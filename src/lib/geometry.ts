@@ -48,6 +48,17 @@ export function getFieldWorldSize(field: FieldSize): Size {
 	};
 }
 
+export function getFieldAreaBounds(viewport: Size, speechArea: Pick<Bounds, 'y' | 'height'>): Bounds {
+	const y = speechArea.y + speechArea.height;
+
+	return {
+		x: 0,
+		y,
+		width: viewport.width,
+		height: Math.max(0, viewport.height - y)
+	};
+}
+
 export function clampCamera(target: WorldPoint, viewport: Size, fieldWorldSize: Size): WorldPoint {
 	const x = fieldWorldSize.width <= viewport.width
 		? (fieldWorldSize.width - viewport.width) / 2
@@ -63,6 +74,13 @@ export function worldToScreen(world: WorldPoint, camera: WorldPoint): WorldPoint
 	return {
 		x: world.x - camera.x,
 		y: world.y - camera.y
+	};
+}
+
+export function fieldLocalToViewport(local: WorldPoint, fieldArea: Pick<Bounds, 'x' | 'y'>): WorldPoint {
+	return {
+		x: local.x + fieldArea.x,
+		y: local.y + fieldArea.y
 	};
 }
 

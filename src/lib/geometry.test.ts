@@ -4,6 +4,8 @@ import {
 	clampToBounds,
 	clampToViewport,
 	DESKTOP_CELL_SIZE,
+	fieldLocalToViewport,
+	getFieldAreaBounds,
 	getFieldWorldSize,
 	getResponsiveCellSize,
 	gridToWorld,
@@ -34,6 +36,25 @@ describe('field geometry', () => {
 
 		expect(field).toEqual({ width: 896, height: 448 });
 		expect(worldToScreen(player, camera).x).toBe(180);
+	});
+
+	it('separates field area from speech area and uses field area height for the camera', () => {
+		const viewport = { width: 360, height: 740 };
+		const speechArea = { x: 16, y: 84, width: 328, height: 176 };
+		const fieldArea = getFieldAreaBounds(viewport, speechArea);
+		const cellSize = getResponsiveCellSize(viewport.width);
+		const fieldWorld = getFieldWorldSize({ columns: 16, rows: 8, cellSize });
+		const player = gridToWorld({ x: 7, y: 4 }, cellSize);
+		const camera = clampCamera(player, { width: fieldArea.width, height: fieldArea.height }, fieldWorld);
+		const topRow = fieldLocalToViewport(
+			worldToScreen(gridToWorld({ x: 0, y: 0 }, cellSize), camera),
+			fieldArea
+		);
+
+		expect(fieldArea.y).toBe(speechArea.y + speechArea.height);
+		expect(fieldArea.height).toBe(viewport.height - fieldArea.y);
+		expect(camera.y).toBe((fieldWorld.height - fieldArea.height) / 2);
+		expect(topRow.y).toBeGreaterThanOrEqual(fieldArea.y);
 	});
 
 	it('converts a grid cell to the center of its world cell', () => {

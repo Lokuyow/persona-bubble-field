@@ -3,6 +3,8 @@
 	import {
 		clampCamera,
 		clampToBounds,
+		fieldLocalToViewport,
+		getFieldAreaBounds,
 		getFieldWorldSize,
 		getResponsiveCellSize,
 		gridToWorld,
@@ -71,22 +73,24 @@
 	$: cellSize = getResponsiveCellSize(viewportSize.width);
 	$: field = { ...FIELD, cellSize };
 	$: fieldWorldSize = getFieldWorldSize(field);
-	$: camera = clampCamera(
-		gridToWorld(playerPosition, cellSize),
-		viewportSize,
-		fieldWorldSize
-	);
 	$: speechAreaBounds = {
 		x: SPEECH_AREA.sidePadding,
 		y: SPEECH_AREA.top,
 		width: Math.max(0, viewportSize.width - SPEECH_AREA.sidePadding * 2),
 		height: SPEECH_AREA.height
 	};
+	$: fieldAreaBounds = getFieldAreaBounds(viewportSize, speechAreaBounds);
+	$: camera = clampCamera(
+		gridToWorld(playerPosition, cellSize),
+		{ width: fieldAreaBounds.width, height: fieldAreaBounds.height },
+		fieldWorldSize
+	);
 
 	$: participantViews = PARTICIPANTS.map((participant) => {
 		const position = participant.isSelf ? playerPosition : participant.position;
 		const world = gridToWorld(position, cellSize);
-		return { ...participant, position, world, screen: worldToScreen(world, camera) };
+		const fieldLocalScreen = worldToScreen(world, camera);
+		return { ...participant, position, world, screen: fieldLocalToViewport(fieldLocalScreen, fieldAreaBounds) };
 	});
 
 	$: participantById = new Map(participantViews.map((participant) => [participant.id, participant]));
@@ -94,7 +98,7 @@
 	$: visibleNormalBubbles = BUBBLES.filter((bubble): bubble is Extract<Bubble, { kind: 'normal' }> => bubble.kind === 'normal')
 		.map((bubble) => {
 			const speaker = participantById.get(bubble.speakerId);
-			if (!speaker || !isInsideViewport(speaker.screen)) return null;
+			if (!speaker || !isInsideFieldArea(speaker.screen)) return null;
 			const size = bubbleSizes[bubble.id] ?? DEFAULT_BUBBLE_SIZES.normal;
 			const preferred = normalBubblePreferredAnchor(speaker.screen.x, size, speechAreaBounds);
 			return { ...bubble, anchor: clampToBounds(preferred, size, speechAreaBounds), size, speaker };
@@ -106,7 +110,7 @@
 			const members = bubble.memberIds
 				.map((id) => participantById.get(id))
 				.filter((participant): participant is (typeof participantViews)[number] => Boolean(participant));
-			const visibleMembers = members.filter((member) => isInsideViewport(member.screen));
+			const visibleMembers = members.filter((member) => isInsideFieldArea(member.screen));
 			if (visibleMembers.length === 0) return null;
 			const size = bubbleSizes[bubble.id] ?? DEFAULT_BUBBLE_SIZES.merged;
 			const preferred = mergedBubblePreferredAnchor(
@@ -153,8 +157,13 @@
 		};
 	}
 
-	function isInsideViewport(point: WorldPoint) {
-		return point.x >= 0 && point.x <= viewportSize.width && point.y >= 0 && point.y <= viewportSize.height;
+	function isInsideFieldArea(point: WorldPoint) {
+		return (
+			point.x >= fieldAreaBounds.x &&
+			point.x <= fieldAreaBounds.x + fieldAreaBounds.width &&
+			point.y >= fieldAreaBounds.y &&
+			point.y <= fieldAreaBounds.y + fieldAreaBounds.height
+		);
 	}
 
 	function move(direction: Direction) {
@@ -219,28 +228,34 @@
 			<span>speech area / provisional</span>
 		</div>
 		<div
-			class="field-scene"
-			style={`--cell-size: ${cellSize}px; --avatar-size: ${cellSize === 56 ? 40 : 46}px; width: ${fieldWorldSize.width}px; height: ${fieldWorldSize.height}px; transform: translate3d(${-camera.x}px, ${-camera.y}px, 0);`}
+			class="field-area"
+			style={`top: ${fieldAreaBounds.y}px; height: ${fieldAreaBounds.height}px;`}
+			aria-label="Field area"
 		>
-			<div class="field-grid" aria-hidden="true"></div>
-			<div class="field-sun" aria-hidden="true"></div>
-			<div class="field-label field-label-top">the little clearing</div>
-			<div class="field-label field-label-bottom">16 × 8 / fixed field</div>
+			<div
+				class="field-scene"
+				style={`--cell-size: ${cellSize}px; --avatar-size: ${cellSize === 56 ? 40 : 46}px; width: ${fieldWorldSize.width}px; height: ${fieldWorldSize.height}px; transform: translate3d(${-camera.x}px, ${-camera.y}px, 0);`}
+			>
+				<div class="field-grid" aria-hidden="true"></div>
+				<div class="field-sun" aria-hidden="true"></div>
+				<div class="field-label field-label-top">the little clearing</div>
+				<div class="field-label field-label-bottom">16 × 8 / fixed field</div>
 
-			{#each participantViews as participant (participant.id)}
-				<div
-					class:player={participant.isSelf}
-					class="participant"
-					style={`left: ${participant.world.x}px; top: ${participant.world.y}px;`}
-					aria-label={`${participant.name}${participant.isSelf ? ' (you)' : ''}`}
-				>
-					<div class={`avatar avatar-${participant.color}`}>
-						{#if participant.isSelf}<span class="avatar-ring" aria-hidden="true"></span>{/if}
-						<span>{participant.initials}</span>
+				{#each participantViews as participant (participant.id)}
+					<div
+						class:player={participant.isSelf}
+						class="participant"
+						style={`left: ${participant.world.x}px; top: ${participant.world.y}px;`}
+						aria-label={`${participant.name}${participant.isSelf ? ' (you)' : ''}`}
+					>
+						<div class={`avatar avatar-${participant.color}`}>
+							{#if participant.isSelf}<span class="avatar-ring" aria-hidden="true"></span>{/if}
+							<span>{participant.initials}</span>
+						</div>
+						<span class="participant-name">{participant.name}</span>
 					</div>
-					<span class="participant-name">{participant.name}</span>
-				</div>
-			{/each}
+				{/each}
+			</div>
 		</div>
 
 		<svg class="tail-layer" viewBox={`0 0 ${viewportSize.width} ${viewportSize.height}`} aria-hidden="true">
@@ -443,6 +458,16 @@
 		top: 0;
 		left: 0;
 		will-change: transform;
+	}
+
+	.field-area {
+		position: absolute;
+		right: 0;
+		left: 0;
+		z-index: 2;
+		overflow: hidden;
+		background: #e8e7da;
+		border-top: 1px solid rgba(95, 111, 96, 0.16);
 	}
 
 	.speech-area {
