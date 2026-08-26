@@ -363,7 +363,26 @@ describe('field geometry', () => {
 		expect(placeBubbles(items, { x: 0, y: 0, width: 300, height: 300 }, 56)).toEqual([
 			{ id: 'first', anchor: { x: 100, y: 100 } },
 			{ id: 'second', anchor: { x: 100, y: 42 } }
-		]);
+	]);
+	});
+
+	it('keeps dense fixed-bubble scoring deterministic with bounded repair candidates', () => {
+		const fixed = Array.from({ length: 30 }, (_, index) => ({
+			id: `fixed-${String(index).padStart(2, '0')}`,
+			preferred: { x: 100, y: 100 },
+			size: { width: 80, height: 30 }
+		}));
+		const target = { id: 'target', preferred: { x: 100, y: 100 }, size: { width: 80, height: 30 } };
+		const bounds = { x: 0, y: 0, width: 320, height: 320 };
+		const denseInput = [...fixed, target];
+		const first = placeBubbles(denseInput, bounds, 56);
+		const second = placeBubbles(denseInput, bounds, 56);
+		const targetPlacement = first.find(({ id }) => id === target.id)!;
+
+		expect(first).toEqual(second);
+		expect(first).toHaveLength(31);
+		expect(targetPlacement.anchor).not.toEqual(target.preferred);
+		expect(targetPlacement.anchor).toEqual(second.find(({ id }) => id === target.id)!.anchor);
 	});
 
 	it('returns all bubbles in narrow bounds and never worsens preferred overlap', () => {

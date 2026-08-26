@@ -189,6 +189,7 @@ export function clampToViewport(anchor: WorldPoint, bubble: Size, viewport: Size
 }
 
 const BUBBLE_PLACEMENT_GAP = 8;
+const MAX_PLACEMENT_CANDIDATES = 32;
 
 function bubbleRect(anchor: WorldPoint, size: Size): Bounds {
 	return { ...anchor, ...size };
@@ -231,6 +232,7 @@ type PlacedBubble = BubblePlacementInput & {
 };
 
 function addCandidate(candidates: WorldPoint[], seen: Set<string>, candidate: WorldPoint): void {
+	if (candidates.length >= MAX_PLACEMENT_CANDIDATES) return;
 	const key = `${candidate.x}:${candidate.y}`;
 
 	if (seen.has(key)) return;
@@ -386,7 +388,8 @@ function findLocalRepair(
 
 		const item = groupItems[index];
 		const unassigned = groupItems.slice(index + 1).map((candidate) => ({ ...candidate, anchor: clampToBounds(candidate.preferred, candidate.size, bounds) }));
-		const candidates = getCandidates(item, bounds, cellSize, gap, [...fixed, ...assigned, ...unassigned]);
+		const localReferences = [...assigned, ...unassigned];
+		const candidates = getCandidates(item, bounds, cellSize, gap, localReferences);
 
 		for (const anchor of candidates) {
 			search(index + 1, [...assigned, { ...item, anchor }]);
