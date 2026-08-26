@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { onDestroy, onMount } from 'svelte';
+	import { onMount } from 'svelte';
 	import {
 		clampCamera,
-		clampToViewport,
+		clampToBounds,
 		getFieldWorldSize,
 		gridToWorld,
 		mergedBubblePreferredAnchor,
@@ -23,6 +23,11 @@
 	const FIELD_WORLD_SIZE = getFieldWorldSize(FIELD);
 	const DEFAULT_VIEWPORT = { width: 1100, height: 680 };
 	const TAIL_GAP = 18;
+	const SPEECH_AREA = {
+		top: 84,
+		height: 176,
+		sidePadding: 16
+	} as const;
 	const DEFAULT_BUBBLE_SIZES = {
 		normal: { width: 184, height: 54 },
 		merged: { width: 218, height: 58 }
@@ -64,13 +69,18 @@
 	let viewportSize: Size = DEFAULT_VIEWPORT;
 	let lastMoveMessage = '矢印キーまたは下のパッドで移動';
 	let bubbleSizes: Record<string, Size> = {};
-	let bubbleObserver: ResizeObserver | undefined;
 
 	$: camera = clampCamera(
 		gridToWorld(playerPosition, FIELD.cellSize),
 		viewportSize,
 		FIELD_WORLD_SIZE
 	);
+	$: speechAreaBounds = {
+		x: SPEECH_AREA.sidePadding,
+		y: SPEECH_AREA.top,
+		width: Math.max(0, viewportSize.width - SPEECH_AREA.sidePadding * 2),
+		height: SPEECH_AREA.height
+	};
 
 	$: participantViews = PARTICIPANTS.map((participant) => {
 		const position = participant.isSelf ? playerPosition : participant.position;
@@ -83,10 +93,10 @@
 	$: visibleNormalBubbles = BUBBLES.filter((bubble): bubble is Extract<Bubble, { kind: 'normal' }> => bubble.kind === 'normal')
 		.map((bubble) => {
 			const speaker = participantById.get(bubble.speakerId);
-			if (!speaker || !isNearViewport(speaker.screen, 100)) return null;
+			if (!speaker || !isInsideViewport(speaker.screen)) return null;
 			const size = bubbleSizes[bubble.id] ?? DEFAULT_BUBBLE_SIZES.normal;
 			const preferred = normalBubblePreferredAnchor(speaker.screen, size, TAIL_GAP);
-			return { ...bubble, anchor: clampToViewport(preferred, size, viewportSize), size, speaker };
+			return { ...bubble, anchor: clampToBounds(preferred, size, speechAreaBounds), size, speaker };
 		})
 		.filter((bubble): bubble is NonNullable<typeof bubble> => bubble !== null);
 
@@ -95,15 +105,15 @@
 			const members = bubble.memberIds
 				.map((id) => participantById.get(id))
 				.filter((participant): participant is (typeof participantViews)[number] => Boolean(participant));
-			const visibleMembers = members.filter((member) => isNearViewport(member.screen, 90));
+			const visibleMembers = members.filter((member) => isInsideViewport(member.screen));
 			if (visibleMembers.length === 0) return null;
 			const size = bubbleSizes[bubble.id] ?? DEFAULT_BUBBLE_SIZES.merged;
 			const preferred = mergedBubblePreferredAnchor(
-				members.map((member) => member.screen),
+				visibleMembers.map((member) => member.screen),
 				size,
 				TAIL_GAP
 			);
-			return { ...bubble, anchor: clampToViewport(preferred, size, viewportSize), size, members: visibleMembers };
+			return { ...bubble, anchor: clampToBounds(preferred, size, speechAreaBounds), size, members: visibleMembers };
 		})
 		.filter((bubble): bubble is NonNullable<typeof bubble> => bubble !== null);
 
@@ -123,8 +133,6 @@
 		return () => observer.disconnect();
 	});
 
-	onDestroy(() => bubbleObserver?.disconnect());
-
 	function observeBubble(node: HTMLElement, id: string) {
 		const update = () => {
 			bubbleSizes = {
@@ -133,19 +141,19 @@
 			};
 		};
 
-		bubbleObserver ??= new ResizeObserver(update);
-		bubbleObserver.observe(node);
+		const observer = new ResizeObserver(update);
+		observer.observe(node);
 		update();
 
 		return {
 			destroy() {
-				bubbleObserver?.unobserve(node);
+				observer.disconnect();
 			}
 		};
 	}
 
-	function isNearViewport(point: WorldPoint, padding: number) {
-		return point.x >= -padding && point.x <= viewportSize.width + padding && point.y >= -padding && point.y <= viewportSize.height + padding;
+	function isInsideViewport(point: WorldPoint) {
+		return point.x >= 0 && point.x <= viewportSize.width && point.y >= 0 && point.y <= viewportSize.height;
 	}
 
 	function move(direction: Direction) {
@@ -202,6 +210,13 @@
 	</div>
 
 	<section class="field-viewport" bind:this={viewportElement} aria-label="Conversation field">
+		<div
+			class="speech-area"
+			style={`top: ${SPEECH_AREA.top}px; height: ${SPEECH_AREA.height}px; left: ${SPEECH_AREA.sidePadding}px; right: ${SPEECH_AREA.sidePadding}px;`}
+			aria-hidden="true"
+		>
+			<span>speech area / provisional</span>
+		</div>
 		<div
 			class="field-scene"
 			style={`width: ${FIELD_WORLD_SIZE.width}px; height: ${FIELD_WORLD_SIZE.height}px; transform: translate3d(${-camera.x}px, ${-camera.y}px, 0);`}
@@ -427,6 +442,26 @@
 		top: 0;
 		left: 0;
 		will-change: transform;
+	}
+
+	.speech-area {
+		position: absolute;
+		z-index: 1;
+		border-top: 1px dashed rgba(111, 121, 100, 0.2);
+		border-bottom: 1px dashed rgba(111, 121, 100, 0.2);
+		background: linear-gradient(180deg, rgba(255, 255, 255, 0.12), transparent 42%, rgba(255, 255, 255, 0.06));
+		pointer-events: none;
+	}
+
+	.speech-area span {
+		position: absolute;
+		top: 7px;
+		right: 10px;
+		color: rgba(89, 104, 88, 0.38);
+		font-size: 9px;
+		font-weight: 700;
+		letter-spacing: 0.12em;
+		text-transform: uppercase;
 	}
 
 	.field-grid {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	clampCamera,
+	clampToBounds,
 	clampToViewport,
 	getFieldWorldSize,
 	gridToWorld,
@@ -75,6 +76,27 @@ describe('field geometry', () => {
 		expect(clampToViewport({ x: -40, y: 500 }, { width: 120, height: 44 }, { width: 320, height: 240 }, 12)).toEqual({
 		 x: 12,
 		 y: 184
+		});
 	});
+
+	it('keeps a bubble inside the explicit speech area bounds', () => {
+		expect(
+			clampToBounds(
+				{ x: 220, y: 20 },
+				{ width: 120, height: 44 },
+				{ x: 16, y: 84, width: 288, height: 160 },
+				8
+			)
+		).toEqual({ x: 176, y: 92 });
+	});
+
+	it('calculates a merged anchor from only the members it receives', () => {
+		const visibleMembers = [{ x: 120, y: 220 }, { x: 200, y: 200 }];
+		const offscreenMember = { x: 900, y: 30 };
+
+		expect(mergedBubblePreferredAnchor(visibleMembers, { width: 160, height: 48 }, 16)).toEqual({ x: 80, y: 136 });
+		expect(
+			mergedBubblePreferredAnchor([...visibleMembers, offscreenMember], { width: 160, height: 48 }, 16)
+		).not.toEqual({ x: 80, y: 136 });
 	});
 });

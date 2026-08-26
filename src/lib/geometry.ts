@@ -13,6 +13,11 @@ export type Size = {
 	height: number;
 };
 
+export type Bounds = Size & {
+	x: number;
+	y: number;
+};
+
 export type Direction = 'up' | 'down' | 'left' | 'right';
 
 export type FieldSize = {
@@ -110,12 +115,18 @@ export function mergedBubblePreferredAnchor(
 	};
 }
 
-export function clampToViewport(anchor: WorldPoint, bubble: Size, viewport: Size, margin = 12): WorldPoint {
-	const maxX = Math.max(margin, viewport.width - bubble.width - margin);
-	const maxY = Math.max(margin, viewport.height - bubble.height - margin);
+export function clampToBounds(anchor: WorldPoint, bubble: Size, bounds: Bounds, margin = 0): WorldPoint {
+	const minX = bounds.x + margin;
+	const minY = bounds.y + margin;
+	const maxX = Math.max(minX, bounds.x + bounds.width - bubble.width - margin);
+	const maxY = Math.max(minY, bounds.y + bounds.height - bubble.height - margin);
 
 	return {
-		x: Math.min(Math.max(anchor.x, margin), maxX),
-		y: Math.min(Math.max(anchor.y, margin), maxY)
+		x: Math.min(Math.max(anchor.x, minX), maxX),
+		y: Math.min(Math.max(anchor.y, minY), maxY)
 	};
+}
+
+export function clampToViewport(anchor: WorldPoint, bubble: Size, viewport: Size, margin = 12): WorldPoint {
+	return clampToBounds(anchor, bubble, { x: 0, y: 0, ...viewport }, margin);
 }
