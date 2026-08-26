@@ -15,8 +15,35 @@ import {
 	mergedBubblePreferredAnchor,
 	moveOneCell,
 	normalBubblePreferredAnchor,
+	placeBubbles,
 	worldToScreen
 } from './geometry';
+
+function overlapsWithGap(
+	first: { anchor: { x: number; y: number }; size: { width: number; height: number } },
+	second: { anchor: { x: number; y: number }; size: { width: number; height: number } },
+	gap = 8
+) {
+	return (
+		first.anchor.x < second.anchor.x + second.size.width + gap &&
+		first.anchor.x + first.size.width + gap > second.anchor.x &&
+		first.anchor.y < second.anchor.y + second.size.height + gap &&
+		first.anchor.y + first.size.height + gap > second.anchor.y
+	);
+}
+
+function overlapAreaWithGap(
+	first: { anchor: { x: number; y: number }; size: { width: number; height: number } },
+	second: { anchor: { x: number; y: number }; size: { width: number; height: number } },
+	gap = 8
+) {
+	const width = Math.min(first.anchor.x + first.size.width, second.anchor.x + second.size.width + gap) -
+		Math.max(first.anchor.x, second.anchor.x - gap);
+	const height = Math.min(first.anchor.y + first.size.height, second.anchor.y + second.size.height + gap) -
+		Math.max(first.anchor.y, second.anchor.y - gap);
+
+	return Math.max(0, width) * Math.max(0, height);
+}
 
 describe('field geometry', () => {
 	it('selects the prototype cell size by viewport width', () => {
@@ -205,5 +232,172 @@ describe('field geometry', () => {
 
 		expect(first.x).toBe(second.x);
 		expect(first.y).toBeLessThan(second.y);
+	});
+
+	it('keeps an isolated bubble at its preferred anchor', () => {
+		const bounds = { x: 0, y: 0, width: 320, height: 200 };
+		const result = placeBubbles(
+			[{ id: 'isolated', preferred: { x: 36, y: 52 }, size: { width: 80, height: 32 } }],
+			bounds,
+			56
+		);
+
+		expect(result).toEqual([{ id: 'isolated', anchor: { x: 36, y: 52 } }]);
+	});
+
+	it('is deterministic for the same inputs, including stable ordering', () => {
+		const items = [
+			{ id: 'merged-note', preferred: { x: 100, y: 70 }, size: { width: 160, height: 48 } },
+			{ id: 'normal-note', preferred: { x: 100, y: 70 }, size: { width: 120, height: 44 } },
+			{ id: 'third-note', preferred: { x: 140, y: 70 }, size: { width: 100, height: 36 } }
+		];
+		const bounds = { x: 0, y: 0, width: 360, height: 240 };
+
+		expect(placeBubbles(items, bounds, 56)).toEqual(placeBubbles(items, bounds, 56));
+		expect(placeBubbles(items, bounds, 56).map(({ id }) => id)).toEqual([
+			'merged-note',
+			'normal-note',
+			'third-note'
+		]);
+	});
+
+	it('keeps every candidate result inside the speech bounds', () => {
+		const bounds = { x: 16, y: 84, width: 328, height: 176 };
+		const result = placeBubbles(
+			[
+				{ id: 'left', preferred: { x: -200, y: -80 }, size: { width: 184, height: 54 } },
+				{ id: 'right', preferred: { x: 300, y: 400 }, size: { width: 218, height: 58 } }
+			],
+			bounds,
+			56
+		);
+
+		for (const placement of result) {
+			const item = [
+				{ id: 'left', size: { width: 184, height: 54 } },
+				{ id: 'right', size: { width: 218, height: 58 } }
+			].find((candidate) => candidate.id === placement.id)!;
+			expect(placement.anchor.x).toBeGreaterThanOrEqual(bounds.x);
+			expect(placement.anchor.y).toBeGreaterThanOrEqual(bounds.y);
+			expect(placement.anchor.x + item.size.width).toBeLessThanOrEqual(bounds.x + bounds.width);
+			expect(placement.anchor.y + item.size.height).toBeLessThanOrEqual(bounds.y + bounds.height);
+		}
+	});
+
+	it('resolves a feasible three-bubble fixture without gap collisions', () => {
+		const items = [
+			{ id: 'first', preferred: { x: 100, y: 60 }, size: { width: 80, height: 30 } },
+			{ id: 'second', preferred: { x: 100, y: 60 }, size: { width: 80, height: 30 } },
+			{ id: 'third', preferred: { x: 100, y: 60 }, size: { width: 80, height: 30 } }
+		];
+		const placements = placeBubbles(items, { x: 0, y: 0, width: 320, height: 200 }, 56);
+
+		for (let first = 0; first < placements.length; first += 1) {
+			for (let second = first + 1; second < placements.length; second += 1) {
+				const firstItem = { ...items.find((item) => item.id === placements[first].id)!, anchor: placements[first].anchor };
+				const secondItem = { ...items.find((item) => item.id === placements[second].id)!, anchor: placements[second].anchor };
+				expect(overlapsWithGap(firstItem, secondItem)).toBe(false);
+			}
+		}
+	});
+
+	it('repairs the current 360px three-bubble fixture with edge-aligned reflow', () => {
+		const items = [
+			{ id: 'merged-note', preferred: { x: 126, y: 122 }, size: { width: 218, height: 58 } },
+			{ id: 'upper-normal', preferred: { x: 16, y: 144 }, size: { width: 184, height: 54 } },
+			{ id: 'lower-normal', preferred: { x: 16, y: 202 }, size: { width: 184, height: 54 } }
+		];
+		const placements = placeBubbles(items, { x: 16, y: 84, width: 328, height: 192 }, MOBILE_CELL_SIZE);
+
+		for (let first = 0; first < placements.length; first += 1) {
+			for (let second = first + 1; second < placements.length; second += 1) {
+				const firstItem = { ...items.find((item) => item.id === placements[first].id)!, anchor: placements[first].anchor };
+				const secondItem = { ...items.find((item) => item.id === placements[second].id)!, anchor: placements[second].anchor };
+				expect(overlapsWithGap(firstItem, secondItem)).toBe(false);
+			}
+		}
+	});
+
+	it('handles mixed normal and merged sizes in the 360px collision fixture', () => {
+		const items = [
+			{ id: 'haru-note', preferred: { x: 88, y: 150 }, size: { width: 184, height: 54 } },
+			{ id: 'merged-note', preferred: { x: 72, y: 150 }, size: { width: 218, height: 58 } }
+		];
+		const bounds = { x: 16, y: 84, width: 328, height: 176 };
+		const placements = placeBubbles(items, bounds, MOBILE_CELL_SIZE);
+
+		expect(overlapsWithGap(
+			{ ...items[0], anchor: placements.find(({ id }) => id === items[0].id)!.anchor },
+			{ ...items[1], anchor: placements.find(({ id }) => id === items[1].id)!.anchor }
+		)).toBe(false);
+	});
+
+	it('preserves upper-to-lower spatial correspondence when bubbles do not collide', () => {
+		const items = [
+			{ id: 'upper', preferred: { x: 40, y: 90 }, size: { width: 100, height: 36 } },
+			{ id: 'lower', preferred: { x: 220, y: 180 }, size: { width: 100, height: 36 } }
+		];
+		const placements = placeBubbles(items, { x: 0, y: 0, width: 360, height: 260 }, 56);
+
+		expect(placements.find(({ id }) => id === 'upper')!.anchor.y).toBe(90);
+		expect(placements.find(({ id }) => id === 'lower')!.anchor.y).toBe(180);
+	});
+
+	it('deduplicates clamped edge candidates safely', () => {
+		const bounds = { x: 0, y: 0, width: 100, height: 80 };
+		const items = [
+			{ id: 'edge-a', preferred: { x: 90, y: 70 }, size: { width: 90, height: 70 } },
+			{ id: 'edge-b', preferred: { x: 90, y: 70 }, size: { width: 90, height: 70 } }
+		];
+
+		expect(placeBubbles(items, bounds, 56)).toHaveLength(2);
+		expect(placeBubbles(items, bounds, 56)[0].anchor).toEqual({ x: 10, y: 10 });
+	});
+
+	it('uses candidate order to resolve equal-distance ties', () => {
+		const items = [
+			{ id: 'first', preferred: { x: 100, y: 100 }, size: { width: 50, height: 50 } },
+			{ id: 'second', preferred: { x: 100, y: 100 }, size: { width: 50, height: 50 } }
+		];
+
+		expect(placeBubbles(items, { x: 0, y: 0, width: 300, height: 300 }, 56)).toEqual([
+			{ id: 'first', anchor: { x: 100, y: 100 } },
+			{ id: 'second', anchor: { x: 100, y: 42 } }
+	]);
+	});
+
+	it('keeps dense fixed-bubble scoring deterministic with bounded repair candidates', () => {
+		const fixed = Array.from({ length: 30 }, (_, index) => ({
+			id: `fixed-${String(index).padStart(2, '0')}`,
+			preferred: { x: 100, y: 100 },
+			size: { width: 80, height: 30 }
+		}));
+		const target = { id: 'target', preferred: { x: 100, y: 100 }, size: { width: 80, height: 30 } };
+		const bounds = { x: 0, y: 0, width: 320, height: 320 };
+		const denseInput = [...fixed, target];
+		const first = placeBubbles(denseInput, bounds, 56);
+		const second = placeBubbles(denseInput, bounds, 56);
+		const targetPlacement = first.find(({ id }) => id === target.id)!;
+
+		expect(first).toEqual(second);
+		expect(first).toHaveLength(31);
+		expect(targetPlacement.anchor).not.toEqual(target.preferred);
+		expect(targetPlacement.anchor).toEqual(second.find(({ id }) => id === target.id)!.anchor);
+	});
+
+	it('returns all bubbles in narrow bounds and never worsens preferred overlap', () => {
+		const bounds = { x: 0, y: 0, width: 120, height: 50 };
+		const items = [
+			{ id: 'first', preferred: { x: 0, y: 0 }, size: { width: 100, height: 40 } },
+			{ id: 'second', preferred: { x: 0, y: 0 }, size: { width: 100, height: 40 } }
+		];
+		const placements = placeBubbles(items, bounds, 56);
+		const selected = { ...items[1], anchor: placements.find(({ id }) => id === 'second')!.anchor };
+		const preferred = { ...items[1], anchor: { x: 0, y: 0 } };
+		const first = { ...items[0], anchor: placements.find(({ id }) => id === 'first')!.anchor };
+
+		expect(placements).toHaveLength(items.length);
+		expect(overlapsWithGap(first, selected)).toBe(true);
+		expect(overlapAreaWithGap(first, selected)).toBeLessThanOrEqual(overlapAreaWithGap(first, preferred));
 	});
 });

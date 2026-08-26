@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { base } from '$app/paths';
 	import {
 		clampCamera,
 		clampToBounds,
@@ -12,6 +13,7 @@
 		mergedBubblePreferredAnchor,
 		moveOneCell,
 		normalBubblePreferredAnchor,
+		placeBubbles,
 		worldToScreen,
 		type Direction,
 		type GridPosition,
@@ -144,6 +146,21 @@
 		.filter((bubble): bubble is NonNullable<typeof bubble> => bubble !== null);
 
 	$: allVisibleBubbles = [...visibleNormalBubbles, ...visibleMergedBubbles];
+	$: bubblePlacement = placeBubbles(
+		allVisibleBubbles.map((bubble) => ({ id: bubble.id, preferred: bubble.anchor, size: bubble.size })),
+		bubbleSafeBounds,
+		cellSize
+	);
+	$: placedAnchorById = new Map(bubblePlacement.map((placement) => [placement.id, placement.anchor]));
+	$: positionedNormalBubbles = visibleNormalBubbles.map((bubble) => ({
+		...bubble,
+		anchor: placedAnchorById.get(bubble.id) ?? bubble.anchor
+	}));
+	$: positionedMergedBubbles = visibleMergedBubbles.map((bubble) => ({
+		...bubble,
+		anchor: placedAnchorById.get(bubble.id) ?? bubble.anchor
+	}));
+	$: positionedVisibleBubbles = [...positionedNormalBubbles, ...positionedMergedBubbles];
 
 	onMount(() => {
 		const updateViewport = () => {
@@ -220,6 +237,7 @@
 
 <svelte:head>
 	<title>Persona Bubble Field — local prototype</title>
+	<link rel="icon" href={`${base}/favicon.svg`} />
 	<meta
 		name="description"
 		content="A local field prototype for testing character movement, camera follow, bubbles, and SVG tails."
@@ -280,11 +298,11 @@
 		</div>
 
 		<svg class="tail-layer" viewBox={`0 0 ${viewportSize.width} ${viewportSize.height}`} aria-hidden="true">
-			{#each visibleNormalBubbles as bubble (bubble.id)}
+			{#each positionedNormalBubbles as bubble (bubble.id)}
 				{@const start = tailStart(bubble.anchor, bubble.size)}
 				<line class={`tail tail-${bubble.tone}`} x1={start.x} y1={start.y} x2={bubble.speaker.screen.x} y2={bubble.speaker.screen.y - 18} />
 			{/each}
-			{#each visibleMergedBubbles as bubble (bubble.id)}
+			{#each positionedMergedBubbles as bubble (bubble.id)}
 				{@const start = tailStart(bubble.anchor, bubble.size)}
 				{#each bubble.members as member (member.id)}
 					<line class={`tail tail-${bubble.tone}`} x1={start.x} y1={start.y} x2={member.screen.x} y2={member.screen.y - 18} />
@@ -293,7 +311,7 @@
 		</svg>
 
 		<div class="bubble-layer" aria-live="polite">
-			{#each allVisibleBubbles as bubble (bubble.id)}
+			{#each positionedVisibleBubbles as bubble (bubble.id)}
 				<div
 					use:observeBubble={bubble.id}
 					class={`bubble bubble-${bubble.kind} bubble-${bubble.tone}`}
