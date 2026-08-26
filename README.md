@@ -6,6 +6,16 @@ a temporary development identifier.
 
 ## Development
 
+Use Node.js 24. The minimum supported version is 24.19.0, and the current
+recommended version is 24.19.0. On Windows, do not use Node.js 24.13.0; its
+toolchain caused a native crash during investigation.
+
+When using nvm on Windows, select the recommended version explicitly:
+
+```sh
+nvm use 24.19.0
+```
+
 ```sh
 npm install
 npm run dev
