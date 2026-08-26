@@ -338,6 +338,8 @@
 	}
 
 	function handleKeydown(event: KeyboardEvent) {
+		if (isEditableTarget(event.target)) return;
+
 		const directionByKey: Partial<Record<string, Direction>> = {
 			ArrowUp: 'up',
 			ArrowDown: 'down',
@@ -349,6 +351,11 @@
 
 		event.preventDefault();
 		move(direction);
+	}
+
+	function isEditableTarget(target: EventTarget | null): boolean {
+		if (!(target instanceof HTMLElement)) return false;
+		return target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
 	}
 
 	function tailStart(anchor: WorldPoint, size: Size): WorldPoint {

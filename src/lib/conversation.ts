@@ -88,6 +88,16 @@ function stableMergedId(normalBubbleId: string): string {
 	return `merged:${normalBubbleId}`;
 }
 
+function retireSpeakerNormalForNewMessage(
+	normalBubbles: readonly NormalBubbleState[],
+	message: ConversationMessage
+): NormalBubbleState[] {
+	const existing = normalBubbles.find((bubble) => bubble.pubkey === message.pubkey);
+	if (!existing || (sameContent(message, existing) && sameSpeech(message, existing))) return [...normalBubbles];
+
+	return normalBubbles.filter((bubble) => bubble.pubkey !== message.pubkey);
+}
+
 export function receiveMessage(
 	state: ConversationState,
 	message: ConversationMessage,
@@ -100,6 +110,7 @@ export function receiveMessage(
 	const speechType = message.speechType ?? 'normal';
 	let normalBubbles = activeNormalBubbles(state, now);
 	let mergedBubbles = activeMergedBubbles(state, now);
+	normalBubbles = retireSpeakerNormalForNewMessage(normalBubbles, message);
 
 	const matchingMerged = mergedBubbles.find(
 		(bubble) => sameContent(message, bubble) && sameSpeech(message, bubble)
@@ -151,10 +162,6 @@ export function receiveMessage(
 	const existingNormalFromSpeaker = normalBubbles.find((bubble) => bubble.pubkey === message.pubkey);
 	if (existingNormalFromSpeaker && sameContent(message, existingNormalFromSpeaker) && sameSpeech(message, existingNormalFromSpeaker)) {
 		return copyState(state, { normalBubbles, mergedBubbles, processedMessageIds });
-	}
-
-	if (existingNormalFromSpeaker) {
-		normalBubbles = normalBubbles.filter((bubble) => bubble.pubkey !== message.pubkey);
 	}
 
 	normalBubbles = [

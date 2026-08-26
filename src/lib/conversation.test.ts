@@ -90,6 +90,37 @@ describe('conversation lifecycle', () => {
 		expect(state.normalBubbles[0]).toMatchObject({ id: 'm2', content: 'new' });
 	});
 
+	it('retires the speaker\'s old normal before that speaker joins an existing merge', () => {
+		let state = normalState('old', 'alice');
+		state = receive(state, message('m2', 'bob', 'hello', 'normal', 10), true, 10);
+		state = receive(state, message('m3', 'alice', 'hello', 'normal', 20), true, 20);
+
+		expect(state.normalBubbles).toEqual([]);
+		expect(state.mergedBubbles).toMatchObject([{ content: 'hello', memberPubkeys: ['bob', 'alice'] }]);
+	});
+
+	it('retires only the joining speaker normal while preserving the established merge', () => {
+		let state = mergedState();
+		state = receive(state, message('m3', 'charlie', 'other', 'normal', 20), true, 20);
+		state = receive(state, message('m4', 'charlie', 'hello', 'normal', 30), true, 30);
+
+		expect(state.mergedBubbles).toHaveLength(1);
+		expect(state.mergedBubbles[0].memberPubkeys).toEqual(['alice', 'bob', 'charlie']);
+		expect(state.normalBubbles).toEqual([]);
+	});
+
+	it('removes a member\'s different normal when they repeat the established merge content', () => {
+		let state = mergedState();
+		state = receive(state, message('m3', 'alice', 'other', 'normal', 20), true, 20);
+		const expiresAt = state.mergedBubbles[0].expiresAt;
+		state = receive(state, message('m4', 'alice', 'hello', 'normal', 30), true, 30);
+
+		expect(state.normalBubbles).toEqual([]);
+		expect(state.mergedBubbles).toHaveLength(1);
+		expect(state.mergedBubbles[0].memberPubkeys).toEqual(['alice', 'bob']);
+		expect(state.mergedBubbles[0].expiresAt).toBe(expiresAt);
+	});
+
 	it('merges exact content and speech type from two different pubkeys', () => {
 		const state = mergedState();
 
