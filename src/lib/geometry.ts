@@ -26,6 +26,14 @@ export type FieldSize = {
 	cellSize: number;
 };
 
+export const DESKTOP_CELL_SIZE = 72;
+export const MOBILE_CELL_SIZE = 56;
+export const MOBILE_FIELD_BREAKPOINT = 700;
+
+export function getResponsiveCellSize(viewportWidth: number): number {
+	return viewportWidth <= MOBILE_FIELD_BREAKPOINT ? MOBILE_CELL_SIZE : DESKTOP_CELL_SIZE;
+}
+
 export function gridToWorld(cell: GridPosition, cellSize: number): WorldPoint {
 	return {
 		x: (cell.x + 0.5) * cellSize,

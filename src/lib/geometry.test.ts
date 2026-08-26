@@ -3,8 +3,11 @@ import {
 	clampCamera,
 	clampToBounds,
 	clampToViewport,
+	DESKTOP_CELL_SIZE,
 	getFieldWorldSize,
+	getResponsiveCellSize,
 	gridToWorld,
+	MOBILE_CELL_SIZE,
 	mergedBubblePreferredAnchor,
 	moveOneCell,
 	normalBubblePreferredAnchor,
@@ -13,6 +16,26 @@ import {
 } from './geometry';
 
 describe('field geometry', () => {
+	it('selects the prototype cell size by viewport width', () => {
+		expect(getResponsiveCellSize(360)).toBe(MOBILE_CELL_SIZE);
+		expect(getResponsiveCellSize(700)).toBe(MOBILE_CELL_SIZE);
+		expect(getResponsiveCellSize(701)).toBe(DESKTOP_CELL_SIZE);
+	});
+
+	it('uses the mobile cell size for grid to world conversion at 360px', () => {
+		expect(gridToWorld({ x: 1, y: 2 }, getResponsiveCellSize(360))).toEqual({ x: 84, y: 140 });
+	});
+
+	it('keeps responsive field size and camera projection on the same cell size', () => {
+		const cellSize = getResponsiveCellSize(360);
+		const field = getFieldWorldSize({ columns: 16, rows: 8, cellSize });
+		const player = gridToWorld({ x: 7, y: 4 }, cellSize);
+		const camera = clampCamera(player, { width: 360, height: 740 }, field);
+
+		expect(field).toEqual({ width: 896, height: 448 });
+		expect(worldToScreen(player, camera).x).toBe(180);
+	});
+
 	it('converts a grid cell to the center of its world cell', () => {
 		expect(gridToWorld({ x: 2, y: 3 }, 40)).toEqual({ x: 100, y: 140 });
 	});

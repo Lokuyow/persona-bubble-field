@@ -4,6 +4,7 @@
 		clampCamera,
 		clampToBounds,
 		getFieldWorldSize,
+		getResponsiveCellSize,
 		gridToWorld,
 		mergedBubblePreferredAnchor,
 		moveOneCell,
@@ -17,10 +18,8 @@
 
 	const FIELD = {
 		columns: 16,
-		rows: 8,
-		cellSize: 72
+		rows: 8
 	} as const;
-	const FIELD_WORLD_SIZE = getFieldWorldSize(FIELD);
 	const DEFAULT_VIEWPORT = { width: 1100, height: 680 };
 	const SPEECH_AREA = {
 		top: 84,
@@ -69,10 +68,13 @@
 	let lastMoveMessage = '矢印キーまたは下のパッドで移動';
 	let bubbleSizes: Record<string, Size> = {};
 
+	$: cellSize = getResponsiveCellSize(viewportSize.width);
+	$: field = { ...FIELD, cellSize };
+	$: fieldWorldSize = getFieldWorldSize(field);
 	$: camera = clampCamera(
-		gridToWorld(playerPosition, FIELD.cellSize),
+		gridToWorld(playerPosition, cellSize),
 		viewportSize,
-		FIELD_WORLD_SIZE
+		fieldWorldSize
 	);
 	$: speechAreaBounds = {
 		x: SPEECH_AREA.sidePadding,
@@ -83,7 +85,7 @@
 
 	$: participantViews = PARTICIPANTS.map((participant) => {
 		const position = participant.isSelf ? playerPosition : participant.position;
-		const world = gridToWorld(position, FIELD.cellSize);
+		const world = gridToWorld(position, cellSize);
 		return { ...participant, position, world, screen: worldToScreen(world, camera) };
 	});
 
@@ -218,7 +220,7 @@
 		</div>
 		<div
 			class="field-scene"
-			style={`width: ${FIELD_WORLD_SIZE.width}px; height: ${FIELD_WORLD_SIZE.height}px; transform: translate3d(${-camera.x}px, ${-camera.y}px, 0);`}
+			style={`--cell-size: ${cellSize}px; --avatar-size: ${cellSize === 56 ? 40 : 46}px; width: ${fieldWorldSize.width}px; height: ${fieldWorldSize.height}px; transform: translate3d(${-camera.x}px, ${-camera.y}px, 0);`}
 		>
 			<div class="field-grid" aria-hidden="true"></div>
 			<div class="field-sun" aria-hidden="true"></div>
@@ -471,7 +473,7 @@
 		background-image:
 			linear-gradient(to right, rgba(101, 122, 105, 0.16) 1px, transparent 1px),
 			linear-gradient(to bottom, rgba(101, 122, 105, 0.16) 1px, transparent 1px);
-		background-size: 72px 72px;
+		background-size: var(--cell-size) var(--cell-size);
 		box-shadow: 0 24px 65px rgba(67, 75, 62, 0.12), inset 0 0 0 16px rgba(255, 255, 255, 0.11);
 	}
 
@@ -509,7 +511,7 @@
 		position: absolute;
 		z-index: 3;
 		display: flex;
-		width: 78px;
+		width: calc(var(--cell-size) + 8px);
 		transform: translate(-50%, -15%);
 		flex-direction: column;
 		align-items: center;
@@ -520,8 +522,8 @@
 	.avatar {
 		position: relative;
 		display: grid;
-		width: 46px;
-		height: 46px;
+		width: var(--avatar-size);
+		height: var(--avatar-size);
 		place-items: center;
 		border: 2px solid rgba(255, 255, 255, 0.88);
 		border-radius: 42% 58% 48% 52%;
