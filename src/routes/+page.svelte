@@ -12,31 +12,25 @@
 		type SpeechType
 	} from '$lib/conversation';
 	import {
-		clampCamera,
 		clampToBounds,
-		fieldLocalToViewport,
-		getActualFieldTop,
 		getFieldAreaBounds,
 		getFieldWorldSize,
 		getResponsiveCellSize,
-		getSameCellVisualOffset,
-		gridToWorld,
 		mergedBubblePreferredAnchor,
 		normalBubblePreferredAnchor,
 		placeBubbles,
-		worldToScreen,
 		type Direction,
 		type GridPosition,
 		type Size,
 		type WorldPoint
 	} from '$lib/geometry';
+	import { projectPresence } from '$lib/presenceProjection';
 	import {
 		PRESENCE_TIMEOUT_MS,
 		createPresenceState,
 		debugSetParticipantPosition,
 		debugTimeoutParticipant,
 		getParticipant,
-		getActiveParticipantIds,
 		moveParticipant,
 		prunePresence,
 		recordPresenceActivity,
@@ -109,12 +103,9 @@
 		height: SPEECH_AREA.height
 	};
 	$: fieldAreaBounds = getFieldAreaBounds(viewportSize, speechAreaBounds);
-	$: camera = clampCamera(
-		gridToWorld(playerPosition, cellSize),
-		{ width: fieldAreaBounds.width, height: fieldAreaBounds.height },
-		fieldWorldSize
-	);
-	$: actualFieldTop = getActualFieldTop(fieldAreaBounds, camera);
+	$: presenceProjection = getPresenceProjection(presenceState);
+	$: camera = presenceProjection.camera;
+	$: actualFieldTop = presenceProjection.actualFieldTop;
 	$: speechAreaVisualBounds = {
 		x: 0,
 		y: 0,
@@ -128,29 +119,12 @@
 		height: Math.max(0, actualFieldTop - SPEECH_AREA.top)
 	};
 
-	$: activeParticipantIds = getActiveParticipantIds(presenceState);
 	$: selectedPresence = getParticipant(presenceState, selectedSpeakerId);
-	$: participantViews = PARTICIPANTS
-		.filter((participant) => activeParticipantIds.has(participant.id))
-		.map((participant) => {
-		const presence = getParticipant(presenceState, participant.id)!;
-		const position = presence.position;
-		const sameCellIds = PARTICIPANTS
-			.filter((candidate) => activeParticipantIds.has(candidate.id))
-			.filter((candidate) => getParticipant(presenceState, candidate.id)?.position.x === position.x && getParticipant(presenceState, candidate.id)?.position.y === position.y)
-			.map((candidate) => candidate.id);
-		const visualOffset = getSameCellVisualOffset(participant.id, sameCellIds, cellSize);
-		const worldPoint = gridToWorld(position, cellSize);
-		const world = { x: worldPoint.x + visualOffset.x, y: worldPoint.y + visualOffset.y };
-		const fieldLocalScreen = worldToScreen(world, camera);
-		return { ...participant, ...presence, position, world, screen: fieldLocalToViewport(fieldLocalScreen, fieldAreaBounds) };
-	});
+	$: participantViews = presenceProjection.participants;
 
 	$: participantById = new Map(participantViews.map((participant) => [participant.id, participant]));
 
-	$: visibleParticipantIds = new Set(
-		participantViews.filter((participant) => isInsideFieldArea(participant.screen)).map((participant) => participant.id)
-	);
+	$: visibleParticipantIds = presenceProjection.visibleParticipantIds;
 	$: visibleParticipantKey = [...visibleParticipantIds].sort().join('|');
 	$: syncVisibility(visibleParticipantKey, visibleParticipantIds);
 
@@ -302,31 +276,12 @@
 		return participantTone(members[0] ?? { color: 'lavender' });
 	}
 
-	function projectParticipant(state: PresenceState, participant: Participant) {
-		const presence = getParticipant(state, participant.id);
-		if (!presence || presence.status !== 'active') return null;
-		const sameCellIds = PARTICIPANTS
-			.filter((candidate) => getParticipant(state, candidate.id)?.status === 'active')
-			.filter((candidate) => {
-				const position = getParticipant(state, candidate.id)?.position;
-				return position?.x === presence.position.x && position?.y === presence.position.y;
-			})
-			.map((candidate) => candidate.id);
-		const offset = getSameCellVisualOffset(participant.id, sameCellIds, cellSize);
-		const worldPoint = gridToWorld(presence.position, cellSize);
-		const world = { x: worldPoint.x + offset.x, y: worldPoint.y + offset.y };
-		const fieldLocalScreen = worldToScreen(world, camera);
-		return { ...participant, ...presence, world, screen: fieldLocalToViewport(fieldLocalScreen, fieldAreaBounds) };
-	}
-
-	function visibleIdsForState(state: PresenceState): Set<string> {
-		return new Set(
-			PARTICIPANTS
-				.map((participant) => projectParticipant(state, participant))
-				.filter((participant): participant is NonNullable<typeof participant> => Boolean(participant))
-				.filter((participant) => isInsideFieldArea(participant.screen))
-				.map((participant) => participant.id)
-		);
+	function getPresenceProjection(state: PresenceState) {
+		return projectPresence(state, PARTICIPANTS, {
+			cellSize,
+			fieldAreaBounds,
+			fieldWorldSize
+		});
 	}
 
 	function rememberPlacedMergedAnchors(
@@ -379,7 +334,7 @@
 			createdAt: receivedAt,
 			receivedAt
 		};
-		const isSpeakerVisible = visibleIdsForState(nextPresenceState).has(selectedSpeakerId);
+		const isSpeakerVisible = getPresenceProjection(nextPresenceState).visibleParticipantIds.has(selectedSpeakerId);
 		conversationState = receiveMessage(conversationState, message, {
 			isSpeakerVisible,
 			duration: getPrototypeDisplayDuration(message.content),
