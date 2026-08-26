@@ -170,15 +170,15 @@ describe('field geometry', () => {
 	});
 
 	it('calculates a merged anchor from only the members it receives', () => {
-		const visibleMembers = [{ x: 120, y: 220 }, { x: 200, y: 200 }];
-		const offscreenMember = { x: 900, y: 30 };
+		const visibleMembers = [{ x: 120, y: 2 }, { x: 200, y: 4 }];
+		const offscreenMember = { x: 900, y: 0 };
 
 		expect(
 			mergedBubblePreferredAnchor(visibleMembers, 8, { width: 160, height: 48 }, { x: 16, y: 84, width: 288, height: 160 })
 		).toMatchObject({ x: 80 });
 		expect(
 			mergedBubblePreferredAnchor(visibleMembers, 8, { width: 160, height: 48 }, { x: 16, y: 84, width: 288, height: 160 }).y
-		).toBe(logicalFieldYToSpeechY((220 + 200) / 2, 8, { width: 160, height: 48 }, { x: 16, y: 84, width: 288, height: 160 }));
+		).toBe(logicalFieldYToSpeechY((2 + 4) / 2, 8, { width: 160, height: 48 }, { x: 16, y: 84, width: 288, height: 160 }));
 		expect(
 			mergedBubblePreferredAnchor(
 				[...visibleMembers, offscreenMember],
