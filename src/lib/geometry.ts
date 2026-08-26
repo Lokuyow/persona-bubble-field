@@ -18,6 +18,17 @@ export type Bounds = Size & {
 	y: number;
 };
 
+export type BubblePlacementInput = {
+	id: string;
+	preferred: WorldPoint;
+	size: Size;
+};
+
+export type BubblePlacement = {
+	id: string;
+	anchor: WorldPoint;
+};
+
 export type Direction = 'up' | 'down' | 'left' | 'right';
 
 export type FieldSize = {
@@ -175,4 +186,131 @@ export function clampToBounds(anchor: WorldPoint, bubble: Size, bounds: Bounds, 
 
 export function clampToViewport(anchor: WorldPoint, bubble: Size, viewport: Size, margin = 12): WorldPoint {
 	return clampToBounds(anchor, bubble, { x: 0, y: 0, ...viewport }, margin);
+}
+
+const BUBBLE_PLACEMENT_GAP = 8;
+
+function bubbleRect(anchor: WorldPoint, size: Size): Bounds {
+	return { ...anchor, ...size };
+}
+
+function gapOverlapArea(first: Bounds, second: Bounds, gap: number): number {
+	const overlapWidth = Math.min(first.x + first.width, second.x + second.width + gap) -
+		Math.max(first.x, second.x - gap);
+	const overlapHeight = Math.min(first.y + first.height, second.y + second.height + gap) -
+		Math.max(first.y, second.y - gap);
+
+	return Math.max(0, overlapWidth) * Math.max(0, overlapHeight);
+}
+
+function candidateOffsets(size: Size, cellSize: number, gap: number): readonly WorldPoint[] {
+	const verticalStep = size.height + gap;
+	const horizontalStep = Math.max(1, cellSize);
+
+	return [
+		{ x: 0, y: 0 },
+		{ x: 0, y: -verticalStep },
+		{ x: 0, y: verticalStep },
+		{ x: -horizontalStep, y: 0 },
+		{ x: horizontalStep, y: 0 },
+		{ x: -horizontalStep, y: -verticalStep },
+		{ x: horizontalStep, y: -verticalStep },
+		{ x: -horizontalStep, y: verticalStep },
+		{ x: horizontalStep, y: verticalStep },
+		{ x: 0, y: -2 * verticalStep },
+		{ x: 0, y: 2 * verticalStep },
+		{ x: -horizontalStep, y: -2 * verticalStep },
+		{ x: horizontalStep, y: -2 * verticalStep },
+		{ x: -horizontalStep, y: 2 * verticalStep },
+		{ x: horizontalStep, y: 2 * verticalStep }
+	];
+}
+
+function getCandidates(
+	item: BubblePlacementInput,
+	bounds: Bounds,
+	cellSize: number,
+	gap: number
+): WorldPoint[] {
+	const preferred = clampToBounds(item.preferred, item.size, bounds);
+	const seen = new Set<string>();
+	const candidates: WorldPoint[] = [];
+
+	for (const offset of candidateOffsets(item.size, cellSize, gap)) {
+		const candidate = clampToBounds(
+			{ x: preferred.x + offset.x, y: preferred.y + offset.y },
+			item.size,
+			bounds
+		);
+		const key = `${candidate.x}:${candidate.y}`;
+
+		if (seen.has(key)) continue;
+		seen.add(key);
+		candidates.push(candidate);
+	}
+
+	return candidates;
+}
+
+/**
+ * Places bubbles in a stable order using a bounded set of candidates around
+ * their already-clamped preferred anchors. It intentionally makes no attempt
+ * at global packing: a candidate that cannot avoid earlier bubbles is chosen
+ * by minimum gap-aware overlap area.
+ */
+export function placeBubbles(
+	items: readonly BubblePlacementInput[],
+	bounds: Bounds,
+	cellSize: number,
+	gap = BUBBLE_PLACEMENT_GAP
+): BubblePlacement[] {
+	const orderedItems = [...items].sort((first, second) =>
+		first.preferred.y - second.preferred.y ||
+		first.preferred.x - second.preferred.x ||
+		(first.id < second.id ? -1 : first.id > second.id ? 1 : 0)
+	);
+	const placed: Array<{ anchor: WorldPoint; size: Size }> = [];
+	const results: BubblePlacement[] = [];
+
+	for (const item of orderedItems) {
+		const preferred = clampToBounds(item.preferred, item.size, bounds);
+		const candidates = getCandidates(item, bounds, cellSize, gap);
+		let bestCandidate = candidates[0] ?? preferred;
+		let bestOverlap = Number.POSITIVE_INFINITY;
+		let bestDistance = Number.POSITIVE_INFINITY;
+		let hasNonOverlap = false;
+
+		for (const candidate of candidates) {
+			const overlap = placed.reduce(
+				(total, previous) => total + gapOverlapArea(bubbleRect(candidate, item.size), bubbleRect(previous.anchor, previous.size), gap),
+				0
+			);
+			const distance = Math.hypot(candidate.x - preferred.x, candidate.y - preferred.y);
+			const isNonOverlap = overlap === 0;
+
+			if (isNonOverlap && !hasNonOverlap) {
+				hasNonOverlap = true;
+				bestCandidate = candidate;
+				bestOverlap = overlap;
+				bestDistance = distance;
+				continue;
+			}
+
+			if (hasNonOverlap && !isNonOverlap) continue;
+			if (hasNonOverlap && distance > bestDistance) continue;
+			if (!hasNonOverlap && overlap > bestOverlap) continue;
+			if (!hasNonOverlap && overlap === bestOverlap) continue;
+
+			bestCandidate = candidate;
+			bestOverlap = overlap;
+			bestDistance = distance;
+		}
+
+		placed.push({ anchor: bestCandidate, size: item.size });
+		results.push({ id: item.id, anchor: bestCandidate });
+	}
+
+	const placementById = new Map(results.map((result) => [result.id, result]));
+
+	return items.map((item) => placementById.get(item.id)!);
 }
