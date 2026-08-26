@@ -2,6 +2,16 @@
 	import { onMount } from 'svelte';
 	import { base } from '$app/paths';
 	import {
+		applyVisibility,
+		createConversationState,
+		getPrototypeDisplayDuration,
+		pruneExpired,
+		receiveMessage,
+		type ConversationMessage,
+		type ConversationState,
+		type SpeechType
+	} from '$lib/conversation';
+	import {
 		clampCamera,
 		clampToBounds,
 		fieldLocalToViewport,
@@ -45,10 +55,6 @@
 		isSelf?: boolean;
 	};
 
-	type Bubble =
-		| { id: string; kind: 'normal'; text: string; speakerId: string; tone: string }
-		| { id: string; kind: 'merged'; text: string; memberIds: string[]; tone: string };
-
 	const PARTICIPANTS: Participant[] = [
 		{ id: 'you', name: 'you', initials: 'YU', color: 'coral', position: { x: 7, y: 4 }, isSelf: true },
 		{ id: 'mio', name: 'mio', initials: 'MI', color: 'lavender', position: { x: 8, y: 2 } },
@@ -60,18 +66,19 @@
 		{ id: 'toma', name: 'toma', initials: 'TO', color: 'blue', position: { x: 3, y: 6 } }
 	];
 
-	const BUBBLES: Bubble[] = [
-		{ id: 'haru-note', kind: 'normal', text: 'ここ、風が気持ちいいね', speakerId: 'haru', tone: 'sky' },
-		{ id: 'merged-note', kind: 'merged', text: '同じ話題が届いてる', memberIds: ['mio', 'sena', 'riku'], tone: 'violet' },
-		{ id: 'nagi-note', kind: 'normal', text: '少しだけ近くへ', speakerId: 'nagi', tone: 'peach' },
-		{ id: 'yui-note', kind: 'normal', text: 'またあとで話そう', speakerId: 'yui', tone: 'rose' }
-	];
-
 	let playerPosition: GridPosition = { ...PARTICIPANTS[0].position };
 	let viewportElement: HTMLElement;
 	let viewportSize: Size = DEFAULT_VIEWPORT;
 	let lastMoveMessage = '矢印キーまたは下のパッドで移動';
 	let bubbleSizes: Record<string, Size> = {};
+	let conversationState: ConversationState = createConversationState();
+	let lastPlacedAnchorById: Record<string, WorldPoint> = {};
+	let selectedSpeakerId = PARTICIPANTS[0].id;
+	let selectedSpeechType: SpeechType = 'normal';
+	let composerText = '';
+	let conversationStatus = 'local conversation is empty';
+	let localMessageSequence = 0;
+	let lastVisibilityKey: string | null = null;
 
 	$: cellSize = getResponsiveCellSize(viewportSize.width);
 	$: field = { ...FIELD, cellSize };
@@ -111,9 +118,15 @@
 
 	$: participantById = new Map(participantViews.map((participant) => [participant.id, participant]));
 
-	$: visibleNormalBubbles = BUBBLES.filter((bubble): bubble is Extract<Bubble, { kind: 'normal' }> => bubble.kind === 'normal')
+	$: visibleParticipantIds = new Set(
+		participantViews.filter((participant) => isInsideFieldArea(participant.screen)).map((participant) => participant.id)
+	);
+	$: visibleParticipantKey = [...visibleParticipantIds].sort().join('|');
+	$: syncVisibility(visibleParticipantKey, visibleParticipantIds);
+
+	$: visibleNormalBubbles = conversationState.normalBubbles
 		.map((bubble) => {
-			const speaker = participantById.get(bubble.speakerId);
+			const speaker = participantById.get(bubble.pubkey);
 			if (!speaker || !isInsideFieldArea(speaker.screen)) return null;
 			const size = bubbleSizes[bubble.id] ?? DEFAULT_BUBBLE_SIZES.normal;
 			const preferred = normalBubblePreferredAnchor(
@@ -123,42 +136,72 @@
 				size,
 				bubbleSafeBounds
 			);
-			return { ...bubble, anchor: clampToBounds(preferred, size, bubbleSafeBounds), size, speaker };
+			return {
+				...bubble,
+				text: bubble.content,
+				tone: participantTone(speaker),
+				anchor: clampToBounds(preferred, size, bubbleSafeBounds),
+				size,
+				speaker
+			};
 		})
 		.filter((bubble): bubble is NonNullable<typeof bubble> => bubble !== null);
 
-	$: visibleMergedBubbles = BUBBLES.filter((bubble): bubble is Extract<Bubble, { kind: 'merged' }> => bubble.kind === 'merged')
+	$: visibleMergedBubbles = conversationState.mergedBubbles
 		.map((bubble) => {
-			const members = bubble.memberIds
+			const members = bubble.memberPubkeys
 				.map((id) => participantById.get(id))
 				.filter((participant): participant is (typeof participantViews)[number] => Boolean(participant));
 			const visibleMembers = members.filter((member) => isInsideFieldArea(member.screen));
-			if (visibleMembers.length === 0) return null;
 			const size = bubbleSizes[bubble.id] ?? DEFAULT_BUBBLE_SIZES.merged;
+			if (visibleMembers.length === 0) {
+				const lastAnchor = lastPlacedAnchorById[bubble.id];
+				if (!lastAnchor) return null;
+				return {
+					...bubble,
+					text: bubble.content,
+					tone: mergedBubbleTone(members),
+					anchor: lastAnchor,
+					size,
+					members: []
+				};
+			}
+
 			const preferred = mergedBubblePreferredAnchor(
 				visibleMembers.map((member) => ({ x: member.screen.x, y: member.position.y })),
 				field.rows,
 				size,
 				bubbleSafeBounds
 			);
-			return { ...bubble, anchor: clampToBounds(preferred, size, bubbleSafeBounds), size, members: visibleMembers };
+			return {
+				...bubble,
+				text: bubble.content,
+				tone: mergedBubbleTone(members),
+				anchor: clampToBounds(preferred, size, bubbleSafeBounds),
+				size,
+				members: visibleMembers
+			};
 		})
 		.filter((bubble): bubble is NonNullable<typeof bubble> => bubble !== null);
 
-	$: allVisibleBubbles = [...visibleNormalBubbles, ...visibleMergedBubbles];
+	$: placeableBubbles = [
+		...visibleNormalBubbles,
+		...visibleMergedBubbles.filter((bubble) => bubble.members.length > 0)
+	];
 	$: bubblePlacement = placeBubbles(
-		allVisibleBubbles.map((bubble) => ({ id: bubble.id, preferred: bubble.anchor, size: bubble.size })),
+		placeableBubbles.map((bubble) => ({ id: bubble.id, preferred: bubble.anchor, size: bubble.size })),
 		bubbleSafeBounds,
 		cellSize
 	);
 	$: placedAnchorById = new Map(bubblePlacement.map((placement) => [placement.id, placement.anchor]));
+	$: rememberPlacedMergedAnchors(visibleMergedBubbles, placedAnchorById, conversationState.mergedBubbles);
 	$: positionedNormalBubbles = visibleNormalBubbles.map((bubble) => ({
 		...bubble,
 		anchor: placedAnchorById.get(bubble.id) ?? bubble.anchor
 	}));
 	$: positionedMergedBubbles = visibleMergedBubbles.map((bubble) => ({
 		...bubble,
-		anchor: placedAnchorById.get(bubble.id) ?? bubble.anchor
+		anchor: bubble.members.length === 0 ? bubble.anchor : placedAnchorById.get(bubble.id) ?? bubble.anchor
 	}));
 	$: positionedVisibleBubbles = [...positionedNormalBubbles, ...positionedMergedBubbles];
 
@@ -172,8 +215,14 @@
 		const observer = new ResizeObserver(updateViewport);
 		observer.observe(viewportElement);
 		updateViewport();
+		const expiryTimer = window.setInterval(() => {
+			conversationState = pruneExpired(conversationState, Date.now());
+		}, 250);
 
-		return () => observer.disconnect();
+		return () => {
+			observer.disconnect();
+			window.clearInterval(expiryTimer);
+		};
 	});
 
 	function observeBubble(node: HTMLElement, id: string) {
@@ -204,6 +253,78 @@
 		);
 	}
 
+	function syncVisibility(key: string, visiblePubkeys: ReadonlySet<string>) {
+		if (key === lastVisibilityKey) return;
+		lastVisibilityKey = key;
+		conversationState = applyVisibility(conversationState, visiblePubkeys);
+	}
+
+	function participantTone(participant: Pick<Participant, 'color'>): string {
+		if (participant.color === 'lavender') return 'violet';
+		if (participant.color === 'rose') return 'rose';
+		if (participant.color === 'peach' || participant.color === 'yellow' || participant.color === 'coral') return 'peach';
+		return 'sky';
+	}
+
+	function mergedBubbleTone(members: readonly Participant[]): string {
+		return participantTone(members[0] ?? { color: 'lavender' });
+	}
+
+	function rememberPlacedMergedAnchors(
+		bubbles: readonly { id: string; members: readonly Participant[] }[],
+		placed: ReadonlyMap<string, WorldPoint>,
+		activeMergedBubbles: readonly { id: string }[]
+	) {
+		const activeIds = new Set(activeMergedBubbles.map((bubble) => bubble.id));
+		const next = { ...lastPlacedAnchorById };
+		let changed = false;
+
+		for (const id of Object.keys(next)) {
+			if (!activeIds.has(id)) {
+				delete next[id];
+				changed = true;
+			}
+		}
+
+		for (const bubble of bubbles) {
+			if (bubble.members.length === 0) continue;
+			const anchor = placed.get(bubble.id);
+			if (!anchor) continue;
+			const previous = next[bubble.id];
+			if (!previous || previous.x !== anchor.x || previous.y !== anchor.y) {
+				next[bubble.id] = anchor;
+				changed = true;
+			}
+		}
+
+		if (changed) lastPlacedAnchorById = next;
+	}
+
+	function sendMessage(event: SubmitEvent) {
+		event.preventDefault();
+		if (!composerText.trim()) return;
+
+		const receivedAt = Date.now();
+		const message: ConversationMessage = {
+			id: `local:${receivedAt}:${localMessageSequence++}`,
+			pubkey: selectedSpeakerId,
+			content: composerText,
+			speechType: selectedSpeechType,
+			createdAt: receivedAt,
+			receivedAt
+		};
+		const isSpeakerVisible = visibleParticipantIds.has(selectedSpeakerId);
+		conversationState = receiveMessage(conversationState, message, {
+			isSpeakerVisible,
+			duration: getPrototypeDisplayDuration(message.content),
+			now: receivedAt
+		});
+		conversationStatus = isSpeakerVisible
+			? `${selectedSpeakerId} spoke · ${selectedSpeechType}`
+			: `${selectedSpeakerId} is offscreen · message not shown`;
+		composerText = '';
+	}
+
 	function move(direction: Direction) {
 		const occupied = PARTICIPANTS.filter((participant) => !participant.isSelf).map((participant) => participant.position);
 		const next = moveOneCell(playerPosition, direction, FIELD, occupied);
@@ -217,6 +338,8 @@
 	}
 
 	function handleKeydown(event: KeyboardEvent) {
+		if (isEditableTarget(event.target)) return;
+
 		const directionByKey: Partial<Record<string, Direction>> = {
 			ArrowUp: 'up',
 			ArrowDown: 'down',
@@ -228,6 +351,11 @@
 
 		event.preventDefault();
 		move(direction);
+	}
+
+	function isEditableTarget(target: EventTarget | null): boolean {
+		if (!(target instanceof HTMLElement)) return false;
+		return target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
 	}
 
 	function tailStart(anchor: WorldPoint, size: Size): WorldPoint {
@@ -315,10 +443,12 @@
 				<div
 					use:observeBubble={bubble.id}
 					class={`bubble bubble-${bubble.kind} bubble-${bubble.tone}`}
+					data-bubble-id={bubble.id}
+					data-speech-type={bubble.speechType}
 					style={`transform: translate3d(${bubble.anchor.x}px, ${bubble.anchor.y}px, 0);`}
 				>
 					<span>{bubble.text}</span>
-					{#if bubble.kind === 'merged'}<small>3 people · merged</small>{/if}
+					{#if bubble.kind === 'merged'}<small>{bubble.memberPubkeys.length} people · merged</small>{/if}
 				</div>
 			{/each}
 		</div>
@@ -337,6 +467,36 @@
 			<strong>{playerPosition.x + 1}<i>/</i>{playerPosition.y + 1}</strong>
 		</div>
 	</div>
+
+	<form class="conversation-composer" aria-label="Local conversation controls" onsubmit={sendMessage}>
+		<div class="composer-heading">
+			<span class="control-kicker">local conversation</span>
+			<span class="conversation-status" aria-live="polite">{conversationStatus}</span>
+		</div>
+		<div class="composer-fields">
+			<label>
+				<span>speaker</span>
+				<select aria-label="Speaker" bind:value={selectedSpeakerId}>
+					{#each PARTICIPANTS as participant}
+						<option value={participant.id}>{participant.name}</option>
+					{/each}
+				</select>
+			</label>
+			<label>
+				<span>type</span>
+				<select aria-label="Speech type" bind:value={selectedSpeechType}>
+					<option value="normal">normal</option>
+					<option value="shout">shout</option>
+					<option value="monologue">monologue</option>
+				</select>
+			</label>
+			<label class="composer-text-field">
+				<span>message</span>
+				<input aria-label="Message text" bind:value={composerText} placeholder="say something locally" />
+			</label>
+			<button type="submit">send</button>
+		</div>
+	</form>
 
 	<div class="controls-panel" aria-label="Movement controls">
 		<div class="control-copy">
@@ -388,6 +548,7 @@
 
 	.topbar,
 	.status-panel,
+	.conversation-composer,
 	.controls-panel,
 	.footer-note,
 	.camera-chip {
@@ -772,6 +933,93 @@
 		font-weight: 800;
 	}
 
+	.conversation-composer {
+		top: 66px;
+		left: 50%;
+		z-index: 11;
+		width: min(570px, calc(100% - 32px));
+		padding: 9px 11px 10px;
+		border: 1px solid rgba(57, 67, 64, 0.12);
+		border-radius: 14px;
+		background: rgba(255, 253, 245, 0.82);
+		box-shadow: 0 8px 22px rgba(60, 72, 65, 0.09);
+		backdrop-filter: blur(8px);
+		transform: translateX(-50%);
+	}
+
+	.composer-heading,
+	.composer-fields,
+	.composer-fields label {
+		display: flex;
+	}
+
+	.composer-heading {
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 10px;
+		margin-bottom: 6px;
+	}
+
+	.conversation-status {
+		overflow: hidden;
+		color: #89918a;
+		font-size: 9px;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.composer-fields {
+		align-items: end;
+		gap: 7px;
+	}
+
+	.composer-fields label {
+		min-width: 0;
+		flex-direction: column;
+		gap: 3px;
+		color: #87908b;
+		font-size: 9px;
+		font-weight: 700;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+	}
+
+	.composer-fields select,
+	.composer-fields input,
+	.composer-fields button {
+		min-height: 30px;
+		border: 1px solid rgba(57, 67, 64, 0.14);
+		border-radius: 8px;
+		background: rgba(255, 255, 255, 0.76);
+		color: #46514d;
+		font-size: 11px;
+	}
+
+	.composer-fields select,
+	.composer-fields input {
+		padding: 5px 7px;
+	}
+
+	.composer-text-field {
+		flex: 1;
+	}
+
+	.composer-fields button {
+		padding: 5px 12px;
+		background: #e2def5;
+		color: #645a91;
+		cursor: pointer;
+		font-weight: 800;
+		text-transform: lowercase;
+	}
+
+	.composer-fields button:hover,
+	.composer-fields button:focus-visible {
+		background: #d5cfef;
+		outline: 2px solid rgba(136, 125, 183, 0.3);
+		outline-offset: 2px;
+	}
+
 	.position-readout {
 		display: flex;
 		align-items: baseline;
@@ -906,6 +1154,23 @@
 			bottom: 13px;
 			gap: 10px;
 		}
+
+		.conversation-composer {
+			top: 60px;
+			width: calc(100% - 20px);
+			padding: 8px;
+		}
+
+		.composer-fields { gap: 4px; }
+		.composer-fields label { font-size: 8px; }
+		.composer-fields select,
+		.composer-fields input,
+		.composer-fields button {
+			min-height: 28px;
+			font-size: 10px;
+		}
+		.composer-fields select { max-width: 74px; }
+		.composer-fields button { padding: 5px 9px; }
 
 		.control-copy { display: none; }
 		.d-pad { width: 92px; height: 92px; gap: 4px; }
