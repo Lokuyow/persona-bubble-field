@@ -52,6 +52,20 @@ export function gridToWorld(cell: GridPosition, cellSize: number): WorldPoint {
 	};
 }
 
+export function getSameCellVisualOffset(
+	participantId: string,
+	peerIds: readonly string[],
+	cellSize: number
+): WorldPoint {
+	const ids = [...new Set(peerIds)].sort();
+	const index = ids.indexOf(participantId);
+	if (index < 0 || ids.length <= 1) return { x: 0, y: 0 };
+
+	const radius = Math.min(12, cellSize * 0.18);
+	const angle = -Math.PI / 2 + (index * Math.PI * 2) / ids.length;
+	return { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius };
+}
+
 export function getFieldWorldSize(field: FieldSize): Size {
 	return {
 		width: field.columns * field.cellSize,

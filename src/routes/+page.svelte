@@ -19,9 +19,9 @@
 		getFieldAreaBounds,
 		getFieldWorldSize,
 		getResponsiveCellSize,
+		getSameCellVisualOffset,
 		gridToWorld,
 		mergedBubblePreferredAnchor,
-		moveOneCell,
 		normalBubblePreferredAnchor,
 		placeBubbles,
 		worldToScreen,
@@ -30,6 +30,18 @@
 		type Size,
 		type WorldPoint
 	} from '$lib/geometry';
+	import {
+		PRESENCE_TIMEOUT_MS,
+		createPresenceState,
+		debugSetParticipantPosition,
+		debugTimeoutParticipant,
+		getParticipant,
+		getActiveParticipantIds,
+		moveParticipant,
+		prunePresence,
+		recordPresenceActivity,
+		type PresenceState
+	} from '$lib/presence';
 
 	const FIELD = {
 		columns: 16,
@@ -51,22 +63,27 @@
 		name: string;
 		initials: string;
 		color: string;
-		position: GridPosition;
+		initialPosition: GridPosition;
 		isSelf?: boolean;
 	};
 
 	const PARTICIPANTS: Participant[] = [
-		{ id: 'you', name: 'you', initials: 'YU', color: 'coral', position: { x: 7, y: 4 }, isSelf: true },
-		{ id: 'mio', name: 'mio', initials: 'MI', color: 'lavender', position: { x: 8, y: 2 } },
-		{ id: 'sena', name: 'sena', initials: 'SE', color: 'mint', position: { x: 9, y: 2 } },
-		{ id: 'riku', name: 'riku', initials: 'RI', color: 'yellow', position: { x: 10, y: 2 } },
-		{ id: 'haru', name: 'haru', initials: 'HA', color: 'sky', position: { x: 4, y: 3 } },
-		{ id: 'nagi', name: 'nagi', initials: 'NA', color: 'peach', position: { x: 5, y: 6 } },
-		{ id: 'yui', name: 'yui', initials: 'YI', color: 'rose', position: { x: 12, y: 5 } },
-		{ id: 'toma', name: 'toma', initials: 'TO', color: 'blue', position: { x: 3, y: 6 } }
+		{ id: 'you', name: 'you', initials: 'YU', color: 'coral', initialPosition: { x: 7, y: 4 }, isSelf: true },
+		{ id: 'mio', name: 'mio', initials: 'MI', color: 'lavender', initialPosition: { x: 8, y: 2 } },
+		{ id: 'sena', name: 'sena', initials: 'SE', color: 'mint', initialPosition: { x: 9, y: 2 } },
+		{ id: 'riku', name: 'riku', initials: 'RI', color: 'yellow', initialPosition: { x: 10, y: 2 } },
+		{ id: 'haru', name: 'haru', initials: 'HA', color: 'sky', initialPosition: { x: 4, y: 3 } },
+		{ id: 'nagi', name: 'nagi', initials: 'NA', color: 'peach', initialPosition: { x: 5, y: 6 } },
+		{ id: 'yui', name: 'yui', initials: 'YI', color: 'rose', initialPosition: { x: 12, y: 5 } },
+		{ id: 'toma', name: 'toma', initials: 'TO', color: 'blue', initialPosition: { x: 3, y: 6 } }
 	];
 
-	let playerPosition: GridPosition = { ...PARTICIPANTS[0].position };
+	const initialNow = Date.now();
+	let presenceState: PresenceState = createPresenceState(
+		FIELD,
+		initialNow,
+		PARTICIPANTS.map(({ id, initialPosition }) => ({ id, position: initialPosition }))
+	);
 	let viewportElement: HTMLElement;
 	let viewportSize: Size = DEFAULT_VIEWPORT;
 	let lastMoveMessage = '矢印キーまたは下のパッドで移動';
@@ -79,10 +96,12 @@
 	let conversationStatus = 'local conversation is empty';
 	let localMessageSequence = 0;
 	let lastVisibilityKey: string | null = null;
+	let presenceStatusMessage = 'select a participant to inspect local presence';
 
 	$: cellSize = getResponsiveCellSize(viewportSize.width);
 	$: field = { ...FIELD, cellSize };
 	$: fieldWorldSize = getFieldWorldSize(field);
+	$: playerPosition = getParticipant(presenceState, 'you')?.position ?? PARTICIPANTS[0].initialPosition;
 	$: speechAreaBounds = {
 		x: SPEECH_AREA.sidePadding,
 		y: SPEECH_AREA.top,
@@ -109,11 +128,22 @@
 		height: Math.max(0, actualFieldTop - SPEECH_AREA.top)
 	};
 
-	$: participantViews = PARTICIPANTS.map((participant) => {
-		const position = participant.isSelf ? playerPosition : participant.position;
-		const world = gridToWorld(position, cellSize);
+	$: activeParticipantIds = getActiveParticipantIds(presenceState);
+	$: selectedPresence = getParticipant(presenceState, selectedSpeakerId);
+	$: participantViews = PARTICIPANTS
+		.filter((participant) => activeParticipantIds.has(participant.id))
+		.map((participant) => {
+		const presence = getParticipant(presenceState, participant.id)!;
+		const position = presence.position;
+		const sameCellIds = PARTICIPANTS
+			.filter((candidate) => activeParticipantIds.has(candidate.id))
+			.filter((candidate) => getParticipant(presenceState, candidate.id)?.position.x === position.x && getParticipant(presenceState, candidate.id)?.position.y === position.y)
+			.map((candidate) => candidate.id);
+		const visualOffset = getSameCellVisualOffset(participant.id, sameCellIds, cellSize);
+		const worldPoint = gridToWorld(position, cellSize);
+		const world = { x: worldPoint.x + visualOffset.x, y: worldPoint.y + visualOffset.y };
 		const fieldLocalScreen = worldToScreen(world, camera);
-		return { ...participant, position, world, screen: fieldLocalToViewport(fieldLocalScreen, fieldAreaBounds) };
+		return { ...participant, ...presence, position, world, screen: fieldLocalToViewport(fieldLocalScreen, fieldAreaBounds) };
 	});
 
 	$: participantById = new Map(participantViews.map((participant) => [participant.id, participant]));
@@ -205,7 +235,7 @@
 	}));
 	$: positionedVisibleBubbles = [...positionedNormalBubbles, ...positionedMergedBubbles];
 
-	onMount(() => {
+		onMount(() => {
 		const updateViewport = () => {
 			if (!viewportElement) return;
 			const rect = viewportElement.getBoundingClientRect();
@@ -216,7 +246,9 @@
 		observer.observe(viewportElement);
 		updateViewport();
 		const expiryTimer = window.setInterval(() => {
-			conversationState = pruneExpired(conversationState, Date.now());
+			const now = Date.now();
+			presenceState = prunePresence(presenceState, now);
+			conversationState = pruneExpired(conversationState, now);
 		}, 250);
 
 		return () => {
@@ -270,6 +302,33 @@
 		return participantTone(members[0] ?? { color: 'lavender' });
 	}
 
+	function projectParticipant(state: PresenceState, participant: Participant) {
+		const presence = getParticipant(state, participant.id);
+		if (!presence || presence.status !== 'active') return null;
+		const sameCellIds = PARTICIPANTS
+			.filter((candidate) => getParticipant(state, candidate.id)?.status === 'active')
+			.filter((candidate) => {
+				const position = getParticipant(state, candidate.id)?.position;
+				return position?.x === presence.position.x && position?.y === presence.position.y;
+			})
+			.map((candidate) => candidate.id);
+		const offset = getSameCellVisualOffset(participant.id, sameCellIds, cellSize);
+		const worldPoint = gridToWorld(presence.position, cellSize);
+		const world = { x: worldPoint.x + offset.x, y: worldPoint.y + offset.y };
+		const fieldLocalScreen = worldToScreen(world, camera);
+		return { ...participant, ...presence, world, screen: fieldLocalToViewport(fieldLocalScreen, fieldAreaBounds) };
+	}
+
+	function visibleIdsForState(state: PresenceState): Set<string> {
+		return new Set(
+			PARTICIPANTS
+				.map((participant) => projectParticipant(state, participant))
+				.filter((participant): participant is NonNullable<typeof participant> => Boolean(participant))
+				.filter((participant) => isInsideFieldArea(participant.screen))
+				.map((participant) => participant.id)
+		);
+	}
+
 	function rememberPlacedMergedAnchors(
 		bubbles: readonly { id: string; members: readonly Participant[] }[],
 		placed: ReadonlyMap<string, WorldPoint>,
@@ -305,6 +364,13 @@
 		if (!composerText.trim()) return;
 
 		const receivedAt = Date.now();
+		const nextPresenceState = recordPresenceActivity(
+			presenceState,
+			selectedSpeakerId,
+			'message',
+			receivedAt
+		);
+		presenceState = nextPresenceState;
 		const message: ConversationMessage = {
 			id: `local:${receivedAt}:${localMessageSequence++}`,
 			pubkey: selectedSpeakerId,
@@ -313,7 +379,7 @@
 			createdAt: receivedAt,
 			receivedAt
 		};
-		const isSpeakerVisible = visibleParticipantIds.has(selectedSpeakerId);
+		const isSpeakerVisible = visibleIdsForState(nextPresenceState).has(selectedSpeakerId);
 		conversationState = receiveMessage(conversationState, message, {
 			isSpeakerVisible,
 			duration: getPrototypeDisplayDuration(message.content),
@@ -326,15 +392,49 @@
 	}
 
 	function move(direction: Direction) {
-		const occupied = PARTICIPANTS.filter((participant) => !participant.isSelf).map((participant) => participant.position);
-		const next = moveOneCell(playerPosition, direction, FIELD, occupied);
-		if (!next) {
+		const result = moveParticipant(presenceState, 'you', direction, Date.now());
+		if (!result.moved) {
 			lastMoveMessage = 'そこへは移動できません';
 			return;
 		}
 
-		playerPosition = next;
+		presenceState = result.state;
+		const next = getParticipant(result.state, 'you')!.position;
 		lastMoveMessage = `field ${next.x + 1}, ${next.y + 1}`;
+	}
+
+	function moveSelected(direction: Direction) {
+		const now = Date.now();
+		const result = moveParticipant(presenceState, selectedSpeakerId, direction, now);
+		if (!result.moved) {
+			presenceStatusMessage = `${selectedSpeakerId} cannot move there`;
+			return;
+		}
+
+		presenceState = result.state;
+		const participant = getParticipant(result.state, selectedSpeakerId)!;
+		presenceStatusMessage = `${selectedSpeakerId} moved to ${participant.position.x + 1}, ${participant.position.y + 1}`;
+	}
+
+	function activitySelected() {
+		const now = Date.now();
+		const wasActive = getParticipant(presenceState, selectedSpeakerId)?.status === 'active';
+		presenceState = recordPresenceActivity(presenceState, selectedSpeakerId, 'trace-inspection', now);
+		presenceStatusMessage = wasActive
+			? `${selectedSpeakerId} activity recorded`
+			: `${selectedSpeakerId} reactivated at its retained position`;
+	}
+
+	function timeoutSelected() {
+		presenceState = debugTimeoutParticipant(presenceState, selectedSpeakerId);
+		presenceStatusMessage = `${selectedSpeakerId} timed out for local debugging`;
+	}
+
+	function overlapSelected() {
+		const self = getParticipant(presenceState, 'you');
+		if (!self || selectedSpeakerId === 'you') return;
+		presenceState = debugSetParticipantPosition(presenceState, selectedSpeakerId, self.position);
+		presenceStatusMessage = `${selectedSpeakerId} overlaps you at ${self.position.x + 1}, ${self.position.y + 1}`;
 	}
 
 	function handleKeydown(event: KeyboardEvent) {
@@ -406,12 +506,13 @@
 				<div class="field-grid" aria-hidden="true"></div>
 				<div class="field-sun" aria-hidden="true"></div>
 				<div class="field-label field-label-top">the little clearing</div>
-				<div class="field-label field-label-bottom">16 × 8 / fixed field</div>
+				<div class="field-label field-label-bottom">16 × 8 / local fixture</div>
 
 				{#each participantViews as participant (participant.id)}
 					<div
 						class:player={participant.isSelf}
 						class="participant"
+						data-position={`${participant.position.x},${participant.position.y}`}
 						style={`left: ${participant.world.x}px; top: ${participant.world.y}px;`}
 						aria-label={`${participant.name}${participant.isSelf ? ' (you)' : ''}`}
 					>
@@ -498,6 +599,40 @@
 		</div>
 	</form>
 
+	<section class="presence-panel" aria-label="Local presence controls">
+		<div class="presence-heading">
+			<span class="control-kicker">local presence</span>
+			<span class:inactive={selectedPresence?.status === 'inactive'} class="presence-state">
+				{selectedPresence?.status ?? 'unknown'}
+			</span>
+		</div>
+		<label class="presence-select">
+			<span>participant</span>
+			<select aria-label="Presence participant" bind:value={selectedSpeakerId}>
+				{#each PARTICIPANTS as participant}
+					<option value={participant.id}>{participant.name}</option>
+				{/each}
+			</select>
+		</label>
+		<div class="presence-details" aria-live="polite">
+			<span>last position <strong>{selectedPresence ? `${selectedPresence.position.x + 1}, ${selectedPresence.position.y + 1}` : '—'}</strong></span>
+			<span>last activity <strong>{selectedPresence ? new Date(selectedPresence.lastActivityAt).toLocaleTimeString() : '—'}</strong></span>
+		</div>
+		<div class="presence-movement" aria-label="Move selected participant">
+			<button type="button" aria-label="Move selected participant up" onclick={() => moveSelected('up')}>↑</button>
+			<button type="button" aria-label="Move selected participant left" onclick={() => moveSelected('left')}>←</button>
+			<button type="button" aria-label="Move selected participant down" onclick={() => moveSelected('down')}>↓</button>
+			<button type="button" aria-label="Move selected participant right" onclick={() => moveSelected('right')}>→</button>
+		</div>
+		<div class="presence-actions">
+			<button type="button" onclick={activitySelected}>activity</button>
+			<button type="button" onclick={timeoutSelected}>debug timeout</button>
+		</div>
+		<button class="presence-overlap" type="button" onclick={overlapSelected}>debug overlap selected → you</button>
+		<p class="presence-status" aria-live="polite">{presenceStatusMessage}</p>
+		<p class="presence-timeout">timeout at {PRESENCE_TIMEOUT_MS / 60_000} minutes · no heartbeat</p>
+	</section>
+
 	<div class="controls-panel" aria-label="Movement controls">
 		<div class="control-copy">
 			<span class="control-kicker">move one cell</span>
@@ -548,8 +683,9 @@
 
 	.topbar,
 	.status-panel,
-	.conversation-composer,
-	.controls-panel,
+		.conversation-composer,
+		.presence-panel,
+		.controls-panel,
 	.footer-note,
 	.camera-chip {
 		position: absolute;
@@ -1048,6 +1184,159 @@
 		font-style: normal;
 	}
 
+	.presence-panel {
+		top: 126px;
+		right: 32px;
+		width: min(246px, calc(100% - 32px));
+		padding: 11px;
+		border: 1px solid rgba(57, 67, 64, 0.12);
+		border-radius: 14px;
+		background: rgba(255, 253, 245, 0.84);
+		box-shadow: 0 8px 22px rgba(60, 72, 65, 0.09);
+		backdrop-filter: blur(8px);
+	}
+
+	.presence-heading,
+	.presence-details,
+	.presence-actions {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+	}
+
+	.presence-heading { margin-bottom: 7px; }
+
+	.presence-state {
+		padding: 3px 7px;
+		border-radius: 999px;
+		background: rgba(146, 198, 172, 0.28);
+		color: #4f8c6a;
+		font-size: 9px;
+		font-weight: 800;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+	}
+
+	.presence-state.inactive {
+		background: rgba(202, 151, 133, 0.2);
+		color: #a76654;
+	}
+
+	.presence-select,
+	.presence-details span {
+		display: flex;
+		flex-direction: column;
+		gap: 3px;
+		color: #87908b;
+		font-size: 9px;
+		font-weight: 700;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+	}
+
+	.presence-select select,
+	.presence-actions button,
+	.presence-movement button {
+		min-height: 28px;
+		border: 1px solid rgba(57, 67, 64, 0.14);
+		border-radius: 8px;
+		background: rgba(255, 255, 255, 0.76);
+		color: #46514d;
+		font: inherit;
+		font-size: 10px;
+	}
+
+	.presence-select select {
+		padding: 5px 7px;
+	}
+
+	.presence-details {
+		align-items: flex-start;
+		margin-top: 8px;
+	}
+
+	.presence-details strong {
+		color: #5f6a65;
+		font-size: 10px;
+		letter-spacing: 0;
+		text-transform: none;
+	}
+
+	.presence-movement {
+		display: grid;
+		width: 92px;
+		height: 62px;
+		margin: 9px auto 7px;
+		grid-template: repeat(2, 1fr) / repeat(3, 1fr);
+		gap: 4px;
+	}
+
+	.presence-movement button:nth-child(1) { grid-area: 1 / 2; }
+	.presence-movement button:nth-child(2) { grid-area: 2 / 1; }
+	.presence-movement button:nth-child(3) { grid-area: 2 / 2; }
+	.presence-movement button:nth-child(4) { grid-area: 2 / 3; }
+
+	.presence-actions {
+		justify-content: stretch;
+	}
+
+	.presence-actions button {
+		flex: 1;
+		padding: 5px 6px;
+		cursor: pointer;
+		font-weight: 800;
+	}
+
+	.presence-overlap {
+		width: 100%;
+		margin-top: 6px;
+		padding: 5px 6px;
+		border: 0;
+		background: transparent;
+		color: #89918a;
+		cursor: pointer;
+		font: inherit;
+		font-size: 8px;
+		letter-spacing: 0.03em;
+	}
+
+	.presence-overlap:hover,
+	.presence-overlap:focus-visible {
+		color: #a76654;
+		outline: 2px solid rgba(215, 127, 97, 0.35);
+		outline-offset: 1px;
+	}
+
+	.presence-actions button:last-child {
+		background: #f2dfd7;
+		color: #a76654;
+	}
+
+	.presence-movement button:hover,
+	.presence-movement button:focus-visible,
+	.presence-actions button:hover,
+	.presence-actions button:focus-visible {
+		background: #fff9ed;
+		outline: 2px solid rgba(215, 127, 97, 0.35);
+		outline-offset: 2px;
+	}
+
+	.presence-status {
+		min-height: 22px;
+		margin: 7px 0 0;
+		color: #69736d;
+		font-size: 10px;
+		line-height: 1.25;
+	}
+
+	.presence-timeout {
+		margin: 5px 0 0;
+		color: #a0a49d;
+		font-size: 8px;
+		letter-spacing: 0.04em;
+	}
+
 	.controls-panel {
 		right: 32px;
 		bottom: 24px;
@@ -1159,6 +1448,12 @@
 			top: 60px;
 			width: calc(100% - 20px);
 			padding: 8px;
+		}
+
+		.presence-panel {
+			top: 128px;
+			right: 10px;
+			width: min(236px, calc(100% - 20px));
 		}
 
 		.composer-fields { gap: 4px; }
