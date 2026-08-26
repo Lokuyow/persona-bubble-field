@@ -5,15 +5,16 @@ import {
 	clampToViewport,
 	DESKTOP_CELL_SIZE,
 	fieldLocalToViewport,
+	getActualFieldTop,
 	getFieldAreaBounds,
 	getFieldWorldSize,
 	getResponsiveCellSize,
 	gridToWorld,
+	logicalFieldYToSpeechY,
 	MOBILE_CELL_SIZE,
 	mergedBubblePreferredAnchor,
 	moveOneCell,
 	normalBubblePreferredAnchor,
-	speechAreaBubbleY,
 	worldToScreen
 } from './geometry';
 
@@ -55,6 +56,15 @@ describe('field geometry', () => {
 		expect(fieldArea.height).toBe(viewport.height - fieldArea.y);
 		expect(camera.y).toBe((fieldWorld.height - fieldArea.height) / 2);
 		expect(topRow.y).toBeGreaterThanOrEqual(fieldArea.y);
+		expect(getActualFieldTop(fieldArea, camera)).toBe(fieldArea.y + (fieldArea.height - fieldWorld.height) / 2);
+	});
+
+	it('extends the effective speech area to the actual centered field top', () => {
+		const fieldArea = { x: 0, y: 260, width: 360, height: 480 };
+
+		expect(getActualFieldTop(fieldArea, { x: 0, y: -16 })).toBe(276);
+		expect(getActualFieldTop(fieldArea, { x: 0, y: 0 })).toBe(fieldArea.y);
+		expect(getActualFieldTop(fieldArea, { x: 0, y: 16 })).toBe(fieldArea.y);
 	});
 
 	it('converts a grid cell to the center of its world cell', () => {
@@ -96,20 +106,26 @@ describe('field geometry', () => {
 		expect(moveOneCell({ x: 1, y: 1 }, 'right', field)).toEqual({ x: 2, y: 1 });
 	});
 
-	it('places a normal bubble at the speech area lane while following speaker X', () => {
-		const speechArea = { x: 16, y: 84, width: 288, height: 160 };
-
-		expect(normalBubblePreferredAnchor(200, { width: 120, height: 44 }, speechArea)).toEqual({ x: 140, y: 142 });
-	});
-
-	it('keeps normal bubble vertical placement in the speech area regardless of speaker Y', () => {
+	it('maps logical field Y into the speech area while keeping the bubble inside', () => {
 		const speechArea = { x: 16, y: 84, width: 288, height: 160 };
 		const bubble = { width: 120, height: 44 };
-		const anchor = normalBubblePreferredAnchor(200, bubble, speechArea);
 
-		expect(anchor.y).toBe(speechAreaBubbleY(speechArea, bubble));
-		expect(anchor.y).toBeGreaterThanOrEqual(speechArea.y);
-		expect(anchor.y + bubble.height).toBeLessThanOrEqual(speechArea.y + speechArea.height);
+		const top = logicalFieldYToSpeechY(0, 8, bubble, speechArea);
+		const bottom = logicalFieldYToSpeechY(7, 8, bubble, speechArea);
+
+		expect(top).toBeLessThan(bottom);
+		expect(top).toBeGreaterThanOrEqual(speechArea.y);
+		expect(bottom + bubble.height).toBeLessThanOrEqual(speechArea.y + speechArea.height);
+	});
+
+	it('keeps normal bubble X tied to the speaker while logical Y changes only bubble Y', () => {
+		const speechArea = { x: 16, y: 84, width: 288, height: 160 };
+		const bubble = { width: 120, height: 44 };
+		const top = normalBubblePreferredAnchor(200, 0, 8, bubble, speechArea);
+		const bottom = normalBubblePreferredAnchor(200, 7, 8, bubble, speechArea);
+
+		expect(top.x).toBe(bottom.x);
+		expect(top.y).toBeLessThan(bottom.y);
 	});
 
 	it('centers a merged bubble horizontally from its members', () => {
@@ -120,10 +136,19 @@ describe('field geometry', () => {
 					{ x: 200, y: 200 },
 					{ x: 280, y: 240 }
 				],
+				8,
 				{ width: 160, height: 48 },
 				{ x: 16, y: 84, width: 288, height: 160 }
 			)
-		).toEqual({ x: 120, y: 140 });
+		).toMatchObject({ x: 120 });
+		expect(
+			mergedBubblePreferredAnchor(
+				[{ x: 120, y: 2 }, { x: 200, y: 2 }, { x: 280, y: 2 }],
+				8,
+				{ width: 160, height: 48 },
+				{ x: 16, y: 84, width: 288, height: 160 }
+			).y
+		).toBe(logicalFieldYToSpeechY(2, 8, { width: 160, height: 48 }, { x: 16, y: 84, width: 288, height: 160 }));
 	});
 
 	it('keeps bubble anchors inside the viewport', () => {
@@ -149,14 +174,36 @@ describe('field geometry', () => {
 		const offscreenMember = { x: 900, y: 30 };
 
 		expect(
-			mergedBubblePreferredAnchor(visibleMembers, { width: 160, height: 48 }, { x: 16, y: 84, width: 288, height: 160 })
-		).toEqual({ x: 80, y: 140 });
+			mergedBubblePreferredAnchor(visibleMembers, 8, { width: 160, height: 48 }, { x: 16, y: 84, width: 288, height: 160 })
+		).toMatchObject({ x: 80 });
+		expect(
+			mergedBubblePreferredAnchor(visibleMembers, 8, { width: 160, height: 48 }, { x: 16, y: 84, width: 288, height: 160 }).y
+		).toBe(logicalFieldYToSpeechY((220 + 200) / 2, 8, { width: 160, height: 48 }, { x: 16, y: 84, width: 288, height: 160 }));
 		expect(
 			mergedBubblePreferredAnchor(
 				[...visibleMembers, offscreenMember],
+				8,
 				{ width: 160, height: 48 },
 				{ x: 16, y: 84, width: 288, height: 160 }
 			)
-		).not.toEqual({ x: 80, y: 140 });
+		).not.toMatchObject({ x: 80 });
+	});
+
+	it('uses the visible members logical Y average for a merged bubble', () => {
+		const bubble = { width: 160, height: 48 };
+		const speechArea = { x: 16, y: 84, width: 288, height: 160 };
+		const anchor = mergedBubblePreferredAnchor([{ x: 120, y: 0 }, { x: 200, y: 6 }], 8, bubble, speechArea);
+
+		expect(anchor.y).toBe(logicalFieldYToSpeechY(3, 8, bubble, speechArea));
+	});
+
+	it('keeps logical bubble ordering independent of camera Y', () => {
+		const speechArea = { x: 16, y: 84, width: 288, height: 160 };
+		const bubble = { width: 120, height: 44 };
+		const first = normalBubblePreferredAnchor(200, 2, 8, bubble, speechArea);
+		const second = normalBubblePreferredAnchor(200, 5, 8, bubble, speechArea);
+
+		expect(first.x).toBe(second.x);
+		expect(first.y).toBeLessThan(second.y);
 	});
 });

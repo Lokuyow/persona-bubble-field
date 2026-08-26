@@ -4,6 +4,7 @@
 		clampCamera,
 		clampToBounds,
 		fieldLocalToViewport,
+		getActualFieldTop,
 		getFieldAreaBounds,
 		getFieldWorldSize,
 		getResponsiveCellSize,
@@ -85,6 +86,19 @@
 		{ width: fieldAreaBounds.width, height: fieldAreaBounds.height },
 		fieldWorldSize
 	);
+	$: actualFieldTop = getActualFieldTop(fieldAreaBounds, camera);
+	$: speechAreaVisualBounds = {
+		x: 0,
+		y: 0,
+		width: viewportSize.width,
+		height: actualFieldTop
+	};
+	$: bubbleSafeBounds = {
+		x: SPEECH_AREA.sidePadding,
+		y: SPEECH_AREA.top,
+		width: Math.max(0, viewportSize.width - SPEECH_AREA.sidePadding * 2),
+		height: Math.max(0, actualFieldTop - SPEECH_AREA.top)
+	};
 
 	$: participantViews = PARTICIPANTS.map((participant) => {
 		const position = participant.isSelf ? playerPosition : participant.position;
@@ -100,8 +114,14 @@
 			const speaker = participantById.get(bubble.speakerId);
 			if (!speaker || !isInsideFieldArea(speaker.screen)) return null;
 			const size = bubbleSizes[bubble.id] ?? DEFAULT_BUBBLE_SIZES.normal;
-			const preferred = normalBubblePreferredAnchor(speaker.screen.x, size, speechAreaBounds);
-			return { ...bubble, anchor: clampToBounds(preferred, size, speechAreaBounds), size, speaker };
+			const preferred = normalBubblePreferredAnchor(
+				speaker.screen.x,
+				speaker.position.y,
+				field.rows,
+				size,
+				bubbleSafeBounds
+			);
+			return { ...bubble, anchor: clampToBounds(preferred, size, bubbleSafeBounds), size, speaker };
 		})
 		.filter((bubble): bubble is NonNullable<typeof bubble> => bubble !== null);
 
@@ -114,11 +134,12 @@
 			if (visibleMembers.length === 0) return null;
 			const size = bubbleSizes[bubble.id] ?? DEFAULT_BUBBLE_SIZES.merged;
 			const preferred = mergedBubblePreferredAnchor(
-				visibleMembers.map((member) => member.screen),
+				visibleMembers.map((member) => ({ x: member.screen.x, y: member.position.y })),
+				field.rows,
 				size,
-				speechAreaBounds
+				bubbleSafeBounds
 			);
-			return { ...bubble, anchor: clampToBounds(preferred, size, speechAreaBounds), size, members: visibleMembers };
+			return { ...bubble, anchor: clampToBounds(preferred, size, bubbleSafeBounds), size, members: visibleMembers };
 		})
 		.filter((bubble): bubble is NonNullable<typeof bubble> => bubble !== null);
 
@@ -161,7 +182,7 @@
 		return (
 			point.x >= fieldAreaBounds.x &&
 			point.x <= fieldAreaBounds.x + fieldAreaBounds.width &&
-			point.y >= fieldAreaBounds.y &&
+			point.y >= actualFieldTop &&
 			point.y <= fieldAreaBounds.y + fieldAreaBounds.height
 		);
 	}
@@ -222,7 +243,7 @@
 	<section class="field-viewport" bind:this={viewportElement} aria-label="Conversation field">
 		<div
 			class="speech-area"
-			style={`top: ${SPEECH_AREA.top}px; height: ${SPEECH_AREA.height}px; left: ${SPEECH_AREA.sidePadding}px; right: ${SPEECH_AREA.sidePadding}px;`}
+			style={`top: ${speechAreaVisualBounds.y}px; height: ${speechAreaVisualBounds.height}px; left: ${speechAreaVisualBounds.x}px; width: ${speechAreaVisualBounds.width}px;`}
 			aria-hidden="true"
 		>
 			<span>speech area / provisional</span>
@@ -466,8 +487,7 @@
 		left: 0;
 		z-index: 2;
 		overflow: hidden;
-		background: #e8e7da;
-		border-top: 1px solid rgba(95, 111, 96, 0.16);
+		background: transparent;
 	}
 
 	.speech-area {
@@ -481,7 +501,7 @@
 
 	.speech-area span {
 		position: absolute;
-		top: 7px;
+		top: 68px;
 		right: 10px;
 		color: rgba(89, 104, 88, 0.38);
 		font-size: 9px;

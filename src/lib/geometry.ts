@@ -59,6 +59,10 @@ export function getFieldAreaBounds(viewport: Size, speechArea: Pick<Bounds, 'y' 
 	};
 }
 
+export function getActualFieldTop(fieldArea: Bounds, camera: WorldPoint): number {
+	return fieldArea.y + Math.max(0, -camera.y);
+}
+
 export function clampCamera(target: WorldPoint, viewport: Size, fieldWorldSize: Size): WorldPoint {
 	const x = fieldWorldSize.width <= viewport.width
 		? (fieldWorldSize.width - viewport.width) / 2
@@ -112,19 +116,35 @@ export function moveOneCell(
 	return next;
 }
 
-export function speechAreaBubbleY(speechArea: Bounds, bubble: Size): number {
-	return speechArea.y + Math.max(0, (speechArea.height - bubble.height) / 2);
+export function logicalFieldYToSpeechY(
+	logicalY: number,
+	rowCount: number,
+	bubble: Size,
+	speechArea: Bounds
+): number {
+	const minY = speechArea.y;
+	const maxY = Math.max(minY, speechArea.y + speechArea.height - bubble.height);
+	const normalizedY = rowCount <= 1 ? 0.5 : Math.min(Math.max(logicalY / (rowCount - 1), 0), 1);
+
+	return minY + (maxY - minY) * normalizedY;
 }
 
-export function normalBubblePreferredAnchor(speakerX: number, bubble: Size, speechArea: Bounds): WorldPoint {
+export function normalBubblePreferredAnchor(
+	speakerX: number,
+	logicalY: number,
+	rowCount: number,
+	bubble: Size,
+	speechArea: Bounds
+): WorldPoint {
 	return {
 		x: speakerX - bubble.width / 2,
-		y: speechAreaBubbleY(speechArea, bubble)
+		y: logicalFieldYToSpeechY(logicalY, rowCount, bubble, speechArea)
 	};
 }
 
 export function mergedBubblePreferredAnchor(
 	members: readonly WorldPoint[],
+	rowCount: number,
 	bubble: Size,
 	speechArea: Bounds
 ): WorldPoint {
@@ -133,10 +153,11 @@ export function mergedBubblePreferredAnchor(
 	}
 
 	const centerX = members.reduce((sum, member) => sum + member.x, 0) / members.length;
+	const averageY = members.reduce((sum, member) => sum + member.y, 0) / members.length;
 
 	return {
 		x: centerX - bubble.width / 2,
-		y: speechAreaBubbleY(speechArea, bubble)
+		y: logicalFieldYToSpeechY(averageY, rowCount, bubble, speechArea)
 	};
 }
 
