@@ -86,32 +86,31 @@ export function moveOneCell(
 	return next;
 }
 
-export function normalBubblePreferredAnchor(
-	speaker: WorldPoint,
-	bubble: Size,
-	tailGap: number
-): WorldPoint {
+export function speechAreaBubbleY(speechArea: Bounds, bubble: Size): number {
+	return speechArea.y + Math.max(0, (speechArea.height - bubble.height) / 2);
+}
+
+export function normalBubblePreferredAnchor(speakerX: number, bubble: Size, speechArea: Bounds): WorldPoint {
 	return {
-		x: speaker.x - bubble.width / 2,
-		y: speaker.y - bubble.height - tailGap
+		x: speakerX - bubble.width / 2,
+		y: speechAreaBubbleY(speechArea, bubble)
 	};
 }
 
 export function mergedBubblePreferredAnchor(
 	members: readonly WorldPoint[],
 	bubble: Size,
-	tailGap: number
+	speechArea: Bounds
 ): WorldPoint {
 	if (members.length === 0) {
 		return { x: 0, y: 0 };
 	}
 
 	const centerX = members.reduce((sum, member) => sum + member.x, 0) / members.length;
-	const highestMemberY = Math.min(...members.map((member) => member.y));
 
 	return {
 		x: centerX - bubble.width / 2,
-		y: highestMemberY - bubble.height - tailGap
+		y: speechAreaBubbleY(speechArea, bubble)
 	};
 }
 

@@ -22,7 +22,6 @@
 	} as const;
 	const FIELD_WORLD_SIZE = getFieldWorldSize(FIELD);
 	const DEFAULT_VIEWPORT = { width: 1100, height: 680 };
-	const TAIL_GAP = 18;
 	const SPEECH_AREA = {
 		top: 84,
 		height: 176,
@@ -95,7 +94,7 @@
 			const speaker = participantById.get(bubble.speakerId);
 			if (!speaker || !isInsideViewport(speaker.screen)) return null;
 			const size = bubbleSizes[bubble.id] ?? DEFAULT_BUBBLE_SIZES.normal;
-			const preferred = normalBubblePreferredAnchor(speaker.screen, size, TAIL_GAP);
+			const preferred = normalBubblePreferredAnchor(speaker.screen.x, size, speechAreaBounds);
 			return { ...bubble, anchor: clampToBounds(preferred, size, speechAreaBounds), size, speaker };
 		})
 		.filter((bubble): bubble is NonNullable<typeof bubble> => bubble !== null);
@@ -111,7 +110,7 @@
 			const preferred = mergedBubblePreferredAnchor(
 				visibleMembers.map((member) => member.screen),
 				size,
-				TAIL_GAP
+				speechAreaBounds
 			);
 			return { ...bubble, anchor: clampToBounds(preferred, size, speechAreaBounds), size, members: visibleMembers };
 		})

@@ -8,6 +8,7 @@ import {
 	mergedBubblePreferredAnchor,
 	moveOneCell,
 	normalBubblePreferredAnchor,
+	speechAreaBubbleY,
 	worldToScreen
 } from './geometry';
 
@@ -51,14 +52,23 @@ describe('field geometry', () => {
 		expect(moveOneCell({ x: 1, y: 1 }, 'right', field)).toEqual({ x: 2, y: 1 });
 	});
 
-	it('places a normal bubble above its speaker', () => {
-		expect(normalBubblePreferredAnchor({ x: 200, y: 180 }, { width: 120, height: 44 }, 16)).toEqual({
-		 x: 140,
-		 y: 120
-	});
+	it('places a normal bubble at the speech area lane while following speaker X', () => {
+		const speechArea = { x: 16, y: 84, width: 288, height: 160 };
+
+		expect(normalBubblePreferredAnchor(200, { width: 120, height: 44 }, speechArea)).toEqual({ x: 140, y: 142 });
 	});
 
-	it('centers a merged bubble above its members', () => {
+	it('keeps normal bubble vertical placement in the speech area regardless of speaker Y', () => {
+		const speechArea = { x: 16, y: 84, width: 288, height: 160 };
+		const bubble = { width: 120, height: 44 };
+		const anchor = normalBubblePreferredAnchor(200, bubble, speechArea);
+
+		expect(anchor.y).toBe(speechAreaBubbleY(speechArea, bubble));
+		expect(anchor.y).toBeGreaterThanOrEqual(speechArea.y);
+		expect(anchor.y + bubble.height).toBeLessThanOrEqual(speechArea.y + speechArea.height);
+	});
+
+	it('centers a merged bubble horizontally from its members', () => {
 		expect(
 			mergedBubblePreferredAnchor(
 				[
@@ -67,9 +77,9 @@ describe('field geometry', () => {
 					{ x: 280, y: 240 }
 				],
 				{ width: 160, height: 48 },
-				16
+				{ x: 16, y: 84, width: 288, height: 160 }
 			)
-		).toEqual({ x: 120, y: 136 });
+		).toEqual({ x: 120, y: 140 });
 	});
 
 	it('keeps bubble anchors inside the viewport', () => {
@@ -94,9 +104,15 @@ describe('field geometry', () => {
 		const visibleMembers = [{ x: 120, y: 220 }, { x: 200, y: 200 }];
 		const offscreenMember = { x: 900, y: 30 };
 
-		expect(mergedBubblePreferredAnchor(visibleMembers, { width: 160, height: 48 }, 16)).toEqual({ x: 80, y: 136 });
 		expect(
-			mergedBubblePreferredAnchor([...visibleMembers, offscreenMember], { width: 160, height: 48 }, 16)
-		).not.toEqual({ x: 80, y: 136 });
+			mergedBubblePreferredAnchor(visibleMembers, { width: 160, height: 48 }, { x: 16, y: 84, width: 288, height: 160 })
+		).toEqual({ x: 80, y: 140 });
+		expect(
+			mergedBubblePreferredAnchor(
+				[...visibleMembers, offscreenMember],
+				{ width: 160, height: 48 },
+				{ x: 16, y: 84, width: 288, height: 160 }
+			)
+		).not.toEqual({ x: 80, y: 140 });
 	});
 });
