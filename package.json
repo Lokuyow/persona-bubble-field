@@ -10,11 +10,13 @@
 		"dev": "vite dev",
 		"dev:host": "vite dev --host",
 		"build": "vite build",
+		"build:pages": "node scripts/build-pages.mjs",
 		"preview": "vite preview",
 		"test": "vitest run",
 		"prepare": "svelte-kit sync || echo ''",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
+		"validate": "npm test && npm run check && npm run build:pages && git diff --check",
 		"deploy": "gh workflow run deploy-pages.yml --ref main"
 	},
 	"devDependencies": {
