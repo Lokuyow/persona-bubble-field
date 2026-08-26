@@ -26,11 +26,11 @@ npm run dev
 ```sh
 npm run check
 npm run build
+npm run validate
 ```
 
-For a GitHub Pages project site, set `BASE_PATH` to the repository path when
-building, for example `BASE_PATH=/persona-bubble-field npm run build`. The
-deployment workflow derives this value from the repository name automatically.
+For a GitHub Pages project site, use `npm run build:pages`; it builds with the
+repository base path `/persona-bubble-field` on Windows and Linux.
 
 ## Licensing
 

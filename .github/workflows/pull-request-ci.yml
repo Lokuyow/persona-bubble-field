@@ -20,6 +20,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Check PR diff whitespace
+        if: github.event_name == 'pull_request'
+        run: git diff --check "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -30,10 +36,5 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Check SvelteKit and TypeScript
-        run: npm run check
-
-      - name: Build static site
-        env:
-          BASE_PATH: /${{ github.event.repository.name }}
-        run: npm run build
+      - name: Validate
+        run: npm run validate
