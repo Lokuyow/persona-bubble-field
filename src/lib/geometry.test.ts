@@ -301,6 +301,23 @@ describe('field geometry', () => {
 		}
 	});
 
+	it('repairs the current 360px three-bubble fixture with edge-aligned reflow', () => {
+		const items = [
+			{ id: 'merged-note', preferred: { x: 126, y: 122 }, size: { width: 218, height: 58 } },
+			{ id: 'upper-normal', preferred: { x: 16, y: 144 }, size: { width: 184, height: 54 } },
+			{ id: 'lower-normal', preferred: { x: 16, y: 202 }, size: { width: 184, height: 54 } }
+		];
+		const placements = placeBubbles(items, { x: 16, y: 84, width: 328, height: 192 }, MOBILE_CELL_SIZE);
+
+		for (let first = 0; first < placements.length; first += 1) {
+			for (let second = first + 1; second < placements.length; second += 1) {
+				const firstItem = { ...items.find((item) => item.id === placements[first].id)!, anchor: placements[first].anchor };
+				const secondItem = { ...items.find((item) => item.id === placements[second].id)!, anchor: placements[second].anchor };
+				expect(overlapsWithGap(firstItem, secondItem)).toBe(false);
+			}
+		}
+	});
+
 	it('handles mixed normal and merged sizes in the 360px collision fixture', () => {
 		const items = [
 			{ id: 'haru-note', preferred: { x: 88, y: 150 }, size: { width: 184, height: 54 } },
@@ -335,6 +352,18 @@ describe('field geometry', () => {
 
 		expect(placeBubbles(items, bounds, 56)).toHaveLength(2);
 		expect(placeBubbles(items, bounds, 56)[0].anchor).toEqual({ x: 10, y: 10 });
+	});
+
+	it('uses candidate order to resolve equal-distance ties', () => {
+		const items = [
+			{ id: 'first', preferred: { x: 100, y: 100 }, size: { width: 50, height: 50 } },
+			{ id: 'second', preferred: { x: 100, y: 100 }, size: { width: 50, height: 50 } }
+		];
+
+		expect(placeBubbles(items, { x: 0, y: 0, width: 300, height: 300 }, 56)).toEqual([
+			{ id: 'first', anchor: { x: 100, y: 100 } },
+			{ id: 'second', anchor: { x: 100, y: 42 } }
+		]);
 	});
 
 	it('returns all bubbles in narrow bounds and never worsens preferred overlap', () => {
