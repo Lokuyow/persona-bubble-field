@@ -36,7 +36,7 @@ function canonicalizeRelay(relay: string): string | null {
 		return null;
 	}
 
-	if ((url.protocol !== 'ws:' && url.protocol !== 'wss:') || !url.hostname) {
+	if (relay.includes('#') || (url.protocol !== 'ws:' && url.protocol !== 'wss:') || !url.hostname) {
 		return null;
 	}
 

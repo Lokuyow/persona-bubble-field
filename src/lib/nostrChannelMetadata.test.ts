@@ -188,7 +188,8 @@ describe('NIP-28 channel metadata resolution', () => {
 				'wss://first.example',
 				'wss://first.example/',
 				'ws://second.example',
-				'wss://first.example/path'
+				'wss://first.example/path',
+				'wss://encoded.example/path%23?query=%23'
 			]
 		}));
 
@@ -197,7 +198,8 @@ describe('NIP-28 channel metadata resolution', () => {
 		expect(resolved?.relays).toEqual([
 			'wss://first.example/',
 			'ws://second.example/',
-			'wss://first.example/path'
+			'wss://first.example/path',
+			'wss://encoded.example/path%23?query=%23'
 		]);
 		expect(resolved?.channel.relayHint).toBe('wss://first.example/');
 	});
@@ -208,6 +210,8 @@ describe('NIP-28 channel metadata resolution', () => {
 			'{"relays":["https://not-websocket.example/"]}',
 			'{"relays":["not a url"]}',
 			'{"relays":[123]}',
+			'{"relays":["wss://fragment.example/#fragment"]}',
+			'{"relays":["wss://fragment.example/#"]}',
 			'{"relays":["wss://valid.example/", "http://invalid.example/"]}'
 		];
 
