@@ -66,6 +66,20 @@ function signedPositionWithCreatedAt(createdAt: number): VerifiedEvent {
 	} as PositionEventTemplate, TEST_SECRET_KEY);
 }
 
+function signedMessageWithCreatedAt(createdAt: number): VerifiedEvent {
+	return finalizeWorldEvent({
+		kind: CHANNEL_MESSAGE_KIND,
+		created_at: createdAt,
+		tags: [
+			['e', channel.channelId, channel.relayHint, 'root'],
+			['L', PROTOTYPE_NAMESPACE],
+			['l', 'chat', PROTOTYPE_NAMESPACE],
+			['w', '7:3']
+		],
+		content: 'hello world'
+	} as WorldMessageTemplate, TEST_SECRET_KEY);
+}
+
 function resign(template: EventTemplate): VerifiedEvent {
 	return finalizeWorldEvent(template as WorldMessageTemplate | PositionEventTemplate, TEST_SECRET_KEY);
 }
@@ -179,6 +193,16 @@ describe('Nostr protocol foundation', () => {
 
 			expect(verifyEvent(event)).toBe(true);
 			expect(parsePositionEvent(event, CHANNEL_ID)).toBeNull();
+		}
+	);
+
+	it.each([-1, 1_700_000_000.5, Number.MAX_SAFE_INTEGER + 1])(
+		'rejects correctly signed message events with invalid created_at %s',
+		(createdAt) => {
+			const event = signedMessageWithCreatedAt(createdAt);
+
+			expect(verifyEvent(event)).toBe(true);
+			expect(parseWorldMessage(event, CHANNEL_ID)).toBeNull();
 		}
 	);
 
