@@ -252,6 +252,15 @@ describe('Nostr protocol foundation', () => {
 		});
 		malformedPosition.tags[3][1] = '07:3';
 
+		const duplicatePosition = buildWorldMessageTemplate({
+			channel,
+			content: 'hello world',
+			speechType: 'normal',
+			position: { x: 7, y: 3 },
+			createdAt: 1_700_000_000
+		});
+		duplicatePosition.tags.push(['w', '7:3']);
+
 		const missingChatLabel = buildWorldMessageTemplate({
 			channel,
 			content: 'hello world',
@@ -261,12 +270,34 @@ describe('Nostr protocol foundation', () => {
 		});
 		missingChatLabel.tags.splice(2, 1);
 
-		for (const template of [conflictingRoot, conflictingSpeech, malformedPosition, missingChatLabel]) {
+		const missingNamespaceLabel = buildWorldMessageTemplate({
+			channel,
+			content: 'hello world',
+			speechType: 'normal',
+			position: { x: 7, y: 3 },
+			createdAt: 1_700_000_000
+		});
+		missingNamespaceLabel.tags.splice(1, 1);
+
+		for (const template of [
+			conflictingRoot,
+			conflictingSpeech,
+			malformedPosition,
+			duplicatePosition,
+			missingChatLabel,
+			missingNamespaceLabel
+		]) {
 			expect(parseWorldMessage(resign(template), CHANNEL_ID)).toBeNull();
 		}
 	});
 
 	it('rejects ambiguous position semantics while allowing unrelated extra tags', () => {
+		const targetOnly = buildPositionEventTemplate({
+			channel,
+			position: { x: 8, y: 3 },
+			slot: 0,
+			createdAt: 1_700_000_000
+		});
 		const accepted = buildPositionEventTemplate({
 			channel,
 			position: { x: 8, y: 3 },
@@ -283,6 +314,14 @@ describe('Nostr protocol foundation', () => {
 		});
 		conflictingSlot.tags.push(['d', POSITION_SLOT_IDENTIFIERS[1]]);
 
+		const conflictingChannel = buildPositionEventTemplate({
+			channel,
+			position: { x: 8, y: 3 },
+			slot: 0,
+			createdAt: 1_700_000_000
+		});
+		conflictingChannel.tags.push(['e', OTHER_CHANNEL_ID, 'wss://other-relay.example.com']);
+
 		const malformedContent = buildPositionEventTemplate({
 			channel,
 			position: { x: 8, y: 3 },
@@ -291,8 +330,10 @@ describe('Nostr protocol foundation', () => {
 		});
 		malformedContent.content = '08:3';
 
+		expect(parsePositionEvent(resign(targetOnly), CHANNEL_ID)).not.toBeNull();
 		expect(parsePositionEvent(resign(accepted), CHANNEL_ID)).not.toBeNull();
 		expect(parsePositionEvent(resign(conflictingSlot), CHANNEL_ID)).toBeNull();
+		expect(parsePositionEvent(resign(conflictingChannel), CHANNEL_ID)).toBeNull();
 		expect(parsePositionEvent(resign(malformedContent), CHANNEL_ID)).toBeNull();
 	});
 

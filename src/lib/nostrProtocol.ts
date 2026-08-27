@@ -203,13 +203,9 @@ function parseSpeechType(event: Event): SpeechType | null {
 
 function parseUnambiguousWorldPosition(event: Event): GridPosition | null {
 	const values = event.tags.filter((tag) => tag[0] === 'w').map((tag) => tag[1]);
-	if (values.length === 0) return null;
+	if (values.length !== 1) return null;
 
-	const parsed = values.map(parseCanonicalGridPosition);
-	if (parsed.some((position) => position === null)) return null;
-	const canonicalValues = new Set(values);
-	if (canonicalValues.size !== 1) return null;
-	return parsed[0]!;
+	return parseCanonicalGridPosition(values[0]);
 }
 
 function matchesChannelRoot(event: Event, channelId: string): boolean {
@@ -259,7 +255,8 @@ function parsePositionSlot(event: Event): PositionSlot | null {
 }
 
 function referencesChannel(event: Event, channelId: string): boolean {
-	return event.tags.some((tag) => tag[0] === 'e' && tag[1] === channelId);
+	const referencedEventIds = event.tags.filter((tag) => tag[0] === 'e').map((tag) => tag[1]);
+	return referencedEventIds.length > 0 && referencedEventIds.every((eventId) => eventId === channelId);
 }
 
 /**
