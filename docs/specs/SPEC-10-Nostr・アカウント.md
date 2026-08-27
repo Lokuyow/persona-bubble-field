@@ -21,6 +21,29 @@ MVPではプロジェクト用のNIP-28 channelを1つ用意する。
 
 メッセージにはNIP-28 kind 42を使用する。
 
+### NIP-28 channel metadata
+
+プロトタイプでは、NIP-28 channel kind 40として次のイベントIDを使用する。
+
+`3212de4b75f0c41efa17e41affcfc3a811171ba930e5b657687b5f5148627d5b`
+
+kind 40 / kind 41 metadataの発見には、次のbootstrap Relayを使用する。
+
+- `wss://nos.lol/`
+- `wss://x.kojira.io/`
+- `wss://relay.nostr.wirednet.jp/`
+- `wss://yabu.me/`
+
+これらはmetadata discovery用のseedであり、authoritativeなworld read/write Relay一覧ではない。worldのread/write Relay setは、検証済みのkind 40 / kind 41 metadataにある `relays` をauthorityとして解決する。
+
+kind 41はkind 40のcreator pubkeyによるものだけを採用候補とし、target channelを参照する有効な候補が存在する場合は、`created_at` が最大のものを現在metadataとする。同値の場合はevent IDがlexicographically lowestのものを選ぶ。候補が存在しない場合はkind 40のinitial metadataを使用する。
+
+選択した現在metadataのJSONまたは `relays` が不正な場合、kind 40や古いkind 41へsilent fallbackしない。`relays` はcanonicalize・dedupeし、元の出現順を維持する。
+
+Relay hintはchannel identityではない。preferred hintは `wss://nos.lol/` とするが、authoritative metadataの `relays` に含まれる場合だけ使用し、含まれない場合はcanonical authoritative Relay arrayの先頭を使用する。
+
+session中のkind 41 live追従はMVP要件とせず、session start / reload時にmetadataをresolutionする。
+
 専用クライアントではkind 42をTwitter風タイムラインとして時系列に蓄積表示するのではなく、現在の会話を一時的なフキダシとして表示する。
 
 Nostr Relay上にkind 42イベントが残ることと、専用クライアント上でフキダシが一定時間後に消えることは別の概念として扱う。
