@@ -90,6 +90,9 @@ export function applyPresenceEvidence(
 	evidence: PresenceEvidence
 ): ReducedPresenceParticipant {
 	if (!current) return reducedParticipant(evidence);
+	if (current.pubkey !== evidence.pubkey) {
+		throw new TypeError('Presence evidence pubkey must match the current participant pubkey.');
+	}
 
 	const currentEvidence: PresenceEvidence = {
 		eventId: current.positionEvidence.eventId,

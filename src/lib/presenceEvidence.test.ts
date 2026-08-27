@@ -155,6 +155,19 @@ describe('presence evidence reducer', () => {
 		)).toEqual([once]);
 	});
 
+	it('fails closed when evidence belongs to a different pubkey without mutating current state', () => {
+		const alice = applyPresenceEvidence(undefined, evidence('alice-event', 'a'.repeat(64), 100, 'message'));
+		const aliceBefore = {
+			...alice,
+			position: { ...alice.position },
+			positionEvidence: { ...alice.positionEvidence }
+		};
+		const bobEvidence = evidence('bob-event', 'b'.repeat(64), 101, 'position-slot-1', { x: 2, y: 2 });
+
+		expect(() => applyPresenceEvidence(alice, bobEvidence)).toThrow(TypeError);
+		expect(alice).toEqual(aliceBefore);
+	});
+
 	it('is independent of mixed message and position arrival order', () => {
 		const messages = [message('message-old', 'a'.repeat(64), 99), message('message-new', 'a'.repeat(64), 101)];
 		const positions = [position('slot-0', 'a'.repeat(64), 100, 0), position('slot-1', 'b'.repeat(64), 100, 1)];
