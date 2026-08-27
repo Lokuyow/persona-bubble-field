@@ -1,0 +1,13 @@
+diff --git a/node_modules/rx-nostr/dist/rx-nostr.js b/node_modules/rx-nostr/dist/rx-nostr.js
+index c72c5bf..a82ea81 100644
+--- a/node_modules/rx-nostr/dist/rx-nostr.js
++++ b/node_modules/rx-nostr/dist/rx-nostr.js
+@@ -3205,7 +3205,7 @@ class PublishProxy {
+     if (this.disposed) {
+       return;
+     }
+-    if (!this.pubs.has(eventId)) {
++    if (this.pubs.has(eventId)) {
+       this.pubs.delete(eventId);
+       this.count$.decrement();
+     }
