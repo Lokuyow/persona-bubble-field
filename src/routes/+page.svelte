@@ -8,8 +8,7 @@
 		pruneExpired,
 		receiveMessage,
 		type ConversationMessage,
-		type ConversationState,
-		type SpeechType
+		type ConversationState
 	} from '$lib/conversation';
 	import {
 		clampToBounds,
@@ -19,23 +18,13 @@
 		mergedBubblePreferredAnchor,
 		normalBubblePreferredAnchor,
 		placeBubbles,
-		type Direction,
-		type GridPosition,
 		type Size,
 		type WorldPoint
 	} from '$lib/geometry';
 	import { projectPresence } from '$lib/presenceProjection';
-	import {
-		PRESENCE_TIMEOUT_MS,
-		createPresenceState,
-		debugSetParticipantPosition,
-		debugTimeoutParticipant,
-		getParticipant,
-		moveParticipant,
-		prunePresence,
-		recordPresenceActivity,
-		type PresenceState
-	} from '$lib/presence';
+	import type { PresenceState } from '$lib/presence';
+	import type { ParsedWorldMessage } from '$lib/nostrProtocol';
+	import { createWorldReadSession, type WorldReadConnectionStatus } from '$lib/worldReadSession';
 
 	const FIELD = {
 		columns: 16,
@@ -52,50 +41,28 @@
 		merged: { width: 218, height: 58 }
 	} satisfies Record<'normal' | 'merged', Size>;
 
+	type AvatarColor = 'coral' | 'lavender' | 'mint' | 'yellow' | 'sky' | 'peach' | 'rose' | 'blue';
 	type Participant = {
 		id: string;
 		name: string;
 		initials: string;
-		color: string;
-		initialPosition: GridPosition;
-		isSelf?: boolean;
+		color: AvatarColor;
 	};
+	const AVATAR_COLORS: readonly AvatarColor[] = ['coral', 'lavender', 'mint', 'yellow', 'sky', 'peach', 'rose', 'blue'];
 
-	const PARTICIPANTS: Participant[] = [
-		{ id: 'you', name: 'you', initials: 'YU', color: 'coral', initialPosition: { x: 7, y: 4 }, isSelf: true },
-		{ id: 'mio', name: 'mio', initials: 'MI', color: 'lavender', initialPosition: { x: 8, y: 2 } },
-		{ id: 'sena', name: 'sena', initials: 'SE', color: 'mint', initialPosition: { x: 9, y: 2 } },
-		{ id: 'riku', name: 'riku', initials: 'RI', color: 'yellow', initialPosition: { x: 10, y: 2 } },
-		{ id: 'haru', name: 'haru', initials: 'HA', color: 'sky', initialPosition: { x: 4, y: 3 } },
-		{ id: 'nagi', name: 'nagi', initials: 'NA', color: 'peach', initialPosition: { x: 5, y: 6 } },
-		{ id: 'yui', name: 'yui', initials: 'YI', color: 'rose', initialPosition: { x: 12, y: 5 } },
-		{ id: 'toma', name: 'toma', initials: 'TO', color: 'blue', initialPosition: { x: 3, y: 6 } }
-	];
-
-	const initialNow = Date.now();
-	let presenceState: PresenceState = createPresenceState(
-		FIELD,
-		initialNow,
-		PARTICIPANTS.map(({ id, initialPosition }) => ({ id, position: initialPosition }))
-	);
+	let presenceState: PresenceState = { field: FIELD, participants: [] };
 	let viewportElement: HTMLElement;
 	let viewportSize: Size = DEFAULT_VIEWPORT;
-	let lastMoveMessage = '矢印キーまたは下のパッドで移動';
 	let bubbleSizes: Record<string, Size> = {};
 	let conversationState: ConversationState = createConversationState();
 	let lastPlacedAnchorById: Record<string, WorldPoint> = {};
-	let selectedSpeakerId = PARTICIPANTS[0].id;
-	let selectedSpeechType: SpeechType = 'normal';
-	let composerText = '';
-	let conversationStatus = 'local conversation is empty';
-	let localMessageSequence = 0;
 	let lastVisibilityKey: string | null = null;
-	let presenceStatusMessage = 'select a participant to inspect local presence';
+	let colorByPubkey: Record<string, AvatarColor> = {};
+	let connectionStatus: WorldReadConnectionStatus = { kind: 'bootstrapping' };
 
 	$: cellSize = getResponsiveCellSize(viewportSize.width);
 	$: field = { ...FIELD, cellSize };
 	$: fieldWorldSize = getFieldWorldSize(field);
-	$: playerPosition = getParticipant(presenceState, 'you')?.position ?? PARTICIPANTS[0].initialPosition;
 	$: speechAreaBounds = {
 		x: SPEECH_AREA.sidePadding,
 		y: SPEECH_AREA.top,
@@ -119,7 +86,6 @@
 		height: Math.max(0, actualFieldTop - SPEECH_AREA.top)
 	};
 
-	$: selectedPresence = getParticipant(presenceState, selectedSpeakerId);
 	$: participantViews = presenceProjection.participants;
 
 	$: participantById = new Map(participantViews.map((participant) => [participant.id, participant]));
@@ -209,11 +175,38 @@
 	}));
 	$: positionedVisibleBubbles = [...positionedNormalBubbles, ...positionedMergedBubbles];
 
-		onMount(() => {
+	onMount(() => {
+		let mounted = true;
+		let startRequested = false;
+		let session: ReturnType<typeof createWorldReadSession> | null = null;
+
+		const begin = async () => {
+			if (startRequested || !hasUsableViewport()) return;
+			startRequested = true;
+			session = createWorldReadSession({
+				field: FIELD,
+				onPresenceChanged: setPresence,
+				onLiveMessage: receiveLiveMessage,
+				onStatusChanged: (status) => { connectionStatus = status; }
+			});
+
+			try {
+				const bootstrap = await session.start();
+				if (!mounted) return;
+				setPresence(bootstrap.presence);
+				restoreBootstrapConversation(bootstrap.messages, bootstrap.presence, Date.now());
+				session.completeBootstrap();
+			} catch {
+				// The session reports a concise fatal status to the UI.
+			}
+		};
+
 		const updateViewport = () => {
 			if (!viewportElement) return;
 			const rect = viewportElement.getBoundingClientRect();
+			if (rect.width <= 0 || rect.height <= 0) return;
 			viewportSize = { width: rect.width, height: rect.height };
+			void begin();
 		};
 
 		const observer = new ResizeObserver(updateViewport);
@@ -221,13 +214,18 @@
 		updateViewport();
 		const expiryTimer = window.setInterval(() => {
 			const now = Date.now();
-			presenceState = prunePresence(presenceState, now);
+			const nextPresence = session?.refresh(now);
+			if (nextPresence) {
+				conversationState = applyVisibility(conversationState, getPresenceProjection(nextPresence).visibleParticipantIds);
+			}
 			conversationState = pruneExpired(conversationState, now);
 		}, 250);
 
 		return () => {
+			mounted = false;
 			observer.disconnect();
 			window.clearInterval(expiryTimer);
+			session?.dispose();
 		};
 	});
 
@@ -276,12 +274,99 @@
 		return participantTone(members[0] ?? { color: 'lavender' });
 	}
 
+	function participantModels(state: PresenceState): readonly Participant[] {
+		return state.participants
+			.filter((participant) => participant.status === 'active')
+			.map((participant) => ({
+				id: participant.id,
+				name: `${participant.id.slice(0, 8)}…${participant.id.slice(-6)}`,
+				initials: '?',
+				color: colorByPubkey[participant.id] ?? AVATAR_COLORS[0]
+			}));
+	}
+
 	function getPresenceProjection(state: PresenceState) {
-		return projectPresence(state, PARTICIPANTS, {
+		return projectPresence(state, participantModels(state), {
 			cellSize,
 			fieldAreaBounds,
 			fieldWorldSize
 		});
+	}
+
+	function hasUsableViewport(): boolean {
+		return viewportSize.width > 0 && viewportSize.height > 0;
+	}
+
+	function setPresence(nextPresence: PresenceState): void {
+		const activeIds = nextPresence.participants
+			.filter((participant) => participant.status === 'active')
+			.map((participant) => participant.id)
+			.sort();
+		const nextColors: Record<string, AvatarColor> = {};
+		const used = new Set<AvatarColor>();
+		for (const id of activeIds) {
+			const retained = colorByPubkey[id];
+			if (retained) {
+				nextColors[id] = retained;
+				used.add(retained);
+			}
+		}
+		for (const id of activeIds) {
+			if (nextColors[id]) continue;
+			const color = AVATAR_COLORS.find((candidate) => !used.has(candidate)) ?? AVATAR_COLORS[activeIds.indexOf(id) % AVATAR_COLORS.length];
+			nextColors[id] = color;
+			used.add(color);
+		}
+		colorByPubkey = nextColors;
+		presenceState = nextPresence;
+	}
+
+	function toConversationMessage(message: ParsedWorldMessage): ConversationMessage {
+		return {
+			id: message.id,
+			pubkey: message.pubkey,
+			content: message.content,
+			speechType: message.speechType,
+			createdAt: message.createdAt * 1000
+		};
+	}
+
+	function naturalExpiresAt(message: ParsedWorldMessage): number {
+		return message.createdAt * 1000 + getPrototypeDisplayDuration(message.content);
+	}
+
+	function restoreBootstrapConversation(
+		messages: readonly ParsedWorldMessage[],
+		bootstrapPresence: PresenceState,
+		entryNowMs: number
+	): void {
+		const entryVisible = getPresenceProjection(bootstrapPresence).visibleParticipantIds;
+		for (const message of [...messages].sort((first, second) =>
+			first.createdAt - second.createdAt || first.id.localeCompare(second.id)
+		)) {
+			if (naturalExpiresAt(message) <= entryNowMs) continue;
+			const conversationMessage = toConversationMessage(message);
+			conversationState = receiveMessage(conversationState, conversationMessage, {
+				isSpeakerVisible: entryVisible.has(message.pubkey),
+				duration: getPrototypeDisplayDuration(message.content),
+				now: conversationMessage.createdAt
+			});
+		}
+		conversationState = applyVisibility(conversationState, entryVisible);
+	}
+
+	function receiveLiveMessage(message: ParsedWorldMessage, nextPresence: PresenceState): void {
+		setPresence(nextPresence);
+		const nowMs = Date.now();
+		if (naturalExpiresAt(message) <= nowMs) return;
+		const conversationMessage = toConversationMessage(message);
+		const visibleParticipantIds = getPresenceProjection(nextPresence).visibleParticipantIds;
+		conversationState = receiveMessage(conversationState, conversationMessage, {
+			isSpeakerVisible: visibleParticipantIds.has(message.pubkey),
+			duration: getPrototypeDisplayDuration(message.content),
+			now: conversationMessage.createdAt
+		});
+		conversationState = applyVisibility(conversationState, visibleParticipantIds);
 	}
 
 	function rememberPlacedMergedAnchors(
@@ -314,120 +399,19 @@
 		if (changed) lastPlacedAnchorById = next;
 	}
 
-	function sendMessage(event: SubmitEvent) {
-		event.preventDefault();
-		if (!composerText.trim()) return;
-
-		const receivedAt = Date.now();
-		const nextPresenceState = recordPresenceActivity(
-			presenceState,
-			selectedSpeakerId,
-			'message',
-			receivedAt
-		);
-		presenceState = nextPresenceState;
-		const message: ConversationMessage = {
-			id: `local:${receivedAt}:${localMessageSequence++}`,
-			pubkey: selectedSpeakerId,
-			content: composerText,
-			speechType: selectedSpeechType,
-			createdAt: receivedAt,
-			receivedAt
-		};
-		const isSpeakerVisible = getPresenceProjection(nextPresenceState).visibleParticipantIds.has(selectedSpeakerId);
-		conversationState = receiveMessage(conversationState, message, {
-			isSpeakerVisible,
-			duration: getPrototypeDisplayDuration(message.content),
-			now: receivedAt
-		});
-		conversationStatus = isSpeakerVisible
-			? `${selectedSpeakerId} spoke · ${selectedSpeechType}`
-			: `${selectedSpeakerId} is offscreen · message not shown`;
-		composerText = '';
-	}
-
-	function move(direction: Direction) {
-		const result = moveParticipant(presenceState, 'you', direction, Date.now());
-		if (!result.moved) {
-			lastMoveMessage = 'そこへは移動できません';
-			return;
-		}
-
-		presenceState = result.state;
-		const next = getParticipant(result.state, 'you')!.position;
-		lastMoveMessage = `field ${next.x + 1}, ${next.y + 1}`;
-	}
-
-	function moveSelected(direction: Direction) {
-		const now = Date.now();
-		const result = moveParticipant(presenceState, selectedSpeakerId, direction, now);
-		if (!result.moved) {
-			presenceStatusMessage = `${selectedSpeakerId} cannot move there`;
-			return;
-		}
-
-		presenceState = result.state;
-		const participant = getParticipant(result.state, selectedSpeakerId)!;
-		presenceStatusMessage = `${selectedSpeakerId} moved to ${participant.position.x + 1}, ${participant.position.y + 1}`;
-	}
-
-	function activitySelected() {
-		const now = Date.now();
-		const wasActive = getParticipant(presenceState, selectedSpeakerId)?.status === 'active';
-		presenceState = recordPresenceActivity(presenceState, selectedSpeakerId, 'trace-inspection', now);
-		presenceStatusMessage = wasActive
-			? `${selectedSpeakerId} activity recorded`
-			: `${selectedSpeakerId} reactivated at its retained position`;
-	}
-
-	function timeoutSelected() {
-		presenceState = debugTimeoutParticipant(presenceState, selectedSpeakerId);
-		presenceStatusMessage = `${selectedSpeakerId} timed out for local debugging`;
-	}
-
-	function overlapSelected() {
-		const self = getParticipant(presenceState, 'you');
-		if (!self || selectedSpeakerId === 'you') return;
-		presenceState = debugSetParticipantPosition(presenceState, selectedSpeakerId, self.position);
-		presenceStatusMessage = `${selectedSpeakerId} overlaps you at ${self.position.x + 1}, ${self.position.y + 1}`;
-	}
-
-	function handleKeydown(event: KeyboardEvent) {
-		if (isEditableTarget(event.target)) return;
-
-		const directionByKey: Partial<Record<string, Direction>> = {
-			ArrowUp: 'up',
-			ArrowDown: 'down',
-			ArrowLeft: 'left',
-			ArrowRight: 'right'
-		};
-		const direction = directionByKey[event.key];
-		if (!direction) return;
-
-		event.preventDefault();
-		move(direction);
-	}
-
-	function isEditableTarget(target: EventTarget | null): boolean {
-		if (!(target instanceof HTMLElement)) return false;
-		return target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
-	}
-
 	function tailStart(anchor: WorldPoint, size: Size): WorldPoint {
 		return { x: anchor.x + size.width / 2, y: anchor.y + size.height };
 	}
 </script>
 
 <svelte:head>
-	<title>Persona Bubble Field — local prototype</title>
+	<title>Persona Bubble Field — read-only world</title>
 	<link rel="icon" href={`${base}/favicon.svg`} />
 	<meta
 		name="description"
-		content="A local field prototype for testing character movement, camera follow, bubbles, and SVG tails."
+		content="A read-only view of the current prototype world from Nostr relays."
 	/>
 </svelte:head>
-
-<svelte:window onkeydown={handleKeydown} />
 
 <main class="app-shell">
 	<div class="topbar">
@@ -435,10 +419,10 @@
 			<span class="brand-mark" aria-hidden="true">✳</span>
 			<div>
 				<p class="brand-name">persona field</p>
-				<p class="brand-subtitle">local conversation prototype</p>
+				<p class="brand-subtitle">read-only Relay world</p>
 			</div>
 		</div>
-		<div class="prototype-badge"><span></span> prototype / local only</div>
+		<div class="prototype-badge"><span></span> spectator / read only</div>
 	</div>
 
 	<section class="field-viewport" bind:this={viewportElement} aria-label="Conversation field">
@@ -461,18 +445,16 @@
 				<div class="field-grid" aria-hidden="true"></div>
 				<div class="field-sun" aria-hidden="true"></div>
 				<div class="field-label field-label-top">the little clearing</div>
-				<div class="field-label field-label-bottom">16 × 8 / local fixture</div>
+				<div class="field-label field-label-bottom">16 × 8 / Relay world</div>
 
 				{#each participantViews as participant (participant.id)}
 					<div
-						class:player={participant.isSelf}
 						class="participant"
 						data-position={`${participant.position.x},${participant.position.y}`}
 						style={`left: ${participant.world.x}px; top: ${participant.world.y}px;`}
-						aria-label={`${participant.name}${participant.isSelf ? ' (you)' : ''}`}
+						aria-label={participant.name}
 					>
 						<div class={`avatar avatar-${participant.color}`}>
-							{#if participant.isSelf}<span class="avatar-ring" aria-hidden="true"></span>{/if}
 							<span>{participant.initials}</span>
 						</div>
 						<span class="participant-name">{participant.name}</span>
@@ -510,98 +492,23 @@
 		</div>
 
 		<div class="viewport-vignette" aria-hidden="true"></div>
-		<div class="camera-chip"><span class="camera-dot"></span> camera follows you</div>
+		<div class="camera-chip"><span class="camera-dot"></span> spectator camera · origin</div>
 	</section>
 
 	<div class="status-panel">
 		<div>
-			<p class="panel-kicker">movement prototype</p>
-			<p class="status-message" aria-live="polite">{lastMoveMessage}</p>
-		</div>
-		<div class="position-readout">
-			<span>your cell</span>
-			<strong>{playerPosition.x + 1}<i>/</i>{playerPosition.y + 1}</strong>
-		</div>
-	</div>
-
-	<form class="conversation-composer" aria-label="Local conversation controls" onsubmit={sendMessage}>
-		<div class="composer-heading">
-			<span class="control-kicker">local conversation</span>
-			<span class="conversation-status" aria-live="polite">{conversationStatus}</span>
-		</div>
-		<div class="composer-fields">
-			<label>
-				<span>speaker</span>
-				<select aria-label="Speaker" bind:value={selectedSpeakerId}>
-					{#each PARTICIPANTS as participant}
-						<option value={participant.id}>{participant.name}</option>
-					{/each}
-				</select>
-			</label>
-			<label>
-				<span>type</span>
-				<select aria-label="Speech type" bind:value={selectedSpeechType}>
-					<option value="normal">normal</option>
-					<option value="shout">shout</option>
-					<option value="monologue">monologue</option>
-				</select>
-			</label>
-			<label class="composer-text-field">
-				<span>message</span>
-				<input aria-label="Message text" bind:value={composerText} placeholder="say something locally" />
-			</label>
-			<button type="submit">send</button>
-		</div>
-	</form>
-
-	<section class="presence-panel" aria-label="Local presence controls">
-		<div class="presence-heading">
-			<span class="control-kicker">local presence</span>
-			<span class:inactive={selectedPresence?.status === 'inactive'} class="presence-state">
-				{selectedPresence?.status ?? 'unknown'}
-			</span>
-		</div>
-		<label class="presence-select">
-			<span>participant</span>
-			<select aria-label="Presence participant" bind:value={selectedSpeakerId}>
-				{#each PARTICIPANTS as participant}
-					<option value={participant.id}>{participant.name}</option>
-				{/each}
-			</select>
-		</label>
-		<div class="presence-details" aria-live="polite">
-			<span>last position <strong>{selectedPresence ? `${selectedPresence.position.x + 1}, ${selectedPresence.position.y + 1}` : '—'}</strong></span>
-			<span>last activity <strong>{selectedPresence ? new Date(selectedPresence.lastActivityAt).toLocaleTimeString() : '—'}</strong></span>
-		</div>
-		<div class="presence-movement" aria-label="Move selected participant">
-			<button type="button" aria-label="Move selected participant up" onclick={() => moveSelected('up')}>↑</button>
-			<button type="button" aria-label="Move selected participant left" onclick={() => moveSelected('left')}>←</button>
-			<button type="button" aria-label="Move selected participant down" onclick={() => moveSelected('down')}>↓</button>
-			<button type="button" aria-label="Move selected participant right" onclick={() => moveSelected('right')}>→</button>
-		</div>
-		<div class="presence-actions">
-			<button type="button" onclick={activitySelected}>activity</button>
-			<button type="button" onclick={timeoutSelected}>debug timeout</button>
-		</div>
-		<button class="presence-overlap" type="button" onclick={overlapSelected}>debug overlap selected → you</button>
-		<p class="presence-status" aria-live="polite">{presenceStatusMessage}</p>
-		<p class="presence-timeout">timeout at {PRESENCE_TIMEOUT_MS / 60_000} minutes · no heartbeat</p>
-	</section>
-
-	<div class="controls-panel" aria-label="Movement controls">
-		<div class="control-copy">
-			<span class="control-kicker">move one cell</span>
-			<span class="control-hint">arrow keys / tap pad</span>
-		</div>
-		<div class="d-pad">
-			<button type="button" class="d-pad-button up" aria-label="Move up" onclick={() => move('up')}>↑</button>
-			<button type="button" class="d-pad-button left" aria-label="Move left" onclick={() => move('left')}>←</button>
-			<button type="button" class="d-pad-button down" aria-label="Move down" onclick={() => move('down')}>↓</button>
-			<button type="button" class="d-pad-button right" aria-label="Move right" onclick={() => move('right')}>→</button>
+			<p class="panel-kicker">prototype world · {presenceState.participants.filter((participant) => participant.status === 'active').length} active</p>
+			<p class="status-message" aria-live="polite">
+				{#if connectionStatus.kind === 'bootstrapping'}connecting to prototype world…
+				{:else if connectionStatus.kind === 'available'}world live
+				{:else if connectionStatus.kind === 'degraded'}world live · limited relay availability
+				{:else}world unavailable · {connectionStatus.message}
+				{/if}
+			</p>
 		</div>
 	</div>
 
-	<p class="footer-note">static field · DOM participants · SVG tails · no relay connection</p>
+	<p class="footer-note">read-only Relay state · DOM participants · SVG tails · no publishing</p>
 </main>
 
 <style>
@@ -638,9 +545,6 @@
 
 	.topbar,
 	.status-panel,
-		.conversation-composer,
-		.presence-panel,
-		.controls-panel,
 	.footer-note,
 	.camera-chip {
 		position: absolute;
@@ -679,9 +583,6 @@
 	.brand-subtitle,
 	.panel-kicker,
 	.status-message,
-	.control-kicker,
-	.control-hint,
-	.position-readout span,
 	.footer-note,
 	.field-label {
 		margin: 0;
@@ -850,14 +751,6 @@
 		transform: rotate(-4deg);
 	}
 
-	.avatar-ring {
-		position: absolute;
-		inset: -7px;
-		border: 1.5px dashed rgba(224, 119, 87, 0.86);
-		border-radius: 50%;
-		animation: breathe 2.8s ease-in-out infinite;
-	}
-
 	.avatar-coral { background: #f0a488; }
 	.avatar-lavender { background: #b6afe1; }
 	.avatar-mint { background: #99c6ac; }
@@ -875,20 +768,6 @@
 		font-size: 10px;
 		font-weight: 700;
 		letter-spacing: 0.03em;
-	}
-
-	.player {
-		z-index: 5;
-	}
-
-	.player .avatar {
-		border-color: #fffaf1;
-		box-shadow: 0 7px 14px rgba(173, 85, 63, 0.25);
-	}
-
-	.player .participant-name {
-		background: #fff9ed;
-		color: #c86751;
 	}
 
 	.tail-layer,
@@ -1008,8 +887,7 @@
 		gap: 22px;
 	}
 
-	.panel-kicker,
-	.control-kicker {
+	.panel-kicker {
 		color: #76827b;
 		font-size: 10px;
 		font-weight: 800;
@@ -1024,330 +902,6 @@
 		font-weight: 800;
 	}
 
-	.conversation-composer {
-		top: 66px;
-		left: 50%;
-		z-index: 11;
-		width: min(570px, calc(100% - 32px));
-		padding: 9px 11px 10px;
-		border: 1px solid rgba(57, 67, 64, 0.12);
-		border-radius: 14px;
-		background: rgba(255, 253, 245, 0.82);
-		box-shadow: 0 8px 22px rgba(60, 72, 65, 0.09);
-		backdrop-filter: blur(8px);
-		transform: translateX(-50%);
-	}
-
-	.composer-heading,
-	.composer-fields,
-	.composer-fields label {
-		display: flex;
-	}
-
-	.composer-heading {
-		align-items: baseline;
-		justify-content: space-between;
-		gap: 10px;
-		margin-bottom: 6px;
-	}
-
-	.conversation-status {
-		overflow: hidden;
-		color: #89918a;
-		font-size: 9px;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	.composer-fields {
-		align-items: end;
-		gap: 7px;
-	}
-
-	.composer-fields label {
-		min-width: 0;
-		flex-direction: column;
-		gap: 3px;
-		color: #87908b;
-		font-size: 9px;
-		font-weight: 700;
-		letter-spacing: 0.08em;
-		text-transform: uppercase;
-	}
-
-	.composer-fields select,
-	.composer-fields input,
-	.composer-fields button {
-		min-height: 30px;
-		border: 1px solid rgba(57, 67, 64, 0.14);
-		border-radius: 8px;
-		background: rgba(255, 255, 255, 0.76);
-		color: #46514d;
-		font-size: 11px;
-	}
-
-	.composer-fields select,
-	.composer-fields input {
-		padding: 5px 7px;
-	}
-
-	.composer-text-field {
-		flex: 1;
-	}
-
-	.composer-fields button {
-		padding: 5px 12px;
-		background: #e2def5;
-		color: #645a91;
-		cursor: pointer;
-		font-weight: 800;
-		text-transform: lowercase;
-	}
-
-	.composer-fields button:hover,
-	.composer-fields button:focus-visible {
-		background: #d5cfef;
-		outline: 2px solid rgba(136, 125, 183, 0.3);
-		outline-offset: 2px;
-	}
-
-	.position-readout {
-		display: flex;
-		align-items: baseline;
-		gap: 7px;
-		padding-left: 22px;
-		border-left: 1px solid rgba(63, 76, 69, 0.2);
-	}
-
-	.position-readout span {
-		color: #87908b;
-		font-size: 10px;
-		letter-spacing: 0.1em;
-		text-transform: uppercase;
-	}
-
-	.position-readout strong {
-		color: #c8755c;
-		font-size: 22px;
-		letter-spacing: -0.04em;
-	}
-
-	.position-readout i {
-		padding: 0 3px;
-		color: #a6aaa0;
-		font-size: 14px;
-		font-style: normal;
-	}
-
-	.presence-panel {
-		top: 126px;
-		right: 32px;
-		width: min(246px, calc(100% - 32px));
-		padding: 11px;
-		border: 1px solid rgba(57, 67, 64, 0.12);
-		border-radius: 14px;
-		background: rgba(255, 253, 245, 0.84);
-		box-shadow: 0 8px 22px rgba(60, 72, 65, 0.09);
-		backdrop-filter: blur(8px);
-	}
-
-	.presence-heading,
-	.presence-details,
-	.presence-actions {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 8px;
-	}
-
-	.presence-heading { margin-bottom: 7px; }
-
-	.presence-state {
-		padding: 3px 7px;
-		border-radius: 999px;
-		background: rgba(146, 198, 172, 0.28);
-		color: #4f8c6a;
-		font-size: 9px;
-		font-weight: 800;
-		letter-spacing: 0.08em;
-		text-transform: uppercase;
-	}
-
-	.presence-state.inactive {
-		background: rgba(202, 151, 133, 0.2);
-		color: #a76654;
-	}
-
-	.presence-select,
-	.presence-details span {
-		display: flex;
-		flex-direction: column;
-		gap: 3px;
-		color: #87908b;
-		font-size: 9px;
-		font-weight: 700;
-		letter-spacing: 0.08em;
-		text-transform: uppercase;
-	}
-
-	.presence-select select,
-	.presence-actions button,
-	.presence-movement button {
-		min-height: 28px;
-		border: 1px solid rgba(57, 67, 64, 0.14);
-		border-radius: 8px;
-		background: rgba(255, 255, 255, 0.76);
-		color: #46514d;
-		font: inherit;
-		font-size: 10px;
-	}
-
-	.presence-select select {
-		padding: 5px 7px;
-	}
-
-	.presence-details {
-		align-items: flex-start;
-		margin-top: 8px;
-	}
-
-	.presence-details strong {
-		color: #5f6a65;
-		font-size: 10px;
-		letter-spacing: 0;
-		text-transform: none;
-	}
-
-	.presence-movement {
-		display: grid;
-		width: 92px;
-		height: 62px;
-		margin: 9px auto 7px;
-		grid-template: repeat(2, 1fr) / repeat(3, 1fr);
-		gap: 4px;
-	}
-
-	.presence-movement button:nth-child(1) { grid-area: 1 / 2; }
-	.presence-movement button:nth-child(2) { grid-area: 2 / 1; }
-	.presence-movement button:nth-child(3) { grid-area: 2 / 2; }
-	.presence-movement button:nth-child(4) { grid-area: 2 / 3; }
-
-	.presence-actions {
-		justify-content: stretch;
-	}
-
-	.presence-actions button {
-		flex: 1;
-		padding: 5px 6px;
-		cursor: pointer;
-		font-weight: 800;
-	}
-
-	.presence-overlap {
-		width: 100%;
-		margin-top: 6px;
-		padding: 5px 6px;
-		border: 0;
-		background: transparent;
-		color: #89918a;
-		cursor: pointer;
-		font: inherit;
-		font-size: 8px;
-		letter-spacing: 0.03em;
-	}
-
-	.presence-overlap:hover,
-	.presence-overlap:focus-visible {
-		color: #a76654;
-		outline: 2px solid rgba(215, 127, 97, 0.35);
-		outline-offset: 1px;
-	}
-
-	.presence-actions button:last-child {
-		background: #f2dfd7;
-		color: #a76654;
-	}
-
-	.presence-movement button:hover,
-	.presence-movement button:focus-visible,
-	.presence-actions button:hover,
-	.presence-actions button:focus-visible {
-		background: #fff9ed;
-		outline: 2px solid rgba(215, 127, 97, 0.35);
-		outline-offset: 2px;
-	}
-
-	.presence-status {
-		min-height: 22px;
-		margin: 7px 0 0;
-		color: #69736d;
-		font-size: 10px;
-		line-height: 1.25;
-	}
-
-	.presence-timeout {
-		margin: 5px 0 0;
-		color: #a0a49d;
-		font-size: 8px;
-		letter-spacing: 0.04em;
-	}
-
-	.controls-panel {
-		right: 32px;
-		bottom: 24px;
-		display: flex;
-		align-items: center;
-		gap: 18px;
-	}
-
-	.control-copy {
-		display: flex;
-		flex-direction: column;
-		align-items: flex-end;
-		gap: 4px;
-	}
-
-	.control-hint {
-		color: #a0a49d;
-		font-size: 10px;
-	}
-
-	.d-pad {
-		display: grid;
-		width: 110px;
-		height: 110px;
-		grid-template: repeat(3, 1fr) / repeat(3, 1fr);
-		gap: 5px;
-	}
-
-	.d-pad-button {
-		border: 1px solid rgba(55, 68, 64, 0.15);
-		border-radius: 10px;
-		background: rgba(255, 253, 245, 0.75);
-		box-shadow: 0 4px 10px rgba(77, 83, 65, 0.08);
-		color: #69736d;
-		cursor: pointer;
-		font-size: 19px;
-		transition: transform 120ms ease, background 120ms ease, color 120ms ease;
-	}
-
-	.d-pad-button:hover,
-	.d-pad-button:focus-visible {
-		background: #fff9ed;
-		color: #cd755b;
-		outline: 2px solid rgba(215, 127, 97, 0.35);
-		outline-offset: 2px;
-	}
-
-	.d-pad-button:active {
-		transform: scale(0.94);
-	}
-
-	.d-pad-button.up { grid-area: 1 / 2; }
-	.d-pad-button.left { grid-area: 2 / 1; }
-	.d-pad-button.down { grid-area: 3 / 2; }
-	.d-pad-button.right { grid-area: 2 / 3; }
-
 	.footer-note {
 		bottom: 8px;
 		left: 50%;
@@ -1357,11 +911,6 @@
 		letter-spacing: 0.12em;
 		text-transform: uppercase;
 		white-space: nowrap;
-	}
-
-	@keyframes breathe {
-		0%, 100% { transform: scale(0.97); opacity: 0.76; }
-		50% { transform: scale(1.03); opacity: 1; }
 	}
 
 	@media (max-width: 700px) {
@@ -1390,45 +939,10 @@
 		}
 
 		.status-message { font-size: 12px; }
-		.position-readout { padding-left: 14px; }
-		.position-readout strong { font-size: 19px; }
-
-		.controls-panel {
-			right: 14px;
-			bottom: 13px;
-			gap: 10px;
-		}
-
-		.conversation-composer {
-			top: 60px;
-			width: calc(100% - 20px);
-			padding: 8px;
-		}
-
-		.presence-panel {
-			top: 128px;
-			right: 10px;
-			width: min(236px, calc(100% - 20px));
-		}
-
-		.composer-fields { gap: 4px; }
-		.composer-fields label { font-size: 8px; }
-		.composer-fields select,
-		.composer-fields input,
-		.composer-fields button {
-			min-height: 28px;
-			font-size: 10px;
-		}
-		.composer-fields select { max-width: 74px; }
-		.composer-fields button { padding: 5px 9px; }
-
-		.control-copy { display: none; }
-		.d-pad { width: 92px; height: 92px; gap: 4px; }
-		.d-pad-button { border-radius: 8px; font-size: 16px; }
 
 		.camera-chip {
 			right: 16px;
-			bottom: 132px;
+			bottom: 24px;
 			font-size: 8px;
 		}
 
@@ -1443,11 +957,6 @@
 		.prototype-badge { max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 		.status-panel { max-width: 176px; }
 		.status-message { line-height: 1.25; }
-		.position-readout { display: none; }
 	}
 
-	@media (prefers-reduced-motion: reduce) {
-		.avatar-ring { animation: none; }
-		.d-pad-button { transition: none; }
-	}
 </style>
