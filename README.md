@@ -4,6 +4,11 @@ Bootstrap repository for a SvelteKit static web application. The public
 service name and product UI are not decided yet; this repository name is only
 a temporary development identifier.
 
+## Product specifications and design
+
+See [docs/PROJECT.md](docs/PROJECT.md) for the repository's product
+specifications and design documentation.
+
 ## Development
 
 Use Node.js 24. The minimum supported version is 24.19.0, and the current
