@@ -10,7 +10,8 @@ import {
 	type OutgoingMessagePacket,
 	type RxNostr
 } from 'rx-nostr';
-import { type Observable, type Subscription } from 'rxjs';
+import { Subscription } from 'rxjs';
+import type { Filter } from 'nostr-tools/filter';
 import { verifyEvent, type Event, type VerifiedEvent } from 'nostr-tools/pure';
 import {
 	buildPositionFilter,
@@ -20,7 +21,8 @@ import {
 	parseWorldMessage,
 	type ParsedPositionEvent,
 	type ParsedWorldMessage,
-	POSITION_SLOT_IDENTIFIERS
+	POSITION_SLOT_IDENTIFIERS,
+	PROTOTYPE_NAMESPACE
 } from './nostrProtocol';
 import { resolveChannelMetadata, type ResolvedChannelMetadata } from './nostrChannelMetadata';
 import type { PrototypeWorldConfig } from './prototypeWorld';
@@ -32,10 +34,16 @@ const DEFAULT_OPERATION_TIMEOUT_MS = 10_000;
 export type LogicalPrimarySubscription = 'world-messages' | 'world-positions';
 export type PrimaryPairStatus = 'pending' | 'eose' | 'closed' | 'unavailable' | 'timeout';
 export type RelayCapacity = 'insufficient' | 'primary-only' | 'trace-capable' | 'unknown';
+export type RelayQueryStatus = 'eose' | 'closed' | 'unavailable' | 'timeout';
+export type RelayQueryDiagnostic = Readonly<{
+	relayUrl: string;
+	status: RelayQueryStatus;
+	notice?: string;
+}>;
 
 export type MetadataDiscoveryRelayDiagnostic = Readonly<{
 	relayUrl: string;
-	status: 'pending' | 'eose' | 'unavailable' | 'timeout';
+	status: 'pending' | RelayQueryStatus;
 	receivedKind40: boolean;
 	receivedKind41Candidates: number;
 }>;
@@ -48,6 +56,7 @@ export type MetadataDiscoveryDiagnostics = Readonly<{
 export type PrimaryPairDiagnostic = Readonly<{
 	relayUrl: string;
 	subscription: LogicalPrimarySubscription;
+	/** start() returns a bootstrap snapshot; getDiagnostics() also reflects later CLOSED. */
 	status: PrimaryPairStatus;
 	notice?: string;
 }>;
@@ -99,6 +108,11 @@ export type TraceQueryInput = Readonly<{
 	until?: number;
 }>;
 
+export type TraceQueryResult = Readonly<{
+	messages: readonly ParsedWorldMessage[];
+	relays: readonly RelayQueryDiagnostic[];
+}>;
+
 export type NostrRelayTransportOptions = Readonly<{
 	operationTimeoutMs?: number;
 	websocketCtor?: IWebSocketConstructor;
@@ -131,10 +145,10 @@ function filterEntries(filter: unknown): readonly [string, unknown][] | null {
 }
 
 function hasExactly(values: unknown, expected: readonly (string | number)[]): boolean {
-	if (!Array.isArray(values) || values.length !== expected.length) return false;
+	if (!Array.isArray(values)) return false;
 	const actual = new Set(values);
 	const target = new Set(expected);
-	return actual.size === values.length && actual.size === target.size && [...target].every((value) => actual.has(value));
+	return actual.size === target.size && [...target].every((value) => actual.has(value));
 }
 
 function classifyPrimaryFilter(
@@ -152,7 +166,7 @@ function classifyPrimaryFilter(
 	const isMessage = entries.every(([key]) => allowedMessageKeys.has(key)) &&
 		hasExactly(filter.kinds, [42]) &&
 		hasExactly(filter['#e'], [channelId]) &&
-		hasExactly(filter['#L'], ['io.github.lokuyow.persona-bubble-field']) &&
+		hasExactly(filter['#L'], [PROTOTYPE_NAMESPACE]) &&
 		hasExactly(filter['#l'], ['chat']);
 	if (isMessage) return 'world-messages';
 
@@ -169,6 +183,18 @@ function reqFromOutgoing(packet: OutgoingMessagePacket): { subId: string; filter
 		return null;
 	}
 	return { subId: packet.message[1], filters: packet.message.slice(2) };
+}
+
+/** Compare query conditions, ignoring key order and semantically absent values. */
+function matchesQueryFilter(filters: readonly unknown[], expected: Filter): boolean {
+	if (filters.length !== 1) return false;
+	const actualEntries = filterEntries(filters[0]);
+	const expectedEntries = filterEntries(expected)!;
+	if (!actualEntries || actualEntries.length !== expectedEntries.length) return false;
+	const actual = Object.fromEntries(actualEntries);
+	return expectedEntries.every(([key, value]) => Array.isArray(value)
+		? hasExactly(actual[key], value)
+		: actual[key] === value);
 }
 
 function copyPairDiagnostics(pairs: ReadonlyMap<PrimaryPairKey, PrimaryPairDiagnostic>): readonly PrimaryPairDiagnostic[] {
@@ -190,14 +216,16 @@ export function createNostrRelayTransport(
 	let metadataDiagnostics: MetadataDiscoveryDiagnostics | null = null;
 	let startInput: PrimaryStartInput | null = null;
 	let initialPhase = false;
-	let initialMessages: ParsedWorldMessage[] = [];
-	let initialPositions: ParsedPositionEvent[] = [];
+	const initialMessages: ParsedWorldMessage[] = [];
+	const initialPositions: ParsedPositionEvent[] = [];
 	const messageIds = new Set<string>();
 	const positionIds = new Set<string>();
 	const primaryPairs = new Map<PrimaryPairKey, PrimaryPairDiagnostic>();
 	const connections = new Map<string, RelayConnectionDiagnostic>();
 	const relayAliases = new Map<string, string>();
-	const subscriptions: Subscription[] = [];
+	const subscriptions = new Subscription();
+	let cancelPrimaryStart: (() => void) | null = null;
+	const pendingTraces: { filter: Filter; result: Promise<TraceQueryResult> }[] = [];
 
 	function requireRxNostr(): RxNostr {
 		if (!rxNostr) throw new Error('Relay transport has not been initialized.');
@@ -251,13 +279,83 @@ export function createNostrRelayTransport(
 	}
 
 	function disposeRxNostr(): void {
-		while (subscriptions.length > 0) subscriptions.pop()?.unsubscribe();
+		cancelPrimaryStart?.();
+		subscriptions.unsubscribe();
 		rxNostr?.dispose();
 		rxNostr = null;
 	}
 
-	async function discoverMetadata(): Promise<{ metadata: ResolvedChannelMetadata; diagnostics: MetadataDiscoveryDiagnostics }> {
+	// Discovery and trace both need real per-relay terminal messages. use()'s
+	// completion includes synthetic EOSE/timeouts, so it cannot provide this status.
+	function queryRelays(
+		filter: Filter,
+		relays: readonly string[],
+		onEvent: (packet: EventPacket, relayUrl: string) => void
+	): Promise<readonly RelayQueryDiagnostic[]> {
 		const client = requireRxNostr();
+		const aliases = new Map(relays.map((relayUrl) => [new URL(relayUrl).toString(), relayUrl]));
+		const configuredRelay = (url: string) => aliases.get(new URL(url).toString());
+		const results = new Map<string, RelayQueryDiagnostic>();
+		const subIds = new Map<string, string>();
+		return new Promise((resolve, reject) => {
+			let settled = false;
+			const resources = new Subscription();
+			subscriptions.add(resources);
+			resources.add(() => {
+				if (!settled) {
+					settled = true;
+					reject(new Error('Relay transport disposed during finite query.'));
+				}
+			});
+			const finish = () => {
+				if (settled || results.size !== relays.length) return;
+				settled = true;
+				resources.unsubscribe();
+				resolve(relays.map((relayUrl) => ({ ...results.get(relayUrl)! })));
+			};
+			const deadline = setTimeout(() => {
+				for (const relayUrl of relays) {
+					if (!results.has(relayUrl)) results.set(relayUrl, { relayUrl, status: 'timeout' });
+				}
+				finish();
+			}, timeoutMs);
+			resources.add(() => clearTimeout(deadline));
+			resources.add(client.createOutgoingMessageObservable().subscribe((packet) => {
+				const request = reqFromOutgoing(packet);
+				if (!request || !matchesQueryFilter(request.filters, filter)) return;
+				const relayUrl = configuredRelay(packet.to);
+				if (relayUrl && !results.has(relayUrl)) subIds.set(relayUrl, request.subId);
+			}));
+			resources.add(client.createAllEventObservable().subscribe((packet) => {
+				const relayUrl = configuredRelay(packet.from);
+				if (relayUrl && !results.has(relayUrl) && subIds.get(relayUrl) === packet.subId) onEvent(packet, relayUrl);
+			}));
+			resources.add(client.createAllMessageObservable().subscribe((packet) => {
+				if (packet.type !== 'EOSE' && packet.type !== 'CLOSED') return;
+				const relayUrl = configuredRelay(packet.from);
+				if (!relayUrl || results.has(relayUrl) || subIds.get(relayUrl) !== packet.subId) return;
+				results.set(relayUrl, packet.type === 'EOSE'
+					? { relayUrl, status: 'eose' }
+					: { relayUrl, status: 'closed', notice: packet.notice });
+				finish();
+			}));
+			const unavailable = (relayUrl: string, connection: ConnectionState | undefined) => {
+				if (connection && isConnectionUnavailable(connection) && !results.has(relayUrl)) {
+					results.set(relayUrl, { relayUrl, status: 'unavailable' });
+				}
+			};
+			resources.add(client.createConnectionStateObservable().subscribe((packet) => {
+				const relayUrl = configuredRelay(packet.from);
+				if (relayUrl) unavailable(relayUrl, packet.state);
+				finish();
+			}));
+			resources.add(client.use(createRxOneshotReq({ filters: filter }), { on: { relays: [...relays] } }).subscribe());
+			for (const relayUrl of relays) unavailable(relayUrl, client.getRelayStatus(relayUrl)?.connection);
+			finish();
+		});
+	}
+
+	async function discoverMetadata(): Promise<{ metadata: ResolvedChannelMetadata; diagnostics: MetadataDiscoveryDiagnostics }> {
 		const events = new Map<string, Event>();
 		const relayDiagnostics = new Map<string, MetadataDiscoveryRelayDiagnostic>(world.metadataDiscoveryRelays.map((relayUrl) => [relayUrl, {
 			relayUrl,
@@ -265,27 +363,9 @@ export function createNostrRelayTransport(
 			receivedKind40: false,
 			receivedKind41Candidates: 0
 		}]));
-		const aliases = new Map(world.metadataDiscoveryRelays.map((relayUrl) => [relayUrl.replace(/\/$/, ''), relayUrl]));
-		const rawSubscription = client.createAllMessageObservable().subscribe((packet) => {
-			const relayUrl = aliases.get(packet.from);
-			if (!relayUrl) return;
-			const current = relayDiagnostics.get(relayUrl);
-			if (!current || current.status !== 'pending') return;
-			if (packet.type === 'EOSE') relayDiagnostics.set(relayUrl, { ...current, status: 'eose' });
-		});
-		const connectionSubscription = client.createConnectionStateObservable().subscribe((packet) => {
-			const relayUrl = aliases.get(packet.from);
-			const current = relayUrl ? relayDiagnostics.get(relayUrl) : undefined;
-			if (current && current.status === 'pending' && isConnectionUnavailable(packet.state)) {
-				relayDiagnostics.set(relayUrl!, { ...current, status: 'unavailable' });
-			}
-		});
-
-		const collect = (packet: EventPacket) => {
+		const collect = (packet: EventPacket, relayUrl: string) => {
 			events.set(packet.event.id, packet.event);
-			const relayUrl = aliases.get(packet.from);
-			const current = relayUrl ? relayDiagnostics.get(relayUrl) : undefined;
-			if (!relayUrl || !current) return;
+			const current = relayDiagnostics.get(relayUrl)!;
 			if (packet.event.id === world.channelId && packet.event.kind === CHANNEL_CREATE_KIND) {
 				relayDiagnostics.set(relayUrl, { ...current, receivedKind40: true });
 			} else if (packet.event.kind === CHANNEL_METADATA_KIND) {
@@ -295,31 +375,23 @@ export function createNostrRelayTransport(
 				});
 			}
 		};
-		const eventSubscription = client.createAllEventObservable().subscribe(collect);
-		const kind40 = createRxOneshotReq({ filters: { ids: [world.channelId], kinds: [CHANNEL_CREATE_KIND] } });
-		const kind41 = createRxOneshotReq({ filters: { kinds: [CHANNEL_METADATA_KIND], '#e': [world.channelId] } });
-		const completion = (observable: Observable<unknown>) =>
-			new Promise<void>((resolve) => observable.subscribe({ complete: resolve }));
-
-		try {
-			await Promise.all([
-				completion(client.use(kind40, { on: { relays: [...world.metadataDiscoveryRelays] } })),
-				completion(client.use(kind41, { on: { relays: [...world.metadataDiscoveryRelays] } }))
-			]);
-		} finally {
-			rawSubscription.unsubscribe();
-			eventSubscription.unsubscribe();
-			connectionSubscription.unsubscribe();
-		}
-
-		for (const [relayUrl, current] of relayDiagnostics) {
-			if (current.status === 'pending') relayDiagnostics.set(relayUrl, { ...current, status: 'timeout' });
-		}
+		const [kind40, kind41] = await Promise.all([
+			queryRelays({ ids: [world.channelId], kinds: [CHANNEL_CREATE_KIND] }, world.metadataDiscoveryRelays, collect),
+			queryRelays({ kinds: [CHANNEL_METADATA_KIND], '#e': [world.channelId] }, world.metadataDiscoveryRelays, collect)
+		]);
+		world.metadataDiscoveryRelays.forEach((relayUrl, index) => {
+			const statuses = [kind40[index].status, kind41[index].status];
+			const status: RelayQueryStatus = statuses.every((value) => value === 'eose') ? 'eose'
+				: statuses.includes('unavailable') ? 'unavailable'
+					: statuses.includes('timeout') ? 'timeout' : 'closed';
+			relayDiagnostics.set(relayUrl, { ...relayDiagnostics.get(relayUrl)!, status });
+		});
 		const resolved = resolveChannelMetadata([...events.values()], world.channelId, world.preferredRelayHint);
 		const result = {
 			relays: [...relayDiagnostics.values()],
 			uniqueEventCount: events.size
 		};
+		metadataDiagnostics = result;
 		if (!resolved) throw new Error('NIP-28 channel metadata resolution failed.');
 		return { metadata: resolved, diagnostics: result };
 	}
@@ -358,6 +430,7 @@ export function createNostrRelayTransport(
 	async function startPrimary(): Promise<readonly PrimaryPairDiagnostic[]> {
 		const client = requireRxNostr();
 		if (!metadata || !startInput) throw new Error('Primary startup is missing resolved metadata or callbacks.');
+		initialPhase = true;
 		const positionSlots = POSITION_SLOT_IDENTIFIERS;
 		for (const relayUrl of metadata.relays) {
 			for (const subscription of ['world-messages', 'world-positions'] as const) {
@@ -369,9 +442,12 @@ export function createNostrRelayTransport(
 			let settled = false;
 			let deadline: ReturnType<typeof setTimeout> | undefined;
 			const primarySubIds = new Map<string, LogicalPrimarySubscription>();
+			const activeSubIds = new Map<PrimaryPairKey, string>();
+			const closedSubIds = new Set<string>();
 			const finish = () => {
 				if (settled || ![...primaryPairs.values()].every((pair) => isTerminal(pair.status))) return;
 				settled = true;
+				cancelPrimaryStart = null;
 				if (deadline) clearTimeout(deadline);
 				initialPhase = false;
 				resolve(copyPairDiagnostics(primaryPairs));
@@ -379,10 +455,12 @@ export function createNostrRelayTransport(
 			const fail = (error: Error) => {
 				if (settled) return;
 				settled = true;
+				cancelPrimaryStart = null;
 				if (deadline) clearTimeout(deadline);
 				initialPhase = false;
 				reject(error);
 			};
+			cancelPrimaryStart = () => fail(new Error('Relay transport disposed during primary initialization.'));
 			const outgoingSubscription = client.createOutgoingMessageObservable().subscribe((packet) => {
 				const request = reqFromOutgoing(packet);
 				if (!request) return;
@@ -399,16 +477,33 @@ export function createNostrRelayTransport(
 					return;
 				}
 				// The subId remains opaque. Repeated mapping is a normal reconnect resend.
-				primarySubIds.set(`${relayUrl}\u0000${request.subId}`, logical);
+				const mappingKey = `${relayUrl}\u0000${request.subId}`;
+				primarySubIds.set(mappingKey, logical);
+				activeSubIds.set(key, request.subId);
+				closedSubIds.delete(mappingKey);
+			});
+			// Consume the public, filter-matched event stream synchronously. The
+			// project parsers verify signatures; async use() verification must not
+			// move an EVENT received before EOSE across the bootstrap/live boundary.
+			const eventSubscription = client.createAllEventObservable().subscribe((packet) => {
+				const relayUrl = canonicalRelay(packet.from);
+				if (!relayUrl) return;
+				const logical = primarySubIds.get(`${relayUrl}\u0000${packet.subId}`);
+				if (!logical || activeSubIds.get(pairKey(relayUrl, logical)) !== packet.subId) return;
+				if (logical === 'world-messages') receiveMessage(packet.event);
+				else receivePosition(packet.event);
 			});
 			const rawSubscription = client.createAllMessageObservable().subscribe((packet) => {
 				if ((packet.type !== 'EOSE' && packet.type !== 'CLOSED') || !canonicalRelay(packet.from)) return;
 				const relayUrl = canonicalRelay(packet.from)!;
-				const logical = primarySubIds.get(`${relayUrl}\u0000${packet.subId}`);
+				const mappingKey = `${relayUrl}\u0000${packet.subId}`;
+				const logical = primarySubIds.get(mappingKey);
 				if (!logical) return;
 				const key = pairKey(relayUrl, logical);
+				if (activeSubIds.get(key) !== packet.subId || closedSubIds.has(mappingKey)) return;
 				const pair = primaryPairs.get(key);
-				if (!pair || pair.status !== 'pending') return;
+				if (!pair || (packet.type === 'EOSE' && pair.status !== 'pending')) return;
+				if (packet.type === 'CLOSED') closedSubIds.add(mappingKey);
 				const next = packet.type === 'EOSE'
 					? { ...pair, status: 'eose' as const }
 					: { ...pair, status: 'closed' as const, notice: packet.notice };
@@ -420,12 +515,12 @@ export function createNostrRelayTransport(
 				updateConnection(packet.from, packet.state);
 				finish();
 			});
-			subscriptions.push(outgoingSubscription, rawSubscription, stateSubscription);
+			for (const subscription of [outgoingSubscription, eventSubscription, rawSubscription, stateSubscription]) subscriptions.add(subscription);
 
 			const messageRequest = createRxForwardReq();
 			const positionRequest = createRxForwardReq();
-			subscriptions.push(client.use(messageRequest).subscribe((packet) => receiveMessage(packet.event)));
-			subscriptions.push(client.use(positionRequest).subscribe((packet) => receivePosition(packet.event)));
+			subscriptions.add(client.use(messageRequest).subscribe());
+			subscriptions.add(client.use(positionRequest).subscribe());
 			deadline = setTimeout(() => {
 				for (const [key, pair] of primaryPairs) {
 					if (pair.status === 'pending') primaryPairs.set(key, { ...pair, status: 'timeout' });
@@ -434,6 +529,11 @@ export function createNostrRelayTransport(
 			}, timeoutMs);
 			messageRequest.emit(buildWorldMessageFilter({ channelId: metadata!.channelId, since: startInput!.messageSince }));
 			positionRequest.emit(buildPositionFilter({ channelId: metadata!.channelId, since: startInput!.positionSince }));
+			for (const relayUrl of metadata!.relays) {
+				const connection = client.getRelayStatus(relayUrl)?.connection;
+				if (connection) updateConnection(relayUrl, connection);
+			}
+			finish();
 		});
 	}
 
@@ -444,7 +544,6 @@ export function createNostrRelayTransport(
 			assertTimestamp(input.positionSince, 'positionSince');
 			state = 'starting';
 			startInput = input;
-			initialPhase = true;
 			rxNostr = createRxNostr({
 				connectionStrategy: 'lazy',
 				signer: noopSigner(),
@@ -472,7 +571,7 @@ export function createNostrRelayTransport(
 					nip11: nip11Diagnostics()
 				};
 			} catch (error) {
-				state = 'failed';
+				if ((state as TransportState) !== 'disposed') state = 'failed';
 				disposeRxNostr();
 				throw error;
 			}
@@ -507,19 +606,25 @@ export function createNostrRelayTransport(
 			return [...results.values()];
 		},
 
-		async queryTrace(input: TraceQueryInput): Promise<readonly ParsedWorldMessage[]> {
+		async queryTrace(input: TraceQueryInput): Promise<TraceQueryResult> {
 			if (state !== 'started' || !metadata) throw new Error('Relay transport must start before querying trace events.');
 			const filter = buildTraceMessageFilter({ channelId: metadata.channelId, ...input });
-			const request = createRxOneshotReq({ filters: filter });
+			// Identical in-flight filters cannot identify two different logical
+			// requests through outgoing semantics. Share that finite query only.
+			const existing = pendingTraces.find((query) => matchesQueryFilter([filter], query.filter));
+			if (existing) return existing.result;
 			const events = new Map<string, ParsedWorldMessage>();
-			await new Promise<void>((resolve) => requireRxNostr().use(request).subscribe({
-				next: (packet) => {
-					const parsed = parseWorldMessage(packet.event, metadata!.channelId);
-					if (parsed) events.set(parsed.id, parsed);
-				},
-				complete: resolve
-			}));
-			return [...events.values()];
+			const result = queryRelays(filter, metadata.relays, (packet) => {
+				const parsed = parseWorldMessage(packet.event, metadata!.channelId);
+				if (parsed) events.set(parsed.id, parsed);
+			}).then((relays) => ({ messages: [...events.values()], relays }));
+			const pending = { filter, result };
+			pendingTraces.push(pending);
+			try {
+				return await result;
+			} finally {
+				pendingTraces.splice(pendingTraces.indexOf(pending), 1);
+			}
 		},
 
 		dispose(): void {
