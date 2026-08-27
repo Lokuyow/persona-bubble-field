@@ -54,6 +54,18 @@ function signedPosition(slot: 0 | 1, override: Partial<Parameters<typeof buildPo
 	}), TEST_SECRET_KEY);
 }
 
+function signedPositionWithCreatedAt(createdAt: number): VerifiedEvent {
+	return finalizeWorldEvent({
+		kind: POSITION_KIND,
+		created_at: createdAt,
+		tags: [
+			['d', POSITION_SLOT_IDENTIFIERS[0]],
+			['e', channel.channelId, channel.relayHint]
+		],
+		content: '8:3'
+	} as PositionEventTemplate, TEST_SECRET_KEY);
+}
+
 function resign(template: EventTemplate): VerifiedEvent {
 	return finalizeWorldEvent(template as WorldMessageTemplate | PositionEventTemplate, TEST_SECRET_KEY);
 }
@@ -159,6 +171,16 @@ describe('Nostr protocol foundation', () => {
 			position: { x: 8, y: 3 }
 		});
 	});
+
+	it.each([-1, 1_700_000_000.5, Number.MAX_SAFE_INTEGER + 1])(
+		'rejects correctly signed position events with invalid created_at %s',
+		(createdAt) => {
+			const event = signedPositionWithCreatedAt(createdAt);
+
+			expect(verifyEvent(event)).toBe(true);
+			expect(parsePositionEvent(event, CHANNEL_ID)).toBeNull();
+		}
+	);
 
 	it('rejects wire copies whose content, tags, or signature have been tampered with', () => {
 		const event = signedMessage();
