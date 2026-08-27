@@ -300,7 +300,9 @@ presence状態のユーザーについてcurrent positionを復元する際は�
 
 公式クライアントでは、同一秒内に発言と移動が行われても、発言時 `w` とその時点のposition stateが矛盾しないようにする。
 
-この規則は、改造クライアント等が矛盾したeventを発行した場合の実際の操作順を復元するためのものではない。
+この規則は、event IDのtie-breakを含め、改造クライアント等が矛盾したeventを発行した場合の実際の操作順を復元するためのものではない。
+
+同じ `created_at` と上記source priorityを持つposition evidenceが複数ある場合は、event IDがlexicographically lowestのものをdeterministicに採用する。position evidenceのsource priorityはcurrent positionの決定にのみ使用し、presenceの最終活動時刻は全valid activityの最大 `created_at` で決定する。
 
 ---
 

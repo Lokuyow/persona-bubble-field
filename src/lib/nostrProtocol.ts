@@ -228,6 +228,7 @@ function isVerifiedEvent(event: Event): event is VerifiedEvent {
 export function parseWorldMessage(event: Event, channelId: string): ParsedWorldMessage | null {
 	assertChannelId(channelId);
 	if (!isVerifiedEvent(event) || event.kind !== CHANNEL_MESSAGE_KIND) return null;
+	if (!Number.isSafeInteger(event.created_at) || event.created_at < 0) return null;
 	if (!matchesChannelRoot(event, channelId)) return null;
 	if (!event.tags.some((tag) => tag[0] === 'L' && tag[1] === PROTOTYPE_NAMESPACE)) return null;
 	if (!hasProjectChatLabel(event)) return null;
