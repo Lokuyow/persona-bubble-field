@@ -7,9 +7,9 @@
 		getPrototypeDisplayDuration,
 		pruneExpired,
 		receiveMessage,
-		type ConversationMessage,
 		type ConversationState
 	} from '$lib/conversation';
+	import { replayBootstrapConversation } from '$lib/bootstrapConversation';
 	import {
 		clampToBounds,
 		getFieldAreaBounds,
@@ -321,7 +321,7 @@
 		presenceState = nextPresence;
 	}
 
-	function toConversationMessage(message: ParsedWorldMessage): ConversationMessage {
+	function toConversationMessage(message: ParsedWorldMessage) {
 		return {
 			id: message.id,
 			pubkey: message.pubkey,
@@ -341,17 +341,7 @@
 		entryNowMs: number
 	): void {
 		const entryVisible = getPresenceProjection(bootstrapPresence).visibleParticipantIds;
-		for (const message of [...messages].sort((first, second) =>
-			first.createdAt - second.createdAt || first.id.localeCompare(second.id)
-		)) {
-			if (naturalExpiresAt(message) <= entryNowMs) continue;
-			const conversationMessage = toConversationMessage(message);
-			conversationState = receiveMessage(conversationState, conversationMessage, {
-				isSpeakerVisible: entryVisible.has(message.pubkey),
-				duration: getPrototypeDisplayDuration(message.content),
-				now: conversationMessage.createdAt
-			});
-		}
+		conversationState = replayBootstrapConversation(messages, entryVisible, entryNowMs);
 		conversationState = applyVisibility(conversationState, entryVisible);
 	}
 
