@@ -266,6 +266,7 @@ function referencesChannel(event: Event, channelId: string): boolean {
 export function parsePositionEvent(event: Event, channelId: string): ParsedPositionEvent | null {
 	assertChannelId(channelId);
 	if (!isVerifiedEvent(event) || event.kind !== POSITION_KIND) return null;
+	if (!Number.isSafeInteger(event.created_at) || event.created_at < 0) return null;
 	if (!referencesChannel(event, channelId)) return null;
 
 	const slot = parsePositionSlot(event);

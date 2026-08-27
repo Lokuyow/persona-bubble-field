@@ -222,6 +222,8 @@ slot 0 → slot 1
 
 具体的なRelay取得・再接続処理は実装時に使用ライブラリの現行APIとRelay挙動を確認して決定する。
 
+current Unix secondにslot 1が確認できる場合は、slot 0が取得結果に存在しなくても、その秒はすでに2スロットを消費済みとして扱い、次の秒まで新しいposition updateを発行しない。これは公式クライアントが同一秒にslot 0 → slot 1の順で発行するプロトコル規則に基づき、partialなRelay viewでslot 0を再利用しないためである。
+
 ---
 
 ## 17. 発言時position
