@@ -28,5 +28,8 @@
 		"typescript": "^6.0.3",
 		"vite": "^8.0.16",
 		"vitest": "^4.1.11"
+	},
+	"dependencies": {
+		"nostr-tools": "^2.25.0"
 	}
 }
