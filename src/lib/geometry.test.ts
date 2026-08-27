@@ -5,6 +5,7 @@ import {
 	clampToViewport,
 	DESKTOP_CELL_SIZE,
 	fieldLocalToViewport,
+	formatCanonicalGridPosition,
 	getActualFieldTop,
 	getFieldAreaBounds,
 	getFieldWorldSize,
@@ -15,6 +16,7 @@ import {
 	mergedBubblePreferredAnchor,
 	moveOneCell,
 	normalBubblePreferredAnchor,
+	parseCanonicalGridPosition,
 	placeBubbles,
 	worldToScreen
 } from './geometry';
@@ -46,6 +48,23 @@ function overlapAreaWithGap(
 }
 
 describe('field geometry', () => {
+	it('round-trips canonical grid positions', () => {
+		const position = { x: 15, y: 7 };
+
+		expect(formatCanonicalGridPosition(position)).toBe('15:7');
+		expect(parseCanonicalGridPosition('15:7')).toEqual(position);
+	});
+
+	it.each(['00:0', '01:2', '+1:2', '-1:2', '1:-2', '1.5:2', '1,2', '1:2:3'])
+		('rejects non-canonical grid position %s', (value) => {
+			expect(parseCanonicalGridPosition(value)).toBeNull();
+		});
+
+	it('rejects grid positions that cannot be represented safely', () => {
+		expect(parseCanonicalGridPosition('9007199254740992:0')).toBeNull();
+		expect(() => formatCanonicalGridPosition({ x: Number.MAX_SAFE_INTEGER + 1, y: 0 })).toThrow(TypeError);
+	});
+
 	it('selects the prototype cell size by viewport width', () => {
 		expect(getResponsiveCellSize(360)).toBe(MOBILE_CELL_SIZE);
 		expect(getResponsiveCellSize(700)).toBe(MOBILE_CELL_SIZE);

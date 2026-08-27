@@ -3,6 +3,40 @@ export type GridPosition = {
 	y: number;
 };
 
+const CANONICAL_GRID_POSITION = /^(0|[1-9]\d*):(0|[1-9]\d*)$/;
+
+function isCanonicalGridCoordinate(value: number): boolean {
+	return Number.isSafeInteger(value) && value >= 0;
+}
+
+/**
+ * Encodes a logical field cell in the single canonical representation used by
+ * the Nostr protocol layer. Field-size validation intentionally remains with
+ * the field domain because the product's final dimensions are not set yet.
+ */
+export function formatCanonicalGridPosition(position: GridPosition): string {
+	if (!isCanonicalGridCoordinate(position.x) || !isCanonicalGridCoordinate(position.y)) {
+		throw new TypeError('Grid position must contain non-negative safe integers.');
+	}
+
+	return `${position.x}:${position.y}`;
+}
+
+/**
+ * Parses only the canonical decimal cell form. Equivalent alternate spellings
+ * such as leading zeros and signed coordinates are deliberately rejected.
+ */
+export function parseCanonicalGridPosition(value: string): GridPosition | null {
+	const match = CANONICAL_GRID_POSITION.exec(value);
+	if (!match) return null;
+
+	const x = Number(match[1]);
+	const y = Number(match[2]);
+	if (!isCanonicalGridCoordinate(x) || !isCanonicalGridCoordinate(y)) return null;
+
+	return { x, y };
+}
+
 export type WorldPoint = {
 	x: number;
 	y: number;
