@@ -19,8 +19,10 @@
 - kind 42の発言位置tag `w` を正式公開仕様として恒久採用するか
   - prototypeでは `["w", "<x>:<y>"]` を使用する
   - 正式公開仕様として固定する前に、その時点の最新NIPおよび既存の単一文字tag利用状況を再確認する
-- 使用Relay
-- NIP-28 channel kind 40の具体的イベント
+- 正式公開時のmetadata discovery bootstrap Relay set
+  - prototypeでは `wss://nos.lol/`、`wss://x.kojira.io/`、`wss://relay.nostr.wirednet.jp/`、`wss://yabu.me/` を使用する
+- 正式公開時に使用するNIP-28 channel kind 40
+  - prototypeでは `3212de4b75f0c41efa17e41affcfc3a811171ba930e5b657687b5f5148627d5b` を使用する
 - モデレーション方針
 - 通報・ミュート等の扱い
 
