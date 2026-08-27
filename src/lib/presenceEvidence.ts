@@ -64,7 +64,7 @@ function reducedParticipant(evidence: PresenceEvidence): ReducedPresenceParticip
 	};
 }
 
-function messageEvidence(message: ParsedWorldMessage): PresenceEvidence {
+export function presenceEvidenceFromMessage(message: ParsedWorldMessage): PresenceEvidence {
 	return {
 		eventId: message.id,
 		pubkey: message.pubkey,
@@ -74,7 +74,7 @@ function messageEvidence(message: ParsedWorldMessage): PresenceEvidence {
 	};
 }
 
-function positionEvidence(event: ParsedPositionEvent): PresenceEvidence {
+export function presenceEvidenceFromPosition(event: ParsedPositionEvent): PresenceEvidence {
 	return {
 		eventId: event.id,
 		pubkey: event.pubkey,
@@ -124,8 +124,8 @@ export function reconstructPresenceEvidence(
 ): ReducedPresenceParticipant[] {
 	const participants = new Map<string, ReducedPresenceParticipant>();
 	const evidence = [
-		...messages.map(messageEvidence),
-		...positions.map(positionEvidence)
+		...messages.map(presenceEvidenceFromMessage),
+		...positions.map(presenceEvidenceFromPosition)
 	];
 
 	for (const item of evidence) {
