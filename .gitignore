@@ -1,5 +1,8 @@
 node_modules
 
+# Local character artwork sources (delivery images remain tracked)
+/.character-sources/
+
 # Output
 .output
 .vercel

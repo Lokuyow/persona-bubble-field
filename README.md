@@ -37,6 +37,18 @@ npm run validate
 For a GitHub Pages project site, use `npm run build:pages`; it builds with the
 repository base path `/persona-bubble-field` on Windows and Linux.
 
+### Character image conversion
+
+Run `npm run characters:images` to convert high-resolution character originals
+from the gitignored `.character-sources/` directory into
+`static/characters/*.webp`. An alternate input directory can be supplied, for
+example `npm run characters:images -- "D:\character originals"`. The source
+basename becomes the delivery image filename. Do not use an existing delivery
+WebP as input; regenerate from the high-resolution original instead.
+
+Normal runs convert only missing or changed images and skip valid unchanged
+outputs. Use `npm run characters:images -- --force` to regenerate every source.
+
 ## Licensing
 
 - Source code is available under the [MIT License](LICENSE).
