@@ -1,4 +1,5 @@
 import type { Direction } from './geometry';
+import { CHARACTER_CATALOG, getCharacterById, type Character } from './character';
 import {
 	createPresenceState,
 	moveParticipant,
@@ -9,11 +10,7 @@ import {
 
 export const DEV_WORLD_SELF_ID = 'you';
 
-export const DEV_WORLD_SELF_PRESENTATION = {
-	name: 'Dev Wanderer',
-	initials: 'DEV',
-	color: 'sky'
-} as const;
+export const DEV_WORLD_DEFAULT_CHARACTER_ID = '001';
 
 function initialPosition(field: PresenceField) {
 	return {
@@ -25,6 +22,17 @@ function initialPosition(field: PresenceField) {
 /** Returns whether the explicit local-only sandbox request is available in this build. */
 export function isDevWorldSandboxEnabled(isDev: boolean, search: URLSearchParams): boolean {
 	return isDev && search.get('devWorld') === '1';
+}
+
+/** Resolves the optional DEV-only initial character without creating an assignment rule. */
+export function resolveDevWorldCharacterId(search: URLSearchParams): string {
+	const requestedId = search.get('devCharacter');
+	return requestedId && getCharacterById(requestedId) ? requestedId : DEV_WORLD_DEFAULT_CHARACTER_ID;
+}
+
+/** Returns the catalog entry used by the DEV-only presentation. */
+export function getDevWorldCharacter(characterId: string): Character {
+	return getCharacterById(characterId) ?? CHARACTER_CATALOG[0];
 }
 
 /** Creates the deterministic local presence used by the DEV world sandbox. */
