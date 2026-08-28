@@ -122,11 +122,24 @@ describe('Nostr protocol foundation', () => {
 
 		const event = finalizeCharacterProfileEvent(template, TEST_SECRET_KEY);
 		expect(verifyEvent(event)).toBe(true);
-		expect(event.kind).toBe(0);
-		expect(event.tags).toEqual([]);
+		expect(event.kind).toBe(template.kind);
+		expect(event.created_at).toBe(template.created_at);
+		expect(event.tags).toEqual(template.tags);
+		expect(event.content).toBe(template.content);
 	});
 
-	it.each(['characters/001.webp', '/characters/001.webp', 'not a URL'])('rejects non-absolute picture URLs: %s', (absolutePictureUrl) => {
+	it('preserves Character 002 about text including newlines in kind 0 metadata', () => {
+		const character = CHARACTER_CATALOG[1];
+		const template = buildCharacterProfileTemplate({
+			character,
+			absolutePictureUrl: 'https://static.example.test/characters/002.webp',
+			createdAt: 1_700_000_000
+		});
+
+		expect(JSON.parse(template.content).about).toBe(character.about);
+	});
+
+	it.each(['characters/001.webp', '/characters/001.webp', 'not a URL', 'ftp://example.test/characters/001.webp'])('rejects non-absolute HTTP(S) picture URLs: %s', (absolutePictureUrl) => {
 		expect(() => buildCharacterProfileTemplate({
 			character: CHARACTER_CATALOG[0],
 			absolutePictureUrl,
