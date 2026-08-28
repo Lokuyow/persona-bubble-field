@@ -80,6 +80,11 @@ type BufferedLiveEvent =
 	| Readonly<{ kind: 'message'; event: ParsedWorldMessage }>
 	| Readonly<{ kind: 'position'; event: ParsedPositionEvent }>;
 
+type SelfPositionOperation = Readonly<{
+	id: string;
+	operation: 'entry' | 'movement' | 'reactivation';
+}>;
+
 function bootstrapSince(nowMs: number): number {
 	return Math.max(0, Math.floor((nowMs - PRESENCE_TIMEOUT_MS - BOOTSTRAP_SAFETY_MARGIN_MS) / 1000));
 }
@@ -105,14 +110,13 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 	let status: WorldReadConnectionStatus = { kind: 'bootstrapping' };
 	let positionPublishState: PositionPublishState = createPositionPublishState();
 	let selfJoinedThisSession = false;
-	let pendingSelfOperation: Readonly<{
-		id: string;
-		operation: 'entry' | 'movement' | 'reactivation';
-	}> | null = null;
+	let pendingSelfOperation: SelfPositionOperation | null = null;
+	let latestSelfOperationId: string | null = null;
 	let selfPositionWriteState: SelfPositionWriteState = options.selfAccount ? { kind: 'ready' } : { kind: 'unavailable' };
 	const pendingLiveEvents: BufferedLiveEvent[] = [];
 	const knownSelfPositionEvents = new Map<string, ParsedPositionEvent>();
 	const handedOffSelfPositionEvents = new Map<string, ParsedPositionEvent>();
+	const retryableSelfOperations = new Map<string, SelfPositionOperation>();
 	const appliedCanonicalPositionEventIds = new Set<string>();
 
 	function emitStatus(next: WorldReadConnectionStatus): void {
@@ -171,9 +175,17 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 			selfJoinedThisSession = nextPresence.participants.some((participant) =>
 				participant.id === event.pubkey && participant.status === 'active'
 			);
-			if (pendingSelfOperation?.id === event.id) {
-				emitSelfPositionWriteState({ kind: 'succeeded', operation: pendingSelfOperation.operation });
+			const pendingOperation = pendingSelfOperation?.id === event.id ? pendingSelfOperation : null;
+			const retryableOperation = retryableSelfOperations.get(event.id);
+			if (pendingOperation) {
+				retryableSelfOperations.delete(event.id);
+				emitSelfPositionWriteState({ kind: 'succeeded', operation: pendingOperation.operation });
 				pendingSelfOperation = null;
+			} else if (retryableOperation) {
+				retryableSelfOperations.delete(event.id);
+				if (latestSelfOperationId === event.id) {
+					emitSelfPositionWriteState({ kind: 'succeeded', operation: retryableOperation.operation });
+				}
 			}
 		}
 		return true;
@@ -231,6 +243,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 		const { event, parsed } = candidate;
 		// The planner was consumed before this call. It must never be rolled back.
 		pendingSelfOperation = { id: parsed.id, operation };
+		latestSelfOperationId = parsed.id;
 		emitSelfPositionWriteState({ kind: 'pending', operation });
 		try {
 			const results = await transport!.publish(event);
@@ -242,12 +255,14 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 				applyCanonicalPosition(parsed, Date.now());
 				return { kind: 'succeeded', operation };
 			}
+			retryableSelfOperations.set(parsed.id, pendingSelfOperation);
 			pendingSelfOperation = null;
 			emitSelfPositionWriteState({ kind: 'retryable', operation });
 			return { kind: 'retryable', operation };
 		} catch {
 			if (disposed) return { kind: 'unavailable' };
 			if (pendingSelfOperation?.id !== parsed.id) return { kind: 'succeeded', operation };
+			retryableSelfOperations.set(parsed.id, pendingSelfOperation);
 			pendingSelfOperation = null;
 			emitSelfPositionWriteState({ kind: 'retryable', operation });
 			return { kind: 'retryable', operation };

@@ -313,6 +313,117 @@ describe('world read session', () => {
 		expect(writeStates.at(-1)).toBe('succeeded');
 	});
 
+	it('settles a retryable no-response operation when its matching live echo arrives later', async () => {
+		publish.mockResolvedValueOnce([{ relayUrl: 'wss://relay.test/', outcome: 'no-response' }]);
+		const presenceChanged = vi.fn();
+		const writeStates: string[] = [];
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 },
+			selfAccount: selfAccount(),
+			onPresenceChanged: presenceChanged,
+			onLiveMessage: vi.fn(),
+			onStatusChanged: vi.fn(),
+			onSelfPositionWriteStateChanged: (state) => writeStates.push(state.kind)
+		});
+
+		await session.start();
+		session.completeBootstrap();
+		await expect(session.enterSelf()).resolves.toEqual({ kind: 'retryable', operation: 'entry' });
+		const echoed = parsePositionEvent(publish.mock.calls[0][0], 'c'.repeat(64))!;
+		const beforeEcho = presenceChanged.mock.calls.length;
+		input!.onLivePosition(echoed);
+		input!.onLivePosition(echoed);
+
+		expect(presenceChanged).toHaveBeenCalledTimes(beforeEcho + 1);
+		expect(session.refresh(700_000).participants).toEqual([
+			expect.objectContaining({ id: selfPubkey, position: echoed.position, status: 'active' })
+		]);
+		expect(writeStates.at(-1)).toBe('succeeded');
+	});
+
+	it('settles a retryable publish exception when its matching live echo arrives later', async () => {
+		publish.mockRejectedValueOnce(new Error('publish failed'));
+		const writeStates: string[] = [];
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 },
+			selfAccount: selfAccount(),
+			onPresenceChanged: vi.fn(),
+			onLiveMessage: vi.fn(),
+			onStatusChanged: vi.fn(),
+			onSelfPositionWriteStateChanged: (state) => writeStates.push(state.kind)
+		});
+
+		await session.start();
+		session.completeBootstrap();
+		await expect(session.enterSelf()).resolves.toEqual({ kind: 'retryable', operation: 'entry' });
+		input!.onLivePosition(parsePositionEvent(publish.mock.calls[0][0], 'c'.repeat(64))!);
+
+		expect(writeStates.at(-1)).toBe('succeeded');
+	});
+
+	it('does not let an old retryable echo overwrite a newer pending operation state', async () => {
+		let resolvePublish!: (results: readonly { relayUrl: string; outcome: 'accepted' }[]) => void;
+		result = startResult([], [position('self-bootstrap', 700, selfPubkey, 0, { x: 1, y: 1 })]);
+		publish
+			.mockResolvedValueOnce([{ relayUrl: 'wss://relay.test/', outcome: 'no-response' }])
+			.mockImplementationOnce(() => new Promise((resolve) => { resolvePublish = resolve; }));
+		const writeStates: string[] = [];
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 },
+			selfAccount: selfAccount(),
+			onPresenceChanged: vi.fn(),
+			onLiveMessage: vi.fn(),
+			onStatusChanged: vi.fn(),
+			onSelfPositionWriteStateChanged: (state) => writeStates.push(state.kind)
+		});
+
+		await session.start();
+		session.completeBootstrap();
+		await session.enterSelf();
+		await expect(session.moveSelf('right')).resolves.toEqual({ kind: 'retryable', operation: 'movement' });
+		const oldEcho = parsePositionEvent(publish.mock.calls[0][0], 'c'.repeat(64))!;
+		vi.setSystemTime(701_000);
+		const newerPending = session.moveSelf('down');
+		await Promise.resolve();
+		input!.onLivePosition(oldEcho);
+
+		expect(writeStates.at(-1)).toBe('pending');
+		resolvePublish([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
+		await expect(newerPending).resolves.toEqual({ kind: 'succeeded', operation: 'movement' });
+	});
+
+	it('does not let an old retryable echo overwrite a newer succeeded operation state', async () => {
+		result = startResult([], [position('self-bootstrap', 700, selfPubkey, 0, { x: 1, y: 1 })]);
+		publish
+			.mockResolvedValueOnce([{ relayUrl: 'wss://relay.test/', outcome: 'no-response' }])
+			.mockResolvedValueOnce([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
+		const writeStates: string[] = [];
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 },
+			selfAccount: selfAccount(),
+			onPresenceChanged: vi.fn(),
+			onLiveMessage: vi.fn(),
+			onStatusChanged: vi.fn(),
+			onSelfPositionWriteStateChanged: (state) => writeStates.push(state.kind)
+		});
+
+		await session.start();
+		session.completeBootstrap();
+		await session.enterSelf();
+		await expect(session.moveSelf('right')).resolves.toEqual({ kind: 'retryable', operation: 'movement' });
+		const oldEcho = parsePositionEvent(publish.mock.calls[0][0], 'c'.repeat(64))!;
+		vi.setSystemTime(701_000);
+		await expect(session.moveSelf('down')).resolves.toEqual({ kind: 'succeeded', operation: 'movement' });
+		const newer = parsePositionEvent(publish.mock.calls[1][0], 'c'.repeat(64))!;
+		const beforeOldEcho = writeStates.length;
+		input!.onLivePosition(oldEcho);
+
+		expect(writeStates).toHaveLength(beforeOldEcho);
+		expect(session.refresh(701_000).participants).toEqual([
+			expect.objectContaining({ id: selfPubkey, position: newer.position, status: 'active' })
+		]);
+	});
+
 	it('does not double-apply an echo that arrives before accepted completion', async () => {
 		let resolvePublish: (results: readonly { relayUrl: string; outcome: 'accepted' }[]) => void;
 		publish.mockImplementationOnce(() => new Promise((resolve) => { resolvePublish = resolve; }));
