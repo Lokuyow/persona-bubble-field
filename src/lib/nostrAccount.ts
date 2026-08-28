@@ -7,10 +7,11 @@ const DATABASE_NAME = 'persona-bubble-field-account';
 const STORE_NAME = 'persona-bubble-field-account-state';
 const SECRET_KEY = 'secret-key';
 const TIMESTAMP_KEY = 'last-changed-at-ms';
+const INITIAL_PROFILE_PUBLISHED_PUBKEY_KEY = 'initial-profile-published-pubkey';
 
 interface AccountDatabase extends DBSchema {
 	[STORE_NAME]: {
-		key: typeof SECRET_KEY | typeof TIMESTAMP_KEY;
+		key: typeof SECRET_KEY | typeof TIMESTAMP_KEY | typeof INITIAL_PROFILE_PUBLISHED_PUBKEY_KEY;
 		// Persisted data is untrusted, even when the TypeScript writer is typed.
 		value: unknown;
 	};
@@ -23,6 +24,7 @@ export type AccountSnapshot = Readonly<{
 	secretKey: Uint8Array;
 	pubkey: string;
 	lastChangedAtMs: number;
+	initialProfilePublished: boolean;
 }>;
 
 export type CorruptAccountState = Readonly<{
@@ -40,6 +42,8 @@ export type ReincarnateAccountResult =
 	| Readonly<{ kind: 'cooldown'; nextAllowedAtMs: number }>
 	| Readonly<{ kind: 'uninitialized' }>
 	| CorruptAccountState;
+
+export type MarkInitialProfilePublishedResult = Readonly<{ kind: 'recorded' | 'stale' }>;
 
 type StoredAccountState =
 	| Readonly<{ kind: 'fresh' }>
@@ -108,16 +112,28 @@ async function readAccountState(tx: AccountTransaction): Promise<StoredAccountSt
 		// Invalid scalars are checked by nostr-tools; never expose the library's raw error.
 		return { kind: 'corrupt', reason: 'invalid-secret' };
 	}
+	const [publishedPubkey]: unknown[] = await tx.store.getAll(INITIAL_PROFILE_PUBLISHED_PUBKEY_KEY, 1);
 	return {
 		kind: 'ready',
-		account: { secretKey: secret.slice(), pubkey, lastChangedAtMs: timestamp }
+		account: {
+			secretKey: secret.slice(),
+			pubkey,
+			lastChangedAtMs: timestamp,
+			initialProfilePublished: publishedPubkey === pubkey
+		}
 	};
 }
 
 async function writeNewAccount(tx: AccountTransaction, nowMs: number): Promise<AccountSnapshot> {
 	const secretKey = generateSecretKey().slice();
-	const account: AccountSnapshot = { secretKey, pubkey: getPublicKey(secretKey), lastChangedAtMs: nowMs };
+	const account: AccountSnapshot = {
+		secretKey,
+		pubkey: getPublicKey(secretKey),
+		lastChangedAtMs: nowMs,
+		initialProfilePublished: false
+	};
 	// Await only IDB work while the transaction is active. Overwrite, never archive, the old key.
+	await tx.store.delete(INITIAL_PROFILE_PUBLISHED_PUBKEY_KEY);
 	await tx.store.put(secretKey, SECRET_KEY);
 	await tx.store.put(nowMs, TIMESTAMP_KEY);
 	return account;
@@ -186,4 +202,40 @@ export function loadOrCreateAccount(): Promise<LoadAccountResult> {
 /** Explicitly replaces an account (including a missing secret) after the persisted cooldown. */
 export function reincarnateAccount(): Promise<ReincarnateAccountResult> {
 	return accessAccount('reincarnate');
+}
+
+/** Records only the current account's initial profile publication; stale snapshots cannot affect a replacement. */
+export async function markInitialProfilePublished(
+	account: AccountSnapshot
+): Promise<MarkInitialProfilePublishedResult> {
+	const db = await openAccountDatabase();
+	let tx: AccountTransaction | undefined;
+	try {
+		tx = db.transaction(STORE_NAME, 'readwrite');
+		void tx.done.catch(() => {});
+		const state = await readAccountState(tx);
+		if (
+			state.kind !== 'ready' ||
+			state.account.pubkey !== account.pubkey ||
+			state.account.lastChangedAtMs !== account.lastChangedAtMs
+		) {
+			await tx.done;
+			return { kind: 'stale' };
+		}
+		await tx.store.put(account.pubkey, INITIAL_PROFILE_PUBLISHED_PUBKEY_KEY);
+		await tx.done;
+		return { kind: 'recorded' };
+	} catch {
+		if (tx) {
+			try {
+				tx.abort();
+			} catch {
+				// A request failure may already have aborted the transaction.
+			}
+			await tx.done.catch(() => {});
+		}
+		throw new Error('Account operation failed.');
+	} finally {
+		db.close();
+	}
 }

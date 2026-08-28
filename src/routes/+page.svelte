@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { base } from '$app/paths';
+	import { asset, base } from '$app/paths';
 	import {
 		applyVisibility,
 		createConversationState,
@@ -32,6 +32,12 @@
 	} from '$lib/devWorldSandbox';
 	import { CHARACTER_CATALOG } from '$lib/character';
 	import { deriveCharacterFromPubkey } from '$lib/characterAssignment';
+	import { loadOrCreateAccount } from '$lib/nostrAccount';
+	import {
+		prepareInitialProfilePublication,
+		publishInitialProfile,
+		type PreparedInitialProfilePublication
+	} from '$lib/initialProfilePublication';
 	import { projectPresence } from '$lib/presenceProjection';
 	import type { PresenceState } from '$lib/presence';
 	import type { ParsedWorldMessage } from '$lib/nostrProtocol';
@@ -203,6 +209,27 @@
 		const begin = async () => {
 			if (devWorldSandboxEnabled || startRequested || !hasUsableViewport()) return;
 			startRequested = true;
+			let initialProfilePublication: PreparedInitialProfilePublication | null = null;
+			try {
+				const accountResult = await loadOrCreateAccount();
+				if (
+					(accountResult.kind === 'created' || accountResult.kind === 'restored') &&
+					!accountResult.account.initialProfilePublished
+				) {
+					const character = deriveCharacterFromPubkey(accountResult.account.pubkey, CHARACTER_CATALOG);
+					const absolutePictureUrl = new URL(
+						asset(`/${character.picture}`),
+						window.location.origin
+					).toString();
+					initialProfilePublication = prepareInitialProfilePublication({
+						account: accountResult.account,
+						character,
+						absolutePictureUrl
+					});
+				}
+			} catch {
+				// Account failure is fail-closed for profile publication, not world reading.
+			}
 			session = createWorldReadSession({
 				field: FIELD,
 				onPresenceChanged: setPresence,
@@ -216,6 +243,9 @@
 				setPresence(bootstrap.presence);
 				restoreBootstrapConversation(bootstrap.messages, bootstrap.presence, Date.now());
 				session.completeBootstrap();
+				if (initialProfilePublication) {
+					void publishInitialProfile(initialProfilePublication, (event) => session!.publish(event)).catch(() => {});
+				}
 			} catch {
 				// The session reports a concise fatal status to the UI.
 			}

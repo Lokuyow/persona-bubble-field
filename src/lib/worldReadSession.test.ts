@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { VerifiedEvent } from 'nostr-tools/pure';
 import type { ParsedPositionEvent, ParsedWorldMessage } from './nostrProtocol';
 import { PRESENCE_TIMEOUT_MS } from './presence';
 import { createWorldReadSession, type WorldReadConnectionStatus } from './worldReadSession';
@@ -77,6 +78,30 @@ describe('world read session', () => {
 		]);
 		expect(presences.at(-1)).toBe(1);
 		expect(publish).not.toHaveBeenCalled();
+	});
+
+	it('delegates pre-signed publication to the started transport without changing world status on failure', async () => {
+		const statuses: WorldReadConnectionStatus[] = [];
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 },
+			onPresenceChanged: vi.fn(),
+			onLiveMessage: vi.fn(),
+			onStatusChanged: (status) => statuses.push(status)
+		});
+		const event = { id: 'a'.repeat(64) } as VerifiedEvent;
+		const results = [{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }] as const;
+
+		await session.start();
+		publish.mockResolvedValueOnce(results);
+		await expect(session.publish(event)).resolves.toEqual(results);
+		expect(publish).toHaveBeenCalledWith(event);
+
+		const beforeFailure = [...statuses];
+		publish.mockRejectedValueOnce(new Error('disposed'));
+		await expect(session.publish(event)).rejects.toThrow('disposed');
+		expect(statuses).toEqual(beforeFailure);
+		session.dispose();
+		expect(() => session.publish(event)).toThrow('World read session must start before publishing.');
 	});
 
 	it('buffers live callbacks until bootstrap completion, then drains them once in arrival order', async () => {
