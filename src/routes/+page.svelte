@@ -506,7 +506,7 @@
 		>
 			<div
 				class="field-scene"
-				style={`--cell-size: ${cellSize}px; --avatar-size: ${cellSize === 56 ? 40 : 46}px; width: ${fieldWorldSize.width}px; height: ${fieldWorldSize.height}px; transform: translate3d(${-camera.x}px, ${-camera.y}px, 0);`}
+				style={`--cell-size: ${cellSize}px; --avatar-size: ${cellSize === 56 ? 52 : 68}px; width: ${fieldWorldSize.width}px; height: ${fieldWorldSize.height}px; transform: translate3d(${-camera.x}px, ${-camera.y}px, 0);`}
 			>
 				<div class="field-grid" aria-hidden="true"></div>
 				<div class="field-sun" aria-hidden="true"></div>
@@ -820,20 +820,20 @@
 	.participant {
 		position: absolute;
 		z-index: 3;
-		display: flex;
-		width: calc(var(--cell-size) + 8px);
-		transform: translate(-50%, -15%);
-		flex-direction: column;
-		align-items: center;
-		gap: 5px;
+		width: var(--cell-size);
+		height: var(--cell-size);
+		transform: translate(-50%, -50%);
 		will-change: left, top;
 	}
 
 	.avatar {
-		position: relative;
+		position: absolute;
+		top: 50%;
+		left: 50%;
 		display: grid;
 		width: var(--avatar-size);
 		height: var(--avatar-size);
+		box-sizing: border-box;
 		place-items: center;
 		border: 2px solid rgba(255, 255, 255, 0.88);
 		border-radius: 42% 58% 48% 52%;
@@ -842,7 +842,7 @@
 		font-size: 11px;
 		font-weight: 900;
 		letter-spacing: 0.04em;
-		transform: rotate(-4deg);
+		transform: translate(-50%, -50%) rotate(-4deg);
 	}
 
 	.avatar-coral { background: #f0a488; }
@@ -863,6 +863,17 @@
 	}
 
 	.participant-name {
+		position: absolute;
+		bottom: 1px;
+		left: 50%;
+		display: block;
+		width: max-content;
+		max-width: calc(var(--avatar-size) - 4px);
+		box-sizing: border-box;
+		transform: translateX(-50%);
+		overflow: hidden;
+		white-space: nowrap;
+		text-overflow: ellipsis;
 		padding: 2px 7px 3px;
 		border-radius: 999px;
 		background: rgba(247, 247, 239, 0.74);
