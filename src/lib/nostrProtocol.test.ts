@@ -2,21 +2,25 @@ import { describe, expect, it } from 'vitest';
 import { verifyEvent, type Event, type EventTemplate, type VerifiedEvent } from 'nostr-tools/pure';
 import {
 	CHANNEL_MESSAGE_KIND,
+	PROFILE_KIND,
 	POSITION_KIND,
 	POSITION_SLOT_IDENTIFIERS,
 	PROTOTYPE_NAMESPACE,
 	buildPositionEventTemplate,
+	buildCharacterProfileTemplate,
 	buildPositionFilter,
 	buildTraceMessageFilter,
 	buildWorldMessageFilter,
 	buildWorldMessageTemplate,
 	finalizeWorldEvent,
+	finalizeCharacterProfileEvent,
 	parsePositionEvent,
 	parseWorldMessage,
 	type ChannelReference,
 	type PositionEventTemplate,
 	type WorldMessageTemplate
 } from './nostrProtocol';
+import { CHARACTER_CATALOG } from './character';
 
 const CHANNEL_ID = 'a'.repeat(64);
 const OTHER_CHANNEL_ID = 'b'.repeat(64);
@@ -97,6 +101,47 @@ function receivedCopy(event: Event): Event {
 }
 
 describe('Nostr protocol foundation', () => {
+	it('builds and signs the initial character kind 0 profile', () => {
+		const character = CHARACTER_CATALOG[0];
+		const template = buildCharacterProfileTemplate({
+			character,
+			absolutePictureUrl: 'https://static.example.test/characters/001.webp',
+			createdAt: 1_700_000_000
+		});
+
+		expect(template).toEqual({
+			kind: PROFILE_KIND,
+			created_at: 1_700_000_000,
+			tags: [],
+			content: JSON.stringify({
+				name: character.name,
+				about: character.about,
+				picture: 'https://static.example.test/characters/001.webp'
+			})
+		});
+
+		const event = finalizeCharacterProfileEvent(template, TEST_SECRET_KEY);
+		expect(verifyEvent(event)).toBe(true);
+		expect(event.kind).toBe(0);
+		expect(event.tags).toEqual([]);
+	});
+
+	it.each(['characters/001.webp', '/characters/001.webp', 'not a URL'])('rejects non-absolute picture URLs: %s', (absolutePictureUrl) => {
+		expect(() => buildCharacterProfileTemplate({
+			character: CHARACTER_CATALOG[0],
+			absolutePictureUrl,
+			createdAt: 1_700_000_000
+		})).toThrow(TypeError);
+	});
+
+	it('rejects invalid profile template timestamps', () => {
+		expect(() => buildCharacterProfileTemplate({
+			character: CHARACTER_CATALOG[0],
+			absolutePictureUrl: 'https://static.example.test/characters/001.webp',
+			createdAt: -1
+		})).toThrow(TypeError);
+	});
+
 	it('builds the canonical normal kind 42 shape', () => {
 		const event = buildWorldMessageTemplate({
 			channel,
