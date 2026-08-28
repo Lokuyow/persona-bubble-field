@@ -24,11 +24,13 @@
 	} from '$lib/geometry';
 	import {
 		DEV_WORLD_SELF_ID,
-		DEV_WORLD_SELF_PRESENTATION,
+		getDevWorldCharacter,
 		isDevWorldSandboxEnabled,
 		moveDevWorldSelf,
-		resetDevWorldPresence
+		resetDevWorldPresence,
+		resolveDevWorldCharacterId
 	} from '$lib/devWorldSandbox';
+	import { CHARACTER_CATALOG } from '$lib/character';
 	import { projectPresence } from '$lib/presenceProjection';
 	import type { PresenceState } from '$lib/presence';
 	import type { ParsedWorldMessage } from '$lib/nostrProtocol';
@@ -55,6 +57,7 @@
 		name: string;
 		initials: string;
 		color: AvatarColor;
+		picture?: string;
 	};
 	const AVATAR_COLORS: readonly AvatarColor[] = ['coral', 'lavender', 'mint', 'yellow', 'sky', 'peach', 'rose', 'blue'];
 
@@ -68,6 +71,7 @@
 	let colorByPubkey: Record<string, AvatarColor> = {};
 	let connectionStatus: WorldReadConnectionStatus = { kind: 'bootstrapping' };
 	let devWorldSandboxEnabled = false;
+	let selectedCharacterId = '001';
 
 	$: cellSize = getResponsiveCellSize(viewportSize.width);
 	$: field = { ...FIELD, cellSize };
@@ -79,7 +83,7 @@
 		height: SPEECH_AREA.height
 	};
 	$: fieldAreaBounds = getFieldAreaBounds(viewportSize, speechAreaBounds);
-	$: presenceProjection = getPresenceProjection(presenceState);
+	$: presenceProjection = getPresenceProjection(presenceState, selectedCharacterId);
 	$: camera = presenceProjection.camera;
 	$: actualFieldTop = presenceProjection.actualFieldTop;
 	$: speechAreaVisualBounds = {
@@ -190,7 +194,10 @@
 		let session: ReturnType<typeof createWorldReadSession> | null = null;
 		devWorldSandboxEnabled = isDevWorldSandboxEnabled(import.meta.env.DEV, new URLSearchParams(window.location.search));
 
-		if (devWorldSandboxEnabled) resetSandbox();
+		if (devWorldSandboxEnabled) {
+			selectedCharacterId = resolveDevWorldCharacterId(new URLSearchParams(window.location.search));
+			resetSandbox();
+		}
 
 		const begin = async () => {
 			if (devWorldSandboxEnabled || startRequested || !hasUsableViewport()) return;
@@ -295,12 +302,19 @@
 		return participantTone(members[0] ?? { color: 'lavender' });
 	}
 
-	function participantModels(state: PresenceState): readonly Participant[] {
+	function participantModels(state: PresenceState, selectedId = selectedCharacterId): readonly Participant[] {
 		return state.participants
 			.filter((participant) => participant.status === 'active')
 			.map((participant) => {
 				if (devWorldSandboxEnabled && participant.id === DEV_WORLD_SELF_ID) {
-					return { id: participant.id, ...DEV_WORLD_SELF_PRESENTATION };
+					const character = getDevWorldCharacter(selectedId);
+					return {
+						id: participant.id,
+						name: character.name,
+						initials: '',
+						picture: character.picture,
+						color: 'sky' as const
+					};
 				}
 				return {
 					id: participant.id,
@@ -311,8 +325,8 @@
 			});
 	}
 
-	function getPresenceProjection(state: PresenceState) {
-		return projectPresence(state, participantModels(state), {
+	function getPresenceProjection(state: PresenceState, selectedId = selectedCharacterId) {
+		return projectPresence(state, participantModels(state, selectedId), {
 			cellSize,
 			fieldAreaBounds,
 			fieldWorldSize
@@ -365,6 +379,11 @@
 		if (!devWorldSandboxEnabled) return;
 		const result = moveDevWorldSelf(presenceState, direction, Date.now());
 		if (result.moved) setPresence(result.state);
+	}
+
+	function selectSandboxCharacter(characterId: string): void {
+		if (!devWorldSandboxEnabled) return;
+		selectedCharacterId = resolveDevWorldCharacterId(new URLSearchParams(`?devCharacter=${encodeURIComponent(characterId)}`));
 	}
 
 	function resetSandbox(): void {
@@ -502,7 +521,11 @@
 						aria-label={participant.name}
 					>
 						<div class={`avatar avatar-${participant.color}`}>
-							<span>{participant.initials}</span>
+							{#if participant.picture}
+								<img src={`${base}/${participant.picture}`} alt="" aria-hidden="true" />
+							{:else}
+								<span>{participant.initials}</span>
+							{/if}
 						</div>
 						<span class="participant-name">{participant.name}</span>
 					</div>
@@ -558,6 +581,14 @@
 
 	{#if devWorldSandboxEnabled}
 		<div class="sandbox-controls" aria-label="DEV sandbox controls">
+			<label class="sandbox-character-picker">
+				<span>Character</span>
+				<select aria-label="Select sandbox character" value={selectedCharacterId} on:change={(event) => selectSandboxCharacter((event.currentTarget as HTMLSelectElement).value)}>
+					{#each CHARACTER_CATALOG as character (character.characterId)}
+						<option value={character.characterId}>{character.characterId} — {character.name}</option>
+					{/each}
+				</select>
+			</label>
 			<div class="sandbox-direction-pad">
 				<span aria-hidden="true"></span>
 				<button type="button" aria-label="Move up" on:click={() => moveSandboxSelf('up')}>↑</button>
@@ -823,6 +854,14 @@
 	.avatar-rose { background: #dca1b2; }
 	.avatar-blue { background: #90b4d0; }
 
+	.avatar img {
+		display: block;
+		width: 100%;
+		height: 100%;
+		object-fit: contain;
+		object-position: center;
+	}
+
 	.participant-name {
 		padding: 2px 7px 3px;
 		border-radius: 999px;
@@ -975,6 +1014,27 @@
 		transform: translateX(-50%);
 	}
 
+	.sandbox-character-picker {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		color: #596662;
+		font-size: 10px;
+		font-weight: 800;
+		letter-spacing: 0.04em;
+	}
+
+	.sandbox-character-picker select {
+		max-width: 205px;
+		min-height: 38px;
+		padding: 0 9px;
+		border: 1px solid rgba(57, 67, 64, 0.2);
+		border-radius: 10px;
+		background: rgba(255, 255, 255, 0.86);
+		color: #3f4a47;
+		font: inherit;
+	}
+
 	.sandbox-direction-pad {
 		display: grid;
 		grid-template-columns: repeat(3, 38px);
@@ -1008,7 +1068,8 @@
 	}
 
 	.sandbox-direction-pad button:focus-visible,
-	.sandbox-reset:focus-visible {
+	.sandbox-reset:focus-visible,
+	.sandbox-character-picker select:focus-visible {
 		outline: 3px solid #6dabb9;
 		outline-offset: 2px;
 	}
@@ -1061,6 +1122,16 @@
 			bottom: 76px;
 			flex-direction: column;
 			gap: 7px;
+		}
+
+		.sandbox-character-picker {
+			width: min(100vw - 32px, 280px);
+			justify-content: space-between;
+		}
+
+		.sandbox-character-picker select {
+			max-width: 210px;
+			flex: 1;
 		}
 
 		.footer-note {

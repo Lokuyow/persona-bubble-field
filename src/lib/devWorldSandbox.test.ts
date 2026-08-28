@@ -4,11 +4,14 @@ import { createPresenceState, getParticipant } from './presence';
 import {
 	createDevWorldPresence,
 	DEV_WORLD_SELF_ID,
-	DEV_WORLD_SELF_PRESENTATION,
+	DEV_WORLD_DEFAULT_CHARACTER_ID,
+	getDevWorldCharacter,
 	isDevWorldSandboxEnabled,
 	moveDevWorldSelf,
-	resetDevWorldPresence
+	resetDevWorldPresence,
+	resolveDevWorldCharacterId
 } from './devWorldSandbox';
+import { CHARACTER_CATALOG } from './character';
 
 const field = { columns: 16, rows: 8 };
 
@@ -24,7 +27,7 @@ describe('DEV world sandbox', () => {
 		expect(isDevWorldSandboxEnabled(false, new URLSearchParams('?devWorld=1'))).toBe(false);
 	});
 
-	it('creates the deterministic self and its fixed presentation', () => {
+	it('creates the deterministic self without embedding presentation data', () => {
 		const presence = createDevWorldPresence(field, 100);
 
 		expect(presence).toEqual({
@@ -36,7 +39,17 @@ describe('DEV world sandbox', () => {
 				status: 'active'
 			}]
 		});
-		expect(DEV_WORLD_SELF_PRESENTATION).toEqual({ name: 'Dev Wanderer', initials: 'DEV', color: 'sky' });
+	});
+
+	it('resolves the default, valid, and unknown DEV character query values', () => {
+		expect(resolveDevWorldCharacterId(new URLSearchParams())).toBe(DEV_WORLD_DEFAULT_CHARACTER_ID);
+		expect(resolveDevWorldCharacterId(new URLSearchParams('?devCharacter=005'))).toBe('005');
+		expect(resolveDevWorldCharacterId(new URLSearchParams('?devCharacter=999'))).toBe('001');
+		expect(getDevWorldCharacter('005')).toBe(CHARACTER_CATALOG[4]);
+		expect(getDevWorldCharacter('999')).toBe(CHARACTER_CATALOG[0]);
+		expect(CHARACTER_CATALOG.map(({ characterId }) => characterId)).toEqual(
+			['001', '002', '003', '004', '005', '006', '007', '008', '009', '010']
+		);
 	});
 
 	it.each([
