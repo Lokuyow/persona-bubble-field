@@ -18,9 +18,17 @@
 		mergedBubblePreferredAnchor,
 		normalBubblePreferredAnchor,
 		placeBubbles,
+		type Direction,
 		type Size,
 		type WorldPoint
 	} from '$lib/geometry';
+	import {
+		DEV_WORLD_SELF_ID,
+		DEV_WORLD_SELF_PRESENTATION,
+		isDevWorldSandboxEnabled,
+		moveDevWorldSelf,
+		resetDevWorldPresence
+	} from '$lib/devWorldSandbox';
 	import { projectPresence } from '$lib/presenceProjection';
 	import type { PresenceState } from '$lib/presence';
 	import type { ParsedWorldMessage } from '$lib/nostrProtocol';
@@ -59,6 +67,7 @@
 	let lastVisibilityKey: string | null = null;
 	let colorByPubkey: Record<string, AvatarColor> = {};
 	let connectionStatus: WorldReadConnectionStatus = { kind: 'bootstrapping' };
+	let devWorldSandboxEnabled = false;
 
 	$: cellSize = getResponsiveCellSize(viewportSize.width);
 	$: field = { ...FIELD, cellSize };
@@ -179,9 +188,12 @@
 		let mounted = true;
 		let startRequested = false;
 		let session: ReturnType<typeof createWorldReadSession> | null = null;
+		devWorldSandboxEnabled = isDevWorldSandboxEnabled(import.meta.env.DEV, new URLSearchParams(window.location.search));
+
+		if (devWorldSandboxEnabled) resetSandbox();
 
 		const begin = async () => {
-			if (startRequested || !hasUsableViewport()) return;
+			if (devWorldSandboxEnabled || startRequested || !hasUsableViewport()) return;
 			startRequested = true;
 			session = createWorldReadSession({
 				field: FIELD,
@@ -206,12 +218,20 @@
 			const rect = viewportElement.getBoundingClientRect();
 			if (rect.width <= 0 || rect.height <= 0) return;
 			viewportSize = { width: rect.width, height: rect.height };
-			void begin();
+			if (!devWorldSandboxEnabled) void begin();
+		};
+		const handleKeydown = (event: KeyboardEvent) => {
+			if (event.repeat || isEditableTarget(event.target)) return;
+			const direction = directionFromKey(event.key);
+			if (!direction) return;
+			event.preventDefault();
+			moveSandboxSelf(direction);
 		};
 
 		const observer = new ResizeObserver(updateViewport);
 		observer.observe(viewportElement);
 		updateViewport();
+		if (devWorldSandboxEnabled) window.addEventListener('keydown', handleKeydown);
 		const expiryTimer = window.setInterval(() => {
 			const now = Date.now();
 			const nextPresence = session?.refresh(now);
@@ -224,6 +244,7 @@
 		return () => {
 			mounted = false;
 			observer.disconnect();
+			window.removeEventListener('keydown', handleKeydown);
 			window.clearInterval(expiryTimer);
 			session?.dispose();
 		};
@@ -277,12 +298,17 @@
 	function participantModels(state: PresenceState): readonly Participant[] {
 		return state.participants
 			.filter((participant) => participant.status === 'active')
-			.map((participant) => ({
-				id: participant.id,
-				name: `${participant.id.slice(0, 8)}…${participant.id.slice(-6)}`,
-				initials: '?',
-				color: colorByPubkey[participant.id] ?? AVATAR_COLORS[0]
-			}));
+			.map((participant) => {
+				if (devWorldSandboxEnabled && participant.id === DEV_WORLD_SELF_ID) {
+					return { id: participant.id, ...DEV_WORLD_SELF_PRESENTATION };
+				}
+				return {
+					id: participant.id,
+					name: `${participant.id.slice(0, 8)}…${participant.id.slice(-6)}`,
+					initials: '?',
+					color: colorByPubkey[participant.id] ?? AVATAR_COLORS[0]
+				};
+			});
 	}
 
 	function getPresenceProjection(state: PresenceState) {
@@ -319,6 +345,35 @@
 		}
 		colorByPubkey = nextColors;
 		presenceState = nextPresence;
+	}
+
+	function directionFromKey(key: string): Direction | null {
+		if (key === 'ArrowUp') return 'up';
+		if (key === 'ArrowDown') return 'down';
+		if (key === 'ArrowLeft') return 'left';
+		if (key === 'ArrowRight') return 'right';
+		return null;
+	}
+
+	function isEditableTarget(target: EventTarget | null): boolean {
+		return target instanceof HTMLElement && (
+			target.matches('input, textarea, select') || target.isContentEditable
+		);
+	}
+
+	function moveSandboxSelf(direction: Direction): void {
+		if (!devWorldSandboxEnabled) return;
+		const result = moveDevWorldSelf(presenceState, direction, Date.now());
+		if (result.moved) setPresence(result.state);
+	}
+
+	function resetSandbox(): void {
+		if (!devWorldSandboxEnabled) return;
+		conversationState = createConversationState();
+		lastPlacedAnchorById = {};
+		lastVisibilityKey = null;
+		colorByPubkey = {};
+		setPresence(resetDevWorldPresence(FIELD, Date.now()));
 	}
 
 	function toConversationMessage(message: ParsedWorldMessage) {
@@ -395,11 +450,13 @@
 </script>
 
 <svelte:head>
-	<title>Persona Bubble Field — read-only world</title>
+	<title>{devWorldSandboxEnabled ? 'Persona Bubble Field — DEV World Sandbox' : 'Persona Bubble Field — read-only world'}</title>
 	<link rel="icon" href={`${base}/favicon.svg`} />
 	<meta
 		name="description"
-		content="A read-only view of the current prototype world from Nostr relays."
+		content={devWorldSandboxEnabled
+			? 'A local-only development sandbox with no Relay connection or publishing.'
+			: 'A read-only view of the current prototype world from Nostr relays.'}
 	/>
 </svelte:head>
 
@@ -409,10 +466,10 @@
 			<span class="brand-mark" aria-hidden="true">✳</span>
 			<div>
 				<p class="brand-name">persona field</p>
-				<p class="brand-subtitle">read-only Relay world</p>
+				<p class="brand-subtitle">{devWorldSandboxEnabled ? 'DEV World Sandbox' : 'read-only Relay world'}</p>
 			</div>
 		</div>
-		<div class="prototype-badge"><span></span> spectator / read only</div>
+		<div class="prototype-badge"><span></span>{devWorldSandboxEnabled ? 'DEV sandbox · local only' : 'spectator / read only'}</div>
 	</div>
 
 	<section class="field-viewport" bind:this={viewportElement} aria-label="Conversation field">
@@ -435,7 +492,7 @@
 				<div class="field-grid" aria-hidden="true"></div>
 				<div class="field-sun" aria-hidden="true"></div>
 				<div class="field-label field-label-top">the little clearing</div>
-				<div class="field-label field-label-bottom">16 × 8 / Relay world</div>
+				<div class="field-label field-label-bottom">16 × 8 / {devWorldSandboxEnabled ? 'DEV sandbox' : 'Relay world'}</div>
 
 				{#each participantViews as participant (participant.id)}
 					<div
@@ -482,14 +539,15 @@
 		</div>
 
 		<div class="viewport-vignette" aria-hidden="true"></div>
-		<div class="camera-chip"><span class="camera-dot"></span> spectator camera · origin</div>
+		<div class="camera-chip"><span class="camera-dot"></span>{devWorldSandboxEnabled ? 'self camera · DEV' : 'spectator camera · origin'}</div>
 	</section>
 
 	<div class="status-panel">
 		<div>
-			<p class="panel-kicker">prototype world · {presenceState.participants.filter((participant) => participant.status === 'active').length} active</p>
+			<p class="panel-kicker">{devWorldSandboxEnabled ? 'DEV sandbox' : 'prototype world'} · {presenceState.participants.filter((participant) => participant.status === 'active').length} active</p>
 			<p class="status-message" aria-live="polite">
-				{#if connectionStatus.kind === 'bootstrapping'}connecting to prototype world…
+				{#if devWorldSandboxEnabled}local only · Relay connection disabled · publishing disabled
+				{:else if connectionStatus.kind === 'bootstrapping'}connecting to prototype world…
 				{:else if connectionStatus.kind === 'available'}world live
 				{:else if connectionStatus.kind === 'degraded'}world live · limited relay availability
 				{:else}world unavailable · {connectionStatus.message}
@@ -498,7 +556,21 @@
 		</div>
 	</div>
 
-	<p class="footer-note">read-only Relay state · DOM participants · SVG tails · no publishing</p>
+	{#if devWorldSandboxEnabled}
+		<div class="sandbox-controls" aria-label="DEV sandbox controls">
+			<div class="sandbox-direction-pad">
+				<span aria-hidden="true"></span>
+				<button type="button" aria-label="Move up" on:click={() => moveSandboxSelf('up')}>↑</button>
+				<span aria-hidden="true"></span>
+				<button type="button" aria-label="Move left" on:click={() => moveSandboxSelf('left')}>←</button>
+				<button type="button" aria-label="Move down" on:click={() => moveSandboxSelf('down')}>↓</button>
+				<button type="button" aria-label="Move right" on:click={() => moveSandboxSelf('right')}>→</button>
+			</div>
+			<button class="sandbox-reset" type="button" on:click={resetSandbox}>Reset sandbox</button>
+		</div>
+	{/if}
+
+	<p class="footer-note">{devWorldSandboxEnabled ? 'DEV sandbox · local only · no Relay connection · no publishing' : 'read-only Relay state · DOM participants · SVG tails · no publishing'}</p>
 </main>
 
 <style>
@@ -536,7 +608,8 @@
 	.topbar,
 	.status-panel,
 	.footer-note,
-	.camera-chip {
+	.camera-chip,
+	.sandbox-controls {
 		position: absolute;
 		z-index: 10;
 	}
@@ -892,6 +965,54 @@
 		font-weight: 800;
 	}
 
+	.sandbox-controls {
+		bottom: 76px;
+		left: 50%;
+		z-index: 11;
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		transform: translateX(-50%);
+	}
+
+	.sandbox-direction-pad {
+		display: grid;
+		grid-template-columns: repeat(3, 38px);
+		gap: 4px;
+	}
+
+	.sandbox-direction-pad button,
+	.sandbox-reset {
+		border: 1px solid rgba(57, 67, 64, 0.2);
+		background: rgba(255, 255, 255, 0.86);
+		box-shadow: 0 5px 12px rgba(58, 70, 61, 0.14);
+		color: #3f4a47;
+		font-weight: 800;
+	}
+
+	.sandbox-direction-pad button {
+		display: grid;
+		width: 38px;
+		height: 38px;
+		place-items: center;
+		border-radius: 10px;
+		font-size: 18px;
+	}
+
+	.sandbox-reset {
+		min-height: 38px;
+		padding: 0 11px;
+		border-radius: 999px;
+		font-size: 10px;
+		letter-spacing: 0.04em;
+	}
+
+	.sandbox-direction-pad button:focus-visible,
+	.sandbox-reset:focus-visible {
+		outline: 3px solid #6dabb9;
+		outline-offset: 2px;
+	}
+
 	.footer-note {
 		bottom: 8px;
 		left: 50%;
@@ -934,6 +1055,12 @@
 			right: 16px;
 			bottom: 24px;
 			font-size: 8px;
+		}
+
+		.sandbox-controls {
+			bottom: 76px;
+			flex-direction: column;
+			gap: 7px;
 		}
 
 		.footer-note {
