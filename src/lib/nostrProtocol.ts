@@ -1,6 +1,7 @@
 import { finalizeEvent, verifyEvent, type Event, type EventTemplate, type VerifiedEvent } from 'nostr-tools/pure';
 import type { Filter } from 'nostr-tools/filter';
 import type { SpeechType } from './conversation';
+import type { Character } from './character';
 import {
 	formatCanonicalGridPosition,
 	parseCanonicalGridPosition,
@@ -10,6 +11,7 @@ import {
 export const PROTOTYPE_NAMESPACE = 'io.github.lokuyow.persona-bubble-field';
 export const CHANNEL_MESSAGE_KIND = 42;
 export const POSITION_KIND = 30078;
+export const PROFILE_KIND = 0;
 export const POSITION_SLOT_IDENTIFIERS = [
 	`${PROTOTYPE_NAMESPACE}:position:0`,
 	`${PROTOTYPE_NAMESPACE}:position:1`
@@ -39,12 +41,22 @@ export type PositionEventInput = {
 	createdAt: number;
 };
 
+export type CharacterProfileInput = {
+	character: Character;
+	absolutePictureUrl: string;
+	createdAt: number;
+};
+
 export type WorldMessageTemplate = EventTemplate & {
 	kind: typeof CHANNEL_MESSAGE_KIND;
 };
 
 export type PositionEventTemplate = EventTemplate & {
 	kind: typeof POSITION_KIND;
+};
+
+export type CharacterProfileTemplate = EventTemplate & {
+	kind: typeof PROFILE_KIND;
 };
 
 export type WorldEventTemplate = WorldMessageTemplate | PositionEventTemplate;
@@ -102,6 +114,15 @@ function assertRelayHint(relayHint: string): void {
 function assertCreatedAt(value: number): void {
 	if (!Number.isSafeInteger(value) || value < 0) {
 		throw new TypeError('created_at must be a non-negative safe integer in Unix seconds.');
+	}
+}
+
+function assertAbsolutePictureUrl(value: string): void {
+	try {
+		const url = new URL(value);
+		if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error();
+	} catch {
+		throw new TypeError('Picture URL must be an absolute HTTP(S) URL.');
 	}
 }
 
@@ -173,8 +194,32 @@ export function buildPositionEventTemplate(input: PositionEventInput): PositionE
 	};
 }
 
+export function buildCharacterProfileTemplate(input: CharacterProfileInput): CharacterProfileTemplate {
+	assertCreatedAt(input.createdAt);
+	assertAbsolutePictureUrl(input.absolutePictureUrl);
+
+	return {
+		kind: PROFILE_KIND,
+		created_at: input.createdAt,
+		tags: [],
+		content: JSON.stringify({
+			name: input.character.name,
+			about: input.character.about,
+			picture: input.absolutePictureUrl
+		})
+	};
+}
+
 /** Delegates ID generation and Schnorr signing to nostr-tools. */
 export function finalizeWorldEvent(template: WorldEventTemplate, secretKey: Uint8Array): VerifiedEvent {
+	return finalizeEvent(template, secretKey);
+}
+
+/** Delegates ID generation and Schnorr signing to nostr-tools. */
+export function finalizeCharacterProfileEvent(
+	template: CharacterProfileTemplate,
+	secretKey: Uint8Array
+): VerifiedEvent {
 	return finalizeEvent(template, secretKey);
 }
 
