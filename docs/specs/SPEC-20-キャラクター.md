@@ -10,7 +10,9 @@
 
 新規生成されたNostr pubkeyから、決定的にキャラクターを導出する。
 
-同じpubkeyからは常に同じキャラクターが導出される。
+同一の現行character catalogと導出規則を使用する限り、同じpubkeyからは常に同じキャラクターが導出される。
+
+正式公開前のprototypeでは、catalogまたは導出規則を破壊的に変更した結果、同じpubkeyの割当が変化してよい。正式公開版としてキャラクター体系と導出規則をfreezeした後は、既存pubkey → characterの対応を維持する。
 
 Nostr鍵自体がランダム生成されるため、正規UIを通常どおり利用するユーザーから見るとランダムなキャラクター抽選として扱う。
 
@@ -39,12 +41,25 @@ Nostr鍵自体がランダム生成されるため、正規UIを通常どおり�
 
 ### 導出規則の固定
 
-pubkey → characterの対応は、既存ユーザーの専用世界での人格そのものである。
+prototypeでは、NIP-01のcanonicalな32-byte lowercase hex pubkeyを入力とする。
 
-そのため公開前に、少なくとも以下を確定し、テストfixture等によって固定する。
+pubkey全体を符号なし整数として解釈し、候補character catalogの件数でmodを取る。得られたindexのcharacterを割当結果とする。
+
+候補catalogには個別のweightやrarityを持たせない。追加hash、独自乱数、永続化されたassignment recordも導入しない。
+
+invalid pubkeyまたは空の候補集合は、本来成立しない入力としてfail-closeする。デフォルトcharacterその他のsilent fallbackで隠さない。
+
+prototype期間は、キャラクター総数、catalog内容・順序、導出方式、slot数、slot順、slot → characterId対応等を破壊的に変更してよい。必要であれば既存browser-local account/dataをresetしてよい。
+
+prototype期間の旧割当を維持するmigration、legacy assignment、version別互換pathは設けない。
+
+正式公開版としてキャラクター体系と導出規則をfreezeした後、pubkey → characterの対応は既存ユーザーの専用世界での人格そのものである。
+
+そのためfreeze時に、少なくとも以下を確定し、テストfixture等によって固定する。
 
 - 導出アルゴリズム
 - アプリ固有の導出用識別文字列等
+- character catalogの内容・順序
 - character slot数
 - slot順
 - slot → characterId の対応
@@ -299,13 +314,7 @@ pubkey → characterの対応は、既存ユーザーの専用世界での人格
 - 基本プロフィール
 - キャラクターの同一性に関わる情報
 
-また、キャラクター割当に影響する以下の構造も固定する。
-
-- character slot数
-- slot順
-- slot → characterId
-
-これらを変更して既存ユーザーの人格が変化することを避ける。
+キャラクター割当に影響する構造の固定は、[導出規則の固定](#導出規則の固定)を正とする。これらを変更して既存ユーザーの人格が変化することを避ける。
 
 ### 後から変更可能なもの
 
