@@ -1,5 +1,5 @@
-import { randomUUID } from 'node:crypto';
-import { access, mkdir, readFile, readdir, rename, rm, stat } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { access, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,6 +14,19 @@ export const DELIVERY_ALPHA_QUALITY = 100;
 export const DELIVERY_EFFORT = 6;
 export const DEFAULT_INPUT_DIRECTORY = path.join(repositoryRoot, '.character-sources');
 export const OUTPUT_DIRECTORY = path.join(repositoryRoot, 'static', 'characters');
+export const CACHE_STATE_PATH = path.join(repositoryRoot, '.character-image-cache.json');
+export const PIPELINE_CONFIG = Object.freeze({
+	width: DELIVERY_SIZE,
+	height: DELIVERY_SIZE,
+	format: 'webp',
+	fit: 'contain',
+	position: 'center',
+	background: { r: 0, g: 0, b: 0, alpha: 0 },
+	quality: DELIVERY_QUALITY,
+	alphaQuality: DELIVERY_ALPHA_QUALITY,
+	effort: DELIVERY_EFFORT
+});
+export const PIPELINE_SIGNATURE = createHash('sha256').update(JSON.stringify(PIPELINE_CONFIG)).digest('hex');
 
 function describePath(filePath) {
 	const relativePath = path.relative(repositoryRoot, filePath);
@@ -26,6 +39,10 @@ async function readSourceMetadata(sourcePath) {
 	} catch (error) {
 		throw new Error(`cannot decode image (${error instanceof Error ? error.message : String(error)})`);
 	}
+}
+
+async function sha256File(filePath) {
+	return createHash('sha256').update(await readFile(filePath)).digest('hex');
 }
 
 function validateSourceMetadata(metadata) {
@@ -81,6 +98,29 @@ async function replaceOutput(tempPath, outputPath) {
 	}
 }
 
+async function loadCache(cachePath) {
+	try {
+		const parsed = JSON.parse(await readFile(cachePath, 'utf8'));
+		if (parsed?.version !== 1 || typeof parsed.entries !== 'object' || parsed.entries === null || Array.isArray(parsed.entries)) {
+			return { version: 1, entries: {} };
+		}
+		return { version: 1, entries: parsed.entries };
+	} catch {
+		return { version: 1, entries: {} };
+	}
+}
+
+async function saveCache(cachePath, entries) {
+	const tempPath = `${cachePath}.${process.pid}.${randomUUID()}.tmp`;
+	try {
+		await mkdir(path.dirname(cachePath), { recursive: true });
+		await writeFile(tempPath, `${JSON.stringify({ version: 1, entries }, null, 2)}\n`, 'utf8');
+		await replaceOutput(tempPath, cachePath);
+	} finally {
+		await rm(tempPath, { force: true });
+	}
+}
+
 async function convertOne(sourcePath, outputPath) {
 	const tempPath = path.join(
 		path.dirname(outputPath),
@@ -90,17 +130,17 @@ async function convertOne(sourcePath, outputPath) {
 	try {
 		await sharp(sourcePath)
 			.resize({
-				width: DELIVERY_SIZE,
-				height: DELIVERY_SIZE,
-				fit: 'contain',
-				position: 'center',
-				background: { r: 0, g: 0, b: 0, alpha: 0 },
+				width: PIPELINE_CONFIG.width,
+				height: PIPELINE_CONFIG.height,
+				fit: PIPELINE_CONFIG.fit,
+				position: PIPELINE_CONFIG.position,
+				background: PIPELINE_CONFIG.background,
 				withoutEnlargement: true
 			})
 			.webp({
-				quality: DELIVERY_QUALITY,
-				alphaQuality: DELIVERY_ALPHA_QUALITY,
-				effort: DELIVERY_EFFORT
+				quality: PIPELINE_CONFIG.quality,
+				alphaQuality: PIPELINE_CONFIG.alphaQuality,
+				effort: PIPELINE_CONFIG.effort
 			})
 			.toFile(tempPath);
 
@@ -136,14 +176,15 @@ async function collectSources(inputDirectory) {
 
 	const collisions = new Map();
 	for (const source of sources) {
-		const paths = collisions.get(source.basename) ?? [];
-		paths.push(source.sourcePath);
-		collisions.set(source.basename, paths);
+		const key = source.basename.toLowerCase();
+		const collision = collisions.get(key) ?? { basename: source.basename, paths: [] };
+		collision.paths.push(source.sourcePath);
+		collisions.set(key, collision);
 	}
 
 	const collisionMessages = [...collisions.entries()]
-		.filter(([, paths]) => paths.length > 1)
-		.map(([basename, paths]) => `basename "${basename}" maps to multiple outputs: ${paths.map(describePath).join(', ')}`);
+		.filter(([, collision]) => collision.paths.length > 1)
+		.map(([, collision]) => `basename "${collision.basename}" maps to multiple outputs: ${collision.paths.map(describePath).join(', ')}`);
 
 	if (collisionMessages.length > 0) {
 		throw new Error(`input validation failed:\n- ${collisionMessages.join('\n- ')}`);
@@ -176,15 +217,23 @@ async function collectSources(inputDirectory) {
 export async function runPipeline({
 	inputDirectory = DEFAULT_INPUT_DIRECTORY,
 	outputDirectory = OUTPUT_DIRECTORY,
+	cachePath = CACHE_STATE_PATH,
 	force = false
 } = {}) {
 	const resolvedInputDirectory = path.resolve(inputDirectory);
 	const resolvedOutputDirectory = path.resolve(outputDirectory);
+	const resolvedCachePath = path.resolve(cachePath);
 	if (resolvedInputDirectory === DEFAULT_INPUT_DIRECTORY && !(await fileExists(resolvedInputDirectory))) {
 		await mkdir(resolvedInputDirectory, { recursive: true });
 	}
 	const sources = await collectSources(resolvedInputDirectory);
 	await mkdir(resolvedOutputDirectory, { recursive: true });
+	const sourcesWithHashes = await Promise.all(
+		sources.map(async (source) => ({ ...source, sourceHash: await sha256File(source.sourcePath) }))
+	);
+	const cache = await loadCache(resolvedCachePath);
+	const cacheEntries = { ...cache.entries };
+	let cacheChanged = false;
 
 	const summary = {
 		scanned: sources.length,
@@ -196,25 +245,36 @@ export async function runPipeline({
 		errors: []
 	};
 
-	for (const source of sources) {
+	for (const source of sourcesWithHashes) {
 		const outputPath = path.join(resolvedOutputDirectory, `${source.basename}.webp`);
 		const outputExists = await fileExists(outputPath);
 		const hadOutputBeforeConversion = outputExists;
-		let shouldConvert = force || !outputExists;
+		let shouldSkip = false;
 
-		if (outputExists && !force) {
-			const [sourceStats, outputStats] = await Promise.all([stat(source.sourcePath), stat(outputPath)]);
-			const outputIsValid = await validateDeliveryImage(outputPath);
-			shouldConvert = sourceStats.mtimeMs > outputStats.mtimeMs || !outputIsValid;
+		if (!force && outputExists && (await validateDeliveryImage(outputPath))) {
+			const cacheEntry = cacheEntries[source.basename];
+			if (
+				cacheEntry?.pipelineSignature === PIPELINE_SIGNATURE &&
+				cacheEntry.sourceSha256 === source.sourceHash
+			) {
+				shouldSkip = cacheEntry.outputSha256 === (await sha256File(outputPath));
+			}
 		}
 
-		if (!shouldConvert) {
+		if (shouldSkip) {
 			summary.skipped += 1;
 			continue;
 		}
 
 		try {
 			await convertOne(source.sourcePath, outputPath);
+			const outputHash = await sha256File(outputPath);
+			cacheEntries[source.basename] = {
+				sourceSha256: source.sourceHash,
+				outputSha256: outputHash,
+				pipelineSignature: PIPELINE_SIGNATURE
+			};
+			cacheChanged = true;
 			if (hadOutputBeforeConversion) {
 				summary.updated += 1;
 			} else {
@@ -223,6 +283,15 @@ export async function runPipeline({
 		} catch (error) {
 			summary.failed += 1;
 			summary.errors.push(`${describePath(source.sourcePath)}: ${error instanceof Error ? error.message : String(error)}`);
+		}
+	}
+
+	if (cacheChanged) {
+		try {
+			await saveCache(resolvedCachePath, cacheEntries);
+		} catch (error) {
+			summary.failed += 1;
+			summary.errors.push(`cache ${resolvedCachePath}: ${error instanceof Error ? error.message : String(error)}`);
 		}
 	}
 
