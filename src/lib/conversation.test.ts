@@ -69,6 +69,23 @@ describe('conversation lifecycle', () => {
 		expect(replayed.normalBubbles).toEqual([]);
 	});
 
+	it('keeps an event-created expiry instead of granting a delayed message a fresh duration', () => {
+		const delayed = receive(createConversationState(), message('m1', 'alice', 'hello', 'normal', 1_000), true, 1_000);
+
+		expect(pruneExpired(delayed, 1_099).normalBubbles).toHaveLength(1);
+		expect(pruneExpired(delayed, 1_100).normalBubbles).toEqual([]);
+	});
+
+	it('does not admit an expired relay message into viewer-local conversation state', () => {
+		const naturalExpiresAt = 1_000 + DURATION;
+		const now = naturalExpiresAt;
+		let state = createConversationState();
+		if (naturalExpiresAt > now) state = receive(state, message('m1', 'alice', 'hello', 'normal', 1_000), true, 1_000);
+
+		expect(state.normalBubbles).toEqual([]);
+		expect(state.processedMessageIds.size).toBe(0);
+	});
+
 	it('removes an active normal bubble when its speaker goes offscreen', () => {
 		const state = applyVisibility(normalState(), new Set(['bob']));
 
