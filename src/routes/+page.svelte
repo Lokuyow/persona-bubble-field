@@ -32,7 +32,7 @@
 	} from '$lib/devWorldSandbox';
 	import { CHARACTER_CATALOG } from '$lib/character';
 	import { deriveCharacterFromPubkey } from '$lib/characterAssignment';
-	import { loadOrCreateAccount } from '$lib/nostrAccount';
+	import { loadOrCreateAccount, type AccountSnapshot } from '$lib/nostrAccount';
 	import {
 		prepareInitialProfilePublication,
 		publishInitialProfile,
@@ -41,7 +41,11 @@
 	import { projectPresence } from '$lib/presenceProjection';
 	import type { PresenceState } from '$lib/presence';
 	import type { ParsedWorldMessage } from '$lib/nostrProtocol';
-	import { createWorldReadSession, type WorldReadConnectionStatus } from '$lib/worldReadSession';
+	import {
+		createWorldReadSession,
+		type SelfPositionWriteState,
+		type WorldReadConnectionStatus
+	} from '$lib/worldReadSession';
 
 	const FIELD = {
 		columns: 16,
@@ -77,6 +81,9 @@
 	let lastVisibilityKey: string | null = null;
 	let colorByPubkey: Record<string, AvatarColor> = {};
 	let connectionStatus: WorldReadConnectionStatus = { kind: 'bootstrapping' };
+	let selfAccount: AccountSnapshot | null = null;
+	let selfPositionWriteState: SelfPositionWriteState = { kind: 'unavailable' };
+	let worldSession: ReturnType<typeof createWorldReadSession> | null = null;
 	let devWorldSandboxEnabled = false;
 	let selectedCharacterId = '001';
 
@@ -90,7 +97,11 @@
 		height: SPEECH_AREA.height
 	};
 	$: fieldAreaBounds = getFieldAreaBounds(viewportSize, speechAreaBounds);
-	$: presenceProjection = getPresenceProjection(presenceState, selectedCharacterId);
+	$: selfProjectionId = devWorldSandboxEnabled ? DEV_WORLD_SELF_ID : selfAccount?.pubkey ?? 'you';
+	$: presenceProjection = getPresenceProjection(presenceState, selectedCharacterId, selfProjectionId);
+	$: isWorldSelfActive = Boolean(selfAccount && presenceState.participants.some((participant) =>
+		participant.id === selfAccount?.pubkey && participant.status === 'active'
+	));
 	$: camera = presenceProjection.camera;
 	$: actualFieldTop = presenceProjection.actualFieldTop;
 	$: speechAreaVisualBounds = {
@@ -212,17 +223,17 @@
 			let initialProfilePublication: PreparedInitialProfilePublication | null = null;
 			try {
 				const accountResult = await loadOrCreateAccount();
-				if (
-					(accountResult.kind === 'created' || accountResult.kind === 'restored') &&
-					!accountResult.account.initialProfilePublished
-				) {
-					const character = deriveCharacterFromPubkey(accountResult.account.pubkey, CHARACTER_CATALOG);
+				if (accountResult.kind === 'created' || accountResult.kind === 'restored') {
+					selfAccount = accountResult.account;
+				}
+				if (selfAccount && !selfAccount.initialProfilePublished) {
+					const character = deriveCharacterFromPubkey(selfAccount.pubkey, CHARACTER_CATALOG);
 					const absolutePictureUrl = new URL(
 						asset(`/${character.picture}`),
 						window.location.origin
 					).toString();
 					initialProfilePublication = prepareInitialProfilePublication({
-						account: accountResult.account,
+						account: selfAccount,
 						character,
 						absolutePictureUrl
 					});
@@ -232,10 +243,13 @@
 			}
 			session = createWorldReadSession({
 				field: FIELD,
+				selfAccount,
 				onPresenceChanged: setPresence,
 				onLiveMessage: receiveLiveMessage,
-				onStatusChanged: (status) => { connectionStatus = status; }
+				onStatusChanged: (status) => { connectionStatus = status; },
+				onSelfPositionWriteStateChanged: (state) => { selfPositionWriteState = state; }
 			});
+			worldSession = session;
 
 			try {
 				const bootstrap = await session.start();
@@ -243,6 +257,7 @@
 				setPresence(bootstrap.presence);
 				restoreBootstrapConversation(bootstrap.messages, bootstrap.presence, Date.now());
 				session.completeBootstrap();
+				void session.enterSelf();
 				if (initialProfilePublication) {
 					void publishInitialProfile(initialProfilePublication, (event) => session!.publish(event)).catch(() => {});
 				}
@@ -263,13 +278,14 @@
 			const direction = directionFromKey(event.key);
 			if (!direction) return;
 			event.preventDefault();
-			moveSandboxSelf(direction);
+			if (devWorldSandboxEnabled) moveSandboxSelf(direction);
+			else moveWorldSelf(direction);
 		};
 
 		const observer = new ResizeObserver(updateViewport);
 		observer.observe(viewportElement);
 		updateViewport();
-		if (devWorldSandboxEnabled) window.addEventListener('keydown', handleKeydown);
+		window.addEventListener('keydown', handleKeydown);
 		const expiryTimer = window.setInterval(() => {
 			const now = Date.now();
 			const nextPresence = session?.refresh(now);
@@ -285,6 +301,7 @@
 			window.removeEventListener('keydown', handleKeydown);
 			window.clearInterval(expiryTimer);
 			session?.dispose();
+			if (worldSession === session) worldSession = null;
 		};
 	});
 
@@ -358,12 +375,16 @@
 			});
 	}
 
-	function getPresenceProjection(state: PresenceState, selectedId = selectedCharacterId) {
+	function getPresenceProjection(
+		state: PresenceState,
+		selectedId = selectedCharacterId,
+		selfId = selfProjectionId
+	) {
 		return projectPresence(state, participantModels(state, selectedId), {
 			cellSize,
 			fieldAreaBounds,
 			fieldWorldSize
-		});
+		}, selfId);
 	}
 
 	function hasUsableViewport(): boolean {
@@ -412,6 +433,16 @@
 		if (!devWorldSandboxEnabled) return;
 		const result = moveDevWorldSelf(presenceState, direction, Date.now());
 		if (result.moved) setPresence(result.state);
+	}
+
+	function moveWorldSelf(direction: Direction): void {
+		if (devWorldSandboxEnabled) return;
+		void worldSession?.moveSelf(direction);
+	}
+
+	function retryWorldEntry(): void {
+		if (devWorldSandboxEnabled || selfPositionWriteState.kind !== 'retryable') return;
+		void worldSession?.enterSelf();
 	}
 
 	function selectSandboxCharacter(characterId: string): void {
@@ -502,13 +533,13 @@
 </script>
 
 <svelte:head>
-	<title>{devWorldSandboxEnabled ? 'Persona Bubble Field — DEV World Sandbox' : 'Persona Bubble Field — read-only world'}</title>
+	<title>{devWorldSandboxEnabled ? 'Persona Bubble Field — DEV World Sandbox' : 'Persona Bubble Field — Relay world'}</title>
 	<link rel="icon" href={`${base}/favicon.svg`} />
 	<meta
 		name="description"
 		content={devWorldSandboxEnabled
 			? 'A local-only development sandbox with no Relay connection or publishing.'
-			: 'A read-only view of the current prototype world from Nostr relays.'}
+			: 'Join and move in the current prototype world through Nostr relays.'}
 	/>
 </svelte:head>
 
@@ -518,10 +549,10 @@
 			<span class="brand-mark" aria-hidden="true">✳</span>
 			<div>
 				<p class="brand-name">persona field</p>
-				<p class="brand-subtitle">{devWorldSandboxEnabled ? 'DEV World Sandbox' : 'read-only Relay world'}</p>
+				<p class="brand-subtitle">{devWorldSandboxEnabled ? 'DEV World Sandbox' : 'live Relay world'}</p>
 			</div>
 		</div>
-		<div class="prototype-badge"><span></span>{devWorldSandboxEnabled ? 'DEV sandbox · local only' : 'spectator / read only'}</div>
+		<div class="prototype-badge"><span></span>{devWorldSandboxEnabled ? 'DEV sandbox · local only' : 'prototype / Relay world'}</div>
 	</div>
 
 	<section class="field-viewport" bind:this={viewportElement} aria-label="Conversation field">
@@ -595,7 +626,7 @@
 		</div>
 
 		<div class="viewport-vignette" aria-hidden="true"></div>
-		<div class="camera-chip"><span class="camera-dot"></span>{devWorldSandboxEnabled ? 'self camera · DEV' : 'spectator camera · origin'}</div>
+		<div class="camera-chip"><span class="camera-dot"></span>{devWorldSandboxEnabled ? 'self camera · DEV' : selfAccount ? 'self camera · Relay' : 'spectator camera · origin'}</div>
 	</section>
 
 	<div class="status-panel">
@@ -609,6 +640,13 @@
 				{:else}world unavailable · {connectionStatus.message}
 				{/if}
 			</p>
+			{#if !devWorldSandboxEnabled && selfPositionWriteState.kind === 'unavailable'}
+				<p class="write-status">movement unavailable · account storage needs attention</p>
+			{:else if !devWorldSandboxEnabled && selfPositionWriteState.kind === 'pending'}
+				<p class="write-status">{selfPositionWriteState.operation} syncing to Relay…</p>
+			{:else if !devWorldSandboxEnabled && selfPositionWriteState.kind === 'retryable'}
+				<p class="write-status">movement was not confirmed by Relay · retry available</p>
+			{/if}
 		</div>
 	</div>
 
@@ -632,9 +670,24 @@
 			</div>
 			<button class="sandbox-reset" type="button" on:click={resetSandbox}>Reset sandbox</button>
 		</div>
+	{:else if selfPositionWriteState.kind === 'retryable' && !isWorldSelfActive}
+		<div class="world-controls" aria-label="World entry controls">
+			<button class="world-entry-retry" type="button" on:click={retryWorldEntry}>Enter field again</button>
+		</div>
+	{:else if selfAccount && isWorldSelfActive}
+		<div class="world-controls" aria-label="World movement controls">
+			<div class="world-direction-pad">
+				<span aria-hidden="true"></span>
+				<button type="button" aria-label="Move up" disabled={selfPositionWriteState.kind === 'pending'} on:click={() => moveWorldSelf('up')}>↑</button>
+				<span aria-hidden="true"></span>
+				<button type="button" aria-label="Move left" disabled={selfPositionWriteState.kind === 'pending'} on:click={() => moveWorldSelf('left')}>←</button>
+				<button type="button" aria-label="Move down" disabled={selfPositionWriteState.kind === 'pending'} on:click={() => moveWorldSelf('down')}>↓</button>
+				<button type="button" aria-label="Move right" disabled={selfPositionWriteState.kind === 'pending'} on:click={() => moveWorldSelf('right')}>→</button>
+			</div>
+		</div>
 	{/if}
 
-	<p class="footer-note">{devWorldSandboxEnabled ? 'DEV sandbox · local only · no Relay connection · no publishing' : 'read-only Relay state · DOM participants · SVG tails · no publishing'}</p>
+	<p class="footer-note">{devWorldSandboxEnabled ? 'DEV sandbox · local only · no Relay connection · no publishing' : 'Relay world · signed position publishing · DOM participants · SVG tails'}</p>
 </main>
 
 <style>
@@ -673,7 +726,8 @@
 	.status-panel,
 	.footer-note,
 	.camera-chip,
-	.sandbox-controls {
+	.sandbox-controls,
+	.world-controls {
 		position: absolute;
 		z-index: 10;
 	}
@@ -1048,6 +1102,13 @@
 		font-weight: 800;
 	}
 
+	.write-status {
+		margin: 5px 0 0;
+		color: #7d6258;
+		font-size: 10px;
+		font-weight: 700;
+	}
+
 	.sandbox-controls {
 		bottom: 76px;
 		left: 50%;
@@ -1055,6 +1116,13 @@
 		display: flex;
 		align-items: center;
 		gap: 10px;
+		transform: translateX(-50%);
+	}
+
+	.world-controls {
+		bottom: 76px;
+		left: 50%;
+		z-index: 11;
 		transform: translateX(-50%);
 	}
 
@@ -1085,8 +1153,16 @@
 		gap: 4px;
 	}
 
+	.world-direction-pad {
+		display: grid;
+		grid-template-columns: repeat(3, 38px);
+		gap: 4px;
+	}
+
 	.sandbox-direction-pad button,
-	.sandbox-reset {
+	.world-direction-pad button,
+	.sandbox-reset,
+	.world-entry-retry {
 		border: 1px solid rgba(57, 67, 64, 0.2);
 		background: rgba(255, 255, 255, 0.86);
 		box-shadow: 0 5px 12px rgba(58, 70, 61, 0.14);
@@ -1103,6 +1179,20 @@
 		font-size: 18px;
 	}
 
+	.world-direction-pad button {
+		display: grid;
+		width: 38px;
+		height: 38px;
+		place-items: center;
+		border-radius: 10px;
+		font-size: 18px;
+	}
+
+	.world-direction-pad button:disabled {
+		cursor: wait;
+		opacity: 0.54;
+	}
+
 	.sandbox-reset {
 		min-height: 38px;
 		padding: 0 11px;
@@ -1111,8 +1201,19 @@
 		letter-spacing: 0.04em;
 	}
 
+	.world-entry-retry {
+		min-height: 38px;
+		padding: 0 14px;
+		border-radius: 999px;
+		font-size: 10px;
+		font-weight: 800;
+		letter-spacing: 0.04em;
+	}
+
 	.sandbox-direction-pad button:focus-visible,
+	.world-direction-pad button:focus-visible,
 	.sandbox-reset:focus-visible,
+	.world-entry-retry:focus-visible,
 	.sandbox-character-picker select:focus-visible {
 		outline: 3px solid #6dabb9;
 		outline-offset: 2px;
@@ -1166,6 +1267,10 @@
 			bottom: 76px;
 			flex-direction: column;
 			gap: 7px;
+		}
+
+		.world-controls {
+			bottom: 76px;
 		}
 
 		.sandbox-character-picker {

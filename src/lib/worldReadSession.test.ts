@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { VerifiedEvent } from 'nostr-tools/pure';
-import type { ParsedPositionEvent, ParsedWorldMessage } from './nostrProtocol';
+import { getPublicKey, type VerifiedEvent } from 'nostr-tools/pure';
+import { parsePositionEvent, type ParsedPositionEvent, type ParsedWorldMessage } from './nostrProtocol';
 import { PRESENCE_TIMEOUT_MS } from './presence';
 import { createWorldReadSession, type WorldReadConnectionStatus } from './worldReadSession';
 
@@ -11,17 +11,37 @@ vi.mock('./nostrRelayTransport', () => ({
 }));
 
 const alice = 'a'.repeat(64);
+const selfSecretKey = new Uint8Array(32).fill(7);
+const selfPubkey = getPublicKey(selfSecretKey);
+
+function selfAccount() {
+	return {
+		secretKey: selfSecretKey.slice(),
+		pubkey: selfPubkey,
+		lastChangedAtMs: 700_000,
+		initialProfilePublished: true
+	};
+}
 
 function message(id = 'message', createdAt = 100): ParsedWorldMessage {
 	return { id, pubkey: alice, createdAt, content: 'hello', speechType: 'normal', position: { x: 1, y: 1 } };
 }
 
-function position(id = 'position', createdAt = 100): ParsedPositionEvent {
-	return { id, pubkey: alice, createdAt, slot: 0, position: { x: 2, y: 1 } };
+function position(
+	id = 'position',
+	createdAt = 100,
+	pubkey = alice,
+	slot: 0 | 1 = 0,
+	cell = { x: 2, y: 1 }
+): ParsedPositionEvent {
+	return { id, pubkey, createdAt, slot, position: cell };
 }
 
 function startResult(messages: readonly ParsedWorldMessage[] = [], positions: readonly ParsedPositionEvent[] = [], statuses: readonly string[] = ['eose']) {
 	return {
+		metadata: {
+			channel: { channelId: 'c'.repeat(64), relayHint: 'wss://relay.test/' }
+		},
 		messages,
 		positions,
 		metadataDiscovery: { relays: [{ relayUrl: 'ws://relay.test/', status: 'eose' }] },
@@ -199,5 +219,183 @@ describe('world read session', () => {
 		input!.onLiveMessage(message('after-dispose', 701));
 		expect(live).not.toHaveBeenCalled();
 		expect(dispose).toHaveBeenCalledOnce();
+	});
+
+	it('flushes buffered occupancy before selecting an entry cell', async () => {
+		const occupied = position('occupied', 700, alice, 0, { x: 0, y: 0 });
+		mocked.createTransport.mockReturnValue({
+			start: vi.fn(async (nextInput) => {
+				input = nextInput;
+				nextInput.onLivePosition(occupied);
+				return startResult();
+			}),
+			dispose,
+			publish
+		});
+		publish.mockResolvedValue([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
+		const session = createWorldReadSession({
+			field: { columns: 2, rows: 1 },
+			selfAccount: selfAccount(),
+			onPresenceChanged: vi.fn(),
+			onLiveMessage: vi.fn(),
+			onStatusChanged: vi.fn()
+		});
+
+		await session.start();
+		session.completeBootstrap();
+		await expect(session.enterSelf()).resolves.toEqual({ kind: 'succeeded', operation: 'entry' });
+		const event = parsePositionEvent(publish.mock.calls[0][0], 'c'.repeat(64));
+		expect(event?.position).toEqual({ x: 1, y: 0 });
+	});
+
+	it('keeps an active bootstrap self at its recovered position without another entry event', async () => {
+		result = startResult([], [position('self-bootstrap', 700, selfPubkey, 0, { x: 2, y: 1 })]);
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 },
+			selfAccount: selfAccount(),
+			onPresenceChanged: vi.fn(),
+			onLiveMessage: vi.fn(),
+			onStatusChanged: vi.fn()
+		});
+
+		await session.start();
+		session.completeBootstrap();
+		await expect(session.enterSelf()).resolves.toEqual({ kind: 'not-needed' });
+		expect(publish).not.toHaveBeenCalled();
+	});
+
+	it('uses the retained cell for the first post-timeout reactivation', async () => {
+		result = startResult([], [position('self-bootstrap', 700, selfPubkey, 0, { x: 2, y: 1 })]);
+		publish.mockResolvedValueOnce([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 },
+			selfAccount: selfAccount(),
+			onPresenceChanged: vi.fn(),
+			onLiveMessage: vi.fn(),
+			onStatusChanged: vi.fn()
+		});
+
+		await session.start();
+		session.completeBootstrap();
+		await session.enterSelf();
+		vi.setSystemTime(700_000 + PRESENCE_TIMEOUT_MS);
+		await expect(session.moveSelf('right')).resolves.toEqual({ kind: 'succeeded', operation: 'reactivation' });
+		const event = parsePositionEvent(publish.mock.calls[0][0], 'c'.repeat(64));
+		expect(event?.position).toEqual({ x: 2, y: 1 });
+	});
+
+	it('applies a handoff event once when its live echo arrives before no-response completion', async () => {
+		let resolvePublish: (results: readonly { relayUrl: string; outcome: 'no-response' }[]) => void;
+		publish.mockImplementationOnce(() => new Promise((resolve) => { resolvePublish = resolve; }));
+		const writeStates: string[] = [];
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 },
+			selfAccount: selfAccount(),
+			onPresenceChanged: vi.fn(),
+			onLiveMessage: vi.fn(),
+			onStatusChanged: vi.fn(),
+			onSelfPositionWriteStateChanged: (state) => writeStates.push(state.kind)
+		});
+
+		await session.start();
+		session.completeBootstrap();
+		const pending = session.enterSelf();
+		await Promise.resolve();
+		const echoed = parsePositionEvent(publish.mock.calls[0][0], 'c'.repeat(64))!;
+		input!.onLivePosition(echoed);
+		input!.onLivePosition(echoed);
+		resolvePublish!([{ relayUrl: 'wss://relay.test/', outcome: 'no-response' }]);
+
+		await expect(pending).resolves.toEqual({ kind: 'succeeded', operation: 'entry' });
+		expect(session.refresh(700_000).participants.filter((participant) => participant.id === selfPubkey)).toEqual([
+			expect.objectContaining({ position: echoed.position, status: 'active' })
+		]);
+		expect(writeStates.at(-1)).toBe('succeeded');
+	});
+
+	it('does not double-apply an echo that arrives before accepted completion', async () => {
+		let resolvePublish: (results: readonly { relayUrl: string; outcome: 'accepted' }[]) => void;
+		publish.mockImplementationOnce(() => new Promise((resolve) => { resolvePublish = resolve; }));
+		const presenceChanged = vi.fn();
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 },
+			selfAccount: selfAccount(),
+			onPresenceChanged: presenceChanged,
+			onLiveMessage: vi.fn(),
+			onStatusChanged: vi.fn()
+		});
+
+		await session.start();
+		session.completeBootstrap();
+		const pending = session.enterSelf();
+		await Promise.resolve();
+		const echoed = parsePositionEvent(publish.mock.calls[0][0], 'c'.repeat(64))!;
+		input!.onLivePosition(echoed);
+		const beforeCompletion = presenceChanged.mock.calls.length;
+		resolvePublish!([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
+
+		await expect(pending).resolves.toEqual({ kind: 'succeeded', operation: 'entry' });
+		expect(presenceChanged).toHaveBeenCalledTimes(beforeCompletion);
+	});
+
+	it('does not double-apply an accepted event when its echo arrives later', async () => {
+		publish.mockResolvedValueOnce([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
+		const presenceChanged = vi.fn();
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 },
+			selfAccount: selfAccount(),
+			onPresenceChanged: presenceChanged,
+			onLiveMessage: vi.fn(),
+			onStatusChanged: vi.fn()
+		});
+
+		await session.start();
+		session.completeBootstrap();
+		await session.enterSelf();
+		const echoed = parsePositionEvent(publish.mock.calls[0][0], 'c'.repeat(64))!;
+		const beforeEcho = presenceChanged.mock.calls.length;
+		input!.onLivePosition(echoed);
+
+		expect(presenceChanged).toHaveBeenCalledTimes(beforeEcho);
+	});
+
+	it('keeps a no-response slot consumed without advancing canonical presence', async () => {
+		publish.mockResolvedValue([{ relayUrl: 'wss://relay.test/', outcome: 'no-response' }]);
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 },
+			selfAccount: selfAccount(),
+			onPresenceChanged: vi.fn(),
+			onLiveMessage: vi.fn(),
+			onStatusChanged: vi.fn()
+		});
+
+		await session.start();
+		session.completeBootstrap();
+		await expect(session.enterSelf()).resolves.toEqual({ kind: 'retryable', operation: 'entry' });
+		await expect(session.enterSelf()).resolves.toEqual({ kind: 'retryable', operation: 'entry' });
+		await expect(session.enterSelf()).resolves.toEqual({ kind: 'blocked' });
+		const first = parsePositionEvent(publish.mock.calls[0][0], 'c'.repeat(64))!;
+		const second = parsePositionEvent(publish.mock.calls[1][0], 'c'.repeat(64))!;
+		expect([first.slot, second.slot]).toEqual([0, 1]);
+		expect(session.refresh(700_000).participants.find((participant) => participant.id === selfPubkey)).toBeUndefined();
+	});
+
+	it('reconstructs a reloaded planner from bootstrap position evidence, not an earlier session attempt', async () => {
+		result = startResult([], [position('bootstrap-slot-0', 700, selfPubkey, 0, { x: 2, y: 1 })]);
+		publish.mockResolvedValueOnce([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 },
+			selfAccount: selfAccount(),
+			onPresenceChanged: vi.fn(),
+			onLiveMessage: vi.fn(),
+			onStatusChanged: vi.fn()
+		});
+
+		await session.start();
+		session.completeBootstrap();
+		await session.enterSelf();
+		await expect(session.moveSelf('right')).resolves.toEqual({ kind: 'succeeded', operation: 'movement' });
+		const event = parsePositionEvent(publish.mock.calls[0][0], 'c'.repeat(64));
+		expect(event?.slot).toBe(1);
 	});
 });
