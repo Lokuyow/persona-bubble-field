@@ -26,6 +26,23 @@ npm install
 npm run dev
 ```
 
+### DEV World Sandbox
+
+For local field, movement, camera, and viewport checks without connecting to a
+Relay, open the development server at:
+
+```text
+http://localhost:5173/?devWorld=1
+```
+
+This starts a DEV-only, local-only sandbox with one `Dev Wanderer` participant.
+It does not connect to a Relay or publish anything. The query is ignored in a
+production build, which continues to start the normal Relay world.
+
+When checking Relay isolation in browser DevTools, confirm there are no
+connections or frames for Relay hosts or Nostr traffic. Vite's development HMR
+WebSocket is unrelated to the application and is excluded from that check.
+
 ## Verification
 
 ```sh
