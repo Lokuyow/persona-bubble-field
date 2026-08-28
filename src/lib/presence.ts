@@ -138,6 +138,34 @@ export function spawnParticipant(
 	};
 }
 
+/**
+ * Places a participant for a new world entry. Unlike reactivation, an expired
+ * participant is assigned from the current active occupancy instead of
+ * retaining its old cell.
+ */
+export function enterParticipant(
+	state: PresenceState,
+	id: string,
+	now: number,
+	random: RandomSource = Math.random
+): PresenceState {
+	const participant = state.participants.find((candidate) => candidate.id === id);
+	if (participant?.status === 'active') return state;
+
+	const position = chooseSpawnPosition(state, random);
+	if (!participant) {
+		return {
+			...state,
+			participants: [
+				...state.participants.map(copyParticipant),
+				{ id, position, lastActivityAt: now, status: 'active' }
+			]
+		};
+	}
+
+	return withParticipant(state, id, (current) => activeWithActivity(current, position, now));
+}
+
 export function recordPresenceActivity(
 	state: PresenceState,
 	id: string,

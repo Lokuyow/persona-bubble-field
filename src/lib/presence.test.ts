@@ -4,6 +4,7 @@ import {
 	PRESENCE_TIMEOUT_MS,
 	createPresenceState,
 	debugTimeoutParticipant,
+	enterParticipant,
 	getActiveOccupancy,
 	getParticipant,
 	moveParticipant,
@@ -59,6 +60,18 @@ describe('local position and presence domain', () => {
 
 		expect(state.participants).toHaveLength(7);
 		expect(at(state, 'g').position).toEqual({ x: 0, y: 0 });
+	});
+
+	it('treats an expired participant as a new entry instead of restoring its old cell', () => {
+		let state = createPresenceState(smallField, 10, [
+			{ id: 'alice', position: { x: 0, y: 0 } },
+			{ id: 'bob', position: { x: 0, y: 0 } }
+		]);
+		state = debugTimeoutParticipant(state, 'alice');
+
+		const entered = enterParticipant(state, 'alice', 20, rng(0));
+
+		expect(at(entered, 'alice')).toMatchObject({ position: { x: 1, y: 0 }, status: 'active', lastActivityAt: 20 });
 	});
 
 	it.each([
