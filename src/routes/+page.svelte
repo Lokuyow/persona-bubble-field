@@ -31,6 +31,7 @@
 		resolveDevWorldCharacterId
 	} from '$lib/devWorldSandbox';
 	import { CHARACTER_CATALOG } from '$lib/character';
+	import { deriveCharacterFromPubkey } from '$lib/characterAssignment';
 	import { projectPresence } from '$lib/presenceProjection';
 	import type { PresenceState } from '$lib/presence';
 	import type { ParsedWorldMessage } from '$lib/nostrProtocol';
@@ -316,10 +317,12 @@
 						color: 'sky' as const
 					};
 				}
+				const character = deriveCharacterFromPubkey(participant.id, CHARACTER_CATALOG);
 				return {
 					id: participant.id,
-					name: `${participant.id.slice(0, 8)}…${participant.id.slice(-6)}`,
-					initials: '?',
+					name: character.name,
+					initials: '',
+					picture: character.picture,
 					color: colorByPubkey[participant.id] ?? AVATAR_COLORS[0]
 				};
 			});
