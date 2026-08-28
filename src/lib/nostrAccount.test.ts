@@ -7,6 +7,7 @@ import {
 	ACCOUNT_REINCARNATION_COOLDOWN_MS,
 	getReincarnationEligibility,
 	loadOrCreateAccount,
+	markInitialProfilePublished,
 	reincarnateAccount,
 	type AccountSnapshot,
 	type LoadAccountResult,
@@ -24,6 +25,7 @@ const DATABASE_NAME = 'persona-bubble-field-account';
 const STORE_NAME = 'persona-bubble-field-account-state';
 const SECRET_KEY = 'secret-key';
 const TIMESTAMP_KEY = 'last-changed-at-ms';
+const INITIAL_PROFILE_PUBLISHED_PUBKEY_KEY = 'initial-profile-published-pubkey';
 const TIME = 1_700_000_000_000;
 const DAY = ACCOUNT_REINCARNATION_COOLDOWN_MS;
 const MAX_TIME = Number.MAX_SAFE_INTEGER - DAY;
@@ -265,6 +267,73 @@ describe('snapshots and the existing signing boundary', () => {
 		expect(signed.pubkey).not.toBe(next.pubkey);
 		expect(verifyEvent(signed)).toBe(true);
 		expect((await storedRecords())[SECRET_KEY]).toEqual(next.secretKey);
+	});
+});
+
+describe('initial profile publication marker', () => {
+	it('recognizes and idempotently records only the current account publication', async () => {
+		const account = accountFrom(await loadOrCreateAccount());
+		expect(account.initialProfilePublished).toBe(false);
+
+		expect(await markInitialProfilePublished(account)).toEqual({ kind: 'recorded' });
+		expect(await markInitialProfilePublished(account)).toEqual({ kind: 'recorded' });
+		expect((await storedRecords())[INITIAL_PROFILE_PUBLISHED_PUBKEY_KEY]).toBe(account.pubkey);
+		expect(accountFrom(await loadOrCreateAccount()).initialProfilePublished).toBe(true);
+	});
+
+	it('clears the old marker during reincarnation so the replacement is unpublished', async () => {
+		const account = accountFrom(await loadOrCreateAccount());
+		await markInitialProfilePublished(account);
+		vi.mocked(Date.now).mockReturnValue(TIME + DAY);
+
+		const replacement = accountFrom(await reincarnateAccount());
+
+		expect(replacement.initialProfilePublished).toBe(false);
+		expect((await storedRecords())[INITIAL_PROFILE_PUBLISHED_PUBKEY_KEY]).toBeUndefined();
+	});
+
+	it('rejects a stale snapshot without marking the replacement account', async () => {
+		const oldAccount = accountFrom(await loadOrCreateAccount());
+		vi.mocked(Date.now).mockReturnValue(TIME + DAY);
+		const replacement = accountFrom(await reincarnateAccount());
+
+		expect(await markInitialProfilePublished(oldAccount)).toEqual({ kind: 'stale' });
+		expect((await storedRecords())[INITIAL_PROFILE_PUBLISHED_PUBKEY_KEY]).toBeUndefined();
+		expect(accountFrom(await loadOrCreateAccount())).toEqual(replacement);
+	});
+
+	it('leaves a concurrent replacement unpublished regardless of marker transaction order', async () => {
+		const oldAccount = accountFrom(await loadOrCreateAccount());
+		vi.mocked(Date.now).mockReturnValue(TIME + DAY);
+
+		const [markerResult, replacementResult] = await Promise.all([
+			markInitialProfilePublished(oldAccount),
+			reincarnateAccount()
+		]);
+
+		expect(['recorded', 'stale']).toContain(markerResult.kind);
+		const replacement = accountFrom(replacementResult);
+		expect(replacement.pubkey).not.toBe(oldAccount.pubkey);
+		expect(accountFrom(await loadOrCreateAccount()).initialProfilePublished).toBe(false);
+		expect((await storedRecords())[INITIAL_PROFILE_PUBLISHED_PUBKEY_KEY]).toBeUndefined();
+	});
+
+	it('preserves the account and allows retry after marker persistence fails', async () => {
+		const account = accountFrom(await loadOrCreateAccount());
+		const originalPut = IDBObjectStore.prototype.put;
+		const put = vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (this: IDBObjectStore, value, key) {
+			if (key === INITIAL_PROFILE_PUBLISHED_PUBKEY_KEY) {
+				throw new DOMException('Simulated write failure.', 'QuotaExceededError');
+			}
+			return originalPut.call(this, value, key);
+		});
+
+		await expect(markInitialProfilePublished(account)).rejects.toThrow('Account operation failed.');
+		put.mockRestore();
+
+		expect(await storedRecords()).toEqual({ [SECRET_KEY]: account.secretKey, [TIMESTAMP_KEY]: TIME });
+		expect(accountFrom(await loadOrCreateAccount()).initialProfilePublished).toBe(false);
+		expect(await markInitialProfilePublished(account)).toEqual({ kind: 'recorded' });
 	});
 });
 

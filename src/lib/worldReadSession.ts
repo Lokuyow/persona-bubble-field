@@ -1,9 +1,11 @@
 import {
 	createNostrRelayTransport,
 	type PrimaryPairDiagnostic,
-	type PrimaryStartResult
+	type PrimaryStartResult,
+	type PublishRelayResult
 } from './nostrRelayTransport';
 import type { ParsedPositionEvent, ParsedWorldMessage } from './nostrProtocol';
+import type { VerifiedEvent } from 'nostr-tools/pure';
 import { PRESENCE_TIMEOUT_MS, type PresenceField, type PresenceState } from './presence';
 import { PROTOTYPE_WORLD_CONFIG } from './prototypeWorld';
 import {
@@ -145,6 +147,11 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 		refresh(nowMs: number): PresenceState {
 			if (disposed) return presence;
 			return project(nowMs);
+		},
+
+		publish(event: VerifiedEvent): Promise<readonly PublishRelayResult[]> {
+			if (disposed || !transport) throw new Error('World read session must start before publishing.');
+			return transport.publish(event);
 		},
 
 		dispose(): void {
