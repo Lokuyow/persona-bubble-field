@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getPublicKey, type VerifiedEvent } from 'nostr-tools/pure';
-import { parsePositionEvent, type ParsedPositionEvent, type ParsedWorldMessage } from './nostrProtocol';
+import {
+	parsePositionEvent,
+	parseWorldMessage,
+	type ParsedPositionEvent,
+	type ParsedWorldMessage
+} from './nostrProtocol';
 import { PRESENCE_TIMEOUT_MS } from './presence';
 import { createWorldReadSession, type WorldReadConnectionStatus } from './worldReadSession';
 
@@ -508,5 +513,197 @@ describe('world read session', () => {
 		await expect(session.moveSelf('right')).resolves.toEqual({ kind: 'succeeded', operation: 'movement' });
 		const event = parsePositionEvent(publish.mock.calls[0][0], 'c'.repeat(64));
 		expect(event?.slot).toBe(1);
+	});
+
+	it('blocks a message when bootstrap evidence exists but this session has not confirmed entry', async () => {
+		result = startResult([], [position('self-bootstrap', 700, selfPubkey, 0, { x: 2, y: 1 })]);
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 },
+			selfAccount: selfAccount(),
+			onPresenceChanged: vi.fn(),
+			onLiveMessage: vi.fn(),
+			onStatusChanged: vi.fn()
+		});
+
+		await session.start();
+		session.completeBootstrap();
+		await expect(session.publishNormalMessage('before entry')).resolves.toEqual({ kind: 'blocked' });
+		expect(publish).not.toHaveBeenCalled();
+		expect(session.getSelfMessageAvailability()).toEqual({ kind: 'unavailable' });
+	});
+
+	it('publishes a canonical normal message at the active self position without a position event', async () => {
+		result = startResult([], [position('self-bootstrap', 700, selfPubkey, 0, { x: 2, y: 1 })]);
+		publish.mockResolvedValueOnce([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
+		const live = vi.fn();
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 },
+			selfAccount: selfAccount(),
+			onPresenceChanged: vi.fn(),
+			onLiveMessage: live,
+			onStatusChanged: vi.fn()
+		});
+
+		await session.start();
+		session.completeBootstrap();
+		await session.enterSelf();
+		await expect(session.publishNormalMessage('hello #ignored')).resolves.toEqual({
+			kind: 'succeeded',
+			eventId: expect.any(String)
+		});
+		const event = publish.mock.calls[0][0];
+		const parsed = parseWorldMessage(event, 'c'.repeat(64));
+
+		expect(event.kind).toBe(42);
+		expect(event.tags).toEqual([
+			['e', 'c'.repeat(64), 'wss://relay.test/', 'root'],
+			['L', 'io.github.lokuyow.persona-bubble-field'],
+			['l', 'chat', 'io.github.lokuyow.persona-bubble-field'],
+			['w', '2:1']
+		]);
+		expect(parsed).toMatchObject({ content: 'hello #ignored', speechType: 'normal', position: { x: 2, y: 1 } });
+		expect(live).toHaveBeenCalledTimes(1);
+	});
+
+	it('accepts the canonical duplicate prefix for a normal message', async () => {
+		result = startResult([], [position('self-bootstrap', 700, selfPubkey, 0, { x: 2, y: 1 })]);
+		publish.mockResolvedValueOnce([{ relayUrl: 'wss://relay.test/', outcome: 'rejected', notice: 'duplicate: already have event' }]);
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 },
+			selfAccount: selfAccount(),
+			onPresenceChanged: vi.fn(),
+			onLiveMessage: vi.fn(),
+			onStatusChanged: vi.fn()
+		});
+
+		await session.start();
+		session.completeBootstrap();
+		await session.enterSelf();
+
+		await expect(session.publishNormalMessage('duplicate')).resolves.toEqual({ kind: 'succeeded', eventId: expect.any(String) });
+	});
+
+	it('reactivates an entered self through a message and records the reallocated w position', async () => {
+		result = startResult([], [position('self-bootstrap', 700, selfPubkey, 0, { x: 2, y: 1 })]);
+		publish.mockResolvedValueOnce([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 },
+			selfAccount: selfAccount(),
+			onPresenceChanged: vi.fn(),
+			onLiveMessage: vi.fn(),
+			onStatusChanged: vi.fn()
+		});
+
+		await session.start();
+		session.completeBootstrap();
+		await session.enterSelf();
+		vi.setSystemTime(700_000 + PRESENCE_TIMEOUT_MS);
+		input!.onLivePosition(position('occupied', 700 + PRESENCE_TIMEOUT_MS / 1000, alice, 0, { x: 2, y: 1 }));
+		await expect(session.publishNormalMessage('back')).resolves.toEqual({ kind: 'succeeded', eventId: expect.any(String) });
+		const parsed = parseWorldMessage(publish.mock.calls[0][0], 'c'.repeat(64));
+
+		expect(parsed?.position).not.toEqual({ x: 2, y: 1 });
+		expect(session.refresh(700_000 + PRESENCE_TIMEOUT_MS).participants).toContainEqual(
+			expect.objectContaining({ id: selfPubkey, position: parsed?.position, status: 'active' })
+		);
+	});
+
+	it('treats a matching live echo before a non-authoritative publish completion as message success once', async () => {
+		let resolvePublish!: (results: readonly { relayUrl: string; outcome: 'no-response' }[]) => void;
+		result = startResult([], [position('self-bootstrap', 700, selfPubkey, 0, { x: 2, y: 1 })]);
+		publish.mockImplementationOnce(() => new Promise((resolve) => { resolvePublish = resolve; }));
+		const live = vi.fn();
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 },
+			selfAccount: selfAccount(),
+			onPresenceChanged: vi.fn(),
+			onLiveMessage: live,
+			onStatusChanged: vi.fn()
+		});
+
+		await session.start();
+		session.completeBootstrap();
+		await session.enterSelf();
+		const pending = session.publishNormalMessage('echo first');
+		await Promise.resolve();
+		const echoed = parseWorldMessage(publish.mock.calls[0][0], 'c'.repeat(64))!;
+		input!.onLiveMessage(echoed);
+		input!.onLiveMessage(echoed);
+		resolvePublish([{ relayUrl: 'wss://relay.test/', outcome: 'no-response' }]);
+
+		await expect(pending).resolves.toEqual({ kind: 'succeeded', eventId: echoed.id });
+		expect(live).toHaveBeenCalledTimes(1);
+	});
+
+	it('does not let a different live event confirm a pending self message', async () => {
+		let resolvePublish!: (results: readonly { relayUrl: string; outcome: 'no-response' }[]) => void;
+		result = startResult([], [position('self-bootstrap', 700, selfPubkey, 0, { x: 2, y: 1 })]);
+		publish.mockImplementationOnce(() => new Promise((resolve) => { resolvePublish = resolve; }));
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 },
+			selfAccount: selfAccount(),
+			onPresenceChanged: vi.fn(),
+			onLiveMessage: vi.fn(),
+			onStatusChanged: vi.fn()
+		});
+
+		await session.start();
+		session.completeBootstrap();
+		await session.enterSelf();
+		const pending = session.publishNormalMessage('waiting');
+		await Promise.resolve();
+		input!.onLiveMessage({ ...message('other-live', 700), pubkey: alice });
+		resolvePublish([{ relayUrl: 'wss://relay.test/', outcome: 'no-response' }]);
+
+		await expect(pending).resolves.toEqual({ kind: 'retryable' });
+	});
+
+	it.each([
+		['rejection', [{ relayUrl: 'wss://relay.test/', outcome: 'rejected', notice: 'blocked: denied' }]],
+		['no response', [{ relayUrl: 'wss://relay.test/', outcome: 'no-response' }]]
+	] as const)('does not canonically apply a message after %s without a matching echo', async (_name, results) => {
+		result = startResult([], [position('self-bootstrap', 700, selfPubkey, 0, { x: 2, y: 1 })]);
+		publish.mockResolvedValueOnce(results);
+		const live = vi.fn();
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 },
+			selfAccount: selfAccount(),
+			onPresenceChanged: vi.fn(),
+			onLiveMessage: live,
+			onStatusChanged: vi.fn()
+		});
+
+		await session.start();
+		session.completeBootstrap();
+		await session.enterSelf();
+		await expect(session.publishNormalMessage('not confirmed')).resolves.toEqual({ kind: 'retryable' });
+
+		expect(live).not.toHaveBeenCalled();
+	});
+
+	it('does not re-deliver a bootstrap message when its live duplicate is drained', async () => {
+		const bootstrap = message('bootstrap-message', 700);
+		mocked.createTransport.mockReturnValue({
+			start: vi.fn(async (nextInput) => {
+				input = nextInput;
+				nextInput.onLiveMessage(bootstrap);
+				return startResult([bootstrap]);
+			}),
+			dispose,
+			publish
+		});
+		const live = vi.fn();
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 },
+			onPresenceChanged: vi.fn(),
+			onLiveMessage: live,
+			onStatusChanged: vi.fn()
+		});
+
+		await session.start();
+		session.completeBootstrap();
+		input!.onLiveMessage(bootstrap);
+
+		expect(live).not.toHaveBeenCalled();
 	});
 });

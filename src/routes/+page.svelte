@@ -41,8 +41,10 @@
 	import { projectPresence } from '$lib/presenceProjection';
 	import type { PresenceState } from '$lib/presence';
 	import type { ParsedWorldMessage } from '$lib/nostrProtocol';
+	import HostOwnedComposerLite from '$lib/HostOwnedComposerLite.svelte';
 	import {
 		createWorldReadSession,
+		type SelfMessageAvailability,
 		type SelfPositionWriteState,
 		type WorldReadConnectionStatus
 	} from '$lib/worldReadSession';
@@ -83,6 +85,7 @@
 	let connectionStatus: WorldReadConnectionStatus = { kind: 'bootstrapping' };
 	let selfAccount: AccountSnapshot | null = null;
 	let selfPositionWriteState: SelfPositionWriteState = { kind: 'unavailable' };
+	let selfMessageAvailability: SelfMessageAvailability = { kind: 'unavailable' };
 	let worldSession: ReturnType<typeof createWorldReadSession> | null = null;
 	let devWorldSandboxEnabled = false;
 	let selectedCharacterId = '001';
@@ -247,7 +250,8 @@
 				onPresenceChanged: setPresence,
 				onLiveMessage: receiveLiveMessage,
 				onStatusChanged: (status) => { connectionStatus = status; },
-				onSelfPositionWriteStateChanged: (state) => { selfPositionWriteState = state; }
+				onSelfPositionWriteStateChanged: (state) => { selfPositionWriteState = state; },
+				onSelfMessageAvailabilityChanged: (state) => { selfMessageAvailability = state; }
 			});
 			worldSession = session;
 
@@ -440,6 +444,12 @@
 		void worldSession?.moveSelf(direction);
 	}
 
+	async function submitComposerContent(content: string): Promise<Readonly<{ eventId: string }>> {
+		const result = await worldSession?.publishNormalMessage(content);
+		if (result?.kind === 'succeeded') return { eventId: result.eventId };
+		throw new Error('Message was not confirmed by Relay.');
+	}
+
 	function retryWorldEntry(): void {
 		if (devWorldSandboxEnabled || selfPositionWriteState.kind !== 'retryable') return;
 		void worldSession?.enterSelf();
@@ -543,7 +553,7 @@
 	/>
 </svelte:head>
 
-<main class="app-shell">
+<main class="app-shell" class:composer-available={!devWorldSandboxEnabled && selfMessageAvailability.kind === 'ready'}>
 	<div class="topbar">
 		<div class="brand-lockup">
 			<span class="brand-mark" aria-hidden="true">✳</span>
@@ -687,6 +697,12 @@
 		</div>
 	{/if}
 
+	{#if !devWorldSandboxEnabled && selfMessageAvailability.kind === 'ready'}
+		<div class="composer-dock" aria-label="Message composer">
+			<HostOwnedComposerLite submitContent={submitComposerContent} />
+		</div>
+	{/if}
+
 	<p class="footer-note">{devWorldSandboxEnabled ? 'DEV sandbox · local only · no Relay connection · no publishing' : 'Relay world · signed position publishing · DOM participants · SVG tails'}</p>
 </main>
 
@@ -712,8 +728,10 @@
 	}
 
 	.app-shell {
+		--composer-dock-height: clamp(132px, 20svh, 160px);
 		position: relative;
 		display: flex;
+		height: 100svh;
 		min-height: 100svh;
 		flex-direction: column;
 		overflow: hidden;
@@ -813,6 +831,25 @@
 		overflow: hidden;
 		isolation: isolate;
 		background: #e8e7da;
+	}
+
+	.composer-available .field-viewport {
+		min-height: 0;
+	}
+
+	.composer-dock {
+		z-index: 12;
+		width: 100%;
+		height: var(--composer-dock-height);
+		flex: 0 0 var(--composer-dock-height);
+		padding: 8px 16px calc(8px + env(safe-area-inset-bottom));
+		border-top: 1px solid rgba(57, 67, 64, 0.14);
+		background: rgba(245, 241, 233, 0.98);
+	}
+
+	.composer-dock :global(.host-owned-composer) {
+		width: min(720px, 100%);
+		margin: 0 auto;
 	}
 
 	.field-viewport::before {
@@ -1087,6 +1124,10 @@
 		gap: 22px;
 	}
 
+	.composer-available .status-panel {
+		bottom: calc(var(--composer-dock-height) + 30px);
+	}
+
 	.panel-kicker {
 		color: #76827b;
 		font-size: 10px;
@@ -1124,6 +1165,10 @@
 		left: 50%;
 		z-index: 11;
 		transform: translateX(-50%);
+	}
+
+	.composer-available .world-controls {
+		bottom: calc(var(--composer-dock-height) + 76px);
 	}
 
 	.sandbox-character-picker {
@@ -1228,6 +1273,10 @@
 		letter-spacing: 0.12em;
 		text-transform: uppercase;
 		white-space: nowrap;
+	}
+
+	.composer-available .footer-note {
+		bottom: calc(var(--composer-dock-height) + 8px);
 	}
 
 	@media (max-width: 700px) {
