@@ -14,6 +14,8 @@
 	type HostOwnedComposerElement = HTMLElement & {
 		assetBase: string | null;
 		configureHostOwned(options: Readonly<{
+			keyboardButtonBarEnabled?: boolean;
+			enterKeyBehavior?: 'newline' | 'submit';
 			submit: (
 				output: HostOwnedComposerOutput,
 				options: Readonly<{ signal: AbortSignal }>
@@ -42,6 +44,8 @@
 				composer = document.createElement(HOST_OWNED_TAG_NAME) as HostOwnedComposerElement;
 				composer.assetBase = HOST_OWNED_ASSET_BASE;
 				composer.configureHostOwned({
+					keyboardButtonBarEnabled: false,
+					enterKeyBehavior: 'submit',
 					submit: async (output, { signal }) => {
 						if (signal.aborted) throw new DOMException('Submission was cancelled.', 'AbortError');
 						// This integration intentionally ignores composer-owned tags and context.
