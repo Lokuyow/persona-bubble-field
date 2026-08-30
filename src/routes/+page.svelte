@@ -812,16 +812,16 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 				{@const start = tailStart(bubble.anchor, bubble.size)}
 				{@const target = tailTarget(bubble.speaker)}
 				{@const tail = tailGeometry(start, target)}
-				<polygon class={`tail tail-${bubble.tone}`} data-tail-participant-id={bubble.speaker.id} points={tail.points} />
-				<path class="tail-outline" data-tail-participant-id={bubble.speaker.id} d={tail.outlinePath} />
+				<polygon class={`tail tail-${bubble.tone} tone-${bubble.tone}`} data-tail-participant-id={bubble.speaker.id} points={tail.points} />
+				<path class={`tail-outline tone-${bubble.tone}`} data-tail-participant-id={bubble.speaker.id} d={tail.outlinePath} />
 			{/each}
 			{#each positionedMergedBubbles as bubble (bubble.id)}
 				{#each bubble.members as member, index (member.id)}
 					{@const start = mergedTailStart(bubble.anchor, bubble.size, index, bubble.members.length)}
 					{@const target = tailTarget(member)}
 					{@const tail = tailGeometry(start, target, 7, 2)}
-					<polygon class={`tail tail-${bubble.tone}`} data-tail-participant-id={member.id} points={tail.points} />
-					<path class="tail-outline" data-tail-participant-id={member.id} d={tail.outlinePath} />
+					<polygon class={`tail tail-${bubble.tone} tone-${bubble.tone}`} data-tail-participant-id={member.id} points={tail.points} />
+					<path class={`tail-outline tone-${bubble.tone}`} data-tail-participant-id={member.id} d={tail.outlinePath} />
 				{/each}
 			{/each}
 		</svg>
@@ -830,7 +830,7 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 			{#each positionedVisibleBubbles as bubble (bubble.id)}
 				<div
 					use:observeBubble={bubble.id}
-					class={`bubble bubble-${bubble.kind} bubble-${bubble.tone}`}
+					class={`bubble bubble-${bubble.kind} bubble-${bubble.tone} tone-${bubble.tone}`}
 					data-bubble-id={bubble.id}
 					data-merged-members={bubble.kind === 'merged' ? bubble.memberPubkeys.length : undefined}
 					data-speech-type={bubble.speechType}
@@ -1053,7 +1053,6 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 
 	.field-viewport {
 		position: relative;
-		--bubble-outline: rgba(57, 67, 64, 0.42);
 		min-height: 100svh;
 		flex: 1;
 		overflow: hidden;
@@ -1272,16 +1271,15 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 
 	.tail-outline {
 		fill: none;
-		stroke: var(--bubble-outline);
+		stroke: var(--tone-outline);
 		stroke-width: 1;
 		stroke-linecap: round;
 		stroke-linejoin: round;
 	}
 
-	.tail-sky { fill: #d9edf0; }
-	.tail-violet { fill: #e2def5; }
-	.tail-peach { fill: #f6dfce; }
-	.tail-rose { fill: #f1d9df; }
+	.tail {
+		fill: var(--tone-background);
+	}
 
 	.bubble-layer {
 		z-index: 6;
@@ -1290,11 +1288,11 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 	.bubble {
 		position: absolute;
 		display: flex;
-		background: var(--bubble-bg);
+		background: var(--tone-background);
 		min-height: 50px;
 		align-items: center;
 		justify-content: center;
-		border: 1px solid var(--bubble-outline);
+		border: 1px solid var(--tone-outline);
 		border-radius: 18px;
 		color: #364142;
 		font-size: 13px;
@@ -1313,7 +1311,7 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 		width: 8px;
 		height: 3px;
 		transform: translateX(-50%);
-		background: var(--bubble-bg);
+		background: var(--tone-background);
 		pointer-events: none;
 		z-index: 1;
 	}
@@ -1338,15 +1336,30 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 		width: 8px;
 		height: 3px;
 		transform: translateX(-50%);
-		background: var(--bubble-bg);
+		background: var(--tone-background);
 		pointer-events: none;
 		z-index: 1;
 	}
 
-	.bubble-sky { --bubble-bg: #d9edf0; }
-	.bubble-violet { --bubble-bg: #e2def5; }
-	.bubble-peach { --bubble-bg: #f6dfce; }
-	.bubble-rose { --bubble-bg: #f1d9df; }
+	.tone-sky {
+		--tone-background: #d9edf0;
+		--tone-outline: rgba(57, 67, 64, 0.42);
+	}
+
+	.tone-violet {
+		--tone-background: #e2def5;
+		--tone-outline: rgba(57, 67, 64, 0.42);
+	}
+
+	.tone-peach {
+		--tone-background: #f6dfce;
+		--tone-outline: rgba(57, 67, 64, 0.42);
+	}
+
+	.tone-rose {
+		--tone-background: #f1d9df;
+		--tone-outline: rgba(57, 67, 64, 0.42);
+	}
 
 	.viewport-vignette {
 		position: absolute;
