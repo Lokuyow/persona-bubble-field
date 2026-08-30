@@ -559,6 +559,21 @@
 	function tailStart(anchor: WorldPoint, size: Size): WorldPoint {
 		return { x: anchor.x + size.width / 2, y: anchor.y + size.height };
 	}
+
+	function tailPolygonPoints(start: WorldPoint, target: WorldPoint, width = 9, overlap = 2): string {
+		const dx = target.x - start.x;
+		const dy = target.y - start.y;
+		const length = Math.hypot(dx, dy) || 1;
+		const ux = dx / length;
+		const uy = dy / length;
+		const px = -uy * (width / 2);
+		const py = ux * (width / 2);
+		const baseCenter = { x: start.x - ux * overlap, y: start.y - uy * overlap };
+		const left = { x: baseCenter.x + px, y: baseCenter.y + py };
+		const right = { x: baseCenter.x - px, y: baseCenter.y - py };
+
+		return `${left.x},${left.y} ${right.x},${right.y} ${target.x},${target.y}`;
+	}
 </script>
 
 <svelte:head>
@@ -637,12 +652,14 @@
 		<svg class="tail-layer" viewBox={`0 0 ${viewportSize.width} ${viewportSize.height}`} aria-hidden="true">
 			{#each positionedNormalBubbles as bubble (bubble.id)}
 				{@const start = tailStart(bubble.anchor, bubble.size)}
-				<line class={`tail tail-${bubble.tone}`} x1={start.x} y1={start.y} x2={bubble.speaker.screen.x} y2={bubble.speaker.screen.y - 18} />
+				{@const target = { x: bubble.speaker.screen.x, y: bubble.speaker.screen.y - 18 }}
+				<polygon class={`tail tail-${bubble.tone}`} points={tailPolygonPoints(start, target)} />
 			{/each}
 			{#each positionedMergedBubbles as bubble (bubble.id)}
 				{@const start = tailStart(bubble.anchor, bubble.size)}
 				{#each bubble.members as member (member.id)}
-					<line class={`tail tail-${bubble.tone}`} x1={start.x} y1={start.y} x2={member.screen.x} y2={member.screen.y - 18} />
+					{@const target = { x: member.screen.x, y: member.screen.y - 18 }}
+					<polygon class={`tail tail-${bubble.tone}`} points={tailPolygonPoints(start, target)} />
 				{/each}
 			{/each}
 		</svg>
@@ -1086,16 +1103,13 @@
 	}
 
 	.tail {
-		stroke-width: 2.2;
-		stroke-linecap: round;
-		opacity: 0.82;
-		stroke-dasharray: 3 5;
+		opacity: 0.9;
 	}
 
-	.tail-sky { stroke: #6dabb9; }
-	.tail-violet { stroke: #887db7; }
-	.tail-peach { stroke: #cf8d6a; }
-	.tail-rose { stroke: #bc7891; }
+	.tail-sky { fill: #6dabb9; }
+	.tail-violet { fill: #887db7; }
+	.tail-peach { fill: #cf8d6a; }
+	.tail-rose { fill: #bc7891; }
 
 	.bubble-layer {
 		z-index: 6;
