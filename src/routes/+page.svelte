@@ -802,9 +802,19 @@
 			...participantIds.map((id, index) => ({ id, position: { x: index * 2 + 1, y: 2 } }))
 		]));
 		const duration = 60_000;
-		for (const [index, pubkey] of [DEV_WORLD_SELF_ID, ...participantIds].entries()) {
+		const allParticipantIds = [DEV_WORLD_SELF_ID, ...participantIds];
+		const mergedContent = 'merged showcase fixture';
+		for (const [index, pubkey] of allParticipantIds.slice(0, 2).entries()) {
 			conversationState = receiveMessage(conversationState, {
-				id: `dev-speech-normal-message-${index}`,
+				id: `dev-speech-showcase-merged-message-${index}`,
+				pubkey,
+				content: mergedContent,
+				createdAt: now
+			}, { isSpeakerVisible: true, duration, now });
+		}
+		for (const [index, pubkey] of allParticipantIds.entries()) {
+			conversationState = receiveMessage(conversationState, {
+				id: `dev-speech-showcase-normal-message-${index}`,
 				pubkey,
 				content: `normal fixture ${index + 1}`,
 				createdAt: now
