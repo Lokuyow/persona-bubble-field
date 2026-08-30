@@ -72,7 +72,7 @@ describe('field geometry', () => {
 	});
 
 	it('uses the mobile cell size for grid to world conversion at 360px', () => {
-		expect(gridToWorld({ x: 1, y: 2 }, getResponsiveCellSize(360))).toEqual({ x: 120, y: 200 });
+		expect(gridToWorld({ x: 1, y: 2 }, getResponsiveCellSize(360))).toEqual({ x: 90, y: 150 });
 	});
 
 	it('keeps responsive field size and camera projection on the same cell size', () => {
@@ -81,11 +81,11 @@ describe('field geometry', () => {
 		const player = gridToWorld({ x: 7, y: 4 }, cellSize);
 		const camera = clampCamera(player, { width: 360, height: 740 }, field);
 
-		expect(field).toEqual({ width: 1280, height: 640 });
+		expect(field).toEqual({ width: 960, height: 480 });
 		expect(worldToScreen(player, camera).x).toBe(180);
 	});
 
-	it('separates field area from speech area and clamps the larger mobile world to it', () => {
+	it('separates field area from speech area and clamps the mobile world to it', () => {
 		const viewport = { width: 360, height: 740 };
 		const speechArea = { x: 16, y: 84, width: 328, height: 176 };
 		const fieldArea = getFieldAreaBounds(viewport, speechArea);
@@ -100,8 +100,8 @@ describe('field geometry', () => {
 
 		expect(fieldArea.y).toBe(speechArea.y + speechArea.height);
 		expect(fieldArea.height).toBe(viewport.height - fieldArea.y);
-		expect(camera.y).toBe(120);
-		expect(topRow.y).toBeLessThan(fieldArea.y);
+		expect(camera.y).toBe(0);
+		expect(topRow.y).toBe(fieldArea.y + MOBILE_CELL_SIZE / 2);
 		expect(getActualFieldTop(fieldArea, camera)).toBe(fieldArea.y);
 	});
 

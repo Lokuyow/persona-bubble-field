@@ -139,7 +139,7 @@ test.describe('DEV World Sandbox', () => {
 		});
 
 		expect(background.image).toContain('repeating-conic-gradient');
-		expect(background.size).toContain('192px 192px');
+		expect(background.size).toContain('168px 168px');
 	});
 
 	test('selects and presents character 020 from the catalog', async ({ page }) => {
@@ -459,10 +459,10 @@ test.describe('DEV World Sandbox', () => {
 
 	test.describe('responsive field presentation', () => {
 		for (const viewport of [
-			{ name: 'mobile', width: 390, height: 844, cell: '80px', avatar: '76px', worldWidth: '1280px', worldHeight: '640px' },
-			{ name: 'desktop', width: 1200, height: 900, cell: '96px', avatar: '92px', worldWidth: '1536px', worldHeight: '768px' }
+			{ name: 'mobile', width: 390, height: 844, cell: '60px', avatar: '56px', worldWidth: '960px', worldHeight: '480px' },
+			{ name: 'desktop', width: 1200, height: 900, cell: '84px', avatar: '80px', worldWidth: '1344px', worldHeight: '672px' }
 		]) {
-			test(`${viewport.name} uses the larger cell and centered avatar`, async ({ page }) => {
+			test(`${viewport.name} uses the responsive cell and centered avatar`, async ({ page }) => {
 				await page.setViewportSize({ width: viewport.width, height: viewport.height });
 				await expectNoConsoleProblems(page, async () => {
 					await openDevWorld(page);
@@ -501,8 +501,8 @@ test.describe('DEV World Sandbox', () => {
 			expect(afterTransform).not.toBe(beforeTransform);
 			expect(Math.abs(after.avatarCenter.x - page.viewportSize()!.width / 2)).toBeLessThan(0.5);
 			expect(Math.abs(after.avatarCenter.x - after.participantCenter.x)).toBeLessThan(0.5);
-			expect(after.avatarWidth).toBe('76px');
-			expect(after.avatarHeight).toBe('76px');
+			expect(after.avatarWidth).toBe('56px');
+			expect(after.avatarHeight).toBe('56px');
 			expect(before.participantCenter.y).toBe(after.participantCenter.y);
 		});
 	});
