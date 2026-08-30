@@ -57,6 +57,8 @@ function startResult(messages: readonly ParsedWorldMessage[] = [], positions: re
 
 describe('world read session', () => {
 	let input: {
+		onBootstrapMessage: (event: ParsedWorldMessage) => void;
+		onBootstrapPosition: (event: ParsedPositionEvent) => void;
 		onLiveMessage: (event: ParsedWorldMessage) => void;
 		onLivePosition: (event: ParsedPositionEvent) => void;
 		onPrimaryClosed: (diagnostic: never) => void;
@@ -705,5 +707,102 @@ describe('world read session', () => {
 		input!.onLiveMessage(bootstrap);
 
 		expect(live).not.toHaveBeenCalled();
+	});
+
+	it('projects verified bootstrap evidence before canonical completion without replaying it as conversation', async () => {
+		const bootstrapMessage = message('progressive-message', 700);
+		const bootstrapPosition = position('progressive-position', 700);
+		const progressiveParticipantCounts: number[] = [];
+		mocked.createTransport.mockReturnValue({
+			start: vi.fn(async (nextInput) => {
+				input = nextInput;
+				nextInput.onBootstrapMessage(bootstrapMessage);
+				nextInput.onBootstrapPosition(bootstrapPosition);
+				nextInput.onLiveMessage(bootstrapMessage);
+				return startResult([bootstrapMessage], [bootstrapPosition]);
+			}),
+			dispose,
+			publish
+		});
+		const live = vi.fn();
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 },
+			onPresenceChanged: (presence) => progressiveParticipantCounts.push(presence.participants.length),
+			onLiveMessage: live,
+			onStatusChanged: vi.fn()
+		});
+
+		const bootstrap = await session.start();
+
+		expect(progressiveParticipantCounts).toContain(1);
+		expect(bootstrap.presence.participants).toEqual([
+			expect.objectContaining({ id: alice, position: { x: 2, y: 1 } })
+		]);
+		expect(live).not.toHaveBeenCalled();
+		session.completeBootstrap();
+		expect(live).not.toHaveBeenCalled();
+	});
+
+	it('does not select a self entry cell from partial bootstrap presence', async () => {
+		const occupied = position('bootstrap-occupied', 700, alice, 0, { x: 0, y: 0 });
+		result = startResult([], [occupied]);
+		mocked.createTransport.mockReturnValue({
+			start: vi.fn(async (nextInput) => {
+				input = nextInput;
+				nextInput.onBootstrapPosition(occupied);
+				return result;
+			}),
+			dispose,
+			publish
+		});
+		publish.mockResolvedValue([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
+		const session = createWorldReadSession({
+			field: { columns: 2, rows: 1 },
+			selfAccount: selfAccount(),
+			onPresenceChanged: vi.fn(),
+			onLiveMessage: vi.fn(),
+			onStatusChanged: vi.fn()
+		});
+
+		await session.start();
+		await expect(session.enterSelf()).resolves.toEqual({ kind: 'blocked' });
+		expect(publish).not.toHaveBeenCalled();
+		session.completeBootstrap();
+		await expect(session.enterSelf()).resolves.toEqual({ kind: 'succeeded', operation: 'entry' });
+		const event = parsePositionEvent(publish.mock.calls[0][0], 'c'.repeat(64));
+		expect(event?.position).toEqual({ x: 1, y: 0 });
+	});
+
+	it('keeps returning self evidence visible before canonical entry without enabling messages', async () => {
+		const recovered = position('returning-self', 700, selfPubkey, 0, { x: 2, y: 1 });
+		result = startResult([], [recovered]);
+		const availability: string[] = [];
+		mocked.createTransport.mockReturnValue({
+			start: vi.fn(async (nextInput) => {
+				input = nextInput;
+				nextInput.onBootstrapPosition(recovered);
+				return result;
+			}),
+			dispose,
+			publish
+		});
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 },
+			selfAccount: selfAccount(),
+			onPresenceChanged: vi.fn(),
+			onLiveMessage: vi.fn(),
+			onStatusChanged: vi.fn(),
+			onSelfMessageAvailabilityChanged: (state) => availability.push(state.kind)
+		});
+
+		await session.start();
+		expect(session.refresh(700_000).participants).toEqual([
+			expect.objectContaining({ id: selfPubkey, position: { x: 2, y: 1 } })
+		]);
+		expect(availability).toEqual([]);
+		await expect(session.publishNormalMessage('too early')).resolves.toEqual({ kind: 'blocked' });
+		session.completeBootstrap();
+		await expect(session.enterSelf()).resolves.toEqual({ kind: 'not-needed' });
+		expect(availability).toEqual(['ready']);
 	});
 });

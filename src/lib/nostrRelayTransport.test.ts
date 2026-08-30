@@ -86,7 +86,15 @@ function fixture(authorityCount = 2, websocketCtor = socketConstructor) {
 	const config = { channelId: channel.id, metadataDiscoveryRelays: seeds.map((relay) => relay.url), preferredRelayHint: authorities[0].url };
 	const transport = createNostrRelayTransport(config, { operationTimeoutMs: TIMEOUT, websocketCtor });
 	transports.push(transport);
-	const input = { messageSince: TIME - 50, positionSince: TIME - 100, onLiveMessage: vi.fn(), onLivePosition: vi.fn(), onPrimaryClosed: vi.fn() };
+	const input = {
+		messageSince: TIME - 50,
+		positionSince: TIME - 100,
+		onBootstrapMessage: vi.fn(),
+		onBootstrapPosition: vi.fn(),
+		onLiveMessage: vi.fn(),
+		onLivePosition: vi.fn(),
+		onPrimaryClosed: vi.fn()
+	};
 	const reference = { channelId: channel.id, relayHint: authorities[0].url };
 	const message = (content = 'hello', createdAt = TIME) => finalizeEvent(buildWorldMessageTemplate({ channel: reference, content, createdAt, speechType: 'normal', position: { x: 1, y: 2 } }), AUTHOR);
 	const position = (createdAt = TIME) => finalizeEvent(buildPositionEventTemplate({ channel: reference, createdAt, slot: 0, position: { x: 1, y: 2 } }), AUTHOR);
@@ -122,6 +130,17 @@ afterEach(async () => {
 });
 
 describe('primary lifecycle', () => {
+	it('does not start primary REQs while metadata discovery is still non-terminal', async () => {
+		const f = fixture(1);
+		for (const relay of f.seeds) relay.onRequest = () => {};
+		const pending = f.transport.start(f.input);
+		void pending.catch(() => {});
+
+		await vi.advanceTimersByTimeAsync(TIMEOUT - 1);
+
+		expect(f.authorities[0].primaryRequests()).toEqual([]);
+	});
+
 	it('keeps an EVENT immediately preceding the final EOSE in the initial position batch', async () => {
 		const f = fixture(1);
 		const event = f.position();
@@ -132,6 +151,36 @@ describe('primary lifecycle', () => {
 		const result = await f.start();
 		expect(result.positions.map((position) => position.id)).toEqual([event.id]);
 		expect(f.input.onLivePosition).not.toHaveBeenCalled();
+	});
+
+	it('projects each verified primary bootstrap event before final EOSE and retains it once in the snapshot', async () => {
+		const f = fixture(1);
+		const event = f.message('bootstrap-before-eose');
+		let messageRequestId: string | null = null;
+		f.authorities[0].onRequest = (socket, request) => {
+			if (kind(request) === 42) {
+				messageRequestId = request[1];
+				send(socket, 'EVENT', request[1], event);
+				return;
+			}
+			send(socket, 'EOSE', request[1]);
+		};
+		let settled = false;
+		const pending = f.transport.start(f.input).then((result) => {
+			settled = true;
+			return result;
+		});
+
+		await vi.advanceTimersByTimeAsync(30);
+
+		expect(f.input.onBootstrapMessage).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: event.id }));
+		expect(f.input.onLiveMessage).not.toHaveBeenCalled();
+		expect(settled).toBe(false);
+		send(f.authorities[0].latestSocket(), 'EOSE', messageRequestId!);
+		await vi.advanceTimersByTimeAsync(5);
+
+		await expect(pending).resolves.toMatchObject({ messages: [expect.objectContaining({ id: event.id })] });
+		expect(f.input.onBootstrapMessage).toHaveBeenCalledTimes(1);
 	});
 
 	it('buffers stored messages/positions, then delivers each live event only once', async () => {

@@ -32,7 +32,7 @@
 	};
 
 	type Props = {
-		submitContent: (content: string) => Promise<Readonly<{ eventId: string }>>;
+		submitContent: (content: string, signal: AbortSignal) => Promise<Readonly<{ eventId: string }>>;
 		onPreferredHeightChange?: (height: number) => void;
 	};
 
@@ -67,7 +67,7 @@
 					submit: async (output, { signal }) => {
 						if (signal.aborted) throw new DOMException('Submission was cancelled.', 'AbortError');
 						// This integration intentionally ignores composer-owned tags and context.
-						return submitContent(output.content);
+						return submitContent(output.content, signal);
 					}
 				});
 				host.append(composer);
