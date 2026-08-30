@@ -81,6 +81,23 @@ test.describe('DEV World Sandbox', () => {
 		await expect(self.locator('img')).toHaveAttribute('src', /characters\/001\.webp$/);
 	});
 
+	test('uses a subtle checkerboard field without the sun decoration', async ({ page }) => {
+		await openDevWorld(page);
+
+		await expect(page.locator('.field-sun')).toHaveCount(0);
+		const fieldGrid = page.locator('.field-grid');
+		const background = await fieldGrid.evaluate((element) => {
+			const style = getComputedStyle(element);
+			return {
+				image: style.backgroundImage,
+				size: style.backgroundSize
+			};
+		});
+
+		expect(background.image).toContain('repeating-conic-gradient');
+		expect(background.size).toContain('192px 192px');
+	});
+
 	test('selects and presents character 020 from the catalog', async ({ page }) => {
 		await page.goto('/?devWorld=1&devCharacter=020');
 		await expect(page.getByText('DEV World Sandbox', { exact: true })).toBeVisible();
