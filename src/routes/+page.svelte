@@ -985,7 +985,7 @@
 		};
 	}
 
-	function tailGeometry(start: WorldPoint, target: WorldPoint, width = 9, overlap = 2) {
+	function tailGeometry(start: WorldPoint, target: WorldPoint, width = 11, overlap = 2) {
 		const dx = target.x - start.x;
 		const dy = target.y - start.y;
 		const length = Math.hypot(dx, dy) || 1;
@@ -996,10 +996,13 @@
 		const baseCenter = { x: start.x - ux * overlap, y: start.y - uy * overlap };
 		const left = { x: baseCenter.x + px, y: baseCenter.y + py };
 		const right = { x: baseCenter.x - px, y: baseCenter.y - py };
+		const seamProgress = Math.min(1, Math.max(0, (start.y - baseCenter.y) / (target.y - baseCenter.y || 1)));
+		const seamCenterX = baseCenter.x + (target.x - baseCenter.x) * seamProgress;
 
 		return {
 			points: `${left.x},${left.y} ${right.x},${right.y} ${target.x},${target.y}`,
-			outlinePath: `M ${left.x} ${left.y} L ${target.x} ${target.y} L ${right.x} ${right.y}`
+			outlinePath: `M ${left.x} ${left.y} L ${target.x} ${target.y} L ${right.x} ${right.y}`,
+			seamOffsetX: seamCenterX - start.x
 		};
 	}
 </script>
@@ -1083,7 +1086,7 @@
 				{#each bubble.members as member, index (member.id)}
 					{@const start = mergedTailStart(bubble.anchor, bubble.size, index, bubble.members.length)}
 					{@const target = tailTarget(member)}
-					{@const tail = tailGeometry(start, target, 7, 2)}
+					{@const tail = tailGeometry(start, target, 9, 2)}
 					<polygon class={`tail tail-${bubble.tone} tone-${bubble.tone}`} data-tail-participant-id={member.id} points={tail.points} />
 					<path class={`tail-outline tone-${bubble.tone}`} data-tail-participant-id={member.id} d={tail.outlinePath} />
 				{/each}
@@ -1099,7 +1102,7 @@
 					data-bubble-participant-id={bubble.kind === 'normal' ? bubble.speaker.id : undefined}
 					data-merged-members={bubble.kind === 'merged' ? bubble.memberPubkeys.length : undefined}
 					data-speech-type={bubble.speechType}
-					style={`${bubble.kind === 'merged' ? mergedBubbleStyle(bubble.memberPubkeys.length) : ''}; transform: translate3d(${bubble.anchor.x}px, ${bubble.anchor.y}px, 0);`}
+					style={`${bubble.kind === 'merged' ? mergedBubbleStyle(bubble.memberPubkeys.length) : ''}; --tail-seam-offset-x: ${bubble.kind === 'normal' ? tailGeometry(tailStart(bubble.anchor, bubble.size), tailTarget(bubble.speaker)).seamOffsetX : 0}px; transform: translate3d(${bubble.anchor.x}px, ${bubble.anchor.y}px, 0);`}
 				>
 					<span>{bubble.text}</span>
 					{#if bubble.kind === 'merged'}
@@ -1107,7 +1110,7 @@
 							<span
 								class="bubble-tail-connection"
 								data-tail-participant-id={member.id}
-								style={mergedTailConnectionStyle(index, bubble.members.length)}
+								style={`${mergedTailConnectionStyle(index, bubble.members.length)} --tail-seam-offset-x: ${tailGeometry(mergedTailStart(bubble.anchor, bubble.size, index, bubble.members.length), tailTarget(member), 9, 2).seamOffsetX}px;`}
 								aria-hidden="true"
 							></span>
 						{/each}
@@ -1551,9 +1554,9 @@
 	.bubble-normal::after {
 		content: '';
 		position: absolute;
-		left: 50%;
+		left: calc(50% + var(--tail-seam-offset-x, 0px));
 		bottom: -1px;
-		width: 8px;
+		width: 11px;
 		height: 3px;
 		transform: translateX(-50%);
 		background: var(--tone-background);
@@ -1578,9 +1581,9 @@
 	.bubble-tail-connection {
 		position: absolute;
 		bottom: -1px;
-		width: 8px;
+		width: 9px;
 		height: 3px;
-		transform: translateX(-50%);
+		transform: translateX(calc(-50% + var(--tail-seam-offset-x, 0px)));
 		background: var(--tone-background);
 		pointer-events: none;
 		z-index: 1;
