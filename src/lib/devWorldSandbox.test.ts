@@ -45,11 +45,13 @@ describe('DEV world sandbox', () => {
 	it('resolves the default, valid, and unknown DEV character query values', () => {
 		expect(resolveDevWorldCharacterId(new URLSearchParams())).toBe(DEV_WORLD_DEFAULT_CHARACTER_ID);
 		expect(resolveDevWorldCharacterId(new URLSearchParams('?devCharacter=005'))).toBe('005');
+		expect(resolveDevWorldCharacterId(new URLSearchParams('?devCharacter=020'))).toBe('020');
 		expect(resolveDevWorldCharacterId(new URLSearchParams('?devCharacter=999'))).toBe('001');
 		expect(getDevWorldCharacter('005')).toBe(CHARACTER_CATALOG[4]);
+		expect(getDevWorldCharacter('020')).toBe(CHARACTER_CATALOG[19]);
 		expect(getDevWorldCharacter('999')).toBe(CHARACTER_CATALOG[0]);
 		expect(CHARACTER_CATALOG.map(({ characterId }) => characterId)).toEqual(
-			['001', '002', '003', '004', '005', '006', '007', '008', '009', '010']
+			['001', '002', '003', '004', '005', '006', '007', '008', '009', '010', '011', '012', '013', '014', '015', '016', '017', '018', '019', '020']
 		);
 	});
 

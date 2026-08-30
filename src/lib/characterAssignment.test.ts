@@ -17,7 +17,9 @@ describe('prototype character assignment', () => {
 	it.each([
 		[0, '001'],
 		[1, '002'],
-		[9, '010']
+		[9, '010'],
+		[10, '011'],
+		[19, '020']
 	])('uses the current catalog index for canonical pubkey value %s', (value, characterId) => {
 		expect(deriveCharacterFromPubkey(pubkeyWithValue(value), CHARACTER_CATALOG).characterId)
 			.toBe(characterId);

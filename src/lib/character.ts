@@ -8,7 +8,7 @@ export type Character = CharacterMaster & {
 	picture: string;
 };
 
-const INITIAL_CHARACTER_MASTER = [
+const CHARACTER_MASTER = [
 	{
 		characterId: '001',
 		name: '女の子',
@@ -27,7 +27,7 @@ const INITIAL_CHARACTER_MASTER = [
 	{
 		characterId: '004',
 		name: 'エルフ',
-		about: '長く生きているらしいが、年齢の話はしない。'
+		about: '年齢の話はしません。'
 	},
 	{
 		characterId: '005',
@@ -57,11 +57,61 @@ const INITIAL_CHARACTER_MASTER = [
 	{
 		characterId: '010',
 		name: '河童',
-		about: '頭の皿が乾くことより、皿について聞かれることの方を嫌がる。'
+		about: '尻子玉を集めてる'
+	},
+	{
+		characterId: '011',
+		name: '無口な少年',
+		about: '話さないわけではない。話すことがないだけかもしれない。'
+	},
+	{
+		characterId: '012',
+		name: '石ころ',
+		about: '石ころ。'
+	},
+	{
+		characterId: '013',
+		name: '木',
+		about: '気づいたときにはそこにいた。'
+	},
+	{
+		characterId: '014',
+		name: 'マテオ',
+		about: '少し遠くから来たような顔をしている。'
+	},
+	{
+		characterId: '015',
+		name: '自動販売機',
+		about: '夜になると少しだけ存在感が増す。'
+	},
+	{
+		characterId: '016',
+		name: 'お母さん',
+		about: 'ちゃんと食べているかを気にしている。'
+	},
+	{
+		characterId: '017',
+		name: 'お父さん',
+		about: '最近どうしているか、聞こうと思っている。'
+	},
+	{
+		characterId: '018',
+		name: 'ゴブリン',
+		about: '簿記2級'
+	},
+	{
+		characterId: '019',
+		name: 'ぽよる',
+		about: 'べつに溶けてるわけじゃないです。'
+	},
+	{
+		characterId: '020',
+		name: 'アミナ',
+		about: '静かな場所ではよく笑う。'
 	}
 ] as const satisfies readonly CharacterMaster[];
 
-export const CHARACTER_CATALOG: readonly Character[] = INITIAL_CHARACTER_MASTER.map((master) => ({
+export const CHARACTER_CATALOG: readonly Character[] = CHARACTER_MASTER.map((master) => ({
 	...master,
 	picture: characterPicturePath(master.characterId)
 }));

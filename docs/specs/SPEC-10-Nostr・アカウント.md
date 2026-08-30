@@ -213,6 +213,12 @@ MVPでは以下を提供しない。
 
 これにより、一般Nostr上でも最初はそのキャラクターの姿を持つ。
 
+prototype期間中に組み込みcharacter catalogまたは公式プロフィールを破壊的に更新する場合は、明示的なcharacter profile revisionを更新し、既存browser-local accountの鍵とアカウント作成時刻を維持したまま、現在のpubkey → character導出結果でkind 0を一度だけ再同期してよい。再同期時は新しいreplaceable eventになるよう、準備時点の現在Unix秒を `created_at` に使用する。
+
+同期済みかはpubkeyだけではなくprofile revisionを含むbrowser-local markerで判定する。authoritative Relayへのpublish成功後だけ現在revisionを記録し、同じrevisionでは通常起動のたびに自動再発行しない。過去のpubkey-only markerは旧revisionへの同期済みとして扱う。
+
+現在revisionへの同期後、ユーザーは従来どおり外部Nostrクライアントからkind 0を自由に変更できる。次の強制同期は、明示的にprofile revisionを更新した場合だけ行う。
+
 なりきりクライアントにはプロフィール編集UIを設けない。
 
 ただし、kind 0そのものを暗号学的に編集不能にはしない。
