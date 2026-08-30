@@ -6,6 +6,35 @@ async function openDevWorld(page: Page): Promise<void> {
 	await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 }
 
+async function readMergedBubbleGeometry(page: Page, memberPrefixes: readonly string[]) {
+	return page.locator('.bubble-merged').evaluate((bubble, prefixes) => {
+		const mergedMemberIds = new Set(prefixes.map((prefix) => prefix.repeat(64)));
+		const rect = bubble.getBoundingClientRect();
+		const style = getComputedStyle(bubble);
+		const polygons = [...document.querySelectorAll<SVGPolygonElement>('.tail-layer polygon')]
+			.filter((polygon) => mergedMemberIds.has(polygon.dataset.tailParticipantId ?? ''));
+		const tailStartXs = polygons.map((polygon) => {
+			const first = polygon.points.getItem(0);
+			const second = polygon.points.getItem(1);
+			const target = polygon.points.getItem(polygon.points.numberOfItems - 1);
+			const base = { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 };
+			const dx = target.x - base.x;
+			const dy = target.y - base.y;
+			const length = Math.hypot(dx, dy) || 1;
+			return base.x + (dx / length) * 2;
+		});
+
+		return {
+			memberCount: Number(bubble.dataset.mergedMembers),
+			width: rect.width,
+			height: rect.height,
+			fontSize: Number.parseFloat(style.fontSize),
+			paddingLeft: Number.parseFloat(style.paddingLeft),
+			tailStartXs
+		};
+	}, memberPrefixes);
+}
+
 async function readCharacterGeometry(page: Page) {
 	return page.locator('.participant').first().evaluate((participant) => {
 		const avatar = participant.querySelector<HTMLElement>('.avatar');
@@ -118,6 +147,8 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.getByText('DEV World Sandbox', { exact: true })).toBeVisible();
 		await expect(page.locator('.bubble-normal')).toHaveCount(1);
 		await expect(page.locator('.bubble-merged')).toHaveCount(1);
+		await expect(page.locator('.bubble-merged')).toHaveAttribute('data-merged-members', '2');
+		await expect(page.locator('.bubble-merged small')).toHaveCount(0);
 
 		const tailState = await page.locator('.tail-layer').evaluate((layer) => {
 			const polygons = [...layer.querySelectorAll('polygon')];
@@ -194,6 +225,38 @@ test.describe('DEV World Sandbox', () => {
 			{ fill: 'none', strokeDasharray: 'none', opacity: '1' },
 			{ fill: 'none', strokeDasharray: 'none', opacity: '1' }
 		]);
+	});
+
+	test('scales merged bubbles and distributes merged tail starts for 2, 3, and 4 members', async ({ page }) => {
+		const fixtures = [
+			{ query: '1', count: 2, members: ['b', 'c'] },
+			{ query: 'merged3', count: 3, members: ['b', 'c', 'd'] },
+			{ query: 'merged4', count: 4, members: ['b', 'c', 'd', 'e'] }
+		] as const;
+		const geometries = [];
+
+		for (const fixture of fixtures) {
+			await page.goto(`/?devWorld=1&devSpeech=${fixture.query}`);
+			await expect(page.getByText('DEV World Sandbox', { exact: true })).toBeVisible();
+			await expect(page.locator('.bubble-merged')).toHaveAttribute('data-merged-members', String(fixture.count));
+			await expect(page.locator('.bubble-merged small')).toHaveCount(0);
+
+			const geometry = await readMergedBubbleGeometry(page, fixture.members);
+			expect(geometry.memberCount).toBe(fixture.count);
+			expect(geometry.tailStartXs).toHaveLength(fixture.count);
+			expect(new Set(geometry.tailStartXs.map((x) => x.toFixed(3))).size).toBe(fixture.count);
+			expect(Math.max(...geometry.tailStartXs) - Math.min(...geometry.tailStartXs)).toBeGreaterThan(40);
+			geometries.push(geometry);
+		}
+
+		expect(geometries[1].width).toBeGreaterThan(geometries[0].width);
+		expect(geometries[2].width).toBeGreaterThan(geometries[1].width);
+		expect(geometries[1].height).toBeGreaterThan(geometries[0].height);
+		expect(geometries[2].height).toBeGreaterThan(geometries[1].height);
+		expect(geometries[1].fontSize).toBeGreaterThan(geometries[0].fontSize);
+		expect(geometries[2].fontSize).toBeGreaterThan(geometries[1].fontSize);
+		expect(geometries[1].paddingLeft).toBeGreaterThan(geometries[0].paddingLeft);
+		expect(geometries[2].paddingLeft).toBeGreaterThan(geometries[1].paddingLeft);
 	});
 
 	test('switches the self character through the sandbox selector', async ({ page }) => {
