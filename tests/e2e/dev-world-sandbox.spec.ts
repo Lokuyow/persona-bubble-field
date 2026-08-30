@@ -91,6 +91,18 @@ test.describe('DEV World Sandbox', () => {
 			const polygons = [...layer.querySelectorAll('polygon')];
 			const outlines = [...layer.querySelectorAll('path')];
 			const bubbles = [...document.querySelectorAll<HTMLElement>('.bubble')];
+			const participants = [...document.querySelectorAll<HTMLElement>('.participant')];
+			const fieldArea = document.querySelector<HTMLElement>('.field-area');
+			const fieldScene = document.querySelector<HTMLElement>('.field-scene');
+			if (!fieldArea || !fieldScene) throw new Error('Missing field geometry');
+			const cellSize = Number.parseFloat(getComputedStyle(fieldScene).getPropertyValue('--cell-size'));
+			const cameraTransform = getComputedStyle(fieldScene).transform;
+			const cameraY = cameraTransform === 'none' ? 0 : -Number.parseFloat(cameraTransform.split(',')[5]);
+			const expectedCellY: Record<string, number> = {
+				['a'.repeat(64)]: 2,
+				['b'.repeat(64)]: 2,
+				['c'.repeat(64)]: 2
+			};
 			return {
 				polygonCount: polygons.length,
 				outlineCount: outlines.length,
@@ -103,12 +115,31 @@ test.describe('DEV World Sandbox', () => {
 					return {
 						fill: getComputedStyle(polygon).fill,
 						background: bubbleStyle.backgroundColor,
-						maskBackground: getComputedStyle(bubble, '::after').backgroundColor
+						maskBackground: getComputedStyle(bubble, '::after').backgroundColor,
+						maskWidth: getComputedStyle(bubble, '::after').width,
+						maskHeight: getComputedStyle(bubble, '::after').height,
+						borderRadius: bubbleStyle.borderRadius,
+						borderColor: bubbleStyle.borderTopColor,
+						outlineColor: getComputedStyle(document.querySelector<SVGPathElement>(`path[data-tail-participant-id="${polygon.dataset.tailParticipantId}"]`)!).stroke,
+						target: (() => {
+							const point = polygon.points.getItem(polygon.points.numberOfItems - 1);
+							return { x: point.x, y: point.y };
+						})(),
+						participantCenterX: (() => {
+							const participant = participants.find((candidate) => candidate.dataset.participantId === polygon.dataset.tailParticipantId);
+							if (!participant) return null;
+							const rect = participant.getBoundingClientRect();
+							return rect.left + rect.width / 2;
+						})(),
+						cellY: expectedCellY[polygon.dataset.tailParticipantId ?? ''] ?? null,
+						fieldTop: fieldArea.getBoundingClientRect().top,
+						cellSize,
+						cameraY
 					};
 				}),
 				outlineStyles: outlines.map((outline) => {
 					const style = getComputedStyle(outline);
-					return { fill: style.fill, strokeDasharray: style.strokeDasharray };
+					return { fill: style.fill, strokeDasharray: style.strokeDasharray, opacity: style.opacity };
 				})
 			};
 		});
@@ -119,10 +150,17 @@ test.describe('DEV World Sandbox', () => {
 			fill: style.background,
 			maskBackground: style.background
 		})));
+		expect(tailState.polygonStyles.every((style) => style.maskWidth !== '11px')).toBe(true);
+		expect(tailState.polygonStyles.every((style) => style.maskHeight === '3px')).toBe(true);
+		expect(tailState.polygonStyles.every((style) => style.borderRadius.split(' ').length <= 2)).toBe(true);
+		expect(tailState.polygonStyles.every((style) => style.borderColor === style.outlineColor)).toBe(true);
+		expect(tailState.polygonStyles.every((style) => style.cellY !== null)).toBe(true);
+		expect(tailState.polygonStyles.every((style) => Math.abs(style.target.y - (style.fieldTop + style.cellY * style.cellSize - style.cameraY - 4)) < 0.01)).toBe(true);
+		expect(tailState.polygonStyles.every((style) => style.participantCenterX !== null && Math.abs(style.target.x - style.participantCenterX) < 0.01)).toBe(true);
 		expect(tailState.outlineStyles).toEqual([
-			{ fill: 'none', strokeDasharray: 'none' },
-			{ fill: 'none', strokeDasharray: 'none' },
-			{ fill: 'none', strokeDasharray: 'none' }
+			{ fill: 'none', strokeDasharray: 'none', opacity: '1' },
+			{ fill: 'none', strokeDasharray: 'none', opacity: '1' },
+			{ fill: 'none', strokeDasharray: 'none', opacity: '1' }
 		]);
 	});
 
