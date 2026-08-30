@@ -24,7 +24,7 @@ function selfAccount() {
 		secretKey: selfSecretKey.slice(),
 		pubkey: selfPubkey,
 		lastChangedAtMs: 700_000,
-		initialProfilePublished: true
+		characterProfileRevision: 2
 	};
 }
 

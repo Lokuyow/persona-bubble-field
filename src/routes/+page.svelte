@@ -36,11 +36,15 @@
 	import { CHARACTER_CATALOG, type Character } from '$lib/character';
 	import { deriveCharacterFromPubkey } from '$lib/characterAssignment';
 	import ProfileDialog from '$lib/ProfileDialog.svelte';
-	import { loadOrCreateAccount, type AccountSnapshot } from '$lib/nostrAccount';
 	import {
-		prepareInitialProfilePublication,
-		publishInitialProfile,
-		type PreparedInitialProfilePublication
+		CURRENT_CHARACTER_PROFILE_REVISION,
+		loadOrCreateAccount,
+		type AccountSnapshot
+	} from '$lib/nostrAccount';
+	import {
+		prepareCharacterProfilePublication,
+		publishCharacterProfile,
+		type PreparedCharacterProfilePublication
 	} from '$lib/initialProfilePublication';
 	import { projectPresence } from '$lib/presenceProjection';
 import { createPresenceState, type PresenceState } from '$lib/presence';
@@ -230,22 +234,24 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 		const begin = async () => {
 			if (devWorldSandboxEnabled || startRequested || !hasUsableViewport()) return;
 			startRequested = true;
-			let initialProfilePublication: PreparedInitialProfilePublication | null = null;
+			let characterProfilePublication: PreparedCharacterProfilePublication | null = null;
 			try {
 				const accountResult = await loadOrCreateAccount();
 				if (accountResult.kind === 'created' || accountResult.kind === 'restored') {
 					selfAccount = accountResult.account;
 				}
-				if (selfAccount && !selfAccount.initialProfilePublished) {
+				if (selfAccount && selfAccount.characterProfileRevision !== CURRENT_CHARACTER_PROFILE_REVISION) {
 					const character = deriveCharacterFromPubkey(selfAccount.pubkey, CHARACTER_CATALOG);
 					const absolutePictureUrl = new URL(
 						asset(`/${character.picture}`),
 						window.location.origin
 					).toString();
-					initialProfilePublication = prepareInitialProfilePublication({
+					characterProfilePublication = prepareCharacterProfilePublication({
 						account: selfAccount,
 						character,
-						absolutePictureUrl
+						absolutePictureUrl,
+						createdAt: accountResult.kind === 'restored' ? Math.floor(Date.now() / 1000) :
+							Math.floor(selfAccount.lastChangedAtMs / 1000)
 					});
 				}
 			} catch {
@@ -269,8 +275,8 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 				restoreBootstrapConversation(bootstrap.messages, bootstrap.presence, Date.now());
 				session.completeBootstrap();
 				void session.enterSelf();
-				if (initialProfilePublication) {
-					void publishInitialProfile(initialProfilePublication, (event) => session!.publish(event)).catch(() => {});
+				if (characterProfilePublication) {
+					void publishCharacterProfile(characterProfilePublication, (event) => session!.publish(event)).catch(() => {});
 				}
 			} catch {
 				// The session reports a concise fatal status to the UI.

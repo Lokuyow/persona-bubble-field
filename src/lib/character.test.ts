@@ -28,7 +28,7 @@ const EXPECTED_CHARACTERS = [
 	{
 		characterId: '004',
 		name: 'エルフ',
-		about: '長く生きているらしいが、年齢の話はしない。'
+		about: '年齢の話はしません。'
 	},
 	{
 		characterId: '005',
@@ -58,26 +58,36 @@ const EXPECTED_CHARACTERS = [
 	{
 		characterId: '010',
 		name: '河童',
-		about: '頭の皿が乾くことより、皿について聞かれることの方を嫌がる。'
-	}
+		about: '尻子玉を集めてる'
+	},
+	{ characterId: '011', name: '無口な少年', about: '話さないわけではない。話すことがないだけかもしれない。' },
+	{ characterId: '012', name: '石ころ', about: '石ころ。' },
+	{ characterId: '013', name: '木', about: '気づいたときにはそこにいた。' },
+	{ characterId: '014', name: 'マテオ', about: '少し遠くから来たような顔をしている。' },
+	{ characterId: '015', name: '自動販売機', about: '夜になると少しだけ存在感が増す。' },
+	{ characterId: '016', name: 'お母さん', about: 'ちゃんと食べているかを気にしている。' },
+	{ characterId: '017', name: 'お父さん', about: '最近どうしているか、聞こうと思っている。' },
+	{ characterId: '018', name: 'ゴブリン', about: '簿記2級' },
+	{ characterId: '019', name: 'ぽよる', about: 'べつに溶けてるわけじゃないです。' },
+	{ characterId: '020', name: 'アミナ', about: '静かな場所ではよく笑う。' }
 ] as const;
 
 describe('character catalog', () => {
-	it('contains the exact initial character master data', () => {
+	it('contains the exact 001 through 020 character master data in source order', () => {
 		expect(CHARACTER_CATALOG.map(({ characterId, name, about }) => ({ characterId, name, about })))
 			.toEqual(EXPECTED_CHARACTERS);
 	});
 
 	it('has unique character IDs and names', () => {
 		expect(new Set(CHARACTER_CATALOG.map((character) => character.characterId)).size)
-			.toBe(CHARACTER_CATALOG.length);
+			.toBe(20);
 		expect(new Set(CHARACTER_CATALOG.map((character) => character.name)).size)
-			.toBe(CHARACTER_CATALOG.length);
+			.toBe(20);
 	});
 
-	it('derives picture paths deterministically from character IDs', () => {
+	it('derives picture paths deterministically through 020', () => {
 		expect(characterPicturePath('001')).toBe('characters/001.webp');
-		expect(characterPicturePath('010')).toBe('characters/010.webp');
+		expect(characterPicturePath('020')).toBe('characters/020.webp');
 		expect(CHARACTER_CATALOG.map((character) => character.picture)).toEqual(
 			CHARACTER_CATALOG.map((character) => characterPicturePath(character.characterId))
 		);
@@ -90,7 +100,7 @@ describe('character catalog', () => {
 	});
 
 	it('retrieves characters by ID without an implicit fallback', () => {
-		expect(getCharacterById('001')?.name).toBe('女の子');
+		expect(getCharacterById('020')?.name).toBe('アミナ');
 		expect(getCharacterById('999')).toBeUndefined();
 		expect(getCharacterById('')).toBeUndefined();
 	});
