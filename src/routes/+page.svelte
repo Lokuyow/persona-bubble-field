@@ -41,8 +41,10 @@
 	import { projectPresence } from '$lib/presenceProjection';
 	import type { PresenceState } from '$lib/presence';
 	import type { ParsedWorldMessage } from '$lib/nostrProtocol';
+	import HostOwnedComposerLite from '$lib/HostOwnedComposerLite.svelte';
 	import {
 		createWorldReadSession,
+		type SelfMessageAvailability,
 		type SelfPositionWriteState,
 		type WorldReadConnectionStatus
 	} from '$lib/worldReadSession';
@@ -83,6 +85,8 @@
 	let connectionStatus: WorldReadConnectionStatus = { kind: 'bootstrapping' };
 	let selfAccount: AccountSnapshot | null = null;
 	let selfPositionWriteState: SelfPositionWriteState = { kind: 'unavailable' };
+	let selfMessageAvailability: SelfMessageAvailability = { kind: 'unavailable' };
+	let composerPreferredHeight: number | null = null;
 	let worldSession: ReturnType<typeof createWorldReadSession> | null = null;
 	let devWorldSandboxEnabled = false;
 	let selectedCharacterId = '001';
@@ -247,7 +251,8 @@
 				onPresenceChanged: setPresence,
 				onLiveMessage: receiveLiveMessage,
 				onStatusChanged: (status) => { connectionStatus = status; },
-				onSelfPositionWriteStateChanged: (state) => { selfPositionWriteState = state; }
+				onSelfPositionWriteStateChanged: (state) => { selfPositionWriteState = state; },
+				onSelfMessageAvailabilityChanged: (state) => { selfMessageAvailability = state; }
 			});
 			worldSession = session;
 
@@ -274,7 +279,7 @@
 			if (!devWorldSandboxEnabled) void begin();
 		};
 		const handleKeydown = (event: KeyboardEvent) => {
-			if (event.repeat || isEditableTarget(event.target)) return;
+			if (event.repeat || isEditableKeyboardEvent(event)) return;
 			const direction = directionFromKey(event.key);
 			if (!direction) return;
 			event.preventDefault();
@@ -423,10 +428,10 @@
 		return null;
 	}
 
-	function isEditableTarget(target: EventTarget | null): boolean {
-		return target instanceof HTMLElement && (
-			target.matches('input, textarea, select') || target.isContentEditable
-		);
+	function isEditableKeyboardEvent(event: KeyboardEvent): boolean {
+		return event.composedPath().some((target) => target instanceof HTMLElement && (
+			target.matches('input, textarea, select, [contenteditable], ehagaki-composer') || target.isContentEditable
+		));
 	}
 
 	function moveSandboxSelf(direction: Direction): void {
@@ -438,6 +443,16 @@
 	function moveWorldSelf(direction: Direction): void {
 		if (devWorldSandboxEnabled) return;
 		void worldSession?.moveSelf(direction);
+	}
+
+	async function submitComposerContent(content: string): Promise<Readonly<{ eventId: string }>> {
+		const result = await worldSession?.publishNormalMessage(content);
+		if (result?.kind === 'succeeded') return { eventId: result.eventId };
+		throw new Error('Message was not confirmed by Relay.');
+	}
+
+	function setComposerPreferredHeight(height: number): void {
+		composerPreferredHeight = height;
 	}
 
 	function retryWorldEntry(): void {
@@ -543,7 +558,12 @@
 	/>
 </svelte:head>
 
-<main class="app-shell">
+<main
+	class="app-shell"
+	class:composer-available={!devWorldSandboxEnabled && selfMessageAvailability.kind === 'ready'}
+	class:composer-preferred-height={composerPreferredHeight !== null}
+	style={composerPreferredHeight === null ? undefined : `--composer-preferred-height: ${composerPreferredHeight}px`}
+>
 	<div class="topbar">
 		<div class="brand-lockup">
 			<span class="brand-mark" aria-hidden="true">✳</span>
@@ -687,6 +707,15 @@
 		</div>
 	{/if}
 
+	{#if !devWorldSandboxEnabled && selfMessageAvailability.kind === 'ready'}
+		<div class="composer-dock" aria-label="Message composer">
+			<HostOwnedComposerLite
+				submitContent={submitComposerContent}
+				onPreferredHeightChange={setComposerPreferredHeight}
+			/>
+		</div>
+	{/if}
+
 	<p class="footer-note">{devWorldSandboxEnabled ? 'DEV sandbox · local only · no Relay connection · no publishing' : 'Relay world · signed position publishing · DOM participants · SVG tails'}</p>
 </main>
 
@@ -712,8 +741,12 @@
 	}
 
 	.app-shell {
+		--composer-dock-padding-block: 8px;
+		--composer-dock-border-width: 1px;
+		--composer-dock-height: clamp(132px, 20svh, 160px);
 		position: relative;
 		display: flex;
+		height: 100svh;
 		min-height: 100svh;
 		flex-direction: column;
 		overflow: hidden;
@@ -813,6 +846,36 @@
 		overflow: hidden;
 		isolation: isolate;
 		background: #e8e7da;
+	}
+
+	.composer-available .field-viewport {
+		min-height: 0;
+	}
+
+	.composer-available.composer-preferred-height {
+		--composer-dock-height: calc(
+			var(--composer-preferred-height)
+			+ var(--composer-dock-padding-block)
+			+ var(--composer-dock-padding-block)
+			+ var(--composer-dock-border-width)
+			+ env(safe-area-inset-bottom)
+		);
+	}
+
+	.composer-dock {
+		z-index: 12;
+		width: 100%;
+		height: var(--composer-dock-height);
+		flex: 0 0 var(--composer-dock-height);
+		padding: var(--composer-dock-padding-block) 16px
+			calc(var(--composer-dock-padding-block) + env(safe-area-inset-bottom));
+		border-top: var(--composer-dock-border-width) solid rgba(57, 67, 64, 0.14);
+		background: rgba(245, 241, 233, 0.98);
+	}
+
+	.composer-dock :global(.host-owned-composer) {
+		width: min(720px, 100%);
+		margin: 0 auto;
 	}
 
 	.field-viewport::before {
@@ -1087,6 +1150,10 @@
 		gap: 22px;
 	}
 
+	.composer-available .status-panel {
+		bottom: calc(var(--composer-dock-height) + 30px);
+	}
+
 	.panel-kicker {
 		color: #76827b;
 		font-size: 10px;
@@ -1124,6 +1191,10 @@
 		left: 50%;
 		z-index: 11;
 		transform: translateX(-50%);
+	}
+
+	.composer-available .world-controls {
+		bottom: calc(var(--composer-dock-height) + 76px);
 	}
 
 	.sandbox-character-picker {
@@ -1228,6 +1299,10 @@
 		letter-spacing: 0.12em;
 		text-transform: uppercase;
 		white-space: nowrap;
+	}
+
+	.composer-available .footer-note {
+		bottom: calc(var(--composer-dock-height) + 8px);
 	}
 
 	@media (max-width: 700px) {
