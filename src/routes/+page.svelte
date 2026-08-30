@@ -279,7 +279,7 @@
 			if (!devWorldSandboxEnabled) void begin();
 		};
 		const handleKeydown = (event: KeyboardEvent) => {
-			if (event.repeat || isEditableTarget(event.target)) return;
+			if (event.repeat || isEditableKeyboardEvent(event)) return;
 			const direction = directionFromKey(event.key);
 			if (!direction) return;
 			event.preventDefault();
@@ -428,10 +428,10 @@
 		return null;
 	}
 
-	function isEditableTarget(target: EventTarget | null): boolean {
-		return target instanceof HTMLElement && (
-			target.matches('input, textarea, select') || target.isContentEditable
-		);
+	function isEditableKeyboardEvent(event: KeyboardEvent): boolean {
+		return event.composedPath().some((target) => target instanceof HTMLElement && (
+			target.matches('input, textarea, select, [contenteditable], ehagaki-composer') || target.isContentEditable
+		));
 	}
 
 	function moveSandboxSelf(direction: Direction): void {
