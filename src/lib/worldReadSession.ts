@@ -189,6 +189,20 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 		applyCanonicalPosition(event, nowMs);
 	}
 
+	// Bootstrap evidence is already parser/signature-verified by the transport.
+	// It can safely improve the visible field before final EOSE, but it must not
+	// produce conversation or make self writes available before canonical handoff.
+	function applyBootstrapMessage(message: ParsedWorldMessage, nowMs: number): void {
+		worldPresence = applyWorldPresenceMessage(worldPresence, message);
+		project(nowMs);
+	}
+
+	function applyBootstrapPosition(event: ParsedPositionEvent, nowMs: number): void {
+		observeLivePosition(event);
+		worldPresence = applyWorldPresencePosition(worldPresence, event);
+		project(nowMs);
+	}
+
 	function rebuildSelfPositionPlanner(): void {
 		if (!options.selfAccount) return;
 		positionPublishState = reconstructPositionPublishState([
@@ -385,6 +399,8 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 				const result = await transport.start({
 					messageSince: since,
 					positionSince: since,
+					onBootstrapMessage: (event) => applyBootstrapMessage(event, Date.now()),
+					onBootstrapPosition: (event) => applyBootstrapPosition(event, Date.now()),
 					onLiveMessage: (event) => receiveLive({ kind: 'message', event }),
 					onLivePosition: (event) => receiveLive({ kind: 'position', event }),
 					onPrimaryClosed: markDegraded
@@ -419,6 +435,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 		},
 
 		enterSelf(): Promise<SelfPositionWriteResult> {
+			if (!bootstrapComplete) return Promise.resolve({ kind: 'blocked' });
 			if (!options.selfAccount) return publishSelfPosition('entry');
 			const participant = getParticipant(currentPresence(), options.selfAccount.pubkey);
 			if (participant?.status === 'active') {
@@ -431,6 +448,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 		},
 
 		moveSelf(direction: Direction): Promise<SelfPositionWriteResult> {
+			if (!bootstrapComplete) return Promise.resolve({ kind: 'blocked' });
 			if (!options.selfAccount) return publishSelfPosition('movement', direction);
 			const participant = getParticipant(currentPresence(), options.selfAccount.pubkey);
 			if (!participant) return publishSelfPosition('entry');

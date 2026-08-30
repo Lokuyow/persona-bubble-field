@@ -82,6 +82,13 @@ export type NostrRelayTransportDiagnostics = Readonly<{
 export type PrimaryStartInput = Readonly<{
 	messageSince: number;
 	positionSince: number;
+	/**
+	 * A validated primary event received while the finite bootstrap is still in
+	 * progress. Consumers may project presence from it, but must not treat it as
+	 * a canonical conversation handoff until start() resolves.
+	 */
+	onBootstrapMessage: (event: ParsedWorldMessage) => void;
+	onBootstrapPosition: (event: ParsedPositionEvent) => void;
 	onLiveMessage: (event: ParsedWorldMessage) => void;
 	onLivePosition: (event: ParsedPositionEvent) => void;
 	onPrimaryClosed: (diagnostic: PrimaryPairDiagnostic) => void;
@@ -414,7 +421,10 @@ export function createNostrRelayTransport(
 		const parsed = parseWorldMessage(event, metadata.channelId);
 		if (!parsed || messageIds.has(parsed.id)) return;
 		messageIds.add(parsed.id);
-		if (initialPhase) initialMessages.push(parsed);
+		if (initialPhase) {
+			initialMessages.push(parsed);
+			startInput?.onBootstrapMessage(parsed);
+		}
 		else startInput?.onLiveMessage(parsed);
 	}
 
@@ -423,7 +433,10 @@ export function createNostrRelayTransport(
 		const parsed = parsePositionEvent(event, metadata.channelId);
 		if (!parsed || positionIds.has(parsed.id)) return;
 		positionIds.add(parsed.id);
-		if (initialPhase) initialPositions.push(parsed);
+		if (initialPhase) {
+			initialPositions.push(parsed);
+			startInput?.onBootstrapPosition(parsed);
+		}
 		else startInput?.onLivePosition(parsed);
 	}
 

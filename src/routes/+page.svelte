@@ -94,7 +94,15 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 	let selfMessageAvailability: SelfMessageAvailability = { kind: 'unavailable' };
 	let composerPreferredHeight: number | null = null;
 	let worldSession: ReturnType<typeof createWorldReadSession> | null = null;
+	let runtimeMode: 'unresolved' | 'relay' | 'dev' = 'unresolved';
 	let devWorldSandboxEnabled = false;
+	let pendingComposerSubmission: Readonly<{
+		resolve: () => void;
+		reject: (error: Error) => void;
+		cleanup: () => void;
+	}> | null = null;
+	let composerStartupError: Error | null = null;
+	let entryRetryable = false;
 	let selectedCharacterId = '001';
 	let lastProfileTrigger: HTMLButtonElement | null = null;
 
@@ -222,6 +230,7 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 		let startRequested = false;
 		let session: ReturnType<typeof createWorldReadSession> | null = null;
 		devWorldSandboxEnabled = isDevWorldSandboxEnabled(import.meta.env.DEV, new URLSearchParams(window.location.search));
+		runtimeMode = devWorldSandboxEnabled ? 'dev' : 'relay';
 
 		if (devWorldSandboxEnabled) {
 			selectedCharacterId = resolveDevWorldCharacterId(new URLSearchParams(window.location.search));
@@ -254,17 +263,35 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 							Math.floor(selfAccount.lastChangedAtMs / 1000)
 					});
 				}
+				if (!selfAccount) {
+					setComposerTerminalError(new Error('Account is unavailable for publishing.'));
+				}
 			} catch {
 				// Account failure is fail-closed for profile publication, not world reading.
+				setComposerTerminalError(new Error('Account is unavailable for publishing.'));
 			}
 			session = createWorldReadSession({
 				field: FIELD,
 				selfAccount,
 				onPresenceChanged: setPresence,
 				onLiveMessage: receiveLiveMessage,
-				onStatusChanged: (status) => { connectionStatus = status; },
-				onSelfPositionWriteStateChanged: (state) => { selfPositionWriteState = state; },
-				onSelfMessageAvailabilityChanged: (state) => { selfMessageAvailability = state; }
+				onStatusChanged: (status) => {
+					connectionStatus = status;
+					if (status.kind === 'failed') setComposerTerminalError(new Error(status.message));
+				},
+				onSelfPositionWriteStateChanged: (state) => {
+					selfPositionWriteState = state;
+					if ('operation' in state && state.operation === 'entry') {
+						if (state.kind === 'retryable') {
+							entryRetryable = true;
+							cancelPendingComposerSubmission(new Error('World entry was not confirmed by Relay.'));
+						} else if (state.kind === 'pending' || state.kind === 'succeeded') entryRetryable = false;
+					}
+				},
+				onSelfMessageAvailabilityChanged: (state) => {
+					selfMessageAvailability = state;
+					if (state.kind === 'ready') resolvePendingComposerSubmission();
+				}
 			});
 			worldSession = session;
 
@@ -280,6 +307,7 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 				}
 			} catch {
 				// The session reports a concise fatal status to the UI.
+				setComposerTerminalError(new Error('Relay startup failed.'));
 			}
 		};
 
@@ -314,6 +342,7 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 
 		return () => {
 			mounted = false;
+			cancelPendingComposerSubmission(new DOMException('Submission was cancelled.', 'AbortError'));
 			observer.disconnect();
 			window.removeEventListener('keydown', handleKeydown);
 			window.clearInterval(expiryTimer);
@@ -453,7 +482,45 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 		void worldSession?.moveSelf(direction);
 	}
 
-	async function submitComposerContent(content: string): Promise<Readonly<{ eventId: string }>> {
+	function resolvePendingComposerSubmission(): void {
+		const pending = pendingComposerSubmission;
+		if (!pending) return;
+		pendingComposerSubmission = null;
+		pending.cleanup();
+		pending.resolve();
+	}
+
+	function setComposerTerminalError(error: Error): void {
+		composerStartupError = error;
+		cancelPendingComposerSubmission(error);
+	}
+
+	function cancelPendingComposerSubmission(error: Error): void {
+		const pending = pendingComposerSubmission;
+		if (!pending) return;
+		pendingComposerSubmission = null;
+		pending.cleanup();
+		pending.reject(error);
+	}
+
+	function waitForMessageReady(signal: AbortSignal): Promise<void> {
+		if (signal.aborted) return Promise.reject(new DOMException('Submission was cancelled.', 'AbortError'));
+		if (composerStartupError) return Promise.reject(composerStartupError);
+		if (entryRetryable) return Promise.reject(new Error('World entry was not confirmed by Relay.'));
+		if (selfMessageAvailability.kind === 'ready' && worldSession) return Promise.resolve();
+		if (pendingComposerSubmission) return Promise.reject(new Error('A message is already waiting for Relay readiness.'));
+		return new Promise((resolve, reject) => {
+			const abort = () => cancelPendingComposerSubmission(new DOMException('Submission was cancelled.', 'AbortError'));
+			const cleanup = () => signal.removeEventListener('abort', abort);
+			pendingComposerSubmission = { resolve, reject, cleanup };
+			signal.addEventListener('abort', abort, { once: true });
+			if (signal.aborted) abort();
+		});
+	}
+
+	async function submitComposerContent(content: string, signal: AbortSignal): Promise<Readonly<{ eventId: string }>> {
+		await waitForMessageReady(signal);
+		if (signal.aborted) throw new DOMException('Submission was cancelled.', 'AbortError');
 		const result = await worldSession?.publishNormalMessage(content);
 		if (result?.kind === 'succeeded') return { eventId: result.eventId };
 		throw new Error('Message was not confirmed by Relay.');
@@ -634,7 +701,7 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 
 <main
 	class="app-shell"
-	class:composer-available={!devWorldSandboxEnabled && selfMessageAvailability.kind === 'ready'}
+	class:composer-available={runtimeMode === 'relay'}
 	class:composer-preferred-height={composerPreferredHeight !== null}
 	style={composerPreferredHeight === null ? undefined : `--composer-preferred-height: ${composerPreferredHeight}px`}
 >
@@ -795,7 +862,7 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 		</div>
 	{/if}
 
-	{#if !devWorldSandboxEnabled && selfMessageAvailability.kind === 'ready'}
+	{#if runtimeMode === 'relay'}
 		<div class="composer-dock" aria-label="Message composer">
 			<HostOwnedComposerLite
 				submitContent={submitComposerContent}
