@@ -19,10 +19,10 @@
 
 
 {#if character}
-	<Dialog.Root {open} {onOpenChange}>
+	<Dialog.Root bind:open={() => open, onOpenChange}>
 		<Dialog.Portal>
 			<Dialog.Overlay class="profile-dialog-overlay" />
-			<Dialog.Content class="profile-dialog-content" {onCloseAutoFocus}>
+			<Dialog.Content class="profile-dialog-content" preventScroll={false} {onCloseAutoFocus}>
 				<div class="profile-dialog-header">
 					<Avatar.Root class="profile-dialog-avatar">
 						<Avatar.Image src={asset(`/${character.picture}`)} alt="" />

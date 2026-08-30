@@ -60,6 +60,12 @@ async function openProfile(page: Page, name: string): Promise<void> {
 	await expect(profileDialog(page)).toBeVisible();
 }
 
+async function profileTriggerCenter(page: Page, name: string): Promise<{ x: number; y: number }> {
+	const box = await profileTrigger(page, name).boundingBox();
+	if (!box) throw new Error('Expected the profile trigger to have a bounding box.');
+	return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+}
+
 test.describe('DEV World Sandbox', () => {
 	test('starts with the local-only self and deterministic character presentation', async ({ page }) => {
 		await openDevWorld(page);
@@ -150,10 +156,18 @@ test.describe('DEV World Sandbox', () => {
 		await expect(profileDialog(page)).toBeVisible();
 	});
 
+	test('does not add a body pointer lock while a profile is open', async ({ page }) => {
+		await openDevWorld(page);
+		await openProfile(page, '女の子');
+
+		expect(await page.evaluate(() => getComputedStyle(document.body).pointerEvents)).toBe('auto');
+	});
+
 	for (const closePath of ['close button', 'Escape', 'outside interaction'] as const) {
-		test(`keeps profile history aligned and field interaction usable after ${closePath}`, async ({ page }) => {
+		test(`keeps profile history aligned and immediately reopens after ${closePath}`, async ({ page }) => {
 			await openDevWorld(page);
 			const self = page.locator('.participant').first();
+			const triggerCenter = await profileTriggerCenter(page, '女の子');
 			await openProfile(page, '女の子');
 
 			if (closePath === 'close button') {
@@ -166,20 +180,26 @@ test.describe('DEV World Sandbox', () => {
 
 			await expect(profileDialog(page)).toBeHidden();
 			await expect(profileTrigger(page, '女の子')).toBeFocused();
-			await page.keyboard.press('ArrowRight');
-			await expect(self).toHaveAttribute('data-position', '8,3');
-			await openProfile(page, '女の子');
+			await page.mouse.click(triggerCenter.x, triggerCenter.y);
 			await expectProfile(page, {
 				name: '女の子',
 				picture: '001.webp',
 				about: '知らない場所でも、わりと平気そう。'
 			});
+			if (closePath === 'close button') {
+				await profileDialog(page).getByRole('button', { name: '閉じる' }).click();
+				await expect(profileDialog(page)).toBeHidden();
+				await page.mouse.click(triggerCenter.x, triggerCenter.y);
+				await expect(profileDialog(page)).toBeVisible();
+			}
 			await page.goBack();
 			await expect(profileDialog(page)).toBeHidden();
 			await page.goForward();
 			await expect(profileDialog(page)).toBeVisible();
 			await page.goBack();
 			await expect(profileDialog(page)).toBeHidden();
+			await page.keyboard.press('ArrowRight');
+			await expect(self).toHaveAttribute('data-position', '8,3');
 		});
 	}
 
