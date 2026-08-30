@@ -260,11 +260,17 @@ test.describe('DEV World Sandbox', () => {
 		expect(await page.locator('.bubble-merged').evaluate((bubble) => getComputedStyle(bubble).borderRadius)).toBe('18px');
 	});
 
-	test('renders all eight participant colors as matching normal bubbles and tails', async ({ page }) => {
+	test('renders the full speech showcase with eight colors and a merged bubble', async ({ page }) => {
 		await page.goto('/?devWorld=1&devSpeech=1');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 		await expect(page.locator('.participant')).toHaveCount(8);
 		await expect(page.locator('.bubble-normal')).toHaveCount(8);
+		const mergedBubble = page.locator('.bubble-merged');
+		await expect(mergedBubble).toHaveCount(1);
+		await expect(mergedBubble).toHaveAttribute('data-merged-members', '2');
+		await expect(mergedBubble.locator('.bubble-tail-connection')).toHaveCount(2);
+		await expect(page.locator('.tail-layer polygon')).toHaveCount(10);
+		await expect(page.locator('.tail-layer path')).toHaveCount(10);
 
 		const colorState = await page.locator('.bubble-layer').evaluate(() => {
 			const participants = [...document.querySelectorAll<HTMLElement>('.participant')];
@@ -300,6 +306,23 @@ test.describe('DEV World Sandbox', () => {
 			tailOutline: color.bubbleOutline,
 			connectionBackground: color.bubbleBackground
 		})));
+
+		const mergedTailState = await mergedBubble.evaluate((bubble) => {
+			const memberIds = [...bubble.querySelectorAll<HTMLElement>('.bubble-tail-connection')]
+				.map((connection) => connection.dataset.tailParticipantId);
+			return {
+			memberIds,
+			tailIds: [...document.querySelectorAll<SVGPolygonElement>('.tail-layer polygon')]
+				.filter((tail) => memberIds.includes(tail.dataset.tailParticipantId))
+				.map((tail) => tail.dataset.tailParticipantId),
+			outlineIds: [...document.querySelectorAll<SVGPathElement>('.tail-layer path')]
+				.filter((outline) => memberIds.includes(outline.dataset.tailParticipantId))
+				.map((outline) => outline.dataset.tailParticipantId)
+			};
+		});
+		expect(new Set(mergedTailState.memberIds).size).toBe(2);
+		expect(new Set(mergedTailState.tailIds)).toEqual(new Set(mergedTailState.memberIds));
+		expect(new Set(mergedTailState.outlineIds)).toEqual(new Set(mergedTailState.memberIds));
 	});
 
 	test('scales merged bubbles and distributes merged tail starts for 2, 3, and 4 members', async ({ page }) => {
