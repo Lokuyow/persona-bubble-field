@@ -958,7 +958,7 @@
 		const minHeight = 64 + level * 4;
 		const paddingY = 14 + level;
 		const paddingX = 20 + level * 2;
-		const fontSize = 18 + level;
+		const fontSize = 22 + level;
 		return [
 			`--merged-bubble-min-width: ${minWidth}px`,
 			`--merged-bubble-min-height: ${minHeight}px`,
@@ -1562,7 +1562,7 @@
 		border: 1px solid var(--tone-outline);
 		border-radius: 18px;
 		color: #364142;
-		font-size: 13px;
+		font-size: 16px;
 		font-weight: 800;
 		letter-spacing: 0.02em;
 		line-height: 1.35;
