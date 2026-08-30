@@ -1141,7 +1141,6 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 	.field-grid {
 		position: absolute;
 		inset: 0;
-		border: 1px solid rgba(95, 111, 96, 0.3);
 		background-color: rgba(222, 228, 213, 0.48);
 		background-image:
 			linear-gradient(to right, rgba(101, 122, 105, 0.16) 1px, transparent 1px),
@@ -1153,7 +1152,10 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 			);
 		background-size: var(--cell-size) var(--cell-size), var(--cell-size) var(--cell-size),
 			calc(var(--cell-size) * 2) calc(var(--cell-size) * 2);
-		box-shadow: 0 24px 65px rgba(67, 75, 62, 0.12), inset 0 0 0 16px rgba(255, 255, 255, 0.11);
+		box-shadow:
+			0 24px 65px rgba(67, 75, 62, 0.12),
+			inset 0 0 0 1px rgba(95, 111, 96, 0.3),
+			inset 0 0 0 16px rgba(255, 255, 255, 0.11);
 	}
 
 	.field-label {
