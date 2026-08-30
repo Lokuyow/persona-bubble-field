@@ -916,6 +916,7 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 
 	.field-viewport {
 		position: relative;
+		--bubble-outline: rgba(57, 67, 64, 0.42);
 		min-height: 100svh;
 		flex: 1;
 		overflow: hidden;
@@ -1140,7 +1141,7 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 
 	.tail-outline {
 		fill: none;
-		stroke: rgba(57, 67, 64, 0.11);
+		stroke: var(--bubble-outline);
 		stroke-width: 1;
 		stroke-linecap: round;
 		stroke-linejoin: round;
@@ -1163,9 +1164,8 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 		min-height: 50px;
 		align-items: center;
 		justify-content: center;
-		border: 1px solid rgba(57, 67, 64, 0.11);
+		border: 1px solid var(--bubble-outline);
 		border-radius: 17px 17px 17px 7px;
-		box-shadow: 0 13px 26px rgba(60, 72, 65, 0.14);
 		color: #364142;
 		font-size: 13px;
 		font-weight: 800;
