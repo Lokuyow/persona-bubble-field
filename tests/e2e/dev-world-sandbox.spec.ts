@@ -167,7 +167,7 @@ test.describe('DEV World Sandbox', () => {
 	});
 
 	test('renders deterministic normal and merged speech tails in the DEV fixture', async ({ page }) => {
-		await page.goto('/?devWorld=1&devSpeech=1');
+		await page.goto('/?devWorld=1&devSpeech=merged2');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 		await expect(page.locator('.bubble-normal')).toHaveCount(1);
 		await expect(page.locator('.bubble-merged')).toHaveCount(1);
@@ -260,9 +260,51 @@ test.describe('DEV World Sandbox', () => {
 		expect(await page.locator('.bubble-merged').evaluate((bubble) => getComputedStyle(bubble).borderRadius)).toBe('18px');
 	});
 
+	test('renders all eight participant colors as matching normal bubbles and tails', async ({ page }) => {
+		await page.goto('/?devWorld=1&devSpeech=1');
+		await expect(page.getByText('DEV World Sandbox', { exact: true })).toBeVisible();
+		await expect(page.locator('.participant')).toHaveCount(8);
+		await expect(page.locator('.bubble-normal')).toHaveCount(8);
+
+		const colorState = await page.locator('.bubble-layer').evaluate(() => {
+			const participants = [...document.querySelectorAll<HTMLElement>('.participant')];
+			const bubbles = [...document.querySelectorAll<HTMLElement>('.bubble-normal')];
+			const colors = participants.map((participant) => {
+				const avatar = participant.querySelector<HTMLElement>('.avatar');
+				const participantId = participant.dataset.participantId;
+				const bubble = bubbles.find((candidate) => candidate.dataset.bubbleParticipantId === participantId);
+				const tail = document.querySelector<SVGPolygonElement>(`.tail-layer polygon[data-tail-participant-id="${participantId}"]`);
+				const outline = document.querySelector<SVGPathElement>(`.tail-layer path[data-tail-participant-id="${participantId}"]`);
+				if (!avatar || !bubble || !tail || !outline) throw new Error('Expected participant color elements');
+				const tone = [...bubble.classList].find((className) => className.startsWith('tone-'))?.slice(5);
+				return {
+					avatarTone: [...avatar.classList].find((className) => className.startsWith('avatar-'))?.slice(7),
+					bubbleTone: tone,
+					bubbleBackground: getComputedStyle(bubble).backgroundColor,
+					bubbleOutline: getComputedStyle(bubble).borderTopColor,
+					tailFill: getComputedStyle(tail).fill,
+					tailOutline: getComputedStyle(outline).stroke,
+					connectionBackground: getComputedStyle(bubble, '::after').backgroundColor
+				};
+			});
+			return colors;
+		});
+
+		expect(new Set(colorState.map((color) => color.avatarTone))).toEqual(new Set([
+			'coral', 'lavender', 'mint', 'yellow', 'sky', 'peach', 'rose', 'blue'
+		]));
+		expect(colorState).toEqual(colorState.map((color) => ({
+			...color,
+			bubbleTone: color.avatarTone,
+			tailFill: color.bubbleBackground,
+			tailOutline: color.bubbleOutline,
+			connectionBackground: color.bubbleBackground
+		})));
+	});
+
 	test('scales merged bubbles and distributes merged tail starts for 2, 3, and 4 members', async ({ page }) => {
 		const fixtures = [
-			{ query: '1', count: 2, members: ['b', 'c'] },
+			{ query: 'merged2', count: 2, members: ['b', 'c'] },
 			{ query: 'merged3', count: 3, members: ['b', 'c', 'd'] },
 			{ query: 'merged4', count: 4, members: ['b', 'c', 'd', 'e'] }
 		] as const;
