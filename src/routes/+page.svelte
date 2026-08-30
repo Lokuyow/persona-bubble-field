@@ -658,7 +658,7 @@
 				{@const target = { x: bubble.speaker.screen.x, y: bubble.speaker.screen.y - 18 }}
 				{@const tail = tailGeometry(start, target)}
 				<polygon class={`tail tail-${bubble.tone}`} points={tail.points} />
-				<path class={`tail-outline tail-${bubble.tone}`} d={tail.outlinePath} />
+				<path class="tail-outline" d={tail.outlinePath} />
 			{/each}
 			{#each positionedMergedBubbles as bubble (bubble.id)}
 				{@const start = tailStart(bubble.anchor, bubble.size)}
@@ -666,7 +666,7 @@
 					{@const target = { x: member.screen.x, y: member.screen.y - 18 }}
 					{@const tail = tailGeometry(start, target)}
 					<polygon class={`tail tail-${bubble.tone}`} points={tail.points} />
-					<path class={`tail-outline tail-${bubble.tone}`} d={tail.outlinePath} />
+					<path class="tail-outline" d={tail.outlinePath} />
 				{/each}
 			{/each}
 		</svg>
@@ -1107,10 +1107,6 @@
 	.tail-layer {
 		z-index: 4;
 		overflow: visible;
-	}
-
-	.tail {
-		opacity: 0.9;
 	}
 
 	.tail-outline {
