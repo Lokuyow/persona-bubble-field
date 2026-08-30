@@ -172,7 +172,9 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 			const members = bubble.memberPubkeys
 				.map((id) => participantById.get(id))
 				.filter((participant): participant is (typeof participantViews)[number] => Boolean(participant));
-			const visibleMembers = members.filter((member) => isInsideFieldArea(member.screen));
+			const visibleMembers = members
+				.filter((member) => isInsideFieldArea(member.screen))
+				.sort((left, right) => left.screen.x - right.screen.x || left.id.localeCompare(right.id));
 			const size = bubbleSizes[bubble.id] ?? DEFAULT_BUBBLE_SIZES.merged;
 			if (visibleMembers.length === 0) {
 				const lastAnchor = lastPlacedAnchorById[bubble.id];
@@ -674,10 +676,20 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 	}
 
 	function mergedTailStart(anchor: WorldPoint, size: Size, index: number, count: number): WorldPoint {
-		if (count <= 1) return tailStart(anchor, size);
+		return {
+			x: anchor.x + size.width * mergedTailFraction(index, count),
+			y: anchor.y + size.height
+		};
+	}
+
+	function mergedTailFraction(index: number, count: number): number {
+		if (count <= 1) return 0.5;
 		const edgeInset = count === 2 ? 0.28 : count === 3 ? 0.22 : 0.18;
-		const fraction = edgeInset + (1 - edgeInset * 2) * (index / (count - 1));
-		return { x: anchor.x + size.width * fraction, y: anchor.y + size.height };
+		return edgeInset + (1 - edgeInset * 2) * (index / (count - 1));
+	}
+
+	function mergedTailConnectionStyle(index: number, count: number): string {
+		return `left: ${mergedTailFraction(index, count) * 100}%;`;
 	}
 
 	function mergedBubbleStyle(memberCount: number): string {
@@ -825,6 +837,16 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 					style={`${bubble.kind === 'merged' ? mergedBubbleStyle(bubble.memberPubkeys.length) : ''}; transform: translate3d(${bubble.anchor.x}px, ${bubble.anchor.y}px, 0);`}
 				>
 					<span>{bubble.text}</span>
+					{#if bubble.kind === 'merged'}
+						{#each bubble.members as member, index (member.id)}
+							<span
+								class="bubble-tail-connection"
+								data-tail-participant-id={member.id}
+								style={mergedTailConnectionStyle(index, bubble.members.length)}
+								aria-hidden="true"
+							></span>
+						{/each}
+					{/if}
 				</div>
 			{/each}
 		</div>
@@ -1273,7 +1295,7 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 		align-items: center;
 		justify-content: center;
 		border: 1px solid var(--bubble-outline);
-		border-radius: 999px;
+		border-radius: 18px;
 		color: #364142;
 		font-size: 13px;
 		font-weight: 800;
@@ -1283,7 +1305,7 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 		will-change: transform;
 	}
 
-	.bubble::after {
+	.bubble-normal::after {
 		content: '';
 		position: absolute;
 		left: 50%;
@@ -1308,6 +1330,17 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 		min-height: var(--merged-bubble-min-height, 58px);
 		padding: var(--merged-bubble-padding-y, 12px) var(--merged-bubble-padding-x, 16px);
 		font-size: var(--merged-bubble-font-size, 13px);
+	}
+
+	.bubble-tail-connection {
+		position: absolute;
+		bottom: -1px;
+		width: 8px;
+		height: 3px;
+		transform: translateX(-50%);
+		background: var(--bubble-bg);
+		pointer-events: none;
+		z-index: 1;
 	}
 
 	.bubble-sky { --bubble-bg: #d9edf0; }
