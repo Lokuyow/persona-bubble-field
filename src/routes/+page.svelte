@@ -760,6 +760,7 @@
 
 	:global(button) {
 		font: inherit;
+		cursor: pointer;
 	}
 
 	.app-shell {
@@ -1006,7 +1007,6 @@
 		padding: 0;
 		border: 0;
 		background: transparent;
-		cursor: pointer;
 	}
 
 	.participant-profile-trigger:focus-visible {
@@ -1279,15 +1279,7 @@
 		font-weight: 800;
 	}
 
-	.sandbox-direction-pad button {
-		display: grid;
-		width: 38px;
-		height: 38px;
-		place-items: center;
-		border-radius: 10px;
-		font-size: 18px;
-	}
-
+	.sandbox-direction-pad button,
 	.world-direction-pad button {
 		display: grid;
 		width: 38px;
