@@ -145,8 +145,9 @@ test.describe('DEV World Sandbox', () => {
 	});
 
 	for (const closePath of ['close button', 'Escape', 'outside interaction'] as const) {
-		test(`keeps profile history aligned after ${closePath}`, async ({ page }) => {
+		test(`keeps profile history aligned and field interaction usable after ${closePath}`, async ({ page }) => {
 			await openDevWorld(page);
+			const self = page.locator('.participant').first();
 			await openProfile(page, '女の子');
 
 			if (closePath === 'close button') {
@@ -159,6 +160,16 @@ test.describe('DEV World Sandbox', () => {
 
 			await expect(profileDialog(page)).toBeHidden();
 			await expect(profileTrigger(page, '女の子')).toBeFocused();
+			await page.keyboard.press('ArrowRight');
+			await expect(self).toHaveAttribute('data-position', '8,3');
+			await openProfile(page, '女の子');
+			await expectProfile(page, {
+				name: '女の子',
+				picture: '001.webp',
+				about: '知らない場所でも、わりと平気そう。'
+			});
+			await page.goBack();
+			await expect(profileDialog(page)).toBeHidden();
 			await page.goForward();
 			await expect(profileDialog(page)).toBeVisible();
 			await page.goBack();

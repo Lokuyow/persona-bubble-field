@@ -1,12 +1,20 @@
 <script lang="ts">
+	import { page } from '$app/state';
 	import { asset } from '$app/paths';
 	import { Avatar, Dialog, ScrollArea } from 'bits-ui';
-	import type { Character } from '$lib/character';
+	import { getCharacterById } from '$lib/character';
 
-	export let character: Character | null = null;
-	export let open = false;
-	export let onOpenChange: (open: boolean) => void;
-	export let onCloseAutoFocus: (event: Event) => void;
+	let {
+		onOpenChange,
+		onCloseAutoFocus
+	}: {
+		onOpenChange: (open: boolean) => void;
+		onCloseAutoFocus: (event: Event) => void;
+	} = $props();
+
+	const profileCharacterId = $derived(page.state.profileCharacterId);
+	const character = $derived(profileCharacterId ? getCharacterById(profileCharacterId) ?? null : null);
+	const open = $derived(character !== null);
 </script>
 
 <Dialog.Root {open} {onOpenChange}>

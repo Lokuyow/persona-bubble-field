@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { pushState } from '$app/navigation';
+	import { page } from '$app/state';
 	import { asset, base } from '$app/paths';
-	import { page } from '$app/stores';
 	import { Avatar } from 'bits-ui';
 	import {
 		applyVisibility,
@@ -33,7 +33,7 @@
 		resetDevWorldPresence,
 		resolveDevWorldCharacterId
 	} from '$lib/devWorldSandbox';
-	import { CHARACTER_CATALOG, getCharacterById, type Character } from '$lib/character';
+	import { CHARACTER_CATALOG, type Character } from '$lib/character';
 	import { deriveCharacterFromPubkey } from '$lib/characterAssignment';
 	import ProfileDialog from '$lib/ProfileDialog.svelte';
 	import { loadOrCreateAccount, type AccountSnapshot } from '$lib/nostrAccount';
@@ -121,9 +121,6 @@
 	};
 
 	$: participantViews = presenceProjection.participants;
-	$: profileCharacterId = $page.state.profileCharacterId;
-	$: profileCharacter = profileCharacterId ? getCharacterById(profileCharacterId) ?? null : null;
-	$: profileDialogOpen = profileCharacter !== null;
 
 	$: participantById = new Map(participantViews.map((participant) => [participant.id, participant]));
 
@@ -280,7 +277,7 @@
 			if (!devWorldSandboxEnabled) void begin();
 		};
 		const handleKeydown = (event: KeyboardEvent) => {
-			if (profileDialogOpen || event.repeat || isEditableTarget(event.target)) return;
+			if (document.querySelector('.profile-dialog-content') || event.repeat || isEditableTarget(event.target)) return;
 			const direction = directionFromKey(event.key);
 			if (!direction) return;
 			event.preventDefault();
@@ -463,11 +460,11 @@
 
 	function openProfile(characterId: string, trigger: HTMLButtonElement): void {
 		lastProfileTrigger = trigger;
-		pushState('', { ...$page.state, profileCharacterId: characterId });
+		pushState('', { ...page.state, profileCharacterId: characterId });
 	}
 
 	function handleProfileOpenChange(open: boolean): void {
-		if (!open && profileDialogOpen) history.back();
+		if (!open) history.back();
 	}
 
 	function restoreProfileTriggerFocus(event: Event): void {
@@ -650,8 +647,6 @@
 	</section>
 
 	<ProfileDialog
-		character={profileCharacter}
-		open={profileDialogOpen}
 		onOpenChange={handleProfileOpenChange}
 		onCloseAutoFocus={restoreProfileTriggerFocus}
 	/>
