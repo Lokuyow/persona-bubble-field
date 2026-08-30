@@ -589,6 +589,13 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 		return { x: anchor.x + size.width / 2, y: anchor.y + size.height };
 	}
 
+	function tailTarget(participant: (typeof participantViews)[number]): WorldPoint {
+		return {
+			x: participant.screen.x,
+			y: fieldAreaBounds.y + participant.position.y * cellSize - camera.y - 4
+		};
+	}
+
 	function tailGeometry(start: WorldPoint, target: WorldPoint, width = 9, overlap = 2) {
 		const dx = target.x - start.x;
 		const dy = target.y - start.y;
@@ -661,6 +668,7 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 				{#each participantViews as participant (participant.id)}
 					<div
 						class="participant"
+						data-participant-id={participant.id}
 						data-position={`${participant.position.x},${participant.position.y}`}
 						style={`left: ${participant.world.x}px; top: ${participant.world.y}px;`}
 					>
@@ -684,18 +692,18 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 		<svg class="tail-layer" viewBox={`0 0 ${viewportSize.width} ${viewportSize.height}`} aria-hidden="true">
 			{#each positionedNormalBubbles as bubble (bubble.id)}
 				{@const start = tailStart(bubble.anchor, bubble.size)}
-				{@const target = { x: bubble.speaker.screen.x, y: bubble.speaker.screen.y - 18 }}
+				{@const target = tailTarget(bubble.speaker)}
 				{@const tail = tailGeometry(start, target)}
-				<polygon class={`tail tail-${bubble.tone}`} points={tail.points} />
-				<path class="tail-outline" d={tail.outlinePath} />
+				<polygon class={`tail tail-${bubble.tone}`} data-tail-participant-id={bubble.speaker.id} points={tail.points} />
+				<path class="tail-outline" data-tail-participant-id={bubble.speaker.id} d={tail.outlinePath} />
 			{/each}
 			{#each positionedMergedBubbles as bubble (bubble.id)}
 				{@const start = tailStart(bubble.anchor, bubble.size)}
 				{#each bubble.members as member (member.id)}
-					{@const target = { x: member.screen.x, y: member.screen.y - 18 }}
+					{@const target = tailTarget(member)}
 					{@const tail = tailGeometry(start, target)}
-					<polygon class={`tail tail-${bubble.tone}`} points={tail.points} />
-					<path class="tail-outline" d={tail.outlinePath} />
+					<polygon class={`tail tail-${bubble.tone}`} data-tail-participant-id={member.id} points={tail.points} />
+					<path class="tail-outline" data-tail-participant-id={member.id} d={tail.outlinePath} />
 				{/each}
 			{/each}
 		</svg>
@@ -1145,7 +1153,6 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 		stroke-width: 1;
 		stroke-linecap: round;
 		stroke-linejoin: round;
-		opacity: 0.95;
 	}
 
 	.tail-sky { fill: #d9edf0; }
@@ -1165,7 +1172,7 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 		align-items: center;
 		justify-content: center;
 		border: 1px solid var(--bubble-outline);
-		border-radius: 17px 17px 17px 7px;
+		border-radius: 999px;
 		color: #364142;
 		font-size: 13px;
 		font-weight: 800;
@@ -1180,8 +1187,8 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 		position: absolute;
 		left: 50%;
 		bottom: -1px;
-		width: 11px;
-		height: 3px;
+		width: 8px;
+		height: 2px;
 		transform: translateX(-50%);
 		background: var(--bubble-bg);
 		pointer-events: none;
@@ -1199,7 +1206,6 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 		flex-direction: column;
 		gap: 3px;
 		padding: 12px 16px 10px;
-		border-radius: 19px;
 	}
 
 	.bubble-merged small {
