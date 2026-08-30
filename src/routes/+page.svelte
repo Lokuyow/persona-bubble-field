@@ -23,6 +23,7 @@
 		mergedBubblePreferredAnchor,
 		normalBubblePreferredAnchor,
 		placeBubbles,
+		moveOneCell,
 		type Direction,
 		type Size,
 		type WorldPoint,
@@ -50,7 +51,7 @@
 		type PreparedCharacterProfilePublication
 	} from '$lib/initialProfilePublication';
 	import { projectPresence } from '$lib/presenceProjection';
-	import { createPresenceState, type PresenceState } from '$lib/presence';
+	import { createPresenceState, getActiveOccupancy, getParticipant, type PresenceState } from '$lib/presence';
 	import type { ParsedWorldMessage } from '$lib/nostrProtocol';
 	import HostOwnedComposerLite from '$lib/HostOwnedComposerLite.svelte';
 	import {
@@ -75,6 +76,7 @@
 		merged: { width: 218, height: 58 }
 	} satisfies Record<'normal' | 'merged', Size>;
 	const MOVEMENT_ANIMATION_DURATION_MS = 400;
+	const MOVEMENT_DIRECTIONS: readonly Direction[] = ['up', 'down', 'left', 'right'];
 
 	type AvatarColor = 'coral' | 'lavender' | 'mint' | 'yellow' | 'sky' | 'peach' | 'rose' | 'blue';
 	type Participant = {
@@ -137,6 +139,11 @@
 	};
 	$: fieldAreaBounds = getFieldAreaBounds(viewportSize, speechAreaBounds);
 	$: selfProjectionId = devWorldSandboxEnabled ? DEV_WORLD_SELF_ID : selfAccount?.pubkey ?? 'you';
+	$: movementCells = getMovementCells(
+		presenceState,
+		selfProjectionId,
+		devWorldSandboxEnabled || (selfAccount !== null && isWorldSelfActive && selfPositionWriteState.kind !== 'pending')
+	);
 	$: presenceProjection = getPresenceProjection(presenceState, selectedCharacterId, selfProjectionId);
 	$: isWorldSelfActive = Boolean(selfAccount && presenceState.participants.some((participant) =>
 		participant.id === selfAccount?.pubkey && participant.status === 'active'
@@ -686,6 +693,18 @@
 		return null;
 	}
 
+	function getMovementCells(state: PresenceState, selfId: string, enabled: boolean) {
+		if (!enabled) return [];
+		const self = getParticipant(state, selfId);
+		if (!self || self.status !== 'active') return [];
+
+		const occupied = getActiveOccupancy(state, selfId);
+		return MOVEMENT_DIRECTIONS.flatMap((direction) => {
+			const position = moveOneCell(self.position, direction, state.field, occupied);
+			return position ? [{ direction, position }] : [];
+		});
+	}
+
 	function isComposerEditorKeyboardEvent(event: Event): boolean {
 		const path = event.composedPath();
 		return path.some((target) => target instanceof HTMLElement && target.matches('ehagaki-composer')) &&
@@ -724,6 +743,11 @@
 	function moveWorldSelf(direction: Direction): void {
 		if (devWorldSandboxEnabled) return;
 		void worldSession?.moveSelf(direction);
+	}
+
+	function moveSelfFromCell(direction: Direction): void {
+		if (devWorldSandboxEnabled) moveSandboxSelf(direction);
+		else moveWorldSelf(direction);
 	}
 
 	function resolvePendingComposerSubmission(): void {
@@ -1048,6 +1072,21 @@
 				style={`--cell-size: ${cellSize}px; --avatar-size: calc(var(--cell-size) - 4px); width: ${fieldWorldSize.width}px; height: ${fieldWorldSize.height}px; transform: translate3d(${-camera.x}px, ${-camera.y}px, 0);`}
 			>
 				<div class="field-grid" aria-hidden="true"></div>
+				<div class="field-movement-layer" aria-label="Available movement cells">
+					{#each movementCells as cell (cell.direction)}
+						<button
+							class="movement-cell"
+							type="button"
+							data-movement-direction={cell.direction}
+							data-movement-position={`${cell.position.x},${cell.position.y}`}
+							aria-label={`Move ${cell.direction}`}
+							style={`left: ${cell.position.x * cellSize}px; top: ${cell.position.y * cellSize}px;`}
+							on:click={() => moveSelfFromCell(cell.direction)}
+						>
+							{cell.direction === 'up' ? '↑' : cell.direction === 'down' ? '↓' : cell.direction === 'left' ? '←' : '→'}
+						</button>
+					{/each}
+				</div>
 				{#each participantViews as participant (participant.id)}
 					<div
 						class="participant"
@@ -1137,30 +1176,11 @@
 					{/each}
 				</select>
 			</label>
-			<div class="sandbox-direction-pad">
-				<span aria-hidden="true"></span>
-				<button type="button" aria-label="Move up" on:click={() => moveSandboxSelf('up')}>↑</button>
-				<span aria-hidden="true"></span>
-				<button type="button" aria-label="Move left" on:click={() => moveSandboxSelf('left')}>←</button>
-				<button type="button" aria-label="Move down" on:click={() => moveSandboxSelf('down')}>↓</button>
-				<button type="button" aria-label="Move right" on:click={() => moveSandboxSelf('right')}>→</button>
-			</div>
 			<button class="sandbox-reset" type="button" on:click={resetSandbox}>Reset sandbox</button>
 		</div>
 	{:else if selfPositionWriteState.kind === 'retryable' && !isWorldSelfActive}
 		<div class="world-controls" aria-label="World entry controls">
 			<button class="world-entry-retry" type="button" on:click={retryWorldEntry}>Enter field again</button>
-		</div>
-	{:else if selfAccount && isWorldSelfActive}
-		<div class="world-controls" aria-label="World movement controls">
-			<div class="world-direction-pad">
-				<span aria-hidden="true"></span>
-				<button type="button" aria-label="Move up" disabled={selfPositionWriteState.kind === 'pending'} on:click={() => moveWorldSelf('up')}>↑</button>
-				<span aria-hidden="true"></span>
-				<button type="button" aria-label="Move left" disabled={selfPositionWriteState.kind === 'pending'} on:click={() => moveWorldSelf('left')}>←</button>
-				<button type="button" aria-label="Move down" disabled={selfPositionWriteState.kind === 'pending'} on:click={() => moveWorldSelf('down')}>↓</button>
-				<button type="button" aria-label="Move right" disabled={selfPositionWriteState.kind === 'pending'} on:click={() => moveWorldSelf('right')}>→</button>
-			</div>
 		</div>
 	{/if}
 
@@ -1401,6 +1421,48 @@
 			0 24px 65px rgba(67, 75, 62, 0.12),
 			inset 0 0 0 1px rgba(95, 111, 96, 0.3),
 			inset 0 0 0 16px rgba(255, 255, 255, 0.11);
+	}
+
+	.field-movement-layer {
+		position: absolute;
+		inset: 0;
+		z-index: 1;
+		pointer-events: none;
+	}
+
+	.movement-cell {
+		position: absolute;
+		display: grid;
+		width: var(--cell-size);
+		height: var(--cell-size);
+		box-sizing: border-box;
+		place-items: center;
+		padding: 0;
+		border: 3px solid rgba(65, 132, 117, 0.72);
+		border-radius: 10px;
+		background: rgba(177, 231, 211, 0.42);
+		box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.56), 0 2px 8px rgba(52, 104, 91, 0.12);
+		color: #286858;
+		cursor: pointer;
+		font: inherit;
+		font-size: clamp(18px, calc(var(--cell-size) * 0.28), 24px);
+		font-weight: 900;
+		line-height: 1;
+		pointer-events: auto;
+		touch-action: manipulation;
+	}
+
+	.movement-cell:hover {
+		background: rgba(177, 231, 211, 0.68);
+	}
+
+	.movement-cell:active {
+		background: rgba(145, 211, 190, 0.76);
+	}
+
+	.movement-cell:focus-visible {
+		outline: 3px solid #6dabb9;
+		outline-offset: -5px;
 	}
 
 	.field-label {
@@ -1739,20 +1801,6 @@
 		font: inherit;
 	}
 
-	.sandbox-direction-pad {
-		display: grid;
-		grid-template-columns: repeat(3, 38px);
-		gap: 4px;
-	}
-
-	.world-direction-pad {
-		display: grid;
-		grid-template-columns: repeat(3, 38px);
-		gap: 4px;
-	}
-
-	.sandbox-direction-pad button,
-	.world-direction-pad button,
 	.sandbox-reset,
 	.world-entry-retry {
 		border: 1px solid rgba(57, 67, 64, 0.2);
@@ -1760,21 +1808,6 @@
 		box-shadow: 0 5px 12px rgba(58, 70, 61, 0.14);
 		color: #3f4a47;
 		font-weight: 800;
-	}
-
-	.sandbox-direction-pad button,
-	.world-direction-pad button {
-		display: grid;
-		width: 38px;
-		height: 38px;
-		place-items: center;
-		border-radius: 10px;
-		font-size: 18px;
-	}
-
-	.world-direction-pad button:disabled {
-		cursor: wait;
-		opacity: 0.54;
 	}
 
 	.sandbox-reset {
@@ -1794,8 +1827,6 @@
 		letter-spacing: 0.04em;
 	}
 
-	.sandbox-direction-pad button:focus-visible,
-	.world-direction-pad button:focus-visible,
 	.sandbox-reset:focus-visible,
 	.world-entry-retry:focus-visible,
 	.sandbox-character-picker select:focus-visible {

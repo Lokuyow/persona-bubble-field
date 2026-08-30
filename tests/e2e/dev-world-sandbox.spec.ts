@@ -82,6 +82,31 @@ async function readCharacterGeometry(page: Page) {
 	});
 }
 
+async function readMovementCellGeometry(page: Page) {
+	return page.locator('.movement-cell').evaluateAll((cells) => {
+		const grid = document.querySelector<HTMLElement>('.field-grid');
+		const scene = document.querySelector<HTMLElement>('.field-scene');
+		if (!grid || !scene) throw new Error('Expected the field grid and scene to be rendered.');
+		const gridRect = grid.getBoundingClientRect();
+		const cellSize = Number.parseFloat(getComputedStyle(scene).getPropertyValue('--cell-size'));
+
+		return cells.map((cell) => {
+			const rect = cell.getBoundingClientRect();
+			const [x, y] = (cell.getAttribute('data-movement-position') ?? '').split(',').map(Number);
+			return {
+				direction: cell.getAttribute('data-movement-direction'),
+				position: { x, y },
+				width: rect.width,
+				height: rect.height,
+				leftOffset: rect.left - gridRect.left,
+				topOffset: rect.top - gridRect.top,
+				background: getComputedStyle(cell).backgroundColor,
+				cursor: getComputedStyle(cell).cursor
+			};
+		});
+	});
+}
+
 async function expectNoConsoleProblems(page: Page, action: () => Promise<void>): Promise<void> {
 	const problems: string[] = [];
 	page.on('console', (message) => {
@@ -124,6 +149,7 @@ test.describe('DEV World Sandbox', () => {
 
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 		await expect(page.locator('.participant')).toHaveCount(1);
+		await expect(page.locator('.sandbox-direction-pad, .world-direction-pad')).toHaveCount(0);
 
 		const characterSelect = page.getByLabel('Select sandbox character');
 		await expect(characterSelect).toHaveValue('001');
@@ -382,18 +408,73 @@ test.describe('DEV World Sandbox', () => {
 		await expect(self.locator('.participant-name')).toHaveText(selectedName ?? '');
 	});
 
-	test('moves by control and keyboard, then resets to the initial position', async ({ page }) => {
+	test('renders adjacent cells on the grid, moves by cell and follows the new position', async ({ page }) => {
 		await openDevWorld(page);
 
 		const self = page.locator('.participant').first();
+		const movementCells = await readMovementCellGeometry(page);
+		expect(movementCells.map((cell) => cell.direction)).toEqual(['up', 'down', 'left', 'right']);
+		expect(movementCells.map((cell) => cell.position)).toEqual([
+			{ x: 7, y: 2 },
+			{ x: 7, y: 4 },
+			{ x: 6, y: 3 },
+			{ x: 8, y: 3 }
+		]);
+		for (const cell of movementCells) {
+			expect(cell.width).toBeCloseTo(cell.height, 5);
+			expect(cell.width).toBeGreaterThan(0);
+			expect(cell.leftOffset).toBeCloseTo(cell.position.x * cell.width, 5);
+			expect(cell.topOffset).toBeCloseTo(cell.position.y * cell.height, 5);
+			expect(cell.background).not.toBe('rgba(0, 0, 0, 0)');
+			expect(cell.cursor).toBe('pointer');
+		}
+
 		await page.getByRole('button', { name: 'Move right' }).click();
 		await expect(self).toHaveAttribute('data-position', '8,3');
-
-		await page.keyboard.press('ArrowUp');
-		await expect(self).toHaveAttribute('data-position', '8,2');
+		await expect(page.locator('.movement-cell')).toHaveCount(4);
+		await expect(page.locator('.movement-cell[data-movement-position="8,2"]')).toHaveCount(1);
+		await expect(page.locator('.movement-cell[data-movement-position="8,4"]')).toHaveCount(1);
+		await expect(page.locator('.movement-cell[data-movement-position="7,3"]')).toHaveCount(1);
+		await expect(page.locator('.movement-cell[data-movement-position="9,3"]')).toHaveCount(1);
 
 		await page.getByRole('button', { name: 'Reset sandbox' }).click();
 		await expect(self).toHaveAttribute('data-position', '7,3');
+	});
+
+	test('operates an adjacent cell through keyboard focus and preserves Arrow movement', async ({ page }) => {
+		await openDevWorld(page);
+
+		const self = page.locator('.participant').first();
+		const up = page.getByRole('button', { name: 'Move up' });
+		await up.focus();
+		await expect(up).toBeFocused();
+		await page.keyboard.press('Enter');
+		await expect(self).toHaveAttribute('data-position', '7,2');
+
+		await page.keyboard.press('ArrowDown');
+		await expect(self).toHaveAttribute('data-position', '7,3');
+	});
+
+	test('does not render a field-external cell at the field edge', async ({ page }) => {
+		await openDevWorld(page);
+
+		const self = page.locator('.participant').first();
+		for (let index = 0; index < 7; index += 1) await page.keyboard.press('ArrowLeft');
+		await expect(self).toHaveAttribute('data-position', '0,3');
+		await expect(page.getByRole('button', { name: 'Move left' })).toHaveCount(0);
+		await expect(page.locator('.movement-cell[data-movement-position="-1,3"]')).toHaveCount(0);
+	});
+
+	test('does not render an occupied adjacent cell as interactive', async ({ page }) => {
+		await page.goto('/?devWorld=1&devSpeech=1');
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '7,3');
+		await expect(page.getByRole('button', { name: 'Move up' })).toHaveCount(0);
+		await expect(page.locator('.movement-cell[data-movement-position="7,2"]')).toHaveCount(0);
+		await expect(page.locator('.movement-cell[data-movement-position="6,3"]')).toHaveCount(1);
+		await expect(page.locator('.movement-cell[data-movement-position="8,3"]')).toHaveCount(1);
+		await expect(page.locator('.movement-cell[data-movement-position="7,4"]')).toHaveCount(1);
 	});
 
 	test('continues one-cell movement on an explicit keyboard hold and stops on keyup', async ({ page }) => {
@@ -625,8 +706,14 @@ test.describe('DEV World Sandbox', () => {
 					await expect(scene).toHaveCSS('width', viewport.worldWidth);
 					await expect(scene).toHaveCSS('height', viewport.worldHeight);
 
-					const geometry = await readCharacterGeometry(page);
-					expect(geometry.cellWidth).toBe(viewport.cell);
+						const geometry = await readCharacterGeometry(page);
+						const movementCells = await readMovementCellGeometry(page);
+						expect(movementCells).toHaveLength(4);
+						for (const cell of movementCells) {
+							expect(cell.leftOffset).toBeCloseTo(cell.position.x * cell.width, 5);
+							expect(cell.topOffset).toBeCloseTo(cell.position.y * cell.height, 5);
+						}
+						expect(geometry.cellWidth).toBe(viewport.cell);
 					expect(geometry.cellHeight).toBe(viewport.cell);
 					expect(geometry.avatarWidth).toBe(viewport.avatar);
 					expect(geometry.avatarHeight).toBe(viewport.avatar);
