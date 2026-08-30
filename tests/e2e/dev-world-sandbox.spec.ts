@@ -244,7 +244,7 @@ test.describe('DEV World Sandbox', () => {
 			fill: style.background,
 			maskBackground: style.background
 		})));
-		expect(tailState.polygonStyles.every((style) => style.maskWidth !== '11px')).toBe(true);
+		expect(tailState.polygonStyles.map((style) => style.maskWidth)).toEqual(['11px', '9px', '9px']);
 		expect(tailState.polygonStyles.every((style) => style.maskHeight === '3px')).toBe(true);
 		expect(tailState.polygonStyles.every((style) => style.borderRadius.split(' ').length <= 2)).toBe(true);
 		expect(tailState.polygonStyles.every((style) => style.borderColor === style.outlineColor)).toBe(true);
@@ -344,7 +344,7 @@ test.describe('DEV World Sandbox', () => {
 			expect(geometry.tailStartXs).toHaveLength(fixture.count);
 			expect(geometry.connectionMasks).toHaveLength(fixture.count);
 			expect(geometry.tailOutlineCount).toBe(fixture.count + 1);
-			expect(geometry.connectionMasks.every((mask) => mask.width === 8 && mask.height === 3)).toBe(true);
+			expect(geometry.connectionMasks.every((mask) => mask.width === 9 && mask.height === 3)).toBe(true);
 			expect(geometry.connectionMasks.every((mask) => mask.background === geometry.background)).toBe(true);
 			expect(geometry.connectionMasks.map((mask) => mask.participantId).sort()).toEqual(fixture.members.map((prefix) => prefix.repeat(64)).sort());
 			for (const [index, startX] of geometry.tailStartXs.entries()) {
