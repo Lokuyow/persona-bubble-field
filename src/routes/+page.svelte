@@ -1130,6 +1130,7 @@
 	.bubble {
 		position: absolute;
 		display: flex;
+		background: var(--bubble-bg);
 		min-height: 50px;
 		align-items: center;
 		justify-content: center;
@@ -1143,6 +1144,19 @@
 		line-height: 1.35;
 		text-align: center;
 		will-change: transform;
+	}
+
+	.bubble::after {
+		content: '';
+		position: absolute;
+		left: 50%;
+		bottom: -1px;
+		width: 11px;
+		height: 3px;
+		transform: translateX(-50%);
+		background: var(--bubble-bg);
+		pointer-events: none;
+		z-index: 1;
 	}
 
 	.bubble-normal {
@@ -1167,10 +1181,10 @@
 		text-transform: uppercase;
 	}
 
-	.bubble-sky { background: #d9edf0; }
-	.bubble-violet { background: #e2def5; }
-	.bubble-peach { background: #f6dfce; }
-	.bubble-rose { background: #f1d9df; }
+	.bubble-sky { --bubble-bg: #d9edf0; }
+	.bubble-violet { --bubble-bg: #e2def5; }
+	.bubble-peach { --bubble-bg: #f6dfce; }
+	.bubble-rose { --bubble-bg: #f1d9df; }
 
 	.viewport-vignette {
 		position: absolute;
