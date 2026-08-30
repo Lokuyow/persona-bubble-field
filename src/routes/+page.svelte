@@ -1,6 +1,9 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { pushState } from '$app/navigation';
+	import { page } from '$app/state';
 	import { asset, base } from '$app/paths';
+	import { Avatar } from 'bits-ui';
 	import {
 		applyVisibility,
 		createConversationState,
@@ -30,8 +33,9 @@
 		resetDevWorldPresence,
 		resolveDevWorldCharacterId
 	} from '$lib/devWorldSandbox';
-	import { CHARACTER_CATALOG } from '$lib/character';
+	import { CHARACTER_CATALOG, type Character } from '$lib/character';
 	import { deriveCharacterFromPubkey } from '$lib/characterAssignment';
+	import ProfileDialog from '$lib/ProfileDialog.svelte';
 	import { loadOrCreateAccount, type AccountSnapshot } from '$lib/nostrAccount';
 	import {
 		prepareInitialProfilePublication,
@@ -67,10 +71,8 @@
 	type AvatarColor = 'coral' | 'lavender' | 'mint' | 'yellow' | 'sky' | 'peach' | 'rose' | 'blue';
 	type Participant = {
 		id: string;
-		name: string;
-		initials: string;
+		character: Character;
 		color: AvatarColor;
-		picture?: string;
 	};
 	const AVATAR_COLORS: readonly AvatarColor[] = ['coral', 'lavender', 'mint', 'yellow', 'sky', 'peach', 'rose', 'blue'];
 
@@ -90,6 +92,7 @@
 	let worldSession: ReturnType<typeof createWorldReadSession> | null = null;
 	let devWorldSandboxEnabled = false;
 	let selectedCharacterId = '001';
+	let lastProfileTrigger: HTMLButtonElement | null = null;
 
 	$: cellSize = getResponsiveCellSize(viewportSize.width);
 	$: field = { ...FIELD, cellSize };
@@ -279,7 +282,7 @@
 			if (!devWorldSandboxEnabled) void begin();
 		};
 		const handleKeydown = (event: KeyboardEvent) => {
-			if (event.repeat || isEditableKeyboardEvent(event)) return;
+			if (document.querySelector('.profile-dialog-content') || event.repeat || isEditableKeyboardEvent(event)) return;
 			const direction = directionFromKey(event.key);
 			if (!direction) return;
 			event.preventDefault();
@@ -363,18 +366,14 @@
 					const character = getDevWorldCharacter(selectedId);
 					return {
 						id: participant.id,
-						name: character.name,
-						initials: '',
-						picture: character.picture,
+						character,
 						color: 'sky' as const
 					};
 				}
 				const character = deriveCharacterFromPubkey(participant.id, CHARACTER_CATALOG);
 				return {
 					id: participant.id,
-					name: character.name,
-					initials: '',
-					picture: character.picture,
+					character,
 					color: colorByPubkey[participant.id] ?? AVATAR_COLORS[0]
 				};
 			});
@@ -472,6 +471,21 @@
 		lastVisibilityKey = null;
 		colorByPubkey = {};
 		setPresence(resetDevWorldPresence(FIELD, Date.now()));
+	}
+
+	function openProfile(characterId: string, trigger: HTMLButtonElement): void {
+		lastProfileTrigger = trigger;
+		pushState('', { ...page.state, profileCharacterId: characterId });
+	}
+
+	function handleProfileOpenChange(open: boolean): void {
+		if (!open) history.back();
+	}
+
+	function restoreProfileTriggerFocus(event: Event): void {
+		if (!lastProfileTrigger?.isConnected) return;
+		event.preventDefault();
+		lastProfileTrigger.focus();
 	}
 
 	function toConversationMessage(message: ParsedWorldMessage) {
@@ -602,16 +616,19 @@
 						class="participant"
 						data-position={`${participant.position.x},${participant.position.y}`}
 						style={`left: ${participant.world.x}px; top: ${participant.world.y}px;`}
-						aria-label={participant.name}
 					>
-						<div class={`avatar avatar-${participant.color}`}>
-							{#if participant.picture}
-								<img src={`${base}/${participant.picture}`} alt="" aria-hidden="true" />
-							{:else}
-								<span>{participant.initials}</span>
-							{/if}
-						</div>
-						<span class="participant-name">{participant.name}</span>
+						<button
+							class="participant-profile-trigger"
+							type="button"
+							aria-label={`${participant.character.name} のプロフィールを開く`}
+							on:click={(event) => openProfile(participant.character.characterId, event.currentTarget)}
+						>
+							<Avatar.Root class={`avatar avatar-${participant.color}`}>
+								<Avatar.Image src={asset(`/${participant.character.picture}`)} alt="" />
+								<Avatar.Fallback>{participant.character.name.slice(0, 1)}</Avatar.Fallback>
+							</Avatar.Root>
+							<span class="participant-name" aria-hidden="true">{participant.character.name}</span>
+						</button>
 					</div>
 				{/each}
 			</div>
@@ -648,6 +665,11 @@
 		<div class="viewport-vignette" aria-hidden="true"></div>
 		<div class="camera-chip"><span class="camera-dot"></span>{devWorldSandboxEnabled ? 'self camera · DEV' : selfAccount ? 'self camera · Relay' : 'spectator camera · origin'}</div>
 	</section>
+
+	<ProfileDialog
+		onOpenChange={handleProfileOpenChange}
+		onCloseAutoFocus={restoreProfileTriggerFocus}
+	/>
 
 	<div class="status-panel">
 		<div>
@@ -976,7 +998,23 @@
 		will-change: left, top;
 	}
 
-	.avatar {
+	.participant-profile-trigger {
+		position: relative;
+		display: block;
+		width: 100%;
+		height: 100%;
+		padding: 0;
+		border: 0;
+		background: transparent;
+		cursor: pointer;
+	}
+
+	.participant-profile-trigger:focus-visible {
+		outline: 3px solid #6dabb9;
+		outline-offset: 3px;
+	}
+
+	:global(.avatar) {
 		position: absolute;
 		top: 50%;
 		left: 50%;
@@ -992,19 +1030,19 @@
 		font-size: 11px;
 		font-weight: 900;
 		letter-spacing: 0.04em;
-		transform: translate(-50%, -50%) rotate(-4deg);
+		transform: translate(-50%, -50%);
 	}
 
-	.avatar-coral { background: #f0a488; }
-	.avatar-lavender { background: #b6afe1; }
-	.avatar-mint { background: #99c6ac; }
-	.avatar-yellow { background: #e8c774; }
-	.avatar-sky { background: #9bc6d5; }
-	.avatar-peach { background: #eab994; }
-	.avatar-rose { background: #dca1b2; }
-	.avatar-blue { background: #90b4d0; }
+	:global(.avatar-coral) { background: #f0a488; }
+	:global(.avatar-lavender) { background: #b6afe1; }
+	:global(.avatar-mint) { background: #99c6ac; }
+	:global(.avatar-yellow) { background: #e8c774; }
+	:global(.avatar-sky) { background: #9bc6d5; }
+	:global(.avatar-peach) { background: #eab994; }
+	:global(.avatar-rose) { background: #dca1b2; }
+	:global(.avatar-blue) { background: #90b4d0; }
 
-	.avatar img {
+	:global(.avatar img) {
 		display: block;
 		width: 100%;
 		height: 100%;
