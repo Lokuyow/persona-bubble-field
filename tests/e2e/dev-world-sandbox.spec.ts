@@ -55,7 +55,12 @@ async function readCharacterGeometry(page: Page) {
 		const avatar = participant.querySelector<HTMLElement>('.avatar');
 		const participantRect = participant.getBoundingClientRect();
 		const avatarRect = avatar?.getBoundingClientRect();
+		const fieldGrid = document.querySelector<HTMLElement>('.field-grid');
 		if (!avatar || !avatarRect) throw new Error('Expected the participant avatar to be rendered.');
+		if (!fieldGrid) throw new Error('Expected the field grid to be rendered.');
+		const fieldGridRect = fieldGrid.getBoundingClientRect();
+		const [x, y] = (participant.dataset.position ?? '').split(',').map(Number);
+		const cellSize = Number.parseFloat(getComputedStyle(participant).width);
 
 		return {
 			cellWidth: getComputedStyle(participant).width,
@@ -69,6 +74,10 @@ async function readCharacterGeometry(page: Page) {
 			avatarCenter: {
 				x: avatarRect.left + avatarRect.width / 2,
 				y: avatarRect.top + avatarRect.height / 2
+			},
+			gridCellCenter: {
+				x: fieldGridRect.left + (x + 0.5) * cellSize,
+				y: fieldGridRect.top + (y + 0.5) * cellSize
 			}
 		};
 	});
@@ -559,6 +568,8 @@ test.describe('DEV World Sandbox', () => {
 					expect(geometry.avatarHeight).toBe(viewport.avatar);
 					expect(Math.abs(geometry.avatarCenter.x - geometry.participantCenter.x)).toBeLessThan(0.5);
 					expect(Math.abs(geometry.avatarCenter.y - geometry.participantCenter.y)).toBeLessThan(0.5);
+					expect(Math.abs(geometry.participantCenter.x - geometry.gridCellCenter.x)).toBeLessThan(0.01);
+					expect(Math.abs(geometry.participantCenter.y - geometry.gridCellCenter.y)).toBeLessThan(0.01);
 					await expect(page.locator('.participant-name')).toBeVisible();
 					await expect(page.locator('.field-area')).toHaveCSS('overflow', 'hidden');
 					await expect(page.locator('.participant')).not.toHaveAttribute('data-movement-animation', 'active');
