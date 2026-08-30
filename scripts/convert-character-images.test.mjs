@@ -69,17 +69,38 @@ describe('character image conversion pipeline', () => {
 		expect(data[(448 * info.width + 256) * info.channels + 3]).toBe(0);
 	});
 
-	it.each([
-		['WebP source files are not accepted', { format: 'webp' }],
-		['source dimensions must both be greater than 512px', { width: 512 }],
-		['source image must have an alpha channel', { channels: 3 }]
-	])('rejects invalid source files: %s', async (expectedMessage, fixtureOptions) => {
+	it('warns for small sources and preserves their dimensions without enlarging them', async () => {
 		const root = await createTemporaryDirectory();
 		const { inputDirectory, outputDirectory, cachePath } = getPipelineOptions(root);
 		await mkdir(inputDirectory);
-		await createFixture(path.join(inputDirectory, 'invalid.png'), fixtureOptions);
+		await createFixture(path.join(inputDirectory, 'small.png'), { width: 496, height: 498 });
 
-		await expect(runPipeline({ inputDirectory, outputDirectory, cachePath })).rejects.toThrow(expectedMessage);
+		const summary = await runPipeline({ inputDirectory, outputDirectory, cachePath });
+		const metadata = await sharp(await readFile(path.join(outputDirectory, 'small.webp'))).metadata();
+
+		expect(summary).toMatchObject({ generated: 1, failed: 0 });
+		expect(summary.warnings).toHaveLength(1);
+		expect(summary.warnings[0]).toMatch(
+			/[/\\]sources[/\\]small\.png: source dimensions are at or below 512px; preserving the original dimensions \(496x498\)$/
+		);
+		expect(metadata).toMatchObject({ format: 'webp', width: 496, height: 498 });
+	});
+
+	it('warns for sources without alpha and converts them without alpha', async () => {
+		const root = await createTemporaryDirectory();
+		const { inputDirectory, outputDirectory, cachePath } = getPipelineOptions(root);
+		await mkdir(inputDirectory);
+		await createFixture(path.join(inputDirectory, 'opaque.png'), { channels: 3 });
+
+		const summary = await runPipeline({ inputDirectory, outputDirectory, cachePath });
+		const metadata = await sharp(await readFile(path.join(outputDirectory, 'opaque.webp'))).metadata();
+
+		expect(summary).toMatchObject({ generated: 1, failed: 0 });
+		expect(summary.warnings).toHaveLength(1);
+		expect(summary.warnings[0]).toMatch(
+			/[/\\]sources[/\\]opaque\.png: source image has no alpha channel; converting without alpha$/
+		);
+		expect(metadata).toMatchObject({ format: 'webp', width: 512, height: 512, hasAlpha: false });
 	});
 
 	it('rejects duplicate basenames instead of choosing one source', async () => {

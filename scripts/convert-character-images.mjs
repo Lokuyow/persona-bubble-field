@@ -24,7 +24,9 @@ export const PIPELINE_CONFIG = Object.freeze({
 	background: { r: 0, g: 0, b: 0, alpha: 0 },
 	quality: DELIVERY_QUALITY,
 	alphaQuality: DELIVERY_ALPHA_QUALITY,
-	effort: DELIVERY_EFFORT
+	effort: DELIVERY_EFFORT,
+	withoutEnlargement: true,
+	preserveSmallSources: true
 });
 export const PIPELINE_SIGNATURE = createHash('sha256').update(JSON.stringify(PIPELINE_CONFIG)).digest('hex');
 
@@ -55,22 +57,23 @@ function validateSourceMetadata(metadata) {
 	if (metadata.width === undefined || metadata.height === undefined) {
 		throw new Error('image dimensions are unavailable');
 	}
+	const warnings = [];
 	if (metadata.width <= DELIVERY_SIZE || metadata.height <= DELIVERY_SIZE) {
-		throw new Error(`source dimensions must both be greater than ${DELIVERY_SIZE}px (received ${metadata.width}x${metadata.height})`);
+		warnings.push(`source dimensions are at or below ${DELIVERY_SIZE}px; preserving the original dimensions (${metadata.width}x${metadata.height})`);
 	}
 	if (metadata.hasAlpha !== true) {
-		throw new Error('source image must have an alpha channel');
+		warnings.push('source image has no alpha channel; converting without alpha');
 	}
+	return warnings;
 }
 
-async function validateDeliveryImage(outputPath) {
+async function validateDeliveryImage(outputPath, expectedWidth = DELIVERY_SIZE, expectedHeight = DELIVERY_SIZE) {
 	try {
 		const metadata = await sharp(await readFile(outputPath)).metadata();
 		return (
 			metadata.format?.toLowerCase() === 'webp' &&
-			metadata.width === DELIVERY_SIZE &&
-			metadata.height === DELIVERY_SIZE &&
-			metadata.hasAlpha === true
+			metadata.width === expectedWidth &&
+			metadata.height === expectedHeight
 		);
 	} catch {
 		return false;
@@ -121,22 +124,26 @@ async function saveCache(cachePath, entries) {
 	}
 }
 
-async function convertOne(sourcePath, outputPath) {
+async function convertOne(sourcePath, outputPath, metadata) {
 	const tempPath = path.join(
 		path.dirname(outputPath),
 		`.${path.basename(outputPath)}.${process.pid}.${randomUUID()}.tmp`
 	);
 
 	try {
-		await sharp(sourcePath)
-			.resize({
+		const image = sharp(sourcePath);
+		const shouldResize = metadata.width > DELIVERY_SIZE || metadata.height > DELIVERY_SIZE;
+		if (shouldResize) {
+			image.resize({
 				width: PIPELINE_CONFIG.width,
 				height: PIPELINE_CONFIG.height,
 				fit: PIPELINE_CONFIG.fit,
 				position: PIPELINE_CONFIG.position,
-				background: PIPELINE_CONFIG.background,
-				withoutEnlargement: true
-			})
+				...(metadata.hasAlpha === true ? { background: PIPELINE_CONFIG.background } : {}),
+				withoutEnlargement: PIPELINE_CONFIG.withoutEnlargement
+			});
+		}
+		await image
 			.webp({
 				quality: PIPELINE_CONFIG.quality,
 				alphaQuality: PIPELINE_CONFIG.alphaQuality,
@@ -144,8 +151,10 @@ async function convertOne(sourcePath, outputPath) {
 			})
 			.toFile(tempPath);
 
-		if (!(await validateDeliveryImage(tempPath))) {
-			throw new Error('generated output failed WebP, 512x512, or alpha validation');
+		const expectedWidth = shouldResize ? DELIVERY_SIZE : metadata.width;
+		const expectedHeight = shouldResize ? DELIVERY_SIZE : metadata.height;
+		if (!(await validateDeliveryImage(tempPath, expectedWidth, expectedHeight))) {
+			throw new Error('generated output failed WebP or expected dimensions validation');
 		}
 
 		await replaceOutput(tempPath, outputPath);
@@ -194,10 +203,10 @@ async function collectSources(inputDirectory) {
 		sources.map(async (source) => {
 			try {
 				const metadata = await readSourceMetadata(source.sourcePath);
-				validateSourceMetadata(metadata);
-				return { source, error: null };
+				const warnings = validateSourceMetadata(metadata);
+				return { source: { ...source, metadata }, warnings, error: null };
 			} catch (error) {
-				return { source, error: error instanceof Error ? error.message : String(error) };
+				return { source, warnings: [], error: error instanceof Error ? error.message : String(error) };
 			}
 		})
 	);
@@ -211,7 +220,12 @@ async function collectSources(inputDirectory) {
 		);
 	}
 
-	return validationResults.map(({ source }) => source);
+	return {
+		sources: validationResults.map(({ source }) => source),
+		warnings: validationResults.flatMap(({ source, warnings }) =>
+			warnings.map((warning) => `${describePath(source.sourcePath)}: ${warning}`)
+		)
+	};
 }
 
 export async function runPipeline({
@@ -226,7 +240,7 @@ export async function runPipeline({
 	if (resolvedInputDirectory === DEFAULT_INPUT_DIRECTORY && !(await fileExists(resolvedInputDirectory))) {
 		await mkdir(resolvedInputDirectory, { recursive: true });
 	}
-	const sources = await collectSources(resolvedInputDirectory);
+	const { sources, warnings } = await collectSources(resolvedInputDirectory);
 	await mkdir(resolvedOutputDirectory, { recursive: true });
 	const sourcesWithHashes = await Promise.all(
 		sources.map(async (source) => ({ ...source, sourceHash: await sha256File(source.sourcePath) }))
@@ -242,7 +256,8 @@ export async function runPipeline({
 		skipped: 0,
 		failed: 0,
 		outputDirectory: resolvedOutputDirectory,
-		errors: []
+		errors: [],
+		warnings
 	};
 
 	for (const source of sourcesWithHashes) {
@@ -251,7 +266,9 @@ export async function runPipeline({
 		const hadOutputBeforeConversion = outputExists;
 		let shouldSkip = false;
 
-		if (!force && outputExists && (await validateDeliveryImage(outputPath))) {
+		const expectedWidth = source.metadata.width > DELIVERY_SIZE ? DELIVERY_SIZE : source.metadata.width;
+		const expectedHeight = source.metadata.height > DELIVERY_SIZE ? DELIVERY_SIZE : source.metadata.height;
+		if (!force && outputExists && (await validateDeliveryImage(outputPath, expectedWidth, expectedHeight))) {
 			const cacheEntry = cacheEntries[source.basename];
 			if (
 				cacheEntry?.pipelineSignature === PIPELINE_SIGNATURE &&
@@ -267,7 +284,7 @@ export async function runPipeline({
 		}
 
 		try {
-			await convertOne(source.sourcePath, outputPath);
+			await convertOne(source.sourcePath, outputPath, source.metadata);
 			const outputHash = await sha256File(outputPath);
 			cacheEntries[source.basename] = {
 				sourceSha256: source.sourceHash,
@@ -325,6 +342,9 @@ function printSummary(summary) {
 	console.log(`Updated: ${summary.updated}`);
 	console.log(`Skipped: ${summary.skipped}`);
 	console.log(`Failed: ${summary.failed}`);
+	for (const warning of summary.warnings) {
+		console.warn(`Warning: ${warning}`);
+	}
 	console.log(`Output: ${summary.outputDirectory}`);
 }
 
