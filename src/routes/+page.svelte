@@ -560,7 +560,7 @@
 		return { x: anchor.x + size.width / 2, y: anchor.y + size.height };
 	}
 
-	function tailPolygonPoints(start: WorldPoint, target: WorldPoint, width = 9, overlap = 2): string {
+	function tailGeometry(start: WorldPoint, target: WorldPoint, width = 9, overlap = 2) {
 		const dx = target.x - start.x;
 		const dy = target.y - start.y;
 		const length = Math.hypot(dx, dy) || 1;
@@ -572,7 +572,10 @@
 		const left = { x: baseCenter.x + px, y: baseCenter.y + py };
 		const right = { x: baseCenter.x - px, y: baseCenter.y - py };
 
-		return `${left.x},${left.y} ${right.x},${right.y} ${target.x},${target.y}`;
+		return {
+			points: `${left.x},${left.y} ${right.x},${right.y} ${target.x},${target.y}`,
+			outlinePath: `M ${left.x} ${left.y} L ${target.x} ${target.y} L ${right.x} ${right.y}`
+		};
 	}
 </script>
 
@@ -653,13 +656,17 @@
 			{#each positionedNormalBubbles as bubble (bubble.id)}
 				{@const start = tailStart(bubble.anchor, bubble.size)}
 				{@const target = { x: bubble.speaker.screen.x, y: bubble.speaker.screen.y - 18 }}
-				<polygon class={`tail tail-${bubble.tone}`} points={tailPolygonPoints(start, target)} />
+				{@const tail = tailGeometry(start, target)}
+				<polygon class={`tail tail-${bubble.tone}`} points={tail.points} />
+				<path class={`tail-outline tail-${bubble.tone}`} d={tail.outlinePath} />
 			{/each}
 			{#each positionedMergedBubbles as bubble (bubble.id)}
 				{@const start = tailStart(bubble.anchor, bubble.size)}
 				{#each bubble.members as member (member.id)}
 					{@const target = { x: member.screen.x, y: member.screen.y - 18 }}
-					<polygon class={`tail tail-${bubble.tone}`} points={tailPolygonPoints(start, target)} />
+					{@const tail = tailGeometry(start, target)}
+					<polygon class={`tail tail-${bubble.tone}`} points={tail.points} />
+					<path class={`tail-outline tail-${bubble.tone}`} d={tail.outlinePath} />
 				{/each}
 			{/each}
 		</svg>
@@ -1104,6 +1111,15 @@
 
 	.tail {
 		opacity: 0.9;
+	}
+
+	.tail-outline {
+		fill: none;
+		stroke: rgba(57, 67, 64, 0.11);
+		stroke-width: 1;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+		opacity: 0.95;
 	}
 
 	.tail-sky { fill: #d9edf0; }
