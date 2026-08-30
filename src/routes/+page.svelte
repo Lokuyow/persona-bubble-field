@@ -1083,7 +1083,7 @@
 							style={`left: ${cell.position.x * cellSize}px; top: ${cell.position.y * cellSize}px;`}
 							on:click={() => moveSelfFromCell(cell.direction)}
 						>
-							{cell.direction === 'up' ? '↑' : cell.direction === 'down' ? '↓' : cell.direction === 'left' ? '←' : '→'}
+							<span class="movement-cell-chevron" aria-hidden="true"></span>
 						</button>
 					{/each}
 				</div>
@@ -1438,31 +1438,53 @@
 		box-sizing: border-box;
 		place-items: center;
 		padding: 0;
-		border: 3px solid rgba(65, 132, 117, 0.72);
-		border-radius: 10px;
-		background: rgba(177, 231, 211, 0.42);
-		box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.56), 0 2px 8px rgba(52, 104, 91, 0.12);
-		color: #286858;
+		border: 1px solid rgba(64, 111, 96, 0.28);
+		border-radius: 4px;
+		background: rgba(120, 166, 148, 0.13);
+		box-shadow: inset 0 0 18px rgba(255, 255, 255, 0.16);
+		color: rgba(52, 101, 86, 0.68);
 		cursor: pointer;
 		font: inherit;
-		font-size: clamp(18px, calc(var(--cell-size) * 0.28), 24px);
-		font-weight: 900;
-		line-height: 1;
 		pointer-events: auto;
 		touch-action: manipulation;
+		transition: background-color 120ms ease, border-color 120ms ease;
 	}
 
 	.movement-cell:hover {
-		background: rgba(177, 231, 211, 0.68);
+		border-color: rgba(64, 111, 96, 0.4);
+		background: rgba(120, 166, 148, 0.2);
 	}
 
 	.movement-cell:active {
-		background: rgba(145, 211, 190, 0.76);
+		background: rgba(103, 151, 133, 0.26);
 	}
 
 	.movement-cell:focus-visible {
 		outline: 3px solid #6dabb9;
 		outline-offset: -5px;
+	}
+
+	.movement-cell-chevron {
+		width: 8px;
+		height: 8px;
+		border-top: 1.5px solid currentColor;
+		border-right: 1.5px solid currentColor;
+	}
+
+	.movement-cell[data-movement-direction='up'] .movement-cell-chevron {
+		transform: translateY(2px) rotate(-45deg);
+	}
+
+	.movement-cell[data-movement-direction='right'] .movement-cell-chevron {
+		transform: translateX(-2px) rotate(45deg);
+	}
+
+	.movement-cell[data-movement-direction='down'] .movement-cell-chevron {
+		transform: translateY(-2px) rotate(135deg);
+	}
+
+	.movement-cell[data-movement-direction='left'] .movement-cell-chevron {
+		transform: translateX(2px) rotate(-135deg);
 	}
 
 	.field-label {
