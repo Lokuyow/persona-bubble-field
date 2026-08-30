@@ -395,8 +395,9 @@
 			resetSandbox();
 			const devSpeech = new URLSearchParams(window.location.search).get('devSpeech');
 			if (import.meta.env.DEV && devSpeech) {
-				const mergedMemberCount = devSpeech === 'merged3' ? 3 : devSpeech === 'merged4' ? 4 : devSpeech === '1' ? 2 : 0;
-				if (mergedMemberCount > 0) seedDevSpeechFixture(mergedMemberCount);
+				if (devSpeech === '1') seedDevSpeechNormalFixture();
+				const mergedMemberCount = devSpeech === 'merged2' ? 2 : devSpeech === 'merged3' ? 3 : devSpeech === 'merged4' ? 4 : 0;
+				if (mergedMemberCount > 0) seedDevSpeechMergedFixture(mergedMemberCount);
 			}
 		}
 
@@ -607,10 +608,7 @@
 	}
 
 	function participantTone(participant: Pick<Participant, 'color'>): string {
-		if (participant.color === 'lavender') return 'violet';
-		if (participant.color === 'rose') return 'rose';
-		if (participant.color === 'peach' || participant.color === 'yellow' || participant.color === 'coral') return 'peach';
-		return 'sky';
+		return participant.color;
 	}
 
 	function mergedBubbleTone(members: readonly Participant[]): string {
@@ -621,12 +619,11 @@
 		return state.participants
 			.filter((participant) => participant.status === 'active')
 			.map((participant) => {
-				if (devWorldSandboxEnabled && participant.id === DEV_WORLD_SELF_ID) {
-					const character = getDevWorldCharacter(selectedId);
+				if (participant.id === DEV_WORLD_SELF_ID) {
 					return {
 						id: participant.id,
-						character,
-						color: 'sky' as const
+						character: getDevWorldCharacter(selectedId),
+						color: colorByPubkey[participant.id] ?? AVATAR_COLORS[0]
 					};
 				}
 				const character = deriveCharacterFromPubkey(participant.id, CHARACTER_CATALOG);
@@ -796,7 +793,26 @@
 		setPresence(resetDevWorldPresence(FIELD, Date.now()));
 	}
 
-	function seedDevSpeechFixture(mergedMemberCount: number): void {
+	function seedDevSpeechNormalFixture(): void {
+		if (!devWorldSandboxEnabled) return;
+		const now = Date.now();
+		const participantIds = ['0', 'a', 'b', 'c', 'd', 'e', 'f'].map((prefix) => prefix.repeat(64));
+		setPresence(createPresenceState(FIELD, now, [
+			{ id: DEV_WORLD_SELF_ID, position: { x: 7, y: 3 } },
+			...participantIds.map((id, index) => ({ id, position: { x: index * 2 + 1, y: 2 } }))
+		]));
+		const duration = 60_000;
+		for (const [index, pubkey] of [DEV_WORLD_SELF_ID, ...participantIds].entries()) {
+			conversationState = receiveMessage(conversationState, {
+				id: `dev-speech-normal-message-${index}`,
+				pubkey,
+				content: `normal fixture ${index + 1}`,
+				createdAt: now
+			}, { isSpeakerVisible: true, duration, now });
+		}
+	}
+
+	function seedDevSpeechMergedFixture(mergedMemberCount: number): void {
 		if (!devWorldSandboxEnabled) return;
 		const now = Date.now();
 		const normalPubkey = 'a'.repeat(64);
@@ -1079,6 +1095,7 @@
 					use:observeBubble={bubble.id}
 					class={`bubble bubble-${bubble.kind} bubble-${bubble.tone} tone-${bubble.tone}`}
 					data-bubble-id={bubble.id}
+					data-bubble-participant-id={bubble.kind === 'normal' ? bubble.speaker.id : undefined}
 					data-merged-members={bubble.kind === 'merged' ? bubble.memberPubkeys.length : undefined}
 					data-speech-type={bubble.speechType}
 					style={`${bubble.kind === 'merged' ? mergedBubbleStyle(bubble.memberPubkeys.length) : ''}; transform: translate3d(${bubble.anchor.x}px, ${bubble.anchor.y}px, 0);`}
@@ -1591,24 +1608,44 @@
 		z-index: 1;
 	}
 
-	.tone-sky {
-		--tone-background: #d9edf0;
-		--tone-outline: rgba(57, 67, 64, 0.42);
+	.tone-coral {
+		--tone-background: hsl(12, 53%, 96%);
+		--tone-outline: hsl(12, 96%, 52%);
 	}
 
-	.tone-violet {
-		--tone-background: #e2def5;
-		--tone-outline: rgba(57, 67, 64, 0.42);
+	.tone-lavender {
+		--tone-background: hsl(250, 53%, 96%);
+		--tone-outline: hsl(250, 96%, 52%);
+	}
+
+	.tone-mint {
+		--tone-background: hsl(145, 43%, 96%);
+		--tone-outline: hsl(145, 90%, 42%);
+	}
+
+	.tone-yellow {
+		--tone-background: hsl(48, 53%, 96%);
+		--tone-outline: hsl(48, 96%, 48%);
+	}
+
+	.tone-sky {
+		--tone-background: hsl(188, 43%, 96%);
+		--tone-outline: hsl(188, 99%, 46%);
 	}
 
 	.tone-peach {
-		--tone-background: #f6dfce;
-		--tone-outline: rgba(57, 67, 64, 0.42);
+		--tone-background: hsl(28, 53%, 96%);
+		--tone-outline: hsl(28, 96%, 52%);
 	}
 
 	.tone-rose {
-		--tone-background: #f1d9df;
-		--tone-outline: rgba(57, 67, 64, 0.42);
+		--tone-background: hsl(340, 53%, 96%);
+		--tone-outline: hsl(340, 96%, 52%);
+	}
+
+	.tone-blue {
+		--tone-background: hsl(210, 53%, 96%);
+		--tone-outline: hsl(210, 96%, 52%);
 	}
 
 	.viewport-vignette {
