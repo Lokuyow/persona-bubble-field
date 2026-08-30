@@ -972,7 +972,7 @@
 		font-size: 11px;
 		font-weight: 900;
 		letter-spacing: 0.04em;
-		transform: translate(-50%, -50%) rotate(-4deg);
+		transform: translate(-50%, -50%);
 	}
 
 	:global(.avatar-coral) { background: #f0a488; }

@@ -89,8 +89,8 @@
 
 	:global(.profile-dialog-avatar) {
 		display: grid;
-		width: 92px;
-		height: 92px;
+		width: 256px;
+		height: 256px;
 		flex: 0 0 auto;
 		place-items: center;
 		overflow: hidden;
@@ -189,11 +189,6 @@
 		:global(.profile-dialog-content) {
 			gap: 14px;
 			padding: 20px;
-		}
-
-		:global(.profile-dialog-avatar) {
-			width: 76px;
-			height: 76px;
 		}
 
 		.profile-dialog-header :global([data-dialog-title]) { font-size: 19px; }
