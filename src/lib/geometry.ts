@@ -71,8 +71,8 @@ export type FieldSize = {
 	cellSize: number;
 };
 
-export const DESKTOP_CELL_SIZE = 72;
-export const MOBILE_CELL_SIZE = 56;
+export const DESKTOP_CELL_SIZE = 96;
+export const MOBILE_CELL_SIZE = 80;
 export const MOBILE_FIELD_BREAKPOINT = 700;
 
 export function getResponsiveCellSize(viewportWidth: number): number {

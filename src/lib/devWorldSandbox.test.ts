@@ -12,6 +12,7 @@ import {
 	resolveDevWorldCharacterId
 } from './devWorldSandbox';
 import { CHARACTER_CATALOG } from './character';
+import { MOBILE_CELL_SIZE } from './geometry';
 
 const field = { columns: 16, rows: 8 };
 
@@ -101,9 +102,9 @@ describe('DEV world sandbox', () => {
 		const initial = createDevWorldPresence(field, 100);
 		const moved = moveDevWorldSelf(initial, 'right', 200).state;
 		const options = {
-			cellSize: 56,
+			cellSize: MOBILE_CELL_SIZE,
 			fieldAreaBounds: { x: 0, y: 260, width: 390, height: 584 },
-			fieldWorldSize: { width: 896, height: 448 }
+			fieldWorldSize: { width: 1280, height: 640 }
 		};
 		const initialProjection = projectPresence(initial, [{ id: DEV_WORLD_SELF_ID }], options);
 		const movedProjection = projectPresence(moved, [{ id: DEV_WORLD_SELF_ID }], options);

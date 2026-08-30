@@ -13,6 +13,7 @@ import {
 	recordPresenceActivity
 } from './presence';
 import { projectPresence } from './presenceProjection';
+import { MOBILE_CELL_SIZE } from './geometry';
 
 const message = (id: string, pubkey: string, content: string, createdAt: number): ConversationMessage => ({
 	id,
@@ -26,9 +27,9 @@ const receive = (state: ReturnType<typeof createConversationState>, input: Conve
 
 describe('presence and conversation boundary', () => {
 	const projectionOptions = {
-		cellSize: 56,
+		cellSize: MOBILE_CELL_SIZE,
 		fieldAreaBounds: { x: 0, y: 260, width: 328, height: 100 },
-		fieldWorldSize: { width: 896, height: 448 }
+		fieldWorldSize: { width: 1280, height: 640 }
 	};
 	it('dismisses a normal bubble when presence times out', () => {
 		let presence = createPresenceState({ columns: 2, rows: 2 }, 0, [{ id: 'alice', position: { x: 0, y: 0 } }]);

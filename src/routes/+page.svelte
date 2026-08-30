@@ -570,7 +570,7 @@
 		>
 			<div
 				class="field-scene"
-				style={`--cell-size: ${cellSize}px; --avatar-size: ${cellSize === 56 ? 52 : 68}px; width: ${fieldWorldSize.width}px; height: ${fieldWorldSize.height}px; transform: translate3d(${-camera.x}px, ${-camera.y}px, 0);`}
+				style={`--cell-size: ${cellSize}px; --avatar-size: calc(var(--cell-size) - 4px); width: ${fieldWorldSize.width}px; height: ${fieldWorldSize.height}px; transform: translate3d(${-camera.x}px, ${-camera.y}px, 0);`}
 			>
 				<div class="field-grid" aria-hidden="true"></div>
 				<div class="field-sun" aria-hidden="true"></div>
