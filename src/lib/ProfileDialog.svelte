@@ -77,7 +77,9 @@
 	.profile-dialog-header {
 		display: flex;
 		align-items: center;
+		flex-direction: column;
 		gap: 16px;
+		text-align: center;
 	}
 
 	.profile-dialog-header :global([data-dialog-title]) {
