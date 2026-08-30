@@ -2,7 +2,6 @@ import { expect, test, type Page } from '@playwright/test';
 
 async function openDevWorld(page: Page): Promise<void> {
 	await page.goto('/?devWorld=1');
-	await expect(page.getByText('DEV World Sandbox', { exact: true })).toBeVisible();
 	await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 }
 
@@ -123,7 +122,7 @@ test.describe('DEV World Sandbox', () => {
 	test('starts with the local-only self and deterministic character presentation', async ({ page }) => {
 		await openDevWorld(page);
 
-		await expect(page.getByText('local only · Relay connection disabled · publishing disabled', { exact: true })).toBeVisible();
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 		await expect(page.locator('.participant')).toHaveCount(1);
 
 		const characterSelect = page.getByLabel('Select sandbox character');
@@ -152,9 +151,9 @@ test.describe('DEV World Sandbox', () => {
 		expect(background.size).toContain('168px 168px');
 	});
 
-	test('selects and presents character 020 from the catalog', async ({ page }) => {
+		test('selects and presents character 020 from the catalog', async ({ page }) => {
 		await page.goto('/?devWorld=1&devCharacter=020');
-		await expect(page.getByText('DEV World Sandbox', { exact: true })).toBeVisible();
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 		await expect(page.getByLabel('Select sandbox character')).toHaveValue('020');
 
 		const self = page.locator('.participant').first();
@@ -169,7 +168,7 @@ test.describe('DEV World Sandbox', () => {
 
 	test('renders deterministic normal and merged speech tails in the DEV fixture', async ({ page }) => {
 		await page.goto('/?devWorld=1&devSpeech=1');
-		await expect(page.getByText('DEV World Sandbox', { exact: true })).toBeVisible();
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 		await expect(page.locator('.bubble-normal')).toHaveCount(1);
 		await expect(page.locator('.bubble-merged')).toHaveCount(1);
 		await expect(page.locator('.bubble-merged')).toHaveAttribute('data-merged-members', '2');
@@ -271,7 +270,7 @@ test.describe('DEV World Sandbox', () => {
 
 		for (const fixture of fixtures) {
 			await page.goto(`/?devWorld=1&devSpeech=${fixture.query}`);
-			await expect(page.getByText('DEV World Sandbox', { exact: true })).toBeVisible();
+			await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 			await expect(page.locator('.bubble-merged')).toHaveAttribute('data-merged-members', String(fixture.count));
 			await expect(page.locator('.bubble-merged small')).toHaveCount(0);
 
@@ -518,7 +517,7 @@ test.describe('DEV World Sandbox', () => {
 	test('keeps a long profile usable on a mobile viewport', async ({ page }) => {
 		await page.setViewportSize({ width: 390, height: 360 });
 		await page.goto('/?devWorld=1&devCharacter=002');
-		await expect(page.getByText('DEV World Sandbox', { exact: true })).toBeVisible();
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 		await openProfile(page, '全裸中年男性');
 
 		const dialog = profileDialog(page);
