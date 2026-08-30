@@ -65,14 +65,17 @@ async function installHostOwnedStub(page: Page): Promise<{ requests: () => numbe
   whenReady() { return Promise.resolve(); }
   connectedCallback() {
     if (this.shadowRoot.childElementCount) return;
+    window.__ehagakiAbortActiveSubmit = () => this.activeController?.abort();
     const textarea = document.createElement('textarea');
     textarea.setAttribute('aria-label', '投稿エディター');
     const button = document.createElement('button'); button.type = 'button'; button.textContent = 'Send';
     button.addEventListener('click', async () => {
       const controller = new AbortController();
       if (window.__ehagakiAbortNextSubmit) { window.__ehagakiAbortNextSubmit = false; controller.abort(); }
+      this.activeController = controller; window.__ehagakiSubmitStarted = true;
       try { await this.options.submit({ content: textarea.value, tags: [], context: null }, { signal: controller.signal }); textarea.value = ''; }
       catch { /* Host-owned contract: retain the failed content. */ }
+      finally { this.activeController = null; }
     });
     this.shadowRoot.append(textarea, button);
   }
@@ -97,7 +100,8 @@ async function installDelayedRelay(page: Page): Promise<void> {
 			published: [] as Array<Record<string, unknown>>,
 			metadataReleased: false,
 			primaryReleased: false,
-			rejectMessagePublishes: false
+			rejectMessagePublishes: false,
+			rejectPositionPublishes: false
 		};
 		const deliver = (socket: FakeWebSocket, packet: unknown[]) => socket.dispatch('message', { type: 'message', data: JSON.stringify(packet) });
 		const respondMetadata = (request: PendingRequest) => {
@@ -140,7 +144,8 @@ async function installDelayedRelay(page: Page): Promise<void> {
 				if (packet[0] === 'EVENT') {
 					state.published.push(packet[1] as Record<string, unknown>);
 					const event = packet[1] as { id: string; kind: number };
-					deliver(this, ['OK', event.id, !(event.kind === 42 && state.rejectMessagePublishes), '']);
+					const reject = event.kind === 42 && state.rejectMessagePublishes || event.kind === 30078 && state.rejectPositionPublishes;
+					deliver(this, ['OK', event.id, !reject, '']);
 					return;
 				}
 				if (packet[0] !== 'REQ') return;
@@ -174,7 +179,9 @@ async function installDelayedRelay(page: Page): Promise<void> {
 					state.primaryReleased = true;
 					pendingPrimary.splice(0).forEach((request) => deliver(request.socket, ['EOSE', request.subId]));
 				},
-				rejectMessagePublishes: () => { state.rejectMessagePublishes = true; }
+				rejectMessagePublishes: () => { state.rejectMessagePublishes = true; },
+				rejectPositionPublishes: () => { state.rejectPositionPublishes = true; },
+				allowPositionPublishes: () => { state.rejectPositionPublishes = false; }
 			}
 		});
 	}, {
@@ -187,7 +194,7 @@ async function installDelayedRelay(page: Page): Promise<void> {
 
 function relayState(page: Page) {
 	return page.evaluate(() => (window as typeof window & {
-		__relayStartupTest: { state: { requests: Array<{ url: string; filter: Record<string, unknown> }>; published: Array<{ id: string; kind: number }> }; releaseMetadata(): void; releasePrimary(): void; rejectMessagePublishes(): void };
+		__relayStartupTest: { state: { requests: Array<{ url: string; filter: Record<string, unknown> }>; published: Array<{ id: string; kind: number }> }; releaseMetadata(): void; releasePrimary(): void; rejectMessagePublishes(): void; rejectPositionPublishes(): void; allowPositionPublishes(): void };
 	}).__relayStartupTest);
 }
 
@@ -213,7 +220,17 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('.participant[data-position="3,2"]')).toHaveCount(1);
 		expect(await page.locator('.bubble')).toHaveCount(0);
 
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { rejectPositionPublishes(): void } }).__relayStartupTest.rejectPositionPublishes());
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		await expect(page.getByRole('button', { name: 'Enter field again' })).toBeVisible();
+		await expect(editor).toHaveValue('queued until Relay is ready');
+		await editor.fill('reject while entry is retryable');
+		await page.locator('ehagaki-composer').getByRole('button', { name: 'Send' }).click();
+		await expect(editor).toHaveValue('reject while entry is retryable');
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { allowPositionPublishes(): void } }).__relayStartupTest.allowPositionPublishes());
+		await page.getByRole('button', { name: 'Enter field again' }).click();
+		await editor.fill('publish after entry recovery');
+		await page.locator('ehagaki-composer').getByRole('button', { name: 'Send' }).click();
 		await expect.poll(async () => new Set((await relayState(page)).state.published
 			.filter((event) => event.kind === 42)
 			.map((event) => event.id)).size).toBe(1);
@@ -229,6 +246,26 @@ test.describe('Relay startup', () => {
 		await editor.fill('retain after abort');
 		await page.locator('ehagaki-composer').getByRole('button', { name: 'Send' }).click();
 		await expect(editor).toHaveValue('retain after abort');
+	});
+
+	test('aborting a metadata-waiting submit releases it without publishing later', async ({ page }) => {
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page);
+		await page.goto('/');
+		await expect(page.locator('.composer-dock')).toBeVisible();
+		const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
+		await editor.fill('abort while waiting for metadata');
+		await page.locator('ehagaki-composer').getByRole('button', { name: 'Send' }).click();
+		await expect.poll(() => page.evaluate(() => Boolean((window as typeof window & { __ehagakiSubmitStarted?: boolean }).__ehagakiSubmitStarted))).toBe(true);
+		await page.evaluate(() => (window as typeof window & { __ehagakiAbortActiveSubmit(): void }).__ehagakiAbortActiveSubmit());
+		await expect(editor).toHaveValue('abort while waiting for metadata');
+
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) && [42, 30078].includes((request.filter.kinds as number[])[0]))).toBe(true);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		await expect(page.getByText('world live', { exact: true })).toBeVisible();
+		expect(new Set((await relayState(page)).state.published.filter((event) => event.kind === 42).map((event) => event.id)).size).toBe(0);
+		await expect(editor).toHaveValue('abort while waiting for metadata');
 	});
 
 	test('never mounts or loads the Host-owned Composer in DEV World', async ({ page }) => {

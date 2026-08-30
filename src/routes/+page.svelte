@@ -98,6 +98,7 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 		cleanup: () => void;
 	}> | null = null;
 	let composerStartupError: Error | null = null;
+	let entryRetryable = false;
 	let selectedCharacterId = '001';
 	let lastProfileTrigger: HTMLButtonElement | null = null;
 
@@ -257,11 +258,11 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 					});
 				}
 				if (!selfAccount) {
-					rejectPendingComposerSubmission(new Error('Account is unavailable for publishing.'));
+					setComposerTerminalError(new Error('Account is unavailable for publishing.'));
 				}
 			} catch {
 				// Account failure is fail-closed for profile publication, not world reading.
-				rejectPendingComposerSubmission(new Error('Account is unavailable for publishing.'));
+				setComposerTerminalError(new Error('Account is unavailable for publishing.'));
 			}
 			session = createWorldReadSession({
 				field: FIELD,
@@ -270,12 +271,15 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 				onLiveMessage: receiveLiveMessage,
 				onStatusChanged: (status) => {
 					connectionStatus = status;
-					if (status.kind === 'failed') rejectPendingComposerSubmission(new Error(status.message));
+					if (status.kind === 'failed') setComposerTerminalError(new Error(status.message));
 				},
 				onSelfPositionWriteStateChanged: (state) => {
 					selfPositionWriteState = state;
-					if (state.kind === 'retryable') {
-						rejectPendingComposerSubmission(new Error('World entry was not confirmed by Relay.'));
+					if ('operation' in state && state.operation === 'entry') {
+						if (state.kind === 'retryable') {
+							entryRetryable = true;
+							cancelPendingComposerSubmission(new Error('World entry was not confirmed by Relay.'));
+						} else if (state.kind === 'pending' || state.kind === 'succeeded') entryRetryable = false;
 					}
 				},
 				onSelfMessageAvailabilityChanged: (state) => {
@@ -297,7 +301,7 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 				}
 			} catch {
 				// The session reports a concise fatal status to the UI.
-				rejectPendingComposerSubmission(new Error('Relay startup failed.'));
+				setComposerTerminalError(new Error('Relay startup failed.'));
 			}
 		};
 
@@ -480,7 +484,7 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 		pending.resolve();
 	}
 
-	function rejectPendingComposerSubmission(error: Error): void {
+	function setComposerTerminalError(error: Error): void {
 		composerStartupError = error;
 		cancelPendingComposerSubmission(error);
 	}
@@ -496,6 +500,7 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 	function waitForMessageReady(signal: AbortSignal): Promise<void> {
 		if (signal.aborted) return Promise.reject(new DOMException('Submission was cancelled.', 'AbortError'));
 		if (composerStartupError) return Promise.reject(composerStartupError);
+		if (entryRetryable) return Promise.reject(new Error('World entry was not confirmed by Relay.'));
 		if (selfMessageAvailability.kind === 'ready' && worldSession) return Promise.resolve();
 		if (pendingComposerSubmission) return Promise.reject(new Error('A message is already waiting for Relay readiness.'));
 		return new Promise((resolve, reject) => {

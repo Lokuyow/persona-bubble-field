@@ -709,6 +709,29 @@ describe('world read session', () => {
 		expect(live).not.toHaveBeenCalled();
 	});
 
+	it('keeps message publishing available when movement is retryable', async () => {
+		result = startResult([], [position('self-bootstrap', 700, selfPubkey, 0, { x: 1, y: 1 })]);
+		publish
+			.mockResolvedValueOnce([{ relayUrl: 'wss://relay.test/', outcome: 'no-response' }])
+			.mockResolvedValueOnce([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
+		const availability: string[] = [];
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 },
+			selfAccount: selfAccount(),
+			onPresenceChanged: vi.fn(),
+			onLiveMessage: vi.fn(),
+			onStatusChanged: vi.fn(),
+			onSelfMessageAvailabilityChanged: (state) => availability.push(state.kind)
+		});
+
+		await session.start();
+		session.completeBootstrap();
+		await expect(session.enterSelf()).resolves.toEqual({ kind: 'not-needed' });
+		await expect(session.moveSelf('right')).resolves.toEqual({ kind: 'retryable', operation: 'movement' });
+		await expect(session.publishNormalMessage('still available')).resolves.toEqual(expect.objectContaining({ kind: 'succeeded' }));
+		expect(availability).toEqual(['ready']);
+	});
+
 	it('projects verified bootstrap evidence before canonical completion without replaying it as conversation', async () => {
 		const bootstrapMessage = message('progressive-message', 700);
 		const bootstrapPosition = position('progressive-position', 700);
