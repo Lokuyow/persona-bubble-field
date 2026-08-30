@@ -105,7 +105,6 @@
 		height: 256px;
 		flex: 0 0 auto;
 		place-items: center;
-		overflow: hidden;
 		border: 2px solid rgba(255, 255, 255, 0.88);
 		border-radius: 42% 58% 48% 52%;
 		background: #9bc6d5;
