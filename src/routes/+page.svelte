@@ -661,7 +661,6 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 				style={`--cell-size: ${cellSize}px; --avatar-size: calc(var(--cell-size) - 4px); width: ${fieldWorldSize.width}px; height: ${fieldWorldSize.height}px; transform: translate3d(${-camera.x}px, ${-camera.y}px, 0);`}
 			>
 				<div class="field-grid" aria-hidden="true"></div>
-				<div class="field-sun" aria-hidden="true"></div>
 				<div class="field-label field-label-top">the little clearing</div>
 				<div class="field-label field-label-bottom">16 × 8 / {devWorldSandboxEnabled ? 'DEV sandbox' : 'Relay world'}</div>
 
@@ -1014,23 +1013,18 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 		position: absolute;
 		inset: 0;
 		border: 1px solid rgba(95, 111, 96, 0.3);
-		background-color: rgba(199, 211, 192, 0.3);
+		background-color: rgba(222, 228, 213, 0.48);
 		background-image:
 			linear-gradient(to right, rgba(101, 122, 105, 0.16) 1px, transparent 1px),
-			linear-gradient(to bottom, rgba(101, 122, 105, 0.16) 1px, transparent 1px);
-		background-size: var(--cell-size) var(--cell-size);
+			linear-gradient(to bottom, rgba(101, 122, 105, 0.16) 1px, transparent 1px),
+			repeating-conic-gradient(
+				from 90deg at 50% 50%,
+				rgba(151, 169, 145, 0.12) 0deg 90deg,
+				rgba(244, 246, 235, 0.08) 90deg 180deg
+			);
+		background-size: var(--cell-size) var(--cell-size), var(--cell-size) var(--cell-size),
+			calc(var(--cell-size) * 2) calc(var(--cell-size) * 2);
 		box-shadow: 0 24px 65px rgba(67, 75, 62, 0.12), inset 0 0 0 16px rgba(255, 255, 255, 0.11);
-	}
-
-	.field-sun {
-		position: absolute;
-		top: 87px;
-		right: 132px;
-		width: 112px;
-		height: 112px;
-		border-radius: 50%;
-		background: rgba(246, 211, 133, 0.42);
-		filter: blur(1px);
 	}
 
 	.field-label {
