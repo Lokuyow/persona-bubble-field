@@ -348,6 +348,21 @@ test.describe('DEV World Sandbox', () => {
 		await expect(self).toHaveAttribute('data-position', '8,3');
 	});
 
+	test('does not leave a held movement running after the page becomes hidden', async ({ page }) => {
+		await openDevWorld(page);
+
+		const self = page.locator('.participant').first();
+		await page.keyboard.down('ArrowRight');
+		await expect(self).toHaveAttribute('data-position', '8,3');
+		await page.evaluate(() => {
+			Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+			document.dispatchEvent(new Event('visibilitychange'));
+		});
+		await page.waitForTimeout(650);
+		await page.keyboard.up('ArrowRight');
+		await expect(self).toHaveAttribute('data-position', '8,3');
+	});
+
 	test('does not turn browser repeat events into direct movement requests', async ({ page }) => {
 		await openDevWorld(page);
 

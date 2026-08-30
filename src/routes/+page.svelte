@@ -324,17 +324,16 @@
 		}
 
 		const now = performance.now();
+		const hadActiveVisualMotion = visualMotion !== null;
 		updateVisualAnimation(now);
+		const currentVisualWorldById = visualWorldById;
+		const currentVisualCamera = visualCamera ?? previous.camera;
 		const previousById = new Map(previous.participants.map((participant) => [participant.id, participant]));
 		const transitions = new Map<string, VisualParticipantTransition>();
 		for (const participant of next.participants) {
 			const previousParticipant = previousById.get(participant.id);
-			const hasMoved = Boolean(previousParticipant && (
-				previousParticipant.position.x !== participant.position.x ||
-				previousParticipant.position.y !== participant.position.y
-			));
-			const currentWorld = visualWorldById[participant.id] ?? previousParticipant?.world ?? participant.world;
-			transitions.set(participant.id, hasMoved
+			const currentWorld = currentVisualWorldById[participant.id] ?? previousParticipant?.world ?? participant.world;
+			transitions.set(participant.id, currentWorld.x !== participant.world.x || currentWorld.y !== participant.world.y
 				? { from: currentWorld, to: participant.world }
 				: { from: participant.world, to: participant.world });
 		}
@@ -347,7 +346,8 @@
 		const selfMoved = Boolean(previousSelf && nextSelf && (
 			previousSelf.position.x !== nextSelf.position.x || previousSelf.position.y !== nextSelf.position.y
 		));
-		const cameraMoved = selfMoved && (previous.camera.x !== next.camera.x || previous.camera.y !== next.camera.y);
+		const cameraCanAnimate = hadActiveVisualMotion || selfMoved;
+		const cameraMoved = cameraCanAnimate && (currentVisualCamera.x !== next.camera.x || currentVisualCamera.y !== next.camera.y);
 		if (prefersReducedMotion || (movedIds.size === 0 && !cameraMoved)) {
 			visualWorldById = Object.fromEntries(next.participants.map((participant) => [participant.id, participant.world]));
 			visualCamera = next.camera;
@@ -356,10 +356,10 @@
 		}
 
 		visualWorldById = Object.fromEntries([...transitions].map(([id, transition]) => [id, transition.from]));
-		visualCamera = previous.camera;
+		visualCamera = currentVisualCamera;
 		visualMotion = {
 			startedAt: now,
-			fromCamera: previous.camera,
+			fromCamera: currentVisualCamera,
 			toCamera: next.camera,
 			participants: movedIds
 		};
@@ -681,8 +681,8 @@
 
 	function isComposerEditorKeyboardEvent(event: Event): boolean {
 		const path = event.composedPath();
-		const isComposerEvent = path.some((target) => target instanceof HTMLElement && target.matches('ehagaki-composer'));
-		return isComposerEvent && path.some((target) => target instanceof HTMLElement && target.isContentEditable);
+		return path.some((target) => target instanceof HTMLElement && target.matches('ehagaki-composer')) &&
+			path.some((target) => target instanceof HTMLElement && target.isContentEditable);
 	}
 
 	function canUseArrowForMovement(event: KeyboardEvent): boolean {
@@ -696,7 +696,8 @@
 		) return false;
 
 		const path = event.composedPath();
-		if (isComposerEditorKeyboardEvent(event)) return composerEditorIsEmpty === true;
+		const isComposerEvent = path.some((target) => target instanceof HTMLElement && target.matches('ehagaki-composer'));
+		if (isComposerEvent) return isComposerEditorKeyboardEvent(event) && composerEditorIsEmpty === true;
 		return !path.some((target) => target instanceof HTMLElement && (
 			target.matches('input, textarea, select') || target.isContentEditable
 		));

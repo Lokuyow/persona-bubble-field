@@ -110,6 +110,7 @@ async function installDelayedRelay(page: Page): Promise<void> {
 		const authoritative = new Set<string>(authoritativeRelays);
 		const pendingMetadata: PendingRequest[] = [];
 		const pendingPrimary: PendingRequest[] = [];
+		const activePrimary: PendingRequest[] = [];
 		const state = {
 			requests: [] as Array<{ url: string; subId: string; filter: Record<string, unknown> }>,
 			published: [] as Array<Record<string, unknown>>,
@@ -171,6 +172,7 @@ async function installDelayedRelay(page: Page): Promise<void> {
 					if (state.metadataReleased) respondMetadata(request);
 					else pendingMetadata.push(request);
 				} else if (authoritative.has(relayUrl)) {
+					activePrimary.push(request);
 					respondPrimary(request);
 					if (!state.primaryReleased) pendingPrimary.push(request);
 				}
@@ -196,7 +198,14 @@ async function installDelayedRelay(page: Page): Promise<void> {
 				},
 				rejectMessagePublishes: () => { state.rejectMessagePublishes = true; },
 				rejectPositionPublishes: () => { state.rejectPositionPublishes = true; },
-				allowPositionPublishes: () => { state.rejectPositionPublishes = false; }
+				allowPositionPublishes: () => { state.rejectPositionPublishes = false; },
+				injectPosition: (event: object) => {
+					for (const request of activePrimary) {
+						if ((request.filter.kinds as number[] | undefined)?.includes(30078)) {
+							deliver(request.socket, ['EVENT', request.subId, event]);
+						}
+					}
+				}
 			}
 		});
 	}, {
@@ -209,7 +218,7 @@ async function installDelayedRelay(page: Page): Promise<void> {
 
 function relayState(page: Page) {
 	return page.evaluate(() => (window as typeof window & {
-		__relayStartupTest: { state: { requests: Array<{ url: string; filter: Record<string, unknown> }>; published: Array<{ id: string; kind: number }> }; releaseMetadata(): void; releasePrimary(): void; rejectMessagePublishes(): void; rejectPositionPublishes(): void; allowPositionPublishes(): void };
+		__relayStartupTest: { state: { requests: Array<{ url: string; filter: Record<string, unknown> }>; published: Array<{ id: string; kind: number }> }; releaseMetadata(): void; releasePrimary(): void; rejectMessagePublishes(): void; rejectPositionPublishes(): void; allowPositionPublishes(): void; injectPosition(event: object): void };
 	}).__relayStartupTest);
 }
 
@@ -328,6 +337,23 @@ test.describe('Relay startup', () => {
 		await expect.poll(() => page.evaluate(() => (window as typeof window & { __keyboardDefaulted?: boolean }).__keyboardDefaulted)).toBe(true);
 	});
 
+	test('does not move or prevent Arrow default from another Composer control', async ({ page }) => {
+		const editor = await openReadyRelayWorld(page);
+		const self = page.locator('.participant[data-self="true"]');
+		const before = await self.getAttribute('data-position');
+		await page.evaluate(() => {
+			(window as typeof window & { __keyboardDefaulted?: boolean }).__keyboardDefaulted = false;
+			window.addEventListener('keydown', (event) => {
+				if (event.key.startsWith('Arrow')) (window as typeof window & { __keyboardDefaulted?: boolean }).__keyboardDefaulted = event.defaultPrevented;
+			});
+		});
+		const send = page.locator('ehagaki-composer').getByRole('button', { name: 'Send' });
+		await send.focus();
+		await page.keyboard.press('ArrowRight');
+		await expect(self).toHaveAttribute('data-position', before ?? '');
+		await expect.poll(() => page.evaluate(() => (window as typeof window & { __keyboardDefaulted?: boolean }).__keyboardDefaulted)).toBe(false);
+	});
+
 	test('preserves Composer editing Arrow behavior while non-empty and re-enables movement after deletion', async ({ page }) => {
 		const editor = await openReadyRelayWorld(page);
 		const self = page.locator('.participant[data-self="true"]');
@@ -390,6 +416,53 @@ test.describe('Relay startup', () => {
 		expect(Math.abs(finalX - x)).toBeGreaterThanOrEqual(2);
 		await page.waitForTimeout(650);
 		await expect(self).toHaveAttribute('data-position', finalPosition ?? '');
+	});
+
+	test('retargets active participant and camera animation when another participant updates', async ({ page }) => {
+		await page.setViewportSize({ width: 390, height: 844 });
+		const editor = await openReadyRelayWorld(page);
+		const self = page.locator('.participant[data-self="true"]');
+		const scene = page.locator('.field-scene');
+		const remotePosition = finalizeEvent(buildPositionEventTemplate({
+			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' },
+			position: { x: 4, y: 2 },
+			slot: 0,
+			createdAt: Math.floor(Date.now() / 1000) + 1
+		}), new Uint8Array(32).fill(19));
+
+		let move = await chooseHorizontalMove(page);
+		let cameraStartedMoving = false;
+		for (let attempt = 0; attempt < 16; attempt += 1) {
+			const transformBeforeMove = await scene.evaluate((element) => getComputedStyle(element).transform);
+			await editor.focus();
+			await page.keyboard.press(move.key);
+			await expect(self).toHaveAttribute('data-position', move.expected);
+			await expect(self).toHaveAttribute('data-movement-animation', 'active');
+			await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+			const transformAfterMove = await scene.evaluate((element) => getComputedStyle(element).transform);
+			if (transformAfterMove !== transformBeforeMove) {
+				cameraStartedMoving = true;
+				break;
+			}
+			await expect(self).not.toHaveAttribute('data-movement-animation', 'active');
+			move = await chooseHorizontalMove(page);
+		}
+		expect(cameraStartedMoving).toBe(true);
+
+		await page.evaluate((event) => {
+			(window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event);
+		}, remotePosition);
+		await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+		await expect(self).toHaveAttribute('data-movement-animation', 'active');
+		await expect(scene).toHaveAttribute('data-camera-animation', 'active');
+		const transformDuringRetarget = await scene.evaluate((element) => getComputedStyle(element).transform);
+
+		await expect(self).not.toHaveAttribute('data-movement-animation', 'active');
+		await expect(scene).not.toHaveAttribute('data-camera-animation', 'active');
+		const transformAtRest = await scene.evaluate((element) => getComputedStyle(element).transform);
+		expect(transformDuringRetarget).not.toBe(transformAtRest);
+		await expect(self).toHaveAttribute('data-position', move.expected);
+		await expect(page.locator(`.participant[data-participant-id="${remotePosition.pubkey}"]`)).toHaveAttribute('data-position', '4,2');
 	});
 
 	test('never mounts or loads the Host-owned Composer in DEV World', async ({ page }) => {
