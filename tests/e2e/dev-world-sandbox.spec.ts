@@ -134,6 +134,12 @@ test.describe('DEV World Sandbox', () => {
 		await expect(profileDialog(page)).toBeHidden();
 		await page.keyboard.press('ArrowRight');
 		await expect(self).toHaveAttribute('data-position', '8,3');
+		await openProfile(page, '女の子');
+		await expectProfile(page, {
+			name: '女の子',
+			picture: '001.webp',
+			about: '知らない場所でも、わりと平気そう。'
+		});
 	});
 
 	test('opens a profile by keyboard', async ({ page }) => {

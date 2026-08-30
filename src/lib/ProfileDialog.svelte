@@ -17,10 +17,11 @@
 	const open = $derived(character !== null);
 </script>
 
-<Dialog.Root {open} {onOpenChange}>
-	<Dialog.Portal>
-		<Dialog.Overlay class="profile-dialog-overlay" />
-		{#if character}
+
+{#if character}
+	<Dialog.Root {open} {onOpenChange}>
+		<Dialog.Portal>
+			<Dialog.Overlay class="profile-dialog-overlay" />
 			<Dialog.Content class="profile-dialog-content" {onCloseAutoFocus}>
 				<div class="profile-dialog-header">
 					<Avatar.Root class="profile-dialog-avatar">
@@ -46,9 +47,9 @@
 					<Dialog.Close class="profile-dialog-close">閉じる</Dialog.Close>
 				</footer>
 			</Dialog.Content>
-		{/if}
-	</Dialog.Portal>
-</Dialog.Root>
+		</Dialog.Portal>
+	</Dialog.Root>
+{/if}
 
 <style>
 	:global(.profile-dialog-overlay) {
