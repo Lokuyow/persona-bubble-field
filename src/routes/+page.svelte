@@ -43,7 +43,7 @@
 		type PreparedInitialProfilePublication
 	} from '$lib/initialProfilePublication';
 	import { projectPresence } from '$lib/presenceProjection';
-	import type { PresenceState } from '$lib/presence';
+import { createPresenceState, type PresenceState } from '$lib/presence';
 	import type { ParsedWorldMessage } from '$lib/nostrProtocol';
 	import HostOwnedComposerLite from '$lib/HostOwnedComposerLite.svelte';
 	import {
@@ -222,6 +222,9 @@
 		if (devWorldSandboxEnabled) {
 			selectedCharacterId = resolveDevWorldCharacterId(new URLSearchParams(window.location.search));
 			resetSandbox();
+			if (import.meta.env.DEV && new URLSearchParams(window.location.search).get('devSpeech') === '1') {
+				seedDevSpeechFixture();
+			}
 		}
 
 		const begin = async () => {
@@ -471,6 +474,32 @@
 		lastVisibilityKey = null;
 		colorByPubkey = {};
 		setPresence(resetDevWorldPresence(FIELD, Date.now()));
+	}
+
+	function seedDevSpeechFixture(): void {
+		if (!devWorldSandboxEnabled) return;
+		const now = Date.now();
+		const normalPubkey = 'a'.repeat(64);
+		const mergedPubkeyA = 'b'.repeat(64);
+		const mergedPubkeyB = 'c'.repeat(64);
+		setPresence(createPresenceState(FIELD, now, [
+			{ id: DEV_WORLD_SELF_ID, position: { x: 7, y: 3 } },
+			{ id: normalPubkey, position: { x: 4, y: 2 } },
+			{ id: mergedPubkeyA, position: { x: 6, y: 2 } },
+			{ id: mergedPubkeyB, position: { x: 10, y: 2 } }
+		]));
+		const duration = 60_000;
+		const normalMessage = {
+			id: 'dev-speech-normal-message', pubkey: normalPubkey, content: 'normal fixture', createdAt: now
+		} as const;
+		const mergedMessage = {
+			id: 'dev-speech-merged-message-a', pubkey: mergedPubkeyA, content: 'merged fixture', createdAt: now
+		} as const;
+		conversationState = receiveMessage(conversationState, normalMessage, { isSpeakerVisible: true, duration, now });
+		conversationState = receiveMessage(conversationState, mergedMessage, { isSpeakerVisible: true, duration, now });
+		conversationState = receiveMessage(conversationState, {
+			...mergedMessage, id: 'dev-speech-merged-message-b', pubkey: mergedPubkeyB
+		}, { isSpeakerVisible: true, duration, now });
 	}
 
 	function openProfile(characterId: string, trigger: HTMLButtonElement): void {
