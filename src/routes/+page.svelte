@@ -172,7 +172,9 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 			const members = bubble.memberPubkeys
 				.map((id) => participantById.get(id))
 				.filter((participant): participant is (typeof participantViews)[number] => Boolean(participant));
-			const visibleMembers = members.filter((member) => isInsideFieldArea(member.screen));
+			const visibleMembers = members
+				.filter((member) => isInsideFieldArea(member.screen))
+				.sort((left, right) => left.screen.x - right.screen.x || left.id.localeCompare(right.id));
 			const size = bubbleSizes[bubble.id] ?? DEFAULT_BUBBLE_SIZES.merged;
 			if (visibleMembers.length === 0) {
 				const lastAnchor = lastPlacedAnchorById[bubble.id];
@@ -235,8 +237,10 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 		if (devWorldSandboxEnabled) {
 			selectedCharacterId = resolveDevWorldCharacterId(new URLSearchParams(window.location.search));
 			resetSandbox();
-			if (import.meta.env.DEV && new URLSearchParams(window.location.search).get('devSpeech') === '1') {
-				seedDevSpeechFixture();
+			const devSpeech = new URLSearchParams(window.location.search).get('devSpeech');
+			if (import.meta.env.DEV && devSpeech) {
+				const mergedMemberCount = devSpeech === 'merged3' ? 3 : devSpeech === 'merged4' ? 4 : devSpeech === '1' ? 2 : 0;
+				if (mergedMemberCount > 0) seedDevSpeechFixture(mergedMemberCount);
 			}
 		}
 
@@ -549,30 +553,39 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 		setPresence(resetDevWorldPresence(FIELD, Date.now()));
 	}
 
-	function seedDevSpeechFixture(): void {
+	function seedDevSpeechFixture(mergedMemberCount: number): void {
 		if (!devWorldSandboxEnabled) return;
 		const now = Date.now();
 		const normalPubkey = 'a'.repeat(64);
-		const mergedPubkeyA = 'b'.repeat(64);
-		const mergedPubkeyB = 'c'.repeat(64);
+		const mergedPubkeys = ['b', 'c', 'd', 'e']
+			.slice(0, mergedMemberCount)
+			.map((prefix) => prefix.repeat(64));
+		const mergedPositions = mergedMemberCount === 2
+			? [6, 10]
+			: mergedMemberCount === 3
+				? [5, 8, 11]
+				: [4, 6, 10, 12];
 		setPresence(createPresenceState(FIELD, now, [
 			{ id: DEV_WORLD_SELF_ID, position: { x: 7, y: 3 } },
 			{ id: normalPubkey, position: { x: 4, y: 2 } },
-			{ id: mergedPubkeyA, position: { x: 6, y: 2 } },
-			{ id: mergedPubkeyB, position: { x: 10, y: 2 } }
+			...mergedPubkeys.map((id, index) => ({ id, position: { x: mergedPositions[index], y: 2 } }))
 		]));
 		const duration = 60_000;
 		const normalMessage = {
 			id: 'dev-speech-normal-message', pubkey: normalPubkey, content: 'normal fixture', createdAt: now
 		} as const;
 		const mergedMessage = {
-			id: 'dev-speech-merged-message-a', pubkey: mergedPubkeyA, content: 'merged fixture', createdAt: now
+			id: 'dev-speech-merged-message-a', pubkey: mergedPubkeys[0], content: 'merged fixture', createdAt: now
 		} as const;
 		conversationState = receiveMessage(conversationState, normalMessage, { isSpeakerVisible: true, duration, now });
 		conversationState = receiveMessage(conversationState, mergedMessage, { isSpeakerVisible: true, duration, now });
-		conversationState = receiveMessage(conversationState, {
-			...mergedMessage, id: 'dev-speech-merged-message-b', pubkey: mergedPubkeyB
-		}, { isSpeakerVisible: true, duration, now });
+		for (const [index, pubkey] of mergedPubkeys.slice(1).entries()) {
+			conversationState = receiveMessage(conversationState, {
+				...mergedMessage,
+				id: `dev-speech-merged-message-${String.fromCharCode(98 + index)}`,
+				pubkey
+			}, { isSpeakerVisible: true, duration, now });
+		}
 	}
 
 	function openProfile(characterId: string, trigger: HTMLButtonElement): void {
@@ -660,6 +673,39 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 
 	function tailStart(anchor: WorldPoint, size: Size): WorldPoint {
 		return { x: anchor.x + size.width / 2, y: anchor.y + size.height };
+	}
+
+	function mergedTailStart(anchor: WorldPoint, size: Size, index: number, count: number): WorldPoint {
+		return {
+			x: anchor.x + size.width * mergedTailFraction(index, count),
+			y: anchor.y + size.height
+		};
+	}
+
+	function mergedTailFraction(index: number, count: number): number {
+		if (count <= 1) return 0.5;
+		const edgeInset = count === 2 ? 0.28 : count === 3 ? 0.22 : 0.18;
+		return edgeInset + (1 - edgeInset * 2) * (index / (count - 1));
+	}
+
+	function mergedTailConnectionStyle(index: number, count: number): string {
+		return `left: ${mergedTailFraction(index, count) * 100}%;`;
+	}
+
+	function mergedBubbleStyle(memberCount: number): string {
+		const level = Math.min(Math.max(memberCount, 2), 4) - 2;
+		const minWidth = 230 + level * 18;
+		const minHeight = 62 + level * 4;
+		const paddingY = 13 + level;
+		const paddingX = 18 + level * 2;
+		const fontSize = 14 + level;
+		return [
+			`--merged-bubble-min-width: ${minWidth}px`,
+			`--merged-bubble-min-height: ${minHeight}px`,
+			`--merged-bubble-padding-y: ${paddingY}px`,
+			`--merged-bubble-padding-x: ${paddingX}px`,
+			`--merged-bubble-font-size: ${fontSize}px`
+		].join('; ');
 	}
 
 	function tailTarget(participant: (typeof participantViews)[number]): WorldPoint {
@@ -770,10 +816,10 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 				<path class="tail-outline" data-tail-participant-id={bubble.speaker.id} d={tail.outlinePath} />
 			{/each}
 			{#each positionedMergedBubbles as bubble (bubble.id)}
-				{@const start = tailStart(bubble.anchor, bubble.size)}
-				{#each bubble.members as member (member.id)}
+				{#each bubble.members as member, index (member.id)}
+					{@const start = mergedTailStart(bubble.anchor, bubble.size, index, bubble.members.length)}
 					{@const target = tailTarget(member)}
-					{@const tail = tailGeometry(start, target)}
+					{@const tail = tailGeometry(start, target, 7, 2)}
 					<polygon class={`tail tail-${bubble.tone}`} data-tail-participant-id={member.id} points={tail.points} />
 					<path class="tail-outline" data-tail-participant-id={member.id} d={tail.outlinePath} />
 				{/each}
@@ -786,11 +832,21 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 					use:observeBubble={bubble.id}
 					class={`bubble bubble-${bubble.kind} bubble-${bubble.tone}`}
 					data-bubble-id={bubble.id}
+					data-merged-members={bubble.kind === 'merged' ? bubble.memberPubkeys.length : undefined}
 					data-speech-type={bubble.speechType}
-					style={`transform: translate3d(${bubble.anchor.x}px, ${bubble.anchor.y}px, 0);`}
+					style={`${bubble.kind === 'merged' ? mergedBubbleStyle(bubble.memberPubkeys.length) : ''}; transform: translate3d(${bubble.anchor.x}px, ${bubble.anchor.y}px, 0);`}
 				>
 					<span>{bubble.text}</span>
-					{#if bubble.kind === 'merged'}<small>{bubble.memberPubkeys.length} people · merged</small>{/if}
+					{#if bubble.kind === 'merged'}
+						{#each bubble.members as member, index (member.id)}
+							<span
+								class="bubble-tail-connection"
+								data-tail-participant-id={member.id}
+								style={mergedTailConnectionStyle(index, bubble.members.length)}
+								aria-hidden="true"
+							></span>
+						{/each}
+					{/if}
 				</div>
 			{/each}
 		</div>
@@ -1239,7 +1295,7 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 		align-items: center;
 		justify-content: center;
 		border: 1px solid var(--bubble-outline);
-		border-radius: 999px;
+		border-radius: 18px;
 		color: #364142;
 		font-size: 13px;
 		font-weight: 800;
@@ -1249,7 +1305,7 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 		will-change: transform;
 	}
 
-	.bubble::after {
+	.bubble-normal::after {
 		content: '';
 		position: absolute;
 		left: 50%;
@@ -1268,19 +1324,23 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 	}
 
 	.bubble-merged {
-		width: 218px;
-		min-height: 58px;
-		flex-direction: column;
-		gap: 3px;
-		padding: 12px 16px 10px;
+		width: max-content;
+		max-width: calc(100% - 32px);
+		min-width: var(--merged-bubble-min-width, 218px);
+		min-height: var(--merged-bubble-min-height, 58px);
+		padding: var(--merged-bubble-padding-y, 12px) var(--merged-bubble-padding-x, 16px);
+		font-size: var(--merged-bubble-font-size, 13px);
 	}
 
-	.bubble-merged small {
-		color: #7c779d;
-		font-size: 9px;
-		font-weight: 700;
-		letter-spacing: 0.12em;
-		text-transform: uppercase;
+	.bubble-tail-connection {
+		position: absolute;
+		bottom: -1px;
+		width: 8px;
+		height: 3px;
+		transform: translateX(-50%);
+		background: var(--bubble-bg);
+		pointer-events: none;
+		z-index: 1;
 	}
 
 	.bubble-sky { --bubble-bg: #d9edf0; }
