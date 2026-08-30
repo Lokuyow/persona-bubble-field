@@ -277,7 +277,7 @@
 		visualMotion = null;
 	}
 
-	function updateVisualAnimation(now = performance.now()): void {
+	function sampleVisualAnimation(now = performance.now()): void {
 		if (!visualMotion) return;
 		const progress = Math.min(1, Math.max(0, (now - visualMotion.startedAt) / MOVEMENT_ANIMATION_DURATION_MS));
 		const eased = easeOut(progress);
@@ -290,13 +290,22 @@
 
 		if (progress >= 1) {
 			visualMotion = null;
-			visualAnimationFrame = null;
+			if (visualAnimationFrame !== null) {
+				cancelAnimationFrame(visualAnimationFrame);
+				visualAnimationFrame = null;
+			}
 			visualWorldById = Object.fromEntries(presenceProjection.participants.map((participant) => [participant.id, participant.world]));
 			visualCamera = presenceProjection.camera;
-			return;
 		}
+	}
 
-		visualAnimationFrame = requestAnimationFrame(() => updateVisualAnimation());
+	function scheduleVisualAnimation(): void {
+		if (!visualMotion || visualAnimationFrame !== null) return;
+		visualAnimationFrame = requestAnimationFrame(() => {
+			visualAnimationFrame = null;
+			sampleVisualAnimation();
+			scheduleVisualAnimation();
+		});
 	}
 
 	function syncVisualToCanonical(): void {
@@ -325,7 +334,7 @@
 
 		const now = performance.now();
 		const hadActiveVisualMotion = visualMotion !== null;
-		updateVisualAnimation(now);
+		sampleVisualAnimation(now);
 		const currentVisualWorldById = visualWorldById;
 		const currentVisualCamera = visualCamera ?? previous.camera;
 		const previousById = new Map(previous.participants.map((participant) => [participant.id, participant]));
@@ -349,9 +358,9 @@
 		const cameraCanAnimate = hadActiveVisualMotion || selfMoved;
 		const cameraMoved = cameraCanAnimate && (currentVisualCamera.x !== next.camera.x || currentVisualCamera.y !== next.camera.y);
 		if (prefersReducedMotion || (movedIds.size === 0 && !cameraMoved)) {
+			cancelVisualAnimation();
 			visualWorldById = Object.fromEntries(next.participants.map((participant) => [participant.id, participant.world]));
 			visualCamera = next.camera;
-			visualMotion = null;
 			return;
 		}
 
@@ -363,7 +372,8 @@
 			toCamera: next.camera,
 			participants: movedIds
 		};
-		updateVisualAnimation(now);
+		sampleVisualAnimation(now);
+		scheduleVisualAnimation();
 	}
 
 	onMount(() => {

@@ -420,6 +420,31 @@ test.describe('Relay startup', () => {
 
 	test('retargets active participant and camera animation when another participant updates', async ({ page }) => {
 		await page.setViewportSize({ width: 390, height: 844 });
+		await page.addInitScript(() => {
+			const nativeRequestAnimationFrame = window.requestAnimationFrame.bind(window);
+			const nativeCancelAnimationFrame = window.cancelAnimationFrame.bind(window);
+			const pending = new Set<number>();
+			let maxPending = 0;
+			window.requestAnimationFrame = (callback) => {
+				const id = nativeRequestAnimationFrame((timestamp) => {
+					pending.delete(id);
+					callback(timestamp);
+				});
+				pending.add(id);
+				maxPending = Math.max(maxPending, pending.size);
+				return id;
+			};
+			window.cancelAnimationFrame = (id) => {
+				pending.delete(id);
+				nativeCancelAnimationFrame(id);
+			};
+			Object.assign(window, {
+				__visualAnimationRafMetrics: {
+					pending: () => pending.size,
+					maxPending: () => maxPending
+				}
+			});
+		});
 		const editor = await openReadyRelayWorld(page);
 		const self = page.locator('.participant[data-self="true"]');
 		const scene = page.locator('.field-scene');
@@ -438,7 +463,7 @@ test.describe('Relay startup', () => {
 			await page.keyboard.press(move.key);
 			await expect(self).toHaveAttribute('data-position', move.expected);
 			await expect(self).toHaveAttribute('data-movement-animation', 'active');
-			await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+			await page.waitForTimeout(20);
 			const transformAfterMove = await scene.evaluate((element) => getComputedStyle(element).transform);
 			if (transformAfterMove !== transformBeforeMove) {
 				cameraStartedMoving = true;
@@ -452,13 +477,15 @@ test.describe('Relay startup', () => {
 		await page.evaluate((event) => {
 			(window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event);
 		}, remotePosition);
-		await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+		await page.waitForTimeout(20);
 		await expect(self).toHaveAttribute('data-movement-animation', 'active');
 		await expect(scene).toHaveAttribute('data-camera-animation', 'active');
+		expect(await page.evaluate(() => (window as typeof window & { __visualAnimationRafMetrics: { maxPending(): number } }).__visualAnimationRafMetrics.maxPending())).toBeLessThanOrEqual(1);
 		const transformDuringRetarget = await scene.evaluate((element) => getComputedStyle(element).transform);
 
 		await expect(self).not.toHaveAttribute('data-movement-animation', 'active');
 		await expect(scene).not.toHaveAttribute('data-camera-animation', 'active');
+		await expect.poll(() => page.evaluate(() => (window as typeof window & { __visualAnimationRafMetrics: { pending(): number } }).__visualAnimationRafMetrics.pending())).toBe(0);
 		const transformAtRest = await scene.evaluate((element) => getComputedStyle(element).transform);
 		expect(transformDuringRetarget).not.toBe(transformAtRest);
 		await expect(self).toHaveAttribute('data-position', move.expected);
