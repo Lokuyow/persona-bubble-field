@@ -232,7 +232,6 @@ async function openReadyRelayWorld(page: Page): Promise<Locator> {
 	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
 	await expect.poll(async () => (await relayState(page)).state.requests.some((request) => AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) && [42, 30078].includes((request.filter.kinds as number[])[0]))).toBe(true);
 	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
-	await expect(page.getByText('world live', { exact: true })).toBeVisible();
 	await expect(page.locator('.participant')).toHaveCount(2);
 	return editor;
 }
@@ -311,7 +310,7 @@ test.describe('Relay startup', () => {
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) && [42, 30078].includes((request.filter.kinds as number[])[0]))).toBe(true);
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
-		await expect(page.getByText('world live', { exact: true })).toBeVisible();
+	await expect(page.locator('.participant')).toHaveCount(2);
 		expect(new Set((await relayState(page)).state.published.filter((event) => event.kind === 42).map((event) => event.id)).size).toBe(0);
 		await expect(editor).toHaveValue('abort while waiting for metadata');
 	});

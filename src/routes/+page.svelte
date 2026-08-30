@@ -998,12 +998,7 @@
 	<div class="topbar">
 		<div class="brand-lockup">
 			<span class="brand-mark" aria-hidden="true">✳</span>
-			<div>
-				<p class="brand-name">persona field</p>
-				<p class="brand-subtitle">{devWorldSandboxEnabled ? 'DEV World Sandbox' : 'live Relay world'}</p>
-			</div>
 		</div>
-		<div class="prototype-badge"><span></span>{devWorldSandboxEnabled ? 'DEV sandbox · local only' : 'prototype / Relay world'}</div>
 	</div>
 
 	<section class="field-viewport" bind:this={viewportElement} aria-label="Conversation field">
@@ -1012,7 +1007,6 @@
 			style={`top: ${speechAreaVisualBounds.y}px; height: ${speechAreaVisualBounds.height}px; left: ${speechAreaVisualBounds.x}px; width: ${speechAreaVisualBounds.width}px;`}
 			aria-hidden="true"
 		>
-			<span>speech area / provisional</span>
 		</div>
 		<div
 			class="field-area"
@@ -1025,9 +1019,6 @@
 				style={`--cell-size: ${cellSize}px; --avatar-size: calc(var(--cell-size) - 4px); width: ${fieldWorldSize.width}px; height: ${fieldWorldSize.height}px; transform: translate3d(${-camera.x}px, ${-camera.y}px, 0);`}
 			>
 				<div class="field-grid" aria-hidden="true"></div>
-				<div class="field-label field-label-top">the little clearing</div>
-				<div class="field-label field-label-bottom">16 × 8 / {devWorldSandboxEnabled ? 'DEV sandbox' : 'Relay world'}</div>
-
 				{#each participantViews as participant (participant.id)}
 					<div
 						class="participant"
@@ -1099,34 +1090,12 @@
 		</div>
 
 		<div class="viewport-vignette" aria-hidden="true"></div>
-		<div class="camera-chip"><span class="camera-dot"></span>{devWorldSandboxEnabled ? 'self camera · DEV' : selfAccount ? 'self camera · Relay' : 'spectator camera · origin'}</div>
 	</section>
 
 	<ProfileDialog
 		onOpenChange={handleProfileOpenChange}
 		onCloseAutoFocus={restoreProfileTriggerFocus}
 	/>
-
-	<div class="status-panel">
-		<div>
-			<p class="panel-kicker">{devWorldSandboxEnabled ? 'DEV sandbox' : 'prototype world'} · {presenceState.participants.filter((participant) => participant.status === 'active').length} active</p>
-			<p class="status-message" aria-live="polite">
-				{#if devWorldSandboxEnabled}local only · Relay connection disabled · publishing disabled
-				{:else if connectionStatus.kind === 'bootstrapping'}connecting to prototype world…
-				{:else if connectionStatus.kind === 'available'}world live
-				{:else if connectionStatus.kind === 'degraded'}world live · limited relay availability
-				{:else}world unavailable · {connectionStatus.message}
-				{/if}
-			</p>
-			{#if !devWorldSandboxEnabled && selfPositionWriteState.kind === 'unavailable'}
-				<p class="write-status">movement unavailable · account storage needs attention</p>
-			{:else if !devWorldSandboxEnabled && selfPositionWriteState.kind === 'pending'}
-				<p class="write-status">{selfPositionWriteState.operation} syncing to Relay…</p>
-			{:else if !devWorldSandboxEnabled && selfPositionWriteState.kind === 'retryable'}
-				<p class="write-status">movement was not confirmed by Relay · retry available</p>
-			{/if}
-		</div>
-	</div>
 
 	{#if devWorldSandboxEnabled}
 		<div class="sandbox-controls" aria-label="DEV sandbox controls">
@@ -1175,7 +1144,6 @@
 		</div>
 	{/if}
 
-	<p class="footer-note">{devWorldSandboxEnabled ? 'DEV sandbox · local only · no Relay connection · no publishing' : 'Relay world · signed position publishing · DOM participants · SVG tails'}</p>
 </main>
 
 <style>
