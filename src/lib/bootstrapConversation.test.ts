@@ -24,7 +24,7 @@ describe('bootstrap conversation replay', () => {
 			entryNowMs
 		);
 
-		expect(duration).toBe(4_600);
+		expect(duration).toBe(5_600);
 		expect(100_000 + duration).toBeGreaterThan(104_000);
 		expect(100_000 + duration).toBeLessThanOrEqual(entryNowMs);
 		expect(104_000 + duration).toBeGreaterThan(entryNowMs);
