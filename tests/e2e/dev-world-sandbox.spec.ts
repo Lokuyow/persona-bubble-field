@@ -39,6 +39,27 @@ async function expectNoConsoleProblems(page: Page, action: () => Promise<void>):
 	expect(problems).toEqual([]);
 }
 
+function profileTrigger(page: Page, name: string) {
+	return page.getByRole('button', { name: `${name} のプロフィールを開く` });
+}
+
+function profileDialog(page: Page) {
+	return page.getByRole('dialog');
+}
+
+async function expectProfile(page: Page, character: { name: string; picture: string; about: string }): Promise<void> {
+	const dialog = profileDialog(page);
+	await expect(dialog).toBeVisible();
+	await expect(dialog.locator('[data-dialog-title]')).toHaveText(character.name);
+	await expect(dialog.locator('.profile-dialog-avatar img')).toHaveAttribute('src', new RegExp(`characters/${character.picture}$`));
+	await expect(dialog.locator('.profile-dialog-about')).toHaveText(character.about);
+}
+
+async function openProfile(page: Page, name: string): Promise<void> {
+	await profileTrigger(page, name).click();
+	await expect(profileDialog(page)).toBeVisible();
+}
+
 test.describe('DEV World Sandbox', () => {
 	test('starts with the local-only self and deterministic character presentation', async ({ page }) => {
 		await openDevWorld(page);
@@ -82,6 +103,92 @@ test.describe('DEV World Sandbox', () => {
 
 		await page.getByRole('button', { name: 'Reset sandbox' }).click();
 		await expect(self).toHaveAttribute('data-position', '7,3');
+	});
+
+	test('opens a profile by pointer, restores it through history, and resumes movement after Back', async ({ page }) => {
+		await openDevWorld(page);
+
+		const self = page.locator('.participant').first();
+		await openProfile(page, '女の子');
+		await expectProfile(page, {
+			name: '女の子',
+			picture: '001.webp',
+			about: '知らない場所でも、わりと平気そう。'
+		});
+
+		await page.keyboard.press('ArrowRight');
+		await expect(self).toHaveAttribute('data-position', '7,3');
+
+		await page.goBack();
+		await expect(profileDialog(page)).toBeHidden();
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+
+		await page.goForward();
+		await expectProfile(page, {
+			name: '女の子',
+			picture: '001.webp',
+			about: '知らない場所でも、わりと平気そう。'
+		});
+
+		await page.goBack();
+		await expect(profileDialog(page)).toBeHidden();
+		await page.keyboard.press('ArrowRight');
+		await expect(self).toHaveAttribute('data-position', '8,3');
+	});
+
+	test('opens a profile by keyboard', async ({ page }) => {
+		await openDevWorld(page);
+
+		await profileTrigger(page, '女の子').focus();
+		await page.keyboard.press('Enter');
+		await expect(profileDialog(page)).toBeVisible();
+	});
+
+	for (const closePath of ['close button', 'Escape', 'outside interaction'] as const) {
+		test(`keeps profile history aligned after ${closePath}`, async ({ page }) => {
+			await openDevWorld(page);
+			await openProfile(page, '女の子');
+
+			if (closePath === 'close button') {
+				await profileDialog(page).getByRole('button', { name: '閉じる' }).click();
+			} else if (closePath === 'Escape') {
+				await page.keyboard.press('Escape');
+			} else {
+				await page.locator('.profile-dialog-overlay').click({ position: { x: 4, y: 4 } });
+			}
+
+			await expect(profileDialog(page)).toBeHidden();
+			await expect(profileTrigger(page, '女の子')).toBeFocused();
+			await page.goForward();
+			await expect(profileDialog(page)).toBeVisible();
+			await page.goBack();
+			await expect(profileDialog(page)).toBeHidden();
+		});
+	}
+
+	test('uses an Avatar fallback when a character image fails to load', async ({ page }) => {
+		await page.route('**/characters/001.webp', (route) => route.fulfill({ status: 404 }));
+		await openDevWorld(page);
+
+		const trigger = profileTrigger(page, '女の子');
+		await expect(trigger.locator('.avatar')).toHaveText('女');
+		await trigger.click();
+		await expect(profileDialog(page).locator('.profile-dialog-avatar')).toHaveText('女');
+	});
+
+	test('keeps a long profile usable on a mobile viewport', async ({ page }) => {
+		await page.setViewportSize({ width: 390, height: 360 });
+		await page.goto('/?devWorld=1&devCharacter=002');
+		await expect(page.getByText('DEV World Sandbox', { exact: true })).toBeVisible();
+		await openProfile(page, '全裸中年男性');
+
+		const dialog = profileDialog(page);
+		const viewport = dialog.locator('.profile-dialog-scroll-viewport');
+		await expect(viewport).toBeVisible();
+		expect(await viewport.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+		await viewport.evaluate((element) => element.scrollTo({ top: element.scrollHeight }));
+		await expect(dialog.getByRole('button', { name: '閉じる' })).toBeVisible();
+		expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 	});
 
 	test.describe('responsive field presentation', () => {

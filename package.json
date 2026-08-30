@@ -31,14 +31,15 @@
 		"fake-indexeddb": "6.2.5",
 		"mock-socket": "9.3.1",
 		"patch-package": "8.0.1",
+		"sharp": "^0.35.4",
 		"svelte": "^5.56.1",
 		"svelte-check": "^4.6.0",
-		"sharp": "^0.35.4",
 		"typescript": "^6.0.3",
 		"vite": "^8.0.16",
 		"vitest": "^4.1.11"
 	},
 	"dependencies": {
+		"bits-ui": "^2.19.0",
 		"idb": "^8.0.3",
 		"nostr-tools": "^2.25.0",
 		"rx-nostr": "3.7.5",
