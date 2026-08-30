@@ -292,8 +292,11 @@ PR CIの基準は以下。
 - `pull_request` 時はbase SHAからhead SHAまでのPR全体に対して `git diff --check` を実行する
 - clean runner上で `npm ci` を実行する
 - 続けて `npm run validate` を実行する
+- `npm run validate` 成功後に `npx playwright install --with-deps chromium` を実行する
+- 続けて `npm run test:e2e` を実行する
 
 `npm run validate` にはVitest、Svelte / TypeScript check、GitHub Pages用production build、working treeの `git diff --check` が含まれる。
+`npm run validate` は従来どおり基礎検証であり、Playwright E2Eを含めない。
 
 CIはdeployを行わない。
 
@@ -346,6 +349,8 @@ PR merge後の不要なhead branchは削除する。GitHubの自動branch削除�
 2. `npm run check`
 3. `npm run build:pages`
 4. `git diff --check`
+
+ブラウザの挙動に関係する変更では、上記に加えて適切なPlaywright E2Eを実行する。人間向けの通常経路は `npm run test:e2e`、coding agent向けの低出力経路は `npm run test:e2e:agent` とする。ローカルのChromium binaryが未installの場合は `npx playwright install chromium` を実行する。E2Eは実Relay、外部network、実account、secretへ依存せず、開発用のDEV World Sandboxを対象とする。
 
 通常のローカル検証に `npm ci` を含めない。同じworktreeで `npm run dev` または `npm run dev:host` が起動中でも、`node_modules` を削除せず `npm run validate` を実行できる構成を維持する。
 

@@ -134,6 +134,14 @@ commands.
   passed unless it was actually run and observed to pass.
 - Report relevant verification that was not run and the reason.
 
+Browser behavior changes require the appropriate Playwright E2E coverage in
+addition to unit and static checks. Use `npm run test:e2e` for the normal
+human-readable browser path; coding agents may prefer
+`npm run test:e2e:agent` for its low-output `dot` reporter. The E2E suite uses
+the local DEV World Sandbox and must not depend on real Relays, external
+network access, real accounts, or secrets. If the local Chromium binary is not
+installed, run `npx playwright install chromium`.
+
 Remove temporary logs, debugging instrumentation, test harnesses, screenshots,
 traces, and discarded experimental changes before finishing unless they are
 intentionally part of the requested deliverable.

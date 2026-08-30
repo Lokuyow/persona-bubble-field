@@ -14,6 +14,8 @@
 		"characters:images": "node scripts/convert-character-images.mjs",
 		"preview": "vite preview",
 		"test": "vitest run",
+		"test:e2e": "playwright test",
+		"test:e2e:agent": "playwright test --reporter=dot",
 		"postinstall": "patch-package --error-on-fail",
 		"prepare": "svelte-kit sync || echo ''",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
@@ -22,6 +24,7 @@
 		"deploy": "gh workflow run deploy-pages.yml --ref main"
 	},
 	"devDependencies": {
+		"@playwright/test": "^1.62.1",
 		"@sveltejs/adapter-static": "^3.0.10",
 		"@sveltejs/kit": "^2.63.0",
 		"@sveltejs/vite-plugin-svelte": "^7.1.2",
