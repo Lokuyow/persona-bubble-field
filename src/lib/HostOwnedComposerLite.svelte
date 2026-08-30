@@ -16,6 +16,8 @@
 		configureHostOwned(options: Readonly<{
 			keyboardButtonBarEnabled?: boolean;
 			enterKeyBehavior?: 'newline' | 'submit';
+			editorMinLines?: number;
+			editorMaxLines?: number;
 			submit: (
 				output: HostOwnedComposerOutput,
 				options: Readonly<{ signal: AbortSignal }>
@@ -46,6 +48,8 @@
 				composer.configureHostOwned({
 					keyboardButtonBarEnabled: false,
 					enterKeyBehavior: 'submit',
+					editorMinLines: 1,
+					editorMaxLines: 3,
 					submit: async (output, { signal }) => {
 						if (signal.aborted) throw new DOMException('Submission was cancelled.', 'AbortError');
 						// This integration intentionally ignores composer-owned tags and context.
