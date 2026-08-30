@@ -11,8 +11,14 @@
 		context: unknown;
 	}>;
 
+	type HostOwnedPreferredHeightChangeEvent = Event & {
+		detail?: Readonly<{ height?: unknown }>;
+	};
+
 	type HostOwnedComposerElement = HTMLElement & {
 		assetBase: string | null;
+		preferredHeight: number | null;
+		whenReady(): Promise<void>;
 		configureHostOwned(options: Readonly<{
 			keyboardButtonBarEnabled?: boolean;
 			enterKeyBehavior?: 'newline' | 'submit';
@@ -27,15 +33,22 @@
 
 	type Props = {
 		submitContent: (content: string) => Promise<Readonly<{ eventId: string }>>;
+		onPreferredHeightChange?: (height: number) => void;
 	};
 
-	let { submitContent }: Props = $props();
+	let { submitContent, onPreferredHeightChange }: Props = $props();
 	let host: HTMLDivElement;
 	let loadFailed = $state(false);
 
 	onMount(() => {
 		let disposed = false;
 		let composer: HostOwnedComposerElement | null = null;
+		const handlePreferredHeightChange = (event: Event) => {
+			const height = (event as HostOwnedPreferredHeightChangeEvent).detail?.height;
+			if (typeof height === 'number' && Number.isFinite(height) && height > 0) {
+				onPreferredHeightChange?.(height);
+			}
+		};
 
 		void (async () => {
 			try {
@@ -45,6 +58,7 @@
 
 				composer = document.createElement(HOST_OWNED_TAG_NAME) as HostOwnedComposerElement;
 				composer.assetBase = HOST_OWNED_ASSET_BASE;
+				composer.addEventListener('ehagaki-preferred-height-change', handlePreferredHeightChange);
 				composer.configureHostOwned({
 					keyboardButtonBarEnabled: false,
 					enterKeyBehavior: 'submit',
@@ -57,6 +71,13 @@
 					}
 				});
 				host.append(composer);
+				await composer.whenReady();
+				if (!disposed) {
+					const height = composer.preferredHeight;
+					if (typeof height === 'number' && Number.isFinite(height) && height > 0) {
+						onPreferredHeightChange?.(height);
+					}
+				}
 			} catch {
 				if (!disposed) loadFailed = true;
 			}
@@ -64,6 +85,7 @@
 
 		return () => {
 			disposed = true;
+			composer?.removeEventListener('ehagaki-preferred-height-change', handlePreferredHeightChange);
 			composer?.remove();
 		};
 	});

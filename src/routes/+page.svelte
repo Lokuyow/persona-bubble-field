@@ -86,6 +86,7 @@
 	let selfAccount: AccountSnapshot | null = null;
 	let selfPositionWriteState: SelfPositionWriteState = { kind: 'unavailable' };
 	let selfMessageAvailability: SelfMessageAvailability = { kind: 'unavailable' };
+	let composerPreferredHeight: number | null = null;
 	let worldSession: ReturnType<typeof createWorldReadSession> | null = null;
 	let devWorldSandboxEnabled = false;
 	let selectedCharacterId = '001';
@@ -450,6 +451,10 @@
 		throw new Error('Message was not confirmed by Relay.');
 	}
 
+	function setComposerPreferredHeight(height: number): void {
+		composerPreferredHeight = height;
+	}
+
 	function retryWorldEntry(): void {
 		if (devWorldSandboxEnabled || selfPositionWriteState.kind !== 'retryable') return;
 		void worldSession?.enterSelf();
@@ -553,7 +558,12 @@
 	/>
 </svelte:head>
 
-<main class="app-shell" class:composer-available={!devWorldSandboxEnabled && selfMessageAvailability.kind === 'ready'}>
+<main
+	class="app-shell"
+	class:composer-available={!devWorldSandboxEnabled && selfMessageAvailability.kind === 'ready'}
+	class:composer-preferred-height={composerPreferredHeight !== null}
+	style={composerPreferredHeight === null ? undefined : `--composer-preferred-height: ${composerPreferredHeight}px`}
+>
 	<div class="topbar">
 		<div class="brand-lockup">
 			<span class="brand-mark" aria-hidden="true">✳</span>
@@ -699,7 +709,10 @@
 
 	{#if !devWorldSandboxEnabled && selfMessageAvailability.kind === 'ready'}
 		<div class="composer-dock" aria-label="Message composer">
-			<HostOwnedComposerLite submitContent={submitComposerContent} />
+			<HostOwnedComposerLite
+				submitContent={submitComposerContent}
+				onPreferredHeightChange={setComposerPreferredHeight}
+			/>
 		</div>
 	{/if}
 
@@ -728,6 +741,8 @@
 	}
 
 	.app-shell {
+		--composer-dock-padding-block: 8px;
+		--composer-dock-border-width: 1px;
 		--composer-dock-height: clamp(132px, 20svh, 160px);
 		position: relative;
 		display: flex;
@@ -837,13 +852,24 @@
 		min-height: 0;
 	}
 
+	.composer-available.composer-preferred-height {
+		--composer-dock-height: calc(
+			var(--composer-preferred-height)
+			+ var(--composer-dock-padding-block)
+			+ var(--composer-dock-padding-block)
+			+ var(--composer-dock-border-width)
+			+ env(safe-area-inset-bottom)
+		);
+	}
+
 	.composer-dock {
 		z-index: 12;
 		width: 100%;
 		height: var(--composer-dock-height);
 		flex: 0 0 var(--composer-dock-height);
-		padding: 8px 16px calc(8px + env(safe-area-inset-bottom));
-		border-top: 1px solid rgba(57, 67, 64, 0.14);
+		padding: var(--composer-dock-padding-block) 16px
+			calc(var(--composer-dock-padding-block) + env(safe-area-inset-bottom));
+		border-top: var(--composer-dock-border-width) solid rgba(57, 67, 64, 0.14);
 		background: rgba(245, 241, 233, 0.98);
 	}
 
