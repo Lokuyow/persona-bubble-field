@@ -262,7 +262,7 @@ test.describe('DEV World Sandbox', () => {
 
 	test('renders all eight participant colors as matching normal bubbles and tails', async ({ page }) => {
 		await page.goto('/?devWorld=1&devSpeech=1');
-		await expect(page.getByText('DEV World Sandbox', { exact: true })).toBeVisible();
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 		await expect(page.locator('.participant')).toHaveCount(8);
 		await expect(page.locator('.bubble-normal')).toHaveCount(8);
 
