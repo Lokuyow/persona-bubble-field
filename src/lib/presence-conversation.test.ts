@@ -29,7 +29,7 @@ describe('presence and conversation boundary', () => {
 	const projectionOptions = {
 		cellSize: MOBILE_CELL_SIZE,
 		fieldAreaBounds: { x: 0, y: 260, width: 328, height: 100 },
-		fieldWorldSize: { width: 1280, height: 640 }
+		fieldWorldSize: { width: 960, height: 480 }
 	};
 	it('dismisses a normal bubble when presence times out', () => {
 		let presence = createPresenceState({ columns: 2, rows: 2 }, 0, [{ id: 'alice', position: { x: 0, y: 0 } }]);

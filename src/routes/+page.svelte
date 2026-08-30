@@ -938,11 +938,11 @@
 
 	function mergedBubbleStyle(memberCount: number): string {
 		const level = Math.min(Math.max(memberCount, 2), 4) - 2;
-		const minWidth = 230 + level * 18;
-		const minHeight = 62 + level * 4;
-		const paddingY = 13 + level;
-		const paddingX = 18 + level * 2;
-		const fontSize = 14 + level;
+		const minWidth = 234 + level * 18;
+		const minHeight = 64 + level * 4;
+		const paddingY = 14 + level;
+		const paddingX = 20 + level * 2;
+		const fontSize = 18 + level;
 		return [
 			`--merged-bubble-min-width: ${minWidth}px`,
 			`--merged-bubble-min-height: ${minHeight}px`,
