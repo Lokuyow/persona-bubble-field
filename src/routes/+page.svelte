@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { pushState } from '$app/navigation';
 	import { page } from '$app/state';
 	import { asset, base } from '$app/paths';
@@ -15,6 +15,8 @@
 	import { replayBootstrapConversation } from '$lib/bootstrapConversation';
 	import {
 		clampToBounds,
+		fieldLocalToViewport,
+		getActualFieldTop,
 		getFieldAreaBounds,
 		getFieldWorldSize,
 		getResponsiveCellSize,
@@ -23,7 +25,8 @@
 		placeBubbles,
 		type Direction,
 		type Size,
-		type WorldPoint
+		type WorldPoint,
+		worldToScreen
 	} from '$lib/geometry';
 	import {
 		DEV_WORLD_SELF_ID,
@@ -47,7 +50,7 @@
 		type PreparedCharacterProfilePublication
 	} from '$lib/initialProfilePublication';
 	import { projectPresence } from '$lib/presenceProjection';
-import { createPresenceState, type PresenceState } from '$lib/presence';
+	import { createPresenceState, type PresenceState } from '$lib/presence';
 	import type { ParsedWorldMessage } from '$lib/nostrProtocol';
 	import HostOwnedComposerLite from '$lib/HostOwnedComposerLite.svelte';
 	import {
@@ -71,6 +74,7 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 		normal: { width: 184, height: 54 },
 		merged: { width: 218, height: 58 }
 	} satisfies Record<'normal' | 'merged', Size>;
+	const MOVEMENT_ANIMATION_DURATION_MS = 400;
 
 	type AvatarColor = 'coral' | 'lavender' | 'mint' | 'yellow' | 'sky' | 'peach' | 'rose' | 'blue';
 	type Participant = {
@@ -105,6 +109,22 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 	let entryRetryable = false;
 	let selectedCharacterId = '001';
 	let lastProfileTrigger: HTMLButtonElement | null = null;
+	let composerEditorIsEmpty: boolean | null = null;
+	let visualWorldById: Record<string, WorldPoint> = {};
+	let visualCamera: WorldPoint | null = null;
+	let visualMotion: VisualMotion | null = null;
+	let visualAnimationFrame: number | null = null;
+	let visualProjectionInitialized = false;
+	let prefersReducedMotion = false;
+	let stopKeyboardHold = () => {};
+
+	type VisualParticipantTransition = Readonly<{ from: WorldPoint; to: WorldPoint }>;
+	type VisualMotion = Readonly<{
+		startedAt: number;
+		fromCamera: WorldPoint;
+		toCamera: WorldPoint;
+		participants: ReadonlyMap<string, VisualParticipantTransition>;
+	}>;
 
 	$: cellSize = getResponsiveCellSize(viewportSize.width);
 	$: field = { ...FIELD, cellSize };
@@ -121,8 +141,8 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 	$: isWorldSelfActive = Boolean(selfAccount && presenceState.participants.some((participant) =>
 		participant.id === selfAccount?.pubkey && participant.status === 'active'
 	));
-	$: camera = presenceProjection.camera;
-	$: actualFieldTop = presenceProjection.actualFieldTop;
+	$: camera = visualCamera ?? presenceProjection.camera;
+	$: actualFieldTop = getActualFieldTop(fieldAreaBounds, camera);
 	$: speechAreaVisualBounds = {
 		x: 0,
 		y: 0,
@@ -136,11 +156,20 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 		height: Math.max(0, actualFieldTop - SPEECH_AREA.top)
 	};
 
-	$: participantViews = presenceProjection.participants;
+	$: participantViews = presenceProjection.participants.map((participant) => {
+		const world = visualWorldById[participant.id] ?? participant.world;
+		return {
+			...participant,
+			world,
+			screen: fieldLocalToViewport(worldToScreen(world, camera), fieldAreaBounds)
+		};
+	});
 
 	$: participantById = new Map(participantViews.map((participant) => [participant.id, participant]));
 
-	$: visibleParticipantIds = presenceProjection.visibleParticipantIds;
+	$: visibleParticipantIds = new Set(
+		participantViews.filter((participant) => isInsideFieldArea(participant.screen)).map((participant) => participant.id)
+	);
 	$: visibleParticipantKey = [...visibleParticipantIds].sort().join('|');
 	$: syncVisibility(visibleParticipantKey, visibleParticipantIds);
 
@@ -151,7 +180,7 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 			const size = bubbleSizes[bubble.id] ?? DEFAULT_BUBBLE_SIZES.normal;
 			const preferred = normalBubblePreferredAnchor(
 				speaker.screen.x,
-				speaker.position.y,
+				speaker.world.y / cellSize - 0.5,
 				field.rows,
 				size,
 				bubbleSafeBounds
@@ -190,7 +219,7 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 			}
 
 			const preferred = mergedBubblePreferredAnchor(
-				visibleMembers.map((member) => ({ x: member.screen.x, y: member.position.y })),
+				visibleMembers.map((member) => ({ x: member.screen.x, y: member.world.y / cellSize - 0.5 })),
 				field.rows,
 				size,
 				bubbleSafeBounds
@@ -226,11 +255,138 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 		anchor: bubble.members.length === 0 ? bubble.anchor : placedAnchorById.get(bubble.id) ?? bubble.anchor
 	}));
 	$: positionedVisibleBubbles = [...positionedNormalBubbles, ...positionedMergedBubbles];
+	$: movingParticipantIds = visualMotion ? new Set(visualMotion.participants.keys()) : new Set<string>();
+
+	function lerp(first: number, second: number, progress: number): number {
+		return first + (second - first) * progress;
+	}
+
+	function lerpPoint(first: WorldPoint, second: WorldPoint, progress: number): WorldPoint {
+		return { x: lerp(first.x, second.x, progress), y: lerp(first.y, second.y, progress) };
+	}
+
+	function easeOut(progress: number): number {
+		return 1 - Math.pow(1 - progress, 3);
+	}
+
+	function cancelVisualAnimation(): void {
+		if (visualAnimationFrame !== null) {
+			cancelAnimationFrame(visualAnimationFrame);
+			visualAnimationFrame = null;
+		}
+		visualMotion = null;
+	}
+
+	function sampleVisualAnimation(now = performance.now()): void {
+		if (!visualMotion) return;
+		const progress = Math.min(1, Math.max(0, (now - visualMotion.startedAt) / MOVEMENT_ANIMATION_DURATION_MS));
+		const eased = easeOut(progress);
+		const nextWorldById: Record<string, WorldPoint> = {};
+		for (const [id, transition] of visualMotion.participants) {
+			nextWorldById[id] = lerpPoint(transition.from, transition.to, eased);
+		}
+		visualWorldById = nextWorldById;
+		visualCamera = lerpPoint(visualMotion.fromCamera, visualMotion.toCamera, eased);
+
+		if (progress >= 1) {
+			visualMotion = null;
+			if (visualAnimationFrame !== null) {
+				cancelAnimationFrame(visualAnimationFrame);
+				visualAnimationFrame = null;
+			}
+			visualWorldById = Object.fromEntries(presenceProjection.participants.map((participant) => [participant.id, participant.world]));
+			visualCamera = presenceProjection.camera;
+		}
+	}
+
+	function scheduleVisualAnimation(): void {
+		if (!visualMotion || visualAnimationFrame !== null) return;
+		visualAnimationFrame = requestAnimationFrame(() => {
+			visualAnimationFrame = null;
+			sampleVisualAnimation();
+			scheduleVisualAnimation();
+		});
+	}
+
+	function syncVisualToCanonical(): void {
+		cancelVisualAnimation();
+		visualWorldById = Object.fromEntries(presenceProjection.participants.map((participant) => [participant.id, participant.world]));
+		visualCamera = presenceProjection.camera;
+		visualProjectionInitialized = true;
+	}
+
+	function animatePresenceTransition(previous: ReturnType<typeof getPresenceProjection>, next: ReturnType<typeof getPresenceProjection>): void {
+		const logicalParticipantsChanged = previous.participants.length !== next.participants.length || previous.participants.some((participant, index) => {
+			const nextParticipant = next.participants[index];
+			return !nextParticipant ||
+				participant.id !== nextParticipant.id ||
+				participant.position.x !== nextParticipant.position.x ||
+				participant.position.y !== nextParticipant.position.y;
+		});
+		if (!logicalParticipantsChanged) return;
+
+		if (!visualProjectionInitialized) {
+			visualWorldById = Object.fromEntries(next.participants.map((participant) => [participant.id, participant.world]));
+			visualCamera = next.camera;
+			visualProjectionInitialized = true;
+			return;
+		}
+
+		const now = performance.now();
+		const hadActiveVisualMotion = visualMotion !== null;
+		sampleVisualAnimation(now);
+		const currentVisualWorldById = visualWorldById;
+		const currentVisualCamera = visualCamera ?? previous.camera;
+		const previousById = new Map(previous.participants.map((participant) => [participant.id, participant]));
+		const transitions = new Map<string, VisualParticipantTransition>();
+		for (const participant of next.participants) {
+			const previousParticipant = previousById.get(participant.id);
+			const currentWorld = currentVisualWorldById[participant.id] ?? previousParticipant?.world ?? participant.world;
+			transitions.set(participant.id, currentWorld.x !== participant.world.x || currentWorld.y !== participant.world.y
+				? { from: currentWorld, to: participant.world }
+				: { from: participant.world, to: participant.world });
+		}
+
+		const movedIds = new Map([...transitions].filter(([, transition]) =>
+			transition.from.x !== transition.to.x || transition.from.y !== transition.to.y
+		));
+		const previousSelf = previousById.get(selfProjectionId);
+		const nextSelf = next.participants.find((participant) => participant.id === selfProjectionId);
+		const selfMoved = Boolean(previousSelf && nextSelf && (
+			previousSelf.position.x !== nextSelf.position.x || previousSelf.position.y !== nextSelf.position.y
+		));
+		const cameraCanAnimate = hadActiveVisualMotion || selfMoved;
+		const cameraMoved = cameraCanAnimate && (currentVisualCamera.x !== next.camera.x || currentVisualCamera.y !== next.camera.y);
+		if (prefersReducedMotion || (movedIds.size === 0 && !cameraMoved)) {
+			cancelVisualAnimation();
+			visualWorldById = Object.fromEntries(next.participants.map((participant) => [participant.id, participant.world]));
+			visualCamera = next.camera;
+			return;
+		}
+
+		visualWorldById = Object.fromEntries([...transitions].map(([id, transition]) => [id, transition.from]));
+		visualCamera = currentVisualCamera;
+		visualMotion = {
+			startedAt: now,
+			fromCamera: currentVisualCamera,
+			toCamera: next.camera,
+			participants: movedIds
+		};
+		sampleVisualAnimation(now);
+		scheduleVisualAnimation();
+	}
 
 	onMount(() => {
 		let mounted = true;
 		let startRequested = false;
 		let session: ReturnType<typeof createWorldReadSession> | null = null;
+		const reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+		prefersReducedMotion = reducedMotionQuery.matches;
+		const handleReducedMotionChange = () => {
+			prefersReducedMotion = reducedMotionQuery.matches;
+			if (prefersReducedMotion) syncVisualToCanonical();
+		};
+		reducedMotionQuery.addEventListener('change', handleReducedMotionChange);
 		devWorldSandboxEnabled = isDevWorldSandboxEnabled(import.meta.env.DEV, new URLSearchParams(window.location.search));
 		runtimeMode = devWorldSandboxEnabled ? 'dev' : 'relay';
 
@@ -320,21 +476,74 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 			const rect = viewportElement.getBoundingClientRect();
 			if (rect.width <= 0 || rect.height <= 0) return;
 			viewportSize = { width: rect.width, height: rect.height };
+			void tick().then(() => {
+				if (mounted) syncVisualToCanonical();
+			});
 			if (!devWorldSandboxEnabled) void begin();
 		};
-		const handleKeydown = (event: KeyboardEvent) => {
-			if (document.querySelector('.profile-dialog-content') || event.repeat || isEditableKeyboardEvent(event)) return;
-			const direction = directionFromKey(event.key);
-			if (!direction) return;
-			event.preventDefault();
+		let heldDirection: Direction | null = null;
+		let heldSource: 'page' | 'composer-editor' | null = null;
+		let holdTimer: number | null = null;
+		const clearKeyboardHold = () => {
+			heldDirection = null;
+			heldSource = null;
+			if (holdTimer !== null) {
+				window.clearInterval(holdTimer);
+				holdTimer = null;
+			}
+		};
+		stopKeyboardHold = clearKeyboardHold;
+		const requestMovement = (direction: Direction) => {
 			if (devWorldSandboxEnabled) moveSandboxSelf(direction);
 			else moveWorldSelf(direction);
+		};
+		const startKeyboardHold = (direction: Direction, source: 'page' | 'composer-editor') => {
+			clearKeyboardHold();
+			heldDirection = direction;
+			heldSource = source;
+			requestMovement(direction);
+			holdTimer = window.setInterval(() => {
+				if (!heldDirection || (heldSource === 'composer-editor' && composerEditorIsEmpty !== true) || document.querySelector('.profile-dialog-content')) {
+					clearKeyboardHold();
+					return;
+				}
+				requestMovement(heldDirection);
+			}, 500);
+		};
+		const handleKeydown = (event: KeyboardEvent) => {
+			const direction = directionFromKey(event.key);
+			if (!direction) return;
+			if (!canUseArrowForMovement(event)) {
+				clearKeyboardHold();
+				return;
+			}
+			// Browser repeat events only suppress the browser default. Movement is
+			// driven by the explicit hold timer below, never by repeat frequency.
+			event.preventDefault();
+			if (event.repeat) return;
+			const source = isComposerEditorKeyboardEvent(event) ? 'composer-editor' : 'page';
+			startKeyboardHold(direction, source);
+		};
+		const handleKeyup = (event: KeyboardEvent) => {
+			const direction = directionFromKey(event.key);
+			if (direction && direction === heldDirection) clearKeyboardHold();
+		};
+		const handleFocusIn = (event: FocusEvent) => {
+			if (heldDirection && !isComposerEditorKeyboardEvent(event)) clearKeyboardHold();
+		};
+		const handleWindowBlur = () => clearKeyboardHold();
+		const handleVisibilityChange = () => {
+			if (document.hidden) clearKeyboardHold();
 		};
 
 		const observer = new ResizeObserver(updateViewport);
 		observer.observe(viewportElement);
 		updateViewport();
 		window.addEventListener('keydown', handleKeydown);
+		window.addEventListener('keyup', handleKeyup);
+		document.addEventListener('focusin', handleFocusIn);
+		window.addEventListener('blur', handleWindowBlur);
+		document.addEventListener('visibilitychange', handleVisibilityChange);
 		const expiryTimer = window.setInterval(() => {
 			const now = Date.now();
 			const nextPresence = session?.refresh(now);
@@ -349,6 +558,14 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 			cancelPendingComposerSubmission(new DOMException('Submission was cancelled.', 'AbortError'));
 			observer.disconnect();
 			window.removeEventListener('keydown', handleKeydown);
+			window.removeEventListener('keyup', handleKeyup);
+			document.removeEventListener('focusin', handleFocusIn);
+			window.removeEventListener('blur', handleWindowBlur);
+			document.removeEventListener('visibilitychange', handleVisibilityChange);
+			clearKeyboardHold();
+			if (stopKeyboardHold === clearKeyboardHold) stopKeyboardHold = () => {};
+			reducedMotionQuery.removeEventListener('change', handleReducedMotionChange);
+			cancelVisualAnimation();
 			window.clearInterval(expiryTimer);
 			session?.dispose();
 			if (worldSession === session) worldSession = null;
@@ -438,6 +655,7 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 	}
 
 	function setPresence(nextPresence: PresenceState): void {
+		const previousProjection = getPresenceProjection(presenceState);
 		const activeIds = nextPresence.participants
 			.filter((participant) => participant.status === 'active')
 			.map((participant) => participant.id)
@@ -459,6 +677,8 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 		}
 		colorByPubkey = nextColors;
 		presenceState = nextPresence;
+		const nextProjection = getPresenceProjection(nextPresence);
+		animatePresenceTransition(previousProjection, nextProjection);
 	}
 
 	function directionFromKey(key: string): Direction | null {
@@ -469,10 +689,33 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 		return null;
 	}
 
-	function isEditableKeyboardEvent(event: KeyboardEvent): boolean {
-		return event.composedPath().some((target) => target instanceof HTMLElement && (
-			target.matches('input, textarea, select, [contenteditable], ehagaki-composer') || target.isContentEditable
+	function isComposerEditorKeyboardEvent(event: Event): boolean {
+		const path = event.composedPath();
+		return path.some((target) => target instanceof HTMLElement && target.matches('ehagaki-composer')) &&
+			path.some((target) => target instanceof HTMLElement && target.isContentEditable);
+	}
+
+	function canUseArrowForMovement(event: KeyboardEvent): boolean {
+		if (
+			event.isComposing ||
+			event.shiftKey ||
+			event.ctrlKey ||
+			event.altKey ||
+			event.metaKey ||
+			document.querySelector('.profile-dialog-content')
+		) return false;
+
+		const path = event.composedPath();
+		const isComposerEvent = path.some((target) => target instanceof HTMLElement && target.matches('ehagaki-composer'));
+		if (isComposerEvent) return isComposerEditorKeyboardEvent(event) && composerEditorIsEmpty === true;
+		return !path.some((target) => target instanceof HTMLElement && (
+			target.matches('input, textarea, select') || target.isContentEditable
 		));
+	}
+
+	function handleComposerEditorEmptyChange(isEmpty: boolean | null): void {
+		composerEditorIsEmpty = isEmpty;
+		if (isEmpty !== true) stopKeyboardHold();
 	}
 
 	function moveSandboxSelf(direction: Direction): void {
@@ -594,6 +837,7 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 	}
 
 	function handleProfileOpenChange(open: boolean): void {
+		if (open) stopKeyboardHold();
 		if (!open) history.back();
 	}
 
@@ -711,7 +955,7 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 	function tailTarget(participant: (typeof participantViews)[number]): WorldPoint {
 		return {
 			x: participant.screen.x,
-			y: fieldAreaBounds.y + participant.position.y * cellSize - camera.y - 4
+			y: fieldAreaBounds.y + participant.world.y - cellSize / 2 - camera.y - 4
 		};
 	}
 
@@ -777,6 +1021,7 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 		>
 			<div
 				class="field-scene"
+				data-camera-animation={visualMotion ? 'active' : undefined}
 				style={`--cell-size: ${cellSize}px; --avatar-size: calc(var(--cell-size) - 4px); width: ${fieldWorldSize.width}px; height: ${fieldWorldSize.height}px; transform: translate3d(${-camera.x}px, ${-camera.y}px, 0);`}
 			>
 				<div class="field-grid" aria-hidden="true"></div>
@@ -787,7 +1032,9 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 					<div
 						class="participant"
 						data-participant-id={participant.id}
+						data-self={participant.id === selfProjectionId ? 'true' : undefined}
 						data-position={`${participant.position.x},${participant.position.y}`}
+						data-movement-animation={movingParticipantIds.has(participant.id) ? 'active' : undefined}
 						style={`left: ${participant.world.x}px; top: ${participant.world.y}px;`}
 					>
 						<button
@@ -922,6 +1169,7 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 		<div class="composer-dock" aria-label="Message composer">
 			<HostOwnedComposerLite
 				submitContent={submitComposerContent}
+				onEditorEmptyChange={handleComposerEditorEmptyChange}
 				onPreferredHeightChange={setComposerPreferredHeight}
 			/>
 		</div>

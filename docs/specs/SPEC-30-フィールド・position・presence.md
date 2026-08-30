@@ -64,6 +64,16 @@ PC等ではフィールドの広い範囲を表示できる。
 - 左
 - 右
 
+PCでは修飾キーなしのArrowキー（ArrowUp / ArrowDown / ArrowLeft /
+ArrowRight）で移動できる。Composer editorにフォーカスしている場合は、
+Editorが完全にemptyのときだけ修飾キーなしのArrowキーを移動に使用する。
+non-emptyのEditor、IME composition中、または修飾キー付きのArrowキーでは、
+Editorまたはブラウザ本来のカーソル・選択・OS操作を優先する。
+
+Arrowキーは長押し中も継続して移動できる。ただしposition同期の制約により、
+移動は1秒あたり最大2回とする。成立したposition変化は短いvisual animationで
+表示するが、animationはRelayで確定する前のローカルposition確定を意味しない。
+
 斜め移動は行わない。
 
 フィールド端では停止し、反対側へループしない。

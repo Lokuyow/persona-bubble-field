@@ -15,8 +15,13 @@
 		detail?: Readonly<{ height?: unknown }>;
 	};
 
+	type HostOwnedEditorEmptyChangeEvent = Event & {
+		detail?: Readonly<{ isEmpty?: unknown }>;
+	};
+
 	type HostOwnedComposerElement = HTMLElement & {
 		assetBase: string | null;
+		editorIsEmpty: boolean | null;
 		preferredHeight: number | null;
 		whenReady(): Promise<void>;
 		configureHostOwned(options: Readonly<{
@@ -33,21 +38,27 @@
 
 	type Props = {
 		submitContent: (content: string, signal: AbortSignal) => Promise<Readonly<{ eventId: string }>>;
+		onEditorEmptyChange?: (isEmpty: boolean | null) => void;
 		onPreferredHeightChange?: (height: number) => void;
 	};
 
-	let { submitContent, onPreferredHeightChange }: Props = $props();
+	let { submitContent, onEditorEmptyChange, onPreferredHeightChange }: Props = $props();
 	let host: HTMLDivElement;
 	let loadFailed = $state(false);
 
 	onMount(() => {
 		let disposed = false;
 		let composer: HostOwnedComposerElement | null = null;
+		onEditorEmptyChange?.(null);
 		const handlePreferredHeightChange = (event: Event) => {
 			const height = (event as HostOwnedPreferredHeightChangeEvent).detail?.height;
 			if (typeof height === 'number' && Number.isFinite(height) && height > 0) {
 				onPreferredHeightChange?.(height);
 			}
+		};
+		const handleEditorEmptyChange = (event: Event) => {
+			const isEmpty = (event as HostOwnedEditorEmptyChangeEvent).detail?.isEmpty;
+			if (typeof isEmpty === 'boolean') onEditorEmptyChange?.(isEmpty);
 		};
 
 		void (async () => {
@@ -58,6 +69,7 @@
 
 				composer = document.createElement(HOST_OWNED_TAG_NAME) as HostOwnedComposerElement;
 				composer.assetBase = HOST_OWNED_ASSET_BASE;
+				composer.addEventListener('ehagaki-editor-empty-change', handleEditorEmptyChange);
 				composer.addEventListener('ehagaki-preferred-height-change', handlePreferredHeightChange);
 				composer.configureHostOwned({
 					keyboardButtonBarEnabled: false,
@@ -73,6 +85,7 @@
 				host.append(composer);
 				await composer.whenReady();
 				if (!disposed) {
+					onEditorEmptyChange?.(composer.editorIsEmpty);
 					const height = composer.preferredHeight;
 					if (typeof height === 'number' && Number.isFinite(height) && height > 0) {
 						onPreferredHeightChange?.(height);
@@ -85,6 +98,8 @@
 
 		return () => {
 			disposed = true;
+			onEditorEmptyChange?.(null);
+			composer?.removeEventListener('ehagaki-editor-empty-change', handleEditorEmptyChange);
 			composer?.removeEventListener('ehagaki-preferred-height-change', handlePreferredHeightChange);
 			composer?.remove();
 		};
