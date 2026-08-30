@@ -88,6 +88,7 @@ async function installHostOwnedStub(page: Page): Promise<{ requests: () => numbe
       finally { this.activeController = null; }
     });
     this.shadowRoot.append(textarea, button);
+    window.__ehagakiSetPreferredHeight = (height) => this.dispatchEvent(new CustomEvent('ehagaki-preferred-height-change', { bubbles: true, composed: true, detail: { height } }));
     if (window.__ehagakiDeferComposerEmptyState) {
       window.__ehagakiResolveComposerEmptyState = updateEditorEmpty;
     } else {
@@ -99,6 +100,53 @@ customElements.define('ehagaki-composer', EhagakiComposer);`
 		});
 	});
 	return { requests: () => requests };
+}
+
+async function installVirtualKeyboardStub(page: Page): Promise<void> {
+	await page.addInitScript(() => {
+		const listeners = new Set<(event: Event) => void>();
+		let overlaysContent = false;
+		let boundingRect = {
+			left: 0,
+			top: window.innerHeight,
+			right: window.innerWidth,
+			bottom: window.innerHeight,
+			width: window.innerWidth,
+			height: 0
+		};
+		Object.defineProperty(navigator, 'virtualKeyboard', {
+			configurable: true,
+			value: {
+				get overlaysContent() { return overlaysContent; },
+				set overlaysContent(value: boolean) {
+					overlaysContent = value;
+				},
+				get boundingRect() { return boundingRect; },
+				addEventListener(type: string, listener: (event: Event) => void) {
+					if (type === 'geometrychange') listeners.add(listener);
+				},
+				removeEventListener(type: string, listener: (event: Event) => void) {
+					if (type === 'geometrychange') listeners.delete(listener);
+				}
+			}
+		});
+		Object.assign(window, {
+			__virtualKeyboardTest: {
+				setBottomInset(inset: number) {
+					boundingRect = {
+						left: 0,
+						top: window.innerHeight - inset,
+						right: window.innerWidth,
+						bottom: window.innerHeight,
+						width: window.innerWidth,
+						height: inset
+					};
+					for (const listener of listeners) listener(new Event('geometrychange'));
+				},
+				state: () => ({ overlaysContent })
+			}
+		});
+	});
 }
 
 async function installDelayedRelay(page: Page): Promise<void> {
@@ -246,6 +294,82 @@ async function chooseHorizontalMove(page: Page): Promise<{ key: 'ArrowLeft' | 'A
 }
 
 test.describe('Relay startup', () => {
+	test('keeps Field geometry reserved while only the fixed Composer follows VirtualKeyboard geometry', async ({ page }) => {
+		await page.setViewportSize({ width: 390, height: 844 });
+		await installVirtualKeyboardStub(page);
+		await openReadyRelayWorld(page);
+		await expect.poll(() => page.evaluate(() => (window as typeof window & {
+			__virtualKeyboardTest: { state(): { overlaysContent: boolean } };
+		}).__virtualKeyboardTest.state().overlaysContent)).toBe(true);
+
+		const before = await page.evaluate(() => {
+			const dock = document.querySelector<HTMLElement>('.composer-dock')!;
+			const field = document.querySelector<HTMLElement>('.field-viewport')!;
+			const self = document.querySelector<HTMLElement>('.participant[data-self="true"]')!;
+			return {
+				dock: dock.getBoundingClientRect().toJSON(),
+				field: field.getBoundingClientRect().toJSON(),
+				participant: self.getBoundingClientRect().toJSON(),
+				cameraTransform: getComputedStyle(document.querySelector<HTMLElement>('.field-scene')!).transform,
+				position: getComputedStyle(dock).position,
+				viewportHeight: window.innerHeight
+			};
+		});
+		expect(before.position).toBe('fixed');
+		expect(before.dock.bottom).toBeCloseTo(before.viewportHeight, 1);
+		expect(before.field.height + before.dock.height).toBeCloseTo(before.viewportHeight, 1);
+
+		await page.evaluate(() => (window as typeof window & {
+			__virtualKeyboardTest: { setBottomInset(inset: number): void };
+		}).__virtualKeyboardTest.setBottomInset(300));
+		await expect.poll(() => page.evaluate(() => getComputedStyle(document.querySelector('.app-shell')!)
+			.getPropertyValue('--composer-keyboard-inset').trim())).toBe('300px');
+
+		const keyboardOpen = await page.evaluate(() => {
+			const dock = document.querySelector<HTMLElement>('.composer-dock')!;
+			const field = document.querySelector<HTMLElement>('.field-viewport')!;
+			const self = document.querySelector<HTMLElement>('.participant[data-self="true"]')!;
+			return {
+				dock: dock.getBoundingClientRect().toJSON(),
+				field: field.getBoundingClientRect().toJSON(),
+				participant: self.getBoundingClientRect().toJSON(),
+				cameraTransform: getComputedStyle(document.querySelector<HTMLElement>('.field-scene')!).transform
+			};
+		});
+		expect(keyboardOpen.dock.bottom).toBeCloseTo(544, 1);
+		expect(keyboardOpen.field.height).toBeCloseTo(before.field.height, 1);
+		expect(keyboardOpen.participant).toEqual(before.participant);
+		expect(keyboardOpen.cameraTransform).toBe(before.cameraTransform);
+
+		await page.evaluate(() => (window as typeof window & {
+			__virtualKeyboardTest: { setBottomInset(inset: number): void };
+		}).__virtualKeyboardTest.setBottomInset(0));
+		await expect.poll(() => page.evaluate(() => getComputedStyle(document.querySelector('.app-shell')!)
+			.getPropertyValue('--composer-keyboard-inset').trim())).toBe('0px');
+		await expect(page.locator('.composer-dock')).toHaveCSS('bottom', '0px');
+
+	});
+
+	test('keeps the Field reservation synchronized with Host-owned preferred height', async ({ page }) => {
+		await openReadyRelayWorld(page);
+		const before = await page.evaluate(() => ({
+			dock: document.querySelector('.composer-dock')!.getBoundingClientRect().toJSON(),
+			field: document.querySelector('.field-viewport')!.getBoundingClientRect().toJSON(),
+			viewportHeight: window.innerHeight
+		}));
+		await page.evaluate(() => (window as typeof window & {
+			__ehagakiSetPreferredHeight(height: number): void;
+		}).__ehagakiSetPreferredHeight(200));
+		await expect.poll(() => page.evaluate(() => document.querySelector('.composer-dock')!.getBoundingClientRect().height)).toBeGreaterThan(before.dock.height);
+		const after = await page.evaluate(() => ({
+			dock: document.querySelector('.composer-dock')!.getBoundingClientRect().toJSON(),
+			field: document.querySelector('.field-viewport')!.getBoundingClientRect().toJSON(),
+			viewportHeight: window.innerHeight
+		}));
+		expect(after.field.height).toBeLessThan(before.field.height);
+		expect(after.field.height + after.dock.height).toBeCloseTo(after.viewportHeight, 1);
+	});
+
 	test('decouples Composer from metadata and participant projection from final primary EOSE', async ({ page }) => {
 		const hostOwned = await installHostOwnedStub(page);
 		await installDelayedRelay(page);

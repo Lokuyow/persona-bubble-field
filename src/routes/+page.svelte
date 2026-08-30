@@ -52,6 +52,7 @@
 	} from '$lib/initialProfilePublication';
 	import { projectPresence } from '$lib/presenceProjection';
 	import { createPresenceState, getActiveOccupancy, getParticipant, type PresenceState } from '$lib/presence';
+	import { getVirtualKeyboardBottomInset, getVisualViewportKeyboardInset, type ViewportRect } from '$lib/keyboardInset';
 	import type { ParsedWorldMessage } from '$lib/nostrProtocol';
 	import HostOwnedComposerLite from '$lib/HostOwnedComposerLite.svelte';
 	import {
@@ -99,6 +100,7 @@
 	let selfPositionWriteState: SelfPositionWriteState = { kind: 'unavailable' };
 	let selfMessageAvailability: SelfMessageAvailability = { kind: 'unavailable' };
 	let composerPreferredHeight: number | null = null;
+	let composerKeyboardInset = 0;
 	let worldSession: ReturnType<typeof createWorldReadSession> | null = null;
 	let runtimeMode: 'unresolved' | 'relay' | 'dev' = 'unresolved';
 	let devWorldSandboxEnabled = false;
@@ -536,7 +538,7 @@
 			const direction = directionFromKey(event.key);
 			if (direction && direction === heldDirection) clearKeyboardHold();
 		};
-		const handleFocusIn = (event: FocusEvent) => {
+		const handleMovementFocusIn = (event: FocusEvent) => {
 			if (heldDirection && !isComposerEditorKeyboardEvent(event)) clearKeyboardHold();
 		};
 		const handleWindowBlur = () => clearKeyboardHold();
@@ -545,11 +547,59 @@
 		};
 
 		const observer = new ResizeObserver(updateViewport);
+		const virtualKeyboard = (navigator as Navigator & { virtualKeyboard?: VirtualKeyboardLike }).virtualKeyboard;
+		const visualViewport = window.visualViewport;
+		let composerFocused = false;
+		let changedVirtualKeyboardOverlaysContent = false;
+		let previousVirtualKeyboardOverlaysContent: boolean | null = null;
+		const updateComposerKeyboardInset = () => {
+			if (virtualKeyboard) {
+				composerKeyboardInset = getVirtualKeyboardBottomInset(layoutViewportRect(), virtualKeyboard.boundingRect);
+				return;
+			}
+			if (!visualViewport) {
+				composerKeyboardInset = 0;
+				return;
+			}
+			composerKeyboardInset = getVisualViewportKeyboardInset({
+				layoutViewportHeight: window.innerHeight,
+				visualViewportHeight: visualViewport.height,
+				visualViewportOffsetTop: visualViewport.offsetTop,
+				visualViewportScale: visualViewport.scale,
+				composerFocused
+			});
+		};
+		const handleComposerFocusIn = (event: FocusEvent) => {
+			if (!isComposerEditorFocusEvent(event)) return;
+			composerFocused = true;
+			updateComposerKeyboardInset();
+		};
+		const handleComposerFocusOut = () => {
+			queueMicrotask(() => {
+				composerFocused = document.activeElement instanceof HTMLElement && document.activeElement.matches('ehagaki-composer');
+				updateComposerKeyboardInset();
+			});
+		};
+		if (runtimeMode === 'relay' && virtualKeyboard) {
+			const previousOverlaysContent = virtualKeyboard.overlaysContent;
+			previousVirtualKeyboardOverlaysContent = previousOverlaysContent;
+			if (!previousOverlaysContent) {
+				virtualKeyboard.overlaysContent = true;
+				changedVirtualKeyboardOverlaysContent = true;
+			}
+			virtualKeyboard.addEventListener('geometrychange', updateComposerKeyboardInset);
+		}
 		observer.observe(viewportElement);
 		updateViewport();
+		updateComposerKeyboardInset();
 		window.addEventListener('keydown', handleKeydown);
 		window.addEventListener('keyup', handleKeyup);
-		document.addEventListener('focusin', handleFocusIn);
+		document.addEventListener('focusin', handleMovementFocusIn);
+		document.addEventListener('focusin', handleComposerFocusIn);
+		document.addEventListener('focusout', handleComposerFocusOut);
+		visualViewport?.addEventListener('resize', updateComposerKeyboardInset);
+		visualViewport?.addEventListener('scroll', updateComposerKeyboardInset);
+		window.addEventListener('resize', updateComposerKeyboardInset);
 		window.addEventListener('blur', handleWindowBlur);
 		document.addEventListener('visibilitychange', handleVisibilityChange);
 		const expiryTimer = window.setInterval(() => {
@@ -565,9 +615,19 @@
 			mounted = false;
 			cancelPendingComposerSubmission(new DOMException('Submission was cancelled.', 'AbortError'));
 			observer.disconnect();
+			virtualKeyboard?.removeEventListener('geometrychange', updateComposerKeyboardInset);
+			if (changedVirtualKeyboardOverlaysContent && virtualKeyboard && previousVirtualKeyboardOverlaysContent !== null) {
+				virtualKeyboard.overlaysContent = previousVirtualKeyboardOverlaysContent;
+			}
+			composerKeyboardInset = 0;
 			window.removeEventListener('keydown', handleKeydown);
 			window.removeEventListener('keyup', handleKeyup);
-			document.removeEventListener('focusin', handleFocusIn);
+			document.removeEventListener('focusin', handleMovementFocusIn);
+			document.removeEventListener('focusin', handleComposerFocusIn);
+			document.removeEventListener('focusout', handleComposerFocusOut);
+			visualViewport?.removeEventListener('resize', updateComposerKeyboardInset);
+			visualViewport?.removeEventListener('scroll', updateComposerKeyboardInset);
+			window.removeEventListener('resize', updateComposerKeyboardInset);
 			window.removeEventListener('blur', handleWindowBlur);
 			document.removeEventListener('visibilitychange', handleVisibilityChange);
 			clearKeyboardHold();
@@ -709,6 +769,32 @@
 		const path = event.composedPath();
 		return path.some((target) => target instanceof HTMLElement && target.matches('ehagaki-composer')) &&
 			path.some((target) => target instanceof HTMLElement && target.isContentEditable);
+	}
+
+	type VirtualKeyboardLike = {
+		boundingRect: DOMRectReadOnly;
+		overlaysContent: boolean;
+		addEventListener: (type: 'geometrychange', listener: EventListener) => void;
+		removeEventListener: (type: 'geometrychange', listener: EventListener) => void;
+	};
+
+	function isComposerEditorFocusEvent(event: Event): boolean {
+		const path = event.composedPath();
+		return path.some((target) => target instanceof HTMLElement && target.matches('ehagaki-composer')) &&
+			path.some((target) => target instanceof HTMLElement && (
+				target.isContentEditable || target.matches('input, textarea')
+			));
+	}
+
+	function layoutViewportRect(): ViewportRect {
+		return {
+			left: 0,
+			top: 0,
+			right: window.innerWidth,
+			bottom: window.innerHeight,
+			width: window.innerWidth,
+			height: window.innerHeight
+		};
 	}
 
 	function canUseArrowForMovement(event: KeyboardEvent): boolean {
@@ -1046,7 +1132,8 @@
 	class="app-shell"
 	class:composer-available={runtimeMode === 'relay'}
 	class:composer-preferred-height={composerPreferredHeight !== null}
-	style={composerPreferredHeight === null ? undefined : `--composer-preferred-height: ${composerPreferredHeight}px`}
+	class:composer-keyboard-visible={composerKeyboardInset > 0}
+	style={`--composer-keyboard-inset: ${composerKeyboardInset}px;${composerPreferredHeight === null ? '' : `--composer-preferred-height: ${composerPreferredHeight}px;`}`}
 >
 	<div class="topbar">
 		<div class="brand-lockup">
@@ -1340,15 +1427,26 @@
 		);
 	}
 
+	.composer-available {
+		padding-bottom: var(--composer-dock-height);
+	}
+
 	.composer-dock {
+		position: fixed;
+		bottom: var(--composer-keyboard-inset);
+		left: 0;
+		right: 0;
 		z-index: 12;
-		width: 100%;
-		height: var(--composer-dock-height);
-		flex: 0 0 var(--composer-dock-height);
+		height: var(--composer-dock-visible-height, var(--composer-dock-height));
 		padding: var(--composer-dock-padding-block) 16px
 			calc(var(--composer-dock-padding-block) + env(safe-area-inset-bottom));
 		border-top: var(--composer-dock-border-width) solid rgba(57, 67, 64, 0.14);
 		background: rgba(245, 241, 233, 0.98);
+	}
+
+	.composer-keyboard-visible .composer-dock {
+		--composer-dock-visible-height: calc(var(--composer-dock-height) - env(safe-area-inset-bottom));
+		padding-bottom: var(--composer-dock-padding-block);
 	}
 
 	.composer-dock :global(.host-owned-composer) {
