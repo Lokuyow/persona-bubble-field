@@ -1592,23 +1592,23 @@
 	}
 
 	.tone-sky {
-		--tone-background: #d9edf0;
-		--tone-outline: rgba(57, 67, 64, 0.42);
+		--tone-background: hsl(188, 43%, 96%);
+		--tone-outline: hsl(188, 99%, 46%);
 	}
 
 	.tone-violet {
-		--tone-background: #e2def5;
-		--tone-outline: rgba(57, 67, 64, 0.42);
+		--tone-background: hsl(250, 53%, 96%);
+		--tone-outline: hsl(250, 96%, 52%);
 	}
 
 	.tone-peach {
-		--tone-background: #f6dfce;
-		--tone-outline: rgba(57, 67, 64, 0.42);
+		--tone-background: hsl(28, 53%, 96%);
+		--tone-outline: hsl(28, 96%, 52%);
 	}
 
 	.tone-rose {
-		--tone-background: #f1d9df;
-		--tone-outline: rgba(57, 67, 64, 0.42);
+		--tone-background: hsl(340, 53%, 96%);
+		--tone-outline: hsl(340, 96%, 52%);
 	}
 
 	.viewport-vignette {
