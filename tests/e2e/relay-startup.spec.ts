@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { finalizeEvent } from 'nostr-tools/pure';
 import { buildPositionEventTemplate, buildWorldMessageTemplate } from '../../src/lib/nostrProtocol';
 
@@ -60,6 +60,7 @@ async function installHostOwnedStub(page: Page): Promise<{ requests: () => numbe
 		await route.fulfill({
 			contentType: 'application/javascript',
 			body: `class EhagakiComposer extends HTMLElement {
+  editorIsEmpty = null;
   constructor() { super(); this.attachShadow({ mode: 'open' }); }
   configureHostOwned(options) { this.options = options; }
   whenReady() { return Promise.resolve(); }
@@ -67,7 +68,16 @@ async function installHostOwnedStub(page: Page): Promise<{ requests: () => numbe
     if (this.shadowRoot.childElementCount) return;
     window.__ehagakiAbortActiveSubmit = () => this.activeController?.abort();
     const textarea = document.createElement('textarea');
+    textarea.setAttribute('contenteditable', 'true');
     textarea.setAttribute('aria-label', '投稿エディター');
+    const updateEditorEmpty = () => {
+      this.editorIsEmpty = textarea.value.length === 0;
+      this.dispatchEvent(new CustomEvent('ehagaki-editor-empty-change', { bubbles: true, composed: true, detail: { isEmpty: this.editorIsEmpty } }));
+    };
+    textarea.addEventListener('input', updateEditorEmpty);
+    textarea.addEventListener('keydown', (event) => {
+      if (event.key.startsWith('Arrow')) window.__ehagakiEditorArrowPrevented = event.defaultPrevented;
+    });
     const button = document.createElement('button'); button.type = 'button'; button.textContent = 'Send';
     button.addEventListener('click', async () => {
       const controller = new AbortController();
@@ -78,6 +88,11 @@ async function installHostOwnedStub(page: Page): Promise<{ requests: () => numbe
       finally { this.activeController = null; }
     });
     this.shadowRoot.append(textarea, button);
+    if (window.__ehagakiDeferComposerEmptyState) {
+      window.__ehagakiResolveComposerEmptyState = updateEditorEmpty;
+    } else {
+      updateEditorEmpty();
+    }
   }
 }
 customElements.define('ehagaki-composer', EhagakiComposer);`
@@ -198,6 +213,30 @@ function relayState(page: Page) {
 	}).__relayStartupTest);
 }
 
+async function openReadyRelayWorld(page: Page): Promise<Locator> {
+	await installHostOwnedStub(page);
+	await installDelayedRelay(page);
+	await page.goto('/');
+	await expect(page.locator('.composer-dock')).toBeVisible();
+	const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
+	await expect(editor).toBeVisible();
+	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
+	await expect.poll(async () => (await relayState(page)).state.requests.some((request) => AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) && [42, 30078].includes((request.filter.kinds as number[])[0]))).toBe(true);
+	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+	await expect(page.getByText('world live', { exact: true })).toBeVisible();
+	await expect(page.locator('.participant')).toHaveCount(2);
+	return editor;
+}
+
+async function chooseHorizontalMove(page: Page): Promise<{ key: 'ArrowLeft' | 'ArrowRight'; expected: string }> {
+	const position = await page.locator('.participant[data-self="true"]').getAttribute('data-position');
+	if (!position) throw new Error('Expected the Relay self participant position.');
+	const [x, y] = position.split(',').map(Number);
+	return x < 15
+		? { key: 'ArrowRight', expected: `${x + 1},${y}` }
+		: { key: 'ArrowLeft', expected: `${x - 1},${y}` };
+}
+
 test.describe('Relay startup', () => {
 	test('decouples Composer from metadata and participant projection from final primary EOSE', async ({ page }) => {
 		const hostOwned = await installHostOwnedStub(page);
@@ -266,6 +305,91 @@ test.describe('Relay startup', () => {
 		await expect(page.getByText('world live', { exact: true })).toBeVisible();
 		expect(new Set((await relayState(page)).state.published.filter((event) => event.kind === 42).map((event) => event.id)).size).toBe(0);
 		await expect(editor).toHaveValue('abort while waiting for metadata');
+	});
+
+	test('uses an empty Host-owned Composer editor Arrow for one movement and prevents its default', async ({ page }) => {
+		const editor = await openReadyRelayWorld(page);
+		const self = page.locator('.participant[data-self="true"]');
+		const move = await chooseHorizontalMove(page);
+		await page.evaluate(() => {
+			(window as typeof window & { __keyboardDefaulted?: boolean }).__keyboardDefaulted = false;
+			window.addEventListener('keydown', (event) => {
+				if (event.key.startsWith('Arrow')) (window as typeof window & { __keyboardDefaulted?: boolean }).__keyboardDefaulted = event.defaultPrevented;
+			});
+		});
+		await editor.focus();
+		await page.keyboard.press(move.key);
+		await expect(self).toHaveAttribute('data-position', move.expected);
+		await expect(self).toHaveAttribute('data-movement-animation', 'active');
+		await page.waitForTimeout(250);
+		await expect(self).toHaveAttribute('data-movement-animation', 'active');
+		await page.waitForTimeout(200);
+		await expect(self).not.toHaveAttribute('data-movement-animation', 'active');
+		await expect.poll(() => page.evaluate(() => (window as typeof window & { __keyboardDefaulted?: boolean }).__keyboardDefaulted)).toBe(true);
+	});
+
+	test('preserves Composer editing Arrow behavior while non-empty and re-enables movement after deletion', async ({ page }) => {
+		const editor = await openReadyRelayWorld(page);
+		const self = page.locator('.participant[data-self="true"]');
+		const before = await self.getAttribute('data-position');
+		await editor.fill('x');
+		await editor.focus();
+		await page.keyboard.press('ArrowLeft');
+		await expect(self).toHaveAttribute('data-position', before ?? '');
+		await expect.poll(() => editor.evaluate((element) => ({
+			value: (element as HTMLTextAreaElement).value,
+			selectionStart: (element as HTMLTextAreaElement).selectionStart
+		}))).toEqual({ value: 'x', selectionStart: 0 });
+
+		await editor.fill('');
+		const move = await chooseHorizontalMove(page);
+		await editor.focus();
+		await page.keyboard.press(move.key);
+		await expect(self).toHaveAttribute('data-position', move.expected);
+	});
+
+	test('fails closed for Composer empty-state null and preserves modifier Arrow behavior', async ({ page }) => {
+		await page.addInitScript(() => {
+			(window as typeof window & { __ehagakiDeferComposerEmptyState?: boolean }).__ehagakiDeferComposerEmptyState = true;
+		});
+		const editor = await openReadyRelayWorld(page);
+		const self = page.locator('.participant[data-self="true"]');
+		const before = await self.getAttribute('data-position');
+		const move = await chooseHorizontalMove(page);
+		await editor.focus();
+		await page.keyboard.press(move.key);
+		await expect(self).toHaveAttribute('data-position', before ?? '');
+
+		await page.evaluate(() => (window as typeof window & { __ehagakiResolveComposerEmptyState?: () => void }).__ehagakiResolveComposerEmptyState?.());
+		await page.keyboard.press('Shift+' + move.key);
+		await page.keyboard.press('Control+' + move.key);
+		await page.keyboard.press('Alt+' + move.key);
+		await page.keyboard.press('Meta+' + move.key);
+		await expect(self).toHaveAttribute('data-position', before ?? '');
+
+		await editor.fill('');
+		await page.keyboard.press(move.key);
+		await expect(self).toHaveAttribute('data-position', move.expected);
+	});
+
+	test('continues Composer-empty movement on a hold at the Relay movement cadence', async ({ page }) => {
+		const editor = await openReadyRelayWorld(page);
+		const self = page.locator('.participant[data-self="true"]');
+		const position = await self.getAttribute('data-position');
+		if (!position) throw new Error('Expected the Relay self participant position.');
+		const [x] = position.split(',').map(Number);
+		const key = x <= 13 ? 'ArrowRight' : 'ArrowLeft';
+		await editor.focus();
+		await page.keyboard.down(key);
+		await expect.poll(() => self.getAttribute('data-position')).not.toBe(position);
+		const afterFirstMovement = await self.getAttribute('data-position');
+		await expect.poll(() => self.getAttribute('data-position')).not.toBe(afterFirstMovement);
+		await page.keyboard.up(key);
+		const finalPosition = await self.getAttribute('data-position');
+		const [finalX] = (finalPosition ?? '').split(',').map(Number);
+		expect(Math.abs(finalX - x)).toBeGreaterThanOrEqual(2);
+		await page.waitForTimeout(650);
+		await expect(self).toHaveAttribute('data-position', finalPosition ?? '');
 	});
 
 	test('never mounts or loads the Host-owned Composer in DEV World', async ({ page }) => {

@@ -122,6 +122,7 @@ test.describe('DEV World Sandbox', () => {
 
 		const self = page.locator('.participant').first();
 		await expect(self).toHaveAttribute('data-position', '7,3');
+		await expect(self).not.toHaveAttribute('data-movement-animation', 'active');
 		await expect(self.locator('img')).toHaveAttribute('src', /characters\/001\.webp$/);
 	});
 
@@ -322,6 +323,58 @@ test.describe('DEV World Sandbox', () => {
 		await expect(self).toHaveAttribute('data-position', '7,3');
 	});
 
+	test('continues one-cell movement on an explicit keyboard hold and stops on keyup', async ({ page }) => {
+		await openDevWorld(page);
+
+		const self = page.locator('.participant').first();
+		await page.keyboard.down('ArrowRight');
+		await expect(self).toHaveAttribute('data-position', '8,3');
+		await page.waitForTimeout(1_050);
+		await page.keyboard.up('ArrowRight');
+		await expect(self).toHaveAttribute('data-position', '10,3');
+		await page.waitForTimeout(650);
+		await expect(self).toHaveAttribute('data-position', '10,3');
+	});
+
+	test('does not leave a held movement running after window blur', async ({ page }) => {
+		await openDevWorld(page);
+
+		const self = page.locator('.participant').first();
+		await page.keyboard.down('ArrowRight');
+		await expect(self).toHaveAttribute('data-position', '8,3');
+		await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+		await page.waitForTimeout(650);
+		await page.keyboard.up('ArrowRight');
+		await expect(self).toHaveAttribute('data-position', '8,3');
+	});
+
+	test('does not turn browser repeat events into direct movement requests', async ({ page }) => {
+		await openDevWorld(page);
+
+		const self = page.locator('.participant').first();
+		await page.keyboard.down('ArrowRight');
+		await expect(self).toHaveAttribute('data-position', '8,3');
+		await page.evaluate(() => {
+			for (let index = 0; index < 10; index += 1) {
+				window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', repeat: true, bubbles: true }));
+			}
+		});
+		await page.waitForTimeout(100);
+		await expect(self).toHaveAttribute('data-position', '8,3');
+		await page.keyboard.up('ArrowRight');
+	});
+
+	test('preserves native Arrow behavior for the DEV character select', async ({ page }) => {
+		await openDevWorld(page);
+
+		const self = page.locator('.participant').first();
+		const characterSelect = page.getByLabel('Select sandbox character');
+		await characterSelect.focus();
+		await page.keyboard.press('ArrowDown');
+		await expect(characterSelect).toHaveValue('002');
+		await expect(self).toHaveAttribute('data-position', '7,3');
+	});
+
 	test('opens a profile by pointer, restores it through history, and resumes movement after Back', async ({ page }) => {
 		await openDevWorld(page);
 
@@ -357,6 +410,20 @@ test.describe('DEV World Sandbox', () => {
 			picture: '001.webp',
 			about: '知らない場所でも、わりと平気そう。'
 		});
+	});
+
+	test('stops a held Arrow when a profile dialog opens', async ({ page }) => {
+		await openDevWorld(page);
+
+		const self = page.locator('.participant').first();
+		await page.keyboard.down('ArrowRight');
+		await expect(self).toHaveAttribute('data-position', '8,3');
+		await profileTrigger(page, '女の子').click();
+		await expect(profileDialog(page)).toBeVisible();
+		const positionWhenOpened = await self.getAttribute('data-position');
+		await page.waitForTimeout(650);
+		await page.keyboard.up('ArrowRight');
+		await expect(self).toHaveAttribute('data-position', positionWhenOpened ?? '');
 	});
 
 	test('opens a profile by keyboard', async ({ page }) => {
@@ -479,6 +546,7 @@ test.describe('DEV World Sandbox', () => {
 					expect(Math.abs(geometry.avatarCenter.y - geometry.participantCenter.y)).toBeLessThan(0.5);
 					await expect(page.locator('.participant-name')).toBeVisible();
 					await expect(page.locator('.field-area')).toHaveCSS('overflow', 'hidden');
+					await expect(page.locator('.participant')).not.toHaveAttribute('data-movement-animation', 'active');
 				});
 			});
 		}
@@ -495,6 +563,9 @@ test.describe('DEV World Sandbox', () => {
 
 			await page.getByRole('button', { name: 'Move right' }).click();
 			await expect(self).toHaveAttribute('data-position', '8,3');
+			await expect(self).toHaveAttribute('data-movement-animation', 'active');
+			await expect(self).not.toHaveAttribute('data-movement-animation', 'active');
+			await expect(scene).not.toHaveAttribute('data-camera-animation', 'active');
 			const after = await readCharacterGeometry(page);
 			const afterTransform = await scene.evaluate((element) => getComputedStyle(element).transform);
 
@@ -505,5 +576,16 @@ test.describe('DEV World Sandbox', () => {
 			expect(after.avatarHeight).toBe('76px');
 			expect(before.participantCenter.y).toBe(after.participantCenter.y);
 		});
+	});
+
+	test('disables movement animation when reduced motion is preferred', async ({ page }) => {
+		await page.emulateMedia({ reducedMotion: 'reduce' });
+		await openDevWorld(page);
+
+		const self = page.locator('.participant').first();
+		await page.getByRole('button', { name: 'Move right' }).click();
+		await expect(self).toHaveAttribute('data-position', '8,3');
+		await expect(self).not.toHaveAttribute('data-movement-animation', 'active');
+		await expect(page.locator('.field-scene')).not.toHaveAttribute('data-camera-animation', 'active');
 	});
 });
