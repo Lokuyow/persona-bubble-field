@@ -7,11 +7,14 @@ const DATABASE_NAME = 'persona-bubble-field-account';
 const STORE_NAME = 'persona-bubble-field-account-state';
 const SECRET_KEY = 'secret-key';
 const TIMESTAMP_KEY = 'last-changed-at-ms';
-const INITIAL_PROFILE_PUBLISHED_PUBKEY_KEY = 'initial-profile-published-pubkey';
+// Keep the existing key so legacy pubkey-only values can be recognized as revision 1.
+const CHARACTER_PROFILE_PUBLICATION_MARKER_KEY = 'initial-profile-published-pubkey';
+
+export const CURRENT_CHARACTER_PROFILE_REVISION = 2;
 
 interface AccountDatabase extends DBSchema {
 	[STORE_NAME]: {
-		key: typeof SECRET_KEY | typeof TIMESTAMP_KEY | typeof INITIAL_PROFILE_PUBLISHED_PUBKEY_KEY;
+		key: typeof SECRET_KEY | typeof TIMESTAMP_KEY | typeof CHARACTER_PROFILE_PUBLICATION_MARKER_KEY;
 		// Persisted data is untrusted, even when the TypeScript writer is typed.
 		value: unknown;
 	};
@@ -24,7 +27,7 @@ export type AccountSnapshot = Readonly<{
 	secretKey: Uint8Array;
 	pubkey: string;
 	lastChangedAtMs: number;
-	initialProfilePublished: boolean;
+	characterProfileRevision: number | null;
 }>;
 
 export type CorruptAccountState = Readonly<{
@@ -43,7 +46,7 @@ export type ReincarnateAccountResult =
 	| Readonly<{ kind: 'uninitialized' }>
 	| CorruptAccountState;
 
-export type MarkInitialProfilePublishedResult = Readonly<{ kind: 'recorded' | 'stale' }>;
+export type MarkCharacterProfilePublicationResult = Readonly<{ kind: 'recorded' | 'stale' }>;
 
 type StoredAccountState =
 	| Readonly<{ kind: 'fresh' }>
@@ -60,6 +63,14 @@ function assertAccountTimestamp(value: number): void {
 	if (!isAccountTimestamp(value)) {
 		throw new TypeError('Account time must be non-negative safe Unix milliseconds with room for cooldown.');
 	}
+}
+
+function characterProfileRevisionForMarker(marker: unknown, pubkey: string): number | null {
+	if (marker === pubkey) return 1;
+	if (typeof marker !== 'object' || marker === null || Array.isArray(marker)) return null;
+	const candidate = marker as Readonly<Record<string, unknown>>;
+	return candidate.pubkey === pubkey && typeof candidate.revision === 'number' &&
+		Number.isSafeInteger(candidate.revision) && candidate.revision > 0 ? candidate.revision : null;
 }
 
 /** A display-time check only. Reincarnation rechecks the persisted timestamp in its transaction. */
@@ -112,14 +123,14 @@ async function readAccountState(tx: AccountTransaction): Promise<StoredAccountSt
 		// Invalid scalars are checked by nostr-tools; never expose the library's raw error.
 		return { kind: 'corrupt', reason: 'invalid-secret' };
 	}
-	const [publishedPubkey]: unknown[] = await tx.store.getAll(INITIAL_PROFILE_PUBLISHED_PUBKEY_KEY, 1);
+	const [profilePublicationMarker]: unknown[] = await tx.store.getAll(CHARACTER_PROFILE_PUBLICATION_MARKER_KEY, 1);
 	return {
 		kind: 'ready',
 		account: {
 			secretKey: secret.slice(),
 			pubkey,
 			lastChangedAtMs: timestamp,
-			initialProfilePublished: publishedPubkey === pubkey
+			characterProfileRevision: characterProfileRevisionForMarker(profilePublicationMarker, pubkey)
 		}
 	};
 }
@@ -130,10 +141,10 @@ async function writeNewAccount(tx: AccountTransaction, nowMs: number): Promise<A
 		secretKey,
 		pubkey: getPublicKey(secretKey),
 		lastChangedAtMs: nowMs,
-		initialProfilePublished: false
+		characterProfileRevision: null
 	};
 	// Await only IDB work while the transaction is active. Overwrite, never archive, the old key.
-	await tx.store.delete(INITIAL_PROFILE_PUBLISHED_PUBKEY_KEY);
+	await tx.store.delete(CHARACTER_PROFILE_PUBLICATION_MARKER_KEY);
 	await tx.store.put(secretKey, SECRET_KEY);
 	await tx.store.put(nowMs, TIMESTAMP_KEY);
 	return account;
@@ -204,10 +215,10 @@ export function reincarnateAccount(): Promise<ReincarnateAccountResult> {
 	return accessAccount('reincarnate');
 }
 
-/** Records only the current account's initial profile publication; stale snapshots cannot affect a replacement. */
-export async function markInitialProfilePublished(
+/** Records only the current account's current character-profile revision. */
+export async function markCharacterProfilePublication(
 	account: AccountSnapshot
-): Promise<MarkInitialProfilePublishedResult> {
+): Promise<MarkCharacterProfilePublicationResult> {
 	const db = await openAccountDatabase();
 	let tx: AccountTransaction | undefined;
 	try {
@@ -222,7 +233,10 @@ export async function markInitialProfilePublished(
 			await tx.done;
 			return { kind: 'stale' };
 		}
-		await tx.store.put(account.pubkey, INITIAL_PROFILE_PUBLISHED_PUBKEY_KEY);
+		await tx.store.put(
+			{ pubkey: account.pubkey, revision: CURRENT_CHARACTER_PROFILE_REVISION },
+			CHARACTER_PROFILE_PUBLICATION_MARKER_KEY
+		);
 		await tx.done;
 		return { kind: 'recorded' };
 	} catch {

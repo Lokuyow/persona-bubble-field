@@ -1,6 +1,6 @@
 import type { Character } from './character';
 import {
-	markInitialProfilePublished,
+	markCharacterProfilePublication,
 	type AccountSnapshot
 } from './nostrAccount';
 import {
@@ -10,24 +10,25 @@ import {
 import type { PublishRelayResult } from './nostrRelayTransport';
 import type { VerifiedEvent } from 'nostr-tools/pure';
 
-export type PreparedInitialProfilePublication = Readonly<{
+export type PreparedCharacterProfilePublication = Readonly<{
 	account: AccountSnapshot;
 	event: VerifiedEvent;
 }>;
 
-export type InitialProfilePublicationResult = Readonly<{
+export type CharacterProfilePublicationResult = Readonly<{
 	kind: 'recorded' | 'stale' | 'retryable';
 }>;
 
-export function prepareInitialProfilePublication(input: Readonly<{
+export function prepareCharacterProfilePublication(input: Readonly<{
 	account: AccountSnapshot;
 	character: Character;
 	absolutePictureUrl: string;
-}>): PreparedInitialProfilePublication {
+	createdAt: number;
+}>): PreparedCharacterProfilePublication {
 	const template = buildCharacterProfileTemplate({
 		character: input.character,
 		absolutePictureUrl: input.absolutePictureUrl,
-		createdAt: Math.floor(input.account.lastChangedAtMs / 1000)
+		createdAt: input.createdAt
 	});
 	return {
 		account: input.account,
@@ -44,14 +45,14 @@ export function reachedAuthoritativeRelay(results: readonly PublishRelayResult[]
 }
 
 /** Never throws: publication failures remain retryable and do not affect the world-read lifecycle. */
-export async function publishInitialProfile(
-	publication: PreparedInitialProfilePublication,
+export async function publishCharacterProfile(
+	publication: PreparedCharacterProfilePublication,
 	publish: (event: VerifiedEvent) => Promise<readonly PublishRelayResult[]>
-): Promise<InitialProfilePublicationResult> {
+): Promise<CharacterProfilePublicationResult> {
 	try {
 		const results = await publish(publication.event);
 		if (!reachedAuthoritativeRelay(results)) return { kind: 'retryable' };
-		return await markInitialProfilePublished(publication.account);
+		return await markCharacterProfilePublication(publication.account);
 	} catch {
 		return { kind: 'retryable' };
 	}

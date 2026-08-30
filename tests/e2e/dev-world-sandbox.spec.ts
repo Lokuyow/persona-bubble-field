@@ -81,6 +81,21 @@ test.describe('DEV World Sandbox', () => {
 		await expect(self.locator('img')).toHaveAttribute('src', /characters\/001\.webp$/);
 	});
 
+	test('selects and presents character 020 from the catalog', async ({ page }) => {
+		await page.goto('/?devWorld=1&devCharacter=020');
+		await expect(page.getByText('DEV World Sandbox', { exact: true })).toBeVisible();
+		await expect(page.getByLabel('Select sandbox character')).toHaveValue('020');
+
+		const self = page.locator('.participant').first();
+		await expect(self.locator('img')).toHaveAttribute('src', /characters\/020\.webp$/);
+		await openProfile(page, 'アミナ');
+		await expectProfile(page, {
+			name: 'アミナ',
+			picture: '020.webp',
+			about: '静かな場所ではよく笑う。'
+		});
+	});
+
 	test('renders deterministic normal and merged speech tails in the DEV fixture', async ({ page }) => {
 		await page.goto('/?devWorld=1&devSpeech=1');
 		await expect(page.getByText('DEV World Sandbox', { exact: true })).toBeVisible();
