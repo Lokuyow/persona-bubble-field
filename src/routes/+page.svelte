@@ -1188,7 +1188,7 @@ import { createPresenceState, type PresenceState } from '$lib/presence';
 		left: 50%;
 		bottom: -1px;
 		width: 8px;
-		height: 2px;
+		height: 3px;
 		transform: translateX(-50%);
 		background: var(--bubble-bg);
 		pointer-events: none;

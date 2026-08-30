@@ -117,6 +117,7 @@ test.describe('DEV World Sandbox', () => {
 						background: bubbleStyle.backgroundColor,
 						maskBackground: getComputedStyle(bubble, '::after').backgroundColor,
 						maskWidth: getComputedStyle(bubble, '::after').width,
+						maskHeight: getComputedStyle(bubble, '::after').height,
 						borderRadius: bubbleStyle.borderRadius,
 						borderColor: bubbleStyle.borderTopColor,
 						outlineColor: getComputedStyle(document.querySelector<SVGPathElement>(`path[data-tail-participant-id="${polygon.dataset.tailParticipantId}"]`)!).stroke,
@@ -150,6 +151,7 @@ test.describe('DEV World Sandbox', () => {
 			maskBackground: style.background
 		})));
 		expect(tailState.polygonStyles.every((style) => style.maskWidth !== '11px')).toBe(true);
+		expect(tailState.polygonStyles.every((style) => style.maskHeight === '3px')).toBe(true);
 		expect(tailState.polygonStyles.every((style) => style.borderRadius.split(' ').length <= 2)).toBe(true);
 		expect(tailState.polygonStyles.every((style) => style.borderColor === style.outlineColor)).toBe(true);
 		expect(tailState.polygonStyles.every((style) => style.cellY !== null)).toBe(true);
