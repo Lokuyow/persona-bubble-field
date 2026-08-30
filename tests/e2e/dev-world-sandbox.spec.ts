@@ -81,6 +81,51 @@ test.describe('DEV World Sandbox', () => {
 		await expect(self.locator('img')).toHaveAttribute('src', /characters\/001\.webp$/);
 	});
 
+	test('renders deterministic normal and merged speech tails in the DEV fixture', async ({ page }) => {
+		await page.goto('/?devWorld=1&devSpeech=1');
+		await expect(page.getByText('DEV World Sandbox', { exact: true })).toBeVisible();
+		await expect(page.locator('.bubble-normal')).toHaveCount(1);
+		await expect(page.locator('.bubble-merged')).toHaveCount(1);
+
+		const tailState = await page.locator('.tail-layer').evaluate((layer) => {
+			const polygons = [...layer.querySelectorAll('polygon')];
+			const outlines = [...layer.querySelectorAll('path')];
+			const bubbles = [...document.querySelectorAll<HTMLElement>('.bubble')];
+			return {
+				polygonCount: polygons.length,
+				outlineCount: outlines.length,
+				lineCount: layer.querySelectorAll('line').length,
+				polygonStyles: polygons.map((polygon) => {
+					const tone = [...polygon.classList].find((className) => className.startsWith('tail-'))?.slice(5);
+					const bubble = bubbles.find((candidate) => candidate.classList.contains(`bubble-${tone}`));
+					if (!bubble) throw new Error(`Missing bubble for tone ${tone ?? 'unknown'}`);
+					const bubbleStyle = getComputedStyle(bubble);
+					return {
+						fill: getComputedStyle(polygon).fill,
+						background: bubbleStyle.backgroundColor,
+						maskBackground: getComputedStyle(bubble, '::after').backgroundColor
+					};
+				}),
+				outlineStyles: outlines.map((outline) => {
+					const style = getComputedStyle(outline);
+					return { fill: style.fill, strokeDasharray: style.strokeDasharray };
+				})
+			};
+		});
+
+		expect(tailState).toMatchObject({ polygonCount: 3, outlineCount: 3, lineCount: 0 });
+		expect(tailState.polygonStyles).toEqual(tailState.polygonStyles.map((style) => ({
+			...style,
+			fill: style.background,
+			maskBackground: style.background
+		})));
+		expect(tailState.outlineStyles).toEqual([
+			{ fill: 'none', strokeDasharray: 'none' },
+			{ fill: 'none', strokeDasharray: 'none' },
+			{ fill: 'none', strokeDasharray: 'none' }
+		]);
+	});
+
 	test('switches the self character through the sandbox selector', async ({ page }) => {
 		await openDevWorld(page);
 

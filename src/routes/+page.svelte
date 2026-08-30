@@ -43,7 +43,7 @@
 		type PreparedInitialProfilePublication
 	} from '$lib/initialProfilePublication';
 	import { projectPresence } from '$lib/presenceProjection';
-	import type { PresenceState } from '$lib/presence';
+import { createPresenceState, type PresenceState } from '$lib/presence';
 	import type { ParsedWorldMessage } from '$lib/nostrProtocol';
 	import HostOwnedComposerLite from '$lib/HostOwnedComposerLite.svelte';
 	import {
@@ -222,6 +222,9 @@
 		if (devWorldSandboxEnabled) {
 			selectedCharacterId = resolveDevWorldCharacterId(new URLSearchParams(window.location.search));
 			resetSandbox();
+			if (import.meta.env.DEV && new URLSearchParams(window.location.search).get('devSpeech') === '1') {
+				seedDevSpeechFixture();
+			}
 		}
 
 		const begin = async () => {
@@ -473,6 +476,32 @@
 		setPresence(resetDevWorldPresence(FIELD, Date.now()));
 	}
 
+	function seedDevSpeechFixture(): void {
+		if (!devWorldSandboxEnabled) return;
+		const now = Date.now();
+		const normalPubkey = 'a'.repeat(64);
+		const mergedPubkeyA = 'b'.repeat(64);
+		const mergedPubkeyB = 'c'.repeat(64);
+		setPresence(createPresenceState(FIELD, now, [
+			{ id: DEV_WORLD_SELF_ID, position: { x: 7, y: 3 } },
+			{ id: normalPubkey, position: { x: 4, y: 2 } },
+			{ id: mergedPubkeyA, position: { x: 6, y: 2 } },
+			{ id: mergedPubkeyB, position: { x: 10, y: 2 } }
+		]));
+		const duration = 60_000;
+		const normalMessage = {
+			id: 'dev-speech-normal-message', pubkey: normalPubkey, content: 'normal fixture', createdAt: now
+		} as const;
+		const mergedMessage = {
+			id: 'dev-speech-merged-message-a', pubkey: mergedPubkeyA, content: 'merged fixture', createdAt: now
+		} as const;
+		conversationState = receiveMessage(conversationState, normalMessage, { isSpeakerVisible: true, duration, now });
+		conversationState = receiveMessage(conversationState, mergedMessage, { isSpeakerVisible: true, duration, now });
+		conversationState = receiveMessage(conversationState, {
+			...mergedMessage, id: 'dev-speech-merged-message-b', pubkey: mergedPubkeyB
+		}, { isSpeakerVisible: true, duration, now });
+	}
+
 	function openProfile(characterId: string, trigger: HTMLButtonElement): void {
 		lastProfileTrigger = trigger;
 		pushState('', { ...page.state, profileCharacterId: characterId });
@@ -559,6 +588,24 @@
 	function tailStart(anchor: WorldPoint, size: Size): WorldPoint {
 		return { x: anchor.x + size.width / 2, y: anchor.y + size.height };
 	}
+
+	function tailGeometry(start: WorldPoint, target: WorldPoint, width = 9, overlap = 2) {
+		const dx = target.x - start.x;
+		const dy = target.y - start.y;
+		const length = Math.hypot(dx, dy) || 1;
+		const ux = dx / length;
+		const uy = dy / length;
+		const px = -uy * (width / 2);
+		const py = ux * (width / 2);
+		const baseCenter = { x: start.x - ux * overlap, y: start.y - uy * overlap };
+		const left = { x: baseCenter.x + px, y: baseCenter.y + py };
+		const right = { x: baseCenter.x - px, y: baseCenter.y - py };
+
+		return {
+			points: `${left.x},${left.y} ${right.x},${right.y} ${target.x},${target.y}`,
+			outlinePath: `M ${left.x} ${left.y} L ${target.x} ${target.y} L ${right.x} ${right.y}`
+		};
+	}
 </script>
 
 <svelte:head>
@@ -637,12 +684,18 @@
 		<svg class="tail-layer" viewBox={`0 0 ${viewportSize.width} ${viewportSize.height}`} aria-hidden="true">
 			{#each positionedNormalBubbles as bubble (bubble.id)}
 				{@const start = tailStart(bubble.anchor, bubble.size)}
-				<line class={`tail tail-${bubble.tone}`} x1={start.x} y1={start.y} x2={bubble.speaker.screen.x} y2={bubble.speaker.screen.y - 18} />
+				{@const target = { x: bubble.speaker.screen.x, y: bubble.speaker.screen.y - 18 }}
+				{@const tail = tailGeometry(start, target)}
+				<polygon class={`tail tail-${bubble.tone}`} points={tail.points} />
+				<path class="tail-outline" d={tail.outlinePath} />
 			{/each}
 			{#each positionedMergedBubbles as bubble (bubble.id)}
 				{@const start = tailStart(bubble.anchor, bubble.size)}
 				{#each bubble.members as member (member.id)}
-					<line class={`tail tail-${bubble.tone}`} x1={start.x} y1={start.y} x2={member.screen.x} y2={member.screen.y - 18} />
+					{@const target = { x: member.screen.x, y: member.screen.y - 18 }}
+					{@const tail = tailGeometry(start, target)}
+					<polygon class={`tail tail-${bubble.tone}`} points={tail.points} />
+					<path class="tail-outline" d={tail.outlinePath} />
 				{/each}
 			{/each}
 		</svg>
@@ -864,6 +917,7 @@
 
 	.field-viewport {
 		position: relative;
+		--bubble-outline: rgba(57, 67, 64, 0.42);
 		min-height: 100svh;
 		flex: 1;
 		overflow: hidden;
@@ -1085,17 +1139,19 @@
 		overflow: visible;
 	}
 
-	.tail {
-		stroke-width: 2.2;
+	.tail-outline {
+		fill: none;
+		stroke: var(--bubble-outline);
+		stroke-width: 1;
 		stroke-linecap: round;
-		opacity: 0.82;
-		stroke-dasharray: 3 5;
+		stroke-linejoin: round;
+		opacity: 0.95;
 	}
 
-	.tail-sky { stroke: #6dabb9; }
-	.tail-violet { stroke: #887db7; }
-	.tail-peach { stroke: #cf8d6a; }
-	.tail-rose { stroke: #bc7891; }
+	.tail-sky { fill: #d9edf0; }
+	.tail-violet { fill: #e2def5; }
+	.tail-peach { fill: #f6dfce; }
+	.tail-rose { fill: #f1d9df; }
 
 	.bubble-layer {
 		z-index: 6;
@@ -1104,12 +1160,12 @@
 	.bubble {
 		position: absolute;
 		display: flex;
+		background: var(--bubble-bg);
 		min-height: 50px;
 		align-items: center;
 		justify-content: center;
-		border: 1px solid rgba(57, 67, 64, 0.11);
+		border: 1px solid var(--bubble-outline);
 		border-radius: 17px 17px 17px 7px;
-		box-shadow: 0 13px 26px rgba(60, 72, 65, 0.14);
 		color: #364142;
 		font-size: 13px;
 		font-weight: 800;
@@ -1117,6 +1173,19 @@
 		line-height: 1.35;
 		text-align: center;
 		will-change: transform;
+	}
+
+	.bubble::after {
+		content: '';
+		position: absolute;
+		left: 50%;
+		bottom: -1px;
+		width: 11px;
+		height: 3px;
+		transform: translateX(-50%);
+		background: var(--bubble-bg);
+		pointer-events: none;
+		z-index: 1;
 	}
 
 	.bubble-normal {
@@ -1141,10 +1210,10 @@
 		text-transform: uppercase;
 	}
 
-	.bubble-sky { background: #d9edf0; }
-	.bubble-violet { background: #e2def5; }
-	.bubble-peach { background: #f6dfce; }
-	.bubble-rose { background: #f1d9df; }
+	.bubble-sky { --bubble-bg: #d9edf0; }
+	.bubble-violet { --bubble-bg: #e2def5; }
+	.bubble-peach { --bubble-bg: #f6dfce; }
+	.bubble-rose { --bubble-bg: #f1d9df; }
 
 	.viewport-vignette {
 		position: absolute;
