@@ -222,9 +222,27 @@ test.describe('DEV World Sandbox', () => {
 		const dialog = profileDialog(page);
 		const viewport = dialog.locator('.profile-dialog-scroll-viewport');
 		await expect(viewport).toBeVisible();
-		expect(await viewport.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+		const scrollState = await viewport.evaluate((element) => ({
+			scrollable: element.scrollHeight > element.clientHeight,
+			initialTop: element.scrollTop
+		}));
+		expect(scrollState.scrollable).toBe(true);
+		expect(scrollState.initialTop).toBe(0);
 		await viewport.evaluate((element) => element.scrollTo({ top: element.scrollHeight }));
-		await expect(dialog.getByRole('button', { name: '閉じる' })).toBeVisible();
+		expect(await viewport.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+
+		const closeButton = dialog.getByRole('button', { name: '閉じる' });
+		await expect(closeButton).toBeInViewport({ ratio: 1 });
+		const closeBox = await closeButton.boundingBox();
+		const viewportSize = page.viewportSize();
+		expect(closeBox).not.toBeNull();
+		expect(viewportSize).not.toBeNull();
+		expect(closeBox!.x).toBeGreaterThanOrEqual(0);
+		expect(closeBox!.y).toBeGreaterThanOrEqual(0);
+		expect(closeBox!.x + closeBox!.width).toBeLessThanOrEqual(viewportSize!.width);
+		expect(closeBox!.y + closeBox!.height).toBeLessThanOrEqual(viewportSize!.height);
+		await closeButton.click();
+		await expect(dialog).toBeHidden();
 		expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 	});
 

@@ -88,6 +88,7 @@
 		align-items: center;
 		flex-direction: column;
 		gap: 16px;
+		flex: 0 0 auto;
 		text-align: center;
 	}
 
@@ -165,6 +166,7 @@
 
 	.profile-dialog-footer {
 		display: flex;
+		flex: 0 0 auto;
 		justify-content: flex-end;
 	}
 
@@ -204,5 +206,19 @@
 
 		.profile-dialog-header :global([data-dialog-title]) { font-size: 19px; }
 		.profile-dialog-about { font-size: 14px; }
+	}
+
+	@media (max-height: 480px) {
+		:global(.profile-dialog-content) {
+			gap: 8px;
+			padding: 12px;
+		}
+
+		.profile-dialog-header { gap: 8px; }
+
+		:global(.profile-dialog-avatar) {
+			width: clamp(128px, calc(100dvh - 184px), 256px);
+			height: clamp(128px, calc(100dvh - 184px), 256px);
+		}
 	}
 </style>
