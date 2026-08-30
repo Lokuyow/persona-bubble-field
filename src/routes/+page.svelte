@@ -1106,10 +1106,10 @@
 		opacity: 0.9;
 	}
 
-	.tail-sky { fill: #6dabb9; }
-	.tail-violet { fill: #887db7; }
-	.tail-peach { fill: #cf8d6a; }
-	.tail-rose { fill: #bc7891; }
+	.tail-sky { fill: #d9edf0; }
+	.tail-violet { fill: #e2def5; }
+	.tail-peach { fill: #f6dfce; }
+	.tail-rose { fill: #f1d9df; }
 
 	.bubble-layer {
 		z-index: 6;
