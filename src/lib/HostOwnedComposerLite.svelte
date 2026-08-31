@@ -24,6 +24,8 @@
 		editorIsEmpty: boolean | null;
 		preferredHeight: number | null;
 		whenReady(): Promise<void>;
+		focusEditor(): void;
+		blurEditor(): void;
 		configureHostOwned(options: Readonly<{
 			editorSubmitButtonEnabled?: boolean;
 			keyboardButtonBarEnabled?: boolean;
@@ -46,10 +48,23 @@
 	let { submitContent, onEditorEmptyChange, onPreferredHeightChange }: Props = $props();
 	let host: HTMLDivElement;
 	let loadFailed = $state(false);
+	let composerReady = false;
+	let composer: HostOwnedComposerElement | null = null;
+
+	export function focusEditor(): boolean {
+		if (!composerReady || !composer) return false;
+		composer.focusEditor();
+		return true;
+	}
+
+	export function blurEditor(): boolean {
+		if (!composerReady || !composer) return false;
+		composer.blurEditor();
+		return true;
+	}
 
 	onMount(() => {
 		let disposed = false;
-		let composer: HostOwnedComposerElement | null = null;
 		onEditorEmptyChange?.(null);
 		const handlePreferredHeightChange = (event: Event) => {
 			const height = (event as HostOwnedPreferredHeightChangeEvent).detail?.height;
@@ -87,6 +102,7 @@
 				host.append(composer);
 				await composer.whenReady();
 				if (!disposed) {
+					composerReady = true;
 					onEditorEmptyChange?.(composer.editorIsEmpty);
 					const height = composer.preferredHeight;
 					if (typeof height === 'number' && Number.isFinite(height) && height > 0) {
@@ -100,6 +116,7 @@
 
 		return () => {
 			disposed = true;
+			composerReady = false;
 			onEditorEmptyChange?.(null);
 			composer?.removeEventListener('ehagaki-editor-empty-change', handleEditorEmptyChange);
 			composer?.removeEventListener('ehagaki-preferred-height-change', handlePreferredHeightChange);

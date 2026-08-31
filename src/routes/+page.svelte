@@ -119,6 +119,7 @@
 	let selectedCharacterId = '001';
 	let lastProfileTrigger: HTMLButtonElement | null = null;
 	let composerEditorIsEmpty: boolean | null = null;
+	let composerComponent: { focusEditor(): boolean; blurEditor(): boolean } | null = null;
 	let visualWorldById: Record<string, WorldPoint> = {};
 	let visualCamera: WorldPoint | null = null;
 	let visualMotion: VisualMotion | null = null;
@@ -535,9 +536,23 @@
 			}, 500);
 		};
 		const handleKeydown = (event: KeyboardEvent) => {
-			const direction = directionFromKey(event.key);
+			if (event.code === 'Escape' && isComposerEditorKeyboardEvent(event) && !event.isComposing) {
+				if (composerComponent?.blurEditor()) event.preventDefault();
+				return;
+			}
+			if (event.code === 'KeyN' && canUseComposerFocusShortcut(event)) {
+				if (composerComponent?.focusEditor()) event.preventDefault();
+				return;
+			}
+
+			const arrowDirection = directionFromKey(event.key);
+			const wasdDirection = directionFromCode(event.code);
+			const direction = arrowDirection ?? wasdDirection;
 			if (!direction) return;
-			if (!canUseArrowForMovement(event)) {
+			const canMove = arrowDirection
+				? canUseArrowForMovement(event)
+				: canUseWASDForMovement(event);
+			if (!canMove) {
 				clearKeyboardHold();
 				return;
 			}
@@ -545,11 +560,11 @@
 			// driven by the explicit hold timer below, never by repeat frequency.
 			event.preventDefault();
 			if (event.repeat) return;
-			const source = isComposerEditorKeyboardEvent(event) ? 'composer-editor' : 'page';
+			const source = arrowDirection && isComposerEditorKeyboardEvent(event) ? 'composer-editor' : 'page';
 			startKeyboardHold(direction, source);
 		};
 		const handleKeyup = (event: KeyboardEvent) => {
-			const direction = directionFromKey(event.key);
+			const direction = directionFromKey(event.key) ?? directionFromCode(event.code);
 			if (direction && direction === heldDirection) clearKeyboardHold();
 		};
 		const handleMovementFocusIn = (event: FocusEvent) => {
@@ -778,6 +793,14 @@
 		return null;
 	}
 
+	function directionFromCode(code: string): Direction | null {
+		if (code === 'KeyW') return 'up';
+		if (code === 'KeyA') return 'left';
+		if (code === 'KeyS') return 'down';
+		if (code === 'KeyD') return 'right';
+		return null;
+	}
+
 	function getMovementCells(state: PresenceState, selfId: string, enabled: boolean) {
 		if (!enabled) return [];
 		const self = getParticipant(state, selfId);
@@ -836,6 +859,37 @@
 		const isComposerEvent = path.some((target) => target instanceof HTMLElement && target.matches('ehagaki-composer'));
 		if (isComposerEvent) return isComposerEditorKeyboardEvent(event) && composerEditorIsEmpty === true;
 		return !path.some((target) => target instanceof HTMLElement && (
+			target.matches('input, textarea, select') || target.isContentEditable
+		));
+	}
+
+	function canUseWASDForMovement(event: KeyboardEvent): boolean {
+		if (
+			event.isComposing ||
+			event.shiftKey ||
+			event.ctrlKey ||
+			event.altKey ||
+			event.metaKey ||
+			document.querySelector('.profile-dialog-content')
+		) return false;
+
+		return !event.composedPath().some((target) => target instanceof HTMLElement && (
+			target.matches('input, textarea, select') || target.isContentEditable
+		));
+	}
+
+	function canUseComposerFocusShortcut(event: KeyboardEvent): boolean {
+		if (
+			event.isComposing ||
+			event.shiftKey ||
+			event.ctrlKey ||
+			event.altKey ||
+			event.metaKey ||
+			isComposerEditorKeyboardEvent(event) ||
+			document.querySelector('.profile-dialog-content')
+		) return false;
+
+		return !event.composedPath().some((target) => target instanceof HTMLElement && (
 			target.matches('input, textarea, select') || target.isContentEditable
 		));
 	}
@@ -1412,6 +1466,7 @@
 	{#if runtimeMode === 'relay'}
 		<div class="composer-dock" aria-label="Message composer">
 			<HostOwnedComposerLite
+				bind:this={composerComponent}
 				submitContent={submitComposerContent}
 				onEditorEmptyChange={handleComposerEditorEmptyChange}
 				onPreferredHeightChange={setComposerPreferredHeight}
