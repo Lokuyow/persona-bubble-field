@@ -657,9 +657,10 @@
 	function observeBubble(node: HTMLElement, id: string) {
 		const content = node.querySelector<HTMLElement>('.bubble-content');
 		const update = () => {
+			const rect = node.getBoundingClientRect();
 			bubbleSizes = {
 				...bubbleSizes,
-				[id]: { width: node.offsetWidth, height: node.offsetHeight }
+				[id]: { width: rect.width, height: rect.height }
 			};
 			if (content) {
 				bubbleOverflowById = {
