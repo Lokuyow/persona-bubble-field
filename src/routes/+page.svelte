@@ -1937,9 +1937,9 @@
 		pointer-events: none;
 	}
 
-	.timeline-entry {
+	/* .timeline-entry {
 		padding: 10px 8px 11px;
-	}
+	} */
 
 	.timeline-entry:last-child { border-bottom: 0; }
 
@@ -1995,7 +1995,7 @@
 		margin: 6px 0 0;
 		overflow: hidden;
 		color: #fff;
-		font-size: 13px;
+		font-size: 16px;
 		font-weight: 800;
 		letter-spacing: 0.01em;
 		line-height: 1.45;
@@ -2010,6 +2010,10 @@
 			-1px 1px 0 #222,
 			0 1px 0 #222,
 			1px 1px 0 #222;
+
+	 @media (width <= 700px) {
+			font-size: 13px;
+		}
 	}
 
 	.timeline-content {
