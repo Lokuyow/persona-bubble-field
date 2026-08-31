@@ -150,7 +150,7 @@ describe('primary lifecycle', () => {
 			expect(messageRequests).toHaveLength(1);
 			expect(messageRequests[0]).toHaveLength(4);
 			expect(messageRequests[0][2]).toMatchObject({ kinds: [42], since: f.input.messageSince });
-			expect(messageRequests[0][3]).toMatchObject({ kinds: [42], limit: 20 });
+			expect(messageRequests[0][3]).toMatchObject({ kinds: [42], limit: 50 });
 			expect(messageRequests[0][3].since).toBeUndefined();
 		}
 		expect(result.primaryPairs).toHaveLength(4);
@@ -301,7 +301,7 @@ describe('primary lifecycle', () => {
 			if (kind(request) === 42) {
 				expect(request).toHaveLength(4);
 				expect(request[2].since).toBe(f.input.messageSince);
-				expect(request[3].limit).toBe(20);
+				expect(request[3].limit).toBe(50);
 				expect(request[3].since).toBeUndefined();
 			} else {
 				expect(request[2].since).toBe(f.input.positionSince);
@@ -617,7 +617,7 @@ describe('semantic primary classifier', () => {
 			const kinds = (message[2] as Record<string, unknown>).kinds;
 			if (Array.isArray(kinds) && kinds[0] === 42) {
 				expect(message[2]).toHaveProperty('since', TIME - 5);
-				expect(message[3]).toHaveProperty('limit', 20);
+				expect(message[3]).toHaveProperty('limit', 50);
 				expect(message[3]).toHaveProperty('since', undefined);
 			} else {
 				expect(message[2]).toHaveProperty('since', TIME - 5);

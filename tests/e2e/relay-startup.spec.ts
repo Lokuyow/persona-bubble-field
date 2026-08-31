@@ -198,7 +198,7 @@ async function installDelayedRelay(page: Page, options: { deferPrimaryEvents?: b
 			if (request.filters.some((filter) => (filter.kinds as number[] | undefined)?.includes(30078))) {
 				deliver(request.socket, ['EVENT', request.subId, primaryEvents.position]);
 			}
-			if (request.filters.some((filter) => filter.limit === 20)) {
+			if (request.filters.some((filter) => filter.limit === 50)) {
 				for (const event of timelineHistory) deliver(request.socket, ['EVENT', request.subId, event]);
 			}
 		};
@@ -478,7 +478,7 @@ test.describe('Relay startup', () => {
 			(request.filter.kinds as number[])[0] === 42 &&
 			request.filters.length === 2 &&
 			request.filters.some((filter) => typeof filter.since === 'number') &&
-			request.filters.some((filter) => filter.limit === 20 && filter.since === undefined)
+			request.filters.some((filter) => filter.limit === 50 && filter.since === undefined)
 		)).toBe(true);
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
 

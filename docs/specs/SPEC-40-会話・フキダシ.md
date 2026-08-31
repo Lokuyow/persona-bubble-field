@@ -73,9 +73,9 @@ kind 42の `w` は発言時点の不変な座標であり、その後発言者�
 authorの現在presenceの有無にかかわらず対象とする。合体フキダシの表示状態にかかわらず、
 元event単位で表示する。同じevent IDは一度だけ扱うが、本文が同じでもevent IDが異なる
 発言は別entryとする。Relayからbootstrapで取得できた範囲とlive更新を合わせ、NIP-01の
-`created_at`降順、同一時刻ではevent IDのlexical ascendingで並べ、取得できた最新最大20件を
-表示する。20件未満のRelay応答を追加取得で補填することは保証しない。非表示中も更新を続け、
-再表示時にはその時点の最新20件を表示する。
+`created_at`降順、同一時刻ではevent IDのlexical ascendingで並べ、取得できた最新最大50件を
+内部stateに保持する。50件未満のRelay応答を追加取得で補填することは保証しない。非表示中も更新を続け、
+再表示時にはその時点の最新50件から表示領域へ収まるentryだけを表示する。
 
 各entryにはキャラクター名と本文だけを表示し、アイコン、時刻、event ID、Relay情報、返信、
 リアクション等は表示しない。キャラクター名と本文は同じinline text flowの先頭から開始し、
@@ -93,7 +93,7 @@ authorのpubkeyから既存の決定的なcharacter割当を使い、timelineの
 
 timelineは真のoverlayであり、表示状態によってfield viewportのgeometry、field width、camera、
 cell、participant座標、speech area、bubble placement bounds、Composer領域を変更しない。
-panel内はscrollせず、表示領域へ完全に収まる新しいentryから順に表示する。内部stateは最新20件を
+panel内はscrollせず、表示領域へ完全に収まる新しいentryから順に表示する。内部stateは最新50件を
 保持する。既存の`MOBILE_FIELD_BREAKPOINT = 700`を使い、width > 700
 ではreload時の初期表示をON、width <= 700ではOFFとする。この初期判定はページ初期化時に
 一度だけ行い、表示後のresize・端末回転でユーザーのshow/hide状態を上書きしない。hide button

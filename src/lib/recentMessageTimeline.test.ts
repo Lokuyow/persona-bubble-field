@@ -23,11 +23,13 @@ describe('recent message timeline', () => {
 	});
 
 	it('keeps at most the product limit and inserts live messages into the same order', () => {
-		const bootstrap = Array.from({ length: 20 }, (_, index) => message(`message-${index}`, index));
+		const bootstrap = Array.from({ length: 51 }, (_, index) => message(`message-${index}`, index));
 		const timeline = createRecentMessageTimeline(bootstrap);
 		const next = addRecentMessage(timeline, message('newest', 100, 'full body\nwith lines'));
 
-		expect(next).toHaveLength(20);
+		expect(timeline).toHaveLength(50);
+		expect(timeline[0]).toEqual(message('message-50', 50));
+		expect(next).toHaveLength(50);
 		expect(next[0]).toEqual(message('newest', 100, 'full body\nwith lines'));
 		expect(next.some((entry) => entry.id === 'message-0')).toBe(false);
 		expect(addRecentMessage(next, message('newest', 100, 'changed duplicate'))).toBe(next);

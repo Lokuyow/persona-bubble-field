@@ -173,7 +173,7 @@ test.describe('DEV World Sandbox', () => {
 		const timeline = page.getByLabel('Recent message timeline');
 		const visibleEntries = timeline.locator('.timeline-visible-entries .timeline-entry');
 		await expect(timeline).toBeVisible();
-		await expect(visibleEntries).toHaveCount(20);
+		expect(await visibleEntries.count()).toBeGreaterThan(20);
 		const measurementParity = await visibleEntries.first().evaluate((entry) => {
 			const measurement = document.querySelector<HTMLElement>('.timeline-measurements .timeline-entry');
 			if (!measurement) throw new Error('Expected a matching timeline measurement entry.');
@@ -239,7 +239,7 @@ test.describe('DEV World Sandbox', () => {
 		expect(longEntryFlow.contentLines).toBeGreaterThan(1);
 		expect(longEntryFlow.scrollHeight).toBeGreaterThan(longEntryFlow.clientHeight);
 		await expect(timeline.locator('.timeline-measurements button.timeline-name')).toHaveCount(0);
-		await expect(timeline.locator('button.timeline-name')).toHaveCount(20);
+		await expect(timeline.locator('button.timeline-name')).toHaveCount(await visibleEntries.count());
 
 		const activePubkey = 'a'.repeat(64);
 		const outsidePubkey = 'f'.repeat(64);

@@ -431,7 +431,7 @@ MVPでは、少なくとも以下を論理的に別subscriptionとして扱う�
 logical primary subscriptionは引き続きkind 42 messageと`kind 30078` positionの2本とする。
 `world-messages`は同一責務内で、recent用filterと直近タイムラインhistory用filterを2つ持つ
 1つのREQとしてよい。recent用filterのbootstrap windowは従来どおりpresenceと生存bubbleの
-復元に必要な範囲とし、timeline history用filterは`limit: 20`で取得する。`world-positions`は
+復元に必要な範囲とし、timeline history用filterは`limit: 50`で取得する。`world-positions`は
 従来どおり1つのfilterを持つ。したがって、logical primaryの数を増やさずにREQ内の複数filterを
 使用する構成を今回の仕様とする。
 
@@ -516,7 +516,7 @@ safety marginの具体値は製品仕様として現時点では固定しない�
 を更新する。
 
 ただし、`created_at < messageSince`のhistory eventはこのrecent world state更新の対象外とし、
-timelineだけを更新する。timelineのhistoryとliveは同じevent ID dedupe・NIP-01 sort・最大20件の
+timelineだけを更新する。timelineのhistoryとliveは同じevent ID dedupe・NIP-01 sort・最大50件の
 stateへ渡す。
 
 フキダシ側の具体的処理は [`SPEC-40-会話・フキダシ.md`](./SPEC-40-会話・フキダシ.md) を正とする。
@@ -526,7 +526,7 @@ stateへ渡す。
 Relay接続が切れてsubscriptionを再作成する場合も、catch-up取得とlive更新の間に意図的な空白期間を作らない。
 
 再接続時は、直前に正常処理した時点より少し前から再取得する方法、または初期bootstrap範囲を再取得する方法を使用できる。
-再接続で同じ`world-messages`のrecent + `limit:20` history filter bundleを再送する場合も、
+再接続で同じ`world-messages`のrecent + `limit:50` history filter bundleを再送する場合も、
 `messageSince`境界を変更せず、history-only eventをpresenceやbubble evidenceへ昇格させない。
 
 重複して受信したeventはevent ID等によって重複排除する。
