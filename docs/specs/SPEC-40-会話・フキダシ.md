@@ -63,6 +63,40 @@ kind 42の `w` は発言時点の不変な座標であり、その後発言者�
 
 発言の痕跡は発言領域へ蓄積表示せず、フィールド上の空間オブジェクトとして扱う。
 
+### 補助タイムラインoverlay
+
+発言領域とは別に、現在の会話状況を把握するための補助UIとして、フィールドviewportの
+左側へ直近発言タイムラインをoverlay表示する。これは空間型チャットを置き換えるSNS型の
+主画面ではなく、無制限の過去ログやfeedでもない。
+
+専用世界のparserを通過した有効なkind 42を、通常・叫び・モノローグ、閲覧者の画面内外、
+authorの現在presenceの有無にかかわらず対象とする。合体フキダシの表示状態にかかわらず、
+元event単位で表示する。同じevent IDは一度だけ扱うが、本文が同じでもevent IDが異なる
+発言は別entryとする。Relayからbootstrapで取得できた範囲とlive更新を合わせ、NIP-01の
+`created_at`降順、同一時刻ではevent IDのlexical ascendingで並べ、取得できた最新最大20件を
+表示する。20件未満のRelay応答を追加取得で補填することは保証しない。非表示中も更新を続け、
+再表示時にはその時点の最新20件を表示する。
+
+各entryにはキャラクター名と本文だけを表示し、アイコン、時刻、event ID、Relay情報、返信、
+リアクション等は表示しない。本文は明示改行とauto-wrapを含む実描画5行までとし、5行を
+超えた場合だけ`…`を表示する。元のevent `content`は切り詰めず保持し、全文展開操作は設けない。
+
+authorのpubkeyから既存の決定的なcharacter割当を使い、timelineのためのkind 0取得や新しい
+プロフィール通信・保存経路は追加しない。現在active presenceにあり画面上の色を持つauthorは
+名前にも同じtoneカテゴリを使い、presence外のauthorは通常文字色とする。timeline stateへ
+色を保存せず、描画時の現在の色割当へ追従させる。キャラクター名はinteractive elementとし、
+既存Profile Dialogを開く。presence外のauthorも同じpubkeyからprofileを導出でき、Dialogを
+開いてもtimelineは閉じない。close時は既存のfocus restoration経路を使う。
+
+timelineは真のoverlayであり、表示状態によってfield viewportのgeometry、field width、camera、
+cell、participant座標、speech area、bubble placement bounds、Composer領域を変更しない。
+panel内だけを縦scroll可能とする。既存の`MOBILE_FIELD_BREAKPOINT = 700`を使い、width > 700
+ではreload時の初期表示をON、width <= 700ではOFFとする。この初期判定はページ初期化時に
+一度だけ行い、表示後のresize・端末回転でユーザーのshow/hide状態を上書きしない。hide button
+と、閉じた状態でも残るshow controlを設け、timeline内容をlocalStorage、IndexedDB等へ保存しない。
+SSR/hydration中はclosedとして扱う。timelineの更新・表示はbubbleの寿命判定および
+`ConversationState`から独立させる。
+
 ### 通常フキダシの配置
 
 フキダシは、発言元ユーザーの横方向位置に対応する発言領域内の位置を基本とする。
@@ -435,7 +469,8 @@ MVPでは、**テキストメッセージによる現在の会話**を中心と�
 
 NIP-28 kind 42によるメッセージを使用する。
 
-現在の会話は通常フキダシとして一時表示し、Twitter型タイムラインとして蓄積しない。
+現在の会話は通常フキダシとして一時表示し、Twitter型タイムラインとして主画面へ蓄積しない。
+フィールドviewport上の補助タイムラインoverlayは、上記の「発言領域」とは別の有限なUIとして扱う。
 
 ただし、過去のkind 42の一部は「発言の痕跡」として空間上に残り、後から探索・調査できる。
 

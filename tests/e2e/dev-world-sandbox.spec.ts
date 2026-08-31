@@ -167,6 +167,83 @@ test.describe('DEV World Sandbox', () => {
 		await expect(self.locator('img')).toHaveAttribute('src', /characters\/001\.webp$/);
 	});
 
+	test('shows a finite recent-message overlay with semantic colors and existing profile focus restoration', async ({ page }) => {
+		await page.setViewportSize({ width: 1200, height: 900 });
+		await page.goto('/?devWorld=1&devSpeech=timeline');
+		const timeline = page.getByLabel('Recent message timeline');
+		await expect(timeline).toBeVisible();
+		await expect(timeline.locator('.timeline-entry')).toHaveCount(20);
+		await expect(timeline.locator('img')).toHaveCount(0);
+
+		const timelineOrder = await timeline.locator('.timeline-entry').evaluateAll((entries) => entries.map((entry) => ({
+			id: entry.getAttribute('data-timeline-event-id'),
+			createdAt: Number(entry.getAttribute('data-timeline-created-at'))
+		})));
+		expect(timelineOrder.every((entry, index) => index === 0 ||
+			entry.createdAt < timelineOrder[index - 1].createdAt ||
+			(entry.createdAt === timelineOrder[index - 1].createdAt &&
+				(entry.id ?? '') > (timelineOrder[index - 1].id ?? '')))).toBe(true);
+		expect(await timeline.locator('.timeline-content').allTextContents()).toContain('same content, different event');
+		await expect(timeline.locator('.timeline-entry').filter({ hasText: 'line 1' }).locator('.timeline-ellipsis')).toHaveCount(1);
+		await expect(timeline.locator('.timeline-entry').filter({ hasText: 'same content, different event' }).locator('.timeline-ellipsis')).toHaveCount(0);
+
+		const activePubkey = 'a'.repeat(64);
+		const outsidePubkey = 'f'.repeat(64);
+		const activeParticipantTone = await page.locator(`[data-participant-id="${activePubkey}"] .avatar`).evaluate((avatar) =>
+			[...avatar.classList].find((className) => className.startsWith('avatar-'))?.slice('avatar-'.length));
+		await expect(timeline.locator(`[data-timeline-pubkey="${activePubkey}"]`).first()).toHaveAttribute('data-timeline-tone', activeParticipantTone ?? '');
+		await expect(timeline.locator(`[data-timeline-pubkey="${outsidePubkey}"]`).first()).toHaveAttribute('data-timeline-tone', 'default');
+
+		const activeName = timeline.locator(`[data-timeline-pubkey="${activePubkey}"] .timeline-name`).first();
+		await activeName.click();
+		await expect(profileDialog(page)).toBeVisible();
+		await expect(timeline).toBeVisible();
+		await profileDialog(page).getByRole('button', { name: '閉じる' }).click();
+		await expect(activeName).toBeFocused();
+
+		const outsideName = timeline.locator(`[data-timeline-pubkey="${outsidePubkey}"] .timeline-name`).first();
+		await outsideName.click();
+		await expect(profileDialog(page)).toBeVisible();
+		await page.keyboard.press('Escape');
+		await expect(profileDialog(page)).toBeHidden();
+	});
+
+	test('starts closed on mobile, preserves manual show/hide through resize, and leaves field geometry unchanged', async ({ page }) => {
+		await page.setViewportSize({ width: 390, height: 844 });
+		await page.goto('/?devWorld=1&devSpeech=timeline');
+		const timeline = page.getByLabel('Recent message timeline');
+		const show = page.getByRole('button', { name: 'Show recent messages' });
+		await expect(timeline).toBeHidden();
+		await expect(show).toBeVisible();
+
+		const before = await page.evaluate(() => ({
+			field: document.querySelector<HTMLElement>('.field-area')!.getBoundingClientRect().toJSON(),
+			scene: getComputedStyle(document.querySelector<HTMLElement>('.field-scene')!).transform,
+			participants: [...document.querySelectorAll<HTMLElement>('.participant')].map((participant) => participant.getBoundingClientRect().toJSON())
+		}));
+		await show.click();
+		await expect(timeline).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Hide recent messages' })).toBeVisible();
+		await page.getByRole('button', { name: 'Hide recent messages' }).click();
+		await expect(timeline).toBeHidden();
+		const afterMobileHide = await page.evaluate(() => ({
+			field: document.querySelector<HTMLElement>('.field-area')!.getBoundingClientRect().toJSON(),
+			scene: getComputedStyle(document.querySelector<HTMLElement>('.field-scene')!).transform,
+			participants: [...document.querySelectorAll<HTMLElement>('.participant')].map((participant) => participant.getBoundingClientRect().toJSON())
+		}));
+		expect(afterMobileHide.field).toEqual(before.field);
+		expect(afterMobileHide.scene).toBe(before.scene);
+		expect(afterMobileHide.participants).toEqual(before.participants);
+		await page.setViewportSize({ width: 1200, height: 900 });
+		await expect(timeline).toBeHidden();
+		await expect(show).toBeVisible();
+		await show.click();
+		await expect(timeline).toBeVisible();
+
+		await page.setViewportSize({ width: 390, height: 844 });
+		await expect(timeline).toBeVisible();
+	});
+
 	test('uses the prototype park background beneath the field grid', async ({ page }) => {
 		await openDevWorld(page);
 

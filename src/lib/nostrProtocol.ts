@@ -12,6 +12,7 @@ export const PROTOTYPE_NAMESPACE = 'io.github.lokuyow.persona-bubble-field';
 export const CHANNEL_MESSAGE_KIND = 42;
 export const POSITION_KIND = 30078;
 export const PROFILE_KIND = 0;
+export const RECENT_MESSAGE_TIMELINE_LIMIT = 20;
 export const POSITION_SLOT_IDENTIFIERS = [
 	`${PROTOTYPE_NAMESPACE}:position:0`,
 	`${PROTOTYPE_NAMESPACE}:position:1`
@@ -338,6 +339,21 @@ export function buildWorldMessageFilter(options: LiveFilterOptions): Filter {
 		'#l': ['chat'],
 		since: options.since
 	};
+}
+
+export function buildWorldMessageHistoryFilter(options: Pick<LiveFilterOptions, 'channelId'>): Filter {
+	assertChannelId(options.channelId);
+	return {
+		kinds: [CHANNEL_MESSAGE_KIND],
+		'#e': [options.channelId],
+		'#L': [PROTOTYPE_NAMESPACE],
+		'#l': ['chat'],
+		limit: RECENT_MESSAGE_TIMELINE_LIMIT
+	};
+}
+
+export function buildWorldMessageFilters(options: LiveFilterOptions): [Filter, Filter] {
+	return [buildWorldMessageFilter(options), buildWorldMessageHistoryFilter(options)];
 }
 
 export function buildPositionFilter(options: LiveFilterOptions): Filter {

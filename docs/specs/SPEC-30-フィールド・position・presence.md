@@ -428,7 +428,12 @@ MVPでは、少なくとも以下を論理的に別subscriptionとして扱う�
 - 専用世界のkind 42 message
 - `kind 30078` position
 
-1つのREQへ複数filterを詰め込むことを前提とせず、各subscriptionは1つの主要な責務とfilterを持つ構成を基本とする。
+logical primary subscriptionは引き続きkind 42 messageと`kind 30078` positionの2本とする。
+`world-messages`は同一責務内で、recent用filterと直近タイムラインhistory用filterを2つ持つ
+1つのREQとしてよい。recent用filterのbootstrap windowは従来どおりpresenceと生存bubbleの
+復元に必要な範囲とし、timeline history用filterは`limit: 20`で取得する。`world-positions`は
+従来どおり1つのfilterを持つ。したがって、logical primaryの数を増やさずにREQ内の複数filterを
+使用する構成を今回の仕様とする。
 
 RelayごとのWebSocket接続自体をsubscriptionごとに別接続へ分ける必要はなく、同一Relay接続上で複数subscriptionを管理してよい。
 
@@ -444,13 +449,19 @@ RelayごとのWebSocket接続自体をsubscriptionごとに別接続へ分ける
 - `l = chat`
 - 初期同期に必要な `since`
 
-初期取得したkind 42は、
+recent用filterで初期取得したkind 42は、
 
 - presence activity
 - current position evidence
 - 入室時点でまだ生存しているフキダシの復元
 
 に利用できる。
+
+timeline history用filterで取得した古いkind 42はtimeline表示には利用するが、presence activity、
+current position evidence、生存bubble復元の根拠には利用しない。transportのbootstrap unionに
+含まれるeventはclient側でevent ID dedupeし、`created_at >= messageSince`の境界をinitial
+bootstrap後のlive/reconnect処理でも維持する。古いeventをlive callbackで受け取った場合も
+presenceやbubbleを変更せず、timelineへの取り込みだけを行う。
 
 message subscriptionの具体的なbootstrap期間は、presence timeoutとフキダシの最大表示寿命の双方を満たす範囲とする。
 
@@ -504,6 +515,10 @@ safety marginの具体値は製品仕様として現時点では固定しない�
 
 を更新する。
 
+ただし、`created_at < messageSince`のhistory eventはこのrecent world state更新の対象外とし、
+timelineだけを更新する。timelineのhistoryとliveは同じevent ID dedupe・NIP-01 sort・最大20件の
+stateへ渡す。
+
 フキダシ側の具体的処理は [`SPEC-40-会話・フキダシ.md`](./SPEC-40-会話・フキダシ.md) を正とする。
 
 ### 再接続
@@ -511,6 +526,8 @@ safety marginの具体値は製品仕様として現時点では固定しない�
 Relay接続が切れてsubscriptionを再作成する場合も、catch-up取得とlive更新の間に意図的な空白期間を作らない。
 
 再接続時は、直前に正常処理した時点より少し前から再取得する方法、または初期bootstrap範囲を再取得する方法を使用できる。
+再接続で同じ`world-messages`のrecent + `limit:20` history filter bundleを再送する場合も、
+`messageSince`境界を変更せず、history-only eventをpresenceやbubble evidenceへ昇格させない。
 
 重複して受信したeventはevent ID等によって重複排除する。
 

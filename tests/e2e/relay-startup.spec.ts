@@ -37,6 +37,8 @@ function profileDialog(page: Page) {
 }
 
 async function openProfile(page: Page): Promise<void> {
+	const timeline = page.getByLabel('Recent message timeline');
+	if (await timeline.isVisible()) await page.getByRole('button', { name: 'Hide recent messages' }).click();
 	await page.locator('.participant-profile-trigger').first().click();
 	await expect(profileDialog(page)).toBeVisible();
 }
@@ -162,18 +164,19 @@ async function installVirtualKeyboardStub(page: Page): Promise<void> {
 	});
 }
 
-async function installDelayedRelay(page: Page, options: { deferPrimaryEvents?: boolean } = {}): Promise<void> {
+async function installDelayedRelay(page: Page, options: { deferPrimaryEvents?: boolean; historyMessages?: readonly object[] } = {}): Promise<void> {
 	const events = testEvents();
-	await page.addInitScript(({ seedRelays, authoritativeRelays, channelEvent, primaryEvents, deferPrimaryEvents }) => {
+	await page.addInitScript(({ seedRelays, authoritativeRelays, channelEvent, primaryEvents, historyMessages, deferPrimaryEvents }) => {
 		type Listener = (event?: { type: string; data?: string; code?: number; reason?: string }) => void;
-		type PendingRequest = { socket: FakeWebSocket; subId: string; filter: Record<string, unknown> };
+		type PendingRequest = { socket: FakeWebSocket; subId: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] };
 		const seed = new Set<string>(seedRelays);
 		const authoritative = new Set<string>(authoritativeRelays);
 		const pendingMetadata: PendingRequest[] = [];
 		const pendingPrimary: PendingRequest[] = [];
 		const activePrimary: PendingRequest[] = [];
+		const timelineHistory = (historyMessages ?? []) as Array<Record<string, unknown>>;
 		const state = {
-			requests: [] as Array<{ url: string; subId: string; filter: Record<string, unknown> }>,
+			requests: [] as Array<{ url: string; subId: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] }>,
 			published: [] as Array<Record<string, unknown>>,
 			metadataReleased: false,
 			primaryEventsReleased: !deferPrimaryEvents,
@@ -189,9 +192,15 @@ async function installDelayedRelay(page: Page, options: { deferPrimaryEvents?: b
 			deliver(request.socket, ['EOSE', request.subId]);
 		};
 		const respondPrimaryEvent = (request: PendingRequest) => {
-			const kind = (request.filter.kinds as number[] | undefined)?.[0];
-			if (kind === 42) deliver(request.socket, ['EVENT', request.subId, primaryEvents.message]);
-			if (kind === 30078) deliver(request.socket, ['EVENT', request.subId, primaryEvents.position]);
+			if (request.filters.some((filter) => (filter.kinds as number[] | undefined)?.includes(42))) {
+				deliver(request.socket, ['EVENT', request.subId, primaryEvents.message]);
+			}
+			if (request.filters.some((filter) => (filter.kinds as number[] | undefined)?.includes(30078))) {
+				deliver(request.socket, ['EVENT', request.subId, primaryEvents.position]);
+			}
+			if (request.filters.some((filter) => filter.limit === 20)) {
+				for (const event of timelineHistory) deliver(request.socket, ['EVENT', request.subId, event]);
+			}
 		};
 		const respondPrimary = (request: PendingRequest) => {
 			if (state.primaryEventsReleased) respondPrimaryEvent(request);
@@ -230,9 +239,10 @@ async function installDelayedRelay(page: Page, options: { deferPrimaryEvents?: b
 					return;
 				}
 				if (packet[0] !== 'REQ') return;
-				const request = { socket: this, subId: packet[1] as string, filter: packet[2] as Record<string, unknown> };
+				const filters = packet.slice(2) as Record<string, unknown>[];
+				const request = { socket: this, subId: packet[1] as string, filter: filters[0] ?? {}, filters };
 				const relayUrl = new URL(this.url).toString();
-				state.requests.push({ url: relayUrl, subId: request.subId, filter: request.filter });
+				state.requests.push({ url: relayUrl, subId: request.subId, filter: request.filter, filters });
 				if (seed.has(relayUrl)) {
 					if (state.metadataReleased) respondMetadata(request);
 					else pendingMetadata.push(request);
@@ -270,7 +280,14 @@ async function installDelayedRelay(page: Page, options: { deferPrimaryEvents?: b
 				allowPositionPublishes: () => { state.rejectPositionPublishes = false; },
 				injectPosition: (event: object) => {
 					for (const request of activePrimary) {
-						if ((request.filter.kinds as number[] | undefined)?.includes(30078)) {
+						if (request.filters.some((filter) => (filter.kinds as number[] | undefined)?.includes(30078))) {
+							deliver(request.socket, ['EVENT', request.subId, event]);
+						}
+					}
+				},
+				injectMessage: (event: object) => {
+					for (const request of activePrimary) {
+						if (request.filters.some((filter) => (filter.kinds as number[] | undefined)?.includes(42))) {
 							deliver(request.socket, ['EVENT', request.subId, event]);
 						}
 					}
@@ -282,13 +299,14 @@ async function installDelayedRelay(page: Page, options: { deferPrimaryEvents?: b
 		authoritativeRelays: AUTHORITATIVE_RELAYS,
 		channelEvent: CHANNEL_EVENT,
 		primaryEvents: events,
+		historyMessages: options.historyMessages ?? [],
 		deferPrimaryEvents: options.deferPrimaryEvents ?? false
 	});
 }
 
 function relayState(page: Page) {
 	return page.evaluate(() => (window as typeof window & {
-		__relayStartupTest: { state: { requests: Array<{ url: string; filter: Record<string, unknown> }>; published: Array<{ id: string; kind: number }> }; releaseMetadata(): void; releasePrimaryEvents(): void; releasePrimary(): void; rejectMessagePublishes(): void; rejectPositionPublishes(): void; allowPositionPublishes(): void; injectPosition(event: object): void };
+		__relayStartupTest: { state: { requests: Array<{ url: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] }>; published: Array<{ id: string; kind: number }> }; releaseMetadata(): void; releasePrimaryEvents(): void; releasePrimary(): void; rejectMessagePublishes(): void; rejectPositionPublishes(): void; allowPositionPublishes(): void; injectPosition(event: object): void; injectMessage(event: object): void };
 	}).__relayStartupTest);
 }
 
@@ -438,6 +456,62 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('ehagaki-composer')).toHaveCount(0);
 		expect(hostOwned.requests()).toBe(0);
 		expect(consoleIssues).toEqual([]);
+	});
+
+	test('keeps history-only messages in the timeline without restoring their presence or bubbles', async ({ page }) => {
+		const historySecret = new Uint8Array(32).fill(20);
+		const createdAt = Math.floor(Date.now() / 1000) - 3_600;
+		const historyMessage = finalizeEvent(buildWorldMessageTemplate({
+			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' },
+			content: 'history-only message',
+			speechType: 'normal',
+			position: { x: 1, y: 1 },
+			createdAt
+		}), historySecret);
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { historyMessages: [historyMessage] });
+		await page.goto('/');
+		await expect(page.locator('.composer-dock')).toBeVisible();
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
+			AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) &&
+			(request.filter.kinds as number[])[0] === 42 &&
+			request.filters.length === 2 &&
+			request.filters.some((filter) => typeof filter.since === 'number') &&
+			request.filters.some((filter) => filter.limit === 20 && filter.since === undefined)
+		)).toBe(true);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+
+		await expect(page.locator(`[data-timeline-event-id="${historyMessage.id}"]`)).toHaveCount(1);
+		await expect(page.locator(`[data-participant-id="${historyMessage.pubkey}"]`)).toHaveCount(0);
+		await expect(page.locator(`[data-bubble-id="${historyMessage.id}"]`)).toHaveCount(0);
+	});
+
+	test('continues timeline ingestion while its overlay is hidden', async ({ page }) => {
+		const liveSecret = new Uint8Array(32).fill(21);
+		const liveMessage = finalizeEvent(buildWorldMessageTemplate({
+			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' },
+			content: 'arrived while hidden',
+			speechType: 'normal',
+			position: { x: 3, y: 3 },
+			createdAt: Math.floor(Date.now() / 1000)
+		}), liveSecret);
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page);
+		await page.goto('/');
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
+			AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) &&
+			(request.filter.kinds as number[])[0] === 42
+		)).toBe(true);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		await expect(page.locator('.participant')).toHaveCount(2);
+		await expect(page.getByLabel('Recent message timeline')).toBeVisible();
+		await page.getByRole('button', { name: 'Hide recent messages' }).click();
+		await expect(page.getByLabel('Recent message timeline')).toBeHidden();
+		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectMessage(event: object): void } }).__relayStartupTest.injectMessage(event), liveMessage);
+		await page.getByRole('button', { name: 'Show recent messages' }).click();
+		await expect(page.locator(`[data-timeline-event-id="${liveMessage.id}"]`)).toHaveCount(1);
 	});
 
 	for (const viewport of [

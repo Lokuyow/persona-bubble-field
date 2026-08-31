@@ -20,6 +20,7 @@
 		getFieldAreaBounds,
 		getFieldWorldSize,
 		getResponsiveCellSize,
+		MOBILE_FIELD_BREAKPOINT,
 		mergedBubblePreferredAnchor,
 		normalBubblePreferredAnchor,
 		placeBubbles,
@@ -52,6 +53,7 @@
 	} from '$lib/initialProfilePublication';
 	import { projectPresence } from '$lib/presenceProjection';
 	import { createPresenceState, getActiveOccupancy, getParticipant, type PresenceState } from '$lib/presence';
+	import { addRecentMessage, createRecentMessageTimeline, type RecentMessageTimeline } from '$lib/recentMessageTimeline';
 	import { getVirtualKeyboardBottomInset, getVisualViewportKeyboardInset, type ViewportRect } from '$lib/keyboardInset';
 	import type { ParsedWorldMessage } from '$lib/nostrProtocol';
 	import HostOwnedComposerLite from '$lib/HostOwnedComposerLite.svelte';
@@ -100,6 +102,10 @@
 	let lastPlacedAnchorById: Record<string, WorldPoint> = {};
 	let lastVisibilityKey: string | null = null;
 	let colorByPubkey: Record<string, AvatarColor> = {};
+	let recentMessageTimeline: RecentMessageTimeline = [];
+	let timelineOverflowById: Record<string, boolean> = {};
+	let timelineInitialized = false;
+	let timelineOpen = false;
 	let connectionStatus: WorldReadConnectionStatus = { kind: 'bootstrapping' };
 	let selfAccount: AccountSnapshot | null = null;
 	let selfPositionWriteState: SelfPositionWriteState = { kind: 'unavailable' };
@@ -395,6 +401,8 @@
 		let mounted = true;
 		let startRequested = false;
 		let session: ReturnType<typeof createWorldReadSession> | null = null;
+		timelineInitialized = true;
+		timelineOpen = window.innerWidth > MOBILE_FIELD_BREAKPOINT;
 		const reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
 		prefersReducedMotion = reducedMotionQuery.matches;
 		const handleReducedMotionChange = () => {
@@ -422,6 +430,7 @@
 				if (devSpeech === 'linebreak-five') seedDevSpeechLinebreakFiveFixture();
 				if (devSpeech === 'long') seedDevSpeechLongFixture();
 				if (devSpeech === 'linebreak-overflow') seedDevSpeechLinebreakOverflowFixture();
+				if (devSpeech === 'timeline') seedDevRecentMessageTimelineFixture();
 			}
 		}
 
@@ -460,6 +469,7 @@
 				selfAccount,
 				onPresenceChanged: setPresence,
 				onLiveMessage: receiveLiveMessage,
+				onTimelineMessage: receiveTimelineMessage,
 				onStatusChanged: (status) => {
 					connectionStatus = status;
 					if (status.kind === 'failed') setComposerTerminalError(new Error(status.message));
@@ -485,6 +495,10 @@
 				if (!mounted) return;
 				setPresence(bootstrap.presence);
 				restoreBootstrapConversation(bootstrap.messages, bootstrap.presence, Date.now());
+				recentMessageTimeline = createRecentMessageTimeline([
+					...recentMessageTimeline,
+					...bootstrap.timelineMessages
+				]);
 				session.completeBootstrap();
 				void session.enterSelf();
 				if (characterProfilePublication) {
@@ -695,6 +709,27 @@
 				const next = { ...bubbleOverflowById };
 				delete next[id];
 				bubbleOverflowById = next;
+			}
+		};
+	}
+
+	function observeTimelineContent(node: HTMLElement, id: string) {
+		const update = () => {
+			timelineOverflowById = {
+				...timelineOverflowById,
+				[id]: node.scrollHeight > node.clientHeight + 1
+			};
+		};
+		const observer = new ResizeObserver(update);
+		observer.observe(node);
+		update();
+
+		return {
+			destroy() {
+				observer.disconnect();
+				const next = { ...timelineOverflowById };
+				delete next[id];
+				timelineOverflowById = next;
 			}
 		};
 	}
@@ -976,10 +1011,37 @@
 	function resetSandbox(): void {
 		if (!devWorldSandboxEnabled) return;
 		conversationState = createConversationState();
+		recentMessageTimeline = [];
+		timelineOverflowById = {};
 		lastPlacedAnchorById = {};
 		lastVisibilityKey = null;
 		colorByPubkey = {};
 		setPresence(resetDevWorldPresence(FIELD, Date.now()));
+	}
+
+	function seedDevRecentMessageTimelineFixture(): void {
+		if (!devWorldSandboxEnabled) return;
+		const now = Math.floor(Date.now() / 1000);
+		const activePubkey = 'a'.repeat(64);
+		const outsidePubkey = 'f'.repeat(64);
+		setPresence(createPresenceState(FIELD, Date.now(), [
+			{ id: DEV_WORLD_SELF_ID, position: { x: 7, y: 3 } },
+			{ id: activePubkey, position: { x: 11, y: 3 } }
+		]));
+		const messages: ParsedWorldMessage[] = Array.from({ length: 24 }, (_, index) => ({
+			id: index === 23 ? 'dev-timeline-duplicate' : `dev-timeline-${String(index).padStart(2, '0')}`,
+			pubkey: index === 21 ? outsidePubkey : activePubkey,
+			createdAt: now - Math.floor((23 - index) / 3),
+			content: index === 10
+				? 'line 1\nline 2\nline 3\nline 4\nline 5\nline 6'
+				: index === 11 || index === 12
+					? 'same content, different event'
+					: `timeline message ${index + 1}`,
+			speechType: index % 3 === 0 ? 'shout' : index % 3 === 1 ? 'monologue' : 'normal',
+			position: { x: 1, y: 1 }
+		}));
+		messages.push({ ...messages[22], id: 'dev-timeline-duplicate', content: 'duplicate event ID' });
+		recentMessageTimeline = createRecentMessageTimeline(messages);
 	}
 
 	function seedDevSpeechNormalFixture(): void {
@@ -1158,6 +1220,28 @@
 		pushState('', { ...page.state, profileCharacterId: characterId });
 	}
 
+	function timelineCharacter(pubkey: string): Character {
+		return pubkey === DEV_WORLD_SELF_ID
+			? getDevWorldCharacter(selectedCharacterId)
+			: deriveCharacterFromPubkey(pubkey, CHARACTER_CATALOG);
+	}
+
+	function timelineTone(pubkey: string): AvatarColor | null {
+		return colorByPubkey[pubkey] ?? null;
+	}
+
+	function receiveTimelineMessage(message: ParsedWorldMessage): void {
+		recentMessageTimeline = addRecentMessage(recentMessageTimeline, message);
+	}
+
+	function showRecentMessageTimeline(): void {
+		timelineOpen = true;
+	}
+
+	function hideRecentMessageTimeline(): void {
+		timelineOpen = false;
+	}
+
 	function handleProfileOpenChange(open: boolean): void {
 		if (open) stopKeyboardHold();
 		if (!open) history.back();
@@ -1333,6 +1417,52 @@
 			aria-hidden="true"
 		>
 		</div>
+		{#if timelineInitialized && timelineOpen}
+			<aside class="recent-message-timeline" aria-label="Recent message timeline">
+				<header class="timeline-header">
+					<h2>Recent messages</h2>
+					<button
+						class="timeline-hide-control"
+						type="button"
+						aria-label="Hide recent messages"
+						on:click={hideRecentMessageTimeline}
+					>×</button>
+				</header>
+				<div class="timeline-scroll">
+					{#each recentMessageTimeline as message (message.id)}
+						{@const character = timelineCharacter(message.pubkey)}
+						{@const tone = timelineTone(message.pubkey)}
+						<article
+							class="timeline-entry"
+							data-timeline-event-id={message.id}
+							data-timeline-pubkey={message.pubkey}
+							data-timeline-created-at={message.createdAt}
+							data-timeline-tone={tone ?? 'default'}
+						>
+							<button
+								class={`timeline-name${tone ? ` tone-${tone}` : ''}`}
+								type="button"
+								aria-label={`${character.name} のプロフィールを開く`}
+								on:click={(event) => openProfile(character.characterId, event.currentTarget as HTMLButtonElement)}
+							>{character.name}</button>
+							<div class="timeline-content-shell">
+								<p class="timeline-content" use:observeTimelineContent={message.id}>{message.content}</p>
+								{#if timelineOverflowById[message.id]}
+									<span class="timeline-ellipsis" aria-hidden="true">…</span>
+								{/if}
+							</div>
+						</article>
+					{/each}
+				</div>
+			</aside>
+		{:else if timelineInitialized}
+			<button
+				class="timeline-show-control"
+				type="button"
+				aria-label="Show recent messages"
+				on:click={showRecentMessageTimeline}
+			>Recent messages</button>
+		{/if}
 		<div
 			class="field-area"
 			style={`top: ${fieldAreaBounds.y}px; left: ${fieldAreaBounds.x}px; width: ${fieldAreaBounds.width}px; height: ${fieldAreaBounds.height}px;`}
@@ -1653,6 +1783,150 @@
 			linear-gradient(135deg, rgba(213, 219, 198, 0.44), transparent 52%),
 			#e8e7da;
 		content: '';
+	}
+
+	.recent-message-timeline {
+		position: absolute;
+		top: 84px;
+		bottom: 16px;
+		left: 16px;
+		z-index: 9;
+		display: flex;
+		width: min(328px, calc(100% - 32px));
+		max-height: calc(100% - 100px);
+		flex-direction: column;
+		border: 1px solid rgba(57, 67, 64, 0.18);
+		border-radius: 18px;
+		background: rgba(247, 247, 239, 0.94);
+		box-shadow: 0 14px 36px rgba(58, 70, 61, 0.18);
+		backdrop-filter: blur(10px);
+		color: #374345;
+		pointer-events: auto;
+	}
+
+	.timeline-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 12px 12px 10px 16px;
+		border-bottom: 1px solid rgba(57, 67, 64, 0.12);
+		flex: 0 0 auto;
+	}
+
+	.timeline-header h2 {
+		margin: 0;
+		color: #596662;
+		font-size: 11px;
+		font-weight: 900;
+		letter-spacing: 0.1em;
+		text-transform: uppercase;
+	}
+
+	.timeline-hide-control,
+	.timeline-show-control {
+		border: 1px solid rgba(57, 67, 64, 0.16);
+		border-radius: 999px;
+		background: rgba(255, 255, 255, 0.78);
+		box-shadow: 0 4px 10px rgba(58, 70, 61, 0.1);
+		color: #596662;
+		font-weight: 900;
+	}
+
+	.timeline-hide-control {
+		display: grid;
+		width: 30px;
+		height: 30px;
+		padding: 0;
+		place-items: center;
+		font-size: 20px;
+		line-height: 1;
+	}
+
+	.timeline-scroll {
+		min-height: 0;
+		padding: 4px 8px 10px;
+		overflow-y: auto;
+		overscroll-behavior: contain;
+	}
+
+	.timeline-entry {
+		padding: 10px 8px 11px;
+		border-bottom: 1px solid rgba(57, 67, 64, 0.1);
+	}
+
+	.timeline-entry:last-child { border-bottom: 0; }
+
+	.timeline-name {
+		max-width: 100%;
+		padding: 0;
+		border: 0;
+		background: transparent;
+		color: #596662;
+		font-size: 12px;
+		font-weight: 900;
+		letter-spacing: 0.02em;
+		text-align: left;
+		text-decoration: underline;
+		text-decoration-color: rgba(89, 102, 98, 0.35);
+		text-underline-offset: 3px;
+	}
+
+	.timeline-name.tone-coral { color: hsl(12, 96%, 42%); }
+	.timeline-name.tone-lavender { color: hsl(250, 72%, 42%); }
+	.timeline-name.tone-mint { color: hsl(145, 68%, 31%); }
+	.timeline-name.tone-yellow { color: hsl(48, 82%, 34%); }
+	.timeline-name.tone-sky { color: hsl(188, 72%, 32%); }
+	.timeline-name.tone-peach { color: hsl(28, 82%, 38%); }
+	.timeline-name.tone-rose { color: hsl(340, 72%, 40%); }
+	.timeline-name.tone-blue { color: hsl(210, 72%, 37%); }
+
+	.timeline-content-shell {
+		position: relative;
+		min-width: 0;
+	}
+
+	.timeline-content {
+		max-height: calc(1.45em * 5);
+		margin: 6px 0 0;
+		overflow: hidden;
+		color: #374345;
+		font-size: 13px;
+		font-weight: 700;
+		letter-spacing: 0.01em;
+		line-height: 1.45;
+		overflow-wrap: anywhere;
+		white-space: pre-line;
+	}
+
+	.timeline-ellipsis {
+		position: absolute;
+		right: 0;
+		bottom: 0;
+		padding-left: 0.35em;
+		background: #f7f7ef;
+		color: #374345;
+		font-size: 13px;
+		font-weight: 900;
+		line-height: 1.45;
+	}
+
+	.timeline-show-control {
+		position: absolute;
+		top: 84px;
+		left: 16px;
+		z-index: 9;
+		min-height: 38px;
+		padding: 0 13px;
+		font-size: 11px;
+		letter-spacing: 0.03em;
+		pointer-events: auto;
+	}
+
+	.timeline-hide-control:focus-visible,
+	.timeline-name:focus-visible,
+	.timeline-show-control:focus-visible {
+		outline: 3px solid #6dabb9;
+		outline-offset: 2px;
 	}
 
 	.field-scene {
