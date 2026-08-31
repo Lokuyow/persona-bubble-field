@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
+	import { browser } from '$app/environment';
 	import { pushState } from '$app/navigation';
 	import { page } from '$app/state';
 	import { asset, base } from '$app/paths';
@@ -78,6 +79,8 @@
 	} satisfies Record<'normal' | 'merged', Size>;
 	const MOVEMENT_ANIMATION_DURATION_MS = 400;
 	const MOVEMENT_DIRECTIONS: readonly Direction[] = ['up', 'down', 'left', 'right'];
+	const INITIAL_COMPOSER_PREFERRED_HEIGHT = 50;
+	const initialDevWorldSandboxEnabled = browser && isDevWorldSandboxEnabled(import.meta.env.DEV, page.url.searchParams);
 
 	type AvatarColor = 'coral' | 'lavender' | 'mint' | 'yellow' | 'sky' | 'peach' | 'rose' | 'blue';
 	type Participant = {
@@ -102,8 +105,8 @@
 	let composerPreferredHeight: number | null = null;
 	let composerKeyboardInset = 0;
 	let worldSession: ReturnType<typeof createWorldReadSession> | null = null;
-	let runtimeMode: 'unresolved' | 'relay' | 'dev' = 'unresolved';
-	let devWorldSandboxEnabled = false;
+	let runtimeMode: 'relay' | 'dev' = initialDevWorldSandboxEnabled ? 'dev' : 'relay';
+	let devWorldSandboxEnabled = initialDevWorldSandboxEnabled;
 	let pendingComposerSubmission: Readonly<{
 		resolve: () => void;
 		reject: (error: Error) => void;
@@ -396,8 +399,6 @@
 			if (prefersReducedMotion) syncVisualToCanonical();
 		};
 		reducedMotionQuery.addEventListener('change', handleReducedMotionChange);
-		devWorldSandboxEnabled = isDevWorldSandboxEnabled(import.meta.env.DEV, new URLSearchParams(window.location.search));
-		runtimeMode = devWorldSandboxEnabled ? 'dev' : 'relay';
 
 		if (devWorldSandboxEnabled) {
 			selectedCharacterId = resolveDevWorldCharacterId(new URLSearchParams(window.location.search));
@@ -1131,9 +1132,8 @@
 <main
 	class="app-shell"
 	class:composer-available={runtimeMode === 'relay'}
-	class:composer-preferred-height={composerPreferredHeight !== null}
 	class:composer-keyboard-visible={composerKeyboardInset > 0}
-	style={`--composer-keyboard-inset: ${composerKeyboardInset}px;${composerPreferredHeight === null ? '' : `--composer-preferred-height: ${composerPreferredHeight}px;`}`}
+	style={`--composer-keyboard-inset: ${composerKeyboardInset}px;--composer-initial-preferred-height: ${INITIAL_COMPOSER_PREFERRED_HEIGHT}px;${composerPreferredHeight === null ? '' : `--composer-preferred-height: ${composerPreferredHeight}px;`}`}
 >
 	<div class="topbar">
 		<div class="brand-lockup">
@@ -1308,7 +1308,14 @@
 	.app-shell {
 		--composer-dock-padding-block: 8px;
 		--composer-dock-border-width: 1px;
-		--composer-dock-height: clamp(132px, 20svh, 160px);
+		--composer-preferred-height: var(--composer-initial-preferred-height);
+		--composer-dock-height: calc(
+			var(--composer-preferred-height)
+			+ var(--composer-dock-padding-block)
+			+ var(--composer-dock-padding-block)
+			+ var(--composer-dock-border-width)
+			+ env(safe-area-inset-bottom)
+		);
 		position: relative;
 		display: flex;
 		height: 100svh;
@@ -1415,16 +1422,6 @@
 
 	.composer-available .field-viewport {
 		min-height: 0;
-	}
-
-	.composer-available.composer-preferred-height {
-		--composer-dock-height: calc(
-			var(--composer-preferred-height)
-			+ var(--composer-dock-padding-block)
-			+ var(--composer-dock-padding-block)
-			+ var(--composer-dock-border-width)
-			+ env(safe-area-inset-bottom)
-		);
 	}
 
 	.composer-available {
