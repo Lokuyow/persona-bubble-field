@@ -694,6 +694,7 @@
 	}
 
 	function syncVisibility(key: string, visiblePubkeys: ReadonlySet<string>) {
+		if (key === '' && lastVisibilityKey === null) return;
 		if (key === lastVisibilityKey) return;
 		lastVisibilityKey = key;
 		conversationState = applyVisibility(conversationState, visiblePubkeys);

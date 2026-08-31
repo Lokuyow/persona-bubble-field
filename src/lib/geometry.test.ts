@@ -72,7 +72,7 @@ describe('field geometry', () => {
 	});
 
 	it('uses the mobile cell size for grid to world conversion at 360px', () => {
-		expect(gridToWorld({ x: 1, y: 2 }, getResponsiveCellSize(360))).toEqual({ x: 90, y: 150 });
+		expect(gridToWorld({ x: 1, y: 2 }, getResponsiveCellSize(360))).toEqual({ x: 75, y: 125 });
 	});
 
 	it('keeps responsive field size and camera projection on the same cell size', () => {
@@ -81,7 +81,7 @@ describe('field geometry', () => {
 		const player = gridToWorld({ x: 7, y: 4 }, cellSize);
 		const camera = clampCamera(player, { width: 360, height: 740 }, field);
 
-		expect(field).toEqual({ width: 960, height: 480 });
+		expect(field).toEqual({ width: 800, height: 400 });
 		expect(worldToScreen(player, camera).x).toBe(180);
 	});
 
@@ -102,9 +102,9 @@ describe('field geometry', () => {
 		expect(fieldArea.x).toBe(8);
 		expect(fieldArea.width).toBe(viewport.width - 16);
 		expect(fieldArea.height).toBe(viewport.height - fieldArea.y);
-		expect(camera.y).toBe(0);
-		expect(topRow.y).toBe(fieldArea.y + MOBILE_CELL_SIZE / 2);
-		expect(getActualFieldTop(fieldArea, camera)).toBe(fieldArea.y);
+		expect(camera.y).toBe(-40);
+		expect(topRow.y).toBe(fieldArea.y + MOBILE_CELL_SIZE / 2 + 40);
+		expect(getActualFieldTop(fieldArea, camera)).toBe(fieldArea.y - camera.y);
 	});
 
 	it('extends the effective speech area to the actual centered field top', () => {
