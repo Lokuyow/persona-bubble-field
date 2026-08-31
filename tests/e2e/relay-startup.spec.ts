@@ -62,7 +62,7 @@ async function installHostOwnedStub(page: Page): Promise<{ requests: () => numbe
 			body: `class EhagakiComposer extends HTMLElement {
   editorIsEmpty = null;
   constructor() { super(); this.attachShadow({ mode: 'open' }); }
-  configureHostOwned(options) { this.options = options; }
+  configureHostOwned(options) { this.options = options; window.__ehagakiHostOwnedOptions = options; }
   whenReady() { return Promise.resolve(); }
   connectedCallback() {
     if (this.shadowRoot.childElementCount) return;
@@ -294,6 +294,40 @@ async function chooseHorizontalMove(page: Page): Promise<{ key: 'ArrowLeft' | 'A
 }
 
 test.describe('Relay startup', () => {
+	test('passes the Host-owned editor submit button option without enabling the keyboard button bar', async ({ page }) => {
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page);
+		await page.goto('/');
+		await expect(page.locator('ehagaki-composer')).toBeVisible();
+
+		const options = await page.evaluate(() => {
+			const options = (window as typeof window & {
+				__ehagakiHostOwnedOptions?: {
+					editorSubmitButtonEnabled?: boolean;
+					keyboardButtonBarEnabled?: boolean;
+					enterKeyBehavior?: string;
+					editorMinLines?: number;
+					editorMaxLines?: number;
+				};
+			}).__ehagakiHostOwnedOptions;
+			return options && {
+				editorSubmitButtonEnabled: options.editorSubmitButtonEnabled,
+				keyboardButtonBarEnabled: options.keyboardButtonBarEnabled,
+				enterKeyBehavior: options.enterKeyBehavior,
+				editorMinLines: options.editorMinLines,
+				editorMaxLines: options.editorMaxLines
+			};
+		});
+
+		expect(options).toEqual({
+			editorSubmitButtonEnabled: true,
+			keyboardButtonBarEnabled: false,
+			enterKeyBehavior: 'submit',
+			editorMinLines: 1,
+			editorMaxLines: 3
+		});
+	});
+
 	test('renders DEV sandbox without Composer in the initial response or after hydration', async ({ page }) => {
 		const hostOwned = await installHostOwnedStub(page);
 		const consoleIssues: string[] = [];
