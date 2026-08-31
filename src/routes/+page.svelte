@@ -1814,19 +1814,23 @@
 		left: 50%;
 		display: block;
 		width: max-content;
-		max-width: calc(var(--avatar-size) - 4px);
+		max-width: calc(var(--avatar-size) + 4px);
 		box-sizing: border-box;
 		transform: translateX(-50%);
 		overflow: hidden;
 		white-space: nowrap;
 		text-overflow: ellipsis;
-		padding: 2px 7px 3px;
+		padding: 1px 6px 1px;
 		border-radius: 999px;
 		background: rgba(247, 247, 239, 0.74);
 		color: #596662;
-		font-size: 10px;
+		font-size: 12px;
 		font-weight: 700;
 		letter-spacing: 0.03em;
+
+		@media (max-width: 700px) {
+			font-size: 8px;
+		}
 	}
 
 	.tail-layer,
