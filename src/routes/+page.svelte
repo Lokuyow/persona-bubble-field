@@ -1517,7 +1517,6 @@
 						{@const character = timelineCharacter(message.pubkey)}
 						{@const tone = timelineTone(message.pubkey)}
 						<article class="timeline-entry" use:observeTimelineEntry={message.id}>
-							<span class={`timeline-name${tone ? ` tone-${tone}` : ''}`}>{character.name}</span>
 							<div class="timeline-content-shell">
 								<div class="timeline-text">
 									<span class={`timeline-name${tone ? ` tone-${tone}` : ''}`}>{character.name}</span>

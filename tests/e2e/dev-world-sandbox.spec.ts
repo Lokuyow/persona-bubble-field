@@ -174,6 +174,19 @@ test.describe('DEV World Sandbox', () => {
 		const visibleEntries = timeline.locator('.timeline-visible-entries .timeline-entry');
 		await expect(timeline).toBeVisible();
 		await expect(visibleEntries).toHaveCount(20);
+		const measurementParity = await visibleEntries.first().evaluate((entry) => {
+			const measurement = document.querySelector<HTMLElement>('.timeline-measurements .timeline-entry');
+			if (!measurement) throw new Error('Expected a matching timeline measurement entry.');
+			return {
+				visibleHeight: entry.getBoundingClientRect().height,
+				measurementHeight: measurement.getBoundingClientRect().height,
+				visibleNames: entry.querySelectorAll('.timeline-name').length,
+				measurementNames: measurement.querySelectorAll('.timeline-name').length
+			};
+		});
+		expect(Math.abs(measurementParity.visibleHeight - measurementParity.measurementHeight)).toBeLessThan(1);
+		expect(measurementParity.visibleNames).toBe(1);
+		expect(measurementParity.measurementNames).toBe(1);
 		await expect(timeline.locator('img')).toHaveCount(0);
 		const presentation = await timeline.evaluate((element) => {
 			const style = getComputedStyle(element);
