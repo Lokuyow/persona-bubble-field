@@ -32,6 +32,15 @@ const CHANNEL_EVENT = {
 
 const HOST_OWNED_ENTRY = 'https://lokuyow.github.io/ehagaki/web-component/host-owned/ehagaki-composer.js';
 
+function profileDialog(page: Page) {
+	return page.getByRole('dialog');
+}
+
+async function openProfile(page: Page): Promise<void> {
+	await page.locator('.participant-profile-trigger').first().click();
+	await expect(profileDialog(page)).toBeVisible();
+}
+
 function testEvents() {
 	const secret = new Uint8Array(32).fill(19);
 	const createdAt = Math.floor(Date.now() / 1000);
@@ -61,9 +70,12 @@ async function installHostOwnedStub(page: Page): Promise<{ requests: () => numbe
 			contentType: 'application/javascript',
 			body: `class EhagakiComposer extends HTMLElement {
   editorIsEmpty = null;
+  editor = null;
   constructor() { super(); this.attachShadow({ mode: 'open' }); }
   configureHostOwned(options) { this.options = options; window.__ehagakiHostOwnedOptions = options; }
   whenReady() { return Promise.resolve(); }
+  focusEditor() { this.editor?.focus(); }
+  blurEditor() { this.editor?.blur(); }
   connectedCallback() {
     if (this.shadowRoot.childElementCount) return;
     window.__ehagakiAbortActiveSubmit = () => this.activeController?.abort();
@@ -87,6 +99,7 @@ async function installHostOwnedStub(page: Page): Promise<{ requests: () => numbe
       catch { /* Host-owned contract: retain the failed content. */ }
       finally { this.activeController = null; }
     });
+    this.editor = textarea;
     this.shadowRoot.append(textarea, button);
     window.__ehagakiSetPreferredHeight = (height) => this.dispatchEvent(new CustomEvent('ehagaki-preferred-height-change', { bubbles: true, composed: true, detail: { height } }));
     if (window.__ehagakiDeferComposerEmptyState) {
@@ -732,6 +745,76 @@ test.describe('Relay startup', () => {
 		expect(Math.abs(finalX - x)).toBeGreaterThanOrEqual(2);
 		await page.clock.runFor(1_000);
 		await expect(self).toHaveAttribute('data-position', finalPosition ?? '');
+	});
+
+	test('focuses the Composer with N and blurs it with Escape before WASD movement', async ({ page }) => {
+		const editor = await openReadyRelayWorld(page);
+		const self = page.locator('.participant[data-self="true"]');
+		const move = await chooseHorizontalMove(page);
+
+		await page.locator('.participant').first().focus();
+		await page.keyboard.press('n');
+		await expect(editor).toBeFocused();
+
+		await editor.fill('keep this content');
+		await page.keyboard.press('Escape');
+		await expect(editor).not.toBeFocused();
+		await expect(editor).toHaveValue('keep this content');
+		await page.keyboard.press(move.key === 'ArrowRight' ? 'd' : 'a');
+		await expect(self).toHaveAttribute('data-position', move.expected);
+	});
+
+	test('keeps WASD and N as normal Composer input while the editor is focused', async ({ page }) => {
+		const editor = await openReadyRelayWorld(page);
+		const self = page.locator('.participant[data-self="true"]');
+		const before = await self.getAttribute('data-position');
+
+		await editor.fill('');
+		await editor.focus();
+		for (const key of ['w', 'a', 's', 'd', 'n']) await page.keyboard.press(key);
+		await expect(self).toHaveAttribute('data-position', before ?? '');
+		await expect(editor).toHaveValue('wasdn');
+	});
+
+	test('does not intercept Composer shortcuts while a profile dialog is open', async ({ page }) => {
+		const editor = await openReadyRelayWorld(page);
+		const self = page.locator('.participant[data-self="true"]');
+		const before = await self.getAttribute('data-position');
+
+		await openProfile(page);
+		await page.keyboard.press('d');
+		await page.keyboard.press('n');
+		await expect(self).toHaveAttribute('data-position', before ?? '');
+		await expect(editor).not.toBeFocused();
+		await expect(profileDialog(page)).toBeVisible();
+	});
+
+	test('does not intercept WASD or N during composition or with modifiers in the Composer', async ({ page }) => {
+		const editor = await openReadyRelayWorld(page);
+		const self = page.locator('.participant[data-self="true"]');
+		const before = await self.getAttribute('data-position');
+
+		await page.locator('.participant').first().focus();
+		await page.keyboard.press('Shift+d');
+		await page.keyboard.press('Control+n');
+		await page.keyboard.press('Alt+w');
+		await page.keyboard.press('Meta+a');
+		await page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', {
+			key: 'd', code: 'KeyD', isComposing: true, bubbles: true
+		})));
+		await page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', {
+			key: 'n', code: 'KeyN', isComposing: true, bubbles: true
+		})));
+		await expect(self).toHaveAttribute('data-position', before ?? '');
+		await expect(editor).not.toBeFocused();
+
+		await editor.fill('composition content');
+		await editor.focus();
+		await editor.evaluate((element) => element.dispatchEvent(new KeyboardEvent('keydown', {
+			key: 'Escape', code: 'Escape', isComposing: true, bubbles: true, composed: true
+		})));
+		await expect(editor).toBeFocused();
+		await expect(editor).toHaveValue('composition content');
 	});
 
 	test('retargets active participant and camera animation when another participant updates', async ({ page }) => {

@@ -70,9 +70,23 @@ Editorが完全にemptyのときだけ修飾キーなしのArrowキーを移動�
 non-emptyのEditor、IME composition中、または修飾キー付きのArrowキーでは、
 Editorまたはブラウザ本来のカーソル・選択・OS操作を優先する。
 
+PCでは修飾キーなしの物理W/A/S/Dキーでも移動できる。キーの対応は
+`KeyboardEvent.code` を基準に、`KeyW` = 上、`KeyA` = 左、`KeyS` = 下、
+`KeyD` = 右とする。W/A/S/DはComposer editorにフォーカスしていない場合だけ
+移動に使用し、Editorがemptyでも本文入力を優先する。input / textarea /
+select / contenteditable等の別の入力操作中、IME composition中、修飾キー付き、
+またはプロフィールDialog等の既存仕様上移動を無効化する状態では、W/A/S/Dを
+横取りしない。
+
 Arrowキーは長押し中も継続して移動できる。ただしposition同期の制約により、
 移動は1秒あたり最大2回とする。成立したposition変化は短いvisual animationで
 表示するが、animationはRelayで確定する前のローカルposition確定を意味しない。
+
+W/A/S/Dの長押しもArrowキーと同じmovement hold driverを使用し、1秒あたり
+最大2回、position publish、keyup、window blur、visibilitychange等の既存制御を
+共有する。browserのrepeat eventを独立した移動requestとして扱わない。Arrowキーの
+既存挙動は変更しない。特に、Composer editorが完全にemptyの場合のArrow移動は
+維持する。
 
 斜め移動は行わない。
 

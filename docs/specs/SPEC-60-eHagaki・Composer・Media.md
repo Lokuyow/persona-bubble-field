@@ -59,7 +59,21 @@ MVPでは主として以下を所有する。
 
 eHagakiはComposer Outputを親クライアントへ渡し、親クライアントが最終Nostr eventを構築する。
 
-具体的なWeb Component APIやデータ構造はeHagaki側の設計で決定する。
+Host-owned Composer Liteの公開component APIには、親クライアントがComposer
+editorへフォーカスを移すための `focusEditor()` と、editorからフォーカスを外す
+ための `blurEditor()` を含める。persona-bubble-fieldは、Host-ownedの
+component境界と型定義を通じてこの2つのAPIを利用し、Shadow DOM内部の
+`.ProseMirror` 等のselectorへ依存しない。
+
+PCでEditorにフォーカスしている状態のEscapeは、本文やselectionを消去せずに
+`blurEditor()`を呼び出してEditorからフォーカスを外す。ただしIME composition中の
+Escapeは親クライアントのshortcutとして横取りしない。Editor外で、他の
+input / textarea / select / contenteditable等の入力操作中でなく、プロフィール
+Dialog等が開いていない状態の修飾キーなし物理 `KeyN` は `focusEditor()` を呼び出す。
+Editorが既にフォーカスされている場合、Nは通常の本文入力とする。shortcutを実際に
+処理した場合だけ、必要なbrowser defaultを抑止する。
+
+その他の具体的なWeb Component APIやデータ構造はeHagaki側の設計で決定する。
 
 親クライアント管理で利用する場合、eHagaki自身へのNostrログインを投稿可能条件としない。
 

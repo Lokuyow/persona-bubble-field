@@ -761,6 +761,49 @@ test.describe('DEV World Sandbox', () => {
 		await expect(self).toHaveAttribute('data-position', '10,3');
 	});
 
+	test('moves in each direction with physical WASD keys', async ({ page }) => {
+		await openDevWorld(page);
+
+		const self = page.locator('.participant').first();
+		for (const [key, expected] of [
+			['w', '7,2'],
+			['a', '6,2'],
+			['s', '6,3'],
+			['d', '7,3']
+		] as const) {
+			await page.keyboard.press(key);
+			await expect(self).toHaveAttribute('data-position', expected);
+		}
+	});
+
+	test('continues a held WASD movement at the existing two-per-second cadence', async ({ page }) => {
+		await openClockedDevWorld(page);
+
+		const self = page.locator('.participant').first();
+		await page.keyboard.down('d');
+		await expect(self).toHaveAttribute('data-position', '8,3');
+		await page.clock.runFor(1_000);
+		await page.keyboard.up('d');
+		await expect(self).toHaveAttribute('data-position', '10,3');
+		await page.clock.runFor(1_000);
+		await expect(self).toHaveAttribute('data-position', '10,3');
+	});
+
+	test('does not turn WASD repeat events into direct movement requests', async ({ page }) => {
+		await openDevWorld(page);
+
+		const self = page.locator('.participant').first();
+		await page.keyboard.down('d');
+		await expect(self).toHaveAttribute('data-position', '8,3');
+		await page.evaluate(() => {
+			for (let index = 0; index < 10; index += 1) {
+				window.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', code: 'KeyD', repeat: true, bubbles: true }));
+			}
+		});
+		await expect(self).toHaveAttribute('data-position', '8,3');
+		await page.keyboard.up('d');
+	});
+
 	test('does not leave a held movement running after window blur', async ({ page }) => {
 		await openClockedDevWorld(page);
 
@@ -811,6 +854,35 @@ test.describe('DEV World Sandbox', () => {
 		await characterSelect.focus();
 		await page.keyboard.press('ArrowDown');
 		await expect(characterSelect).toHaveValue('002');
+		await expect(self).toHaveAttribute('data-position', '7,3');
+	});
+
+	test('preserves native input behavior for WASD and N in the DEV character select', async ({ page }) => {
+		await openDevWorld(page);
+
+		const self = page.locator('.participant').first();
+		const characterSelect = page.getByLabel('Select sandbox character');
+		await characterSelect.focus();
+		const before = await characterSelect.inputValue();
+		for (const key of ['w', 'a', 's', 'd', 'n']) await page.keyboard.press(key);
+		await expect(characterSelect).toHaveValue(before);
+		await expect(self).toHaveAttribute('data-position', '7,3');
+	});
+
+	test('does not intercept WASD or N during composition or with modifiers', async ({ page }) => {
+		await openDevWorld(page);
+
+		const self = page.locator('.participant').first();
+		await page.keyboard.press('Shift+d');
+		await page.keyboard.press('Control+a');
+		await page.keyboard.press('Alt+s');
+		await page.keyboard.press('Meta+w');
+		await page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', {
+			key: 'd', code: 'KeyD', isComposing: true, bubbles: true
+		})));
+		await page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', {
+			key: 'n', code: 'KeyN', isComposing: true, bubbles: true
+		})));
 		await expect(self).toHaveAttribute('data-position', '7,3');
 	});
 
