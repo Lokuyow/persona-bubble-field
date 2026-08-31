@@ -71,8 +71,8 @@ export type FieldSize = {
 	cellSize: number;
 };
 
-export const DESKTOP_CELL_SIZE = 84;
-export const MOBILE_CELL_SIZE = 60;
+export const DESKTOP_CELL_SIZE = 76;
+export const MOBILE_CELL_SIZE = 50;
 export const MOBILE_FIELD_BREAKPOINT = 700;
 export const DESKTOP_FIELD_SIDE_MARGIN = 8;
 export const MOBILE_FIELD_SIDE_MARGIN = 8;
