@@ -1886,6 +1886,15 @@
 		font-weight: 900;
 		letter-spacing: 0.1em;
 		text-transform: uppercase;
+		text-shadow:
+			-1px -1px 0 #000,
+			0 -1px 0 #000,
+			1px -1px 0 #000,
+			-1px 0 0 #000,
+			1px 0 0 #000,
+			-1px 1px 0 #000,
+			0 1px 0 #000,
+			1px 1px 0 #000;
 	}
 
 	.timeline-hide-control,
@@ -1944,6 +1953,15 @@
 		text-decoration: underline;
 		text-decoration-color: rgba(89, 102, 98, 0.35);
 		text-underline-offset: 3px;
+		text-shadow:
+			-1px -1px 0 #000,
+			0 -1px 0 #000,
+			1px -1px 0 #000,
+			-1px 0 0 #000,
+			1px 0 0 #000,
+			-1px 1px 0 #000,
+			0 1px 0 #000,
+			1px 1px 0 #000;
 	}
 
 	.timeline-name.tone-coral,
@@ -1971,6 +1989,15 @@
 		line-height: 1.45;
 		overflow-wrap: anywhere;
 		white-space: pre-line;
+		text-shadow:
+			-1px -1px 0 #000,
+			0 -1px 0 #000,
+			1px -1px 0 #000,
+			-1px 0 0 #000,
+			1px 0 0 #000,
+			-1px 1px 0 #000,
+			0 1px 0 #000,
+			1px 1px 0 #000;
 	}
 
 	.timeline-ellipsis {
@@ -1983,6 +2010,15 @@
 		font-size: 13px;
 		font-weight: 900;
 		line-height: 1.45;
+		text-shadow:
+			-1px -1px 0 #000,
+			0 -1px 0 #000,
+			1px -1px 0 #000,
+			-1px 0 0 #000,
+			1px 0 0 #000,
+			-1px 1px 0 #000,
+			0 1px 0 #000,
+			1px 1px 0 #000;
 	}
 
 	.timeline-show-control {
