@@ -1890,7 +1890,8 @@
 		font-weight: 900;
 		letter-spacing: 0.1em;
 		text-transform: uppercase;
-		paint-order: stroke fill;
+		-webkit-text-stroke: 0;
+		text-shadow: 0 1px 1px rgba(0, 0, 0, 0.9);
 	}
 
 	.timeline-hide-control,
@@ -1950,8 +1951,9 @@
 		letter-spacing: 0.02em;
 		text-align: left;
 		cursor: pointer;
-		paint-order: stroke fill;
 		vertical-align: top;
+		-webkit-text-stroke: 0;
+		text-shadow: 0 1px 1px rgba(0, 0, 0, 0.9);
 	}
 
 	.timeline-name.tone-coral { color: hsl(12, 96%, 42%); }
@@ -1980,13 +1982,13 @@
 		overflow: hidden;
 		color: #fff;
 		font-size: 15px;
-		font-weight: 800;
+		font-weight: 700;
 		letter-spacing: 0.01em;
 		line-height: 1.45;
 		overflow-wrap: anywhere;
 		white-space: pre-line;
-		-webkit-text-stroke: 2px rgb(0, 0, 0);
-		paint-order: stroke fill;
+		-webkit-text-stroke: 0;
+		text-shadow: 0 1px 1px rgba(0, 0, 0, 0.9);
 
 	 @media (width <= 700px) {
 			font-size: 13px;
@@ -2009,8 +2011,8 @@
 		font-size: 13px;
 		font-weight: 900;
 		line-height: 1.45;
-		-webkit-text-stroke: 1.5px rgba(20, 24, 23, 0.95);
-		paint-order: stroke fill;
+		-webkit-text-stroke: 0;
+		text-shadow: 0 1px 1px rgba(0, 0, 0, 0.9);
 	}
 
 	.timeline-show-control {
