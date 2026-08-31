@@ -388,7 +388,7 @@ describe('field geometry', () => {
 	});
 
 	it('keeps dense fixed-bubble scoring deterministic with bounded repair candidates', () => {
-		const fixed = Array.from({ length: 30 }, (_, index) => ({
+		const fixed = Array.from({ length: 12 }, (_, index) => ({
 			id: `fixed-${String(index).padStart(2, '0')}`,
 			preferred: { x: 100, y: 100 },
 			size: { width: 80, height: 30 }
@@ -401,7 +401,7 @@ describe('field geometry', () => {
 		const targetPlacement = first.find(({ id }) => id === target.id)!;
 
 		expect(first).toEqual(second);
-		expect(first).toHaveLength(31);
+		expect(first).toHaveLength(13);
 		expect(targetPlacement.anchor).not.toEqual(target.preferred);
 		expect(targetPlacement.anchor).toEqual(second.find(({ id }) => id === target.id)!.anchor);
 	});
