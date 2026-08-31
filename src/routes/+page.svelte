@@ -1944,6 +1944,9 @@
 		text-decoration: underline;
 		text-decoration-color: rgba(89, 102, 98, 0.35);
 		text-underline-offset: 3px;
+		text-shadow:
+			0 0 2px rgba(255, 255, 255, 1),
+			0 0 4px rgba(255, 255, 255, 0.95);
 	}
 
 	.timeline-name.tone-coral { color: hsl(12, 96%, 42%); }
@@ -1964,13 +1967,16 @@
 		max-height: calc(1.45em * 5);
 		margin: 6px 0 0;
 		overflow: hidden;
-		color: #374345;
+		color: #26302d;
 		font-size: 13px;
-		font-weight: 700;
+		font-weight: 800;
 		letter-spacing: 0.01em;
 		line-height: 1.45;
 		overflow-wrap: anywhere;
 		white-space: pre-line;
+		text-shadow:
+			0 0 2px rgba(255, 255, 255, 1),
+			0 0 4px rgba(255, 255, 255, 0.95);
 	}
 
 	.timeline-ellipsis {
@@ -1979,11 +1985,13 @@
 		bottom: 0;
 		padding-left: 0.35em;
 		background: transparent;
-		color: #374345;
+		color: #26302d;
 		font-size: 13px;
 		font-weight: 900;
 		line-height: 1.45;
-		text-shadow: 0 1px 2px rgba(255, 255, 255, 0.8);
+		text-shadow:
+			0 0 2px rgba(255, 255, 255, 1),
+			0 0 4px rgba(255, 255, 255, 0.95);
 	}
 
 	.timeline-show-control {
