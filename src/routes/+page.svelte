@@ -94,6 +94,7 @@
 	let viewportElement: HTMLElement;
 	let viewportSize: Size = DEFAULT_VIEWPORT;
 	let bubbleSizes: Record<string, Size> = {};
+	let bubbleOverflowById: Record<string, boolean> = {};
 	let conversationState: ConversationState = createConversationState();
 	let lastPlacedAnchorById: Record<string, WorldPoint> = {};
 	let lastVisibilityKey: string | null = null;
@@ -406,9 +407,17 @@
 			const devSpeech = new URLSearchParams(window.location.search).get('devSpeech');
 			if (import.meta.env.DEV && devSpeech) {
 				if (devSpeech === '1') seedDevSpeechNormalFixture();
-				const mergedMemberCount = devSpeech === 'merged2' ? 2 : devSpeech === 'merged3' ? 3 : devSpeech === 'merged4' ? 4 : 0;
-				if (mergedMemberCount > 0) seedDevSpeechMergedFixture(mergedMemberCount);
+				const mergedMemberCount = devSpeech.startsWith('merged2') ? 2 : devSpeech.startsWith('merged3') ? 3 : devSpeech.startsWith('merged4') ? 4 : 0;
+				if (mergedMemberCount > 0) {
+					const mergedContent = devSpeech.endsWith('-long')
+						? 'Merged bubble content grows naturally until its size limit. '.repeat(8).trim()
+						: undefined;
+					seedDevSpeechMergedFixture(mergedMemberCount, mergedContent);
+				}
+				if (devSpeech === 'normal-sizes') seedDevSpeechNormalSizeFixture();
+				if (devSpeech === 'comparison') seedDevSpeechComparisonFixture();
 				if (devSpeech === 'linebreak') seedDevSpeechLinebreakFixture();
+				if (devSpeech === 'linebreak-five') seedDevSpeechLinebreakFiveFixture();
 				if (devSpeech === 'long') seedDevSpeechLongFixture();
 				if (devSpeech === 'linebreak-overflow') seedDevSpeechLinebreakOverflowFixture();
 			}
@@ -645,20 +654,31 @@
 	});
 
 	function observeBubble(node: HTMLElement, id: string) {
+		const content = node.querySelector<HTMLElement>('.bubble-content');
 		const update = () => {
 			bubbleSizes = {
 				...bubbleSizes,
 				[id]: { width: node.offsetWidth, height: node.offsetHeight }
 			};
+			if (content) {
+				bubbleOverflowById = {
+					...bubbleOverflowById,
+					[id]: content.scrollHeight > content.clientHeight
+				};
+			}
 		};
 
 		const observer = new ResizeObserver(update);
 		observer.observe(node);
+		if (content) observer.observe(content);
 		update();
 
 		return {
 			destroy() {
 				observer.disconnect();
+				const next = { ...bubbleOverflowById };
+				delete next[id];
+				bubbleOverflowById = next;
 			}
 		};
 	}
@@ -936,7 +956,7 @@
 		}
 	}
 
-	function seedDevSpeechMergedFixture(mergedMemberCount: number): void {
+	function seedDevSpeechMergedFixture(mergedMemberCount: number, mergedContent = 'merged fixture'): void {
 		if (!devWorldSandboxEnabled) return;
 		const now = Date.now();
 		const normalPubkey = 'a'.repeat(64);
@@ -958,7 +978,7 @@
 			id: 'dev-speech-normal-message', pubkey: normalPubkey, content: 'normal fixture', createdAt: now
 		} as const;
 		const mergedMessage = {
-			id: 'dev-speech-merged-message-a', pubkey: mergedPubkeys[0], content: 'merged fixture', createdAt: now
+			id: 'dev-speech-merged-message-a', pubkey: mergedPubkeys[0], content: mergedContent, createdAt: now
 		} as const;
 		conversationState = receiveMessage(conversationState, normalMessage, { isSpeakerVisible: true, duration, now });
 		conversationState = receiveMessage(conversationState, mergedMessage, { isSpeakerVisible: true, duration, now });
@@ -967,6 +987,62 @@
 				...mergedMessage,
 				id: `dev-speech-merged-message-${String.fromCharCode(98 + index)}`,
 				pubkey
+			}, { isSpeakerVisible: true, duration, now });
+		}
+	}
+
+	function seedDevSpeechNormalSizeFixture(): void {
+		if (!devWorldSandboxEnabled) return;
+		const now = Date.now();
+		const messages = [
+			{ pubkey: 'a'.repeat(64), position: { x: 5, y: 2 }, content: 'short' },
+			{ pubkey: 'b'.repeat(64), position: { x: 7, y: 2 }, content: 'medium bubble message' },
+			{
+				pubkey: 'c'.repeat(64),
+				position: { x: 9, y: 2 },
+				content: 'Long normal bubble content grows until it reaches the maximum width and wraps naturally.'
+			}
+		] as const;
+		setPresence(createPresenceState(FIELD, now, [
+			{ id: DEV_WORLD_SELF_ID, position: { x: 7, y: 3 } },
+			...messages.map(({ pubkey, position }) => ({ id: pubkey, position }))
+		]));
+		const duration = 60_000;
+		for (const [index, { pubkey, content }] of messages.entries()) {
+			conversationState = receiveMessage(conversationState, {
+				id: `dev-speech-normal-size-${index}`,
+				pubkey,
+				content,
+				createdAt: now
+			}, { isSpeakerVisible: true, duration, now });
+		}
+	}
+
+	function seedDevSpeechComparisonFixture(): void {
+		if (!devWorldSandboxEnabled) return;
+		const now = Date.now();
+		const content = 'The same representative message is rendered at two bubble scales to compare wrapping behavior.';
+		const normalPubkey = 'a'.repeat(64);
+		const mergedPubkeys = ['b', 'c'].map((prefix) => prefix.repeat(64));
+		setPresence(createPresenceState(FIELD, now, [
+			{ id: DEV_WORLD_SELF_ID, position: { x: 7, y: 3 } },
+			{ id: normalPubkey, position: { x: 5, y: 2 } },
+			...mergedPubkeys.map((id, index) => ({ id, position: { x: index === 0 ? 6 : 8, y: 2 } }))
+		]));
+		const duration = 60_000;
+		conversationState = receiveMessage(conversationState, {
+			id: 'dev-speech-comparison-normal',
+			pubkey: normalPubkey,
+			content,
+			speechType: 'shout',
+			createdAt: now
+		}, { isSpeakerVisible: true, duration, now });
+		for (const [index, pubkey] of mergedPubkeys.entries()) {
+			conversationState = receiveMessage(conversationState, {
+				id: `dev-speech-comparison-merged-${index}`,
+				pubkey,
+				content,
+				createdAt: now
 			}, { isSpeakerVisible: true, duration, now });
 		}
 	}
@@ -1000,6 +1076,13 @@
 
 	function seedDevSpeechLinebreakFixture(): void {
 		seedDevSpeechFixture('normal line 1\nnormal line 2\nnormal line 3', 'merged line 1\nmerged line 2\nmerged line 3');
+	}
+
+	function seedDevSpeechLinebreakFiveFixture(): void {
+		seedDevSpeechFixture(
+			'normal line 1\nnormal line 2\nnormal line 3\nnormal line 4\nnormal line 5',
+			'merged line 1\nmerged line 2\nmerged line 3\nmerged line 4\nmerged line 5'
+		);
 	}
 
 	function seedDevSpeechLongFixture(): void {
@@ -1122,14 +1205,14 @@
 
 	function mergedBubbleStyle(memberCount: number): string {
 		const level = Math.min(Math.max(memberCount, 2), 4) - 2;
-		const minWidth = 234 + level * 18;
-		const minHeight = 64 + level * 4;
+		const minWidth = 100 + level * 20;
+		const maxWidth = 330 + level * 15;
 		const paddingY = 14 + level;
 		const paddingX = 20 + level * 2;
 		const fontSize = 22 + level;
 		return [
 			`--merged-bubble-min-width: ${minWidth}px`,
-			`--merged-bubble-min-height: ${minHeight}px`,
+			`--merged-bubble-max-width: ${maxWidth}px`,
 			`--merged-bubble-padding-y: ${paddingY}px`,
 			`--merged-bubble-padding-x: ${paddingX}px`,
 			`--merged-bubble-font-size: ${fontSize}px`
@@ -1278,6 +1361,9 @@
 					style={`${bubble.kind === 'merged' ? mergedBubbleStyle(bubble.memberPubkeys.length) : ''}; --tail-seam-offset-x: ${bubble.kind === 'normal' ? tailGeometry(tailStart(bubble.anchor, bubble.size), tailTarget(bubble.speaker)).seamOffsetX : 0}px; transform: translate3d(${bubble.anchor.x}px, ${bubble.anchor.y}px, 0);`}
 				>
 					<span class="bubble-content">{bubble.text}</span>
+					{#if bubbleOverflowById[bubble.id]}
+						<span class="bubble-ellipsis" aria-hidden="true">…</span>
+					{/if}
 					{#if bubble.kind === 'merged'}
 						{#each bubble.members as member, index (member.id)}
 							<span
@@ -1763,7 +1849,6 @@
 		position: absolute;
 		display: flex;
 		background: var(--tone-background);
-		min-height: 50px;
 		align-items: center;
 		justify-content: center;
 		border: 1px solid var(--tone-outline);
@@ -1788,6 +1873,17 @@
 		line-clamp: 5;
 	}
 
+	.bubble-ellipsis {
+		position: absolute;
+		right: 8px;
+		bottom: 5px;
+		z-index: 2;
+		padding-left: 0.5em;
+		background: var(--tone-background);
+		line-height: 1;
+		pointer-events: none;
+	}
+
 	.bubble-normal::after {
 		content: '';
 		position: absolute;
@@ -1802,15 +1898,16 @@
 	}
 
 	.bubble-normal {
-		width: 184px;
+		width: fit-content;
+		min-width: 72px;
+		max-width: min(240px, calc(100% - 32px));
 		padding: 12px 15px;
 	}
 
 	.bubble-merged {
-		width: max-content;
-		max-width: calc(100% - 32px);
-		min-width: var(--merged-bubble-min-width, 218px);
-		min-height: var(--merged-bubble-min-height, 58px);
+		width: fit-content;
+		max-width: min(var(--merged-bubble-max-width, 330px), calc(100% - 32px));
+		min-width: var(--merged-bubble-min-width, 100px);
 		padding: var(--merged-bubble-padding-y, 12px) var(--merged-bubble-padding-x, 16px);
 		font-size: var(--merged-bubble-font-size, 13px);
 	}
