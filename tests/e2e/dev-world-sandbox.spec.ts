@@ -161,21 +161,28 @@ test.describe('DEV World Sandbox', () => {
 		await expect(self.locator('img')).toHaveAttribute('src', /characters\/001\.webp$/);
 	});
 
-	test('uses a subtle checkerboard field without the sun decoration', async ({ page }) => {
+	test('uses the prototype park background beneath the field grid', async ({ page }) => {
 		await openDevWorld(page);
 
 		await expect(page.locator('.field-sun')).toHaveCount(0);
 		const fieldGrid = page.locator('.field-grid');
 		const background = await fieldGrid.evaluate((element) => {
 			const style = getComputedStyle(element);
+			const scene = document.querySelector<HTMLElement>('.field-scene');
+			if (!scene) throw new Error('Expected the field scene to be rendered.');
+			const sceneRect = scene.getBoundingClientRect();
 			return {
 				image: style.backgroundImage,
-				size: style.backgroundSize
+				size: style.backgroundSize,
+				sceneRatio: sceneRect.width / sceneRect.height
 			};
 		});
 
+		expect(background.image).toContain('prototype-urban-park.png');
 		expect(background.image).toContain('repeating-conic-gradient');
 		expect(background.size).toContain('168px 168px');
+		expect(background.size).toContain('100% 100%');
+		expect(background.sceneRatio).toBeCloseTo(2, 5);
 	});
 
 		test('selects and presents character 020 from the catalog', async ({ page }) => {
