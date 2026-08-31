@@ -1890,7 +1890,6 @@
 		font-weight: 900;
 		letter-spacing: 0.1em;
 		text-transform: uppercase;
-		-webkit-text-stroke: 1.5px rgba(20, 24, 23, 0.95);
 		paint-order: stroke fill;
 	}
 
@@ -1945,14 +1944,12 @@
 		appearance: none;
 		color: #fff;
 		font-family: inherit;
-		font-size: 12px;
 		font-weight: 900;
 		line-height: 1.45;
 		margin-right: 0.35em;
 		letter-spacing: 0.02em;
 		text-align: left;
 		cursor: pointer;
-		-webkit-text-stroke: 1.5px rgba(20, 24, 23, 0.95);
 		paint-order: stroke fill;
 		vertical-align: top;
 	}
@@ -1982,13 +1979,13 @@
 		margin: 6px 0 0;
 		overflow: hidden;
 		color: #fff;
-		font-size: 16px;
+		font-size: 15px;
 		font-weight: 800;
 		letter-spacing: 0.01em;
 		line-height: 1.45;
 		overflow-wrap: anywhere;
 		white-space: pre-line;
-		-webkit-text-stroke: 1.5px rgba(20, 24, 23, 0.95);
+		-webkit-text-stroke: 2px rgb(0, 0, 0);
 		paint-order: stroke fill;
 
 	 @media (width <= 700px) {
