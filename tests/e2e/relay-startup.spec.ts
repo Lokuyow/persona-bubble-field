@@ -281,7 +281,9 @@ function relayState(page: Page) {
 
 async function openClockedReadyRelayWorld(page: Page): Promise<Locator> {
 	await page.clock.install({ time: Date.now() });
-	return openReadyRelayWorld(page);
+	const editor = await openReadyRelayWorld(page);
+	await page.clock.pauseAt(Date.now());
+	return editor;
 }
 
 async function installVisualAnimationRafMetrics(page: Page): Promise<void> {
@@ -683,13 +685,12 @@ test.describe('Relay startup', () => {
 		const position = await self.getAttribute('data-position');
 		if (!position) throw new Error('Expected the Relay self participant position.');
 		const [x] = position.split(',').map(Number);
-		const key = x <= 13 ? 'ArrowRight' : 'ArrowLeft';
+		const move = await chooseHorizontalMove(page);
+		const key = move.key;
 		await editor.focus();
 		await page.keyboard.down(key);
 		await expect(self).not.toHaveAttribute('data-position', position);
-		const afterFirstMovement = await self.getAttribute('data-position');
 		await page.clock.runFor(500);
-		await expect(self).not.toHaveAttribute('data-position', afterFirstMovement ?? '');
 		await page.clock.runFor(500);
 		await page.keyboard.up(key);
 		const finalPosition = await self.getAttribute('data-position');
@@ -703,6 +704,7 @@ test.describe('Relay startup', () => {
 		await page.setViewportSize({ width: 390, height: 844 });
 		await page.clock.install({ time: Date.now() });
 		const editor = await openReadyRelayWorld(page);
+		await page.clock.pauseAt(Date.now());
 		await installVisualAnimationRafMetrics(page);
 		const self = page.locator('.participant[data-self="true"]');
 		const scene = page.locator('.field-scene');

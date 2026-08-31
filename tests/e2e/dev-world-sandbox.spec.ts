@@ -9,6 +9,7 @@ async function openDevWorld(page: Page): Promise<void> {
 async function openClockedDevWorld(page: Page): Promise<void> {
 	await page.clock.install({ time: Date.now() });
 	await openDevWorld(page);
+	await page.clock.pauseAt(Date.now());
 }
 
 async function readMergedBubbleGeometry(page: Page, memberPrefixes: readonly string[]) {
