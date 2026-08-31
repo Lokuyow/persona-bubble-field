@@ -294,6 +294,75 @@ async function chooseHorizontalMove(page: Page): Promise<{ key: 'ArrowLeft' | 'A
 }
 
 test.describe('Relay startup', () => {
+	test('renders DEV sandbox without Composer in the initial response or after hydration', async ({ page }) => {
+		const hostOwned = await installHostOwnedStub(page);
+		const consoleIssues: string[] = [];
+		page.on('console', (message) => {
+			if (message.type() === 'warning' || message.type() === 'error') consoleIssues.push(message.text());
+		});
+		page.on('pageerror', (error) => consoleIssues.push(error.message));
+
+		const response = await page.goto('/?devWorld=1');
+		expect(response).not.toBeNull();
+		expect(await response!.text()).not.toContain('<div class="composer-dock');
+
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+		await expect(page.locator('.participant')).toHaveCount(1);
+		await expect(page.locator('.composer-dock')).toHaveCount(0);
+		await expect(page.locator('ehagaki-composer')).toHaveCount(0);
+		expect(hostOwned.requests()).toBe(0);
+		expect(consoleIssues).toEqual([]);
+	});
+
+	for (const viewport of [
+		{ name: 'desktop', width: 1200, height: 900 },
+		{ name: 'mobile', width: 390, height: 844 }
+	]) {
+		test(`reserves the one-line Composer from the initial render on ${viewport.name}`, async ({ page }) => {
+			await page.setViewportSize({ width: viewport.width, height: viewport.height });
+			await installHostOwnedStub(page);
+			await installDelayedRelay(page);
+
+			const response = await page.goto('/', { waitUntil: 'commit' });
+			expect(response).not.toBeNull();
+			expect(await response!.text()).toContain('composer-dock');
+
+			await expect(page.locator('.composer-dock')).toBeVisible();
+			await expect(page.locator('ehagaki-composer')).toBeVisible();
+			const beforePreferredHeight = await page.evaluate(() => {
+				const shell = document.querySelector<HTMLElement>('.app-shell')!;
+				const dock = document.querySelector<HTMLElement>('.composer-dock')!;
+				const field = document.querySelector<HTMLElement>('.field-viewport')!;
+				return {
+					dockHeight: dock.getBoundingClientRect().height,
+					fieldHeight: field.getBoundingClientRect().height,
+					viewportHeight: window.innerHeight,
+					initialPreferredHeight: getComputedStyle(shell)
+						.getPropertyValue('--composer-initial-preferred-height').trim(),
+					preferredHeight: getComputedStyle(shell).getPropertyValue('--composer-preferred-height').trim()
+				};
+			});
+			expect(beforePreferredHeight.initialPreferredHeight).toBe('50px');
+			expect(beforePreferredHeight.preferredHeight).toBe('50px');
+			expect(beforePreferredHeight.dockHeight).toBeCloseTo(67, 1);
+			expect(beforePreferredHeight.fieldHeight + beforePreferredHeight.dockHeight)
+				.toBeCloseTo(beforePreferredHeight.viewportHeight, 1);
+
+			await page.evaluate(() => (window as typeof window & {
+				__ehagakiSetPreferredHeight(height: number): void;
+			}).__ehagakiSetPreferredHeight(50));
+			await expect.poll(() => page.evaluate(() => document.querySelector<HTMLElement>('.composer-dock')!.getBoundingClientRect().height))
+				.toBeCloseTo(beforePreferredHeight.dockHeight, 1);
+
+			const afterPreferredHeight = await page.evaluate(() => ({
+				dockHeight: document.querySelector<HTMLElement>('.composer-dock')!.getBoundingClientRect().height,
+				fieldHeight: document.querySelector<HTMLElement>('.field-viewport')!.getBoundingClientRect().height
+			}));
+			expect(Math.abs(afterPreferredHeight.dockHeight - beforePreferredHeight.dockHeight)).toBeLessThan(0.5);
+			expect(Math.abs(afterPreferredHeight.fieldHeight - beforePreferredHeight.fieldHeight)).toBeLessThan(0.5);
+		});
+	}
+
 	test('keeps Field geometry reserved while only the fixed Composer follows VirtualKeyboard geometry', async ({ page }) => {
 		await page.setViewportSize({ width: 390, height: 844 });
 		await installVirtualKeyboardStub(page);
