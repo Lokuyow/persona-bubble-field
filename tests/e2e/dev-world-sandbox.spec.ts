@@ -6,6 +6,11 @@ async function openDevWorld(page: Page): Promise<void> {
 	await expect(page.locator('.participant')).toHaveCount(1);
 }
 
+async function openClockedDevWorld(page: Page): Promise<void> {
+	await page.clock.install({ time: Date.now() });
+	await openDevWorld(page);
+}
+
 async function readMergedBubbleGeometry(page: Page, memberPrefixes: readonly string[]) {
 	return page.locator('.bubble-merged').evaluate((bubble, prefixes) => {
 		const mergedMemberIds = new Set(prefixes.map((prefix) => prefix.repeat(64)));
@@ -736,32 +741,32 @@ test.describe('DEV World Sandbox', () => {
 	});
 
 	test('continues one-cell movement on an explicit keyboard hold and stops on keyup', async ({ page }) => {
-		await openDevWorld(page);
+		await openClockedDevWorld(page);
 
 		const self = page.locator('.participant').first();
 		await page.keyboard.down('ArrowRight');
 		await expect(self).toHaveAttribute('data-position', '8,3');
-		await page.waitForTimeout(1_050);
+		await page.clock.runFor(1_000);
 		await page.keyboard.up('ArrowRight');
 		await expect(self).toHaveAttribute('data-position', '10,3');
-		await page.waitForTimeout(650);
+		await page.clock.runFor(1_000);
 		await expect(self).toHaveAttribute('data-position', '10,3');
 	});
 
 	test('does not leave a held movement running after window blur', async ({ page }) => {
-		await openDevWorld(page);
+		await openClockedDevWorld(page);
 
 		const self = page.locator('.participant').first();
 		await page.keyboard.down('ArrowRight');
 		await expect(self).toHaveAttribute('data-position', '8,3');
 		await page.evaluate(() => window.dispatchEvent(new Event('blur')));
-		await page.waitForTimeout(650);
+		await page.clock.runFor(1_000);
 		await page.keyboard.up('ArrowRight');
 		await expect(self).toHaveAttribute('data-position', '8,3');
 	});
 
 	test('does not leave a held movement running after the page becomes hidden', async ({ page }) => {
-		await openDevWorld(page);
+		await openClockedDevWorld(page);
 
 		const self = page.locator('.participant').first();
 		await page.keyboard.down('ArrowRight');
@@ -770,7 +775,7 @@ test.describe('DEV World Sandbox', () => {
 			Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
 			document.dispatchEvent(new Event('visibilitychange'));
 		});
-		await page.waitForTimeout(650);
+		await page.clock.runFor(1_000);
 		await page.keyboard.up('ArrowRight');
 		await expect(self).toHaveAttribute('data-position', '8,3');
 	});
@@ -786,7 +791,6 @@ test.describe('DEV World Sandbox', () => {
 				window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', repeat: true, bubbles: true }));
 			}
 		});
-		await page.waitForTimeout(100);
 		await expect(self).toHaveAttribute('data-position', '8,3');
 		await page.keyboard.up('ArrowRight');
 	});
@@ -840,7 +844,7 @@ test.describe('DEV World Sandbox', () => {
 	});
 
 	test('stops a held Arrow when a profile dialog opens', async ({ page }) => {
-		await openDevWorld(page);
+		await openClockedDevWorld(page);
 
 		const self = page.locator('.participant').first();
 		await page.keyboard.down('ArrowRight');
@@ -848,7 +852,7 @@ test.describe('DEV World Sandbox', () => {
 		await profileTrigger(page, '女の子').click();
 		await expect(profileDialog(page)).toBeVisible();
 		const positionWhenOpened = await self.getAttribute('data-position');
-		await page.waitForTimeout(650);
+		await page.clock.runFor(1_000);
 		await page.keyboard.up('ArrowRight');
 		await expect(self).toHaveAttribute('data-position', positionWhenOpened ?? '');
 	});
