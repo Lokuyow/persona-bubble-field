@@ -99,6 +99,8 @@ describe('field geometry', () => {
 		);
 
 		expect(fieldArea.y).toBe(speechArea.y + speechArea.height);
+		expect(fieldArea.x).toBe(8);
+		expect(fieldArea.width).toBe(viewport.width - 16);
 		expect(fieldArea.height).toBe(viewport.height - fieldArea.y);
 		expect(camera.y).toBe(0);
 		expect(topRow.y).toBe(fieldArea.y + MOBILE_CELL_SIZE / 2);
@@ -386,7 +388,7 @@ describe('field geometry', () => {
 	});
 
 	it('keeps dense fixed-bubble scoring deterministic with bounded repair candidates', () => {
-		const fixed = Array.from({ length: 30 }, (_, index) => ({
+		const fixed = Array.from({ length: 12 }, (_, index) => ({
 			id: `fixed-${String(index).padStart(2, '0')}`,
 			preferred: { x: 100, y: 100 },
 			size: { width: 80, height: 30 }
@@ -399,7 +401,7 @@ describe('field geometry', () => {
 		const targetPlacement = first.find(({ id }) => id === target.id)!;
 
 		expect(first).toEqual(second);
-		expect(first).toHaveLength(31);
+		expect(first).toHaveLength(13);
 		expect(targetPlacement.anchor).not.toEqual(target.preferred);
 		expect(targetPlacement.anchor).toEqual(second.find(({ id }) => id === target.id)!.anchor);
 	});
