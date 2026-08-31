@@ -104,6 +104,8 @@
 	let colorByPubkey: Record<string, AvatarColor> = {};
 	let recentMessageTimeline: RecentMessageTimeline = [];
 	let timelineOverflowById: Record<string, boolean> = {};
+	let timelineEntryHeights: Record<string, number> = {};
+	let timelineAvailableHeight = 0;
 	let timelineInitialized = false;
 	let timelineOpen = false;
 	let connectionStatus: WorldReadConnectionStatus = { kind: 'bootstrapping' };
@@ -734,6 +736,45 @@
 		};
 	}
 
+	function observeTimelineEntry(node: HTMLElement, id: string) {
+		const update = () => {
+			const height = node.getBoundingClientRect().height;
+			if (height <= 0) return;
+			timelineEntryHeights = {
+				...timelineEntryHeights,
+				[id]: height
+			};
+		};
+		const observer = new ResizeObserver(update);
+		observer.observe(node);
+		update();
+
+		return {
+			destroy() {
+			observer.disconnect();
+			const next = { ...timelineEntryHeights };
+			delete next[id];
+			timelineEntryHeights = next;
+		}
+		};
+	}
+
+	function observeTimelineVisibleArea(node: HTMLElement) {
+		const update = () => {
+			timelineAvailableHeight = Math.max(0, node.clientHeight - 14);
+		};
+		const observer = new ResizeObserver(update);
+		observer.observe(node);
+		update();
+
+		return {
+			destroy() {
+				observer.disconnect();
+				timelineAvailableHeight = 0;
+			}
+		};
+	}
+
 	function isInsideFieldArea(point: WorldPoint) {
 		return (
 			point.x >= fieldAreaBounds.x &&
@@ -1013,6 +1054,8 @@
 		conversationState = createConversationState();
 		recentMessageTimeline = [];
 		timelineOverflowById = {};
+		timelineEntryHeights = {};
+		timelineAvailableHeight = 0;
 		lastPlacedAnchorById = {};
 		lastVisibilityKey = null;
 		colorByPubkey = {};
@@ -1230,6 +1273,19 @@
 		return colorByPubkey[pubkey] ?? null;
 	}
 
+	$: timelineVisibleMessageCount = (() => {
+		let usedHeight = 0;
+		let count = 0;
+		for (const message of recentMessageTimeline) {
+			const height = timelineEntryHeights[message.id];
+			if (height === undefined || usedHeight + height > timelineAvailableHeight + 1) break;
+			usedHeight += height;
+			count += 1;
+		}
+		return count;
+	})();
+	$: timelineVisibleMessages = recentMessageTimeline.slice(0, timelineVisibleMessageCount);
+
 	function receiveTimelineMessage(message: ParsedWorldMessage): void {
 		recentMessageTimeline = addRecentMessage(recentMessageTimeline, message);
 	}
@@ -1428,8 +1484,8 @@
 						on:click={hideRecentMessageTimeline}
 					>×</button>
 				</header>
-				<div class="timeline-scroll">
-					{#each recentMessageTimeline as message (message.id)}
+				<div class="timeline-visible-entries" use:observeTimelineVisibleArea>
+					{#each timelineVisibleMessages as message (message.id)}
 						{@const character = timelineCharacter(message.pubkey)}
 						{@const tone = timelineTone(message.pubkey)}
 						<article
@@ -1450,6 +1506,18 @@
 								{#if timelineOverflowById[message.id]}
 									<span class="timeline-ellipsis" aria-hidden="true">…</span>
 								{/if}
+							</div>
+						</article>
+					{/each}
+				</div>
+				<div class="timeline-measurements" aria-hidden="true">
+					{#each recentMessageTimeline as message (message.id)}
+						{@const character = timelineCharacter(message.pubkey)}
+						{@const tone = timelineTone(message.pubkey)}
+						<article class="timeline-entry" use:observeTimelineEntry={message.id}>
+							<span class={`timeline-name${tone ? ` tone-${tone}` : ''}`}>{character.name}</span>
+							<div class="timeline-content-shell">
+								<p class="timeline-content">{message.content}</p>
 							</div>
 						</article>
 					{/each}
@@ -1797,9 +1865,8 @@
 		flex-direction: column;
 		border: 1px solid rgba(57, 67, 64, 0.18);
 		border-radius: 18px;
-		background: rgba(247, 247, 239, 0.5);
-		box-shadow: 0 14px 36px rgba(58, 70, 61, 0.18);
-		backdrop-filter: blur(2px);
+		background: transparent;
+		box-shadow: none;
 		color: #374345;
 		pointer-events: auto;
 	}
@@ -1842,11 +1909,20 @@
 		line-height: 1;
 	}
 
-	.timeline-scroll {
+	.timeline-visible-entries {
+		flex: 1 1 auto;
 		min-height: 0;
 		padding: 4px 8px 10px;
-		overflow-y: auto;
-		overscroll-behavior: contain;
+		overflow: visible;
+	}
+
+	.timeline-measurements {
+		position: absolute;
+		top: 0;
+		right: 8px;
+		left: 8px;
+		visibility: hidden;
+		pointer-events: none;
 	}
 
 	.timeline-entry {
@@ -1857,6 +1933,7 @@
 	.timeline-entry:last-child { border-bottom: 0; }
 
 	.timeline-name {
+		display: block;
 		max-width: 100%;
 		padding: 0;
 		border: 0;
@@ -1903,11 +1980,12 @@
 		right: 0;
 		bottom: 0;
 		padding-left: 0.35em;
-		background: #f7f7ef;
+		background: transparent;
 		color: #374345;
 		font-size: 13px;
 		font-weight: 900;
 		line-height: 1.45;
+		text-shadow: 0 1px 2px rgba(255, 255, 255, 0.8);
 	}
 
 	.timeline-show-control {

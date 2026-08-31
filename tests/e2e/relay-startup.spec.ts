@@ -488,6 +488,7 @@ test.describe('Relay startup', () => {
 	});
 
 	test('continues timeline ingestion while its overlay is hidden', async ({ page }) => {
+		await page.setViewportSize({ width: 1200, height: 500 });
 		const liveSecret = new Uint8Array(32).fill(21);
 		const liveMessage = finalizeEvent(buildWorldMessageTemplate({
 			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' },
@@ -496,8 +497,15 @@ test.describe('Relay startup', () => {
 			position: { x: 3, y: 3 },
 			createdAt: Math.floor(Date.now() / 1000)
 		}), liveSecret);
+		const historyMessages = Array.from({ length: 9 }, (_, index) => finalizeEvent(buildWorldMessageTemplate({
+			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' },
+			content: `history ${index + 1}`,
+			speechType: 'normal',
+			position: { x: 3, y: 3 },
+			createdAt: Math.floor(Date.now() / 1000) - 3_600 - index
+		}), new Uint8Array(32).fill(30 + index)));
 		await installHostOwnedStub(page);
-		await installDelayedRelay(page);
+		await installDelayedRelay(page, { historyMessages });
 		await page.goto('/');
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
@@ -507,11 +515,15 @@ test.describe('Relay startup', () => {
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
 		await expect(page.locator('.participant')).toHaveCount(2);
 		await expect(page.getByLabel('Recent message timeline')).toBeVisible();
+		const visibleTimeline = page.locator('.timeline-visible-entries .timeline-entry');
+		const beforeHiddenIds = await visibleTimeline.evaluateAll((entries) => entries.map((entry) => entry.getAttribute('data-timeline-event-id')));
 		await page.getByRole('button', { name: 'Hide recent messages' }).click();
 		await expect(page.getByLabel('Recent message timeline')).toBeHidden();
 		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectMessage(event: object): void } }).__relayStartupTest.injectMessage(event), liveMessage);
 		await page.getByRole('button', { name: 'Show recent messages' }).click();
 		await expect(page.locator(`[data-timeline-event-id="${liveMessage.id}"]`)).toHaveCount(1);
+		const afterShownIds = await visibleTimeline.evaluateAll((entries) => entries.map((entry) => entry.getAttribute('data-timeline-event-id')));
+		expect(afterShownIds.some((id) => !beforeHiddenIds.includes(id))).toBe(true);
 	});
 
 	for (const viewport of [

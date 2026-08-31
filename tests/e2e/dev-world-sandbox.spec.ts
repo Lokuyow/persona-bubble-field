@@ -168,14 +168,31 @@ test.describe('DEV World Sandbox', () => {
 	});
 
 	test('shows a finite recent-message overlay with semantic colors and existing profile focus restoration', async ({ page }) => {
-		await page.setViewportSize({ width: 1200, height: 900 });
+		await page.setViewportSize({ width: 1200, height: 1600 });
 		await page.goto('/?devWorld=1&devSpeech=timeline');
 		const timeline = page.getByLabel('Recent message timeline');
+		const visibleEntries = timeline.locator('.timeline-visible-entries .timeline-entry');
 		await expect(timeline).toBeVisible();
-		await expect(timeline.locator('.timeline-entry')).toHaveCount(20);
+		await expect(visibleEntries).toHaveCount(20);
 		await expect(timeline.locator('img')).toHaveCount(0);
+		const presentation = await timeline.evaluate((element) => {
+			const style = getComputedStyle(element);
+			const entries = element.querySelector<HTMLElement>('.timeline-visible-entries');
+			return {
+				backgroundColor: style.backgroundColor,
+				backdropFilter: style.backdropFilter,
+				boxShadow: style.boxShadow,
+				overflowY: entries ? getComputedStyle(entries).overflowY : ''
+			};
+		});
+		expect(presentation).toEqual({
+			backgroundColor: 'rgba(0, 0, 0, 0)',
+			backdropFilter: 'none',
+			boxShadow: 'none',
+			overflowY: 'visible'
+		});
 
-		const timelineOrder = await timeline.locator('.timeline-entry').evaluateAll((entries) => entries.map((entry) => ({
+		const timelineOrder = await visibleEntries.evaluateAll((entries) => entries.map((entry) => ({
 			id: entry.getAttribute('data-timeline-event-id'),
 			createdAt: Number(entry.getAttribute('data-timeline-created-at'))
 		})));
@@ -183,9 +200,11 @@ test.describe('DEV World Sandbox', () => {
 			entry.createdAt < timelineOrder[index - 1].createdAt ||
 			(entry.createdAt === timelineOrder[index - 1].createdAt &&
 				(entry.id ?? '') > (timelineOrder[index - 1].id ?? '')))).toBe(true);
-		expect(await timeline.locator('.timeline-content').allTextContents()).toContain('same content, different event');
-		await expect(timeline.locator('.timeline-entry').filter({ hasText: 'line 1' }).locator('.timeline-ellipsis')).toHaveCount(1);
-		await expect(timeline.locator('.timeline-entry').filter({ hasText: 'same content, different event' }).locator('.timeline-ellipsis')).toHaveCount(0);
+		expect(await visibleEntries.locator('.timeline-content').allTextContents()).toContain('same content, different event');
+		await expect(visibleEntries.filter({ hasText: 'line 1' }).locator('.timeline-ellipsis')).toHaveCount(1);
+		await expect(visibleEntries.filter({ hasText: 'same content, different event' }).locator('.timeline-ellipsis')).toHaveCount(0);
+		await expect(timeline.locator('.timeline-measurements button.timeline-name')).toHaveCount(0);
+		await expect(timeline.locator('button.timeline-name')).toHaveCount(20);
 
 		const activePubkey = 'a'.repeat(64);
 		const outsidePubkey = 'f'.repeat(64);
@@ -206,6 +225,43 @@ test.describe('DEV World Sandbox', () => {
 		await expect(profileDialog(page)).toBeVisible();
 		await page.keyboard.press('Escape');
 		await expect(profileDialog(page)).toBeHidden();
+	});
+
+	test('renders only fully fitting entries without a scroll container', async ({ page }) => {
+		await page.setViewportSize({ width: 1200, height: 900 });
+		await page.goto('/?devWorld=1&devSpeech=timeline');
+		const timeline = page.getByLabel('Recent message timeline');
+		const visibleEntries = timeline.locator('.timeline-visible-entries .timeline-entry');
+		await expect.poll(() => visibleEntries.count()).toBeGreaterThan(0);
+		const initialCount = await visibleEntries.count();
+
+		await page.setViewportSize({ width: 1200, height: 1400 });
+		await expect.poll(() => visibleEntries.count()).toBeGreaterThan(initialCount);
+		const expandedCount = await visibleEntries.count();
+
+		await page.setViewportSize({ width: 1200, height: 500 });
+		await expect.poll(() => visibleEntries.count()).toBeLessThan(expandedCount);
+		const layout = await page.evaluate(() => {
+			const container = document.querySelector<HTMLElement>('.timeline-visible-entries');
+			if (!container) throw new Error('Expected the visible timeline container.');
+			const containerRect = container.getBoundingClientRect();
+			return {
+				overflowY: getComputedStyle(container).overflowY,
+				scrollTop: container.scrollTop,
+				scrollHeight: container.scrollHeight,
+				clientHeight: container.clientHeight,
+				entryBottoms: [...container.querySelectorAll<HTMLElement>('.timeline-entry')].map((entry) => entry.getBoundingClientRect().bottom),
+				interactiveCount: container.querySelectorAll('button.timeline-name').length,
+				measurementInteractiveCount: document.querySelectorAll('.timeline-measurements button.timeline-name').length,
+				containerBottom: containerRect.bottom
+			};
+		});
+		expect(layout.overflowY).toBe('visible');
+		expect(layout.scrollTop).toBe(0);
+		expect(layout.scrollHeight).toBe(layout.clientHeight);
+		expect(layout.entryBottoms.every((bottom) => bottom <= layout.containerBottom + 1)).toBe(true);
+		expect(layout.interactiveCount).toBe(await visibleEntries.count());
+		expect(layout.measurementInteractiveCount).toBe(0);
 	});
 
 	test('starts closed on mobile, preserves manual show/hide through resize, and leaves field geometry unchanged', async ({ page }) => {

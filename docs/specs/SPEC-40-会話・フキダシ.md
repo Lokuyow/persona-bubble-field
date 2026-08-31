@@ -90,7 +90,8 @@ authorのpubkeyから既存の決定的なcharacter割当を使い、timelineの
 
 timelineは真のoverlayであり、表示状態によってfield viewportのgeometry、field width、camera、
 cell、participant座標、speech area、bubble placement bounds、Composer領域を変更しない。
-panel内だけを縦scroll可能とする。既存の`MOBILE_FIELD_BREAKPOINT = 700`を使い、width > 700
+panel内はscrollせず、表示領域へ完全に収まる新しいentryから順に表示する。内部stateは最新20件を
+保持する。既存の`MOBILE_FIELD_BREAKPOINT = 700`を使い、width > 700
 ではreload時の初期表示をON、width <= 700ではOFFとする。この初期判定はページ初期化時に
 一度だけ行い、表示後のresize・端末回転でユーザーのshow/hide状態を上書きしない。hide button
 と、閉じた状態でも残るshow controlを設け、timeline内容をlocalStorage、IndexedDB等へ保存しない。
