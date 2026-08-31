@@ -161,21 +161,26 @@ test.describe('DEV World Sandbox', () => {
 		await expect(self.locator('img')).toHaveAttribute('src', /characters\/001\.webp$/);
 	});
 
-	test('uses a subtle checkerboard field without the sun decoration', async ({ page }) => {
+	test('uses a subtle checkerboard field with a distinct boundary', async ({ page }) => {
 		await openDevWorld(page);
 
 		await expect(page.locator('.field-sun')).toHaveCount(0);
 		const fieldGrid = page.locator('.field-grid');
 		const background = await fieldGrid.evaluate((element) => {
 			const style = getComputedStyle(element);
+			const boundaryStyle = getComputedStyle(element, '::after');
 			return {
 				image: style.backgroundImage,
-				size: style.backgroundSize
+				size: style.backgroundSize,
+				boundaryBorder: boundaryStyle.borderTopWidth,
+				boundaryShadow: boundaryStyle.boxShadow
 			};
 		});
 
 		expect(background.image).toContain('repeating-conic-gradient');
 		expect(background.size).toContain('168px 168px');
+		expect(background.boundaryBorder).toBe('2px');
+		expect(background.boundaryShadow).toContain('inset');
 	});
 
 		test('selects and presents character 020 from the catalog', async ({ page }) => {
@@ -696,16 +701,19 @@ test.describe('DEV World Sandbox', () => {
 
 	test.describe('responsive field presentation', () => {
 		for (const viewport of [
-			{ name: 'mobile', width: 390, height: 844, cell: '60px', avatar: '56px', worldWidth: '960px', worldHeight: '480px' },
-			{ name: 'desktop', width: 1200, height: 900, cell: '84px', avatar: '80px', worldWidth: '1344px', worldHeight: '672px' }
+			{ name: 'mobile', width: 390, height: 844, sideMargin: '8px', fieldWidth: '374px', cell: '60px', avatar: '56px', worldWidth: '960px', worldHeight: '480px' },
+			{ name: 'desktop', width: 1200, height: 900, sideMargin: '8px', fieldWidth: '1184px', cell: '84px', avatar: '80px', worldWidth: '1344px', worldHeight: '672px' }
 		]) {
 			test(`${viewport.name} uses the responsive cell and centered avatar`, async ({ page }) => {
 				await page.setViewportSize({ width: viewport.width, height: viewport.height });
 				await expectNoConsoleProblems(page, async () => {
 					await openDevWorld(page);
 					const scene = page.locator('.field-scene');
+					const fieldArea = page.locator('.field-area');
 					await expect(scene).toHaveCSS('width', viewport.worldWidth);
 					await expect(scene).toHaveCSS('height', viewport.worldHeight);
+					await expect(fieldArea).toHaveCSS('left', viewport.sideMargin);
+					await expect(fieldArea).toHaveCSS('width', viewport.fieldWidth);
 
 						const geometry = await readCharacterGeometry(page);
 						const movementCells = await readMovementCellGeometry(page);
@@ -723,7 +731,7 @@ test.describe('DEV World Sandbox', () => {
 					expect(Math.abs(geometry.participantCenter.x - geometry.gridCellCenter.x)).toBeLessThan(0.01);
 					expect(Math.abs(geometry.participantCenter.y - geometry.gridCellCenter.y)).toBeLessThan(0.01);
 					await expect(page.locator('.participant-name')).toBeVisible();
-					await expect(page.locator('.field-area')).toHaveCSS('overflow', 'hidden');
+					await expect(fieldArea).toHaveCSS('overflow', 'hidden');
 					await expect(page.locator('.participant')).not.toHaveAttribute('data-movement-animation', 'active');
 				});
 			});

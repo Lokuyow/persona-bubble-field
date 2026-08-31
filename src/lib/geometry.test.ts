@@ -99,6 +99,8 @@ describe('field geometry', () => {
 		);
 
 		expect(fieldArea.y).toBe(speechArea.y + speechArea.height);
+		expect(fieldArea.x).toBe(8);
+		expect(fieldArea.width).toBe(viewport.width - 16);
 		expect(fieldArea.height).toBe(viewport.height - fieldArea.y);
 		expect(camera.y).toBe(0);
 		expect(topRow.y).toBe(fieldArea.y + MOBILE_CELL_SIZE / 2);
