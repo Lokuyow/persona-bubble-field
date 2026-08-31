@@ -1863,7 +1863,6 @@
 		width: min(328px, calc(100% - 32px));
 		max-height: calc(100% - 100px);
 		flex-direction: column;
-		border: 1px solid rgba(57, 67, 64, 0.18);
 		border-radius: 18px;
 		background: transparent;
 		box-shadow: none;
@@ -1927,7 +1926,6 @@
 
 	.timeline-entry {
 		padding: 10px 8px 11px;
-		border-bottom: 1px solid rgba(57, 67, 64, 0.1);
 	}
 
 	.timeline-entry:last-child { border-bottom: 0; }
