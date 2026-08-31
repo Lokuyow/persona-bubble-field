@@ -1,7 +1,7 @@
 # persona-bubble-field 技術選定 Deep Research
 
 > 調査基準時点: 2026年8月\
-> 更新: 2026-08-27 Relay transport調査結果を反映
+> 更新: 2026-08-31 rx-nostr 3.7.6正式releaseとpublish cleanup修正を反映
 
 ## エグゼクティブサマリー
 
@@ -21,7 +21,7 @@ Nostrは責務を分離する。event / crypto primitivesには **`nostr-tools` 
 
 Relay transportは **`rx-nostr` をADOPT** とする。SPEC-30が要求する、Relayごとに1 WebSocketを共有したmessage / positionの長寿命Forward subscription、per-Relay raw `EOSE`、再接続後の継続REQを、RxJSをadapter内部に閉じ込めたまま扱えることをSPIKEで確認した。以前のSimplePool + thin wrapper中心方針は撤回し、`nostr-tools` のSimplePool Relay transportは **RE-EVALUATE LATER** とする。
 
-`rx-nostr@3.7.5`をexact pinし、既知のpublish cleanup bugには[upstream PR #198](https://github.com/penpenpng/rx-nostr/pull/198)相当の最小temporary tracked patchを適用する。patch failureはinstall時にfail-closeし、projectはpublic package entryのbehavior regression testで`OK true`、`OK false`、timeout後のlazy Relay cleanupを保証する。fork Git dependency、private API、publish-only SimplePool fallback、publishごとのRxNostr instance作成workaroundは採用しない。
+`rx-nostr@3.7.6`をexact pinする。upstream [PR #198](https://github.com/penpenpng/rx-nostr/pull/198)のpublish cleanup修正は正式releaseに収録済みであり、project-owned temporary patch、patch-package、postinstallは撤去済みである。projectはpublic package entryのbehavior regression testで`OK true`、`OK false`、timeout後のlazy Relay cleanupを引き続き保証する。fork Git dependency、private API、publish-only SimplePool fallback、publishごとのRxNostr instance作成workaroundは採用しない。
 
 永続化は必要になった時点で `idb-keyval` を第一候補とし、index/query等が必要になった場合のみ `idb` やDexieを再評価する。
 
@@ -51,7 +51,7 @@ Relay transportの再調査は完了した。**新規library候補の探索は�
 | Renderer | PixiJS | **RE-EVALUATE LATER** | DOM speechとの二重rendererを招く | 大量continuous animationでDOMが実測bottleneck |
 | Renderer | Konva / svelte-konva | **REJECT FOR NOW** | Canvas object model、drag/hit detection等が不要 | Canvas shape editingが必要 |
 | Nostr | `nostr-tools` event / crypto primitives | **ADOPT** | project-owned event semanticsを保ったまま、key generation、event ID/hash、Schnorr signing、signed event verificationを利用できる | crypto / event primitiveの要件が変わる場合 |
-| Nostr | rx-nostr Relay transport | **ADOPT** | `rx-nostr@3.7.5` exact pinとtracked temporary patchにより、SPEC-30の長寿命Forward REQ、per-Relay raw EOSE、再接続、Relay状態、NIP-11 queueを扱う。RxJSはadapter内部に閉じ込める | PR #198相当を含む正式releaseでpatchなしのproject regression testとvalidateが通った場合にpatch撤去を検討 |
+| Nostr | rx-nostr Relay transport | **ADOPT** | `rx-nostr@3.7.6` exact pinで、SPEC-30の長寿命Forward REQ、per-Relay raw EOSE、再接続、Relay状態、NIP-11 queueを扱う。PR #198のpublish cleanup修正はupstream正式releaseに収録済みで、RxJSはadapter内部に閉じ込める | Relay lifecycle要件またはofficial APIの挙動が変わる場合 |
 | Nostr | `nostr-tools` SimplePool Relay transport | **RE-EVALUATE LATER** | per-Relay raw EOSEとreconnect semanticsを満たすにはproject-owned lower-level lifecycle実装が増える | Relay lifecycle要件またはofficial APIの挙動が変わる場合 |
 | Nostr | Nostrify | **RE-EVALUATE LATER** | Relay lifecycle APIは候補だが、現在のrx-nostr採用方針を覆す根拠はない | rx-nostrの採用条件を満たせない、またはarchitectureを覆す新事実が確認された場合 |
 | Nostr | Applesauce | **REJECT FOR NOW** | EventStore/reactive modelがcurrent-message中心MVPには広すぎる | large local EventStoreが必要 |
@@ -176,7 +176,7 @@ inline SVGを維持する。
 
 `nostr-tools` は **ADOPT** とする。fresh secret key generation、public key derivation、event ID/hash、Schnorr signing、signed event verificationを担当する。project-owned `nostrProtocol` はkind 42、kind 30078、NIP-28、NIP-32、speech type、positionとproject semantic validationを所有する。現行実装の`nostrProtocol`も、event template構築、`finalizeEvent()`、`verifyEvent()`、受信eventのsemantic parserをこの境界で分けている。
 
-Relay transportは `rx-nostr` を **ADOPT** とする。`rx-nostr@3.7.5`をexact pinし、Relayごとに1 WebSocketを共有したmulti-Relay communication、long-lived Forward REQ、そのlifecycle、reconnect、ongoing Forward REQの自動再送、raw `EOSE`、`CLOSED`、`OK`、connection state、NIP-11 subscription queueを扱う。RxJSはtransport adapter内部だけで使い、Svelteおよびdomain APIへ漏らさない。
+Relay transportは `rx-nostr` を **ADOPT** とする。`rx-nostr@3.7.6`をexact pinし、Relayごとに1 WebSocketを共有したmulti-Relay communication、long-lived Forward REQ、そのlifecycle、reconnect、ongoing Forward REQの自動再送、raw `EOSE`、`CLOSED`、`OK`、connection state、NIP-11 subscription queueを扱う。PR #198のpublish cleanup修正はupstream正式releaseに収録済みで、project-owned temporary patch infrastructureは撤去済みである。RxJSはtransport adapter内部だけで使い、Svelteおよびdomain APIへ漏らさない。
 
 ### SPIKEで確認したRelay lifecycle
 
@@ -185,7 +185,7 @@ SPEC-30では、Relayごとに論理的に別の長寿命subscriptionを少な�
 - `world-messages`: `kinds:[42]`、target channel `#e`、project `#L`、`#l:["chat"]`
 - `world-positions`: `kinds:[30078]`、target channel `#e`、project position slot `#d`
 
-いずれもstored bootstrapから`EOSE`、その後のlive `EVENT`までを同じsubscriptionで継続する。rx-nostr 3.7.5のForward Strategyとmock Relay SPIKEで、この挙動を確認した。
+いずれもstored bootstrapから`EOSE`、その後のlive `EVENT`までを同じsubscriptionで継続する。rx-nostr 3.7.6のForward Strategyとmock Relay SPIKEで、この挙動を確認した。3.7.5で行った確認は、正式releaseで同じtransport方針を継続するための基礎となった。
 
 public APIからRelay `from`、actual NIP-01 `subId`、`type: "EOSE"`を観測できる。これはRelayの`["EOSE", subId]`から生成されたraw packetであり、project側のtimeoutとは区別できる。`EOSE`後もForward subscriptionは`CLOSE`されず、同じsubscriptionで後続`EVENT`を受信する。
 
@@ -214,15 +214,15 @@ secret keyはRelay transportへ渡さない。`skipExpirationCheck: true`を使�
 
 `@rx-nostr/crypto` は追加しない。`seckeySigner`、public key derivation、hashing/signature primitives、verifierを提供するが、現在の責務分割で`nostr-tools`を置き換える利益がない。確認したverifierはsignature検証時に再計算hashを使用する一方、`nostr-tools` `verifyEvent()`のような`event.id === recomputed hash`の明示確認は行わない。fresh secret-key generationも`nostr-tools`から外す理由がない。この判断は同package一般の安全性評価ではなく、本projectの要件に対するものとする。
 
-### NIP-11とtemporary patch
+### NIP-11とpublish cleanup修正
 
 rx-nostrはNIP-11 `limitation.max_subscriptions`をREQ queue capacityとして使用する。Relayが`max_subscriptions: 1`を広告する場合、必要な2本のlong-lived subscriptionの一方がqueueに残り続ける可能性がある。これはRelay capabilityとproject requirementsのcompatibility問題であり、実Relay検証で確認する。NIP-11の無視、2 filterの統合、fallback Relayの自動追加は今回決定しない。
 
-調査時点で、rx-nostr 3.7.5 / current mainにはpublish cleanup bugがある。正常なterminal `OK`後、`PublishProxy.confirmOK()`の条件反転によりregistered publish state / logical connection countが解放されず、lazy Relay connectionがidle / dormantへ戻れないことを再現した。[Issue #197](https://github.com/penpenpng/rx-nostr/issues/197)と[PR #198](https://github.com/penpenpng/rx-nostr/pull/198)は調査時点でopenであり、PRはroot causeの1行修正とpublic-behavior regression testを含む。
+調査時点では、rx-nostr 3.7.5 / current mainにpublish cleanup bugがあり、正常なterminal `OK`後にregistered publish state / logical connection countが解放されず、lazy Relay connectionがidle / dormantへ戻れないことを再現した。[Issue #197](https://github.com/penpenpng/rx-nostr/issues/197)と[PR #198](https://github.com/penpenpng/rx-nostr/pull/198)で追跡していたroot causeは、PR #198のmergeと`rx-nostr@3.7.6`正式releaseによって解決済みである。
 
-したがって、temporary tracked patchを`patches/rx-nostr+3.7.5.patch`として管理する。patch-packageをpostinstallで実行し、適用不能ならinstallをfail-closeする。public package entryだけを使うproject regression testでterminal `OK true`、`OK false`、timeout後にpublish logical stateが解放されlazy Relay connectionがdormantへ戻ることを保証する。fork Git dependency、private API、publishごとにRxNostr instanceを作り直す、publishだけSimplePoolへ分離するworkaroundは採用しない。
+3.7.5時点では上記のtemporary tracked patchを適用していたが、正式releaseへの更新に伴い`patches/rx-nostr+3.7.5.patch`、patch-package、postinstallは撤去済みである。public package entryだけを使うproject-side regression testでterminal `OK true`、`OK false`、timeout後にpublish logical stateが解放されlazy Relay connectionがdormantへ戻ることを保証する。fork Git dependency、private API、publishごとにRxNostr instanceを作り直す、publishだけSimplePoolへ分離するworkaroundは採用しない。
 
-temporary patchの撤去は、PR #198相当を含む**正式release**へupgradeした後に限る。patchを外し、patch-packageとpostinstallを外し、existing project-side regression testをpatchなしで実行して`npm run validate`を成功させる。upstream mergeだけでは撤去条件を満たさない。
+temporary patchの撤去条件だった、PR #198相当を含む**正式release**へのupgradeが`rx-nostr@3.7.6`で満たされた。patchなしのexisting project-side regression testと`npm run validate`で、upstream修正をproject境界から継続検証する。
 
 SimplePoolは一般に不適切なlibraryという結論ではない。ただし本projectでは、`SimplePool.subscribeMap()`等のaggregate EOSEではper-Relay raw EOSE semanticsを直接扱いにくく、lower-level subscriptionのEOSE timeoutと実Relay EOSEの区別、reconnect時のfilter `since`、project-owned reconnect lifecycleが問題になる。これらを満たすにはAbstractRelay / direct subscription等の独自実装が増えるため、Relay transportとしては **RE-EVALUATE LATER** とする。
 
@@ -234,7 +234,7 @@ NIP-28がunrecommendedであることを理由にNIP-29へ自動変更しない�
 - [rx-nostr v3: Reconnection](https://penpenpng.github.io/rx-nostr/en/v3/reconnection.html)
 - [rx-nostr v3: Other observables](https://penpenpng.github.io/rx-nostr/en/v3/other-observables.html)
 - [rx-nostr v3: NIP-11 Registry](https://penpenpng.github.io/rx-nostr/en/v3/nip11-registry.html)
-- [rx-nostr 3.7.5 source](https://github.com/penpenpng/rx-nostr/tree/rx-nostr%403.7.5) / [current source](https://github.com/penpenpng/rx-nostr)
+- [rx-nostr 3.7.6 source](https://github.com/penpenpng/rx-nostr/tree/rx-nostr%403.7.6) / [current source](https://github.com/penpenpng/rx-nostr)
 - [Issue #197: Publish state is not released after receiving OK](https://github.com/penpenpng/rx-nostr/issues/197)
 - [PR #198: Fix publish state cleanup after OK](https://github.com/penpenpng/rx-nostr/pull/198)
 
@@ -287,10 +287,10 @@ collision用の外部runtime dependencyは追加しない。
 
 ```text
 nostr-tools (event / crypto primitives)
-rx-nostr@3.7.5 (Relay transport; tracked temporary publish cleanup patch)
+rx-nostr@3.7.6 (Relay transport; upstream publish cleanup fix included)
 ```
 
-`@rx-nostr/crypto`は追加しない。PR #198相当を含む正式releaseへupgradeする場合のみ、temporary patch撤去条件を満たすことを確認する。
+`@rx-nostr/crypto`は追加しない。PR #198の修正を含む`rx-nostr@3.7.6`正式releaseを採用し、temporary patch撤去条件を満たした。
 
 ### Browser persistence実装時
 
@@ -314,7 +314,7 @@ idb-keyval
 |---|---|
 | **採用済み / 継続** | DOM absolute positioning、CSS transform、pure geometry、ResizeObserver、DOM bubbles、SVG tails、project-owned deterministic collision placement、Vitest |
 | **Nostr event / cryptoで採用** | `nostr-tools`。project-owned `nostrProtocol` がevent semanticsを所有 |
-| **Nostr Relay transportで採用** | `rx-nostr@3.7.5`。PR #198相当のtemporary tracked patchとpublic behavior regression testでpublish cleanupを保証 |
+| **Nostr Relay transportで採用** | `rx-nostr@3.7.6` exact pin。PR #198のfixはupstream正式releaseに収録済みで、project-side public behavior regression testを維持 |
 | **Persistence段階で採用** | `idb-keyval` |
 | **必要なbrowser regressionが明確になった時点で導入** | Playwright |
 | **今は入れない** | `avoid-overlap`、Floating UI、Svelte Flow、D3 force、labelgun、LeaderLine、Konva、`@rx-nostr/crypto`、Applesauce、NDK |
@@ -332,4 +332,4 @@ idb-keyval
 
 それ以外では、新しいcollision libraryを探索し続けない。
 
-Relay transport再調査は完了している。新規library候補の探索は停止し、`rx-nostr@3.7.5`とtemporary tracked patchでproduction実装へ進む。正式releaseはtemporary patch撤去候補であり、現在のarchitectureを覆す新事実がない限り候補探索へは戻らない。
+Relay transport再調査は完了している。新規library候補の探索は停止し、`rx-nostr@3.7.6` exact pinでproduction実装を継続する。PR #198のfixは正式releaseへ収録済みで、project-owned temporary patch infrastructureは撤去済みである。現在のarchitectureを覆す新事実がない限り候補探索へ戻らない。

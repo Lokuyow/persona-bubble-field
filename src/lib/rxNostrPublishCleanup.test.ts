@@ -11,7 +11,7 @@ function event(): VerifiedEvent {
 		kind: 1,
 		created_at: 1_700_000_000,
 		tags: [],
-		content: 'patched publish cleanup'
+		content: 'publish cleanup regression'
 	}, TEST_SECRET_KEY);
 }
 
@@ -38,7 +38,7 @@ async function waitForCompletion(observable: { subscribe(observer: { complete: (
 }
 
 async function expectPublishCleanup(ok: boolean | null): Promise<void> {
-	const relayUrl = `ws://rx-nostr-patch-${crypto.randomUUID()}`;
+	const relayUrl = `ws://rx-nostr-cleanup-${crypto.randomUUID()}`;
 	const server = new Server(relayUrl);
 	servers.push(server);
 	server.on('connection', (socket) => {
@@ -72,7 +72,7 @@ afterEach(() => {
 	while (servers.length > 0) servers.pop()?.stop();
 });
 
-describe('rx-nostr 3.7.5 temporary publish cleanup patch', () => {
+describe('rx-nostr publish cleanup behavior', () => {
 	it('releases the lazy relay after a terminal OK true', async () => {
 		await expectPublishCleanup(true);
 	});
