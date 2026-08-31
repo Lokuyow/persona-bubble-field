@@ -203,6 +203,28 @@ test.describe('DEV World Sandbox', () => {
 		expect(await visibleEntries.locator('.timeline-content').allTextContents()).toContain('same content, different event');
 		await expect(visibleEntries.filter({ hasText: 'line 1' }).locator('.timeline-ellipsis')).toHaveCount(1);
 		await expect(visibleEntries.filter({ hasText: 'same content, different event' }).locator('.timeline-ellipsis')).toHaveCount(0);
+		const shortEntryFlow = await visibleEntries.filter({ hasText: 'timeline message 22' }).first().evaluate((entry) => {
+			const name = entry.querySelector<HTMLElement>('.timeline-name');
+			const content = entry.querySelector<HTMLElement>('.timeline-content');
+			if (!name || !content) throw new Error('Expected an inline timeline name and content.');
+			const contentLine = content.getClientRects()[0];
+			return {
+				nameTop: name.getBoundingClientRect().top,
+				contentTop: contentLine?.top ?? -1,
+				contentTag: content.tagName,
+				textHeight: entry.querySelector<HTMLElement>('.timeline-text')?.clientHeight ?? 0
+			};
+		});
+		expect(Math.abs(shortEntryFlow.nameTop - shortEntryFlow.contentTop)).toBeLessThan(1.5);
+		expect(shortEntryFlow.contentTag).toBe('SPAN');
+		expect(shortEntryFlow.textHeight).toBeLessThan(40);
+		const longEntryFlow = await visibleEntries.filter({ hasText: 'line 1' }).first().locator('.timeline-text').evaluate((text) => ({
+			clientHeight: text.clientHeight,
+			scrollHeight: text.scrollHeight,
+			contentLines: text.querySelector<HTMLElement>('.timeline-content')?.getClientRects().length ?? 0
+		}));
+		expect(longEntryFlow.contentLines).toBeGreaterThan(1);
+		expect(longEntryFlow.scrollHeight).toBeGreaterThan(longEntryFlow.clientHeight);
 		await expect(timeline.locator('.timeline-measurements button.timeline-name')).toHaveCount(0);
 		await expect(timeline.locator('button.timeline-name')).toHaveCount(20);
 

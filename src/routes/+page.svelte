@@ -1495,14 +1495,16 @@
 							data-timeline-created-at={message.createdAt}
 							data-timeline-tone={tone ?? 'default'}
 						>
-							<button
-								class={`timeline-name${tone ? ` tone-${tone}` : ''}`}
-								type="button"
-								aria-label={`${character.name} のプロフィールを開く`}
-								on:click={(event) => openProfile(character.characterId, event.currentTarget as HTMLButtonElement)}
-							>{character.name}</button>
 							<div class="timeline-content-shell">
-								<p class="timeline-content" use:observeTimelineContent={message.id}>{message.content}</p>
+								<div class="timeline-text" use:observeTimelineContent={message.id}>
+									<button
+										class={`timeline-name${tone ? ` tone-${tone}` : ''}`}
+										type="button"
+										aria-label={`${character.name} のプロフィールを開く`}
+										on:click={(event) => openProfile(character.characterId, event.currentTarget as HTMLButtonElement)}
+									>{character.name}</button>
+									<span class="timeline-content">{message.content}</span>
+								</div>
 								{#if timelineOverflowById[message.id]}
 									<span class="timeline-ellipsis" aria-hidden="true">…</span>
 								{/if}
@@ -1517,7 +1519,10 @@
 						<article class="timeline-entry" use:observeTimelineEntry={message.id}>
 							<span class={`timeline-name${tone ? ` tone-${tone}` : ''}`}>{character.name}</span>
 							<div class="timeline-content-shell">
-								<p class="timeline-content">{message.content}</p>
+								<div class="timeline-text">
+									<span class={`timeline-name${tone ? ` tone-${tone}` : ''}`}>{character.name}</span>
+									<span class="timeline-content">{message.content}</span>
+								</div>
 							</div>
 						</article>
 					{/each}
@@ -1881,20 +1886,20 @@
 
 	.timeline-header h2 {
 		margin: 0;
-		color: #fff;
+		color: #596662;
 		font-size: 11px;
 		font-weight: 900;
 		letter-spacing: 0.1em;
 		text-transform: uppercase;
 		text-shadow:
-			-1px -1px 0 #000,
-			0 -1px 0 #000,
-			1px -1px 0 #000,
-			-1px 0 0 #000,
-			1px 0 0 #000,
-			-1px 1px 0 #000,
-			0 1px 0 #000,
-			1px 1px 0 #000;
+			-1px -1px 0 #fff,
+			0 -1px 0 #fff,
+			1px -1px 0 #fff,
+			-1px 0 0 #fff,
+			1px 0 0 #fff,
+			-1px 1px 0 #fff,
+			0 1px 0 #fff,
+			1px 1px 0 #fff;
 	}
 
 	.timeline-hide-control,
@@ -1940,49 +1945,51 @@
 	.timeline-entry:last-child { border-bottom: 0; }
 
 	.timeline-name {
-		display: block;
+		display: inline;
 		max-width: 100%;
 		padding: 0;
 		border: 0;
 		background: transparent;
-		color: #fff;
+		color: #596662;
+		font-family: inherit;
 		font-size: 12px;
 		font-weight: 900;
+		margin-right: 0.35em;
 		letter-spacing: 0.02em;
 		text-align: left;
 		text-decoration: underline;
 		text-decoration-color: rgba(89, 102, 98, 0.35);
 		text-underline-offset: 3px;
 		text-shadow:
-			-1px -1px 0 #000,
-			0 -1px 0 #000,
-			1px -1px 0 #000,
-			-1px 0 0 #000,
-			1px 0 0 #000,
-			-1px 1px 0 #000,
-			0 1px 0 #000,
-			1px 1px 0 #000;
+			-1px -1px 0 #fff,
+			0 -1px 0 #fff,
+			1px -1px 0 #fff,
+			-1px 0 0 #fff,
+			1px 0 0 #fff,
+			-1px 1px 0 #fff,
+			0 1px 0 #fff,
+			1px 1px 0 #fff;
 	}
 
-	.timeline-name.tone-coral,
-	.timeline-name.tone-lavender,
-	.timeline-name.tone-mint,
-	.timeline-name.tone-yellow,
-	.timeline-name.tone-sky,
-	.timeline-name.tone-peach,
-	.timeline-name.tone-rose,
-	.timeline-name.tone-blue { color: #fff; }
+	.timeline-name.tone-coral { color: hsl(12, 96%, 42%); }
+	.timeline-name.tone-lavender { color: hsl(250, 72%, 42%); }
+	.timeline-name.tone-mint { color: hsl(145, 68%, 31%); }
+	.timeline-name.tone-yellow { color: hsl(48, 82%, 34%); }
+	.timeline-name.tone-sky { color: hsl(188, 72%, 32%); }
+	.timeline-name.tone-peach { color: hsl(28, 82%, 38%); }
+	.timeline-name.tone-rose { color: hsl(340, 72%, 40%); }
+	.timeline-name.tone-blue { color: hsl(210, 72%, 37%); }
 
 	.timeline-content-shell {
 		position: relative;
 		min-width: 0;
 	}
 
-	.timeline-content {
+	.timeline-text {
 		max-height: calc(1.45em * 5);
 		margin: 6px 0 0;
 		overflow: hidden;
-		color: #fff;
+		color: #26302d;
 		font-size: 13px;
 		font-weight: 800;
 		letter-spacing: 0.01em;
@@ -1990,14 +1997,20 @@
 		overflow-wrap: anywhere;
 		white-space: pre-line;
 		text-shadow:
-			-1px -1px 0 #000,
-			0 -1px 0 #000,
-			1px -1px 0 #000,
-			-1px 0 0 #000,
-			1px 0 0 #000,
-			-1px 1px 0 #000,
-			0 1px 0 #000,
-			1px 1px 0 #000;
+			-1px -1px 0 #fff,
+			0 -1px 0 #fff,
+			1px -1px 0 #fff,
+			-1px 0 0 #fff,
+			1px 0 0 #fff,
+			-1px 1px 0 #fff,
+			0 1px 0 #fff,
+			1px 1px 0 #fff;
+	}
+
+	.timeline-content {
+		display: inline;
+		color: inherit;
+		font: inherit;
 	}
 
 	.timeline-ellipsis {
@@ -2006,19 +2019,19 @@
 		bottom: 0;
 		padding-left: 0.35em;
 		background: transparent;
-		color: #fff;
+		color: #26302d;
 		font-size: 13px;
 		font-weight: 900;
 		line-height: 1.45;
 		text-shadow:
-			-1px -1px 0 #000,
-			0 -1px 0 #000,
-			1px -1px 0 #000,
-			-1px 0 0 #000,
-			1px 0 0 #000,
-			-1px 1px 0 #000,
-			0 1px 0 #000,
-			1px 1px 0 #000;
+			-1px -1px 0 #fff,
+			0 -1px 0 #fff,
+			1px -1px 0 #fff,
+			-1px 0 0 #fff,
+			1px 0 0 #fff,
+			-1px 1px 0 #fff,
+			0 1px 0 #fff,
+			1px 1px 0 #fff;
 	}
 
 	.timeline-show-control {
