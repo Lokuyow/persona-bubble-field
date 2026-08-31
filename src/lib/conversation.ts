@@ -52,7 +52,7 @@ export function createConversationState(): ConversationState {
 }
 
 export function getPrototypeDisplayDuration(content: string): number {
-	return Math.min(12_000, Math.max(5_000, Array.from(content).length * 120 + 5_000));
+	return Math.min(15_000, Math.max(6_000, Array.from(content).length * 240 + 6_000));
 }
 
 function copyState(state: ConversationState, changes: Partial<ConversationState>): ConversationState {

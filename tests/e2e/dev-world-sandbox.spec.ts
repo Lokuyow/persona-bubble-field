@@ -189,7 +189,7 @@ test.describe('DEV World Sandbox', () => {
 
 		expect(background.image).toContain('prototype-urban-park.png');
 		expect(background.image).toContain('repeating-conic-gradient');
-		expect(background.size).toContain('168px 168px');
+		expect(background.size).toContain('152px 152px');
 		expect(background.size).toContain('100% 100%');
 		expect(background.sceneRatio).toBeCloseTo(2, 5);
 		expect(background.boundaryBorder).toBe('2px');
@@ -1037,8 +1037,8 @@ test.describe('DEV World Sandbox', () => {
 
 	test.describe('responsive field presentation', () => {
 		for (const viewport of [
-			{ name: 'mobile', width: 390, height: 844, sideMargin: '8px', fieldWidth: '374px', cell: '60px', avatar: '56px', worldWidth: '960px', worldHeight: '480px' },
-			{ name: 'desktop', width: 1200, height: 900, sideMargin: '8px', fieldWidth: '1184px', cell: '84px', avatar: '80px', worldWidth: '1344px', worldHeight: '672px' }
+			{ name: 'mobile', width: 390, height: 844, sideMargin: '8px', fieldWidth: '374px', cell: '50px', avatar: '46px', worldWidth: '800px', worldHeight: '400px' },
+			{ name: 'desktop', width: 1200, height: 900, sideMargin: '8px', fieldWidth: '1184px', cell: '76px', avatar: '72px', worldWidth: '1216px', worldHeight: '608px' }
 		]) {
 			test(`${viewport.name} uses the responsive cell and centered avatar`, async ({ page }) => {
 				await page.setViewportSize({ width: viewport.width, height: viewport.height });
@@ -1094,8 +1094,8 @@ test.describe('DEV World Sandbox', () => {
 			expect(afterTransform).not.toBe(beforeTransform);
 			expect(Math.abs(after.avatarCenter.x - page.viewportSize()!.width / 2)).toBeLessThan(0.5);
 			expect(Math.abs(after.avatarCenter.x - after.participantCenter.x)).toBeLessThan(0.5);
-			expect(after.avatarWidth).toBe('56px');
-			expect(after.avatarHeight).toBe('56px');
+			expect(after.avatarWidth).toBe('46px');
+			expect(after.avatarHeight).toBe('46px');
 			expect(before.participantCenter.y).toBe(after.participantCenter.y);
 		});
 	});
