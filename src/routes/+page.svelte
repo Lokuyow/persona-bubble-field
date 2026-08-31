@@ -1150,7 +1150,7 @@
 		</div>
 		<div
 			class="field-area"
-			style={`top: ${fieldAreaBounds.y}px; height: ${fieldAreaBounds.height}px;`}
+			style={`top: ${fieldAreaBounds.y}px; left: ${fieldAreaBounds.x}px; width: ${fieldAreaBounds.width}px; height: ${fieldAreaBounds.height}px;`}
 			aria-label="Field area"
 		>
 			<div
@@ -1471,8 +1471,6 @@
 
 	.field-area {
 		position: absolute;
-		right: 0;
-		left: 0;
 		z-index: 2;
 		overflow: hidden;
 		background: transparent;
@@ -1514,8 +1512,16 @@
 			calc(var(--cell-size) * 2) calc(var(--cell-size) * 2);
 		box-shadow:
 			0 24px 65px rgba(67, 75, 62, 0.12),
-			inset 0 0 0 1px rgba(95, 111, 96, 0.3),
-			inset 0 0 0 16px rgba(255, 255, 255, 0.11);
+			inset 0 0 0 1px rgba(95, 111, 96, 0.3);
+	}
+
+	.field-grid::after {
+		position: absolute;
+		inset: 0;
+		border: 2px solid rgba(68, 91, 73, 0.48);
+		box-shadow: inset 0 0 0 10px rgba(112, 137, 108, 0.2);
+		content: '';
+		pointer-events: none;
 	}
 
 	.field-movement-layer {

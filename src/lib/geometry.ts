@@ -74,6 +74,8 @@ export type FieldSize = {
 export const DESKTOP_CELL_SIZE = 84;
 export const MOBILE_CELL_SIZE = 60;
 export const MOBILE_FIELD_BREAKPOINT = 700;
+export const DESKTOP_FIELD_SIDE_MARGIN = 8;
+export const MOBILE_FIELD_SIDE_MARGIN = 8;
 
 export function getResponsiveCellSize(viewportWidth: number): number {
 	return viewportWidth <= MOBILE_FIELD_BREAKPOINT ? MOBILE_CELL_SIZE : DESKTOP_CELL_SIZE;
@@ -109,11 +111,14 @@ export function getFieldWorldSize(field: FieldSize): Size {
 
 export function getFieldAreaBounds(viewport: Size, speechArea: Pick<Bounds, 'y' | 'height'>): Bounds {
 	const y = speechArea.y + speechArea.height;
+	const sideMargin = viewport.width <= MOBILE_FIELD_BREAKPOINT
+		? MOBILE_FIELD_SIDE_MARGIN
+		: DESKTOP_FIELD_SIDE_MARGIN;
 
 	return {
-		x: 0,
+		x: sideMargin,
 		y,
-		width: viewport.width,
+		width: Math.max(0, viewport.width - sideMargin * 2),
 		height: Math.max(0, viewport.height - y)
 	};
 }
