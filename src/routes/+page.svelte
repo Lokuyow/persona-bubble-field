@@ -1890,7 +1890,8 @@
 		font-weight: 900;
 		letter-spacing: 0.1em;
 		text-transform: uppercase;
-		-webkit-text-stroke: 0.75px rgba(20, 24, 23, 0.95);
+		-webkit-text-stroke: 1.5px rgba(20, 24, 23, 0.95);
+		paint-order: stroke fill;
 	}
 
 	.timeline-hide-control,
@@ -1951,7 +1952,8 @@
 		letter-spacing: 0.02em;
 		text-align: left;
 		cursor: pointer;
-		-webkit-text-stroke: 0.75px rgba(20, 24, 23, 0.95);
+		-webkit-text-stroke: 1.5px rgba(20, 24, 23, 0.95);
+		paint-order: stroke fill;
 		vertical-align: top;
 	}
 
@@ -1986,7 +1988,8 @@
 		line-height: 1.45;
 		overflow-wrap: anywhere;
 		white-space: pre-line;
-		-webkit-text-stroke: 0.75px rgba(20, 24, 23, 0.95);
+		-webkit-text-stroke: 1.5px rgba(20, 24, 23, 0.95);
+		paint-order: stroke fill;
 
 	 @media (width <= 700px) {
 			font-size: 13px;
@@ -2009,7 +2012,8 @@
 		font-size: 13px;
 		font-weight: 900;
 		line-height: 1.45;
-		-webkit-text-stroke: 0.75px rgba(20, 24, 23, 0.95);
+		-webkit-text-stroke: 1.5px rgba(20, 24, 23, 0.95);
+		paint-order: stroke fill;
 	}
 
 	.timeline-show-control {
