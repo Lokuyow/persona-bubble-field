@@ -287,6 +287,91 @@ test.describe('DEV World Sandbox', () => {
 		expect(await page.locator('.bubble-merged').evaluate((bubble) => getComputedStyle(bubble).borderRadius)).toBe('18px');
 	});
 
+	test('preserves explicit line breaks in normal and merged bubbles without clamping short content', async ({ page }) => {
+		await page.goto('/?devWorld=1&devSpeech=linebreak');
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+
+		const bubbles = page.locator('.bubble');
+		await expect(bubbles).toHaveCount(2);
+		const state = await bubbles.evaluateAll((elements) => elements.map((element) => {
+			const content = element.querySelector<HTMLElement>('.bubble-content');
+			if (!content) throw new Error('Expected bubble content element.');
+			const style = getComputedStyle(content);
+			return {
+				text: content.textContent,
+				whiteSpace: style.whiteSpace,
+				display: style.display,
+				lineClamp: style.webkitLineClamp,
+				overflow: style.overflow,
+				lineHeight: Number.parseFloat(style.lineHeight),
+				clientHeight: content.clientHeight,
+				scrollHeight: content.scrollHeight
+			};
+		}));
+
+		expect(state.map((bubble) => bubble.text)).toEqual([
+			'normal line 1\nnormal line 2\nnormal line 3',
+			'merged line 1\nmerged line 2\nmerged line 3'
+		]);
+		expect(state.every((bubble) => bubble.whiteSpace === 'pre-line')).toBe(true);
+		expect(state.every((bubble) => bubble.display === 'flow-root')).toBe(true);
+		expect(state.every((bubble) => bubble.lineClamp === '5')).toBe(true);
+		expect(state.every((bubble) => bubble.overflow === 'hidden')).toBe(true);
+		expect(state.every((bubble) => bubble.scrollHeight === bubble.clientHeight)).toBe(true);
+		expect(state.every((bubble) => Math.abs(bubble.clientHeight - bubble.lineHeight * 3) <= 1)).toBe(true);
+		expect(state.every((bubble) => bubble.clientHeight > 0)).toBe(true);
+	});
+
+	for (const [query, expectedTexts] of [
+		[
+			'long',
+			[
+				'Normal bubble message that wraps repeatedly inside the speech bubble width. '.repeat(8).trim(),
+				'Merged bubble message that wraps repeatedly inside the speech bubble width. '.repeat(8).trim()
+			]
+		],
+		[
+			'linebreak-overflow',
+			[
+				'normal line 1\nnormal line 2\nnormal line 3\nnormal line 4\nnormal line 5\nnormal line 6',
+				'merged line 1\nmerged line 2\nmerged line 3\nmerged line 4\nmerged line 5\nmerged line 6'
+			]
+		]
+	] as const) {
+		test(`clamps ${query === 'long' ? 'wrapped long text' : 'explicit six-line text'} in normal and merged bubbles`, async ({ page }) => {
+			await page.setViewportSize({ width: 390, height: 844 });
+			await page.goto(`/?devWorld=1&devSpeech=${query}`);
+			await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+
+			const bubbles = page.locator('.bubble');
+			await expect(bubbles).toHaveCount(2);
+			const state = await bubbles.evaluateAll((elements) => elements.map((element) => {
+				const content = element.querySelector<HTMLElement>('.bubble-content');
+				if (!content) throw new Error('Expected bubble content element.');
+				const style = getComputedStyle(content);
+				const lineHeight = Number.parseFloat(style.lineHeight);
+				return {
+					text: content.textContent,
+					display: style.display,
+					lineClamp: style.webkitLineClamp,
+					overflow: style.overflow,
+					clientHeight: content.clientHeight,
+					scrollHeight: content.scrollHeight,
+					lineHeight,
+					bubbleHeight: element.getBoundingClientRect().height
+				};
+			}));
+
+			expect(state.map((bubble) => bubble.text)).toEqual(expectedTexts);
+			expect(state.every((bubble) => bubble.display === 'flow-root')).toBe(true);
+			expect(state.every((bubble) => bubble.lineClamp === '5')).toBe(true);
+			expect(state.every((bubble) => bubble.overflow === 'hidden')).toBe(true);
+			expect(state.every((bubble) => bubble.scrollHeight > bubble.clientHeight)).toBe(true);
+			expect(state.every((bubble) => bubble.clientHeight <= bubble.lineHeight * 5 + 1)).toBe(true);
+			expect(state.every((bubble) => bubble.bubbleHeight > 0)).toBe(true);
+		});
+	}
+
 	test('renders the full speech showcase with eight colors and a merged bubble', async ({ page }) => {
 		await page.goto('/?devWorld=1&devSpeech=1');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();

@@ -150,6 +150,15 @@ describe('conversation lifecycle', () => {
 		});
 	});
 
+	it('keeps multiline content unchanged for merged conversation state', () => {
+		const content = 'first line\nsecond line\nthird line';
+		const first = receive(createConversationState(), message('m1', 'alice', content));
+		const state = receive(first, message('m2', 'bob', content, 'normal', 10), true, 10);
+
+		expect(state.mergedBubbles[0].content).toBe(content);
+		expect(state.mergedBubbles[0].messageIds).toEqual(['m1', 'm2']);
+	});
+
 	it('does not merge two messages from the same pubkey', () => {
 		const state = receive(normalState(), message('m2', 'alice', 'hello', 'normal', 10), true, 10);
 
