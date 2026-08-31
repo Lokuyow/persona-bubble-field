@@ -292,6 +292,258 @@ test.describe('DEV World Sandbox', () => {
 		expect(await page.locator('.bubble-merged').evaluate((bubble) => getComputedStyle(bubble).borderRadius)).toBe('18px');
 	});
 
+	test('preserves explicit line breaks in normal and merged bubbles without clamping short content', async ({ page }) => {
+		await page.goto('/?devWorld=1&devSpeech=linebreak');
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+
+		const bubbles = page.locator('.bubble');
+		await expect(bubbles).toHaveCount(2);
+		const state = await bubbles.evaluateAll((elements) => elements.map((element) => {
+			const content = element.querySelector<HTMLElement>('.bubble-content');
+			if (!content) throw new Error('Expected bubble content element.');
+			const style = getComputedStyle(content);
+			return {
+				text: content.textContent,
+				whiteSpace: style.whiteSpace,
+				display: style.display,
+				lineClamp: style.webkitLineClamp,
+				overflow: style.overflow,
+				lineHeight: Number.parseFloat(style.lineHeight),
+				clientHeight: content.clientHeight,
+				scrollHeight: content.scrollHeight,
+				ellipsisCount: element.querySelectorAll('.bubble-ellipsis').length
+			};
+		}));
+
+		expect(state.map((bubble) => bubble.text)).toEqual([
+			'normal line 1\nnormal line 2\nnormal line 3',
+			'merged line 1\nmerged line 2\nmerged line 3'
+		]);
+		expect(state.every((bubble) => bubble.whiteSpace === 'pre-line')).toBe(true);
+		expect(state.every((bubble) => bubble.display === 'flow-root')).toBe(true);
+		expect(state.every((bubble) => bubble.lineClamp === '5')).toBe(true);
+		expect(state.every((bubble) => bubble.overflow === 'hidden')).toBe(true);
+		expect(state.every((bubble) => bubble.scrollHeight === bubble.clientHeight)).toBe(true);
+		expect(state.every((bubble) => Math.abs(bubble.clientHeight - bubble.lineHeight * 3) <= 1)).toBe(true);
+		expect(state.every((bubble) => bubble.ellipsisCount === 0)).toBe(true);
+		expect(state.every((bubble) => bubble.clientHeight > 0)).toBe(true);
+	});
+
+	for (const [query, expectedTexts] of [
+		[
+			'long',
+			[
+				'Normal bubble message that wraps repeatedly inside the speech bubble width. '.repeat(8).trim(),
+				'Merged bubble message that wraps repeatedly inside the speech bubble width. '.repeat(8).trim()
+			]
+		],
+		[
+			'linebreak-overflow',
+			[
+				'normal line 1\nnormal line 2\nnormal line 3\nnormal line 4\nnormal line 5\nnormal line 6',
+				'merged line 1\nmerged line 2\nmerged line 3\nmerged line 4\nmerged line 5\nmerged line 6'
+			]
+		]
+	] as const) {
+		test(`clamps ${query === 'long' ? 'wrapped long text' : 'explicit six-line text'} in normal and merged bubbles`, async ({ page }) => {
+			await page.setViewportSize({ width: 390, height: 844 });
+			await page.goto(`/?devWorld=1&devSpeech=${query}`);
+			await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+
+			const bubbles = page.locator('.bubble');
+			await expect(bubbles).toHaveCount(2);
+			const state = await bubbles.evaluateAll((elements) => elements.map((element) => {
+				const content = element.querySelector<HTMLElement>('.bubble-content');
+				if (!content) throw new Error('Expected bubble content element.');
+				const style = getComputedStyle(content);
+				const lineHeight = Number.parseFloat(style.lineHeight);
+				return {
+					text: content.textContent,
+					display: style.display,
+					lineClamp: style.webkitLineClamp,
+					overflow: style.overflow,
+					clientHeight: content.clientHeight,
+					scrollHeight: content.scrollHeight,
+					lineHeight,
+					bubbleHeight: element.getBoundingClientRect().height,
+					ellipsis: (() => {
+						const indicator = element.querySelector<HTMLElement>('.bubble-ellipsis');
+						if (!indicator) return null;
+						const rect = indicator.getBoundingClientRect();
+						return {
+							text: indicator.textContent,
+							ariaHidden: indicator.getAttribute('aria-hidden'),
+							visible: rect.width > 0 && rect.height > 0 && getComputedStyle(indicator).visibility !== 'hidden'
+						};
+					})()
+				};
+			}));
+
+			expect(state.map((bubble) => bubble.text)).toEqual(expectedTexts);
+			expect(state.every((bubble) => bubble.display === 'flow-root')).toBe(true);
+			expect(state.every((bubble) => bubble.lineClamp === '5')).toBe(true);
+			expect(state.every((bubble) => bubble.overflow === 'hidden')).toBe(true);
+			expect(state.every((bubble) => bubble.scrollHeight > bubble.clientHeight)).toBe(true);
+			expect(state.every((bubble) => bubble.clientHeight <= bubble.lineHeight * 5 + 1)).toBe(true);
+			expect(state.every((bubble) => bubble.bubbleHeight > 0)).toBe(true);
+			expect(state.every((bubble) => bubble.ellipsis?.text === '…')).toBe(true);
+			expect(state.every((bubble) => bubble.ellipsis?.ariaHidden === 'true')).toBe(true);
+			expect(state.every((bubble) => bubble.ellipsis?.visible)).toBe(true);
+		});
+	}
+
+	test('sizes normal bubbles by content up to the 240px safe maximum', async ({ page }) => {
+		await page.goto('/?devWorld=1&devSpeech=normal-sizes');
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+
+		const bubbles = page.locator('.bubble-normal');
+		await expect(bubbles).toHaveCount(3);
+		const state = await bubbles.evaluateAll((elements) => elements.map((element) => {
+			const rect = element.getBoundingClientRect();
+			return { width: rect.width, height: rect.height, left: rect.left, right: rect.right };
+		}));
+
+		expect(state[0].width).toBeLessThan(state[1].width);
+		expect(state[1].width).toBeLessThanOrEqual(state[2].width);
+		expect(state[0].width).toBeLessThan(240);
+		expect(state.every((bubble) => bubble.width <= 240.5)).toBe(true);
+		expect(state.every((bubble) => bubble.left >= 16 && bubble.right <= 1264)).toBe(true);
+	});
+
+	test('grows merged bubbles by content while increasing the maximum with member count', async ({ page }) => {
+		const fixtures = [
+			{ query: 'merged2', longQuery: 'merged2-long', count: 2, maxWidth: 330, members: ['b', 'c'] },
+			{ query: 'merged3', longQuery: 'merged3-long', count: 3, maxWidth: 345, members: ['b', 'c', 'd'] },
+			{ query: 'merged4', longQuery: 'merged4-long', count: 4, maxWidth: 360, members: ['b', 'c', 'd', 'e'] }
+		] as const;
+
+		for (const fixture of fixtures) {
+			await page.goto(`/?devWorld=1&devSpeech=${fixture.query}`);
+			await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+			await expect(page.locator('.bubble-merged')).toHaveAttribute('data-merged-members', String(fixture.count));
+			const short = await readMergedBubbleGeometry(page, fixture.members);
+
+			await page.goto(`/?devWorld=1&devSpeech=${fixture.longQuery}`);
+			await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+			const long = await readMergedBubbleGeometry(page, fixture.members);
+
+			expect(short.width).toBeLessThan(fixture.maxWidth);
+			expect(long.width).toBeGreaterThan(short.width);
+			expect(long.width).toBeLessThanOrEqual(fixture.maxWidth + 0.5);
+			expect(long.width).toBeLessThanOrEqual(360.5);
+			expect(long.height).toBeGreaterThan(0);
+		}
+	});
+
+	test('changes bubble height with rendered lines and keeps the five-line ceiling', async ({ page }) => {
+		const fixtures = ['merged2', 'linebreak', 'linebreak-five', 'linebreak-overflow'] as const;
+		const normalHeights: number[] = [];
+		const mergedHeights: number[] = [];
+
+		for (const query of fixtures) {
+			await page.goto(`/?devWorld=1&devSpeech=${query}`);
+			await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+			normalHeights.push(await page.locator('.bubble-normal').first().evaluate((element) => element.getBoundingClientRect().height));
+			mergedHeights.push(await page.locator('.bubble-merged').first().evaluate((element) => element.getBoundingClientRect().height));
+		}
+
+		expect(normalHeights[0]).toBeLessThan(normalHeights[1]);
+		expect(normalHeights[1]).toBeLessThan(normalHeights[2]);
+		expect(Math.abs(normalHeights[3] - normalHeights[2])).toBeLessThanOrEqual(1);
+		expect(mergedHeights[0]).toBeLessThan(mergedHeights[1]);
+		expect(mergedHeights[1]).toBeLessThan(mergedHeights[2]);
+		expect(Math.abs(mergedHeights[3] - mergedHeights[2])).toBeLessThanOrEqual(1);
+	});
+
+	test('does not add an ellipsis when both bubbles fit exactly five rendered lines', async ({ page }) => {
+		await page.goto('/?devWorld=1&devSpeech=linebreak-five');
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+
+		const bubbles = page.locator('.bubble');
+		await expect(bubbles).toHaveCount(2);
+		const state = await bubbles.evaluateAll((elements) => elements.map((element) => {
+			const content = element.querySelector<HTMLElement>('.bubble-content');
+			if (!content) throw new Error('Expected bubble content element.');
+			const style = getComputedStyle(content);
+			const lineHeight = Number.parseFloat(style.lineHeight);
+			return {
+				text: content.textContent,
+				clientHeight: content.clientHeight,
+				scrollHeight: content.scrollHeight,
+				lineHeight,
+				ellipsisCount: element.querySelectorAll('.bubble-ellipsis').length
+			};
+		}));
+
+		for (const bubble of state) {
+			expect(bubble.text).toContain('line 5');
+			expect(bubble.scrollHeight).toBe(bubble.clientHeight);
+			expect(Math.abs(bubble.clientHeight - bubble.lineHeight * 5)).toBeLessThanOrEqual(1);
+			expect(bubble.ellipsisCount).toBe(0);
+		}
+	});
+
+	test('keeps similar wrapping information when the same content becomes merged', async ({ page }) => {
+		await page.goto('/?devWorld=1&devSpeech=comparison');
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+		await expect(page.locator('.bubble-normal[data-speech-type="shout"]')).toHaveCount(1);
+		await expect(page.locator('.bubble-merged')).toHaveCount(1);
+
+		const state = await page.locator('.bubble-layer').evaluate(() => {
+			const normal = document.querySelector<HTMLElement>('.bubble-normal[data-speech-type="shout"] .bubble-content');
+			const merged = document.querySelector<HTMLElement>('.bubble-merged .bubble-content');
+			if (!normal || !merged) throw new Error('Expected comparison bubbles.');
+			const normalStyle = getComputedStyle(normal);
+			const mergedStyle = getComputedStyle(merged);
+			return {
+				normalText: normal.textContent,
+				mergedText: merged.textContent,
+				normalLines: Math.round(normal.clientHeight / Number.parseFloat(normalStyle.lineHeight)),
+				mergedLines: Math.round(merged.clientHeight / Number.parseFloat(mergedStyle.lineHeight)),
+				normalFontSize: Number.parseFloat(normalStyle.fontSize),
+				mergedFontSize: Number.parseFloat(mergedStyle.fontSize),
+				normalWidth: normal.parentElement?.getBoundingClientRect().width ?? 0,
+				mergedWidth: merged.parentElement?.getBoundingClientRect().width ?? 0
+			};
+		});
+
+		expect(state.normalText).toBe(state.mergedText);
+		expect(state.mergedFontSize).toBeGreaterThan(state.normalFontSize);
+		expect(state.mergedWidth).toBeGreaterThan(state.normalWidth);
+		expect(Math.abs(state.mergedLines - state.normalLines)).toBeLessThanOrEqual(1);
+	});
+
+	test('keeps clamped bubbles and explicit ellipsis inside the safe bounds at 320px', async ({ page }) => {
+		await page.setViewportSize({ width: 320, height: 844 });
+		await page.goto('/?devWorld=1&devSpeech=linebreak-overflow');
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+
+		const bubbles = page.locator('.bubble-merged');
+		await expect(bubbles).toHaveCount(1);
+		const state = await bubbles.evaluateAll((elements) => elements.map((element) => {
+			const content = element.querySelector<HTMLElement>('.bubble-content');
+			const indicator = element.querySelector<HTMLElement>('.bubble-ellipsis');
+			if (!content || !indicator) throw new Error('Expected clamped content and ellipsis.');
+			const rect = element.getBoundingClientRect();
+			const indicatorRect = indicator.getBoundingClientRect();
+			const style = getComputedStyle(content);
+			return {
+				left: rect.left,
+				right: rect.right,
+				clientHeight: content.clientHeight,
+				scrollHeight: content.scrollHeight,
+				lineHeight: Number.parseFloat(style.lineHeight),
+				indicatorVisible: indicatorRect.width > 0 && indicatorRect.height > 0
+			};
+		}));
+
+		expect(state).toHaveLength(1);
+		expect(state.every((bubble) => bubble.left >= 16 && bubble.right <= 304)).toBe(true);
+		expect(state.every((bubble) => bubble.scrollHeight > bubble.clientHeight)).toBe(true);
+		expect(state.every((bubble) => bubble.clientHeight <= bubble.lineHeight * 5 + 1)).toBe(true);
+		expect(state.every((bubble) => bubble.indicatorVisible)).toBe(true);
+	});
+
 	test('renders the full speech showcase with eight colors and a merged bubble', async ({ page }) => {
 		await page.goto('/?devWorld=1&devSpeech=1');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
