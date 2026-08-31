@@ -25,6 +25,7 @@
 		preferredHeight: number | null;
 		whenReady(): Promise<void>;
 		configureHostOwned(options: Readonly<{
+			editorSubmitButtonEnabled?: boolean;
 			keyboardButtonBarEnabled?: boolean;
 			enterKeyBehavior?: 'newline' | 'submit';
 			editorMinLines?: number;
@@ -72,6 +73,7 @@
 				composer.addEventListener('ehagaki-editor-empty-change', handleEditorEmptyChange);
 				composer.addEventListener('ehagaki-preferred-height-change', handlePreferredHeightChange);
 				composer.configureHostOwned({
+					editorSubmitButtonEnabled: true,
 					keyboardButtonBarEnabled: false,
 					enterKeyBehavior: 'submit',
 					editorMinLines: 1,
