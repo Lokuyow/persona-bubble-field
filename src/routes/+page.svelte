@@ -1881,7 +1881,7 @@
 
 	.timeline-header h2 {
 		margin: 0;
-		color: #596662;
+		color: #fff;
 		font-size: 11px;
 		font-weight: 900;
 		letter-spacing: 0.1em;
@@ -1936,7 +1936,7 @@
 		padding: 0;
 		border: 0;
 		background: transparent;
-		color: #596662;
+		color: #fff;
 		font-size: 12px;
 		font-weight: 900;
 		letter-spacing: 0.02em;
@@ -1944,19 +1944,16 @@
 		text-decoration: underline;
 		text-decoration-color: rgba(89, 102, 98, 0.35);
 		text-underline-offset: 3px;
-		text-shadow:
-			0 0 2px rgba(255, 255, 255, 1),
-			0 0 4px rgba(255, 255, 255, 0.95);
 	}
 
-	.timeline-name.tone-coral { color: hsl(12, 96%, 42%); }
-	.timeline-name.tone-lavender { color: hsl(250, 72%, 42%); }
-	.timeline-name.tone-mint { color: hsl(145, 68%, 31%); }
-	.timeline-name.tone-yellow { color: hsl(48, 82%, 34%); }
-	.timeline-name.tone-sky { color: hsl(188, 72%, 32%); }
-	.timeline-name.tone-peach { color: hsl(28, 82%, 38%); }
-	.timeline-name.tone-rose { color: hsl(340, 72%, 40%); }
-	.timeline-name.tone-blue { color: hsl(210, 72%, 37%); }
+	.timeline-name.tone-coral,
+	.timeline-name.tone-lavender,
+	.timeline-name.tone-mint,
+	.timeline-name.tone-yellow,
+	.timeline-name.tone-sky,
+	.timeline-name.tone-peach,
+	.timeline-name.tone-rose,
+	.timeline-name.tone-blue { color: #fff; }
 
 	.timeline-content-shell {
 		position: relative;
@@ -1967,16 +1964,13 @@
 		max-height: calc(1.45em * 5);
 		margin: 6px 0 0;
 		overflow: hidden;
-		color: #26302d;
+		color: #fff;
 		font-size: 13px;
 		font-weight: 800;
 		letter-spacing: 0.01em;
 		line-height: 1.45;
 		overflow-wrap: anywhere;
 		white-space: pre-line;
-		text-shadow:
-			0 0 2px rgba(255, 255, 255, 1),
-			0 0 4px rgba(255, 255, 255, 0.95);
 	}
 
 	.timeline-ellipsis {
@@ -1985,13 +1979,10 @@
 		bottom: 0;
 		padding-left: 0.35em;
 		background: transparent;
-		color: #26302d;
+		color: #fff;
 		font-size: 13px;
 		font-weight: 900;
 		line-height: 1.45;
-		text-shadow:
-			0 0 2px rgba(255, 255, 255, 1),
-			0 0 4px rgba(255, 255, 255, 0.95);
 	}
 
 	.timeline-show-control {
