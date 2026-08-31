@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
-	import { browser } from '$app/environment';
 	import { pushState } from '$app/navigation';
 	import { page } from '$app/state';
 	import { asset, base } from '$app/paths';
@@ -80,7 +79,8 @@
 	const MOVEMENT_ANIMATION_DURATION_MS = 400;
 	const MOVEMENT_DIRECTIONS: readonly Direction[] = ['up', 'down', 'left', 'right'];
 	const INITIAL_COMPOSER_PREFERRED_HEIGHT = 50;
-	const initialDevWorldSandboxEnabled = browser && isDevWorldSandboxEnabled(import.meta.env.DEV, page.url.searchParams);
+	const initialDevWorldSandboxEnabled = import.meta.env.DEV &&
+		isDevWorldSandboxEnabled(import.meta.env.DEV, page.url.searchParams);
 
 	type AvatarColor = 'coral' | 'lavender' | 'mint' | 'yellow' | 'sky' | 'peach' | 'rose' | 'blue';
 	type Participant = {

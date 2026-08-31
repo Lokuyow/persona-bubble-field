@@ -3,6 +3,7 @@ import { expect, test, type Page } from '@playwright/test';
 async function openDevWorld(page: Page): Promise<void> {
 	await page.goto('/?devWorld=1');
 	await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+	await expect(page.locator('.participant')).toHaveCount(1);
 }
 
 async function readMergedBubbleGeometry(page: Page, memberPrefixes: readonly string[]) {

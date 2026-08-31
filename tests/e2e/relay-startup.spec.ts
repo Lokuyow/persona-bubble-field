@@ -294,6 +294,26 @@ async function chooseHorizontalMove(page: Page): Promise<{ key: 'ArrowLeft' | 'A
 }
 
 test.describe('Relay startup', () => {
+	test('renders DEV sandbox without Composer in the initial response or after hydration', async ({ page }) => {
+		const hostOwned = await installHostOwnedStub(page);
+		const consoleIssues: string[] = [];
+		page.on('console', (message) => {
+			if (message.type() === 'warning' || message.type() === 'error') consoleIssues.push(message.text());
+		});
+		page.on('pageerror', (error) => consoleIssues.push(error.message));
+
+		const response = await page.goto('/?devWorld=1');
+		expect(response).not.toBeNull();
+		expect(await response!.text()).not.toContain('<div class="composer-dock');
+
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+		await expect(page.locator('.participant')).toHaveCount(1);
+		await expect(page.locator('.composer-dock')).toHaveCount(0);
+		await expect(page.locator('ehagaki-composer')).toHaveCount(0);
+		expect(hostOwned.requests()).toBe(0);
+		expect(consoleIssues).toEqual([]);
+	});
+
 	for (const viewport of [
 		{ name: 'desktop', width: 1200, height: 900 },
 		{ name: 'mobile', width: 390, height: 844 }
