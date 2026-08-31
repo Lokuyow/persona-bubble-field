@@ -236,6 +236,7 @@ test.describe('DEV World Sandbox', () => {
 		await expect(timeline.locator(`[data-timeline-pubkey="${outsidePubkey}"]`).first()).toHaveAttribute('data-timeline-tone', 'default');
 
 		const activeName = timeline.locator(`[data-timeline-pubkey="${activePubkey}"] .timeline-name`).first();
+		await expect(activeName).toHaveCSS('text-decoration-line', 'none');
 		await activeName.click();
 		await expect(profileDialog(page)).toBeVisible();
 		await expect(timeline).toBeVisible();

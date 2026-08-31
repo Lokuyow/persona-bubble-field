@@ -1957,9 +1957,7 @@
 		margin-right: 0.35em;
 		letter-spacing: 0.02em;
 		text-align: left;
-		text-decoration: underline;
-		text-decoration-color: rgba(89, 102, 98, 0.35);
-		text-underline-offset: 3px;
+		cursor: pointer;
 		text-shadow:
 			-1px -1px 0 #222,
 			0 -1px 0 #222,
@@ -1981,6 +1979,12 @@
 	.timeline-name.tone-blue { color: hsl(210, 72%, 37%); }
 
 	.timeline-name[class*='tone-'] { text-shadow: none; }
+
+	.timeline-name:hover,
+	.timeline-name:focus-visible {
+		border-radius: 3px;
+		background: rgba(255, 255, 255, 0.18);
+	}
 
 	.timeline-content-shell {
 		position: relative;
