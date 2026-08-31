@@ -16,7 +16,6 @@
 		"test": "vitest run",
 		"test:e2e": "playwright test",
 		"test:e2e:agent": "playwright test --reporter=dot",
-		"postinstall": "patch-package --error-on-fail",
 		"prepare": "svelte-kit sync || echo ''",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
@@ -30,7 +29,6 @@
 		"@sveltejs/vite-plugin-svelte": "^7.1.2",
 		"fake-indexeddb": "6.2.5",
 		"mock-socket": "9.3.1",
-		"patch-package": "8.0.1",
 		"sharp": "^0.35.4",
 		"svelte": "^5.56.1",
 		"svelte-check": "^4.6.0",
@@ -42,7 +40,7 @@
 		"bits-ui": "^2.19.0",
 		"idb": "^8.0.3",
 		"nostr-tools": "^2.25.0",
-		"rx-nostr": "3.7.5",
+		"rx-nostr": "3.7.6",
 		"rxjs": "^7.8.2"
 	}
 }
