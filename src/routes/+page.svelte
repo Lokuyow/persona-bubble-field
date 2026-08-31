@@ -1797,9 +1797,9 @@
 		flex-direction: column;
 		border: 1px solid rgba(57, 67, 64, 0.18);
 		border-radius: 18px;
-		background: rgba(247, 247, 239, 0.94);
+		background: rgba(247, 247, 239, 0.5);
 		box-shadow: 0 14px 36px rgba(58, 70, 61, 0.18);
-		backdrop-filter: blur(10px);
+		backdrop-filter: blur(2px);
 		color: #374345;
 		pointer-events: auto;
 	}
