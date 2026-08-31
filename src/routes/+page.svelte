@@ -1890,15 +1890,7 @@
 		font-weight: 900;
 		letter-spacing: 0.1em;
 		text-transform: uppercase;
-		text-shadow:
-			-1px -1px 0 #222,
-			0 -1px 0 #222,
-			1px -1px 0 #222,
-			-1px 0 0 #222,
-			1px 0 0 #222,
-			-1px 1px 0 #222,
-			0 1px 0 #222,
-			1px 1px 0 #222;
+		-webkit-text-stroke: 0.75px rgba(20, 24, 23, 0.95);
 	}
 
 	.timeline-hide-control,
@@ -1949,23 +1941,18 @@
 		padding: 0;
 		border: 0;
 		background: transparent;
+		appearance: none;
 		color: #fff;
 		font-family: inherit;
 		font-size: 12px;
 		font-weight: 900;
+		line-height: 1.45;
 		margin-right: 0.35em;
 		letter-spacing: 0.02em;
 		text-align: left;
 		cursor: pointer;
-		text-shadow:
-			-1px -1px 0 #222,
-			0 -1px 0 #222,
-			1px -1px 0 #222,
-			-1px 0 0 #222,
-			1px 0 0 #222,
-			-1px 1px 0 #222,
-			0 1px 0 #222,
-			1px 1px 0 #222;
+		-webkit-text-stroke: 0.75px rgba(20, 24, 23, 0.95);
+		vertical-align: top;
 	}
 
 	.timeline-name.tone-coral { color: hsl(12, 96%, 42%); }
@@ -1976,8 +1963,6 @@
 	.timeline-name.tone-peach { color: hsl(28, 82%, 38%); }
 	.timeline-name.tone-rose { color: hsl(340, 72%, 40%); }
 	.timeline-name.tone-blue { color: hsl(210, 72%, 37%); }
-
-	.timeline-name[class*='tone-'] { text-shadow: none; }
 
 	.timeline-name:hover,
 	.timeline-name:focus-visible {
@@ -2001,15 +1986,7 @@
 		line-height: 1.45;
 		overflow-wrap: anywhere;
 		white-space: pre-line;
-		text-shadow:
-			-1px -1px 0 #222,
-			0 -1px 0 #222,
-			1px -1px 0 #222,
-			-1px 0 0 #222,
-			1px 0 0 #222,
-			-1px 1px 0 #222,
-			0 1px 0 #222,
-			1px 1px 0 #222;
+		-webkit-text-stroke: 0.75px rgba(20, 24, 23, 0.95);
 
 	 @media (width <= 700px) {
 			font-size: 13px;
@@ -2032,15 +2009,7 @@
 		font-size: 13px;
 		font-weight: 900;
 		line-height: 1.45;
-		text-shadow:
-			-1px -1px 0 #222,
-			0 -1px 0 #222,
-			1px -1px 0 #222,
-			-1px 0 0 #222,
-			1px 0 0 #222,
-			-1px 1px 0 #222,
-			0 1px 0 #222,
-			1px 1px 0 #222;
+		-webkit-text-stroke: 0.75px rgba(20, 24, 23, 0.95);
 	}
 
 	.timeline-show-control {
