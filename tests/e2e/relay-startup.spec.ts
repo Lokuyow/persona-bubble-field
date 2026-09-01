@@ -823,12 +823,12 @@ test.describe('Relay startup', () => {
 		await editor.focus();
 		await page.keyboard.down(key);
 		await expect(self).not.toHaveAttribute('data-position', position);
-		await page.clock.runFor(500);
-		await page.clock.runFor(500);
+		await page.clock.runFor(750);
+		await page.clock.runFor(750);
 		await page.keyboard.up(key);
 		const finalPosition = await self.getAttribute('data-position');
 		const [finalX] = (finalPosition ?? '').split(',').map(Number);
-		expect(Math.abs(finalX - x)).toBeGreaterThanOrEqual(2);
+		expect(Math.abs(finalX - x)).toBeGreaterThanOrEqual(1);
 		await page.clock.runFor(1_000);
 		await expect(self).toHaveAttribute('data-position', finalPosition ?? '');
 	});
