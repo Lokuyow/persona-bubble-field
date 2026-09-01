@@ -56,6 +56,8 @@ export type BubblePlacementInput = {
 	id: string;
 	preferred: WorldPoint;
 	size: Size;
+	/** The rendered silhouette relative to the unchanged body anchor. */
+	visualBounds?: Bounds;
 };
 
 export type BubblePlacement = {
@@ -244,8 +246,37 @@ export function clampToViewport(anchor: WorldPoint, bubble: Size, viewport: Size
 const BUBBLE_PLACEMENT_GAP = 8;
 const MAX_PLACEMENT_CANDIDATES = 32;
 
-function bubbleRect(anchor: WorldPoint, size: Size): Bounds {
-	return { ...anchor, ...size };
+function bubbleRect(anchor: WorldPoint, item: Pick<BubblePlacementInput, 'size' | 'visualBounds'>): Bounds {
+	const bounds = item.visualBounds ?? { x: 0, y: 0, ...item.size };
+	return { x: anchor.x + bounds.x, y: anchor.y + bounds.y, width: bounds.width, height: bounds.height };
+}
+
+function clampPlacementAnchor(
+	anchor: WorldPoint,
+	item: BubblePlacementInput,
+	bounds: Bounds,
+	visualRegion: Bounds
+): WorldPoint {
+	if (!item.visualBounds) return clampToBounds(anchor, item.size, bounds);
+	const baseMinX = bounds.x;
+	const baseMaxX = Math.max(baseMinX, bounds.x + bounds.width - item.size.width);
+	const baseMinY = bounds.y;
+	const baseMaxY = Math.max(baseMinY, bounds.y + bounds.height - item.size.height);
+	const visualMinX = visualRegion.x - item.visualBounds.x;
+	const visualMaxX = visualRegion.x + visualRegion.width - item.visualBounds.x - item.visualBounds.width;
+	const visualMinY = visualRegion.y - item.visualBounds.y;
+	const visualMaxY = visualRegion.y + visualRegion.height - item.visualBounds.y - item.visualBounds.height;
+	const minX = Math.max(baseMinX, visualMinX);
+	const maxX = Math.min(baseMaxX, visualMaxX);
+	const minY = Math.max(baseMinY, visualMinY);
+	const maxY = Math.min(baseMaxY, visualMaxY);
+	if (minX > maxX + 1e-6 || minY > maxY + 1e-6) {
+		throw new RangeError(`Bubble ${item.id} cannot fit its visual bounds inside the placement region.`);
+	}
+	return {
+		x: Math.min(Math.max(anchor.x, minX), Math.max(minX, maxX)),
+		y: Math.min(Math.max(anchor.y, minY), Math.max(minY, maxY))
+	};
 }
 
 function gapOverlapArea(first: Bounds, second: Bounds, gap: number): number {
@@ -257,9 +288,10 @@ function gapOverlapArea(first: Bounds, second: Bounds, gap: number): number {
 	return Math.max(0, overlapWidth) * Math.max(0, overlapHeight);
 }
 
-function candidateOffsets(size: Size, cellSize: number, gap: number): readonly WorldPoint[] {
-	const verticalStep = size.height + gap;
-	const horizontalStep = Math.max(1, cellSize);
+function candidateOffsets(item: BubblePlacementInput, cellSize: number, gap: number): readonly WorldPoint[] {
+	const visualSize = item.visualBounds ?? { x: 0, y: 0, ...item.size };
+	const verticalStep = visualSize.height + gap;
+	const horizontalStep = Math.max(1, cellSize, visualSize.width / 2);
 
 	return [
 		{ x: 0, y: 0 },
@@ -296,19 +328,21 @@ function addCandidate(candidates: WorldPoint[], seen: Set<string>, candidate: Wo
 function getCandidates(
 	item: BubblePlacementInput,
 	bounds: Bounds,
+	visualRegion: Bounds,
 	cellSize: number,
 	gap: number,
 	references: readonly PlacedBubble[] = []
 ): WorldPoint[] {
-	const preferred = clampToBounds(item.preferred, item.size, bounds);
+	const preferred = clampPlacementAnchor(item.preferred, item, bounds, visualRegion);
 	const seen = new Set<string>();
 	const candidates: WorldPoint[] = [];
 
-	for (const offset of candidateOffsets(item.size, cellSize, gap)) {
-		addCandidate(candidates, seen, clampToBounds(
+	for (const offset of candidateOffsets(item, cellSize, gap)) {
+		addCandidate(candidates, seen, clampPlacementAnchor(
 			{ x: preferred.x + offset.x, y: preferred.y + offset.y },
-			item.size,
-			bounds
+			item,
+			bounds,
+			visualRegion
 		));
 	}
 
@@ -318,18 +352,19 @@ function getCandidates(
 		{ x: preferred.x, y: bounds.y },
 		{ x: preferred.x, y: bounds.y + bounds.height - item.size.height }
 	]) {
-		addCandidate(candidates, seen, clampToBounds(candidate, item.size, bounds));
+		addCandidate(candidates, seen, clampPlacementAnchor(candidate, item, bounds, visualRegion));
 	}
 
 	for (const reference of references) {
-		const previous = bubbleRect(reference.anchor, reference.size);
+		const previous = bubbleRect(reference.anchor, reference);
+		const currentVisual = item.visualBounds ?? { x: 0, y: 0, ...item.size };
 		for (const candidate of [
-			{ x: preferred.x, y: previous.y - item.size.height - gap },
-			{ x: preferred.x, y: previous.y + previous.height + gap },
-			{ x: previous.x - item.size.width - gap, y: preferred.y },
-			{ x: previous.x + previous.width + gap, y: preferred.y }
+			{ x: preferred.x, y: previous.y - currentVisual.height - gap - currentVisual.y },
+			{ x: preferred.x, y: previous.y + previous.height + gap - currentVisual.y },
+			{ x: previous.x - currentVisual.width - gap - currentVisual.x, y: preferred.y },
+			{ x: previous.x + previous.width + gap - currentVisual.x, y: preferred.y }
 		]) {
-			addCandidate(candidates, seen, clampToBounds(candidate, item.size, bounds));
+			addCandidate(candidates, seen, clampPlacementAnchor(candidate, item, bounds, visualRegion));
 		}
 	}
 
@@ -349,7 +384,7 @@ function chooseCandidate(
 
 	for (const candidate of candidates) {
 		const overlap = placed.reduce(
-			(total, previous) => total + gapOverlapArea(bubbleRect(candidate, item.size), bubbleRect(previous.anchor, previous.size), gap),
+			(total, previous) => total + gapOverlapArea(bubbleRect(candidate, item), bubbleRect(previous.anchor, previous), gap),
 			0
 		);
 		const distance = Math.hypot(candidate.x - item.preferred.x, candidate.y - item.preferred.y);
@@ -384,8 +419,8 @@ function totalOverlap(
 	let overlap = group.reduce(
 		(total, current) => total + fixed.reduce(
 			(fixedTotal, previous) => fixedTotal + gapOverlapArea(
-				bubbleRect(current.anchor, current.size),
-				bubbleRect(previous.anchor, previous.size),
+				bubbleRect(current.anchor, current),
+				bubbleRect(previous.anchor, previous),
 				gap
 			),
 			0
@@ -396,8 +431,8 @@ function totalOverlap(
 	for (let first = 0; first < group.length; first += 1) {
 		for (let second = first + 1; second < group.length; second += 1) {
 			overlap += gapOverlapArea(
-				bubbleRect(group[first].anchor, group[first].size),
-				bubbleRect(group[second].anchor, group[second].size),
+				bubbleRect(group[first].anchor, group[first]),
+				bubbleRect(group[second].anchor, group[second]),
 				gap
 			);
 		}
@@ -418,6 +453,7 @@ function findLocalRepair(
 	related: readonly PlacedBubble[],
 	fixed: readonly PlacedBubble[],
 	bounds: Bounds,
+	visualRegion: Bounds,
 	cellSize: number,
 	gap: number
 ): { group: PlacedBubble[]; overlap: number } | null {
@@ -440,9 +476,9 @@ function findLocalRepair(
 		}
 
 		const item = groupItems[index];
-		const unassigned = groupItems.slice(index + 1).map((candidate) => ({ ...candidate, anchor: clampToBounds(candidate.preferred, candidate.size, bounds) }));
+		const unassigned = groupItems.slice(index + 1).map((candidate) => ({ ...candidate, anchor: clampPlacementAnchor(candidate.preferred, candidate, bounds, visualRegion) }));
 		const localReferences = [...assigned, ...unassigned];
-		const candidates = getCandidates(item, bounds, cellSize, gap, localReferences);
+		const candidates = getCandidates(item, bounds, visualRegion, cellSize, gap, localReferences);
 
 		for (const anchor of candidates) {
 			search(index + 1, [...assigned, { ...item, anchor }]);
@@ -466,7 +502,8 @@ export function placeBubbles(
 	items: readonly BubblePlacementInput[],
 	bounds: Bounds,
 	cellSize: number,
-	gap = BUBBLE_PLACEMENT_GAP
+	gap = BUBBLE_PLACEMENT_GAP,
+	visualRegion: Bounds = bounds
 ): BubblePlacement[] {
 	const orderedItems = [...items].sort((first, second) =>
 		first.preferred.y - second.preferred.y ||
@@ -477,18 +514,18 @@ export function placeBubbles(
 	const anchorsById = new Map<string, WorldPoint>();
 
 	for (const item of orderedItems) {
-		const candidates = getCandidates(item, bounds, cellSize, gap, placed);
+		const candidates = getCandidates(item, bounds, visualRegion, cellSize, gap, placed);
 		const choice = chooseCandidate(item, candidates, placed, gap);
 		let anchor = choice.anchor;
 
 		if (choice.overlap > 0 && placed.length > 0) {
 			const related = placed
 				.filter((previous) => candidates.some((candidate) =>
-					gapOverlapArea(bubbleRect(candidate, item.size), bubbleRect(previous.anchor, previous.size), gap) > 0
+					gapOverlapArea(bubbleRect(candidate, item), bubbleRect(previous.anchor, previous), gap) > 0
 				))
 				.slice(-2);
 			const fixed = placed.filter((previous) => !related.includes(previous));
-			const repair = findLocalRepair(item, related, fixed, bounds, cellSize, gap);
+			const repair = findLocalRepair(item, related, fixed, bounds, visualRegion, cellSize, gap);
 			const greedyGroup = [...related, { ...item, anchor }];
 
 			if (repair && repair.overlap < totalOverlap(greedyGroup, fixed, gap)) {

@@ -59,7 +59,7 @@
 	import HostOwnedComposerLite from '$lib/HostOwnedComposerLite.svelte';
 	import { resolveSpeechSubmission } from '$lib/speechSubmission';
 	import type { SpeechType } from '$lib/conversation';
-	import { createSpeechBubblePath } from '$lib/speechBubblePath';
+	import { createSpeechBubbleShape, type SpeechBubbleShape } from '$lib/speechBubblePath';
 	import {
 		createWorldReadSession,
 		type SelfMessageAvailability,
@@ -190,6 +190,12 @@
 		width: Math.max(0, viewportSize.width - SPEECH_AREA.sidePadding * 2),
 		height: Math.max(0, actualFieldTop - SPEECH_AREA.top)
 	};
+	$: bubbleVisualRegion = {
+		x: 0,
+		y: bubbleSafeBounds.y,
+		width: viewportSize.width,
+		height: Math.max(bubbleSafeBounds.height, ...Object.values(bubbleSizes).map((size) => size.height))
+	};
 
 	$: participantViews = presenceProjection.participants.map((participant) => {
 		const world = visualWorldById[participant.id] ?? participant.world;
@@ -213,6 +219,7 @@
 			const speaker = participantById.get(bubble.pubkey);
 			if (!speaker || !isInsideFieldArea(speaker.screen)) return null;
 			const size = bubbleSizes[bubble.id] ?? DEFAULT_BUBBLE_SIZES.normal;
+			const shape = specialBubbleShape(bubble.speechType, bubble.id, size);
 			const preferred = normalBubblePreferredAnchor(
 				speaker.screen.x,
 				speaker.world.y / cellSize - 0.5,
@@ -226,6 +233,7 @@
 				tone: participantTone(speaker),
 				anchor: clampToBounds(preferred, size, bubbleSafeBounds),
 				size,
+				shape,
 				speaker
 			};
 		})
@@ -240,6 +248,7 @@
 				.filter((member) => isInsideFieldArea(member.screen))
 				.sort((left, right) => left.screen.x - right.screen.x || left.id.localeCompare(right.id));
 			const size = bubbleSizes[bubble.id] ?? DEFAULT_BUBBLE_SIZES.merged;
+			const shape = specialBubbleShape(bubble.speechType, bubble.id, size);
 			if (visibleMembers.length === 0) {
 				const lastAnchor = lastPlacedAnchorById[bubble.id];
 				if (!lastAnchor) return null;
@@ -249,6 +258,7 @@
 					tone: mergedBubbleTone(members),
 					anchor: lastAnchor,
 					size,
+					shape,
 					members: []
 				};
 			}
@@ -265,6 +275,7 @@
 				tone: mergedBubbleTone(members),
 				anchor: clampToBounds(preferred, size, bubbleSafeBounds),
 				size,
+				shape,
 				members: visibleMembers
 			};
 		})
@@ -275,9 +286,11 @@
 		...visibleMergedBubbles.filter((bubble) => bubble.members.length > 0)
 	];
 	$: bubblePlacement = placeBubbles(
-		placeableBubbles.map((bubble) => ({ id: bubble.id, preferred: bubble.anchor, size: bubble.size })),
+		placeableBubbles.map((bubble) => ({ id: bubble.id, preferred: bubble.anchor, size: bubble.size, visualBounds: bubble.shape?.bounds })),
 		bubbleSafeBounds,
-		cellSize
+		cellSize,
+		undefined,
+		bubbleVisualRegion
 	);
 	$: placedAnchorById = new Map(bubblePlacement.map((placement) => [placement.id, placement.anchor]));
 	$: rememberPlacedMergedAnchors(visibleMergedBubbles, placedAnchorById, conversationState.mergedBubbles);
@@ -530,6 +543,11 @@
 			if (!viewportElement) return;
 			const rect = viewportElement.getBoundingClientRect();
 			if (rect.width <= 0 || rect.height <= 0) return;
+			if (viewportSize.width !== rect.width || viewportSize.height !== rect.height) {
+				// Measured body sizes are tied to their previous containing block.
+				// Discard them before special visual bounds are recomputed for a resize.
+				bubbleSizes = {};
+			}
 			viewportSize = { width: rect.width, height: rect.height };
 			void tick().then(() => {
 				if (mounted) syncVisualToCanonical();
@@ -1472,6 +1490,17 @@
 		if (changed) lastPlacedAnchorById = next;
 	}
 
+	function specialBubbleShape(speechType: SpeechType, bubbleId: string, size: Size): SpeechBubbleShape | null {
+		return createSpeechBubbleShape(speechType, size.width, size.height, `${bubbleId}${speechType}`, {
+			maxBleedX: Math.max(0, (viewportSize.width - size.width) / 2),
+			maxBleedY: Math.max(0, (bubbleSafeBounds.height - size.height) / 2)
+		});
+	}
+
+	function bubbleSurfaceStyle(shape: SpeechBubbleShape): string {
+		return `inset: auto; left: ${shape.bounds.x - 1}px; top: ${shape.bounds.y - 1}px; width: ${shape.bounds.width}px; height: ${shape.bounds.height}px;`;
+	}
+
 	function tailStart(anchor: WorldPoint, size: Size): WorldPoint {
 		return { x: anchor.x + size.width / 2, y: anchor.y + size.height };
 	}
@@ -1550,16 +1579,9 @@
 		return speechType === 'normal' ? 0 : SPECIAL_TAIL_BODY_EXTENSION;
 	}
 
-	function bubbleSurfacePoint(point: WorldPoint, anchor: WorldPoint, size: Size): WorldPoint {
-		return {
-			x: (point.x - anchor.x + 1) * size.width / (size.width + 2),
-			y: (point.y - anchor.y + 1) * size.height / (size.height + 2)
-		};
-	}
-
-	function tailOutlineOpeningPoints(tail: ReturnType<typeof tailGeometry>, anchor: WorldPoint, size: Size): string {
+	function tailOutlineOpeningPoints(tail: ReturnType<typeof tailGeometry>, anchor: WorldPoint): string {
 		return [tail.rootLeft, tail.rootRight, tail.target]
-			.map((point) => bubbleSurfacePoint(point, anchor, size))
+			.map((point) => ({ x: point.x - anchor.x, y: point.y - anchor.y }))
 			.map((point) => `${point.x},${point.y}`)
 			.join(' ');
 	}
@@ -1748,32 +1770,34 @@
 					style={`${bubble.kind === 'merged' ? mergedBubbleStyle(bubble.memberPubkeys.length) : ''}; --tail-seam-offset-x: ${bubble.kind === 'normal' ? tailGeometry(tailStart(bubble.anchor, bubble.size), tailTarget(bubble.speaker)).seamOffsetX : 0}px; transform: translate3d(${bubble.anchor.x}px, ${bubble.anchor.y}px, 0);`}
 				>
 					{#if bubble.speechType !== 'normal'}
+						{@const shape = bubble.shape}
 						{@const outlineMaskId = speechOutlineMaskId(bubble.id)}
 						<svg
 							class="bubble-surface"
 							data-speech-surface={bubble.speechType}
-							viewBox={`0 0 ${bubble.size.width} ${bubble.size.height}`}
-							preserveAspectRatio="none"
+							data-visual-bounds={`${shape?.bounds.x ?? 0},${shape?.bounds.y ?? 0},${shape?.bounds.width ?? bubble.size.width},${shape?.bounds.height ?? bubble.size.height}`}
+							viewBox={`${shape?.bounds.x ?? 0} ${shape?.bounds.y ?? 0} ${shape?.bounds.width ?? bubble.size.width} ${shape?.bounds.height ?? bubble.size.height}`}
+							style={shape ? bubbleSurfaceStyle(shape) : ''}
 							aria-hidden="true"
 						>
 							<defs>
-								<mask id={outlineMaskId} maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x="0" y="0" width={bubble.size.width} height={bubble.size.height}>
-									<rect x="0" y="0" width={bubble.size.width} height={bubble.size.height} fill="white" />
+								<mask id={outlineMaskId} maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x={shape?.bounds.x ?? 0} y={shape?.bounds.y ?? 0} width={shape?.bounds.width ?? bubble.size.width} height={shape?.bounds.height ?? bubble.size.height}>
+									<rect x={shape?.bounds.x ?? 0} y={shape?.bounds.y ?? 0} width={shape?.bounds.width ?? bubble.size.width} height={shape?.bounds.height ?? bubble.size.height} fill="white" />
 									{#if bubble.kind === 'normal'}
 										{@const start = tailStart(bubble.anchor, bubble.size)}
 										{@const tail = tailGeometry(start, tailTarget(bubble.speaker), 11, 2, SPECIAL_TAIL_BODY_EXTENSION)}
-										<polygon data-tail-opening={bubble.speaker.id} points={tailOutlineOpeningPoints(tail, bubble.anchor, bubble.size)} fill="black" />
+										<polygon data-tail-opening={bubble.speaker.id} points={tailOutlineOpeningPoints(tail, bubble.anchor)} fill="black" />
 									{:else}
 										{#each bubble.members as member, index (member.id)}
 											{@const start = mergedTailStart(bubble.anchor, bubble.size, index, bubble.members.length)}
 											{@const tail = tailGeometry(start, tailTarget(member), 9, 2, SPECIAL_TAIL_BODY_EXTENSION)}
-											<polygon data-tail-opening={member.id} points={tailOutlineOpeningPoints(tail, bubble.anchor, bubble.size)} fill="black" />
+											<polygon data-tail-opening={member.id} points={tailOutlineOpeningPoints(tail, bubble.anchor)} fill="black" />
 										{/each}
 									{/if}
 								</mask>
 							</defs>
-							<path class="bubble-surface-fill" d={createSpeechBubblePath(bubble.speechType, bubble.size.width, bubble.size.height) ?? ''} />
-							<path class="bubble-surface-outline" d={createSpeechBubblePath(bubble.speechType, bubble.size.width, bubble.size.height) ?? ''} mask={`url(#${outlineMaskId})`} />
+							<path class="bubble-surface-fill" d={shape?.path ?? ''} />
+							<path class="bubble-surface-outline" d={shape?.path ?? ''} mask={`url(#${outlineMaskId})`} />
 						</svg>
 					{/if}
 					<span class="bubble-content">{bubble.text}</span>

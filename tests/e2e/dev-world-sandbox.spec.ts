@@ -551,6 +551,10 @@ test.describe('DEV World Sandbox', () => {
 			const bubbleRect = bubble.getBoundingClientRect();
 			const surfaceRect = surface.getBoundingClientRect();
 			const pathBounds = fill.getBBox();
+			const visualBounds = (surface.dataset.visualBounds ?? '').split(',').map(Number);
+			if (visualBounds.length !== 4 || visualBounds.some((value) => !Number.isFinite(value))) {
+				throw new Error('Expected finite special speech visual bounds.');
+			}
 			const toneBackground = resolveColor(getComputedStyle(bubble).getPropertyValue('--tone-background').trim());
 			const toneOutline = resolveColor(getComputedStyle(bubble).getPropertyValue('--tone-outline').trim());
 			return {
@@ -563,7 +567,8 @@ test.describe('DEV World Sandbox', () => {
 				toneOutline,
 				bubbleRect: bubbleRect.toJSON(),
 				surfaceRect: surfaceRect.toJSON(),
-				pathBox: { x: pathBounds.x, y: pathBounds.y, width: pathBounds.width, height: pathBounds.height }
+				pathBox: { x: pathBounds.x, y: pathBounds.y, width: pathBounds.width, height: pathBounds.height },
+				visualBounds: { x: visualBounds[0], y: visualBounds[1], width: visualBounds[2], height: visualBounds[3] }
 			};
 		}));
 
@@ -571,18 +576,35 @@ test.describe('DEV World Sandbox', () => {
 		const monologues = surfaces.filter((surface) => surface.type === 'monologue');
 		expect(shouts).toHaveLength(2);
 		expect(monologues).toHaveLength(2);
-		expect(shouts.every((surface) => (surface.d?.match(/\bL\s/g)?.length ?? 0) >= 23 && !surface.d?.includes('Q'))).toBe(true);
-		expect(monologues.every((surface) => (surface.d?.match(/\bC\s/g)?.length ?? 0) >= 10 && !surface.d?.includes('L'))).toBe(true);
+		expect(shouts.every((surface) => (surface.d?.match(/\bL\s/g)?.length ?? 0) >= 20 && !surface.d?.includes('Q'))).toBe(true);
+		expect(monologues.every((surface) => (surface.d?.match(/\bC\s/g)?.length ?? 0) >= 7 && !surface.d?.includes('L'))).toBe(true);
 		for (const surface of surfaces) {
 			expect(surface.fill).toBe(surface.toneBackground);
 			expect(surface.stroke).toBe(surface.toneOutline);
 			expect(surface.strokeWidth).toBe('1px');
-			expect(surface.surfaceRect.width).toBeCloseTo(surface.bubbleRect.width, 1);
-			expect(surface.surfaceRect.height).toBeCloseTo(surface.bubbleRect.height, 1);
-			expect(surface.pathBox.x).toBeGreaterThanOrEqual(0);
-			expect(surface.pathBox.y).toBeGreaterThanOrEqual(0);
-			expect(surface.pathBox.x + surface.pathBox.width).toBeLessThanOrEqual(surface.bubbleRect.width);
-			expect(surface.pathBox.y + surface.pathBox.height).toBeLessThanOrEqual(surface.bubbleRect.height);
+			expect(surface.surfaceRect.left - surface.bubbleRect.left).toBeCloseTo(surface.visualBounds.x, 1);
+			expect(surface.surfaceRect.top - surface.bubbleRect.top).toBeCloseTo(surface.visualBounds.y, 1);
+			expect(surface.surfaceRect.width).toBeCloseTo(surface.visualBounds.width, 1);
+			expect(surface.surfaceRect.height).toBeCloseTo(surface.visualBounds.height, 1);
+			expect(surface.pathBox.x).toBeGreaterThanOrEqual(surface.visualBounds.x);
+			expect(surface.pathBox.y).toBeGreaterThanOrEqual(surface.visualBounds.y);
+			expect(surface.pathBox.x + surface.pathBox.width).toBeLessThanOrEqual(surface.visualBounds.x + surface.visualBounds.width);
+			expect(surface.pathBox.y + surface.pathBox.height).toBeLessThanOrEqual(surface.visualBounds.y + surface.visualBounds.height);
+			expect(
+				surface.pathBox.x < 0 ||
+				surface.pathBox.y < 0 ||
+				surface.pathBox.x + surface.pathBox.width > surface.bubbleRect.width ||
+				surface.pathBox.y + surface.pathBox.height > surface.bubbleRect.height
+			).toBe(true);
+		}
+		for (let first = 0; first < surfaces.length; first += 1) {
+			for (let second = first + 1; second < surfaces.length; second += 1) {
+				const left = Math.max(surfaces[first].surfaceRect.left, surfaces[second].surfaceRect.left);
+				const right = Math.min(surfaces[first].surfaceRect.right, surfaces[second].surfaceRect.right);
+				const top = Math.max(surfaces[first].surfaceRect.top, surfaces[second].surfaceRect.top);
+				const bottom = Math.min(surfaces[first].surfaceRect.bottom, surfaces[second].surfaceRect.bottom);
+				expect(Math.max(0, right - left) * Math.max(0, bottom - top)).toBe(0);
+			}
 		}
 		expect(await page.locator('.tail-layer polygon')).toHaveCount(7);
 		expect(await page.locator('.tail-layer path')).toHaveCount(7);
@@ -678,8 +700,10 @@ test.describe('DEV World Sandbox', () => {
 					clientHeight: content.clientHeight,
 					scrollHeight: content.scrollHeight,
 					lineHeight: Number.parseFloat(contentStyle.lineHeight),
-					surfaceWidth: surfaceRect.width,
-					surfaceHeight: surfaceRect.height,
+					surfaceLeft: surfaceRect.left,
+					surfaceRight: surfaceRect.right,
+					surfaceTop: surfaceRect.top,
+					surfaceBottom: surfaceRect.bottom,
 					ellipsisVisible: (() => {
 						const indicator = element.querySelector<HTMLElement>('.bubble-ellipsis');
 						if (!indicator) return false;
@@ -694,8 +718,10 @@ test.describe('DEV World Sandbox', () => {
 			expect(state.height).toBeGreaterThan(0);
 			expect(state.scrollHeight).toBeGreaterThan(state.clientHeight);
 			expect(state.clientHeight).toBeLessThanOrEqual(state.lineHeight * 5 + 1);
-			expect(state.surfaceWidth).toBeCloseTo(state.width, 1);
-			expect(state.surfaceHeight).toBeCloseTo(state.height, 1);
+			expect(state.surfaceLeft).toBeGreaterThanOrEqual(0);
+			expect(state.surfaceRight).toBeLessThanOrEqual(320);
+			expect(state.surfaceTop).toBeGreaterThanOrEqual(84);
+			expect(state.surfaceBottom).toBeLessThanOrEqual(466);
 			expect(state.ellipsisVisible).toBe(true);
 		});
 	}

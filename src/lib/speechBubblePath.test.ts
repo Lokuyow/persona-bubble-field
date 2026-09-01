@@ -1,101 +1,108 @@
 import { describe, expect, it } from 'vitest';
-import { createSpeechBubblePath } from './speechBubblePath';
+import { createSpeechBubbleShape, type SpeechBubbleShape } from './speechBubblePath';
 
-function coordinates(path: string): number[] {
-	return [...path.matchAll(/-?\d+(?:\.\d+)?/g)].map((match) => Number(match[0]));
+function pathDigest(path: string): string {
+	let hash = 2_166_136_261;
+	for (let index = 0; index < path.length; index += 1) {
+		hash ^= path.charCodeAt(index);
+		hash = Math.imul(hash, 16_777_619);
+	}
+	return (hash >>> 0).toString(16);
 }
 
-function linePoints(path: string): ReadonlyArray<Readonly<{ x: number; y: number }>> {
-	return [...path.matchAll(/[ML]\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)/g)]
-		.map((match) => ({ x: Number(match[1]), y: Number(match[2]) }));
+function expectBoundsToEnclose(shape: SpeechBubbleShape): void {
+	const { bounds } = shape;
+	for (const point of shape.metadata.points) {
+		expect(point.x).toBeGreaterThanOrEqual(bounds.x);
+		expect(point.x).toBeLessThanOrEqual(bounds.x + bounds.width);
+		expect(point.y).toBeGreaterThanOrEqual(bounds.y);
+		expect(point.y).toBeLessThanOrEqual(bounds.y + bounds.height);
+	}
 }
 
-function commandCount(path: string, command: string): number {
-	return [...path.matchAll(new RegExp(`\\b${command}\\s`, 'g'))].length;
-}
-
-function normalizedSuperellipseRadius(point: Readonly<{ x: number; y: number }>, width: number, height: number): number {
-	const radiusX = width / 2 - 2;
-	const radiusY = height / 2 - 2;
-	return Math.pow(
-		Math.pow(Math.abs((point.x - width / 2) / radiusX), 4) +
-		Math.pow(Math.abs((point.y - height / 2) / radiusY), 4),
-		1 / 4
-	);
-}
-
-function cubicLobes(path: string): ReadonlyArray<Readonly<{ firstControl: { x: number; y: number }; secondControl: { x: number; y: number }; valley: { x: number; y: number } }>> {
-	return [...path.matchAll(/C\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)/g)]
-		.map((match) => ({
-			firstControl: { x: Number(match[1]), y: Number(match[2]) },
-			secondControl: { x: Number(match[3]), y: Number(match[4]) },
-			valley: { x: Number(match[5]), y: Number(match[6]) }
-		}));
-}
-
-function expectBoundedFinitePath(speechType: 'shout' | 'monologue', width: number, height: number): void {
-	const path = createSpeechBubblePath(speechType, width, height) ?? '';
-	const values = coordinates(path);
-	expect(values.length).toBeGreaterThan(0);
-	expect(values.every(Number.isFinite)).toBe(true);
-	const xs = values.filter((_, index) => index % 2 === 0);
-	const ys = values.filter((_, index) => index % 2 === 1);
-	expect(Math.min(...xs)).toBeGreaterThanOrEqual(0);
-	expect(Math.max(...xs)).toBeLessThanOrEqual(width);
-	expect(Math.min(...ys)).toBeGreaterThanOrEqual(0);
-	expect(Math.max(...ys)).toBeLessThanOrEqual(height);
-}
-
-describe('createSpeechBubblePath', () => {
+describe('createSpeechBubbleShape', () => {
 	it('leaves normal bubbles on their existing CSS surface', () => {
-		expect(createSpeechBubblePath('normal', 184, 54)).toBeNull();
+		expect(createSpeechBubbleShape('normal', 184, 54, 'normal-bubble')).toBeNull();
 	});
 
-	it('creates a deterministic all-perimeter shout burst with repeated tips and valleys', () => {
-		const width = 184;
-		const height = 54;
-		const path = createSpeechBubblePath('shout', width, height) ?? '';
-		expect(path).toBe(createSpeechBubblePath('shout', width, height));
-		expect(commandCount(path, 'L')).toBeGreaterThanOrEqual(23);
-		expect(commandCount(path, 'Q')).toBe(0);
-		const points = linePoints(path);
-		const tips = points.filter((_, index) => index % 2 === 0);
-		const valleys = points.filter((_, index) => index % 2 === 1);
-		expect(tips).toHaveLength(12);
-		expect(tips.filter((point) => point.y < 14).length).toBeGreaterThanOrEqual(3);
-		expect(tips.filter((point) => point.y > 40).length).toBeGreaterThanOrEqual(3);
-		expect(tips.filter((point) => point.x < 46).length).toBeGreaterThanOrEqual(2);
-		expect(tips.filter((point) => point.x > 138).length).toBeGreaterThanOrEqual(2);
-		const tipRadii = tips.map((point) => normalizedSuperellipseRadius(point, width, height));
-		const valleyRadii = valleys.map((point) => normalizedSuperellipseRadius(point, width, height));
-		expect(Math.max(...tipRadii) - Math.min(...tipRadii)).toBeGreaterThanOrEqual(0.04);
-		expect(Math.min(...tipRadii) - Math.max(...valleyRadii)).toBeGreaterThan(0.08);
-	});
-
-	it('creates a deterministic rounded cloud from multiple cubic lobes', () => {
-		const width = 184;
-		const height = 54;
-		const path = createSpeechBubblePath('monologue', width, height) ?? '';
-		expect(path).toBe(createSpeechBubblePath('monologue', width, height));
-		expect(commandCount(path, 'C')).toBeGreaterThanOrEqual(10);
-		expect(commandCount(path, 'L')).toBe(0);
-		expect(commandCount(path, 'Q')).toBe(0);
-		const lobes = cubicLobes(path);
-		expect(lobes).toHaveLength(10);
-		const controlRadii = lobes.flatMap((lobe) => [
-			normalizedSuperellipseRadius(lobe.firstControl, width, height),
-			normalizedSuperellipseRadius(lobe.secondControl, width, height)
-		]);
-		const valleyRadii = lobes.map((lobe) => normalizedSuperellipseRadius(lobe.valley, width, height));
-		expect(Math.min(...controlRadii) - Math.max(...valleyRadii)).toBeGreaterThan(0.12);
+	it('uses a deterministic rounded-size RNG key without a global production seed', () => {
+		const first = createSpeechBubbleShape('shout', 189.29, 54, 'bubble-idshout');
+		const second = createSpeechBubbleShape('shout', 189.31, 54, 'bubble-idshout');
+		const changed = createSpeechBubbleShape('shout', 189.31, 54, 'another-idshout');
+		expect(first?.metadata.count).toBe(second?.metadata.count);
+		expect(first?.metadata.outwardSizes).toEqual(second?.metadata.outwardSizes);
+		expect(first?.path).not.toBe(changed?.path);
 	});
 
 	it.each([
-		[72, 30],
-		[184, 54],
-		[330, 128]
-	] as const)('keeps both special paths finite and inside a %dx%d measured bubble', (width, height) => {
-		expectBoundedFinitePath('shout', width, height);
-		expectBoundedFinitePath('monologue', width, height);
+		['shout', 184, 54, 'df409c48'],
+		['shout', 218, 58, 'e9ef5119'],
+		['monologue', 184, 54, '1100ab48'],
+		['monologue', 218, 58, '7f0ebc4']
+	] as const)('keeps the approved seed 70161 %s %dx%d golden shape', (speechType, width, height, digest) => {
+		const shape = createSpeechBubbleShape(speechType, width, height, 70161);
+		expect(shape).not.toBeNull();
+		expect(pathDigest(shape!.path)).toBe(digest);
+	});
+
+	it('creates the v7 shout distribution as center-radial short, medium, and long spikes', () => {
+		const shape = createSpeechBubbleShape('shout', 184, 54, 70161)!;
+		expect(shape.metadata.count).toBe(20);
+		expect(createSpeechBubbleShape('shout', 330, 128, 70161)!.metadata.count).toBeGreaterThan(shape.metadata.count);
+		expect(shape.metadata.outwardSizes.some((size) => size < 6)).toBe(true);
+		expect(shape.metadata.outwardSizes.some((size) => size > 12 && size < 20)).toBe(true);
+		expect(shape.metadata.outwardSizes.some((size) => size > 28)).toBe(true);
+		expect(shape.metadata.outwardRays).toHaveLength(shape.metadata.count);
+		for (const ray of shape.metadata.outwardRays ?? []) {
+			const fromCenter = { x: ray.base.x - shape.metadata.center!.x, y: ray.base.y - shape.metadata.center!.y };
+			const toTip = { x: ray.point.x - shape.metadata.center!.x, y: ray.point.y - shape.metadata.center!.y };
+			expect(Math.abs(fromCenter.x * toTip.y - fromCenter.y * toTip.x)).toBeLessThan(1e-8);
+			expect(fromCenter.x * toTip.x + fromCenter.y * toTip.y).toBeGreaterThan(Math.hypot(fromCenter.x, fromCenter.y) ** 2);
+		}
+		expect(shape.bounds.x).toBeLessThan(0);
+		expect(shape.bounds.y).toBeLessThan(0);
+		expect(shape.bounds.x + shape.bounds.width).toBeGreaterThan(184);
+		expect(shape.bounds.y + shape.bounds.height).toBeGreaterThan(54);
+		expect(shape.metadata.valleys.every((point) => point.x >= -1.2 && point.x <= 185.2 && point.y >= -1.2 && point.y <= 55.2)).toBe(true);
+		expectBoundsToEnclose(shape);
+	});
+
+	it('creates the v5 cloud distribution with variable cubic lobes outside the body', () => {
+		const shape = createSpeechBubbleShape('monologue', 218, 58, 70161)!;
+		expect((shape.path.match(/\bC\s/g) ?? [])).toHaveLength(shape.metadata.count);
+		expect((shape.path.match(/\bL\s/g) ?? [])).toHaveLength(0);
+		expect(shape.metadata.count).toBe(10);
+		expect(createSpeechBubbleShape('monologue', 330, 128, 70161)!.metadata.count).toBeGreaterThan(shape.metadata.count);
+		expect(shape.metadata.maximumOutwardSize - shape.metadata.minimumOutwardSize).toBeGreaterThan(8);
+		expect(shape.bounds.x).toBeLessThan(0);
+		expect(shape.bounds.y).toBeLessThan(0);
+		expect(shape.bounds.x + shape.bounds.width).toBeGreaterThan(218);
+		expect(shape.bounds.y + shape.bounds.height).toBeGreaterThan(58);
+		expect(shape.metadata.valleys.every((point) => point.x >= -2 && point.x <= 220 && point.y >= -2 && point.y <= 60)).toBe(true);
+		expectBoundsToEnclose(shape);
+	});
+
+	it.each([
+		['shout', 72, 30],
+		['shout', 184, 54],
+		['shout', 330, 128],
+		['monologue', 72, 30],
+		['monologue', 184, 54],
+		['monologue', 330, 128]
+	] as const)('encloses the actual %s path at %dx%d in its separate visual bounds', (speechType, width, height) => {
+		const shape = createSpeechBubbleShape(speechType, width, height, 70161)!;
+		expect(shape.metadata.points.every((point) => Number.isFinite(point.x) && Number.isFinite(point.y))).toBe(true);
+		expectBoundsToEnclose(shape);
+	});
+
+	it('caps only outward decoration within the supplied responsive envelope', () => {
+		const constraints = { maxBleedX: 16, maxBleedY: 10 };
+		for (const speechType of ['shout', 'monologue'] as const) {
+			const shape = createSpeechBubbleShape(speechType, 288, 128, 70161, constraints)!;
+			expect(shape.bounds.x).toBeGreaterThanOrEqual(-constraints.maxBleedX - 0.01);
+			expect(shape.bounds.y).toBeGreaterThanOrEqual(-constraints.maxBleedY - 0.01);
+			expect(shape.bounds.x + shape.bounds.width).toBeLessThanOrEqual(288 + constraints.maxBleedX + 0.01);
+			expect(shape.bounds.y + shape.bounds.height).toBeLessThanOrEqual(128 + constraints.maxBleedY + 0.01);
+		}
 	});
 });

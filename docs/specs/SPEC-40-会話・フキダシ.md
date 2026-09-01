@@ -276,12 +276,13 @@ message subscription、position subscription、`EOSE`、再接続等の詳細な
 
 3種類とも発言が見える範囲は同じとする。
 
-違いは主として専用クライアント上のbody silhouetteに持たせる。
+違いは主として専用クライアント上のbody silhouetteに持たせる。叫びとモノローグの装飾は、
+通常と同じ本文bodyを基準にその外側へ付加し、装飾のために本文領域を縮めない。
 
 通常は既存の通常フキダシ表示を維持し、叫びとモノローグは以下の見た目とする。
 
-- 叫び：一重outlineの適度に長短があるjagged / spiky / burst形状
-- モノローグ：bodyだけが雲状に波打つfluffy / cloud / scalloped形状
+- 叫び：一重outlineで、body中心から外へ放射する大きな長短差のあるjagged / spiky / burst形状
+- モノローグ：body外側に大小差のある丸い房が連続するfluffy / cloud / scalloped形状
 
 fillは現在のbubble tone background、outlineは現在のspeaker tone outlineを使用する。
 3種類とも現在のtail geometryを共有し、type別のtailは追加しない。合体フキダシも元の
