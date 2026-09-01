@@ -1870,7 +1870,7 @@
 		margin: 0;
 		color: #fff;
 		font-size: 16px;
-		font-weight: 900;
+		font-weight: 700;
 		letter-spacing: 0.1em;
 		text-transform: uppercase;
 		-webkit-text-stroke: 0;
@@ -1884,7 +1884,7 @@
 		background: rgba(255, 255, 255, 0.78);
 		box-shadow: 0 4px 10px rgba(58, 70, 61, 0.1);
 		color: #596662;
-		font-weight: 900;
+		font-weight: 700;
 	}
 
 	.timeline-hide-control {
@@ -1928,7 +1928,7 @@
 		appearance: none;
 		color: #fff;
 		font-family: inherit;
-		font-weight: 900;
+		font-weight: 700;
 		line-height: 1.45;
 		margin-right: 0.35em;
 		letter-spacing: 0.02em;
@@ -1964,7 +1964,6 @@
 		overflow: hidden;
 		color: #fff;
 		font-size: 18px;
-		font-weight: 700;
 		letter-spacing: 0.01em;
 		line-height: 1.45;
 		padding: 6px 0;
@@ -1992,7 +1991,7 @@
 		background: transparent;
 		color: #fff;
 		font-size: 13px;
-		font-weight: 900;
+		font-weight: 700;
 		line-height: 1.45;
 		-webkit-text-stroke: 0;
 		text-shadow: 0 1px 1px rgba(0, 0, 0, 0.9);
