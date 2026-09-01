@@ -109,7 +109,7 @@ describe('world read session', () => {
 	});
 
 	it('keeps history in the timeline while excluding it from presence and recent bootstrap messages', async () => {
-		const old = { ...message('old-history', 39), pubkey: 'b'.repeat(64) };
+		const old = { ...message('old-history', 39), pubkey: 'b'.repeat(64), speechType: 'monologue' as const };
 		const recent = message('recent-message', 40);
 		result = startResult([old, recent]);
 		const timeline = vi.fn();
@@ -569,11 +569,13 @@ describe('world read session', () => {
 		result = startResult([], [position('self-bootstrap', 700, selfPubkey, 0, { x: 2, y: 1 })]);
 		publish.mockResolvedValueOnce([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
 		const live = vi.fn();
+		const timeline = vi.fn();
 		const session = createWorldReadSession({
 			field: { columns: 4, rows: 3 },
 			selfAccount: selfAccount(),
 			onPresenceChanged: vi.fn(),
 			onLiveMessage: live,
+			onTimelineMessage: timeline,
 			onStatusChanged: vi.fn()
 		});
 
@@ -596,6 +598,11 @@ describe('world read session', () => {
 		]);
 		expect(parsed).toMatchObject({ content: 'hello #ignored', speechType: 'normal', position: { x: 2, y: 1 } });
 		expect(live).toHaveBeenCalledTimes(1);
+		expect(timeline).toHaveBeenCalledWith(expect.objectContaining({
+			id: parsed?.id,
+			content: 'hello #ignored',
+			speechType: 'normal'
+		}));
 	});
 
 	it.each([
@@ -604,11 +611,13 @@ describe('world read session', () => {
 	] as const)('publishes a canonical %s speech type through kind 42', async (speechType, speechLabel) => {
 		result = startResult([], [position('self-bootstrap', 700, selfPubkey, 0, { x: 2, y: 1 })]);
 		publish.mockResolvedValueOnce([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
+		const timeline = vi.fn();
 		const session = createWorldReadSession({
 			field: { columns: 4, rows: 3 },
 			selfAccount: selfAccount(),
 			onPresenceChanged: vi.fn(),
 			onLiveMessage: vi.fn(),
+			onTimelineMessage: timeline,
 			onStatusChanged: vi.fn()
 		});
 
@@ -627,6 +636,10 @@ describe('world read session', () => {
 			content: 'typed message',
 			speechType
 		});
+		expect(timeline).toHaveBeenCalledWith(expect.objectContaining({
+			content: 'typed message',
+			speechType
+		}));
 	});
 
 	it('accepts the canonical duplicate prefix for a normal message', async () => {

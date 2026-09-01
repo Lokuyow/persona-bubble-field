@@ -42,13 +42,14 @@ function perimeterCount(width: number, height: number, minimum: number, maximum:
 function shoutPath(width: number, height: number): string {
 	const tipCount = perimeterCount(width, height, 12, 20, 20);
 	const step = (Math.PI * 2) / tipCount;
-	const valleyDepth = clamp(Math.min(width, height) * 0.16, 4, 8);
-	const variation = [1, 0.76, 0.9, 0.82] as const;
+	const valleyDepth = clamp(Math.min(width, height) * 0.3, 8, 14);
+	const tipInset = [0, 2.4, 0.6, 3.8, 1.3, 2.6] as const;
+	const valleyVariation = [1, 0.72, 0.9, 0.78, 0.96, 0.68] as const;
 	const points: Point[] = [];
 	for (let index = 0; index < tipCount; index += 1) {
 		const tipAngle = -Math.PI / 2 + index * step;
-		points.push(superellipsePoint(width, height, tipAngle));
-		points.push(superellipsePoint(width, height, tipAngle + step / 2, valleyDepth * variation[index % variation.length]));
+		points.push(superellipsePoint(width, height, tipAngle, tipInset[index % tipInset.length]));
+		points.push(superellipsePoint(width, height, tipAngle + step / 2, valleyDepth * valleyVariation[index % valleyVariation.length]));
 	}
 	return `${points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${formatPoint(point)}`).join(' ')} Z`;
 }
@@ -56,8 +57,8 @@ function shoutPath(width: number, height: number): string {
 function monologuePath(width: number, height: number): string {
 	const lobeCount = perimeterCount(width, height, 10, 18, 26);
 	const step = (Math.PI * 2) / lobeCount;
-	const valleyInset = clamp(Math.min(width, height) * 0.16, 4, 9);
-	const controlInset = 0.68;
+	const valleyInset = clamp(Math.min(width, height) * 0.29, 8, 14);
+	const controlInset = 1;
 	const start = superellipsePoint(width, height, -Math.PI / 2 - step / 2, valleyInset);
 	let path = `M ${formatPoint(start)}`;
 	for (let index = 0; index < lobeCount; index += 1) {

@@ -40,7 +40,7 @@ function profileDialog(page: Page) {
 async function openProfile(page: Page): Promise<void> {
 	const timeline = page.getByLabel('Recent message timeline');
 	if (await timeline.isVisible()) await page.getByRole('button', { name: 'Hide recent messages' }).click();
-	await page.locator('.participant-profile-trigger').first().click();
+	await page.locator('.participant[data-self="true"] .participant-profile-trigger').click();
 	await expect(profileDialog(page)).toBeVisible();
 }
 
@@ -485,7 +485,9 @@ test.describe('Relay startup', () => {
 			await submit();
 			await waitForPublishedMessageCount(page, before + 1);
 			await expect(editor).toHaveValue('');
-			return (await publishedMessages(page))[before];
+			const event = (await publishedMessages(page))[before];
+			await expect(page.locator(`[data-timeline-event-id="${event.id}"]`)).toHaveCount(1);
+			return event;
 		};
 
 		const normalByButton = await submitAndRead('button normal', () => send.click());
@@ -617,7 +619,7 @@ test.describe('Relay startup', () => {
 		const historyMessage = finalizeEvent(buildWorldMessageTemplate({
 			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' },
 			content: 'history-only message',
-			speechType: 'normal',
+			speechType: 'monologue',
 			position: { x: 1, y: 1 },
 			createdAt
 		}), historySecret);
