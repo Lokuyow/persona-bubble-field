@@ -1470,13 +1470,13 @@
 		{#if timelineInitialized && timelineOpen}
 			<aside class="recent-message-timeline" aria-label="Recent message timeline">
 				<header class="timeline-header">
-					<h2>Recent messages</h2>
 					<button
 						class="timeline-hide-control"
 						type="button"
 						aria-label="Hide recent messages"
 						on:click={hideRecentMessageTimeline}
 					>×</button>
+					<h2>Recent messages</h2>
 				</header>
 				<div class="timeline-visible-entries" use:observeTimelineVisibleArea>
 					{#each timelineVisibleMessages as message (message.id)}
@@ -1843,11 +1843,11 @@
 	.recent-message-timeline {
 		position: absolute;
 		top: 0;
-		bottom: 16px;
-		left: 16px;
+		bottom: 0;
+		left: 8px;
 		z-index: 9;
 		display: flex;
-		width: min(328px, calc(100% - 32px));
+		width: min(320px, calc(100% - 32px));
 		flex-direction: column;
 		border-radius: 18px;
 		background: transparent;
@@ -1859,16 +1859,17 @@
 	.timeline-header {
 		display: flex;
 		align-items: center;
-		justify-content: space-between;
-		padding: 12px 12px 10px 16px;
+		justify-content: flex-start;
+		padding: 16px 12px 10px 4px;
 		border-bottom: 1px solid rgba(57, 67, 64, 0.12);
 		flex: 0 0 auto;
+		gap: 12px;
 	}
 
 	.timeline-header h2 {
 		margin: 0;
 		color: #fff;
-		font-size: 11px;
+		font-size: 16px;
 		font-weight: 900;
 		letter-spacing: 0.1em;
 		text-transform: uppercase;
@@ -1888,18 +1889,18 @@
 
 	.timeline-hide-control {
 		display: grid;
-		width: 30px;
-		height: 30px;
+		width: 44px;
+		height: 44px;
 		padding: 0;
 		place-items: center;
-		font-size: 20px;
+		font-size: 30px;
 		line-height: 1;
 	}
 
 	.timeline-visible-entries {
 		flex: 1 1 auto;
 		min-height: 0;
-		padding: 4px 8px 10px;
+		padding: 0;
 		overflow: visible;
 	}
 
@@ -2002,9 +2003,9 @@
 		top: 16px;
 		left: 16px;
 		z-index: 9;
-		min-height: 38px;
+		min-height: 44px;
 		padding: 0 13px;
-		font-size: 11px;
+		font-size: 16px;
 		letter-spacing: 0.03em;
 		pointer-events: auto;
 	}
