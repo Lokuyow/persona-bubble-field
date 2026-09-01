@@ -2,12 +2,16 @@ import type { SpeechType } from './conversation';
 
 const PATH_INSET = 1;
 const OUTLINE_WIDTH = 1;
-const SHOUT_SPACING = 22;
+const SHOUT_SPACING = 16;
 const SHOUT_BASE_LENGTH = 14;
-const SHOUT_VARIANCE = 0.2;
-const CLOUD_SPACING = 50;
-const CLOUD_BASE_SIZE = 10;
-const CLOUD_VARIANCE = 0.7;
+const SHOUT_COVERAGE = 0.5;
+const SHOUT_BASE_WIDTH = 10;
+const SHOUT_SIZE_BOOST = 1.8;
+const CLOUD_SPACING = 64;
+const CLOUD_BASE_SIZE = 4;
+const CLOUD_VARIANCE = 1.8;
+const CLOUD_OFFSET = 8;
+const CLOUD_SMALL_RATE = 0.85;
 
 type Point = Readonly<{ x: number; y: number }>;
 
@@ -18,13 +22,23 @@ export type SpeechBubbleShape = Readonly<{
 	bounds: SpeechBubbleVisualBounds;
 	metadata: Readonly<{
 		count: number;
+		intervalCount: number;
+		decoratedCount: number;
+		coverage?: number;
 		minimumOutwardSize: number;
 		maximumOutwardSize: number;
 		outwardSizes: readonly number[];
+		requestedOutwardSizes: readonly number[];
+		actualOutwardSizes: readonly number[];
 		points: readonly Point[];
 		valleys: readonly Point[];
 		center?: Point;
 		outwardRays?: readonly Readonly<{ base: Point; point: Point; direction: Point }>[];
+		spikeRootWidths?: readonly number[];
+		valleyOutwardSizes?: readonly number[];
+		sizeFactor?: number;
+		lobeFactors?: readonly number[];
+		lobeBumps?: readonly number[];
 	}>;
 }>;
 
@@ -44,6 +58,10 @@ function mod(value: number, divisor: number): number {
 
 function safeDimension(value: number): number {
 	return Number.isFinite(value) ? Math.max(PATH_INSET * 2 + 1, value) : PATH_INSET * 2 + 1;
+}
+
+function randomInteger(rng: () => number, minimum: number, maximum: number): number {
+	return Math.floor(rng() * (maximum - minimum + 1)) + minimum;
 }
 
 function formatNumber(value: number): string {
@@ -163,6 +181,32 @@ function weightedIntervals(total: number, spacing: number, rng: () => number, va
 	return weights.map((weight) => weight / sum * total);
 }
 
+function rotateMask(mask: readonly boolean[], rotation: number): boolean[] {
+	const count = mask.length;
+	return mask.map((_, index) => mask[(index - rotation + count) % count]);
+}
+
+function buildCoverageMask(count: number, rng: () => number, targetCoverage: number): boolean[] {
+	for (let attempt = 0; attempt < 48; attempt += 1) {
+		const runs: Array<Readonly<{ decorated: boolean; length: number }>> = [];
+		let remaining = count;
+		let decorated = rng() < 0.45;
+		while (remaining > 0) {
+			const minimumRun = decorated ? 2 : 1;
+			const maximumRun = decorated ? 4 : 3;
+			const length = Math.min(randomInteger(rng, minimumRun, maximumRun), remaining);
+			runs.push({ decorated, length });
+			remaining -= length;
+			decorated = !decorated;
+		}
+		const mask = runs.flatMap((run) => Array.from({ length: run.length }, () => run.decorated));
+		const coverage = mask.filter(Boolean).length / count;
+		if (Math.abs(coverage - targetCoverage) <= 0.08) return rotateMask(mask, randomInteger(rng, 0, count - 1));
+	}
+	const fallback = Array.from({ length: count }, (_, index) => index < Math.round(count * targetCoverage));
+	return rotateMask(fallback, randomInteger(rng, 0, count - 1));
+}
+
 function capOutwardDistance(point: Point, direction: Point, requested: number, width: number, height: number, constraints?: SpeechBubbleShapeConstraints): number {
 	if (!constraints) return requested;
 	const outlineInset = OUTLINE_WIDTH / 2 + 0.01;
@@ -192,6 +236,19 @@ function visualBounds(points: readonly Point[]): SpeechBubbleVisualBounds {
 	};
 }
 
+function appendBaseSegment(path: string, points: Point[], sampler: PerimeterSampler, start: number, end: number): string {
+	if (end <= start) return path;
+	const span = end - start;
+	const steps = Math.max(2, Math.round(span / 6));
+	let nextPath = path;
+	for (let index = 1; index <= steps; index += 1) {
+		const point = sampler.pointAt(start + span * (index / steps));
+		points.push(point);
+		nextPath += ` L ${formatPoint(point)}`;
+	}
+	return nextPath;
+}
+
 function cubicPoint(first: Point, control1: Point, control2: Point, last: Point, progress: number): Point {
 	const inverse = 1 - progress;
 	return {
@@ -214,7 +271,8 @@ function cubicExtrema(first: number, control1: number, control2: number, last: n
 function shoutShape(width: number, height: number, seed: string | number, constraints?: SpeechBubbleShapeConstraints): SpeechBubbleShape {
 	const sampler = makeSampler(roundedRectPoints(width, height, clamp(Math.min(width, height) * 0.25, 9, 18)));
 	const rng = mulberry32(hash32(`shout|${seed}|${Math.round(width)}|${Math.round(height)}`));
-	const intervals = weightedIntervals(sampler.total, SHOUT_SPACING, rng, SHOUT_VARIANCE * 0.55, 10, 34);
+	const intervals = weightedIntervals(sampler.total, SHOUT_SPACING, rng, 0, 10, 34);
+	const mask = buildCoverageMask(intervals.length, rng, SHOUT_COVERAGE);
 	const center = { x: width / 2, y: height / 2 };
 	const offset = rng() * sampler.total;
 	const valleys: Array<Readonly<{ station: number; point: Point }>> = [];
@@ -227,70 +285,122 @@ function shoutShape(width: number, height: number, seed: string | number, constr
 		station += interval;
 	}
 
+	const perimeter = sampler.total;
+	const sizeFactor = 1 + SHOUT_SIZE_BOOST * Math.max(0, (perimeter - 470) / 420);
+	const requestedLength = SHOUT_BASE_LENGTH * sizeFactor;
 	const points: Point[] = [valleys[0].point];
-	const lengths: number[] = [];
+	const requestedLengths: number[] = [];
+	const actualLengths: number[] = [];
+	const rootWidths: number[] = [];
 	const rays: Array<Readonly<{ base: Point; point: Point; direction: Point }>> = [];
 	let path = `M ${formatPoint(valleys[0].point)}`;
 	for (let index = 0; index < valleys.length; index += 1) {
 		const current = valleys[index];
-		const next = valleys[(index + 1) % valleys.length];
-		const roll = rng();
-		const classFactor = roll < 0.24 ? 0.3 + rng() * 0.2 : roll < 0.68 ? 0.9 + rng() * 0.4 : 1.9 + rng() * 1.4;
-		const requestedLength = SHOUT_BASE_LENGTH * (1 + (classFactor - 1) * (0.85 + SHOUT_VARIANCE * 1.45));
-		const tipStation = current.station + intervals[index] * (0.5 + (rng() - 0.5) * 0.16);
-		const base = sampler.pointAt(tipStation);
-		const direction = normalize(base.x - center.x, base.y - center.y);
-		const length = capOutwardDistance(base, direction, requestedLength, width, height, constraints);
-		const tip = { x: base.x + direction.x * length, y: base.y + direction.y * length };
-		lengths.push(length);
-		rays.push({ base, point: tip, direction });
-		points.push(tip, next.point);
-		path += ` L ${formatPoint(tip)} L ${formatPoint(next.point)}`;
+		const span = intervals[index];
+		if (mask[index]) {
+			const tipStation = current.station + span * (0.5 + (rng() - 0.5) * 0.1);
+			const halfBase = Math.min(SHOUT_BASE_WIDTH / 2, span * 0.26);
+			const leftStation = tipStation - halfBase;
+			const rightStation = tipStation + halfBase;
+			rootWidths.push(halfBase * 2);
+			path = appendBaseSegment(path, points, sampler, current.station, leftStation);
+			const base = sampler.pointAt(tipStation);
+			const direction = normalize(base.x - center.x, base.y - center.y);
+			const length = capOutwardDistance(base, direction, requestedLength, width, height, constraints);
+			const tip = { x: base.x + direction.x * length, y: base.y + direction.y * length };
+			const rightBase = sampler.pointAt(rightStation);
+			requestedLengths.push(requestedLength);
+			actualLengths.push(length);
+			rays.push({ base, point: tip, direction });
+			points.push(tip, rightBase);
+			path += ` L ${formatPoint(tip)} L ${formatPoint(rightBase)}`;
+			path = appendBaseSegment(path, points, sampler, rightStation, current.station + span);
+		} else {
+			path = appendBaseSegment(path, points, sampler, current.station, current.station + span);
+		}
 	}
 	return {
 		path: `${path} Z`,
 		bounds: visualBounds(points),
-		metadata: { count: intervals.length, minimumOutwardSize: Math.min(...lengths), maximumOutwardSize: Math.max(...lengths), outwardSizes: lengths, points, valleys: valleys.map((valley) => valley.point), center, outwardRays: rays }
+		metadata: {
+			count: intervals.length,
+			intervalCount: intervals.length,
+			decoratedCount: requestedLengths.length,
+			coverage: requestedLengths.length / intervals.length,
+			minimumOutwardSize: Math.min(...actualLengths),
+			maximumOutwardSize: Math.max(...actualLengths),
+			outwardSizes: actualLengths,
+			requestedOutwardSizes: requestedLengths,
+			actualOutwardSizes: actualLengths,
+			points,
+			valleys: valleys.map((valley) => valley.point),
+			center,
+			outwardRays: rays,
+			spikeRootWidths: rootWidths,
+			sizeFactor
+		}
 	};
 }
 
 function cloudShape(width: number, height: number, seed: string | number, constraints?: SpeechBubbleShapeConstraints): SpeechBubbleShape {
 	const sampler = makeSampler(roundedRectPoints(width, height, clamp(Math.min(width, height) * 0.25, 9, 18)));
-	const rng = mulberry32(hash32(`cloud|${seed}|${Math.round(width)}|${Math.round(height)}`));
-	const intervals = weightedIntervals(sampler.total, CLOUD_SPACING, rng, CLOUD_VARIANCE * 0.34, 7, 20);
+	const rng = mulberry32(hash32(`mono-full-cloud|${seed}|${Math.round(width)}|${Math.round(height)}`));
+	const intervals = weightedIntervals(sampler.total, CLOUD_SPACING, rng, 0.16, 6, 24);
 	const offset = rng() * sampler.total;
 	const valleys: Array<Readonly<{ station: number; point: Point }>> = [];
+	const valleyOutwardSizes: number[] = [];
 	let station = offset;
 	for (const interval of intervals) {
 		const frame = sampler.frameAt(station);
-		const distance = capOutwardDistance(frame.point, frame.normal, rng() * 2, width, height, constraints);
+		const distance = capOutwardDistance(frame.point, frame.normal, CLOUD_OFFSET * (0.7 + rng() * 0.35), width, height, constraints);
+		valleyOutwardSizes.push(distance);
 		valleys.push({ station, point: { x: frame.point.x + frame.normal.x * distance, y: frame.point.y + frame.normal.y * distance } });
 		station += interval;
 	}
 
 	const points: Point[] = [valleys[0].point];
-	const sizes: number[] = [];
+	const factors: number[] = [];
+	const requestedBumps: number[] = [];
+	const actualBumps: number[] = [];
 	let path = `M ${formatPoint(valleys[0].point)}`;
 	for (let index = 0; index < valleys.length; index += 1) {
 		const current = valleys[index];
 		const next = valleys[(index + 1) % valleys.length];
-		const bump = CLOUD_BASE_SIZE * (0.62 + rng() * (0.76 + CLOUD_VARIANCE * 0.72));
+		const roll = rng();
+		const factor = roll < CLOUD_SMALL_RATE ? 0.35 + rng() * 0.35 : 1.45 + rng() * 0.65;
+		const bump = CLOUD_BASE_SIZE * (0.55 + factor * (0.55 + CLOUD_VARIANCE * 0.4));
 		const firstFrame = sampler.frameAt(current.station + intervals[index] * 0.28);
 		const secondFrame = sampler.frameAt(current.station + intervals[index] * 0.72);
-		const firstDistance = capOutwardDistance(firstFrame.point, firstFrame.normal, bump, width, height, constraints);
-		const secondDistance = capOutwardDistance(secondFrame.point, secondFrame.normal, bump, width, height, constraints);
+		const firstDistance = capOutwardDistance(firstFrame.point, firstFrame.normal, CLOUD_OFFSET + bump, width, height, constraints);
+		const secondDistance = capOutwardDistance(secondFrame.point, secondFrame.normal, CLOUD_OFFSET + bump, width, height, constraints);
 		const control1 = { x: firstFrame.point.x + firstFrame.normal.x * firstDistance, y: firstFrame.point.y + firstFrame.normal.y * firstDistance };
 		const control2 = { x: secondFrame.point.x + secondFrame.normal.x * secondDistance, y: secondFrame.point.y + secondFrame.normal.y * secondDistance };
 		for (const progress of [0, 1, ...cubicExtrema(current.point.x, control1.x, control2.x, next.point.x), ...cubicExtrema(current.point.y, control1.y, control2.y, next.point.y)]) {
 			if (progress >= 0 && progress <= 1) points.push(cubicPoint(current.point, control1, control2, next.point, progress));
 		}
-		sizes.push(Math.min(firstDistance, secondDistance));
+		factors.push(factor);
+		requestedBumps.push(bump);
+		actualBumps.push(Math.min(firstDistance, secondDistance) - CLOUD_OFFSET);
 		path += ` C ${formatPoint(control1)} ${formatPoint(control2)} ${formatPoint(next.point)}`;
 	}
 	return {
 		path: `${path} Z`,
 		bounds: visualBounds(points),
-		metadata: { count: intervals.length, minimumOutwardSize: Math.min(...sizes), maximumOutwardSize: Math.max(...sizes), outwardSizes: sizes, points, valleys: valleys.map((valley) => valley.point) }
+		metadata: {
+			count: intervals.length,
+			intervalCount: intervals.length,
+			decoratedCount: intervals.length,
+			minimumOutwardSize: Math.min(...actualBumps),
+			maximumOutwardSize: Math.max(...actualBumps),
+			outwardSizes: actualBumps,
+			requestedOutwardSizes: requestedBumps,
+			actualOutwardSizes: actualBumps,
+			points,
+			valleys: valleys.map((valley) => valley.point),
+			valleyOutwardSizes,
+			lobeFactors: factors,
+			lobeBumps: requestedBumps
+		}
 	};
 }
 

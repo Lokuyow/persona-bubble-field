@@ -618,6 +618,20 @@ test.describe('DEV World Sandbox', () => {
 				const outline = surface?.querySelector<SVGPathElement>('.bubble-surface-outline');
 				const mask = surface?.querySelector<SVGMaskElement>('mask');
 				if (!surface || !fill || !outline || !mask) throw new Error('Expected a masked special speech surface.');
+				const content = bubble.querySelector<HTMLElement>('.bubble-content');
+				const contentRect = content?.getBoundingClientRect();
+				const inverseSurfaceMatrix = fill.getScreenCTM()?.inverse();
+				if (bubble.dataset.speechType === 'monologue' && (!contentRect || !inverseSurfaceMatrix)) {
+					throw new Error('Expected monologue content geometry.');
+				}
+				const contentSafePointsInside = bubble.dataset.speechType === 'monologue' && contentRect && inverseSurfaceMatrix
+					? [
+						{ x: contentRect.left + Math.min(4, contentRect.width / 4), y: contentRect.top + Math.min(4, contentRect.height / 4) },
+						{ x: contentRect.right - Math.min(4, contentRect.width / 4), y: contentRect.top + Math.min(4, contentRect.height / 4) },
+						{ x: contentRect.left + Math.min(4, contentRect.width / 4), y: contentRect.bottom - Math.min(4, contentRect.height / 4) },
+						{ x: contentRect.right - Math.min(4, contentRect.width / 4), y: contentRect.bottom - Math.min(4, contentRect.height / 4) }
+					].map((point) => fill.isPointInFill(new DOMPoint(point.x, point.y).matrixTransform(inverseSurfaceMatrix)))
+					: [];
 				return [...mask.querySelectorAll<SVGPolygonElement>('polygon[data-tail-opening]')].map((opening) => {
 					const participantId = opening.dataset.tailOpening;
 					if (!participantId) throw new Error('Expected a tail opening participant id.');
@@ -640,6 +654,7 @@ test.describe('DEV World Sandbox', () => {
 						openingMatchesOutlineMask: outline.getAttribute('mask') === `url(#${mask.id})`,
 						openingFill: getComputedStyle(opening).fill,
 						openingInsideBody: fill.isPointInFill(openingMidpoint),
+						contentSafePointsInside,
 						openingPoints,
 						tailPoints,
 						outlinePoints,
@@ -655,6 +670,7 @@ test.describe('DEV World Sandbox', () => {
 			expect(union.openingMatchesOutlineMask).toBe(true);
 			expect(union.openingFill).toBe('rgb(0, 0, 0)');
 			expect(union.openingInsideBody).toBe(true);
+			if (union.speechType === 'monologue') expect(union.contentSafePointsInside.every(Boolean)).toBe(true);
 			expect(union.bodyStrokeWidth).toBe(union.tailStrokeWidth);
 			for (const [index, openingPoint] of union.openingPoints.entries()) {
 				expect(Math.hypot(openingPoint.x - union.tailPoints[index].x, openingPoint.y - union.tailPoints[index].y)).toBeLessThan(1);

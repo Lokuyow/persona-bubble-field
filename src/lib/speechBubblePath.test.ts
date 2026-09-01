@@ -32,54 +32,70 @@ describe('createSpeechBubbleShape', () => {
 		expect(first?.metadata.count).toBe(second?.metadata.count);
 		expect(first?.metadata.outwardSizes).toEqual(second?.metadata.outwardSizes);
 		expect(first?.path).not.toBe(changed?.path);
+		expect(first?.path).not.toBe(second?.path);
+		expect(first?.metadata.points.some((point, index) => point.x !== second?.metadata.points[index]?.x || point.y !== second?.metadata.points[index]?.y)).toBe(true);
 	});
 
 	it.each([
-		['shout', 184, 54, 'df409c48'],
-		['shout', 218, 58, 'e9ef5119'],
-		['monologue', 184, 54, '1100ab48'],
-		['monologue', 218, 58, '7f0ebc4']
-	] as const)('keeps the approved seed 70161 %s %dx%d golden shape', (speechType, width, height, digest) => {
-		const shape = createSpeechBubbleShape(speechType, width, height, 70161);
+		['shout', 184, 54, '49d39194'],
+		['shout', 218, 58, '85a7b07d'],
+		['monologue', 184, 54, 'a11eaca'],
+		['monologue', 218, 58, 'd1d6ab8a']
+	] as const)('matches the v10c fixed seed 72644 %s %dx%d golden shape', (speechType, width, height, digest) => {
+		const shape = createSpeechBubbleShape(speechType, width, height, 72644);
 		expect(shape).not.toBeNull();
 		expect(pathDigest(shape!.path)).toBe(digest);
 	});
 
-	it('creates the v7 shout distribution as center-radial short, medium, and long spikes', () => {
-		const shape = createSpeechBubbleShape('shout', 184, 54, 70161)!;
-		expect(shape.metadata.count).toBe(20);
-		expect(createSpeechBubbleShape('shout', 330, 128, 70161)!.metadata.count).toBeGreaterThan(shape.metadata.count);
-		expect(shape.metadata.outwardSizes.some((size) => size < 6)).toBe(true);
-		expect(shape.metadata.outwardSizes.some((size) => size > 12 && size < 20)).toBe(true);
-		expect(shape.metadata.outwardSizes.some((size) => size > 28)).toBe(true);
-		expect(shape.metadata.outwardRays).toHaveLength(shape.metadata.count);
-		for (const ray of shape.metadata.outwardRays ?? []) {
-			const fromCenter = { x: ray.base.x - shape.metadata.center!.x, y: ray.base.y - shape.metadata.center!.y };
-			const toTip = { x: ray.point.x - shape.metadata.center!.x, y: ray.point.y - shape.metadata.center!.y };
+	it('uses v10c shout coverage, smooth contour sections, and fixed-size center-radial spikes', () => {
+		const small = createSpeechBubbleShape('shout', 184, 54, 72644)!;
+		const merged = createSpeechBubbleShape('shout', 218, 58, 72644)!;
+		const large = createSpeechBubbleShape('shout', 330, 128, 72644)!;
+		expect(small.metadata.intervalCount).toBe(28);
+		expect(small.metadata.decoratedCount).toBe(16);
+		expect(small.metadata.coverage).toBe(16 / 28);
+		expect(merged.metadata.intervalCount).toBe(32);
+		expect(merged.metadata.decoratedCount).toBe(17);
+		expect(merged.metadata.coverage).toBe(17 / 32);
+		expect(small.metadata.requestedOutwardSizes.every((length) => length === 14)).toBe(true);
+		expect(small.metadata.actualOutwardSizes.every((length) => length === 14)).toBe(true);
+		expect(merged.metadata.requestedOutwardSizes.every((length) => Math.abs(length - 16.944176213101322) < 1e-12)).toBe(true);
+		expect(large.metadata.requestedOutwardSizes.every((length) => Math.abs(length - 38.423115299022314) < 1e-12)).toBe(true);
+		expect(small.metadata.spikeRootWidths?.every((width) => width <= 10 && width > 0)).toBe(true);
+		expect(large.metadata.spikeRootWidths?.every((width) => width <= 10 && width > 0)).toBe(true);
+		expect((small.path.match(/\bL\s/g) ?? []).length).toBeGreaterThan(100);
+		expect(small.metadata.outwardRays).toHaveLength(small.metadata.decoratedCount);
+		for (const ray of small.metadata.outwardRays ?? []) {
+			const fromCenter = { x: ray.base.x - small.metadata.center!.x, y: ray.base.y - small.metadata.center!.y };
+			const toTip = { x: ray.point.x - small.metadata.center!.x, y: ray.point.y - small.metadata.center!.y };
 			expect(Math.abs(fromCenter.x * toTip.y - fromCenter.y * toTip.x)).toBeLessThan(1e-8);
 			expect(fromCenter.x * toTip.x + fromCenter.y * toTip.y).toBeGreaterThan(Math.hypot(fromCenter.x, fromCenter.y) ** 2);
 		}
-		expect(shape.bounds.x).toBeLessThan(0);
-		expect(shape.bounds.y).toBeLessThan(0);
-		expect(shape.bounds.x + shape.bounds.width).toBeGreaterThan(184);
-		expect(shape.bounds.y + shape.bounds.height).toBeGreaterThan(54);
-		expect(shape.metadata.valleys.every((point) => point.x >= -1.2 && point.x <= 185.2 && point.y >= -1.2 && point.y <= 55.2)).toBe(true);
-		expectBoundsToEnclose(shape);
+		expect(large.metadata.sizeFactor).toBeCloseTo(2.7445082356444512, 12);
+		expectBoundsToEnclose(small);
+		expectBoundsToEnclose(merged);
+		expectBoundsToEnclose(large);
 	});
 
-	it('creates the v5 cloud distribution with variable cubic lobes outside the body', () => {
-		const shape = createSpeechBubbleShape('monologue', 218, 58, 70161)!;
-		expect((shape.path.match(/\bC\s/g) ?? [])).toHaveLength(shape.metadata.count);
-		expect((shape.path.match(/\bL\s/g) ?? [])).toHaveLength(0);
-		expect(shape.metadata.count).toBe(10);
-		expect(createSpeechBubbleShape('monologue', 330, 128, 70161)!.metadata.count).toBeGreaterThan(shape.metadata.count);
-		expect(shape.metadata.maximumOutwardSize - shape.metadata.minimumOutwardSize).toBeGreaterThan(8);
-		expect(shape.bounds.x).toBeLessThan(0);
-		expect(shape.bounds.y).toBeLessThan(0);
-		expect(shape.bounds.x + shape.bounds.width).toBeGreaterThan(218);
-		expect(shape.bounds.y + shape.bounds.height).toBeGreaterThan(58);
-		expect(shape.metadata.valleys.every((point) => point.x >= -2 && point.x <= 220 && point.y >= -2 && point.y <= 60)).toBe(true);
-		expectBoundsToEnclose(shape);
+	it('uses v10c full cloud-only lobes with explicit 85 percent small and 15 percent large classes', () => {
+		const small = createSpeechBubbleShape('monologue', 184, 54, 72644)!;
+		const merged = createSpeechBubbleShape('monologue', 218, 58, 72644)!;
+		for (const [shape, count, minimumBump, maximumBump] of [
+			[small, 7, 4.033864743672777, 11.920829839027487],
+			[merged, 8, 4.138020742816385, 10.64828880764125]
+		] as const) {
+			expect(shape.metadata.intervalCount).toBe(count);
+			expect(shape.metadata.decoratedCount).toBe(count);
+			expect((shape.path.match(/\bC\s/g) ?? [])).toHaveLength(count);
+			expect((shape.path.match(/\bL\s/g) ?? [])).toHaveLength(0);
+			expect(shape.metadata.lobeFactors?.some((factor) => factor < 0.85)).toBe(true);
+			expect(shape.metadata.lobeFactors?.some((factor) => factor >= 1.45)).toBe(true);
+			expect(shape.metadata.lobeFactors?.every((factor) => factor < 0.85 || factor >= 1.45)).toBe(true);
+			expect(Math.min(...(shape.metadata.lobeBumps ?? []))).toBeCloseTo(minimumBump, 12);
+			expect(Math.max(...(shape.metadata.lobeBumps ?? []))).toBeCloseTo(maximumBump, 12);
+			expect(shape.metadata.valleyOutwardSizes?.every((distance) => distance >= 5.6 && distance <= 8.4)).toBe(true);
+			expectBoundsToEnclose(shape);
+		}
 	});
 
 	it.each([
@@ -90,7 +106,7 @@ describe('createSpeechBubbleShape', () => {
 		['monologue', 184, 54],
 		['monologue', 330, 128]
 	] as const)('encloses the actual %s path at %dx%d in its separate visual bounds', (speechType, width, height) => {
-		const shape = createSpeechBubbleShape(speechType, width, height, 70161)!;
+		const shape = createSpeechBubbleShape(speechType, width, height, 72644)!;
 		expect(shape.metadata.points.every((point) => Number.isFinite(point.x) && Number.isFinite(point.y))).toBe(true);
 		expectBoundsToEnclose(shape);
 	});
@@ -98,7 +114,7 @@ describe('createSpeechBubbleShape', () => {
 	it('caps only outward decoration within the supplied responsive envelope', () => {
 		const constraints = { maxBleedX: 16, maxBleedY: 10 };
 		for (const speechType of ['shout', 'monologue'] as const) {
-			const shape = createSpeechBubbleShape(speechType, 288, 128, 70161, constraints)!;
+			const shape = createSpeechBubbleShape(speechType, 288, 128, 72644, constraints)!;
 			expect(shape.bounds.x).toBeGreaterThanOrEqual(-constraints.maxBleedX - 0.01);
 			expect(shape.bounds.y).toBeGreaterThanOrEqual(-constraints.maxBleedY - 0.01);
 			expect(shape.bounds.x + shape.bounds.width).toBeLessThanOrEqual(288 + constraints.maxBleedX + 0.01);
