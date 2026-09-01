@@ -59,6 +59,12 @@ MVPでは主として以下を所有する。
 
 eHagakiはComposer Outputを親クライアントへ渡し、親クライアントが最終Nostr eventを構築する。
 
+persona-bubble-fieldはHost-owned Liteの汎用`submitShortcuts` APIを利用する。eHagakiはEnterと
+modifierの判定およびHost-owned submit lifecycleを担当し、opaqueな`shortcutId`を親へ返すだけと
+する。shortcut IDから叫び・モノローグへ意味付けするresolver、slash command parser、発言タイプ
+selectorはpersona-bubble-field側の責務とする。eHagakiへpersona固有のspeech semanticsを持ち込まず、
+eHagaki自身がslash commandを解釈しない。
+
 Host-owned Composer Liteの公開component APIには、親クライアントがComposer
 editorへフォーカスを移すための `focusEditor()` と、editorからフォーカスを外す
 ための `blurEditor()` を含める。persona-bubble-fieldは、Host-ownedの

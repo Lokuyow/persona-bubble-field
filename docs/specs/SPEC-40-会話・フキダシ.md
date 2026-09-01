@@ -233,17 +233,48 @@ message subscription、position subscription、`EOSE`、再接続等の詳細な
 
 3種類とも発言が見える範囲は同じとする。
 
-違いは主として専用クライアント上の見た目・演出に持たせる。
+違いは主として専用クライアント上のbody silhouetteに持たせる。
 
-具体的な、
+通常は既存の通常フキダシ表示を維持し、叫びとモノローグは以下の見た目とする。
 
-- フキダシ形状
-- サイズ
-- 装飾
-- アニメーション
-- その他の演出
+- 叫び：一重outlineの適度に長短があるjagged / spiky / burst形状
+- モノローグ：bodyだけが雲状に波打つfluffy / cloud / scalloped形状
 
-は未決定とする。
+fillは現在のbubble tone background、outlineは現在のspeaker tone outlineを使用する。
+3種類とも現在のtail geometryを共有し、type別のtailは追加しない。合体フキダシも元の
+発言タイプのbody silhouetteを維持する。
+
+発言タイプによってfont、size、paddingの意味論、最大5表示行、display duration、visibility、
+range、max widthの製品ルール、merge巨大化ルール、animationを変更しない。
+
+### 発言タイプの選択
+
+発言タイプは1投稿ごとのexplicit choiceとし、通常をdefaultとする。ユーザーは以下の3方法で
+選択できる。
+
+1. Composer dockの発言タイプ切り替えbutton
+2. Composer本文先頭のslash command
+3. modified Enter shortcut
+
+切り替えbuttonは通常 → 叫び → モノローグ → 通常の順に循環するone-shot選択で、投稿成功後は
+通常へ戻り、投稿失敗時は選択を維持する。選択状態は永続化しない。
+
+slash commandは本文の絶対先頭でtokenが完全一致する場合だけ認識し、認識したprefixと最初の
+ASCII spaceだけをNostr contentから除去する。long commandとshort aliasは同じ意味とする。
+
+- 叫び：`/shout`、`/s`
+- モノローグ：`/mono`、`/m`
+
+`/something`、`/me`等をprefix matchとして扱わず、case-sensitiveとする。commandの後に本文が
+ない投稿は送信しない。
+
+shortcutの優先順位は、
+
+`keyboard shortcut > slash command > UI切り替え > normal`
+
+とする。Ctrl/Cmd+Enterは叫び、Alt/Option+Enterはモノローグ、plain Enterは通常のsubmit、
+Shift+Enterは改行とする。shortcutとslash commandが競合しても、認識したslash prefixは本文から
+除去する。
 
 3種類でNostr event kindを分けない。
 

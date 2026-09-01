@@ -1,6 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { finalizeEvent } from 'nostr-tools/pure';
 import { buildPositionEventTemplate, buildWorldMessageTemplate } from '../../src/lib/nostrProtocol';
+import { SPEECH_SHORTCUT_IDS } from '../../src/lib/speechSubmission';
 
 const CHANNEL_ID = '3212de4b75f0c41efa17e41affcfc3a811171ba930e5b657687b5f5148627d5b';
 const SEED_RELAYS = [
@@ -89,16 +90,33 @@ async function installHostOwnedStub(page: Page): Promise<{ requests: () => numbe
     textarea.addEventListener('input', updateEditorEmpty);
     textarea.addEventListener('keydown', (event) => {
       if (event.key.startsWith('Arrow')) window.__ehagakiEditorArrowPrevented = event.defaultPrevented;
+
+      if ((event.key !== 'Enter' && event.code !== 'NumpadEnter') || event.isComposing || event.shiftKey) return;
+      const shortcut = (this.options.submitShortcuts || []).find((candidate) => {
+        if (candidate.modifiers.length !== 1) return false;
+        if (candidate.modifiers[0] === 'ctrlOrMeta') return (event.ctrlKey || event.metaKey) && !event.altKey;
+        if (candidate.modifiers[0] === 'alt') return event.altKey && !event.ctrlKey && !event.metaKey;
+        return false;
+      });
+      if (event.ctrlKey || event.metaKey || event.altKey) {
+        if (!shortcut) return;
+      }
+      event.preventDefault();
+      void submit(shortcut?.id);
     });
-    const button = document.createElement('button'); button.type = 'button'; button.textContent = 'Send';
-    button.addEventListener('click', async () => {
+    const submit = async (shortcutId) => {
       const controller = new AbortController();
       if (window.__ehagakiAbortNextSubmit) { window.__ehagakiAbortNextSubmit = false; controller.abort(); }
       this.activeController = controller; window.__ehagakiSubmitStarted = true;
-      try { await this.options.submit({ content: textarea.value, tags: [], context: null }, { signal: controller.signal }); textarea.value = ''; }
-      catch { /* Host-owned contract: retain the failed content. */ }
+      try {
+        await this.options.submit({ content: textarea.value, tags: [], context: null }, { signal: controller.signal, shortcutId });
+        textarea.value = '';
+        updateEditorEmpty();
+      } catch { /* Host-owned contract: retain the failed content. */ }
       finally { this.activeController = null; }
-    });
+    };
+    const button = document.createElement('button'); button.type = 'button'; button.textContent = 'Send';
+    button.addEventListener('click', () => void submit());
     this.editor = textarea;
     this.shadowRoot.append(textarea, button);
     window.__ehagakiSetPreferredHeight = (height) => this.dispatchEvent(new CustomEvent('ehagaki-preferred-height-change', { bubbles: true, composed: true, detail: { height } }));
@@ -268,6 +286,7 @@ async function installDelayedRelay(page: Page, options: { deferPrimaryEvents?: b
 				rejectMessagePublishes: () => { state.rejectMessagePublishes = true; },
 				rejectPositionPublishes: () => { state.rejectPositionPublishes = true; },
 				allowPositionPublishes: () => { state.rejectPositionPublishes = false; },
+				allowMessagePublishes: () => { state.rejectMessagePublishes = false; },
 				injectPosition: (event: object) => {
 					for (const request of activePrimary) {
 						if ((request.filter.kinds as number[] | undefined)?.includes(30078)) {
@@ -288,8 +307,20 @@ async function installDelayedRelay(page: Page, options: { deferPrimaryEvents?: b
 
 function relayState(page: Page) {
 	return page.evaluate(() => (window as typeof window & {
-		__relayStartupTest: { state: { requests: Array<{ url: string; filter: Record<string, unknown> }>; published: Array<{ id: string; kind: number }> }; releaseMetadata(): void; releasePrimaryEvents(): void; releasePrimary(): void; rejectMessagePublishes(): void; rejectPositionPublishes(): void; allowPositionPublishes(): void; injectPosition(event: object): void };
+		__relayStartupTest: { state: { requests: Array<{ url: string; filter: Record<string, unknown> }>; published: Array<{ id: string; kind: number; content: string; tags: string[][] }> }; releaseMetadata(): void; releasePrimaryEvents(): void; releasePrimary(): void; rejectMessagePublishes(): void; allowMessagePublishes(): void; rejectPositionPublishes(): void; allowPositionPublishes(): void; injectPosition(event: object): void };
 	}).__relayStartupTest);
+}
+
+async function publishedMessages(page: Page) {
+	return [...new Map(
+		(await relayState(page)).state.published
+			.filter((event) => event.kind === 42)
+			.map((event) => [event.id, event])
+	)].map(([, event]) => event);
+}
+
+async function waitForPublishedMessageCount(page: Page, count: number): Promise<void> {
+	await expect.poll(async () => (await publishedMessages(page)).length).toBe(count);
 }
 
 async function openClockedReadyRelayWorld(page: Page): Promise<Locator> {
@@ -400,6 +431,7 @@ test.describe('Relay startup', () => {
 					enterKeyBehavior?: string;
 					editorMinLines?: number;
 					editorMaxLines?: number;
+					submitShortcuts?: Array<{ id: string; modifiers: string[] }>;
 				};
 			}).__ehagakiHostOwnedOptions;
 			return options && {
@@ -407,7 +439,8 @@ test.describe('Relay startup', () => {
 				keyboardButtonBarEnabled: options.keyboardButtonBarEnabled,
 				enterKeyBehavior: options.enterKeyBehavior,
 				editorMinLines: options.editorMinLines,
-				editorMaxLines: options.editorMaxLines
+				editorMaxLines: options.editorMaxLines,
+				submitShortcuts: options.submitShortcuts
 			};
 		});
 
@@ -416,8 +449,118 @@ test.describe('Relay startup', () => {
 			keyboardButtonBarEnabled: false,
 			enterKeyBehavior: 'submit',
 			editorMinLines: 1,
-			editorMaxLines: 3
+			editorMaxLines: 3,
+			submitShortcuts: [
+				{ id: SPEECH_SHORTCUT_IDS.shout, modifiers: ['ctrlOrMeta'] },
+				{ id: SPEECH_SHORTCUT_IDS.monologue, modifiers: ['alt'] }
+			]
 		});
+	});
+
+	test('publishes normal, shout, and monologue through the editor button and Enter shortcuts', async ({ page }) => {
+		const editor = await openReadyRelayWorld(page);
+		const send = page.locator('ehagaki-composer').getByRole('button', { name: 'Send' });
+
+		const submitAndRead = async (content: string, submit: () => Promise<void>) => {
+			const before = (await publishedMessages(page)).length;
+			await editor.fill(content);
+			await submit();
+			await waitForPublishedMessageCount(page, before + 1);
+			await expect(editor).toHaveValue('');
+			return (await publishedMessages(page))[before];
+		};
+
+		const normalByButton = await submitAndRead('button normal', () => send.click());
+		const normalByEnter = await submitAndRead('plain Enter', () => editor.press('Enter'));
+		const shoutByControl = await submitAndRead('Control shout', () => editor.press('Control+Enter'));
+		const shoutByMeta = await submitAndRead('Meta shout', () => editor.press('Meta+Enter'));
+		const monologueByAlt = await submitAndRead('Alt monologue', () => editor.press('Alt+Enter'));
+
+		for (const event of [normalByButton, normalByEnter]) {
+			expect(event.content).toMatch(/normal|Enter/);
+			expect(event.tags.some((tag) => tag[0] === 'l' && tag[1]?.startsWith('speech:'))).toBe(false);
+		}
+		for (const event of [shoutByControl, shoutByMeta]) {
+			expect(event.tags).toContainEqual(['l', 'speech:shout', 'io.github.lokuyow.persona-bubble-field']);
+		}
+		expect(monologueByAlt.tags).toContainEqual(['l', 'speech:monologue', 'io.github.lokuyow.persona-bubble-field']);
+	});
+
+	test('resolves long and short slash commands before publishing', async ({ page }) => {
+		const editor = await openReadyRelayWorld(page);
+		const send = page.locator('ehagaki-composer').getByRole('button', { name: 'Send' });
+		for (const [command, content, label] of [
+			['/shout hello', 'hello', 'speech:shout'],
+			['/s short hello', 'short hello', 'speech:shout'],
+			['/mono monologue hello', 'monologue hello', 'speech:monologue'],
+			['/m short monologue', 'short monologue', 'speech:monologue']
+		] as const) {
+			const before = (await publishedMessages(page)).length;
+			await editor.fill(command);
+			await send.click();
+			await waitForPublishedMessageCount(page, before + 1);
+			const event = (await publishedMessages(page))[before];
+			expect(event.content).toBe(content);
+			expect(event.tags).toContainEqual(['l', label, 'io.github.lokuyow.persona-bubble-field']);
+		}
+	});
+
+	test('gives keyboard shortcuts precedence while still removing recognized slash prefixes', async ({ page }) => {
+		const editor = await openReadyRelayWorld(page);
+		const before = (await publishedMessages(page)).length;
+
+		await editor.fill('/m hello');
+		await editor.press('Control+Enter');
+		await waitForPublishedMessageCount(page, before + 1);
+		let event = (await publishedMessages(page))[before];
+		expect(event.content).toBe('hello');
+		expect(event.tags).toContainEqual(['l', 'speech:shout', 'io.github.lokuyow.persona-bubble-field']);
+
+		await editor.fill('/s hello');
+		await editor.press('Alt+Enter');
+		await waitForPublishedMessageCount(page, before + 2);
+		event = (await publishedMessages(page))[before + 1];
+		expect(event.content).toBe('hello');
+		expect(event.tags).toContainEqual(['l', 'speech:monologue', 'io.github.lokuyow.persona-bubble-field']);
+	});
+
+	test('keeps command-only content and false-positive slash text instead of publishing an empty command', async ({ page }) => {
+		const editor = await openReadyRelayWorld(page);
+		const send = page.locator('ehagaki-composer').getByRole('button', { name: 'Send' });
+		await editor.fill('/shout');
+		await send.click();
+		await expect(editor).toHaveValue('/shout');
+		await expect.poll(async () => (await publishedMessages(page)).length).toBe(0);
+
+		await editor.fill('/something');
+		await send.click();
+		await waitForPublishedMessageCount(page, 1);
+		const event = (await publishedMessages(page))[0];
+		expect(event.content).toBe('/something');
+		expect(event.tags.some((tag) => tag[0] === 'l' && tag[1]?.startsWith('speech:'))).toBe(false);
+	});
+
+	test('cycles the one-shot speech selector and only resets it after a successful submit', async ({ page }) => {
+		const editor = await openReadyRelayWorld(page);
+		const send = page.locator('ehagaki-composer').getByRole('button', { name: 'Send' });
+		const selector = page.locator('.speech-type-toggle');
+
+		await expect(selector).toHaveAttribute('data-speech-type', 'normal');
+		await selector.click();
+		await expect(selector).toHaveAttribute('data-speech-type', 'shout');
+		await selector.click();
+		await expect(selector).toHaveAttribute('data-speech-type', 'monologue');
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { rejectMessagePublishes(): void } }).__relayStartupTest.rejectMessagePublishes());
+		await editor.fill('keep monologue on failure');
+		await send.click();
+		await expect(editor).toHaveValue('keep monologue on failure');
+		await expect(selector).toHaveAttribute('data-speech-type', 'monologue');
+
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { allowMessagePublishes(): void } }).__relayStartupTest.allowMessagePublishes());
+		await editor.fill('successful monologue');
+		await send.click();
+		await waitForPublishedMessageCount(page, 2);
+		await expect(selector).toHaveAttribute('data-speech-type', 'normal');
 	});
 
 	test('renders DEV sandbox without Composer in the initial response or after hydration', async ({ page }) => {
@@ -576,6 +719,7 @@ test.describe('Relay startup', () => {
 		await expect(editor).toBeVisible();
 		await editor.fill('queued until Relay is ready');
 		await page.locator('ehagaki-composer').getByRole('button', { name: 'Send' }).click();
+		await expect(page.locator('.speech-type-toggle')).toBeDisabled();
 
 		const beforeMetadata = await relayState(page);
 		expect(beforeMetadata.state.requests.some((request) => AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) && [42, 30078].includes((request.filter.kinds as number[])[0]))).toBe(false);

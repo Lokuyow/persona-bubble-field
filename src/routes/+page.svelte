@@ -55,6 +55,9 @@
 	import { getVirtualKeyboardBottomInset, getVisualViewportKeyboardInset, type ViewportRect } from '$lib/keyboardInset';
 	import type { ParsedWorldMessage } from '$lib/nostrProtocol';
 	import HostOwnedComposerLite from '$lib/HostOwnedComposerLite.svelte';
+	import { resolveSpeechSubmission } from '$lib/speechSubmission';
+	import type { SpeechType } from '$lib/conversation';
+	import { createSpeechBubblePath } from '$lib/speechBubblePath';
 	import {
 		createWorldReadSession,
 		type SelfMessageAvailability,
@@ -80,6 +83,12 @@
 	const MOVEMENT_ANIMATION_DURATION_MS = 400;
 	const MOVEMENT_DIRECTIONS: readonly Direction[] = ['up', 'down', 'left', 'right'];
 	const INITIAL_COMPOSER_PREFERRED_HEIGHT = 50;
+	const SPEECH_TYPE_ORDER: readonly SpeechType[] = ['normal', 'shout', 'monologue'];
+	const SPEECH_TYPE_LABELS: Readonly<Record<SpeechType, string>> = {
+		normal: '通常',
+		shout: '叫び',
+		monologue: 'モノローグ'
+	};
 	const initialDevWorldSandboxEnabled = import.meta.env.DEV &&
 		isDevWorldSandboxEnabled(import.meta.env.DEV, page.url.searchParams);
 
@@ -115,8 +124,10 @@
 		cleanup: () => void;
 	}> | null = null;
 	let composerStartupError: Error | null = null;
+	let composerSubmissionInProgress = false;
 	let entryRetryable = false;
 	let selectedCharacterId = '001';
+	let selectedSpeechType: SpeechType = 'normal';
 	let lastProfileTrigger: HTMLButtonElement | null = null;
 	let composerEditorIsEmpty: boolean | null = null;
 	let composerComponent: { focusEditor(): boolean; blurEditor(): boolean } | null = null;
@@ -414,8 +425,10 @@
 					const mergedContent = devSpeech.endsWith('-long')
 						? 'Merged bubble content grows naturally until its size limit. '.repeat(8).trim()
 						: undefined;
-					seedDevSpeechMergedFixture(mergedMemberCount, mergedContent);
+					const mergedSpeechType = devSpeech.includes('shout') ? 'shout' : devSpeech.includes('monologue') ? 'monologue' : 'normal';
+					seedDevSpeechMergedFixture(mergedMemberCount, mergedContent, mergedSpeechType);
 				}
+				if (devSpeech === 'types') seedDevSpeechTypeFixture();
 				if (devSpeech === 'normal-sizes') seedDevSpeechNormalSizeFixture();
 				if (devSpeech === 'comparison') seedDevSpeechComparisonFixture();
 				if (devSpeech === 'linebreak') seedDevSpeechLinebreakFixture();
@@ -953,12 +966,38 @@
 		});
 	}
 
-	async function submitComposerContent(content: string, signal: AbortSignal): Promise<Readonly<{ eventId: string }>> {
-		await waitForMessageReady(signal);
-		if (signal.aborted) throw new DOMException('Submission was cancelled.', 'AbortError');
-		const result = await worldSession?.publishNormalMessage(content);
-		if (result?.kind === 'succeeded') return { eventId: result.eventId };
-		throw new Error('Message was not confirmed by Relay.');
+	async function submitComposerContent(
+		content: string,
+		options: Readonly<{ signal: AbortSignal; shortcutId?: string }>
+	): Promise<Readonly<{ eventId: string }>> {
+		const submission = resolveSpeechSubmission({
+			content,
+			shortcutId: options.shortcutId,
+			selectedSpeechType
+		});
+		composerSubmissionInProgress = true;
+		try {
+			await waitForMessageReady(options.signal);
+			if (options.signal.aborted) throw new DOMException('Submission was cancelled.', 'AbortError');
+			const result = await worldSession?.publishMessage(submission.content, submission.speechType);
+			if (result?.kind === 'succeeded') {
+				selectedSpeechType = 'normal';
+				return { eventId: result.eventId };
+			}
+			throw new Error('Message was not confirmed by Relay.');
+		} finally {
+			composerSubmissionInProgress = false;
+		}
+	}
+
+	function nextSpeechType(speechType: SpeechType): SpeechType {
+		const index = SPEECH_TYPE_ORDER.indexOf(speechType);
+		return SPEECH_TYPE_ORDER[(index + 1) % SPEECH_TYPE_ORDER.length];
+	}
+
+	function cycleSpeechType(): void {
+		if (composerSubmissionInProgress) return;
+		selectedSpeechType = nextSpeechType(selectedSpeechType);
 	}
 
 	function setComposerPreferredHeight(height: number): void {
@@ -1013,7 +1052,11 @@
 		}
 	}
 
-	function seedDevSpeechMergedFixture(mergedMemberCount: number, mergedContent = 'merged fixture'): void {
+	function seedDevSpeechMergedFixture(
+		mergedMemberCount: number,
+		mergedContent = 'merged fixture',
+		mergedSpeechType: SpeechType = 'normal'
+	): void {
 		if (!devWorldSandboxEnabled) return;
 		const now = Date.now();
 		const normalPubkey = 'a'.repeat(64);
@@ -1035,7 +1078,7 @@
 			id: 'dev-speech-normal-message', pubkey: normalPubkey, content: 'normal fixture', createdAt: now
 		} as const;
 		const mergedMessage = {
-			id: 'dev-speech-merged-message-a', pubkey: mergedPubkeys[0], content: mergedContent, createdAt: now
+			id: 'dev-speech-merged-message-a', pubkey: mergedPubkeys[0], content: mergedContent, speechType: mergedSpeechType, createdAt: now
 		} as const;
 		conversationState = receiveMessage(conversationState, normalMessage, { isSpeakerVisible: true, duration, now });
 		conversationState = receiveMessage(conversationState, mergedMessage, { isSpeakerVisible: true, duration, now });
@@ -1046,6 +1089,31 @@
 				pubkey
 			}, { isSpeakerVisible: true, duration, now });
 		}
+	}
+
+	function seedDevSpeechTypeFixture(): void {
+		if (!devWorldSandboxEnabled) return;
+		const now = Date.now();
+		const normalPubkey = 'a'.repeat(64);
+		const shoutPubkeys = ['b', 'c'].map((prefix) => prefix.repeat(64));
+		const monologuePubkeys = ['d', 'e'].map((prefix) => prefix.repeat(64));
+		setPresence(createPresenceState(FIELD, now, [
+			{ id: DEV_WORLD_SELF_ID, position: { x: 7, y: 3 } },
+			{ id: normalPubkey, position: { x: 4, y: 2 } },
+			...shoutPubkeys.map((id, index) => ({ id, position: { x: index === 0 ? 6 : 8, y: 2 } })),
+			...monologuePubkeys.map((id, index) => ({ id, position: { x: index === 0 ? 6 : 8, y: 1 } }))
+		]));
+		const duration = 60_000;
+		const addMessage = (id: string, pubkey: string, content: string, speechType: SpeechType) => {
+			conversationState = receiveMessage(conversationState, {
+				id, pubkey, content, speechType, createdAt: now
+			}, { isSpeakerVisible: true, duration, now });
+		};
+		addMessage('dev-speech-types-normal', normalPubkey, 'normal fixture', 'normal');
+		addMessage('dev-speech-types-shout-a', shoutPubkeys[0], 'shout fixture', 'shout');
+		addMessage('dev-speech-types-shout-b', shoutPubkeys[1], 'shout fixture', 'shout');
+		addMessage('dev-speech-types-monologue-a', monologuePubkeys[0], 'monologue fixture', 'monologue');
+		addMessage('dev-speech-types-monologue-b', monologuePubkeys[1], 'monologue fixture', 'monologue');
 	}
 
 	function seedDevSpeechNormalSizeFixture(): void {
@@ -1414,13 +1482,24 @@
 			{#each positionedVisibleBubbles as bubble (bubble.id)}
 				<div
 					use:observeBubble={bubble.id}
-					class={`bubble bubble-${bubble.kind} bubble-${bubble.tone} tone-${bubble.tone}`}
+					class={`bubble bubble-${bubble.kind} bubble-${bubble.tone} tone-${bubble.tone}${bubble.speechType !== 'normal' ? ' speech-bubble-special' : ''}`}
 					data-bubble-id={bubble.id}
 					data-bubble-participant-id={bubble.kind === 'normal' ? bubble.speaker.id : undefined}
 					data-merged-members={bubble.kind === 'merged' ? bubble.memberPubkeys.length : undefined}
 					data-speech-type={bubble.speechType}
 					style={`${bubble.kind === 'merged' ? mergedBubbleStyle(bubble.memberPubkeys.length) : ''}; --tail-seam-offset-x: ${bubble.kind === 'normal' ? tailGeometry(tailStart(bubble.anchor, bubble.size), tailTarget(bubble.speaker)).seamOffsetX : 0}px; transform: translate3d(${bubble.anchor.x}px, ${bubble.anchor.y}px, 0);`}
 				>
+					{#if bubble.speechType !== 'normal'}
+						<svg
+							class="bubble-surface"
+							data-speech-surface={bubble.speechType}
+							viewBox={`0 0 ${bubble.size.width} ${bubble.size.height}`}
+							preserveAspectRatio="none"
+							aria-hidden="true"
+						>
+							<path d={createSpeechBubblePath(bubble.speechType, bubble.size.width, bubble.size.height) ?? ''} />
+						</svg>
+					{/if}
 					<span class="bubble-content">{bubble.text}</span>
 					{#if bubbleOverflowById[bubble.id]}
 						<span class="bubble-ellipsis" aria-hidden="true">…</span>
@@ -1467,12 +1546,27 @@
 
 	{#if runtimeMode === 'relay'}
 		<div class="composer-dock" aria-label="Message composer">
-			<HostOwnedComposerLite
-				bind:this={composerComponent}
-				submitContent={submitComposerContent}
-				onEditorEmptyChange={handleComposerEditorEmptyChange}
-				onPreferredHeightChange={setComposerPreferredHeight}
-			/>
+			<div class="composer-dock-content">
+				<button
+					class="speech-type-toggle"
+					type="button"
+					data-speech-type={selectedSpeechType}
+					aria-label={`発言タイプ: ${SPEECH_TYPE_LABELS[selectedSpeechType]}（クリックで${SPEECH_TYPE_LABELS[nextSpeechType(selectedSpeechType)]}へ）`}
+					title={`発言タイプ: ${SPEECH_TYPE_LABELS[selectedSpeechType]}。クリックで${SPEECH_TYPE_LABELS[nextSpeechType(selectedSpeechType)]}へ`}
+					disabled={composerSubmissionInProgress}
+					on:click={cycleSpeechType}
+				>
+					<span aria-hidden="true">{SPEECH_TYPE_LABELS[selectedSpeechType]}</span>
+				</button>
+				<div class="composer-editor-slot">
+					<HostOwnedComposerLite
+						bind:this={composerComponent}
+						submitContent={submitComposerContent}
+						onEditorEmptyChange={handleComposerEditorEmptyChange}
+						onPreferredHeightChange={setComposerPreferredHeight}
+					/>
+				</div>
+			</div>
 		</div>
 	{/if}
 
@@ -1641,9 +1735,56 @@
 		padding-bottom: var(--composer-dock-padding-block);
 	}
 
-	.composer-dock :global(.host-owned-composer) {
+	.composer-dock-content {
+		display: flex;
 		width: min(720px, 100%);
+		height: 100%;
+		align-items: stretch;
+		gap: 8px;
 		margin: 0 auto;
+		min-width: 0;
+	}
+
+	.speech-type-toggle {
+		flex: 0 0 54px;
+		min-width: 0;
+		min-height: 0;
+		padding: 0 4px;
+		border: 1px solid rgba(57, 67, 64, 0.2);
+		border-radius: 12px;
+		background: rgba(255, 255, 255, 0.86);
+		box-shadow: 0 5px 12px rgba(58, 70, 61, 0.1);
+		color: #3f4a47;
+		font-size: 10px;
+		font-weight: 800;
+		line-height: 1.15;
+		white-space: normal;
+	}
+
+	.speech-type-toggle:hover:not(:disabled) {
+		background: rgba(255, 255, 255, 0.98);
+	}
+
+	.speech-type-toggle:disabled {
+		cursor: wait;
+		opacity: 0.58;
+	}
+
+	.speech-type-toggle:focus-visible {
+		outline: 3px solid #6dabb9;
+		outline-offset: 2px;
+	}
+
+	.composer-editor-slot {
+		flex: 1 1 auto;
+		min-width: 0;
+		min-height: 0;
+	}
+
+	.composer-dock-content :global(.host-owned-composer) {
+		width: 100%;
+		height: 100%;
+		min-width: 0;
 	}
 
 	.field-viewport::before {
@@ -1937,7 +2078,33 @@
 		will-change: transform;
 	}
 
+	.speech-bubble-special {
+		background: transparent;
+		border-color: transparent;
+		border-radius: 0;
+	}
+
+	.bubble-surface {
+		position: absolute;
+		inset: -1px;
+		z-index: 0;
+		display: block;
+		width: calc(100% + 2px);
+		height: calc(100% + 2px);
+		overflow: visible;
+		pointer-events: none;
+	}
+
+	.bubble-surface path {
+		fill: var(--tone-background);
+		stroke: var(--tone-outline);
+		stroke-width: 1.5;
+		stroke-linejoin: round;
+	}
+
 	.bubble-content {
+		position: relative;
+		z-index: 1;
 		min-width: 0;
 		max-width: 100%;
 		overflow: hidden;

@@ -305,6 +305,107 @@ test.describe('DEV World Sandbox', () => {
 		expect(await page.locator('.bubble-merged').evaluate((bubble) => getComputedStyle(bubble).borderRadius)).toBe('18px');
 	});
 
+	test('renders normal, shout, and monologue body surfaces while preserving merged tails', async ({ page }) => {
+		await page.goto('/?devWorld=1&devSpeech=types');
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+		await expect(page.locator('.bubble[data-speech-type="normal"]')).toHaveCount(1);
+		await expect(page.locator('.bubble-merged[data-speech-type="shout"]')).toHaveCount(1);
+		await expect(page.locator('.bubble-merged[data-speech-type="monologue"]')).toHaveCount(1);
+		await expect(page.locator('.bubble-merged[data-speech-type="shout"] .bubble-tail-connection')).toHaveCount(2);
+		await expect(page.locator('.bubble-merged[data-speech-type="monologue"] .bubble-tail-connection')).toHaveCount(2);
+		await expect(page.locator('.bubble[data-speech-type="normal"] .bubble-surface')).toHaveCount(0);
+
+		const surfaces = await page.locator('.bubble-surface').evaluateAll((elements) => elements.map((surface) => {
+			const bubble = surface.closest<HTMLElement>('.bubble');
+			const path = surface.querySelector<SVGPathElement>('path');
+			if (!bubble || !path) throw new Error('Expected a speech surface and path.');
+			const colorContext = document.createElement('canvas').getContext('2d');
+			if (!colorContext) throw new Error('Expected a 2D color context.');
+			const resolveColor = (value: string) => {
+				colorContext.fillStyle = value;
+				return colorContext.fillStyle;
+			};
+			const bubbleRect = bubble.getBoundingClientRect();
+			const surfaceRect = surface.getBoundingClientRect();
+			const pathBounds = path.getBBox();
+			const toneBackground = resolveColor(getComputedStyle(bubble).getPropertyValue('--tone-background').trim());
+			const toneOutline = resolveColor(getComputedStyle(bubble).getPropertyValue('--tone-outline').trim());
+			return {
+				type: bubble.dataset.speechType,
+				d: path.getAttribute('d'),
+				fill: resolveColor(getComputedStyle(path).fill),
+				stroke: resolveColor(getComputedStyle(path).stroke),
+				toneBackground,
+				toneOutline,
+				bubbleRect: bubbleRect.toJSON(),
+				surfaceRect: surfaceRect.toJSON(),
+				pathBox: { x: pathBounds.x, y: pathBounds.y, width: pathBounds.width, height: pathBounds.height }
+			};
+		}));
+
+		const shout = surfaces.find((surface) => surface.type === 'shout');
+		const monologue = surfaces.find((surface) => surface.type === 'monologue');
+		expect(shout?.d).toContain('L');
+		expect(shout?.d).not.toContain('Q');
+		expect(monologue?.d).toContain('Q');
+		for (const surface of surfaces) {
+			expect(surface.fill).toBe(surface.toneBackground);
+			expect(surface.stroke).toBe(surface.toneOutline);
+			expect(surface.surfaceRect.width).toBeCloseTo(surface.bubbleRect.width, 1);
+			expect(surface.surfaceRect.height).toBeCloseTo(surface.bubbleRect.height, 1);
+			expect(surface.pathBox.x).toBeGreaterThanOrEqual(0);
+			expect(surface.pathBox.y).toBeGreaterThanOrEqual(0);
+			expect(surface.pathBox.x + surface.pathBox.width).toBeLessThanOrEqual(surface.bubbleRect.width);
+			expect(surface.pathBox.y + surface.pathBox.height).toBeLessThanOrEqual(surface.bubbleRect.height);
+		}
+		expect(await page.locator('.tail-layer polygon')).toHaveCount(5);
+		expect(await page.locator('.tail-layer path')).toHaveCount(5);
+	});
+
+	for (const speechType of ['shout', 'monologue'] as const) {
+		test(`keeps five-line clamping, dynamic size, and safe bounds for ${speechType} bubbles`, async ({ page }) => {
+			await page.setViewportSize({ width: 320, height: 844 });
+			await page.goto(`/?devWorld=1&devSpeech=merged2-${speechType}-long`);
+			await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+			const bubble = page.locator(`.bubble-merged[data-speech-type="${speechType}"]`);
+			await expect(bubble).toHaveCount(1);
+			const state = await bubble.evaluate((element) => {
+				const content = element.querySelector<HTMLElement>('.bubble-content');
+				const surface = element.querySelector<SVGSVGElement>('.bubble-surface');
+				if (!content || !surface) throw new Error('Expected special bubble content and surface.');
+				const contentStyle = getComputedStyle(content);
+				const rect = element.getBoundingClientRect();
+				const surfaceRect = surface.getBoundingClientRect();
+				return {
+					left: rect.left,
+					right: rect.right,
+					width: rect.width,
+					height: rect.height,
+					clientHeight: content.clientHeight,
+					scrollHeight: content.scrollHeight,
+					lineHeight: Number.parseFloat(contentStyle.lineHeight),
+					surfaceWidth: surfaceRect.width,
+					surfaceHeight: surfaceRect.height,
+					ellipsisVisible: (() => {
+						const indicator = element.querySelector<HTMLElement>('.bubble-ellipsis');
+						if (!indicator) return false;
+						const indicatorRect = indicator.getBoundingClientRect();
+						return indicatorRect.width > 0 && indicatorRect.height > 0;
+					})()
+				};
+			});
+			expect(state.left).toBeGreaterThanOrEqual(16);
+			expect(state.right).toBeLessThanOrEqual(304);
+			expect(state.width).toBeGreaterThan(0);
+			expect(state.height).toBeGreaterThan(0);
+			expect(state.scrollHeight).toBeGreaterThan(state.clientHeight);
+			expect(state.clientHeight).toBeLessThanOrEqual(state.lineHeight * 5 + 1);
+			expect(state.surfaceWidth).toBeCloseTo(state.width, 1);
+			expect(state.surfaceHeight).toBeCloseTo(state.height, 1);
+			expect(state.ellipsisVisible).toBe(true);
+		});
+	}
+
 	test('preserves explicit line breaks in normal and merged bubbles without clamping short content', async ({ page }) => {
 		await page.goto('/?devWorld=1&devSpeech=linebreak');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
