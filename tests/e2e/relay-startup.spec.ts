@@ -94,7 +94,7 @@ async function installHostOwnedStub(page: Page): Promise<{ requests: () => numbe
       if ((event.key !== 'Enter' && event.code !== 'NumpadEnter') || event.isComposing || event.shiftKey) return;
       const shortcut = (this.options.submitShortcuts || []).find((candidate) => {
         if (candidate.modifiers.length !== 1) return false;
-        if (candidate.modifiers[0] === 'ctrlOrMeta') return (event.ctrlKey || event.metaKey) && !event.altKey;
+        if (candidate.modifiers[0] === 'ctrlOrMeta') return (event.ctrlKey !== event.metaKey) && !event.altKey;
         if (candidate.modifiers[0] === 'alt') return event.altKey && !event.ctrlKey && !event.metaKey;
         return false;
       });
@@ -522,6 +522,16 @@ test.describe('Relay startup', () => {
 		event = (await publishedMessages(page))[before + 1];
 		expect(event.content).toBe('hello');
 		expect(event.tags).toContainEqual(['l', 'speech:monologue', 'io.github.lokuyow.persona-bubble-field']);
+	});
+
+	test('does not publish Ctrl+Meta+Enter as a ctrlOrMeta speech shortcut', async ({ page }) => {
+		const editor = await openReadyRelayWorld(page);
+		const before = (await publishedMessages(page)).length;
+
+		await editor.fill('both modifiers');
+		await editor.press('Control+Meta+Enter');
+		await expect.poll(async () => (await publishedMessages(page)).length).toBe(before);
+		await expect(editor).toHaveValue('both modifiers');
 	});
 
 	test('keeps command-only content and false-positive slash text instead of publishing an empty command', async ({ page }) => {

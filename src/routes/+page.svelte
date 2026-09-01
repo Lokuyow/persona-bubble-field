@@ -1095,11 +1095,13 @@
 		if (!devWorldSandboxEnabled) return;
 		const now = Date.now();
 		const normalPubkey = 'a'.repeat(64);
+		const specialNormalPubkey = 'f'.repeat(64);
 		const shoutPubkeys = ['b', 'c'].map((prefix) => prefix.repeat(64));
 		const monologuePubkeys = ['d', 'e'].map((prefix) => prefix.repeat(64));
 		setPresence(createPresenceState(FIELD, now, [
 			{ id: DEV_WORLD_SELF_ID, position: { x: 7, y: 3 } },
 			{ id: normalPubkey, position: { x: 4, y: 2 } },
+			{ id: specialNormalPubkey, position: { x: 11, y: 2 } },
 			...shoutPubkeys.map((id, index) => ({ id, position: { x: index === 0 ? 6 : 8, y: 2 } })),
 			...monologuePubkeys.map((id, index) => ({ id, position: { x: index === 0 ? 6 : 8, y: 1 } }))
 		]));
@@ -1110,6 +1112,7 @@
 			}, { isSpeakerVisible: true, duration, now });
 		};
 		addMessage('dev-speech-types-normal', normalPubkey, 'normal fixture', 'normal');
+		addMessage('dev-speech-types-special-normal', specialNormalPubkey, 'special normal fixture', 'shout');
 		addMessage('dev-speech-types-shout-a', shoutPubkeys[0], 'shout fixture', 'shout');
 		addMessage('dev-speech-types-shout-b', shoutPubkeys[1], 'shout fixture', 'shout');
 		addMessage('dev-speech-types-monologue-a', monologuePubkeys[0], 'monologue fixture', 'monologue');
@@ -2084,6 +2087,14 @@
 		border-radius: 0;
 	}
 
+	.speech-bubble-special[data-speech-type='shout'] {
+		--speech-tail-seam-depth: 8px;
+	}
+
+	.speech-bubble-special[data-speech-type='monologue'] {
+		--speech-tail-seam-depth: 14px;
+	}
+
 	.bubble-surface {
 		position: absolute;
 		inset: -1px;
@@ -2133,7 +2144,7 @@
 		left: calc(50% + var(--tail-seam-offset-x, 0px));
 		bottom: -1px;
 		width: 11px;
-		height: 3px;
+		height: calc(3px + var(--speech-tail-seam-depth, 0px));
 		transform: translateX(-50%);
 		background: var(--tone-background);
 		pointer-events: none;
@@ -2159,7 +2170,7 @@
 		position: absolute;
 		bottom: -1px;
 		width: 9px;
-		height: 3px;
+		height: calc(3px + var(--speech-tail-seam-depth, 0px));
 		transform: translateX(calc(-50% + var(--tail-seam-offset-x, 0px)));
 		background: var(--tone-background);
 		pointer-events: none;
