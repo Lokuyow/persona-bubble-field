@@ -1999,7 +1999,7 @@
 
 	.timeline-show-control {
 		position: absolute;
-		top: 84px;
+		top: 16px;
 		left: 16px;
 		z-index: 9;
 		min-height: 38px;
