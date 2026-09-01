@@ -1844,7 +1844,7 @@
 		position: absolute;
 		top: 0;
 		bottom: 0;
-		left: 8px;
+		left: 12px;
 		z-index: 9;
 		display: flex;
 		width: min(320px, calc(100% - 32px));
@@ -1860,7 +1860,7 @@
 		display: flex;
 		align-items: center;
 		justify-content: flex-start;
-		padding: 16px 12px 10px 4px;
+		padding: 16px 12px 10px 0;
 		border-bottom: 1px solid rgba(57, 67, 64, 0.12);
 		flex: 0 0 auto;
 		gap: 12px;
@@ -2001,7 +2001,7 @@
 	.timeline-show-control {
 		position: absolute;
 		top: 16px;
-		left: 16px;
+		left: 12px;
 		z-index: 9;
 		min-height: 44px;
 		padding: 0 13px;
