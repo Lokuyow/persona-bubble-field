@@ -40,7 +40,7 @@ function profileDialog(page: Page) {
 async function openProfile(page: Page): Promise<void> {
 	const timeline = page.getByLabel('Recent message timeline');
 	if (await timeline.isVisible()) await page.getByRole('button', { name: 'Hide recent messages' }).click();
-	await page.locator('.participant[data-self="true"] .participant-profile-trigger').click();
+	await page.locator('[data-self="true"] .participant-profile-trigger').click();
 	await expect(profileDialog(page)).toBeVisible();
 }
 
@@ -378,13 +378,20 @@ async function installVisualAnimationRafMetrics(page: Page): Promise<void> {
 
 async function openReadyRelayWorld(page: Page): Promise<Locator> {
 	await installHostOwnedStub(page);
-	await installDelayedRelay(page);
+	await installDelayedRelay(page, { deferPrimaryEvents: true });
 	await page.goto('/');
 	await expect(page.locator('.composer-dock')).toBeVisible();
 	const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
 	await expect(editor).toBeVisible();
 	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
-	await expect.poll(async () => (await relayState(page)).state.requests.some((request) => AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) && [42, 30078].includes((request.filter.kinds as number[])[0]))).toBe(true);
+	await expect.poll(async () => {
+		const requests = (await relayState(page)).state.requests;
+		return [42, 30078].every((kind) => requests.some((request) =>
+			AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) &&
+			(request.filter.kinds as number[])[0] === kind
+		));
+	}).toBe(true);
+	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimaryEvents(): void } }).__relayStartupTest.releasePrimaryEvents());
 	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
 	await expect(page.locator('.participant')).toHaveCount(2);
 	return editor;
