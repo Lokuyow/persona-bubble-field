@@ -53,6 +53,7 @@ export type WorldReadConnectionStatus =
 
 export type WorldReadBootstrap = Readonly<{
 	messages: readonly ParsedWorldMessage[];
+	timelineMessages: readonly ParsedWorldMessage[];
 	positions: readonly ParsedPositionEvent[];
 	presence: PresenceState;
 	status: WorldReadConnectionStatus;
@@ -81,6 +82,7 @@ export type WorldReadSessionOptions = Readonly<{
 	selfAccount?: AccountSnapshot | null;
 	onPresenceChanged: (presence: PresenceState) => void;
 	onLiveMessage: (message: ParsedWorldMessage, presence: PresenceState) => void;
+	onTimelineMessage?: (message: ParsedWorldMessage) => void;
 	onStatusChanged: (status: WorldReadConnectionStatus) => void;
 	onSelfPositionWriteStateChanged?: (state: SelfPositionWriteState) => void;
 	onSelfMessageAvailabilityChanged?: (state: SelfMessageAvailability) => void;
@@ -120,6 +122,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 	let bootstrapComplete = false;
 	let transport: ReturnType<typeof createNostrRelayTransport> | null = null;
 	let channel: ChannelReference | null = null;
+	let messageSince = 0;
 	let worldPresence: WorldPresenceState = reconstructWorldPresenceState(options.field, [], []);
 	let presence = projectWorldPresenceState(worldPresence, Date.now());
 	let status: WorldReadConnectionStatus = { kind: 'bootstrapping' };
@@ -174,9 +177,11 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 	function applyCanonicalMessage(message: ParsedWorldMessage, nowMs: number): boolean {
 		if (appliedCanonicalMessageEventIds.has(message.id)) return false;
 		appliedCanonicalMessageEventIds.add(message.id);
+		if (!disposed) options.onTimelineMessage?.(message);
+		if (pendingSelfMessage?.id === message.id) pendingSelfMessage.echoConfirmed = true;
+		if (message.createdAt < messageSince) return true;
 		worldPresence = applyWorldPresenceMessage(worldPresence, message);
 		const nextPresence = project(nowMs);
-		if (pendingSelfMessage?.id === message.id) pendingSelfMessage.echoConfirmed = true;
 		if (!disposed) options.onLiveMessage(message, nextPresence);
 		return true;
 	}
@@ -194,6 +199,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 	// It can safely improve the visible field before final EOSE, but it must not
 	// produce conversation or make self writes available before canonical handoff.
 	function applyBootstrapMessage(message: ParsedWorldMessage, nowMs: number): void {
+		if (message.createdAt < messageSince) return;
 		worldPresence = applyWorldPresenceMessage(worldPresence, message);
 		project(nowMs);
 	}
@@ -395,6 +401,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 			emitStatus({ kind: 'bootstrapping' });
 			const nowMs = Date.now();
 			const since = bootstrapSince(nowMs);
+			messageSince = since;
 
 			try {
 				const result = await transport.start({
@@ -408,7 +415,8 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 				});
 				if (disposed) throw new Error('World read session was disposed during startup.');
 
-				worldPresence = reconstructWorldPresenceState(options.field, result.messages, result.positions);
+				const recentMessages = result.messages.filter((message) => message.createdAt >= messageSince);
+				worldPresence = reconstructWorldPresenceState(options.field, recentMessages, result.positions);
 				for (const event of result.messages) appliedCanonicalMessageEventIds.add(event.id);
 				for (const event of result.positions) {
 					appliedCanonicalPositionEventIds.add(event.id);
@@ -418,7 +426,13 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 				const nextPresence = project(Date.now());
 				const issueCount = hasRelayIssue(result);
 				emitStatus(issueCount === 0 ? { kind: 'available' } : { kind: 'degraded', issueCount });
-				return { messages: result.messages, positions: result.positions, presence: nextPresence, status };
+				return {
+					messages: recentMessages,
+					timelineMessages: result.messages,
+					positions: result.positions,
+					presence: nextPresence,
+					status
+				};
 			} catch (error) {
 				if (!disposed) {
 					const message = error instanceof Error ? error.message : 'Relay startup failed.';

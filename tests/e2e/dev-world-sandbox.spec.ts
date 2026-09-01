@@ -167,6 +167,174 @@ test.describe('DEV World Sandbox', () => {
 		await expect(self.locator('img')).toHaveAttribute('src', /characters\/001\.webp$/);
 	});
 
+	test('shows a finite recent-message overlay with semantic colors and existing profile focus restoration', async ({ page }) => {
+		await page.setViewportSize({ width: 1200, height: 1600 });
+		await page.goto('/?devWorld=1&devSpeech=timeline');
+		const timeline = page.getByLabel('Recent message timeline');
+		const visibleEntries = timeline.locator('.timeline-visible-entries .timeline-entry');
+		await expect(timeline).toBeVisible();
+		expect(await visibleEntries.count()).toBeGreaterThan(20);
+		const measurementParity = await visibleEntries.first().evaluate((entry) => {
+			const measurement = document.querySelector<HTMLElement>('.timeline-measurements .timeline-entry');
+			if (!measurement) throw new Error('Expected a matching timeline measurement entry.');
+			return {
+				visibleHeight: entry.getBoundingClientRect().height,
+				measurementHeight: measurement.getBoundingClientRect().height,
+				visibleNames: entry.querySelectorAll('.timeline-name').length,
+				measurementNames: measurement.querySelectorAll('.timeline-name').length
+			};
+		});
+		expect(Math.abs(measurementParity.visibleHeight - measurementParity.measurementHeight)).toBeLessThan(1);
+		expect(measurementParity.visibleNames).toBe(1);
+		expect(measurementParity.measurementNames).toBe(1);
+		await expect(timeline.locator('img')).toHaveCount(0);
+		const presentation = await timeline.evaluate((element) => {
+			const style = getComputedStyle(element);
+			const entries = element.querySelector<HTMLElement>('.timeline-visible-entries');
+			return {
+				backgroundColor: style.backgroundColor,
+				backdropFilter: style.backdropFilter,
+				boxShadow: style.boxShadow,
+				overflowY: entries ? getComputedStyle(entries).overflowY : ''
+			};
+		});
+		expect(presentation).toEqual({
+			backgroundColor: 'rgba(0, 0, 0, 0)',
+			backdropFilter: 'none',
+			boxShadow: 'none',
+			overflowY: 'visible'
+		});
+
+		const timelineOrder = await visibleEntries.evaluateAll((entries) => entries.map((entry) => ({
+			id: entry.getAttribute('data-timeline-event-id'),
+			createdAt: Number(entry.getAttribute('data-timeline-created-at'))
+		})));
+		expect(timelineOrder.every((entry, index) => index === 0 ||
+			entry.createdAt < timelineOrder[index - 1].createdAt ||
+			(entry.createdAt === timelineOrder[index - 1].createdAt &&
+				(entry.id ?? '') > (timelineOrder[index - 1].id ?? '')))).toBe(true);
+		expect(await visibleEntries.locator('.timeline-content').allTextContents()).toContain('same content, different event');
+		await expect(visibleEntries.filter({ hasText: 'line 1' }).locator('.timeline-ellipsis')).toHaveCount(1);
+		await expect(visibleEntries.filter({ hasText: 'same content, different event' }).locator('.timeline-ellipsis')).toHaveCount(0);
+		const shortEntryFlow = await visibleEntries.filter({ hasText: 'timeline message 22' }).first().evaluate((entry) => {
+			const name = entry.querySelector<HTMLElement>('.timeline-name');
+			const content = entry.querySelector<HTMLElement>('.timeline-content');
+			if (!name || !content) throw new Error('Expected an inline timeline name and content.');
+			const contentLine = content.getClientRects()[0];
+			return {
+				nameTop: name.getBoundingClientRect().top,
+				contentTop: contentLine?.top ?? -1,
+				contentTag: content.tagName,
+				textHeight: entry.querySelector<HTMLElement>('.timeline-text')?.clientHeight ?? 0
+			};
+		});
+		expect(Math.abs(shortEntryFlow.nameTop - shortEntryFlow.contentTop)).toBeLessThan(4.5);
+		expect(shortEntryFlow.contentTag).toBe('SPAN');
+		expect(shortEntryFlow.textHeight).toBeLessThan(40);
+		const longEntryFlow = await visibleEntries.filter({ hasText: 'line 1' }).first().locator('.timeline-text').evaluate((text) => ({
+			clientHeight: text.clientHeight,
+			scrollHeight: text.scrollHeight,
+			contentLines: text.querySelector<HTMLElement>('.timeline-content')?.getClientRects().length ?? 0
+		}));
+		expect(longEntryFlow.contentLines).toBeGreaterThan(1);
+		expect(longEntryFlow.scrollHeight).toBeGreaterThan(longEntryFlow.clientHeight);
+		await expect(timeline.locator('.timeline-measurements button.timeline-name')).toHaveCount(0);
+		await expect(timeline.locator('button.timeline-name')).toHaveCount(await visibleEntries.count());
+
+		const activePubkey = 'a'.repeat(64);
+		const outsidePubkey = 'f'.repeat(64);
+		const activeParticipantTone = await page.locator(`[data-participant-id="${activePubkey}"] .avatar`).evaluate((avatar) =>
+			[...avatar.classList].find((className) => className.startsWith('avatar-'))?.slice('avatar-'.length));
+		await expect(timeline.locator(`[data-timeline-pubkey="${activePubkey}"]`).first()).toHaveAttribute('data-timeline-tone', activeParticipantTone ?? '');
+		await expect(timeline.locator(`[data-timeline-pubkey="${outsidePubkey}"]`).first()).toHaveAttribute('data-timeline-tone', 'default');
+
+		const activeName = timeline.locator(`[data-timeline-pubkey="${activePubkey}"] .timeline-name`).first();
+		await expect(activeName).toHaveCSS('text-decoration-line', 'none');
+		await activeName.click();
+		await expect(profileDialog(page)).toBeVisible();
+		await expect(timeline).toBeVisible();
+		await profileDialog(page).getByRole('button', { name: '閉じる' }).click();
+		await expect(activeName).toBeFocused();
+
+		const outsideName = timeline.locator(`[data-timeline-pubkey="${outsidePubkey}"] .timeline-name`).first();
+		await outsideName.click();
+		await expect(profileDialog(page)).toBeVisible();
+		await page.keyboard.press('Escape');
+		await expect(profileDialog(page)).toBeHidden();
+	});
+
+	test('renders only fully fitting entries without a scroll container', async ({ page }) => {
+		await page.setViewportSize({ width: 1200, height: 500 });
+		await page.goto('/?devWorld=1&devSpeech=timeline');
+		const timeline = page.getByLabel('Recent message timeline');
+		const visibleEntries = timeline.locator('.timeline-visible-entries .timeline-entry');
+		await expect.poll(() => visibleEntries.count()).toBeGreaterThan(0);
+		const initialCount = await visibleEntries.count();
+
+		await page.setViewportSize({ width: 1200, height: 1400 });
+		await expect.poll(() => visibleEntries.count()).toBeGreaterThan(initialCount);
+		const expandedCount = await visibleEntries.count();
+
+		await page.setViewportSize({ width: 1200, height: 500 });
+		await expect.poll(() => visibleEntries.count()).toBeLessThan(expandedCount);
+		const layout = await page.evaluate(() => {
+			const container = document.querySelector<HTMLElement>('.timeline-visible-entries');
+			if (!container) throw new Error('Expected the visible timeline container.');
+			const containerRect = container.getBoundingClientRect();
+			return {
+				overflowY: getComputedStyle(container).overflowY,
+				scrollTop: container.scrollTop,
+				scrollHeight: container.scrollHeight,
+				clientHeight: container.clientHeight,
+				entryBottoms: [...container.querySelectorAll<HTMLElement>('.timeline-entry')].map((entry) => entry.getBoundingClientRect().bottom),
+				interactiveCount: container.querySelectorAll('button.timeline-name').length,
+				measurementInteractiveCount: document.querySelectorAll('.timeline-measurements button.timeline-name').length,
+				containerBottom: containerRect.bottom
+			};
+		});
+		expect(layout.overflowY).toBe('visible');
+		expect(layout.scrollTop).toBe(0);
+		expect(layout.scrollHeight).toBeGreaterThanOrEqual(layout.clientHeight);
+		expect(layout.interactiveCount).toBe(await visibleEntries.count());
+		expect(layout.measurementInteractiveCount).toBe(0);
+	});
+
+	test('starts closed on mobile, preserves manual show/hide through resize, and leaves field geometry unchanged', async ({ page }) => {
+		await page.setViewportSize({ width: 390, height: 844 });
+		await page.goto('/?devWorld=1&devSpeech=timeline');
+		const timeline = page.getByLabel('Recent message timeline');
+		const show = page.getByRole('button', { name: 'Show recent messages' });
+		await expect(timeline).toBeHidden();
+		await expect(show).toBeVisible();
+
+		const before = await page.evaluate(() => ({
+			field: document.querySelector<HTMLElement>('.field-area')!.getBoundingClientRect().toJSON(),
+			scene: getComputedStyle(document.querySelector<HTMLElement>('.field-scene')!).transform,
+			participants: [...document.querySelectorAll<HTMLElement>('.participant')].map((participant) => participant.getBoundingClientRect().toJSON())
+		}));
+		await show.click();
+		await expect(timeline).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Hide recent messages' })).toBeVisible();
+		await page.getByRole('button', { name: 'Hide recent messages' }).click();
+		await expect(timeline).toBeHidden();
+		const afterMobileHide = await page.evaluate(() => ({
+			field: document.querySelector<HTMLElement>('.field-area')!.getBoundingClientRect().toJSON(),
+			scene: getComputedStyle(document.querySelector<HTMLElement>('.field-scene')!).transform,
+			participants: [...document.querySelectorAll<HTMLElement>('.participant')].map((participant) => participant.getBoundingClientRect().toJSON())
+		}));
+		expect(afterMobileHide.field).toEqual(before.field);
+		expect(afterMobileHide.scene).toBe(before.scene);
+		expect(afterMobileHide.participants).toEqual(before.participants);
+		await page.setViewportSize({ width: 1200, height: 900 });
+		await expect(timeline).toBeHidden();
+		await expect(show).toBeVisible();
+		await show.click();
+		await expect(timeline).toBeVisible();
+
+		await page.setViewportSize({ width: 390, height: 844 });
+		await expect(timeline).toBeVisible();
+	});
+
 	test('uses the prototype park background beneath the field grid', async ({ page }) => {
 		await openDevWorld(page);
 

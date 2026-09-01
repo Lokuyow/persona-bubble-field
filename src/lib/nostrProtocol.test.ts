@@ -6,11 +6,13 @@ import {
 	POSITION_KIND,
 	POSITION_SLOT_IDENTIFIERS,
 	PROTOTYPE_NAMESPACE,
+	RECENT_MESSAGE_TIMELINE_LIMIT,
 	buildPositionEventTemplate,
 	buildCharacterProfileTemplate,
 	buildPositionFilter,
 	buildTraceMessageFilter,
 	buildWorldMessageFilter,
+	buildWorldMessageFilters,
 	buildWorldMessageTemplate,
 	finalizeWorldEvent,
 	finalizeCharacterProfileEvent,
@@ -449,6 +451,22 @@ describe('Nostr protocol foundation', () => {
 			'#l': ['chat'],
 			since: 1_700_000_000
 		});
+		expect(buildWorldMessageFilters({ channelId: CHANNEL_ID, since: 1_700_000_000 })).toEqual([
+			{
+				kinds: [42],
+				'#e': [CHANNEL_ID],
+				'#L': [PROTOTYPE_NAMESPACE],
+				'#l': ['chat'],
+				since: 1_700_000_000
+			},
+			{
+				kinds: [42],
+				'#e': [CHANNEL_ID],
+				'#L': [PROTOTYPE_NAMESPACE],
+				'#l': ['chat'],
+				limit: RECENT_MESSAGE_TIMELINE_LIMIT
+			}
+		]);
 		expect(buildPositionFilter({ channelId: CHANNEL_ID, since: 1_700_000_100 })).toEqual({
 			kinds: [30078],
 			'#d': [...POSITION_SLOT_IDENTIFIERS],

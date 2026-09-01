@@ -48,6 +48,7 @@ function startResult(messages: readonly ParsedWorldMessage[] = [], positions: re
 			channel: { channelId: 'c'.repeat(64), relayHint: 'wss://relay.test/' }
 		},
 		messages,
+		timelineMessages: messages,
 		positions,
 		metadataDiscovery: { relays: [{ relayUrl: 'ws://relay.test/', status: 'eose' }] },
 		primaryPairs: statuses.map((status) => ({ relayUrl: 'ws://relay.test/', subscription: 'world-messages', status })),
@@ -105,6 +106,36 @@ describe('world read session', () => {
 		]);
 		expect(presences.at(-1)).toBe(1);
 		expect(publish).not.toHaveBeenCalled();
+	});
+
+	it('keeps history in the timeline while excluding it from presence and recent bootstrap messages', async () => {
+		const old = { ...message('old-history', 39), pubkey: 'b'.repeat(64) };
+		const recent = message('recent-message', 40);
+		result = startResult([old, recent]);
+		const timeline = vi.fn();
+		const presence = vi.fn();
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 },
+			onPresenceChanged: presence,
+			onLiveMessage: vi.fn(),
+			onTimelineMessage: timeline,
+			onStatusChanged: vi.fn()
+		});
+
+		const bootstrap = await session.start();
+
+		expect(bootstrap.messages).toEqual([recent]);
+		expect(bootstrap.timelineMessages).toEqual([old, recent]);
+		expect(bootstrap.presence.participants.map((participant) => participant.id)).toEqual([alice]);
+		expect(timeline).not.toHaveBeenCalled();
+
+		const oldReconnect = { ...old, id: 'old-history-reconnect' };
+		input!.onLiveMessage(oldReconnect);
+		input!.onLiveMessage(oldReconnect);
+		session.completeBootstrap();
+
+		expect(timeline).toHaveBeenCalledExactlyOnceWith(oldReconnect);
+		expect(session.refresh(700_000).participants.map((participant) => participant.id)).toEqual([alice]);
 	});
 
 	it('delegates pre-signed publication to the started transport without changing world status on failure', async () => {

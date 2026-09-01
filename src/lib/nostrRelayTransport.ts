@@ -16,13 +16,14 @@ import { verifyEvent, type Event, type VerifiedEvent } from 'nostr-tools/pure';
 import {
 	buildPositionFilter,
 	buildTraceMessageFilter,
-	buildWorldMessageFilter,
+	buildWorldMessageFilters,
 	parsePositionEvent,
 	parseWorldMessage,
 	type ParsedPositionEvent,
 	type ParsedWorldMessage,
 	POSITION_SLOT_IDENTIFIERS,
-	PROTOTYPE_NAMESPACE
+	PROTOTYPE_NAMESPACE,
+	RECENT_MESSAGE_TIMELINE_LIMIT
 } from './nostrProtocol';
 import { resolveChannelMetadata, type ResolvedChannelMetadata } from './nostrChannelMetadata';
 import type { PrototypeWorldConfig } from './prototypeWorld';
@@ -163,20 +164,29 @@ function classifyPrimaryFilter(
 	channelId: string,
 	positionSlots: readonly string[]
 ): LogicalPrimarySubscription | null {
+	const isMessageFilter = (candidate: unknown, kind: 'recent' | 'history'): boolean => {
+		const entries = filterEntries(candidate);
+		if (!entries) return false;
+		const filter = Object.fromEntries(entries) as Record<string, unknown>;
+		const allowedKeys = new Set(['kinds', '#e', '#L', '#l', kind === 'recent' ? 'since' : 'limit']);
+		if (!entries.every(([key]) => allowedKeys.has(key)) ||
+			!hasExactly(filter.kinds, [42]) ||
+			!hasExactly(filter['#e'], [channelId]) ||
+			!hasExactly(filter['#L'], [PROTOTYPE_NAMESPACE]) ||
+			!hasExactly(filter['#l'], ['chat'])) return false;
+		if (kind === 'recent') return Number.isSafeInteger(filter.since) && (filter.since as number) >= 0;
+		return filter.limit === RECENT_MESSAGE_TIMELINE_LIMIT;
+	};
+
+	if (filters.length === 2 &&
+		filters.some((filter) => isMessageFilter(filter, 'recent')) &&
+		filters.some((filter) => isMessageFilter(filter, 'history'))) return 'world-messages';
+
 	if (filters.length !== 1) return null;
 	const entries = filterEntries(filters[0]);
 	if (!entries) return null;
 	const filter = Object.fromEntries(entries) as Record<string, unknown>;
 	if (!Number.isSafeInteger(filter.since) || (filter.since as number) < 0) return null;
-
-	const allowedMessageKeys = new Set(['kinds', '#e', '#L', '#l', 'since']);
-	const isMessage = entries.every(([key]) => allowedMessageKeys.has(key)) &&
-		hasExactly(filter.kinds, [42]) &&
-		hasExactly(filter['#e'], [channelId]) &&
-		hasExactly(filter['#L'], [PROTOTYPE_NAMESPACE]) &&
-		hasExactly(filter['#l'], ['chat']);
-	if (isMessage) return 'world-messages';
-
 	const allowedPositionKeys = new Set(['kinds', '#e', '#d', 'since']);
 	const isPosition = entries.every(([key]) => allowedPositionKeys.has(key)) &&
 		hasExactly(filter.kinds, [30078]) &&
@@ -540,7 +550,7 @@ export function createNostrRelayTransport(
 				}
 				finish();
 			}, timeoutMs);
-			messageRequest.emit(buildWorldMessageFilter({ channelId: metadata!.channelId, since: startInput!.messageSince }));
+			messageRequest.emit(buildWorldMessageFilters({ channelId: metadata!.channelId, since: startInput!.messageSince }));
 			positionRequest.emit(buildPositionFilter({ channelId: metadata!.channelId, since: startInput!.positionSince }));
 			for (const relayUrl of metadata!.relays) {
 				const connection = client.getRelayStatus(relayUrl)?.connection;
