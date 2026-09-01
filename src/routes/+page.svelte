@@ -1580,7 +1580,11 @@
 								<Avatar.Image src={asset(`/${participant.character.picture}`)} alt="" />
 								<Avatar.Fallback>{participant.character.name.slice(0, 1)}</Avatar.Fallback>
 							</Avatar.Root>
-							<span class="participant-name" aria-hidden="true">{participant.character.name}</span>
+							<span
+								class={`participant-name${participant.id === selfProjectionId ? ' participant-name-self' : ''}`}
+								aria-hidden="true"
+							>{participant.character.name}</span
+							>
 						</button>
 					</div>
 				{/each}
@@ -2249,6 +2253,11 @@
 		@media (max-width: 700px) {
 			font-size: 8px;
 		}
+	}
+
+	.participant-name-self {
+		border: 2px solid #d14949;
+		font-weight: 800;
 	}
 
 	.tail-layer,

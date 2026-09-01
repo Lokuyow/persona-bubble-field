@@ -736,6 +736,10 @@ test.describe('DEV World Sandbox', () => {
 		await expect(mergedBubble.locator('.bubble-tail-connection')).toHaveCount(2);
 		await expect(page.locator('.tail-layer polygon')).toHaveCount(10);
 		await expect(page.locator('.tail-layer path')).toHaveCount(10);
+		await expect(page.locator('.participant[data-self="true"] .participant-name')).toHaveCount(1);
+		await expect(page.locator('.participant:not([data-self="true"]) .participant-name-self')).toHaveCount(0);
+		await expect(page.locator('.participant[data-self="true"] .participant-name')).toHaveCSS('border-top-width', '2px');
+		await expect(page.locator('.participant[data-self="true"] .participant-name')).toHaveCSS('font-weight', '800');
 
 		const colorState = await page.locator('.bubble-layer').evaluate(() => {
 			const participants = [...document.querySelectorAll<HTMLElement>('.participant')];
