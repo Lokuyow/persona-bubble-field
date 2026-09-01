@@ -552,6 +552,24 @@
 			}, 500);
 		};
 		const handleKeydown = (event: KeyboardEvent) => {
+			if (
+				timelineInitialized &&
+				event.key.toLowerCase() === 'c' &&
+				!event.repeat &&
+				!event.isComposing &&
+				!event.shiftKey &&
+				!event.ctrlKey &&
+				!event.altKey &&
+				!event.metaKey &&
+				!document.querySelector('.profile-dialog-content') &&
+				!event.composedPath().some((target) => target instanceof HTMLElement && (
+					target.matches('input, textarea, select') || target.isContentEditable
+				))
+			) {
+				timelineOpen = !timelineOpen;
+				event.preventDefault();
+				return;
+			}
 			if (event.code === 'Escape' && isComposerEditorKeyboardEvent(event) && !event.isComposing) {
 				if (composerComponent?.blurEditor()) event.preventDefault();
 				return;
@@ -1470,15 +1488,16 @@
 		>
 		</div>
 		{#if timelineInitialized && timelineOpen}
-			<aside class="recent-message-timeline" aria-label="Recent message timeline">
+			<aside class="recent-message-timeline" aria-label="Chatter">
 				<header class="timeline-header">
 					<button
 						class="timeline-hide-control"
 						type="button"
-						aria-label="Hide recent messages"
+						aria-label="Hide Chatter"
+						aria-keyshortcuts="C"
 						on:click={hideRecentMessageTimeline}
 					>×</button>
-					<h2>Recent messages</h2>
+					<h2>Chatter</h2>
 				</header>
 				<div class="timeline-visible-entries" use:observeTimelineVisibleArea>
 					{#each timelineVisibleMessages as message (message.id)}
@@ -1527,9 +1546,10 @@
 			<button
 				class="timeline-show-control"
 				type="button"
-				aria-label="Show recent messages"
+				aria-label="Show Chatter"
+				aria-keyshortcuts="C"
 				on:click={showRecentMessageTimeline}
-			>Recent messages</button>
+			>Chatter</button>
 		{/if}
 		<div
 			class="field-area"

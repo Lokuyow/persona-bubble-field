@@ -37,8 +37,8 @@ function profileDialog(page: Page) {
 }
 
 async function openProfile(page: Page): Promise<void> {
-	const timeline = page.getByLabel('Recent message timeline');
-	if (await timeline.isVisible()) await page.getByRole('button', { name: 'Hide recent messages' }).click();
+	const timeline = page.getByLabel('Chatter', { exact: true });
+	if (await timeline.isVisible()) await page.getByRole('button', { name: 'Hide Chatter' }).click();
 	await page.locator('[data-self="true"] .participant-profile-trigger').click();
 	await expect(profileDialog(page)).toBeVisible();
 }
@@ -521,13 +521,13 @@ test.describe('Relay startup', () => {
 		)).toBe(true);
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
 		await expect(page.locator('.participant')).toHaveCount(2);
-		await expect(page.getByLabel('Recent message timeline')).toBeVisible();
+		await expect(page.locator('aside.recent-message-timeline')).toBeVisible();
 		const visibleTimeline = page.locator('.timeline-visible-entries .timeline-entry');
 		const beforeHiddenIds = await visibleTimeline.evaluateAll((entries) => entries.map((entry) => entry.getAttribute('data-timeline-event-id')));
-		await page.getByRole('button', { name: 'Hide recent messages' }).click();
-		await expect(page.getByLabel('Recent message timeline')).toBeHidden();
+		await page.getByRole('button', { name: 'Hide Chatter' }).click();
+		await expect(page.locator('aside.recent-message-timeline')).toBeHidden();
 		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectMessage(event: object): void } }).__relayStartupTest.injectMessage(event), liveMessage);
-		await page.getByRole('button', { name: 'Show recent messages' }).click();
+		await page.getByRole('button', { name: 'Show Chatter' }).click();
 		await expect(page.locator(`[data-timeline-event-id="${liveMessage.id}"]`)).toHaveCount(1);
 		const afterShownIds = await visibleTimeline.evaluateAll((entries) => entries.map((entry) => entry.getAttribute('data-timeline-event-id')));
 		expect(afterShownIds.some((id) => !beforeHiddenIds.includes(id))).toBe(true);
@@ -864,9 +864,9 @@ test.describe('Relay startup', () => {
 
 		await editor.fill('');
 		await editor.focus();
-		for (const key of ['w', 'a', 's', 'd', 'n']) await page.keyboard.press(key);
+		for (const key of ['w', 'a', 's', 'd', 'n', 'c']) await page.keyboard.press(key);
 		await expect(self).toHaveAttribute('data-position', before ?? '');
-		await expect(editor).toHaveValue('wasdn');
+		await expect(editor).toHaveValue('wasdnc');
 	});
 
 	test('does not intercept Composer shortcuts while a profile dialog is open', async ({ page }) => {
