@@ -83,6 +83,7 @@
 	const MOVEMENT_ANIMATION_DURATION_MS = 400;
 	const MOVEMENT_DIRECTIONS: readonly Direction[] = ['up', 'down', 'left', 'right'];
 	const INITIAL_COMPOSER_PREFERRED_HEIGHT = 50;
+	const SPECIAL_TAIL_BODY_EXTENSION = 26;
 	const SPEECH_TYPE_ORDER: readonly SpeechType[] = ['normal', 'shout', 'monologue'];
 	const SPEECH_TYPE_LABELS: Readonly<Record<SpeechType, string>> = {
 		normal: '通常',
@@ -1095,13 +1096,15 @@
 		if (!devWorldSandboxEnabled) return;
 		const now = Date.now();
 		const normalPubkey = 'a'.repeat(64);
-		const specialNormalPubkey = 'f'.repeat(64);
+		const singleShoutPubkey = 'f'.repeat(64);
+		const singleMonologuePubkey = '9'.repeat(64);
 		const shoutPubkeys = ['b', 'c'].map((prefix) => prefix.repeat(64));
 		const monologuePubkeys = ['d', 'e'].map((prefix) => prefix.repeat(64));
 		setPresence(createPresenceState(FIELD, now, [
 			{ id: DEV_WORLD_SELF_ID, position: { x: 7, y: 3 } },
 			{ id: normalPubkey, position: { x: 4, y: 2 } },
-			{ id: specialNormalPubkey, position: { x: 11, y: 2 } },
+			{ id: singleShoutPubkey, position: { x: 11, y: 2 } },
+			{ id: singleMonologuePubkey, position: { x: 11, y: 1 } },
 			...shoutPubkeys.map((id, index) => ({ id, position: { x: index === 0 ? 6 : 8, y: 2 } })),
 			...monologuePubkeys.map((id, index) => ({ id, position: { x: index === 0 ? 6 : 8, y: 1 } }))
 		]));
@@ -1112,7 +1115,8 @@
 			}, { isSpeakerVisible: true, duration, now });
 		};
 		addMessage('dev-speech-types-normal', normalPubkey, 'normal fixture', 'normal');
-		addMessage('dev-speech-types-special-normal', specialNormalPubkey, 'special normal fixture', 'shout');
+		addMessage('dev-speech-types-single-shout', singleShoutPubkey, 'single shout fixture', 'shout');
+		addMessage('dev-speech-types-single-monologue', singleMonologuePubkey, 'single monologue fixture', 'monologue');
 		addMessage('dev-speech-types-shout-a', shoutPubkeys[0], 'shout fixture', 'shout');
 		addMessage('dev-speech-types-shout-b', shoutPubkeys[1], 'shout fixture', 'shout');
 		addMessage('dev-speech-types-monologue-a', monologuePubkeys[0], 'monologue fixture', 'monologue');
@@ -1354,7 +1358,7 @@
 		};
 	}
 
-	function tailGeometry(start: WorldPoint, target: WorldPoint, width = 11, overlap = 2) {
+	function tailGeometry(start: WorldPoint, target: WorldPoint, width = 11, overlap = 2, bodyExtension = 0) {
 		const dx = target.x - start.x;
 		const dy = target.y - start.y;
 		const length = Math.hypot(dx, dy) || 1;
@@ -1365,14 +1369,45 @@
 		const baseCenter = { x: start.x - ux * overlap, y: start.y - uy * overlap };
 		const left = { x: baseCenter.x + px, y: baseCenter.y + py };
 		const right = { x: baseCenter.x - px, y: baseCenter.y - py };
+		const extendIntoBody = (point: WorldPoint): WorldPoint => ({
+			x: point.x + (point.x - target.x) / length * bodyExtension,
+			y: point.y + (point.y - target.y) / length * bodyExtension
+		});
+		const rootLeft = extendIntoBody(left);
+		const rootRight = extendIntoBody(right);
 		const seamProgress = Math.min(1, Math.max(0, (start.y - baseCenter.y) / (target.y - baseCenter.y || 1)));
 		const seamCenterX = baseCenter.x + (target.x - baseCenter.x) * seamProgress;
 
 		return {
-			points: `${left.x},${left.y} ${right.x},${right.y} ${target.x},${target.y}`,
-			outlinePath: `M ${left.x} ${left.y} L ${target.x} ${target.y} L ${right.x} ${right.y}`,
+			points: `${rootLeft.x},${rootLeft.y} ${rootRight.x},${rootRight.y} ${target.x},${target.y}`,
+			outlinePath: `M ${rootLeft.x} ${rootLeft.y} L ${target.x} ${target.y} L ${rootRight.x} ${rootRight.y}`,
+			rootLeft,
+			rootRight,
+			target,
 			seamOffsetX: seamCenterX - start.x
 		};
+	}
+
+	function specialTailExtension(speechType: SpeechType): number {
+		return speechType === 'normal' ? 0 : SPECIAL_TAIL_BODY_EXTENSION;
+	}
+
+	function bubbleSurfacePoint(point: WorldPoint, anchor: WorldPoint, size: Size): WorldPoint {
+		return {
+			x: (point.x - anchor.x + 1) * size.width / (size.width + 2),
+			y: (point.y - anchor.y + 1) * size.height / (size.height + 2)
+		};
+	}
+
+	function tailOutlineOpeningPoints(tail: ReturnType<typeof tailGeometry>, anchor: WorldPoint, size: Size): string {
+		return [tail.rootLeft, tail.rootRight, tail.target]
+			.map((point) => bubbleSurfacePoint(point, anchor, size))
+			.map((point) => `${point.x},${point.y}`)
+			.join(' ');
+	}
+
+	function speechOutlineMaskId(bubbleId: string): string {
+		return `speech-tail-opening-${bubbleId.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
 	}
 </script>
 
@@ -1466,7 +1501,7 @@
 			{#each positionedNormalBubbles as bubble (bubble.id)}
 				{@const start = tailStart(bubble.anchor, bubble.size)}
 				{@const target = tailTarget(bubble.speaker)}
-				{@const tail = tailGeometry(start, target)}
+				{@const tail = tailGeometry(start, target, 11, 2, specialTailExtension(bubble.speechType))}
 				<polygon class={`tail tail-${bubble.tone} tone-${bubble.tone}`} data-tail-participant-id={bubble.speaker.id} points={tail.points} />
 				<path class={`tail-outline tone-${bubble.tone}`} data-tail-participant-id={bubble.speaker.id} d={tail.outlinePath} />
 			{/each}
@@ -1474,7 +1509,7 @@
 				{#each bubble.members as member, index (member.id)}
 					{@const start = mergedTailStart(bubble.anchor, bubble.size, index, bubble.members.length)}
 					{@const target = tailTarget(member)}
-					{@const tail = tailGeometry(start, target, 9, 2)}
+					{@const tail = tailGeometry(start, target, 9, 2, specialTailExtension(bubble.speechType))}
 					<polygon class={`tail tail-${bubble.tone} tone-${bubble.tone}`} data-tail-participant-id={member.id} points={tail.points} />
 					<path class={`tail-outline tone-${bubble.tone}`} data-tail-participant-id={member.id} d={tail.outlinePath} />
 				{/each}
@@ -1493,6 +1528,7 @@
 					style={`${bubble.kind === 'merged' ? mergedBubbleStyle(bubble.memberPubkeys.length) : ''}; --tail-seam-offset-x: ${bubble.kind === 'normal' ? tailGeometry(tailStart(bubble.anchor, bubble.size), tailTarget(bubble.speaker)).seamOffsetX : 0}px; transform: translate3d(${bubble.anchor.x}px, ${bubble.anchor.y}px, 0);`}
 				>
 					{#if bubble.speechType !== 'normal'}
+						{@const outlineMaskId = speechOutlineMaskId(bubble.id)}
 						<svg
 							class="bubble-surface"
 							data-speech-surface={bubble.speechType}
@@ -1500,14 +1536,31 @@
 							preserveAspectRatio="none"
 							aria-hidden="true"
 						>
-							<path d={createSpeechBubblePath(bubble.speechType, bubble.size.width, bubble.size.height) ?? ''} />
+							<defs>
+								<mask id={outlineMaskId} maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x="0" y="0" width={bubble.size.width} height={bubble.size.height}>
+									<rect x="0" y="0" width={bubble.size.width} height={bubble.size.height} fill="white" />
+									{#if bubble.kind === 'normal'}
+										{@const start = tailStart(bubble.anchor, bubble.size)}
+										{@const tail = tailGeometry(start, tailTarget(bubble.speaker), 11, 2, SPECIAL_TAIL_BODY_EXTENSION)}
+										<polygon data-tail-opening={bubble.speaker.id} points={tailOutlineOpeningPoints(tail, bubble.anchor, bubble.size)} fill="black" />
+									{:else}
+										{#each bubble.members as member, index (member.id)}
+											{@const start = mergedTailStart(bubble.anchor, bubble.size, index, bubble.members.length)}
+											{@const tail = tailGeometry(start, tailTarget(member), 9, 2, SPECIAL_TAIL_BODY_EXTENSION)}
+											<polygon data-tail-opening={member.id} points={tailOutlineOpeningPoints(tail, bubble.anchor, bubble.size)} fill="black" />
+										{/each}
+									{/if}
+								</mask>
+							</defs>
+							<path class="bubble-surface-fill" d={createSpeechBubblePath(bubble.speechType, bubble.size.width, bubble.size.height) ?? ''} />
+							<path class="bubble-surface-outline" d={createSpeechBubblePath(bubble.speechType, bubble.size.width, bubble.size.height) ?? ''} mask={`url(#${outlineMaskId})`} />
 						</svg>
 					{/if}
 					<span class="bubble-content">{bubble.text}</span>
 					{#if bubbleOverflowById[bubble.id]}
 						<span class="bubble-ellipsis" aria-hidden="true">…</span>
 					{/if}
-					{#if bubble.kind === 'merged'}
+					{#if bubble.kind === 'merged' && bubble.speechType === 'normal'}
 						{#each bubble.members as member, index (member.id)}
 							<span
 								class="bubble-tail-connection"
@@ -2087,12 +2140,8 @@
 		border-radius: 0;
 	}
 
-	.speech-bubble-special[data-speech-type='shout'] {
-		--speech-tail-seam-depth: 8px;
-	}
-
-	.speech-bubble-special[data-speech-type='monologue'] {
-		--speech-tail-seam-depth: 14px;
+	.speech-bubble-special.bubble-normal::after {
+		content: none;
 	}
 
 	.bubble-surface {
@@ -2106,10 +2155,15 @@
 		pointer-events: none;
 	}
 
-	.bubble-surface path {
+	.bubble-surface-fill {
 		fill: var(--tone-background);
+	}
+
+	.bubble-surface-outline {
+		fill: none;
 		stroke: var(--tone-outline);
-		stroke-width: 1.5;
+		stroke-width: 1;
+		stroke-linecap: round;
 		stroke-linejoin: round;
 	}
 
@@ -2144,7 +2198,7 @@
 		left: calc(50% + var(--tail-seam-offset-x, 0px));
 		bottom: -1px;
 		width: 11px;
-		height: calc(3px + var(--speech-tail-seam-depth, 0px));
+		height: 3px;
 		transform: translateX(-50%);
 		background: var(--tone-background);
 		pointer-events: none;
@@ -2170,7 +2224,7 @@
 		position: absolute;
 		bottom: -1px;
 		width: 9px;
-		height: calc(3px + var(--speech-tail-seam-depth, 0px));
+		height: 3px;
 		transform: translateX(calc(-50% + var(--tail-seam-offset-x, 0px)));
 		background: var(--tone-background);
 		pointer-events: none;

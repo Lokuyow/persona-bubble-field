@@ -243,6 +243,8 @@ message subscription、position subscription、`EOSE`、再接続等の詳細な
 fillは現在のbubble tone background、outlineは現在のspeaker tone outlineを使用する。
 3種類とも現在のtail geometryを共有し、type別のtailは追加しない。合体フキダシも元の
 発言タイプのbody silhouetteを維持する。
+叫び・モノローグでもbodyとtailはfillとoutlineを連続した一つのフキダシとして見せ、tail rootに
+body outlineの横切り、gap、二重線を残さない。
 
 発言タイプによってfont、size、paddingの意味論、最大5表示行、display duration、visibility、
 range、max widthの製品ルール、merge巨大化ルール、animationを変更しない。

@@ -305,22 +305,24 @@ test.describe('DEV World Sandbox', () => {
 		expect(await page.locator('.bubble-merged').evaluate((bubble) => getComputedStyle(bubble).borderRadius)).toBe('18px');
 	});
 
-	test('renders normal, shout, and monologue body surfaces while preserving merged tails', async ({ page }) => {
+	test('renders burst and cloud surfaces with outline-continuous special tails', async ({ page }) => {
 		await page.goto('/?devWorld=1&devSpeech=types');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 		await expect(page.locator('.bubble[data-speech-type="normal"]')).toHaveCount(1);
 		await expect(page.locator('.bubble-normal[data-speech-type="shout"]')).toHaveCount(1);
+		await expect(page.locator('.bubble-normal[data-speech-type="monologue"]')).toHaveCount(1);
 		await expect(page.locator('.bubble-merged[data-speech-type="shout"]')).toHaveCount(1);
 		await expect(page.locator('.bubble-merged[data-speech-type="monologue"]')).toHaveCount(1);
 		await expect(page.locator('.bubble-normal[data-speech-type="shout"] .bubble-surface')).toHaveCount(1);
-		await expect(page.locator('.bubble-merged[data-speech-type="shout"] .bubble-tail-connection')).toHaveCount(2);
-		await expect(page.locator('.bubble-merged[data-speech-type="monologue"] .bubble-tail-connection')).toHaveCount(2);
+		await expect(page.locator('.bubble-normal[data-speech-type="monologue"] .bubble-surface')).toHaveCount(1);
+		await expect(page.locator('.bubble[data-speech-type]:not([data-speech-type="normal"]) .bubble-tail-connection')).toHaveCount(0);
 		await expect(page.locator('.bubble[data-speech-type="normal"] .bubble-surface')).toHaveCount(0);
 
 		const surfaces = await page.locator('.bubble-surface').evaluateAll((elements) => elements.map((surface) => {
 			const bubble = surface.closest<HTMLElement>('.bubble');
-			const path = surface.querySelector<SVGPathElement>('path');
-			if (!bubble || !path) throw new Error('Expected a speech surface and path.');
+			const fill = surface.querySelector<SVGPathElement>('.bubble-surface-fill');
+			const outline = surface.querySelector<SVGPathElement>('.bubble-surface-outline');
+			if (!bubble || !fill || !outline) throw new Error('Expected separated speech fill and outline paths.');
 			const colorContext = document.createElement('canvas').getContext('2d');
 			if (!colorContext) throw new Error('Expected a 2D color context.');
 			const resolveColor = (value: string) => {
@@ -329,14 +331,15 @@ test.describe('DEV World Sandbox', () => {
 			};
 			const bubbleRect = bubble.getBoundingClientRect();
 			const surfaceRect = surface.getBoundingClientRect();
-			const pathBounds = path.getBBox();
+			const pathBounds = fill.getBBox();
 			const toneBackground = resolveColor(getComputedStyle(bubble).getPropertyValue('--tone-background').trim());
 			const toneOutline = resolveColor(getComputedStyle(bubble).getPropertyValue('--tone-outline').trim());
 			return {
 				type: bubble.dataset.speechType,
-				d: path.getAttribute('d'),
-				fill: resolveColor(getComputedStyle(path).fill),
-				stroke: resolveColor(getComputedStyle(path).stroke),
+				d: fill.getAttribute('d'),
+				fill: resolveColor(getComputedStyle(fill).fill),
+				stroke: resolveColor(getComputedStyle(outline).stroke),
+				strokeWidth: getComputedStyle(outline).strokeWidth,
 				toneBackground,
 				toneOutline,
 				bubbleRect: bubbleRect.toJSON(),
@@ -345,14 +348,16 @@ test.describe('DEV World Sandbox', () => {
 			};
 		}));
 
-		const shout = surfaces.find((surface) => surface.type === 'shout');
-		const monologue = surfaces.find((surface) => surface.type === 'monologue');
-		expect(shout?.d).toContain('L');
-		expect(shout?.d).not.toContain('Q');
-		expect(monologue?.d).toContain('Q');
+		const shouts = surfaces.filter((surface) => surface.type === 'shout');
+		const monologues = surfaces.filter((surface) => surface.type === 'monologue');
+		expect(shouts).toHaveLength(2);
+		expect(monologues).toHaveLength(2);
+		expect(shouts.every((surface) => (surface.d?.match(/\bL\s/g)?.length ?? 0) >= 23 && !surface.d?.includes('Q'))).toBe(true);
+		expect(monologues.every((surface) => (surface.d?.match(/\bC\s/g)?.length ?? 0) >= 10 && !surface.d?.includes('L'))).toBe(true);
 		for (const surface of surfaces) {
 			expect(surface.fill).toBe(surface.toneBackground);
 			expect(surface.stroke).toBe(surface.toneOutline);
+			expect(surface.strokeWidth).toBe('1px');
 			expect(surface.surfaceRect.width).toBeCloseTo(surface.bubbleRect.width, 1);
 			expect(surface.surfaceRect.height).toBeCloseTo(surface.bubbleRect.height, 1);
 			expect(surface.pathBox.x).toBeGreaterThanOrEqual(0);
@@ -360,83 +365,69 @@ test.describe('DEV World Sandbox', () => {
 			expect(surface.pathBox.x + surface.pathBox.width).toBeLessThanOrEqual(surface.bubbleRect.width);
 			expect(surface.pathBox.y + surface.pathBox.height).toBeLessThanOrEqual(surface.bubbleRect.height);
 		}
-		expect(await page.locator('.tail-layer polygon')).toHaveCount(6);
-		expect(await page.locator('.tail-layer path')).toHaveCount(6);
+		expect(await page.locator('.tail-layer polygon')).toHaveCount(7);
+		expect(await page.locator('.tail-layer path')).toHaveCount(7);
 
-		const seamGeometry = await page.locator('.bubble-layer').evaluate(() => {
+		const tailUnions = await page.locator('.bubble-layer').evaluate(() => {
 			const bubbles = [...document.querySelectorAll<HTMLElement>('.bubble')];
 			const specialBubbles = bubbles.filter((bubble) => bubble.dataset.speechType !== 'normal');
-			const pointInPath = (path: SVGPathElement, x: number, y: number): boolean =>
-				path.isPointInFill(new DOMPoint(x, y));
-			const lowerPathEdge = (path: SVGPathElement, screenX: number): number => {
-				const matrix = path.getScreenCTM();
-				if (!matrix) throw new Error('Expected the speech surface transform.');
-				const localPoint = new DOMPoint(screenX, path.getBoundingClientRect().bottom)
-					.matrixTransform(matrix.inverse());
-				const height = path.ownerSVGElement?.viewBox.baseVal.height ?? 0;
-				let lowerY = -1;
-				for (let y = 0; y <= height; y += 0.25) {
-					if (pointInPath(path, localPoint.x, y)) lowerY = y;
-				}
-				if (lowerY < 0) throw new Error('Expected the tail seam x position to be inside the speech body.');
-				return new DOMPoint(localPoint.x, lowerY).matrixTransform(matrix).y;
+			const screenPoints = (element: SVGGraphicsElement, points: readonly DOMPoint[]) => {
+				const matrix = element.getScreenCTM();
+				if (!matrix) throw new Error('Expected an SVG transform.');
+				return points.map((point) => {
+					const transformed = point.matrixTransform(matrix);
+					return { x: transformed.x, y: transformed.y };
+				});
 			};
 
 			return specialBubbles.flatMap((bubble) => {
-				const bubbleRect = bubble.getBoundingClientRect();
 				const surface = bubble.querySelector<SVGSVGElement>('.bubble-surface');
-				const path = surface?.querySelector<SVGPathElement>('path');
-				if (!surface || !path) throw new Error('Expected a special speech surface.');
-				const bubbleParticipantId = bubble.dataset.bubbleParticipantId;
-				const participantIds = bubbleParticipantId
-					? [bubbleParticipantId]
-					: [...bubble.querySelectorAll<HTMLElement>('.bubble-tail-connection')]
-						.map((connection) => connection.dataset.tailParticipantId)
-						.filter((id): id is string => Boolean(id));
-				const pseudoStyle = bubbleParticipantId ? getComputedStyle(bubble, '::after') : null;
-				const maskHeight = pseudoStyle
-					? Number.parseFloat(pseudoStyle.height)
-					: Number.parseFloat(getComputedStyle(bubble.querySelector<HTMLElement>('.bubble-tail-connection')!).height);
-				const maskBottom = pseudoStyle
-					? Number.parseFloat(pseudoStyle.bottom)
-					: Number.parseFloat(getComputedStyle(bubble.querySelector<HTMLElement>('.bubble-tail-connection')!).bottom);
-				const maskTop = bubbleRect.bottom - maskBottom - maskHeight;
-				return participantIds.map((participantId) => {
+				const fill = surface?.querySelector<SVGPathElement>('.bubble-surface-fill');
+				const outline = surface?.querySelector<SVGPathElement>('.bubble-surface-outline');
+				const mask = surface?.querySelector<SVGMaskElement>('mask');
+				if (!surface || !fill || !outline || !mask) throw new Error('Expected a masked special speech surface.');
+				return [...mask.querySelectorAll<SVGPolygonElement>('polygon[data-tail-opening]')].map((opening) => {
+					const participantId = opening.dataset.tailOpening;
+					if (!participantId) throw new Error('Expected a tail opening participant id.');
 					const tail = document.querySelector<SVGPolygonElement>(`.tail-layer polygon[data-tail-participant-id="${participantId}"]`);
-					if (!tail) throw new Error('Expected a tail polygon for every special speech connection.');
-					const tailRect = tail.getBoundingClientRect();
-					const connection = bubble.querySelector<HTMLElement>(`.bubble-tail-connection[data-tail-participant-id="${participantId}"]`);
-					const connectionRect = connection?.getBoundingClientRect();
-					const centerX = connectionRect
-						? connectionRect.left + connectionRect.width / 2
-						: (() => {
-							if (!pseudoStyle) throw new Error('Expected a normal bubble seam style.');
-							const left = Number.parseFloat(pseudoStyle.left);
-							const transform = pseudoStyle.transform.match(/matrix\([^,]+,[^,]+,[^,]+,[^,]+,\s*([^,]+),/);
-							const translateX = transform ? Number.parseFloat(transform[1]) : 0;
-							return bubbleRect.left + left + translateX;
-						})();
-					const bodyBottom = lowerPathEdge(path, centerX);
+					const tailOutline = document.querySelector<SVGPathElement>(`.tail-layer path[data-tail-participant-id="${participantId}"]`);
+					if (!tail || !tailOutline) throw new Error('Expected fill and outline for every special tail connection.');
+					const openingPoints = screenPoints(opening, [opening.points.getItem(0), opening.points.getItem(1)]);
+					const tailPoints = screenPoints(tail, [tail.points.getItem(0), tail.points.getItem(1)]);
+					const outlinePoints = screenPoints(tailOutline, [
+						tailOutline.getPointAtLength(0),
+						tailOutline.getPointAtLength(tailOutline.getTotalLength())
+					]);
+					const openingMidpoint = new DOMPoint(
+						(opening.points.getItem(0).x + opening.points.getItem(1).x) / 2,
+						(opening.points.getItem(0).y + opening.points.getItem(1).y) / 2
+					);
 					return {
 						speechType: bubble.dataset.speechType,
 						participantId,
-						maskTop,
-						maskBottom: bubbleRect.bottom - maskBottom,
-						bodyBottom,
-						tailRect,
-						maskLeft: connectionRect?.left ?? centerX - Number.parseFloat(pseudoStyle!.width) / 2,
-						maskRight: connectionRect?.right ?? centerX + Number.parseFloat(pseudoStyle!.width) / 2
+						openingMatchesOutlineMask: outline.getAttribute('mask') === `url(#${mask.id})`,
+						openingFill: getComputedStyle(opening).fill,
+						openingInsideBody: fill.isPointInFill(openingMidpoint),
+						openingPoints,
+						tailPoints,
+						outlinePoints,
+						bodyStrokeWidth: getComputedStyle(outline).strokeWidth,
+						tailStrokeWidth: getComputedStyle(tailOutline).strokeWidth
 					};
 				});
 			});
 		});
 
-		for (const seam of seamGeometry) {
-			expect(seam.maskTop).toBeLessThanOrEqual(seam.bodyBottom + 0.5);
-			expect(seam.maskBottom).toBeGreaterThan(seam.bodyBottom);
-			expect(seam.maskBottom).toBeGreaterThan(seam.tailRect.top);
-			expect(seam.maskTop).toBeLessThan(seam.tailRect.bottom);
-			expect(Math.min(seam.maskRight, seam.tailRect.right) - Math.max(seam.maskLeft, seam.tailRect.left)).toBeGreaterThan(0);
+		expect(tailUnions).toHaveLength(6);
+		for (const union of tailUnions) {
+			expect(union.openingMatchesOutlineMask).toBe(true);
+			expect(union.openingFill).toBe('rgb(0, 0, 0)');
+			expect(union.openingInsideBody).toBe(true);
+			expect(union.bodyStrokeWidth).toBe(union.tailStrokeWidth);
+			for (const [index, openingPoint] of union.openingPoints.entries()) {
+				expect(Math.hypot(openingPoint.x - union.tailPoints[index].x, openingPoint.y - union.tailPoints[index].y)).toBeLessThan(1);
+				expect(Math.hypot(openingPoint.x - union.outlinePoints[index].x, openingPoint.y - union.outlinePoints[index].y)).toBeLessThan(1);
+			}
 		}
 
 		const normalSeam = await page.locator('.bubble[data-speech-type="normal"]').evaluate((bubble) => {

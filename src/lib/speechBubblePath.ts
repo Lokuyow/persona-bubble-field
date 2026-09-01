@@ -1,6 +1,7 @@
 import type { SpeechType } from './conversation';
 
 const PATH_INSET = 2;
+const SUPERELLIPSE_EXPONENT = 4;
 
 type Point = Readonly<{ x: number; y: number }>;
 
@@ -8,58 +9,63 @@ function safeDimension(value: number): number {
 	return Number.isFinite(value) ? Math.max(PATH_INSET * 2 + 1, value) : PATH_INSET * 2 + 1;
 }
 
-function segmentCount(length: number): number {
-	return Math.min(7, Math.max(3, Math.round(length / 42)));
+function clamp(value: number, minimum: number, maximum: number): number {
+	return Math.min(maximum, Math.max(minimum, value));
 }
 
-function edgePoints(
-	start: Point,
-	end: Point,
-	segments: number,
-	depth: number,
-	axis: 'horizontal' | 'vertical',
-	baseTowardInterior: boolean
-): Point[] {
-	return Array.from({ length: segments + 1 }, (_, index) => {
-		const progress = index / segments;
-		const base = {
-			x: start.x + (end.x - start.x) * progress,
-			y: start.y + (end.y - start.y) * progress
-		};
-		if (index === 0 || index === segments) return base;
-		const offset = index % 2 === 0 ? 0 : depth * (baseTowardInterior ? 1 : -1);
-		return axis === 'horizontal' ? { x: base.x, y: base.y + offset } : { x: base.x + offset, y: base.y };
-	});
+function formatPoint(point: Point): string {
+	return `${point.x.toFixed(2)} ${point.y.toFixed(2)}`;
 }
 
-function perimeterPoints(width: number, height: number, depth: number): Point[] {
-	const right = width - PATH_INSET;
-	const bottom = height - PATH_INSET;
-	const topSegments = segmentCount(width - PATH_INSET * 2);
-	const sideSegments = segmentCount(height - PATH_INSET * 2);
-	return [
-		...edgePoints({ x: PATH_INSET, y: PATH_INSET }, { x: right, y: PATH_INSET }, topSegments, depth, 'horizontal', true),
-		...edgePoints({ x: right, y: PATH_INSET }, { x: right, y: bottom }, sideSegments, depth, 'vertical', false).slice(1),
-		...edgePoints({ x: right, y: bottom }, { x: PATH_INSET, y: bottom }, topSegments, depth, 'horizontal', false).slice(1),
-		...edgePoints({ x: PATH_INSET, y: bottom }, { x: PATH_INSET, y: PATH_INSET }, sideSegments, depth, 'vertical', true).slice(1, -1)
-	];
+function superellipsePoint(width: number, height: number, angle: number, inwardDistance = 0): Point {
+	const cosine = Math.cos(angle);
+	const sine = Math.sin(angle);
+	const exponent = 2 / SUPERELLIPSE_EXPONENT;
+	const radiusX = Math.max(0.5, width / 2 - PATH_INSET);
+	const radiusY = Math.max(0.5, height / 2 - PATH_INSET);
+	const vector = {
+		x: Math.sign(cosine) * Math.pow(Math.abs(cosine), exponent) * radiusX,
+		y: Math.sign(sine) * Math.pow(Math.abs(sine), exponent) * radiusY
+	};
+	const distance = Math.hypot(vector.x, vector.y) || 1;
+	const scale = Math.max(0, (distance - inwardDistance) / distance);
+	return {
+		x: width / 2 + vector.x * scale,
+		y: height / 2 + vector.y * scale
+	};
 }
 
-function polygonPath(points: readonly Point[]): string {
-	return `${points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(' ')} Z`;
+function perimeterCount(width: number, height: number, minimum: number, maximum: number, spacing: number): number {
+	return clamp(Math.round((width + height) / spacing), minimum, maximum);
 }
 
-function quadraticCloudPath(points: readonly Point[]): string {
-	const midpoint = (first: Point, second: Point): Point => ({
-		x: (first.x + second.x) / 2,
-		y: (first.y + second.y) / 2
-	});
-	const start = midpoint(points.at(-1)!, points[0]);
-	let path = `M ${start.x.toFixed(2)} ${start.y.toFixed(2)}`;
-	for (let index = 0; index < points.length; index += 1) {
-		const control = points[index];
-		const end = midpoint(control, points[(index + 1) % points.length]);
-		path += ` Q ${control.x.toFixed(2)} ${control.y.toFixed(2)} ${end.x.toFixed(2)} ${end.y.toFixed(2)}`;
+function shoutPath(width: number, height: number): string {
+	const tipCount = perimeterCount(width, height, 12, 20, 20);
+	const step = (Math.PI * 2) / tipCount;
+	const valleyDepth = clamp(Math.min(width, height) * 0.16, 4, 8);
+	const variation = [1, 0.76, 0.9, 0.82] as const;
+	const points: Point[] = [];
+	for (let index = 0; index < tipCount; index += 1) {
+		const tipAngle = -Math.PI / 2 + index * step;
+		points.push(superellipsePoint(width, height, tipAngle));
+		points.push(superellipsePoint(width, height, tipAngle + step / 2, valleyDepth * variation[index % variation.length]));
+	}
+	return `${points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${formatPoint(point)}`).join(' ')} Z`;
+}
+
+function monologuePath(width: number, height: number): string {
+	const lobeCount = perimeterCount(width, height, 10, 18, 26);
+	const step = (Math.PI * 2) / lobeCount;
+	const valleyInset = clamp(Math.min(width, height) * 0.16, 4, 9);
+	const controlInset = 0.68;
+	const start = superellipsePoint(width, height, -Math.PI / 2 - step / 2, valleyInset);
+	let path = `M ${formatPoint(start)}`;
+	for (let index = 0; index < lobeCount; index += 1) {
+		const angle = -Math.PI / 2 + index * step;
+		const from = index === 0 ? start : superellipsePoint(width, height, angle - step / 2, valleyInset);
+		const end = superellipsePoint(width, height, angle + step / 2, valleyInset);
+		const outer = superellipsePoint(width, height, angle);
+		path += ` C ${formatPoint({ x: from.x + (outer.x - from.x) * controlInset, y: from.y + (outer.y - from.y) * controlInset })} ${formatPoint({ x: end.x + (outer.x - end.x) * controlInset, y: end.y + (outer.y - end.y) * controlInset })} ${formatPoint(end)}`;
 	}
 	return `${path} Z`;
 }
@@ -68,9 +74,7 @@ export function createSpeechBubblePath(speechType: SpeechType, width: number, he
 	if (speechType === 'normal') return null;
 	const safeWidth = safeDimension(width);
 	const safeHeight = safeDimension(height);
-	const depth = speechType === 'monologue'
-		? Math.min(14, Math.max(6, Math.min(safeWidth, safeHeight) * 0.18))
-		: Math.min(8, Math.max(4, Math.min(safeWidth, safeHeight) * 0.12));
-	const points = perimeterPoints(safeWidth, safeHeight, depth);
-	return speechType === 'shout' ? polygonPath(points) : quadraticCloudPath(points);
+	return speechType === 'shout'
+		? shoutPath(safeWidth, safeHeight)
+		: monologuePath(safeWidth, safeHeight);
 }
