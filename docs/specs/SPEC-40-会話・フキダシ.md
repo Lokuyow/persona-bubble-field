@@ -63,6 +63,44 @@ kind 42の `w` は発言時点の不変な座標であり、その後発言者�
 
 発言の痕跡は発言領域へ蓄積表示せず、フィールド上の空間オブジェクトとして扱う。
 
+### 補助タイムラインoverlay
+
+発言領域とは別に、現在の会話状況を把握するための補助UIとして、フィールドviewportの
+左側へ直近発言タイムラインをoverlay表示する。これは空間型チャットを置き換えるSNS型の
+主画面ではなく、無制限の過去ログやfeedでもない。
+
+専用世界のparserを通過した有効なkind 42を、通常・叫び・モノローグ、閲覧者の画面内外、
+authorの現在presenceの有無にかかわらず対象とする。合体フキダシの表示状態にかかわらず、
+元event単位で表示する。同じevent IDは一度だけ扱うが、本文が同じでもevent IDが異なる
+発言は別entryとする。Relayからbootstrapで取得できた範囲とlive更新を合わせ、NIP-01の
+`created_at`降順、同一時刻ではevent IDのlexical ascendingで並べ、取得できた最新最大50件を
+内部stateに保持する。50件未満のRelay応答を追加取得で補填することは保証しない。非表示中も更新を続け、
+再表示時にはその時点の最新50件から表示領域へ収まるentryだけを表示する。
+
+各entryにはキャラクター名と本文だけを表示し、アイコン、時刻、event ID、Relay情報、返信、
+リアクション等は表示しない。キャラクター名と本文は同じinline text flowの先頭から開始し、
+名前の直後で強制改行しない。本文が横幅に収まらない場合は通常のinline文章として自然に
+折り返す。entry全体は名前と本文が同じ行にある場合の行も含め、明示改行とauto-wrapを
+合わせた実描画5行までとし、5行を超えた場合だけ`…`を表示する。元のevent `content`は
+切り詰めず保持し、全文展開操作は設けない。
+
+authorのpubkeyから既存の決定的なcharacter割当を使い、timelineのためのkind 0取得や新しい
+プロフィール通信・保存経路は追加しない。現在active presenceにあり画面上の色を持つauthorは
+名前にも同じtoneカテゴリを使い、presence外のauthorは通常文字色とする。timeline stateへ
+色を保存せず、描画時の現在の色割当へ追従させる。キャラクター名はinteractive elementとし、
+既存Profile Dialogを開く。presence外のauthorも同じpubkeyからprofileを導出でき、Dialogを
+開いてもtimelineは閉じない。close時は既存のfocus restoration経路を使う。
+
+timelineは真のoverlayであり、表示状態によってfield viewportのgeometry、field width、camera、
+cell、participant座標、speech area、bubble placement bounds、Composer領域を変更しない。
+panel内はscrollせず、表示領域へ完全に収まる新しいentryから順に表示する。内部stateは最新50件を
+保持する。既存の`MOBILE_FIELD_BREAKPOINT = 700`を使い、width > 700
+ではreload時の初期表示をON、width <= 700ではOFFとする。この初期判定はページ初期化時に
+一度だけ行い、表示後のresize・端末回転でユーザーのshow/hide状態を上書きしない。hide button
+と、閉じた状態でも残るshow controlを設け、timeline内容をlocalStorage、IndexedDB等へ保存しない。
+SSR/hydration中はclosedとして扱う。timelineの更新・表示はbubbleの寿命判定および
+`ConversationState`から独立させる。
+
 ### 通常フキダシの配置
 
 フキダシは、発言元ユーザーの横方向位置に対応する発言領域内の位置を基本とする。
@@ -435,7 +473,8 @@ MVPでは、**テキストメッセージによる現在の会話**を中心と�
 
 NIP-28 kind 42によるメッセージを使用する。
 
-現在の会話は通常フキダシとして一時表示し、Twitter型タイムラインとして蓄積しない。
+現在の会話は通常フキダシとして一時表示し、Twitter型タイムラインとして主画面へ蓄積しない。
+フィールドviewport上の補助タイムラインoverlayは、上記の「発言領域」とは別の有限なUIとして扱う。
 
 ただし、過去のkind 42の一部は「発言の痕跡」として空間上に残り、後から探索・調査できる。
 

@@ -27,7 +27,7 @@ const socketConstructor = WebSocket as unknown as IWebSocketConstructor;
 const servers: Server[] = [];
 const transports: ReturnType<typeof createNostrRelayTransport>[] = [];
 let relaySequence = 0;
-type WireRequest = ['REQ', string, Record<string, unknown>];
+	type WireRequest = ['REQ', string, ...Record<string, unknown>[]];
 
 function kind(request: WireRequest): number | undefined {
 	return (request[2].kinds as number[])[0];
@@ -139,6 +139,24 @@ describe('primary lifecycle', () => {
 		await vi.advanceTimersByTimeAsync(TIMEOUT - 1);
 
 		expect(f.authorities[0].primaryRequests()).toEqual([]);
+	});
+
+	it('sends recent and timeline history filters in one world-messages REQ while keeping two logical primaries', async () => {
+		const f = fixture(2);
+		const result = await f.start();
+
+		for (const relay of f.authorities) {
+			const messageRequests = relay.primaryRequests().filter((request) => kind(request) === 42);
+			expect(messageRequests).toHaveLength(1);
+			expect(messageRequests[0]).toHaveLength(4);
+			expect(messageRequests[0][2]).toMatchObject({ kinds: [42], since: f.input.messageSince });
+			expect(messageRequests[0][3]).toMatchObject({ kinds: [42], limit: 50 });
+			expect(messageRequests[0][3].since).toBeUndefined();
+		}
+		expect(result.primaryPairs).toHaveLength(4);
+		expect(result.primaryPairs.map((pair) => pair.subscription)).toEqual([
+			'world-messages', 'world-positions', 'world-messages', 'world-positions'
+		]);
 	});
 
 	it('keeps an EVENT immediately preceding the final EOSE in the initial position batch', async () => {
@@ -280,7 +298,14 @@ describe('primary lifecycle', () => {
 		expect(relay.sockets).toHaveLength(2);
 		expect(relay.primaryRequests()).toHaveLength(4);
 		for (const request of relay.primaryRequests()) {
-			expect(request[2].since).toBe(kind(request) === 42 ? f.input.messageSince : f.input.positionSince);
+			if (kind(request) === 42) {
+				expect(request).toHaveLength(4);
+				expect(request[2].since).toBe(f.input.messageSince);
+				expect(request[3].limit).toBe(50);
+				expect(request[3].since).toBeUndefined();
+			} else {
+				expect(request[2].since).toBe(f.input.positionSince);
+			}
 		}
 		expect(f.input.onLiveMessage).not.toHaveBeenCalled();
 		expect(f.input.onLivePosition).not.toHaveBeenCalled();
@@ -575,7 +600,11 @@ describe('semantic primary classifier', () => {
 		vi.mocked(createRxForwardReq).mockImplementation(() => {
 			const request = actualRxNostr.createRxForwardReq();
 			const emit = request.emit.bind(request);
-			request.emit = (filter) => emit(Object.fromEntries(Object.entries({ ...filter, since: TIME - 5 }).reverse()) as import('rx-nostr').LazyFilter);
+			request.emit = (filter) => {
+				const rewrite = (candidate: import('rx-nostr').LazyFilter) =>
+					Object.fromEntries(Object.entries({ ...candidate, ...(candidate.limit === undefined ? { since: TIME - 5 } : {}) }).reverse()) as import('rx-nostr').LazyFilter;
+				return emit(Array.isArray(filter) ? filter.map(rewrite) : rewrite(filter));
+			};
 			return request;
 		});
 		const f = fixture();
@@ -585,7 +614,14 @@ describe('semantic primary classifier', () => {
 		expect(primary).toHaveLength(4);
 		for (const message of primary) {
 			expect(message[2]).toHaveProperty('until', undefined);
-			expect(message[2]).toHaveProperty('since', TIME - 5);
+			const kinds = (message[2] as Record<string, unknown>).kinds;
+			if (Array.isArray(kinds) && kinds[0] === 42) {
+				expect(message[2]).toHaveProperty('since', TIME - 5);
+				expect(message[3]).toHaveProperty('limit', 50);
+				expect(message[3]).toHaveProperty('since', undefined);
+			} else {
+				expect(message[2]).toHaveProperty('since', TIME - 5);
+			}
 		}
 	});
 
@@ -606,7 +642,10 @@ describe('semantic primary classifier', () => {
 		vi.mocked(createRxForwardReq).mockImplementation(() => {
 			const request = actualRxNostr.createRxForwardReq();
 			const emit = request.emit.bind(request);
-			request.emit = (filter) => emit({ ...filter, ...extra });
+			request.emit = (filter) => {
+				const addExtra = (candidate: import('rx-nostr').LazyFilter) => ({ ...candidate, ...extra });
+				return emit(Array.isArray(filter) ? filter.map(addExtra) : addExtra(filter));
+			};
 			return request;
 		});
 		const f = fixture(2, RecordingSocket as unknown as IWebSocketConstructor);
