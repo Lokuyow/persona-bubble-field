@@ -63,7 +63,7 @@ kind 42の `w` は発言時点の不変な座標であり、その後発言者�
 
 発言の痕跡は発言領域へ蓄積表示せず、フィールド上の空間オブジェクトとして扱う。
 
-### 補助タイムラインoverlay
+### Chatter（補助タイムラインoverlay）
 
 発言領域とは別に、現在の会話状況を把握するための補助UIとして、フィールドviewportの
 左側へ直近発言タイムラインをoverlay表示する。これは空間型チャットを置き換えるSNS型の
@@ -100,6 +100,11 @@ panel内はscrollせず、表示領域へ完全に収まる新しいentryから�
 と、閉じた状態でも残るshow controlを設け、timeline内容をlocalStorage、IndexedDB等へ保存しない。
 SSR/hydration中はclosedとして扱う。timelineの更新・表示はbubbleの寿命判定および
 `ConversationState`から独立させる。
+
+ユーザー向け名称は`Chatter`とする。修飾キーなしの`C`で現在の表示状態をshow/hide toggleする。
+入力中、IME composition中、modifier付き、Profile Dialog等のmodal状態ではショートカットを
+横取りせず、`event.repeat`のkeydownでは再toggleしない。Chatterのtoggleは既存の表示状態を
+直接操作し、resizeで上書きせず、reload時はdesktop初期ON/mobile初期OFFへ戻す。
 
 ### 通常フキダシの配置
 

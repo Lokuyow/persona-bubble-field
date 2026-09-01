@@ -566,6 +566,24 @@
 			}, 500);
 		};
 		const handleKeydown = (event: KeyboardEvent) => {
+			if (
+				timelineInitialized &&
+				event.key.toLowerCase() === 'c' &&
+				!event.repeat &&
+				!event.isComposing &&
+				!event.shiftKey &&
+				!event.ctrlKey &&
+				!event.altKey &&
+				!event.metaKey &&
+				!document.querySelector('.profile-dialog-content') &&
+				!event.composedPath().some((target) => target instanceof HTMLElement && (
+					target.matches('input, textarea, select') || target.isContentEditable
+				))
+			) {
+				timelineOpen = !timelineOpen;
+				event.preventDefault();
+				return;
+			}
 			if (event.code === 'Escape' && isComposerEditorKeyboardEvent(event) && !event.isComposing) {
 				if (composerComponent?.blurEditor()) event.preventDefault();
 				return;
@@ -1576,15 +1594,16 @@
 		>
 		</div>
 		{#if timelineInitialized && timelineOpen}
-			<aside class="recent-message-timeline" aria-label="Recent message timeline">
+			<aside class="recent-message-timeline" aria-label="Chatter">
 				<header class="timeline-header">
 					<button
 						class="timeline-hide-control"
 						type="button"
-						aria-label="Hide recent messages"
+						aria-label="Hide Chatter"
+						aria-keyshortcuts="C"
 						on:click={hideRecentMessageTimeline}
 					>×</button>
-					<h2>Recent messages</h2>
+					<h2>Chatter</h2>
 				</header>
 				<div class="timeline-visible-entries" use:observeTimelineVisibleArea>
 					{#each timelineVisibleMessages as message (message.id)}
@@ -1633,9 +1652,10 @@
 			<button
 				class="timeline-show-control"
 				type="button"
-				aria-label="Show recent messages"
+				aria-label="Show Chatter"
+				aria-keyshortcuts="C"
 				on:click={showRecentMessageTimeline}
-			>Recent messages</button>
+			>Chatter</button>
 		{/if}
 		<div
 			class="field-area"
@@ -1686,7 +1706,11 @@
 								<Avatar.Image src={asset(`/${participant.character.picture}`)} alt="" />
 								<Avatar.Fallback>{participant.character.name.slice(0, 1)}</Avatar.Fallback>
 							</Avatar.Root>
-							<span class="participant-name" aria-hidden="true">{participant.character.name}</span>
+							<span
+								class={`participant-name${participant.id === selfProjectionId ? ' participant-name-self' : ''}`}
+								aria-hidden="true"
+							>{participant.character.name}</span
+							>
 						</button>
 					</div>
 				{/each}
@@ -2446,6 +2470,11 @@
 		@media (max-width: 700px) {
 			font-size: 8px;
 		}
+	}
+
+	.participant-name-self {
+		border: 2px solid #d14949;
+		font-weight: 800;
 	}
 
 	.tail-layer,

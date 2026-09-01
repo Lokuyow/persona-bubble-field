@@ -170,7 +170,7 @@ test.describe('DEV World Sandbox', () => {
 	test('shows a finite recent-message overlay with semantic colors and existing profile focus restoration', async ({ page }) => {
 		await page.setViewportSize({ width: 1200, height: 1600 });
 		await page.goto('/?devWorld=1&devSpeech=timeline');
-		const timeline = page.getByLabel('Recent message timeline');
+		const timeline = page.getByLabel('Chatter', { exact: true });
 		const visibleEntries = timeline.locator('.timeline-visible-entries .timeline-entry');
 		await expect(timeline).toBeVisible();
 		expect(await visibleEntries.count()).toBeGreaterThan(20);
@@ -263,10 +263,52 @@ test.describe('DEV World Sandbox', () => {
 		await expect(profileDialog(page)).toBeHidden();
 	});
 
+	test('toggles Chatter with the unmodified C shortcut and preserves its guards', async ({ page }) => {
+		await page.setViewportSize({ width: 1200, height: 900 });
+		await page.goto('/?devWorld=1&devSpeech=timeline');
+		const chatter = page.locator('aside.recent-message-timeline');
+		const hide = page.getByRole('button', { name: 'Hide Chatter' });
+		await expect(chatter).toBeVisible();
+		await expect(hide).toHaveAttribute('aria-keyshortcuts', 'C');
+		const beforeIds = await page.locator('.timeline-visible-entries .timeline-entry').evaluateAll((entries) =>
+			entries.map((entry) => entry.getAttribute('data-timeline-event-id')));
+
+		await page.keyboard.press('c');
+		await expect(chatter).toBeHidden();
+		await page.keyboard.press('C');
+		await expect(chatter).toBeVisible();
+		await expect(page.locator('.timeline-visible-entries .timeline-entry')).toHaveCount(beforeIds.length);
+		await expect(page.getByRole('button', { name: 'Hide Chatter' })).toHaveAttribute('aria-keyshortcuts', 'C');
+
+		await page.keyboard.press('Control+c');
+		await expect(chatter).toBeVisible();
+		await page.keyboard.press('Shift+c');
+		await expect(chatter).toBeVisible();
+		await page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', {
+			key: 'c', code: 'KeyC', isComposing: true, bubbles: true
+		})));
+		await expect(chatter).toBeVisible();
+
+		await page.locator('.timeline-name').first().click();
+		await expect(page.getByRole('dialog')).toBeVisible();
+		await page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', {
+			key: 'c', code: 'KeyC', bubbles: true
+		})));
+		await expect(chatter).toBeVisible();
+		await page.getByRole('dialog').getByRole('button', { name: '閉じる' }).click();
+
+		await page.keyboard.press('c');
+		await expect(chatter).toBeHidden();
+		await page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', {
+			key: 'c', code: 'KeyC', repeat: true, bubbles: true
+		})));
+		await expect(chatter).toBeHidden();
+	});
+
 	test('renders only fully fitting entries without a scroll container', async ({ page }) => {
 		await page.setViewportSize({ width: 1200, height: 500 });
 		await page.goto('/?devWorld=1&devSpeech=timeline');
-		const timeline = page.getByLabel('Recent message timeline');
+		const timeline = page.locator('aside.recent-message-timeline');
 		const visibleEntries = timeline.locator('.timeline-visible-entries .timeline-entry');
 		await expect.poll(() => visibleEntries.count()).toBeGreaterThan(0);
 		const initialCount = await visibleEntries.count();
@@ -302,10 +344,19 @@ test.describe('DEV World Sandbox', () => {
 	test('starts closed on mobile, preserves manual show/hide through resize, and leaves field geometry unchanged', async ({ page }) => {
 		await page.setViewportSize({ width: 390, height: 844 });
 		await page.goto('/?devWorld=1&devSpeech=timeline');
-		const timeline = page.getByLabel('Recent message timeline');
-		const show = page.getByRole('button', { name: 'Show recent messages' });
+		const timeline = page.locator('aside.recent-message-timeline');
+		const show = page.getByRole('button', { name: 'Show Chatter' });
 		await expect(timeline).toBeHidden();
 		await expect(show).toBeVisible();
+		await expect(show).toHaveAttribute('aria-keyshortcuts', 'C');
+		await page.keyboard.press('c');
+		await expect(timeline).toBeVisible();
+		await page.setViewportSize({ width: 1200, height: 900 });
+		await expect(timeline).toBeVisible();
+		await page.setViewportSize({ width: 390, height: 844 });
+		await expect(timeline).toBeVisible();
+		await page.keyboard.press('c');
+		await expect(timeline).toBeHidden();
 
 		const before = await page.evaluate(() => ({
 			field: document.querySelector<HTMLElement>('.field-area')!.getBoundingClientRect().toJSON(),
@@ -314,8 +365,8 @@ test.describe('DEV World Sandbox', () => {
 		}));
 		await show.click();
 		await expect(timeline).toBeVisible();
-		await expect(page.getByRole('button', { name: 'Hide recent messages' })).toBeVisible();
-		await page.getByRole('button', { name: 'Hide recent messages' }).click();
+		await expect(page.getByRole('button', { name: 'Hide Chatter' })).toBeVisible();
+		await page.getByRole('button', { name: 'Hide Chatter' }).click();
 		await expect(timeline).toBeHidden();
 		const afterMobileHide = await page.evaluate(() => ({
 			field: document.querySelector<HTMLElement>('.field-area')!.getBoundingClientRect().toJSON(),
@@ -912,6 +963,10 @@ test.describe('DEV World Sandbox', () => {
 		await expect(mergedBubble.locator('.bubble-tail-connection')).toHaveCount(2);
 		await expect(page.locator('.tail-layer polygon')).toHaveCount(10);
 		await expect(page.locator('.tail-layer path')).toHaveCount(10);
+		await expect(page.locator('.participant[data-self="true"] .participant-name')).toHaveCount(1);
+		await expect(page.locator('.participant:not([data-self="true"]) .participant-name-self')).toHaveCount(0);
+		await expect(page.locator('.participant[data-self="true"] .participant-name')).toHaveCSS('border-top-width', '2px');
+		await expect(page.locator('.participant[data-self="true"] .participant-name')).toHaveCSS('font-weight', '800');
 
 		const colorState = await page.locator('.bubble-layer').evaluate(() => {
 			const participants = [...document.querySelectorAll<HTMLElement>('.participant')];
