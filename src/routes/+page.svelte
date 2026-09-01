@@ -1683,14 +1683,18 @@
 		box-sizing: border-box;
 	}
 
+	:global(:root) {
+		--app-background: #f5f1e9;
+	}
+
 	:global(html) {
-		background: #f5f1e9;
+		background: var(--app-background);
 	}
 
 	:global(body) {
 		margin: 0;
 		min-width: 320px;
-		background: #f5f1e9;
+		background: var(--app-background);
 		color: #2e3435;
 		font-family: 'Trebuchet MS', 'Avenir Next', system-ui, sans-serif;
 	}
@@ -1717,9 +1721,7 @@
 		min-height: 100svh;
 		flex-direction: column;
 		overflow: hidden;
-		background:
-			radial-gradient(circle at 14% 12%, rgba(255, 255, 255, 0.7), transparent 28rem),
-			#f5f1e9;
+		background: transparent;
 	}
 
 	.topbar,
@@ -1812,7 +1814,7 @@
 		flex: 1;
 		overflow: hidden;
 		isolation: isolate;
-		background: #e8e7da;
+		background: transparent;
 	}
 
 	.composer-available .field-viewport {
@@ -1850,10 +1852,7 @@
 		position: absolute;
 		inset: 0;
 		z-index: -1;
-		background:
-			radial-gradient(circle at 50% 42%, rgba(255, 255, 255, 0.76), transparent 40%),
-			linear-gradient(135deg, rgba(213, 219, 198, 0.44), transparent 52%),
-			#e8e7da;
+		background: transparent;
 		content: '';
 	}
 
