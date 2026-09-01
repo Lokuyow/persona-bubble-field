@@ -1460,12 +1460,6 @@
 	class:composer-keyboard-visible={composerKeyboardInset > 0}
 	style={`--composer-keyboard-inset: ${composerKeyboardInset}px;--composer-initial-preferred-height: ${INITIAL_COMPOSER_PREFERRED_HEIGHT}px;${composerPreferredHeight === null ? '' : `--composer-preferred-height: ${composerPreferredHeight}px;`}`}
 >
-	<div class="topbar">
-		<div class="brand-lockup">
-			<span class="brand-mark" aria-hidden="true">✳</span>
-		</div>
-	</div>
-
 	<section class="field-viewport" bind:this={viewportElement} aria-label="Conversation field">
 		<div
 			class="speech-area"
@@ -1684,7 +1678,7 @@
 	}
 
 	:global(:root) {
-		--app-background: #f5f1e9;
+		--app-background: #161921;
 	}
 
 	:global(html) {
@@ -1724,7 +1718,6 @@
 		background: transparent;
 	}
 
-	.topbar,
 	.status-panel,
 	.footer-note,
 	.camera-chip,
@@ -1734,15 +1727,6 @@
 		z-index: 10;
 	}
 
-	.topbar {
-		top: 0;
-		display: flex;
-		width: 100%;
-		align-items: center;
-		justify-content: space-between;
-		padding: 24px 32px;
-		pointer-events: none;
-	}
 
 	.brand-lockup {
 		display: flex;
@@ -1858,13 +1842,12 @@
 
 	.recent-message-timeline {
 		position: absolute;
-		top: 84px;
+		top: 0;
 		bottom: 16px;
 		left: 16px;
 		z-index: 9;
 		display: flex;
 		width: min(328px, calc(100% - 32px));
-		max-height: calc(100% - 100px);
 		flex-direction: column;
 		border-radius: 18px;
 		background: transparent;
@@ -1977,20 +1960,20 @@
 
 	.timeline-text {
 		max-height: calc(1.45em * 5);
-		margin: 6px 0 0;
 		overflow: hidden;
 		color: #fff;
-		font-size: 15px;
+		font-size: 18px;
 		font-weight: 700;
 		letter-spacing: 0.01em;
 		line-height: 1.45;
+		padding: 6px 0;
 		overflow-wrap: anywhere;
 		white-space: pre-line;
 		-webkit-text-stroke: 0;
 		text-shadow: 0 1px 1px rgba(0, 0, 0, 0.9);
 
 	 @media (width <= 700px) {
-			font-size: 13px;
+			font-size: 14px;
 		}
 	}
 
@@ -2570,9 +2553,6 @@
 	}
 
 	@media (max-width: 700px) {
-		.topbar {
-			padding: 16px 16px;
-		}
 
 		.brand-mark {
 			width: 31px;
