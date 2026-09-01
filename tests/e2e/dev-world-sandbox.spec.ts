@@ -170,7 +170,7 @@ test.describe('DEV World Sandbox', () => {
 	test('shows a finite recent-message overlay with semantic colors and existing profile focus restoration', async ({ page }) => {
 		await page.setViewportSize({ width: 1200, height: 1600 });
 		await page.goto('/?devWorld=1&devSpeech=timeline');
-		const timeline = page.locator('aside.recent-message-timeline');
+		const timeline = page.getByLabel('Chatter', { exact: true });
 		const visibleEntries = timeline.locator('.timeline-visible-entries .timeline-entry');
 		await expect(timeline).toBeVisible();
 		expect(await visibleEntries.count()).toBeGreaterThan(20);

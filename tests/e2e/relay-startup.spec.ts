@@ -39,7 +39,7 @@ function profileDialog(page: Page) {
 async function openProfile(page: Page): Promise<void> {
 	const timeline = page.locator('aside.recent-message-timeline');
 	if (await timeline.isVisible()) await page.getByRole('button', { name: 'Hide Chatter' }).click();
-	await page.locator('.participant-profile-trigger').first().click({ force: true });
+	await page.locator('.participant-profile-trigger').first().click();
 	await expect(profileDialog(page)).toBeVisible();
 }
 
