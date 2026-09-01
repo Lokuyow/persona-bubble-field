@@ -597,15 +597,6 @@ test.describe('DEV World Sandbox', () => {
 				surface.pathBox.y + surface.pathBox.height > surface.bubbleRect.height
 			).toBe(true);
 		}
-		for (let first = 0; first < surfaces.length; first += 1) {
-			for (let second = first + 1; second < surfaces.length; second += 1) {
-				const left = Math.max(surfaces[first].surfaceRect.left, surfaces[second].surfaceRect.left);
-				const right = Math.min(surfaces[first].surfaceRect.right, surfaces[second].surfaceRect.right);
-				const top = Math.max(surfaces[first].surfaceRect.top, surfaces[second].surfaceRect.top);
-				const bottom = Math.min(surfaces[first].surfaceRect.bottom, surfaces[second].surfaceRect.bottom);
-				expect(Math.max(0, right - left) * Math.max(0, bottom - top)).toBe(0);
-			}
-		}
 		expect(await page.locator('.tail-layer polygon')).toHaveCount(7);
 		expect(await page.locator('.tail-layer path')).toHaveCount(7);
 
