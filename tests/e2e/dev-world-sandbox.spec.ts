@@ -579,6 +579,30 @@ test.describe('DEV World Sandbox', () => {
 		expect(monologues).toHaveLength(2);
 		expect(shouts.every((surface) => (surface.d?.match(/\bL/g)?.length ?? 0) >= 20 && !surface.d?.includes('Q'))).toBe(true);
 		expect(monologues.every((surface) => (surface.d?.match(/\bC/g)?.length ?? 0) >= 7 && !surface.d?.includes('L'))).toBe(true);
+
+		const stacking = await page.locator('.bubble-layer').evaluate(() => {
+			const bubbles = [...document.querySelectorAll<HTMLElement>('.bubble')];
+			const rectsOverlap = (a: DOMRect, b: DOMRect) =>
+				a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+			const shoutBubbles = bubbles.filter((bubble) => bubble.dataset.speechType === 'shout');
+			const opponents = bubbles.filter((bubble) => bubble.dataset.speechType !== 'shout');
+			return {
+				shoutZIndexes: shoutBubbles.map((bubble) => getComputedStyle(bubble).zIndex),
+				normalZIndexes: opponents.filter((bubble) => bubble.dataset.speechType === 'normal').map((bubble) => getComputedStyle(bubble).zIndex),
+				monologueZIndexes: opponents.filter((bubble) => bubble.dataset.speechType === 'monologue').map((bubble) => getComputedStyle(bubble).zIndex),
+				overlaps: shoutBubbles.flatMap((shout) => {
+					const surface = shout.querySelector<SVGSVGElement>('.bubble-surface');
+					if (!surface) throw new Error('Expected a shout surface.');
+					const surfaceRect = surface.getBoundingClientRect();
+					return opponents.filter((opponent) => rectsOverlap(surfaceRect, opponent.getBoundingClientRect())).map((opponent) => opponent.dataset.speechType);
+				})
+			};
+		});
+		expect(stacking.shoutZIndexes.every((zIndex) => zIndex === '3')).toBe(true);
+		expect(stacking.normalZIndexes.every((zIndex) => zIndex === 'auto')).toBe(true);
+		expect(stacking.monologueZIndexes.every((zIndex) => zIndex === 'auto')).toBe(true);
+		expect(stacking.overlaps.length).toBeGreaterThan(0);
+		expect(stacking.overlaps.some((speechType) => speechType === 'monologue')).toBe(true);
 		for (const surface of surfaces) {
 			expect(surface.fill).toBe(surface.toneBackground);
 			expect(surface.stroke).toBe(surface.toneOutline);

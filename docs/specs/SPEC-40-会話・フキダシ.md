@@ -167,6 +167,7 @@ decorative overflowとして扱い、bodyの配置・collision・overlap avoidan
 そのため、叫びのspikeは発言領域からはみ出したり、他のフキダシやそのしっぽと視覚的に
 重なったりしてよい。spikeの重なりを避けるためにbodyを移動したり、spikeを短縮したりしない。
 viewportの外側へ出たspikeはviewportのclipで隠れてよい。
+叫びのspikeが通常またはモノローグのフキダシと視覚的に重なった場合、叫びを前面に描画する。
 
 ### 発言中の移動
 

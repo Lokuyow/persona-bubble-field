@@ -2554,6 +2554,10 @@
 		will-change: transform;
 	}
 
+	.bubble[data-speech-type='shout'] {
+		z-index: 3;
+	}
+
 	.speech-bubble-special {
 		background: transparent;
 		border-color: transparent;
