@@ -108,6 +108,7 @@
 	let viewportSize: Size = DEFAULT_VIEWPORT;
 	let bubbleSizes: Record<string, Size> = {};
 	let bubbleOverflowById: Record<string, boolean> = {};
+	const mountedBubbleNodes = new Map<string, HTMLElement>();
 	let conversationState: ConversationState = createConversationState();
 	let lastPlacedAnchorById: Record<string, WorldPoint> = {};
 	let lastVisibilityKey: string | null = null;
@@ -555,7 +556,9 @@
 			}
 			viewportSize = { width: rect.width, height: rect.height };
 			void tick().then(() => {
-				if (mounted) syncVisualToCanonical();
+				if (!mounted) return;
+				remeasureMountedBubbles();
+				syncVisualToCanonical();
 			});
 			if (!devWorldSandboxEnabled) void begin();
 		};
@@ -740,20 +743,59 @@
 		};
 	});
 
-	function observeBubble(node: HTMLElement, id: string) {
+	type BubbleMeasurement = Readonly<{ size: Size; overflow: boolean }>;
+
+	function measureBubble(node: HTMLElement): BubbleMeasurement {
 		const content = node.querySelector<HTMLElement>('.bubble-content');
-		const update = () => {
-			const rect = node.getBoundingClientRect();
+		const rect = node.getBoundingClientRect();
+		return {
+			size: { width: rect.width, height: rect.height },
+			overflow: content ? content.scrollHeight > content.clientHeight : false
+		};
+	}
+
+	function applyBubbleMeasurement(id: string, measurement: BubbleMeasurement): void {
+		const currentSize = bubbleSizes[id];
+		if (!currentSize || currentSize.width !== measurement.size.width || currentSize.height !== measurement.size.height) {
 			bubbleSizes = {
 				...bubbleSizes,
-				[id]: { width: rect.width, height: rect.height }
+				[id]: measurement.size
 			};
-			if (content) {
-				bubbleOverflowById = {
-					...bubbleOverflowById,
-					[id]: content.scrollHeight > content.clientHeight
-				};
+		}
+		if (bubbleOverflowById[id] !== measurement.overflow) {
+			bubbleOverflowById = {
+				...bubbleOverflowById,
+				[id]: measurement.overflow
+			};
+		}
+	}
+
+	function remeasureMountedBubbles(): void {
+		const nextSizes = { ...bubbleSizes };
+		const nextOverflow = { ...bubbleOverflowById };
+		let sizesChanged = false;
+		let overflowChanged = false;
+		for (const [id, node] of mountedBubbleNodes) {
+			const measurement = measureBubble(node);
+			const currentSize = nextSizes[id];
+			if (!currentSize || currentSize.width !== measurement.size.width || currentSize.height !== measurement.size.height) {
+				nextSizes[id] = measurement.size;
+				sizesChanged = true;
 			}
+			if (nextOverflow[id] !== measurement.overflow) {
+				nextOverflow[id] = measurement.overflow;
+				overflowChanged = true;
+			}
+		}
+		if (sizesChanged) bubbleSizes = nextSizes;
+		if (overflowChanged) bubbleOverflowById = nextOverflow;
+	}
+
+	function observeBubble(node: HTMLElement, id: string) {
+		mountedBubbleNodes.set(id, node);
+		const content = node.querySelector<HTMLElement>('.bubble-content');
+		const update = () => {
+			applyBubbleMeasurement(id, measureBubble(node));
 		};
 
 		const observer = new ResizeObserver(update);
@@ -764,6 +806,7 @@
 		return {
 			destroy() {
 				observer.disconnect();
+				if (mountedBubbleNodes.get(id) === node) mountedBubbleNodes.delete(id);
 				const next = { ...bubbleOverflowById };
 				delete next[id];
 				bubbleOverflowById = next;

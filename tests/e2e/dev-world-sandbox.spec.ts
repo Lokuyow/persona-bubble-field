@@ -741,6 +741,92 @@ test.describe('DEV World Sandbox', () => {
 		expect(state.path.y).toBeLessThan(0);
 	});
 
+	test('remeasures mounted bubble bodies after height-only viewport resize', async ({ page }) => {
+		for (const speechType of ['shout', 'monologue'] as const) {
+			await page.setViewportSize({ width: 1440, height: 1000 });
+			await expectNoConsoleProblems(page, async () => {
+				await page.goto(`/?devWorld=1&devSpeech=merged2-${speechType}-long`);
+				await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+				await expect(page.locator(`.bubble-merged[data-speech-type="${speechType}"]`)).toHaveCount(1);
+			});
+			const bubble = page.locator(`.bubble-merged[data-speech-type="${speechType}"]`);
+			const measure = () => bubble.evaluate((element) => {
+				const content = element.querySelector<HTMLElement>('.bubble-content');
+				const surface = element.querySelector<SVGSVGElement>('.bubble-surface');
+				if (!content || !surface) throw new Error('Expected a special bubble body and surface.');
+				const bodyRect = element.getBoundingClientRect();
+				const surfaceRect = surface.getBoundingClientRect();
+				const visualBounds = (surface.dataset.visualBounds ?? '').split(',').map(Number);
+				const contentStyle = getComputedStyle(content);
+				const ellipsis = element.querySelector<HTMLElement>('.bubble-ellipsis');
+				const ellipsisRect = ellipsis?.getBoundingClientRect();
+				return {
+					bodyWidth: bodyRect.width,
+					bodyHeight: bodyRect.height,
+					surfaceWidth: surfaceRect.width,
+					surfaceHeight: surfaceRect.height,
+					visualWidth: visualBounds[2],
+					visualHeight: visualBounds[3],
+					clientHeight: content.clientHeight,
+					scrollHeight: content.scrollHeight,
+					lineHeight: Number.parseFloat(contentStyle.lineHeight),
+					ellipsisVisible: Boolean(ellipsisRect && ellipsisRect.width > 0 && ellipsisRect.height > 0)
+				};
+			});
+
+			await expect.poll(async () => (await measure()).surfaceHeight).toBeGreaterThan(178);
+			const before = await measure();
+			expect(before.bodyHeight).toBeGreaterThan(100);
+			expect(before.surfaceHeight).toBeGreaterThan(before.bodyHeight);
+			expect(before.visualHeight).toBeGreaterThan(before.bodyHeight);
+			expect(before.scrollHeight).toBeGreaterThan(before.clientHeight);
+			expect(before.clientHeight).toBeLessThanOrEqual(before.lineHeight * 5 + 1);
+			expect(before.ellipsisVisible).toBe(true);
+
+			await expectNoConsoleProblems(page, async () => {
+				await page.setViewportSize({ width: 1440, height: 920 });
+				await expect.poll(async () => {
+					const state = await measure();
+					return state.visualHeight;
+				}).toBeGreaterThan(before.bodyHeight);
+			});
+			const after = await measure();
+			expect(after.bodyWidth).toBeCloseTo(before.bodyWidth, 1);
+			expect(after.bodyHeight).toBeCloseTo(before.bodyHeight, 1);
+			expect(after.surfaceWidth).toBeGreaterThan(after.bodyWidth);
+			expect(after.surfaceHeight).toBeGreaterThan(after.bodyHeight);
+			expect(after.visualWidth).toBeGreaterThan(after.bodyWidth);
+			expect(after.visualHeight).toBeGreaterThan(after.bodyHeight);
+			expect(after.scrollHeight).toBeGreaterThan(after.clientHeight);
+			expect(after.clientHeight).toBeLessThanOrEqual(after.lineHeight * 5 + 1);
+			expect(after.ellipsisVisible).toBe(true);
+		}
+
+		await page.setViewportSize({ width: 1440, height: 1000 });
+		await expectNoConsoleProblems(page, async () => {
+			await page.goto('/?devWorld=1&devSpeech=types');
+			await expect(page.locator('.bubble[data-speech-type="normal"]')).toHaveCount(1);
+		});
+		const normalBubble = page.locator('.bubble[data-speech-type="normal"]');
+		const normalBefore = await normalBubble.evaluate((element) => {
+			const rect = element.getBoundingClientRect();
+			return { width: rect.width, height: rect.height };
+		});
+		await expectNoConsoleProblems(page, async () => {
+			await page.setViewportSize({ width: 1440, height: 920 });
+			await expect.poll(async () => (await normalBubble.boundingBox())?.height ?? 0).toBeGreaterThan(0);
+		});
+		const normalAfter = await normalBubble.evaluate((element) => {
+			const rect = element.getBoundingClientRect();
+			const seam = getComputedStyle(element, '::after');
+			return { width: rect.width, height: rect.height, seamHeight: seam.height, seamBottom: seam.bottom };
+		});
+		expect(normalAfter.width).toBeCloseTo(normalBefore.width, 1);
+		expect(normalAfter.height).toBeCloseTo(normalBefore.height, 1);
+		expect(normalAfter.seamHeight).toBe('3px');
+		expect(normalAfter.seamBottom).toBe('-1px');
+	});
+
 	for (const speechType of ['shout', 'monologue'] as const) {
 		test(`keeps five-line clamping, dynamic size, and safe bounds for ${speechType} bubbles`, async ({ page }) => {
 			await page.setViewportSize({ width: 320, height: 844 });
