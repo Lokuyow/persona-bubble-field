@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { SPEECH_SHORTCUT_IDS } from './speechSubmission';
 
 	const HOST_OWNED_ENTRY = 'https://lokuyow.github.io/ehagaki/web-component/host-owned/ehagaki-composer.js';
 	const HOST_OWNED_ASSET_BASE = 'https://lokuyow.github.io/ehagaki/web-component/host-owned/';
@@ -32,15 +33,22 @@
 			enterKeyBehavior?: 'newline' | 'submit';
 			editorMinLines?: number;
 			editorMaxLines?: number;
+			submitShortcuts?: readonly Readonly<{
+				id: string;
+				modifiers: readonly ('ctrl' | 'meta' | 'ctrlOrMeta' | 'alt' | 'shift')[];
+			}>[];
 			submit: (
 				output: HostOwnedComposerOutput,
-				options: Readonly<{ signal: AbortSignal }>
+				options: Readonly<{ signal: AbortSignal; shortcutId?: string }>
 			) => Promise<void | Readonly<{ eventId: string }>>;
 		}>): void;
 	};
 
 	type Props = {
-		submitContent: (content: string, signal: AbortSignal) => Promise<Readonly<{ eventId: string }>>;
+		submitContent: (
+			content: string,
+			options: Readonly<{ signal: AbortSignal; shortcutId?: string }>
+		) => Promise<Readonly<{ eventId: string }>>;
 		onEditorEmptyChange?: (isEmpty: boolean | null) => void;
 		onPreferredHeightChange?: (height: number) => void;
 	};
@@ -93,10 +101,14 @@
 					enterKeyBehavior: 'submit',
 					editorMinLines: 1,
 					editorMaxLines: 3,
-					submit: async (output, { signal }) => {
+					submitShortcuts: [
+						{ id: SPEECH_SHORTCUT_IDS.shout, modifiers: ['ctrlOrMeta'] },
+						{ id: SPEECH_SHORTCUT_IDS.monologue, modifiers: ['alt'] }
+					],
+					submit: async (output, { signal, shortcutId }) => {
 						if (signal.aborted) throw new DOMException('Submission was cancelled.', 'AbortError');
 						// This integration intentionally ignores composer-owned tags and context.
-						return submitContent(output.content, signal);
+						return submitContent(output.content, { signal, shortcutId });
 					}
 				});
 				host.append(composer);

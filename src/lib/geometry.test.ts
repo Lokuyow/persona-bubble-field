@@ -266,6 +266,43 @@ describe('field geometry', () => {
 		expect(result).toEqual([{ id: 'isolated', anchor: { x: 36, y: 52 } }]);
 	});
 
+	it('keeps normal-only placement unchanged when no visual bounds are supplied', () => {
+		const item = { id: 'normal', preferred: { x: -20, y: 30 }, size: { width: 80, height: 32 } };
+		expect(placeBubbles([item], { x: 0, y: 0, width: 320, height: 200 }, 56)).toEqual([
+			{ id: 'normal', anchor: { x: 0, y: 30 } }
+		]);
+	});
+
+	it('keeps the base body safe while clamping and separating special visual bounds', () => {
+		const items = [
+			{ id: 'first', preferred: { x: 0, y: 30 }, size: { width: 80, height: 32 }, visualBounds: { x: -30, y: -10, width: 140, height: 52 } },
+			{ id: 'second', preferred: { x: 20, y: 30 }, size: { width: 80, height: 32 }, visualBounds: { x: -30, y: -10, width: 140, height: 52 } }
+		];
+		const bodyBounds = { x: 0, y: 0, width: 320, height: 200 };
+		const visualRegion = { x: 0, y: 0, width: 320, height: 200 };
+		const placements = placeBubbles(items, bodyBounds, 56, 8, visualRegion);
+		const first = placements.find((placement) => placement.id === 'first')!;
+		const second = placements.find((placement) => placement.id === 'second')!;
+		const visualRect = (anchor: { x: number; y: number }) => ({ x: anchor.x - 30, y: anchor.y - 10, width: 140, height: 52 });
+		const firstVisual = visualRect(first.anchor);
+		const secondVisual = visualRect(second.anchor);
+
+		expect(first.anchor).toEqual({ x: 30, y: 30 });
+		for (const placement of placements) {
+			expect(placement.anchor.x).toBeGreaterThanOrEqual(bodyBounds.x);
+			expect(placement.anchor.x + 80).toBeLessThanOrEqual(bodyBounds.width);
+			expect(placement.anchor.y).toBeGreaterThanOrEqual(bodyBounds.y);
+			expect(placement.anchor.y + 32).toBeLessThanOrEqual(bodyBounds.height);
+		}
+		for (const visual of [firstVisual, secondVisual]) {
+			expect(visual.x).toBeGreaterThanOrEqual(visualRegion.x);
+			expect(visual.x + visual.width).toBeLessThanOrEqual(visualRegion.width);
+			expect(visual.y).toBeGreaterThanOrEqual(visualRegion.y);
+			expect(visual.y + visual.height).toBeLessThanOrEqual(visualRegion.height);
+		}
+		expect(overlapAreaWithGap({ anchor: firstVisual, size: firstVisual }, { anchor: secondVisual, size: secondVisual })).toBe(0);
+	});
+
 	it('is deterministic for the same inputs, including stable ordering', () => {
 		const items = [
 			{ id: 'merged-note', preferred: { x: 100, y: 70 }, size: { width: 160, height: 48 } },

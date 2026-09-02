@@ -57,6 +57,9 @@
 	import { getVirtualKeyboardBottomInset, getVisualViewportKeyboardInset, type ViewportRect } from '$lib/keyboardInset';
 	import type { ParsedWorldMessage } from '$lib/nostrProtocol';
 	import HostOwnedComposerLite from '$lib/HostOwnedComposerLite.svelte';
+	import { resolveSpeechSubmission } from '$lib/speechSubmission';
+	import type { SpeechType } from '$lib/conversation';
+	import { createSpeechBubbleShape, type SpeechBubbleShape } from '$lib/speechBubblePath';
 	import {
 		createWorldReadSession,
 		type SelfMessageAvailability,
@@ -82,6 +85,13 @@
 	const MOVEMENT_ANIMATION_DURATION_MS = 400;
 	const MOVEMENT_DIRECTIONS: readonly Direction[] = ['up', 'down', 'left', 'right'];
 	const INITIAL_COMPOSER_PREFERRED_HEIGHT = 50;
+	const SPECIAL_TAIL_BODY_EXTENSION = 26;
+	const SPEECH_TYPE_ORDER: readonly SpeechType[] = ['normal', 'shout', 'monologue'];
+	const SPEECH_TYPE_LABELS: Readonly<Record<SpeechType, string>> = {
+		normal: '通常',
+		shout: '叫び',
+		monologue: 'モノローグ'
+	};
 	const initialDevWorldSandboxEnabled = import.meta.env.DEV &&
 		isDevWorldSandboxEnabled(import.meta.env.DEV, page.url.searchParams);
 
@@ -98,6 +108,7 @@
 	let viewportSize: Size = DEFAULT_VIEWPORT;
 	let bubbleSizes: Record<string, Size> = {};
 	let bubbleOverflowById: Record<string, boolean> = {};
+	const mountedBubbleNodes = new Map<string, HTMLElement>();
 	let conversationState: ConversationState = createConversationState();
 	let lastPlacedAnchorById: Record<string, WorldPoint> = {};
 	let lastVisibilityKey: string | null = null;
@@ -123,8 +134,10 @@
 		cleanup: () => void;
 	}> | null = null;
 	let composerStartupError: Error | null = null;
+	let composerSubmissionInProgress = false;
 	let entryRetryable = false;
 	let selectedCharacterId = '001';
+	let selectedSpeechType: SpeechType = 'normal';
 	let lastProfileTrigger: HTMLButtonElement | null = null;
 	let composerEditorIsEmpty: boolean | null = null;
 	let composerComponent: { focusEditor(): boolean; blurEditor(): boolean } | null = null;
@@ -178,6 +191,12 @@
 		width: Math.max(0, viewportSize.width - SPEECH_AREA.sidePadding * 2),
 		height: Math.max(0, actualFieldTop - SPEECH_AREA.top)
 	};
+	$: bubbleVisualRegion = {
+		x: 0,
+		y: bubbleSafeBounds.y,
+		width: viewportSize.width,
+		height: Math.max(bubbleSafeBounds.height, ...Object.values(bubbleSizes).map((size) => size.height))
+	};
 
 	$: participantViews = presenceProjection.participants.map((participant) => {
 		const world = visualWorldById[participant.id] ?? participant.world;
@@ -201,6 +220,7 @@
 			const speaker = participantById.get(bubble.pubkey);
 			if (!speaker || !isInsideFieldArea(speaker.screen)) return null;
 			const size = bubbleSizes[bubble.id] ?? DEFAULT_BUBBLE_SIZES.normal;
+			const shape = specialBubbleShape(bubble.speechType, bubble.id, size);
 			const preferred = normalBubblePreferredAnchor(
 				speaker.screen.x,
 				speaker.world.y / cellSize - 0.5,
@@ -214,6 +234,7 @@
 				tone: participantTone(speaker),
 				anchor: clampToBounds(preferred, size, bubbleSafeBounds),
 				size,
+				shape,
 				speaker
 			};
 		})
@@ -228,6 +249,7 @@
 				.filter((member) => isInsideFieldArea(member.screen))
 				.sort((left, right) => left.screen.x - right.screen.x || left.id.localeCompare(right.id));
 			const size = bubbleSizes[bubble.id] ?? DEFAULT_BUBBLE_SIZES.merged;
+			const shape = specialBubbleShape(bubble.speechType, bubble.id, size);
 			if (visibleMembers.length === 0) {
 				const lastAnchor = lastPlacedAnchorById[bubble.id];
 				if (!lastAnchor) return null;
@@ -237,6 +259,7 @@
 					tone: mergedBubbleTone(members),
 					anchor: lastAnchor,
 					size,
+					shape,
 					members: []
 				};
 			}
@@ -253,6 +276,7 @@
 				tone: mergedBubbleTone(members),
 				anchor: clampToBounds(preferred, size, bubbleSafeBounds),
 				size,
+				shape,
 				members: visibleMembers
 			};
 		})
@@ -263,9 +287,16 @@
 		...visibleMergedBubbles.filter((bubble) => bubble.members.length > 0)
 	];
 	$: bubblePlacement = placeBubbles(
-		placeableBubbles.map((bubble) => ({ id: bubble.id, preferred: bubble.anchor, size: bubble.size })),
+		placeableBubbles.map((bubble) => ({
+			id: bubble.id,
+			preferred: bubble.anchor,
+			size: bubble.size,
+			visualBounds: bubble.speechType === 'shout' ? undefined : bubble.shape?.bounds
+		})),
 		bubbleSafeBounds,
-		cellSize
+		cellSize,
+		undefined,
+		bubbleVisualRegion
 	);
 	$: placedAnchorById = new Map(bubblePlacement.map((placement) => [placement.id, placement.anchor]));
 	$: rememberPlacedMergedAnchors(visibleMergedBubbles, placedAnchorById, conversationState.mergedBubbles);
@@ -424,8 +455,10 @@
 					const mergedContent = devSpeech.endsWith('-long')
 						? 'Merged bubble content grows naturally until its size limit. '.repeat(8).trim()
 						: undefined;
-					seedDevSpeechMergedFixture(mergedMemberCount, mergedContent);
+					const mergedSpeechType = devSpeech.includes('shout') ? 'shout' : devSpeech.includes('monologue') ? 'monologue' : 'normal';
+					seedDevSpeechMergedFixture(mergedMemberCount, mergedContent, mergedSpeechType);
 				}
+				if (devSpeech === 'types') seedDevSpeechTypeFixture();
 				if (devSpeech === 'normal-sizes') seedDevSpeechNormalSizeFixture();
 				if (devSpeech === 'comparison') seedDevSpeechComparisonFixture();
 				if (devSpeech === 'linebreak') seedDevSpeechLinebreakFixture();
@@ -516,9 +549,16 @@
 			if (!viewportElement) return;
 			const rect = viewportElement.getBoundingClientRect();
 			if (rect.width <= 0 || rect.height <= 0) return;
+			if (viewportSize.width !== rect.width || viewportSize.height !== rect.height) {
+				// Measured body sizes are tied to their previous containing block.
+				// Discard them before special visual bounds are recomputed for a resize.
+				bubbleSizes = {};
+			}
 			viewportSize = { width: rect.width, height: rect.height };
 			void tick().then(() => {
-				if (mounted) syncVisualToCanonical();
+				if (!mounted) return;
+				remeasureMountedBubbles();
+				syncVisualToCanonical();
 			});
 			if (!devWorldSandboxEnabled) void begin();
 		};
@@ -703,20 +743,59 @@
 		};
 	});
 
-	function observeBubble(node: HTMLElement, id: string) {
+	type BubbleMeasurement = Readonly<{ size: Size; overflow: boolean }>;
+
+	function measureBubble(node: HTMLElement): BubbleMeasurement {
 		const content = node.querySelector<HTMLElement>('.bubble-content');
-		const update = () => {
-			const rect = node.getBoundingClientRect();
+		const rect = node.getBoundingClientRect();
+		return {
+			size: { width: rect.width, height: rect.height },
+			overflow: content ? content.scrollHeight > content.clientHeight : false
+		};
+	}
+
+	function applyBubbleMeasurement(id: string, measurement: BubbleMeasurement): void {
+		const currentSize = bubbleSizes[id];
+		if (!currentSize || currentSize.width !== measurement.size.width || currentSize.height !== measurement.size.height) {
 			bubbleSizes = {
 				...bubbleSizes,
-				[id]: { width: rect.width, height: rect.height }
+				[id]: measurement.size
 			};
-			if (content) {
-				bubbleOverflowById = {
-					...bubbleOverflowById,
-					[id]: content.scrollHeight > content.clientHeight
-				};
+		}
+		if (bubbleOverflowById[id] !== measurement.overflow) {
+			bubbleOverflowById = {
+				...bubbleOverflowById,
+				[id]: measurement.overflow
+			};
+		}
+	}
+
+	function remeasureMountedBubbles(): void {
+		const nextSizes = { ...bubbleSizes };
+		const nextOverflow = { ...bubbleOverflowById };
+		let sizesChanged = false;
+		let overflowChanged = false;
+		for (const [id, node] of mountedBubbleNodes) {
+			const measurement = measureBubble(node);
+			const currentSize = nextSizes[id];
+			if (!currentSize || currentSize.width !== measurement.size.width || currentSize.height !== measurement.size.height) {
+				nextSizes[id] = measurement.size;
+				sizesChanged = true;
 			}
+			if (nextOverflow[id] !== measurement.overflow) {
+				nextOverflow[id] = measurement.overflow;
+				overflowChanged = true;
+			}
+		}
+		if (sizesChanged) bubbleSizes = nextSizes;
+		if (overflowChanged) bubbleOverflowById = nextOverflow;
+	}
+
+	function observeBubble(node: HTMLElement, id: string) {
+		mountedBubbleNodes.set(id, node);
+		const content = node.querySelector<HTMLElement>('.bubble-content');
+		const update = () => {
+			applyBubbleMeasurement(id, measureBubble(node));
 		};
 
 		const observer = new ResizeObserver(update);
@@ -727,6 +806,7 @@
 		return {
 			destroy() {
 				observer.disconnect();
+				if (mountedBubbleNodes.get(id) === node) mountedBubbleNodes.delete(id);
 				const next = { ...bubbleOverflowById };
 				delete next[id];
 				bubbleOverflowById = next;
@@ -1047,12 +1127,38 @@
 		});
 	}
 
-	async function submitComposerContent(content: string, signal: AbortSignal): Promise<Readonly<{ eventId: string }>> {
-		await waitForMessageReady(signal);
-		if (signal.aborted) throw new DOMException('Submission was cancelled.', 'AbortError');
-		const result = await worldSession?.publishNormalMessage(content);
-		if (result?.kind === 'succeeded') return { eventId: result.eventId };
-		throw new Error('Message was not confirmed by Relay.');
+	async function submitComposerContent(
+		content: string,
+		options: Readonly<{ signal: AbortSignal; shortcutId?: string }>
+	): Promise<Readonly<{ eventId: string }>> {
+		const submission = resolveSpeechSubmission({
+			content,
+			shortcutId: options.shortcutId,
+			selectedSpeechType
+		});
+		composerSubmissionInProgress = true;
+		try {
+			await waitForMessageReady(options.signal);
+			if (options.signal.aborted) throw new DOMException('Submission was cancelled.', 'AbortError');
+			const result = await worldSession?.publishMessage(submission.content, submission.speechType);
+			if (result?.kind === 'succeeded') {
+				selectedSpeechType = 'normal';
+				return { eventId: result.eventId };
+			}
+			throw new Error('Message was not confirmed by Relay.');
+		} finally {
+			composerSubmissionInProgress = false;
+		}
+	}
+
+	function nextSpeechType(speechType: SpeechType): SpeechType {
+		const index = SPEECH_TYPE_ORDER.indexOf(speechType);
+		return SPEECH_TYPE_ORDER[(index + 1) % SPEECH_TYPE_ORDER.length];
+	}
+
+	function cycleSpeechType(): void {
+		if (composerSubmissionInProgress) return;
+		selectedSpeechType = nextSpeechType(selectedSpeechType);
 	}
 
 	function setComposerPreferredHeight(height: number): void {
@@ -1136,7 +1242,11 @@
 		}
 	}
 
-	function seedDevSpeechMergedFixture(mergedMemberCount: number, mergedContent = 'merged fixture'): void {
+	function seedDevSpeechMergedFixture(
+		mergedMemberCount: number,
+		mergedContent = 'merged fixture',
+		mergedSpeechType: SpeechType = 'normal'
+	): void {
 		if (!devWorldSandboxEnabled) return;
 		const now = Date.now();
 		const normalPubkey = 'a'.repeat(64);
@@ -1158,7 +1268,7 @@
 			id: 'dev-speech-normal-message', pubkey: normalPubkey, content: 'normal fixture', createdAt: now
 		} as const;
 		const mergedMessage = {
-			id: 'dev-speech-merged-message-a', pubkey: mergedPubkeys[0], content: mergedContent, createdAt: now
+			id: 'dev-speech-merged-message-a', pubkey: mergedPubkeys[0], content: mergedContent, speechType: mergedSpeechType, createdAt: now
 		} as const;
 		conversationState = receiveMessage(conversationState, normalMessage, { isSpeakerVisible: true, duration, now });
 		conversationState = receiveMessage(conversationState, mergedMessage, { isSpeakerVisible: true, duration, now });
@@ -1169,6 +1279,37 @@
 				pubkey
 			}, { isSpeakerVisible: true, duration, now });
 		}
+	}
+
+	function seedDevSpeechTypeFixture(): void {
+		if (!devWorldSandboxEnabled) return;
+		const now = Date.now();
+		const normalPubkey = 'a'.repeat(64);
+		const singleShoutPubkey = 'f'.repeat(64);
+		const singleMonologuePubkey = '9'.repeat(64);
+		const shoutPubkeys = ['b', 'c'].map((prefix) => prefix.repeat(64));
+		const monologuePubkeys = ['d', 'e'].map((prefix) => prefix.repeat(64));
+		setPresence(createPresenceState(FIELD, now, [
+			{ id: DEV_WORLD_SELF_ID, position: { x: 7, y: 3 } },
+			{ id: normalPubkey, position: { x: 4, y: 2 } },
+			{ id: singleShoutPubkey, position: { x: 11, y: 2 } },
+			{ id: singleMonologuePubkey, position: { x: 11, y: 1 } },
+			...shoutPubkeys.map((id, index) => ({ id, position: { x: index === 0 ? 6 : 8, y: 2 } })),
+			...monologuePubkeys.map((id, index) => ({ id, position: { x: index === 0 ? 6 : 8, y: 1 } }))
+		]));
+		const duration = 60_000;
+		const addMessage = (id: string, pubkey: string, content: string, speechType: SpeechType) => {
+			conversationState = receiveMessage(conversationState, {
+				id, pubkey, content, speechType, createdAt: now
+			}, { isSpeakerVisible: true, duration, now });
+		};
+		addMessage('dev-speech-types-normal', normalPubkey, 'normal fixture', 'normal');
+		addMessage('dev-speech-types-single-shout', singleShoutPubkey, 'single shout fixture', 'shout');
+		addMessage('dev-speech-types-single-monologue', singleMonologuePubkey, 'single monologue fixture', 'monologue');
+		addMessage('dev-speech-types-shout-a', shoutPubkeys[0], 'shout fixture', 'shout');
+		addMessage('dev-speech-types-shout-b', shoutPubkeys[1], 'shout fixture', 'shout');
+		addMessage('dev-speech-types-monologue-a', monologuePubkeys[0], 'monologue fixture', 'monologue');
+		addMessage('dev-speech-types-monologue-b', monologuePubkeys[1], 'monologue fixture', 'monologue');
 	}
 
 	function seedDevSpeechNormalSizeFixture(): void {
@@ -1397,6 +1538,18 @@
 		if (changed) lastPlacedAnchorById = next;
 	}
 
+	function specialBubbleShape(speechType: SpeechType, bubbleId: string, size: Size): SpeechBubbleShape | null {
+		const constraints = speechType === 'shout' ? undefined : {
+			maxBleedX: Math.max(0, (viewportSize.width - size.width) / 2),
+			maxBleedY: Math.max(0, (bubbleSafeBounds.height - size.height) / 2)
+		};
+		return createSpeechBubbleShape(speechType, size.width, size.height, `${bubbleId}${speechType}`, constraints);
+	}
+
+	function bubbleSurfaceStyle(shape: SpeechBubbleShape): string {
+		return `inset: auto; left: ${shape.bounds.x - 1}px; top: ${shape.bounds.y - 1}px; width: ${shape.bounds.width}px; height: ${shape.bounds.height}px;`;
+	}
+
 	function tailStart(anchor: WorldPoint, size: Size): WorldPoint {
 		return { x: anchor.x + size.width / 2, y: anchor.y + size.height };
 	}
@@ -1441,7 +1594,7 @@
 		};
 	}
 
-	function tailGeometry(start: WorldPoint, target: WorldPoint, width = 11, overlap = 2) {
+	function tailGeometry(start: WorldPoint, target: WorldPoint, width = 11, overlap = 2, bodyExtension = 0) {
 		const dx = target.x - start.x;
 		const dy = target.y - start.y;
 		const length = Math.hypot(dx, dy) || 1;
@@ -1452,14 +1605,38 @@
 		const baseCenter = { x: start.x - ux * overlap, y: start.y - uy * overlap };
 		const left = { x: baseCenter.x + px, y: baseCenter.y + py };
 		const right = { x: baseCenter.x - px, y: baseCenter.y - py };
+		const extendIntoBody = (point: WorldPoint): WorldPoint => ({
+			x: point.x + (point.x - target.x) / length * bodyExtension,
+			y: point.y + (point.y - target.y) / length * bodyExtension
+		});
+		const rootLeft = extendIntoBody(left);
+		const rootRight = extendIntoBody(right);
 		const seamProgress = Math.min(1, Math.max(0, (start.y - baseCenter.y) / (target.y - baseCenter.y || 1)));
 		const seamCenterX = baseCenter.x + (target.x - baseCenter.x) * seamProgress;
 
 		return {
-			points: `${left.x},${left.y} ${right.x},${right.y} ${target.x},${target.y}`,
-			outlinePath: `M ${left.x} ${left.y} L ${target.x} ${target.y} L ${right.x} ${right.y}`,
+			points: `${rootLeft.x},${rootLeft.y} ${rootRight.x},${rootRight.y} ${target.x},${target.y}`,
+			outlinePath: `M ${rootLeft.x} ${rootLeft.y} L ${target.x} ${target.y} L ${rootRight.x} ${rootRight.y}`,
+			rootLeft,
+			rootRight,
+			target,
 			seamOffsetX: seamCenterX - start.x
 		};
+	}
+
+	function specialTailExtension(speechType: SpeechType): number {
+		return speechType === 'normal' ? 0 : SPECIAL_TAIL_BODY_EXTENSION;
+	}
+
+	function tailOutlineOpeningPoints(tail: ReturnType<typeof tailGeometry>, anchor: WorldPoint): string {
+		return [tail.rootLeft, tail.rootRight, tail.target]
+			.map((point) => ({ x: point.x - anchor.x, y: point.y - anchor.y }))
+			.map((point) => `${point.x},${point.y}`)
+			.join(' ');
+	}
+
+	function speechOutlineMaskId(bubbleId: string): string {
+		return `speech-tail-opening-${bubbleId.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
 	}
 </script>
 
@@ -1615,7 +1792,7 @@
 			{#each positionedNormalBubbles as bubble (bubble.id)}
 				{@const start = tailStart(bubble.anchor, bubble.size)}
 				{@const target = tailTarget(bubble.speaker)}
-				{@const tail = tailGeometry(start, target)}
+				{@const tail = tailGeometry(start, target, 11, 2, specialTailExtension(bubble.speechType))}
 				<polygon class={`tail tail-${bubble.tone} tone-${bubble.tone}`} data-tail-participant-id={bubble.speaker.id} points={tail.points} />
 				<path class={`tail-outline tone-${bubble.tone}`} data-tail-participant-id={bubble.speaker.id} d={tail.outlinePath} />
 			{/each}
@@ -1623,7 +1800,7 @@
 				{#each bubble.members as member, index (member.id)}
 					{@const start = mergedTailStart(bubble.anchor, bubble.size, index, bubble.members.length)}
 					{@const target = tailTarget(member)}
-					{@const tail = tailGeometry(start, target, 9, 2)}
+					{@const tail = tailGeometry(start, target, 9, 2, specialTailExtension(bubble.speechType))}
 					<polygon class={`tail tail-${bubble.tone} tone-${bubble.tone}`} data-tail-participant-id={member.id} points={tail.points} />
 					<path class={`tail-outline tone-${bubble.tone}`} data-tail-participant-id={member.id} d={tail.outlinePath} />
 				{/each}
@@ -1634,18 +1811,49 @@
 			{#each positionedVisibleBubbles as bubble (bubble.id)}
 				<div
 					use:observeBubble={bubble.id}
-					class={`bubble bubble-${bubble.kind} bubble-${bubble.tone} tone-${bubble.tone}`}
+					class={`bubble bubble-${bubble.kind} bubble-${bubble.tone} tone-${bubble.tone}${bubble.speechType !== 'normal' ? ' speech-bubble-special' : ''}`}
 					data-bubble-id={bubble.id}
 					data-bubble-participant-id={bubble.kind === 'normal' ? bubble.speaker.id : undefined}
 					data-merged-members={bubble.kind === 'merged' ? bubble.memberPubkeys.length : undefined}
 					data-speech-type={bubble.speechType}
 					style={`${bubble.kind === 'merged' ? mergedBubbleStyle(bubble.memberPubkeys.length) : ''}; --tail-seam-offset-x: ${bubble.kind === 'normal' ? tailGeometry(tailStart(bubble.anchor, bubble.size), tailTarget(bubble.speaker)).seamOffsetX : 0}px; transform: translate3d(${bubble.anchor.x}px, ${bubble.anchor.y}px, 0);`}
 				>
+					{#if bubble.speechType !== 'normal'}
+						{@const shape = bubble.shape}
+						{@const outlineMaskId = speechOutlineMaskId(bubble.id)}
+						<svg
+							class="bubble-surface"
+							data-speech-surface={bubble.speechType}
+							data-visual-bounds={`${shape?.bounds.x ?? 0},${shape?.bounds.y ?? 0},${shape?.bounds.width ?? bubble.size.width},${shape?.bounds.height ?? bubble.size.height}`}
+							viewBox={`${shape?.bounds.x ?? 0} ${shape?.bounds.y ?? 0} ${shape?.bounds.width ?? bubble.size.width} ${shape?.bounds.height ?? bubble.size.height}`}
+							style={shape ? bubbleSurfaceStyle(shape) : ''}
+							aria-hidden="true"
+						>
+							<defs>
+								<mask id={outlineMaskId} maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x={shape?.bounds.x ?? 0} y={shape?.bounds.y ?? 0} width={shape?.bounds.width ?? bubble.size.width} height={shape?.bounds.height ?? bubble.size.height}>
+									<rect x={shape?.bounds.x ?? 0} y={shape?.bounds.y ?? 0} width={shape?.bounds.width ?? bubble.size.width} height={shape?.bounds.height ?? bubble.size.height} fill="white" />
+									{#if bubble.kind === 'normal'}
+										{@const start = tailStart(bubble.anchor, bubble.size)}
+										{@const tail = tailGeometry(start, tailTarget(bubble.speaker), 11, 2, SPECIAL_TAIL_BODY_EXTENSION)}
+										<polygon data-tail-opening={bubble.speaker.id} points={tailOutlineOpeningPoints(tail, bubble.anchor)} fill="black" />
+									{:else}
+										{#each bubble.members as member, index (member.id)}
+											{@const start = mergedTailStart(bubble.anchor, bubble.size, index, bubble.members.length)}
+											{@const tail = tailGeometry(start, tailTarget(member), 9, 2, SPECIAL_TAIL_BODY_EXTENSION)}
+											<polygon data-tail-opening={member.id} points={tailOutlineOpeningPoints(tail, bubble.anchor)} fill="black" />
+										{/each}
+									{/if}
+								</mask>
+							</defs>
+							<path class="bubble-surface-fill" d={shape?.path ?? ''} />
+							<path class="bubble-surface-outline" d={shape?.path ?? ''} mask={`url(#${outlineMaskId})`} />
+						</svg>
+					{/if}
 					<span class="bubble-content">{bubble.text}</span>
 					{#if bubbleOverflowById[bubble.id]}
 						<span class="bubble-ellipsis" aria-hidden="true">…</span>
 					{/if}
-					{#if bubble.kind === 'merged'}
+					{#if bubble.kind === 'merged' && bubble.speechType === 'normal'}
 						{#each bubble.members as member, index (member.id)}
 							<span
 								class="bubble-tail-connection"
@@ -1687,12 +1895,27 @@
 
 	{#if runtimeMode === 'relay'}
 		<div class="composer-dock" aria-label="Message composer">
-			<HostOwnedComposerLite
-				bind:this={composerComponent}
-				submitContent={submitComposerContent}
-				onEditorEmptyChange={handleComposerEditorEmptyChange}
-				onPreferredHeightChange={setComposerPreferredHeight}
-			/>
+			<div class="composer-dock-content">
+				<button
+					class="speech-type-toggle"
+					type="button"
+					data-speech-type={selectedSpeechType}
+					aria-label={`発言タイプ: ${SPEECH_TYPE_LABELS[selectedSpeechType]}（クリックで${SPEECH_TYPE_LABELS[nextSpeechType(selectedSpeechType)]}へ）`}
+					title={`発言タイプ: ${SPEECH_TYPE_LABELS[selectedSpeechType]}。クリックで${SPEECH_TYPE_LABELS[nextSpeechType(selectedSpeechType)]}へ`}
+					disabled={composerSubmissionInProgress}
+					on:click={cycleSpeechType}
+				>
+					<span aria-hidden="true">{SPEECH_TYPE_LABELS[selectedSpeechType]}</span>
+				</button>
+				<div class="composer-editor-slot">
+					<HostOwnedComposerLite
+						bind:this={composerComponent}
+						submitContent={submitComposerContent}
+						onEditorEmptyChange={handleComposerEditorEmptyChange}
+						onPreferredHeightChange={setComposerPreferredHeight}
+					/>
+				</div>
+			</div>
 		</div>
 	{/if}
 
@@ -1853,9 +2076,56 @@
 		padding-bottom: var(--composer-dock-padding-block);
 	}
 
-	.composer-dock :global(.host-owned-composer) {
+	.composer-dock-content {
+		display: flex;
 		width: min(720px, 100%);
+		height: 100%;
+		align-items: stretch;
+		gap: 8px;
 		margin: 0 auto;
+		min-width: 0;
+	}
+
+	.speech-type-toggle {
+		flex: 0 0 54px;
+		min-width: 0;
+		min-height: 0;
+		padding: 0 4px;
+		border: 1px solid rgba(57, 67, 64, 0.2);
+		border-radius: 12px;
+		background: rgba(255, 255, 255, 0.86);
+		box-shadow: 0 5px 12px rgba(58, 70, 61, 0.1);
+		color: #3f4a47;
+		font-size: 10px;
+		font-weight: 800;
+		line-height: 1.15;
+		white-space: normal;
+	}
+
+	.speech-type-toggle:hover:not(:disabled) {
+		background: rgba(255, 255, 255, 0.98);
+	}
+
+	.speech-type-toggle:disabled {
+		cursor: wait;
+		opacity: 0.58;
+	}
+
+	.speech-type-toggle:focus-visible {
+		outline: 3px solid #6dabb9;
+		outline-offset: 2px;
+	}
+
+	.composer-editor-slot {
+		flex: 1 1 auto;
+		min-width: 0;
+		min-height: 0;
+	}
+
+	.composer-dock-content :global(.host-owned-composer) {
+		width: 100%;
+		height: 100%;
+		min-width: 0;
 	}
 
 	.field-viewport::before {
@@ -2327,7 +2597,46 @@
 		will-change: transform;
 	}
 
+	.bubble[data-speech-type='shout'] {
+		z-index: 3;
+	}
+
+	.speech-bubble-special {
+		background: transparent;
+		border-color: transparent;
+		border-radius: 0;
+	}
+
+	.speech-bubble-special.bubble-normal::after {
+		content: none;
+	}
+
+	.bubble-surface {
+		position: absolute;
+		inset: -1px;
+		z-index: 0;
+		display: block;
+		width: calc(100% + 2px);
+		height: calc(100% + 2px);
+		overflow: visible;
+		pointer-events: none;
+	}
+
+	.bubble-surface-fill {
+		fill: var(--tone-background);
+	}
+
+	.bubble-surface-outline {
+		fill: none;
+		stroke: var(--tone-outline);
+		stroke-width: 1;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+	}
+
 	.bubble-content {
+		position: relative;
+		z-index: 1;
 		min-width: 0;
 		max-width: 100%;
 		overflow: hidden;

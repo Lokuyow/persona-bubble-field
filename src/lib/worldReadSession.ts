@@ -26,6 +26,7 @@ import {
 import type { Direction } from './geometry';
 import type { VerifiedEvent } from 'nostr-tools/pure';
 import type { AccountSnapshot } from './nostrAccount';
+import type { SpeechType } from './conversation';
 import { reachedAuthoritativeRelay } from './initialProfilePublication';
 import {
 	createPositionPublishState,
@@ -289,7 +290,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 		return { event: signed, parsed };
 	}
 
-	function selfMessageCandidate(content: string): Readonly<{ event: VerifiedEvent; parsed: ParsedWorldMessage }> | null {
+	function selfMessageCandidate(content: string, speechType: SpeechType): Readonly<{ event: VerifiedEvent; parsed: ParsedWorldMessage }> | null {
 		if (!options.selfAccount || !channel || !selfJoinedThisSession) return null;
 		const nowMs = Date.now();
 		const state = currentPresence();
@@ -303,7 +304,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 		const signed = finalizeWorldEvent(buildWorldMessageTemplate({
 			channel,
 			content,
-			speechType: 'normal',
+			speechType,
 			position: participant.position,
 			createdAt: Math.floor(nowMs / 1000)
 		}), options.selfAccount.secretKey);
@@ -312,10 +313,10 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 		return { event: signed, parsed };
 	}
 
-	async function publishNormalMessage(content: string): Promise<SelfMessagePublishResult> {
+	async function publishMessage(content: string, speechType: SpeechType): Promise<SelfMessagePublishResult> {
 		if (disposed || !options.selfAccount || !transport || !channel) return { kind: 'unavailable' };
 		if (pendingSelfMessage) return { kind: 'pending' };
-		const candidate = selfMessageCandidate(content);
+		const candidate = selfMessageCandidate(content, speechType);
 		if (!candidate) return { kind: 'blocked' };
 		const { event, parsed } = candidate;
 		pendingSelfMessage = { id: parsed.id, echoConfirmed: false };
@@ -472,8 +473,8 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 			);
 		},
 
-		publishNormalMessage(content: string): Promise<SelfMessagePublishResult> {
-			return publishNormalMessage(content);
+		publishMessage(content: string, speechType: SpeechType): Promise<SelfMessagePublishResult> {
+			return publishMessage(content, speechType);
 		},
 
 		refresh(nowMs: number): PresenceState {

@@ -109,7 +109,7 @@ describe('world read session', () => {
 	});
 
 	it('keeps history in the timeline while excluding it from presence and recent bootstrap messages', async () => {
-		const old = { ...message('old-history', 39), pubkey: 'b'.repeat(64) };
+		const old = { ...message('old-history', 39), pubkey: 'b'.repeat(64), speechType: 'monologue' as const };
 		const recent = message('recent-message', 40);
 		result = startResult([old, recent]);
 		const timeline = vi.fn();
@@ -560,7 +560,7 @@ describe('world read session', () => {
 
 		await session.start();
 		session.completeBootstrap();
-		await expect(session.publishNormalMessage('before entry')).resolves.toEqual({ kind: 'blocked' });
+		await expect(session.publishMessage('before entry', 'normal')).resolves.toEqual({ kind: 'blocked' });
 		expect(publish).not.toHaveBeenCalled();
 		expect(session.getSelfMessageAvailability()).toEqual({ kind: 'unavailable' });
 	});
@@ -569,18 +569,20 @@ describe('world read session', () => {
 		result = startResult([], [position('self-bootstrap', 700, selfPubkey, 0, { x: 2, y: 1 })]);
 		publish.mockResolvedValueOnce([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
 		const live = vi.fn();
+		const timeline = vi.fn();
 		const session = createWorldReadSession({
 			field: { columns: 4, rows: 3 },
 			selfAccount: selfAccount(),
 			onPresenceChanged: vi.fn(),
 			onLiveMessage: live,
+			onTimelineMessage: timeline,
 			onStatusChanged: vi.fn()
 		});
 
 		await session.start();
 		session.completeBootstrap();
 		await session.enterSelf();
-		await expect(session.publishNormalMessage('hello #ignored')).resolves.toEqual({
+		await expect(session.publishMessage('hello #ignored', 'normal')).resolves.toEqual({
 			kind: 'succeeded',
 			eventId: expect.any(String)
 		});
@@ -596,6 +598,48 @@ describe('world read session', () => {
 		]);
 		expect(parsed).toMatchObject({ content: 'hello #ignored', speechType: 'normal', position: { x: 2, y: 1 } });
 		expect(live).toHaveBeenCalledTimes(1);
+		expect(timeline).toHaveBeenCalledWith(expect.objectContaining({
+			id: parsed?.id,
+			content: 'hello #ignored',
+			speechType: 'normal'
+		}));
+	});
+
+	it.each([
+		['shout', ['l', 'speech:shout', 'io.github.lokuyow.persona-bubble-field']],
+		['monologue', ['l', 'speech:monologue', 'io.github.lokuyow.persona-bubble-field']]
+	] as const)('publishes a canonical %s speech type through kind 42', async (speechType, speechLabel) => {
+		result = startResult([], [position('self-bootstrap', 700, selfPubkey, 0, { x: 2, y: 1 })]);
+		publish.mockResolvedValueOnce([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
+		const timeline = vi.fn();
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 },
+			selfAccount: selfAccount(),
+			onPresenceChanged: vi.fn(),
+			onLiveMessage: vi.fn(),
+			onTimelineMessage: timeline,
+			onStatusChanged: vi.fn()
+		});
+
+		await session.start();
+		session.completeBootstrap();
+		await session.enterSelf();
+		await expect(session.publishMessage('typed message', speechType)).resolves.toEqual({
+			kind: 'succeeded',
+			eventId: expect.any(String)
+		});
+
+		const event = publish.mock.calls[0][0];
+		expect(event.kind).toBe(42);
+		expect(event.tags).toContainEqual(speechLabel);
+		expect(parseWorldMessage(event, 'c'.repeat(64))).toMatchObject({
+			content: 'typed message',
+			speechType
+		});
+		expect(timeline).toHaveBeenCalledWith(expect.objectContaining({
+			content: 'typed message',
+			speechType
+		}));
 	});
 
 	it('accepts the canonical duplicate prefix for a normal message', async () => {
@@ -613,7 +657,7 @@ describe('world read session', () => {
 		session.completeBootstrap();
 		await session.enterSelf();
 
-		await expect(session.publishNormalMessage('duplicate')).resolves.toEqual({ kind: 'succeeded', eventId: expect.any(String) });
+		await expect(session.publishMessage('duplicate', 'normal')).resolves.toEqual({ kind: 'succeeded', eventId: expect.any(String) });
 	});
 
 	it('reactivates an entered self through a message and records the reallocated w position', async () => {
@@ -632,7 +676,7 @@ describe('world read session', () => {
 		await session.enterSelf();
 		vi.setSystemTime(700_000 + PRESENCE_TIMEOUT_MS);
 		input!.onLivePosition(position('occupied', 700 + PRESENCE_TIMEOUT_MS / 1000, alice, 0, { x: 2, y: 1 }));
-		await expect(session.publishNormalMessage('back')).resolves.toEqual({ kind: 'succeeded', eventId: expect.any(String) });
+		await expect(session.publishMessage('back', 'normal')).resolves.toEqual({ kind: 'succeeded', eventId: expect.any(String) });
 		const parsed = parseWorldMessage(publish.mock.calls[0][0], 'c'.repeat(64));
 
 		expect(parsed?.position).not.toEqual({ x: 2, y: 1 });
@@ -657,7 +701,7 @@ describe('world read session', () => {
 		await session.start();
 		session.completeBootstrap();
 		await session.enterSelf();
-		const pending = session.publishNormalMessage('echo first');
+		const pending = session.publishMessage('echo first', 'normal');
 		await Promise.resolve();
 		const echoed = parseWorldMessage(publish.mock.calls[0][0], 'c'.repeat(64))!;
 		input!.onLiveMessage(echoed);
@@ -683,7 +727,7 @@ describe('world read session', () => {
 		await session.start();
 		session.completeBootstrap();
 		await session.enterSelf();
-		const pending = session.publishNormalMessage('waiting');
+		const pending = session.publishMessage('waiting', 'normal');
 		await Promise.resolve();
 		input!.onLiveMessage({ ...message('other-live', 700), pubkey: alice });
 		resolvePublish([{ relayUrl: 'wss://relay.test/', outcome: 'no-response' }]);
@@ -709,7 +753,7 @@ describe('world read session', () => {
 		await session.start();
 		session.completeBootstrap();
 		await session.enterSelf();
-		await expect(session.publishNormalMessage('not confirmed')).resolves.toEqual({ kind: 'retryable' });
+		await expect(session.publishMessage('not confirmed', 'normal')).resolves.toEqual({ kind: 'retryable' });
 
 		expect(live).not.toHaveBeenCalled();
 	});
@@ -759,7 +803,7 @@ describe('world read session', () => {
 		session.completeBootstrap();
 		await expect(session.enterSelf()).resolves.toEqual({ kind: 'not-needed' });
 		await expect(session.moveSelf('right')).resolves.toEqual({ kind: 'retryable', operation: 'movement' });
-		await expect(session.publishNormalMessage('still available')).resolves.toEqual(expect.objectContaining({ kind: 'succeeded' }));
+		await expect(session.publishMessage('still available', 'normal')).resolves.toEqual(expect.objectContaining({ kind: 'succeeded' }));
 		expect(availability).toEqual(['ready']);
 	});
 
@@ -854,7 +898,7 @@ describe('world read session', () => {
 			expect.objectContaining({ id: selfPubkey, position: { x: 2, y: 1 } })
 		]);
 		expect(availability).toEqual([]);
-		await expect(session.publishNormalMessage('too early')).resolves.toEqual({ kind: 'blocked' });
+		await expect(session.publishMessage('too early', 'normal')).resolves.toEqual({ kind: 'blocked' });
 		session.completeBootstrap();
 		await expect(session.enterSelf()).resolves.toEqual({ kind: 'not-needed' });
 		expect(availability).toEqual(['ready']);

@@ -162,6 +162,13 @@ presence切れしたユーザーの色は再利用可能とする。
 
 具体的な重なり回避algorithmは内部実装として扱い、上記の製品挙動を維持する。
 
+重なり回避の判定対象は、フキダシの本文bodyとする。叫びのspikeは本文bodyの外側にある
+decorative overflowとして扱い、bodyの配置・collision・overlap avoidanceの判定には含めない。
+そのため、叫びのspikeは発言領域からはみ出したり、他のフキダシやそのしっぽと視覚的に
+重なったりしてよい。spikeの重なりを避けるためにbodyを移動したり、spikeを短縮したりしない。
+viewportの外側へ出たspikeはviewportのclipで隠れてよい。
+叫びのspikeが通常またはモノローグのフキダシと視覚的に重なった場合、叫びを前面に描画する。
+
 ### 発言中の移動
 
 通常フキダシ表示中に発言者が移動した場合、フキダシも発言者を追従する。
@@ -276,17 +283,51 @@ message subscription、position subscription、`EOSE`、再接続等の詳細な
 
 3種類とも発言が見える範囲は同じとする。
 
-違いは主として専用クライアント上の見た目・演出に持たせる。
+違いは主として専用クライアント上のbody silhouetteに持たせる。叫びとモノローグの装飾は、
+通常と同じ本文bodyを基準にその外側へ付加し、装飾のために本文領域を縮めない。
 
-具体的な、
+通常は既存の通常フキダシ表示を維持し、叫びとモノローグは以下の見た目とする。
 
-- フキダシ形状
-- サイズ
-- 装飾
-- アニメーション
-- その他の演出
+- 叫び：通常のbody contourを一部残し、その一部へ長短差のあるcenter-radial spikeを偏りすぎないよう全周へ分散して付加するjagged / spiky / burst形状。bodyが大きいほど基準spikeを長くし、body/text領域は縮めない
+- モノローグ：visible silhouetteの全周を大小のある丸いcloud lobeで形成し、通常のrounded contourをvisible final outlineとして残さないfluffy / cloud / scalloped形状。小さい房を主体とし、ときどき大きい房を混ぜる
 
-は未決定とする。
+fillは現在のbubble tone background、outlineは現在のspeaker tone outlineを使用する。
+3種類とも現在のtail geometryを共有し、type別のtailは追加しない。合体フキダシも元の
+発言タイプのbody silhouetteを維持する。
+叫び・モノローグでもbodyとtailはfillとoutlineを連続した一つのフキダシとして見せ、tail rootに
+body outlineの横切り、gap、二重線を残さない。
+
+発言タイプによってfont、size、paddingの意味論、最大5表示行、display duration、visibility、
+range、max widthの製品ルール、merge巨大化ルール、animationを変更しない。
+
+### 発言タイプの選択
+
+発言タイプは1投稿ごとのexplicit choiceとし、通常をdefaultとする。ユーザーは以下の3方法で
+選択できる。
+
+1. Composer dockの発言タイプ切り替えbutton
+2. Composer本文先頭のslash command
+3. modified Enter shortcut
+
+切り替えbuttonは通常 → 叫び → モノローグ → 通常の順に循環するone-shot選択で、投稿成功後は
+通常へ戻り、投稿失敗時は選択を維持する。選択状態は永続化しない。
+
+slash commandは本文の絶対先頭でtokenが完全一致する場合だけ認識し、認識したprefixと最初の
+ASCII spaceだけをNostr contentから除去する。long commandとshort aliasは同じ意味とする。
+
+- 叫び：`/shout`、`/s`
+- モノローグ：`/mono`、`/m`
+
+`/something`、`/me`等をprefix matchとして扱わず、case-sensitiveとする。commandの後に本文が
+ない投稿は送信しない。
+
+shortcutの優先順位は、
+
+`keyboard shortcut > slash command > UI切り替え > normal`
+
+とする。Ctrl/Cmd+Enterは叫び、Alt/Option+Enterはモノローグ、plain Enterは通常のsubmit、
+Shift+Enterは改行とする。shortcutとslash commandが競合しても、認識したslash prefixは本文から
+除去する。
 
 3種類でNostr event kindを分けない。
 
@@ -390,7 +431,8 @@ NIP-32 namespaceと専用世界識別の詳細は [`SPEC-10-Nostr・アカウン
 
 そこから画面内にいる各発言者のアイコンへしっぽを伸ばす。
 
-他のフキダシとの重なりは通常フキダシと同様に可能な範囲で回避する。
+本文bodyの他のフキダシとの重なりは通常フキダシと同様に可能な範囲で回避する。叫びの
+spikeの視覚的な重なりは、この判定対象に含めない。
 
 ### 合体メンバーの固定
 
