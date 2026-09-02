@@ -162,6 +162,12 @@ presence切れしたユーザーの色は再利用可能とする。
 
 具体的な重なり回避algorithmは内部実装として扱い、上記の製品挙動を維持する。
 
+重なり回避の判定対象は、フキダシの本文bodyとする。叫びのspikeは本文bodyの外側にある
+decorative overflowとして扱い、bodyの配置・collision・overlap avoidanceの判定には含めない。
+そのため、叫びのspikeは発言領域からはみ出したり、他のフキダシやそのしっぽと視覚的に
+重なったりしてよい。spikeの重なりを避けるためにbodyを移動したり、spikeを短縮したりしない。
+viewportの外側へ出たspikeはviewportのclipで隠れてよい。
+
 ### 発言中の移動
 
 通常フキダシ表示中に発言者が移動した場合、フキダシも発言者を追従する。
@@ -281,7 +287,7 @@ message subscription、position subscription、`EOSE`、再接続等の詳細な
 
 通常は既存の通常フキダシ表示を維持し、叫びとモノローグは以下の見た目とする。
 
-- 叫び：通常のbody contourを一部残し、その一部へ細長いcenter-radial spikeを付加するjagged / spiky / burst形状。spikeを全周へ敷き詰めず、bodyが大きいほどspikeを長くする
+- 叫び：通常のbody contourを一部残し、その一部へ長短差のあるcenter-radial spikeを偏りすぎないよう全周へ分散して付加するjagged / spiky / burst形状。bodyが大きいほど基準spikeを長くし、body/text領域は縮めない
 - モノローグ：visible silhouetteの全周を大小のある丸いcloud lobeで形成し、通常のrounded contourをvisible final outlineとして残さないfluffy / cloud / scalloped形状。小さい房を主体とし、ときどき大きい房を混ぜる
 
 fillは現在のbubble tone background、outlineは現在のspeaker tone outlineを使用する。
@@ -424,7 +430,8 @@ NIP-32 namespaceと専用世界識別の詳細は [`SPEC-10-Nostr・アカウン
 
 そこから画面内にいる各発言者のアイコンへしっぽを伸ばす。
 
-他のフキダシとの重なりは通常フキダシと同様に可能な範囲で回避する。
+本文bodyの他のフキダシとの重なりは通常フキダシと同様に可能な範囲で回避する。叫びの
+spikeの視覚的な重なりは、この判定対象に含めない。
 
 ### 合体メンバーの固定
 

@@ -286,7 +286,12 @@
 		...visibleMergedBubbles.filter((bubble) => bubble.members.length > 0)
 	];
 	$: bubblePlacement = placeBubbles(
-		placeableBubbles.map((bubble) => ({ id: bubble.id, preferred: bubble.anchor, size: bubble.size, visualBounds: bubble.shape?.bounds })),
+		placeableBubbles.map((bubble) => ({
+			id: bubble.id,
+			preferred: bubble.anchor,
+			size: bubble.size,
+			visualBounds: bubble.speechType === 'shout' ? undefined : bubble.shape?.bounds
+		})),
 		bubbleSafeBounds,
 		cellSize,
 		undefined,
@@ -1491,10 +1496,11 @@
 	}
 
 	function specialBubbleShape(speechType: SpeechType, bubbleId: string, size: Size): SpeechBubbleShape | null {
-		return createSpeechBubbleShape(speechType, size.width, size.height, `${bubbleId}${speechType}`, {
+		const constraints = speechType === 'shout' ? undefined : {
 			maxBleedX: Math.max(0, (viewportSize.width - size.width) / 2),
 			maxBleedY: Math.max(0, (bubbleSafeBounds.height - size.height) / 2)
-		});
+		};
+		return createSpeechBubbleShape(speechType, size.width, size.height, `${bubbleId}${speechType}`, constraints);
 	}
 
 	function bubbleSurfaceStyle(shape: SpeechBubbleShape): string {

@@ -119,6 +119,7 @@ async function expectNoConsoleProblems(page: Page, action: () => Promise<void>):
 	page.on('console', (message) => {
 		if (message.type() === 'error' || message.type() === 'warning') problems.push(`${message.type()}: ${message.text()}`);
 	});
+	page.on('pageerror', (error) => problems.push(`pageerror: ${error.message}`));
 	await action();
 	expect(problems).toEqual([]);
 }
@@ -576,8 +577,8 @@ test.describe('DEV World Sandbox', () => {
 		const monologues = surfaces.filter((surface) => surface.type === 'monologue');
 		expect(shouts).toHaveLength(2);
 		expect(monologues).toHaveLength(2);
-		expect(shouts.every((surface) => (surface.d?.match(/\bL\s/g)?.length ?? 0) >= 20 && !surface.d?.includes('Q'))).toBe(true);
-		expect(monologues.every((surface) => (surface.d?.match(/\bC\s/g)?.length ?? 0) >= 7 && !surface.d?.includes('L'))).toBe(true);
+		expect(shouts.every((surface) => (surface.d?.match(/\bL/g)?.length ?? 0) >= 20 && !surface.d?.includes('Q'))).toBe(true);
+		expect(monologues.every((surface) => (surface.d?.match(/\bC/g)?.length ?? 0) >= 7 && !surface.d?.includes('L'))).toBe(true);
 		for (const surface of surfaces) {
 			expect(surface.fill).toBe(surface.toneBackground);
 			expect(surface.stroke).toBe(surface.toneOutline);
@@ -685,6 +686,37 @@ test.describe('DEV World Sandbox', () => {
 		expect(normalSeam).toEqual({ height: '3px', bottom: '-1px' });
 	});
 
+	test('keeps long merged shout body placement independent from decorative overflow', async ({ page }) => {
+		await expectNoConsoleProblems(page, async () => {
+			await page.goto('/?devWorld=1&devSpeech=merged2-shout-long');
+			await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+			await expect(page.locator('.bubble-merged[data-speech-type="shout"]')).toHaveCount(1);
+			await expect(page.locator('.bubble-merged[data-speech-type="shout"] .bubble-surface')).toBeVisible();
+		});
+
+		const state = await page.locator('.bubble-merged[data-speech-type="shout"]').evaluate((bubble) => {
+			const surface = bubble.querySelector<SVGSVGElement>('.bubble-surface');
+			const fill = surface?.querySelector<SVGPathElement>('.bubble-surface-fill');
+			if (!surface || !fill) throw new Error('Expected a shout surface.');
+			const bodyRect = bubble.getBoundingClientRect();
+			const surfaceRect = surface.getBoundingClientRect();
+			const pathBounds = fill.getBBox();
+			return {
+				body: { left: bodyRect.left, top: bodyRect.top, width: bodyRect.width, height: bodyRect.height },
+				surface: { left: surfaceRect.left, top: surfaceRect.top, width: surfaceRect.width, height: surfaceRect.height },
+				path: { x: pathBounds.x, y: pathBounds.y, width: pathBounds.width, height: pathBounds.height }
+			};
+		});
+		expect(state.body.width).toBeGreaterThan(0);
+		expect(state.body.height).toBeGreaterThan(0);
+		expect(state.surface.width).toBeGreaterThan(state.body.width);
+		expect(state.surface.height).toBeGreaterThan(state.body.height);
+		expect(state.surface.left).toBeLessThan(state.body.left);
+		expect(state.surface.top).toBeLessThan(state.body.top);
+		expect(state.path.x).toBeLessThan(0);
+		expect(state.path.y).toBeLessThan(0);
+	});
+
 	for (const speechType of ['shout', 'monologue'] as const) {
 		test(`keeps five-line clamping, dynamic size, and safe bounds for ${speechType} bubbles`, async ({ page }) => {
 			await page.setViewportSize({ width: 320, height: 844 });
@@ -725,10 +757,14 @@ test.describe('DEV World Sandbox', () => {
 			expect(state.height).toBeGreaterThan(0);
 			expect(state.scrollHeight).toBeGreaterThan(state.clientHeight);
 			expect(state.clientHeight).toBeLessThanOrEqual(state.lineHeight * 5 + 1);
-			expect(state.surfaceLeft).toBeGreaterThanOrEqual(0);
-			expect(state.surfaceRight).toBeLessThanOrEqual(320);
-			expect(state.surfaceTop).toBeGreaterThanOrEqual(84);
-			expect(state.surfaceBottom).toBeLessThanOrEqual(466);
+			if (speechType === 'monologue') {
+				expect(state.surfaceLeft).toBeGreaterThanOrEqual(0);
+				expect(state.surfaceRight).toBeLessThanOrEqual(320);
+				expect(state.surfaceTop).toBeGreaterThanOrEqual(84);
+				expect(state.surfaceBottom).toBeLessThanOrEqual(466);
+			} else {
+				expect(state.surfaceLeft < 0 || state.surfaceRight > 320 || state.surfaceTop < 84 || state.surfaceBottom > 466).toBe(true);
+			}
 			expect(state.ellipsisVisible).toBe(true);
 		});
 	}

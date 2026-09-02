@@ -3,10 +3,15 @@ import type { SpeechType } from './conversation';
 const PATH_INSET = 1;
 const OUTLINE_WIDTH = 1;
 const SHOUT_SPACING = 16;
-const SHOUT_BASE_LENGTH = 14;
+const SHOUT_BASE_LENGTH = 36;
+const SHOUT_LENGTH_VARIATION = 1.3;
 const SHOUT_COVERAGE = 0.5;
-const SHOUT_BASE_WIDTH = 10;
-const SHOUT_SIZE_BOOST = 1.8;
+const SHOUT_BASE_WIDTH = 8;
+const SHOUT_SIZE_BOOST = 1.5;
+const SHOUT_MIN_VARIATION_RATIO = 0.3;
+const SHOUT_MAX_VARIATION_RATIO = 2.5;
+const SHOUT_RADIUS = 18;
+const SHOUT_SEGMENT_LENGTH = 6;
 const CLOUD_SPACING = 64;
 const CLOUD_BASE_SIZE = 4;
 const CLOUD_VARIANCE = 1.8;
@@ -35,6 +40,11 @@ export type SpeechBubbleShape = Readonly<{
 		center?: Point;
 		outwardRays?: readonly Readonly<{ base: Point; point: Point; direction: Point }>[];
 		spikeRootWidths?: readonly number[];
+		spikeIndices?: readonly number[];
+		spikeScales?: readonly number[];
+		perimeter?: number;
+		step?: number;
+		baseLength?: number;
 		valleyOutwardSizes?: readonly number[];
 		sizeFactor?: number;
 		lobeFactors?: readonly number[];
@@ -95,6 +105,10 @@ function mulberry32(seed: number): () => number {
 function normalize(x: number, y: number): Point {
 	const length = Math.hypot(x, y) || 1;
 	return { x: x / length, y: y / length };
+}
+
+function shoutLerp(first: number, second: number, progress: number): number {
+	return first + (second - first) * progress;
 }
 
 function roundedRectPoints(width: number, height: number, radius: number): Point[] {
@@ -268,76 +282,244 @@ function cubicExtrema(first: number, control1: number, control2: number, last: n
 	return [(-b + root) / (2 * a), (-b - root) / (2 * a)];
 }
 
-function shoutShape(width: number, height: number, seed: string | number, constraints?: SpeechBubbleShapeConstraints): SpeechBubbleShape {
-	const sampler = makeSampler(roundedRectPoints(width, height, clamp(Math.min(width, height) * 0.25, 9, 18)));
-	const rng = mulberry32(hash32(`shout|${seed}|${Math.round(width)}|${Math.round(height)}`));
-	const intervals = weightedIntervals(sampler.total, SHOUT_SPACING, rng, 0, 10, 34);
-	const mask = buildCoverageMask(intervals.length, rng, SHOUT_COVERAGE);
-	const center = { x: width / 2, y: height / 2 };
-	const offset = rng() * sampler.total;
-	const valleys: Array<Readonly<{ station: number; point: Point }>> = [];
-	let station = offset;
-	for (const interval of intervals) {
-		const base = sampler.pointAt(station);
-		const direction = normalize(base.x - center.x, base.y - center.y);
-		const distance = capOutwardDistance(base, direction, rng() * 1.2, width, height, constraints);
-		valleys.push({ station, point: { x: base.x + direction.x * distance, y: base.y + direction.y * distance } });
-		station += interval;
+type ShoutPerimeterSegment = Readonly<{
+	a: Point;
+	b: Point;
+	length: number;
+	start: number;
+	end: number;
+}>;
+
+type ShoutPerimeterData = Readonly<{
+	segments: readonly ShoutPerimeterSegment[];
+	perimeter: number;
+}>;
+
+function shoutRoundedRectPoints(width: number, height: number, radius: number, segmentLength: number): Point[] {
+	const points: Point[] = [];
+	const clampedRadius = Math.min(radius, width / 2, height / 2);
+	const left = 0;
+	const top = 0;
+	const right = width;
+	const bottom = height;
+
+	const pushArc = (centerX: number, centerY: number, startAngle: number, endAngle: number): void => {
+		const arcLength = Math.abs(endAngle - startAngle) * clampedRadius;
+		const steps = Math.max(3, Math.ceil(arcLength / segmentLength));
+		for (let index = 0; index < steps; index += 1) {
+			const progress = index / steps;
+			const angle = shoutLerp(startAngle, endAngle, progress);
+			points.push({
+				x: centerX + Math.cos(angle) * clampedRadius,
+				y: centerY + Math.sin(angle) * clampedRadius
+			});
+		}
+	};
+
+	const pushLine = (x1: number, y1: number, x2: number, y2: number): void => {
+		const distance = Math.hypot(x2 - x1, y2 - y1);
+		const steps = Math.max(1, Math.ceil(distance / segmentLength));
+		for (let index = 0; index < steps; index += 1) {
+			const progress = index / steps;
+			points.push({ x: shoutLerp(x1, x2, progress), y: shoutLerp(y1, y2, progress) });
+		}
+	};
+
+	pushLine(left + clampedRadius, top, right - clampedRadius, top);
+	pushArc(right - clampedRadius, top + clampedRadius, -Math.PI / 2, 0);
+	pushLine(right, top + clampedRadius, right, bottom - clampedRadius);
+	pushArc(right - clampedRadius, bottom - clampedRadius, 0, Math.PI / 2);
+	pushLine(right - clampedRadius, bottom, left + clampedRadius, bottom);
+	pushArc(left + clampedRadius, bottom - clampedRadius, Math.PI / 2, Math.PI);
+	pushLine(left, bottom - clampedRadius, left, top + clampedRadius);
+	pushArc(left + clampedRadius, top + clampedRadius, Math.PI, Math.PI * 1.5);
+	return points;
+}
+
+function shoutPolygonArea(points: readonly Point[]): number {
+	let area = 0;
+	for (let index = 0; index < points.length; index += 1) {
+		const first = points[index];
+		const second = points[(index + 1) % points.length];
+		area += first.x * second.y - second.x * first.y;
+	}
+	return area / 2;
+}
+
+function ensureShoutClockwise(points: Point[]): Point[] {
+	if (shoutPolygonArea(points) > 0) points.reverse();
+	return points;
+}
+
+function buildShoutPerimeterData(points: readonly Point[]): ShoutPerimeterData {
+	const segments: ShoutPerimeterSegment[] = [];
+	let perimeter = 0;
+	for (let index = 0; index < points.length; index += 1) {
+		const first = points[index];
+		const second = points[(index + 1) % points.length];
+		const length = Math.hypot(second.x - first.x, second.y - first.y);
+		segments.push({ a: first, b: second, length, start: perimeter, end: perimeter + length });
+		perimeter += length;
+	}
+	return { segments, perimeter };
+}
+
+function sampleShoutPointAtDistance(perimeterData: ShoutPerimeterData, distance: number): Readonly<{ point: Point; tangent: Point }> {
+	const normalizedDistance = mod(distance, perimeterData.perimeter);
+	for (const segment of perimeterData.segments) {
+		if (normalizedDistance <= segment.end) {
+			const progress = segment.length === 0 ? 0 : (normalizedDistance - segment.start) / segment.length;
+			return {
+				point: {
+					x: shoutLerp(segment.a.x, segment.b.x, progress),
+					y: shoutLerp(segment.a.y, segment.b.y, progress)
+				},
+				tangent: normalize(segment.b.x - segment.a.x, segment.b.y - segment.a.y)
+			};
+		}
+	}
+	const last = perimeterData.segments[perimeterData.segments.length - 1];
+	return { point: { ...last.b }, tangent: normalize(last.b.x - last.a.x, last.b.y - last.a.y) };
+}
+
+function createShoutCoverageMask(count: number, coverage: number, rng: () => number): boolean[] {
+	const spikeCount = Math.max(1, Math.round(count * coverage));
+	const mask = new Array(count).fill(false);
+	if (spikeCount >= count) {
+		mask.fill(true);
+		return mask;
 	}
 
-	const perimeter = sampler.total;
-	const sizeFactor = 1 + SHOUT_SIZE_BOOST * Math.max(0, (perimeter - 470) / 420);
-	const requestedLength = SHOUT_BASE_LENGTH * sizeFactor;
-	const points: Point[] = [valleys[0].point];
+	const idealStep = count / spikeCount;
+	const jitterRatio = 0.22;
+	const chosen: number[] = [];
+	for (let index = 0; index < spikeCount; index += 1) {
+		const base = index * idealStep;
+		const jitter = (rng() * 2 - 1) * idealStep * jitterRatio;
+		let chosenIndex = Math.round(base + jitter);
+		chosenIndex = mod(chosenIndex, count);
+		chosen.push(chosenIndex);
+	}
+	chosen.sort((first, second) => first - second);
+	for (let index = 1; index < chosen.length; index += 1) {
+		if (chosen[index] <= chosen[index - 1]) chosen[index] = chosen[index - 1] + 1;
+	}
+	for (let index = 0; index < chosen.length; index += 1) chosen[index] = mod(chosen[index], count);
+
+	const used = new Set<number>();
+	for (let index = 0; index < chosen.length; index += 1) {
+		let chosenIndex = chosen[index];
+		let guard = 0;
+		while (used.has(chosenIndex) && guard < count) {
+			chosenIndex = (chosenIndex + 1) % count;
+			guard += 1;
+		}
+		used.add(chosenIndex);
+		mask[chosenIndex] = true;
+	}
+	return mask;
+}
+
+function formatShoutPoint(point: Point): string {
+	return `${point.x.toFixed(2)},${point.y.toFixed(2)}`;
+}
+
+type ShoutPathItem =
+	| Readonly<{ kind: 'plain'; point: Point }>
+	| Readonly<{ kind: 'spike'; leftRoot: Point; tip: Point; rightRoot: Point }>;
+
+export function createShoutBubbleShape(width: number, height: number, seed: number, constraints?: SpeechBubbleShapeConstraints): SpeechBubbleShape {
+	const perimeterData = buildShoutPerimeterData(ensureShoutClockwise(shoutRoundedRectPoints(width, height, SHOUT_RADIUS, SHOUT_SEGMENT_LENGTH)));
+	const intervalCount = Math.max(8, Math.round(perimeterData.perimeter / SHOUT_SPACING));
+	const step = perimeterData.perimeter / intervalCount;
+	const rng = mulberry32(hash32(String(seed)));
+	const decoratedMask = createShoutCoverageMask(intervalCount, SHOUT_COVERAGE, rng);
+	const center = { x: width / 2, y: height / 2 };
+	const largeScale = Math.max(0, (Math.max(width, height) - 184) / 146);
+	const boostedLength = SHOUT_BASE_LENGTH * (1 + largeScale * (SHOUT_SIZE_BOOST - 1));
+	const pathItems: ShoutPathItem[] = [];
+	const points: Point[] = [];
+	const valleys: Point[] = [];
 	const requestedLengths: number[] = [];
 	const actualLengths: number[] = [];
 	const rootWidths: number[] = [];
+	const spikeIndices: number[] = [];
+	const spikeScales: number[] = [];
 	const rays: Array<Readonly<{ base: Point; point: Point; direction: Point }>> = [];
-	let path = `M ${formatPoint(valleys[0].point)}`;
-	for (let index = 0; index < valleys.length; index += 1) {
-		const current = valleys[index];
-		const span = intervals[index];
-		if (mask[index]) {
-			const tipStation = current.station + span * (0.5 + (rng() - 0.5) * 0.1);
-			const halfBase = Math.min(SHOUT_BASE_WIDTH / 2, span * 0.26);
-			const leftStation = tipStation - halfBase;
-			const rightStation = tipStation + halfBase;
-			rootWidths.push(halfBase * 2);
-			path = appendBaseSegment(path, points, sampler, current.station, leftStation);
-			const base = sampler.pointAt(tipStation);
-			const direction = normalize(base.x - center.x, base.y - center.y);
-			const length = capOutwardDistance(base, direction, requestedLength, width, height, constraints);
-			const tip = { x: base.x + direction.x * length, y: base.y + direction.y * length };
-			const rightBase = sampler.pointAt(rightStation);
-			requestedLengths.push(requestedLength);
-			actualLengths.push(length);
-			rays.push({ base, point: tip, direction });
-			points.push(tip, rightBase);
-			path += ` L ${formatPoint(tip)} L ${formatPoint(rightBase)}`;
-			path = appendBaseSegment(path, points, sampler, rightStation, current.station + span);
-		} else {
-			path = appendBaseSegment(path, points, sampler, current.station, current.station + span);
+
+	for (let index = 0; index < intervalCount; index += 1) {
+		const baseSample = sampleShoutPointAtDistance(perimeterData, index * step);
+		const basePoint = baseSample.point;
+		valleys.push(basePoint);
+		const direction = normalize(basePoint.x - center.x, basePoint.y - center.y);
+		if (!decoratedMask[index]) {
+			pathItems.push({ kind: 'plain', point: basePoint });
+			continue;
 		}
+
+		const raw = rng() * 2 - 1;
+		const biased = raw >= 0 ? raw ** 1.1 : -(Math.abs(raw) ** 1.1);
+		const spikeScale = biased >= 0
+			? shoutLerp(1, SHOUT_MAX_VARIATION_RATIO, clamp(biased * SHOUT_LENGTH_VARIATION, 0, 1))
+			: shoutLerp(1, SHOUT_MIN_VARIATION_RATIO, clamp(-biased * SHOUT_LENGTH_VARIATION, 0, 1));
+		const requestedLength = boostedLength * spikeScale;
+		const halfRoot = SHOUT_BASE_WIDTH / 2;
+		const leftRoot = { x: basePoint.x - baseSample.tangent.x * halfRoot, y: basePoint.y - baseSample.tangent.y * halfRoot };
+		const rightRoot = { x: basePoint.x + baseSample.tangent.x * halfRoot, y: basePoint.y + baseSample.tangent.y * halfRoot };
+		const actualLength = capOutwardDistance(basePoint, direction, requestedLength, width, height, constraints);
+		const tip = { x: basePoint.x + direction.x * actualLength, y: basePoint.y + direction.y * actualLength };
+		pathItems.push({ kind: 'spike', leftRoot, tip, rightRoot });
+		requestedLengths.push(requestedLength);
+		actualLengths.push(actualLength);
+		rootWidths.push(SHOUT_BASE_WIDTH);
+		spikeIndices.push(index);
+		spikeScales.push(spikeScale);
+		rays.push({ base: basePoint, point: tip, direction });
 	}
+
+	const pathParts: string[] = [];
+	let hasFirstPoint = false;
+	const appendPoint = (command: 'M' | 'L', point: Point): void => {
+		pathParts.push(`${command}${formatShoutPoint(point)}`);
+		points.push(point);
+	};
+	for (const item of pathItems) {
+		if (item.kind === 'plain') {
+			appendPoint(hasFirstPoint ? 'L' : 'M', item.point);
+			hasFirstPoint = true;
+			continue;
+		}
+		appendPoint(hasFirstPoint ? 'L' : 'M', item.leftRoot);
+		hasFirstPoint = true;
+		appendPoint('L', item.tip);
+		appendPoint('L', item.rightRoot);
+	}
+	pathParts.push('Z');
+
 	return {
-		path: `${path} Z`,
+		path: pathParts.join(' '),
 		bounds: visualBounds(points),
 		metadata: {
-			count: intervals.length,
-			intervalCount: intervals.length,
-			decoratedCount: requestedLengths.length,
-			coverage: requestedLengths.length / intervals.length,
+			count: intervalCount,
+			intervalCount,
+			decoratedCount: spikeIndices.length,
+			coverage: spikeIndices.length / intervalCount,
 			minimumOutwardSize: Math.min(...actualLengths),
 			maximumOutwardSize: Math.max(...actualLengths),
 			outwardSizes: actualLengths,
 			requestedOutwardSizes: requestedLengths,
 			actualOutwardSizes: actualLengths,
 			points,
-			valleys: valleys.map((valley) => valley.point),
+			valleys,
 			center,
 			outwardRays: rays,
 			spikeRootWidths: rootWidths,
-			sizeFactor
+			sizeFactor: boostedLength / SHOUT_BASE_LENGTH,
+			spikeIndices,
+			spikeScales,
+			perimeter: perimeterData.perimeter,
+			step,
+			baseLength: boostedLength
 		}
 	};
 }
@@ -408,5 +590,9 @@ export function createSpeechBubbleShape(speechType: SpeechType, width: number, h
 	if (speechType === 'normal') return null;
 	const safeWidth = safeDimension(width);
 	const safeHeight = safeDimension(height);
-	return speechType === 'shout' ? shoutShape(safeWidth, safeHeight, seed, constraints) : cloudShape(safeWidth, safeHeight, seed, constraints);
+	if (speechType === 'shout') {
+		const coreSeed = hash32(`shout|${seed}|${Math.round(safeWidth)}|${Math.round(safeHeight)}`);
+		return createShoutBubbleShape(safeWidth, safeHeight, coreSeed, constraints);
+	}
+	return cloudShape(safeWidth, safeHeight, seed, constraints);
 }
