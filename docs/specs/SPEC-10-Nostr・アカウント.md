@@ -48,7 +48,7 @@ session中のkind 41 live追従はMVP要件とせず、session start / reload時
 
 Nostr Relay上にkind 42イベントが残ることと、専用クライアント上でフキダシが一定時間後に消えることは別の概念として扱う。
 
-通常のフキダシ表示が終了した後も、対象kind 42の一部は決定的な自動抽選によって「発言の痕跡」の対象となり得る。
+通常のフキダシ表示が終了した後も、有効なtop-level kind 42の一部は決定的な自動抽選によって「発言の痕跡」の対象となり得る。
 
 これは通常の過去ログ表示を復活させるものではなく、一部の過去発言だけを空間上の記憶として再発見可能にするものである。
 
@@ -120,19 +120,46 @@ NIP-32のnamespaceは公開された語彙であり、認証・所有権・ア�
 
 ### kind 42の表示条件
 
-以下を満たすものを専用世界のチャットメッセージとして扱う。
+以下を満たす**top-level** kind 42だけを、専用世界のチャットメッセージとして扱う。
 
-- 対象のNIP-28 channel kind 40をrootとしている
+- 対象のNIP-28 channel kind 40へのroot参照だけを持つ
 - 所定のNIP-32 `L` namespaceが付いている
 - 同namespaceをmarkerとする `l=chat` が付いている
+- 発言時positionを表す単一canonical `w` が付いている
 
 Relayのtag filterによる取得結果だけを認証結果として扱わず、受信したevent自体のtag構造をクライアント側でも検証する。
 
-発言の痕跡の候補も、この専用世界の対象kind 42から選ぶ。
+NIP-28形式のkind 42 replyは、外部client製を含め完全に無視する。live bubble、Chatter、presence evidence、trace root候補にせず、legacy reply互換経路も設けない。
+
+発言の痕跡の候補も、この有効なtop-level kind 42から選ぶ。
 
 kind 42には発言時の論理フィールド座標も保持する。
 
 座標を表す具体的なtag形式とposition/presenceとの関係は [`SPEC-30-フィールド・position・presence.md`](./SPEC-30-フィールド・position・presence.md) および [`SPEC-40-会話・フキダシ.md`](./SPEC-40-会話・フキダシ.md) を正とする。
+
+### kind 1111: trace conversation reply
+
+痕跡conversationへのreplyだけにNIP-22 kind 1111を使用する。通常live speechへのreply UIは設けない。
+
+公式clientが生成するkind 1111には、次を必須とする。
+
+- project `L` / `l` と `l=chat`
+- root kind 42を指すuppercase `E` / `K` / `P`
+- immediate parentを指すlowercase `e` / `k` / `p`
+- 投稿時の実際のフィールド位置を表す単一canonical `w`
+- 必要な場合だけspeech type label
+
+rootは有効なtop-level kind 42なので `K=42` とする。root kind 42へのdirect replyでは、rootを `E/K/P` と `e/k/p` の双方で参照する。kind 1111へのreplyでは、`E/K/P` は同じrootを維持し、`e/k/p` はparent kind 1111とそのauthorを指す。
+
+project labelsはtarget-channel membershipまたは公式client証明ではない。受理する1111のuppercase `E` rootは、対象kind 40 worldに属する有効なtop-level kind 42でなければならない。immediate parentはroot自身または同じroot treeの有効な1111でなければならない。`K/P` と `k/p` は実際のroot/parentのkindとauthorに照合する。
+
+external/modified client製1111も、署名、project labels、単一canonical `w`、root/parent relation、kind、authorを全て検証できる場合だけ受理する。NIP-22の `p` は本文mentionにも使えるため、`p=self`だけで自分へのdirect replyや通知対象と判定してはならない。
+
+`K/k/P/p`等のsemantic correctnessは受信後に検証する。REQを過度に狭めるための `#K` filterは必須としない。trace conversationの取得意味論は [`SPEC-50-発言の痕跡.md`](./SPEC-50-発言の痕跡.md) を正とする。
+
+### NIP-09
+
+NIP-09 / kind 5はMVP完全非対応とする。kind 5を発行、購読、検索せず、外部clientのdeletion requestをUI/cacheへ反映しない。tombstoneやdeleted-reply placeholderは導入しない。browserがすでに取得・cacheしたroot/replyをkind 5を理由に削除しない。Relayが物理削除したeventを未取得browserが取得できないことまでは制御しない。
 
 ### kind 30078等のアプリ固有イベント
 
@@ -242,7 +269,7 @@ prototype期間中に組み込みcharacter catalogまたは公式プロフィー
 
 初回アカウント作成時には両者を同じ内容にする。
 
-発言の痕跡では、元の発言者のキャラクター情報を表示しない。
+trace conversationのauthor表示は、kind 0ではなくpubkeyから導出したcharacter catalogを使用する。具体的なghostとProfile Dialogの表示規則は [`SPEC-50-発言の痕跡.md`](./SPEC-50-発言の痕跡.md) を正とする。
 
 ---
 

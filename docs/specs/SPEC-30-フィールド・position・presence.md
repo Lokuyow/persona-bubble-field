@@ -90,10 +90,11 @@ W/A/S/Dの長押しもArrowキーと同じmovement hold driverを使用し、1�
 
 斜め移動は行わない。
 
-pointer / touch操作では、自分の上下左右にある現在移動可能なセルを
-フィールド上で直接選択して1マス移動する。移動可能セルは操作可能な
-interactive elementとして表示するが、フィールド外または他のactive参加者に
-占有された移動不能セルはinteractiveな表示・操作対象にしない。
+pointer / touch操作では、field上のinteractive UI以外から開始できるdynamic / floating virtual joystickを使用する。joystick centerはdrag開始位置とし、finger releaseまたはpointercancelで消える。deflection magnitudeで速度は変えず、analog方向をdominant axis等で上下左右のcardinal方向へ変換する。diagonal移動は行わない。
+
+tapとdragはgesture thresholdで区別するが、具体的なthresholdは実装詳細とする。既存の1マス移動、最大2 movement/sec、presence、position publish、visual animationを再利用する。PCのArrow/WASD操作は維持する。
+
+field上の選択はpixel targetではなくlogical cellを基本にする。selectable targetが1件なら直接そのactionを行い、2件以上ならPC/mobile共通context menuを開く。current characterは個別に表示し、multiple rootsは1つの「痕跡を調べる」とする。outside tap/clickでmenuを閉じ、movement開始時はmenuを閉じてそのmovementを続行する。menuを開いただけではconversation、reply target、draftを変更しない。
 
 フィールド端では停止し、反対側へループしない。
 
@@ -265,9 +266,9 @@ current Unix secondにslot 1が確認できる場合は、slot 0が取得結果�
 
 ## 17. 発言時position
 
-過去の対象kind 42について、その発言が行われた時点のフィールド座標を、position eventの履歴へ依存せずkind 42自身から復元できるようにする。
+過去の対象kind 42およびkind 1111について、そのeventが行われた時点のフィールド座標を、position eventの履歴へ依存せずevent自身から復元できるようにする。
 
-専用世界のkind 42には、発言時positionを表す単一文字 `w` tagを必須とする。
+専用世界のkind 42およびtrace conversation kind 1111には、発言時positionを表す単一文字 `w` tagを必須とする。
 
 プロトタイプでは以下の形式とする。
 
@@ -283,20 +284,7 @@ kind 42の `w` は、そのeventが発行された時点の不変な発言位置
 
 後からユーザーが移動してもkind 42の `w` は変化しない。
 
-これにより、
-
-- 発言時positionの復元
-- 発言の痕跡を元の発言位置へ固定
-- Relay上で特定セルのkind 42をREQ
-- Relay上で複数セルのkind 42をREQ
-
-できる構造とする。
-
-単一文字tagはRelayによるtag filterの対象として利用できるため、将来の位置別取得に使用できる。
-
-例えばセル `7:3` の発言を取得する場合は、概念的に `#w = ["7:3"]` を使用できる。
-
-複数セルを取得する場合は、同じ `#w` filterの値として複数のcanonical cell値を列挙できる。
+これにより、発言時positionの復元と、発言の痕跡を元の発言位置へ固定できる。旧`#w`位置別on-demand REQは使用しない。
 
 `w` は物理的位置やgeohashを表すものではない。
 
@@ -310,7 +298,7 @@ NIP上の地理的位置tagへ本プロジェクトの架空の論理フィー�
 
 ## 18. position evidence
 
-presence状態のユーザーについてcurrent positionを復元する際は、`kind 30078` だけでなく、専用世界のkind 42に含まれる `w` もposition evidenceとして扱う。
+presence状態のユーザーについてcurrent positionを復元する際は、`kind 30078` だけでなく、有効なtop-level kind 42に含まれる `w` もposition evidenceとして扱う。kind 1111の `w` はhistorical reply positionであり、remote userのcurrent presence/position evidenceに使用しない。
 
 これはkind 42の `w` が、その発言が行われた時点での送信者のpositionを直接保持しているためである。
 
@@ -352,6 +340,7 @@ presenceは、そのユーザーが最近この空間で**能動的に活動し�
 - フィールド上での移動
 - この専用世界でのメッセージ発言
 - 発言の痕跡を明示的に調べる操作
+- trace conversationへのreply投稿
 
 同じマスに居続けて発言しているユーザーも、発言によってpresenceを維持する。
 
@@ -365,11 +354,11 @@ presenceは、そのユーザーが最近この空間で**能動的に活動し�
 
 フィールド移動は、移動後の座標を持つ `kind 30078` position更新として表現する。
 
-専用世界でのメッセージ発言は、発言位置を `w` tagに持つkind 42そのものをpresence activityとして扱う。
+専用世界での通常メッセージ発言は、発言位置を `w` tagに持つ有効なtop-level kind 42そのものをpresence activityとして扱う。kind 1111 reply投稿もpresence activityとするが、その `w` をremote userのcurrent presence evidenceには使わない。
 
 発言のためだけに追加の `kind 30078` を必ず発行する必要はない。
 
-発言の痕跡を明示的に調べた場合は、必要に応じて現在座標を持つ `kind 30078` position更新を発行し、その操作をpresence activityとして表現する。
+発言の痕跡を明示的に調べた場合またはreply投稿時は、必要に応じて現在座標を持つ `kind 30078` position更新を発行し、その操作をpresence activityとして表現する。presence timeout後にreplyする場合は、reactivation後の実際のpositionを確定してから、そのpositionを1111の `w` に使用する。
 
 痕跡調査と同一秒内に、すでに同じユーザーによるposition更新等のpresence activityが存在する場合は、同一座標の冗長なposition eventを必ず追加する必要はなく、presence更新をcoalesceしてよい。
 
@@ -427,6 +416,7 @@ MVPでは、少なくとも以下を論理的に別subscriptionとして扱う�
 
 - 専用世界のkind 42 message
 - `kind 30078` position
+- trace conversation kind 1111
 
 logical primary subscriptionは引き続きkind 42 messageと`kind 30078` positionの2本とする。
 `world-messages`は同一責務内で、recent用filterと直近タイムラインhistory用filterを2つ持つ
@@ -434,6 +424,8 @@ logical primary subscriptionは引き続きkind 42 messageと`kind 30078` positi
 復元に必要な範囲とし、timeline history用filterは`limit: 50`で取得する。`world-positions`は
 従来どおり1つのfilterを持つ。したがって、logical primaryの数を増やさずにREQ内の複数filterを
 使用する構成を今回の仕様とする。
+
+kind 1111は第3 logical subscriptionとする。第4の常時subscriptionは要求せず、notification、open root、current speechのNIP-22 filterを一つのfilter bundleとしてまとめる。個別filterの製品意味論は [`SPEC-50-発言の痕跡.md`](./SPEC-50-発言の痕跡.md) を正とする。
 
 RelayごとのWebSocket接続自体をsubscriptionごとに別接続へ分ける必要はなく、同一Relay接続上で複数subscriptionを管理してよい。
 
@@ -506,7 +498,7 @@ safety marginの具体値は製品仕様として現時点では固定しない�
 
 等を更新する。
 
-新しい有効なkind 42を受信した場合は、
+新しい有効なtop-level kind 42を受信した場合は、
 
 - `w` によるposition evidence
 - last presence activity
@@ -535,27 +527,22 @@ Relay接続が切れてsubscriptionを再作成する場合も、catch-up取得�
 
 ---
 
-## 21. 過去発言の位置別REQ
+## 21. trace root bootstrapとconversation transport
 
-通常のlive world state取得と、過去発言を位置から探す取得は別の用途として扱う。
+旧`#w`位置別on-demand REQを撤回する。trace root bootstrapでは、起動時に各authoritative Relayへ次のworld識別用history filterを要求する。
 
-通常のlive world stateは主として時間範囲によって取得する。
+- `kinds=[42]`
+- `#e=[対象kind40 event ID]`
+- `#L=[project namespace]`
+- `#l=["chat"]`
+- `limit=1000`
 
-発言の痕跡等で過去発言を位置から取得する場合は、kind 42の `w` tagを利用したon-demand REQを使用できる。
+これはworld識別用Relay prefilterを維持し、旧`#w`位置filterだけを撤去する形である。他channelまたはproject外の全kind 42を取得して母集団へ含めない。
 
-例えば特定セルまたは周辺セルについて、
+RelayのNIP-11 max limit等により1000未満になることは許容する。1000件を埋めるための追加paginationは保証しない。各RelayのEOSE / CLOSED / timeout後に結果を統合し、event IDでdedupeする。`created_at`とevent IDで決定的に並べた最新1000 unique raw kind 42をclient-side semantic validationへ渡す。
 
-- kind 42
-- 対象kind 40
-- prototype NIP-32 namespace
-- `l = chat`
-- `#w` = 対象セル群
-- 痕跡の寿命等に応じた時間条件
+ここでrawとは上記Relay prefilterを通過したkind 42を意味する。NIP-28形式kind 42 reply、invalid signature、invalid `w`等、後段validationで落ちるeventもraw 1000枠を消費し得る。その後にsemantic validation、top-level判定、20%抽選、cell/global root capを適用する。network受信途中にglobal capが埋まったことを理由にmulti-Relay bootstrapを早期終了しない。
 
-で取得できる構造とする。
-
-過去発言を位置別に取得するためだけに、すべてのkind 42履歴を常時live subscriptionへ流し続ける設計にはしない。
-
-痕跡の具体的な抽選、寿命、上限、調査範囲等は [`SPEC-50-発言の痕跡.md`](./SPEC-50-発言の痕跡.md) を正とする。
+第3 logical subscriptionでは、`SPEC-50`で定義するNIP-22 filter bundleをForward subscriptionとして扱う。filter bundle変更、per-Relay EOSE / CLOSED / timeout、reconnect、multi-Relay event ID dedupe、不要なhistory再取得の抑制はtransportの責務とする。cursor / since等のrx-nostr内部詳細は製品仕様として固定しない。
 
 ---
