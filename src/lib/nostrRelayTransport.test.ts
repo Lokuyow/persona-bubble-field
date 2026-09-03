@@ -50,8 +50,7 @@ function mockRelay() {
 		onConnection: (_socket: Client) => {},
 		onRequest: (socket: Client, request: WireRequest) => send(socket, 'EOSE', request[1]),
 		onPublish: (_socket: Client, _event: VerifiedEvent) => {},
-		primaryRequests: (): WireRequest[] => relay.requests.filter((request) => [42, 30078].includes(kind(request)!) && !request[2]['#w']),
-		traceRequests: (): WireRequest[] => relay.requests.filter((request) => request[2]['#w']),
+		primaryRequests: (): WireRequest[] => relay.requests.filter((request) => [42, 30078].includes(kind(request)!)),
 		primaryId: (eventKind: 42 | 30078): string => relay.primaryRequests().filter((request) => kind(request) === eventKind).at(-1)![1],
 		latestSocket: (): Client => relay.sockets.at(-1)!
 	};
@@ -431,148 +430,6 @@ describe('NIP-11 capability and queue', () => {
 	});
 });
 
-describe('trace query', () => {
-	it('shares overlapping identical trace semantics without cross-correlating their EOSE', async () => {
-		const f = fixture(1);
-		await f.start();
-		const event = f.message();
-		f.authorities[0].onRequest = (socket, request) => {
-			// A repeated query without coalescing would overwrite the first mapping
-			// before its response and then time out despite this successful result.
-			if (f.authorities[0].traceRequests().length !== 1) return;
-			send(socket, 'EVENT', request[1], event);
-			send(socket, 'EOSE', request[1]);
-		};
-		const first = f.transport.queryTrace({ positions: [{ x: 1, y: 2 }, { x: 2, y: 3 }] });
-		const second = f.transport.queryTrace({ positions: [{ x: 2, y: 3 }, { x: 1, y: 2 }] });
-		await vi.advanceTimersByTimeAsync(150);
-		for (const result of await Promise.all([first, second])) {
-			expect(result.messages.map((message) => message.id)).toEqual([event.id]);
-			expect(result.relays[0].status).toBe('eose');
-		}
-		expect(f.authorities[0].traceRequests()).toHaveLength(1);
-	});
-
-	it('treats repeated trace positions as the same filter condition', async () => {
-		const f = fixture(1);
-		await f.start();
-		const pending = f.transport.queryTrace({ positions: [{ x: 1, y: 2 }, { x: 1, y: 2 }] });
-		await vi.advanceTimersByTimeAsync(150);
-		expect((await pending).relays[0].status).toBe('eose');
-	});
-
-	it('validates and dedupes query-local messages, correlates only trace subIds, and releases only finite REQs', async () => {
-		const f = fixture();
-		await f.start();
-		const valid = f.message('trace');
-		const primaryOnly = f.message('primary-only');
-		const invalid = finalizeEvent({ ...valid, tags: [...valid.tags, ['w', '1:2']], content: 'ambiguous position' }, AUTHOR);
-		for (const relay of f.authorities) relay.onRequest = (socket, request) => {
-			send(socket, 'EVENT', relay.primaryId(42), primaryOnly);
-			send(socket, 'EVENT', request[1], valid);
-			send(socket, 'EVENT', request[1], valid);
-			send(socket, 'EVENT', request[1], invalid);
-			send(socket, 'EVENT', request[1], { ...valid, sig: '0'.repeat(128) });
-			send(socket, 'EOSE', request[1]);
-		};
-		const pending = f.transport.queryTrace({ positions: [{ x: 1, y: 2 }], since: TIME - 1, until: TIME + 1 });
-		await vi.advanceTimersByTimeAsync(15);
-		const result = await pending;
-		expect(result.messages.map((event) => event.id)).toEqual([valid.id]);
-		expect(result.relays.map((relay) => relay.status)).toEqual(['eose', 'eose']);
-		expect(f.input.onLiveMessage).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: primaryOnly.id }));
-		expect(f.input.onPrimaryClosed).not.toHaveBeenCalled();
-		for (const relay of f.authorities) {
-			expect(relay.traceRequests()).toHaveLength(1);
-			const closedIds = relay.messages.filter((message) => message[0] === 'CLOSE').map((message) => message[1]);
-			expect(closedIds).toEqual([relay.traceRequests()[0][1]]);
-			expect(relay.primaryRequests()).toHaveLength(2);
-			expect(relay.sockets).toHaveLength(1);
-		}
-		expect(f.seeds.flatMap((relay) => relay.traceRequests())).toEqual([]);
-	});
-
-	it('keeps successful relay messages when another relay times out, ignoring unrelated EOSE', async () => {
-		const f = fixture();
-		await f.start();
-		const event = f.message();
-		f.authorities[0].onRequest = (socket, request) => {
-			send(socket, 'EVENT', request[1], event);
-			send(socket, 'EOSE', request[1]);
-		};
-		f.authorities[1].onRequest = (socket) => send(socket, 'EOSE', f.authorities[1].primaryId(42));
-		const pending = f.transport.queryTrace({ positions: [{ x: 1, y: 2 }] });
-		await vi.advanceTimersByTimeAsync(150);
-		const result = await pending;
-		expect(result.messages.map((message) => message.id)).toEqual([event.id]);
-		expect(result.relays.map((relay) => relay.status)).toEqual(['eose', 'timeout']);
-		expect(f.transport.getDiagnostics().primaryPairs.every((pair) => pair.status === 'eose')).toBe(true);
-	});
-
-	it('reports CLOSED and its notice without notifying the primary CLOSED callback', async () => {
-		const f = fixture();
-		await f.start();
-		f.authorities[1].onRequest = (socket, request) => send(socket, 'CLOSED', request[1], 'restricted: trace disabled');
-		const pending = f.transport.queryTrace({ positions: [{ x: 1, y: 2 }] });
-		await vi.advanceTimersByTimeAsync(10);
-		expect((await pending).relays).toEqual([
-			{ relayUrl: f.authorities[0].url, status: 'eose' },
-			{ relayUrl: f.authorities[1].url, status: 'closed', notice: 'restricted: trace disabled' }
-		]);
-		expect(f.input.onPrimaryClosed).not.toHaveBeenCalled();
-	});
-
-	it('reports an already rejected relay as unavailable', async () => {
-		const f = fixture();
-		await f.start();
-		f.authorities[1].latestSocket().close({ code: 4000, reason: 'test unavailable', wasClean: true });
-		await vi.advanceTimersByTimeAsync(5);
-		const pending = f.transport.queryTrace({ positions: [{ x: 1, y: 2 }] });
-		await vi.advanceTimersByTimeAsync(15);
-		expect((await pending).relays.map((relay) => relay.status)).toEqual(['eose', 'unavailable']);
-	});
-
-	it('times out queued trace REQs without closing either primary subscription', async () => {
-		const f = fixture();
-		for (const relay of f.authorities) Nip11Registry.set(relay.url, { limitation: { max_subscriptions: 2 } });
-		await f.start();
-		const pending = f.transport.queryTrace({ positions: [{ x: 1, y: 2 }] });
-		await vi.advanceTimersByTimeAsync(150);
-		expect((await pending).relays.map((relay) => relay.status)).toEqual(['timeout', 'timeout']);
-		expect(f.authorities.flatMap((relay) => relay.traceRequests())).toEqual([]);
-		const live = f.message('after queued trace');
-		send(f.authorities[0].latestSocket(), 'EVENT', f.authorities[0].primaryId(42), live);
-		expect(f.input.onLiveMessage).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: live.id }));
-		expect(f.input.onPrimaryClosed).not.toHaveBeenCalled();
-	});
-
-	it('uses a total operation deadline even if events keep arriving without EOSE', async () => {
-		const f = fixture(1);
-		await f.start();
-		f.authorities[0].onRequest = () => {};
-		const pending = f.transport.queryTrace({ positions: [{ x: 1, y: 2 }] });
-		await vi.advanceTimersByTimeAsync(10);
-		const relay = f.authorities[0];
-		const event = f.message();
-		const interval = setInterval(() => send(relay.latestSocket(), 'EVENT', relay.traceRequests()[0][1], event), 10);
-		await vi.advanceTimersByTimeAsync(95);
-		clearInterval(interval);
-		const result = await pending;
-		expect(result.messages.map((message) => message.id)).toEqual([event.id]);
-		expect(result.relays[0].status).toBe('timeout');
-	});
-
-	it('returns messages and per-relay real EOSE diagnostics without changing primary lifecycle', async () => {
-		const f = fixture();
-		await f.start();
-		const pending = f.transport.queryTrace({ positions: [{ x: 1, y: 2 }] });
-		await vi.advanceTimersByTimeAsync(10);
-		expect(await pending).toEqual({ messages: [], relays: f.authorities.map((relay) => ({ relayUrl: relay.url, status: 'eose' })) });
-		expect(f.transport.getDiagnostics().primaryPairs.map((pair) => pair.status)).toEqual(['eose', 'eose', 'eose', 'eose']);
-		expect(f.input.onPrimaryClosed).not.toHaveBeenCalled();
-	});
-});
-
 describe('semantic primary classifier', () => {
 	it('rejects unknown real-valued properties exposed by a changed public outgoing API', async () => {
 		vi.mocked(createRxNostr).mockImplementationOnce((config) => {
@@ -626,7 +483,7 @@ describe('semantic primary classifier', () => {
 	});
 
 	it.each([
-		['trace #w', { '#w': ['1:2'] }],
+		['unexpected #w condition', { '#w': ['1:2'] }],
 		['numeric until', { until: TIME + 1 }],
 		['limit', { limit: 1 }],
 		['extra tag condition', { '#x': ['unexpected'] }],
@@ -656,7 +513,7 @@ describe('semantic primary classifier', () => {
 	});
 
 	it.each([
-		['trace #w', { '#w': ['1:2'] }], ['numeric until', { until: TIME + 1 }],
+		['unexpected #w condition', { '#w': ['1:2'] }], ['numeric until', { until: TIME + 1 }],
 		['limit', { limit: 1 }], ['unknown primary condition', { '#x': ['unexpected'] }]
 	])('does not map a post-start finite %s REQ into primary lifecycle', async (_name, extra) => {
 		const f = fixture();
@@ -693,27 +550,20 @@ describe('transport ownership', () => {
 	it('rejects a second start and methods before start or after disposal', async () => {
 		const f = fixture();
 		await expect(f.transport.publish(f.message())).rejects.toThrow('must start');
-		await expect(f.transport.queryTrace({ positions: [{ x: 1, y: 2 }] })).rejects.toThrow('must start');
 		await f.start();
 		await expect(f.transport.start(f.input)).rejects.toThrow('only allowed once');
 		f.transport.dispose();
 		await expect(f.transport.start(f.input)).rejects.toThrow('only allowed once');
-		await expect(f.transport.queryTrace({ positions: [{ x: 1, y: 2 }] })).rejects.toThrow('must start');
 	});
 
 	it('disposes finite requests, primary subscriptions and client without CLOSED callbacks', async () => {
 		const f = fixture();
 		await f.start();
-		for (const relay of f.authorities) relay.onRequest = () => {};
 		const dispose = vi.spyOn(publicClient(), 'dispose');
-		const pending = f.transport.queryTrace({ positions: [{ x: 1, y: 2 }] });
-		const assertion = expect(pending).rejects.toThrow('disposed');
-		await vi.advanceTimersByTimeAsync(10);
 		const wire = vi.spyOn(WebSocket.prototype, 'send');
 		f.transport.dispose();
 		f.transport.dispose();
 		await vi.advanceTimersByTimeAsync(20);
-		await assertion;
 		expect(dispose).toHaveBeenCalledTimes(1);
 		const closedIds = wire.mock.calls.map(([message]) => JSON.parse(message as string)).filter((message) => message[0] === 'CLOSE').map((message) => message[1]);
 		for (const relay of f.authorities) {

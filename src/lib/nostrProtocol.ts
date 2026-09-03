@@ -10,6 +10,7 @@ import {
 
 export const PROTOTYPE_NAMESPACE = 'io.github.lokuyow.persona-bubble-field';
 export const CHANNEL_MESSAGE_KIND = 42;
+export const TRACE_REPLY_KIND = 1111;
 export const POSITION_KIND = 30078;
 export const PROFILE_KIND = 0;
 export const RECENT_MESSAGE_TIMELINE_LIMIT = 50;
@@ -42,6 +43,17 @@ export type PositionEventInput = {
 	createdAt: number;
 };
 
+export type TraceReplyInput = {
+	root: ParsedWorldMessage;
+	parent: ParsedWorldMessage | ParsedTraceReply;
+	content: string;
+	speechType: SpeechType;
+	position: GridPosition;
+	createdAt: number;
+	/** An authoritative world relay recommendation, never an event identity. */
+	relayHint?: string;
+};
+
 export type CharacterProfileInput = {
 	character: Character;
 	absolutePictureUrl: string;
@@ -56,11 +68,15 @@ export type PositionEventTemplate = EventTemplate & {
 	kind: typeof POSITION_KIND;
 };
 
+export type TraceReplyTemplate = EventTemplate & {
+	kind: typeof TRACE_REPLY_KIND;
+};
+
 export type CharacterProfileTemplate = EventTemplate & {
 	kind: typeof PROFILE_KIND;
 };
 
-export type WorldEventTemplate = WorldMessageTemplate | PositionEventTemplate;
+export type WorldEventTemplate = WorldMessageTemplate | PositionEventTemplate | TraceReplyTemplate;
 
 export type ParsedWorldMessage = {
 	id: string;
@@ -79,23 +95,75 @@ export type ParsedPositionEvent = {
 	position: GridPosition;
 };
 
+/** A structurally valid kind 1111 whose root and parent still need lookup. */
+export type ParsedTraceReplyCandidate = {
+	id: string;
+	pubkey: string;
+	createdAt: number;
+	content: string;
+	speechType: SpeechType;
+	position: GridPosition;
+	rootId: string;
+	rootPubkey: string;
+	rootAuthorHint?: string;
+	parentId: string;
+	parentKind: typeof CHANNEL_MESSAGE_KIND | typeof TRACE_REPLY_KIND;
+	parentAuthorHints: readonly string[];
+	parentAuthorHint?: string;
+};
+
+/** A kind 1111 whose root and immediate parent were both semantically verified. */
+export type ParsedTraceReply = {
+	id: string;
+	pubkey: string;
+	createdAt: number;
+	content: string;
+	speechType: SpeechType;
+	position: GridPosition;
+	rootId: string;
+	rootPubkey: string;
+	parentId: string;
+	parentKind: typeof CHANNEL_MESSAGE_KIND | typeof TRACE_REPLY_KIND;
+	parentPubkey: string;
+};
+
 export type LiveFilterOptions = {
 	channelId: string;
 	since: number;
 };
 
-export type TraceFilterOptions = {
-	channelId: string;
-	positions: readonly GridPosition[];
-	since?: number;
-	until?: number;
+export type TraceRootBootstrapFilterOptions = Pick<LiveFilterOptions, 'channelId'>;
+
+export type TraceReplyFilterOptions = {
+	rootId: string;
+};
+
+export type TraceDirectReplyFilterOptions = TraceReplyFilterOptions & {
+	currentId: string;
+};
+
+export type TraceNotificationFilterOptions = {
+	personaPubkey: string;
+	effectiveRootIds?: readonly string[];
 };
 
 const NOSTR_EVENT_ID = /^[0-9a-f]{64}$/;
+const TRACE_ROOT_BOOTSTRAP_LIMIT = 1000;
+const TRACE_REPLY_INITIAL_LIMIT = 100;
 
 function assertChannelId(channelId: string): void {
-	if (!NOSTR_EVENT_ID.test(channelId)) {
-		throw new TypeError('Channel ID must be a 64-character lowercase hexadecimal Nostr event ID.');
+	assertNostrEventId(channelId, 'Channel ID');
+}
+
+function assertNostrEventId(value: string, label: string): void {
+	if (!NOSTR_EVENT_ID.test(value)) {
+		throw new TypeError(`${label} must be a 64-character lowercase hexadecimal Nostr event ID.`);
+	}
+}
+
+function assertPubkey(value: string, label: string): void {
+	if (!NOSTR_EVENT_ID.test(value)) {
+		throw new TypeError(`${label} must be a 64-character lowercase hexadecimal Nostr pubkey.`);
 	}
 }
 
@@ -133,14 +201,6 @@ function assertPositionSlot(slot: PositionSlot): void {
 	}
 }
 
-function assertTimeRange(since: number | undefined, until: number | undefined): void {
-	if (since !== undefined) assertCreatedAt(since);
-	if (until !== undefined) assertCreatedAt(until);
-	if (since !== undefined && until !== undefined && since > until) {
-		throw new TypeError('since must not be later than until.');
-	}
-}
-
 function assertChannelReference(channel: ChannelReference): void {
 	assertChannelId(channel.channelId);
 	assertRelayHint(channel.relayHint);
@@ -173,6 +233,66 @@ export function buildWorldMessageTemplate(input: WorldMessageInput): WorldMessag
 
 	return {
 		kind: CHANNEL_MESSAGE_KIND,
+		created_at: input.createdAt,
+		tags,
+		content: input.content
+	};
+}
+
+function isParsedTraceReply(value: ParsedWorldMessage | ParsedTraceReply): value is ParsedTraceReply {
+	return 'rootId' in value;
+}
+
+function assertMessageReference(message: ParsedWorldMessage, label: string): void {
+	assertNostrEventId(message.id, `${label} ID`);
+	assertPubkey(message.pubkey, `${label} pubkey`);
+}
+
+function assertTraceReplyReference(reply: ParsedTraceReply, label: string): void {
+	assertNostrEventId(reply.id, `${label} ID`);
+	assertPubkey(reply.pubkey, `${label} pubkey`);
+	assertNostrEventId(reply.rootId, `${label} root ID`);
+	assertPubkey(reply.rootPubkey, `${label} root pubkey`);
+}
+
+function regularEventPointer(tagName: 'E' | 'e', id: string, pubkey: string, relayHint?: string): string[] {
+	return [tagName, id, relayHint ?? '', pubkey];
+}
+
+export function buildTraceReplyTemplate(input: TraceReplyInput): TraceReplyTemplate {
+	assertMessageReference(input.root, 'Root');
+	assertCreatedAt(input.createdAt);
+	if (input.relayHint !== undefined) assertRelayHint(input.relayHint);
+
+	const parentKind = isParsedTraceReply(input.parent) ? TRACE_REPLY_KIND : CHANNEL_MESSAGE_KIND;
+	if (isParsedTraceReply(input.parent)) {
+		assertTraceReplyReference(input.parent, 'Parent');
+		if (input.parent.rootId !== input.root.id || input.parent.rootPubkey !== input.root.pubkey) {
+			throw new TypeError('Reply parent must belong to the supplied root tree.');
+		}
+	} else {
+		assertMessageReference(input.parent, 'Parent');
+		if (input.parent.id !== input.root.id || input.parent.pubkey !== input.root.pubkey) {
+			throw new TypeError('A kind 42 reply parent must be the supplied root.');
+		}
+	}
+
+	const tags = [
+		regularEventPointer('E', input.root.id, input.root.pubkey, input.relayHint),
+		['K', String(CHANNEL_MESSAGE_KIND)],
+		['P', input.root.pubkey],
+		regularEventPointer('e', input.parent.id, input.parent.pubkey, input.relayHint),
+		['k', String(parentKind)],
+		['p', input.parent.pubkey],
+		['L', PROTOTYPE_NAMESPACE],
+		['l', 'chat', PROTOTYPE_NAMESPACE],
+		['w', formatCanonicalGridPosition(input.position)]
+	];
+	const label = speechLabel(input.speechType);
+	if (label) tags.push(label);
+
+	return {
+		kind: TRACE_REPLY_KIND,
 		created_at: input.createdAt,
 		tags,
 		content: input.content
@@ -224,12 +344,6 @@ export function finalizeCharacterProfileEvent(
 	return finalizeEvent(template, secretKey);
 }
 
-function getProjectRootIds(event: Event): string[] {
-	return event.tags
-		.filter((tag) => tag[0] === 'e' && tag[3] === 'root')
-		.map((tag) => tag[1]);
-}
-
 function hasProjectChatLabel(event: Event): boolean {
 	return event.tags.some((tag) =>
 		tag[0] === 'l' && tag[1] === 'chat' && tag[2] === PROTOTYPE_NAMESPACE
@@ -254,9 +368,9 @@ function parseUnambiguousWorldPosition(event: Event): GridPosition | null {
 	return parseCanonicalGridPosition(values[0]);
 }
 
-function matchesChannelRoot(event: Event, channelId: string): boolean {
-	const rootIds = getProjectRootIds(event);
-	return rootIds.length > 0 && rootIds.every((id) => id === channelId);
+function hasExactlyChannelRootRelation(event: Event, channelId: string): boolean {
+	const relations = event.tags.filter((tag) => tag[0] === 'e');
+	return relations.length === 1 && relations[0][1] === channelId && relations[0][3] === 'root';
 }
 
 function isVerifiedEvent(event: Event): event is VerifiedEvent {
@@ -275,7 +389,7 @@ export function parseWorldMessage(event: Event, channelId: string): ParsedWorldM
 	assertChannelId(channelId);
 	if (!isVerifiedEvent(event) || event.kind !== CHANNEL_MESSAGE_KIND) return null;
 	if (!Number.isSafeInteger(event.created_at) || event.created_at < 0) return null;
-	if (!matchesChannelRoot(event, channelId)) return null;
+	if (!hasExactlyChannelRootRelation(event, channelId)) return null;
 	if (!event.tags.some((tag) => tag[0] === 'L' && tag[1] === PROTOTYPE_NAMESPACE)) return null;
 	if (!hasProjectChatLabel(event)) return null;
 
@@ -290,6 +404,97 @@ export function parseWorldMessage(event: Event, channelId: string): ParsedWorldM
 		content: event.content,
 		speechType,
 		position
+	};
+}
+
+function exactlyOneTag(event: Event, name: string): string[] | null {
+	const tags = event.tags.filter((tag) => tag[0] === name);
+	return tags.length === 1 ? tags[0] : null;
+}
+
+function validPointerAuthorHint(tag: readonly string[]): string | null | undefined {
+	const hint = tag[3];
+	if (hint === undefined) return undefined;
+	return NOSTR_EVENT_ID.test(hint) ? hint : null;
+}
+
+/**
+ * Validates only an event's own kind 1111 structure. The resulting candidate
+ * must still be compared with accepted root and parent events before use.
+ */
+export function parseTraceReplyCandidate(event: Event): ParsedTraceReplyCandidate | null {
+	if (!isVerifiedEvent(event) || event.kind !== TRACE_REPLY_KIND) return null;
+	if (!Number.isSafeInteger(event.created_at) || event.created_at < 0) return null;
+	if (!event.tags.some((tag) => tag[0] === 'L' && tag[1] === PROTOTYPE_NAMESPACE)) return null;
+	if (!hasProjectChatLabel(event)) return null;
+	if (event.tags.some((tag) => ['A', 'I', 'a', 'i'].includes(tag[0]))) return null;
+
+	const rootEvent = exactlyOneTag(event, 'E');
+	const rootKind = exactlyOneTag(event, 'K');
+	const rootAuthor = exactlyOneTag(event, 'P');
+	const parentEvent = exactlyOneTag(event, 'e');
+	const parentKind = exactlyOneTag(event, 'k');
+	if (!rootEvent || !rootKind || !rootAuthor || !parentEvent || !parentKind) return null;
+	if (!NOSTR_EVENT_ID.test(rootEvent[1]) || rootKind[1] !== String(CHANNEL_MESSAGE_KIND) || !NOSTR_EVENT_ID.test(rootAuthor[1])) return null;
+	if (!NOSTR_EVENT_ID.test(parentEvent[1])) return null;
+	if (parentKind[1] !== String(CHANNEL_MESSAGE_KIND) && parentKind[1] !== String(TRACE_REPLY_KIND)) return null;
+
+	const rootAuthorHint = validPointerAuthorHint(rootEvent);
+	const parentAuthorHint = validPointerAuthorHint(parentEvent);
+	if (rootAuthorHint === null || parentAuthorHint === null) return null;
+
+	const speechType = parseSpeechType(event);
+	const position = parseUnambiguousWorldPosition(event);
+	if (!speechType || !position) return null;
+
+	return {
+		id: event.id,
+		pubkey: event.pubkey,
+		createdAt: event.created_at,
+		content: event.content,
+		speechType,
+		position,
+		rootId: rootEvent[1],
+		rootPubkey: rootAuthor[1],
+		...(rootAuthorHint === undefined ? {} : { rootAuthorHint }),
+		parentId: parentEvent[1],
+		parentKind: parentKind[1] === String(CHANNEL_MESSAGE_KIND) ? CHANNEL_MESSAGE_KIND : TRACE_REPLY_KIND,
+		parentAuthorHints: event.tags.filter((tag) => tag[0] === 'p').map((tag) => tag[1]),
+		...(parentAuthorHint === undefined ? {} : { parentAuthorHint })
+	};
+}
+
+/**
+ * Resolves a structural candidate against already accepted events without
+ * owning transport, cache, pending-parent, or tree orchestration state.
+ */
+export function validateTraceReplyCandidate(
+	candidate: ParsedTraceReplyCandidate,
+	root: ParsedWorldMessage,
+	parent: ParsedWorldMessage | ParsedTraceReply
+): ParsedTraceReply | null {
+	if (candidate.rootId !== root.id || candidate.rootPubkey !== root.pubkey) return null;
+	if (candidate.rootAuthorHint !== undefined && candidate.rootAuthorHint !== root.pubkey) return null;
+
+	const parentKind = isParsedTraceReply(parent) ? TRACE_REPLY_KIND : CHANNEL_MESSAGE_KIND;
+	if (isParsedTraceReply(parent) && (parent.rootId !== root.id || parent.rootPubkey !== root.pubkey)) return null;
+	if (!isParsedTraceReply(parent) && (parent.id !== root.id || parent.pubkey !== root.pubkey)) return null;
+	if (candidate.parentId !== parent.id || candidate.parentKind !== parentKind) return null;
+	if (!candidate.parentAuthorHints.includes(parent.pubkey)) return null;
+	if (candidate.parentAuthorHint !== undefined && candidate.parentAuthorHint !== parent.pubkey) return null;
+
+	return {
+		id: candidate.id,
+		pubkey: candidate.pubkey,
+		createdAt: candidate.createdAt,
+		content: candidate.content,
+		speechType: candidate.speechType,
+		position: candidate.position,
+		rootId: root.id,
+		rootPubkey: root.pubkey,
+		parentId: parent.id,
+		parentKind,
+		parentPubkey: parent.pubkey
 	};
 }
 
@@ -367,20 +572,48 @@ export function buildPositionFilter(options: LiveFilterOptions): Filter {
 	};
 }
 
-export function buildTraceMessageFilter(options: TraceFilterOptions): Filter {
+export function buildTraceRootBootstrapFilter(options: TraceRootBootstrapFilterOptions): Filter {
 	assertChannelId(options.channelId);
-	assertTimeRange(options.since, options.until);
-	if (options.positions.length === 0) {
-		throw new TypeError('Trace filters require at least one position.');
-	}
-
 	return {
 		kinds: [CHANNEL_MESSAGE_KIND],
 		'#e': [options.channelId],
 		'#L': [PROTOTYPE_NAMESPACE],
 		'#l': ['chat'],
-		'#w': options.positions.map(formatCanonicalGridPosition),
-		...(options.since === undefined ? {} : { since: options.since }),
-		...(options.until === undefined ? {} : { until: options.until })
+		limit: TRACE_ROOT_BOOTSTRAP_LIMIT
+	};
+}
+
+export function buildTraceReplyFilter(options: TraceReplyFilterOptions): Filter {
+	assertNostrEventId(options.rootId, 'Root ID');
+	return {
+		kinds: [TRACE_REPLY_KIND],
+		'#E': [options.rootId],
+		'#L': [PROTOTYPE_NAMESPACE],
+		'#l': ['chat'],
+		limit: TRACE_REPLY_INITIAL_LIMIT
+	};
+}
+
+export function buildTraceDirectReplyFilter(options: TraceDirectReplyFilterOptions): Filter {
+	assertNostrEventId(options.currentId, 'Current event ID');
+	return {
+		...buildTraceReplyFilter(options),
+		'#e': [options.currentId]
+	};
+}
+
+export function buildTraceNotificationFilter(options: TraceNotificationFilterOptions): Filter {
+	assertPubkey(options.personaPubkey, 'Persona pubkey');
+	if (options.effectiveRootIds !== undefined) {
+		for (const rootId of options.effectiveRootIds) assertNostrEventId(rootId, 'Effective root ID');
+	}
+	return {
+		kinds: [TRACE_REPLY_KIND],
+		'#p': [options.personaPubkey],
+		'#L': [PROTOTYPE_NAMESPACE],
+		'#l': ['chat'],
+		...(options.effectiveRootIds && options.effectiveRootIds.length > 0
+			? { '#E': [...options.effectiveRootIds] }
+			: {})
 	};
 }
