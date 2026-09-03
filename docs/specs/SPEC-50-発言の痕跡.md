@@ -20,6 +20,16 @@ BigInt(`0x${event.id}`) % 5n === 0n
 
 browserが取得したeffective rootはbrowser-localに永続保持する。latest bootstrap範囲から外れてもroot evictionまで保持し、browserごとに保持する古いtrace集合が異なってよい。root evictionでは、root、root read state、reply tree、reply read/unread state、reply notificationを完全に忘れる。
 
+### reply cache
+
+reply cacheは、全root合計で最大1000件のkind 1111 eventを保持するglobal hard capとする。NIP-22のinitial `limit=100` は各Relay・各filterのhistory取得上限であり、このcache上限とは別概念である。
+
+rootごとの独立quotaは設けない。recently opened rootを優先し、古いrootのreply treeをroot単位LRU evictionする。current open rootは、他にevict可能なtreeがある間は優先保持する。
+
+root単位LRUだけでは1000件以下にできない場合、たとえば単一rootだけで1000件を超える場合は、global hard capを優先してそのroot内の古いreplyもevictできる。これはroot別quotaを設ける意味ではない。persistent cacheにchildだけが残るorphan状態を作らず、保持するreplyはrootまでvalidation可能なtree関係を維持する。intra-root evictionの具体algorithmは実装詳細として固定しない。
+
+reply-tree LRU evictionではrootとroot read stateを残し、そのtreeのreply cache、reply read/unread、notification metadataを忘れる。再open時はRelayからreply historyを取得し直す。
+
 ### root lightとauthor ghost
 
 通常時、trace cellには共通の小さなlightだけを表示し、author ghostや件数は表示しない。replyは独立した通常field lightを生成しない。field上の通常lightはroot traceだけが所有する。
@@ -61,7 +71,7 @@ Profile Dialogまたはcontext menuを開閉してもconversation exploration、
 - root conversation open時は、`kinds=[1111]`、`#E=[root]`、project `#L/#l`、initial `limit=100`で、root-wideのrecent historyとlive replyを対象にする。
 - current speechのdirect reply補完は、`kinds=[1111]`、`#E=[root]`、`#e=[current]`、project `#L/#l`、initial `limit=100`とする。
 - notification候補は、`kinds=[1111]`、`#p=[current persona pubkey]`、project `#L/#l`を使い、可能ならcurrent effective root IDsで`#E`も絞る。
-- `limit=100`は各Relay・各filterのinitial history取得上限であり、reply treeの件数上限ではない。Relayごとの応答をevent IDでmulti-Relay dedupeし、tree/cacheのglobal capとは別に扱う。
+- `limit=100`は各Relay・各filterのinitial history取得上限であり、reply treeの件数上限でもreply cacheのglobal 1000件上限でもない。Relayごとの応答をevent IDでmulti-Relay dedupeし、tree/cacheのglobal capとは別に扱う。
 
 初回history取得では、Relay arrival orderに依存してreplyを1件ずつprogressiveに表示しない。EOSE / CLOSED / timeoutまでのbounded batchを集め、batch/cache内のroot/parent relationをsemantic validationした後、accepted direct repliesをまとめて反映する。
 

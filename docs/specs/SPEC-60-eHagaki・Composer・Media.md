@@ -66,7 +66,7 @@ modifierの判定およびHost-owned submit lifecycleを担当し、opaqueな`sh
 selectorはpersona-bubble-field側の責務とする。eHagakiへpersona固有のspeech semanticsを持ち込まず、
 eHagaki自身がslash commandを解釈しない。
 
-trace conversationのreply modeでは、Host-owned Liteの既存 `setContext()` reply context、preview、`×` clearを利用する。reply preview hydrationにevent dataが必要な場合、親clientはすでに取得・semantic validationしたtarget eventを `preloadedEvents` として渡してよい。`preloadedEvents` はpreview/context補助であり、最終NIP-22 event構築のauthorityではない。
+trace conversationのreply modeでは、Host-owned Liteの既存 `setContext()` reply context、preview、`×` clearを利用する。reply preview hydrationにevent dataが必要な場合、親clientはすでに取得・semantic validationしたtarget eventを `preloadedEvents` として渡す。`preloadedEvents` はpreview/context補助であり、最終NIP-22 event構築のauthorityではない。
 
 親clientはreply target、NIP-22 `E/K/P`・`e/k/p`、`w`、speech type、最終event、sign、publishを所有する。Composer Outputの `tags` と `context` は最終event構築のauthorityにしない。eHagaki自身にRelay read、trace cache、NIP-22 tree取得、validation、notification、position、publish責務を追加しない。
 
