@@ -64,6 +64,13 @@ async function seed(channelId: string, eventId: string, rawEvent: unknown): Prom
 	await db.put(STORE_NAME, { channelId, eventId, rawEvent });
 }
 
+async function seedRecord(record: unknown): Promise<void> {
+	const db = await database();
+	const tx = db.transaction(STORE_NAME, 'readwrite');
+	await tx.store.put(record as never);
+	await tx.done;
+}
+
 beforeEach(() => {
 	vi.stubGlobal('indexedDB', new IDBFactory());
 });
@@ -139,6 +146,23 @@ describe('trace root cache reconciliation', () => {
 		await reconcileTraceRootCache({ channelId: CHANNEL_ID, field: { columns: 2, rows: 1 }, rawEvents: [first] });
 		await reconcileTraceRootCache({ channelId: OTHER_CHANNEL_ID, field: { columns: 2, rows: 1 }, rawEvents: [other] });
 		await reconcileTraceRootCache({ channelId: CHANNEL_ID, field: { columns: 2, rows: 1 }, rawEvents: [] });
+		expect((await reconcileTraceRootCache({
+			channelId: OTHER_CHANNEL_ID, field: { columns: 2, rows: 1 }, rawEvents: []
+		})).map((root) => root.id)).toEqual([other.id]);
+	});
+
+	it('cleans a same-channel non-string compound-key record without touching another channel', async () => {
+		const other = lotteryRoot({ channelId: OTHER_CHANNEL_ID, nonce: 'other-key-partition' });
+		await seedRecord({ channelId: CHANNEL_ID, eventId: 123, rawEvent: null });
+		await seed(OTHER_CHANNEL_ID, other.id, other);
+
+		expect(await reconcileTraceRootCache({
+			channelId: CHANNEL_ID, field: { columns: 2, rows: 1 }, rawEvents: []
+		})).toEqual([]);
+
+		const db = await database();
+		const allKeys = await db.getAllKeys(STORE_NAME);
+		expect(allKeys).toEqual([[OTHER_CHANNEL_ID, other.id]]);
 		expect((await reconcileTraceRootCache({
 			channelId: OTHER_CHANNEL_ID, field: { columns: 2, rows: 1 }, rawEvents: []
 		})).map((root) => root.id)).toEqual([other.id]);

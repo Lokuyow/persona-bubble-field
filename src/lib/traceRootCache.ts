@@ -43,10 +43,6 @@ async function openTraceDatabase() {
 	}
 }
 
-function currentChannelRange(channelId: string): IDBKeyRange {
-	return IDBKeyRange.bound([channelId, ''], [channelId, '\uffff']);
-}
-
 function storedRawEvents(records: readonly unknown[]): Event[] {
 	return records.flatMap((record) => {
 		if (typeof record !== 'object' || record === null || Array.isArray(record)) return [];
@@ -57,11 +53,11 @@ function storedRawEvents(records: readonly unknown[]): Event[] {
 
 async function replaceCurrentChannel(
 	tx: TraceTransaction,
-	keys: readonly [string, string][],
+	keys: readonly IDBValidKey[],
 	channelId: string,
 	candidates: readonly TraceRootCandidate[]
 ): Promise<void> {
-	for (const key of keys) await tx.store.delete(key);
+	for (const key of keys) await tx.store.delete(key as [string, string]);
 	for (const candidate of candidates) {
 		await tx.store.put({
 			channelId,
@@ -89,13 +85,23 @@ export async function reconcileTraceRootCache(
 	try {
 		tx = db.transaction(STORE_NAME, 'readwrite');
 		void tx.done.catch(() => {});
-		const range = currentChannelRange(input.channelId);
-		const [records, keys] = await Promise.all([tx.store.getAll(range), tx.store.getAllKeys(range)]);
+		// Enumerate the complete store: a compound-key range constrained by a
+		// string eventId would hide same-channel records whose corrupt key uses a
+		// different IndexedDB-valid key type (for example, a number).
+		const [allRecords, allKeys] = await Promise.all([tx.store.getAll(), tx.store.getAllKeys()]);
+		const currentRecords: unknown[] = [];
+		const currentKeys: IDBValidKey[] = [];
+		for (let index = 0; index < allKeys.length; index += 1) {
+			const key = allKeys[index];
+			if (!Array.isArray(key) || key.length !== 2 || key[0] !== input.channelId) continue;
+			currentKeys.push(key);
+			currentRecords.push(allRecords[index]);
+		}
 		const selectedStoredRoots = selectTraceRootCandidates(
-			storedRawEvents(records), input.channelId, input.field
+			storedRawEvents(currentRecords), input.channelId, input.field
 		);
 		const survivors = capTraceRootCandidates([...selectedStoredRoots, ...selectedNewRoots], input.field);
-		await replaceCurrentChannel(tx, keys as [string, string][], input.channelId, survivors);
+		await replaceCurrentChannel(tx, currentKeys, input.channelId, survivors);
 		await tx.done;
 		return survivors.map((candidate) => candidate.root);
 	} catch {
