@@ -15,7 +15,6 @@ import type { Filter } from 'nostr-tools/filter';
 import { verifyEvent, type Event, type VerifiedEvent } from 'nostr-tools/pure';
 import {
 	buildPositionFilter,
-	buildTraceMessageFilter,
 	buildWorldMessageFilters,
 	parsePositionEvent,
 	parseWorldMessage,
@@ -108,17 +107,6 @@ export type PublishRelayResult = Readonly<{
 	relayUrl: string;
 	outcome: 'accepted' | 'rejected' | 'no-response';
 	notice?: string;
-}>;
-
-export type TraceQueryInput = Readonly<{
-	positions: Parameters<typeof buildTraceMessageFilter>[0]['positions'];
-	since?: number;
-	until?: number;
-}>;
-
-export type TraceQueryResult = Readonly<{
-	messages: readonly ParsedWorldMessage[];
-	relays: readonly RelayQueryDiagnostic[];
 }>;
 
 export type NostrRelayTransportOptions = Readonly<{
@@ -242,8 +230,6 @@ export function createNostrRelayTransport(
 	const relayAliases = new Map<string, string>();
 	const subscriptions = new Subscription();
 	let cancelPrimaryStart: (() => void) | null = null;
-	const pendingTraces: { filter: Filter; result: Promise<TraceQueryResult> }[] = [];
-
 	function requireRxNostr(): RxNostr {
 		if (!rxNostr) throw new Error('Relay transport has not been initialized.');
 		return rxNostr;
@@ -627,27 +613,6 @@ export function createNostrRelayTransport(
 				});
 			});
 			return [...results.values()];
-		},
-
-		async queryTrace(input: TraceQueryInput): Promise<TraceQueryResult> {
-			if (state !== 'started' || !metadata) throw new Error('Relay transport must start before querying trace events.');
-			const filter = buildTraceMessageFilter({ channelId: metadata.channelId, ...input });
-			// Identical in-flight filters cannot identify two different logical
-			// requests through outgoing semantics. Share that finite query only.
-			const existing = pendingTraces.find((query) => matchesQueryFilter([filter], query.filter));
-			if (existing) return existing.result;
-			const events = new Map<string, ParsedWorldMessage>();
-			const result = queryRelays(filter, metadata.relays, (packet) => {
-				const parsed = parseWorldMessage(packet.event, metadata!.channelId);
-				if (parsed) events.set(parsed.id, parsed);
-			}).then((relays) => ({ messages: [...events.values()], relays }));
-			const pending = { filter, result };
-			pendingTraces.push(pending);
-			try {
-				return await result;
-			} finally {
-				pendingTraces.splice(pendingTraces.indexOf(pending), 1);
-			}
 		},
 
 		dispose(): void {
