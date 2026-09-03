@@ -114,6 +114,7 @@
 	let lastVisibilityKey: string | null = null;
 	let colorByPubkey: Record<string, AvatarColor> = {};
 	let recentMessageTimeline: RecentMessageTimeline = [];
+	let effectiveTraceRoots: readonly ParsedWorldMessage[] = [];
 	let timelineOverflowById: Record<string, boolean> = {};
 	let timelineEntryHeights: Record<string, number> = {};
 	let timelineAvailableHeight = 0;
@@ -208,6 +209,15 @@
 	});
 
 	$: participantById = new Map(participantViews.map((participant) => [participant.id, participant]));
+	$: traceLightCells = [...new Map(effectiveTraceRoots.map((root) => [
+		`${root.position.x},${root.position.y}`,
+		root.position
+	])).values()].map((position) => ({
+		position,
+		occupied: participantViews.some((participant) =>
+			participant.position.x === position.x && participant.position.y === position.y
+		)
+	}));
 
 	$: visibleParticipantIds = new Set(
 		participantViews.filter((participant) => isInsideFieldArea(participant.screen)).map((participant) => participant.id)
@@ -467,6 +477,9 @@
 				if (devSpeech === 'linebreak-overflow') seedDevSpeechLinebreakOverflowFixture();
 				if (devSpeech === 'timeline') seedDevRecentMessageTimelineFixture();
 			}
+			if (import.meta.env.DEV && new URLSearchParams(window.location.search).get('devTrace') === 'lights') {
+				seedDevTraceLightFixture();
+			}
 		}
 
 		const begin = async () => {
@@ -505,6 +518,9 @@
 				onPresenceChanged: setPresence,
 				onLiveMessage: receiveLiveMessage,
 				onTimelineMessage: receiveTimelineMessage,
+				onEffectiveTraceRootsChanged: (roots) => {
+					effectiveTraceRoots = roots;
+				},
 				onStatusChanged: (status) => {
 					connectionStatus = status;
 					if (status.kind === 'failed') setComposerTerminalError(new Error(status.message));
@@ -1179,6 +1195,7 @@
 		if (!devWorldSandboxEnabled) return;
 		conversationState = createConversationState();
 		recentMessageTimeline = [];
+		effectiveTraceRoots = [];
 		timelineOverflowById = {};
 		timelineEntryHeights = {};
 		timelineAvailableHeight = 0;
@@ -1211,6 +1228,37 @@
 		}));
 		messages.push({ ...messages[22], id: 'dev-timeline-duplicate', content: 'duplicate event ID' });
 		recentMessageTimeline = createRecentMessageTimeline(messages);
+	}
+
+	function traceLightWorldPosition(position: { x: number; y: number }, occupied: boolean): WorldPoint {
+		const edgeOffset = occupied ? cellSize * 0.28 : 0;
+		return {
+			x: (position.x + 0.5) * cellSize + edgeOffset,
+			y: (position.y + 0.5) * cellSize - edgeOffset
+		};
+	}
+
+	function seedDevTraceLightFixture(): void {
+		if (!devWorldSandboxEnabled) return;
+		const now = Math.floor(Date.now() / 1000);
+		effectiveTraceRoots = [
+			{
+				id: '1'.repeat(64), pubkey: 'a'.repeat(64), createdAt: now,
+				content: 'first root in the shared empty cell', speechType: 'normal', position: { x: 2, y: 2 }
+			},
+			{
+				id: '2'.repeat(64), pubkey: 'b'.repeat(64), createdAt: now - 1,
+				content: 'second root in the shared empty cell', speechType: 'shout', position: { x: 2, y: 2 }
+			},
+			{
+				id: '3'.repeat(64), pubkey: 'c'.repeat(64), createdAt: now - 2,
+				content: 'root beside the current participant', speechType: 'monologue', position: { x: 7, y: 3 }
+			},
+			{
+				id: '4'.repeat(64), pubkey: 'd'.repeat(64), createdAt: now - 3,
+				content: 'root on an available movement cell', speechType: 'normal', position: { x: 8, y: 3 }
+			}
+		];
 	}
 
 	function seedDevSpeechNormalFixture(): void {
@@ -1756,6 +1804,17 @@
 						>
 							<span class="movement-cell-chevron" aria-hidden="true"></span>
 						</button>
+					{/each}
+				</div>
+				<div class="trace-light-layer" aria-hidden="true">
+					{#each traceLightCells as cell (`${cell.position.x},${cell.position.y}`)}
+						{@const world = traceLightWorldPosition(cell.position, cell.occupied)}
+						<span
+							class="trace-light"
+							data-trace-light-position={`${cell.position.x},${cell.position.y}`}
+							data-trace-light-occupied={cell.occupied ? 'true' : undefined}
+							style={`left: ${world.x}px; top: ${world.y}px;`}
+						></span>
 					{/each}
 				</div>
 				{#each participantViews as participant (participant.id)}
@@ -2382,6 +2441,25 @@
 		inset: 0;
 		z-index: 1;
 		pointer-events: none;
+	}
+
+	.trace-light-layer {
+		position: absolute;
+		inset: 0;
+		z-index: 4;
+		pointer-events: none;
+	}
+
+	.trace-light {
+		position: absolute;
+		width: max(6px, calc(var(--cell-size) * 0.14));
+		height: max(6px, calc(var(--cell-size) * 0.14));
+		border: 1px solid rgba(255, 250, 205, 0.84);
+		border-radius: 50%;
+		background: rgba(255, 238, 154, 0.75);
+		box-shadow: 0 0 8px 3px rgba(255, 225, 120, 0.42);
+		pointer-events: none;
+		transform: translate(-50%, -50%);
 	}
 
 	.movement-cell {

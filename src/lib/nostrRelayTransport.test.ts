@@ -235,7 +235,9 @@ describe('primary lifecycle', () => {
 			send(relay.latestSocket(), 'EVENT', relay.primaryId(42), storedMessage);
 		}
 		await vi.advanceTimersByTimeAsync(10);
-		expect(f.input.onLiveMessage).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: liveMessage.id }));
+		expect(f.input.onLiveMessage).toHaveBeenCalledExactlyOnceWith(
+			expect.objectContaining({ id: liveMessage.id }), expect.objectContaining({ id: liveMessage.id })
+		);
 		expect(f.input.onLivePosition).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: livePosition.id }));
 		expect(f.authorities.map((relay) => relay.sockets.length)).toEqual([1, 1]);
 		expect(f.authorities.flatMap((relay) => relay.messages.filter((message) => message[0] === 'CLOSE'))).toEqual([]);
@@ -325,7 +327,9 @@ describe('primary lifecycle', () => {
 		const live = f.message('after reconnect', TIME + 2);
 		send(relay.latestSocket(), 'EVENT', relay.primaryId(42), live);
 		await vi.advanceTimersByTimeAsync(5);
-		expect(f.input.onLiveMessage).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: live.id }));
+		expect(f.input.onLiveMessage).toHaveBeenCalledExactlyOnceWith(
+			expect.objectContaining({ id: live.id }), expect.objectContaining({ id: live.id })
+		);
 		send(relay.latestSocket(), 'CLOSED', relay.primaryId(42), 'restricted: after reconnect');
 		expect(f.input.onPrimaryClosed).toHaveBeenCalledTimes(1);
 	});
@@ -603,7 +607,9 @@ describe('trace root bootstrap', () => {
 		const live = f.message('primary-after-trace');
 		send(f.authorities[0].latestSocket(), 'EVENT', f.authorities[0].primaryId(42), live);
 		await vi.advanceTimersByTimeAsync(10);
-		expect(f.input.onLiveMessage).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: live.id }));
+		expect(f.input.onLiveMessage).toHaveBeenCalledExactlyOnceWith(
+			expect.objectContaining({ id: live.id }), expect.objectContaining({ id: live.id })
+		);
 	});
 
 	it('cleans up a pending finite bootstrap during dispose', async () => {

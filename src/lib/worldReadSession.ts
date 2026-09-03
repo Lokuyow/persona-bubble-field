@@ -4,6 +4,7 @@ import {
 	type PrimaryStartResult,
 	type PublishRelayResult
 } from './nostrRelayTransport';
+import { reconcileTraceRootCache } from './traceRootCache';
 import {
 	buildPositionEventTemplate,
 	buildWorldMessageTemplate,
@@ -24,7 +25,7 @@ import {
 	type PresenceState
 } from './presence';
 import type { Direction } from './geometry';
-import type { VerifiedEvent } from 'nostr-tools/pure';
+import type { Event as NostrEvent, VerifiedEvent } from 'nostr-tools/pure';
 import type { AccountSnapshot } from './nostrAccount';
 import type { SpeechType } from './conversation';
 import { reachedAuthoritativeRelay } from './initialProfilePublication';
@@ -83,13 +84,14 @@ export type WorldReadSessionOptions = Readonly<{
 	onPresenceChanged: (presence: PresenceState) => void;
 	onLiveMessage: (message: ParsedWorldMessage, presence: PresenceState) => void;
 	onTimelineMessage?: (message: ParsedWorldMessage) => void;
+	onEffectiveTraceRootsChanged?: (roots: readonly ParsedWorldMessage[]) => void;
 	onStatusChanged: (status: WorldReadConnectionStatus) => void;
 	onSelfPositionWriteStateChanged?: (state: SelfPositionWriteState) => void;
 	onSelfMessageAvailabilityChanged?: (state: SelfMessageAvailability) => void;
 }>;
 
 type BufferedLiveEvent =
-	| Readonly<{ kind: 'message'; event: ParsedWorldMessage }>
+	| Readonly<{ kind: 'message'; event: ParsedWorldMessage; rawEvent: NostrEvent }>
 	| Readonly<{ kind: 'position'; event: ParsedPositionEvent }>;
 
 type SelfPositionOperation = Readonly<{
@@ -174,7 +176,30 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 		emitStatus({ kind: 'degraded', issueCount });
 	}
 
-	function applyCanonicalMessage(message: ParsedWorldMessage, nowMs: number): boolean {
+	function reconcileTraceRoots(rawEvents: readonly NostrEvent[]): void {
+		if (!channel || disposed) return;
+		void reconcileTraceRootCache({
+			channelId: channel.channelId,
+			field: options.field,
+			rawEvents
+		}).then((roots) => {
+			if (!disposed) options.onEffectiveTraceRootsChanged?.(roots);
+		}).catch(() => {
+			// Trace is viewer-local supplemental state and never changes world status.
+		});
+	}
+
+	function startTraceBackground(): void {
+		reconcileTraceRoots([]);
+		if (!transport) return;
+		void transport.bootstrapTraceRootCandidates().then((result) => {
+			reconcileTraceRoots(result.rawEvents);
+		}).catch(() => {
+			// Finite trace bootstrap failures leave the primary world usable.
+		});
+	}
+
+	function applyCanonicalMessage(message: ParsedWorldMessage, nowMs: number, rawEvent?: NostrEvent): boolean {
 		if (appliedCanonicalMessageEventIds.has(message.id)) return false;
 		appliedCanonicalMessageEventIds.add(message.id);
 		if (!disposed) options.onTimelineMessage?.(message);
@@ -183,11 +208,12 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 		worldPresence = applyWorldPresenceMessage(worldPresence, message);
 		const nextPresence = project(nowMs);
 		if (!disposed) options.onLiveMessage(message, nextPresence);
+		if (rawEvent) reconcileTraceRoots([rawEvent]);
 		return true;
 	}
 
-	function applyLiveMessage(message: ParsedWorldMessage, nowMs: number): void {
-		applyCanonicalMessage(message, nowMs);
+	function applyLiveMessage(message: ParsedWorldMessage, rawEvent: NostrEvent, nowMs: number): void {
+		applyCanonicalMessage(message, nowMs, rawEvent);
 	}
 
 	function applyLivePosition(event: ParsedPositionEvent, nowMs: number): void {
@@ -326,7 +352,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 			if (disposed) return { kind: 'unavailable' };
 			const echoConfirmed = pendingSelfMessage?.id === parsed.id && pendingSelfMessage.echoConfirmed;
 			if (reachedAuthoritativeRelay(results) || echoConfirmed) {
-				applyCanonicalMessage(parsed, Date.now());
+				applyCanonicalMessage(parsed, Date.now(), event);
 				if (pendingSelfMessage?.id === parsed.id) pendingSelfMessage = null;
 				return { kind: 'succeeded', eventId: parsed.id };
 			}
@@ -336,7 +362,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 			if (disposed) return { kind: 'unavailable' };
 			const echoConfirmed = pendingSelfMessage?.id === parsed.id && pendingSelfMessage.echoConfirmed;
 			if (echoConfirmed) {
-				applyCanonicalMessage(parsed, Date.now());
+				applyCanonicalMessage(parsed, Date.now(), event);
 				pendingSelfMessage = null;
 				return { kind: 'succeeded', eventId: parsed.id };
 			}
@@ -389,7 +415,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 			pendingLiveEvents.push(event);
 			return;
 		}
-		if (event.kind === 'message') applyLiveMessage(event.event, Date.now());
+		if (event.kind === 'message') applyLiveMessage(event.event, event.rawEvent, Date.now());
 		else applyLivePosition(event.event, Date.now());
 	}
 
@@ -409,7 +435,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 					positionSince: since,
 					onBootstrapMessage: (event) => applyBootstrapMessage(event, Date.now()),
 					onBootstrapPosition: (event) => applyBootstrapPosition(event, Date.now()),
-					onLiveMessage: (event) => receiveLive({ kind: 'message', event }),
+					onLiveMessage: (event, rawEvent) => receiveLive({ kind: 'message', event, rawEvent }),
 					onLivePosition: (event) => receiveLive({ kind: 'position', event }),
 					onPrimaryClosed: markDegraded
 				});
@@ -426,6 +452,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 				const nextPresence = project(Date.now());
 				const issueCount = hasRelayIssue(result);
 				emitStatus(issueCount === 0 ? { kind: 'available' } : { kind: 'degraded', issueCount });
+				startTraceBackground();
 				return {
 					messages: recentMessages,
 					timelineMessages: result.messages,
