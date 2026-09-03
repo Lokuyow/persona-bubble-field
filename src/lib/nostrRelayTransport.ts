@@ -90,7 +90,8 @@ export type PrimaryStartInput = Readonly<{
 	 */
 	onBootstrapMessage: (event: ParsedWorldMessage) => void;
 	onBootstrapPosition: (event: ParsedPositionEvent) => void;
-	onLiveMessage: (event: ParsedWorldMessage) => void;
+	/** A verified, event-ID-deduped live message and its cache-authoritative wire event. */
+	onLiveMessage: (event: ParsedWorldMessage, rawEvent: Event) => void;
 	onLivePosition: (event: ParsedPositionEvent) => void;
 	onPrimaryClosed: (diagnostic: PrimaryPairDiagnostic) => void;
 }>;
@@ -442,7 +443,7 @@ export function createNostrRelayTransport(
 			initialMessages.push(parsed);
 			startInput?.onBootstrapMessage(parsed);
 		}
-		else startInput?.onLiveMessage(parsed);
+		else startInput?.onLiveMessage(parsed, event);
 	}
 
 	function receivePosition(event: Event): void {

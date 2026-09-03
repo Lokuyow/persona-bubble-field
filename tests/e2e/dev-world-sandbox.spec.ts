@@ -168,6 +168,67 @@ test.describe('DEV World Sandbox', () => {
 		await expect(self.locator('img')).toHaveAttribute('src', /characters\/001\.webp$/);
 	});
 
+	test('projects unique non-interactive trace lights into the field scene', async ({ page }) => {
+		await page.setViewportSize({ width: 390, height: 844 });
+		await page.emulateMedia({ reducedMotion: 'reduce' });
+		await page.goto('/?devWorld=1&devTrace=lights');
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+
+		const lights = page.locator('.trace-light');
+		await expect(lights).toHaveCount(3);
+		await expect(page.locator('[data-trace-light-position="2,2"]')).toHaveCount(1);
+		await expect(page.locator('[data-trace-light-position="7,3"]')).toHaveCount(1);
+		await expect(page.locator('[data-trace-light-position="8,3"]')).toHaveCount(1);
+		const presentation = await lights.evaluateAll((elements) => elements.map((element) => ({
+			text: element.textContent,
+			pointerEvents: getComputedStyle(element).pointerEvents
+		})));
+		expect(presentation).toEqual([
+			{ text: '', pointerEvents: 'none' },
+			{ text: '', pointerEvents: 'none' },
+			{ text: '', pointerEvents: 'none' }
+		]);
+
+		const geometry = await page.evaluate(() => {
+			const grid = document.querySelector<HTMLElement>('.field-grid');
+			const scene = document.querySelector<HTMLElement>('.field-scene');
+			const empty = document.querySelector<HTMLElement>('[data-trace-light-position="2,2"]');
+			const occupied = document.querySelector<HTMLElement>('[data-trace-light-position="7,3"]');
+			if (!grid || !scene || !empty || !occupied) throw new Error('Expected trace light geometry.');
+			const gridRect = grid.getBoundingClientRect();
+			const emptyRect = empty.getBoundingClientRect();
+			const occupiedRect = occupied.getBoundingClientRect();
+			const cellSize = Number.parseFloat(getComputedStyle(scene).getPropertyValue('--cell-size'));
+			return {
+				cellSize,
+				empty: { x: emptyRect.left + emptyRect.width / 2 - gridRect.left, y: emptyRect.top + emptyRect.height / 2 - gridRect.top },
+				occupied: { x: occupiedRect.left + occupiedRect.width / 2 - gridRect.left, y: occupiedRect.top + occupiedRect.height / 2 - gridRect.top }
+			};
+		});
+		expect(geometry.empty.x).toBeCloseTo(2.5 * geometry.cellSize, 1);
+		expect(geometry.empty.y).toBeCloseTo(2.5 * geometry.cellSize, 1);
+		expect(geometry.occupied.x).toBeGreaterThan(7.5 * geometry.cellSize);
+		expect(geometry.occupied.y).toBeLessThan(3.5 * geometry.cellSize);
+
+		await profileTrigger(page, '女の子').click();
+		await expect(profileDialog(page)).toBeVisible();
+		await page.keyboard.press('Escape');
+		await expect(profileDialog(page)).toBeHidden();
+
+		const before = await page.evaluate(() => ({
+			gridLeft: document.querySelector<HTMLElement>('.field-grid')!.getBoundingClientRect().left,
+			lightLeft: document.querySelector<HTMLElement>('[data-trace-light-position="2,2"]')!.getBoundingClientRect().left
+		}));
+		await page.getByRole('button', { name: 'Move right' }).click();
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '8,3');
+		const after = await page.evaluate(() => ({
+			gridLeft: document.querySelector<HTMLElement>('.field-grid')!.getBoundingClientRect().left,
+			lightLeft: document.querySelector<HTMLElement>('[data-trace-light-position="2,2"]')!.getBoundingClientRect().left
+		}));
+		expect(after.gridLeft).not.toBe(before.gridLeft);
+		expect(after.lightLeft - before.lightLeft).toBeCloseTo(after.gridLeft - before.gridLeft, 3);
+	});
+
 	test('shows a finite recent-message overlay with semantic colors and existing profile focus restoration', async ({ page }) => {
 		await page.setViewportSize({ width: 1200, height: 1600 });
 		await page.goto('/?devWorld=1&devSpeech=timeline');

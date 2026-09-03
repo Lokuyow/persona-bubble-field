@@ -9,10 +9,14 @@ import {
 import { PRESENCE_TIMEOUT_MS } from './presence';
 import { createWorldReadSession, type WorldReadConnectionStatus } from './worldReadSession';
 
-const mocked = vi.hoisted(() => ({ createTransport: vi.fn() }));
+const mocked = vi.hoisted(() => ({ createTransport: vi.fn(), reconcileTraceRootCache: vi.fn() }));
 
 vi.mock('./nostrRelayTransport', () => ({
 	createNostrRelayTransport: mocked.createTransport
+}));
+
+vi.mock('./traceRootCache', () => ({
+	reconcileTraceRootCache: mocked.reconcileTraceRootCache
 }));
 
 const alice = 'a'.repeat(64);
@@ -42,6 +46,14 @@ function position(
 	return { id, pubkey, createdAt, slot, position: cell };
 }
 
+function raw(event: ParsedWorldMessage) {
+	return { id: event.id } as never;
+}
+
+function traceBootstrap() {
+	return vi.fn().mockResolvedValue({ rawEvents: [], relays: [] });
+}
+
 function startResult(messages: readonly ParsedWorldMessage[] = [], positions: readonly ParsedPositionEvent[] = [], statuses: readonly string[] = ['eose']) {
 	return {
 		metadata: {
@@ -58,9 +70,9 @@ function startResult(messages: readonly ParsedWorldMessage[] = [], positions: re
 
 describe('world read session', () => {
 	let input: {
-		onBootstrapMessage: (event: ParsedWorldMessage) => void;
-		onBootstrapPosition: (event: ParsedPositionEvent) => void;
-		onLiveMessage: (event: ParsedWorldMessage) => void;
+	onBootstrapMessage: (event: ParsedWorldMessage) => void;
+	onBootstrapPosition: (event: ParsedPositionEvent) => void;
+	onLiveMessage: (event: ParsedWorldMessage, rawEvent: never) => void;
 		onLivePosition: (event: ParsedPositionEvent) => void;
 		onPrimaryClosed: (diagnostic: never) => void;
 		messageSince: number;
@@ -78,11 +90,13 @@ describe('world read session', () => {
 		publish = vi.fn();
 		result = startResult();
 		mocked.createTransport.mockReset();
+		mocked.reconcileTraceRootCache.mockReset().mockResolvedValue([]);
 		mocked.createTransport.mockReturnValue({
 			start: vi.fn(async (nextInput) => {
 				input = nextInput;
 				return result;
 			}),
+			bootstrapTraceRootCandidates: traceBootstrap(),
 			dispose,
 			publish
 		});
@@ -130,12 +144,201 @@ describe('world read session', () => {
 		expect(timeline).not.toHaveBeenCalled();
 
 		const oldReconnect = { ...old, id: 'old-history-reconnect' };
-		input!.onLiveMessage(oldReconnect);
-		input!.onLiveMessage(oldReconnect);
+		input!.onLiveMessage(oldReconnect, raw(oldReconnect));
+		input!.onLiveMessage(oldReconnect, raw(oldReconnect));
 		session.completeBootstrap();
 
 		expect(timeline).toHaveBeenCalledExactlyOnceWith(oldReconnect);
-		expect(session.refresh(700_000).participants.map((participant) => participant.id)).toEqual([alice]);
+		 expect(session.refresh(700_000).participants.map((participant) => participant.id)).toEqual([alice]);
+	});
+
+	it('does not await trace restore or an unresolved trace bootstrap during primary start', async () => {
+		let resolveRestore!: (roots: readonly ParsedWorldMessage[]) => void;
+		mocked.reconcileTraceRootCache.mockImplementationOnce(() => new Promise((resolve) => { resolveRestore = resolve; }));
+		const bootstrapTraceRootCandidates = vi.fn(() => new Promise<never>(() => {}));
+		mocked.createTransport.mockReturnValue({
+			start: vi.fn(async (nextInput) => {
+				input = nextInput;
+				return startResult();
+			}),
+			bootstrapTraceRootCandidates,
+			dispose,
+			publish
+		});
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 }, onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn()
+		});
+
+		await expect(session.start()).resolves.toEqual(expect.objectContaining({ status: { kind: 'available' } }));
+		expect(bootstrapTraceRootCandidates).toHaveBeenCalledOnce();
+		resolveRestore([]);
+	});
+
+	it('reconciles cache restore and a partial trace bootstrap as supplemental snapshots', async () => {
+		const cached = message('cached-root', 700);
+		const network = message('network-root', 701);
+		const onEffectiveTraceRootsChanged = vi.fn();
+		mocked.reconcileTraceRootCache.mockImplementation(async ({ rawEvents }) =>
+			rawEvents.length === 0 ? [cached] : [network]
+		);
+		mocked.createTransport.mockReturnValue({
+			start: vi.fn(async (nextInput) => {
+				input = nextInput;
+				return startResult();
+			}),
+			bootstrapTraceRootCandidates: vi.fn().mockResolvedValue({ rawEvents: [raw(network)], relays: [{ status: 'timeout' }] }),
+			dispose,
+			publish
+		});
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 }, onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(),
+			onEffectiveTraceRootsChanged, onStatusChanged: vi.fn()
+		});
+
+		await session.start();
+		await vi.waitFor(() => expect(onEffectiveTraceRootsChanged).toHaveBeenCalledWith([network]));
+		expect(onEffectiveTraceRootsChanged).toHaveBeenCalledWith([cached]);
+		expect(session.getStatus()).toEqual({ kind: 'available' });
+	});
+
+	it('does not reconcile a timeline-only live history message', async () => {
+		const bootstrapTraceRootCandidates = vi.fn(() => new Promise<never>(() => {}));
+		mocked.createTransport.mockReturnValue({
+			start: vi.fn(async (nextInput) => {
+				input = nextInput;
+				return startResult();
+			}),
+			bootstrapTraceRootCandidates,
+			dispose,
+			publish
+		});
+		const timeline = vi.fn();
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 }, onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(),
+			onTimelineMessage: timeline, onStatusChanged: vi.fn()
+		});
+
+		await session.start();
+		await Promise.resolve();
+		mocked.reconcileTraceRootCache.mockClear();
+		session.completeBootstrap();
+		const history = message('live-history', 39);
+		input!.onLiveMessage(history, raw(history));
+
+		expect(timeline).toHaveBeenCalledWith(history);
+		expect(mocked.reconcileTraceRootCache).not.toHaveBeenCalled();
+	});
+
+	it('keeps trace cache and bootstrap failures out of world connection status', async () => {
+		const statuses: WorldReadConnectionStatus[] = [];
+		mocked.reconcileTraceRootCache.mockRejectedValue(new Error('storage unavailable'));
+		mocked.createTransport.mockReturnValue({
+			start: vi.fn(async (nextInput) => {
+				input = nextInput;
+				return startResult();
+			}),
+			bootstrapTraceRootCandidates: vi.fn().mockRejectedValue(new Error('trace timeout')),
+			dispose,
+			publish
+		});
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 }, onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(),
+			onStatusChanged: (status) => statuses.push(status)
+		});
+
+		await session.start();
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(statuses).toEqual([{ kind: 'bootstrapping' }, { kind: 'available' }]);
+	});
+
+	it('does not notify late trace cache snapshots after disposal', async () => {
+		let resolveRestore!: (roots: readonly ParsedWorldMessage[]) => void;
+		const onEffectiveTraceRootsChanged = vi.fn();
+		mocked.reconcileTraceRootCache.mockImplementationOnce(() => new Promise((resolve) => { resolveRestore = resolve; }));
+		mocked.createTransport.mockReturnValue({
+			start: vi.fn(async (nextInput) => {
+				input = nextInput;
+				return startResult();
+			}),
+			bootstrapTraceRootCandidates: vi.fn(() => new Promise<never>(() => {})),
+			dispose,
+			publish
+		});
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 }, onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(),
+			onEffectiveTraceRootsChanged, onStatusChanged: vi.fn()
+		});
+
+		await session.start();
+		session.dispose();
+		resolveRestore([message('late-root', 700)]);
+		await Promise.resolve();
+		expect(onEffectiveTraceRootsChanged).not.toHaveBeenCalled();
+	});
+
+	it('reconciles an accepted local publish without a live echo', async () => {
+		result = startResult([], [position('self-bootstrap', 700, selfPubkey, 0, { x: 2, y: 1 })]);
+		const bootstrapTraceRootCandidates = vi.fn(() => new Promise<never>(() => {}));
+		mocked.createTransport.mockReturnValue({
+			start: vi.fn(async (nextInput) => {
+				input = nextInput;
+				return result;
+			}),
+			bootstrapTraceRootCandidates,
+			dispose,
+			publish
+		});
+		publish.mockResolvedValue([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 }, selfAccount: selfAccount(), onPresenceChanged: vi.fn(),
+			onLiveMessage: vi.fn(), onStatusChanged: vi.fn()
+		});
+
+		await session.start();
+		await Promise.resolve();
+		mocked.reconcileTraceRootCache.mockClear();
+		session.completeBootstrap();
+		await expect(session.enterSelf()).resolves.toEqual({ kind: 'not-needed' });
+		await expect(session.publishMessage('local trace candidate', 'normal')).resolves.toEqual(expect.objectContaining({ kind: 'succeeded' }));
+
+		const signed = publish.mock.calls[0][0];
+		await vi.waitFor(() => expect(mocked.reconcileTraceRootCache).toHaveBeenCalledWith(expect.objectContaining({ rawEvents: [signed] })));
+	});
+
+	it('does not reconcile a self publish twice when its live echo arrives first', async () => {
+		result = startResult([], [position('self-bootstrap', 700, selfPubkey, 0, { x: 2, y: 1 })]);
+		let resolvePublish!: (value: readonly { relayUrl: string; outcome: 'accepted' }[]) => void;
+		publish.mockImplementationOnce(() => new Promise((resolve) => { resolvePublish = resolve; }));
+		mocked.createTransport.mockReturnValue({
+			start: vi.fn(async (nextInput) => {
+				input = nextInput;
+				return result;
+			}),
+			bootstrapTraceRootCandidates: vi.fn(() => new Promise<never>(() => {})),
+			dispose,
+			publish
+		});
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 }, selfAccount: selfAccount(), onPresenceChanged: vi.fn(),
+			onLiveMessage: vi.fn(), onStatusChanged: vi.fn()
+		});
+
+		await session.start();
+		await Promise.resolve();
+		mocked.reconcileTraceRootCache.mockClear();
+		session.completeBootstrap();
+		await session.enterSelf();
+		const pending = session.publishMessage('echo first', 'normal');
+		await vi.waitFor(() => expect(publish).toHaveBeenCalledOnce());
+		const signed = publish.mock.calls[0][0] as VerifiedEvent;
+		const echoed = parseWorldMessage(signed, 'c'.repeat(64))!;
+		input!.onLiveMessage(echoed, signed as never);
+		await vi.waitFor(() => expect(mocked.reconcileTraceRootCache).toHaveBeenCalledTimes(1));
+		resolvePublish([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
+
+		await expect(pending).resolves.toEqual({ kind: 'succeeded', eventId: echoed.id });
+		expect(mocked.reconcileTraceRootCache).toHaveBeenCalledTimes(1);
 	});
 
 	it('delegates pre-signed publication to the started transport without changing world status on failure', async () => {
@@ -169,10 +372,11 @@ describe('world read session', () => {
 		mocked.createTransport.mockReturnValue({
 			start: vi.fn(async (nextInput) => {
 				input = nextInput;
-				nextInput.onLiveMessage(liveMessage);
+				nextInput.onLiveMessage(liveMessage, raw(liveMessage));
 				nextInput.onLivePosition(livePosition);
 				return startResult();
 			}),
+			bootstrapTraceRootCandidates: traceBootstrap(),
 			dispose
 		});
 		const session = createWorldReadSession({
@@ -254,7 +458,8 @@ describe('world read session', () => {
 		session.completeBootstrap();
 		expect(session.refresh(100_000 + PRESENCE_TIMEOUT_MS).participants[0].status).toBe('inactive');
 		session.dispose();
-		input!.onLiveMessage(message('after-dispose', 701));
+		const afterDispose = message('after-dispose', 701);
+		input!.onLiveMessage(afterDispose, raw(afterDispose));
 		expect(live).not.toHaveBeenCalled();
 		expect(dispose).toHaveBeenCalledOnce();
 	});
@@ -267,6 +472,7 @@ describe('world read session', () => {
 				nextInput.onLivePosition(occupied);
 				return startResult();
 			}),
+			bootstrapTraceRootCandidates: traceBootstrap(),
 			dispose,
 			publish
 		});
@@ -704,8 +910,8 @@ describe('world read session', () => {
 		const pending = session.publishMessage('echo first', 'normal');
 		await Promise.resolve();
 		const echoed = parseWorldMessage(publish.mock.calls[0][0], 'c'.repeat(64))!;
-		input!.onLiveMessage(echoed);
-		input!.onLiveMessage(echoed);
+		input!.onLiveMessage(echoed, raw(echoed));
+		input!.onLiveMessage(echoed, raw(echoed));
 		resolvePublish([{ relayUrl: 'wss://relay.test/', outcome: 'no-response' }]);
 
 		await expect(pending).resolves.toEqual({ kind: 'succeeded', eventId: echoed.id });
@@ -729,7 +935,8 @@ describe('world read session', () => {
 		await session.enterSelf();
 		const pending = session.publishMessage('waiting', 'normal');
 		await Promise.resolve();
-		input!.onLiveMessage({ ...message('other-live', 700), pubkey: alice });
+		const otherLive = { ...message('other-live', 700), pubkey: alice };
+		input!.onLiveMessage(otherLive, raw(otherLive));
 		resolvePublish([{ relayUrl: 'wss://relay.test/', outcome: 'no-response' }]);
 
 		await expect(pending).resolves.toEqual({ kind: 'retryable' });
@@ -763,9 +970,10 @@ describe('world read session', () => {
 		mocked.createTransport.mockReturnValue({
 			start: vi.fn(async (nextInput) => {
 				input = nextInput;
-				nextInput.onLiveMessage(bootstrap);
+				nextInput.onLiveMessage(bootstrap, raw(bootstrap));
 				return startResult([bootstrap]);
 			}),
+			bootstrapTraceRootCandidates: traceBootstrap(),
 			dispose,
 			publish
 		});
@@ -779,7 +987,7 @@ describe('world read session', () => {
 
 		await session.start();
 		session.completeBootstrap();
-		input!.onLiveMessage(bootstrap);
+		input!.onLiveMessage(bootstrap, raw(bootstrap));
 
 		expect(live).not.toHaveBeenCalled();
 	});
@@ -816,9 +1024,10 @@ describe('world read session', () => {
 				input = nextInput;
 				nextInput.onBootstrapMessage(bootstrapMessage);
 				nextInput.onBootstrapPosition(bootstrapPosition);
-				nextInput.onLiveMessage(bootstrapMessage);
+				nextInput.onLiveMessage(bootstrapMessage, raw(bootstrapMessage));
 				return startResult([bootstrapMessage], [bootstrapPosition]);
 			}),
+			bootstrapTraceRootCandidates: traceBootstrap(),
 			dispose,
 			publish
 		});
@@ -850,6 +1059,7 @@ describe('world read session', () => {
 				nextInput.onBootstrapPosition(occupied);
 				return result;
 			}),
+			bootstrapTraceRootCandidates: traceBootstrap(),
 			dispose,
 			publish
 		});
@@ -881,6 +1091,7 @@ describe('world read session', () => {
 				nextInput.onBootstrapPosition(recovered);
 				return result;
 			}),
+			bootstrapTraceRootCandidates: traceBootstrap(),
 			dispose,
 			publish
 		});
