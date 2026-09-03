@@ -17,15 +17,15 @@ repository-trackedな本資料と、以下に列挙する `docs/specs/` 配下�
 ## 仕様文書一覧
 
 - [`SPEC-10-Nostr・アカウント.md`](specs/SPEC-10-Nostr・アカウント.md)
-  - NIP-28 / NIP-32、専用世界の識別、アカウント、秘密鍵、kind 0、一般Nostrへの移行、転生
+  - NIP-28 top-level kind 42、NIP-22 kind 1111、NIP-09、NIP-32、専用世界の識別、アカウント、秘密鍵、kind 0、一般Nostrへの移行、転生
 - [`SPEC-20-キャラクター.md`](specs/SPEC-20-キャラクター.md)
   - キャラクター割当、キャラクターデータ、名前、画像、重複、公開後の固定ルール
 - [`SPEC-30-フィールド・position・presence.md`](specs/SPEC-30-フィールド・position・presence.md)
-  - フィールド、移動、position、presence
+  - フィールド、移動、position、presence、Relay transport/subscription lifecycle
 - [`SPEC-40-会話・フキダシ.md`](specs/SPEC-40-会話・フキダシ.md)
   - 発言表示範囲、発言領域、フキダシ、発言タイプ、合体表示、コミュニケーション機能
 - [`SPEC-50-発言の痕跡.md`](specs/SPEC-50-発言の痕跡.md)
-  - 発言の痕跡、痕跡化、寿命、上限、調査、既読
+  - 発言の痕跡、root、trace conversation取得、cache、read/unread、調査
 - [`SPEC-60-eHagaki・Composer・Media.md`](specs/SPEC-60-eHagaki・Composer・Media.md)
   - eHagakiとの責務分担、Host-owned Composer Lite版、Media
 - [`SPEC-90-未決定事項.md`](specs/SPEC-90-未決定事項.md)
@@ -152,10 +152,12 @@ MVPでは以下を持たない。
 - バックエンドなしで成立する構成を基本とし、クライアント間の表示差や位置競合を中央管理するためだけにバックエンドやロックサーバーを追加しない
 - 可能な限り既存NIP・標準イベントを利用し、NIP-28 Public ChatをNIP-29へ自動的に置き換えない
 - NIP-32ラベルを認証・公式クライアント証明として扱わない
+- NIP-09 deletion requestをMVPでは発行、購読、検索、UI/cache反映しない
 - 専用世界固有のルールは主として親クライアント側で管理し、eHagakiは汎用Nostr Composerとして維持する
 - eHagakiへ秘密鍵や任意eventを署名できる汎用Signerを渡さず、最終Nostr eventの構築・署名・送信は親クライアントが担う
 - 合体表示や発言の痕跡のために元のkind 42を統合・改変せず、各発言を独立したNostr eventとして維持する
 - 発言の痕跡のためだけに通常の過去ログ、Twitter型タイムライン、独自の「保存投稿」kindを導入しない
+- NIP-22 kind 1111はtrace conversationにだけ使用し、通常live speechやChatterへ持ち込まない
 - 痕跡化判定と上限処理は、同じ前提条件を持つクライアントが同じ結果を導出できる決定的な方式を優先する
 - position方式は現在位置の同期だけでなく、過去の対象kind 42について発言時位置を復元できることを満たす
 - Nostr上の事実と専用クライアント上の表示・操作ルールを区別し、バックエンドなしでは防げない行為を防げるものとして設計しない

@@ -1,226 +1,111 @@
 # 発言の痕跡仕様
 
-> この文書は本プロジェクトの確定仕様の一部です。Source of Truthの入口は [`docs/PROJECT.md`](../PROJECT.md) とし、本資料を含む同資料記載の `SPEC-*` 文書一式と併用する。個別仕様は、その仕様を記載する文書を正とする。
+> この文書は本プロジェクトの確定仕様の一部である。Source of Truthの入口は [`docs/PROJECT.md`](../PROJECT.md) とし、本資料を含む同資料記載の `SPEC-*` 文書一式と併用する。個別仕様は、その仕様を記載する文書を正とする。
 
 ## 24. 発言の痕跡
 
-通常の発言は従来どおり揮発し、Twitter型の過去ログとして時系列に蓄積表示しない。
+通常の発言は揮発し、Twitter型の過去ログとして時系列に蓄積表示しない。そのうえで、過去の対象kind 42の一部だけを、元の発言位置に残る**発言の痕跡**として扱う。痕跡は過去ログや履歴ビューではなく、空間に残った一部の発言の記憶である。投稿日時、経過時間、「さっき」「今日」「数日前」等の古さはroot/replyのいずれにも表示しない。
 
-そのうえで、過去の対象kind 42の一部だけを、元の発言位置に残る**「発言の痕跡」**として扱う。
+### rootの選択と上限
 
-発言の痕跡は、通常の過去ログ機能や履歴ビューではない。
+trace root候補は、有効なtop-level kind 42だけとする。normal / shout / monologueを同率で対象にし、merged bubbleは表示上の集約にすぎないため、抽選は元event単位で行う。
 
-> **過去の会話の一部が、その言葉が発せられた場所に残った空間上の記憶**
+```ts
+BigInt(`0x${event.id}`) % 5n === 0n
+```
 
-として扱う。
+上の決定的20%抽選にsparse-world boost、密度補正、時間expiryは設けない。1 cellあたりのrootは最大3件、global root上限は `floor(total logical cell count / 2)` とする。上限はrootだけを数え、kind 1111 replyは数えない。上限超過時は古いrootから落とし、同時刻は既存の決定的orderingに従う。
 
-### 痕跡化する発言の選択
+### root cache
 
-痕跡化する発言を投稿者自身に選択させない。
+browserが取得したeffective rootはbrowser-localに永続保持する。latest bootstrap範囲から外れてもroot evictionまで保持し、browserごとに保持する古いtrace集合が異なってよい。root evictionでは、root、root read state、reply tree、reply read/unread state、reply notificationを完全に忘れる。
 
-「痕跡として残す」等の投稿操作は設けない。
+### reply cache
 
-対象kind 42から、決定的な自動抽選によって痕跡化対象を選ぶ。
+reply cacheは、全root合計で最大1000件のkind 1111 eventを保持するglobal hard capとする。NIP-22のinitial `limit=100` は各Relay・各filterのhistory取得上限であり、このcache上限とは別概念である。
 
-同じkind 42について、同じ前提条件を持つクライアントは同じ痕跡化判定を得られる方式を採用する。
+rootごとの独立quotaは設けない。recently opened rootを優先し、古いrootのreply treeをroot単位LRU evictionする。current open rootは、他にevict可能なtreeがある間は優先保持する。
 
-具体的な決定的抽選アルゴリズムは未決定とする。
+root単位LRUだけでは1000件以下にできない場合、たとえば単一rootだけで1000件を超える場合は、global hard capを優先してそのroot内の古いreplyもevictできる。これはroot別quotaを設ける意味ではない。persistent cacheにchildだけが残るorphan状態を作らず、保持するreplyはrootまでvalidation可能なtree関係を維持する。intra-root evictionの具体algorithmは実装詳細として固定しない。
 
-リアクション数、人気、投稿者による指定等を痕跡化条件にはしない。
+reply-tree LRU evictionではrootとroot read stateを残し、そのtreeのreply cache、reply read/unread、notification metadataを忘れる。再open時はRelayからreply historyを取得し直す。
 
-通常・叫び・モノローグで痕跡化率に差を付けない。
+### root lightとauthor ghost
 
-### 痕跡密度の補正
+通常時、trace cellには共通の小さなlightだけを表示し、author ghostや件数は表示しない。replyは独立した通常field lightを生成しない。field上の通常lightはroot traceだけが所有する。
 
-基本となる痕跡化率は設ける。
+rootを調査するとauthor ghostを表示する。authorはpubkeyから既存の決定的character割当で導出し、character catalogのimage / name / aboutだけを使用する。kind 0の取得、raw pubkey、npubの表示は行わない。trace/reply ghostからauthorのProfile Dialogを開ける。
 
-ただし、発言量が少なく、フィールド上の有効な痕跡密度が低い場合は、通常より痕跡化されやすくする補正を許容する。
+cellにcurrent participantがいなければghostはparticipant相当位置に置く。いる場合はcurrentを優先してghostをcell edgeへ小さく半透明で置く。ghostはpresence、collision、occupancyに影響しない。current participantがrootと同cellにいてもroot lightは隠さず、edgeまたはforegroundへ視覚的にoffsetして存在を維持する。このoffset lightは別のpixel hit targetではなく、cellのlogical selection規則を使う。
 
-この補正も、各クライアントで同じ結果を導出できる決定的な方式とする。
+同一cellに複数rootがある場合、通常時は1つのlightだけを表示し、investigation前は件数を表示しない。最初はnewest rootを選ぶ。investigation後は `1/3` 等を表示し、dedicated prev/nextでrootを切り替える。root一覧をcontext menuに並べない。
 
-過疎時に発言の大部分が痕跡化することは避ける。
+### investigation range
 
-そのため、補正後の痕跡化率にも上限を設ける。
+root/replyのinvestigation rangeは、それぞれの実際の `w` cell自身と周囲8 cellとする。これはdiagonal movementを許可する意味ではない。
 
-具体的な、
+- rootはrange内でだけ調査でき、root調査はpresence activityとする。
+- replyを選択してさらに深く辿るには、そのreplyの実際の `w` のinvestigation rangeまで物理的に移動している必要がある。
+- reply targetのrange外へ出るとreply modeを解除してdraftを破棄するが、conversation explorationは維持する。
 
-- 基本痕跡化率
-- 痕跡密度の判定方法
-- 補正方法
-- 最大痕跡化率
+## 25. trace conversation
 
-は未決定とする。
+trace conversationはroot調査からだけ入る。一度にexploreできるroot conversationは1つだけとする。通常live speechへのreply UIは持たない。
 
-### 痕跡の寿命
+rootを調査したら、NIP-22 reply historyを待たずにroot ghostと実際のroot本文bubbleを即表示する。reply history取得中は小さいreply loading状態を表示する。
 
-痕跡には寿命を設ける。
+conversationはcurrent selected speechとそのdirect repliesを中心に表示する。deeper levelではparent 1件だけをcontextとして表示する。reply depthに上限は設けない。
 
-一定期間を経過した痕跡は、共有世界上の有効な痕跡として扱わない。
+- different-cell direct repliesは同時に表示する。
+- offscreen direct replyまたはparentはviewport edge connectorとdirection arrowだけを表示し、本文、author、距離を表示しない。
+- reply間の関係はspeech tailと別のdotted / segmented connectorで表現する。
+- same-cell複数replyは代表1件とcountを表示する。個別replyは共通context menuから選択し、menuではbodyを見せずauthorだけを示す。同authorの複数replyはnewest-firstの番号で区別する。
+- same-cellへのnew replyがlive到着しても表示中代表を自動変更しない。conversationをreopenした時だけ代表をnewestへ戻す。
 
-古いkind 42そのものがRelay上に残っていても、痕跡の寿命を超えていればフィールド上には表示しない。
+Profile Dialogまたはcontext menuを開閉してもconversation exploration、reply target、draftを維持する。
 
-具体的な寿命は未決定とする。
+### NIP-22 conversation取得
 
-### フィールド全体の上限
+この節はtrace conversation取得の製品意味論を正とする。Relay transport、subscription lifecycle、reconnectおよびdedupeの実装責務は [`SPEC-30-フィールド・position・presence.md`](./SPEC-30-フィールド・position・presence.md) を正とする。
 
-フィールド全体で同時に有効とする痕跡数には上限を設ける。
+- root conversation open時は、`kinds=[1111]`、`#E=[root]`、project `#L/#l`、initial `limit=100`で、root-wideのrecent historyとlive replyを対象にする。
+- current speechのdirect reply補完は、`kinds=[1111]`、`#E=[root]`、`#e=[current]`、project `#L/#l`、initial `limit=100`とする。
+- notification候補は、`kinds=[1111]`、`#p=[current persona pubkey]`、project `#L/#l`を使い、可能ならcurrent effective root IDsで`#E`も絞る。
+- `limit=100`は各Relay・各filterのinitial history取得上限であり、reply treeの件数上限でもreply cacheのglobal 1000件上限でもない。Relayごとの応答をevent IDでmulti-Relay dedupeし、tree/cacheのglobal capとは別に扱う。
 
-発言量が多い場合でも、フィールド全体が痕跡オブジェクトで埋め尽くされないようにする。
+初回history取得では、Relay arrival orderに依存してreplyを1件ずつprogressiveに表示しない。EOSE / CLOSED / timeoutまでのbounded batchを集め、batch/cache内のroot/parent relationをsemantic validationした後、accepted direct repliesをまとめて反映する。
 
-上限を超える場合にどの痕跡を対象外とするかは、各クライアントが同じ結果を導出できる決定的な方式とする。
+cache済みconversationをreopenした場合はcached repliesを即表示し、同時にRelay refreshを行う。refreshで以前cache済みだったreplyがRelayから返らなかったことだけをcache削除根拠にしない。NIP-09は完全非対応であり、Relay omissionをdeletion扱いしない。
 
-具体的な上限数と選別方法は未決定とする。
+live 1111は、rootまたはimmediate parentが利用不能ならその受信ではignoreする。pending buffer、無制限parent fetch、orphan cache、root revivalは行わない。後のhistory refreshで必要なroot/parentと同じeventが得られた場合は、そのbatchで再validationして受理してよい。current browserでeffectiveでないrootへの1111は常にignoreし、notificationも生成しない。
 
-### 1マスごとの上限
+open中の同rootへのvalid 1111は受信、cache、read/unread判定を行う。current speechへのdirect replyだけがcurrent viewへの新規表示候補になり、同rootでも別branchへのreplyはcurrent viewへ勝手に挿入しない。
 
-同じマスに複数の痕跡を保持できる。
+### reply modeとdraft
 
-ただし、1マスごとにも少数の上限を設ける。
+traceを調査またはreplyを選択すると、そのeventをreply targetとするreply modeへ入る。ただしComposerへ自動focusしない。
 
-マスごとの上限を超える場合は、そのマスの古い痕跡から対象外とする。
+- 別eventまたは別rootをreply targetにすると、旧draftを破棄する。
+- eHagaki reply previewの`×`はreply referenceだけを解除し、draftを維持する。
+- blank field tapによる明示conversation closeはconversation/reply modeを解除し、draftを維持する。
+- successful reply publish後はreply modeを解除するが、current speechを投稿replyへ自動移動しない。
+- replyはnormal / shout / monologueを許可し、trace styleで元speech shapeを維持する。
+- own replyはselfがそのreplyの `w` にいる間だけduplicate self ghostを省略し、bubble tailをcurrent selfへ向ける。selfがcellを離れた後は通常のself ghostを表示する。
 
-これにより、人が集まりやすい場所に複数の記憶が残る性質は維持しながら、一つのマスが大量の過去発言を保持することを防ぐ。
+## 26. read / unread
 
-具体的な1マスあたりの上限数は未決定とする。
+root readおよびreply read/unreadはbrowser-local persistent stateとし、Nostr eventとして発行せず、cross-device同期しない。
 
-### 痕跡の位置
+root readはbrowser-person scopeで保持し、reincarnation後も維持する。reply read/unreadとnotificationはpersona/pubkey scopeで保持し、旧persona宛notificationをreincarnation後のpersonaへ引き継がない。
 
-痕跡は、元のkind 42が発言された時点のフィールド位置へ固定する。
+root readは、root ghostと実際のroot本文bubbleの**両方**が実表示された時だけ成立する。light、menu、connector、offscreen arrow、ghostだけ、conversation open開始だけではroot readにしない。reply readは、実際のreply本文bubbleが表示された時だけ成立する。menu、offscreen arrow、connector、root openだけではreadにしない。
 
-痕跡密度を調整するために、別の空きマスや周辺マスへ再配置しない。
+自分がauthorであるeventへのdirect replyだけを未読候補とする。self-replyは表示できてもnotification対象外とする。
 
-このため、過去の対象kind 42について発言時位置を後から復元できることをposition方式の要件とする。
+- root read/unreadはlight opacityへ反映する。同一cellに複数rootがある場合、全rootがreadなら弱いopacity、1件でもunreadなら未読opacityとする。
+- reply unreadの有無はlight colorへ反映する。同一cellに複数rootがある場合、いずれかのrootにreply unreadがあればunread color、全rootにreply unreadがなければ通常colorとする。
+- global unread indicatorはComposer dockに置き、Chatterとは別UIとする。操作時は「どこかにあなたへの返信の痕跡があります」のように未読存在だけを説明する。本文、author、場所、方向、距離、件数を表示せず、auto-navigationもしない。
 
-### 発言者情報
+## 27. trace bubbleの視覚的優先順位
 
-痕跡から元の発言者を表示しない。
-
-以下は表示しない。
-
-- キャラクター名
-- キャラクターアイコン
-- pubkey
-- kind 0プロフィール
-- その他、発言者を直接識別するための表示情報
-
-痕跡は、
-
-> **「誰が言ったか」ではなく、「この場所で何が言われたか」**
-
-を中心に扱う。
-
-Nostr Relay上の元イベント自体から発言者情報を取得できることは、この専用クライアント上の表示ルールとは別の概念として扱う。
-
-### 痕跡に表示する情報
-
-痕跡を調べた場合、少なくとも以下を表示する。
-
-- 元発言の本文
-- 元発言の発言タイプ
-- 大まかな古さ
-
-発言タイプは、
-
-- 通常
-- 叫び
-- モノローグ
-
-を保持する。
-
-正確な投稿日時は表示しない。
-
-代わりに、
-
-- さっき
-- 今日
-- 数日前
-
-等の大まかな古さだけを表示する。
-
-具体的な時間区分は未決定とする。
-
-### 痕跡オブジェクトの発見
-
-痕跡オブジェクトは、閲覧者の現在画面にその痕跡のフィールド位置が入れば存在を確認できる。
-
-画面外の痕跡の方向や距離を常時案内することは、現時点の確定仕様には含めない。
-
-痕跡が視界に入っただけでは本文を表示しない。
-
-### 調査可能距離
-
-痕跡の内容を読むには、その痕跡の位置へ近づく必要がある。
-
-痕跡のマスを中心として、
-
-- 上
-- 下
-- 左
-- 右
-- 左上
-- 右上
-- 左下
-- 右下
-
-の周囲8マスまで近づけば調査可能とする。
-
-痕跡と同じマスに立つことは必須としない。
-
-ユーザー自身の移動方法は従来どおり上下左右のみであり、斜め移動を許可するものではない。
-
-### 調べる操作
-
-調査可能距離に入っただけでは痕跡本文を自動表示しない。
-
-ユーザーが明示的に**「調べる」操作**を行った場合にだけ内容を表示する。
-
-これにより、
-
-> 痕跡を発見する\
-> → 近づく\
-> → 明示的に調べる\
-> → 内容を読む
-
-という空間上の行動を成立させる。
-
-痕跡を調べる操作はpresence活動として扱う。
-
-### 同じマスに複数の痕跡がある場合
-
-同じマスに複数の有効な痕跡が存在する場合、そのマスを調べることで、そのマスにある痕跡をまとめて一覧表示する。
-
-1回の調査につき1件だけをランダムに表示する方式にはしない。
-
-ただし表示されるのは自動抽選によって痕跡化された一部の発言だけであり、その場所で行われたすべての過去発言を一覧表示するものではない。
-
-### 既読状態
-
-痕跡を読んでも、共有世界からその痕跡自体を削除しない。
-
-各閲覧クライアントは、自分が読んだ痕跡の既読状態をブラウザ内に保持する。
-
-既読状態は共有Nostr世界へ書き込む必要はない。
-
-他ユーザーがその痕跡を読んだかどうかにも影響しない。
-
-既読の痕跡は、未読の痕跡より見た目を弱める。
-
-具体的な、
-
-- 既読状態の保存方式
-- 見た目の弱め方
-- 既読状態の保持期間
-
-は未決定とする。
-
-### 痕跡への返答
-
-痕跡を読んだことを理由に新しい発言を行うことはできる。
-
-ただしMVPではリプライ機能を使用しないため、痕跡への専用reply関係やスレッドは作らない。
-
-ユーザーが痕跡を読んだ後に発言した内容は、通常の新しいkind 42として扱う。
-
-その新しいkind 42も、通常の自動抽選によって後に痕跡化される可能性がある。
-
----
+trace root/reply bubbleは軽い半透明fill、完全opaque text、trace-specific outlineとし、normal / shout / monologueのshape/styleを維持する。live/current speechはtrace bubbleより優先して配置する。exact opacity/color、placement algorithm、connector pixel geometryは実装詳細として固定しない。

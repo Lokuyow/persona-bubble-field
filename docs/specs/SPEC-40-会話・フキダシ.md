@@ -33,7 +33,7 @@
 
 `["w", "7:3"]`
 
-座標文字列のcanonical形式、position同期との関係、Relayでの位置別REQ等の詳細は [`SPEC-30-フィールド・position・presence.md`](./SPEC-30-フィールド・position・presence.md) を正とする。
+座標文字列のcanonical形式、position同期との関係、Relay transport/subscription lifecycle等の詳細は [`SPEC-30-フィールド・position・presence.md`](./SPEC-30-フィールド・position・presence.md) を正とする。
 
 kind 42の `w` は発言時点の不変な座標であり、その後発言者が移動しても変更しない。
 
@@ -69,7 +69,7 @@ kind 42の `w` は発言時点の不変な座標であり、その後発言者�
 左側へ直近発言タイムラインをoverlay表示する。これは空間型チャットを置き換えるSNS型の
 主画面ではなく、無制限の過去ログやfeedでもない。
 
-専用世界のparserを通過した有効なkind 42を、通常・叫び・モノローグ、閲覧者の画面内外、
+専用世界のparserを通過した有効なtop-level kind 42だけを、通常・叫び・モノローグ、閲覧者の画面内外、
 authorの現在presenceの有無にかかわらず対象とする。合体フキダシの表示状態にかかわらず、
 元event単位で表示する。同じevent IDは一度だけ扱うが、本文が同じでもevent IDが異なる
 発言は別entryとする。Relayからbootstrapで取得できた範囲とlive更新を合わせ、NIP-01の
@@ -84,7 +84,7 @@ authorの現在presenceの有無にかかわらず対象とする。合体フキ
 合わせた実描画5行までとし、5行を超えた場合だけ`…`を表示する。元のevent `content`は
 切り詰めず保持し、全文展開操作は設けない。
 
-authorのpubkeyから既存の決定的なcharacter割当を使い、timelineのためのkind 0取得や新しい
+kind 1111はChatterへ一切表示しない。authorのpubkeyから既存の決定的なcharacter割当を使い、timelineのためのkind 0取得や新しい
 プロフィール通信・保存経路は追加しない。現在active presenceにあり画面上の色を持つauthorは
 名前にも同じtoneカテゴリを使い、presence外のauthorは通常文字色とする。timeline stateへ
 色を保存せず、描画時の現在の色割当へ追従させる。キャラクター名はinteractive elementとし、
@@ -518,7 +518,7 @@ spikeの視覚的な重なりは、この判定対象に含めない。
 
 MVPでは、**テキストメッセージによる現在の会話**を中心とする。
 
-NIP-28 kind 42によるメッセージを使用する。
+NIP-28 kind 42による有効なtop-level messageを使用する。
 
 現在の会話は通常フキダシとして一時表示し、Twitter型タイムラインとして主画面へ蓄積しない。
 フィールドviewport上の補助タイムラインoverlayは、上記の「発言領域」とは別の有限なUIとして扱う。
@@ -527,7 +527,7 @@ NIP-28 kind 42によるメッセージを使用する。
 
 ### 専用世界kind 42の基本構造
 
-プロトタイプの専用世界kind 42には、少なくとも以下を持たせる。
+プロトタイプの専用世界top-level kind 42には、少なくとも以下を持たせる。
 
 - 対象NIP-28 channel kind 40へのroot参照
 - NIP-32 namespace
@@ -593,7 +593,7 @@ eHagakiと親クライアントの具体的な責務分担は [`SPEC-60-eHagaki�
 
 以下はMVPでは利用しない。
 
-- リプライ
+- 通常live speechへのリプライ
 - 引用リポスト
 - リポスト
 - リアクション
@@ -601,6 +601,8 @@ eHagakiと親クライアントの具体的な責務分担は [`SPEC-60-eHagaki�
 - カスタム絵文字リアクション
 - 画像投稿
 - 動画投稿
+
+trace rootの調査から入るNIP-22 kind 1111 conversationは、この通常live speechへのリプライ非対応の例外である。kind 1111は通常フキダシ、Chatter、presence evidenceへ入れない。trace conversationの表示・操作は [`SPEC-50-発言の痕跡.md`](./SPEC-50-発言の痕跡.md) を正とする。
 
 独自kindを新設してこれらの代替機能を作らない。
 
