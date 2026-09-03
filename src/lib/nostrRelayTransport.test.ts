@@ -1,5 +1,5 @@
 import { Server, WebSocket, type Client } from 'mock-socket';
-import { finalizeEvent, type VerifiedEvent } from 'nostr-tools/pure';
+import { finalizeEvent, type Event, type VerifiedEvent } from 'nostr-tools/pure';
 import { map } from 'rxjs';
 import {
 	Nip11Registry, createRxNostr, createRxForwardReq, createRxOneshotReq,
@@ -8,7 +8,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createNostrRelayTransport } from './nostrRelayTransport';
 import {
-	buildWorldMessageTemplate, buildPositionEventTemplate, buildWorldMessageFilter
+	buildTraceRootBootstrapFilter, buildWorldMessageTemplate, buildPositionEventTemplate, buildWorldMessageFilter
 } from './nostrProtocol';
 
 // Capture only the public client. Tests still use the installed package,
@@ -50,7 +50,8 @@ function mockRelay() {
 		onConnection: (_socket: Client) => {},
 		onRequest: (socket: Client, request: WireRequest) => send(socket, 'EOSE', request[1]),
 		onPublish: (_socket: Client, _event: VerifiedEvent) => {},
-		primaryRequests: (): WireRequest[] => relay.requests.filter((request) => [42, 30078].includes(kind(request)!)),
+		primaryRequests: (): WireRequest[] => relay.requests.filter((request) => [42, 30078].includes(kind(request)!) && request[2].limit === undefined),
+		rootRequests: (): WireRequest[] => relay.requests.filter((request) => kind(request) === 42 && request[2].limit === 1000),
 		primaryId: (eventKind: 42 | 30078): string => relay.primaryRequests().filter((request) => kind(request) === eventKind).at(-1)![1],
 		latestSocket: (): Client => relay.sockets.at(-1)!
 	};
@@ -68,6 +69,19 @@ function mockRelay() {
 		relay.onConnection(socket);
 	});
 	return relay;
+}
+
+function rawEvent(id: string, createdAt = TIME, overrides: Partial<Event> = {}): Event {
+	return {
+		id,
+		pubkey: 'd'.repeat(64),
+		created_at: createdAt,
+		kind: 42,
+		tags: [],
+		content: 'raw',
+		sig: '0'.repeat(128),
+		...overrides
+	};
 }
 
 function fixture(authorityCount = 2, websocketCtor = socketConstructor) {
@@ -427,6 +441,182 @@ describe('NIP-11 capability and queue', () => {
 			expect(result.primaryPairs.every((pair) => pair.status === 'eose')).toBe(true);
 		}
 		expect(f.input.onPrimaryClosed).not.toHaveBeenCalled();
+	});
+});
+
+describe('trace root bootstrap', () => {
+	it('requires started transport and allows one startup operation only', async () => {
+		const f = fixture(1);
+		await expect(f.transport.bootstrapTraceRootCandidates()).rejects.toThrow('must start');
+		await f.start();
+
+		const pending = f.transport.bootstrapTraceRootCandidates();
+		await vi.advanceTimersByTimeAsync(10);
+		await expect(pending).resolves.toMatchObject({ rawEvents: [] });
+		await expect(f.transport.bootstrapTraceRootCandidates()).rejects.toThrow('only allowed once');
+	});
+
+	it('sends the exact root filter only to authoritative relays and retains raw events', async () => {
+		const f = fixture(2);
+		await f.start();
+		const expectedFilter = buildTraceRootBootstrapFilter({ channelId: f.channel.id });
+		const invalidSignature = f.message('invalid-signature');
+		invalidSignature.sig = '0'.repeat(128);
+		const nip28Reply = {
+			...f.message('nip28-reply'),
+			tags: [['e', f.channel.id, '', 'reply'], ['L', expectedFilter['#L']![0]], ['l', 'chat'], ['w', '1:2']]
+		};
+		for (const relay of f.authorities) {
+			relay.onRequest = (socket, request) => {
+				if (request[2].limit === 1000) {
+					send(socket, 'EVENT', request[1], invalidSignature);
+					send(socket, 'EVENT', request[1], nip28Reply);
+				}
+				send(socket, 'EOSE', request[1]);
+			};
+		}
+
+		const pending = f.transport.bootstrapTraceRootCandidates();
+		await vi.advanceTimersByTimeAsync(10);
+		const result = await pending;
+		expect(result.rawEvents.map((event) => event.id)).toEqual([nip28Reply.id, invalidSignature.id]);
+		for (const relay of f.authorities) {
+			expect(relay.rootRequests().map((request) => request.slice(2))).toEqual([[expectedFilter]]);
+		}
+		expect(f.seeds.flatMap((relay) => relay.rootRequests())).toEqual([]);
+		expect(result.relays.map((diagnostic) => diagnostic.status)).toEqual(['eose', 'eose']);
+	});
+
+	it('dedupes and deterministically orders a bounded union without early termination', async () => {
+		const f = fixture(2);
+		await f.start();
+		const rootFilter = buildTraceRootBootstrapFilter({ channelId: f.channel.id });
+		const rootTags = [
+			['e', rootFilter['#e']![0]],
+			['L', rootFilter['#L']![0]],
+			['l', rootFilter['#l']![0]]
+		];
+		const events = Array.from({ length: 1000 }, (_, index) => rawEvent(index.toString(16).padStart(64, '0'), TIME - index, { content: `authority-${index}`, tags: rootTags }));
+		const sameRelayId = 'f'.repeat(64);
+		const sameRelayFirst = rawEvent(sameRelayId, TIME + 1, { content: 'a', tags: rootTags });
+		const sameRelaySecond = rawEvent(sameRelayId, TIME + 1, { content: 'z', tags: rootTags });
+		const lateA = rawEvent('a'.repeat(64), TIME + 2, { content: 'late-a', tags: rootTags });
+		const lateB = rawEvent('b'.repeat(64), TIME + 2, { content: 'late-b', tags: rootTags });
+		let firstRootRequest: WireRequest | null = null;
+		f.authorities[0].onRequest = (socket, request) => {
+			if (request[2].limit !== 1000) return;
+			firstRootRequest = request;
+			for (const event of events) send(socket, 'EVENT', request[1], event);
+		};
+		f.authorities[1].onRequest = (socket, request) => {
+			if (request[2].limit !== 1000) return;
+			send(socket, 'EVENT', request[1], lateB);
+			send(socket, 'EVENT', request[1], lateA);
+			send(socket, 'EVENT', request[1], events[1]);
+			send(socket, 'EVENT', request[1], sameRelayFirst);
+			send(socket, 'EVENT', request[1], sameRelaySecond);
+			send(socket, 'EOSE', request[1]);
+		};
+
+		const pending = f.transport.bootstrapTraceRootCandidates();
+		await vi.advanceTimersByTimeAsync(10);
+		expect(firstRootRequest).not.toBeNull();
+		let settled = false;
+		void pending.then(() => { settled = true; });
+		await vi.advanceTimersByTimeAsync(1);
+		expect(settled).toBe(false);
+		send(f.authorities[0].latestSocket(), 'EOSE', firstRootRequest![1]);
+		await vi.advanceTimersByTimeAsync(10);
+
+		const result = await pending;
+		expect(result.rawEvents).toHaveLength(1000);
+		expect(result.rawEvents.slice(0, 2).map((event) => event.id)).toEqual([lateA.id, lateB.id]);
+		expect(result.rawEvents.find((event) => event.id === events[1].id)?.content).toBe(events[1].content);
+		expect(result.rawEvents.find((event) => event.id === sameRelayId)?.content).toBe('a');
+		expect(result.rawEvents.some((event) => event.id === events.at(-1)!.id)).toBe(false);
+	});
+
+	it('reports mixed EOSE and CLOSED terminal diagnostics', async () => {
+		const f = fixture(2);
+		await f.start();
+		f.authorities[0].onRequest = (socket, request) => {
+			if (request[2].limit === 1000) send(socket, 'EOSE', request[1]);
+		};
+		f.authorities[1].onRequest = (socket, request) => {
+			if (request[2].limit === 1000) send(socket, 'CLOSED', request[1], 'restricted: trace');
+		};
+		const pending = f.transport.bootstrapTraceRootCandidates();
+		await vi.advanceTimersByTimeAsync(10);
+		expect((await pending).relays).toEqual([
+			{ relayUrl: f.authorities[0].url, status: 'eose' },
+			{ relayUrl: f.authorities[1].url, status: 'closed', notice: 'restricted: trace' }
+		]);
+	});
+
+	it('reports success and timeout independently', async () => {
+		const f = fixture(2);
+		await f.start();
+		f.authorities[0].onRequest = (socket, request) => {
+			if (request[2].limit === 1000) send(socket, 'EOSE', request[1]);
+		};
+		f.authorities[1].onRequest = () => {};
+		const pending = f.transport.bootstrapTraceRootCandidates();
+		await vi.advanceTimersByTimeAsync(TIMEOUT + 10);
+		expect((await pending).relays.map((diagnostic) => diagnostic.status)).toEqual(['eose', 'timeout']);
+	});
+
+	it('reports an unavailable authoritative relay', async () => {
+		vi.mocked(createRxNostr).mockImplementationOnce((config) => actualRxNostr.createRxNostr({ ...config, retry: { strategy: 'off' } }));
+		const f = fixture(2);
+		f.authorities[1].server.options!.verifyClient = () => false;
+		await f.start(150);
+		f.authorities[0].onRequest = (socket, request) => {
+			if (request[2].limit === 1000) send(socket, 'EOSE', request[1]);
+		};
+		const pending = f.transport.bootstrapTraceRootCandidates();
+		await vi.advanceTimersByTimeAsync(10);
+		expect((await pending).relays.map((diagnostic) => diagnostic.status)).toEqual(['eose', 'unavailable']);
+	});
+
+	it('runs as a third finite REQ when the relay capacity is three', async () => {
+		const f = fixture(1);
+		Nip11Registry.set(f.authorities[0].url, { limitation: { max_subscriptions: 3 } });
+		await f.start();
+		const pending = f.transport.bootstrapTraceRootCandidates();
+		await vi.advanceTimersByTimeAsync(10);
+		expect(f.authorities[0].rootRequests()).toHaveLength(1);
+		const rootSubId = f.authorities[0].rootRequests()[0][1];
+		expect((await pending).relays[0].status).toBe('eose');
+		expect(f.authorities[0].messages.filter((message) => message[0] === 'CLOSE' && message[1] === rootSubId)).toHaveLength(1);
+		expect(f.authorities[0].primaryRequests()).toHaveLength(2);
+	});
+
+	it('times out only bootstrap at capacity two and keeps both primaries live', async () => {
+		const f = fixture(1);
+		Nip11Registry.set(f.authorities[0].url, { limitation: { max_subscriptions: 2 } });
+		await f.start();
+		const pending = f.transport.bootstrapTraceRootCandidates();
+		await vi.advanceTimersByTimeAsync(TIMEOUT + 10);
+		expect((await pending).relays[0].status).toBe('timeout');
+		expect(f.authorities[0].rootRequests()).toEqual([]);
+		expect(f.authorities[0].primaryRequests()).toHaveLength(2);
+		const live = f.message('primary-after-trace');
+		send(f.authorities[0].latestSocket(), 'EVENT', f.authorities[0].primaryId(42), live);
+		await vi.advanceTimersByTimeAsync(10);
+		expect(f.input.onLiveMessage).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: live.id }));
+	});
+
+	it('cleans up a pending finite bootstrap during dispose', async () => {
+		const f = fixture(1);
+		await f.start();
+		f.authorities[0].onRequest = () => {};
+		const pending = f.transport.bootstrapTraceRootCandidates();
+		await vi.advanceTimersByTimeAsync(10);
+		f.transport.dispose();
+		await expect(pending).rejects.toThrow('disposed during finite query');
+		await vi.advanceTimersByTimeAsync(TIMEOUT + 10);
+		expect(vi.getTimerCount()).toBe(0);
+		expect(f.authorities[0].messages.filter((message) => message[0] === 'CLOSE')).not.toEqual([]);
 	});
 });
 

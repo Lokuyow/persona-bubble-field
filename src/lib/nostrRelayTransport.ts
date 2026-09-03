@@ -15,6 +15,7 @@ import type { Filter } from 'nostr-tools/filter';
 import { verifyEvent, type Event, type VerifiedEvent } from 'nostr-tools/pure';
 import {
 	buildPositionFilter,
+	buildTraceRootBootstrapFilter,
 	buildWorldMessageFilters,
 	parsePositionEvent,
 	parseWorldMessage,
@@ -101,6 +102,11 @@ export type PrimaryStartResult = Readonly<{
 	positions: readonly ParsedPositionEvent[];
 	primaryPairs: readonly PrimaryPairDiagnostic[];
 	nip11: readonly Nip11Diagnostic[];
+}>;
+
+export type TraceRootBootstrapResult = Readonly<{
+	rawEvents: readonly Event[];
+	relays: readonly RelayQueryDiagnostic[];
 }>;
 
 export type PublishRelayResult = Readonly<{
@@ -206,6 +212,20 @@ function copyPairDiagnostics(pairs: ReadonlyMap<PrimaryPairKey, PrimaryPairDiagn
 	return [...pairs.values()].map((pair) => ({ ...pair }));
 }
 
+function compareEventIds(first: Event, second: Event): number {
+	return first.id < second.id ? -1 : first.id > second.id ? 1 : 0;
+}
+
+function eventRepresentation(event: Event): string {
+	return JSON.stringify([event.id, event.pubkey, event.created_at, event.kind, event.tags, event.content, event.sig]);
+}
+
+function compareRepresentations(first: Event, second: Event): number {
+	const firstRepresentation = eventRepresentation(first);
+	const secondRepresentation = eventRepresentation(second);
+	return firstRepresentation < secondRepresentation ? -1 : firstRepresentation > secondRepresentation ? 1 : 0;
+}
+
 export function createNostrRelayTransport(
 	world: PrototypeWorldConfig,
 	options: NostrRelayTransportOptions = {}
@@ -230,6 +250,7 @@ export function createNostrRelayTransport(
 	const relayAliases = new Map<string, string>();
 	const subscriptions = new Subscription();
 	let cancelPrimaryStart: (() => void) | null = null;
+	let traceRootBootstrapStarted = false;
 	function requireRxNostr(): RxNostr {
 		if (!rxNostr) throw new Error('Relay transport has not been initialized.');
 		return rxNostr;
@@ -588,6 +609,39 @@ export function createNostrRelayTransport(
 
 		getDiagnostics(): NostrRelayTransportDiagnostics {
 			return diagnostics();
+		},
+
+		async bootstrapTraceRootCandidates(): Promise<TraceRootBootstrapResult> {
+			if (state !== 'started' || !metadata) {
+				throw new Error('Relay transport must start before trace root bootstrap.');
+			}
+			if (traceRootBootstrapStarted) {
+				throw new Error('Trace root bootstrap is only allowed once.');
+			}
+			traceRootBootstrapStarted = true;
+			const filter = buildTraceRootBootstrapFilter({ channelId: metadata.channelId });
+			const eventsByRelay = new Map<string, Event[]>(metadata.relays.map((relayUrl) => [relayUrl, []]));
+			const diagnostics = await queryRelays(filter, metadata.relays, (packet, relayUrl) => {
+				eventsByRelay.get(relayUrl)?.push(packet.event);
+			});
+			const uniqueEvents = new Map<string, Event>();
+			for (const relayUrl of metadata.relays) {
+				const relayEvents = eventsByRelay.get(relayUrl) ?? [];
+				const representations = new Map<string, Event[]>();
+				for (const event of relayEvents) {
+					const candidates = representations.get(event.id);
+					if (candidates) candidates.push(event);
+					else representations.set(event.id, [event]);
+				}
+				for (const candidates of representations.values()) {
+					const selected = [...candidates].sort(compareRepresentations)[0];
+					if (!uniqueEvents.has(selected.id)) uniqueEvents.set(selected.id, selected);
+				}
+			}
+			const rawEvents = [...uniqueEvents.values()]
+				.sort((first, second) => second.created_at - first.created_at || compareEventIds(first, second))
+				.slice(0, filter.limit!);
+			return { rawEvents, relays: diagnostics };
 		},
 
 		async publish(event: VerifiedEvent): Promise<readonly PublishRelayResult[]> {
