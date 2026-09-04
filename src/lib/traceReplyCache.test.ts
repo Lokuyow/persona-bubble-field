@@ -68,8 +68,8 @@ async function database() {
 	return db;
 }
 
-async function seedRootForChannel(channelId: string, root: RootFixture): Promise<void> {
-	await reconcileTraceRootCache({ channelId, field: { columns: 2, rows: 1 }, rawEvents: [root.raw] });
+async function seedRootForChannel(channelId: string, root: RootFixture, field = { columns: 20, rows: 1 }): Promise<void> {
+	await reconcileTraceRootCache({ channelId, field, rawEvents: [root.raw] });
 }
 
 async function replyRecords() {
@@ -121,7 +121,7 @@ describe('trace reply cache reconciliation', () => {
 		const secondRoot = makeRoot(CHANNEL_ID, 'second-root');
 		await reconcileTraceRootCache({
 			channelId: CHANNEL_ID,
-			field: { columns: 4, rows: 1 },
+			field: { columns: 20, rows: 1 },
 			rawEvents: [firstRoot.raw, secondRoot.raw]
 		});
 		const firstReply = makeReply(firstRoot.parsed, firstRoot.parsed, 'first reply', 101);
@@ -240,11 +240,11 @@ describe('trace reply cache reconciliation', () => {
 	it('does not persist replies or LRU metadata for an evicted root supplied by a stale caller', async () => {
 		const old = makeRoot(CHANNEL_ID, 'stale-old', 100);
 		const next = makeRoot(CHANNEL_ID, 'stale-next', 101);
-		await seedRootForChannel(CHANNEL_ID, old);
+		await seedRootForChannel(CHANNEL_ID, old, { columns: 10, rows: 1 });
 		const reply = makeReply(old.parsed, old.parsed, 'stale reply', 102);
 		await reconcileTraceReplyCache({ channelId: CHANNEL_ID, effectiveRoots: [old.parsed], rawEvents: [reply.raw] });
 		expect(await touchTraceReplyTree({ channelId: CHANNEL_ID, rootId: old.parsed.id })).toBe(true);
-		await seedRootForChannel(CHANNEL_ID, next);
+		await seedRootForChannel(CHANNEL_ID, next, { columns: 10, rows: 1 });
 		expect(await replyRecords()).toEqual([]);
 		expect(await lruRecords()).toEqual([]);
 		expect(await reconcileTraceReplyCache({
@@ -338,7 +338,7 @@ describe('trace reply cache reconciliation', () => {
 	it('aborts root eviction cleanup atomically when a reply deletion fails', async () => {
 		const old = makeRoot(CHANNEL_ID, 'atomic-old', 100);
 		const next = makeRoot(CHANNEL_ID, 'atomic-next', 101);
-		await seedRootForChannel(CHANNEL_ID, old);
+		await seedRootForChannel(CHANNEL_ID, old, { columns: 10, rows: 1 });
 		const reply = makeReply(old.parsed, old.parsed, 'atomic reply', 102);
 		await reconcileTraceReplyCache({ channelId: CHANNEL_ID, effectiveRoots: [old.parsed], rawEvents: [reply.raw] });
 		await touchTraceReplyTree({ channelId: CHANNEL_ID, rootId: old.parsed.id });
@@ -347,7 +347,7 @@ describe('trace reply cache reconciliation', () => {
 			if (this.name === TRACE_REPLY_STORE) throw new DOMException('Simulated delete failure.', 'AbortError');
 			return originalDelete.call(this, key);
 		});
-		await expect(seedRootForChannel(CHANNEL_ID, next)).rejects.toThrow('Trace root cache operation failed.');
+		await expect(seedRootForChannel(CHANNEL_ID, next, { columns: 10, rows: 1 })).rejects.toThrow('Trace root cache operation failed.');
 		deletion.mockRestore();
 		const db = await database();
 		expect(await db.get(TRACE_ROOT_STORE, [CHANNEL_ID, old.parsed.id])).toBeDefined();

@@ -93,7 +93,7 @@ describe('trace root cache reconciliation', () => {
 		legacy.close();
 
 		expect((await reconcileTraceRootCache({
-			channelId: CHANNEL_ID, field: { columns: 2, rows: 1 }, rawEvents: []
+			channelId: CHANNEL_ID, field: { columns: 20, rows: 1 }, rawEvents: []
 		})).map((root) => root.id)).toEqual([event.id]);
 		const upgraded = await database();
 		expect(upgraded.version).toBe(2);
@@ -102,7 +102,7 @@ describe('trace root cache reconciliation', () => {
 
 	it('creates an empty cache, stores raw events, and restores them after reload', async () => {
 		const event = lotteryRoot({ nonce: 'persist' });
-		const input = { channelId: CHANNEL_ID, field: { columns: 2, rows: 1 }, rawEvents: [event] };
+		const input = { channelId: CHANNEL_ID, field: { columns: 20, rows: 1 }, rawEvents: [event] };
 		expect((await reconcileTraceRootCache(input)).map((root) => root.id)).toEqual([event.id]);
 		const stored = await records();
 		expect(stored).toEqual([expect.objectContaining({
@@ -124,7 +124,7 @@ describe('trace root cache reconciliation', () => {
 		await seed(CHANNEL_ID, 'c'.repeat(64), null);
 
 		expect(await reconcileTraceRootCache({
-			channelId: CHANNEL_ID, field: { columns: 2, rows: 1 }, rawEvents: []
+			channelId: CHANNEL_ID, field: { columns: 2, rows: 10 }, rawEvents: []
 		})).toEqual([]);
 		expect(await records()).toEqual([]);
 	});
@@ -132,7 +132,7 @@ describe('trace root cache reconciliation', () => {
 	it('keeps cached roots omitted by a later bootstrap while capacity remains', async () => {
 		const old = lotteryRoot({ createdAt: 1, position: { x: 0, y: 0 }, nonce: 'old' });
 		const next = lotteryRoot({ createdAt: 2, position: { x: 1, y: 0 }, nonce: 'next' });
-		const field = { columns: 4, rows: 1 };
+		const field = { columns: 20, rows: 1 };
 		await reconcileTraceRootCache({ channelId: CHANNEL_ID, field, rawEvents: [old] });
 		expect((await reconcileTraceRootCache({ channelId: CHANNEL_ID, field, rawEvents: [next] }))
 			.map((root) => root.id)).toEqual([next.id, old.id]);
@@ -142,7 +142,7 @@ describe('trace root cache reconciliation', () => {
 		const roots = [1, 2, 3, 4].map((createdAt) =>
 			lotteryRoot({ createdAt, position: { x: 0, y: 0 }, nonce: `cell-${createdAt}` })
 		);
-		const field = { columns: 8, rows: 1 };
+		const field = { columns: 30, rows: 1 };
 		await reconcileTraceRootCache({ channelId: CHANNEL_ID, field, rawEvents: roots.slice(0, 3) });
 		expect((await reconcileTraceRootCache({ channelId: CHANNEL_ID, field, rawEvents: [roots[3]] }))
 			.map((root) => root.id)).toEqual([roots[3].id, roots[2].id, roots[1].id]);
@@ -152,7 +152,7 @@ describe('trace root cache reconciliation', () => {
 		const roots = [1, 2, 3].map((createdAt) =>
 			lotteryRoot({ createdAt, position: { x: createdAt - 1, y: 0 }, nonce: `global-${createdAt}` })
 		);
-		const field = { columns: 4, rows: 1 };
+		const field = { columns: 20, rows: 1 };
 		await reconcileTraceRootCache({ channelId: CHANNEL_ID, field, rawEvents: roots.slice(0, 2) });
 		expect((await reconcileTraceRootCache({ channelId: CHANNEL_ID, field, rawEvents: [roots[2]] }))
 			.map((root) => root.id)).toEqual([roots[2].id, roots[1].id]);
@@ -161,11 +161,11 @@ describe('trace root cache reconciliation', () => {
 	it('does not modify another channel partition', async () => {
 		const first = lotteryRoot({ nonce: 'first' });
 		const other = lotteryRoot({ channelId: OTHER_CHANNEL_ID, nonce: 'other' });
-		await reconcileTraceRootCache({ channelId: CHANNEL_ID, field: { columns: 2, rows: 1 }, rawEvents: [first] });
-		await reconcileTraceRootCache({ channelId: OTHER_CHANNEL_ID, field: { columns: 2, rows: 1 }, rawEvents: [other] });
-		await reconcileTraceRootCache({ channelId: CHANNEL_ID, field: { columns: 2, rows: 1 }, rawEvents: [] });
+		await reconcileTraceRootCache({ channelId: CHANNEL_ID, field: { columns: 20, rows: 1 }, rawEvents: [first] });
+		await reconcileTraceRootCache({ channelId: OTHER_CHANNEL_ID, field: { columns: 20, rows: 1 }, rawEvents: [other] });
+		await reconcileTraceRootCache({ channelId: CHANNEL_ID, field: { columns: 20, rows: 1 }, rawEvents: [] });
 		expect((await reconcileTraceRootCache({
-			channelId: OTHER_CHANNEL_ID, field: { columns: 2, rows: 1 }, rawEvents: []
+			channelId: OTHER_CHANNEL_ID, field: { columns: 20, rows: 1 }, rawEvents: []
 		})).map((root) => root.id)).toEqual([other.id]);
 	});
 
@@ -175,21 +175,21 @@ describe('trace root cache reconciliation', () => {
 		await seed(OTHER_CHANNEL_ID, other.id, other);
 
 		expect(await reconcileTraceRootCache({
-			channelId: CHANNEL_ID, field: { columns: 2, rows: 1 }, rawEvents: []
+			channelId: CHANNEL_ID, field: { columns: 20, rows: 1 }, rawEvents: []
 		})).toEqual([]);
 
 		const db = await database();
 		const allKeys = await db.getAllKeys(TRACE_ROOT_STORE);
 		expect(allKeys).toEqual([[OTHER_CHANNEL_ID, other.id]]);
 		expect((await reconcileTraceRootCache({
-			channelId: OTHER_CHANNEL_ID, field: { columns: 2, rows: 1 }, rawEvents: []
+			channelId: OTHER_CHANNEL_ID, field: { columns: 20, rows: 1 }, rawEvents: []
 		})).map((root) => root.id)).toEqual([other.id]);
 	});
 
 	it('serializes concurrent reconciliations without losing either valid update', async () => {
 		const first = lotteryRoot({ createdAt: 1, position: { x: 0, y: 0 }, nonce: 'parallel-first' });
 		const second = lotteryRoot({ createdAt: 2, position: { x: 1, y: 0 }, nonce: 'parallel-second' });
-		const field = { columns: 4, rows: 1 };
+		const field = { columns: 20, rows: 1 };
 		await Promise.all([
 			reconcileTraceRootCache({ channelId: CHANNEL_ID, field, rawEvents: [first] }),
 			reconcileTraceRootCache({ channelId: CHANNEL_ID, field, rawEvents: [second] })
@@ -201,14 +201,14 @@ describe('trace root cache reconciliation', () => {
 	it('rejects an invalid channel ID before attempting IndexedDB access', async () => {
 		vi.stubGlobal('indexedDB', new Proxy({}, { get() { throw new Error('Unexpected storage access.'); } }));
 		await expect(reconcileTraceRootCache({
-			channelId: 'A'.repeat(64), field: { columns: 1, rows: 1 }, rawEvents: []
+			channelId: 'A'.repeat(64), field: { columns: 20, rows: 1 }, rawEvents: []
 		})).rejects.toThrow(TypeError);
 	});
 
 	it('rejects failed writes and leaves the previous snapshot intact', async () => {
 		const old = lotteryRoot({ createdAt: 1, nonce: 'old' });
 		const next = lotteryRoot({ createdAt: 2, nonce: 'next' });
-		const field = { columns: 2, rows: 1 };
+		const field = { columns: 20, rows: 1 };
 		await reconcileTraceRootCache({ channelId: CHANNEL_ID, field, rawEvents: [old] });
 		const originalPut = IDBObjectStore.prototype.put;
 		const put = vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (this: IDBObjectStore, value, key) {
@@ -227,7 +227,7 @@ describe('trace root cache reconciliation', () => {
 	it('does not report success when a transaction aborts after writes', async () => {
 		const old = lotteryRoot({ createdAt: 1, nonce: 'abort-old' });
 		const next = lotteryRoot({ createdAt: 2, nonce: 'abort-next' });
-		const field = { columns: 2, rows: 1 };
+		const field = { columns: 20, rows: 1 };
 		await reconcileTraceRootCache({ channelId: CHANNEL_ID, field, rawEvents: [old] });
 		const originalPut = IDBObjectStore.prototype.put;
 		const put = vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (this: IDBObjectStore, value, key) {

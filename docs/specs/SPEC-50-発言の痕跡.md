@@ -14,7 +14,7 @@ trace root候補は、有効なtop-level kind 42だけとする。normal / shout
 BigInt(`0x${event.id}`) % 5n === 0n
 ```
 
-上の決定的20%抽選にsparse-world boost、密度補正、時間expiryは設けない。1 cellあたりのrootは最大3件、global root上限は `floor(total logical cell count / 2)` とする。上限はrootだけを数え、kind 1111 replyは数えない。上限超過時は古いrootから落とし、同時刻は既存の決定的orderingに従う。
+上の決定的20%抽選にsparse-world boost、密度補正、時間expiryは設けない。1 cellあたりのrootは最大3件、global root上限は `floor(total logical cell count / 10)` とする。上限はrootだけを数え、kind 1111 replyは数えない。上限超過時は古いrootから落とし、同時刻は既存の決定的orderingに従う。
 
 ### root cache
 

@@ -77,7 +77,7 @@ export function capTraceRootCandidates(
 		perCellSurvivors.push(candidate);
 	}
 
-	return perCellSurvivors.slice(0, Math.floor(field.columns * field.rows / 2));
+	return perCellSurvivors.slice(0, Math.floor(field.columns * field.rows / 10));
 }
 
 /**
