@@ -1805,15 +1805,19 @@
 	function seedDevRecentMessageTimelineFixture(): void {
 		if (!devWorldSandboxEnabled) return;
 		const now = Math.floor(Date.now() / 1000);
-		const activePubkey = 'a'.repeat(64);
+		const activePubkeys = ['0', '1', '2', 'a', 'b', 'c', 'd', 'e'].map((prefix) => prefix.repeat(64));
+		const activePubkey = activePubkeys[0];
 		const outsidePubkey = 'f'.repeat(64);
 		setPresence(createPresenceState(FIELD, Date.now(), [
 			{ id: DEV_WORLD_SELF_ID, position: { x: 7, y: 3 } },
-			{ id: activePubkey, position: { x: 11, y: 3 } }
+			...activePubkeys.map((id, index) => ({
+				id,
+				position: { x: 8 + (index % 4), y: 2 + Math.floor(index / 4) }
+			}))
 		]));
 		const messages: ParsedWorldMessage[] = Array.from({ length: 24 }, (_, index) => ({
 			id: index === 23 ? 'dev-timeline-duplicate' : `dev-timeline-${String(index).padStart(2, '0')}`,
-			pubkey: index === 21 ? outsidePubkey : activePubkey,
+			pubkey: index === 21 ? outsidePubkey : index === 22 ? DEV_WORLD_SELF_ID : activePubkeys[index % activePubkeys.length],
 			createdAt: now - Math.floor((23 - index) / 3),
 			content: index === 10
 				? 'line 1\nline 2\nline 3\nline 4\nline 5\nline 6'
@@ -3353,14 +3357,14 @@
 		text-shadow: 0 1px 1px rgba(0, 0, 0, 0.9);
 	}
 
-	.timeline-name.tone-coral { color: hsl(12, 96%, 42%); }
-	.timeline-name.tone-lavender { color: hsl(250, 72%, 42%); }
-	.timeline-name.tone-mint { color: hsl(145, 68%, 31%); }
-	.timeline-name.tone-yellow { color: hsl(48, 82%, 34%); }
-	.timeline-name.tone-sky { color: hsl(188, 72%, 32%); }
-	.timeline-name.tone-peach { color: hsl(28, 82%, 38%); }
-	.timeline-name.tone-rose { color: hsl(340, 72%, 40%); }
-	.timeline-name.tone-blue { color: hsl(210, 72%, 37%); }
+	.timeline-name.tone-coral { color: color-mix(in srgb, hsl(12, 96%, 42%) 70%, white 30%); }
+	.timeline-name.tone-lavender { color: color-mix(in srgb, hsl(250, 72%, 42%) 70%, white 30%); }
+	.timeline-name.tone-mint { color: color-mix(in srgb, hsl(145, 68%, 31%) 70%, white 30%); }
+	.timeline-name.tone-yellow { color: color-mix(in srgb, hsl(48, 82%, 34%) 70%, white 30%); }
+	.timeline-name.tone-sky { color: color-mix(in srgb, hsl(188, 72%, 32%) 70%, white 30%); }
+	.timeline-name.tone-peach { color: color-mix(in srgb, hsl(28, 82%, 38%) 70%, white 30%); }
+	.timeline-name.tone-rose { color: color-mix(in srgb, hsl(340, 72%, 40%) 70%, white 30%); }
+	.timeline-name.tone-blue { color: color-mix(in srgb, hsl(210, 72%, 37%) 70%, white 30%); }
 
 	.timeline-name:hover,
 	.timeline-name:focus-visible {
