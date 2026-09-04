@@ -56,13 +56,8 @@ PC等ではフィールドの広い範囲を表示できる。
 
 ### 移動
 
-移動は以下とする。
-
-- 1回の操作で1マス
-- 上
-- 下
-- 左
-- 右
+1回のmovementは、隣接する1つのcellへの移動とする。移動方向はcardinal 4方向と
+diagonal 4方向の計8方向を許可する。
 
 PCでは修飾キーなしのArrowキー（ArrowUp / ArrowDown / ArrowLeft /
 ArrowRight）で移動できる。Composer editorにフォーカスしている場合は、
