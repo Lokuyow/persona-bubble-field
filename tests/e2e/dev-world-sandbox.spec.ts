@@ -469,8 +469,8 @@ test.describe('DEV World Sandbox', () => {
 		});
 
 		expect(background.image).toContain('prototype-urban-park.png');
-		expect(background.image).toContain('repeating-conic-gradient');
-		expect(background.size).toContain('152px 152px');
+		expect(background.image).not.toContain('repeating-conic-gradient');
+		expect(background.size).toContain('76px 76px');
 		expect(background.size).toContain('100% 100%');
 		expect(background.sceneRatio).toBeCloseTo(2, 5);
 		expect(background.boundaryBorder).toBe('2px');

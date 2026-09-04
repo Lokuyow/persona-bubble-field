@@ -2412,16 +2412,11 @@
 		background-image:
 			linear-gradient(to right, rgba(101, 122, 105, 0.16) 1px, transparent 1px),
 			linear-gradient(to bottom, rgba(101, 122, 105, 0.16) 1px, transparent 1px),
-			repeating-conic-gradient(
-				from 90deg at 50% 50%,
-				rgba(151, 169, 145, 0.12) 0deg 90deg,
-				rgba(244, 246, 235, 0.08) 90deg 180deg
-			),
 			linear-gradient(rgba(255, 250, 224, 0.2), rgba(255, 250, 224, 0.2)),
 			var(--field-background-image, none);
 		background-size: var(--cell-size) var(--cell-size), var(--cell-size) var(--cell-size),
-			calc(var(--cell-size) * 2) calc(var(--cell-size) * 2), 100% 100%, 100% 100%;
-		background-repeat: repeat, repeat, repeat, no-repeat, no-repeat;
+			100% 100%, 100% 100%;
+		background-repeat: repeat, repeat, no-repeat, no-repeat;
 		box-shadow:
 			0 24px 65px rgba(67, 75, 62, 0.12),
 			inset 0 0 0 1px rgba(95, 111, 96, 0.3);
