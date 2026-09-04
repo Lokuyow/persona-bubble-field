@@ -26,7 +26,6 @@
 		normalBubblePreferredAnchor,
 		placeBubbles,
 		placeBubblesWithFixed,
-		moveOneCell,
 		type Direction,
 		type Size,
 		type WorldPoint,
@@ -38,6 +37,12 @@
 		viewportPointToLogicalCell,
 		type FieldCellAction
 	} from '$lib/fieldSelection';
+	import {
+		clampJoystickThumb,
+		isJoystickDrag,
+		joystickDirection,
+		type JoystickPoint
+	} from '$lib/pointerJoystick';
 	import {
 		DEV_WORLD_SELF_ID,
 		getDevWorldCharacter,
@@ -60,7 +65,7 @@
 		type PreparedCharacterProfilePublication
 	} from '$lib/initialProfilePublication';
 	import { projectPresence } from '$lib/presenceProjection';
-	import { createPresenceState, getActiveOccupancy, getParticipant, type PresenceState } from '$lib/presence';
+	import { createPresenceState, type PresenceState } from '$lib/presence';
 	import { addRecentMessage, createRecentMessageTimeline, type RecentMessageTimeline } from '$lib/recentMessageTimeline';
 	import { getVirtualKeyboardBottomInset, getVisualViewportKeyboardInset, type ViewportRect } from '$lib/keyboardInset';
 	import type { ParsedWorldMessage } from '$lib/nostrProtocol';
@@ -102,7 +107,6 @@
 		merged: { width: 218, height: 58 }
 	} satisfies Record<'normal' | 'merged', Size>;
 	const MOVEMENT_ANIMATION_DURATION_MS = 400;
-	const MOVEMENT_DIRECTIONS: readonly Direction[] = ['up', 'down', 'left', 'right'];
 	const INITIAL_COMPOSER_PREFERRED_HEIGHT = 50;
 	const SPECIAL_TAIL_BODY_EXTENSION = 26;
 	const SPEECH_TYPE_ORDER: readonly SpeechType[] = ['normal', 'shout', 'monologue'];
@@ -174,7 +178,16 @@
 	let visualAnimationFrame: number | null = null;
 	let visualProjectionInitialized = false;
 	let prefersReducedMotion = false;
-	let stopKeyboardHold = () => {};
+	let stopMovementHold = () => {};
+	let cancelPointerJoystick = () => {};
+	let movementHoldTakeover = (_pointerId: number, _direction: Direction) => {};
+	let movementHoldUpdatePointer = (_pointerId: number, _direction: Direction) => {};
+	let movementHoldStopPointer = (_pointerId: number) => {};
+	let pointerJoystick: Readonly<{
+		center: JoystickPoint;
+		thumb: JoystickPoint;
+		direction: Direction;
+	}> | null = null;
 
 	type VisualParticipantTransition = Readonly<{ from: WorldPoint; to: WorldPoint }>;
 	type VisualMotion = Readonly<{
@@ -195,11 +208,6 @@
 	};
 	$: fieldAreaBounds = getFieldAreaBounds(viewportSize, speechAreaBounds);
 	$: selfProjectionId = devWorldSandboxEnabled ? DEV_WORLD_SELF_ID : selfAccount?.pubkey ?? 'you';
-	$: movementCells = getMovementCells(
-		presenceState,
-		selfProjectionId,
-		devWorldSandboxEnabled || (selfAccount !== null && isWorldSelfActive && selfPositionWriteState.kind !== 'pending')
-	);
 	$: presenceProjection = getPresenceProjection(presenceState, selectedCharacterId, selfProjectionId);
 	$: isWorldSelfActive = Boolean(selfAccount && presenceState.participants.some((participant) =>
 		participant.id === selfAccount?.pubkey && participant.status === 'active'
@@ -249,8 +257,7 @@
 		}, traceRootCells)
 		: null;
 	$: traceOnlyCellTriggers = traceRootCells.filter((cell) =>
-		!participantViews.some((participant) => sameCell(participant.position, cell.position)) &&
-		!movementCells.some((movement) => sameCell(movement.position, cell.position))
+		!participantViews.some((participant) => sameCell(participant.position, cell.position))
 	);
 
 	$: visibleParticipantIds = new Set(
@@ -681,43 +688,65 @@
 			});
 			if (!devWorldSandboxEnabled) void begin();
 		};
-		let heldDirection: Direction | null = null;
-		let heldSource: 'page' | 'composer-editor' | null = null;
+		type MovementHoldOwner = 'keyboard' | 'pointer';
+		let movementHoldOwner: MovementHoldOwner | null = null;
+		let movementHoldDirection: Direction | null = null;
+		let movementHoldSource: 'page' | 'composer-editor' | null = null;
+		let movementHoldKeyboardKey: string | null = null;
+		let movementHoldKeyboardCode: string | null = null;
+		let movementHoldPointerId: number | null = null;
 		let holdTimer: number | null = null;
-		const clearKeyboardHold = () => {
-			heldDirection = null;
-			heldSource = null;
+		const clearMovementHold = () => {
+			movementHoldOwner = null;
+			movementHoldDirection = null;
+			movementHoldSource = null;
+			movementHoldKeyboardKey = null;
+			movementHoldKeyboardCode = null;
+			movementHoldPointerId = null;
 			if (holdTimer !== null) {
 				window.clearInterval(holdTimer);
 				holdTimer = null;
 			}
 		};
-		stopKeyboardHold = clearKeyboardHold;
+		stopMovementHold = clearMovementHold;
 		const requestMovement = (direction: Direction) => {
-			if (fieldActionMenu) {
-				closeFieldActionMenu();
-				moveSelfFromCell(direction);
-				return;
-			}
-			const cell = movementCells.find((candidate) => candidate.direction === direction);
-			if (cell) resolveFieldCellSelection(cell.position);
+			closeFieldActionMenu();
+			moveSelfFromCell(direction);
 		};
-		const startKeyboardHold = (direction: Direction, source: 'page' | 'composer-editor') => {
-			clearKeyboardHold();
-			heldDirection = direction;
-			heldSource = source;
-			requestMovement(direction);
-			if (fieldActionMenu) {
-				clearKeyboardHold();
-				return;
-			}
+		const startMovementTimer = () => {
 			holdTimer = window.setInterval(() => {
-				if (!heldDirection || (heldSource === 'composer-editor' && composerEditorIsEmpty !== true) || document.querySelector('.profile-dialog-content')) {
-					clearKeyboardHold();
+				if (!movementHoldOwner || !movementHoldDirection ||
+					(movementHoldOwner === 'keyboard' && movementHoldSource === 'composer-editor' && composerEditorIsEmpty !== true) ||
+					document.querySelector('.profile-dialog-content')) {
+					clearMovementHold();
 					return;
 				}
-				requestMovement(heldDirection);
+				requestMovement(movementHoldDirection);
 			}, 500);
+		};
+		const startKeyboardHold = (direction: Direction, event: KeyboardEvent, source: 'page' | 'composer-editor') => {
+			clearMovementHold();
+			movementHoldOwner = 'keyboard';
+			movementHoldDirection = direction;
+			movementHoldSource = source;
+			movementHoldKeyboardKey = event.key;
+			movementHoldKeyboardCode = event.code;
+			requestMovement(direction);
+			startMovementTimer();
+		};
+		const takeOverPointerHold = (pointerId: number, direction: Direction) => {
+			clearMovementHold();
+			movementHoldOwner = 'pointer';
+			movementHoldDirection = direction;
+			movementHoldPointerId = pointerId;
+			requestMovement(direction);
+			startMovementTimer();
+		};
+		const updatePointerHold = (pointerId: number, direction: Direction) => {
+			if (movementHoldOwner === 'pointer' && movementHoldPointerId === pointerId) movementHoldDirection = direction;
+		};
+		const stopPointerHold = (pointerId: number) => {
+			if (movementHoldOwner === 'pointer' && movementHoldPointerId === pointerId) clearMovementHold();
 		};
 		const handleKeydown = (event: KeyboardEvent) => {
 			if (event.code === 'Escape' && fieldActionMenu) {
@@ -756,11 +785,12 @@
 			const wasdDirection = directionFromCode(event.code);
 			const direction = arrowDirection ?? wasdDirection;
 			if (!direction) return;
+			if (movementHoldOwner === 'pointer') return;
 			const canMove = arrowDirection
 				? canUseArrowForMovement(event)
 				: canUseWASDForMovement(event);
 			if (!canMove) {
-				clearKeyboardHold();
+				clearMovementHold();
 				return;
 			}
 			// Browser repeat events only suppress the browser default. Movement is
@@ -768,18 +798,25 @@
 			event.preventDefault();
 			if (event.repeat) return;
 			const source = arrowDirection && isComposerEditorKeyboardEvent(event) ? 'composer-editor' : 'page';
-			startKeyboardHold(direction, source);
+			startKeyboardHold(direction, event, source);
 		};
 		const handleKeyup = (event: KeyboardEvent) => {
 			const direction = directionFromKey(event.key) ?? directionFromCode(event.code);
-			if (direction && direction === heldDirection) clearKeyboardHold();
+			if (movementHoldOwner === 'keyboard' && direction === movementHoldDirection &&
+				(event.key === movementHoldKeyboardKey || event.code === movementHoldKeyboardCode)) clearMovementHold();
 		};
 		const handleMovementFocusIn = (event: FocusEvent) => {
-			if (heldDirection && !isComposerEditorKeyboardEvent(event)) clearKeyboardHold();
+			if (movementHoldOwner === 'keyboard' && movementHoldDirection && !isComposerEditorKeyboardEvent(event)) clearMovementHold();
 		};
-		const handleWindowBlur = () => clearKeyboardHold();
+		const handleWindowBlur = () => {
+			clearMovementHold();
+			cancelPointerJoystick();
+		};
 		const handleVisibilityChange = () => {
-			if (document.hidden) clearKeyboardHold();
+			if (document.hidden) {
+				clearMovementHold();
+				cancelPointerJoystick();
+			}
 		};
 		const handleDocumentPointerDown = (event: PointerEvent) => {
 			if (fieldActionMenu && !event.composedPath().some((target) =>
@@ -844,6 +881,9 @@
 		window.addEventListener('blur', handleWindowBlur);
 		document.addEventListener('visibilitychange', handleVisibilityChange);
 		document.addEventListener('pointerdown', handleDocumentPointerDown);
+		movementHoldTakeover = takeOverPointerHold;
+		movementHoldUpdatePointer = updatePointerHold;
+		movementHoldStopPointer = stopPointerHold;
 		const expiryTimer = window.setInterval(() => {
 			const now = Date.now();
 			const nextPresence = session?.refresh(now);
@@ -873,8 +913,12 @@
 			window.removeEventListener('blur', handleWindowBlur);
 			document.removeEventListener('visibilitychange', handleVisibilityChange);
 			document.removeEventListener('pointerdown', handleDocumentPointerDown);
-			clearKeyboardHold();
-			if (stopKeyboardHold === clearKeyboardHold) stopKeyboardHold = () => {};
+			clearMovementHold();
+			cancelPointerJoystick();
+			movementHoldTakeover = (_pointerId, _direction) => {};
+			movementHoldUpdatePointer = (_pointerId, _direction) => {};
+			movementHoldStopPointer = (_pointerId) => {};
+			stopMovementHold = () => {};
 			reducedMotionQuery.removeEventListener('change', handleReducedMotionChange);
 			cancelVisualAnimation();
 			window.clearInterval(expiryTimer);
@@ -1129,18 +1173,6 @@
 		return null;
 	}
 
-	function getMovementCells(state: PresenceState, selfId: string, enabled: boolean) {
-		if (!enabled) return [];
-		const self = getParticipant(state, selfId);
-		if (!self || self.status !== 'active') return [];
-
-		const occupied = getActiveOccupancy(state, selfId);
-		return MOVEMENT_DIRECTIONS.flatMap((direction) => {
-			const position = moveOneCell(self.position, direction, state.field, occupied);
-			return position ? [{ direction, position }] : [];
-		});
-	}
-
 	function setEffectiveTraceRoots(roots: readonly ParsedWorldMessage[]): void {
 		effectiveTraceRoots = roots;
 		devTraceConversationRuntime?.reconcileEffectiveRoots(roots);
@@ -1164,10 +1196,8 @@
 		const participantIds = participantViews
 			.filter((participant) => sameCell(participant.position, position))
 			.map((participant) => participant.id);
-		const movementDirection = movementCells.find((movement) => sameCell(movement.position, position))?.direction;
 		return buildFieldCellActions({
 			participantIds,
-			...(movementDirection ? { movementDirection } : {}),
 			hasTrace: traceRootCells.some((cell) => sameCell(cell.position, position))
 		});
 	}
@@ -1185,10 +1215,6 @@
 		trigger?: HTMLButtonElement
 	): void {
 		closeFieldActionMenu();
-		if (action.kind === 'movement') {
-			moveSelfFromCell(action.direction);
-			return;
-		}
 		if (action.kind === 'trace') {
 			investigateTraceCell(position);
 			return;
@@ -1210,22 +1236,85 @@
 		fieldActionMenu = { position: { ...position }, actions: resolution.actions };
 	}
 
-	function handleFieldAreaClick(event: MouseEvent): void {
-		const position = viewportPointToLogicalCell({
-			point: { x: event.clientX, y: event.clientY },
-			fieldArea: fieldAreaBounds,
-			camera,
-			field
-		});
-		if (position) resolveFieldCellSelection(position);
-		else closeFieldActionMenu();
-	}
-
 	function fieldSelectionPointer(node: HTMLElement) {
-		node.addEventListener('click', handleFieldAreaClick);
+		let activeGesture: Readonly<{
+			pointerId: number;
+			start: JoystickPoint;
+			anchor: { x: number; y: number };
+			dragging: boolean;
+		}> | null = null;
+
+		const isInteractiveTarget = (event: PointerEvent): boolean => event.composedPath().some((target) =>
+			target instanceof HTMLElement && target.matches(
+				'button, input, textarea, select, [contenteditable="true"], .field-action-menu'
+			)
+		);
+		const releasePointerCapture = (pointerId: number) => {
+			if (node.hasPointerCapture(pointerId)) node.releasePointerCapture(pointerId);
+		};
+		const cancelGesture = () => {
+			const gesture = activeGesture;
+			activeGesture = null;
+			if (gesture) {
+				movementHoldStopPointer(gesture.pointerId);
+				try { releasePointerCapture(gesture.pointerId); } catch { /* pointer capture may already be lost */ }
+			}
+			pointerJoystick = null;
+		};
+		const finishGesture = (event: PointerEvent, selectTap: boolean) => {
+			const gesture = activeGesture;
+			if (!gesture || gesture.pointerId !== event.pointerId) return;
+			activeGesture = null;
+			try { releasePointerCapture(event.pointerId); } catch { /* pointer capture may already be lost */ }
+			if (gesture.dragging) movementHoldStopPointer(event.pointerId);
+			pointerJoystick = null;
+			if (selectTap && !gesture.dragging) resolveFieldCellSelection(gesture.anchor);
+		};
+		const handlePointerDown = (event: PointerEvent) => {
+			if (!event.isPrimary || event.button !== 0 || activeGesture || isInteractiveTarget(event)) return;
+			const start = { x: event.clientX, y: event.clientY };
+			const anchor = viewportPointToLogicalCell({ point: start, fieldArea: fieldAreaBounds, camera, field });
+			if (!anchor) return;
+			activeGesture = { pointerId: event.pointerId, start, anchor, dragging: false };
+			try { node.setPointerCapture(event.pointerId); } catch { /* synthetic events may not have a capturable pointer */ }
+		};
+		const handlePointerMove = (event: PointerEvent) => {
+			const gesture = activeGesture;
+			if (!gesture || gesture.pointerId !== event.pointerId) return;
+			const current = { x: event.clientX, y: event.clientY };
+			if (!gesture.dragging) {
+				if (!isJoystickDrag(gesture.start, current)) return;
+				const direction = joystickDirection(gesture.start, current);
+				if (!direction) return;
+				activeGesture = { ...gesture, dragging: true };
+				pointerJoystick = {
+					center: gesture.start,
+					thumb: clampJoystickThumb(gesture.start, current),
+					direction
+				};
+				closeFieldActionMenu();
+				movementHoldTakeover(event.pointerId, direction);
+				return;
+			}
+			const direction = joystickDirection(gesture.start, current);
+			if (!direction) return;
+			pointerJoystick = {
+				center: gesture.start,
+				thumb: clampJoystickThumb(gesture.start, current),
+				direction
+			};
+			movementHoldUpdatePointer(event.pointerId, direction);
+		};
+		node.addEventListener('pointerdown', handlePointerDown);
+		node.addEventListener('pointermove', handlePointerMove);
+		node.addEventListener('pointerup', (event) => finishGesture(event, true));
+		node.addEventListener('pointercancel', (event) => finishGesture(event, false));
+		node.addEventListener('lostpointercapture', (event) => finishGesture(event as PointerEvent, false));
+		cancelPointerJoystick = cancelGesture;
 		return {
 			destroy() {
-				node.removeEventListener('click', handleFieldAreaClick);
+				cancelGesture();
+				cancelPointerJoystick = () => {};
 			}
 		};
 	}
@@ -1243,7 +1332,6 @@
 
 	function fieldActionLabel(action: FieldCellAction): string {
 		if (action.kind === 'trace') return '痕跡を調べる';
-		if (action.kind === 'movement') return `Move ${action.direction}`;
 		const participant = participantViews.find((candidate) => candidate.id === action.participantId);
 		return participant ? `${participant.character.name} のプロフィールを開く` : 'プロフィールを開く';
 	}
@@ -1331,7 +1419,7 @@
 
 	function handleComposerEditorEmptyChange(isEmpty: boolean | null): void {
 		composerEditorIsEmpty = isEmpty;
-		if (isEmpty !== true) stopKeyboardHold();
+		if (isEmpty !== true) stopMovementHold();
 	}
 
 	function moveSandboxSelf(direction: Direction): void {
@@ -1769,7 +1857,7 @@
 	}
 
 	function handleProfileOpenChange(open: boolean): void {
-		if (open) stopKeyboardHold();
+		if (open) stopMovementHold();
 		if (!open) history.back();
 	}
 
@@ -2054,24 +2142,6 @@
 					style={`--field-background-image: url("${asset(FIELD_BACKGROUND_ASSET)}");`}
 					aria-hidden="true"
 				></div>
-				<div class="field-movement-layer" aria-label="Available movement cells">
-					{#each movementCells as cell (cell.direction)}
-						<button
-							class="movement-cell"
-							type="button"
-							data-movement-direction={cell.direction}
-							data-movement-position={`${cell.position.x},${cell.position.y}`}
-							aria-label={`Move ${cell.direction}`}
-							style={`left: ${cell.position.x * cellSize}px; top: ${cell.position.y * cellSize}px;`}
-							on:click={(event) => {
-								event.stopPropagation();
-								resolveFieldCellSelection(cell.position, event.currentTarget as HTMLButtonElement);
-							}}
-						>
-							<span class="movement-cell-chevron" aria-hidden="true"></span>
-						</button>
-					{/each}
-				</div>
 				<div class="trace-light-layer" aria-hidden="true">
 					{#each traceLightCells as cell (`${cell.position.x},${cell.position.y}`)}
 						{@const world = traceLightWorldPosition(cell.position, cell.occupied)}
@@ -2175,6 +2245,20 @@
 				{/if}
 			</div>
 		</div>
+		{#if pointerJoystick}
+			<div
+				class="pointer-joystick"
+				data-pointer-joystick={pointerJoystick.direction}
+				aria-hidden="true"
+				style={`left: ${pointerJoystick.center.x}px; top: ${pointerJoystick.center.y}px;`}
+			>
+				<div class="pointer-joystick-base"></div>
+				<div
+					class="pointer-joystick-thumb"
+					style={`--joystick-thumb-x: ${pointerJoystick.thumb.x}px; --joystick-thumb-y: ${pointerJoystick.thumb.y}px;`}
+				></div>
+			</div>
+		{/if}
 
 		<svg class="tail-layer" viewBox={`0 0 ${viewportSize.width} ${viewportSize.height}`} aria-hidden="true">
 			{#each positionedNormalBubbles as bubble (bubble.id)}
@@ -2769,6 +2853,7 @@
 		z-index: 2;
 		overflow: hidden;
 		background: transparent;
+		touch-action: pinch-zoom;
 	}
 
 	.speech-area {
@@ -2817,13 +2902,6 @@
 		pointer-events: none;
 	}
 
-	.field-movement-layer {
-		position: absolute;
-		inset: 0;
-		z-index: 1;
-		pointer-events: none;
-	}
-
 	.trace-light-layer {
 		position: absolute;
 		inset: 0;
@@ -2867,61 +2945,41 @@
 		outline-offset: -5px;
 	}
 
-	.movement-cell {
+	.pointer-joystick {
 		position: absolute;
-		display: grid;
-		width: var(--cell-size);
-		height: var(--cell-size);
-		box-sizing: border-box;
-		place-items: center;
-		padding: 0;
-		border: 1px solid rgba(64, 111, 96, 0.28);
-		border-radius: 4px;
-		background: rgba(120, 166, 148, 0.13);
-		box-shadow: inset 0 0 18px rgba(255, 255, 255, 0.16);
-		color: rgba(52, 101, 86, 0.68);
-		cursor: pointer;
-		font: inherit;
-		pointer-events: auto;
-		touch-action: manipulation;
-		transition: background-color 120ms ease, border-color 120ms ease;
+		z-index: 7;
+		width: 96px;
+		height: 96px;
+		transform: translate(-50%, -50%);
+		pointer-events: none;
 	}
 
-	.movement-cell:hover {
-		border-color: rgba(64, 111, 96, 0.4);
-		background: rgba(120, 166, 148, 0.2);
+	.pointer-joystick-base,
+	.pointer-joystick-thumb {
+		position: absolute;
+		border-radius: 50%;
+		pointer-events: none;
 	}
 
-	.movement-cell:active {
-		background: rgba(103, 151, 133, 0.26);
+	.pointer-joystick-base {
+		top: 0;
+		left: 0;
+		width: 96px;
+		height: 96px;
+		border: 1px solid rgba(50, 82, 70, 0.32);
+		background: rgba(221, 235, 221, 0.32);
+		box-shadow: 0 5px 18px rgba(50, 68, 56, 0.14), inset 0 0 0 1px rgba(255, 255, 255, 0.3);
 	}
 
-	.movement-cell:focus-visible {
-		outline: 3px solid #6dabb9;
-		outline-offset: -5px;
-	}
-
-	.movement-cell-chevron {
-		width: 8px;
-		height: 8px;
-		border-top: 1.5px solid currentColor;
-		border-right: 1.5px solid currentColor;
-	}
-
-	.movement-cell[data-movement-direction='up'] .movement-cell-chevron {
-		transform: translateY(2px) rotate(-45deg);
-	}
-
-	.movement-cell[data-movement-direction='right'] .movement-cell-chevron {
-		transform: translateX(-2px) rotate(45deg);
-	}
-
-	.movement-cell[data-movement-direction='down'] .movement-cell-chevron {
-		transform: translateY(-2px) rotate(135deg);
-	}
-
-	.movement-cell[data-movement-direction='left'] .movement-cell-chevron {
-		transform: translateX(2px) rotate(-135deg);
+	.pointer-joystick-thumb {
+		left: calc(50% + var(--joystick-thumb-x));
+		top: calc(50% + var(--joystick-thumb-y));
+		width: 32px;
+		height: 32px;
+		transform: translate(-50%, -50%);
+		border: 1px solid rgba(43, 77, 63, 0.48);
+		background: rgba(108, 153, 132, 0.58);
+		box-shadow: 0 3px 10px rgba(50, 68, 56, 0.18);
 	}
 
 	.field-label {

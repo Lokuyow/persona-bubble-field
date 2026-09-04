@@ -56,13 +56,8 @@ PC等ではフィールドの広い範囲を表示できる。
 
 ### 移動
 
-移動は以下とする。
-
-- 1回の操作で1マス
-- 上
-- 下
-- 左
-- 右
+1回のmovementは、隣接する1つのcellへの移動とする。移動方向はcardinal 4方向と
+diagonal 4方向の計8方向を許可する。
 
 PCでは修飾キーなしのArrowキー（ArrowUp / ArrowDown / ArrowLeft /
 ArrowRight）で移動できる。Composer editorにフォーカスしている場合は、
@@ -88,13 +83,39 @@ W/A/S/Dの長押しもArrowキーと同じmovement hold driverを使用し、1�
 既存挙動は変更しない。特に、Composer editorが完全にemptyの場合のArrow移動は
 維持する。
 
-斜め移動は行わない。
+logical movementは8-neighborとし、up / down / left / rightのcardinal 4方向と、
+up-right / down-right / down-left / up-leftのdiagonal 4方向を許可する。diagonalも
+隣接diagonal cellへの1 stepを1 movementとして扱い、2つのcardinal movementへ分解しない。
+したがってdiagonal 1回につきposition update、position publish、position slot消費、
+presence activityはいずれも1 movement分とする。
 
-pointer / touch操作では、field上のinteractive UI以外から開始できるdynamic / floating virtual joystickを使用する。joystick centerはdrag開始位置とし、finger releaseまたはpointercancelで消える。deflection magnitudeで速度は変えず、analog方向をdominant axis等で上下左右のcardinal方向へ変換する。diagonal移動は行わない。
+destination cellがfield外またはoccupiedの場合はmovementを成立させない。diagonalの
+occupancy判定はdestination cellだけを対象とし、orthogonal side cellによるcorner
+blockingは行わない。blocked diagonalをcardinal movementへfallbackまたはslideさせない。
+成立したmovementの最大レートはcardinal / diagonalで共通の1秒あたり2回とする。
 
-tapとdragはgesture thresholdで区別するが、具体的なthresholdは実装詳細とする。既存の1マス移動、最大2 movement/sec、presence、position publish、visual animationを再利用する。PCのArrow/WASD操作は維持する。
+pointer movementはPCとmobile/tabletで共通とし、mouse、pen、touchをWeb標準の
+Pointer Eventsによる同じpointer gestureとして扱う。field上のinteractive UI以外から
+開始できるdynamic / floating virtual joystickを使用する。joystickはdrag確定後だけ
+表示し、centerはdrag開始位置とする。pointer release、pointer cancel等のgesture終了時
+に消える。
 
-field上の選択はpixel targetではなくlogical cellを基本にする。selectable targetが1件なら直接そのactionを行い、2件以上ならPC/mobile共通context menuを開く。current characterは個別に表示し、multiple rootsは1つの「痕跡を調べる」とする。outside tap/clickでmenuを閉じ、movement開始時はmenuを閉じてそのmovementを続行する。menuを開いただけではconversation、reply target、draftを変更しない。
+pointerの移動方向は、cardinal 4方向とdiagonal 4方向の計8方向とする。joystickの
+方向はequal-width 45度の8方向sectorへ量子化し、deflection magnitudeで移動速度を
+変えない。pointer movementは既存の1マス移動、最大2 movement/sec、presence、position
+publish、visual animationを再利用する。
+
+tapとdragはgesture thresholdで区別するが、具体的なthresholdは実装詳細とする。
+threshold未満のpointer releaseはmovementではなくlogical-cell selectionとして扱う。
+PCのArrow/WASD操作は維持し、現時点ではcardinal 4方向の入力のままとする。
+
+field上の選択はpixel targetではなくlogical cellを基本にする。tap / clickはmovementには
+使用せず、logical-cell selection専用とする。selectable targetが1件なら直接そのactionを
+行い、2件以上ならPC/mobile共通context menuを開く。current characterは個別に表示し、
+multiple rootsは1つの「痕跡を調べる」とする。outside tap/clickでmenuを閉じる。
+movementはselectable cell actionやcontext menu itemとして提供しない。current character
+周囲の4方向movement buttonやadjacent cell movementは設けない。menuを開いただけでは
+conversation、reply target、draftを変更しない。
 
 フィールド端では停止し、反対側へループしない。
 

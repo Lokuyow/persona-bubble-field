@@ -411,6 +411,20 @@ function relayState(page: Page) {
 	}).__relayStartupTest);
 }
 
+async function dragRelayJoystick(page: Page, delta: { x: number; y: number }, startCell = { x: 5, y: 4 }): Promise<void> {
+	const start = await page.locator('.field-grid').evaluate((grid, cell) => {
+		const scene = document.querySelector<HTMLElement>('.field-scene');
+		if (!scene) throw new Error('Expected the field scene to be rendered.');
+		const rect = grid.getBoundingClientRect();
+		const cellSize = Number.parseFloat(getComputedStyle(scene).getPropertyValue('--cell-size'));
+		return { x: rect.left + (cell.x + 0.5) * cellSize, y: rect.top + (cell.y + 0.5) * cellSize };
+	}, startCell);
+	await page.mouse.move(start.x, start.y);
+	await page.mouse.down();
+	await page.mouse.move(start.x + delta.x, start.y + delta.y);
+	await page.mouse.up();
+}
+
 async function publishedMessages(page: Page) {
 	return [...new Map(
 		(await relayState(page)).state.published
@@ -506,13 +520,10 @@ async function chooseHorizontalMove(page: Page): Promise<{ key: 'ArrowLeft' | 'A
 	const position = await page.locator('.participant[data-self="true"]').getAttribute('data-position');
 	if (!position) throw new Error('Expected the Relay self participant position.');
 	const [x, y] = position.split(',').map(Number);
-	if (await page.getByRole('button', { name: 'Move right' }).count() > 0) {
+	if (x < 15) {
 		return { key: 'ArrowRight', expected: `${x + 1},${y}` };
 	}
-	if (await page.getByRole('button', { name: 'Move left' }).count() > 0) {
-		return { key: 'ArrowLeft', expected: `${x - 1},${y}` };
-	}
-	throw new Error('Expected an available horizontal move for the Relay self participant.');
+	return { key: 'ArrowLeft', expected: `${x - 1},${y}` };
 }
 
 type AvailableMove = {
@@ -524,17 +535,11 @@ async function chooseMoveToward(page: Page, target: { x: number; y: number }): P
 	const position = await page.locator('.participant[data-self="true"]').getAttribute('data-position');
 	if (!position) throw new Error('Expected the Relay self participant position.');
 	const [x, y] = position.split(',').map(Number);
-	const candidates: Array<AvailableMove & { name: string }> = [];
-	if (x < target.x) candidates.push({ key: 'ArrowRight', expected: `${x + 1},${y}`, name: 'Move right' });
-	if (x > target.x) candidates.push({ key: 'ArrowLeft', expected: `${x - 1},${y}`, name: 'Move left' });
-	if (y < target.y) candidates.push({ key: 'ArrowDown', expected: `${x},${y + 1}`, name: 'Move down' });
-	if (y > target.y) candidates.push({ key: 'ArrowUp', expected: `${x},${y - 1}`, name: 'Move up' });
-	for (const candidate of candidates) {
-		if (await page.getByRole('button', { name: candidate.name }).count() > 0) {
-			return candidate;
-		}
-	}
-	throw new Error('Expected an available move toward the Relay camera boundary.');
+	if (x < target.x) return { key: 'ArrowRight', expected: `${x + 1},${y}` };
+	if (x > target.x) return { key: 'ArrowLeft', expected: `${x - 1},${y}` };
+	if (y < target.y) return { key: 'ArrowDown', expected: `${x},${y + 1}` };
+	if (y > target.y) return { key: 'ArrowUp', expected: `${x},${y - 1}` };
+	throw new Error('Expected the Relay participant to differ from the target.');
 }
 
 function reverseMoveKey(key: AvailableMove['key']): AvailableMove['key'] {
@@ -589,14 +594,16 @@ test.describe('Relay startup', () => {
 		}).__relayStartupTest.releaseTraceRoots());
 		await expect(page.locator('[data-trace-light-position="4,2"]')).toBeVisible();
 
+		await page.evaluate(() => {
+			(window as typeof window & { __relayStartupTest: { state: { published: unknown[] } } }).__relayStartupTest.state.published.length = 0;
+		});
 		const publishedPositionIds = async () => new Set(
 			(await relayState(page)).state.published.filter((event) => event.kind === 30078).map((event) => event.id)
 		).size;
 		const positionsBefore = await publishedPositionIds();
-		await page.getByRole('button', { name: 'Move right' }).click();
-		const menu = page.getByRole('menu', { name: 'Cell actions' });
-		await expect(menu).toBeVisible();
-		await menu.locator('[data-cell-action="trace"]').click();
+		await dragRelayJoystick(page, { x: 24, y: -24 });
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '4,1');
+		await page.locator('[data-cell-position="4,2"]').click();
 		await expect(page.locator(`[data-trace-root-id="${trace.root.id}"]`)).toContainText('Relay trace root');
 		await expect(page.locator('.trace-reply-status[data-reply-refresh="loading"]')).toBeVisible();
 		await expect.poll(publishedPositionIds).toBe(positionsBefore + 1);

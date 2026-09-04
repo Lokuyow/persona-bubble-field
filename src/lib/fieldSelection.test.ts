@@ -23,11 +23,10 @@ describe('field logical-cell selection', () => {
 
 	it('builds deterministic cell actions and collapses every trace root into one action', () => {
 		expect(buildFieldCellActions({
-			participantIds: ['z', 'a'], movementDirection: 'right', hasTrace: true
+			participantIds: ['z', 'a'], hasTrace: true
 		})).toEqual([
 			{ kind: 'participant', participantId: 'a' },
 			{ kind: 'participant', participantId: 'z' },
-			{ kind: 'movement', direction: 'right' },
 			{ kind: 'trace' }
 		]);
 	});
@@ -35,8 +34,8 @@ describe('field logical-cell selection', () => {
 	it('executes one action directly and routes multiple actions through the shared menu', () => {
 		expect(resolveFieldCellActions([])).toEqual({ kind: 'none' });
 		expect(resolveFieldCellActions([{ kind: 'trace' }])).toEqual({ kind: 'direct', action: { kind: 'trace' } });
-		expect(resolveFieldCellActions([{ kind: 'movement', direction: 'left' }, { kind: 'trace' }])).toEqual({
-			kind: 'menu', actions: [{ kind: 'movement', direction: 'left' }, { kind: 'trace' }]
+		expect(resolveFieldCellActions([{ kind: 'participant', participantId: 'a' }, { kind: 'trace' }])).toEqual({
+			kind: 'menu', actions: [{ kind: 'participant', participantId: 'a' }, { kind: 'trace' }]
 		});
 	});
 });

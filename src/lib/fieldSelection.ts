@@ -2,7 +2,6 @@ import type { Bounds, Direction, FieldSize, GridPosition, WorldPoint } from './g
 
 export type FieldCellAction =
 	| Readonly<{ kind: 'participant'; participantId: string }>
-	| Readonly<{ kind: 'movement'; direction: Direction }>
 	| Readonly<{ kind: 'trace' }>;
 
 export type FieldCellActionResolution =
@@ -28,7 +27,6 @@ export function viewportPointToLogicalCell(input: Readonly<{
 
 export function buildFieldCellActions(input: Readonly<{
 	participantIds?: readonly string[];
-	movementDirection?: Direction;
 	hasTrace?: boolean;
 }>): readonly FieldCellAction[] {
 	return [
@@ -36,7 +34,6 @@ export function buildFieldCellActions(input: Readonly<{
 			kind: 'participant' as const,
 			participantId
 		})),
-		...(input.movementDirection ? [{ kind: 'movement' as const, direction: input.movementDirection }] : []),
 		...(input.hasTrace ? [{ kind: 'trace' as const }] : [])
 	];
 }

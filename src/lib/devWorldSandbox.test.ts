@@ -57,9 +57,13 @@ describe('DEV world sandbox', () => {
 
 	it.each([
 		['up', { x: 7, y: 2 }],
+		['up-right', { x: 8, y: 2 }],
 		['down', { x: 7, y: 4 }],
+		['down-right', { x: 8, y: 4 }],
 		['left', { x: 6, y: 3 }],
-		['right', { x: 8, y: 3 }]
+		['down-left', { x: 6, y: 4 }],
+		['right', { x: 8, y: 3 }],
+		['up-left', { x: 6, y: 2 }]
 	] as const)('moves one cell %s', (direction, expected) => {
 		const result = moveDevWorldSelf(createDevWorldPresence(field, 100), direction, 200);
 
