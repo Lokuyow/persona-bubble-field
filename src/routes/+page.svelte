@@ -302,6 +302,18 @@
 			visibleBounds: traceVisibleBounds
 		})
 	} : null;
+	$: traceConversationTargetVisibilityByCell = new Map(
+		[
+			...(projectedTraceParent ? [[
+				`${projectedTraceParent.speech.event.position.x},${projectedTraceParent.speech.event.position.y}`,
+				projectedTraceParent.projection.visibility
+			] as const] : []),
+			...projectedTraceReplyCells.map(({ cell, projection }) => [
+				`${cell.position.x},${cell.position.y}`,
+				projection.visibility
+			] as const)
+		]
+	);
 	$: traceNavigationPositions = [
 		...traceRootCells.map((cell) => cell.position),
 		...(traceConversationProjection?.parent ? [traceConversationProjection.parent.event.position] : []),
@@ -1405,19 +1417,23 @@
 	}
 
 	function actionsForCell(position: { x: number; y: number }): readonly FieldCellAction[] {
+		const traceTargetVisibility = traceConversationTargetVisibilityByCell.get(`${position.x},${position.y}`);
+		const traceTargetIsOnscreen = traceTargetVisibility !== 'offscreen';
 		const participantIds = participantViews
 			.filter((participant) => sameCell(participant.position, position))
 			.map((participant) => participant.id);
 		let trace: Extract<FieldCellAction, { kind: 'trace' }> | null = null;
-		if (
+		const parentRootAtCell =
 			traceConversationProjection?.parent?.kind === 'root' &&
-			sameCell(traceConversationProjection.parent.event.position, position)
-		) {
-			trace = {
-				kind: 'trace',
-				rootId: traceConversationProjection.parent.event.id,
-				behavior: 'select-current'
-			};
+			sameCell(traceConversationProjection.parent.event.position, position);
+		if (parentRootAtCell) {
+			if (traceTargetIsOnscreen) {
+				trace = {
+					kind: 'trace',
+					rootId: traceConversationProjection!.parent!.event.id,
+					behavior: 'select-current'
+				};
+			}
 		} else {
 			const rootCell = traceRootCells.find((cell) => sameCell(cell.position, position));
 			const currentIsRootCell = traceConversationProjection?.current.kind === 'root' &&
@@ -1430,7 +1446,9 @@
 		return buildFieldCellActions({
 			participantIds,
 			trace,
-			replyIds: replyNavigationItemsForCell(position).map((item) => item.reply.id)
+			replyIds: traceTargetIsOnscreen
+				? replyNavigationItemsForCell(position).map((item) => item.reply.id)
+				: []
 		});
 	}
 

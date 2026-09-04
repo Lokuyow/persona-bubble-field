@@ -348,6 +348,7 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.getByText('offscreen reply body must stay hidden')).toHaveCount(0);
 		await expect(page.locator('[data-trace-reply-offscreen-position="15,7"]')).toBeVisible();
 		await expect(page.locator('[data-trace-reply-ghost-id="' + 'a'.repeat(64) + '"]')).toHaveCount(0);
+		await expect(page.locator('[data-cell-position="15,7"]')).toHaveCount(0);
 		await expect(page.locator('[data-trace-relation-reply-id]')).toHaveCount(3);
 		expect(await page.locator('[data-trace-relation-reply-id]').first().evaluate((element) => getComputedStyle(element).pointerEvents)).toBe('none');
 
@@ -481,6 +482,13 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.locator('[data-trace-parent-id="' + '7'.repeat(64) + '"]')).toHaveCount(0);
 		await expect(page.locator('[data-trace-parent-offscreen-id="' + '7'.repeat(64) + '"]'))
 			.toHaveAttribute('data-trace-parent-direction', 'left');
+		await expect(page.locator('[data-cell-position="6,4"]')).toHaveCount(0);
+		await expect(page.locator('[data-cell-position="8,4"]')).toHaveCount(1);
+
+		for (let step = 0; step < 4; step += 1) await page.keyboard.press('ArrowLeft');
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '8,3');
+		const restoredParentCell = page.locator('[data-cell-position="6,4"]');
+		await expect(restoredParentCell).toHaveCount(1);
 	});
 
 	test('shows a finite recent-message overlay with semantic colors and existing profile focus restoration', async ({ page }) => {
