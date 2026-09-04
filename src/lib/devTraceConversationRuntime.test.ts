@@ -7,18 +7,23 @@ function root(id: string, createdAt: number, x = 1, y = 1): ParsedWorldMessage {
 	return { id, pubkey: id.padEnd(64, '0'), createdAt, content: id, speechType: 'normal', position: { x, y } };
 }
 
-function reply(id: string, rootId: string, createdAt = 3): ParsedTraceReply {
+function reply(id: string, rootId: string, createdAt = 3, options: Readonly<{
+	parentId?: string;
+	parentKind?: 42 | 1111;
+	x?: number;
+	y?: number;
+}> = {}): ParsedTraceReply {
 	return {
 		id,
 		pubkey: id.padEnd(64, 'a'),
 		createdAt,
 		content: id,
 		speechType: 'normal',
-		position: { x: 2, y: 1 },
+		position: { x: options.x ?? 2, y: options.y ?? 1 },
 		rootId,
 		rootPubkey: rootId.padEnd(64, '0'),
-		parentId: rootId,
-		parentKind: 42,
+		parentId: options.parentId ?? rootId,
+		parentKind: options.parentKind ?? 42,
 		parentPubkey: rootId.padEnd(64, '0')
 	};
 }
@@ -75,6 +80,56 @@ describe('DEV trace conversation runtime', () => {
 		f.replies = [current, other, live];
 		f.runtime.reconcileReplies(f.replies);
 		expect(f.runtime.getTraceConversationState()).toMatchObject({ replies: [current, live] });
+	});
+
+	it('selects only adjacent accepted replies in range and preserves the snapshot', () => {
+		const f = fixture();
+		const child = reply('child', 'new');
+		const grandchild = reply('grandchild', 'new', 4, {
+			parentId: child.id, parentKind: 1111, x: 2, y: 2
+		});
+		const sibling = reply('sibling', 'new', 5, { x: 1, y: 2 });
+		f.replies = [child, grandchild, sibling];
+		expect(f.runtime.openTraceConversation({ rootId: 'new', currentId: child.id })).toEqual({ kind: 'blocked' });
+		expect(f.runtime.openTraceConversation({ rootId: 'new', currentId: 'new' })).toEqual({ kind: 'opened' });
+		const before = f.runtime.getTraceConversationState();
+		expect(f.runtime.selectTraceConversationSpeech(grandchild.id)).toEqual({ kind: 'blocked' });
+		expect(f.runtime.selectTraceConversationSpeech('unknown')).toEqual({ kind: 'blocked' });
+		expect(f.runtime.getTraceConversationState()).toBe(before);
+		expect(f.runtime.selectTraceConversationSpeech(child.id)).toEqual({ kind: 'opened' });
+		expect(f.runtime.getTraceConversationState()).toMatchObject({
+			config: { rootId: 'new', currentId: child.id }, replies: [child, grandchild, sibling]
+		});
+		expect(f.runtime.openTraceConversation({ rootId: 'new', currentId: 'new' })).toEqual({ kind: 'blocked' });
+		expect(f.runtime.getTraceConversationState()).toMatchObject({ config: { currentId: child.id } });
+		expect(f.runtime.selectTraceConversationSpeech(sibling.id)).toEqual({ kind: 'blocked' });
+		expect(f.runtime.selectTraceConversationSpeech(grandchild.id)).toEqual({ kind: 'opened' });
+		expect(f.runtime.selectTraceConversationSpeech(child.id)).toEqual({ kind: 'opened' });
+		expect(f.runtime.selectTraceConversationSpeech('new')).toEqual({ kind: 'opened' });
+	});
+
+	it('blocks an out-of-range adjacent reply without changing state or presence', () => {
+		const f = fixture();
+		const far = reply('far-reply', 'new', 3, { x: 3, y: 2 });
+		f.replies = [far];
+		f.runtime.openTraceConversation({ rootId: 'new', currentId: 'new' });
+		f.setPresence.mockClear();
+		const before = f.runtime.getTraceConversationState();
+		expect(f.runtime.selectTraceConversationSpeech(far.id)).toEqual({ kind: 'blocked' });
+		expect(f.runtime.getTraceConversationState()).toBe(before);
+		expect(f.setPresence).not.toHaveBeenCalled();
+	});
+
+	it('falls back to root when the accepted snapshot loses the current reply', () => {
+		const f = fixture();
+		const child = reply('child', 'new');
+		f.replies = [child];
+		f.runtime.openTraceConversation({ rootId: 'new', currentId: 'new' });
+		f.runtime.selectTraceConversationSpeech(child.id);
+		f.runtime.reconcileReplies([]);
+		expect(f.runtime.getTraceConversationState()).toMatchObject({
+			config: { rootId: 'new', currentId: 'new' }, replies: []
+		});
 	});
 
 	it('keeps the current root when an explicit same-cell switch is out of range', () => {

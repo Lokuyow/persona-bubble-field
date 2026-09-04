@@ -344,7 +344,7 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.getByLabel('2 replies in this cell')).toBeVisible();
 		await expect(page.locator('[data-trace-reply-position="9,4"][data-trace-reply-id]')).toHaveAttribute('data-speech-type', 'shout');
 		await expect(page.locator('[data-trace-reply-position="8,4"][data-trace-reply-id]')).toHaveAttribute('data-speech-type', 'monologue');
-		await expect(page.getByText('deeper branch reply must stay hidden')).toHaveCount(0);
+		await expect(page.getByText('deeper branch reply')).toHaveCount(0);
 		await expect(page.getByText('offscreen reply body must stay hidden')).toHaveCount(0);
 		await expect(page.locator('[data-trace-reply-offscreen-position="15,7"]')).toBeVisible();
 		await expect(page.locator('[data-trace-reply-ghost-id="' + 'a'.repeat(64) + '"]')).toHaveCount(0);
@@ -392,6 +392,95 @@ test.describe('DEV World Sandbox', () => {
 		expect(await page.evaluate(() => (window as never as {
 			__traceReplyExternalCalls: { webSocketUrls: string[]; indexedDbOpen: number }
 		}).__traceReplyExternalCalls)).toEqual(externalBaseline);
+	});
+
+	test('navigates a deep DEV Trace one adjacent speech at a time through shared cell actions', async ({ page }) => {
+		await page.setViewportSize({ width: 900, height: 720 });
+		await page.emulateMedia({ reducedMotion: 'reduce' });
+		await page.goto('/?devWorld=1&devTrace=replies');
+		const hideTimeline = page.getByRole('button', { name: 'Hide Chatter' });
+		await hideTimeline.click();
+		const selectCell = async (position: string) => {
+			const cell = page.locator(`[data-cell-position="${position}"]`);
+			const box = await cell.boundingBox();
+			if (!box) throw new Error(`Expected visible logical cell ${position}.`);
+			await cell.click({ position: { x: box.width - 2, y: box.height - 2 } });
+		};
+		const selectParticipantCell = async (participantId: string) => {
+			const box = await page.locator(`[data-participant-id="${participantId}"]`).boundingBox();
+			if (!box) throw new Error(`Expected visible participant ${participantId}.`);
+			await page.mouse.click(box.x + 3, box.y + 3);
+		};
+
+		await selectCell('8,4');
+		await selectCell('6,4');
+		let menu = page.getByRole('menu', { name: 'Cell actions' });
+		await expect(menu.locator('[data-cell-action="reply"]')).toHaveCount(2);
+		await menu.locator('[data-cell-action="reply"]').first().click();
+		await expect(page.locator('[data-trace-current-reply-id="' + '7'.repeat(64) + '"]'))
+			.toContainText('newest same-cell direct reply');
+		await expect(page.locator('[data-trace-parent-id="' + '2'.repeat(64) + '"]'))
+			.toContainText('trace-only root near the viewer');
+		await expect(page.locator('[data-trace-reply-id="' + 'b'.repeat(64) + '"]'))
+			.toContainText('deeper branch reply');
+
+		await selectCell('7,4');
+		await expect(page.locator('[data-trace-current-reply-id="' + 'b'.repeat(64) + '"]'))
+			.toContainText('deeper branch reply');
+		await expect(page.locator('[data-trace-parent-id="' + '7'.repeat(64) + '"]'))
+			.toContainText('newest same-cell direct reply');
+		await expect(page.getByText('trace-only root near the viewer')).toHaveCount(0);
+		await expect(page.locator('[data-trace-reply-id="' + 'd'.repeat(64) + '"]'))
+			.toHaveAttribute('data-trace-reply-count', '2');
+
+		await selectCell('8,4');
+		menu = page.getByRole('menu', { name: 'Cell actions' });
+		const sameAuthorReplies = menu.locator('[data-cell-action="reply"]');
+		await expect(sameAuthorReplies).toHaveCount(2);
+		await expect(sameAuthorReplies.nth(0)).toHaveText(/ #1$/);
+		await expect(sameAuthorReplies.nth(1)).toHaveText(/ #2$/);
+		await expect(menu).not.toContainText('newest same-author grandchild');
+		await expect(menu).not.toContainText('older same-author grandchild');
+		await sameAuthorReplies.first().click();
+		await expect(page.locator('[data-trace-current-reply-id="' + 'd'.repeat(64) + '"]'))
+			.toContainText('newest same-author grandchild');
+		await expect(page.locator('[data-trace-parent-id="' + 'b'.repeat(64) + '"]'))
+			.toContainText('deeper branch reply');
+
+		await selectParticipantCell('f'.repeat(64));
+		menu = page.getByRole('menu', { name: 'Cell actions' });
+		await expect(menu.locator('[data-cell-action="participant"]')).toHaveCount(1);
+		await expect(menu.locator('[data-cell-action="reply"]')).toHaveCount(1);
+		await menu.locator('[data-cell-action="reply"]').click();
+		await expect(page.locator('[data-trace-current-reply-id="' + 'd'.repeat(64) + '"]')).toBeVisible();
+
+		await page.keyboard.press('ArrowRight');
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '8,3');
+		await selectParticipantCell('f'.repeat(64));
+		await page.getByRole('menu', { name: 'Cell actions' }).locator('[data-cell-action="reply"]').click();
+		await expect(page.locator('[data-trace-current-reply-id="' + 'f'.repeat(64) + '"]'))
+			.toContainText('great-grandchild reply');
+		await expect(page.locator('[data-trace-parent-id="' + 'd'.repeat(64) + '"]')).toBeVisible();
+
+		await selectCell('8,4');
+		await expect(page.locator('[data-trace-current-reply-id="' + 'd'.repeat(64) + '"]')).toBeVisible();
+		await selectCell('7,4');
+		await expect(page.locator('[data-trace-current-reply-id="' + 'b'.repeat(64) + '"]')).toBeVisible();
+		await expect(page.locator('[data-trace-reply-id="' + 'd'.repeat(64) + '"]'))
+			.toContainText('newest same-author grandchild');
+
+		await page.locator('[data-trace-current-reply-ghost-id="' + 'b'.repeat(64) + '"] .trace-ghost-profile-trigger').click();
+		await expect(profileDialog(page)).toBeVisible();
+		await page.keyboard.press('Escape');
+		await expect(profileDialog(page)).toBeHidden();
+		await expect(page.locator('[data-trace-current-reply-id="' + 'b'.repeat(64) + '"]')).toBeVisible();
+
+		await page.setViewportSize({ width: 420, height: 720 });
+		for (let step = 0; step < 4; step += 1) await page.keyboard.press('ArrowRight');
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '12,3');
+		await expect(page.locator('[data-trace-parent-id="' + '7'.repeat(64) + '"]')).toHaveCount(0);
+		await expect(page.locator('[data-trace-parent-offscreen-id="' + '7'.repeat(64) + '"]'))
+			.toHaveAttribute('data-trace-parent-direction', 'left');
 	});
 
 	test('shows a finite recent-message overlay with semantic colors and existing profile focus restoration', async ({ page }) => {

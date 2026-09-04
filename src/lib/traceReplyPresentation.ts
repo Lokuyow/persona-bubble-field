@@ -9,12 +9,28 @@ import {
 	type WorldPoint,
 	worldToScreen
 } from './geometry';
-import type { ParsedTraceReply } from './nostrProtocol';
+import type { ParsedTraceReply, ParsedWorldMessage } from './nostrProtocol';
 import type { TraceConversationState } from './traceConversation';
 
 export type TraceReplyRepresentativeState = Readonly<{
-	conversationKey: string | null;
-	representativeByCell: Readonly<Record<string, string>>;
+	rootId: string | null;
+	representativeByCurrent: Readonly<Record<string, Readonly<Record<string, string>>>>;
+}>;
+
+export type TraceSpeech =
+	| Readonly<{ kind: 'root'; event: ParsedWorldMessage }>
+	| Readonly<{ kind: 'reply'; event: ParsedTraceReply }>;
+
+export type TraceConversationProjection = Readonly<{
+	root: ParsedWorldMessage;
+	current: TraceSpeech;
+	parent: TraceSpeech | null;
+	directReplies: readonly ParsedTraceReply[];
+}>;
+
+export type NumberedTraceReply = Readonly<{
+	reply: ParsedTraceReply;
+	authorOrdinal: number | null;
 }>;
 
 export type TraceReplyCell = Readonly<{
@@ -43,8 +59,8 @@ export type TraceGhostPlacement = Readonly<{
 }>;
 
 export const EMPTY_TRACE_REPLY_REPRESENTATIVE_STATE: TraceReplyRepresentativeState = {
-	conversationKey: null,
-	representativeByCell: {}
+	rootId: null,
+	representativeByCurrent: {}
 };
 
 function cellKey(position: GridPosition): string {
@@ -56,20 +72,72 @@ function compareReplies(first: ParsedTraceReply, second: ParsedTraceReply): numb
 		(first.id < second.id ? -1 : first.id > second.id ? 1 : 0);
 }
 
-function directReplies(state: Extract<TraceConversationState, { kind: 'open' }>): readonly ParsedTraceReply[] {
-	if (state.config.currentId !== state.root.id) return [];
+function acceptedReplies(state: Extract<TraceConversationState, { kind: 'open' }>): readonly ParsedTraceReply[] {
 	const unique = new Map<string, ParsedTraceReply>();
 	for (const reply of state.replies) {
-		if (
-			reply.rootId === state.root.id &&
-			reply.parentKind === 42 &&
-			reply.parentId === state.root.id &&
-			!unique.has(reply.id)
-		) {
+		if (reply.rootId === state.root.id && !unique.has(reply.id)) {
 			unique.set(reply.id, reply);
 		}
 	}
 	return [...unique.values()].sort(compareReplies);
+}
+
+export function resolveTraceConversationProjection(
+	conversation: TraceConversationState
+): TraceConversationProjection | null {
+	if (conversation.kind === 'closed' || conversation.config.rootId !== conversation.root.id) return null;
+	const replies = acceptedReplies(conversation);
+	const replyById = new Map(replies.map((reply) => [reply.id, reply]));
+	const current: TraceSpeech | null = conversation.config.currentId === conversation.root.id
+		? { kind: 'root', event: conversation.root }
+		: (() => {
+			const reply = replyById.get(conversation.config.currentId);
+			return reply ? { kind: 'reply' as const, event: reply } : null;
+		})();
+	if (!current) return null;
+
+	let parent: TraceSpeech | null = null;
+	if (current.kind === 'reply') {
+		if (current.event.parentKind === 42) {
+			if (current.event.parentId !== conversation.root.id) return null;
+			parent = { kind: 'root', event: conversation.root };
+		} else {
+			const reply = replyById.get(current.event.parentId);
+			if (!reply) return null;
+			parent = { kind: 'reply', event: reply };
+		}
+	}
+
+	const parentKind = current.kind === 'root' ? 42 : 1111;
+	const directReplies = replies.filter((reply) =>
+		reply.parentKind === parentKind && reply.parentId === current.event.id
+	);
+	return { root: conversation.root, current, parent, directReplies };
+}
+
+export function adjacentTraceSpeech(
+	projection: TraceConversationProjection,
+	targetId: string
+): TraceSpeech | null {
+	if (projection.parent && projection.parent.event.id === targetId) return projection.parent;
+	const child = projection.directReplies.find((reply) => reply.id === targetId);
+	return child ? { kind: 'reply', event: child } : null;
+}
+
+export function numberTraceReplyAuthors(
+	replies: readonly ParsedTraceReply[]
+): readonly NumberedTraceReply[] {
+	const unique = new Map<string, ParsedTraceReply>();
+	for (const reply of replies) if (!unique.has(reply.id)) unique.set(reply.id, reply);
+	const ordered = [...unique.values()].sort(compareReplies);
+	const totals = new Map<string, number>();
+	for (const reply of ordered) totals.set(reply.pubkey, (totals.get(reply.pubkey) ?? 0) + 1);
+	const seen = new Map<string, number>();
+	return ordered.map((reply) => {
+		const ordinal = (seen.get(reply.pubkey) ?? 0) + 1;
+		seen.set(reply.pubkey, ordinal);
+		return { reply, authorOrdinal: (totals.get(reply.pubkey) ?? 0) > 1 ? ordinal : null };
+	});
 }
 
 /**
@@ -83,11 +151,14 @@ export function reconcileTraceReplyPresentation(
 	if (conversation.kind === 'closed') {
 		return { state: EMPTY_TRACE_REPLY_REPRESENTATIVE_STATE, cells: [] };
 	}
-
-	const conversationKey = `${conversation.root.id}:${conversation.config.currentId}`;
-	const preserveRepresentatives = previous.conversationKey === conversationKey;
+	const projection = resolveTraceConversationProjection(conversation);
+	if (!projection) return { state: EMPTY_TRACE_REPLY_REPRESENTATIVE_STATE, cells: [] };
+	const preserveRoot = previous.rootId === conversation.root.id;
+	const currentId = projection.current.event.id;
+	const previousByCurrent = preserveRoot ? previous.representativeByCurrent : {};
+	const previousByCell = previousByCurrent[currentId] ?? {};
 	const grouped = new Map<string, ParsedTraceReply[]>();
-	for (const reply of directReplies(conversation)) {
+	for (const reply of projection.directReplies) {
 		const key = cellKey(reply.position);
 		const replies = grouped.get(key) ?? [];
 		replies.push(reply);
@@ -96,7 +167,7 @@ export function reconcileTraceReplyPresentation(
 
 	const representativeByCell: Record<string, string> = {};
 	const cells = [...grouped.entries()].map(([key, replies]) => {
-		const retainedId = preserveRepresentatives ? previous.representativeByCell[key] : undefined;
+		const retainedId = previousByCell[key];
 		const representative = replies.find((reply) => reply.id === retainedId) ?? replies[0];
 		representativeByCell[key] = representative.id;
 		return {
@@ -110,7 +181,10 @@ export function reconcileTraceReplyPresentation(
 	);
 
 	return {
-		state: { conversationKey, representativeByCell },
+		state: {
+			rootId: conversation.root.id,
+			representativeByCurrent: { ...previousByCurrent, [currentId]: representativeByCell }
+		},
 		cells
 	};
 }

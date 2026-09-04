@@ -71,7 +71,6 @@
 	import type { ParsedTraceReply, ParsedWorldMessage } from '$lib/nostrProtocol';
 	import {
 		groupTraceRoots,
-		newestTraceRootSelection,
 		stepTraceRootSelection,
 		traceSelectionDetails
 	} from '$lib/traceInvestigation';
@@ -83,11 +82,14 @@
 	import {
 		deriveTraceReplyCharacter,
 		EMPTY_TRACE_REPLY_REPRESENTATIVE_STATE,
+		numberTraceReplyAuthors,
 		projectTraceReplyCell,
 		reconcileTraceReplyPresentation,
+		resolveTraceConversationProjection,
 		resolveTraceGhostPlacement,
 		type TraceReplyCell,
-		type TraceReplyRepresentativeState
+		type TraceReplyRepresentativeState,
+		type TraceSpeech
 	} from '$lib/traceReplyPresentation';
 	import HostOwnedComposerLite from '$lib/HostOwnedComposerLite.svelte';
 	import { resolveSpeechSubmission } from '$lib/speechSubmission';
@@ -263,15 +265,14 @@
 			participant.position.x === cell.position.x && participant.position.y === cell.position.y
 		)
 	}));
-	$: selectedTraceDetails = traceConversationState.kind === 'open'
+	$: traceConversationProjection = resolveTraceConversationProjection(traceConversationState);
+	$: selectedTraceDetails = traceConversationState.kind === 'open' &&
+		traceConversationState.config.currentId === traceConversationState.root.id
 		? traceSelectionDetails({
 			position: traceConversationState.root.position,
 			rootId: traceConversationState.root.id
 		}, traceRootCells)
 		: null;
-	$: traceOnlyCellTriggers = traceRootCells.filter((cell) =>
-		!participantViews.some((participant) => sameCell(participant.position, cell.position))
-	);
 	$: traceVisibleBounds = {
 		x: fieldAreaBounds.x,
 		y: actualFieldTop,
@@ -290,6 +291,25 @@
 	}));
 	$: offscreenTraceReplyCells = projectedTraceReplyCells.filter(({ projection }) =>
 		projection.visibility === 'offscreen'
+	);
+	$: projectedTraceParent = traceConversationProjection?.parent ? {
+		speech: traceConversationProjection.parent,
+		projection: projectTraceReplyCell({
+			position: traceConversationProjection.parent.event.position,
+			cellSize,
+			camera,
+			fieldArea: fieldAreaBounds,
+			visibleBounds: traceVisibleBounds
+		})
+	} : null;
+	$: traceNavigationPositions = [
+		...traceRootCells.map((cell) => cell.position),
+		...(traceConversationProjection?.parent ? [traceConversationProjection.parent.event.position] : []),
+		...(traceConversationProjection?.directReplies.map((reply) => reply.position) ?? [])
+	].filter((position, index, positions) => positions.findIndex((candidate) => sameCell(candidate, position)) === index);
+	$: traceOnlyCellTriggers = traceNavigationPositions.filter((position) =>
+		!participantViews.some((participant) => sameCell(participant.position, position)) &&
+		actionsForCell(position).length > 0
 	);
 
 	$: visibleParticipantIds = new Set(
@@ -392,68 +412,66 @@
 		anchor: bubble.members.length === 0 ? bubble.anchor : placedAnchorById.get(bubble.id) ?? bubble.anchor
 	}));
 	$: positionedVisibleBubbles = [...positionedNormalBubbles, ...positionedMergedBubbles];
-	$: traceGhost = traceConversationState.kind === 'open' ? (() => {
-		const root = traceConversationState.root;
-		const occupied = participantViews.some((participant) => sameCell(participant.position, root.position));
-		const center = gridToWorld(root.position, cellSize);
-		const placement = resolveTraceGhostPlacement({
-			kind: 'root', cellSize, hasParticipant: occupied, hasRootGhost: true
-		});
-		const world = { x: center.x + placement.offset.x, y: center.y + placement.offset.y };
-		return {
-			root,
-			character: deriveCharacterFromPubkey(root.pubkey, CHARACTER_CATALOG),
-			tone: traceTone(root.pubkey),
-			compact: placement.scale < 1,
-			world,
-			screen: fieldLocalToViewport(worldToScreen(world, camera), fieldAreaBounds)
-		};
-	})() : null;
+	$: traceCurrentView = traceConversationProjection ? buildTraceSpeechView(
+		traceConversationProjection.current,
+		'current',
+		fieldLocalToViewport(
+			worldToScreen(gridToWorld(traceConversationProjection.current.event.position, cellSize), camera),
+			fieldAreaBounds
+		),
+		Boolean(
+			traceConversationProjection.parent?.kind === 'root' &&
+			sameCell(traceConversationProjection.parent.event.position, traceConversationProjection.current.event.position)
+		),
+		traceConversationProjection.parent?.kind === 'root' &&
+			sameCell(traceConversationProjection.parent.event.position, traceConversationProjection.current.event.position)
+	) : null;
+	$: traceParentView = projectedTraceParent?.projection.visibility === 'onscreen' && traceCurrentView
+		? buildTraceSpeechView(
+			projectedTraceParent.speech,
+			'parent',
+			projectedTraceParent.projection.screen,
+			sameCell(projectedTraceParent.speech.event.position, traceCurrentView.event.position),
+			traceCurrentView.speech.kind === 'root' &&
+				sameCell(traceCurrentView.event.position, projectedTraceParent.speech.event.position)
+		)
+		: null;
 	$: traceReplyViews = projectedTraceReplyCells
 		.filter(({ projection }) => projection.visibility === 'onscreen')
 		.map(({ cell, projection }) => {
 			const reply = cell.representative;
-			const selfParticipant = participantViews.find((participant) =>
-				participant.id === selfProjectionId &&
-				participant.id === reply.pubkey &&
-				participant.status === 'active' &&
-				sameCell(participant.position, reply.position)
+			const collidesWithCurrent = Boolean(traceCurrentView && sameCell(traceCurrentView.event.position, reply.position));
+			const collidesWithParent = Boolean(traceParentView && sameCell(traceParentView.event.position, reply.position));
+			const rootCollision = Boolean(
+				(traceCurrentView?.speech.kind === 'root' && collidesWithCurrent) ||
+				(traceParentView?.speech.kind === 'root' && collidesWithParent)
 			);
-			const hasParticipant = participantViews.some((participant) => sameCell(participant.position, reply.position));
-			const hasRootGhost = Boolean(traceGhost && sameCell(traceGhost.root.position, reply.position));
-			const placement = resolveTraceGhostPlacement({
-				kind: 'reply', cellSize, hasParticipant, hasRootGhost
-			});
-			const center = gridToWorld(reply.position, cellSize);
-			const world = { x: center.x + placement.offset.x, y: center.y + placement.offset.y };
-			const ghostScreen = {
-				x: projection.screen.x + placement.offset.x,
-				y: projection.screen.y + placement.offset.y
-			};
+			const view = buildTraceSpeechView(
+				{ kind: 'reply', event: reply },
+				'child',
+				projection.screen,
+				collidesWithCurrent || collidesWithParent,
+				rootCollision
+			);
 			return {
+				...view,
 				cell,
-				reply,
-				character: deriveTraceReplyCharacter(reply, CHARACTER_CATALOG),
-				tone: traceTone(reply.pubkey),
-				compact: placement.scale < 1,
-				world,
-				screen: selfParticipant ? projection.screen : ghostScreen,
-				tailTarget: selfParticipant
-					? tailTarget(selfParticipant)
-					: { x: ghostScreen.x, y: ghostScreen.y - cellSize * (placement.scale < 1 ? 0.29 : 0.5) - 4 },
-				ghost: selfParticipant ? null : { world, screen: ghostScreen }
+				reply
 			};
 		});
 	$: traceReplyGhosts = traceReplyViews
 		.filter((view): view is typeof view & { ghost: NonNullable<typeof view.ghost> } => view.ghost !== null)
 		.map((view) => ({ ...view, world: view.ghost.world, screen: view.ghost.screen }));
-	$: traceBubble = traceGhost ? (() => {
-		const id = `trace-root-${traceGhost.root.id}`;
+	$: traceBubble = traceCurrentView ? (() => {
+		const event = traceCurrentView.event;
+		const id = traceCurrentView.speech.kind === 'root'
+			? `trace-root-${event.id}`
+			: `trace-current-reply-${event.id}`;
 		const size = bubbleSizes[id] ?? DEFAULT_BUBBLE_SIZES.normal;
-		const shape = specialBubbleShape(traceGhost.root.speechType, id, size);
+		const shape = specialBubbleShape(event.speechType, id, size);
 		const preferred = normalBubblePreferredAnchor(
-			traceGhost.screen.x,
-			traceGhost.root.position.y,
+			traceCurrentView.screen.x,
+			event.position.y,
 			field.rows,
 			size,
 			bubbleSafeBounds
@@ -463,7 +481,7 @@
 				id,
 				preferred: clampToBounds(preferred, size, bubbleSafeBounds),
 				size,
-				visualBounds: traceGhost.root.speechType === 'shout' ? undefined : shape?.bounds
+				visualBounds: event.speechType === 'shout' ? undefined : shape?.bounds
 			}],
 			positionedVisibleBubbles.map((bubble) => ({
 				id: bubble.id,
@@ -478,13 +496,49 @@
 			bubbleVisualRegion
 		);
 		return {
+			...traceCurrentView,
 			id,
-			root: traceGhost.root,
-			tone: traceGhost.tone,
 			size,
 			shape,
 			anchor: placement?.anchor ?? preferred
 		};
+	})() : null;
+	$: traceParentBubble = traceParentView ? (() => {
+		const event = traceParentView.event;
+		const id = `trace-parent-${traceParentView.speech.kind}-${event.id}`;
+		const size = bubbleSizes[id] ?? DEFAULT_BUBBLE_SIZES.normal;
+		const shape = specialBubbleShape(event.speechType, id, size);
+		const preferred = normalBubblePreferredAnchor(
+			traceParentView.screen.x,
+			event.position.y,
+			field.rows,
+			size,
+			bubbleSafeBounds
+		);
+		const [placement] = placeBubblesWithFixed(
+			[{
+				id,
+				preferred: clampToBounds(preferred, size, bubbleSafeBounds),
+				size,
+				visualBounds: event.speechType === 'shout' ? undefined : shape?.bounds
+			}],
+			[
+				...positionedVisibleBubbles.map((bubble) => ({
+					id: bubble.id, preferred: bubble.anchor, anchor: bubble.anchor, size: bubble.size,
+					visualBounds: bubble.speechType === 'shout' ? undefined : bubble.shape?.bounds
+				})),
+				...(traceBubble ? [{
+					id: traceBubble.id, preferred: traceBubble.anchor, anchor: traceBubble.anchor,
+					size: traceBubble.size,
+					visualBounds: traceBubble.event.speechType === 'shout' ? undefined : traceBubble.shape?.bounds
+				}] : [])
+			],
+			bubbleSafeBounds,
+			cellSize,
+			undefined,
+			bubbleVisualRegion
+		);
+		return { ...traceParentView, id, size, shape, anchor: placement?.anchor ?? preferred };
 	})() : null;
 	$: traceReplyBubbleCandidates = traceReplyViews.map((ghost) => {
 		const id = `trace-reply-${ghost.reply.id}`;
@@ -525,7 +579,14 @@
 				preferred: traceBubble.anchor,
 				anchor: traceBubble.anchor,
 				size: traceBubble.size,
-				visualBounds: traceBubble.root.speechType === 'shout' ? undefined : traceBubble.shape?.bounds
+				visualBounds: traceBubble.event.speechType === 'shout' ? undefined : traceBubble.shape?.bounds
+			}] : []),
+			...(traceParentBubble ? [{
+				id: traceParentBubble.id,
+				preferred: traceParentBubble.anchor,
+				anchor: traceParentBubble.anchor,
+				size: traceParentBubble.size,
+				visualBounds: traceParentBubble.event.speechType === 'shout' ? undefined : traceParentBubble.shape?.bounds
 			}] : [])
 		],
 		bubbleSafeBounds,
@@ -1330,21 +1391,51 @@
 		if (!traceConversationController) setTraceConversation({ kind: 'closed' });
 	}
 
+	function replyNavigationItemsForCell(position: { x: number; y: number }) {
+		if (!traceConversationProjection) return [];
+		const replies = [
+			...(traceConversationProjection.parent?.kind === 'reply'
+				? [traceConversationProjection.parent.event]
+				: []),
+			...traceConversationProjection.directReplies
+		].filter((reply) =>
+			reply.id !== traceConversationProjection?.current.event.id && sameCell(reply.position, position)
+		);
+		return numberTraceReplyAuthors(replies);
+	}
+
 	function actionsForCell(position: { x: number; y: number }): readonly FieldCellAction[] {
 		const participantIds = participantViews
 			.filter((participant) => sameCell(participant.position, position))
 			.map((participant) => participant.id);
+		let trace: Extract<FieldCellAction, { kind: 'trace' }> | null = null;
+		if (
+			traceConversationProjection?.parent?.kind === 'root' &&
+			sameCell(traceConversationProjection.parent.event.position, position)
+		) {
+			trace = {
+				kind: 'trace',
+				rootId: traceConversationProjection.parent.event.id,
+				behavior: 'select-current'
+			};
+		} else {
+			const rootCell = traceRootCells.find((cell) => sameCell(cell.position, position));
+			const currentIsRootCell = traceConversationProjection?.current.kind === 'root' &&
+				sameCell(traceConversationProjection.current.event.position, position);
+			const root = currentIsRootCell
+				? undefined
+				: rootCell?.roots.find((candidate) => candidate.id !== traceConversationProjection?.root.id);
+			if (root) trace = { kind: 'trace', rootId: root.id, behavior: 'open-root' };
+		}
 		return buildFieldCellActions({
 			participantIds,
-			hasTrace: traceRootCells.some((cell) => sameCell(cell.position, position))
+			trace,
+			replyIds: replyNavigationItemsForCell(position).map((item) => item.reply.id)
 		});
 	}
 
-	function investigateTraceCell(position: { x: number; y: number }): void {
-		const cell = traceRootCells.find((candidate) => sameCell(candidate.position, position));
-		const selection = cell ? newestTraceRootSelection(cell) : null;
-		if (!selection) return;
-		traceConversationController?.openTraceConversation({ rootId: selection.rootId, currentId: selection.rootId });
+	function investigateTraceRoot(rootId: string): void {
+		traceConversationController?.openTraceConversation({ rootId, currentId: rootId });
 	}
 
 	function executeFieldCellAction(
@@ -1354,7 +1445,15 @@
 	): void {
 		closeFieldActionMenu();
 		if (action.kind === 'trace') {
-			investigateTraceCell(position);
+			if (action.behavior === 'select-current') {
+				traceConversationController?.selectTraceConversationSpeech(action.rootId);
+			} else {
+				investigateTraceRoot(action.rootId);
+			}
+			return;
+		}
+		if (action.kind === 'reply') {
+			traceConversationController?.selectTraceConversationSpeech(action.replyId);
 			return;
 		}
 		const participant = participantViews.find((candidate) => candidate.id === action.participantId);
@@ -1470,6 +1569,14 @@
 
 	function fieldActionLabel(action: FieldCellAction): string {
 		if (action.kind === 'trace') return '痕跡を調べる';
+		if (action.kind === 'reply') {
+			const item = fieldActionMenu
+				? replyNavigationItemsForCell(fieldActionMenu.position).find((candidate) => candidate.reply.id === action.replyId)
+				: undefined;
+			if (!item) return '返信を調べる';
+			const character = deriveTraceReplyCharacter(item.reply, CHARACTER_CATALOG);
+			return `${character.name}${item.authorOrdinal === null ? '' : ` #${item.authorOrdinal}`}`;
+		}
 		const participant = participantViews.find((candidate) => candidate.id === action.participantId);
 		return participant ? `${participant.character.name} のプロフィールを開く` : 'プロフィールを開く';
 	}
@@ -1805,8 +1912,23 @@
 			}),
 			devTraceReply({
 				id: 'b'.repeat(64), pubkey: 'b'.repeat(64), createdAt: now,
-				content: 'deeper branch reply must stay hidden', speechType: 'normal', position: { x: 7, y: 4 },
+				content: 'deeper branch reply', speechType: 'normal', position: { x: 7, y: 4 },
 				parentId: sameCellNewest.id, parentKind: 1111, parentPubkey: sameCellNewest.pubkey
+			}),
+			devTraceReply({
+				id: 'd'.repeat(64), pubkey: 'd'.repeat(64), createdAt: now + 2,
+				content: 'newest same-author grandchild', speechType: 'shout', position: { x: 8, y: 4 },
+				parentId: 'b'.repeat(64), parentKind: 1111, parentPubkey: 'b'.repeat(64)
+			}),
+			devTraceReply({
+				id: 'e'.repeat(64), pubkey: 'd'.repeat(64), createdAt: now + 1,
+				content: 'older same-author grandchild', speechType: 'normal', position: { x: 8, y: 4 },
+				parentId: 'b'.repeat(64), parentKind: 1111, parentPubkey: 'b'.repeat(64)
+			}),
+			devTraceReply({
+				id: 'f'.repeat(64), pubkey: 'e'.repeat(64), createdAt: now + 3,
+				content: 'great-grandchild reply', speechType: 'monologue', position: { x: 9, y: 4 },
+				parentId: 'd'.repeat(64), parentKind: 1111, parentPubkey: 'd'.repeat(64)
 			})
 		]);
 	}
@@ -2208,6 +2330,53 @@
 		};
 	}
 
+	function buildTraceSpeechView(
+		speech: TraceSpeech,
+		role: 'current' | 'parent' | 'child',
+		baseScreen: WorldPoint,
+		hasTraceCollision: boolean,
+		hasRootGhost: boolean
+	) {
+		const event = speech.event;
+		const selfParticipant = speech.kind === 'reply'
+			? participantViews.find((participant) =>
+				participant.id === selfProjectionId &&
+				participant.id === event.pubkey &&
+				participant.status === 'active' &&
+				sameCell(participant.position, event.position)
+			)
+			: undefined;
+		const hasParticipant = hasTraceCollision || participantViews.some((participant) =>
+			sameCell(participant.position, event.position)
+		);
+		const placement = resolveTraceGhostPlacement({
+			kind: role === 'parent' ? 'root' : speech.kind,
+			cellSize,
+			hasParticipant,
+			hasRootGhost
+		});
+		const center = gridToWorld(event.position, cellSize);
+		const world = { x: center.x + placement.offset.x, y: center.y + placement.offset.y };
+		const ghostScreen = {
+			x: baseScreen.x + placement.offset.x,
+			y: baseScreen.y + placement.offset.y
+		};
+		return {
+			speech,
+			role,
+			event,
+			character: deriveCharacterFromPubkey(event.pubkey, CHARACTER_CATALOG),
+			tone: traceTone(event.pubkey),
+			compact: placement.scale < 1,
+			world,
+			screen: selfParticipant ? baseScreen : ghostScreen,
+			tailTarget: selfParticipant
+				? tailTarget(selfParticipant)
+				: { x: ghostScreen.x, y: ghostScreen.y - cellSize * (placement.scale < 1 ? 0.29 : 0.5) - 4 },
+			ghost: selfParticipant ? null : { world, screen: ghostScreen }
+		};
+	}
+
 	function tailGeometry(start: WorldPoint, target: WorldPoint, width = 11, overlap = 2, bodyExtension = 0) {
 		const dx = target.x - start.x;
 		const dy = target.y - start.y;
@@ -2371,16 +2540,16 @@
 					{/each}
 				</div>
 				<div class="field-cell-selection-layer" aria-label="Trace investigation cells">
-					{#each traceOnlyCellTriggers as cell (`${cell.position.x},${cell.position.y}`)}
+					{#each traceOnlyCellTriggers as position (`${position.x},${position.y}`)}
 						<button
 							class="field-cell-selection-trigger"
 							type="button"
-							data-cell-position={`${cell.position.x},${cell.position.y}`}
+							data-cell-position={`${position.x},${position.y}`}
 							aria-label="痕跡を調べる"
-							style={`left: ${cell.position.x * cellSize}px; top: ${cell.position.y * cellSize}px;`}
+							style={`left: ${position.x * cellSize}px; top: ${position.y * cellSize}px;`}
 							on:click={(event) => {
 								event.stopPropagation();
-								resolveFieldCellSelection(cell.position, event.currentTarget as HTMLButtonElement);
+								resolveFieldCellSelection(position, event.currentTarget as HTMLButtonElement);
 							}}
 						></button>
 					{/each}
@@ -2415,27 +2584,52 @@
 						</button>
 					</div>
 				{/each}
-				{#if traceGhost}
+				{#if traceCurrentView?.ghost}
 					<div
-						class:trace-ghost-compact={traceGhost.compact}
+						class:trace-ghost-compact={traceCurrentView.compact}
 						class="trace-ghost"
-						data-trace-ghost-root-id={traceGhost.root.id}
-						style={`left: ${traceGhost.world.x}px; top: ${traceGhost.world.y}px;`}
+						data-trace-ghost-root-id={traceCurrentView.speech.kind === 'root' ? traceCurrentView.event.id : undefined}
+						data-trace-current-reply-ghost-id={traceCurrentView.speech.kind === 'reply' ? traceCurrentView.event.id : undefined}
+						style={`left: ${traceCurrentView.world.x}px; top: ${traceCurrentView.world.y}px;`}
 					>
 						<button
 							class="trace-ghost-profile-trigger"
 							type="button"
-							aria-label={`${traceGhost.character.name} のプロフィールを開く`}
+							aria-label={`${traceCurrentView.character.name} のプロフィールを開く`}
 							on:click={(event) => {
 								event.stopPropagation();
-								openProfile(traceGhost.character.characterId, event.currentTarget);
+								openProfile(traceCurrentView.character.characterId, event.currentTarget);
 							}}
 						>
-							<Avatar.Root class={`avatar avatar-${traceGhost.tone}`}>
-								<Avatar.Image src={asset(`/${traceGhost.character.picture}`)} alt="" />
-								<Avatar.Fallback>{traceGhost.character.name.slice(0, 1)}</Avatar.Fallback>
+							<Avatar.Root class={`avatar avatar-${traceCurrentView.tone}`}>
+								<Avatar.Image src={asset(`/${traceCurrentView.character.picture}`)} alt="" />
+								<Avatar.Fallback>{traceCurrentView.character.name.slice(0, 1)}</Avatar.Fallback>
 							</Avatar.Root>
-							<span class="trace-ghost-name" aria-hidden="true">{traceGhost.character.name}</span>
+							<span class="trace-ghost-name" aria-hidden="true">{traceCurrentView.character.name}</span>
+						</button>
+					</div>
+				{/if}
+				{#if traceParentView?.ghost}
+					<div
+						class:trace-ghost-compact={traceParentView.compact}
+						class="trace-ghost trace-parent-ghost"
+						data-trace-parent-ghost-id={traceParentView.event.id}
+						style={`left: ${traceParentView.world.x}px; top: ${traceParentView.world.y}px;`}
+					>
+						<button
+							class="trace-ghost-profile-trigger"
+							type="button"
+							aria-label={`${traceParentView.character.name} のプロフィールを開く`}
+							on:click={(event) => {
+								event.stopPropagation();
+								openProfile(traceParentView.character.characterId, event.currentTarget);
+							}}
+						>
+							<Avatar.Root class={`avatar avatar-${traceParentView.tone}`}>
+								<Avatar.Image src={asset(`/${traceParentView.character.picture}`)} alt="" />
+								<Avatar.Fallback>{traceParentView.character.name.slice(0, 1)}</Avatar.Fallback>
+							</Avatar.Root>
+							<span class="trace-ghost-name" aria-hidden="true">{traceParentView.character.name}</span>
 						</button>
 					</div>
 				{/if}
@@ -2472,7 +2666,7 @@
 						aria-label="Cell actions"
 						style={`left: ${(fieldActionMenu.position.x + 0.5) * cellSize}px; top: ${(fieldActionMenu.position.y + 0.5) * cellSize}px;`}
 					>
-						{#each fieldActionMenu.actions as action, index (`${action.kind}-${index}`)}
+					{#each fieldActionMenu.actions as action, index (`${action.kind}-${action.kind === 'participant' ? action.participantId : action.kind === 'trace' ? action.rootId : action.replyId}-${index}`)}
 							<button
 								type="button"
 								role="menuitem"
@@ -2503,7 +2697,7 @@
 		{/if}
 
 		<svg class="tail-layer" viewBox={`0 0 ${viewportSize.width} ${viewportSize.height}`} aria-hidden="true">
-			{#if traceBubble && offscreenTraceReplyCells.length > 0}
+			{#if traceBubble && (offscreenTraceReplyCells.length > 0 || projectedTraceParent?.projection.visibility === 'offscreen')}
 				<defs>
 					<marker id="trace-offscreen-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
 						<path class="trace-offscreen-arrowhead" d="M 0 0 L 8 4 L 0 8 z" />
@@ -2511,12 +2705,27 @@
 				</defs>
 			{/if}
 			{#if traceBubble}
-				{@const rootCenter = bubbleCenter(traceBubble.anchor, traceBubble.size)}
+				{@const currentCenter = bubbleCenter(traceBubble.anchor, traceBubble.size)}
+				{#if traceParentBubble}
+					<path
+						class="trace-relation-connector trace-parent-connector"
+						data-trace-parent-relation-id={traceParentBubble.event.id}
+						d={traceRelationPath(bubbleCenter(traceParentBubble.anchor, traceParentBubble.size), currentCenter)}
+					/>
+				{:else if projectedTraceParent?.projection.visibility === 'offscreen' && projectedTraceParent.projection.edge}
+					<path
+						class="trace-relation-connector trace-offscreen-connector trace-parent-offscreen-connector"
+						data-trace-parent-offscreen-id={projectedTraceParent.speech.event.id}
+						data-trace-parent-direction={projectedTraceParent.projection.edge.direction}
+						d={traceRelationPath(currentCenter, projectedTraceParent.projection.edge.point)}
+						marker-end="url(#trace-offscreen-arrow)"
+					/>
+				{/if}
 				{#each traceReplyBubbles as bubble (bubble.id)}
 					<path
 						class="trace-relation-connector"
 						data-trace-relation-reply-id={bubble.reply.id}
-						d={traceRelationPath(rootCenter, bubbleCenter(bubble.anchor, bubble.size))}
+						d={traceRelationPath(currentCenter, bubbleCenter(bubble.anchor, bubble.size))}
 					/>
 				{/each}
 				{#each offscreenTraceReplyCells as item (`${item.cell.position.x},${item.cell.position.y}`)}
@@ -2525,7 +2734,7 @@
 							class="trace-relation-connector trace-offscreen-connector"
 							data-trace-reply-offscreen-position={`${item.cell.position.x},${item.cell.position.y}`}
 							data-trace-reply-direction={item.projection.edge.direction}
-							d={traceRelationPath(rootCenter, item.projection.edge.point)}
+							d={traceRelationPath(currentCenter, item.projection.edge.point)}
 							marker-end="url(#trace-offscreen-arrow)"
 						/>
 					{/if}
@@ -2547,12 +2756,17 @@
 					<path class={`tail-outline tone-${bubble.tone}`} data-tail-participant-id={member.id} d={tail.outlinePath} />
 				{/each}
 			{/each}
-			{#if traceBubble && traceGhost}
+			{#if traceBubble}
 				{@const start = tailStart(traceBubble.anchor, traceBubble.size)}
-				{@const target = { x: traceGhost.screen.x, y: traceGhost.screen.y - cellSize / 2 - 4 }}
-				{@const tail = tailGeometry(start, target, 11, 2, specialTailExtension(traceBubble.root.speechType))}
-				<polygon class={`tail trace-tail tone-${traceBubble.tone}`} data-trace-tail-root-id={traceBubble.root.id} points={tail.points} />
-				<path class={`tail-outline trace-tail-outline tone-${traceBubble.tone}`} data-trace-tail-root-id={traceBubble.root.id} d={tail.outlinePath} />
+				{@const tail = tailGeometry(start, traceBubble.tailTarget, 11, 2, specialTailExtension(traceBubble.event.speechType))}
+				<polygon class={`tail trace-tail tone-${traceBubble.tone}`} data-trace-tail-root-id={traceBubble.speech.kind === 'root' ? traceBubble.event.id : undefined} data-trace-tail-current-reply-id={traceBubble.speech.kind === 'reply' ? traceBubble.event.id : undefined} data-trace-tail-target={`${traceBubble.tailTarget.x},${traceBubble.tailTarget.y}`} points={tail.points} />
+				<path class={`tail-outline trace-tail-outline tone-${traceBubble.tone}`} data-trace-tail-root-id={traceBubble.speech.kind === 'root' ? traceBubble.event.id : undefined} data-trace-tail-current-reply-id={traceBubble.speech.kind === 'reply' ? traceBubble.event.id : undefined} data-trace-tail-target={`${traceBubble.tailTarget.x},${traceBubble.tailTarget.y}`} d={tail.outlinePath} />
+			{/if}
+			{#if traceParentBubble}
+				{@const start = tailStart(traceParentBubble.anchor, traceParentBubble.size)}
+				{@const tail = tailGeometry(start, traceParentBubble.tailTarget, 11, 2, specialTailExtension(traceParentBubble.event.speechType))}
+				<polygon class={`tail trace-tail trace-parent-tail tone-${traceParentBubble.tone}`} data-trace-tail-parent-id={traceParentBubble.event.id} points={tail.points} />
+				<path class={`tail-outline trace-tail-outline trace-parent-tail-outline tone-${traceParentBubble.tone}`} data-trace-tail-parent-id={traceParentBubble.event.id} d={tail.outlinePath} />
 			{/if}
 			{#each traceReplyBubbles as bubble (bubble.id)}
 				{@const start = tailStart(bubble.anchor, bubble.size)}
@@ -2663,24 +2877,54 @@
 					{/if}
 				</div>
 			{/each}
-			{#if traceBubble && traceGhost}
+			{#if traceParentBubble}
+				{@const parentTail = tailGeometry(tailStart(traceParentBubble.anchor, traceParentBubble.size), traceParentBubble.tailTarget, 11, 2, specialTailExtension(traceParentBubble.event.speechType))}
+				<div
+					use:observeBubble={traceParentBubble.id}
+					class={`bubble bubble-normal trace-root-bubble trace-parent-bubble tone-${traceParentBubble.tone}${traceParentBubble.event.speechType !== 'normal' ? ' speech-bubble-special' : ''}`}
+					data-bubble-id={traceParentBubble.id}
+					data-trace-parent-id={traceParentBubble.event.id}
+					data-trace-parent-kind={traceParentBubble.speech.kind}
+					data-speech-type={traceParentBubble.event.speechType}
+					style={`--tail-seam-offset-x: ${parentTail.seamOffsetX}px; transform: translate3d(${traceParentBubble.anchor.x}px, ${traceParentBubble.anchor.y}px, 0);`}
+				>
+					{#if traceParentBubble.event.speechType !== 'normal'}
+						{@const shape = traceParentBubble.shape}
+						{@const outlineMaskId = speechOutlineMaskId(traceParentBubble.id)}
+						<svg class="bubble-surface" data-speech-surface={traceParentBubble.event.speechType} viewBox={`${shape?.bounds.x ?? 0} ${shape?.bounds.y ?? 0} ${shape?.bounds.width ?? traceParentBubble.size.width} ${shape?.bounds.height ?? traceParentBubble.size.height}`} style={shape ? bubbleSurfaceStyle(shape) : ''} aria-hidden="true">
+							<defs>
+								<mask id={outlineMaskId} maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x={shape?.bounds.x ?? 0} y={shape?.bounds.y ?? 0} width={shape?.bounds.width ?? traceParentBubble.size.width} height={shape?.bounds.height ?? traceParentBubble.size.height}>
+									<rect x={shape?.bounds.x ?? 0} y={shape?.bounds.y ?? 0} width={shape?.bounds.width ?? traceParentBubble.size.width} height={shape?.bounds.height ?? traceParentBubble.size.height} fill="white" />
+									<polygon data-tail-opening={traceParentBubble.event.id} points={tailOutlineOpeningPoints(parentTail, traceParentBubble.anchor)} fill="black" />
+								</mask>
+							</defs>
+							<path class="bubble-surface-fill trace-bubble-surface-fill" d={shape?.path ?? ''} />
+							<path class="bubble-surface-outline trace-bubble-surface-outline" d={shape?.path ?? ''} mask={`url(#${outlineMaskId})`} />
+						</svg>
+					{/if}
+					<span class="bubble-content">{traceParentBubble.event.content}</span>
+					{#if bubbleOverflowById[traceParentBubble.id]}<span class="bubble-ellipsis" aria-hidden="true">…</span>{/if}
+				</div>
+			{/if}
+			{#if traceBubble}
+				{@const currentTail = tailGeometry(tailStart(traceBubble.anchor, traceBubble.size), traceBubble.tailTarget, 11, 2, specialTailExtension(traceBubble.event.speechType))}
 				<div
 					use:observeBubble={traceBubble.id}
-					class={`bubble bubble-normal trace-root-bubble tone-${traceBubble.tone}${traceBubble.root.speechType !== 'normal' ? ' speech-bubble-special' : ''}`}
+					class={`bubble bubble-normal trace-root-bubble trace-current-bubble tone-${traceBubble.tone}${traceBubble.event.speechType !== 'normal' ? ' speech-bubble-special' : ''}`}
 					data-bubble-id={traceBubble.id}
-					data-trace-root-id={traceBubble.root.id}
-					data-speech-type={traceBubble.root.speechType}
-					style={`transform: translate3d(${traceBubble.anchor.x}px, ${traceBubble.anchor.y}px, 0);`}
+					data-trace-root-id={traceBubble.speech.kind === 'root' ? traceBubble.event.id : undefined}
+					data-trace-current-reply-id={traceBubble.speech.kind === 'reply' ? traceBubble.event.id : undefined}
+					data-trace-current-id={traceBubble.event.id}
+					data-trace-current-kind={traceBubble.speech.kind}
+					data-speech-type={traceBubble.event.speechType}
+					style={`--tail-seam-offset-x: ${currentTail.seamOffsetX}px; transform: translate3d(${traceBubble.anchor.x}px, ${traceBubble.anchor.y}px, 0);`}
 				>
-					{#if traceBubble.root.speechType !== 'normal'}
+					{#if traceBubble.event.speechType !== 'normal'}
 						{@const shape = traceBubble.shape}
 						{@const outlineMaskId = speechOutlineMaskId(traceBubble.id)}
-						{@const start = tailStart(traceBubble.anchor, traceBubble.size)}
-						{@const target = { x: traceGhost.screen.x, y: traceGhost.screen.y - cellSize / 2 - 4 }}
-						{@const tail = tailGeometry(start, target, 11, 2, SPECIAL_TAIL_BODY_EXTENSION)}
 						<svg
 							class="bubble-surface"
-							data-speech-surface={traceBubble.root.speechType}
+							data-speech-surface={traceBubble.event.speechType}
 							viewBox={`${shape?.bounds.x ?? 0} ${shape?.bounds.y ?? 0} ${shape?.bounds.width ?? traceBubble.size.width} ${shape?.bounds.height ?? traceBubble.size.height}`}
 							style={shape ? bubbleSurfaceStyle(shape) : ''}
 							aria-hidden="true"
@@ -2688,14 +2932,14 @@
 							<defs>
 								<mask id={outlineMaskId} maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x={shape?.bounds.x ?? 0} y={shape?.bounds.y ?? 0} width={shape?.bounds.width ?? traceBubble.size.width} height={shape?.bounds.height ?? traceBubble.size.height}>
 									<rect x={shape?.bounds.x ?? 0} y={shape?.bounds.y ?? 0} width={shape?.bounds.width ?? traceBubble.size.width} height={shape?.bounds.height ?? traceBubble.size.height} fill="white" />
-									<polygon data-tail-opening={traceBubble.root.id} points={tailOutlineOpeningPoints(tail, traceBubble.anchor)} fill="black" />
+									<polygon data-tail-opening={traceBubble.event.id} points={tailOutlineOpeningPoints(currentTail, traceBubble.anchor)} fill="black" />
 								</mask>
 							</defs>
 							<path class="bubble-surface-fill trace-bubble-surface-fill" d={shape?.path ?? ''} />
 							<path class="bubble-surface-outline trace-bubble-surface-outline" d={shape?.path ?? ''} mask={`url(#${outlineMaskId})`} />
 						</svg>
 					{/if}
-					<span class="bubble-content">{traceBubble.root.content}</span>
+					<span class="bubble-content">{traceBubble.event.content}</span>
 					{#if bubbleOverflowById[traceBubble.id]}
 						<span class="bubble-ellipsis" aria-hidden="true">…</span>
 					{/if}
@@ -3426,6 +3670,7 @@
 		transform: translate(-50%, -50%);
 		opacity: 0.58;
 		filter: saturate(0.72);
+		pointer-events: none;
 	}
 
 	.trace-ghost-compact {
@@ -3443,14 +3688,28 @@
 	}
 
 	.trace-ghost-profile-trigger {
-		position: relative;
+		position: absolute;
+		top: 50%;
+		left: 50%;
 		display: block;
-		width: 100%;
-		height: 100%;
+		width: calc(100% - 8px);
+		height: calc(100% - 8px);
 		padding: 0;
 		border: 0;
 		background: transparent;
 		cursor: pointer;
+		pointer-events: auto;
+		transform: translate(-50%, -50%);
+	}
+
+	.trace-ghost-profile-trigger :global(.avatar) {
+		width: 100%;
+		height: 100%;
+	}
+
+	.trace-ghost-compact .trace-ghost-profile-trigger {
+		width: 100%;
+		height: 100%;
 	}
 
 	.trace-ghost-profile-trigger:focus-visible {
@@ -3472,6 +3731,7 @@
 		color: #596662;
 		font-size: 9px;
 		font-weight: 700;
+		pointer-events: none;
 		white-space: nowrap;
 		text-overflow: ellipsis;
 	}

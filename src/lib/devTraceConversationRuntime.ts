@@ -12,6 +12,10 @@ import type {
 	TraceConversationOpenResult,
 	TraceConversationState
 } from './traceConversation';
+import {
+	adjacentTraceSpeech,
+	resolveTraceConversationProjection
+} from './traceReplyPresentation';
 
 export type DevTraceConversationRuntime = TraceConversationController & Readonly<{
 	reconcileEffectiveRoots(roots: readonly ParsedWorldMessage[]): void;
@@ -51,9 +55,9 @@ export function createDevTraceConversationRuntime(options: Readonly<{
 	function openTraceConversation(config: TraceConversationConfig): TraceConversationOpenResult {
 		if (disposed) return { kind: 'unavailable' };
 		const root = options.getEffectiveRoots().find((candidate) => candidate.id === config.rootId);
-		if (!root) return { kind: 'blocked' };
-		if (state.kind === 'open' && state.root.id === root.id && state.config.currentId === config.currentId) {
-			return { kind: 'opened' };
+		if (!root || config.currentId !== root.id) return { kind: 'blocked' };
+		if (state.kind === 'open' && state.root.id === root.id) {
+			return state.config.currentId === config.currentId ? { kind: 'opened' } : { kind: 'blocked' };
 		}
 		const sameCellSwitch = state.kind === 'open' && state.root.id !== root.id &&
 			sameGridPosition(state.root.position, root.position);
@@ -68,6 +72,30 @@ export function createDevTraceConversationRuntime(options: Readonly<{
 		if (prepared.kind === 'blocked') return { kind: 'blocked' };
 		if (!prepared.coalesced) options.setPresence(prepared.nextPresence);
 		activate(root, config);
+		return { kind: 'opened' };
+	}
+
+	function selectTraceConversationSpeech(targetId: string): TraceConversationOpenResult {
+		if (disposed) return { kind: 'unavailable' };
+		if (state.kind === 'closed') return { kind: 'blocked' };
+		const projection = resolveTraceConversationProjection(state);
+		const target = projection ? adjacentTraceSpeech(projection, targetId) : null;
+		if (!target) return { kind: 'blocked' };
+		const prepared = prepareTraceInspectionActivity({
+			presence: options.getPresence(),
+			selfId: options.selfId,
+			target: target.event.position,
+			nowMs: now(),
+			requireCurrentRange: true,
+			random: options.random
+		});
+		if (prepared.kind === 'blocked') return { kind: 'blocked' };
+		if (!prepared.coalesced) options.setPresence(prepared.nextPresence);
+		emit({
+			...state,
+			config: { rootId: state.root.id, currentId: target.event.id },
+			replyRefresh: 'settled'
+		});
 		return { kind: 'opened' };
 	}
 
@@ -97,14 +125,19 @@ export function createDevTraceConversationRuntime(options: Readonly<{
 	function reconcileReplies(replies: readonly ParsedTraceReply[]): void {
 		if (disposed || state.kind === 'closed') return;
 		const rootId = state.root.id;
-		emit({
+		const next: TraceConversationState = {
 			...state,
 			replies: replies.filter((reply) => reply.rootId === rootId)
+		};
+		emit(resolveTraceConversationProjection(next) ? next : {
+			...next,
+			config: { rootId, currentId: rootId }
 		});
 	}
 
 	return {
 		openTraceConversation,
+		selectTraceConversationSpeech,
 		closeTraceConversation,
 		reconcileEffectiveRoots,
 		reconcileReplies,

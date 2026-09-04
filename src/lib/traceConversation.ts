@@ -23,6 +23,7 @@ export type TraceConversationOpenResult = Readonly<{
 
 export type TraceConversationController = Readonly<{
 	openTraceConversation(config: TraceConversationConfig): TraceConversationOpenResult;
+	selectTraceConversationSpeech(targetId: string): TraceConversationOpenResult;
 	closeTraceConversation(): void;
 	getTraceConversationState(): TraceConversationState;
 }>;
