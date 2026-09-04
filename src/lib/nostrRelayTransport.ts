@@ -761,6 +761,15 @@ export function createNostrRelayTransport(
 		return relay.initialStatus.status !== 'pending';
 	}
 
+	function armTraceCatchUpTimer(generation: TraceGeneration, relay: TraceRelayState, cycle: TraceCycle): void {
+		if (cycle.timer) clearTimeout(cycle.timer);
+		cycle.timer = setTimeout(() => {
+			if (generation === traceGeneration && generation.active && relay.cycle === cycle) {
+				finishTraceCatchUp(generation, relay, { relayUrl: relay.relayUrl, status: 'timeout' });
+			}
+		}, timeoutMs);
+	}
+
 	function startTraceCycle(generation: TraceGeneration, relay: TraceRelayState, kind: TraceCycleKind): void {
 		if (generation !== traceGeneration || !generation.active) return;
 		const cycle = relay.cycle?.kind === kind
@@ -772,13 +781,22 @@ export function createNostrRelayTransport(
 		cycle.cycleBoundary = unixNow();
 		if (cycle.timer) clearTimeout(cycle.timer);
 		relay.cycle = cycle;
-		if (kind === 'catch-up') {
-			cycle.timer = setTimeout(() => {
-				if (generation === traceGeneration && generation.active && relay.cycle === cycle) {
-					finishTraceCatchUp(generation, relay, { relayUrl: relay.relayUrl, status: 'timeout' });
-				}
-			}, timeoutMs);
-		}
+		if (kind === 'catch-up') armTraceCatchUpTimer(generation, relay, cycle);
+	}
+
+	function convertTimedOutInitialCycleToCatchUp(generation: TraceGeneration, relay: TraceRelayState): void {
+		const initialCycle = relay.cycle;
+		if (relay.initialStatus.status !== 'timeout' || initialCycle?.kind !== 'initial') return;
+		// Events before initial settlement were delivered in initialBatch. Keep the
+		// wire-observed boundary, but begin a fresh callback-only batch and timer.
+		const catchUpCycle: TraceCycle = {
+			kind: 'catch-up',
+			cycleBoundary: initialCycle.cycleBoundary,
+			events: [],
+			timer: null
+		};
+		relay.cycle = catchUpCycle;
+		armTraceCatchUpTimer(generation, relay, catchUpCycle);
 	}
 
 	function finishTraceInitialRelay(
@@ -824,10 +842,10 @@ export function createNostrRelayTransport(
 					transitionTraceRelay(generation, relay);
 					continue;
 				}
-				// The initial deadline may settle while a wire-visible initial REQ is
-				// still ongoing. Its initial events were already returned above; from
-				// this point its later events form a bounded, callback-only catch-up.
-				if (relay.cycle?.kind === 'initial') startTraceCycle(generation, relay, 'catch-up');
+				// A timed-out initial REQ may still be ongoing. Its pre-settlement
+				// events were returned above; retain its actual wire boundary while a
+				// fresh callback-only catch-up batch waits for a terminal message.
+				convertTimedOutInitialCycleToCatchUp(generation, relay);
 			}
 		});
 	}

@@ -832,6 +832,64 @@ describe('trace reply transport', () => {
 		}));
 	});
 
+	it('keeps the actual initial wire boundary when a timed-out initial REQ later reaches EOSE', async () => {
+		const f = fixture(1);
+		await f.start();
+		await completeTraceRootBootstrap(f.transport);
+		const relay = f.authorities[0];
+		relay.onRequest = () => {};
+		const config = traceInput(f.channel.id);
+		const pending = f.transport.configureTraceReplies(config);
+		const actualWireBoundary = Math.floor(Date.now() / 1000);
+		await vi.advanceTimersByTimeAsync(TIMEOUT);
+		await pending;
+		vi.setSystemTime((actualWireBoundary + TIMEOUT + 301) * 1000);
+		send(relay.latestSocket(), 'EOSE', relay.traceRequests()[0][1]);
+		await vi.advanceTimersByTimeAsync(5);
+		const continuation = relay.traceRequests().at(-1)!;
+		const root = filters(continuation).find((filter) => !Array.isArray(filter['#e']) && !Array.isArray(filter['#p']) && Array.isArray(filter['#E']))!;
+		expect(root.since).toBe(actualWireBoundary - 300);
+		expect(config.onBatch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ relays: [expect.objectContaining({ status: 'eose' })] }));
+	});
+
+	it('does not create an artificial catch-up after an initial CLOSED terminal', async () => {
+		const f = fixture(1);
+		await f.start();
+		await completeTraceRootBootstrap(f.transport);
+		const relay = f.authorities[0];
+		relay.onRequest = (socket, request) => {
+			if (kind(request) === 1111) send(socket, 'CLOSED', request[1], 'restricted: replies');
+		};
+		const config = traceInput(f.channel.id);
+		const pending = f.transport.configureTraceReplies(config);
+		await vi.advanceTimersByTimeAsync(5);
+		await expect(pending).resolves.toMatchObject({ initialBatch: { relays: [{ relayUrl: relay.url, status: 'closed', notice: 'restricted: replies' }] } });
+		await vi.advanceTimersByTimeAsync(TIMEOUT + 10);
+		expect(config.onBatch).not.toHaveBeenCalled();
+		expect(f.transport.getDiagnostics().traceReplies?.relays).toEqual([{ relayUrl: relay.url, status: 'closed', notice: 'restricted: replies' }]);
+	});
+
+	it('does not create an artificial catch-up after an initial unavailable terminal', async () => {
+		vi.mocked(createRxNostr).mockImplementationOnce((config) => actualRxNostr.createRxNostr({ ...config, retry: { strategy: 'off' } }));
+		const f = fixture(2);
+		f.authorities[1].server.options!.verifyClient = () => false;
+		await f.start(150);
+		await completeTraceRootBootstrap(f.transport);
+		f.authorities[0].onRequest = (socket, request) => {
+			if (kind(request) === 1111) send(socket, 'CLOSED', request[1], 'restricted: replies');
+		};
+		const config = traceInput(f.channel.id);
+		const pending = f.transport.configureTraceReplies(config);
+		await vi.advanceTimersByTimeAsync(5);
+		await pending;
+		await vi.advanceTimersByTimeAsync(TIMEOUT + 10);
+		expect(config.onBatch).not.toHaveBeenCalled();
+		expect(f.transport.getDiagnostics().traceReplies?.relays).toEqual([
+			{ relayUrl: f.authorities[0].url, status: 'closed', notice: 'restricted: replies' },
+			{ relayUrl: f.authorities[1].url, status: 'unavailable' }
+		]);
+	});
+
 	it('delivers a previously queued max-two third REQ as one late catch-up before that relay alone continues', async () => {
 		const f = fixture(1, socketConstructor, 6_000);
 		await f.start();
