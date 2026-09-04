@@ -89,29 +89,22 @@ async function readCharacterGeometry(page: Page) {
 	});
 }
 
-async function readMovementCellGeometry(page: Page) {
-	return page.locator('.movement-cell').evaluateAll((cells) => {
-		const grid = document.querySelector<HTMLElement>('.field-grid');
+async function fieldCellCenter(page: Page, position: { x: number; y: number }): Promise<{ x: number; y: number }> {
+	return page.locator('.field-grid').evaluate((grid, cell) => {
 		const scene = document.querySelector<HTMLElement>('.field-scene');
-		if (!grid || !scene) throw new Error('Expected the field grid and scene to be rendered.');
-		const gridRect = grid.getBoundingClientRect();
+		if (!scene) throw new Error('Expected the field scene to be rendered.');
+		const rect = grid.getBoundingClientRect();
 		const cellSize = Number.parseFloat(getComputedStyle(scene).getPropertyValue('--cell-size'));
+		return { x: rect.left + (cell.x + 0.5) * cellSize, y: rect.top + (cell.y + 0.5) * cellSize };
+	}, position);
+}
 
-		return cells.map((cell) => {
-			const rect = cell.getBoundingClientRect();
-			const [x, y] = (cell.getAttribute('data-movement-position') ?? '').split(',').map(Number);
-			return {
-				direction: cell.getAttribute('data-movement-direction'),
-				position: { x, y },
-				width: rect.width,
-				height: rect.height,
-				leftOffset: rect.left - gridRect.left,
-				topOffset: rect.top - gridRect.top,
-				background: getComputedStyle(cell).backgroundColor,
-				cursor: getComputedStyle(cell).cursor
-			};
-		});
-	});
+async function dragJoystick(page: Page, delta: { x: number; y: number }, startCell = { x: 5, y: 5 }): Promise<void> {
+	const start = await fieldCellCenter(page, startCell);
+	await page.mouse.move(start.x, start.y);
+	await page.mouse.down();
+	await page.mouse.move(start.x + delta.x, start.y + delta.y);
+	await page.mouse.up();
 }
 
 async function expectNoConsoleProblems(page: Page, action: () => Promise<void>): Promise<void> {
@@ -232,20 +225,18 @@ test.describe('DEV World Sandbox', () => {
 			gridLeft: document.querySelector<HTMLElement>('.field-grid')!.getBoundingClientRect().left,
 			lightLeft: document.querySelector<HTMLElement>('[data-trace-light-position="2,2"]')!.getBoundingClientRect().left
 		}));
-		await page.getByRole('button', { name: 'Move left' }).click();
-		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '6,3');
-		await page.getByRole('button', { name: 'Move right' }).click();
-		await page.getByRole('menu', { name: 'Cell actions' }).locator('[data-cell-action="movement"]').click();
-		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '7,3');
-		await page.getByRole('button', { name: 'Move right' }).click();
+		await page.locator('[data-cell-position="8,4"]').click();
+		await expect(page.locator('[data-trace-root-id="' + '2'.repeat(64) + '"]')).toContainText('trace-only root near the viewer');
+		await expect(page.getByRole('menu', { name: 'Cell actions' })).toHaveCount(0);
+		const self = page.locator('.participant[data-self="true"]');
+		const start = await fieldCellCenter(page, { x: 5, y: 5 });
+		await page.mouse.move(start.x, start.y);
+		await page.mouse.down();
+		await page.mouse.move(start.x + 24, start.y);
+		await page.mouse.up();
+		await expect(self).toHaveAttribute('data-position', '8,3');
 		const actionMenu = page.getByRole('menu', { name: 'Cell actions' });
-		await expect(actionMenu).toBeVisible();
-		await expect(actionMenu.getByRole('menuitem')).toHaveCount(2);
-		await expect(actionMenu.locator('[data-cell-action="trace"]')).toHaveText('痕跡を調べる');
-		await expect(page.locator('.trace-root-bubble')).toHaveCount(0);
-		await actionMenu.locator('[data-cell-action="movement"]').click();
-		await expect(actionMenu).toBeHidden();
-		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '8,3');
+		await expect(actionMenu).toHaveCount(0);
 		const after = await page.evaluate(() => ({
 			gridLeft: document.querySelector<HTMLElement>('.field-grid')!.getBoundingClientRect().left,
 			lightLeft: document.querySelector<HTMLElement>('[data-trace-light-position="2,2"]')!.getBoundingClientRect().left
@@ -283,8 +274,11 @@ test.describe('DEV World Sandbox', () => {
 		await page.keyboard.press('Escape');
 		await expect(menu).toBeHidden();
 
-		await page.getByRole('button', { name: 'Move right' }).click();
+		await page.keyboard.press('ArrowRight');
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '8,3');
+		await profileTrigger(page, '女の子').click();
 		await expect(menu).toBeVisible();
+		await expect(menu.locator('[data-cell-action="movement"]')).toHaveCount(0);
 		await menu.locator('[data-cell-action="trace"]').click();
 		await expect(page.locator('[data-trace-root-id="' + '4'.repeat(64) + '"]')).toContainText('newest root');
 		await expect(page.getByText('1/2', { exact: true })).toBeVisible();
@@ -298,9 +292,9 @@ test.describe('DEV World Sandbox', () => {
 		await expect(profileDialog(page)).toBeHidden();
 		await expect(page.locator('[data-trace-root-id="' + '5'.repeat(64) + '"]')).toBeVisible();
 
-		await page.getByRole('button', { name: 'Move left' }).click();
-		await page.getByRole('button', { name: 'Move left' }).click();
-		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '5,3');
+		await page.keyboard.press('ArrowLeft');
+		await page.keyboard.press('ArrowLeft');
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '6,3');
 		await expect(page.locator('[data-trace-root-id="' + '5'.repeat(64) + '"]')).toBeVisible();
 		await page.getByRole('button', { name: 'Previous trace root' }).click();
 		await expect(page.locator('[data-trace-root-id="' + '5'.repeat(64) + '"]')).toBeVisible();
@@ -1399,51 +1393,72 @@ test.describe('DEV World Sandbox', () => {
 		await expect(self.locator('.participant-name')).toHaveText(selectedName ?? '');
 	});
 
-	test('renders adjacent cells on the grid, moves by cell and follows the new position', async ({ page }) => {
-		await openDevWorld(page);
+	test('uses a floating pointer joystick for mouse drag movement and removes cell movement affordances', async ({ page }) => {
+		await openClockedDevWorld(page);
+		await expect(page.locator('.field-movement-layer, .movement-cell, .movement-cell-chevron')).toHaveCount(0);
 
 		const self = page.locator('.participant').first();
-		const movementCells = await readMovementCellGeometry(page);
-		expect(movementCells.map((cell) => cell.direction)).toEqual(['up', 'down', 'left', 'right']);
-		expect(movementCells.map((cell) => cell.position)).toEqual([
-			{ x: 7, y: 2 },
-			{ x: 7, y: 4 },
-			{ x: 6, y: 3 },
-			{ x: 8, y: 3 }
-		]);
-		for (const cell of movementCells) {
-			expect(cell.width).toBeCloseTo(cell.height, 5);
-			expect(cell.width).toBeGreaterThan(0);
-			expect(cell.leftOffset).toBeCloseTo(cell.position.x * cell.width, 5);
-			expect(cell.topOffset).toBeCloseTo(cell.position.y * cell.height, 5);
-			expect(cell.background).not.toBe('rgba(0, 0, 0, 0)');
-			expect(cell.cursor).toBe('pointer');
-		}
-
-		await page.getByRole('button', { name: 'Move right' }).click();
+		const start = await fieldCellCenter(page, { x: 5, y: 5 });
+		await page.mouse.move(start.x, start.y);
+		await page.mouse.down();
+		await page.mouse.move(start.x + 8, start.y);
+		await expect(page.locator('[data-pointer-joystick]')).toHaveCount(0);
+		await page.mouse.move(start.x + 24, start.y);
+		await expect(page.locator('[data-pointer-joystick="right"]')).toBeVisible();
 		await expect(self).toHaveAttribute('data-position', '8,3');
-		await expect(page.locator('.movement-cell')).toHaveCount(4);
-		await expect(page.locator('.movement-cell[data-movement-position="8,2"]')).toHaveCount(1);
-		await expect(page.locator('.movement-cell[data-movement-position="8,4"]')).toHaveCount(1);
-		await expect(page.locator('.movement-cell[data-movement-position="7,3"]')).toHaveCount(1);
-		await expect(page.locator('.movement-cell[data-movement-position="9,3"]')).toHaveCount(1);
-
-		await page.getByRole('button', { name: 'Reset sandbox' }).click();
-		await expect(self).toHaveAttribute('data-position', '7,3');
+		await page.clock.runFor(1_000);
+		await expect(self).toHaveAttribute('data-position', '10,3');
+		await page.mouse.up();
+		await expect(page.locator('[data-pointer-joystick]')).toHaveCount(0);
+		await page.clock.runFor(1_000);
+		await expect(self).toHaveAttribute('data-position', '10,3');
 	});
 
-	test('operates an adjacent cell through keyboard focus and preserves Arrow movement', async ({ page }) => {
+	test('moves one cell in each cardinal direction through the pointer path', async ({ page }) => {
+		for (const [delta, expected] of [
+			[{ x: 24, y: 0 }, '8,3'],
+			[{ x: -24, y: 0 }, '6,3'],
+			[{ x: 0, y: -24 }, '7,2'],
+			[{ x: 0, y: 24 }, '7,4']
+		] as const) {
+			await openDevWorld(page);
+			await dragJoystick(page, delta);
+			await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', expected);
+		}
+	});
+
+	test('accepts the touch PointerEvent path without changing the movement API', async ({ page }) => {
 		await openDevWorld(page);
+		const start = await fieldCellCenter(page, { x: 5, y: 5 });
+		await page.locator('.field-area').evaluate((node, point) => {
+			const init = { bubbles: true, pointerId: 17, pointerType: 'touch', isPrimary: true, button: 0 } as const;
+			node.dispatchEvent(new PointerEvent('pointerdown', { ...init, clientX: point.x, clientY: point.y }));
+			node.dispatchEvent(new PointerEvent('pointermove', { ...init, clientX: point.x + 24, clientY: point.y }));
+			node.dispatchEvent(new PointerEvent('pointerup', { ...init, clientX: point.x + 24, clientY: point.y }));
+		}, start);
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '8,3');
+		await expect(page.locator('[data-pointer-joystick]')).toHaveCount(0);
+	});
 
-		const self = page.locator('.participant').first();
-		const up = page.getByRole('button', { name: 'Move up' });
-		await up.focus();
-		await expect(up).toBeFocused();
-		await page.keyboard.press('Enter');
-		await expect(self).toHaveAttribute('data-position', '7,2');
+	test('keeps tap selection separate from pointer movement and preserves participant trace menus', async ({ page }) => {
+		await page.goto('/?devWorld=1&devTrace=lights');
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+		await page.locator('[data-cell-position="8,4"]').click();
+		await expect(page.getByRole('menu', { name: 'Cell actions' })).toHaveCount(0);
 
-		await page.keyboard.press('ArrowDown');
-		await expect(self).toHaveAttribute('data-position', '7,3');
+		const start = await fieldCellCenter(page, { x: 5, y: 5 });
+		await page.mouse.move(start.x, start.y);
+		await page.mouse.down();
+		await page.mouse.move(start.x + 24, start.y);
+		await page.mouse.up();
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '8,3');
+
+		await profileTrigger(page, '女の子').click();
+		const menu = page.getByRole('menu', { name: 'Cell actions' });
+		await expect(menu.getByRole('menuitem')).toHaveCount(2);
+		await expect(menu.locator('[data-cell-action="movement"]')).toHaveCount(0);
+		await expect(menu.locator('[data-cell-action="participant"]')).toHaveCount(1);
+		await expect(menu.locator('[data-cell-action="trace"]')).toHaveCount(1);
 	});
 
 	test('does not render a field-external cell at the field edge', async ({ page }) => {
@@ -1452,20 +1467,84 @@ test.describe('DEV World Sandbox', () => {
 		const self = page.locator('.participant').first();
 		for (let index = 0; index < 7; index += 1) await page.keyboard.press('ArrowLeft');
 		await expect(self).toHaveAttribute('data-position', '0,3');
-		await expect(page.getByRole('button', { name: 'Move left' })).toHaveCount(0);
-		await expect(page.locator('.movement-cell[data-movement-position="-1,3"]')).toHaveCount(0);
+		const start = await fieldCellCenter(page, { x: 5, y: 5 });
+		await page.mouse.move(start.x, start.y);
+		await page.mouse.down();
+		await page.mouse.move(start.x - 24, start.y);
+		await expect(page.locator('[data-pointer-joystick="left"]')).toBeVisible();
+		await expect(self).toHaveAttribute('data-position', '0,3');
+		await page.mouse.up();
 	});
 
-	test('does not render an occupied adjacent cell as interactive', async ({ page }) => {
+	test('does not move into an occupied cell through the pointer joystick', async ({ page }) => {
 		await page.goto('/?devWorld=1&devSpeech=1');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '7,3');
-		await expect(page.getByRole('button', { name: 'Move up' })).toHaveCount(0);
-		await expect(page.locator('.movement-cell[data-movement-position="7,2"]')).toHaveCount(0);
-		await expect(page.locator('.movement-cell[data-movement-position="6,3"]')).toHaveCount(1);
-		await expect(page.locator('.movement-cell[data-movement-position="8,3"]')).toHaveCount(1);
-		await expect(page.locator('.movement-cell[data-movement-position="7,4"]')).toHaveCount(1);
+		const start = await fieldCellCenter(page, { x: 5, y: 5 });
+		await page.mouse.move(start.x, start.y);
+		await page.mouse.down();
+		await page.mouse.move(start.x, start.y - 24);
+		await expect(page.locator('[data-pointer-joystick="up"]')).toBeVisible();
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '7,3');
+		await page.mouse.up();
+	});
+
+	test('keeps keyboard ownership during a pending pointer tap and safely takes over on drag', async ({ page }) => {
+		await openClockedDevWorld(page);
+		const self = page.locator('.participant[data-self="true"]');
+		await page.keyboard.down('ArrowRight');
+		await expect(self).toHaveAttribute('data-position', '8,3');
+
+		const start = await fieldCellCenter(page, { x: 5, y: 5 });
+		await page.mouse.move(start.x, start.y);
+		await page.mouse.down();
+		await page.clock.runFor(500);
+		await expect(self).toHaveAttribute('data-position', '9,3');
+		await page.mouse.move(start.x, start.y - 24);
+		await expect(page.locator('[data-pointer-joystick="up"]')).toBeVisible();
+		await expect(self).toHaveAttribute('data-position', '9,2');
+		await page.clock.runFor(500);
+		await expect(self).toHaveAttribute('data-position', '9,1');
+		await page.mouse.up();
+		await page.clock.runFor(1_000);
+		await expect(self).toHaveAttribute('data-position', '9,1');
+		await page.keyboard.up('ArrowRight');
+		await page.keyboard.press('ArrowLeft');
+		await expect(self).toHaveAttribute('data-position', '8,1');
+	});
+
+	test('does not let keyboard input or keyup steal or stop pointer ownership', async ({ page }) => {
+		await openClockedDevWorld(page);
+		const self = page.locator('.participant[data-self="true"]');
+		await dragJoystick(page, { x: 24, y: 0 });
+		await expect(self).toHaveAttribute('data-position', '8,3');
+
+		const start = await fieldCellCenter(page, { x: 5, y: 5 });
+		await page.mouse.move(start.x, start.y);
+		await page.mouse.down();
+		await page.mouse.move(start.x + 24, start.y);
+		await page.keyboard.down('ArrowLeft');
+		await page.keyboard.up('ArrowLeft');
+		await page.clock.runFor(500);
+		await expect(self).toHaveAttribute('data-position', '10,3');
+		await page.mouse.up();
+	});
+
+	test('updates pointer direction without an immediate request or timer restart', async ({ page }) => {
+		await openClockedDevWorld(page);
+		const self = page.locator('.participant[data-self="true"]');
+		const start = await fieldCellCenter(page, { x: 5, y: 5 });
+		await page.mouse.move(start.x, start.y);
+		await page.mouse.down();
+		await page.mouse.move(start.x + 24, start.y);
+		await expect(self).toHaveAttribute('data-position', '8,3');
+		await page.clock.runFor(400);
+		await page.mouse.move(start.x, start.y - 24);
+		await expect(self).toHaveAttribute('data-position', '8,3');
+		await page.clock.runFor(100);
+		await expect(self).toHaveAttribute('data-position', '8,2');
+		await page.mouse.up();
 	});
 
 	test('continues one-cell movement on an explicit keyboard hold and stops on keyup', async ({ page }) => {
@@ -1772,12 +1851,6 @@ test.describe('DEV World Sandbox', () => {
 					await expect(fieldArea).toHaveCSS('width', viewport.fieldWidth);
 
 						const geometry = await readCharacterGeometry(page);
-						const movementCells = await readMovementCellGeometry(page);
-						expect(movementCells).toHaveLength(4);
-						for (const cell of movementCells) {
-							expect(cell.leftOffset).toBeCloseTo(cell.position.x * cell.width, 5);
-							expect(cell.topOffset).toBeCloseTo(cell.position.y * cell.height, 5);
-						}
 						expect(geometry.cellWidth).toBe(viewport.cell);
 					expect(geometry.cellHeight).toBe(viewport.cell);
 					expect(geometry.avatarWidth).toBe(viewport.avatar);
@@ -1803,7 +1876,7 @@ test.describe('DEV World Sandbox', () => {
 			const before = await readCharacterGeometry(page);
 			const beforeTransform = await scene.evaluate((element) => getComputedStyle(element).transform);
 
-			await page.getByRole('button', { name: 'Move right' }).click();
+			await dragJoystick(page, { x: 24, y: 0 });
 			await expect(self).toHaveAttribute('data-position', '8,3');
 			await expect(self).toHaveAttribute('data-movement-animation', 'active');
 			await expect(self).not.toHaveAttribute('data-movement-animation', 'active');
@@ -1825,7 +1898,7 @@ test.describe('DEV World Sandbox', () => {
 		await openDevWorld(page);
 
 		const self = page.locator('.participant').first();
-		await page.getByRole('button', { name: 'Move right' }).click();
+		await dragJoystick(page, { x: 24, y: 0 });
 		await expect(self).toHaveAttribute('data-position', '8,3');
 		await expect(self).not.toHaveAttribute('data-movement-animation', 'active');
 		await expect(page.locator('.field-scene')).not.toHaveAttribute('data-camera-animation', 'active');

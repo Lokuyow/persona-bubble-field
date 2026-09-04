@@ -90,11 +90,28 @@ W/A/S/Dの長押しもArrowキーと同じmovement hold driverを使用し、1�
 
 斜め移動は行わない。
 
-pointer / touch操作では、field上のinteractive UI以外から開始できるdynamic / floating virtual joystickを使用する。joystick centerはdrag開始位置とし、finger releaseまたはpointercancelで消える。deflection magnitudeで速度は変えず、analog方向をdominant axis等で上下左右のcardinal方向へ変換する。diagonal移動は行わない。
+pointer movementはPCとmobile/tabletで共通とし、mouse、pen、touchをWeb標準の
+Pointer Eventsによる同じpointer gestureとして扱う。field上のinteractive UI以外から
+開始できるdynamic / floating virtual joystickを使用する。joystickはdrag確定後だけ
+表示し、centerはdrag開始位置とする。pointer release、pointer cancel等のgesture終了時
+に消える。
 
-tapとdragはgesture thresholdで区別するが、具体的なthresholdは実装詳細とする。既存の1マス移動、最大2 movement/sec、presence、position publish、visual animationを再利用する。PCのArrow/WASD操作は維持する。
+pointerの移動方向はup / down / left / rightのcardinal 4方向だけとする。
+deflection magnitudeで移動速度を変えず、diagonal移動も行わない。pointer movementは
+既存の1マス移動、最大2 movement/sec、presence、position publish、visual animationを
+再利用する。
 
-field上の選択はpixel targetではなくlogical cellを基本にする。selectable targetが1件なら直接そのactionを行い、2件以上ならPC/mobile共通context menuを開く。current characterは個別に表示し、multiple rootsは1つの「痕跡を調べる」とする。outside tap/clickでmenuを閉じ、movement開始時はmenuを閉じてそのmovementを続行する。menuを開いただけではconversation、reply target、draftを変更しない。
+tapとdragはgesture thresholdで区別するが、具体的なthresholdは実装詳細とする。
+threshold未満のpointer releaseはmovementではなくlogical-cell selectionとして扱う。
+PCのArrow/WASD操作は維持する。
+
+field上の選択はpixel targetではなくlogical cellを基本にする。tap / clickはmovementには
+使用せず、logical-cell selection専用とする。selectable targetが1件なら直接そのactionを
+行い、2件以上ならPC/mobile共通context menuを開く。current characterは個別に表示し、
+multiple rootsは1つの「痕跡を調べる」とする。outside tap/clickでmenuを閉じる。
+movementはselectable cell actionやcontext menu itemとして提供しない。current character
+周囲の4方向movement buttonやadjacent cell movementは設けない。menuを開いただけでは
+conversation、reply target、draftを変更しない。
 
 フィールド端では停止し、反対側へループしない。
 
