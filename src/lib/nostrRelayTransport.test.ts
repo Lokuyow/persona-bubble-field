@@ -27,10 +27,14 @@ const socketConstructor = WebSocket as unknown as IWebSocketConstructor;
 const servers: Server[] = [];
 const transports: ReturnType<typeof createNostrRelayTransport>[] = [];
 let relaySequence = 0;
-	type WireRequest = ['REQ', string, ...Record<string, unknown>[]];
+type WireRequest = ['REQ', string, ...Record<string, unknown>[]];
+
+function filters(request: WireRequest): readonly Record<string, unknown>[] {
+	return request.slice(2) as Record<string, unknown>[];
+}
 
 function kind(request: WireRequest): number | undefined {
-	return (request[2].kinds as number[])[0];
+	return (filters(request)[0].kinds as number[])[0];
 }
 
 function send(socket: Client, ...message: unknown[]): void {
@@ -51,6 +55,7 @@ function mockRelay() {
 		onRequest: (socket: Client, request: WireRequest) => send(socket, 'EOSE', request[1]),
 		onPublish: (_socket: Client, _event: VerifiedEvent) => {},
 		primaryRequests: (): WireRequest[] => relay.requests.filter((request) => [42, 30078].includes(kind(request)!) && request[2].limit === undefined),
+		traceRequests: (): WireRequest[] => relay.requests.filter((request) => filters(request).every((filter) => (filter.kinds as number[])[0] === 1111)),
 		rootRequests: (): WireRequest[] => relay.requests.filter((request) => kind(request) === 42 && request[2].limit === 1000),
 		primaryId: (eventKind: 42 | 30078): string => relay.primaryRequests().filter((request) => kind(request) === eventKind).at(-1)![1],
 		latestSocket: (): Client => relay.sockets.at(-1)!
@@ -84,7 +89,7 @@ function rawEvent(id: string, createdAt = TIME, overrides: Partial<Event> = {}):
 	};
 }
 
-function fixture(authorityCount = 2, websocketCtor = socketConstructor) {
+function fixture(authorityCount = 2, websocketCtor = socketConstructor, operationTimeoutMs = TIMEOUT) {
 	const seeds = Array.from({ length: 4 }, () => mockRelay());
 	const authorities = Array.from({ length: authorityCount }, () => mockRelay());
 	const channel = finalizeEvent({ kind: 40, created_at: TIME - 10, tags: [], content: JSON.stringify({ relays: [authorities[0].url] }) }, CREATOR);
@@ -97,7 +102,7 @@ function fixture(authorityCount = 2, websocketCtor = socketConstructor) {
 		};
 	});
 	const config = { channelId: channel.id, metadataDiscoveryRelays: seeds.map((relay) => relay.url), preferredRelayHint: authorities[0].url };
-	const transport = createNostrRelayTransport(config, { operationTimeoutMs: TIMEOUT, websocketCtor });
+	const transport = createNostrRelayTransport(config, { operationTimeoutMs, websocketCtor });
 	transports.push(transport);
 	const input = {
 		messageSince: TIME - 50,
@@ -117,6 +122,31 @@ function fixture(authorityCount = 2, websocketCtor = socketConstructor) {
 		return pending;
 	};
 	return { seeds, authorities, channel, metadata, config, transport, input, message, position, start };
+}
+
+async function completeTraceRootBootstrap(transport: ReturnType<typeof createNostrRelayTransport>): Promise<void> {
+	const pending = transport.bootstrapTraceRootCandidates();
+	await vi.advanceTimersByTimeAsync(10);
+	await pending;
+}
+
+function traceInput(rootId: string, currentId = 'e'.repeat(64)) {
+	return {
+		notification: { personaPubkey: 'c'.repeat(64), effectiveRootIds: [rootId], initialSince: TIME - 600 },
+		conversation: { rootId, currentId },
+		onBatch: vi.fn(),
+		onLiveEvent: vi.fn()
+	};
+}
+
+function traceReply(rootId: string, id: string, createdAt = TIME, currentId = 'e'.repeat(64)): Event {
+	return rawEvent(id, createdAt, {
+		kind: 1111,
+		tags: [
+			['E', rootId], ['e', currentId], ['p', 'c'.repeat(64)],
+			['L', 'io.github.lokuyow.persona-bubble-field'], ['l', 'chat']
+		]
+	});
 }
 
 function publicClient(): RxNostr {
@@ -623,6 +653,467 @@ describe('trace root bootstrap', () => {
 		await vi.advanceTimersByTimeAsync(TIMEOUT + 10);
 		expect(vi.getTimerCount()).toBe(0);
 		expect(f.authorities[0].messages.filter((message) => message[0] === 'CLOSE')).not.toEqual([]);
+	});
+});
+
+describe('trace reply transport', () => {
+	it('rejects configuration until finite trace root bootstrap has completed', async () => {
+		const f = fixture(1);
+		const config = traceInput(f.channel.id);
+		await expect(f.transport.configureTraceReplies(config)).rejects.toThrow('complete trace root bootstrap');
+		await f.start();
+		await expect(f.transport.configureTraceReplies(config)).rejects.toThrow('complete trace root bootstrap');
+		await completeTraceRootBootstrap(f.transport);
+		f.authorities[0].onRequest = (socket, request) => send(socket, 'EOSE', request[1]);
+		const pending = f.transport.configureTraceReplies(config);
+		await vi.advanceTimersByTimeAsync(10);
+		await expect(pending).resolves.toMatchObject({ status: 'active' });
+	});
+
+	it('uses one relay-scoped trace Forward request per authority and returns initial raw events only from configure', async () => {
+		const f = fixture(2);
+		await f.start();
+		await completeTraceRootBootstrap(f.transport);
+		const use = vi.spyOn(publicClient(), 'use');
+		const raw = finalizeEvent({
+			kind: 1111,
+			created_at: TIME,
+			tags: [['E', f.channel.id], ['e', 'e'.repeat(64)], ['L', 'io.github.lokuyow.persona-bubble-field'], ['l', 'chat']],
+			content: 'raw reply'
+		}, AUTHOR);
+		raw.sig = '0'.repeat(128);
+		const observedRaw = vi.fn();
+		publicClient().createAllEventObservable().subscribe(observedRaw);
+		for (const relay of f.authorities) {
+			relay.onRequest = (socket, request) => {
+				if (kind(request) !== 1111) return;
+				if (filters(request).some((filter) => filter.limit === 100)) {
+					expect(filters(request)).toHaveLength(3);
+					expect(filters(request).filter((filter) => filter.limit === 100)).toHaveLength(2);
+					send(socket, 'EVENT', request[1], raw);
+					send(socket, 'EOSE', request[1]);
+				}
+			};
+		}
+		const config = traceInput(f.channel.id);
+		const pending = f.transport.configureTraceReplies(config);
+		await vi.advanceTimersByTimeAsync(10);
+		const result = await pending;
+		expect(observedRaw).toHaveBeenCalled();
+		expect(result).toMatchObject({ status: 'active', initialBatch: { events: [expect.objectContaining({ id: raw.id })] } });
+		expect(config.onBatch).not.toHaveBeenCalled();
+		expect(config.onLiveEvent).not.toHaveBeenCalled();
+		for (const relay of f.authorities) {
+			expect(relay.traceRequests()).toHaveLength(2);
+			expect(relay.sockets).toHaveLength(1);
+		}
+		expect(use.mock.calls.slice(-2).map(([, options]) => options)).toEqual(f.authorities.map((relay) => ({ on: { relays: [relay.url] } })));
+	});
+
+	it('transitions only EOSE-complete relays to no-limit continuation with the 300-second overlap', async () => {
+		const f = fixture(2);
+		await f.start();
+		await completeTraceRootBootstrap(f.transport);
+		const [a, b] = f.authorities;
+		a.onRequest = (socket, request) => {
+			if (kind(request) !== 1111) return;
+			if (filters(request).some((filter) => filter.limit === 100)) send(socket, 'EOSE', request[1]);
+			else send(socket, 'EOSE', request[1]);
+		};
+		b.onRequest = () => {};
+		const config = traceInput(f.channel.id);
+		const pending = f.transport.configureTraceReplies(config);
+		await vi.advanceTimersByTimeAsync(TIMEOUT + 10);
+		await expect(pending).resolves.toMatchObject({
+			status: 'active',
+			initialBatch: { relays: [expect.objectContaining({ status: 'eose' }), expect.objectContaining({ status: 'timeout' })] }
+		});
+		await vi.advanceTimersByTimeAsync(1);
+		const aContinuation = a.traceRequests().at(-1)!;
+		expect(a.traceRequests()).toHaveLength(2);
+		expect(filters(aContinuation).every((filter) => filter.limit === undefined)).toBe(true);
+		expect(filters(aContinuation).every((filter) => filter.since === TIME - 300)).toBe(true);
+		expect(b.traceRequests()).toHaveLength(1);
+		expect(filters(b.traceRequests()[0]).filter((filter) => filter.limit === 100)).toHaveLength(2);
+		expect(config.onBatch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ relays: [expect.objectContaining({ status: 'eose' })] }));
+	});
+
+	it('times out a queued third request without closing primaries, then treats late wire delivery as catch-up', async () => {
+		const f = fixture(1);
+		await f.start();
+		await completeTraceRootBootstrap(f.transport);
+		Nip11Registry.set(f.authorities[0].url, { limitation: { max_subscriptions: 2 } });
+		const config = traceInput(f.channel.id);
+		const pending = f.transport.configureTraceReplies(config);
+		await vi.advanceTimersByTimeAsync(TIMEOUT + 10);
+		await expect(pending).resolves.toMatchObject({ status: 'active', initialBatch: { relays: [expect.objectContaining({ status: 'timeout' })] } });
+		expect(f.authorities[0].traceRequests()).toEqual([]);
+		expect(f.authorities[0].primaryRequests()).toHaveLength(2);
+		const primaryIds = f.authorities[0].primaryRequests().map((request) => request[1]);
+		const closedIds = f.authorities[0].messages.filter((message) => message[0] === 'CLOSE').map((message) => message[1]);
+		expect(primaryIds.every((id) => !closedIds.includes(id))).toBe(true);
+	});
+
+	it('does not carry an EOSE cursor from a superseded initial generation', async () => {
+		const f = fixture(2);
+		await f.start();
+		await completeTraceRootBootstrap(f.transport);
+		const [a, b] = f.authorities;
+		a.onRequest = (socket, request) => {
+			if (kind(request) === 1111) send(socket, 'EOSE', request[1]);
+		};
+		b.onRequest = () => {};
+		const first = traceInput(f.channel.id);
+		const old = f.transport.configureTraceReplies(first);
+		await vi.advanceTimersByTimeAsync(10);
+		const next = traceInput(f.channel.id, 'f'.repeat(64));
+		const fresh = f.transport.configureTraceReplies(next);
+		void fresh.catch(() => {});
+		await vi.advanceTimersByTimeAsync(10);
+		await expect(old).resolves.toEqual({ status: 'superseded', generation: 1 });
+		expect(first.onBatch).not.toHaveBeenCalled();
+		expect(first.onLiveEvent).not.toHaveBeenCalled();
+		const newest = a.traceRequests().at(-1)!;
+		expect(filters(newest).find((filter) => Array.isArray(filter['#e']) && filter['#e'][0] === 'f'.repeat(64))?.limit).toBe(100);
+	});
+
+	it('keeps an unacknowledged catch-up batch across an automatic reconnect and dedupes its replay', async () => {
+		const f = fixture(1, socketConstructor, 6_000);
+		await f.start();
+		await completeTraceRootBootstrap(f.transport);
+		const relay = f.authorities[0];
+		relay.onRequest = (socket, request) => {
+			if (kind(request) !== 1111) return;
+			if (filters(request).some((filter) => filter.limit === 100)) send(socket, 'EOSE', request[1]);
+		};
+		const config = traceInput(f.channel.id);
+		const configured = f.transport.configureTraceReplies(config);
+		await vi.advanceTimersByTimeAsync(5);
+		await configured;
+		const buffered = traceReply(f.channel.id, '1'.repeat(64));
+		send(relay.latestSocket(), 'EVENT', relay.traceRequests().at(-1)![1], buffered);
+		await vi.advanceTimersByTimeAsync(1);
+		expect(config.onBatch).not.toHaveBeenCalled();
+		relay.latestSocket().close({ code: 1001, reason: 'reconnect catch-up', wasClean: false });
+		await vi.advanceTimersByTimeAsync(5_000);
+		const replayed = relay.traceRequests().at(-1)!;
+		expect(filters(replayed).every((filter) => filter.limit === undefined)).toBe(true);
+		send(relay.latestSocket(), 'EVENT', replayed[1], buffered);
+		send(relay.latestSocket(), 'EOSE', replayed[1]);
+		await vi.advanceTimersByTimeAsync(5);
+		expect(config.onBatch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+			events: [expect.objectContaining({ id: buffered.id })],
+			relays: [expect.objectContaining({ status: 'eose' })]
+		}));
+	});
+
+	it('evaluates continuation since lazily from the latest EOSE-stable cursor on each reconnect', async () => {
+		const f = fixture(1, socketConstructor, 6_000);
+		await f.start();
+		await completeTraceRootBootstrap(f.transport);
+		const relay = f.authorities[0];
+		const continuationWireBoundaries: number[] = [];
+		relay.onRequest = (socket, request) => {
+			if (kind(request) !== 1111) return;
+			if (filters(request).some((filter) => filter.limit === 100)) send(socket, 'EOSE', request[1]);
+			else continuationWireBoundaries.push(Math.floor(Date.now() / 1000));
+		};
+		const config = traceInput(f.channel.id);
+		const configured = f.transport.configureTraceReplies(config);
+		await vi.advanceTimersByTimeAsync(5);
+		await configured;
+		relay.latestSocket().close({ code: 1001, reason: 'first reconnect', wasClean: false });
+		await vi.advanceTimersByTimeAsync(5_000);
+		const reconnectOne = relay.traceRequests().at(-1)!;
+		const reconnectOneBoundary = continuationWireBoundaries.at(-1)!;
+		const requestsBeforeEose = relay.traceRequests().length;
+		send(relay.latestSocket(), 'EOSE', reconnectOne[1]);
+		await vi.advanceTimersByTimeAsync(10);
+		const requestsAfterEose = relay.traceRequests().length;
+		expect(requestsAfterEose).toBe(requestsBeforeEose);
+		expect(config.onBatch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ relays: [expect.objectContaining({ status: 'eose' })] }));
+		relay.latestSocket().close({ code: 1001, reason: 'second reconnect', wasClean: false });
+		await vi.advanceTimersByTimeAsync(5_000);
+		expect(relay.traceRequests().length).toBeGreaterThan(requestsAfterEose);
+		const reconnectTwo = relay.traceRequests().at(-1)!;
+		const root = filters(reconnectTwo).find((filter) => !Array.isArray(filter['#p']) && !Array.isArray(filter['#e']) && Array.isArray(filter['#E']))!;
+		const notification = filters(reconnectTwo).find((filter) => Array.isArray(filter['#p']))!;
+		expect(root.since).toBe(reconnectOneBoundary - 300);
+		expect(notification.since).toBe(reconnectOneBoundary - 300);
+		expect(filters(reconnectTwo).every((filter) => filter.limit === undefined)).toBe(true);
+	});
+
+	it('fails closed for late packets after initial and catch-up CLOSED terminals', async () => {
+		const f = fixture(1);
+		await f.start();
+		await completeTraceRootBootstrap(f.transport);
+		const relay = f.authorities[0];
+		let initial = true;
+		relay.onRequest = (socket, request) => {
+			if (kind(request) !== 1111) return;
+			if (initial) {
+				initial = false;
+				send(socket, 'CLOSED', request[1], 'restricted: initial');
+			}
+		};
+		const initialConfig = traceInput(f.channel.id);
+		const initialPending = f.transport.configureTraceReplies(initialConfig);
+		await vi.advanceTimersByTimeAsync(5);
+		await initialPending;
+		const initialSubId = relay.traceRequests()[0][1];
+		send(relay.latestSocket(), 'EVENT', initialSubId, traceReply(f.channel.id, '8'.repeat(64)));
+		send(relay.latestSocket(), 'EOSE', initialSubId);
+		await vi.advanceTimersByTimeAsync(5);
+		expect(initialConfig.onBatch).not.toHaveBeenCalled();
+		expect(initialConfig.onLiveEvent).not.toHaveBeenCalled();
+
+		const next = traceInput(f.channel.id, 'f'.repeat(64));
+		relay.onRequest = (socket, request) => {
+			if (kind(request) === 1111 && filters(request).some((filter) => filter.limit === 100)) send(socket, 'EOSE', request[1]);
+		};
+		const nextPending = f.transport.configureTraceReplies(next);
+		await vi.advanceTimersByTimeAsync(5);
+		await nextPending;
+		const catchUp = relay.traceRequests().at(-1)!;
+		send(relay.latestSocket(), 'CLOSED', catchUp[1], 'restricted: catch-up');
+		await vi.advanceTimersByTimeAsync(5);
+		expect(next.onBatch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ relays: [expect.objectContaining({ status: 'closed' })] }));
+		send(relay.latestSocket(), 'EVENT', catchUp[1], traceReply(f.channel.id, '9'.repeat(64), TIME + 1, 'f'.repeat(64)));
+		send(relay.latestSocket(), 'EOSE', catchUp[1]);
+		await vi.advanceTimersByTimeAsync(5);
+		expect(next.onBatch).toHaveBeenCalledTimes(1);
+		expect(next.onLiveEvent).not.toHaveBeenCalled();
+	});
+
+	it('turns a wire-visible initial timeout into one bounded post-initial catch-up without duplicate initial delivery', async () => {
+		const f = fixture(1);
+		await f.start();
+		await completeTraceRootBootstrap(f.transport);
+		const relay = f.authorities[0];
+		relay.onRequest = () => {};
+		const config = traceInput(f.channel.id);
+		const pending = f.transport.configureTraceReplies(config);
+		await vi.advanceTimersByTimeAsync(5);
+		const initial = traceReply(f.channel.id, '2'.repeat(64));
+		send(relay.latestSocket(), 'EVENT', relay.traceRequests()[0][1], initial);
+		await vi.advanceTimersByTimeAsync(TIMEOUT);
+		const result = await pending;
+		expect(result).toMatchObject({ initialBatch: { events: [expect.objectContaining({ id: initial.id })] } });
+		expect(config.onBatch).not.toHaveBeenCalled();
+		const catchUp = traceReply(f.channel.id, '3'.repeat(64));
+		send(relay.latestSocket(), 'EVENT', relay.traceRequests()[0][1], catchUp);
+		send(relay.latestSocket(), 'EOSE', relay.traceRequests()[0][1]);
+		await vi.advanceTimersByTimeAsync(5);
+		expect(config.onBatch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+			events: [expect.objectContaining({ id: catchUp.id })],
+			relays: [expect.objectContaining({ status: 'eose' })]
+		}));
+	});
+
+	it('keeps the actual initial wire boundary when a timed-out initial REQ later reaches EOSE', async () => {
+		const f = fixture(1);
+		await f.start();
+		await completeTraceRootBootstrap(f.transport);
+		const relay = f.authorities[0];
+		relay.onRequest = () => {};
+		const config = traceInput(f.channel.id);
+		const pending = f.transport.configureTraceReplies(config);
+		const actualWireBoundary = Math.floor(Date.now() / 1000);
+		await vi.advanceTimersByTimeAsync(TIMEOUT);
+		await pending;
+		vi.setSystemTime((actualWireBoundary + TIMEOUT + 301) * 1000);
+		send(relay.latestSocket(), 'EOSE', relay.traceRequests()[0][1]);
+		await vi.advanceTimersByTimeAsync(5);
+		const continuation = relay.traceRequests().at(-1)!;
+		const root = filters(continuation).find((filter) => !Array.isArray(filter['#e']) && !Array.isArray(filter['#p']) && Array.isArray(filter['#E']))!;
+		expect(root.since).toBe(actualWireBoundary - 300);
+		expect(config.onBatch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ relays: [expect.objectContaining({ status: 'eose' })] }));
+	});
+
+	it('does not create an artificial catch-up after an initial CLOSED terminal', async () => {
+		const f = fixture(1);
+		await f.start();
+		await completeTraceRootBootstrap(f.transport);
+		const relay = f.authorities[0];
+		relay.onRequest = (socket, request) => {
+			if (kind(request) === 1111) send(socket, 'CLOSED', request[1], 'restricted: replies');
+		};
+		const config = traceInput(f.channel.id);
+		const pending = f.transport.configureTraceReplies(config);
+		await vi.advanceTimersByTimeAsync(5);
+		await expect(pending).resolves.toMatchObject({ initialBatch: { relays: [{ relayUrl: relay.url, status: 'closed', notice: 'restricted: replies' }] } });
+		await vi.advanceTimersByTimeAsync(TIMEOUT + 10);
+		expect(config.onBatch).not.toHaveBeenCalled();
+		expect(f.transport.getDiagnostics().traceReplies?.relays).toEqual([{ relayUrl: relay.url, status: 'closed', notice: 'restricted: replies' }]);
+	});
+
+	it('does not create an artificial catch-up after an initial unavailable terminal', async () => {
+		vi.mocked(createRxNostr).mockImplementationOnce((config) => actualRxNostr.createRxNostr({ ...config, retry: { strategy: 'off' } }));
+		const f = fixture(2);
+		f.authorities[1].server.options!.verifyClient = () => false;
+		await f.start(150);
+		await completeTraceRootBootstrap(f.transport);
+		f.authorities[0].onRequest = (socket, request) => {
+			if (kind(request) === 1111) send(socket, 'CLOSED', request[1], 'restricted: replies');
+		};
+		const config = traceInput(f.channel.id);
+		const pending = f.transport.configureTraceReplies(config);
+		await vi.advanceTimersByTimeAsync(5);
+		await pending;
+		await vi.advanceTimersByTimeAsync(TIMEOUT + 10);
+		expect(config.onBatch).not.toHaveBeenCalled();
+		expect(f.transport.getDiagnostics().traceReplies?.relays).toEqual([
+			{ relayUrl: f.authorities[0].url, status: 'closed', notice: 'restricted: replies' },
+			{ relayUrl: f.authorities[1].url, status: 'unavailable' }
+		]);
+	});
+
+	it('delivers a previously queued max-two third REQ as one late catch-up before that relay alone continues', async () => {
+		const f = fixture(1, socketConstructor, 6_000);
+		await f.start();
+		await completeTraceRootBootstrap(f.transport);
+		const relay = f.authorities[0];
+		Nip11Registry.set(relay.url, { limitation: { max_subscriptions: 2 } });
+		relay.onRequest = () => {};
+		const config = traceInput(f.channel.id);
+		const pending = f.transport.configureTraceReplies(config);
+		await vi.advanceTimersByTimeAsync(6_010);
+		await pending;
+		expect(relay.traceRequests()).toEqual([]);
+		expect(relay.primaryRequests()).toHaveLength(2);
+		Nip11Registry.set(relay.url, { limitation: { max_subscriptions: 3 } });
+		// SubQueue re-evaluates dynamic NIP-11 capacity when work is queued. The
+		// wake request stays queued behind the now-active product third REQ; the
+		// transport itself never creates a fourth request.
+		const wake = createRxForwardReq();
+		const wakeSubscription = publicClient().use(wake, { on: { relays: [relay.url] } }).subscribe();
+		wake.emit({ kinds: [9_999] });
+		await vi.advanceTimersByTimeAsync(10);
+		const late = relay.traceRequests().at(-1)!;
+		expect(filters(late).filter((filter) => filter.limit === 100)).toHaveLength(2);
+		wakeSubscription.unsubscribe();
+		const event = traceReply(f.channel.id, '6'.repeat(64));
+		send(relay.latestSocket(), 'EVENT', late[1], event);
+		send(relay.latestSocket(), 'EOSE', late[1]);
+		await vi.advanceTimersByTimeAsync(5);
+		expect(config.onBatch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ events: [expect.objectContaining({ id: event.id })] }));
+	});
+
+	it('uses only EOSE boundaries as cursors, never raw timestamps, live events, CLOSED, timeout, or unavailable', async () => {
+		vi.mocked(createRxNostr).mockImplementationOnce((config) => actualRxNostr.createRxNostr({ ...config, retry: { strategy: 'off' } }));
+		const f = fixture(3);
+		f.authorities[2].server.options!.verifyClient = () => false;
+		await f.start(150);
+		await completeTraceRootBootstrap(f.transport);
+		const [a, b] = f.authorities;
+		a.onRequest = (socket, request) => {
+			if (kind(request) !== 1111) return;
+			if (filters(request).some((filter) => filter.limit === 100)) {
+				send(socket, 'EVENT', request[1], traceReply(f.channel.id, '7'.repeat(64), TIME + 9_999));
+				send(socket, 'EOSE', request[1]);
+			}
+		};
+		b.onRequest = (socket, request) => { if (kind(request) === 1111) send(socket, 'CLOSED', request[1], 'blocked'); };
+		const first = traceInput(f.channel.id);
+		const configured = f.transport.configureTraceReplies(first);
+		await vi.advanceTimersByTimeAsync(5);
+		await configured;
+		const next = traceInput(f.channel.id, 'f'.repeat(64));
+		const reconfigured = f.transport.configureTraceReplies(next);
+		await vi.advanceTimersByTimeAsync(5);
+		await reconfigured;
+		const aFresh = a.traceRequests().at(-1)!;
+		expect(filters(aFresh).find((filter) => !Array.isArray(filter['#e']) && Array.isArray(filter['#E']))?.since).toBe(TIME - 300);
+		expect(filters(b.traceRequests().at(-1)!).filter((filter) => filter.limit === 100)).toHaveLength(2);
+		expect(f.transport.getDiagnostics().traceReplies?.relays.map((relay) => relay.status)).toContain('unavailable');
+	});
+
+	it('keeps notification cursor continuity only for its canonical persona and effective-root scope', async () => {
+		const f = fixture(1);
+		await f.start();
+		await completeTraceRootBootstrap(f.transport);
+		const relay = f.authorities[0];
+		relay.onRequest = (socket, request) => { if (kind(request) === 1111) send(socket, 'EOSE', request[1]); };
+		const first = traceInput(f.channel.id);
+		const configured = f.transport.configureTraceReplies(first);
+		await vi.advanceTimersByTimeAsync(5);
+		await configured;
+		const requestsAfterFirst = relay.traceRequests().length;
+		const reordered = {
+			...traceInput(f.channel.id),
+			notification: { personaPubkey: 'c'.repeat(64), effectiveRootIds: [f.channel.id, f.channel.id], initialSince: TIME - 600 }
+		};
+		await f.transport.configureTraceReplies(reordered);
+		expect(relay.traceRequests()).toHaveLength(requestsAfterFirst);
+		const added = {
+			...traceInput(f.channel.id),
+			notification: { personaPubkey: 'c'.repeat(64), effectiveRootIds: [f.channel.id, 'a'.repeat(64)], initialSince: TIME - 700 }
+		};
+		const addedPending = f.transport.configureTraceReplies(added);
+		await vi.advanceTimersByTimeAsync(5);
+		await addedPending;
+		const addedFilter = filters(relay.traceRequests().at(-1)!).find((filter) => Array.isArray(filter['#p']))!;
+		expect(addedFilter.since).toBe(TIME - 700);
+		const changedPersona = {
+			...added,
+			notification: { ...added.notification, personaPubkey: 'b'.repeat(64) }
+		};
+		const personaPending = f.transport.configureTraceReplies(changedPersona);
+		await vi.advanceTimersByTimeAsync(5);
+		await personaPending;
+		expect(filters(relay.traceRequests().at(-1)!).find((filter) => Array.isArray(filter['#p']))?.['#p']).toEqual(['b'.repeat(64)]);
+	});
+
+	it('preserves same-root cursor, makes a new direct scope initial, and refreshes after close and reopen', async () => {
+		const f = fixture(1);
+		await f.start();
+		await completeTraceRootBootstrap(f.transport);
+		const relay = f.authorities[0];
+		relay.onRequest = (socket, request) => { if (kind(request) === 1111) send(socket, 'EOSE', request[1]); };
+		const configured = f.transport.configureTraceReplies(traceInput(f.channel.id));
+		await vi.advanceTimersByTimeAsync(5);
+		await configured;
+		const next = traceInput(f.channel.id, 'f'.repeat(64));
+		const changedPending = f.transport.configureTraceReplies(next);
+		await vi.advanceTimersByTimeAsync(5);
+		await changedPending;
+		const changed = relay.traceRequests().map(filters);
+		expect(changed.some((bundle) => bundle.find((filter) => Array.isArray(filter['#e']) && filter['#e'][0] === f.channel.id)?.limit === undefined)).toBe(true);
+		expect(changed.some((bundle) => bundle.find((filter) => Array.isArray(filter['#e']) && filter['#e'][0] === 'f'.repeat(64))?.limit === 100)).toBe(true);
+		await f.transport.configureTraceReplies({ onBatch: vi.fn(), onLiveEvent: vi.fn() });
+		const reopened = f.transport.configureTraceReplies(traceInput(f.channel.id));
+		await vi.advanceTimersByTimeAsync(5);
+		await reopened;
+		expect(filters(relay.traceRequests().at(-1)!).filter((filter) => filter.limit === 100)).toHaveLength(2);
+	});
+
+	it('cleans up reconfigured trace state and ignores old packets and all callbacks after dispose', async () => {
+		const f = fixture(1);
+		await f.start();
+		await completeTraceRootBootstrap(f.transport);
+		const relay = f.authorities[0];
+		relay.onRequest = (socket, request) => { if (kind(request) === 1111) send(socket, 'EOSE', request[1]); };
+		const first = traceInput(f.channel.id);
+		const configured = f.transport.configureTraceReplies(first);
+		await vi.advanceTimersByTimeAsync(5);
+		await configured;
+		const oldRequest = relay.traceRequests().at(-1)!;
+		const second = traceInput(f.channel.id, 'f'.repeat(64));
+		const secondPending = f.transport.configureTraceReplies(second);
+		await vi.advanceTimersByTimeAsync(5);
+		await secondPending;
+		expect(relay.messages.some((message) => message[0] === 'CLOSE' && message[1] === oldRequest[1])).toBe(true);
+		send(relay.latestSocket(), 'EVENT', oldRequest[1], traceReply(f.channel.id, '4'.repeat(64)));
+		send(relay.latestSocket(), 'EOSE', oldRequest[1]);
+		await vi.advanceTimersByTimeAsync(1);
+		expect(second.onBatch).not.toHaveBeenCalled();
+		expect(second.onLiveEvent).not.toHaveBeenCalled();
+		f.transport.dispose();
+		send(relay.latestSocket(), 'EVENT', relay.traceRequests().at(-1)![1], traceReply(f.channel.id, '5'.repeat(64)));
+		await vi.advanceTimersByTimeAsync(TIMEOUT + 10);
+		expect(second.onBatch).not.toHaveBeenCalled();
+		expect(second.onLiveEvent).not.toHaveBeenCalled();
+		expect(vi.getTimerCount()).toBe(0);
 	});
 });
 

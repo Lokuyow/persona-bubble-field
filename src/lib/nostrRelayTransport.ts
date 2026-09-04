@@ -7,7 +7,9 @@ import {
 	type ConnectionState,
 	type EventPacket,
 	type IWebSocketConstructor,
+	type LazyFilter,
 	type OutgoingMessagePacket,
+	type RxReq,
 	type RxNostr
 } from 'rx-nostr';
 import { Subscription } from 'rxjs';
@@ -15,6 +17,9 @@ import type { Filter } from 'nostr-tools/filter';
 import { verifyEvent, type Event, type VerifiedEvent } from 'nostr-tools/pure';
 import {
 	buildPositionFilter,
+	buildTraceDirectReplyFilter,
+	buildTraceNotificationFilter,
+	buildTraceReplyFilter,
 	buildTraceRootBootstrapFilter,
 	buildWorldMessageFilters,
 	parsePositionEvent,
@@ -31,6 +36,7 @@ import type { PrototypeWorldConfig } from './prototypeWorld';
 const CHANNEL_CREATE_KIND = 40;
 const CHANNEL_METADATA_KIND = 41;
 const DEFAULT_OPERATION_TIMEOUT_MS = 10_000;
+const TRACE_REPLY_RESUME_OVERLAP_SECONDS = 300;
 
 export type LogicalPrimarySubscription = 'world-messages' | 'world-positions';
 export type PrimaryPairStatus = 'pending' | 'eose' | 'closed' | 'unavailable' | 'timeout';
@@ -73,11 +79,52 @@ export type Nip11Diagnostic = Readonly<{
 	capacity: RelayCapacity;
 }>;
 
+export type TraceReplyRelayDiagnostic = Readonly<{
+	relayUrl: string;
+	status: 'pending' | RelayQueryStatus;
+	notice?: string;
+}>;
+
+export type TraceReplyBatch = Readonly<{
+	events: readonly Event[];
+	relays: readonly TraceReplyRelayDiagnostic[];
+}>;
+
+export type TraceReplyNotificationConfig = Readonly<{
+	personaPubkey: string;
+	effectiveRootIds?: readonly string[];
+	initialSince: number;
+}>;
+
+export type TraceReplyConversationConfig = Readonly<{
+	rootId: string;
+	currentId: string;
+}>;
+
+export type TraceReplyConfiguration = Readonly<{
+	notification?: TraceReplyNotificationConfig;
+	conversation?: TraceReplyConversationConfig;
+	onBatch: (batch: TraceReplyBatch) => void;
+	onLiveEvent: (event: Event) => void;
+}>;
+
+export type TraceReplyConfigurationResult =
+	| Readonly<{ status: 'active'; generation: number; initialBatch: TraceReplyBatch }>
+	| Readonly<{ status: 'inactive'; generation: number }>
+	| Readonly<{ status: 'superseded'; generation: number }>;
+
+export type TraceReplyDiagnostics = Readonly<{
+	generation: number;
+	status: 'initializing' | 'active' | 'inactive';
+	relays: readonly TraceReplyRelayDiagnostic[];
+}>;
+
 export type NostrRelayTransportDiagnostics = Readonly<{
 	metadataDiscovery: MetadataDiscoveryDiagnostics | null;
 	primaryPairs: readonly PrimaryPairDiagnostic[];
 	connections: readonly RelayConnectionDiagnostic[];
 	nip11: readonly Nip11Diagnostic[];
+	traceReplies: TraceReplyDiagnostics | null;
 }>;
 
 export type PrimaryStartInput = Readonly<{
@@ -123,11 +170,62 @@ export type NostrRelayTransportOptions = Readonly<{
 
 type TransportState = 'new' | 'starting' | 'started' | 'failed' | 'disposed';
 type PrimaryPairKey = `${string}\u0000${LogicalPrimarySubscription}`;
+type TraceScopeKind = 'notification' | 'root' | 'direct';
+type TraceScopeForm = 'initial' | 'continuation';
+type TraceCycleKind = 'initial' | 'catch-up';
+
+type TraceScope = Readonly<{
+	key: string;
+	kind: TraceScopeKind;
+	initialFilter: Filter;
+	initialSince?: number;
+}>;
+
+type TraceCycle = {
+	kind: TraceCycleKind;
+	cycleBoundary: number;
+	events: Event[];
+	timer: ReturnType<typeof setTimeout> | null;
+};
+
+type TraceRelayState = {
+	relayUrl: string;
+	req: RxReq<'forward'> & { emit(filters: LazyFilter | LazyFilter[]): void };
+	subscription: Subscription;
+	subId: string | null;
+	forms: Map<string, TraceScopeForm>;
+	stableCursors: Map<string, number>;
+	provisionalCursors: Map<string, number>;
+	initialStatus: TraceReplyRelayDiagnostic;
+	cycle: TraceCycle | null;
+};
+
+type TraceGeneration = {
+	id: number;
+	semanticKey: string;
+	scopes: readonly TraceScope[];
+	states: Map<string, TraceRelayState>;
+	resources: Subscription;
+	seenIds: Set<string>;
+	initialEvents: Event[];
+	initialSettled: boolean;
+	active: boolean;
+	initialDeadline: ReturnType<typeof setTimeout> | null;
+	callbacks: Pick<TraceReplyConfiguration, 'onBatch' | 'onLiveEvent'>;
+	resolve: (result: TraceReplyConfigurationResult) => void;
+	reject: (error: Error) => void;
+	settledResult: TraceReplyConfigurationResult | null;
+	initialPromise: Promise<TraceReplyConfigurationResult>;
+};
 
 function assertTimestamp(value: number, name: string): void {
 	if (!Number.isSafeInteger(value) || value < 0) {
 		throw new TypeError(`${name} must be a non-negative safe integer in Unix seconds.`);
 	}
+}
+
+function unixNow(): number {
+	return Math.floor(Date.now() / 1000);
 }
 
 function pairKey(relayUrl: string, subscription: LogicalPrimarySubscription): PrimaryPairKey {
@@ -209,6 +307,24 @@ function matchesQueryFilter(filters: readonly unknown[], expected: Filter): bool
 		: actual[key] === value);
 }
 
+function matchesFilter(candidate: unknown, expected: Filter): boolean {
+	const actualEntries = filterEntries(candidate);
+	const expectedEntries = filterEntries(expected);
+	if (!actualEntries || !expectedEntries || actualEntries.length !== expectedEntries.length) return false;
+	const actual = Object.fromEntries(actualEntries);
+	return expectedEntries.every(([key, value]) => Array.isArray(value)
+		? hasExactly(actual[key], value)
+		: actual[key] === value);
+}
+
+function matchesFilterBundle(filters: readonly unknown[], expected: readonly Filter[]): boolean {
+	return filters.length === expected.length && expected.every((filter) => filters.some((candidate) => matchesFilter(candidate, filter)));
+}
+
+function canonicalRootIds(rootIds: readonly string[] | undefined): readonly string[] {
+	return [...new Set(rootIds ?? [])].sort((first, second) => first < second ? -1 : first > second ? 1 : 0);
+}
+
 function copyPairDiagnostics(pairs: ReadonlyMap<PrimaryPairKey, PrimaryPairDiagnostic>): readonly PrimaryPairDiagnostic[] {
 	return [...pairs.values()].map((pair) => ({ ...pair }));
 }
@@ -252,6 +368,11 @@ export function createNostrRelayTransport(
 	const subscriptions = new Subscription();
 	let cancelPrimaryStart: (() => void) | null = null;
 	let traceRootBootstrapStarted = false;
+	let traceRootBootstrapComplete = false;
+	let traceGenerationSequence = 0;
+	let traceGeneration: TraceGeneration | null = null;
+	let traceDiagnostics: TraceReplyDiagnostics | null = null;
+	const stableTraceCursors = new Map<string, Map<string, number>>();
 	function requireRxNostr(): RxNostr {
 		if (!rxNostr) throw new Error('Relay transport has not been initialized.');
 		return rxNostr;
@@ -270,13 +391,24 @@ export function createNostrRelayTransport(
 		const canonical = canonicalRelay(relayUrl);
 		if (!canonical) return;
 		connections.set(canonical, { relayUrl: canonical, state: connectionState });
-		if (!initialPhase || !isConnectionUnavailable(connectionState)) return;
-		for (const subscription of ['world-messages', 'world-positions'] as const) {
-			const key = pairKey(canonical, subscription);
-			const pair = primaryPairs.get(key);
-			if (pair && pair.status === 'pending') {
-				primaryPairs.set(key, { ...pair, status: 'unavailable' });
+		if (initialPhase && isConnectionUnavailable(connectionState)) {
+			for (const subscription of ['world-messages', 'world-positions'] as const) {
+				const key = pairKey(canonical, subscription);
+				const pair = primaryPairs.get(key);
+				if (pair && pair.status === 'pending') {
+					primaryPairs.set(key, { ...pair, status: 'unavailable' });
+				}
 			}
+		}
+		const generation = traceGeneration;
+		const traceState = generation?.states.get(canonical);
+		if (!generation || !traceState || !isConnectionUnavailable(connectionState)) return;
+		if (!generation.initialSettled && traceState.initialStatus.status === 'pending') {
+			finishTraceInitialRelay(generation, traceState, { relayUrl: canonical, status: 'unavailable' });
+			return;
+		}
+		if (generation.initialSettled && traceState.cycle) {
+			finishTraceCatchUp(generation, traceState, { relayUrl: canonical, status: 'unavailable' });
 		}
 	}
 
@@ -299,12 +431,14 @@ export function createNostrRelayTransport(
 			metadataDiscovery: metadataDiagnostics,
 			primaryPairs: copyPairDiagnostics(primaryPairs),
 			connections: [...connections.values()].map((connection) => ({ ...connection })),
-			nip11: nip11Diagnostics()
+			nip11: nip11Diagnostics(),
+			traceReplies: traceDiagnostics
 		};
 	}
 
 	function disposeRxNostr(): void {
 		cancelPrimaryStart?.();
+		disposeTraceGeneration(true);
 		subscriptions.unsubscribe();
 		rxNostr?.dispose();
 		rxNostr = null;
@@ -568,6 +702,357 @@ export function createNostrRelayTransport(
 		});
 	}
 
+	function copyTraceDiagnostic(diagnostic: TraceReplyRelayDiagnostic): TraceReplyRelayDiagnostic {
+		return { ...diagnostic };
+	}
+
+	function refreshTraceDiagnostics(generation: TraceGeneration | null, status: TraceReplyDiagnostics['status']): void {
+		traceDiagnostics = generation
+			? {
+				generation: generation.id,
+				status,
+				relays: metadata!.relays.map((relayUrl) => copyTraceDiagnostic(generation.states.get(relayUrl)!.initialStatus))
+			}
+			: { generation: traceGenerationSequence, status: 'inactive', relays: [] };
+	}
+
+	function traceScopes(input: TraceReplyConfiguration): { scopes: readonly TraceScope[]; semanticKey: string } {
+		const scopes: TraceScope[] = [];
+		const notification = input.notification;
+		if (notification) {
+			assertTimestamp(notification.initialSince, 'notification initialSince');
+			const effectiveRootIds = canonicalRootIds(notification.effectiveRootIds);
+			const initialFilter = buildTraceNotificationFilter({
+				personaPubkey: notification.personaPubkey,
+				...(effectiveRootIds.length > 0 ? { effectiveRootIds } : {})
+			});
+			scopes.push({
+				key: `notification\u0000${notification.personaPubkey}\u0000${effectiveRootIds.join('\u0000')}`,
+				kind: 'notification',
+				initialFilter: { ...initialFilter, since: notification.initialSince },
+				initialSince: notification.initialSince
+			});
+		}
+		if (input.conversation) {
+			const { rootId, currentId } = input.conversation;
+			scopes.push({ key: `root\u0000${rootId}`, kind: 'root', initialFilter: buildTraceReplyFilter({ rootId }) });
+			scopes.push({ key: `direct\u0000${rootId}\u0000${currentId}`, kind: 'direct', initialFilter: buildTraceDirectReplyFilter({ rootId, currentId }) });
+		}
+		return { scopes, semanticKey: JSON.stringify(scopes.map((scope) => [scope.key, scope.initialFilter])) };
+	}
+
+	function traceConcreteFilters(generation: TraceGeneration, relay: TraceRelayState): Filter[] {
+		return generation.scopes.map((scope) => {
+			if (relay.forms.get(scope.key) !== 'continuation') return { ...scope.initialFilter };
+			const cursor = relay.stableCursors.get(scope.key);
+			if (cursor === undefined) throw new Error('Trace continuation is missing a stable cursor.');
+			const filter = { ...scope.initialFilter, since: cursor } as Record<string, unknown>;
+			if (scope.kind !== 'notification') delete filter.limit;
+			return filter as Filter;
+		});
+	}
+
+	function traceFilters(generation: TraceGeneration, relay: TraceRelayState): LazyFilter[] {
+		return generation.scopes.map((scope) => {
+			if (relay.forms.get(scope.key) !== 'continuation') return { ...scope.initialFilter };
+			const filter = { ...scope.initialFilter } as Record<string, unknown>;
+			if (scope.kind !== 'notification') delete filter.limit;
+			filter.since = () => {
+				const cursor = relay.stableCursors.get(scope.key);
+				if (cursor === undefined) throw new Error('Trace continuation is missing a stable cursor.');
+				return cursor;
+			};
+			return filter as LazyFilter;
+		});
+	}
+
+	function traceBoundary(scope: TraceScope, cycleBoundary: number): number {
+		const overlap = Math.max(0, cycleBoundary - TRACE_REPLY_RESUME_OVERLAP_SECONDS);
+		return scope.kind === 'notification' ? Math.max(scope.initialSince!, overlap) : overlap;
+	}
+
+	function traceInitialTerminal(generation: TraceGeneration, relay: TraceRelayState): boolean {
+		return relay.initialStatus.status !== 'pending';
+	}
+
+	function armTraceCatchUpTimer(generation: TraceGeneration, relay: TraceRelayState, cycle: TraceCycle): void {
+		if (cycle.timer) clearTimeout(cycle.timer);
+		cycle.timer = setTimeout(() => {
+			if (generation === traceGeneration && generation.active && relay.cycle === cycle) {
+				finishTraceCatchUp(generation, relay, { relayUrl: relay.relayUrl, status: 'timeout' });
+			}
+		}, timeoutMs);
+	}
+
+	function startTraceCycle(generation: TraceGeneration, relay: TraceRelayState, kind: TraceCycleKind): void {
+		if (generation !== traceGeneration || !generation.active) return;
+		const cycle = relay.cycle?.kind === kind
+			? relay.cycle
+			: { kind, cycleBoundary: unixNow(), events: [], timer: null };
+		// A reconnect resends the ongoing Forward REQ. It is still the same
+		// unacknowledged batch, so keep its buffered raw events and only move the
+		// boundary to the latest wire REQ that its eventual EOSE acknowledges.
+		cycle.cycleBoundary = unixNow();
+		if (cycle.timer) clearTimeout(cycle.timer);
+		relay.cycle = cycle;
+		if (kind === 'catch-up') armTraceCatchUpTimer(generation, relay, cycle);
+	}
+
+	function convertTimedOutInitialCycleToCatchUp(generation: TraceGeneration, relay: TraceRelayState): void {
+		const initialCycle = relay.cycle;
+		if (relay.initialStatus.status !== 'timeout' || initialCycle?.kind !== 'initial') return;
+		// Events before initial settlement were delivered in initialBatch. Keep the
+		// wire-observed boundary, but begin a fresh callback-only batch and timer.
+		const catchUpCycle: TraceCycle = {
+			kind: 'catch-up',
+			cycleBoundary: initialCycle.cycleBoundary,
+			events: [],
+			timer: null
+		};
+		relay.cycle = catchUpCycle;
+		armTraceCatchUpTimer(generation, relay, catchUpCycle);
+	}
+
+	function invalidateTraceRelayTerminal(relay: TraceRelayState): void {
+		if (relay.cycle?.timer) clearTimeout(relay.cycle.timer);
+		relay.cycle = null;
+		relay.subId = null;
+	}
+
+	function finishTraceInitialRelay(
+		generation: TraceGeneration,
+		relay: TraceRelayState,
+		diagnostic: TraceReplyRelayDiagnostic
+	): void {
+		if (generation !== traceGeneration || generation.initialSettled || traceInitialTerminal(generation, relay)) return;
+		relay.initialStatus = diagnostic;
+		if (diagnostic.status === 'eose' && relay.cycle) {
+			for (const scope of generation.scopes) relay.provisionalCursors.set(scope.key, traceBoundary(scope, relay.cycle.cycleBoundary));
+		}
+		if (diagnostic.status === 'closed' || diagnostic.status === 'unavailable') invalidateTraceRelayTerminal(relay);
+		if ([...generation.states.values()].every((state) => traceInitialTerminal(generation, state))) finishTraceInitial(generation);
+	}
+
+	function finishTraceInitial(generation: TraceGeneration): void {
+		if (generation !== traceGeneration || generation.initialSettled) return;
+		generation.initialSettled = true;
+		if (generation.initialDeadline) clearTimeout(generation.initialDeadline);
+		generation.initialDeadline = null;
+		for (const relay of generation.states.values()) {
+			for (const [scopeKey, cursor] of relay.provisionalCursors) {
+				relay.stableCursors.set(scopeKey, cursor);
+				const retained = stableTraceCursors.get(scopeKey) ?? new Map<string, number>();
+				retained.set(relay.relayUrl, cursor);
+				stableTraceCursors.set(scopeKey, retained);
+			}
+			relay.provisionalCursors.clear();
+		}
+		const result: TraceReplyConfigurationResult = {
+			status: 'active', generation: generation.id, initialBatch: {
+				events: [...generation.initialEvents],
+				relays: metadata!.relays.map((relayUrl) => copyTraceDiagnostic(generation.states.get(relayUrl)!.initialStatus))
+			}
+		};
+		generation.settledResult = result;
+		refreshTraceDiagnostics(generation, 'active');
+		generation.resolve(result);
+		queueMicrotask(() => {
+			if (generation !== traceGeneration || !generation.active) return;
+			for (const relay of generation.states.values()) {
+				if (relay.initialStatus.status === 'eose') {
+					transitionTraceRelay(generation, relay);
+					continue;
+				}
+				// A timed-out initial REQ may still be ongoing. Its pre-settlement
+				// events were returned above; retain its actual wire boundary while a
+				// fresh callback-only catch-up batch waits for a terminal message.
+				convertTimedOutInitialCycleToCatchUp(generation, relay);
+			}
+		});
+	}
+
+	function transitionTraceRelay(generation: TraceGeneration, relay: TraceRelayState): void {
+		if (generation !== traceGeneration || !generation.active) return;
+		let changed = false;
+		for (const scope of generation.scopes) {
+			if (relay.forms.get(scope.key) === 'initial') {
+				relay.forms.set(scope.key, 'continuation');
+				changed = true;
+			}
+		}
+		if (!changed) return;
+		relay.req.emit(traceFilters(generation, relay));
+	}
+
+	function finishTraceCatchUp(
+		generation: TraceGeneration,
+		relay: TraceRelayState,
+		diagnostic: TraceReplyRelayDiagnostic
+	): void {
+		if (generation !== traceGeneration || !generation.active || !generation.initialSettled || !relay.cycle) return;
+		const cycle = relay.cycle;
+		relay.cycle = null;
+		if (cycle.timer) clearTimeout(cycle.timer);
+		const batch: TraceReplyBatch = { events: [...cycle.events], relays: [diagnostic] };
+		generation.callbacks.onBatch(batch);
+		if (generation !== traceGeneration || !generation.active) return;
+		relay.initialStatus = diagnostic;
+		refreshTraceDiagnostics(generation, 'active');
+		if (diagnostic.status === 'eose') {
+			for (const scope of generation.scopes) {
+				const cursor = traceBoundary(scope, cycle.cycleBoundary);
+				relay.stableCursors.set(scope.key, cursor);
+				const retained = stableTraceCursors.get(scope.key) ?? new Map<string, number>();
+				retained.set(relay.relayUrl, cursor);
+				stableTraceCursors.set(scope.key, retained);
+			}
+			transitionTraceRelay(generation, relay);
+		} else if (diagnostic.status === 'closed' || diagnostic.status === 'unavailable') {
+			relay.subId = null;
+		}
+	}
+
+	function receiveTraceEvent(generation: TraceGeneration, relay: TraceRelayState, event: Event): void {
+		if (generation !== traceGeneration || !generation.active || generation.seenIds.has(event.id)) return;
+		generation.seenIds.add(event.id);
+		if (!generation.initialSettled) {
+			generation.initialEvents.push(event);
+			return;
+		}
+		if (relay.cycle) {
+			relay.cycle.events.push(event);
+			return;
+		}
+		generation.callbacks.onLiveEvent(event);
+	}
+
+	function disposeTraceGeneration(disposed: boolean): void {
+		const generation = traceGeneration;
+		if (!generation) return;
+		traceGeneration = null;
+		generation.active = false;
+		if (generation.initialDeadline) clearTimeout(generation.initialDeadline);
+		for (const relay of generation.states.values()) if (relay.cycle?.timer) clearTimeout(relay.cycle.timer);
+		generation.resources.unsubscribe();
+		if (!generation.initialSettled) {
+			if (disposed) generation.reject(new Error('Relay transport disposed during trace reply configuration.'));
+			else generation.resolve({ status: 'superseded', generation: generation.id });
+		}
+	}
+
+	function configureTraceReplies(input: TraceReplyConfiguration): Promise<TraceReplyConfigurationResult> {
+		if (state !== 'started' || !metadata || !traceRootBootstrapComplete) {
+			return Promise.reject(new Error('Relay transport must complete trace root bootstrap before configuring trace replies.'));
+		}
+		const configured = traceScopes(input);
+		if (configured.scopes.length === 0) {
+			disposeTraceGeneration(false);
+			stableTraceCursors.clear();
+			traceGenerationSequence += 1;
+			const result: TraceReplyConfigurationResult = { status: 'inactive', generation: traceGenerationSequence };
+			refreshTraceDiagnostics(null, 'inactive');
+			return Promise.resolve(result);
+		}
+		if (traceGeneration?.semanticKey === configured.semanticKey) {
+			traceGeneration.callbacks = { onBatch: input.onBatch, onLiveEvent: input.onLiveEvent };
+			return traceGeneration.initialSettled
+				? Promise.resolve(traceGeneration.settledResult!)
+				: traceGeneration.initialPromise;
+		}
+		disposeTraceGeneration(false);
+		const scopeKeys = new Set(configured.scopes.map((scope) => scope.key));
+		for (const key of [...stableTraceCursors.keys()]) if (!scopeKeys.has(key)) stableTraceCursors.delete(key);
+		let resolve!: (result: TraceReplyConfigurationResult) => void;
+		let reject!: (error: Error) => void;
+		const initialPromise = new Promise<TraceReplyConfigurationResult>((nextResolve, nextReject) => { resolve = nextResolve; reject = nextReject; });
+		const generation: TraceGeneration = {
+			id: ++traceGenerationSequence,
+			semanticKey: configured.semanticKey,
+			scopes: configured.scopes,
+			states: new Map(),
+			resources: new Subscription(),
+			seenIds: new Set(),
+			initialEvents: [],
+			initialSettled: false,
+			active: true,
+			initialDeadline: null,
+			callbacks: { onBatch: input.onBatch, onLiveEvent: input.onLiveEvent },
+			resolve,
+			reject,
+			settledResult: null,
+			initialPromise
+		};
+		traceGeneration = generation;
+		for (const relayUrl of metadata.relays) {
+			const retained = new Map<string, number>();
+			for (const scope of configured.scopes) {
+				const cursor = stableTraceCursors.get(scope.key)?.get(relayUrl);
+				if (cursor !== undefined) retained.set(scope.key, cursor);
+			}
+			const req = createRxForwardReq();
+			const relay: TraceRelayState = {
+				relayUrl,
+				req,
+				subscription: new Subscription(),
+				subId: null,
+				forms: new Map(configured.scopes.map((scope) => [scope.key, retained.has(scope.key) ? 'continuation' : 'initial'])),
+				stableCursors: retained,
+				provisionalCursors: new Map(),
+				initialStatus: { relayUrl, status: 'pending' },
+				cycle: null
+			};
+			generation.states.set(relayUrl, relay);
+			relay.subscription = clientUseTraceRequest(req, relayUrl);
+			generation.resources.add(relay.subscription);
+		}
+		const client = requireRxNostr();
+		generation.resources.add(client.createOutgoingMessageObservable().subscribe((packet) => {
+			const request = reqFromOutgoing(packet);
+			const relayUrl = canonicalRelay(packet.to);
+			if (!request || !relayUrl || generation !== traceGeneration || !generation.active) return;
+			const relay = generation.states.get(relayUrl);
+			if (!relay || !matchesFilterBundle(request.filters, traceConcreteFilters(generation, relay))) return;
+			relay.subId = request.subId;
+			if (!generation.initialSettled) {
+				if (!traceInitialTerminal(generation, relay)) startTraceCycle(generation, relay, 'initial');
+			} else startTraceCycle(generation, relay, 'catch-up');
+		}));
+		generation.resources.add(client.createAllEventObservable().subscribe((packet) => {
+			const relayUrl = canonicalRelay(packet.from);
+			const relay = relayUrl ? generation.states.get(relayUrl) : undefined;
+			if (generation !== traceGeneration || !relay || relay.subId !== packet.subId) return;
+			receiveTraceEvent(generation, relay, packet.event);
+		}));
+		generation.resources.add(client.createAllMessageObservable().subscribe((packet) => {
+			if (packet.type !== 'EOSE' && packet.type !== 'CLOSED') return;
+			const relayUrl = canonicalRelay(packet.from);
+			const relay = relayUrl ? generation.states.get(relayUrl) : undefined;
+			if (generation !== traceGeneration || !relay || relay.subId !== packet.subId) return;
+			const diagnostic: TraceReplyRelayDiagnostic = packet.type === 'EOSE'
+				? { relayUrl: relay.relayUrl, status: 'eose' }
+				: { relayUrl: relay.relayUrl, status: 'closed', notice: packet.notice };
+			if (!generation.initialSettled) finishTraceInitialRelay(generation, relay, diagnostic);
+			else finishTraceCatchUp(generation, relay, diagnostic);
+		}));
+		generation.initialDeadline = setTimeout(() => {
+			if (generation !== traceGeneration || generation.initialSettled) return;
+			for (const relay of generation.states.values()) {
+				finishTraceInitialRelay(generation, relay, { relayUrl: relay.relayUrl, status: 'timeout' });
+			}
+		}, timeoutMs);
+		refreshTraceDiagnostics(generation, 'initializing');
+		for (const relay of generation.states.values()) relay.req.emit(traceFilters(generation, relay));
+		for (const relayUrl of metadata.relays) {
+			const connection = client.getRelayStatus(relayUrl)?.connection;
+			if (connection) updateConnection(relayUrl, connection);
+		}
+		return generation.initialPromise;
+	}
+
+	function clientUseTraceRequest(req: TraceRelayState['req'], relayUrl: string): Subscription {
+		return requireRxNostr().use(req, { on: { relays: [relayUrl] } }).subscribe();
+	}
+
 	return {
 		async start(input: PrimaryStartInput): Promise<PrimaryStartResult> {
 			if (state !== 'new') throw new Error('Relay transport start is only allowed once.');
@@ -642,7 +1127,13 @@ export function createNostrRelayTransport(
 			const rawEvents = [...uniqueEvents.values()]
 				.sort((first, second) => second.created_at - first.created_at || compareEventIds(first, second))
 				.slice(0, filter.limit!);
-			return { rawEvents, relays: diagnostics };
+			const result = { rawEvents, relays: diagnostics };
+			traceRootBootstrapComplete = true;
+			return result;
+		},
+
+		configureTraceReplies(input: TraceReplyConfiguration): Promise<TraceReplyConfigurationResult> {
+			return configureTraceReplies(input);
 		},
 
 		async publish(event: VerifiedEvent): Promise<readonly PublishRelayResult[]> {
