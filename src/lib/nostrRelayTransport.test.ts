@@ -807,6 +807,84 @@ describe('trace reply transport', () => {
 		}));
 	});
 
+	it('evaluates continuation since lazily from the latest EOSE-stable cursor on each reconnect', async () => {
+		const f = fixture(1, socketConstructor, 6_000);
+		await f.start();
+		await completeTraceRootBootstrap(f.transport);
+		const relay = f.authorities[0];
+		const continuationWireBoundaries: number[] = [];
+		relay.onRequest = (socket, request) => {
+			if (kind(request) !== 1111) return;
+			if (filters(request).some((filter) => filter.limit === 100)) send(socket, 'EOSE', request[1]);
+			else continuationWireBoundaries.push(Math.floor(Date.now() / 1000));
+		};
+		const config = traceInput(f.channel.id);
+		const configured = f.transport.configureTraceReplies(config);
+		await vi.advanceTimersByTimeAsync(5);
+		await configured;
+		relay.latestSocket().close({ code: 1001, reason: 'first reconnect', wasClean: false });
+		await vi.advanceTimersByTimeAsync(5_000);
+		const reconnectOne = relay.traceRequests().at(-1)!;
+		const reconnectOneBoundary = continuationWireBoundaries.at(-1)!;
+		const requestsBeforeEose = relay.traceRequests().length;
+		send(relay.latestSocket(), 'EOSE', reconnectOne[1]);
+		await vi.advanceTimersByTimeAsync(10);
+		const requestsAfterEose = relay.traceRequests().length;
+		expect(requestsAfterEose).toBe(requestsBeforeEose);
+		expect(config.onBatch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ relays: [expect.objectContaining({ status: 'eose' })] }));
+		relay.latestSocket().close({ code: 1001, reason: 'second reconnect', wasClean: false });
+		await vi.advanceTimersByTimeAsync(5_000);
+		expect(relay.traceRequests().length).toBeGreaterThan(requestsAfterEose);
+		const reconnectTwo = relay.traceRequests().at(-1)!;
+		const root = filters(reconnectTwo).find((filter) => !Array.isArray(filter['#p']) && !Array.isArray(filter['#e']) && Array.isArray(filter['#E']))!;
+		const notification = filters(reconnectTwo).find((filter) => Array.isArray(filter['#p']))!;
+		expect(root.since).toBe(reconnectOneBoundary - 300);
+		expect(notification.since).toBe(reconnectOneBoundary - 300);
+		expect(filters(reconnectTwo).every((filter) => filter.limit === undefined)).toBe(true);
+	});
+
+	it('fails closed for late packets after initial and catch-up CLOSED terminals', async () => {
+		const f = fixture(1);
+		await f.start();
+		await completeTraceRootBootstrap(f.transport);
+		const relay = f.authorities[0];
+		let initial = true;
+		relay.onRequest = (socket, request) => {
+			if (kind(request) !== 1111) return;
+			if (initial) {
+				initial = false;
+				send(socket, 'CLOSED', request[1], 'restricted: initial');
+			}
+		};
+		const initialConfig = traceInput(f.channel.id);
+		const initialPending = f.transport.configureTraceReplies(initialConfig);
+		await vi.advanceTimersByTimeAsync(5);
+		await initialPending;
+		const initialSubId = relay.traceRequests()[0][1];
+		send(relay.latestSocket(), 'EVENT', initialSubId, traceReply(f.channel.id, '8'.repeat(64)));
+		send(relay.latestSocket(), 'EOSE', initialSubId);
+		await vi.advanceTimersByTimeAsync(5);
+		expect(initialConfig.onBatch).not.toHaveBeenCalled();
+		expect(initialConfig.onLiveEvent).not.toHaveBeenCalled();
+
+		const next = traceInput(f.channel.id, 'f'.repeat(64));
+		relay.onRequest = (socket, request) => {
+			if (kind(request) === 1111 && filters(request).some((filter) => filter.limit === 100)) send(socket, 'EOSE', request[1]);
+		};
+		const nextPending = f.transport.configureTraceReplies(next);
+		await vi.advanceTimersByTimeAsync(5);
+		await nextPending;
+		const catchUp = relay.traceRequests().at(-1)!;
+		send(relay.latestSocket(), 'CLOSED', catchUp[1], 'restricted: catch-up');
+		await vi.advanceTimersByTimeAsync(5);
+		expect(next.onBatch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ relays: [expect.objectContaining({ status: 'closed' })] }));
+		send(relay.latestSocket(), 'EVENT', catchUp[1], traceReply(f.channel.id, '9'.repeat(64), TIME + 1, 'f'.repeat(64)));
+		send(relay.latestSocket(), 'EOSE', catchUp[1]);
+		await vi.advanceTimersByTimeAsync(5);
+		expect(next.onBatch).toHaveBeenCalledTimes(1);
+		expect(next.onLiveEvent).not.toHaveBeenCalled();
+	});
+
 	it('turns a wire-visible initial timeout into one bounded post-initial catch-up without duplicate initial delivery', async () => {
 		const f = fixture(1);
 		await f.start();

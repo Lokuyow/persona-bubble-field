@@ -741,7 +741,7 @@ export function createNostrRelayTransport(
 		return { scopes, semanticKey: JSON.stringify(scopes.map((scope) => [scope.key, scope.initialFilter])) };
 	}
 
-	function traceFilters(generation: TraceGeneration, relay: TraceRelayState): Filter[] {
+	function traceConcreteFilters(generation: TraceGeneration, relay: TraceRelayState): Filter[] {
 		return generation.scopes.map((scope) => {
 			if (relay.forms.get(scope.key) !== 'continuation') return { ...scope.initialFilter };
 			const cursor = relay.stableCursors.get(scope.key);
@@ -749,6 +749,20 @@ export function createNostrRelayTransport(
 			const filter = { ...scope.initialFilter, since: cursor } as Record<string, unknown>;
 			if (scope.kind !== 'notification') delete filter.limit;
 			return filter as Filter;
+		});
+	}
+
+	function traceFilters(generation: TraceGeneration, relay: TraceRelayState): LazyFilter[] {
+		return generation.scopes.map((scope) => {
+			if (relay.forms.get(scope.key) !== 'continuation') return { ...scope.initialFilter };
+			const filter = { ...scope.initialFilter } as Record<string, unknown>;
+			if (scope.kind !== 'notification') delete filter.limit;
+			filter.since = () => {
+				const cursor = relay.stableCursors.get(scope.key);
+				if (cursor === undefined) throw new Error('Trace continuation is missing a stable cursor.');
+				return cursor;
+			};
+			return filter as LazyFilter;
 		});
 	}
 
@@ -799,6 +813,12 @@ export function createNostrRelayTransport(
 		armTraceCatchUpTimer(generation, relay, catchUpCycle);
 	}
 
+	function invalidateTraceRelayTerminal(relay: TraceRelayState): void {
+		if (relay.cycle?.timer) clearTimeout(relay.cycle.timer);
+		relay.cycle = null;
+		relay.subId = null;
+	}
+
 	function finishTraceInitialRelay(
 		generation: TraceGeneration,
 		relay: TraceRelayState,
@@ -809,6 +829,7 @@ export function createNostrRelayTransport(
 		if (diagnostic.status === 'eose' && relay.cycle) {
 			for (const scope of generation.scopes) relay.provisionalCursors.set(scope.key, traceBoundary(scope, relay.cycle.cycleBoundary));
 		}
+		if (diagnostic.status === 'closed' || diagnostic.status === 'unavailable') invalidateTraceRelayTerminal(relay);
 		if ([...generation.states.values()].every((state) => traceInitialTerminal(generation, state))) finishTraceInitial(generation);
 	}
 
@@ -886,6 +907,8 @@ export function createNostrRelayTransport(
 				stableTraceCursors.set(scope.key, retained);
 			}
 			transitionTraceRelay(generation, relay);
+		} else if (diagnostic.status === 'closed' || diagnostic.status === 'unavailable') {
+			relay.subId = null;
 		}
 	}
 
@@ -988,7 +1011,7 @@ export function createNostrRelayTransport(
 			const relayUrl = canonicalRelay(packet.to);
 			if (!request || !relayUrl || generation !== traceGeneration || !generation.active) return;
 			const relay = generation.states.get(relayUrl);
-			if (!relay || !matchesFilterBundle(request.filters, traceFilters(generation, relay))) return;
+			if (!relay || !matchesFilterBundle(request.filters, traceConcreteFilters(generation, relay))) return;
 			relay.subId = request.subId;
 			if (!generation.initialSettled) {
 				if (!traceInitialTerminal(generation, relay)) startTraceCycle(generation, relay, 'initial');
