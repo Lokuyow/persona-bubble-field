@@ -19,3 +19,9 @@ name = "検証"
 icon = "test"
 command = "npm run validate"
 platform = "win32"
+
+[[actions]]
+name = "開発サーバー: lun"
+icon = "run"
+command = "npm run dev -- --host"
+platform = "win32"
