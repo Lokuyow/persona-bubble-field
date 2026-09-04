@@ -2,9 +2,11 @@ import {
 	createNostrRelayTransport,
 	type PrimaryPairDiagnostic,
 	type PrimaryStartResult,
-	type PublishRelayResult
+	type PublishRelayResult,
+	type TraceReplyBatch
 } from './nostrRelayTransport';
 import { reconcileTraceRootCache } from './traceRootCache';
+import { reconcileTraceReplyCache, touchTraceReplyTree } from './traceReplyCache';
 import {
 	buildPositionEventTemplate,
 	buildWorldMessageTemplate,
@@ -13,6 +15,7 @@ import {
 	parseWorldMessage,
 	type ChannelReference,
 	type ParsedPositionEvent,
+	type ParsedTraceReply,
 	type ParsedWorldMessage
 } from './nostrProtocol';
 import {
@@ -43,6 +46,17 @@ import {
 	reconstructWorldPresenceState,
 	type WorldPresenceState
 } from './worldPresence';
+import {
+	groupTraceRoots,
+	isWithinTraceInvestigationRange,
+	prepareTraceInspectionActivity,
+	sameGridPosition
+} from './traceInvestigation';
+import type {
+	TraceConversationConfig,
+	TraceConversationOpenResult,
+	TraceConversationState
+} from './traceConversation';
 
 const BOOTSTRAP_SAFETY_MARGIN_MS = 60_000;
 
@@ -62,15 +76,17 @@ export type WorldReadBootstrap = Readonly<{
 
 export type SelfPositionWriteState =
 	| Readonly<{ kind: 'ready' }>
-	| Readonly<{ kind: 'pending'; operation: 'entry' | 'movement' | 'reactivation' }>
-	| Readonly<{ kind: 'succeeded'; operation: 'entry' | 'movement' | 'reactivation' }>
-	| Readonly<{ kind: 'retryable'; operation: 'entry' | 'movement' | 'reactivation' }>
+	| Readonly<{ kind: 'pending'; operation: SelfPositionOperationKind }>
+	| Readonly<{ kind: 'succeeded'; operation: SelfPositionOperationKind }>
+	| Readonly<{ kind: 'retryable'; operation: SelfPositionOperationKind }>
 	| Readonly<{ kind: 'unavailable' }>;
+
+export type SelfPositionOperationKind = 'entry' | 'movement' | 'reactivation' | 'trace-inspection';
 
 export type SelfPositionWriteResult =
 	| Readonly<{ kind: 'not-needed' | 'blocked' | 'unavailable' | 'pending' }>
-	| Readonly<{ kind: 'succeeded'; operation: 'entry' | 'movement' | 'reactivation' }>
-	| Readonly<{ kind: 'retryable'; operation: 'entry' | 'movement' | 'reactivation' }>;
+	| Readonly<{ kind: 'succeeded'; operation: SelfPositionOperationKind }>
+	| Readonly<{ kind: 'retryable'; operation: SelfPositionOperationKind }>;
 
 export type SelfMessageAvailability = Readonly<{ kind: 'ready' | 'unavailable' }>;
 
@@ -85,6 +101,7 @@ export type WorldReadSessionOptions = Readonly<{
 	onLiveMessage: (message: ParsedWorldMessage, presence: PresenceState) => void;
 	onTimelineMessage?: (message: ParsedWorldMessage) => void;
 	onEffectiveTraceRootsChanged?: (roots: readonly ParsedWorldMessage[]) => void;
+	onTraceConversationChanged?: (state: TraceConversationState) => void;
 	onStatusChanged: (status: WorldReadConnectionStatus) => void;
 	onSelfPositionWriteStateChanged?: (state: SelfPositionWriteState) => void;
 	onSelfMessageAvailabilityChanged?: (state: SelfMessageAvailability) => void;
@@ -96,7 +113,7 @@ type BufferedLiveEvent =
 
 type SelfPositionOperation = Readonly<{
 	id: string;
-	operation: 'entry' | 'movement' | 'reactivation';
+	operation: SelfPositionOperationKind;
 }>;
 
 type SelfMessageOperation = {
@@ -135,6 +152,11 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 	let selfPositionWriteState: SelfPositionWriteState = options.selfAccount ? { kind: 'ready' } : { kind: 'unavailable' };
 	let selfMessageAvailability: SelfMessageAvailability = { kind: 'unavailable' };
 	let pendingSelfMessage: SelfMessageOperation | null = null;
+	let effectiveTraceRoots: readonly ParsedWorldMessage[] = [];
+	let traceRootBootstrapReadiness: Promise<'ready' | 'failed'> | null = null;
+	let traceConversationState: TraceConversationState = { kind: 'closed' };
+	let traceConversationGeneration = 0;
+	let traceReplyReconcileTail: Promise<void> = Promise.resolve();
 	const pendingLiveEvents: BufferedLiveEvent[] = [];
 	const knownSelfPositionEvents = new Map<string, ParsedPositionEvent>();
 	const handedOffSelfPositionEvents = new Map<string, ParsedPositionEvent>();
@@ -150,6 +172,11 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 	function emitSelfPositionWriteState(next: SelfPositionWriteState): void {
 		selfPositionWriteState = next;
 		if (!disposed) options.onSelfPositionWriteStateChanged?.(next);
+	}
+
+	function emitTraceConversationState(next: TraceConversationState): void {
+		traceConversationState = next;
+		if (!disposed) options.onTraceConversationChanged?.(next);
 	}
 
 	function refreshSelfMessageAvailability(): void {
@@ -183,7 +210,10 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 			field: options.field,
 			rawEvents
 		}).then((roots) => {
-			if (!disposed) options.onEffectiveTraceRootsChanged?.(roots);
+			if (disposed) return;
+			effectiveTraceRoots = roots;
+			reconcileOpenTraceRoot(roots);
+			options.onEffectiveTraceRootsChanged?.(roots);
 		}).catch(() => {
 			// Trace is viewer-local supplemental state and never changes world status.
 		});
@@ -192,10 +222,11 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 	function startTraceBackground(): void {
 		reconcileTraceRoots([]);
 		if (!transport) return;
-		void transport.bootstrapTraceRootCandidates().then((result) => {
+		traceRootBootstrapReadiness = transport.bootstrapTraceRootCandidates().then((result) => {
 			reconcileTraceRoots(result.rawEvents);
+			return 'ready' as const;
 		}).catch(() => {
-			// Finite trace bootstrap failures leave the primary world usable.
+			return 'failed' as const;
 		});
 	}
 
@@ -281,7 +312,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 	}
 
 	function selfOperationCandidate(
-		operation: 'entry' | 'movement' | 'reactivation',
+		operation: Exclude<SelfPositionOperationKind, 'trace-inspection'>,
 		direction?: Direction
 	): Readonly<{ event: VerifiedEvent; parsed: ParsedPositionEvent }> | null {
 		if (!options.selfAccount || !channel) return null;
@@ -300,12 +331,20 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 		}
 		const participant = getParticipant(candidate, options.selfAccount.pubkey);
 		if (!participant) return null;
+		return positionCandidate(participant.position, nowMs);
+	}
+
+	function positionCandidate(
+		position: ParsedPositionEvent['position'],
+		nowMs: number
+	): Readonly<{ event: VerifiedEvent; parsed: ParsedPositionEvent }> | null {
+		if (!options.selfAccount || !channel) return null;
 		const createdAt = Math.floor(nowMs / 1000);
 		const plan = planPositionPublish(positionPublishState, createdAt);
 		if (plan.kind === 'unavailable') return null;
 		const signed = finalizeWorldEvent(buildPositionEventTemplate({
 			channel,
-			position: participant.position,
+			position,
 			slot: plan.slot,
 			createdAt
 		}), options.selfAccount.secretKey);
@@ -371,15 +410,10 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 		}
 	}
 
-	async function publishSelfPosition(operation: 'entry' | 'movement' | 'reactivation', direction?: Direction): Promise<SelfPositionWriteResult> {
-		if (!options.selfAccount) {
-			emitSelfPositionWriteState({ kind: 'unavailable' });
-			return { kind: 'unavailable' };
-		}
-		if (disposed) return { kind: 'unavailable' };
-		if (pendingSelfOperation) return { kind: 'pending' };
-		const candidate = selfOperationCandidate(operation, direction);
-		if (!candidate) return { kind: 'blocked' };
+	async function publishPreparedSelfPosition(
+		operation: SelfPositionOperationKind,
+		candidate: Readonly<{ event: VerifiedEvent; parsed: ParsedPositionEvent }>
+	): Promise<SelfPositionWriteResult> {
 		const { event, parsed } = candidate;
 		// The planner was consumed before this call. It must never be rolled back.
 		pendingSelfOperation = { id: parsed.id, operation };
@@ -407,6 +441,188 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 			emitSelfPositionWriteState({ kind: 'retryable', operation });
 			return { kind: 'retryable', operation };
 		}
+	}
+
+	async function publishSelfPosition(
+		operation: Exclude<SelfPositionOperationKind, 'trace-inspection'>,
+		direction?: Direction
+	): Promise<SelfPositionWriteResult> {
+		if (!options.selfAccount) {
+			emitSelfPositionWriteState({ kind: 'unavailable' });
+			return { kind: 'unavailable' };
+		}
+		if (disposed) return { kind: 'unavailable' };
+		if (pendingSelfOperation) return { kind: 'pending' };
+		const candidate = selfOperationCandidate(operation, direction);
+		if (!candidate) return { kind: 'blocked' };
+		return publishPreparedSelfPosition(operation, candidate);
+	}
+
+	function traceStateFor(
+		root: ParsedWorldMessage,
+		config: TraceConversationConfig,
+		replies: readonly ParsedTraceReply[],
+		replyRefresh: 'loading' | 'settled' | 'unavailable'
+	): TraceConversationState {
+		return { kind: 'open', root, config, replies, replyRefresh };
+	}
+
+	function updateTraceConversation(
+		generation: number,
+		update: (current: Extract<TraceConversationState, { kind: 'open' }>) => TraceConversationState
+	): void {
+		if (disposed || generation !== traceConversationGeneration || traceConversationState.kind !== 'open') return;
+		emitTraceConversationState(update(traceConversationState));
+	}
+
+	function reconcileTraceReplies(
+		generation: number,
+		rootId: string,
+		rawEvents: readonly NostrEvent[]
+	): Promise<boolean> {
+		let success = false;
+		traceReplyReconcileTail = traceReplyReconcileTail.then(async () => {
+			if (!channel) return;
+			try {
+				const currentOpenRootId = traceConversationState.kind === 'open'
+					? traceConversationState.root.id
+					: undefined;
+				const replies = await reconcileTraceReplyCache({
+					channelId: channel.channelId,
+					effectiveRoots: effectiveTraceRoots,
+					rawEvents,
+					...(currentOpenRootId ? { currentOpenRootId } : {})
+				});
+				success = true;
+				updateTraceConversation(generation, (current) => ({
+					...current,
+					replies: replies.filter((reply) => reply.rootId === rootId)
+				}));
+			} catch {
+				// A supplemental cache failure does not affect primary world reads.
+			}
+		});
+		return traceReplyReconcileTail.then(() => success);
+	}
+
+	function receiveTraceBatch(generation: number, rootId: string, batch: TraceReplyBatch): void {
+		void reconcileTraceReplies(generation, rootId, batch.events);
+	}
+
+	async function startTraceConversationWork(
+		generation: number,
+		root: ParsedWorldMessage,
+		config: TraceConversationConfig
+	): Promise<void> {
+		if (!channel || !transport) return;
+		try {
+			const touched = await touchTraceReplyTree({ channelId: channel.channelId, rootId: root.id });
+			if (!touched) {
+				if (generation === traceConversationGeneration) closeTraceConversation();
+				return;
+			}
+		} catch {
+			// Continue: a later reconciliation may still restore or repair the cache.
+		}
+		await reconcileTraceReplies(generation, config.rootId, []);
+		if (disposed || generation !== traceConversationGeneration) return;
+		const readiness = traceRootBootstrapReadiness ? await traceRootBootstrapReadiness : 'failed';
+		if (disposed || generation !== traceConversationGeneration) return;
+		if (readiness !== 'ready') {
+			updateTraceConversation(generation, (current) => ({ ...current, replyRefresh: 'unavailable' }));
+			return;
+		}
+		try {
+			const result = await transport.configureTraceReplies({
+				conversation: config,
+				onBatch: (batch) => receiveTraceBatch(generation, config.rootId, batch),
+				onLiveEvent: (event) => { void reconcileTraceReplies(generation, config.rootId, [event]); }
+			});
+			if (disposed || generation !== traceConversationGeneration || result.status === 'superseded') return;
+			if (result.status !== 'active') {
+				updateTraceConversation(generation, (current) => ({ ...current, replyRefresh: 'unavailable' }));
+				return;
+			}
+			const reconciled = await reconcileTraceReplies(generation, config.rootId, result.initialBatch.events);
+			updateTraceConversation(generation, (current) => ({
+				...current,
+				replyRefresh: reconciled ? 'settled' : 'unavailable'
+			}));
+		} catch {
+			updateTraceConversation(generation, (current) => ({ ...current, replyRefresh: 'unavailable' }));
+		}
+	}
+
+	function activateTraceConversation(root: ParsedWorldMessage, config: TraceConversationConfig): void {
+		const generation = ++traceConversationGeneration;
+		emitTraceConversationState(traceStateFor(root, config, [], 'loading'));
+		void startTraceConversationWork(generation, root, config);
+	}
+
+	function openTraceConversation(config: TraceConversationConfig): TraceConversationOpenResult {
+		if (disposed || !options.selfAccount || !transport || !channel) return { kind: 'unavailable' };
+		if (!bootstrapComplete) return { kind: 'blocked' };
+		const root = effectiveTraceRoots.find((candidate) => candidate.id === config.rootId);
+		if (!root) return { kind: 'blocked' };
+		if (traceConversationState.kind === 'open' && traceConversationState.root.id === root.id &&
+			traceConversationState.config.currentId === config.currentId) return { kind: 'opened' };
+		if (pendingSelfOperation) return { kind: 'pending' };
+		const sameCellSwitch = traceConversationState.kind === 'open' && traceConversationState.root.id !== root.id &&
+			sameGridPosition(traceConversationState.root.position, root.position);
+		const nowMs = Date.now();
+		const prepared = prepareTraceInspectionActivity({
+			presence: currentPresence(),
+			selfId: options.selfAccount.pubkey,
+			target: root.position,
+			nowMs,
+			requireCurrentRange: sameCellSwitch
+		});
+		if (prepared.kind === 'blocked') return { kind: 'blocked' };
+		if (!prepared.coalesced) {
+			const candidate = positionCandidate(prepared.position, nowMs);
+			if (!candidate) return { kind: 'blocked' };
+			void publishPreparedSelfPosition('trace-inspection', candidate);
+		}
+		activateTraceConversation(root, config);
+		return { kind: 'opened' };
+	}
+
+	function deactivateTraceSubscription(generation: number): void {
+		const deactivate = async () => {
+			const readiness = traceRootBootstrapReadiness ? await traceRootBootstrapReadiness : 'failed';
+			if (disposed || generation !== traceConversationGeneration || traceConversationState.kind !== 'closed' || readiness !== 'ready') return;
+			await transport?.configureTraceReplies({ onBatch: () => {}, onLiveEvent: () => {} }).catch(() => {});
+		};
+		void deactivate();
+	}
+
+	function closeTraceConversation(): void {
+		if (disposed || traceConversationState.kind === 'closed') return;
+		const generation = ++traceConversationGeneration;
+		emitTraceConversationState({ kind: 'closed' });
+		deactivateTraceSubscription(generation);
+	}
+
+	function reconcileOpenTraceRoot(roots: readonly ParsedWorldMessage[]): void {
+		if (traceConversationState.kind === 'closed') return;
+		const current = traceConversationState;
+		const retained = roots.find((root) => root.id === current.root.id);
+		if (retained) {
+			if (retained !== current.root) {
+				emitTraceConversationState({ ...current, root: retained });
+			}
+			return;
+		}
+		const fallback = groupTraceRoots(roots)
+			.find((cell) => sameGridPosition(cell.position, current.root.position))?.roots[0];
+		const self = options.selfAccount
+			? getParticipant(projectWorldPresenceState(worldPresence, Date.now()), options.selfAccount.pubkey)
+			: undefined;
+		if (!fallback || !self || !isWithinTraceInvestigationRange(self.position, fallback.position)) {
+			closeTraceConversation();
+			return;
+		}
+		activateTraceConversation(fallback, { rootId: fallback.id, currentId: fallback.id });
 	}
 
 	function receiveLive(event: BufferedLiveEvent): void {
@@ -504,6 +720,14 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 			return publishMessage(content, speechType);
 		},
 
+		openTraceConversation(config: TraceConversationConfig): TraceConversationOpenResult {
+			return openTraceConversation(config);
+		},
+
+		closeTraceConversation(): void {
+			closeTraceConversation();
+		},
+
 		refresh(nowMs: number): PresenceState {
 			if (disposed) return presence;
 			return project(nowMs);
@@ -517,6 +741,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 		dispose(): void {
 			if (disposed) return;
 			disposed = true;
+			traceConversationGeneration += 1;
 			pendingLiveEvents.splice(0);
 			transport?.dispose();
 		},
@@ -531,6 +756,10 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 
 		getSelfMessageAvailability(): SelfMessageAvailability {
 			return selfMessageAvailability;
+		},
+
+		getTraceConversationState(): TraceConversationState {
+			return traceConversationState;
 		}
 	};
 }
