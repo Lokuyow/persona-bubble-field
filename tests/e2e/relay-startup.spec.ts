@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { finalizeEvent } from 'nostr-tools/pure';
+import { finalizeEvent, getPublicKey } from 'nostr-tools/pure';
 import { buildPositionEventTemplate, buildWorldMessageTemplate } from '../../src/lib/nostrProtocol';
 import { SPEECH_SHORTCUT_IDS } from '../../src/lib/speechSubmission';
 
@@ -63,6 +63,43 @@ function testEvents() {
 			createdAt
 		}), secret)
 	};
+}
+
+function traceRuntimeEvents() {
+	const selfSecret = new Uint8Array(32).fill(23);
+	const rootSecret = new Uint8Array(32).fill(29);
+	const createdAt = Math.floor(Date.now() / 1000);
+	const channel = { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' };
+	const selfPosition = finalizeEvent(buildPositionEventTemplate({
+		channel,
+		position: { x: 3, y: 2 },
+		slot: 0,
+		createdAt
+	}), selfSecret);
+	const message = finalizeEvent(buildWorldMessageTemplate({
+		channel,
+		content: 'trace runtime participant',
+		speechType: 'normal',
+		position: { x: 8, y: 6 },
+		createdAt
+	}), rootSecret);
+	let root = finalizeEvent(buildWorldMessageTemplate({
+		channel,
+		content: 'Relay trace root 0',
+		speechType: 'shout',
+		position: { x: 4, y: 2 },
+		createdAt
+	}), rootSecret);
+	for (let attempt = 1; BigInt(`0x${root.id}`) % 5n !== 0n; attempt += 1) {
+		root = finalizeEvent(buildWorldMessageTemplate({
+			channel,
+			content: `Relay trace root ${attempt}`,
+			speechType: 'shout',
+			position: { x: 4, y: 2 },
+			createdAt
+		}), rootSecret);
+	}
+	return { selfSecret, selfPubkey: getPublicKey(selfSecret), selfPosition, message, root };
 }
 
 async function installHostOwnedStub(page: Page): Promise<{ requests: () => number }> {
@@ -182,15 +219,24 @@ async function installVirtualKeyboardStub(page: Page): Promise<void> {
 	});
 }
 
-async function installDelayedRelay(page: Page, options: { deferPrimaryEvents?: boolean; historyMessages?: readonly object[] } = {}): Promise<void> {
-	const events = testEvents();
-	await page.addInitScript(({ seedRelays, authoritativeRelays, channelEvent, primaryEvents, historyMessages, deferPrimaryEvents }) => {
+async function installDelayedRelay(page: Page, options: {
+	deferPrimaryEvents?: boolean;
+	historyMessages?: readonly object[];
+	primaryEvents?: Readonly<{ message: object; position: object }>;
+	traceRoots?: readonly object[];
+	deferTraceRoots?: boolean;
+	deferTraceReplies?: boolean;
+} = {}): Promise<void> {
+	const events = options.primaryEvents ?? testEvents();
+	await page.addInitScript(({ seedRelays, authoritativeRelays, channelEvent, primaryEvents, historyMessages, deferPrimaryEvents, traceRoots, deferTraceRoots, deferTraceReplies }) => {
 		type Listener = (event?: { type: string; data?: string; code?: number; reason?: string }) => void;
 		type PendingRequest = { socket: FakeWebSocket; subId: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] };
 		const seed = new Set<string>(seedRelays);
 		const authoritative = new Set<string>(authoritativeRelays);
 		const pendingMetadata: PendingRequest[] = [];
 		const pendingPrimary: PendingRequest[] = [];
+		const pendingTraceRoots: PendingRequest[] = [];
+		const pendingTraceReplies: PendingRequest[] = [];
 		const activePrimary: PendingRequest[] = [];
 		const timelineHistory = (historyMessages ?? []) as Array<Record<string, unknown>>;
 		const state = {
@@ -199,6 +245,8 @@ async function installDelayedRelay(page: Page, options: { deferPrimaryEvents?: b
 			metadataReleased: false,
 			primaryEventsReleased: !deferPrimaryEvents,
 			primaryReleased: false,
+			traceRootsReleased: !deferTraceRoots,
+			traceRepliesReleased: !deferTraceReplies,
 			rejectMessagePublishes: false,
 			rejectPositionPublishes: false
 		};
@@ -223,6 +271,13 @@ async function installDelayedRelay(page: Page, options: { deferPrimaryEvents?: b
 		const respondPrimary = (request: PendingRequest) => {
 			if (state.primaryEventsReleased) respondPrimaryEvent(request);
 			if (state.primaryReleased) deliver(request.socket, ['EOSE', request.subId]);
+		};
+		const respondTraceRoots = (request: PendingRequest) => {
+			for (const event of traceRoots) deliver(request.socket, ['EVENT', request.subId, event]);
+			deliver(request.socket, ['EOSE', request.subId]);
+		};
+		const respondTraceReplies = (request: PendingRequest) => {
+			deliver(request.socket, ['EOSE', request.subId]);
 		};
 
 		class FakeWebSocket {
@@ -265,6 +320,22 @@ async function installDelayedRelay(page: Page, options: { deferPrimaryEvents?: b
 					if (state.metadataReleased) respondMetadata(request);
 					else pendingMetadata.push(request);
 				} else if (authoritative.has(relayUrl)) {
+					const isTraceRoot = request.filters.some((filter) =>
+						(filter.kinds as number[] | undefined)?.includes(42) && filter.limit === 1000
+					);
+					const isTraceReply = request.filters.some((filter) =>
+						(filter.kinds as number[] | undefined)?.includes(1111)
+					);
+					if (isTraceRoot) {
+						if (state.traceRootsReleased) respondTraceRoots(request);
+						else pendingTraceRoots.push(request);
+						return;
+					}
+					if (isTraceReply) {
+						if (state.traceRepliesReleased) respondTraceReplies(request);
+						else pendingTraceReplies.push(request);
+						return;
+					}
 					activePrimary.push(request);
 					respondPrimary(request);
 					if (!state.primaryReleased) pendingPrimary.push(request);
@@ -293,6 +364,14 @@ async function installDelayedRelay(page: Page, options: { deferPrimaryEvents?: b
 					state.primaryReleased = true;
 					pendingPrimary.splice(0).forEach((request) => deliver(request.socket, ['EOSE', request.subId]));
 				},
+				releaseTraceRoots: () => {
+					state.traceRootsReleased = true;
+					pendingTraceRoots.splice(0).forEach(respondTraceRoots);
+				},
+				releaseTraceReplies: () => {
+					state.traceRepliesReleased = true;
+					pendingTraceReplies.splice(0).forEach(respondTraceReplies);
+				},
 				rejectMessagePublishes: () => { state.rejectMessagePublishes = true; },
 				rejectPositionPublishes: () => { state.rejectPositionPublishes = true; },
 				allowPositionPublishes: () => { state.rejectPositionPublishes = false; },
@@ -319,13 +398,16 @@ async function installDelayedRelay(page: Page, options: { deferPrimaryEvents?: b
 		channelEvent: CHANNEL_EVENT,
 		primaryEvents: events,
 		historyMessages: options.historyMessages ?? [],
-		deferPrimaryEvents: options.deferPrimaryEvents ?? false
+		deferPrimaryEvents: options.deferPrimaryEvents ?? false,
+		traceRoots: options.traceRoots ?? [],
+		deferTraceRoots: options.deferTraceRoots ?? false,
+		deferTraceReplies: options.deferTraceReplies ?? false
 	});
 }
 
 function relayState(page: Page) {
 	return page.evaluate(() => (window as typeof window & {
-		__relayStartupTest: { state: { requests: Array<{ url: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] }>; published: Array<{ id: string; kind: number; content: string; tags: string[][] }> }; releaseMetadata(): void; releasePrimaryEvents(): void; releasePrimary(): void; rejectMessagePublishes(): void; allowMessagePublishes(): void; rejectPositionPublishes(): void; allowPositionPublishes(): void; injectPosition(event: object): void; injectMessage(event: object): void };
+		__relayStartupTest: { state: { requests: Array<{ url: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] }>; published: Array<{ id: string; kind: number; content: string; tags: string[][] }> }; releaseMetadata(): void; releasePrimaryEvents(): void; releasePrimary(): void; releaseTraceRoots(): void; releaseTraceReplies(): void; rejectMessagePublishes(): void; allowMessagePublishes(): void; rejectPositionPublishes(): void; allowPositionPublishes(): void; injectPosition(event: object): void; injectMessage(event: object): void };
 	}).__relayStartupTest);
 }
 
@@ -397,6 +479,29 @@ async function openReadyRelayWorld(page: Page): Promise<Locator> {
 	return editor;
 }
 
+async function seedRelayAccount(page: Page, secretKey: Uint8Array, pubkey: string): Promise<void> {
+	await page.goto('/favicon.svg');
+	await page.evaluate(async ({ secret, accountPubkey }) => {
+		const database = await new Promise<IDBDatabase>((resolve, reject) => {
+			const request = indexedDB.open('persona-bubble-field-account', 1);
+			request.onupgradeneeded = () => request.result.createObjectStore('persona-bubble-field-account-state');
+			request.onsuccess = () => resolve(request.result);
+			request.onerror = () => reject(request.error);
+		});
+		const transaction = database.transaction('persona-bubble-field-account-state', 'readwrite');
+		const store = transaction.objectStore('persona-bubble-field-account-state');
+		store.put(new Uint8Array(secret), 'secret-key');
+		store.put(Date.now(), 'last-changed-at-ms');
+		store.put({ pubkey: accountPubkey, revision: 2 }, 'initial-profile-published-pubkey');
+		await new Promise<void>((resolve, reject) => {
+			transaction.oncomplete = () => resolve();
+			transaction.onerror = () => reject(transaction.error);
+			transaction.onabort = () => reject(transaction.error);
+		});
+		database.close();
+	}, { secret: [...secretKey], accountPubkey: pubkey });
+}
+
 async function chooseHorizontalMove(page: Page): Promise<{ key: 'ArrowLeft' | 'ArrowRight'; expected: string }> {
 	const position = await page.locator('.participant[data-self="true"]').getAttribute('data-position');
 	if (!position) throw new Error('Expected the Relay self participant position.');
@@ -442,6 +547,77 @@ function reverseMoveKey(key: AvailableMove['key']): AvailableMove['key'] {
 }
 
 test.describe('Relay startup', () => {
+	test('opens a Relay trace root and settles the explicit conversation reply subscription', async ({ page }) => {
+		const trace = traceRuntimeEvents();
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, {
+			deferPrimaryEvents: true,
+			primaryEvents: { message: trace.message, position: trace.selfPosition },
+			traceRoots: [trace.root],
+			deferTraceRoots: true,
+			deferTraceReplies: true
+		});
+		await seedRelayAccount(page, trace.selfSecret, trace.selfPubkey);
+		await page.goto('/');
+		await expect(page.locator('main')).toHaveAttribute('data-trace-runtime', 'relay');
+		const hideTimeline = page.getByRole('button', { name: 'Hide Chatter' });
+		if (await hideTimeline.isVisible()) await hideTimeline.click();
+
+		await page.evaluate(() => (window as typeof window & {
+			__relayStartupTest: { releaseMetadata(): void }
+		}).__relayStartupTest.releaseMetadata());
+		await expect.poll(async () => {
+			const requests = (await relayState(page)).state.requests;
+			return [42, 30078].every((kind) => requests.some((request) =>
+				AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) &&
+				(request.filter.kinds as number[])[0] === kind && request.filter.limit !== 1000
+			));
+		}).toBe(true);
+		await page.evaluate(() => (window as typeof window & {
+			__relayStartupTest: { releasePrimaryEvents(): void; releasePrimary(): void }
+		}).__relayStartupTest.releasePrimaryEvents());
+		await page.evaluate(() => (window as typeof window & {
+			__relayStartupTest: { releasePrimary(): void }
+		}).__relayStartupTest.releasePrimary());
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '3,2');
+
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
+			(request.filter.kinds as number[] | undefined)?.includes(42) && request.filter.limit === 1000
+		)).toBe(true);
+		await page.evaluate(() => (window as typeof window & {
+			__relayStartupTest: { releaseTraceRoots(): void }
+		}).__relayStartupTest.releaseTraceRoots());
+		await expect(page.locator('[data-trace-light-position="4,2"]')).toBeVisible();
+
+		const publishedPositionIds = async () => new Set(
+			(await relayState(page)).state.published.filter((event) => event.kind === 30078).map((event) => event.id)
+		).size;
+		const positionsBefore = await publishedPositionIds();
+		await page.getByRole('button', { name: 'Move right' }).click();
+		const menu = page.getByRole('menu', { name: 'Cell actions' });
+		await expect(menu).toBeVisible();
+		await menu.locator('[data-cell-action="trace"]').click();
+		await expect(page.locator(`[data-trace-root-id="${trace.root.id}"]`)).toContainText('Relay trace root');
+		await expect(page.locator('.trace-reply-status[data-reply-refresh="loading"]')).toBeVisible();
+		await expect.poll(publishedPositionIds).toBe(positionsBefore + 1);
+
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
+			request.filters.some((filter) =>
+				(filter.kinds as number[] | undefined)?.includes(1111) &&
+				(filter['#E'] as string[] | undefined)?.includes(trace.root.id)
+			) && request.filters.some((filter) =>
+				(filter.kinds as number[] | undefined)?.includes(1111) &&
+				(filter['#E'] as string[] | undefined)?.includes(trace.root.id) &&
+				(filter['#e'] as string[] | undefined)?.includes(trace.root.id)
+			)
+		)).toBe(true);
+		await page.evaluate(() => (window as typeof window & {
+			__relayStartupTest: { releaseTraceReplies(): void }
+		}).__relayStartupTest.releaseTraceReplies());
+		await expect(page.locator('.trace-reply-status')).toHaveCount(0);
+		await expect(page.locator(`[data-trace-root-id="${trace.root.id}"]`)).toBeVisible();
+	});
+
 	test('passes the Host-owned editor submit button option without enabling the keyboard button bar', async ({ page }) => {
 		await installHostOwnedStub(page);
 		await installDelayedRelay(page);

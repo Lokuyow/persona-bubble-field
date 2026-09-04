@@ -65,6 +65,10 @@ export type BubblePlacement = {
 	anchor: WorldPoint;
 };
 
+export type FixedBubblePlacement = BubblePlacementInput & {
+	anchor: WorldPoint;
+};
+
 export type Direction = 'up' | 'down' | 'left' | 'right';
 
 export type FieldSize = {
@@ -503,14 +507,16 @@ export function placeBubbles(
 	bounds: Bounds,
 	cellSize: number,
 	gap = BUBBLE_PLACEMENT_GAP,
-	visualRegion: Bounds = bounds
+	visualRegion: Bounds = bounds,
+	fixedPlacements: readonly FixedBubblePlacement[] = []
 ): BubblePlacement[] {
 	const orderedItems = [...items].sort((first, second) =>
 		first.preferred.y - second.preferred.y ||
 		first.preferred.x - second.preferred.x ||
 		(first.id < second.id ? -1 : first.id > second.id ? 1 : 0)
 	);
-	const placed: PlacedBubble[] = [];
+	const fixedIds = new Set(fixedPlacements.map((placement) => placement.id));
+	const placed: PlacedBubble[] = fixedPlacements.map((placement) => ({ ...placement }));
 	const anchorsById = new Map<string, WorldPoint>();
 
 	for (const item of orderedItems) {
@@ -520,6 +526,7 @@ export function placeBubbles(
 
 		if (choice.overlap > 0 && placed.length > 0) {
 			const related = placed
+				.filter((previous) => !fixedIds.has(previous.id))
 				.filter((previous) => candidates.some((candidate) =>
 					gapOverlapArea(bubbleRect(candidate, item), bubbleRect(previous.anchor, previous), gap) > 0
 				))
@@ -543,4 +550,16 @@ export function placeBubbles(
 	}
 
 	return items.map((item) => ({ id: item.id, anchor: anchorsById.get(item.id)! }));
+}
+
+/** Places new bubbles around already-final placements without moving the fixed set. */
+export function placeBubblesWithFixed(
+	items: readonly BubblePlacementInput[],
+	fixedPlacements: readonly FixedBubblePlacement[],
+	bounds: Bounds,
+	cellSize: number,
+	gap = BUBBLE_PLACEMENT_GAP,
+	visualRegion: Bounds = bounds
+): BubblePlacement[] {
+	return placeBubbles(items, bounds, cellSize, gap, visualRegion, fixedPlacements);
 }

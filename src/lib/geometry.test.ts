@@ -18,6 +18,7 @@ import {
 	normalBubblePreferredAnchor,
 	parseCanonicalGridPosition,
 	placeBubbles,
+	placeBubblesWithFixed,
 	worldToScreen
 } from './geometry';
 
@@ -457,5 +458,24 @@ describe('field geometry', () => {
 		expect(placements).toHaveLength(items.length);
 		expect(overlapsWithGap(first, selected)).toBe(true);
 		expect(overlapAreaWithGap(first, selected)).toBeLessThanOrEqual(overlapAreaWithGap(first, preferred));
+	});
+
+	it('places an added trace bubble around fixed live anchors without moving them', () => {
+		const bounds = { x: 0, y: 0, width: 320, height: 200 };
+		const live = { id: 'live', preferred: { x: 100, y: 80 }, size: { width: 100, height: 40 } };
+		const [livePlacement] = placeBubbles([live], bounds, 56);
+		const [tracePlacement] = placeBubblesWithFixed(
+			[{ id: 'trace', preferred: { x: 100, y: 80 }, size: { width: 100, height: 40 } }],
+			[{ ...live, anchor: livePlacement.anchor }],
+			bounds,
+			56
+		);
+
+		expect(livePlacement.anchor).toEqual({ x: 100, y: 80 });
+		expect(tracePlacement.anchor).not.toEqual(livePlacement.anchor);
+		expect(overlapsWithGap(
+			{ anchor: livePlacement.anchor, size: live.size },
+			{ anchor: tracePlacement.anchor, size: { width: 100, height: 40 } }
+		)).toBe(false);
 	});
 });

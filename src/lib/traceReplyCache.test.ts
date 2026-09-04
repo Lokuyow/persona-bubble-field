@@ -116,6 +116,30 @@ afterEach(() => {
 });
 
 describe('trace reply cache reconciliation', () => {
+	it('returns the full current-channel snapshot across two effective roots', async () => {
+		const firstRoot = makeRoot(CHANNEL_ID, 'first-root');
+		const secondRoot = makeRoot(CHANNEL_ID, 'second-root');
+		await reconcileTraceRootCache({
+			channelId: CHANNEL_ID,
+			field: { columns: 4, rows: 1 },
+			rawEvents: [firstRoot.raw, secondRoot.raw]
+		});
+		const firstReply = makeReply(firstRoot.parsed, firstRoot.parsed, 'first reply', 101);
+		const secondReply = makeReply(secondRoot.parsed, secondRoot.parsed, 'second reply', 102);
+
+		const replies = await reconcileTraceReplyCache({
+			channelId: CHANNEL_ID,
+			effectiveRoots: [firstRoot.parsed, secondRoot.parsed],
+			rawEvents: [firstReply.raw, secondReply.raw]
+		});
+
+		expect(new Set(replies.map((reply) => reply.rootId))).toEqual(new Set([
+			firstRoot.parsed.id,
+			secondRoot.parsed.id
+		]));
+		expect(replies.map((reply) => reply.id)).toHaveLength(2);
+	});
+
 	it('persists accepted replies across reopen and does not treat Relay omission as deletion', async () => {
 		const root = makeRoot(CHANNEL_ID, 'persist');
 		await seedRootForChannel(CHANNEL_ID, root);
