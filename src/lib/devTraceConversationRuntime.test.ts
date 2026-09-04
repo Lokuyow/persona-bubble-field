@@ -1,10 +1,26 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createPresenceState, debugTimeoutParticipant, getParticipant, type PresenceState } from './presence';
-import type { ParsedWorldMessage } from './nostrProtocol';
+import type { ParsedTraceReply, ParsedWorldMessage } from './nostrProtocol';
 import { createDevTraceConversationRuntime } from './devTraceConversationRuntime';
 
 function root(id: string, createdAt: number, x = 1, y = 1): ParsedWorldMessage {
 	return { id, pubkey: id.padEnd(64, '0'), createdAt, content: id, speechType: 'normal', position: { x, y } };
+}
+
+function reply(id: string, rootId: string, createdAt = 3): ParsedTraceReply {
+	return {
+		id,
+		pubkey: id.padEnd(64, 'a'),
+		createdAt,
+		content: id,
+		speechType: 'normal',
+		position: { x: 2, y: 1 },
+		rootId,
+		rootPubkey: rootId.padEnd(64, '0'),
+		parentId: rootId,
+		parentKind: 42,
+		parentPubkey: rootId.padEnd(64, '0')
+	};
 }
 
 function fixture(initialPresence?: PresenceState) {
@@ -12,6 +28,7 @@ function fixture(initialPresence?: PresenceState) {
 		{ id: 'self', position: { x: 1, y: 1 } }
 	]);
 	let roots: readonly ParsedWorldMessage[] = [root('old', 1), root('new', 2)];
+	let replies: readonly ParsedTraceReply[] = [];
 	const states: unknown[] = [];
 	const setPresence = vi.fn((next: PresenceState) => { presence = next; });
 	const runtime = createDevTraceConversationRuntime({
@@ -19,6 +36,7 @@ function fixture(initialPresence?: PresenceState) {
 		getPresence: () => presence,
 		setPresence,
 		getEffectiveRoots: () => roots,
+		getReplies: () => replies,
 		onStateChanged: (state) => states.push(state),
 		now: () => 2_000,
 		random: () => 0
@@ -28,6 +46,8 @@ function fixture(initialPresence?: PresenceState) {
 		get presence() { return presence; },
 		get roots() { return roots; },
 		set roots(next) { roots = next; },
+		get replies() { return replies; },
+		set replies(next) { replies = next; },
 		states,
 		setPresence
 	};
@@ -42,6 +62,19 @@ describe('DEV trace conversation runtime', () => {
 			kind: 'open', root: { id: 'new' }, replies: [], replyRefresh: 'settled'
 		});
 		expect(getParticipant(f.presence, 'self')).toMatchObject({ position: { x: 1, y: 1 }, lastActivityAt: 2_000 });
+	});
+
+	it('injects typed reply snapshots for the open root without network or cache ownership', () => {
+		const f = fixture();
+		const current = reply('current-reply', 'new');
+		const other = reply('other-reply', 'old');
+		f.replies = [current, other];
+		f.runtime.openTraceConversation({ rootId: 'new', currentId: 'new' });
+		expect(f.runtime.getTraceConversationState()).toMatchObject({ replies: [current] });
+		const live = reply('live-reply', 'new', 4);
+		f.replies = [current, other, live];
+		f.runtime.reconcileReplies(f.replies);
+		expect(f.runtime.getTraceConversationState()).toMatchObject({ replies: [current, live] });
 	});
 
 	it('keeps the current root when an explicit same-cell switch is out of range', () => {

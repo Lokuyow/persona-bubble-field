@@ -1,4 +1,4 @@
-import type { ParsedWorldMessage } from './nostrProtocol';
+import type { ParsedTraceReply, ParsedWorldMessage } from './nostrProtocol';
 import { getParticipant, type PresenceState, type RandomSource } from './presence';
 import {
 	groupTraceRoots,
@@ -15,6 +15,7 @@ import type {
 
 export type DevTraceConversationRuntime = TraceConversationController & Readonly<{
 	reconcileEffectiveRoots(roots: readonly ParsedWorldMessage[]): void;
+	reconcileReplies(replies: readonly ParsedTraceReply[]): void;
 	dispose(): void;
 }>;
 
@@ -23,6 +24,7 @@ export function createDevTraceConversationRuntime(options: Readonly<{
 	getPresence: () => PresenceState;
 	setPresence: (presence: PresenceState) => void;
 	getEffectiveRoots: () => readonly ParsedWorldMessage[];
+	getReplies: () => readonly ParsedTraceReply[];
 	onStateChanged?: (state: TraceConversationState) => void;
 	now?: () => number;
 	random?: RandomSource;
@@ -37,7 +39,13 @@ export function createDevTraceConversationRuntime(options: Readonly<{
 	}
 
 	function activate(root: ParsedWorldMessage, config: TraceConversationConfig): void {
-		emit({ kind: 'open', root, config, replies: [], replyRefresh: 'settled' });
+		emit({
+			kind: 'open',
+			root,
+			config,
+			replies: options.getReplies().filter((reply) => reply.rootId === root.id),
+			replyRefresh: 'settled'
+		});
 	}
 
 	function openTraceConversation(config: TraceConversationConfig): TraceConversationOpenResult {
@@ -86,10 +94,20 @@ export function createDevTraceConversationRuntime(options: Readonly<{
 		activate(fallback, { rootId: fallback.id, currentId: fallback.id });
 	}
 
+	function reconcileReplies(replies: readonly ParsedTraceReply[]): void {
+		if (disposed || state.kind === 'closed') return;
+		const rootId = state.root.id;
+		emit({
+			...state,
+			replies: replies.filter((reply) => reply.rootId === rootId)
+		});
+	}
+
 	return {
 		openTraceConversation,
 		closeTraceConversation,
 		reconcileEffectiveRoots,
+		reconcileReplies,
 		getTraceConversationState: () => state,
 		dispose(): void {
 			disposed = true;
