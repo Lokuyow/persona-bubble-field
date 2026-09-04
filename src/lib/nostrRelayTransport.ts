@@ -763,8 +763,14 @@ export function createNostrRelayTransport(
 
 	function startTraceCycle(generation: TraceGeneration, relay: TraceRelayState, kind: TraceCycleKind): void {
 		if (generation !== traceGeneration || !generation.active) return;
-		if (relay.cycle?.timer) clearTimeout(relay.cycle.timer);
-		const cycle: TraceCycle = { kind, cycleBoundary: unixNow(), events: [], timer: null };
+		const cycle = relay.cycle?.kind === kind
+			? relay.cycle
+			: { kind, cycleBoundary: unixNow(), events: [], timer: null };
+		// A reconnect resends the ongoing Forward REQ. It is still the same
+		// unacknowledged batch, so keep its buffered raw events and only move the
+		// boundary to the latest wire REQ that its eventual EOSE acknowledges.
+		cycle.cycleBoundary = unixNow();
+		if (cycle.timer) clearTimeout(cycle.timer);
 		relay.cycle = cycle;
 		if (kind === 'catch-up') {
 			cycle.timer = setTimeout(() => {
@@ -814,7 +820,14 @@ export function createNostrRelayTransport(
 		queueMicrotask(() => {
 			if (generation !== traceGeneration || !generation.active) return;
 			for (const relay of generation.states.values()) {
-				if (relay.initialStatus.status === 'eose') transitionTraceRelay(generation, relay);
+				if (relay.initialStatus.status === 'eose') {
+					transitionTraceRelay(generation, relay);
+					continue;
+				}
+				// The initial deadline may settle while a wire-visible initial REQ is
+				// still ongoing. Its initial events were already returned above; from
+				// this point its later events form a bounded, callback-only catch-up.
+				if (relay.cycle?.kind === 'initial') startTraceCycle(generation, relay, 'catch-up');
 			}
 		});
 	}
@@ -960,7 +973,7 @@ export function createNostrRelayTransport(
 			if (!relay || !matchesFilterBundle(request.filters, traceFilters(generation, relay))) return;
 			relay.subId = request.subId;
 			if (!generation.initialSettled) {
-				if (!traceInitialTerminal(generation, relay) && !relay.cycle) startTraceCycle(generation, relay, 'initial');
+				if (!traceInitialTerminal(generation, relay)) startTraceCycle(generation, relay, 'initial');
 			} else startTraceCycle(generation, relay, 'catch-up');
 		}));
 		generation.resources.add(client.createAllEventObservable().subscribe((packet) => {
