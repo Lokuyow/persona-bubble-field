@@ -20,16 +20,24 @@
 		getFieldAreaBounds,
 		getFieldWorldSize,
 		getResponsiveCellSize,
+		gridToWorld,
 		MOBILE_FIELD_BREAKPOINT,
 		mergedBubblePreferredAnchor,
 		normalBubblePreferredAnchor,
 		placeBubbles,
+		placeBubblesWithFixed,
 		moveOneCell,
 		type Direction,
 		type Size,
 		type WorldPoint,
 		worldToScreen
 	} from '$lib/geometry';
+	import {
+		buildFieldCellActions,
+		resolveFieldCellActions,
+		viewportPointToLogicalCell,
+		type FieldCellAction
+	} from '$lib/fieldSelection';
 	import {
 		DEV_WORLD_SELF_ID,
 		getDevWorldCharacter,
@@ -56,6 +64,17 @@
 	import { addRecentMessage, createRecentMessageTimeline, type RecentMessageTimeline } from '$lib/recentMessageTimeline';
 	import { getVirtualKeyboardBottomInset, getVisualViewportKeyboardInset, type ViewportRect } from '$lib/keyboardInset';
 	import type { ParsedWorldMessage } from '$lib/nostrProtocol';
+	import {
+		groupTraceRoots,
+		newestTraceRootSelection,
+		stepTraceRootSelection,
+		traceSelectionDetails
+	} from '$lib/traceInvestigation';
+	import type {
+		TraceConversationController,
+		TraceConversationState
+	} from '$lib/traceConversation';
+	import type { DevTraceConversationRuntime } from '$lib/devTraceConversationRuntime';
 	import HostOwnedComposerLite from '$lib/HostOwnedComposerLite.svelte';
 	import { resolveSpeechSubmission } from '$lib/speechSubmission';
 	import type { SpeechType } from '$lib/conversation';
@@ -115,6 +134,13 @@
 	let colorByPubkey: Record<string, AvatarColor> = {};
 	let recentMessageTimeline: RecentMessageTimeline = [];
 	let effectiveTraceRoots: readonly ParsedWorldMessage[] = [];
+	let traceConversationState: TraceConversationState = { kind: 'closed' };
+	let traceConversationController: TraceConversationController | null = null;
+	let devTraceConversationRuntime: DevTraceConversationRuntime | null = null;
+	let fieldActionMenu: Readonly<{
+		position: { x: number; y: number };
+		actions: readonly FieldCellAction[];
+	}> | null = null;
 	let timelineOverflowById: Record<string, boolean> = {};
 	let timelineEntryHeights: Record<string, number> = {};
 	let timelineAvailableHeight = 0;
@@ -209,15 +235,23 @@
 	});
 
 	$: participantById = new Map(participantViews.map((participant) => [participant.id, participant]));
-	$: traceLightCells = [...new Map(effectiveTraceRoots.map((root) => [
-		`${root.position.x},${root.position.y}`,
-		root.position
-	])).values()].map((position) => ({
-		position,
+	$: traceRootCells = groupTraceRoots(effectiveTraceRoots);
+	$: traceLightCells = traceRootCells.map((cell) => ({
+		...cell,
 		occupied: participantViews.some((participant) =>
-			participant.position.x === position.x && participant.position.y === position.y
+			participant.position.x === cell.position.x && participant.position.y === cell.position.y
 		)
 	}));
+	$: selectedTraceDetails = traceConversationState.kind === 'open'
+		? traceSelectionDetails({
+			position: traceConversationState.root.position,
+			rootId: traceConversationState.root.id
+		}, traceRootCells)
+		: null;
+	$: traceOnlyCellTriggers = traceRootCells.filter((cell) =>
+		!participantViews.some((participant) => sameCell(participant.position, cell.position)) &&
+		!movementCells.some((movement) => sameCell(movement.position, cell.position))
+	);
 
 	$: visibleParticipantIds = new Set(
 		participantViews.filter((participant) => isInsideFieldArea(participant.screen)).map((participant) => participant.id)
@@ -319,6 +353,61 @@
 		anchor: bubble.members.length === 0 ? bubble.anchor : placedAnchorById.get(bubble.id) ?? bubble.anchor
 	}));
 	$: positionedVisibleBubbles = [...positionedNormalBubbles, ...positionedMergedBubbles];
+	$: traceGhost = traceConversationState.kind === 'open' ? (() => {
+		const root = traceConversationState.root;
+		const occupied = participantViews.some((participant) => sameCell(participant.position, root.position));
+		const center = gridToWorld(root.position, cellSize);
+		const world = occupied
+			? { x: center.x - cellSize * 0.29, y: center.y + cellSize * 0.27 }
+			: center;
+		return {
+			root,
+			character: deriveCharacterFromPubkey(root.pubkey, CHARACTER_CATALOG),
+			tone: traceTone(root.pubkey),
+			occupied,
+			world,
+			screen: fieldLocalToViewport(worldToScreen(world, camera), fieldAreaBounds)
+		};
+	})() : null;
+	$: traceBubble = traceGhost ? (() => {
+		const id = `trace-root-${traceGhost.root.id}`;
+		const size = bubbleSizes[id] ?? DEFAULT_BUBBLE_SIZES.normal;
+		const shape = specialBubbleShape(traceGhost.root.speechType, id, size);
+		const preferred = normalBubblePreferredAnchor(
+			traceGhost.screen.x,
+			traceGhost.root.position.y,
+			field.rows,
+			size,
+			bubbleSafeBounds
+		);
+		const [placement] = placeBubblesWithFixed(
+			[{
+				id,
+				preferred: clampToBounds(preferred, size, bubbleSafeBounds),
+				size,
+				visualBounds: traceGhost.root.speechType === 'shout' ? undefined : shape?.bounds
+			}],
+			positionedVisibleBubbles.map((bubble) => ({
+				id: bubble.id,
+				preferred: bubble.anchor,
+				anchor: bubble.anchor,
+				size: bubble.size,
+				visualBounds: bubble.speechType === 'shout' ? undefined : bubble.shape?.bounds
+			})),
+			bubbleSafeBounds,
+			cellSize,
+			undefined,
+			bubbleVisualRegion
+		);
+		return {
+			id,
+			root: traceGhost.root,
+			tone: traceGhost.tone,
+			size,
+			shape,
+			anchor: placement?.anchor ?? preferred
+		};
+	})() : null;
 	$: movingParticipantIds = visualMotion ? new Set(visualMotion.participants.keys()) : new Set<string>();
 
 	function lerp(first: number, second: number, progress: number): number {
@@ -480,6 +569,20 @@
 			if (import.meta.env.DEV && new URLSearchParams(window.location.search).get('devTrace') === 'lights') {
 				seedDevTraceLightFixture();
 			}
+			if (import.meta.env.DEV) {
+				void import('$lib/devTraceConversationRuntime').then(({ createDevTraceConversationRuntime }) => {
+					if (!mounted || !devWorldSandboxEnabled) return;
+					const runtime = createDevTraceConversationRuntime({
+						selfId: DEV_WORLD_SELF_ID,
+						getPresence: () => presenceState,
+						setPresence,
+						getEffectiveRoots: () => effectiveTraceRoots,
+						onStateChanged: setTraceConversation
+					});
+					devTraceConversationRuntime = runtime;
+					traceConversationController = runtime;
+				});
+			}
 		}
 
 		const begin = async () => {
@@ -518,9 +621,8 @@
 				onPresenceChanged: setPresence,
 				onLiveMessage: receiveLiveMessage,
 				onTimelineMessage: receiveTimelineMessage,
-				onEffectiveTraceRootsChanged: (roots) => {
-					effectiveTraceRoots = roots;
-				},
+				onEffectiveTraceRootsChanged: setEffectiveTraceRoots,
+				onTraceConversationChanged: setTraceConversation,
 				onStatusChanged: (status) => {
 					connectionStatus = status;
 					if (status.kind === 'failed') setComposerTerminalError(new Error(status.message));
@@ -540,6 +642,7 @@
 				}
 			});
 			worldSession = session;
+			traceConversationController = session;
 
 			try {
 				const bootstrap = await session.start();
@@ -591,14 +694,23 @@
 		};
 		stopKeyboardHold = clearKeyboardHold;
 		const requestMovement = (direction: Direction) => {
-			if (devWorldSandboxEnabled) moveSandboxSelf(direction);
-			else moveWorldSelf(direction);
+			if (fieldActionMenu) {
+				closeFieldActionMenu();
+				moveSelfFromCell(direction);
+				return;
+			}
+			const cell = movementCells.find((candidate) => candidate.direction === direction);
+			if (cell) resolveFieldCellSelection(cell.position);
 		};
 		const startKeyboardHold = (direction: Direction, source: 'page' | 'composer-editor') => {
 			clearKeyboardHold();
 			heldDirection = direction;
 			heldSource = source;
 			requestMovement(direction);
+			if (fieldActionMenu) {
+				clearKeyboardHold();
+				return;
+			}
 			holdTimer = window.setInterval(() => {
 				if (!heldDirection || (heldSource === 'composer-editor' && composerEditorIsEmpty !== true) || document.querySelector('.profile-dialog-content')) {
 					clearKeyboardHold();
@@ -608,6 +720,11 @@
 			}, 500);
 		};
 		const handleKeydown = (event: KeyboardEvent) => {
+			if (event.code === 'Escape' && fieldActionMenu) {
+				closeFieldActionMenu();
+				event.preventDefault();
+				return;
+			}
 			if (
 				timelineInitialized &&
 				event.key.toLowerCase() === 'c' &&
@@ -663,6 +780,11 @@
 		const handleWindowBlur = () => clearKeyboardHold();
 		const handleVisibilityChange = () => {
 			if (document.hidden) clearKeyboardHold();
+		};
+		const handleDocumentPointerDown = (event: PointerEvent) => {
+			if (fieldActionMenu && !event.composedPath().some((target) =>
+				target instanceof HTMLElement && target.classList.contains('field-action-menu')
+			)) closeFieldActionMenu();
 		};
 
 		const observer = new ResizeObserver(updateViewport);
@@ -721,6 +843,7 @@
 		window.addEventListener('resize', updateComposerKeyboardInset);
 		window.addEventListener('blur', handleWindowBlur);
 		document.addEventListener('visibilitychange', handleVisibilityChange);
+		document.addEventListener('pointerdown', handleDocumentPointerDown);
 		const expiryTimer = window.setInterval(() => {
 			const now = Date.now();
 			const nextPresence = session?.refresh(now);
@@ -749,12 +872,16 @@
 			window.removeEventListener('resize', updateComposerKeyboardInset);
 			window.removeEventListener('blur', handleWindowBlur);
 			document.removeEventListener('visibilitychange', handleVisibilityChange);
+			document.removeEventListener('pointerdown', handleDocumentPointerDown);
 			clearKeyboardHold();
 			if (stopKeyboardHold === clearKeyboardHold) stopKeyboardHold = () => {};
 			reducedMotionQuery.removeEventListener('change', handleReducedMotionChange);
 			cancelVisualAnimation();
 			window.clearInterval(expiryTimer);
 			session?.dispose();
+			devTraceConversationRuntime?.dispose();
+			devTraceConversationRuntime = null;
+			traceConversationController = null;
 			if (worldSession === session) worldSession = null;
 		};
 	});
@@ -910,6 +1037,15 @@
 		return participant.color;
 	}
 
+	function sameCell(first: { x: number; y: number }, second: { x: number; y: number }): boolean {
+		return first.x === second.x && first.y === second.y;
+	}
+
+	function traceTone(pubkey: string): AvatarColor {
+		const prefix = Number.parseInt(pubkey.slice(0, 2), 16);
+		return AVATAR_COLORS[(Number.isFinite(prefix) ? prefix : 0) % AVATAR_COLORS.length];
+	}
+
 	function mergedBubbleTone(members: readonly Participant[]): string {
 		return participantTone(members[0] ?? { color: 'lavender' });
 	}
@@ -1003,6 +1139,113 @@
 			const position = moveOneCell(self.position, direction, state.field, occupied);
 			return position ? [{ direction, position }] : [];
 		});
+	}
+
+	function setEffectiveTraceRoots(roots: readonly ParsedWorldMessage[]): void {
+		effectiveTraceRoots = roots;
+		devTraceConversationRuntime?.reconcileEffectiveRoots(roots);
+	}
+
+	function setTraceConversation(next: TraceConversationState): void {
+		traceConversationState = next;
+	}
+
+	function closeFieldActionMenu(): void {
+		fieldActionMenu = null;
+	}
+
+	function closeTraceConversation(): void {
+		closeFieldActionMenu();
+		traceConversationController?.closeTraceConversation();
+		if (!traceConversationController) traceConversationState = { kind: 'closed' };
+	}
+
+	function actionsForCell(position: { x: number; y: number }): readonly FieldCellAction[] {
+		const participantIds = participantViews
+			.filter((participant) => sameCell(participant.position, position))
+			.map((participant) => participant.id);
+		const movementDirection = movementCells.find((movement) => sameCell(movement.position, position))?.direction;
+		return buildFieldCellActions({
+			participantIds,
+			...(movementDirection ? { movementDirection } : {}),
+			hasTrace: traceRootCells.some((cell) => sameCell(cell.position, position))
+		});
+	}
+
+	function investigateTraceCell(position: { x: number; y: number }): void {
+		const cell = traceRootCells.find((candidate) => sameCell(candidate.position, position));
+		const selection = cell ? newestTraceRootSelection(cell) : null;
+		if (!selection) return;
+		traceConversationController?.openTraceConversation({ rootId: selection.rootId, currentId: selection.rootId });
+	}
+
+	function executeFieldCellAction(
+		action: FieldCellAction,
+		position: { x: number; y: number },
+		trigger?: HTMLButtonElement
+	): void {
+		closeFieldActionMenu();
+		if (action.kind === 'movement') {
+			moveSelfFromCell(action.direction);
+			return;
+		}
+		if (action.kind === 'trace') {
+			investigateTraceCell(position);
+			return;
+		}
+		const participant = participantViews.find((candidate) => candidate.id === action.participantId);
+		if (participant && trigger) openProfile(participant.character.characterId, trigger);
+	}
+
+	function resolveFieldCellSelection(position: { x: number; y: number }, trigger?: HTMLButtonElement): void {
+		const resolution = resolveFieldCellActions(actionsForCell(position));
+		if (resolution.kind === 'none') {
+			closeTraceConversation();
+			return;
+		}
+		if (resolution.kind === 'direct') {
+			executeFieldCellAction(resolution.action, position, trigger);
+			return;
+		}
+		fieldActionMenu = { position: { ...position }, actions: resolution.actions };
+	}
+
+	function handleFieldAreaClick(event: MouseEvent): void {
+		const position = viewportPointToLogicalCell({
+			point: { x: event.clientX, y: event.clientY },
+			fieldArea: fieldAreaBounds,
+			camera,
+			field
+		});
+		if (position) resolveFieldCellSelection(position);
+		else closeFieldActionMenu();
+	}
+
+	function fieldSelectionPointer(node: HTMLElement) {
+		node.addEventListener('click', handleFieldAreaClick);
+		return {
+			destroy() {
+				node.removeEventListener('click', handleFieldAreaClick);
+			}
+		};
+	}
+
+	function selectAdjacentTraceRoot(delta: -1 | 1): void {
+		if (!selectedTraceDetails) return;
+		const current = {
+			position: selectedTraceDetails.cell.position,
+			rootId: selectedTraceDetails.root.id
+		};
+		const next = stepTraceRootSelection(current, traceRootCells, delta);
+		if (next.rootId === current.rootId) return;
+		traceConversationController?.openTraceConversation({ rootId: next.rootId, currentId: next.rootId });
+	}
+
+	function fieldActionLabel(action: FieldCellAction): string {
+		if (action.kind === 'trace') return '痕跡を調べる';
+		if (action.kind === 'movement') return `Move ${action.direction}`;
+		const participant = participantViews.find((candidate) => candidate.id === action.participantId);
+		return participant ? `${participant.character.name} のプロフィールを開く` : 'プロフィールを開く';
 	}
 
 	function isComposerEditorKeyboardEvent(event: Event): boolean {
@@ -1103,6 +1346,7 @@
 	}
 
 	function moveSelfFromCell(direction: Direction): void {
+		closeFieldActionMenu();
 		if (devWorldSandboxEnabled) moveSandboxSelf(direction);
 		else moveWorldSelf(direction);
 	}
@@ -1195,7 +1439,8 @@
 		if (!devWorldSandboxEnabled) return;
 		conversationState = createConversationState();
 		recentMessageTimeline = [];
-		effectiveTraceRoots = [];
+		setEffectiveTraceRoots([]);
+		closeTraceConversation();
 		timelineOverflowById = {};
 		timelineEntryHeights = {};
 		timelineAvailableHeight = 0;
@@ -1240,25 +1485,41 @@
 
 	function seedDevTraceLightFixture(): void {
 		if (!devWorldSandboxEnabled) return;
-		const now = Math.floor(Date.now() / 1000);
-		effectiveTraceRoots = [
+		const nowMs = Date.now();
+		const now = Math.floor(nowMs / 1000);
+		const livePubkey = 'f'.repeat(64);
+		setPresence(createPresenceState(FIELD, nowMs, [
+			{ id: DEV_WORLD_SELF_ID, position: { x: 7, y: 3 } },
+			{ id: livePubkey, position: { x: 9, y: 4 } }
+		]));
+		conversationState = receiveMessage(conversationState, {
+			id: 'dev-trace-live-message',
+			pubkey: livePubkey,
+			content: 'live bubble fixed while a trace bubble is added nearby',
+			createdAt: nowMs
+		}, { isSpeakerVisible: true, duration: 60_000, now: nowMs });
+		setEffectiveTraceRoots([
 			{
 				id: '1'.repeat(64), pubkey: 'a'.repeat(64), createdAt: now,
-				content: 'first root in the shared empty cell', speechType: 'normal', position: { x: 2, y: 2 }
+				content: 'out-of-range trace root', speechType: 'normal', position: { x: 2, y: 2 }
 			},
 			{
-				id: '2'.repeat(64), pubkey: 'b'.repeat(64), createdAt: now - 1,
-				content: 'second root in the shared empty cell', speechType: 'shout', position: { x: 2, y: 2 }
+				id: '2'.repeat(64), pubkey: 'b'.repeat(64), createdAt: now,
+				content: 'trace-only root near the viewer', speechType: 'shout', position: { x: 8, y: 4 }
 			},
 			{
 				id: '3'.repeat(64), pubkey: 'c'.repeat(64), createdAt: now - 2,
 				content: 'root beside the current participant', speechType: 'monologue', position: { x: 7, y: 3 }
 			},
 			{
-				id: '4'.repeat(64), pubkey: 'd'.repeat(64), createdAt: now - 3,
-				content: 'root on an available movement cell', speechType: 'normal', position: { x: 8, y: 3 }
+				id: '4'.repeat(64), pubkey: 'd'.repeat(64), createdAt: now - 1,
+				content: 'newest root on an available movement cell', speechType: 'normal', position: { x: 8, y: 3 }
+			},
+			{
+				id: '5'.repeat(64), pubkey: 'e'.repeat(64), createdAt: now - 2,
+				content: 'older root on the same movement cell', speechType: 'monologue', position: { x: 8, y: 3 }
 			}
-		];
+		]);
 	}
 
 	function seedDevSpeechNormalFixture(): void {
@@ -1703,6 +1964,7 @@
 	class="app-shell"
 	class:composer-available={runtimeMode === 'relay'}
 	class:composer-keyboard-visible={composerKeyboardInset > 0}
+	data-trace-runtime={traceConversationController ? runtimeMode : undefined}
 	style={`--composer-keyboard-inset: ${composerKeyboardInset}px;--composer-initial-preferred-height: ${INITIAL_COMPOSER_PREFERRED_HEIGHT}px;${composerPreferredHeight === null ? '' : `--composer-preferred-height: ${composerPreferredHeight}px;`}`}
 >
 	<section class="field-viewport" bind:this={viewportElement} aria-label="Conversation field">
@@ -1780,6 +2042,7 @@
 			class="field-area"
 			style={`top: ${fieldAreaBounds.y}px; left: ${fieldAreaBounds.x}px; width: ${fieldAreaBounds.width}px; height: ${fieldAreaBounds.height}px;`}
 			aria-label="Field area"
+			use:fieldSelectionPointer
 		>
 			<div
 				class="field-scene"
@@ -1800,7 +2063,10 @@
 							data-movement-position={`${cell.position.x},${cell.position.y}`}
 							aria-label={`Move ${cell.direction}`}
 							style={`left: ${cell.position.x * cellSize}px; top: ${cell.position.y * cellSize}px;`}
-							on:click={() => moveSelfFromCell(cell.direction)}
+							on:click={(event) => {
+								event.stopPropagation();
+								resolveFieldCellSelection(cell.position, event.currentTarget as HTMLButtonElement);
+							}}
 						>
 							<span class="movement-cell-chevron" aria-hidden="true"></span>
 						</button>
@@ -1817,6 +2083,21 @@
 						></span>
 					{/each}
 				</div>
+				<div class="field-cell-selection-layer" aria-label="Trace investigation cells">
+					{#each traceOnlyCellTriggers as cell (`${cell.position.x},${cell.position.y}`)}
+						<button
+							class="field-cell-selection-trigger"
+							type="button"
+							data-cell-position={`${cell.position.x},${cell.position.y}`}
+							aria-label="痕跡を調べる"
+							style={`left: ${cell.position.x * cellSize}px; top: ${cell.position.y * cellSize}px;`}
+							on:click={(event) => {
+								event.stopPropagation();
+								resolveFieldCellSelection(cell.position, event.currentTarget as HTMLButtonElement);
+							}}
+						></button>
+					{/each}
+				</div>
 				{#each participantViews as participant (participant.id)}
 					<div
 						class="participant"
@@ -1830,7 +2111,10 @@
 							class="participant-profile-trigger"
 							type="button"
 							aria-label={`${participant.character.name} のプロフィールを開く`}
-							on:click={(event) => openProfile(participant.character.characterId, event.currentTarget)}
+							on:click={(event) => {
+								event.stopPropagation();
+								resolveFieldCellSelection(participant.position, event.currentTarget);
+							}}
 						>
 							<Avatar.Root class={`avatar avatar-${participant.color}`}>
 								<Avatar.Image src={asset(`/${participant.character.picture}`)} alt="" />
@@ -1844,6 +2128,51 @@
 						</button>
 					</div>
 				{/each}
+				{#if traceGhost}
+					<div
+						class:trace-ghost-occupied={traceGhost.occupied}
+						class="trace-ghost"
+						data-trace-ghost-root-id={traceGhost.root.id}
+						style={`left: ${traceGhost.world.x}px; top: ${traceGhost.world.y}px;`}
+					>
+						<button
+							class="trace-ghost-profile-trigger"
+							type="button"
+							aria-label={`${traceGhost.character.name} のプロフィールを開く`}
+							on:click={(event) => {
+								event.stopPropagation();
+								openProfile(traceGhost.character.characterId, event.currentTarget);
+							}}
+						>
+							<Avatar.Root class={`avatar avatar-${traceGhost.tone}`}>
+								<Avatar.Image src={asset(`/${traceGhost.character.picture}`)} alt="" />
+								<Avatar.Fallback>{traceGhost.character.name.slice(0, 1)}</Avatar.Fallback>
+							</Avatar.Root>
+							<span class="trace-ghost-name" aria-hidden="true">{traceGhost.character.name}</span>
+						</button>
+					</div>
+				{/if}
+				{#if fieldActionMenu}
+					<div
+						class="field-action-menu"
+						role="menu"
+						tabindex="-1"
+						aria-label="Cell actions"
+						style={`left: ${(fieldActionMenu.position.x + 0.5) * cellSize}px; top: ${(fieldActionMenu.position.y + 0.5) * cellSize}px;`}
+					>
+						{#each fieldActionMenu.actions as action, index (`${action.kind}-${index}`)}
+							<button
+								type="button"
+								role="menuitem"
+								data-cell-action={action.kind}
+								on:click={(event) => {
+									event.stopPropagation();
+									executeFieldCellAction(action, fieldActionMenu!.position, event.currentTarget);
+								}}
+							>{fieldActionLabel(action)}</button>
+						{/each}
+					</div>
+				{/if}
 			</div>
 		</div>
 
@@ -1864,6 +2193,13 @@
 					<path class={`tail-outline tone-${bubble.tone}`} data-tail-participant-id={member.id} d={tail.outlinePath} />
 				{/each}
 			{/each}
+			{#if traceBubble && traceGhost}
+				{@const start = tailStart(traceBubble.anchor, traceBubble.size)}
+				{@const target = { x: traceGhost.screen.x, y: traceGhost.screen.y - cellSize / 2 - 4 }}
+				{@const tail = tailGeometry(start, target, 11, 2, specialTailExtension(traceBubble.root.speechType))}
+				<polygon class={`tail trace-tail tone-${traceBubble.tone}`} data-trace-tail-root-id={traceBubble.root.id} points={tail.points} />
+				<path class={`tail-outline trace-tail-outline tone-${traceBubble.tone}`} data-trace-tail-root-id={traceBubble.root.id} d={tail.outlinePath} />
+			{/if}
 		</svg>
 
 		<div class="bubble-layer" aria-live="polite">
@@ -1924,6 +2260,56 @@
 					{/if}
 				</div>
 			{/each}
+			{#if traceBubble && traceGhost}
+				<div
+					use:observeBubble={traceBubble.id}
+					class={`bubble bubble-normal trace-root-bubble tone-${traceBubble.tone}${traceBubble.root.speechType !== 'normal' ? ' speech-bubble-special' : ''}`}
+					data-bubble-id={traceBubble.id}
+					data-trace-root-id={traceBubble.root.id}
+					data-speech-type={traceBubble.root.speechType}
+					style={`transform: translate3d(${traceBubble.anchor.x}px, ${traceBubble.anchor.y}px, 0);`}
+				>
+					{#if traceBubble.root.speechType !== 'normal'}
+						{@const shape = traceBubble.shape}
+						{@const outlineMaskId = speechOutlineMaskId(traceBubble.id)}
+						{@const start = tailStart(traceBubble.anchor, traceBubble.size)}
+						{@const target = { x: traceGhost.screen.x, y: traceGhost.screen.y - cellSize / 2 - 4 }}
+						{@const tail = tailGeometry(start, target, 11, 2, SPECIAL_TAIL_BODY_EXTENSION)}
+						<svg
+							class="bubble-surface"
+							data-speech-surface={traceBubble.root.speechType}
+							viewBox={`${shape?.bounds.x ?? 0} ${shape?.bounds.y ?? 0} ${shape?.bounds.width ?? traceBubble.size.width} ${shape?.bounds.height ?? traceBubble.size.height}`}
+							style={shape ? bubbleSurfaceStyle(shape) : ''}
+							aria-hidden="true"
+						>
+							<defs>
+								<mask id={outlineMaskId} maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x={shape?.bounds.x ?? 0} y={shape?.bounds.y ?? 0} width={shape?.bounds.width ?? traceBubble.size.width} height={shape?.bounds.height ?? traceBubble.size.height}>
+									<rect x={shape?.bounds.x ?? 0} y={shape?.bounds.y ?? 0} width={shape?.bounds.width ?? traceBubble.size.width} height={shape?.bounds.height ?? traceBubble.size.height} fill="white" />
+									<polygon data-tail-opening={traceBubble.root.id} points={tailOutlineOpeningPoints(tail, traceBubble.anchor)} fill="black" />
+								</mask>
+							</defs>
+							<path class="bubble-surface-fill trace-bubble-surface-fill" d={shape?.path ?? ''} />
+							<path class="bubble-surface-outline trace-bubble-surface-outline" d={shape?.path ?? ''} mask={`url(#${outlineMaskId})`} />
+						</svg>
+					{/if}
+					<span class="bubble-content">{traceBubble.root.content}</span>
+					{#if bubbleOverflowById[traceBubble.id]}
+						<span class="bubble-ellipsis" aria-hidden="true">…</span>
+					{/if}
+					{#if selectedTraceDetails && selectedTraceDetails.total > 1}
+						<div class="trace-root-selector" aria-label="Trace roots in this cell">
+							<button type="button" aria-label="Previous trace root" disabled={selectedTraceDetails.index === 0} on:click={() => selectAdjacentTraceRoot(-1)}>‹</button>
+							<span>{selectedTraceDetails.index + 1}/{selectedTraceDetails.total}</span>
+							<button type="button" aria-label="Next trace root" disabled={selectedTraceDetails.index === selectedTraceDetails.total - 1} on:click={() => selectAdjacentTraceRoot(1)}>›</button>
+						</div>
+					{/if}
+					{#if traceConversationState.kind === 'open' && traceConversationState.replyRefresh !== 'settled'}
+						<span class="trace-reply-status" data-reply-refresh={traceConversationState.replyRefresh}>
+							{traceConversationState.replyRefresh === 'loading' ? 'Loading…' : 'Replies unavailable'}
+						</span>
+					{/if}
+				</div>
+			{/if}
 		</div>
 
 		<div class="viewport-vignette" aria-hidden="true"></div>
@@ -2462,6 +2848,30 @@
 		transform: translate(-50%, -50%);
 	}
 
+	.field-cell-selection-layer {
+		position: absolute;
+		inset: 0;
+		z-index: 2;
+		pointer-events: none;
+	}
+
+	.field-cell-selection-trigger {
+		position: absolute;
+		width: var(--cell-size);
+		height: var(--cell-size);
+		padding: 0;
+		border: 0;
+		background: transparent;
+		cursor: pointer;
+		pointer-events: auto;
+		touch-action: manipulation;
+	}
+
+	.field-cell-selection-trigger:focus-visible {
+		outline: 3px solid #6dabb9;
+		outline-offset: -5px;
+	}
+
 	.movement-cell {
 		position: absolute;
 		display: grid;
@@ -2628,6 +3038,94 @@
 		font-weight: 800;
 	}
 
+	.trace-ghost {
+		position: absolute;
+		z-index: 4;
+		width: var(--cell-size);
+		height: var(--cell-size);
+		transform: translate(-50%, -50%);
+		opacity: 0.58;
+		filter: saturate(0.72);
+	}
+
+	.trace-ghost-occupied {
+		width: calc(var(--cell-size) * 0.58);
+		height: calc(var(--cell-size) * 0.58);
+	}
+
+	.trace-ghost-occupied :global(.avatar) {
+		width: 100%;
+		height: 100%;
+	}
+
+	.trace-ghost-profile-trigger {
+		position: relative;
+		display: block;
+		width: 100%;
+		height: 100%;
+		padding: 0;
+		border: 0;
+		background: transparent;
+		cursor: pointer;
+	}
+
+	.trace-ghost-profile-trigger:focus-visible {
+		outline: 3px solid #6dabb9;
+		outline-offset: 2px;
+	}
+
+	.trace-ghost-name {
+		position: absolute;
+		bottom: -2px;
+		left: 50%;
+		max-width: calc(var(--cell-size) + 8px);
+		padding: 1px 5px;
+		transform: translateX(-50%);
+		overflow: hidden;
+		border: 1px dashed rgba(79, 91, 88, 0.48);
+		border-radius: 999px;
+		background: rgba(247, 247, 239, 0.76);
+		color: #596662;
+		font-size: 9px;
+		font-weight: 700;
+		white-space: nowrap;
+		text-overflow: ellipsis;
+	}
+
+	.field-action-menu {
+		position: absolute;
+		z-index: 8;
+		display: grid;
+		min-width: 170px;
+		padding: 5px;
+		border: 1px solid rgba(66, 82, 76, 0.28);
+		border-radius: 10px;
+		background: rgba(250, 250, 244, 0.97);
+		box-shadow: 0 10px 28px rgba(44, 54, 50, 0.24);
+		transform: translate(-50%, calc(-100% - 8px));
+		pointer-events: auto;
+	}
+
+	.field-action-menu button {
+		min-height: 38px;
+		padding: 7px 10px;
+		border: 0;
+		border-radius: 7px;
+		background: transparent;
+		color: #364541;
+		font: inherit;
+		font-size: 12px;
+		font-weight: 700;
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.field-action-menu button:hover,
+	.field-action-menu button:focus-visible {
+		background: rgba(122, 164, 148, 0.18);
+		outline: none;
+	}
+
 	.tail-layer,
 	.bubble-layer {
 		position: absolute;
@@ -2735,6 +3233,91 @@
 		background: var(--tone-background);
 		line-height: 1;
 		pointer-events: none;
+	}
+
+	.trace-root-bubble {
+		width: fit-content;
+		min-width: 72px;
+		max-width: min(240px, calc(100% - 32px));
+		padding: 12px 15px;
+		border-style: dashed;
+		pointer-events: none;
+	}
+
+	.trace-root-bubble .bubble-content {
+		color: #26312f;
+		opacity: 1;
+	}
+
+	.trace-bubble-surface-fill {
+		fill: color-mix(in srgb, var(--tone-background) 91%, transparent);
+	}
+
+	.trace-bubble-surface-outline,
+	.trace-tail-outline {
+		stroke-dasharray: 4 3;
+	}
+
+	.trace-tail {
+		opacity: 0.9;
+	}
+
+	.trace-root-selector {
+		position: absolute;
+		top: calc(100% + 5px);
+		left: 50%;
+		z-index: 4;
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		padding: 3px 5px;
+		border: 1px solid rgba(65, 77, 73, 0.22);
+		border-radius: 999px;
+		background: rgba(250, 250, 244, 0.94);
+		box-shadow: 0 4px 12px rgba(44, 54, 50, 0.14);
+		color: #53625d;
+		font-size: 10px;
+		transform: translateX(-50%);
+		pointer-events: auto;
+	}
+
+	.trace-root-selector button {
+		display: grid;
+		width: 26px;
+		height: 26px;
+		place-items: center;
+		padding: 0;
+		border: 0;
+		border-radius: 50%;
+		background: transparent;
+		color: inherit;
+		font-size: 20px;
+		line-height: 1;
+		cursor: pointer;
+	}
+
+	.trace-root-selector button:disabled {
+		opacity: 0.32;
+		cursor: default;
+	}
+
+	.trace-root-selector button:focus-visible {
+		outline: 2px solid #6dabb9;
+	}
+
+	.trace-reply-status {
+		position: absolute;
+		top: calc(100% + 42px);
+		left: 50%;
+		width: max-content;
+		max-width: 180px;
+		padding: 2px 7px;
+		border-radius: 999px;
+		background: rgba(250, 250, 244, 0.88);
+		color: #68736f;
+		font-size: 9px;
+		font-weight: 700;
+		transform: translateX(-50%);
 	}
 
 	.bubble-normal::after {

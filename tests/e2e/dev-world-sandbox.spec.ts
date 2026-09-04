@@ -168,26 +168,44 @@ test.describe('DEV World Sandbox', () => {
 		await expect(self.locator('img')).toHaveAttribute('src', /characters\/001\.webp$/);
 	});
 
-	test('projects unique non-interactive trace lights into the field scene', async ({ page }) => {
+	test('uses logical cells for trace actions while lights remain decorative', async ({ page }) => {
 		await page.setViewportSize({ width: 390, height: 844 });
 		await page.emulateMedia({ reducedMotion: 'reduce' });
+		await page.addInitScript(() => {
+			const NativeWebSocket = window.WebSocket;
+			Object.defineProperty(window, '__traceExternalCalls', {
+				value: { webSocketUrls: [] as string[], indexedDbOpen: 0 }, configurable: true
+			});
+			window.WebSocket = class extends NativeWebSocket {
+				constructor(url: string | URL, protocols?: string | string[]) {
+					(window as never as { __traceExternalCalls: { webSocketUrls: string[] } }).__traceExternalCalls.webSocketUrls.push(String(url));
+					super(url, protocols);
+				}
+			};
+			const nativeOpen = indexedDB.open.bind(indexedDB);
+			indexedDB.open = ((...args: Parameters<IDBFactory['open']>) => {
+				(window as never as { __traceExternalCalls: { indexedDbOpen: number } }).__traceExternalCalls.indexedDbOpen += 1;
+				return nativeOpen(...args);
+			}) as IDBFactory['open'];
+		});
 		await page.goto('/?devWorld=1&devTrace=lights');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+		await expect(page.locator('main')).toHaveAttribute('data-trace-runtime', 'dev');
+		const externalCallBaseline = await page.evaluate(() => (window as never as {
+			__traceExternalCalls: { webSocketUrls: string[]; indexedDbOpen: number }
+		}).__traceExternalCalls);
 
 		const lights = page.locator('.trace-light');
-		await expect(lights).toHaveCount(3);
+		await expect(lights).toHaveCount(4);
 		await expect(page.locator('[data-trace-light-position="2,2"]')).toHaveCount(1);
 		await expect(page.locator('[data-trace-light-position="7,3"]')).toHaveCount(1);
+		await expect(page.locator('[data-trace-light-position="8,4"]')).toHaveCount(1);
 		await expect(page.locator('[data-trace-light-position="8,3"]')).toHaveCount(1);
 		const presentation = await lights.evaluateAll((elements) => elements.map((element) => ({
 			text: element.textContent,
 			pointerEvents: getComputedStyle(element).pointerEvents
 		})));
-		expect(presentation).toEqual([
-			{ text: '', pointerEvents: 'none' },
-			{ text: '', pointerEvents: 'none' },
-			{ text: '', pointerEvents: 'none' }
-		]);
+		expect(presentation).toEqual(Array.from({ length: 4 }, () => ({ text: '', pointerEvents: 'none' })));
 
 		const geometry = await page.evaluate(() => {
 			const grid = document.querySelector<HTMLElement>('.field-grid');
@@ -210,16 +228,23 @@ test.describe('DEV World Sandbox', () => {
 		expect(geometry.occupied.x).toBeGreaterThan(7.5 * geometry.cellSize);
 		expect(geometry.occupied.y).toBeLessThan(3.5 * geometry.cellSize);
 
-		await profileTrigger(page, '女の子').click();
-		await expect(profileDialog(page)).toBeVisible();
-		await page.keyboard.press('Escape');
-		await expect(profileDialog(page)).toBeHidden();
-
 		const before = await page.evaluate(() => ({
 			gridLeft: document.querySelector<HTMLElement>('.field-grid')!.getBoundingClientRect().left,
 			lightLeft: document.querySelector<HTMLElement>('[data-trace-light-position="2,2"]')!.getBoundingClientRect().left
 		}));
+		await page.getByRole('button', { name: 'Move left' }).click();
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '6,3');
 		await page.getByRole('button', { name: 'Move right' }).click();
+		await page.getByRole('menu', { name: 'Cell actions' }).locator('[data-cell-action="movement"]').click();
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '7,3');
+		await page.getByRole('button', { name: 'Move right' }).click();
+		const actionMenu = page.getByRole('menu', { name: 'Cell actions' });
+		await expect(actionMenu).toBeVisible();
+		await expect(actionMenu.getByRole('menuitem')).toHaveCount(2);
+		await expect(actionMenu.locator('[data-cell-action="trace"]')).toHaveText('痕跡を調べる');
+		await expect(page.locator('.trace-root-bubble')).toHaveCount(0);
+		await actionMenu.locator('[data-cell-action="movement"]').click();
+		await expect(actionMenu).toBeHidden();
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '8,3');
 		const after = await page.evaluate(() => ({
 			gridLeft: document.querySelector<HTMLElement>('.field-grid')!.getBoundingClientRect().left,
@@ -227,6 +252,61 @@ test.describe('DEV World Sandbox', () => {
 		}));
 		expect(after.gridLeft).not.toBe(before.gridLeft);
 		expect(after.lightLeft - before.lightLeft).toBeCloseTo(after.gridLeft - before.gridLeft, 3);
+		expect(await page.evaluate(() => (window as never as {
+			__traceExternalCalls: { webSocketUrls: string[]; indexedDbOpen: number }
+		}).__traceExternalCalls)).toEqual(externalCallBaseline);
+	});
+
+	test('opens and navigates the shared DEV trace conversation without changing it on menu open', async ({ page }) => {
+		await page.setViewportSize({ width: 900, height: 720 });
+		await page.emulateMedia({ reducedMotion: 'reduce' });
+		await page.goto('/?devWorld=1&devTrace=lights');
+		await expect(page.locator('main')).toHaveAttribute('data-trace-runtime', 'dev');
+		const hideTimeline = page.getByRole('button', { name: 'Hide Chatter' });
+		if (await hideTimeline.isVisible()) await hideTimeline.click();
+
+		await page.locator('[data-cell-position="2,2"]').focus();
+		await page.keyboard.press('Enter');
+		await expect(page.locator('.trace-root-bubble')).toHaveCount(0);
+		const liveAnchor = await page.locator('[data-bubble-id="dev-trace-live-message"]').evaluate((element) => getComputedStyle(element).transform);
+		await page.locator('[data-cell-position="8,4"]').click({ position: { x: 4, y: 4 } });
+		await expect(page.locator('[data-trace-root-id="' + '2'.repeat(64) + '"]')).toContainText('trace-only root near the viewer');
+		await expect(page.locator('[data-trace-ghost-root-id="' + '2'.repeat(64) + '"]')).toBeVisible();
+		await expect(page.locator('.trace-reply-status')).toHaveCount(0);
+		await expect.poll(() => page.locator('[data-bubble-id="dev-trace-live-message"]').evaluate((element) => getComputedStyle(element).transform)).toBe(liveAnchor);
+
+		await profileTrigger(page, '女の子').click();
+		const menu = page.getByRole('menu', { name: 'Cell actions' });
+		await expect(menu).toBeVisible();
+		await expect(menu.getByRole('menuitem')).toHaveCount(2);
+		await expect(page.locator('[data-trace-root-id="' + '2'.repeat(64) + '"]')).toBeVisible();
+		await page.keyboard.press('Escape');
+		await expect(menu).toBeHidden();
+
+		await page.getByRole('button', { name: 'Move right' }).click();
+		await expect(menu).toBeVisible();
+		await menu.locator('[data-cell-action="trace"]').click();
+		await expect(page.locator('[data-trace-root-id="' + '4'.repeat(64) + '"]')).toContainText('newest root');
+		await expect(page.getByText('1/2', { exact: true })).toBeVisible();
+		await page.getByRole('button', { name: 'Next trace root' }).click();
+		await expect(page.locator('[data-trace-root-id="' + '5'.repeat(64) + '"]')).toContainText('older root');
+		await expect(page.getByText('2/2', { exact: true })).toBeVisible();
+
+		await page.locator('.trace-ghost-profile-trigger').click();
+		await expect(profileDialog(page)).toBeVisible();
+		await page.keyboard.press('Escape');
+		await expect(profileDialog(page)).toBeHidden();
+		await expect(page.locator('[data-trace-root-id="' + '5'.repeat(64) + '"]')).toBeVisible();
+
+		await page.getByRole('button', { name: 'Move left' }).click();
+		await page.getByRole('button', { name: 'Move left' }).click();
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '5,3');
+		await expect(page.locator('[data-trace-root-id="' + '5'.repeat(64) + '"]')).toBeVisible();
+		await page.getByRole('button', { name: 'Previous trace root' }).click();
+		await expect(page.locator('[data-trace-root-id="' + '5'.repeat(64) + '"]')).toBeVisible();
+
+		await page.locator('.field-area').click({ position: { x: 8, y: 8 } });
+		await expect(page.locator('.trace-root-bubble')).toHaveCount(0);
 	});
 
 	test('shows a finite recent-message overlay with semantic colors and existing profile focus restoration', async ({ page }) => {
@@ -417,6 +497,7 @@ test.describe('DEV World Sandbox', () => {
 		await expect(timeline).toBeVisible();
 		await page.setViewportSize({ width: 390, height: 844 });
 		await expect(timeline).toBeVisible();
+		await expect.poll(() => page.locator('.field-area').evaluate((element) => element.getBoundingClientRect().width)).toBe(374);
 		await page.keyboard.press('c');
 		await expect(timeline).toBeHidden();
 
