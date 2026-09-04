@@ -143,16 +143,31 @@ describe('field geometry', () => {
 
 		expect(moveOneCell({ x: 0, y: 0 }, 'left', field)).toBeNull();
 		expect(moveOneCell({ x: 3, y: 2 }, 'down', field)).toBeNull();
+		expect(moveOneCell({ x: 0, y: 0 }, 'up-right', field)).toBeNull();
 		expect(moveOneCell({ x: 1, y: 1 }, 'right', field, [{ x: 2, y: 1 }])).toBeNull();
+		expect(moveOneCell({ x: 1, y: 1 }, 'down-right', field, [{ x: 2, y: 2 }])).toBeNull();
 	});
 
-	it('moves one cell in each cardinal direction', () => {
+	it('moves one cell in each cardinal and diagonal direction', () => {
 		const field = { columns: 4, rows: 3 };
 
 		expect(moveOneCell({ x: 1, y: 1 }, 'up', field)).toEqual({ x: 1, y: 0 });
+		expect(moveOneCell({ x: 1, y: 1 }, 'up-right', field)).toEqual({ x: 2, y: 0 });
 		expect(moveOneCell({ x: 1, y: 1 }, 'down', field)).toEqual({ x: 1, y: 2 });
+		expect(moveOneCell({ x: 1, y: 1 }, 'down-right', field)).toEqual({ x: 2, y: 2 });
 		expect(moveOneCell({ x: 1, y: 1 }, 'left', field)).toEqual({ x: 0, y: 1 });
+		expect(moveOneCell({ x: 1, y: 1 }, 'down-left', field)).toEqual({ x: 0, y: 2 });
 		expect(moveOneCell({ x: 1, y: 1 }, 'right', field)).toEqual({ x: 2, y: 1 });
+		expect(moveOneCell({ x: 1, y: 1 }, 'up-left', field)).toEqual({ x: 0, y: 0 });
+	});
+
+	it('allows a diagonal when only its orthogonal side cells are occupied', () => {
+		const field = { columns: 4, rows: 4 };
+
+		expect(moveOneCell({ x: 1, y: 2 }, 'up-right', field, [
+			{ x: 1, y: 1 },
+			{ x: 2, y: 2 }
+		])).toEqual({ x: 2, y: 1 });
 	});
 
 	it('maps logical field Y into the speech area while keeping the bubble inside', () => {

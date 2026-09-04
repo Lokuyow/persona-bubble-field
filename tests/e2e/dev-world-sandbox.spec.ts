@@ -1427,6 +1427,35 @@ test.describe('DEV World Sandbox', () => {
 		}
 	});
 
+	test('moves one cell in each diagonal direction through the pointer path', async ({ page }) => {
+		for (const [delta, expected] of [
+			[{ x: 24, y: -24 }, '8,2'],
+			[{ x: 24, y: 24 }, '8,4'],
+			[{ x: -24, y: 24 }, '6,4'],
+			[{ x: -24, y: -24 }, '6,2']
+		] as const) {
+			await openDevWorld(page);
+			await dragJoystick(page, delta);
+			await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', expected);
+		}
+	});
+
+	test('continues diagonal pointer movement at the shared 500ms cadence', async ({ page }) => {
+		await openClockedDevWorld(page);
+		const self = page.locator('.participant[data-self="true"]');
+		const start = await fieldCellCenter(page, { x: 5, y: 5 });
+		await page.mouse.move(start.x, start.y);
+		await page.mouse.down();
+		await page.mouse.move(start.x + 24, start.y - 24);
+		await expect(page.locator('[data-pointer-joystick="up-right"]')).toBeVisible();
+		await expect(self).toHaveAttribute('data-position', '8,2');
+		await page.clock.runFor(500);
+		await expect(self).toHaveAttribute('data-position', '9,1');
+		await page.mouse.up();
+		await page.clock.runFor(1_000);
+		await expect(self).toHaveAttribute('data-position', '9,1');
+	});
+
 	test('accepts the touch PointerEvent path without changing the movement API', async ({ page }) => {
 		await openDevWorld(page);
 		const start = await fieldCellCenter(page, { x: 5, y: 5 });
@@ -1490,6 +1519,45 @@ test.describe('DEV World Sandbox', () => {
 		await page.mouse.up();
 	});
 
+		test('allows a diagonal when only its orthogonal side cells are occupied', async ({ page }) => {
+		await page.goto('/?devWorld=1&devSpeech=1');
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+
+		const self = page.locator('.participant[data-self="true"]');
+		await expect(self).toHaveAttribute('data-position', '7,3');
+		const start = await fieldCellCenter(page, { x: 5, y: 5 });
+		await page.mouse.move(start.x, start.y);
+		await page.mouse.down();
+		await page.mouse.move(start.x + 24, start.y - 24);
+		await expect(page.locator('[data-pointer-joystick="up-right"]')).toBeVisible();
+		await expect(self).toHaveAttribute('data-position', '8,2');
+		await page.mouse.up();
+	});
+
+	test('blocks an occupied diagonal destination and a diagonal field edge', async ({ page }) => {
+		await page.goto('/?devWorld=1&devSpeech=1');
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+		const self = page.locator('.participant[data-self="true"]');
+		await expect(self).toHaveAttribute('data-position', '7,3');
+		await page.keyboard.press('ArrowLeft');
+		await expect(self).toHaveAttribute('data-position', '6,3');
+		await dragJoystick(page, { x: 24, y: -24 });
+		await expect(self).toHaveAttribute('data-position', '6,3');
+
+		await page.goto('/?devWorld=1');
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+		await expect(self).toHaveAttribute('data-position', '7,3');
+		for (let index = 0; index < 7; index += 1) await page.keyboard.press('ArrowLeft');
+		await expect(self).toHaveAttribute('data-position', '0,3');
+		const start = await fieldCellCenter(page, { x: 5, y: 5 });
+		await page.mouse.move(start.x, start.y);
+		await page.mouse.down();
+		await page.mouse.move(start.x - 24, start.y - 24);
+		await expect(page.locator('[data-pointer-joystick="up-left"]')).toBeVisible();
+		await expect(self).toHaveAttribute('data-position', '0,3');
+		await page.mouse.up();
+	});
+
 	test('keeps keyboard ownership during a pending pointer tap and safely takes over on drag', async ({ page }) => {
 		await openClockedDevWorld(page);
 		const self = page.locator('.participant[data-self="true"]');
@@ -1540,10 +1608,11 @@ test.describe('DEV World Sandbox', () => {
 		await page.mouse.move(start.x + 24, start.y);
 		await expect(self).toHaveAttribute('data-position', '8,3');
 		await page.clock.runFor(400);
-		await page.mouse.move(start.x, start.y - 24);
+		await page.mouse.move(start.x + 24, start.y - 24);
+		await expect(page.locator('[data-pointer-joystick="up-right"]')).toBeVisible();
 		await expect(self).toHaveAttribute('data-position', '8,3');
 		await page.clock.runFor(100);
-		await expect(self).toHaveAttribute('data-position', '8,2');
+		await expect(self).toHaveAttribute('data-position', '9,2');
 		await page.mouse.up();
 	});
 
@@ -1876,20 +1945,30 @@ test.describe('DEV World Sandbox', () => {
 			const before = await readCharacterGeometry(page);
 			const beforeTransform = await scene.evaluate((element) => getComputedStyle(element).transform);
 
-			await dragJoystick(page, { x: 24, y: 0 });
-			await expect(self).toHaveAttribute('data-position', '8,3');
+			const beforeLogicalStyle = await self.evaluate((element) => ({
+				left: (element as HTMLElement).style.left,
+				top: (element as HTMLElement).style.top
+			}));
+			await dragJoystick(page, { x: 24, y: -24 });
+			await expect(self).toHaveAttribute('data-position', '8,2');
 			await expect(self).toHaveAttribute('data-movement-animation', 'active');
 			await expect(self).not.toHaveAttribute('data-movement-animation', 'active');
 			await expect(scene).not.toHaveAttribute('data-camera-animation', 'active');
 			const after = await readCharacterGeometry(page);
 			const afterTransform = await scene.evaluate((element) => getComputedStyle(element).transform);
+			const afterLogicalStyle = await self.evaluate((element) => ({
+				left: (element as HTMLElement).style.left,
+				top: (element as HTMLElement).style.top
+			}));
 
 			expect(afterTransform).not.toBe(beforeTransform);
+			expect(afterLogicalStyle.left).not.toBe(beforeLogicalStyle.left);
+			expect(afterLogicalStyle.top).not.toBe(beforeLogicalStyle.top);
 			expect(Math.abs(after.avatarCenter.x - page.viewportSize()!.width / 2)).toBeLessThan(0.5);
 			expect(Math.abs(after.avatarCenter.x - after.participantCenter.x)).toBeLessThan(0.5);
 			expect(after.avatarWidth).toBe('46px');
 			expect(after.avatarHeight).toBe('46px');
-			expect(before.participantCenter.y).toBe(after.participantCenter.y);
+			expect(before.participantCenter.y).not.toBe(after.participantCenter.y);
 		});
 	});
 

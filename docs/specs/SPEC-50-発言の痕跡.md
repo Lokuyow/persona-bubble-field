@@ -42,7 +42,8 @@ cellにcurrent participantがいなければghostはparticipant相当位置に�
 
 ### investigation range
 
-root/replyのinvestigation rangeは、それぞれの実際の `w` cell自身と周囲8 cellとする。これはdiagonal movementを許可する意味ではない。
+root/replyのinvestigation rangeは、それぞれの実際の `w` cell自身と周囲8 cellとする。
+movement rulesは[SPEC-30](./SPEC-30-フィールド・position・presence.md)を正とする。
 
 - rootはrange内でだけ調査でき、root調査はpresence activityとする。
 - replyを選択してさらに深く辿るには、そのreplyの実際の `w` のinvestigation rangeまで物理的に移動している必要がある。

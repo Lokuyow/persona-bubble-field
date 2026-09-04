@@ -69,7 +69,15 @@ export type FixedBubblePlacement = BubblePlacementInput & {
 	anchor: WorldPoint;
 };
 
-export type Direction = 'up' | 'down' | 'left' | 'right';
+export type Direction =
+	| 'up'
+	| 'up-right'
+	| 'right'
+	| 'down-right'
+	| 'down'
+	| 'down-left'
+	| 'left'
+	| 'up-left';
 
 export type FieldSize = {
 	columns: number;
@@ -166,9 +174,13 @@ export function moveOneCell(
 ): GridPosition | null {
 	const delta: Record<Direction, GridPosition> = {
 		up: { x: 0, y: -1 },
+		'up-right': { x: 1, y: -1 },
+		right: { x: 1, y: 0 },
+		'down-right': { x: 1, y: 1 },
 		down: { x: 0, y: 1 },
+		'down-left': { x: -1, y: 1 },
 		left: { x: -1, y: 0 },
-		right: { x: 1, y: 0 }
+		'up-left': { x: -1, y: -1 }
 	};
 	const next = {
 		x: current.x + delta[direction].x,

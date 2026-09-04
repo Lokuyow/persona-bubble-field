@@ -594,17 +594,19 @@ test.describe('Relay startup', () => {
 		}).__relayStartupTest.releaseTraceRoots());
 		await expect(page.locator('[data-trace-light-position="4,2"]')).toBeVisible();
 
+		await page.evaluate(() => {
+			(window as typeof window & { __relayStartupTest: { state: { published: unknown[] } } }).__relayStartupTest.state.published.length = 0;
+		});
 		const publishedPositionIds = async () => new Set(
 			(await relayState(page)).state.published.filter((event) => event.kind === 30078).map((event) => event.id)
 		).size;
 		const positionsBefore = await publishedPositionIds();
-		await dragRelayJoystick(page, { x: 24, y: 0 });
-		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '4,2');
-		await page.locator('.participant[data-self="true"] .participant-profile-trigger').click();
-		await page.getByRole('menuitem', { name: '痕跡を調べる' }).click();
+		await dragRelayJoystick(page, { x: 24, y: -24 });
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '4,1');
+		await page.locator('[data-cell-position="4,2"]').click();
 		await expect(page.locator(`[data-trace-root-id="${trace.root.id}"]`)).toContainText('Relay trace root');
 		await expect(page.locator('.trace-reply-status[data-reply-refresh="loading"]')).toBeVisible();
-		await expect.poll(publishedPositionIds).toBeGreaterThan(positionsBefore);
+		await expect.poll(publishedPositionIds).toBe(positionsBefore + 1);
 
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
 			request.filters.some((filter) =>

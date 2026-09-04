@@ -76,9 +76,13 @@ describe('local position and presence domain', () => {
 
 	it.each([
 		['up', { x: 1, y: 0 }],
+		['up-right', { x: 2, y: 0 }],
 		['down', { x: 1, y: 2 }],
+		['down-right', { x: 2, y: 2 }],
 		['left', { x: 0, y: 1 }],
-		['right', { x: 2, y: 1 }]
+		['down-left', { x: 0, y: 2 }],
+		['right', { x: 2, y: 1 }],
+		['up-left', { x: 0, y: 0 }]
 	] as const)('moves an active participant one cell %s', (direction: Direction, expected) => {
 		const result = moveParticipant(seeded({ x: 1, y: 1 }, 10), 'alice', direction, 20);
 

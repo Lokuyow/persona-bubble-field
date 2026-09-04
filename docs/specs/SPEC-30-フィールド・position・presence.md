@@ -88,7 +88,16 @@ W/A/S/Dの長押しもArrowキーと同じmovement hold driverを使用し、1�
 既存挙動は変更しない。特に、Composer editorが完全にemptyの場合のArrow移動は
 維持する。
 
-斜め移動は行わない。
+logical movementは8-neighborとし、up / down / left / rightのcardinal 4方向と、
+up-right / down-right / down-left / up-leftのdiagonal 4方向を許可する。diagonalも
+隣接diagonal cellへの1 stepを1 movementとして扱い、2つのcardinal movementへ分解しない。
+したがってdiagonal 1回につきposition update、position publish、position slot消費、
+presence activityはいずれも1 movement分とする。
+
+destination cellがfield外またはoccupiedの場合はmovementを成立させない。diagonalの
+occupancy判定はdestination cellだけを対象とし、orthogonal side cellによるcorner
+blockingは行わない。blocked diagonalをcardinal movementへfallbackまたはslideさせない。
+成立したmovementの最大レートはcardinal / diagonalで共通の1秒あたり2回とする。
 
 pointer movementはPCとmobile/tabletで共通とし、mouse、pen、touchをWeb標準の
 Pointer Eventsによる同じpointer gestureとして扱う。field上のinteractive UI以外から
@@ -96,14 +105,14 @@ Pointer Eventsによる同じpointer gestureとして扱う。field上のinterac
 表示し、centerはdrag開始位置とする。pointer release、pointer cancel等のgesture終了時
 に消える。
 
-pointerの移動方向はup / down / left / rightのcardinal 4方向だけとする。
-deflection magnitudeで移動速度を変えず、diagonal移動も行わない。pointer movementは
-既存の1マス移動、最大2 movement/sec、presence、position publish、visual animationを
-再利用する。
+pointerの移動方向は、cardinal 4方向とdiagonal 4方向の計8方向とする。joystickの
+方向はequal-width 45度の8方向sectorへ量子化し、deflection magnitudeで移動速度を
+変えない。pointer movementは既存の1マス移動、最大2 movement/sec、presence、position
+publish、visual animationを再利用する。
 
 tapとdragはgesture thresholdで区別するが、具体的なthresholdは実装詳細とする。
 threshold未満のpointer releaseはmovementではなくlogical-cell selectionとして扱う。
-PCのArrow/WASD操作は維持する。
+PCのArrow/WASD操作は維持し、現時点ではcardinal 4方向の入力のままとする。
 
 field上の選択はpixel targetではなくlogical cellを基本にする。tap / clickはmovementには
 使用せず、logical-cell selection専用とする。selectable targetが1件なら直接そのactionを
