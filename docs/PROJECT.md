@@ -17,7 +17,7 @@ repository-trackedな本資料と、以下に列挙する `docs/specs/` 配下�
 ## 仕様文書一覧
 
 - [`SPEC-10-Nostr・アカウント.md`](specs/SPEC-10-Nostr・アカウント.md)
-  - NIP-28 top-level kind 42、NIP-22 kind 1111、NIP-09、NIP-32、専用世界の識別、アカウント、秘密鍵、kind 0、一般Nostrへの移行、転生
+  - NIP-28 top-level kind 42、NIP-22 kind 1111、NIP-09、NIP-32、専用世界の識別、アカウント、秘密鍵、kind 0、一般Nostrへの移行
 - [`SPEC-20-キャラクター.md`](specs/SPEC-20-キャラクター.md)
   - キャラクター割当、キャラクターデータ、名前、画像、重複、公開後の固定ルール
 - [`SPEC-30-フィールド・position・presence.md`](specs/SPEC-30-フィールド・position・presence.md)
@@ -28,6 +28,8 @@ repository-trackedな本資料と、以下に列挙する `docs/specs/` 配下�
   - 発言の痕跡、root、trace conversation取得、cache、read/unread、調査
 - [`SPEC-60-eHagaki・Composer・Media.md`](specs/SPEC-60-eHagaki・Composer・Media.md)
   - eHagakiとの責務分担、Host-owned Composer Lite版、Media
+- [`SPEC-70-寿命・ゲーム・脱出.md`](specs/SPEC-70-寿命・ゲーム・脱出.md)
+  - 寿命、ポイント、繕い、綻び、死亡・転生、脱出、二周目、バックアップ・復元
 - [`SPEC-90-未決定事項.md`](specs/SPEC-90-未決定事項.md)
   - 現時点で未決定としている製品仕様
 
