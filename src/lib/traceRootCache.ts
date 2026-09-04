@@ -1,6 +1,13 @@
-import { openDB, type DBSchema, type IDBPTransaction } from 'idb';
 import type { Event } from 'nostr-tools/pure';
 import type { ParsedWorldMessage } from './nostrProtocol';
+import {
+	openTraceDatabase,
+	TRACE_DATABASE_STORES,
+	TRACE_REPLY_LRU_STORE,
+	TRACE_REPLY_STORE,
+	TRACE_ROOT_STORE,
+	type TraceReadwriteTransaction
+} from './traceDatabase';
 import {
 	assertTraceRootChannelId,
 	assertTraceRootField,
@@ -10,34 +17,18 @@ import {
 	type TraceRootField
 } from './traceRoots';
 
-const DATABASE_NAME = 'persona-bubble-field-trace';
-const STORE_NAME = 'trace-roots';
-
-interface TraceDatabase extends DBSchema {
-	[STORE_NAME]: {
-		key: [string, string];
-		value: Readonly<{ channelId: string; eventId: string; rawEvent: unknown }>;
-	};
-}
-
-type TraceTransaction = IDBPTransaction<TraceDatabase, [typeof STORE_NAME], 'readwrite'>;
-
 export type ReconcileTraceRootCacheInput = Readonly<{
 	channelId: string;
 	field: TraceRootField;
 	rawEvents: readonly Event[];
 }>;
 
-async function openTraceDatabase() {
+async function openRootDatabase() {
 	if (typeof indexedDB === 'undefined') {
 		throw new Error('Trace root storage is unavailable.');
 	}
 	try {
-		return await openDB<TraceDatabase>(DATABASE_NAME, 1, {
-			upgrade(db) {
-				db.createObjectStore(STORE_NAME, { keyPath: ['channelId', 'eventId'] });
-			}
-		});
+		return await openTraceDatabase();
 	} catch {
 		throw new Error('Trace root storage could not be opened.');
 	}
@@ -52,18 +43,41 @@ function storedRawEvents(records: readonly unknown[]): Event[] {
 }
 
 async function replaceCurrentChannel(
-	tx: TraceTransaction,
+	tx: TraceReadwriteTransaction,
 	keys: readonly IDBValidKey[],
 	channelId: string,
 	candidates: readonly TraceRootCandidate[]
 ): Promise<void> {
-	for (const key of keys) await tx.store.delete(key as [string, string]);
+	const store = tx.objectStore(TRACE_ROOT_STORE);
+	for (const key of keys) await store.delete(key as [string, string]);
 	for (const candidate of candidates) {
-		await tx.store.put({
+		await store.put({
 			channelId,
 			eventId: candidate.root.id,
 			rawEvent: candidate.rawEvent
 		});
+	}
+}
+
+async function removeEvictedRootState(
+	tx: TraceReadwriteTransaction,
+	channelId: string,
+	survivorIds: ReadonlySet<string>
+): Promise<void> {
+	const replyStore = tx.objectStore(TRACE_REPLY_STORE);
+	for (const key of await replyStore.getAllKeys()) {
+		if (!Array.isArray(key) || key.length !== 3 || key[0] !== channelId) continue;
+		if (typeof key[1] !== 'string' || !survivorIds.has(key[1])) {
+			await replyStore.delete(key as [string, string, string]);
+		}
+	}
+
+	const lruStore = tx.objectStore(TRACE_REPLY_LRU_STORE);
+	for (const key of await lruStore.getAllKeys()) {
+		if (!Array.isArray(key) || key.length !== 2 || key[0] !== channelId) continue;
+		if (typeof key[1] !== 'string' || !survivorIds.has(key[1])) {
+			await lruStore.delete(key as [string, string]);
+		}
 	}
 }
 
@@ -80,15 +94,16 @@ export async function reconcileTraceRootCache(
 	assertTraceRootField(input.field);
 	const selectedNewRoots = selectTraceRootCandidates(input.rawEvents, input.channelId, input.field);
 
-	const db = await openTraceDatabase();
-	let tx: TraceTransaction | undefined;
+	const db = await openRootDatabase();
+	let tx: TraceReadwriteTransaction | undefined;
 	try {
-		tx = db.transaction(STORE_NAME, 'readwrite');
+		tx = db.transaction(TRACE_DATABASE_STORES, 'readwrite');
 		void tx.done.catch(() => {});
+		const rootStore = tx.objectStore(TRACE_ROOT_STORE);
 		// Enumerate the complete store: a compound-key range constrained by a
 		// string eventId would hide same-channel records whose corrupt key uses a
 		// different IndexedDB-valid key type (for example, a number).
-		const [allRecords, allKeys] = await Promise.all([tx.store.getAll(), tx.store.getAllKeys()]);
+		const [allRecords, allKeys] = await Promise.all([rootStore.getAll(), rootStore.getAllKeys()]);
 		const currentRecords: unknown[] = [];
 		const currentKeys: IDBValidKey[] = [];
 		for (let index = 0; index < allKeys.length; index += 1) {
@@ -101,7 +116,9 @@ export async function reconcileTraceRootCache(
 			storedRawEvents(currentRecords), input.channelId, input.field
 		);
 		const survivors = capTraceRootCandidates([...selectedStoredRoots, ...selectedNewRoots], input.field);
+		const survivorIds = new Set(survivors.map((candidate) => candidate.root.id));
 		await replaceCurrentChannel(tx, currentKeys, input.channelId, survivors);
+		await removeEvictedRootState(tx, input.channelId, survivorIds);
 		await tx.done;
 		return survivors.map((candidate) => candidate.root);
 	} catch {

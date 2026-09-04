@@ -7,14 +7,18 @@ import {
 	finalizeWorldEvent,
 	type ChannelReference
 } from './nostrProtocol';
+import {
+	openTraceDatabase,
+	TRACE_DATABASE_NAME,
+	TRACE_ROOT_STORE,
+	type TraceDatabase
+} from './traceDatabase';
 import { reconcileTraceRootCache } from './traceRootCache';
 
-const DATABASE_NAME = 'persona-bubble-field-trace';
-const STORE_NAME = 'trace-roots';
 const CHANNEL_ID = 'a'.repeat(64);
 const OTHER_CHANNEL_ID = 'b'.repeat(64);
 const SECRET_KEY = new Uint8Array(32).fill(8);
-const connections: IDBPDatabase[] = [];
+const connections: IDBPDatabase<TraceDatabase>[] = [];
 
 function channel(channelId = CHANNEL_ID): ChannelReference {
 	return { channelId, relayHint: 'wss://relay.example.com' };
@@ -45,10 +49,8 @@ function lotteryRoot(options: Parameters<typeof root>[0] = {}, wins = true) {
 	throw new Error('Could not make a deterministic lottery fixture.');
 }
 
-async function database(): Promise<IDBPDatabase> {
-	const db = await openDB(DATABASE_NAME, 1, {
-		upgrade(db) { db.createObjectStore(STORE_NAME, { keyPath: ['channelId', 'eventId'] }); }
-	});
+async function database(): Promise<IDBPDatabase<TraceDatabase>> {
+	const db = await openTraceDatabase();
 	connections.push(db);
 	return db;
 }
@@ -56,17 +58,17 @@ async function database(): Promise<IDBPDatabase> {
 async function records(channelId = CHANNEL_ID): Promise<unknown[]> {
 	const db = await database();
 	const range = IDBKeyRange.bound([channelId, ''], [channelId, '\uffff']);
-	return db.getAll(STORE_NAME, range);
+	return db.getAll(TRACE_ROOT_STORE, range);
 }
 
 async function seed(channelId: string, eventId: string, rawEvent: unknown): Promise<void> {
 	const db = await database();
-	await db.put(STORE_NAME, { channelId, eventId, rawEvent });
+	await db.put(TRACE_ROOT_STORE, { channelId, eventId, rawEvent });
 }
 
 async function seedRecord(record: unknown): Promise<void> {
 	const db = await database();
-	const tx = db.transaction(STORE_NAME, 'readwrite');
+	const tx = db.transaction(TRACE_ROOT_STORE, 'readwrite');
 	await tx.store.put(record as never);
 	await tx.done;
 }
@@ -82,6 +84,22 @@ afterEach(() => {
 });
 
 describe('trace root cache reconciliation', () => {
+	it('preserves version 1 roots while upgrading the shared database to version 2', async () => {
+		const event = lotteryRoot({ nonce: 'legacy-v1' });
+		const legacy = await openDB(TRACE_DATABASE_NAME, 1, {
+			upgrade(db) { db.createObjectStore(TRACE_ROOT_STORE, { keyPath: ['channelId', 'eventId'] }); }
+		});
+		await legacy.put(TRACE_ROOT_STORE, { channelId: CHANNEL_ID, eventId: event.id, rawEvent: event });
+		legacy.close();
+
+		expect((await reconcileTraceRootCache({
+			channelId: CHANNEL_ID, field: { columns: 2, rows: 1 }, rawEvents: []
+		})).map((root) => root.id)).toEqual([event.id]);
+		const upgraded = await database();
+		expect(upgraded.version).toBe(2);
+		expect([...upgraded.objectStoreNames]).toEqual(['trace-replies', 'trace-reply-lru', 'trace-roots']);
+	});
+
 	it('creates an empty cache, stores raw events, and restores them after reload', async () => {
 		const event = lotteryRoot({ nonce: 'persist' });
 		const input = { channelId: CHANNEL_ID, field: { columns: 2, rows: 1 }, rawEvents: [event] };
@@ -161,7 +179,7 @@ describe('trace root cache reconciliation', () => {
 		})).toEqual([]);
 
 		const db = await database();
-		const allKeys = await db.getAllKeys(STORE_NAME);
+		const allKeys = await db.getAllKeys(TRACE_ROOT_STORE);
 		expect(allKeys).toEqual([[OTHER_CHANNEL_ID, other.id]]);
 		expect((await reconcileTraceRootCache({
 			channelId: OTHER_CHANNEL_ID, field: { columns: 2, rows: 1 }, rawEvents: []
