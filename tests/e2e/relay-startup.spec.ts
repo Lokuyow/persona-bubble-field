@@ -1,6 +1,13 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { finalizeEvent, getPublicKey } from 'nostr-tools/pure';
-import { buildPositionEventTemplate, buildWorldMessageTemplate } from '../../src/lib/nostrProtocol';
+import {
+	buildPositionEventTemplate,
+	buildTraceReplyTemplate,
+	buildWorldMessageTemplate,
+	parseTraceReplyCandidate,
+	parseWorldMessage,
+	validateTraceReplyCandidate
+} from '../../src/lib/nostrProtocol';
 import { SPEECH_SHORTCUT_IDS } from '../../src/lib/speechSubmission';
 
 const CHANNEL_ID = '3212de4b75f0c41efa17e41affcfc3a811171ba930e5b657687b5f5148627d5b';
@@ -99,7 +106,41 @@ function traceRuntimeEvents() {
 			createdAt
 		}), rootSecret);
 	}
-	return { selfSecret, selfPubkey: getPublicKey(selfSecret), selfPosition, message, root };
+	const parsedRoot = parseWorldMessage(root, CHANNEL_ID);
+	if (!parsedRoot) throw new Error('Relay trace root fixture did not parse.');
+	const replySecret = new Uint8Array(32).fill(31);
+	const direct = finalizeEvent(buildTraceReplyTemplate({
+		root: parsedRoot,
+		parent: parsedRoot,
+		content: 'Relay direct reply',
+		speechType: 'normal',
+		position: { x: 5, y: 2 },
+		createdAt: createdAt + 1
+	}), replySecret);
+	const directCandidate = parseTraceReplyCandidate(direct);
+	const parsedDirect = directCandidate && validateTraceReplyCandidate(directCandidate, parsedRoot, parsedRoot);
+	if (!parsedDirect) throw new Error('Relay direct reply fixture did not parse.');
+	const deeper = finalizeEvent(buildTraceReplyTemplate({
+		root: parsedRoot,
+		parent: parsedDirect,
+		content: 'Relay deeper branch reply',
+		speechType: 'monologue',
+		position: { x: 6, y: 2 },
+		createdAt: createdAt + 2
+	}), replySecret);
+	const invalid = { ...direct, id: 'f'.repeat(64), content: 'Relay invalid reply' };
+	const live = finalizeEvent(buildTraceReplyTemplate({
+		root: parsedRoot,
+		parent: parsedRoot,
+		content: 'Relay live direct reply',
+		speechType: 'shout',
+		position: { x: 6, y: 2 },
+		createdAt: createdAt + 3
+	}), new Uint8Array(32).fill(33));
+	return {
+		selfSecret, selfPubkey: getPublicKey(selfSecret), selfPosition, message, root,
+		direct, deeper, invalid, live
+	};
 }
 
 async function installHostOwnedStub(page: Page): Promise<{ requests: () => number }> {
@@ -224,11 +265,12 @@ async function installDelayedRelay(page: Page, options: {
 	historyMessages?: readonly object[];
 	primaryEvents?: Readonly<{ message: object; position: object }>;
 	traceRoots?: readonly object[];
+	traceReplies?: readonly object[];
 	deferTraceRoots?: boolean;
 	deferTraceReplies?: boolean;
 } = {}): Promise<void> {
 	const events = options.primaryEvents ?? testEvents();
-	await page.addInitScript(({ seedRelays, authoritativeRelays, channelEvent, primaryEvents, historyMessages, deferPrimaryEvents, traceRoots, deferTraceRoots, deferTraceReplies }) => {
+	await page.addInitScript(({ seedRelays, authoritativeRelays, channelEvent, primaryEvents, historyMessages, deferPrimaryEvents, traceRoots, traceReplies, deferTraceRoots, deferTraceReplies }) => {
 		type Listener = (event?: { type: string; data?: string; code?: number; reason?: string }) => void;
 		type PendingRequest = { socket: FakeWebSocket; subId: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] };
 		const seed = new Set<string>(seedRelays);
@@ -238,7 +280,9 @@ async function installDelayedRelay(page: Page, options: {
 		const pendingTraceRoots: PendingRequest[] = [];
 		const pendingTraceReplies: PendingRequest[] = [];
 		const activePrimary: PendingRequest[] = [];
+		const activeTraceReplies: PendingRequest[] = [];
 		const timelineHistory = (historyMessages ?? []) as Array<Record<string, unknown>>;
+		const traceReplyHistory = traceReplies as Array<Record<string, unknown>>;
 		const state = {
 			requests: [] as Array<{ url: string; subId: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] }>,
 			published: [] as Array<Record<string, unknown>>,
@@ -277,6 +321,7 @@ async function installDelayedRelay(page: Page, options: {
 			deliver(request.socket, ['EOSE', request.subId]);
 		};
 		const respondTraceReplies = (request: PendingRequest) => {
+			for (const event of traceReplyHistory) deliver(request.socket, ['EVENT', request.subId, event]);
 			deliver(request.socket, ['EOSE', request.subId]);
 		};
 
@@ -304,6 +349,14 @@ async function installDelayedRelay(page: Page, options: {
 			}
 			send(raw: string) {
 				const packet = JSON.parse(raw) as unknown[];
+				if (packet[0] === 'CLOSE') {
+					const subId = packet[1] as string;
+					for (const requests of [activePrimary, activeTraceReplies]) {
+						const index = requests.findIndex((request) => request.subId === subId && request.socket === this);
+						if (index >= 0) requests.splice(index, 1);
+					}
+					return;
+				}
 				if (packet[0] === 'EVENT') {
 					state.published.push(packet[1] as Record<string, unknown>);
 					const event = packet[1] as { id: string; kind: number };
@@ -332,6 +385,7 @@ async function installDelayedRelay(page: Page, options: {
 						return;
 					}
 					if (isTraceReply) {
+						activeTraceReplies.push(request);
 						if (state.traceRepliesReleased) respondTraceReplies(request);
 						else pendingTraceReplies.push(request);
 						return;
@@ -372,6 +426,10 @@ async function installDelayedRelay(page: Page, options: {
 					state.traceRepliesReleased = true;
 					pendingTraceReplies.splice(0).forEach(respondTraceReplies);
 				},
+				deferTraceReplies: () => { state.traceRepliesReleased = false; },
+				injectTraceReply: (event: object) => {
+					for (const request of activeTraceReplies) deliver(request.socket, ['EVENT', request.subId, event]);
+				},
 				rejectMessagePublishes: () => { state.rejectMessagePublishes = true; },
 				rejectPositionPublishes: () => { state.rejectPositionPublishes = true; },
 				allowPositionPublishes: () => { state.rejectPositionPublishes = false; },
@@ -400,6 +458,7 @@ async function installDelayedRelay(page: Page, options: {
 		historyMessages: options.historyMessages ?? [],
 		deferPrimaryEvents: options.deferPrimaryEvents ?? false,
 		traceRoots: options.traceRoots ?? [],
+		traceReplies: options.traceReplies ?? [],
 		deferTraceRoots: options.deferTraceRoots ?? false,
 		deferTraceReplies: options.deferTraceReplies ?? false
 	});
@@ -407,18 +466,22 @@ async function installDelayedRelay(page: Page, options: {
 
 function relayState(page: Page) {
 	return page.evaluate(() => (window as typeof window & {
-		__relayStartupTest: { state: { requests: Array<{ url: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] }>; published: Array<{ id: string; kind: number; content: string; tags: string[][] }> }; releaseMetadata(): void; releasePrimaryEvents(): void; releasePrimary(): void; releaseTraceRoots(): void; releaseTraceReplies(): void; rejectMessagePublishes(): void; allowMessagePublishes(): void; rejectPositionPublishes(): void; allowPositionPublishes(): void; injectPosition(event: object): void; injectMessage(event: object): void };
+		__relayStartupTest: { state: { requests: Array<{ url: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] }>; published: Array<{ id: string; kind: number; content: string; tags: string[][] }> }; releaseMetadata(): void; releasePrimaryEvents(): void; releasePrimary(): void; releaseTraceRoots(): void; releaseTraceReplies(): void; deferTraceReplies(): void; injectTraceReply(event: object): void; rejectMessagePublishes(): void; allowMessagePublishes(): void; rejectPositionPublishes(): void; allowPositionPublishes(): void; injectPosition(event: object): void; injectMessage(event: object): void };
 	}).__relayStartupTest);
 }
 
-async function dragRelayJoystick(page: Page, delta: { x: number; y: number }, startCell = { x: 5, y: 4 }): Promise<void> {
-	const start = await page.locator('.field-grid').evaluate((grid, cell) => {
+async function relayFieldCellCenter(page: Page, cell: { x: number; y: number }): Promise<{ x: number; y: number }> {
+	return page.locator('.field-grid').evaluate((grid, position) => {
 		const scene = document.querySelector<HTMLElement>('.field-scene');
 		if (!scene) throw new Error('Expected the field scene to be rendered.');
 		const rect = grid.getBoundingClientRect();
 		const cellSize = Number.parseFloat(getComputedStyle(scene).getPropertyValue('--cell-size'));
-		return { x: rect.left + (cell.x + 0.5) * cellSize, y: rect.top + (cell.y + 0.5) * cellSize };
-	}, startCell);
+		return { x: rect.left + (position.x + 0.5) * cellSize, y: rect.top + (position.y + 0.5) * cellSize };
+	}, cell);
+}
+
+async function dragRelayJoystick(page: Page, delta: { x: number; y: number }, startCell = { x: 5, y: 4 }): Promise<void> {
+	const start = await relayFieldCellCenter(page, startCell);
 	await page.mouse.move(start.x, start.y);
 	await page.mouse.down();
 	await page.mouse.move(start.x + delta.x, start.y + delta.y);
@@ -623,6 +686,87 @@ test.describe('Relay startup', () => {
 		}).__relayStartupTest.releaseTraceReplies());
 		await expect(page.locator('.trace-reply-status')).toHaveCount(0);
 		await expect(page.locator(`[data-trace-root-id="${trace.root.id}"]`)).toBeVisible();
+	});
+
+	test('presents accepted Relay direct replies and preserves cached presentation across refresh', async ({ page }) => {
+		const trace = traceRuntimeEvents();
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, {
+			deferPrimaryEvents: true,
+			primaryEvents: { message: trace.message, position: trace.selfPosition },
+			traceRoots: [trace.root],
+			traceReplies: [trace.direct, trace.deeper, trace.invalid],
+			deferTraceRoots: true,
+			deferTraceReplies: true
+		});
+		await seedRelayAccount(page, trace.selfSecret, trace.selfPubkey);
+		await page.goto('/');
+		const hideTimeline = page.getByRole('button', { name: 'Hide Chatter' });
+		if (await hideTimeline.isVisible()) await hideTimeline.click();
+
+		await page.evaluate(() => (window as typeof window & {
+			__relayStartupTest: { releaseMetadata(): void }
+		}).__relayStartupTest.releaseMetadata());
+		await expect.poll(async () => {
+			const requests = (await relayState(page)).state.requests;
+			return [42, 30078].every((kind) => requests.some((request) =>
+				AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) &&
+				(request.filter.kinds as number[])[0] === kind && request.filter.limit !== 1000
+			));
+		}).toBe(true);
+		await page.evaluate(() => (window as typeof window & {
+			__relayStartupTest: { releasePrimaryEvents(): void; releasePrimary(): void }
+		}).__relayStartupTest.releasePrimaryEvents());
+		await page.evaluate(() => (window as typeof window & {
+			__relayStartupTest: { releasePrimary(): void }
+		}).__relayStartupTest.releasePrimary());
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '3,2');
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
+			(request.filter.kinds as number[] | undefined)?.includes(42) && request.filter.limit === 1000
+		)).toBe(true);
+		await page.evaluate(() => (window as typeof window & {
+			__relayStartupTest: { releaseTraceRoots(): void }
+		}).__relayStartupTest.releaseTraceRoots());
+		await expect(page.locator('[data-trace-light-position="4,2"]')).toBeVisible();
+
+		await page.locator('[data-cell-position="4,2"]').click();
+		await expect(page.locator(`[data-trace-root-id="${trace.root.id}"]`)).toContainText('Relay trace root');
+		await expect(page.locator('.trace-reply-status[data-reply-refresh="loading"]')).toBeVisible();
+		await expect(page.getByText('Relay direct reply')).toHaveCount(0);
+		await page.evaluate(() => (window as typeof window & {
+			__relayStartupTest: { releaseTraceReplies(): void }
+		}).__relayStartupTest.releaseTraceReplies());
+		await expect(page.locator(`[data-trace-reply-id="${trace.direct.id}"]`)).toContainText('Relay direct reply');
+		await expect(page.getByText('Relay deeper branch reply')).toHaveCount(0);
+		await expect(page.getByText('Relay invalid reply')).toHaveCount(0);
+		await expect(page.locator('.trace-reply-status')).toHaveCount(0);
+
+		await page.evaluate((event) => (window as typeof window & {
+			__relayStartupTest: { injectTraceReply(event: object): void }
+		}).__relayStartupTest.injectTraceReply(event), trace.live);
+		await expect(page.locator(`[data-trace-reply-id="${trace.live.id}"]`)).toContainText('Relay live direct reply');
+
+		const replyRequestCount = async () => (await relayState(page)).state.requests.filter((request) =>
+			request.filters.some((filter) => (filter.kinds as number[] | undefined)?.includes(1111))
+		).length;
+		const requestsBeforeReopen = await replyRequestCount();
+		if (await hideTimeline.isVisible()) await hideTimeline.click();
+		const blankCell = await relayFieldCellCenter(page, { x: 0, y: 0 });
+		await page.mouse.click(blankCell.x, blankCell.y);
+		await expect(page.locator('[data-trace-reply-id]')).toHaveCount(0);
+		await page.evaluate(() => (window as typeof window & {
+			__relayStartupTest: { deferTraceReplies(): void }
+		}).__relayStartupTest.deferTraceReplies());
+		await page.locator('[data-cell-position="4,2"]').click();
+		await expect(page.locator(`[data-trace-reply-id="${trace.direct.id}"]`)).toContainText('Relay direct reply');
+		await expect(page.locator(`[data-trace-reply-id="${trace.live.id}"]`)).toContainText('Relay live direct reply');
+		await expect(page.locator('.trace-reply-status[data-reply-refresh="loading"]')).toBeVisible();
+		await expect.poll(replyRequestCount).toBeGreaterThan(requestsBeforeReopen);
+		await page.evaluate(() => (window as typeof window & {
+			__relayStartupTest: { releaseTraceReplies(): void }
+		}).__relayStartupTest.releaseTraceReplies());
+		await expect(page.locator('.trace-reply-status')).toHaveCount(0);
+		await expect(page.locator(`[data-trace-reply-id="${trace.direct.id}"]`)).toBeVisible();
 	});
 
 	test('passes the Host-owned editor submit button option without enabling the keyboard button bar', async ({ page }) => {

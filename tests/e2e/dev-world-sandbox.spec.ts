@@ -303,6 +303,97 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.locator('.trace-root-bubble')).toHaveCount(0);
 	});
 
+	test('presents deterministic direct Trace replies without external runtime ownership', async ({ page }) => {
+		await page.setViewportSize({ width: 900, height: 720 });
+		await page.emulateMedia({ reducedMotion: 'reduce' });
+		await page.addInitScript(() => {
+			const NativeWebSocket = window.WebSocket;
+			Object.defineProperty(window, '__traceReplyExternalCalls', {
+				value: { webSocketUrls: [] as string[], indexedDbOpen: 0 }, configurable: true
+			});
+			window.WebSocket = class extends NativeWebSocket {
+				constructor(url: string | URL, protocols?: string | string[]) {
+					(window as never as { __traceReplyExternalCalls: { webSocketUrls: string[] } }).__traceReplyExternalCalls.webSocketUrls.push(String(url));
+					super(url, protocols);
+				}
+			};
+			const nativeOpen = indexedDB.open.bind(indexedDB);
+			indexedDB.open = ((...args: Parameters<IDBFactory['open']>) => {
+				(window as never as { __traceReplyExternalCalls: { indexedDbOpen: number } }).__traceReplyExternalCalls.indexedDbOpen += 1;
+				return nativeOpen(...args);
+			}) as IDBFactory['open'];
+		});
+		await page.goto('/?devWorld=1&devTrace=replies');
+		await expect(page.locator('main')).toHaveAttribute('data-trace-runtime', 'dev');
+		const hideTimeline = page.getByRole('button', { name: 'Hide Chatter' });
+		if (await hideTimeline.isVisible()) await hideTimeline.click();
+		const externalBaseline = await page.evaluate(() => (window as never as {
+			__traceReplyExternalCalls: { webSocketUrls: string[]; indexedDbOpen: number }
+		}).__traceReplyExternalCalls);
+
+		const liveBubble = page.locator('[data-bubble-id="dev-trace-live-message"]');
+		const liveAnchor = await liveBubble.evaluate((element) => getComputedStyle(element).transform);
+		await page.locator('[data-cell-position="8,4"]').click();
+		await expect(page.locator('[data-trace-root-id="' + '2'.repeat(64) + '"]')).toContainText('trace-only root near the viewer');
+		await expect.poll(() => liveBubble.evaluate((element) => getComputedStyle(element).transform)).toBe(liveAnchor);
+
+		const replyBubbles = page.locator('[data-trace-reply-id]');
+		await expect(replyBubbles).toHaveCount(3);
+		await expect(page.locator('[data-trace-reply-id="' + '7'.repeat(64) + '"]')).toContainText('newest same-cell direct reply');
+		await expect(page.locator('[data-trace-reply-id="' + '7'.repeat(64) + '"]')).toHaveAttribute('data-trace-reply-count', '2');
+		await expect(page.getByLabel('2 replies in this cell')).toBeVisible();
+		await expect(page.locator('[data-trace-reply-position="9,4"][data-trace-reply-id]')).toHaveAttribute('data-speech-type', 'shout');
+		await expect(page.locator('[data-trace-reply-position="8,4"][data-trace-reply-id]')).toHaveAttribute('data-speech-type', 'monologue');
+		await expect(page.getByText('deeper branch reply must stay hidden')).toHaveCount(0);
+		await expect(page.getByText('offscreen reply body must stay hidden')).toHaveCount(0);
+		await expect(page.locator('[data-trace-reply-offscreen-position="15,7"]')).toBeVisible();
+		await expect(page.locator('[data-trace-reply-ghost-id="' + 'a'.repeat(64) + '"]')).toHaveCount(0);
+		await expect(page.locator('[data-trace-relation-reply-id]')).toHaveCount(3);
+		expect(await page.locator('[data-trace-relation-reply-id]').first().evaluate((element) => getComputedStyle(element).pointerEvents)).toBe('none');
+
+		const coexistence = await page.evaluate(() => {
+			const center = (selector: string) => {
+				const rect = document.querySelector<HTMLElement>(selector)!.getBoundingClientRect();
+				return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+			};
+			return {
+				participant: center('[data-participant-id="' + 'f'.repeat(64) + '"]'),
+				participantReply: center('[data-trace-reply-ghost-id="' + '8'.repeat(64) + '"]'),
+				root: center('[data-trace-ghost-root-id="' + '2'.repeat(64) + '"]'),
+				rootReply: center('[data-trace-reply-ghost-id="' + '9'.repeat(64) + '"]')
+			};
+		});
+		expect(coexistence.participantReply).not.toEqual(coexistence.participant);
+		expect(coexistence.rootReply).not.toEqual(coexistence.root);
+
+		await page.getByRole('button', { name: 'Add live trace reply' }).click();
+		await expect(page.locator('[data-trace-reply-id="' + '7'.repeat(64) + '"]')).toContainText('newest same-cell direct reply');
+		await expect(page.locator('[data-trace-reply-id="' + '7'.repeat(64) + '"]')).toHaveAttribute('data-trace-reply-count', '3');
+		await expect(page.getByText('live newest same-cell direct reply')).toHaveCount(0);
+
+		await page.locator('[data-trace-reply-ghost-id="' + '7'.repeat(64) + '"]').click();
+		await expect(profileDialog(page)).toBeVisible();
+		await page.keyboard.press('Escape');
+		await expect(profileDialog(page)).toBeHidden();
+		await expect(page.locator('[data-trace-reply-id="' + '7'.repeat(64) + '"]')).toBeVisible();
+
+		const connectorBeforeMovement = await page.locator('[data-trace-reply-offscreen-position="15,7"]').getAttribute('d');
+		await dragJoystick(page, { x: -24, y: 0 }, { x: 5, y: 3 });
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '6,3');
+		await expect.poll(() => page.locator('[data-trace-reply-offscreen-position="15,7"]').getAttribute('d')).not.toBe(connectorBeforeMovement);
+		await page.keyboard.press('ArrowRight');
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '7,3');
+
+		await page.locator('.field-area').click({ position: { x: 8, y: 8 } });
+		await expect(replyBubbles).toHaveCount(0);
+		await page.locator('[data-cell-position="8,4"]').click();
+		await expect(page.locator('[data-trace-reply-id="' + 'c'.repeat(64) + '"]')).toContainText('live newest same-cell direct reply');
+		await expect(page.locator('[data-trace-reply-id="' + 'c'.repeat(64) + '"]')).toHaveAttribute('data-trace-reply-count', '3');
+		expect(await page.evaluate(() => (window as never as {
+			__traceReplyExternalCalls: { webSocketUrls: string[]; indexedDbOpen: number }
+		}).__traceReplyExternalCalls)).toEqual(externalBaseline);
+	});
+
 	test('shows a finite recent-message overlay with semantic colors and existing profile focus restoration', async ({ page }) => {
 		await page.setViewportSize({ width: 1200, height: 1600 });
 		await page.goto('/?devWorld=1&devSpeech=timeline');
