@@ -117,6 +117,14 @@ function traceRuntimeEvents() {
 		position: { x: 5, y: 2 },
 		createdAt: createdAt + 1
 	}), replySecret);
+	const selfDirect = finalizeEvent(buildTraceReplyTemplate({
+		root: parsedRoot,
+		parent: parsedRoot,
+		content: 'Relay own direct reply',
+		speechType: 'normal',
+		position: { x: 3, y: 2 },
+		createdAt: createdAt + 1
+	}), selfSecret);
 	const directCandidate = parseTraceReplyCandidate(direct);
 	const parsedDirect = directCandidate && validateTraceReplyCandidate(directCandidate, parsedRoot, parsedRoot);
 	if (!parsedDirect) throw new Error('Relay direct reply fixture did not parse.');
@@ -139,7 +147,7 @@ function traceRuntimeEvents() {
 	}), new Uint8Array(32).fill(33));
 	return {
 		selfSecret, selfPubkey: getPublicKey(selfSecret), selfPosition, message, root,
-		direct, deeper, invalid, live
+		direct, selfDirect, deeper, invalid, live
 	};
 }
 
@@ -695,7 +703,7 @@ test.describe('Relay startup', () => {
 			deferPrimaryEvents: true,
 			primaryEvents: { message: trace.message, position: trace.selfPosition },
 			traceRoots: [trace.root],
-			traceReplies: [trace.direct, trace.deeper, trace.invalid],
+			traceReplies: [trace.direct, trace.selfDirect, trace.deeper, trace.invalid],
 			deferTraceRoots: true,
 			deferTraceReplies: true
 		});
@@ -737,6 +745,24 @@ test.describe('Relay startup', () => {
 			__relayStartupTest: { releaseTraceReplies(): void }
 		}).__relayStartupTest.releaseTraceReplies());
 		await expect(page.locator(`[data-trace-reply-id="${trace.direct.id}"]`)).toContainText('Relay direct reply');
+		const selfReplyBubble = page.locator(`[data-trace-reply-id="${trace.selfDirect.id}"]`);
+		await expect(selfReplyBubble).toContainText('Relay own direct reply');
+		await expect(page.locator(`[data-trace-reply-ghost-id="${trace.selfDirect.id}"]`)).toHaveCount(0);
+		const initialSelfTailTarget = await page.locator(`[data-trace-tail-reply-id="${trace.selfDirect.id}"]`).first().getAttribute('data-trace-tail-target');
+		const expectedInitialSelfTailTarget = await page.evaluate(() => {
+			const participant = document.querySelector('.participant[data-self="true"]');
+			if (!participant) throw new Error('Expected current self participant.');
+			const bounds = participant.getBoundingClientRect();
+			const field = document.querySelector('.field-scene');
+			if (!field) throw new Error('Expected field.');
+			const cellSize = Number.parseFloat(getComputedStyle(field).getPropertyValue('--cell-size')) || 0;
+			return `${bounds.left + bounds.width / 2},${bounds.top + bounds.height / 2 - cellSize / 2 - 4}`;
+		});
+		expect(initialSelfTailTarget).toBe(expectedInitialSelfTailTarget);
+		await page.keyboard.press('ArrowDown');
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '3,3');
+		await expect(page.locator(`[data-trace-reply-ghost-id="${trace.selfDirect.id}"]`)).toBeVisible();
+		await expect(page.locator(`[data-trace-tail-reply-id="${trace.selfDirect.id}"]`).first()).not.toHaveAttribute('data-trace-tail-target', initialSelfTailTarget ?? '');
 		await expect(page.getByText('Relay deeper branch reply')).toHaveCount(0);
 		await expect(page.getByText('Relay invalid reply')).toHaveCount(0);
 		await expect(page.locator('.trace-reply-status')).toHaveCount(0);
@@ -751,7 +777,7 @@ test.describe('Relay startup', () => {
 		).length;
 		const requestsBeforeReopen = await replyRequestCount();
 		if (await hideTimeline.isVisible()) await hideTimeline.click();
-		const blankCell = await relayFieldCellCenter(page, { x: 0, y: 0 });
+		const blankCell = await relayFieldCellCenter(page, { x: 3, y: 4 });
 		await page.mouse.click(blankCell.x, blankCell.y);
 		await expect(page.locator('[data-trace-reply-id]')).toHaveCount(0);
 		await page.evaluate(() => (window as typeof window & {

@@ -409,10 +409,16 @@
 			screen: fieldLocalToViewport(worldToScreen(world, camera), fieldAreaBounds)
 		};
 	})() : null;
-	$: traceReplyGhosts = projectedTraceReplyCells
+	$: traceReplyViews = projectedTraceReplyCells
 		.filter(({ projection }) => projection.visibility === 'onscreen')
 		.map(({ cell, projection }) => {
 			const reply = cell.representative;
+			const selfParticipant = participantViews.find((participant) =>
+				participant.id === selfProjectionId &&
+				participant.id === reply.pubkey &&
+				participant.status === 'active' &&
+				sameCell(participant.position, reply.position)
+			);
 			const hasParticipant = participantViews.some((participant) => sameCell(participant.position, reply.position));
 			const hasRootGhost = Boolean(traceGhost && sameCell(traceGhost.root.position, reply.position));
 			const placement = resolveTraceGhostPlacement({
@@ -420,6 +426,10 @@
 			});
 			const center = gridToWorld(reply.position, cellSize);
 			const world = { x: center.x + placement.offset.x, y: center.y + placement.offset.y };
+			const ghostScreen = {
+				x: projection.screen.x + placement.offset.x,
+				y: projection.screen.y + placement.offset.y
+			};
 			return {
 				cell,
 				reply,
@@ -427,12 +437,16 @@
 				tone: traceTone(reply.pubkey),
 				compact: placement.scale < 1,
 				world,
-				screen: {
-					x: projection.screen.x + placement.offset.x,
-					y: projection.screen.y + placement.offset.y
-				}
+				screen: selfParticipant ? projection.screen : ghostScreen,
+				tailTarget: selfParticipant
+					? tailTarget(selfParticipant)
+					: { x: ghostScreen.x, y: ghostScreen.y - cellSize * (placement.scale < 1 ? 0.29 : 0.5) - 4 },
+				ghost: selfParticipant ? null : { world, screen: ghostScreen }
 			};
 		});
+	$: traceReplyGhosts = traceReplyViews
+		.filter((view): view is typeof view & { ghost: NonNullable<typeof view.ghost> } => view.ghost !== null)
+		.map((view) => ({ ...view, world: view.ghost.world, screen: view.ghost.screen }));
 	$: traceBubble = traceGhost ? (() => {
 		const id = `trace-root-${traceGhost.root.id}`;
 		const size = bubbleSizes[id] ?? DEFAULT_BUBBLE_SIZES.normal;
@@ -472,7 +486,7 @@
 			anchor: placement?.anchor ?? preferred
 		};
 	})() : null;
-	$: traceReplyBubbleCandidates = traceReplyGhosts.map((ghost) => {
+	$: traceReplyBubbleCandidates = traceReplyViews.map((ghost) => {
 		const id = `trace-reply-${ghost.reply.id}`;
 		const size = bubbleSizes[id] ?? DEFAULT_BUBBLE_SIZES.normal;
 		const shape = specialBubbleShape(ghost.reply.speechType, id, size);
@@ -2542,10 +2556,9 @@
 			{/if}
 			{#each traceReplyBubbles as bubble (bubble.id)}
 				{@const start = tailStart(bubble.anchor, bubble.size)}
-				{@const target = { x: bubble.screen.x, y: bubble.screen.y - cellSize * (bubble.compact ? 0.29 : 0.5) - 4 }}
-				{@const tail = tailGeometry(start, target, 11, 2, specialTailExtension(bubble.reply.speechType))}
-				<polygon class={`tail trace-tail tone-${bubble.tone}`} data-trace-tail-reply-id={bubble.reply.id} points={tail.points} />
-				<path class={`tail-outline trace-tail-outline tone-${bubble.tone}`} data-trace-tail-reply-id={bubble.reply.id} d={tail.outlinePath} />
+				{@const tail = tailGeometry(start, bubble.tailTarget, 11, 2, specialTailExtension(bubble.reply.speechType))}
+				<polygon class={`tail trace-tail tone-${bubble.tone}`} data-trace-tail-reply-id={bubble.reply.id} data-trace-tail-target={`${bubble.tailTarget.x},${bubble.tailTarget.y}`} points={tail.points} />
+				<path class={`tail-outline trace-tail-outline tone-${bubble.tone}`} data-trace-tail-reply-id={bubble.reply.id} data-trace-tail-target={`${bubble.tailTarget.x},${bubble.tailTarget.y}`} d={tail.outlinePath} />
 			{/each}
 		</svg>
 
@@ -2608,7 +2621,7 @@
 				</div>
 			{/each}
 			{#each traceReplyBubbles as bubble (bubble.id)}
-				{@const replyTarget = { x: bubble.screen.x, y: bubble.screen.y - cellSize * (bubble.compact ? 0.29 : 0.5) - 4 }}
+				{@const replyTarget = bubble.tailTarget}
 				{@const replyTail = tailGeometry(tailStart(bubble.anchor, bubble.size), replyTarget, 11, 2, specialTailExtension(bubble.reply.speechType))}
 				<div
 					use:observeBubble={bubble.id}
