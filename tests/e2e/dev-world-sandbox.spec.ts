@@ -564,6 +564,18 @@ test.describe('DEV World Sandbox', () => {
 		expect(longEntryFlow.scrollHeight).toBeGreaterThan(longEntryFlow.clientHeight);
 		await expect(timeline.locator('.timeline-measurements button.timeline-name')).toHaveCount(0);
 		await expect(timeline.locator('button.timeline-name')).toHaveCount(await visibleEntries.count());
+		const toneColors = await visibleEntries.evaluateAll((entries) => entries.reduce<Record<string, string>>((colors, entry) => {
+			const tone = entry.getAttribute('data-timeline-tone') ?? 'default';
+			const name = entry.querySelector<HTMLElement>('.timeline-name');
+			if (name) colors[tone] = getComputedStyle(name).color;
+			return colors;
+		}, {}));
+		expect(Object.keys(toneColors)).toEqual(expect.arrayContaining([
+			'coral', 'lavender', 'mint', 'yellow', 'sky', 'peach', 'rose', 'blue', 'default'
+		]));
+		expect(new Set(Object.entries(toneColors)
+		.filter(([tone]) => tone !== 'default')
+		.map(([, color]) => color)).size).toBe(8);
 
 		const activePubkey = 'a'.repeat(64);
 		const outsidePubkey = 'f'.repeat(64);
