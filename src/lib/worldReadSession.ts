@@ -477,13 +477,14 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 
 	function reconcileTraceReplies(
 		generation: number,
+		rootId: string,
 		rawEvents: readonly NostrEvent[]
 	): Promise<boolean> {
 		let success = false;
 		traceReplyReconcileTail = traceReplyReconcileTail.then(async () => {
 			if (!channel) return;
 			try {
-				const currentOpenRootId = generation === traceConversationGeneration && traceConversationState.kind === 'open'
+				const currentOpenRootId = traceConversationState.kind === 'open'
 					? traceConversationState.root.id
 					: undefined;
 				const replies = await reconcileTraceReplyCache({
@@ -493,7 +494,10 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 					...(currentOpenRootId ? { currentOpenRootId } : {})
 				});
 				success = true;
-				updateTraceConversation(generation, (current) => ({ ...current, replies }));
+				updateTraceConversation(generation, (current) => ({
+					...current,
+					replies: replies.filter((reply) => reply.rootId === rootId)
+				}));
 			} catch {
 				// A supplemental cache failure does not affect primary world reads.
 			}
@@ -501,8 +505,8 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 		return traceReplyReconcileTail.then(() => success);
 	}
 
-	function receiveTraceBatch(generation: number, batch: TraceReplyBatch): void {
-		void reconcileTraceReplies(generation, batch.events);
+	function receiveTraceBatch(generation: number, rootId: string, batch: TraceReplyBatch): void {
+		void reconcileTraceReplies(generation, rootId, batch.events);
 	}
 
 	async function startTraceConversationWork(
@@ -520,7 +524,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 		} catch {
 			// Continue: a later reconciliation may still restore or repair the cache.
 		}
-		await reconcileTraceReplies(generation, []);
+		await reconcileTraceReplies(generation, config.rootId, []);
 		if (disposed || generation !== traceConversationGeneration) return;
 		const readiness = traceRootBootstrapReadiness ? await traceRootBootstrapReadiness : 'failed';
 		if (disposed || generation !== traceConversationGeneration) return;
@@ -531,15 +535,15 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 		try {
 			const result = await transport.configureTraceReplies({
 				conversation: config,
-				onBatch: (batch) => receiveTraceBatch(generation, batch),
-				onLiveEvent: (event) => { void reconcileTraceReplies(generation, [event]); }
+				onBatch: (batch) => receiveTraceBatch(generation, config.rootId, batch),
+				onLiveEvent: (event) => { void reconcileTraceReplies(generation, config.rootId, [event]); }
 			});
 			if (disposed || generation !== traceConversationGeneration || result.status === 'superseded') return;
 			if (result.status !== 'active') {
 				updateTraceConversation(generation, (current) => ({ ...current, replyRefresh: 'unavailable' }));
 				return;
 			}
-			const reconciled = await reconcileTraceReplies(generation, result.initialBatch.events);
+			const reconciled = await reconcileTraceReplies(generation, config.rootId, result.initialBatch.events);
 			updateTraceConversation(generation, (current) => ({
 				...current,
 				replyRefresh: reconciled ? 'settled' : 'unavailable'
