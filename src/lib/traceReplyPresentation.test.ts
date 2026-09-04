@@ -7,9 +7,11 @@ import type { TraceConversationState } from './traceConversation';
 import {
 	deriveTraceReplyCharacter,
 	EMPTY_TRACE_REPLY_REPRESENTATIVE_STATE,
+	numberTraceReplyAuthors,
 	projectPointToViewportEdge,
 	projectTraceReplyCell,
 	reconcileTraceReplyPresentation,
+	resolveTraceConversationProjection,
 	resolveTraceGhostPlacement
 } from './traceReplyPresentation';
 
@@ -92,12 +94,86 @@ describe('Trace direct reply presentation', () => {
 		expect(reopened.cells[0].representative.id).toBe(liveNewest.id);
 	});
 
-	it('does not expose replies for a non-root current speech', () => {
-		const result = reconcileTraceReplyPresentation(
-			EMPTY_TRACE_REPLY_REPRESENTATIVE_STATE,
-			open([reply({ id: '1'.repeat(64), createdAt: 101 })], 'd'.repeat(64))
+	it('resolves accepted current, immediate parent, and direct children at arbitrary depth', () => {
+		const child = reply({ id: '1'.repeat(64), createdAt: 101 });
+		const grandchild = reply({
+			id: '2'.repeat(64), createdAt: 102, parentId: child.id, parentKind: 1111,
+			pubkey: 'd'.repeat(64)
+		});
+		const greatGrandchild = reply({
+			id: '3'.repeat(64), createdAt: 103, parentId: grandchild.id, parentKind: 1111,
+			pubkey: 'e'.repeat(64)
+		});
+		const sibling = reply({ id: '4'.repeat(64), createdAt: 104 });
+		const projection = resolveTraceConversationProjection(open([
+			greatGrandchild, sibling, grandchild, child
+		], grandchild.id));
+		expect(projection?.current).toMatchObject({ kind: 'reply', event: { id: grandchild.id } });
+		expect(projection?.parent).toMatchObject({ kind: 'reply', event: { id: child.id } });
+		expect(projection?.directReplies.map((candidate) => candidate.id)).toEqual([greatGrandchild.id]);
+
+		expect(resolveTraceConversationProjection(open([child], 'f'.repeat(64)))).toBeNull();
+		expect(resolveTraceConversationProjection(open([
+			reply({ id: '5'.repeat(64), createdAt: 105, parentId: 'f'.repeat(64), parentKind: 1111 })
+		], '5'.repeat(64)))).toBeNull();
+	});
+
+	it('preserves representatives independently for each current speech until close', () => {
+		const child = reply({ id: '1'.repeat(64), createdAt: 101, x: 3 });
+		const rootOlder = reply({ id: '2'.repeat(64), createdAt: 100, x: 4 });
+		const rootNewest = reply({ id: '3'.repeat(64), createdAt: 102, x: 4 });
+		const grandchildOlder = reply({
+			id: '4'.repeat(64), createdAt: 103, x: 5, parentId: child.id, parentKind: 1111
+		});
+		const grandchildNewest = reply({
+			id: '5'.repeat(64), createdAt: 104, x: 5, parentId: child.id, parentKind: 1111
+		});
+		const replies = [child, rootOlder, rootNewest, grandchildOlder, grandchildNewest];
+		const rootView = reconcileTraceReplyPresentation(EMPTY_TRACE_REPLY_REPRESENTATIVE_STATE, open(replies));
+		const rootState = {
+			...rootView.state,
+			representativeByCurrent: {
+				...rootView.state.representativeByCurrent,
+				[ROOT_ID]: { ...rootView.state.representativeByCurrent[ROOT_ID], '4,2': rootOlder.id }
+			}
+		};
+		const childView = reconcileTraceReplyPresentation(rootState, open(replies, child.id));
+		const childState = {
+			...childView.state,
+			representativeByCurrent: {
+				...childView.state.representativeByCurrent,
+				[child.id]: { '5,2': grandchildOlder.id }
+			}
+		};
+		const returned = reconcileTraceReplyPresentation(childState, open(replies));
+		expect(returned.cells.find((cell) => cell.position.x === 4)?.representative.id).toBe(rootOlder.id);
+		const childReturned = reconcileTraceReplyPresentation(returned.state, open(replies, child.id));
+		expect(childReturned.cells[0].representative.id).toBe(grandchildOlder.id);
+		const missing = reconcileTraceReplyPresentation(childReturned.state, open([
+			child, rootOlder, rootNewest, grandchildNewest
+		], child.id));
+		expect(missing.cells[0].representative.id).toBe(grandchildNewest.id);
+		const reopened = reconcileTraceReplyPresentation(
+			reconcileTraceReplyPresentation(missing.state, { kind: 'closed' }).state,
+			open(replies)
 		);
-		expect(result.cells).toEqual([]);
+		expect(reopened.cells.find((cell) => cell.position.x === 4)?.representative.id).toBe(rootNewest.id);
+	});
+
+	it('numbers duplicate authors newest-first without exposing input order or duplicates', () => {
+		const author = 'e'.repeat(64);
+		const oldest = reply({ id: '9'.repeat(64), createdAt: 100, pubkey: author });
+		const tiedLater = reply({ id: '2'.repeat(64), createdAt: 101, pubkey: author });
+		const tiedEarlier = reply({ id: '1'.repeat(64), createdAt: 101, pubkey: author });
+		const other = reply({ id: '3'.repeat(64), createdAt: 99, pubkey: 'f'.repeat(64) });
+		expect(numberTraceReplyAuthors([oldest, other, tiedLater, tiedEarlier, tiedLater]).map((item) => ({
+			id: item.reply.id, ordinal: item.authorOrdinal
+		}))).toEqual([
+			{ id: tiedEarlier.id, ordinal: 1 },
+			{ id: tiedLater.id, ordinal: 2 },
+			{ id: oldest.id, ordinal: 3 },
+			{ id: other.id, ordinal: null }
+		]);
 	});
 
 	it('delegates reply authors to the canonical character assignment', () => {

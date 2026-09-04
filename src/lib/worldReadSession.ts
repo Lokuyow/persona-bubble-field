@@ -57,6 +57,10 @@ import type {
 	TraceConversationOpenResult,
 	TraceConversationState
 } from './traceConversation';
+import {
+	adjacentTraceSpeech,
+	resolveTraceConversationProjection
+} from './traceReplyPresentation';
 
 const BOOTSTRAP_SAFETY_MARGIN_MS = 60_000;
 
@@ -475,6 +479,19 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 		emitTraceConversationState(update(traceConversationState));
 	}
 
+	function applyTraceReplySnapshot(generation: number, replies: readonly ParsedTraceReply[]): void {
+		if (disposed || generation !== traceConversationGeneration || traceConversationState.kind !== 'open') return;
+		const next: TraceConversationState = { ...traceConversationState, replies };
+		if (resolveTraceConversationProjection(next)) {
+			emitTraceConversationState(next);
+			return;
+		}
+		const fallbackGeneration = ++traceConversationGeneration;
+		const config = { rootId: next.root.id, currentId: next.root.id };
+		emitTraceConversationState({ ...next, config, replyRefresh: 'loading' });
+		void startTraceConversationWork(fallbackGeneration, next.root, config);
+	}
+
 	function reconcileTraceReplies(
 		generation: number,
 		rootId: string,
@@ -494,10 +511,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 					...(currentOpenRootId ? { currentOpenRootId } : {})
 				});
 				success = true;
-				updateTraceConversation(generation, (current) => ({
-					...current,
-					replies: replies.filter((reply) => reply.rootId === rootId)
-				}));
+				applyTraceReplySnapshot(generation, replies.filter((reply) => reply.rootId === rootId));
 			} catch {
 				// A supplemental cache failure does not affect primary world reads.
 			}
@@ -563,9 +577,12 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 		if (disposed || !options.selfAccount || !transport || !channel) return { kind: 'unavailable' };
 		if (!bootstrapComplete) return { kind: 'blocked' };
 		const root = effectiveTraceRoots.find((candidate) => candidate.id === config.rootId);
-		if (!root) return { kind: 'blocked' };
-		if (traceConversationState.kind === 'open' && traceConversationState.root.id === root.id &&
-			traceConversationState.config.currentId === config.currentId) return { kind: 'opened' };
+		if (!root || config.currentId !== root.id) return { kind: 'blocked' };
+		if (traceConversationState.kind === 'open' && traceConversationState.root.id === root.id) {
+			return traceConversationState.config.currentId === config.currentId
+				? { kind: 'opened' }
+				: { kind: 'blocked' };
+		}
 		if (pendingSelfOperation) return { kind: 'pending' };
 		const sameCellSwitch = traceConversationState.kind === 'open' && traceConversationState.root.id !== root.id &&
 			sameGridPosition(traceConversationState.root.position, root.position);
@@ -584,6 +601,35 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 			void publishPreparedSelfPosition('trace-inspection', candidate);
 		}
 		activateTraceConversation(root, config);
+		return { kind: 'opened' };
+	}
+
+	function selectTraceConversationSpeech(targetId: string): TraceConversationOpenResult {
+		if (disposed || !options.selfAccount || !transport || !channel) return { kind: 'unavailable' };
+		if (!bootstrapComplete || traceConversationState.kind === 'closed') return { kind: 'blocked' };
+		if (pendingSelfOperation) return { kind: 'pending' };
+		const current = traceConversationState;
+		const projection = resolveTraceConversationProjection(current);
+		const target = projection ? adjacentTraceSpeech(projection, targetId) : null;
+		if (!target) return { kind: 'blocked' };
+		const nowMs = Date.now();
+		const prepared = prepareTraceInspectionActivity({
+			presence: currentPresence(),
+			selfId: options.selfAccount.pubkey,
+			target: target.event.position,
+			nowMs,
+			requireCurrentRange: true
+		});
+		if (prepared.kind === 'blocked') return { kind: 'blocked' };
+		if (!prepared.coalesced) {
+			const candidate = positionCandidate(prepared.position, nowMs);
+			if (!candidate) return { kind: 'blocked' };
+			void publishPreparedSelfPosition('trace-inspection', candidate);
+		}
+		const config = { rootId: current.root.id, currentId: target.event.id };
+		const generation = ++traceConversationGeneration;
+		emitTraceConversationState({ ...current, config, replyRefresh: 'loading' });
+		void startTraceConversationWork(generation, current.root, config);
 		return { kind: 'opened' };
 	}
 
@@ -722,6 +768,9 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 
 		openTraceConversation(config: TraceConversationConfig): TraceConversationOpenResult {
 			return openTraceConversation(config);
+		},
+		selectTraceConversationSpeech(targetId: string): TraceConversationOpenResult {
+			return selectTraceConversationSpeech(targetId);
 		},
 
 		closeTraceConversation(): void {

@@ -23,19 +23,24 @@ describe('field logical-cell selection', () => {
 
 	it('builds deterministic cell actions and collapses every trace root into one action', () => {
 		expect(buildFieldCellActions({
-			participantIds: ['z', 'a'], hasTrace: true
+			participantIds: ['z', 'a', 'a'],
+			trace: { kind: 'trace', rootId: 'root', behavior: 'open-root' },
+			replyIds: ['newer', 'older', 'newer']
 		})).toEqual([
 			{ kind: 'participant', participantId: 'a' },
 			{ kind: 'participant', participantId: 'z' },
-			{ kind: 'trace' }
+			{ kind: 'trace', rootId: 'root', behavior: 'open-root' },
+			{ kind: 'reply', replyId: 'newer' },
+			{ kind: 'reply', replyId: 'older' }
 		]);
 	});
 
 	it('executes one action directly and routes multiple actions through the shared menu', () => {
 		expect(resolveFieldCellActions([])).toEqual({ kind: 'none' });
-		expect(resolveFieldCellActions([{ kind: 'trace' }])).toEqual({ kind: 'direct', action: { kind: 'trace' } });
-		expect(resolveFieldCellActions([{ kind: 'participant', participantId: 'a' }, { kind: 'trace' }])).toEqual({
-			kind: 'menu', actions: [{ kind: 'participant', participantId: 'a' }, { kind: 'trace' }]
+		const trace = { kind: 'trace' as const, rootId: 'root', behavior: 'open-root' as const };
+		expect(resolveFieldCellActions([trace])).toEqual({ kind: 'direct', action: trace });
+		expect(resolveFieldCellActions([{ kind: 'participant', participantId: 'a' }, trace])).toEqual({
+			kind: 'menu', actions: [{ kind: 'participant', participantId: 'a' }, trace]
 		});
 	});
 });

@@ -62,19 +62,29 @@ function raw(event: ParsedWorldMessage) {
 	return { id: event.id } as never;
 }
 
-function traceReply(id: string, root: ParsedWorldMessage, createdAt = 701): ParsedTraceReply {
+function traceReply(
+	id: string,
+	root: ParsedWorldMessage,
+	createdAt = 701,
+	options: {
+		parent?: ParsedWorldMessage | ParsedTraceReply;
+		position?: ParsedTraceReply['position'];
+		pubkey?: string;
+	} = {}
+): ParsedTraceReply {
+	const parent = options.parent ?? root;
 	return {
 		id,
-		pubkey: alice,
+		pubkey: options.pubkey ?? alice,
 		createdAt,
 		content: id,
 		speechType: 'normal',
-		position: root.position,
+		position: options.position ?? root.position,
 		rootId: root.id,
 		rootPubkey: root.pubkey,
-		parentId: root.id,
-		parentKind: 42,
-		parentPubkey: root.pubkey
+		parentId: parent.id,
+		parentKind: 'rootId' in parent ? 1111 : 42,
+		parentPubkey: parent.pubkey
 	};
 }
 
@@ -1294,6 +1304,89 @@ describe('world read session', () => {
 			replies: [replyB]
 		})));
 		expect(session.getTraceConversationState()).toEqual(expect.objectContaining({ root: rootB, replies: [replyB] }));
+	});
+
+	it('switches only to adjacent accepted speech while preserving the snapshot and rejecting stale callbacks', async () => {
+		const root = { ...message('trace-root', 700), pubkey: 'b'.repeat(64), position: { x: 1, y: 1 } };
+		const child = traceReply('child', root, 701, { position: { x: 0, y: 1 } });
+		const sibling = traceReply('sibling', root, 700, { position: { x: 1, y: 2 } });
+		const grandchild = traceReply('grandchild', root, 702, {
+			parent: child,
+			position: { x: 0, y: 2 }
+		});
+		const replies = [grandchild, child, sibling];
+		const configurations: TraceReplyConfiguration[] = [];
+		mocked.reconcileTraceRootCache.mockResolvedValue([root]);
+		mocked.reconcileTraceReplyCache.mockResolvedValue(replies);
+		result = startResult([], [position('self-position', 700, selfPubkey, 0, { x: 1, y: 1 })]);
+		const configureTraceReplies = vi.fn((configuration: TraceReplyConfiguration) => {
+			configurations.push(configuration);
+			return Promise.resolve({
+				status: 'active' as const,
+				generation: configurations.length,
+				initialBatch: { events: [], relays: [] }
+			});
+		});
+		mocked.createTransport.mockReturnValue({
+			start: vi.fn(async (nextInput) => {
+				input = nextInput;
+				return result;
+			}),
+			bootstrapTraceRootCandidates: traceBootstrap(),
+			configureTraceReplies,
+			dispose,
+			publish
+		});
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 }, selfAccount: selfAccount(),
+			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn()
+		});
+
+		await session.start();
+		session.completeBootstrap();
+		await vi.waitFor(() => expect(mocked.reconcileTraceRootCache).toHaveBeenCalled());
+		expect(session.openTraceConversation({ rootId: root.id, currentId: child.id })).toEqual({ kind: 'blocked' });
+		expect(session.openTraceConversation({ rootId: root.id, currentId: root.id })).toEqual({ kind: 'opened' });
+		await vi.waitFor(() => expect(session.getTraceConversationState()).toEqual(expect.objectContaining({
+			kind: 'open', config: { rootId: root.id, currentId: root.id }, replies, replyRefresh: 'settled'
+		})));
+
+		expect(session.selectTraceConversationSpeech(grandchild.id)).toEqual({ kind: 'blocked' });
+		expect(session.selectTraceConversationSpeech('unknown')).toEqual({ kind: 'blocked' });
+		expect(session.selectTraceConversationSpeech(child.id)).toEqual({ kind: 'opened' });
+		expect(session.getTraceConversationState()).toEqual(expect.objectContaining({
+			kind: 'open', config: { rootId: root.id, currentId: child.id }, replies, replyRefresh: 'loading'
+		}));
+		await vi.waitFor(() => expect(session.getTraceConversationState()).toEqual(expect.objectContaining({
+			kind: 'open', config: { rootId: root.id, currentId: child.id }, replies, replyRefresh: 'settled'
+		})));
+		expect(configurations.at(-1)?.conversation).toEqual({ rootId: root.id, currentId: child.id });
+		expect(session.openTraceConversation({ rootId: root.id, currentId: root.id })).toEqual({ kind: 'blocked' });
+		expect(session.getTraceConversationState()).toEqual(expect.objectContaining({
+			config: { rootId: root.id, currentId: child.id }, replies
+		}));
+		expect(session.selectTraceConversationSpeech(sibling.id)).toEqual({ kind: 'blocked' });
+
+		configurations[0].onBatch({ events: [{ id: 'late-root-batch' } as never], relays: [] });
+		configurations[0].onLiveEvent({ id: 'late-root-live' } as never);
+		await vi.waitFor(() => expect(mocked.reconcileTraceReplyCache).toHaveBeenCalledWith(expect.objectContaining({
+			rawEvents: [{ id: 'late-root-live' }]
+		})));
+		expect(session.getTraceConversationState()).toEqual(expect.objectContaining({
+			config: { rootId: root.id, currentId: child.id }, replies
+		}));
+
+		expect(session.selectTraceConversationSpeech(grandchild.id)).toEqual({ kind: 'opened' });
+		await vi.waitFor(() => expect(configurations.at(-1)?.conversation).toEqual({
+			rootId: root.id,
+			currentId: grandchild.id
+		}));
+		expect(session.selectTraceConversationSpeech(child.id)).toEqual({ kind: 'opened' });
+		expect(session.selectTraceConversationSpeech(root.id)).toEqual({ kind: 'opened' });
+		input!.onLivePosition(position('self-moved-away', 703, selfPubkey, 1, { x: 3, y: 2 }));
+		const beforeBlockedSelection = session.getTraceConversationState();
+		expect(session.selectTraceConversationSpeech(child.id)).toEqual({ kind: 'blocked' });
+		expect(session.getTraceConversationState()).toEqual(beforeBlockedSelection);
 	});
 
 	it('keeps the current same-cell root when the viewer moved out of range', async () => {
