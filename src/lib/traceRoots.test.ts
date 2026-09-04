@@ -61,7 +61,7 @@ describe('trace root selection', () => {
 	it('rejects out-of-bounds roots and retains roots regardless of age', () => {
 		const old = lotteryRoot({ createdAt: 0, position: { x: 1, y: 0 }, nonce: 'old' });
 		const outside = lotteryRoot({ position: { x: 2, y: 0 }, nonce: 'outside' });
-		expect(selectEffectiveTraceRoots([old, outside], CHANNEL_ID, { columns: 2, rows: 1 }).map((root) => root.id))
+		expect(selectEffectiveTraceRoots([old, outside], CHANNEL_ID, { columns: 2, rows: 10 }).map((root) => root.id))
 			.toEqual([old.id]);
 	});
 
@@ -70,8 +70,8 @@ describe('trace root selection', () => {
 			lotteryRoot({ createdAt: 10, position: { x: 0, y: 0 }, nonce: 'one' }),
 			lotteryRoot({ createdAt: 11, position: { x: 1, y: 0 }, nonce: 'two' })
 		];
-		const first = selectEffectiveTraceRoots([...roots, roots[0]], CHANNEL_ID, { columns: 4, rows: 1 });
-		const second = selectEffectiveTraceRoots([...roots].reverse(), CHANNEL_ID, { columns: 4, rows: 1 });
+		const first = selectEffectiveTraceRoots([...roots, roots[0]], CHANNEL_ID, { columns: 20, rows: 1 });
+		const second = selectEffectiveTraceRoots([...roots].reverse(), CHANNEL_ID, { columns: 20, rows: 1 });
 		expect(first.map((root) => root.id)).toEqual(second.map((root) => root.id));
 		expect(first).toHaveLength(2);
 	});
@@ -82,7 +82,7 @@ describe('trace root selection', () => {
 		);
 		const expected = [...tied].sort((first, second) => first.id < second.id ? -1 : first.id > second.id ? 1 : 0)
 			.slice(0, 3).map((event) => event.id);
-		expect(selectEffectiveTraceRoots(tied.reverse(), CHANNEL_ID, { columns: 8, rows: 1 }).map((root) => root.id))
+		expect(selectEffectiveTraceRoots(tied.reverse(), CHANNEL_ID, { columns: 30, rows: 1 }).map((root) => root.id))
 			.toEqual(expected);
 	});
 
@@ -91,8 +91,18 @@ describe('trace root selection', () => {
 			lotteryRoot({ createdAt: 50, position: { x: index, y: 0 }, nonce: `global-${index}` })
 		);
 		const expected = [...tied].sort((first, second) => first.id < second.id ? -1 : first.id > second.id ? 1 : 0)
-			.slice(0, 2).map((event) => event.id);
-		expect(selectEffectiveTraceRoots(tied, CHANNEL_ID, { columns: 4, rows: 1 }).map((root) => root.id))
+			.slice(0, 12).map((event) => event.id);
+		expect(selectEffectiveTraceRoots(tied, CHANNEL_ID, { columns: 16, rows: 8 }).map((root) => root.id))
+			.toEqual(expected);
+	});
+
+	it('limits 13 candidates to 12 roots on a 16 by 8 field using existing ordering', () => {
+		const roots = Array.from({ length: 13 }, (_, index) =>
+			lotteryRoot({ createdAt: 50 + index, position: { x: index, y: 0 }, nonce: `cap-${index}` })
+		);
+		const expected = [...roots].sort((first, second) => second.created_at - first.created_at ||
+			(first.id < second.id ? -1 : first.id > second.id ? 1 : 0)).slice(0, 12).map((event) => event.id);
+		expect(selectEffectiveTraceRoots(roots, CHANNEL_ID, { columns: 16, rows: 8 }).map((root) => root.id))
 			.toEqual(expected);
 	});
 
@@ -100,9 +110,9 @@ describe('trace root selection', () => {
 		const old = lotteryRoot({ createdAt: 1, position: { x: 0, y: 0 }, nonce: 'old' });
 		const middle = lotteryRoot({ createdAt: 2, position: { x: 1, y: 0 }, nonce: 'middle' });
 		const newest = lotteryRoot({ createdAt: 3, position: { x: 2, y: 0 }, nonce: 'newest' });
-		expect(selectEffectiveTraceRoots([old, middle], CHANNEL_ID, { columns: 4, rows: 1 }).map((root) => root.id))
+		expect(selectEffectiveTraceRoots([old, middle], CHANNEL_ID, { columns: 20, rows: 1 }).map((root) => root.id))
 			.toEqual([middle.id, old.id]);
-		expect(selectEffectiveTraceRoots([old, middle, newest], CHANNEL_ID, { columns: 4, rows: 1 }).map((root) => root.id))
+		expect(selectEffectiveTraceRoots([old, middle, newest], CHANNEL_ID, { columns: 20, rows: 1 }).map((root) => root.id))
 			.toEqual([newest.id, middle.id]);
 	});
 });
