@@ -80,6 +80,22 @@ async function lruRecords() {
 	return (await database()).getAll(TRACE_REPLY_LRU_STORE);
 }
 
+function observeWrites() {
+	const writes: Array<{ store: string; operation: 'delete' | 'put'; key: unknown }> = [];
+	const originalPut = IDBObjectStore.prototype.put;
+	const originalDelete = IDBObjectStore.prototype.delete;
+	vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (this: IDBObjectStore, value, key) {
+		const record = value as Record<string, unknown>;
+		writes.push({ store: this.name, operation: 'put', key: (this.keyPath as string[]).map((field) => record[field]) });
+		return originalPut.call(this, value, key);
+	});
+	vi.spyOn(IDBObjectStore.prototype, 'delete').mockImplementation(function (this: IDBObjectStore, key) {
+		writes.push({ store: this.name, operation: 'delete', key });
+		return originalDelete.call(this, key);
+	});
+	return writes;
+}
+
 let capRoot: RootFixture;
 let capOtherRoot: RootFixture;
 let capReplies: ReplyFixture[];
@@ -116,6 +132,37 @@ afterEach(() => {
 });
 
 describe('trace reply cache reconciliation', () => {
+	it('performs no writes for unchanged or duplicate persisted replies and LRU', async () => {
+		await seedRootForChannel(CHANNEL_ID, capRoot);
+		const input = { channelId: CHANNEL_ID, effectiveRoots: [capRoot.parsed], rawEvents: [] as Event[] };
+		const snapshot = await reconcileTraceReplyCache({ ...input, rawEvents: capReplies.slice(0, 100).map((reply) => reply.raw) });
+		await touchTraceReplyTree({ channelId: CHANNEL_ID, rootId: capRoot.parsed.id });
+		const records = await replyRecords();
+		const lru = await lruRecords();
+		const writes = observeWrites();
+		expect(await reconcileTraceReplyCache(input)).toEqual(snapshot);
+		expect(writes).toEqual([]);
+		expect(await reconcileTraceReplyCache({ ...input, rawEvents: records.map((record) => structuredClone(record.rawEvent) as Event) })).toEqual(snapshot);
+		expect(writes).toEqual([]);
+		expect(await replyRecords()).toEqual(records);
+		expect(await lruRecords()).toEqual(lru);
+	});
+
+	it('writes only the added reply among 100 persisted replies', async () => {
+		await seedRootForChannel(CHANNEL_ID, capRoot);
+		const input = { channelId: CHANNEL_ID, effectiveRoots: [capRoot.parsed], rawEvents: [] as Event[] };
+		await reconcileTraceReplyCache({ ...input, rawEvents: capReplies.slice(0, 100).map((reply) => reply.raw) });
+		await touchTraceReplyTree({ channelId: CHANNEL_ID, rootId: capRoot.parsed.id });
+		const writes = observeWrites();
+		const snapshot = await reconcileTraceReplyCache({ ...input, rawEvents: [capReplies[100].raw] });
+		expect(snapshot).toHaveLength(101);
+		expect(new Set(snapshot.map((reply) => reply.id))).toEqual(new Set(capReplies.slice(0, 101).map((reply) => reply.parsed.id)));
+		expect(writes).toEqual([{ store: TRACE_REPLY_STORE, operation: 'put', key: [CHANNEL_ID, capRoot.parsed.id, capReplies[100].parsed.id] }]);
+		writes.length = 0;
+		expect(await reconcileTraceReplyCache(input)).toEqual(snapshot);
+		expect(writes).toEqual([]);
+	});
+
 	it('returns the full current-channel snapshot across two effective roots', async () => {
 		const firstRoot = makeRoot(CHANNEL_ID, 'first-root');
 		const secondRoot = makeRoot(CHANNEL_ID, 'second-root');
@@ -156,13 +203,65 @@ describe('trace reply cache reconciliation', () => {
 		})]);
 	});
 
-	it('cleans corrupt raw replies and their broken orphan descendants', async () => {
+	it('repairs only changed reply and LRU envelopes and a corrupt same-key raw event', async () => {
+		const root = makeRoot(CHANNEL_ID, 'repair');
+		await seedRootForChannel(CHANNEL_ID, root);
+		const replies = [makeReply(root.parsed, root.parsed, 'repair raw', 101), makeReply(root.parsed, root.parsed, 'repair envelope', 102)];
+		const input = { channelId: CHANNEL_ID, effectiveRoots: [root.parsed], rawEvents: replies.map((reply) => reply.raw) };
+		const snapshot = await reconcileTraceReplyCache(input);
+		await touchTraceReplyTree({ channelId: CHANNEL_ID, rootId: root.parsed.id });
+		const db = await database();
+		const records = await replyRecords();
+		const rawRecord = records.find((record) => record.eventId === replies[0].parsed.id)!;
+		const envelopeRecord = records.find((record) => record.eventId === replies[1].parsed.id)!;
+		await db.put(TRACE_REPLY_STORE, { ...rawRecord, rawEvent: { ...replies[0].raw, content: 'tampered' } });
+		const extraRaw = { ...replies[1].raw, relayMetadata: { source: 'stored' } };
+		await db.put(TRACE_REPLY_STORE, Object.assign({ ...envelopeRecord, rawEvent: extraRaw }, { obsolete: true }));
+		await db.put(TRACE_REPLY_LRU_STORE, Object.assign({ channelId: CHANNEL_ID, rootId: root.parsed.id, accessOrder: 1 }, { obsolete: true }));
+		const writes = observeWrites();
+		expect(await reconcileTraceReplyCache(input)).toEqual(snapshot);
+		expect(writes).toHaveLength(3);
+		expect(writes).toEqual(expect.arrayContaining([
+			...replies.map((reply) => ({ store: TRACE_REPLY_STORE, operation: 'put', key: [CHANNEL_ID, root.parsed.id, reply.parsed.id] })),
+			{ store: TRACE_REPLY_LRU_STORE, operation: 'put', key: [CHANNEL_ID, root.parsed.id] }
+		]));
+		expect(await db.get(TRACE_REPLY_STORE, [CHANNEL_ID, root.parsed.id, envelopeRecord.eventId])).toEqual({ ...envelopeRecord, rawEvent: structuredClone(extraRaw) });
+		expect(await lruRecords()).toEqual([{ channelId: CHANNEL_ID, rootId: root.parsed.id, accessOrder: 1 }]);
+		writes.length = 0;
+		expect(await reconcileTraceReplyCache({ ...input, rawEvents: [] })).toEqual(snapshot);
+		expect(writes).toEqual([]);
+	});
+
+	it('deletes malformed keys and invalid LRU while retaining an empty effective tree touch', async () => {
+		const root = makeRoot(CHANNEL_ID, 'empty touched');
+		await seedRootForChannel(CHANNEL_ID, root);
+		await seedRootForChannel(OTHER_CHANNEL_ID, capOtherRoot);
+		await touchTraceReplyTree({ channelId: CHANNEL_ID, rootId: root.parsed.id });
+		const db = await database();
+		await db.put(TRACE_REPLY_STORE, { channelId: CHANNEL_ID, rootId: root.parsed.id, eventId: 7 as unknown as string, rawEvent: null });
+		await db.put(TRACE_REPLY_LRU_STORE, { channelId: CHANNEL_ID, rootId: 7 as unknown as string, accessOrder: 1 });
+		await db.put(TRACE_REPLY_LRU_STORE, { channelId: OTHER_CHANNEL_ID, rootId: capOtherRoot.parsed.id, accessOrder: -1 });
+		await db.put(TRACE_REPLY_LRU_STORE, { channelId: CHANNEL_ID, rootId: 'e'.repeat(64), accessOrder: 2 });
+		const writes = observeWrites();
+		expect(await reconcileTraceReplyCache({ channelId: CHANNEL_ID, effectiveRoots: [root.parsed], rawEvents: [] })).toEqual([]);
+		expect(writes).toHaveLength(4);
+		expect(writes).toEqual(expect.arrayContaining([
+			{ store: TRACE_REPLY_STORE, operation: 'delete', key: [CHANNEL_ID, root.parsed.id, 7] },
+			{ store: TRACE_REPLY_LRU_STORE, operation: 'delete', key: [OTHER_CHANNEL_ID, capOtherRoot.parsed.id] },
+			...[7, 'e'.repeat(64)].map((rootId) => ({ store: TRACE_REPLY_LRU_STORE, operation: 'delete', key: [CHANNEL_ID, rootId] }))
+		]));
+		expect(await replyRecords()).toEqual([]);
+		expect(await lruRecords()).toEqual([{ channelId: CHANNEL_ID, rootId: root.parsed.id, accessOrder: 1 }]);
+	});
+
+	it('cleans corrupt raw replies and their broken orphan descendants without rewriting survivors', async () => {
 		const root = makeRoot(CHANNEL_ID, 'corrupt');
 		await seedRootForChannel(CHANNEL_ID, root);
 		const parent = makeReply(root.parsed, root.parsed, 'parent', 101);
 		const child = makeReply(root.parsed, parent.parsed, 'child', 102);
+		const survivor = makeReply(root.parsed, root.parsed, 'survivor', 103);
 		await reconcileTraceReplyCache({
-			channelId: CHANNEL_ID, effectiveRoots: [root.parsed], rawEvents: [parent.raw, child.raw]
+			channelId: CHANNEL_ID, effectiveRoots: [root.parsed], rawEvents: [parent.raw, child.raw, survivor.raw]
 		});
 		const db = await database();
 		await db.put(TRACE_REPLY_STORE, {
@@ -172,10 +271,22 @@ describe('trace reply cache reconciliation', () => {
 		await db.put(TRACE_REPLY_STORE, {
 			channelId: CHANNEL_ID, rootId: root.parsed.id, eventId: 'f'.repeat(64), rawEvent: null
 		});
+		await db.put(TRACE_REPLY_STORE, {
+			channelId: CHANNEL_ID, rootId: root.parsed.id, eventId: 'e'.repeat(64), rawEvent: survivor.raw
+		});
+		await db.put(TRACE_REPLY_STORE, {
+			channelId: CHANNEL_ID, rootId: 'd'.repeat(64), eventId: survivor.parsed.id, rawEvent: survivor.raw
+		});
+		const writes = observeWrites();
 		expect(await reconcileTraceReplyCache({
 			channelId: CHANNEL_ID, effectiveRoots: [root.parsed], rawEvents: []
-		})).toEqual([]);
-		expect(await replyRecords()).toEqual([]);
+		})).toEqual([survivor.parsed]);
+		expect(writes).toHaveLength(5);
+		expect(writes).toEqual(expect.arrayContaining([
+			...[parent.parsed.id, child.parsed.id, 'f'.repeat(64), 'e'.repeat(64)].map((eventId) => ({ store: TRACE_REPLY_STORE, operation: 'delete', key: [CHANNEL_ID, root.parsed.id, eventId] })),
+			{ store: TRACE_REPLY_STORE, operation: 'delete', key: [CHANNEL_ID, 'd'.repeat(64), survivor.parsed.id] }
+		]));
+		expect(await replyRecords()).toEqual([expect.objectContaining({ eventId: survivor.parsed.id })]);
 	});
 
 	it('serializes concurrent reconciliations without losing valid updates', async () => {
@@ -192,15 +303,22 @@ describe('trace reply cache reconciliation', () => {
 		})).map((reply) => reply.id)).toEqual([first.parsed.id, second.parsed.id]);
 	});
 
-	it('rolls back every reply write when a request fails', async () => {
+	it('rolls back mixed reply deletes and puts when a later LRU repair fails', async () => {
 		const root = makeRoot(CHANNEL_ID, 'rollback');
 		await seedRootForChannel(CHANNEL_ID, root);
 		const old = makeReply(root.parsed, root.parsed, 'old', 101);
 		const next = makeReply(root.parsed, root.parsed, 'next', 102);
 		await reconcileTraceReplyCache({ channelId: CHANNEL_ID, effectiveRoots: [root.parsed], rawEvents: [old.raw] });
-		const originalPut = IDBObjectStore.prototype.put;
+		const db = await database();
+		await db.put(TRACE_REPLY_STORE, { channelId: CHANNEL_ID, rootId: root.parsed.id, eventId: 'f'.repeat(64), rawEvent: null });
+		await db.put(TRACE_REPLY_LRU_STORE, Object.assign({ channelId: CHANNEL_ID, rootId: root.parsed.id, accessOrder: 1 }, { obsolete: true }));
+		const beforeReplies = await replyRecords();
+		const beforeLru = await lruRecords();
+		const beforeKeys = await db.getAllKeys(TRACE_REPLY_STORE);
+		const writes = observeWrites();
+		const originalPut = vi.mocked(IDBObjectStore.prototype.put).getMockImplementation()!;
 		const put = vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (this: IDBObjectStore, value, key) {
-			if ((value as { eventId?: string }).eventId === next.parsed.id) {
+			if (this.name === TRACE_REPLY_LRU_STORE) {
 				throw new DOMException('Simulated write failure.', 'QuotaExceededError');
 			}
 			return originalPut.call(this, value, key);
@@ -209,9 +327,13 @@ describe('trace reply cache reconciliation', () => {
 			channelId: CHANNEL_ID, effectiveRoots: [root.parsed], rawEvents: [next.raw]
 		})).rejects.toThrow('Trace reply cache operation failed.');
 		put.mockRestore();
-		expect((await reconcileTraceReplyCache({
-			channelId: CHANNEL_ID, effectiveRoots: [root.parsed], rawEvents: []
-		})).map((reply) => reply.id)).toEqual([old.parsed.id]);
+		expect(writes).toEqual([
+			{ store: TRACE_REPLY_STORE, operation: 'delete', key: [CHANNEL_ID, root.parsed.id, 'f'.repeat(64)] },
+			{ store: TRACE_REPLY_STORE, operation: 'put', key: [CHANNEL_ID, root.parsed.id, next.parsed.id] }
+		]);
+		expect(await replyRecords()).toEqual(beforeReplies);
+		expect(await lruRecords()).toEqual(beforeLru);
+		expect(await db.getAllKeys(TRACE_REPLY_STORE)).toEqual(beforeKeys);
 	});
 
 	it('does not report success or leave partial state when the transaction aborts after writes', async () => {
@@ -220,6 +342,8 @@ describe('trace reply cache reconciliation', () => {
 		const old = makeReply(root.parsed, root.parsed, 'abort old', 101);
 		const next = makeReply(root.parsed, root.parsed, 'abort next', 102);
 		await reconcileTraceReplyCache({ channelId: CHANNEL_ID, effectiveRoots: [root.parsed], rawEvents: [old.raw] });
+		const beforeReplies = await replyRecords();
+		const beforeLru = await lruRecords();
 		const originalPut = IDBObjectStore.prototype.put;
 		const put = vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (this: IDBObjectStore, value, key) {
 			const request = originalPut.call(this, value, key);
@@ -232,9 +356,8 @@ describe('trace reply cache reconciliation', () => {
 			channelId: CHANNEL_ID, effectiveRoots: [root.parsed], rawEvents: [next.raw]
 		})).rejects.toThrow('Trace reply cache operation failed.');
 		put.mockRestore();
-		expect((await reconcileTraceReplyCache({
-			channelId: CHANNEL_ID, effectiveRoots: [root.parsed], rawEvents: []
-		})).map((reply) => reply.id)).toEqual([old.parsed.id]);
+		expect(await replyRecords()).toEqual(beforeReplies);
+		expect(await lruRecords()).toEqual(beforeLru);
 	});
 
 	it('does not persist replies or LRU metadata for an evicted root supplied by a stale caller', async () => {
@@ -269,12 +392,18 @@ describe('trace reply cache reconciliation', () => {
 		expect(records.filter((record) => record.channelId === CHANNEL_ID)).toHaveLength(600);
 		expect(records.filter((record) => record.channelId === OTHER_CHANNEL_ID)).toHaveLength(400);
 
+		const writes = observeWrites();
 		await reconcileTraceReplyCache({
 			channelId: OTHER_CHANNEL_ID, effectiveRoots: [capOtherRoot.parsed], rawEvents: [capOtherReplies[400].raw]
 		});
 		records = await replyRecords();
 		expect(records).toHaveLength(401);
 		expect(new Set(records.map((record) => record.channelId))).toEqual(new Set([OTHER_CHANNEL_ID]));
+		expect(writes.filter((write) => write.operation === 'delete')).toHaveLength(600);
+		expect(writes.filter((write) => write.operation === 'delete').every((write) => write.store === TRACE_REPLY_STORE && (write.key as string[])[0] === CHANNEL_ID)).toBe(true);
+		expect(writes.filter((write) => write.operation === 'put')).toEqual([
+			{ store: TRACE_REPLY_STORE, operation: 'put', key: [OTHER_CHANNEL_ID, capOtherRoot.parsed.id, capOtherReplies[400].parsed.id] }
+		]);
 	}, 20_000);
 
 	it('uses persistent touches for LRU priority', async () => {
@@ -284,6 +413,7 @@ describe('trace reply cache reconciliation', () => {
 			channelId: CHANNEL_ID, effectiveRoots: [capRoot.parsed], rawEvents: capReplies.slice(0, 600).map((reply) => reply.raw)
 		});
 		expect(await touchTraceReplyTree({ channelId: CHANNEL_ID, rootId: capRoot.parsed.id })).toBe(true);
+		const writes = observeWrites();
 		await reconcileTraceReplyCache({
 			channelId: OTHER_CHANNEL_ID, effectiveRoots: [capOtherRoot.parsed], rawEvents: capOtherReplies.map((reply) => reply.raw)
 		});
@@ -291,6 +421,7 @@ describe('trace reply cache reconciliation', () => {
 		expect(records).toHaveLength(600);
 		expect(new Set(records.map((record) => record.channelId))).toEqual(new Set([CHANNEL_ID]));
 		expect(await lruRecords()).toEqual([expect.objectContaining({ rootId: capRoot.parsed.id, accessOrder: 1 })]);
+		expect(writes).toEqual([]);
 	}, 20_000);
 
 	it('protects the current open root while another tree can be evicted', async () => {
@@ -305,6 +436,7 @@ describe('trace reply cache reconciliation', () => {
 			rawEvents: capOtherReplies.map((reply) => reply.raw)
 		});
 		await touchTraceReplyTree({ channelId: OTHER_CHANNEL_ID, rootId: capOtherRoot.parsed.id });
+		const writes = observeWrites();
 		await reconcileTraceReplyCache({
 			channelId: CHANNEL_ID,
 			effectiveRoots: [capRoot.parsed],
@@ -314,6 +446,14 @@ describe('trace reply cache reconciliation', () => {
 		const records = await replyRecords();
 		expect(records).toHaveLength(600);
 		expect(new Set(records.map((record) => record.channelId))).toEqual(new Set([CHANNEL_ID]));
+		expect(writes.filter((write) => write.operation === 'delete')).toHaveLength(402);
+		expect(writes.filter((write) => write.operation === 'delete').every((write) => (write.key as string[])[0] === OTHER_CHANNEL_ID)).toBe(true);
+		expect(writes.filter((write) => write.store === TRACE_REPLY_LRU_STORE)).toEqual([
+			{ store: TRACE_REPLY_LRU_STORE, operation: 'delete', key: [OTHER_CHANNEL_ID, capOtherRoot.parsed.id] }
+		]);
+		expect(writes.filter((write) => write.operation === 'put')).toEqual([
+			{ store: TRACE_REPLY_STORE, operation: 'put', key: [CHANNEL_ID, capRoot.parsed.id, capReplies[599].parsed.id] }
+		]);
 	}, 20_000);
 
 	it('trims a single oversized tree by deterministic leaves without leaving an orphan', async () => {
