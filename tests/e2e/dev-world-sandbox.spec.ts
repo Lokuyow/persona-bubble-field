@@ -515,6 +515,20 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.locator('[data-trace-tail-root-id="' + '2'.repeat(64) + '"]')).toHaveCount(2);
 		await expect(page.locator('[data-trace-tail-root-id="' + '2'.repeat(64) + '"]').first()).toHaveAttribute('data-trace-tail-target');
 		await expect(page.locator('[data-trace-tail-reply-id]')).toHaveCount(0);
+		const rootSpecialTailMask = await page.locator('.tail-layer').evaluate((layer) => {
+			const tail = layer.querySelector<SVGPolygonElement>('[data-trace-tail-root-id]');
+			const maskId = tail?.getAttribute('mask')?.replace(/^url\(#|\)$/g, '');
+			const mask = maskId ? document.getElementById(maskId) : null;
+			return {
+				maskId,
+				x: mask?.getAttribute('x'), y: mask?.getAttribute('y'),
+				width: mask?.getAttribute('width'), height: mask?.getAttribute('height'),
+				bodyFill: mask?.querySelector('path')?.getAttribute('fill'),
+				viewportFill: mask?.querySelector('rect')?.getAttribute('fill')
+			};
+		});
+		const [, , viewportWidth, viewportHeight] = (await page.locator('.tail-layer').getAttribute('viewBox') ?? '').split(' ');
+		expect(rootSpecialTailMask).toMatchObject({ x: '0', y: '0', width: viewportWidth, height: viewportHeight, viewportFill: 'white', bodyFill: 'black' });
 		await page.locator('[data-trace-reply-id="' + '7'.repeat(64) + '"]').getByRole('button', { name: /プロフィール/ }).click();
 		await expect(profileDialog(page)).toBeVisible();
 		await page.keyboard.press('Escape');

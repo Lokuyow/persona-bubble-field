@@ -2605,12 +2605,14 @@
 				{@const rootTail = tailGeometry(rootTailStart, traceRootTailTarget, 11, 2, specialTailExtension(traceBubble.event.speechType))}
 				{#if traceBubble.event.speechType !== 'normal' && traceBubble.shape}
 					<defs>
-						<mask id={traceTailMaskId(traceBubble.id)} maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x={traceBubble.shape.bounds.x} y={traceBubble.shape.bounds.y} width={traceBubble.shape.bounds.width} height={traceBubble.shape.bounds.height}>
-							<path d={traceBubble.shape.path} transform={`translate(${traceBubble.anchor.x} ${traceBubble.anchor.y})`} fill="white" />
+						<mask id={traceTailMaskId(traceBubble.id)} maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x="0" y="0" width={viewportSize.width} height={viewportSize.height}>
+							<rect x="0" y="0" width={viewportSize.width} height={viewportSize.height} fill="white" />
+							<path d={traceBubble.shape.path} transform={`translate(${traceBubble.anchor.x} ${traceBubble.anchor.y})`} fill="black" />
 						</mask>
-						<mask id={traceTailOutlineMaskId(traceBubble.id)} maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x={traceBubble.shape.bounds.x} y={traceBubble.shape.bounds.y} width={traceBubble.shape.bounds.width} height={traceBubble.shape.bounds.height}>
-							<rect x={traceBubble.shape.bounds.x} y={traceBubble.shape.bounds.y} width={traceBubble.shape.bounds.width} height={traceBubble.shape.bounds.height} fill="white" />
-							<polygon points={tailOutlineOpeningPoints(rootTail, traceBubble.anchor)} transform={`translate(${traceBubble.anchor.x} ${traceBubble.anchor.y})`} fill="black" />
+						<mask id={traceTailOutlineMaskId(traceBubble.id)} maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x="0" y="0" width={viewportSize.width} height={viewportSize.height}>
+							<rect x="0" y="0" width={viewportSize.width} height={viewportSize.height} fill="white" />
+							<path d={traceBubble.shape.path} transform={`translate(${traceBubble.anchor.x} ${traceBubble.anchor.y})`} fill="black" />
+							<polygon points={tailOutlineOpeningPoints(rootTail, traceBubble.anchor)} transform={`translate(${traceBubble.anchor.x} ${traceBubble.anchor.y})`} fill="white" />
 						</mask>
 					</defs>
 				{/if}
