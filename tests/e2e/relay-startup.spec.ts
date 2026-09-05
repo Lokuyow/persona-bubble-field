@@ -1504,25 +1504,76 @@ test.describe('Relay startup', () => {
 
 	});
 
-	test('keeps the Field reservation synchronized with Host-owned preferred height', async ({ page }) => {
-		await openReadyRelayWorld(page);
-		const before = await page.evaluate(() => ({
-			dock: document.querySelector('.composer-dock')!.getBoundingClientRect().toJSON(),
-			field: document.querySelector('.field-viewport')!.getBoundingClientRect().toJSON(),
-			viewportHeight: window.innerHeight
-		}));
-		await page.evaluate(() => (window as typeof window & {
-			__ehagakiSetPreferredHeight(height: number): void;
-		}).__ehagakiSetPreferredHeight(200));
-		await expect.poll(() => page.evaluate(() => document.querySelector('.composer-dock')!.getBoundingClientRect().height)).toBeGreaterThan(before.dock.height);
-		const after = await page.evaluate(() => ({
-			dock: document.querySelector('.composer-dock')!.getBoundingClientRect().toJSON(),
-			field: document.querySelector('.field-viewport')!.getBoundingClientRect().toJSON(),
-			viewportHeight: window.innerHeight
-		}));
-		expect(after.field.height).toBeLessThan(before.field.height);
-		expect(after.field.height + after.dock.height).toBeCloseTo(after.viewportHeight, 1);
-	});
+	for (const viewport of [
+		{ name: 'desktop', width: 1200, height: 900 },
+		{ name: 'mobile', width: 390, height: 844 }
+	]) {
+		test(`keeps Field geometry stable while Host-owned Composer grows on ${viewport.name}`, async ({ page }) => {
+			await page.setViewportSize({ width: viewport.width, height: viewport.height });
+			await openReadyRelayWorld(page);
+			const participantPosition = await page.locator('.participant[data-self="true"]').getAttribute('data-position');
+			if (!participantPosition) throw new Error('Expected the Relay self participant position.');
+			const [participantX, participantY] = participantPosition.split(',').map(Number);
+			const bubbleEvent = finalizeEvent(buildWorldMessageTemplate({
+				channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' },
+				content: 'geometry regression bubble',
+				speechType: 'normal',
+				position: { x: participantX, y: participantY },
+				createdAt: Math.floor(Date.now() / 1000)
+			}), new Uint8Array(32).fill(19));
+			await page.evaluate((event) => (window as typeof window & {
+				__relayStartupTest: { injectMessage(event: object): void };
+			}).__relayStartupTest.injectMessage(event), bubbleEvent);
+			await expect(page.locator('.bubble').first()).toBeVisible();
+			await expect(page.locator('.field-scene')).not.toHaveAttribute('data-camera-animation', 'active');
+			await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+			const readGeometry = () => page.evaluate(() => {
+				const rect = (selector: string, index = 0) => {
+					const element = document.querySelectorAll<HTMLElement>(selector)[index];
+					return element?.getBoundingClientRect().toJSON() ?? null;
+				};
+				return {
+					dock: rect('.composer-dock'),
+					viewport: rect('.field-viewport'),
+					area: rect('.field-area'),
+					scene: rect('.field-scene'),
+					speech: rect('.speech-area'),
+					participant: rect('.participant[data-self="true"]'),
+					bubble: rect('.bubble'),
+					transform: getComputedStyle(document.querySelector('.field-scene')!).transform
+				};
+			});
+			const before = await readGeometry();
+			expect(before.bubble).not.toBeNull();
+
+			await page.evaluate(() => (window as typeof window & {
+				__ehagakiSetPreferredHeight(height: number): void;
+			}).__ehagakiSetPreferredHeight(200));
+			await expect.poll(async () => (await readGeometry()).dock!.height).toBeGreaterThan(before.dock!.height);
+			const grown = await readGeometry();
+			expect(grown.dock!.y).toBeLessThan(before.dock!.y);
+			expect(grown.viewport).toEqual(before.viewport);
+			expect(grown.area).toEqual(before.area);
+			expect(grown.scene).toEqual(before.scene);
+			expect(grown.speech).toEqual(before.speech);
+			expect(grown.participant).toEqual(before.participant);
+			expect(grown.bubble).toEqual(before.bubble);
+			expect(grown.transform).toBe(before.transform);
+
+			await page.evaluate(() => (window as typeof window & {
+				__ehagakiSetPreferredHeight(height: number): void;
+			}).__ehagakiSetPreferredHeight(50));
+			await expect.poll(async () => (await readGeometry()).dock!.height).toBeCloseTo(before.dock!.height, 1);
+			const restored = await readGeometry();
+			expect(restored.viewport).toEqual(before.viewport);
+			expect(restored.area).toEqual(before.area);
+			expect(restored.scene).toEqual(before.scene);
+			expect(restored.speech).toEqual(before.speech);
+			expect(restored.participant).toEqual(before.participant);
+			expect(restored.bubble).toEqual(before.bubble);
+			expect(restored.transform).toBe(before.transform);
+		});
+	}
 
 	test('decouples Composer from metadata and participant projection from final primary EOSE', async ({ page }) => {
 		const hostOwned = await installHostOwnedStub(page);

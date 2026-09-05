@@ -3280,6 +3280,13 @@
 			+ var(--composer-dock-border-width)
 			+ env(safe-area-inset-bottom)
 		);
+		--composer-reserved-height: calc(
+			var(--composer-initial-preferred-height)
+			+ var(--composer-dock-padding-block)
+			+ var(--composer-dock-padding-block)
+			+ var(--composer-dock-border-width)
+			+ env(safe-area-inset-bottom)
+		);
 		position: relative;
 		display: flex;
 		height: 100svh;
@@ -3381,7 +3388,7 @@
 	}
 
 	.composer-available {
-		padding-bottom: var(--composer-dock-height);
+		padding-bottom: var(--composer-reserved-height);
 	}
 
 	.composer-dock {
