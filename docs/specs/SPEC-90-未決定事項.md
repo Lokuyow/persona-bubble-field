@@ -16,8 +16,8 @@
   - `l=chat`、`speech:shout`、`speech:monologue` の語彙はprototype仕様として確定済み
 - 正式公開時のposition用 `kind 30078` の恒久 `d` tag値
   - prototypeでは `io.github.lokuyow.persona-bubble-field:position:0` / `io.github.lokuyow.persona-bubble-field:position:1` を使用する
-- kind 42およびkind 1111の発言位置tag `w` を正式公開仕様として恒久採用するか
-  - prototypeでは `["w", "<x>:<y>"]` を使用する
+- kind 42の発言位置tag `w` を正式公開仕様として恒久採用するか
+	- prototypeではkind 42だけが `["w", "<x>:<y>"]` を使用する。kind 1111 replyはtree-onlyであり、`w` を発行しない
   - 正式公開仕様として固定する前に、その時点の最新NIPおよび既存の単一文字tag利用状況を再確認する
 - 正式公開時のmetadata discovery bootstrap Relay set
   - prototypeでは `wss://nos.lol/`、`wss://x.kojira.io/`、`wss://relay.nostr.wirednet.jp/`、`wss://yabu.me/` を使用する

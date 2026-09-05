@@ -42,12 +42,12 @@ cellにcurrent participantがいなければghostはparticipant相当位置に�
 
 ### investigation range
 
-root/replyのinvestigation rangeは、それぞれの実際の `w` cell自身と周囲8 cellとする。
+investigation rangeはrootの実際の `w` cell自身と周囲8 cellとする。replyは独自のworld/cell positionを持たない。
 movement rulesは[SPEC-30](./SPEC-30-フィールド・position・presence.md)を正とする。
 
 - rootはrange内でだけ調査でき、root調査はpresence activityとする。
-- replyを選択してさらに深く辿るには、そのreplyの実際の `w` のinvestigation rangeまで物理的に移動している必要がある。
-- reply targetのrange外へ出るとreply modeを解除してdraftを破棄するが、conversation explorationは維持する。
+- replyを選択してさらに深く辿る操作もopen rootのrange内で行う。
+- root range外へ出るとreply modeを解除してdraftを破棄するが、conversation explorationは維持する。
 
 ## 25. trace conversation
 
@@ -55,13 +55,13 @@ trace conversationはroot調査からだけ入る。一度にexploreできるroo
 
 rootを調査したら、NIP-22 reply historyを待たずにroot ghostと実際のroot本文bubbleを即表示する。reply history取得中は小さいreply loading状態を表示する。
 
-conversationはcurrent selected speechとそのdirect repliesを中心に表示する。deeper levelではparent 1件だけをcontextとして表示する。reply depthに上限は設けない。
+表示対象はroot、current、immediate parent、currentの全direct repliesだけである。rootは常にfield position由来で表示し、rootがcurrentまたはimmediate parentでない深いcurrentでは1行ellipsisのcompact contextとする。reply depthに上限は設けない。
 
-- different-cell direct repliesは同時に表示する。
-- offscreen direct replyまたはparentはviewport edge connectorとdirection arrowだけを表示し、本文、author、距離を表示しない。
-- reply間の関係はspeech tailと別のdotted / segmented connectorで表現する。
-- same-cell複数replyは代表1件とcountを表示する。個別replyは共通context menuから選択し、menuではbodyを見せずauthorだけを示す。同authorの複数replyはnewest-firstの番号で区別する。
-- same-cellへのnew replyがlive到着しても表示中代表を自動変更しない。conversationをreopenした時だけ代表をnewestへ戻す。
+- current=rootまたはimmediate parent=rootではroot bubbleをtree anchorとする。
+- 深いcurrentではhidden ancestorのUI node、仮想slot、connectorを生成せず、immediate parentを`bubbleSafeBounds`中央へreply card footprintで中央揃えしたvisible local cluster anchorとする。currentとdirect childrenは親のplaced cardから既定slotへ配置する。
+- child slotはcreatedAt降順、event ID昇順で右下、左下、右上、左上、以後同順の外側ringとする。slot、clamp、collisionはauthor icon/nameを含むreply card footprintを使用し、同一anchorへ潰れる場合はranked slot/edge fallbackを選ぶ。
+- compact rootとdeep immediate parentの間にはconnectorを描かない。connectorは表示中の実在する親子関係だけをdotted / segmentedで描く。
+- speech bodyはnative button、author icon/nameはsiblingのnative Profile buttonとする。Profile操作はselection、target、draftを変更しない。body measurementはoverflow/ellipsis/special shape専用、wrapper footprintはplacement専用とする。
 
 Profile Dialogまたはcontext menuを開閉してもconversation exploration、reply target、draftを維持する。
 

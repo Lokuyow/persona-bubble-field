@@ -81,7 +81,7 @@ describe('Trace reply publication ownership', () => {
 		expect(rawEvent.kind).toBe(1111);
 		expect(rawEvent.tags).toEqual(expect.arrayContaining([
 			['E', f.root.id, '', f.root.pubkey], ['K', '42'], ['P', f.root.pubkey],
-			['e', f.root.id, '', f.root.pubkey], ['k', '42'], ['p', f.root.pubkey], ['w', '2:1']
+			['e', f.root.id, '', f.root.pubkey], ['k', '42'], ['p', f.root.pubkey]
 		]));
 		expect(parseTraceReplyCandidate(rawEvent)?.speechType).toBe(speechType);
 		expect(f.session.getTraceConversationState()).toMatchObject({ config: { currentId: f.root.id }, replies: [{ id: rawEvent.id }] });
@@ -276,7 +276,7 @@ function traceReply(
 	createdAt = 701,
 	options: {
 		parent?: ParsedWorldMessage | ParsedTraceReply;
-		position?: ParsedTraceReply['position'];
+		position?: { x: number; y: number };
 		pubkey?: string;
 	} = {}
 ): ParsedTraceReply {
@@ -287,7 +287,6 @@ function traceReply(
 		createdAt,
 		content: id,
 		speechType: 'normal',
-		position: options.position ?? root.position,
 		rootId: root.id,
 		rootPubkey: root.pubkey,
 		parentId: parent.id,

@@ -1,8 +1,7 @@
-import type { GridPosition } from './geometry';
 import type { TraceConversationState } from './traceConversation';
 
 export type TraceReplyIdentity = Readonly<{ rootId: string; targetId: string }>;
-export type TraceReplyTarget = TraceReplyIdentity & Readonly<{ position: GridPosition }>;
+export type TraceReplyTarget = TraceReplyIdentity;
 export type TraceReplyMode = Readonly<{
 	generation: number;
 	clearContentVersion: number;
@@ -17,7 +16,7 @@ export function createTraceReplyMode(): TraceReplyMode {
 export function acceptedTraceReplyTarget(state: TraceConversationState, identity: TraceReplyIdentity): TraceReplyTarget | null {
 	if (state.kind !== 'open' || state.root.id !== identity.rootId) return null;
 	const event = state.root.id === identity.targetId ? state.root : state.replies.find((reply) => reply.id === identity.targetId);
-	return event ? { ...identity, position: { ...event.position } } : null;
+	return event ? { ...identity } : null;
 }
 
 export function selectTraceReplyTarget(state: TraceReplyMode, target: TraceReplyTarget): TraceReplyMode {

@@ -68,7 +68,7 @@ eHagaki自身がslash commandを解釈しない。
 
 trace conversationのreply modeでは、Host-owned Liteの既存 `setContext()` reply context、preview、`×` clearを利用する。reply preview hydrationにevent dataが必要な場合、親clientはすでに取得・semantic validationしたtarget eventを `preloadedEvents` として渡す。`preloadedEvents` はpreview/context補助であり、最終NIP-22 event構築のauthorityではない。
 
-親clientはreply target、NIP-22 `E/K/P`・`e/k/p`、`w`、speech type、最終event、sign、publishを所有する。Composer Outputの `tags` と `context` は最終event構築のauthorityにしない。eHagaki自身にRelay read、trace cache、NIP-22 tree取得、validation、notification、position、publish責務を追加しない。
+親clientはreply target、NIP-22 `E/K/P`・`e/k/p`、speech type、最終event、sign、publishを所有する。kind 1111 replyは `w` を持たない。Composer Outputの `tags` と `context` は最終event構築のauthorityにしない。eHagaki自身にRelay read、trace cache、NIP-22 tree取得、validation、notification、position、publish責務を追加しない。
 
 Host-owned Composer Liteの表示高さはeHagakiの`preferredHeight`に追従する。一方、親クライアントがFieldに予約するComposer領域は空・1行状態を基準に固定し、本文のauto-growによる増加分はField上へoverlayする。したがって、Composer本文の増減だけではField viewport、Field scene、map/background、participant、speech/bubble、Trace表示のgeometryを変更しない。VirtualKeyboard / VisualViewport表示時も、Composer dockだけをキーボード直上へ移動し、Field geometryはresizeしない。
 
