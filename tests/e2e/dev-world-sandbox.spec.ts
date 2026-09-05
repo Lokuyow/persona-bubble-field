@@ -472,6 +472,8 @@ test.describe('DEV World Sandbox', () => {
 		expect(maskedTraceTails.every((tail) => tail.maskUnits === 'userSpaceOnUse' && tail.maskContentUnits === 'userSpaceOnUse' && tail.matchesBody)).toBe(true);
 		await expect(page.locator('.tail-layer polygon[data-trace-tail-reply-id="' + '7'.repeat(64) + '"][mask]')).toHaveCount(0);
 		await expect(page.locator('.tail-layer path.trace-tail-outline[mask]')).toHaveCount(3);
+		await expect(page.locator('.tail-layer mask[id^="trace-tail-outline-"] path')).toHaveCount(3);
+		await expect(page.locator('.tail-layer mask[id^="trace-tail-outline-"] polygon')).toHaveCount(3);
 		await expect(page.getByText('deeper branch reply')).toHaveCount(0);
 		await expect(page.getByText('offscreen reply body must stay hidden')).toHaveCount(0);
 		await expect(page.locator('[data-trace-reply-offscreen-position="15,7"]')).toBeVisible();
@@ -556,6 +558,7 @@ test.describe('DEV World Sandbox', () => {
 			.toContainText('deeper branch reply');
 		await expect(page.locator('.trace-parent-tail[mask]')).toHaveCount(1);
 		await expect(page.locator('.trace-parent-tail-outline[mask]')).toHaveCount(1);
+		await expect(page.locator('.tail-layer mask[id^="trace-tail-outline-"] polygon')).toHaveCount(1);
 
 		await selectCell('7,4');
 		await expect(page.locator('[data-trace-current-reply-id="' + 'b'.repeat(64) + '"]'))
