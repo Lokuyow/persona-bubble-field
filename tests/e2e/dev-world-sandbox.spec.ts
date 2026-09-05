@@ -1934,6 +1934,7 @@ test.describe('DEV World Sandbox', () => {
 		await openClockedDevWorld(page);
 		const self = page.locator('.participant[data-self="true"]');
 		await page.keyboard.down('ArrowRight');
+		await page.clock.runFor(50);
 		await expect(self).toHaveAttribute('data-position', '8,3');
 
 		const start = await fieldCellCenter(page, { x: 5, y: 5 });
@@ -1993,6 +1994,7 @@ test.describe('DEV World Sandbox', () => {
 
 		const self = page.locator('.participant').first();
 		await page.keyboard.down('ArrowRight');
+		await page.clock.runFor(50);
 		await expect(self).toHaveAttribute('data-position', '8,3');
 		await page.clock.runFor(1_000);
 		await page.keyboard.up('ArrowRight');
@@ -2016,11 +2018,133 @@ test.describe('DEV World Sandbox', () => {
 		}
 	});
 
+	test('combines WASD, Arrow, and mixed keyboard keys into one diagonal movement', async ({ page }) => {
+		const diagonals = [
+			[['w', 'd'], '8,2'], [['w', 'a'], '6,2'], [['s', 'd'], '8,4'], [['s', 'a'], '6,4'],
+			[['ArrowUp', 'ArrowRight'], '8,2'], [['ArrowUp', 'ArrowLeft'], '6,2'],
+			[['ArrowDown', 'ArrowRight'], '8,4'], [['ArrowDown', 'ArrowLeft'], '6,4'],
+			[['w', 'ArrowRight'], '8,2'], [['ArrowUp', 'd'], '8,2']
+		] as const;
+
+		for (const [keys, expected] of diagonals) {
+			await openDevWorld(page);
+			const self = page.locator('.participant').first();
+			await page.keyboard.down(keys[0]);
+			await page.keyboard.down(keys[1]);
+			await expect(self).toHaveAttribute('data-position', expected);
+			await page.keyboard.up(keys[1]);
+			await page.keyboard.up(keys[0]);
+		}
+	});
+
+	test('cancels opposite keyboard components and resumes the remaining direction', async ({ page }) => {
+		await openClockedDevWorld(page);
+		const self = page.locator('.participant').first();
+
+		await page.keyboard.down('w');
+		await page.clock.runFor(50);
+		await expect(self).toHaveAttribute('data-position', '7,2');
+		await page.keyboard.down('s');
+		await expect(self).toHaveAttribute('data-position', '7,2');
+		await page.clock.runFor(500);
+		await expect(self).toHaveAttribute('data-position', '7,2');
+		await page.keyboard.up('s');
+		await page.clock.runFor(500);
+		await expect(self).toHaveAttribute('data-position', '7,1');
+		await page.keyboard.up('w');
+
+		await page.keyboard.down('a');
+		await page.keyboard.down('d');
+		await expect(self).toHaveAttribute('data-position', '7,1');
+		await page.keyboard.up('d');
+		await page.keyboard.up('a');
+	});
+
+	test('deduplicates logical directions and cleans up a neutral hold on native input focus', async ({ page }) => {
+		await openClockedDevWorld(page);
+		const self = page.locator('.participant').first();
+
+		await page.keyboard.down('w');
+		await page.keyboard.down('ArrowUp');
+		await page.keyboard.down('s');
+		await page.clock.runFor(50);
+		await expect(self).toHaveAttribute('data-position', '7,3');
+
+		await page.getByLabel('Select sandbox character').focus();
+		await page.keyboard.up('s');
+		await page.clock.runFor(1_000);
+		await expect(self).toHaveAttribute('data-position', '7,3');
+		await page.keyboard.up('ArrowUp');
+		await page.keyboard.up('w');
+	});
+
+	test('re-phases the keyboard hold timer after a diagonal direction change', async ({ page }) => {
+		await openClockedDevWorld(page);
+		const self = page.locator('.participant').first();
+
+		await page.keyboard.down('s');
+		await page.clock.runFor(50);
+		await expect(self).toHaveAttribute('data-position', '7,4');
+		await page.clock.runFor(400);
+		await page.keyboard.down('d');
+		await expect(self).toHaveAttribute('data-position', '8,5');
+		await page.clock.runFor(99);
+		await expect(self).toHaveAttribute('data-position', '8,5');
+		await page.clock.runFor(1);
+		await expect(self).toHaveAttribute('data-position', '8,5');
+		await page.clock.runFor(400);
+		await expect(self).toHaveAttribute('data-position', '9,6');
+		await page.keyboard.up('d');
+		await page.keyboard.up('s');
+	});
+
+	test('cancels an early-resolved chord timeout before the next movement key', async ({ page }) => {
+		await openClockedDevWorld(page);
+		const self = page.locator('.participant').first();
+
+		await page.keyboard.down('w');
+		await page.clock.runFor(20);
+		await page.keyboard.up('w');
+		await expect(self).toHaveAttribute('data-position', '7,2');
+
+		await page.keyboard.down('d');
+		await page.clock.runFor(29);
+		await expect(self).toHaveAttribute('data-position', '7,2');
+		await page.clock.runFor(1);
+		await expect(self).toHaveAttribute('data-position', '7,2');
+		await page.clock.runFor(20);
+		await expect(self).toHaveAttribute('data-position', '8,2');
+
+		await page.clock.runFor(499);
+		await expect(self).toHaveAttribute('data-position', '8,2');
+		await page.clock.runFor(1);
+		await expect(self).toHaveAttribute('data-position', '9,2');
+		await page.keyboard.up('d');
+	});
+
+	test('holds a diagonal at the existing cadence and follows the key that remains held', async ({ page }) => {
+		await openClockedDevWorld(page);
+		const self = page.locator('.participant').first();
+
+		await page.keyboard.down('s');
+		await page.keyboard.down('d');
+		await expect(self).toHaveAttribute('data-position', '8,4');
+		await page.clock.runFor(500);
+		await expect(self).toHaveAttribute('data-position', '9,5');
+		await page.keyboard.up('d');
+		await page.clock.runFor(500);
+		await expect(self).toHaveAttribute('data-position', '9,6');
+		await page.keyboard.up('s');
+		await page.clock.runFor(1_000);
+		await expect(self).toHaveAttribute('data-position', '9,6');
+	});
+
 	test('continues a held WASD movement at the existing two-per-second cadence', async ({ page }) => {
 		await openClockedDevWorld(page);
 
 		const self = page.locator('.participant').first();
 		await page.keyboard.down('d');
+		await page.clock.runFor(50);
 		await expect(self).toHaveAttribute('data-position', '8,3');
 		await page.clock.runFor(1_000);
 		await page.keyboard.up('d');
@@ -2049,6 +2173,7 @@ test.describe('DEV World Sandbox', () => {
 
 		const self = page.locator('.participant').first();
 		await page.keyboard.down('ArrowRight');
+		await page.clock.runFor(50);
 		await expect(self).toHaveAttribute('data-position', '8,3');
 		await page.evaluate(() => window.dispatchEvent(new Event('blur')));
 		await page.clock.runFor(1_000);
@@ -2061,6 +2186,7 @@ test.describe('DEV World Sandbox', () => {
 
 		const self = page.locator('.participant').first();
 		await page.keyboard.down('ArrowRight');
+		await page.clock.runFor(50);
 		await expect(self).toHaveAttribute('data-position', '8,3');
 		await page.evaluate(() => {
 			Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
@@ -2076,6 +2202,7 @@ test.describe('DEV World Sandbox', () => {
 
 		const self = page.locator('.participant').first();
 		await page.keyboard.down('ArrowRight');
+		await page.clock.runFor(50);
 		await expect(self).toHaveAttribute('data-position', '8,3');
 		await page.evaluate(() => {
 			for (let index = 0; index < 10; index += 1) {
@@ -2168,6 +2295,7 @@ test.describe('DEV World Sandbox', () => {
 
 		const self = page.locator('.participant').first();
 		await page.keyboard.down('ArrowRight');
+		await page.clock.runFor(50);
 		await expect(self).toHaveAttribute('data-position', '8,3');
 		await profileTrigger(page, '女の子').click();
 		await expect(profileDialog(page)).toBeVisible();

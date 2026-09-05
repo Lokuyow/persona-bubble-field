@@ -910,17 +910,23 @@
 		let movementHoldOwner: MovementHoldOwner | null = null;
 		let movementHoldDirection: Direction | null = null;
 		let movementHoldSource: 'page' | 'composer-editor' | null = null;
-		let movementHoldKeyboardKey: string | null = null;
-		let movementHoldKeyboardCode: string | null = null;
+		const pressedKeyboardMovementKeys = new Set<string>();
 		let movementHoldPointerId: number | null = null;
 		let holdTimer: number | null = null;
+		let keyboardChordTimer: number | null = null;
+		const KEYBOARD_CHORD_DELAY_MS = 50;
+		const cancelKeyboardChordTimer = () => {
+			if (keyboardChordTimer === null) return;
+			window.clearTimeout(keyboardChordTimer);
+			keyboardChordTimer = null;
+		};
 		const clearMovementHold = () => {
 			movementHoldOwner = null;
 			movementHoldDirection = null;
 			movementHoldSource = null;
-			movementHoldKeyboardKey = null;
-			movementHoldKeyboardCode = null;
+			pressedKeyboardMovementKeys.clear();
 			movementHoldPointerId = null;
+			cancelKeyboardChordTimer();
 			if (holdTimer !== null) {
 				window.clearInterval(holdTimer);
 				holdTimer = null;
@@ -933,23 +939,25 @@
 		};
 		const startMovementTimer = () => {
 			holdTimer = window.setInterval(() => {
-				if (!movementHoldOwner || !movementHoldDirection ||
+				if (!movementHoldOwner ||
 					(movementHoldOwner === 'keyboard' && movementHoldSource === 'composer-editor' && composerEditorIsEmpty !== true) ||
 					document.querySelector('.profile-dialog-content')) {
 					clearMovementHold();
 					return;
 				}
-				requestMovement(movementHoldDirection);
+				if (movementHoldDirection) requestMovement(movementHoldDirection);
 			}, 500);
 		};
-		const startKeyboardHold = (direction: Direction, event: KeyboardEvent, source: 'page' | 'composer-editor') => {
-			clearMovementHold();
-			movementHoldOwner = 'keyboard';
+		const rephaseMovementTimer = () => {
+			if (holdTimer === null) return;
+			window.clearInterval(holdTimer);
+			startMovementTimer();
+		};
+		const resolveKeyboardChord = () => {
+			cancelKeyboardChordTimer();
+			const direction = directionFromKeyboardMovementKeys(pressedKeyboardMovementKeys);
 			movementHoldDirection = direction;
-			movementHoldSource = source;
-			movementHoldKeyboardKey = event.key;
-			movementHoldKeyboardCode = event.code;
-			requestMovement(direction);
+			if (direction) requestMovement(direction);
 			startMovementTimer();
 		};
 		const takeOverPointerHold = (pointerId: number, direction: Direction) => {
@@ -1016,15 +1024,53 @@
 			event.preventDefault();
 			if (event.repeat) return;
 			const source = arrowDirection && isComposerEditorKeyboardEvent(event) ? 'composer-editor' : 'page';
-			startKeyboardHold(direction, event, source);
+			const keyToken = event.code || event.key;
+			pressedKeyboardMovementKeys.add(keyToken);
+			const nextDirection = directionFromKeyboardMovementKeys(pressedKeyboardMovementKeys);
+			if (movementHoldOwner !== 'keyboard') {
+				clearMovementHold();
+				pressedKeyboardMovementKeys.add(keyToken);
+				movementHoldOwner = 'keyboard';
+				movementHoldSource = source;
+				movementHoldDirection = nextDirection;
+				keyboardChordTimer = window.setTimeout(resolveKeyboardChord, KEYBOARD_CHORD_DELAY_MS);
+				return;
+			}
+			if (keyboardChordTimer !== null) {
+				if (nextDirection === 'up-right' || nextDirection === 'down-right' ||
+					nextDirection === 'down-left' || nextDirection === 'up-left') {
+					window.clearTimeout(keyboardChordTimer);
+					keyboardChordTimer = null;
+					movementHoldDirection = nextDirection;
+					requestMovement(nextDirection);
+					startMovementTimer();
+				} else {
+					movementHoldDirection = nextDirection;
+				}
+				return;
+			}
+			const previousDirection = movementHoldDirection;
+			movementHoldDirection = nextDirection;
+			if (nextDirection !== previousDirection) {
+				if (!nextDirection) return;
+				requestMovement(nextDirection);
+				rephaseMovementTimer();
+			}
 		};
 		const handleKeyup = (event: KeyboardEvent) => {
-			const direction = directionFromKey(event.key) ?? directionFromCode(event.code);
-			if (movementHoldOwner === 'keyboard' && direction === movementHoldDirection &&
-				(event.key === movementHoldKeyboardKey || event.code === movementHoldKeyboardCode)) clearMovementHold();
+			const keyToken = event.code || event.key;
+			if (keyboardChordTimer !== null) resolveKeyboardChord();
+			if (!pressedKeyboardMovementKeys.delete(keyToken) || movementHoldOwner !== 'keyboard') return;
+			const nextDirection = directionFromKeyboardMovementKeys(pressedKeyboardMovementKeys);
+			if (!nextDirection) {
+				if (pressedKeyboardMovementKeys.size === 0) clearMovementHold();
+				else movementHoldDirection = null;
+				return;
+			}
+			movementHoldDirection = nextDirection;
 		};
 		const handleMovementFocusIn = (event: FocusEvent) => {
-			if (movementHoldOwner === 'keyboard' && movementHoldDirection && !isComposerEditorKeyboardEvent(event)) clearMovementHold();
+			if (movementHoldOwner === 'keyboard' && !isComposerEditorKeyboardEvent(event)) clearMovementHold();
 		};
 		const handleWindowBlur = () => {
 			clearMovementHold();
@@ -1397,6 +1443,25 @@
 		if (code === 'KeyS') return 'down';
 		if (code === 'KeyD') return 'right';
 		return null;
+	}
+
+	function directionFromKeyboardMovementKeys(keys: Iterable<string>): Direction | null {
+		const activeDirections = new Set<Direction>();
+		for (const key of keys) {
+			const direction = directionFromCode(key) ?? directionFromKey(key);
+			if (direction) activeDirections.add(direction);
+		}
+		const x = activeDirections.has('left') === activeDirections.has('right')
+			? 0 : activeDirections.has('right') ? 1 : -1;
+		const y = activeDirections.has('up') === activeDirections.has('down')
+			? 0 : activeDirections.has('down') ? 1 : -1;
+		if (x === 0 && y === 0) return null;
+		if (x === 0) return y < 0 ? 'up' : 'down';
+		if (y === 0) return x < 0 ? 'left' : 'right';
+		if (x > 0 && y < 0) return 'up-right';
+		if (x > 0 && y > 0) return 'down-right';
+		if (x < 0 && y > 0) return 'down-left';
+		return 'up-left';
 	}
 
 	function setEffectiveTraceRoots(roots: readonly ParsedWorldMessage[]): void {

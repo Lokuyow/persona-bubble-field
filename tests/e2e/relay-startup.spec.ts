@@ -1642,6 +1642,7 @@ test.describe('Relay startup', () => {
 		const key = move.key;
 		await editor.focus();
 		await page.keyboard.down(key);
+		await page.clock.runFor(50);
 		await expect(self).not.toHaveAttribute('data-position', position);
 		await page.clock.runFor(750);
 		await page.clock.runFor(750);
