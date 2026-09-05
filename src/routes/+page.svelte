@@ -270,12 +270,14 @@
 
 	$: participantById = new Map(participantViews.map((participant) => [participant.id, participant]));
 	$: traceRootCells = groupTraceRoots(effectiveTraceRoots);
-	$: traceLightCells = traceRootCells.map((cell) => ({
-		...cell,
-		occupied: participantViews.some((participant) =>
-			participant.position.x === cell.position.x && participant.position.y === cell.position.y
-		)
-	}));
+	$: traceLightCells = traceRootCells
+		.filter((cell) => traceConversationState.kind !== 'open' || !sameCell(cell.position, traceConversationState.root.position))
+		.map((cell) => ({
+			...cell,
+			occupied: participantViews.some((participant) =>
+				participant.position.x === cell.position.x && participant.position.y === cell.position.y
+			)
+		}));
 	$: traceConversationProjection = resolveTraceConversationProjection(traceConversationState);
 	$: selectedTraceDetails = traceConversationState.kind === 'open' &&
 		traceConversationState.config.currentId === traceConversationState.root.id

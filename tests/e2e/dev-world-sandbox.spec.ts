@@ -357,6 +357,8 @@ test.describe('DEV World Sandbox', () => {
 		await page.locator('[data-cell-position="8,4"]').click({ position: { x: 4, y: 4 } });
 		await expect(page.locator('[data-trace-root-id="' + '2'.repeat(64) + '"]')).toContainText('trace-only root near the viewer');
 		await expect(page.locator('[data-trace-ghost-root-id="' + '2'.repeat(64) + '"]')).toBeVisible();
+		await expect(page.locator('[data-trace-light-position="8,4"]')).toHaveCount(0);
+		await expect(page.locator('.trace-light')).toHaveCount(3);
 		await expect(page.locator('.trace-reply-status')).toHaveCount(0);
 		await expect.poll(() => page.locator('[data-bubble-id="dev-trace-live-message"]').evaluate((element) => getComputedStyle(element).transform)).toBe(liveAnchor);
 
@@ -395,6 +397,8 @@ test.describe('DEV World Sandbox', () => {
 
 		await page.locator('.field-area').click({ position: { x: 8, y: 8 } });
 		await expect(page.locator('.trace-root-bubble')).toHaveCount(0);
+		await expect(page.locator('[data-trace-light-position="8,4"]')).toHaveCount(1);
+		await expect(page.locator('.trace-light')).toHaveCount(4);
 	});
 
 	test('presents deterministic direct Trace replies without external runtime ownership', async ({ page }) => {
