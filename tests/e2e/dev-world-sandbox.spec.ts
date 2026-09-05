@@ -442,6 +442,60 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.getByLabel('2 replies in this cell')).toBeVisible();
 		await expect(page.locator('[data-trace-reply-position="9,4"][data-trace-reply-id]')).toHaveAttribute('data-speech-type', 'shout');
 		await expect(page.locator('[data-trace-reply-position="8,4"][data-trace-reply-id]')).toHaveAttribute('data-speech-type', 'monologue');
+
+		const traceBubbleBackgrounds = await page.locator('.trace-root-bubble, .trace-reply-bubble').evaluateAll((bubbles) => bubbles.map((bubble) => ({
+			speechType: bubble.getAttribute('data-speech-type'),
+			background: getComputedStyle(bubble).backgroundColor
+		})));
+		expect(traceBubbleBackgrounds.filter(({ speechType }) => speechType === 'shout' || speechType === 'monologue')
+			.every(({ background }) => background === 'rgba(0, 0, 0, 0)')).toBe(true);
+		expect(traceBubbleBackgrounds.filter(({ speechType }) => speechType === 'normal')
+			.every(({ background }) => background !== 'rgba(0, 0, 0, 0)')).toBe(true);
+
+		const traceTailMasks = await page.locator('.tail-layer').evaluate((layer) => {
+			const bodyPathByBubbleId = new Map([...document.querySelectorAll<HTMLElement>('.trace-root-bubble, .trace-reply-bubble')]
+				.filter((bubble) => bubble.dataset.speechType !== 'normal')
+				.map((bubble) => [bubble.dataset.bubbleId, bubble.querySelector<SVGPathElement>('.bubble-surface-fill')?.getAttribute('d')]));
+			const tails = [...layer.querySelectorAll<SVGPolygonElement>('.trace-tail')];
+			return tails.map((tail) => {
+				const maskId = tail.getAttribute('mask')?.replace(/^url\(#|\)$/g, '');
+				const mask = maskId ? document.getElementById(maskId) : null;
+				const bodyPath = mask?.querySelector<SVGPathElement>('path');
+				const bubbleId = maskId?.replace(/^trace-tail-body-/, '');
+				return {
+					maskId,
+					maskUnits: mask?.getAttribute('maskUnits'),
+					maskContentUnits: mask?.getAttribute('maskContentUnits'),
+					bodyPath: bodyPath?.getAttribute('d'),
+					matchesBody: bodyPath?.getAttribute('d') === bodyPathByBubbleId.get(bubbleId)
+				};
+			});
+		});
+		const traceTailOpeningGeometry = await page.locator('.tail-layer').evaluate((layer) => [...layer.querySelectorAll<SVGPolygonElement>('.trace-tail')]
+			.filter((tail) => tail.hasAttribute('mask'))
+			.map((tail) => {
+				const outline = tail.nextElementSibling as SVGPathElement | null;
+				const maskId = outline?.getAttribute('mask')?.replace(/^url\(#|\)$/g, '');
+				const opening = maskId ? document.querySelector<SVGMaskElement>(`#${maskId} polygon`) : null;
+				const transform = opening?.getAttribute('transform')?.match(/^translate\((-?[\d.]+) (-?[\d.]+)\)$/);
+				if (!opening || !transform) throw new Error('Expected a viewport-transformed trace tail opening.');
+				const [translateX, translateY] = transform.slice(1).map(Number);
+				const openingPoints = (opening.getAttribute('points') ?? '').trim().split(/\s+/).map((point) => point.split(',').map(Number));
+				const tailPoints = Array.from({ length: tail.points.numberOfItems }, (_, index) => {
+					const point = tail.points.getItem(index);
+					return [point.x, point.y];
+				});
+				return Math.max(...openingPoints.map(([x, y], index) => Math.hypot(x + translateX - tailPoints[index][0], y + translateY - tailPoints[index][1])));
+			}));
+		const maskedTraceTails = traceTailMasks.filter((tail) => tail.maskId);
+		expect(maskedTraceTails).toHaveLength(3);
+		expect(maskedTraceTails.every((tail) => tail.maskUnits === 'userSpaceOnUse' && tail.maskContentUnits === 'userSpaceOnUse' && tail.matchesBody)).toBe(true);
+		expect(traceTailOpeningGeometry).toHaveLength(3);
+		expect(Math.max(...traceTailOpeningGeometry)).toBeLessThan(0.001);
+		await expect(page.locator('.tail-layer polygon[data-trace-tail-reply-id="' + '7'.repeat(64) + '"][mask]')).toHaveCount(0);
+		await expect(page.locator('.tail-layer path.trace-tail-outline[mask]')).toHaveCount(3);
+		await expect(page.locator('.tail-layer mask[id^="trace-tail-outline-"] path')).toHaveCount(3);
+		await expect(page.locator('.tail-layer mask[id^="trace-tail-outline-"] polygon')).toHaveCount(3);
 		await expect(page.getByText('deeper branch reply')).toHaveCount(0);
 		await expect(page.getByText('offscreen reply body must stay hidden')).toHaveCount(0);
 		await expect(page.locator('[data-trace-reply-offscreen-position="15,7"]')).toBeVisible();
@@ -524,6 +578,24 @@ test.describe('DEV World Sandbox', () => {
 			.toContainText('trace-only root near the viewer');
 		await expect(page.locator('[data-trace-reply-id="' + 'b'.repeat(64) + '"]'))
 			.toContainText('deeper branch reply');
+		await expect(page.locator('.trace-parent-tail[mask]')).toHaveCount(1);
+		await expect(page.locator('.trace-parent-tail-outline[mask]')).toHaveCount(1);
+		await expect(page.locator('.tail-layer mask[id^="trace-tail-outline-"] polygon')).toHaveCount(1);
+		const parentTailOpeningError = await page.locator('.tail-layer').evaluate((layer) => {
+			const tail = layer.querySelector<SVGPolygonElement>('.trace-parent-tail');
+			const outline = tail?.nextElementSibling as SVGPathElement | null;
+			const maskId = outline?.getAttribute('mask')?.replace(/^url\(#|\)$/g, '');
+			const opening = maskId ? document.querySelector<SVGPolygonElement>(`#${maskId} polygon`) : null;
+			const transform = opening?.getAttribute('transform')?.match(/^translate\((-?[\d.]+) (-?[\d.]+)\)$/);
+			if (!tail || !opening || !transform) throw new Error('Expected a viewport-transformed parent tail opening.');
+			const [translateX, translateY] = transform.slice(1).map(Number);
+			const openingPoints = (opening.getAttribute('points') ?? '').trim().split(/\s+/).map((point) => point.split(',').map(Number));
+			return Math.max(...openingPoints.map(([x, y], index) => {
+				const tailPoint = tail.points.getItem(index);
+				return Math.hypot(x + translateX - tailPoint.x, y + translateY - tailPoint.y);
+			}));
+		});
+		expect(parentTailOpeningError).toBeLessThan(0.001);
 
 		await selectCell('7,4');
 		await expect(page.locator('[data-trace-current-reply-id="' + 'b'.repeat(64) + '"]'))

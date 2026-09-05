@@ -2517,6 +2517,14 @@
 	function speechOutlineMaskId(bubbleId: string): string {
 		return `speech-tail-opening-${bubbleId.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
 	}
+
+	function traceTailMaskId(bubbleId: string): string {
+		return `trace-tail-body-${bubbleId.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+	}
+
+	function traceTailOutlineMaskId(bubbleId: string): string {
+		return `trace-tail-outline-${bubbleId.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+	}
 </script>
 
 <svelte:head>
@@ -2793,6 +2801,49 @@
 		{/if}
 
 		<svg class="tail-layer" viewBox={`0 0 ${viewportSize.width} ${viewportSize.height}`} aria-hidden="true">
+			<defs>
+				{#if traceBubble && traceBubble.event.speechType !== 'normal' && traceBubble.shape}
+					{@const start = tailStart(traceBubble.anchor, traceBubble.size)}
+					{@const tail = tailGeometry(start, traceBubble.tailTarget, 11, 2, specialTailExtension(traceBubble.event.speechType))}
+					<mask id={traceTailMaskId(traceBubble.id)} maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x="0" y="0" width={viewportSize.width} height={viewportSize.height}>
+						<rect x="0" y="0" width={viewportSize.width} height={viewportSize.height} fill="white" />
+						<path d={traceBubble.shape.path} transform={`translate(${traceBubble.anchor.x} ${traceBubble.anchor.y})`} fill="black" />
+					</mask>
+					<mask id={traceTailOutlineMaskId(traceBubble.id)} maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x="0" y="0" width={viewportSize.width} height={viewportSize.height}>
+						<rect x="0" y="0" width={viewportSize.width} height={viewportSize.height} fill="white" />
+						<path d={traceBubble.shape.path} transform={`translate(${traceBubble.anchor.x} ${traceBubble.anchor.y})`} fill="black" />
+						<polygon points={tailOutlineOpeningPoints(tail, traceBubble.anchor)} transform={`translate(${traceBubble.anchor.x} ${traceBubble.anchor.y})`} fill="white" />
+					</mask>
+				{/if}
+				{#if traceParentBubble && traceParentBubble.event.speechType !== 'normal' && traceParentBubble.shape}
+					{@const start = tailStart(traceParentBubble.anchor, traceParentBubble.size)}
+					{@const tail = tailGeometry(start, traceParentBubble.tailTarget, 11, 2, specialTailExtension(traceParentBubble.event.speechType))}
+					<mask id={traceTailMaskId(traceParentBubble.id)} maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x="0" y="0" width={viewportSize.width} height={viewportSize.height}>
+						<rect x="0" y="0" width={viewportSize.width} height={viewportSize.height} fill="white" />
+						<path d={traceParentBubble.shape.path} transform={`translate(${traceParentBubble.anchor.x} ${traceParentBubble.anchor.y})`} fill="black" />
+					</mask>
+					<mask id={traceTailOutlineMaskId(traceParentBubble.id)} maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x="0" y="0" width={viewportSize.width} height={viewportSize.height}>
+						<rect x="0" y="0" width={viewportSize.width} height={viewportSize.height} fill="white" />
+						<path d={traceParentBubble.shape.path} transform={`translate(${traceParentBubble.anchor.x} ${traceParentBubble.anchor.y})`} fill="black" />
+						<polygon points={tailOutlineOpeningPoints(tail, traceParentBubble.anchor)} transform={`translate(${traceParentBubble.anchor.x} ${traceParentBubble.anchor.y})`} fill="white" />
+					</mask>
+				{/if}
+				{#each traceReplyBubbles as bubble (bubble.id)}
+					{#if bubble.reply.speechType !== 'normal' && bubble.shape}
+						{@const start = tailStart(bubble.anchor, bubble.size)}
+						{@const tail = tailGeometry(start, bubble.tailTarget, 11, 2, specialTailExtension(bubble.reply.speechType))}
+						<mask id={traceTailMaskId(bubble.id)} maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x="0" y="0" width={viewportSize.width} height={viewportSize.height}>
+							<rect x="0" y="0" width={viewportSize.width} height={viewportSize.height} fill="white" />
+							<path d={bubble.shape.path} transform={`translate(${bubble.anchor.x} ${bubble.anchor.y})`} fill="black" />
+						</mask>
+						<mask id={traceTailOutlineMaskId(bubble.id)} maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x="0" y="0" width={viewportSize.width} height={viewportSize.height}>
+							<rect x="0" y="0" width={viewportSize.width} height={viewportSize.height} fill="white" />
+							<path d={bubble.shape.path} transform={`translate(${bubble.anchor.x} ${bubble.anchor.y})`} fill="black" />
+							<polygon points={tailOutlineOpeningPoints(tail, bubble.anchor)} transform={`translate(${bubble.anchor.x} ${bubble.anchor.y})`} fill="white" />
+						</mask>
+					{/if}
+				{/each}
+			</defs>
 			{#if traceBubble && (offscreenTraceReplyCells.length > 0 || projectedTraceParent?.projection.visibility === 'offscreen')}
 				<defs>
 					<marker id="trace-offscreen-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
@@ -2855,20 +2906,20 @@
 			{#if traceBubble}
 				{@const start = tailStart(traceBubble.anchor, traceBubble.size)}
 				{@const tail = tailGeometry(start, traceBubble.tailTarget, 11, 2, specialTailExtension(traceBubble.event.speechType))}
-				<polygon class={`tail trace-tail tone-${traceBubble.tone}`} data-trace-tail-root-id={traceBubble.speech.kind === 'root' ? traceBubble.event.id : undefined} data-trace-tail-current-reply-id={traceBubble.speech.kind === 'reply' ? traceBubble.event.id : undefined} data-trace-tail-target={`${traceBubble.tailTarget.x},${traceBubble.tailTarget.y}`} points={tail.points} />
-				<path class={`tail-outline trace-tail-outline tone-${traceBubble.tone}`} data-trace-tail-root-id={traceBubble.speech.kind === 'root' ? traceBubble.event.id : undefined} data-trace-tail-current-reply-id={traceBubble.speech.kind === 'reply' ? traceBubble.event.id : undefined} data-trace-tail-target={`${traceBubble.tailTarget.x},${traceBubble.tailTarget.y}`} d={tail.outlinePath} />
+				<polygon class={`tail trace-tail tone-${traceBubble.tone}`} mask={traceBubble.event.speechType === 'normal' ? undefined : `url(#${traceTailMaskId(traceBubble.id)})`} data-trace-tail-root-id={traceBubble.speech.kind === 'root' ? traceBubble.event.id : undefined} data-trace-tail-current-reply-id={traceBubble.speech.kind === 'reply' ? traceBubble.event.id : undefined} data-trace-tail-target={`${traceBubble.tailTarget.x},${traceBubble.tailTarget.y}`} points={tail.points} />
+				<path class={`tail-outline trace-tail-outline tone-${traceBubble.tone}`} mask={traceBubble.event.speechType === 'normal' ? undefined : `url(#${traceTailOutlineMaskId(traceBubble.id)})`} data-trace-tail-root-id={traceBubble.speech.kind === 'root' ? traceBubble.event.id : undefined} data-trace-tail-current-reply-id={traceBubble.speech.kind === 'reply' ? traceBubble.event.id : undefined} data-trace-tail-target={`${traceBubble.tailTarget.x},${traceBubble.tailTarget.y}`} d={tail.outlinePath} />
 			{/if}
 			{#if traceParentBubble}
 				{@const start = tailStart(traceParentBubble.anchor, traceParentBubble.size)}
 				{@const tail = tailGeometry(start, traceParentBubble.tailTarget, 11, 2, specialTailExtension(traceParentBubble.event.speechType))}
-				<polygon class={`tail trace-tail trace-parent-tail tone-${traceParentBubble.tone}`} data-trace-tail-parent-id={traceParentBubble.event.id} points={tail.points} />
-				<path class={`tail-outline trace-tail-outline trace-parent-tail-outline tone-${traceParentBubble.tone}`} data-trace-tail-parent-id={traceParentBubble.event.id} d={tail.outlinePath} />
+				<polygon class={`tail trace-tail trace-parent-tail tone-${traceParentBubble.tone}`} mask={traceParentBubble.event.speechType === 'normal' ? undefined : `url(#${traceTailMaskId(traceParentBubble.id)})`} data-trace-tail-parent-id={traceParentBubble.event.id} points={tail.points} />
+				<path class={`tail-outline trace-tail-outline trace-parent-tail-outline tone-${traceParentBubble.tone}`} mask={traceParentBubble.event.speechType === 'normal' ? undefined : `url(#${traceTailOutlineMaskId(traceParentBubble.id)})`} data-trace-tail-parent-id={traceParentBubble.event.id} d={tail.outlinePath} />
 			{/if}
 			{#each traceReplyBubbles as bubble (bubble.id)}
 				{@const start = tailStart(bubble.anchor, bubble.size)}
 				{@const tail = tailGeometry(start, bubble.tailTarget, 11, 2, specialTailExtension(bubble.reply.speechType))}
-				<polygon class={`tail trace-tail tone-${bubble.tone}`} data-trace-tail-reply-id={bubble.reply.id} data-trace-tail-target={`${bubble.tailTarget.x},${bubble.tailTarget.y}`} points={tail.points} />
-				<path class={`tail-outline trace-tail-outline tone-${bubble.tone}`} data-trace-tail-reply-id={bubble.reply.id} data-trace-tail-target={`${bubble.tailTarget.x},${bubble.tailTarget.y}`} d={tail.outlinePath} />
+				<polygon class={`tail trace-tail tone-${bubble.tone}`} mask={bubble.reply.speechType === 'normal' ? undefined : `url(#${traceTailMaskId(bubble.id)})`} data-trace-tail-reply-id={bubble.reply.id} data-trace-tail-target={`${bubble.tailTarget.x},${bubble.tailTarget.y}`} points={tail.points} />
+				<path class={`tail-outline trace-tail-outline tone-${bubble.tone}`} mask={bubble.reply.speechType === 'normal' ? undefined : `url(#${traceTailOutlineMaskId(bubble.id)})`} data-trace-tail-reply-id={bubble.reply.id} data-trace-tail-target={`${bubble.tailTarget.x},${bubble.tailTarget.y}`} d={tail.outlinePath} />
 			{/each}
 		</svg>
 
@@ -4004,6 +4055,11 @@
 		border-style: dashed;
 		background: color-mix(in srgb, var(--tone-background) 91%, transparent);
 		pointer-events: none;
+	}
+
+	.trace-root-bubble.speech-bubble-special,
+	.trace-reply-bubble.speech-bubble-special {
+		background: transparent;
 	}
 
 	.trace-root-bubble .bubble-content,
