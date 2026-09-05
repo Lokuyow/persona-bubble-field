@@ -4,6 +4,8 @@ import {
 	createPositionPublishState,
 	planPositionPublish,
 	reconstructPositionPublishState,
+	retainPositionPublishEvidence,
+	type PositionPublishEvidence,
 	type PositionPublishPlan
 } from './positionPublish';
 
@@ -31,6 +33,44 @@ function availablePlan(plan: PositionPublishPlan): Extract<PositionPublishPlan, 
 }
 
 describe('position publish slot planner', () => {
+	it('retains at most two events and matches full-history reconstruction at every prefix', () => {
+		const stream: ParsedPositionEvent[] = [];
+		for (let second = 100; second < 200; second += 1) {
+			const event = parsedPosition(`own-${second}`, OWN_PUBKEY, second, second % 2 ? 1 : 0);
+			stream.push(event, { ...event }, parsedPosition(`other-${second}`, OTHER_PUBKEY, second + 100, 1));
+			stream.push(parsedPosition(`late-${second}`, OWN_PUBKEY, second - 1, 1));
+		}
+		for (let index = 0; index < 100; index += 1) stream.push(parsedPosition(`same-${index}`, OWN_PUBKEY, 199, 0));
+		let evidence: PositionPublishEvidence = [];
+		const history: ParsedPositionEvent[] = [];
+		for (const event of stream) {
+			const previous = evidence;
+			const snapshot = [...previous];
+			evidence = retainPositionPublishEvidence(evidence, event, OWN_PUBKEY);
+			history.push(event);
+			expect(previous).toEqual(snapshot);
+			expect(evidence.length).toBeLessThanOrEqual(2);
+			expect(new Set(evidence.map((item) => item.id)).size).toBe(evidence.length);
+			expect(reconstructPositionPublishState(evidence, OWN_PUBKEY)).toEqual(reconstructPositionPublishState(history, OWN_PUBKEY));
+		}
+	});
+
+	it.each([
+		[parsedPosition('first', OWN_PUBKEY, 100, 0), parsedPosition('second', OWN_PUBKEY, 100, 0)],
+		[parsedPosition('slot-1', OWN_PUBKEY, 100, 1)]
+	])('keeps exhausted evidence bounded until a newer second', (...events) => {
+		let evidence: PositionPublishEvidence = [];
+		for (const event of events) evidence = retainPositionPublishEvidence(evidence, event, OWN_PUBKEY);
+		const state = reconstructPositionPublishState(evidence, OWN_PUBKEY);
+		expect(planPositionPublish(state, 100)).toEqual({ kind: 'unavailable', reason: 'second-exhausted' });
+		expect(planPositionPublish(state, 101)).toMatchObject({ kind: 'available', slot: 0 });
+		for (let index = 0; index < 100; index += 1) evidence = retainPositionPublishEvidence(evidence, parsedPosition(`extra-${index}`, OWN_PUBKEY, 100, 0), OWN_PUBKEY);
+		expect(evidence).toHaveLength(2);
+		expect(reconstructPositionPublishState(evidence, OWN_PUBKEY)).toEqual(state);
+		const next = parsedPosition('next', OWN_PUBKEY, 101, 0);
+		expect(retainPositionPublishEvidence(evidence, next, OWN_PUBKEY)).toEqual([next]);
+	});
+
 	it('plans slot 0, slot 1, then exhaustion within one second', () => {
 		const first = availablePlan(planPositionPublish(createPositionPublishState(), 100));
 		const second = availablePlan(planPositionPublish(first.nextState, 100));
