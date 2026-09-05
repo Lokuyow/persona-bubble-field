@@ -912,6 +912,19 @@ export function createNostrRelayTransport(
 		}
 	}
 
+	function finishTraceLiveClosed(
+		generation: TraceGeneration,
+		relay: TraceRelayState,
+		diagnostic: TraceReplyRelayDiagnostic
+	): void {
+		if (generation !== traceGeneration || !generation.active || !generation.initialSettled || relay.cycle || !relay.subId) return;
+		invalidateTraceRelayTerminal(relay);
+		relay.initialStatus = diagnostic;
+		refreshTraceDiagnostics(generation, 'active');
+		// Commit the terminal state before the consumer can reconfigure this generation.
+		generation.callbacks.onBatch({ events: [], relays: [diagnostic] });
+	}
+
 	function receiveTraceEvent(generation: TraceGeneration, relay: TraceRelayState, event: Event): void {
 		if (generation !== traceGeneration || !generation.active || generation.seenIds.has(event.id)) return;
 		generation.seenIds.add(event.id);
@@ -1032,7 +1045,8 @@ export function createNostrRelayTransport(
 				? { relayUrl: relay.relayUrl, status: 'eose' }
 				: { relayUrl: relay.relayUrl, status: 'closed', notice: packet.notice };
 			if (!generation.initialSettled) finishTraceInitialRelay(generation, relay, diagnostic);
-			else finishTraceCatchUp(generation, relay, diagnostic);
+			else if (relay.cycle) finishTraceCatchUp(generation, relay, diagnostic);
+			else if (packet.type === 'CLOSED') finishTraceLiveClosed(generation, relay, diagnostic);
 		}));
 		generation.initialDeadline = setTimeout(() => {
 			if (generation !== traceGeneration || generation.initialSettled) return;
