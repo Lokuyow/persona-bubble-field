@@ -689,9 +689,12 @@ describe('Nostr protocol foundation', () => {
 		expect(buildTraceReplyFilter({ rootId: CHANNEL_ID })).toEqual({
 			kinds: [1111], '#E': [CHANNEL_ID], '#L': [PROTOTYPE_NAMESPACE], '#l': ['chat'], limit: 100
 		});
-		expect(buildTraceDirectReplyFilter({ rootId: CHANNEL_ID, currentId: OTHER_CHANNEL_ID })).toEqual({
-			kinds: [1111], '#E': [CHANNEL_ID], '#e': [OTHER_CHANNEL_ID], '#L': [PROTOTYPE_NAMESPACE], '#l': ['chat'], limit: 100
+		const directFilter = buildTraceDirectReplyFilter({ currentId: OTHER_CHANNEL_ID });
+		expect(directFilter).toEqual({
+			kinds: [1111], '#e': [OTHER_CHANNEL_ID], '#L': [PROTOTYPE_NAMESPACE], '#l': ['chat'], limit: 100
 		});
+		expect(directFilter).not.toHaveProperty('#E');
+		expect(Object.keys(directFilter).filter((key) => key.startsWith('#'))).toHaveLength(3);
 		expect(buildTraceNotificationFilter({ personaPubkey: 'c'.repeat(64) })).toEqual({
 			kinds: [1111], '#p': ['c'.repeat(64)], '#L': [PROTOTYPE_NAMESPACE], '#l': ['chat']
 		});
@@ -710,7 +713,9 @@ describe('Nostr protocol foundation', () => {
 			createdAt: 1
 		})).toThrow(TypeError);
 		expect(() => buildTraceReplyFilter({ rootId: 'A'.repeat(64) })).toThrow(TypeError);
-		expect(() => buildTraceDirectReplyFilter({ rootId: CHANNEL_ID, currentId: 'A'.repeat(64) })).toThrow(TypeError);
+		for (const currentId of ['A'.repeat(64), 'g'.repeat(64), 'a'.repeat(63), 'a'.repeat(65), '']) {
+			expect(() => buildTraceDirectReplyFilter({ currentId })).toThrow(TypeError);
+		}
 		expect(() => buildTraceNotificationFilter({ personaPubkey: 'A'.repeat(64) })).toThrow(TypeError);
 		expect(() => buildPositionEventTemplate({
 			channel: { channelId: CHANNEL_ID, relayHint: 'https://not-a-relay.example.com' },

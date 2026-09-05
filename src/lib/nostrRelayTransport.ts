@@ -736,7 +736,7 @@ export function createNostrRelayTransport(
 		if (input.conversation) {
 			const { rootId, currentId } = input.conversation;
 			scopes.push({ key: `root\u0000${rootId}`, kind: 'root', initialFilter: buildTraceReplyFilter({ rootId }) });
-			scopes.push({ key: `direct\u0000${rootId}\u0000${currentId}`, kind: 'direct', initialFilter: buildTraceDirectReplyFilter({ rootId, currentId }) });
+			scopes.push({ key: `direct\u0000${rootId}\u0000${currentId}`, kind: 'direct', initialFilter: buildTraceDirectReplyFilter({ currentId }) });
 		}
 		return { scopes, semanticKey: JSON.stringify(scopes.map((scope) => [scope.key, scope.initialFilter])) };
 	}

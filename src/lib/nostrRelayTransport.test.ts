@@ -1,5 +1,6 @@
 import { Server, WebSocket, type Client } from 'mock-socket';
 import { finalizeEvent, type Event, type VerifiedEvent } from 'nostr-tools/pure';
+import { matchFilter, type Filter } from 'nostr-tools/filter';
 import { map } from 'rxjs';
 import {
 	Nip11Registry, createRxNostr, createRxForwardReq, createRxOneshotReq,
@@ -48,6 +49,7 @@ function mockRelay() {
 	servers.push(server);
 	const relay = {
 		url, server,
+		maxTagFilters: Infinity,
 		requests: [] as WireRequest[],
 		messages: [] as unknown[][],
 		sockets: [] as Client[],
@@ -68,6 +70,10 @@ function mockRelay() {
 			if (message[0] === 'REQ') {
 				const request = message as WireRequest;
 				relay.requests.push(request);
+				if (filters(request).some((filter) => Object.keys(filter).filter((key) => /^#[A-Za-z]$/.test(key)).length > relay.maxTagFilters)) {
+					send(socket, 'CLOSED', request[1], 'ERROR: bad req: too many tags in filter');
+					return;
+				}
 				relay.onRequest(socket, request);
 			} else if (message[0] === 'EVENT') relay.onPublish(socket, message[1] as VerifiedEvent);
 		});
@@ -657,6 +663,63 @@ describe('trace root bootstrap', () => {
 });
 
 describe('trace reply transport', () => {
+	it('retrieves history beyond the root limit and live replies in a three-tag bundle', async () => {
+		const f = fixture(2, socketConstructor, 6_000);
+		await f.start(); await completeTraceRootBootstrap(f.transport);
+		const currentId = 'e'.repeat(64);
+		const older = traceReply(f.channel.id, 'older-direct', TIME - 200, currentId);
+		const recent = Array.from({ length: 100 }, (_, index) => traceReply(f.channel.id, `other-${index}`, TIME - index, 'f'.repeat(64)));
+		for (const relay of f.authorities) {
+			relay.maxTagFilters = 3;
+			relay.onRequest = (socket, request) => {
+				for (const filter of filters(request)) {
+					for (const event of [...recent, older].filter((event) => matchFilter(filter as Filter, event)).slice(0, filter.limit as number | undefined)) {
+						send(socket, 'EVENT', request[1], event);
+					}
+				}
+				send(socket, 'EOSE', request[1]);
+			};
+		}
+		const config = { conversation: { rootId: f.channel.id, currentId }, onBatch: vi.fn(), onLiveEvent: vi.fn() };
+		const pending = f.transport.configureTraceReplies(config);
+		await vi.advanceTimersByTimeAsync(20);
+		expect(await pending).toMatchObject({ initialBatch: { events: expect.arrayContaining([expect.objectContaining({ id: older.id })]),
+			relays: f.authorities.map((relay) => ({ relayUrl: relay.url, status: 'eose' })) } });
+		const live = traceReply(f.channel.id, 'new-live', TIME + 1, currentId);
+		for (const relay of f.authorities) {
+			const wire = relay.traceRequests().at(-1)!;
+			expect(filters(wire)).toHaveLength(2);
+			expect(filters(wire).every((filter) => filter.limit === undefined)).toBe(true);
+			send(relay.latestSocket(), 'EVENT', wire[1], live);
+		}
+		await vi.advanceTimersByTimeAsync(10);
+		expect(config.onLiveEvent).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: live.id }));
+		const caughtUp = traceReply(f.channel.id, 'after-disconnect', TIME + 2, currentId);
+		recent.unshift(caughtUp, live);
+		const relay = f.authorities[0];
+		const requestsBefore = relay.traceRequests().length;
+		relay.latestSocket().close({ code: 1001, reason: 'three-tag reconnect', wasClean: false });
+		await vi.advanceTimersByTimeAsync(5_000);
+		expect(relay.traceRequests().length).toBeGreaterThan(requestsBefore);
+		expect(filters(relay.traceRequests().at(-1)!).every((filter) => filter.limit === undefined && typeof filter.since === 'number')).toBe(true);
+		expect(config.onBatch).toHaveBeenCalledWith(expect.objectContaining({ events: [expect.objectContaining({ id: caughtUp.id })] }));
+		expect(config.onLiveEvent).toHaveBeenCalledTimes(1);
+	});
+
+	it('rejects the entire legacy bundle instead of serving its valid root filter', async () => {
+		const relay = mockRelay(); relay.maxTagFilters = 3;
+		const served = vi.fn(); relay.onRequest = served;
+		const socket = new WebSocket(relay.url);
+		const packets: unknown[][] = [];
+		socket.onmessage = (event) => packets.push(JSON.parse(event.data as string));
+		await vi.advanceTimersByTimeAsync(10);
+		const root = { kinds: [1111], '#E': ['a'.repeat(64)], '#L': ['namespace'], '#l': ['chat'], limit: 100 };
+		socket.send(JSON.stringify(['REQ', 'legacy', root, { ...root, '#e': ['a'.repeat(64)] }]));
+		await vi.advanceTimersByTimeAsync(10);
+		expect(packets).toEqual([['CLOSED', 'legacy', 'ERROR: bad req: too many tags in filter']]);
+		expect(served).not.toHaveBeenCalled(); socket.close();
+	});
+
 	it('rejects configuration until finite trace root bootstrap has completed', async () => {
 		const f = fixture(1);
 		const config = traceInput(f.channel.id);

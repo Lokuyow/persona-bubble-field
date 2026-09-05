@@ -1,9 +1,11 @@
 import 'fake-indexeddb/auto';
 import { IDBFactory, IDBObjectStore } from 'fake-indexeddb';
 import type { Event } from 'nostr-tools/pure';
+import { matchFilter } from 'nostr-tools/filter';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	buildTraceReplyTemplate,
+	buildTraceDirectReplyFilter,
 	buildWorldMessageTemplate,
 	finalizeWorldEvent,
 	parseTraceReplyCandidate,
@@ -132,6 +134,27 @@ afterEach(() => {
 });
 
 describe('trace reply cache reconciliation', () => {
+	it('rejects a signed wrong-root candidate matching the direct query even when both roots are effective', async () => {
+		const root = capRoot;
+		const otherRoot = makeRoot(CHANNEL_ID, 'other-effective-root');
+		await reconcileTraceRootCache({ channelId: CHANNEL_ID, field: { columns: 20, rows: 1 }, rawEvents: [root.raw, otherRoot.raw] });
+		const valid = capReplies[0];
+		const template = buildTraceReplyTemplate({
+			root: root.parsed, parent: root.parsed, content: 'wrong tree', createdAt: 201,
+			position: { x: 1, y: 0 }, speechType: 'normal'
+		});
+		// The lower-case parent remains root A; the upper-case root claims B.
+		template.tags = template.tags.map((tag) => tag[0] === 'E' ? ['E', otherRoot.raw.id, '', otherRoot.raw.pubkey] : tag);
+		const wrong = finalizeWorldEvent(template, SECRET_KEY);
+		expect(parseTraceReplyCandidate(wrong)).not.toBeNull();
+		expect(matchFilter(buildTraceDirectReplyFilter({ currentId: root.raw.id }), wrong)).toBe(true);
+		const result = await reconcileTraceReplyCache({
+			channelId: CHANNEL_ID, effectiveRoots: [root.parsed, otherRoot.parsed], rawEvents: [wrong, valid.raw]
+		});
+		expect(result.map((reply) => reply.id)).toEqual([valid.raw.id]);
+		expect((await replyRecords()).map((record) => record.eventId)).toEqual([valid.raw.id]);
+	});
+
 	it('hydrates accepted root and nested reply previews from signed records without writes', async () => {
 		const root = capRoot;
 		const parent = capReplies[999];

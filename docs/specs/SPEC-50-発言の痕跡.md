@@ -70,7 +70,7 @@ Profile Dialogまたはcontext menuを開閉してもconversation exploration、
 この節はtrace conversation取得の製品意味論を正とする。Relay transport、subscription lifecycle、reconnectおよびdedupeの実装責務は [`SPEC-30-フィールド・position・presence.md`](./SPEC-30-フィールド・position・presence.md) を正とする。
 
 - root conversation open時は、`kinds=[1111]`、`#E=[root]`、project `#L/#l`、initial `limit=100`で、root-wideのrecent historyとlive replyを対象にする。
-- current speechのdirect reply補完は、`kinds=[1111]`、`#E=[root]`、`#e=[current]`、project `#L/#l`、initial `limit=100`とする。
+- current speechのdirect reply補完は、`kinds=[1111]`、`#e=[current]`、project `#L/#l`、initial `limit=100`とする。tag条件は3個に抑え、root/tree整合性は取得後のsemantic validationで確認する。query一致だけでcandidateを受理しない。
 - notification候補は、`kinds=[1111]`、`#p=[current persona pubkey]`、project `#L/#l`を使い、可能ならcurrent effective root IDsで`#E`も絞る。
 - `limit=100`は各Relay・各filterのinitial history取得上限であり、reply treeの件数上限でもreply cacheのglobal 1000件上限でもない。Relayごとの応答をevent IDでmulti-Relay dedupeし、tree/cacheのglobal capとは別に扱う。
 
