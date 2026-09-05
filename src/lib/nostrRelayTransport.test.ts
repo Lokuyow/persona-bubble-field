@@ -843,6 +843,121 @@ describe('trace reply transport', () => {
 		expect(filters(reconnectTwo).every((filter) => filter.limit === undefined)).toBe(true);
 	});
 
+	it('reports live CLOSED after continuation EOSE and ignores duplicate and late packets', async () => {
+		const f = fixture(1);
+		await f.start();
+		await completeTraceRootBootstrap(f.transport);
+		const relay = f.authorities[0];
+		const config = traceInput(f.channel.id);
+		const pending = f.transport.configureTraceReplies(config);
+		await vi.advanceTimersByTimeAsync(20);
+		const result = await pending;
+		const initialSnapshot = structuredClone(result);
+		expect(relay.traceRequests()).toHaveLength(2);
+		const continuation = relay.traceRequests().at(-1)!;
+		expect(filters(continuation).every((filter) => filter.limit === undefined)).toBe(true);
+		expect(config.onBatch).toHaveBeenCalledExactlyOnceWith({ events: [], relays: [{ relayUrl: relay.url, status: 'eose' }] });
+		const live = traceReply(f.channel.id, '6'.repeat(64));
+		send(relay.latestSocket(), 'EVENT', continuation[1], live);
+		await vi.advanceTimersByTimeAsync(5);
+		expect(config.onLiveEvent).toHaveBeenCalledExactlyOnceWith(expect.objectContaining(live));
+		config.onBatch.mockClear();
+		const closed = { relayUrl: relay.url, status: 'closed', notice: 'restricted: live replies' };
+		const observedDiagnostics = vi.fn();
+		config.onBatch.mockImplementation(() => observedDiagnostics(f.transport.getDiagnostics().traceReplies));
+		const requestCount = relay.requests.length;
+		send(relay.latestSocket(), 'CLOSED', continuation[1], closed.notice);
+		await vi.advanceTimersByTimeAsync(5);
+		const expectedDiagnostics = { generation: 1, status: 'active', relays: [closed] };
+		expect(f.transport.getDiagnostics().traceReplies).toEqual(expectedDiagnostics);
+		expect(observedDiagnostics).toHaveBeenCalledExactlyOnceWith(expectedDiagnostics);
+		expect(config.onBatch).toHaveBeenCalledExactlyOnceWith({ events: [], relays: [closed] });
+		expect(result).toEqual(initialSnapshot);
+		await expect(f.transport.configureTraceReplies(config)).resolves.toEqual(initialSnapshot);
+
+		send(relay.latestSocket(), 'CLOSED', continuation[1], 'restricted: duplicate');
+		send(relay.latestSocket(), 'EOSE', continuation[1]);
+		send(relay.latestSocket(), 'EVENT', continuation[1], traceReply(f.channel.id, '7'.repeat(64)));
+		await vi.advanceTimersByTimeAsync(TIMEOUT + 10);
+		expect(f.transport.getDiagnostics().traceReplies).toEqual(expectedDiagnostics);
+		expect(config.onBatch).toHaveBeenCalledTimes(1);
+		expect(config.onLiveEvent).toHaveBeenCalledTimes(1);
+		expect(relay.requests).toHaveLength(requestCount);
+	});
+
+	it('isolates live CLOSED to one relay without poisoning dedupe or closing primaries', async () => {
+		const f = fixture(2);
+		await f.start();
+		await completeTraceRootBootstrap(f.transport);
+		const config = traceInput(f.channel.id);
+		const pending = f.transport.configureTraceReplies(config);
+		await vi.advanceTimersByTimeAsync(20);
+		await pending;
+		expect(config.onBatch).toHaveBeenCalledTimes(2);
+		config.onBatch.mockClear();
+		const primaryDiagnostics = f.transport.getDiagnostics().primaryPairs;
+		const [a, b] = f.authorities;
+		const aId = a.traceRequests().at(-1)![1];
+		const bId = b.traceRequests().at(-1)![1];
+		send(a.latestSocket(), 'CLOSED', aId, 'restricted: relay A');
+		await vi.advanceTimersByTimeAsync(5);
+		expect(f.transport.getDiagnostics().traceReplies).toMatchObject({ status: 'active', relays: [
+			{ relayUrl: a.url, status: 'closed', notice: 'restricted: relay A' },
+			{ relayUrl: b.url, status: 'eose' }
+		] });
+		expect(config.onBatch).toHaveBeenCalledExactlyOnceWith({ events: [], relays: [
+			{ relayUrl: a.url, status: 'closed', notice: 'restricted: relay A' }
+		] });
+		const reply = traceReply(f.channel.id, '8'.repeat(64));
+		send(a.latestSocket(), 'EVENT', aId, reply);
+		await vi.advanceTimersByTimeAsync(5);
+		expect(config.onLiveEvent).not.toHaveBeenCalled();
+		send(b.latestSocket(), 'EVENT', bId, reply);
+		send(b.latestSocket(), 'EVENT', bId, reply);
+		const message = f.message('primary after trace closure');
+		const position = f.position();
+		send(a.latestSocket(), 'EVENT', a.primaryId(42), message);
+		send(a.latestSocket(), 'EVENT', a.primaryId(30078), position);
+		await vi.advanceTimersByTimeAsync(5);
+		expect(config.onLiveEvent).toHaveBeenCalledExactlyOnceWith(expect.objectContaining(reply));
+		expect(f.input.onLiveMessage).toHaveBeenCalledExactlyOnceWith(
+			expect.objectContaining({ id: message.id }), expect.objectContaining(message)
+		);
+		expect(f.input.onLivePosition).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: position.id }));
+		expect(f.input.onPrimaryClosed).not.toHaveBeenCalled();
+		expect(f.transport.getDiagnostics().primaryPairs).toEqual(primaryDiagnostics);
+	});
+
+	it('preserves inactive reconfiguration from the live CLOSED callback', async () => {
+		const f = fixture(1);
+		await f.start();
+		await completeTraceRootBootstrap(f.transport);
+		const config = traceInput(f.channel.id);
+		const pending = f.transport.configureTraceReplies(config);
+		await vi.advanceTimersByTimeAsync(20);
+		await pending;
+		expect(config.onBatch).toHaveBeenCalledTimes(1);
+		config.onBatch.mockClear();
+		const inactive = { onBatch: vi.fn(), onLiveEvent: vi.fn() };
+		config.onBatch.mockImplementation(() => { void f.transport.configureTraceReplies(inactive); });
+		const relay = f.authorities[0];
+		const subId = relay.traceRequests().at(-1)![1];
+		send(relay.latestSocket(), 'CLOSED', subId, 'restricted: live');
+		await vi.advanceTimersByTimeAsync(5);
+		expect(config.onBatch).toHaveBeenCalledTimes(1);
+		const diagnostic = f.transport.getDiagnostics().traceReplies;
+		expect(diagnostic).toMatchObject({ status: 'inactive', relays: [] });
+		send(relay.latestSocket(), 'CLOSED', subId, 'restricted: duplicate');
+		send(relay.latestSocket(), 'EOSE', subId);
+		send(relay.latestSocket(), 'EVENT', subId, traceReply(f.channel.id, '9'.repeat(64)));
+		await vi.advanceTimersByTimeAsync(TIMEOUT + 10);
+		expect(f.transport.getDiagnostics().traceReplies).toEqual(diagnostic);
+		expect(config.onBatch).toHaveBeenCalledTimes(1);
+		expect(config.onLiveEvent).not.toHaveBeenCalled();
+		expect(inactive.onBatch).not.toHaveBeenCalled();
+		expect(inactive.onLiveEvent).not.toHaveBeenCalled();
+	});
+
 	it('fails closed for late packets after initial and catch-up CLOSED terminals', async () => {
 		const f = fixture(1);
 		await f.start();
