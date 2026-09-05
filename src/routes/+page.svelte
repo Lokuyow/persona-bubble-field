@@ -4004,6 +4004,11 @@
 		pointer-events: none;
 	}
 
+	.trace-root-bubble.speech-bubble-special,
+	.trace-reply-bubble.speech-bubble-special {
+		background: transparent;
+	}
+
 	.trace-root-bubble .bubble-content,
 	.trace-reply-bubble .bubble-content {
 		color: #26312f;

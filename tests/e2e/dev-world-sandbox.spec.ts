@@ -438,6 +438,15 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.getByLabel('2 replies in this cell')).toBeVisible();
 		await expect(page.locator('[data-trace-reply-position="9,4"][data-trace-reply-id]')).toHaveAttribute('data-speech-type', 'shout');
 		await expect(page.locator('[data-trace-reply-position="8,4"][data-trace-reply-id]')).toHaveAttribute('data-speech-type', 'monologue');
+
+		const traceBubbleBackgrounds = await page.locator('.trace-root-bubble, .trace-reply-bubble').evaluateAll((bubbles) => bubbles.map((bubble) => ({
+			speechType: bubble.getAttribute('data-speech-type'),
+			background: getComputedStyle(bubble).backgroundColor
+		})));
+		expect(traceBubbleBackgrounds.filter(({ speechType }) => speechType === 'shout' || speechType === 'monologue')
+			.every(({ background }) => background === 'rgba(0, 0, 0, 0)')).toBe(true);
+		expect(traceBubbleBackgrounds.filter(({ speechType }) => speechType === 'normal')
+			.every(({ background }) => background !== 'rgba(0, 0, 0, 0)')).toBe(true);
 		await expect(page.getByText('deeper branch reply')).toHaveCount(0);
 		await expect(page.getByText('offscreen reply body must stay hidden')).toHaveCount(0);
 		await expect(page.locator('[data-trace-reply-offscreen-position="15,7"]')).toBeVisible();
