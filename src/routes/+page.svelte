@@ -2810,7 +2810,7 @@
 					<mask id={traceTailOutlineMaskId(traceBubble.id)} maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x="0" y="0" width={viewportSize.width} height={viewportSize.height}>
 						<rect x="0" y="0" width={viewportSize.width} height={viewportSize.height} fill="white" />
 						<path d={traceBubble.shape.path} transform={`translate(${traceBubble.anchor.x} ${traceBubble.anchor.y})`} fill="black" />
-						<polygon points={tailOutlineOpeningPoints(tail, traceBubble.anchor)} fill="white" />
+						<polygon points={tailOutlineOpeningPoints(tail, traceBubble.anchor)} transform={`translate(${traceBubble.anchor.x} ${traceBubble.anchor.y})`} fill="white" />
 					</mask>
 				{/if}
 				{#if traceParentBubble && traceParentBubble.event.speechType !== 'normal' && traceParentBubble.shape}
@@ -2823,7 +2823,7 @@
 					<mask id={traceTailOutlineMaskId(traceParentBubble.id)} maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x="0" y="0" width={viewportSize.width} height={viewportSize.height}>
 						<rect x="0" y="0" width={viewportSize.width} height={viewportSize.height} fill="white" />
 						<path d={traceParentBubble.shape.path} transform={`translate(${traceParentBubble.anchor.x} ${traceParentBubble.anchor.y})`} fill="black" />
-						<polygon points={tailOutlineOpeningPoints(tail, traceParentBubble.anchor)} fill="white" />
+						<polygon points={tailOutlineOpeningPoints(tail, traceParentBubble.anchor)} transform={`translate(${traceParentBubble.anchor.x} ${traceParentBubble.anchor.y})`} fill="white" />
 					</mask>
 				{/if}
 				{#each traceReplyBubbles as bubble (bubble.id)}
@@ -2837,7 +2837,7 @@
 						<mask id={traceTailOutlineMaskId(bubble.id)} maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x="0" y="0" width={viewportSize.width} height={viewportSize.height}>
 							<rect x="0" y="0" width={viewportSize.width} height={viewportSize.height} fill="white" />
 							<path d={bubble.shape.path} transform={`translate(${bubble.anchor.x} ${bubble.anchor.y})`} fill="black" />
-							<polygon points={tailOutlineOpeningPoints(tail, bubble.anchor)} fill="white" />
+							<polygon points={tailOutlineOpeningPoints(tail, bubble.anchor)} transform={`translate(${bubble.anchor.x} ${bubble.anchor.y})`} fill="white" />
 						</mask>
 					{/if}
 				{/each}

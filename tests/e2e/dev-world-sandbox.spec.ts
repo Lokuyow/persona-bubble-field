@@ -467,9 +467,27 @@ test.describe('DEV World Sandbox', () => {
 				};
 			});
 		});
+		const traceTailOpeningGeometry = await page.locator('.tail-layer').evaluate((layer) => [...layer.querySelectorAll<SVGPolygonElement>('.trace-tail')]
+			.filter((tail) => tail.hasAttribute('mask'))
+			.map((tail) => {
+				const outline = tail.nextElementSibling as SVGPathElement | null;
+				const maskId = outline?.getAttribute('mask')?.replace(/^url\(#|\)$/g, '');
+				const opening = maskId ? document.querySelector<SVGMaskElement>(`#${maskId} polygon`) : null;
+				const transform = opening?.getAttribute('transform')?.match(/^translate\((-?[\d.]+) (-?[\d.]+)\)$/);
+				if (!opening || !transform) throw new Error('Expected a viewport-transformed trace tail opening.');
+				const [translateX, translateY] = transform.slice(1).map(Number);
+				const openingPoints = (opening.getAttribute('points') ?? '').trim().split(/\s+/).map((point) => point.split(',').map(Number));
+				const tailPoints = Array.from({ length: tail.points.numberOfItems }, (_, index) => {
+					const point = tail.points.getItem(index);
+					return [point.x, point.y];
+				});
+				return Math.max(...openingPoints.map(([x, y], index) => Math.hypot(x + translateX - tailPoints[index][0], y + translateY - tailPoints[index][1])));
+			}));
 		const maskedTraceTails = traceTailMasks.filter((tail) => tail.maskId);
 		expect(maskedTraceTails).toHaveLength(3);
 		expect(maskedTraceTails.every((tail) => tail.maskUnits === 'userSpaceOnUse' && tail.maskContentUnits === 'userSpaceOnUse' && tail.matchesBody)).toBe(true);
+		expect(traceTailOpeningGeometry).toHaveLength(3);
+		expect(Math.max(...traceTailOpeningGeometry)).toBeLessThan(0.001);
 		await expect(page.locator('.tail-layer polygon[data-trace-tail-reply-id="' + '7'.repeat(64) + '"][mask]')).toHaveCount(0);
 		await expect(page.locator('.tail-layer path.trace-tail-outline[mask]')).toHaveCount(3);
 		await expect(page.locator('.tail-layer mask[id^="trace-tail-outline-"] path')).toHaveCount(3);
@@ -559,6 +577,21 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.locator('.trace-parent-tail[mask]')).toHaveCount(1);
 		await expect(page.locator('.trace-parent-tail-outline[mask]')).toHaveCount(1);
 		await expect(page.locator('.tail-layer mask[id^="trace-tail-outline-"] polygon')).toHaveCount(1);
+		const parentTailOpeningError = await page.locator('.tail-layer').evaluate((layer) => {
+			const tail = layer.querySelector<SVGPolygonElement>('.trace-parent-tail');
+			const outline = tail?.nextElementSibling as SVGPathElement | null;
+			const maskId = outline?.getAttribute('mask')?.replace(/^url\(#|\)$/g, '');
+			const opening = maskId ? document.querySelector<SVGPolygonElement>(`#${maskId} polygon`) : null;
+			const transform = opening?.getAttribute('transform')?.match(/^translate\((-?[\d.]+) (-?[\d.]+)\)$/);
+			if (!tail || !opening || !transform) throw new Error('Expected a viewport-transformed parent tail opening.');
+			const [translateX, translateY] = transform.slice(1).map(Number);
+			const openingPoints = (opening.getAttribute('points') ?? '').trim().split(/\s+/).map((point) => point.split(',').map(Number));
+			return Math.max(...openingPoints.map(([x, y], index) => {
+				const tailPoint = tail.points.getItem(index);
+				return Math.hypot(x + translateX - tailPoint.x, y + translateY - tailPoint.y);
+			}));
+		});
+		expect(parentTailOpeningError).toBeLessThan(0.001);
 
 		await selectCell('7,4');
 		await expect(page.locator('[data-trace-current-reply-id="' + 'b'.repeat(64) + '"]'))
