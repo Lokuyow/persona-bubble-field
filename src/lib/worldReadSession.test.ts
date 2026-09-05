@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getPublicKey, type VerifiedEvent } from 'nostr-tools/pure';
 import {
 	parsePositionEvent,
+	parseTraceReplyCandidate,
+	validateTraceReplyCandidate,
 	parseWorldMessage,
 	type ParsedPositionEvent,
 	type ParsedTraceReply,
@@ -18,6 +20,206 @@ const mocked = vi.hoisted(() => ({
 	reconcileTraceReplyCache: vi.fn(),
 	touchTraceReplyTree: vi.fn()
 }));
+
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	let reject!: (reason: Error) => void;
+	const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+	return { promise, resolve, reject };
+}
+
+describe('Trace reply publication ownership', () => {
+	const settle = async () => { for (let i = 0; i < 40; i++) await Promise.resolve(); };
+	const accepted = [{ relayUrl: 'wss://relay.test/', outcome: 'accepted' as const }];
+
+	async function fixture(nested = false) {
+		vi.useFakeTimers(); vi.setSystemTime(700_000);
+		const root = message('a'.repeat(64), 699);
+		const child = traceReply('b'.repeat(64), root, 699);
+		let cached: readonly ParsedTraceReply[] = nested ? [child] : [];
+		let callbacks!: TraceReplyConfiguration;
+		let primary!: { onLivePosition: (event: ParsedPositionEvent) => void };
+		const publish = vi.fn(async (_event: VerifiedEvent) => accepted as import('./nostrRelayTransport').PublishRelayResult[]);
+		const configureTraceReplies = vi.fn(async (input: TraceReplyConfiguration) => {
+			callbacks = input;
+			return { status: 'active', initialBatch: { events: [], relays: [] } };
+		});
+		mocked.reconcileTraceRootCache.mockReset().mockResolvedValue([root]);
+		mocked.touchTraceReplyTree.mockReset().mockResolvedValue(true);
+		mocked.reconcileTraceReplyCache.mockReset().mockImplementation(async ({ rawEvents }) => {
+			for (const rawEvent of rawEvents) {
+				const candidate = parseTraceReplyCandidate(rawEvent);
+				const parent = candidate?.parentId === root.id ? root : child;
+				const parsed = candidate && validateTraceReplyCandidate(candidate, root, parent);
+				if (parsed && !cached.some((reply) => reply.id === parsed.id)) cached = [...cached, parsed];
+			}
+			return cached;
+		});
+		mocked.createTransport.mockReset().mockReturnValue({
+			start: vi.fn(async (input) => { primary = input; return startResult([], [position('self', 700, selfPubkey)]); }),
+			bootstrapTraceRootCandidates: traceBootstrap(), configureTraceReplies, publish, dispose: vi.fn()
+		});
+		const onLiveMessage = vi.fn();
+		const session = createWorldReadSession({ field: { columns: 4, rows: 3 }, selfAccount: selfAccount(),
+			onPresenceChanged: vi.fn(), onLiveMessage, onStatusChanged: vi.fn() });
+		await session.start(); session.completeBootstrap(); await session.enterSelf(); await settle();
+		expect(session.openTraceConversation({ rootId: root.id, currentId: root.id }).kind).toBe('opened');
+		await settle();
+		return { session, root, child, publish, configureTraceReplies, primary, onLiveMessage,
+			callbacks: () => callbacks,
+			submit: (speechType: 'normal' | 'shout' | 'monologue' = 'normal') => session.publishTraceReply({
+				rootId: root.id, targetId: nested ? child.id : root.id, content: 'reply draft', speechType
+			}) };
+	}
+
+	it.each(['normal', 'shout', 'monologue'] as const)('publishes a root %s reply with canonical position and keeps current speech', async (speechType) => {
+		const f = await fixture();
+		const result = await f.submit(speechType);
+		expect(result.kind).toBe('succeeded');
+		expect(f.publish).toHaveBeenCalledTimes(1);
+		const rawEvent = f.publish.mock.calls[0][0];
+		expect(rawEvent.kind).toBe(1111);
+		expect(rawEvent.tags).toEqual(expect.arrayContaining([
+			['E', f.root.id, '', f.root.pubkey], ['K', '42'], ['P', f.root.pubkey],
+			['e', f.root.id, '', f.root.pubkey], ['k', '42'], ['p', f.root.pubkey], ['w', '2:1']
+		]));
+		expect(parseTraceReplyCandidate(rawEvent)?.speechType).toBe(speechType);
+		expect(f.session.getTraceConversationState()).toMatchObject({ config: { currentId: f.root.id }, replies: [{ id: rawEvent.id }] });
+		expect(f.onLiveMessage).not.toHaveBeenCalled();
+	});
+
+	it('constructs nested references from the accepted tree', async () => {
+		const f = await fixture(true); await f.submit();
+		const rawEvent = f.publish.mock.calls[0][0];
+		expect(rawEvent.tags).toEqual(expect.arrayContaining([['E', f.root.id, '', f.root.pubkey],
+			['e', f.child.id, '', f.child.pubkey], ['k', '1111'], ['p', f.child.pubkey]]));
+	});
+
+	it('rejects a foreign target before any planner or publication work', async () => {
+		const f = await fixture();
+		await expect(f.session.publishTraceReply({ rootId: f.root.id, targetId: 'f'.repeat(64), content: 'draft', speechType: 'normal' }))
+			.resolves.toEqual({ kind: 'blocked' });
+		expect(f.publish).not.toHaveBeenCalled();
+	});
+
+	it('blocks reply before consuming another slot while Trace inspection is pending, and allows retry', async () => {
+		const f = await fixture(); vi.setSystemTime(701_000);
+		const pending = deferred<import('./nostrRelayTransport').PublishRelayResult[]>();
+		f.publish.mockImplementationOnce(() => pending.promise);
+		expect(f.session.selectTraceConversationSpeech(f.root.id).kind).toBe('opened');
+		await expect(f.submit()).resolves.toEqual({ kind: 'pending' });
+		expect(f.publish).toHaveBeenCalledTimes(1);
+		pending.resolve(accepted); await settle();
+		await expect(f.submit()).resolves.toMatchObject({ kind: 'succeeded' });
+		expect(f.publish.mock.calls.map(([event]) => event.kind)).toEqual([30078, 1111]);
+	});
+
+	it.each([false, true])('holds the owner through kind 1111 (preceding position: %s), even after position echo', async (positionRequired) => {
+		const f = await fixture();
+		if (positionRequired) vi.setSystemTime(701_000);
+		const pending = deferred<import('./nostrRelayTransport').PublishRelayResult[]>();
+		f.publish.mockImplementation((event) => event.kind === 1111 ? pending.promise : Promise.resolve(accepted));
+		const result = f.submit(); await settle();
+		const calls = f.publish.mock.calls.map(([event]) => event);
+		if (positionRequired) f.primary.onLivePosition(parsePositionEvent(calls[0], 'c'.repeat(64))!);
+		await expect(f.session.moveSelf('right')).resolves.toEqual({ kind: 'pending' });
+		await expect(f.session.enterSelf()).resolves.toEqual({ kind: 'pending' });
+		await expect(f.session.publishMessage('normal', 'normal')).resolves.toEqual({ kind: 'pending' });
+		expect(f.session.selectTraceConversationSpeech(f.root.id).kind).toBe('pending');
+		await expect(f.submit()).resolves.toEqual({ kind: 'pending' });
+		expect(f.publish).toHaveBeenCalledTimes(positionRequired ? 2 : 1);
+		pending.resolve(accepted); await result;
+		vi.setSystemTime(702_000);
+		await expect(f.session.moveSelf('right')).resolves.toMatchObject({ kind: 'succeeded' });
+	});
+
+	it('also excludes an already pending normal message', async () => {
+		const f = await fixture();
+		const pending = deferred<import('./nostrRelayTransport').PublishRelayResult[]>();
+		f.publish.mockImplementationOnce(() => pending.promise);
+		const message = f.session.publishMessage('normal', 'normal');
+		await expect(f.submit()).resolves.toEqual({ kind: 'pending' });
+		expect(f.publish).toHaveBeenCalledTimes(1);
+		pending.resolve(accepted); await message;
+	});
+
+	it.each(['accepted', 'duplicate', 'rejected', 'exception', 'no-response'] as const)('withholds own echo until %s, while another valid reply continues', async (outcome) => {
+		const f = await fixture();
+		const pending = deferred<import('./nostrRelayTransport').PublishRelayResult[]>();
+		f.publish.mockImplementationOnce(() => pending.promise);
+		const result = f.submit();
+		const rawEvent = f.publish.mock.calls[0][0];
+		f.callbacks().onLiveEvent(rawEvent);
+		f.callbacks().onBatch({ events: [rawEvent], relays: [] });
+		await settle();
+		expect(mocked.reconcileTraceReplyCache.mock.calls.flatMap(([input]) => input.rawEvents)).not.toContain(rawEvent);
+		const { buildTraceReplyTemplate, finalizeWorldEvent } = await import('./nostrProtocol');
+		const other = finalizeWorldEvent(buildTraceReplyTemplate({ root: f.root, parent: f.root, content: 'other',
+			speechType: 'normal', position: { x: 1, y: 1 }, createdAt: 700 }), new Uint8Array(32).fill(8));
+		f.callbacks().onLiveEvent(other);
+		f.callbacks().onBatch({ events: [], relays: [{ relayUrl: 'wss://relay.test/', status: 'closed' }] });
+		await settle();
+		expect(f.session.getTraceConversationState()).toMatchObject({ replies: [{ id: other.id }] });
+		if (outcome === 'exception') pending.reject(new Error('offline'));
+		else if (outcome === 'no-response') pending.resolve([{ relayUrl: 'wss://relay.test/', outcome: 'no-response' }]);
+		else pending.resolve(outcome === 'accepted' ? accepted : [{ relayUrl: 'wss://relay.test/', outcome: 'rejected',
+			notice: outcome === 'duplicate' ? 'duplicate: already stored' : 'blocked: no' }]);
+		const success = outcome === 'accepted' || outcome === 'duplicate';
+		await expect(result).resolves.toMatchObject({ kind: success ? 'succeeded' : 'reply-failed' });
+		expect(mocked.reconcileTraceReplyCache.mock.calls.flatMap(([input]) => input.rawEvents).filter((event) => event.id === rawEvent.id))
+			.toHaveLength(success ? 1 : 0);
+		expect(f.configureTraceReplies).toHaveBeenCalledTimes(1);
+		f.session.closeTraceConversation(); await settle();
+		f.session.openTraceConversation({ rootId: f.root.id, currentId: f.root.id }); await settle();
+		f.callbacks().onLiveEvent(rawEvent); await settle();
+		expect(f.session.getTraceConversationState()).toMatchObject({ replies: expect.arrayContaining([expect.objectContaining({ id: rawEvent.id })]) });
+	});
+
+	it('keeps the owner during reconciliation and treats cache failure as supplemental', async () => {
+		const f = await fixture();
+		const cache = deferred<readonly ParsedTraceReply[]>();
+		mocked.reconcileTraceReplyCache.mockImplementationOnce(() => cache.promise);
+		const result = f.submit(); await settle();
+		await expect(f.session.moveSelf('right')).resolves.toEqual({ kind: 'pending' });
+		cache.reject(new Error('transaction aborted'));
+		await expect(result).resolves.toMatchObject({ kind: 'succeeded' });
+		vi.setSystemTime(701_000);
+		await expect(f.session.moveSelf('right')).resolves.toMatchObject({ kind: 'succeeded' });
+	});
+
+	it('reconciles accepted publication after close without reopening its conversation', async () => {
+		const f = await fixture();
+		const pending = deferred<import('./nostrRelayTransport').PublishRelayResult[]>();
+		f.publish.mockImplementationOnce(() => pending.promise);
+		const result = f.submit();
+		f.session.closeTraceConversation(); await settle();
+		const configurations = f.configureTraceReplies.mock.calls.length;
+		pending.resolve(accepted);
+		await expect(result).resolves.toMatchObject({ kind: 'succeeded' });
+		expect(f.session.getTraceConversationState()).toEqual({ kind: 'closed' });
+		expect(f.configureTraceReplies).toHaveBeenCalledTimes(configurations);
+		expect(mocked.reconcileTraceReplyCache.mock.calls.at(-1)![0]).not.toHaveProperty('currentOpenRootId');
+	});
+
+	it('does not roll back position or its consumed slots when reply is rejected', async () => {
+		const f = await fixture(); vi.setSystemTime(701_000);
+		f.publish.mockImplementation(async (event) => event.kind === 1111
+			? [{ relayUrl: 'wss://relay.test/', outcome: 'rejected', notice: 'blocked: no' }] : accepted);
+		await expect(f.submit()).resolves.toEqual({ kind: 'reply-failed' });
+		await f.session.moveSelf('right');
+		expect(parsePositionEvent(f.publish.mock.calls.at(-1)![0], 'c'.repeat(64))?.slot).toBe(1);
+		await expect(f.session.moveSelf('left')).resolves.toEqual({ kind: 'blocked' });
+	});
+
+	it('does not construct a reply after a retryable position failure and preserves slot consumption', async () => {
+		const f = await fixture(); vi.setSystemTime(701_000);
+		f.publish.mockResolvedValue([{ relayUrl: 'wss://relay.test/', outcome: 'no-response' }]);
+		await expect(f.submit()).resolves.toEqual({ kind: 'position-failed' });
+		await expect(f.submit()).resolves.toEqual({ kind: 'position-failed' });
+		await expect(f.submit()).resolves.toEqual({ kind: 'blocked' });
+		expect(f.publish.mock.calls.map(([event]) => event.kind)).toEqual([30078, 30078]);
+	});
+});
 
 vi.mock('./nostrRelayTransport', () => ({
 	createNostrRelayTransport: mocked.createTransport

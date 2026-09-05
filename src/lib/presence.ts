@@ -2,7 +2,7 @@ import { moveOneCell, type Direction, type FieldSize, type GridPosition } from '
 
 export const PRESENCE_TIMEOUT_MS = 10 * 60 * 1000;
 
-export type PresenceActivity = 'movement' | 'message' | 'trace-inspection';
+export type PresenceActivity = 'movement' | 'message' | 'trace-inspection' | 'trace-reply';
 export type PresenceStatus = 'active' | 'inactive';
 
 export type PresenceParticipant = {

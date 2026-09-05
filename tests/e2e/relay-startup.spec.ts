@@ -38,7 +38,7 @@ const CHANNEL_EVENT = {
 	tags: [['client', 'lumilumi', '31990:84b0c46ab699ac35eb2ca286470b85e081db2087cdef63932236c397417782f5:1727506446612', 'wss://cagliostr.compile-error.net']]
 } as const;
 
-const HOST_OWNED_ENTRY = 'https://lokuyow.github.io/ehagaki/web-component/host-owned/ehagaki-composer.js';
+import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 
 function profileDialog(page: Page) {
 	return page.getByRole('dialog');
@@ -178,76 +178,6 @@ function traceRuntimeEvents() {
 	};
 }
 
-async function installHostOwnedStub(page: Page): Promise<{ requests: () => number }> {
-	let requests = 0;
-	await page.route(HOST_OWNED_ENTRY, async (route) => {
-		requests += 1;
-		await route.fulfill({
-			contentType: 'application/javascript',
-			body: `class EhagakiComposer extends HTMLElement {
-  editorIsEmpty = null;
-  editor = null;
-  constructor() { super(); this.attachShadow({ mode: 'open' }); }
-  configureHostOwned(options) { this.options = options; window.__ehagakiHostOwnedOptions = options; }
-  whenReady() { return Promise.resolve(); }
-  focusEditor() { this.editor?.focus(); }
-  blurEditor() { this.editor?.blur(); }
-  connectedCallback() {
-    if (this.shadowRoot.childElementCount) return;
-    window.__ehagakiAbortActiveSubmit = () => this.activeController?.abort();
-    const textarea = document.createElement('textarea');
-    textarea.setAttribute('contenteditable', 'true');
-    textarea.setAttribute('aria-label', '投稿エディター');
-    const updateEditorEmpty = () => {
-      this.editorIsEmpty = textarea.value.length === 0;
-      this.dispatchEvent(new CustomEvent('ehagaki-editor-empty-change', { bubbles: true, composed: true, detail: { isEmpty: this.editorIsEmpty } }));
-    };
-    textarea.addEventListener('input', updateEditorEmpty);
-    textarea.addEventListener('keydown', (event) => {
-      if (event.key.startsWith('Arrow')) window.__ehagakiEditorArrowPrevented = event.defaultPrevented;
-
-      if ((event.key !== 'Enter' && event.code !== 'NumpadEnter') || event.isComposing || event.shiftKey) return;
-      const shortcut = (this.options.submitShortcuts || []).find((candidate) => {
-        if (candidate.modifiers.length !== 1) return false;
-        if (candidate.modifiers[0] === 'ctrlOrMeta') return (event.ctrlKey !== event.metaKey) && !event.altKey;
-        if (candidate.modifiers[0] === 'alt') return event.altKey && !event.ctrlKey && !event.metaKey;
-        return false;
-      });
-      if (event.ctrlKey || event.metaKey || event.altKey) {
-        if (!shortcut) return;
-      }
-      event.preventDefault();
-      void submit(shortcut?.id);
-    });
-    const submit = async (shortcutId) => {
-      const controller = new AbortController();
-      if (window.__ehagakiAbortNextSubmit) { window.__ehagakiAbortNextSubmit = false; controller.abort(); }
-      this.activeController = controller; window.__ehagakiSubmitStarted = true;
-      try {
-        await this.options.submit({ content: textarea.value, tags: [], context: null }, { signal: controller.signal, shortcutId });
-        textarea.value = '';
-        updateEditorEmpty();
-      } catch { /* Host-owned contract: retain the failed content. */ }
-      finally { this.activeController = null; }
-    };
-    const button = document.createElement('button'); button.type = 'button'; button.textContent = 'Send';
-    button.addEventListener('click', () => void submit());
-    this.editor = textarea;
-    this.shadowRoot.append(textarea, button);
-    window.__ehagakiSetPreferredHeight = (height) => this.dispatchEvent(new CustomEvent('ehagaki-preferred-height-change', { bubbles: true, composed: true, detail: { height } }));
-    if (window.__ehagakiDeferComposerEmptyState) {
-      window.__ehagakiResolveComposerEmptyState = updateEditorEmpty;
-    } else {
-      updateEditorEmpty();
-    }
-  }
-}
-customElements.define('ehagaki-composer', EhagakiComposer);`
-		});
-	});
-	return { requests: () => requests };
-}
-
 async function installVirtualKeyboardStub(page: Page): Promise<void> {
 	await page.addInitScript(() => {
 		const listeners = new Set<(event: Event) => void>();
@@ -317,6 +247,7 @@ async function installDelayedRelay(page: Page, options: {
 		const activePrimary: PendingRequest[] = [];
 		const activeTraceReplies: PendingRequest[] = [];
 		const closedTraceReplies: PendingRequest[] = [];
+		const pendingPublishes: Array<{ socket: FakeWebSocket; event: Record<string, unknown> }> = [];
 		const timelineHistory = (historyMessages ?? []) as Array<Record<string, unknown>>;
 		const traceReplyHistory = traceReplies as Array<Record<string, unknown>>;
 		const state = {
@@ -328,9 +259,20 @@ async function installDelayedRelay(page: Page, options: {
 			traceRootsReleased: !deferTraceRoots,
 			traceRepliesReleased: !deferTraceReplies,
 			rejectMessagePublishes: false,
-			rejectPositionPublishes: false
+			rejectPositionPublishes: false,
+			deferReplyPublishes: false,
+			deferPositionPublishes: false,
+			echoRepliesBeforeResult: false,
+			replyOutcome: 'accepted' as 'accepted' | 'rejected' | 'duplicate'
 		};
 		const deliver = (socket: FakeWebSocket, packet: unknown[]) => socket.dispatch('message', { type: 'message', data: JSON.stringify(packet) });
+		const respondPublish = (socket: FakeWebSocket, event: Record<string, unknown>) => {
+			const reject = event.kind === 42 && state.rejectMessagePublishes || event.kind === 30078 && state.rejectPositionPublishes ||
+				event.kind === 1111 && state.replyOutcome !== 'accepted';
+			const notice = event.kind === 1111 && state.replyOutcome === 'duplicate' ? 'duplicate: already stored' : reject ? 'blocked: test rejection' : '';
+			if (event.kind === 1111 && state.replyOutcome !== 'rejected' && !traceReplyHistory.some((known) => known.id === event.id)) traceReplyHistory.push(event);
+			deliver(socket, ['OK', event.id, !reject, notice]);
+		};
 		const respondMetadata = (request: PendingRequest) => {
 			if ((request.filter.kinds as number[] | undefined)?.includes(40)) {
 				deliver(request.socket, ['EVENT', request.subId, channelEvent]);
@@ -398,9 +340,13 @@ async function installDelayedRelay(page: Page, options: {
 				}
 				if (packet[0] === 'EVENT') {
 					state.published.push(packet[1] as Record<string, unknown>);
-					const event = packet[1] as { id: string; kind: number };
-					const reject = event.kind === 42 && state.rejectMessagePublishes || event.kind === 30078 && state.rejectPositionPublishes;
-					deliver(this, ['OK', event.id, !reject, '']);
+					const event = packet[1] as Record<string, unknown>;
+					if (event.kind === 1111 && state.echoRepliesBeforeResult) {
+						for (const request of activeTraceReplies) deliver(request.socket, ['EVENT', request.subId, event]);
+					}
+					if (event.kind === 1111 && state.deferReplyPublishes || event.kind === 30078 && state.deferPositionPublishes) {
+						pendingPublishes.push({ socket: this, event });
+					} else respondPublish(this, event);
 					return;
 				}
 				if (packet[0] !== 'REQ') return;
@@ -449,6 +395,15 @@ async function installDelayedRelay(page: Page, options: {
 		Object.assign(window, {
 			__relayStartupTest: {
 				state,
+				releasePublishes: (kind: number) => {
+					if (kind === 1111) state.deferReplyPublishes = false;
+					if (kind === 30078) state.deferPositionPublishes = false;
+					for (let index = pendingPublishes.length - 1; index >= 0; index--) {
+						if (pendingPublishes[index].event.kind !== kind) continue;
+						const pending = pendingPublishes.splice(index, 1)[0];
+						respondPublish(pending.socket, pending.event);
+					}
+				},
 				releaseMetadata: () => {
 					state.metadataReleased = true;
 					pendingMetadata.splice(0).forEach(respondMetadata);
@@ -669,6 +624,111 @@ function reverseMoveKey(key: AvailableMove['key']): AvailableMove['key'] {
 }
 
 test.describe('Relay startup', () => {
+	test('rejects mismatched structured reply output before position or message publication', async ({ page }) => {
+		const trace = traceRuntimeEvents();
+		await page.emulateMedia({ reducedMotion: 'reduce' });
+		await page.setViewportSize({ width: 1100, height: 850 });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { primaryEvents: { message: trace.message, position: trace.selfPosition }, traceRoots: [trace.root] });
+		await seedRelayAccount(page, trace.selfSecret, trace.selfPubkey);
+		await page.goto('/');
+		await page.evaluate(() => {
+			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
+			relay.releaseMetadata(); relay.releasePrimary();
+		});
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '3,2');
+		await page.getByRole('button', { name: 'Hide Chatter' }).click();
+		await page.locator('[data-cell-position="4,2"]').click();
+		const editor = page.getByRole('textbox', { name: '投稿エディター' });
+		const preview = page.getByLabel('Reply preview', { exact: true });
+		await expect(preview).toContainText('Relay trace root');
+		const before = (await relayState(page)).state.published.length;
+		let terminals = 0;
+		for (const target of ['f'.repeat(64), null]) {
+			await page.evaluate((eventId) => {
+				(window as unknown as { __ehagakiSubmitReplyOverride: unknown }).__ehagakiSubmitReplyOverride = eventId === null ? null : { eventId, relayHints: [], authorPubkey: null };
+			}, target);
+			await editor.fill('retain mismatched draft');
+			await editor.press('Enter');
+			await expect.poll(() => page.evaluate(() => (window as unknown as { __ehagakiTerminalCount: number }).__ehagakiTerminalCount)).toBe(++terminals);
+			await expect(editor).toHaveValue('retain mismatched draft');
+			await expect(preview).toHaveAttribute('data-reply-id', trace.root.id);
+			expect((await relayState(page)).state.published).toHaveLength(before);
+		}
+		await page.getByRole('button', { name: 'Clear reply', exact: true }).click();
+		await page.evaluate((eventId) => {
+			(window as unknown as { __ehagakiSubmitReplyOverride: unknown }).__ehagakiSubmitReplyOverride = { eventId, relayHints: [], authorPubkey: null };
+		}, trace.root.id);
+		await editor.press('Enter');
+		await expect.poll(() => page.evaluate(() => (window as unknown as { __ehagakiTerminalCount: number }).__ehagakiTerminalCount)).toBe(++terminals);
+		expect((await relayState(page)).state.published).toHaveLength(before);
+		await expect(editor).toHaveValue('retain mismatched draft');
+	});
+
+	for (const outcome of ['accepted', 'duplicate', 'rejected'] as const) {
+		test(`publishes a Trace reply with ${outcome} and quarantines echo before OK`, async ({ page }) => {
+			const time = Date.now();
+			const trace = traceRuntimeEvents();
+			await page.clock.setFixedTime(time);
+			await page.emulateMedia({ reducedMotion: 'reduce' });
+			await page.setViewportSize({ width: 1100, height: 850 });
+			await installHostOwnedStub(page);
+			await installDelayedRelay(page, { primaryEvents: { message: trace.message, position: trace.selfPosition }, traceRoots: [trace.root] });
+			await seedRelayAccount(page, trace.selfSecret, trace.selfPubkey);
+			await page.goto('/');
+			await page.evaluate(() => {
+				const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
+				relay.releaseMetadata(); relay.releasePrimary();
+			});
+			await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '3,2');
+			await page.getByRole('button', { name: 'Hide Chatter' }).click();
+			await page.locator('[data-cell-position="4,2"]').click();
+			const preview = page.getByLabel('Reply preview', { exact: true });
+			const editor = page.getByRole('textbox', { name: '投稿エディター' });
+			await expect(preview).toContainText('Relay trace root');
+			await expect(editor).not.toBeFocused();
+			await page.clock.setFixedTime(time + 1000);
+			await page.evaluate((outcome) => Object.assign((window as unknown as {
+				__relayStartupTest: { state: Record<string, unknown> }
+			}).__relayStartupTest.state, { deferReplyPublishes: true, echoRepliesBeforeResult: true, replyOutcome: outcome }), outcome);
+			await editor.fill('own Trace shout');
+			await editor.press('Control+Enter');
+			await expect.poll(async () => (await relayState(page)).state.published.filter((event) => event.kind === 1111).length).toBeGreaterThan(0);
+			const raw = (await relayState(page)).state.published.find((event) => event.kind === 1111)!;
+			expect(raw.tags).toEqual(expect.arrayContaining([
+				['E', trace.root.id, '', trace.root.pubkey], ['e', trace.root.id, '', trace.root.pubkey], ['w', '3:2'], ['k', '42']
+			]));
+			const bubble = page.locator(`[data-trace-reply-id="${raw.id}"]`);
+			await expect(bubble).toHaveCount(0);
+			await expect(editor).toHaveValue('own Trace shout');
+			const positionsBefore = (await relayState(page)).state.published.filter((event) => event.kind === 30078).length;
+			await editor.press('Escape');
+			await page.keyboard.press('ArrowRight');
+			await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '3,2');
+			expect((await relayState(page)).state.published.filter((event) => event.kind === 30078)).toHaveLength(positionsBefore);
+			await page.evaluate(() => (window as unknown as { __relayStartupTest: { releasePublishes(kind: number): void } }).__relayStartupTest.releasePublishes(1111));
+			await expect.poll(() => page.evaluate(() => (window as unknown as { __ehagakiTerminalCount: number }).__ehagakiTerminalCount)).toBe(1);
+			if (outcome === 'rejected') {
+				await expect(editor).toHaveValue('own Trace shout');
+				await expect(bubble).toHaveCount(0);
+				await expect(preview).toHaveAttribute('data-reply-id', trace.root.id);
+			} else {
+				await expect(editor).toHaveValue('');
+				await expect(preview).toHaveCount(0);
+			}
+			if (outcome !== 'rejected') {
+				await expect(bubble).toContainText('own Trace shout');
+				await expect(bubble).toHaveAttribute('data-speech-type', 'shout');
+				await expect(page.locator('[data-trace-current-id]')).toHaveAttribute('data-trace-current-id', trace.root.id);
+				await expect(page.locator(`[data-trace-reply-ghost-id="${raw.id}"]`)).toHaveCount(0);
+			}
+			if (outcome === 'rejected') await page.getByRole('button', { name: 'Clear reply', exact: true }).click();
+			await editor.fill('normal kind 42 after reply mode');
+			await editor.press('Enter');
+			await expect.poll(async () => (await relayState(page)).state.published.some((event) => event.kind === 42 && event.content === 'normal kind 42 after reply mode')).toBe(true);
+		});
+	}
+
 	test('opens a Relay trace root and settles the explicit conversation reply subscription', async ({ page }) => {
 		const trace = traceRuntimeEvents();
 		await installHostOwnedStub(page);
