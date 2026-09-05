@@ -911,12 +911,18 @@
 		const pressedKeyboardMovementKeys = new Set<string>();
 		let movementHoldPointerId: number | null = null;
 		let holdTimer: number | null = null;
+		let keyboardChordTimer: number | null = null;
+		const KEYBOARD_CHORD_DELAY_MS = 50;
 		const clearMovementHold = () => {
 			movementHoldOwner = null;
 			movementHoldDirection = null;
 			movementHoldSource = null;
 			pressedKeyboardMovementKeys.clear();
 			movementHoldPointerId = null;
+			if (keyboardChordTimer !== null) {
+				window.clearTimeout(keyboardChordTimer);
+				keyboardChordTimer = null;
+			}
 			if (holdTimer !== null) {
 				window.clearInterval(holdTimer);
 				holdTimer = null;
@@ -943,11 +949,11 @@
 			window.clearInterval(holdTimer);
 			startMovementTimer();
 		};
-		const startKeyboardHold = (direction: Direction, source: 'page' | 'composer-editor') => {
-			movementHoldOwner = 'keyboard';
+		const resolveKeyboardChord = () => {
+			keyboardChordTimer = null;
+			const direction = directionFromKeyboardMovementKeys(pressedKeyboardMovementKeys);
 			movementHoldDirection = direction;
-			movementHoldSource = source;
-			requestMovement(direction);
+			if (direction) requestMovement(direction);
 			startMovementTimer();
 		};
 		const takeOverPointerHold = (pointerId: number, direction: Direction) => {
@@ -1017,25 +1023,39 @@
 			const keyToken = event.code || event.key;
 			pressedKeyboardMovementKeys.add(keyToken);
 			const nextDirection = directionFromKeyboardMovementKeys(pressedKeyboardMovementKeys);
-			if (!nextDirection) {
-				movementHoldDirection = null;
-				return;
-			}
 			if (movementHoldOwner !== 'keyboard') {
 				clearMovementHold();
 				pressedKeyboardMovementKeys.add(keyToken);
-				startKeyboardHold(nextDirection, source);
+				movementHoldOwner = 'keyboard';
+				movementHoldSource = source;
+				movementHoldDirection = nextDirection;
+				keyboardChordTimer = window.setTimeout(resolveKeyboardChord, KEYBOARD_CHORD_DELAY_MS);
+				return;
+			}
+			if (keyboardChordTimer !== null) {
+				if (nextDirection === 'up-right' || nextDirection === 'down-right' ||
+					nextDirection === 'down-left' || nextDirection === 'up-left') {
+					window.clearTimeout(keyboardChordTimer);
+					keyboardChordTimer = null;
+					movementHoldDirection = nextDirection;
+					requestMovement(nextDirection);
+					startMovementTimer();
+				} else {
+					movementHoldDirection = nextDirection;
+				}
 				return;
 			}
 			const previousDirection = movementHoldDirection;
 			movementHoldDirection = nextDirection;
 			if (nextDirection !== previousDirection) {
+				if (!nextDirection) return;
 				requestMovement(nextDirection);
 				rephaseMovementTimer();
 			}
 		};
 		const handleKeyup = (event: KeyboardEvent) => {
 			const keyToken = event.code || event.key;
+			if (keyboardChordTimer !== null) resolveKeyboardChord();
 			if (!pressedKeyboardMovementKeys.delete(keyToken) || movementHoldOwner !== 'keyboard') return;
 			const nextDirection = directionFromKeyboardMovementKeys(pressedKeyboardMovementKeys);
 			if (!nextDirection) {

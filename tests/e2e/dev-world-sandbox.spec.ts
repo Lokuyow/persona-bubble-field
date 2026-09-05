@@ -1858,6 +1858,7 @@ test.describe('DEV World Sandbox', () => {
 		await openClockedDevWorld(page);
 		const self = page.locator('.participant[data-self="true"]');
 		await page.keyboard.down('ArrowRight');
+		await page.clock.runFor(50);
 		await expect(self).toHaveAttribute('data-position', '8,3');
 
 		const start = await fieldCellCenter(page, { x: 5, y: 5 });
@@ -1917,6 +1918,7 @@ test.describe('DEV World Sandbox', () => {
 
 		const self = page.locator('.participant').first();
 		await page.keyboard.down('ArrowRight');
+		await page.clock.runFor(50);
 		await expect(self).toHaveAttribute('data-position', '8,3');
 		await page.clock.runFor(1_000);
 		await page.keyboard.up('ArrowRight');
@@ -1942,10 +1944,10 @@ test.describe('DEV World Sandbox', () => {
 
 	test('combines WASD, Arrow, and mixed keyboard keys into one diagonal movement', async ({ page }) => {
 		const diagonals = [
-			[['w', 'd'], '8,1'], [['w', 'a'], '6,1'], [['s', 'd'], '8,5'], [['s', 'a'], '6,5'],
-			[['ArrowUp', 'ArrowRight'], '8,1'], [['ArrowUp', 'ArrowLeft'], '6,1'],
-			[['ArrowDown', 'ArrowRight'], '8,5'], [['ArrowDown', 'ArrowLeft'], '6,5'],
-			[['w', 'ArrowRight'], '8,1'], [['ArrowUp', 'd'], '8,1']
+			[['w', 'd'], '8,2'], [['w', 'a'], '6,2'], [['s', 'd'], '8,4'], [['s', 'a'], '6,4'],
+			[['ArrowUp', 'ArrowRight'], '8,2'], [['ArrowUp', 'ArrowLeft'], '6,2'],
+			[['ArrowDown', 'ArrowRight'], '8,4'], [['ArrowDown', 'ArrowLeft'], '6,4'],
+			[['w', 'ArrowRight'], '8,2'], [['ArrowUp', 'd'], '8,2']
 		] as const;
 
 		for (const [keys, expected] of diagonals) {
@@ -1964,6 +1966,7 @@ test.describe('DEV World Sandbox', () => {
 		const self = page.locator('.participant').first();
 
 		await page.keyboard.down('w');
+		await page.clock.runFor(50);
 		await expect(self).toHaveAttribute('data-position', '7,2');
 		await page.keyboard.down('s');
 		await expect(self).toHaveAttribute('data-position', '7,2');
@@ -1976,7 +1979,7 @@ test.describe('DEV World Sandbox', () => {
 
 		await page.keyboard.down('a');
 		await page.keyboard.down('d');
-		await expect(self).toHaveAttribute('data-position', '6,1');
+		await expect(self).toHaveAttribute('data-position', '7,1');
 		await page.keyboard.up('d');
 		await page.keyboard.up('a');
 	});
@@ -1986,18 +1989,15 @@ test.describe('DEV World Sandbox', () => {
 		const self = page.locator('.participant').first();
 
 		await page.keyboard.down('w');
-		await expect(self).toHaveAttribute('data-position', '7,2');
 		await page.keyboard.down('ArrowUp');
-		await expect(self).toHaveAttribute('data-position', '7,2');
 		await page.keyboard.down('s');
-		await expect(self).toHaveAttribute('data-position', '7,2');
-		await page.clock.runFor(500);
-		await expect(self).toHaveAttribute('data-position', '7,2');
+		await page.clock.runFor(50);
+		await expect(self).toHaveAttribute('data-position', '7,3');
 
 		await page.getByLabel('Select sandbox character').focus();
 		await page.keyboard.up('s');
 		await page.clock.runFor(1_000);
-		await expect(self).toHaveAttribute('data-position', '7,2');
+		await expect(self).toHaveAttribute('data-position', '7,3');
 		await page.keyboard.up('ArrowUp');
 		await page.keyboard.up('w');
 	});
@@ -2007,6 +2007,7 @@ test.describe('DEV World Sandbox', () => {
 		const self = page.locator('.participant').first();
 
 		await page.keyboard.down('s');
+		await page.clock.runFor(50);
 		await expect(self).toHaveAttribute('data-position', '7,4');
 		await page.clock.runFor(400);
 		await page.keyboard.down('d');
@@ -2027,15 +2028,15 @@ test.describe('DEV World Sandbox', () => {
 
 		await page.keyboard.down('s');
 		await page.keyboard.down('d');
-		await expect(self).toHaveAttribute('data-position', '8,5');
+		await expect(self).toHaveAttribute('data-position', '8,4');
 		await page.clock.runFor(500);
-		await expect(self).toHaveAttribute('data-position', '9,6');
+		await expect(self).toHaveAttribute('data-position', '9,5');
 		await page.keyboard.up('d');
 		await page.clock.runFor(500);
-		await expect(self).toHaveAttribute('data-position', '9,7');
+		await expect(self).toHaveAttribute('data-position', '9,6');
 		await page.keyboard.up('s');
 		await page.clock.runFor(1_000);
-		await expect(self).toHaveAttribute('data-position', '9,7');
+		await expect(self).toHaveAttribute('data-position', '9,6');
 	});
 
 	test('continues a held WASD movement at the existing two-per-second cadence', async ({ page }) => {
@@ -2043,6 +2044,7 @@ test.describe('DEV World Sandbox', () => {
 
 		const self = page.locator('.participant').first();
 		await page.keyboard.down('d');
+		await page.clock.runFor(50);
 		await expect(self).toHaveAttribute('data-position', '8,3');
 		await page.clock.runFor(1_000);
 		await page.keyboard.up('d');
@@ -2071,6 +2073,7 @@ test.describe('DEV World Sandbox', () => {
 
 		const self = page.locator('.participant').first();
 		await page.keyboard.down('ArrowRight');
+		await page.clock.runFor(50);
 		await expect(self).toHaveAttribute('data-position', '8,3');
 		await page.evaluate(() => window.dispatchEvent(new Event('blur')));
 		await page.clock.runFor(1_000);
@@ -2083,6 +2086,7 @@ test.describe('DEV World Sandbox', () => {
 
 		const self = page.locator('.participant').first();
 		await page.keyboard.down('ArrowRight');
+		await page.clock.runFor(50);
 		await expect(self).toHaveAttribute('data-position', '8,3');
 		await page.evaluate(() => {
 			Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
@@ -2098,6 +2102,7 @@ test.describe('DEV World Sandbox', () => {
 
 		const self = page.locator('.participant').first();
 		await page.keyboard.down('ArrowRight');
+		await page.clock.runFor(50);
 		await expect(self).toHaveAttribute('data-position', '8,3');
 		await page.evaluate(() => {
 			for (let index = 0; index < 10; index += 1) {
@@ -2190,6 +2195,7 @@ test.describe('DEV World Sandbox', () => {
 
 		const self = page.locator('.participant').first();
 		await page.keyboard.down('ArrowRight');
+		await page.clock.runFor(50);
 		await expect(self).toHaveAttribute('data-position', '8,3');
 		await profileTrigger(page, '女の子').click();
 		await expect(profileDialog(page)).toBeVisible();
