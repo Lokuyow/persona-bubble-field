@@ -913,16 +913,18 @@
 		let holdTimer: number | null = null;
 		let keyboardChordTimer: number | null = null;
 		const KEYBOARD_CHORD_DELAY_MS = 50;
+		const cancelKeyboardChordTimer = () => {
+			if (keyboardChordTimer === null) return;
+			window.clearTimeout(keyboardChordTimer);
+			keyboardChordTimer = null;
+		};
 		const clearMovementHold = () => {
 			movementHoldOwner = null;
 			movementHoldDirection = null;
 			movementHoldSource = null;
 			pressedKeyboardMovementKeys.clear();
 			movementHoldPointerId = null;
-			if (keyboardChordTimer !== null) {
-				window.clearTimeout(keyboardChordTimer);
-				keyboardChordTimer = null;
-			}
+			cancelKeyboardChordTimer();
 			if (holdTimer !== null) {
 				window.clearInterval(holdTimer);
 				holdTimer = null;
@@ -950,7 +952,7 @@
 			startMovementTimer();
 		};
 		const resolveKeyboardChord = () => {
-			keyboardChordTimer = null;
+			cancelKeyboardChordTimer();
 			const direction = directionFromKeyboardMovementKeys(pressedKeyboardMovementKeys);
 			movementHoldDirection = direction;
 			if (direction) requestMovement(direction);

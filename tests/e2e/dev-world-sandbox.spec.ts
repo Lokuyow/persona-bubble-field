@@ -2022,6 +2022,30 @@ test.describe('DEV World Sandbox', () => {
 		await page.keyboard.up('s');
 	});
 
+	test('cancels an early-resolved chord timeout before the next movement key', async ({ page }) => {
+		await openClockedDevWorld(page);
+		const self = page.locator('.participant').first();
+
+		await page.keyboard.down('w');
+		await page.clock.runFor(20);
+		await page.keyboard.up('w');
+		await expect(self).toHaveAttribute('data-position', '7,2');
+
+		await page.keyboard.down('d');
+		await page.clock.runFor(29);
+		await expect(self).toHaveAttribute('data-position', '7,2');
+		await page.clock.runFor(1);
+		await expect(self).toHaveAttribute('data-position', '7,2');
+		await page.clock.runFor(20);
+		await expect(self).toHaveAttribute('data-position', '8,2');
+
+		await page.clock.runFor(499);
+		await expect(self).toHaveAttribute('data-position', '8,2');
+		await page.clock.runFor(1);
+		await expect(self).toHaveAttribute('data-position', '9,2');
+		await page.keyboard.up('d');
+	});
+
 	test('holds a diagonal at the existing cadence and follows the key that remains held', async ({ page }) => {
 		await openClockedDevWorld(page);
 		const self = page.locator('.participant').first();
