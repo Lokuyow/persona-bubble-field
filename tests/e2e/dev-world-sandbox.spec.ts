@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 
 async function openDevWorld(page: Page): Promise<void> {
 	await page.goto('/?devWorld=1');
@@ -145,6 +146,99 @@ async function profileTriggerCenter(page: Page, name: string): Promise<{ x: numb
 }
 
 test.describe('DEV World Sandbox', () => {
+	test.beforeEach(async ({ page }) => { await installHostOwnedStub(page); });
+
+	test('preserves Trace reply drafts across clear and close, changes ownership and publishes locally', async ({ page }) => {
+		await page.setViewportSize({ width: 1100, height: 850 });
+		await page.emulateMedia({ reducedMotion: 'reduce' });
+		await page.goto('/?devWorld=1&devTrace=replies');
+		await page.getByRole('button', { name: 'Hide Chatter' }).click();
+		const editor = page.getByRole('textbox', { name: '投稿エディター' });
+		const preview = page.getByLabel('Reply preview', { exact: true });
+		const selectCell = async (position: string) => {
+			const cell = page.locator(`[data-cell-position="${position}"]`);
+			const box = await cell.boundingBox();
+			if (!box) throw new Error('Expected a visible Trace cell');
+			// The root and its compact same-cell reply occupy the center and lower-right corner.
+			await cell.click({ position: { x: 2, y: 2 } });
+		};
+		await editor.fill('top-level draft');
+		await selectCell('8,4');
+		await expect(preview).toHaveAttribute('data-reply-id', '2'.repeat(64));
+		await expect(editor).toHaveValue('');
+		await expect(editor).not.toBeFocused();
+		await editor.fill('preserved A');
+		await page.getByRole('button', { name: 'Clear reply', exact: true }).click();
+		await expect(preview).toHaveCount(0);
+		await expect(editor).toHaveValue('preserved A');
+		await selectCell('8,4');
+		const menu = page.getByRole('menu');
+		if (await menu.isVisible()) await page.getByRole('menuitem', { name: '痕跡を調べる', exact: true }).click();
+		await expect(preview).toHaveAttribute('data-reply-id', '2'.repeat(64));
+		await expect(editor).toHaveValue('preserved A');
+		await page.locator('.field-area').click({ position: { x: 8, y: 8 } });
+		await expect(preview).toHaveCount(0);
+		await expect(editor).toHaveValue('preserved A');
+		await selectCell('8,4');
+		await expect(preview).toHaveAttribute('data-reply-id', '2'.repeat(64));
+		await expect(editor).toHaveValue('preserved A');
+		await selectCell('8,3');
+		await expect(preview).toHaveAttribute('data-reply-id', '4'.repeat(64));
+		await expect(editor).toHaveValue('');
+		await editor.fill('DEV own reply');
+		await editor.press('Alt+Enter');
+		await expect(editor).toHaveValue('');
+		await expect(preview).toHaveCount(0);
+		await expect(page.locator('[data-trace-current-id]')).toHaveAttribute('data-trace-current-id', '4'.repeat(64));
+		const own = page.locator('[data-trace-reply-id="' + '1'.padStart(64, '0') + '"]');
+		await expect(own).toContainText('DEV own reply');
+		await expect(own).toHaveAttribute('data-speech-type', 'monologue');
+		await expect(page.locator('[data-trace-reply-ghost-id="' + '1'.padStart(64, '0') + '"]')).toHaveCount(0);
+		await editor.press('Escape');
+		await page.keyboard.press('ArrowLeft');
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '6,3');
+		await expect(page.locator('[data-trace-reply-ghost-id="' + '1'.padStart(64, '0') + '"]')).toBeVisible();
+		await page.keyboard.press('ArrowRight');
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '7,3');
+		await expect(page.locator('[data-trace-reply-ghost-id="' + '1'.padStart(64, '0') + '"]')).toHaveCount(0);
+	});
+	test('reselects the current reply without losing its draft, preserves it through profiles, and clears on range exit', async ({ page }) => {
+		await page.setViewportSize({ width: 1100, height: 850 });
+		await page.emulateMedia({ reducedMotion: 'reduce' });
+		await page.goto('/?devWorld=1&devTrace=replies');
+		await page.getByRole('button', { name: 'Hide Chatter' }).click();
+		const selectCell = async (position: string) => {
+			const cell = page.locator(`[data-cell-position="${position}"]`);
+			const box = await cell.boundingBox();
+			if (!box) throw new Error('Expected a visible Trace cell');
+			await cell.click({ position: { x: box.width - 2, y: box.height - 2 } });
+		};
+		const editor = page.getByRole('textbox', { name: '投稿エディター' });
+		const preview = page.getByLabel('Reply preview', { exact: true });
+		await selectCell('8,4');
+		await selectCell('6,4');
+		await page.getByRole('menu').locator('[data-cell-action="reply"]').first().click();
+		await expect(preview).toHaveAttribute('data-reply-id', '7'.repeat(64));
+		await expect(editor).not.toBeFocused();
+		await editor.fill('nested draft');
+		await page.getByRole('button', { name: 'Clear reply', exact: true }).click();
+		await selectCell('6,4');
+		await expect(preview).toHaveAttribute('data-reply-id', '7'.repeat(64));
+		await expect(editor).toHaveValue('nested draft');
+		await page.locator('[data-trace-current-reply-ghost-id="' + '7'.repeat(64) + '"] .trace-ghost-profile-trigger').click();
+		await expect(profileDialog(page)).toBeVisible();
+		await page.keyboard.press('Escape');
+		await expect(editor).toHaveValue('nested draft');
+		await expect(preview).toHaveAttribute('data-reply-id', '7'.repeat(64));
+		await page.keyboard.press('ArrowRight');
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '8,3');
+		await expect(editor).toHaveValue('');
+		await expect(preview).toHaveCount(0);
+		await expect(page.locator('[data-trace-current-reply-id="' + '7'.repeat(64) + '"]')).toBeVisible();
+		await page.keyboard.press('ArrowLeft');
+		await expect(preview).toHaveCount(0);
+	});
+
 	test('starts with the local-only self and deterministic character presentation', async ({ page }) => {
 		await openDevWorld(page);
 
@@ -385,7 +479,9 @@ test.describe('DEV World Sandbox', () => {
 		await page.keyboard.press('ArrowRight');
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '7,3');
 
-		await page.locator('.field-area').click({ position: { x: 8, y: 8 } });
+		// With the Composer dock present, the field area's corner can lie outside the logical grid.
+		const blankCell = await fieldCellCenter(page, { x: 5, y: 3 });
+		await page.mouse.click(blankCell.x, blankCell.y);
 		await expect(replyBubbles).toHaveCount(0);
 		await page.locator('[data-cell-position="8,4"]').click();
 		await expect(page.locator('[data-trace-reply-id="' + 'c'.repeat(64) + '"]')).toContainText('live newest same-cell direct reply');

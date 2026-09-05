@@ -6,9 +6,10 @@ import {
 	type TraceReplyBatch
 } from './nostrRelayTransport';
 import { reconcileTraceRootCache } from './traceRootCache';
-import { reconcileTraceReplyCache, touchTraceReplyTree } from './traceReplyCache';
+import { loadTracePreviewEvent, reconcileTraceReplyCache, touchTraceReplyTree } from './traceReplyCache';
 import {
 	buildPositionEventTemplate,
+	buildTraceReplyTemplate,
 	buildWorldMessageTemplate,
 	finalizeWorldEvent,
 	parsePositionEvent,
@@ -57,7 +58,9 @@ import {
 import type {
 	TraceConversationConfig,
 	TraceConversationOpenResult,
-	TraceConversationState
+	TraceConversationState,
+	TraceReplyPublication,
+	TraceReplyPublishResult
 } from './traceConversation';
 import {
 	adjacentTraceSpeech,
@@ -87,7 +90,7 @@ export type SelfPositionWriteState =
 	| Readonly<{ kind: 'retryable'; operation: SelfPositionOperationKind }>
 	| Readonly<{ kind: 'unavailable' }>;
 
-export type SelfPositionOperationKind = 'entry' | 'movement' | 'reactivation' | 'trace-inspection';
+export type SelfPositionOperationKind = 'entry' | 'movement' | 'reactivation' | 'trace-inspection' | 'trace-reply';
 
 export type SelfPositionWriteResult =
 	| Readonly<{ kind: 'not-needed' | 'blocked' | 'unavailable' | 'pending' }>
@@ -158,6 +161,8 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 	let selfPositionWriteState: SelfPositionWriteState = options.selfAccount ? { kind: 'ready' } : { kind: 'unavailable' };
 	let selfMessageAvailability: SelfMessageAvailability = { kind: 'unavailable' };
 	let pendingSelfMessage: SelfMessageOperation | null = null;
+	// Owns the entire reply pipeline, including coalesced position and post-position publication.
+	let pendingTraceReply: { eventId: string | null } | null = null;
 	let effectiveTraceRoots: readonly ParsedWorldMessage[] = [];
 	let traceRootBootstrapReadiness: Promise<'ready' | 'failed'> | null = null;
 	let traceConversationState: TraceConversationState = { kind: 'closed' };
@@ -309,7 +314,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 	}
 
 	function selfOperationCandidate(
-		operation: Exclude<SelfPositionOperationKind, 'trace-inspection'>,
+		operation: Exclude<SelfPositionOperationKind, 'trace-inspection' | 'trace-reply'>,
 		direction?: Direction
 	): Readonly<{ event: VerifiedEvent; parsed: ParsedPositionEvent }> | null {
 		if (!options.selfAccount || !channel) return null;
@@ -377,7 +382,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 
 	async function publishMessage(content: string, speechType: SpeechType): Promise<SelfMessagePublishResult> {
 		if (disposed || !options.selfAccount || !transport || !channel) return { kind: 'unavailable' };
-		if (pendingSelfMessage) return { kind: 'pending' };
+		if (pendingSelfMessage || pendingTraceReply) return { kind: 'pending' };
 		const candidate = selfMessageCandidate(content, speechType);
 		if (!candidate) return { kind: 'blocked' };
 		const { event, parsed } = candidate;
@@ -441,7 +446,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 	}
 
 	async function publishSelfPosition(
-		operation: Exclude<SelfPositionOperationKind, 'trace-inspection'>,
+		operation: Exclude<SelfPositionOperationKind, 'trace-inspection' | 'trace-reply'>,
 		direction?: Direction
 	): Promise<SelfPositionWriteResult> {
 		if (!options.selfAccount) {
@@ -449,7 +454,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 			return { kind: 'unavailable' };
 		}
 		if (disposed) return { kind: 'unavailable' };
-		if (pendingSelfOperation) return { kind: 'pending' };
+		if (pendingSelfOperation || pendingTraceReply) return { kind: 'pending' };
 		const candidate = selfOperationCandidate(operation, direction);
 		if (!candidate) return { kind: 'blocked' };
 		return publishPreparedSelfPosition(operation, candidate);
@@ -513,7 +518,14 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 	}
 
 	function receiveTraceBatch(generation: number, rootId: string, batch: TraceReplyBatch): void {
-		void reconcileTraceReplies(generation, rootId, batch.events);
+		void receiveTraceReplies(generation, rootId, batch.events);
+	}
+
+	function receiveTraceReplies(generation: number, rootId: string, events: readonly NostrEvent[]): Promise<boolean> {
+		// Filter before enqueue: terminal completion must not admit a previously withheld echo.
+		const admitted = events.filter((event) => event.id !== pendingTraceReply?.eventId);
+		if (events.length > 0 && admitted.length === 0) return Promise.resolve(true);
+		return reconcileTraceReplies(generation, rootId, admitted);
 	}
 
 	async function startTraceConversationWork(
@@ -543,14 +555,14 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 			const result = await transport.configureTraceReplies({
 				conversation: config,
 				onBatch: (batch) => receiveTraceBatch(generation, config.rootId, batch),
-				onLiveEvent: (event) => { void reconcileTraceReplies(generation, config.rootId, [event]); }
+				onLiveEvent: (event) => { void receiveTraceReplies(generation, config.rootId, [event]); }
 			});
 			if (disposed || generation !== traceConversationGeneration || result.status === 'superseded') return;
 			if (result.status !== 'active') {
 				updateTraceConversation(generation, (current) => ({ ...current, replyRefresh: 'unavailable' }));
 				return;
 			}
-			const reconciled = await reconcileTraceReplies(generation, config.rootId, result.initialBatch.events);
+			const reconciled = await receiveTraceReplies(generation, config.rootId, result.initialBatch.events);
 			updateTraceConversation(generation, (current) => ({
 				...current,
 				replyRefresh: reconciled ? 'settled' : 'unavailable'
@@ -573,10 +585,10 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 		if (!root || config.currentId !== root.id) return { kind: 'blocked' };
 		if (traceConversationState.kind === 'open' && traceConversationState.root.id === root.id) {
 			return traceConversationState.config.currentId === config.currentId
-				? { kind: 'opened' }
+				? selectTraceConversationSpeech(config.currentId)
 				: { kind: 'blocked' };
 		}
-		if (pendingSelfOperation) return { kind: 'pending' };
+		if (pendingSelfOperation || pendingTraceReply) return { kind: 'pending' };
 		const sameCellSwitch = traceConversationState.kind === 'open' && traceConversationState.root.id !== root.id &&
 			sameGridPosition(traceConversationState.root.position, root.position);
 		const nowMs = Date.now();
@@ -600,10 +612,11 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 	function selectTraceConversationSpeech(targetId: string): TraceConversationOpenResult {
 		if (disposed || !options.selfAccount || !transport || !channel) return { kind: 'unavailable' };
 		if (!bootstrapComplete || traceConversationState.kind === 'closed') return { kind: 'blocked' };
-		if (pendingSelfOperation) return { kind: 'pending' };
+		if (pendingSelfOperation || pendingTraceReply) return { kind: 'pending' };
 		const current = traceConversationState;
 		const projection = resolveTraceConversationProjection(current);
-		const target = projection ? adjacentTraceSpeech(projection, targetId) : null;
+		const target = projection ? projection.current.event.id === targetId
+			? projection.current : adjacentTraceSpeech(projection, targetId) : null;
 		if (!target) return { kind: 'blocked' };
 		const nowMs = Date.now();
 		const prepared = prepareTraceInspectionActivity({
@@ -619,6 +632,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 			if (!candidate) return { kind: 'blocked' };
 			void publishPreparedSelfPosition('trace-inspection', candidate);
 		}
+		if (current.config.currentId === targetId) return { kind: 'opened' };
 		const config = { rootId: current.root.id, currentId: target.event.id };
 		const generation = ++traceConversationGeneration;
 		emitTraceConversationState({ ...current, config, replyRefresh: 'loading' });
@@ -672,6 +686,58 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 		}
 		if (event.kind === 'message') applyLiveMessage(event.event, event.rawEvent, Date.now());
 		else applyLivePosition(event.event, Date.now());
+	}
+
+	function resolveReplyTarget(rootId: string, targetId: string) {
+		if (traceConversationState.kind !== 'open' || traceConversationState.root.id !== rootId) return null;
+		const { root, replies } = traceConversationState;
+		const target = targetId === root.id ? root : replies.find((reply) => reply.id === targetId);
+		return target ? { root, target, replies } : null;
+	}
+
+	async function publishTraceReply(input: TraceReplyPublication): Promise<TraceReplyPublishResult> {
+		if (disposed || !options.selfAccount || !transport || !channel) return { kind: 'unavailable' };
+		if (!bootstrapComplete || !selfJoinedThisSession) return { kind: 'blocked' };
+		if (pendingSelfOperation || pendingSelfMessage || pendingTraceReply) return { kind: 'pending' };
+		const accepted = resolveReplyTarget(input.rootId, input.targetId);
+		if (!accepted) return { kind: 'blocked' };
+		const operation = { eventId: null as string | null };
+		pendingTraceReply = operation;
+		try {
+			const nowMs = Date.now();
+			const prepared = prepareTraceInspectionActivity({
+				presence: currentPresence(), selfId: options.selfAccount.pubkey,
+				target: accepted.target.position, nowMs, requireCurrentRange: true, activity: 'trace-reply'
+			});
+			if (prepared.kind === 'blocked') return { kind: 'out-of-range' };
+			if (!prepared.coalesced) {
+				const candidate = positionCandidate(prepared.position, nowMs);
+				if (!candidate) return { kind: 'blocked' };
+				const positionResult = await publishPreparedSelfPosition('trace-reply', candidate);
+				if (disposed) return { kind: 'unavailable' };
+				if (positionResult.kind !== 'succeeded') return { kind: 'position-failed' };
+			}
+			const self = getParticipant(currentPresence(), options.selfAccount.pubkey);
+			if (!self || !isWithinTraceInvestigationRange(self.position, accepted.target.position)) return { kind: 'out-of-range' };
+			if (self.status !== 'active') return { kind: 'blocked' };
+			const event = finalizeWorldEvent(buildTraceReplyTemplate({
+				root: accepted.root, parent: accepted.target, content: input.content, speechType: input.speechType,
+				position: { ...self.position }, createdAt: Math.floor(Date.now() / 1000)
+			}), options.selfAccount.secretKey);
+			operation.eventId = event.id;
+			const results = await transport.publish(event);
+			if (disposed) return { kind: 'unavailable' };
+			if (!reachedAuthoritativeRelay(results)) return { kind: 'reply-failed' };
+			// Use the current generation only for the same open root. Cache semantics decide retention.
+			const generation = traceConversationState.kind === 'open' && traceConversationState.root.id === accepted.root.id
+				? traceConversationGeneration : -1;
+			await reconcileTraceReplies(generation, accepted.root.id, [event]);
+			return { kind: 'succeeded', eventId: event.id };
+		} catch {
+			return { kind: disposed ? 'unavailable' : 'reply-failed' };
+		} finally {
+			if (pendingTraceReply === operation) pendingTraceReply = null;
+		}
 	}
 
 	return {
@@ -733,6 +799,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 
 		enterSelf(): Promise<SelfPositionWriteResult> {
 			if (!bootstrapComplete) return Promise.resolve({ kind: 'blocked' });
+			if (pendingTraceReply) return Promise.resolve({ kind: 'pending' });
 			if (!options.selfAccount) return publishSelfPosition('entry');
 			const participant = getParticipant(currentPresence(), options.selfAccount.pubkey);
 			if (participant?.status === 'active') {
@@ -757,6 +824,21 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 
 		publishMessage(content: string, speechType: SpeechType): Promise<SelfMessagePublishResult> {
 			return publishMessage(content, speechType);
+		},
+
+		publishTraceReply,
+
+		async getTracePreviewEvent(rootId: string, targetId: string): Promise<NostrEvent | null> {
+			if (disposed || !channel) return null;
+			const accepted = resolveReplyTarget(rootId, targetId);
+			if (!accepted) return null;
+			const parent = 'parentId' in accepted.target && accepted.target.parentId !== accepted.root.id
+				? accepted.replies.find((reply) => reply.id === (accepted.target as ParsedTraceReply).parentId)
+				: accepted.root;
+			if (!parent) return null;
+			try {
+				return await loadTracePreviewEvent({ channelId: channel.channelId, root: accepted.root, target: accepted.target, parent });
+			} catch { return null; }
 		},
 
 		openTraceConversation(config: TraceConversationConfig): TraceConversationOpenResult {

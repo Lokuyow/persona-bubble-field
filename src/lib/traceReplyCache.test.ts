@@ -19,7 +19,7 @@ import {
 	TRACE_REPLY_STORE,
 	TRACE_ROOT_STORE
 } from './traceDatabase';
-import { reconcileTraceReplyCache, touchTraceReplyTree } from './traceReplyCache';
+import { loadTracePreviewEvent, reconcileTraceReplyCache, touchTraceReplyTree } from './traceReplyCache';
 import { reconcileTraceRootCache } from './traceRootCache';
 
 const CHANNEL_ID = 'a'.repeat(64);
@@ -132,6 +132,35 @@ afterEach(() => {
 });
 
 describe('trace reply cache reconciliation', () => {
+	it('hydrates accepted root and nested reply previews from signed records without writes', async () => {
+		const root = capRoot;
+		const parent = capReplies[999];
+		const child = capReplies[1000];
+		await seedRootForChannel(CHANNEL_ID, root);
+		await reconcileTraceReplyCache({ channelId: CHANNEL_ID, effectiveRoots: [root.parsed], rawEvents: [parent.raw, child.raw] });
+		const writes = observeWrites();
+		expect(await loadTracePreviewEvent({ channelId: CHANNEL_ID, root: root.parsed, target: root.parsed, parent: root.parsed })).toEqual(root.raw);
+		expect(await loadTracePreviewEvent({ channelId: CHANNEL_ID, root: root.parsed, target: child.parsed, parent: parent.parsed })).toEqual(child.raw);
+		expect(await loadTracePreviewEvent({ channelId: CHANNEL_ID, root: root.parsed, target: child.parsed, parent: root.parsed })).toBeNull();
+		expect(await loadTracePreviewEvent({ channelId: CHANNEL_ID, root: root.parsed, target: capReplies[0].parsed, parent: root.parsed })).toBeNull();
+		expect(writes).toEqual([]);
+	});
+
+	it('rejects corrupt preview signatures and evicted records without repairing persistence', async () => {
+		await seedRootForChannel(CHANNEL_ID, capRoot);
+		await reconcileTraceReplyCache({ channelId: CHANNEL_ID, effectiveRoots: [capRoot.parsed], rawEvents: [capReplies[0].raw] });
+		const db = await database();
+		const key = [CHANNEL_ID, capRoot.parsed.id, capReplies[0].parsed.id] as [string, string, string];
+		const record = (await db.get(TRACE_REPLY_STORE, key))!;
+		await db.put(TRACE_REPLY_STORE, { ...record, rawEvent: { ...capReplies[0].raw, sig: '0'.repeat(128) } });
+		const writes = observeWrites();
+		const input = { channelId: CHANNEL_ID, root: capRoot.parsed, target: capReplies[0].parsed, parent: capRoot.parsed };
+		expect(await loadTracePreviewEvent(input)).toBeNull();
+		expect(writes).toEqual([]);
+		await db.delete(TRACE_REPLY_STORE, key);
+		expect(await loadTracePreviewEvent(input)).toBeNull();
+	});
+
 	it('performs no writes for unchanged or duplicate persisted replies and LRU', async () => {
 		await seedRootForChannel(CHANNEL_ID, capRoot);
 		const input = { channelId: CHANNEL_ID, effectiveRoots: [capRoot.parsed], rawEvents: [] as Event[] };

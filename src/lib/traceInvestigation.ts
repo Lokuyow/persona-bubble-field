@@ -110,6 +110,7 @@ export function prepareTraceInspectionActivity(input: Readonly<{
 	target: GridPosition;
 	nowMs: number;
 	requireCurrentRange?: boolean;
+	activity?: 'trace-inspection' | 'trace-reply';
 	random?: RandomSource;
 }>): TraceInspectionPreparation {
 	const current = getParticipant(input.presence, input.selfId);
@@ -120,7 +121,7 @@ export function prepareTraceInspectionActivity(input: Readonly<{
 	const nextPresence = recordPresenceActivity(
 		input.presence,
 		input.selfId,
-		'trace-inspection',
+		input.activity ?? 'trace-inspection',
 		input.nowMs,
 		input.random
 	);

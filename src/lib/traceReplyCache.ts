@@ -1,5 +1,5 @@
 import type { Event } from 'nostr-tools/pure';
-import { parseWorldMessage, type ParsedTraceReply, type ParsedWorldMessage } from './nostrProtocol';
+import { parseWorldMessage, parseTraceReplyCandidate, validateTraceReplyCandidate, type ParsedTraceReply, type ParsedWorldMessage } from './nostrProtocol';
 import {
 	openTraceDatabase,
 	TRACE_DATABASE_STORES,
@@ -32,6 +32,33 @@ export type TouchTraceReplyTreeInput = Readonly<{
 	channelId: string;
 	rootId: string;
 }>;
+
+/** Reads one existing signed event for preview only; the accepted tree remains the authority. */
+export async function loadTracePreviewEvent(input: Readonly<{
+	channelId: string;
+	root: ParsedWorldMessage;
+	target: ParsedWorldMessage | ParsedTraceReply;
+	parent: ParsedWorldMessage | ParsedTraceReply;
+}>): Promise<Event | null> {
+	const db = await openReplyDatabase();
+	try {
+		const isReply = 'rootId' in input.target;
+		const record = isReply
+			? await db.get(TRACE_REPLY_STORE, [input.channelId, input.root.id, input.target.id])
+			: await db.get(TRACE_ROOT_STORE, [input.channelId, input.target.id]);
+		if (!record || record.channelId !== input.channelId || record.eventId !== input.target.id) return null;
+		const raw = record.rawEvent as Event;
+		if (isReply && (!('rootId' in record) || record.rootId !== input.root.id)) return null;
+		const candidate = isReply ? parseTraceReplyCandidate(raw) : null;
+		const parsed = isReply ? candidate && validateTraceReplyCandidate(candidate, input.root, input.parent)
+			: parseWorldMessage(raw, input.channelId);
+		return parsed?.id === input.target.id && parsed.pubkey === input.target.pubkey ? raw : null;
+	} catch {
+		return null;
+	} finally {
+		db.close();
+	}
+}
 
 type RootAuthority = Readonly<{
 	channelId: string;

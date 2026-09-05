@@ -71,6 +71,7 @@
 	import type { ParsedTraceReply, ParsedWorldMessage } from '$lib/nostrProtocol';
 	import {
 		groupTraceRoots,
+		isWithinTraceInvestigationRange,
 		stepTraceRootSelection,
 		traceSelectionDetails
 	} from '$lib/traceInvestigation';
@@ -80,7 +81,6 @@
 	} from '$lib/traceConversation';
 	import type { DevTraceConversationRuntime } from '$lib/devTraceConversationRuntime';
 	import {
-		deriveTraceReplyCharacter,
 		EMPTY_TRACE_REPLY_REPRESENTATIVE_STATE,
 		numberTraceReplyAuthors,
 		projectTraceReplyCell,
@@ -92,6 +92,11 @@
 		type TraceSpeech
 	} from '$lib/traceReplyPresentation';
 	import HostOwnedComposerLite from '$lib/HostOwnedComposerLite.svelte';
+	import { matchesComposerSubmit, type ComposerSubmitEnvelope } from '$lib/hostOwnedComposerContext';
+	import {
+		acceptedTraceReplyTarget, clearTraceReplyMode, completeTraceReplySubmission,
+		createTraceReplyMode, selectTraceReplyTarget, type TraceReplyMode
+	} from '$lib/traceReplyMode';
 	import { resolveSpeechSubmission } from '$lib/speechSubmission';
 	import type { SpeechType } from '$lib/conversation';
 	import { createSpeechBubbleShape, type SpeechBubbleShape } from '$lib/speechBubblePath';
@@ -150,6 +155,12 @@
 	let recentMessageTimeline: RecentMessageTimeline = [];
 	let effectiveTraceRoots: readonly ParsedWorldMessage[] = [];
 	let traceConversationState: TraceConversationState = { kind: 'closed' };
+	let traceReplyMode = createTraceReplyMode();
+	$: composerDesiredContext = {
+		generation: traceReplyMode.generation,
+		targetId: traceReplyMode.target?.targetId ?? null,
+		clearContentVersion: traceReplyMode.clearContentVersion
+	};
 	let traceReplyRepresentativeState: TraceReplyRepresentativeState = EMPTY_TRACE_REPLY_REPRESENTATIVE_STATE;
 	let traceReplyCells: readonly TraceReplyCell[] = [];
 	let traceConversationController: TraceConversationController | null = null;
@@ -316,12 +327,13 @@
 	);
 	$: traceNavigationPositions = [
 		...traceRootCells.map((cell) => cell.position),
+		...(!traceReplyMode.target && traceConversationProjection ? [traceConversationProjection.current.event.position] : []),
 		...(traceConversationProjection?.parent ? [traceConversationProjection.parent.event.position] : []),
 		...(traceConversationProjection?.directReplies.map((reply) => reply.position) ?? [])
 	].filter((position, index, positions) => positions.findIndex((candidate) => sameCell(candidate, position)) === index);
 	$: traceOnlyCellTriggers = traceNavigationPositions.filter((position) =>
 		!participantViews.some((participant) => sameCell(participant.position, position)) &&
-		actionsForCell(position).length > 0
+		actionsForCell(position, traceReplyMode).length > 0
 	);
 
 	$: visibleParticipantIds = new Set(
@@ -787,6 +799,7 @@
 						setPresence,
 						getEffectiveRoots: () => effectiveTraceRoots,
 						getReplies: () => devTraceReplies,
+						setReplies: setDevTraceReplies,
 						onStateChanged: setTraceConversation
 					});
 					devTraceConversationRuntime = runtime;
@@ -1334,6 +1347,14 @@
 	}
 
 	function setPresence(nextPresence: PresenceState): void {
+		const selfId = devWorldSandboxEnabled ? DEV_WORLD_SELF_ID : selfAccount?.pubkey;
+		const previousSelf = presenceState.participants.find((participant) => participant.id === selfId);
+		const nextSelf = nextPresence.participants.find((participant) => participant.id === selfId);
+		if (traceReplyMode.target && nextSelf &&
+			(!previousSelf || !sameCell(previousSelf.position, nextSelf.position)) &&
+			!isWithinTraceInvestigationRange(nextSelf.position, traceReplyMode.target.position)) {
+			traceReplyMode = clearTraceReplyMode(traceReplyMode, true);
+		}
 		const previousProjection = getPresenceProjection(presenceState);
 		const activeIds = nextPresence.participants
 			.filter((participant) => participant.status === 'active')
@@ -1382,6 +1403,9 @@
 	}
 
 	function setTraceConversation(next: TraceConversationState): void {
+		if (traceReplyMode.target && !acceptedTraceReplyTarget(next, traceReplyMode.target)) {
+			traceReplyMode = clearTraceReplyMode(traceReplyMode);
+		}
 		const presentation = reconcileTraceReplyPresentation(traceReplyRepresentativeState, next);
 		traceReplyRepresentativeState = presentation.state;
 		traceReplyCells = presentation.cells;
@@ -1399,6 +1423,7 @@
 
 	function closeTraceConversation(): void {
 		closeFieldActionMenu();
+		traceReplyMode = clearTraceReplyMode(traceReplyMode);
 		traceConversationController?.closeTraceConversation();
 		if (!traceConversationController) setTraceConversation({ kind: 'closed' });
 	}
@@ -1406,17 +1431,19 @@
 	function replyNavigationItemsForCell(position: { x: number; y: number }) {
 		if (!traceConversationProjection) return [];
 		const replies = [
+			...(!traceReplyMode.target && traceConversationProjection.current.kind === 'reply'
+				? [traceConversationProjection.current.event] : []),
 			...(traceConversationProjection.parent?.kind === 'reply'
 				? [traceConversationProjection.parent.event]
 				: []),
 			...traceConversationProjection.directReplies
 		].filter((reply) =>
-			reply.id !== traceConversationProjection?.current.event.id && sameCell(reply.position, position)
+				(!traceReplyMode.target || reply.id !== traceConversationProjection?.current.event.id) && sameCell(reply.position, position)
 		);
 		return numberTraceReplyAuthors(replies);
 	}
 
-	function actionsForCell(position: { x: number; y: number }): readonly FieldCellAction[] {
+	function actionsForCell(position: { x: number; y: number }, replyMode: TraceReplyMode = traceReplyMode): readonly FieldCellAction[] {
 		const traceTargetVisibility = traceConversationTargetVisibilityByCell.get(`${position.x},${position.y}`);
 		const traceTargetIsOnscreen = traceTargetVisibility !== 'offscreen';
 		const participantIds = participantViews
@@ -1426,7 +1453,11 @@
 		const parentRootAtCell =
 			traceConversationProjection?.parent?.kind === 'root' &&
 			sameCell(traceConversationProjection.parent.event.position, position);
-		if (parentRootAtCell) {
+		const reselectCurrentRoot = !replyMode.target && traceConversationProjection?.current.kind === 'root' &&
+			sameCell(traceConversationProjection.current.event.position, position);
+		if (reselectCurrentRoot) {
+			trace = { kind: 'trace', rootId: traceConversationProjection!.current.event.id, behavior: 'select-current' };
+		} else if (parentRootAtCell) {
 			if (traceTargetIsOnscreen) {
 				trace = {
 					kind: 'trace',
@@ -1453,7 +1484,30 @@
 	}
 
 	function investigateTraceRoot(rootId: string): void {
-		traceConversationController?.openTraceConversation({ rootId, currentId: rootId });
+		const result = traceConversationController?.openTraceConversation({ rootId, currentId: rootId });
+		if (result?.kind === 'opened') activateReplyTarget(rootId, rootId);
+	}
+
+	function activateReplyTarget(rootId: string, targetId: string): void {
+		const accepted = traceConversationController?.getTraceConversationState();
+		const target = accepted && acceptedTraceReplyTarget(accepted, { rootId, targetId });
+		if (target) traceReplyMode = selectTraceReplyTarget(traceReplyMode, target);
+	}
+
+	function selectTraceSpeech(targetId: string): void {
+		const result = traceConversationController?.selectTraceConversationSpeech(targetId);
+		const accepted = traceConversationController?.getTraceConversationState();
+		if (result?.kind === 'opened' && accepted?.kind === 'open') activateReplyTarget(accepted.root.id, targetId);
+	}
+
+	function clearComposerReply(generation: number): void {
+		if (generation === traceReplyMode.generation) traceReplyMode = clearTraceReplyMode(traceReplyMode);
+	}
+
+	async function loadComposerPreview(targetId: string) {
+		const target = traceReplyMode.target;
+		return target?.targetId === targetId && worldSession
+			? worldSession.getTracePreviewEvent(target.rootId, targetId) : null;
 	}
 
 	function executeFieldCellAction(
@@ -1464,14 +1518,14 @@
 		closeFieldActionMenu();
 		if (action.kind === 'trace') {
 			if (action.behavior === 'select-current') {
-				traceConversationController?.selectTraceConversationSpeech(action.rootId);
+				selectTraceSpeech(action.rootId);
 			} else {
 				investigateTraceRoot(action.rootId);
 			}
 			return;
 		}
 		if (action.kind === 'reply') {
-			traceConversationController?.selectTraceConversationSpeech(action.replyId);
+			selectTraceSpeech(action.replyId);
 			return;
 		}
 		const participant = participantViews.find((candidate) => candidate.id === action.participantId);
@@ -1582,7 +1636,7 @@
 		};
 		const next = stepTraceRootSelection(current, traceRootCells, delta);
 		if (next.rootId === current.rootId) return;
-		traceConversationController?.openTraceConversation({ rootId: next.rootId, currentId: next.rootId });
+		investigateTraceRoot(next.rootId);
 	}
 
 	function fieldActionLabel(action: FieldCellAction): string {
@@ -1592,7 +1646,7 @@
 				? replyNavigationItemsForCell(fieldActionMenu.position).find((candidate) => candidate.reply.id === action.replyId)
 				: undefined;
 			if (!item) return '返信を調べる';
-			const character = deriveTraceReplyCharacter(item.reply, CHARACTER_CATALOG);
+			const character = traceCharacter(item.reply.pubkey);
 			return `${character.name}${item.authorOrdinal === null ? '' : ` #${item.authorOrdinal}`}`;
 		}
 		const participant = participantViews.find((candidate) => candidate.id === action.participantId);
@@ -1739,22 +1793,35 @@
 	}
 
 	async function submitComposerContent(
-		content: string,
+		envelope: ComposerSubmitEnvelope,
 		options: Readonly<{ signal: AbortSignal; shortcutId?: string }>
 	): Promise<Readonly<{ eventId: string }>> {
+		const desired = () => ({ generation: traceReplyMode.generation, targetId: traceReplyMode.target?.targetId ?? null,
+			clearContentVersion: traceReplyMode.clearContentVersion });
+		if (!matchesComposerSubmit(envelope, desired())) throw new Error('Composer reply context is not synchronized.');
+		const target = traceReplyMode.target;
 		const submission = resolveSpeechSubmission({
-			content,
+			content: envelope.output.content,
 			shortcutId: options.shortcutId,
 			selectedSpeechType
 		});
 		composerSubmissionInProgress = true;
 		try {
-			await waitForMessageReady(options.signal);
+			if (!devWorldSandboxEnabled) await waitForMessageReady(options.signal);
 			if (options.signal.aborted) throw new DOMException('Submission was cancelled.', 'AbortError');
-			const result = await worldSession?.publishMessage(submission.content, submission.speechType);
+			if (!matchesComposerSubmit(envelope, desired())) throw new Error('Composer reply target changed before publication.');
+			const result = target
+				? await (devWorldSandboxEnabled ? devTraceConversationRuntime : worldSession)?.publishTraceReply({
+					rootId: target.rootId, targetId: target.targetId, ...submission
+				})
+				: !devWorldSandboxEnabled ? await worldSession?.publishMessage(submission.content, submission.speechType) : undefined;
 			if (result?.kind === 'succeeded') {
 				selectedSpeechType = 'normal';
+				traceReplyMode = completeTraceReplySubmission(traceReplyMode, envelope.generation);
 				return { eventId: result.eventId };
+			}
+			if (result?.kind === 'out-of-range' && traceReplyMode.generation === envelope.generation) {
+				traceReplyMode = clearTraceReplyMode(traceReplyMode, true);
 			}
 			throw new Error('Message was not confirmed by Relay.');
 		} finally {
@@ -2387,7 +2454,7 @@
 			speech,
 			role,
 			event,
-			character: deriveCharacterFromPubkey(event.pubkey, CHARACTER_CATALOG),
+			character: traceCharacter(event.pubkey),
 			tone: traceTone(event.pubkey),
 			compact: placement.scale < 1,
 			world,
@@ -2397,6 +2464,11 @@
 				: { x: ghostScreen.x, y: ghostScreen.y - cellSize * (placement.scale < 1 ? 0.29 : 0.5) - 4 },
 			ghost: selfParticipant ? null : { world, screen: ghostScreen }
 		};
+	}
+
+	function traceCharacter(pubkey: string): Character {
+		return devWorldSandboxEnabled && pubkey === DEV_WORLD_SELF_ID
+			? getDevWorldCharacter(selectedCharacterId) : deriveCharacterFromPubkey(pubkey, CHARACTER_CATALOG);
 	}
 
 	function tailGeometry(start: WorldPoint, target: WorldPoint, width = 11, overlap = 2, bodyExtension = 0) {
@@ -2458,7 +2530,7 @@
 
 <main
 	class="app-shell"
-	class:composer-available={runtimeMode === 'relay'}
+	class:composer-available={runtimeMode === 'relay' || devTraceReplyFixtureEnabled}
 	class:composer-keyboard-visible={composerKeyboardInset > 0}
 	data-trace-runtime={traceConversationController ? runtimeMode : undefined}
 	style={`--composer-keyboard-inset: ${composerKeyboardInset}px;--composer-initial-preferred-height: ${INITIAL_COMPOSER_PREFERRED_HEIGHT}px;${composerPreferredHeight === null ? '' : `--composer-preferred-height: ${composerPreferredHeight}px;`}`}
@@ -3015,7 +3087,7 @@
 		</div>
 	{/if}
 
-	{#if runtimeMode === 'relay'}
+	{#if runtimeMode === 'relay' || devTraceReplyFixtureEnabled}
 		<div class="composer-dock" aria-label="Message composer">
 			<div class="composer-dock-content">
 				<button
@@ -3033,6 +3105,9 @@
 					<HostOwnedComposerLite
 						bind:this={composerComponent}
 						submitContent={submitComposerContent}
+						desiredContext={composerDesiredContext}
+						loadPreview={loadComposerPreview}
+						onPreviewClear={clearComposerReply}
 						onEditorEmptyChange={handleComposerEditorEmptyChange}
 						onPreferredHeightChange={setComposerPreferredHeight}
 					/>
@@ -4190,7 +4265,8 @@
 		transform: translateX(-50%);
 	}
 
-	.composer-available .world-controls {
+	.composer-available .world-controls,
+	.composer-available .sandbox-controls {
 		bottom: calc(var(--composer-dock-height) + 76px);
 	}
 

@@ -42,6 +42,7 @@ function fixture(initialPresence?: PresenceState) {
 		setPresence,
 		getEffectiveRoots: () => roots,
 		getReplies: () => replies,
+		setReplies: (next) => { replies = next; runtime.reconcileReplies(next); },
 		onStateChanged: (state) => states.push(state),
 		now: () => 2_000,
 		random: () => 0
@@ -59,6 +60,21 @@ function fixture(initialPresence?: PresenceState) {
 }
 
 describe('DEV trace conversation runtime', () => {
+	it.each(['normal', 'shout', 'monologue'] as const)('publishes a local nested %s reply without selecting it', async (speechType) => {
+		const f = fixture();
+		const parent = reply('parent', 'new');
+		f.replies = [parent];
+		f.runtime.openTraceConversation({ rootId: 'new', currentId: 'new' });
+		f.runtime.selectTraceConversationSpeech(parent.id);
+		expect(await f.runtime.publishTraceReply({ rootId: 'new', targetId: parent.id, content: 'local draft', speechType }))
+			.toEqual({ kind: 'succeeded', eventId: '1'.padStart(64, '0') });
+		expect(f.replies.at(-1)).toMatchObject({
+			pubkey: 'self', content: 'local draft', speechType, rootId: 'new', parentId: parent.id,
+			parentKind: 1111, parentPubkey: parent.pubkey, position: { x: 1, y: 1 }
+		});
+		expect(f.runtime.getTraceConversationState()).toMatchObject({ config: { currentId: parent.id }, replies: f.replies });
+	});
+
 	it('opens only effective roots with an empty settled reply snapshot', () => {
 		const f = fixture();
 		expect(f.runtime.openTraceConversation({ rootId: 'missing', currentId: 'missing' })).toEqual({ kind: 'blocked' });
