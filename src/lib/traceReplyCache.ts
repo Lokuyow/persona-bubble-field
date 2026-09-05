@@ -7,6 +7,7 @@ import {
 	TRACE_REPLY_STORE,
 	TRACE_ROOT_STORE,
 	type TraceReadwriteTransaction,
+	type TraceReplyRecord,
 	type TraceReplyLruRecord
 } from './traceDatabase';
 import {
@@ -246,21 +247,22 @@ function enforceGlobalCap(
 	}
 }
 
-async function rewriteReplies(
+async function applyReplyChanges(
 	tx: TraceReadwriteTransaction,
+	oldReplyRecords: readonly unknown[],
 	oldReplyKeys: readonly IDBValidKey[],
+	oldLruRecords: readonly unknown[],
 	oldLruKeys: readonly IDBValidKey[],
 	trees: ReadonlyMap<string, ReplyTree>,
 	lru: ReadonlyMap<string, TraceReplyLruRecord>
 ): Promise<void> {
-	const replyStore = tx.objectStore(TRACE_REPLY_STORE);
-	for (const key of oldReplyKeys) await replyStore.delete(key as [string, string, string]);
+	const replyPuts = new Map<string, TraceReplyRecord>();
 	for (const tree of [...trees.values()].sort((first, second) =>
 		first.channelId < second.channelId ? -1 : first.channelId > second.channelId ? 1 :
 		first.rootId < second.rootId ? -1 : first.rootId > second.rootId ? 1 : 0
 	)) {
 		for (const event of tree.replies) {
-			await replyStore.put({
+			replyPuts.set(JSON.stringify([tree.channelId, tree.rootId, event.reply.id]), {
 				channelId: tree.channelId,
 				rootId: tree.rootId,
 				eventId: event.reply.id,
@@ -268,10 +270,43 @@ async function rewriteReplies(
 			});
 		}
 	}
+	const replyStore = tx.objectStore(TRACE_REPLY_STORE);
+	for (let index = 0; index < oldReplyKeys.length; index += 1) {
+		const key = oldReplyKeys[index];
+		const id = Array.isArray(key) && key.length === 3 && key.every((part) => typeof part === 'string')
+			? JSON.stringify(key) : null;
+		const next = id === null ? undefined : replyPuts.get(id);
+		if (!next) {
+			await replyStore.delete(key as [string, string, string]);
+			continue;
+		}
+		const old = recordObject(oldReplyRecords[index]);
+		// Resolution retains the validated persisted rawEvent reference when it wins.
+		// Compare its provenance, not just the event ID; keep envelope cleanup intact.
+		if (old && Object.keys(old).length === 4 &&
+			old.channelId === next.channelId && old.rootId === next.rootId &&
+			old.eventId === next.eventId && old.rawEvent === next.rawEvent
+		) replyPuts.delete(id!);
+	}
+	for (const record of replyPuts.values()) await replyStore.put(record);
 
+	const lruPuts = new Map([...lru.values()].map((record) => [JSON.stringify([record.channelId, record.rootId]), record]));
 	const lruStore = tx.objectStore(TRACE_REPLY_LRU_STORE);
-	for (const key of oldLruKeys) await lruStore.delete(key as [string, string]);
-	for (const record of lru.values()) await lruStore.put(record);
+	for (let index = 0; index < oldLruKeys.length; index += 1) {
+		const key = oldLruKeys[index];
+		const id = Array.isArray(key) && key.length === 2 && key.every((part) => typeof part === 'string')
+			? JSON.stringify(key) : null;
+		const next = id === null ? undefined : lruPuts.get(id);
+		if (!next) {
+			await lruStore.delete(key as [string, string]);
+			continue;
+		}
+		const old = recordObject(oldLruRecords[index]);
+		if (old && Object.keys(old).length === 3 &&
+			old.channelId === next.channelId && old.rootId === next.rootId && old.accessOrder === next.accessOrder
+		) lruPuts.delete(id!);
+	}
+	for (const record of lruPuts.values()) await lruStore.put(record);
 }
 
 function currentChannelSnapshot(
@@ -313,7 +348,7 @@ export async function reconcileTraceReplyCache(
 			? null
 			: treeKey(input.channelId, input.currentOpenRootId);
 		enforceGlobalCap(trees, lru, currentOpenKey);
-		await rewriteReplies(tx, replyKeys, lruKeys, trees, lru);
+		await applyReplyChanges(tx, replyRecords, replyKeys, lruRecords, lruKeys, trees, lru);
 		await tx.done;
 		return currentChannelSnapshot(trees, input);
 	} catch {
