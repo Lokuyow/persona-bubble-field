@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { finalizeEvent, getPublicKey } from 'nostr-tools/pure';
+import { finalizeEvent, getPublicKey, verifyEvent, type Event as NostrEvent } from 'nostr-tools/pure';
 import {
 	buildPositionEventTemplate,
 	buildTraceReplyTemplate,
@@ -251,6 +251,7 @@ async function installDelayedRelay(page: Page, options: {
 		const timelineHistory = (historyMessages ?? []) as Array<Record<string, unknown>>;
 		const traceReplyHistory = traceReplies as Array<Record<string, unknown>>;
 		const state = {
+			traceDeliveries: [] as string[],
 			requests: [] as Array<{ url: string; subId: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] }>,
 			published: [] as Array<Record<string, unknown>>,
 			metadataReleased: false,
@@ -265,7 +266,19 @@ async function installDelayedRelay(page: Page, options: {
 			echoRepliesBeforeResult: false,
 			replyOutcome: 'accepted' as 'accepted' | 'rejected' | 'duplicate'
 		};
-		const deliver = (socket: FakeWebSocket, packet: unknown[]) => socket.dispatch('message', { type: 'message', data: JSON.stringify(packet) });
+		const deliver = (socket: FakeWebSocket, packet: unknown[]) => {
+			if (packet[0] === 'EVENT' && (packet[2] as { kind?: number }).kind === 1111) state.traceDeliveries.push((packet[2] as { id: string }).id);
+			socket.dispatch('message', { type: 'message', data: JSON.stringify(packet) });
+		};
+		const matchesTraceFilter = (event: Record<string, unknown>, filter: Record<string, unknown>) =>
+			(!filter.kinds || (filter.kinds as number[]).includes(event.kind as number)) &&
+			(filter.since === undefined || (event.created_at as number) >= (filter.since as number)) &&
+			(filter.until === undefined || (event.created_at as number) <= (filter.until as number)) &&
+			Object.entries(filter).filter(([key]) => /^#[A-Za-z]$/.test(key)).every(([key, values]) =>
+				(event.tags as string[][]).some((tag) => tag[0] === key.slice(1) && (values as string[]).includes(tag[1])));
+		const deliverTraceLive = (request: PendingRequest, event: Record<string, unknown>) => {
+			if (request.filters.some((filter) => matchesTraceFilter(event, filter))) deliver(request.socket, ['EVENT', request.subId, event]);
+		};
 		const respondPublish = (socket: FakeWebSocket, event: Record<string, unknown>) => {
 			const reject = event.kind === 42 && state.rejectMessagePublishes || event.kind === 30078 && state.rejectPositionPublishes ||
 				event.kind === 1111 && state.replyOutcome !== 'accepted';
@@ -299,7 +312,13 @@ async function installDelayedRelay(page: Page, options: {
 			deliver(request.socket, ['EOSE', request.subId]);
 		};
 		const respondTraceReplies = (request: PendingRequest) => {
-			for (const event of traceReplyHistory) deliver(request.socket, ['EVENT', request.subId, event]);
+			const selected = new Map<string, Record<string, unknown>>();
+			for (const filter of request.filters) {
+				const matches = traceReplyHistory.filter((event) => matchesTraceFilter(event, filter))
+					.sort((a, b) => (b.created_at as number) - (a.created_at as number) || String(a.id).localeCompare(String(b.id)));
+				for (const event of matches.slice(0, filter.limit as number | undefined)) selected.set(event.id as string, event);
+			}
+			for (const event of selected.values()) deliver(request.socket, ['EVENT', request.subId, event]);
 			deliver(request.socket, ['EOSE', request.subId]);
 		};
 
@@ -342,7 +361,7 @@ async function installDelayedRelay(page: Page, options: {
 					state.published.push(packet[1] as Record<string, unknown>);
 					const event = packet[1] as Record<string, unknown>;
 					if (event.kind === 1111 && state.echoRepliesBeforeResult) {
-						for (const request of activeTraceReplies) deliver(request.socket, ['EVENT', request.subId, event]);
+						for (const request of activeTraceReplies) deliverTraceLive(request, event);
 					}
 					if (event.kind === 1111 && state.deferReplyPublishes || event.kind === 30078 && state.deferPositionPublishes) {
 						pendingPublishes.push({ socket: this, event });
@@ -354,6 +373,12 @@ async function installDelayedRelay(page: Page, options: {
 				const request = { socket: this, subId: packet[1] as string, filter: filters[0] ?? {}, filters };
 				const relayUrl = new URL(this.url).toString();
 				state.requests.push({ url: relayUrl, subId: request.subId, filter: request.filter, filters });
+				if (filters.some((filter) => Object.keys(filter).filter((key) => /^#[A-Za-z]$/.test(key)).length > 3)) {
+					const previous = activeTraceReplies.findIndex((candidate) => candidate.socket === this && candidate.subId === request.subId);
+					if (previous >= 0) activeTraceReplies.splice(previous, 1);
+					deliver(this, ['CLOSED', request.subId, 'ERROR: bad req: too many tags in filter']);
+					return;
+				}
 				if (seed.has(relayUrl)) {
 					if (state.metadataReleased) respondMetadata(request);
 					else pendingMetadata.push(request);
@@ -426,7 +451,9 @@ async function installDelayedRelay(page: Page, options: {
 				},
 				deferTraceReplies: () => { state.traceRepliesReleased = false; },
 				injectTraceReply: (event: object) => {
-					for (const request of activeTraceReplies) deliver(request.socket, ['EVENT', request.subId, event]);
+					const raw = event as Record<string, unknown>;
+					if (!traceReplyHistory.some((known) => known.id === raw.id)) traceReplyHistory.push(raw);
+					for (const request of activeTraceReplies) deliverTraceLive(request, raw);
 				},
 				injectClosedTraceReply: (event: object) => {
 					for (const request of closedTraceReplies) deliver(request.socket, ['EVENT', request.subId, event]);
@@ -624,6 +651,97 @@ function reverseMoveKey(key: AvailableMove['key']): AvailableMove['key'] {
 }
 
 test.describe('Relay startup', () => {
+	test('shows published Trace replies to a fresh client through Relay history and live delivery', async ({ page: sender, browser }) => {
+		const time = Date.now();
+		const trace = traceRuntimeEvents();
+		const readerContext = await browser.newContext({ viewport: { width: 1100, height: 850 } });
+		try {
+			const reader = await readerContext.newPage();
+			const readerSecret = new Uint8Array(32).fill(43);
+			const readerPubkey = getPublicKey(readerSecret);
+			expect(readerPubkey).not.toBe(trace.selfPubkey);
+			const readerPosition = finalizeEvent(buildPositionEventTemplate({
+				channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 3, y: 2 }, slot: 0, createdAt: trace.selfPosition.created_at
+			}), readerSecret);
+			const openClient = async (client: Page, secret: Uint8Array, pubkey: string, position: NostrEvent, history: NostrEvent[]) => {
+				await client.clock.setFixedTime(time);
+				await client.emulateMedia({ reducedMotion: 'reduce' });
+				await client.setViewportSize({ width: 1100, height: 850 });
+				await installHostOwnedStub(client);
+				await installDelayedRelay(client, { primaryEvents: { message: trace.message, position }, traceRoots: [trace.root], traceReplies: history });
+				await seedRelayAccount(client, secret, pubkey);
+				await client.goto('/');
+				await expect(client.locator('.composer-dock')).toBeVisible();
+				await client.evaluate(() => {
+					const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
+					relay.releaseMetadata(); relay.releasePrimary();
+				});
+				await expect(client.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '3,2');
+				await client.getByRole('button', { name: 'Hide Chatter' }).click();
+				await expect(client.locator('[data-trace-light-position="4,2"]')).toBeVisible();
+			};
+			const publish = async (content: string) => {
+				await selectRelayTraceCell(sender, '4,2');
+				await expect(sender.getByLabel('Reply preview', { exact: true })).toHaveAttribute('data-reply-id', trace.root.id);
+				const editor = sender.getByRole('textbox', { name: '投稿エディター' });
+				await editor.fill(content);
+				await editor.press('Enter');
+				await expect(editor).toHaveValue('');
+				// Only the signed EVENT received on the publish wire crosses clients.
+				const raw = (await relayState(sender)).state.published.find((event) => event.kind === 1111 && event.content === content) as NostrEvent;
+				expect(verifyEvent(raw)).toBe(true);
+				return raw;
+			};
+			await openClient(sender, trace.selfSecret, trace.selfPubkey, trace.selfPosition, []);
+			const history = await publish('cross-client history reply');
+			await openClient(reader, readerSecret, readerPubkey, readerPosition, [history]);
+			const cachedIds = () => reader.evaluate(async () => {
+				const db = await new Promise<IDBDatabase>((resolve, reject) => {
+					const request = indexedDB.open('persona-bubble-field-trace');
+					request.onsuccess = () => resolve(request.result);
+					request.onerror = () => reject(request.error);
+				});
+				try {
+					return await new Promise<string[]>((resolve, reject) => {
+						const request = db.transaction('trace-replies').objectStore('trace-replies').getAll();
+						request.onsuccess = () => resolve(request.result.map((record) => record.eventId));
+						request.onerror = () => reject(request.error);
+					});
+				} finally { db.close(); }
+			});
+			expect(await cachedIds()).toEqual([]);
+			await selectRelayTraceCell(reader, '4,2');
+			await expect(reader.locator(`[data-trace-reply-id="${history.id}"]`)).toContainText(history.content);
+			await expect.poll(async () => (await relayState(reader)).state.requests.some((request) =>
+				request.filters.length === 2 && request.filters.every((filter) => (filter.kinds as number[])?.includes(1111) && filter.limit === undefined)
+			)).toBe(true);
+			const wire = (await relayState(reader)).state.requests.find((request) => request.filters.length === 2 && request.filter.limit === 100)!;
+			expect(wire.filters[0]['#E']).toEqual([trace.root.id]);
+			expect(wire.filters[1]['#e']).toEqual([trace.root.id]);
+			expect(wire.filters[1]).not.toHaveProperty('#E');
+			await sender.clock.setFixedTime(time + 1000);
+			await sender.getByRole('textbox', { name: '投稿エディター' }).press('Escape');
+			await sender.keyboard.press('ArrowUp');
+			await expect(sender.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '3,1');
+			const live = await publish('cross-client live reply');
+			expect(live.id).not.toBe(history.id);
+			const wrongRoot = finalizeEvent({
+				kind: live.kind, created_at: live.created_at, content: 'wrong-root candidate',
+				tags: live.tags.map((tag) => tag[0] === 'E' ? ['E', 'f'.repeat(64), '', trace.root.pubkey] : tag)
+			}, trace.selfSecret);
+			expect(parseTraceReplyCandidate(wrongRoot)).not.toBeNull();
+			await reader.evaluate((event) => (window as unknown as { __relayStartupTest: { injectTraceReply(event: object): void } }).__relayStartupTest.injectTraceReply(event), wrongRoot);
+			await reader.evaluate((event) => (window as unknown as { __relayStartupTest: { injectTraceReply(event: object): void } }).__relayStartupTest.injectTraceReply(event), live);
+			await expect(reader.locator(`[data-trace-reply-id="${live.id}"]`)).toContainText(live.content);
+			const received = await reader.evaluate(() => (window as unknown as { __relayStartupTest: { state: { traceDeliveries: string[] } } }).__relayStartupTest.state.traceDeliveries);
+			expect(received).toEqual(expect.arrayContaining([history.id, wrongRoot.id, live.id]));
+			await expect.poll(cachedIds).toEqual(expect.arrayContaining([history.id, live.id]));
+			expect(await cachedIds()).not.toContain(wrongRoot.id);
+			await expect(reader.locator(`[data-trace-reply-id="${wrongRoot.id}"]`)).toHaveCount(0);
+			await expect(reader.locator('[data-trace-current-id]')).toHaveAttribute('data-trace-current-id', trace.root.id);
+		} finally { await readerContext.close(); }
+	});
+
 	test('rejects mismatched structured reply output before position or message publication', async ({ page }) => {
 		const trace = traceRuntimeEvents();
 		await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -791,7 +909,7 @@ test.describe('Relay startup', () => {
 				(filter['#E'] as string[] | undefined)?.includes(trace.root.id)
 			) && request.filters.some((filter) =>
 				(filter.kinds as number[] | undefined)?.includes(1111) &&
-				(filter['#E'] as string[] | undefined)?.includes(trace.root.id) &&
+				!('#E' in filter) &&
 				(filter['#e'] as string[] | undefined)?.includes(trace.root.id)
 			)
 		)).toBe(true);
@@ -937,7 +1055,7 @@ test.describe('Relay startup', () => {
 				!('#e' in filter)
 			) && request.filters.some((filter) =>
 				(filter.kinds as number[] | undefined)?.includes(1111) &&
-				(filter['#E'] as string[] | undefined)?.includes(trace.root.id) &&
+				!('#E' in filter) &&
 				(filter['#e'] as string[] | undefined)?.includes(trace.direct.id)
 			)
 		)).toBe(true);

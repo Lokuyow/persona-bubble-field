@@ -138,7 +138,7 @@ export type TraceReplyFilterOptions = {
 	rootId: string;
 };
 
-export type TraceDirectReplyFilterOptions = TraceReplyFilterOptions & {
+export type TraceDirectReplyFilterOptions = {
 	currentId: string;
 };
 
@@ -597,8 +597,11 @@ export function buildTraceReplyFilter(options: TraceReplyFilterOptions): Filter 
 export function buildTraceDirectReplyFilter(options: TraceDirectReplyFilterOptions): Filter {
 	assertNostrEventId(options.currentId, 'Current event ID');
 	return {
-		...buildTraceReplyFilter(options),
-		'#e': [options.currentId]
+		kinds: [TRACE_REPLY_KIND],
+		'#e': [options.currentId],
+		'#L': [PROTOTYPE_NAMESPACE],
+		'#l': ['chat'],
+		limit: TRACE_REPLY_INITIAL_LIMIT
 	};
 }
 
