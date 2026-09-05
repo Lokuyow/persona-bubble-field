@@ -938,6 +938,11 @@
 				if (movementHoldDirection) requestMovement(movementHoldDirection);
 			}, 500);
 		};
+		const rephaseMovementTimer = () => {
+			if (holdTimer === null) return;
+			window.clearInterval(holdTimer);
+			startMovementTimer();
+		};
 		const startKeyboardHold = (direction: Direction, source: 'page' | 'composer-editor') => {
 			movementHoldOwner = 'keyboard';
 			movementHoldDirection = direction;
@@ -1022,8 +1027,12 @@
 				startKeyboardHold(nextDirection, source);
 				return;
 			}
+			const previousDirection = movementHoldDirection;
 			movementHoldDirection = nextDirection;
-			requestMovement(nextDirection);
+			if (nextDirection !== previousDirection) {
+				requestMovement(nextDirection);
+				rephaseMovementTimer();
+			}
 		};
 		const handleKeyup = (event: KeyboardEvent) => {
 			const keyToken = event.code || event.key;
@@ -1037,7 +1046,7 @@
 			movementHoldDirection = nextDirection;
 		};
 		const handleMovementFocusIn = (event: FocusEvent) => {
-			if (movementHoldOwner === 'keyboard' && movementHoldDirection && !isComposerEditorKeyboardEvent(event)) clearMovementHold();
+			if (movementHoldOwner === 'keyboard' && !isComposerEditorKeyboardEvent(event)) clearMovementHold();
 		};
 		const handleWindowBlur = () => {
 			clearMovementHold();
@@ -1413,17 +1422,15 @@
 	}
 
 	function directionFromKeyboardMovementKeys(keys: Iterable<string>): Direction | null {
-		let horizontal = 0;
-		let vertical = 0;
+		const activeDirections = new Set<Direction>();
 		for (const key of keys) {
 			const direction = directionFromCode(key) ?? directionFromKey(key);
-			if (direction === 'left') horizontal -= 1;
-			if (direction === 'right') horizontal += 1;
-			if (direction === 'up') vertical -= 1;
-			if (direction === 'down') vertical += 1;
+			if (direction) activeDirections.add(direction);
 		}
-		const x = Math.sign(horizontal);
-		const y = Math.sign(vertical);
+		const x = activeDirections.has('left') === activeDirections.has('right')
+			? 0 : activeDirections.has('right') ? 1 : -1;
+		const y = activeDirections.has('up') === activeDirections.has('down')
+			? 0 : activeDirections.has('down') ? 1 : -1;
 		if (x === 0 && y === 0) return null;
 		if (x === 0) return y < 0 ? 'up' : 'down';
 		if (y === 0) return x < 0 ? 'left' : 'right';

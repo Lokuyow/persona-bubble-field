@@ -1981,6 +1981,46 @@ test.describe('DEV World Sandbox', () => {
 		await page.keyboard.up('a');
 	});
 
+	test('deduplicates logical directions and cleans up a neutral hold on native input focus', async ({ page }) => {
+		await openClockedDevWorld(page);
+		const self = page.locator('.participant').first();
+
+		await page.keyboard.down('w');
+		await expect(self).toHaveAttribute('data-position', '7,2');
+		await page.keyboard.down('ArrowUp');
+		await expect(self).toHaveAttribute('data-position', '7,2');
+		await page.keyboard.down('s');
+		await expect(self).toHaveAttribute('data-position', '7,2');
+		await page.clock.runFor(500);
+		await expect(self).toHaveAttribute('data-position', '7,2');
+
+		await page.getByLabel('Select sandbox character').focus();
+		await page.keyboard.up('s');
+		await page.clock.runFor(1_000);
+		await expect(self).toHaveAttribute('data-position', '7,2');
+		await page.keyboard.up('ArrowUp');
+		await page.keyboard.up('w');
+	});
+
+	test('re-phases the keyboard hold timer after a diagonal direction change', async ({ page }) => {
+		await openClockedDevWorld(page);
+		const self = page.locator('.participant').first();
+
+		await page.keyboard.down('s');
+		await expect(self).toHaveAttribute('data-position', '7,4');
+		await page.clock.runFor(400);
+		await page.keyboard.down('d');
+		await expect(self).toHaveAttribute('data-position', '8,5');
+		await page.clock.runFor(99);
+		await expect(self).toHaveAttribute('data-position', '8,5');
+		await page.clock.runFor(1);
+		await expect(self).toHaveAttribute('data-position', '8,5');
+		await page.clock.runFor(400);
+		await expect(self).toHaveAttribute('data-position', '9,6');
+		await page.keyboard.up('d');
+		await page.keyboard.up('s');
+	});
+
 	test('holds a diagonal at the existing cadence and follows the key that remains held', async ({ page }) => {
 		await openClockedDevWorld(page);
 		const self = page.locator('.participant').first();
