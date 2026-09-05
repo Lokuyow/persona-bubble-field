@@ -359,7 +359,7 @@ PR merge後の不要なhead branchは削除する。GitHubの自動branch削除�
 3. `npm run build:pages`
 4. `git diff --check`
 
-ブラウザの挙動に関係する変更では、上記に加えて適切なPlaywright E2Eを実行する。人間向けの通常経路は `npm run test:e2e`、coding agent向けの低出力経路は `npm run test:e2e:agent` とする。ローカルのChromium binaryが未installの場合は `npx playwright install chromium` を実行する。E2Eは実Relay、外部network、実account、secretへ依存せず、開発用のDEV World Sandboxを対象とする。
+ブラウザの挙動に関係する変更では、上記に加えて適切なPlaywright E2Eを実行する。人間向けの通常経路は `npm run test:e2e`、coding agent向けの低出力経路は `npm run test:e2e:agent` とする。ローカルのChromium binaryが未installの場合は `npx playwright install chromium` を実行する。E2Eには、ローカルのDEV World Sandboxを使う検証と、Fake RelayやComposer stub等のローカルtest doublesを使って通常画面を検証する経路がある。いずれも実Relay、外部network、実account、実secretへ依存しない。
 
 通常のローカル検証に `npm ci` を含めない。同じworktreeで `npm run dev` または `npm run dev:host` が起動中でも、`node_modules` を削除せず `npm run validate` を実行できる構成を維持する。
 
