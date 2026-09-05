@@ -146,6 +146,36 @@ async function profileTriggerCenter(page: Page, name: string): Promise<{ x: numb
 }
 
 test.describe('DEV World Sandbox', () => {
+	test('does not paint the default-viewport field scene before measurement and keeps it visible after resize', async ({ page, browser }) => {
+		const ssrContext = await browser.newContext({
+			baseURL: test.info().project.use.baseURL as string,
+			javaScriptEnabled: false,
+			viewport: { width: 1440, height: 900 }
+		});
+		try {
+			const ssrPage = await ssrContext.newPage();
+			await ssrPage.goto('/?devWorld=1', { waitUntil: 'domcontentloaded' });
+			const prerenderedScene = ssrPage.locator('.field-scene');
+			await expect(prerenderedScene).toHaveCount(1);
+			expect(await ssrPage.locator('.field-viewport').evaluate((element) => ({
+				measured: element.classList.contains('viewport-measured'),
+				visibility: getComputedStyle(element.querySelector('.field-scene')!).visibility
+			}))).toEqual({ measured: false, visibility: 'hidden' });
+		} finally {
+			await ssrContext.close();
+		}
+
+		await page.setViewportSize({ width: 1440, height: 900 });
+		await page.goto('/?devWorld=1');
+		await expect(page.locator('.field-viewport')).toHaveClass(/viewport-measured/);
+		await expect(page.locator('.field-scene')).toBeVisible();
+		await expect(page.locator('.field-area')).toHaveCSS('left', '8px');
+		await expect(page.locator('.field-area')).toHaveCSS('width', '1424px');
+
+		await page.setViewportSize({ width: 1200, height: 900 });
+		await expect(page.locator('.field-viewport')).toHaveClass(/viewport-measured/);
+		await expect(page.locator('.field-scene')).toBeVisible();
+	});
 	test.beforeEach(async ({ page }) => { await installHostOwnedStub(page); });
 
 	test('preserves Trace reply drafts across clear and close, changes ownership and publishes locally', async ({ page }) => {

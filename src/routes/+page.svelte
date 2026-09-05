@@ -145,6 +145,7 @@
 	let presenceState: PresenceState = { field: FIELD, participants: [] };
 	let viewportElement: HTMLElement;
 	let viewportSize: Size = DEFAULT_VIEWPORT;
+	let viewportMeasured = false;
 	let bubbleSizes: Record<string, Size> = {};
 	let bubbleOverflowById: Record<string, boolean> = {};
 	const mountedBubbleNodes = new Map<string, HTMLElement>();
@@ -899,6 +900,7 @@
 				bubbleSizes = {};
 			}
 			viewportSize = { width: rect.width, height: rect.height };
+			viewportMeasured = true;
 			void tick().then(() => {
 				if (!mounted) return;
 				remeasureMountedBubbles();
@@ -2545,7 +2547,12 @@
 	data-trace-runtime={traceConversationController ? runtimeMode : undefined}
 	style={`--composer-keyboard-inset: ${composerKeyboardInset}px;--composer-initial-preferred-height: ${INITIAL_COMPOSER_PREFERRED_HEIGHT}px;${composerPreferredHeight === null ? '' : `--composer-preferred-height: ${composerPreferredHeight}px;`}`}
 >
-	<section class="field-viewport" bind:this={viewportElement} aria-label="Conversation field">
+	<section
+		class="field-viewport"
+		class:viewport-measured={viewportMeasured}
+		bind:this={viewportElement}
+		aria-label="Conversation field"
+	>
 		<div
 			class="speech-area"
 			style={`top: ${speechAreaVisualBounds.y}px; height: ${speechAreaVisualBounds.height}px; left: ${speechAreaVisualBounds.x}px; width: ${speechAreaVisualBounds.width}px;`}
@@ -3298,6 +3305,10 @@
 		overflow: hidden;
 		isolation: isolate;
 		background: transparent;
+	}
+
+	.field-viewport:not(.viewport-measured) .field-scene {
+		visibility: hidden;
 	}
 
 	.composer-available .field-viewport {
