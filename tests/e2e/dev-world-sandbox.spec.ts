@@ -276,8 +276,33 @@ test.describe('DEV World Sandbox', () => {
 				})
 			);
 			expect(new Set(anchors).size).toBe(anchors.length);
-			await children.first().getByRole('button').first().focus();
-			await page.keyboard.press('Enter');
+			const authorLayout = await children.first().evaluate((card) => {
+				const author = card.querySelector<HTMLElement>('[data-trace-author-block]');
+				const avatar = author?.querySelector<HTMLElement>('.trace-reply-author-avatar');
+				const name = author?.querySelector<HTMLElement>('.trace-reply-author-name');
+				const bubble = card.querySelector<HTMLElement>('.trace-reply-bubble');
+				if (!author || !avatar || !name || !bubble) throw new Error('Expected a reply author block and bubble.');
+				const authorBox = author.getBoundingClientRect();
+				const avatarBox = avatar.getBoundingClientRect();
+				const nameBox = name.getBoundingClientRect();
+				const bubbleBox = bubble.getBoundingClientRect();
+				return {
+					authorDisplay: getComputedStyle(author).display,
+					direction: getComputedStyle(author).flexDirection,
+					nameWhiteSpace: getComputedStyle(name).whiteSpace,
+					nameOverflow: getComputedStyle(name).textOverflow,
+					authorLeft: authorBox.left, avatarTop: avatarBox.top, nameTop: nameBox.top,
+					bubbleLeft: bubbleBox.left, bubbleTop: bubbleBox.top
+				};
+			});
+			expect(authorLayout).toMatchObject({ authorDisplay: 'flex', direction: 'column', nameWhiteSpace: 'nowrap', nameOverflow: 'ellipsis' });
+			expect(authorLayout.authorLeft).toBeLessThan(authorLayout.bubbleLeft);
+			expect(authorLayout.avatarTop).toBeLessThan(authorLayout.nameTop);
+			expect(Math.abs(authorLayout.avatarTop - authorLayout.bubbleTop)).toBeLessThan(4);
+			const selectedChildId = await children.first().getAttribute('data-trace-reply-id');
+			if (!selectedChildId) throw new Error('Expected child reply ID.');
+			await children.first().locator('.trace-reply-bubble').click();
+			await expect(page.locator('[data-trace-current-reply-id]')).toHaveAttribute('data-trace-current-reply-id', selectedChildId);
 			await children.first().getByRole('button', { name: /プロフィール/ }).click();
 			await expect(profileDialog(page)).toBeVisible();
 			await page.keyboard.press('Escape');

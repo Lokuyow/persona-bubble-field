@@ -2732,9 +2732,9 @@
 						<span class="bubble-content">{bubble.reply.content}</span>
 						{#if bubbleOverflowById[bubble.id]}<span class="bubble-ellipsis" aria-hidden="true">…</span>{/if}
 					</button>
-					<button class="trace-reply-author-profile" type="button" aria-label={`${bubble.character.name} のプロフィールを開く`} on:click={(event) => { event.stopPropagation(); openProfile(bubble.character.characterId, event.currentTarget); }}>
-						<Avatar.Root class={`avatar avatar-${bubble.tone}`}><Avatar.Image src={asset(`/${bubble.character.picture}`)} alt="" /><Avatar.Fallback>{bubble.character.name.slice(0, 1)}</Avatar.Fallback></Avatar.Root>
-						<span>{bubble.character.name}</span>
+					<button class="trace-reply-author-profile" data-trace-author-block type="button" aria-label={`${bubble.character.name} のプロフィールを開く`} on:click={(event) => { event.stopPropagation(); openProfile(bubble.character.characterId, event.currentTarget); }}>
+						<span class="trace-reply-author-avatar"><Avatar.Root class={`avatar avatar-${bubble.tone}`}><Avatar.Image src={asset(`/${bubble.character.picture}`)} alt="" /><Avatar.Fallback>{bubble.character.name.slice(0, 1)}</Avatar.Fallback></Avatar.Root></span>
+						<span class="trace-reply-author-name">{bubble.character.name}</span>
 					</button>
 				</div>
 			{/each}
@@ -3760,7 +3760,7 @@
 	.trace-reply-card {
 		position: absolute;
 		display: flex;
-		align-items: center;
+		align-items: flex-start;
 		gap: 8px;
 		pointer-events: auto;
 	}
@@ -3774,9 +3774,12 @@
 	}
 
 	.trace-reply-author-profile {
-		display: inline-flex;
+		display: flex;
+		order: -1;
+		flex: 0 0 62px;
+		flex-direction: column;
 		align-items: center;
-		gap: 4px;
+		gap: 3px;
 		max-width: 62px;
 		padding: 2px;
 		border: 0;
@@ -3786,13 +3789,24 @@
 		font-size: 10px;
 		font-weight: 800;
 		line-height: 1.1;
-		text-align: left;
+		text-align: center;
 	}
 
-	.trace-reply-author-profile :global(.avatar) {
+	.trace-reply-author-avatar {
+		order: -1;
 		width: 25px;
 		height: 25px;
 		flex: 0 0 auto;
+	}
+
+	.trace-reply-author-avatar :global(.avatar) { width: 25px; height: 25px; }
+
+	.trace-reply-author-name {
+		display: block;
+		max-width: 58px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	.trace-reply-author-profile:focus-visible,
