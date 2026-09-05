@@ -36,6 +36,8 @@ import {
 	createPositionPublishState,
 	planPositionPublish,
 	reconstructPositionPublishState,
+	retainPositionPublishEvidence,
+	type PositionPublishEvidence,
 	type PositionPublishState
 } from './positionPublish';
 import { PROTOTYPE_WORLD_CONFIG } from './prototypeWorld';
@@ -162,8 +164,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 	let traceConversationGeneration = 0;
 	let traceReplyReconcileTail: Promise<void> = Promise.resolve();
 	const pendingLiveEvents: BufferedLiveEvent[] = [];
-	const knownSelfPositionEvents = new Map<string, ParsedPositionEvent>();
-	const handedOffSelfPositionEvents = new Map<string, ParsedPositionEvent>();
+	let selfPositionEvidence: PositionPublishEvidence = [];
 	const retryableSelfOperations = new Map<string, SelfPositionOperation>();
 	const appliedCanonicalPositionEventIds = new Set<string>();
 	const appliedCanonicalMessageEventIds = new Set<string>();
@@ -271,18 +272,10 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 		project(nowMs);
 	}
 
-	function rebuildSelfPositionPlanner(): void {
-		if (!options.selfAccount) return;
-		positionPublishState = reconstructPositionPublishState([
-			...knownSelfPositionEvents.values(),
-			...handedOffSelfPositionEvents.values()
-		], options.selfAccount.pubkey);
-	}
-
 	function observeLivePosition(event: ParsedPositionEvent): void {
 		if (!options.selfAccount || event.pubkey !== options.selfAccount.pubkey) return;
-		knownSelfPositionEvents.set(event.id, event);
-		rebuildSelfPositionPlanner();
+		selfPositionEvidence = retainPositionPublishEvidence(selfPositionEvidence, event, options.selfAccount.pubkey);
+		positionPublishState = reconstructPositionPublishState(selfPositionEvidence, options.selfAccount.pubkey);
 	}
 
 	function applyCanonicalPosition(event: ParsedPositionEvent, nowMs: number): boolean {
@@ -355,7 +348,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 		const parsed = parsePositionEvent(signed, channel.channelId);
 		if (!parsed) throw new Error('Locally signed position event did not pass the project parser.');
 		positionPublishState = plan.nextState;
-		handedOffSelfPositionEvents.set(parsed.id, parsed);
+		selfPositionEvidence = retainPositionPublishEvidence(selfPositionEvidence, parsed, options.selfAccount.pubkey);
 		return { event: signed, parsed };
 	}
 

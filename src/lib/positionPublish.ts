@@ -9,6 +9,24 @@ export type PositionPublishState = Readonly<{
 
 export type PositionPublishUnavailableReason = 'second-exhausted' | 'clock-regressed';
 
+export type PositionPublishEvidence =
+	| readonly []
+	| readonly [ParsedPositionEvent]
+	| readonly [ParsedPositionEvent, ParsedPositionEvent];
+
+/** Retains enough own evidence to reconstruct slot consumption, without history growth. */
+export function retainPositionPublishEvidence(
+	evidence: PositionPublishEvidence,
+	event: ParsedPositionEvent,
+	pubkey: string
+): PositionPublishEvidence {
+	if (event.pubkey !== pubkey) return evidence;
+	if (evidence.length === 0 || event.createdAt > evidence[0].createdAt) return [event];
+	if (event.createdAt < evidence[0].createdAt || evidence.some((known) => known.id === event.id)) return evidence;
+	// Two distinct events already exhaust this second, regardless of their slots.
+	return evidence.length === 2 ? evidence : [evidence[0], event];
+}
+
 export type PositionPublishPlan =
 	| Readonly<{
 			kind: 'available';

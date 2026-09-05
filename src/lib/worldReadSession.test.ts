@@ -9,6 +9,7 @@ import {
 } from './nostrProtocol';
 import type { TraceReplyConfiguration } from './nostrRelayTransport';
 import { PRESENCE_TIMEOUT_MS } from './presence';
+import { planPositionPublish, reconstructPositionPublishState } from './positionPublish';
 import { createWorldReadSession, type WorldReadConnectionStatus } from './worldReadSession';
 
 const mocked = vi.hoisted(() => ({
@@ -30,6 +31,11 @@ vi.mock('./traceReplyCache', () => ({
 	reconcileTraceReplyCache: mocked.reconcileTraceReplyCache,
 	touchTraceReplyTree: mocked.touchTraceReplyTree
 }));
+
+vi.mock('./positionPublish', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('./positionPublish')>();
+	return { ...actual, reconstructPositionPublishState: vi.fn(actual.reconstructPositionPublishState) };
+});
 
 const alice = 'a'.repeat(64);
 const selfSecretKey = new Uint8Array(32).fill(7);
@@ -121,6 +127,7 @@ describe('world read session', () => {
 	let result: ReturnType<typeof startResult>;
 
 	beforeEach(() => {
+		vi.mocked(reconstructPositionPublishState).mockClear();
 		vi.useFakeTimers();
 		vi.setSystemTime(700_000);
 		input = undefined;
@@ -140,6 +147,30 @@ describe('world read session', () => {
 			dispose,
 			publish
 		});
+	});
+
+	it('bounds planner inputs while processing 100 successive self position seconds', async () => {
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 }, selfAccount: selfAccount(),
+			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn()
+		});
+		await session.start();
+		session.completeBootstrap();
+		vi.mocked(reconstructPositionPublishState).mockClear();
+		for (let second = 700; second < 800; second += 1) {
+			vi.setSystemTime(second * 1000);
+			input!.onLivePosition(position(`self-${second}`, second, selfPubkey));
+		}
+		const calls = vi.mocked(reconstructPositionPublishState).mock.calls;
+		expect(calls).toHaveLength(100);
+		expect(Math.max(...calls.map(([events]) => events.length))).toBeLessThanOrEqual(2);
+		expect(calls.reduce((sum, [events]) => sum + events.length, 0)).toBeLessThanOrEqual(200);
+		const state = vi.mocked(reconstructPositionPublishState).mock.results.at(-1)!.value;
+		expect(planPositionPublish(state, 799)).toMatchObject({ kind: 'available', slot: 1 });
+		expect(planPositionPublish(state, 798)).toEqual({ kind: 'unavailable', reason: 'clock-regressed' });
+		publish.mockResolvedValue([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
+		await expect(session.moveSelf('right')).resolves.toMatchObject({ kind: 'succeeded' });
+		expect(parsePositionEvent(publish.mock.calls[0][0], 'c'.repeat(64))?.slot).toBe(1);
 	});
 
 	it('reconstructs the bootstrap snapshot and uses the 11 minute window', async () => {
@@ -595,6 +626,10 @@ describe('world read session', () => {
 			expect.objectContaining({ position: echoed.position, status: 'active' })
 		]);
 		expect(writeStates.at(-1)).toBe('succeeded');
+		publish.mockResolvedValue([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
+		vi.setSystemTime(700_250);
+		await expect(session.moveSelf(echoed.position.x < 3 ? 'right' : 'left')).resolves.toMatchObject({ kind: 'succeeded' });
+		expect(parsePositionEvent(publish.mock.calls[1][0], 'c'.repeat(64))?.slot).toBe(1);
 	});
 
 	it('settles a retryable no-response operation when its matching live echo arrives later', async () => {
@@ -774,6 +809,62 @@ describe('world read session', () => {
 		expect([first.slot, second.slot]).toEqual([0, 1]);
 		expect(session.refresh(700_000).participants.find((participant) => participant.id === selfPubkey)).toBeUndefined();
 	});
+
+	it('preserves newer exhausted planner state while an old retryable echo settles', async () => {
+		publish.mockResolvedValue([{ relayUrl: 'wss://relay.test/', outcome: 'no-response' }]);
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 }, selfAccount: selfAccount(),
+			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn()
+		});
+		await session.start();
+		session.completeBootstrap();
+		await expect(session.enterSelf()).resolves.toMatchObject({ kind: 'retryable' });
+		const old = parsePositionEvent(publish.mock.calls[0][0], 'c'.repeat(64))!;
+		vi.setSystemTime(701_000);
+		input!.onLivePosition(position('new-slot-1', 701, selfPubkey, 1));
+		input!.onLivePosition(old);
+		expect(session.getSelfPositionWriteState()).toMatchObject({ kind: 'succeeded' });
+		await expect(session.moveSelf('right')).resolves.toEqual({ kind: 'blocked' });
+		expect(publish).toHaveBeenCalledTimes(1);
+		const state = vi.mocked(reconstructPositionPublishState).mock.results.at(-1)!.value;
+		expect(state).toEqual({ lastPublishSecond: 701, consumedSlots: 2 });
+		expect(planPositionPublish(state, 700)).toEqual({ kind: 'unavailable', reason: 'clock-regressed' });
+	});
+
+	it.each(['slot-0', 'slot-1', 'two-slot-0', 'buffered-slot-1'] as const)(
+		'retains %s evidence across progressive, final and buffered bootstrap handoff', async (scenario) => {
+			const latest = position('latest', 700, selfPubkey, scenario === 'slot-1' ? 1 : 0);
+			const older = position('older', 699, selfPubkey, 1);
+			mocked.createTransport.mockReturnValue({
+				start: vi.fn(async (nextInput) => {
+					input = nextInput;
+					input!.onBootstrapPosition(older);
+					input!.onBootstrapPosition(latest);
+					input!.onBootstrapPosition({ ...latest });
+					if (scenario === 'two-slot-0') input!.onBootstrapPosition(position('distinct', 700, selfPubkey, 0));
+					if (scenario === 'buffered-slot-1') input!.onLivePosition(position('buffered', 700, selfPubkey, 1));
+					return startResult([], [older, { ...older }]);
+				}),
+				bootstrapTraceRootCandidates: traceBootstrap(), dispose, publish
+			});
+			publish.mockResolvedValue([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
+			const session = createWorldReadSession({
+				field: { columns: 4, rows: 3 }, selfAccount: selfAccount(),
+				onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn()
+			});
+			await session.start();
+			await expect(session.moveSelf('right')).resolves.toEqual({ kind: 'blocked' });
+			session.completeBootstrap();
+			const outcome = await session.moveSelf('right');
+			if (scenario === 'slot-0') {
+				expect(outcome).toMatchObject({ kind: 'succeeded' });
+				expect(parsePositionEvent(publish.mock.calls[0][0], 'c'.repeat(64))?.slot).toBe(1);
+			} else {
+				expect(outcome).toEqual({ kind: 'blocked' });
+				expect(publish).not.toHaveBeenCalled();
+			}
+		}
+	);
 
 	it('reconstructs a reloaded planner from bootstrap position evidence, not an earlier session attempt', async () => {
 		result = startResult([], [position('bootstrap-slot-0', 700, selfPubkey, 0, { x: 2, y: 1 })]);
