@@ -64,7 +64,7 @@
 		publishCharacterProfile,
 		type PreparedCharacterProfilePublication
 	} from '$lib/initialProfilePublication';
-	import { projectPresence } from '$lib/presenceProjection';
+	import { projectPresence, type PresenceProjectionOptions } from '$lib/presenceProjection';
 	import { createPresenceState, type PresenceState } from '$lib/presence';
 	import { addRecentMessage, createRecentMessageTimeline, type RecentMessageTimeline } from '$lib/recentMessageTimeline';
 	import { getVirtualKeyboardBottomInset, getVisualViewportKeyboardInset, type ViewportRect } from '$lib/keyboardInset';
@@ -145,6 +145,7 @@
 	let presenceState: PresenceState = { field: FIELD, participants: [] };
 	let viewportElement: HTMLElement;
 	let viewportSize: Size = DEFAULT_VIEWPORT;
+	let initialFieldGeometryReady = false;
 	let bubbleSizes: Record<string, Size> = {};
 	let bubbleOverflowById: Record<string, boolean> = {};
 	const mountedBubbleNodes = new Map<string, HTMLElement>();
@@ -234,7 +235,9 @@
 	};
 	$: fieldAreaBounds = getFieldAreaBounds(viewportSize, speechAreaBounds);
 	$: selfProjectionId = devWorldSandboxEnabled ? DEV_WORLD_SELF_ID : selfAccount?.pubkey ?? 'you';
-	$: presenceProjection = getPresenceProjection(presenceState, selectedCharacterId, selfProjectionId);
+	$: presenceProjection = getPresenceProjection(presenceState, selectedCharacterId, selfProjectionId, {
+		cellSize, fieldAreaBounds, fieldWorldSize
+	});
 	$: isWorldSelfActive = Boolean(selfAccount && presenceState.participants.some((participant) =>
 		participant.id === selfAccount?.pubkey && participant.status === 'active'
 	));
@@ -903,6 +906,8 @@
 				if (!mounted) return;
 				remeasureMountedBubbles();
 				syncVisualToCanonical();
+				// Reveal only with the visual projection of the measured geometry.
+				initialFieldGeometryReady = true;
 			});
 			if (!devWorldSandboxEnabled) void begin();
 		};
@@ -1381,13 +1386,10 @@
 	function getPresenceProjection(
 		state: PresenceState,
 		selectedId = selectedCharacterId,
-		selfId = selfProjectionId
+		selfId = selfProjectionId,
+		geometry: PresenceProjectionOptions = { cellSize, fieldAreaBounds, fieldWorldSize }
 	) {
-		return projectPresence(state, participantModels(state, selectedId), {
-			cellSize,
-			fieldAreaBounds,
-			fieldWorldSize
-		}, selfId);
+		return projectPresence(state, participantModels(state, selectedId), geometry, selfId);
 	}
 
 	function hasUsableViewport(): boolean {
@@ -2610,7 +2612,12 @@
 	data-trace-runtime={traceConversationController ? runtimeMode : undefined}
 	style={`--composer-keyboard-inset: ${composerKeyboardInset}px;--composer-initial-preferred-height: ${INITIAL_COMPOSER_PREFERRED_HEIGHT}px;${composerPreferredHeight === null ? '' : `--composer-preferred-height: ${composerPreferredHeight}px;`}`}
 >
-	<section class="field-viewport" bind:this={viewportElement} aria-label="Conversation field">
+	<section
+		class="field-viewport"
+		class:initial-field-geometry-ready={initialFieldGeometryReady}
+		bind:this={viewportElement}
+		aria-label="Conversation field"
+	>
 		<div
 			class="speech-area"
 			style={`top: ${speechAreaVisualBounds.y}px; height: ${speechAreaVisualBounds.height}px; left: ${speechAreaVisualBounds.x}px; width: ${speechAreaVisualBounds.width}px;`}
@@ -3363,6 +3370,10 @@
 		overflow: hidden;
 		isolation: isolate;
 		background: transparent;
+	}
+
+	.field-viewport:not(.initial-field-geometry-ready) .field-scene {
+		visibility: hidden;
 	}
 
 	.composer-available .field-viewport {

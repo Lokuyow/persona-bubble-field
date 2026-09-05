@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
+import { installFieldFrameSampling, sampleRenderedField } from './helpers/fieldFrames';
 
 async function openDevWorld(page: Page): Promise<void> {
 	await page.goto('/?devWorld=1');
@@ -146,6 +147,57 @@ async function profileTriggerCenter(page: Page, name: string): Promise<{ x: numb
 }
 
 test.describe('DEV World Sandbox', () => {
+	test('does not paint the default-viewport field scene before measurement and keeps it visible after resize', async ({ page, browser }) => {
+		const ssrContext = await browser.newContext({
+			baseURL: test.info().project.use.baseURL as string,
+			javaScriptEnabled: false,
+			viewport: { width: 1440, height: 900 }
+		});
+		try {
+			const ssrPage = await ssrContext.newPage();
+			await ssrPage.goto('/?devWorld=1', { waitUntil: 'domcontentloaded' });
+			const prerenderedScene = ssrPage.locator('.field-scene');
+			await expect(prerenderedScene).toHaveCount(1);
+			expect(await ssrPage.locator('.field-viewport').evaluate((element) => ({
+				ready: element.classList.contains('initial-field-geometry-ready'),
+				visibility: getComputedStyle(element.querySelector('.field-scene')!).visibility
+			}))).toEqual({ ready: false, visibility: 'hidden' });
+			await expect(ssrPage.locator('aside.recent-message-timeline')).toHaveCount(0);
+		} finally {
+			await ssrContext.close();
+		}
+
+		await page.setViewportSize({ width: 2560, height: 1440 });
+		await installFieldFrameSampling(page);
+		await page.goto('/?devWorld=1');
+		await expect(page.locator('.field-viewport')).toHaveClass(/initial-field-geometry-ready/);
+		await expect(page.locator('.field-scene')).toBeVisible();
+		await expect(page.locator('.field-area')).toHaveCSS('left', '8px');
+		await expect(page.locator('.field-area')).toHaveCSS('width', '2544px');
+		const startupFrames = await sampleRenderedField(page);
+		const visibleFrames = startupFrames.filter((frame) => frame.source === 'frame' && frame.visible);
+		expect(visibleFrames.length).toBeGreaterThan(0);
+		for (const frame of visibleFrames) {
+			expect(frame.scene).toEqual({ x: 672, y: 546, width: 1216, height: 608 });
+		}
+
+		for (const viewport of [
+			{ width: 2000, height: 1440, x: 392, y: 546, worldWidth: 1216 },
+			{ width: 2000, height: 1200, x: 392, y: 426, worldWidth: 1216 },
+			{ width: 700, height: 900, x: -25, y: 380, worldWidth: 800 },
+			{ width: 701, height: 900, x: -219.5, y: 276, worldWidth: 1216 }
+		]) {
+			await page.setViewportSize({ width: viewport.width, height: viewport.height });
+			await expect.poll(() => page.locator('.field-scene').evaluate((element) => {
+				const { x, y, width } = element.getBoundingClientRect();
+				return { x, y, width };
+			})).toEqual({ x: viewport.x, y: viewport.y, width: viewport.worldWidth });
+			await expect(page.locator('.field-viewport')).toHaveClass(/initial-field-geometry-ready/);
+		}
+		const resizeFrames = (await sampleRenderedField(page)).slice(startupFrames.length);
+		expect(resizeFrames.length).toBeGreaterThan(0);
+		expect(resizeFrames.every((frame) => frame.visible)).toBe(true);
+	});
 	test.beforeEach(async ({ page }) => { await installHostOwnedStub(page); });
 
 	test('preserves Trace reply drafts across clear and close, changes ownership and publishes locally', async ({ page }) => {
