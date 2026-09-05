@@ -48,7 +48,6 @@ export type TraceReplyInput = {
 	parent: ParsedWorldMessage | ParsedTraceReply;
 	content: string;
 	speechType: SpeechType;
-	position: GridPosition;
 	createdAt: number;
 	/** An authoritative world relay recommendation, never an event identity. */
 	relayHint?: string;
@@ -102,7 +101,6 @@ export type ParsedTraceReplyCandidate = {
 	createdAt: number;
 	content: string;
 	speechType: SpeechType;
-	position: GridPosition;
 	rootId: string;
 	rootPubkey: string;
 	rootAuthorHint?: string;
@@ -119,7 +117,6 @@ export type ParsedTraceReply = {
 	createdAt: number;
 	content: string;
 	speechType: SpeechType;
-	position: GridPosition;
 	rootId: string;
 	rootPubkey: string;
 	parentId: string;
@@ -285,8 +282,7 @@ export function buildTraceReplyTemplate(input: TraceReplyInput): TraceReplyTempl
 		['k', String(parentKind)],
 		['p', input.parent.pubkey],
 		['L', PROTOTYPE_NAMESPACE],
-		['l', 'chat', PROTOTYPE_NAMESPACE],
-		['w', formatCanonicalGridPosition(input.position)]
+		['l', 'chat', PROTOTYPE_NAMESPACE]
 	];
 	const label = speechLabel(input.speechType);
 	if (label) tags.push(label);
@@ -444,8 +440,7 @@ export function parseTraceReplyCandidate(event: Event): ParsedTraceReplyCandidat
 	if (rootAuthorHint === null || parentAuthorHint === null) return null;
 
 	const speechType = parseSpeechType(event);
-	const position = parseUnambiguousWorldPosition(event);
-	if (!speechType || !position) return null;
+	if (!speechType) return null;
 
 	return {
 		id: event.id,
@@ -453,7 +448,6 @@ export function parseTraceReplyCandidate(event: Event): ParsedTraceReplyCandidat
 		createdAt: event.created_at,
 		content: event.content,
 		speechType,
-		position,
 		rootId: rootEvent[1],
 		rootPubkey: rootAuthor[1],
 		...(rootAuthorHint === undefined ? {} : { rootAuthorHint }),
@@ -489,7 +483,6 @@ export function validateTraceReplyCandidate(
 		createdAt: candidate.createdAt,
 		content: candidate.content,
 		speechType: candidate.speechType,
-		position: candidate.position,
 		rootId: root.id,
 		rootPubkey: root.pubkey,
 		parentId: parent.id,

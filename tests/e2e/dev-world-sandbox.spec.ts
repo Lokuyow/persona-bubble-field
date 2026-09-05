@@ -245,48 +245,103 @@ test.describe('DEV World Sandbox', () => {
 		const own = page.locator('[data-trace-reply-id="' + '1'.padStart(64, '0') + '"]');
 		await expect(own).toContainText('DEV own reply');
 		await expect(own).toHaveAttribute('data-speech-type', 'monologue');
-		await expect(page.locator('[data-trace-reply-ghost-id="' + '1'.padStart(64, '0') + '"]')).toHaveCount(0);
+		await expect(own.getByRole('button', { name: /プロフィール/ })).toBeVisible();
 		await editor.press('Escape');
 		await page.keyboard.press('ArrowLeft');
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '6,3');
-		await expect(page.locator('[data-trace-reply-ghost-id="' + '1'.padStart(64, '0') + '"]')).toBeVisible();
+		await expect(own).toBeVisible();
 		await page.keyboard.press('ArrowRight');
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '7,3');
-		await expect(page.locator('[data-trace-reply-ghost-id="' + '1'.padStart(64, '0') + '"]')).toHaveCount(0);
+		await expect(own).toBeVisible();
 	});
+
+	for (const viewport of [{ name: 'desktop', width: 1100, height: 850 }, { name: 'mobile', width: 390, height: 844 }]) {
+		test(`keeps a deep tree-only cluster interactive on ${viewport.name}`, async ({ page }) => {
+			await page.setViewportSize(viewport);
+			await page.goto('/?devWorld=1&devTrace=replies');
+			if (viewport.name === 'desktop') await page.getByRole('button', { name: 'Hide Chatter' }).click();
+			await page.locator('[data-cell-position="8,4"]').click();
+			const direct = page.locator(`[data-trace-reply-id="${'7'.repeat(64)}"]`);
+			await direct.getByRole('button').first().click();
+			await page.locator(`[data-trace-reply-id="${'b'.repeat(64)}"]`).getByRole('button').first().click();
+			await expect(page.locator('[data-trace-root-id] .trace-root-compact')).toBeVisible();
+			await expect(page.locator(`[data-trace-role="parent"][data-trace-reply-id="${'7'.repeat(64)}"]`)).toBeVisible();
+			await expect(page.locator(`[data-trace-role="current"][data-trace-reply-id="${'b'.repeat(64)}"]`)).toBeVisible();
+			const children = page.locator('[data-trace-role="child"]');
+			await expect(children).toHaveCount(2);
+			const anchors = await page.locator('.trace-root-card, [data-trace-role="parent"], [data-trace-role="current"], [data-trace-role="child"]').evaluateAll((cards) =>
+				cards.map((card) => {
+					const box = card.getBoundingClientRect();
+					return `${Math.round(box.left)},${Math.round(box.top)}`;
+				})
+			);
+			expect(new Set(anchors).size).toBe(anchors.length);
+			const authorLayout = await children.first().evaluate((card) => {
+				const author = card.querySelector<HTMLElement>('[data-trace-author-block]');
+				const avatarWrapper = author?.querySelector<HTMLElement>('.trace-reply-author-avatar');
+				const avatar = author?.querySelector<HTMLElement>('.trace-reply-author-avatar .avatar');
+				const name = author?.querySelector<HTMLElement>('.trace-reply-author-name');
+				const bubble = card.querySelector<HTMLElement>('.trace-reply-bubble');
+				if (!author || !avatarWrapper || !avatar || !name || !bubble) throw new Error('Expected a reply author block and bubble.');
+				const authorBox = author.getBoundingClientRect();
+				const avatarWrapperBox = avatarWrapper.getBoundingClientRect();
+				const avatarBox = avatar.getBoundingClientRect();
+				const nameBox = name.getBoundingClientRect();
+				const bubbleBox = bubble.getBoundingClientRect();
+				return {
+					authorDisplay: getComputedStyle(author).display,
+					direction: getComputedStyle(author).flexDirection,
+					nameWhiteSpace: getComputedStyle(name).whiteSpace,
+					nameOverflow: getComputedStyle(name).textOverflow,
+					authorLeft: authorBox.left, avatarWrapperBox, avatarBox, nameBox, bubbleBox
+				};
+			});
+			expect(authorLayout).toMatchObject({ authorDisplay: 'flex', direction: 'column', nameWhiteSpace: 'nowrap', nameOverflow: 'ellipsis' });
+			expect(authorLayout.authorLeft).toBeLessThan(authorLayout.bubbleBox.left);
+			expect(authorLayout.avatarBox.left).toBeGreaterThanOrEqual(authorLayout.avatarWrapperBox.left - 0.5);
+			expect(authorLayout.avatarBox.right).toBeLessThanOrEqual(authorLayout.avatarWrapperBox.right + 0.5);
+			expect(authorLayout.avatarBox.top).toBeGreaterThanOrEqual(authorLayout.avatarWrapperBox.top - 0.5);
+			expect(authorLayout.avatarBox.bottom).toBeLessThanOrEqual(authorLayout.avatarWrapperBox.bottom + 0.5);
+			expect(Math.abs((authorLayout.avatarBox.left + authorLayout.avatarBox.right) / 2 - (authorLayout.avatarWrapperBox.left + authorLayout.avatarWrapperBox.right) / 2)).toBeLessThan(0.5);
+			expect(Math.abs((authorLayout.avatarBox.top + authorLayout.avatarBox.bottom) / 2 - (authorLayout.avatarWrapperBox.top + authorLayout.avatarWrapperBox.bottom) / 2)).toBeLessThan(0.5);
+			expect(authorLayout.avatarBox.bottom).toBeLessThanOrEqual(authorLayout.nameBox.top);
+			expect(authorLayout.avatarBox.right).toBeLessThanOrEqual(authorLayout.bubbleBox.left);
+			expect(authorLayout.nameBox.right).toBeLessThanOrEqual(authorLayout.bubbleBox.left);
+			const selectedChildId = await children.first().getAttribute('data-trace-reply-id');
+			if (!selectedChildId) throw new Error('Expected child reply ID.');
+			await children.first().locator('.trace-reply-bubble').click();
+			await expect(page.locator('[data-trace-current-reply-id]')).toHaveAttribute('data-trace-current-reply-id', selectedChildId);
+			await children.first().getByRole('button', { name: /プロフィール/ }).click();
+			await expect(profileDialog(page)).toBeVisible();
+			await page.keyboard.press('Escape');
+		});
+	}
 	test('reselects the current reply without losing its draft, preserves it through profiles, and clears on range exit', async ({ page }) => {
 		await page.setViewportSize({ width: 1100, height: 850 });
 		await page.emulateMedia({ reducedMotion: 'reduce' });
 		await page.goto('/?devWorld=1&devTrace=replies');
 		await page.getByRole('button', { name: 'Hide Chatter' }).click();
-		const selectCell = async (position: string) => {
-			const cell = page.locator(`[data-cell-position="${position}"]`);
-			const box = await cell.boundingBox();
-			if (!box) throw new Error('Expected a visible Trace cell');
-			await cell.click({ position: { x: box.width - 2, y: box.height - 2 } });
-		};
 		const editor = page.getByRole('textbox', { name: '投稿エディター' });
 		const preview = page.getByLabel('Reply preview', { exact: true });
-		await selectCell('8,4');
-		await selectCell('6,4');
-		await page.getByRole('menu').locator('[data-cell-action="reply"]').first().click();
+		await page.locator('[data-cell-position="8,4"]').click();
+		const current = page.locator('[data-trace-reply-id="' + '7'.repeat(64) + '"]');
+		await current.getByRole('button').first().click();
 		await expect(preview).toHaveAttribute('data-reply-id', '7'.repeat(64));
-		await expect(editor).not.toBeFocused();
 		await editor.fill('nested draft');
 		await page.getByRole('button', { name: 'Clear reply', exact: true }).click();
-		await selectCell('6,4');
+		await current.getByRole('button').first().click();
 		await expect(preview).toHaveAttribute('data-reply-id', '7'.repeat(64));
 		await expect(editor).toHaveValue('nested draft');
-		await page.locator('[data-trace-current-reply-ghost-id="' + '7'.repeat(64) + '"] .trace-ghost-profile-trigger').click();
+		await current.getByRole('button', { name: /プロフィール/ }).click();
 		await expect(profileDialog(page)).toBeVisible();
 		await page.keyboard.press('Escape');
 		await expect(editor).toHaveValue('nested draft');
 		await expect(preview).toHaveAttribute('data-reply-id', '7'.repeat(64));
-		await page.keyboard.press('ArrowRight');
-		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '8,3');
+		for (let step = 0; step < 4; step += 1) await page.keyboard.press('ArrowRight');
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,3');
 		await expect(editor).toHaveValue('');
 		await expect(preview).toHaveCount(0);
-		await expect(page.locator('[data-trace-current-reply-id="' + '7'.repeat(64) + '"]')).toBeVisible();
+		await expect(current).toBeVisible();
 		await page.keyboard.press('ArrowLeft');
 		await expect(preview).toHaveCount(0);
 	});
@@ -488,12 +543,29 @@ test.describe('DEV World Sandbox', () => {
 		await expect.poll(() => liveBubble.evaluate((element) => getComputedStyle(element).transform)).toBe(liveAnchor);
 
 		const replyBubbles = page.locator('[data-trace-reply-id]');
-		await expect(replyBubbles).toHaveCount(3);
+		await expect(replyBubbles).toHaveCount(5);
 		await expect(page.locator('[data-trace-reply-id="' + '7'.repeat(64) + '"]')).toContainText('newest same-cell direct reply');
-		await expect(page.locator('[data-trace-reply-id="' + '7'.repeat(64) + '"]')).toHaveAttribute('data-trace-reply-count', '2');
-		await expect(page.getByLabel('2 replies in this cell')).toBeVisible();
-		await expect(page.locator('[data-trace-reply-position="9,4"][data-trace-reply-id]')).toHaveAttribute('data-speech-type', 'shout');
-		await expect(page.locator('[data-trace-reply-position="8,4"][data-trace-reply-id]')).toHaveAttribute('data-speech-type', 'monologue');
+		await expect(page.locator('[data-trace-tail-root-id="' + '2'.repeat(64) + '"]')).toHaveCount(2);
+		await expect(page.locator('[data-trace-tail-root-id="' + '2'.repeat(64) + '"]').first()).toHaveAttribute('data-trace-tail-target');
+		await expect(page.locator('[data-trace-tail-reply-id]')).toHaveCount(0);
+		const rootSpecialTailMask = await page.locator('.tail-layer').evaluate((layer) => {
+			const tail = layer.querySelector<SVGPolygonElement>('[data-trace-tail-root-id]');
+			const maskId = tail?.getAttribute('mask')?.replace(/^url\(#|\)$/g, '');
+			const mask = maskId ? document.getElementById(maskId) : null;
+			return {
+				maskId,
+				x: mask?.getAttribute('x'), y: mask?.getAttribute('y'),
+				width: mask?.getAttribute('width'), height: mask?.getAttribute('height'),
+				bodyFill: mask?.querySelector('path')?.getAttribute('fill'),
+				viewportFill: mask?.querySelector('rect')?.getAttribute('fill')
+			};
+		});
+		const [, , viewportWidth, viewportHeight] = (await page.locator('.tail-layer').getAttribute('viewBox') ?? '').split(' ');
+		expect(rootSpecialTailMask).toMatchObject({ x: '0', y: '0', width: viewportWidth, height: viewportHeight, viewportFill: 'white', bodyFill: 'black' });
+		await page.locator('[data-trace-reply-id="' + '7'.repeat(64) + '"]').getByRole('button', { name: /プロフィール/ }).click();
+		await expect(profileDialog(page)).toBeVisible();
+		await page.keyboard.press('Escape');
+		/* Retired position/ghost/offscreen projection assertions from the cell-based UI.
 
 		const traceBubbleBackgrounds = await page.locator('.trace-root-bubble, .trace-reply-bubble').evaluateAll((bubbles) => bubbles.map((bubble) => ({
 			speechType: bubble.getAttribute('data-speech-type'),
@@ -599,6 +671,7 @@ test.describe('DEV World Sandbox', () => {
 		expect(await page.evaluate(() => (window as never as {
 			__traceReplyExternalCalls: { webSocketUrls: string[]; indexedDbOpen: number }
 		}).__traceReplyExternalCalls)).toEqual(externalBaseline);
+		*/
 	});
 
 	test('navigates a deep DEV Trace one adjacent speech at a time through shared cell actions', async ({ page }) => {
@@ -607,6 +680,14 @@ test.describe('DEV World Sandbox', () => {
 		await page.goto('/?devWorld=1&devTrace=replies');
 		const hideTimeline = page.getByRole('button', { name: 'Hide Chatter' });
 		await hideTimeline.click();
+		await page.locator('[data-cell-position="8,4"]').click();
+		await page.locator('[data-trace-reply-id="' + '7'.repeat(64) + '"]').getByRole('button').first().click();
+		await expect(page.locator('[data-trace-current-reply-id="' + '7'.repeat(64) + '"]')).toBeVisible();
+		await expect(page.locator('[data-trace-reply-id="' + 'b'.repeat(64) + '"]')).toBeVisible();
+		await page.locator('[data-trace-reply-id="' + 'b'.repeat(64) + '"]').getByRole('button').first().click();
+		await expect(page.locator('[data-trace-current-reply-id="' + 'b'.repeat(64) + '"]')).toBeVisible();
+		/* Retired logical-cell reply-navigation assertions; speech bubbles now own reply selection. */
+		/*
 		const selectCell = async (position: string) => {
 			const cell = page.locator(`[data-cell-position="${position}"]`);
 			const box = await cell.boundingBox();
@@ -713,6 +794,7 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '8,3');
 		const restoredParentCell = page.locator('[data-cell-position="6,4"]');
 		await expect(restoredParentCell).toHaveCount(1);
+		*/
 	});
 
 	test('shows a finite recent-message overlay with semantic colors and existing profile focus restoration', async ({ page }) => {

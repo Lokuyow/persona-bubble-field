@@ -56,7 +56,7 @@ function makeReply(
 	createdAt: number
 ): ReplyFixture {
 	const raw = finalizeWorldEvent(buildTraceReplyTemplate({
-		root, parent, content, createdAt, position: { x: createdAt % 8, y: 0 }, speechType: 'normal'
+		root, parent, content, createdAt, speechType: 'normal'
 	}), SECRET_KEY);
 	const candidate = parseTraceReplyCandidate(raw);
 	const parsed = candidate && validateTraceReplyCandidate(candidate, root, parent);
@@ -141,7 +141,7 @@ describe('trace reply cache reconciliation', () => {
 		const valid = capReplies[0];
 		const template = buildTraceReplyTemplate({
 			root: root.parsed, parent: root.parsed, content: 'wrong tree', createdAt: 201,
-			position: { x: 1, y: 0 }, speechType: 'normal'
+			speechType: 'normal'
 		});
 		// The lower-case parent remains root A; the upper-case root claims B.
 		template.tags = template.tags.map((tag) => tag[0] === 'E' ? ['E', otherRoot.raw.id, '', otherRoot.raw.pubkey] : tag);

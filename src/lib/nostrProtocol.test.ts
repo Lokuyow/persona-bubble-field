@@ -127,7 +127,6 @@ function signedTraceReply(
 		parent,
 		content: 'reply',
 		speechType: 'normal',
-		position: { x: 8, y: 3 },
 		createdAt: 1_700_000_001,
 		relayHint: channel.relayHint,
 		...override
@@ -515,7 +514,6 @@ describe('Nostr protocol foundation', () => {
 			parent: root,
 			content: 'direct',
 			speechType: 'shout',
-			position: { x: 8, y: 3 },
 			createdAt: 1_700_000_001,
 			relayHint: channel.relayHint
 		});
@@ -525,7 +523,7 @@ describe('Nostr protocol foundation', () => {
 			tags: [
 				['E', root.id, channel.relayHint, root.pubkey], ['K', '42'], ['P', root.pubkey],
 				['e', root.id, channel.relayHint, root.pubkey], ['k', '42'], ['p', root.pubkey],
-				['L', PROTOTYPE_NAMESPACE], ['l', 'chat', PROTOTYPE_NAMESPACE], ['w', '8:3'],
+				['L', PROTOTYPE_NAMESPACE], ['l', 'chat', PROTOTYPE_NAMESPACE],
 				['l', 'speech:shout', PROTOTYPE_NAMESPACE]
 			],
 			content: 'direct'
@@ -540,7 +538,6 @@ describe('Nostr protocol foundation', () => {
 			parent: direct!,
 			content: 'deeper',
 			speechType: 'monologue',
-			position: { x: 9, y: 3 },
 			createdAt: 1_700_000_002
 		});
 		expect(deeperTemplate.tags.slice(0, 6)).toEqual([
@@ -560,6 +557,15 @@ describe('Nostr protocol foundation', () => {
 		expect(validateTraceReplyCandidate(candidate!, root, root)).not.toBeNull();
 	});
 
+	it('accepts a legacy signed reply w tag as an ignored extra tag', () => {
+		const root = parsedRoot();
+		const template = buildTraceReplyTemplate({
+			root, parent: root, content: 'legacy', speechType: 'normal', createdAt: 1_700_000_001
+		});
+		template.tags.push(['w', '8:3']);
+		expect(parseTraceReplyCandidate(finalizeWorldEvent(template, TEST_SECRET_KEY))).not.toBeNull();
+	});
+
 	it('rejects malformed trace candidate scopes, relations, timestamps, and signatures', () => {
 		const root = parsedRoot();
 		const template = buildTraceReplyTemplate({
@@ -567,7 +573,6 @@ describe('Nostr protocol foundation', () => {
 			parent: root,
 			content: 'reply',
 			speechType: 'normal',
-			position: { x: 8, y: 3 },
 			createdAt: 1_700_000_001
 		});
 		const malformed = [
@@ -587,8 +592,6 @@ describe('Nostr protocol foundation', () => {
 			['root scope I', (event: TraceReplyTemplate) => event.tags.push(['I', 'https://example.test'])],
 			['parent scope a', (event: TraceReplyTemplate) => event.tags.push(['a', '30023:x'])],
 			['parent scope i', (event: TraceReplyTemplate) => event.tags.push(['i', 'https://example.test'])],
-			['invalid w', (event: TraceReplyTemplate) => { event.tags[8][1] = '08:3'; }],
-			['duplicate w', (event: TraceReplyTemplate) => event.tags.push(['w', '8:3'])],
 			['missing namespace label', (event: TraceReplyTemplate) => event.tags.splice(6, 1)],
 			['missing chat label', (event: TraceReplyTemplate) => event.tags.splice(7, 1)],
 			['invalid root author hint', (event: TraceReplyTemplate) => { event.tags[0][3] = 'A'.repeat(64); }]
@@ -636,11 +639,11 @@ describe('Nostr protocol foundation', () => {
 			const copy = { ...buildTraceReplyTemplate({
 				root: candidateRoot,
 				parent: candidateRoot,
-				content: 'reply', speechType: 'normal', position: { x: 8, y: 3 }, createdAt: 1_700_000_001
+				content: 'reply', speechType: 'normal', createdAt: 1_700_000_001
 			}), tags: buildTraceReplyTemplate({
 				root: candidateRoot,
 				parent: candidateRoot,
-				content: 'reply', speechType: 'normal', position: { x: 8, y: 3 }, createdAt: 1_700_000_001
+				content: 'reply', speechType: 'normal', createdAt: 1_700_000_001
 			}).tags.map((tag) => [...tag]) } as TraceReplyTemplate;
 			mutate(copy);
 			const candidate = parseTraceReplyCandidate(resign(copy));

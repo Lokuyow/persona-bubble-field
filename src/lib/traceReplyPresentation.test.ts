@@ -1,233 +1,37 @@
 import { describe, expect, it } from 'vitest';
-import { CHARACTER_CATALOG } from './character';
-import { deriveCharacterFromPubkey } from './characterAssignment';
-import type { Bounds } from './geometry';
 import type { ParsedTraceReply, ParsedWorldMessage } from './nostrProtocol';
-import type { TraceConversationState } from './traceConversation';
-import {
-	deriveTraceReplyCharacter,
-	EMPTY_TRACE_REPLY_REPRESENTATIVE_STATE,
-	numberTraceReplyAuthors,
-	projectPointToViewportEdge,
-	projectTraceReplyCell,
-	reconcileTraceReplyPresentation,
-	resolveTraceConversationProjection,
-	resolveTraceGhostPlacement
-} from './traceReplyPresentation';
+import { adjacentTraceSpeech, compareTraceReplies, resolveTraceConversationProjection } from './traceReplyPresentation';
 
-const ROOT_ID = 'a'.repeat(64);
-const ROOT: ParsedWorldMessage = {
-	id: ROOT_ID,
-	pubkey: 'b'.repeat(64),
-	createdAt: 100,
-	content: 'root',
-	speechType: 'normal',
-	position: { x: 2, y: 2 }
+const root: ParsedWorldMessage = {
+	id: 'r'.repeat(64), pubkey: 'a'.repeat(64), createdAt: 1, content: 'root', speechType: 'normal', position: { x: 2, y: 2 }
 };
 
-function reply(options: Readonly<{
-	id: string;
-	createdAt: number;
-	x?: number;
-	y?: number;
-	parentId?: string;
-	parentKind?: 42 | 1111;
-	rootId?: string;
-	pubkey?: string;
-}>): ParsedTraceReply {
+function reply(id: string, parent: ParsedWorldMessage | ParsedTraceReply, createdAt: number): ParsedTraceReply {
 	return {
-		id: options.id,
-		pubkey: options.pubkey ?? 'c'.repeat(64),
-		createdAt: options.createdAt,
-		content: options.id,
-		speechType: 'normal',
-		position: { x: options.x ?? 3, y: options.y ?? 2 },
-		rootId: options.rootId ?? ROOT_ID,
-		rootPubkey: ROOT.pubkey,
-		parentId: options.parentId ?? ROOT_ID,
-		parentKind: options.parentKind ?? 42,
-		parentPubkey: ROOT.pubkey
+		id, pubkey: 'b'.repeat(64), createdAt, content: id, speechType: 'normal', rootId: root.id,
+		rootPubkey: root.pubkey, parentId: parent.id, parentKind: 'rootId' in parent ? 1111 : 42, parentPubkey: parent.pubkey
 	};
 }
 
-function open(replies: readonly ParsedTraceReply[], currentId = ROOT_ID): TraceConversationState {
-	return {
-		kind: 'open',
-		root: ROOT,
-		config: { rootId: ROOT_ID, currentId },
-		replies,
-		replyRefresh: 'settled'
-	};
-}
-
-describe('Trace direct reply presentation', () => {
-	it('keeps only root-direct replies and orders cells and replies deterministically', () => {
-		const older = reply({ id: '2'.repeat(64), createdAt: 101, x: 4, y: 2 });
-		const newestLaterId = reply({ id: '9'.repeat(64), createdAt: 102, x: 4, y: 2 });
-		const newestEarlierId = reply({ id: '1'.repeat(64), createdAt: 102, x: 4, y: 2 });
-		const firstCell = reply({ id: '3'.repeat(64), createdAt: 99, x: 5, y: 1 });
-		const deeper = reply({ id: '4'.repeat(64), createdAt: 103, parentId: older.id, parentKind: 1111 });
-		const otherRoot = reply({ id: '5'.repeat(64), createdAt: 104, rootId: 'f'.repeat(64) });
-		const result = reconcileTraceReplyPresentation(EMPTY_TRACE_REPLY_REPRESENTATIVE_STATE, open([
-			newestLaterId, deeper, older, firstCell, newestEarlierId, otherRoot, older
-		]));
-
-		expect(result.cells.map((cell) => cell.position)).toEqual([{ x: 5, y: 1 }, { x: 4, y: 2 }]);
-		expect(result.cells[1].replies.map((candidate) => candidate.id)).toEqual([
-			newestEarlierId.id, newestLaterId.id, older.id
-		]);
-		expect(result.cells[1]).toMatchObject({ representative: { id: newestEarlierId.id }, count: 3 });
-	});
-
-	it('preserves a representative during live updates, falls back when it disappears, and resets after close', () => {
-		const older = reply({ id: '1'.repeat(64), createdAt: 101 });
-		const initialNewest = reply({ id: '2'.repeat(64), createdAt: 102 });
-		const liveNewest = reply({ id: '3'.repeat(64), createdAt: 103 });
-		const initial = reconcileTraceReplyPresentation(EMPTY_TRACE_REPLY_REPRESENTATIVE_STATE, open([older, initialNewest]));
-		const live = reconcileTraceReplyPresentation(initial.state, open([older, initialNewest, liveNewest]));
-		expect(live.cells[0].representative.id).toBe(initialNewest.id);
-
-		const missing = reconcileTraceReplyPresentation(live.state, open([older, liveNewest]));
-		expect(missing.cells[0].representative.id).toBe(liveNewest.id);
-		const closed = reconcileTraceReplyPresentation(missing.state, { kind: 'closed' });
-		const reopened = reconcileTraceReplyPresentation(closed.state, open([older, initialNewest, liveNewest]));
-		expect(reopened.cells[0].representative.id).toBe(liveNewest.id);
-	});
-
-	it('resolves accepted current, immediate parent, and direct children at arbitrary depth', () => {
-		const child = reply({ id: '1'.repeat(64), createdAt: 101 });
-		const grandchild = reply({
-			id: '2'.repeat(64), createdAt: 102, parentId: child.id, parentKind: 1111,
-			pubkey: 'd'.repeat(64)
+describe('Trace reply presentation', () => {
+	it('keeps only root, immediate parent, current and sorted direct children', () => {
+		const parent = reply('p'.repeat(64), root, 2);
+		const current = reply('c'.repeat(64), parent, 3);
+		const newer = reply('z'.repeat(64), current, 5);
+		const older = reply('a'.repeat(64), current, 4);
+		const projection = resolveTraceConversationProjection({
+			kind: 'open', root, replies: [older, newer, parent, current], replyRefresh: 'settled',
+			config: { rootId: root.id, currentId: current.id }
 		});
-		const greatGrandchild = reply({
-			id: '3'.repeat(64), createdAt: 103, parentId: grandchild.id, parentKind: 1111,
-			pubkey: 'e'.repeat(64)
-		});
-		const sibling = reply({ id: '4'.repeat(64), createdAt: 104 });
-		const projection = resolveTraceConversationProjection(open([
-			greatGrandchild, sibling, grandchild, child
-		], grandchild.id));
-		expect(projection?.current).toMatchObject({ kind: 'reply', event: { id: grandchild.id } });
-		expect(projection?.parent).toMatchObject({ kind: 'reply', event: { id: child.id } });
-		expect(projection?.directReplies.map((candidate) => candidate.id)).toEqual([greatGrandchild.id]);
-
-		expect(resolveTraceConversationProjection(open([child], 'f'.repeat(64)))).toBeNull();
-		expect(resolveTraceConversationProjection(open([
-			reply({ id: '5'.repeat(64), createdAt: 105, parentId: 'f'.repeat(64), parentKind: 1111 })
-		], '5'.repeat(64)))).toBeNull();
+		expect(projection?.parent?.event.id).toBe(parent.id);
+		expect(projection?.directReplies.map((item) => item.id)).toEqual([newer.id, older.id]);
+		expect(adjacentTraceSpeech(projection!, root.id)?.kind).toBe('root');
+		expect(adjacentTraceSpeech(projection!, older.id)?.event.id).toBe(older.id);
 	});
 
-	it('preserves representatives independently for each current speech until close', () => {
-		const child = reply({ id: '1'.repeat(64), createdAt: 101, x: 3 });
-		const rootOlder = reply({ id: '2'.repeat(64), createdAt: 100, x: 4 });
-		const rootNewest = reply({ id: '3'.repeat(64), createdAt: 102, x: 4 });
-		const grandchildOlder = reply({
-			id: '4'.repeat(64), createdAt: 103, x: 5, parentId: child.id, parentKind: 1111
-		});
-		const grandchildNewest = reply({
-			id: '5'.repeat(64), createdAt: 104, x: 5, parentId: child.id, parentKind: 1111
-		});
-		const replies = [child, rootOlder, rootNewest, grandchildOlder, grandchildNewest];
-		const rootView = reconcileTraceReplyPresentation(EMPTY_TRACE_REPLY_REPRESENTATIVE_STATE, open(replies));
-		const rootState = {
-			...rootView.state,
-			representativeByCurrent: {
-				...rootView.state.representativeByCurrent,
-				[ROOT_ID]: { ...rootView.state.representativeByCurrent[ROOT_ID], '4,2': rootOlder.id }
-			}
-		};
-		const childView = reconcileTraceReplyPresentation(rootState, open(replies, child.id));
-		const childState = {
-			...childView.state,
-			representativeByCurrent: {
-				...childView.state.representativeByCurrent,
-				[child.id]: { '5,2': grandchildOlder.id }
-			}
-		};
-		const returned = reconcileTraceReplyPresentation(childState, open(replies));
-		expect(returned.cells.find((cell) => cell.position.x === 4)?.representative.id).toBe(rootOlder.id);
-		const childReturned = reconcileTraceReplyPresentation(returned.state, open(replies, child.id));
-		expect(childReturned.cells[0].representative.id).toBe(grandchildOlder.id);
-		const missing = reconcileTraceReplyPresentation(childReturned.state, open([
-			child, rootOlder, rootNewest, grandchildNewest
-		], child.id));
-		expect(missing.cells[0].representative.id).toBe(grandchildNewest.id);
-		const reopened = reconcileTraceReplyPresentation(
-			reconcileTraceReplyPresentation(missing.state, { kind: 'closed' }).state,
-			open(replies)
-		);
-		expect(reopened.cells.find((cell) => cell.position.x === 4)?.representative.id).toBe(rootNewest.id);
-	});
-
-	it('numbers duplicate authors newest-first without exposing input order or duplicates', () => {
-		const author = 'e'.repeat(64);
-		const oldest = reply({ id: '9'.repeat(64), createdAt: 100, pubkey: author });
-		const tiedLater = reply({ id: '2'.repeat(64), createdAt: 101, pubkey: author });
-		const tiedEarlier = reply({ id: '1'.repeat(64), createdAt: 101, pubkey: author });
-		const other = reply({ id: '3'.repeat(64), createdAt: 99, pubkey: 'f'.repeat(64) });
-		expect(numberTraceReplyAuthors([oldest, other, tiedLater, tiedEarlier, tiedLater]).map((item) => ({
-			id: item.reply.id, ordinal: item.authorOrdinal
-		}))).toEqual([
-			{ id: tiedEarlier.id, ordinal: 1 },
-			{ id: tiedLater.id, ordinal: 2 },
-			{ id: oldest.id, ordinal: 3 },
-			{ id: other.id, ordinal: null }
-		]);
-	});
-
-	it('delegates reply authors to the canonical character assignment', () => {
-		const candidate = reply({ id: '1'.repeat(64), createdAt: 101, pubkey: 'e'.repeat(64) });
-		expect(deriveTraceReplyCharacter(candidate, CHARACTER_CATALOG)).toEqual(
-			deriveCharacterFromPubkey(candidate.pubkey, CHARACTER_CATALOG)
-		);
-	});
-
-	it('projects cell centers through the camera and classifies the inclusive visible boundary', () => {
-		const visibleBounds: Bounds = { x: 10, y: 20, width: 100, height: 100 };
-		expect(projectTraceReplyCell({
-			position: { x: 1, y: 1 }, cellSize: 20, camera: { x: 20, y: 20 },
-			fieldArea: { x: 10, y: 20 }, visibleBounds
-		})).toMatchObject({ screen: { x: 20, y: 30 }, visibility: 'onscreen' });
-		expect(projectTraceReplyCell({
-			position: { x: 8, y: 1 }, cellSize: 20, camera: { x: 20, y: 20 },
-			fieldArea: { x: 10, y: 20 }, visibleBounds
-		})).toMatchObject({ visibility: 'offscreen', edge: { direction: 'right' } });
-	});
-
-	it.each([
-		[{ x: 50, y: -100 }, 'up'],
-		[{ x: 200, y: -100 }, 'up-right'],
-		[{ x: 200, y: 50 }, 'right'],
-		[{ x: 200, y: 200 }, 'down-right'],
-		[{ x: 50, y: 200 }, 'down'],
-		[{ x: -100, y: 200 }, 'down-left'],
-		[{ x: -100, y: 50 }, 'left'],
-		[{ x: -100, y: -100 }, 'up-left']
-	] as const)('projects %j to the %s edge direction', (target, direction) => {
-		const projected = projectPointToViewportEdge(target, { x: 0, y: 0, width: 100, height: 100 }, 10);
-		expect(projected.direction).toBe(direction);
-		expect(projected.point.x).toBeGreaterThanOrEqual(10);
-		expect(projected.point.x).toBeLessThanOrEqual(90);
-		expect(projected.point.y).toBeGreaterThanOrEqual(10);
-		expect(projected.point.y).toBeLessThanOrEqual(90);
-	});
-
-	it('keeps participants central and assigns distinct deterministic root/reply ghost slots', () => {
-		expect(resolveTraceGhostPlacement({
-			kind: 'reply', cellSize: 100, hasParticipant: false, hasRootGhost: false
-		})).toEqual({ offset: { x: 0, y: 0 }, scale: 1, subdued: false });
-		const root = resolveTraceGhostPlacement({
-			kind: 'root', cellSize: 100, hasParticipant: true, hasRootGhost: true
-		});
-		const replyGhost = resolveTraceGhostPlacement({
-			kind: 'reply', cellSize: 100, hasParticipant: true, hasRootGhost: true
-		});
-		expect(root).toMatchObject({ scale: 0.58, subdued: true });
-		expect(root.offset.x).toBeCloseTo(-29);
-		expect(root.offset.y).toBeCloseTo(27);
-		expect(replyGhost).toMatchObject({ scale: 0.58, subdued: true });
-		expect(replyGhost.offset.x).toBeCloseTo(29);
-		expect(replyGhost.offset.y).toBeCloseTo(27);
+	it('orders children by newest timestamp then event ID', () => {
+		const left = reply('a'.repeat(64), root, 4);
+		const right = reply('b'.repeat(64), root, 4);
+		expect([right, left].sort(compareTraceReplies).map((item) => item.id)).toEqual([left.id, right.id]);
 	});
 });
