@@ -3759,23 +3759,26 @@
 	.trace-root-card,
 	.trace-reply-card {
 		position: absolute;
-		display: flex;
 		align-items: flex-start;
 		gap: 8px;
 		pointer-events: auto;
 	}
 
 	.trace-root-card { z-index: 1; }
-	.trace-reply-card { z-index: 2; }
+	.trace-root-card { display: flex; }
+	.trace-reply-card { display: grid; grid-template-columns: 62px max-content; z-index: 2; }
 
 	.trace-root-card .trace-root-bubble,
 	.trace-reply-card .trace-reply-bubble {
 		position: relative;
 	}
 
+	.trace-reply-card .trace-reply-bubble { grid-column: 2; grid-row: 1; }
+
 	.trace-reply-author-profile {
 		display: flex;
-		order: -1;
+		grid-column: 1;
+		grid-row: 1;
 		flex: 0 0 62px;
 		flex-direction: column;
 		align-items: center;
