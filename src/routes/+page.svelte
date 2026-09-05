@@ -3656,9 +3656,6 @@
 	.speech-area {
 		position: absolute;
 		z-index: 1;
-		border-top: 1px dashed rgba(111, 121, 100, 0.2);
-		border-bottom: 1px dashed rgba(111, 121, 100, 0.2);
-		background: linear-gradient(180deg, rgba(255, 255, 255, 0.12), transparent 42%, rgba(255, 255, 255, 0.06));
 		pointer-events: none;
 	}
 
