@@ -288,7 +288,7 @@ current Unix secondにslot 1が確認できる場合は、slot 0が取得結果�
 
 ## 17. 発言時position
 
-過去の対象kind 42およびkind 1111について、そのeventが行われた時点のフィールド座標を、position eventの履歴へ依存せずevent自身から復元できるようにする。
+過去の対象kind 42について、そのeventが行われた時点のフィールド座標を、position eventの履歴へ依存せずevent自身から復元できるようにする。
 
 専用世界のtop-level kind 42には、発言時positionを表す単一文字 `w` tagを必須とする。trace conversation kind 1111はtree-onlyであり `w` を発行しない。過去に署名されたkind 1111の `w` はextra tagとして無視して受理する。
 

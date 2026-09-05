@@ -256,9 +256,7 @@ function regularEventPointer(tagName: 'E' | 'e', id: string, pubkey: string, rel
 	return [tagName, id, relayHint ?? '', pubkey];
 }
 
-type TraceReplyBuilderInput = TraceReplyInput & Readonly<{ /** Ignored legacy caller input. */ position?: GridPosition }>;
-
-export function buildTraceReplyTemplate(input: TraceReplyBuilderInput): TraceReplyTemplate {
+export function buildTraceReplyTemplate(input: TraceReplyInput): TraceReplyTemplate {
 	assertMessageReference(input.root, 'Root');
 	assertCreatedAt(input.createdAt);
 	if (input.relayHint !== undefined) assertRelayHint(input.relayHint);

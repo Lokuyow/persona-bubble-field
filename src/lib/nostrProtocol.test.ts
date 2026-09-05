@@ -127,7 +127,6 @@ function signedTraceReply(
 		parent,
 		content: 'reply',
 		speechType: 'normal',
-		position: { x: 8, y: 3 },
 		createdAt: 1_700_000_001,
 		relayHint: channel.relayHint,
 		...override
@@ -515,7 +514,6 @@ describe('Nostr protocol foundation', () => {
 			parent: root,
 			content: 'direct',
 			speechType: 'shout',
-			position: { x: 8, y: 3 },
 			createdAt: 1_700_000_001,
 			relayHint: channel.relayHint
 		});
@@ -540,7 +538,6 @@ describe('Nostr protocol foundation', () => {
 			parent: direct!,
 			content: 'deeper',
 			speechType: 'monologue',
-			position: { x: 9, y: 3 },
 			createdAt: 1_700_000_002
 		});
 		expect(deeperTemplate.tags.slice(0, 6)).toEqual([
@@ -576,7 +573,6 @@ describe('Nostr protocol foundation', () => {
 			parent: root,
 			content: 'reply',
 			speechType: 'normal',
-			position: { x: 8, y: 3 },
 			createdAt: 1_700_000_001
 		});
 		const malformed = [
@@ -643,11 +639,11 @@ describe('Nostr protocol foundation', () => {
 			const copy = { ...buildTraceReplyTemplate({
 				root: candidateRoot,
 				parent: candidateRoot,
-				content: 'reply', speechType: 'normal', position: { x: 8, y: 3 }, createdAt: 1_700_000_001
+				content: 'reply', speechType: 'normal', createdAt: 1_700_000_001
 			}), tags: buildTraceReplyTemplate({
 				root: candidateRoot,
 				parent: candidateRoot,
-				content: 'reply', speechType: 'normal', position: { x: 8, y: 3 }, createdAt: 1_700_000_001
+				content: 'reply', speechType: 'normal', createdAt: 1_700_000_001
 			}).tags.map((tag) => [...tag]) } as TraceReplyTemplate;
 			mutate(copy);
 			const candidate = parseTraceReplyCandidate(resign(copy));

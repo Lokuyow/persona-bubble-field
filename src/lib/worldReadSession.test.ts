@@ -72,7 +72,7 @@ describe('Trace reply publication ownership', () => {
 			}) };
 	}
 
-	it.each(['normal', 'shout', 'monologue'] as const)('publishes a root %s reply with canonical position and keeps current speech', async (speechType) => {
+	it.each(['normal', 'shout', 'monologue'] as const)('publishes a root %s reply and keeps current speech', async (speechType) => {
 		const f = await fixture();
 		const result = await f.submit(speechType);
 		expect(result.kind).toBe('succeeded');
@@ -155,7 +155,7 @@ describe('Trace reply publication ownership', () => {
 		expect(mocked.reconcileTraceReplyCache.mock.calls.flatMap(([input]) => input.rawEvents)).not.toContain(rawEvent);
 		const { buildTraceReplyTemplate, finalizeWorldEvent } = await import('./nostrProtocol');
 		const other = finalizeWorldEvent(buildTraceReplyTemplate({ root: f.root, parent: f.root, content: 'other',
-			speechType: 'normal', position: { x: 1, y: 1 }, createdAt: 700 }), new Uint8Array(32).fill(8));
+			speechType: 'normal', createdAt: 700 }), new Uint8Array(32).fill(8));
 		f.callbacks().onLiveEvent(other);
 		f.callbacks().onBatch({ events: [], relays: [{ relayUrl: 'wss://relay.test/', status: 'closed' }] });
 		await settle();

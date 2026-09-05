@@ -35,7 +35,7 @@ function makeReply(
 	createdAt: number
 ): Readonly<{ raw: Event; parsed: ParsedTraceReply }> {
 	const raw = finalizeWorldEvent(buildTraceReplyTemplate({
-		root, parent, content, createdAt, position: { x: createdAt % 4, y: 0 }, speechType: 'normal'
+		root, parent, content, createdAt, speechType: 'normal'
 	}), SECRET_KEY);
 	const candidate = parseTraceReplyCandidate(raw);
 	const parsed = candidate && validateTraceReplyCandidate(candidate, root, parent);
@@ -92,7 +92,7 @@ describe('trace reply semantic resolution', () => {
 		const otherReply = makeReply(other.parsed, other.parsed, 'other reply', 101);
 		const wrongTemplate = buildTraceReplyTemplate({
 			root: root.parsed, parent: root.parsed, content: 'wrong', createdAt: 101,
-			position: { x: 0, y: 0 }, speechType: 'normal'
+			speechType: 'normal'
 		});
 		wrongTemplate.tags[4][1] = '1111';
 		const valid = makeReply(root.parsed, root.parsed, 'valid', 101);

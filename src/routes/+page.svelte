@@ -84,6 +84,7 @@
 		resolveTraceConversationProjection,
 		type TraceSpeech
 	} from '$lib/traceReplyPresentation';
+	import { distinctTraceAnchor, traceChildPreferred } from '$lib/traceTreeLayout';
 	import HostOwnedComposerLite from '$lib/HostOwnedComposerLite.svelte';
 	import { matchesComposerSubmit, type ComposerSubmitEnvelope } from '$lib/hostOwnedComposerContext';
 	import {
@@ -396,6 +397,10 @@
 		const offset = occupied ? { x: -cellSize * 0.29, y: cellSize * 0.27 } : { x: 0, y: 0 };
 		const center = gridToWorld(traceBubble.event.position, cellSize);
 		return { ...traceBubble, world: { x: center.x + offset.x, y: center.y + offset.y }, compact: occupied };
+	})() : null;
+	$: traceRootTailTarget = traceRootGhost ? (() => {
+		const screen = fieldLocalToViewport(worldToScreen(traceRootGhost.world, camera), fieldAreaBounds);
+		return { x: screen.x, y: screen.y - cellSize * (traceRootGhost.compact ? 0.29 : 0.5) - 4 };
 	})() : null;
 	$: movingParticipantIds = visualMotion ? new Set(visualMotion.participants.keys()) : new Set<string>();
 
@@ -2237,18 +2242,6 @@
 		};
 	}
 
-	function traceChildPreferred(parent: Readonly<{ anchor: WorldPoint; footprint: Size }>, child: Size, index: number): WorldPoint {
-		const ring = Math.floor(index / 4);
-		const slot = index % 4;
-		const gap = 10;
-		const horizontal = child.width + gap;
-		const vertical = child.height + gap;
-		if (slot === 0) return { x: parent.anchor.x + parent.footprint.width + gap + ring * horizontal, y: parent.anchor.y + parent.footprint.height + gap + ring * vertical };
-		if (slot === 1) return { x: parent.anchor.x - child.width - gap - ring * horizontal, y: parent.anchor.y + parent.footprint.height + gap + ring * vertical };
-		if (slot === 2) return { x: parent.anchor.x + parent.footprint.width + gap + ring * horizontal, y: parent.anchor.y - child.height - gap - ring * vertical };
-		return { x: parent.anchor.x - child.width - gap - ring * horizontal, y: parent.anchor.y - child.height - gap - ring * vertical };
-	}
-
 	function layoutTraceTree(projection: ReturnType<typeof resolveTraceConversationProjection>) {
 		if (!projection) return null;
 		const fixed = positionedVisibleBubbles.map((bubble) => ({
@@ -2280,7 +2273,8 @@
 			const card = makeTraceReplyCard(reply, role, preferred);
 			const [placement] = placeBubblesWithFixed([{ id: card.id, preferred, size: card.footprint }], placed,
 				bubbleSafeBounds, cellSize, undefined, bubbleVisualRegion);
-			card.anchor = placement?.anchor ?? clampToBounds(preferred, card.footprint, bubbleSafeBounds);
+			card.anchor = distinctTraceAnchor(placement?.anchor ?? preferred, card.footprint, bubbleSafeBounds,
+				placed.map((candidate) => candidate.anchor), cards.length);
 			cards.push(card);
 			placed.push({ id: card.id, preferred: card.anchor, anchor: card.anchor, size: card.footprint });
 			return card;
@@ -2606,6 +2600,23 @@
 		{/if}
 
 		<svg class="tail-layer" viewBox={`0 0 ${viewportSize.width} ${viewportSize.height}`} aria-hidden="true">
+			{#if traceBubble && traceRootTailTarget}
+				{@const rootTailStart = tailStart(traceBubble.anchor, traceBubble.size)}
+				{@const rootTail = tailGeometry(rootTailStart, traceRootTailTarget, 11, 2, specialTailExtension(traceBubble.event.speechType))}
+				{#if traceBubble.event.speechType !== 'normal' && traceBubble.shape}
+					<defs>
+						<mask id={traceTailMaskId(traceBubble.id)} maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x={traceBubble.shape.bounds.x} y={traceBubble.shape.bounds.y} width={traceBubble.shape.bounds.width} height={traceBubble.shape.bounds.height}>
+							<path d={traceBubble.shape.path} transform={`translate(${traceBubble.anchor.x} ${traceBubble.anchor.y})`} fill="white" />
+						</mask>
+						<mask id={traceTailOutlineMaskId(traceBubble.id)} maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x={traceBubble.shape.bounds.x} y={traceBubble.shape.bounds.y} width={traceBubble.shape.bounds.width} height={traceBubble.shape.bounds.height}>
+							<rect x={traceBubble.shape.bounds.x} y={traceBubble.shape.bounds.y} width={traceBubble.shape.bounds.width} height={traceBubble.shape.bounds.height} fill="white" />
+							<polygon points={tailOutlineOpeningPoints(rootTail, traceBubble.anchor)} transform={`translate(${traceBubble.anchor.x} ${traceBubble.anchor.y})`} fill="black" />
+						</mask>
+					</defs>
+				{/if}
+				<polygon class={`tail trace-tail tail-${traceBubble.tone} tone-${traceBubble.tone}`} data-trace-tail-root-id={traceBubble.event.id} data-trace-tail-target={`${traceRootTailTarget.x},${traceRootTailTarget.y}`} points={rootTail.points} mask={traceBubble.event.speechType !== 'normal' ? `url(#${traceTailMaskId(traceBubble.id)})` : undefined} />
+				<path class={`tail-outline trace-tail-outline tone-${traceBubble.tone}`} data-trace-tail-root-id={traceBubble.event.id} d={rootTail.outlinePath} mask={traceBubble.event.speechType !== 'normal' ? `url(#${traceTailOutlineMaskId(traceBubble.id)})` : undefined} />
+			{/if}
 			{#each traceReplyBubbles as bubble (bubble.id)}
 				{@const parent = traceReplyBubbles.find((candidate) => candidate.reply.id === bubble.reply.parentId)}
 				{#if parent}
@@ -2752,6 +2763,11 @@
 							<defs>
 								<mask id={outlineMaskId} maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x={shape?.bounds.x ?? 0} y={shape?.bounds.y ?? 0} width={shape?.bounds.width ?? traceBubble.size.width} height={shape?.bounds.height ?? traceBubble.size.height}>
 									<rect x={shape?.bounds.x ?? 0} y={shape?.bounds.y ?? 0} width={shape?.bounds.width ?? traceBubble.size.width} height={shape?.bounds.height ?? traceBubble.size.height} fill="white" />
+									{#if traceRootTailTarget}
+										{@const start = tailStart(traceBubble.anchor, traceBubble.size)}
+										{@const tail = tailGeometry(start, traceRootTailTarget, 11, 2, SPECIAL_TAIL_BODY_EXTENSION)}
+										<polygon data-tail-opening={`trace-root-${traceBubble.event.id}`} points={tailOutlineOpeningPoints(tail, traceBubble.anchor)} fill="black" />
+									{/if}
 								</mask>
 							</defs>
 							<path class="bubble-surface-fill trace-bubble-surface-fill" d={shape?.path ?? ''} />
