@@ -39,6 +39,7 @@ const CHANNEL_EVENT = {
 } as const;
 
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
+import { installFieldFrameSampling, readFieldFrames, sampleRenderedField } from './helpers/fieldFrames';
 
 function profileDialog(page: Page) {
 	return page.getByRole('dialog');
@@ -651,6 +652,59 @@ function reverseMoveKey(key: AvailableMove['key']): AvailableMove['key'] {
 }
 
 test.describe('Relay startup', () => {
+	for (const width of [700, 701]) {
+		test(`keeps Chatter initialization and overlay geometry at width ${width}`, async ({ page }) => {
+			await page.setViewportSize({ width, height: 900 });
+			await openReadyRelayWorld(page);
+			const chatter = page.locator('aside.recent-message-timeline');
+			await expect(chatter).toBeVisible({ visible: width > 700 });
+			const geometry = () => page.evaluate(() => ({
+				rects: ['.field-viewport', '.field-area', '.field-scene', '.speech-area', '.composer-dock', '.participant']
+					.map((selector) => [...document.querySelectorAll(selector)].map((node) => node.getBoundingClientRect().toJSON())),
+				camera: getComputedStyle(document.querySelector('.field-scene')!).transform
+			}));
+			const before = await geometry();
+			for (const open of [width <= 700, width > 700]) {
+				await page.getByRole('button', { name: open ? 'Show Chatter' : 'Hide Chatter' }).click();
+				await expect(chatter).toBeVisible({ visible: open });
+				expect(await geometry()).toEqual(before);
+			}
+			// Keep a manual choice opposite to the next viewport's reload default.
+			await page.setViewportSize({ width: width === 700 ? 701 : 700, height: 900 });
+			await expect(page.locator('.field-area')).toHaveCSS('width', width === 700 ? '685px' : '684px');
+			await expect(chatter).toBeVisible({ visible: width > 700 });
+			await page.reload();
+			await expect(page.locator('.field-viewport')).toHaveClass(/initial-field-geometry-ready/);
+			await expect(chatter).toBeVisible({ visible: width === 700 });
+		});
+	}
+
+	test('centers the first visible field frame before Relay bootstrap and preserves it through presence', async ({ page }) => {
+		await page.setViewportSize({ width: 2560, height: 1440 });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page);
+		await installFieldFrameSampling(page);
+		await page.goto('/');
+		await expect.poll(async () => (await readFieldFrames(page)).filter((frame) => frame.source === 'frame' && frame.visible).length).toBeGreaterThan(0);
+		const first = (await readFieldFrames(page)).find((frame) => frame.source === 'frame' && frame.visible)!;
+		expect(first.scene).toEqual({ x: 672, y: 512.5, width: 1216, height: 608 });
+		expect(first.viewport).toEqual({ x: 0, y: 0, width: 2560, height: 1373 });
+		expect(first.composer?.height).toBe(67);
+		await page.evaluate(() => (window as unknown as { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
+			AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) &&
+			(request.filter.kinds as number[])[0] === 42)).toBe(true);
+		await page.evaluate(() => (window as unknown as { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		await expect(page.locator('.participant[data-self="true"]')).toBeVisible();
+		const visible = (await sampleRenderedField(page)).filter((frame) => frame.source === 'frame' && frame.visible);
+		for (const frame of visible) {
+			expect(Math.abs(frame.scene.x - first.scene.x)).toBeLessThanOrEqual(0.5);
+			expect(Math.abs(frame.scene.y - first.scene.y)).toBeLessThanOrEqual(0.5);
+			expect(frame.scene.width).toBe(1216);
+			expect(frame.scene.height).toBe(608);
+		}
+	});
+
 	test('shows published Trace replies to a fresh client through Relay history and live delivery', async ({ page: sender, browser }) => {
 		const time = Date.now();
 		const trace = traceRuntimeEvents();
