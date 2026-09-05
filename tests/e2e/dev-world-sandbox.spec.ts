@@ -447,6 +447,31 @@ test.describe('DEV World Sandbox', () => {
 			.every(({ background }) => background === 'rgba(0, 0, 0, 0)')).toBe(true);
 		expect(traceBubbleBackgrounds.filter(({ speechType }) => speechType === 'normal')
 			.every(({ background }) => background !== 'rgba(0, 0, 0, 0)')).toBe(true);
+
+		const traceTailMasks = await page.locator('.tail-layer').evaluate((layer) => {
+			const bodyPathByBubbleId = new Map([...document.querySelectorAll<HTMLElement>('.trace-root-bubble, .trace-reply-bubble')]
+				.filter((bubble) => bubble.dataset.speechType !== 'normal')
+				.map((bubble) => [bubble.dataset.bubbleId, bubble.querySelector<SVGPathElement>('.bubble-surface-fill')?.getAttribute('d')]));
+			const tails = [...layer.querySelectorAll<SVGPolygonElement>('.trace-tail')];
+			return tails.map((tail) => {
+				const maskId = tail.getAttribute('mask')?.replace(/^url\(#|\)$/g, '');
+				const mask = maskId ? document.getElementById(maskId) : null;
+				const bodyPath = mask?.querySelector<SVGPathElement>('path');
+				const bubbleId = maskId?.replace(/^trace-tail-body-/, '');
+				return {
+					maskId,
+					maskUnits: mask?.getAttribute('maskUnits'),
+					maskContentUnits: mask?.getAttribute('maskContentUnits'),
+					bodyPath: bodyPath?.getAttribute('d'),
+					matchesBody: bodyPath?.getAttribute('d') === bodyPathByBubbleId.get(bubbleId)
+				};
+			});
+		});
+		const maskedTraceTails = traceTailMasks.filter((tail) => tail.maskId);
+		expect(maskedTraceTails).toHaveLength(3);
+		expect(maskedTraceTails.every((tail) => tail.maskUnits === 'userSpaceOnUse' && tail.maskContentUnits === 'userSpaceOnUse' && tail.matchesBody)).toBe(true);
+		await expect(page.locator('.tail-layer polygon[data-trace-tail-reply-id="' + '7'.repeat(64) + '"][mask]')).toHaveCount(0);
+		await expect(page.locator('.tail-layer path.trace-tail-outline[mask]')).toHaveCount(3);
 		await expect(page.getByText('deeper branch reply')).toHaveCount(0);
 		await expect(page.getByText('offscreen reply body must stay hidden')).toHaveCount(0);
 		await expect(page.locator('[data-trace-reply-offscreen-position="15,7"]')).toBeVisible();
@@ -529,6 +554,8 @@ test.describe('DEV World Sandbox', () => {
 			.toContainText('trace-only root near the viewer');
 		await expect(page.locator('[data-trace-reply-id="' + 'b'.repeat(64) + '"]'))
 			.toContainText('deeper branch reply');
+		await expect(page.locator('.trace-parent-tail[mask]')).toHaveCount(1);
+		await expect(page.locator('.trace-parent-tail-outline[mask]')).toHaveCount(1);
 
 		await selectCell('7,4');
 		await expect(page.locator('[data-trace-current-reply-id="' + 'b'.repeat(64) + '"]'))
