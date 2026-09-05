@@ -3796,6 +3796,8 @@
 	}
 
 	.trace-reply-author-avatar {
+		position: relative;
+		display: block;
 		order: -1;
 		width: 25px;
 		height: 25px;

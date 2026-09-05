@@ -278,11 +278,13 @@ test.describe('DEV World Sandbox', () => {
 			expect(new Set(anchors).size).toBe(anchors.length);
 			const authorLayout = await children.first().evaluate((card) => {
 				const author = card.querySelector<HTMLElement>('[data-trace-author-block]');
-				const avatar = author?.querySelector<HTMLElement>('.trace-reply-author-avatar');
+				const avatarWrapper = author?.querySelector<HTMLElement>('.trace-reply-author-avatar');
+				const avatar = author?.querySelector<HTMLElement>('.trace-reply-author-avatar .avatar');
 				const name = author?.querySelector<HTMLElement>('.trace-reply-author-name');
 				const bubble = card.querySelector<HTMLElement>('.trace-reply-bubble');
-				if (!author || !avatar || !name || !bubble) throw new Error('Expected a reply author block and bubble.');
+				if (!author || !avatarWrapper || !avatar || !name || !bubble) throw new Error('Expected a reply author block and bubble.');
 				const authorBox = author.getBoundingClientRect();
+				const avatarWrapperBox = avatarWrapper.getBoundingClientRect();
 				const avatarBox = avatar.getBoundingClientRect();
 				const nameBox = name.getBoundingClientRect();
 				const bubbleBox = bubble.getBoundingClientRect();
@@ -291,14 +293,20 @@ test.describe('DEV World Sandbox', () => {
 					direction: getComputedStyle(author).flexDirection,
 					nameWhiteSpace: getComputedStyle(name).whiteSpace,
 					nameOverflow: getComputedStyle(name).textOverflow,
-					authorLeft: authorBox.left, avatarTop: avatarBox.top, nameTop: nameBox.top,
-					bubbleLeft: bubbleBox.left, bubbleTop: bubbleBox.top
+					authorLeft: authorBox.left, avatarWrapperBox, avatarBox, nameBox, bubbleBox
 				};
 			});
 			expect(authorLayout).toMatchObject({ authorDisplay: 'flex', direction: 'column', nameWhiteSpace: 'nowrap', nameOverflow: 'ellipsis' });
-			expect(authorLayout.authorLeft).toBeLessThan(authorLayout.bubbleLeft);
-			expect(authorLayout.avatarTop).toBeLessThan(authorLayout.nameTop);
-			expect(Math.abs(authorLayout.avatarTop - authorLayout.bubbleTop)).toBeLessThan(4);
+			expect(authorLayout.authorLeft).toBeLessThan(authorLayout.bubbleBox.left);
+			expect(authorLayout.avatarBox.left).toBeGreaterThanOrEqual(authorLayout.avatarWrapperBox.left - 0.5);
+			expect(authorLayout.avatarBox.right).toBeLessThanOrEqual(authorLayout.avatarWrapperBox.right + 0.5);
+			expect(authorLayout.avatarBox.top).toBeGreaterThanOrEqual(authorLayout.avatarWrapperBox.top - 0.5);
+			expect(authorLayout.avatarBox.bottom).toBeLessThanOrEqual(authorLayout.avatarWrapperBox.bottom + 0.5);
+			expect(Math.abs((authorLayout.avatarBox.left + authorLayout.avatarBox.right) / 2 - (authorLayout.avatarWrapperBox.left + authorLayout.avatarWrapperBox.right) / 2)).toBeLessThan(0.5);
+			expect(Math.abs((authorLayout.avatarBox.top + authorLayout.avatarBox.bottom) / 2 - (authorLayout.avatarWrapperBox.top + authorLayout.avatarWrapperBox.bottom) / 2)).toBeLessThan(0.5);
+			expect(authorLayout.avatarBox.bottom).toBeLessThanOrEqual(authorLayout.nameBox.top);
+			expect(authorLayout.avatarBox.right).toBeLessThanOrEqual(authorLayout.bubbleBox.left);
+			expect(authorLayout.nameBox.right).toBeLessThanOrEqual(authorLayout.bubbleBox.left);
 			const selectedChildId = await children.first().getAttribute('data-trace-reply-id');
 			if (!selectedChildId) throw new Error('Expected child reply ID.');
 			await children.first().locator('.trace-reply-bubble').click();
