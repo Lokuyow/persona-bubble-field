@@ -107,7 +107,8 @@ publish、visual animationを再利用する。
 
 tapとdragはgesture thresholdで区別するが、具体的なthresholdは実装詳細とする。
 threshold未満のpointer releaseはmovementではなくlogical-cell selectionとして扱う。
-PCのArrow/WASD操作は維持し、現時点ではcardinal 4方向の入力のままとする。
+PCのArrow/WASD操作は維持し、押下中の上下成分と左右成分を合成した8方向の入力を
+使用する。上下または左右の反対成分は相殺し、両成分が残る場合はdiagonalとして扱う。
 
 field上の選択はpixel targetではなくlogical cellを基本にする。tap / clickはmovementには
 使用せず、logical-cell selection専用とする。selectable targetが1件なら直接そのactionを

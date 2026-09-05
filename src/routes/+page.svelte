@@ -908,16 +908,14 @@
 		let movementHoldOwner: MovementHoldOwner | null = null;
 		let movementHoldDirection: Direction | null = null;
 		let movementHoldSource: 'page' | 'composer-editor' | null = null;
-		let movementHoldKeyboardKey: string | null = null;
-		let movementHoldKeyboardCode: string | null = null;
+		const pressedKeyboardMovementKeys = new Set<string>();
 		let movementHoldPointerId: number | null = null;
 		let holdTimer: number | null = null;
 		const clearMovementHold = () => {
 			movementHoldOwner = null;
 			movementHoldDirection = null;
 			movementHoldSource = null;
-			movementHoldKeyboardKey = null;
-			movementHoldKeyboardCode = null;
+			pressedKeyboardMovementKeys.clear();
 			movementHoldPointerId = null;
 			if (holdTimer !== null) {
 				window.clearInterval(holdTimer);
@@ -931,22 +929,19 @@
 		};
 		const startMovementTimer = () => {
 			holdTimer = window.setInterval(() => {
-				if (!movementHoldOwner || !movementHoldDirection ||
+				if (!movementHoldOwner ||
 					(movementHoldOwner === 'keyboard' && movementHoldSource === 'composer-editor' && composerEditorIsEmpty !== true) ||
 					document.querySelector('.profile-dialog-content')) {
 					clearMovementHold();
 					return;
 				}
-				requestMovement(movementHoldDirection);
+				if (movementHoldDirection) requestMovement(movementHoldDirection);
 			}, 500);
 		};
-		const startKeyboardHold = (direction: Direction, event: KeyboardEvent, source: 'page' | 'composer-editor') => {
-			clearMovementHold();
+		const startKeyboardHold = (direction: Direction, source: 'page' | 'composer-editor') => {
 			movementHoldOwner = 'keyboard';
 			movementHoldDirection = direction;
 			movementHoldSource = source;
-			movementHoldKeyboardKey = event.key;
-			movementHoldKeyboardCode = event.code;
 			requestMovement(direction);
 			startMovementTimer();
 		};
@@ -1014,12 +1009,32 @@
 			event.preventDefault();
 			if (event.repeat) return;
 			const source = arrowDirection && isComposerEditorKeyboardEvent(event) ? 'composer-editor' : 'page';
-			startKeyboardHold(direction, event, source);
+			const keyToken = event.code || event.key;
+			pressedKeyboardMovementKeys.add(keyToken);
+			const nextDirection = directionFromKeyboardMovementKeys(pressedKeyboardMovementKeys);
+			if (!nextDirection) {
+				movementHoldDirection = null;
+				return;
+			}
+			if (movementHoldOwner !== 'keyboard') {
+				clearMovementHold();
+				pressedKeyboardMovementKeys.add(keyToken);
+				startKeyboardHold(nextDirection, source);
+				return;
+			}
+			movementHoldDirection = nextDirection;
+			requestMovement(nextDirection);
 		};
 		const handleKeyup = (event: KeyboardEvent) => {
-			const direction = directionFromKey(event.key) ?? directionFromCode(event.code);
-			if (movementHoldOwner === 'keyboard' && direction === movementHoldDirection &&
-				(event.key === movementHoldKeyboardKey || event.code === movementHoldKeyboardCode)) clearMovementHold();
+			const keyToken = event.code || event.key;
+			if (!pressedKeyboardMovementKeys.delete(keyToken) || movementHoldOwner !== 'keyboard') return;
+			const nextDirection = directionFromKeyboardMovementKeys(pressedKeyboardMovementKeys);
+			if (!nextDirection) {
+				if (pressedKeyboardMovementKeys.size === 0) clearMovementHold();
+				else movementHoldDirection = null;
+				return;
+			}
+			movementHoldDirection = nextDirection;
 		};
 		const handleMovementFocusIn = (event: FocusEvent) => {
 			if (movementHoldOwner === 'keyboard' && movementHoldDirection && !isComposerEditorKeyboardEvent(event)) clearMovementHold();
@@ -1395,6 +1410,27 @@
 		if (code === 'KeyS') return 'down';
 		if (code === 'KeyD') return 'right';
 		return null;
+	}
+
+	function directionFromKeyboardMovementKeys(keys: Iterable<string>): Direction | null {
+		let horizontal = 0;
+		let vertical = 0;
+		for (const key of keys) {
+			const direction = directionFromCode(key) ?? directionFromKey(key);
+			if (direction === 'left') horizontal -= 1;
+			if (direction === 'right') horizontal += 1;
+			if (direction === 'up') vertical -= 1;
+			if (direction === 'down') vertical += 1;
+		}
+		const x = Math.sign(horizontal);
+		const y = Math.sign(vertical);
+		if (x === 0 && y === 0) return null;
+		if (x === 0) return y < 0 ? 'up' : 'down';
+		if (y === 0) return x < 0 ? 'left' : 'right';
+		if (x > 0 && y < 0) return 'up-right';
+		if (x > 0 && y > 0) return 'down-right';
+		if (x < 0 && y > 0) return 'down-left';
+		return 'up-left';
 	}
 
 	function setEffectiveTraceRoots(roots: readonly ParsedWorldMessage[]): void {

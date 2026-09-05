@@ -1940,6 +1940,64 @@ test.describe('DEV World Sandbox', () => {
 		}
 	});
 
+	test('combines WASD, Arrow, and mixed keyboard keys into one diagonal movement', async ({ page }) => {
+		const diagonals = [
+			[['w', 'd'], '8,1'], [['w', 'a'], '6,1'], [['s', 'd'], '8,5'], [['s', 'a'], '6,5'],
+			[['ArrowUp', 'ArrowRight'], '8,1'], [['ArrowUp', 'ArrowLeft'], '6,1'],
+			[['ArrowDown', 'ArrowRight'], '8,5'], [['ArrowDown', 'ArrowLeft'], '6,5'],
+			[['w', 'ArrowRight'], '8,1'], [['ArrowUp', 'd'], '8,1']
+		] as const;
+
+		for (const [keys, expected] of diagonals) {
+			await openDevWorld(page);
+			const self = page.locator('.participant').first();
+			await page.keyboard.down(keys[0]);
+			await page.keyboard.down(keys[1]);
+			await expect(self).toHaveAttribute('data-position', expected);
+			await page.keyboard.up(keys[1]);
+			await page.keyboard.up(keys[0]);
+		}
+	});
+
+	test('cancels opposite keyboard components and resumes the remaining direction', async ({ page }) => {
+		await openClockedDevWorld(page);
+		const self = page.locator('.participant').first();
+
+		await page.keyboard.down('w');
+		await expect(self).toHaveAttribute('data-position', '7,2');
+		await page.keyboard.down('s');
+		await expect(self).toHaveAttribute('data-position', '7,2');
+		await page.clock.runFor(500);
+		await expect(self).toHaveAttribute('data-position', '7,2');
+		await page.keyboard.up('s');
+		await page.clock.runFor(500);
+		await expect(self).toHaveAttribute('data-position', '7,1');
+		await page.keyboard.up('w');
+
+		await page.keyboard.down('a');
+		await page.keyboard.down('d');
+		await expect(self).toHaveAttribute('data-position', '6,1');
+		await page.keyboard.up('d');
+		await page.keyboard.up('a');
+	});
+
+	test('holds a diagonal at the existing cadence and follows the key that remains held', async ({ page }) => {
+		await openClockedDevWorld(page);
+		const self = page.locator('.participant').first();
+
+		await page.keyboard.down('s');
+		await page.keyboard.down('d');
+		await expect(self).toHaveAttribute('data-position', '8,5');
+		await page.clock.runFor(500);
+		await expect(self).toHaveAttribute('data-position', '9,6');
+		await page.keyboard.up('d');
+		await page.clock.runFor(500);
+		await expect(self).toHaveAttribute('data-position', '9,7');
+		await page.keyboard.up('s');
+		await page.clock.runFor(1_000);
+		await expect(self).toHaveAttribute('data-position', '9,7');
+	});
+
 	test('continues a held WASD movement at the existing two-per-second cadence', async ({ page }) => {
 		await openClockedDevWorld(page);
 
