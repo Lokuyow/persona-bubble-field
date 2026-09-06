@@ -19,7 +19,7 @@ const TONE_VALUES: Readonly<Record<BubbleTone, Readonly<{ background: string; ou
 };
 
 /** Keep the current Trace surface expression in one presentation token. */
-export const TRACE_SURFACE_OPACITY = '91%';
+export const TRACE_SURFACE_OPACITY = '70%';
 
 export function bubbleToneStyle(tone: BubbleTone, trace = false): string {
 	const value = TONE_VALUES[tone];

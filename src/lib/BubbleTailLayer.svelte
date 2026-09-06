@@ -79,6 +79,6 @@
 	.tail { fill: var(--tone-background); }
 	.tail-outline { fill: none; stroke: var(--tone-outline); stroke-width: 1; stroke-linecap: round; stroke-linejoin: round; }
 	.trace-relation-connector { fill: none; stroke: rgba(77, 101, 93, 0.64); stroke-width: 1.5; stroke-dasharray: 3 5; stroke-linecap: round; pointer-events: none; }
-	.trace-tail { opacity: 0.9; }
+	.trace-tail { opacity: 0.7; }
 	.trace-tail-outline { stroke-dasharray: 4 3; }
 </style>
