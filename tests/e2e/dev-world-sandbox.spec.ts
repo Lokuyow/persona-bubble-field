@@ -707,6 +707,36 @@ test.describe('DEV World Sandbox', () => {
 		const replyBubbles = page.locator('[data-trace-reply-id]');
 		await expect(replyBubbles).toHaveCount(5);
 		await expect(page.locator('[data-trace-reply-id="' + '7'.repeat(64) + '"]')).toContainText('newest same-cell direct reply');
+		const traceSurface = await page.locator('.bubble-layer').evaluate(() => {
+			const resolveSurface = (value: string) => {
+				const probe = document.createElement('span');
+				probe.style.setProperty('--trace-surface', value);
+				probe.style.background = 'var(--trace-surface)';
+				document.body.append(probe);
+				const color = getComputedStyle(probe).backgroundColor;
+				probe.remove();
+				return color;
+			};
+			return [...document.querySelectorAll<HTMLElement>('.trace-root-bubble, .trace-reply-card')].map((card) => {
+				const token = getComputedStyle(card).getPropertyValue('--trace-surface').trim();
+				const fill = card.querySelector<SVGPathElement>('.trace-bubble-surface-fill');
+				const text = card.querySelector<HTMLElement>('.bubble-content');
+				return {
+					speechType: card.dataset.speechType,
+					token,
+					expectedSurface: resolveSurface(token),
+					background: getComputedStyle(card).backgroundColor,
+					fill: fill ? getComputedStyle(fill).fill : null,
+					textOpacity: text ? getComputedStyle(text).opacity : null
+				};
+			});
+		});
+		const normalTraceSurfaces = traceSurface.filter((surface) => surface.speechType === 'normal');
+		const specialTraceSurfaces = traceSurface.filter((surface) => surface.speechType === 'shout' || surface.speechType === 'monologue');
+		expect(normalTraceSurfaces.length).toBeGreaterThan(0);
+		expect(specialTraceSurfaces.length).toBeGreaterThan(0);
+		expect(normalTraceSurfaces.every((surface) => surface.background === surface.expectedSurface && surface.textOpacity === '1')).toBe(true);
+		expect(specialTraceSurfaces.every((surface) => surface.fill === surface.expectedSurface && surface.textOpacity === '1')).toBe(true);
 		await expect(page.locator('[data-trace-tail-root-id="' + '2'.repeat(64) + '"]')).toHaveCount(2);
 		await expect(page.locator('[data-trace-tail-root-id="' + '2'.repeat(64) + '"]').first()).toHaveAttribute('data-trace-tail-target');
 		await expect(page.locator('[data-trace-tail-reply-id]')).toHaveCount(0);
@@ -727,113 +757,6 @@ test.describe('DEV World Sandbox', () => {
 		await page.locator('[data-trace-reply-id="' + '7'.repeat(64) + '"]').getByRole('button', { name: /プロフィール/ }).click();
 		await expect(profileDialog(page)).toBeVisible();
 		await page.keyboard.press('Escape');
-		/* Retired position/ghost/offscreen projection assertions from the cell-based UI.
-
-		const traceBubbleBackgrounds = await page.locator('.trace-root-bubble, .trace-reply-card').evaluateAll((bubbles) => bubbles.map((bubble) => ({
-			speechType: bubble.getAttribute('data-speech-type'),
-			background: getComputedStyle(bubble).backgroundColor
-		})));
-		expect(traceBubbleBackgrounds.filter(({ speechType }) => speechType === 'shout' || speechType === 'monologue')
-			.every(({ background }) => background === 'rgba(0, 0, 0, 0)')).toBe(true);
-		expect(traceBubbleBackgrounds.filter(({ speechType }) => speechType === 'normal')
-			.every(({ background }) => background !== 'rgba(0, 0, 0, 0)')).toBe(true);
-
-		const traceTailMasks = await page.locator('.tail-layer').evaluate((layer) => {
-			const bodyPathByBubbleId = new Map([...document.querySelectorAll<HTMLElement>('.trace-root-bubble, .trace-reply-card')]
-				.filter((bubble) => bubble.dataset.speechType !== 'normal')
-				.map((bubble) => [bubble.dataset.bubbleId, bubble.querySelector<SVGPathElement>('.bubble-surface-fill')?.getAttribute('d')]));
-			const tails = [...layer.querySelectorAll<SVGPolygonElement>('.trace-tail')];
-			return tails.map((tail) => {
-				const maskId = tail.getAttribute('mask')?.replace(/^url\(#|\)$/g, '');
-				const mask = maskId ? document.getElementById(maskId) : null;
-				const bodyPath = mask?.querySelector<SVGPathElement>('path');
-				const bubbleId = maskId?.replace(/^trace-tail-body-/, '');
-				return {
-					maskId,
-					maskUnits: mask?.getAttribute('maskUnits'),
-					maskContentUnits: mask?.getAttribute('maskContentUnits'),
-					bodyPath: bodyPath?.getAttribute('d'),
-					matchesBody: bodyPath?.getAttribute('d') === bodyPathByBubbleId.get(bubbleId)
-				};
-			});
-		});
-		const traceTailOpeningGeometry = await page.locator('.tail-layer').evaluate((layer) => [...layer.querySelectorAll<SVGPolygonElement>('.trace-tail')]
-			.filter((tail) => tail.hasAttribute('mask'))
-			.map((tail) => {
-				const outline = tail.nextElementSibling as SVGPathElement | null;
-				const maskId = outline?.getAttribute('mask')?.replace(/^url\(#|\)$/g, '');
-				const opening = maskId ? document.querySelector<SVGMaskElement>(`#${maskId} polygon`) : null;
-				const transform = opening?.getAttribute('transform')?.match(/^translate\((-?[\d.]+) (-?[\d.]+)\)$/);
-				if (!opening || !transform) throw new Error('Expected a viewport-transformed trace tail opening.');
-				const [translateX, translateY] = transform.slice(1).map(Number);
-				const openingPoints = (opening.getAttribute('points') ?? '').trim().split(/\s+/).map((point) => point.split(',').map(Number));
-				const tailPoints = Array.from({ length: tail.points.numberOfItems }, (_, index) => {
-					const point = tail.points.getItem(index);
-					return [point.x, point.y];
-				});
-				return Math.max(...openingPoints.map(([x, y], index) => Math.hypot(x + translateX - tailPoints[index][0], y + translateY - tailPoints[index][1])));
-			}));
-		const maskedTraceTails = traceTailMasks.filter((tail) => tail.maskId);
-		expect(maskedTraceTails).toHaveLength(3);
-		expect(maskedTraceTails.every((tail) => tail.maskUnits === 'userSpaceOnUse' && tail.maskContentUnits === 'userSpaceOnUse' && tail.matchesBody)).toBe(true);
-		expect(traceTailOpeningGeometry).toHaveLength(3);
-		expect(Math.max(...traceTailOpeningGeometry)).toBeLessThan(0.001);
-		await expect(page.locator('.tail-layer polygon[data-trace-tail-reply-id="' + '7'.repeat(64) + '"][mask]')).toHaveCount(0);
-		await expect(page.locator('.tail-layer path.trace-tail-outline[mask]')).toHaveCount(3);
-		await expect(page.locator('.tail-layer mask[id^="trace-tail-outline-"] path')).toHaveCount(3);
-		await expect(page.locator('.tail-layer mask[id^="trace-tail-outline-"] polygon')).toHaveCount(3);
-		await expect(page.getByText('deeper branch reply')).toHaveCount(0);
-		await expect(page.getByText('offscreen reply body must stay hidden')).toHaveCount(0);
-		await expect(page.locator('[data-trace-reply-offscreen-position="15,7"]')).toBeVisible();
-		await expect(page.locator('[data-trace-reply-ghost-id="' + 'a'.repeat(64) + '"]')).toHaveCount(0);
-		await expect(page.locator('[data-cell-position="15,7"]')).toHaveCount(0);
-		await expect(page.locator('[data-trace-relation-reply-id]')).toHaveCount(3);
-		expect(await page.locator('[data-trace-relation-reply-id]').first().evaluate((element) => getComputedStyle(element).pointerEvents)).toBe('none');
-
-		const coexistence = await page.evaluate(() => {
-			const center = (selector: string) => {
-				const rect = document.querySelector<HTMLElement>(selector)!.getBoundingClientRect();
-				return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-			};
-			return {
-				participant: center('[data-participant-id="' + 'f'.repeat(64) + '"]'),
-				participantReply: center('[data-trace-reply-ghost-id="' + '8'.repeat(64) + '"]'),
-				root: center('[data-trace-ghost-root-id="' + '2'.repeat(64) + '"]'),
-				rootReply: center('[data-trace-reply-ghost-id="' + '9'.repeat(64) + '"]')
-			};
-		});
-		expect(coexistence.participantReply).not.toEqual(coexistence.participant);
-		expect(coexistence.rootReply).not.toEqual(coexistence.root);
-
-		await page.getByRole('button', { name: 'Add live trace reply' }).click();
-		await expect(page.locator('[data-trace-reply-id="' + '7'.repeat(64) + '"]')).toContainText('newest same-cell direct reply');
-		await expect(page.locator('[data-trace-reply-id="' + '7'.repeat(64) + '"]')).toHaveAttribute('data-trace-reply-count', '3');
-		await expect(page.getByText('live newest same-cell direct reply')).toHaveCount(0);
-
-		await page.locator('[data-trace-reply-ghost-id="' + '7'.repeat(64) + '"]').click();
-		await expect(profileDialog(page)).toBeVisible();
-		await page.keyboard.press('Escape');
-		await expect(profileDialog(page)).toBeHidden();
-		await expect(page.locator('[data-trace-reply-id="' + '7'.repeat(64) + '"]')).toBeVisible();
-
-		const connectorBeforeMovement = await page.locator('[data-trace-reply-offscreen-position="15,7"]').getAttribute('d');
-		await dragJoystick(page, { x: -24, y: 0 }, { x: 5, y: 3 });
-		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '6,3');
-		await expect.poll(() => page.locator('[data-trace-reply-offscreen-position="15,7"]').getAttribute('d')).not.toBe(connectorBeforeMovement);
-		await page.keyboard.press('ArrowRight');
-		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '7,3');
-
-		// With the Composer dock present, the field area's corner can lie outside the logical grid.
-		const blankCell = await fieldCellCenter(page, { x: 5, y: 3 });
-		await page.mouse.click(blankCell.x, blankCell.y);
-		await expect(replyBubbles).toHaveCount(0);
-		await page.locator('[data-cell-position="8,4"]').click();
-		await expect(page.locator('[data-trace-reply-id="' + 'c'.repeat(64) + '"]')).toContainText('live newest same-cell direct reply');
-		await expect(page.locator('[data-trace-reply-id="' + 'c'.repeat(64) + '"]')).toHaveAttribute('data-trace-reply-count', '3');
-		expect(await page.evaluate(() => (window as never as {
-			__traceReplyExternalCalls: { webSocketUrls: string[]; indexedDbOpen: number }
-		}).__traceReplyExternalCalls)).toEqual(externalBaseline);
-		*/
 	});
 
 	test('navigates a deep DEV Trace one adjacent speech at a time through shared cell actions', async ({ page }) => {
@@ -848,115 +771,6 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.locator('[data-trace-reply-id="' + 'b'.repeat(64) + '"]')).toBeVisible();
 		await page.locator('[data-trace-reply-id="' + 'b'.repeat(64) + '"]').locator('.trace-reply-content-button').click();
 		await expect(page.locator('[data-trace-current-reply-id="' + 'b'.repeat(64) + '"]')).toBeVisible();
-		/* Retired logical-cell reply-navigation assertions; speech bubbles now own reply selection. */
-		/*
-		const selectCell = async (position: string) => {
-			const cell = page.locator(`[data-cell-position="${position}"]`);
-			const box = await cell.boundingBox();
-			if (!box) throw new Error(`Expected visible logical cell ${position}.`);
-			await cell.click({ position: { x: box.width - 2, y: box.height - 2 } });
-		};
-		const selectParticipantCell = async (participantId: string) => {
-			const box = await page.locator(`[data-participant-id="${participantId}"]`).boundingBox();
-			if (!box) throw new Error(`Expected visible participant ${participantId}.`);
-			await page.mouse.click(box.x + 3, box.y + 3);
-		};
-
-		await selectCell('8,4');
-		await selectCell('6,4');
-		let menu = page.getByRole('menu', { name: 'Cell actions' });
-		await expect(menu.locator('[data-cell-action="reply"]')).toHaveCount(2);
-		await menu.locator('[data-cell-action="reply"]').first().click();
-		await expect(page.locator('[data-trace-current-reply-id="' + '7'.repeat(64) + '"]'))
-			.toContainText('newest same-cell direct reply');
-		await expect(page.locator('[data-trace-parent-id="' + '2'.repeat(64) + '"]'))
-			.toContainText('trace-only root near the viewer');
-		await expect(page.locator('[data-trace-reply-id="' + 'b'.repeat(64) + '"]'))
-			.toContainText('deeper branch reply');
-		await expect(page.locator('.trace-parent-tail[mask]')).toHaveCount(1);
-		await expect(page.locator('.trace-parent-tail-outline[mask]')).toHaveCount(1);
-		await expect(page.locator('.tail-layer mask[id^="trace-tail-outline-"] polygon')).toHaveCount(1);
-		const parentTailOpeningError = await page.locator('.tail-layer').evaluate((layer) => {
-			const tail = layer.querySelector<SVGPolygonElement>('.trace-parent-tail');
-			const outline = tail?.nextElementSibling as SVGPathElement | null;
-			const maskId = outline?.getAttribute('mask')?.replace(/^url\(#|\)$/g, '');
-			const opening = maskId ? document.querySelector<SVGPolygonElement>(`#${maskId} polygon`) : null;
-			const transform = opening?.getAttribute('transform')?.match(/^translate\((-?[\d.]+) (-?[\d.]+)\)$/);
-			if (!tail || !opening || !transform) throw new Error('Expected a viewport-transformed parent tail opening.');
-			const [translateX, translateY] = transform.slice(1).map(Number);
-			const openingPoints = (opening.getAttribute('points') ?? '').trim().split(/\s+/).map((point) => point.split(',').map(Number));
-			return Math.max(...openingPoints.map(([x, y], index) => {
-				const tailPoint = tail.points.getItem(index);
-				return Math.hypot(x + translateX - tailPoint.x, y + translateY - tailPoint.y);
-			}));
-		});
-		expect(parentTailOpeningError).toBeLessThan(0.001);
-
-		await selectCell('7,4');
-		await expect(page.locator('[data-trace-current-reply-id="' + 'b'.repeat(64) + '"]'))
-			.toContainText('deeper branch reply');
-		await expect(page.locator('[data-trace-parent-id="' + '7'.repeat(64) + '"]'))
-			.toContainText('newest same-cell direct reply');
-		await expect(page.getByText('trace-only root near the viewer')).toHaveCount(0);
-		await expect(page.locator('[data-trace-reply-id="' + 'd'.repeat(64) + '"]'))
-			.toHaveAttribute('data-trace-reply-count', '2');
-
-		await selectCell('8,4');
-		menu = page.getByRole('menu', { name: 'Cell actions' });
-		const sameAuthorReplies = menu.locator('[data-cell-action="reply"]');
-		await expect(sameAuthorReplies).toHaveCount(2);
-		await expect(sameAuthorReplies.nth(0)).toHaveText(/ #1$/);
-		await expect(sameAuthorReplies.nth(1)).toHaveText(/ #2$/);
-		await expect(menu).not.toContainText('newest same-author grandchild');
-		await expect(menu).not.toContainText('older same-author grandchild');
-		await sameAuthorReplies.first().click();
-		await expect(page.locator('[data-trace-current-reply-id="' + 'd'.repeat(64) + '"]'))
-			.toContainText('newest same-author grandchild');
-		await expect(page.locator('[data-trace-parent-id="' + 'b'.repeat(64) + '"]'))
-			.toContainText('deeper branch reply');
-
-		await selectParticipantCell('f'.repeat(64));
-		menu = page.getByRole('menu', { name: 'Cell actions' });
-		await expect(menu.locator('[data-cell-action="participant"]')).toHaveCount(1);
-		await expect(menu.locator('[data-cell-action="reply"]')).toHaveCount(1);
-		await menu.locator('[data-cell-action="reply"]').click();
-		await expect(page.locator('[data-trace-current-reply-id="' + 'd'.repeat(64) + '"]')).toBeVisible();
-
-		await page.keyboard.press('ArrowRight');
-		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '8,3');
-		await selectParticipantCell('f'.repeat(64));
-		await page.getByRole('menu', { name: 'Cell actions' }).locator('[data-cell-action="reply"]').click();
-		await expect(page.locator('[data-trace-current-reply-id="' + 'f'.repeat(64) + '"]'))
-			.toContainText('great-grandchild reply');
-		await expect(page.locator('[data-trace-parent-id="' + 'd'.repeat(64) + '"]')).toBeVisible();
-
-		await selectCell('8,4');
-		await expect(page.locator('[data-trace-current-reply-id="' + 'd'.repeat(64) + '"]')).toBeVisible();
-		await selectCell('7,4');
-		await expect(page.locator('[data-trace-current-reply-id="' + 'b'.repeat(64) + '"]')).toBeVisible();
-		await expect(page.locator('[data-trace-reply-id="' + 'd'.repeat(64) + '"]'))
-			.toContainText('newest same-author grandchild');
-
-		await page.locator('[data-trace-current-reply-ghost-id="' + 'b'.repeat(64) + '"] .trace-ghost-profile-trigger').click();
-		await expect(profileDialog(page)).toBeVisible();
-		await page.keyboard.press('Escape');
-		await expect(profileDialog(page)).toBeHidden();
-		await expect(page.locator('[data-trace-current-reply-id="' + 'b'.repeat(64) + '"]')).toBeVisible();
-
-		await page.setViewportSize({ width: 420, height: 720 });
-		for (let step = 0; step < 4; step += 1) await page.keyboard.press('ArrowRight');
-		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '12,3');
-		await expect(page.locator('[data-trace-parent-id="' + '7'.repeat(64) + '"]')).toHaveCount(0);
-		await expect(page.locator('[data-trace-parent-offscreen-id="' + '7'.repeat(64) + '"]'))
-			.toHaveAttribute('data-trace-parent-direction', 'left');
-		await expect(page.locator('[data-cell-position="6,4"]')).toHaveCount(0);
-		await expect(page.locator('[data-cell-position="8,4"]')).toHaveCount(1);
-
-		for (let step = 0; step < 4; step += 1) await page.keyboard.press('ArrowLeft');
-		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '8,3');
-		const restoredParentCell = page.locator('[data-cell-position="6,4"]');
-		await expect(restoredParentCell).toHaveCount(1);
-		*/
 	});
 
 	test('shows a finite recent-message overlay with semantic colors and existing profile focus restoration', async ({ page }) => {
