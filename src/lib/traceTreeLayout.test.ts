@@ -28,4 +28,14 @@ describe('trace tree layout', () => {
 		expect(Math.round(next.x)).not.toBe(Math.round(occupied.x));
 		expect(Math.round(next.y)).not.toBe(Math.round(occupied.y));
 	});
+
+	it('searches the remaining legal positions when a narrow area clamps every ranked slot', () => {
+		const bounds = { x: 0, y: 0, width: 84, height: 40 };
+		const footprint = { width: 80, height: 40 };
+		const anchors: Array<{ x: number; y: number }> = [];
+		for (let rank = 0; rank < 5; rank += 1) {
+			anchors.push(distinctTraceAnchor({ x: 80, y: 0 }, footprint, bounds, anchors, rank));
+		}
+		expect(new Set(anchors.map(({ x, y }) => `${Math.round(x)},${Math.round(y)}`)).size).toBe(anchors.length);
+	});
 });

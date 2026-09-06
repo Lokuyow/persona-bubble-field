@@ -40,5 +40,19 @@ export function distinctTraceAnchor(preferred: WorldPoint, footprint: Size, boun
 		clampToBounds({ x: maxX, y: maxY }, footprint, bounds)
 	];
 	// Keep anchors distinct after sub-pixel layout is rounded for rendering.
-	return candidates.find((candidate) => !occupied.some((anchor) => Math.round(anchor.x) === Math.round(candidate.x) && Math.round(anchor.y) === Math.round(candidate.y))) ?? base;
+	const isDistinct = (candidate: WorldPoint) => !occupied.some((anchor) =>
+		Math.round(anchor.x) === Math.round(candidate.x) && Math.round(anchor.y) === Math.round(candidate.y)
+	);
+	const candidate = candidates.find(isDistinct);
+	if (candidate) return candidate;
+
+	// A narrow mobile speech area can clamp every ranked slot and edge to an
+	// occupied point. Search its legal pixels before conceding that no unique
+	// anchor exists; cards remain inside the same safe bounds.
+	for (let y = bounds.y; y <= maxY; y += 1) {
+		for (let x = bounds.x; x <= maxX; x += 1) {
+			if (isDistinct({ x, y })) return { x, y };
+		}
+	}
+	return base;
 }
