@@ -182,6 +182,8 @@
 	.bubble-ellipsis { position: absolute; right: 8px; bottom: 5px; z-index: 2; padding-left: 0.5em; background: var(--tone-background); line-height: 1; pointer-events: none; }
 	.bubble-normal { width: fit-content; min-width: 72px; max-width: min(240px, calc(100% - 32px)); padding: 12px 15px; }
 	.bubble-normal::after { content: ''; position: absolute; left: calc(50% + var(--tail-seam-offset-x, 0px)); bottom: -1px; width: 11px; height: 3px; transform: translateX(-50%); background: var(--tone-background); pointer-events: none; z-index: 1; }
+	.trace-reply-card.bubble-normal::after { content: none; }
+	.trace-root-bubble.bubble-normal::after { background: var(--trace-surface); }
 	.trace-root-bubble,
 	.trace-reply-card { width: fit-content; min-width: 72px; max-width: min(240px, calc(100% - 32px)); padding: 12px 15px; border-style: dashed; background: var(--trace-surface); pointer-events: auto; }
 	.trace-root-card,

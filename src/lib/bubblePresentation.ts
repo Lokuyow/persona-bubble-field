@@ -136,4 +136,3 @@ function safeSvgId(bubbleId: string): string {
 
 export function speechOutlineMaskId(bubbleId: string): string { return `speech-tail-opening-${safeSvgId(bubbleId)}`; }
 export function traceTailMaskId(bubbleId: string): string { return `trace-tail-body-${safeSvgId(bubbleId)}`; }
-export function traceTailOutlineMaskId(bubbleId: string): string { return `trace-tail-outline-${safeSvgId(bubbleId)}`; }
