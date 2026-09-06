@@ -262,8 +262,8 @@ test.describe('DEV World Sandbox', () => {
 			if (viewport.name === 'desktop') await page.getByRole('button', { name: 'Hide Chatter' }).click();
 			await page.locator('[data-cell-position="8,4"]').click();
 			const direct = page.locator(`[data-trace-reply-id="${'7'.repeat(64)}"]`);
-			await direct.getByRole('button').first().click();
-			await page.locator(`[data-trace-reply-id="${'b'.repeat(64)}"]`).getByRole('button').first().click();
+			await direct.locator('.trace-reply-content-button').click();
+			await page.locator(`[data-trace-reply-id="${'b'.repeat(64)}"]`).locator('.trace-reply-content-button').click();
 			await expect(page.locator('[data-trace-root-id] .trace-root-compact')).toBeVisible();
 			await expect(page.locator(`[data-trace-role="parent"][data-trace-reply-id="${'7'.repeat(64)}"]`)).toBeVisible();
 			await expect(page.locator(`[data-trace-role="current"][data-trace-reply-id="${'b'.repeat(64)}"]`)).toBeVisible();
@@ -281,23 +281,30 @@ test.describe('DEV World Sandbox', () => {
 				const avatarWrapper = author?.querySelector<HTMLElement>('.trace-reply-author-avatar');
 				const avatar = author?.querySelector<HTMLElement>('.trace-reply-author-avatar .avatar');
 				const name = author?.querySelector<HTMLElement>('.trace-reply-author-name');
-				const bubble = card.querySelector<HTMLElement>('.trace-reply-bubble');
-				if (!author || !avatarWrapper || !avatar || !name || !bubble) throw new Error('Expected a reply author block and bubble.');
+				const surface = card.querySelector<HTMLElement>('.trace-reply-surface');
+				const content = card.querySelector<HTMLElement>('.trace-reply-content-button');
+				if (!author || !avatarWrapper || !avatar || !name || !surface || !content) throw new Error('Expected a reply author block, surface, and content control.');
 				const authorBox = author.getBoundingClientRect();
 				const avatarWrapperBox = avatarWrapper.getBoundingClientRect();
 				const avatarBox = avatar.getBoundingClientRect();
 				const nameBox = name.getBoundingClientRect();
-				const bubbleBox = bubble.getBoundingClientRect();
+				const surfaceBox = surface.getBoundingClientRect();
+				const contentBox = content.getBoundingClientRect();
 				return {
 					authorDisplay: getComputedStyle(author).display,
 					direction: getComputedStyle(author).flexDirection,
 					nameWhiteSpace: getComputedStyle(name).whiteSpace,
 					nameOverflow: getComputedStyle(name).textOverflow,
-					authorLeft: authorBox.left, avatarWrapperBox, avatarBox, nameBox, bubbleBox
+					authorLeft: authorBox.left, avatarWrapperBox, avatarBox, nameBox, surfaceBox, contentBox
 				};
 			});
 			expect(authorLayout).toMatchObject({ authorDisplay: 'flex', direction: 'column', nameWhiteSpace: 'nowrap', nameOverflow: 'ellipsis' });
-			expect(authorLayout.authorLeft).toBeLessThan(authorLayout.bubbleBox.left);
+			for (const box of [authorLayout.avatarBox, authorLayout.nameBox, authorLayout.contentBox]) {
+				expect(box.left).toBeGreaterThanOrEqual(authorLayout.surfaceBox.left - 0.5);
+				expect(box.right).toBeLessThanOrEqual(authorLayout.surfaceBox.right + 0.5);
+				expect(box.top).toBeGreaterThanOrEqual(authorLayout.surfaceBox.top - 0.5);
+				expect(box.bottom).toBeLessThanOrEqual(authorLayout.surfaceBox.bottom + 0.5);
+			}
 			expect(authorLayout.avatarBox.left).toBeGreaterThanOrEqual(authorLayout.avatarWrapperBox.left - 0.5);
 			expect(authorLayout.avatarBox.right).toBeLessThanOrEqual(authorLayout.avatarWrapperBox.right + 0.5);
 			expect(authorLayout.avatarBox.top).toBeGreaterThanOrEqual(authorLayout.avatarWrapperBox.top - 0.5);
@@ -305,11 +312,11 @@ test.describe('DEV World Sandbox', () => {
 			expect(Math.abs((authorLayout.avatarBox.left + authorLayout.avatarBox.right) / 2 - (authorLayout.avatarWrapperBox.left + authorLayout.avatarWrapperBox.right) / 2)).toBeLessThan(0.5);
 			expect(Math.abs((authorLayout.avatarBox.top + authorLayout.avatarBox.bottom) / 2 - (authorLayout.avatarWrapperBox.top + authorLayout.avatarWrapperBox.bottom) / 2)).toBeLessThan(0.5);
 			expect(authorLayout.avatarBox.bottom).toBeLessThanOrEqual(authorLayout.nameBox.top);
-			expect(authorLayout.avatarBox.right).toBeLessThanOrEqual(authorLayout.bubbleBox.left);
-			expect(authorLayout.nameBox.right).toBeLessThanOrEqual(authorLayout.bubbleBox.left);
+			expect(authorLayout.avatarBox.right).toBeLessThanOrEqual(authorLayout.contentBox.left);
+			expect(authorLayout.nameBox.right).toBeLessThanOrEqual(authorLayout.contentBox.left);
 			const selectedChildId = await children.first().getAttribute('data-trace-reply-id');
 			if (!selectedChildId) throw new Error('Expected child reply ID.');
-			await children.first().locator('.trace-reply-bubble').click();
+			await children.first().locator('.trace-reply-content-button').click();
 			await expect(page.locator('[data-trace-current-reply-id]')).toHaveAttribute('data-trace-current-reply-id', selectedChildId);
 			await children.first().getByRole('button', { name: /プロフィール/ }).click();
 			await expect(profileDialog(page)).toBeVisible();
@@ -325,11 +332,11 @@ test.describe('DEV World Sandbox', () => {
 		const preview = page.getByLabel('Reply preview', { exact: true });
 		await page.locator('[data-cell-position="8,4"]').click();
 		const current = page.locator('[data-trace-reply-id="' + '7'.repeat(64) + '"]');
-		await current.getByRole('button').first().click();
+		await current.locator('.trace-reply-content-button').click();
 		await expect(preview).toHaveAttribute('data-reply-id', '7'.repeat(64));
 		await editor.fill('nested draft');
 		await page.getByRole('button', { name: 'Clear reply', exact: true }).click();
-		await current.getByRole('button').first().click();
+		await current.locator('.trace-reply-content-button').click();
 		await expect(preview).toHaveAttribute('data-reply-id', '7'.repeat(64));
 		await expect(editor).toHaveValue('nested draft');
 		await current.getByRole('button', { name: /プロフィール/ }).click();
@@ -567,7 +574,7 @@ test.describe('DEV World Sandbox', () => {
 		await page.keyboard.press('Escape');
 		/* Retired position/ghost/offscreen projection assertions from the cell-based UI.
 
-		const traceBubbleBackgrounds = await page.locator('.trace-root-bubble, .trace-reply-bubble').evaluateAll((bubbles) => bubbles.map((bubble) => ({
+		const traceBubbleBackgrounds = await page.locator('.trace-root-bubble, .trace-reply-surface').evaluateAll((bubbles) => bubbles.map((bubble) => ({
 			speechType: bubble.getAttribute('data-speech-type'),
 			background: getComputedStyle(bubble).backgroundColor
 		})));
@@ -577,7 +584,7 @@ test.describe('DEV World Sandbox', () => {
 			.every(({ background }) => background !== 'rgba(0, 0, 0, 0)')).toBe(true);
 
 		const traceTailMasks = await page.locator('.tail-layer').evaluate((layer) => {
-			const bodyPathByBubbleId = new Map([...document.querySelectorAll<HTMLElement>('.trace-root-bubble, .trace-reply-bubble')]
+			const bodyPathByBubbleId = new Map([...document.querySelectorAll<HTMLElement>('.trace-root-bubble, .trace-reply-surface')]
 				.filter((bubble) => bubble.dataset.speechType !== 'normal')
 				.map((bubble) => [bubble.dataset.bubbleId, bubble.querySelector<SVGPathElement>('.bubble-surface-fill')?.getAttribute('d')]));
 			const tails = [...layer.querySelectorAll<SVGPolygonElement>('.trace-tail')];
@@ -681,10 +688,10 @@ test.describe('DEV World Sandbox', () => {
 		const hideTimeline = page.getByRole('button', { name: 'Hide Chatter' });
 		await hideTimeline.click();
 		await page.locator('[data-cell-position="8,4"]').click();
-		await page.locator('[data-trace-reply-id="' + '7'.repeat(64) + '"]').getByRole('button').first().click();
+		await page.locator('[data-trace-reply-id="' + '7'.repeat(64) + '"]').locator('.trace-reply-content-button').click();
 		await expect(page.locator('[data-trace-current-reply-id="' + '7'.repeat(64) + '"]')).toBeVisible();
 		await expect(page.locator('[data-trace-reply-id="' + 'b'.repeat(64) + '"]')).toBeVisible();
-		await page.locator('[data-trace-reply-id="' + 'b'.repeat(64) + '"]').getByRole('button').first().click();
+		await page.locator('[data-trace-reply-id="' + 'b'.repeat(64) + '"]').locator('.trace-reply-content-button').click();
 		await expect(page.locator('[data-trace-current-reply-id="' + 'b'.repeat(64) + '"]')).toBeVisible();
 		/* Retired logical-cell reply-navigation assertions; speech bubbles now own reply selection. */
 		/*

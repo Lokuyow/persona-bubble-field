@@ -2216,8 +2216,8 @@
 		};
 	}
 
-	function defaultTraceReplyCardFootprint(body: Size): Size {
-		return { width: body.width + 64, height: Math.max(body.height, 42) };
+	function defaultTraceReplyCardFootprint(surface: Size): Size {
+		return surface;
 	}
 
 	function observeTraceReplyCard(node: HTMLElement, id: string) {
@@ -2714,13 +2714,11 @@
 					data-speech-type={bubble.reply.speechType}
 					style={`transform: translate3d(${bubble.anchor.x}px, ${bubble.anchor.y}px, 0);`}
 				>
-					<button
-						type="button"
+					<div
 						use:observeBubble={bubble.id}
-						class={`bubble bubble-normal trace-reply-bubble tone-${bubble.tone}${bubble.reply.speechType !== 'normal' ? ' speech-bubble-special' : ''}`}
+						class={`bubble bubble-normal trace-reply-surface tone-${bubble.tone}${bubble.reply.speechType !== 'normal' ? ' speech-bubble-special' : ''}`}
 						data-bubble-id={bubble.id}
 						data-speech-type={bubble.reply.speechType}
-						on:click={(event) => { event.stopPropagation(); selectTraceSpeech(bubble.reply.id); }}
 					>
 						{#if bubble.reply.speechType !== 'normal'}
 							{@const shape = bubble.shape}
@@ -2729,13 +2727,15 @@
 								<path class="bubble-surface-outline trace-bubble-surface-outline" d={shape?.path ?? ''} />
 							</svg>
 						{/if}
-						<span class="bubble-content">{bubble.reply.content}</span>
-						{#if bubbleOverflowById[bubble.id]}<span class="bubble-ellipsis" aria-hidden="true">…</span>{/if}
-					</button>
-					<button class="trace-reply-author-profile" data-trace-author-block type="button" aria-label={`${bubble.character.name} のプロフィールを開く`} on:click={(event) => { event.stopPropagation(); openProfile(bubble.character.characterId, event.currentTarget); }}>
+						<button class="trace-reply-author-profile" data-trace-author-block type="button" aria-label={`${bubble.character.name} のプロフィールを開く`} on:click={(event) => { event.stopPropagation(); openProfile(bubble.character.characterId, event.currentTarget); }}>
 						<span class="trace-reply-author-avatar"><Avatar.Root class={`avatar avatar-${bubble.tone}`}><Avatar.Image src={asset(`/${bubble.character.picture}`)} alt="" /><Avatar.Fallback>{bubble.character.name.slice(0, 1)}</Avatar.Fallback></Avatar.Root></span>
 						<span class="trace-reply-author-name">{bubble.character.name}</span>
 					</button>
+						<button class="trace-reply-content-button" type="button" on:click={(event) => { event.stopPropagation(); selectTraceSpeech(bubble.reply.id); }}>
+							<span class="bubble-content">{bubble.reply.content}</span>
+							{#if bubbleOverflowById[bubble.id]}<span class="bubble-ellipsis" aria-hidden="true">…</span>{/if}
+						</button>
+					</div>
 				</div>
 			{/each}
 			{#if traceBubble}
@@ -3746,7 +3746,7 @@
 	}
 
 	.trace-root-bubble,
-	.trace-reply-bubble {
+	.trace-reply-surface {
 		width: fit-content;
 		min-width: 72px;
 		max-width: min(240px, calc(100% - 32px));
@@ -3759,21 +3759,26 @@
 	.trace-root-card,
 	.trace-reply-card {
 		position: absolute;
-		align-items: flex-start;
-		gap: 8px;
 		pointer-events: auto;
 	}
 
 	.trace-root-card { z-index: 1; }
 	.trace-root-card { display: flex; }
-	.trace-reply-card { display: grid; grid-template-columns: 62px max-content; z-index: 2; }
+	.trace-reply-card { z-index: 2; }
 
 	.trace-root-card .trace-root-bubble,
-	.trace-reply-card .trace-reply-bubble {
+	.trace-reply-card .trace-reply-surface {
 		position: relative;
 	}
 
-	.trace-reply-card .trace-reply-bubble { grid-column: 2; grid-row: 1; }
+	.trace-reply-surface {
+		display: grid;
+		grid-template-columns: 62px minmax(0, 1fr);
+		column-gap: 8px;
+		align-items: start;
+		width: fit-content;
+		min-width: 144px;
+	}
 
 	.trace-reply-author-profile {
 		display: flex;
@@ -3787,7 +3792,7 @@
 		padding: 2px;
 		border: 0;
 		border-radius: 7px;
-		background: rgba(250, 250, 244, 0.82);
+		background: transparent;
 		color: #40504b;
 		font-size: 10px;
 		font-weight: 800;
@@ -3814,8 +3819,22 @@
 		white-space: nowrap;
 	}
 
+	.trace-reply-content-button {
+		position: relative;
+		grid-column: 2;
+		grid-row: 1;
+		min-width: 0;
+		padding: 0;
+		border: 0;
+		background: transparent;
+		color: inherit;
+		font: inherit;
+		text-align: left;
+		cursor: pointer;
+	}
+
 	.trace-reply-author-profile:focus-visible,
-	.trace-reply-bubble:focus-visible,
+	.trace-reply-content-button:focus-visible,
 	.trace-root-bubble:focus-visible {
 		outline: 3px solid #6dabb9;
 		outline-offset: 2px;
@@ -3827,12 +3846,12 @@
 	}
 
 	.trace-root-bubble.speech-bubble-special,
-	.trace-reply-bubble.speech-bubble-special {
+	.trace-reply-surface.speech-bubble-special {
 		background: transparent;
 	}
 
 	.trace-root-bubble .bubble-content,
-	.trace-reply-bubble .bubble-content {
+	.trace-reply-surface .bubble-content {
 		color: #26312f;
 		opacity: 1;
 	}

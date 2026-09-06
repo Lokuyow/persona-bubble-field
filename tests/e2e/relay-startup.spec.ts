@@ -1021,7 +1021,7 @@ test.describe('Relay startup', () => {
 		await expect(selfReplyBubble).toContainText('Relay own direct reply');
 		await expect(page.locator(`[data-trace-reply-ghost-id="${trace.selfDirect.id}"]`)).toHaveCount(0);
 		await expect(page.locator(`[data-trace-tail-reply-id]`)).toHaveCount(0);
-		await selfReplyBubble.getByRole('button').first().click();
+		await selfReplyBubble.locator('.trace-reply-content-button').click();
 		await expect(page.locator(`[data-trace-current-reply-id="${trace.selfDirect.id}"]`)).toContainText('Relay own direct reply');
 		await expect(page.getByText('Relay deeper branch reply')).toHaveCount(0);
 		await expect(page.getByText('Relay invalid reply')).toHaveCount(0);
@@ -1062,7 +1062,7 @@ test.describe('Relay startup', () => {
 		await page.evaluate(() => (window as typeof window & {
 			__relayStartupTest: { deferTraceReplies(): void }
 		}).__relayStartupTest.deferTraceReplies());
-		await page.locator(`[data-trace-reply-id="${trace.direct.id}"]`).getByRole('button').first().click();
+		await page.locator(`[data-trace-reply-id="${trace.direct.id}"]`).locator('.trace-reply-content-button').click();
 		await expect(page.locator(`[data-trace-current-reply-id="${trace.direct.id}"]`)).toContainText('Relay direct reply');
 		await expect(page.locator(`[data-trace-root-id="${trace.root.id}"]`)).toContainText('Relay trace root');
 		await expect(page.locator(`[data-trace-reply-id="${trace.deeper.id}"]`)).toContainText('Relay deeper branch reply');
@@ -1100,7 +1100,7 @@ test.describe('Relay startup', () => {
 		await page.evaluate(() => (window as typeof window & {
 			__relayStartupTest: { deferTraceReplies(): void }
 		}).__relayStartupTest.deferTraceReplies());
-		await page.locator(`[data-trace-reply-id="${trace.deeper.id}"]`).getByRole('button').first().click();
+		await page.locator(`[data-trace-reply-id="${trace.deeper.id}"]`).locator('.trace-reply-content-button').click();
 		await expect(page.locator(`[data-trace-current-reply-id="${trace.deeper.id}"]`)).toContainText('Relay deeper branch reply');
 		await expect(page.locator(`[data-trace-parent-id="${trace.direct.id}"]`)).toContainText('Relay direct reply');
 		await expect(page.locator(`[data-trace-reply-id="${trace.greatGrandchild.id}"]`)).toContainText('Relay great-grandchild reply');
@@ -1115,7 +1115,7 @@ test.describe('Relay startup', () => {
 			__relayStartupTest: { releaseTraceReplies(): void }
 		}).__relayStartupTest.releaseTraceReplies());
 		await expect(page.locator('.trace-reply-status')).toHaveCount(0);
-		await page.locator(`[data-trace-parent-id="${trace.direct.id}"]`).getByRole('button').first().click();
+		await page.locator(`[data-trace-parent-id="${trace.direct.id}"]`).locator('.trace-reply-content-button').click();
 		await expect(page.locator(`[data-trace-current-reply-id="${trace.direct.id}"]`)).toBeVisible();
 		await expect(page.locator(`[data-trace-reply-id="${trace.deeper.id}"]`)).toBeVisible();
 	});
