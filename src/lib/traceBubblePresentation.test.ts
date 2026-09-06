@@ -43,6 +43,30 @@ function layout(projection: TraceConversationProjection, bubbleSizes: Record<str
 }
 
 describe('trace bubble presentation', () => {
+	it('keeps oldest-first siblings in clockwise slots when a newer sibling arrives', () => {
+		const siblings = ['d', 'e', 'f', 'g'].map((letter, index) => ({
+			...child,
+			id: id(letter),
+			createdAt: 20 + index
+		}));
+		const projection = (directReplies: readonly ParsedTraceReply[]): TraceConversationProjection => ({
+			root,
+			current: { kind: 'reply', event: current },
+			parent: { kind: 'reply', event: parent },
+			directReplies
+		});
+		const sizes = Object.fromEntries([
+			[`trace-root-${root.id}`], [`trace-reply-${parent.id}`], [`trace-reply-${current.id}`],
+			...siblings.map((reply) => `trace-reply-${reply.id}`)
+		].map((key) => [key, { width: 80, height: 40 }]));
+		const first = layout(projection(siblings), sizes);
+		const second = layout(projection([...siblings, { ...child, id: id('z'), createdAt: 99 }]), {
+			...sizes, [`trace-reply-${id('z')}`]: { width: 80, height: 40 }
+		});
+		expect(first?.cards.filter((card) => card.role === 'child').map((card) => card.reply.id)).toEqual(siblings.map((reply) => reply.id));
+		expect(first?.cards.filter((card) => card.role === 'child').map((card) => card.anchor)).toEqual(second?.cards.filter((card) => card.role === 'child').slice(0, 4).map((card) => card.anchor));
+	});
+
 	it('keeps presentation body sizes separate from card footprints while placing parent, current, and child cards', () => {
 		const bubbleSizes = {
 			[`trace-root-${root.id}`]: { width: 100, height: 50 },

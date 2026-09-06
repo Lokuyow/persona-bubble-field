@@ -14,7 +14,7 @@ function reply(id: string, parent: ParsedWorldMessage | ParsedTraceReply, create
 }
 
 describe('Trace reply presentation', () => {
-	it('keeps only root, immediate parent, current and sorted direct children', () => {
+	it('keeps only root, immediate parent, current and oldest-first direct children', () => {
 		const parent = reply('p'.repeat(64), root, 2);
 		const current = reply('c'.repeat(64), parent, 3);
 		const newer = reply('z'.repeat(64), current, 5);
@@ -24,14 +24,21 @@ describe('Trace reply presentation', () => {
 			config: { rootId: root.id, currentId: current.id }
 		});
 		expect(projection?.parent?.event.id).toBe(parent.id);
-		expect(projection?.directReplies.map((item) => item.id)).toEqual([newer.id, older.id]);
+		expect(projection?.directReplies.map((item) => item.id)).toEqual([older.id, newer.id]);
 		expect(adjacentTraceSpeech(projection!, root.id)?.kind).toBe('root');
 		expect(adjacentTraceSpeech(projection!, older.id)?.event.id).toBe(older.id);
 	});
 
-	it('orders children by newest timestamp then event ID', () => {
+	it('keeps the accepted reply ordering newest-first but orders direct siblings by oldest timestamp then event ID', () => {
 		const left = reply('a'.repeat(64), root, 4);
 		const right = reply('b'.repeat(64), root, 4);
 		expect([right, left].sort(compareTraceReplies).map((item) => item.id)).toEqual([left.id, right.id]);
+		const newer = reply('z'.repeat(64), root, 5);
+		const projection = resolveTraceConversationProjection({
+			kind: 'open', root, replies: [newer, right, left], replyRefresh: 'settled',
+			config: { rootId: root.id, currentId: root.id }
+		});
+		expect(projection?.directReplies.map((item) => item.id)).toEqual([left.id, right.id, newer.id]);
+		expect(adjacentTraceSpeech(projection!, right.id)?.event.id).toBe(right.id);
 	});
 });

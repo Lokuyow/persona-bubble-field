@@ -62,8 +62,44 @@ export function bubbleCenter(anchor: WorldPoint, size: Size): WorldPoint {
 	return { x: anchor.x + size.width / 2, y: anchor.y + size.height / 2 };
 }
 
-export function traceRelationPath(start: WorldPoint, end: WorldPoint): string {
-	return `M ${start.x} ${start.y} L ${end.x} ${end.y}`;
+export type TaperedBandGeometry = Readonly<{
+	startLeft: WorldPoint;
+	startRight: WorldPoint;
+	endLeft: WorldPoint;
+	endRight: WorldPoint;
+	points: string;
+}>;
+
+/**
+ * The shared directional primitive for tails and Trace relations.  Keep it
+ * independent of any bubble-specific overlap, masking, or seam behavior.
+ */
+export function taperedBandGeometry(
+	start: WorldPoint,
+	end: WorldPoint,
+	startWidth: number,
+	endWidth: number
+): TaperedBandGeometry {
+	const dx = end.x - start.x;
+	const dy = end.y - start.y;
+	const length = Math.hypot(dx, dy) || 1;
+	const ux = dx / length;
+	const uy = dy / length;
+	const edge = (center: WorldPoint, width: number, side: 1 | -1): WorldPoint => ({
+		x: center.x - uy * (width / 2) * side,
+		y: center.y + ux * (width / 2) * side
+	});
+	const startLeft = edge(start, startWidth, 1);
+	const startRight = edge(start, startWidth, -1);
+	const endLeft = edge(end, endWidth, 1);
+	const endRight = edge(end, endWidth, -1);
+	return {
+		startLeft,
+		startRight,
+		endLeft,
+		endRight,
+		points: `${startLeft.x},${startLeft.y} ${startRight.x},${startRight.y} ${endRight.x},${endRight.y} ${endLeft.x},${endLeft.y}`
+	};
 }
 
 export function mergedTailFraction(index: number, count: number): number {
@@ -97,17 +133,14 @@ export function tailGeometry(start: WorldPoint, target: WorldPoint, width = 11, 
 	const length = Math.hypot(dx, dy) || 1;
 	const ux = dx / length;
 	const uy = dy / length;
-	const px = -uy * (width / 2);
-	const py = ux * (width / 2);
 	const baseCenter = { x: start.x - ux * overlap, y: start.y - uy * overlap };
-	const left = { x: baseCenter.x + px, y: baseCenter.y + py };
-	const right = { x: baseCenter.x - px, y: baseCenter.y - py };
+	const band = taperedBandGeometry(baseCenter, target, width, 0);
 	const extendIntoBody = (point: WorldPoint): WorldPoint => ({
 		x: point.x + (point.x - target.x) / length * bodyExtension,
 		y: point.y + (point.y - target.y) / length * bodyExtension
 	});
-	const rootLeft = extendIntoBody(left);
-	const rootRight = extendIntoBody(right);
+	const rootLeft = extendIntoBody(band.startLeft);
+	const rootRight = extendIntoBody(band.startRight);
 	const seamProgress = Math.min(1, Math.max(0, (start.y - baseCenter.y) / (target.y - baseCenter.y || 1)));
 	const seamCenterX = baseCenter.x + (target.x - baseCenter.x) * seamProgress;
 	return {
@@ -136,4 +169,4 @@ function safeSvgId(bubbleId: string): string {
 }
 
 export function speechOutlineMaskId(bubbleId: string): string { return `speech-tail-opening-${safeSvgId(bubbleId)}`; }
-export function traceTailMaskId(bubbleId: string): string { return `trace-tail-body-${safeSvgId(bubbleId)}`; }
+export function traceSurfaceOcclusionMaskId(rootId: string): string { return `trace-surface-occlusion-${safeSvgId(rootId)}`; }

@@ -469,11 +469,14 @@ test.describe('DEV World Sandbox', () => {
 				expect(box.top).toBeGreaterThanOrEqual(shoutStacking.surfaceBox.top - 0.5);
 				expect(box.bottom).toBeLessThanOrEqual(shoutStacking.surfaceBox.bottom + 0.5);
 			}
-			const selectedChildId = await children.first().getAttribute('data-trace-reply-id');
-			if (!selectedChildId) throw new Error('Expected child reply ID.');
-			await children.first().locator('.trace-reply-content-button').click();
+			// Select the shout child that owns the next visible level; oldest-first
+			// ordering deliberately makes the earlier normal sibling first.
+			const selectedChild = page.locator(`[data-trace-role="child"][data-trace-reply-id="${'d'.repeat(64)}"]`);
+			const selectedChildId = await selectedChild.getAttribute('data-trace-reply-id');
+			if (!selectedChildId) throw new Error('Expected the nested child reply ID.');
+			await selectedChild.locator('.trace-reply-content-button').click();
 			await expect(page.locator('[data-trace-current-reply-id]')).toHaveAttribute('data-trace-current-reply-id', selectedChildId);
-			await children.first().getByRole('button', { name: /プロフィール/ }).click();
+			await page.locator(`[data-trace-role="child"][data-trace-reply-id="${'f'.repeat(64)}"]`).getByRole('button', { name: /プロフィール/ }).click();
 			await expect(profileDialog(page)).toBeVisible();
 			await page.keyboard.press('Escape');
 		});
@@ -661,8 +664,9 @@ test.describe('DEV World Sandbox', () => {
 			document.body.append(probe);
 			const expectedSurface = getComputedStyle(probe).backgroundColor;
 			probe.remove();
-			const tailMask = tail.getAttribute('mask');
-			const maskId = tailMask?.replace(/^url\(#|\)$/g, '');
+			const group = tail.closest<SVGGElement>('g[data-trace-surface-occlusion-root-id]');
+			const sharedMask = group?.getAttribute('mask');
+			const maskId = sharedMask?.replace(/^url\(#|\)$/g, '');
 			const mask = maskId ? document.getElementById(maskId) : null;
 			const screenPoints = (element: SVGGraphicsElement, points: readonly DOMPoint[]) => {
 				const matrix = element.getScreenCTM();
@@ -674,7 +678,8 @@ test.describe('DEV World Sandbox', () => {
 			return {
 				expectedSurface,
 				tailFill: getComputedStyle(tail).fill,
-				tailMask,
+				sharedMask,
+				tailMask: tail.getAttribute('mask'),
 				tailOutlineMask: tailOutline.getAttribute('mask'),
 				bodyExclusionCount: mask?.querySelectorAll('rect[fill="black"]').length,
 				pseudoContent: getComputedStyle(root, '::after').content,
@@ -685,8 +690,9 @@ test.describe('DEV World Sandbox', () => {
 		expect(normalRootSurface).toEqual({
 			expectedSurface: normalRootSurface.expectedSurface,
 			tailFill: normalRootSurface.expectedSurface,
-			tailMask: expect.stringMatching(/^url\(#trace-tail-body-/),
-			tailOutlineMask: normalRootSurface.tailMask,
+			sharedMask: expect.stringMatching(/^url\(#trace-surface-occlusion-/),
+			tailMask: null,
+			tailOutlineMask: null,
 			bodyExclusionCount: 1,
 			pseudoContent: 'none',
 			outlineMask: expect.stringMatching(/^url\(#speech-tail-opening-/),
@@ -700,12 +706,15 @@ test.describe('DEV World Sandbox', () => {
 			const tail = document.querySelector<SVGPolygonElement>('.tail-layer polygon[data-trace-tail-root-id]');
 			const outline = document.querySelector<SVGPathElement>('.tail-layer path[data-trace-tail-root-id]');
 			if (!tail || !outline) throw new Error('Expected the monologue root tail.');
-			const maskId = tail.getAttribute('mask')?.replace(/^url\(#|\)$/g, '');
-			return { tailMask: tail.getAttribute('mask'), outlineMask: outline.getAttribute('mask'), reopenCount: maskId ? document.getElementById(maskId)?.querySelectorAll('polygon').length : null };
+			const group = tail.closest<SVGGElement>('g[data-trace-surface-occlusion-root-id]');
+			const sharedMask = group?.getAttribute('mask');
+			const maskId = sharedMask?.replace(/^url\(#|\)$/g, '');
+			return { sharedMask, tailMask: tail.getAttribute('mask'), outlineMask: outline.getAttribute('mask'), reopenCount: maskId ? document.getElementById(maskId)?.querySelectorAll('polygon').length : null };
 		});
 		expect(monologueRootOutline).toEqual({
-			tailMask: expect.stringMatching(/^url\(#trace-tail-body-/),
-			outlineMask: monologueRootOutline.tailMask,
+			sharedMask: expect.stringMatching(/^url\(#trace-surface-occlusion-/),
+			tailMask: null,
+			outlineMask: null,
 			reopenCount: 0
 		});
 		await expect(page.getByText('2/2', { exact: true })).toBeVisible();
@@ -766,6 +775,13 @@ test.describe('DEV World Sandbox', () => {
 		const replyBubbles = page.locator('[data-trace-reply-id]');
 		await expect(replyBubbles).toHaveCount(5);
 		await expect(page.locator('[data-trace-reply-id="' + '7'.repeat(64) + '"]')).toContainText('newest same-cell direct reply');
+		const directChildIds = async () => page.locator('[data-trace-role="child"]').evaluateAll((cards) => cards.map((card) => card.getAttribute('data-trace-reply-id')));
+		expect(await directChildIds()).toEqual(['6', '7', '8', '9', 'a'].map((id) => id.repeat(64)));
+		const oldestDirectAnchor = await page.locator('[data-trace-reply-id="' + '6'.repeat(64) + '"]').evaluate((card) => getComputedStyle(card).transform);
+		await page.getByRole('button', { name: 'Add live trace reply' }).click();
+		await expect(page.locator('[data-trace-reply-id="' + 'c'.repeat(64) + '"]')).toBeVisible();
+		expect(await directChildIds()).toEqual(['6', '7', '8', '9', 'a', 'c'].map((id) => id.repeat(64)));
+		await expect.poll(() => page.locator('[data-trace-reply-id="' + '6'.repeat(64) + '"]').evaluate((card) => getComputedStyle(card).transform)).toBe(oldestDirectAnchor);
 		const traceSurface = await page.locator('.bubble-layer').evaluate(() => {
 			const resolveSurface = (value: string) => {
 				const probe = document.createElement('span');
@@ -810,25 +826,28 @@ test.describe('DEV World Sandbox', () => {
 			const outline = document.querySelector<SVGPathElement>('.tail-layer path[data-trace-tail-root-id]');
 			const surfaceOutline = root?.querySelector<SVGPathElement>('.bubble-surface-outline');
 			if (!tail || !outline || !surfaceOutline) throw new Error('Expected the special root surface and tail.');
-			const tailMask = tail.getAttribute('mask');
-			const maskId = tailMask?.replace(/^url\(#|\)$/g, '');
+			const group = tail.closest<SVGGElement>('g[data-trace-surface-occlusion-root-id]');
+			const sharedMask = group?.getAttribute('mask');
+			const maskId = sharedMask?.replace(/^url\(#|\)$/g, '');
 			const mask = maskId ? document.getElementById(maskId) : null;
 			return {
-				tailMask,
+				sharedMask,
+				tailMask: tail.getAttribute('mask'),
 				outlineMask: outline.getAttribute('mask'),
 				outlineReopenCount: mask?.querySelectorAll('polygon').length,
 				surfaceOpeningCount: surfaceOutline.closest('svg')?.querySelectorAll('polygon[data-tail-opening]').length
 			};
 		});
 		expect(specialRootOutline).toEqual({
-			tailMask: expect.stringMatching(/^url\(#trace-tail-body-/),
-			outlineMask: specialRootOutline.tailMask,
+			sharedMask: expect.stringMatching(/^url\(#trace-surface-occlusion-/),
+			tailMask: null,
+			outlineMask: null,
 			outlineReopenCount: 0,
 			surfaceOpeningCount: 1
 		});
 		const rootSpecialTailMask = await page.locator('.tail-layer').evaluate((layer) => {
-			const tail = layer.querySelector<SVGPolygonElement>('[data-trace-tail-root-id]');
-			const maskId = tail?.getAttribute('mask')?.replace(/^url\(#|\)$/g, '');
+			const group = layer.querySelector<SVGGElement>('[data-trace-surface-occlusion-root-id]');
+			const maskId = group?.getAttribute('mask')?.replace(/^url\(#|\)$/g, '');
 			const mask = maskId ? document.getElementById(maskId) : null;
 			return {
 				maskId,
@@ -840,6 +859,52 @@ test.describe('DEV World Sandbox', () => {
 		});
 		const [, , viewportWidth, viewportHeight] = (await page.locator('.tail-layer').getAttribute('viewBox') ?? '').split(' ');
 		expect(rootSpecialTailMask).toMatchObject({ x: '0', y: '0', width: viewportWidth, height: viewportHeight, viewportFill: 'white', bodyFill: 'black' });
+		const sharedTracePresentation = await page.locator('.tail-layer').evaluate((layer) => {
+			const group = layer.querySelector<SVGGElement>('[data-trace-surface-occlusion-root-id]');
+			const maskId = group?.getAttribute('mask')?.replace(/^url\(#|\)$/g, '');
+			const mask = maskId ? document.getElementById(maskId) : null;
+			const foreground = [...layer.querySelectorAll<SVGPolygonElement>('polygon[data-trace-relation-reply-id]')];
+			const halos = [...layer.querySelectorAll<SVGPolygonElement>('polygon[data-trace-relation-halo-reply-id]')];
+			const edgeWidth = (polygon: SVGPolygonElement, index: number) => {
+				const points = polygon.points;
+				return Math.hypot(points.getItem(index).x - points.getItem(index + 1).x, points.getItem(index).y - points.getItem(index + 1).y);
+			};
+			return {
+				groupMask: group?.getAttribute('mask'),
+				rootTailGroup: layer.querySelector('[data-trace-tail-root-id]')?.closest('g') === group,
+				foregroundGroups: foreground.every((polygon) => polygon.closest('g') === group),
+				haloGroups: halos.every((polygon) => polygon.closest('g') === group),
+				relationPairs: foreground.map((polygon) => ({
+					id: polygon.dataset.traceRelationReplyId,
+					halo: halos.find((halo) => halo.dataset.traceRelationHaloReplyId === polygon.dataset.traceRelationReplyId)?.dataset.traceRelationHaloReplyId,
+					foregroundFill: getComputedStyle(polygon).fill,
+					haloFill: getComputedStyle(halos.find((halo) => halo.dataset.traceRelationHaloReplyId === polygon.dataset.traceRelationReplyId)!).fill,
+					foregroundBox: (() => {
+						const box = polygon.getBBox();
+						return { width: box.width, height: box.height };
+					})(),
+					startWidth: edgeWidth(polygon, 0), endWidth: edgeWidth(polygon, 2),
+					haloStartWidth: edgeWidth(halos.find((halo) => halo.dataset.traceRelationHaloReplyId === polygon.dataset.traceRelationReplyId)!, 0),
+					haloEndWidth: edgeWidth(halos.find((halo) => halo.dataset.traceRelationHaloReplyId === polygon.dataset.traceRelationReplyId)!, 2)
+				})),
+				normalOccluders: mask?.querySelectorAll('rect[fill="black"]').length,
+				specialOccluders: mask?.querySelectorAll('path[fill="black"]').length
+			};
+		});
+		expect(sharedTracePresentation.groupMask).toMatch(/^url\(#trace-surface-occlusion-/);
+		expect(sharedTracePresentation.rootTailGroup).toBe(true);
+		expect(sharedTracePresentation.foregroundGroups).toBe(true);
+		expect(sharedTracePresentation.haloGroups).toBe(true);
+		expect(sharedTracePresentation.relationPairs.length).toBeGreaterThan(0);
+		expect(sharedTracePresentation.relationPairs.every((relation) => {
+			const widths = [relation.startWidth, relation.endWidth, relation.haloStartWidth, relation.haloEndWidth];
+			return relation.halo === relation.id && relation.foregroundFill !== 'none' && relation.haloFill !== 'none' &&
+				relation.foregroundBox.width > 0 && relation.foregroundBox.height > 0 && widths.every(Number.isFinite) &&
+				relation.startWidth > relation.endWidth && relation.endWidth > 0 &&
+				relation.haloStartWidth > relation.startWidth && relation.haloEndWidth > relation.endWidth && relation.haloEndWidth > 0;
+		})).toBe(true);
+		expect(sharedTracePresentation.normalOccluders).toBeGreaterThan(0);
+		expect(sharedTracePresentation.specialOccluders).toBeGreaterThan(0);
 		await page.locator('[data-trace-reply-id="' + '7'.repeat(64) + '"]').getByRole('button', { name: /プロフィール/ }).click();
 		await expect(profileDialog(page)).toBeVisible();
 		await page.keyboard.press('Escape');
