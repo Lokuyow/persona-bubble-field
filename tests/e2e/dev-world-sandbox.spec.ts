@@ -2,6 +2,18 @@ import { expect, test, type Page } from '@playwright/test';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { installFieldFrameSampling, sampleRenderedField } from './helpers/fieldFrames';
 
+type TraceGeometryRect = { x: number; y: number; width: number; height: number };
+type TraceGeometryFrame = {
+	ready: string | null;
+	visible: boolean;
+	rootCard: TraceGeometryRect;
+	rootBubble: TraceGeometryRect;
+	surface: TraceGeometryRect | null;
+	viewBox: string | null;
+	rootTailCount: number;
+	relationConnectorCount: number;
+};
+
 async function openDevWorld(page: Page): Promise<void> {
 	await page.goto('/?devWorld=1');
 	await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
@@ -99,6 +111,53 @@ async function fieldCellCenter(page: Page, position: { x: number; y: number }): 
 		const cellSize = Number.parseFloat(getComputedStyle(scene).getPropertyValue('--cell-size'));
 		return { x: rect.left + (cell.x + 0.5) * cellSize, y: rect.top + (cell.y + 0.5) * cellSize };
 	}, position);
+}
+
+async function installTraceGeometryFrameSampling(page: Page): Promise<void> {
+	await page.addInitScript(() => {
+		type Rect = { x: number; y: number; width: number; height: number };
+		type TraceFrame = {
+			ready: string | null;
+			visible: boolean;
+			rootCard: Rect;
+			rootBubble: Rect;
+			surface: Rect | null;
+			viewBox: string | null;
+			rootTailCount: number;
+			relationConnectorCount: number;
+		};
+		const state = window as typeof window & { __traceGeometryFrames: TraceFrame[] };
+		state.__traceGeometryFrames = [];
+		const rect = (element: Element): Rect => {
+			const { x, y, width, height } = element.getBoundingClientRect();
+			return { x, y, width, height };
+		};
+		const sample = () => {
+			const rootCard = document.querySelector<HTMLElement>('.trace-root-card');
+			const rootBubble = document.querySelector<HTMLElement>('[data-trace-root-id]');
+			if (!rootCard || !rootBubble) return;
+			const surface = rootBubble.querySelector<SVGSVGElement>('.bubble-surface');
+			const style = getComputedStyle(rootCard);
+			state.__traceGeometryFrames.push({
+				ready: rootCard.dataset.traceGeometryReady ?? null,
+				visible: style.visibility === 'visible' && style.display !== 'none',
+				rootCard: rect(rootCard),
+				rootBubble: rect(rootBubble),
+				surface: surface ? rect(surface) : null,
+				viewBox: surface?.getAttribute('viewBox') ?? null,
+				rootTailCount: document.querySelectorAll('[data-trace-tail-root-id]').length,
+				relationConnectorCount: document.querySelectorAll('.trace-relation-connector').length
+			});
+		};
+		const frame = () => { sample(); requestAnimationFrame(frame); };
+		requestAnimationFrame(frame);
+		new MutationObserver(sample).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'style', 'data-trace-geometry-ready'] });
+	});
+}
+
+async function sampleTraceGeometryFrames(page: Page) {
+	await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+	return page.evaluate<TraceGeometryFrame[]>(() => (window as typeof window & { __traceGeometryFrames: TraceGeometryFrame[] }).__traceGeometryFrames);
 }
 
 async function dragJoystick(page: Page, delta: { x: number; y: number }, startCell = { x: 5, y: 5 }): Promise<void> {
@@ -200,6 +259,64 @@ test.describe('DEV World Sandbox', () => {
 	});
 	test.beforeEach(async ({ page }) => { await installHostOwnedStub(page); });
 
+	for (const viewport of [{ name: 'desktop', width: 1100, height: 850 }, { name: 'mobile', width: 390, height: 844 }]) {
+		test(`shows measured Trace special geometry from its first visible frame on ${viewport.name}`, async ({ page }) => {
+			await page.setViewportSize(viewport);
+			await installTraceGeometryFrameSampling(page);
+			await page.goto('/?devWorld=1&devTrace=replies');
+			if (viewport.name === 'desktop') await page.getByRole('button', { name: 'Hide Chatter' }).click();
+			const rootCard = page.locator('.trace-root-card');
+			await page.locator('[data-cell-position="8,4"]').click();
+			await expect(rootCard).toHaveAttribute('data-trace-geometry-ready', 'ready');
+			await expect(rootCard).toBeVisible();
+			const firstOpenFrames = await sampleTraceGeometryFrames(page);
+			const pendingFrames = firstOpenFrames.filter((frame) => frame.ready === 'pending');
+			expect(pendingFrames.every((frame) => !frame.visible && frame.rootTailCount === 0 && frame.relationConnectorCount === 0)).toBe(true);
+			const visibleFrames = firstOpenFrames.filter((frame) => frame.visible);
+			expect(visibleFrames.length).toBeGreaterThan(0);
+			const firstVisible = visibleFrames[0];
+			const settled = visibleFrames.at(-1)!;
+			expect(firstVisible.ready).toBe('ready');
+			const firstViewBox = (firstVisible.viewBox ?? '').split(' ').map(Number);
+			const settledViewBox = (settled.viewBox ?? '').split(' ').map(Number);
+			expect(firstViewBox).toHaveLength(4);
+			for (const [index, value] of firstViewBox.entries()) expect(value).toBeCloseTo(settledViewBox[index], 3);
+			expect(firstVisible.rootTailCount).toBe(settled.rootTailCount);
+			expect(firstVisible.relationConnectorCount).toBe(settled.relationConnectorCount);
+			for (const key of ['x', 'y', 'width', 'height'] as const) {
+				expect(firstVisible.rootCard[key]).toBeCloseTo(settled.rootCard[key], 1);
+				expect(firstVisible.rootBubble[key]).toBeCloseTo(settled.rootBubble[key], 1);
+				if (firstVisible.surface && settled.surface) expect(firstVisible.surface[key]).toBeCloseTo(settled.surface[key], 1);
+			}
+
+			const blankCell = await fieldCellCenter(page, { x: 5, y: 3 });
+			await page.mouse.click(blankCell.x, blankCell.y);
+			await expect(rootCard).toHaveCount(0);
+			const reopenStart = (await sampleTraceGeometryFrames(page)).length;
+			await page.locator('[data-cell-position="8,4"]').click();
+			await expect(rootCard).toHaveAttribute('data-trace-geometry-ready', 'ready');
+			const reopenFrames = (await sampleTraceGeometryFrames(page)).slice(reopenStart).filter((frame) => frame.visible);
+			expect(reopenFrames.length).toBeGreaterThan(0);
+			const reopened = reopenFrames[0];
+			const reopenedViewBox = (reopened.viewBox ?? '').split(' ').map(Number);
+			for (const [index, value] of reopenedViewBox.entries()) expect(value).toBeCloseTo(firstViewBox[index], 3);
+			for (const key of ['x', 'y', 'width', 'height'] as const) {
+				expect(reopened.rootCard[key]).toBeCloseTo(firstVisible.rootCard[key], 1);
+				expect(reopened.rootBubble[key]).toBeCloseTo(firstVisible.rootBubble[key], 1);
+			}
+
+			const resizeStart = (await sampleTraceGeometryFrames(page)).length;
+			await page.setViewportSize({ width: viewport.width + 20, height: viewport.height });
+			await expect(rootCard).toHaveAttribute('data-trace-geometry-ready', 'ready');
+			const resizeFrames = (await sampleTraceGeometryFrames(page)).slice(resizeStart);
+			const resizePendingFrames = resizeFrames.filter((frame) => frame.ready === 'pending');
+			expect(resizePendingFrames.every((frame) => !frame.visible && frame.rootTailCount === 0 && frame.relationConnectorCount === 0)).toBe(true);
+			const resizeVisibleFrames = resizeFrames.filter((frame) => frame.visible);
+			expect(resizeVisibleFrames.length).toBeGreaterThan(0);
+			expect(resizeVisibleFrames[0].ready).toBe('ready');
+		});
+	}
+
 	test('preserves Trace reply drafts across clear and close, changes ownership and publishes locally', async ({ page }) => {
 		await page.setViewportSize({ width: 1100, height: 850 });
 		await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -261,6 +378,7 @@ test.describe('DEV World Sandbox', () => {
 			await page.goto('/?devWorld=1&devTrace=replies');
 			if (viewport.name === 'desktop') await page.getByRole('button', { name: 'Hide Chatter' }).click();
 			await page.locator('[data-cell-position="8,4"]').click();
+			await expect(page.locator('.trace-root-card')).toHaveAttribute('data-trace-geometry-ready', 'ready');
 			const direct = page.locator(`[data-trace-reply-id="${'7'.repeat(64)}"]`);
 			await direct.locator('.trace-reply-content-button').click();
 			await page.locator(`[data-trace-reply-id="${'b'.repeat(64)}"]`).locator('.trace-reply-content-button').click();

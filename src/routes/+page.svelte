@@ -26,6 +26,7 @@
 		normalBubblePreferredAnchor,
 		placeBubbles,
 		placeBubblesWithFixed,
+		type Bounds,
 		type Direction,
 		type Size,
 		type WorldPoint,
@@ -143,6 +144,7 @@
 	let bubbleSizes: Record<string, Size> = {};
 	let bubbleOverflowById: Record<string, boolean> = {};
 	const mountedBubbleNodes = new Map<string, HTMLElement>();
+	const mountedTraceReplyCardNodes = new Map<string, HTMLElement>();
 	let conversationState: ConversationState = createConversationState();
 	let lastPlacedAnchorById: Record<string, WorldPoint> = {};
 	let lastVisibilityKey: string | null = null;
@@ -389,9 +391,29 @@
 		anchor: bubble.members.length === 0 ? bubble.anchor : placedAnchorById.get(bubble.id) ?? bubble.anchor
 	}));
 	$: positionedVisibleBubbles = [...positionedNormalBubbles, ...positionedMergedBubbles];
-	$: traceTreeLayout = layoutTraceTree(traceConversationProjection);
+	$: traceTreeLayout = layoutTraceTree(traceConversationProjection, {
+		fixedBubbles: positionedVisibleBubbles,
+		bubbleSizes,
+		traceReplyCardFootprints,
+		bubbleSafeBounds,
+		bubbleVisualRegion,
+		cellSize,
+		camera,
+		fieldAreaBounds,
+		fieldRows: field.rows,
+		viewportWidth: viewportSize.width,
+		devWorldSandboxEnabled,
+		selectedCharacterId
+	});
 	$: traceBubble = traceTreeLayout?.root ?? null;
 	$: traceReplyBubbles = traceTreeLayout?.cards ?? [];
+	$: tracePresentationReady = isTracePresentationMeasured(
+		initialFieldGeometryReady,
+		traceBubble,
+		traceReplyBubbles,
+		bubbleSizes,
+		traceReplyCardFootprints
+	);
 	$: traceRootGhost = traceBubble ? (() => {
 		const occupied = participantViews.some((participant) => sameCell(participant.position, traceBubble.event.position));
 		const offset = occupied ? { x: -cellSize * 0.29, y: cellSize * 0.27 } : { x: 0, y: 0 };
@@ -674,11 +696,13 @@
 				// Measured body sizes are tied to their previous containing block.
 				// Discard them before special visual bounds are recomputed for a resize.
 				bubbleSizes = {};
+				traceReplyCardFootprints = {};
 			}
 			viewportSize = { width: rect.width, height: rect.height };
 			void tick().then(() => {
 				if (!mounted) return;
 				remeasureMountedBubbles();
+				remeasureMountedTraceReplyCards();
 				syncVisualToCanonical();
 				// Reveal only with the visual projection of the measured geometry.
 				initialFieldGeometryReady = true;
@@ -1034,6 +1058,13 @@
 		update();
 
 		return {
+			update(nextId: string) {
+				if (nextId === id) return;
+				if (mountedBubbleNodes.get(id) === node) mountedBubbleNodes.delete(id);
+				id = nextId;
+				mountedBubbleNodes.set(id, node);
+				update();
+			},
 			destroy() {
 				observer.disconnect();
 				if (mountedBubbleNodes.get(id) === node) mountedBubbleNodes.delete(id);
@@ -2153,9 +2184,19 @@
 	}
 
 	function specialBubbleShape(speechType: SpeechType, bubbleId: string, size: Size): SpeechBubbleShape | null {
+		return specialBubbleShapeFor(speechType, bubbleId, size, viewportSize.width, bubbleSafeBounds);
+	}
+
+	function specialBubbleShapeFor(
+		speechType: SpeechType,
+		bubbleId: string,
+		size: Size,
+		viewportWidth: number,
+		safeBounds: Bounds
+	): SpeechBubbleShape | null {
 		const constraints = speechType === 'shout' ? undefined : {
-			maxBleedX: Math.max(0, (viewportSize.width - size.width) / 2),
-			maxBleedY: Math.max(0, (bubbleSafeBounds.height - size.height) / 2)
+			maxBleedX: Math.max(0, (viewportWidth - size.width) / 2),
+			maxBleedY: Math.max(0, (safeBounds.height - size.height) / 2)
 		};
 		return createSpeechBubbleShape(speechType, size.width, size.height, `${bubbleId}${speechType}`, constraints);
 	}
@@ -2220,7 +2261,33 @@
 		return surface;
 	}
 
+	function isTracePresentationMeasured(
+		fieldGeometryReady: boolean,
+		root: Readonly<{ id: string }> | null,
+		cards: readonly Readonly<{ id: string }>[],
+		sizes: Readonly<Record<string, Size>>,
+		footprints: Readonly<Record<string, Size>>
+	): boolean {
+		return Boolean(fieldGeometryReady && root && sizes[root.id] && cards.every((card) => sizes[card.id] && footprints[card.id]));
+	}
+
+	function remeasureMountedTraceReplyCards(): void {
+		const nextFootprints = { ...traceReplyCardFootprints };
+		let changed = false;
+		for (const [id, node] of mountedTraceReplyCardNodes) {
+			const rect = node.getBoundingClientRect();
+			const footprint = { width: rect.width, height: rect.height };
+			const current = nextFootprints[id];
+			if (!current || current.width !== footprint.width || current.height !== footprint.height) {
+				nextFootprints[id] = footprint;
+				changed = true;
+			}
+		}
+		if (changed) traceReplyCardFootprints = nextFootprints;
+	}
+
 	function observeTraceReplyCard(node: HTMLElement, id: string) {
+		mountedTraceReplyCardNodes.set(id, node);
 		const update = () => {
 			const rect = node.getBoundingClientRect();
 			const footprint = { width: rect.width, height: rect.height };
@@ -2235,6 +2302,7 @@
 		return {
 			destroy() {
 				observer.disconnect();
+				if (mountedTraceReplyCardNodes.get(id) === node) mountedTraceReplyCardNodes.delete(id);
 				const next = { ...traceReplyCardFootprints };
 				delete next[id];
 				traceReplyCardFootprints = next;
@@ -2242,38 +2310,56 @@
 		};
 	}
 
-	function layoutTraceTree(projection: ReturnType<typeof resolveTraceConversationProjection>) {
+	type TraceTreeLayoutContext = Readonly<{
+		fixedBubbles: readonly Readonly<{ id: string; anchor: WorldPoint; size: Size; speechType: SpeechType; shape: SpeechBubbleShape | null }>[];
+		bubbleSizes: Readonly<Record<string, Size>>;
+		traceReplyCardFootprints: Readonly<Record<string, Size>>;
+		bubbleSafeBounds: Bounds;
+		bubbleVisualRegion: Bounds;
+		cellSize: number;
+		camera: WorldPoint;
+		fieldAreaBounds: Bounds;
+		fieldRows: number;
+		viewportWidth: number;
+		devWorldSandboxEnabled: boolean;
+		selectedCharacterId: string;
+	}>;
+
+	function layoutTraceTree(
+		projection: ReturnType<typeof resolveTraceConversationProjection>,
+		context: TraceTreeLayoutContext
+	) {
 		if (!projection) return null;
-		const fixed = positionedVisibleBubbles.map((bubble) => ({
+		const fixed = context.fixedBubbles.map((bubble) => ({
 			id: bubble.id, preferred: bubble.anchor, anchor: bubble.anchor, size: bubble.size,
 			visualBounds: bubble.speechType === 'shout' ? undefined : bubble.shape?.bounds
 		}));
 		const rootId = `trace-root-${projection.root.id}`;
-		const rootSize = bubbleSizes[rootId] ?? DEFAULT_BUBBLE_SIZES.normal;
-		const rootShape = specialBubbleShape(projection.root.speechType, rootId, rootSize);
+		const rootSize = context.bubbleSizes[rootId] ?? DEFAULT_BUBBLE_SIZES.normal;
+		const rootShape = specialBubbleShapeFor(projection.root.speechType, rootId, rootSize, context.viewportWidth, context.bubbleSafeBounds);
 		const rootScreen = fieldLocalToViewport(
-			worldToScreen(gridToWorld(projection.root.position, cellSize), camera), fieldAreaBounds
+			worldToScreen(gridToWorld(projection.root.position, context.cellSize), context.camera), context.fieldAreaBounds
 		);
 		const rootPreferred = clampToBounds(normalBubblePreferredAnchor(
-			rootScreen.x, projection.root.position.y, field.rows, rootSize, bubbleSafeBounds
-		), rootSize, bubbleSafeBounds);
+			rootScreen.x, projection.root.position.y, context.fieldRows, rootSize, context.bubbleSafeBounds
+		), rootSize, context.bubbleSafeBounds);
 		const [rootPlacement] = placeBubblesWithFixed([{
 			id: rootId, preferred: rootPreferred, size: rootSize,
 			visualBounds: projection.root.speechType === 'shout' ? undefined : rootShape?.bounds
-		}], fixed, bubbleSafeBounds, cellSize, undefined, bubbleVisualRegion);
+		}], fixed, context.bubbleSafeBounds, context.cellSize, undefined, context.bubbleVisualRegion);
 		const root = {
 			id: rootId, event: projection.root, anchor: rootPlacement?.anchor ?? rootPreferred, size: rootSize,
 			footprint: rootSize, shape: rootShape, tone: traceTone(projection.root.pubkey),
-			character: traceCharacter(projection.root.pubkey),
+			character: traceCharacter(projection.root.pubkey, context.devWorldSandboxEnabled, context.selectedCharacterId),
 			compact: projection.current.kind === 'reply' && projection.parent?.kind === 'reply'
 		};
 		const placed = [...fixed, { id: root.id, preferred: root.anchor, anchor: root.anchor, size: root.footprint }];
 		const cards: Array<ReturnType<typeof makeTraceReplyCard>> = [];
 		const placeCard = (reply: ParsedTraceReply, role: 'parent' | 'current' | 'child', preferred: WorldPoint) => {
-			const card = makeTraceReplyCard(reply, role, preferred);
+			const card = makeTraceReplyCard(reply, role, preferred, context);
 			const [placement] = placeBubblesWithFixed([{ id: card.id, preferred, size: card.footprint }], placed,
-				bubbleSafeBounds, cellSize, undefined, bubbleVisualRegion);
-			card.anchor = distinctTraceAnchor(placement?.anchor ?? preferred, card.footprint, bubbleSafeBounds,
+				context.bubbleSafeBounds, context.cellSize, undefined, context.bubbleVisualRegion);
+			card.anchor = distinctTraceAnchor(placement?.anchor ?? preferred, card.footprint, context.bubbleSafeBounds,
 				placed.map((candidate) => candidate.anchor), cards.length);
 			cards.push(card);
 			placed.push({ id: card.id, preferred: card.anchor, anchor: card.anchor, size: card.footprint });
@@ -2283,38 +2369,43 @@
 		if (projection.current.kind === 'reply') {
 			if (projection.parent?.kind === 'root') {
 				currentAnchor = placeCard(projection.current.event, 'current', traceChildPreferred(root, defaultTraceReplyCardFootprint(
-					bubbleSizes[`trace-reply-${projection.current.event.id}`] ?? DEFAULT_BUBBLE_SIZES.normal), 0));
+					context.bubbleSizes[`trace-reply-${projection.current.event.id}`] ?? DEFAULT_BUBBLE_SIZES.normal), 0));
 			} else if (projection.parent?.kind === 'reply') {
 				const parent = projection.parent.event;
-				const parentBody = bubbleSizes[`trace-reply-${parent.id}`] ?? DEFAULT_BUBBLE_SIZES.normal;
-				const parentFootprint = traceReplyCardFootprints[`trace-reply-${parent.id}`] ?? defaultTraceReplyCardFootprint(parentBody);
-				const parentPreferred = { x: bubbleSafeBounds.x + Math.max(0, (bubbleSafeBounds.width - parentFootprint.width) / 2), y: bubbleSafeBounds.y + Math.max(0, (bubbleSafeBounds.height - parentFootprint.height) / 2) };
+				const parentBody = context.bubbleSizes[`trace-reply-${parent.id}`] ?? DEFAULT_BUBBLE_SIZES.normal;
+				const parentFootprint = context.traceReplyCardFootprints[`trace-reply-${parent.id}`] ?? defaultTraceReplyCardFootprint(parentBody);
+				const parentPreferred = { x: context.bubbleSafeBounds.x + Math.max(0, (context.bubbleSafeBounds.width - parentFootprint.width) / 2), y: context.bubbleSafeBounds.y + Math.max(0, (context.bubbleSafeBounds.height - parentFootprint.height) / 2) };
 				const parentCard = placeCard(parent, 'parent', parentPreferred);
 				currentAnchor = placeCard(projection.current.event, 'current', traceChildPreferred(parentCard, defaultTraceReplyCardFootprint(
-					bubbleSizes[`trace-reply-${projection.current.event.id}`] ?? DEFAULT_BUBBLE_SIZES.normal), 0));
+					context.bubbleSizes[`trace-reply-${projection.current.event.id}`] ?? DEFAULT_BUBBLE_SIZES.normal), 0));
 			}
 		}
 		for (const [index, reply] of projection.directReplies.entries()) {
 			placeCard(reply, 'child', traceChildPreferred(currentAnchor, defaultTraceReplyCardFootprint(
-				bubbleSizes[`trace-reply-${reply.id}`] ?? DEFAULT_BUBBLE_SIZES.normal), index));
+				context.bubbleSizes[`trace-reply-${reply.id}`] ?? DEFAULT_BUBBLE_SIZES.normal), index));
 		}
 		return { root, cards };
 	}
 
-	function makeTraceReplyCard(event: ParsedTraceReply, role: 'parent' | 'current' | 'child', preferred: WorldPoint) {
+	function makeTraceReplyCard(
+		event: ParsedTraceReply,
+		role: 'parent' | 'current' | 'child',
+		preferred: WorldPoint,
+		context: TraceTreeLayoutContext
+	) {
 		const id = `trace-reply-${event.id}`;
-		const size = bubbleSizes[id] ?? DEFAULT_BUBBLE_SIZES.normal;
+		const size = context.bubbleSizes[id] ?? DEFAULT_BUBBLE_SIZES.normal;
 		return {
 			id, reply: event, role, anchor: preferred, size,
-			footprint: traceReplyCardFootprints[id] ?? defaultTraceReplyCardFootprint(size),
-			shape: specialBubbleShape(event.speechType, id, size),
-			character: traceCharacter(event.pubkey), tone: traceTone(event.pubkey)
+			footprint: context.traceReplyCardFootprints[id] ?? defaultTraceReplyCardFootprint(size),
+			shape: specialBubbleShapeFor(event.speechType, id, size, context.viewportWidth, context.bubbleSafeBounds),
+			character: traceCharacter(event.pubkey, context.devWorldSandboxEnabled, context.selectedCharacterId), tone: traceTone(event.pubkey)
 		};
 	}
 
-	function traceCharacter(pubkey: string): Character {
-		return devWorldSandboxEnabled && pubkey === DEV_WORLD_SELF_ID
-			? getDevWorldCharacter(selectedCharacterId) : deriveCharacterFromPubkey(pubkey, CHARACTER_CATALOG);
+	function traceCharacter(pubkey: string, isDevWorldSandbox: boolean, currentCharacterId: string): Character {
+		return isDevWorldSandbox && pubkey === DEV_WORLD_SELF_ID
+			? getDevWorldCharacter(currentCharacterId) : deriveCharacterFromPubkey(pubkey, CHARACTER_CATALOG);
 	}
 
 	function tailGeometry(start: WorldPoint, target: WorldPoint, width = 11, overlap = 2, bodyExtension = 0) {
@@ -2600,7 +2691,8 @@
 		{/if}
 
 		<svg class="tail-layer" viewBox={`0 0 ${viewportSize.width} ${viewportSize.height}`} aria-hidden="true">
-			{#if traceBubble && traceRootTailTarget}
+			{#if tracePresentationReady}
+				{#if traceBubble && traceRootTailTarget}
 				{@const rootTailStart = tailStart(traceBubble.anchor, traceBubble.size)}
 				{@const rootTail = tailGeometry(rootTailStart, traceRootTailTarget, 11, 2, specialTailExtension(traceBubble.event.speechType))}
 				{#if traceBubble.event.speechType !== 'normal' && traceBubble.shape}
@@ -2618,15 +2710,16 @@
 				{/if}
 				<polygon class={`tail trace-tail tail-${traceBubble.tone} tone-${traceBubble.tone}`} data-trace-tail-root-id={traceBubble.event.id} data-trace-tail-target={`${traceRootTailTarget.x},${traceRootTailTarget.y}`} points={rootTail.points} mask={traceBubble.event.speechType !== 'normal' ? `url(#${traceTailMaskId(traceBubble.id)})` : undefined} />
 				<path class={`tail-outline trace-tail-outline tone-${traceBubble.tone}`} data-trace-tail-root-id={traceBubble.event.id} d={rootTail.outlinePath} mask={traceBubble.event.speechType !== 'normal' ? `url(#${traceTailOutlineMaskId(traceBubble.id)})` : undefined} />
-			{/if}
-			{#each traceReplyBubbles as bubble (bubble.id)}
+				{/if}
+				{#each traceReplyBubbles as bubble (bubble.id)}
 				{@const parent = traceReplyBubbles.find((candidate) => candidate.reply.id === bubble.reply.parentId)}
 				{#if parent}
 					<path class="trace-relation-connector" data-trace-relation-reply-id={bubble.reply.id} d={traceRelationPath(bubbleCenter(parent.anchor, parent.footprint), bubbleCenter(bubble.anchor, bubble.footprint))} />
 				{:else if traceBubble && bubble.reply.parentId === traceBubble.event.id}
 					<path class="trace-relation-connector" data-trace-relation-reply-id={bubble.reply.id} d={traceRelationPath(bubbleCenter(traceBubble.anchor, traceBubble.footprint), bubbleCenter(bubble.anchor, bubble.footprint))} />
 				{/if}
-			{/each}
+				{/each}
+			{/if}
 			{#each positionedNormalBubbles as bubble (bubble.id)}
 				{@const start = tailStart(bubble.anchor, bubble.size)}
 				{@const target = tailTarget(bubble.speaker)}
@@ -2707,7 +2800,9 @@
 				<div
 					use:observeTraceReplyCard={bubble.id}
 					class="trace-reply-card"
+					class:trace-presentation-pending={!tracePresentationReady}
 					data-trace-reply-id={bubble.reply.id}
+					data-trace-geometry-ready={tracePresentationReady ? 'ready' : 'pending'}
 					data-trace-role={bubble.role}
 					data-trace-current-reply-id={bubble.role === 'current' ? bubble.reply.id : undefined}
 					data-trace-parent-id={bubble.role === 'parent' ? bubble.reply.id : undefined}
@@ -2739,7 +2834,7 @@
 				</div>
 			{/each}
 			{#if traceBubble}
-				<div class="trace-root-card" style={`transform: translate3d(${traceBubble.anchor.x}px, ${traceBubble.anchor.y}px, 0);`}>
+				<div class="trace-root-card" class:trace-presentation-pending={!tracePresentationReady} data-trace-geometry-ready={tracePresentationReady ? 'ready' : 'pending'} style={`transform: translate3d(${traceBubble.anchor.x}px, ${traceBubble.anchor.y}px, 0);`}>
 					<button
 						type="button"
 					use:observeBubble={traceBubble.id}
@@ -3760,6 +3855,11 @@
 	.trace-reply-card {
 		position: absolute;
 		pointer-events: auto;
+	}
+
+	.trace-presentation-pending {
+		visibility: hidden;
+		pointer-events: none;
 	}
 
 	.trace-root-card { z-index: 1; }
