@@ -3884,19 +3884,14 @@
 		position: relative;
 		z-index: 1;
 		display: flex;
-		grid-column: 1;
-		grid-row: 1;
-		flex: 0 0 62px;
 		flex-direction: column;
 		align-items: center;
+		padding: 0;
 		gap: 3px;
-		max-width: 62px;
-		padding: 2px;
 		border: 0;
-		border-radius: 7px;
 		background: transparent;
 		color: #40504b;
-		font-size: 10px;
+		font-size: 12px;
 		font-weight: 800;
 		line-height: 1.1;
 		text-align: center;
@@ -3906,16 +3901,16 @@
 		position: relative;
 		display: block;
 		order: -1;
-		width: 25px;
-		height: 25px;
+		width: 36px;
+		height: 36px;
 		flex: 0 0 auto;
 	}
 
-	.trace-reply-author-avatar :global(.avatar) { width: 25px; height: 25px; }
+	.trace-reply-author-avatar :global(.avatar) { width: 36px; height: 36px; }
 
 	.trace-reply-author-name {
 		display: block;
-		max-width: 58px;
+		max-width: 60px;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
