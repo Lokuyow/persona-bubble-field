@@ -31,7 +31,7 @@ describe('trace tree layout', () => {
 
 	it('searches the remaining legal positions when a narrow area clamps every ranked slot', () => {
 		const bounds = { x: 0, y: 0, width: 84, height: 40 };
-		const footprint = { width: 80, height: 40 };
+		const footprint = { width: 80, height: 80 };
 		const anchors: Array<{ x: number; y: number }> = [];
 		for (let rank = 0; rank < 5; rank += 1) {
 			anchors.push(distinctTraceAnchor({ x: 80, y: 0 }, footprint, bounds, anchors, rank));

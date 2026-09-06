@@ -23,8 +23,8 @@ export function distinctTraceAnchor(preferred: WorldPoint, footprint: Size, boun
 	const base = clampToBounds(preferred, footprint, bounds);
 	const step = Math.max(12, Math.min(footprint.width, footprint.height) / 2);
 	const ring = Math.floor(rank / 4) + 1;
-	const maxX = bounds.x + bounds.width - footprint.width;
-	const maxY = bounds.y + bounds.height - footprint.height;
+	const maxX = Math.max(bounds.x, bounds.x + bounds.width - footprint.width);
+	const maxY = Math.max(bounds.y, bounds.y + bounds.height - footprint.height);
 	const direction = [
 		{ x: 1, y: 1 }, { x: -1, y: 1 }, { x: 1, y: -1 }, { x: -1, y: -1 }
 	][rank % 4];
