@@ -34,7 +34,7 @@ reply-tree LRU evictionではrootとroot read stateを残し、そのtreeのrepl
 
 通常時、trace cellには共通の小さなlightだけを表示し、author ghostや件数は表示しない。replyは独立した通常field lightを生成しない。field上の通常lightはroot traceだけが所有する。
 
-rootを調査するとauthor ghostを表示する。authorはpubkeyから既存の決定的character割当で導出し、character catalogのimage / name / aboutだけを使用する。kind 0の取得、raw pubkey、npubの表示は行わない。trace/reply ghostからauthorのProfile Dialogを開ける。
+rootを調査するとroot author ghostを表示する。authorはpubkeyから既存の決定的character割当で導出し、character catalogのimage / name / aboutだけを使用する。kind 0の取得、raw pubkey、npubの表示は行わない。reply authorはbubbleの兄弟native Profile buttonからProfile Dialogを開ける。
 
 cellにcurrent participantがいなければghostはparticipant相当位置に置く。いる場合はcurrentを優先してghostをcell edgeへ小さく半透明で置く。ghostはpresence、collision、occupancyに影響しない。通常時、current participantがrootと同cellにいてもroot lightは隠さず、edgeまたはforegroundへ視覚的にoffsetして存在を維持する。rootを調査してそのroot conversationが開いている間は、対象rootが属するcellの共通root lightを非表示にする。conversationを閉じれば再表示する。同一cellに複数rootがある場合も、いずれかのrootをそのcellで調査中は共通lightを非表示にし、他cellのlightは維持する。このoffset lightは別のpixel hit targetではなく、cellのlogical selection規則を使う。
 
@@ -42,12 +42,12 @@ cellにcurrent participantがいなければghostはparticipant相当位置に�
 
 ### investigation range
 
-root/replyのinvestigation rangeは、それぞれの実際の `w` cell自身と周囲8 cellとする。
+investigation rangeはrootの実際の `w` cell自身と周囲8 cellとする。replyは独自のworld/cell positionを持たない。
 movement rulesは[SPEC-30](./SPEC-30-フィールド・position・presence.md)を正とする。
 
 - rootはrange内でだけ調査でき、root調査はpresence activityとする。
-- replyを選択してさらに深く辿るには、そのreplyの実際の `w` のinvestigation rangeまで物理的に移動している必要がある。
-- reply targetのrange外へ出るとreply modeを解除してdraftを破棄するが、conversation explorationは維持する。
+- replyを選択してさらに深く辿る操作もopen rootのrange内で行う。
+- root range外へ出るとreply modeを解除してdraftを破棄するが、conversation explorationは維持する。
 
 ## 25. trace conversation
 
@@ -55,13 +55,13 @@ trace conversationはroot調査からだけ入る。一度にexploreできるroo
 
 rootを調査したら、NIP-22 reply historyを待たずにroot ghostと実際のroot本文bubbleを即表示する。reply history取得中は小さいreply loading状態を表示する。
 
-conversationはcurrent selected speechとそのdirect repliesを中心に表示する。deeper levelではparent 1件だけをcontextとして表示する。reply depthに上限は設けない。
+表示対象はroot、current、immediate parent、currentの全direct repliesだけである。rootは常にfield position由来で表示し、rootがcurrentまたはimmediate parentでない深いcurrentでは1行ellipsisのcompact contextとする。reply depthに上限は設けない。
 
-- different-cell direct repliesは同時に表示する。
-- offscreen direct replyまたはparentはviewport edge connectorとdirection arrowだけを表示し、本文、author、距離を表示しない。
-- reply間の関係はspeech tailと別のdotted / segmented connectorで表現する。
-- same-cell複数replyは代表1件とcountを表示する。個別replyは共通context menuから選択し、menuではbodyを見せずauthorだけを示す。同authorの複数replyはnewest-firstの番号で区別する。
-- same-cellへのnew replyがlive到着しても表示中代表を自動変更しない。conversationをreopenした時だけ代表をnewestへ戻す。
+- current=rootまたはimmediate parent=rootではroot bubbleをtree anchorとする。
+- 深いcurrentではhidden ancestorのUI node、仮想slot、connectorを生成せず、immediate parentを`bubbleSafeBounds`中央へreply card footprintで中央揃えしたvisible local cluster anchorとする。currentとdirect childrenは親のplaced cardから既定slotへ配置する。
+- child slotはcreatedAt降順、event ID昇順で右下、左下、右上、左上、以後同順の外側ringとする。slot、clamp、collisionはauthor icon/nameを含むreply card footprintを使用し、同一anchorへ潰れる場合はranked slot/edge fallbackを選ぶ。
+- compact rootとdeep immediate parentの間にはconnectorを描かない。connectorは表示中の実在する親子関係だけをdotted / segmentedで描く。
+- speech bodyはnative button、author icon/nameはsiblingのnative Profile buttonとする。Profile操作はselection、target、draftを変更しない。body measurementはoverflow/ellipsis/special shape専用、wrapper footprintはplacement専用とする。
 
 Profile Dialogまたはcontext menuを開閉してもconversation exploration、reply target、draftを維持する。
 
@@ -91,7 +91,7 @@ traceを調査またはreplyを選択すると、そのeventをreply targetと�
 - blank field tapによる明示conversation closeはconversation/reply modeを解除し、draftを維持する。
 - successful reply publish後はreply modeを解除するが、current speechを投稿replyへ自動移動しない。
 - replyはnormal / shout / monologueを許可し、trace styleで元speech shapeを維持する。
-- own replyはselfがそのreplyの `w` にいる間だけduplicate self ghostを省略し、bubble tailをcurrent selfへ向ける。selfがcellを離れた後は通常のself ghostを表示する。
+- root bubbleはfield上のroot author ghostへ既存のtailを維持する。reply bubbleはfield ghostまたはselfへ向かうtailを持たない。Profile操作はconversation、target、draftを変更しない。
 
 ## 26. read / unread
 

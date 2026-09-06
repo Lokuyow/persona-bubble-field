@@ -288,9 +288,9 @@ current Unix secondにslot 1が確認できる場合は、slot 0が取得結果�
 
 ## 17. 発言時position
 
-過去の対象kind 42およびkind 1111について、そのeventが行われた時点のフィールド座標を、position eventの履歴へ依存せずevent自身から復元できるようにする。
+過去の対象kind 42について、そのeventが行われた時点のフィールド座標を、position eventの履歴へ依存せずevent自身から復元できるようにする。
 
-専用世界のkind 42およびtrace conversation kind 1111には、発言時positionを表す単一文字 `w` tagを必須とする。
+専用世界のtop-level kind 42には、発言時positionを表す単一文字 `w` tagを必須とする。trace conversation kind 1111はtree-onlyであり `w` を発行しない。過去に署名されたkind 1111の `w` はextra tagとして無視して受理する。
 
 プロトタイプでは以下の形式とする。
 
@@ -320,7 +320,7 @@ NIP上の地理的位置tagへ本プロジェクトの架空の論理フィー�
 
 ## 18. position evidence
 
-presence状態のユーザーについてcurrent positionを復元する際は、`kind 30078` だけでなく、有効なtop-level kind 42に含まれる `w` もposition evidenceとして扱う。kind 1111の `w` はhistorical reply positionであり、remote userのcurrent presence/position evidenceに使用しない。
+presence状態のユーザーについてcurrent positionを復元する際は、`kind 30078` だけでなく、有効なtop-level kind 42に含まれる `w` もposition evidenceとして扱う。kind 1111はposition evidenceに使用しない。
 
 これはkind 42の `w` が、その発言が行われた時点での送信者のpositionを直接保持しているためである。
 
@@ -376,11 +376,11 @@ presenceは、そのユーザーが最近この空間で**能動的に活動し�
 
 フィールド移動は、移動後の座標を持つ `kind 30078` position更新として表現する。
 
-専用世界での通常メッセージ発言は、発言位置を `w` tagに持つ有効なtop-level kind 42そのものをpresence activityとして扱う。kind 1111 reply投稿もpresence activityとするが、その `w` をremote userのcurrent presence evidenceには使わない。
+専用世界での通常メッセージ発言は、発言位置を `w` tagに持つ有効なtop-level kind 42そのものをpresence activityとして扱う。kind 1111 reply投稿もpresence activityとするが、reply自身は位置tagを持たない。
 
 発言のためだけに追加の `kind 30078` を必ず発行する必要はない。
 
-発言の痕跡を明示的に調べた場合またはreply投稿時は、必要に応じて現在座標を持つ `kind 30078` position更新を発行し、その操作をpresence activityとして表現する。presence timeout後にreplyする場合は、reactivation後の実際のpositionを確定してから、そのpositionを1111の `w` に使用する。
+発言の痕跡を明示的に調べた場合またはreply投稿時は、必要に応じて現在座標を持つ `kind 30078` position更新を発行し、その操作をpresence activityとして表現する。presence timeout後にreplyする場合も、reactivation後のpositionを確定してから `w` なしの1111を投稿する。
 
 痕跡調査と同一秒内に、すでに同じユーザーによるposition更新等のpresence activityが存在する場合は、同一座標の冗長なposition eventを必ず追加する必要はなく、presence更新をcoalesceしてよい。
 

@@ -19,7 +19,6 @@ function reply(id: string, rootId: string, createdAt = 3, options: Readonly<{
 		createdAt,
 		content: id,
 		speechType: 'normal',
-		position: { x: options.x ?? 2, y: options.y ?? 1 },
 		rootId,
 		rootPubkey: rootId.padEnd(64, '0'),
 		parentId: options.parentId ?? rootId,
@@ -70,7 +69,7 @@ describe('DEV trace conversation runtime', () => {
 			.toEqual({ kind: 'succeeded', eventId: '1'.padStart(64, '0') });
 		expect(f.replies.at(-1)).toMatchObject({
 			pubkey: 'self', content: 'local draft', speechType, rootId: 'new', parentId: parent.id,
-			parentKind: 1111, parentPubkey: parent.pubkey, position: { x: 1, y: 1 }
+			parentKind: 1111, parentPubkey: parent.pubkey
 		});
 		expect(f.runtime.getTraceConversationState()).toMatchObject({ config: { currentId: parent.id }, replies: f.replies });
 	});
@@ -131,9 +130,8 @@ describe('DEV trace conversation runtime', () => {
 		f.runtime.openTraceConversation({ rootId: 'new', currentId: 'new' });
 		f.setPresence.mockClear();
 		const before = f.runtime.getTraceConversationState();
-		expect(f.runtime.selectTraceConversationSpeech(far.id)).toEqual({ kind: 'blocked' });
-		expect(f.runtime.getTraceConversationState()).toBe(before);
-		expect(f.setPresence).not.toHaveBeenCalled();
+		expect(f.runtime.selectTraceConversationSpeech(far.id)).toEqual({ kind: 'opened' });
+		expect(f.runtime.getTraceConversationState()).not.toBe(before);
 	});
 
 	it('falls back to root when the accepted snapshot loses the current reply', () => {

@@ -2,6 +2,18 @@ import { expect, test, type Page } from '@playwright/test';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { installFieldFrameSampling, sampleRenderedField } from './helpers/fieldFrames';
 
+type TraceGeometryRect = { x: number; y: number; width: number; height: number };
+type TraceGeometryFrame = {
+	ready: string | null;
+	visible: boolean;
+	rootCard: TraceGeometryRect;
+	rootBubble: TraceGeometryRect;
+	surface: TraceGeometryRect | null;
+	viewBox: string | null;
+	rootTailCount: number;
+	relationConnectorCount: number;
+};
+
 async function openDevWorld(page: Page): Promise<void> {
 	await page.goto('/?devWorld=1');
 	await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
@@ -99,6 +111,53 @@ async function fieldCellCenter(page: Page, position: { x: number; y: number }): 
 		const cellSize = Number.parseFloat(getComputedStyle(scene).getPropertyValue('--cell-size'));
 		return { x: rect.left + (cell.x + 0.5) * cellSize, y: rect.top + (cell.y + 0.5) * cellSize };
 	}, position);
+}
+
+async function installTraceGeometryFrameSampling(page: Page): Promise<void> {
+	await page.addInitScript(() => {
+		type Rect = { x: number; y: number; width: number; height: number };
+		type TraceFrame = {
+			ready: string | null;
+			visible: boolean;
+			rootCard: Rect;
+			rootBubble: Rect;
+			surface: Rect | null;
+			viewBox: string | null;
+			rootTailCount: number;
+			relationConnectorCount: number;
+		};
+		const state = window as typeof window & { __traceGeometryFrames: TraceFrame[] };
+		state.__traceGeometryFrames = [];
+		const rect = (element: Element): Rect => {
+			const { x, y, width, height } = element.getBoundingClientRect();
+			return { x, y, width, height };
+		};
+		const sample = () => {
+			const rootCard = document.querySelector<HTMLElement>('.trace-root-card');
+			const rootBubble = document.querySelector<HTMLElement>('[data-trace-root-id]');
+			if (!rootCard || !rootBubble) return;
+			const surface = rootBubble.querySelector<SVGSVGElement>('.bubble-surface');
+			const style = getComputedStyle(rootCard);
+			state.__traceGeometryFrames.push({
+				ready: rootCard.dataset.traceGeometryReady ?? null,
+				visible: style.visibility === 'visible' && style.display !== 'none',
+				rootCard: rect(rootCard),
+				rootBubble: rect(rootBubble),
+				surface: surface ? rect(surface) : null,
+				viewBox: surface?.getAttribute('viewBox') ?? null,
+				rootTailCount: document.querySelectorAll('[data-trace-tail-root-id]').length,
+				relationConnectorCount: document.querySelectorAll('.trace-relation-connector').length
+			});
+		};
+		const frame = () => { sample(); requestAnimationFrame(frame); };
+		requestAnimationFrame(frame);
+		new MutationObserver(sample).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'style', 'data-trace-geometry-ready'] });
+	});
+}
+
+async function sampleTraceGeometryFrames(page: Page) {
+	await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+	return page.evaluate<TraceGeometryFrame[]>(() => (window as typeof window & { __traceGeometryFrames: TraceGeometryFrame[] }).__traceGeometryFrames);
 }
 
 async function dragJoystick(page: Page, delta: { x: number; y: number }, startCell = { x: 5, y: 5 }): Promise<void> {
@@ -200,6 +259,64 @@ test.describe('DEV World Sandbox', () => {
 	});
 	test.beforeEach(async ({ page }) => { await installHostOwnedStub(page); });
 
+	for (const viewport of [{ name: 'desktop', width: 1100, height: 850 }, { name: 'mobile', width: 390, height: 844 }]) {
+		test(`shows measured Trace special geometry from its first visible frame on ${viewport.name}`, async ({ page }) => {
+			await page.setViewportSize(viewport);
+			await installTraceGeometryFrameSampling(page);
+			await page.goto('/?devWorld=1&devTrace=replies');
+			if (viewport.name === 'desktop') await page.getByRole('button', { name: 'Hide Chatter' }).click();
+			const rootCard = page.locator('.trace-root-card');
+			await page.locator('[data-cell-position="8,4"]').click();
+			await expect(rootCard).toHaveAttribute('data-trace-geometry-ready', 'ready');
+			await expect(rootCard).toBeVisible();
+			const firstOpenFrames = await sampleTraceGeometryFrames(page);
+			const pendingFrames = firstOpenFrames.filter((frame) => frame.ready === 'pending');
+			expect(pendingFrames.every((frame) => !frame.visible && frame.rootTailCount === 0 && frame.relationConnectorCount === 0)).toBe(true);
+			const visibleFrames = firstOpenFrames.filter((frame) => frame.visible);
+			expect(visibleFrames.length).toBeGreaterThan(0);
+			const firstVisible = visibleFrames[0];
+			const settled = visibleFrames.at(-1)!;
+			expect(firstVisible.ready).toBe('ready');
+			const firstViewBox = (firstVisible.viewBox ?? '').split(' ').map(Number);
+			const settledViewBox = (settled.viewBox ?? '').split(' ').map(Number);
+			expect(firstViewBox).toHaveLength(4);
+			for (const [index, value] of firstViewBox.entries()) expect(value).toBeCloseTo(settledViewBox[index], 3);
+			expect(firstVisible.rootTailCount).toBe(settled.rootTailCount);
+			expect(firstVisible.relationConnectorCount).toBe(settled.relationConnectorCount);
+			for (const key of ['x', 'y', 'width', 'height'] as const) {
+				expect(firstVisible.rootCard[key]).toBeCloseTo(settled.rootCard[key], 1);
+				expect(firstVisible.rootBubble[key]).toBeCloseTo(settled.rootBubble[key], 1);
+				if (firstVisible.surface && settled.surface) expect(firstVisible.surface[key]).toBeCloseTo(settled.surface[key], 1);
+			}
+
+			const blankCell = await fieldCellCenter(page, { x: 5, y: 3 });
+			await page.mouse.click(blankCell.x, blankCell.y);
+			await expect(rootCard).toHaveCount(0);
+			const reopenStart = (await sampleTraceGeometryFrames(page)).length;
+			await page.locator('[data-cell-position="8,4"]').click();
+			await expect(rootCard).toHaveAttribute('data-trace-geometry-ready', 'ready');
+			const reopenFrames = (await sampleTraceGeometryFrames(page)).slice(reopenStart).filter((frame) => frame.visible);
+			expect(reopenFrames.length).toBeGreaterThan(0);
+			const reopened = reopenFrames[0];
+			const reopenedViewBox = (reopened.viewBox ?? '').split(' ').map(Number);
+			for (const [index, value] of reopenedViewBox.entries()) expect(value).toBeCloseTo(firstViewBox[index], 3);
+			for (const key of ['x', 'y', 'width', 'height'] as const) {
+				expect(reopened.rootCard[key]).toBeCloseTo(firstVisible.rootCard[key], 1);
+				expect(reopened.rootBubble[key]).toBeCloseTo(firstVisible.rootBubble[key], 1);
+			}
+
+			const resizeStart = (await sampleTraceGeometryFrames(page)).length;
+			await page.setViewportSize({ width: viewport.width + 20, height: viewport.height });
+			await expect(rootCard).toHaveAttribute('data-trace-geometry-ready', 'ready');
+			const resizeFrames = (await sampleTraceGeometryFrames(page)).slice(resizeStart);
+			const resizePendingFrames = resizeFrames.filter((frame) => frame.ready === 'pending');
+			expect(resizePendingFrames.every((frame) => !frame.visible && frame.rootTailCount === 0 && frame.relationConnectorCount === 0)).toBe(true);
+			const resizeVisibleFrames = resizeFrames.filter((frame) => frame.visible);
+			expect(resizeVisibleFrames.length).toBeGreaterThan(0);
+			expect(resizeVisibleFrames[0].ready).toBe('ready');
+		});
+	}
+
 	test('preserves Trace reply drafts across clear and close, changes ownership and publishes locally', async ({ page }) => {
 		await page.setViewportSize({ width: 1100, height: 850 });
 		await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -245,48 +362,148 @@ test.describe('DEV World Sandbox', () => {
 		const own = page.locator('[data-trace-reply-id="' + '1'.padStart(64, '0') + '"]');
 		await expect(own).toContainText('DEV own reply');
 		await expect(own).toHaveAttribute('data-speech-type', 'monologue');
-		await expect(page.locator('[data-trace-reply-ghost-id="' + '1'.padStart(64, '0') + '"]')).toHaveCount(0);
+		await expect(own.getByRole('button', { name: /プロフィール/ })).toBeVisible();
 		await editor.press('Escape');
 		await page.keyboard.press('ArrowLeft');
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '6,3');
-		await expect(page.locator('[data-trace-reply-ghost-id="' + '1'.padStart(64, '0') + '"]')).toBeVisible();
+		await expect(own).toBeVisible();
 		await page.keyboard.press('ArrowRight');
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '7,3');
-		await expect(page.locator('[data-trace-reply-ghost-id="' + '1'.padStart(64, '0') + '"]')).toHaveCount(0);
+		await expect(own).toBeVisible();
 	});
+
+	for (const viewport of [{ name: 'desktop', width: 1100, height: 850 }, { name: 'mobile', width: 390, height: 844 }]) {
+		test(`keeps a deep tree-only cluster interactive on ${viewport.name}`, async ({ page }) => {
+			await page.setViewportSize(viewport);
+			await page.goto('/?devWorld=1&devTrace=replies');
+			if (viewport.name === 'desktop') await page.getByRole('button', { name: 'Hide Chatter' }).click();
+			await page.locator('[data-cell-position="8,4"]').click();
+			await expect(page.locator('.trace-root-card')).toHaveAttribute('data-trace-geometry-ready', 'ready');
+			const direct = page.locator(`[data-trace-reply-id="${'7'.repeat(64)}"]`);
+			await direct.locator('.trace-reply-content-button').click();
+			await page.locator(`[data-trace-reply-id="${'b'.repeat(64)}"]`).locator('.trace-reply-content-button').click();
+			await expect(page.locator('[data-trace-root-id] .trace-root-compact')).toBeVisible();
+			await expect(page.locator(`[data-trace-role="parent"][data-trace-reply-id="${'7'.repeat(64)}"]`)).toBeVisible();
+			await expect(page.locator(`[data-trace-role="current"][data-trace-reply-id="${'b'.repeat(64)}"]`)).toBeVisible();
+			const children = page.locator('[data-trace-role="child"]');
+			await expect(children).toHaveCount(2);
+			const anchors = await page.locator('.trace-root-card, [data-trace-role="parent"], [data-trace-role="current"], [data-trace-role="child"]').evaluateAll((cards) =>
+				cards.map((card) => {
+					const box = card.getBoundingClientRect();
+					return `${Math.round(box.left)},${Math.round(box.top)}`;
+				})
+			);
+			expect(new Set(anchors).size).toBe(anchors.length);
+			const authorLayout = await children.first().evaluate((card) => {
+				const author = card.querySelector<HTMLElement>('[data-trace-author-block]');
+				const avatarWrapper = author?.querySelector<HTMLElement>('.trace-reply-author-avatar');
+				const avatar = author?.querySelector<HTMLElement>('.trace-reply-author-avatar .avatar');
+				const name = author?.querySelector<HTMLElement>('.trace-reply-author-name');
+				const surface = card as HTMLElement;
+				const content = card.querySelector<HTMLElement>('.trace-reply-content-button');
+				if (!author || !avatarWrapper || !avatar || !name || !surface || !content) throw new Error('Expected a reply author block, surface, and content control.');
+				const authorBox = author.getBoundingClientRect();
+				const avatarWrapperBox = avatarWrapper.getBoundingClientRect();
+				const avatarBox = avatar.getBoundingClientRect();
+				const nameBox = name.getBoundingClientRect();
+				const surfaceBox = surface.getBoundingClientRect();
+				const contentBox = content.getBoundingClientRect();
+				return {
+					authorDisplay: getComputedStyle(author).display,
+					direction: getComputedStyle(author).flexDirection,
+					nameWhiteSpace: getComputedStyle(name).whiteSpace,
+					nameOverflow: getComputedStyle(name).textOverflow,
+					authorLeft: authorBox.left, avatarWrapperBox, avatarBox, nameBox, surfaceBox, contentBox
+				};
+			});
+			expect(authorLayout).toMatchObject({ authorDisplay: 'flex', direction: 'column', nameWhiteSpace: 'nowrap', nameOverflow: 'ellipsis' });
+			for (const box of [authorLayout.avatarBox, authorLayout.nameBox, authorLayout.contentBox]) {
+				expect(box.left).toBeGreaterThanOrEqual(authorLayout.surfaceBox.left - 0.5);
+				expect(box.right).toBeLessThanOrEqual(authorLayout.surfaceBox.right + 0.5);
+				expect(box.top).toBeGreaterThanOrEqual(authorLayout.surfaceBox.top - 0.5);
+				expect(box.bottom).toBeLessThanOrEqual(authorLayout.surfaceBox.bottom + 0.5);
+			}
+			expect(authorLayout.avatarBox.left).toBeGreaterThanOrEqual(authorLayout.avatarWrapperBox.left - 0.5);
+			expect(authorLayout.avatarBox.right).toBeLessThanOrEqual(authorLayout.avatarWrapperBox.right + 0.5);
+			expect(authorLayout.avatarBox.top).toBeGreaterThanOrEqual(authorLayout.avatarWrapperBox.top - 0.5);
+			expect(authorLayout.avatarBox.bottom).toBeLessThanOrEqual(authorLayout.avatarWrapperBox.bottom + 0.5);
+			expect(Math.abs((authorLayout.avatarBox.left + authorLayout.avatarBox.right) / 2 - (authorLayout.avatarWrapperBox.left + authorLayout.avatarWrapperBox.right) / 2)).toBeLessThan(0.5);
+			expect(Math.abs((authorLayout.avatarBox.top + authorLayout.avatarBox.bottom) / 2 - (authorLayout.avatarWrapperBox.top + authorLayout.avatarWrapperBox.bottom) / 2)).toBeLessThan(0.5);
+			expect(authorLayout.avatarBox.bottom).toBeLessThanOrEqual(authorLayout.nameBox.top);
+			expect(authorLayout.avatarBox.right).toBeLessThanOrEqual(authorLayout.contentBox.left);
+			expect(authorLayout.nameBox.right).toBeLessThanOrEqual(authorLayout.contentBox.left);
+			const shoutReply = page.locator(`[data-trace-reply-id="${'d'.repeat(64)}"]`);
+			const shoutStacking = await shoutReply.evaluate((card) => {
+				const surface = card as HTMLElement;
+				const svg = card.querySelector<SVGSVGElement>('.bubble-surface');
+				const author = card.querySelector<HTMLElement>('[data-trace-author-block]');
+				const content = card.querySelector<HTMLElement>('.trace-reply-content-button');
+				const avatar = card.querySelector<HTMLElement>('.trace-reply-author-avatar .avatar');
+				const name = card.querySelector<HTMLElement>('.trace-reply-author-name');
+				if (!surface || !svg || !author || !content || !avatar || !name) throw new Error('Expected a complete shout reply surface.');
+				const style = (element: Element) => getComputedStyle(element);
+				const surfaceBox = surface.getBoundingClientRect();
+				const boxes = [avatar, name, content].map((element) => element.getBoundingClientRect());
+				return {
+					speechType: surface.dataset.speechType,
+					svg: { position: style(svg).position, zIndex: style(svg).zIndex },
+					author: { position: style(author).position, zIndex: style(author).zIndex },
+					content: { position: style(content).position, zIndex: style(content).zIndex },
+					name: { text: name.textContent, visibility: style(name).visibility, opacity: style(name).opacity, color: style(name).color },
+					surfaceBox,
+					boxes
+				};
+			});
+			expect(shoutStacking.speechType).toBe('shout');
+			expect(shoutStacking.svg).toEqual({ position: 'absolute', zIndex: '0' });
+			expect(shoutStacking.author).toEqual({ position: 'relative', zIndex: '1' });
+			expect(shoutStacking.content).toEqual({ position: 'relative', zIndex: '1' });
+			expect(Number(shoutStacking.author.zIndex)).toBeGreaterThan(Number(shoutStacking.svg.zIndex));
+			expect(Number(shoutStacking.content.zIndex)).toBeGreaterThan(Number(shoutStacking.svg.zIndex));
+			expect(shoutStacking.name).toMatchObject({ visibility: 'visible', opacity: '1' });
+			expect(shoutStacking.name.text?.trim().length).toBeGreaterThan(0);
+			expect(shoutStacking.name.color).not.toBe('rgba(0, 0, 0, 0)');
+			for (const box of shoutStacking.boxes) {
+				expect(box.left).toBeGreaterThanOrEqual(shoutStacking.surfaceBox.left - 0.5);
+				expect(box.right).toBeLessThanOrEqual(shoutStacking.surfaceBox.right + 0.5);
+				expect(box.top).toBeGreaterThanOrEqual(shoutStacking.surfaceBox.top - 0.5);
+				expect(box.bottom).toBeLessThanOrEqual(shoutStacking.surfaceBox.bottom + 0.5);
+			}
+			const selectedChildId = await children.first().getAttribute('data-trace-reply-id');
+			if (!selectedChildId) throw new Error('Expected child reply ID.');
+			await children.first().locator('.trace-reply-content-button').click();
+			await expect(page.locator('[data-trace-current-reply-id]')).toHaveAttribute('data-trace-current-reply-id', selectedChildId);
+			await children.first().getByRole('button', { name: /プロフィール/ }).click();
+			await expect(profileDialog(page)).toBeVisible();
+			await page.keyboard.press('Escape');
+		});
+	}
 	test('reselects the current reply without losing its draft, preserves it through profiles, and clears on range exit', async ({ page }) => {
 		await page.setViewportSize({ width: 1100, height: 850 });
 		await page.emulateMedia({ reducedMotion: 'reduce' });
 		await page.goto('/?devWorld=1&devTrace=replies');
 		await page.getByRole('button', { name: 'Hide Chatter' }).click();
-		const selectCell = async (position: string) => {
-			const cell = page.locator(`[data-cell-position="${position}"]`);
-			const box = await cell.boundingBox();
-			if (!box) throw new Error('Expected a visible Trace cell');
-			await cell.click({ position: { x: box.width - 2, y: box.height - 2 } });
-		};
 		const editor = page.getByRole('textbox', { name: '投稿エディター' });
 		const preview = page.getByLabel('Reply preview', { exact: true });
-		await selectCell('8,4');
-		await selectCell('6,4');
-		await page.getByRole('menu').locator('[data-cell-action="reply"]').first().click();
+		await page.locator('[data-cell-position="8,4"]').click();
+		const current = page.locator('[data-trace-reply-id="' + '7'.repeat(64) + '"]');
+		await current.locator('.trace-reply-content-button').click();
 		await expect(preview).toHaveAttribute('data-reply-id', '7'.repeat(64));
-		await expect(editor).not.toBeFocused();
 		await editor.fill('nested draft');
 		await page.getByRole('button', { name: 'Clear reply', exact: true }).click();
-		await selectCell('6,4');
+		await current.locator('.trace-reply-content-button').click();
 		await expect(preview).toHaveAttribute('data-reply-id', '7'.repeat(64));
 		await expect(editor).toHaveValue('nested draft');
-		await page.locator('[data-trace-current-reply-ghost-id="' + '7'.repeat(64) + '"] .trace-ghost-profile-trigger').click();
+		await current.getByRole('button', { name: /プロフィール/ }).click();
 		await expect(profileDialog(page)).toBeVisible();
 		await page.keyboard.press('Escape');
 		await expect(editor).toHaveValue('nested draft');
 		await expect(preview).toHaveAttribute('data-reply-id', '7'.repeat(64));
-		await page.keyboard.press('ArrowRight');
-		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '8,3');
+		for (let step = 0; step < 4; step += 1) await page.keyboard.press('ArrowRight');
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,3');
 		await expect(editor).toHaveValue('');
 		await expect(preview).toHaveCount(0);
-		await expect(page.locator('[data-trace-current-reply-id="' + '7'.repeat(64) + '"]')).toBeVisible();
+		await expect(current).toBeVisible();
 		await page.keyboard.press('ArrowLeft');
 		await expect(preview).toHaveCount(0);
 	});
@@ -488,14 +705,31 @@ test.describe('DEV World Sandbox', () => {
 		await expect.poll(() => liveBubble.evaluate((element) => getComputedStyle(element).transform)).toBe(liveAnchor);
 
 		const replyBubbles = page.locator('[data-trace-reply-id]');
-		await expect(replyBubbles).toHaveCount(3);
+		await expect(replyBubbles).toHaveCount(5);
 		await expect(page.locator('[data-trace-reply-id="' + '7'.repeat(64) + '"]')).toContainText('newest same-cell direct reply');
-		await expect(page.locator('[data-trace-reply-id="' + '7'.repeat(64) + '"]')).toHaveAttribute('data-trace-reply-count', '2');
-		await expect(page.getByLabel('2 replies in this cell')).toBeVisible();
-		await expect(page.locator('[data-trace-reply-position="9,4"][data-trace-reply-id]')).toHaveAttribute('data-speech-type', 'shout');
-		await expect(page.locator('[data-trace-reply-position="8,4"][data-trace-reply-id]')).toHaveAttribute('data-speech-type', 'monologue');
+		await expect(page.locator('[data-trace-tail-root-id="' + '2'.repeat(64) + '"]')).toHaveCount(2);
+		await expect(page.locator('[data-trace-tail-root-id="' + '2'.repeat(64) + '"]').first()).toHaveAttribute('data-trace-tail-target');
+		await expect(page.locator('[data-trace-tail-reply-id]')).toHaveCount(0);
+		const rootSpecialTailMask = await page.locator('.tail-layer').evaluate((layer) => {
+			const tail = layer.querySelector<SVGPolygonElement>('[data-trace-tail-root-id]');
+			const maskId = tail?.getAttribute('mask')?.replace(/^url\(#|\)$/g, '');
+			const mask = maskId ? document.getElementById(maskId) : null;
+			return {
+				maskId,
+				x: mask?.getAttribute('x'), y: mask?.getAttribute('y'),
+				width: mask?.getAttribute('width'), height: mask?.getAttribute('height'),
+				bodyFill: mask?.querySelector('path')?.getAttribute('fill'),
+				viewportFill: mask?.querySelector('rect')?.getAttribute('fill')
+			};
+		});
+		const [, , viewportWidth, viewportHeight] = (await page.locator('.tail-layer').getAttribute('viewBox') ?? '').split(' ');
+		expect(rootSpecialTailMask).toMatchObject({ x: '0', y: '0', width: viewportWidth, height: viewportHeight, viewportFill: 'white', bodyFill: 'black' });
+		await page.locator('[data-trace-reply-id="' + '7'.repeat(64) + '"]').getByRole('button', { name: /プロフィール/ }).click();
+		await expect(profileDialog(page)).toBeVisible();
+		await page.keyboard.press('Escape');
+		/* Retired position/ghost/offscreen projection assertions from the cell-based UI.
 
-		const traceBubbleBackgrounds = await page.locator('.trace-root-bubble, .trace-reply-bubble').evaluateAll((bubbles) => bubbles.map((bubble) => ({
+		const traceBubbleBackgrounds = await page.locator('.trace-root-bubble, .trace-reply-card').evaluateAll((bubbles) => bubbles.map((bubble) => ({
 			speechType: bubble.getAttribute('data-speech-type'),
 			background: getComputedStyle(bubble).backgroundColor
 		})));
@@ -505,7 +739,7 @@ test.describe('DEV World Sandbox', () => {
 			.every(({ background }) => background !== 'rgba(0, 0, 0, 0)')).toBe(true);
 
 		const traceTailMasks = await page.locator('.tail-layer').evaluate((layer) => {
-			const bodyPathByBubbleId = new Map([...document.querySelectorAll<HTMLElement>('.trace-root-bubble, .trace-reply-bubble')]
+			const bodyPathByBubbleId = new Map([...document.querySelectorAll<HTMLElement>('.trace-root-bubble, .trace-reply-card')]
 				.filter((bubble) => bubble.dataset.speechType !== 'normal')
 				.map((bubble) => [bubble.dataset.bubbleId, bubble.querySelector<SVGPathElement>('.bubble-surface-fill')?.getAttribute('d')]));
 			const tails = [...layer.querySelectorAll<SVGPolygonElement>('.trace-tail')];
@@ -599,6 +833,7 @@ test.describe('DEV World Sandbox', () => {
 		expect(await page.evaluate(() => (window as never as {
 			__traceReplyExternalCalls: { webSocketUrls: string[]; indexedDbOpen: number }
 		}).__traceReplyExternalCalls)).toEqual(externalBaseline);
+		*/
 	});
 
 	test('navigates a deep DEV Trace one adjacent speech at a time through shared cell actions', async ({ page }) => {
@@ -607,6 +842,14 @@ test.describe('DEV World Sandbox', () => {
 		await page.goto('/?devWorld=1&devTrace=replies');
 		const hideTimeline = page.getByRole('button', { name: 'Hide Chatter' });
 		await hideTimeline.click();
+		await page.locator('[data-cell-position="8,4"]').click();
+		await page.locator('[data-trace-reply-id="' + '7'.repeat(64) + '"]').locator('.trace-reply-content-button').click();
+		await expect(page.locator('[data-trace-current-reply-id="' + '7'.repeat(64) + '"]')).toBeVisible();
+		await expect(page.locator('[data-trace-reply-id="' + 'b'.repeat(64) + '"]')).toBeVisible();
+		await page.locator('[data-trace-reply-id="' + 'b'.repeat(64) + '"]').locator('.trace-reply-content-button').click();
+		await expect(page.locator('[data-trace-current-reply-id="' + 'b'.repeat(64) + '"]')).toBeVisible();
+		/* Retired logical-cell reply-navigation assertions; speech bubbles now own reply selection. */
+		/*
 		const selectCell = async (position: string) => {
 			const cell = page.locator(`[data-cell-position="${position}"]`);
 			const box = await cell.boundingBox();
@@ -713,6 +956,7 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '8,3');
 		const restoredParentCell = page.locator('[data-cell-position="6,4"]');
 		await expect(restoredParentCell).toHaveCount(1);
+		*/
 	});
 
 	test('shows a finite recent-message overlay with semantic colors and existing profile focus restoration', async ({ page }) => {

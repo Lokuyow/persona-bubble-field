@@ -622,7 +622,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 		const prepared = prepareTraceInspectionActivity({
 			presence: currentPresence(),
 			selfId: options.selfAccount.pubkey,
-			target: target.event.position,
+			target: current.root.position,
 			nowMs,
 			requireCurrentRange: true
 		});
@@ -707,7 +707,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 			const nowMs = Date.now();
 			const prepared = prepareTraceInspectionActivity({
 				presence: currentPresence(), selfId: options.selfAccount.pubkey,
-				target: accepted.target.position, nowMs, requireCurrentRange: true, activity: 'trace-reply'
+				target: accepted.root.position, nowMs, requireCurrentRange: true, activity: 'trace-reply'
 			});
 			if (prepared.kind === 'blocked') return { kind: 'out-of-range' };
 			if (!prepared.coalesced) {
@@ -718,11 +718,11 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 				if (positionResult.kind !== 'succeeded') return { kind: 'position-failed' };
 			}
 			const self = getParticipant(currentPresence(), options.selfAccount.pubkey);
-			if (!self || !isWithinTraceInvestigationRange(self.position, accepted.target.position)) return { kind: 'out-of-range' };
+			if (!self || !isWithinTraceInvestigationRange(self.position, accepted.root.position)) return { kind: 'out-of-range' };
 			if (self.status !== 'active') return { kind: 'blocked' };
 			const event = finalizeWorldEvent(buildTraceReplyTemplate({
 				root: accepted.root, parent: accepted.target, content: input.content, speechType: input.speechType,
-				position: { ...self.position }, createdAt: Math.floor(Date.now() / 1000)
+				createdAt: Math.floor(Date.now() / 1000)
 			}), options.selfAccount.secretKey);
 			operation.eventId = event.id;
 			const results = await transport.publish(event);

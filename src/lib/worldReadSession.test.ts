@@ -72,7 +72,7 @@ describe('Trace reply publication ownership', () => {
 			}) };
 	}
 
-	it.each(['normal', 'shout', 'monologue'] as const)('publishes a root %s reply with canonical position and keeps current speech', async (speechType) => {
+	it.each(['normal', 'shout', 'monologue'] as const)('publishes a root %s reply and keeps current speech', async (speechType) => {
 		const f = await fixture();
 		const result = await f.submit(speechType);
 		expect(result.kind).toBe('succeeded');
@@ -81,7 +81,7 @@ describe('Trace reply publication ownership', () => {
 		expect(rawEvent.kind).toBe(1111);
 		expect(rawEvent.tags).toEqual(expect.arrayContaining([
 			['E', f.root.id, '', f.root.pubkey], ['K', '42'], ['P', f.root.pubkey],
-			['e', f.root.id, '', f.root.pubkey], ['k', '42'], ['p', f.root.pubkey], ['w', '2:1']
+			['e', f.root.id, '', f.root.pubkey], ['k', '42'], ['p', f.root.pubkey]
 		]));
 		expect(parseTraceReplyCandidate(rawEvent)?.speechType).toBe(speechType);
 		expect(f.session.getTraceConversationState()).toMatchObject({ config: { currentId: f.root.id }, replies: [{ id: rawEvent.id }] });
@@ -155,7 +155,7 @@ describe('Trace reply publication ownership', () => {
 		expect(mocked.reconcileTraceReplyCache.mock.calls.flatMap(([input]) => input.rawEvents)).not.toContain(rawEvent);
 		const { buildTraceReplyTemplate, finalizeWorldEvent } = await import('./nostrProtocol');
 		const other = finalizeWorldEvent(buildTraceReplyTemplate({ root: f.root, parent: f.root, content: 'other',
-			speechType: 'normal', position: { x: 1, y: 1 }, createdAt: 700 }), new Uint8Array(32).fill(8));
+			speechType: 'normal', createdAt: 700 }), new Uint8Array(32).fill(8));
 		f.callbacks().onLiveEvent(other);
 		f.callbacks().onBatch({ events: [], relays: [{ relayUrl: 'wss://relay.test/', status: 'closed' }] });
 		await settle();
@@ -276,7 +276,7 @@ function traceReply(
 	createdAt = 701,
 	options: {
 		parent?: ParsedWorldMessage | ParsedTraceReply;
-		position?: ParsedTraceReply['position'];
+		position?: { x: number; y: number };
 		pubkey?: string;
 	} = {}
 ): ParsedTraceReply {
@@ -287,7 +287,6 @@ function traceReply(
 		createdAt,
 		content: id,
 		speechType: 'normal',
-		position: options.position ?? root.position,
 		rootId: root.id,
 		rootPubkey: root.pubkey,
 		parentId: parent.id,

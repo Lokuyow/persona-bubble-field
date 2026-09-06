@@ -146,14 +146,14 @@ kind 42には発言時の論理フィールド座標も保持する。
 - project `L` / `l` と `l=chat`
 - root kind 42を指すuppercase `E` / `K` / `P`
 - immediate parentを指すlowercase `e` / `k` / `p`
-- 投稿時の実際のフィールド位置を表す単一canonical `w`
+- kind 1111自身のworld position tagは持たない
 - 必要な場合だけspeech type label
 
 rootは有効なtop-level kind 42なので `K=42` とする。root kind 42へのdirect replyでは、rootを `E/K/P` と `e/k/p` の双方で参照する。kind 1111へのreplyでは、`E/K/P` は同じrootを維持し、`e/k/p` はparent kind 1111とそのauthorを指す。
 
 project labelsはtarget-channel membershipまたは公式client証明ではない。受理する1111のuppercase `E` rootは、対象kind 40 worldに属する有効なtop-level kind 42でなければならない。immediate parentはroot自身または同じroot treeの有効な1111でなければならない。`K/P` と `k/p` は実際のroot/parentのkindとauthorに照合する。
 
-external/modified client製1111も、署名、project labels、単一canonical `w`、root/parent relation、kind、authorを全て検証できる場合だけ受理する。NIP-22の `p` は本文mentionにも使えるため、`p=self`だけで自分へのdirect replyや通知対象と判定してはならない。
+external/modified client製1111も、署名、project labels、root/parent relation、kind、authorを全て検証できる場合だけ受理する。legacy signed replyに含まれる `w` はextra tagとして無視する。NIP-22の `p` は本文mentionにも使えるため、`p=self`だけで自分へのdirect replyや通知対象と判定してはならない。
 
 `K/k/P/p`等のsemantic correctnessは受信後に検証する。REQを過度に狭めるための `#K` filterは必須としない。trace conversationの取得意味論は [`SPEC-50-発言の痕跡.md`](./SPEC-50-発言の痕跡.md) を正とする。
 

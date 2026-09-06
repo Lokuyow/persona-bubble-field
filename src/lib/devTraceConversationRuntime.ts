@@ -90,7 +90,7 @@ export function createDevTraceConversationRuntime(options: Readonly<{
 		const prepared = prepareTraceInspectionActivity({
 			presence: options.getPresence(),
 			selfId: options.selfId,
-			target: target.event.position,
+			target: state.root.position,
 			nowMs: now(),
 			requireCurrentRange: true,
 			random: options.random
@@ -151,7 +151,7 @@ export function createDevTraceConversationRuntime(options: Readonly<{
 			if (!target) return { kind: 'blocked' };
 			const nowMs = now();
 			const prepared = prepareTraceInspectionActivity({
-				presence: options.getPresence(), selfId: options.selfId, target: target.position,
+				presence: options.getPresence(), selfId: options.selfId, target: root.position,
 				nowMs, requireCurrentRange: true, activity: 'trace-reply', random: options.random
 			});
 			if (prepared.kind === 'blocked') return { kind: 'out-of-range' };
@@ -159,7 +159,7 @@ export function createDevTraceConversationRuntime(options: Readonly<{
 			const eventId = (++publicationSequence).toString(16).padStart(64, '0');
 			options.setReplies([...options.getReplies(), {
 				id: eventId, pubkey: options.selfId, createdAt: Math.floor(nowMs / 1000),
-				content: input.content, speechType: input.speechType, position: { ...prepared.position },
+				content: input.content, speechType: input.speechType,
 				rootId: root.id, rootPubkey: root.pubkey, parentId: target.id,
 				parentKind: 'rootId' in target ? 1111 : 42, parentPubkey: target.pubkey
 			}]);

@@ -25,13 +25,10 @@ describe('field logical-cell selection', () => {
 		expect(buildFieldCellActions({
 			participantIds: ['z', 'a', 'a'],
 			trace: { kind: 'trace', rootId: 'root', behavior: 'open-root' },
-			replyIds: ['newer', 'older', 'newer']
 		})).toEqual([
 			{ kind: 'participant', participantId: 'a' },
 			{ kind: 'participant', participantId: 'z' },
-			{ kind: 'trace', rootId: 'root', behavior: 'open-root' },
-			{ kind: 'reply', replyId: 'newer' },
-			{ kind: 'reply', replyId: 'older' }
+			{ kind: 'trace', rootId: 'root', behavior: 'open-root' }
 		]);
 	});
 

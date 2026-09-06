@@ -2,8 +2,7 @@ import type { Bounds, Direction, FieldSize, GridPosition, WorldPoint } from './g
 
 export type FieldCellAction =
 	| Readonly<{ kind: 'participant'; participantId: string }>
-	| Readonly<{ kind: 'trace'; rootId: string; behavior: 'open-root' | 'select-current' }>
-	| Readonly<{ kind: 'reply'; replyId: string }>;
+	| Readonly<{ kind: 'trace'; rootId: string; behavior: 'open-root' | 'select-current' }>;
 
 export type FieldCellActionResolution =
 	| Readonly<{ kind: 'none' }>
@@ -29,17 +28,14 @@ export function viewportPointToLogicalCell(input: Readonly<{
 export function buildFieldCellActions(input: Readonly<{
 	participantIds?: readonly string[];
 	trace?: Extract<FieldCellAction, { kind: 'trace' }> | null;
-	replyIds?: readonly string[];
 }>): readonly FieldCellAction[] {
 	const participantIds = [...new Set(input.participantIds ?? [])].sort();
-	const replyIds = [...new Set(input.replyIds ?? [])];
 	return [
 		...participantIds.map((participantId) => ({
 			kind: 'participant' as const,
 			participantId
 		})),
-		...(input.trace ? [input.trace] : []),
-		...replyIds.map((replyId) => ({ kind: 'reply' as const, replyId }))
+		...(input.trace ? [input.trace] : [])
 	];
 }
 

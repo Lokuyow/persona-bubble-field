@@ -1,0 +1,58 @@
+import { clampToBounds, type Bounds, type Size, type WorldPoint } from './geometry';
+
+export type TraceTreeAnchor = Readonly<{ anchor: WorldPoint; footprint: Size }>;
+
+/** The stable clockwise slot order used for every visible reply sibling set. */
+export function traceChildPreferred(parent: TraceTreeAnchor, child: Size, index: number): WorldPoint {
+	const ring = Math.floor(index / 4);
+	const slot = index % 4;
+	const gap = 10;
+	const horizontal = child.width + gap;
+	const vertical = child.height + gap;
+	if (slot === 0) return { x: parent.anchor.x + parent.footprint.width + gap + ring * horizontal, y: parent.anchor.y + parent.footprint.height + gap + ring * vertical };
+	if (slot === 1) return { x: parent.anchor.x - child.width - gap - ring * horizontal, y: parent.anchor.y + parent.footprint.height + gap + ring * vertical };
+	if (slot === 2) return { x: parent.anchor.x + parent.footprint.width + gap + ring * horizontal, y: parent.anchor.y - child.height - gap - ring * vertical };
+	return { x: parent.anchor.x - child.width - gap - ring * horizontal, y: parent.anchor.y - child.height - gap - ring * vertical };
+}
+
+/**
+ * A fixed-placement pass can clamp several cards to the same point. Keep the
+ * first collision-free result, then try deterministic outer and edge anchors.
+ */
+export function distinctTraceAnchor(preferred: WorldPoint, footprint: Size, bounds: Bounds, occupied: readonly WorldPoint[], rank: number): WorldPoint {
+	const base = clampToBounds(preferred, footprint, bounds);
+	const step = Math.max(12, Math.min(footprint.width, footprint.height) / 2);
+	const ring = Math.floor(rank / 4) + 1;
+	const maxX = Math.max(bounds.x, bounds.x + bounds.width - footprint.width);
+	const maxY = Math.max(bounds.y, bounds.y + bounds.height - footprint.height);
+	const direction = [
+		{ x: 1, y: 1 }, { x: -1, y: 1 }, { x: 1, y: -1 }, { x: -1, y: -1 }
+	][rank % 4];
+	const candidates = [
+		base,
+		clampToBounds({ x: base.x + direction.x * step * ring, y: base.y + direction.y * step * ring }, footprint, bounds),
+		clampToBounds({ x: base.x + direction.x * step * (ring + 1), y: base.y + direction.y * step * (ring + 1) }, footprint, bounds),
+		clampToBounds({ x: direction.x > 0 ? bounds.x + bounds.width - footprint.width : bounds.x, y: base.y }, footprint, bounds),
+		clampToBounds({ x: base.x, y: direction.y > 0 ? bounds.y + bounds.height - footprint.height : bounds.y }, footprint, bounds),
+		clampToBounds({ x: bounds.x, y: bounds.y }, footprint, bounds),
+		clampToBounds({ x: maxX, y: bounds.y }, footprint, bounds),
+		clampToBounds({ x: bounds.x, y: maxY }, footprint, bounds),
+		clampToBounds({ x: maxX, y: maxY }, footprint, bounds)
+	];
+	// Keep anchors distinct after sub-pixel layout is rounded for rendering.
+	const isDistinct = (candidate: WorldPoint) => !occupied.some((anchor) =>
+		Math.round(anchor.x) === Math.round(candidate.x) && Math.round(anchor.y) === Math.round(candidate.y)
+	);
+	const candidate = candidates.find(isDistinct);
+	if (candidate) return candidate;
+
+	// A narrow mobile speech area can clamp every ranked slot and edge to an
+	// occupied point. Search its legal pixels before conceding that no unique
+	// anchor exists; cards remain inside the same safe bounds.
+	for (let y = bounds.y; y <= maxY; y += 1) {
+		for (let x = bounds.x; x <= maxX; x += 1) {
+			if (isDistinct({ x, y })) return { x, y };
+		}
+	}
+	return base;
+}
