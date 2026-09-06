@@ -15,6 +15,11 @@
 		type BubbleTone
 	} from './bubblePresentation';
 
+	const TRACE_RELATION_FOREGROUND_PARENT_WIDTH = 16;
+	const TRACE_RELATION_FOREGROUND_CHILD_WIDTH = 0.4;
+	const TRACE_RELATION_HALO_PARENT_WIDTH = 21;
+	const TRACE_RELATION_HALO_CHILD_WIDTH = 1.2;
+
 	type NormalTail = Readonly<{ id: string; tone: BubbleTone; speechType: SpeechType; anchor: WorldPoint; size: Size; target: WorldPoint }>;
 	type MergedTail = Readonly<{ id: string; tone: BubbleTone; speechType: SpeechType; anchor: WorldPoint; size: Size; members: readonly Readonly<{ id: string; target: WorldPoint }>[] }>;
 	type Props = Readonly<{
@@ -61,8 +66,8 @@
 				{@const relationStart = parent ? bubbleCenter(parent.anchor, parent.footprint) : bubble.reply.parentId === traceRoot.event.id ? bubbleCenter(traceRoot.anchor, traceRoot.footprint) : null}
 				{#if relationStart}
 					{@const relationEnd = bubbleCenter(bubble.anchor, bubble.footprint)}
-					{@const halo = taperedBandGeometry(relationStart, relationEnd, 21, 1.2)}
-					{@const foreground = taperedBandGeometry(relationStart, relationEnd, 16, 0.4)}
+					{@const halo = taperedBandGeometry(relationStart, relationEnd, TRACE_RELATION_HALO_PARENT_WIDTH, TRACE_RELATION_HALO_CHILD_WIDTH)}
+					{@const foreground = taperedBandGeometry(relationStart, relationEnd, TRACE_RELATION_FOREGROUND_PARENT_WIDTH, TRACE_RELATION_FOREGROUND_CHILD_WIDTH)}
 					<polygon class="trace-relation-halo" data-trace-relation-halo-reply-id={bubble.reply.id} points={halo.points} />
 					<polygon class="trace-relation-connector" data-trace-relation-reply-id={bubble.reply.id} points={foreground.points} />
 				{/if}
