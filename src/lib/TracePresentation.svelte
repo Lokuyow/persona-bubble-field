@@ -183,7 +183,7 @@
 	.bubble-normal { width: fit-content; min-width: 72px; max-width: min(240px, calc(100% - 32px)); padding: 12px 15px; }
 	.bubble-normal::after { content: ''; position: absolute; left: calc(50% + var(--tail-seam-offset-x, 0px)); bottom: -1px; width: 11px; height: 3px; transform: translateX(-50%); background: var(--tone-background); pointer-events: none; z-index: 1; }
 	.trace-root-bubble,
-	.trace-reply-card { width: fit-content; min-width: 72px; max-width: min(240px, calc(100% - 32px)); padding: 12px 15px; border-style: dashed; background: var(--trace-surface, color-mix(in srgb, var(--tone-background) 91%, transparent)); pointer-events: auto; }
+	.trace-reply-card { width: fit-content; min-width: 72px; max-width: min(240px, calc(100% - 32px)); padding: 12px 15px; border-style: dashed; background: var(--trace-surface); pointer-events: auto; }
 	.trace-root-card,
 	.trace-reply-card { position: absolute; pointer-events: auto; }
 	.trace-presentation-pending { visibility: hidden; pointer-events: none; }

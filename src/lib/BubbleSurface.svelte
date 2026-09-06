@@ -43,6 +43,6 @@
 	.bubble-surface { position: absolute; z-index: 0; display: block; overflow: visible; pointer-events: none; }
 	.bubble-surface-fill { fill: var(--tone-background); }
 	.bubble-surface-outline { fill: none; stroke: var(--tone-outline); stroke-width: 1; stroke-linecap: round; stroke-linejoin: round; }
-	.trace-bubble-surface-fill { fill: var(--trace-surface, color-mix(in srgb, var(--tone-background) 91%, transparent)); }
+	.trace-bubble-surface-fill { fill: var(--trace-surface); }
 	.trace-bubble-surface-outline { stroke-dasharray: 4 3; }
 </style>
