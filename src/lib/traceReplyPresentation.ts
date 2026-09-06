@@ -17,6 +17,11 @@ export function compareTraceReplies(first: ParsedTraceReply, second: ParsedTrace
 		(first.id < second.id ? -1 : first.id > second.id ? 1 : 0);
 }
 
+function compareDirectTraceReplies(first: ParsedTraceReply, second: ParsedTraceReply): number {
+	return first.createdAt - second.createdAt ||
+		(first.id < second.id ? -1 : first.id > second.id ? 1 : 0);
+}
+
 function acceptedReplies(state: Extract<TraceConversationState, { kind: 'open' }>): readonly ParsedTraceReply[] {
 	const unique = new Map<string, ParsedTraceReply>();
 	for (const reply of state.replies) {
@@ -53,7 +58,9 @@ export function resolveTraceConversationProjection(
 	}
 
 	const parentKind = current.kind === 'root' ? 42 : 1111;
-	const directReplies = replies.filter((reply) => reply.parentKind === parentKind && reply.parentId === current.event.id);
+	const directReplies = replies
+		.filter((reply) => reply.parentKind === parentKind && reply.parentId === current.event.id)
+		.sort(compareDirectTraceReplies);
 	return { root: conversation.root, current, parent, directReplies };
 }
 
