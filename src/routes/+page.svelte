@@ -2685,14 +2685,6 @@
 		text-transform: uppercase;
 	}
 
-	.prototype-badge span {
-		width: 6px;
-		height: 6px;
-		border-radius: 50%;
-		background: #d98568;
-		box-shadow: 0 0 0 4px rgba(217, 133, 104, 0.14);
-	}
-
 	.field-viewport {
 		position: relative;
 		min-height: 100svh;
@@ -2987,17 +2979,6 @@
 		position: absolute;
 		z-index: 1;
 		pointer-events: none;
-	}
-
-	.speech-area span {
-		position: absolute;
-		top: 68px;
-		right: 10px;
-		color: rgba(89, 104, 88, 0.38);
-		font-size: 9px;
-		font-weight: 700;
-		letter-spacing: 0.12em;
-		text-transform: uppercase;
 	}
 
 	.field-grid {
