@@ -61,8 +61,8 @@
 				{@const relationStart = parent ? bubbleCenter(parent.anchor, parent.footprint) : bubble.reply.parentId === traceRoot.event.id ? bubbleCenter(traceRoot.anchor, traceRoot.footprint) : null}
 				{#if relationStart}
 					{@const relationEnd = bubbleCenter(bubble.anchor, bubble.footprint)}
-					{@const halo = taperedBandGeometry(relationStart, relationEnd, 7, 3.5)}
-					{@const foreground = taperedBandGeometry(relationStart, relationEnd, 4, 1.5)}
+					{@const halo = taperedBandGeometry(relationStart, relationEnd, 14, 1.8)}
+					{@const foreground = taperedBandGeometry(relationStart, relationEnd, 10, 0.7)}
 					<polygon class="trace-relation-halo" data-trace-relation-halo-reply-id={bubble.reply.id} points={halo.points} />
 					<polygon class="trace-relation-connector" data-trace-relation-reply-id={bubble.reply.id} points={foreground.points} />
 				{/if}

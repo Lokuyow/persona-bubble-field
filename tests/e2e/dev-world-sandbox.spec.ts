@@ -897,6 +897,12 @@ test.describe('DEV World Sandbox', () => {
 		expect(sharedTracePresentation.haloGroups).toBe(true);
 		expect(sharedTracePresentation.relationPairs.length).toBeGreaterThan(0);
 		expect(sharedTracePresentation.relationPairs.every((relation) => relation.halo === relation.id && relation.foregroundFill !== 'none' && relation.haloFill !== 'none' && relation.foregroundBox.width > 0 && relation.foregroundBox.height > 0 && relation.startWidth > relation.endWidth && relation.haloStartWidth > relation.startWidth && relation.haloEndWidth > relation.endWidth)).toBe(true);
+		for (const relation of sharedTracePresentation.relationPairs) {
+			expect(relation.startWidth).toBeCloseTo(10, 1);
+			expect(relation.endWidth).toBeCloseTo(0.7, 1);
+			expect(relation.haloStartWidth).toBeCloseTo(14, 1);
+			expect(relation.haloEndWidth).toBeCloseTo(1.8, 1);
+		}
 		expect(sharedTracePresentation.normalOccluders).toBeGreaterThan(0);
 		expect(sharedTracePresentation.specialOccluders).toBeGreaterThan(0);
 		await page.locator('[data-trace-reply-id="' + '7'.repeat(64) + '"]').getByRole('button', { name: /プロフィール/ }).click();
