@@ -3867,8 +3867,8 @@
 
 	.trace-reply-card {
 		display: grid;
-		grid-template-columns: 62px minmax(0, 1fr);
-		column-gap: 8px;
+		grid-template-columns: auto minmax(0, 1fr);
+		column-gap: 6px;
 		align-items: start;
 		width: fit-content;
 		min-width: 144px;
