@@ -6,13 +6,12 @@
 		bubbleCenter,
 		bubbleToneStyle,
 		mergedTailStart,
+		NORMAL_TRACE_ROOT_RADIUS,
 		specialTailExtension,
 		tailGeometry,
-		tailOutlineOpeningPoints,
 		tailStart,
 		traceRelationPath,
 		traceTailMaskId,
-		traceTailOutlineMaskId,
 		type BubbleTone
 	} from './bubblePresentation';
 
@@ -35,21 +34,18 @@
 		{@const traceRoot = traceLayout.root}
 		{#if traceRootTailTarget}
 			{@const rootTail = tailGeometry(tailStart(traceRoot.anchor, traceRoot.size), traceRootTailTarget, 11, 2, specialTailExtension(traceRoot.event.speechType))}
-			{#if traceRoot.event.speechType !== 'normal' && traceRoot.shape}
-				<defs>
-					<mask id={traceTailMaskId(traceRoot.id)} maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x="0" y="0" width={viewportSize.width} height={viewportSize.height}>
-						<rect x="0" y="0" width={viewportSize.width} height={viewportSize.height} fill="white" />
+			<defs>
+				<mask id={traceTailMaskId(traceRoot.id)} maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x="0" y="0" width={viewportSize.width} height={viewportSize.height}>
+					<rect x="0" y="0" width={viewportSize.width} height={viewportSize.height} fill="white" />
+					{#if traceRoot.shape}
 						<path d={traceRoot.shape.path} transform={`translate(${traceRoot.anchor.x} ${traceRoot.anchor.y})`} fill="black" />
-					</mask>
-					<mask id={traceTailOutlineMaskId(traceRoot.id)} maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x="0" y="0" width={viewportSize.width} height={viewportSize.height}>
-						<rect x="0" y="0" width={viewportSize.width} height={viewportSize.height} fill="white" />
-						<path d={traceRoot.shape.path} transform={`translate(${traceRoot.anchor.x} ${traceRoot.anchor.y})`} fill="black" />
-						<polygon points={tailOutlineOpeningPoints(rootTail, traceRoot.anchor)} transform={`translate(${traceRoot.anchor.x} ${traceRoot.anchor.y})`} fill="white" />
-					</mask>
-				</defs>
-			{/if}
-			<polygon class={`tail trace-tail tail-${traceRoot.tone} tone-${traceRoot.tone}`} data-trace-tail-root-id={traceRoot.event.id} data-trace-tail-target={`${traceRootTailTarget.x},${traceRootTailTarget.y}`} points={rootTail.points} mask={traceRoot.event.speechType !== 'normal' ? `url(#${traceTailMaskId(traceRoot.id)})` : undefined} style={bubbleToneStyle(traceRoot.tone)} />
-			<path class={`tail-outline trace-tail-outline tone-${traceRoot.tone}`} data-trace-tail-root-id={traceRoot.event.id} d={rootTail.outlinePath} mask={traceRoot.event.speechType !== 'normal' ? `url(#${traceTailOutlineMaskId(traceRoot.id)})` : undefined} style={bubbleToneStyle(traceRoot.tone)} />
+					{:else}
+						<rect x={traceRoot.anchor.x} y={traceRoot.anchor.y} width={traceRoot.size.width} height={traceRoot.size.height} rx={NORMAL_TRACE_ROOT_RADIUS} fill="black" />
+					{/if}
+				</mask>
+			</defs>
+			<polygon class={`tail trace-tail tail-${traceRoot.tone} tone-${traceRoot.tone}`} data-trace-tail-root-id={traceRoot.event.id} data-trace-tail-target={`${traceRootTailTarget.x},${traceRootTailTarget.y}`} points={rootTail.points} mask={`url(#${traceTailMaskId(traceRoot.id)})`} style={bubbleToneStyle(traceRoot.tone, true)} />
+			<path class={`tail-outline trace-tail-outline tone-${traceRoot.tone}`} data-trace-tail-root-id={traceRoot.event.id} d={rootTail.outlinePath} mask={`url(#${traceTailMaskId(traceRoot.id)})`} style={bubbleToneStyle(traceRoot.tone, true)} />
 		{/if}
 		{#each traceLayout.cards as bubble (bubble.id)}
 			{@const parent = traceLayout.cards.find((candidate) => candidate.reply.id === bubble.reply.parentId)}
@@ -79,6 +75,6 @@
 	.tail { fill: var(--tone-background); }
 	.tail-outline { fill: none; stroke: var(--tone-outline); stroke-width: 1; stroke-linecap: round; stroke-linejoin: round; }
 	.trace-relation-connector { fill: none; stroke: rgba(77, 101, 93, 0.64); stroke-width: 1.5; stroke-dasharray: 3 5; stroke-linecap: round; pointer-events: none; }
-	.trace-tail { opacity: 0.9; }
+	.trace-tail { fill: var(--trace-surface); }
 	.trace-tail-outline { stroke-dasharray: 4 3; }
 </style>

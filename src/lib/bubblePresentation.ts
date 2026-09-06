@@ -5,6 +5,7 @@ import { createSpeechBubbleShape, type SpeechBubbleShape } from './speechBubbleP
 export type BubbleTone = 'coral' | 'lavender' | 'mint' | 'yellow' | 'sky' | 'peach' | 'rose' | 'blue';
 
 export const BUBBLE_TONES: readonly BubbleTone[] = ['coral', 'lavender', 'mint', 'yellow', 'sky', 'peach', 'rose', 'blue'];
+export const NORMAL_TRACE_ROOT_RADIUS = 18;
 
 const TONE_VALUES: Readonly<Record<BubbleTone, Readonly<{ background: string; outline: string }>>> = {
 
@@ -19,7 +20,7 @@ const TONE_VALUES: Readonly<Record<BubbleTone, Readonly<{ background: string; ou
 };
 
 /** Keep the current Trace surface expression in one presentation token. */
-export const TRACE_SURFACE_OPACITY = '91%';
+export const TRACE_SURFACE_OPACITY = '70%';
 
 export function bubbleToneStyle(tone: BubbleTone, trace = false): string {
 	const value = TONE_VALUES[tone];
@@ -136,4 +137,3 @@ function safeSvgId(bubbleId: string): string {
 
 export function speechOutlineMaskId(bubbleId: string): string { return `speech-tail-opening-${safeSvgId(bubbleId)}`; }
 export function traceTailMaskId(bubbleId: string): string { return `trace-tail-body-${safeSvgId(bubbleId)}`; }
-export function traceTailOutlineMaskId(bubbleId: string): string { return `trace-tail-outline-${safeSvgId(bubbleId)}`; }

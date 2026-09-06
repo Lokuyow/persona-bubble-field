@@ -109,4 +109,4 @@ root readは、root ghostと実際のroot本文bubbleの**両方**が実表示�
 
 ## 27. trace bubbleの視覚的優先順位
 
-trace root/reply bubbleは軽い半透明fill、完全opaque text、trace-specific outlineとし、normal / shout / monologueのshape/styleを維持する。live/current speechはtrace bubbleより優先して配置する。exact opacity/color、placement algorithm、connector pixel geometryは実装詳細として固定しない。
+trace root/reply bubbleは軽い半透明fill、完全opaque text、trace-specific outlineとし、normal / shout / monologueのshape/styleを維持する。rootのtailとnormal root bubbleのtail接続部は、そのbubble本体と同じ半透明surfaceを使用する。live/current speechはtrace bubbleより優先して配置する。exact opacity/color、placement algorithm、connector pixel geometryは実装詳細として固定しない。
