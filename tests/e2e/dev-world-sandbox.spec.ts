@@ -399,7 +399,7 @@ test.describe('DEV World Sandbox', () => {
 				const avatarWrapper = author?.querySelector<HTMLElement>('.trace-reply-author-avatar');
 				const avatar = author?.querySelector<HTMLElement>('.trace-reply-author-avatar .avatar');
 				const name = author?.querySelector<HTMLElement>('.trace-reply-author-name');
-				const surface = card.querySelector<HTMLElement>('.trace-reply-surface');
+				const surface = card as HTMLElement;
 				const content = card.querySelector<HTMLElement>('.trace-reply-content-button');
 				if (!author || !avatarWrapper || !avatar || !name || !surface || !content) throw new Error('Expected a reply author block, surface, and content control.');
 				const authorBox = author.getBoundingClientRect();
@@ -434,7 +434,7 @@ test.describe('DEV World Sandbox', () => {
 			expect(authorLayout.nameBox.right).toBeLessThanOrEqual(authorLayout.contentBox.left);
 			const shoutReply = page.locator(`[data-trace-reply-id="${'d'.repeat(64)}"]`);
 			const shoutStacking = await shoutReply.evaluate((card) => {
-				const surface = card.querySelector<HTMLElement>('.trace-reply-surface');
+				const surface = card as HTMLElement;
 				const svg = card.querySelector<SVGSVGElement>('.bubble-surface');
 				const author = card.querySelector<HTMLElement>('[data-trace-author-block]');
 				const content = card.querySelector<HTMLElement>('.trace-reply-content-button');

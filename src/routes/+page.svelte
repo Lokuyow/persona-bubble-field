@@ -2799,7 +2799,8 @@
 			{#each traceReplyBubbles as bubble (bubble.id)}
 				<div
 					use:observeTraceReplyCard={bubble.id}
-					class="trace-reply-card"
+					use:observeBubble={bubble.id}
+					class={`bubble bubble-normal trace-reply-card trace-reply-surface tone-${bubble.tone}${bubble.reply.speechType !== 'normal' ? ' speech-bubble-special' : ''}`}
 					class:trace-presentation-pending={!tracePresentationReady}
 					data-trace-reply-id={bubble.reply.id}
 					data-trace-geometry-ready={tracePresentationReady ? 'ready' : 'pending'}
@@ -2807,14 +2808,9 @@
 					data-trace-current-reply-id={bubble.role === 'current' ? bubble.reply.id : undefined}
 					data-trace-parent-id={bubble.role === 'parent' ? bubble.reply.id : undefined}
 					data-speech-type={bubble.reply.speechType}
+					data-bubble-id={bubble.id}
 					style={`transform: translate3d(${bubble.anchor.x}px, ${bubble.anchor.y}px, 0);`}
 				>
-					<div
-						use:observeBubble={bubble.id}
-						class={`bubble bubble-normal trace-reply-surface tone-${bubble.tone}${bubble.reply.speechType !== 'normal' ? ' speech-bubble-special' : ''}`}
-						data-bubble-id={bubble.id}
-						data-speech-type={bubble.reply.speechType}
-					>
 						{#if bubble.reply.speechType !== 'normal'}
 							{@const shape = bubble.shape}
 							<svg class="bubble-surface" data-speech-surface={bubble.reply.speechType} viewBox={`${shape?.bounds.x ?? 0} ${shape?.bounds.y ?? 0} ${shape?.bounds.width ?? bubble.size.width} ${shape?.bounds.height ?? bubble.size.height}`} style={shape ? bubbleSurfaceStyle(shape) : ''} aria-hidden="true">
@@ -2830,7 +2826,6 @@
 							<span class="bubble-content">{bubble.reply.content}</span>
 							{#if bubbleOverflowById[bubble.id]}<span class="bubble-ellipsis" aria-hidden="true">…</span>{/if}
 						</button>
-					</div>
 				</div>
 			{/each}
 			{#if traceBubble}
@@ -3866,8 +3861,7 @@
 	.trace-root-card { display: flex; }
 	.trace-reply-card { z-index: 2; }
 
-	.trace-root-card .trace-root-bubble,
-	.trace-reply-card .trace-reply-surface {
+	.trace-root-card .trace-root-bubble {
 		position: relative;
 	}
 
