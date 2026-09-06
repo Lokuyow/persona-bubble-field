@@ -19,4 +19,13 @@ describe('trace tree layout', () => {
 		expect(second.x).toBeGreaterThanOrEqual(bounds.x);
 		expect(second.y).toBeGreaterThanOrEqual(bounds.y);
 	});
+
+	it('does not reuse a visually rounded sub-pixel anchor', () => {
+		const bounds = { x: 0, y: 0, width: 500, height: 300 };
+		const footprint = { width: 80, height: 40 };
+		const occupied = { x: 220.4, y: 160.4 };
+		const next = distinctTraceAnchor({ x: 220.6, y: 160.6 }, footprint, bounds, [occupied], 0);
+		expect(Math.round(next.x)).not.toBe(Math.round(occupied.x));
+		expect(Math.round(next.y)).not.toBe(Math.round(occupied.y));
+	});
 });

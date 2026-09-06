@@ -33,5 +33,6 @@ export function distinctTraceAnchor(preferred: WorldPoint, footprint: Size, boun
 		clampToBounds({ x: direction.x > 0 ? bounds.x + bounds.width - footprint.width : bounds.x, y: base.y }, footprint, bounds),
 		clampToBounds({ x: base.x, y: direction.y > 0 ? bounds.y + bounds.height - footprint.height : bounds.y }, footprint, bounds)
 	];
-	return candidates.find((candidate) => !occupied.some((anchor) => Math.abs(anchor.x - candidate.x) < 1 && Math.abs(anchor.y - candidate.y) < 1)) ?? base;
+	// Keep anchors distinct after sub-pixel layout is rounded for rendering.
+	return candidates.find((candidate) => !occupied.some((anchor) => Math.abs(anchor.x - candidate.x) < 2 && Math.abs(anchor.y - candidate.y) < 2)) ?? base;
 }
