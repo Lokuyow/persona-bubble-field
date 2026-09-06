@@ -314,6 +314,43 @@ test.describe('DEV World Sandbox', () => {
 			expect(authorLayout.avatarBox.bottom).toBeLessThanOrEqual(authorLayout.nameBox.top);
 			expect(authorLayout.avatarBox.right).toBeLessThanOrEqual(authorLayout.contentBox.left);
 			expect(authorLayout.nameBox.right).toBeLessThanOrEqual(authorLayout.contentBox.left);
+			const shoutReply = page.locator(`[data-trace-reply-id="${'d'.repeat(64)}"]`);
+			const shoutStacking = await shoutReply.evaluate((card) => {
+				const surface = card.querySelector<HTMLElement>('.trace-reply-surface');
+				const svg = card.querySelector<SVGSVGElement>('.bubble-surface');
+				const author = card.querySelector<HTMLElement>('[data-trace-author-block]');
+				const content = card.querySelector<HTMLElement>('.trace-reply-content-button');
+				const avatar = card.querySelector<HTMLElement>('.trace-reply-author-avatar .avatar');
+				const name = card.querySelector<HTMLElement>('.trace-reply-author-name');
+				if (!surface || !svg || !author || !content || !avatar || !name) throw new Error('Expected a complete shout reply surface.');
+				const style = (element: Element) => getComputedStyle(element);
+				const surfaceBox = surface.getBoundingClientRect();
+				const boxes = [avatar, name, content].map((element) => element.getBoundingClientRect());
+				return {
+					speechType: surface.dataset.speechType,
+					svg: { position: style(svg).position, zIndex: style(svg).zIndex },
+					author: { position: style(author).position, zIndex: style(author).zIndex },
+					content: { position: style(content).position, zIndex: style(content).zIndex },
+					name: { text: name.textContent, visibility: style(name).visibility, opacity: style(name).opacity, color: style(name).color },
+					surfaceBox,
+					boxes
+				};
+			});
+			expect(shoutStacking.speechType).toBe('shout');
+			expect(shoutStacking.svg).toEqual({ position: 'absolute', zIndex: '0' });
+			expect(shoutStacking.author).toEqual({ position: 'relative', zIndex: '1' });
+			expect(shoutStacking.content).toEqual({ position: 'relative', zIndex: '1' });
+			expect(Number(shoutStacking.author.zIndex)).toBeGreaterThan(Number(shoutStacking.svg.zIndex));
+			expect(Number(shoutStacking.content.zIndex)).toBeGreaterThan(Number(shoutStacking.svg.zIndex));
+			expect(shoutStacking.name).toMatchObject({ visibility: 'visible', opacity: '1' });
+			expect(shoutStacking.name.text?.trim().length).toBeGreaterThan(0);
+			expect(shoutStacking.name.color).not.toBe('rgba(0, 0, 0, 0)');
+			for (const box of shoutStacking.boxes) {
+				expect(box.left).toBeGreaterThanOrEqual(shoutStacking.surfaceBox.left - 0.5);
+				expect(box.right).toBeLessThanOrEqual(shoutStacking.surfaceBox.right + 0.5);
+				expect(box.top).toBeGreaterThanOrEqual(shoutStacking.surfaceBox.top - 0.5);
+				expect(box.bottom).toBeLessThanOrEqual(shoutStacking.surfaceBox.bottom + 0.5);
+			}
 			const selectedChildId = await children.first().getAttribute('data-trace-reply-id');
 			if (!selectedChildId) throw new Error('Expected child reply ID.');
 			await children.first().locator('.trace-reply-content-button').click();

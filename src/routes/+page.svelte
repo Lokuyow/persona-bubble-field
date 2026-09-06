@@ -3781,6 +3781,8 @@
 	}
 
 	.trace-reply-author-profile {
+		position: relative;
+		z-index: 1;
 		display: flex;
 		grid-column: 1;
 		grid-row: 1;
@@ -3821,6 +3823,7 @@
 
 	.trace-reply-content-button {
 		position: relative;
+		z-index: 1;
 		grid-column: 2;
 		grid-row: 1;
 		min-width: 0;
