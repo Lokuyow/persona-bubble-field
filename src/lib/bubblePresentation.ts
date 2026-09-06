@@ -5,6 +5,7 @@ import { createSpeechBubbleShape, type SpeechBubbleShape } from './speechBubbleP
 export type BubbleTone = 'coral' | 'lavender' | 'mint' | 'yellow' | 'sky' | 'peach' | 'rose' | 'blue';
 
 export const BUBBLE_TONES: readonly BubbleTone[] = ['coral', 'lavender', 'mint', 'yellow', 'sky', 'peach', 'rose', 'blue'];
+export const NORMAL_TRACE_ROOT_RADIUS = 18;
 
 const TONE_VALUES: Readonly<Record<BubbleTone, Readonly<{ background: string; outline: string }>>> = {
 

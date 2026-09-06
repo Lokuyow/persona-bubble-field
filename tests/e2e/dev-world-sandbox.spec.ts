@@ -649,7 +649,11 @@ test.describe('DEV World Sandbox', () => {
 		const normalRootSurface = await page.locator('.bubble-layer').evaluate(() => {
 			const root = document.querySelector<HTMLElement>('[data-trace-root-id]');
 			const tail = document.querySelector<SVGPolygonElement>('.tail-layer polygon[data-trace-tail-root-id]');
-			if (!root || !tail) throw new Error('Expected the normal trace root and its tail.');
+			const tailOutline = document.querySelector<SVGPathElement>('.tail-layer path[data-trace-tail-root-id]');
+			const surface = root?.querySelector<SVGSVGElement>('.normal-trace-root-surface');
+			const outline = surface?.querySelector<SVGRectElement>('.normal-trace-root-outline');
+			const opening = surface?.querySelector<SVGPolygonElement>('polygon[data-tail-opening]');
+			if (!root || !tail || !tailOutline || !surface || !outline || !opening) throw new Error('Expected the normal trace root surface and tail.');
 			const token = getComputedStyle(root).getPropertyValue('--trace-surface').trim();
 			const probe = document.createElement('span');
 			probe.style.setProperty('--trace-surface', token);
@@ -657,22 +661,38 @@ test.describe('DEV World Sandbox', () => {
 			document.body.append(probe);
 			const expectedSurface = getComputedStyle(probe).backgroundColor;
 			probe.remove();
-			const seam = getComputedStyle(root, '::after');
+			const tailMask = tail.getAttribute('mask');
+			const maskId = tailMask?.replace(/^url\(#|\)$/g, '');
+			const mask = maskId ? document.getElementById(maskId) : null;
+			const screenPoints = (element: SVGGraphicsElement, points: readonly DOMPoint[]) => {
+				const matrix = element.getScreenCTM();
+				if (!matrix) throw new Error('Expected an SVG transform.');
+				return points.map((point) => point.matrixTransform(matrix));
+			};
+			const openingPoints = screenPoints(opening, [opening.points.getItem(0), opening.points.getItem(1)]);
+			const tailPoints = screenPoints(tail, [tail.points.getItem(0), tail.points.getItem(1)]);
 			return {
 				expectedSurface,
 				tailFill: getComputedStyle(tail).fill,
-				tailOpacity: getComputedStyle(tail).opacity,
-				seamContent: seam.content,
-				seamBackground: seam.backgroundColor
+				tailMask,
+				tailOutlineMask: tailOutline.getAttribute('mask'),
+				bodyExclusionCount: mask?.querySelectorAll('rect[fill="black"]').length,
+				pseudoContent: getComputedStyle(root, '::after').content,
+				outlineMask: outline.getAttribute('mask'),
+				openingError: Math.max(...openingPoints.map((point, index) => Math.hypot(point.x - tailPoints[index].x, point.y - tailPoints[index].y)))
 			};
 		});
 		expect(normalRootSurface).toEqual({
 			expectedSurface: normalRootSurface.expectedSurface,
 			tailFill: normalRootSurface.expectedSurface,
-			tailOpacity: '1',
-			seamContent: '""',
-			seamBackground: normalRootSurface.expectedSurface
+			tailMask: expect.stringMatching(/^url\(#trace-tail-body-/),
+			tailOutlineMask: normalRootSurface.tailMask,
+			bodyExclusionCount: 1,
+			pseudoContent: 'none',
+			outlineMask: expect.stringMatching(/^url\(#speech-tail-opening-/),
+			openingError: expect.any(Number)
 		});
+		expect(normalRootSurface.openingError).toBeLessThan(1);
 		await expect(page.getByText('1/2', { exact: true })).toBeVisible();
 		await page.getByRole('button', { name: 'Next trace root' }).click();
 		await expect(page.locator('[data-trace-root-id="' + '5'.repeat(64) + '"]')).toContainText('older root');

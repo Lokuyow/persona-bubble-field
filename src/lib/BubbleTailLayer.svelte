@@ -6,6 +6,7 @@
 		bubbleCenter,
 		bubbleToneStyle,
 		mergedTailStart,
+		NORMAL_TRACE_ROOT_RADIUS,
 		specialTailExtension,
 		tailGeometry,
 		tailStart,
@@ -33,16 +34,18 @@
 		{@const traceRoot = traceLayout.root}
 		{#if traceRootTailTarget}
 			{@const rootTail = tailGeometry(tailStart(traceRoot.anchor, traceRoot.size), traceRootTailTarget, 11, 2, specialTailExtension(traceRoot.event.speechType))}
-			{#if traceRoot.event.speechType !== 'normal' && traceRoot.shape}
-				<defs>
-					<mask id={traceTailMaskId(traceRoot.id)} maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x="0" y="0" width={viewportSize.width} height={viewportSize.height}>
-						<rect x="0" y="0" width={viewportSize.width} height={viewportSize.height} fill="white" />
+			<defs>
+				<mask id={traceTailMaskId(traceRoot.id)} maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x="0" y="0" width={viewportSize.width} height={viewportSize.height}>
+					<rect x="0" y="0" width={viewportSize.width} height={viewportSize.height} fill="white" />
+					{#if traceRoot.shape}
 						<path d={traceRoot.shape.path} transform={`translate(${traceRoot.anchor.x} ${traceRoot.anchor.y})`} fill="black" />
-					</mask>
-				</defs>
-			{/if}
-			<polygon class={`tail trace-tail tail-${traceRoot.tone} tone-${traceRoot.tone}`} data-trace-tail-root-id={traceRoot.event.id} data-trace-tail-target={`${traceRootTailTarget.x},${traceRootTailTarget.y}`} points={rootTail.points} mask={traceRoot.event.speechType !== 'normal' ? `url(#${traceTailMaskId(traceRoot.id)})` : undefined} style={bubbleToneStyle(traceRoot.tone, true)} />
-			<path class={`tail-outline trace-tail-outline tone-${traceRoot.tone}`} data-trace-tail-root-id={traceRoot.event.id} d={rootTail.outlinePath} mask={traceRoot.event.speechType !== 'normal' ? `url(#${traceTailMaskId(traceRoot.id)})` : undefined} style={bubbleToneStyle(traceRoot.tone, true)} />
+					{:else}
+						<rect x={traceRoot.anchor.x} y={traceRoot.anchor.y} width={traceRoot.size.width} height={traceRoot.size.height} rx={NORMAL_TRACE_ROOT_RADIUS} fill="black" />
+					{/if}
+				</mask>
+			</defs>
+			<polygon class={`tail trace-tail tail-${traceRoot.tone} tone-${traceRoot.tone}`} data-trace-tail-root-id={traceRoot.event.id} data-trace-tail-target={`${traceRootTailTarget.x},${traceRootTailTarget.y}`} points={rootTail.points} mask={`url(#${traceTailMaskId(traceRoot.id)})`} style={bubbleToneStyle(traceRoot.tone, true)} />
+			<path class={`tail-outline trace-tail-outline tone-${traceRoot.tone}`} data-trace-tail-root-id={traceRoot.event.id} d={rootTail.outlinePath} mask={`url(#${traceTailMaskId(traceRoot.id)})`} style={bubbleToneStyle(traceRoot.tone, true)} />
 		{/if}
 		{#each traceLayout.cards as bubble (bubble.id)}
 			{@const parent = traceLayout.cards.find((candidate) => candidate.reply.id === bubble.reply.parentId)}

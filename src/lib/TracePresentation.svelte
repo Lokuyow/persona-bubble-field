@@ -2,6 +2,7 @@
 	import { Avatar } from 'bits-ui';
 	import { asset } from '$app/paths';
 	import BubbleSurface from './BubbleSurface.svelte';
+	import NormalTraceRootSurface from './NormalTraceRootSurface.svelte';
 	import type { Size } from './geometry';
 	import type { WorldPoint } from './geometry';
 	import type { TraceBubblePresentationLayout } from './traceBubblePresentation';
@@ -44,6 +45,10 @@
 		onReplyFootprintRemoved,
 		registerReplyRemeasure
 	}: Props = $props();
+
+	let rootOpening = $derived.by(() => layout && traceRootTailTarget
+		? tailOutlineOpeningPoints(tailGeometry(tailStart(layout.root.anchor, layout.root.size), traceRootTailTarget, 11, 2, specialTailExtension(layout.root.event.speechType)), layout.root.anchor)
+		: null);
 
 	function bodyMeasurement(node: HTMLElement): BubbleMeasurement {
 		const content = node.querySelector<HTMLElement>('.bubble-content');
@@ -151,8 +156,9 @@
 			style={bubbleToneStyle(layout.root.tone, true)}
 			onclick={(event) => { event.stopPropagation(); onSelectSpeech(layout.root.event.id); }}
 		>
-			{#if layout.root.event.speechType !== 'normal' && layout.root.shape}
-				{@const rootOpening = traceRootTailTarget ? tailOutlineOpeningPoints(tailGeometry(tailStart(layout.root.anchor, layout.root.size), traceRootTailTarget, 11, 2, specialTailExtension(layout.root.event.speechType)), layout.root.anchor) : null}
+			{#if layout.root.event.speechType === 'normal'}
+				<NormalTraceRootSurface bubbleId={layout.root.id} size={layout.root.size} outlineOpening={rootOpening ? { id: `trace-root-${layout.root.event.id}`, points: rootOpening } : null} />
+			{:else if layout.root.shape}
 				<BubbleSurface bubbleId={layout.root.id} shape={layout.root.shape} variant="trace" speechType={layout.root.event.speechType} outlineOpenings={rootOpening ? [{ id: `trace-root-${layout.root.event.id}`, points: rootOpening }] : []} />
 			{/if}
 			<span class:trace-root-compact={layout.root.compact} class="bubble-content">{layout.root.event.content}</span>
@@ -183,7 +189,7 @@
 	.bubble-normal { width: fit-content; min-width: 72px; max-width: min(240px, calc(100% - 32px)); padding: 12px 15px; }
 	.bubble-normal::after { content: ''; position: absolute; left: calc(50% + var(--tail-seam-offset-x, 0px)); bottom: -1px; width: 11px; height: 3px; transform: translateX(-50%); background: var(--tone-background); pointer-events: none; z-index: 1; }
 	.trace-reply-card.bubble-normal::after { content: none; }
-	.trace-root-bubble.bubble-normal::after { background: var(--trace-surface); }
+	.trace-root-bubble.bubble-normal::after { content: none; }
 	.trace-root-bubble,
 	.trace-reply-card { width: fit-content; min-width: 72px; max-width: min(240px, calc(100% - 32px)); padding: 12px 15px; border-style: dashed; background: var(--trace-surface); pointer-events: auto; }
 	.trace-root-card,
@@ -191,6 +197,7 @@
 	.trace-presentation-pending { visibility: hidden; pointer-events: none; }
 	.trace-root-card { z-index: 1; display: flex; }
 	.trace-root-card .trace-root-bubble { position: relative; }
+	.trace-root-bubble:not(.speech-bubble-special) { background: transparent; border-color: transparent; }
 	.trace-reply-card { z-index: 2; display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 6px; align-items: start; min-width: 144px; }
 	.trace-reply-author-profile { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; padding: 0; gap: 3px; border: 0; background: transparent; color: #40504b; font-size: 12px; font-weight: 800; line-height: 1.1; text-align: center; }
 	.trace-reply-author-avatar { position: relative; display: block; order: -1; width: 36px; height: 36px; flex: 0 0 auto; }
