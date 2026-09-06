@@ -2800,7 +2800,7 @@
 				<div
 					use:observeTraceReplyCard={bubble.id}
 					use:observeBubble={bubble.id}
-					class={`bubble bubble-normal trace-reply-card trace-reply-surface tone-${bubble.tone}${bubble.reply.speechType !== 'normal' ? ' speech-bubble-special' : ''}`}
+					class={`bubble bubble-normal trace-reply-card tone-${bubble.tone}${bubble.reply.speechType !== 'normal' ? ' speech-bubble-special' : ''}`}
 					class:trace-presentation-pending={!tracePresentationReady}
 					data-trace-reply-id={bubble.reply.id}
 					data-trace-geometry-ready={tracePresentationReady ? 'ready' : 'pending'}
@@ -3836,7 +3836,7 @@
 	}
 
 	.trace-root-bubble,
-	.trace-reply-surface {
+	.trace-reply-card {
 		width: fit-content;
 		min-width: 72px;
 		max-width: min(240px, calc(100% - 32px));
@@ -3865,7 +3865,7 @@
 		position: relative;
 	}
 
-	.trace-reply-surface {
+	.trace-reply-card {
 		display: grid;
 		grid-template-columns: 62px minmax(0, 1fr);
 		column-gap: 8px;
@@ -3938,12 +3938,12 @@
 	}
 
 	.trace-root-bubble.speech-bubble-special,
-	.trace-reply-surface.speech-bubble-special {
+	.trace-reply-card.speech-bubble-special {
 		background: transparent;
 	}
 
 	.trace-root-bubble .bubble-content,
-	.trace-reply-surface .bubble-content {
+	.trace-reply-card .bubble-content {
 		color: #26312f;
 		opacity: 1;
 	}

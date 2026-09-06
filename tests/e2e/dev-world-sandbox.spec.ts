@@ -729,7 +729,7 @@ test.describe('DEV World Sandbox', () => {
 		await page.keyboard.press('Escape');
 		/* Retired position/ghost/offscreen projection assertions from the cell-based UI.
 
-		const traceBubbleBackgrounds = await page.locator('.trace-root-bubble, .trace-reply-surface').evaluateAll((bubbles) => bubbles.map((bubble) => ({
+		const traceBubbleBackgrounds = await page.locator('.trace-root-bubble, .trace-reply-card').evaluateAll((bubbles) => bubbles.map((bubble) => ({
 			speechType: bubble.getAttribute('data-speech-type'),
 			background: getComputedStyle(bubble).backgroundColor
 		})));
@@ -739,7 +739,7 @@ test.describe('DEV World Sandbox', () => {
 			.every(({ background }) => background !== 'rgba(0, 0, 0, 0)')).toBe(true);
 
 		const traceTailMasks = await page.locator('.tail-layer').evaluate((layer) => {
-			const bodyPathByBubbleId = new Map([...document.querySelectorAll<HTMLElement>('.trace-root-bubble, .trace-reply-surface')]
+			const bodyPathByBubbleId = new Map([...document.querySelectorAll<HTMLElement>('.trace-root-bubble, .trace-reply-card')]
 				.filter((bubble) => bubble.dataset.speechType !== 'normal')
 				.map((bubble) => [bubble.dataset.bubbleId, bubble.querySelector<SVGPathElement>('.bubble-surface-fill')?.getAttribute('d')]));
 			const tails = [...layer.querySelectorAll<SVGPolygonElement>('.trace-tail')];
