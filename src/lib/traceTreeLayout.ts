@@ -23,6 +23,8 @@ export function distinctTraceAnchor(preferred: WorldPoint, footprint: Size, boun
 	const base = clampToBounds(preferred, footprint, bounds);
 	const step = Math.max(12, Math.min(footprint.width, footprint.height) / 2);
 	const ring = Math.floor(rank / 4) + 1;
+	const maxX = bounds.x + bounds.width - footprint.width;
+	const maxY = bounds.y + bounds.height - footprint.height;
 	const direction = [
 		{ x: 1, y: 1 }, { x: -1, y: 1 }, { x: 1, y: -1 }, { x: -1, y: -1 }
 	][rank % 4];
@@ -31,8 +33,12 @@ export function distinctTraceAnchor(preferred: WorldPoint, footprint: Size, boun
 		clampToBounds({ x: base.x + direction.x * step * ring, y: base.y + direction.y * step * ring }, footprint, bounds),
 		clampToBounds({ x: base.x + direction.x * step * (ring + 1), y: base.y + direction.y * step * (ring + 1) }, footprint, bounds),
 		clampToBounds({ x: direction.x > 0 ? bounds.x + bounds.width - footprint.width : bounds.x, y: base.y }, footprint, bounds),
-		clampToBounds({ x: base.x, y: direction.y > 0 ? bounds.y + bounds.height - footprint.height : bounds.y }, footprint, bounds)
+		clampToBounds({ x: base.x, y: direction.y > 0 ? bounds.y + bounds.height - footprint.height : bounds.y }, footprint, bounds),
+		clampToBounds({ x: bounds.x, y: bounds.y }, footprint, bounds),
+		clampToBounds({ x: maxX, y: bounds.y }, footprint, bounds),
+		clampToBounds({ x: bounds.x, y: maxY }, footprint, bounds),
+		clampToBounds({ x: maxX, y: maxY }, footprint, bounds)
 	];
 	// Keep anchors distinct after sub-pixel layout is rounded for rendering.
-	return candidates.find((candidate) => !occupied.some((anchor) => Math.abs(anchor.x - candidate.x) < 2 && Math.abs(anchor.y - candidate.y) < 2)) ?? base;
+	return candidates.find((candidate) => !occupied.some((anchor) => Math.round(anchor.x) === Math.round(candidate.x) && Math.round(anchor.y) === Math.round(candidate.y))) ?? base;
 }
