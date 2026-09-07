@@ -3,7 +3,7 @@ import type { Character } from './character';
 import type { ParsedTraceReply, ParsedWorldMessage } from './nostrProtocol';
 import type { TraceConversationProjection } from './traceReplyPresentation';
 import { createPresentationBubbleShape, type BubbleTone } from './bubblePresentation';
-import { layoutTraceBubblePresentation } from './traceBubblePresentation';
+import { layoutTraceBubblePresentation, type TraceBubblePresentationInput } from './traceBubblePresentation';
 
 const character: Character = { characterId: '001', name: 'Test', about: 'Test character', picture: 'characters/001.webp' };
 const id = (character: string) => character.repeat(64);
@@ -23,7 +23,7 @@ const child: ParsedTraceReply = {
 	rootPubkey: root.pubkey, parentId: current.id, parentKind: 1111, parentPubkey: current.pubkey
 };
 
-function layout(projection: TraceConversationProjection, bubbleSizes: Record<string, { width: number; height: number }>, footprints: Record<string, { width: number; height: number }> = {}, previousLayout?: ReturnType<typeof layoutTraceBubblePresentation>) {
+function layout(projection: TraceConversationProjection, bubbleSizes: Record<string, { width: number; height: number }>, footprints: Record<string, { width: number; height: number }> = {}, previousLayout?: ReturnType<typeof layoutTraceBubblePresentation>, overrides: Partial<TraceBubblePresentationInput> = {}) {
 	return layoutTraceBubblePresentation({
 		projection,
 		fixedBubbles: [],
@@ -39,6 +39,7 @@ function layout(projection: TraceConversationProjection, bubbleSizes: Record<str
 		defaultBubbleSize: { width: 80, height: 40 },
 		characterFor: () => character,
 		toneFor: () => 'mint' satisfies BubbleTone,
+		...overrides,
 		previousLayout
 	});
 }
@@ -128,5 +129,22 @@ describe('trace bubble presentation', () => {
 			x: nextSelected.anchor.x + nextSelected.footprint.width + 10,
 			y: nextSelected.anchor.y + nextSelected.footprint.height + 10
 		});
+	});
+
+	it('reuses anchors only within the same coordinate context', () => {
+		const projection: TraceConversationProjection = { root, current: { kind: 'root', event: root }, parent: null, directReplies: [] };
+		const sizes = { [`trace-root-${root.id}`]: { width: 80, height: 40 } };
+		const first = layout(projection, sizes)!;
+		const unchanged = layout(projection, sizes, {}, first)!;
+		const moved = layout(projection, sizes, {}, first, { camera: { x: 50, y: 0 } })!;
+		const resized = layout(projection, sizes, {}, first, {
+			bubbleSafeBounds: { x: 0, y: 0, width: 1000, height: 500 },
+			bubbleVisualRegion: { x: 0, y: 0, width: 1000, height: 500 }
+		})!;
+		expect(unchanged.root.anchor).toEqual(first.root.anchor);
+		expect(moved.root.anchor).not.toEqual(first.root.anchor);
+		expect(moved.root.anchor.x).toBe(60);
+		expect(moved.root.anchor.y).toBe(first.root.anchor.y);
+		expect(resized.root.anchor).not.toEqual(first.root.anchor);
 	});
 });

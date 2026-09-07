@@ -49,6 +49,10 @@ export type TraceReplyPresentation = Readonly<{
 export type TraceBubblePresentationLayout = Readonly<{
 	root: TraceRootPresentation;
 	cards: readonly TraceReplyPresentation[];
+	context: string;
+	replyContext: string;
+	rootPreferred: WorldPoint;
+	fixedContext: string;
 }>;
 
 export type TraceBubblePresentationInput = Readonly<{
@@ -71,8 +75,48 @@ export type TraceBubblePresentationInput = Readonly<{
 
 function defaultTraceReplyCardFootprint(surface: Size): Size { return surface; }
 
+function tracePresentationContext(input: TraceBubblePresentationInput): string {
+	return JSON.stringify({
+		root: { id: input.projection?.root.id ?? null, position: input.projection?.root.position ?? null },
+		camera: input.camera,
+		cellSize: input.cellSize,
+		fieldAreaBounds: input.fieldAreaBounds,
+		bubbleSafeBounds: input.bubbleSafeBounds,
+		bubbleVisualRegion: input.bubbleVisualRegion,
+		fieldRows: input.fieldRows,
+		viewportWidth: input.viewportWidth
+	});
+}
+
+function traceReplyContinuityContext(input: TraceBubblePresentationInput): string {
+	return JSON.stringify({
+		root: { id: input.projection?.root.id ?? null, position: input.projection?.root.position ?? null },
+		camera: input.camera,
+		cellSize: input.cellSize,
+		fieldAreaBounds: input.fieldAreaBounds,
+		fieldRows: input.fieldRows,
+		viewportWidth: input.viewportWidth
+	});
+}
+
+function traceFixedContext(input: TraceBubblePresentationInput): string {
+	return JSON.stringify([...input.fixedBubbles]
+		.map((bubble) => ({
+			id: bubble.id,
+			anchor: bubble.anchor,
+			size: bubble.size,
+			speechType: bubble.speechType,
+			visualBounds: bubble.shape?.bounds ?? null
+		}))
+		.sort((first, second) => first.id.localeCompare(second.id)));
+}
+
 function sameSize(first: Size, second: Size): boolean {
 	return first.width === second.width && first.height === second.height;
+}
+
+function samePoint(first: WorldPoint, second: WorldPoint): boolean {
+	return Math.abs(first.x - second.x) < 0.5 && Math.abs(first.y - second.y) < 0.5;
 }
 
 function continuityAnchor(
@@ -94,6 +138,10 @@ function continuityAnchor(
 export function layoutTraceBubblePresentation(input: TraceBubblePresentationInput): TraceBubblePresentationLayout | null {
 	const { projection } = input;
 	if (!projection) return null;
+	const context = tracePresentationContext(input);
+	const replyContext = traceReplyContinuityContext(input);
+	const fixedContext = traceFixedContext(input);
+	const rootContinuityLayout = input.previousLayout?.context === context ? input.previousLayout : null;
 	const fixed = input.fixedBubbles.map((bubble) => ({
 		id: bubble.id, preferred: bubble.anchor, anchor: bubble.anchor, size: bubble.size,
 		visualBounds: bubble.speechType === 'shout' ? undefined : bubble.shape?.bounds
@@ -107,7 +155,11 @@ export function layoutTraceBubblePresentation(input: TraceBubblePresentationInpu
 	const rootPreferred = clampToBounds(normalBubblePreferredAnchor(
 		rootScreen.x, projection.root.position.y, input.fieldRows, rootSize, input.bubbleSafeBounds
 	), rootSize, input.bubbleSafeBounds);
-	const rootContinuity = continuityAnchor(input.previousLayout, projection.root.id, rootSize, rootSize, input.bubbleSafeBounds);
+	const previousRoot = input.previousLayout?.root.event.id === projection.root.id ? input.previousLayout : null;
+	const replyContinuityLayout = input.previousLayout &&
+		(input.previousLayout.replyContext === replyContext || (previousRoot && samePoint(previousRoot.rootPreferred, rootPreferred)))
+		? input.previousLayout : null;
+	const rootContinuity = continuityAnchor(rootContinuityLayout, projection.root.id, rootSize, rootSize, input.bubbleSafeBounds);
 	const [rootPlacement] = placeBubblesWithFixed([{
 		id: rootId, preferred: rootContinuity ?? rootPreferred, size: rootSize,
 		visualBounds: projection.root.speechType === 'shout' ? undefined : rootShape?.bounds
@@ -129,9 +181,13 @@ export function layoutTraceBubblePresentation(input: TraceBubblePresentationInpu
 			shape: createPresentationBubbleShape(reply.speechType, id, size, input.viewportWidth, input.bubbleSafeBounds),
 			character: input.characterFor(reply.pubkey), tone: input.toneFor(reply.pubkey)
 		};
-		const preserved = continuityAnchor(input.previousLayout, reply.id, card.size, card.footprint, input.bubbleSafeBounds);
-		const [placement] = placeBubblesWithFixed([{ id: card.id, preferred: preserved ?? preferred, size: card.footprint }], placed,
-			input.bubbleSafeBounds, input.cellSize, undefined, input.bubbleVisualRegion);
+		const preserved = continuityAnchor(replyContinuityLayout, reply.id, card.size, card.footprint, input.bubbleSafeBounds);
+		const preservePlacement = Boolean(preserved && input.previousLayout?.fixedContext === fixedContext &&
+			samePoint(input.previousLayout.root.anchor, root.anchor));
+		const [placement] = preservePlacement
+			? [{ id: card.id, anchor: preserved! }]
+			: placeBubblesWithFixed([{ id: card.id, preferred: preserved ?? preferred, size: card.footprint }], placed,
+				input.bubbleSafeBounds, input.cellSize, undefined, input.bubbleVisualRegion);
 		const anchored = {
 			...card,
 			anchor: distinctTraceAnchor(placement?.anchor ?? preferred, card.footprint, input.bubbleSafeBounds,
@@ -163,7 +219,7 @@ export function layoutTraceBubblePresentation(input: TraceBubblePresentationInpu
 		placeCard(reply, 'child', traceChildPreferred(currentAnchor, defaultTraceReplyCardFootprint(
 			input.bubbleSizes[`trace-reply-${reply.id}`] ?? input.defaultBubbleSize), index));
 	}
-	return { root, cards };
+	return { root, cards, context, replyContext, rootPreferred, fixedContext };
 }
 
 export function isTracePresentationMeasured(

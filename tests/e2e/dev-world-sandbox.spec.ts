@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { installFieldFrameSampling, sampleRenderedField } from './helpers/fieldFrames';
 
@@ -586,6 +586,40 @@ test.describe('DEV World Sandbox', () => {
 			await page.getByRole('button', { name: 'Add live trace reply' }).click();
 			await expect(page.locator('[data-trace-reply-id="' + 'c'.repeat(64) + '"]')).toBeVisible();
 			await expect.poll(() => existing.evaluate((card) => getComputedStyle(card).transform)).toBe(anchor);
+		});
+
+		test(`preserves selected Trace positions across direct and deep navigation on ${viewport.name}`, async ({ page }) => {
+			await page.setViewportSize(viewport);
+			await page.goto('/?devWorld=1&devTrace=replies');
+			if (viewport.name === 'desktop') await page.getByRole('button', { name: 'Hide Chatter' }).click();
+			await page.locator('[data-cell-position="8,4"]').click();
+			await expect(page.locator('.trace-root-card')).toHaveAttribute('data-trace-geometry-ready', 'ready');
+			await expect(page.locator('.field-scene')).not.toHaveAttribute('data-camera-animation', 'active');
+			const rightUpper = page.locator('[data-trace-reply-id="' + '8'.repeat(64) + '"]');
+			const readAnchor = (card: Locator) => card.evaluate((element) => getComputedStyle(element).transform);
+			await expect(rightUpper).toBeVisible();
+			const rightUpperBefore = await readAnchor(rightUpper);
+			await rightUpper.locator('.trace-reply-content-button').click();
+			await expect(page.locator('[data-trace-current-reply-id]')).toHaveAttribute('data-trace-current-reply-id', '8'.repeat(64));
+			await expect.poll(() => readAnchor(rightUpper)).toBe(rightUpperBefore);
+
+			await page.reload();
+			if (viewport.name === 'desktop') await page.getByRole('button', { name: 'Hide Chatter' }).click();
+			await page.locator('[data-cell-position="8,4"]').click();
+			await expect(page.locator('.trace-root-card')).toHaveAttribute('data-trace-geometry-ready', 'ready');
+			await expect(page.locator('.field-scene')).not.toHaveAttribute('data-camera-animation', 'active');
+			const branchParent = page.locator('[data-trace-reply-id="' + '7'.repeat(64) + '"]');
+			const branchParentBefore = await readAnchor(branchParent);
+			await branchParent.locator('.trace-reply-content-button').click();
+			await expect(page.locator('[data-trace-current-reply-id]')).toHaveAttribute('data-trace-current-reply-id', '7'.repeat(64));
+			await expect(page.locator('[data-trace-reply-id="' + 'b'.repeat(64) + '"]')).toBeVisible();
+			await expect.poll(() => readAnchor(branchParent)).toBe(branchParentBefore);
+			const child = page.locator('[data-trace-reply-id="' + 'b'.repeat(64) + '"]');
+			const childBefore = await readAnchor(child);
+			await child.locator('.trace-reply-content-button').click();
+			await expect(page.locator('[data-trace-current-reply-id]')).toHaveAttribute('data-trace-current-reply-id', 'b'.repeat(64));
+			await expect.poll(() => readAnchor(branchParent)).toBe(branchParentBefore);
+			await expect.poll(() => readAnchor(child)).toBe(childBefore);
 		});
 	}
 	test('reselects the current reply without losing its draft, preserves it through profiles, and clears on range exit', async ({ page }) => {
