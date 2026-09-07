@@ -1357,8 +1357,17 @@
 
 	async function loadComposerPreview(targetId: string) {
 		const target = traceReplyMode.target;
-		return target?.targetId === targetId && worldSession
-			? worldSession.getTracePreviewEvent(target.rootId, targetId) : null;
+		if (target?.targetId !== targetId || !worldSession) return null;
+		const event = await worldSession.getTracePreviewEvent(target.rootId, targetId);
+		if (!event) return null;
+		const character = deriveCharacterFromPubkey(event.pubkey, CHARACTER_CATALOG);
+		return {
+			event,
+			profile: {
+				displayName: character.name,
+				picture: new URL(asset(`/${character.picture}`), window.location.origin).toString()
+			}
+		};
 	}
 
 	function executeFieldCellAction(

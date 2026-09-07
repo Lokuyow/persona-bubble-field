@@ -16,6 +16,10 @@ export type ComposerDesiredContext = Readonly<{
 	targetId: string | null;
 	clearContentVersion: number;
 }>;
+export type ComposerPreview = Readonly<{
+	event: NostrEvent;
+	profile: Readonly<{ displayName: string; picture: string }>;
+}>;
 export type ComposerSyncSnapshot = Readonly<{
 	generation: number;
 	appliedGeneration: number | null;
@@ -26,6 +30,7 @@ export type ComposerContextPatch = Readonly<{
 	content?: null;
 	reply: string | null;
 	preloadedEvents?: Readonly<Record<string, NostrEvent>>;
+	preloadedProfiles?: Readonly<Record<string, Readonly<{ displayName: string; picture: string }>>>;
 }>;
 
 export function matchesComposerSubmit(envelope: ComposerSubmitEnvelope, desired: ComposerDesiredContext): boolean {
@@ -47,7 +52,7 @@ function replyId(value: unknown): string | null | undefined {
 /** One combined context call at a time; superseded requests retain only the latest desired state. */
 export function createComposerContextSync(options: Readonly<{
 	setContext: (patch: ComposerContextPatch) => Promise<void>;
-	loadPreview?: (targetId: string) => Promise<NostrEvent | null>;
+	loadPreview?: (targetId: string) => Promise<ComposerPreview | null>;
 	onPreviewClear: (generation: number) => void;
 }>) {
 	let desired: ComposerDesiredContext = { generation: 0, targetId: null, clearContentVersion: 0 };
@@ -69,14 +74,17 @@ export function createComposerContextSync(options: Readonly<{
 		const operation = { request: desired, acknowledged: false };
 		inFlight = operation;
 		try {
-			const event = desired.targetId && options.loadPreview ? await options.loadPreview(desired.targetId) : null;
+			const preview = desired.targetId && options.loadPreview ? await options.loadPreview(desired.targetId) : null;
 			if (disposed || submitting || operation.request !== desired) return;
 			const { request } = operation;
 			operation.acknowledged = false;
 			await options.setContext({
 				reply: request.targetId ? noteEncode(request.targetId) : null,
 				...(request.clearContentVersion > clearedVersion ? { content: null } : {}),
-				...(event && event.id === request.targetId ? { preloadedEvents: { [event.id]: event } } : {})
+				...(preview && preview.event.id === request.targetId ? {
+					preloadedEvents: { [preview.event.id]: preview.event },
+					preloadedProfiles: { [preview.event.pubkey]: preview.profile }
+				} : {})
 			});
 			if (disposed) return;
 			if (operation.acknowledged) {

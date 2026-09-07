@@ -1,9 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import { noteEncode } from 'nostr-tools/nip19';
-import { createComposerContextSync, matchesComposerSubmit, type ComposerContextPatch, type ComposerDesiredContext, type HostOwnedComposerOutput } from './hostOwnedComposerContext';
+import { createComposerContextSync, matchesComposerSubmit, type ComposerContextPatch, type ComposerDesiredContext, type ComposerPreview, type HostOwnedComposerOutput } from './hostOwnedComposerContext';
 
 const a = 'a'.repeat(64);
 const b = 'b'.repeat(64);
+const preview = (id: string, pubkey: string, displayName: string): ComposerPreview => ({
+	event: { id, pubkey, kind: 42, content: `event-${id}`, tags: [], created_at: 1, sig: '0'.repeat(128) },
+	profile: { displayName, picture: `https://field.example.test/characters/${displayName}.webp` }
+});
 const request = (generation: number, targetId: string | null, clearContentVersion = 0): ComposerDesiredContext =>
 	({ generation, targetId, clearContentVersion });
 const flush = async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); };
@@ -85,6 +89,30 @@ describe('Host-owned combined context synchronization', () => {
 		sync.request(request(2, null, 1)); finish(null); await flush();
 		expect(setContext.mock.calls).toEqual([[{ content: null, reply: null }]]);
 		expect(sync.snapshot().fullySynced).toBe(true);
+	});
+
+	it('sets the hydrated event and its target-author profile in one acknowledged patch', async () => {
+		const setContext = vi.fn(async (patch: ComposerContextPatch) => { sync.contextUpdated(patch.reply); });
+		const sync = createComposerContextSync({ setContext, loadPreview: async (targetId) =>
+			preview(targetId, targetId === a ? b : 'c'.repeat(64), targetId === a ? 'root-author' : 'reply-author'), onPreviewClear: vi.fn() });
+		sync.request(request(1, a, 1)); sync.ready(); await flush();
+		expect(setContext.mock.calls).toEqual([[{
+			content: null,
+			reply: noteEncode(a),
+			preloadedEvents: { [a]: expect.objectContaining({ id: a, pubkey: b }) },
+			preloadedProfiles: { [b]: { displayName: 'root-author', picture: 'https://field.example.test/characters/root-author.webp' } }
+		}]]);
+		sync.request(request(2, b)); await flush();
+		expect(setContext.mock.calls.at(-1)).toEqual([{ reply: noteEncode(b), preloadedEvents: { [b]: expect.objectContaining({ id: b, pubkey: 'c'.repeat(64) }) }, preloadedProfiles: { ['c'.repeat(64)]: { displayName: 'reply-author', picture: 'https://field.example.test/characters/reply-author.webp' } } }]);
+	});
+
+	it('does not apply a slow preview result after the target is cleared', async () => {
+		let finish!: (preview: ComposerPreview) => void;
+		const setContext = vi.fn(async (patch: ComposerContextPatch) => { sync.contextUpdated(patch.reply); });
+		const sync = createComposerContextSync({ setContext, loadPreview: () => new Promise((resolve) => { finish = resolve; }), onPreviewClear: vi.fn() });
+		sync.request(request(1, a, 1)); sync.ready();
+		sync.request(request(2, null, 1)); finish(preview(a, b, 'stale-character')); await flush();
+		expect(setContext.mock.calls).toEqual([[{ content: null, reply: null }]]);
 	});
 
 	it('repairs unexpected references without adopting them or clearing the draft', async () => {

@@ -9,6 +9,8 @@ import {
 	validateTraceReplyCandidate
 } from '../../src/lib/nostrProtocol';
 import { SPEECH_SHORTCUT_IDS } from '../../src/lib/speechSubmission';
+import { CHARACTER_CATALOG, characterPicturePath } from '../../src/lib/character';
+import { deriveCharacterFromPubkey } from '../../src/lib/characterAssignment';
 
 const CHANNEL_ID = '3212de4b75f0c41efa17e41affcfc3a811171ba930e5b657687b5f5148627d5b';
 const SEED_RELAYS = [
@@ -609,6 +611,18 @@ async function seedRelayAccount(page: Page, secretKey: Uint8Array, pubkey: strin
 	}, { secret: [...secretKey], accountPubkey: pubkey });
 }
 
+async function composerContextCalls(page: Page): Promise<Array<{
+	reply?: string | null;
+	preloadedEvents?: Record<string, { id: string; pubkey: string }>;
+	preloadedProfiles?: Record<string, { displayName: string; picture: string }>;
+}>> {
+	return page.evaluate(() => (window as typeof window & { __ehagakiContextCalls?: Array<{
+		reply?: string | null;
+		preloadedEvents?: Record<string, { id: string; pubkey: string }>;
+		preloadedProfiles?: Record<string, { displayName: string; picture: string }>;
+	}> }).__ehagakiContextCalls ?? []);
+}
+
 async function chooseHorizontalMove(page: Page): Promise<{ key: 'ArrowLeft' | 'ArrowRight'; expected: string }> {
 	const position = await page.locator('.participant[data-self="true"]').getAttribute('data-position');
 	if (!position) throw new Error('Expected the Relay self participant position.');
@@ -787,6 +801,53 @@ test.describe('Relay startup', () => {
 			await expect(reader.locator(`[data-trace-reply-id="${wrongRoot.id}"]`)).toHaveCount(0);
 			await expect(reader.locator('[data-trace-current-id]')).toHaveAttribute('data-trace-current-id', trace.root.id);
 		} finally { await readerContext.close(); }
+	});
+
+	test('passes target-author character profiles across root, nested reply, and clear context patches', async ({ page }) => {
+		const trace = traceRuntimeEvents();
+		await page.emulateMedia({ reducedMotion: 'reduce' });
+		await page.setViewportSize({ width: 1100, height: 850 });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { primaryEvents: { message: trace.message, position: trace.selfPosition }, traceRoots: [trace.root], traceReplies: [trace.direct, trace.deeper] });
+		await seedRelayAccount(page, trace.selfSecret, trace.selfPubkey);
+		await page.goto('/');
+		await page.evaluate(() => {
+			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void; releaseTraceRoots(): void; releaseTraceReplies(): void } }).__relayStartupTest;
+			relay.releaseMetadata(); relay.releasePrimary(); relay.releaseTraceRoots(); relay.releaseTraceReplies();
+		});
+		await expect(page.locator('.participant')).toHaveCount(2);
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '3,2');
+		await page.getByRole('button', { name: 'Hide Chatter' }).click();
+		await page.locator('[data-cell-position="4,2"]').click();
+		await expect(page.getByLabel('Reply preview', { exact: true })).toContainText('Relay trace root');
+
+		const rootCharacter = deriveCharacterFromPubkey(trace.root.pubkey, CHARACTER_CATALOG);
+		const rootCalls = await composerContextCalls(page);
+		const rootCall = [...rootCalls].reverse().find((call) => call.preloadedEvents?.[trace.root.id]);
+		expect(rootCall?.preloadedEvents?.[trace.root.id]?.pubkey).toBe(trace.root.pubkey);
+		expect(rootCall?.preloadedProfiles?.[trace.root.pubkey]?.displayName).toBe(rootCharacter.name);
+		expect(rootCall?.preloadedProfiles?.[trace.root.pubkey]?.picture).toBe(
+			new URL(`/characters/${characterPicturePath(rootCharacter.characterId).split('/').at(-1)}`, page.url()).toString()
+		);
+		expect(rootCall?.preloadedProfiles?.[trace.root.pubkey]?.picture).toMatch(/^https?:\/\//);
+
+		await page.locator(`[data-trace-reply-id="${trace.direct.id}"] .trace-reply-content-button`).click();
+		await expect(page.getByLabel('Reply preview', { exact: true })).toContainText('Relay direct reply');
+		const replyCharacter = deriveCharacterFromPubkey(trace.direct.pubkey, CHARACTER_CATALOG);
+		const replyCalls = await composerContextCalls(page);
+		const replyCall = [...replyCalls].reverse().find((call) => call.preloadedEvents?.[trace.direct.id]);
+		expect(replyCall?.preloadedEvents?.[trace.direct.id]?.pubkey).toBe(trace.direct.pubkey);
+		expect(replyCall?.preloadedProfiles?.[trace.direct.pubkey]?.displayName).toBe(replyCharacter.name);
+		expect(replyCall?.preloadedProfiles?.[trace.direct.pubkey]?.picture).toBe(
+			new URL(`/characters/${characterPicturePath(replyCharacter.characterId).split('/').at(-1)}`, page.url()).toString()
+		);
+		expect(replyCall?.preloadedProfiles).not.toHaveProperty(trace.root.pubkey);
+
+		await page.getByRole('button', { name: 'Clear reply', exact: true }).click();
+		await expect(page.getByLabel('Reply preview', { exact: true })).toHaveCount(0);
+		const clearCall = (await composerContextCalls(page)).at(-1);
+		expect(clearCall?.reply).toBeNull();
+		expect(clearCall?.preloadedProfiles).toBeUndefined();
 	});
 
 	test('rejects mismatched structured reply output before position or message publication', async ({ page }) => {

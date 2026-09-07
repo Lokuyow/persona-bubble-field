@@ -23,7 +23,7 @@ export async function installHostOwnedStub(page: Page): Promise<{ requests: () =
     (window.__ehagakiContextCalls ||= []).push(patch);
     if (patch.content === null) { this.editor.value = ''; this.updateEditorEmpty(); }
     if (Object.hasOwn(patch, 'reply')) this.reply = patch.reply;
-    this.renderReply(patch.preloadedEvents);
+    this.renderReply(patch.preloadedEvents, patch.preloadedProfiles);
     this.contextUpdated();
   }
   replyId() {
@@ -37,12 +37,14 @@ export async function installHostOwnedStub(page: Page): Promise<{ requests: () =
     }
     return hex;
   }
-  renderReply(preloadedEvents) {
+  renderReply(preloadedEvents, preloadedProfiles) {
     this.shadowRoot.querySelector('[aria-label="Reply preview"]')?.remove();
     if (!this.reply) return;
     const preview = document.createElement('div'); preview.setAttribute('aria-label', 'Reply preview');
     preview.dataset.replyId = this.replyId();
-    const body = document.createElement('span'); body.textContent = preloadedEvents?.[this.replyId()]?.content || 'Reply';
+    const event = preloadedEvents?.[this.replyId()];
+    const profile = event ? preloadedProfiles?.[event.pubkey] : undefined;
+    const body = document.createElement('span'); body.textContent = profile ? profile.displayName + ': ' + event.content : event?.content || 'Reply';
     const clear = document.createElement('button'); clear.textContent = '×'; clear.setAttribute('aria-label', 'Clear reply');
     clear.onclick = () => { this.reply = null; this.renderReply(); this.contextUpdated(); };
     preview.append(body, clear); this.shadowRoot.prepend(preview);
