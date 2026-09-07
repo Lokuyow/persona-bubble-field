@@ -6,9 +6,10 @@
 		bubbleId: string;
 		size: Size;
 		outlineOpening: Readonly<{ id: string; points: string }> | null;
+		selected?: boolean;
 	}>;
 
-	let { bubbleId, size, outlineOpening }: Props = $props();
+	let { bubbleId, size, outlineOpening, selected = false }: Props = $props();
 	let outlineMask = $derived(speechOutlineMaskId(bubbleId));
 	let outlineRadius = $derived(Math.max(0, NORMAL_TRACE_ROOT_RADIUS - 0.5));
 </script>
@@ -23,11 +24,12 @@
 		</defs>
 	{/if}
 	<rect class="normal-trace-root-fill" x="0" y="0" width={size.width} height={size.height} rx={NORMAL_TRACE_ROOT_RADIUS} />
-	<rect class="normal-trace-root-outline" x="0.5" y="0.5" width={Math.max(0, size.width - 1)} height={Math.max(0, size.height - 1)} rx={outlineRadius} mask={outlineOpening ? `url(#${outlineMask})` : undefined} />
+	<rect class="normal-trace-root-outline" class:trace-current-selection-outline={selected} x="0.5" y="0.5" width={Math.max(0, size.width - 1)} height={Math.max(0, size.height - 1)} rx={outlineRadius} mask={outlineOpening ? `url(#${outlineMask})` : undefined} />
 </svg>
 
 <style>
 	.normal-trace-root-surface { position: absolute; z-index: 0; overflow: visible; pointer-events: none; }
 	.normal-trace-root-fill { fill: var(--trace-surface); }
 	.normal-trace-root-outline { fill: none; stroke: var(--tone-outline); stroke-width: 1; stroke-dasharray: 4 3; stroke-linecap: round; stroke-linejoin: round; }
+	.trace-current-selection-outline { stroke: var(--color-accent); stroke-width: 2; stroke-dasharray: none; }
 </style>

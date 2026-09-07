@@ -67,6 +67,10 @@ rootを調査したら、NIP-22 reply historyを待たずにroot ghostと実際�
 - compact rootとdeep immediate parentの間にはconnectorを描かない。connectorは表示中の実在する親子関係だけをcontinuous tapered relationとそのhaloで描く。root tailとrelationは、visible Trace surfaceの内側へ描画しない。
 - speech bodyはnative button、author icon/nameはsiblingのnative Profile buttonとする。Profile操作はselection、target、draftを変更しない。overflow / ellipsis / special shape用のpresentation measurementとplacement用のwrapper footprintは責務およびstate/reporting pathとして分離する。exact DOM measurement targetは実装詳細とし、現行presentationでは挙動、special surface geometry、tree placementを維持するため、両経路が同じreply card root矩形を使用してよい。
 
+Trace conversationでrootとreplyなど複数の選択可能なspeechが表示されている場合、conversationのcurrent speechを他のvisible Trace speechと視覚的に区別できる。rootしか表示されずcurrentが自明な場合は、current強調を必須としない。強調はComposerの一時的なreply targetではなくconversationのcurrentに基づき、reply referenceの解除やsuccessful reply publish後にreply modeだけが解除されても、conversation currentが変わらない限り維持する。normal / shout / monologueの各speech shape本来の外形を使ったselection presentationとし、exact color、stroke width、dash pattern等のpixel表現は実装詳細とする。
+
+replyのspeech selection領域はauthor Profile領域と分離したまま、content columnの利用可能な領域を使用する。短文でもcontent側の利用可能な縦方向領域を選択できる。author Profile操作はspeech selection、conversation exploration、reply target、draftを変更しない。
+
 Profile Dialogまたはcontext menuを開閉してもconversation exploration、reply target、draftを維持する。
 
 ### NIP-22 conversation取得

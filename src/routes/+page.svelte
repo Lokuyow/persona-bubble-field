@@ -2519,6 +2519,7 @@
 			<TracePresentation
 				layout={traceTreeLayout}
 				ready={tracePresentationReady}
+				currentSpeechId={traceConversationProjection?.current.event.id ?? null}
 				replyRefresh={traceConversationState.kind === 'open' ? traceConversationState.replyRefresh : null}
 				{traceRootTailTarget}
 				{bubbleOverflowById}
