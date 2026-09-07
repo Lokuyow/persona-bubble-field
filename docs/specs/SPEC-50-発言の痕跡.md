@@ -51,7 +51,7 @@ movement rulesは[SPEC-30](./SPEC-30-フィールド・position・presence.md)�
 - range外のvisible root lightを操作した場合は、conversationやcontext menuを開かず、「近づくと調べられる」という一時feedbackだけを表示し、stateを変更しない。
 - Characterとroot lightが同じcellにある場合、range外のrootはcontext menuのactionとして数えず、Characterが1人ならProfile Dialogを直接開く。range内ではCharacter profileとTrace調査を既存context menuから選択できる。
 - replyを選択してさらに深く辿る操作もopen rootのrange内で行う。
-- root range外へ出るとreply modeを解除してdraftを破棄するが、conversation explorationは維持する。
+- root range外へ出るとconversation explorationを終了する。range外へ出た時点でactiveなreply modeならreply modeを解除してdraftを破棄する。reply referenceがすでに解除されている場合は、conversationだけを終了し、Composer draftは維持する。
 
 ## 25. trace conversation
 

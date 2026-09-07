@@ -1231,11 +1231,11 @@
 		const selfId = devWorldSandboxEnabled ? DEV_WORLD_SELF_ID : selfAccount?.pubkey;
 		const previousSelf = presenceState.participants.find((participant) => participant.id === selfId);
 		const nextSelf = nextPresence.participants.find((participant) => participant.id === selfId);
-		if (traceReplyMode.target && nextSelf &&
+		const traceRangeExited = traceConversationState.kind === 'open' && nextSelf &&
 			(!previousSelf || !sameCell(previousSelf.position, nextSelf.position)) &&
-			!isWithinTraceInvestigationRange(nextSelf.position, traceConversationState.kind === 'open'
-				? traceConversationState.root.position : nextSelf.position)) {
-			traceReplyMode = clearTraceReplyMode(traceReplyMode, true);
+			!isWithinTraceInvestigationRange(nextSelf.position, traceConversationState.root.position);
+		if (traceRangeExited) {
+			closeTraceConversation(Boolean(traceReplyMode.target));
 		}
 		const previousProjection = getPresenceProjection(presenceState);
 		const activeIds = nextPresence.participants
@@ -1328,9 +1328,9 @@
 		}, 1_000);
 	}
 
-	function closeTraceConversation(): void {
+	function closeTraceConversation(discardReplyDraft = false): void {
 		closeFieldActionMenu();
-		traceReplyMode = clearTraceReplyMode(traceReplyMode);
+		traceReplyMode = clearTraceReplyMode(traceReplyMode, discardReplyDraft);
 		traceConversationController?.closeTraceConversation();
 		if (!traceConversationController) setTraceConversation({ kind: 'closed' });
 	}
