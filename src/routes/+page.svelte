@@ -20,7 +20,6 @@
 		getFieldWorldSize,
 		getResponsiveCellSize,
 		gridToWorld,
-		MOBILE_FIELD_BREAKPOINT,
 		mergedBubblePreferredAnchor,
 		normalBubblePreferredAnchor,
 		placeBubbles,
@@ -67,7 +66,7 @@
 		type PreparedCharacterProfilePublication
 	} from '$lib/initialProfilePublication';
 	import { projectPresence, type PresenceProjectionOptions } from '$lib/presenceProjection';
-	import { createPresenceState, debugTimeoutParticipant, type PresenceState } from '$lib/presence';
+	import { debugTimeoutParticipant, type PresenceState } from '$lib/presence';
 	import { addRecentMessage, createRecentMessageTimeline, type RecentMessageTimeline } from '$lib/recentMessageTimeline';
 	import { getVirtualKeyboardBottomInset, getVisualViewportKeyboardInset, type ViewportRect } from '$lib/keyboardInset';
 	import type { ParsedTraceReply, ParsedWorldMessage } from '$lib/nostrProtocol';
@@ -115,7 +114,11 @@
 			return next;
 		};
 	})();
-	import HostOwnedComposerLite from '$lib/HostOwnedComposerLite.svelte';
+	import ComposerDock from '$lib/frontend/ComposerDock.svelte';
+	import Chatter from '$lib/frontend/Chatter.svelte';
+	import WorldEntryControls from '$lib/frontend/WorldEntryControls.svelte';
+	import DevWorldControls from '$lib/dev/DevWorldControls.svelte';
+	import { applyDevPageFixtures, createDevTraceLiveReply } from '$lib/dev/devPageFixtures';
 	import { matchesComposerSubmit, type ComposerSubmitEnvelope } from '$lib/hostOwnedComposerContext';
 	import {
 		acceptedTraceReplyTarget, clearTraceReplyMode, completeTraceReplySubmission,
@@ -148,12 +151,6 @@
 	} satisfies Record<'normal' | 'merged', Size>;
 	const MOVEMENT_ANIMATION_DURATION_MS = 400;
 	const INITIAL_COMPOSER_PREFERRED_HEIGHT = 50;
-	const SPEECH_TYPE_ORDER: readonly SpeechType[] = ['normal', 'shout', 'monologue'];
-	const SPEECH_TYPE_LABELS: Readonly<Record<SpeechType, string>> = {
-		normal: '通常',
-		shout: '叫び',
-		monologue: 'モノローグ'
-	};
 	const initialDevWorldSandboxEnabled = import.meta.env.DEV &&
 		isDevWorldSandboxEnabled(import.meta.env.DEV, page.url.searchParams);
 
@@ -199,11 +196,6 @@
 	}> | null = null;
 	let proximityFeedback: Readonly<{ position: { x: number; y: number } }> | null = null;
 	let proximityFeedbackTimer: number | null = null;
-	let timelineOverflowById: Record<string, boolean> = {};
-	let timelineEntryHeights: Record<string, number> = {};
-	let timelineAvailableHeight = 0;
-	let timelineInitialized = false;
-	let timelineOpen = false;
 	let connectionStatus: WorldReadConnectionStatus = { kind: 'bootstrapping' };
 	let selfAccount: AccountSnapshot | null = null;
 	let selfPositionWriteState: SelfPositionWriteState = { kind: 'unavailable' };
@@ -225,6 +217,7 @@
 	let selectedSpeechType: SpeechType = 'normal';
 	let lastProfileTrigger: HTMLButtonElement | null = null;
 	let composerEditorIsEmpty: boolean | null = null;
+	let chatterComponent: { initialize(width: number): void; isInitialized(): boolean; toggle(): void; resetMeasurements(): void };
 	let composerComponent: { focusEditor(): boolean; blurEditor(): boolean } | null = null;
 	let visualWorldById: Record<string, WorldPoint> = {};
 	let visualCamera: WorldPoint | null = null;
@@ -617,8 +610,7 @@
 		let mounted = true;
 		let startRequested = false;
 		let session: ReturnType<typeof createWorldReadSession> | null = null;
-		timelineInitialized = true;
-		timelineOpen = window.innerWidth > MOBILE_FIELD_BREAKPOINT;
+		chatterComponent.initialize(window.innerWidth);
 		const reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
 		prefersReducedMotion = reducedMotionQuery.matches;
 		const handleReducedMotionChange = () => {
@@ -631,33 +623,17 @@
 			const devSearchParams = new URLSearchParams(window.location.search);
 			selectedCharacterId = resolveDevWorldCharacterId(devSearchParams);
 			resetSandbox();
-			const devSpeech = devSearchParams.get('devSpeech');
-			if (import.meta.env.DEV && devSpeech) {
-				if (devSpeech === '1') seedDevSpeechNormalFixture();
-				const mergedMemberCount = devSpeech.startsWith('merged2') ? 2 : devSpeech.startsWith('merged3') ? 3 : devSpeech.startsWith('merged4') ? 4 : 0;
-				if (mergedMemberCount > 0) {
-					const mergedContent = devSpeech.endsWith('-long')
-						? 'Merged bubble content grows naturally until its size limit. '.repeat(8).trim()
-						: undefined;
-					const mergedSpeechType = devSpeech.includes('shout') ? 'shout' : devSpeech.includes('monologue') ? 'monologue' : 'normal';
-					seedDevSpeechMergedFixture(mergedMemberCount, mergedContent, mergedSpeechType);
-				}
-				if (devSpeech === 'types') seedDevSpeechTypeFixture();
-				if (devSpeech === 'normal-sizes') seedDevSpeechNormalSizeFixture();
-				if (devSpeech === 'comparison') seedDevSpeechComparisonFixture();
-				if (devSpeech === 'linebreak') seedDevSpeechLinebreakFixture();
-				if (devSpeech === 'linebreak-five') seedDevSpeechLinebreakFiveFixture();
-				if (devSpeech === 'long') seedDevSpeechLongFixture();
-				if (devSpeech === 'linebreak-overflow') seedDevSpeechLinebreakOverflowFixture();
-				if (devSpeech === 'timeline') seedDevRecentMessageTimelineFixture();
-			}
-			const devTrace = devSearchParams.get('devTrace');
-			if (import.meta.env.DEV && (devTrace === 'lights' || devTrace === 'replies')) {
-				seedDevTraceLightFixture();
-			}
-			if (import.meta.env.DEV && devTrace === 'replies') {
-				devTraceReplyFixtureEnabled = true;
-				seedDevTraceReplyFixture();
+			if (import.meta.env.DEV) {
+				applyDevPageFixtures(devSearchParams, {
+					field: FIELD,
+					setPresence,
+					getConversation: () => conversationState,
+					setConversation: (next) => { conversationState = next; },
+					setRecentMessageTimeline: (next) => { recentMessageTimeline = next; },
+					setEffectiveTraceRoots,
+					setDevTraceReplies,
+					enableTraceReplyFixture: () => { devTraceReplyFixtureEnabled = true; }
+				});
 			}
 			if (import.meta.env.DEV && devSearchParams.get('devPresence') === 'inactive') {
 				setPresence(debugTimeoutParticipant(presenceState, DEV_WORLD_SELF_ID));
@@ -855,7 +831,7 @@
 				return;
 			}
 			if (
-				timelineInitialized &&
+				chatterComponent.isInitialized() &&
 				event.key.toLowerCase() === 'c' &&
 				!event.repeat &&
 				!event.isComposing &&
@@ -868,7 +844,7 @@
 					target.matches('input, textarea, select') || target.isContentEditable
 				))
 			) {
-				timelineOpen = !timelineOpen;
+				chatterComponent.toggle();
 				event.preventDefault();
 				return;
 			}
@@ -1104,66 +1080,6 @@
 			delete next[id];
 			bubbleOverflowById = next;
 		});
-	}
-
-	function observeTimelineContent(node: HTMLElement, id: string) {
-		const update = () => {
-			timelineOverflowById = {
-				...timelineOverflowById,
-				[id]: node.scrollHeight > node.clientHeight + 1
-			};
-		};
-		const observer = new ResizeObserver(update);
-		observer.observe(node);
-		update();
-
-		return {
-			destroy() {
-				observer.disconnect();
-				const next = { ...timelineOverflowById };
-				delete next[id];
-				timelineOverflowById = next;
-			}
-		};
-	}
-
-	function observeTimelineEntry(node: HTMLElement, id: string) {
-		const update = () => {
-			const height = node.getBoundingClientRect().height;
-			if (height <= 0) return;
-			timelineEntryHeights = {
-				...timelineEntryHeights,
-				[id]: height
-			};
-		};
-		const observer = new ResizeObserver(update);
-		observer.observe(node);
-		update();
-
-		return {
-			destroy() {
-			observer.disconnect();
-			const next = { ...timelineEntryHeights };
-			delete next[id];
-			timelineEntryHeights = next;
-		}
-		};
-	}
-
-	function observeTimelineVisibleArea(node: HTMLElement) {
-		const update = () => {
-			timelineAvailableHeight = Math.max(0, node.clientHeight - 14);
-		};
-		const observer = new ResizeObserver(update);
-		observer.observe(node);
-		update();
-
-		return {
-			destroy() {
-				observer.disconnect();
-				timelineAvailableHeight = 0;
-			}
-		};
 	}
 
 	function isInsideFieldArea(point: WorldPoint) {
@@ -1717,16 +1633,6 @@
 		}
 	}
 
-	function nextSpeechType(speechType: SpeechType): SpeechType {
-		const index = SPEECH_TYPE_ORDER.indexOf(speechType);
-		return SPEECH_TYPE_ORDER[(index + 1) % SPEECH_TYPE_ORDER.length];
-	}
-
-	function cycleSpeechType(): void {
-		if (composerSubmissionInProgress) return;
-		selectedSpeechType = nextSpeechType(selectedSpeechType);
-	}
-
 	function setComposerPreferredHeight(height: number): void {
 		composerPreferredHeight = height;
 	}
@@ -1748,42 +1654,11 @@
 		setDevTraceReplies([]);
 		setEffectiveTraceRoots([]);
 		closeTraceConversation();
-		timelineOverflowById = {};
-		timelineEntryHeights = {};
-		timelineAvailableHeight = 0;
+		chatterComponent.resetMeasurements();
 		lastPlacedAnchorById = {};
 		lastVisibilityKey = null;
 		colorByPubkey = {};
 		setPresence(resetDevWorldPresence(FIELD, Date.now()));
-	}
-
-	function seedDevRecentMessageTimelineFixture(): void {
-		if (!devWorldSandboxEnabled) return;
-		const now = Math.floor(Date.now() / 1000);
-		const activePubkeys = ['0', '1', '2', 'a', 'b', 'c', 'd', 'e'].map((prefix) => prefix.repeat(64));
-		const activePubkey = activePubkeys[0];
-		const outsidePubkey = 'f'.repeat(64);
-		setPresence(createPresenceState(FIELD, Date.now(), [
-			{ id: DEV_WORLD_SELF_ID, position: { x: 7, y: 3 } },
-			...activePubkeys.map((id, index) => ({
-				id,
-				position: { x: 8 + (index % 4), y: 2 + Math.floor(index / 4) }
-			}))
-		]));
-		const messages: ParsedWorldMessage[] = Array.from({ length: 24 }, (_, index) => ({
-			id: index === 23 ? 'dev-timeline-duplicate' : `dev-timeline-${String(index).padStart(2, '0')}`,
-			pubkey: index === 21 ? outsidePubkey : index === 22 ? DEV_WORLD_SELF_ID : activePubkeys[index % activePubkeys.length],
-			createdAt: now - Math.floor((23 - index) / 3),
-			content: index === 10
-				? 'line 1\nline 2\nline 3\nline 4\nline 5\nline 6'
-				: index === 11 || index === 12
-					? 'same content, different event'
-					: `timeline message ${index + 1}`,
-			speechType: index % 3 === 0 ? 'shout' : index % 3 === 1 ? 'monologue' : 'normal',
-			position: { x: 1, y: 1 }
-		}));
-		messages.push({ ...messages[22], id: 'dev-timeline-duplicate', content: 'duplicate event ID' });
-		recentMessageTimeline = createRecentMessageTimeline(messages);
 	}
 
 	function traceLightWorldPosition(position: { x: number; y: number }, occupied: boolean): WorldPoint {
@@ -1794,329 +1669,9 @@
 		};
 	}
 
-	function seedDevTraceLightFixture(): void {
-		if (!devWorldSandboxEnabled) return;
-		const nowMs = Date.now();
-		const now = Math.floor(nowMs / 1000);
-		const livePubkey = 'f'.repeat(64);
-		setPresence(createPresenceState(FIELD, nowMs, [
-			{ id: DEV_WORLD_SELF_ID, position: { x: 7, y: 3 } },
-			{ id: livePubkey, position: { x: 9, y: 4 } }
-		]));
-		conversationState = receiveMessage(conversationState, {
-			id: 'dev-trace-live-message',
-			pubkey: livePubkey,
-			content: 'live bubble fixed while a trace bubble is added nearby',
-			createdAt: nowMs
-		}, { isSpeakerVisible: true, duration: 60_000, now: nowMs });
-		setEffectiveTraceRoots([
-			{
-				id: '1'.repeat(64), pubkey: 'a'.repeat(64), createdAt: now,
-				content: 'out-of-range trace root', speechType: 'normal', position: { x: 2, y: 2 }
-			},
-			{
-				id: '2'.repeat(64), pubkey: 'b'.repeat(64), createdAt: now,
-				content: 'trace-only root near the viewer', speechType: 'shout', position: { x: 8, y: 4 }
-			},
-			{
-				id: '3'.repeat(64), pubkey: 'c'.repeat(64), createdAt: now - 2,
-				content: 'root beside the current participant', speechType: 'monologue', position: { x: 7, y: 3 }
-			},
-			{
-				id: '4'.repeat(64), pubkey: 'd'.repeat(64), createdAt: now - 1,
-				content: 'newest root on an available movement cell', speechType: 'normal', position: { x: 8, y: 3 }
-			}
-		]);
-	}
-
-	function devTraceReply(options: Readonly<{
-		id: string;
-		pubkey: string;
-		createdAt: number;
-		content: string;
-		speechType: SpeechType;
-		position: { x: number; y: number };
-		parentId?: string;
-		parentKind?: 42 | 1111;
-		parentPubkey?: string;
-	}>): ParsedTraceReply {
-		const rootId = '2'.repeat(64);
-		const rootPubkey = 'b'.repeat(64);
-		return {
-			id: options.id,
-			pubkey: options.pubkey,
-			createdAt: options.createdAt,
-			content: options.content,
-			speechType: options.speechType,
-			rootId,
-			rootPubkey,
-			parentId: options.parentId ?? rootId,
-			parentKind: options.parentKind ?? 42,
-			parentPubkey: options.parentPubkey ?? rootPubkey
-		};
-	}
-
-	function seedDevTraceReplyFixture(): void {
-		if (!devWorldSandboxEnabled) return;
-		const now = Math.floor(Date.now() / 1000);
-		const sameCellAuthor = '6'.repeat(64);
-		const sameCellNewest = devTraceReply({
-			id: '7'.repeat(64), pubkey: sameCellAuthor, createdAt: now - 1,
-			content: 'newest same-cell direct reply', speechType: 'normal', position: { x: 6, y: 4 }
-		});
-		setDevTraceReplies([
-			devTraceReply({
-				id: '6'.repeat(64), pubkey: '5'.repeat(64), createdAt: now - 2,
-				content: 'older same-cell direct reply', speechType: 'normal', position: { x: 6, y: 4 }
-			}),
-			sameCellNewest,
-			devTraceReply({
-				id: '8'.repeat(64), pubkey: '8'.repeat(64), createdAt: now,
-				content: 'shout reply beside an actual participant', speechType: 'shout', position: { x: 9, y: 4 }
-			}),
-			devTraceReply({
-				id: '9'.repeat(64), pubkey: '9'.repeat(64), createdAt: now,
-				content: 'monologue reply sharing the root cell', speechType: 'monologue', position: { x: 8, y: 4 }
-			}),
-			devTraceReply({
-				id: 'a'.repeat(64), pubkey: 'a'.repeat(64), createdAt: now,
-				content: 'offscreen reply body must stay hidden', speechType: 'normal', position: { x: 15, y: 7 }
-			}),
-			devTraceReply({
-				id: 'b'.repeat(64), pubkey: 'b'.repeat(64), createdAt: now,
-				content: 'deeper branch reply', speechType: 'normal', position: { x: 7, y: 4 },
-				parentId: sameCellNewest.id, parentKind: 1111, parentPubkey: sameCellNewest.pubkey
-			}),
-			devTraceReply({
-				id: 'd'.repeat(64), pubkey: 'd'.repeat(64), createdAt: now + 2,
-				content: 'newest same-author grandchild', speechType: 'shout', position: { x: 8, y: 4 },
-				parentId: 'b'.repeat(64), parentKind: 1111, parentPubkey: 'b'.repeat(64)
-			}),
-			devTraceReply({
-				id: 'e'.repeat(64), pubkey: 'd'.repeat(64), createdAt: now + 1,
-				content: 'older same-author grandchild', speechType: 'normal', position: { x: 8, y: 4 },
-				parentId: 'b'.repeat(64), parentKind: 1111, parentPubkey: 'b'.repeat(64)
-			}),
-			devTraceReply({
-				id: 'f'.repeat(64), pubkey: 'e'.repeat(64), createdAt: now + 3,
-				content: 'great-grandchild reply', speechType: 'monologue', position: { x: 9, y: 4 },
-				parentId: 'd'.repeat(64), parentKind: 1111, parentPubkey: 'd'.repeat(64)
-			})
-		]);
-	}
-
 	function injectDevTraceLiveReply(): void {
 		if (!devTraceReplyFixtureEnabled || devTraceReplies.some((reply) => reply.id === 'c'.repeat(64))) return;
-		setDevTraceReplies([...devTraceReplies, devTraceReply({
-			id: 'c'.repeat(64), pubkey: 'c'.repeat(64), createdAt: Math.floor(Date.now() / 1000) + 1,
-			content: 'live newest same-cell direct reply', speechType: 'normal', position: { x: 6, y: 4 }
-		})]);
-	}
-
-	function seedDevSpeechNormalFixture(): void {
-		if (!devWorldSandboxEnabled) return;
-		const now = Date.now();
-		const participantIds = ['0', 'a', 'b', 'c', 'd', 'e', 'f'].map((prefix) => prefix.repeat(64));
-		setPresence(createPresenceState(FIELD, now, [
-			{ id: DEV_WORLD_SELF_ID, position: { x: 7, y: 3 } },
-			...participantIds.map((id, index) => ({ id, position: { x: index * 2 + 1, y: 2 } }))
-		]));
-		const duration = 60_000;
-		const allParticipantIds = [DEV_WORLD_SELF_ID, ...participantIds];
-		const mergedContent = 'merged showcase fixture';
-		for (const [index, pubkey] of allParticipantIds.slice(0, 2).entries()) {
-			conversationState = receiveMessage(conversationState, {
-				id: `dev-speech-showcase-merged-message-${index}`,
-				pubkey,
-				content: mergedContent,
-				createdAt: now
-			}, { isSpeakerVisible: true, duration, now });
-		}
-		for (const [index, pubkey] of allParticipantIds.entries()) {
-			conversationState = receiveMessage(conversationState, {
-				id: `dev-speech-showcase-normal-message-${index}`,
-				pubkey,
-				content: `normal fixture ${index + 1}`,
-				createdAt: now
-			}, { isSpeakerVisible: true, duration, now });
-		}
-	}
-
-	function seedDevSpeechMergedFixture(
-		mergedMemberCount: number,
-		mergedContent = 'merged fixture',
-		mergedSpeechType: SpeechType = 'normal'
-	): void {
-		if (!devWorldSandboxEnabled) return;
-		const now = Date.now();
-		const normalPubkey = 'a'.repeat(64);
-		const mergedPubkeys = ['b', 'c', 'd', 'e']
-			.slice(0, mergedMemberCount)
-			.map((prefix) => prefix.repeat(64));
-		const mergedPositions = mergedMemberCount === 2
-			? [6, 10]
-			: mergedMemberCount === 3
-				? [5, 8, 11]
-				: [4, 6, 10, 12];
-		setPresence(createPresenceState(FIELD, now, [
-			{ id: DEV_WORLD_SELF_ID, position: { x: 7, y: 3 } },
-			{ id: normalPubkey, position: { x: 4, y: 2 } },
-			...mergedPubkeys.map((id, index) => ({ id, position: { x: mergedPositions[index], y: 2 } }))
-		]));
-		const duration = 60_000;
-		const normalMessage = {
-			id: 'dev-speech-normal-message', pubkey: normalPubkey, content: 'normal fixture', createdAt: now
-		} as const;
-		const mergedMessage = {
-			id: 'dev-speech-merged-message-a', pubkey: mergedPubkeys[0], content: mergedContent, speechType: mergedSpeechType, createdAt: now
-		} as const;
-		conversationState = receiveMessage(conversationState, normalMessage, { isSpeakerVisible: true, duration, now });
-		conversationState = receiveMessage(conversationState, mergedMessage, { isSpeakerVisible: true, duration, now });
-		for (const [index, pubkey] of mergedPubkeys.slice(1).entries()) {
-			conversationState = receiveMessage(conversationState, {
-				...mergedMessage,
-				id: `dev-speech-merged-message-${String.fromCharCode(98 + index)}`,
-				pubkey
-			}, { isSpeakerVisible: true, duration, now });
-		}
-	}
-
-	function seedDevSpeechTypeFixture(): void {
-		if (!devWorldSandboxEnabled) return;
-		const now = Date.now();
-		const normalPubkey = 'a'.repeat(64);
-		const singleShoutPubkey = 'f'.repeat(64);
-		const singleMonologuePubkey = '9'.repeat(64);
-		const shoutPubkeys = ['b', 'c'].map((prefix) => prefix.repeat(64));
-		const monologuePubkeys = ['d', 'e'].map((prefix) => prefix.repeat(64));
-		setPresence(createPresenceState(FIELD, now, [
-			{ id: DEV_WORLD_SELF_ID, position: { x: 7, y: 3 } },
-			{ id: normalPubkey, position: { x: 4, y: 2 } },
-			{ id: singleShoutPubkey, position: { x: 11, y: 2 } },
-			{ id: singleMonologuePubkey, position: { x: 11, y: 1 } },
-			...shoutPubkeys.map((id, index) => ({ id, position: { x: index === 0 ? 6 : 8, y: 2 } })),
-			...monologuePubkeys.map((id, index) => ({ id, position: { x: index === 0 ? 6 : 8, y: 1 } }))
-		]));
-		const duration = 60_000;
-		const addMessage = (id: string, pubkey: string, content: string, speechType: SpeechType) => {
-			conversationState = receiveMessage(conversationState, {
-				id, pubkey, content, speechType, createdAt: now
-			}, { isSpeakerVisible: true, duration, now });
-		};
-		addMessage('dev-speech-types-normal', normalPubkey, 'normal fixture', 'normal');
-		addMessage('dev-speech-types-single-shout', singleShoutPubkey, 'single shout fixture', 'shout');
-		addMessage('dev-speech-types-single-monologue', singleMonologuePubkey, 'single monologue fixture', 'monologue');
-		addMessage('dev-speech-types-shout-a', shoutPubkeys[0], 'shout fixture', 'shout');
-		addMessage('dev-speech-types-shout-b', shoutPubkeys[1], 'shout fixture', 'shout');
-		addMessage('dev-speech-types-monologue-a', monologuePubkeys[0], 'monologue fixture', 'monologue');
-		addMessage('dev-speech-types-monologue-b', monologuePubkeys[1], 'monologue fixture', 'monologue');
-	}
-
-	function seedDevSpeechNormalSizeFixture(): void {
-		if (!devWorldSandboxEnabled) return;
-		const now = Date.now();
-		const messages = [
-			{ pubkey: 'a'.repeat(64), position: { x: 5, y: 2 }, content: 'short' },
-			{ pubkey: 'b'.repeat(64), position: { x: 7, y: 2 }, content: 'medium bubble message' },
-			{
-				pubkey: 'c'.repeat(64),
-				position: { x: 9, y: 2 },
-				content: 'Long normal bubble content grows until it reaches the maximum width and wraps naturally.'
-			}
-		] as const;
-		setPresence(createPresenceState(FIELD, now, [
-			{ id: DEV_WORLD_SELF_ID, position: { x: 7, y: 3 } },
-			...messages.map(({ pubkey, position }) => ({ id: pubkey, position }))
-		]));
-		const duration = 60_000;
-		for (const [index, { pubkey, content }] of messages.entries()) {
-			conversationState = receiveMessage(conversationState, {
-				id: `dev-speech-normal-size-${index}`,
-				pubkey,
-				content,
-				createdAt: now
-			}, { isSpeakerVisible: true, duration, now });
-		}
-	}
-
-	function seedDevSpeechComparisonFixture(): void {
-		if (!devWorldSandboxEnabled) return;
-		const now = Date.now();
-		const content = 'The same representative message is rendered at two bubble scales to compare wrapping behavior.';
-		const normalPubkey = 'a'.repeat(64);
-		const mergedPubkeys = ['b', 'c'].map((prefix) => prefix.repeat(64));
-		setPresence(createPresenceState(FIELD, now, [
-			{ id: DEV_WORLD_SELF_ID, position: { x: 7, y: 3 } },
-			{ id: normalPubkey, position: { x: 5, y: 2 } },
-			...mergedPubkeys.map((id, index) => ({ id, position: { x: index === 0 ? 6 : 8, y: 2 } }))
-		]));
-		const duration = 60_000;
-		conversationState = receiveMessage(conversationState, {
-			id: 'dev-speech-comparison-normal',
-			pubkey: normalPubkey,
-			content,
-			speechType: 'shout',
-			createdAt: now
-		}, { isSpeakerVisible: true, duration, now });
-		for (const [index, pubkey] of mergedPubkeys.entries()) {
-			conversationState = receiveMessage(conversationState, {
-				id: `dev-speech-comparison-merged-${index}`,
-				pubkey,
-				content,
-				createdAt: now
-			}, { isSpeakerVisible: true, duration, now });
-		}
-	}
-
-	function seedDevSpeechFixture(normalContent: string, mergedContent: string): void {
-		if (!devWorldSandboxEnabled) return;
-		const now = Date.now();
-		const normalPubkey = 'a'.repeat(64);
-		const mergedPubkeys = ['b', 'c'].map((prefix) => prefix.repeat(64));
-		setPresence(createPresenceState(FIELD, now, [
-			{ id: DEV_WORLD_SELF_ID, position: { x: 7, y: 3 } },
-			{ id: normalPubkey, position: { x: 5, y: 2 } },
-			...mergedPubkeys.map((id, index) => ({ id, position: { x: index === 0 ? 6 : 8, y: 2 } }))
-		]));
-		const duration = 60_000;
-		conversationState = receiveMessage(conversationState, {
-			id: 'dev-speech-line-clamp-normal',
-			pubkey: normalPubkey,
-			content: normalContent,
-			createdAt: now
-		}, { isSpeakerVisible: true, duration, now });
-		for (const [index, pubkey] of mergedPubkeys.entries()) {
-			conversationState = receiveMessage(conversationState, {
-				id: `dev-speech-line-clamp-merged-${index}`,
-				pubkey,
-				content: mergedContent,
-				createdAt: now
-			}, { isSpeakerVisible: true, duration, now });
-		}
-	}
-
-	function seedDevSpeechLinebreakFixture(): void {
-		seedDevSpeechFixture('normal line 1\nnormal line 2\nnormal line 3', 'merged line 1\nmerged line 2\nmerged line 3');
-	}
-
-	function seedDevSpeechLinebreakFiveFixture(): void {
-		seedDevSpeechFixture(
-			'normal line 1\nnormal line 2\nnormal line 3\nnormal line 4\nnormal line 5',
-			'merged line 1\nmerged line 2\nmerged line 3\nmerged line 4\nmerged line 5'
-		);
-	}
-
-	function seedDevSpeechLongFixture(): void {
-		const normalContent = 'Normal bubble message that wraps repeatedly inside the speech bubble width. '.repeat(8).trim();
-		const mergedContent = 'Merged bubble message that wraps repeatedly inside the speech bubble width. '.repeat(8).trim();
-		seedDevSpeechFixture(normalContent, mergedContent);
-	}
-
-	function seedDevSpeechLinebreakOverflowFixture(): void {
-		seedDevSpeechFixture(
-			'normal line 1\nnormal line 2\nnormal line 3\nnormal line 4\nnormal line 5\nnormal line 6',
-			'merged line 1\nmerged line 2\nmerged line 3\nmerged line 4\nmerged line 5\nmerged line 6'
-		);
+		setDevTraceReplies([...devTraceReplies, createDevTraceLiveReply(Date.now())]);
 	}
 
 	function openProfile(characterId: string, trigger: HTMLButtonElement): void {
@@ -2124,39 +1679,9 @@
 		pushState('', { ...page.state, profileCharacterId: characterId });
 	}
 
-	function timelineCharacter(pubkey: string): Character {
-		return pubkey === DEV_WORLD_SELF_ID
-			? getDevWorldCharacter(selectedCharacterId)
-			: deriveCharacterFromPubkey(pubkey, CHARACTER_CATALOG);
-	}
-
-	function timelineTone(pubkey: string): AvatarColor | null {
-		return colorByPubkey[pubkey] ?? null;
-	}
-
-	$: timelineVisibleMessageCount = (() => {
-		let usedHeight = 0;
-		let count = 0;
-		for (const message of recentMessageTimeline) {
-			const height = timelineEntryHeights[message.id];
-			if (height === undefined || usedHeight + height > timelineAvailableHeight + 1) break;
-			usedHeight += height;
-			count += 1;
-		}
-		return count;
-	})();
-	$: timelineVisibleMessages = recentMessageTimeline.slice(0, timelineVisibleMessageCount);
 
 	function receiveTimelineMessage(message: ParsedWorldMessage): void {
 		recentMessageTimeline = addRecentMessage(recentMessageTimeline, message);
-	}
-
-	function showRecentMessageTimeline(): void {
-		timelineOpen = true;
-	}
-
-	function hideRecentMessageTimeline(): void {
-		timelineOpen = false;
 	}
 
 	function handleProfileOpenChange(open: boolean): void {
@@ -2310,70 +1835,13 @@
 			aria-hidden="true"
 		>
 		</div>
-		{#if timelineInitialized && timelineOpen}
-			<aside class="recent-message-timeline" aria-label="Chatter">
-				<header class="timeline-header">
-					<button
-						class="timeline-hide-control"
-						type="button"
-						aria-label="Hide Chatter"
-						aria-keyshortcuts="C"
-						on:click={hideRecentMessageTimeline}
-					>×</button>
-					<h2>Chatter</h2>
-				</header>
-				<div class="timeline-visible-entries" use:observeTimelineVisibleArea>
-					{#each timelineVisibleMessages as message (message.id)}
-						{@const character = timelineCharacter(message.pubkey)}
-						{@const tone = timelineTone(message.pubkey)}
-						<article
-							class="timeline-entry"
-							data-timeline-event-id={message.id}
-							data-timeline-pubkey={message.pubkey}
-							data-timeline-created-at={message.createdAt}
-							data-timeline-tone={tone ?? 'default'}
-						>
-							<div class="timeline-content-shell">
-								<div class="timeline-text" use:observeTimelineContent={message.id}>
-									<button
-										class={`timeline-name${tone ? ` tone-${tone}` : ''}`}
-										type="button"
-										aria-label={`${character.name} のプロフィールを開く`}
-										on:click={(event) => openProfile(character.characterId, event.currentTarget as HTMLButtonElement)}
-									>{character.name}</button>
-									<span class="timeline-content">{message.content}</span>
-								</div>
-								{#if timelineOverflowById[message.id]}
-									<span class="timeline-ellipsis" aria-hidden="true">…</span>
-								{/if}
-							</div>
-						</article>
-					{/each}
-				</div>
-				<div class="timeline-measurements" aria-hidden="true">
-					{#each recentMessageTimeline as message (message.id)}
-						{@const character = timelineCharacter(message.pubkey)}
-						{@const tone = timelineTone(message.pubkey)}
-						<article class="timeline-entry" use:observeTimelineEntry={message.id}>
-							<div class="timeline-content-shell">
-								<div class="timeline-text">
-									<span class={`timeline-name${tone ? ` tone-${tone}` : ''}`}>{character.name}</span>
-									<span class="timeline-content">{message.content}</span>
-								</div>
-							</div>
-						</article>
-					{/each}
-				</div>
-			</aside>
-		{:else if timelineInitialized}
-			<button
-				class="timeline-show-control"
-				type="button"
-				aria-label="Show Chatter"
-				aria-keyshortcuts="C"
-				on:click={showRecentMessageTimeline}
-			>Chatter</button>
-		{/if}
+		<Chatter
+			bind:this={chatterComponent}
+			messages={recentMessageTimeline}
+			tones={colorByPubkey}
+			{selectedCharacterId}
+			onOpenProfile={openProfile}
+		/>
 		<div
 			class="field-area"
 			style={`top: ${fieldAreaBounds.y}px; left: ${fieldAreaBounds.x}px; width: ${fieldAreaBounds.width}px; height: ${fieldAreaBounds.height}px;`}
@@ -2555,58 +2023,31 @@
 	/>
 
 	{#if devWorldSandboxEnabled}
-		<div class="sandbox-controls" aria-label="DEV sandbox controls">
-			<label class="sandbox-character-picker">
-				<span>Character</span>
-				<select aria-label="Select sandbox character" value={selectedCharacterId} on:change={(event) => selectSandboxCharacter((event.currentTarget as HTMLSelectElement).value)}>
-					{#each CHARACTER_CATALOG as character (character.characterId)}
-						<option value={character.characterId}>{character.characterId} — {character.name}</option>
-					{/each}
-				</select>
-			</label>
-			{#if devTraceReplyFixtureEnabled}
-				<button
-					class="sandbox-live-reply"
-					type="button"
-					disabled={devTraceReplies.some((reply) => reply.id === 'c'.repeat(64))}
-					on:click={injectDevTraceLiveReply}
-				>Add live trace reply</button>
-			{/if}
-			<button class="sandbox-reset" type="button" on:click={resetSandbox}>Reset sandbox</button>
-		</div>
+		<DevWorldControls
+			{selectedCharacterId}
+			traceReplyFixtureEnabled={devTraceReplyFixtureEnabled}
+			canAddLiveReply={!devTraceReplies.some((reply) => reply.id === 'c'.repeat(64))}
+			onCharacterChange={selectSandboxCharacter}
+			onReset={resetSandbox}
+			onAddLiveReply={injectDevTraceLiveReply}
+		/>
 	{:else if selfPositionWriteState.kind === 'retryable' && !isWorldSelfActive}
-		<div class="world-controls" aria-label="World entry controls">
-			<button class="world-entry-retry" type="button" on:click={retryWorldEntry}>Enter field again</button>
-		</div>
+		<WorldEntryControls onRetry={retryWorldEntry} />
 	{/if}
 
 	{#if runtimeMode === 'relay' || devTraceReplyFixtureEnabled}
-		<div class="composer-dock" aria-label="Message composer">
-			<div class="composer-dock-content">
-				<button
-					class="speech-type-toggle"
-					type="button"
-					data-speech-type={selectedSpeechType}
-					aria-label={`発言タイプ: ${SPEECH_TYPE_LABELS[selectedSpeechType]}（クリックで${SPEECH_TYPE_LABELS[nextSpeechType(selectedSpeechType)]}へ）`}
-					title={`発言タイプ: ${SPEECH_TYPE_LABELS[selectedSpeechType]}。クリックで${SPEECH_TYPE_LABELS[nextSpeechType(selectedSpeechType)]}へ`}
-					disabled={composerSubmissionInProgress}
-					on:click={cycleSpeechType}
-				>
-					<span aria-hidden="true">{SPEECH_TYPE_LABELS[selectedSpeechType]}</span>
-				</button>
-				<div class="composer-editor-slot">
-					<HostOwnedComposerLite
-						bind:this={composerComponent}
-						submitContent={submitComposerContent}
-						desiredContext={composerDesiredContext}
-						loadPreview={loadComposerPreview}
-						onPreviewClear={clearComposerReply}
-						onEditorEmptyChange={handleComposerEditorEmptyChange}
-						onPreferredHeightChange={setComposerPreferredHeight}
-					/>
-				</div>
-			</div>
-		</div>
+		<ComposerDock
+			bind:this={composerComponent}
+			{selectedSpeechType}
+			submissionInProgress={composerSubmissionInProgress}
+			onSpeechTypeChange={(next) => { selectedSpeechType = next; }}
+			submitContent={submitComposerContent}
+			desiredContext={composerDesiredContext}
+			loadPreview={loadComposerPreview}
+			onPreviewClear={clearComposerReply}
+			onEditorEmptyChange={handleComposerEditorEmptyChange}
+			onPreferredHeightChange={setComposerPreferredHeight}
+		/>
 	{/if}
 
 </main>
@@ -2641,13 +2082,10 @@
 
 	.status-panel,
 	.footer-note,
-	.camera-chip,
-	.sandbox-controls,
-	.world-controls {
+	.camera-chip {
 		position: absolute;
 		z-index: 10;
 	}
-
 
 	.brand-lockup {
 		display: flex;
@@ -2726,76 +2164,6 @@
 		padding-bottom: var(--composer-reserved-height);
 	}
 
-	.composer-dock {
-		position: fixed;
-		bottom: var(--composer-keyboard-inset);
-		left: 0;
-		right: 0;
-		z-index: 12;
-		height: var(--composer-dock-visible-height, var(--composer-dock-height));
-		padding: var(--composer-dock-padding-block) 16px
-			calc(var(--composer-dock-padding-block) + env(safe-area-inset-bottom));
-		border-top: var(--composer-dock-border-width) solid rgba(57, 67, 64, 0.14);
-		background: rgba(245, 241, 233, 0.98);
-	}
-
-	.composer-keyboard-visible .composer-dock {
-		--composer-dock-visible-height: calc(var(--composer-dock-height) - env(safe-area-inset-bottom));
-		padding-bottom: var(--composer-dock-padding-block);
-	}
-
-	.composer-dock-content {
-		display: flex;
-		width: min(720px, 100%);
-		height: 100%;
-		align-items: stretch;
-		gap: 8px;
-		margin: 0 auto;
-		min-width: 0;
-	}
-
-	.speech-type-toggle {
-		flex: 0 0 54px;
-		min-width: 0;
-		min-height: 0;
-		padding: 0 4px;
-		border: 1px solid rgba(57, 67, 64, 0.2);
-		border-radius: 12px;
-		background: rgba(255, 255, 255, 0.86);
-		box-shadow: 0 5px 12px rgba(58, 70, 61, 0.1);
-		color: #3f4a47;
-		font-size: 10px;
-		font-weight: 800;
-		line-height: 1.15;
-		white-space: normal;
-	}
-
-	.speech-type-toggle:hover:not(:disabled) {
-		background: rgba(255, 255, 255, 0.98);
-	}
-
-	.speech-type-toggle:disabled {
-		cursor: wait;
-		opacity: 0.58;
-	}
-
-	.speech-type-toggle:focus-visible {
-		outline: 3px solid var(--color-focus-ring);
-		outline-offset: 2px;
-	}
-
-	.composer-editor-slot {
-		flex: 1 1 auto;
-		min-width: 0;
-		min-height: 0;
-	}
-
-	.composer-dock-content :global(.host-owned-composer) {
-		width: 100%;
-		height: 100%;
-		min-width: 0;
-	}
-
 	.field-viewport::before {
 		position: absolute;
 		inset: 0;
@@ -2804,181 +2172,9 @@
 		content: '';
 	}
 
-	.recent-message-timeline {
-		position: absolute;
-		top: 0;
-		bottom: 0;
-		left: 12px;
-		z-index: 9;
-		display: flex;
-		width: min(320px, calc(100% - 32px));
-		flex-direction: column;
-		border-radius: 18px;
-		background: transparent;
-		box-shadow: none;
-		color: #374345;
-		pointer-events: auto;
-	}
-
-	.timeline-header {
-		display: flex;
-		align-items: center;
-		justify-content: flex-start;
-		padding: 16px 12px 10px 0;
-		border-bottom: 1px solid rgba(57, 67, 64, 0.12);
-		flex: 0 0 auto;
-		gap: 12px;
-	}
-
-	.timeline-header h2 {
-		margin: 0;
-		color: #fff;
-		font-size: 16px;
-		font-weight: 700;
-		letter-spacing: 0.1em;
-		text-transform: uppercase;
-		-webkit-text-stroke: 0;
-		text-shadow: 0 1px 1px rgba(0, 0, 0, 0.9);
-	}
-
-	.timeline-hide-control,
-	.timeline-show-control {
-		border: 1px solid rgba(57, 67, 64, 0.16);
-		border-radius: 999px;
-		background: rgba(255, 255, 255, 0.78);
-		box-shadow: 0 4px 10px rgba(58, 70, 61, 0.1);
-		color: #596662;
-		font-weight: 700;
-	}
-
-	.timeline-hide-control {
-		display: grid;
-		width: 44px;
-		height: 44px;
-		padding: 0;
-		place-items: center;
-		font-size: 30px;
-		line-height: 1;
-	}
-
-	.timeline-visible-entries {
-		flex: 1 1 auto;
-		min-height: 0;
-		padding: 0;
-		overflow: visible;
-	}
-
-	.timeline-measurements {
-		position: absolute;
-		top: 0;
-		right: 8px;
-		left: 8px;
-		visibility: hidden;
-		pointer-events: none;
-	}
-
 	/* .timeline-entry {
 		padding: 10px 8px 11px;
 	} */
-
-	.timeline-entry:last-child { border-bottom: 0; }
-
-	.timeline-name {
-		display: inline;
-		max-width: 100%;
-		padding: 0;
-		border: 0;
-		background: transparent;
-		appearance: none;
-		color: #fff;
-		font-family: inherit;
-		font-weight: 700;
-		line-height: 1.45;
-		margin-right: 0.35em;
-		letter-spacing: 0.02em;
-		text-align: left;
-		cursor: pointer;
-		vertical-align: top;
-		-webkit-text-stroke: 0;
-		text-shadow: 0 1px 1px rgba(0, 0, 0, 0.9);
-	}
-
-	.timeline-name.tone-coral { color: color-mix(in srgb, hsl(12, 96%, 42%) 70%, white 30%); }
-	.timeline-name.tone-lavender { color: color-mix(in srgb, hsl(250, 72%, 42%) 70%, white 30%); }
-	.timeline-name.tone-mint { color: color-mix(in srgb, hsl(145, 68%, 31%) 70%, white 30%); }
-	.timeline-name.tone-yellow { color: color-mix(in srgb, hsl(48, 82%, 34%) 70%, white 30%); }
-	.timeline-name.tone-sky { color: color-mix(in srgb, hsl(188, 72%, 32%) 70%, white 30%); }
-	.timeline-name.tone-peach { color: color-mix(in srgb, hsl(28, 82%, 38%) 70%, white 30%); }
-	.timeline-name.tone-rose { color: color-mix(in srgb, hsl(340, 72%, 40%) 70%, white 30%); }
-	.timeline-name.tone-blue { color: color-mix(in srgb, hsl(210, 72%, 37%) 70%, white 30%); }
-
-	.timeline-name:hover,
-	.timeline-name:focus-visible {
-		border-radius: 3px;
-		background: rgba(255, 255, 255, 0.18);
-	}
-
-	.timeline-content-shell {
-		position: relative;
-		min-width: 0;
-	}
-
-	.timeline-text {
-		max-height: calc(1.45em * 5);
-		overflow: hidden;
-		color: #fff;
-		font-size: 18px;
-		letter-spacing: 0.01em;
-		line-height: 1.45;
-		padding: 6px 0;
-		overflow-wrap: anywhere;
-		white-space: pre-line;
-		-webkit-text-stroke: 0;
-		text-shadow: 0 1px 1px rgba(0, 0, 0, 0.9);
-
-	 @media (width <= 700px) {
-			font-size: 14px;
-		}
-	}
-
-	.timeline-content {
-		display: inline;
-		color: inherit;
-		font: inherit;
-	}
-
-	.timeline-ellipsis {
-		position: absolute;
-		right: 0;
-		bottom: 0;
-		padding-left: 0.35em;
-		background: transparent;
-		color: #fff;
-		font-size: 13px;
-		font-weight: 700;
-		line-height: 1.45;
-		-webkit-text-stroke: 0;
-		text-shadow: 0 1px 1px rgba(0, 0, 0, 0.9);
-	}
-
-	.timeline-show-control {
-		position: absolute;
-		top: 16px;
-		left: 12px;
-		z-index: 9;
-		min-height: 44px;
-		padding: 0 13px;
-		font-size: 16px;
-		letter-spacing: 0.03em;
-		pointer-events: auto;
-	}
-
-	.timeline-hide-control:focus-visible,
-	.timeline-name:focus-visible,
-	.timeline-show-control:focus-visible {
-		outline: 3px solid var(--color-focus-ring);
-		outline-offset: 2px;
-	}
 
 	.field-scene {
 		position: absolute;
@@ -3333,89 +2529,6 @@
 		font-weight: 700;
 	}
 
-	.sandbox-controls {
-		bottom: 76px;
-		left: 50%;
-		z-index: 11;
-		display: flex;
-		align-items: center;
-		gap: 10px;
-		transform: translateX(-50%);
-	}
-
-	.world-controls {
-		bottom: 76px;
-		left: 50%;
-		z-index: 11;
-		transform: translateX(-50%);
-	}
-
-	.composer-available .world-controls,
-	.composer-available .sandbox-controls {
-		bottom: calc(var(--composer-dock-height) + 76px);
-	}
-
-	.sandbox-character-picker {
-		display: flex;
-		align-items: center;
-		gap: 6px;
-		color: #596662;
-		font-size: 10px;
-		font-weight: 800;
-		letter-spacing: 0.04em;
-	}
-
-	.sandbox-character-picker select {
-		max-width: 205px;
-		min-height: 38px;
-		padding: 0 9px;
-		border: 1px solid rgba(57, 67, 64, 0.2);
-		border-radius: 10px;
-		background: rgba(255, 255, 255, 0.86);
-		color: #3f4a47;
-		font: inherit;
-	}
-
-	.sandbox-reset,
-	.sandbox-live-reply,
-	.world-entry-retry {
-		border: 1px solid rgba(57, 67, 64, 0.2);
-		background: rgba(255, 255, 255, 0.86);
-		box-shadow: 0 5px 12px rgba(58, 70, 61, 0.14);
-		color: #3f4a47;
-		font-weight: 800;
-	}
-
-	.sandbox-reset,
-	.sandbox-live-reply {
-		min-height: 38px;
-		padding: 0 11px;
-		border-radius: 999px;
-		font-size: 10px;
-		letter-spacing: 0.04em;
-	}
-
-	.sandbox-live-reply:disabled {
-		opacity: 0.48;
-	}
-
-	.world-entry-retry {
-		min-height: 38px;
-		padding: 0 14px;
-		border-radius: 999px;
-		font-size: 10px;
-		font-weight: 800;
-		letter-spacing: 0.04em;
-	}
-
-	.sandbox-reset:focus-visible,
-	.sandbox-live-reply:focus-visible,
-	.world-entry-retry:focus-visible,
-	.sandbox-character-picker select:focus-visible {
-		outline: 3px solid var(--color-focus-ring);
-		outline-offset: 2px;
-	}
-
 	.footer-note {
 		bottom: 8px;
 		left: 50%;
@@ -3459,26 +2572,6 @@
 			right: 16px;
 			bottom: 24px;
 			font-size: 8px;
-		}
-
-		.sandbox-controls {
-			bottom: 76px;
-			flex-direction: column;
-			gap: 7px;
-		}
-
-		.world-controls {
-			bottom: 76px;
-		}
-
-		.sandbox-character-picker {
-			width: min(100vw - 32px, 280px);
-			justify-content: space-between;
-		}
-
-		.sandbox-character-picker select {
-			max-width: 210px;
-			flex: 1;
 		}
 
 		.footer-note {
