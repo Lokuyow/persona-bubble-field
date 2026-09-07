@@ -174,6 +174,7 @@
 	.host-owned-composer :global(ehagaki-composer) {
 		display: block;
 		height: 100%;
+		--ehagaki-accent-color: var(--color-accent);
 	}
 
 	.composer-load-error {
