@@ -103,6 +103,18 @@
 		isTracePresentationMeasured,
 		layoutTraceBubblePresentation
 	} from '$lib/traceBubblePresentation';
+	const resolveTraceBubbleLayout = (() => {
+		let previousLayout: ReturnType<typeof layoutTraceBubblePresentation> = null;
+		return (input: Parameters<typeof layoutTraceBubblePresentation>[0]) => {
+			if (!input.projection) {
+				previousLayout = null;
+				return null;
+			}
+			const next = layoutTraceBubblePresentation({ ...input, previousLayout });
+			previousLayout = next;
+			return next;
+		};
+	})();
 	import HostOwnedComposerLite from '$lib/HostOwnedComposerLite.svelte';
 	import { matchesComposerSubmit, type ComposerSubmitEnvelope } from '$lib/hostOwnedComposerContext';
 	import {
@@ -452,7 +464,7 @@
 		anchor: bubble.anchor, size: bubble.size, shape: bubble.shape,
 		members: bubble.members.map((member) => ({ id: member.id, target: tailTarget(member) }))
 	}));
-	$: traceTreeLayout = layoutTraceBubblePresentation({
+	$: traceTreeLayout = resolveTraceBubbleLayout({
 		projection: traceConversationProjection,
 		fixedBubbles: positionedVisibleBubbles,
 		bubbleSizes,

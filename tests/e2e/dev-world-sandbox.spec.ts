@@ -574,6 +574,19 @@ test.describe('DEV World Sandbox', () => {
 			await page.keyboard.press('Escape');
 			await expect(page.locator('[data-trace-current-reply-id]')).toHaveAttribute('data-trace-current-reply-id', 'f'.repeat(64));
 		});
+
+		test(`preserves existing Trace anchors when a direct reply is added on ${viewport.name}`, async ({ page }) => {
+			await page.setViewportSize(viewport);
+			await page.goto('/?devWorld=1&devTrace=replies');
+			if (viewport.name === 'desktop') await page.getByRole('button', { name: 'Hide Chatter' }).click();
+			await page.locator('[data-cell-position="8,4"]').click();
+			await expect(page.locator('.trace-root-card')).toHaveAttribute('data-trace-geometry-ready', 'ready');
+			const existing = page.locator('[data-trace-reply-id="' + '6'.repeat(64) + '"]');
+			const anchor = await existing.evaluate((card) => getComputedStyle(card).transform);
+			await page.getByRole('button', { name: 'Add live trace reply' }).click();
+			await expect(page.locator('[data-trace-reply-id="' + 'c'.repeat(64) + '"]')).toBeVisible();
+			await expect.poll(() => existing.evaluate((card) => getComputedStyle(card).transform)).toBe(anchor);
+		});
 	}
 	test('reselects the current reply without losing its draft, preserves it through profiles, and clears on range exit', async ({ page }) => {
 		await page.setViewportSize({ width: 1100, height: 850 });

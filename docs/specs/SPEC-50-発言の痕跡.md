@@ -64,6 +64,7 @@ rootを調査したら、NIP-22 reply historyを待たずにroot ghostと実際�
 - current=rootまたはimmediate parent=rootではroot bubbleをtree anchorとする。
 - 深いcurrentではhidden ancestorのUI node、仮想slot、connectorを生成せず、immediate parentを`bubbleSafeBounds`中央へreply card footprintで中央揃えしたvisible local cluster anchorとする。currentとdirect childrenは親のplaced cardから既定slotへ配置する。
 - direct child slotはcreatedAt昇順、event ID昇順で右下、左下、右上、左上、以後同順の外側ringとする。slot、clamp、collisionはauthor icon/nameを含むreply card footprintを使用し、同一anchorへ潰れる場合はranked slot/edge fallbackを選ぶ。
+- currentの変更やdirect replyの追加で再配置が必要になっても、表示中のTrace nodeのサイズとfootprintが変わらず、safe bounds内で維持できる場合は、そのnodeのanchorを維持する。新規node、サイズ変更、collisionまたはsafe bounds変更があるnodeは既存のslot/clamp/collision規則で再配置する。
 - compact rootとdeep immediate parentの間にはconnectorを描かない。connectorは表示中の実在する親子関係だけをcontinuous tapered relationとそのhaloで描く。root tailとrelationは、visible Trace surfaceの内側へ描画しない。
 - speech bodyはnative button、author icon/nameはsiblingのnative Profile buttonとする。Profile操作はselection、target、draftを変更しない。overflow / ellipsis / special shape用のpresentation measurementとplacement用のwrapper footprintは責務およびstate/reporting pathとして分離する。exact DOM measurement targetは実装詳細とし、現行presentationでは挙動、special surface geometry、tree placementを維持するため、両経路が同じreply card root矩形を使用してよい。
 
