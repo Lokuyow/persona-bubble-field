@@ -742,7 +742,15 @@ test.describe('Relay startup', () => {
 				await expect(client.locator('[data-trace-light-position="4,2"]')).toBeVisible();
 			};
 			const publish = async (content: string) => {
-				await selectRelayTraceCell(sender, '4,2');
+				const openRoot = sender.locator(`[data-trace-root-id="${trace.root.id}"]`);
+				if (await openRoot.isVisible()) {
+					// After the first publish, the open root keeps its conversation visible while
+					// its light and logical-cell trigger remain hidden. Re-select the root through
+					// its visible native button to establish the next reply target.
+					await openRoot.click();
+				} else {
+					await selectRelayTraceCell(sender, '4,2');
+				}
 				await expect(sender.getByLabel('Reply preview', { exact: true })).toHaveAttribute('data-reply-id', trace.root.id);
 				const editor = sender.getByRole('textbox', { name: '投稿エディター' });
 				await editor.fill(content);
