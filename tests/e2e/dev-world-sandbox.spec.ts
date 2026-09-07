@@ -560,6 +560,8 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.locator('[data-trace-light-position="7,3"]')).toHaveCount(1);
 		await expect(page.locator('[data-trace-light-position="8,4"]')).toHaveCount(1);
 		await expect(page.locator('[data-trace-light-position="8,3"]')).toHaveCount(1);
+		await expect(page.locator('[data-trace-indicator-position="2,2"]')).toHaveCount(0);
+		await expect(page.locator('.trace-investigation-indicator')).toHaveCount(3);
 		const presentation = await lights.evaluateAll((elements) => elements.map((element) => ({
 			text: element.textContent,
 			pointerEvents: getComputedStyle(element).pointerEvents
@@ -625,6 +627,8 @@ test.describe('DEV World Sandbox', () => {
 		await page.locator('[data-cell-position="2,2"]').focus();
 		await page.keyboard.press('Enter');
 		await expect(page.locator('.trace-root-bubble')).toHaveCount(0);
+		await expect(page.locator('.trace-proximity-feedback')).toHaveText('近づくと調べられる');
+		await expect(page.locator('.trace-proximity-feedback')).toHaveCount(0, { timeout: 1_500 });
 		const liveAnchor = await page.locator('[data-bubble-id="dev-trace-live-message"]').evaluate((element) => getComputedStyle(element).transform);
 		await page.locator('[data-cell-position="8,4"]').click({ position: { x: 4, y: 4 } });
 		await expect(page.locator('[data-trace-root-id="' + '2'.repeat(64) + '"]')).toContainText('trace-only root near the viewer');
