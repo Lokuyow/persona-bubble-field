@@ -394,10 +394,12 @@ test.describe('DEV World Sandbox', () => {
 		await editor.press('Escape');
 		await page.keyboard.press('ArrowLeft');
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '6,3');
-		await expect(own).toBeVisible();
+		await expect(own).toHaveCount(0);
+		await expect(page.locator('.trace-root-card')).toHaveCount(0);
+		await expect(page.locator('[data-trace-light-position="8,4"]')).toHaveCount(1);
 		await page.keyboard.press('ArrowRight');
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '7,3');
-		await expect(own).toBeVisible();
+		await expect(own).toHaveCount(0);
 	});
 
 	test('shows current Trace selection only when multiple speeches are visible', async ({ page }) => {
@@ -643,13 +645,34 @@ test.describe('DEV World Sandbox', () => {
 		await page.keyboard.press('Escape');
 		await expect(editor).toHaveValue('nested draft');
 		await expect(preview).toHaveAttribute('data-reply-id', '7'.repeat(64));
+		await page.getByRole('button', { name: 'Clear reply', exact: true }).click();
+		await expect(preview).toHaveCount(0);
+		await expect(editor).toHaveValue('nested draft');
+		await expect(current).toBeVisible();
+		for (let step = 0; step < 4; step += 1) await page.keyboard.press('ArrowRight');
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,3');
+		await expect(editor).toHaveValue('nested draft');
+		await expect(preview).toHaveCount(0);
+		await expect(page.locator('.trace-root-card')).toHaveCount(0);
+		await expect(page.locator('[data-trace-reply-id="' + '7'.repeat(64) + '"]')).toHaveCount(0);
+		await expect(page.locator('[data-trace-light-position="8,4"]')).toHaveCount(1);
+
+		await page.reload();
+		await page.getByRole('button', { name: 'Hide Chatter' }).click();
+		await page.locator('[data-cell-position="8,4"]').click();
+		const activeCurrent = page.locator('[data-trace-reply-id="' + '7'.repeat(64) + '"]');
+		await activeCurrent.locator('.trace-reply-content-button').click();
+		await editor.fill('active nested draft');
+		await editor.press('Escape');
+		await page.keyboard.press('ArrowLeft');
+		await page.keyboard.press('ArrowRight');
 		for (let step = 0; step < 4; step += 1) await page.keyboard.press('ArrowRight');
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,3');
 		await expect(editor).toHaveValue('');
 		await expect(preview).toHaveCount(0);
-		await expect(current).toBeVisible();
-		await page.keyboard.press('ArrowLeft');
-		await expect(preview).toHaveCount(0);
+		await expect(page.locator('.trace-root-card')).toHaveCount(0);
+		await expect(page.locator('[data-trace-reply-id="' + '7'.repeat(64) + '"]')).toHaveCount(0);
+		await expect(page.locator('[data-trace-light-position="8,4"]')).toHaveCount(1);
 	});
 
 	test('starts with the local-only self and deterministic character presentation', async ({ page }) => {
