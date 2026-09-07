@@ -2047,6 +2047,104 @@ test.describe('DEV World Sandbox', () => {
 		expect(geometries.every((geometry) => geometry.borderRadius === '18px')).toBe(true);
 	});
 
+	test('uses compact mobile presentation values and remeasures normal bubbles across the breakpoint', async ({ page }) => {
+		await page.setViewportSize({ width: 1100, height: 850 });
+		await page.goto('/?devWorld=1&devSpeech=long');
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+		const readNormalStyle = () => page.locator('.bubble-normal').first().evaluate((element) => {
+			const style = getComputedStyle(element);
+			return {
+				fontSize: style.fontSize,
+				maxWidth: Number.parseFloat(style.maxWidth.match(/[\d.]+px/)?.[0] ?? 'NaN'),
+				padding: style.padding,
+				width: element.getBoundingClientRect().width
+			};
+		});
+		expect(await readNormalStyle()).toMatchObject({ fontSize: '16px', maxWidth: 240, padding: '12px 15px' });
+
+		await page.setViewportSize({ width: 390, height: 844 });
+		await page.goto('/?devWorld=1&devSpeech=long');
+		await expect(page.locator('.bubble-normal')).toBeVisible();
+		await expect.poll(readNormalStyle).toMatchObject({ fontSize: '14px', maxWidth: 200, padding: '9px 12px' });
+		const mobileLongWidth = (await readNormalStyle()).width;
+		expect(mobileLongWidth).toBeLessThanOrEqual(200);
+
+		await page.setViewportSize({ width: 700, height: 844 });
+		await expect.poll(readNormalStyle).toMatchObject({ fontSize: '14px', maxWidth: 200, padding: '9px 12px' });
+		await page.setViewportSize({ width: 701, height: 844 });
+		await expect.poll(readNormalStyle).toMatchObject({ fontSize: '16px', maxWidth: 240, padding: '12px 15px' });
+	});
+
+	test('keeps merged mobile emphasis while applying compact widths and padding', async ({ page }) => {
+		await page.setViewportSize({ width: 390, height: 844 });
+		const geometries = [];
+		for (const fixture of [
+			{ query: 'merged2', count: 2, fontSize: '17px', minWidth: '80px', maxWidth: '250px', padding: '11px 15px', members: ['b', 'c'] },
+			{ query: 'merged3', count: 3, fontSize: '18px', minWidth: '96px', maxWidth: '262px', padding: '12px 17px', members: ['b', 'c', 'd'] },
+			{ query: 'merged4', count: 4, fontSize: '19px', minWidth: '112px', maxWidth: '274px', padding: '13px 19px', members: ['b', 'c', 'd', 'e'] }
+		] as const) {
+			await page.goto(`/?devWorld=1&devSpeech=${fixture.query}`);
+			await expect(page.locator('.bubble-merged')).toHaveAttribute('data-merged-members', String(fixture.count));
+			const style = await page.locator('.bubble-merged').evaluate((element) => {
+				const computed = getComputedStyle(element);
+				return { fontSize: computed.fontSize, minWidth: computed.minWidth, maxWidth: Number.parseFloat(computed.maxWidth.match(/[\d.]+px/)?.[0] ?? 'NaN'), padding: computed.padding, width: element.getBoundingClientRect().width, height: element.getBoundingClientRect().height };
+			});
+			expect(style).toMatchObject({ fontSize: fixture.fontSize, minWidth: fixture.minWidth, maxWidth: Number.parseFloat(fixture.maxWidth), padding: fixture.padding });
+			expect(style.width).toBeLessThanOrEqual(Number.parseFloat(fixture.maxWidth));
+			geometries.push(style);
+		}
+		expect(geometries[1].width).toBeGreaterThan(geometries[0].width);
+		expect(geometries[2].width).toBeGreaterThan(geometries[1].width);
+		expect(geometries[1].height).toBeGreaterThan(geometries[0].height);
+		expect(geometries[2].height).toBeGreaterThan(geometries[1].height);
+
+		await page.goto('/?devWorld=1&devSpeech=long');
+		await expect.poll(() => page.locator('.bubble-merged').evaluate((element) => element.getBoundingClientRect().width)).toBeLessThanOrEqual(250);
+	});
+
+	test('compacts Trace root and replies on mobile and restores desktop values after resize', async ({ page }) => {
+		await page.setViewportSize({ width: 390, height: 844 });
+		await page.goto('/?devWorld=1&devTrace=replies');
+		await page.locator('[data-cell-position="8,4"]').click();
+		await expect(page.locator('.trace-root-card')).toHaveAttribute('data-trace-geometry-ready', 'ready');
+		const root = page.locator('.trace-root-bubble');
+		const reply = page.locator('.trace-reply-card').first();
+		const readTraceStyles = () => page.locator('.trace-root-bubble, .trace-reply-card').first().evaluate((element) => {
+			const style = getComputedStyle(element);
+			const replyCard = element.classList.contains('trace-reply-card') ? element : document.querySelector<HTMLElement>('.trace-reply-card');
+			const author = replyCard?.querySelector<HTMLElement>('.trace-reply-author-profile');
+			const avatar = replyCard?.querySelector<HTMLElement>('.trace-reply-author-avatar');
+			const name = replyCard?.querySelector<HTMLElement>('.trace-reply-author-name');
+			if (!replyCard || !author || !avatar || !name) throw new Error('Expected Trace reply presentation.');
+			const replyStyle = getComputedStyle(replyCard);
+			return {
+				root: { fontSize: style.fontSize, maxWidth: Number.parseFloat(style.maxWidth.match(/[\d.]+px/)?.[0] ?? 'NaN'), padding: style.padding },
+				reply: { fontSize: replyStyle.fontSize, maxWidth: Number.parseFloat(replyStyle.maxWidth.match(/[\d.]+px/)?.[0] ?? 'NaN'), minWidth: replyStyle.minWidth, padding: replyStyle.padding, columnGap: replyStyle.columnGap },
+				author: { fontSize: getComputedStyle(author).fontSize, avatar: getComputedStyle(avatar).width, nameMaxWidth: getComputedStyle(name).maxWidth }
+			};
+		});
+		expect(await readTraceStyles()).toEqual({
+			root: { fontSize: '14px', maxWidth: 200, padding: '9px 12px' },
+			reply: { fontSize: '14px', maxWidth: 200, minWidth: '128px', padding: '9px 12px', columnGap: '5px' },
+			author: { fontSize: '11px', avatar: '32px', nameMaxWidth: '52px' }
+		});
+		await expect(root).toBeVisible();
+		await expect(reply).toBeVisible();
+
+		await page.setViewportSize({ width: 701, height: 844 });
+		await expect.poll(readTraceStyles).toEqual({
+			root: { fontSize: '16px', maxWidth: 240, padding: '12px 15px' },
+			reply: { fontSize: '16px', maxWidth: 240, minWidth: '144px', padding: '12px 15px', columnGap: '6px' },
+			author: { fontSize: '12px', avatar: '36px', nameMaxWidth: '60px' }
+		});
+		await page.setViewportSize({ width: 700, height: 844 });
+		await expect.poll(readTraceStyles).toEqual({
+			root: { fontSize: '14px', maxWidth: 200, padding: '9px 12px' },
+			reply: { fontSize: '14px', maxWidth: 200, minWidth: '128px', padding: '9px 12px', columnGap: '5px' },
+			author: { fontSize: '11px', avatar: '32px', nameMaxWidth: '52px' }
+		});
+	});
+
 	test('switches the self character through the sandbox selector', async ({ page }) => {
 		await openDevWorld(page);
 

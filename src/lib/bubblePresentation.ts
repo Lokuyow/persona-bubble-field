@@ -123,7 +123,12 @@ export function mergedBubbleStyle(memberCount: number): string {
 		`--merged-bubble-max-width: ${330 + level * 15}px`,
 		`--merged-bubble-padding-y: ${14 + level}px`,
 		`--merged-bubble-padding-x: ${20 + level * 2}px`,
-		`--merged-bubble-font-size: ${22 + level}px`
+		`--merged-bubble-font-size: ${22 + level}px`,
+		`--merged-bubble-mobile-min-width: ${80 + level * 16}px`,
+		`--merged-bubble-mobile-max-width: ${250 + level * 12}px`,
+		`--merged-bubble-mobile-padding-y: ${11 + level}px`,
+		`--merged-bubble-mobile-padding-x: ${15 + level * 2}px`,
+		`--merged-bubble-mobile-font-size: ${17 + level}px`
 	].join('; ');
 }
 
