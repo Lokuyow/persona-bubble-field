@@ -1918,6 +1918,40 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.locator('.participant:not([data-self="true"]) .participant-name-self')).toHaveCount(0);
 		await expect(page.locator('.participant[data-self="true"] .participant-name')).toHaveCSS('border-top-width', '2px');
 		await expect(page.locator('.participant[data-self="true"] .participant-name')).toHaveCSS('font-weight', '800');
+		const nameColors = await page.locator('.participant').evaluateAll((participants) => {
+			const selfName = participants
+				.find((participant) => participant.getAttribute('data-self') === 'true')
+				?.querySelector<HTMLElement>('.participant-name');
+			const nonSelfName = participants
+				.find((participant) => participant.getAttribute('data-self') !== 'true')
+				?.querySelector<HTMLElement>('.participant-name');
+			if (!selfName || !nonSelfName) throw new Error('Expected self and non-self participant names');
+
+			const accentProbe = document.createElement('div');
+			accentProbe.style.border = '2px solid var(--color-accent)';
+			accentProbe.style.backgroundColor = 'var(--color-accent-soft)';
+			const neutralProbe = document.createElement('div');
+			neutralProbe.style.backgroundColor = 'rgba(247, 247, 239, 0.74)';
+			document.body.append(accentProbe, neutralProbe);
+			const accentStyle = getComputedStyle(accentProbe);
+			const neutralStyle = getComputedStyle(neutralProbe);
+			const selfStyle = getComputedStyle(selfName);
+			const nonSelfStyle = getComputedStyle(nonSelfName);
+			const colors = {
+				accent: accentStyle.borderTopColor,
+				accentSoft: accentStyle.backgroundColor,
+				selfBorder: selfStyle.borderTopColor,
+				selfBackground: selfStyle.backgroundColor,
+				neutral: neutralStyle.backgroundColor,
+				nonSelfBackground: nonSelfStyle.backgroundColor
+			};
+			accentProbe.remove();
+			neutralProbe.remove();
+			return colors;
+		});
+		expect(nameColors.selfBorder).toBe(nameColors.accent);
+		expect(nameColors.selfBackground).toBe(nameColors.accentSoft);
+		expect(nameColors.nonSelfBackground).toBe(nameColors.neutral);
 
 		const colorState = await page.locator('.bubble-layer').evaluate(() => {
 			const participants = [...document.querySelectorAll<HTMLElement>('.participant')];

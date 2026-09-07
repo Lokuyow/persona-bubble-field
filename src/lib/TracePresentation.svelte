@@ -1,7 +1,6 @@
 <script lang="ts">
-	import { Avatar } from 'bits-ui';
-	import { asset } from '$app/paths';
 	import BubbleSurface from './BubbleSurface.svelte';
+	import CharacterAvatar from './CharacterAvatar.svelte';
 	import NormalTraceRootSurface from './NormalTraceRootSurface.svelte';
 	import type { Size } from './geometry';
 	import type { WorldPoint } from './geometry';
@@ -128,7 +127,7 @@
 				<BubbleSurface bubbleId={bubble.id} shape={bubble.shape} variant="trace" speechType={bubble.reply.speechType} />
 			{/if}
 			<button class="trace-reply-author-profile" data-trace-author-block type="button" aria-label={`${bubble.character.name} のプロフィールを開く`} onclick={(event) => { event.stopPropagation(); onOpenProfile(bubble.character.characterId, event.currentTarget); }}>
-				<span class="trace-reply-author-avatar"><Avatar.Root class={`avatar avatar-${bubble.tone}`}><Avatar.Image src={asset(`/${bubble.character.picture}`)} alt="" /><Avatar.Fallback>{bubble.character.name.slice(0, 1)}</Avatar.Fallback></Avatar.Root></span>
+				<span class="trace-reply-author-avatar"><CharacterAvatar class={`avatar avatar-${bubble.tone}`} character={bubble.character} /></span>
 				<span class="trace-reply-author-name">{bubble.character.name}</span>
 			</button>
 			<button class="trace-reply-content-button" type="button" onclick={(event) => { event.stopPropagation(); onSelectSpeech(bubble.reply.id); }}>
@@ -194,7 +193,7 @@
 	.trace-reply-content-button { position: relative; z-index: 1; grid-column: 2; grid-row: 1; min-width: 0; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 	.trace-reply-author-profile:focus-visible,
 	.trace-reply-content-button:focus-visible,
-	.trace-root-bubble:focus-visible { outline: 3px solid #6dabb9; outline-offset: 2px; }
+	.trace-root-bubble:focus-visible { outline: 3px solid var(--color-focus-ring); outline-offset: 2px; }
 	.trace-root-compact { -webkit-line-clamp: 1; line-clamp: 1; }
 	.trace-root-bubble.speech-bubble-special,
 	.trace-reply-card.speech-bubble-special { background: transparent; }
