@@ -116,4 +116,14 @@
 	.bubble-normal::after { content: ''; position: absolute; left: calc(50% + var(--tail-seam-offset-x, 0px)); bottom: -1px; width: 11px; height: 3px; transform: translateX(-50%); background: var(--tone-background); pointer-events: none; z-index: 1; }
 	.bubble-merged { width: fit-content; max-width: min(var(--merged-bubble-max-width, 330px), calc(100% - 32px)); min-width: var(--merged-bubble-min-width, 100px); padding: var(--merged-bubble-padding-y, 12px) var(--merged-bubble-padding-x, 16px); font-size: var(--merged-bubble-font-size, 13px); }
 	.bubble-tail-connection { position: absolute; bottom: -1px; width: 9px; height: 3px; transform: translateX(calc(-50% + var(--tail-seam-offset-x, 0px))); background: var(--tone-background); pointer-events: none; z-index: 1; }
+	@media (max-width: 700px) {
+		.bubble { font-size: 13px; }
+		.bubble-normal { min-width: 60px; max-width: min(180px, calc(100% - 32px)); padding: 8px 10px; }
+		.bubble-merged {
+			min-width: var(--merged-bubble-mobile-min-width, 72px);
+			max-width: min(var(--merged-bubble-mobile-max-width, 220px), calc(100% - 32px));
+			padding: var(--merged-bubble-mobile-padding-y, 9px) var(--merged-bubble-mobile-padding-x, 12px);
+			font-size: var(--merged-bubble-mobile-font-size, 15px);
+		}
+	}
 </style>

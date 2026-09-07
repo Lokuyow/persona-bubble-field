@@ -200,4 +200,15 @@
 	.trace-root-bubble .bubble-content,
 	.trace-reply-card .bubble-content { color: #26312f; opacity: 1; }
 	.trace-reply-status { position: absolute; top: calc(100% + 42px); left: 50%; width: max-content; max-width: 180px; padding: 2px 7px; border-radius: 999px; background: rgba(250, 250, 244, 0.88); color: #68736f; font-size: 9px; font-weight: 700; transform: translateX(-50%); }
+	@media (max-width: 700px) {
+		.bubble { font-size: 13px; }
+		.bubble-normal,
+		.trace-root-bubble,
+		.trace-reply-card { min-width: 60px; max-width: min(180px, calc(100% - 32px)); padding: 8px 10px; }
+		.trace-reply-card { min-width: 112px; column-gap: 4px; }
+		.trace-reply-author-profile { font-size: 10px; }
+		.trace-reply-author-avatar,
+		.trace-reply-author-avatar :global(.avatar) { width: 28px; height: 28px; }
+		.trace-reply-author-name { max-width: 48px; }
+	}
 </style>
