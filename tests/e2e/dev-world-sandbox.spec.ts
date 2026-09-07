@@ -2139,6 +2139,66 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.locator('[data-pointer-joystick]')).toHaveCount(0);
 	});
 
+	test('starts mouse movement from field-owned selectable targets without activating them', async ({ page }) => {
+		await openDevWorld(page);
+		const participant = page.locator('.participant-profile-trigger').first();
+		const participantBox = await participant.boundingBox();
+		if (!participantBox) throw new Error('Expected the participant profile trigger to be visible.');
+		await page.mouse.move(participantBox.x + participantBox.width / 2, participantBox.y + participantBox.height / 2);
+		await page.mouse.down();
+		await page.mouse.move(participantBox.x + participantBox.width / 2 + 24, participantBox.y + participantBox.height / 2);
+		await expect(page.locator('[data-pointer-joystick="right"]')).toBeVisible();
+		await page.mouse.up();
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '8,3');
+		await expect(profileDialog(page)).toBeHidden();
+
+		await page.goto('/?devWorld=1&devTrace=lights');
+		const cellTrigger = page.locator('[data-cell-position="8,4"]');
+		const cellBox = await cellTrigger.boundingBox();
+		if (!cellBox) throw new Error('Expected the trace cell selection trigger to be visible.');
+		await page.mouse.move(cellBox.x + cellBox.width / 2, cellBox.y + cellBox.height / 2);
+		await page.mouse.down();
+		await page.mouse.move(cellBox.x + cellBox.width / 2 + 24, cellBox.y + cellBox.height / 2);
+		await expect(page.locator('[data-pointer-joystick="right"]')).toBeVisible();
+		await page.mouse.up();
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '8,3');
+		await expect(page.getByRole('menu', { name: 'Cell actions' })).toBeHidden();
+	});
+
+	test('starts mouse movement from the investigated root author ghost', async ({ page }) => {
+		await page.goto('/?devWorld=1&devTrace=lights');
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+		await page.locator('[data-cell-position="8,4"]').click();
+		const ghost = page.locator('.trace-ghost-profile-trigger');
+		await expect(ghost).toBeVisible();
+		const box = await ghost.boundingBox();
+		if (!box) throw new Error('Expected the trace ghost profile trigger to be visible.');
+		await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+		await page.mouse.down();
+		await page.mouse.move(box.x + box.width / 2 + 24, box.y + box.height / 2);
+		await expect(page.locator('[data-pointer-joystick="right"]')).toBeVisible();
+		await page.mouse.up();
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '8,3');
+		await expect(profileDialog(page)).toBeHidden();
+	});
+
+	test('moves from a field-owned button through a real touch pointer sequence', async ({ page }) => {
+		await openDevWorld(page);
+		const trigger = page.locator('.participant-profile-trigger').first();
+		const box = await trigger.boundingBox();
+		if (!box) throw new Error('Expected the participant profile trigger to be visible.');
+		const client = await page.context().newCDPSession(page);
+		await client.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 });
+		const x = box.x + box.width / 2;
+		const y = box.y + box.height / 2;
+		await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 1 }] });
+		await client.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x + 24, y, id: 1 }] });
+		await expect(page.locator('[data-pointer-joystick="right"]')).toBeVisible();
+		await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '8,3');
+		await expect(profileDialog(page)).toBeHidden();
+	});
+
 	test('keeps tap selection separate from pointer movement and preserves participant trace menus', async ({ page }) => {
 		await page.goto('/?devWorld=1&devTrace=lights');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
