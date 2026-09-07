@@ -213,7 +213,7 @@ kind 42の `w` は発言時positionを保持するため、フキダシの現在
 
 通常フキダシ・合体フキダシとも、本文量に応じて横幅・縦幅が可変となる。短い本文は最大幅まで不要に広げず、本文が増えると横方向へ自然に拡大し、横幅上限に達した後は自動折り返しによって縦方向へ拡大する。
 
-通常フキダシの最大横幅は、width > 700pxでは240px、width <= 700pxでは200pxとする。viewportまたは発言領域の安全幅がこれらの最大幅より狭い場合は、安全幅を優先する。mobile breakpointでは、通常フキダシのfont-size、padding、minimum width等をcompactにできる。これは端末幅に応じたresponsive ruleであり、通常・叫び・モノローグという発言タイプ自体を理由にfont、size、paddingを変えるものではない。
+通常フキダシの最大横幅は、width > 700pxでは240px、width <= 700pxでは180pxとする。viewportまたは発言領域の安全幅がこれらの最大幅より狭い場合は、安全幅を優先する。mobile breakpointでは、通常フキダシのfont-size、padding、minimum width等をcompactにできる。これは端末幅に応じたresponsive ruleであり、通常・叫び・モノローグという発言タイプ自体を理由にfont、size、paddingを変えるものではない。
 
 合体フキダシは文字サイズが通常フキダシより大きくなるため、通常フキダシより大きな最大横幅を持ち、合体人数の増加に応じて最大横幅も拡大する。viewportまたは発言領域の安全幅がこれらの最大幅より狭い場合は、安全幅を優先する。mobile breakpointでは、合体フキダシも人数増加に応じた強調の意味論を維持したままcompactにできる。
 
