@@ -445,11 +445,11 @@
 	});
 	$: normalTailModels = positionedNormalBubbles.map((bubble) => ({
 		id: bubble.speaker.id, tone: bubble.tone as BubbleTone, speechType: bubble.speechType,
-		anchor: bubble.anchor, size: bubble.size, target: tailTarget(bubble.speaker)
+		anchor: bubble.anchor, size: bubble.size, shape: bubble.shape, target: tailTarget(bubble.speaker)
 	}));
 	$: mergedTailModels = positionedMergedBubbles.map((bubble) => ({
 		id: bubble.id, tone: bubble.tone as BubbleTone, speechType: bubble.speechType,
-		anchor: bubble.anchor, size: bubble.size,
+		anchor: bubble.anchor, size: bubble.size, shape: bubble.shape,
 		members: bubble.members.map((member) => ({ id: member.id, target: tailTarget(member) }))
 	}));
 	$: traceTreeLayout = layoutTraceBubblePresentation({
