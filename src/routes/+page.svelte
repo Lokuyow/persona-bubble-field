@@ -67,7 +67,7 @@
 		type PreparedCharacterProfilePublication
 	} from '$lib/initialProfilePublication';
 	import { projectPresence, type PresenceProjectionOptions } from '$lib/presenceProjection';
-	import { createPresenceState, type PresenceState } from '$lib/presence';
+	import { createPresenceState, debugTimeoutParticipant, type PresenceState } from '$lib/presence';
 	import { addRecentMessage, createRecentMessageTimeline, type RecentMessageTimeline } from '$lib/recentMessageTimeline';
 	import { getVirtualKeyboardBottomInset, getVisualViewportKeyboardInset, type ViewportRect } from '$lib/keyboardInset';
 	import type { ParsedTraceReply, ParsedWorldMessage } from '$lib/nostrProtocol';
@@ -287,7 +287,9 @@
 	});
 
 	$: participantById = new Map(participantViews.map((participant) => [participant.id, participant]));
-	$: selfLogicalPosition = participantViews.find((participant) => participant.id === selfProjectionId)?.position ?? null;
+	$: selfPresence = presenceState.participants.find((participant) => participant.id === selfProjectionId) ?? null;
+	$: selfLogicalPosition = selfPresence?.position ?? null;
+	$: selfIsActive = selfPresence?.status === 'active';
 	$: traceRootCells = groupTraceRoots(effectiveTraceRoots);
 	$: traceLightCells = traceRootCells
 		.filter((cell) => traceConversationState.kind !== 'open' || !sameCell(cell.position, traceConversationState.root.position))
@@ -296,12 +298,13 @@
 			occupied: participantViews.some((participant) =>
 				participant.position.x === cell.position.x && participant.position.y === cell.position.y
 			),
-			inInvestigationRange: selfLogicalPosition !== null &&
+			inInvestigationRange: selfIsActive && selfLogicalPosition !== null &&
 				isWithinTraceInvestigationRange(selfLogicalPosition, cell.position)
 		}));
 	$: traceConversationProjection = resolveTraceConversationProjection(traceConversationState);
 	$: traceOnlyCellTriggers = traceRootCells.map((cell) => cell.position).filter((position) =>
-		!participantViews.some((participant) => sameCell(participant.position, position))
+		!participantViews.some((participant) => sameCell(participant.position, position)) &&
+		traceLightCells.some((cell) => sameCell(cell.position, position))
 	);
 
 	$: visibleParticipantIds = new Set(
@@ -1322,16 +1325,17 @@
 			.filter((participant) => sameCell(participant.position, position))
 			.map((participant) => participant.id);
 		let trace: Extract<FieldCellAction, { kind: 'trace' }> | null = null;
+		const visibleTraceAtCell = traceLightCells.some((cell) => sameCell(cell.position, position));
 		const reselectCurrentRoot = traceConversationProjection?.current.kind === 'root' &&
-			sameCell(traceConversationProjection.current.event.position, position);
-		if (reselectCurrentRoot && selfLogicalPosition && isWithinTraceInvestigationRange(selfLogicalPosition, position)) {
+			sameCell(traceConversationProjection.current.event.position, position) && visibleTraceAtCell;
+		if (reselectCurrentRoot && !replyMode.target && selfIsActive && selfLogicalPosition && isWithinTraceInvestigationRange(selfLogicalPosition, position)) {
 			trace = { kind: 'trace', rootId: traceConversationProjection!.current.event.id, behavior: 'select-current' };
 		} else {
 			const rootCell = traceRootCells.find((cell) => sameCell(cell.position, position));
 			const currentIsRootCell = traceConversationProjection?.current.kind === 'root' &&
 				sameCell(traceConversationProjection.current.event.position, position);
 			const root = currentIsRootCell ? undefined : rootCell?.roots[0];
-			if (root && selfLogicalPosition && isWithinTraceInvestigationRange(selfLogicalPosition, root.position)) {
+			if (root && (!selfIsActive || (selfLogicalPosition && isWithinTraceInvestigationRange(selfLogicalPosition, root.position)))) {
 				trace = { kind: 'trace', rootId: root.id, behavior: 'open-root' };
 			}
 		}
@@ -1398,7 +1402,7 @@
 	function resolveFieldCellSelection(position: { x: number; y: number }, trigger?: HTMLButtonElement): void {
 		const resolution = resolveFieldCellActions(actionsForCell(position));
 		if (resolution.kind === 'none') {
-			const visibleOutOfRangeTrace = traceLightCells.some((cell) => sameCell(cell.position, position) && !cell.inInvestigationRange);
+			const visibleOutOfRangeTrace = selfIsActive && traceLightCells.some((cell) => sameCell(cell.position, position) && !cell.inInvestigationRange);
 			if (visibleOutOfRangeTrace) {
 				showTraceProximityFeedback(position);
 				return;
@@ -1736,6 +1740,11 @@
 		lastVisibilityKey = null;
 		colorByPubkey = {};
 		setPresence(resetDevWorldPresence(FIELD, Date.now()));
+	}
+
+	function timeoutSandboxSelf(): void {
+		if (!devWorldSandboxEnabled) return;
+		setPresence(debugTimeoutParticipant(presenceState, DEV_WORLD_SELF_ID));
 	}
 
 	function seedDevRecentMessageTimelineFixture(): void {
@@ -2406,7 +2415,7 @@
 							type="button"
 							on:dragstart|preventDefault
 							data-cell-position={`${position.x},${position.y}`}
-				aria-label={selfLogicalPosition && isWithinTraceInvestigationRange(selfLogicalPosition, position)
+				aria-label={!selfIsActive || (selfLogicalPosition && isWithinTraceInvestigationRange(selfLogicalPosition, position))
 					? '痕跡を調べる'
 					: '痕跡を調べる（近づくと調べられる）'}
 							style={`left: ${position.x * cellSize}px; top: ${position.y * cellSize}px;`}
@@ -2552,6 +2561,7 @@
 					on:click={injectDevTraceLiveReply}
 				>Add live trace reply</button>
 			{/if}
+			<button class="sandbox-timeout-self" type="button" on:click={timeoutSandboxSelf}>Timeout self</button>
 			<button class="sandbox-reset" type="button" on:click={resetSandbox}>Reset sandbox</button>
 		</div>
 	{:else if selfPositionWriteState.kind === 'retryable' && !isWorldSelfActive}

@@ -340,6 +340,8 @@ test.describe('DEV World Sandbox', () => {
 		await page.getByRole('button', { name: 'Clear reply', exact: true }).click();
 		await expect(preview).toHaveCount(0);
 		await expect(editor).toHaveValue('preserved A');
+		await page.locator('.field-area').click({ position: { x: 8, y: 8 } });
+		await expect(page.locator('[data-trace-light-position="8,4"]')).toHaveCount(1);
 		await selectCell('8,4');
 		const menu = page.getByRole('menu');
 		if (await menu.isVisible()) await page.getByRole('menuitem', { name: '痕跡を調べる', exact: true }).click();
@@ -743,6 +745,40 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.locator('.trace-root-bubble')).toHaveCount(0);
 		await expect(page.locator('[data-trace-light-position="8,4"]')).toHaveCount(1);
 		await expect(page.locator('.trace-light')).toHaveCount(4);
+	});
+
+	test('does not leave a selectable trigger behind for the hidden open Trace light', async ({ page }) => {
+		await page.setViewportSize({ width: 900, height: 720 });
+		await page.emulateMedia({ reducedMotion: 'reduce' });
+		await page.goto('/?devWorld=1&devTrace=lights');
+		await expect(page.locator('[data-cell-position="8,4"]')).toBeVisible();
+		await page.locator('[data-cell-position="8,4"]').click();
+		await expect(page.locator('[data-trace-root-id="' + '2'.repeat(64) + '"]')).toBeVisible();
+		await expect(page.locator('[data-trace-light-position="8,4"]')).toHaveCount(0);
+		await expect(page.locator('[data-trace-indicator-position="8,4"]')).toHaveCount(0);
+		await expect(page.locator('[data-cell-position="8,4"]')).toHaveCount(0);
+		const cell = await page.locator('.field-grid').evaluate((grid) => {
+			const scene = document.querySelector<HTMLElement>('.field-scene');
+			if (!scene) throw new Error('Expected the field scene.');
+			return Number.parseFloat(getComputedStyle(scene).getPropertyValue('--cell-size'));
+		});
+		const grid = await page.locator('.field-grid').boundingBox();
+		if (!grid) throw new Error('Expected the field grid.');
+		await page.mouse.click(grid.x + 8 * cell + 2, grid.y + 4 * cell + 2);
+		await expect(page.locator('.trace-root-bubble')).toHaveCount(0);
+	});
+
+	test('reactivates an inactive DEV self through Trace inspection', async ({ page }) => {
+		await page.setViewportSize({ width: 900, height: 720 });
+		await page.emulateMedia({ reducedMotion: 'reduce' });
+		await page.goto('/?devWorld=1&devTrace=lights');
+		await page.getByRole('button', { name: 'Timeout self' }).click();
+		await expect(page.locator('.participant[data-self="true"]')).toHaveCount(0);
+		await expect(page.locator('[data-cell-position="8,4"]')).toHaveAttribute('aria-label', '痕跡を調べる');
+		await page.locator('[data-cell-position="8,4"]').click();
+		await expect(page.locator('[data-trace-root-id="' + '2'.repeat(64) + '"]')).toContainText('trace-only root near the viewer');
+		await expect(page.locator('.participant[data-self="true"]')).toHaveCount(1);
+		await expect(page.locator('.trace-proximity-feedback')).toHaveCount(0);
 	});
 
 	test('presents deterministic direct Trace replies without external runtime ownership', async ({ page }) => {
