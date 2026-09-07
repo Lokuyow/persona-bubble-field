@@ -72,7 +72,7 @@ export function capTraceRootCandidates(
 	for (const candidate of unique.values()) {
 		const cell = `${candidate.root.position.x}:${candidate.root.position.y}`;
 		const count = perCell.get(cell) ?? 0;
-		if (count >= 3) continue;
+		if (count >= 1) continue;
 		perCell.set(cell, count + 1);
 		perCellSurvivors.push(candidate);
 	}

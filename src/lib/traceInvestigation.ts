@@ -12,18 +12,6 @@ export type TraceRootCell = Readonly<{
 	roots: readonly ParsedWorldMessage[];
 }>;
 
-export type TraceRootSelection = Readonly<{
-	position: GridPosition;
-	rootId: string;
-}>;
-
-export type TraceSelectionDetails = Readonly<{
-	cell: TraceRootCell;
-	root: ParsedWorldMessage;
-	index: number;
-	total: number;
-}>;
-
 export type TraceInspectionPreparation =
 	| Readonly<{ kind: 'blocked' }>
 	| Readonly<{
@@ -64,44 +52,6 @@ export function groupTraceRoots(roots: readonly ParsedWorldMessage[]): readonly 
 
 export function isWithinTraceInvestigationRange(self: GridPosition, target: GridPosition): boolean {
 	return Math.max(Math.abs(self.x - target.x), Math.abs(self.y - target.y)) <= 1;
-}
-
-export function newestTraceRootSelection(cell: TraceRootCell): TraceRootSelection | null {
-	const root = cell.roots[0];
-	return root ? { position: { ...cell.position }, rootId: root.id } : null;
-}
-
-export function traceSelectionDetails(
-	selection: TraceRootSelection | null,
-	cells: readonly TraceRootCell[]
-): TraceSelectionDetails | null {
-	if (!selection) return null;
-	const cell = cells.find((candidate) => sameGridPosition(candidate.position, selection.position));
-	if (!cell) return null;
-	const index = cell.roots.findIndex((root) => root.id === selection.rootId);
-	if (index < 0) return null;
-	return { cell, root: cell.roots[index], index, total: cell.roots.length };
-}
-
-export function reconcileTraceRootSelection(
-	selection: TraceRootSelection | null,
-	cells: readonly TraceRootCell[]
-): TraceRootSelection | null {
-	if (!selection) return null;
-	if (traceSelectionDetails(selection, cells)) return selection;
-	const cell = cells.find((candidate) => sameGridPosition(candidate.position, selection.position));
-	return cell ? newestTraceRootSelection(cell) : null;
-}
-
-export function stepTraceRootSelection(
-	selection: TraceRootSelection,
-	cells: readonly TraceRootCell[],
-	delta: -1 | 1
-): TraceRootSelection {
-	const details = traceSelectionDetails(selection, cells);
-	if (!details) return selection;
-	const index = Math.min(details.total - 1, Math.max(0, details.index + delta));
-	return { position: { ...details.cell.position }, rootId: details.cell.roots[index].id };
 }
 
 export function prepareTraceInspectionActivity(input: Readonly<{

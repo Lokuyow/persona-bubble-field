@@ -589,15 +589,12 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 				: { kind: 'blocked' };
 		}
 		if (pendingSelfOperation || pendingTraceReply) return { kind: 'pending' };
-		const sameCellSwitch = traceConversationState.kind === 'open' && traceConversationState.root.id !== root.id &&
-			sameGridPosition(traceConversationState.root.position, root.position);
 		const nowMs = Date.now();
 		const prepared = prepareTraceInspectionActivity({
 			presence: currentPresence(),
 			selfId: options.selfAccount.pubkey,
 			target: root.position,
 			nowMs,
-			requireCurrentRange: sameCellSwitch
 		});
 		if (prepared.kind === 'blocked') return { kind: 'blocked' };
 		if (!prepared.coalesced) {

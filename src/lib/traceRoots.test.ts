@@ -49,10 +49,10 @@ describe('trace root selection', () => {
 	});
 
 	it('uses the exact event-ID modulo lottery for every speech type', () => {
-		const winners = (['normal', 'shout', 'monologue'] as const).map((speechType) =>
-			lotteryRoot({ speechType, nonce: speechType }, true)
+		const winners = (['normal', 'shout', 'monologue'] as const).map((speechType, index) =>
+			lotteryRoot({ speechType, position: { x: index, y: 0 }, nonce: speechType }, true)
 		);
-		const loser = lotteryRoot({ nonce: 'loser' }, false);
+		const loser = lotteryRoot({ position: { x: 3, y: 0 }, nonce: 'loser' }, false);
 
 		expect(selectEffectiveTraceRoots([...winners, loser], CHANNEL_ID, { columns: 8, rows: 8 })
 			.map((candidate) => candidate.id).sort()).toEqual(winners.map((event) => event.id).sort());
@@ -76,14 +76,24 @@ describe('trace root selection', () => {
 		expect(first).toHaveLength(2);
 	});
 
-	it('keeps the newest three roots per cell with lexical ID tie-breaking', () => {
+	it('keeps only the newest root per cell with lexical ID tie-breaking', () => {
 		const tied = Array.from({ length: 4 }, (_, index) =>
 			lotteryRoot({ createdAt: 50, position: { x: 0, y: 0 }, nonce: `tie-${index}` })
 		);
 		const expected = [...tied].sort((first, second) => first.id < second.id ? -1 : first.id > second.id ? 1 : 0)
-			.slice(0, 3).map((event) => event.id);
+			.slice(0, 1).map((event) => event.id);
 		expect(selectEffectiveTraceRoots(tied.reverse(), CHANNEL_ID, { columns: 30, rows: 1 }).map((root) => root.id))
 			.toEqual(expected);
+	});
+
+	it('does not let one cell affect the newest root selected from another cell', () => {
+		const sameCell = [
+			lotteryRoot({ createdAt: 1, position: { x: 0, y: 0 }, nonce: 'same-old' }),
+			lotteryRoot({ createdAt: 2, position: { x: 0, y: 0 }, nonce: 'same-new' })
+		];
+		const otherCell = lotteryRoot({ createdAt: 1, position: { x: 1, y: 0 }, nonce: 'other' });
+		expect(selectEffectiveTraceRoots([otherCell, sameCell[0], sameCell[1]], CHANNEL_ID, { columns: 20, rows: 1 }).map((root) => root.id))
+			.toEqual([sameCell[1].id, otherCell.id]);
 	});
 
 	it('applies the global cap with lexical ID tie-breaking', () => {
@@ -106,13 +116,10 @@ describe('trace root selection', () => {
 			.toEqual(expected);
 	});
 
-	it('evicts an old root only when a newer root exceeds a cap', () => {
+	it('evicts an old root when a newer root occupies the same cell', () => {
 		const old = lotteryRoot({ createdAt: 1, position: { x: 0, y: 0 }, nonce: 'old' });
-		const middle = lotteryRoot({ createdAt: 2, position: { x: 1, y: 0 }, nonce: 'middle' });
-		const newest = lotteryRoot({ createdAt: 3, position: { x: 2, y: 0 }, nonce: 'newest' });
-		expect(selectEffectiveTraceRoots([old, middle], CHANNEL_ID, { columns: 20, rows: 1 }).map((root) => root.id))
-			.toEqual([middle.id, old.id]);
-		expect(selectEffectiveTraceRoots([old, middle, newest], CHANNEL_ID, { columns: 20, rows: 1 }).map((root) => root.id))
-			.toEqual([newest.id, middle.id]);
+		const newest = lotteryRoot({ createdAt: 3, position: { x: 0, y: 0 }, nonce: 'newest' });
+		expect(selectEffectiveTraceRoots([old, newest], CHANNEL_ID, { columns: 20, rows: 1 }).map((root) => root.id))
+			.toEqual([newest.id]);
 	});
 });
