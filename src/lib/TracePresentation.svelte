@@ -158,9 +158,9 @@
 			<span class:trace-root-compact={layout.root.compact} class="bubble-content">{layout.root.event.content}</span>
 			{#if bubbleOverflowById[layout.root.id]}<span class="bubble-ellipsis" aria-hidden="true">…</span>{/if}
 		</button>
-		{#if replyRefresh && replyRefresh !== 'settled'}
-			<span class="trace-reply-status" data-reply-refresh={replyRefresh}>
-				{replyRefresh === 'loading' ? 'Loading…' : 'Replies unavailable'}
+		{#if replyRefresh === 'unavailable'}
+			<span class="trace-reply-status" data-reply-refresh="unavailable">
+				Replies unavailable
 			</span>
 		{/if}
 	</div>

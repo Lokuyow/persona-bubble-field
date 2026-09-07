@@ -1009,7 +1009,7 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '4,1');
 		await page.locator('[data-cell-position="4,2"]').click();
 		await expect(page.locator(`[data-trace-root-id="${trace.root.id}"]`)).toContainText('Relay trace root');
-		await expect(page.locator('.trace-reply-status[data-reply-refresh="loading"]')).toBeVisible();
+		await expect(page.locator('.trace-reply-status')).toHaveCount(0);
 		await expect.poll(publishedPositionIds).toBe(positionsBefore + 1);
 
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
@@ -1072,7 +1072,7 @@ test.describe('Relay startup', () => {
 
 		await page.locator('[data-cell-position="4,2"]').click();
 		await expect(page.locator(`[data-trace-root-id="${trace.root.id}"]`)).toContainText('Relay trace root');
-		await expect(page.locator('.trace-reply-status[data-reply-refresh="loading"]')).toBeVisible();
+		await expect(page.locator('.trace-reply-status')).toHaveCount(0);
 		await expect(page.getByText('Relay direct reply')).toHaveCount(0);
 		await page.evaluate(() => (window as typeof window & {
 			__relayStartupTest: { releaseTraceReplies(): void }
@@ -1108,7 +1108,7 @@ test.describe('Relay startup', () => {
 		await page.locator('[data-cell-position="4,2"]').click();
 		await expect(page.locator(`[data-trace-reply-id="${trace.direct.id}"]`)).toContainText('Relay direct reply');
 		await expect(page.locator(`[data-trace-reply-id="${trace.live.id}"]`)).toContainText('Relay live direct reply');
-		await expect(page.locator('.trace-reply-status[data-reply-refresh="loading"]')).toBeVisible();
+		await expect(page.locator('.trace-reply-status')).toHaveCount(0);
 		await expect.poll(replyRequestCount).toBeGreaterThan(requestsBeforeReopen);
 		await page.evaluate(() => (window as typeof window & {
 			__relayStartupTest: { releaseTraceReplies(): void }
@@ -1129,7 +1129,7 @@ test.describe('Relay startup', () => {
 		await expect(page.locator(`[data-trace-reply-id="${trace.deeper.id}"]`)).toContainText('Relay deeper branch reply');
 		await expect(page.locator(`[data-trace-reply-id="${trace.selfDirect.id}"]`)).toHaveCount(0);
 		await expect(page.locator(`[data-trace-reply-id="${trace.live.id}"]`)).toHaveCount(0);
-		await expect(page.locator('.trace-reply-status[data-reply-refresh="loading"]')).toBeVisible();
+		await expect(page.locator('.trace-reply-status')).toHaveCount(0);
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
 			request.filters.some((filter) =>
 				(filter.kinds as number[] | undefined)?.includes(1111) &&
@@ -1166,7 +1166,7 @@ test.describe('Relay startup', () => {
 		await expect(page.locator(`[data-trace-parent-id="${trace.direct.id}"]`)).toContainText('Relay direct reply');
 		await expect(page.locator(`[data-trace-reply-id="${trace.greatGrandchild.id}"]`)).toContainText('Relay great-grandchild reply');
 		await expect(page.locator(`[data-trace-reply-id="${trace.currentLive.id}"]`)).toHaveCount(0);
-		await expect(page.locator('.trace-reply-status[data-reply-refresh="loading"]')).toBeVisible();
+		await expect(page.locator('.trace-reply-status')).toHaveCount(0);
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
 			request.filters.some((filter) =>
 				(filter['#e'] as string[] | undefined)?.includes(trace.deeper.id)
