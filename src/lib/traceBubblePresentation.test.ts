@@ -3,7 +3,7 @@ import type { Character } from './character';
 import type { ParsedTraceReply, ParsedWorldMessage } from './nostrProtocol';
 import type { TraceConversationProjection } from './traceReplyPresentation';
 import { createPresentationBubbleShape, type BubbleTone } from './bubblePresentation';
-import { layoutTraceBubblePresentation } from './traceBubblePresentation';
+import { layoutTraceBubblePresentation, type TraceBubblePresentationInput } from './traceBubblePresentation';
 
 const character: Character = { characterId: '001', name: 'Test', about: 'Test character', picture: 'characters/001.webp' };
 const id = (character: string) => character.repeat(64);
@@ -23,7 +23,7 @@ const child: ParsedTraceReply = {
 	rootPubkey: root.pubkey, parentId: current.id, parentKind: 1111, parentPubkey: current.pubkey
 };
 
-function layout(projection: TraceConversationProjection, bubbleSizes: Record<string, { width: number; height: number }>, footprints: Record<string, { width: number; height: number }> = {}) {
+function layout(projection: TraceConversationProjection, bubbleSizes: Record<string, { width: number; height: number }>, footprints: Record<string, { width: number; height: number }> = {}, previousLayout?: ReturnType<typeof layoutTraceBubblePresentation>, overrides: Partial<TraceBubblePresentationInput> = {}) {
 	return layoutTraceBubblePresentation({
 		projection,
 		fixedBubbles: [],
@@ -38,7 +38,9 @@ function layout(projection: TraceConversationProjection, bubbleSizes: Record<str
 		viewportWidth: 1000,
 		defaultBubbleSize: { width: 80, height: 40 },
 		characterFor: () => character,
-		toneFor: () => 'mint' satisfies BubbleTone
+		toneFor: () => 'mint' satisfies BubbleTone,
+		...overrides,
+		previousLayout
 	});
 }
 
@@ -104,5 +106,45 @@ describe('trace bubble presentation', () => {
 		expect(card?.footprint).toEqual(footprint);
 		expect(card?.shape).toEqual(createPresentationBubbleShape('shout', `trace-reply-${shout.id}`, bodySize, 1000, { x: 0, y: 0, width: 1000, height: 700 }));
 		expect(card?.shape).not.toEqual(createPresentationBubbleShape('shout', `trace-reply-${shout.id}`, footprint, 1000, { x: 0, y: 0, width: 1000, height: 700 }));
+	});
+
+	it('preserves visible reply anchors while changing the current speech', () => {
+		const siblings = ['e', 'f', 'g', 'h'].map((letter, index) => ({
+			...parent, id: id(letter), createdAt: 20 + index, content: `reply ${letter}`
+		}));
+		const sizes = Object.fromEntries([
+			[`trace-root-${root.id}`], ...siblings.map((reply) => [`trace-reply-${reply.id}`])
+		].map(([key]) => [key, { width: 80, height: 40 }]));
+		const rootProjection: TraceConversationProjection = { root, current: { kind: 'root', event: root }, parent: null, directReplies: siblings };
+		const first = layout(rootProjection, sizes)!;
+		const selected = siblings[2];
+		const child = { ...current, id: id('i'), parentId: selected.id, parentPubkey: selected.pubkey };
+		const nextProjection: TraceConversationProjection = { root, current: { kind: 'reply', event: selected }, parent: { kind: 'root', event: root }, directReplies: [child] };
+		const second = layout(nextProjection, { ...sizes, [`trace-reply-${child.id}`]: { width: 80, height: 40 } }, {}, first)!;
+		const previousSelected = first.cards.find((card) => card.reply.id === selected.id)!;
+		const nextSelected = second.cards.find((card) => card.reply.id === selected.id)!;
+		expect(nextSelected.anchor).toEqual(previousSelected.anchor);
+		expect(second.root.anchor).toEqual(first.root.anchor);
+		expect(second.cards.find((card) => card.reply.id === child.id)?.anchor).toEqual({
+			x: nextSelected.anchor.x + nextSelected.footprint.width + 10,
+			y: nextSelected.anchor.y + nextSelected.footprint.height + 10
+		});
+	});
+
+	it('reuses anchors only within the same coordinate context', () => {
+		const projection: TraceConversationProjection = { root, current: { kind: 'root', event: root }, parent: null, directReplies: [] };
+		const sizes = { [`trace-root-${root.id}`]: { width: 80, height: 40 } };
+		const first = layout(projection, sizes)!;
+		const unchanged = layout(projection, sizes, {}, first)!;
+		const moved = layout(projection, sizes, {}, first, { camera: { x: 50, y: 0 } })!;
+		const resized = layout(projection, sizes, {}, first, {
+			bubbleSafeBounds: { x: 0, y: 0, width: 1000, height: 500 },
+			bubbleVisualRegion: { x: 0, y: 0, width: 1000, height: 500 }
+		})!;
+		expect(unchanged.root.anchor).toEqual(first.root.anchor);
+		expect(moved.root.anchor).not.toEqual(first.root.anchor);
+		expect(moved.root.anchor.x).toBe(60);
+		expect(moved.root.anchor.y).toBe(first.root.anchor.y);
+		expect(resized.root.anchor).not.toEqual(first.root.anchor);
 	});
 });

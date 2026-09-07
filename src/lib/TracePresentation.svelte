@@ -11,6 +11,7 @@
 	type Props = Readonly<{
 		layout: TraceBubblePresentationLayout | null;
 		ready: boolean;
+		currentSpeechId: string | null;
 		replyRefresh: 'loading' | 'unavailable' | 'settled' | null;
 		traceRootTailTarget: WorldPoint | null;
 		bubbleOverflowById: Readonly<Record<string, boolean>>;
@@ -27,6 +28,7 @@
 	let {
 		layout,
 		ready,
+		currentSpeechId,
 		replyRefresh,
 		traceRootTailTarget,
 		bubbleOverflowById,
@@ -43,6 +45,7 @@
 	let rootOpening = $derived.by(() => layout && traceRootTailTarget
 		? tailOutlineOpeningPoints(tailGeometry(tailStart(layout.root.anchor, layout.root.size), traceRootTailTarget, 11, 2, specialTailExtension(layout.root.event.speechType)), layout.root.anchor)
 		: null);
+	let showCurrentSelection = $derived(Boolean(layout && layout.cards.length > 0 && currentSpeechId));
 
 	function bodyMeasurement(node: HTMLElement): BubbleMeasurement {
 		const content = node.querySelector<HTMLElement>('.bubble-content');
@@ -118,13 +121,15 @@
 			data-trace-geometry-ready={ready ? 'ready' : 'pending'}
 			data-trace-role={bubble.role}
 			data-trace-current-reply-id={bubble.role === 'current' ? bubble.reply.id : undefined}
+			data-trace-selection={showCurrentSelection && currentSpeechId === bubble.reply.id ? 'current' : undefined}
+			class:trace-current-selected={showCurrentSelection && currentSpeechId === bubble.reply.id}
 			data-trace-parent-id={bubble.role === 'parent' ? bubble.reply.id : undefined}
 			data-speech-type={bubble.reply.speechType}
 			data-bubble-id={bubble.id}
 			style={`${bubbleToneStyle(bubble.tone, true)}; transform: translate3d(${bubble.anchor.x}px, ${bubble.anchor.y}px, 0);`}
 		>
 			{#if bubble.reply.speechType !== 'normal' && bubble.shape}
-				<BubbleSurface bubbleId={bubble.id} shape={bubble.shape} variant="trace" speechType={bubble.reply.speechType} />
+				<BubbleSurface bubbleId={bubble.id} shape={bubble.shape} variant="trace" speechType={bubble.reply.speechType} selected={showCurrentSelection && currentSpeechId === bubble.reply.id} />
 			{/if}
 			<button class="trace-reply-author-profile" data-trace-author-block type="button" aria-label={`${bubble.character.name} のプロフィールを開く`} onclick={(event) => { event.stopPropagation(); onOpenProfile(bubble.character.characterId, event.currentTarget); }}>
 				<span class="trace-reply-author-avatar"><CharacterAvatar class={`avatar avatar-${bubble.tone}`} character={bubble.character} /></span>
@@ -146,14 +151,16 @@
 			data-trace-root-id={layout.root.event.id}
 			data-trace-current-id={layout.root.event.id}
 			data-trace-current-kind="root"
+			data-trace-selection={showCurrentSelection && currentSpeechId === layout.root.event.id ? 'current' : undefined}
+			class:trace-current-selected={showCurrentSelection && currentSpeechId === layout.root.event.id}
 			data-speech-type={layout.root.event.speechType}
 			style={bubbleToneStyle(layout.root.tone, true)}
 			onclick={(event) => { event.stopPropagation(); onSelectSpeech(layout.root.event.id); }}
 		>
 			{#if layout.root.event.speechType === 'normal'}
-				<NormalTraceRootSurface bubbleId={layout.root.id} size={layout.root.size} outlineOpening={rootOpening ? { id: `trace-root-${layout.root.event.id}`, points: rootOpening } : null} />
+				<NormalTraceRootSurface bubbleId={layout.root.id} size={layout.root.size} outlineOpening={rootOpening ? { id: `trace-root-${layout.root.event.id}`, points: rootOpening } : null} selected={showCurrentSelection && currentSpeechId === layout.root.event.id} />
 			{:else if layout.root.shape}
-				<BubbleSurface bubbleId={layout.root.id} shape={layout.root.shape} variant="trace" speechType={layout.root.event.speechType} outlineOpenings={rootOpening ? [{ id: `trace-root-${layout.root.event.id}`, points: rootOpening }] : []} />
+				<BubbleSurface bubbleId={layout.root.id} shape={layout.root.shape} variant="trace" speechType={layout.root.event.speechType} outlineOpenings={rootOpening ? [{ id: `trace-root-${layout.root.event.id}`, points: rootOpening }] : []} selected={showCurrentSelection && currentSpeechId === layout.root.event.id} />
 			{/if}
 			<span class:trace-root-compact={layout.root.compact} class="bubble-content">{layout.root.event.content}</span>
 			{#if bubbleOverflowById[layout.root.id]}<span class="bubble-ellipsis" aria-hidden="true">…</span>{/if}
@@ -186,11 +193,12 @@
 	.trace-root-card .trace-root-bubble { position: relative; }
 	.trace-root-bubble:not(.speech-bubble-special) { background: transparent; border-color: transparent; }
 	.trace-reply-card { z-index: 2; display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 6px; align-items: start; min-width: 144px; }
+	.trace-reply-card.trace-current-selected:not(.speech-bubble-special)::before { content: ''; position: absolute; inset: 0; z-index: 2; border: 2px solid var(--color-accent); border-radius: inherit; pointer-events: none; box-sizing: border-box; }
 	.trace-reply-author-profile { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; padding: 0; gap: 3px; border: 0; background: transparent; color: #40504b; font-size: 12px; font-weight: 800; line-height: 1.1; text-align: center; }
 	.trace-reply-author-avatar { position: relative; display: block; order: -1; width: 36px; height: 36px; flex: 0 0 auto; }
 	.trace-reply-author-avatar :global(.avatar) { width: 36px; height: 36px; }
 	.trace-reply-author-name { display: block; max-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-	.trace-reply-content-button { position: relative; z-index: 1; grid-column: 2; grid-row: 1; min-width: 0; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+	.trace-reply-content-button { position: relative; z-index: 1; grid-column: 2; grid-row: 1; align-self: stretch; justify-self: stretch; min-width: 0; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 	.trace-reply-author-profile:focus-visible,
 	.trace-reply-content-button:focus-visible,
 	.trace-root-bubble:focus-visible { outline: 3px solid var(--color-focus-ring); outline-offset: 2px; }

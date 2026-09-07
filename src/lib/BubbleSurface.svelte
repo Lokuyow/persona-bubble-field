@@ -9,9 +9,10 @@
 		variant: 'live' | 'trace';
 		speechType: Exclude<SpeechType, 'normal'>;
 		outlineOpenings?: readonly Readonly<{ id: string; points: string }>[];
+		selected?: boolean;
 	}>;
 
-	let { bubbleId, shape, variant, speechType, outlineOpenings = [] }: Props = $props();
+	let { bubbleId, shape, variant, speechType, outlineOpenings = [], selected = false }: Props = $props();
 	let outlineMask = $derived(speechOutlineMaskId(bubbleId));
 	let hasOutlineMask = $derived(outlineOpenings.length > 0);
 </script>
@@ -36,7 +37,7 @@
 		</defs>
 	{/if}
 	<path class="bubble-surface-fill" class:trace-bubble-surface-fill={variant === 'trace'} d={shape.path} />
-	<path class="bubble-surface-outline" class:trace-bubble-surface-outline={variant === 'trace'} d={shape.path} mask={hasOutlineMask ? `url(#${outlineMask})` : undefined} />
+	<path class="bubble-surface-outline" class:trace-bubble-surface-outline={variant === 'trace'} class:trace-current-selection-outline={selected && variant === 'trace'} d={shape.path} mask={hasOutlineMask ? `url(#${outlineMask})` : undefined} />
 </svg>
 
 <style>
@@ -45,4 +46,5 @@
 	.bubble-surface-outline { fill: none; stroke: var(--tone-outline); stroke-width: 1; stroke-linecap: round; stroke-linejoin: round; }
 	.trace-bubble-surface-fill { fill: var(--trace-surface); }
 	.trace-bubble-surface-outline { stroke-dasharray: 4 3; }
+	.trace-current-selection-outline { stroke: var(--color-accent); stroke-width: 2; stroke-dasharray: none; }
 </style>
