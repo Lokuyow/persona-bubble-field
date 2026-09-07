@@ -53,7 +53,7 @@ movement rulesは[SPEC-30](./SPEC-30-フィールド・position・presence.md)�
 
 trace conversationはroot調査からだけ入る。一度にexploreできるroot conversationは1つだけとする。通常live speechへのreply UIは持たない。
 
-rootを調査したら、NIP-22 reply historyを待たずにroot ghostと実際のroot本文bubbleを即表示する。reply history取得中は小さいreply loading状態を表示する。
+rootを調査したら、NIP-22 reply historyを待たずにroot ghostと実際のroot本文bubbleを即表示する。reply history取得中はloading indicatorを表示しない。
 
 表示対象はroot、current、immediate parent、currentの全direct repliesだけである。rootは常にfield position由来で表示し、rootがcurrentまたはimmediate parentでない深いcurrentでは1行ellipsisのcompact contextとする。reply depthに上限は設けない。
 
