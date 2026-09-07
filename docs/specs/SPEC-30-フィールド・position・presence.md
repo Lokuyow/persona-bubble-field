@@ -116,7 +116,8 @@ PCのArrow/WASD操作は維持し、押下中の上下成分と左右成分を�
 使用する。上下または左右の反対成分は相殺し、両成分が残る場合はdiagonalとして扱う。
 
 field上の選択はpixel targetではなくlogical cellを基本にする。tap / clickはmovementには
-使用せず、logical-cell selection専用とする。selectable targetが1件なら直接そのactionを
+使用せず、logical-cell selection専用とする。現在そのlogical cellから実行可能なselectable
+actionが1件なら直接そのactionを
 行い、2件以上ならPC/mobile共通context menuを開く。current characterは個別に表示し、
 multiple rootsは1つの「痕跡を調べる」とする。outside tap/clickでmenuを閉じる。
 movementはselectable cell actionやcontext menu itemとして提供しない。current character

@@ -113,6 +113,32 @@ async function fieldCellCenter(page: Page, position: { x: number; y: number }): 
 	}, position);
 }
 
+async function fieldOwnedBlankPoint(page: Page, preferred: { x: number; y: number }): Promise<{ x: number; y: number }> {
+	return page.locator('.field-grid').evaluate((grid, preferredCell) => {
+		const scene = document.querySelector<HTMLElement>('.field-scene');
+		const fieldArea = document.querySelector<HTMLElement>('.field-area');
+		if (!scene || !fieldArea) throw new Error('Expected the field surface to be rendered.');
+		const gridRect = grid.getBoundingClientRect();
+		const cellSize = Number.parseFloat(getComputedStyle(scene).getPropertyValue('--cell-size'));
+		const candidates = [preferredCell, ...Array.from({ length: 8 }, (_, index) => ({
+			x: preferredCell.x + (index % 4) - 1,
+			y: preferredCell.y + Math.floor(index / 4) - 1
+		}))];
+		for (const cell of candidates) {
+			const point = { x: gridRect.left + (cell.x + 0.5) * cellSize, y: gridRect.top + (cell.y + 0.5) * cellSize };
+			const hit = document.elementFromPoint(point.x, point.y);
+			if (!hit || !fieldArea.contains(hit)) continue;
+			if (hit.closest('.participant, [data-field-gesture-origin="selectable"], .field-action-menu, .sandbox-controls, .composer-dock, [role="dialog"]')) continue;
+			return point;
+		}
+		const rect = (element: Element) => {
+			const box = element.getBoundingClientRect();
+			return { x: box.x, y: box.y, width: box.width, height: box.height };
+		};
+		throw new Error(`No field-owned blank point. fieldArea=${JSON.stringify(rect(fieldArea))} grid=${JSON.stringify(rect(grid))} controls=${JSON.stringify([...document.querySelectorAll('.sandbox-controls')].map(rect))}`);
+	}, preferred);
+}
+
 async function installTraceGeometryFrameSampling(page: Page): Promise<void> {
 	await page.addInitScript(() => {
 		type Rect = { x: number; y: number; width: number; height: number };
@@ -289,7 +315,7 @@ test.describe('DEV World Sandbox', () => {
 				if (firstVisible.surface && settled.surface) expect(firstVisible.surface[key]).toBeCloseTo(settled.surface[key], 1);
 			}
 
-			const blankCell = await fieldCellCenter(page, { x: 5, y: 3 });
+			const blankCell = await fieldOwnedBlankPoint(page, { x: 5, y: 3 });
 			await page.mouse.click(blankCell.x, blankCell.y);
 			await expect(rootCard).toHaveCount(0);
 			const reopenStart = (await sampleTraceGeometryFrames(page)).length;
@@ -340,6 +366,8 @@ test.describe('DEV World Sandbox', () => {
 		await page.getByRole('button', { name: 'Clear reply', exact: true }).click();
 		await expect(preview).toHaveCount(0);
 		await expect(editor).toHaveValue('preserved A');
+		await page.locator('.field-area').click({ position: { x: 8, y: 8 } });
+		await expect(page.locator('[data-trace-light-position="8,4"]')).toHaveCount(1);
 		await selectCell('8,4');
 		const menu = page.getByRole('menu');
 		if (await menu.isVisible()) await page.getByRole('menuitem', { name: '痕跡を調べる', exact: true }).click();
@@ -560,6 +588,8 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.locator('[data-trace-light-position="7,3"]')).toHaveCount(1);
 		await expect(page.locator('[data-trace-light-position="8,4"]')).toHaveCount(1);
 		await expect(page.locator('[data-trace-light-position="8,3"]')).toHaveCount(1);
+		await expect(page.locator('[data-trace-indicator-position="2,2"]')).toHaveCount(0);
+		await expect(page.locator('.trace-investigation-indicator')).toHaveCount(3);
 		const presentation = await lights.evaluateAll((elements) => elements.map((element) => ({
 			text: element.textContent,
 			pointerEvents: getComputedStyle(element).pointerEvents
@@ -595,7 +625,7 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.locator('[data-trace-root-id="' + '2'.repeat(64) + '"]')).toContainText('trace-only root near the viewer');
 		await expect(page.getByRole('menu', { name: 'Cell actions' })).toHaveCount(0);
 		const self = page.locator('.participant[data-self="true"]');
-		const start = await fieldCellCenter(page, { x: 5, y: 5 });
+		const start = await fieldOwnedBlankPoint(page, { x: 5, y: 5 });
 		await page.mouse.move(start.x, start.y);
 		await page.mouse.down();
 		await page.mouse.move(start.x + 24, start.y);
@@ -625,6 +655,8 @@ test.describe('DEV World Sandbox', () => {
 		await page.locator('[data-cell-position="2,2"]').focus();
 		await page.keyboard.press('Enter');
 		await expect(page.locator('.trace-root-bubble')).toHaveCount(0);
+		await expect(page.locator('.trace-proximity-feedback')).toHaveText('近づくと調べられる');
+		await expect(page.locator('.trace-proximity-feedback')).toHaveCount(0, { timeout: 1_500 });
 		const liveAnchor = await page.locator('[data-bubble-id="dev-trace-live-message"]').evaluate((element) => getComputedStyle(element).transform);
 		await page.locator('[data-cell-position="8,4"]').click({ position: { x: 4, y: 4 } });
 		await expect(page.locator('[data-trace-root-id="' + '2'.repeat(64) + '"]')).toContainText('trace-only root near the viewer');
@@ -739,6 +771,39 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.locator('.trace-root-bubble')).toHaveCount(0);
 		await expect(page.locator('[data-trace-light-position="8,4"]')).toHaveCount(1);
 		await expect(page.locator('.trace-light')).toHaveCount(4);
+	});
+
+	test('does not leave a selectable trigger behind for the hidden open Trace light', async ({ page }) => {
+		await page.setViewportSize({ width: 900, height: 720 });
+		await page.emulateMedia({ reducedMotion: 'reduce' });
+		await page.goto('/?devWorld=1&devTrace=lights');
+		await expect(page.locator('[data-cell-position="8,4"]')).toBeVisible();
+		await page.locator('[data-cell-position="8,4"]').click();
+		await expect(page.locator('[data-trace-root-id="' + '2'.repeat(64) + '"]')).toBeVisible();
+		await expect(page.locator('[data-trace-light-position="8,4"]')).toHaveCount(0);
+		await expect(page.locator('[data-trace-indicator-position="8,4"]')).toHaveCount(0);
+		await expect(page.locator('[data-cell-position="8,4"]')).toHaveCount(0);
+		const cell = await page.locator('.field-grid').evaluate((grid) => {
+			const scene = document.querySelector<HTMLElement>('.field-scene');
+			if (!scene) throw new Error('Expected the field scene.');
+			return Number.parseFloat(getComputedStyle(scene).getPropertyValue('--cell-size'));
+		});
+		const grid = await page.locator('.field-grid').boundingBox();
+		if (!grid) throw new Error('Expected the field grid.');
+		await page.mouse.click(grid.x + 8 * cell + 2, grid.y + 4 * cell + 2);
+		await expect(page.locator('.trace-root-bubble')).toHaveCount(0);
+	});
+
+	test('reactivates an inactive DEV self through Trace inspection', async ({ page }) => {
+		await page.setViewportSize({ width: 900, height: 720 });
+		await page.emulateMedia({ reducedMotion: 'reduce' });
+		await page.goto('/?devWorld=1&devTrace=lights&devPresence=inactive');
+		await expect(page.locator('.participant[data-self="true"]')).toHaveCount(0);
+		await expect(page.locator('[data-cell-position="8,4"]')).toHaveAttribute('aria-label', '痕跡を調べる');
+		await page.locator('[data-cell-position="8,4"]').click();
+		await expect(page.locator('[data-trace-root-id="' + '2'.repeat(64) + '"]')).toContainText('trace-only root near the viewer');
+		await expect(page.locator('.participant[data-self="true"]')).toHaveCount(1);
+		await expect(page.locator('.trace-proximity-feedback')).toHaveCount(0);
 	});
 
 	test('presents deterministic direct Trace replies without external runtime ownership', async ({ page }) => {
@@ -2166,7 +2231,7 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.locator('.field-movement-layer, .movement-cell, .movement-cell-chevron')).toHaveCount(0);
 
 		const self = page.locator('.participant').first();
-		const start = await fieldCellCenter(page, { x: 5, y: 5 });
+		const start = await fieldOwnedBlankPoint(page, { x: 5, y: 5 });
 		await page.mouse.move(start.x, start.y);
 		await page.mouse.down();
 		await page.mouse.move(start.x + 8, start.y);
@@ -2211,7 +2276,7 @@ test.describe('DEV World Sandbox', () => {
 	test('continues diagonal pointer movement at the shared 500ms cadence', async ({ page }) => {
 		await openClockedDevWorld(page);
 		const self = page.locator('.participant[data-self="true"]');
-		const start = await fieldCellCenter(page, { x: 5, y: 5 });
+		const start = await fieldOwnedBlankPoint(page, { x: 5, y: 5 });
 		await page.mouse.move(start.x, start.y);
 		await page.mouse.down();
 		await page.mouse.move(start.x + 24, start.y - 24);
@@ -2226,7 +2291,7 @@ test.describe('DEV World Sandbox', () => {
 
 	test('accepts the touch PointerEvent path without changing the movement API', async ({ page }) => {
 		await openDevWorld(page);
-		const start = await fieldCellCenter(page, { x: 5, y: 5 });
+		const start = await fieldOwnedBlankPoint(page, { x: 5, y: 5 });
 		await page.locator('.field-area').evaluate((node, point) => {
 			const init = { bubbles: true, pointerId: 17, pointerType: 'touch', isPrimary: true, button: 0 } as const;
 			node.dispatchEvent(new PointerEvent('pointerdown', { ...init, clientX: point.x, clientY: point.y }));
@@ -2303,7 +2368,7 @@ test.describe('DEV World Sandbox', () => {
 		await page.locator('[data-cell-position="8,4"]').click();
 		await expect(page.getByRole('menu', { name: 'Cell actions' })).toHaveCount(0);
 
-		const start = await fieldCellCenter(page, { x: 5, y: 5 });
+		const start = await fieldOwnedBlankPoint(page, { x: 5, y: 5 });
 		await page.mouse.move(start.x, start.y);
 		await page.mouse.down();
 		await page.mouse.move(start.x + 24, start.y);
@@ -2324,7 +2389,7 @@ test.describe('DEV World Sandbox', () => {
 		const self = page.locator('.participant').first();
 		for (let index = 0; index < 7; index += 1) await page.keyboard.press('ArrowLeft');
 		await expect(self).toHaveAttribute('data-position', '0,3');
-		const start = await fieldCellCenter(page, { x: 5, y: 5 });
+		const start = await fieldOwnedBlankPoint(page, { x: 5, y: 5 });
 		await page.mouse.move(start.x, start.y);
 		await page.mouse.down();
 		await page.mouse.move(start.x - 24, start.y);
@@ -2338,7 +2403,7 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '7,3');
-		const start = await fieldCellCenter(page, { x: 5, y: 5 });
+		const start = await fieldOwnedBlankPoint(page, { x: 5, y: 5 });
 		await page.mouse.move(start.x, start.y);
 		await page.mouse.down();
 		await page.mouse.move(start.x, start.y - 24);
@@ -2353,7 +2418,7 @@ test.describe('DEV World Sandbox', () => {
 
 		const self = page.locator('.participant[data-self="true"]');
 		await expect(self).toHaveAttribute('data-position', '7,3');
-		const start = await fieldCellCenter(page, { x: 5, y: 5 });
+		const start = await fieldOwnedBlankPoint(page, { x: 5, y: 5 });
 		await page.mouse.move(start.x, start.y);
 		await page.mouse.down();
 		await page.mouse.move(start.x + 24, start.y - 24);
@@ -2377,7 +2442,7 @@ test.describe('DEV World Sandbox', () => {
 		await expect(self).toHaveAttribute('data-position', '7,3');
 		for (let index = 0; index < 7; index += 1) await page.keyboard.press('ArrowLeft');
 		await expect(self).toHaveAttribute('data-position', '0,3');
-		const start = await fieldCellCenter(page, { x: 5, y: 5 });
+		const start = await fieldOwnedBlankPoint(page, { x: 5, y: 5 });
 		await page.mouse.move(start.x, start.y);
 		await page.mouse.down();
 		await page.mouse.move(start.x - 24, start.y - 24);
@@ -2393,7 +2458,7 @@ test.describe('DEV World Sandbox', () => {
 		await page.clock.runFor(50);
 		await expect(self).toHaveAttribute('data-position', '8,3');
 
-		const start = await fieldCellCenter(page, { x: 5, y: 5 });
+		const start = await fieldOwnedBlankPoint(page, { x: 5, y: 5 });
 		await page.mouse.move(start.x, start.y);
 		await page.mouse.down();
 		await page.clock.runFor(500);
@@ -2417,7 +2482,7 @@ test.describe('DEV World Sandbox', () => {
 		await dragJoystick(page, { x: 24, y: 0 });
 		await expect(self).toHaveAttribute('data-position', '8,3');
 
-		const start = await fieldCellCenter(page, { x: 5, y: 5 });
+		const start = await fieldOwnedBlankPoint(page, { x: 5, y: 5 });
 		await page.mouse.move(start.x, start.y);
 		await page.mouse.down();
 		await page.mouse.move(start.x + 24, start.y);
@@ -2431,7 +2496,7 @@ test.describe('DEV World Sandbox', () => {
 	test('updates pointer direction without an immediate request or timer restart', async ({ page }) => {
 		await openClockedDevWorld(page);
 		const self = page.locator('.participant[data-self="true"]');
-		const start = await fieldCellCenter(page, { x: 5, y: 5 });
+		const start = await fieldOwnedBlankPoint(page, { x: 5, y: 5 });
 		await page.mouse.move(start.x, start.y);
 		await page.mouse.down();
 		await page.mouse.move(start.x + 24, start.y);

@@ -34,6 +34,8 @@ reply-tree LRU evictionではrootとroot read stateを残し、そのtreeのrepl
 
 通常時、trace cellには共通の小さなlightだけを表示し、author ghostや件数は表示しない。replyは独立した通常field lightを生成しない。field上の通常lightはroot traceだけが所有する。
 
+表示中のroot lightがinvestigation range内にある場合は、調査可能であることを示す小さなinteraction indicatorをlight付近に表示する。indicatorはlogical-cell selectionを補助する表示であり、独立したpixel hit targetにはしない。
+
 rootを調査するとroot author ghostを表示する。authorはpubkeyから既存の決定的character割当で導出し、character catalogのimage / name / aboutだけを使用する。kind 0の取得、raw pubkey、npubの表示は行わない。reply authorはbubbleの兄弟native Profile buttonからProfile Dialogを開ける。
 
 cellにcurrent participantがいなければghostはparticipant相当位置に置く。いる場合はcurrentを優先してghostをcell edgeへ小さく半透明で置く。ghostはpresence、collision、occupancyに影響しない。通常時、current participantがrootと同cellにいてもroot lightは隠さず、edgeまたはforegroundへ視覚的にoffsetして存在を維持する。rootを調査してそのroot conversationが開いている間は、対象rootが属するcellのroot lightを非表示にする。conversationを閉じれば再表示する。このoffset lightは別のpixel hit targetではなく、cellのlogical selection規則を使う。
@@ -46,6 +48,8 @@ investigation rangeはrootの実際の `w` cell自身と周囲8 cellとする。
 movement rulesは[SPEC-30](./SPEC-30-フィールド・position・presence.md)を正とする。
 
 - rootはrange内でだけ調査でき、root調査はpresence activityとする。
+- range外のvisible root lightを操作した場合は、conversationやcontext menuを開かず、「近づくと調べられる」という一時feedbackだけを表示し、stateを変更しない。
+- Characterとroot lightが同じcellにある場合、range外のrootはcontext menuのactionとして数えず、Characterが1人ならProfile Dialogを直接開く。range内ではCharacter profileとTrace調査を既存context menuから選択できる。
 - replyを選択してさらに深く辿る操作もopen rootのrange内で行う。
 - root range外へ出るとreply modeを解除してdraftを破棄するが、conversation explorationは維持する。
 

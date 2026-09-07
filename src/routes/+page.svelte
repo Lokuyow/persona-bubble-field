@@ -67,7 +67,7 @@
 		type PreparedCharacterProfilePublication
 	} from '$lib/initialProfilePublication';
 	import { projectPresence, type PresenceProjectionOptions } from '$lib/presenceProjection';
-	import { createPresenceState, type PresenceState } from '$lib/presence';
+	import { createPresenceState, debugTimeoutParticipant, type PresenceState } from '$lib/presence';
 	import { addRecentMessage, createRecentMessageTimeline, type RecentMessageTimeline } from '$lib/recentMessageTimeline';
 	import { getVirtualKeyboardBottomInset, getVisualViewportKeyboardInset, type ViewportRect } from '$lib/keyboardInset';
 	import type { ParsedTraceReply, ParsedWorldMessage } from '$lib/nostrProtocol';
@@ -185,6 +185,8 @@
 		position: { x: number; y: number };
 		actions: readonly FieldCellAction[];
 	}> | null = null;
+	let proximityFeedback: Readonly<{ position: { x: number; y: number } }> | null = null;
+	let proximityFeedbackTimer: number | null = null;
 	let timelineOverflowById: Record<string, boolean> = {};
 	let timelineEntryHeights: Record<string, number> = {};
 	let timelineAvailableHeight = 0;
@@ -285,6 +287,9 @@
 	});
 
 	$: participantById = new Map(participantViews.map((participant) => [participant.id, participant]));
+	$: selfPresence = presenceState.participants.find((participant) => participant.id === selfProjectionId) ?? null;
+	$: selfLogicalPosition = selfPresence?.position ?? null;
+	$: selfIsActive = selfPresence?.status === 'active';
 	$: traceRootCells = groupTraceRoots(effectiveTraceRoots);
 	$: traceLightCells = traceRootCells
 		.filter((cell) => traceConversationState.kind !== 'open' || !sameCell(cell.position, traceConversationState.root.position))
@@ -292,12 +297,14 @@
 			...cell,
 			occupied: participantViews.some((participant) =>
 				participant.position.x === cell.position.x && participant.position.y === cell.position.y
-			)
+			),
+			inInvestigationRange: selfIsActive && selfLogicalPosition !== null &&
+				isWithinTraceInvestigationRange(selfLogicalPosition, cell.position)
 		}));
 	$: traceConversationProjection = resolveTraceConversationProjection(traceConversationState);
 	$: traceOnlyCellTriggers = traceRootCells.map((cell) => cell.position).filter((position) =>
 		!participantViews.some((participant) => sameCell(participant.position, position)) &&
-		actionsForCell(position, traceReplyMode).length > 0
+		traceLightCells.some((cell) => sameCell(cell.position, position))
 	);
 
 	$: visibleParticipantIds = new Set(
@@ -639,6 +646,9 @@
 			if (import.meta.env.DEV && devTrace === 'replies') {
 				devTraceReplyFixtureEnabled = true;
 				seedDevTraceReplyFixture();
+			}
+			if (import.meta.env.DEV && devSearchParams.get('devPresence') === 'inactive') {
+				setPresence(debugTimeoutParticipant(presenceState, DEV_WORLD_SELF_ID));
 			}
 			if (import.meta.env.DEV) {
 				void import('$lib/devTraceConversationRuntime').then(({ createDevTraceConversationRuntime }) => {
@@ -1011,6 +1021,8 @@
 
 		return () => {
 			mounted = false;
+			if (proximityFeedbackTimer !== null) window.clearTimeout(proximityFeedbackTimer);
+			proximityFeedbackTimer = null;
 			cancelPendingComposerSubmission(new DOMException('Submission was cancelled.', 'AbortError'));
 			observer.disconnect();
 			virtualKeyboard?.removeEventListener('geometrychange', updateComposerKeyboardInset);
@@ -1295,6 +1307,15 @@
 		fieldActionMenu = null;
 	}
 
+	function showTraceProximityFeedback(position: { x: number; y: number }): void {
+		proximityFeedback = { position: { ...position } };
+		if (proximityFeedbackTimer !== null) window.clearTimeout(proximityFeedbackTimer);
+		proximityFeedbackTimer = window.setTimeout(() => {
+			proximityFeedback = null;
+			proximityFeedbackTimer = null;
+		}, 1_000);
+	}
+
 	function closeTraceConversation(): void {
 		closeFieldActionMenu();
 		traceReplyMode = clearTraceReplyMode(traceReplyMode);
@@ -1307,16 +1328,19 @@
 			.filter((participant) => sameCell(participant.position, position))
 			.map((participant) => participant.id);
 		let trace: Extract<FieldCellAction, { kind: 'trace' }> | null = null;
-		const reselectCurrentRoot = !replyMode.target && traceConversationProjection?.current.kind === 'root' &&
-			sameCell(traceConversationProjection.current.event.position, position);
-		if (reselectCurrentRoot) {
+		const visibleTraceAtCell = traceLightCells.some((cell) => sameCell(cell.position, position));
+		const reselectCurrentRoot = traceConversationProjection?.current.kind === 'root' &&
+			sameCell(traceConversationProjection.current.event.position, position) && visibleTraceAtCell;
+		if (reselectCurrentRoot && !replyMode.target && selfIsActive && selfLogicalPosition && isWithinTraceInvestigationRange(selfLogicalPosition, position)) {
 			trace = { kind: 'trace', rootId: traceConversationProjection!.current.event.id, behavior: 'select-current' };
 		} else {
 			const rootCell = traceRootCells.find((cell) => sameCell(cell.position, position));
 			const currentIsRootCell = traceConversationProjection?.current.kind === 'root' &&
 				sameCell(traceConversationProjection.current.event.position, position);
 			const root = currentIsRootCell ? undefined : rootCell?.roots[0];
-			if (root) trace = { kind: 'trace', rootId: root.id, behavior: 'open-root' };
+			if (root && (!selfIsActive || (selfLogicalPosition && isWithinTraceInvestigationRange(selfLogicalPosition, root.position)))) {
+				trace = { kind: 'trace', rootId: root.id, behavior: 'open-root' };
+			}
 		}
 		return buildFieldCellActions({
 			participantIds,
@@ -1381,6 +1405,11 @@
 	function resolveFieldCellSelection(position: { x: number; y: number }, trigger?: HTMLButtonElement): void {
 		const resolution = resolveFieldCellActions(actionsForCell(position));
 		if (resolution.kind === 'none') {
+			const visibleOutOfRangeTrace = selfIsActive && traceLightCells.some((cell) => sameCell(cell.position, position) && !cell.inInvestigationRange);
+			if (visibleOutOfRangeTrace) {
+				showTraceProximityFeedback(position);
+				return;
+			}
 			closeTraceConversation();
 			return;
 		}
@@ -2358,8 +2387,24 @@
 							data-trace-light-occupied={cell.occupied ? 'true' : undefined}
 							style={`left: ${world.x}px; top: ${world.y}px;`}
 						></span>
+						{#if cell.inInvestigationRange}
+							<span
+								class="trace-investigation-indicator"
+								data-trace-indicator-position={`${cell.position.x},${cell.position.y}`}
+								aria-hidden="true"
+								style={`left: ${world.x + cellSize * 0.18}px; top: ${world.y - cellSize * 0.18}px;`}
+							>⌕</span>
+						{/if}
 					{/each}
 				</div>
+				{#if proximityFeedback}
+					<div
+						class="trace-proximity-feedback"
+						role="status"
+						aria-live="polite"
+						style={`left: ${(proximityFeedback.position.x + 0.5) * cellSize}px; top: ${(proximityFeedback.position.y + 0.18) * cellSize}px;`}
+					>近づくと調べられる</div>
+				{/if}
 				<div class="field-cell-selection-layer" aria-label="Trace investigation cells">
 					{#each traceOnlyCellTriggers as position (`${position.x},${position.y}`)}
 						<button
@@ -2368,7 +2413,9 @@
 							type="button"
 							on:dragstart|preventDefault
 							data-cell-position={`${position.x},${position.y}`}
-							aria-label="痕跡を調べる"
+				aria-label={!selfIsActive || (selfLogicalPosition && isWithinTraceInvestigationRange(selfLogicalPosition, position))
+					? '痕跡を調べる'
+					: '痕跡を調べる（近づくと調べられる）'}
 							style={`left: ${position.x * cellSize}px; top: ${position.y * cellSize}px;`}
 							on:click={(event) => {
 								event.stopPropagation();
@@ -2984,6 +3031,37 @@
 		box-shadow: 0 0 8px 3px rgba(255, 225, 120, 0.42);
 		pointer-events: none;
 		transform: translate(-50%, -50%);
+	}
+
+	.trace-investigation-indicator {
+		position: absolute;
+		width: max(12px, calc(var(--cell-size) * 0.24));
+		height: max(12px, calc(var(--cell-size) * 0.24));
+		color: rgba(255, 250, 205, 0.92);
+		font-size: max(12px, calc(var(--cell-size) * 0.24));
+		font-weight: 900;
+		line-height: 1;
+		text-align: center;
+		text-shadow: 0 0 4px rgba(84, 67, 26, 0.55);
+		transform: translate(-50%, -50%);
+		pointer-events: none;
+	}
+
+	.trace-proximity-feedback {
+		position: absolute;
+		z-index: 5;
+		width: max-content;
+		max-width: 150px;
+		padding: 3px 8px;
+		border: 1px solid rgba(255, 250, 205, 0.72);
+		border-radius: 999px;
+		background: rgba(52, 64, 54, 0.82);
+		color: #fffbdc;
+		font-size: 11px;
+		font-weight: 800;
+		line-height: 1.2;
+		transform: translate(-50%, -100%);
+		pointer-events: none;
 	}
 
 	.field-cell-selection-layer {
