@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { SpeechType } from './conversation';
 	import type { Size, WorldPoint } from './geometry';
+	import type { SpeechBubbleShape } from './speechBubblePath';
 	import type { TraceBubblePresentationLayout } from './traceBubblePresentation';
 	import {
 		bubbleCenter,
@@ -11,6 +12,7 @@
 		tailGeometry,
 		tailStart,
 		taperedBandGeometry,
+		liveSurfaceOcclusionMaskId,
 		traceSurfaceOcclusionMaskId,
 		type BubbleTone
 	} from './bubblePresentation';
@@ -20,8 +22,8 @@
 	const TRACE_RELATION_HALO_PARENT_WIDTH = 21;
 	const TRACE_RELATION_HALO_CHILD_WIDTH = 1.2;
 
-	type NormalTail = Readonly<{ id: string; tone: BubbleTone; speechType: SpeechType; anchor: WorldPoint; size: Size; target: WorldPoint }>;
-	type MergedTail = Readonly<{ id: string; tone: BubbleTone; speechType: SpeechType; anchor: WorldPoint; size: Size; members: readonly Readonly<{ id: string; target: WorldPoint }>[] }>;
+	type NormalTail = Readonly<{ id: string; tone: BubbleTone; speechType: SpeechType; anchor: WorldPoint; size: Size; target: WorldPoint; shape: SpeechBubbleShape | null }>;
+	type MergedTail = Readonly<{ id: string; tone: BubbleTone; speechType: SpeechType; anchor: WorldPoint; size: Size; shape: SpeechBubbleShape | null; members: readonly Readonly<{ id: string; target: WorldPoint }>[] }>;
 	type Props = Readonly<{
 		viewportSize: Size;
 		traceReady: boolean;
@@ -32,9 +34,40 @@
 	}>;
 
 	let { viewportSize, traceReady, traceLayout, traceRootTailTarget, normalTails, mergedTails }: Props = $props();
+	let specialNormalTails = $derived(normalTails.filter((bubble) => bubble.speechType !== 'normal' && bubble.shape));
+	let specialMergedTails = $derived(mergedTails.filter((bubble) => bubble.speechType !== 'normal' && bubble.shape));
+	let hasLiveSurfaceOcclusion = $derived(specialNormalTails.length > 0 || specialMergedTails.length > 0);
 </script>
 
 <svg class="tail-layer" viewBox={`0 0 ${viewportSize.width} ${viewportSize.height}`} aria-hidden="true">
+	{#if hasLiveSurfaceOcclusion}
+		{@const occlusionMask = liveSurfaceOcclusionMaskId()}
+		<defs>
+			<mask id={occlusionMask} maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x="0" y="0" width={viewportSize.width} height={viewportSize.height}>
+				<rect x="0" y="0" width={viewportSize.width} height={viewportSize.height} fill="white" />
+				{#each specialNormalTails as bubble (bubble.id)}
+					<path d={bubble.shape!.path} transform={`translate(${bubble.anchor.x} ${bubble.anchor.y})`} fill="black" />
+				{/each}
+				{#each specialMergedTails as bubble (bubble.id)}
+					<path d={bubble.shape!.path} transform={`translate(${bubble.anchor.x} ${bubble.anchor.y})`} fill="black" />
+				{/each}
+			</mask>
+		</defs>
+		<g data-live-surface-occlusion="true" mask={`url(#${occlusionMask})`}>
+			{#each specialNormalTails as bubble (bubble.id)}
+				{@const tail = tailGeometry(tailStart(bubble.anchor, bubble.size), bubble.target, 11, 2, specialTailExtension(bubble.speechType))}
+				<polygon class={`tail tail-${bubble.tone} tone-${bubble.tone}`} data-tail-participant-id={bubble.id} points={tail.points} style={bubbleToneStyle(bubble.tone)} />
+				<path class={`tail-outline tone-${bubble.tone}`} data-tail-participant-id={bubble.id} d={tail.outlinePath} style={bubbleToneStyle(bubble.tone)} />
+			{/each}
+			{#each specialMergedTails as bubble (bubble.id)}
+				{#each bubble.members as member, index (member.id)}
+					{@const tail = tailGeometry(mergedTailStart(bubble.anchor, bubble.size, index, bubble.members.length), member.target, 9, 2, specialTailExtension(bubble.speechType))}
+					<polygon class={`tail tail-${bubble.tone} tone-${bubble.tone}`} data-tail-participant-id={member.id} points={tail.points} style={bubbleToneStyle(bubble.tone)} />
+					<path class={`tail-outline tone-${bubble.tone}`} data-tail-participant-id={member.id} d={tail.outlinePath} style={bubbleToneStyle(bubble.tone)} />
+				{/each}
+			{/each}
+		</g>
+	{/if}
 	{#if traceReady && traceLayout}
 		{@const traceRoot = traceLayout.root}
 		{@const occlusionMask = traceSurfaceOcclusionMaskId(traceRoot.id)}
@@ -74,12 +107,12 @@
 			{/each}
 		</g>
 	{/if}
-	{#each normalTails as bubble (bubble.id)}
+	{#each normalTails.filter((bubble) => bubble.speechType === 'normal') as bubble (bubble.id)}
 		{@const tail = tailGeometry(tailStart(bubble.anchor, bubble.size), bubble.target, 11, 2, specialTailExtension(bubble.speechType))}
 		<polygon class={`tail tail-${bubble.tone} tone-${bubble.tone}`} data-tail-participant-id={bubble.id} points={tail.points} style={bubbleToneStyle(bubble.tone)} />
 		<path class={`tail-outline tone-${bubble.tone}`} data-tail-participant-id={bubble.id} d={tail.outlinePath} style={bubbleToneStyle(bubble.tone)} />
 	{/each}
-	{#each mergedTails as bubble (bubble.id)}
+	{#each mergedTails.filter((bubble) => bubble.speechType === 'normal') as bubble (bubble.id)}
 		{#each bubble.members as member, index (member.id)}
 			{@const tail = tailGeometry(mergedTailStart(bubble.anchor, bubble.size, index, bubble.members.length), member.target, 9, 2, specialTailExtension(bubble.speechType))}
 			<polygon class={`tail tail-${bubble.tone} tone-${bubble.tone}`} data-tail-participant-id={member.id} points={tail.points} style={bubbleToneStyle(bubble.tone)} />

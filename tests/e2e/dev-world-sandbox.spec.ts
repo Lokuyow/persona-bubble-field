@@ -1460,7 +1460,43 @@ test.describe('DEV World Sandbox', () => {
 			).toBe(true);
 		}
 		expect(await page.locator('.tail-layer polygon')).toHaveCount(7);
-		expect(await page.locator('.tail-layer path')).toHaveCount(7);
+		expect(await page.locator('.tail-layer .tail-outline')).toHaveCount(7);
+
+		const liveTailOcclusion = await page.locator('.tail-layer').evaluate((layer) => {
+			const group = layer.querySelector<SVGGElement>('[data-live-surface-occlusion]');
+			const groupMaskId = group?.getAttribute('mask')?.replace(/^url\(#|\)$/g, '');
+			const mask = groupMaskId ? layer.querySelector<SVGMaskElement>(`mask#${groupMaskId}`) : null;
+			const specialTails = [...(group?.querySelectorAll<SVGPolygonElement>('polygon[data-tail-participant-id]') ?? [])];
+			const normalTails = [...layer.querySelectorAll<SVGPolygonElement>(':scope > polygon[data-tail-participant-id]')];
+			const occluders = [...(mask?.querySelectorAll<SVGPathElement>('path[fill="black"]') ?? [])];
+			const pointInsideOccluder = (tail: SVGPolygonElement) => {
+				const first = tail.points.getItem(0);
+				const second = tail.points.getItem(1);
+				const midpoint = new DOMPoint((first.x + second.x) / 2, (first.y + second.y) / 2);
+				return occluders.some((occluder) => {
+					const inverse = occluder.getScreenCTM()?.inverse();
+					const tailMatrix = tail.getScreenCTM();
+					const tailPoint = tailMatrix ? midpoint.matrixTransform(tailMatrix) : null;
+					return Boolean(inverse && tailPoint && occluder.isPointInFill(tailPoint.matrixTransform(inverse)));
+				});
+			};
+			return {
+				groupMask: group?.getAttribute('mask'),
+				maskId: groupMaskId,
+				occluderCount: occluders.length,
+				specialTailCount: specialTails.length,
+				normalTailCount: normalTails.length,
+				specialUnderlapPointsOccluded: specialTails.map(pointInsideOccluder),
+				normalTailMasks: normalTails.map((tail) => tail.parentElement?.getAttribute('mask'))
+			};
+		});
+		expect(liveTailOcclusion.groupMask).toMatch(/^url\(#live-surface-occlusion\)$/);
+		expect(liveTailOcclusion.maskId).toBe('live-surface-occlusion');
+		expect(liveTailOcclusion.occluderCount).toBe(4);
+		expect(liveTailOcclusion.specialTailCount).toBe(6);
+		expect(liveTailOcclusion.normalTailCount).toBe(1);
+		expect(liveTailOcclusion.specialUnderlapPointsOccluded).toEqual([true, true, true, true, true, true]);
+		expect(liveTailOcclusion.normalTailMasks).toEqual([null]);
 
 		const tailUnions = await page.locator('.bubble-layer').evaluate(() => {
 			const bubbles = [...document.querySelectorAll<HTMLElement>('.bubble')];

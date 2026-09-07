@@ -175,3 +175,4 @@ function safeSvgId(bubbleId: string): string {
 
 export function speechOutlineMaskId(bubbleId: string): string { return `speech-tail-opening-${safeSvgId(bubbleId)}`; }
 export function traceSurfaceOcclusionMaskId(rootId: string): string { return `trace-surface-occlusion-${safeSvgId(rootId)}`; }
+export function liveSurfaceOcclusionMaskId(): string { return 'live-surface-occlusion'; }
