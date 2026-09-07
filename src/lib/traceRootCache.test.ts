@@ -10,6 +10,8 @@ import {
 import {
 	openTraceDatabase,
 	TRACE_DATABASE_NAME,
+	TRACE_REPLY_LRU_STORE,
+	TRACE_REPLY_STORE,
 	TRACE_ROOT_STORE,
 	type TraceDatabase
 } from './traceDatabase';
@@ -138,14 +140,30 @@ describe('trace root cache reconciliation', () => {
 			.map((root) => root.id)).toEqual([next.id, old.id]);
 	});
 
-	it('evicts the oldest cached root when a new root exceeds the per-cell cap', async () => {
+	it('shrinks a legacy same-cell multi-root cache to its newest root without migration', async () => {
 		const roots = [1, 2, 3, 4].map((createdAt) =>
 			lotteryRoot({ createdAt, position: { x: 0, y: 0 }, nonce: `cell-${createdAt}` })
 		);
 		const field = { columns: 30, rows: 1 };
-		await reconcileTraceRootCache({ channelId: CHANNEL_ID, field, rawEvents: roots.slice(0, 3) });
+		for (const event of roots.slice(0, 3)) await seed(CHANNEL_ID, event.id, event);
 		expect((await reconcileTraceRootCache({ channelId: CHANNEL_ID, field, rawEvents: [roots[3]] }))
-			.map((root) => root.id)).toEqual([roots[3].id, roots[2].id, roots[1].id]);
+			.map((root) => root.id)).toEqual([roots[3].id]);
+		expect((await records()).map((record) => (record as { eventId: string }).eventId)).toEqual([roots[3].id]);
+	});
+
+	it('cleans reply and LRU state for a same-cell root evicted by reconciliation', async () => {
+		const old = lotteryRoot({ createdAt: 1, position: { x: 0, y: 0 }, nonce: 'cleanup-old' });
+		const newest = lotteryRoot({ createdAt: 2, position: { x: 0, y: 0 }, nonce: 'cleanup-newest' });
+		const db = await database();
+		await db.put(TRACE_ROOT_STORE, { channelId: CHANNEL_ID, eventId: old.id, rawEvent: old });
+		await db.put(TRACE_ROOT_STORE, { channelId: CHANNEL_ID, eventId: newest.id, rawEvent: newest });
+		await db.put(TRACE_REPLY_STORE, { channelId: CHANNEL_ID, rootId: old.id, eventId: 'r'.repeat(64), rawEvent: null });
+		await db.put(TRACE_REPLY_LRU_STORE, { channelId: CHANNEL_ID, rootId: old.id, accessOrder: 1 });
+
+		await reconcileTraceRootCache({ channelId: CHANNEL_ID, field: { columns: 30, rows: 1 }, rawEvents: [] });
+
+		expect(await db.getAllKeys(TRACE_REPLY_STORE)).toEqual([]);
+		expect(await db.getAllKeys(TRACE_REPLY_LRU_STORE)).toEqual([]);
 	});
 
 	it('evicts the oldest cached root when a new root exceeds the global cap', async () => {

@@ -64,14 +64,11 @@ export function createDevTraceConversationRuntime(options: Readonly<{
 		if (state.kind === 'open' && state.root.id === root.id) {
 			return state.config.currentId === config.currentId ? selectTraceConversationSpeech(config.currentId) : { kind: 'blocked' };
 		}
-		const sameCellSwitch = state.kind === 'open' && state.root.id !== root.id &&
-			sameGridPosition(state.root.position, root.position);
 		const prepared = prepareTraceInspectionActivity({
 			presence: options.getPresence(),
 			selfId: options.selfId,
 			target: root.position,
 			nowMs: now(),
-			requireCurrentRange: sameCellSwitch,
 			random: options.random
 		});
 		if (prepared.kind === 'blocked') return { kind: 'blocked' };

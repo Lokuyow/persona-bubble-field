@@ -4,11 +4,7 @@ import type { ParsedWorldMessage } from './nostrProtocol';
 import {
 	groupTraceRoots,
 	isWithinTraceInvestigationRange,
-	newestTraceRootSelection,
-	prepareTraceInspectionActivity,
-	reconcileTraceRootSelection,
-	stepTraceRootSelection,
-	traceSelectionDetails
+	prepareTraceInspectionActivity
 } from './traceInvestigation';
 
 function root(id: string, createdAt: number, x = 1, y = 1): ParsedWorldMessage {
@@ -24,31 +20,12 @@ describe('trace investigation', () => {
 		expect(isWithinTraceInvestigationRange({ x: 1, y: 1 }, { x: 2, y: 3 })).toBe(false);
 	});
 
-	it('groups cells deterministically and sorts roots newest-first with lexical ties', () => {
+	it('groups effective roots deterministically by logical cell', () => {
 		const cells = groupTraceRoots([
-			root('c', 2, 2, 1), root('b', 3), root('a', 3), root('z', 1, 0, 0), root('a', 3)
+			root('c', 2, 2, 1), root('b', 3), root('z', 1, 0, 0), root('a', 3, 1, 2)
 		]);
-		expect(cells.map((cell) => `${cell.position.x},${cell.position.y}`)).toEqual(['0,0', '1,1', '2,1']);
-		expect(cells[1].roots.map((candidate) => candidate.id)).toEqual(['a', 'b']);
-	});
-
-	it('opens newest, bounds previous and next, and preserves selection across reorder', () => {
-		const cells = groupTraceRoots([root('old', 1), root('new', 2), root('middle', 1.5)]);
-		const opened = newestTraceRootSelection(cells[0])!;
-		expect(opened.rootId).toBe('new');
-		expect(stepTraceRootSelection(opened, cells, -1)).toEqual(opened);
-		const second = stepTraceRootSelection(opened, cells, 1);
-		expect(traceSelectionDetails(second, cells)?.index).toBe(1);
-		const last = stepTraceRootSelection(stepTraceRootSelection(second, cells, 1), cells, 1);
-		expect(traceSelectionDetails(last, cells)?.index).toBe(2);
-		expect(reconcileTraceRootSelection(second, groupTraceRoots([root('latest', 4), ...cells[0].roots]))).toEqual(second);
-	});
-
-	it('falls back to newest only after eviction and closes when the cell disappears', () => {
-		const selected = { position: { x: 1, y: 1 }, rootId: 'selected' };
-		expect(reconcileTraceRootSelection(selected, groupTraceRoots([root('newest', 4), root('other', 3)])))
-			.toEqual({ position: { x: 1, y: 1 }, rootId: 'newest' });
-		expect(reconcileTraceRootSelection(selected, groupTraceRoots([root('elsewhere', 4, 2, 2)]))).toBeNull();
+		expect(cells.map((cell) => `${cell.position.x},${cell.position.y}`)).toEqual(['0,0', '1,1', '2,1', '1,2']);
+		expect(cells.every((cell) => cell.roots)).toBe(true);
 	});
 
 	it('prepares active activity without moving and safely coalesces only the same second', () => {

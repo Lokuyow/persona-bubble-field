@@ -699,9 +699,15 @@ test.describe('DEV World Sandbox', () => {
 			openingError: expect.any(Number)
 		});
 		expect(normalRootSurface.openingError).toBeLessThan(1);
-		await expect(page.getByText('1/2', { exact: true })).toBeVisible();
-		await page.getByRole('button', { name: 'Next trace root' }).click();
-		await expect(page.locator('[data-trace-root-id="' + '5'.repeat(64) + '"]')).toContainText('older root');
+		await expect(page.locator('.trace-root-selector')).toHaveCount(0);
+		await expect(page.getByRole('button', { name: 'Previous trace root' })).toHaveCount(0);
+		await expect(page.getByRole('button', { name: 'Next trace root' })).toHaveCount(0);
+
+		await page.keyboard.press('ArrowLeft');
+		await profileTrigger(page, '女の子').click();
+		await expect(page.getByRole('menu', { name: 'Cell actions' })).toBeVisible();
+		await page.getByRole('menu', { name: 'Cell actions' }).locator('[data-cell-action="trace"]').click();
+		await expect(page.locator('[data-trace-root-id="' + '3'.repeat(64) + '"]')).toContainText('root beside the current participant');
 		const monologueRootOutline = await page.locator('.bubble-layer').evaluate(() => {
 			const tail = document.querySelector<SVGPolygonElement>('.tail-layer polygon[data-trace-tail-root-id]');
 			const outline = document.querySelector<SVGPathElement>('.tail-layer path[data-trace-tail-root-id]');
@@ -717,20 +723,17 @@ test.describe('DEV World Sandbox', () => {
 			outlineMask: null,
 			reopenCount: 0
 		});
-		await expect(page.getByText('2/2', { exact: true })).toBeVisible();
+		await expect(page.locator('.trace-root-selector')).toHaveCount(0);
 
 		await page.locator('.trace-ghost-profile-trigger').click();
 		await expect(profileDialog(page)).toBeVisible();
 		await page.keyboard.press('Escape');
 		await expect(profileDialog(page)).toBeHidden();
-		await expect(page.locator('[data-trace-root-id="' + '5'.repeat(64) + '"]')).toBeVisible();
+		await expect(page.locator('[data-trace-root-id="' + '3'.repeat(64) + '"]')).toBeVisible();
 
 		await page.keyboard.press('ArrowLeft');
-		await page.keyboard.press('ArrowLeft');
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '6,3');
-		await expect(page.locator('[data-trace-root-id="' + '5'.repeat(64) + '"]')).toBeVisible();
-		await page.getByRole('button', { name: 'Previous trace root' }).click();
-		await expect(page.locator('[data-trace-root-id="' + '5'.repeat(64) + '"]')).toBeVisible();
+		await expect(page.locator('[data-trace-root-id="' + '3'.repeat(64) + '"]')).toBeVisible();
 
 		await page.locator('.field-area').click({ position: { x: 8, y: 8 } });
 		await expect(page.locator('.trace-root-bubble')).toHaveCount(0);

@@ -31,7 +31,7 @@ function fixture(initialPresence?: PresenceState) {
 	let presence = initialPresence ?? createPresenceState({ columns: 4, rows: 3 }, 1_000, [
 		{ id: 'self', position: { x: 1, y: 1 } }
 	]);
-	let roots: readonly ParsedWorldMessage[] = [root('old', 1), root('new', 2)];
+	let roots: readonly ParsedWorldMessage[] = [root('old', 1, 0, 0), root('new', 2, 1, 1)];
 	let replies: readonly ParsedTraceReply[] = [];
 	const states: unknown[] = [];
 	const setPresence = vi.fn((next: PresenceState) => { presence = next; });
@@ -146,15 +146,6 @@ describe('DEV trace conversation runtime', () => {
 		});
 	});
 
-	it('keeps the current root when an explicit same-cell switch is out of range', () => {
-		const f = fixture();
-		f.runtime.openTraceConversation({ rootId: 'new', currentId: 'new' });
-		f.roots = [root('new', 2, 3, 2), root('far', 1, 3, 2)];
-		f.runtime.reconcileEffectiveRoots(f.roots);
-		expect(f.runtime.openTraceConversation({ rootId: 'far', currentId: 'far' })).toEqual({ kind: 'blocked' });
-		expect(f.runtime.getTraceConversationState()).toMatchObject({ kind: 'open', root: { id: 'new' } });
-	});
-
 	it('reactivates locally without network state and rejects an out-of-range post-reactivation', () => {
 		let presence = createPresenceState({ columns: 4, rows: 3 }, 1_000, [
 			{ id: 'self', position: { x: 2, y: 2 } },
@@ -171,7 +162,7 @@ describe('DEV trace conversation runtime', () => {
 		const f = fixture();
 		f.runtime.openTraceConversation({ rootId: 'old', currentId: 'old' });
 		f.setPresence.mockClear();
-		f.roots = [root('fallback', 3)];
+		f.roots = [root('fallback', 3, 0, 0)];
 		f.runtime.reconcileEffectiveRoots(f.roots);
 		expect(f.runtime.getTraceConversationState()).toMatchObject({ kind: 'open', root: { id: 'fallback' } });
 		expect(f.setPresence).not.toHaveBeenCalled();

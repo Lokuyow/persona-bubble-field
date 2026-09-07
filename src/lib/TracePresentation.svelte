@@ -9,17 +9,14 @@
 	import type { BubbleMeasurement } from './SpeechBubble.svelte';
 	import { bubbleToneStyle, specialTailExtension, tailGeometry, tailOutlineOpeningPoints, tailStart } from './bubblePresentation';
 
-	type TraceSelectionDetails = Readonly<{ index: number; total: number }> | null;
 	type Props = Readonly<{
 		layout: TraceBubblePresentationLayout | null;
 		ready: boolean;
-		selectedTraceDetails: TraceSelectionDetails;
 		replyRefresh: 'loading' | 'unavailable' | 'settled' | null;
 		traceRootTailTarget: WorldPoint | null;
 		bubbleOverflowById: Readonly<Record<string, boolean>>;
 		onSelectSpeech: (id: string) => void;
 		onOpenProfile: (characterId: string, trigger: HTMLButtonElement) => void;
-		onSelectAdjacentRoot: (direction: -1 | 1) => void;
 		onBubbleMeasurement: (id: string, measurement: BubbleMeasurement) => void;
 		onBubbleMeasurementRemoved: (id: string) => void;
 		registerBubbleRemeasure: (id: string, measure: () => void) => () => void;
@@ -31,13 +28,11 @@
 	let {
 		layout,
 		ready,
-		selectedTraceDetails,
 		replyRefresh,
 		traceRootTailTarget,
 		bubbleOverflowById,
 		onSelectSpeech,
 		onOpenProfile,
-		onSelectAdjacentRoot,
 		onBubbleMeasurement,
 		onBubbleMeasurementRemoved,
 		registerBubbleRemeasure,
@@ -164,13 +159,6 @@
 			<span class:trace-root-compact={layout.root.compact} class="bubble-content">{layout.root.event.content}</span>
 			{#if bubbleOverflowById[layout.root.id]}<span class="bubble-ellipsis" aria-hidden="true">…</span>{/if}
 		</button>
-		{#if selectedTraceDetails && selectedTraceDetails.total > 1}
-			<div class="trace-root-selector" aria-label="Trace roots in this cell">
-				<button type="button" aria-label="Previous trace root" disabled={selectedTraceDetails.index === 0} onclick={() => onSelectAdjacentRoot(-1)}>‹</button>
-				<span>{selectedTraceDetails.index + 1}/{selectedTraceDetails.total}</span>
-				<button type="button" aria-label="Next trace root" disabled={selectedTraceDetails.index === selectedTraceDetails.total - 1} onclick={() => onSelectAdjacentRoot(1)}>›</button>
-			</div>
-		{/if}
 		{#if replyRefresh && replyRefresh !== 'settled'}
 			<span class="trace-reply-status" data-reply-refresh={replyRefresh}>
 				{replyRefresh === 'loading' ? 'Loading…' : 'Replies unavailable'}
@@ -212,9 +200,5 @@
 	.trace-reply-card.speech-bubble-special { background: transparent; }
 	.trace-root-bubble .bubble-content,
 	.trace-reply-card .bubble-content { color: #26312f; opacity: 1; }
-	.trace-root-selector { position: absolute; top: calc(100% + 5px); left: 50%; z-index: 4; display: flex; align-items: center; gap: 6px; padding: 3px 5px; border: 1px solid rgba(65, 77, 73, 0.22); border-radius: 999px; background: rgba(250, 250, 244, 0.94); box-shadow: 0 4px 12px rgba(44, 54, 50, 0.14); color: #53625d; font-size: 10px; transform: translateX(-50%); pointer-events: auto; }
-	.trace-root-selector button { display: grid; width: 26px; height: 26px; place-items: center; padding: 0; border: 0; border-radius: 50%; background: transparent; color: inherit; font-size: 20px; line-height: 1; cursor: pointer; }
-	.trace-root-selector button:disabled { opacity: 0.32; cursor: default; }
-	.trace-root-selector button:focus-visible { outline: 2px solid #6dabb9; }
 	.trace-reply-status { position: absolute; top: calc(100% + 42px); left: 50%; width: max-content; max-width: 180px; padding: 2px 7px; border-radius: 999px; background: rgba(250, 250, 244, 0.88); color: #68736f; font-size: 9px; font-weight: 700; transform: translateX(-50%); }
 </style>

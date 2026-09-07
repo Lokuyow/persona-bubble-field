@@ -36,11 +36,11 @@ function channel(channelId: string): ChannelReference {
 	return { channelId, relayHint: 'wss://relay.example.com' };
 }
 
-function makeRoot(channelId: string, content: string, createdAt = 100): RootFixture {
+function makeRoot(channelId: string, content: string, createdAt = 100, position = { x: 0, y: 0 }): RootFixture {
 	for (let attempt = 0; attempt < 10_000; attempt += 1) {
 		const raw = finalizeWorldEvent(buildWorldMessageTemplate({
 			channel: channel(channelId), content: `${content}-${attempt}`, createdAt,
-			position: { x: 0, y: 0 }, speechType: 'normal'
+			position, speechType: 'normal'
 		}), SECRET_KEY);
 		if (BigInt(`0x${raw.id}`) % 5n !== 0n) continue;
 		const parsed = parseWorldMessage(raw, channelId);
@@ -217,7 +217,7 @@ describe('trace reply cache reconciliation', () => {
 
 	it('returns the full current-channel snapshot across two effective roots', async () => {
 		const firstRoot = makeRoot(CHANNEL_ID, 'first-root');
-		const secondRoot = makeRoot(CHANNEL_ID, 'second-root');
+		const secondRoot = makeRoot(CHANNEL_ID, 'second-root', 100, { x: 1, y: 0 });
 		await reconcileTraceRootCache({
 			channelId: CHANNEL_ID,
 			field: { columns: 20, rows: 1 },

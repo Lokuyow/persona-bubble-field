@@ -72,9 +72,7 @@
 	import type { ParsedTraceReply, ParsedWorldMessage } from '$lib/nostrProtocol';
 	import {
 		groupTraceRoots,
-		isWithinTraceInvestigationRange,
-		stepTraceRootSelection,
-		traceSelectionDetails
+		isWithinTraceInvestigationRange
 	} from '$lib/traceInvestigation';
 	import type {
 		TraceConversationController,
@@ -296,13 +294,6 @@
 			)
 		}));
 	$: traceConversationProjection = resolveTraceConversationProjection(traceConversationState);
-	$: selectedTraceDetails = traceConversationState.kind === 'open' &&
-		traceConversationState.config.currentId === traceConversationState.root.id
-		? traceSelectionDetails({
-			position: traceConversationState.root.position,
-			rootId: traceConversationState.root.id
-		}, traceRootCells)
-		: null;
 	$: traceOnlyCellTriggers = traceRootCells.map((cell) => cell.position).filter((position) =>
 		!participantViews.some((participant) => sameCell(participant.position, position)) &&
 		actionsForCell(position, traceReplyMode).length > 0
@@ -1323,9 +1314,7 @@
 			const rootCell = traceRootCells.find((cell) => sameCell(cell.position, position));
 			const currentIsRootCell = traceConversationProjection?.current.kind === 'root' &&
 				sameCell(traceConversationProjection.current.event.position, position);
-			const root = currentIsRootCell
-				? undefined
-				: rootCell?.roots.find((candidate) => candidate.id !== traceConversationProjection?.root.id);
+			const root = currentIsRootCell ? undefined : rootCell?.roots[0];
 			if (root) trace = { kind: 'trace', rootId: root.id, behavior: 'open-root' };
 		}
 		return buildFieldCellActions({
@@ -1482,17 +1471,6 @@
 				cancelPointerJoystick = () => {};
 			}
 		};
-	}
-
-	function selectAdjacentTraceRoot(delta: -1 | 1): void {
-		if (!selectedTraceDetails) return;
-		const current = {
-			position: selectedTraceDetails.cell.position,
-			rootId: selectedTraceDetails.root.id
-		};
-		const next = stepTraceRootSelection(current, traceRootCells, delta);
-		if (next.rootId === current.rootId) return;
-		investigateTraceRoot(next.rootId);
 	}
 
 	function fieldActionLabel(action: FieldCellAction): string {
@@ -1785,10 +1763,6 @@
 			{
 				id: '4'.repeat(64), pubkey: 'd'.repeat(64), createdAt: now - 1,
 				content: 'newest root on an available movement cell', speechType: 'normal', position: { x: 8, y: 3 }
-			},
-			{
-				id: '5'.repeat(64), pubkey: 'e'.repeat(64), createdAt: now - 2,
-				content: 'older root on the same movement cell', speechType: 'monologue', position: { x: 8, y: 3 }
 			}
 		]);
 	}
@@ -2494,13 +2468,11 @@
 			<TracePresentation
 				layout={traceTreeLayout}
 				ready={tracePresentationReady}
-				{selectedTraceDetails}
 				replyRefresh={traceConversationState.kind === 'open' ? traceConversationState.replyRefresh : null}
 				{traceRootTailTarget}
 				{bubbleOverflowById}
 				onSelectSpeech={selectTraceSpeech}
 				onOpenProfile={openProfile}
-				onSelectAdjacentRoot={selectAdjacentTraceRoot}
 				onBubbleMeasurement={applyBubbleMeasurement}
 				onBubbleMeasurementRemoved={removeBubbleMeasurement}
 				registerBubbleRemeasure={registerBubbleRemeasure}

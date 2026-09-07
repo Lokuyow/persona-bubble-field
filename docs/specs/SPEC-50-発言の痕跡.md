@@ -14,7 +14,7 @@ trace root候補は、有効なtop-level kind 42だけとする。normal / shout
 BigInt(`0x${event.id}`) % 5n === 0n
 ```
 
-上の決定的20%抽選にsparse-world boost、密度補正、時間expiryは設けない。1 cellあたりのrootは最大3件、global root上限は `floor(total logical cell count / 10)` とする。上限はrootだけを数え、kind 1111 replyは数えない。上限超過時は古いrootから落とし、同時刻は既存の決定的orderingに従う。
+上の決定的20%抽選にsparse-world boost、密度補正、時間expiryは設けない。effective rootは1 logical cellあたり最大1件とし、同一cellに複数のeligible root candidateがある場合はnewest rootだけを残す。`createdAt` が同じ場合は既存の決定的event ID orderingで1件を決める。global root上限は `floor(total logical cell count / 10)` とする。per-cell survivorを決めた後にglobal capを適用し、上限はrootだけを数え、kind 1111 replyは数えない。
 
 ### root cache
 
@@ -36,9 +36,9 @@ reply-tree LRU evictionではrootとroot read stateを残し、そのtreeのrepl
 
 rootを調査するとroot author ghostを表示する。authorはpubkeyから既存の決定的character割当で導出し、character catalogのimage / name / aboutだけを使用する。kind 0の取得、raw pubkey、npubの表示は行わない。reply authorはbubbleの兄弟native Profile buttonからProfile Dialogを開ける。
 
-cellにcurrent participantがいなければghostはparticipant相当位置に置く。いる場合はcurrentを優先してghostをcell edgeへ小さく半透明で置く。ghostはpresence、collision、occupancyに影響しない。通常時、current participantがrootと同cellにいてもroot lightは隠さず、edgeまたはforegroundへ視覚的にoffsetして存在を維持する。rootを調査してそのroot conversationが開いている間は、対象rootが属するcellの共通root lightを非表示にする。conversationを閉じれば再表示する。同一cellに複数rootがある場合も、いずれかのrootをそのcellで調査中は共通lightを非表示にし、他cellのlightは維持する。このoffset lightは別のpixel hit targetではなく、cellのlogical selection規則を使う。
+cellにcurrent participantがいなければghostはparticipant相当位置に置く。いる場合はcurrentを優先してghostをcell edgeへ小さく半透明で置く。ghostはpresence、collision、occupancyに影響しない。通常時、current participantがrootと同cellにいてもroot lightは隠さず、edgeまたはforegroundへ視覚的にoffsetして存在を維持する。rootを調査してそのroot conversationが開いている間は、対象rootが属するcellのroot lightを非表示にする。conversationを閉じれば再表示する。このoffset lightは別のpixel hit targetではなく、cellのlogical selection規則を使う。
 
-同一cellに複数rootがある場合、通常時は1つのlightだけを表示し、investigation前は件数を表示しない。最初はnewest rootを選ぶ。investigation後は `1/3` 等を表示し、dedicated prev/nextでrootを切り替える。root一覧をcontext menuに並べない。
+root lightはcellごとに1つだけ表示し、件数表示は持たない。logical cellから調査できるrootも常に1件である。
 
 ### investigation range
 
@@ -103,8 +103,7 @@ root readは、root ghostと実際のroot本文bubbleの**両方**が実表示�
 
 自分がauthorであるeventへのdirect replyだけを未読候補とする。self-replyは表示できてもnotification対象外とする。
 
-- root read/unreadはlight opacityへ反映する。同一cellに複数rootがある場合、全rootがreadなら弱いopacity、1件でもunreadなら未読opacityとする。
-- reply unreadの有無はlight colorへ反映する。同一cellに複数rootがある場合、いずれかのrootにreply unreadがあればunread color、全rootにreply unreadがなければ通常colorとする。
+- root read/unreadはlight opacityへ反映する。reply unreadの有無はlight colorへ反映する。
 - global unread indicatorはComposer dockに置き、Chatterとは別UIとする。操作時は「どこかにあなたへの返信の痕跡があります」のように未読存在だけを説明する。本文、author、場所、方向、距離、件数を表示せず、auto-navigationもしない。
 
 ## 27. trace bubbleの視覚的優先順位
