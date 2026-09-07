@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { asset } from '$app/paths';
-	import { Avatar, Dialog, ScrollArea } from 'bits-ui';
+	import { Dialog, ScrollArea } from 'bits-ui';
 	import { getCharacterById } from '$lib/character';
+	import CharacterAvatar from './CharacterAvatar.svelte';
 
 	let {
 		onOpenChange,
@@ -24,10 +24,7 @@
 			<Dialog.Overlay class="profile-dialog-overlay" />
 			<Dialog.Content class="profile-dialog-content" preventScroll={false} {onCloseAutoFocus}>
 				<div class="profile-dialog-header">
-					<Avatar.Root class="profile-dialog-avatar">
-						<Avatar.Image src={asset(`/${character.picture}`)} alt="" />
-						<Avatar.Fallback>{character.name.slice(0, 1)}</Avatar.Fallback>
-					</Avatar.Root>
+					<CharacterAvatar class="profile-dialog-avatar" {character} />
 					<div>
 						<Dialog.Title>{character.name}</Dialog.Title>
 						<Dialog.Description class="visually-hidden">キャラクターのプロフィール</Dialog.Description>
@@ -184,7 +181,7 @@
 	}
 
 	:global(.profile-dialog-close:focus-visible) {
-		outline: 3px solid #6dabb9;
+		outline: 3px solid var(--color-focus-ring);
 		outline-offset: 2px;
 	}
 

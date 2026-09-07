@@ -1,0 +1,43 @@
+:root {
+	--app-background: #161921;
+	--color-accent: #cf06fe;
+	--color-accent-soft: #fbe9ff;
+	--color-focus-ring: #6dabb9;
+}
+
+@supports (color: oklch(63.2% 0.306 317.3)) {
+	:root {
+		--color-accent: oklch(63.2% 0.306 317.3);
+	}
+}
+
+@supports (color: color-mix(in oklch, red 12%, white 88%)) {
+	:root {
+		--color-accent-soft: color-mix(
+			in oklch,
+			var(--color-accent) 12%,
+			white 88%
+		);
+	}
+}
+
+* {
+	box-sizing: border-box;
+}
+
+html {
+	background: var(--app-background);
+}
+
+body {
+	margin: 0;
+	min-width: 320px;
+	background: var(--app-background);
+	color: #2e3435;
+	font-family: 'Trebuchet MS', 'Avenir Next', system-ui, sans-serif;
+}
+
+button {
+	font: inherit;
+	cursor: pointer;
+}
