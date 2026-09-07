@@ -1397,13 +1397,17 @@
 			start: JoystickPoint;
 			anchor: { x: number; y: number };
 			dragging: boolean;
+			captureOwner: HTMLElement;
 		}> | null = null;
 
-		const isInteractiveTarget = (event: PointerEvent): boolean => event.composedPath().some((target) =>
-			target instanceof HTMLElement && target.matches(
-				'button, input, textarea, select, [contenteditable="true"], .field-action-menu'
-			)
-		);
+		const fieldGestureOrigin = (event: PointerEvent): HTMLElement | null => {
+			for (const target of event.composedPath()) {
+				if (!(target instanceof HTMLElement)) continue;
+				if (target.matches('[data-field-gesture-origin="selectable"]')) return target;
+				if (target.matches('button, input, textarea, select, [contenteditable="true"], .field-action-menu')) return null;
+			}
+			return null;
+		};
 		const releasePointerCapture = (pointerId: number) => {
 			if (node.hasPointerCapture(pointerId)) node.releasePointerCapture(pointerId);
 		};
@@ -1412,7 +1416,10 @@
 			activeGesture = null;
 			if (gesture) {
 				movementHoldStopPointer(gesture.pointerId);
-				try { releasePointerCapture(gesture.pointerId); } catch { /* pointer capture may already be lost */ }
+				try {
+					if (gesture.captureOwner.hasPointerCapture(gesture.pointerId)) gesture.captureOwner.releasePointerCapture(gesture.pointerId);
+					releasePointerCapture(gesture.pointerId);
+				} catch { /* pointer capture may already be lost */ }
 			}
 			pointerJoystick = null;
 		};
@@ -1420,18 +1427,23 @@
 			const gesture = activeGesture;
 			if (!gesture || gesture.pointerId !== event.pointerId) return;
 			activeGesture = null;
-			try { releasePointerCapture(event.pointerId); } catch { /* pointer capture may already be lost */ }
+			try {
+				if (gesture.captureOwner.hasPointerCapture(event.pointerId)) gesture.captureOwner.releasePointerCapture(event.pointerId);
+				releasePointerCapture(event.pointerId);
+			} catch { /* pointer capture may already be lost */ }
 			if (gesture.dragging) movementHoldStopPointer(event.pointerId);
 			pointerJoystick = null;
-			if (selectTap && !gesture.dragging) resolveFieldCellSelection(gesture.anchor);
+			if (selectTap && !gesture.dragging && gesture.captureOwner === node) resolveFieldCellSelection(gesture.anchor);
 		};
 		const handlePointerDown = (event: PointerEvent) => {
-			if (!event.isPrimary || event.button !== 0 || activeGesture || isInteractiveTarget(event)) return;
+			if (!event.isPrimary || event.button !== 0 || activeGesture) return;
+			const origin = fieldGestureOrigin(event);
+			if (event.composedPath().some((target) => target instanceof HTMLElement && target.matches('button, input, textarea, select, [contenteditable="true"], .field-action-menu')) && !origin) return;
 			const start = { x: event.clientX, y: event.clientY };
 			const anchor = viewportPointToLogicalCell({ point: start, fieldArea: fieldAreaBounds, camera, field });
 			if (!anchor) return;
-			activeGesture = { pointerId: event.pointerId, start, anchor, dragging: false };
-			try { node.setPointerCapture(event.pointerId); } catch { /* synthetic events may not have a capturable pointer */ }
+			activeGesture = { pointerId: event.pointerId, start, anchor, dragging: false, captureOwner: origin ?? node };
+			try { (origin ?? node).setPointerCapture(event.pointerId); } catch { /* synthetic events may not have a capturable pointer */ }
 		};
 		const handlePointerMove = (event: PointerEvent) => {
 			const gesture = activeGesture;
@@ -1442,6 +1454,10 @@
 				const direction = joystickDirection(gesture.start, current);
 				if (!direction) return;
 				activeGesture = { ...gesture, dragging: true };
+				try {
+					if (gesture.captureOwner !== node && gesture.captureOwner.hasPointerCapture(event.pointerId)) gesture.captureOwner.releasePointerCapture(event.pointerId);
+					node.setPointerCapture(event.pointerId);
+				} catch { /* pointer capture may already be lost */ }
 				pointerJoystick = {
 					center: gesture.start,
 					thumb: clampJoystickThumb(gesture.start, current),
@@ -1464,7 +1480,11 @@
 		node.addEventListener('pointermove', handlePointerMove);
 		node.addEventListener('pointerup', (event) => finishGesture(event, true));
 		node.addEventListener('pointercancel', (event) => finishGesture(event, false));
-		node.addEventListener('lostpointercapture', (event) => finishGesture(event as PointerEvent, false));
+		node.addEventListener('lostpointercapture', (event) => {
+			const gesture = activeGesture;
+			if (!gesture || event.target !== node) return;
+			finishGesture(event as PointerEvent, false);
+		});
 		cancelPointerJoystick = cancelGesture;
 		return {
 			destroy() {
@@ -2344,7 +2364,9 @@
 					{#each traceOnlyCellTriggers as position (`${position.x},${position.y}`)}
 						<button
 							class="field-cell-selection-trigger"
+							data-field-gesture-origin="selectable"
 							type="button"
+							on:dragstart|preventDefault
 							data-cell-position={`${position.x},${position.y}`}
 							aria-label="痕跡を調べる"
 							style={`left: ${position.x * cellSize}px; top: ${position.y * cellSize}px;`}
@@ -2376,7 +2398,9 @@
 					>
 						<button
 							class="trace-ghost-profile-trigger"
+							data-field-gesture-origin="selectable"
 							type="button"
+							on:dragstart|preventDefault
 							aria-label={`${traceRootGhost.character.name} のプロフィールを開く`}
 							on:click={(event) => {
 								event.stopPropagation();

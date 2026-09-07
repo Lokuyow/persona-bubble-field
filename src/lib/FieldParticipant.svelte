@@ -37,7 +37,9 @@
 >
 	<button
 		class="participant-profile-trigger"
+		data-field-gesture-origin="selectable"
 		type="button"
+		ondragstart={(event) => event.preventDefault()}
 		aria-label={`${character.name} のプロフィールを開く`}
 		onclick={(event) => {
 			event.stopPropagation();
