@@ -3,7 +3,7 @@
 	import { SPEECH_SHORTCUT_IDS } from './speechSubmission';
 	import {
 		createComposerContextSync,
-		type ComposerContextPatch, type ComposerDesiredContext, type ComposerSubmitEnvelope,
+		type ComposerContextPatch, type ComposerDesiredContext, type ComposerPreview, type ComposerSubmitEnvelope,
 		type HostOwnedComposerOutput
 	} from './hostOwnedComposerContext';
 	import type { Event as NostrEvent } from 'nostr-tools/pure';
@@ -51,7 +51,7 @@
 			options: Readonly<{ signal: AbortSignal; shortcutId?: string }>
 		) => Promise<Readonly<{ eventId: string }>>;
 		desiredContext: ComposerDesiredContext;
-		loadPreview?: (targetId: string) => Promise<NostrEvent | null>;
+		loadPreview?: (targetId: string) => Promise<ComposerPreview | null>;
 		onPreviewClear: (generation: number) => void;
 		onEditorEmptyChange?: (isEmpty: boolean | null) => void;
 		onPreferredHeightChange?: (height: number) => void;
