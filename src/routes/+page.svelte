@@ -647,6 +647,9 @@
 				devTraceReplyFixtureEnabled = true;
 				seedDevTraceReplyFixture();
 			}
+			if (import.meta.env.DEV && devSearchParams.get('devPresence') === 'inactive') {
+				setPresence(debugTimeoutParticipant(presenceState, DEV_WORLD_SELF_ID));
+			}
 			if (import.meta.env.DEV) {
 				void import('$lib/devTraceConversationRuntime').then(({ createDevTraceConversationRuntime }) => {
 					if (!mounted || !devWorldSandboxEnabled) return;
@@ -1742,11 +1745,6 @@
 		setPresence(resetDevWorldPresence(FIELD, Date.now()));
 	}
 
-	function timeoutSandboxSelf(): void {
-		if (!devWorldSandboxEnabled) return;
-		setPresence(debugTimeoutParticipant(presenceState, DEV_WORLD_SELF_ID));
-	}
-
 	function seedDevRecentMessageTimelineFixture(): void {
 		if (!devWorldSandboxEnabled) return;
 		const now = Math.floor(Date.now() / 1000);
@@ -2561,7 +2559,6 @@
 					on:click={injectDevTraceLiveReply}
 				>Add live trace reply</button>
 			{/if}
-			<button class="sandbox-timeout-self" type="button" on:click={timeoutSandboxSelf}>Timeout self</button>
 			<button class="sandbox-reset" type="button" on:click={resetSandbox}>Reset sandbox</button>
 		</div>
 	{:else if selfPositionWriteState.kind === 'retryable' && !isWorldSelfActive}
