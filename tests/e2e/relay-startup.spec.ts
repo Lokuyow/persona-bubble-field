@@ -1221,6 +1221,30 @@ test.describe('Relay startup', () => {
 		});
 	});
 
+	test('bridges the site accent to the Host-owned Composer theme', async ({ page }) => {
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page);
+		await page.goto('/');
+		const composer = page.locator('ehagaki-composer');
+		await expect(composer).toBeVisible();
+		await expect(composer.getByRole('textbox', { name: '投稿エディター' })).toBeVisible();
+
+		const colors = await composer.evaluate((element) => {
+			const accentValue = getComputedStyle(element).getPropertyValue('--ehagaki-accent-color').trim();
+			const probe = document.createElement('span');
+			probe.style.color = 'var(--color-accent)';
+			document.body.append(probe);
+			const siteAccent = getComputedStyle(probe).color;
+			probe.style.color = accentValue;
+			const composerAccent = getComputedStyle(probe).color;
+			probe.remove();
+			return { accentValue, siteAccent, composerAccent };
+		});
+
+		expect(colors.accentValue).not.toBe('');
+		expect(colors.composerAccent).toBe(colors.siteAccent);
+	});
+
 	test('publishes normal, shout, and monologue through the editor button and Enter shortcuts', async ({ page }) => {
 		const editor = await openReadyRelayWorld(page);
 		const send = page.locator('ehagaki-composer').getByRole('button', { name: 'Send' });
