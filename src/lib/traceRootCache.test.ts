@@ -86,7 +86,7 @@ afterEach(() => {
 });
 
 describe('trace root cache reconciliation', () => {
-	it('preserves version 1 roots while upgrading the shared database to version 2', async () => {
+	it('preserves version 1 roots while upgrading the shared database to version 3', async () => {
 		const event = lotteryRoot({ nonce: 'legacy-v1' });
 		const legacy = await openDB(TRACE_DATABASE_NAME, 1, {
 			upgrade(db) { db.createObjectStore(TRACE_ROOT_STORE, { keyPath: ['channelId', 'eventId'] }); }
@@ -98,8 +98,10 @@ describe('trace root cache reconciliation', () => {
 			channelId: CHANNEL_ID, field: { columns: 20, rows: 1 }, rawEvents: []
 		})).map((root) => root.id)).toEqual([event.id]);
 		const upgraded = await database();
-		expect(upgraded.version).toBe(2);
-		expect([...upgraded.objectStoreNames]).toEqual(['trace-replies', 'trace-reply-lru', 'trace-roots']);
+		expect(upgraded.version).toBe(3);
+		expect([...upgraded.objectStoreNames]).toEqual([
+			'trace-replies', 'trace-reply-lru', 'trace-reply-read', 'trace-root-read', 'trace-roots'
+		]);
 	});
 
 	it('creates an empty cache, stores raw events, and restores them after reload', async () => {

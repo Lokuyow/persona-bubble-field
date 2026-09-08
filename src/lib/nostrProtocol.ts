@@ -600,16 +600,13 @@ export function buildTraceDirectReplyFilter(options: TraceDirectReplyFilterOptio
 
 export function buildTraceNotificationFilter(options: TraceNotificationFilterOptions): Filter {
 	assertPubkey(options.personaPubkey, 'Persona pubkey');
-	if (options.effectiveRootIds !== undefined) {
-		for (const rootId of options.effectiveRootIds) assertNostrEventId(rootId, 'Effective root ID');
-	}
+	// Relay compatibility requires the production notification query to remain
+	// the three-tag query. Effective-root and parent consistency is established
+	// after parsing through the existing Trace reply validator/cache.
 	return {
 		kinds: [TRACE_REPLY_KIND],
 		'#p': [options.personaPubkey],
 		'#L': [PROTOTYPE_NAMESPACE],
-		'#l': ['chat'],
-		...(options.effectiveRootIds && options.effectiveRootIds.length > 0
-			? { '#E': [...options.effectiveRootIds] }
-			: {})
+		'#l': ['chat']
 	};
 }

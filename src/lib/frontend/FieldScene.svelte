@@ -19,6 +19,8 @@
 	export type TraceLightCell = TraceRootCell & Readonly<{
 		occupied: boolean;
 		inInvestigationRange: boolean;
+		read: boolean;
+		unreadReply: boolean;
 	}>;
 	export type TraceRootGhost = Readonly<{
 		event: Pick<ParsedWorldMessage, 'id'>;
@@ -231,6 +233,10 @@
 					class="trace-light"
 					data-trace-light-position={`${cell.position.x},${cell.position.y}`}
 					data-trace-light-occupied={cell.occupied ? 'true' : undefined}
+					data-trace-root-read={cell.read ? 'true' : 'false'}
+					data-trace-root-unread-reply={cell.unreadReply ? 'true' : undefined}
+					class:trace-light-read={cell.read}
+					class:trace-light-unread-reply={cell.unreadReply}
 					style={`left: ${world.x}px; top: ${world.y}px;`}
 				></span>
 				{#if cell.inInvestigationRange}
@@ -405,6 +411,16 @@
 		box-shadow: 0 0 8px 3px rgba(255, 225, 120, 0.42);
 		pointer-events: none;
 		transform: translate(-50%, -50%);
+	}
+
+	.trace-light-read {
+		opacity: 0.48;
+	}
+
+	.trace-light-unread-reply {
+		border-color: rgba(255, 220, 188, 0.96);
+		background: rgba(224, 111, 84, 0.9);
+		box-shadow: 0 0 8px 3px rgba(224, 111, 84, 0.5);
 	}
 
 	.trace-investigation-indicator {

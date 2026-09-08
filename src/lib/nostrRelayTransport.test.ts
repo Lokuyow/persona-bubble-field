@@ -1206,7 +1206,7 @@ describe('trace reply transport', () => {
 		expect(f.transport.getDiagnostics().traceReplies?.relays.map((relay) => relay.status)).toContain('unavailable');
 	});
 
-	it('keeps notification cursor continuity only for its canonical persona and effective-root scope', async () => {
+	it('keeps notification cursor continuity for the persona scope only', async () => {
 		const f = fixture(1);
 		await f.start();
 		await completeTraceRootBootstrap(f.transport);
@@ -1231,7 +1231,8 @@ describe('trace reply transport', () => {
 		await vi.advanceTimersByTimeAsync(5);
 		await addedPending;
 		const addedFilter = filters(relay.traceRequests().at(-1)!).find((filter) => Array.isArray(filter['#p']))!;
-		expect(addedFilter.since).toBe(TIME - 700);
+		expect(addedFilter.since).toBe(TIME - 300);
+		expect(addedFilter).not.toHaveProperty('#E');
 		const changedPersona = {
 			...added,
 			notification: { ...added.notification, personaPubkey: 'b'.repeat(64) }

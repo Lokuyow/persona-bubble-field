@@ -702,7 +702,7 @@ describe('Nostr protocol foundation', () => {
 			kinds: [1111], '#p': ['c'.repeat(64)], '#L': [PROTOTYPE_NAMESPACE], '#l': ['chat']
 		});
 		expect(buildTraceNotificationFilter({ personaPubkey: 'c'.repeat(64), effectiveRootIds: [CHANNEL_ID, OTHER_CHANNEL_ID] })).toEqual({
-			kinds: [1111], '#p': ['c'.repeat(64)], '#L': [PROTOTYPE_NAMESPACE], '#l': ['chat'], '#E': [CHANNEL_ID, OTHER_CHANNEL_ID]
+			kinds: [1111], '#p': ['c'.repeat(64)], '#L': [PROTOTYPE_NAMESPACE], '#l': ['chat']
 		});
 	});
 
