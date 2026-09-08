@@ -3,6 +3,7 @@ import type { Character } from './character';
 import type { ParsedTraceReply, ParsedWorldMessage } from './nostrProtocol';
 import type { TraceConversationProjection } from './traceReplyPresentation';
 import { createPresentationBubbleShape, type BubbleTone } from './bubblePresentation';
+import { continuationBranchGeometry } from './traceContinuationGeometry';
 import { layoutTraceBubblePresentation, type TraceBubblePresentationInput } from './traceBubblePresentation';
 
 const character: Character = { characterId: '001', name: 'Test', about: 'Test character', picture: 'characters/001.webp' };
@@ -141,6 +142,22 @@ describe('trace bubble presentation', () => {
 		const withContinuation = layout({ ...projection, continuationReplyIds: [parent.id] }, sizes, {}, without)!;
 		expect(withContinuation.cards[0].anchor).toEqual(without.cards[0].anchor);
 		expect(withContinuation.cards[0].hasContinuation).toBe(true);
+	});
+
+	it('uses an interior center-based continuation origin for normal and special surfaces', () => {
+		const normal = continuationBranchGeometry({ anchor: { x: 100, y: 100 }, size: { width: 120, height: 60 }, shape: null });
+		const shoutShape = createPresentationBubbleShape('shout', 'continuation-shout', { width: 120, height: 60 }, 1000, { x: 0, y: 0, width: 1000, height: 700 });
+		const shout = continuationBranchGeometry({ anchor: { x: 100, y: 100 }, size: { width: 120, height: 60 }, shape: shoutShape });
+		const center = { x: 160, y: 130 };
+		for (const branch of [normal, shout]) {
+			const offset = { x: branch.start.x - center.x, y: branch.start.y - center.y };
+			expect(offset.x).toBeGreaterThan(0);
+			expect(offset.y).toBeGreaterThan(0);
+			expect(Math.hypot(offset.x, offset.y)).toBeLessThan(30);
+			expect(branch.end.x).toBeGreaterThan(branch.start.x);
+			expect(branch.end.y).toBeGreaterThan(branch.start.y);
+		}
+		expect(normal.start).toEqual(shout.start);
 	});
 
 	it('reuses anchors only within the same coordinate context', () => {
