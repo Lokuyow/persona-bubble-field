@@ -245,7 +245,7 @@
 						class="trace-investigation-indicator"
 						data-trace-indicator-position={`${cell.position.x},${cell.position.y}`}
 						aria-hidden="true"
-						style={`left: ${(cell.position.x + 1) * cellSize - 6}px; top: ${cell.position.y * cellSize + 6}px;`}
+						style={`left: ${(cell.position.x + 1) * cellSize - 10}px; top: ${cell.position.y * cellSize + 10}px;`}
 					>⌕</span>
 				{/if}
 			{/each}
