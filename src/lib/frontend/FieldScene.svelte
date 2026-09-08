@@ -4,8 +4,9 @@
 	import CharacterAvatar from '$lib/CharacterAvatar.svelte';
 	import FieldParticipant from '$lib/FieldParticipant.svelte';
 	import type { BubbleTone } from '$lib/bubblePresentation';
-	import type { FieldCellAction } from '$lib/fieldSelection';
-	import type { Bounds, Direction, GridPosition, Size, WorldPoint } from '$lib/geometry';
+	import { viewportPointToLogicalCell, type FieldCellAction } from '$lib/fieldSelection';
+	import type { Bounds, Direction, FieldSize, GridPosition, Size, WorldPoint } from '$lib/geometry';
+	import { clampJoystickThumb, isJoystickDrag, joystickDirection, type JoystickPoint } from '$lib/pointerJoystick';
 	import type { ProjectedParticipant } from '$lib/presenceProjection';
 	import type { Participant } from '$lib/frontend/presencePresentation';
 	import { isWithinTraceInvestigationRange, type TraceRootCell } from '$lib/traceInvestigation';
@@ -34,16 +35,18 @@
 		thumb: WorldPoint;
 		direction: Direction;
 	}>;
+	export type FieldSceneHandle = Readonly<{
+		cancelPointerGesture: () => void;
+	}>;
 
-	type FieldSelectionPointer = (node: HTMLElement) => void | Readonly<{ destroy: () => void }>;
 	type Props = Readonly<{
 		geometryReady: boolean;
 		fieldAreaBounds: Bounds;
 		fieldWorldSize: Size;
+		field: FieldSize;
 		cellSize: number;
 		camera: WorldPoint;
 		cameraAnimating: boolean;
-		fieldSelectionPointer: FieldSelectionPointer;
 		traceLightCells: readonly TraceLightCell[];
 		proximityFeedback: Readonly<{ position: GridPosition }> | null;
 		traceOnlyCellTriggers: readonly GridPosition[];
@@ -54,22 +57,25 @@
 		selfLogicalPosition: GridPosition | null;
 		traceRootGhost: TraceRootGhost | null;
 		fieldActionMenu: FieldActionMenu | null;
-		pointerJoystick: PointerJoystick | null;
 		resolveFieldCellSelection: (position: GridPosition, trigger?: HTMLButtonElement) => void;
 		executeFieldCellAction: (action: FieldCellAction, position: GridPosition, trigger?: HTMLButtonElement) => void;
 		fieldActionLabel: (action: FieldCellAction) => string;
+		closeFieldActionMenu: () => void;
 		onOpenProfile: (characterId: string, trigger: HTMLButtonElement) => void;
 		traceLightWorldPosition: (position: GridPosition, occupied: boolean) => WorldPoint;
+		onPointerMovementTakeover: (pointerId: number, direction: Direction) => void;
+		onPointerMovementUpdate: (pointerId: number, direction: Direction) => void;
+		onPointerMovementStop: (pointerId: number) => void;
 	}>;
 
 	let {
 		geometryReady,
 		fieldAreaBounds,
 		fieldWorldSize,
+		field,
 		cellSize,
 		camera,
 		cameraAnimating,
-		fieldSelectionPointer,
 		traceLightCells,
 		proximityFeedback,
 		traceOnlyCellTriggers,
@@ -80,13 +86,126 @@
 		selfLogicalPosition,
 		traceRootGhost,
 		fieldActionMenu,
-		pointerJoystick,
 		resolveFieldCellSelection,
 		executeFieldCellAction,
 		fieldActionLabel,
+		closeFieldActionMenu,
 		onOpenProfile,
-		traceLightWorldPosition
+		traceLightWorldPosition,
+		onPointerMovementTakeover,
+		onPointerMovementUpdate,
+		onPointerMovementStop
 	}: Props = $props();
+
+	let pointerJoystick = $state.raw<PointerJoystick | null>(null);
+	let cancelPointerGestureImpl = () => {};
+
+	export function cancelPointerGesture(): void {
+		cancelPointerGestureImpl();
+	}
+
+	function fieldSelectionPointer(node: HTMLElement) {
+		let activeGesture: Readonly<{
+			pointerId: number;
+			start: JoystickPoint;
+			anchor: GridPosition;
+			dragging: boolean;
+			captureOwner: HTMLElement;
+		}> | null = null;
+
+		const fieldGestureOrigin = (event: PointerEvent): HTMLElement | null => {
+			for (const target of event.composedPath()) {
+				if (!(target instanceof HTMLElement)) continue;
+				if (target.matches('[data-field-gesture-origin="selectable"]')) return target;
+				if (target.matches('button, input, textarea, select, [contenteditable="true"], .field-action-menu')) return null;
+			}
+			return null;
+		};
+		const releasePointerCapture = (pointerId: number) => {
+			if (node.hasPointerCapture(pointerId)) node.releasePointerCapture(pointerId);
+		};
+		const cancelGesture = () => {
+			const gesture = activeGesture;
+			activeGesture = null;
+			if (gesture) {
+				onPointerMovementStop(gesture.pointerId);
+				try {
+					if (gesture.captureOwner.hasPointerCapture(gesture.pointerId)) gesture.captureOwner.releasePointerCapture(gesture.pointerId);
+					releasePointerCapture(gesture.pointerId);
+				} catch { /* pointer capture may already be lost */ }
+			}
+			pointerJoystick = null;
+		};
+		const finishGesture = (event: PointerEvent, selectTap: boolean) => {
+			const gesture = activeGesture;
+			if (!gesture || gesture.pointerId !== event.pointerId) return;
+			activeGesture = null;
+			try {
+				if (gesture.captureOwner.hasPointerCapture(event.pointerId)) gesture.captureOwner.releasePointerCapture(event.pointerId);
+				releasePointerCapture(event.pointerId);
+			} catch { /* pointer capture may already be lost */ }
+			if (gesture.dragging) onPointerMovementStop(event.pointerId);
+			pointerJoystick = null;
+			if (selectTap && !gesture.dragging && gesture.captureOwner === node) resolveFieldCellSelection(gesture.anchor);
+		};
+		const handlePointerDown = (event: PointerEvent) => {
+			if (!event.isPrimary || event.button !== 0 || activeGesture) return;
+			const origin = fieldGestureOrigin(event);
+			if (event.composedPath().some((target) => target instanceof HTMLElement && target.matches('button, input, textarea, select, [contenteditable="true"], .field-action-menu')) && !origin) return;
+			const start = { x: event.clientX, y: event.clientY };
+			const anchor = viewportPointToLogicalCell({ point: start, fieldArea: fieldAreaBounds, camera, field });
+			if (!anchor) return;
+			activeGesture = { pointerId: event.pointerId, start, anchor, dragging: false, captureOwner: origin ?? node };
+			try { (origin ?? node).setPointerCapture(event.pointerId); } catch { /* synthetic events may not have a capturable pointer */ }
+		};
+		const handlePointerMove = (event: PointerEvent) => {
+			const gesture = activeGesture;
+			if (!gesture || gesture.pointerId !== event.pointerId) return;
+			const current = { x: event.clientX, y: event.clientY };
+			if (!gesture.dragging) {
+				if (!isJoystickDrag(gesture.start, current)) return;
+				const direction = joystickDirection(gesture.start, current);
+				if (!direction) return;
+				activeGesture = { ...gesture, dragging: true };
+				try {
+					if (gesture.captureOwner !== node && gesture.captureOwner.hasPointerCapture(event.pointerId)) gesture.captureOwner.releasePointerCapture(event.pointerId);
+					node.setPointerCapture(event.pointerId);
+				} catch { /* pointer capture may already be lost */ }
+				pointerJoystick = {
+					center: gesture.start,
+					thumb: clampJoystickThumb(gesture.start, current),
+					direction
+				};
+				closeFieldActionMenu();
+				onPointerMovementTakeover(event.pointerId, direction);
+				return;
+			}
+			const direction = joystickDirection(gesture.start, current);
+			if (!direction) return;
+			pointerJoystick = {
+				center: gesture.start,
+				thumb: clampJoystickThumb(gesture.start, current),
+				direction
+			};
+			onPointerMovementUpdate(event.pointerId, direction);
+		};
+		node.addEventListener('pointerdown', handlePointerDown);
+		node.addEventListener('pointermove', handlePointerMove);
+		node.addEventListener('pointerup', (event) => finishGesture(event, true));
+		node.addEventListener('pointercancel', (event) => finishGesture(event, false));
+		node.addEventListener('lostpointercapture', (event) => {
+			const gesture = activeGesture;
+			if (!gesture || event.target !== node) return;
+			finishGesture(event as PointerEvent, false);
+		});
+		cancelPointerGestureImpl = cancelGesture;
+		return {
+			destroy() {
+				cancelGesture();
+				cancelPointerGestureImpl = () => {};
+			}
+		};
+	}
 
 </script>
 
