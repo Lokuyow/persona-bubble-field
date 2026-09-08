@@ -753,10 +753,10 @@ test.describe('DEV World Sandbox', () => {
 		});
 		expect(geometry.empty.x).toBeCloseTo(8.5 * geometry.cellSize, 1);
 		expect(geometry.empty.y).toBeCloseTo(4.5 * geometry.cellSize, 1);
-		expect(geometry.emptyIndicator.x).toBeCloseTo(9 * geometry.cellSize - 6, 0);
-		expect(geometry.emptyIndicator.y).toBeCloseTo(4 * geometry.cellSize + 6, 0);
-		expect(geometry.occupiedIndicator.x).toBeCloseTo(8 * geometry.cellSize - 6, 0);
-		expect(geometry.occupiedIndicator.y).toBeCloseTo(3 * geometry.cellSize + 6, 0);
+		expect(geometry.emptyIndicator.x).toBeCloseTo(9 * geometry.cellSize - 10, 0);
+		expect(geometry.emptyIndicator.y).toBeCloseTo(4 * geometry.cellSize + 10, 0);
+		expect(geometry.occupiedIndicator.x).toBeCloseTo(8 * geometry.cellSize - 10, 0);
+		expect(geometry.occupiedIndicator.y).toBeCloseTo(3 * geometry.cellSize + 10, 0);
 		expect(geometry.occupiedIndicator.x - geometry.emptyIndicator.x).toBeCloseTo(-geometry.cellSize, 0);
 		expect(geometry.occupiedIndicator.y - geometry.emptyIndicator.y).toBeCloseTo(-geometry.cellSize, 0);
 
