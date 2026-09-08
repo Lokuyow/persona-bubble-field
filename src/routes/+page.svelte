@@ -43,7 +43,7 @@
 		resetDevWorldPresence,
 		resolveDevWorldCharacterId
 	} from '$lib/devWorldSandbox';
-	import { CHARACTER_CATALOG, type Character } from '$lib/character';
+	import { CHARACTER_CATALOG, getCharacterById, type Character } from '$lib/character';
 	import { deriveCharacterFromPubkey } from '$lib/characterAssignment';
 	import ProfileDialog from '$lib/ProfileDialog.svelte';
 	import {
@@ -191,6 +191,9 @@
 	let entryRetryable = false;
 	let selectedCharacterId = $state('001');
 	let selectedSpeechType = $state<SpeechType>('normal');
+	let profileDialogOpen = $derived(Boolean(
+		page.state.profileCharacterId && getCharacterById(page.state.profileCharacterId)
+	));
 	let lastProfileTrigger: HTMLButtonElement | null = null;
 	let composerEditorIsEmpty: boolean | null = null;
 	let chatterComponent: { initialize(width: number): void; isInitialized(): boolean; toggle(): void; resetMeasurements(): void };
@@ -211,7 +214,7 @@
 		canUseWASDForMovement,
 		isComposerEditorKeyboardEvent,
 		getComposerEditorIsEmpty: () => composerEditorIsEmpty,
-		isProfileDialogOpen: () => Boolean(document.querySelector('.profile-dialog-content')),
+		isProfileDialogOpen: () => profileDialogOpen,
 		isDocumentHidden: () => document.hidden,
 		cancelPointerGesture: () => fieldSceneComponent?.cancelPointerGesture()
 	});
@@ -1038,7 +1041,7 @@
 			event.ctrlKey ||
 			event.altKey ||
 			event.metaKey ||
-			document.querySelector('.profile-dialog-content')
+			profileDialogOpen
 		) return false;
 
 		const path = event.composedPath();
@@ -1056,7 +1059,7 @@
 			event.ctrlKey ||
 			event.altKey ||
 			event.metaKey ||
-			document.querySelector('.profile-dialog-content')
+			profileDialogOpen
 		) return false;
 
 		return !event.composedPath().some((target) => target instanceof HTMLElement && (
@@ -1072,7 +1075,7 @@
 			event.altKey ||
 			event.metaKey ||
 			isComposerEditorKeyboardEvent(event) ||
-			document.querySelector('.profile-dialog-content')
+			profileDialogOpen
 		) return false;
 
 		return !event.composedPath().some((target) => target instanceof HTMLElement && (
@@ -1095,7 +1098,7 @@
 			!event.ctrlKey &&
 			!event.altKey &&
 			!event.metaKey &&
-			!document.querySelector('.profile-dialog-content') &&
+			!profileDialogOpen &&
 			!event.composedPath().some((target) => target instanceof HTMLElement && (
 				target.matches('input, textarea, select') || target.isContentEditable
 			))
