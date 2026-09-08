@@ -25,6 +25,7 @@ describe('Trace reply presentation', () => {
 		});
 		expect(projection?.parent?.event.id).toBe(parent.id);
 		expect(projection?.directReplies.map((item) => item.id)).toEqual([older.id, newer.id]);
+		expect(projection?.continuationReplyIds).toEqual([]);
 		expect(adjacentTraceSpeech(projection!, root.id)?.kind).toBe('root');
 		expect(adjacentTraceSpeech(projection!, older.id)?.event.id).toBe(older.id);
 	});
@@ -39,6 +40,19 @@ describe('Trace reply presentation', () => {
 			config: { rootId: root.id, currentId: root.id }
 		});
 		expect(projection?.directReplies.map((item) => item.id)).toEqual([left.id, right.id, newer.id]);
+		expect(projection?.continuationReplyIds).toEqual([]);
 		expect(adjacentTraceSpeech(projection!, right.id)?.event.id).toBe(right.id);
+	});
+
+	it('only marks current direct replies whose accepted tree has a direct child', () => {
+		const first = reply('1'.repeat(64), root, 2);
+		const second = reply('2'.repeat(64), root, 3);
+		const knownChild = reply('3'.repeat(64), first, 4);
+		const projection = resolveTraceConversationProjection({
+			kind: 'open', root, replies: [second, first, knownChild], replyRefresh: 'settled',
+			config: { rootId: root.id, currentId: root.id }
+		});
+		expect(projection?.directReplies.map((item) => item.id)).toEqual([first.id, second.id]);
+		expect(projection?.continuationReplyIds).toEqual([first.id]);
 	});
 });

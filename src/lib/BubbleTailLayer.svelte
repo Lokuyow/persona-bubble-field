@@ -21,9 +21,15 @@
 	const TRACE_RELATION_FOREGROUND_CHILD_WIDTH = 0.4;
 	const TRACE_RELATION_HALO_PARENT_WIDTH = 21;
 	const TRACE_RELATION_HALO_CHILD_WIDTH = 1.2;
+	const TRACE_CONTINUATION_LENGTH = 28;
+	const TRACE_CONTINUATION_FOREGROUND_PARENT_WIDTH = 12;
+	const TRACE_CONTINUATION_FOREGROUND_CHILD_WIDTH = 0.4;
+	const TRACE_CONTINUATION_HALO_PARENT_WIDTH = 17;
+	const TRACE_CONTINUATION_HALO_CHILD_WIDTH = 1.2;
 
 	type NormalTail = Readonly<{ id: string; tone: BubbleTone; speechType: SpeechType; anchor: WorldPoint; size: Size; target: WorldPoint; shape: SpeechBubbleShape | null }>;
 	type MergedTail = Readonly<{ id: string; tone: BubbleTone; speechType: SpeechType; anchor: WorldPoint; size: Size; shape: SpeechBubbleShape | null; members: readonly Readonly<{ id: string; target: WorldPoint }>[] }>;
+	type ContinuationBubble = Readonly<{ anchor: WorldPoint; size: Size; shape: SpeechBubbleShape | null }>;
 	type Props = Readonly<{
 		viewportSize: Size;
 		traceReady: boolean;
@@ -37,6 +43,16 @@
 	let specialNormalTails = $derived(normalTails.filter((bubble) => bubble.speechType !== 'normal' && bubble.shape));
 	let specialMergedTails = $derived(mergedTails.filter((bubble) => bubble.speechType !== 'normal' && bubble.shape));
 	let hasLiveSurfaceOcclusion = $derived(specialNormalTails.length > 0 || specialMergedTails.length > 0);
+
+	function continuationBranchGeometry(bubble: ContinuationBubble) {
+		const bounds = bubble.shape?.bounds ?? { x: 0, y: 0, width: bubble.size.width, height: bubble.size.height };
+		const direction = { x: Math.SQRT1_2, y: Math.SQRT1_2 };
+		const center = { x: bubble.anchor.x + bounds.x + bounds.width / 2, y: bubble.anchor.y + bounds.y + bounds.height / 2 };
+		const distanceToSurface = Math.min(bounds.width / 2 / direction.x, bounds.height / 2 / direction.y);
+		const start = { x: center.x + direction.x * distanceToSurface, y: center.y + direction.y * distanceToSurface };
+		const end = { x: start.x + direction.x * TRACE_CONTINUATION_LENGTH, y: start.y + direction.y * TRACE_CONTINUATION_LENGTH };
+		return { start, end };
+	}
 </script>
 
 <svg class="tail-layer" viewBox={`0 0 ${viewportSize.width} ${viewportSize.height}`} aria-hidden="true">
@@ -104,6 +120,13 @@
 					<polygon class="trace-relation-halo" data-trace-relation-halo-reply-id={bubble.reply.id} points={halo.points} />
 					<polygon class="trace-relation-connector" data-trace-relation-reply-id={bubble.reply.id} points={foreground.points} />
 				{/if}
+				{#if bubble.hasContinuation}
+					{@const continuation = continuationBranchGeometry(bubble)}
+					{@const halo = taperedBandGeometry(continuation.start, continuation.end, TRACE_CONTINUATION_HALO_PARENT_WIDTH, TRACE_CONTINUATION_HALO_CHILD_WIDTH)}
+					{@const foreground = taperedBandGeometry(continuation.start, continuation.end, TRACE_CONTINUATION_FOREGROUND_PARENT_WIDTH, TRACE_CONTINUATION_FOREGROUND_CHILD_WIDTH)}
+					<polygon class="trace-continuation-branch-halo" data-trace-continuation-halo-reply-id={bubble.reply.id} points={halo.points} />
+					<polygon class="trace-continuation-branch" data-trace-continuation-reply-id={bubble.reply.id} points={foreground.points} />
+				{/if}
 			{/each}
 		</g>
 	{/if}
@@ -127,6 +150,8 @@
 	.tail-outline { fill: none; stroke: var(--tone-outline); stroke-width: 1; stroke-linecap: round; stroke-linejoin: round; }
 	.trace-relation-halo { fill: rgba(238, 245, 238, 0.64); pointer-events: none; }
 	.trace-relation-connector { fill: rgba(77, 101, 93, 0.72); pointer-events: none; }
+	.trace-continuation-branch-halo { fill: rgba(238, 245, 238, 0.64); pointer-events: none; }
+	.trace-continuation-branch { fill: rgba(77, 101, 93, 0.72); pointer-events: none; }
 	.trace-tail { fill: var(--trace-surface); }
 	.trace-tail-outline { stroke-dasharray: 4 3; }
 </style>

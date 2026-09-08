@@ -24,7 +24,7 @@ const child: ParsedTraceReply = {
 };
 
 function layout(projection: TraceConversationProjection, bubbleSizes: Record<string, { width: number; height: number }>, footprints: Record<string, { width: number; height: number }> = {}, previousLayout?: ReturnType<typeof layoutTraceBubblePresentation>, overrides: Partial<TraceBubblePresentationInput> = {}) {
-	return layoutTraceBubblePresentation({
+		return layoutTraceBubblePresentation({
 		projection,
 		fixedBubbles: [],
 		bubbleSizes,
@@ -55,7 +55,8 @@ describe('trace bubble presentation', () => {
 			root,
 			current: { kind: 'reply', event: current },
 			parent: { kind: 'reply', event: parent },
-			directReplies
+			directReplies,
+			continuationReplyIds: []
 		});
 		const sizes = Object.fromEntries([
 			[`trace-root-${root.id}`], [`trace-reply-${parent.id}`], [`trace-reply-${current.id}`],
@@ -81,13 +82,14 @@ describe('trace bubble presentation', () => {
 			[`trace-reply-${current.id}`]: { width: 180, height: 120 },
 			[`trace-reply-${child.id}`]: { width: 150, height: 90 }
 		};
-		const result = layout({ root, current: { kind: 'reply', event: current }, parent: { kind: 'reply', event: parent }, directReplies: [child] }, bubbleSizes, footprints);
+		const result = layout({ root, current: { kind: 'reply', event: current }, parent: { kind: 'reply', event: parent }, directReplies: [child], continuationReplyIds: [child.id] }, bubbleSizes, footprints);
 		expect(result?.cards.map((card) => card.role)).toEqual(['parent', 'current', 'child']);
 		expect(result?.cards.map((card) => ({ size: card.size, footprint: card.footprint }))).toEqual([
 			{ size: bubbleSizes[`trace-reply-${parent.id}`], footprint: footprints[`trace-reply-${parent.id}`] },
 			{ size: bubbleSizes[`trace-reply-${current.id}`], footprint: footprints[`trace-reply-${current.id}`] },
 			{ size: bubbleSizes[`trace-reply-${child.id}`], footprint: footprints[`trace-reply-${child.id}`] }
 		]);
+		expect(result?.cards.find((card) => card.reply.id === child.id)?.hasContinuation).toBe(true);
 		expect(result?.cards.map((card) => card.anchor)).toEqual([
 			{ x: 420, y: 300 }, { x: 590, y: 410 }, { x: 780, y: 540 }
 		]);
@@ -97,7 +99,7 @@ describe('trace bubble presentation', () => {
 		const shout: ParsedTraceReply = { ...current, id: id('e'), speechType: 'shout', parentId: root.id, parentKind: 42, parentPubkey: root.pubkey };
 		const bodySize = { width: 110, height: 54 };
 		const footprint = { width: 250, height: 120 };
-		const result = layout({ root, current: { kind: 'reply', event: shout }, parent: { kind: 'root', event: root }, directReplies: [] }, {
+		const result = layout({ root, current: { kind: 'reply', event: shout }, parent: { kind: 'root', event: root }, directReplies: [], continuationReplyIds: [] }, {
 			[`trace-root-${root.id}`]: { width: 100, height: 50 },
 			[`trace-reply-${shout.id}`]: bodySize
 		}, { [`trace-reply-${shout.id}`]: footprint });
@@ -115,11 +117,11 @@ describe('trace bubble presentation', () => {
 		const sizes = Object.fromEntries([
 			[`trace-root-${root.id}`], ...siblings.map((reply) => [`trace-reply-${reply.id}`])
 		].map(([key]) => [key, { width: 80, height: 40 }]));
-		const rootProjection: TraceConversationProjection = { root, current: { kind: 'root', event: root }, parent: null, directReplies: siblings };
+		const rootProjection: TraceConversationProjection = { root, current: { kind: 'root', event: root }, parent: null, directReplies: siblings, continuationReplyIds: [] };
 		const first = layout(rootProjection, sizes)!;
 		const selected = siblings[2];
 		const child = { ...current, id: id('i'), parentId: selected.id, parentPubkey: selected.pubkey };
-		const nextProjection: TraceConversationProjection = { root, current: { kind: 'reply', event: selected }, parent: { kind: 'root', event: root }, directReplies: [child] };
+		const nextProjection: TraceConversationProjection = { root, current: { kind: 'reply', event: selected }, parent: { kind: 'root', event: root }, directReplies: [child], continuationReplyIds: [child.id] };
 		const second = layout(nextProjection, { ...sizes, [`trace-reply-${child.id}`]: { width: 80, height: 40 } }, {}, first)!;
 		const previousSelected = first.cards.find((card) => card.reply.id === selected.id)!;
 		const nextSelected = second.cards.find((card) => card.reply.id === selected.id)!;
@@ -129,10 +131,20 @@ describe('trace bubble presentation', () => {
 			x: nextSelected.anchor.x + nextSelected.footprint.width + 10,
 			y: nextSelected.anchor.y + nextSelected.footprint.height + 10
 		});
+		expect(second.cards.find((card) => card.reply.id === child.id)?.hasContinuation).toBe(true);
+	});
+
+	it('does not move existing anchors when continuation metadata changes', () => {
+		const projection: TraceConversationProjection = { root, current: { kind: 'root', event: root }, parent: null, directReplies: [parent], continuationReplyIds: [] };
+		const sizes = { [`trace-root-${root.id}`]: { width: 80, height: 40 }, [`trace-reply-${parent.id}`]: { width: 80, height: 40 } };
+		const without = layout(projection, sizes)!;
+		const withContinuation = layout({ ...projection, continuationReplyIds: [parent.id] }, sizes, {}, without)!;
+		expect(withContinuation.cards[0].anchor).toEqual(without.cards[0].anchor);
+		expect(withContinuation.cards[0].hasContinuation).toBe(true);
 	});
 
 	it('reuses anchors only within the same coordinate context', () => {
-		const projection: TraceConversationProjection = { root, current: { kind: 'root', event: root }, parent: null, directReplies: [] };
+		const projection: TraceConversationProjection = { root, current: { kind: 'root', event: root }, parent: null, directReplies: [], continuationReplyIds: [] };
 		const sizes = { [`trace-root-${root.id}`]: { width: 80, height: 40 } };
 		const first = layout(projection, sizes)!;
 		const unchanged = layout(projection, sizes, {}, first)!;

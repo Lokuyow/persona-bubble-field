@@ -10,6 +10,7 @@ export type TraceConversationProjection = Readonly<{
 	current: TraceSpeech;
 	parent: TraceSpeech | null;
 	directReplies: readonly ParsedTraceReply[];
+	continuationReplyIds: readonly string[];
 }>;
 
 export function compareTraceReplies(first: ParsedTraceReply, second: ParsedTraceReply): number {
@@ -61,7 +62,13 @@ export function resolveTraceConversationProjection(
 	const directReplies = replies
 		.filter((reply) => reply.parentKind === parentKind && reply.parentId === current.event.id)
 		.sort(compareDirectTraceReplies);
-	return { root: conversation.root, current, parent, directReplies };
+	const directReplyIds = new Set(directReplies.map((reply) => reply.id));
+	const continuationReplyIds = replies
+		.filter((reply) => reply.parentKind === 1111 && directReplyIds.has(reply.parentId))
+		.map((reply) => reply.parentId)
+		.filter((id, index, ids) => ids.indexOf(id) === index)
+		.sort();
+	return { root: conversation.root, current, parent, directReplies, continuationReplyIds };
 }
 
 export function adjacentTraceSpeech(projection: TraceConversationProjection, targetId: string): TraceSpeech | null {
