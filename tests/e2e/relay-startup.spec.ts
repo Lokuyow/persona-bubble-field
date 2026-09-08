@@ -535,8 +535,16 @@ async function waitForPublishedMessageCount(page: Page, count: number): Promise<
 async function openClockedReadyRelayWorld(page: Page): Promise<Locator> {
 	await page.clock.install({ time: Date.now() });
 	const editor = await openReadyRelayWorld(page);
-	await page.clock.pauseAt(Date.now());
+	await pauseAtCurrentBrowserTime(page);
 	return editor;
+}
+
+async function pauseAtCurrentBrowserTime(page: Page): Promise<void> {
+	const now = await page.evaluate(() => Date.now());
+	// Freeze Date while pausing so a running browser clock cannot overtake the target.
+	await page.clock.setFixedTime(now);
+	await page.clock.pauseAt(now);
+	await page.clock.setSystemTime(now);
 }
 
 async function installVisualAnimationRafMetrics(page: Page): Promise<void> {
@@ -1579,7 +1587,8 @@ test.describe('Relay startup', () => {
 				content: 'geometry regression bubble',
 				speechType: 'normal',
 				position: { x: participantX, y: participantY },
-				createdAt: Math.floor(Date.now() / 1000)
+				// A same-second bootstrap position outranks a message's position evidence.
+				createdAt: Math.floor(Date.now() / 1000) + 1
 			}), new Uint8Array(32).fill(19));
 			await page.evaluate((event) => (window as typeof window & {
 				__relayStartupTest: { injectMessage(event: object): void };
@@ -1889,11 +1898,94 @@ test.describe('Relay startup', () => {
 		await expect(editor).toHaveValue('composition content');
 	});
 
+	test('permanently dismisses speech at a visual RAF crossing before canonical refresh', async ({ page }) => {
+		await page.setViewportSize({ width: 390, height: 844 });
+		await page.clock.install({ time: Date.now() });
+		await page.addInitScript(() => {
+			const browserWindow: Window = window;
+			const interval = browserWindow.setInterval.bind(browserWindow);
+			const refresh = { ticks: 0, lastTick: 0 };
+			browserWindow.setInterval = (handler, timeout, ...args) => {
+				if (timeout !== 250 || typeof handler !== 'function') return interval(handler, timeout, ...args);
+				return interval(() => {
+					refresh.ticks += 1;
+					refresh.lastTick = Date.now();
+					handler(...args);
+				}, timeout);
+			};
+			Object.assign(window, { __presenceRefreshClock: refresh });
+		});
+		const channel = { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' };
+		const createdAt = Math.floor(Date.now() / 1000);
+		const selfSecret = new Uint8Array(32).fill(23);
+		const remoteSecret = new Uint8Array(32).fill(19);
+		const speech = finalizeEvent(buildWorldMessageTemplate({
+			channel, createdAt, content: 'speech remains dismissed after the visual speaker returns',
+			speechType: 'normal', position: { x: 10, y: 3 }
+		}), remoteSecret);
+		const selfPosition = finalizeEvent(buildPositionEventTemplate({
+			channel, createdAt, position: { x: 7, y: 3 }, slot: 0
+		}), selfSecret);
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { primaryEvents: { message: speech, position: selfPosition } });
+		await seedRelayAccount(page, selfSecret, selfPosition.pubkey);
+		await page.goto('/');
+		await expect(page.locator('.composer-dock')).toBeVisible();
+		await page.evaluate(() => {
+			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
+			relay.releaseMetadata(); relay.releasePrimary();
+		});
+		const bubble = page.locator(`[data-bubble-participant-id="${speech.pubkey}"]`);
+		const speaker = page.locator(`.participant[data-participant-id="${speech.pubkey}"]`);
+		await expect(bubble).toBeVisible();
+		await pauseAtCurrentBrowserTime(page);
+		await page.clock.runFor(500);
+		const refreshClock = () => page.evaluate(() => {
+			const refresh = (window as unknown as { __presenceRefreshClock: { ticks: number; lastTick: number } }).__presenceRefreshClock;
+			return { ...refresh, now: Date.now() };
+		});
+		const clock = await refreshClock();
+		expect(clock.ticks).toBeGreaterThan(0);
+		// Advance exactly to a controlled refresh boundary; no wall-clock race.
+		await page.clock.runFor(clock.lastTick + 250 - clock.now);
+		const before = await refreshClock();
+		const sampleX = () => speaker.evaluate((element) => {
+			const rect = element.getBoundingClientRect();
+			const area = document.querySelector('.field-area')!.getBoundingClientRect();
+			return { x: rect.x + rect.width / 2, left: area.left, right: area.right };
+		});
+		const initial = await sampleX();
+		expect(initial.x).toBeGreaterThan(initial.left);
+		expect(initial.x).toBeLessThan(initial.right);
+		const injectPosition = async (x: number, slot: 0 | 1) => {
+			const event = finalizeEvent(buildPositionEventTemplate({ channel, createdAt, position: { x, y: 3 }, slot }), remoteSecret);
+			await page.evaluate((event) => (window as unknown as {
+				__relayStartupTest: { injectPosition(event: object): void };
+			}).__relayStartupTest.injectPosition(event), event);
+		};
+		await injectPosition(15, 0);
+		await expect(speaker).toHaveAttribute('data-position', '15,3');
+		await page.clock.runFor(100);
+		const outside = await sampleX();
+		expect(outside.x).toBeGreaterThan(outside.right);
+		await expect(bubble).toHaveCount(0);
+		expect((await refreshClock()).ticks).toBe(before.ticks);
+		// Canonical position is back inside before any refresh can dismiss it.
+		await injectPosition(10, 1);
+		await expect(speaker).toHaveAttribute('data-position', '10,3');
+		await page.clock.runFor(500);
+		const returned = await sampleX();
+		expect(returned.x).toBeGreaterThan(returned.left);
+		expect(returned.x).toBeLessThan(returned.right);
+		expect((await refreshClock()).ticks).toBeGreaterThan(before.ticks);
+		await expect(bubble).toHaveCount(0);
+	});
+
 	test('retargets active participant and camera animation when another participant updates', async ({ page }) => {
 		await page.setViewportSize({ width: 390, height: 844 });
 		await page.clock.install({ time: Date.now() });
 		const editor = await openReadyRelayWorld(page);
-		await page.clock.pauseAt(Date.now());
+		await pauseAtCurrentBrowserTime(page);
 		await installVisualAnimationRafMetrics(page);
 		const self = page.locator('.participant[data-self="true"]');
 		const scene = page.locator('.field-scene');
