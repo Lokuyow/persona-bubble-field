@@ -623,6 +623,39 @@ test.describe('DEV World Sandbox', () => {
 			await expect.poll(() => readAnchor(branchParent)).toBe(branchParentBefore);
 			await expect.poll(() => readAnchor(child)).toBe(childBefore);
 		});
+
+		test(`shows known Trace continuation branches without hidden cards on ${viewport.name}`, async ({ page }) => {
+			await page.setViewportSize(viewport);
+			await page.goto('/?devWorld=1&devTrace=replies');
+			if (viewport.name === 'desktop') await page.getByRole('button', { name: 'Hide Chatter' }).click();
+			await page.locator('[data-cell-position="8,4"]').click();
+			await expect(page.locator('.trace-root-card')).toHaveAttribute('data-trace-geometry-ready', 'ready');
+			const id = (value: string) => value.repeat(64);
+			const branch = (value: string) => page.locator(`[data-trace-continuation-reply-id="${id(value)}"]`);
+			await expect(page.locator('[data-trace-reply-id="' + id('b') + '"]')).toHaveCount(0);
+			await expect(branch('7')).toHaveCount(1);
+			await expect(branch('6')).toHaveCount(0);
+			const continuationStructure = await page.locator('[data-trace-continuation-reply-id]').evaluateAll((elements) => elements.every((element) =>
+				element.closest('[data-trace-surface-occlusion-root-id]') !== null &&
+				!element.classList.contains('trace-relation-connector')
+			));
+			expect(continuationStructure).toBe(true);
+
+			await page.locator(`[data-trace-reply-id="${id('7')}"] .trace-reply-content-button`).click();
+			await expect(page.locator(`[data-trace-reply-id="${id('b')}"]`)).toBeVisible();
+			await expect(branch('7')).toHaveCount(0);
+			await expect(branch('b')).toHaveCount(1);
+			await page.locator(`[data-trace-reply-id="${id('b')}"] .trace-reply-content-button`).click();
+			await expect(page.locator(`[data-trace-reply-id="${id('d')}"]`)).toBeVisible();
+			await expect(page.locator(`[data-trace-reply-id="${id('e')}"]`)).toBeVisible();
+			await expect(branch('b')).toHaveCount(0);
+			await expect(branch('d')).toHaveCount(1);
+			await expect(branch('e')).toHaveCount(0);
+			await expect(page.locator(`[data-trace-reply-id="${id('f')}"]`)).toHaveCount(0);
+			await page.locator(`[data-trace-reply-id="${id('d')}"] .trace-reply-content-button`).click();
+			await expect(page.locator(`[data-trace-reply-id="${id('f')}"]`)).toBeVisible();
+			await expect(branch('d')).toHaveCount(0);
+		});
 	}
 	test('reselects the current reply without losing its draft, preserves it through profiles, and clears on range exit', async ({ page }) => {
 		await page.setViewportSize({ width: 1100, height: 850 });

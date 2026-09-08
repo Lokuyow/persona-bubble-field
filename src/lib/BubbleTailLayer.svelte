@@ -3,6 +3,8 @@
 	import type { Size, WorldPoint } from './geometry';
 	import type { SpeechBubbleShape } from './speechBubblePath';
 	import type { TraceBubblePresentationLayout } from './traceBubblePresentation';
+	import { continuationBranchGeometry } from './traceContinuationGeometry';
+	import { traceRelationEndpoints } from './traceRelationGeometry';
 	import {
 		bubbleCenter,
 		bubbleToneStyle,
@@ -21,6 +23,10 @@
 	const TRACE_RELATION_FOREGROUND_CHILD_WIDTH = 0.4;
 	const TRACE_RELATION_HALO_PARENT_WIDTH = 21;
 	const TRACE_RELATION_HALO_CHILD_WIDTH = 1.2;
+	const TRACE_CONTINUATION_FOREGROUND_PARENT_WIDTH = 12;
+	const TRACE_CONTINUATION_FOREGROUND_CHILD_WIDTH = 0.4;
+	const TRACE_CONTINUATION_HALO_PARENT_WIDTH = 17;
+	const TRACE_CONTINUATION_HALO_CHILD_WIDTH = 1.2;
 
 	type NormalTail = Readonly<{ id: string; tone: BubbleTone; speechType: SpeechType; anchor: WorldPoint; size: Size; target: WorldPoint; shape: SpeechBubbleShape | null }>;
 	type MergedTail = Readonly<{ id: string; tone: BubbleTone; speechType: SpeechType; anchor: WorldPoint; size: Size; shape: SpeechBubbleShape | null; members: readonly Readonly<{ id: string; target: WorldPoint }>[] }>;
@@ -37,6 +43,7 @@
 	let specialNormalTails = $derived(normalTails.filter((bubble) => bubble.speechType !== 'normal' && bubble.shape));
 	let specialMergedTails = $derived(mergedTails.filter((bubble) => bubble.speechType !== 'normal' && bubble.shape));
 	let hasLiveSurfaceOcclusion = $derived(specialNormalTails.length > 0 || specialMergedTails.length > 0);
+
 </script>
 
 <svg class="tail-layer" viewBox={`0 0 ${viewportSize.width} ${viewportSize.height}`} aria-hidden="true">
@@ -96,13 +103,23 @@
 			{/if}
 			{#each traceLayout.cards as bubble (bubble.id)}
 				{@const parent = traceLayout.cards.find((candidate) => candidate.reply.id === bubble.reply.parentId)}
-				{@const relationStart = parent ? bubbleCenter(parent.anchor, parent.footprint) : bubble.reply.parentId === traceRoot.event.id ? bubbleCenter(traceRoot.anchor, traceRoot.footprint) : null}
-				{#if relationStart}
-					{@const relationEnd = bubbleCenter(bubble.anchor, bubble.footprint)}
-					{@const halo = taperedBandGeometry(relationStart, relationEnd, TRACE_RELATION_HALO_PARENT_WIDTH, TRACE_RELATION_HALO_CHILD_WIDTH)}
-					{@const foreground = taperedBandGeometry(relationStart, relationEnd, TRACE_RELATION_FOREGROUND_PARENT_WIDTH, TRACE_RELATION_FOREGROUND_CHILD_WIDTH)}
+				{@const relation = parent
+					? traceRelationEndpoints(bubbleCenter(parent.anchor, parent.footprint), bubbleCenter(bubble.anchor, bubble.footprint))
+					: bubble.reply.parentId === traceRoot.event.id
+						? traceRelationEndpoints(bubbleCenter(traceRoot.anchor, traceRoot.footprint), bubbleCenter(bubble.anchor, bubble.footprint))
+						: null}
+				{#if relation}
+					{@const halo = taperedBandGeometry(relation.start, relation.end, TRACE_RELATION_HALO_PARENT_WIDTH, TRACE_RELATION_HALO_CHILD_WIDTH)}
+					{@const foreground = taperedBandGeometry(relation.start, relation.end, TRACE_RELATION_FOREGROUND_PARENT_WIDTH, TRACE_RELATION_FOREGROUND_CHILD_WIDTH)}
 					<polygon class="trace-relation-halo" data-trace-relation-halo-reply-id={bubble.reply.id} points={halo.points} />
 					<polygon class="trace-relation-connector" data-trace-relation-reply-id={bubble.reply.id} points={foreground.points} />
+				{/if}
+				{#if bubble.hasContinuation}
+					{@const continuation = continuationBranchGeometry(bubble)}
+					{@const halo = taperedBandGeometry(continuation.start, continuation.end, TRACE_CONTINUATION_HALO_PARENT_WIDTH, TRACE_CONTINUATION_HALO_CHILD_WIDTH)}
+					{@const foreground = taperedBandGeometry(continuation.start, continuation.end, TRACE_CONTINUATION_FOREGROUND_PARENT_WIDTH, TRACE_CONTINUATION_FOREGROUND_CHILD_WIDTH)}
+					<polygon class="trace-continuation-branch-halo" data-trace-continuation-halo-reply-id={bubble.reply.id} points={halo.points} />
+					<polygon class="trace-continuation-branch" data-trace-continuation-reply-id={bubble.reply.id} points={foreground.points} />
 				{/if}
 			{/each}
 		</g>
@@ -127,6 +144,8 @@
 	.tail-outline { fill: none; stroke: var(--tone-outline); stroke-width: 1; stroke-linecap: round; stroke-linejoin: round; }
 	.trace-relation-halo { fill: rgba(238, 245, 238, 0.64); pointer-events: none; }
 	.trace-relation-connector { fill: rgba(77, 101, 93, 0.72); pointer-events: none; }
+	.trace-continuation-branch-halo { fill: rgba(238, 245, 238, 0.64); pointer-events: none; }
+	.trace-continuation-branch { fill: rgba(77, 101, 93, 0.72); pointer-events: none; }
 	.trace-tail { fill: var(--trace-surface); }
 	.trace-tail-outline { stroke-dasharray: 4 3; }
 </style>

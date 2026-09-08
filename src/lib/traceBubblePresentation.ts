@@ -44,6 +44,7 @@ export type TraceReplyPresentation = Readonly<{
 	shape: SpeechBubbleShape | null;
 	tone: BubbleTone;
 	character: Character;
+	hasContinuation: boolean;
 }>;
 
 export type TraceBubblePresentationLayout = Readonly<{
@@ -179,7 +180,8 @@ export function layoutTraceBubblePresentation(input: TraceBubblePresentationInpu
 			id, reply, role, anchor: preferred, size,
 			footprint: input.traceReplyCardFootprints[id] ?? defaultTraceReplyCardFootprint(size),
 			shape: createPresentationBubbleShape(reply.speechType, id, size, input.viewportWidth, input.bubbleSafeBounds),
-			character: input.characterFor(reply.pubkey), tone: input.toneFor(reply.pubkey)
+			character: input.characterFor(reply.pubkey), tone: input.toneFor(reply.pubkey),
+			hasContinuation: projection.continuationReplyIds.includes(reply.id)
 		};
 		const preserved = continuityAnchor(replyContinuityLayout, reply.id, card.size, card.footprint, input.bubbleSafeBounds);
 		const preservePlacement = Boolean(preserved && input.previousLayout?.fixedContext === fixedContext &&

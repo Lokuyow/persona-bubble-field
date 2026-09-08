@@ -66,6 +66,7 @@ rootを調査したら、NIP-22 reply historyを待たずにroot ghostと実際�
 - direct child slotはcreatedAt昇順、event ID昇順で右下、左下、右上、左上、以後同順の外側ringとする。slot、clamp、collisionはauthor icon/nameを含むreply card footprintを使用し、同一anchorへ潰れる場合はranked slot/edge fallbackを選ぶ。
 - currentの変更やdirect replyの追加で再配置が必要になっても、同じpresentation coordinate contextで、表示中のTrace nodeのサイズとfootprintが変わらず、safe bounds内で維持できる場合は、そのnodeのanchorを維持する。rootのcontinuity contextにはroot ID/position、camera、cellSize、field area、safe/visual bounds、fieldRows、viewportWidthを含め、これらが変わった場合は古いroot anchorを固定せず、現在のfield positionから導出したplacementを優先する。fixed live bubbleの出現・消失やcollision contextの変更、新規node、サイズ変更、safe bounds外となるnodeは既存のslot/clamp/collision規則で再配置する。
 - compact rootとdeep immediate parentの間にはconnectorを描かない。connectorは表示中の実在する親子関係だけをcontinuous tapered relationとそのhaloで描く。root tailとrelationは、visible Trace surfaceの内側へ描画しない。
+- currentのdirect replyについて、現在browserが保持するvalidated tree内にそのreplyへのdirect childが確認できる場合は、childの内容を表示せず短いcontinuation branch indicatorを表示する。childが複数存在しても存在indicatorは1本でよく、hidden child nodeや実parent-child connectorではなく、操作targetにもならない。branchのexact pixel geometryは実装詳細とする。
 - speech bodyはnative button、author icon/nameはsiblingのnative Profile buttonとする。Profile操作はselection、target、draftを変更しない。overflow / ellipsis / special shape用のpresentation measurementとplacement用のwrapper footprintは責務およびstate/reporting pathとして分離する。exact DOM measurement targetは実装詳細とし、現行presentationでは挙動、special surface geometry、tree placementを維持するため、両経路が同じreply card root矩形を使用してよい。
 
 Trace conversationでrootとreplyなど複数の選択可能なspeechが表示されている場合、conversationのcurrent speechを他のvisible Trace speechと視覚的に区別できる。rootしか表示されずcurrentが自明な場合は、current強調を必須としない。強調はComposerの一時的なreply targetではなくconversationのcurrentに基づき、reply referenceの解除やsuccessful reply publish後にreply modeだけが解除されても、conversation currentが変わらない限り維持する。normal / shout / monologueの各speech shape本来の外形を使ったselection presentationとし、exact color、stroke width、dash pattern等のpixel表現は実装詳細とする。
@@ -88,6 +89,8 @@ Profile Dialogまたはcontext menuを開閉してもconversation exploration、
 cache済みconversationをreopenした場合はcached repliesを即表示し、同時にRelay refreshを行う。refreshで以前cache済みだったreplyがRelayから返らなかったことだけをcache削除根拠にしない。NIP-09は完全非対応であり、Relay omissionをdeletion扱いしない。
 
 live 1111は、rootまたはimmediate parentが利用不能ならその受信ではignoreする。pending buffer、無制限parent fetch、orphan cache、root revivalは行わない。後のhistory refreshで必要なroot/parentと同じeventが得られた場合は、そのbatchで再validationして受理してよい。current browserでeffectiveでないrootへの1111は常にignoreし、notificationも生成しない。
+
+continuation branch indicatorは、現在取得済みまたはcache済みのvalidated reply treeからbest-effortに導出する。indicatorのためだけに追加Relay query、child existence probe、subscription、filter変更は行わないため、branchがないことはchild不存在の保証ではない。
 
 open中の同rootへのvalid 1111は受信、cache、read/unread判定を行う。current speechへのdirect replyだけがcurrent viewへの新規表示候補になり、同rootでも別branchへのreplyはcurrent viewへ勝手に挿入しない。
 
