@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
+	import type { Attachment } from 'svelte/attachments';
 	import BubbleSurface from './BubbleSurface.svelte';
 	import type { SpeechType } from './conversation';
 	import type { Size, WorldPoint } from './geometry';
@@ -46,28 +48,21 @@
 		};
 	}
 
-	function observeBubble(node: HTMLElement) {
-		const { id, reportMeasurement, removeMeasurement, register } = {
-			id: bubble.id,
-			reportMeasurement: onMeasurement,
-			removeMeasurement: onMeasurementRemoved,
-			register: registerRemeasure
-		};
-		const report = () => reportMeasurement(id, measure(node));
+	const observeBubble: Attachment<HTMLElement> = (node) => untrack(() => {
+		const id = node.dataset.bubbleId!;
+		const report = () => untrack(() => onMeasurement(id, measure(node)));
 		const observer = new ResizeObserver(report);
 		observer.observe(node);
 		const content = node.querySelector<HTMLElement>('.bubble-content');
 		if (content) observer.observe(content);
-		const unregister = register(id, report);
+		const unregister = registerRemeasure(id, report);
 		report();
-		return {
-			destroy() {
-				unregister();
-				observer.disconnect();
-				removeMeasurement(id);
-			}
-		};
-	}
+		return () => untrack(() => {
+			unregister();
+			observer.disconnect();
+			onMeasurementRemoved(id);
+		});
+	});
 
 	let rootStyle = $derived([
 		bubbleToneStyle(bubble.tone),
@@ -78,7 +73,7 @@
 </script>
 
 <div
-	use:observeBubble
+	{@attach observeBubble}
 	class={`bubble bubble-${bubble.kind} bubble-${bubble.tone} tone-${bubble.tone}${bubble.speechType !== 'normal' ? ' speech-bubble-special' : ''}`}
 	data-bubble-id={bubble.id}
 	data-bubble-participant-id={bubble.kind === 'normal' ? bubble.participantId : undefined}

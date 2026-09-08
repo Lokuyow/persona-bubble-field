@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
+	import type { Attachment } from 'svelte/attachments';
 	import BubbleSurface from './BubbleSurface.svelte';
 	import CharacterAvatar from './CharacterAvatar.svelte';
 	import NormalTraceRootSurface from './NormalTraceRootSurface.svelte';
@@ -56,65 +58,49 @@
 		};
 	}
 
-	function observeRootBubble(node: HTMLElement) {
-		const { reportMeasurement, removeMeasurement, register } = {
-			reportMeasurement: onBubbleMeasurement,
-			removeMeasurement: onBubbleMeasurementRemoved,
-			register: registerBubbleRemeasure
-		};
+	const observeRootBubble: Attachment<HTMLElement> = (node) => untrack(() => {
 		const id = node.dataset.bubbleId!;
-		const report = () => reportMeasurement(id, bodyMeasurement(node));
+		const report = () => untrack(() => onBubbleMeasurement(id, bodyMeasurement(node)));
 		const observer = new ResizeObserver(report);
 		observer.observe(node);
 		const content = node.querySelector<HTMLElement>('.bubble-content');
 		if (content) observer.observe(content);
-		const unregister = register(id, report);
+		const unregister = registerBubbleRemeasure(id, report);
 		report();
-		return {
-			destroy() {
-				unregister();
-				observer.disconnect();
-				removeMeasurement(id);
-			}
-		};
-	}
+		return () => untrack(() => {
+			unregister();
+			observer.disconnect();
+			onBubbleMeasurementRemoved(id);
+		});
+	});
 
-	function observeReplyCard(node: HTMLElement) {
-		const { reportMeasurement, reportFootprint, removeMeasurement, removeFootprint, register } = {
-			reportMeasurement: onBubbleMeasurement,
-			reportFootprint: onReplyFootprint,
-			removeMeasurement: onBubbleMeasurementRemoved,
-			removeFootprint: onReplyFootprintRemoved,
-			register: registerReplyRemeasure
-		};
+	const observeReplyCard: Attachment<HTMLElement> = (node) => untrack(() => {
 		const id = node.dataset.bubbleId!;
 		// Preserve current physical geometry: both reporting paths measure this card root.
-		const report = () => {
+		const report = () => untrack(() => {
 			const body = bodyMeasurement(node);
-			reportMeasurement(id, body);
-			reportFootprint(id, body.size);
-		};
+			onBubbleMeasurement(id, body);
+			onReplyFootprint(id, body.size);
+		});
 		const observer = new ResizeObserver(report);
 		observer.observe(node);
 		const content = node.querySelector<HTMLElement>('.bubble-content');
 		if (content) observer.observe(content);
-		const unregister = register(id, report);
+		const unregister = registerReplyRemeasure(id, report);
 		report();
-		return {
-			destroy() {
-				unregister();
-				observer.disconnect();
-				removeMeasurement(id);
-				removeFootprint(id);
-			}
-		};
-	}
+		return () => untrack(() => {
+			unregister();
+			observer.disconnect();
+			onBubbleMeasurementRemoved(id);
+			onReplyFootprintRemoved(id);
+		});
+	});
 </script>
 
 {#if layout}
 	{#each layout.cards as bubble (bubble.id)}
 		<div
-			use:observeReplyCard
+			{@attach observeReplyCard}
 			class={`bubble bubble-normal trace-reply-card bubble-${bubble.tone} tone-${bubble.tone}${bubble.reply.speechType !== 'normal' ? ' speech-bubble-special' : ''}`}
 			class:trace-presentation-pending={!ready}
 			data-trace-reply-id={bubble.reply.id}
@@ -145,7 +131,7 @@
 	<div class="trace-root-card" class:trace-presentation-pending={!ready} data-trace-geometry-ready={ready ? 'ready' : 'pending'} style={`transform: translate3d(${layout.root.anchor.x}px, ${layout.root.anchor.y}px, 0);`}>
 		<button
 			type="button"
-			use:observeRootBubble
+			{@attach observeRootBubble}
 			class={`bubble bubble-normal trace-root-bubble trace-current-bubble bubble-${layout.root.tone} tone-${layout.root.tone}${layout.root.event.speechType !== 'normal' ? ' speech-bubble-special' : ''}`}
 			data-bubble-id={layout.root.id}
 			data-trace-root-id={layout.root.event.id}
