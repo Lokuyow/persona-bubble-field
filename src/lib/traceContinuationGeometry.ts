@@ -2,9 +2,8 @@ import type { Size, WorldPoint } from './geometry';
 import { bubbleCenter } from './bubblePresentation';
 import type { SpeechBubbleShape } from './speechBubblePath';
 
-const TRACE_CONTINUATION_LENGTH = 28;
+const TRACE_CONTINUATION_VISIBLE_LENGTH = 28;
 const TRACE_CONTINUATION_INSET = 10;
-const TRACE_CONTINUATION_OUTSIDE_MARGIN = 8;
 
 export type ContinuationBubble = Readonly<{ anchor: WorldPoint; size: Size; shape: SpeechBubbleShape | null }>;
 
@@ -17,7 +16,7 @@ export function continuationBranchGeometry(bubble: ContinuationBubble) {
 	const boundsRight = bubble.anchor.x + bounds.x + bounds.width;
 	const boundsBottom = bubble.anchor.y + bounds.y + bounds.height;
 	const distanceToSurface = Math.min((boundsRight - center.x) / direction.x, (boundsBottom - center.y) / direction.y);
-	const endDistance = Math.max(TRACE_CONTINUATION_INSET + TRACE_CONTINUATION_LENGTH, distanceToSurface + TRACE_CONTINUATION_OUTSIDE_MARGIN);
+	const endDistance = distanceToSurface + TRACE_CONTINUATION_VISIBLE_LENGTH;
 	const end = { x: center.x + direction.x * endDistance, y: center.y + direction.y * endDistance };
 	return { start, end };
 }

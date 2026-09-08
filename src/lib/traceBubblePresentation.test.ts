@@ -156,6 +156,9 @@ describe('trace bubble presentation', () => {
 			expect(Math.hypot(offset.x, offset.y)).toBeLessThan(30);
 			expect(branch.end.x).toBeGreaterThan(branch.start.x);
 			expect(branch.end.y).toBeGreaterThan(branch.start.y);
+			const bounds = branch === normal ? { x: 0, y: 0, width: 120, height: 60 } : shoutShape!.bounds;
+			const surfaceDistance = Math.min((bounds.x + bounds.width + 100 - center.x) / Math.SQRT1_2, (bounds.y + bounds.height + 100 - center.y) / Math.SQRT1_2);
+			expect(Math.hypot(branch.end.x - center.x, branch.end.y - center.y) - surfaceDistance).toBeGreaterThan(20);
 		}
 		expect(normal.start).toEqual(shout.start);
 	});
