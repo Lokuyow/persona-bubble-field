@@ -53,8 +53,6 @@
 	import { CHARACTER_CATALOG, type Character } from '$lib/character';
 	import { deriveCharacterFromPubkey } from '$lib/characterAssignment';
 	import ProfileDialog from '$lib/ProfileDialog.svelte';
-	import FieldParticipant from '$lib/FieldParticipant.svelte';
-	import CharacterAvatar from '$lib/CharacterAvatar.svelte';
 	import {
 		CURRENT_CHARACTER_PROFILE_REVISION,
 		loadOrCreateAccount,
@@ -84,9 +82,7 @@
 		resolveTraceConversationProjection,
 		type TraceSpeech
 	} from '$lib/traceReplyPresentation';
-	import BubbleTailLayer from '$lib/BubbleTailLayer.svelte';
-	import SpeechBubble, { type BubbleMeasurement, type LiveBubblePresentation } from '$lib/SpeechBubble.svelte';
-	import TracePresentation from '$lib/TracePresentation.svelte';
+	import { type BubbleMeasurement, type LiveBubblePresentation } from '$lib/SpeechBubble.svelte';
 	import {
 		bubbleToneStyle,
 		createPresentationBubbleShape,
@@ -107,6 +103,15 @@
 	import WorldEntryControls from '$lib/frontend/WorldEntryControls.svelte';
 	import DevWorldControls from '$lib/dev/DevWorldControls.svelte';
 	import { applyDevPageFixtures, createDevTraceLiveReply } from '$lib/dev/devPageFixtures';
+	import FieldViewport from '$lib/frontend/FieldViewport.svelte';
+	import FieldScene, {
+		type FieldActionMenu,
+		type FieldParticipantView,
+		type PointerJoystick,
+		type TraceLightCell,
+		type TraceRootGhost
+	} from '$lib/frontend/FieldScene.svelte';
+	import SpeechLayer from '$lib/frontend/SpeechLayer.svelte';
 	import { matchesComposerSubmit, type ComposerSubmitEnvelope } from '$lib/hostOwnedComposerContext';
 	import {
 		acceptedTraceReplyTarget, clearTraceReplyMode, completeTraceReplySubmission,
@@ -126,7 +131,6 @@
 		columns: 16,
 		rows: 8
 	} as const;
-	const FIELD_BACKGROUND_ASSET = '/field/prototype-urban-park.png';
 	const DEFAULT_VIEWPORT = { width: 1100, height: 680 };
 	const SPEECH_AREA = {
 		top: 84,
@@ -143,7 +147,7 @@
 		isDevWorldSandboxEnabled(import.meta.env.DEV, page.url.searchParams);
 
 	let presenceState = $state.raw<PresenceState>({ field: FIELD, participants: [] });
-	let viewportElement: HTMLElement;
+	let viewportElement = $state<HTMLElement>();
 	let viewportSize = $state.raw<Size>(DEFAULT_VIEWPORT);
 	let initialFieldGeometryReady = $state(false);
 	let bubbleSizes = $state.raw<Record<string, Size>>({});
@@ -170,10 +174,7 @@
 	let devTraceConversationRuntime: DevTraceConversationRuntime | null = null;
 	let devTraceReplies = $state.raw<readonly ParsedTraceReply[]>([]);
 	let devTraceReplyFixtureEnabled = $state(false);
-	let fieldActionMenu = $state.raw<Readonly<{
-		position: { x: number; y: number };
-		actions: readonly FieldCellAction[];
-	}> | null>(null);
+	let fieldActionMenu = $state.raw<FieldActionMenu | null>(null);
 	let proximityFeedback = $state.raw<Readonly<{ position: { x: number; y: number } }> | null>(null);
 	let proximityFeedbackTimer: number | null = null;
 	let connectionStatus: WorldReadConnectionStatus = { kind: 'bootstrapping' };
@@ -185,6 +186,7 @@
 	let worldSession: ReturnType<typeof createWorldReadSession> | null = null;
 	const runtimeMode: 'relay' | 'dev' = initialDevWorldSandboxEnabled ? 'dev' : 'relay';
 	const devWorldSandboxEnabled = initialDevWorldSandboxEnabled;
+	let composerAvailable = $derived(runtimeMode === 'relay' || devTraceReplyFixtureEnabled);
 	let pendingComposerSubmission: Readonly<{
 		resolve: () => void;
 		reject: (error: Error) => void;
@@ -210,11 +212,7 @@
 	let movementHoldTakeover = (_pointerId: number, _direction: Direction) => {};
 	let movementHoldUpdatePointer = (_pointerId: number, _direction: Direction) => {};
 	let movementHoldStopPointer = (_pointerId: number) => {};
-	let pointerJoystick = $state.raw<Readonly<{
-		center: JoystickPoint;
-		thumb: JoystickPoint;
-		direction: Direction;
-	}> | null>(null);
+	let pointerJoystick = $state.raw<PointerJoystick | null>(null);
 
 	type VisualParticipantTransition = Readonly<{ from: WorldPoint; to: WorldPoint }>;
 	type VisualMotion = Readonly<{
@@ -261,7 +259,7 @@
 		height: Math.max(bubbleSafeBounds.height, ...Object.values(bubbleSizes).map((size) => size.height))
 	});
 
-	let participantViews = $derived(presenceProjection.participants.map((participant) => {
+	let participantViews: FieldParticipantView[] = $derived(presenceProjection.participants.map((participant) => {
 		const world = visualWorldById[participant.id] ?? participant.world;
 		return {
 			...participant,
@@ -275,7 +273,7 @@
 	let selfLogicalPosition = $derived(selfPresence?.position ?? null);
 	let selfIsActive = $derived(selfPresence?.status === 'active');
 	let traceRootCells = $derived(groupTraceRoots(effectiveTraceRoots));
-	let traceLightCells = $derived(traceRootCells
+	let traceLightCells: readonly TraceLightCell[] = $derived(traceRootCells
 		.filter((cell) => traceConversationState.kind !== 'open' || !sameCell(cell.position, traceConversationState.root.position))
 		.map((cell) => ({
 			...cell,
@@ -481,7 +479,7 @@
 	});
 	let traceBubble = $derived(traceTreeLayout?.root ?? null);
 	let tracePresentationReady = $derived(isTracePresentationMeasured(initialFieldGeometryReady, traceTreeLayout, bubbleSizes, traceReplyCardFootprints));
-	let traceRootGhost = $derived(traceBubble ? (() => {
+	let traceRootGhost: TraceRootGhost | null = $derived(traceBubble ? (() => {
 		const occupied = participantViews.some((participant) => sameCell(participant.position, traceBubble.event.position));
 		const offset = occupied ? { x: -cellSize * 0.29, y: cellSize * 0.27 } : { x: 0, y: 0 };
 		const center = gridToWorld(traceBubble.event.position, cellSize);
@@ -987,7 +985,7 @@
 			}
 			virtualKeyboard.addEventListener('geometrychange', updateComposerKeyboardInset);
 		}
-		observer.observe(viewportElement);
+		observer.observe(viewportElement!);
 		updateViewport();
 		updateComposerKeyboardInset();
 		window.addEventListener('keydown', handleKeydown);
@@ -1754,189 +1752,61 @@
 </svelte:head>
 
 <main
-	class={['app-shell', { 'composer-available': runtimeMode === 'relay' || devTraceReplyFixtureEnabled,
+	class={['app-shell', { 'composer-available': composerAvailable,
 		'composer-keyboard-visible': composerKeyboardInset > 0 }]}
 	data-trace-runtime={traceConversationController ? runtimeMode : undefined}
 	style={`--composer-keyboard-inset: ${composerKeyboardInset}px;--composer-initial-preferred-height: ${INITIAL_COMPOSER_PREFERRED_HEIGHT}px;${composerPreferredHeight === null ? '' : `--composer-preferred-height: ${composerPreferredHeight}px;`}`}
 >
-	<section
-		class={['field-viewport', { 'initial-field-geometry-ready': initialFieldGeometryReady }]}
-		bind:this={viewportElement}
-		aria-label="Conversation field"
+	<FieldViewport
+		bind:viewportElement
+		geometryReady={initialFieldGeometryReady}
+		composerAvailable={composerAvailable}
+		speechAreaVisualBounds={speechAreaVisualBounds}
 	>
-		<div
-			class="speech-area"
-			style={`top: ${speechAreaVisualBounds.y}px; height: ${speechAreaVisualBounds.height}px; left: ${speechAreaVisualBounds.x}px; width: ${speechAreaVisualBounds.width}px;`}
-			aria-hidden="true"
-		>
-		</div>
-		<Chatter
-			bind:this={chatterComponent}
-			messages={recentMessageTimeline}
-			tones={colorByPubkey}
-			{selectedCharacterId}
-			onOpenProfile={openProfile}
-		/>
-		<div
-			class="field-area"
-			style={`top: ${fieldAreaBounds.y}px; left: ${fieldAreaBounds.x}px; width: ${fieldAreaBounds.width}px; height: ${fieldAreaBounds.height}px;`}
-			aria-label="Field area"
-			use:fieldSelectionPointer
-		>
-			<div
-				class="field-scene"
-				data-camera-animation={visualMotion ? 'active' : undefined}
-				style={`--cell-size: ${cellSize}px; --avatar-size: calc(var(--cell-size) - 4px); width: ${fieldWorldSize.width}px; height: ${fieldWorldSize.height}px; transform: translate3d(${-camera.x}px, ${-camera.y}px, 0);`}
-			>
-				<div
-					class="field-grid"
-					style={`--field-background-image: url("${asset(FIELD_BACKGROUND_ASSET)}");`}
-					aria-hidden="true"
-				></div>
-				<div class="trace-light-layer" aria-hidden="true">
-					{#each traceLightCells as cell (`${cell.position.x},${cell.position.y}`)}
-						{const world = traceLightWorldPosition(cell.position, cell.occupied)}
-						<span
-							class="trace-light"
-							data-trace-light-position={`${cell.position.x},${cell.position.y}`}
-							data-trace-light-occupied={cell.occupied ? 'true' : undefined}
-							style={`left: ${world.x}px; top: ${world.y}px;`}
-						></span>
-						{#if cell.inInvestigationRange}
-							<span
-								class="trace-investigation-indicator"
-								data-trace-indicator-position={`${cell.position.x},${cell.position.y}`}
-								aria-hidden="true"
-								style={`left: ${world.x + cellSize * 0.18}px; top: ${world.y - cellSize * 0.18}px;`}
-							>⌕</span>
-						{/if}
-					{/each}
-				</div>
-				{#if proximityFeedback}
-					<div
-						class="trace-proximity-feedback"
-						role="status"
-						aria-live="polite"
-						style={`left: ${(proximityFeedback.position.x + 0.5) * cellSize}px; top: ${(proximityFeedback.position.y + 0.18) * cellSize}px;`}
-					>近づくと調べられる</div>
-				{/if}
-				<div class="field-cell-selection-layer" aria-label="Trace investigation cells">
-					{#each traceOnlyCellTriggers as position (`${position.x},${position.y}`)}
-						<button
-							class="field-cell-selection-trigger"
-							data-field-gesture-origin="selectable"
-							type="button"
-							ondragstart={(event) => event.preventDefault()}
-							data-cell-position={`${position.x},${position.y}`}
-				aria-label={!selfIsActive || (selfLogicalPosition && isWithinTraceInvestigationRange(selfLogicalPosition, position))
-					? '痕跡を調べる'
-					: '痕跡を調べる（近づくと調べられる）'}
-							style={`left: ${position.x * cellSize}px; top: ${position.y * cellSize}px;`}
-							onclick={(event) => {
-								event.stopPropagation();
-								resolveFieldCellSelection(position, event.currentTarget as HTMLButtonElement);
-							}}
-						></button>
-					{/each}
-				</div>
-				{#each participantViews as participant (participant.id)}
-					<FieldParticipant
-						id={participant.id}
-						character={participant.character}
-						color={participant.color}
-						self={participant.id === selfProjectionId}
-						position={participant.position}
-						world={participant.world}
-						movementAnimation={movingParticipantIds.has(participant.id)}
-						onProfile={resolveFieldCellSelection}
-					/>
-				{/each}
-				{#if traceRootGhost}
-					<div
-						class={['trace-ghost', { 'trace-ghost-compact': traceRootGhost.compact }]}
-						data-trace-ghost-root-id={traceRootGhost.event.id}
-						style={`left: ${traceRootGhost.world.x}px; top: ${traceRootGhost.world.y}px;`}
-					>
-						<button
-							class="trace-ghost-profile-trigger"
-							data-field-gesture-origin="selectable"
-							type="button"
-							ondragstart={(event) => event.preventDefault()}
-							aria-label={`${traceRootGhost.character.name} のプロフィールを開く`}
-							onclick={(event) => {
-								event.stopPropagation();
-								openProfile(traceRootGhost.character.characterId, event.currentTarget);
-							}}
-						>
-							<CharacterAvatar class={`avatar avatar-${traceRootGhost.tone}`} character={traceRootGhost.character} />
-							<span class="trace-ghost-name" aria-hidden="true">{traceRootGhost.character.name}</span>
-						</button>
-					</div>
-				{/if}
-				{#if fieldActionMenu}
-					<div
-						class="field-action-menu"
-						role="menu"
-						tabindex="-1"
-						aria-label="Cell actions"
-						style={`left: ${(fieldActionMenu.position.x + 0.5) * cellSize}px; top: ${(fieldActionMenu.position.y + 0.5) * cellSize}px;`}
-					>
-					{#each fieldActionMenu.actions as action, index (`${action.kind}-${action.kind === 'participant' ? action.participantId : action.rootId}-${index}`)}
-							<button
-								type="button"
-								role="menuitem"
-								data-cell-action={action.kind}
-								onclick={(event) => {
-									event.stopPropagation();
-									executeFieldCellAction(action, fieldActionMenu!.position, event.currentTarget);
-								}}
-							>{fieldActionLabel(action)}</button>
-						{/each}
-					</div>
-				{/if}
-			</div>
-		</div>
-		{#if pointerJoystick}
-			<div
-				class="pointer-joystick"
-				data-pointer-joystick={pointerJoystick.direction}
-				aria-hidden="true"
-				style={`left: ${pointerJoystick.center.x}px; top: ${pointerJoystick.center.y}px;`}
-			>
-				<div class="pointer-joystick-base"></div>
-				<div
-					class="pointer-joystick-thumb"
-					style={`--joystick-thumb-x: ${pointerJoystick.thumb.x}px; --joystick-thumb-y: ${pointerJoystick.thumb.y}px;`}
-				></div>
-			</div>
-		{/if}
-
-		<BubbleTailLayer
-			{viewportSize}
-			traceReady={tracePresentationReady}
-			traceLayout={traceTreeLayout}
-			{traceRootTailTarget}
-			normalTails={normalTailModels}
-			mergedTails={mergedTailModels}
-		/>
-
-		<div class="bubble-layer" aria-live="polite">
-			{#each liveBubblePresentations as bubble (bubble.id)}
-				<SpeechBubble
-					{bubble}
-					overflow={bubbleOverflowById[bubble.id] ?? false}
-					onMeasurement={applyBubbleMeasurement}
-					onMeasurementRemoved={removeBubbleMeasurement}
-					registerRemeasure={registerBubbleRemeasure}
-				/>
-			{/each}
-			<TracePresentation
-				layout={traceTreeLayout}
-				ready={tracePresentationReady}
+		{#snippet children()}
+			<Chatter
+				bind:this={chatterComponent}
+				messages={recentMessageTimeline}
+				tones={colorByPubkey}
+				{selectedCharacterId}
+				onOpenProfile={openProfile}
+			/>
+			<FieldScene
+				geometryReady={initialFieldGeometryReady}
+				{fieldAreaBounds}
+				{fieldWorldSize}
+				{cellSize}
+				{camera}
+				cameraAnimating={visualMotion !== null}
+				{fieldSelectionPointer}
+				{traceLightCells}
+				{proximityFeedback}
+				{traceOnlyCellTriggers}
+				{participantViews}
+				{selfProjectionId}
+				{movingParticipantIds}
+				{selfIsActive}
+				{selfLogicalPosition}
+				{traceRootGhost}
+				{fieldActionMenu}
+				{pointerJoystick}
+				resolveFieldCellSelection={resolveFieldCellSelection}
+				executeFieldCellAction={executeFieldCellAction}
+				fieldActionLabel={fieldActionLabel}
+				onOpenProfile={openProfile}
+				traceLightWorldPosition={traceLightWorldPosition}
+			/>
+			<SpeechLayer
+				{viewportSize}
+				traceReady={tracePresentationReady}
+				traceLayout={traceTreeLayout}
+				{traceRootTailTarget}
+				normalTails={normalTailModels}
+				mergedTails={mergedTailModels}
+				{liveBubblePresentations}
+				{bubbleOverflowById}
 				currentSpeechId={traceConversationProjection?.current.event.id ?? null}
 				replyRefresh={traceConversationState.kind === 'open' ? traceConversationState.replyRefresh : null}
-				{traceRootTailTarget}
-				{bubbleOverflowById}
 				onSelectSpeech={selectTraceSpeech}
 				onOpenProfile={openProfile}
 				onBubbleMeasurement={applyBubbleMeasurement}
@@ -1946,10 +1816,8 @@
 				onReplyFootprintRemoved={removeTraceReplyFootprint}
 				registerReplyRemeasure={registerTraceReplyRemeasure}
 			/>
-		</div>
-
-		<div class="viewport-vignette" aria-hidden="true"></div>
-	</section>
+		{/snippet}
+	</FieldViewport>
 
 	<ProfileDialog
 		onOpenChange={handleProfileOpenChange}
@@ -2014,511 +1882,8 @@
 		background: transparent;
 	}
 
-	.status-panel,
-	.footer-note,
-	.camera-chip {
-		position: absolute;
-		z-index: 10;
-	}
-
-	.brand-lockup {
-		display: flex;
-		align-items: center;
-		gap: 11px;
-	}
-
-	.brand-mark {
-		display: grid;
-		width: 35px;
-		height: 35px;
-		place-items: center;
-		border: 1.5px solid #394044;
-		border-radius: 50%;
-		color: #e88a6b;
-		font-size: 22px;
-		line-height: 1;
-	}
-
-	.brand-name,
-	.brand-subtitle,
-	.panel-kicker,
-	.status-message,
-	.footer-note,
-	.field-label {
-		margin: 0;
-	}
-
-	.brand-name {
-		font-size: 15px;
-		font-weight: 800;
-		letter-spacing: 0.02em;
-	}
-
-	.brand-subtitle {
-		margin-top: 2px;
-		color: #7d8582;
-		font-size: 10px;
-		letter-spacing: 0.06em;
-		text-transform: uppercase;
-	}
-
-	.prototype-badge {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		padding: 8px 12px;
-		border: 1px solid rgba(53, 64, 65, 0.15);
-		border-radius: 999px;
-		background: rgba(255, 255, 255, 0.42);
-		color: #7d8582;
-		font-size: 10px;
-		font-weight: 700;
-		letter-spacing: 0.08em;
-		text-transform: uppercase;
-	}
-
-	.field-viewport {
-		position: relative;
-		min-height: 100svh;
-		flex: 1;
-		overflow: hidden;
-		isolation: isolate;
-		background: transparent;
-	}
-
-	.field-viewport:not(.initial-field-geometry-ready) .field-scene {
-		visibility: hidden;
-	}
-
-	.composer-available .field-viewport {
-		min-height: 0;
-	}
-
 	.composer-available {
 		padding-bottom: var(--composer-reserved-height);
-	}
-
-	.field-viewport::before {
-		position: absolute;
-		inset: 0;
-		z-index: -1;
-		background: transparent;
-		content: '';
-	}
-
-	/* .timeline-entry {
-		padding: 10px 8px 11px;
-	} */
-
-	.field-scene {
-		position: absolute;
-		top: 0;
-		left: 0;
-		will-change: transform;
-	}
-
-	.field-area {
-		position: absolute;
-		z-index: 2;
-		overflow: hidden;
-		background: transparent;
-		touch-action: pinch-zoom;
-	}
-
-	.speech-area {
-		position: absolute;
-		z-index: 1;
-		pointer-events: none;
-	}
-
-	.field-grid {
-		position: absolute;
-		inset: 0;
-		background-color: rgba(222, 228, 213, 0.48);
-		background-image:
-			linear-gradient(to right, rgba(101, 122, 105, 0.16) 1px, transparent 1px),
-			linear-gradient(to bottom, rgba(101, 122, 105, 0.16) 1px, transparent 1px),
-			linear-gradient(rgba(255, 250, 224, 0.2), rgba(255, 250, 224, 0.2)),
-			var(--field-background-image, none);
-		background-size: var(--cell-size) var(--cell-size), var(--cell-size) var(--cell-size),
-			100% 100%, 100% 100%;
-		background-repeat: repeat, repeat, no-repeat, no-repeat;
-		box-shadow:
-			0 24px 65px rgba(67, 75, 62, 0.12),
-			inset 0 0 0 1px rgba(95, 111, 96, 0.3);
-	}
-
-	.field-grid::after {
-		position: absolute;
-		inset: 0;
-		border: 2px solid rgba(68, 91, 73, 0.48);
-		box-shadow: inset 0 0 0 10px rgba(112, 137, 108, 0.2);
-		content: '';
-		pointer-events: none;
-	}
-
-	.trace-light-layer {
-		position: absolute;
-		inset: 0;
-		z-index: 4;
-		pointer-events: none;
-	}
-
-	.trace-light {
-		position: absolute;
-		width: max(6px, calc(var(--cell-size) * 0.14));
-		height: max(6px, calc(var(--cell-size) * 0.14));
-		border: 1px solid rgba(255, 250, 205, 0.84);
-		border-radius: 50%;
-		background: rgba(255, 238, 154, 0.75);
-		box-shadow: 0 0 8px 3px rgba(255, 225, 120, 0.42);
-		pointer-events: none;
-		transform: translate(-50%, -50%);
-	}
-
-	.trace-investigation-indicator {
-		position: absolute;
-		width: max(12px, calc(var(--cell-size) * 0.24));
-		height: max(12px, calc(var(--cell-size) * 0.24));
-		color: rgba(255, 250, 205, 0.92);
-		font-size: max(12px, calc(var(--cell-size) * 0.24));
-		font-weight: 900;
-		line-height: 1;
-		text-align: center;
-		text-shadow: 0 0 4px rgba(84, 67, 26, 0.55);
-		transform: translate(-50%, -50%);
-		pointer-events: none;
-	}
-
-	.trace-proximity-feedback {
-		position: absolute;
-		z-index: 5;
-		width: max-content;
-		max-width: 150px;
-		padding: 3px 8px;
-		border: 1px solid rgba(255, 250, 205, 0.72);
-		border-radius: 999px;
-		background: rgba(52, 64, 54, 0.82);
-		color: #fffbdc;
-		font-size: 11px;
-		font-weight: 800;
-		line-height: 1.2;
-		transform: translate(-50%, -100%);
-		pointer-events: none;
-	}
-
-	.field-cell-selection-layer {
-		position: absolute;
-		inset: 0;
-		z-index: 2;
-		pointer-events: none;
-	}
-
-	.field-cell-selection-trigger {
-		position: absolute;
-		width: var(--cell-size);
-		height: var(--cell-size);
-		padding: 0;
-		border: 0;
-		background: transparent;
-		cursor: pointer;
-		pointer-events: auto;
-		touch-action: manipulation;
-	}
-
-	.field-cell-selection-trigger:focus-visible {
-		outline: 3px solid var(--color-focus-ring);
-		outline-offset: -5px;
-	}
-
-	.pointer-joystick {
-		position: absolute;
-		z-index: 7;
-		width: 96px;
-		height: 96px;
-		transform: translate(-50%, -50%);
-		pointer-events: none;
-	}
-
-	.pointer-joystick-base,
-	.pointer-joystick-thumb {
-		position: absolute;
-		border-radius: 50%;
-		pointer-events: none;
-	}
-
-	.pointer-joystick-base {
-		top: 0;
-		left: 0;
-		width: 96px;
-		height: 96px;
-		border: 1px solid rgba(50, 82, 70, 0.32);
-		background: rgba(221, 235, 221, 0.32);
-		box-shadow: 0 5px 18px rgba(50, 68, 56, 0.14), inset 0 0 0 1px rgba(255, 255, 255, 0.3);
-	}
-
-	.pointer-joystick-thumb {
-		left: calc(50% + var(--joystick-thumb-x));
-		top: calc(50% + var(--joystick-thumb-y));
-		width: 32px;
-		height: 32px;
-		transform: translate(-50%, -50%);
-		border: 1px solid rgba(43, 77, 63, 0.48);
-		background: rgba(108, 153, 132, 0.58);
-		box-shadow: 0 3px 10px rgba(50, 68, 56, 0.18);
-	}
-
-	.field-label {
-		position: absolute;
-		color: rgba(66, 86, 71, 0.52);
-		font-size: 10px;
-		font-weight: 700;
-		letter-spacing: 0.14em;
-		text-transform: uppercase;
-	}
-
-	.field-label-top {
-		top: 24px;
-		left: 24px;
-	}
-
-	.field-label-bottom {
-		right: 24px;
-		bottom: 24px;
-	}
-
-	.trace-ghost {
-		position: absolute;
-		z-index: 4;
-		width: var(--cell-size);
-		height: var(--cell-size);
-		transform: translate(-50%, -50%);
-		opacity: 0.58;
-		filter: saturate(0.72);
-		pointer-events: none;
-	}
-
-	.trace-ghost-compact {
-		width: calc(var(--cell-size) * 0.58);
-		height: calc(var(--cell-size) * 0.58);
-	}
-
-	.trace-ghost-compact :global(.avatar) {
-		width: 100%;
-		height: 100%;
-	}
-
-	.trace-reply-ghost {
-		z-index: 4;
-	}
-
-	.trace-ghost-profile-trigger {
-		position: absolute;
-		top: 50%;
-		left: 50%;
-		display: block;
-		width: calc(100% - 8px);
-		height: calc(100% - 8px);
-		padding: 0;
-		border: 0;
-		background: transparent;
-		cursor: pointer;
-		pointer-events: auto;
-		transform: translate(-50%, -50%);
-	}
-
-	.trace-ghost-profile-trigger :global(.avatar) {
-		width: 100%;
-		height: 100%;
-	}
-
-	.trace-ghost-compact .trace-ghost-profile-trigger {
-		width: 100%;
-		height: 100%;
-	}
-
-	.trace-ghost-profile-trigger:focus-visible {
-		outline: 3px solid var(--color-focus-ring);
-		outline-offset: 2px;
-	}
-
-	.trace-ghost-name {
-		position: absolute;
-		bottom: -2px;
-		left: 50%;
-		max-width: calc(var(--cell-size) + 8px);
-		padding: 1px 5px;
-		transform: translateX(-50%);
-		overflow: hidden;
-		border: 1px dashed rgba(79, 91, 88, 0.48);
-		border-radius: 999px;
-		background: rgba(247, 247, 239, 0.76);
-		color: #596662;
-		font-size: 9px;
-		font-weight: 700;
-		pointer-events: none;
-		white-space: nowrap;
-		text-overflow: ellipsis;
-	}
-
-	.field-action-menu {
-		position: absolute;
-		z-index: 8;
-		display: grid;
-		min-width: 170px;
-		padding: 5px;
-		border: 1px solid rgba(66, 82, 76, 0.28);
-		border-radius: 10px;
-		background: rgba(250, 250, 244, 0.97);
-		box-shadow: 0 10px 28px rgba(44, 54, 50, 0.24);
-		transform: translate(-50%, calc(-100% - 8px));
-		pointer-events: auto;
-	}
-
-	.field-action-menu button {
-		min-height: 38px;
-		padding: 7px 10px;
-		border: 0;
-		border-radius: 7px;
-		background: transparent;
-		color: #364541;
-		font: inherit;
-		font-size: 12px;
-		font-weight: 700;
-		text-align: left;
-		cursor: pointer;
-	}
-
-	.field-action-menu button:hover,
-	.field-action-menu button:focus-visible {
-		background: rgba(122, 164, 148, 0.18);
-		outline: none;
-	}
-
-	.viewport-vignette {
-		position: absolute;
-		inset: 0;
-		z-index: 7;
-		pointer-events: none;
-		box-shadow: inset 0 0 80px rgba(89, 101, 82, 0.12);
-	}
-
-	.camera-chip {
-		right: 28px;
-		bottom: 28px;
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		padding: 8px 11px;
-		border: 1px solid rgba(57, 67, 64, 0.12);
-		border-radius: 999px;
-		background: rgba(246, 246, 237, 0.7);
-		backdrop-filter: blur(8px);
-		color: #77807b;
-		font-size: 10px;
-		font-weight: 700;
-		letter-spacing: 0.05em;
-		text-transform: uppercase;
-	}
-
-	.camera-dot {
-		width: 7px;
-		height: 7px;
-		border: 1px solid #d28165;
-		border-radius: 50%;
-		background: #f0a488;
-	}
-
-	.status-panel {
-		bottom: 30px;
-		left: 32px;
-		display: flex;
-		align-items: flex-end;
-		gap: 22px;
-	}
-
-	.composer-available .status-panel {
-		bottom: calc(var(--composer-dock-height) + 30px);
-	}
-
-	.panel-kicker {
-		color: #76827b;
-		font-size: 10px;
-		font-weight: 800;
-		letter-spacing: 0.12em;
-		text-transform: uppercase;
-	}
-
-	.status-message {
-		margin-top: 6px;
-		color: #3f4a47;
-		font-size: 14px;
-		font-weight: 800;
-	}
-
-	.write-status {
-		margin: 5px 0 0;
-		color: #7d6258;
-		font-size: 10px;
-		font-weight: 700;
-	}
-
-	.footer-note {
-		bottom: 8px;
-		left: 50%;
-		transform: translateX(-50%);
-		color: rgba(91, 102, 96, 0.55);
-		font-size: 9px;
-		letter-spacing: 0.12em;
-		text-transform: uppercase;
-		white-space: nowrap;
-	}
-
-	.composer-available .footer-note {
-		bottom: calc(var(--composer-dock-height) + 8px);
-	}
-
-	@media (max-width: 700px) {
-
-		.brand-mark {
-			width: 31px;
-			height: 31px;
-			font-size: 19px;
-		}
-
-		.brand-name { font-size: 13px; }
-		.brand-subtitle { font-size: 8px; }
-
-		.prototype-badge {
-			padding: 7px 9px;
-			font-size: 8px;
-		}
-
-		.status-panel {
-			bottom: 22px;
-			left: 16px;
-			gap: 14px;
-		}
-
-		.status-message { font-size: 12px; }
-
-		.camera-chip {
-			right: 16px;
-			bottom: 24px;
-			font-size: 8px;
-		}
-
-		.footer-note {
-			display: none;
-		}
-
-		.field-label-bottom { display: none; }
-	}
-
-	@media (max-width: 420px) {
-		.prototype-badge { max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-		.status-panel { max-width: 176px; }
-		.status-message { line-height: 1.25; }
 	}
 
 </style>
