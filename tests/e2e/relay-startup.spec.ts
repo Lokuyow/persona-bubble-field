@@ -836,6 +836,7 @@ test.describe('Relay startup', () => {
 		const parsedRoot = parseWorldMessage(root, CHANNEL_ID);
 		if (!parsedRoot) throw new Error('Read-state root fixture did not parse.');
 		const reply = finalizeEvent(buildTraceReplyTemplate({ root: parsedRoot, parent: parsedRoot, content: 'private reply detail', speechType: 'normal', createdAt: Math.floor(now / 1000) + 1 }), new Uint8Array(32).fill(31));
+		const replyAfterRootRead = finalizeEvent(buildTraceReplyTemplate({ root: parsedRoot, parent: parsedRoot, content: 'private reply after root read', speechType: 'normal', createdAt: Math.floor(now / 1000) + 2 }), new Uint8Array(32).fill(32));
 		await page.clock.setFixedTime(now);
 		await page.emulateMedia({ reducedMotion: 'reduce' });
 		await page.setViewportSize({ width: 1100, height: 850 });
@@ -870,6 +871,20 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('[data-trace-light-position="4,2"]')).toBeVisible();
 		await expect(page.locator('[data-trace-light-position="4,2"]')).toHaveAttribute('data-trace-root-read', 'true');
 		await expect(page.locator('.trace-unread-indicator')).toHaveCount(0);
+		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectTraceReply(event: object): void } }).__relayStartupTest.injectTraceReply(event), replyAfterRootRead);
+		const light = page.locator('[data-trace-light-position="4,2"]');
+		await expect(light).toHaveAttribute('data-trace-root-read', 'true');
+		await expect(light).toHaveAttribute('data-trace-root-unread-reply', 'true');
+		await expect.poll(() => light.evaluate((element) => getComputedStyle(element).opacity)).toBe('1');
+		await expect(page.locator('.trace-unread-indicator')).toBeVisible();
+		await selectRelayTraceCell(page, '4,2');
+		await expect(page.locator(`[data-trace-reply-id="${replyAfterRootRead.id}"]`)).toContainText(replyAfterRootRead.content);
+		const hideTimeline = page.getByRole('button', { name: 'Hide Chatter' });
+		if (await hideTimeline.isVisible()) await hideTimeline.click();
+		await page.locator('.field-area').click({ position: { x: 8, y: 8 } });
+		await expect(light).toHaveAttribute('data-trace-root-read', 'true');
+		await expect(light).not.toHaveAttribute('data-trace-root-unread-reply');
+		await expect.poll(() => light.evaluate((element) => getComputedStyle(element).opacity)).toBe('0.48');
 	});
 
 	test('passes target-author character profiles across root, nested reply, and clear context patches', async ({ page }) => {

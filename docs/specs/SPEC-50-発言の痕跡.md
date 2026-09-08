@@ -113,6 +113,7 @@ root readは、root ghostと実際のroot本文bubbleの**両方**が実表示�
 自分がauthorであるeventへのdirect replyだけを未読候補とする。self-replyは表示できてもnotification対象外とする。
 
 - root read/unreadはlight opacityへ反映する。reply unreadの有無はlight colorへ反映する。
+- reply unreadの有無はroot lightのcolorへ反映し、reply unreadが存在する場合はroot readによるlightのopacity低下よりpresentation上優先する。
 - global unread indicatorはComposer dockに置き、Chatterとは別UIとする。操作時は「どこかにあなたへの返信の痕跡があります」のように未読存在だけを説明する。本文、author、場所、方向、距離、件数を表示せず、auto-navigationもしない。
 
 ## 27. trace bubbleの視覚的優先順位

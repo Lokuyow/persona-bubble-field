@@ -413,7 +413,7 @@
 		transform: translate(-50%, -50%);
 	}
 
-	.trace-light-read {
+	.trace-light-read:not(.trace-light-unread-reply) {
 		opacity: 0.48;
 	}
 
