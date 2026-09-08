@@ -114,6 +114,22 @@ describe('Trace reply publication ownership', () => {
 		expect(f.publish.mock.calls.map(([event]) => event.kind)).toEqual([30078, 1111]);
 	});
 
+	it('allows local Trace navigation while its inspection position is pending without publishing again', async () => {
+		const f = await fixture(true); vi.setSystemTime(701_000);
+		const pending = deferred<import('./nostrRelayTransport').PublishRelayResult[]>();
+		f.publish.mockImplementation((event) => event.kind === 30078 ? pending.promise : Promise.resolve(accepted));
+
+		expect(f.session.selectTraceConversationSpeech(f.child.id)).toEqual({ kind: 'opened' });
+		await settle();
+		expect(f.session.getTraceConversationState()).toMatchObject({ config: { currentId: f.child.id } });
+		expect(f.publish).toHaveBeenCalledTimes(1);
+		expect(f.publish.mock.calls[0][0].kind).toBe(30078);
+
+		expect(f.session.selectTraceConversationSpeech(f.root.id)).toEqual({ kind: 'opened' });
+		expect(f.session.getTraceConversationState()).toMatchObject({ config: { rootId: f.root.id, currentId: f.root.id } });
+		expect(f.publish).toHaveBeenCalledTimes(1);
+	});
+
 	it.each([false, true])('holds the owner through kind 1111 (preceding position: %s), even after position echo', async (positionRequired) => {
 		const f = await fixture();
 		if (positionRequired) vi.setSystemTime(701_000);

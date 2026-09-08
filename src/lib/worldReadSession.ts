@@ -651,7 +651,8 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 	function selectTraceConversationSpeech(targetId: string): TraceConversationOpenResult {
 		if (disposed || !options.selfAccount || !transport || !channel) return { kind: 'unavailable' };
 		if (!bootstrapComplete || traceConversationState.kind === 'closed') return { kind: 'blocked' };
-		if (pendingSelfOperation || pendingTraceReply) return { kind: 'pending' };
+		const pendingTraceInspection = pendingSelfOperation?.operation === 'trace-inspection';
+		if (pendingTraceReply || (pendingSelfOperation && !pendingTraceInspection)) return { kind: 'pending' };
 		const current = traceConversationState;
 		const projection = resolveTraceConversationProjection(current);
 		const target = projection ? projection.current.event.id === targetId
@@ -666,7 +667,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 			requireCurrentRange: true
 		});
 		if (prepared.kind === 'blocked') return { kind: 'blocked' };
-		if (!prepared.coalesced) {
+		if (!prepared.coalesced && !pendingTraceInspection) {
 			const candidate = positionCandidate(prepared.position, nowMs);
 			if (!candidate) return { kind: 'blocked' };
 			void publishPreparedSelfPosition('trace-inspection', candidate);
