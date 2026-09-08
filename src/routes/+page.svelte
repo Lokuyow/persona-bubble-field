@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, tick } from 'svelte';
+	import { onMount, tick, untrack } from 'svelte';
 	import { pushState } from '$app/navigation';
 	import { page } from '$app/state';
 	import { asset, base } from '$app/paths';
@@ -65,7 +65,8 @@
 		publishCharacterProfile,
 		type PreparedCharacterProfilePublication
 	} from '$lib/initialProfilePublication';
-	import { projectPresence, type PresenceProjectionOptions } from '$lib/presenceProjection';
+	import { allocateParticipantColors, projectFrontendPresence, type Participant } from '$lib/frontend/presencePresentation';
+	import { advanceMergedAnchorHistory } from '$lib/frontend/mergedAnchorHistory';
 	import { debugTimeoutParticipant, type PresenceState } from '$lib/presence';
 	import { addRecentMessage, createRecentMessageTimeline, type RecentMessageTimeline } from '$lib/recentMessageTimeline';
 	import { getVirtualKeyboardBottomInset, getVisualViewportKeyboardInset, type ViewportRect } from '$lib/keyboardInset';
@@ -87,7 +88,6 @@
 	import SpeechBubble, { type BubbleMeasurement, type LiveBubblePresentation } from '$lib/SpeechBubble.svelte';
 	import TracePresentation from '$lib/TracePresentation.svelte';
 	import {
-		BUBBLE_TONES,
 		bubbleToneStyle,
 		createPresentationBubbleShape,
 		mergedTailStart,
@@ -102,18 +102,6 @@
 		isTracePresentationMeasured,
 		layoutTraceBubblePresentation
 	} from '$lib/traceBubblePresentation';
-	const resolveTraceBubbleLayout = (() => {
-		let previousLayout: ReturnType<typeof layoutTraceBubblePresentation> = null;
-		return (input: Parameters<typeof layoutTraceBubblePresentation>[0]) => {
-			if (!input.projection) {
-				previousLayout = null;
-				return null;
-			}
-			const next = layoutTraceBubblePresentation({ ...input, previousLayout });
-			previousLayout = next;
-			return next;
-		};
-	})();
 	import ComposerDock from '$lib/frontend/ComposerDock.svelte';
 	import Chatter from '$lib/frontend/Chatter.svelte';
 	import WorldEntryControls from '$lib/frontend/WorldEntryControls.svelte';
@@ -154,74 +142,66 @@
 	const initialDevWorldSandboxEnabled = import.meta.env.DEV &&
 		isDevWorldSandboxEnabled(import.meta.env.DEV, page.url.searchParams);
 
-	type AvatarColor = BubbleTone;
-	type Participant = {
-		id: string;
-		character: Character;
-		color: AvatarColor;
-	};
-	const AVATAR_COLORS: readonly AvatarColor[] = BUBBLE_TONES;
-
-	let presenceState: PresenceState = { field: FIELD, participants: [] };
+	let presenceState = $state.raw<PresenceState>({ field: FIELD, participants: [] });
 	let viewportElement: HTMLElement;
-	let viewportSize: Size = DEFAULT_VIEWPORT;
-	let initialFieldGeometryReady = false;
-	let bubbleSizes: Record<string, Size> = {};
-	let bubbleOverflowById: Record<string, boolean> = {};
+	let viewportSize = $state.raw<Size>(DEFAULT_VIEWPORT);
+	let initialFieldGeometryReady = $state(false);
+	let bubbleSizes = $state.raw<Record<string, Size>>({});
+	let bubbleOverflowById = $state.raw<Record<string, boolean>>({});
 	const mountedBubbleRemeasures = new Map<string, () => void>();
 	const mountedTraceReplyRemeasures = new Map<string, () => void>();
-	let conversationState: ConversationState = createConversationState();
-	let lastPlacedAnchorById: Record<string, WorldPoint> = {};
+	let conversationState = $state.raw<ConversationState>(createConversationState());
+	let lastPlacedAnchorById = $state.raw<Readonly<Record<string, WorldPoint>>>({});
 	let lastVisibilityKey: string | null = null;
-	let colorByPubkey: Record<string, AvatarColor> = {};
-	let recentMessageTimeline: RecentMessageTimeline = [];
-	let effectiveTraceRoots: readonly ParsedWorldMessage[] = [];
-	let traceConversationState: TraceConversationState = { kind: 'closed' };
-	let traceReplyMode = createTraceReplyMode();
-	$: composerDesiredContext = {
+	let colorByPubkey = $state.raw<Record<string, BubbleTone>>({});
+	let recentMessageTimeline = $state.raw<RecentMessageTimeline>([]);
+	let effectiveTraceRoots = $state.raw<readonly ParsedWorldMessage[]>([]);
+	let traceConversationState = $state.raw<TraceConversationState>({ kind: 'closed' });
+	let traceReplyMode = $state.raw(createTraceReplyMode());
+	let composerDesiredContext = $derived({
 		generation: traceReplyMode.generation,
 		targetId: traceReplyMode.target?.targetId ?? null,
 		clearContentVersion: traceReplyMode.clearContentVersion
-	};
+	});
 	// The measured body remains the source for speech shape and text overflow.
 	// Reply wrappers have a separate footprint because their Profile control lives beside it.
-	let traceReplyCardFootprints: Record<string, Size> = {};
-	let traceConversationController: TraceConversationController | null = null;
+	let traceReplyCardFootprints = $state.raw<Record<string, Size>>({});
+	let traceConversationController = $state.raw<TraceConversationController | null>(null);
 	let devTraceConversationRuntime: DevTraceConversationRuntime | null = null;
-	let devTraceReplies: readonly ParsedTraceReply[] = [];
-	let devTraceReplyFixtureEnabled = false;
-	let fieldActionMenu: Readonly<{
+	let devTraceReplies = $state.raw<readonly ParsedTraceReply[]>([]);
+	let devTraceReplyFixtureEnabled = $state(false);
+	let fieldActionMenu = $state.raw<Readonly<{
 		position: { x: number; y: number };
 		actions: readonly FieldCellAction[];
-	}> | null = null;
-	let proximityFeedback: Readonly<{ position: { x: number; y: number } }> | null = null;
+	}> | null>(null);
+	let proximityFeedback = $state.raw<Readonly<{ position: { x: number; y: number } }> | null>(null);
 	let proximityFeedbackTimer: number | null = null;
 	let connectionStatus: WorldReadConnectionStatus = { kind: 'bootstrapping' };
-	let selfAccount: AccountSnapshot | null = null;
-	let selfPositionWriteState: SelfPositionWriteState = { kind: 'unavailable' };
+	let selfAccount = $state.raw<AccountSnapshot | null>(null);
+	let selfPositionWriteState = $state.raw<SelfPositionWriteState>({ kind: 'unavailable' });
 	let selfMessageAvailability: SelfMessageAvailability = { kind: 'unavailable' };
-	let composerPreferredHeight: number | null = null;
-	let composerKeyboardInset = 0;
+	let composerPreferredHeight = $state<number | null>(null);
+	let composerKeyboardInset = $state(0);
 	let worldSession: ReturnType<typeof createWorldReadSession> | null = null;
-	let runtimeMode: 'relay' | 'dev' = initialDevWorldSandboxEnabled ? 'dev' : 'relay';
-	let devWorldSandboxEnabled = initialDevWorldSandboxEnabled;
+	const runtimeMode: 'relay' | 'dev' = initialDevWorldSandboxEnabled ? 'dev' : 'relay';
+	const devWorldSandboxEnabled = initialDevWorldSandboxEnabled;
 	let pendingComposerSubmission: Readonly<{
 		resolve: () => void;
 		reject: (error: Error) => void;
 		cleanup: () => void;
 	}> | null = null;
 	let composerStartupError: Error | null = null;
-	let composerSubmissionInProgress = false;
+	let composerSubmissionInProgress = $state(false);
 	let entryRetryable = false;
-	let selectedCharacterId = '001';
-	let selectedSpeechType: SpeechType = 'normal';
+	let selectedCharacterId = $state('001');
+	let selectedSpeechType = $state<SpeechType>('normal');
 	let lastProfileTrigger: HTMLButtonElement | null = null;
 	let composerEditorIsEmpty: boolean | null = null;
 	let chatterComponent: { initialize(width: number): void; isInitialized(): boolean; toggle(): void; resetMeasurements(): void };
-	let composerComponent: { focusEditor(): boolean; blurEditor(): boolean } | null = null;
-	let visualWorldById: Record<string, WorldPoint> = {};
-	let visualCamera: WorldPoint | null = null;
-	let visualMotion: VisualMotion | null = null;
+	let composerComponent = $state.raw<{ focusEditor(): boolean; blurEditor(): boolean } | null>(null);
+	let visualWorldById = $state.raw<Record<string, WorldPoint>>({});
+	let visualCamera = $state.raw<WorldPoint | null>(null);
+	let visualMotion = $state.raw<VisualMotion | null>(null);
 	let visualAnimationFrame: number | null = null;
 	let visualProjectionInitialized = false;
 	let prefersReducedMotion = false;
@@ -230,11 +210,11 @@
 	let movementHoldTakeover = (_pointerId: number, _direction: Direction) => {};
 	let movementHoldUpdatePointer = (_pointerId: number, _direction: Direction) => {};
 	let movementHoldStopPointer = (_pointerId: number) => {};
-	let pointerJoystick: Readonly<{
+	let pointerJoystick = $state.raw<Readonly<{
 		center: JoystickPoint;
 		thumb: JoystickPoint;
 		direction: Direction;
-	}> | null = null;
+	}> | null>(null);
 
 	type VisualParticipantTransition = Readonly<{ from: WorldPoint; to: WorldPoint }>;
 	type VisualMotion = Readonly<{
@@ -244,59 +224,58 @@
 		participants: ReadonlyMap<string, VisualParticipantTransition>;
 	}>;
 
-	$: cellSize = getResponsiveCellSize(viewportSize.width);
-	$: field = { ...FIELD, cellSize };
-	$: fieldWorldSize = getFieldWorldSize(field);
-	$: speechAreaBounds = {
+	let cellSize = $derived(getResponsiveCellSize(viewportSize.width));
+	let field = $derived({ ...FIELD, cellSize });
+	let fieldWorldSize = $derived(getFieldWorldSize(field));
+	let speechAreaBounds = $derived({
 		x: SPEECH_AREA.sidePadding,
 		y: SPEECH_AREA.top,
 		width: Math.max(0, viewportSize.width - SPEECH_AREA.sidePadding * 2),
 		height: SPEECH_AREA.height
-	};
-	$: fieldAreaBounds = getFieldAreaBounds(viewportSize, speechAreaBounds);
-	$: selfProjectionId = devWorldSandboxEnabled ? DEV_WORLD_SELF_ID : selfAccount?.pubkey ?? 'you';
-	$: presenceProjection = getPresenceProjection(presenceState, selectedCharacterId, selfProjectionId, {
-		cellSize, fieldAreaBounds, fieldWorldSize
 	});
-	$: isWorldSelfActive = Boolean(selfAccount && presenceState.participants.some((participant) =>
+	let fieldAreaBounds = $derived(getFieldAreaBounds(viewportSize, speechAreaBounds));
+	let selfProjectionId = $derived(devWorldSandboxEnabled ? DEV_WORLD_SELF_ID : selfAccount?.pubkey ?? 'you');
+	let presenceProjection = $derived(projectFrontendPresence({ presence: presenceState, selectedCharacterId, selfProjectionId,
+		geometry: { cellSize, fieldAreaBounds, fieldWorldSize }, colors: colorByPubkey }));
+	let isWorldSelfActive = $derived(Boolean(selfAccount && presenceState.participants.some((participant) =>
 		participant.id === selfAccount?.pubkey && participant.status === 'active'
-	));
-	$: camera = visualCamera ?? presenceProjection.camera;
-	$: actualFieldTop = getActualFieldTop(fieldAreaBounds, camera);
-	$: speechAreaVisualBounds = {
+	)));
+	let camera = $derived(visualCamera ?? presenceProjection.camera);
+	let actualFieldTop = $derived(getActualFieldTop(fieldAreaBounds, camera));
+	let speechAreaVisualBounds = $derived({
 		x: 0,
 		y: 0,
 		width: viewportSize.width,
 		height: actualFieldTop
-	};
-	$: bubbleSafeBounds = {
+	});
+	let bubbleSafeBounds = $derived({
 		x: SPEECH_AREA.sidePadding,
 		y: SPEECH_AREA.top,
 		width: Math.max(0, viewportSize.width - SPEECH_AREA.sidePadding * 2),
 		height: Math.max(0, actualFieldTop - SPEECH_AREA.top)
-	};
-	$: bubbleVisualRegion = {
+	});
+	let bubbleVisualRegion = $derived({
 		x: 0,
 		y: bubbleSafeBounds.y,
 		width: viewportSize.width,
 		height: Math.max(bubbleSafeBounds.height, ...Object.values(bubbleSizes).map((size) => size.height))
-	};
+	});
 
-	$: participantViews = presenceProjection.participants.map((participant) => {
+	let participantViews = $derived(presenceProjection.participants.map((participant) => {
 		const world = visualWorldById[participant.id] ?? participant.world;
 		return {
 			...participant,
 			world,
 			screen: fieldLocalToViewport(worldToScreen(world, camera), fieldAreaBounds)
 		};
-	});
+	}));
 
-	$: participantById = new Map(participantViews.map((participant) => [participant.id, participant]));
-	$: selfPresence = presenceState.participants.find((participant) => participant.id === selfProjectionId) ?? null;
-	$: selfLogicalPosition = selfPresence?.position ?? null;
-	$: selfIsActive = selfPresence?.status === 'active';
-	$: traceRootCells = groupTraceRoots(effectiveTraceRoots);
-	$: traceLightCells = traceRootCells
+	let participantById = $derived(new Map(participantViews.map((participant) => [participant.id, participant])));
+	let selfPresence = $derived(presenceState.participants.find((participant) => participant.id === selfProjectionId) ?? null);
+	let selfLogicalPosition = $derived(selfPresence?.position ?? null);
+	let selfIsActive = $derived(selfPresence?.status === 'active');
+	let traceRootCells = $derived(groupTraceRoots(effectiveTraceRoots));
+	let traceLightCells = $derived(traceRootCells
 		.filter((cell) => traceConversationState.kind !== 'open' || !sameCell(cell.position, traceConversationState.root.position))
 		.map((cell) => ({
 			...cell,
@@ -305,20 +284,25 @@
 			),
 			inInvestigationRange: selfIsActive && selfLogicalPosition !== null &&
 				isWithinTraceInvestigationRange(selfLogicalPosition, cell.position)
-		}));
-	$: traceConversationProjection = resolveTraceConversationProjection(traceConversationState);
-	$: traceOnlyCellTriggers = traceRootCells.map((cell) => cell.position).filter((position) =>
+		})));
+	let traceConversationProjection = $derived(resolveTraceConversationProjection(traceConversationState));
+	let traceOnlyCellTriggers = $derived(traceRootCells.map((cell) => cell.position).filter((position) =>
 		!participantViews.some((participant) => sameCell(participant.position, position)) &&
 		traceLightCells.some((cell) => sameCell(cell.position, position))
-	);
+	));
 
-	$: visibleParticipantIds = new Set(
+	let visibleParticipantIds = $derived(new Set(
 		participantViews.filter((participant) => isInsideFieldArea(participant.screen)).map((participant) => participant.id)
-	);
-	$: visibleParticipantKey = [...visibleParticipantIds].sort().join('|');
-	$: syncVisibility(visibleParticipantKey, visibleParticipantIds);
+	));
+	let visibleParticipantKey = $derived([...visibleParticipantIds].sort().join('|'));
+	$effect(() => {
+		const key = visibleParticipantKey;
+		const ids = visibleParticipantIds;
+		// Only visual visibility changes trigger permanent dismissal, not conversation updates.
+		untrack(() => syncVisibility(key, ids));
+	});
 
-	$: visibleNormalBubbles = conversationState.normalBubbles
+	let visibleNormalBubbles = $derived(conversationState.normalBubbles
 		.map((bubble) => {
 			const speaker = participantById.get(bubble.pubkey);
 			if (!speaker || !isInsideFieldArea(speaker.screen)) return null;
@@ -341,9 +325,9 @@
 				speaker
 			};
 		})
-		.filter((bubble): bubble is NonNullable<typeof bubble> => bubble !== null);
+		.filter((bubble): bubble is NonNullable<typeof bubble> => bubble !== null));
 
-	$: visibleMergedBubbles = conversationState.mergedBubbles
+	let visibleMergedBubbles = $derived(conversationState.mergedBubbles
 		.map((bubble) => {
 			const members = bubble.memberPubkeys
 				.map((id) => participantById.get(id))
@@ -383,13 +367,13 @@
 				members: visibleMembers
 			};
 		})
-		.filter((bubble): bubble is NonNullable<typeof bubble> => bubble !== null);
+		.filter((bubble): bubble is NonNullable<typeof bubble> => bubble !== null));
 
-	$: placeableBubbles = [
+	let placeableBubbles = $derived([
 		...visibleNormalBubbles,
 		...visibleMergedBubbles.filter((bubble) => bubble.members.length > 0)
-	];
-	$: bubblePlacement = placeBubbles(
+	]);
+	let bubblePlacement = $derived(placeBubbles(
 		placeableBubbles.map((bubble) => ({
 			id: bubble.id,
 			preferred: bubble.anchor,
@@ -400,19 +384,30 @@
 		cellSize,
 		undefined,
 		bubbleVisualRegion
-	);
-	$: placedAnchorById = new Map(bubblePlacement.map((placement) => [placement.id, placement.anchor]));
-	$: rememberPlacedMergedAnchors(visibleMergedBubbles, placedAnchorById, conversationState.mergedBubbles);
-	$: positionedNormalBubbles = visibleNormalBubbles.map((bubble) => ({
+	));
+	let placedAnchorById = $derived(new Map(bubblePlacement.map((placement) => [placement.id, placement.anchor])));
+	$effect(() => {
+		const activeIds = new Set(conversationState.mergedBubbles.map((bubble) => bubble.id));
+		const anchors = new Map<string, WorldPoint>();
+		for (const bubble of visibleMergedBubbles) {
+			const anchor = placedAnchorById.get(bubble.id);
+			if (bubble.members.length > 0 && anchor) anchors.set(bubble.id, anchor);
+		}
+		untrack(() => {
+			const next = advanceMergedAnchorHistory(lastPlacedAnchorById, activeIds, anchors);
+			if (next !== lastPlacedAnchorById) lastPlacedAnchorById = next;
+		});
+	});
+	let positionedNormalBubbles = $derived(visibleNormalBubbles.map((bubble) => ({
 		...bubble,
 		anchor: placedAnchorById.get(bubble.id) ?? bubble.anchor
-	}));
-	$: positionedMergedBubbles = visibleMergedBubbles.map((bubble) => ({
+	})));
+	let positionedMergedBubbles = $derived(visibleMergedBubbles.map((bubble) => ({
 		...bubble,
 		anchor: bubble.members.length === 0 ? bubble.anchor : placedAnchorById.get(bubble.id) ?? bubble.anchor
-	}));
-	$: positionedVisibleBubbles = [...positionedNormalBubbles, ...positionedMergedBubbles];
-	$: liveBubblePresentations = positionedVisibleBubbles.map((bubble): LiveBubblePresentation => {
+	})));
+	let positionedVisibleBubbles = $derived([...positionedNormalBubbles, ...positionedMergedBubbles]);
+	let liveBubblePresentations = $derived(positionedVisibleBubbles.map((bubble): LiveBubblePresentation => {
 		if (bubble.kind === 'normal') {
 			const tail = tailGeometry(tailStart(bubble.anchor, bubble.size), tailTarget(bubble.speaker), 11, 2, specialTailExtension(bubble.speechType));
 			return {
@@ -447,45 +442,56 @@
 			mergedTailConnections: connections.map(({ participantId, seamOffset }) => ({ participantId, seamOffset })),
 			outlineOpenings: bubble.speechType === 'normal' ? [] : connections.map(({ participantId, opening }) => ({ id: participantId, points: opening }))
 		};
-	});
-	$: normalTailModels = positionedNormalBubbles.map((bubble) => ({
+	}));
+	let normalTailModels = $derived(positionedNormalBubbles.map((bubble) => ({
 		id: bubble.speaker.id, tone: bubble.tone as BubbleTone, speechType: bubble.speechType,
 		anchor: bubble.anchor, size: bubble.size, shape: bubble.shape, target: tailTarget(bubble.speaker)
-	}));
-	$: mergedTailModels = positionedMergedBubbles.map((bubble) => ({
+	})));
+	let mergedTailModels = $derived(positionedMergedBubbles.map((bubble) => ({
 		id: bubble.id, tone: bubble.tone as BubbleTone, speechType: bubble.speechType,
 		anchor: bubble.anchor, size: bubble.size, shape: bubble.shape,
 		members: bubble.members.map((member) => ({ id: member.id, target: tailTarget(member) }))
-	}));
-	$: traceTreeLayout = resolveTraceBubbleLayout({
-		projection: traceConversationProjection,
-		fixedBubbles: positionedVisibleBubbles,
-		bubbleSizes,
-		traceReplyCardFootprints,
-		bubbleSafeBounds,
-		bubbleVisualRegion,
-		cellSize,
-		camera,
-		fieldAreaBounds,
-		fieldRows: field.rows,
-		viewportWidth: viewportSize.width,
-		defaultBubbleSize: DEFAULT_BUBBLE_SIZES.normal,
-		characterFor: (pubkey) => traceCharacter(pubkey, devWorldSandboxEnabled, selectedCharacterId),
-		toneFor: traceTone
+	})));
+	let traceTreeLayout = $state.raw<ReturnType<typeof layoutTraceBubblePresentation>>(null);
+	$effect.pre(() => {
+		const isDev = devWorldSandboxEnabled;
+		const selectedId = selectedCharacterId;
+		const input = {
+			projection: traceConversationProjection,
+			fixedBubbles: positionedVisibleBubbles,
+			bubbleSizes,
+			traceReplyCardFootprints,
+			bubbleSafeBounds,
+			bubbleVisualRegion,
+			cellSize,
+			camera,
+			fieldAreaBounds,
+			fieldRows: field.rows,
+			viewportWidth: viewportSize.width,
+			defaultBubbleSize: DEFAULT_BUBBLE_SIZES.normal,
+			characterFor: (pubkey: string) => traceCharacter(pubkey, isDev, selectedId),
+			toneFor: traceTone
+		};
+		// Preserve continuity before rendering, without tracking the previous layout itself.
+		untrack(() => {
+			traceTreeLayout = input.projection
+				? layoutTraceBubblePresentation({ ...input, previousLayout: traceTreeLayout })
+				: null;
+		});
 	});
-	$: traceBubble = traceTreeLayout?.root ?? null;
-	$: tracePresentationReady = isTracePresentationMeasured(initialFieldGeometryReady, traceTreeLayout, bubbleSizes, traceReplyCardFootprints);
-	$: traceRootGhost = traceBubble ? (() => {
+	let traceBubble = $derived(traceTreeLayout?.root ?? null);
+	let tracePresentationReady = $derived(isTracePresentationMeasured(initialFieldGeometryReady, traceTreeLayout, bubbleSizes, traceReplyCardFootprints));
+	let traceRootGhost = $derived(traceBubble ? (() => {
 		const occupied = participantViews.some((participant) => sameCell(participant.position, traceBubble.event.position));
 		const offset = occupied ? { x: -cellSize * 0.29, y: cellSize * 0.27 } : { x: 0, y: 0 };
 		const center = gridToWorld(traceBubble.event.position, cellSize);
 		return { ...traceBubble, world: { x: center.x + offset.x, y: center.y + offset.y }, compact: occupied };
-	})() : null;
-	$: traceRootTailTarget = traceRootGhost ? (() => {
+	})() : null);
+	let traceRootTailTarget = $derived(traceRootGhost ? (() => {
 		const screen = fieldLocalToViewport(worldToScreen(traceRootGhost.world, camera), fieldAreaBounds);
 		return { x: screen.x, y: screen.y - cellSize * (traceRootGhost.compact ? 0.29 : 0.5) - 4 };
-	})() : null;
-	$: movingParticipantIds = visualMotion ? new Set(visualMotion.participants.keys()) : new Set<string>();
+	})() : null);
+	let movingParticipantIds = $derived(visualMotion ? new Set(visualMotion.participants.keys()) : new Set<string>());
 
 	function lerp(first: number, second: number, progress: number): number {
 		return first + (second - first) * progress;
@@ -507,7 +513,7 @@
 		visualMotion = null;
 	}
 
-	function sampleVisualAnimation(now = performance.now()): void {
+	function sampleVisualAnimation(now = performance.now(), canonical = presenceProjection): void {
 		if (!visualMotion) return;
 		const progress = Math.min(1, Math.max(0, (now - visualMotion.startedAt) / MOVEMENT_ANIMATION_DURATION_MS));
 		const eased = easeOut(progress);
@@ -524,8 +530,8 @@
 				cancelAnimationFrame(visualAnimationFrame);
 				visualAnimationFrame = null;
 			}
-			visualWorldById = Object.fromEntries(presenceProjection.participants.map((participant) => [participant.id, participant.world]));
-			visualCamera = presenceProjection.camera;
+			visualWorldById = Object.fromEntries(canonical.participants.map((participant) => [participant.id, participant.world]));
+			visualCamera = canonical.camera;
 		}
 	}
 
@@ -545,7 +551,7 @@
 		visualProjectionInitialized = true;
 	}
 
-	function animatePresenceTransition(previous: ReturnType<typeof getPresenceProjection>, next: ReturnType<typeof getPresenceProjection>): void {
+	function animatePresenceTransition(previous: ReturnType<typeof projectFrontendPresence>, next: ReturnType<typeof projectFrontendPresence>, selfId: string): void {
 		const logicalParticipantsChanged = previous.participants.length !== next.participants.length || previous.participants.some((participant, index) => {
 			const nextParticipant = next.participants[index];
 			return !nextParticipant ||
@@ -564,7 +570,8 @@
 
 		const now = performance.now();
 		const hadActiveVisualMotion = visualMotion !== null;
-		sampleVisualAnimation(now);
+		// Finish the old motion against its own canonical snapshot before retargeting.
+		sampleVisualAnimation(now, previous);
 		const currentVisualWorldById = visualWorldById;
 		const currentVisualCamera = visualCamera ?? previous.camera;
 		const previousById = new Map(previous.participants.map((participant) => [participant.id, participant]));
@@ -580,8 +587,8 @@
 		const movedIds = new Map([...transitions].filter(([, transition]) =>
 			transition.from.x !== transition.to.x || transition.from.y !== transition.to.y
 		));
-		const previousSelf = previousById.get(selfProjectionId);
-		const nextSelf = next.participants.find((participant) => participant.id === selfProjectionId);
+		const previousSelf = previousById.get(selfId);
+		const nextSelf = next.participants.find((participant) => participant.id === selfId);
 		const selfMoved = Boolean(previousSelf && nextSelf && (
 			previousSelf.position.x !== nextSelf.position.x || previousSelf.position.y !== nextSelf.position.y
 		));
@@ -602,7 +609,7 @@
 			toCamera: next.camera,
 			participants: movedIds
 		};
-		sampleVisualAnimation(now);
+		sampleVisualAnimation(now, next);
 		scheduleVisualAnimation();
 	}
 
@@ -626,7 +633,7 @@
 			if (import.meta.env.DEV) {
 				applyDevPageFixtures(devSearchParams, {
 					field: FIELD,
-					setPresence,
+					setPresence: acceptPresence,
 					getConversation: () => conversationState,
 					setConversation: (next) => { conversationState = next; },
 					setRecentMessageTimeline: (next) => { recentMessageTimeline = next; },
@@ -636,7 +643,7 @@
 				});
 			}
 			if (import.meta.env.DEV && devSearchParams.get('devPresence') === 'inactive') {
-				setPresence(debugTimeoutParticipant(presenceState, DEV_WORLD_SELF_ID));
+				acceptPresence(debugTimeoutParticipant(presenceState, DEV_WORLD_SELF_ID));
 			}
 			if (import.meta.env.DEV) {
 				void import('$lib/devTraceConversationRuntime').then(({ createDevTraceConversationRuntime }) => {
@@ -644,7 +651,7 @@
 					const runtime = createDevTraceConversationRuntime({
 						selfId: DEV_WORLD_SELF_ID,
 						getPresence: () => presenceState,
-						setPresence,
+						setPresence: acceptPresence,
 						getEffectiveRoots: () => effectiveTraceRoots,
 						getReplies: () => devTraceReplies,
 						setReplies: setDevTraceReplies,
@@ -689,7 +696,7 @@
 			session = createWorldReadSession({
 				field: FIELD,
 				selfAccount,
-				onPresenceChanged: setPresence,
+				onPresenceChanged: acceptPresence,
 				onLiveMessage: receiveLiveMessage,
 				onTimelineMessage: receiveTimelineMessage,
 				onEffectiveTraceRootsChanged: setEffectiveTraceRoots,
@@ -718,7 +725,6 @@
 			try {
 				const bootstrap = await session.start();
 				if (!mounted) return;
-				setPresence(bootstrap.presence);
 				restoreBootstrapConversation(bootstrap.messages, bootstrap.presence, Date.now());
 				recentMessageTimeline = createRecentMessageTimeline([
 					...recentMessageTimeline,
@@ -1002,7 +1008,8 @@
 			const now = Date.now();
 			const nextPresence = session?.refresh(now);
 			if (nextPresence) {
-				conversationState = applyVisibility(conversationState, getPresenceProjection(nextPresence).visibleParticipantIds);
+				conversationState = applyVisibility(conversationState, projectFrontendPresence({ presence: nextPresence, selectedCharacterId, selfProjectionId,
+			geometry: { cellSize, fieldAreaBounds, fieldWorldSize }, colors: colorByPubkey }).visibleParticipantIds);
 			}
 			conversationState = pruneExpired(conversationState, now);
 		}, 250);
@@ -1110,73 +1117,32 @@
 		return participantTone(members[0] ?? { color: 'lavender' });
 	}
 
-	function participantModels(state: PresenceState, selectedId = selectedCharacterId): readonly Participant[] {
-		return state.participants
-			.filter((participant) => participant.status === 'active')
-			.map((participant) => {
-				if (participant.id === DEV_WORLD_SELF_ID) {
-					return {
-						id: participant.id,
-						character: getDevWorldCharacter(selectedId),
-						color: colorByPubkey[participant.id] ?? AVATAR_COLORS[0]
-					};
-				}
-				const character = deriveCharacterFromPubkey(participant.id, CHARACTER_CATALOG);
-				return {
-					id: participant.id,
-					character,
-					color: colorByPubkey[participant.id] ?? AVATAR_COLORS[0]
-				};
-			});
-	}
-
-	function getPresenceProjection(
-		state: PresenceState,
-		selectedId = selectedCharacterId,
-		selfId = selfProjectionId,
-		geometry: PresenceProjectionOptions = { cellSize, fieldAreaBounds, fieldWorldSize }
-	) {
-		return projectPresence(state, participantModels(state, selectedId), geometry, selfId);
-	}
-
 	function hasUsableViewport(): boolean {
 		return viewportSize.width > 0 && viewportSize.height > 0;
 	}
 
-	function setPresence(nextPresence: PresenceState): void {
+	function acceptPresence(nextPresence: PresenceState): void {
+		const previousPresence = presenceState;
+		const previousColors = colorByPubkey;
+		const selectedId = selectedCharacterId;
+		const projectionId = selfProjectionId;
+		const geometry = { cellSize, fieldAreaBounds, fieldWorldSize };
 		const selfId = devWorldSandboxEnabled ? DEV_WORLD_SELF_ID : selfAccount?.pubkey;
-		const previousSelf = presenceState.participants.find((participant) => participant.id === selfId);
+		const previousSelf = previousPresence.participants.find((participant) => participant.id === selfId);
 		const nextSelf = nextPresence.participants.find((participant) => participant.id === selfId);
 		const traceRangeExited = traceConversationState.kind === 'open' && nextSelf &&
 			(!previousSelf || !sameCell(previousSelf.position, nextSelf.position)) &&
 			!isWithinTraceInvestigationRange(nextSelf.position, traceConversationState.root.position);
-		if (traceRangeExited) {
-			closeTraceConversation(Boolean(traceReplyMode.target));
-		}
-		const previousProjection = getPresenceProjection(presenceState);
-		const activeIds = nextPresence.participants
-			.filter((participant) => participant.status === 'active')
-			.map((participant) => participant.id)
-			.sort();
-		const nextColors: Record<string, AvatarColor> = {};
-		const used = new Set<AvatarColor>();
-		for (const id of activeIds) {
-			const retained = colorByPubkey[id];
-			if (retained) {
-				nextColors[id] = retained;
-				used.add(retained);
-			}
-		}
-		for (const id of activeIds) {
-			if (nextColors[id]) continue;
-			const color = AVATAR_COLORS.find((candidate) => !used.has(candidate)) ?? AVATAR_COLORS[activeIds.indexOf(id) % AVATAR_COLORS.length];
-			nextColors[id] = color;
-			used.add(color);
-		}
+		if (traceRangeExited) closeTraceConversation(Boolean(traceReplyMode.target));
+		const previousProjection = projectFrontendPresence({ presence: previousPresence,
+			selectedCharacterId: selectedId, selfProjectionId: projectionId, geometry, colors: previousColors });
+		const nextColors = allocateParticipantColors(previousColors, nextPresence.participants
+			.filter((participant) => participant.status === 'active').map((participant) => participant.id));
 		colorByPubkey = nextColors;
 		presenceState = nextPresence;
-		const nextProjection = getPresenceProjection(nextPresence);
-		animatePresenceTransition(previousProjection, nextProjection);
+		const nextProjection = projectFrontendPresence({ presence: nextPresence,
+			selectedCharacterId: selectedId, selfProjectionId: projectionId, geometry, colors: nextColors });
+		animatePresenceTransition(previousProjection, nextProjection, projectionId);
 	}
 
 	function directionFromKey(key: string): Direction | null {
@@ -1546,7 +1512,7 @@
 	function moveSandboxSelf(direction: Direction): void {
 		if (!devWorldSandboxEnabled) return;
 		const result = moveDevWorldSelf(presenceState, direction, Date.now());
-		if (result.moved) setPresence(result.state);
+		if (result.moved) acceptPresence(result.state);
 	}
 
 	function moveWorldSelf(direction: Direction): void {
@@ -1658,7 +1624,7 @@
 		lastPlacedAnchorById = {};
 		lastVisibilityKey = null;
 		colorByPubkey = {};
-		setPresence(resetDevWorldPresence(FIELD, Date.now()));
+		acceptPresence(resetDevWorldPresence(FIELD, Date.now()));
 	}
 
 	function traceLightWorldPosition(position: { x: number; y: number }, occupied: boolean): WorldPoint {
@@ -1714,53 +1680,24 @@
 		bootstrapPresence: PresenceState,
 		entryNowMs: number
 	): void {
-		const entryVisible = getPresenceProjection(bootstrapPresence).visibleParticipantIds;
+		const entryVisible = projectFrontendPresence({ presence: bootstrapPresence, selectedCharacterId, selfProjectionId,
+			geometry: { cellSize, fieldAreaBounds, fieldWorldSize }, colors: colorByPubkey }).visibleParticipantIds;
 		conversationState = replayBootstrapConversation(messages, entryVisible, entryNowMs);
 		conversationState = applyVisibility(conversationState, entryVisible);
 	}
 
 	function receiveLiveMessage(message: ParsedWorldMessage, nextPresence: PresenceState): void {
-		setPresence(nextPresence);
 		const nowMs = Date.now();
 		if (naturalExpiresAt(message) <= nowMs) return;
 		const conversationMessage = toConversationMessage(message);
-		const visibleParticipantIds = getPresenceProjection(nextPresence).visibleParticipantIds;
+		const visibleParticipantIds = projectFrontendPresence({ presence: nextPresence, selectedCharacterId, selfProjectionId,
+			geometry: { cellSize, fieldAreaBounds, fieldWorldSize }, colors: colorByPubkey }).visibleParticipantIds;
 		conversationState = receiveMessage(conversationState, conversationMessage, {
 			isSpeakerVisible: visibleParticipantIds.has(message.pubkey),
 			duration: getPrototypeDisplayDuration(message.content),
 			now: conversationMessage.createdAt
 		});
 		conversationState = applyVisibility(conversationState, visibleParticipantIds);
-	}
-
-	function rememberPlacedMergedAnchors(
-		bubbles: readonly { id: string; members: readonly Participant[] }[],
-		placed: ReadonlyMap<string, WorldPoint>,
-		activeMergedBubbles: readonly { id: string }[]
-	) {
-		const activeIds = new Set(activeMergedBubbles.map((bubble) => bubble.id));
-		const next = { ...lastPlacedAnchorById };
-		let changed = false;
-
-		for (const id of Object.keys(next)) {
-			if (!activeIds.has(id)) {
-				delete next[id];
-				changed = true;
-			}
-		}
-
-		for (const bubble of bubbles) {
-			if (bubble.members.length === 0) continue;
-			const anchor = placed.get(bubble.id);
-			if (!anchor) continue;
-			const previous = next[bubble.id];
-			if (!previous || previous.x !== anchor.x || previous.y !== anchor.y) {
-				next[bubble.id] = anchor;
-				changed = true;
-			}
-		}
-
-		if (changed) lastPlacedAnchorById = next;
 	}
 
 	function tailTarget(participant: (typeof participantViews)[number]): WorldPoint {
@@ -1817,15 +1754,13 @@
 </svelte:head>
 
 <main
-	class="app-shell"
-	class:composer-available={runtimeMode === 'relay' || devTraceReplyFixtureEnabled}
-	class:composer-keyboard-visible={composerKeyboardInset > 0}
+	class={['app-shell', { 'composer-available': runtimeMode === 'relay' || devTraceReplyFixtureEnabled,
+		'composer-keyboard-visible': composerKeyboardInset > 0 }]}
 	data-trace-runtime={traceConversationController ? runtimeMode : undefined}
 	style={`--composer-keyboard-inset: ${composerKeyboardInset}px;--composer-initial-preferred-height: ${INITIAL_COMPOSER_PREFERRED_HEIGHT}px;${composerPreferredHeight === null ? '' : `--composer-preferred-height: ${composerPreferredHeight}px;`}`}
 >
 	<section
-		class="field-viewport"
-		class:initial-field-geometry-ready={initialFieldGeometryReady}
+		class={['field-viewport', { 'initial-field-geometry-ready': initialFieldGeometryReady }]}
 		bind:this={viewportElement}
 		aria-label="Conversation field"
 	>
@@ -1860,7 +1795,7 @@
 				></div>
 				<div class="trace-light-layer" aria-hidden="true">
 					{#each traceLightCells as cell (`${cell.position.x},${cell.position.y}`)}
-						{@const world = traceLightWorldPosition(cell.position, cell.occupied)}
+						{const world = traceLightWorldPosition(cell.position, cell.occupied)}
 						<span
 							class="trace-light"
 							data-trace-light-position={`${cell.position.x},${cell.position.y}`}
@@ -1891,13 +1826,13 @@
 							class="field-cell-selection-trigger"
 							data-field-gesture-origin="selectable"
 							type="button"
-							on:dragstart|preventDefault
+							ondragstart={(event) => event.preventDefault()}
 							data-cell-position={`${position.x},${position.y}`}
 				aria-label={!selfIsActive || (selfLogicalPosition && isWithinTraceInvestigationRange(selfLogicalPosition, position))
 					? '痕跡を調べる'
 					: '痕跡を調べる（近づくと調べられる）'}
 							style={`left: ${position.x * cellSize}px; top: ${position.y * cellSize}px;`}
-							on:click={(event) => {
+							onclick={(event) => {
 								event.stopPropagation();
 								resolveFieldCellSelection(position, event.currentTarget as HTMLButtonElement);
 							}}
@@ -1918,8 +1853,7 @@
 				{/each}
 				{#if traceRootGhost}
 					<div
-						class:trace-ghost-compact={traceRootGhost.compact}
-						class="trace-ghost"
+						class={['trace-ghost', { 'trace-ghost-compact': traceRootGhost.compact }]}
 						data-trace-ghost-root-id={traceRootGhost.event.id}
 						style={`left: ${traceRootGhost.world.x}px; top: ${traceRootGhost.world.y}px;`}
 					>
@@ -1927,9 +1861,9 @@
 							class="trace-ghost-profile-trigger"
 							data-field-gesture-origin="selectable"
 							type="button"
-							on:dragstart|preventDefault
+							ondragstart={(event) => event.preventDefault()}
 							aria-label={`${traceRootGhost.character.name} のプロフィールを開く`}
-							on:click={(event) => {
+							onclick={(event) => {
 								event.stopPropagation();
 								openProfile(traceRootGhost.character.characterId, event.currentTarget);
 							}}
@@ -1952,7 +1886,7 @@
 								type="button"
 								role="menuitem"
 								data-cell-action={action.kind}
-								on:click={(event) => {
+								onclick={(event) => {
 									event.stopPropagation();
 									executeFieldCellAction(action, fieldActionMenu!.position, event.currentTarget);
 								}}

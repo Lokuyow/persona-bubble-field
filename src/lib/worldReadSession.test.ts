@@ -10,7 +10,7 @@ import {
 	type ParsedWorldMessage
 } from './nostrProtocol';
 import type { TraceReplyConfiguration } from './nostrRelayTransport';
-import { PRESENCE_TIMEOUT_MS } from './presence';
+import { PRESENCE_TIMEOUT_MS, type PresenceState } from './presence';
 import { planPositionPublish, reconstructPositionPublishState } from './positionPublish';
 import { createWorldReadSession, type WorldReadConnectionStatus } from './worldReadSession';
 
@@ -392,6 +392,42 @@ describe('world read session', () => {
 		]);
 		expect(presences.at(-1)).toBe(1);
 		expect(publish).not.toHaveBeenCalled();
+	});
+
+	it('emits final bootstrap presence before start resolves and orders canonical live callbacks', async () => {
+		result = startResult([message('bootstrap-message', 700)]);
+		const calls: string[] = [];
+		const presences: PresenceState[] = [];
+		const livePresences: PresenceState[] = [];
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 },
+			onPresenceChanged: (presence) => {
+				calls.push('presence');
+				presences.push(structuredClone(presence));
+			},
+			onLiveMessage: (_message, presence) => {
+				calls.push('message');
+				livePresences.push(structuredClone(presence));
+			},
+			onStatusChanged: vi.fn()
+		});
+		const bootstrap = await session.start().then((snapshot) => {
+			calls.push('start-resolved');
+			return snapshot;
+		});
+		expect(calls.slice(-2)).toEqual(['presence', 'start-resolved']);
+		expect(presences.at(-1)).toEqual(bootstrap.presence);
+		session.completeBootstrap();
+		calls.length = 0;
+		vi.setSystemTime(701_000);
+		const live = { ...message('canonical-live', 701), position: { x: 3, y: 1 } };
+		input!.onLiveMessage(live, raw(live));
+		expect(calls).toEqual(['presence', 'message']);
+		expect(livePresences.at(-1)).toEqual(presences.at(-1));
+		expect(livePresences.at(-1)?.participants).toEqual([
+			{ id: alice, position: { x: 3, y: 1 }, lastActivityAt: 701_000, status: 'active' }
+		]);
+		session.dispose();
 	});
 
 	it('keeps history in the timeline while excluding it from presence and recent bootstrap messages', async () => {
