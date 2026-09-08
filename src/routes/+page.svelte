@@ -1287,11 +1287,10 @@
 		acceptPresence(resetDevWorldPresence(FIELD, Date.now()));
 	}
 
-	function traceLightWorldPosition(position: { x: number; y: number }, occupied: boolean): WorldPoint {
-		const edgeOffset = occupied ? cellSize * 0.28 : 0;
+	function traceLightWorldPosition(position: { x: number; y: number }): WorldPoint {
 		return {
-			x: (position.x + 0.5) * cellSize + edgeOffset,
-			y: (position.y + 0.5) * cellSize - edgeOffset
+			x: (position.x + 0.5) * cellSize,
+			y: (position.y + 0.5) * cellSize
 		};
 	}
 

@@ -65,7 +65,7 @@
 		fieldActionLabel: (action: FieldCellAction) => string;
 		closeFieldActionMenu: () => void;
 		onOpenProfile: (characterId: string, trigger: HTMLButtonElement) => void;
-		traceLightWorldPosition: (position: GridPosition, occupied: boolean) => WorldPoint;
+		traceLightWorldPosition: (position: GridPosition) => WorldPoint;
 		onPointerMovementTakeover: (pointerId: number, direction: Direction) => void;
 		onPointerMovementUpdate: (pointerId: number, direction: Direction) => void;
 		onPointerMovementStop: (pointerId: number) => void;
@@ -228,23 +228,24 @@
 		></div>
 		<div class="trace-light-layer" aria-hidden="true">
 			{#each traceLightCells as cell (`${cell.position.x},${cell.position.y}`)}
-				{const world = traceLightWorldPosition(cell.position, cell.occupied)}
-				<span
-					class="trace-light"
-					data-trace-light-position={`${cell.position.x},${cell.position.y}`}
-					data-trace-light-occupied={cell.occupied ? 'true' : undefined}
-					data-trace-root-read={cell.read ? 'true' : 'false'}
-					data-trace-root-unread-reply={cell.unreadReply ? 'true' : undefined}
-					class:trace-light-read={cell.read}
-					class:trace-light-unread-reply={cell.unreadReply}
-					style={`left: ${world.x}px; top: ${world.y}px;`}
-				></span>
+				{#if !cell.occupied}
+					{const world = traceLightWorldPosition(cell.position)}
+					<span
+						class="trace-light"
+						data-trace-light-position={`${cell.position.x},${cell.position.y}`}
+						data-trace-root-read={cell.read ? 'true' : 'false'}
+						data-trace-root-unread-reply={cell.unreadReply ? 'true' : undefined}
+						class:trace-light-read={cell.read}
+						class:trace-light-unread-reply={cell.unreadReply}
+						style={`left: ${world.x}px; top: ${world.y}px;`}
+					></span>
+				{/if}
 				{#if cell.inInvestigationRange}
 					<span
 						class="trace-investigation-indicator"
 						data-trace-indicator-position={`${cell.position.x},${cell.position.y}`}
 						aria-hidden="true"
-						style={`left: ${world.x + cellSize * 0.18}px; top: ${world.y - cellSize * 0.18}px;`}
+						style={`left: ${(cell.position.x + 1) * cellSize - 6}px; top: ${cell.position.y * cellSize + 6}px;`}
 					>⌕</span>
 				{/if}
 			{/each}
