@@ -112,6 +112,53 @@ protocol violations, specification violations, or reproducible defects.
 - Reuse existing responsibility boundaries instead of creating parallel paths
   for the same operation.
 
+### Modern Svelte
+
+- For new or changed Svelte code, prefer current non-legacy APIs from the
+  installed Svelte 5 version and established repository patterns. For an
+  unfamiliar or version-sensitive API, check the installed version and current
+  official Svelte documentation first.
+- Do not introduce `svelte/legacy` or deprecated APIs into new code without an
+  explicit compatibility requirement. Do not perform unrelated modernization;
+  change existing code to modern conventions only within the task's safe scope.
+- Use runes mode: `$props()` for component props, `$state` for local reactive
+  state, and `$derived` for pure derived values. Use `$effect` only for side
+  effects and `$effect.pre` only when there is a clear need to run before DOM
+  updates. Prefer `$derived` over effects that merely synchronize calculations.
+- Use `$state.raw` only when immutable snapshots, identity-sensitive objects,
+  or the absence of deep proxying gives it a meaningful purpose. Use `$bindable`
+  only for props that genuinely require component-owned two-way binding. Do not
+  introduce top-level `$:` reactivity in new runes-mode code.
+- Use callback props for component-to-parent notifications; do not use the
+  deprecated `createEventDispatcher` in new code. Use event attributes such as
+  `onclick` and `onkeydown`, not legacy `on:click` or similar directives.
+- For new component composition, prefer snippets and `{@render ...}` over
+  introducing the legacy slot API. Do not add stores, context, or `.svelte.ts`
+  reactive owners merely to reduce prop count or file length when state and
+  responsibility do not need to be shared.
+- Prefer native `{@attach ...}` for element-local measurement, observers, and
+  imperative DOM lifecycle when the attachment is the natural owner. Do not
+  create a legacy action only to wrap it with `fromAction`; understand
+  attachment reactivity and avoid unnecessary dependencies that recreate
+  observers or listeners.
+- Prefer `<svelte:window>` and `<svelte:document>` for global events when
+  ownership and SSR semantics fit. `onMount` remains valid for browser-only
+  resources, dynamic custom-element integration, and external object listeners;
+  do not replace it with `$effect` merely for modernization. Choose the API
+  that matches the resource ownership and cleanup semantics of ResizeObserver,
+  VisualViewport, VirtualKeyboard, and custom elements.
+- When adding conditional classes or substantially changing markup, prefer the
+  repository's class array/object syntax such as
+  `class={['base', { active: condition }]}`. The `class:` directive remains
+  valid; do not remove it as unrelated cleanup. Keep component-scoped CSS by
+  default, avoid broad `:global(...)`, and do not add wrappers when they could
+  affect geometry, positioning, stacking, measurement, SSR DOM contracts, or
+  other existing behavior.
+- Do not increase compiler or `svelte-check` warnings in new or changed Svelte
+  code. Confirm existing modern patterns before inventing a new one, and
+  preserve behavior, DOM contracts, measurement ownership, and lifecycle
+  ordering even when a newer syntax is available.
+
 ## Tests and verification
 
 Use the repository's current scripts and `docs/PROJECT.md` to determine
