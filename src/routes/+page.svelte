@@ -33,15 +33,8 @@
 	import {
 		buildFieldCellActions,
 		resolveFieldCellActions,
-		viewportPointToLogicalCell,
 		type FieldCellAction
 	} from '$lib/fieldSelection';
-	import {
-		clampJoystickThumb,
-		isJoystickDrag,
-		joystickDirection,
-		type JoystickPoint
-	} from '$lib/pointerJoystick';
 	import {
 		DEV_WORLD_SELF_ID,
 		getDevWorldCharacter,
@@ -67,7 +60,6 @@
 	import { advanceMergedAnchorHistory } from '$lib/frontend/mergedAnchorHistory';
 	import { debugTimeoutParticipant, type PresenceState } from '$lib/presence';
 	import { addRecentMessage, createRecentMessageTimeline, type RecentMessageTimeline } from '$lib/recentMessageTimeline';
-	import { getVirtualKeyboardBottomInset, getVisualViewportKeyboardInset, type ViewportRect } from '$lib/keyboardInset';
 	import type { ParsedTraceReply, ParsedWorldMessage } from '$lib/nostrProtocol';
 	import {
 		groupTraceRoots,
@@ -107,10 +99,12 @@
 	import FieldScene, {
 		type FieldActionMenu,
 		type FieldParticipantView,
-		type PointerJoystick,
+		type FieldSceneHandle,
 		type TraceLightCell,
 		type TraceRootGhost
 	} from '$lib/frontend/FieldScene.svelte';
+	import ComposerKeyboardBinding from '$lib/frontend/ComposerKeyboardBinding.svelte';
+	import { createMovementInputController } from '$lib/frontend/movementInputController';
 	import SpeechLayer from '$lib/frontend/SpeechLayer.svelte';
 	import { matchesComposerSubmit, type ComposerSubmitEnvelope } from '$lib/hostOwnedComposerContext';
 	import {
@@ -201,18 +195,26 @@
 	let composerEditorIsEmpty: boolean | null = null;
 	let chatterComponent: { initialize(width: number): void; isInitialized(): boolean; toggle(): void; resetMeasurements(): void };
 	let composerComponent = $state.raw<{ focusEditor(): boolean; blurEditor(): boolean } | null>(null);
+	let fieldSceneComponent: FieldSceneHandle | null = null;
 	let visualWorldById = $state.raw<Record<string, WorldPoint>>({});
 	let visualCamera = $state.raw<WorldPoint | null>(null);
 	let visualMotion = $state.raw<VisualMotion | null>(null);
 	let visualAnimationFrame: number | null = null;
 	let visualProjectionInitialized = false;
 	let prefersReducedMotion = false;
-	let stopMovementHold = () => {};
-	let cancelPointerJoystick = () => {};
-	let movementHoldTakeover = (_pointerId: number, _direction: Direction) => {};
-	let movementHoldUpdatePointer = (_pointerId: number, _direction: Direction) => {};
-	let movementHoldStopPointer = (_pointerId: number) => {};
-	let pointerJoystick = $state.raw<PointerJoystick | null>(null);
+	const movementInputController = createMovementInputController({
+		requestMovement: (direction) => {
+			closeFieldActionMenu();
+			moveSelfFromCell(direction);
+		},
+		canUseArrowForMovement,
+		canUseWASDForMovement,
+		isComposerEditorKeyboardEvent,
+		getComposerEditorIsEmpty: () => composerEditorIsEmpty,
+		isProfileDialogOpen: () => Boolean(document.querySelector('.profile-dialog-content')),
+		isDocumentHidden: () => document.hidden,
+		cancelPointerGesture: () => fieldSceneComponent?.cancelPointerGesture()
+	});
 
 	type VisualParticipantTransition = Readonly<{ from: WorldPoint; to: WorldPoint }>;
 	type VisualMotion = Readonly<{
@@ -760,248 +762,9 @@
 			});
 			if (!devWorldSandboxEnabled) void begin();
 		};
-		type MovementHoldOwner = 'keyboard' | 'pointer';
-		let movementHoldOwner: MovementHoldOwner | null = null;
-		let movementHoldDirection: Direction | null = null;
-		let movementHoldSource: 'page' | 'composer-editor' | null = null;
-		const pressedKeyboardMovementKeys = new Set<string>();
-		let movementHoldPointerId: number | null = null;
-		let holdTimer: number | null = null;
-		let keyboardChordTimer: number | null = null;
-		const KEYBOARD_CHORD_DELAY_MS = 50;
-		const cancelKeyboardChordTimer = () => {
-			if (keyboardChordTimer === null) return;
-			window.clearTimeout(keyboardChordTimer);
-			keyboardChordTimer = null;
-		};
-		const clearMovementHold = () => {
-			movementHoldOwner = null;
-			movementHoldDirection = null;
-			movementHoldSource = null;
-			pressedKeyboardMovementKeys.clear();
-			movementHoldPointerId = null;
-			cancelKeyboardChordTimer();
-			if (holdTimer !== null) {
-				window.clearInterval(holdTimer);
-				holdTimer = null;
-			}
-		};
-		stopMovementHold = clearMovementHold;
-		const requestMovement = (direction: Direction) => {
-			closeFieldActionMenu();
-			moveSelfFromCell(direction);
-		};
-		const startMovementTimer = () => {
-			holdTimer = window.setInterval(() => {
-				if (!movementHoldOwner ||
-					(movementHoldOwner === 'keyboard' && movementHoldSource === 'composer-editor' && composerEditorIsEmpty !== true) ||
-					document.querySelector('.profile-dialog-content')) {
-					clearMovementHold();
-					return;
-				}
-				if (movementHoldDirection) requestMovement(movementHoldDirection);
-			}, 500);
-		};
-		const rephaseMovementTimer = () => {
-			if (holdTimer === null) return;
-			window.clearInterval(holdTimer);
-			startMovementTimer();
-		};
-		const resolveKeyboardChord = () => {
-			cancelKeyboardChordTimer();
-			const direction = directionFromKeyboardMovementKeys(pressedKeyboardMovementKeys);
-			movementHoldDirection = direction;
-			if (direction) requestMovement(direction);
-			startMovementTimer();
-		};
-		const takeOverPointerHold = (pointerId: number, direction: Direction) => {
-			clearMovementHold();
-			movementHoldOwner = 'pointer';
-			movementHoldDirection = direction;
-			movementHoldPointerId = pointerId;
-			requestMovement(direction);
-			startMovementTimer();
-		};
-		const updatePointerHold = (pointerId: number, direction: Direction) => {
-			if (movementHoldOwner === 'pointer' && movementHoldPointerId === pointerId) movementHoldDirection = direction;
-		};
-		const stopPointerHold = (pointerId: number) => {
-			if (movementHoldOwner === 'pointer' && movementHoldPointerId === pointerId) clearMovementHold();
-		};
-		const handleKeydown = (event: KeyboardEvent) => {
-			if (event.code === 'Escape' && fieldActionMenu) {
-				closeFieldActionMenu();
-				event.preventDefault();
-				return;
-			}
-			if (
-				chatterComponent.isInitialized() &&
-				event.key.toLowerCase() === 'c' &&
-				!event.repeat &&
-				!event.isComposing &&
-				!event.shiftKey &&
-				!event.ctrlKey &&
-				!event.altKey &&
-				!event.metaKey &&
-				!document.querySelector('.profile-dialog-content') &&
-				!event.composedPath().some((target) => target instanceof HTMLElement && (
-					target.matches('input, textarea, select') || target.isContentEditable
-				))
-			) {
-				chatterComponent.toggle();
-				event.preventDefault();
-				return;
-			}
-			if (event.code === 'Escape' && isComposerEditorKeyboardEvent(event) && !event.isComposing) {
-				if (composerComponent?.blurEditor()) event.preventDefault();
-				return;
-			}
-			if (event.code === 'KeyN' && canUseComposerFocusShortcut(event)) {
-				if (composerComponent?.focusEditor()) event.preventDefault();
-				return;
-			}
-
-			const arrowDirection = directionFromKey(event.key);
-			const wasdDirection = directionFromCode(event.code);
-			const direction = arrowDirection ?? wasdDirection;
-			if (!direction) return;
-			if (movementHoldOwner === 'pointer') return;
-			const canMove = arrowDirection
-				? canUseArrowForMovement(event)
-				: canUseWASDForMovement(event);
-			if (!canMove) {
-				clearMovementHold();
-				return;
-			}
-			// Browser repeat events only suppress the browser default. Movement is
-			// driven by the explicit hold timer below, never by repeat frequency.
-			event.preventDefault();
-			if (event.repeat) return;
-			const source = arrowDirection && isComposerEditorKeyboardEvent(event) ? 'composer-editor' : 'page';
-			const keyToken = event.code || event.key;
-			pressedKeyboardMovementKeys.add(keyToken);
-			const nextDirection = directionFromKeyboardMovementKeys(pressedKeyboardMovementKeys);
-			if (movementHoldOwner !== 'keyboard') {
-				clearMovementHold();
-				pressedKeyboardMovementKeys.add(keyToken);
-				movementHoldOwner = 'keyboard';
-				movementHoldSource = source;
-				movementHoldDirection = nextDirection;
-				keyboardChordTimer = window.setTimeout(resolveKeyboardChord, KEYBOARD_CHORD_DELAY_MS);
-				return;
-			}
-			if (keyboardChordTimer !== null) {
-				if (nextDirection === 'up-right' || nextDirection === 'down-right' ||
-					nextDirection === 'down-left' || nextDirection === 'up-left') {
-					window.clearTimeout(keyboardChordTimer);
-					keyboardChordTimer = null;
-					movementHoldDirection = nextDirection;
-					requestMovement(nextDirection);
-					startMovementTimer();
-				} else {
-					movementHoldDirection = nextDirection;
-				}
-				return;
-			}
-			const previousDirection = movementHoldDirection;
-			movementHoldDirection = nextDirection;
-			if (nextDirection !== previousDirection) {
-				if (!nextDirection) return;
-				requestMovement(nextDirection);
-				rephaseMovementTimer();
-			}
-		};
-		const handleKeyup = (event: KeyboardEvent) => {
-			const keyToken = event.code || event.key;
-			if (keyboardChordTimer !== null) resolveKeyboardChord();
-			if (!pressedKeyboardMovementKeys.delete(keyToken) || movementHoldOwner !== 'keyboard') return;
-			const nextDirection = directionFromKeyboardMovementKeys(pressedKeyboardMovementKeys);
-			if (!nextDirection) {
-				if (pressedKeyboardMovementKeys.size === 0) clearMovementHold();
-				else movementHoldDirection = null;
-				return;
-			}
-			movementHoldDirection = nextDirection;
-		};
-		const handleMovementFocusIn = (event: FocusEvent) => {
-			if (movementHoldOwner === 'keyboard' && !isComposerEditorKeyboardEvent(event)) clearMovementHold();
-		};
-		const handleWindowBlur = () => {
-			clearMovementHold();
-			cancelPointerJoystick();
-		};
-		const handleVisibilityChange = () => {
-			if (document.hidden) {
-				clearMovementHold();
-				cancelPointerJoystick();
-			}
-		};
-		const handleDocumentPointerDown = (event: PointerEvent) => {
-			if (fieldActionMenu && !event.composedPath().some((target) =>
-				target instanceof HTMLElement && target.classList.contains('field-action-menu')
-			)) closeFieldActionMenu();
-		};
-
 		const observer = new ResizeObserver(updateViewport);
-		const virtualKeyboard = (navigator as Navigator & { virtualKeyboard?: VirtualKeyboardLike }).virtualKeyboard;
-		const visualViewport = window.visualViewport;
-		let composerFocused = false;
-		let changedVirtualKeyboardOverlaysContent = false;
-		let previousVirtualKeyboardOverlaysContent: boolean | null = null;
-		const updateComposerKeyboardInset = () => {
-			if (virtualKeyboard) {
-				composerKeyboardInset = getVirtualKeyboardBottomInset(layoutViewportRect(), virtualKeyboard.boundingRect);
-				return;
-			}
-			if (!visualViewport) {
-				composerKeyboardInset = 0;
-				return;
-			}
-			composerKeyboardInset = getVisualViewportKeyboardInset({
-				layoutViewportHeight: window.innerHeight,
-				visualViewportHeight: visualViewport.height,
-				visualViewportOffsetTop: visualViewport.offsetTop,
-				visualViewportScale: visualViewport.scale,
-				composerFocused
-			});
-		};
-		const handleComposerFocusIn = (event: FocusEvent) => {
-			if (!isComposerEditorFocusEvent(event)) return;
-			composerFocused = true;
-			updateComposerKeyboardInset();
-		};
-		const handleComposerFocusOut = () => {
-			queueMicrotask(() => {
-				composerFocused = document.activeElement instanceof HTMLElement && document.activeElement.matches('ehagaki-composer');
-				updateComposerKeyboardInset();
-			});
-		};
-		if (runtimeMode === 'relay' && virtualKeyboard) {
-			const previousOverlaysContent = virtualKeyboard.overlaysContent;
-			previousVirtualKeyboardOverlaysContent = previousOverlaysContent;
-			if (!previousOverlaysContent) {
-				virtualKeyboard.overlaysContent = true;
-				changedVirtualKeyboardOverlaysContent = true;
-			}
-			virtualKeyboard.addEventListener('geometrychange', updateComposerKeyboardInset);
-		}
 		observer.observe(viewportElement!);
 		updateViewport();
-		updateComposerKeyboardInset();
-		window.addEventListener('keydown', handleKeydown);
-		window.addEventListener('keyup', handleKeyup);
-		document.addEventListener('focusin', handleMovementFocusIn);
-		document.addEventListener('focusin', handleComposerFocusIn);
-		document.addEventListener('focusout', handleComposerFocusOut);
-		visualViewport?.addEventListener('resize', updateComposerKeyboardInset);
-		visualViewport?.addEventListener('scroll', updateComposerKeyboardInset);
-		window.addEventListener('resize', updateComposerKeyboardInset);
-		window.addEventListener('blur', handleWindowBlur);
-		document.addEventListener('visibilitychange', handleVisibilityChange);
-		document.addEventListener('pointerdown', handleDocumentPointerDown);
-		movementHoldTakeover = takeOverPointerHold;
-		movementHoldUpdatePointer = updatePointerHold;
-		movementHoldStopPointer = stopPointerHold;
 		const expiryTimer = window.setInterval(() => {
 			const now = Date.now();
 			const nextPresence = session?.refresh(now);
@@ -1018,28 +781,7 @@
 			proximityFeedbackTimer = null;
 			cancelPendingComposerSubmission(new DOMException('Submission was cancelled.', 'AbortError'));
 			observer.disconnect();
-			virtualKeyboard?.removeEventListener('geometrychange', updateComposerKeyboardInset);
-			if (changedVirtualKeyboardOverlaysContent && virtualKeyboard && previousVirtualKeyboardOverlaysContent !== null) {
-				virtualKeyboard.overlaysContent = previousVirtualKeyboardOverlaysContent;
-			}
-			composerKeyboardInset = 0;
-			window.removeEventListener('keydown', handleKeydown);
-			window.removeEventListener('keyup', handleKeyup);
-			document.removeEventListener('focusin', handleMovementFocusIn);
-			document.removeEventListener('focusin', handleComposerFocusIn);
-			document.removeEventListener('focusout', handleComposerFocusOut);
-			visualViewport?.removeEventListener('resize', updateComposerKeyboardInset);
-			visualViewport?.removeEventListener('scroll', updateComposerKeyboardInset);
-			window.removeEventListener('resize', updateComposerKeyboardInset);
-			window.removeEventListener('blur', handleWindowBlur);
-			document.removeEventListener('visibilitychange', handleVisibilityChange);
-			document.removeEventListener('pointerdown', handleDocumentPointerDown);
-			clearMovementHold();
-			cancelPointerJoystick();
-			movementHoldTakeover = (_pointerId, _direction) => {};
-			movementHoldUpdatePointer = (_pointerId, _direction) => {};
-			movementHoldStopPointer = (_pointerId) => {};
-			stopMovementHold = () => {};
+			movementInputController.destroy();
 			reducedMotionQuery.removeEventListener('change', handleReducedMotionChange);
 			cancelVisualAnimation();
 			window.clearInterval(expiryTimer);
@@ -1141,41 +883,6 @@
 		const nextProjection = projectFrontendPresence({ presence: nextPresence,
 			selectedCharacterId: selectedId, selfProjectionId: projectionId, geometry, colors: nextColors });
 		animatePresenceTransition(previousProjection, nextProjection, projectionId);
-	}
-
-	function directionFromKey(key: string): Direction | null {
-		if (key === 'ArrowUp') return 'up';
-		if (key === 'ArrowDown') return 'down';
-		if (key === 'ArrowLeft') return 'left';
-		if (key === 'ArrowRight') return 'right';
-		return null;
-	}
-
-	function directionFromCode(code: string): Direction | null {
-		if (code === 'KeyW') return 'up';
-		if (code === 'KeyA') return 'left';
-		if (code === 'KeyS') return 'down';
-		if (code === 'KeyD') return 'right';
-		return null;
-	}
-
-	function directionFromKeyboardMovementKeys(keys: Iterable<string>): Direction | null {
-		const activeDirections = new Set<Direction>();
-		for (const key of keys) {
-			const direction = directionFromCode(key) ?? directionFromKey(key);
-			if (direction) activeDirections.add(direction);
-		}
-		const x = activeDirections.has('left') === activeDirections.has('right')
-			? 0 : activeDirections.has('right') ? 1 : -1;
-		const y = activeDirections.has('up') === activeDirections.has('down')
-			? 0 : activeDirections.has('down') ? 1 : -1;
-		if (x === 0 && y === 0) return null;
-		if (x === 0) return y < 0 ? 'up' : 'down';
-		if (y === 0) return x < 0 ? 'left' : 'right';
-		if (x > 0 && y < 0) return 'up-right';
-		if (x > 0 && y > 0) return 'down-right';
-		if (x < 0 && y > 0) return 'down-left';
-		return 'up-left';
 	}
 
 	function setEffectiveTraceRoots(roots: readonly ParsedWorldMessage[]): void {
@@ -1312,109 +1019,6 @@
 		fieldActionMenu = { position: { ...position }, actions: resolution.actions };
 	}
 
-	function fieldSelectionPointer(node: HTMLElement) {
-		let activeGesture: Readonly<{
-			pointerId: number;
-			start: JoystickPoint;
-			anchor: { x: number; y: number };
-			dragging: boolean;
-			captureOwner: HTMLElement;
-		}> | null = null;
-
-		const fieldGestureOrigin = (event: PointerEvent): HTMLElement | null => {
-			for (const target of event.composedPath()) {
-				if (!(target instanceof HTMLElement)) continue;
-				if (target.matches('[data-field-gesture-origin="selectable"]')) return target;
-				if (target.matches('button, input, textarea, select, [contenteditable="true"], .field-action-menu')) return null;
-			}
-			return null;
-		};
-		const releasePointerCapture = (pointerId: number) => {
-			if (node.hasPointerCapture(pointerId)) node.releasePointerCapture(pointerId);
-		};
-		const cancelGesture = () => {
-			const gesture = activeGesture;
-			activeGesture = null;
-			if (gesture) {
-				movementHoldStopPointer(gesture.pointerId);
-				try {
-					if (gesture.captureOwner.hasPointerCapture(gesture.pointerId)) gesture.captureOwner.releasePointerCapture(gesture.pointerId);
-					releasePointerCapture(gesture.pointerId);
-				} catch { /* pointer capture may already be lost */ }
-			}
-			pointerJoystick = null;
-		};
-		const finishGesture = (event: PointerEvent, selectTap: boolean) => {
-			const gesture = activeGesture;
-			if (!gesture || gesture.pointerId !== event.pointerId) return;
-			activeGesture = null;
-			try {
-				if (gesture.captureOwner.hasPointerCapture(event.pointerId)) gesture.captureOwner.releasePointerCapture(event.pointerId);
-				releasePointerCapture(event.pointerId);
-			} catch { /* pointer capture may already be lost */ }
-			if (gesture.dragging) movementHoldStopPointer(event.pointerId);
-			pointerJoystick = null;
-			if (selectTap && !gesture.dragging && gesture.captureOwner === node) resolveFieldCellSelection(gesture.anchor);
-		};
-		const handlePointerDown = (event: PointerEvent) => {
-			if (!event.isPrimary || event.button !== 0 || activeGesture) return;
-			const origin = fieldGestureOrigin(event);
-			if (event.composedPath().some((target) => target instanceof HTMLElement && target.matches('button, input, textarea, select, [contenteditable="true"], .field-action-menu')) && !origin) return;
-			const start = { x: event.clientX, y: event.clientY };
-			const anchor = viewportPointToLogicalCell({ point: start, fieldArea: fieldAreaBounds, camera, field });
-			if (!anchor) return;
-			activeGesture = { pointerId: event.pointerId, start, anchor, dragging: false, captureOwner: origin ?? node };
-			try { (origin ?? node).setPointerCapture(event.pointerId); } catch { /* synthetic events may not have a capturable pointer */ }
-		};
-		const handlePointerMove = (event: PointerEvent) => {
-			const gesture = activeGesture;
-			if (!gesture || gesture.pointerId !== event.pointerId) return;
-			const current = { x: event.clientX, y: event.clientY };
-			if (!gesture.dragging) {
-				if (!isJoystickDrag(gesture.start, current)) return;
-				const direction = joystickDirection(gesture.start, current);
-				if (!direction) return;
-				activeGesture = { ...gesture, dragging: true };
-				try {
-					if (gesture.captureOwner !== node && gesture.captureOwner.hasPointerCapture(event.pointerId)) gesture.captureOwner.releasePointerCapture(event.pointerId);
-					node.setPointerCapture(event.pointerId);
-				} catch { /* pointer capture may already be lost */ }
-				pointerJoystick = {
-					center: gesture.start,
-					thumb: clampJoystickThumb(gesture.start, current),
-					direction
-				};
-				closeFieldActionMenu();
-				movementHoldTakeover(event.pointerId, direction);
-				return;
-			}
-			const direction = joystickDirection(gesture.start, current);
-			if (!direction) return;
-			pointerJoystick = {
-				center: gesture.start,
-				thumb: clampJoystickThumb(gesture.start, current),
-				direction
-			};
-			movementHoldUpdatePointer(event.pointerId, direction);
-		};
-		node.addEventListener('pointerdown', handlePointerDown);
-		node.addEventListener('pointermove', handlePointerMove);
-		node.addEventListener('pointerup', (event) => finishGesture(event, true));
-		node.addEventListener('pointercancel', (event) => finishGesture(event, false));
-		node.addEventListener('lostpointercapture', (event) => {
-			const gesture = activeGesture;
-			if (!gesture || event.target !== node) return;
-			finishGesture(event as PointerEvent, false);
-		});
-		cancelPointerJoystick = cancelGesture;
-		return {
-			destroy() {
-				cancelGesture();
-				cancelPointerJoystick = () => {};
-			}
-		};
-	}
-
 	function fieldActionLabel(action: FieldCellAction): string {
 		if (action.kind === 'trace') return '痕跡を調べる';
 		const participant = participantViews.find((candidate) => candidate.id === action.participantId);
@@ -1425,32 +1029,6 @@
 		const path = event.composedPath();
 		return path.some((target) => target instanceof HTMLElement && target.matches('ehagaki-composer')) &&
 			path.some((target) => target instanceof HTMLElement && target.isContentEditable);
-	}
-
-	type VirtualKeyboardLike = {
-		boundingRect: DOMRectReadOnly;
-		overlaysContent: boolean;
-		addEventListener: (type: 'geometrychange', listener: EventListener) => void;
-		removeEventListener: (type: 'geometrychange', listener: EventListener) => void;
-	};
-
-	function isComposerEditorFocusEvent(event: Event): boolean {
-		const path = event.composedPath();
-		return path.some((target) => target instanceof HTMLElement && target.matches('ehagaki-composer')) &&
-			path.some((target) => target instanceof HTMLElement && (
-				target.isContentEditable || target.matches('input, textarea')
-			));
-	}
-
-	function layoutViewportRect(): ViewportRect {
-		return {
-			left: 0,
-			top: 0,
-			right: window.innerWidth,
-			bottom: window.innerHeight,
-			width: window.innerWidth,
-			height: window.innerHeight
-		};
 	}
 
 	function canUseArrowForMovement(event: KeyboardEvent): boolean {
@@ -1502,9 +1080,58 @@
 		));
 	}
 
+	function handleGlobalKeydown(event: KeyboardEvent): void {
+		if (event.code === 'Escape' && fieldActionMenu) {
+			closeFieldActionMenu();
+			event.preventDefault();
+			return;
+		}
+		if (
+			chatterComponent.isInitialized() &&
+			event.key.toLowerCase() === 'c' &&
+			!event.repeat &&
+			!event.isComposing &&
+			!event.shiftKey &&
+			!event.ctrlKey &&
+			!event.altKey &&
+			!event.metaKey &&
+			!document.querySelector('.profile-dialog-content') &&
+			!event.composedPath().some((target) => target instanceof HTMLElement && (
+				target.matches('input, textarea, select') || target.isContentEditable
+			))
+		) {
+			chatterComponent.toggle();
+			event.preventDefault();
+			return;
+		}
+		if (event.code === 'Escape' && isComposerEditorKeyboardEvent(event) && !event.isComposing) {
+			if (composerComponent?.blurEditor()) event.preventDefault();
+			return;
+		}
+		if (event.code === 'KeyN' && canUseComposerFocusShortcut(event)) {
+			if (composerComponent?.focusEditor()) event.preventDefault();
+			return;
+		}
+		movementInputController.handleKeydown(event);
+	}
+
+	function handleDocumentFocusIn(event: FocusEvent): void {
+		movementInputController.handleFocusIn(event);
+	}
+
+	function handleDocumentVisibilityChange(): void {
+		movementInputController.handleVisibilityChange();
+	}
+
+	function handleDocumentPointerDown(event: PointerEvent): void {
+		if (fieldActionMenu && !event.composedPath().some((target) =>
+			target instanceof HTMLElement && target.classList.contains('field-action-menu')
+		)) closeFieldActionMenu();
+	}
+
 	function handleComposerEditorEmptyChange(isEmpty: boolean | null): void {
 		composerEditorIsEmpty = isEmpty;
-		if (isEmpty !== true) stopMovementHold();
+		if (isEmpty !== true) movementInputController.cancelMovementHold();
 	}
 
 	function moveSandboxSelf(direction: Direction): void {
@@ -1649,7 +1276,7 @@
 	}
 
 	function handleProfileOpenChange(open: boolean): void {
-		if (open) stopMovementHold();
+		if (open) movementInputController.cancelMovementHold();
 		if (!open) history.back();
 	}
 
@@ -1751,6 +1378,21 @@
 	/>
 </svelte:head>
 
+<svelte:window
+	onkeydown={handleGlobalKeydown}
+	onkeyup={movementInputController.handleKeyup}
+	onblur={movementInputController.handleWindowBlur}
+/>
+<svelte:document
+	onfocusin={handleDocumentFocusIn}
+	onvisibilitychange={handleDocumentVisibilityChange}
+	onpointerdown={handleDocumentPointerDown}
+/>
+<ComposerKeyboardBinding
+	{runtimeMode}
+	onKeyboardInsetChange={(inset) => { composerKeyboardInset = inset; }}
+/>
+
 <main
 	class={['app-shell', { 'composer-available': composerAvailable,
 		'composer-keyboard-visible': composerKeyboardInset > 0 }]}
@@ -1772,13 +1414,14 @@
 				onOpenProfile={openProfile}
 			/>
 			<FieldScene
+				bind:this={fieldSceneComponent}
 				geometryReady={initialFieldGeometryReady}
 				{fieldAreaBounds}
 				{fieldWorldSize}
+				{field}
 				{cellSize}
 				{camera}
 				cameraAnimating={visualMotion !== null}
-				{fieldSelectionPointer}
 				{traceLightCells}
 				{proximityFeedback}
 				{traceOnlyCellTriggers}
@@ -1789,12 +1432,15 @@
 				{selfLogicalPosition}
 				{traceRootGhost}
 				{fieldActionMenu}
-				{pointerJoystick}
 				resolveFieldCellSelection={resolveFieldCellSelection}
 				executeFieldCellAction={executeFieldCellAction}
 				fieldActionLabel={fieldActionLabel}
+				closeFieldActionMenu={closeFieldActionMenu}
 				onOpenProfile={openProfile}
 				traceLightWorldPosition={traceLightWorldPosition}
+				onPointerMovementTakeover={movementInputController.takeOverPointer}
+				onPointerMovementUpdate={movementInputController.updatePointer}
+				onPointerMovementStop={movementInputController.stopPointer}
 			/>
 			<SpeechLayer
 				{viewportSize}
