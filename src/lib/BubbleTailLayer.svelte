@@ -4,6 +4,7 @@
 	import type { SpeechBubbleShape } from './speechBubblePath';
 	import type { TraceBubblePresentationLayout } from './traceBubblePresentation';
 	import { continuationBranchGeometry } from './traceContinuationGeometry';
+	import { traceRelationEndpoints } from './traceRelationGeometry';
 	import {
 		bubbleCenter,
 		bubbleToneStyle,
@@ -102,11 +103,14 @@
 			{/if}
 			{#each traceLayout.cards as bubble (bubble.id)}
 				{@const parent = traceLayout.cards.find((candidate) => candidate.reply.id === bubble.reply.parentId)}
-				{@const relationStart = parent ? bubbleCenter(parent.anchor, parent.footprint) : bubble.reply.parentId === traceRoot.event.id ? bubbleCenter(traceRoot.anchor, traceRoot.footprint) : null}
-				{#if relationStart}
-					{@const relationEnd = bubbleCenter(bubble.anchor, bubble.footprint)}
-					{@const halo = taperedBandGeometry(relationStart, relationEnd, TRACE_RELATION_HALO_PARENT_WIDTH, TRACE_RELATION_HALO_CHILD_WIDTH)}
-					{@const foreground = taperedBandGeometry(relationStart, relationEnd, TRACE_RELATION_FOREGROUND_PARENT_WIDTH, TRACE_RELATION_FOREGROUND_CHILD_WIDTH)}
+				{@const relation = parent
+					? traceRelationEndpoints(bubbleCenter(parent.anchor, parent.footprint), bubbleCenter(bubble.anchor, bubble.footprint))
+					: bubble.reply.parentId === traceRoot.event.id
+						? traceRelationEndpoints(bubbleCenter(traceRoot.anchor, traceRoot.footprint), bubbleCenter(bubble.anchor, bubble.footprint))
+						: null}
+				{#if relation}
+					{@const halo = taperedBandGeometry(relation.start, relation.end, TRACE_RELATION_HALO_PARENT_WIDTH, TRACE_RELATION_HALO_CHILD_WIDTH)}
+					{@const foreground = taperedBandGeometry(relation.start, relation.end, TRACE_RELATION_FOREGROUND_PARENT_WIDTH, TRACE_RELATION_FOREGROUND_CHILD_WIDTH)}
 					<polygon class="trace-relation-halo" data-trace-relation-halo-reply-id={bubble.reply.id} points={halo.points} />
 					<polygon class="trace-relation-connector" data-trace-relation-reply-id={bubble.reply.id} points={foreground.points} />
 				{/if}
