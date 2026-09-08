@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
+	import type { Attachment } from 'svelte/attachments';
 	import { CHARACTER_CATALOG, type Character } from '$lib/character';
 	import { deriveCharacterFromPubkey } from '$lib/characterAssignment';
 	import { DEV_WORLD_SELF_ID, getDevWorldCharacter } from '$lib/devWorldSandbox';
@@ -64,65 +66,63 @@
 		timelineOpen = false;
 	}
 
-	function observeTimelineContent(node: HTMLElement, id: string) {
-		const update = () => {
+	const observeTimelineContent: Attachment<HTMLElement> = (node) => untrack(() => {
+		const id = node.dataset.measurementId;
+		if (!id) return;
+		const update = () => untrack(() => {
 			timelineOverflowById = {
 				...timelineOverflowById,
 				[id]: node.scrollHeight > node.clientHeight + 1
 			};
-		};
+		});
 		const observer = new ResizeObserver(update);
 		observer.observe(node);
 		update();
 
-		return {
-			destroy() {
-				observer.disconnect();
-				const next = { ...timelineOverflowById };
-				delete next[id];
-				timelineOverflowById = next;
-			}
-		};
-	}
+		return () => untrack(() => {
+			observer.disconnect();
+			const next = { ...timelineOverflowById };
+			delete next[id];
+			timelineOverflowById = next;
+		});
+	});
 
-	function observeTimelineEntry(node: HTMLElement, id: string) {
-		const update = () => {
+	const observeTimelineEntry: Attachment<HTMLElement> = (node) => untrack(() => {
+		const id = node.dataset.measurementId;
+		if (!id) return;
+		const update = () => untrack(() => {
 			const height = node.getBoundingClientRect().height;
 			if (height <= 0) return;
-			timelineEntryHeights = {
-				...timelineEntryHeights,
-				[id]: height
-			};
-		};
+				timelineEntryHeights = {
+					...timelineEntryHeights,
+					[id]: height
+				};
+		});
 		const observer = new ResizeObserver(update);
 		observer.observe(node);
 		update();
 
-		return {
-			destroy() {
-				observer.disconnect();
-				const next = { ...timelineEntryHeights };
-				delete next[id];
-				timelineEntryHeights = next;
-			}
-		};
-	}
+		return () => untrack(() => {
+			observer.disconnect();
+			const next = { ...timelineEntryHeights };
+			delete next[id];
+			timelineEntryHeights = next;
+		});
+	});
 
-	function observeTimelineVisibleArea(node: HTMLElement) {
-		const update = () => {
+	const observeTimelineVisibleArea: Attachment<HTMLElement> = (node) => untrack(() => {
+		const update = () => untrack(() => {
 			timelineAvailableHeight = Math.max(0, node.clientHeight - 14);
-		};
+		});
 		const observer = new ResizeObserver(update);
 		observer.observe(node);
 		update();
 
-		return {
-			destroy() {
-				observer.disconnect();
-				timelineAvailableHeight = 0;
-			}
-		};
-	}
+		return () => untrack(() => {
+			observer.disconnect();
+			timelineAvailableHeight = 0;
+		});
+	});
 
 </script>
 
@@ -138,7 +138,7 @@
 			>×</button>
 			<h2>Chatter</h2>
 		</header>
-		<div class="timeline-visible-entries" use:observeTimelineVisibleArea>
+		<div class="timeline-visible-entries" {@attach observeTimelineVisibleArea}>
 			{#each timelineVisibleMessages as message (message.id)}
 				{const character = timelineCharacter(message.pubkey)}
 				{const tone = timelineTone(message.pubkey)}
@@ -150,7 +150,7 @@
 					data-timeline-tone={tone ?? 'default'}
 				>
 					<div class="timeline-content-shell">
-						<div class="timeline-text" use:observeTimelineContent={message.id}>
+						<div class="timeline-text" data-measurement-id={message.id} {@attach observeTimelineContent}>
 							<button
 								class={`timeline-name${tone ? ` tone-${tone}` : ''}`}
 								type="button"
@@ -170,7 +170,7 @@
 			{#each messages as message (message.id)}
 				{const character = timelineCharacter(message.pubkey)}
 				{const tone = timelineTone(message.pubkey)}
-				<article class="timeline-entry" use:observeTimelineEntry={message.id}>
+				<article class="timeline-entry" data-measurement-id={message.id} {@attach observeTimelineEntry}>
 					<div class="timeline-content-shell">
 						<div class="timeline-text">
 							<span class={`timeline-name${tone ? ` tone-${tone}` : ''}`}>{character.name}</span>

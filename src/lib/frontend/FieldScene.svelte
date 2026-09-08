@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { Attachment } from 'svelte/attachments';
 	import { asset } from '$app/paths';
 	import type { Character } from '$lib/character';
 	import CharacterAvatar from '$lib/CharacterAvatar.svelte';
@@ -104,7 +105,7 @@
 		cancelPointerGestureImpl();
 	}
 
-	function fieldSelectionPointer(node: HTMLElement) {
+	const fieldSelectionPointer: Attachment<HTMLElement> = (node) => {
 		let activeGesture: Readonly<{
 			pointerId: number;
 			start: JoystickPoint;
@@ -199,13 +200,11 @@
 			finishGesture(event as PointerEvent, false);
 		});
 		cancelPointerGestureImpl = cancelGesture;
-		return {
-			destroy() {
-				cancelGesture();
-				cancelPointerGestureImpl = () => {};
-			}
+		return () => {
+			cancelGesture();
+			cancelPointerGestureImpl = () => {};
 		};
-	}
+	};
 
 </script>
 
@@ -213,7 +212,7 @@
 	class="field-area"
 	style={`top: ${fieldAreaBounds.y}px; left: ${fieldAreaBounds.x}px; width: ${fieldAreaBounds.width}px; height: ${fieldAreaBounds.height}px;`}
 	aria-label="Field area"
-	use:fieldSelectionPointer
+	{@attach fieldSelectionPointer}
 >
 	<div
 		class={['field-scene', { 'field-scene-hidden': !geometryReady }]}
