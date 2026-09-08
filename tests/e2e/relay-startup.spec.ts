@@ -1177,12 +1177,33 @@ test.describe('Relay startup', () => {
 		await expect(selfReplyBubble).toContainText('Relay own direct reply');
 		await expect(page.locator(`[data-trace-reply-ghost-id="${trace.selfDirect.id}"]`)).toHaveCount(0);
 		await expect(page.locator(`[data-trace-tail-reply-id]`)).toHaveCount(0);
+		const publishedPositionIds = async () => new Set(
+			(await relayState(page)).state.published.filter((event) => event.kind === 30078).map((event) => event.id)
+		).size;
+		const positionsBeforeCurrentSwitch = await publishedPositionIds();
+		await page.clock.install({ time: Date.now() });
+		await pauseAtCurrentBrowserTime(page);
+		const now = await page.evaluate(() => Date.now());
+		await page.clock.setFixedTime(Math.floor(now / 1000) * 1000 + 1000);
+		await page.evaluate(() => {
+			(window as typeof window & {
+				__relayStartupTest: { state: { deferPositionPublishes: boolean } }
+			}).__relayStartupTest.state.deferPositionPublishes = true;
+		});
 		await selfReplyBubble.locator('.trace-reply-content-button').click();
 		await expect(page.locator(`[data-trace-current-reply-id="${trace.selfDirect.id}"]`)).toContainText('Relay own direct reply');
 		await expect(page.getByText('Relay deeper branch reply')).toHaveCount(0);
 		await expect(page.getByText('Relay invalid reply')).toHaveCount(0);
 		await expect(page.locator('.trace-reply-status')).toHaveCount(0);
+		await expect.poll(publishedPositionIds).toBe(positionsBeforeCurrentSwitch + 1);
 		await page.locator(`[data-trace-root-id="${trace.root.id}"]`).click();
+		await expect(page.locator(`[data-trace-root-id="${trace.root.id}"]`)).toHaveAttribute('data-trace-current-kind', 'root');
+		await expect(page.locator(`[data-trace-current-reply-id="${trace.selfDirect.id}"]`)).toHaveCount(0);
+		await expect(page.getByLabel('Reply preview', { exact: true })).toContainText('Relay trace root');
+		await expect.poll(publishedPositionIds).toBe(positionsBeforeCurrentSwitch + 1);
+		await page.evaluate(() => (window as typeof window & {
+			__relayStartupTest: { releasePublishes(kind: number): void }
+		}).__relayStartupTest.releasePublishes(30078));
 
 		await page.evaluate((event) => (window as typeof window & {
 			__relayStartupTest: { injectTraceReply(event: object): void }
