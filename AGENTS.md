@@ -173,6 +173,22 @@ commands.
   `docs/PROJECT.md` or the reviewed Plan.
 - Use real-browser verification when unit-level tests cannot establish the
   relevant browser or layout behavior.
+- For new or changed UI, layout, and geometry tests, do not assert exact
+  values for incidental design-tuning details—such as position, width,
+  height, padding, gap, color, opacity, or animation duration—unless the
+  value is fixed by product specification or has another clear correctness
+  reason. Prefer assertions about user-visible behavior and layout
+  invariants where possible: non-overlap, required spatial relationships,
+  containment within the viewport or an intended container, correct
+  connections or correspondence between targets, renderability of content,
+  actionability for click/tap/drag, responsive constraints, and arrival at
+  the correct final state after animation. Use exact values, ranges,
+  relationships, or behavior/invariants according to the contract the test
+  is meant to protect; an exact assertion remains appropriate when an
+  explicitly specified dimension, bound, color, or duration—or algorithmic,
+  protocol, or accessibility correctness—makes that value meaningful. Do
+  not make tests resilient merely by widening tolerances and weakening the
+  contract.
 - Keep tests deterministic. Do not depend on real relays, external network
   availability, real accounts, secrets, or timing races unless the task
   explicitly requires an integration check that cannot be performed
