@@ -6,8 +6,10 @@ import {
 	TRACE_REPLY_LRU_STORE,
 	TRACE_REPLY_STORE,
 	TRACE_ROOT_STORE,
+	TRACE_ROOT_READ_STORE,
 	type TraceReadwriteTransaction
 } from './traceDatabase';
+import { deleteTraceRootReadState } from './traceReadState';
 import {
 	assertTraceRootChannelId,
 	assertTraceRootField,
@@ -69,6 +71,14 @@ async function removeEvictedRootState(
 		if (!Array.isArray(key) || key.length !== 3 || key[0] !== channelId) continue;
 		if (typeof key[1] !== 'string' || !survivorIds.has(key[1])) {
 			await replyStore.delete(key as [string, string, string]);
+		}
+	}
+
+	const rootReadStore = tx.objectStore(TRACE_ROOT_READ_STORE);
+	for (const key of await rootReadStore.getAllKeys()) {
+		if (!Array.isArray(key) || key.length !== 2 || key[0] !== channelId) continue;
+		if (typeof key[1] !== 'string' || !survivorIds.has(key[1])) {
+			await deleteTraceRootReadState(tx, channelId, key[1] as string);
 		}
 	}
 

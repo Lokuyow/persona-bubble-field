@@ -19,6 +19,8 @@
 	export type TraceLightCell = TraceRootCell & Readonly<{
 		occupied: boolean;
 		inInvestigationRange: boolean;
+		read: boolean;
+		unreadReply: boolean;
 	}>;
 	export type TraceRootGhost = Readonly<{
 		event: Pick<ParsedWorldMessage, 'id'>;
@@ -63,7 +65,7 @@
 		fieldActionLabel: (action: FieldCellAction) => string;
 		closeFieldActionMenu: () => void;
 		onOpenProfile: (characterId: string, trigger: HTMLButtonElement) => void;
-		traceLightWorldPosition: (position: GridPosition, occupied: boolean) => WorldPoint;
+		traceLightWorldPosition: (position: GridPosition) => WorldPoint;
 		onPointerMovementTakeover: (pointerId: number, direction: Direction) => void;
 		onPointerMovementUpdate: (pointerId: number, direction: Direction) => void;
 		onPointerMovementStop: (pointerId: number) => void;
@@ -226,19 +228,24 @@
 		></div>
 		<div class="trace-light-layer" aria-hidden="true">
 			{#each traceLightCells as cell (`${cell.position.x},${cell.position.y}`)}
-				{const world = traceLightWorldPosition(cell.position, cell.occupied)}
-				<span
-					class="trace-light"
-					data-trace-light-position={`${cell.position.x},${cell.position.y}`}
-					data-trace-light-occupied={cell.occupied ? 'true' : undefined}
-					style={`left: ${world.x}px; top: ${world.y}px;`}
-				></span>
+				{#if !cell.occupied}
+					{const world = traceLightWorldPosition(cell.position)}
+					<span
+						class="trace-light"
+						data-trace-light-position={`${cell.position.x},${cell.position.y}`}
+						data-trace-root-read={cell.read ? 'true' : 'false'}
+						data-trace-root-unread-reply={cell.unreadReply ? 'true' : undefined}
+						class:trace-light-read={cell.read}
+						class:trace-light-unread-reply={cell.unreadReply}
+						style={`left: ${world.x}px; top: ${world.y}px;`}
+					></span>
+				{/if}
 				{#if cell.inInvestigationRange}
 					<span
 						class="trace-investigation-indicator"
 						data-trace-indicator-position={`${cell.position.x},${cell.position.y}`}
 						aria-hidden="true"
-						style={`left: ${world.x + cellSize * 0.18}px; top: ${world.y - cellSize * 0.18}px;`}
+						style={`left: ${(cell.position.x + 1) * cellSize - 10}px; top: ${cell.position.y * cellSize + 10}px;`}
 					>⌕</span>
 				{/if}
 			{/each}
@@ -405,6 +412,17 @@
 		box-shadow: 0 0 8px 3px rgba(255, 225, 120, 0.42);
 		pointer-events: none;
 		transform: translate(-50%, -50%);
+	}
+
+	.trace-light-read:not(.trace-light-unread-reply) {
+		opacity: 0.32;
+		box-shadow: 0 0 5px 1px rgba(255, 225, 120, 0.18);
+	}
+
+	.trace-light-unread-reply {
+		border-color: rgba(255, 220, 188, 0.96);
+		background: rgba(224, 111, 84, 0.9);
+		box-shadow: 0 0 8px 3px rgba(224, 111, 84, 0.5);
 	}
 
 	.trace-investigation-indicator {

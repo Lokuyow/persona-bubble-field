@@ -790,12 +790,13 @@ test.describe('Relay startup', () => {
 			await selectRelayTraceCell(reader, '4,2');
 			await expect(reader.locator(`[data-trace-reply-id="${history.id}"]`)).toContainText(history.content);
 			await expect.poll(async () => (await relayState(reader)).state.requests.some((request) =>
-				request.filters.length === 2 && request.filters.every((filter) => (filter.kinds as number[])?.includes(1111) && filter.limit === undefined)
+				request.filters.length === 3 && request.filters.filter((filter) => (filter.kinds as number[])?.includes(1111) && filter.limit === 100).length === 2
 			)).toBe(true);
-			const wire = (await relayState(reader)).state.requests.find((request) => request.filters.length === 2 && request.filter.limit === 100)!;
-			expect(wire.filters[0]['#E']).toEqual([trace.root.id]);
-			expect(wire.filters[1]['#e']).toEqual([trace.root.id]);
-			expect(wire.filters[1]).not.toHaveProperty('#E');
+			const wire = (await relayState(reader)).state.requests.find((request) => request.filters.length === 3 && request.filters.filter((filter) => filter.limit === 100).length === 2)!;
+			expect(wire.filters.find((filter) => Array.isArray(filter['#E']))?.['#E']).toEqual([trace.root.id]);
+			expect(wire.filters.find((filter) => Array.isArray(filter['#e']))?.['#e']).toEqual([trace.root.id]);
+			expect(wire.filters.find((filter) => Array.isArray(filter['#p']))).toMatchObject({ '#p': [readerPubkey] });
+			expect(wire.filters.find((filter) => Array.isArray(filter['#p']))).not.toHaveProperty('#E');
 			await sender.clock.setFixedTime(time + 1000);
 			await sender.getByRole('textbox', { name: '投稿エディター' }).press('Escape');
 			await sender.keyboard.press('ArrowUp');
@@ -817,6 +818,84 @@ test.describe('Relay startup', () => {
 			await expect(reader.locator(`[data-trace-reply-id="${wrongRoot.id}"]`)).toHaveCount(0);
 			await expect(reader.locator('[data-trace-current-id]')).toHaveAttribute('data-trace-current-id', trace.root.id);
 		} finally { await readerContext.close(); }
+	});
+
+	test('persists Trace root and reply read state and keeps notification generic', async ({ page }) => {
+		const now = Date.now();
+		const selfSecret = new Uint8Array(32).fill(23);
+		const selfPubkey = getPublicKey(selfSecret);
+		const channel = { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' };
+		const primary = {
+			message: finalizeEvent(buildWorldMessageTemplate({ channel, content: 'read-state participant', speechType: 'normal', position: { x: 3, y: 2 }, createdAt: Math.floor(now / 1000) }), selfSecret),
+			position: finalizeEvent(buildPositionEventTemplate({ channel, position: { x: 3, y: 2 }, slot: 0, createdAt: Math.floor(now / 1000) }), selfSecret)
+		};
+		let root = finalizeEvent(buildWorldMessageTemplate({ channel, content: 'read-state root 0', speechType: 'normal', position: { x: 4, y: 2 }, createdAt: Math.floor(now / 1000) }), selfSecret);
+		for (let attempt = 1; BigInt(`0x${root.id}`) % 5n !== 0n; attempt += 1) {
+			root = finalizeEvent(buildWorldMessageTemplate({ channel, content: `read-state root ${attempt}`, speechType: 'normal', position: { x: 4, y: 2 }, createdAt: Math.floor(now / 1000) }), selfSecret);
+		}
+		const parsedRoot = parseWorldMessage(root, CHANNEL_ID);
+		if (!parsedRoot) throw new Error('Read-state root fixture did not parse.');
+		let unreadRoot = finalizeEvent(buildWorldMessageTemplate({ channel, content: 'read-state unread root', speechType: 'normal', position: { x: 5, y: 2 }, createdAt: Math.floor(now / 1000) }), selfSecret);
+		for (let attempt = 1; BigInt(`0x${unreadRoot.id}`) % 5n !== 0n; attempt += 1) {
+			unreadRoot = finalizeEvent(buildWorldMessageTemplate({ channel, content: `read-state unread root ${attempt}`, speechType: 'normal', position: { x: 5, y: 2 }, createdAt: Math.floor(now / 1000) }), selfSecret);
+		}
+		const reply = finalizeEvent(buildTraceReplyTemplate({ root: parsedRoot, parent: parsedRoot, content: 'private reply detail', speechType: 'normal', createdAt: Math.floor(now / 1000) + 1 }), new Uint8Array(32).fill(31));
+		const replyAfterRootRead = finalizeEvent(buildTraceReplyTemplate({ root: parsedRoot, parent: parsedRoot, content: 'private reply after root read', speechType: 'normal', createdAt: Math.floor(now / 1000) + 2 }), new Uint8Array(32).fill(32));
+		await page.clock.setFixedTime(now);
+		await page.emulateMedia({ reducedMotion: 'reduce' });
+		await page.setViewportSize({ width: 1100, height: 850 });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { primaryEvents: primary, traceRoots: [root, unreadRoot], traceReplies: [reply] });
+		await seedRelayAccount(page, selfSecret, selfPubkey);
+		await page.goto('/');
+		await expect(page.locator('.composer-dock')).toBeVisible();
+		await page.evaluate(() => {
+			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
+			relay.releaseMetadata(); relay.releasePrimary();
+		});
+		await expect(page.locator('[data-trace-light-position="4,2"]')).toBeVisible();
+		const unreadLight = page.locator('[data-trace-light-position="5,2"]');
+		await expect(unreadLight).toBeVisible();
+		await expect.poll(() => unreadLight.evaluate((element) => getComputedStyle(element).opacity)).toBe('1');
+		await expect(page.locator('.trace-unread-indicator')).toBeVisible();
+		await page.locator('.trace-unread-indicator').click();
+		await expect(page.locator('.trace-unread-explanation')).toContainText('どこかにあなたへの返信の痕跡があります');
+		await expect(page.locator('[data-trace-root-id]')).toHaveCount(0);
+		await page.getByRole('button', { name: 'Hide Chatter' }).click();
+		await selectRelayTraceCell(page, '4,2');
+		await expect(page.locator(`[data-trace-root-id="${root.id}"]`)).toContainText(root.content);
+		await expect(page.locator(`[data-trace-root-id="${root.id}"]`)).toHaveAttribute('data-trace-current-kind', 'root');
+		await expect(page.locator(`[data-trace-ghost-root-id="${root.id}"]`)).toBeVisible();
+		await expect(page.locator(`[data-trace-reply-id="${reply.id}"]`)).toContainText(reply.content);
+		await expect(page.locator('.trace-unread-indicator')).toHaveCount(0);
+		await page.locator('.field-area').click({ position: { x: 8, y: 8 } });
+		await expect(page.locator('[data-trace-light-position="4,2"]')).toHaveAttribute('data-trace-root-read', 'true');
+		await expect.poll(() => page.locator('[data-trace-light-position="4,2"]').evaluate((element) => getComputedStyle(element).opacity)).toBe('0.32');
+		const unreadGlow = await unreadLight.evaluate((element) => getComputedStyle(element).boxShadow);
+		const readGlow = await page.locator('[data-trace-light-position="4,2"]').evaluate((element) => getComputedStyle(element).boxShadow);
+		expect(readGlow).not.toBe(unreadGlow);
+		await page.reload();
+		await page.evaluate(() => {
+			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
+			relay.releaseMetadata(); relay.releasePrimary();
+		});
+		await expect(page.locator('[data-trace-light-position="4,2"]')).toBeVisible();
+		await expect(page.locator('[data-trace-light-position="4,2"]')).toHaveAttribute('data-trace-root-read', 'true');
+		await expect(page.locator('.trace-unread-indicator')).toHaveCount(0);
+		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectTraceReply(event: object): void } }).__relayStartupTest.injectTraceReply(event), replyAfterRootRead);
+		const light = page.locator('[data-trace-light-position="4,2"]');
+		await expect(light).toHaveAttribute('data-trace-root-read', 'true');
+		await expect(light).toHaveAttribute('data-trace-root-unread-reply', 'true');
+		await expect.poll(() => light.evaluate((element) => getComputedStyle(element).opacity)).toBe('1');
+		await expect(page.locator('.trace-unread-indicator')).toBeVisible();
+		await selectRelayTraceCell(page, '4,2');
+		await expect(page.locator(`[data-trace-reply-id="${replyAfterRootRead.id}"]`)).toContainText(replyAfterRootRead.content);
+		const hideTimeline = page.getByRole('button', { name: 'Hide Chatter' });
+		if (await hideTimeline.isVisible()) await hideTimeline.click();
+		await page.locator('.field-area').click({ position: { x: 8, y: 8 } });
+		await expect(light).toHaveAttribute('data-trace-root-read', 'true');
+		await expect(light).not.toHaveAttribute('data-trace-root-unread-reply');
+		await expect.poll(() => light.evaluate((element) => getComputedStyle(element).opacity)).toBe('0.32');
 	});
 
 	test('passes target-author character profiles across root, nested reply, and clear context patches', async ({ page }) => {

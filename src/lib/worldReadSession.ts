@@ -8,6 +8,12 @@ import {
 import { reconcileTraceRootCache } from './traceRootCache';
 import { loadTracePreviewEvent, reconcileTraceReplyCache, touchTraceReplyTree } from './traceReplyCache';
 import {
+	loadTraceReadSnapshot,
+	markTraceReplyRead,
+	markTraceRootRead,
+	type TraceReadSnapshot
+} from './traceReadState';
+import {
 	buildPositionEventTemplate,
 	buildTraceReplyTemplate,
 	buildWorldMessageTemplate,
@@ -110,6 +116,7 @@ export type WorldReadSessionOptions = Readonly<{
 	onLiveMessage: (message: ParsedWorldMessage, presence: PresenceState) => void;
 	onTimelineMessage?: (message: ParsedWorldMessage) => void;
 	onEffectiveTraceRootsChanged?: (roots: readonly ParsedWorldMessage[]) => void;
+	onTraceReadSnapshotChanged?: (snapshot: TraceReadSnapshot) => void;
 	onTraceConversationChanged?: (state: TraceConversationState) => void;
 	onStatusChanged: (status: WorldReadConnectionStatus) => void;
 	onSelfPositionWriteStateChanged?: (state: SelfPositionWriteState) => void;
@@ -164,6 +171,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 	// Owns the entire reply pipeline, including coalesced position and post-position publication.
 	let pendingTraceReply: { eventId: string | null } | null = null;
 	let effectiveTraceRoots: readonly ParsedWorldMessage[] = [];
+	let traceReadSnapshot: TraceReadSnapshot = { readRootIds: [], unreadReplyRootIds: [], hasUnreadReplies: false };
 	let traceRootBootstrapReadiness: Promise<'ready' | 'failed'> | null = null;
 	let traceConversationState: TraceConversationState = { kind: 'closed' };
 	let traceConversationGeneration = 0;
@@ -213,9 +221,18 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 		emitStatus({ kind: 'degraded', issueCount });
 	}
 
-	function reconcileTraceRoots(rawEvents: readonly NostrEvent[]): void {
-		if (!channel || disposed) return;
-		void reconcileTraceRootCache({
+	function refreshTraceReadSnapshot(): void {
+		if (!channel || !options.selfAccount || disposed) return;
+		void loadTraceReadSnapshot({ channelId: channel.channelId, personaPubkey: options.selfAccount.pubkey }).then((snapshot) => {
+			if (disposed) return;
+			traceReadSnapshot = snapshot;
+			options.onTraceReadSnapshotChanged?.(snapshot);
+		}).catch(() => {});
+	}
+
+	function reconcileTraceRoots(rawEvents: readonly NostrEvent[]): Promise<void> {
+		if (!channel || disposed) return Promise.resolve();
+		return reconcileTraceRootCache({
 			channelId: channel.channelId,
 			field: options.field,
 			rawEvents
@@ -224,20 +241,41 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 			effectiveTraceRoots = roots;
 			reconcileOpenTraceRoot(roots);
 			options.onEffectiveTraceRootsChanged?.(roots);
+			refreshTraceReadSnapshot();
 		}).catch(() => {
 			// Trace is viewer-local supplemental state and never changes world status.
 		});
 	}
 
 	function startTraceBackground(): void {
-		reconcileTraceRoots([]);
+		void reconcileTraceRoots([]);
 		if (!transport) return;
-		traceRootBootstrapReadiness = transport.bootstrapTraceRootCandidates().then((result) => {
-			reconcileTraceRoots(result.rawEvents);
+		traceRootBootstrapReadiness = transport.bootstrapTraceRootCandidates().then(async (result) => {
+			await reconcileTraceRoots(result.rawEvents);
 			return 'ready' as const;
 		}).catch(() => {
 			return 'failed' as const;
 		});
+		void traceRootBootstrapReadiness.then(async (readiness) => {
+			if (readiness !== 'ready' || disposed || !transport) return;
+			if (typeof transport.configureTraceReplies !== 'function') return;
+			const notification = traceNotificationConfig();
+			if (!notification) return;
+			const result = await transport.configureTraceReplies({
+				...(notification ? { notification } : {}),
+				onBatch: (batch) => { void reconcileTraceReplies(traceConversationGeneration, undefined, batch.events); },
+				onLiveEvent: (event) => { void reconcileTraceReplies(traceConversationGeneration, undefined, [event]); }
+			}).catch(() => {});
+			if (result?.status === 'active') await reconcileTraceReplies(traceConversationGeneration, undefined, result.initialBatch.events);
+		});
+	}
+
+	function traceNotificationConfig() {
+		if (!options.selfAccount || !options.onTraceReadSnapshotChanged) return undefined;
+		return {
+			personaPubkey: options.selfAccount.pubkey,
+			initialSince: Math.floor(options.selfAccount.lastChangedAtMs / 1000)
+		};
 	}
 
 	function applyCanonicalMessage(message: ParsedWorldMessage, nowMs: number, rawEvent?: NostrEvent): boolean {
@@ -492,7 +530,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 
 	function reconcileTraceReplies(
 		generation: number,
-		rootId: string,
+		rootId: string | undefined,
 		rawEvents: readonly NostrEvent[]
 	): Promise<boolean> {
 		let success = false;
@@ -506,10 +544,13 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 					channelId: channel.channelId,
 					effectiveRoots: effectiveTraceRoots,
 					rawEvents,
+					...(options.selfAccount ? { personaPubkey: options.selfAccount.pubkey } : {}),
 					...(currentOpenRootId ? { currentOpenRootId } : {})
 				});
 				success = true;
-				applyTraceReplySnapshot(generation, replies.filter((reply) => reply.rootId === rootId));
+				refreshTraceReadSnapshot();
+				const visibleRootId = rootId ?? (traceConversationState.kind === 'open' ? traceConversationState.root.id : null);
+				if (visibleRootId) applyTraceReplySnapshot(generation, replies.filter((reply) => reply.rootId === visibleRootId));
 			} catch {
 				// A supplemental cache failure does not affect primary world reads.
 			}
@@ -553,6 +594,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 		}
 		try {
 			const result = await transport.configureTraceReplies({
+				...(traceNotificationConfig() ? { notification: traceNotificationConfig() } : {}),
 				conversation: config,
 				onBatch: (batch) => receiveTraceBatch(generation, config.rootId, batch),
 				onLiveEvent: (event) => { void receiveTraceReplies(generation, config.rootId, [event]); }
@@ -641,7 +683,12 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 		const deactivate = async () => {
 			const readiness = traceRootBootstrapReadiness ? await traceRootBootstrapReadiness : 'failed';
 			if (disposed || generation !== traceConversationGeneration || traceConversationState.kind !== 'closed' || readiness !== 'ready') return;
-			await transport?.configureTraceReplies({ onBatch: () => {}, onLiveEvent: () => {} }).catch(() => {});
+			const notification = traceNotificationConfig();
+			await transport?.configureTraceReplies({
+				...(notification ? { notification } : {}),
+				onBatch: (batch) => { void reconcileTraceReplies(traceConversationGeneration, undefined, batch.events); },
+				onLiveEvent: (event) => { void reconcileTraceReplies(traceConversationGeneration, undefined, [event]); }
+			}).catch(() => {});
 		};
 		void deactivate();
 	}
@@ -881,6 +928,28 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 
 		getTraceConversationState(): TraceConversationState {
 			return traceConversationState;
+		},
+
+		markTraceRootRead(rootId: string): Promise<boolean> {
+			if (disposed || !channel || !options.selfAccount) return Promise.resolve(false);
+			return markTraceRootRead({ channelId: channel.channelId, personaPubkey: options.selfAccount.pubkey, rootId })
+				.then((changed) => {
+					if (changed) refreshTraceReadSnapshot();
+					return changed;
+				}).catch(() => false);
+		},
+
+		markTraceReplyRead(rootId: string, replyId: string): Promise<boolean> {
+			if (disposed || !channel || !options.selfAccount) return Promise.resolve(false);
+			return markTraceReplyRead({ channelId: channel.channelId, personaPubkey: options.selfAccount.pubkey, rootId, replyId })
+				.then((changed) => {
+					if (changed) refreshTraceReadSnapshot();
+					return changed;
+				}).catch(() => false);
+		},
+
+		getTraceReadSnapshot(): TraceReadSnapshot {
+			return traceReadSnapshot;
 		}
 	};
 }

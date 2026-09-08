@@ -120,6 +120,7 @@
 		type SelfPositionWriteState,
 		type WorldReadConnectionStatus
 	} from '$lib/worldReadSession';
+	import type { TraceReadSnapshot } from '$lib/traceReadState';
 
 	const FIELD = {
 		columns: 16,
@@ -175,6 +176,7 @@
 	let selfAccount = $state.raw<AccountSnapshot | null>(null);
 	let selfPositionWriteState = $state.raw<SelfPositionWriteState>({ kind: 'unavailable' });
 	let selfMessageAvailability: SelfMessageAvailability = { kind: 'unavailable' };
+	let traceReadSnapshot = $state<TraceReadSnapshot>({ readRootIds: [], unreadReplyRootIds: [], hasUnreadReplies: false });
 	let composerPreferredHeight = $state<number | null>(null);
 	let composerKeyboardInset = $state(0);
 	let worldSession: ReturnType<typeof createWorldReadSession> | null = null;
@@ -286,13 +288,42 @@
 				participant.position.x === cell.position.x && participant.position.y === cell.position.y
 			),
 			inInvestigationRange: selfIsActive && selfLogicalPosition !== null &&
-				isWithinTraceInvestigationRange(selfLogicalPosition, cell.position)
+				isWithinTraceInvestigationRange(selfLogicalPosition, cell.position),
+			read: traceReadSnapshot.readRootIds.includes(cell.roots[0].id),
+			unreadReply: traceReadSnapshot.unreadReplyRootIds.includes(cell.roots[0].id)
 		})));
 	let traceConversationProjection = $derived(resolveTraceConversationProjection(traceConversationState));
 	let traceOnlyCellTriggers = $derived(traceRootCells.map((cell) => cell.position).filter((position) =>
 		!participantViews.some((participant) => sameCell(participant.position, position)) &&
 		traceLightCells.some((cell) => sameCell(cell.position, position))
 	));
+
+	function isActuallyPresented(element: Element | null): element is HTMLElement {
+		if (!(element instanceof HTMLElement) || element.getClientRects().length === 0) return false;
+		const style = getComputedStyle(element);
+		return style.visibility !== 'hidden' && style.display !== 'none';
+	}
+
+	// Read state follows the visible presentation, not measurement attachments.
+	// TracePresentation mounts pending measurement nodes with visibility:hidden.
+	$effect(() => {
+		const ready = tracePresentationReady;
+		const layout = traceTreeLayout;
+		const ghost = traceRootGhost;
+		const session = worldSession;
+		if (!ready || !layout || !ghost || !session || typeof document === 'undefined') return;
+		void tick().then(() => {
+			if (worldSession !== session || !tracePresentationReady) return;
+			const rootGhost = document.querySelector(`[data-trace-ghost-root-id="${ghost.event.id}"]`);
+			const rootBubble = document.querySelector(`[data-trace-root-id="${ghost.event.id}"]`);
+			if (isActuallyPresented(rootGhost) && isActuallyPresented(rootBubble)) {
+				void session.markTraceRootRead(ghost.event.id);
+			}
+			for (const card of document.querySelectorAll<HTMLElement>('[data-trace-reply-id]')) {
+				if (isActuallyPresented(card)) void session.markTraceReplyRead(ghost.event.id, card.dataset.traceReplyId!);
+			}
+		});
+	});
 
 	let visibleParticipantIds = $derived(new Set(
 		participantViews.filter((participant) => isInsideFieldArea(participant.screen)).map((participant) => participant.id)
@@ -703,6 +734,7 @@
 				onLiveMessage: receiveLiveMessage,
 				onTimelineMessage: receiveTimelineMessage,
 				onEffectiveTraceRootsChanged: setEffectiveTraceRoots,
+				onTraceReadSnapshotChanged: (snapshot) => { traceReadSnapshot = snapshot; },
 				onTraceConversationChanged: setTraceConversation,
 				onStatusChanged: (status) => {
 					connectionStatus = status;
@@ -1255,11 +1287,10 @@
 		acceptPresence(resetDevWorldPresence(FIELD, Date.now()));
 	}
 
-	function traceLightWorldPosition(position: { x: number; y: number }, occupied: boolean): WorldPoint {
-		const edgeOffset = occupied ? cellSize * 0.28 : 0;
+	function traceLightWorldPosition(position: { x: number; y: number }): WorldPoint {
 		return {
-			x: (position.x + 0.5) * cellSize + edgeOffset,
-			y: (position.y + 0.5) * cellSize - edgeOffset
+			x: (position.x + 0.5) * cellSize,
+			y: (position.y + 0.5) * cellSize
 		};
 	}
 
@@ -1491,6 +1522,7 @@
 			bind:this={composerComponent}
 			{selectedSpeechType}
 			submissionInProgress={composerSubmissionInProgress}
+			hasUnreadReplies={traceReadSnapshot.hasUnreadReplies}
 			onSpeechTypeChange={(next) => { selectedSpeechType = next; }}
 			submitContent={submitComposerContent}
 			desiredContext={composerDesiredContext}

@@ -321,10 +321,6 @@ function matchesFilterBundle(filters: readonly unknown[], expected: readonly Fil
 	return filters.length === expected.length && expected.every((filter) => filters.some((candidate) => matchesFilter(candidate, filter)));
 }
 
-function canonicalRootIds(rootIds: readonly string[] | undefined): readonly string[] {
-	return [...new Set(rootIds ?? [])].sort((first, second) => first < second ? -1 : first > second ? 1 : 0);
-}
-
 function copyPairDiagnostics(pairs: ReadonlyMap<PrimaryPairKey, PrimaryPairDiagnostic>): readonly PrimaryPairDiagnostic[] {
 	return [...pairs.values()].map((pair) => ({ ...pair }));
 }
@@ -721,13 +717,11 @@ export function createNostrRelayTransport(
 		const notification = input.notification;
 		if (notification) {
 			assertTimestamp(notification.initialSince, 'notification initialSince');
-			const effectiveRootIds = canonicalRootIds(notification.effectiveRootIds);
 			const initialFilter = buildTraceNotificationFilter({
-				personaPubkey: notification.personaPubkey,
-				...(effectiveRootIds.length > 0 ? { effectiveRootIds } : {})
+				personaPubkey: notification.personaPubkey
 			});
 			scopes.push({
-				key: `notification\u0000${notification.personaPubkey}\u0000${effectiveRootIds.join('\u0000')}`,
+				key: `notification\u0000${notification.personaPubkey}`,
 				kind: 'notification',
 				initialFilter: { ...initialFilter, since: notification.initialSince },
 				initialSince: notification.initialSince

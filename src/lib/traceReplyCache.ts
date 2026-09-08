@@ -4,12 +4,14 @@ import {
 	openTraceDatabase,
 	TRACE_DATABASE_STORES,
 	TRACE_REPLY_LRU_STORE,
+	TRACE_REPLY_READ_STORE,
 	TRACE_REPLY_STORE,
 	TRACE_ROOT_STORE,
 	type TraceReadwriteTransaction,
 	type TraceReplyRecord,
 	type TraceReplyLruRecord
 } from './traceDatabase';
+import { reconcileTraceReplyUnreadState, deleteTraceReplyReadState } from './traceReadState';
 import {
 	parseTraceReplyEvents,
 	resolveTraceReplyCandidates,
@@ -26,6 +28,7 @@ export type ReconcileTraceReplyCacheInput = Readonly<{
 	effectiveRoots: readonly ParsedWorldMessage[];
 	rawEvents: readonly Event[];
 	currentOpenRootId?: string;
+	personaPubkey?: string;
 }>;
 
 export type TouchTraceReplyTreeInput = Readonly<{
@@ -317,6 +320,19 @@ async function applyReplyChanges(
 	}
 	for (const record of replyPuts.values()) await replyStore.put(record);
 
+	// Read/unread metadata is subordinate to the retained reply cache. Remove it
+	// in this same transaction so an evicted tree cannot leave notifications behind.
+	const readStore = tx.objectStore(TRACE_REPLY_READ_STORE);
+	const retainedReplyIds = new Set([...trees.values()].flatMap((tree) =>
+		tree.replies.map((event) => JSON.stringify([tree.channelId, tree.rootId, event.reply.id]))));
+	for (const key of await readStore.getAllKeys()) {
+		if (!Array.isArray(key) || key.length !== 4 || typeof key[0] !== 'string') continue;
+		const replyKey = JSON.stringify([key[0], key[2], key[3]]);
+		if (typeof key[0] === 'string' && typeof key[2] === 'string' && typeof key[3] === 'string' && !retainedReplyIds.has(replyKey)) {
+			await deleteTraceReplyReadState(tx, key[0], key[2], key[3]);
+		}
+	}
+
 	const lruPuts = new Map([...lru.values()].map((record) => [JSON.stringify([record.channelId, record.rootId]), record]));
 	const lruStore = tx.objectStore(TRACE_REPLY_LRU_STORE);
 	for (let index = 0; index < oldLruKeys.length; index += 1) {
@@ -375,6 +391,13 @@ export async function reconcileTraceReplyCache(
 			? null
 			: treeKey(input.channelId, input.currentOpenRootId);
 		enforceGlobalCap(trees, lru, currentOpenKey);
+		if (input.personaPubkey) {
+			await reconcileTraceReplyUnreadState(tx, {
+				channelId: input.channelId,
+				personaPubkey: input.personaPubkey,
+				acceptedReplies: [...trees.values()].flatMap((tree) => tree.replies.map((event) => event.reply))
+			});
+		}
 		await applyReplyChanges(tx, replyRecords, replyKeys, lruRecords, lruKeys, trees, lru);
 		await tx.done;
 		return currentChannelSnapshot(trees, input);

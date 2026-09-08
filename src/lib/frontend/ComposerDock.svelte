@@ -6,11 +6,18 @@
 	type Props = ComponentProps<typeof HostOwnedComposerLite> & {
 		selectedSpeechType: SpeechType;
 		submissionInProgress: boolean;
+		hasUnreadReplies: boolean;
 		onSpeechTypeChange: (next: SpeechType) => void;
 	};
 	let { selectedSpeechType, submissionInProgress, onSpeechTypeChange, submitContent,
-		desiredContext, loadPreview, onPreviewClear, onEditorEmptyChange, onPreferredHeightChange }: Props = $props();
+		desiredContext, loadPreview, onPreviewClear, onEditorEmptyChange, onPreferredHeightChange,
+		hasUnreadReplies }: Props = $props();
 	let composerComponent: { focusEditor(): boolean; blurEditor(): boolean } | null = null;
+	let explanationVisible = $state(false);
+
+	$effect(() => {
+		if (!hasUnreadReplies) explanationVisible = false;
+	});
 
 	const SPEECH_TYPE_ORDER: readonly SpeechType[] = ['normal', 'shout', 'monologue'];
 	const SPEECH_TYPE_LABELS: Readonly<Record<SpeechType, string>> = {
@@ -47,6 +54,20 @@
 		>
 			<span aria-hidden="true">{SPEECH_TYPE_LABELS[selectedSpeechType]}</span>
 		</button>
+		{#if hasUnreadReplies}
+			<button
+				class="trace-unread-indicator"
+				class:explanation-visible={explanationVisible}
+				type="button"
+				aria-label="あなたへの返信の痕跡があります"
+				onclick={() => { explanationVisible = !explanationVisible; }}
+			>
+				<span aria-hidden="true">●</span>
+				{#if explanationVisible}
+					<span class="trace-unread-explanation" role="status">どこかにあなたへの返信の痕跡があります</span>
+				{/if}
+			</button>
+		{/if}
 		<div class="composer-editor-slot">
 			<HostOwnedComposerLite
 				bind:this={composerComponent}
@@ -104,6 +125,37 @@
 		font-weight: 800;
 		line-height: 1.15;
 		white-space: normal;
+	}
+
+	.trace-unread-indicator {
+		position: relative;
+		flex: 0 0 34px;
+		min-width: 0;
+		min-height: 0;
+		padding: 0;
+		border: 1px solid rgba(169, 93, 73, 0.46);
+		border-radius: 10px;
+		background: rgba(255, 244, 232, 0.94);
+		color: #b45c48;
+		font-size: 14px;
+		cursor: pointer;
+	}
+
+	.trace-unread-explanation {
+		position: absolute;
+		left: 50%;
+		bottom: calc(100% + 8px);
+		width: max-content;
+		max-width: 230px;
+		padding: 6px 8px;
+		border: 1px solid rgba(82, 77, 68, 0.18);
+		border-radius: 8px;
+		background: rgba(50, 56, 52, 0.94);
+		color: #fffdf2;
+		font-size: 11px;
+		font-weight: 700;
+		line-height: 1.3;
+		pointer-events: none;
 	}
 
 	.speech-type-toggle:hover:not(:disabled) {
