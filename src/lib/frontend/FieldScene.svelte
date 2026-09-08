@@ -414,7 +414,8 @@
 	}
 
 	.trace-light-read:not(.trace-light-unread-reply) {
-		opacity: 0.48;
+		opacity: 0.32;
+		box-shadow: 0 0 5px 1px rgba(255, 225, 120, 0.18);
 	}
 
 	.trace-light-unread-reply {

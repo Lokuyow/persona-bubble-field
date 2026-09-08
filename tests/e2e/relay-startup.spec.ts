@@ -835,13 +835,17 @@ test.describe('Relay startup', () => {
 		}
 		const parsedRoot = parseWorldMessage(root, CHANNEL_ID);
 		if (!parsedRoot) throw new Error('Read-state root fixture did not parse.');
+		let unreadRoot = finalizeEvent(buildWorldMessageTemplate({ channel, content: 'read-state unread root', speechType: 'normal', position: { x: 5, y: 2 }, createdAt: Math.floor(now / 1000) }), selfSecret);
+		for (let attempt = 1; BigInt(`0x${unreadRoot.id}`) % 5n !== 0n; attempt += 1) {
+			unreadRoot = finalizeEvent(buildWorldMessageTemplate({ channel, content: `read-state unread root ${attempt}`, speechType: 'normal', position: { x: 5, y: 2 }, createdAt: Math.floor(now / 1000) }), selfSecret);
+		}
 		const reply = finalizeEvent(buildTraceReplyTemplate({ root: parsedRoot, parent: parsedRoot, content: 'private reply detail', speechType: 'normal', createdAt: Math.floor(now / 1000) + 1 }), new Uint8Array(32).fill(31));
 		const replyAfterRootRead = finalizeEvent(buildTraceReplyTemplate({ root: parsedRoot, parent: parsedRoot, content: 'private reply after root read', speechType: 'normal', createdAt: Math.floor(now / 1000) + 2 }), new Uint8Array(32).fill(32));
 		await page.clock.setFixedTime(now);
 		await page.emulateMedia({ reducedMotion: 'reduce' });
 		await page.setViewportSize({ width: 1100, height: 850 });
 		await installHostOwnedStub(page);
-		await installDelayedRelay(page, { primaryEvents: primary, traceRoots: [root], traceReplies: [reply] });
+		await installDelayedRelay(page, { primaryEvents: primary, traceRoots: [root, unreadRoot], traceReplies: [reply] });
 		await seedRelayAccount(page, selfSecret, selfPubkey);
 		await page.goto('/');
 		await expect(page.locator('.composer-dock')).toBeVisible();
@@ -850,6 +854,9 @@ test.describe('Relay startup', () => {
 			relay.releaseMetadata(); relay.releasePrimary();
 		});
 		await expect(page.locator('[data-trace-light-position="4,2"]')).toBeVisible();
+		const unreadLight = page.locator('[data-trace-light-position="5,2"]');
+		await expect(unreadLight).toBeVisible();
+		await expect.poll(() => unreadLight.evaluate((element) => getComputedStyle(element).opacity)).toBe('1');
 		await expect(page.locator('.trace-unread-indicator')).toBeVisible();
 		await page.locator('.trace-unread-indicator').click();
 		await expect(page.locator('.trace-unread-explanation')).toContainText('どこかにあなたへの返信の痕跡があります');
@@ -863,6 +870,10 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('.trace-unread-indicator')).toHaveCount(0);
 		await page.locator('.field-area').click({ position: { x: 8, y: 8 } });
 		await expect(page.locator('[data-trace-light-position="4,2"]')).toHaveAttribute('data-trace-root-read', 'true');
+		await expect.poll(() => page.locator('[data-trace-light-position="4,2"]').evaluate((element) => getComputedStyle(element).opacity)).toBe('0.32');
+		const unreadGlow = await unreadLight.evaluate((element) => getComputedStyle(element).boxShadow);
+		const readGlow = await page.locator('[data-trace-light-position="4,2"]').evaluate((element) => getComputedStyle(element).boxShadow);
+		expect(readGlow).not.toBe(unreadGlow);
 		await page.reload();
 		await page.evaluate(() => {
 			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
@@ -884,7 +895,7 @@ test.describe('Relay startup', () => {
 		await page.locator('.field-area').click({ position: { x: 8, y: 8 } });
 		await expect(light).toHaveAttribute('data-trace-root-read', 'true');
 		await expect(light).not.toHaveAttribute('data-trace-root-unread-reply');
-		await expect.poll(() => light.evaluate((element) => getComputedStyle(element).opacity)).toBe('0.48');
+		await expect.poll(() => light.evaluate((element) => getComputedStyle(element).opacity)).toBe('0.32');
 	});
 
 	test('passes target-author character profiles across root, nested reply, and clear context patches', async ({ page }) => {
