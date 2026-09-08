@@ -3,12 +3,13 @@
 	import type { Character } from '$lib/character';
 	import CharacterAvatar from '$lib/CharacterAvatar.svelte';
 	import FieldParticipant from '$lib/FieldParticipant.svelte';
+	import type { BubbleTone } from '$lib/bubblePresentation';
 	import type { FieldCellAction } from '$lib/fieldSelection';
 	import type { Bounds, Direction, GridPosition, Size, WorldPoint } from '$lib/geometry';
 	import type { ProjectedParticipant } from '$lib/presenceProjection';
 	import type { Participant } from '$lib/frontend/presencePresentation';
 	import { isWithinTraceInvestigationRange, type TraceRootCell } from '$lib/traceInvestigation';
-import type { ParsedWorldMessage } from '$lib/nostrProtocol';
+	import type { ParsedWorldMessage } from '$lib/nostrProtocol';
 
 	const FIELD_BACKGROUND_ASSET = '/field/prototype-urban-park.png';
 
@@ -20,7 +21,7 @@ import type { ParsedWorldMessage } from '$lib/nostrProtocol';
 	export type TraceRootGhost = Readonly<{
 		event: Pick<ParsedWorldMessage, 'id'>;
 		character: Character;
-		tone: string;
+		tone: BubbleTone;
 		world: WorldPoint;
 		compact: boolean;
 	}>;
@@ -87,9 +88,6 @@ import type { ParsedWorldMessage } from '$lib/nostrProtocol';
 		traceLightWorldPosition
 	}: Props = $props();
 
-	function sameCell(first: GridPosition, second: GridPosition): boolean {
-		return first.x === second.x && first.y === second.y;
-	}
 </script>
 
 <div
@@ -99,8 +97,7 @@ import type { ParsedWorldMessage } from '$lib/nostrProtocol';
 	use:fieldSelectionPointer
 >
 	<div
-		class="field-scene"
-		class:field-scene-hidden={!geometryReady}
+		class={['field-scene', { 'field-scene-hidden': !geometryReady }]}
 		data-camera-animation={cameraAnimating ? 'active' : undefined}
 		style={`--cell-size: ${cellSize}px; --avatar-size: calc(var(--cell-size) - 4px); width: ${fieldWorldSize.width}px; height: ${fieldWorldSize.height}px; transform: translate3d(${-camera.x}px, ${-camera.y}px, 0);`}
 	>
