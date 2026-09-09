@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 64 64"
+  width="64"
+  height="64"
+  fill="none"
+  aria-hidden="true">
+  <path
+    fill="currentColor"
+    d="M15 11
+       H49
+       C55.6 11 61 16.4 61 23
+       V35
+       C61 41.6 55.6 47 49 47
+       H34.5
+       L16.8 59.2
+       C15.6 60.0 14.0 58.9 14.6 57.5
+       L18.9 47
+       H15
+       C8.4 47 3 41.6 3 35
+       V23
+       C3 16.4 8.4 11 15 11
+       Z"/>
+</svg>

@@ -4,7 +4,7 @@ import { build } from 'vite';
 
 const PAGES_BASE_PATH = '/persona-bubble-field';
 const BACKGROUND_ASSET_PATH = `${PAGES_BASE_PATH}/field/prototype-danchi-courtyard.webp`;
-const TRACE_ASSET_PATH = `${PAGES_BASE_PATH}/trace/trace-icon-afterimage.svg`;
+const TRACE_ASSET_PATH = `${PAGES_BASE_PATH}/trace/trace-icon.svg`;
 
 process.env.BASE_PATH = PAGES_BASE_PATH;
 
