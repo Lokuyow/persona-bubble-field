@@ -1401,7 +1401,7 @@ test.describe('DEV World Sandbox', () => {
 		await expect(timeline).toBeVisible();
 	});
 
-	test('uses the prototype park background beneath the field grid', async ({ page }) => {
+	test('uses the prototype courtyard background beneath the field grid', async ({ page }) => {
 		await openDevWorld(page);
 
 		await expect(page.locator('.field-sun')).toHaveCount(0);
@@ -1421,7 +1421,7 @@ test.describe('DEV World Sandbox', () => {
 			};
 		});
 
-		expect(background.image).toContain('prototype-urban-park.png');
+		expect(background.image).toContain('prototype-danchi-courtyard.webp');
 		expect(background.image).not.toContain('repeating-conic-gradient');
 		expect(background.size).toContain('76px 76px');
 		expect(background.size).toContain('100% 100%');
