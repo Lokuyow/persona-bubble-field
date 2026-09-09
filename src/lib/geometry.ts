@@ -141,13 +141,19 @@ export function getActualFieldTop(fieldArea: Bounds, camera: WorldPoint): number
 	return fieldArea.y + Math.max(0, -camera.y);
 }
 
-export function clampCamera(target: WorldPoint, viewport: Size, fieldWorldSize: Size): WorldPoint {
-	const x = fieldWorldSize.width <= viewport.width
-		? (fieldWorldSize.width - viewport.width) / 2
-		: Math.min(Math.max(target.x - viewport.width / 2, 0), fieldWorldSize.width - viewport.width);
-	const y = fieldWorldSize.height <= viewport.height
-		? (fieldWorldSize.height - viewport.height) / 2
-		: Math.min(Math.max(target.y - viewport.height / 2, 0), fieldWorldSize.height - viewport.height);
+export function clampCamera(target: WorldPoint, viewport: Size, cameraWorldBounds: Bounds): WorldPoint {
+	const x = cameraWorldBounds.width <= viewport.width
+		? cameraWorldBounds.x + (cameraWorldBounds.width - viewport.width) / 2
+		: Math.min(
+			Math.max(target.x - viewport.width / 2, cameraWorldBounds.x),
+			cameraWorldBounds.x + cameraWorldBounds.width - viewport.width
+		);
+	const y = cameraWorldBounds.height <= viewport.height
+		? cameraWorldBounds.y + (cameraWorldBounds.height - viewport.height) / 2
+		: Math.min(
+			Math.max(target.y - viewport.height / 2, cameraWorldBounds.y),
+			cameraWorldBounds.y + cameraWorldBounds.height - viewport.height
+		);
 
 	return { x, y };
 }

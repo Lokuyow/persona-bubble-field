@@ -21,6 +21,7 @@ export async function installHostOwnedStub(page: Page): Promise<{ requests: () =
   async setContext(patch) {
     if (this.submitting) throw new Error('submission_in_progress');
     (window.__ehagakiContextCalls ||= []).push(patch);
+    if (Object.hasOwn(patch, 'content') && typeof patch.content === 'string') { this.editor.value = patch.content; this.updateEditorEmpty(); }
     if (patch.content === null) { this.editor.value = ''; this.updateEditorEmpty(); }
     if (Object.hasOwn(patch, 'reply')) this.reply = patch.reply;
     this.renderReply(patch.preloadedEvents, patch.preloadedProfiles);

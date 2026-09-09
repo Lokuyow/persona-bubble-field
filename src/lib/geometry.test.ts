@@ -80,7 +80,7 @@ describe('field geometry', () => {
 		const cellSize = getResponsiveCellSize(360);
 		const field = getFieldWorldSize({ columns: 16, rows: 8, cellSize });
 		const player = gridToWorld({ x: 7, y: 4 }, cellSize);
-		const camera = clampCamera(player, { width: 360, height: 740 }, field);
+		const camera = clampCamera(player, { width: 360, height: 740 }, { x: 0, y: 0, ...field });
 
 		expect(field).toEqual({ width: 800, height: 400 });
 		expect(worldToScreen(player, camera).x).toBe(180);
@@ -93,7 +93,7 @@ describe('field geometry', () => {
 		const cellSize = getResponsiveCellSize(viewport.width);
 		const fieldWorld = getFieldWorldSize({ columns: 16, rows: 8, cellSize });
 		const player = gridToWorld({ x: 7, y: 4 }, cellSize);
-		const camera = clampCamera(player, { width: fieldArea.width, height: fieldArea.height }, fieldWorld);
+		const camera = clampCamera(player, { width: fieldArea.width, height: fieldArea.height }, { x: 0, y: 0, ...fieldWorld });
 		const topRow = fieldLocalToViewport(
 			worldToScreen(gridToWorld({ x: 0, y: 0 }, cellSize), camera),
 			fieldArea
@@ -121,17 +121,39 @@ describe('field geometry', () => {
 	});
 
 	it('clamps the camera to the field edges', () => {
-		const field = getFieldWorldSize({ columns: 16, rows: 8, cellSize: 40 });
+		const field = { x: 0, y: 0, ...getFieldWorldSize({ columns: 16, rows: 8, cellSize: 40 }) };
 
 		expect(clampCamera({ x: 10, y: 10 }, { width: 240, height: 160 }, field)).toEqual({ x: 0, y: 0 });
 		expect(clampCamera({ x: 630, y: 310 }, { width: 240, height: 160 }, field)).toEqual({ x: 400, y: 160 });
 	});
 
 	it('centers a smaller field inside a larger viewport', () => {
-		expect(clampCamera({ x: 100, y: 100 }, { width: 900, height: 600 }, { width: 640, height: 320 })).toEqual({
+		expect(clampCamera({ x: 100, y: 100 }, { width: 900, height: 600 }, { x: 0, y: 0, width: 640, height: 320 })).toEqual({
 		 x: -130,
 		 y: -140
 	});
+	});
+
+	it('clamps a camera bounds with a negative origin', () => {
+		const bounds = { x: -400, y: -200, width: 640, height: 320 };
+
+		expect(clampCamera({ x: -380, y: -180 }, { width: 240, height: 160 }, bounds)).toEqual({ x: -400, y: -200 });
+		expect(clampCamera({ x: 100, y: 100 }, { width: 240, height: 160 }, bounds)).toEqual({ x: -20, y: -40 });
+	});
+
+	it('centers a camera bounds that is smaller than the viewport at its own origin', () => {
+		expect(clampCamera(
+			{ x: -40, y: -20 },
+			{ width: 300, height: 200 },
+			{ x: -100, y: -60, width: 120, height: 80 }
+		)).toEqual({ x: -190, y: -120 });
+	});
+
+	it('clamps targets at both visual bounds edges', () => {
+		const bounds = { x: -200, y: -100, width: 1000, height: 600 };
+
+		expect(clampCamera({ x: -199, y: -99 }, { width: 400, height: 240 }, bounds)).toEqual({ x: -200, y: -100 });
+		expect(clampCamera({ x: 799, y: 499 }, { width: 400, height: 240 }, bounds)).toEqual({ x: 400, y: 260 });
 	});
 
 	it('projects world coordinates into the camera viewport', () => {

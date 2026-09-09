@@ -29,7 +29,7 @@ describe('presence and conversation boundary', () => {
 	const projectionOptions = {
 		cellSize: MOBILE_CELL_SIZE,
 		fieldAreaBounds: { x: 0, y: 260, width: 328, height: 100 },
-		fieldWorldSize: { width: 960, height: 480 }
+		cameraWorldBounds: { x: 0, y: 0, width: 960, height: 480 }
 	};
 	it('dismisses a normal bubble when presence times out', () => {
 		let presence = createPresenceState({ columns: 2, rows: 2 }, 0, [{ id: 'alice', position: { x: 0, y: 0 } }]);
@@ -106,7 +106,7 @@ describe('presence and conversation boundary', () => {
 		conversation = applyVisibility(conversation, getActiveParticipantIds(presence));
 		const projection = projectPresence(presence, [{ id: 'alice' }, { id: 'bob' }], {
 			...projectionOptions,
-			fieldWorldSize: { width: 112, height: 112 }
+			cameraWorldBounds: { x: 0, y: 0, width: 112, height: 112 }
 		});
 
 		expect(conversation.mergedBubbles[0].memberPubkeys).toEqual(['alice', 'bob']);

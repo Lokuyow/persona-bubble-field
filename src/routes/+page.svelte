@@ -114,7 +114,8 @@
 		acceptedTraceReplyTarget, clearTraceReplyMode, completeTraceReplySubmission,
 		createTraceReplyMode, selectTraceReplyTarget, type TraceReplyMode
 	} from '$lib/traceReplyMode';
-	import { resolveSpeechSubmission } from '$lib/speechSubmission';
+	import { createSpeechPublicationCore, type SpeechPublicationContext, type SpeechPublicationOutcome } from '$lib/speechPublication';
+	import type { SpeechSuggestionConversationEntry } from '$lib/speechSuggestions';
 	import type { SpeechType } from '$lib/conversation';
 	import type { SpeechBubbleShape } from '$lib/speechBubblePath';
 	import {
@@ -130,6 +131,7 @@
 		rows: 8
 	} as const;
 	const DEFAULT_VIEWPORT = { width: 1100, height: 680 };
+	const FIELD_ARTWORK_SCALE = 1.75;
 	const SITE_BACKGROUND_ASSET = '/backgrounds/site-background.webp';
 	const SPEECH_AREA = {
 		top: 84,
@@ -205,7 +207,7 @@
 	let lastProfileTrigger: HTMLButtonElement | null = null;
 	let composerEditorIsEmpty: boolean | null = null;
 	let chatterComponent: { initialize(width: number): void; isInitialized(): boolean; toggle(): void; resetMeasurements(): void };
-	let composerComponent = $state.raw<{ focusEditor(): boolean; blurEditor(): boolean } | null>(null);
+	let composerComponent = $state.raw<{ focusEditor(): boolean; blurEditor(): boolean; applyContentIfEmpty(content: string): Promise<boolean> } | null>(null);
 	let fieldSceneComponent: FieldSceneHandle | null = null;
 	let visualWorldById = $state.raw<Record<string, WorldPoint>>({});
 	let visualCamera = $state.raw<WorldPoint | null>(null);
@@ -239,6 +241,12 @@
 	let cellSize = $derived(getResponsiveCellSize(viewportSize.width));
 	let field = $derived({ ...FIELD, cellSize });
 	let fieldWorldSize = $derived(getFieldWorldSize(field));
+	let fieldArtworkBounds = $derived({
+		x: -(fieldWorldSize.width * (FIELD_ARTWORK_SCALE - 1)) / 2,
+		y: -(fieldWorldSize.height * (FIELD_ARTWORK_SCALE - 1)) / 2,
+		width: fieldWorldSize.width * FIELD_ARTWORK_SCALE,
+		height: fieldWorldSize.height * FIELD_ARTWORK_SCALE
+	});
 	let speechAreaBounds = $derived({
 		x: SPEECH_AREA.sidePadding,
 		y: SPEECH_AREA.top,
@@ -248,7 +256,7 @@
 	let fieldAreaBounds = $derived(getFieldAreaBounds(viewportSize, speechAreaBounds));
 	let selfProjectionId = $derived(devWorldSandboxEnabled ? DEV_WORLD_SELF_ID : selfAccount?.pubkey ?? 'you');
 	let presenceProjection = $derived(projectFrontendPresence({ presence: presenceState, selectedCharacterId, selfProjectionId,
-		geometry: { cellSize, fieldAreaBounds, fieldWorldSize }, colors: colorByPubkey }));
+		geometry: { cellSize, fieldAreaBounds, cameraWorldBounds: fieldArtworkBounds }, colors: colorByPubkey }));
 	let isWorldSelfActive = $derived(Boolean(selfAccount && presenceState.participants.some((participant) =>
 		participant.id === selfAccount?.pubkey && participant.status === 'active'
 	)));
@@ -300,6 +308,68 @@
 			unreadReply: traceReadSnapshot.unreadReplyRootIds.includes(cell.roots[0].id)
 		})));
 	let traceConversationProjection = $derived(resolveTraceConversationProjection(traceConversationState));
+	let speechSuggestionCharacter = $derived(
+		devWorldSandboxEnabled
+			? getDevWorldCharacter(selectedCharacterId)
+			: selfAccount ? deriveCharacterFromPubkey(selfAccount.pubkey, CHARACTER_CATALOG)
+				: getCharacterById(selectedCharacterId) ?? CHARACTER_CATALOG[0]
+	);
+	let speechSuggestionConversation = $derived.by((): readonly SpeechSuggestionConversationEntry[] => {
+		const traceEvents = traceConversationProjection
+			? [
+				traceConversationProjection.root,
+				...(traceConversationProjection.parent ? [traceConversationProjection.parent.event] : []),
+				traceConversationProjection.current.event,
+				...traceConversationProjection.directReplies
+			]
+			: recentMessageTimeline;
+		const unique = new Map<string, { id: string; pubkey: string; content: string; createdAt: number }>();
+		for (const event of traceEvents) {
+			if (!unique.has(event.id)) unique.set(event.id, event);
+		}
+		return [...unique.values()]
+			.sort((left, right) => left.createdAt - right.createdAt || left.id.localeCompare(right.id))
+			.slice(-8)
+			.map((event) => ({
+				speaker: event.pubkey === DEV_WORLD_SELF_ID
+					? getDevWorldCharacter(selectedCharacterId).name
+					: deriveCharacterFromPubkey(event.pubkey, CHARACTER_CATALOG).name,
+				content: event.content
+			}));
+	});
+
+	function isCurrentSpeechPublicationContext(context: SpeechPublicationContext): boolean {
+		const currentTarget = traceReplyMode.target;
+		return traceReplyMode.generation === context.generation &&
+			(currentTarget?.rootId ?? null) === (context.target?.rootId ?? null) &&
+			(currentTarget?.targetId ?? null) === (context.target?.targetId ?? null);
+	}
+
+	const speechPublicationCore = createSpeechPublicationCore({
+		getSelectedSpeechType: () => selectedSpeechType,
+		getSubmissionInProgress: () => composerSubmissionInProgress,
+		setSubmissionInProgress: (value) => { composerSubmissionInProgress = value; },
+		isPublicationAllowed: () => devWorldSandboxEnabled || !personaLifecycleTransition,
+		waitForReady: (signal) => devWorldSandboxEnabled ? Promise.resolve() : waitForMessageReady(signal),
+		isCurrentContext: isCurrentSpeechPublicationContext,
+		publish: async (submission, context): Promise<SpeechPublicationOutcome> => {
+			if (personaLifecycleTransition) return { kind: 'blocked' };
+			const result = context.target
+				? await (devWorldSandboxEnabled ? devTraceConversationRuntime : worldSession)?.publishTraceReply({
+					rootId: context.target.rootId, targetId: context.target.targetId, ...submission
+				})
+				: !devWorldSandboxEnabled ? await worldSession?.publishMessage(submission.content, submission.speechType) : undefined;
+			if (result?.kind === 'succeeded') return result;
+			return { kind: result?.kind === 'out-of-range' ? 'out-of-range' : 'failed' };
+		},
+		onSucceeded: (context) => {
+			selectedSpeechType = 'normal';
+			traceReplyMode = completeTraceReplySubmission(traceReplyMode, context.generation);
+		},
+		onOutOfRange: (context) => {
+			if (traceReplyMode.generation === context.generation) traceReplyMode = clearTraceReplyMode(traceReplyMode, true);
+		}
+	});
 	let traceOnlyCellTriggers = $derived(traceRootCells.map((cell) => cell.position).filter((position) =>
 		!participantViews.some((participant) => sameCell(participant.position, position)) &&
 		traceMarkerCells.some((cell) => sameCell(cell.position, position))
@@ -827,7 +897,7 @@
 				const nextPresence = session?.refresh(now);
 				if (nextPresence) {
 					conversationState = applyVisibility(conversationState, projectFrontendPresence({ presence: nextPresence, selectedCharacterId, selfProjectionId,
-						geometry: { cellSize, fieldAreaBounds, fieldWorldSize }, colors: colorByPubkey }).visibleParticipantIds);
+						geometry: { cellSize, fieldAreaBounds, cameraWorldBounds: fieldArtworkBounds }, colors: colorByPubkey }).visibleParticipantIds);
 				}
 				conversationState = pruneExpired(conversationState, now);
 			} finally {
@@ -927,7 +997,7 @@
 		const previousColors = colorByPubkey;
 		const selectedId = selectedCharacterId;
 		const projectionId = selfProjectionId;
-		const geometry = { cellSize, fieldAreaBounds, fieldWorldSize };
+		const geometry = { cellSize, fieldAreaBounds, cameraWorldBounds: fieldArtworkBounds };
 		const selfId = devWorldSandboxEnabled ? DEV_WORLD_SELF_ID : selfAccount?.pubkey;
 		const previousSelf = previousPresence.participants.find((participant) => participant.id === selfId);
 		const nextSelf = nextPresence.participants.find((participant) => participant.id === selfId);
@@ -1287,34 +1357,17 @@
 		const desired = () => ({ generation: traceReplyMode.generation, targetId: traceReplyMode.target?.targetId ?? null,
 			clearContentVersion: traceReplyMode.clearContentVersion });
 		if (!matchesComposerSubmit(envelope, desired())) throw new Error('Composer reply context is not synchronized.');
-		const target = traceReplyMode.target;
-		const submission = resolveSpeechSubmission({
-			content: envelope.output.content,
-			shortcutId: options.shortcutId,
-			selectedSpeechType
-		});
-		composerSubmissionInProgress = true;
-		try {
-			if (!devWorldSandboxEnabled) await waitForMessageReady(options.signal);
-			if (options.signal.aborted) throw new DOMException('Submission was cancelled.', 'AbortError');
-			if (!matchesComposerSubmit(envelope, desired())) throw new Error('Composer reply target changed before publication.');
-			const result = target
-				? await (devWorldSandboxEnabled ? devTraceConversationRuntime : worldSession)?.publishTraceReply({
-					rootId: target.rootId, targetId: target.targetId, ...submission
-				})
-				: !devWorldSandboxEnabled ? await worldSession?.publishMessage(submission.content, submission.speechType) : undefined;
-			if (result?.kind === 'succeeded') {
-				selectedSpeechType = 'normal';
-				traceReplyMode = completeTraceReplySubmission(traceReplyMode, envelope.generation);
-				return { eventId: result.eventId };
-			}
-			if (result?.kind === 'out-of-range' && traceReplyMode.generation === envelope.generation) {
-				traceReplyMode = clearTraceReplyMode(traceReplyMode, true);
-			}
-			throw new Error('Message was not confirmed by Relay.');
-		} finally {
-			composerSubmissionInProgress = false;
-		}
+		return speechPublicationCore.publish(envelope.output.content, {
+			generation: envelope.generation,
+			target: traceReplyMode.target
+		}, options);
+	}
+
+	function submitSpeechCandidate(content: string, signal: AbortSignal): Promise<Readonly<{ eventId: string }>> {
+		return speechPublicationCore.publish(content, {
+			generation: traceReplyMode.generation,
+			target: traceReplyMode.target
+		}, { signal });
 	}
 
 	function setComposerPreferredHeight(height: number): void {
@@ -1398,7 +1451,7 @@
 		entryNowMs: number
 	): void {
 		const entryVisible = projectFrontendPresence({ presence: bootstrapPresence, selectedCharacterId, selfProjectionId,
-			geometry: { cellSize, fieldAreaBounds, fieldWorldSize }, colors: colorByPubkey }).visibleParticipantIds;
+			geometry: { cellSize, fieldAreaBounds, cameraWorldBounds: fieldArtworkBounds }, colors: colorByPubkey }).visibleParticipantIds;
 		conversationState = replayBootstrapConversation(messages, entryVisible, entryNowMs);
 		conversationState = applyVisibility(conversationState, entryVisible);
 	}
@@ -1408,7 +1461,7 @@
 		if (naturalExpiresAt(message) <= nowMs) return;
 		const conversationMessage = toConversationMessage(message);
 		const visibleParticipantIds = projectFrontendPresence({ presence: nextPresence, selectedCharacterId, selfProjectionId,
-			geometry: { cellSize, fieldAreaBounds, fieldWorldSize }, colors: colorByPubkey }).visibleParticipantIds;
+			geometry: { cellSize, fieldAreaBounds, cameraWorldBounds: fieldArtworkBounds }, colors: colorByPubkey }).visibleParticipantIds;
 		conversationState = receiveMessage(conversationState, conversationMessage, {
 			isSpeakerVisible: visibleParticipantIds.has(message.pubkey),
 			duration: getPrototypeDisplayDuration(message.content),
@@ -1510,6 +1563,7 @@
 				geometryReady={initialFieldGeometryReady}
 				{fieldAreaBounds}
 				{fieldWorldSize}
+				fieldArtworkBounds={fieldArtworkBounds}
 				{field}
 				{cellSize}
 				{camera}
@@ -1581,8 +1635,11 @@
 			{selectedSpeechType}
 			submissionInProgress={composerSubmissionInProgress}
 			hasUnreadReplies={traceReadSnapshot.hasUnreadReplies}
+			character={speechSuggestionCharacter}
+			suggestionConversation={speechSuggestionConversation}
 			onSpeechTypeChange={(next) => { selectedSpeechType = next; }}
 			submitContent={submitComposerContent}
+			submitCandidate={submitSpeechCandidate}
 			desiredContext={composerDesiredContext}
 			loadPreview={loadComposerPreview}
 			onPreviewClear={clearComposerReply}
