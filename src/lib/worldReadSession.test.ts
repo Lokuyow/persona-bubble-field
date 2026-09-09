@@ -263,7 +263,7 @@ function selfAccount() {
 	return {
 		secretKey: selfSecretKey.slice(),
 		pubkey: selfPubkey,
-		lastChangedAtMs: 700_000,
+		personaCreatedAtMs: 700_000,
 		characterProfileRevision: 2
 	};
 }

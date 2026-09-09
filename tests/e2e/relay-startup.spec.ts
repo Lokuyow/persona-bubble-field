@@ -600,14 +600,19 @@ async function seedRelayAccount(page: Page, secretKey: Uint8Array, pubkey: strin
 	await page.goto('/favicon.svg');
 	await page.evaluate(async ({ secret, accountPubkey }) => {
 		const database = await new Promise<IDBDatabase>((resolve, reject) => {
-			const request = indexedDB.open('persona-bubble-field-account', 1);
+			const request = indexedDB.open('persona-bubble-field-account', 2);
 			request.onupgradeneeded = () => request.result.createObjectStore('persona-bubble-field-account-state');
 			request.onsuccess = () => resolve(request.result);
 			request.onerror = () => reject(request.error);
 		});
+		const wrappingKey = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']) as CryptoKey;
+		const iv = crypto.getRandomValues(new Uint8Array(12));
+		const ciphertext = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, wrappingKey, new Uint8Array(secret)));
 		const transaction = database.transaction('persona-bubble-field-account-state', 'readwrite');
 		const store = transaction.objectStore('persona-bubble-field-account-state');
-		store.put(new Uint8Array(secret), 'secret-key');
+		store.put(wrappingKey, 'secret-wrapping-key');
+		store.put({ version: 1, iv, ciphertext }, 'encrypted-secret-key');
+		store.put(accountPubkey, 'account-pubkey');
 		store.put(Date.now(), 'last-changed-at-ms');
 		store.put({ pubkey: accountPubkey, revision: 2 }, 'initial-profile-published-pubkey');
 		await new Promise<void>((resolve, reject) => {
@@ -617,6 +622,29 @@ async function seedRelayAccount(page: Page, secretKey: Uint8Array, pubkey: strin
 		});
 		database.close();
 	}, { secret: [...secretKey], accountPubkey: pubkey });
+}
+
+async function seedLegacyRelayAccount(page: Page, secretKey: Uint8Array, pubkey: string, personaCreatedAtMs: number): Promise<void> {
+	await page.goto('/favicon.svg');
+	await page.evaluate(async ({ secret, accountPubkey, createdAt }) => {
+		const database = await new Promise<IDBDatabase>((resolve, reject) => {
+			const request = indexedDB.open('persona-bubble-field-account', 1);
+			request.onupgradeneeded = () => request.result.createObjectStore('persona-bubble-field-account-state');
+			request.onsuccess = () => resolve(request.result);
+			request.onerror = () => reject(request.error);
+		});
+		const transaction = database.transaction('persona-bubble-field-account-state', 'readwrite');
+		const store = transaction.objectStore('persona-bubble-field-account-state');
+		store.put(new Uint8Array(secret), 'secret-key');
+		store.put(createdAt, 'last-changed-at-ms');
+		store.put({ pubkey: accountPubkey, revision: 2 }, 'initial-profile-published-pubkey');
+		await new Promise<void>((resolve, reject) => {
+			transaction.oncomplete = () => resolve();
+			transaction.onerror = () => reject(transaction.error);
+			transaction.onabort = () => reject(transaction.error);
+		});
+		database.close();
+	}, { secret: [...secretKey], accountPubkey: pubkey, createdAt: personaCreatedAtMs });
 }
 
 async function composerContextCalls(page: Page): Promise<Array<{
@@ -667,6 +695,52 @@ function reverseMoveKey(key: AvailableMove['key']): AvailableMove['key'] {
 }
 
 test.describe('Relay startup', () => {
+	test('migrates a legacy v1 account in Chromium without changing its identity or profile state', async ({ page }) => {
+		const secret = new Uint8Array(32).fill(47);
+		const pubkey = getPublicKey(secret);
+		const personaCreatedAtMs = Date.now() - 12_345;
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page);
+		await seedLegacyRelayAccount(page, secret, pubkey, personaCreatedAtMs);
+		await page.goto('/');
+		await expect(page.locator('.composer-dock')).toBeVisible();
+		await page.evaluate(() => {
+			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
+			relay.releaseMetadata(); relay.releasePrimary();
+		});
+		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
+		const persisted = await page.evaluate(async () => {
+			const database = await new Promise<IDBDatabase>((resolve, reject) => {
+				const request = indexedDB.open('persona-bubble-field-account');
+				request.onsuccess = () => resolve(request.result);
+				request.onerror = () => reject(request.error);
+			});
+			try {
+				return await new Promise<{ keys: string[]; timestamp: unknown; pubkey: unknown; marker: unknown; hasSecret: boolean; hasWrappingKey: boolean }>((resolve, reject) => {
+					const request = database.transaction('persona-bubble-field-account-state').objectStore('persona-bubble-field-account-state').getAll();
+					request.onsuccess = () => {
+						const store = database.transaction('persona-bubble-field-account-state').objectStore('persona-bubble-field-account-state');
+						const keysRequest = store.getAllKeys();
+						keysRequest.onsuccess = () => resolve({
+							keys: keysRequest.result.map(String), timestamp: (request.result as unknown[])[keysRequest.result.indexOf('last-changed-at-ms')],
+							pubkey: (request.result as unknown[])[keysRequest.result.indexOf('account-pubkey')],
+							marker: (request.result as unknown[])[keysRequest.result.indexOf('initial-profile-published-pubkey')],
+							hasSecret: keysRequest.result.includes('secret-key'), hasWrappingKey: keysRequest.result.includes('secret-wrapping-key')
+						});
+						keysRequest.onerror = () => reject(keysRequest.error);
+					};
+					request.onerror = () => reject(request.error);
+				});
+			} finally { database.close(); }
+		});
+		expect(persisted.keys).toEqual(expect.arrayContaining(['account-pubkey', 'encrypted-secret-key', 'secret-wrapping-key', 'last-changed-at-ms', 'initial-profile-published-pubkey']));
+		expect(persisted.hasSecret).toBe(false);
+		expect(persisted.hasWrappingKey).toBe(true);
+		expect(persisted.timestamp).toBe(personaCreatedAtMs);
+		expect(persisted.pubkey).toBe(pubkey);
+		expect(persisted.marker).toEqual({ pubkey, revision: 2 });
+	});
+
 	for (const width of [700, 701]) {
 		test(`keeps Chatter initialization and overlay geometry at width ${width}`, async ({ page }) => {
 			await page.setViewportSize({ width, height: 900 });

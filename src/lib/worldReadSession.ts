@@ -274,7 +274,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 		if (!options.selfAccount || !options.onTraceReadSnapshotChanged) return undefined;
 		return {
 			personaPubkey: options.selfAccount.pubkey,
-			initialSince: Math.floor(options.selfAccount.lastChangedAtMs / 1000)
+			initialSince: Math.floor(options.selfAccount.personaCreatedAtMs / 1000)
 		};
 	}
 
