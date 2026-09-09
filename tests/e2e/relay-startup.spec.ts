@@ -747,7 +747,7 @@ test.describe('Relay startup', () => {
 				});
 				await expect(client.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '3,2');
 				await client.getByRole('button', { name: 'Hide Chatter' }).click();
-				await expect(client.locator('[data-trace-light-position="4,2"]')).toBeVisible();
+				await expect(client.locator('[data-trace-marker-position="4,2"]')).toBeVisible();
 			};
 			const publish = async (content: string) => {
 				const openRoot = sender.locator(`[data-trace-root-id="${trace.root.id}"]`);
@@ -853,13 +853,13 @@ test.describe('Relay startup', () => {
 			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
 			relay.releaseMetadata(); relay.releasePrimary();
 		});
-		await expect(page.locator('[data-trace-light-position="4,2"]')).toBeVisible();
-		const unreadLight = page.locator('[data-trace-light-position="5,2"]');
-		await expect(unreadLight).toBeVisible();
-		await expect(unreadLight).toHaveCSS('mask-image', /trace-icon\.svg/);
-		await expect(unreadLight).toHaveCSS('opacity', '1');
-		await expect(page.locator('[data-trace-light-position="4,2"]')).toHaveCSS('mask-image', /trace-icon\.svg/);
-		await expect(page.locator('[data-trace-light-position="4,2"]')).toHaveCSS('color', 'rgb(207, 6, 254)');
+		await expect(page.locator('[data-trace-marker-position="4,2"]')).toBeVisible();
+		const unreadMarker = page.locator('[data-trace-marker-position="5,2"]');
+		await expect(unreadMarker).toBeVisible();
+		await expect(unreadMarker).toHaveCSS('mask-image', /trace-icon\.svg/);
+		await expect(unreadMarker).toHaveCSS('opacity', '1');
+		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveCSS('mask-image', /trace-icon\.svg/);
+		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveCSS('color', 'rgb(207, 6, 254)');
 		await expect(page.locator('.trace-unread-indicator')).toBeVisible();
 		await page.locator('.trace-unread-indicator').click();
 		await expect(page.locator('.trace-unread-explanation')).toContainText('どこかにあなたへの返信の痕跡があります');
@@ -872,36 +872,36 @@ test.describe('Relay startup', () => {
 		await expect(page.locator(`[data-trace-reply-id="${reply.id}"]`)).toContainText(reply.content);
 		await expect(page.locator('.trace-unread-indicator')).toHaveCount(0);
 		await page.locator('.field-area').click({ position: { x: 8, y: 8 } });
-		await expect(page.locator('[data-trace-light-position="4,2"]')).toHaveAttribute('data-trace-root-read', 'true');
-		await expect(page.locator('[data-trace-light-position="4,2"]')).toHaveCSS('mask-image', /trace-icon\.svg/);
-		await expect(page.locator('[data-trace-light-position="4,2"]')).toHaveCSS('color', 'rgb(89, 105, 127)');
-		await expect(page.locator('[data-trace-light-position="4,2"]')).toHaveCSS('opacity', '0.5');
+		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveAttribute('data-trace-root-read', 'true');
+		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveCSS('mask-image', /trace-icon\.svg/);
+		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveCSS('color', 'rgb(89, 105, 127)');
+		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveCSS('opacity', '0.34');
 		await page.reload();
 		await page.evaluate(() => {
 			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
 			relay.releaseMetadata(); relay.releasePrimary();
 		});
-		await expect(page.locator('[data-trace-light-position="4,2"]')).toBeVisible();
-		await expect(page.locator('[data-trace-light-position="4,2"]')).toHaveAttribute('data-trace-root-read', 'true');
+		await expect(page.locator('[data-trace-marker-position="4,2"]')).toBeVisible();
+		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveAttribute('data-trace-root-read', 'true');
 		await expect(page.locator('.trace-unread-indicator')).toHaveCount(0);
 		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectTraceReply(event: object): void } }).__relayStartupTest.injectTraceReply(event), replyAfterRootRead);
-		const light = page.locator('[data-trace-light-position="4,2"]');
-		await expect(light).toHaveAttribute('data-trace-root-read', 'true');
-		await expect(light).toHaveAttribute('data-trace-root-unread-reply', 'true');
-		await expect(light).toHaveCSS('mask-image', /trace-icon\.svg/);
-		await expect(light).toHaveCSS('color', 'rgb(207, 6, 254)');
-		await expect(light).toHaveCSS('opacity', '1');
+		const marker = page.locator('[data-trace-marker-position="4,2"]');
+		await expect(marker).toHaveAttribute('data-trace-root-read', 'true');
+		await expect(marker).toHaveAttribute('data-trace-root-unread-reply', 'true');
+		await expect(marker).toHaveCSS('mask-image', /trace-icon\.svg/);
+		await expect(marker).toHaveCSS('color', 'rgb(207, 6, 254)');
+		await expect(marker).toHaveCSS('opacity', '1');
 		await expect(page.locator('.trace-unread-indicator')).toBeVisible();
 		await selectRelayTraceCell(page, '4,2');
 		await expect(page.locator(`[data-trace-reply-id="${replyAfterRootRead.id}"]`)).toContainText(replyAfterRootRead.content);
 		const hideTimeline = page.getByRole('button', { name: 'Hide Chatter' });
 		if (await hideTimeline.isVisible()) await hideTimeline.click();
 		await page.locator('.field-area').click({ position: { x: 8, y: 8 } });
-		await expect(light).toHaveAttribute('data-trace-root-read', 'true');
-		await expect(light).not.toHaveAttribute('data-trace-root-unread-reply');
-		await expect(light).toHaveCSS('mask-image', /trace-icon\.svg/);
-		await expect(light).toHaveCSS('color', 'rgb(89, 105, 127)');
-		await expect(light).toHaveCSS('opacity', '0.5');
+		await expect(marker).toHaveAttribute('data-trace-root-read', 'true');
+		await expect(marker).not.toHaveAttribute('data-trace-root-unread-reply');
+		await expect(marker).toHaveCSS('mask-image', /trace-icon\.svg/);
+		await expect(marker).toHaveCSS('color', 'rgb(89, 105, 127)');
+		await expect(marker).toHaveCSS('opacity', '0.34');
 	});
 
 	test('passes target-author character profiles across root, nested reply, and clear context patches', async ({ page }) => {
@@ -1097,7 +1097,7 @@ test.describe('Relay startup', () => {
 		await page.evaluate(() => (window as typeof window & {
 			__relayStartupTest: { releaseTraceRoots(): void }
 		}).__relayStartupTest.releaseTraceRoots());
-		await expect(page.locator('[data-trace-light-position="4,2"]')).toBeVisible();
+		await expect(page.locator('[data-trace-marker-position="4,2"]')).toBeVisible();
 
 		await page.evaluate(() => {
 			(window as typeof window & { __relayStartupTest: { state: { published: unknown[] } } }).__relayStartupTest.state.published.length = 0;
@@ -1169,7 +1169,7 @@ test.describe('Relay startup', () => {
 		await page.evaluate(() => (window as typeof window & {
 			__relayStartupTest: { releaseTraceRoots(): void }
 		}).__relayStartupTest.releaseTraceRoots());
-		await expect(page.locator('[data-trace-light-position="4,2"]')).toBeVisible();
+		await expect(page.locator('[data-trace-marker-position="4,2"]')).toBeVisible();
 
 		await page.locator('[data-cell-position="4,2"]').click();
 		await expect(page.locator(`[data-trace-root-id="${trace.root.id}"]`)).toContainText('Relay trace root');

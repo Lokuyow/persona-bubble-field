@@ -17,7 +17,7 @@
 	const TRACE_ICON_ASSET = '/trace/trace-icon.svg';
 
 	export type FieldParticipantView = ProjectedParticipant<Participant>;
-	export type TraceLightCell = TraceRootCell & Readonly<{
+	export type TraceMarkerCell = TraceRootCell & Readonly<{
 		occupied: boolean;
 		inInvestigationRange: boolean;
 		read: boolean;
@@ -51,7 +51,7 @@
 		cellSize: number;
 		camera: WorldPoint;
 		cameraAnimating: boolean;
-		traceLightCells: readonly TraceLightCell[];
+		traceMarkerCells: readonly TraceMarkerCell[];
 		proximityFeedback: Readonly<{ position: GridPosition }> | null;
 		traceOnlyCellTriggers: readonly GridPosition[];
 		participantViews: readonly FieldParticipantView[];
@@ -66,7 +66,7 @@
 		fieldActionLabel: (action: FieldCellAction) => string;
 		closeFieldActionMenu: () => void;
 		onOpenProfile: (characterId: string, trigger: HTMLButtonElement) => void;
-		traceLightWorldPosition: (position: GridPosition) => WorldPoint;
+		traceMarkerWorldPosition: (position: GridPosition) => WorldPoint;
 		onPointerMovementTakeover: (pointerId: number, direction: Direction) => void;
 		onPointerMovementUpdate: (pointerId: number, direction: Direction) => void;
 		onPointerMovementStop: (pointerId: number) => void;
@@ -80,7 +80,7 @@
 		cellSize,
 		camera,
 		cameraAnimating,
-		traceLightCells,
+		traceMarkerCells,
 		proximityFeedback,
 		traceOnlyCellTriggers,
 		participantViews,
@@ -95,7 +95,7 @@
 		fieldActionLabel,
 		closeFieldActionMenu,
 		onOpenProfile,
-		traceLightWorldPosition,
+		traceMarkerWorldPosition,
 		onPointerMovementTakeover,
 		onPointerMovementUpdate,
 		onPointerMovementStop
@@ -227,17 +227,17 @@
 			style={`--field-background-image: url("${asset(FIELD_BACKGROUND_ASSET)}");`}
 			aria-hidden="true"
 		></div>
-		<div class="trace-light-layer" aria-hidden="true">
-			{#each traceLightCells as cell (`${cell.position.x},${cell.position.y}`)}
+		<div class="trace-marker-layer" aria-hidden="true">
+			{#each traceMarkerCells as cell (`${cell.position.x},${cell.position.y}`)}
 				{#if !cell.occupied}
-					{const world = traceLightWorldPosition(cell.position)}
+					{const world = traceMarkerWorldPosition(cell.position)}
 					<span
-						class="trace-light"
-						data-trace-light-position={`${cell.position.x},${cell.position.y}`}
+						class="trace-marker"
+						data-trace-marker-position={`${cell.position.x},${cell.position.y}`}
 						data-trace-root-read={cell.read ? 'true' : 'false'}
 						data-trace-root-unread-reply={cell.unreadReply ? 'true' : undefined}
-						class:trace-light-read={cell.read}
-						class:trace-light-unread-reply={cell.unreadReply}
+						class:trace-marker-read={cell.read}
+						class:trace-marker-unread-reply={cell.unreadReply}
 						style={`left: ${world.x}px; top: ${world.y}px; --trace-icon-image: url("${asset(TRACE_ICON_ASSET)}");`}
 					></span>
 				{/if}
@@ -398,14 +398,14 @@
 		pointer-events: none;
 	}
 
-	.trace-light-layer {
+	.trace-marker-layer {
 		position: absolute;
 		inset: 0;
 		z-index: 4;
 		pointer-events: none;
 	}
 
-	.trace-light {
+	.trace-marker {
 		position: absolute;
 		width: max(22px, min(40px, calc(var(--cell-size) * 0.36)));
 		height: max(22px, min(40px, calc(var(--cell-size) * 0.36)));
@@ -423,11 +423,11 @@
 		transform: translate(-50%, -50%);
 	}
 
-	.trace-light-read:not(.trace-light-unread-reply) {
+	.trace-marker-read:not(.trace-marker-unread-reply) {
 		opacity: 0.34;
 	}
 
-	.trace-light-unread-reply {
+	.trace-marker-unread-reply {
 		color: #cf06fe;
 	}
 
