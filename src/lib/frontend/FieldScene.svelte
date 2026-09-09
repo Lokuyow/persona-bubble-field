@@ -14,6 +14,9 @@
 	import type { ParsedWorldMessage } from '$lib/nostrProtocol';
 
 	const FIELD_BACKGROUND_ASSET = '/field/prototype-danchi-courtyard.webp';
+	const TRACE_DEFAULT_ASSET = '/trace/trace-default.webp';
+	const TRACE_ROOT_READ_ASSET = '/trace/trace-root-read.webp';
+	const TRACE_REPLY_UNREAD_ASSET = '/trace/trace-reply-unread.webp';
 
 	export type FieldParticipantView = ProjectedParticipant<Participant>;
 	export type TraceLightCell = TraceRootCell & Readonly<{
@@ -41,6 +44,12 @@
 	export type FieldSceneHandle = Readonly<{
 		cancelPointerGesture: () => void;
 	}>;
+
+	function traceLightAsset(cell: TraceLightCell): string {
+		if (cell.unreadReply) return TRACE_REPLY_UNREAD_ASSET;
+		if (cell.read) return TRACE_ROOT_READ_ASSET;
+		return TRACE_DEFAULT_ASSET;
+	}
 
 	type Props = Readonly<{
 		geometryReady: boolean;
@@ -237,7 +246,7 @@
 						data-trace-root-unread-reply={cell.unreadReply ? 'true' : undefined}
 						class:trace-light-read={cell.read}
 						class:trace-light-unread-reply={cell.unreadReply}
-						style={`left: ${world.x}px; top: ${world.y}px;`}
+						style={`left: ${world.x}px; top: ${world.y}px; background-image: url("${asset(traceLightAsset(cell))}");`}
 					></span>
 				{/if}
 				{#if cell.inInvestigationRange}
@@ -406,25 +415,13 @@
 
 	.trace-light {
 		position: absolute;
-		width: max(6px, calc(var(--cell-size) * 0.14));
-		height: max(6px, calc(var(--cell-size) * 0.14));
-		border: 1px solid rgba(255, 250, 205, 0.84);
-		border-radius: 50%;
-		background: rgba(255, 238, 154, 0.75);
-		box-shadow: 0 0 8px 3px rgba(255, 225, 120, 0.42);
+		width: max(18px, min(30px, calc(var(--cell-size) * 0.28)));
+		height: max(18px, min(30px, calc(var(--cell-size) * 0.28)));
+		background-position: center;
+		background-repeat: no-repeat;
+		background-size: contain;
 		pointer-events: none;
 		transform: translate(-50%, -50%);
-	}
-
-	.trace-light-read:not(.trace-light-unread-reply) {
-		opacity: 0.32;
-		box-shadow: 0 0 5px 1px rgba(255, 225, 120, 0.18);
-	}
-
-	.trace-light-unread-reply {
-		border-color: rgba(255, 220, 188, 0.96);
-		background: rgba(224, 111, 84, 0.9);
-		box-shadow: 0 0 8px 3px rgba(224, 111, 84, 0.5);
 	}
 
 	.trace-investigation-indicator {
