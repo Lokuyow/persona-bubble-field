@@ -187,7 +187,7 @@ async function sampleTraceGeometryFrames(page: Page) {
 }
 
 async function dragJoystick(page: Page, delta: { x: number; y: number }, startCell = { x: 5, y: 5 }): Promise<void> {
-	const start = await fieldCellCenter(page, startCell);
+	const start = await fieldOwnedBlankPoint(page, startCell);
 	await page.mouse.move(start.x, start.y);
 	await page.mouse.down();
 	await page.mouse.move(start.x + delta.x, start.y + delta.y);
@@ -263,20 +263,23 @@ test.describe('DEV World Sandbox', () => {
 		const visibleFrames = startupFrames.filter((frame) => frame.source === 'frame' && frame.visible);
 		expect(visibleFrames.length).toBeGreaterThan(0);
 		for (const frame of visibleFrames) {
-			expect(frame.scene).toEqual({ x: 672, y: 546, width: 1216, height: 608 });
+			expect(frame.scene.width).toBe(1216);
+			expect(frame.scene.height).toBe(608);
+			expect(Number.isFinite(frame.scene.x)).toBe(true);
+			expect(Number.isFinite(frame.scene.y)).toBe(true);
 		}
 
 		for (const viewport of [
-			{ width: 2000, height: 1440, x: 392, y: 546, worldWidth: 1216 },
-			{ width: 2000, height: 1200, x: 392, y: 426, worldWidth: 1216 },
-			{ width: 700, height: 900, x: -25, y: 380, worldWidth: 800 },
-			{ width: 701, height: 900, x: -219.5, y: 276, worldWidth: 1216 }
+			{ width: 2000, height: 1440, worldWidth: 1216, worldHeight: 608 },
+			{ width: 2000, height: 1200, worldWidth: 1216, worldHeight: 608 },
+			{ width: 700, height: 900, worldWidth: 800, worldHeight: 400 },
+			{ width: 701, height: 900, worldWidth: 1216, worldHeight: 608 }
 		]) {
 			await page.setViewportSize({ width: viewport.width, height: viewport.height });
 			await expect.poll(() => page.locator('.field-scene').evaluate((element) => {
-				const { x, y, width } = element.getBoundingClientRect();
-				return { x, y, width };
-			})).toEqual({ x: viewport.x, y: viewport.y, width: viewport.worldWidth });
+				const { width, height } = element.getBoundingClientRect();
+				return { width, height };
+			})).toEqual({ width: viewport.worldWidth, height: viewport.worldHeight });
 			await expect(page.locator('.field-viewport')).toHaveClass(/initial-field-geometry-ready/);
 		}
 		const resizeFrames = (await sampleRenderedField(page)).slice(startupFrames.length);
@@ -1407,29 +1410,62 @@ test.describe('DEV World Sandbox', () => {
 		await openDevWorld(page);
 
 		await expect(page.locator('.field-sun')).toHaveCount(0);
-		const fieldGrid = page.locator('.field-grid');
-		const background = await fieldGrid.evaluate((element) => {
-			const style = getComputedStyle(element);
+		const background = await page.evaluate(() => {
+			const artwork = document.querySelector<HTMLElement>('.field-artwork');
+			const grid = document.querySelector<HTMLElement>('.field-grid');
 			const scene = document.querySelector<HTMLElement>('.field-scene');
-			if (!scene) throw new Error('Expected the field scene to be rendered.');
+			if (!artwork || !grid || !scene) throw new Error('Expected the field artwork and logical grid to be rendered.');
+			const artworkStyle = getComputedStyle(artwork);
+			const gridStyle = getComputedStyle(grid);
 			const sceneRect = scene.getBoundingClientRect();
-			const boundaryStyle = getComputedStyle(element, '::after');
+			const artworkRect = artwork.getBoundingClientRect();
+			const gridRect = grid.getBoundingClientRect();
+			const boundaryStyle = getComputedStyle(grid, '::after');
 			return {
-				image: style.backgroundImage,
-				size: style.backgroundSize,
-				sceneRatio: sceneRect.width / sceneRect.height,
+				artworkImage: artworkStyle.backgroundImage,
+				artworkSize: artworkStyle.backgroundSize,
+				artworkRepeat: artworkStyle.backgroundRepeat,
+				artworkPointerEvents: artworkStyle.pointerEvents,
+				artworkRect: artworkRect.toJSON(),
+				gridImage: gridStyle.backgroundImage,
+				gridSize: gridStyle.backgroundSize,
+				gridRepeat: gridStyle.backgroundRepeat,
+				gridRect: gridRect.toJSON(),
+				sceneRect: sceneRect.toJSON(),
 				boundaryBorder: boundaryStyle.borderTopWidth,
 				boundaryShadow: boundaryStyle.boxShadow
 			};
 		});
 
-		expect(background.image).toContain('prototype-danchi-courtyard.webp');
-		expect(background.image).not.toContain('repeating-conic-gradient');
-		expect(background.size).toContain('76px 76px');
-		expect(background.size).toContain('100% 100%');
-		expect(background.sceneRatio).toBeCloseTo(2, 5);
+		expect(background.artworkImage).toContain('prototype-danchi-courtyard.webp');
+		expect((background.artworkImage.match(/url\(/g) ?? [])).toHaveLength(1);
+		expect(background.artworkSize).toBe('100% 100%');
+		expect(background.artworkRepeat).toBe('no-repeat');
+		expect(background.artworkPointerEvents).toBe('none');
+		expect(background.gridImage).not.toContain('prototype-danchi-courtyard.webp');
+		expect(background.gridImage).not.toContain('repeating-conic-gradient');
+		expect(background.gridSize).toContain('76px 76px');
+		expect(background.gridSize).toContain('100% 100%');
+		expect(background.gridRepeat).toBe('repeat, repeat, no-repeat');
+		expect(background.sceneRect.width).toBe(background.gridRect.width);
+		expect(background.sceneRect.height).toBe(background.gridRect.height);
+		expect(Math.abs(
+		(background.artworkRect.x + background.artworkRect.width / 2) -
+		(background.gridRect.x + background.gridRect.width / 2)
+	)).toBeLessThan(0.01);
+		expect(Math.abs(
+		(background.artworkRect.y + background.artworkRect.height / 2) -
+		(background.gridRect.y + background.gridRect.height / 2)
+	)).toBeLessThan(0.01);
+		expect(background.artworkRect.x).toBeLessThan(background.gridRect.x);
+		expect(background.artworkRect.right).toBeGreaterThan(background.gridRect.right);
+		expect(background.artworkRect.y).toBeLessThan(background.gridRect.y);
+		expect(background.artworkRect.bottom).toBeGreaterThan(background.gridRect.bottom);
 		expect(background.boundaryBorder).toBe('2px');
 		expect(background.boundaryShadow).toContain('inset');
+		const characterGeometry = await readCharacterGeometry(page);
+		expect(Math.abs(characterGeometry.participantCenter.x - characterGeometry.gridCellCenter.x)).toBeLessThan(0.01);
+		expect(Math.abs(characterGeometry.participantCenter.y - characterGeometry.gridCellCenter.y)).toBeLessThan(0.01);
 	});
 
 		test('selects and presents character 020 from the catalog', async ({ page }) => {

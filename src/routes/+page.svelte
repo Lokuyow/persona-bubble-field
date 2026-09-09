@@ -128,6 +128,7 @@
 		rows: 8
 	} as const;
 	const DEFAULT_VIEWPORT = { width: 1100, height: 680 };
+	const FIELD_ARTWORK_SCALE = 1.75;
 	const SITE_BACKGROUND_ASSET = '/backgrounds/site-background.webp';
 	const SPEECH_AREA = {
 		top: 84,
@@ -234,6 +235,12 @@
 	let cellSize = $derived(getResponsiveCellSize(viewportSize.width));
 	let field = $derived({ ...FIELD, cellSize });
 	let fieldWorldSize = $derived(getFieldWorldSize(field));
+	let fieldArtworkBounds = $derived({
+		x: -(fieldWorldSize.width * (FIELD_ARTWORK_SCALE - 1)) / 2,
+		y: -(fieldWorldSize.height * (FIELD_ARTWORK_SCALE - 1)) / 2,
+		width: fieldWorldSize.width * FIELD_ARTWORK_SCALE,
+		height: fieldWorldSize.height * FIELD_ARTWORK_SCALE
+	});
 	let speechAreaBounds = $derived({
 		x: SPEECH_AREA.sidePadding,
 		y: SPEECH_AREA.top,
@@ -243,7 +250,7 @@
 	let fieldAreaBounds = $derived(getFieldAreaBounds(viewportSize, speechAreaBounds));
 	let selfProjectionId = $derived(devWorldSandboxEnabled ? DEV_WORLD_SELF_ID : selfAccount?.pubkey ?? 'you');
 	let presenceProjection = $derived(projectFrontendPresence({ presence: presenceState, selectedCharacterId, selfProjectionId,
-		geometry: { cellSize, fieldAreaBounds, fieldWorldSize }, colors: colorByPubkey }));
+		geometry: { cellSize, fieldAreaBounds, cameraWorldBounds: fieldArtworkBounds }, colors: colorByPubkey }));
 	let isWorldSelfActive = $derived(Boolean(selfAccount && presenceState.participants.some((participant) =>
 		participant.id === selfAccount?.pubkey && participant.status === 'active'
 	)));
@@ -871,7 +878,7 @@
 			const nextPresence = session?.refresh(now);
 			if (nextPresence) {
 				conversationState = applyVisibility(conversationState, projectFrontendPresence({ presence: nextPresence, selectedCharacterId, selfProjectionId,
-			geometry: { cellSize, fieldAreaBounds, fieldWorldSize }, colors: colorByPubkey }).visibleParticipantIds);
+					geometry: { cellSize, fieldAreaBounds, cameraWorldBounds: fieldArtworkBounds }, colors: colorByPubkey }).visibleParticipantIds);
 			}
 			conversationState = pruneExpired(conversationState, now);
 		}, 250);
@@ -967,7 +974,7 @@
 		const previousColors = colorByPubkey;
 		const selectedId = selectedCharacterId;
 		const projectionId = selfProjectionId;
-		const geometry = { cellSize, fieldAreaBounds, fieldWorldSize };
+		const geometry = { cellSize, fieldAreaBounds, cameraWorldBounds: fieldArtworkBounds };
 		const selfId = devWorldSandboxEnabled ? DEV_WORLD_SELF_ID : selfAccount?.pubkey;
 		const previousSelf = previousPresence.participants.find((participant) => participant.id === selfId);
 		const nextSelf = nextPresence.participants.find((participant) => participant.id === selfId);
@@ -1389,7 +1396,7 @@
 		entryNowMs: number
 	): void {
 		const entryVisible = projectFrontendPresence({ presence: bootstrapPresence, selectedCharacterId, selfProjectionId,
-			geometry: { cellSize, fieldAreaBounds, fieldWorldSize }, colors: colorByPubkey }).visibleParticipantIds;
+			geometry: { cellSize, fieldAreaBounds, cameraWorldBounds: fieldArtworkBounds }, colors: colorByPubkey }).visibleParticipantIds;
 		conversationState = replayBootstrapConversation(messages, entryVisible, entryNowMs);
 		conversationState = applyVisibility(conversationState, entryVisible);
 	}
@@ -1399,7 +1406,7 @@
 		if (naturalExpiresAt(message) <= nowMs) return;
 		const conversationMessage = toConversationMessage(message);
 		const visibleParticipantIds = projectFrontendPresence({ presence: nextPresence, selectedCharacterId, selfProjectionId,
-			geometry: { cellSize, fieldAreaBounds, fieldWorldSize }, colors: colorByPubkey }).visibleParticipantIds;
+			geometry: { cellSize, fieldAreaBounds, cameraWorldBounds: fieldArtworkBounds }, colors: colorByPubkey }).visibleParticipantIds;
 		conversationState = receiveMessage(conversationState, conversationMessage, {
 			isSpeakerVisible: visibleParticipantIds.has(message.pubkey),
 			duration: getPrototypeDisplayDuration(message.content),
@@ -1501,6 +1508,7 @@
 				geometryReady={initialFieldGeometryReady}
 				{fieldAreaBounds}
 				{fieldWorldSize}
+				fieldArtworkBounds={fieldArtworkBounds}
 				{field}
 				{cellSize}
 				{camera}

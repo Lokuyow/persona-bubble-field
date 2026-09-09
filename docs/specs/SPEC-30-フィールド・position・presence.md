@@ -54,6 +54,15 @@ PC等ではフィールドの広い範囲を表示できる。
 
 ユーザーが自分とは無関係にフィールドを自由にパンして遠方を見る機能は設けない。
 
+論理フィールドと、その周囲まで含むvisual artworkは別の責務として扱う。visual
+artworkはpresentationのために論理フィールド境界の外側へ延長してよいが、外周部分は
+論理cellではない。したがって、artwork外周によってposition、movement、occupancy、
+Trace、selectionの範囲を拡張しない。
+
+カメラは端付近の表示に必要な場合、このvisual artwork範囲を含めてframingしてよい。
+これは自由pan機能を追加するものではなく、既存の自分への追従cameraを維持したまま
+presentation上の表示範囲だけを扱う。
+
 ### 移動
 
 1回のmovementは、隣接する1つのcellへの移動とする。移動方向はcardinal 4方向と

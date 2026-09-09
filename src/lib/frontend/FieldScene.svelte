@@ -47,6 +47,7 @@
 		geometryReady: boolean;
 		fieldAreaBounds: Bounds;
 		fieldWorldSize: Size;
+		fieldArtworkBounds: Bounds;
 		field: FieldSize;
 		cellSize: number;
 		camera: WorldPoint;
@@ -76,6 +77,7 @@
 		geometryReady,
 		fieldAreaBounds,
 		fieldWorldSize,
+		fieldArtworkBounds,
 		field,
 		cellSize,
 		camera,
@@ -223,8 +225,12 @@
 		style={`--cell-size: ${cellSize}px; --avatar-size: calc(var(--cell-size) - 4px); width: ${fieldWorldSize.width}px; height: ${fieldWorldSize.height}px; transform: translate3d(${-camera.x}px, ${-camera.y}px, 0);`}
 	>
 		<div
+			class="field-artwork"
+			style={`left: ${fieldArtworkBounds.x}px; top: ${fieldArtworkBounds.y}px; width: ${fieldArtworkBounds.width}px; height: ${fieldArtworkBounds.height}px; --field-background-image: url("${asset(FIELD_BACKGROUND_ASSET)}");`}
+			aria-hidden="true"
+		></div>
+		<div
 			class="field-grid"
-			style={`--field-background-image: url("${asset(FIELD_BACKGROUND_ASSET)}");`}
 			aria-hidden="true"
 		></div>
 		<div class="trace-marker-layer" aria-hidden="true">
@@ -375,18 +381,25 @@
 	.field-grid {
 		position: absolute;
 		inset: 0;
-		background-color: rgba(222, 228, 213, 0.48);
 		background-image:
 			linear-gradient(to right, rgba(101, 122, 105, 0.16) 1px, transparent 1px),
 			linear-gradient(to bottom, rgba(101, 122, 105, 0.16) 1px, transparent 1px),
-			linear-gradient(rgba(255, 250, 224, 0.2), rgba(255, 250, 224, 0.2)),
-			var(--field-background-image, none);
+			linear-gradient(rgba(255, 250, 224, 0.2), rgba(255, 250, 224, 0.2));
 		background-size: var(--cell-size) var(--cell-size), var(--cell-size) var(--cell-size),
-			100% 100%, 100% 100%;
-		background-repeat: repeat, repeat, no-repeat, no-repeat;
+			100% 100%;
+		background-repeat: repeat, repeat, no-repeat;
 		box-shadow:
 			0 24px 65px rgba(67, 75, 62, 0.12),
 			inset 0 0 0 1px rgba(95, 111, 96, 0.3);
+	}
+
+	.field-artwork {
+		position: absolute;
+		z-index: 0;
+		background-image: var(--field-background-image, none);
+		background-size: 100% 100%;
+		background-repeat: no-repeat;
+		pointer-events: none;
 	}
 
 	.field-grid::after {

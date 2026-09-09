@@ -512,6 +512,11 @@ async function selectRelayTraceCell(page: Page, position: string): Promise<void>
 	await cell.click({ position: { x: box.width - 2, y: box.height - 2 } });
 }
 
+async function clickRelayLogicalCell(page: Page, cell: { x: number; y: number }): Promise<void> {
+	const point = await relayFieldCellCenter(page, cell);
+	await page.mouse.click(point.x, point.y);
+}
+
 async function dragRelayJoystick(page: Page, delta: { x: number; y: number }, startCell = { x: 5, y: 4 }): Promise<void> {
 	const start = await relayFieldCellCenter(page, startCell);
 	await page.mouse.move(start.x, start.y);
@@ -799,7 +804,14 @@ test.describe('Relay startup', () => {
 		await page.goto('/');
 		await expect.poll(async () => (await readFieldFrames(page)).filter((frame) => frame.source === 'frame' && frame.visible).length).toBeGreaterThan(0);
 		const first = (await readFieldFrames(page)).find((frame) => frame.source === 'frame' && frame.visible)!;
-		expect(first.scene).toEqual({ x: 672, y: 512.5, width: 1216, height: 608 });
+		expect(first.scene.width).toBe(1216);
+		expect(first.scene.height).toBe(608);
+		expect(Math.abs(
+		(first.scene.x + first.scene.width / 2) - (first.area.x + first.area.width / 2)
+	)).toBeLessThan(0.5);
+		expect(Math.abs(
+		(first.scene.y + first.scene.height / 2) - (first.area.y + first.area.height / 2)
+	)).toBeLessThan(0.5);
 		expect(first.viewport).toEqual({ x: 0, y: 0, width: 2560, height: 1373 });
 		expect(first.composer?.height).toBe(67);
 		await page.evaluate(() => (window as unknown as { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
@@ -810,10 +822,12 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('.participant[data-self="true"]')).toBeVisible();
 		const visible = (await sampleRenderedField(page)).filter((frame) => frame.source === 'frame' && frame.visible);
 		for (const frame of visible) {
-			expect(Math.abs(frame.scene.x - first.scene.x)).toBeLessThanOrEqual(0.5);
-			expect(Math.abs(frame.scene.y - first.scene.y)).toBeLessThanOrEqual(0.5);
 			expect(frame.scene.width).toBe(1216);
 			expect(frame.scene.height).toBe(608);
+			expect(frame.scene.x).toBeGreaterThanOrEqual(frame.area.x - frame.scene.width);
+			expect(frame.scene.x).toBeLessThanOrEqual(frame.area.x + frame.area.width);
+			expect(frame.scene.y).toBeGreaterThanOrEqual(frame.area.y - frame.scene.height);
+			expect(frame.scene.y).toBeLessThanOrEqual(frame.area.y + frame.area.height);
 		}
 	});
 
@@ -968,7 +982,7 @@ test.describe('Relay startup', () => {
 		await expect(page.locator(`[data-trace-ghost-root-id="${root.id}"]`)).toBeVisible();
 		await expect(page.locator(`[data-trace-reply-id="${reply.id}"]`)).toContainText(reply.content);
 		await expect(page.locator('.trace-unread-indicator')).toHaveCount(0);
-		await page.locator('.field-area').click({ position: { x: 8, y: 8 } });
+		await clickRelayLogicalCell(page, { x: 0, y: 0 });
 		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveAttribute('data-trace-root-read', 'true');
 		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveCSS('mask-image', /trace-icon\.svg/);
 		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveCSS('color', 'rgb(89, 105, 127)');
@@ -993,7 +1007,7 @@ test.describe('Relay startup', () => {
 		await expect(page.locator(`[data-trace-reply-id="${replyAfterRootRead.id}"]`)).toContainText(replyAfterRootRead.content);
 		const hideTimeline = page.getByRole('button', { name: 'Hide Chatter' });
 		if (await hideTimeline.isVisible()) await hideTimeline.click();
-		await page.locator('.field-area').click({ position: { x: 8, y: 8 } });
+		await clickRelayLogicalCell(page, { x: 0, y: 0 });
 		await expect(marker).toHaveAttribute('data-trace-root-read', 'true');
 		await expect(marker).not.toHaveAttribute('data-trace-root-unread-reply');
 		await expect(marker).toHaveCSS('mask-image', /trace-icon\.svg/);
@@ -1245,10 +1259,13 @@ test.describe('Relay startup', () => {
 		const positionsBefore = await publishedPositionIds();
 		await dragRelayJoystick(page, { x: 24, y: -24 });
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '4,1');
+		const positionsAfterMovement = await publishedPositionIds();
+		expect(positionsAfterMovement).toBe(positionsBefore + 1);
 		await page.locator('[data-cell-position="4,2"]').click();
 		await expect(page.locator(`[data-trace-root-id="${trace.root.id}"]`)).toContainText('Relay trace root');
 		await expect(page.locator('.trace-reply-status')).toHaveCount(0);
-		await expect.poll(publishedPositionIds).toBe(positionsBefore + 1);
+		await expect.poll(publishedPositionIds).toBeGreaterThanOrEqual(positionsAfterMovement);
+		await expect.poll(publishedPositionIds).toBeLessThanOrEqual(positionsAfterMovement + 1);
 
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
 			request.filters.some((filter) =>

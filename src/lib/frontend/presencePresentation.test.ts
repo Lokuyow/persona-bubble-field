@@ -28,7 +28,7 @@ describe('frontend presence projection', () => {
 		const presence = createPresenceState({ columns: 16, rows: 8 }, 100, [
 			{ id: DEV_WORLD_SELF_ID, position: { x: 7, y: 3 } }
 		]);
-		const geometry = { cellSize: 50, fieldAreaBounds: { x: 0, y: 200, width: 300, height: 200 }, fieldWorldSize: { width: 800, height: 400 } };
+		const geometry = { cellSize: 50, fieldAreaBounds: { x: 0, y: 200, width: 300, height: 200 }, cameraWorldBounds: { x: 0, y: 0, width: 800, height: 400 } };
 		const input = { presence, selectedCharacterId: '001', selfProjectionId: DEV_WORLD_SELF_ID, geometry };
 		const oldColors = Object.freeze({ [DEV_WORLD_SELF_ID]: 'mint' as const });
 		const nextColors = Object.freeze({ [DEV_WORLD_SELF_ID]: 'coral' as const });
