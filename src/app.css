@@ -26,13 +26,17 @@
 }
 
 html {
-	background: var(--app-background);
+	background-color: var(--app-background);
+	background-image: var(--site-background-image, none);
+	background-repeat: repeat;
 }
 
 body {
 	margin: 0;
 	min-width: 320px;
-	background: var(--app-background);
+	background-color: var(--app-background);
+	background-image: var(--site-background-image, none);
+	background-repeat: repeat;
 	color: #2e3435;
 	font-family: 'Trebuchet MS', 'Avenir Next', system-ui, sans-serif;
 }

@@ -127,6 +127,7 @@
 		rows: 8
 	} as const;
 	const DEFAULT_VIEWPORT = { width: 1100, height: 680 };
+	const SITE_BACKGROUND_ASSET = '/backgrounds/site-background.webp';
 	const SPEECH_AREA = {
 		top: 84,
 		height: 176,
@@ -648,6 +649,10 @@
 	}
 
 	onMount(() => {
+		document.documentElement.style.setProperty(
+			'--site-background-image',
+			`url("${asset(SITE_BACKGROUND_ASSET)}")`
+		);
 		let mounted = true;
 		let startRequested = false;
 		let session: ReturnType<typeof createWorldReadSession> | null = null;
