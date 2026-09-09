@@ -46,6 +46,7 @@
 	import { CHARACTER_CATALOG, getCharacterById, type Character } from '$lib/character';
 	import { deriveCharacterFromPubkey } from '$lib/characterAssignment';
 	import ProfileDialog from '$lib/ProfileDialog.svelte';
+	import LifespanHud from '$lib/LifespanHud.svelte';
 	import {
 		CURRENT_CHARACTER_PROFILE_REVISION,
 		loadOrCreatePersona,
@@ -182,6 +183,9 @@
 	let selfAccount = $state.raw<AccountSnapshot | null>(null);
 	let personaSnapshot = $state.raw<PersonaSnapshot | null>(null);
 	let personaLifecycleTransition = $state(false);
+	let lifespanHudNowMs = $state<number | null>(null);
+	let lifespanHudUpdatedAtMs = 0;
+	const LIFESPAN_HUD_REFRESH_INTERVAL_MS = 30_000;
 	let selfPositionWriteState = $state.raw<SelfPositionWriteState>({ kind: 'unavailable' });
 	let selfMessageAvailability: SelfMessageAvailability = { kind: 'unavailable' };
 	let traceReadSnapshot = $state<TraceReadSnapshot>({ readRootIds: [], unreadReplyRootIds: [], hasUnreadReplies: false });
@@ -855,6 +859,7 @@
 				} else {
 					personaSnapshot = personaResult.persona;
 					selfAccount = personaResult.persona.account;
+					updateLifespanHud(Date.now(), true);
 					if (isPersonaExpired(personaResult.persona.gameState, Date.now())) {
 						const result = await beginDeathTransition(personaResult.persona, session);
 						if (result === 'reloaded') return;
@@ -915,6 +920,7 @@
 					return;
 				}
 				const now = Date.now();
+				updateLifespanHud(now);
 				const nextPresence = session?.refresh(now);
 				if (nextPresence) {
 					conversationState = applyVisibility(conversationState, projectFrontendPresence({ presence: nextPresence, selectedCharacterId, selfProjectionId,
@@ -1275,7 +1281,10 @@
 
 	function handleDocumentVisibilityChange(): void {
 		movementInputController.handleVisibilityChange();
-		if (!document.hidden) void runRuntimeRefresh?.();
+		if (!document.hidden) {
+			updateLifespanHud(Date.now(), true);
+			void runRuntimeRefresh?.();
+		}
 	}
 
 	function handleDocumentPointerDown(event: PointerEvent): void {
@@ -1293,6 +1302,17 @@
 		if (!devWorldSandboxEnabled) return;
 		const result = moveDevWorldSelf(presenceState, direction, Date.now());
 		if (result.moved) acceptPresence(result.state);
+	}
+
+	function updateLifespanHud(nowMs: number, force = false): void {
+		if (devWorldSandboxEnabled || personaLifecycleTransition || !personaSnapshot) {
+			lifespanHudNowMs = null;
+			return;
+		}
+		if (force || lifespanHudNowMs === null || nowMs - lifespanHudUpdatedAtMs >= LIFESPAN_HUD_REFRESH_INTERVAL_MS) {
+			lifespanHudNowMs = nowMs;
+			lifespanHudUpdatedAtMs = nowMs;
+		}
 	}
 
 	function moveWorldSelf(direction: Direction): void {
@@ -1645,6 +1665,9 @@
 				onReplyFootprintRemoved={removeTraceReplyFootprint}
 				registerReplyRemeasure={registerTraceReplyRemeasure}
 			/>
+			{#if lifespanHudNowMs !== null && personaSnapshot && !personaLifecycleTransition}
+				<LifespanHud expiresAtMs={personaSnapshot.gameState.lifespanExpiresAtMs} nowMs={lifespanHudNowMs} />
+			{/if}
 		{/snippet}
 	</FieldViewport>
 

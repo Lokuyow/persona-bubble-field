@@ -18,6 +18,7 @@ async function openDevWorld(page: Page): Promise<void> {
 	await page.goto('/?devWorld=1');
 	await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 	await expect(page.locator('.participant')).toHaveCount(1);
+	await expect(page.locator('.lifespan-hud')).toHaveCount(0);
 }
 
 async function openClockedDevWorld(page: Page): Promise<void> {
