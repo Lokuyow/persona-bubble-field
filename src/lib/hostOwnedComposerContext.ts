@@ -103,8 +103,9 @@ export function createComposerContextSync(options: Readonly<{
 	}
 
 	async function waitForIdle(): Promise<void> {
-		if (!inFlight) return;
-		await new Promise<void>((resolve) => idleWaiters.push(resolve));
+		while (inFlight) {
+			await new Promise<void>((resolve) => idleWaiters.push(resolve));
+		}
 	}
 
 	return {

@@ -139,6 +139,57 @@ describe('Host-owned combined context synchronization', () => {
 		expect(await sync.applyContentIfEmpty('既存draftを上書きしない', () => false)).toBe(false);
 		expect(setContext).toHaveBeenCalledTimes(2);
 	});
+
+	it('waits through a superseded follow-up synchronization before applying candidate content', async () => {
+		let finishA!: () => void;
+		let finishB!: () => void;
+		let finishBPreview!: (value: ComposerPreview | null) => void;
+		let currentReply: string | null = null;
+		const loadPreview = vi.fn((targetId: string) => targetId === a
+			? Promise.resolve<ComposerPreview | null>(null)
+			: new Promise<ComposerPreview | null>((resolve) => { finishBPreview = resolve; }));
+		const setContext = vi.fn((patch: ComposerContextPatch) => {
+			if (patch.reply === noteEncode(a)) {
+				return new Promise<void>((resolve) => {
+					finishA = () => {
+						currentReply = patch.reply ?? null;
+						sync.contextUpdated(currentReply);
+						resolve();
+					};
+				});
+			}
+			if (patch.reply === noteEncode(b)) {
+				currentReply = patch.reply;
+				sync.contextUpdated(currentReply);
+				return new Promise<void>((resolve) => { finishB = resolve; });
+			}
+			sync.contextUpdated(currentReply);
+			return Promise.resolve();
+		});
+		const sync = createComposerContextSync({ setContext, loadPreview, onPreviewClear: vi.fn() });
+		sync.request(request(1, a)); sync.ready(); await flush();
+		const applyPromise = sync.applyContentIfEmpty('AI候補', () => true);
+		sync.request(request(2, b, 1));
+		finishA();
+		await flush();
+
+		// B is hydrating its preview, so candidate content must not run after A alone.
+		expect(setContext.mock.calls).toEqual([[{ reply: noteEncode(a) }]]);
+		finishBPreview(preview(b, a, 'reply-author'));
+		await flush();
+		expect(setContext.mock.calls).toHaveLength(2);
+		expect(setContext.mock.calls[1][0]).toEqual(expect.objectContaining({
+			content: null,
+			reply: noteEncode(b)
+		}));
+
+		finishB();
+		await expect(applyPromise).resolves.toBe(true);
+		await flush();
+		expect(setContext.mock.calls.at(-1)).toEqual([{ content: 'AI候補' }]);
+		expect(sync.snapshot()).toEqual({ generation: 2, appliedGeneration: 2, fullySynced: true });
+		expect(currentReply).toBe(noteEncode(b));
+	});
 });
 
 describe('structured submit authority check', () => {
