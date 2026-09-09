@@ -974,6 +974,46 @@ test.describe('Relay startup', () => {
 		expect(clearCall?.preloadedProfiles).toBeUndefined();
 	});
 
+	test('directly sends an AI candidate as a Trace reply using the selected root and target', async ({ page }) => {
+		const trace = traceRuntimeEvents();
+		await installPromptApiStub(page);
+		await page.emulateMedia({ reducedMotion: 'reduce' });
+		await page.setViewportSize({ width: 1100, height: 850 });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { primaryEvents: { message: trace.message, position: trace.selfPosition }, traceRoots: [trace.root], traceReplies: [trace.direct] });
+		await seedRelayAccount(page, trace.selfSecret, trace.selfPubkey);
+		await page.goto('/');
+		await page.evaluate(() => {
+			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void; releaseTraceRoots(): void; releaseTraceReplies(): void } }).__relayStartupTest;
+			relay.releaseMetadata(); relay.releasePrimary(); relay.releaseTraceRoots(); relay.releaseTraceReplies();
+		});
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '3,2');
+		await page.getByRole('button', { name: 'Hide Chatter' }).click();
+		await page.locator('[data-cell-position="4,2"]').click();
+		await expect(page.getByLabel('Reply preview', { exact: true })).toContainText('Relay trace root');
+		await page.locator(`[data-trace-reply-id="${trace.direct.id}"] .trace-reply-content-button`).click();
+		await expect(page.getByLabel('Reply preview', { exact: true })).toContainText('Relay direct reply');
+		const candidateButton = page.getByRole('button', { name: 'AI発言候補を生成' });
+		await expect(candidateButton).toBeVisible();
+		await candidateButton.click();
+		const primary = page.locator('.suggestion-primary').first();
+		await expect(primary).toBeVisible();
+		await primary.click();
+		const directReplies = async () => [...new Map(
+			(await relayState(page)).state.published
+				.filter((event) => event.kind === 1111 && event.content === 'まずは自然な返答です。')
+				.map((event) => [event.id, event])
+		)].map(([, event]) => event);
+		await expect.poll(directReplies).toHaveLength(1);
+		const reply = (await directReplies())[0];
+		expect(reply.tags).toEqual(expect.arrayContaining([
+			['E', trace.root.id, '', trace.root.pubkey], ['e', trace.direct.id, '', trace.direct.pubkey], ['k', '1111']
+		]));
+		expect(reply.tags.some((tag) => tag[0] === 'w')).toBe(false);
+		await expect(page.getByRole('textbox', { name: '投稿エディター' })).toHaveValue('');
+		await expect(page.locator('.suggestion-panel')).toHaveCount(0);
+	});
+
 	test('rejects mismatched structured reply output before position or message publication', async ({ page }) => {
 		const trace = traceRuntimeEvents();
 		await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -1390,11 +1430,12 @@ test.describe('Relay startup', () => {
 		expect(colors.composerAccent).toBe(colors.siteAccent);
 	});
 
-	test('generates on-device candidates, protects drafts, and applies selection without publishing', async ({ page }) => {
+	test('generates on-device candidates and directly sends the primary action once', async ({ page }) => {
 		await installPromptApiStub(page);
 		const selfSecret = new Uint8Array(32).fill(19);
 		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret));
 		const editor = await openReadyRelayWorld(page, 1);
+		await page.getByRole('button', { name: /発言タイプ: 通常/ }).click();
 		const candidateButton = page.getByRole('button', { name: 'AI発言候補を生成' });
 		await expect(candidateButton).toBeVisible();
 		await editor.fill('既存のdraft');
@@ -1403,15 +1444,60 @@ test.describe('Relay startup', () => {
 		await expect(candidateButton).toBeEnabled();
 		const publishedBefore = (await publishedMessages(page)).length;
 		await candidateButton.click();
-		await expect(page.getByRole('button', { name: /まずは自然な返答です/ })).toBeVisible();
+		const primary = page.locator('.suggestion-primary').first();
+		await expect(primary).toBeVisible();
 		const prompt = await page.evaluate(() => (window as typeof window & {
 			__promptApiState: { prompts: string[] }
 		}).__promptApiState.prompts.at(-1));
 		expect(prompt).toContain('名前:');
 		expect(prompt).toContain('直近の会話本文');
-		await page.getByRole('button', { name: /まずは自然な返答です/ }).click();
+		await primary.dblclick();
+		await expect.poll(async () => (await publishedMessages(page)).filter((event) => event.content === 'まずは自然な返答です。')).toHaveLength(1);
+		await expect(editor).toHaveValue('');
+		const published = (await publishedMessages(page)).filter((event) => event.content === 'まずは自然な返答です。');
+		expect(published).toHaveLength(1);
+		expect(published[0].kind).toBe(42);
+		expect(published[0].tags).toEqual(expect.arrayContaining([['l', 'speech:shout', expect.any(String)]]));
+		expect((await publishedMessages(page)).length).toBe(publishedBefore + 1);
+		expect((await composerContextCalls(page)).filter((call) => Object.hasOwn(call, 'content'))).toEqual([]);
+		await expect(page.locator('.suggestion-panel')).toHaveCount(0);
+	});
+
+	test('adds a candidate through Composer without publishing and preserves the draft guard', async ({ page }) => {
+		await installPromptApiStub(page);
+		const selfSecret = new Uint8Array(32).fill(19);
+		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret));
+		const editor = await openReadyRelayWorld(page, 1);
+		const candidateButton = page.getByRole('button', { name: 'AI発言候補を生成' });
+		await editor.fill('既存のdraft');
+		await expect(candidateButton).toBeDisabled();
+		await editor.fill('');
+		await candidateButton.click();
+		await expect(page.locator('.suggestion-primary').first()).toBeVisible();
+		const publishedBefore = (await publishedMessages(page)).length;
+		await page.getByRole('button', { name: '候補1をコンポーザーに追加' }).click();
 		await expect(editor).toHaveValue('まずは自然な返答です。');
 		expect((await publishedMessages(page)).length).toBe(publishedBefore);
+		await expect(page.locator('.suggestion-panel')).toHaveCount(0);
+	});
+
+	test('keeps candidates open after direct publish failure and allows retry', async ({ page }) => {
+		await installPromptApiStub(page);
+		const selfSecret = new Uint8Array(32).fill(19);
+		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret));
+		await openReadyRelayWorld(page, 1);
+		const candidateButton = page.getByRole('button', { name: 'AI発言候補を生成' });
+		await candidateButton.click();
+		const primary = page.locator('.suggestion-primary').first();
+		await expect(primary).toBeVisible();
+		await page.evaluate(() => (window as unknown as { __relayStartupTest: { rejectMessagePublishes(): void } }).__relayStartupTest.rejectMessagePublishes());
+		await primary.click();
+		await expect(page.getByRole('status')).toContainText('候補を送信できませんでした');
+		await expect(page.locator('.suggestion-panel')).toBeVisible();
+		await page.evaluate(() => (window as unknown as { __relayStartupTest: { allowMessagePublishes(): void } }).__relayStartupTest.allowMessagePublishes());
+		await primary.click();
+		await expect.poll(async () => (await publishedMessages(page)).some((event) => event.kind === 42 && event.content === 'まずは自然な返答です。')).toBe(true);
+		await expect(page.locator('.suggestion-panel')).toHaveCount(0);
 	});
 
 	test('keeps the normal Composer when Prompt API availability is unavailable', async ({ page }) => {

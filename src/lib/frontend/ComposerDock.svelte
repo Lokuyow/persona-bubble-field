@@ -13,8 +13,9 @@
 		character: Pick<Character, 'name' | 'about'>;
 		suggestionConversation: readonly SpeechSuggestionConversationEntry[];
 		onSpeechTypeChange: (next: SpeechType) => void;
+		submitCandidate: (content: string, signal: AbortSignal) => Promise<Readonly<{ eventId: string }>>;
 	};
-	let { selectedSpeechType, submissionInProgress, onSpeechTypeChange, submitContent,
+	let { selectedSpeechType, submissionInProgress, onSpeechTypeChange, submitContent, submitCandidate,
 		desiredContext, loadPreview, onPreviewClear, onEditorEmptyChange, onPreferredHeightChange,
 		hasUnreadReplies, character, suggestionConversation }: Props = $props();
 	let composerComponent: { focusEditor(): boolean; blurEditor(): boolean; applyContentIfEmpty(content: string): Promise<boolean> } | null = null;
@@ -75,6 +76,7 @@
 			editorIsEmpty={editorIsEmpty}
 			{submissionInProgress}
 			applyContentIfEmpty={(content) => composerComponent?.applyContentIfEmpty(content) ?? Promise.resolve(false)}
+			{submitCandidate}
 		/>
 		{#if hasUnreadReplies}
 			<button

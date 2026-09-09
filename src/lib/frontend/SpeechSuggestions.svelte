@@ -16,9 +16,10 @@
 		editorIsEmpty: boolean | null;
 		submissionInProgress: boolean;
 		applyContentIfEmpty: (content: string) => Promise<boolean>;
+		submitCandidate: (content: string, signal: AbortSignal) => Promise<Readonly<{ eventId: string }>>;
 	};
 
-	let { character, speechType, conversation, editorIsEmpty, submissionInProgress, applyContentIfEmpty }: Props = $props();
+	let { character, speechType, conversation, editorIsEmpty, submissionInProgress, applyContentIfEmpty, submitCandidate }: Props = $props();
 	let availability = $state<SpeechSuggestionAvailability>('unsupported');
 	let candidates = $state<readonly string[]>([]);
 	let progress = $state(0);
@@ -26,7 +27,11 @@
 	let panelOpen = $state(false);
 	let error = $state<string | null>(null);
 	let abortController: AbortController | null = null;
+	let directSubmitController: AbortController | null = null;
+	let sendingCandidate = $state<string | null>(null);
+	let addingCandidate = $state<string | null>(null);
 	const service = createSpeechSuggestionService();
+	let busy = $derived(generating || submissionInProgress || sendingCandidate !== null || addingCandidate !== null);
 
 	$effect(() => {
 		if (editorIsEmpty !== true && candidates.length > 0) {
@@ -46,7 +51,7 @@
 	}
 
 	async function generate(): Promise<void> {
-		if (generating || submissionInProgress || editorIsEmpty !== true) return;
+		if (busy || editorIsEmpty !== true) return;
 		generating = true;
 		error = null;
 		candidates = [];
@@ -73,17 +78,42 @@
 		}
 	}
 
-	async function selectCandidate(candidate: string): Promise<void> {
-		if (generating || submissionInProgress || editorIsEmpty !== true) return;
-		const applied = await applyContentIfEmpty(candidate);
-		if (applied) {
+	async function addCandidate(candidate: string): Promise<void> {
+		if (busy || editorIsEmpty !== true) return;
+		addingCandidate = candidate;
+		try {
+			const applied = await applyContentIfEmpty(candidate);
+			if (!applied) {
+				error = '本文が入力されているため候補を追加できません。';
+				return;
+			}
 			candidates = [];
 			panelOpen = false;
 			error = null;
-		} else {
+		} catch {
+			error = '候補をコンポーザーに追加できませんでした。';
+		} finally {
+			addingCandidate = null;
+		}
+	}
+
+	async function sendCandidate(candidate: string): Promise<void> {
+		if (busy || editorIsEmpty !== true) return;
+		sendingCandidate = candidate;
+		directSubmitController?.abort();
+		directSubmitController = new AbortController();
+		try {
+			await submitCandidate(candidate, directSubmitController.signal);
 			candidates = [];
 			panelOpen = false;
-			error = '本文が入力されているため候補を適用できません。';
+			error = null;
+		} catch (cause) {
+			if (!(cause instanceof DOMException && cause.name === 'AbortError')) {
+				error = '候補を送信できませんでした。もう一度お試しください。';
+			}
+		} finally {
+			sendingCandidate = null;
+			directSubmitController = null;
 		}
 	}
 
@@ -97,6 +127,7 @@
 		return () => {
 			disposed = true;
 			abortController?.abort();
+			directSubmitController?.abort();
 			service.dispose();
 		};
 	});
@@ -109,7 +140,7 @@
 			type="button"
 			aria-label="AI発言候補を生成"
 			title={editorIsEmpty === true ? '現在の会話から発言候補を生成' : '本文が空のときだけ候補を生成できます'}
-			disabled={generating || submissionInProgress || editorIsEmpty !== true}
+			disabled={busy || editorIsEmpty !== true}
 			onclick={() => void generate()}
 		>
 			<span aria-hidden="true">{generating ? '…' : '候補'}</span>
@@ -118,10 +149,27 @@
 			<div class="suggestion-panel" aria-label="発言候補">
 				<p class="suggestion-heading">発言候補</p>
 				{#each candidates as candidate, index}
-					<button class="suggestion-item" type="button" disabled={editorIsEmpty !== true} onclick={() => void selectCandidate(candidate)}>
-						<span class="suggestion-index" aria-hidden="true">{index + 1}</span>
-						<span>{candidate}</span>
-					</button>
+					<div class="suggestion-item">
+						<button
+							class="suggestion-primary"
+							type="button"
+							disabled={busy || editorIsEmpty !== true}
+							aria-label={`候補${index + 1}: ${candidate} をそのまま送信`}
+							title="候補本文をそのまま送信"
+							onclick={() => void sendCandidate(candidate)}
+						>
+							<span class="suggestion-index" aria-hidden="true">{index + 1}</span>
+							<span class="suggestion-content">{candidate}</span>
+						</button>
+						<button
+							class="suggestion-secondary"
+							type="button"
+							disabled={busy || editorIsEmpty !== true}
+							aria-label={`候補${index + 1}をコンポーザーに追加`}
+							title="コンポーザーに追加"
+							onclick={() => void addCandidate(candidate)}
+						>追加</button>
+					</div>
 				{/each}
 			</div>
 		{/if}
@@ -178,10 +226,16 @@
 
 	.suggestion-heading { margin: 0 2px 2px; color: #59635e; font-size: 11px; font-weight: 800; }
 	.suggestion-item {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		gap: 6px;
+		width: 100%;
+	}
+	.suggestion-primary {
 		display: flex;
+		min-width: 0;
 		gap: 8px;
 		align-items: flex-start;
-		width: 100%;
 		padding: 8px;
 		border: 1px solid rgba(57, 67, 64, 0.14);
 		border-radius: 8px;
@@ -189,11 +243,29 @@
 		color: #303936;
 		font: inherit;
 		font-size: 12px;
+		font-weight: 700;
 		line-height: 1.35;
 		text-align: left;
 	}
-	.suggestion-item:hover:not(:disabled) { background: #f1f6ef; }
-	.suggestion-item:disabled { cursor: not-allowed; opacity: 0.58; }
+	.suggestion-primary:hover:not(:disabled) { background: #f1f6ef; }
+	.suggestion-primary:disabled,
+	.suggestion-secondary:disabled { cursor: not-allowed; opacity: 0.58; }
+	.suggestion-primary:focus-visible,
+	.suggestion-secondary:focus-visible { outline: 3px solid var(--color-focus-ring); outline-offset: 1px; }
+	.suggestion-secondary {
+		align-self: stretch;
+		min-width: 48px;
+		padding: 6px 8px;
+		border: 1px solid rgba(57, 67, 64, 0.2);
+		border-radius: 8px;
+		background: rgba(245, 241, 233, 0.9);
+		color: #59635e;
+		font: inherit;
+		font-size: 11px;
+		font-weight: 800;
+	}
+	.suggestion-secondary:hover:not(:disabled) { background: #e9f0e7; }
+	.suggestion-content { min-width: 0; overflow-wrap: anywhere; }
 	.suggestion-index { flex: 0 0 18px; color: #728379; font-weight: 800; text-align: center; }
 	.suggestion-status {
 		position: absolute;
