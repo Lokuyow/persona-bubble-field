@@ -127,17 +127,18 @@ describe('protected account creation and restore', () => {
 describe('v1 migration and legacy preservation', () => {
 	it('migrates a valid v1 account without changing identity, timestamp, or marker', async () => {
 		const pubkey = getPublicKey(SECRET);
-		await seed({ [LEGACY_SECRET_KEY]: SECRET, [TIMESTAMP_KEY]: TIME, [MARKER_KEY]: { pubkey, revision: 2 } }, 1);
+		await seed({ [LEGACY_SECRET_KEY]: SECRET, [TIMESTAMP_KEY]: TIME, [MARKER_KEY]: pubkey }, 1);
 		const result = await loadOrCreateAccount();
 		const account = accountFrom(result);
 		expect(result.kind).toBe('restored');
 		expect(account.pubkey).toBe(pubkey);
 		expect(account.personaCreatedAtMs).toBe(TIME);
-		expect(account.characterProfileRevision).toBe(2);
+		expect(account.characterProfileRevision).toBe(1);
 		const records = await storedRecords();
 		expect(records[LEGACY_SECRET_KEY]).toBeUndefined();
 		expect(records[ACCOUNT_PUBKEY]).toBe(pubkey);
 		expect(records[WRAPPING_KEY]).toBeInstanceOf(CryptoKey);
+		expect(records[MARKER_KEY]).toBe(pubkey);
 	});
 
 	it('converges concurrent migrations and preserves the legacy identity', async () => {
@@ -161,17 +162,20 @@ describe('v1 migration and legacy preservation', () => {
 });
 
 describe('protected fail-close behavior', () => {
-	it('rejects partial or mixed protected state without creating an account', async () => {
+	it.each([
+		['timestamp + wrapping key only', 'wrapping'],
+		['timestamp + account pubkey only', 'pubkey'],
+		['legacy plaintext secret + protected record', 'mixed']
+	] as const)('rejects %s without repair or account creation', async (_name, stateKind) => {
 		const wrapping = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']) as CryptoKey;
-		for (const records of [
-			{ [TIMESTAMP_KEY]: TIME, [WRAPPING_KEY]: wrapping },
-			{ [TIMESTAMP_KEY]: TIME, [ACCOUNT_PUBKEY]: 'a'.repeat(64) },
-			{ [TIMESTAMP_KEY]: TIME, [LEGACY_SECRET_KEY]: SECRET, [WRAPPING_KEY]: wrapping }
-		]) {
-			await seed(records);
-			expect(await loadOrCreateAccount()).toEqual({ kind: 'corrupt', reason: 'invalid-secret' });
-			expect((await storedRecords())[LEGACY_SECRET_KEY]).toEqual(records[LEGACY_SECRET_KEY]);
-		}
+		const records = stateKind === 'wrapping' ?
+			{ [TIMESTAMP_KEY]: TIME, [WRAPPING_KEY]: wrapping } :
+			stateKind === 'pubkey' ?
+				{ [TIMESTAMP_KEY]: TIME, [ACCOUNT_PUBKEY]: 'a'.repeat(64) } :
+				{ [TIMESTAMP_KEY]: TIME, [LEGACY_SECRET_KEY]: SECRET, [WRAPPING_KEY]: wrapping };
+		await seed(records);
+		expect(await loadOrCreateAccount()).toEqual({ kind: 'corrupt', reason: 'invalid-secret' });
+		expect(await storedRecords()).toEqual(records);
 	});
 
 	it('fails closed when ciphertext is tampered or the persisted pubkey mismatches', async () => {
@@ -183,15 +187,40 @@ describe('protected fail-close behavior', () => {
 		await expect(loadOrCreateAccount()).rejects.toThrow('Account operation failed.');
 	});
 
-	it('treats a transaction failure as atomic and sanitized', async () => {
+	it('rolls back fresh creation when a successful request is followed by transaction abort', async () => {
 		const originalPut = IDBObjectStore.prototype.put;
 		const put = vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (this: IDBObjectStore, value, key) {
-			if (key === ENCRYPTED_SECRET_KEY) throw new DOMException('secret data should not escape', 'QuotaExceededError');
-			return originalPut.call(this, value, key);
+			const request = originalPut.call(this, value, key);
+			if (key === TIMESTAMP_KEY) request.addEventListener('success', () => this.transaction.abort(), { once: true });
+			return request;
 		});
 		await expect(loadOrCreateAccount()).rejects.toThrow('Account operation failed.');
 		put.mockRestore();
 		expect(await storedRecords()).toEqual({});
+		expect((await loadOrCreateAccount()).kind).toBe('created');
+		expect((await storedRecords())[LEGACY_SECRET_KEY]).toBeUndefined();
+	});
+
+	it('rolls back v1 migration after a successful request abort and allows retry', async () => {
+		const pubkey = getPublicKey(SECRET);
+		await seed({ [LEGACY_SECRET_KEY]: SECRET, [TIMESTAMP_KEY]: TIME, [MARKER_KEY]: pubkey }, 1);
+		const originalPut = IDBObjectStore.prototype.put;
+		const put = vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (this: IDBObjectStore, value, key) {
+			const request = originalPut.call(this, value, key);
+			if (key === ACCOUNT_PUBKEY) request.addEventListener('success', () => this.transaction.abort(), { once: true });
+			return request;
+		});
+		await expect(loadOrCreateAccount()).rejects.toThrow('Account operation failed.');
+		put.mockRestore();
+		expect(await storedRecords()).toEqual({ [LEGACY_SECRET_KEY]: SECRET, [TIMESTAMP_KEY]: TIME, [MARKER_KEY]: pubkey });
+		const retry = await loadOrCreateAccount();
+		expect(retry.kind).toBe('restored');
+		expect(accountFrom(retry).pubkey).toBe(pubkey);
+		expect(accountFrom(retry).personaCreatedAtMs).toBe(TIME);
+		expect(accountFrom(retry).characterProfileRevision).toBe(1);
+		const records = await storedRecords();
+		expect(records[LEGACY_SECRET_KEY]).toBeUndefined();
+		expect(records[MARKER_KEY]).toBe(pubkey);
 	});
 });
 
