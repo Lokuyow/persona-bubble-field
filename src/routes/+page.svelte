@@ -111,7 +111,8 @@
 		acceptedTraceReplyTarget, clearTraceReplyMode, completeTraceReplySubmission,
 		createTraceReplyMode, selectTraceReplyTarget, type TraceReplyMode
 	} from '$lib/traceReplyMode';
-	import { resolveSpeechSubmission } from '$lib/speechSubmission';
+	import { createSpeechPublicationCore, type SpeechPublicationContext, type SpeechPublicationOutcome } from '$lib/speechPublication';
+	import type { SpeechSuggestionConversationEntry } from '$lib/speechSuggestions';
 	import type { SpeechType } from '$lib/conversation';
 	import type { SpeechBubbleShape } from '$lib/speechBubblePath';
 	import {
@@ -200,7 +201,7 @@
 	let lastProfileTrigger: HTMLButtonElement | null = null;
 	let composerEditorIsEmpty: boolean | null = null;
 	let chatterComponent: { initialize(width: number): void; isInitialized(): boolean; toggle(): void; resetMeasurements(): void };
-	let composerComponent = $state.raw<{ focusEditor(): boolean; blurEditor(): boolean } | null>(null);
+	let composerComponent = $state.raw<{ focusEditor(): boolean; blurEditor(): boolean; applyContentIfEmpty(content: string): Promise<boolean> } | null>(null);
 	let fieldSceneComponent: FieldSceneHandle | null = null;
 	let visualWorldById = $state.raw<Record<string, WorldPoint>>({});
 	let visualCamera = $state.raw<WorldPoint | null>(null);
@@ -294,6 +295,66 @@
 			unreadReply: traceReadSnapshot.unreadReplyRootIds.includes(cell.roots[0].id)
 		})));
 	let traceConversationProjection = $derived(resolveTraceConversationProjection(traceConversationState));
+	let speechSuggestionCharacter = $derived(
+		devWorldSandboxEnabled
+			? getDevWorldCharacter(selectedCharacterId)
+			: selfAccount ? deriveCharacterFromPubkey(selfAccount.pubkey, CHARACTER_CATALOG)
+				: getCharacterById(selectedCharacterId) ?? CHARACTER_CATALOG[0]
+	);
+	let speechSuggestionConversation = $derived.by((): readonly SpeechSuggestionConversationEntry[] => {
+		const traceEvents = traceConversationProjection
+			? [
+				traceConversationProjection.root,
+				...(traceConversationProjection.parent ? [traceConversationProjection.parent.event] : []),
+				traceConversationProjection.current.event,
+				...traceConversationProjection.directReplies
+			]
+			: recentMessageTimeline;
+		const unique = new Map<string, { id: string; pubkey: string; content: string; createdAt: number }>();
+		for (const event of traceEvents) {
+			if (!unique.has(event.id)) unique.set(event.id, event);
+		}
+		return [...unique.values()]
+			.sort((left, right) => left.createdAt - right.createdAt || left.id.localeCompare(right.id))
+			.slice(-8)
+			.map((event) => ({
+				speaker: event.pubkey === DEV_WORLD_SELF_ID
+					? getDevWorldCharacter(selectedCharacterId).name
+					: deriveCharacterFromPubkey(event.pubkey, CHARACTER_CATALOG).name,
+				content: event.content
+			}));
+	});
+
+	function isCurrentSpeechPublicationContext(context: SpeechPublicationContext): boolean {
+		const currentTarget = traceReplyMode.target;
+		return traceReplyMode.generation === context.generation &&
+			(currentTarget?.rootId ?? null) === (context.target?.rootId ?? null) &&
+			(currentTarget?.targetId ?? null) === (context.target?.targetId ?? null);
+	}
+
+	const speechPublicationCore = createSpeechPublicationCore({
+		getSelectedSpeechType: () => selectedSpeechType,
+		getSubmissionInProgress: () => composerSubmissionInProgress,
+		setSubmissionInProgress: (value) => { composerSubmissionInProgress = value; },
+		waitForReady: (signal) => devWorldSandboxEnabled ? Promise.resolve() : waitForMessageReady(signal),
+		isCurrentContext: isCurrentSpeechPublicationContext,
+		publish: async (submission, context): Promise<SpeechPublicationOutcome> => {
+			const result = context.target
+				? await (devWorldSandboxEnabled ? devTraceConversationRuntime : worldSession)?.publishTraceReply({
+					rootId: context.target.rootId, targetId: context.target.targetId, ...submission
+				})
+				: !devWorldSandboxEnabled ? await worldSession?.publishMessage(submission.content, submission.speechType) : undefined;
+			if (result?.kind === 'succeeded') return result;
+			return { kind: result?.kind === 'out-of-range' ? 'out-of-range' : 'failed' };
+		},
+		onSucceeded: (context) => {
+			selectedSpeechType = 'normal';
+			traceReplyMode = completeTraceReplySubmission(traceReplyMode, context.generation);
+		},
+		onOutOfRange: (context) => {
+			if (traceReplyMode.generation === context.generation) traceReplyMode = clearTraceReplyMode(traceReplyMode, true);
+		}
+	});
 	let traceOnlyCellTriggers = $derived(traceRootCells.map((cell) => cell.position).filter((position) =>
 		!participantViews.some((participant) => sameCell(participant.position, position)) &&
 		traceMarkerCells.some((cell) => sameCell(cell.position, position))
@@ -1234,34 +1295,17 @@
 		const desired = () => ({ generation: traceReplyMode.generation, targetId: traceReplyMode.target?.targetId ?? null,
 			clearContentVersion: traceReplyMode.clearContentVersion });
 		if (!matchesComposerSubmit(envelope, desired())) throw new Error('Composer reply context is not synchronized.');
-		const target = traceReplyMode.target;
-		const submission = resolveSpeechSubmission({
-			content: envelope.output.content,
-			shortcutId: options.shortcutId,
-			selectedSpeechType
-		});
-		composerSubmissionInProgress = true;
-		try {
-			if (!devWorldSandboxEnabled) await waitForMessageReady(options.signal);
-			if (options.signal.aborted) throw new DOMException('Submission was cancelled.', 'AbortError');
-			if (!matchesComposerSubmit(envelope, desired())) throw new Error('Composer reply target changed before publication.');
-			const result = target
-				? await (devWorldSandboxEnabled ? devTraceConversationRuntime : worldSession)?.publishTraceReply({
-					rootId: target.rootId, targetId: target.targetId, ...submission
-				})
-				: !devWorldSandboxEnabled ? await worldSession?.publishMessage(submission.content, submission.speechType) : undefined;
-			if (result?.kind === 'succeeded') {
-				selectedSpeechType = 'normal';
-				traceReplyMode = completeTraceReplySubmission(traceReplyMode, envelope.generation);
-				return { eventId: result.eventId };
-			}
-			if (result?.kind === 'out-of-range' && traceReplyMode.generation === envelope.generation) {
-				traceReplyMode = clearTraceReplyMode(traceReplyMode, true);
-			}
-			throw new Error('Message was not confirmed by Relay.');
-		} finally {
-			composerSubmissionInProgress = false;
-		}
+		return speechPublicationCore.publish(envelope.output.content, {
+			generation: envelope.generation,
+			target: traceReplyMode.target
+		}, options);
+	}
+
+	function submitSpeechCandidate(content: string, signal: AbortSignal): Promise<Readonly<{ eventId: string }>> {
+		return speechPublicationCore.publish(content, {
+			generation: traceReplyMode.generation,
+			target: traceReplyMode.target
+		}, { signal });
 	}
 
 	function setComposerPreferredHeight(height: number): void {
@@ -1528,8 +1572,11 @@
 			{selectedSpeechType}
 			submissionInProgress={composerSubmissionInProgress}
 			hasUnreadReplies={traceReadSnapshot.hasUnreadReplies}
+			character={speechSuggestionCharacter}
+			suggestionConversation={speechSuggestionConversation}
 			onSpeechTypeChange={(next) => { selectedSpeechType = next; }}
 			submitContent={submitComposerContent}
+			submitCandidate={submitSpeechCandidate}
 			desiredContext={composerDesiredContext}
 			loadPreview={loadComposerPreview}
 			onPreviewClear={clearComposerReply}

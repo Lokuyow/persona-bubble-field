@@ -9,6 +9,9 @@
 iframe版ではなくWeb Component版を使用する。
 
 eHagakiは、最終Nostrイベントを所有・送信するpublisherではなく、**Nostr向けComposer**として利用する。
+通常の手入力投稿UIは引き続きeHagaki Host-owned Composer Liteを使用する。一方、オンデバイスAI発言候補の
+候補本文クリックによる直接送信だけは、親クライアントが所有する別の明示的なpublish controlであり、
+一般的なComposer bypassへ拡張しない。
 
 MVPではテキスト入力のみを利用する。
 
@@ -58,7 +61,12 @@ MVPでは主として以下を所有する。
 
 `client` tagは使用しない。
 
-eHagakiはComposer Outputを親クライアントへ渡し、親クライアントが最終Nostr eventを構築する。
+eHagakiは通常ComposerのComposer Outputを親クライアントへ渡し、親クライアントが最終Nostr eventを構築する。
+AI候補の「追加」は既存のHost-owned `setContext({ content })` 経路を利用し、本文が空であることとcontext
+synchronizationのidleを確認して既存draftを保護する。AI候補のPrimary直接送信はComposer Outputや
+`ComposerSubmitEnvelope`を偽造せず、親クライアントの共通speech publish coreを通じて、通常Composer投稿と
+同じ発言タイプresolver、Relay readiness、submission gate、reply target再確認、kind 42 / kind 1111の
+構築・署名・publish・成功後処理を利用する。
 
 persona-bubble-fieldはHost-owned Liteの汎用`submitShortcuts` APIを利用する。eHagakiはEnterと
 modifierの判定およびHost-owned submit lifecycleを担当し、opaqueな`shortcutId`を親へ返すだけと
