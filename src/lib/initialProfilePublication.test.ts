@@ -20,7 +20,7 @@ const SECRET_KEY = new Uint8Array(32).fill(11);
 const account: AccountSnapshot = {
 	secretKey: SECRET_KEY,
 	pubkey: getPublicKey(SECRET_KEY),
-	lastChangedAtMs: 1_700_000_000_789,
+	personaCreatedAtMs: 1_700_000_000_789,
 	characterProfileRevision: null
 };
 
@@ -54,7 +54,7 @@ describe('character profile publication', () => {
 
 	it('uses the supplied current Unix second for a restored-account resync', () => {
 		expect(prepare(1_800_000_123).event.created_at).toBe(1_800_000_123);
-		expect(prepare(1_800_000_123).event.created_at).not.toBe(Math.floor(account.lastChangedAtMs / 1000));
+		expect(prepare(1_800_000_123).event.created_at).not.toBe(Math.floor(account.personaCreatedAtMs / 1000));
 	});
 
 	it.each([

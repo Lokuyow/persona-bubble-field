@@ -722,7 +722,7 @@
 						character,
 						absolutePictureUrl,
 						createdAt: accountResult.kind === 'restored' ? Math.floor(Date.now() / 1000) :
-							Math.floor(selfAccount.lastChangedAtMs / 1000)
+							Math.floor(selfAccount.personaCreatedAtMs / 1000)
 					});
 				}
 				if (!selfAccount) {
