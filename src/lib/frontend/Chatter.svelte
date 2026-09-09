@@ -268,6 +268,8 @@
 	.timeline-entry:last-child { border-bottom: 0; }
 
 	.timeline-name {
+		user-select: text;
+		-webkit-user-select: text;
 		display: inline;
 		max-width: 100%;
 		padding: 0;

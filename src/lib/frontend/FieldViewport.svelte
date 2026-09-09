@@ -43,8 +43,6 @@
 		overflow: hidden;
 		isolation: isolate;
 		background: transparent;
-		user-select: none;
-		-webkit-user-select: none;
 	}
 
 	.field-viewport.composer-available {

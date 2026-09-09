@@ -184,7 +184,7 @@
 	.trace-reply-author-avatar { position: relative; display: block; order: -1; width: 36px; height: 36px; flex: 0 0 auto; }
 	.trace-reply-author-avatar :global(.avatar) { width: 36px; height: 36px; }
 	.trace-reply-author-name { display: block; max-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-	.trace-reply-content-button { position: relative; z-index: 1; grid-column: 2; grid-row: 1; align-self: stretch; justify-self: stretch; min-width: 0; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+	.trace-reply-content-button { position: relative; z-index: 1; grid-column: 2; grid-row: 1; align-self: stretch; justify-self: stretch; min-width: 0; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; user-select: text; -webkit-user-select: text; }
 	.trace-reply-author-profile:focus-visible,
 	.trace-reply-content-button:focus-visible,
 	.trace-root-bubble:focus-visible { outline: 3px solid var(--color-focus-ring); outline-offset: 2px; }

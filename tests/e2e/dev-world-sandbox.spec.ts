@@ -2167,12 +2167,37 @@ test.describe('DEV World Sandbox', () => {
 		expect(await page.evaluate(() => window.getSelection()?.toString() ?? '')).toBe('');
 
 		const liveText = page.locator('.bubble-normal[data-speech-type="shout"] .bubble-content');
+		const dragSelect = async (locator: Locator): Promise<string> => {
+			const box = await locator.boundingBox();
+			if (!box) throw new Error('Expected selectable text to be visible.');
+			await page.evaluate(() => window.getSelection()?.removeAllRanges());
+			await page.mouse.move(box.x + box.width - 2, box.y + box.height / 2);
+			await page.mouse.down();
+			await page.mouse.move(box.x + 2, box.y + box.height / 2, { steps: 5 });
+			await page.mouse.up();
+			return page.evaluate(() => window.getSelection()?.toString() ?? '');
+		};
 		await expect(liveText).toBeVisible();
 		await page.evaluate(() => window.getSelection()?.removeAllRanges());
-		await liveText.selectText();
-		expect(await page.evaluate(() => window.getSelection()?.toString() ?? '')).toBe(await liveText.textContent());
+		expect(await dragSelect(liveText)).not.toBe('');
+		expect(await dragSelect(page.locator('.bubble-merged .bubble-content'))).not.toBe('');
+		await page.goto('/?devWorld=1&devSpeech=timeline');
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+		const showChatter = page.getByRole('button', { name: 'Show Chatter' });
+		if (await showChatter.count()) await showChatter.click();
+		await expect(page.locator('aside[aria-label="Chatter"]')).toBeVisible();
+		expect(await dragSelect(page.locator('.timeline-content').first())).not.toBe('');
+		expect(await dragSelect(page.locator('.timeline-name').first())).not.toBe('');
 
-		await openProfile(page, '女の子');
+		await page.goto('/?devWorld=1&devTrace=replies');
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+		await page.locator('[data-cell-position="8,4"]').click();
+		await expect(page.locator('.trace-root-bubble .bubble-content')).toBeVisible();
+		expect(await dragSelect(page.locator('.trace-root-bubble .bubble-content'))).not.toBe('');
+
+		await page.goto('/?devWorld=1&devSpeech=timeline');
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+		await page.locator('.timeline-name').first().click();
 		const dialog = profileDialog(page);
 		for (const selector of ['[data-dialog-title]', '.profile-dialog-about']) {
 			const text = dialog.locator(selector);

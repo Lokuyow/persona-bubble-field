@@ -356,6 +356,8 @@
 		overflow: hidden;
 		background: transparent;
 		touch-action: pinch-zoom;
+		user-select: none;
+		-webkit-user-select: none;
 	}
 
 	.field-scene {
