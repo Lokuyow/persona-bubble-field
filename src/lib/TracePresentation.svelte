@@ -164,7 +164,7 @@
 	.bubble { position: absolute; display: flex; align-items: center; justify-content: center; background: var(--tone-background); border: 1px solid var(--tone-outline); border-radius: 18px; color: #364142; font-size: 16px; font-weight: 800; letter-spacing: 0.02em; line-height: 1.35; text-align: center; will-change: transform; }
 	.speech-bubble-special { background: transparent; border-color: transparent; border-radius: 0; }
 	.speech-bubble-special.bubble-normal::after { content: none; }
-	.bubble-content { position: relative; z-index: 1; min-width: 0; max-width: 100%; overflow: hidden; white-space: pre-line; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 5; line-clamp: 5; text-align: left; }
+	.bubble-content { position: relative; z-index: 1; min-width: 0; max-width: 100%; overflow: hidden; white-space: pre-line; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 5; line-clamp: 5; text-align: left; user-select: text; -webkit-user-select: text; }
 	.bubble-ellipsis { position: absolute; right: 8px; bottom: 5px; z-index: 2; padding-left: 0.5em; background: var(--tone-background); line-height: 1; pointer-events: none; }
 	.bubble-normal { width: fit-content; min-width: 72px; max-width: min(240px, calc(100% - 32px)); padding: 12px 15px; }
 	.bubble-normal::after { content: ''; position: absolute; left: calc(50% + var(--tail-seam-offset-x, 0px)); bottom: -1px; width: 11px; height: 3px; transform: translateX(-50%); background: var(--tone-background); pointer-events: none; z-index: 1; }
@@ -184,7 +184,7 @@
 	.trace-reply-author-avatar { position: relative; display: block; order: -1; width: 36px; height: 36px; flex: 0 0 auto; }
 	.trace-reply-author-avatar :global(.avatar) { width: 36px; height: 36px; }
 	.trace-reply-author-name { display: block; max-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-	.trace-reply-content-button { position: relative; z-index: 1; grid-column: 2; grid-row: 1; align-self: stretch; justify-self: stretch; min-width: 0; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+	.trace-reply-content-button { position: relative; z-index: 1; grid-column: 2; grid-row: 1; align-self: stretch; justify-self: stretch; min-width: 0; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; user-select: text; -webkit-user-select: text; }
 	.trace-reply-author-profile:focus-visible,
 	.trace-reply-content-button:focus-visible,
 	.trace-root-bubble:focus-visible { outline: 3px solid var(--color-focus-ring); outline-offset: 2px; }

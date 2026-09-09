@@ -2150,6 +2150,68 @@ test.describe('DEV World Sandbox', () => {
 		expect(Math.abs(state.mergedLines - state.normalLines)).toBeLessThanOrEqual(1);
 	});
 
+	test('prevents field UI selection while keeping speech and profile text selectable', async ({ page }) => {
+		await page.setViewportSize({ width: 1200, height: 900 });
+		await page.goto('/?devWorld=1&devSpeech=comparison');
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+
+		const blank = await fieldOwnedBlankPoint(page, { x: 2, y: 2 });
+		const fieldText = page.locator('.participant-profile-trigger .participant-name').first();
+		const fieldTextBox = await fieldText.boundingBox();
+		if (!fieldTextBox) throw new Error('Expected field UI text to be visible.');
+		await page.evaluate(() => window.getSelection()?.removeAllRanges());
+		await page.mouse.move(blank.x, blank.y);
+		await page.mouse.down();
+		await page.mouse.move(fieldTextBox.x + fieldTextBox.width / 2, fieldTextBox.y + fieldTextBox.height / 2);
+		await page.mouse.up();
+		expect(await page.evaluate(() => window.getSelection()?.toString() ?? '')).toBe('');
+
+		const liveText = page.locator('.bubble-normal[data-speech-type="shout"] .bubble-content');
+		const dragSelect = async (locator: Locator): Promise<string> => {
+			const box = await locator.boundingBox();
+			if (!box) throw new Error('Expected selectable text to be visible.');
+			await page.evaluate(() => window.getSelection()?.removeAllRanges());
+			await page.mouse.move(box.x + box.width - 2, box.y + box.height / 2);
+			await page.mouse.down();
+			await page.mouse.move(box.x + 2, box.y + box.height / 2, { steps: 5 });
+			await page.mouse.up();
+			return page.evaluate(() => window.getSelection()?.toString() ?? '');
+		};
+		await expect(liveText).toBeVisible();
+		await page.evaluate(() => window.getSelection()?.removeAllRanges());
+		expect(await dragSelect(liveText)).not.toBe('');
+		expect(await dragSelect(page.locator('.bubble-merged .bubble-content'))).not.toBe('');
+		await page.goto('/?devWorld=1&devSpeech=timeline');
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+		const showChatter = page.getByRole('button', { name: 'Show Chatter' });
+		if (await showChatter.count()) await showChatter.click();
+		await expect(page.locator('aside[aria-label="Chatter"]')).toBeVisible();
+		expect(await dragSelect(page.locator('.timeline-content').first())).not.toBe('');
+		expect(await dragSelect(page.locator('.timeline-name').first())).not.toBe('');
+
+		await page.goto('/?devWorld=1&devTrace=replies');
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+		await page.locator('[data-cell-position="8,4"]').click();
+		await expect(page.locator('.trace-root-bubble .bubble-content')).toBeVisible();
+		expect(await dragSelect(page.locator('.trace-root-bubble .bubble-content'))).not.toBe('');
+
+		await page.goto('/?devWorld=1&devSpeech=timeline');
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+		await page.locator('.timeline-name').first().click();
+		const dialog = profileDialog(page);
+		for (const selector of ['[data-dialog-title]', '.profile-dialog-about']) {
+			const text = dialog.locator(selector);
+			const box = await text.boundingBox();
+			if (!box) throw new Error(`Expected profile text ${selector} to be visible.`);
+			await page.evaluate(() => window.getSelection()?.removeAllRanges());
+			await page.mouse.move(box.x + 2, box.y + box.height / 2);
+			await page.mouse.down();
+			await page.mouse.move(box.x + Math.max(3, box.width - 2), box.y + box.height / 2);
+			await page.mouse.up();
+			expect(await page.evaluate(() => window.getSelection()?.toString() ?? '')).not.toBe('');
+		}
+	});
+
 	test('keeps clamped bubbles and explicit ellipsis inside the safe bounds at 320px', async ({ page }) => {
 		await page.setViewportSize({ width: 320, height: 844 });
 		await page.goto('/?devWorld=1&devSpeech=linebreak-overflow');
