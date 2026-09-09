@@ -3,7 +3,7 @@ import { access, readFile } from 'node:fs/promises';
 import { build } from 'vite';
 
 const PAGES_BASE_PATH = '/persona-bubble-field';
-const BACKGROUND_ASSET_PATH = `${PAGES_BASE_PATH}/field/prototype-urban-park.png`;
+const BACKGROUND_ASSET_PATH = `${PAGES_BASE_PATH}/field/prototype-danchi-courtyard.webp`;
 
 process.env.BASE_PATH = PAGES_BASE_PATH;
 
@@ -18,8 +18,8 @@ if (!html.includes(`--field-background-image: url("${BACKGROUND_ASSET_PATH}");`)
 	);
 }
 
-if (html.includes('./field/prototype-urban-park.png')) {
+if (html.includes('./field/prototype-danchi-courtyard.webp')) {
 	throw new Error('Pages SSR field background must not use a stylesheet-relative asset URL.');
 }
 
-await access(new URL('../build/field/prototype-urban-park.png', import.meta.url), fsConstants.F_OK);
+await access(new URL('../build/field/prototype-danchi-courtyard.webp', import.meta.url), fsConstants.F_OK);

@@ -13,7 +13,7 @@
 	import { isWithinTraceInvestigationRange, type TraceRootCell } from '$lib/traceInvestigation';
 	import type { ParsedWorldMessage } from '$lib/nostrProtocol';
 
-	const FIELD_BACKGROUND_ASSET = '/field/prototype-urban-park.png';
+	const FIELD_BACKGROUND_ASSET = '/field/prototype-danchi-courtyard.webp';
 
 	export type FieldParticipantView = ProjectedParticipant<Participant>;
 	export type TraceLightCell = TraceRootCell & Readonly<{
