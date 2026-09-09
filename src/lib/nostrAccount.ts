@@ -1,8 +1,15 @@
-import { openDB, type DBSchema, type IDBPTransaction } from 'idb';
+import { openDB, type DBSchema, type IDBPDatabase, type IDBPTransaction } from 'idb';
 import { generateSecretKey, getPublicKey } from 'nostr-tools/pure';
+import {
+	createInitialPersonaGameState,
+	isPersonaExpired,
+	isValidPersonaGameState,
+	type PersonaGameState
+} from './personaGameState';
 
 const DATABASE_NAME = 'persona-bubble-field-account';
-const STORE_NAME = 'persona-bubble-field-account-state';
+const ACCOUNT_STORE_NAME = 'persona-bubble-field-account-state';
+const GAME_STORE_NAME = 'persona-bubble-field-game-state';
 const LEGACY_SECRET_KEY = 'secret-key';
 const WRAPPING_KEY = 'secret-wrapping-key';
 const ENCRYPTED_SECRET_KEY = 'encrypted-secret-key';
@@ -10,7 +17,9 @@ const ACCOUNT_PUBKEY = 'account-pubkey';
 const TIMESTAMP_KEY = 'last-changed-at-ms';
 // Keep the existing key so legacy pubkey-only values can be recognized as revision 1.
 const CHARACTER_PROFILE_PUBLICATION_MARKER_KEY = 'initial-profile-published-pubkey';
-const DATABASE_VERSION = 2;
+const GAME_STATE_KEY = 'game-state';
+const LIFECYCLE_MIGRATION_PENDING_KEY = 'lifecycle-migration-pending';
+const DATABASE_VERSION = 3;
 const ENCRYPTED_SECRET_VERSION = 1;
 const AES_KEY_LENGTH = 256;
 const AES_GCM_IV_BYTES = 12;
@@ -18,15 +27,14 @@ const AES_GCM_IV_BYTES = 12;
 export const CURRENT_CHARACTER_PROFILE_REVISION = 2;
 
 interface AccountDatabase extends DBSchema {
-	[STORE_NAME]: {
-		key: string;
-		// Persisted data is untrusted, even when the TypeScript writer is typed.
-		value: unknown;
-	};
+	[ACCOUNT_STORE_NAME]: { key: string; value: unknown };
+	[GAME_STORE_NAME]: { key: string; value: unknown };
 }
 
-type AccountTransaction = IDBPTransaction<AccountDatabase, [typeof STORE_NAME], 'readwrite'>;
-type AccountReadTransaction = IDBPTransaction<AccountDatabase, [typeof STORE_NAME], 'readonly'>;
+type AccountOnlyTransaction = IDBPTransaction<AccountDatabase, [typeof ACCOUNT_STORE_NAME], 'readwrite'>;
+type ReadTransaction = IDBPTransaction<AccountDatabase, [typeof ACCOUNT_STORE_NAME, typeof GAME_STORE_NAME], 'readonly'>;
+type LifecycleTransaction = IDBPTransaction<AccountDatabase, [typeof ACCOUNT_STORE_NAME, typeof GAME_STORE_NAME], 'readwrite'>;
+type AccountReadTransaction = AccountOnlyTransaction | ReadTransaction | LifecycleTransaction;
 
 /** Keep one snapshot for the whole account-dependent operation; do not mutate its key. */
 export type AccountSnapshot = Readonly<{
@@ -38,12 +46,34 @@ export type AccountSnapshot = Readonly<{
 
 export type CorruptAccountState = Readonly<{
 	kind: 'corrupt';
-	reason: 'missing-timestamp' | 'invalid-timestamp' | 'invalid-secret';
+	reason:
+		| 'missing-timestamp'
+		| 'invalid-timestamp'
+		| 'invalid-secret'
+		| 'missing-game-state'
+		| 'invalid-game-state'
+		| 'game-account-mismatch'
+		| 'orphan-game-state'
+		| 'ambiguous-game-state';
 }>;
 
 export type LoadAccountResult =
 	| Readonly<{ kind: 'created' | 'restored'; account: AccountSnapshot }>
 	| Readonly<{ kind: 'missing-secret'; personaCreatedAtMs: number }>
+	| CorruptAccountState;
+
+export type PersonaSnapshot = Readonly<{
+	account: AccountSnapshot;
+	gameState: PersonaGameState;
+}>;
+
+export type LoadPersonaResult =
+	| Readonly<{ kind: 'created' | 'restored'; persona: PersonaSnapshot }>
+	| Readonly<{ kind: 'missing-secret'; personaCreatedAtMs: number }>
+	| CorruptAccountState;
+
+export type ReincarnateExpiredResult =
+	| Readonly<{ kind: 'reincarnated' | 'superseded' | 'not-expired'; persona: PersonaSnapshot }>
 	| CorruptAccountState;
 
 export type MarkCharacterProfilePublicationResult = Readonly<{ kind: 'recorded' | 'stale' }>;
@@ -78,12 +108,32 @@ type StoredAccountState =
 	| Readonly<{ kind: 'missing-secret'; personaCreatedAtMs: number }>
 	| CorruptAccountState;
 
+type StoredGameState =
+	| Readonly<{ kind: 'missing' }>
+	| Readonly<{ kind: 'pending' }>
+	| Readonly<{ kind: 'ready'; gameState: PersonaGameState }>
+	| Readonly<{ kind: 'malformed'; reason: 'invalid-game-state' | 'ambiguous-game-state' }>;
+
+type StoredLifecycleState =
+	| Readonly<{ kind: 'fresh'; pending: boolean }>
+	| Readonly<{ kind: 'ready'; account: LegacyReadyState | ProtectedReadyState; game: StoredGameState }>
+	| Readonly<{ kind: 'missing-secret'; personaCreatedAtMs: number }>
+	| CorruptAccountState;
+
 type ProtectedCandidate = Readonly<{
 	secretKey: Uint8Array;
 	pubkey: string;
 	wrappingKey: CryptoKey;
 	encryptedSecret: EncryptedSecretRecord;
 }>;
+
+function accountStore(tx: AccountReadTransaction): any {
+	return (tx as any).objectStore(ACCOUNT_STORE_NAME);
+}
+
+function gameStore(tx: ReadTransaction | LifecycleTransaction): any {
+	return (tx as any).objectStore(GAME_STORE_NAME);
+}
 
 function isAccountTimestamp(value: unknown): value is number {
 	return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
@@ -131,13 +181,29 @@ function cryptoBytes(bytes: Uint8Array): ArrayBuffer {
 	return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 }
 
-async function openAccountDatabase() {
+function sameSecret(first: Uint8Array, second: Uint8Array): boolean {
+	return first.length === second.length && first.every((byte, index) => byte === second[index]);
+}
+
+function sameGameState(first: PersonaGameState, second: PersonaGameState): boolean {
+	return first.version === second.version && first.personaPubkey === second.personaPubkey &&
+		first.lifespanExpiresAtMs === second.lifespanExpiresAtMs && first.points === second.points &&
+		first.abilities.inferenceEfficiency === second.abilities.inferenceEfficiency &&
+		first.abilities.contextCapacity === second.abilities.contextCapacity &&
+		first.abilities.hallucinationSuppression === second.abilities.hallucinationSuppression;
+}
+
+async function openAccountDatabase(): Promise<IDBPDatabase<AccountDatabase>> {
 	try {
 		// Neither this check nor openDB runs at module import time.
 		if (typeof indexedDB === 'undefined') throw new Error('IndexedDB is unavailable.');
 		return await openDB<AccountDatabase>(DATABASE_NAME, DATABASE_VERSION, {
-			upgrade(db) {
-				if (!db.objectStoreNames.contains(STORE_NAME)) db.createObjectStore(STORE_NAME);
+			upgrade(db, oldVersion) {
+				if (!db.objectStoreNames.contains(ACCOUNT_STORE_NAME)) db.createObjectStore(ACCOUNT_STORE_NAME);
+				if (!db.objectStoreNames.contains(GAME_STORE_NAME)) {
+					const store = db.createObjectStore(GAME_STORE_NAME);
+					if (oldVersion > 0 && oldVersion < DATABASE_VERSION) store.put(true, LIFECYCLE_MIGRATION_PENDING_KEY);
+				}
 			}
 		});
 	} catch {
@@ -145,15 +211,16 @@ async function openAccountDatabase() {
 	}
 }
 
-async function readAccountState(tx: AccountReadTransaction | AccountTransaction): Promise<StoredAccountState> {
+async function readAccountState(tx: AccountReadTransaction): Promise<StoredAccountState> {
+	const store = accountStore(tx);
 	const keys = [LEGACY_SECRET_KEY, WRAPPING_KEY, ENCRYPTED_SECRET_KEY, ACCOUNT_PUBKEY, TIMESTAMP_KEY,
 		CHARACTER_PROFILE_PUBLICATION_MARKER_KEY];
 	const records = new Map<string, unknown>();
 	const present = new Set<string>();
 	for (const key of keys) {
-		if (await tx.store.getKey(key) !== undefined) {
+		if (await store.getKey(key) !== undefined) {
 			present.add(key);
-			const [value]: unknown[] = await tx.store.getAll(key, 1);
+			const [value]: unknown[] = await store.getAll(key, 1);
 			records.set(key, value);
 		}
 	}
@@ -198,9 +265,45 @@ async function readAccountState(tx: AccountReadTransaction | AccountTransaction)
 	};
 }
 
-async function readState(db: Awaited<ReturnType<typeof openAccountDatabase>>): Promise<StoredAccountState> {
-	const tx = db.transaction(STORE_NAME, 'readonly');
-	const state = await readAccountState(tx);
+async function readGameState(tx: ReadTransaction | LifecycleTransaction): Promise<StoredGameState> {
+	const store = gameStore(tx);
+	const keys = await store.getAllKeys();
+	if (keys.some((key: IDBValidKey) => key !== GAME_STATE_KEY && key !== LIFECYCLE_MIGRATION_PENDING_KEY)) {
+		return { kind: 'malformed', reason: 'ambiguous-game-state' };
+	}
+	const statePresent = await store.getKey(GAME_STATE_KEY) !== undefined;
+	const pendingPresent = await store.getKey(LIFECYCLE_MIGRATION_PENDING_KEY) !== undefined;
+	if (statePresent && pendingPresent) return { kind: 'malformed', reason: 'ambiguous-game-state' };
+	if (!statePresent && !pendingPresent) return { kind: 'missing' };
+	if (pendingPresent) {
+		const [pending]: unknown[] = await store.getAll(LIFECYCLE_MIGRATION_PENDING_KEY, 1);
+		return pending === true ? { kind: 'pending' } : { kind: 'malformed', reason: 'invalid-game-state' };
+	}
+	const [value]: unknown[] = await store.getAll(GAME_STATE_KEY, 1);
+	return isValidPersonaGameState(value) ? { kind: 'ready', gameState: value } :
+		{ kind: 'malformed', reason: 'invalid-game-state' };
+}
+
+async function readLifecycleState(tx: ReadTransaction | LifecycleTransaction): Promise<StoredLifecycleState> {
+	const account = await readAccountState(tx);
+	const game = await readGameState(tx);
+	if (account.kind === 'corrupt') return account;
+	if (account.kind === 'missing-secret') return account;
+	if (account.kind === 'fresh') {
+		if (game.kind === 'missing' || game.kind === 'pending') return { kind: 'fresh', pending: game.kind === 'pending' };
+		if (game.kind === 'malformed' && game.reason === 'ambiguous-game-state') return { kind: 'corrupt', reason: 'ambiguous-game-state' };
+		return { kind: 'corrupt', reason: 'orphan-game-state' };
+	}
+	if (game.kind === 'malformed') return { kind: 'corrupt', reason: game.reason };
+	if (game.kind === 'missing') return { kind: 'corrupt', reason: 'missing-game-state' };
+	if (game.kind === 'pending') return { kind: 'ready', account, game };
+	if (game.gameState.personaPubkey !== account.pubkey) return { kind: 'corrupt', reason: 'game-account-mismatch' };
+	return { kind: 'ready', account, game };
+}
+
+async function readLifecycle(db: IDBPDatabase<AccountDatabase>): Promise<StoredLifecycleState> {
+	const tx = db.transaction([ACCOUNT_STORE_NAME, GAME_STORE_NAME], 'readonly');
+	const state = await readLifecycleState(tx);
 	await tx.done;
 	return state;
 }
@@ -226,37 +329,54 @@ function snapshotFromSecret(secretKey: Uint8Array, pubkey: string, personaCreate
 	return { secretKey: secretKey.slice(), pubkey, personaCreatedAtMs, characterProfileRevision };
 }
 
-async function restoreProtected(state: ProtectedReadyState): Promise<AccountSnapshot> {
+async function restoreAccount(account: LegacyReadyState | ProtectedReadyState): Promise<AccountSnapshot> {
+	if (account.kind === 'legacy-ready') {
+		return snapshotFromSecret(account.secretKey, account.pubkey, account.personaCreatedAtMs, account.characterProfileRevision);
+	}
 	try {
 		const secret = new Uint8Array(await webCrypto().subtle.decrypt(
-			{ name: 'AES-GCM', iv: cryptoBytes(state.encryptedSecret.iv) }, state.wrappingKey,
-			cryptoBytes(state.encryptedSecret.ciphertext)
+			{ name: 'AES-GCM', iv: cryptoBytes(account.encryptedSecret.iv) }, account.wrappingKey,
+			cryptoBytes(account.encryptedSecret.ciphertext)
 		));
-		if (secret.length !== 32 || getPublicKey(secret) !== state.pubkey) throw new Error('Account identity mismatch.');
-		return snapshotFromSecret(secret, state.pubkey, state.personaCreatedAtMs, state.characterProfileRevision);
+		if (secret.length !== 32 || getPublicKey(secret) !== account.pubkey) throw new Error('Account identity mismatch.');
+		return snapshotFromSecret(secret, account.pubkey, account.personaCreatedAtMs, account.characterProfileRevision);
 	} catch {
 		throw new Error('Account operation failed.');
 	}
 }
 
-async function commitFreshCandidate(db: Awaited<ReturnType<typeof openAccountDatabase>>, candidate: ProtectedCandidate) {
-	const tx = db.transaction(STORE_NAME, 'readwrite');
+function sameAccountIdentity(first: LegacyReadyState | ProtectedReadyState, second: LegacyReadyState | ProtectedReadyState): boolean {
+	return first.kind === second.kind && first.pubkey === second.pubkey &&
+		first.personaCreatedAtMs === second.personaCreatedAtMs &&
+		first.characterProfileRevision === second.characterProfileRevision &&
+		(first.kind !== 'legacy-ready' || sameSecret(first.secretKey, (second as LegacyReadyState).secretKey));
+}
+
+async function commitFreshPersona(db: IDBPDatabase<AccountDatabase>, candidate: ProtectedCandidate, expectedPending: boolean) {
+	const tx = db.transaction([ACCOUNT_STORE_NAME, GAME_STORE_NAME], 'readwrite');
 	void tx.done.catch(() => {});
 	try {
-		const state = await readAccountState(tx);
-		if (state.kind !== 'fresh') {
+		const state = await readLifecycleState(tx);
+		if (state.kind !== 'fresh' || state.pending !== expectedPending) {
 			await tx.done;
 			return false;
 		}
 		const personaCreatedAtMs = Date.now();
 		assertAccountTimestamp(personaCreatedAtMs);
-		await tx.store.put(candidate.wrappingKey, WRAPPING_KEY);
-		await tx.store.put(candidate.encryptedSecret, ENCRYPTED_SECRET_KEY);
-		await tx.store.put(candidate.pubkey, ACCOUNT_PUBKEY);
-		await tx.store.put(personaCreatedAtMs, TIMESTAMP_KEY);
-		await tx.store.delete(CHARACTER_PROFILE_PUBLICATION_MARKER_KEY);
+		const gameState = createInitialPersonaGameState(candidate.pubkey, personaCreatedAtMs);
+		const accounts = accountStore(tx);
+		await accounts.put(candidate.wrappingKey, WRAPPING_KEY);
+		await accounts.put(candidate.encryptedSecret, ENCRYPTED_SECRET_KEY);
+		await accounts.put(candidate.pubkey, ACCOUNT_PUBKEY);
+		await accounts.put(personaCreatedAtMs, TIMESTAMP_KEY);
+		await accounts.delete(CHARACTER_PROFILE_PUBLICATION_MARKER_KEY);
+		const games = gameStore(tx);
+		await games.put(gameState, GAME_STATE_KEY);
+		await games.delete(LIFECYCLE_MIGRATION_PENDING_KEY);
 		await tx.done;
-		return snapshotFromSecret(candidate.secretKey, candidate.pubkey, personaCreatedAtMs, null);
+		return {
+			account: snapshotFromSecret(candidate.secretKey, candidate.pubkey, personaCreatedAtMs, null), gameState
+		};
 	} catch (error) {
 		try { tx.abort(); } catch { /* The transaction may already have aborted. */ }
 		await tx.done.catch(() => {});
@@ -264,25 +384,45 @@ async function commitFreshCandidate(db: Awaited<ReturnType<typeof openAccountDat
 	}
 }
 
-async function commitLegacyMigration(db: Awaited<ReturnType<typeof openAccountDatabase>>, state: LegacyReadyState,
-	candidate: ProtectedCandidate) {
-	const tx = db.transaction(STORE_NAME, 'readwrite');
+async function commitExistingMigration(db: IDBPDatabase<AccountDatabase>, state: StoredLifecycleState & { kind: 'ready' },
+	account: AccountSnapshot, candidate: ProtectedCandidate | null) {
+	const tx = db.transaction([ACCOUNT_STORE_NAME, GAME_STORE_NAME], 'readwrite');
 	void tx.done.catch(() => {});
 	try {
-		const current = await readAccountState(tx);
-		const sameLegacy = current.kind === 'legacy-ready' && current.pubkey === state.pubkey &&
-			current.personaCreatedAtMs === state.personaCreatedAtMs &&
-			current.secretKey.length === state.secretKey.length && current.secretKey.every((byte, i) => byte === state.secretKey[i]);
-		if (!sameLegacy) {
+		const current = await readLifecycleState(tx);
+		if (current.kind !== 'ready' || !sameAccountIdentity(current.account, state.account)) {
 			await tx.done;
 			return false;
 		}
-		await tx.store.put(candidate.wrappingKey, WRAPPING_KEY);
-		await tx.store.put(candidate.encryptedSecret, ENCRYPTED_SECRET_KEY);
-		await tx.store.put(candidate.pubkey, ACCOUNT_PUBKEY);
-		await tx.store.delete(LEGACY_SECRET_KEY);
+		if (state.game.kind === 'pending' && current.game.kind !== 'pending') {
+			await tx.done;
+			return false;
+		}
+		if (state.game.kind === 'ready' && (current.game.kind !== 'ready' || !sameGameState(current.game.gameState, state.game.gameState))) {
+			await tx.done;
+			return false;
+		}
+		if (candidate) {
+			const accounts = accountStore(tx);
+			await accounts.put(candidate.wrappingKey, WRAPPING_KEY);
+			await accounts.put(candidate.encryptedSecret, ENCRYPTED_SECRET_KEY);
+			await accounts.put(candidate.pubkey, ACCOUNT_PUBKEY);
+			await accounts.delete(LEGACY_SECRET_KEY);
+		}
+		let gameState: PersonaGameState;
+		if (state.game.kind === 'ready') {
+			gameState = state.game.gameState;
+		} else if (state.game.kind === 'pending') {
+			const migrationStartedAtMs = Date.now();
+			assertAccountTimestamp(migrationStartedAtMs);
+			gameState = createInitialPersonaGameState(state.account.pubkey, migrationStartedAtMs);
+			await gameStore(tx).put(gameState, GAME_STATE_KEY);
+			await gameStore(tx).delete(LIFECYCLE_MIGRATION_PENDING_KEY);
+		} else {
+			throw new Error('Invalid lifecycle state.');
+		}
 		await tx.done;
-		return snapshotFromSecret(candidate.secretKey, candidate.pubkey, state.personaCreatedAtMs, state.characterProfileRevision);
+		return { account, gameState };
 	} catch (error) {
 		try { tx.abort(); } catch { /* The transaction may already have aborted. */ }
 		await tx.done.catch(() => {});
@@ -290,23 +430,24 @@ async function commitLegacyMigration(db: Awaited<ReturnType<typeof openAccountDa
 	}
 }
 
-async function loadOrCreate(): Promise<LoadAccountResult> {
+async function loadPersona(): Promise<LoadPersonaResult> {
 	const db = await openAccountDatabase();
 	try {
 		for (;;) {
-			const state = await readState(db);
-			if (state.kind === 'corrupt') return state;
-			if (state.kind === 'missing-secret') return state;
-			if (state.kind === 'protected-ready') return { kind: 'restored', account: await restoreProtected(state) };
-			if (state.kind === 'legacy-ready') {
-				const candidate = await prepareProtectedCandidate(state.secretKey);
-				const result = await commitLegacyMigration(db, state, candidate);
-				if (result) return { kind: 'restored', account: result };
+			const state = await readLifecycle(db);
+			if (state.kind === 'corrupt' || state.kind === 'missing-secret') return state;
+			if (state.kind === 'fresh') {
+				const candidate = await prepareFreshCandidate();
+				const result = await commitFreshPersona(db, candidate, state.pending);
+				if (result) return { kind: 'created', persona: result };
 				continue;
 			}
-			const candidate = await prepareFreshCandidate();
-			const result = await commitFreshCandidate(db, candidate);
-			if (result) return { kind: 'created', account: result };
+			const account = await restoreAccount(state.account);
+			if (state.game.kind === 'ready') return { kind: 'restored', persona: { account, gameState: state.game.gameState } };
+			if (state.game.kind !== 'pending') return { kind: 'corrupt', reason: 'missing-game-state' };
+			const candidate = state.account.kind === 'legacy-ready' ? await prepareProtectedCandidate(state.account.secretKey) : null;
+			const result = await commitExistingMigration(db, state, account, candidate);
+			if (result) return { kind: 'restored', persona: result };
 		}
 	} catch (error) {
 		if (error instanceof Error && error.message === 'Account operation failed.') throw error;
@@ -316,9 +457,86 @@ async function loadOrCreate(): Promise<LoadAccountResult> {
 	}
 }
 
-/** Creates only when both legacy and protected account records are absent; missing/corrupt data is never repaired. */
-export function loadOrCreateAccount(): Promise<LoadAccountResult> {
-	return loadOrCreate();
+export function loadOrCreatePersona(): Promise<LoadPersonaResult> {
+	return loadPersona();
+}
+
+/** Compatibility account-only view over the lifecycle-owned load path. */
+export async function loadOrCreateAccount(): Promise<LoadAccountResult> {
+	const result = await loadPersona();
+	if (result.kind === 'created') return { kind: 'created', account: result.persona.account };
+	if (result.kind === 'restored') return { kind: 'restored', account: result.persona.account };
+	if (result.kind === 'missing-secret') return { kind: 'missing-secret', personaCreatedAtMs: result.personaCreatedAtMs };
+	const corrupt = result as CorruptAccountState;
+	return { kind: 'corrupt', reason: corrupt.reason };
+}
+
+export async function reincarnateExpiredPersona(expected: PersonaSnapshot): Promise<ReincarnateExpiredResult> {
+	const candidate = await prepareFreshCandidate();
+	const db = await openAccountDatabase();
+	let outcome: 'reincarnated' | 'superseded' | 'not-expired' | 'corrupt' = 'corrupt';
+	let replacement: PersonaSnapshot | null = null;
+	try {
+		const tx = db.transaction([ACCOUNT_STORE_NAME, GAME_STORE_NAME], 'readwrite');
+		void tx.done.catch(() => {});
+		try {
+			const current = await readLifecycleState(tx);
+			if (current.kind === 'corrupt' || current.kind === 'missing-secret' || current.kind === 'fresh' || current.game.kind !== 'ready') {
+				await tx.done;
+				return current.kind === 'corrupt' ? current : { kind: 'corrupt', reason: 'missing-game-state' };
+			}
+			const expectedAccount = expected.account;
+			const currentMatches = current.account.pubkey === expectedAccount.pubkey &&
+				current.account.personaCreatedAtMs === expectedAccount.personaCreatedAtMs &&
+				current.game.gameState.personaPubkey === expected.gameState.personaPubkey &&
+				current.game.gameState.lifespanExpiresAtMs === expected.gameState.lifespanExpiresAtMs &&
+				current.game.gameState.points === expected.gameState.points &&
+				sameGameState(current.game.gameState, expected.gameState);
+			if (!currentMatches) {
+				await tx.done;
+				outcome = 'superseded';
+			} else {
+				const nowMs = Date.now();
+				assertAccountTimestamp(nowMs);
+				if (!isPersonaExpired(current.game.gameState, nowMs)) {
+					await tx.done;
+					replacement = { account: await restoreAccount(current.account), gameState: current.game.gameState };
+					outcome = 'not-expired';
+				} else {
+					const gameState = createInitialPersonaGameState(candidate.pubkey, nowMs);
+					const accounts = accountStore(tx);
+					await accounts.put(candidate.wrappingKey, WRAPPING_KEY);
+					await accounts.put(candidate.encryptedSecret, ENCRYPTED_SECRET_KEY);
+					await accounts.put(candidate.pubkey, ACCOUNT_PUBKEY);
+					await accounts.put(nowMs, TIMESTAMP_KEY);
+					await accounts.delete(CHARACTER_PROFILE_PUBLICATION_MARKER_KEY);
+					await accounts.delete(LEGACY_SECRET_KEY);
+					await gameStore(tx).put(gameState, GAME_STATE_KEY);
+					await tx.done;
+					replacement = { account: snapshotFromSecret(candidate.secretKey, candidate.pubkey, nowMs, null), gameState };
+					outcome = 'reincarnated';
+				}
+			}
+		} catch (error) {
+			try { tx.abort(); } catch { /* The transaction may already have aborted. */ }
+			await tx.done.catch(() => {});
+			throw error;
+		}
+	} catch (error) {
+		if (error instanceof Error && error.message === 'Account operation failed.') throw error;
+		throw new Error('Account operation failed.');
+	} finally {
+		db.close();
+	}
+
+	if (outcome === 'superseded') {
+		const current = await loadPersona();
+		if (current.kind === 'created' || current.kind === 'restored') return { kind: 'superseded', persona: current.persona };
+		if (current.kind === 'corrupt') return current;
+		return { kind: 'corrupt', reason: 'invalid-secret' };
+	}
+	if (replacement) return { kind: outcome, persona: replacement };
+	throw new Error('Account operation failed.');
 }
 
 /** Records only the current account's current character-profile revision. */
@@ -326,9 +544,9 @@ export async function markCharacterProfilePublication(
 	account: AccountSnapshot
 ): Promise<MarkCharacterProfilePublicationResult> {
 	const db = await openAccountDatabase();
-	let tx: AccountTransaction | undefined;
+	let tx: AccountOnlyTransaction | undefined;
 	try {
-		tx = db.transaction(STORE_NAME, 'readwrite');
+		tx = db.transaction(ACCOUNT_STORE_NAME, 'readwrite');
 		void tx.done.catch(() => {});
 		const state = await readAccountState(tx);
 		if (state.kind === 'corrupt' || state.kind === 'fresh' || state.kind === 'missing-secret' ||
@@ -336,7 +554,7 @@ export async function markCharacterProfilePublication(
 			await tx.done;
 			return { kind: 'stale' };
 		}
-		await tx.store.put(
+		await accountStore(tx).put(
 			{ pubkey: account.pubkey, revision: CURRENT_CHARACTER_PROFILE_REVISION },
 			CHARACTER_PROFILE_PUBLICATION_MARKER_KEY
 		);

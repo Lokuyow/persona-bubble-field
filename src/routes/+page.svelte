@@ -48,9 +48,12 @@
 	import ProfileDialog from '$lib/ProfileDialog.svelte';
 	import {
 		CURRENT_CHARACTER_PROFILE_REVISION,
-		loadOrCreateAccount,
-		type AccountSnapshot
+		loadOrCreatePersona,
+		reincarnateExpiredPersona,
+		type AccountSnapshot,
+		type PersonaSnapshot
 	} from '$lib/nostrAccount';
+	import { isPersonaExpired } from '$lib/personaGameState';
 	import {
 		prepareCharacterProfilePublication,
 		publishCharacterProfile,
@@ -175,6 +178,8 @@
 	let proximityFeedbackTimer: number | null = null;
 	let connectionStatus: WorldReadConnectionStatus = { kind: 'bootstrapping' };
 	let selfAccount = $state.raw<AccountSnapshot | null>(null);
+	let personaSnapshot = $state.raw<PersonaSnapshot | null>(null);
+	let personaLifecycleTransition = $state(false);
 	let selfPositionWriteState = $state.raw<SelfPositionWriteState>({ kind: 'unavailable' });
 	let selfMessageAvailability: SelfMessageAvailability = { kind: 'unavailable' };
 	let traceReadSnapshot = $state<TraceReadSnapshot>({ readRootIds: [], unreadReplyRootIds: [], hasUnreadReplies: false });
@@ -208,6 +213,7 @@
 	let visualAnimationFrame: number | null = null;
 	let visualProjectionInitialized = false;
 	let prefersReducedMotion = false;
+	let expiryCheckInFlight = false;
 	const movementInputController = createMovementInputController({
 		requestMovement: (direction) => {
 			closeFieldActionMenu();
@@ -707,9 +713,16 @@
 			startRequested = true;
 			let characterProfilePublication: PreparedCharacterProfilePublication | null = null;
 			try {
-				const accountResult = await loadOrCreateAccount();
-				if (accountResult.kind === 'created' || accountResult.kind === 'restored') {
-					selfAccount = accountResult.account;
+				const personaResult = await loadOrCreatePersona();
+				if (personaResult.kind !== 'created' && personaResult.kind !== 'restored') {
+					setComposerTerminalError(new Error('Persona is unavailable for publishing.'));
+					return;
+				}
+				personaSnapshot = personaResult.persona;
+				selfAccount = personaResult.persona.account;
+				if (isPersonaExpired(personaResult.persona.gameState, Date.now())) {
+					await beginDeathTransition(personaResult.persona);
+					return;
 				}
 				if (selfAccount && selfAccount.characterProfileRevision !== CURRENT_CHARACTER_PROFILE_REVISION) {
 					const character = deriveCharacterFromPubkey(selfAccount.pubkey, CHARACTER_CATALOG);
@@ -721,7 +734,7 @@
 						account: selfAccount,
 						character,
 						absolutePictureUrl,
-						createdAt: accountResult.kind === 'restored' ? Math.floor(Date.now() / 1000) :
+						createdAt: personaResult.kind === 'restored' ? Math.floor(Date.now() / 1000) :
 							Math.floor(selfAccount.personaCreatedAtMs / 1000)
 					});
 				}
@@ -729,9 +742,9 @@
 					setComposerTerminalError(new Error('Account is unavailable for publishing.'));
 				}
 			} catch {
-				// Account failure is fail-closed for profile publication, not world reading.
-				setComposerTerminalError(new Error('Account is unavailable for publishing.'));
+				setComposerTerminalError(new Error('Persona is unavailable for publishing.'));
 			}
+			if (composerStartupError || !selfAccount || !personaSnapshot) return;
 			session = createWorldReadSession({
 				field: FIELD,
 				selfAccount,
@@ -773,7 +786,10 @@
 				session.completeBootstrap();
 				void session.enterSelf();
 				if (characterProfilePublication) {
-					void publishCharacterProfile(characterProfilePublication, (event) => session!.publish(event)).catch(() => {});
+					void publishCharacterProfile(characterProfilePublication, (event) => {
+						if (!worldSession) return Promise.reject(new Error('Relay session is unavailable.'));
+						return worldSession.publish(event);
+					}).catch(() => {});
 				}
 			} catch {
 				// The session reports a concise fatal status to the UI.
@@ -805,15 +821,24 @@
 		const observer = new ResizeObserver(updateViewport);
 		observer.observe(viewportElement!);
 		updateViewport();
-		const expiryTimer = window.setInterval(() => {
-			const now = Date.now();
-			const nextPresence = session?.refresh(now);
-			if (nextPresence) {
-				conversationState = applyVisibility(conversationState, projectFrontendPresence({ presence: nextPresence, selectedCharacterId, selfProjectionId,
-			geometry: { cellSize, fieldAreaBounds, fieldWorldSize }, colors: colorByPubkey }).visibleParticipantIds);
+		const refreshRuntime = async () => {
+			if (expiryCheckInFlight || personaLifecycleTransition) return;
+			expiryCheckInFlight = true;
+			try {
+				await checkPersonaExpiry();
+				if (personaLifecycleTransition) return;
+				const now = Date.now();
+				const nextPresence = session?.refresh(now);
+				if (nextPresence) {
+					conversationState = applyVisibility(conversationState, projectFrontendPresence({ presence: nextPresence, selectedCharacterId, selfProjectionId,
+						geometry: { cellSize, fieldAreaBounds, fieldWorldSize }, colors: colorByPubkey }).visibleParticipantIds);
+				}
+				conversationState = pruneExpired(conversationState, now);
+			} finally {
+				expiryCheckInFlight = false;
 			}
-			conversationState = pruneExpired(conversationState, now);
-		}, 250);
+		};
+		const expiryTimer = window.setInterval(() => { void refreshRuntime(); }, 250);
 
 		return () => {
 			mounted = false;
@@ -1161,6 +1186,7 @@
 
 	function handleDocumentVisibilityChange(): void {
 		movementInputController.handleVisibilityChange();
+		if (!document.hidden) void checkPersonaExpiry();
 	}
 
 	function handleDocumentPointerDown(event: PointerEvent): void {
@@ -1187,8 +1213,38 @@
 
 	function moveSelfFromCell(direction: Direction): void {
 		closeFieldActionMenu();
+		if (personaLifecycleTransition) return;
 		if (devWorldSandboxEnabled) moveSandboxSelf(direction);
 		else moveWorldSelf(direction);
+	}
+
+	async function beginDeathTransition(expected: PersonaSnapshot): Promise<void> {
+		if (devWorldSandboxEnabled || personaLifecycleTransition) return;
+		personaLifecycleTransition = true;
+		movementInputController.cancelMovementHold();
+		fieldSceneComponent?.cancelPointerGesture();
+		cancelPendingComposerSubmission(new Error('Persona lifetime ended.'));
+		worldSession?.dispose();
+		worldSession = null;
+		traceConversationController = null;
+		try {
+			const result = await reincarnateExpiredPersona(expected);
+			if (result.kind === 'reincarnated' || result.kind === 'superseded' || result.kind === 'not-expired') {
+				personaSnapshot = result.persona;
+				selfAccount = result.persona.account;
+				window.location.reload();
+				return;
+			}
+			setComposerTerminalError(new Error('Persona is unavailable for publishing.'));
+		} catch {
+			setComposerTerminalError(new Error('Persona is unavailable for publishing.'));
+		}
+	}
+
+	async function checkPersonaExpiry(): Promise<void> {
+		if (devWorldSandboxEnabled || personaLifecycleTransition || !personaSnapshot) return;
+		if (!isPersonaExpired(personaSnapshot.gameState, Date.now())) return;
+		await beginDeathTransition(personaSnapshot);
 	}
 
 	function resolvePendingComposerSubmission(): void {
@@ -1231,6 +1287,7 @@
 		envelope: ComposerSubmitEnvelope,
 		options: Readonly<{ signal: AbortSignal; shortcutId?: string }>
 	): Promise<Readonly<{ eventId: string }>> {
+		if (personaLifecycleTransition) throw new Error('Persona lifetime ended.');
 		const desired = () => ({ generation: traceReplyMode.generation, targetId: traceReplyMode.target?.targetId ?? null,
 			clearContentVersion: traceReplyMode.clearContentVersion });
 		if (!matchesComposerSubmit(envelope, desired())) throw new Error('Composer reply context is not synchronized.');
