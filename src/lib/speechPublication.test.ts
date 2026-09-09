@@ -12,6 +12,7 @@ function fixture() {
 		getSelectedSpeechType: () => 'shout',
 		getSubmissionInProgress: () => submissionInProgress,
 		setSubmissionInProgress: (value) => { submissionInProgress = value; },
+		isPublicationAllowed: () => true,
 		waitForReady: async () => {},
 		isCurrentContext: () => true,
 		publish,
@@ -38,7 +39,7 @@ describe('speech publication core', () => {
 		let gate = false;
 		const gatedCore = createSpeechPublicationCore({
 			getSelectedSpeechType: () => 'normal', getSubmissionInProgress: () => gate,
-			setSubmissionInProgress: (value) => { gate = value; }, waitForReady,
+			setSubmissionInProgress: (value) => { gate = value; }, isPublicationAllowed: () => true, waitForReady,
 			isCurrentContext: () => current, publish: f.publish,
 			onSucceeded: f.onSucceeded, onOutOfRange: f.onOutOfRange
 		});
@@ -60,10 +61,31 @@ describe('speech publication core', () => {
 		const core = createSpeechPublicationCore({
 			getSelectedSpeechType: () => 'normal', getSubmissionInProgress: f.isInProgress,
 			setSubmissionInProgress: (value) => { /* fixture gate is not relevant here */ void value; },
+			isPublicationAllowed: () => true,
 			waitForReady, isCurrentContext: () => true, publish: f.publish,
 			onSucceeded: f.onSucceeded, onOutOfRange: f.onOutOfRange
 		});
 		await expect(core.publish('candidate', topLevel, { signal: controller.signal })).rejects.toMatchObject({ name: 'AbortError' });
+		expect(f.publish).not.toHaveBeenCalled();
+	});
+
+	it('blocks readiness and publication when the persona lifecycle ends', async () => {
+		const f = fixture();
+		let allowed = true;
+		const waitForReady = vi.fn(async () => { allowed = false; });
+		const core = createSpeechPublicationCore({
+			getSelectedSpeechType: () => 'normal', getSubmissionInProgress: f.isInProgress,
+			setSubmissionInProgress: (value) => { /* fixture gate is not relevant here */ void value; },
+			isPublicationAllowed: () => allowed,
+			waitForReady, isCurrentContext: () => true, publish: f.publish,
+			onSucceeded: f.onSucceeded, onOutOfRange: f.onOutOfRange
+		});
+		allowed = false;
+		await expect(core.publish('before-ready', topLevel, { signal: new AbortController().signal })).rejects.toThrow('unavailable');
+		expect(waitForReady).not.toHaveBeenCalled();
+		allowed = true;
+		await expect(core.publish('candidate', topLevel, { signal: new AbortController().signal })).rejects.toThrow('unavailable');
+		expect(waitForReady).toHaveBeenCalledTimes(1);
 		expect(f.publish).not.toHaveBeenCalled();
 	});
 });

@@ -15,6 +15,7 @@ export type SpeechPublicationCoreOptions = Readonly<{
 	getSelectedSpeechType: () => SpeechType;
 	getSubmissionInProgress: () => boolean;
 	setSubmissionInProgress: (value: boolean) => void;
+	isPublicationAllowed: () => boolean;
 	waitForReady: (signal: AbortSignal) => Promise<void>;
 	isCurrentContext: (context: SpeechPublicationContext) => boolean;
 	publish: (submission: SpeechSubmission, context: SpeechPublicationContext, signal: AbortSignal) => Promise<SpeechPublicationOutcome>;
@@ -41,11 +42,14 @@ export function createSpeechPublicationCore(options: SpeechPublicationCoreOption
 				shortcutId: publicationOptions.shortcutId,
 				selectedSpeechType: options.getSelectedSpeechType()
 			});
+			if (!options.isPublicationAllowed()) throw new Error('Speech publication is unavailable.');
 			options.setSubmissionInProgress(true);
 			try {
+				if (!options.isPublicationAllowed()) throw new Error('Speech publication is unavailable.');
 				await options.waitForReady(signal);
 				if (signal.aborted) throw abortError();
 				if (!options.isCurrentContext(context)) throw new Error('Speech reply target changed before publication.');
+				if (!options.isPublicationAllowed()) throw new Error('Speech publication is unavailable.');
 				const result = await options.publish(submission, context, signal);
 				if (signal.aborted) throw abortError();
 				if (result.kind === 'succeeded') {

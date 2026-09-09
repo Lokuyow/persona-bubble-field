@@ -48,9 +48,12 @@
 	import ProfileDialog from '$lib/ProfileDialog.svelte';
 	import {
 		CURRENT_CHARACTER_PROFILE_REVISION,
-		loadOrCreateAccount,
-		type AccountSnapshot
+		loadOrCreatePersona,
+		reincarnateExpiredPersona,
+		type AccountSnapshot,
+		type PersonaSnapshot
 	} from '$lib/nostrAccount';
+	import { isPersonaExpired } from '$lib/personaGameState';
 	import {
 		prepareCharacterProfilePublication,
 		publishCharacterProfile,
@@ -177,6 +180,8 @@
 	let proximityFeedbackTimer: number | null = null;
 	let connectionStatus: WorldReadConnectionStatus = { kind: 'bootstrapping' };
 	let selfAccount = $state.raw<AccountSnapshot | null>(null);
+	let personaSnapshot = $state.raw<PersonaSnapshot | null>(null);
+	let personaLifecycleTransition = $state(false);
 	let selfPositionWriteState = $state.raw<SelfPositionWriteState>({ kind: 'unavailable' });
 	let selfMessageAvailability: SelfMessageAvailability = { kind: 'unavailable' };
 	let traceReadSnapshot = $state<TraceReadSnapshot>({ readRootIds: [], unreadReplyRootIds: [], hasUnreadReplies: false });
@@ -210,6 +215,9 @@
 	let visualAnimationFrame: number | null = null;
 	let visualProjectionInitialized = false;
 	let prefersReducedMotion = false;
+	let expiryCheckInFlight = false;
+	let deathTransitionInFlight = false;
+	let runRuntimeRefresh: (() => Promise<void>) | null = null;
 	const movementInputController = createMovementInputController({
 		requestMovement: (direction) => {
 			closeFieldActionMenu();
@@ -343,9 +351,11 @@
 		getSelectedSpeechType: () => selectedSpeechType,
 		getSubmissionInProgress: () => composerSubmissionInProgress,
 		setSubmissionInProgress: (value) => { composerSubmissionInProgress = value; },
+		isPublicationAllowed: () => devWorldSandboxEnabled || !personaLifecycleTransition,
 		waitForReady: (signal) => devWorldSandboxEnabled ? Promise.resolve() : waitForMessageReady(signal),
 		isCurrentContext: isCurrentSpeechPublicationContext,
 		publish: async (submission, context): Promise<SpeechPublicationOutcome> => {
+			if (personaLifecycleTransition) return { kind: 'blocked' };
 			const result = context.target
 				? await (devWorldSandboxEnabled ? devTraceConversationRuntime : worldSession)?.publishTraceReply({
 					rootId: context.target.rootId, targetId: context.target.targetId, ...submission
@@ -770,39 +780,17 @@
 			}
 		}
 
-		const begin = async () => {
-			if (devWorldSandboxEnabled || startRequested || !hasUsableViewport()) return;
-			startRequested = true;
-			let characterProfilePublication: PreparedCharacterProfilePublication | null = null;
-			try {
-				const accountResult = await loadOrCreateAccount();
-				if (accountResult.kind === 'created' || accountResult.kind === 'restored') {
-					selfAccount = accountResult.account;
-				}
-				if (selfAccount && selfAccount.characterProfileRevision !== CURRENT_CHARACTER_PROFILE_REVISION) {
-					const character = deriveCharacterFromPubkey(selfAccount.pubkey, CHARACTER_CATALOG);
-					const absolutePictureUrl = new URL(
-						asset(`/${character.picture}`),
-						window.location.origin
-					).toString();
-					characterProfilePublication = prepareCharacterProfilePublication({
-						account: selfAccount,
-						character,
-						absolutePictureUrl,
-						createdAt: accountResult.kind === 'restored' ? Math.floor(Date.now() / 1000) :
-							Math.floor(selfAccount.personaCreatedAtMs / 1000)
-					});
-				}
-				if (!selfAccount) {
-					setComposerTerminalError(new Error('Account is unavailable for publishing.'));
-				}
-			} catch {
-				// Account failure is fail-closed for profile publication, not world reading.
-				setComposerTerminalError(new Error('Account is unavailable for publishing.'));
-			}
-			session = createWorldReadSession({
+		const startReadSession = async (
+			account: AccountSnapshot | null,
+			characterProfilePublication: PreparedCharacterProfilePublication | null = null
+		): Promise<void> => {
+			const previousSession = session;
+			session = null;
+			if (worldSession === previousSession) worldSession = null;
+			previousSession?.dispose();
+			const nextSession = createWorldReadSession({
 				field: FIELD,
-				selfAccount,
+				selfAccount: account,
 				onPresenceChanged: acceptPresence,
 				onLiveMessage: receiveLiveMessage,
 				onTimelineMessage: receiveTimelineMessage,
@@ -827,26 +815,69 @@
 					if (state.kind === 'ready') resolvePendingComposerSubmission();
 				}
 			});
-			worldSession = session;
-			traceConversationController = session;
-
+			session = nextSession;
+			worldSession = nextSession;
+			traceConversationController = nextSession;
 			try {
-				const bootstrap = await session.start();
-				if (!mounted) return;
+				const bootstrap = await nextSession.start();
+				if (!mounted || session !== nextSession) {
+					nextSession.dispose();
+					return;
+				}
 				restoreBootstrapConversation(bootstrap.messages, bootstrap.presence, Date.now());
 				recentMessageTimeline = createRecentMessageTimeline([
 					...recentMessageTimeline,
 					...bootstrap.timelineMessages
 				]);
-				session.completeBootstrap();
-				void session.enterSelf();
-				if (characterProfilePublication) {
-					void publishCharacterProfile(characterProfilePublication, (event) => session!.publish(event)).catch(() => {});
+				nextSession.completeBootstrap();
+				if (account && !personaLifecycleTransition) void nextSession.enterSelf();
+				if (characterProfilePublication && account && !personaLifecycleTransition) {
+					void publishCharacterProfile(characterProfilePublication, (event) => {
+						if (personaLifecycleTransition || worldSession !== nextSession) {
+							return Promise.reject(new Error('Persona is unavailable for publishing.'));
+						}
+						return nextSession.publish(event);
+					}).catch(() => {});
 				}
 			} catch {
-				// The session reports a concise fatal status to the UI.
-				setComposerTerminalError(new Error('Relay startup failed.'));
+				if (session === nextSession) setComposerTerminalError(new Error('Relay startup failed.'));
 			}
+		};
+
+		const begin = async () => {
+			if (devWorldSandboxEnabled || startRequested || !hasUsableViewport()) return;
+			startRequested = true;
+			let characterProfilePublication: PreparedCharacterProfilePublication | null = null;
+			try {
+				const personaResult = await loadOrCreatePersona();
+				if (personaResult.kind !== 'created' && personaResult.kind !== 'restored') {
+					setComposerTerminalError(new Error('Persona is unavailable for publishing.'));
+				} else {
+					personaSnapshot = personaResult.persona;
+					selfAccount = personaResult.persona.account;
+					if (isPersonaExpired(personaResult.persona.gameState, Date.now())) {
+						const result = await beginDeathTransition(personaResult.persona, session);
+						if (result === 'reloaded') return;
+					}
+					if (selfAccount.characterProfileRevision !== CURRENT_CHARACTER_PROFILE_REVISION) {
+						const character = deriveCharacterFromPubkey(selfAccount.pubkey, CHARACTER_CATALOG);
+						const absolutePictureUrl = new URL(
+							asset(`/${character.picture}`),
+							window.location.origin
+						).toString();
+						characterProfilePublication = prepareCharacterProfilePublication({
+							account: selfAccount,
+							character,
+							absolutePictureUrl,
+							createdAt: personaResult.kind === 'restored' ? Math.floor(Date.now() / 1000) :
+								Math.floor(selfAccount.personaCreatedAtMs / 1000)
+						});
+					}
+				}
+			} catch {
+				setComposerTerminalError(new Error('Persona is unavailable for publishing.'));
+			}
+			await startReadSession(selfAccount, characterProfilePublication);
 		};
 
 		const updateViewport = () => {
@@ -873,15 +904,29 @@
 		const observer = new ResizeObserver(updateViewport);
 		observer.observe(viewportElement!);
 		updateViewport();
-		const expiryTimer = window.setInterval(() => {
-			const now = Date.now();
-			const nextPresence = session?.refresh(now);
-			if (nextPresence) {
-				conversationState = applyVisibility(conversationState, projectFrontendPresence({ presence: nextPresence, selectedCharacterId, selfProjectionId,
-					geometry: { cellSize, fieldAreaBounds, cameraWorldBounds: fieldArtworkBounds }, colors: colorByPubkey }).visibleParticipantIds);
+		const refreshRuntime = async () => {
+			if (expiryCheckInFlight || deathTransitionInFlight) return;
+			expiryCheckInFlight = true;
+			try {
+				const expiryResult = await checkPersonaExpiry(session);
+				if (expiryResult === 'reloaded') return;
+				if (expiryResult === 'failed') {
+					await startReadSession(null);
+					return;
+				}
+				const now = Date.now();
+				const nextPresence = session?.refresh(now);
+				if (nextPresence) {
+					conversationState = applyVisibility(conversationState, projectFrontendPresence({ presence: nextPresence, selectedCharacterId, selfProjectionId,
+						geometry: { cellSize, fieldAreaBounds, cameraWorldBounds: fieldArtworkBounds }, colors: colorByPubkey }).visibleParticipantIds);
+				}
+				conversationState = pruneExpired(conversationState, now);
+			} finally {
+			expiryCheckInFlight = false;
 			}
-			conversationState = pruneExpired(conversationState, now);
-		}, 250);
+		};
+		runRuntimeRefresh = refreshRuntime;
+		const expiryTimer = window.setInterval(() => { void refreshRuntime(); }, 250);
 
 		return () => {
 			mounted = false;
@@ -893,6 +938,7 @@
 			reducedMotionQuery.removeEventListener('change', handleReducedMotionChange);
 			cancelVisualAnimation();
 			window.clearInterval(expiryTimer);
+			if (runRuntimeRefresh === refreshRuntime) runRuntimeRefresh = null;
 			session?.dispose();
 			devTraceConversationRuntime?.dispose();
 			devTraceConversationRuntime = null;
@@ -1229,6 +1275,7 @@
 
 	function handleDocumentVisibilityChange(): void {
 		movementInputController.handleVisibilityChange();
+		if (!document.hidden) void runRuntimeRefresh?.();
 	}
 
 	function handleDocumentPointerDown(event: PointerEvent): void {
@@ -1249,14 +1296,58 @@
 	}
 
 	function moveWorldSelf(direction: Direction): void {
-		if (devWorldSandboxEnabled) return;
+		if (devWorldSandboxEnabled || !selfAccount) return;
 		void worldSession?.moveSelf(direction);
 	}
 
 	function moveSelfFromCell(direction: Direction): void {
 		closeFieldActionMenu();
+		if (personaLifecycleTransition) return;
 		if (devWorldSandboxEnabled) moveSandboxSelf(direction);
 		else moveWorldSelf(direction);
+	}
+
+	async function beginDeathTransition(
+		expected: PersonaSnapshot,
+		currentSession: ReturnType<typeof createWorldReadSession> | null
+	): Promise<'reloaded' | 'failed'> {
+		if (devWorldSandboxEnabled || personaLifecycleTransition || deathTransitionInFlight) return 'failed';
+		personaLifecycleTransition = true;
+		deathTransitionInFlight = true;
+		movementInputController.cancelMovementHold();
+		fieldSceneComponent?.cancelPointerGesture();
+		cancelPendingComposerSubmission(new Error('Persona lifetime ended.'));
+		currentSession?.dispose();
+		if (worldSession === currentSession) worldSession = null;
+		traceConversationController = null;
+		try {
+			const result = await reincarnateExpiredPersona(expected);
+			if (result.kind === 'reincarnated' || result.kind === 'superseded' || result.kind === 'not-expired') {
+				personaSnapshot = result.persona;
+				selfAccount = result.persona.account;
+				window.location.reload();
+				return 'reloaded';
+			}
+			selfAccount = null;
+			personaSnapshot = null;
+			setComposerTerminalError(new Error('Persona is unavailable for publishing.'));
+			return 'failed';
+		} catch {
+			selfAccount = null;
+			personaSnapshot = null;
+			setComposerTerminalError(new Error('Persona is unavailable for publishing.'));
+			return 'failed';
+		} finally {
+			deathTransitionInFlight = false;
+		}
+	}
+
+	async function checkPersonaExpiry(
+		currentSession: ReturnType<typeof createWorldReadSession> | null
+	): Promise<'unchanged' | 'reloaded' | 'failed'> {
+		if (devWorldSandboxEnabled || personaLifecycleTransition || !personaSnapshot) return 'unchanged';
+		if (!isPersonaExpired(personaSnapshot.gameState, Date.now())) return 'unchanged';
+		return beginDeathTransition(personaSnapshot, currentSession);
 	}
 
 	function resolvePendingComposerSubmission(): void {
@@ -1299,6 +1390,7 @@
 		envelope: ComposerSubmitEnvelope,
 		options: Readonly<{ signal: AbortSignal; shortcutId?: string }>
 	): Promise<Readonly<{ eventId: string }>> {
+		if (personaLifecycleTransition) throw new Error('Persona lifetime ended.');
 		const desired = () => ({ generation: traceReplyMode.generation, targetId: traceReplyMode.target?.targetId ?? null,
 			clearContentVersion: traceReplyMode.clearContentVersion });
 		if (!matchesComposerSubmit(envelope, desired())) throw new Error('Composer reply context is not synchronized.');
@@ -1320,7 +1412,7 @@
 	}
 
 	function retryWorldEntry(): void {
-		if (devWorldSandboxEnabled || selfPositionWriteState.kind !== 'retryable') return;
+		if (devWorldSandboxEnabled || !selfAccount || selfPositionWriteState.kind !== 'retryable') return;
 		void worldSession?.enterSelf();
 	}
 
