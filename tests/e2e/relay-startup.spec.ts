@@ -599,15 +599,19 @@ async function openReadyRelayWorld(page: Page, expectedParticipantCount = 2): Pr
 async function installPromptApiStub(page: Page, availability: 'available' | 'unavailable' = 'available'): Promise<void> {
 	await page.addInitScript(({ availability }) => {
 		const state = { prompts: [] as string[], published: false };
+		const createClone = () => ({
+			prompt: async (input: string) => {
+				state.prompts.push(input);
+				return JSON.stringify({ candidates: ['まずは自然な返答です。', '少しだけキャラクターらしい返答です。', 'ちょっと変化球の返答です。'] });
+			},
+			destroy: () => {}
+		});
 		Object.assign(window, {
 			__promptApiState: state,
 			LanguageModel: {
 				availability: async () => availability,
 				create: async () => ({
-					prompt: async (input: string) => {
-						state.prompts.push(input);
-						return JSON.stringify({ candidates: ['まずは自然な返答です。', '少しだけキャラクターらしい返答です。', 'ちょっと変化球の返答です。'] });
-					},
+					clone: async () => createClone(),
 					destroy: () => {}
 				})
 			}

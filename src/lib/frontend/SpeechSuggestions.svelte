@@ -97,6 +97,7 @@
 		return () => {
 			disposed = true;
 			abortController?.abort();
+			service.dispose();
 		};
 	});
 </script>

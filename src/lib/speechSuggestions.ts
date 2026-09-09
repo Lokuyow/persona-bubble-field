@@ -114,21 +114,39 @@ function parseCandidates(value: string): readonly string[] {
 }
 
 export function createSpeechSuggestionService(api: SpeechSuggestionApi | null = browserApi()) {
-	async function availability(): Promise<SpeechSuggestionAvailability> {
-		if (!api) return 'unsupported';
-		return api.availability(PROMPT_OPTIONS);
+	let baseSession: LanguageModel | null = null;
+	let basePreparation: Promise<LanguageModel> | null = null;
+	let disposed = false;
+
+	function abortError(): DOMException {
+		return new DOMException('Speech suggestion service was disposed.', 'AbortError');
 	}
 
-	async function generate(
-		request: SpeechSuggestionRequest,
-		options: Readonly<{ signal?: AbortSignal; onProgress?: (progress: SpeechSuggestionProgress) => void }> = {}
-	): Promise<readonly string[]> {
-		if (!api) throw new Error('Speech suggestions are not supported.');
-		const currentAvailability = await api.availability(PROMPT_OPTIONS);
-		if (currentAvailability === 'unavailable') throw new Error('Speech suggestions are unavailable.');
-		let session: LanguageModel | null = null;
-		try {
-			session = await api.create({
+	function isAbortError(error: unknown): boolean {
+		return error instanceof DOMException && error.name === 'AbortError';
+	}
+
+	function safeDestroy(session: LanguageModel | null): void {
+		try { session?.destroy(); } catch { /* Resource cleanup must not mask the generation result. */ }
+	}
+
+	function clearBase(session: LanguageModel | null = baseSession): void {
+		if (session && baseSession !== session) return;
+		const previous = baseSession;
+		baseSession = null;
+		safeDestroy(previous);
+	}
+
+	async function prepareBaseSession(
+		currentAvailability: Exclude<Availability, 'unavailable'>,
+		options: Readonly<{ signal?: AbortSignal; onProgress?: (progress: SpeechSuggestionProgress) => void }>
+	): Promise<{ session: LanguageModel; reused: boolean }> {
+		if (disposed) throw abortError();
+		if (baseSession) return { session: baseSession, reused: true };
+		if (basePreparation) return { session: await basePreparation, reused: true };
+
+		const preparation = (async () => {
+			const session = await api!.create({
 				...PROMPT_OPTIONS,
 				initialPrompts: [{ role: 'system', content: SYSTEM_PROMPT }],
 				...(options.onProgress && currentAvailability !== 'available' ? {
@@ -141,17 +159,76 @@ export function createSpeechSuggestionService(api: SpeechSuggestionApi | null = 
 				} : {}),
 				signal: options.signal
 			});
+			if (disposed) {
+				safeDestroy(session);
+				throw abortError();
+			}
+			baseSession = session;
+			return session;
+		})();
+		basePreparation = preparation;
+		try {
+			return { session: await preparation, reused: false };
+		} finally {
+			if (basePreparation === preparation) basePreparation = null;
+		}
+	}
+
+	async function availability(): Promise<SpeechSuggestionAvailability> {
+		if (!api || disposed) return 'unsupported';
+		return api.availability(PROMPT_OPTIONS);
+	}
+
+	async function generate(
+		request: SpeechSuggestionRequest,
+		options: Readonly<{ signal?: AbortSignal; onProgress?: (progress: SpeechSuggestionProgress) => void }> = {}
+	): Promise<readonly string[]> {
+		if (!api || disposed) throw new Error('Speech suggestions are not supported.');
+		if (options.signal?.aborted) throw new DOMException('Speech suggestion generation was cancelled.', 'AbortError');
+		const totalStartedAt = performance.now();
+		const availabilityStartedAt = totalStartedAt;
+		const currentAvailability = await api.availability(PROMPT_OPTIONS);
+		const availabilityMs = performance.now() - availabilityStartedAt;
+		if (currentAvailability === 'unavailable') throw new Error('Speech suggestions are unavailable.');
+		const baseStartedAt = performance.now();
+		const { session: base, reused: baseReused } = await prepareBaseSession(currentAvailability, options);
+		const baseCreateMs = baseReused ? 0 : performance.now() - baseStartedAt;
+		let session: LanguageModel | null = null;
+		try {
+			const cloneStartedAt = performance.now();
+			try {
+				session = await base.clone({ signal: options.signal });
+			} catch (error) {
+				if (!isAbortError(error)) clearBase(base);
+				throw error;
+			}
+			const cloneMs = performance.now() - cloneStartedAt;
+			const promptStartedAt = performance.now();
 			const response = await session.prompt(buildSpeechSuggestionPrompt(request), {
 				responseConstraint: RESPONSE_CONSTRAINT,
 				signal: options.signal
 			});
-			return parseCandidates(response);
+			const promptMs = performance.now() - promptStartedAt;
+			const parseStartedAt = performance.now();
+			const candidates = parseCandidates(response);
+			const parseMs = performance.now() - parseStartedAt;
+			if (import.meta.env.DEV) {
+				console.debug(`[speech-suggestions] availability=${availabilityMs.toFixed(0)}ms baseCreate=${baseCreateMs.toFixed(0)}ms clone=${cloneMs.toFixed(0)}ms prompt=${promptMs.toFixed(0)}ms parse=${parseMs.toFixed(0)}ms total=${(performance.now() - totalStartedAt).toFixed(0)}ms baseReused=${baseReused}`);
+			}
+			return candidates;
 		} finally {
-			session?.destroy();
+			safeDestroy(session);
 		}
 	}
 
-	return { availability, generate };
+	return {
+		availability,
+		generate,
+		dispose(): void {
+			disposed = true;
+			clearBase();
+		}
+	};
 }
 
 export const speechSuggestionPromptOptions = PROMPT_OPTIONS;
