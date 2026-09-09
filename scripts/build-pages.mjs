@@ -4,11 +4,7 @@ import { build } from 'vite';
 
 const PAGES_BASE_PATH = '/persona-bubble-field';
 const BACKGROUND_ASSET_PATH = `${PAGES_BASE_PATH}/field/prototype-danchi-courtyard.webp`;
-const TRACE_ASSET_PATHS = [
-	`${PAGES_BASE_PATH}/trace/trace-default.webp`,
-	`${PAGES_BASE_PATH}/trace/trace-root-read.webp`,
-	`${PAGES_BASE_PATH}/trace/trace-reply-unread.webp`
-];
+const TRACE_ASSET_PATH = `${PAGES_BASE_PATH}/trace/trace-icon-afterimage.svg`;
 
 process.env.BASE_PATH = PAGES_BASE_PATH;
 
@@ -29,10 +25,8 @@ if (html.includes('./field/prototype-danchi-courtyard.webp')) {
 
 await access(new URL('../build/field/prototype-danchi-courtyard.webp', import.meta.url), fsConstants.F_OK);
 
-for (const traceAssetPath of TRACE_ASSET_PATHS) {
-	const manifest = await readFile(new URL('../.svelte-kit/output/server/manifest-full.js', import.meta.url), 'utf8');
-	if (!manifest.includes(`"${traceAssetPath.slice(PAGES_BASE_PATH.length + 1)}"`)) {
-		throw new Error(`Pages build manifest must include trace asset ${traceAssetPath}.`);
-	}
-	await access(new URL(`../build${traceAssetPath.slice(PAGES_BASE_PATH.length)}`, import.meta.url), fsConstants.F_OK);
+const manifest = await readFile(new URL('../.svelte-kit/output/server/manifest-full.js', import.meta.url), 'utf8');
+if (!manifest.includes(`"${TRACE_ASSET_PATH.slice(PAGES_BASE_PATH.length + 1)}"`)) {
+	throw new Error(`Pages build manifest must include trace asset ${TRACE_ASSET_PATH}.`);
 }
+await access(new URL(`../build${TRACE_ASSET_PATH.slice(PAGES_BASE_PATH.length)}`, import.meta.url), fsConstants.F_OK);

@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 64 64"
+  width="64"
+  height="64"
+  fill="none">
+  <!--
+    Conversation trace icon.
+    Use CSS `color` to recolor the whole icon.
+    The rear bubble is intentionally lighter to suggest an afterimage / past utterance.
+  -->
+  <g fill="currentColor">
+    <path
+      opacity="0.34"
+      d="M8.5 18.5
+         C4.9 18.5 2 21.4 2 25
+         V34
+         C2 37.6 4.9 40.5 8.5 40.5
+         H19.3
+         L25.1 45.6
+         C25.9 46.3 27.1 45.5 26.7 44.5
+         L25.2 40.5
+         H29.5
+         C33.1 40.5 36 37.6 36 34
+         V25
+         C36 21.4 33.1 18.5 29.5 18.5
+         Z"/>
+    <path
+      d="M19.5 16
+         C14.8 16 11 19.8 11 24.5
+         V35.5
+         C11 40.2 14.8 44 19.5 44
+         H38.8
+         L48.2 52.1
+         C49.2 53 50.7 52 50.2 50.7
+         L47.7 44
+         H49.5
+         C54.2 44 58 40.2 58 35.5
+         V24.5
+         C58 19.8 54.2 16 49.5 16
+         Z"/>
+  </g>
+</svg>

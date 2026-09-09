@@ -14,9 +14,7 @@
 	import type { ParsedWorldMessage } from '$lib/nostrProtocol';
 
 	const FIELD_BACKGROUND_ASSET = '/field/prototype-danchi-courtyard.webp';
-	const TRACE_DEFAULT_ASSET = '/trace/trace-default.webp';
-	const TRACE_ROOT_READ_ASSET = '/trace/trace-root-read.webp';
-	const TRACE_REPLY_UNREAD_ASSET = '/trace/trace-reply-unread.webp';
+	const TRACE_ICON_ASSET = '/trace/trace-icon-afterimage.svg';
 
 	export type FieldParticipantView = ProjectedParticipant<Participant>;
 	export type TraceLightCell = TraceRootCell & Readonly<{
@@ -44,12 +42,6 @@
 	export type FieldSceneHandle = Readonly<{
 		cancelPointerGesture: () => void;
 	}>;
-
-	function traceLightAsset(cell: TraceLightCell): string {
-		if (cell.unreadReply) return TRACE_REPLY_UNREAD_ASSET;
-		if (cell.read) return TRACE_ROOT_READ_ASSET;
-		return TRACE_DEFAULT_ASSET;
-	}
 
 	type Props = Readonly<{
 		geometryReady: boolean;
@@ -246,7 +238,7 @@
 						data-trace-root-unread-reply={cell.unreadReply ? 'true' : undefined}
 						class:trace-light-read={cell.read}
 						class:trace-light-unread-reply={cell.unreadReply}
-						style={`left: ${world.x}px; top: ${world.y}px; background-image: url("${asset(traceLightAsset(cell))}");`}
+						style={`left: ${world.x}px; top: ${world.y}px; --trace-icon-image: url("${asset(TRACE_ICON_ASSET)}");`}
 					></span>
 				{/if}
 				{#if cell.inInvestigationRange}
@@ -415,17 +407,28 @@
 
 	.trace-light {
 		position: absolute;
-		width: max(22px, min(36px, calc(var(--cell-size) * 0.34)));
-		height: max(22px, min(36px, calc(var(--cell-size) * 0.34)));
-		background-position: center;
-		background-repeat: no-repeat;
-		background-size: contain;
+		width: max(22px, min(28px, calc(var(--cell-size) * 0.34)));
+		height: max(22px, min(28px, calc(var(--cell-size) * 0.34)));
+		color: #59697f;
+		background-color: currentColor;
+		-webkit-mask-image: var(--trace-icon-image);
+		-webkit-mask-position: center;
+		-webkit-mask-repeat: no-repeat;
+		-webkit-mask-size: contain;
+		mask-image: var(--trace-icon-image);
+		mask-position: center;
+		mask-repeat: no-repeat;
+		mask-size: contain;
 		pointer-events: none;
 		transform: translate(-50%, -50%);
 	}
 
 	.trace-light-read:not(.trace-light-unread-reply) {
 		opacity: 0.5;
+	}
+
+	.trace-light-unread-reply {
+		color: #cf06fe;
 	}
 
 	.trace-investigation-indicator {

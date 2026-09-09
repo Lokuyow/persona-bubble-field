@@ -856,9 +856,10 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('[data-trace-light-position="4,2"]')).toBeVisible();
 		const unreadLight = page.locator('[data-trace-light-position="5,2"]');
 		await expect(unreadLight).toBeVisible();
-		await expect(unreadLight).toHaveCSS('background-image', /trace-default\.webp/);
+		await expect(unreadLight).toHaveCSS('mask-image', /trace-icon-afterimage\.svg/);
 		await expect(unreadLight).toHaveCSS('opacity', '1');
-		await expect(page.locator('[data-trace-light-position="4,2"]')).toHaveCSS('background-image', /trace-reply-unread\.webp/);
+		await expect(page.locator('[data-trace-light-position="4,2"]')).toHaveCSS('mask-image', /trace-icon-afterimage\.svg/);
+		await expect(page.locator('[data-trace-light-position="4,2"]')).toHaveCSS('color', 'rgb(207, 6, 254)');
 		await expect(page.locator('.trace-unread-indicator')).toBeVisible();
 		await page.locator('.trace-unread-indicator').click();
 		await expect(page.locator('.trace-unread-explanation')).toContainText('どこかにあなたへの返信の痕跡があります');
@@ -872,7 +873,8 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('.trace-unread-indicator')).toHaveCount(0);
 		await page.locator('.field-area').click({ position: { x: 8, y: 8 } });
 		await expect(page.locator('[data-trace-light-position="4,2"]')).toHaveAttribute('data-trace-root-read', 'true');
-		await expect(page.locator('[data-trace-light-position="4,2"]')).toHaveCSS('background-image', /trace-root-read\.webp/);
+		await expect(page.locator('[data-trace-light-position="4,2"]')).toHaveCSS('mask-image', /trace-icon-afterimage\.svg/);
+		await expect(page.locator('[data-trace-light-position="4,2"]')).toHaveCSS('color', 'rgb(89, 105, 127)');
 		await expect(page.locator('[data-trace-light-position="4,2"]')).toHaveCSS('opacity', '0.5');
 		await page.reload();
 		await page.evaluate(() => {
@@ -886,7 +888,8 @@ test.describe('Relay startup', () => {
 		const light = page.locator('[data-trace-light-position="4,2"]');
 		await expect(light).toHaveAttribute('data-trace-root-read', 'true');
 		await expect(light).toHaveAttribute('data-trace-root-unread-reply', 'true');
-		await expect(light).toHaveCSS('background-image', /trace-reply-unread\.webp/);
+		await expect(light).toHaveCSS('mask-image', /trace-icon-afterimage\.svg/);
+		await expect(light).toHaveCSS('color', 'rgb(207, 6, 254)');
 		await expect(light).toHaveCSS('opacity', '1');
 		await expect(page.locator('.trace-unread-indicator')).toBeVisible();
 		await selectRelayTraceCell(page, '4,2');
@@ -896,7 +899,8 @@ test.describe('Relay startup', () => {
 		await page.locator('.field-area').click({ position: { x: 8, y: 8 } });
 		await expect(light).toHaveAttribute('data-trace-root-read', 'true');
 		await expect(light).not.toHaveAttribute('data-trace-root-unread-reply');
-		await expect(light).toHaveCSS('background-image', /trace-root-read\.webp/);
+		await expect(light).toHaveCSS('mask-image', /trace-icon-afterimage\.svg/);
+		await expect(light).toHaveCSS('color', 'rgb(89, 105, 127)');
 		await expect(light).toHaveCSS('opacity', '0.5');
 	});
 
