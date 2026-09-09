@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { Popover } from 'bits-ui';
 	import type { Character } from '$lib/character';
 	import type { SpeechType } from '$lib/conversation';
 	import {
@@ -134,53 +135,61 @@
 </script>
 
 {#if availability !== 'unsupported' && availability !== 'unavailable'}
-	<div class="suggestions-anchor">
-		<button
-			class="suggestions-toggle"
-			type="button"
-			aria-label="AI発言候補を生成"
-			title={editorIsEmpty === true ? '現在の会話から発言候補を生成' : '本文が空のときだけ候補を生成できます'}
-			disabled={busy || editorIsEmpty !== true}
-			onclick={() => void generate()}
-		>
-			<span aria-hidden="true">{generating ? '…' : '候補'}</span>
-		</button>
-		{#if panelOpen && candidates.length > 0}
-			<div class="suggestion-panel" aria-label="発言候補">
-				<p class="suggestion-heading">発言候補</p>
-				{#each candidates as candidate, index}
-					<div class="suggestion-item">
-						<button
-							class="suggestion-primary"
-							type="button"
-							disabled={busy || editorIsEmpty !== true}
-							aria-label={`候補${index + 1}: ${candidate} をそのまま送信`}
-							title="候補本文をそのまま送信"
-							onclick={() => void sendCandidate(candidate)}
-						>
-							<span class="suggestion-index" aria-hidden="true">{index + 1}</span>
-							<span class="suggestion-content">{candidate}</span>
-						</button>
-						<button
-							class="suggestion-secondary"
-							type="button"
-							disabled={busy || editorIsEmpty !== true}
-							aria-label={`候補${index + 1}をコンポーザーに追加`}
-							title="コンポーザーに追加"
-							onclick={() => void addCandidate(candidate)}
-						>追加</button>
+	<Popover.Root bind:open={panelOpen}>
+		<div class="suggestions-anchor">
+			<button
+				class="suggestions-toggle"
+				type="button"
+				aria-label="AI発言候補を生成"
+				title={editorIsEmpty === true ? '現在の会話から発言候補を生成' : '本文が空のときだけ候補を生成できます'}
+				disabled={busy || editorIsEmpty !== true}
+				onclick={() => void generate()}
+			>
+				<span aria-hidden="true">{generating ? '…' : '候補'}</span>
+			</button>
+			{#if panelOpen && candidates.length > 0}
+				<Popover.ContentStatic
+					trapFocus={false}
+					onOpenAutoFocus={(event) => event.preventDefault()}
+					onCloseAutoFocus={(event) => event.preventDefault()}
+				>
+					<div class="suggestion-panel" aria-label="発言候補">
+						<p class="suggestion-heading">発言候補</p>
+						{#each candidates as candidate, index}
+							<div class="suggestion-item">
+								<button
+									class="suggestion-primary"
+									type="button"
+									disabled={busy || editorIsEmpty !== true}
+									aria-label={`候補${index + 1}: ${candidate} をそのまま送信`}
+									title="候補本文をそのまま送信"
+									onclick={() => void sendCandidate(candidate)}
+								>
+									<span class="suggestion-index" aria-hidden="true">{index + 1}</span>
+									<span class="suggestion-content">{candidate}</span>
+								</button>
+								<button
+									class="suggestion-secondary"
+									type="button"
+									disabled={busy || editorIsEmpty !== true}
+									aria-label={`候補${index + 1}をコンポーザーに追加`}
+									title="コンポーザーに追加"
+									onclick={() => void addCandidate(candidate)}
+								>追加</button>
+							</div>
+						{/each}
 					</div>
-				{/each}
-			</div>
-		{/if}
-		{#if generating && (availability === 'downloadable' || availability === 'downloading')}
-			<p class="suggestion-status" role="status">{availabilityLabel(availability)}</p>
-		{:else if generating}
-			<p class="suggestion-status" role="status">候補を生成中…</p>
-		{:else if error}
-			<p class="suggestion-status suggestion-error" role="status">{error}</p>
-		{/if}
-	</div>
+				</Popover.ContentStatic>
+			{/if}
+			{#if generating && (availability === 'downloadable' || availability === 'downloading')}
+				<p class="suggestion-status" role="status">{availabilityLabel(availability)}</p>
+			{:else if generating}
+				<p class="suggestion-status" role="status">候補を生成中…</p>
+			{:else if error}
+				<p class="suggestion-status suggestion-error" role="status">{error}</p>
+			{/if}
+		</div>
+	</Popover.Root>
 {/if}
 
 <style>

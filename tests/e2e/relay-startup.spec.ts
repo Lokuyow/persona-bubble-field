@@ -1481,6 +1481,25 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('.suggestion-panel')).toHaveCount(0);
 	});
 
+	test('dismisses the candidate panel from an outside speech-type toggle click', async ({ page }) => {
+		await installPromptApiStub(page);
+		const selfSecret = new Uint8Array(32).fill(19);
+		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret));
+		const editor = await openReadyRelayWorld(page, 1);
+		const candidateButton = page.getByRole('button', { name: 'AI発言候補を生成' });
+		const speechTypeToggle = page.getByRole('button', { name: /発言タイプ: 通常/ });
+		await candidateButton.click();
+		await expect(page.locator('.suggestion-panel')).toBeVisible();
+		const publishedBefore = (await publishedMessages(page)).length;
+
+		await speechTypeToggle.click();
+
+		await expect(page.locator('.suggestion-panel')).toHaveCount(0);
+		await expect(page.getByRole('button', { name: /発言タイプ: 叫び/ })).toBeVisible();
+		expect((await publishedMessages(page)).length).toBe(publishedBefore);
+		await expect(editor).toHaveValue('');
+	});
+
 	test('keeps candidates open after direct publish failure and allows retry', async ({ page }) => {
 		await installPromptApiStub(page);
 		const selfSecret = new Uint8Array(32).fill(19);
