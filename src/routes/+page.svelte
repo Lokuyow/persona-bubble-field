@@ -111,7 +111,8 @@
 		acceptedTraceReplyTarget, clearTraceReplyMode, completeTraceReplySubmission,
 		createTraceReplyMode, selectTraceReplyTarget, type TraceReplyMode
 	} from '$lib/traceReplyMode';
-	import { resolveSpeechSubmission } from '$lib/speechSubmission';
+import { resolveSpeechSubmission } from '$lib/speechSubmission';
+import type { SpeechSuggestionConversationEntry } from '$lib/speechSuggestions';
 	import type { SpeechType } from '$lib/conversation';
 	import type { SpeechBubbleShape } from '$lib/speechBubblePath';
 	import {
@@ -200,7 +201,7 @@
 	let lastProfileTrigger: HTMLButtonElement | null = null;
 	let composerEditorIsEmpty: boolean | null = null;
 	let chatterComponent: { initialize(width: number): void; isInitialized(): boolean; toggle(): void; resetMeasurements(): void };
-	let composerComponent = $state.raw<{ focusEditor(): boolean; blurEditor(): boolean } | null>(null);
+	let composerComponent = $state.raw<{ focusEditor(): boolean; blurEditor(): boolean; applyContentIfEmpty(content: string): Promise<boolean> } | null>(null);
 	let fieldSceneComponent: FieldSceneHandle | null = null;
 	let visualWorldById = $state.raw<Record<string, WorldPoint>>({});
 	let visualCamera = $state.raw<WorldPoint | null>(null);
@@ -294,6 +295,35 @@
 			unreadReply: traceReadSnapshot.unreadReplyRootIds.includes(cell.roots[0].id)
 		})));
 	let traceConversationProjection = $derived(resolveTraceConversationProjection(traceConversationState));
+	let speechSuggestionCharacter = $derived(
+		devWorldSandboxEnabled
+			? getDevWorldCharacter(selectedCharacterId)
+			: selfAccount ? deriveCharacterFromPubkey(selfAccount.pubkey, CHARACTER_CATALOG)
+				: getCharacterById(selectedCharacterId) ?? CHARACTER_CATALOG[0]
+	);
+	let speechSuggestionConversation = $derived.by((): readonly SpeechSuggestionConversationEntry[] => {
+		const traceEvents = traceConversationProjection
+			? [
+				traceConversationProjection.root,
+				...(traceConversationProjection.parent ? [traceConversationProjection.parent.event] : []),
+				traceConversationProjection.current.event,
+				...traceConversationProjection.directReplies
+			]
+			: recentMessageTimeline;
+		const unique = new Map<string, { id: string; pubkey: string; content: string; createdAt: number }>();
+		for (const event of traceEvents) {
+			if (!unique.has(event.id)) unique.set(event.id, event);
+		}
+		return [...unique.values()]
+			.sort((left, right) => left.createdAt - right.createdAt || left.id.localeCompare(right.id))
+			.slice(-8)
+			.map((event) => ({
+				speaker: event.pubkey === DEV_WORLD_SELF_ID
+					? getDevWorldCharacter(selectedCharacterId).name
+					: deriveCharacterFromPubkey(event.pubkey, CHARACTER_CATALOG).name,
+				content: event.content
+			}));
+	});
 	let traceOnlyCellTriggers = $derived(traceRootCells.map((cell) => cell.position).filter((position) =>
 		!participantViews.some((participant) => sameCell(participant.position, position)) &&
 		traceMarkerCells.some((cell) => sameCell(cell.position, position))
@@ -1528,6 +1558,8 @@
 			{selectedSpeechType}
 			submissionInProgress={composerSubmissionInProgress}
 			hasUnreadReplies={traceReadSnapshot.hasUnreadReplies}
+			character={speechSuggestionCharacter}
+			suggestionConversation={speechSuggestionConversation}
 			onSpeechTypeChange={(next) => { selectedSpeechType = next; }}
 			submitContent={submitComposerContent}
 			desiredContext={composerDesiredContext}

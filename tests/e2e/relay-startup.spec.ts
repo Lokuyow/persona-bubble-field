@@ -575,7 +575,7 @@ async function installVisualAnimationRafMetrics(page: Page): Promise<void> {
 	});
 }
 
-async function openReadyRelayWorld(page: Page): Promise<Locator> {
+async function openReadyRelayWorld(page: Page, expectedParticipantCount = 2): Promise<Locator> {
 	await installHostOwnedStub(page);
 	await installDelayedRelay(page, { deferPrimaryEvents: true });
 	await page.goto('/');
@@ -592,8 +592,27 @@ async function openReadyRelayWorld(page: Page): Promise<Locator> {
 	}).toBe(true);
 	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimaryEvents(): void } }).__relayStartupTest.releasePrimaryEvents());
 	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
-	await expect(page.locator('.participant')).toHaveCount(2);
+	await expect(page.locator('.participant')).toHaveCount(expectedParticipantCount);
 	return editor;
+}
+
+async function installPromptApiStub(page: Page, availability: 'available' | 'unavailable' = 'available'): Promise<void> {
+	await page.addInitScript(({ availability }) => {
+		const state = { prompts: [] as string[], published: false };
+		Object.assign(window, {
+			__promptApiState: state,
+			LanguageModel: {
+				availability: async () => availability,
+				create: async () => ({
+					prompt: async (input: string) => {
+						state.prompts.push(input);
+						return JSON.stringify({ candidates: ['まずは自然な返答です。', '少しだけキャラクターらしい返答です。', 'ちょっと変化球の返答です。'] });
+					},
+					destroy: () => {}
+				})
+			}
+		});
+		}, { availability });
 }
 
 async function seedRelayAccount(page: Page, secretKey: Uint8Array, pubkey: string): Promise<void> {
@@ -1365,6 +1384,39 @@ test.describe('Relay startup', () => {
 
 		expect(colors.accentValue).not.toBe('');
 		expect(colors.composerAccent).toBe(colors.siteAccent);
+	});
+
+	test('generates on-device candidates, protects drafts, and applies selection without publishing', async ({ page }) => {
+		await installPromptApiStub(page);
+		const selfSecret = new Uint8Array(32).fill(19);
+		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret));
+		const editor = await openReadyRelayWorld(page, 1);
+		const candidateButton = page.getByRole('button', { name: 'AI発言候補を生成' });
+		await expect(candidateButton).toBeVisible();
+		await editor.fill('既存のdraft');
+		await expect(candidateButton).toBeDisabled();
+		await editor.fill('');
+		await expect(candidateButton).toBeEnabled();
+		const publishedBefore = (await publishedMessages(page)).length;
+		await candidateButton.click();
+		await expect(page.getByRole('button', { name: /まずは自然な返答です/ })).toBeVisible();
+		const prompt = await page.evaluate(() => (window as typeof window & {
+			__promptApiState: { prompts: string[] }
+		}).__promptApiState.prompts.at(-1));
+		expect(prompt).toContain('名前:');
+		expect(prompt).toContain('直近の会話本文');
+		await page.getByRole('button', { name: /まずは自然な返答です/ }).click();
+		await expect(editor).toHaveValue('まずは自然な返答です。');
+		expect((await publishedMessages(page)).length).toBe(publishedBefore);
+	});
+
+	test('keeps the normal Composer when Prompt API availability is unavailable', async ({ page }) => {
+		await installPromptApiStub(page, 'unavailable');
+		const selfSecret = new Uint8Array(32).fill(19);
+		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret));
+		const editor = await openReadyRelayWorld(page, 1);
+		await expect(editor).toBeVisible();
+		await expect(page.getByRole('button', { name: 'AI発言候補を生成' })).toHaveCount(0);
 	});
 
 	test('publishes normal, shout, and monologue through the editor button and Enter shortcuts', async ({ page }) => {

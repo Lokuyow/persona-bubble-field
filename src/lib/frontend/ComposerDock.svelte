@@ -1,18 +1,24 @@
 <script lang="ts">
 	import type { ComponentProps } from 'svelte';
 	import HostOwnedComposerLite from '$lib/HostOwnedComposerLite.svelte';
+	import SpeechSuggestions from '$lib/frontend/SpeechSuggestions.svelte';
 	import type { SpeechType } from '$lib/conversation';
+	import type { Character } from '$lib/character';
+	import type { SpeechSuggestionConversationEntry } from '$lib/speechSuggestions';
 
 	type Props = ComponentProps<typeof HostOwnedComposerLite> & {
 		selectedSpeechType: SpeechType;
 		submissionInProgress: boolean;
 		hasUnreadReplies: boolean;
+		character: Pick<Character, 'name' | 'about'>;
+		suggestionConversation: readonly SpeechSuggestionConversationEntry[];
 		onSpeechTypeChange: (next: SpeechType) => void;
 	};
 	let { selectedSpeechType, submissionInProgress, onSpeechTypeChange, submitContent,
 		desiredContext, loadPreview, onPreviewClear, onEditorEmptyChange, onPreferredHeightChange,
-		hasUnreadReplies }: Props = $props();
-	let composerComponent: { focusEditor(): boolean; blurEditor(): boolean } | null = null;
+		hasUnreadReplies, character, suggestionConversation }: Props = $props();
+	let composerComponent: { focusEditor(): boolean; blurEditor(): boolean; applyContentIfEmpty(content: string): Promise<boolean> } | null = null;
+	let editorIsEmpty = $state<boolean | null>(null);
 	let explanationVisible = $state(false);
 
 	$effect(() => {
@@ -28,6 +34,9 @@
 
 	export function focusEditor(): boolean { return composerComponent?.focusEditor() ?? false; }
 	export function blurEditor(): boolean { return composerComponent?.blurEditor() ?? false; }
+	export function applyContentIfEmpty(content: string): Promise<boolean> {
+		return composerComponent?.applyContentIfEmpty(content) ?? Promise.resolve(false);
+	}
 
 	function nextSpeechType(speechType: SpeechType): SpeechType {
 		const index = SPEECH_TYPE_ORDER.indexOf(speechType);
@@ -37,6 +46,11 @@
 	function cycleSpeechType(): void {
 		if (submissionInProgress) return;
 		onSpeechTypeChange(nextSpeechType(selectedSpeechType));
+	}
+
+	function handleEditorEmptyChange(isEmpty: boolean | null): void {
+		editorIsEmpty = isEmpty;
+		onEditorEmptyChange?.(isEmpty);
 	}
 
 </script>
@@ -54,6 +68,14 @@
 		>
 			<span aria-hidden="true">{SPEECH_TYPE_LABELS[selectedSpeechType]}</span>
 		</button>
+		<SpeechSuggestions
+			{character}
+			speechType={selectedSpeechType}
+			conversation={suggestionConversation}
+			editorIsEmpty={editorIsEmpty}
+			{submissionInProgress}
+			applyContentIfEmpty={(content) => composerComponent?.applyContentIfEmpty(content) ?? Promise.resolve(false)}
+		/>
 		{#if hasUnreadReplies}
 			<button
 				class="trace-unread-indicator"
@@ -75,7 +97,7 @@
 				{desiredContext}
 				{loadPreview}
 				{onPreviewClear}
-				{onEditorEmptyChange}
+				onEditorEmptyChange={handleEditorEmptyChange}
 				{onPreferredHeightChange}
 			/>
 		</div>

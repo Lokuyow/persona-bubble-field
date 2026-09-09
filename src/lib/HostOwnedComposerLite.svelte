@@ -62,6 +62,7 @@
 	let loadFailed = $state(false);
 	let composerReady = false;
 	let composer: HostOwnedComposerElement | null = null;
+	let editorIsEmpty: boolean | null = null;
 	const contextSync = createComposerContextSync({
 		setContext: (patch) => composer!.setContext(patch),
 		loadPreview: (targetId) => loadPreview?.(targetId) ?? Promise.resolve(null),
@@ -81,8 +82,13 @@
 		return true;
 	}
 
+	export async function applyContentIfEmpty(content: string): Promise<boolean> {
+		return contextSync.applyContentIfEmpty(content, () => editorIsEmpty);
+	}
+
 	onMount(() => {
 		let disposed = false;
+		editorIsEmpty = null;
 		onEditorEmptyChange?.(null);
 		const handlePreferredHeightChange = (event: Event) => {
 			const height = (event as HostOwnedPreferredHeightChangeEvent).detail?.height;
@@ -92,7 +98,10 @@
 		};
 		const handleEditorEmptyChange = (event: Event) => {
 			const isEmpty = (event as HostOwnedEditorEmptyChangeEvent).detail?.isEmpty;
-			if (typeof isEmpty === 'boolean') onEditorEmptyChange?.(isEmpty);
+			if (typeof isEmpty === 'boolean') {
+				editorIsEmpty = isEmpty;
+				onEditorEmptyChange?.(isEmpty);
+			}
 		};
 		const handleContextUpdated = (event: Event) => {
 			contextSync.contextUpdated((event as CustomEvent<{ reply?: unknown }>).detail?.reply);
@@ -134,7 +143,8 @@
 				if (!disposed) {
 					composerReady = true;
 					contextSync.ready();
-					onEditorEmptyChange?.(composer.editorIsEmpty);
+					editorIsEmpty = composer.editorIsEmpty;
+					onEditorEmptyChange?.(editorIsEmpty);
 					const height = composer.preferredHeight;
 					if (typeof height === 'number' && Number.isFinite(height) && height > 0) {
 						onPreferredHeightChange?.(height);
@@ -149,6 +159,7 @@
 			disposed = true;
 			contextSync.dispose();
 			composerReady = false;
+			editorIsEmpty = null;
 			onEditorEmptyChange?.(null);
 			composer?.removeEventListener('ehagaki-editor-empty-change', handleEditorEmptyChange);
 			composer?.removeEventListener('ehagaki-preferred-height-change', handlePreferredHeightChange);

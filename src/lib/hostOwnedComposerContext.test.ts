@@ -123,6 +123,22 @@ describe('Host-owned combined context synchronization', () => {
 		f.sync.dispose(); f.sync.request(request(2, b)); await flush();
 		expect(f.setContext).toHaveBeenCalledTimes(2);
 	});
+
+	it('applies candidate content through the synchronized path without changing reply context', async () => {
+		let currentReply: string | null = null;
+		const setContext = vi.fn(async (patch: ComposerContextPatch) => {
+			if (Object.hasOwn(patch, 'reply')) currentReply = patch.reply ?? null;
+			sync.contextUpdated(currentReply);
+		});
+		const sync = createComposerContextSync({ setContext, onPreviewClear: vi.fn() });
+		sync.request(request(1, a)); sync.ready(); await flush();
+		const applied = await sync.applyContentIfEmpty('候補本文', () => true);
+		expect(applied).toBe(true);
+		expect(setContext.mock.calls.at(-1)).toEqual([{ content: '候補本文' }]);
+		expect(sync.snapshot().fullySynced).toBe(true);
+		expect(await sync.applyContentIfEmpty('既存draftを上書きしない', () => false)).toBe(false);
+		expect(setContext).toHaveBeenCalledTimes(2);
+	});
 });
 
 describe('structured submit authority check', () => {

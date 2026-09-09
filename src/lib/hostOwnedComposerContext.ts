@@ -27,8 +27,8 @@ export type ComposerSyncSnapshot = Readonly<{
 }>;
 export type ComposerSubmitEnvelope = ComposerSyncSnapshot & Readonly<{ output: HostOwnedComposerOutput }>;
 export type ComposerContextPatch = Readonly<{
-	content?: null;
-	reply: string | null;
+	content?: string | null;
+	reply?: string | null;
 	preloadedEvents?: Readonly<Record<string, NostrEvent>>;
 	preloadedProfiles?: Readonly<Record<string, Readonly<{ displayName: string; picture: string }>>>;
 }>;
@@ -63,6 +63,7 @@ export function createComposerContextSync(options: Readonly<{
 	let ready = false;
 	let submitting = false;
 	let disposed = false;
+	const idleWaiters: Array<() => void> = [];
 
 	function snapshot(): ComposerSyncSnapshot {
 		return { generation: desired.generation, appliedGeneration, fullySynced: ready && !inFlight &&
@@ -96,8 +97,14 @@ export function createComposerContextSync(options: Readonly<{
 			appliedGeneration = null;
 		} finally {
 			inFlight = null;
+			for (const resolve of idleWaiters.splice(0)) resolve();
 			if (!disposed && operation.request !== desired) void drain();
 		}
+	}
+
+	async function waitForIdle(): Promise<void> {
+		if (!inFlight) return;
+		await new Promise<void>((resolve) => idleWaiters.push(resolve));
 	}
 
 	return {
@@ -126,6 +133,13 @@ export function createComposerContextSync(options: Readonly<{
 			submitting = false;
 			if (success) { observed = null; appliedGeneration = null; }
 			void drain();
+		},
+		async applyContentIfEmpty(content: string, isEditorEmpty: () => boolean | null): Promise<boolean> {
+			if (disposed || !ready || submitting || isEditorEmpty() !== true) return false;
+			await waitForIdle();
+			if (disposed || !ready || submitting || isEditorEmpty() !== true) return false;
+			await options.setContext({ content });
+			return true;
 		},
 		snapshot,
 		dispose(): void { disposed = true; ready = false; }
