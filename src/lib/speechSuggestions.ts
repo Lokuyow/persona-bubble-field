@@ -116,6 +116,7 @@ function parseCandidates(value: string): readonly string[] {
 export function createSpeechSuggestionService(api: SpeechSuggestionApi | null = browserApi()) {
 	let baseSession: LanguageModel | null = null;
 	let basePreparation: Promise<LanguageModel> | null = null;
+	let basePreparationController: AbortController | null = null;
 	let disposed = false;
 
 	function abortError(): DOMException {
@@ -145,6 +146,7 @@ export function createSpeechSuggestionService(api: SpeechSuggestionApi | null = 
 		if (baseSession) return { session: baseSession, reused: true };
 		if (basePreparation) return { session: await basePreparation, reused: true };
 
+		const preparationController = new AbortController();
 		const preparation = (async () => {
 			const session = await api!.create({
 				...PROMPT_OPTIONS,
@@ -157,9 +159,9 @@ export function createSpeechSuggestionService(api: SpeechSuggestionApi | null = 
 						});
 					}
 				} : {}),
-				signal: options.signal
+				signal: preparationController.signal
 			});
-			if (disposed) {
+			if (disposed || preparationController.signal.aborted) {
 				safeDestroy(session);
 				throw abortError();
 			}
@@ -167,10 +169,14 @@ export function createSpeechSuggestionService(api: SpeechSuggestionApi | null = 
 			return session;
 		})();
 		basePreparation = preparation;
+		basePreparationController = preparationController;
 		try {
 			return { session: await preparation, reused: false };
 		} finally {
-			if (basePreparation === preparation) basePreparation = null;
+			if (basePreparation === preparation) {
+				basePreparation = null;
+				basePreparationController = null;
+			}
 		}
 	}
 
@@ -226,6 +232,9 @@ export function createSpeechSuggestionService(api: SpeechSuggestionApi | null = 
 		generate,
 		dispose(): void {
 			disposed = true;
+			basePreparationController?.abort();
+			basePreparationController = null;
+			basePreparation = null;
 			clearBase();
 		}
 	};
