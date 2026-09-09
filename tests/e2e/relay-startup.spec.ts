@@ -873,7 +873,7 @@ test.describe('Relay startup', () => {
 		await page.locator('.field-area').click({ position: { x: 8, y: 8 } });
 		await expect(page.locator('[data-trace-light-position="4,2"]')).toHaveAttribute('data-trace-root-read', 'true');
 		await expect(page.locator('[data-trace-light-position="4,2"]')).toHaveCSS('background-image', /trace-root-read\.webp/);
-		await expect(page.locator('[data-trace-light-position="4,2"]')).toHaveCSS('opacity', '1');
+		await expect(page.locator('[data-trace-light-position="4,2"]')).toHaveCSS('opacity', '0.5');
 		await page.reload();
 		await page.evaluate(() => {
 			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
@@ -897,7 +897,7 @@ test.describe('Relay startup', () => {
 		await expect(light).toHaveAttribute('data-trace-root-read', 'true');
 		await expect(light).not.toHaveAttribute('data-trace-root-unread-reply');
 		await expect(light).toHaveCSS('background-image', /trace-root-read\.webp/);
-		await expect(light).toHaveCSS('opacity', '1');
+		await expect(light).toHaveCSS('opacity', '0.5');
 	});
 
 	test('passes target-author character profiles across root, nested reply, and clear context patches', async ({ page }) => {

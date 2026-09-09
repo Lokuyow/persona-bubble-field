@@ -415,13 +415,17 @@
 
 	.trace-light {
 		position: absolute;
-		width: max(18px, min(30px, calc(var(--cell-size) * 0.28)));
-		height: max(18px, min(30px, calc(var(--cell-size) * 0.28)));
+		width: max(22px, min(36px, calc(var(--cell-size) * 0.34)));
+		height: max(22px, min(36px, calc(var(--cell-size) * 0.34)));
 		background-position: center;
 		background-repeat: no-repeat;
 		background-size: contain;
 		pointer-events: none;
 		transform: translate(-50%, -50%);
+	}
+
+	.trace-light-read:not(.trace-light-unread-reply) {
+		opacity: 0.5;
 	}
 
 	.trace-investigation-indicator {
