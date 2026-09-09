@@ -8,7 +8,6 @@ import {
 	type Bounds,
 	type FieldSize,
 	type GridPosition,
-	type Size,
 	type WorldPoint
 } from './geometry';
 import { getParticipant, type PresenceParticipant, type PresenceState } from './presence';
@@ -26,7 +25,7 @@ export type ProjectedParticipant<T extends ProjectionParticipant> = T & Presence
 export type PresenceProjectionOptions = {
 	cellSize: number;
 	fieldAreaBounds: Bounds;
-	fieldWorldSize: Size;
+	cameraWorldBounds: Bounds;
 };
 
 export type PresenceProjection<T extends ProjectionParticipant> = {
@@ -56,7 +55,7 @@ export function projectPresence<T extends ProjectionParticipant>(
 	const camera = clampCamera(
 		gridToWorld(fallbackSelfPosition, options.cellSize),
 		{ width: options.fieldAreaBounds.width, height: options.fieldAreaBounds.height },
-		options.fieldWorldSize
+		options.cameraWorldBounds
 	);
 	const actualFieldTop = getActualFieldTop(options.fieldAreaBounds, camera);
 	const activeParticipants = participants

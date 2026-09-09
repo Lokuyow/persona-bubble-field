@@ -110,7 +110,7 @@ describe('DEV world sandbox', () => {
 		const options = {
 			cellSize: MOBILE_CELL_SIZE,
 			fieldAreaBounds: { x: 0, y: 260, width: 390, height: 584 },
-			fieldWorldSize: { width: 960, height: 480 }
+			cameraWorldBounds: { x: 0, y: 0, width: 960, height: 480 }
 		};
 		const initialProjection = projectPresence(initial, [{ id: DEV_WORLD_SELF_ID }], options);
 		const movedProjection = projectPresence(moved, [{ id: DEV_WORLD_SELF_ID }], options);
