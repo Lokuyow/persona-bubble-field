@@ -10,7 +10,7 @@
 	let label = $derived(formatRemainingLifespan(expiresAtMs, nowMs));
 </script>
 
-<div class="lifespan-hud" aria-live="polite" aria-label={label}>{label}</div>
+<div class="lifespan-hud" aria-label={label}>{label}</div>
 
 <style>
 	.lifespan-hud {
