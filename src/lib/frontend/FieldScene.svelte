@@ -14,9 +14,10 @@
 	import type { ParsedWorldMessage } from '$lib/nostrProtocol';
 
 	const FIELD_BACKGROUND_ASSET = '/field/prototype-danchi-courtyard.webp';
+	const TRACE_ICON_ASSET = '/trace/trace-icon.svg';
 
 	export type FieldParticipantView = ProjectedParticipant<Participant>;
-	export type TraceLightCell = TraceRootCell & Readonly<{
+	export type TraceMarkerCell = TraceRootCell & Readonly<{
 		occupied: boolean;
 		inInvestigationRange: boolean;
 		read: boolean;
@@ -50,7 +51,7 @@
 		cellSize: number;
 		camera: WorldPoint;
 		cameraAnimating: boolean;
-		traceLightCells: readonly TraceLightCell[];
+		traceMarkerCells: readonly TraceMarkerCell[];
 		proximityFeedback: Readonly<{ position: GridPosition }> | null;
 		traceOnlyCellTriggers: readonly GridPosition[];
 		participantViews: readonly FieldParticipantView[];
@@ -65,7 +66,7 @@
 		fieldActionLabel: (action: FieldCellAction) => string;
 		closeFieldActionMenu: () => void;
 		onOpenProfile: (characterId: string, trigger: HTMLButtonElement) => void;
-		traceLightWorldPosition: (position: GridPosition) => WorldPoint;
+		traceMarkerWorldPosition: (position: GridPosition) => WorldPoint;
 		onPointerMovementTakeover: (pointerId: number, direction: Direction) => void;
 		onPointerMovementUpdate: (pointerId: number, direction: Direction) => void;
 		onPointerMovementStop: (pointerId: number) => void;
@@ -79,7 +80,7 @@
 		cellSize,
 		camera,
 		cameraAnimating,
-		traceLightCells,
+		traceMarkerCells,
 		proximityFeedback,
 		traceOnlyCellTriggers,
 		participantViews,
@@ -94,7 +95,7 @@
 		fieldActionLabel,
 		closeFieldActionMenu,
 		onOpenProfile,
-		traceLightWorldPosition,
+		traceMarkerWorldPosition,
 		onPointerMovementTakeover,
 		onPointerMovementUpdate,
 		onPointerMovementStop
@@ -226,18 +227,18 @@
 			style={`--field-background-image: url("${asset(FIELD_BACKGROUND_ASSET)}");`}
 			aria-hidden="true"
 		></div>
-		<div class="trace-light-layer" aria-hidden="true">
-			{#each traceLightCells as cell (`${cell.position.x},${cell.position.y}`)}
+		<div class="trace-marker-layer" aria-hidden="true">
+			{#each traceMarkerCells as cell (`${cell.position.x},${cell.position.y}`)}
 				{#if !cell.occupied}
-					{const world = traceLightWorldPosition(cell.position)}
+					{const world = traceMarkerWorldPosition(cell.position)}
 					<span
-						class="trace-light"
-						data-trace-light-position={`${cell.position.x},${cell.position.y}`}
+						class="trace-marker"
+						data-trace-marker-position={`${cell.position.x},${cell.position.y}`}
 						data-trace-root-read={cell.read ? 'true' : 'false'}
 						data-trace-root-unread-reply={cell.unreadReply ? 'true' : undefined}
-						class:trace-light-read={cell.read}
-						class:trace-light-unread-reply={cell.unreadReply}
-						style={`left: ${world.x}px; top: ${world.y}px;`}
+						class:trace-marker-read={cell.read}
+						class:trace-marker-unread-reply={cell.unreadReply}
+						style={`left: ${world.x}px; top: ${world.y}px; --trace-icon-image: url("${asset(TRACE_ICON_ASSET)}");`}
 					></span>
 				{/if}
 				{#if cell.inInvestigationRange}
@@ -397,34 +398,37 @@
 		pointer-events: none;
 	}
 
-	.trace-light-layer {
+	.trace-marker-layer {
 		position: absolute;
 		inset: 0;
 		z-index: 4;
 		pointer-events: none;
 	}
 
-	.trace-light {
+	.trace-marker {
 		position: absolute;
-		width: max(6px, calc(var(--cell-size) * 0.14));
-		height: max(6px, calc(var(--cell-size) * 0.14));
-		border: 1px solid rgba(255, 250, 205, 0.84);
-		border-radius: 50%;
-		background: rgba(255, 238, 154, 0.75);
-		box-shadow: 0 0 8px 3px rgba(255, 225, 120, 0.42);
+		width: max(22px, min(40px, calc(var(--cell-size) * 0.36)));
+		height: max(22px, min(40px, calc(var(--cell-size) * 0.36)));
+		color: #59697f;
+		background-color: currentColor;
+		-webkit-mask-image: var(--trace-icon-image);
+		-webkit-mask-position: center;
+		-webkit-mask-repeat: no-repeat;
+		-webkit-mask-size: contain;
+		mask-image: var(--trace-icon-image);
+		mask-position: center;
+		mask-repeat: no-repeat;
+		mask-size: contain;
 		pointer-events: none;
 		transform: translate(-50%, -50%);
 	}
 
-	.trace-light-read:not(.trace-light-unread-reply) {
-		opacity: 0.32;
-		box-shadow: 0 0 5px 1px rgba(255, 225, 120, 0.18);
+	.trace-marker-read:not(.trace-marker-unread-reply) {
+		opacity: 0.34;
 	}
 
-	.trace-light-unread-reply {
-		border-color: rgba(255, 220, 188, 0.96);
-		background: rgba(224, 111, 84, 0.9);
-		box-shadow: 0 0 8px 3px rgba(224, 111, 84, 0.5);
+	.trace-marker-unread-reply {
+		color: #cf06fe;
 	}
 
 	.trace-investigation-indicator {

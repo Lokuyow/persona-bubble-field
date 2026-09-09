@@ -30,17 +30,17 @@ root単位LRUだけでは1000件以下にできない場合、たとえば単一
 
 reply-tree LRU evictionではrootとroot read stateを残し、そのtreeのreply cache、reply read/unread、notification metadataを忘れる。再open時はRelayからreply historyを取得し直す。
 
-### root lightとauthor ghost
+### root iconとauthor ghost
 
-通常時、trace cellには共通の小さなlightだけを表示し、author ghostや件数は表示しない。replyは独立した通常field lightを生成しない。field上の通常lightはroot traceだけが所有する。
+通常時、trace cellにはroot traceが所有する小さな痕跡アイコンを表示し、author ghostや件数は表示しない。rootが未読の場合は通常の痕跡アイコン、rootが既読の場合は既読用の痕跡アイコン、replyが未読の場合はreply未読用の痕跡アイコンを表示する。reply未読の表示はroot既読より優先する。replyは独立した通常fieldアイコンを生成しない。
 
-表示中のroot lightがinvestigation range内にある場合は、調査可能であることを示す小さなinteraction indicatorをlight付近に表示する。indicatorはlogical-cell selectionを補助する表示であり、独立したpixel hit targetにはしない。
+表示中のrootアイコンがinvestigation range内にある場合は、調査可能であることを示す小さなinteraction indicatorをアイコン付近に表示する。indicatorはlogical-cell selectionを補助する表示であり、独立したpixel hit targetにはしない。
 
 rootを調査するとroot author ghostを表示する。authorはpubkeyから既存の決定的character割当で導出し、character catalogのimage / name / aboutだけを使用する。kind 0の取得、raw pubkey、npubの表示は行わない。reply authorはbubbleの兄弟native Profile buttonからProfile Dialogを開ける。
 
-cellにcurrent participantがいなければghostはparticipant相当位置に置く。いる場合はcurrentを優先してghostをcell edgeへ小さく半透明で置く。ghostはpresence、collision、occupancyに影響しない。current participantがrootと同cellにいる場合、root lightは非表示にする。investigation range内では既存のinteraction indicatorでTraceの存在を示し、participantの有無に関係なくcell右上の固定位置へ表示する。lightとindicatorは独立したpixel hit targetではなく、cellのlogical selection規則を使う。rootを調査してそのroot conversationが開いている間は、対象rootが属するcellのroot lightを非表示にする。conversationを閉じれば再表示する。
+cellにcurrent participantがいなければghostはparticipant相当位置に置く。いる場合はcurrentを優先してghostをcell edgeへ小さく半透明で置く。ghostはpresence、collision、occupancyに影響しない。current participantがrootと同cellにいる場合、rootアイコンは非表示にする。investigation range内では既存のinteraction indicatorでTraceの存在を示し、participantの有無に関係なくcell右上の固定位置へ表示する。アイコンとindicatorは独立したpixel hit targetではなく、cellのlogical selection規則を使う。rootを調査してそのroot conversationが開いている間は、対象rootが属するcellのrootアイコンを非表示にする。conversationを閉じれば再表示する。
 
-root lightはcellごとに1つだけ表示し、件数表示は持たない。logical cellから調査できるrootも常に1件である。
+rootアイコンはcellごとに1つだけ表示し、件数表示は持たない。logical cellから調査できるrootも常に1件である。
 
 ### investigation range
 
@@ -115,8 +115,8 @@ root readは、root ghostと実際のroot本文bubbleの**両方**が実表示�
 
 自分がauthorであるeventへのdirect replyだけを未読候補とする。self-replyは表示できてもnotification対象外とする。
 
-- root read/unreadはlight opacityへ反映する。reply unreadの有無はlight colorへ反映する。
-- reply unreadの有無はroot lightのcolorへ反映し、reply unreadが存在する場合はroot readによるlightのopacity低下よりpresentation上優先する。
+- root read/unreadはrootアイコンの状態画像へ反映する。reply unreadの有無もreply未読用アイコンとして表示する。
+- reply unreadが存在する場合はroot既読よりpresentation上優先し、rootが既読でもreply未読用アイコンを表示する。既存のread/unread意味論は変更しない。
 - global unread indicatorはComposer dockに置き、Chatterとは別UIとする。操作時は「どこかにあなたへの返信の痕跡があります」のように未読存在だけを説明する。本文、author、場所、方向、距離、件数を表示せず、auto-navigationもしない。
 
 ## 27. trace bubbleの視覚的優先順位

@@ -100,7 +100,7 @@
 		type FieldActionMenu,
 		type FieldParticipantView,
 		type FieldSceneHandle,
-		type TraceLightCell,
+		type TraceMarkerCell,
 		type TraceRootGhost
 	} from '$lib/frontend/FieldScene.svelte';
 	import ComposerKeyboardBinding from '$lib/frontend/ComposerKeyboardBinding.svelte';
@@ -280,7 +280,7 @@
 	let selfLogicalPosition = $derived(selfPresence?.position ?? null);
 	let selfIsActive = $derived(selfPresence?.status === 'active');
 	let traceRootCells = $derived(groupTraceRoots(effectiveTraceRoots));
-	let traceLightCells: readonly TraceLightCell[] = $derived(traceRootCells
+	let traceMarkerCells: readonly TraceMarkerCell[] = $derived(traceRootCells
 		.filter((cell) => traceConversationState.kind !== 'open' || !sameCell(cell.position, traceConversationState.root.position))
 		.map((cell) => ({
 			...cell,
@@ -295,7 +295,7 @@
 	let traceConversationProjection = $derived(resolveTraceConversationProjection(traceConversationState));
 	let traceOnlyCellTriggers = $derived(traceRootCells.map((cell) => cell.position).filter((position) =>
 		!participantViews.some((participant) => sameCell(participant.position, position)) &&
-		traceLightCells.some((cell) => sameCell(cell.position, position))
+		traceMarkerCells.some((cell) => sameCell(cell.position, position))
 	));
 
 	function isActuallyPresented(element: Element | null): element is HTMLElement {
@@ -962,7 +962,7 @@
 			.filter((participant) => sameCell(participant.position, position))
 			.map((participant) => participant.id);
 		let trace: Extract<FieldCellAction, { kind: 'trace' }> | null = null;
-		const visibleTraceAtCell = traceLightCells.some((cell) => sameCell(cell.position, position));
+		const visibleTraceAtCell = traceMarkerCells.some((cell) => sameCell(cell.position, position));
 		const reselectCurrentRoot = traceConversationProjection?.current.kind === 'root' &&
 			sameCell(traceConversationProjection.current.event.position, position) && visibleTraceAtCell;
 		if (reselectCurrentRoot && !replyMode.target && selfIsActive && selfLogicalPosition && isWithinTraceInvestigationRange(selfLogicalPosition, position)) {
@@ -1039,7 +1039,7 @@
 	function resolveFieldCellSelection(position: { x: number; y: number }, trigger?: HTMLButtonElement): void {
 		const resolution = resolveFieldCellActions(actionsForCell(position));
 		if (resolution.kind === 'none') {
-			const visibleOutOfRangeTrace = selfIsActive && traceLightCells.some((cell) => sameCell(cell.position, position) && !cell.inInvestigationRange);
+			const visibleOutOfRangeTrace = selfIsActive && traceMarkerCells.some((cell) => sameCell(cell.position, position) && !cell.inInvestigationRange);
 			if (visibleOutOfRangeTrace) {
 				showTraceProximityFeedback(position);
 				return;
@@ -1287,7 +1287,7 @@
 		acceptPresence(resetDevWorldPresence(FIELD, Date.now()));
 	}
 
-	function traceLightWorldPosition(position: { x: number; y: number }): WorldPoint {
+	function traceMarkerWorldPosition(position: { x: number; y: number }): WorldPoint {
 		return {
 			x: (position.x + 0.5) * cellSize,
 			y: (position.y + 0.5) * cellSize
@@ -1456,7 +1456,7 @@
 				{cellSize}
 				{camera}
 				cameraAnimating={visualMotion !== null}
-				{traceLightCells}
+				{traceMarkerCells}
 				{proximityFeedback}
 				{traceOnlyCellTriggers}
 				{participantViews}
@@ -1471,7 +1471,7 @@
 				fieldActionLabel={fieldActionLabel}
 				closeFieldActionMenu={closeFieldActionMenu}
 				onOpenProfile={openProfile}
-				traceLightWorldPosition={traceLightWorldPosition}
+				traceMarkerWorldPosition={traceMarkerWorldPosition}
 				onPointerMovementTakeover={movementInputController.takeOverPointer}
 				onPointerMovementUpdate={movementInputController.updatePointer}
 				onPointerMovementStop={movementInputController.stopPointer}

@@ -367,7 +367,7 @@ test.describe('DEV World Sandbox', () => {
 		await expect(preview).toHaveCount(0);
 		await expect(editor).toHaveValue('preserved A');
 		await page.locator('.field-area').click({ position: { x: 8, y: 8 } });
-		await expect(page.locator('[data-trace-light-position="8,4"]')).toHaveCount(1);
+		await expect(page.locator('[data-trace-marker-position="8,4"]')).toHaveCount(1);
 		await selectCell('8,4');
 		const menu = page.getByRole('menu');
 		if (await menu.isVisible()) await page.getByRole('menuitem', { name: '痕跡を調べる', exact: true }).click();
@@ -396,7 +396,7 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '6,3');
 		await expect(own).toHaveCount(0);
 		await expect(page.locator('.trace-root-card')).toHaveCount(0);
-		await expect(page.locator('[data-trace-light-position="8,4"]')).toHaveCount(1);
+		await expect(page.locator('[data-trace-marker-position="8,4"]')).toHaveCount(1);
 		await page.keyboard.press('ArrowRight');
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '7,3');
 		await expect(own).toHaveCount(0);
@@ -688,7 +688,7 @@ test.describe('DEV World Sandbox', () => {
 		await expect(preview).toHaveCount(0);
 		await expect(page.locator('.trace-root-card')).toHaveCount(0);
 		await expect(page.locator('[data-trace-reply-id="' + '7'.repeat(64) + '"]')).toHaveCount(0);
-		await expect(page.locator('[data-trace-light-position="8,4"]')).toHaveCount(1);
+		await expect(page.locator('[data-trace-marker-position="8,4"]')).toHaveCount(1);
 
 		await page.reload();
 		await page.getByRole('button', { name: 'Hide Chatter' }).click();
@@ -705,7 +705,7 @@ test.describe('DEV World Sandbox', () => {
 		await expect(preview).toHaveCount(0);
 		await expect(page.locator('.trace-root-card')).toHaveCount(0);
 		await expect(page.locator('[data-trace-reply-id="' + '7'.repeat(64) + '"]')).toHaveCount(0);
-		await expect(page.locator('[data-trace-light-position="8,4"]')).toHaveCount(1);
+		await expect(page.locator('[data-trace-marker-position="8,4"]')).toHaveCount(1);
 	});
 
 	test('starts with the local-only self and deterministic character presentation', async ({ page }) => {
@@ -724,7 +724,7 @@ test.describe('DEV World Sandbox', () => {
 		await expect(self.locator('img')).toHaveAttribute('src', /characters\/001\.webp$/);
 	});
 
-	test('uses logical cells for trace actions while lights remain decorative', async ({ page }) => {
+	test('uses logical cells for trace actions while markers remain decorative', async ({ page }) => {
 		await page.setViewportSize({ width: 390, height: 844 });
 		await page.emulateMedia({ reducedMotion: 'reduce' });
 		await page.addInitScript(() => {
@@ -751,15 +751,15 @@ test.describe('DEV World Sandbox', () => {
 			__traceExternalCalls: { webSocketUrls: string[]; indexedDbOpen: number }
 		}).__traceExternalCalls);
 
-		const lights = page.locator('.trace-light');
-		await expect(lights).toHaveCount(3);
-		await expect(page.locator('[data-trace-light-position="2,2"]')).toHaveCount(1);
-		await expect(page.locator('[data-trace-light-position="7,3"]')).toHaveCount(0);
-		await expect(page.locator('[data-trace-light-position="8,4"]')).toHaveCount(1);
-		await expect(page.locator('[data-trace-light-position="8,3"]')).toHaveCount(1);
+		const markers = page.locator('.trace-marker');
+		await expect(markers).toHaveCount(3);
+		await expect(page.locator('[data-trace-marker-position="2,2"]')).toHaveCount(1);
+		await expect(page.locator('[data-trace-marker-position="7,3"]')).toHaveCount(0);
+		await expect(page.locator('[data-trace-marker-position="8,4"]')).toHaveCount(1);
+		await expect(page.locator('[data-trace-marker-position="8,3"]')).toHaveCount(1);
 		await expect(page.locator('[data-trace-indicator-position="2,2"]')).toHaveCount(0);
 		await expect(page.locator('.trace-investigation-indicator')).toHaveCount(3);
-		const presentation = await lights.evaluateAll((elements) => elements.map((element) => ({
+		const presentation = await markers.evaluateAll((elements) => elements.map((element) => ({
 			text: element.textContent,
 			pointerEvents: getComputedStyle(element).pointerEvents
 		})));
@@ -768,10 +768,10 @@ test.describe('DEV World Sandbox', () => {
 		const geometry = await page.evaluate(() => {
 			const grid = document.querySelector<HTMLElement>('.field-grid');
 			const scene = document.querySelector<HTMLElement>('.field-scene');
-			const empty = document.querySelector<HTMLElement>('[data-trace-light-position="8,4"]');
+			const empty = document.querySelector<HTMLElement>('[data-trace-marker-position="8,4"]');
 			const emptyIndicator = document.querySelector<HTMLElement>('[data-trace-indicator-position="8,4"]');
 			const occupiedIndicator = document.querySelector<HTMLElement>('[data-trace-indicator-position="7,3"]');
-			if (!grid || !scene || !empty || !emptyIndicator || !occupiedIndicator) throw new Error('Expected trace light geometry.');
+			if (!grid || !scene || !empty || !emptyIndicator || !occupiedIndicator) throw new Error('Expected trace marker geometry.');
 			const gridRect = grid.getBoundingClientRect();
 			const emptyRect = empty.getBoundingClientRect();
 			const emptyIndicatorRect = emptyIndicator.getBoundingClientRect();
@@ -795,7 +795,7 @@ test.describe('DEV World Sandbox', () => {
 
 		const before = await page.evaluate(() => ({
 			gridLeft: document.querySelector<HTMLElement>('.field-grid')!.getBoundingClientRect().left,
-			lightLeft: document.querySelector<HTMLElement>('[data-trace-light-position="2,2"]')!.getBoundingClientRect().left
+			markerLeft: document.querySelector<HTMLElement>('[data-trace-marker-position="2,2"]')!.getBoundingClientRect().left
 		}));
 		await page.locator('[data-cell-position="8,4"]').click();
 		await expect(page.locator('[data-trace-root-id="' + '2'.repeat(64) + '"]')).toContainText('trace-only root near the viewer');
@@ -807,15 +807,15 @@ test.describe('DEV World Sandbox', () => {
 		await page.mouse.move(start.x + 24, start.y);
 		await page.mouse.up();
 		await expect(self).toHaveAttribute('data-position', '8,3');
-		await expect(page.locator('[data-trace-light-position="7,3"]')).toHaveCount(1);
+		await expect(page.locator('[data-trace-marker-position="7,3"]')).toHaveCount(1);
 		const actionMenu = page.getByRole('menu', { name: 'Cell actions' });
 		await expect(actionMenu).toHaveCount(0);
 		const after = await page.evaluate(() => ({
 			gridLeft: document.querySelector<HTMLElement>('.field-grid')!.getBoundingClientRect().left,
-			lightLeft: document.querySelector<HTMLElement>('[data-trace-light-position="2,2"]')!.getBoundingClientRect().left
+			markerLeft: document.querySelector<HTMLElement>('[data-trace-marker-position="2,2"]')!.getBoundingClientRect().left
 		}));
 		expect(after.gridLeft).not.toBe(before.gridLeft);
-		expect(after.lightLeft - before.lightLeft).toBeCloseTo(after.gridLeft - before.gridLeft, 3);
+		expect(after.markerLeft - before.markerLeft).toBeCloseTo(after.gridLeft - before.gridLeft, 3);
 		expect(await page.evaluate(() => (window as never as {
 			__traceExternalCalls: { webSocketUrls: string[]; indexedDbOpen: number }
 		}).__traceExternalCalls)).toEqual(externalCallBaseline);
@@ -826,6 +826,7 @@ test.describe('DEV World Sandbox', () => {
 		await page.emulateMedia({ reducedMotion: 'reduce' });
 		await page.goto('/?devWorld=1&devTrace=lights');
 		await expect(page.locator('main')).toHaveAttribute('data-trace-runtime', 'dev');
+		const markers = page.locator('.trace-marker');
 		const hideTimeline = page.getByRole('button', { name: 'Hide Chatter' });
 		if (await hideTimeline.isVisible()) await hideTimeline.click();
 
@@ -838,8 +839,8 @@ test.describe('DEV World Sandbox', () => {
 		await page.locator('[data-cell-position="8,4"]').click({ position: { x: 4, y: 4 } });
 		await expect(page.locator('[data-trace-root-id="' + '2'.repeat(64) + '"]')).toContainText('trace-only root near the viewer');
 		await expect(page.locator('[data-trace-ghost-root-id="' + '2'.repeat(64) + '"]')).toBeVisible();
-		await expect(page.locator('[data-trace-light-position="8,4"]')).toHaveCount(0);
-		await expect(page.locator('.trace-light')).toHaveCount(2);
+		await expect(page.locator('[data-trace-marker-position="8,4"]')).toHaveCount(0);
+		await expect(markers).toHaveCount(2);
 		await expect(page.locator('.trace-reply-status')).toHaveCount(0);
 		await expect.poll(() => page.locator('[data-bubble-id="dev-trace-live-message"]').evaluate((element) => getComputedStyle(element).transform)).toBe(liveAnchor);
 
@@ -946,18 +947,19 @@ test.describe('DEV World Sandbox', () => {
 
 		await page.locator('.field-area').click({ position: { x: 8, y: 8 } });
 		await expect(page.locator('.trace-root-bubble')).toHaveCount(0);
-		await expect(page.locator('[data-trace-light-position="8,4"]')).toHaveCount(1);
-		await expect(page.locator('.trace-light')).toHaveCount(4);
+		await expect(page.locator('[data-trace-marker-position="8,4"]')).toHaveCount(1);
+		await expect(markers).toHaveCount(4);
 	});
 
-	test('does not leave a selectable trigger behind for the hidden open Trace light', async ({ page }) => {
+	test('does not leave a selectable trigger behind for the hidden open Trace marker', async ({ page }) => {
 		await page.setViewportSize({ width: 900, height: 720 });
 		await page.emulateMedia({ reducedMotion: 'reduce' });
 		await page.goto('/?devWorld=1&devTrace=lights');
 		await expect(page.locator('[data-cell-position="8,4"]')).toBeVisible();
+		const markers = page.locator('.trace-marker');
 		await page.locator('[data-cell-position="8,4"]').click();
 		await expect(page.locator('[data-trace-root-id="' + '2'.repeat(64) + '"]')).toBeVisible();
-		await expect(page.locator('[data-trace-light-position="8,4"]')).toHaveCount(0);
+		await expect(page.locator('[data-trace-marker-position="8,4"]')).toHaveCount(0);
 		await expect(page.locator('[data-trace-indicator-position="8,4"]')).toHaveCount(0);
 		await expect(page.locator('[data-cell-position="8,4"]')).toHaveCount(0);
 		const cell = await page.locator('.field-grid').evaluate((grid) => {

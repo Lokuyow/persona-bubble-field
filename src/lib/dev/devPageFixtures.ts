@@ -39,7 +39,7 @@ export function applyDevPageFixtures(searchParams: URLSearchParams, ports: Fixtu
 	}
 	const devTrace = searchParams.get('devTrace');
 	if (devTrace === 'lights' || devTrace === 'replies') {
-		seedDevTraceLightFixture();
+		seedDevTraceMarkerFixture();
 	}
 	if (devTrace === 'replies') {
 		ports.enableTraceReplyFixture();
@@ -74,7 +74,7 @@ export function applyDevPageFixtures(searchParams: URLSearchParams, ports: Fixtu
 		ports.setRecentMessageTimeline(createRecentMessageTimeline(messages));
 	}
 
-	function seedDevTraceLightFixture(): void {
+	function seedDevTraceMarkerFixture(): void {
 		const nowMs = Date.now();
 		const now = Math.floor(nowMs / 1000);
 		const livePubkey = 'f'.repeat(64);
