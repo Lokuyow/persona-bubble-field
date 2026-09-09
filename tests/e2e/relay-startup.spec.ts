@@ -1481,7 +1481,25 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('.suggestion-panel')).toHaveCount(0);
 	});
 
-	test('dismisses the candidate panel from an outside speech-type toggle click', async ({ page }) => {
+	test('closes the candidate panel from its explicit close button without side effects', async ({ page }) => {
+		await installPromptApiStub(page);
+		const selfSecret = new Uint8Array(32).fill(19);
+		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret));
+		const editor = await openReadyRelayWorld(page, 1);
+		const candidateButton = page.getByRole('button', { name: 'AI発言候補を生成' });
+		await candidateButton.click();
+		await expect(page.locator('.suggestion-panel')).toBeVisible();
+		const publishedBefore = (await publishedMessages(page)).length;
+
+		await page.getByRole('button', { name: '発言候補を閉じる' }).click();
+
+		await expect(page.locator('.suggestion-panel')).toHaveCount(0);
+		expect((await publishedMessages(page)).length).toBe(publishedBefore);
+		await expect(editor).toHaveValue('');
+		await expect(page.getByRole('button', { name: /発言タイプ: 通常/ })).toBeVisible();
+	});
+
+	test('keeps the candidate panel open while an outside speech-type toggle is used', async ({ page }) => {
 		await installPromptApiStub(page);
 		const selfSecret = new Uint8Array(32).fill(19);
 		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret));
@@ -1494,7 +1512,7 @@ test.describe('Relay startup', () => {
 
 		await speechTypeToggle.click();
 
-		await expect(page.locator('.suggestion-panel')).toHaveCount(0);
+		await expect(page.locator('.suggestion-panel')).toBeVisible();
 		await expect(page.getByRole('button', { name: /発言タイプ: 叫び/ })).toBeVisible();
 		expect((await publishedMessages(page)).length).toBe(publishedBefore);
 		await expect(editor).toHaveValue('');
