@@ -116,7 +116,7 @@ afterEach(() => {
 });
 
 describe('protected account creation and restore', () => {
-	it('creates v2 protected records without a plaintext secret', async () => {
+	it('creates v3 protected records and initial game state without a plaintext secret', async () => {
 		const result = await loadOrCreateAccount();
 		expect(result.kind).toBe('created');
 		const account = accountFrom(result);
@@ -298,7 +298,7 @@ describe('profile marker persistence and stale snapshots', () => {
 });
 
 describe('database version barrier', () => {
-	it('opens v2 and rejects the old v1 open path', async () => {
+	it('opens v3 and rejects the old v2 open path', async () => {
 		await loadOrCreateAccount();
 		await expect(database(2)).rejects.toMatchObject({ name: 'VersionError' });
 	});

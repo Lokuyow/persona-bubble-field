@@ -716,35 +716,31 @@
 				const personaResult = await loadOrCreatePersona();
 				if (personaResult.kind !== 'created' && personaResult.kind !== 'restored') {
 					setComposerTerminalError(new Error('Persona is unavailable for publishing.'));
-					return;
-				}
-				personaSnapshot = personaResult.persona;
-				selfAccount = personaResult.persona.account;
-				if (isPersonaExpired(personaResult.persona.gameState, Date.now())) {
-					await beginDeathTransition(personaResult.persona);
-					return;
-				}
-				if (selfAccount && selfAccount.characterProfileRevision !== CURRENT_CHARACTER_PROFILE_REVISION) {
-					const character = deriveCharacterFromPubkey(selfAccount.pubkey, CHARACTER_CATALOG);
-					const absolutePictureUrl = new URL(
-						asset(`/${character.picture}`),
-						window.location.origin
-					).toString();
-					characterProfilePublication = prepareCharacterProfilePublication({
-						account: selfAccount,
-						character,
-						absolutePictureUrl,
-						createdAt: personaResult.kind === 'restored' ? Math.floor(Date.now() / 1000) :
-							Math.floor(selfAccount.personaCreatedAtMs / 1000)
-					});
-				}
-				if (!selfAccount) {
-					setComposerTerminalError(new Error('Account is unavailable for publishing.'));
+				} else {
+					personaSnapshot = personaResult.persona;
+					selfAccount = personaResult.persona.account;
+					if (isPersonaExpired(personaResult.persona.gameState, Date.now())) {
+						await beginDeathTransition(personaResult.persona);
+						return;
+					}
+					if (selfAccount.characterProfileRevision !== CURRENT_CHARACTER_PROFILE_REVISION) {
+						const character = deriveCharacterFromPubkey(selfAccount.pubkey, CHARACTER_CATALOG);
+						const absolutePictureUrl = new URL(
+							asset(`/${character.picture}`),
+							window.location.origin
+						).toString();
+						characterProfilePublication = prepareCharacterProfilePublication({
+							account: selfAccount,
+							character,
+							absolutePictureUrl,
+							createdAt: personaResult.kind === 'restored' ? Math.floor(Date.now() / 1000) :
+								Math.floor(selfAccount.personaCreatedAtMs / 1000)
+						});
+					}
 				}
 			} catch {
 				setComposerTerminalError(new Error('Persona is unavailable for publishing.'));
 			}
-			if (composerStartupError || !selfAccount || !personaSnapshot) return;
 			session = createWorldReadSession({
 				field: FIELD,
 				selfAccount,
@@ -784,7 +780,7 @@
 					...bootstrap.timelineMessages
 				]);
 				session.completeBootstrap();
-				void session.enterSelf();
+				if (selfAccount) void session.enterSelf();
 				if (characterProfilePublication) {
 					void publishCharacterProfile(characterProfilePublication, (event) => {
 						if (!worldSession) return Promise.reject(new Error('Relay session is unavailable.'));
@@ -1207,7 +1203,7 @@
 	}
 
 	function moveWorldSelf(direction: Direction): void {
-		if (devWorldSandboxEnabled) return;
+		if (devWorldSandboxEnabled || !selfAccount) return;
 		void worldSession?.moveSelf(direction);
 	}
 
@@ -1326,7 +1322,7 @@
 	}
 
 	function retryWorldEntry(): void {
-		if (devWorldSandboxEnabled || selfPositionWriteState.kind !== 'retryable') return;
+		if (devWorldSandboxEnabled || !selfAccount || selfPositionWriteState.kind !== 'retryable') return;
 		void worldSession?.enterSelf();
 	}
 
