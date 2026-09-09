@@ -54,9 +54,9 @@ async function openProfile(page: Page): Promise<void> {
 	await expect(profileDialog(page)).toBeVisible();
 }
 
-function testEvents() {
+function testEvents(nowMs = Date.now()) {
 	const secret = new Uint8Array(32).fill(19);
-	const createdAt = Math.floor(Date.now() / 1000);
+	const createdAt = Math.floor(nowMs / 1000);
 	const channel = { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' };
 	return {
 		message: finalizeEvent(buildWorldMessageTemplate({
@@ -732,6 +732,39 @@ async function seedUnavailablePersona(page: Page, kind: 'missing' | 'corrupt'): 
 	}), kind);
 }
 
+async function installReincarnationFailure(page: Page): Promise<void> {
+	await page.addInitScript(() => {
+		const failureKey = 'persona-lifecycle-test-fail-reincarnation';
+		let armed = sessionStorage.getItem(failureKey) === '1';
+		let injected = 0;
+		const puts: string[] = [];
+		const originalPut = IDBObjectStore.prototype.put;
+		IDBObjectStore.prototype.put = function(value: unknown, key?: IDBValidKey) {
+			puts.push(this.name);
+			if (armed && this.name === 'persona-bubble-field-game-state' && this.transaction.mode === 'readwrite') {
+				armed = false;
+				injected += 1;
+				sessionStorage.removeItem(failureKey);
+				throw new DOMException('Injected reincarnation persistence failure.', 'QuotaExceededError');
+			}
+			return originalPut.call(this, value, key);
+		};
+		Object.assign(window, {
+			__personaLifecycleFailureTest: {
+				arm: () => { armed = true; sessionStorage.setItem(failureKey, '1'); },
+				injected: () => injected,
+				puts: () => puts
+			}
+		});
+	});
+}
+
+async function armReincarnationFailure(page: Page): Promise<void> {
+	await page.evaluate(() => (window as typeof window & {
+		__personaLifecycleFailureTest: { arm(): void }
+	}).__personaLifecycleFailureTest.arm());
+}
+
 async function composerContextCalls(page: Page): Promise<Array<{
 	reply?: string | null;
 	preloadedEvents?: Record<string, { id: string; pubkey: string }>;
@@ -780,6 +813,78 @@ function reverseMoveKey(key: AvailableMove['key']): AvailableMove['key'] {
 }
 
 test.describe('Relay startup', () => {
+	test('falls back to a read-only world when startup reincarnation fails', async ({ page }) => {
+		const secret = new Uint8Array(32).fill(57);
+		const pubkey = getPublicKey(secret);
+		const events = testEvents();
+		await installReincarnationFailure(page);
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { primaryEvents: events });
+		await seedRelayAccount(page, secret, pubkey);
+		await page.goto('/');
+		await expect(page.locator('.composer-dock')).toBeVisible();
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
+			AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) &&
+			(request.filter.kinds as number[])[0] === 42)).toBe(true);
+		await page.evaluate(() => {
+			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
+			relay.releaseMetadata(); relay.releasePrimary();
+		});
+		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
+		await page.evaluate((expiredPubkey) => new Promise<void>((resolve, reject) => {
+			const request = indexedDB.open('persona-bubble-field-account');
+			request.onerror = () => reject(request.error);
+			request.onsuccess = () => {
+				const database = request.result;
+				const transaction = database.transaction('persona-bubble-field-game-state', 'readwrite');
+				transaction.objectStore('persona-bubble-field-game-state').put({
+					version: 1, personaPubkey: expiredPubkey, lifespanExpiresAtMs: Date.now() - 1, points: 321,
+					abilities: { inferenceEfficiency: 4, contextCapacity: 3, hallucinationSuppression: 4 }
+				}, 'game-state');
+				transaction.oncomplete = () => { database.close(); resolve(); };
+				transaction.onerror = () => { database.close(); reject(transaction.error); };
+				transaction.onabort = () => { database.close(); reject(transaction.error); };
+			}
+		}), pubkey);
+		await armReincarnationFailure(page);
+		await page.reload({ waitUntil: 'domcontentloaded' });
+		await expect(page.locator('.composer-dock')).toBeVisible();
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
+			AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) &&
+			(request.filter.kinds as number[])[0] === 42)).toBe(true);
+		await page.evaluate(() => {
+			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
+			relay.releaseMetadata(); relay.releasePrimary();
+		});
+		await expect(page.locator(`.participant[data-participant-id="${events.message.pubkey}"]`)).toBeVisible();
+		await expect(page.locator(`.bubble[data-bubble-id="${events.message.id}"]`)).toBeVisible();
+		await expect(page.locator('.participant[data-self="true"]')).toHaveCount(0);
+		expect((await publishedMessages(page))).toHaveLength(0);
+		await expect.poll(() => page.evaluate(() => (window as typeof window & {
+			__personaLifecycleFailureTest: { injected(): number }
+		}).__personaLifecycleFailureTest.injected())).toBe(1);
+		const persisted = await page.evaluate(async () => {
+			const database = await new Promise<IDBDatabase>((resolve, reject) => {
+				const request = indexedDB.open('persona-bubble-field-account');
+				request.onsuccess = () => resolve(request.result);
+				request.onerror = () => reject(request.error);
+			});
+			try {
+				return await new Promise<{ pubkey: string; lifespanExpiresAtMs: number }>((resolve, reject) => {
+					const transaction = database.transaction(['persona-bubble-field-account-state', 'persona-bubble-field-game-state']);
+					const accountRequest = transaction.objectStore('persona-bubble-field-account-state').get('account-pubkey');
+					const gameRequest = transaction.objectStore('persona-bubble-field-game-state').get('game-state');
+					transaction.oncomplete = () => resolve({ pubkey: accountRequest.result as string, lifespanExpiresAtMs: (gameRequest.result as { lifespanExpiresAtMs: number }).lifespanExpiresAtMs });
+					transaction.onerror = () => reject(transaction.error);
+				});
+			} finally { database.close(); }
+		});
+		expect(persisted).toEqual({ pubkey, lifespanExpiresAtMs: expect.any(Number) });
+		expect(persisted.lifespanExpiresAtMs).toBeLessThan(Date.now());
+	});
+
 	test('reincarnates an expired persona and resets its game state', async ({ page }) => {
 		const secret = new Uint8Array(32).fill(51);
 		const pubkey = getPublicKey(secret);
@@ -997,6 +1102,79 @@ test.describe('Relay startup', () => {
 			expect(persistedKeys).not.toContain('encrypted-secret-key');
 		});
 	}
+
+	test('keeps public read-only updates after runtime reincarnation fails', async ({ page }) => {
+		const startTime = Date.now();
+		const secret = new Uint8Array(32).fill(59);
+		const pubkey = getPublicKey(secret);
+		const events = testEvents();
+		await page.clock.install({ time: startTime });
+		await installReincarnationFailure(page);
+		await installPromptApiStub(page);
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { primaryEvents: events });
+		await seedRelayAccount(page, secret, pubkey);
+		await page.evaluate(async ({ accountPubkey, deadline }) => {
+			const database = await new Promise<IDBDatabase>((resolve, reject) => {
+				const request = indexedDB.open('persona-bubble-field-account');
+				request.onsuccess = () => resolve(request.result);
+				request.onerror = () => reject(request.error);
+			});
+			const transaction = database.transaction('persona-bubble-field-game-state', 'readwrite');
+			transaction.objectStore('persona-bubble-field-game-state').put({
+				version: 1, personaPubkey: accountPubkey, lifespanExpiresAtMs: deadline, points: 0,
+				abilities: { inferenceEfficiency: 0, contextCapacity: 0, hallucinationSuppression: 0 }
+			}, 'game-state');
+			await new Promise<void>((resolve, reject) => {
+				transaction.oncomplete = () => resolve();
+				transaction.onerror = () => reject(transaction.error);
+				transaction.onabort = () => reject(transaction.error);
+			});
+			database.close();
+		}, { accountPubkey: pubkey, deadline: startTime + 30_000 });
+		await page.goto('/');
+		await expect(page.locator('.composer-dock')).toBeVisible();
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
+			AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) &&
+			(request.filter.kinds as number[])[0] === 42)).toBe(true);
+		await page.evaluate(() => {
+			const relay = (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest;
+			relay.releasePrimary();
+		});
+		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
+		await pauseAtCurrentBrowserTime(page);
+		const initialRequestCount = (await relayState(page)).state.requests.length;
+		await armReincarnationFailure(page);
+		await page.clock.runFor(31_000);
+		await expect.poll(() => page.evaluate(() => (window as typeof window & {
+			__personaLifecycleFailureTest: { injected(): number }
+		}).__personaLifecycleFailureTest.injected())).toBe(1);
+		await expect(page.locator('.participant[data-self="true"]')).toHaveCount(0);
+		await expect.poll(async () => (await relayState(page)).state.requests.length).toBeGreaterThan(initialRequestCount);
+
+		const live = testEvents(startTime + 31_000);
+		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectMessage(event: object): void } }).__relayStartupTest.injectMessage(event), live.message);
+		await expect(page.locator(`.bubble[data-bubble-id="${live.message.id}"]`)).toBeVisible();
+
+		const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
+		const beforeComposer = (await publishedMessages(page)).length;
+		await editor.fill('blocked after runtime death');
+		await page.locator('ehagaki-composer').getByRole('button', { name: 'Send' }).click();
+		await expect.poll(async () => (await publishedMessages(page)).length).toBe(beforeComposer);
+		await expect(editor).toHaveValue('blocked after runtime death');
+
+		await editor.fill('');
+		const candidateButton = page.getByRole('button', { name: 'AI発言候補を生成' });
+		await expect(candidateButton).toBeEnabled();
+		await candidateButton.click();
+		const primary = page.locator('.suggestion-primary').first();
+		await expect(primary).toBeVisible();
+		const beforeCandidate = (await publishedMessages(page)).length;
+		await primary.click();
+		await expect.poll(async () => (await publishedMessages(page)).length).toBe(beforeCandidate);
+		await expect(page.locator('.suggestion-panel')).toBeVisible();
+	});
 
 	test('reincarnates an active Relay session when its deadline is crossed', async ({ page }) => {
 		const startTime = Date.now();
