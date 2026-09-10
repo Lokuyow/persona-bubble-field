@@ -20,6 +20,7 @@ export type MendingProjection = Readonly<{
 	processedDurationMs: number;
 	processedThroughMs: number;
 	effectiveExpiresAtMs: number;
+	lifespanExtensionMs: number;
 	points: number;
 	completed: boolean;
 }>;
@@ -95,6 +96,7 @@ export function projectMending(state: MendingState, nowMs: number): MendingProje
 		processedDurationMs: 0,
 		processedThroughMs: nowMs,
 		effectiveExpiresAtMs: state.lifespanExpiresAtMs,
+		lifespanExtensionMs: 0,
 		points: 0,
 		completed: false
 	};
@@ -106,7 +108,14 @@ export function projectMending(state: MendingState, nowMs: number): MendingProje
 		addSafe(processedThroughMs, MAX_LIFESPAN_MS)
 	);
 	const points = processedDurationMs / MENDING_HOUR_MS * job.pointsPerHour.numerator / job.pointsPerHour.denominator;
-	return { processedDurationMs, processedThroughMs, effectiveExpiresAtMs, points, completed: processedDurationMs === job.maximumDurationMs };
+	return {
+		processedDurationMs,
+		processedThroughMs,
+		effectiveExpiresAtMs,
+		lifespanExtensionMs: effectiveExpiresAtMs - state.lifespanExpiresAtMs,
+		points,
+		completed: processedDurationMs === job.maximumDurationMs
+	};
 }
 
 export function isMendingExpired(state: MendingState, nowMs: number): boolean {

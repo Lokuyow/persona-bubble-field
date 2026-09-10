@@ -12,6 +12,7 @@
 	}>;
 	let { open, projection, hasJob, onOpenChange, onStart, onCollect }: Props = $props();
 	let hours = $derived(((projection?.processedDurationMs ?? 0) / (60 * 60 * 1000)).toFixed(2));
+	let lifespanHours = $derived(((projection?.lifespanExtensionMs ?? 0) / (60 * 60 * 1000)).toFixed(2));
 	let points = $derived((projection?.points ?? 0).toFixed(2));
 </script>
 
@@ -26,10 +27,10 @@
 					<p>繕いを開始できます。</p>
 					<button type="button" onclick={onStart}>繕いを開始</button>
 				{:else if projection?.completed}
-					<p>処理完了: {hours}時間 / 成果 {points}pt</p>
+					<p>処理完了: 経過 {hours}時間 / 寿命延長 +{lifespanHours}時間 / 成果 {points}pt</p>
 					<button type="button" onclick={onCollect}>成果を受け取る</button>
 				{:else}
-					<p>繕い中: {hours}時間 / 推定 {points}pt</p>
+					<p>繕い中: 経過 {hours}時間 / 寿命延長 +{lifespanHours}時間 / 推定 {points}pt</p>
 				{/if}
 				<Dialog.Close>閉じる</Dialog.Close>
 			</Dialog.Content>

@@ -661,6 +661,7 @@ async function seedRelayAccount(page: Page, secretKey: Uint8Array, pubkey: strin
 
 async function readRelayGameState(page: Page): Promise<{
 	version: number;
+	personaPubkey: string;
 	lifespanExpiresAtMs: number;
 	points: number;
 	mendingJob: unknown;
@@ -674,8 +675,8 @@ async function readRelayGameState(page: Page): Promise<{
 		try {
 			const transaction = database.transaction('persona-bubble-field-game-state');
 			const request = transaction.objectStore('persona-bubble-field-game-state').get('game-state');
-			return await new Promise<{ version: number; lifespanExpiresAtMs: number; points: number; mendingJob: unknown }>((resolve, reject) => {
-				transaction.oncomplete = () => resolve(request.result as { version: number; lifespanExpiresAtMs: number; points: number; mendingJob: unknown });
+			return await new Promise<{ version: number; personaPubkey: string; lifespanExpiresAtMs: number; points: number; mendingJob: unknown }>((resolve, reject) => {
+				transaction.oncomplete = () => resolve(request.result as { version: number; personaPubkey: string; lifespanExpiresAtMs: number; points: number; mendingJob: unknown });
 				transaction.onerror = () => reject(transaction.error);
 				transaction.onabort = () => reject(transaction.error);
 			});
@@ -922,15 +923,34 @@ test.describe('Relay startup', () => {
 	});
 
 	test('runs and collects a mending job only from the adjacent terminal cells', async ({ page }) => {
-		await openClockedReadyRelayWorld(page);
-		await moveRelaySelfTo(page, { x: 0, y: 0 });
+		const startTime = Date.now();
+		const secret = new Uint8Array(32).fill(19);
+		const pubkey = getPublicKey(secret);
+		await page.clock.install({ time: startTime });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { primaryEvents: testEvents(startTime) });
+		await seedRelayAccount(page, secret, pubkey);
+		await page.goto('/');
+		await expect(page.locator('.composer-dock')).toBeVisible();
+		await page.evaluate(() => {
+			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
+			relay.releaseMetadata(); relay.releasePrimary();
+		});
+		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
 		const terminal = page.getByRole('button', { name: '繕い端末' });
 		await terminal.click();
 		await expect(page.getByRole('status')).toContainText('近づくと端末を使える');
 
-		await moveRelaySelfTo(page, { x: 11, y: 5 });
+		const atTerminal = finalizeEvent(buildPositionEventTemplate({
+			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 11, y: 5 }, slot: 1,
+			createdAt: Math.floor(await page.evaluate(() => Date.now()) / 1000)
+		}), secret);
+		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), atTerminal);
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,5');
 		await page.clock.runFor(1_001);
 		await page.keyboard.press('ArrowRight');
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,5');
+		await dragRelayJoystick(page, { x: 100, y: 0 }, { x: 10, y: 5 });
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,5');
 
 		await terminal.click();
@@ -948,6 +968,181 @@ test.describe('Relay startup', () => {
 		expect(collected.mendingJob).toBeNull();
 		expect(collected.points).toBe(8);
 		expect(collected.lifespanExpiresAtMs).toBe(started.lifespanExpiresAtMs + 6.4 * 60 * 60 * 1000);
+		await page.getByRole('button', { name: '閉じる' }).click();
+	});
+
+	test('keeps an offline mending job alive across browser reopen after its stored expiry', async ({ page }) => {
+		const startTime = Date.now();
+		const hour = 60 * 60 * 1000;
+		const secret = new Uint8Array(32).fill(19);
+		const pubkey = getPublicKey(secret);
+		await page.clock.install({ time: startTime });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { primaryEvents: testEvents(startTime) });
+		await seedRelayAccount(page, secret, pubkey, startTime + hour);
+		await page.goto('/');
+		await expect(page.locator('.composer-dock')).toBeVisible();
+		await page.evaluate(() => {
+			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
+			relay.releaseMetadata(); relay.releasePrimary();
+		});
+		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
+		await moveRelaySelfTo(page, { x: 11, y: 5 });
+		await page.getByRole('button', { name: '繕い端末' }).click();
+		await page.getByRole('button', { name: '繕いを開始' }).click();
+		const started = await readRelayGameState(page);
+
+		await page.clock.setSystemTime(startTime + hour + 30 * 60 * 1000);
+		await page.reload({ waitUntil: 'domcontentloaded' });
+		await expect(page.locator('.composer-dock')).toBeVisible();
+		await page.evaluate(() => {
+			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
+			relay.releaseMetadata(); relay.releasePrimary();
+		});
+		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
+		await expect(page.locator('.lifespan-hud')).toBeVisible();
+		const reopened = await readRelayGameState(page);
+		expect(reopened).toMatchObject({ personaPubkey: pubkey, lifespanExpiresAtMs: started.lifespanExpiresAtMs, mendingJob: expect.any(Object) });
+	});
+
+	test('closes a stale completed mending dialog before its reward can be collected', async ({ page }) => {
+		const startTime = Date.now();
+		const secret = new Uint8Array(32).fill(19);
+		const pubkey = getPublicKey(secret);
+		await page.clock.install({ time: startTime });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { primaryEvents: testEvents(startTime) });
+		await seedRelayAccount(page, secret, pubkey);
+		await page.goto('/');
+		await expect(page.locator('.composer-dock')).toBeVisible();
+		await page.evaluate(() => {
+			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
+			relay.releaseMetadata(); relay.releasePrimary();
+		});
+		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
+		await moveRelaySelfTo(page, { x: 11, y: 5 });
+		const terminal = page.getByRole('button', { name: '繕い端末' });
+		await terminal.click();
+		await page.getByRole('button', { name: '繕いを開始' }).click();
+		const started = await readRelayGameState(page);
+		const job = started.mendingJob as { startedAtMs: number; maximumDurationMs: number };
+		await page.clock.setSystemTime(job.startedAtMs + job.maximumDurationMs);
+		const currentTerminalPosition = finalizeEvent(buildPositionEventTemplate({
+			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 11, y: 5 }, slot: 1,
+			createdAt: Math.floor(await page.evaluate(() => Date.now()) / 1000)
+		}), secret);
+		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), currentTerminalPosition);
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,5');
+		await terminal.click();
+		await expect(page.getByRole('button', { name: '成果を受け取る' })).toBeVisible();
+		await page.clock.runFor(1_001);
+		const moved = finalizeEvent(buildPositionEventTemplate({
+			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 0, y: 0 }, slot: 1,
+			createdAt: Math.floor(await page.evaluate(() => Date.now()) / 1000)
+		}), secret);
+		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), moved);
+		await expect(page.getByRole('dialog')).toHaveCount(0);
+		const stale = await readRelayGameState(page);
+		expect(stale).toMatchObject({ points: 0, mendingJob: expect.any(Object) });
+	});
+
+	test('converges two tabs on one mending start and collection', async ({ page }) => {
+		const startTime = Date.now();
+		const secret = new Uint8Array(32).fill(19);
+		const pubkey = getPublicKey(secret);
+		const other = await page.context().newPage();
+		const clients = [page, other] as const;
+		try {
+			await Promise.all(clients.map((client) => client.clock.install({ time: startTime })));
+			await Promise.all(clients.map(async (client) => {
+				await installHostOwnedStub(client);
+				await installDelayedRelay(client, { primaryEvents: testEvents(startTime) });
+			}));
+			await seedRelayAccount(page, secret, pubkey);
+			await Promise.all(clients.map(async (client) => {
+				await client.goto('/');
+				await expect(client.locator('.composer-dock')).toBeVisible();
+				await client.evaluate(() => {
+					const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
+					relay.releaseMetadata(); relay.releasePrimary();
+				});
+				await expect(client.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
+			}));
+			const injectTerminalPosition = async (client: Page) => {
+				const event = finalizeEvent(buildPositionEventTemplate({
+					channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 11, y: 5 }, slot: 1,
+					createdAt: Math.floor(await client.evaluate(() => Date.now()) / 1000)
+				}), secret);
+				await client.evaluate((position) => (window as typeof window & {
+					__relayStartupTest: { injectPosition(event: object): void }
+				}).__relayStartupTest.injectPosition(position), event);
+				await expect(client.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,5');
+			};
+			await Promise.all(clients.map(injectTerminalPosition));
+			await Promise.all(clients.map(async (client) => {
+				await client.getByRole('button', { name: '繕い端末' }).click();
+				await expect(client.getByRole('button', { name: '繕いを開始' })).toBeVisible();
+			}));
+			await Promise.all(clients.map((client) => client.getByRole('button', { name: '繕いを開始' }).click()));
+			const started = await readRelayGameState(page);
+			expect(started.mendingJob).toEqual(expect.any(Object));
+
+			const completedAt = (started.mendingJob as { startedAtMs: number; maximumDurationMs: number }).startedAtMs +
+				(started.mendingJob as { maximumDurationMs: number }).maximumDurationMs;
+			await Promise.all(clients.map((client) => client.clock.setSystemTime(completedAt)));
+			await Promise.all(clients.map(injectTerminalPosition));
+			for (const client of clients) {
+				const close = client.getByRole('button', { name: '閉じる' });
+				if (await close.isVisible()) await close.click();
+				await client.getByRole('button', { name: '繕い端末' }).click();
+				await expect(client.getByRole('button', { name: '成果を受け取る' })).toBeVisible();
+			}
+			await Promise.all(clients.map((client) => client.getByRole('button', { name: '成果を受け取る' }).click()));
+			const collected = await readRelayGameState(page);
+			expect(collected).toMatchObject({ points: 8, mendingJob: null });
+		} finally {
+			await other.close();
+		}
+	});
+
+	test('fails closed to a public read-only world when a mending mutation finds corrupt storage', async ({ page }) => {
+		const startTime = Date.now();
+		const secret = new Uint8Array(32).fill(19);
+		const pubkey = getPublicKey(secret);
+		await page.clock.install({ time: startTime });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { primaryEvents: testEvents(startTime) });
+		await seedRelayAccount(page, secret, pubkey);
+		await page.goto('/');
+		await expect(page.locator('.composer-dock')).toBeVisible();
+		await page.evaluate(() => {
+			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
+			relay.releaseMetadata(); relay.releasePrimary();
+		});
+		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
+		await moveRelaySelfTo(page, { x: 11, y: 5 });
+		await page.evaluate(async () => {
+			const database = await new Promise<IDBDatabase>((resolve, reject) => {
+				const request = indexedDB.open('persona-bubble-field-account');
+				request.onsuccess = () => resolve(request.result);
+				request.onerror = () => reject(request.error);
+			});
+			try {
+				const transaction = database.transaction('persona-bubble-field-game-state', 'readwrite');
+				transaction.objectStore('persona-bubble-field-game-state').put({ version: 2 }, 'game-state');
+				await new Promise<void>((resolve, reject) => {
+					transaction.oncomplete = () => resolve(); transaction.onerror = () => reject(transaction.error); transaction.onabort = () => reject(transaction.error);
+				});
+			} finally { database.close(); }
+		});
+		const before = (await publishedMessages(page)).length;
+		await page.getByRole('button', { name: '繕い端末' }).click();
+		await page.getByRole('button', { name: '繕いを開始' }).click();
+		await expect(page.locator('.participant[data-self="true"]')).toHaveCount(0);
+		const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
+		await editor.fill('must remain read-only after corrupt mending');
+		await page.locator('ehagaki-composer').getByRole('button', { name: 'Send' }).click();
+		await expect.poll(async () => (await publishedMessages(page)).length).toBe(before);
 	});
 
 	test('reincarnates an expired persona and resets its game state', async ({ page }) => {

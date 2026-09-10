@@ -230,6 +230,7 @@
 	let expiryCheckInFlight = false;
 	let deathTransitionInFlight = false;
 	let runRuntimeRefresh: (() => Promise<void>) | null = null;
+	let startReadOnlyWorld: (() => void) | null = null;
 	const movementInputController = createMovementInputController({
 		requestMovement: (direction) => {
 			closeFieldActionMenu();
@@ -858,6 +859,7 @@
 				if (session === nextSession) setComposerTerminalError(new Error('Relay startup failed.'));
 			}
 		};
+		startReadOnlyWorld = () => { void startReadSession(null); };
 
 		const begin = async () => {
 			if (devWorldSandboxEnabled || startRequested || !hasUsableViewport()) return;
@@ -958,6 +960,7 @@
 			cancelVisualAnimation();
 			window.clearInterval(expiryTimer);
 			if (runRuntimeRefresh === refreshRuntime) runRuntimeRefresh = null;
+			if (startReadOnlyWorld) startReadOnlyWorld = null;
 			session?.dispose();
 			devTraceConversationRuntime?.dispose();
 			devTraceConversationRuntime = null;
@@ -1092,6 +1095,46 @@
 		mendingDialogOpen = false;
 	}
 
+	function samePersonaIdentity(first: PersonaSnapshot, second: PersonaSnapshot): boolean {
+		return first.account.pubkey === second.account.pubkey &&
+			first.account.personaCreatedAtMs === second.account.personaCreatedAtMs &&
+			first.gameState.personaPubkey === second.gameState.personaPubkey;
+	}
+
+	function disposePersonaWriter(currentSession: ReturnType<typeof createWorldReadSession> | null = worldSession): void {
+		currentSession?.dispose();
+		if (worldSession && worldSession !== currentSession) worldSession.dispose();
+		worldSession = null;
+		traceConversationController = null;
+	}
+
+	function stopPersonaInteractions(message: string): void {
+		personaLifecycleTransition = true;
+		closeMendingTerminal();
+		movementInputController.cancelMovementHold();
+		fieldSceneComponent?.cancelPointerGesture();
+		cancelPendingComposerSubmission(new Error(message));
+	}
+
+	function enterReadOnlyFallback(message: string): void {
+		stopPersonaInteractions(message);
+		disposePersonaWriter();
+		selfAccount = null;
+		personaSnapshot = null;
+		selfPositionWriteState = { kind: 'unavailable' };
+		selfMessageAvailability = { kind: 'unavailable' };
+		setComposerTerminalError(new Error(message));
+		startReadOnlyWorld?.();
+	}
+
+	function reloadForPersonaIdentityChange(latest: PersonaSnapshot): void {
+		stopPersonaInteractions('Persona identity changed in another tab.');
+		disposePersonaWriter();
+		personaSnapshot = latest;
+		selfAccount = latest.account;
+		window.location.reload();
+	}
+
 	function hasLiveMendingProximity(): boolean {
 		return Boolean(!devWorldSandboxEnabled && personaSnapshot && selfIsActive && selfLogicalPosition &&
 			isWithinFacilityInteractionRange(selfLogicalPosition));
@@ -1107,7 +1150,11 @@
 		try {
 			const result = operation === 'start' ? await startMending(expected) : await collectCompletedMending(expected);
 			if (result.kind === 'corrupt') {
-				closeMendingTerminal();
+				enterReadOnlyFallback('Persona is unavailable for publishing.');
+				return;
+			}
+			if (result.kind === 'superseded' && !samePersonaIdentity(expected, result.persona)) {
+				reloadForPersonaIdentityChange(result.persona);
 				return;
 			}
 			personaSnapshot = result.persona;
@@ -1118,6 +1165,8 @@
 				closeMendingTerminal();
 				void beginDeathTransition(result.persona, worldSession);
 			}
+		} catch {
+			closeMendingTerminal();
 		} finally {
 			mendingMutationInFlight = false;
 		}
@@ -1400,30 +1449,19 @@
 		currentSession: ReturnType<typeof createWorldReadSession> | null
 	): Promise<'reloaded' | 'failed'> {
 		if (devWorldSandboxEnabled || personaLifecycleTransition || deathTransitionInFlight) return 'failed';
-		personaLifecycleTransition = true;
+		stopPersonaInteractions('Persona lifetime ended.');
 		deathTransitionInFlight = true;
-		movementInputController.cancelMovementHold();
-		fieldSceneComponent?.cancelPointerGesture();
-		cancelPendingComposerSubmission(new Error('Persona lifetime ended.'));
-		currentSession?.dispose();
-		if (worldSession === currentSession) worldSession = null;
-		traceConversationController = null;
+		disposePersonaWriter(currentSession);
 		try {
 			const result = await reincarnateExpiredPersona(expected);
 			if (result.kind === 'reincarnated' || result.kind === 'superseded' || result.kind === 'not-expired') {
-				personaSnapshot = result.persona;
-				selfAccount = result.persona.account;
-				window.location.reload();
+				reloadForPersonaIdentityChange(result.persona);
 				return 'reloaded';
 			}
-			selfAccount = null;
-			personaSnapshot = null;
-			setComposerTerminalError(new Error('Persona is unavailable for publishing.'));
+			enterReadOnlyFallback('Persona is unavailable for publishing.');
 			return 'failed';
 		} catch {
-			selfAccount = null;
-			personaSnapshot = null;
-			setComposerTerminalError(new Error('Persona is unavailable for publishing.'));
+			enterReadOnlyFallback('Persona is unavailable for publishing.');
 			return 'failed';
 		} finally {
 			deathTransitionInFlight = false;

@@ -233,6 +233,13 @@ async function profileTriggerCenter(page: Page, name: string): Promise<{ x: numb
 }
 
 test.describe('DEV World Sandbox', () => {
+	test('does not open the mending terminal in DEV World', async ({ page }) => {
+		await openDevWorld(page);
+		await page.getByRole('button', { name: '繕い端末' }).click();
+		await expect(page.getByRole('dialog')).toHaveCount(0);
+		await expect(page.locator('.lifespan-hud')).toHaveCount(0);
+	});
+
 	test('does not paint the default-viewport field scene before measurement and keeps it visible after resize', async ({ page, browser }) => {
 		const ssrContext = await browser.newContext({
 			baseURL: test.info().project.use.baseURL as string,
