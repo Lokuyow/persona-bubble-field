@@ -9,6 +9,8 @@ import {
 	loadOrCreatePersona,
 	markCharacterProfilePublication,
 	reincarnateExpiredPersona,
+	startMending,
+	collectCompletedMending,
 	type AccountSnapshot,
 	type LoadAccountResult
 } from './nostrAccount';
@@ -310,7 +312,7 @@ describe('persona lifecycle state and reincarnation', () => {
 		const firstAccount = accountFrom(first);
 		const game = (await storedGameRecords())['game-state'] as Record<string, unknown>;
 		expect(game).toMatchObject({
-			version: 1,
+			version: 2,
 			personaPubkey: firstAccount.pubkey,
 			lifespanExpiresAtMs: TIME + INITIAL_LIFESPAN_MS,
 			points: 0,
@@ -319,6 +321,35 @@ describe('persona lifecycle state and reincarnation', () => {
 		const restored = accountFrom(await loadOrCreateAccount());
 		expect(restored.pubkey).toBe(firstAccount.pubkey);
 		expect((await storedGameRecords())['game-state']).toEqual(game);
+	});
+
+	it('atomically upgrades a valid v1 game record without resetting its persona progress', async () => {
+		const account = await protectedRecords();
+		const pubkey = getPublicKey(SECRET);
+		await seed(account);
+		await seedRawGameState({ version: 1, personaPubkey: pubkey, lifespanExpiresAtMs: TIME + 123, points: 12.5,
+			abilities: { inferenceEfficiency: 2, contextCapacity: 1, hallucinationSuppression: 3 } });
+		const loaded = await loadOrCreatePersona();
+		expect(loaded.kind).toBe('restored');
+		if (loaded.kind !== 'restored') return;
+		expect(loaded.persona.gameState).toMatchObject({ version: 2, personaPubkey: pubkey, lifespanExpiresAtMs: TIME + 123,
+			points: 12.5, abilities: { inferenceEfficiency: 2, contextCapacity: 1, hallucinationSuppression: 3 }, mendingJob: null });
+		expect(await storedRecords()).toEqual(account);
+	});
+
+	it('starts once, materializes a completed job once, and leaves a stale snapshot superseded', async () => {
+		const loaded = await loadOrCreatePersona();
+		if (loaded.kind !== 'created' && loaded.kind !== 'restored') throw new Error('Expected persona.');
+		const first = await startMending(loaded.persona);
+		expect(first.kind).toBe('started');
+		const staleDeath = await reincarnateExpiredPersona(loaded.persona);
+		expect(staleDeath.kind).toBe('superseded');
+		if (first.kind !== 'started') return;
+		vi.mocked(Date.now).mockReturnValue(first.persona.gameState.mendingJob!.startedAtMs + first.persona.gameState.mendingJob!.maximumDurationMs);
+		const collected = await collectCompletedMending(first.persona);
+		expect(collected.kind).toBe('collected');
+		const duplicate = await collectCompletedMending(first.persona);
+		expect(duplicate.kind).toBe('superseded');
 	});
 
 	it('returns not-expired without replacing a current persona', async () => {

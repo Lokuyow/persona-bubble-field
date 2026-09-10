@@ -659,6 +659,30 @@ async function seedRelayAccount(page: Page, secretKey: Uint8Array, pubkey: strin
 	}, { secret: [...secretKey], accountPubkey: pubkey, expiresAtMs: lifespanExpiresAtMs });
 }
 
+async function readRelayGameState(page: Page): Promise<{
+	version: number;
+	lifespanExpiresAtMs: number;
+	points: number;
+	mendingJob: unknown;
+}> {
+	return page.evaluate(async () => {
+		const database = await new Promise<IDBDatabase>((resolve, reject) => {
+			const request = indexedDB.open('persona-bubble-field-account');
+			request.onsuccess = () => resolve(request.result);
+			request.onerror = () => reject(request.error);
+		});
+		try {
+			const transaction = database.transaction('persona-bubble-field-game-state');
+			const request = transaction.objectStore('persona-bubble-field-game-state').get('game-state');
+			return await new Promise<{ version: number; lifespanExpiresAtMs: number; points: number; mendingJob: unknown }>((resolve, reject) => {
+				transaction.oncomplete = () => resolve(request.result as { version: number; lifespanExpiresAtMs: number; points: number; mendingJob: unknown });
+				transaction.onerror = () => reject(transaction.error);
+				transaction.onabort = () => reject(transaction.error);
+			});
+		} finally { database.close(); }
+	});
+}
+
 async function seedV2RelayAccount(page: Page, secretKey: Uint8Array, pubkey: string): Promise<void> {
 	await page.goto('/favicon.svg');
 	await page.evaluate(async ({ secret, accountPubkey }) => {
@@ -803,6 +827,18 @@ async function chooseMoveToward(page: Page, target: { x: number; y: number }): P
 	throw new Error('Expected the Relay participant to differ from the target.');
 }
 
+async function moveRelaySelfTo(page: Page, target: { x: number; y: number }): Promise<void> {
+	for (let step = 0; step < 24; step += 1) {
+		const position = await page.locator('.participant[data-self="true"]').getAttribute('data-position');
+		if (position === `${target.x},${target.y}`) return;
+		const move = await chooseMoveToward(page, target);
+		await page.clock.runFor(1_001);
+		await page.keyboard.press(move.key);
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', move.expected);
+	}
+	throw new Error(`Self did not reach ${target.x},${target.y}.`);
+}
+
 function reverseMoveKey(key: AvailableMove['key']): AvailableMove['key'] {
 	switch (key) {
 		case 'ArrowDown': return 'ArrowUp';
@@ -883,6 +919,35 @@ test.describe('Relay startup', () => {
 		});
 		expect(persisted).toEqual({ pubkey, lifespanExpiresAtMs: expect.any(Number) });
 		expect(persisted.lifespanExpiresAtMs).toBeLessThan(Date.now());
+	});
+
+	test('runs and collects a mending job only from the adjacent terminal cells', async ({ page }) => {
+		await openClockedReadyRelayWorld(page);
+		await moveRelaySelfTo(page, { x: 0, y: 0 });
+		const terminal = page.getByRole('button', { name: '繕い端末' });
+		await terminal.click();
+		await expect(page.getByRole('status')).toContainText('近づくと端末を使える');
+
+		await moveRelaySelfTo(page, { x: 11, y: 5 });
+		await page.clock.runFor(1_001);
+		await page.keyboard.press('ArrowRight');
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,5');
+
+		await terminal.click();
+		await expect(page.getByRole('dialog')).toBeVisible();
+		await page.getByRole('button', { name: '繕いを開始' }).click();
+		await expect(page.getByRole('dialog')).toHaveCount(0);
+		const started = await readRelayGameState(page);
+		expect(started).toMatchObject({ version: 2, points: 0, mendingJob: expect.objectContaining({ maximumDurationMs: 8 * 60 * 60 * 1000 }) });
+
+		await page.clock.setSystemTime((started.mendingJob as { startedAtMs: number }).startedAtMs + 8 * 60 * 60 * 1000);
+		await terminal.click();
+		await expect(page.getByRole('dialog')).toContainText('処理完了');
+		await page.getByRole('button', { name: '成果を受け取る' }).click();
+		const collected = await readRelayGameState(page);
+		expect(collected.mendingJob).toBeNull();
+		expect(collected.points).toBe(8);
+		expect(collected.lifespanExpiresAtMs).toBe(started.lifespanExpiresAtMs + 6.4 * 60 * 60 * 1000);
 	});
 
 	test('reincarnates an expired persona and resets its game state', async ({ page }) => {
@@ -1055,7 +1120,7 @@ test.describe('Relay startup', () => {
 				});
 			} finally { database.close(); }
 		});
-		expect(state).toMatchObject({ version: 1, personaPubkey: pubkey, points: 0 });
+		expect(state).toMatchObject({ version: 2, personaPubkey: pubkey, points: 0, mendingJob: null });
 		expect(state.lifespanExpiresAtMs).toBeGreaterThan(Date.now());
 	});
 

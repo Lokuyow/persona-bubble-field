@@ -104,6 +104,16 @@ describe('world presence adapter', () => {
 		expect(state.participants.map((candidate) => candidate.pubkey)).toEqual([alice]);
 	});
 
+	it('retains remote Nostr evidence at the local-only terminal cell', () => {
+		const state = reconstructWorldPresenceState(
+			{ columns: 16, rows: 8 },
+			[message('terminal-peer', alice, 100, { x: 12, y: 5 })],
+			[]
+		);
+
+		expect(participant(state, alice).position).toEqual({ x: 12, y: 5 });
+	});
+
 	it('applies live evidence through the reducer and keeps deterministic ordering', () => {
 		const initial = reconstructWorldPresenceState(field, [], []);
 		const afterMessage = applyWorldPresenceMessage(initial, message('message', bob, 100, { x: 1, y: 1 }));

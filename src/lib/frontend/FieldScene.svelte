@@ -12,6 +12,7 @@
 	import type { Participant } from '$lib/frontend/presencePresentation';
 	import { isWithinTraceInvestigationRange, type TraceRootCell } from '$lib/traceInvestigation';
 	import type { ParsedWorldMessage } from '$lib/nostrProtocol';
+	import { FIXED_FIELD_FACILITIES } from '$lib/fieldFacilities';
 
 	const FIELD_BACKGROUND_ASSET = '/field/prototype-danchi-courtyard.webp';
 	const TRACE_ICON_ASSET = '/trace/trace-icon.svg';
@@ -53,8 +54,9 @@
 		camera: WorldPoint;
 		cameraAnimating: boolean;
 		traceMarkerCells: readonly TraceMarkerCell[];
-		proximityFeedback: Readonly<{ position: GridPosition }> | null;
+		proximityFeedback: Readonly<{ position: GridPosition; label: string }> | null;
 		traceOnlyCellTriggers: readonly GridPosition[];
+		facilityCellTriggers: readonly GridPosition[];
 		participantViews: readonly FieldParticipantView[];
 		selfProjectionId: string;
 		movingParticipantIds: ReadonlySet<string>;
@@ -85,6 +87,7 @@
 		traceMarkerCells,
 		proximityFeedback,
 		traceOnlyCellTriggers,
+		facilityCellTriggers,
 		participantViews,
 		selfProjectionId,
 		movingParticipantIds,
@@ -257,15 +260,27 @@
 				{/if}
 			{/each}
 		</div>
+		<div class="field-facility-layer" aria-hidden="true">
+			{#each FIXED_FIELD_FACILITIES as facility (facility.kind)}
+				<span class="field-facility field-mending-terminal" data-field-facility={facility.kind}
+					style={`left: ${(facility.position.x + 0.5) * cellSize}px; top: ${(facility.position.y + 0.5) * cellSize}px;`}>繕い</span>
+			{/each}
+		</div>
 		{#if proximityFeedback}
 			<div
 				class="trace-proximity-feedback"
 				role="status"
 				aria-live="polite"
 				style={`left: ${(proximityFeedback.position.x + 0.5) * cellSize}px; top: ${(proximityFeedback.position.y + 0.18) * cellSize}px;`}
-			>近づくと調べられる</div>
+			>{proximityFeedback.label}</div>
 		{/if}
 		<div class="field-cell-selection-layer" aria-label="Trace investigation cells">
+			{#each facilityCellTriggers as position (`facility-${position.x},${position.y}`)}
+				<button class="field-cell-selection-trigger" data-field-gesture-origin="selectable" type="button"
+					ondragstart={(event) => event.preventDefault()} data-cell-position={`${position.x},${position.y}`}
+					aria-label="繕い端末" style={`left: ${position.x * cellSize}px; top: ${position.y * cellSize}px;`}
+					onclick={(event) => { event.stopPropagation(); resolveFieldCellSelection(position, event.currentTarget as HTMLButtonElement); }}></button>
+			{/each}
 			{#each traceOnlyCellTriggers as position (`${position.x},${position.y}`)}
 				<button
 					class="field-cell-selection-trigger"
@@ -326,7 +341,7 @@
 				aria-label="Cell actions"
 				style={`left: ${(fieldActionMenu.position.x + 0.5) * cellSize}px; top: ${(fieldActionMenu.position.y + 0.5) * cellSize}px;`}
 			>
-				{#each fieldActionMenu.actions as action, index (`${action.kind}-${action.kind === 'participant' ? action.participantId : action.rootId}-${index}`)}
+				{#each fieldActionMenu.actions as action, index (`${action.kind}-${action.kind === 'participant' ? action.participantId : action.kind === 'trace' ? action.rootId : 'terminal'}-${index}`)}
 					<button
 						type="button"
 						role="menuitem"
@@ -480,6 +495,15 @@
 		inset: 0;
 		z-index: 2;
 		pointer-events: none;
+	}
+
+	.field-facility-layer { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+	.field-facility {
+		position: absolute; display: grid; width: calc(var(--cell-size) * 0.72); height: calc(var(--cell-size) * 0.72);
+		place-items: center; border: 2px solid rgba(233, 246, 231, 0.9); border-radius: 14px;
+		background: linear-gradient(135deg, #47635b, #7da48a); box-shadow: 0 5px 10px rgba(35, 50, 42, 0.34);
+		color: #fffbe3; font-size: max(9px, calc(var(--cell-size) * 0.15)); font-weight: 900;
+		transform: translate(-50%, -50%); pointer-events: none;
 	}
 
 	.field-cell-selection-trigger {
