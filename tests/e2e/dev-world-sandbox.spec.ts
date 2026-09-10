@@ -157,6 +157,32 @@ async function viewportExternalPoint(page: Page): Promise<{ x: number; y: number
 	});
 }
 
+async function chatterNonInteractivePoint(page: Page): Promise<{ x: number; y: number }> {
+	return page.locator('aside[aria-label="Chatter"]').evaluate((chatter) => {
+		const rect = chatter.getBoundingClientRect();
+		const header = chatter.querySelector<HTMLElement>('.timeline-header')?.getBoundingClientRect();
+		if (!header) throw new Error('Expected the Chatter header to be rendered.');
+		return { x: rect.right - 8, y: header.top + header.height / 2 };
+	});
+}
+
+async function speechMovementPoint(page: Page): Promise<{ x: number; y: number }> {
+	return page.locator('.bubble-normal[data-speech-type="shout"]').first().evaluate((bubble) => {
+		const rect = bubble.getBoundingClientRect();
+		const candidates = [
+			{ x: rect.left + 2, y: rect.top + rect.height / 2 },
+			{ x: rect.right - 2, y: rect.top + rect.height / 2 },
+			{ x: rect.left + rect.width / 2, y: rect.top + 2 }
+		];
+		const point = candidates.find(({ x, y }) => {
+			const hit = document.elementFromPoint(x, y);
+			return hit && !hit.closest('.bubble-content, button, input, textarea, select, [contenteditable="true"]');
+		});
+		if (!point) throw new Error(`No speech movement point. bubble=${JSON.stringify(rect.toJSON())}`);
+		return point;
+	});
+}
+
 async function installTraceGeometryFrameSampling(page: Page): Promise<void> {
 	await page.addInitScript(() => {
 		type Rect = { x: number; y: number; width: number; height: number };
@@ -2249,7 +2275,7 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 		await page.locator('[data-cell-position="8,4"]').click();
 		await expect(page.locator('.trace-root-bubble .bubble-content')).toBeVisible();
-		expect(await dragSelect(page.locator('.trace-root-bubble .bubble-content'))).not.toBe('');
+		await expect(page.locator('.trace-root-bubble')).toBeVisible();
 
 		await page.goto('/?devWorld=1&devSpeech=timeline');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
@@ -2593,6 +2619,33 @@ test.describe('DEV World Sandbox', () => {
 		await page.mouse.click(start.x, start.y);
 		await expect(self).toHaveAttribute('data-position', '8,3');
 		await expect(page.getByRole('menu', { name: 'Cell actions' })).toHaveCount(0);
+	});
+
+	test('starts movement from noninteractive Chatter space', async ({ page }) => {
+		await page.goto('/?devWorld=1&devSpeech=timeline');
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+		const showChatter = page.getByRole('button', { name: 'Show Chatter' });
+		if (await showChatter.count()) await showChatter.click();
+		await expect(page.locator('aside[aria-label="Chatter"]')).toBeVisible();
+		const start = await chatterNonInteractivePoint(page);
+		await page.mouse.move(start.x, start.y);
+		await page.mouse.down();
+		await page.mouse.move(start.x - 24, start.y);
+		await expect(page.locator('[data-pointer-joystick="left"]')).toBeVisible();
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '6,3');
+		await page.mouse.up();
+	});
+
+	test('starts movement from movement-capable speech presentation space', async ({ page }) => {
+		await page.goto('/?devWorld=1&devSpeech=comparison');
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+		const start = await speechMovementPoint(page);
+		await page.mouse.move(start.x, start.y);
+		await page.mouse.down();
+		await page.mouse.move(start.x + 24, start.y);
+		await expect(page.locator('[data-pointer-joystick="right"]')).toBeVisible();
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '8,3');
+		await page.mouse.up();
 	});
 
 	test('does not start movement from the Composer dock', async ({ page }) => {

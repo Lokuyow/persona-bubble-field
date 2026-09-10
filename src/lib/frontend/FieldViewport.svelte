@@ -45,7 +45,11 @@
 
 	const pointerGesture: Attachment<HTMLElement> = (node) => {
 		let activeGesture: Readonly<{ pointerId: number; start: JoystickPoint; anchor: GridPosition | null; dragging: boolean; captureOwner: HTMLElement }> | null = null;
-		const interactive = 'button, input, textarea, select, [contenteditable="true"], .field-action-menu, .composer-dock, .sandbox-controls, [role="dialog"], .bubble-layer, .recent-message-timeline';
+		const interactive = 'button, input, textarea, select, [contenteditable="true"], .field-action-menu, .composer-dock, .sandbox-controls, [role="dialog"], .bubble-content';
+		const textSelectionTarget = (event: PointerEvent) => {
+			if (event.target instanceof Element && event.target.closest('.bubble-content, .trace-root-bubble, .trace-root-card, .timeline-content')) return true;
+			return event.composedPath().some((target) => target instanceof HTMLElement && target.matches('.bubble-content, .trace-root-bubble, .trace-root-card, .timeline-content'));
+		};
 		const origin = (event: PointerEvent): HTMLElement | null => {
 			for (const target of event.composedPath()) {
 				if (!(target instanceof HTMLElement)) continue;
@@ -72,8 +76,9 @@
 		const down = (event: PointerEvent) => {
 			if (!event.isPrimary || event.button !== 0 || activeGesture) return;
 			const gestureOrigin = origin(event);
-			if (event.composedPath().some((target) => target instanceof HTMLElement && target.matches('.composer-dock, [role="dialog"], .sandbox-controls, .bubble-layer, .recent-message-timeline')) ||
-				(event.composedPath().some((target) => target instanceof HTMLElement && target.matches('button, input, textarea, select, [contenteditable="true"], .field-action-menu')) && !gestureOrigin)) return;
+			if (textSelectionTarget(event)) return;
+			if (event.composedPath().some((target) => target instanceof HTMLElement && target.matches('.composer-dock, [role="dialog"], .sandbox-controls')) ||
+				(!textSelectionTarget(event) && event.composedPath().some((target) => target instanceof HTMLElement && target.matches('button, input, textarea, select, [contenteditable="true"], .field-action-menu')) && !gestureOrigin)) return;
 			const start = { x: event.clientX, y: event.clientY };
 			const anchor = viewportPointToLogicalCell({ point: start, fieldArea: fieldAreaBounds, camera, field });
 			activeGesture = { pointerId: event.pointerId, start, anchor, dragging: false, captureOwner: gestureOrigin ?? node };
