@@ -624,9 +624,9 @@ async function installPromptApiStub(page: Page, availability: 'available' | 'una
 		}, { availability });
 }
 
-async function seedRelayAccount(page: Page, secretKey: Uint8Array, pubkey: string): Promise<void> {
+async function seedRelayAccount(page: Page, secretKey: Uint8Array, pubkey: string, lifespanExpiresAtMs = Date.now() + 7 * 24 * 60 * 60 * 1000): Promise<void> {
 	await page.goto('/favicon.svg');
-	await page.evaluate(async ({ secret, accountPubkey }) => {
+	await page.evaluate(async ({ secret, accountPubkey, expiresAtMs }) => {
 		const database = await new Promise<IDBDatabase>((resolve, reject) => {
 			const request = indexedDB.open('persona-bubble-field-account', 3);
 			request.onupgradeneeded = () => {
@@ -647,7 +647,7 @@ async function seedRelayAccount(page: Page, secretKey: Uint8Array, pubkey: strin
 		store.put(Date.now(), 'last-changed-at-ms');
 		store.put({ pubkey: accountPubkey, revision: 2 }, 'initial-profile-published-pubkey');
 		transaction.objectStore('persona-bubble-field-game-state').put({
-			version: 1, personaPubkey: accountPubkey, lifespanExpiresAtMs: Date.now() + 7 * 24 * 60 * 60 * 1000,
+			version: 1, personaPubkey: accountPubkey, lifespanExpiresAtMs: expiresAtMs,
 			points: 0, abilities: { inferenceEfficiency: 0, contextCapacity: 0, hallucinationSuppression: 0 }
 		}, 'game-state');
 		await new Promise<void>((resolve, reject) => {
@@ -656,7 +656,7 @@ async function seedRelayAccount(page: Page, secretKey: Uint8Array, pubkey: strin
 			transaction.onabort = () => reject(transaction.error);
 		});
 		database.close();
-	}, { secret: [...secretKey], accountPubkey: pubkey });
+	}, { secret: [...secretKey], accountPubkey: pubkey, expiresAtMs: lifespanExpiresAtMs });
 }
 
 async function seedV2RelayAccount(page: Page, secretKey: Uint8Array, pubkey: string): Promise<void> {
@@ -1061,7 +1061,7 @@ test.describe('Relay startup', () => {
 
 	for (const stateKind of ['missing', 'corrupt'] as const) {
 		test(`keeps public world read available for ${stateKind} persona storage`, async ({ page }) => {
-			const events = testEvents();
+			const events = testEvents(Date.now() + 30_000);
 			await installHostOwnedStub(page);
 			await installDelayedRelay(page, { primaryEvents: events });
 			await seedUnavailablePersona(page, stateKind);
@@ -1074,6 +1074,7 @@ test.describe('Relay startup', () => {
 			await page.evaluate(() => (window as unknown as { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
 			await expect(page.locator(`.participant[data-participant-id="${events.message.pubkey}"]`)).toBeVisible();
 			await expect(page.locator(`.bubble[data-bubble-id="${events.message.id}"]`)).toBeVisible();
+			await expect(page.locator('.lifespan-hud')).toHaveCount(0);
 			await expect(page.locator('.participant[data-self="true"]')).toHaveCount(0);
 
 			const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
@@ -1102,6 +1103,38 @@ test.describe('Relay startup', () => {
 			expect(persistedKeys).not.toContain('encrypted-secret-key');
 		});
 	}
+
+	test('shows and refreshes the current persona lifespan HUD', async ({ page }) => {
+		const startTime = Date.now();
+		const hour = 60 * 60 * 1000;
+		const day = 24 * hour;
+		const minute = 60 * 1000;
+		const expiresAtMs = startTime + 2 * day + 18 * hour + minute;
+		const secret = new Uint8Array(32).fill(61);
+		const pubkey = getPublicKey(secret);
+		await page.clock.install({ time: startTime });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { primaryEvents: testEvents(startTime) });
+		await seedRelayAccount(page, secret, pubkey, expiresAtMs);
+		await page.goto('/');
+		await expect(page.locator('.composer-dock')).toBeVisible();
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
+			AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) &&
+			(request.filter.kinds as number[])[0] === 42)).toBe(true);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		const hud = page.locator('.lifespan-hud');
+		await expect(hud).toHaveText('寿命 2日 18時間');
+
+		await pauseAtCurrentBrowserTime(page);
+		await page.clock.setSystemTime(expiresAtMs - 23 * hour - 59 * minute);
+		await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+		await expect(hud).toHaveText('寿命 23時間 59分');
+
+		await page.clock.setSystemTime(expiresAtMs - 59 * minute - 59 * 1000);
+		await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+		await expect(hud).toHaveText('寿命 59分');
+	});
 
 	test('keeps public read-only updates after runtime reincarnation fails', async ({ page }) => {
 		const startTime = Date.now();
