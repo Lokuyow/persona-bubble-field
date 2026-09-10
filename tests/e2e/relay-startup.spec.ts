@@ -229,9 +229,10 @@ async function installDelayedRelay(page: Page, options: {
 	traceReplies?: readonly object[];
 	deferTraceRoots?: boolean;
 	deferTraceReplies?: boolean;
+	persistAcrossReload?: boolean;
 } = {}): Promise<void> {
 	const events = options.primaryEvents ?? testEvents();
-	await page.addInitScript(({ seedRelays, authoritativeRelays, channelEvent, primaryEvents, historyMessages, deferPrimaryEvents, traceRoots, traceReplies, deferTraceRoots, deferTraceReplies }) => {
+	await page.addInitScript(({ seedRelays, authoritativeRelays, channelEvent, primaryEvents, historyMessages, deferPrimaryEvents, traceRoots, traceReplies, deferTraceRoots, deferTraceReplies, persistAcrossReload }) => {
 		type Listener = (event?: { type: string; data?: string; code?: number; reason?: string }) => void;
 		type PendingRequest = { socket: FakeWebSocket; subId: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] };
 		const seed = new Set<string>(seedRelays);
@@ -246,10 +247,18 @@ async function installDelayedRelay(page: Page, options: {
 		const pendingPublishes: Array<{ socket: FakeWebSocket; event: Record<string, unknown> }> = [];
 		const timelineHistory = (historyMessages ?? []) as Array<Record<string, unknown>>;
 		const traceReplyHistory = traceReplies as Array<Record<string, unknown>>;
+		const persistedKey = 'relay-startup-persisted-state';
+		const previous = persistAcrossReload ? JSON.parse(sessionStorage.getItem(persistedKey) ?? '{"published":[],"closedSubscriptions":[]}') as {
+			published: Array<Record<string, unknown>>;
+			closedSubscriptions: Array<{ subId: string; url: string }>;
+		} : { published: [], closedSubscriptions: [] };
 		const state = {
 			traceDeliveries: [] as string[],
 			requests: [] as Array<{ url: string; subId: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] }>,
 			published: [] as Array<Record<string, unknown>>,
+			closedSubscriptions: [] as Array<{ subId: string; url: string }>,
+			previousPublished: previous.published,
+			previousClosedSubscriptions: previous.closedSubscriptions,
 			metadataReleased: false,
 			primaryEventsReleased: !deferPrimaryEvents,
 			primaryReleased: false,
@@ -344,6 +353,7 @@ async function installDelayedRelay(page: Page, options: {
 				const packet = JSON.parse(raw) as unknown[];
 				if (packet[0] === 'CLOSE') {
 					const subId = packet[1] as string;
+					state.closedSubscriptions.push({ subId, url: this.url });
 					for (const requests of [activePrimary, activeTraceReplies]) {
 						const index = requests.findIndex((request) => request.subId === subId && request.socket === this);
 						if (index >= 0) {
@@ -412,6 +422,12 @@ async function installDelayedRelay(page: Page, options: {
 		}
 
 		Object.defineProperty(window, 'WebSocket', { configurable: true, value: FakeWebSocket });
+		if (persistAcrossReload) window.addEventListener('pagehide', () => {
+			sessionStorage.setItem(persistedKey, JSON.stringify({
+				published: [...state.previousPublished, ...state.published],
+				closedSubscriptions: [...state.previousClosedSubscriptions, ...state.closedSubscriptions]
+			}));
+		});
 		window.fetch = async () => new Response('{}', { status: 200, headers: { 'content-type': 'application/nostr+json' } });
 		Object.assign(window, {
 			__relayStartupTest: {
@@ -485,13 +501,14 @@ async function installDelayedRelay(page: Page, options: {
 		traceRoots: options.traceRoots ?? [],
 		traceReplies: options.traceReplies ?? [],
 		deferTraceRoots: options.deferTraceRoots ?? false,
-		deferTraceReplies: options.deferTraceReplies ?? false
+		deferTraceReplies: options.deferTraceReplies ?? false,
+		persistAcrossReload: options.persistAcrossReload ?? false
 	});
 }
 
 function relayState(page: Page) {
 	return page.evaluate(() => (window as typeof window & {
-		__relayStartupTest: { state: { requests: Array<{ url: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] }>; published: Array<{ id: string; kind: number; content: string; tags: string[][] }> }; releaseMetadata(): void; releasePrimaryEvents(): void; releasePrimary(): void; releaseTraceRoots(): void; releaseTraceReplies(): void; deferTraceReplies(): void; injectTraceReply(event: object): void; injectClosedTraceReply(event: object): void; activeTraceReplyCount(): number; rejectMessagePublishes(): void; allowMessagePublishes(): void; rejectPositionPublishes(): void; allowPositionPublishes(): void; injectPosition(event: object): void; injectMessage(event: object): void };
+		__relayStartupTest: { state: { requests: Array<{ url: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] }>; published: Array<{ id: string; kind: number; content: string; tags: string[][]; pubkey?: string }> }; releaseMetadata(): void; releasePrimaryEvents(): void; releasePrimary(): void; releaseTraceRoots(): void; releaseTraceReplies(): void; deferTraceReplies(): void; injectTraceReply(event: object): void; injectClosedTraceReply(event: object): void; activeTraceReplyCount(): number; rejectMessagePublishes(): void; allowMessagePublishes(): void; rejectPositionPublishes(): void; allowPositionPublishes(): void; injectPosition(event: object): void; injectMessage(event: object): void };
 	}).__relayStartupTest);
 }
 
@@ -950,8 +967,9 @@ test.describe('Relay startup', () => {
 		await page.clock.runFor(1_001);
 		await page.keyboard.press('ArrowRight');
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,5');
-		await dragRelayJoystick(page, { x: 100, y: 0 }, { x: 10, y: 5 });
-		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,5');
+		await dragRelayJoystick(page, { x: 0, y: -100 }, { x: 12, y: 5 });
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,4');
+		await expect(page.getByRole('dialog')).toHaveCount(0);
 
 		await terminal.click();
 		await expect(page.getByRole('dialog')).toBeVisible();
@@ -987,7 +1005,12 @@ test.describe('Relay startup', () => {
 			relay.releaseMetadata(); relay.releasePrimary();
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
-		await moveRelaySelfTo(page, { x: 11, y: 5 });
+		const atTerminal = finalizeEvent(buildPositionEventTemplate({
+			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 11, y: 5 }, slot: 1,
+			createdAt: Math.floor(await page.evaluate(() => Date.now()) / 1000)
+		}), secret);
+		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), atTerminal);
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,5');
 		await page.getByRole('button', { name: '繕い端末' }).click();
 		await page.getByRole('button', { name: '繕いを開始' }).click();
 		const started = await readRelayGameState(page);
@@ -1102,6 +1125,89 @@ test.describe('Relay startup', () => {
 			expect(collected).toMatchObject({ points: 8, mendingJob: null });
 		} finally {
 			await other.close();
+		}
+	});
+
+	test('reloads an old terminal mutation into the persona reincarnated by another tab', async ({ page }) => {
+		const secret = new Uint8Array(32).fill(63);
+		const oldPubkey = getPublicKey(secret);
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { persistAcrossReload: true });
+		await seedRelayAccount(page, secret, oldPubkey);
+		await page.goto('/');
+		await page.evaluate(() => {
+			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
+			relay.releaseMetadata(); relay.releasePrimary();
+		});
+		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${oldPubkey}"]`)).toBeVisible();
+		const atTerminal = finalizeEvent(buildPositionEventTemplate({
+			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 11, y: 5 }, slot: 1,
+			createdAt: Math.floor(await page.evaluate(() => Date.now()) / 1000)
+		}), secret);
+		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), atTerminal);
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,5');
+		await page.getByRole('button', { name: '繕い端末' }).click();
+		await expect(page.getByRole('dialog')).toBeVisible();
+		const oldPublishedCount = (await relayState(page)).state.published.length;
+
+		const reincarnator = await page.context().newPage();
+		try {
+			await installHostOwnedStub(reincarnator);
+			await installDelayedRelay(reincarnator);
+			await reincarnator.goto('/');
+			await reincarnator.evaluate(() => {
+				const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
+				relay.releaseMetadata(); relay.releasePrimary();
+			});
+			await expect(reincarnator.locator(`.participant[data-self="true"][data-participant-id="${oldPubkey}"]`)).toBeVisible();
+			await reincarnator.evaluate(async (pubkey) => {
+				const database = await new Promise<IDBDatabase>((resolve, reject) => {
+					const request = indexedDB.open('persona-bubble-field-account');
+					request.onsuccess = () => resolve(request.result);
+					request.onerror = () => reject(request.error);
+				});
+				try {
+					const transaction = database.transaction('persona-bubble-field-game-state', 'readwrite');
+					transaction.objectStore('persona-bubble-field-game-state').put({ version: 2, personaPubkey: pubkey, lifespanExpiresAtMs: Date.now() - 1, points: 0,
+						abilities: { inferenceEfficiency: 0, contextCapacity: 0, hallucinationSuppression: 0 }, mendingJob: null }, 'game-state');
+					await new Promise<void>((resolve, reject) => {
+						transaction.oncomplete = () => resolve(); transaction.onerror = () => reject(transaction.error); transaction.onabort = () => reject(transaction.error);
+					});
+				} finally { database.close(); }
+			}, oldPubkey);
+			await reincarnator.reload({ waitUntil: 'domcontentloaded' });
+			await reincarnator.evaluate(() => {
+				const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
+				relay.releaseMetadata(); relay.releasePrimary();
+			});
+			await expect.poll(async () => (await readRelayGameState(reincarnator)).personaPubkey).not.toBe(oldPubkey);
+
+			const reloaded = page.waitForEvent('framenavigated', (frame) => frame === page.mainFrame());
+			await page.getByRole('button', { name: '繕いを開始' }).click();
+			await reloaded;
+			await expect(page.locator('.composer-dock')).toBeVisible();
+			await page.evaluate(() => {
+				const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
+				relay.releaseMetadata(); relay.releasePrimary();
+			});
+			const newPubkey = (await readRelayGameState(page)).personaPubkey;
+			expect(newPubkey).not.toBe(oldPubkey);
+			await expect(page.locator(`.participant[data-self="true"][data-participant-id="${newPubkey}"]`)).toBeVisible();
+			const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
+			await editor.fill('new persona after superseded mending');
+			await page.locator('ehagaki-composer').getByRole('button', { name: 'Send' }).click();
+			await expect.poll(async () => (await relayState(page)).state.published.some((event) => event.kind === 42 && event.pubkey === newPubkey)).toBe(true);
+			const observed = await page.evaluate(() => {
+				const state = (window as typeof window & { __relayStartupTest: { state: { previousPublished: Array<{ kind: number; pubkey: string }>; published: Array<{ kind: number; pubkey: string }>; previousClosedSubscriptions: unknown[] } } }).__relayStartupTest.state;
+				return { published: [...state.previousPublished, ...state.published], closed: state.previousClosedSubscriptions };
+			});
+			expect(observed.closed.length).toBeGreaterThan(0);
+			const postSupersession = observed.published.slice(oldPublishedCount);
+			expect(postSupersession.filter((event) => [30078, 42, 1111].includes(event.kind))).not.toContainEqual(expect.objectContaining({ pubkey: oldPubkey }));
+			expect(postSupersession).toContainEqual(expect.objectContaining({ kind: 30078, pubkey: newPubkey }));
+			expect(postSupersession).toContainEqual(expect.objectContaining({ kind: 42, pubkey: newPubkey }));
+		} finally {
+			await reincarnator.close();
 		}
 	});
 

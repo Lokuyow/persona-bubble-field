@@ -153,7 +153,10 @@
 				if (gesture.captureOwner.hasPointerCapture(event.pointerId)) gesture.captureOwner.releasePointerCapture(event.pointerId);
 				releasePointerCapture(event.pointerId);
 			} catch { /* pointer capture may already be lost */ }
-			if (gesture.dragging) onPointerMovementStop(event.pointerId);
+			if (gesture.dragging) {
+				event.preventDefault();
+				onPointerMovementStop(event.pointerId);
+			}
 			pointerJoystick = null;
 			if (selectTap && !gesture.dragging && gesture.captureOwner === node) resolveFieldCellSelection(gesture.anchor);
 		};
@@ -213,6 +216,12 @@
 			cancelPointerGestureImpl = () => {};
 		};
 	};
+
+	function handleSelectableCellClick(event: MouseEvent, position: GridPosition): void {
+		const trigger = event.currentTarget as HTMLButtonElement;
+		event.stopPropagation();
+		resolveFieldCellSelection(position, trigger);
+	}
 
 </script>
 
@@ -279,7 +288,7 @@
 				<button class="field-cell-selection-trigger" data-field-gesture-origin="selectable" type="button"
 					ondragstart={(event) => event.preventDefault()} data-cell-position={`${position.x},${position.y}`}
 					aria-label="繕い端末" style={`left: ${position.x * cellSize}px; top: ${position.y * cellSize}px;`}
-					onclick={(event) => { event.stopPropagation(); resolveFieldCellSelection(position, event.currentTarget as HTMLButtonElement); }}></button>
+					onclick={(event) => handleSelectableCellClick(event, position)}></button>
 			{/each}
 			{#each traceOnlyCellTriggers as position (`${position.x},${position.y}`)}
 				<button
@@ -292,10 +301,7 @@
 						? '痕跡を調べる'
 						: '痕跡を調べる（近づくと調べられる）'}
 					style={`left: ${position.x * cellSize}px; top: ${position.y * cellSize}px;`}
-					onclick={(event) => {
-						event.stopPropagation();
-						resolveFieldCellSelection(position, event.currentTarget as HTMLButtonElement);
-					}}
+					onclick={(event) => handleSelectableCellClick(event, position)}
 				></button>
 			{/each}
 		</div>
