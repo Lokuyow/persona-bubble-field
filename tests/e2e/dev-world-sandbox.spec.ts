@@ -140,6 +140,49 @@ async function fieldOwnedBlankPoint(page: Page, preferred: { x: number; y: numbe
 	}, preferred);
 }
 
+async function viewportExternalPoint(page: Page): Promise<{ x: number; y: number }> {
+	return page.locator('.field-viewport').evaluate((viewport) => {
+		const viewportRect = viewport.getBoundingClientRect();
+		const fieldRect = document.querySelector<HTMLElement>('.field-area')!.getBoundingClientRect();
+		const composerRect = document.querySelector<HTMLElement>('.composer-dock')?.getBoundingClientRect() ?? null;
+		const candidates = [
+			{ x: viewportRect.left + viewportRect.width / 2, y: viewportRect.top + 20 },
+			{ x: viewportRect.left + 20, y: viewportRect.top + viewportRect.height / 2 },
+			{ x: viewportRect.right - 20, y: viewportRect.top + viewportRect.height / 2 }
+		];
+		const inside = (rect: DOMRect, point: { x: number; y: number }) => point.x >= rect.left && point.x <= rect.right && point.y >= rect.top && point.y <= rect.bottom;
+		const point = candidates.find((candidate) => inside(viewportRect, candidate) && !inside(fieldRect, candidate) && (!composerRect || !inside(composerRect, candidate)));
+		if (!point) throw new Error(`No viewport-external point. viewport=${JSON.stringify(viewportRect.toJSON())} field=${JSON.stringify(fieldRect.toJSON())} composer=${JSON.stringify(composerRect?.toJSON() ?? null)}`);
+		return point;
+	});
+}
+
+async function chatterNonInteractivePoint(page: Page): Promise<{ x: number; y: number }> {
+	return page.locator('aside[aria-label="Chatter"]').evaluate((chatter) => {
+		const rect = chatter.getBoundingClientRect();
+		const header = chatter.querySelector<HTMLElement>('.timeline-header')?.getBoundingClientRect();
+		if (!header) throw new Error('Expected the Chatter header to be rendered.');
+		return { x: rect.right - 8, y: header.top + header.height / 2 };
+	});
+}
+
+async function speechMovementPoint(page: Page): Promise<{ x: number; y: number }> {
+	return page.locator('.bubble-normal[data-speech-type="shout"]').first().evaluate((bubble) => {
+		const rect = bubble.getBoundingClientRect();
+		const candidates = [
+			{ x: rect.left + 2, y: rect.top + rect.height / 2 },
+			{ x: rect.right - 2, y: rect.top + rect.height / 2 },
+			{ x: rect.left + rect.width / 2, y: rect.top + 2 }
+		];
+		const point = candidates.find(({ x, y }) => {
+			const hit = document.elementFromPoint(x, y);
+			return hit && !hit.closest('.bubble-content, button, input, textarea, select, [contenteditable="true"]');
+		});
+		if (!point) throw new Error(`No speech movement point. bubble=${JSON.stringify(rect.toJSON())}`);
+		return point;
+	});
+}
+
 async function installTraceGeometryFrameSampling(page: Page): Promise<void> {
 	await page.addInitScript(() => {
 		type Rect = { x: number; y: number; width: number; height: number };
@@ -2566,6 +2609,67 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.locator('[data-pointer-joystick]')).toHaveCount(0);
 		await page.clock.runFor(1_000);
 		await expect(self).toHaveAttribute('data-position', '10,3');
+	});
+
+	test('starts movement from viewport space outside the field area while keeping external taps inert', async ({ page }) => {
+		await openDevWorld(page);
+		const self = page.locator('.participant[data-self="true"]');
+		const start = await viewportExternalPoint(page);
+		await page.mouse.move(start.x, start.y);
+		await page.mouse.down();
+		await page.mouse.move(start.x + 24, start.y);
+		await expect(page.locator('[data-pointer-joystick="right"]')).toBeVisible();
+		await expect(self).toHaveAttribute('data-position', '8,3');
+		await page.mouse.up();
+		await expect(page.locator('[data-pointer-joystick]')).toHaveCount(0);
+
+		await page.mouse.click(start.x, start.y);
+		await expect(self).toHaveAttribute('data-position', '8,3');
+		await expect(page.getByRole('menu', { name: 'Cell actions' })).toHaveCount(0);
+	});
+
+	test('starts movement from noninteractive Chatter space', async ({ page }) => {
+		await page.goto('/?devWorld=1&devSpeech=timeline');
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+		const showChatter = page.getByRole('button', { name: 'Show Chatter' });
+		if (await showChatter.count()) await showChatter.click();
+		await expect(page.locator('aside[aria-label="Chatter"]')).toBeVisible();
+		const start = await chatterNonInteractivePoint(page);
+		await page.mouse.move(start.x, start.y);
+		await page.mouse.down();
+		await page.mouse.move(start.x - 24, start.y);
+		await expect(page.locator('[data-pointer-joystick="left"]')).toBeVisible();
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '6,3');
+		await page.mouse.up();
+	});
+
+	test('starts movement from movement-capable speech presentation space', async ({ page }) => {
+		await page.goto('/?devWorld=1&devSpeech=comparison');
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+		const start = await speechMovementPoint(page);
+		await page.mouse.move(start.x, start.y);
+		await page.mouse.down();
+		await page.mouse.move(start.x + 24, start.y);
+		await expect(page.locator('[data-pointer-joystick="right"]')).toBeVisible();
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '8,3');
+		await page.mouse.up();
+	});
+
+	test('does not start movement from the Composer dock', async ({ page }) => {
+		await page.goto('/?devWorld=1&devTrace=replies');
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+		await expect(page.locator('.composer-dock')).toBeVisible();
+		const self = page.locator('.participant[data-self="true"]');
+		const composer = page.locator('.composer-dock');
+		const box = await composer.boundingBox();
+		if (!box) throw new Error('Expected the composer dock to be visible.');
+		const start = { x: box.x + box.width / 2, y: box.y + Math.min(20, box.height / 2) };
+		await page.mouse.move(start.x, start.y);
+		await page.mouse.down();
+		await page.mouse.move(start.x + 24, start.y);
+		await expect(page.locator('[data-pointer-joystick]')).toHaveCount(0);
+		await expect(self).toHaveAttribute('data-position', '7,3');
+		await page.mouse.up();
 	});
 
 	test('moves one cell in each cardinal direction through the pointer path', async ({ page }) => {

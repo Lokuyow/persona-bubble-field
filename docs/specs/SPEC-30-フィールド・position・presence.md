@@ -104,11 +104,13 @@ blockingは行わない。blocked diagonalをcardinal movementへfallbackまた�
 成立したmovementの最大レートはcardinal / diagonalで共通の1秒あたり2回とする。
 
 pointer movementはPCとmobile/tabletで共通とし、mouse、pen、touchをWeb標準の
-Pointer Eventsによる同じpointer gestureとして扱う。field背景に加えて、fieldが所有する
+Pointer Eventsによる同じpointer gestureとして扱う。composer-dockを除く通常のfield
+viewport領域（fieldのvisual artwork・gridの外側を含む）から開始でき、fieldが所有する
 selectable target（participant icon / profile trigger、Traceを調査するlogical-cell
-selection target、調査中rootのauthor ghost profile trigger）から開始できるdynamic /
-floating virtual joystickを使用する。joystickはdrag確定後だけ表示し、centerはdrag開始位置
-とする。pointer release、pointer cancel等のgesture終了時に消える。
+selection target、調査中rootのauthor ghost profile trigger）では既存のtap/clickを維持しつつ、
+drag確定後にmovementへtakeoverするdynamic / floating virtual joystickを使用する。
+joystickはdrag確定後だけ表示し、centerはdrag開始位置とする。pointer release、pointer
+cancel等のgesture終了時に消える。field外のtap/clickはlogical-cell selectionを発生させない。
 
 pointerの移動方向は、cardinal 4方向とdiagonal 4方向の計8方向とする。joystickの
 方向はequal-width 45度の8方向sectorへ量子化し、deflection magnitudeで移動速度を
@@ -116,10 +118,10 @@ pointerの移動方向は、cardinal 4方向とdiagonal 4方向の計8方向と�
 publish、visual animationを再利用する。
 
 tapとdragはgesture thresholdで区別するが、具体的なthresholdは実装詳細とする。
-threshold未満のpointer releaseはmovementではなくlogical-cell selectionとして扱う。field-owned
+threshold未満のpointer releaseはmovementではなくlogical-cell selectionとして扱う。ただしlogical-cell selectionはfield内のtapに限る。field-owned
 selectable targetでは元のtap / click actionを維持し、threshold以上でdragが確定した場合は
 movementがgestureを取得して元のtarget actionを実行しない。Composer、input、textarea、select、
-contenteditable、context/action menu、Dialog等、field selectionとは別責務のinteractive UIは
+contenteditable、context/action menu、Dialog等、別操作を優先すべきinteractive UIでは本来の操作を維持し、
 movement originにしない。具体的なthreshold値は実装詳細とし、現在の値を変更しない。
 PCのArrow/WASD操作は維持し、押下中の上下成分と左右成分を合成した8方向の入力を
 使用する。上下または左右の反対成分は相殺し、両成分が残る場合はdiagonalとして扱う。

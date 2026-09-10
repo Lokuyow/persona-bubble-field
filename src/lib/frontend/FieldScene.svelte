@@ -1,13 +1,11 @@
 <script lang="ts">
-	import type { Attachment } from 'svelte/attachments';
 	import { asset } from '$app/paths';
 	import type { Character } from '$lib/character';
 	import CharacterAvatar from '$lib/CharacterAvatar.svelte';
 	import FieldParticipant from '$lib/FieldParticipant.svelte';
 	import type { BubbleTone } from '$lib/bubblePresentation';
-	import { viewportPointToLogicalCell, type FieldCellAction } from '$lib/fieldSelection';
+	import type { FieldCellAction } from '$lib/fieldSelection';
 	import type { Bounds, Direction, FieldSize, GridPosition, Size, WorldPoint } from '$lib/geometry';
-	import { clampJoystickThumb, isJoystickDrag, joystickDirection, type JoystickPoint } from '$lib/pointerJoystick';
 	import type { ProjectedParticipant } from '$lib/presenceProjection';
 	import type { Participant } from '$lib/frontend/presencePresentation';
 	import { isWithinTraceInvestigationRange, type TraceRootCell } from '$lib/traceInvestigation';
@@ -34,14 +32,6 @@
 	export type FieldActionMenu = Readonly<{
 		position: GridPosition;
 		actions: readonly FieldCellAction[];
-	}>;
-	export type PointerJoystick = Readonly<{
-		center: WorldPoint;
-		thumb: WorldPoint;
-		direction: Direction;
-	}>;
-	export type FieldSceneHandle = Readonly<{
-		cancelPointerGesture: () => void;
 	}>;
 
 	type Props = Readonly<{
@@ -70,9 +60,6 @@
 		closeFieldActionMenu: () => void;
 		onOpenProfile: (characterId: string, trigger: HTMLButtonElement) => void;
 		traceMarkerWorldPosition: (position: GridPosition) => WorldPoint;
-		onPointerMovementTakeover: (pointerId: number, direction: Direction) => void;
-		onPointerMovementUpdate: (pointerId: number, direction: Direction) => void;
-		onPointerMovementStop: (pointerId: number) => void;
 	}>;
 
 	let {
@@ -101,127 +88,7 @@
 		closeFieldActionMenu,
 		onOpenProfile,
 		traceMarkerWorldPosition,
-		onPointerMovementTakeover,
-		onPointerMovementUpdate,
-		onPointerMovementStop
 	}: Props = $props();
-
-	let pointerJoystick = $state.raw<PointerJoystick | null>(null);
-	let cancelPointerGestureImpl = () => {};
-
-	export function cancelPointerGesture(): void {
-		cancelPointerGestureImpl();
-	}
-
-	const fieldSelectionPointer: Attachment<HTMLElement> = (node) => {
-		let activeGesture: Readonly<{
-			pointerId: number;
-			start: JoystickPoint;
-			anchor: GridPosition;
-			dragging: boolean;
-			captureOwner: HTMLElement;
-		}> | null = null;
-
-		const fieldGestureOrigin = (event: PointerEvent): HTMLElement | null => {
-			for (const target of event.composedPath()) {
-				if (!(target instanceof HTMLElement)) continue;
-				if (target.matches('[data-field-gesture-origin="selectable"]')) return target;
-				if (target.matches('button, input, textarea, select, [contenteditable="true"], .field-action-menu')) return null;
-			}
-			return null;
-		};
-		const releasePointerCapture = (pointerId: number) => {
-			if (node.hasPointerCapture(pointerId)) node.releasePointerCapture(pointerId);
-		};
-		const cancelGesture = () => {
-			const gesture = activeGesture;
-			activeGesture = null;
-			if (gesture) {
-				onPointerMovementStop(gesture.pointerId);
-				try {
-					if (gesture.captureOwner.hasPointerCapture(gesture.pointerId)) gesture.captureOwner.releasePointerCapture(gesture.pointerId);
-					releasePointerCapture(gesture.pointerId);
-				} catch { /* pointer capture may already be lost */ }
-			}
-			pointerJoystick = null;
-		};
-		const finishGesture = (event: PointerEvent, selectTap: boolean) => {
-			const gesture = activeGesture;
-			if (!gesture || gesture.pointerId !== event.pointerId) return;
-			activeGesture = null;
-			try {
-				if (gesture.captureOwner.hasPointerCapture(event.pointerId)) gesture.captureOwner.releasePointerCapture(event.pointerId);
-				releasePointerCapture(event.pointerId);
-			} catch { /* pointer capture may already be lost */ }
-			if (gesture.dragging) {
-				event.preventDefault();
-				onPointerMovementStop(event.pointerId);
-			}
-			pointerJoystick = null;
-			if (selectTap && !gesture.dragging && gesture.captureOwner === node) resolveFieldCellSelection(gesture.anchor);
-		};
-		const handlePointerDown = (event: PointerEvent) => {
-			if (!event.isPrimary || event.button !== 0 || activeGesture) return;
-			const origin = fieldGestureOrigin(event);
-			if (event.composedPath().some((target) => target instanceof HTMLElement && target.matches('button, input, textarea, select, [contenteditable="true"], .field-action-menu')) && !origin) return;
-			const start = { x: event.clientX, y: event.clientY };
-			const anchor = viewportPointToLogicalCell({ point: start, fieldArea: fieldAreaBounds, camera, field });
-			if (!anchor) return;
-			activeGesture = { pointerId: event.pointerId, start, anchor, dragging: false, captureOwner: origin ?? node };
-			try { (origin ?? node).setPointerCapture(event.pointerId); } catch { /* synthetic events may not have a capturable pointer */ }
-		};
-		const handlePointerMove = (event: PointerEvent) => {
-			const gesture = activeGesture;
-			if (!gesture || gesture.pointerId !== event.pointerId) return;
-			const current = { x: event.clientX, y: event.clientY };
-			if (!gesture.dragging) {
-				if (!isJoystickDrag(gesture.start, current)) return;
-				const direction = joystickDirection(gesture.start, current);
-				if (!direction) return;
-				activeGesture = { ...gesture, dragging: true };
-				try {
-					if (gesture.captureOwner !== node && gesture.captureOwner.hasPointerCapture(event.pointerId)) gesture.captureOwner.releasePointerCapture(event.pointerId);
-					node.setPointerCapture(event.pointerId);
-				} catch { /* pointer capture may already be lost */ }
-				pointerJoystick = {
-					center: gesture.start,
-					thumb: clampJoystickThumb(gesture.start, current),
-					direction
-				};
-				closeFieldActionMenu();
-				onPointerMovementTakeover(event.pointerId, direction);
-				return;
-			}
-			const direction = joystickDirection(gesture.start, current);
-			if (!direction) return;
-			pointerJoystick = {
-				center: gesture.start,
-				thumb: clampJoystickThumb(gesture.start, current),
-				direction
-			};
-			onPointerMovementUpdate(event.pointerId, direction);
-		};
-		node.addEventListener('pointerdown', handlePointerDown);
-		node.addEventListener('pointermove', handlePointerMove);
-		node.addEventListener('pointerup', (event) => finishGesture(event, true));
-		node.addEventListener('pointercancel', (event) => finishGesture(event, false));
-		node.addEventListener('lostpointercapture', (event) => {
-			const gesture = activeGesture;
-			if (!gesture || event.target !== node) return;
-			finishGesture(event as PointerEvent, false);
-		});
-		cancelPointerGestureImpl = cancelGesture;
-		return () => {
-			cancelGesture();
-			cancelPointerGestureImpl = () => {};
-		};
-	};
-
-	function handleSelectableCellClick(event: MouseEvent, position: GridPosition): void {
-		const trigger = event.currentTarget as HTMLButtonElement;
-		event.stopPropagation();
-		resolveFieldCellSelection(position, trigger);
-	}
 
 </script>
 
@@ -229,7 +96,6 @@
 	class="field-area"
 	style={`top: ${fieldAreaBounds.y}px; left: ${fieldAreaBounds.x}px; width: ${fieldAreaBounds.width}px; height: ${fieldAreaBounds.height}px;`}
 	aria-label="Field area"
-	{@attach fieldSelectionPointer}
 >
 	<div
 		class={['field-scene', { 'field-scene-hidden': !geometryReady }]}
@@ -285,10 +151,16 @@
 		{/if}
 		<div class="field-cell-selection-layer" aria-label="Trace investigation cells">
 			{#each facilityCellTriggers as position (`facility-${position.x},${position.y}`)}
-				<button class="field-cell-selection-trigger" data-field-gesture-origin="selectable" type="button"
-					ondragstart={(event) => event.preventDefault()} data-cell-position={`${position.x},${position.y}`}
-					aria-label="繕い端末" style={`left: ${position.x * cellSize}px; top: ${position.y * cellSize}px;`}
-					onclick={(event) => handleSelectableCellClick(event, position)}></button>
+				<button
+					class="field-cell-selection-trigger"
+					data-field-gesture-origin="selectable"
+					type="button"
+					ondragstart={(event) => event.preventDefault()}
+					data-cell-position={`${position.x},${position.y}`}
+					aria-label="繕い端末"
+					style={`left: ${position.x * cellSize}px; top: ${position.y * cellSize}px;`}
+					onclick={(event) => { event.stopPropagation(); resolveFieldCellSelection(position, event.currentTarget as HTMLButtonElement); }}
+				></button>
 			{/each}
 			{#each traceOnlyCellTriggers as position (`${position.x},${position.y}`)}
 				<button
@@ -301,7 +173,10 @@
 						? '痕跡を調べる'
 						: '痕跡を調べる（近づくと調べられる）'}
 					style={`left: ${position.x * cellSize}px; top: ${position.y * cellSize}px;`}
-					onclick={(event) => handleSelectableCellClick(event, position)}
+					onclick={(event) => {
+						event.stopPropagation();
+						resolveFieldCellSelection(position, event.currentTarget as HTMLButtonElement);
+					}}
 				></button>
 			{/each}
 		</div>
@@ -362,21 +237,6 @@
 		{/if}
 	</div>
 </div>
-{#if pointerJoystick}
-	<div
-		class="pointer-joystick"
-		data-pointer-joystick={pointerJoystick.direction}
-		aria-hidden="true"
-		style={`left: ${pointerJoystick.center.x}px; top: ${pointerJoystick.center.y}px;`}
-	>
-		<div class="pointer-joystick-base"></div>
-		<div
-			class="pointer-joystick-thumb"
-			style={`--joystick-thumb-x: ${pointerJoystick.thumb.x}px; --joystick-thumb-y: ${pointerJoystick.thumb.y}px;`}
-		></div>
-	</div>
-{/if}
-
 <style>
 	.field-area {
 		position: absolute;
@@ -437,6 +297,15 @@
 		inset: 0;
 		z-index: 4;
 		pointer-events: none;
+	}
+
+	.field-facility-layer { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+	.field-facility {
+		position: absolute; display: grid; width: calc(var(--cell-size) * 0.72); height: calc(var(--cell-size) * 0.72);
+		place-items: center; border: 2px solid rgba(233, 246, 231, 0.9); border-radius: 14px;
+		background: linear-gradient(135deg, #47635b, #7da48a); box-shadow: 0 5px 10px rgba(35, 50, 42, 0.34);
+		color: #fffbe3; font-size: max(9px, calc(var(--cell-size) * 0.15)); font-weight: 900;
+		transform: translate(-50%, -50%); pointer-events: none;
 	}
 
 	.trace-marker {
@@ -503,15 +372,6 @@
 		pointer-events: none;
 	}
 
-	.field-facility-layer { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
-	.field-facility {
-		position: absolute; display: grid; width: calc(var(--cell-size) * 0.72); height: calc(var(--cell-size) * 0.72);
-		place-items: center; border: 2px solid rgba(233, 246, 231, 0.9); border-radius: 14px;
-		background: linear-gradient(135deg, #47635b, #7da48a); box-shadow: 0 5px 10px rgba(35, 50, 42, 0.34);
-		color: #fffbe3; font-size: max(9px, calc(var(--cell-size) * 0.15)); font-weight: 900;
-		transform: translate(-50%, -50%); pointer-events: none;
-	}
-
 	.field-cell-selection-trigger {
 		position: absolute;
 		width: var(--cell-size);
@@ -527,43 +387,6 @@
 	.field-cell-selection-trigger:focus-visible {
 		outline: 3px solid var(--color-focus-ring);
 		outline-offset: -5px;
-	}
-
-	.pointer-joystick {
-		position: absolute;
-		z-index: 7;
-		width: 96px;
-		height: 96px;
-		transform: translate(-50%, -50%);
-		pointer-events: none;
-	}
-
-	.pointer-joystick-base,
-	.pointer-joystick-thumb {
-		position: absolute;
-		border-radius: 50%;
-		pointer-events: none;
-	}
-
-	.pointer-joystick-base {
-		top: 0;
-		left: 0;
-		width: 96px;
-		height: 96px;
-		border: 1px solid rgba(50, 82, 70, 0.32);
-		background: rgba(221, 235, 221, 0.32);
-		box-shadow: 0 5px 18px rgba(50, 68, 56, 0.14), inset 0 0 0 1px rgba(255, 255, 255, 0.3);
-	}
-
-	.pointer-joystick-thumb {
-		left: calc(50% + var(--joystick-thumb-x));
-		top: calc(50% + var(--joystick-thumb-y));
-		width: 32px;
-		height: 32px;
-		transform: translate(-50%, -50%);
-		border: 1px solid rgba(43, 77, 63, 0.48);
-		background: rgba(108, 153, 132, 0.58);
-		box-shadow: 0 3px 10px rgba(50, 68, 56, 0.18);
 	}
 
 	.trace-ghost {

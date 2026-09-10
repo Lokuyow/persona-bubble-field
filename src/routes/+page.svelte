@@ -104,11 +104,10 @@
 	import WorldEntryControls from '$lib/frontend/WorldEntryControls.svelte';
 	import DevWorldControls from '$lib/dev/DevWorldControls.svelte';
 	import { applyDevPageFixtures, createDevTraceLiveReply } from '$lib/dev/devPageFixtures';
-	import FieldViewport from '$lib/frontend/FieldViewport.svelte';
+	import FieldViewport, { type FieldViewportHandle } from '$lib/frontend/FieldViewport.svelte';
 	import FieldScene, {
 		type FieldActionMenu,
 		type FieldParticipantView,
-		type FieldSceneHandle,
 		type TraceMarkerCell,
 		type TraceRootGhost
 	} from '$lib/frontend/FieldScene.svelte';
@@ -220,7 +219,7 @@
 	let composerEditorIsEmpty: boolean | null = null;
 	let chatterComponent: { initialize(width: number): void; isInitialized(): boolean; toggle(): void; resetMeasurements(): void };
 	let composerComponent = $state.raw<{ focusEditor(): boolean; blurEditor(): boolean; applyContentIfEmpty(content: string): Promise<boolean> } | null>(null);
-	let fieldSceneComponent: FieldSceneHandle | null = null;
+	let fieldViewportComponent: FieldViewportHandle | null = null;
 	let visualWorldById = $state.raw<Record<string, WorldPoint>>({});
 	let visualCamera = $state.raw<WorldPoint | null>(null);
 	let visualMotion = $state.raw<VisualMotion | null>(null);
@@ -242,7 +241,7 @@
 		getComposerEditorIsEmpty: () => composerEditorIsEmpty,
 		isProfileDialogOpen: () => profileDialogOpen,
 		isDocumentHidden: () => document.hidden,
-		cancelPointerGesture: () => fieldSceneComponent?.cancelPointerGesture()
+		cancelPointerGesture: () => fieldViewportComponent?.cancelPointerGesture()
 	});
 
 	type VisualParticipantTransition = Readonly<{ from: WorldPoint; to: WorldPoint }>;
@@ -1086,7 +1085,7 @@
 	function openMendingTerminal(): void {
 		if (!canUseMendingTerminal || mendingMutationInFlight) return;
 		movementInputController.cancelMovementHold();
-		fieldSceneComponent?.cancelPointerGesture();
+			fieldViewportComponent?.cancelPointerGesture();
 		mendingNowMs = Date.now();
 		mendingDialogOpen = true;
 	}
@@ -1112,7 +1111,7 @@
 		personaLifecycleTransition = true;
 		closeMendingTerminal();
 		movementInputController.cancelMovementHold();
-		fieldSceneComponent?.cancelPointerGesture();
+		fieldViewportComponent?.cancelPointerGesture();
 		cancelPendingComposerSubmission(new Error(message));
 	}
 
@@ -1708,9 +1707,18 @@
 	style={`--composer-keyboard-inset: ${composerKeyboardInset}px;--composer-initial-preferred-height: ${INITIAL_COMPOSER_PREFERRED_HEIGHT}px;${composerPreferredHeight === null ? '' : `--composer-preferred-height: ${composerPreferredHeight}px;`}`}
 >
 	<FieldViewport
+		bind:this={fieldViewportComponent}
 		bind:viewportElement
 		geometryReady={initialFieldGeometryReady}
 		composerAvailable={composerAvailable}
+		{fieldAreaBounds}
+		{field}
+		{camera}
+		resolveFieldCellSelection={(position) => resolveFieldCellSelection(position)}
+		closeFieldActionMenu={closeFieldActionMenu}
+		onPointerMovementTakeover={movementInputController.takeOverPointer}
+		onPointerMovementUpdate={movementInputController.updatePointer}
+		onPointerMovementStop={movementInputController.stopPointer}
 		speechAreaVisualBounds={speechAreaVisualBounds}
 	>
 		{#snippet children()}
@@ -1722,7 +1730,6 @@
 				onOpenProfile={openProfile}
 			/>
 			<FieldScene
-				bind:this={fieldSceneComponent}
 				geometryReady={initialFieldGeometryReady}
 				{fieldAreaBounds}
 				{fieldWorldSize}
@@ -1748,9 +1755,6 @@
 				closeFieldActionMenu={closeFieldActionMenu}
 				onOpenProfile={openProfile}
 				traceMarkerWorldPosition={traceMarkerWorldPosition}
-				onPointerMovementTakeover={movementInputController.takeOverPointer}
-				onPointerMovementUpdate={movementInputController.updatePointer}
-				onPointerMovementStop={movementInputController.stopPointer}
 			/>
 			<SpeechLayer
 				{viewportSize}
