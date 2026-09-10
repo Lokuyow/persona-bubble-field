@@ -2275,7 +2275,7 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 		await page.locator('[data-cell-position="8,4"]').click();
 		await expect(page.locator('.trace-root-bubble .bubble-content')).toBeVisible();
-		await expect(page.locator('.trace-root-bubble')).toBeVisible();
+		expect(await dragSelect(page.locator('.trace-root-bubble .bubble-content'))).not.toBe('');
 
 		await page.goto('/?devWorld=1&devSpeech=timeline');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
