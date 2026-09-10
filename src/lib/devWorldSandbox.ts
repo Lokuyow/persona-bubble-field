@@ -1,4 +1,5 @@
 import type { Direction } from './geometry';
+import { isBlockedFacilityCell } from './fieldFacilities';
 import { CHARACTER_CATALOG, getCharacterById, type Character } from './character';
 import {
 	createPresenceState,
@@ -13,10 +14,15 @@ export const DEV_WORLD_SELF_ID = 'you';
 export const DEV_WORLD_DEFAULT_CHARACTER_ID = '001';
 
 function initialPosition(field: PresenceField) {
-	return {
+	const preferred = {
 		x: Math.floor((field.columns - 1) / 2),
 		y: Math.floor((field.rows - 1) / 2)
 	};
+	if (!isBlockedFacilityCell(preferred)) return preferred;
+	for (let y = 0; y < field.rows; y += 1) for (let x = 0; x < field.columns; x += 1) {
+		if (!isBlockedFacilityCell({ x, y })) return { x, y };
+	}
+	throw new Error('Field has no available DEV World cells.');
 }
 
 /** Returns whether the explicit local-only sandbox request is available in this build. */

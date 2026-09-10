@@ -88,6 +88,17 @@ describe('Trace reply publication ownership', () => {
 		expect(f.onLiveMessage).not.toHaveBeenCalled();
 	});
 
+	it('stops position, message, and Trace writers after its owner is disposed', async () => {
+		const f = await fixture();
+		f.session.dispose();
+
+		await expect(f.session.moveSelf('right')).resolves.toEqual({ kind: 'unavailable' });
+		await expect(f.session.publishMessage('old persona message', 'normal')).resolves.toEqual({ kind: 'unavailable' });
+		await expect(f.submit()).resolves.toEqual({ kind: 'unavailable' });
+
+		expect(f.publish).not.toHaveBeenCalled();
+	});
+
 	it('constructs nested references from the accepted tree', async () => {
 		const f = await fixture(true); await f.submit();
 		const rawEvent = f.publish.mock.calls[0][0];
@@ -830,6 +841,24 @@ describe('world read session', () => {
 		session.completeBootstrap();
 		await expect(session.enterSelf()).resolves.toEqual({ kind: 'not-needed' });
 		expect(publish).not.toHaveBeenCalled();
+	});
+
+	it('replaces an active bootstrap self on the terminal cell with a non-blocked entry publication', async () => {
+		result = startResult([], [position('self-at-terminal', 700, selfPubkey, 0, { x: 12, y: 5 })]);
+		publish.mockResolvedValue([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
+		const session = createWorldReadSession({
+			field: { columns: 16, rows: 8 },
+			selfAccount: selfAccount(),
+			onPresenceChanged: vi.fn(),
+			onLiveMessage: vi.fn(),
+			onStatusChanged: vi.fn()
+		});
+
+		await session.start();
+		session.completeBootstrap();
+		await expect(session.enterSelf()).resolves.toEqual({ kind: 'succeeded', operation: 'entry' });
+		const event = parsePositionEvent(publish.mock.calls[0][0], 'c'.repeat(64));
+		expect(event?.position).not.toEqual({ x: 12, y: 5 });
 	});
 
 	it('uses the retained cell for the first post-timeout reactivation', async () => {

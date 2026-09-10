@@ -35,6 +35,7 @@ import {
 	type PresenceState
 } from './presence';
 import type { Direction } from './geometry';
+import { isBlockedFacilityCell } from './fieldFacilities';
 import type { Event as NostrEvent, VerifiedEvent } from 'nostr-tools/pure';
 import type { AccountSnapshot } from './nostrAccount';
 import type { SpeechType } from './conversation';
@@ -847,7 +848,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 			if (pendingTraceReply) return Promise.resolve({ kind: 'pending' });
 			if (!options.selfAccount) return publishSelfPosition('entry');
 			const participant = getParticipant(currentPresence(), options.selfAccount.pubkey);
-			if (participant?.status === 'active') {
+			if (participant?.status === 'active' && !isBlockedFacilityCell(participant.position)) {
 				selfJoinedThisSession = true;
 				refreshSelfMessageAvailability();
 				emitSelfPositionWriteState({ kind: 'ready' });

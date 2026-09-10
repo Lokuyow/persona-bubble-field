@@ -62,6 +62,20 @@ describe('local position and presence domain', () => {
 		expect(at(state, 'g').position).toEqual({ x: 0, y: 0 });
 	});
 
+	it('never chooses the fixed terminal cell for local spawn, entry, or reactivation', () => {
+		const terminalField = { columns: 16, rows: 8 };
+		const blocked = { x: 12, y: 5 };
+		const occupied = [] as { id: string; position: { x: number; y: number } }[];
+		for (let y = 0; y < terminalField.rows; y += 1) for (let x = 0; x < terminalField.columns; x += 1) {
+			if (x !== blocked.x || y !== blocked.y) occupied.push({ id: `${x}-${y}`, position: { x, y } });
+		}
+		const full = createPresenceState(terminalField, 1, occupied);
+		expect(getParticipant(spawnParticipant(full, 'self', 2, rng(0)), 'self')?.position).not.toEqual(blocked);
+		const stale = createPresenceState(terminalField, 1, [{ id: 'self', position: blocked }]);
+		expect(getParticipant(enterParticipant(stale, 'self', 2, rng(0)), 'self')?.position).not.toEqual(blocked);
+		expect(getParticipant(recordPresenceActivity(debugTimeoutParticipant(stale, 'self'), 'self', 'message', 2, rng(0)), 'self')?.position).not.toEqual(blocked);
+	});
+
 	it('treats an expired participant as a new entry instead of restoring its old cell', () => {
 		let state = createPresenceState(smallField, 10, [
 			{ id: 'alice', position: { x: 0, y: 0 } },
@@ -106,6 +120,15 @@ describe('local position and presence domain', () => {
 
 		expect(result.moved).toBe(false);
 		expect(result.state).toEqual(state);
+	});
+
+	it('rejects local movement into the fixed terminal cell', () => {
+		const terminalField = { columns: 16, rows: 8 };
+		const state = createPresenceState(terminalField, 10, [{ id: 'alice', position: { x: 11, y: 5 } }]);
+
+		const result = moveParticipant(state, 'alice', 'right', 20);
+
+		expect(result).toEqual({ state, moved: false });
 	});
 
 	it('does not update activity on failed movement', () => {
