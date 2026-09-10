@@ -979,6 +979,12 @@ test.describe('Relay startup', () => {
 		expect(started).toMatchObject({ version: 2, points: 0, mendingJob: expect.objectContaining({ maximumDurationMs: 8 * 60 * 60 * 1000 }) });
 
 		await page.clock.setSystemTime((started.mendingJob as { startedAtMs: number }).startedAtMs + 8 * 60 * 60 * 1000);
+		const completedAtTerminal = finalizeEvent(buildPositionEventTemplate({
+			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 11, y: 4 }, slot: 1,
+			createdAt: Math.floor(await page.evaluate(() => Date.now()) / 1000)
+		}), secret);
+		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), completedAtTerminal);
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,4');
 		await terminal.click();
 		await expect(page.getByRole('dialog')).toContainText('処理完了');
 		await page.getByRole('button', { name: '成果を受け取る' }).click();
