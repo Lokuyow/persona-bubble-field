@@ -72,64 +72,33 @@ behavior.
 
 ### No speculative compatibility
 
-Do not add or retain legacy paths, migrations, compatibility branches, adapters,
-aliases, or fallback behavior solely for hypothetical future users, unreleased
-designs, or stale callers. When an intentional change replaces a schema,
-interface, or protocol shape and no explicit compatibility requirement exists,
-prefer a clean replacement over maintaining old and new implementations in
-parallel.
+Do not add or retain compatibility behavior solely for hypothetical future
+users, unreleased designs, or stale callers. When an intentional change
+replaces a schema, interface, or protocol shape without an explicit
+compatibility requirement, prefer a clean replacement over maintaining old and
+new forms in parallel.
 
 #### Prototype clean breaks
 
-Before formal release, the mere existence of prototype data, events, routes,
-interfaces, or tests does not make them a backward-compatibility contract.
-Unless compatibility is explicitly required, this includes at least:
-
-- Browser-local storage and IndexedDB schemas, including database and object
-  store names, storage keys, record shapes, schema versions or revisions, and
-  migration markers
-- Locally stored prototype accounts, identities, game state, progression,
-  caches, read state, and other prototype data, as well as the way prototype
-  accounts or identities were generated or derived
-- Prototype Nostr data and protocol shapes, including event schemas, kinds,
-  tags, `d` identifiers, labels, namespaces, channels, and event discovery or
-  selection rules, including old-format events remaining on Relays
-- Prototype-only routes, URL or query parameters, DEV switches, debug or test
-  entrypoints, repository-internal APIs and interfaces, exported functions or
-  types, component props, helpers, and internal state shapes
-- Old test fixtures, test helpers, snapshots, and DEV fixtures
-
-When such a prototype design is intentionally changed, do not infer a need to
-support the old form by adding or retaining migration, legacy readers or
-writers, dual read or write, adapters, shims, wrappers, deprecated aliases,
-version-specific parsers, old/new fallbacks, redirects or forwarding for old
-query parameters or internal APIs, or production compatibility paths that
-exist only to keep stale tests passing. It is acceptable to reset browser-local
-data, create new data or identities, switch prototype namespaces/channels or
-event formats, update all internal callers together, and update or remove
-obsolete tests and fixtures. Tests remain important regression evidence, but
-they are not permanent compatibility contracts; do not remove tests that still
-protect behavior that remains required.
+Before formal release, prototype-local data, identities, event or protocol
+formats, routes, internal/DEV/test interfaces, and fixtures are not
+backward-compatibility contracts merely because they exist. For an intentional
+prototype change, do not add or retain migration, legacy paths, adapters,
+aliases, dual support, or compatibility-only fallbacks to preserve them. If
+needed, update or remove the affected callers, tests, fixtures, or local data;
+do not keep production compatibility code solely for stale tests.
 
 #### Contracts that remain supported
 
-Maintain compatibility when it is an explicit requirement, including:
+Maintain compatibility for data, identities, public interfaces, and external
+integrations that are explicitly supported, including currently required
+Nostr/NIP, Relay, browser, and Web Platform interoperability. Distinguish
+repository-internal use from an external compatibility contract.
 
-- Nostr standards and NIPs, and Nostr Relay interoperability currently in
-  scope
-- Supported browsers and Web Platform APIs
-- Contracts with currently supported external integrations such as eHagaki
-- Data, identity, protocol, public behavior, or public interface contracts
-  released or otherwise explicitly designated as supported
-- Interfaces with confirmed external consumers whose support is currently
-  required
-- Any other requirement stated by the Source of Truth or an explicit task
-
-Distinguish repository-internal use from an external compatibility contract.
-This clean-break policy applies only when the intentional schema, interface,
-or protocol change is already within the task scope. It does not permit
-unrelated changes to user-visible behavior; otherwise preserve behavior unless
-the requested change or the Source of Truth requires changing it.
+This policy applies only when the intentional change is within the task scope.
+It does not permit unrelated user-visible behavior changes or cleanup; outside
+that scope, preserve behavior unless the request or Source of Truth requires
+otherwise.
 
 ### Avoid premature abstraction
 
