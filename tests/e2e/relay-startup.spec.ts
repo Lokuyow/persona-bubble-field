@@ -1245,10 +1245,13 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,2');
 		await terminal.click();
 		await expect(page.getByRole('dialog')).toContainText('寿命延長: +6.40時間（反映済み）');
+		await expect(page.locator('.lifespan-hud')).toContainText('繕い完了');
+		await expect(page.locator('.lifespan-hud')).not.toContainText('繕い中 +');
 		await page.getByRole('button', { name: '成果を受け取る' }).click();
 		await expect.poll(() => readRelayGameState(page)).toMatchObject({ mendingJob: null, points: 8 });
 		await expect(page.getByRole('dialog')).toContainText('所持ポイント: 8.00pt');
 		await expect(page.getByRole('dialog')).not.toContainText('未受取成果:');
+		await expect(page.locator('.lifespan-hud')).not.toContainText('繕い');
 		const collected = await readRelayGameState(page);
 		expect(collected.mendingJob).toBeNull();
 		expect(collected.points).toBe(8);
