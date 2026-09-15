@@ -8,7 +8,7 @@ import {
 	PLAYER_LIFECYCLE_STORE_NAME,
 	ROOT_SECRET_STORE_NAME,
 	authorizeActiveRun,
-	collectCompletedMending,
+	collectMending,
 	loadOrCreateLifecycle,
 	selectIdentity,
 	startMending,
@@ -153,10 +153,27 @@ describe('Root / Identity / Run lifecycle', () => {
 		const started = first.kind === 'started' ? first.persona : second.kind === 'started' ? second.persona : null;
 		if (!started) throw new Error('Expected a winning mending start.');
 		vi.mocked(Date.now).mockReturnValue(TIME + 8 * 60 * 60 * 1000);
-		const collected = await collectCompletedMending(started);
+		const collected = await collectMending(started);
 		expect(collected.kind).toBe('collected');
 		if (collected.kind !== 'collected') return;
-		expect(collected.persona.gameState.mendingJob).toBeNull();
+		expect(collected.persona.gameState.mendingJob).toEqual(expect.objectContaining({ startedAtMs: TIME + 8 * 60 * 60 * 1000 }));
+		expect(collected.persona.activeRun.revision).toBe(2);
+	});
+
+	it('collects a partial bucket and rolls over without losing fractional points', async () => {
+		const selection = await loadOrCreateLifecycle();
+		if (selection.kind !== 'created') throw new Error('Expected fresh state.');
+		const selected = await selectIdentity(selection.selection.generation, selection.selection.candidates[0]);
+		if (selected.kind !== 'selected') throw new Error('Expected selected state.');
+		const started = await startMending(selected.persona);
+		if (started.kind !== 'started') throw new Error('Expected mending start.');
+		const collectedAt = TIME + 2.48 * 60 * 60 * 1000;
+		vi.mocked(Date.now).mockReturnValue(collectedAt);
+		const collected = await collectMending(started.persona);
+		expect(collected.kind).toBe('collected');
+		if (collected.kind !== 'collected') return;
+		expect(collected.persona.gameState.points).toBeCloseTo(2.48, 10);
+		expect(collected.persona.gameState.mendingJob).toEqual(expect.objectContaining({ startedAtMs: collectedAt }));
 		expect(collected.persona.activeRun.revision).toBe(2);
 	});
 
@@ -237,7 +254,7 @@ describe('Root / Identity / Run lifecycle', () => {
 		if (latest.kind !== 'selecting') throw new Error('Expected pending selection.');
 		const next = await selectIdentity(latest.selection.generation, latest.selection.candidates[0]);
 		if (next.kind !== 'selected') throw new Error('Expected next selected state.');
-		const staleCollect = await collectCompletedMending(selected.persona);
+		const staleCollect = await collectMending(selected.persona);
 		expect(staleCollect.kind).toBe('superseded');
 		if (staleCollect.kind === 'superseded') expect(staleCollect.lifecycle.kind).toBe('restored');
 	});

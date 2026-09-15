@@ -13,6 +13,7 @@
 	}>;
 	let { open, projection, hasJob, points: ownedPointsValue, onOpenChange, onStart, onCollect }: Props = $props();
 	let hours = $derived(((projection?.processedDurationMs ?? 0) / (60 * 60 * 1000)).toFixed(2));
+	let maximumHours = $derived(((projection ? projection.processedDurationMs + projection.remainingDurationMs : 0) / (60 * 60 * 1000)).toFixed(2));
 	let remainingHours = $derived(((projection?.remainingDurationMs ?? 0) / (60 * 60 * 1000)).toFixed(2));
 	let lifespanHours = $derived(((projection?.lifespanExtensionMs ?? 0) / (60 * 60 * 1000)).toFixed(2));
 	let unclaimedPoints = $derived((projection?.points ?? 0).toFixed(2));
@@ -30,16 +31,12 @@
 				{#if !hasJob}
 					<p>繕いを開始できます。</p>
 					<button type="button" onclick={onStart}>繕いを開始</button>
-				{:else if projection?.completed}
-					<p>処理済み時間: {hours}時間</p>
-					<p>寿命延長: +{lifespanHours}時間（反映済み）</p>
-					<p>未受取成果: +{unclaimedPoints}pt</p>
-					<button type="button" onclick={onCollect}>成果を受け取る</button>
 				{:else}
-					<p>処理済み時間: {hours}時間</p>
-					<p>完了まで: {remainingHours}時間</p>
-					<p>寿命延長: +{lifespanHours}時間（反映中）</p>
-					<p>獲得予定ポイント: +{unclaimedPoints}pt（完了後に受け取れます）</p>
+					<p>蓄積時間: {hours} / {maximumHours}時間</p>
+					{#if projection?.completed}<p>蓄積上限に達しています</p>{:else}<p>完了まで: {remainingHours}時間</p>{/if}
+					<p>寿命延長: +{lifespanHours}時間（寿命に反映中）</p>
+					<p>受取可能ポイント: +{unclaimedPoints}pt</p>
+					<button type="button" onclick={onCollect}>成果を受け取る</button>
 				{/if}
 				<Dialog.Close>閉じる</Dialog.Close>
 			</Dialog.Content>

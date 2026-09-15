@@ -56,7 +56,7 @@
 	import {
 		CURRENT_CHARACTER_PROFILE_REVISION,
 		authorizeActiveRun,
-		collectCompletedMending,
+		collectMending,
 		loadOrCreateLifecycle,
 		selectIdentity,
 		transitionExpiredPersona,
@@ -1237,7 +1237,7 @@
 		}
 		mendingMutationInFlight = true;
 		try {
-			const result = operation === 'start' ? await startMending(expected) : await collectCompletedMending(expected);
+			const result = operation === 'start' ? await startMending(expected) : await collectMending(expected);
 			if (result.kind === 'corrupt') {
 				enterReadOnlyFallback('Persona is unavailable for publishing.');
 				return;

@@ -11,7 +11,7 @@
 
 	let { expiresAtMs, nowMs, points, mendingProjection }: Props = $props();
 	let label = $derived(formatRemainingLifespan(expiresAtMs, nowMs));
-	let mendingLabel = $derived(mendingProjection?.completed ? '繕い完了' : mendingProjection?.lifespanExtensionPerHour ? `繕い中 +${formatMendingRate(mendingProjection.lifespanExtensionPerHour.numerator, mendingProjection.lifespanExtensionPerHour.denominator)}h/h` : null);
+	let mendingLabel = $derived(mendingProjection?.completed ? '繕い満杯' : mendingProjection?.lifespanExtensionPerHour ? `繕い中 +${formatMendingRate(mendingProjection.lifespanExtensionPerHour.numerator, mendingProjection.lifespanExtensionPerHour.denominator)}h/h` : null);
 </script>
 
 <div class="lifespan-hud" aria-label={mendingLabel ? `${label}、${mendingLabel}` : label}>

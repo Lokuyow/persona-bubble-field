@@ -128,9 +128,17 @@ export function isMendingExpired(state: MendingState, nowMs: number): boolean {
 	return nowMs >= projectMending(state, nowMs).effectiveExpiresAtMs;
 }
 
-export function materializeCompletedMending(state: MendingState): Readonly<{ lifespanExpiresAtMs: number; points: number }> {
+export function materializeMending(state: MendingState & Readonly<{ abilities: PersonaAbilityLevels; points: number }>, nowMs: number): Readonly<{
+	lifespanExpiresAtMs: number;
+	points: number;
+	mendingJob: MendingJob;
+}> | null {
 	if (!state.mendingJob) throw new TypeError('No mending job exists.');
-	const completedAtMs = state.mendingJob.startedAtMs + state.mendingJob.maximumDurationMs;
-	const projection = projectMending(state, completedAtMs);
-	return { lifespanExpiresAtMs: projection.effectiveExpiresAtMs, points: projection.points };
+	const projection = projectMending(state, nowMs);
+	if (projection.points <= 0) return null;
+	return {
+		lifespanExpiresAtMs: projection.effectiveExpiresAtMs,
+		points: state.points + projection.points,
+		mendingJob: createMendingJob(state.abilities, nowMs)
+	};
 }
