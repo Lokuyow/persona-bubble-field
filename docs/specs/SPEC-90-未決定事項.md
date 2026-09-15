@@ -8,6 +8,8 @@
 
 ここでは、製品仕様・UX・外部データ構造として今後判断が必要な事項を管理する。確定済みの製品上の挙動・優先順位を満たすための内部algorithmやlibrary選択だけが未確定である場合は、本一覧へ含めない。
 
+Rootの生成・暗号化保存、BIP85によるIdentity導出、固定3候補からの選択、Identity historyとRun-local state、死亡時の次generation選択、prototype storageのclean breakは確定済みであり、未決定事項ではない。これらの後方互換migration、legacy lifecycle path、旧backup復元構造は設けない。
+
 ### サービス・Nostr
 
 - 公開サービス名 / サイトタイトル
@@ -60,5 +62,13 @@
 
 - 将来の画像・動画対応
 - 将来のカスタム絵文字対応
+- Root-level permanent progressionの具体式 / multiplier / soft cap
+- 高周回point sink
+- True Endのtrigger
+- Identity Manifestのpublic export schema
+- catalog exhaustion時のproduct behavior
+- dead Identity resurrection
+- explicit Root deletion
+- future BIP85 key rotation
 
 ---

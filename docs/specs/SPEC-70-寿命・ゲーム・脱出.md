@@ -1,6 +1,6 @@
 # 寿命・ゲーム・脱出仕様
 
-> この文書は本プロジェクトの確定仕様の一部です。Source of Truthの入口は [`docs/PROJECT.md`](../PROJECT.md) とし、本資料を含む同資料記載の `SPEC-*` 文書一式と併用する。ゲーム進行、寿命、ポイント、繕い、綻び、脱出、二周目、バックアップ・復元は本資料を正とする。
+> この文書は本プロジェクトの確定仕様の一部です。Source of Truthの入口は [`docs/PROJECT.md`](../PROJECT.md) とし、本資料を含む同資料記載の `SPEC-*` 文書一式と併用する。ゲーム進行、寿命、ポイント、繕い、綻び、脱出、Identity、Runは本資料を正とする。
 
 アカウント、秘密鍵、Nostr identityそのもの、および一般Nostrへの持ち出しは [`SPEC-10-Nostr・アカウント.md`](./SPEC-10-Nostr・アカウント.md) を正とする。本資料はそれらのゲーム進行上の扱いだけを定め、Nostr eventのkind、tag、schema、transport方式は定めない。
 
@@ -19,15 +19,16 @@
 - 能力強化状態
 - その他、その人格固有の継続状態
 
-通常死亡後は、次の処理で転生する。
+通常死亡後は、current Runを閉じ、current Identityを `dead` として履歴へ残す。その後、Rootから次generationの未選択candidateを3つ準備し、blockingな選択画面へ戻る。候補を1つ選択すると、そのIdentityにRun #1を作成する。
 
-1. 新しいNostr鍵ペアを生成する
-2. 新pubkeyから新しい人格を割り当てる
-3. 寿命を7日にする
-4. ポイントを0にする
-5. 能力を初期状態にする
+新Run #1は次から開始する。
 
-旧人格と新人格の間に、記憶・状態・自己認識の連続性を持たせない。
+1. 寿命を7日にする
+2. ポイントを0にする
+3. 能力を初期状態にする
+4. `mendingJob = null` にする
+
+旧Identityと新Identityの間に、Run-localの記憶・状態・自己認識の連続性を持たせない。Identity historyにはselected Identityとfinished Runのsummaryだけを残す。
 
 24時間に1回の任意転生および任意のリセマラは廃止する。転生は原則として死亡時のみ発生する。
 
@@ -41,28 +42,11 @@
 
 ## 3. 1000pt到達と脱出
 
-現在所持ポイントが1000pt以上である間だけ、秘密鍵exportを伴う脱出選択を利用できる。過去の到達だけで永久に解放された状態にはしない。1000pt以上を所持しているだけで自動的に脱出させない。
-
-一周目では、現在所持ポイントが1000pt以上である状態で、次のどちらかを選択できる。
-
-- `ソトへ出る`
-- `ハコに残る`
-
-### ソトへ出る
-
-`ソトへ出る` を選択すると、現在人格の秘密鍵exportを正式に解放する。秘密鍵を取得したユーザーは、その人格・Nostr identityを通常のNostrクライアントへ持ち出せる。一般Nostrへの持ち出しに関する既存仕様は [`SPEC-10-Nostr・アカウント.md`](./SPEC-10-Nostr・アカウント.md) を維持する。
-
-脱出後に専用クライアントへ再参加できるか等、今回明示的に定めていない既存挙動は推測で変更しない。
+normal clear working thresholdは現在所持ポイント1000ptとする。1000pt以上である間だけclear選択を利用でき、過去の到達だけで永久unlock flagにはしない。1000pt以上を所持しているだけで自動clearにはしない。clear後はcurrent Identityのnsec取得を可能にする。
 
 ### 脱出前の秘密鍵保護
 
-ハコ内で使用する秘密鍵はブラウザ内に保存する。`ソトへ出る` を選択して正式な秘密鍵exportが解放されるまでは、通常のUI、ブラウザストレージの単純な閲覧、容易なコピー操作だけで、一般ユーザーが秘密鍵を簡単に取得できる状態にしない。一度1000pt以上に到達しただけでは、この保護を解除しない。`ハコに残る` を選択した場合も、二周目でこの保護を維持する。
-
-保存時には暗号化、難読化、その他のクライアント側処理を用い、平文の秘密鍵がそのまま容易に読み取れる状態を避ける。正式な秘密鍵export UIは、`ソトへ出る` を選択した場合だけ利用可能にする。
-
-これは強固な暗号学的セキュリティ境界ではない。DevToolsによる解析、JavaScript実行環境からのアクセス、ソースコード解析・改変、ブラウザストレージの詳細解析、改造クライアント、独自コードによる抽出を行う利用者から秘密鍵を完全に保護することは要件としない。目的は、一般ユーザーが脱出条件を無視して簡単に秘密鍵を持ち出せない程度の障壁を設けることである。
-
-具体的な暗号化・難読化方式は本仕様では固定しない。
+clear前はactive Identityのchild secretをexportしない。Root entropyの保存保護、export後の一般Nostr利用、暗号学的な完全保護を目的としないことは [`SPEC-10-Nostr・アカウント.md`](./SPEC-10-Nostr・アカウント.md) を正とする。
 
 ## 4. 非同期活動「繕い」
 
@@ -91,7 +75,7 @@
 
 繕い中には、繕い中であること、経過時間、context使用率、推定ポイント、寿命延長量等の現在状態を表示してよい。`prompt`、`token`、`inference`、`context`、`hallucination`、`verification` 等の用語をフレーバーとしてログに使用してよいが、それらの本当の意味を作品内で説明する必要はない。
 
-JOB等の具体的な処理内容をフレーバーとして変化させてもよい。ただしv1ではJOBごとにゲーム報酬やルールを変えない。
+JOB等の具体的な処理内容をフレーバーとして変化させてもよい。ただしprototypeではJOBごとにゲーム報酬やルールを変えない。
 
 ## 5. 能力強化と調整端末
 
@@ -202,48 +186,14 @@ Relay障害、通信切断、ブラウザ終了、一時的なネットワーク
 
 具体的なNostr transport、commit-reveal、チート対策、ゲーム用Nostr event kind・tag・schemaは本仕様では定めない。
 
-## 7. 二周目と「ハコに残る」
+## 7. IdentityとRunのライフサイクル
 
-一周目で現在所持ポイントが1000pt以上であるプレイヤーは、脱出せず `ハコに残る` を選択できる。過去に1000ptへ到達しただけでは選択できない。選択時に次を行う。
+Player lifecycleはRoot secret storeと分離したbrowser-local aggregateとして管理する。aggregateはschema version、selected Identity history、current modeを持ち、modeは `selecting(pendingSelection)` または `running(activeRun)` のどちらかである。Rootだけ、またはPlayer stateだけのpartial stateは修復せずread-only fail-closeする。
 
-- 選択時に現在所持しているポイントをすべて消費し、選択後の所持ポイントを必ず0ptにする
-- 1000ptだけを差し引き、超過分を二周目へ持ち越すことはしない
-- 推論効率を初期状態へ戻す
-- コンテキスト容量を初期状態へ戻す
-- ハルシネーション抑制を初期状態へ戻す
-- 非同期処理効率に恒久的な×2補正を得る
-- バックアップを1個得る
+Identityにはgeneration、account index、pubkey、characterId、`identityCreatedAtMs`、status、character profile revision、Run history summaryを持たせる。未選択candidateやskip candidateはIdentity historyへ保存せず、候補のprofile publicationも行わない。
 
-これを二周目とし、能力を初期状態から再び育成できる。×2補正は、推論効率による寿命延長量とハルシネーション抑制によるポイント獲得量に適用する。コンテキスト容量は倍率対象外とする。
+Runにはrun number、monotonic revision、started timestamp、Identity reference、Run-local game stateを持たせる。寿命、points、abilities、`mendingJob`はRun-localであり、mending start/collectionと寿命死亡transitionはactive Runのrevisionを再確認するCASとして扱う。profile publication markerの更新はRun revisionを進めない。
 
-二周目初期状態は、寿命効率0.8 × 2 = 1.6h/h、ポイント効率1.0 × 2 = 2.0pt/h、コンテキスト容量8hとする。能力強化後も×2補正を適用し、推論効率最大時は2.5h/h、ハルシネーション抑制最大時は3.0pt/hとなる。二周目でも能力強化には通常どおりポイントを消費する。
+正常なclear後はcurrent Identityのnsec取得、Root-level permanent progression、同じIdentityでのfresh Runまたは別Identityの選択を可能にする。cleared Identityへ戻る場合は同じkey/pubkey/characterを維持してfresh Runを開始でき、3周目以降にも上限を設けない。clear処理、True End、Root mnemonicとIdentity Manifestの受け渡しは別途実装する。
 
-v1で `ハコに残る` を選択できるのは一度だけとする。二周目で再び1000ptへ到達した場合は、秘密鍵exportを伴う脱出を行い、さらなる三周目は本仕様に含めない。将来の三周目以降の仕様は定めない。
-
-## 8. バックアップと復元
-
-`ハコに残る` を選択したときにバックアップを1個得る。バックアップの所持数は本人だけが確認できる。他の参加者へ、バックアップ所持の有無や残数をシステムから公開しない。本人がチャット等で自発的に伝えることまでは制限しない。
-
-バックアップを所持している状態で死亡条件が成立しても、死亡そのものを回避した扱いにはしない。一度通常どおり死亡させて死亡演出を行い、その後に次を行う。
-
-1. バックアップを1個消費する
-2. 同じ人格を復元する
-3. 同じpubkeyを維持する
-4. 同じ秘密鍵を維持する
-5. 死亡直前のポイントを維持する
-6. 死亡直前の能力強化状態を維持する
-7. 二周目の恒久×2補正を維持する
-
-UI上では `復活` ではなく `復元` と表現する。例えば「バックアップから復元しています。」「復元が完了しました。」等の表現を使用できる。
-
-### 綻び死亡からの復元
-
-綻び等、寿命0以外の理由で死亡してバックアップから復元された場合は、死亡直前の残り寿命を維持する。綻びで死亡した場合、死亡原因となった脱出試行の100ptは獲得しない。復元後はその綻びへ再参加せず、通常フィールドへ戻る。同じ綻びで「死亡 → 復元 → 再参加 → 再度脱出試行」というループは許可しない。
-
-### 寿命死からの復元
-
-寿命0によって死亡し、バックアップから復元された場合、人格、pubkey、秘密鍵、ポイント、能力、二周目恒久補正は死亡直前状態を維持する。寿命だけを7日に再設定して復元する。
-
-### バックアップ消費後の死亡
-
-バックアップを消費した後に再び死亡条件が成立した場合は、通常死亡として扱う。その人格は終了し、秘密鍵、ポイント、能力、その他人格固有状態を失う。その後、新しい鍵ペアと新人格で通常転生する。
+True Endでは、Hako専用Rootの12語English BIP39 mnemonicとIdentity Manifestをユーザーへ渡す。ただしTrue Endはlocal Rootの自動削除を意味せず、Root削除機能は現在scope外である。Manifestは実際にselected、born、playedとなったIdentityのderivation mapping、pubkey、character、Run・clear・death等の履歴を記録する非secretの収容記録であり、未選択candidateやcandidate生成中にskipしたcandidate、Root mnemonicやchild nsec等のsecretは含めない。dead IdentityはTrue End後もHako上ではdeadのままとし、Root mnemonicからchild keyを再導出できることとHako内でresurrectできることは別概念である。Manifestの具体的なpublic export schemaはSPEC-90の未決定事項として残す。
