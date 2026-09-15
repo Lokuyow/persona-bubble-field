@@ -1231,9 +1231,12 @@ test.describe('Relay startup', () => {
 		const activeDialog = page.getByRole('dialog');
 		await expect(activeDialog).toContainText('所持ポイント: 0.00pt');
 		await expect(activeDialog).toContainText('処理済み時間: 0.00時間');
+		await expect(activeDialog).toContainText('完了まで: 8.00時間');
 		await expect(activeDialog).toContainText('寿命延長: +0.00時間（反映中）');
-		await expect(activeDialog).toContainText('未受取成果: +0.00pt');
+		await expect(activeDialog).toContainText('獲得予定ポイント: +0.00pt（完了後に受け取れます）');
+		await expect(activeDialog.getByRole('button', { name: '成果を受け取る' })).toHaveCount(0);
 		await expect(page.locator('.lifespan-hud')).toContainText('繕い中 +0.8h/h');
+		await expect(page.locator('.lifespan-hud')).toContainText('ポイント 0.00pt');
 		await page.getByRole('button', { name: '閉じる' }).click();
 
 		await page.clock.setSystemTime((started.mendingJob as { startedAtMs: number }).startedAtMs + 8 * 60 * 60 * 1000);
@@ -1252,6 +1255,7 @@ test.describe('Relay startup', () => {
 		await expect(page.getByRole('dialog')).toContainText('所持ポイント: 8.00pt');
 		await expect(page.getByRole('dialog')).not.toContainText('未受取成果:');
 		await expect(page.locator('.lifespan-hud')).not.toContainText('繕い');
+		await expect(page.locator('.lifespan-hud')).toContainText('ポイント 8.00pt');
 		const collected = await readRelayGameState(page);
 		expect(collected.mendingJob).toBeNull();
 		expect(collected.points).toBe(8);
@@ -1289,6 +1293,7 @@ test.describe('Relay startup', () => {
 		await expect(dialog).toContainText('次: 0.9h/h / 5pt');
 		await dialog.getByRole('button', { name: '1 level強化' }).first().click();
 		await expect(dialog).toContainText('所持ポイント: 5.00pt');
+		await expect(page.locator('.lifespan-hud')).toContainText('ポイント 5.00pt');
 		await expect(dialog).toContainText('推論効率 Lv1');
 		await expect(dialog.getByRole('button', { name: '1 level強化' }).nth(1)).toBeDisabled();
 		await page.reload();
@@ -1711,16 +1716,16 @@ test.describe('Relay startup', () => {
 			(request.filter.kinds as number[])[0] === 42)).toBe(true);
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
 		const hud = page.locator('.lifespan-hud');
-		await expect(hud).toHaveText('寿命 2日 18時間');
+		await expect(hud).toContainText('寿命 2日 18時間');
 
 		await pauseAtCurrentBrowserTime(page);
 		await page.clock.setSystemTime(expiresAtMs - 23 * hour - 59 * minute);
 		await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
-		await expect(hud).toHaveText('寿命 23時間 59分');
+		await expect(hud).toContainText('寿命 23時間 59分');
 
 		await page.clock.setSystemTime(expiresAtMs - 59 * minute - 59 * 1000);
 		await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
-		await expect(hud).toHaveText('寿命 59分');
+		await expect(hud).toContainText('寿命 59分');
 	});
 
 	test('keeps public read-only updates after runtime death transition fails', async ({ page }) => {
