@@ -98,6 +98,9 @@
 	}
 
 	.selection-dialog {
+		position: relative;
+		inset: auto;
+		box-sizing: border-box;
 		width: min(900px, 100%);
 		max-width: none;
 		margin: 0;
