@@ -106,3 +106,18 @@
 		registerReplyRemeasure={registerReplyRemeasure}
 	/>
 </div>
+
+<style>
+	.bubble-layer {
+		position: absolute;
+		inset: 0;
+		z-index: 3;
+		pointer-events: none;
+	}
+
+	.bubble-layer :global(.bubble),
+	.bubble-layer :global(.trace-root-card),
+	.bubble-layer :global(.trace-reply-card) {
+		pointer-events: auto;
+	}
+</style>
