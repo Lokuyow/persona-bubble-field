@@ -3,10 +3,7 @@ import { generateSecretKey, getPublicKey } from 'nostr-tools/pure';
 import {
 	createInitialPersonaGameState,
 	isPersonaExpired,
-	isValidLegacyPersonaGameState,
 	isValidPersonaGameState,
-	migrateLegacyPersonaGameState,
-	type LegacyPersonaGameState,
 	type PersonaGameState
 } from './personaGameState';
 import { createMendingJob, materializeCompletedMending, projectMending } from './mending';
@@ -120,7 +117,6 @@ type StoredAccountState =
 type StoredGameState =
 	| Readonly<{ kind: 'missing' }>
 	| Readonly<{ kind: 'pending' }>
-	| Readonly<{ kind: 'legacy'; gameState: LegacyPersonaGameState }>
 	| Readonly<{ kind: 'ready'; gameState: PersonaGameState }>
 	| Readonly<{ kind: 'malformed'; reason: 'invalid-game-state' | 'ambiguous-game-state' }>;
 
@@ -297,7 +293,6 @@ async function readGameState(tx: ReadTransaction | LifecycleTransaction): Promis
 	}
 	const [value]: unknown[] = await store.getAll(GAME_STATE_KEY, 1);
 	if (isValidPersonaGameState(value)) return { kind: 'ready', gameState: value };
-	if (isValidLegacyPersonaGameState(value)) return { kind: 'legacy', gameState: value };
 	return { kind: 'malformed', reason: 'invalid-game-state' };
 }
 
@@ -314,7 +309,7 @@ async function readLifecycleState(tx: ReadTransaction | LifecycleTransaction): P
 	if (game.kind === 'malformed') return { kind: 'corrupt', reason: game.reason };
 	if (game.kind === 'missing') return { kind: 'corrupt', reason: 'missing-game-state' };
 	if (game.kind === 'pending') return { kind: 'ready', account, game };
-	if ((game.kind === 'ready' || game.kind === 'legacy') && game.gameState.personaPubkey !== account.pubkey) return { kind: 'corrupt', reason: 'game-account-mismatch' };
+	if (game.kind === 'ready' && game.gameState.personaPubkey !== account.pubkey) return { kind: 'corrupt', reason: 'game-account-mismatch' };
 	return { kind: 'ready', account, game };
 }
 
@@ -419,16 +414,6 @@ async function commitExistingMigration(db: IDBPDatabase<AccountDatabase>, state:
 			await tx.done;
 			return false;
 		}
-		if (state.game.kind === 'legacy' && (current.game.kind !== 'legacy' ||
-			current.game.gameState.personaPubkey !== state.game.gameState.personaPubkey ||
-			current.game.gameState.lifespanExpiresAtMs !== state.game.gameState.lifespanExpiresAtMs ||
-			current.game.gameState.points !== state.game.gameState.points ||
-			current.game.gameState.abilities.inferenceEfficiency !== state.game.gameState.abilities.inferenceEfficiency ||
-			current.game.gameState.abilities.contextCapacity !== state.game.gameState.abilities.contextCapacity ||
-			current.game.gameState.abilities.hallucinationSuppression !== state.game.gameState.abilities.hallucinationSuppression)) {
-			await tx.done;
-			return false;
-		}
 		if (candidate) {
 			const accounts = accountStore(tx);
 			await accounts.put(candidate.wrappingKey, WRAPPING_KEY);
@@ -439,9 +424,6 @@ async function commitExistingMigration(db: IDBPDatabase<AccountDatabase>, state:
 		let gameState: PersonaGameState;
 		if (state.game.kind === 'ready') {
 			gameState = state.game.gameState;
-		} else if (state.game.kind === 'legacy') {
-			gameState = migrateLegacyPersonaGameState(state.game.gameState);
-			await gameStore(tx).put(gameState, GAME_STATE_KEY);
 		} else if (state.game.kind === 'pending') {
 			const migrationStartedAtMs = Date.now();
 			assertAccountTimestamp(migrationStartedAtMs);
@@ -474,7 +456,7 @@ async function loadPersona(): Promise<LoadPersonaResult> {
 			}
 			const account = await restoreAccount(state.account);
 			if (state.game.kind === 'ready') return { kind: 'restored', persona: { account, gameState: state.game.gameState } };
-			if (state.game.kind !== 'pending' && state.game.kind !== 'legacy') return { kind: 'corrupt', reason: 'missing-game-state' };
+			if (state.game.kind !== 'pending') return { kind: 'corrupt', reason: 'missing-game-state' };
 			const candidate = state.account.kind === 'legacy-ready' ? await prepareProtectedCandidate(state.account.secretKey) : null;
 			const result = await commitExistingMigration(db, state, account, candidate);
 			if (result) return { kind: 'restored', persona: result };

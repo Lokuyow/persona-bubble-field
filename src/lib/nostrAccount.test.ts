@@ -323,37 +323,6 @@ describe('persona lifecycle state and reincarnation', () => {
 		expect((await storedGameRecords())['game-state']).toEqual(game);
 	});
 
-	it('atomically upgrades a valid v1 game record without resetting its persona progress', async () => {
-		const account = await protectedRecords();
-		const pubkey = getPublicKey(SECRET);
-		await seed(account);
-		await seedRawGameState({ version: 1, personaPubkey: pubkey, lifespanExpiresAtMs: TIME + 123, points: 12.5,
-			abilities: { inferenceEfficiency: 2, contextCapacity: 1, hallucinationSuppression: 3 } });
-		const loaded = await loadOrCreatePersona();
-		expect(loaded.kind).toBe('restored');
-		if (loaded.kind !== 'restored') return;
-		expect(loaded.persona.gameState).toMatchObject({ version: 2, personaPubkey: pubkey, lifespanExpiresAtMs: TIME + 123,
-			points: 12.5, abilities: { inferenceEfficiency: 2, contextCapacity: 1, hallucinationSuppression: 3 }, mendingJob: null });
-		expect(await storedRecords()).toEqual(account);
-	});
-
-	it('converges concurrent valid v1 game-state migrations without resetting progress', async () => {
-		const account = await protectedRecords();
-		const pubkey = getPublicKey(SECRET);
-		await seed(account);
-		await seedRawGameState({ version: 1, personaPubkey: pubkey, lifespanExpiresAtMs: TIME + 456, points: 7.5,
-			abilities: { inferenceEfficiency: 1, contextCapacity: 2, hallucinationSuppression: 3 } });
-
-		const results = await Promise.all(Array.from({ length: 4 }, () => loadOrCreatePersona()));
-
-		expect(results.every((result) => result.kind === 'restored')).toBe(true);
-		for (const result of results) {
-			if (result.kind !== 'restored') continue;
-			expect(result.persona.gameState).toMatchObject({ version: 2, lifespanExpiresAtMs: TIME + 456, points: 7.5, mendingJob: null });
-		}
-		expect((await storedGameRecords())['game-state']).toMatchObject({ version: 2, lifespanExpiresAtMs: TIME + 456, points: 7.5, mendingJob: null });
-	});
-
 	it('serializes concurrent start and completed-collection attempts without double rewards', async () => {
 		const loaded = await loadOrCreatePersona();
 		if (loaded.kind !== 'created' && loaded.kind !== 'restored') throw new Error('Expected persona.');
@@ -483,7 +452,7 @@ describe('lifecycle fail-close states', () => {
 
 	it('rejects malformed, mismatched, orphan, and ambiguous game state', async () => {
 		await seed(await protectedRecords());
-		await seedRawGameState({ version: 1, personaPubkey: getPublicKey(SECRET), points: 0 });
+		await seedRawGameState({ version: 2, personaPubkey: getPublicKey(SECRET), points: 0, mendingJob: null });
 		expect(await loadOrCreatePersona()).toEqual({ kind: 'corrupt', reason: 'invalid-game-state' });
 
 		await seedRawGameState({

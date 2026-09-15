@@ -664,8 +664,8 @@ async function seedRelayAccount(page: Page, secretKey: Uint8Array, pubkey: strin
 		store.put(Date.now(), 'last-changed-at-ms');
 		store.put({ pubkey: accountPubkey, revision: 2 }, 'initial-profile-published-pubkey');
 		transaction.objectStore('persona-bubble-field-game-state').put({
-			version: 1, personaPubkey: accountPubkey, lifespanExpiresAtMs: expiresAtMs,
-			points: 0, abilities: { inferenceEfficiency: 0, contextCapacity: 0, hallucinationSuppression: 0 }
+			version: 2, personaPubkey: accountPubkey, lifespanExpiresAtMs: expiresAtMs,
+			points: 0, abilities: { inferenceEfficiency: 0, contextCapacity: 0, hallucinationSuppression: 0 }, mendingJob: null
 		}, 'game-state');
 		await new Promise<void>((resolve, reject) => {
 			transaction.oncomplete = () => resolve();
@@ -893,7 +893,7 @@ test.describe('Relay startup', () => {
 				const database = request.result;
 				const transaction = database.transaction('persona-bubble-field-game-state', 'readwrite');
 				transaction.objectStore('persona-bubble-field-game-state').put({
-					version: 1, personaPubkey: expiredPubkey, lifespanExpiresAtMs: Date.now() - 1, points: 321,
+					version: 2, personaPubkey: expiredPubkey, lifespanExpiresAtMs: Date.now() - 1, points: 321, mendingJob: null,
 					abilities: { inferenceEfficiency: 4, contextCapacity: 3, hallucinationSuppression: 4 }
 				}, 'game-state');
 				transaction.oncomplete = () => { database.close(); resolve(); };
@@ -1191,7 +1191,9 @@ test.describe('Relay startup', () => {
 			const reloaded = page.waitForEvent('framenavigated', (frame) => frame === page.mainFrame());
 			await page.getByRole('button', { name: '繕いを開始' }).click();
 			await reloaded;
+			await page.waitForLoadState('load');
 			await expect(page.locator('.composer-dock')).toBeVisible();
+			await expect.poll(() => page.evaluate(() => Boolean((window as typeof window & { __relayStartupTest?: unknown }).__relayStartupTest))).toBe(true);
 			await page.evaluate(() => {
 				const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
 				relay.releaseMetadata(); relay.releasePrimary();
@@ -1279,11 +1281,12 @@ test.describe('Relay startup', () => {
 			});
 			const transaction = database.transaction('persona-bubble-field-game-state', 'readwrite');
 			transaction.objectStore('persona-bubble-field-game-state').put({
-				version: 1,
+				version: 2,
 				personaPubkey: expiredPubkey,
 				lifespanExpiresAtMs: Date.now() - 1,
 				points: 321,
-				abilities: { inferenceEfficiency: 4, contextCapacity: 3, hallucinationSuppression: 4 }
+				abilities: { inferenceEfficiency: 4, contextCapacity: 3, hallucinationSuppression: 4 },
+				mendingJob: null
 			}, 'game-state');
 			await new Promise<void>((resolve, reject) => {
 				transaction.oncomplete = () => resolve();
@@ -1527,7 +1530,7 @@ test.describe('Relay startup', () => {
 			});
 			const transaction = database.transaction('persona-bubble-field-game-state', 'readwrite');
 			transaction.objectStore('persona-bubble-field-game-state').put({
-				version: 1, personaPubkey: accountPubkey, lifespanExpiresAtMs: deadline, points: 0,
+				version: 2, personaPubkey: accountPubkey, lifespanExpiresAtMs: deadline, points: 0, mendingJob: null,
 				abilities: { inferenceEfficiency: 0, contextCapacity: 0, hallucinationSuppression: 0 }
 			}, 'game-state');
 			await new Promise<void>((resolve, reject) => {
@@ -1597,7 +1600,7 @@ test.describe('Relay startup', () => {
 			});
 			const transaction = database.transaction('persona-bubble-field-game-state', 'readwrite');
 			transaction.objectStore('persona-bubble-field-game-state').put({
-				version: 1, personaPubkey: accountPubkey, lifespanExpiresAtMs: deadline, points: 0,
+				version: 2, personaPubkey: accountPubkey, lifespanExpiresAtMs: deadline, points: 0, mendingJob: null,
 				abilities: { inferenceEfficiency: 0, contextCapacity: 0, hallucinationSuppression: 0 }
 			}, 'game-state');
 			await new Promise<void>((resolve, reject) => {

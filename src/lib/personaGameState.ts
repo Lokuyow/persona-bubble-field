@@ -24,14 +24,6 @@ export type PersonaGameState = Readonly<{
 	mendingJob: MendingJob | null;
 }>;
 
-export type LegacyPersonaGameState = Readonly<{
-	version: 1;
-	personaPubkey: string;
-	lifespanExpiresAtMs: number;
-	points: number;
-	abilities: PersonaAbilityLevels;
-}>;
-
 function isCanonicalPubkey(value: unknown): value is string {
 	return typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
 }
@@ -55,22 +47,6 @@ export function isValidPersonaGameState(value: unknown): value is PersonaGameSta
 	return (candidate.mendingJob === null || isValidMendingJob(candidate.mendingJob)) && isAbilityLevel(abilities.inferenceEfficiency, ABILITY_LEVEL_LIMITS.inferenceEfficiency) &&
 		isAbilityLevel(abilities.contextCapacity, ABILITY_LEVEL_LIMITS.contextCapacity) &&
 		isAbilityLevel(abilities.hallucinationSuppression, ABILITY_LEVEL_LIMITS.hallucinationSuppression);
-}
-
-export function isValidLegacyPersonaGameState(value: unknown): value is LegacyPersonaGameState {
-	if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
-	const candidate = value as Readonly<Record<string, unknown>>;
-	if (candidate.version !== 1 || !isCanonicalPubkey(candidate.personaPubkey) || !isSafeTimestamp(candidate.lifespanExpiresAtMs) ||
-		typeof candidate.points !== 'number' || !Number.isFinite(candidate.points) || candidate.points < 0 ||
-		typeof candidate.abilities !== 'object' || candidate.abilities === null || Array.isArray(candidate.abilities)) return false;
-	const abilities = candidate.abilities as Readonly<Record<string, unknown>>;
-	return isAbilityLevel(abilities.inferenceEfficiency, ABILITY_LEVEL_LIMITS.inferenceEfficiency) &&
-		isAbilityLevel(abilities.contextCapacity, ABILITY_LEVEL_LIMITS.contextCapacity) &&
-		isAbilityLevel(abilities.hallucinationSuppression, ABILITY_LEVEL_LIMITS.hallucinationSuppression);
-}
-
-export function migrateLegacyPersonaGameState(state: LegacyPersonaGameState): PersonaGameState {
-	return { ...state, version: 2, mendingJob: null };
 }
 
 export function createInitialPersonaGameState(personaPubkey: string, birthAtMs: number): PersonaGameState {
