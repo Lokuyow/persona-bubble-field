@@ -37,7 +37,7 @@ import {
 import type { Direction } from './geometry';
 import { isBlockedFacilityCell } from './fieldFacilities';
 import type { Event as NostrEvent, VerifiedEvent } from 'nostr-tools/pure';
-import type { AccountSnapshot } from './nostrAccount';
+import type { ActiveSignerSnapshot } from './rootIdentity';
 import type { SpeechType } from './conversation';
 import { reachedAuthoritativeRelay } from './initialProfilePublication';
 import {
@@ -112,7 +112,7 @@ export type SelfMessagePublishResult =
 
 export type WorldReadSessionOptions = Readonly<{
 	field: PresenceField;
-	selfAccount?: AccountSnapshot | null;
+	selfSigner?: ActiveSignerSnapshot | null;
 	onPresenceChanged: (presence: PresenceState) => void;
 	onLiveMessage: (message: ParsedWorldMessage, presence: PresenceState) => void;
 	onTimelineMessage?: (message: ParsedWorldMessage) => void;
@@ -152,7 +152,8 @@ function hasRelayIssue(result: PrimaryStartResult): number {
  * Owns only the real-world read lifecycle. Viewer-local geometry and conversation
  * state stay in the page because their semantics depend on the current viewport.
  */
-export function createWorldReadSession(options: WorldReadSessionOptions) {
+export function createWorldReadSession(input: WorldReadSessionOptions) {
+	const options = input;
 	let disposed = false;
 	let started = false;
 	let bootstrapComplete = false;
@@ -166,7 +167,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 	let selfJoinedThisSession = false;
 	let pendingSelfOperation: SelfPositionOperation | null = null;
 	let latestSelfOperationId: string | null = null;
-	let selfPositionWriteState: SelfPositionWriteState = options.selfAccount ? { kind: 'ready' } : { kind: 'unavailable' };
+	let selfPositionWriteState: SelfPositionWriteState = options.selfSigner ? { kind: 'ready' } : { kind: 'unavailable' };
 	let selfMessageAvailability: SelfMessageAvailability = { kind: 'unavailable' };
 	let pendingSelfMessage: SelfMessageOperation | null = null;
 	// Owns the entire reply pipeline, including coalesced position and post-position publication.
@@ -200,8 +201,8 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 
 	function refreshSelfMessageAvailability(): void {
 		const next: SelfMessageAvailability = !disposed &&
-			Boolean(options.selfAccount && transport && channel && selfJoinedThisSession &&
-				presence.participants.some((participant) => participant.id === options.selfAccount?.pubkey))
+			Boolean(options.selfSigner && transport && channel && selfJoinedThisSession &&
+				presence.participants.some((participant) => participant.id === options.selfSigner?.pubkey))
 			? { kind: 'ready' }
 			: { kind: 'unavailable' };
 		if (next.kind === selfMessageAvailability.kind) return;
@@ -223,8 +224,8 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 	}
 
 	function refreshTraceReadSnapshot(): void {
-		if (!channel || !options.selfAccount || disposed) return;
-		void loadTraceReadSnapshot({ channelId: channel.channelId, personaPubkey: options.selfAccount.pubkey }).then((snapshot) => {
+		if (!channel || !options.selfSigner || disposed) return;
+		void loadTraceReadSnapshot({ channelId: channel.channelId, personaPubkey: options.selfSigner.pubkey }).then((snapshot) => {
 			if (disposed) return;
 			traceReadSnapshot = snapshot;
 			options.onTraceReadSnapshotChanged?.(snapshot);
@@ -272,10 +273,10 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 	}
 
 	function traceNotificationConfig() {
-		if (!options.selfAccount || !options.onTraceReadSnapshotChanged) return undefined;
+		if (!options.selfSigner || !options.onTraceReadSnapshotChanged) return undefined;
 		return {
-			personaPubkey: options.selfAccount.pubkey,
-			initialSince: Math.floor(options.selfAccount.personaCreatedAtMs / 1000)
+			personaPubkey: options.selfSigner.pubkey,
+			initialSince: Math.floor(options.selfSigner.identityCreatedAtMs / 1000)
 		};
 	}
 
@@ -317,9 +318,9 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 	}
 
 	function observeLivePosition(event: ParsedPositionEvent): void {
-		if (!options.selfAccount || event.pubkey !== options.selfAccount.pubkey) return;
-		selfPositionEvidence = retainPositionPublishEvidence(selfPositionEvidence, event, options.selfAccount.pubkey);
-		positionPublishState = reconstructPositionPublishState(selfPositionEvidence, options.selfAccount.pubkey);
+		if (!options.selfSigner || event.pubkey !== options.selfSigner.pubkey) return;
+		selfPositionEvidence = retainPositionPublishEvidence(selfPositionEvidence, event, options.selfSigner.pubkey);
+		positionPublishState = reconstructPositionPublishState(selfPositionEvidence, options.selfSigner.pubkey);
 	}
 
 	function applyCanonicalPosition(event: ParsedPositionEvent, nowMs: number): boolean {
@@ -327,7 +328,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 		appliedCanonicalPositionEventIds.add(event.id);
 		worldPresence = applyWorldPresencePosition(worldPresence, event);
 		const nextPresence = project(nowMs);
-		if (options.selfAccount && event.pubkey === options.selfAccount.pubkey) {
+		if (options.selfSigner && event.pubkey === options.selfSigner.pubkey) {
 			selfJoinedThisSession = nextPresence.participants.some((participant) =>
 				participant.id === event.pubkey && participant.status === 'active'
 			);
@@ -356,21 +357,21 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 		operation: Exclude<SelfPositionOperationKind, 'trace-inspection' | 'trace-reply'>,
 		direction?: Direction
 	): Readonly<{ event: VerifiedEvent; parsed: ParsedPositionEvent }> | null {
-		if (!options.selfAccount || !channel) return null;
+		if (!options.selfSigner || !channel) return null;
 		const nowMs = Date.now();
 		const state = currentPresence();
 		let candidate: PresenceState;
 		if (operation === 'entry') {
-			candidate = enterParticipant(state, options.selfAccount.pubkey, nowMs);
+			candidate = enterParticipant(state, options.selfSigner.pubkey, nowMs);
 		} else if (operation === 'reactivation') {
-			candidate = recordPresenceActivity(state, options.selfAccount.pubkey, 'movement', nowMs);
+			candidate = recordPresenceActivity(state, options.selfSigner.pubkey, 'movement', nowMs);
 		} else {
 			if (!direction) return null;
-			const movement = moveParticipant(state, options.selfAccount.pubkey, direction, nowMs);
+			const movement = moveParticipant(state, options.selfSigner.pubkey, direction, nowMs);
 			if (!movement.moved) return null;
 			candidate = movement.state;
 		}
-		const participant = getParticipant(candidate, options.selfAccount.pubkey);
+		const participant = getParticipant(candidate, options.selfSigner.pubkey);
 		if (!participant) return null;
 		return positionCandidate(participant.position, nowMs);
 	}
@@ -379,7 +380,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 		position: ParsedPositionEvent['position'],
 		nowMs: number
 	): Readonly<{ event: VerifiedEvent; parsed: ParsedPositionEvent }> | null {
-		if (!options.selfAccount || !channel) return null;
+		if (!options.selfSigner || !channel) return null;
 		const createdAt = Math.floor(nowMs / 1000);
 		const plan = planPositionPublish(positionPublishState, createdAt);
 		if (plan.kind === 'unavailable') return null;
@@ -388,24 +389,24 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 			position,
 			slot: plan.slot,
 			createdAt
-		}), options.selfAccount.secretKey);
+		}), options.selfSigner.secretKey);
 		const parsed = parsePositionEvent(signed, channel.channelId);
 		if (!parsed) throw new Error('Locally signed position event did not pass the project parser.');
 		positionPublishState = plan.nextState;
-		selfPositionEvidence = retainPositionPublishEvidence(selfPositionEvidence, parsed, options.selfAccount.pubkey);
+		selfPositionEvidence = retainPositionPublishEvidence(selfPositionEvidence, parsed, options.selfSigner.pubkey);
 		return { event: signed, parsed };
 	}
 
 	function selfMessageCandidate(content: string, speechType: SpeechType): Readonly<{ event: VerifiedEvent; parsed: ParsedWorldMessage }> | null {
-		if (!options.selfAccount || !channel || !selfJoinedThisSession) return null;
+		if (!options.selfSigner || !channel || !selfJoinedThisSession) return null;
 		const nowMs = Date.now();
 		const state = currentPresence();
-		const current = getParticipant(state, options.selfAccount.pubkey);
+		const current = getParticipant(state, options.selfSigner.pubkey);
 		if (!current) return null;
 		const candidate = current.status === 'inactive'
-			? recordPresenceActivity(state, options.selfAccount.pubkey, 'message', nowMs)
+			? recordPresenceActivity(state, options.selfSigner.pubkey, 'message', nowMs)
 			: state;
-		const participant = getParticipant(candidate, options.selfAccount.pubkey);
+		const participant = getParticipant(candidate, options.selfSigner.pubkey);
 		if (!participant) return null;
 		const signed = finalizeWorldEvent(buildWorldMessageTemplate({
 			channel,
@@ -413,14 +414,14 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 			speechType,
 			position: participant.position,
 			createdAt: Math.floor(nowMs / 1000)
-		}), options.selfAccount.secretKey);
+		}), options.selfSigner.secretKey);
 		const parsed = parseWorldMessage(signed, channel.channelId);
 		if (!parsed) throw new Error('Locally signed world message did not pass the project parser.');
 		return { event: signed, parsed };
 	}
 
 	async function publishMessage(content: string, speechType: SpeechType): Promise<SelfMessagePublishResult> {
-		if (disposed || !options.selfAccount || !transport || !channel) return { kind: 'unavailable' };
+		if (disposed || !options.selfSigner || !transport || !channel) return { kind: 'unavailable' };
 		if (pendingSelfMessage || pendingTraceReply) return { kind: 'pending' };
 		const candidate = selfMessageCandidate(content, speechType);
 		if (!candidate) return { kind: 'blocked' };
@@ -488,7 +489,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 		operation: Exclude<SelfPositionOperationKind, 'trace-inspection' | 'trace-reply'>,
 		direction?: Direction
 	): Promise<SelfPositionWriteResult> {
-		if (!options.selfAccount) {
+		if (!options.selfSigner) {
 			emitSelfPositionWriteState({ kind: 'unavailable' });
 			return { kind: 'unavailable' };
 		}
@@ -545,7 +546,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 					channelId: channel.channelId,
 					effectiveRoots: effectiveTraceRoots,
 					rawEvents,
-					...(options.selfAccount ? { personaPubkey: options.selfAccount.pubkey } : {}),
+					...(options.selfSigner ? { personaPubkey: options.selfSigner.pubkey } : {}),
 					...(currentOpenRootId ? { currentOpenRootId } : {})
 				});
 				success = true;
@@ -622,7 +623,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 	}
 
 	function openTraceConversation(config: TraceConversationConfig): TraceConversationOpenResult {
-		if (disposed || !options.selfAccount || !transport || !channel) return { kind: 'unavailable' };
+		if (disposed || !options.selfSigner || !transport || !channel) return { kind: 'unavailable' };
 		if (!bootstrapComplete) return { kind: 'blocked' };
 		const root = effectiveTraceRoots.find((candidate) => candidate.id === config.rootId);
 		if (!root || config.currentId !== root.id) return { kind: 'blocked' };
@@ -635,7 +636,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 		const nowMs = Date.now();
 		const prepared = prepareTraceInspectionActivity({
 			presence: currentPresence(),
-			selfId: options.selfAccount.pubkey,
+			selfId: options.selfSigner.pubkey,
 			target: root.position,
 			nowMs,
 		});
@@ -650,7 +651,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 	}
 
 	function selectTraceConversationSpeech(targetId: string): TraceConversationOpenResult {
-		if (disposed || !options.selfAccount || !transport || !channel) return { kind: 'unavailable' };
+		if (disposed || !options.selfSigner || !transport || !channel) return { kind: 'unavailable' };
 		if (!bootstrapComplete || traceConversationState.kind === 'closed') return { kind: 'blocked' };
 		const pendingTraceInspection = pendingSelfOperation?.operation === 'trace-inspection';
 		if (pendingTraceReply || (pendingSelfOperation && !pendingTraceInspection)) return { kind: 'pending' };
@@ -662,7 +663,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 		const nowMs = Date.now();
 		const prepared = prepareTraceInspectionActivity({
 			presence: currentPresence(),
-			selfId: options.selfAccount.pubkey,
+			selfId: options.selfSigner.pubkey,
 			target: current.root.position,
 			nowMs,
 			requireCurrentRange: true
@@ -714,8 +715,8 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 		}
 		const fallback = groupTraceRoots(roots)
 			.find((cell) => sameGridPosition(cell.position, current.root.position))?.roots[0];
-		const self = options.selfAccount
-			? getParticipant(projectWorldPresenceState(worldPresence, Date.now()), options.selfAccount.pubkey)
+		const self = options.selfSigner
+			? getParticipant(projectWorldPresenceState(worldPresence, Date.now()), options.selfSigner.pubkey)
 			: undefined;
 		if (!fallback || !self || !isWithinTraceInvestigationRange(self.position, fallback.position)) {
 			closeTraceConversation();
@@ -742,7 +743,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 	}
 
 	async function publishTraceReply(input: TraceReplyPublication): Promise<TraceReplyPublishResult> {
-		if (disposed || !options.selfAccount || !transport || !channel) return { kind: 'unavailable' };
+		if (disposed || !options.selfSigner || !transport || !channel) return { kind: 'unavailable' };
 		if (!bootstrapComplete || !selfJoinedThisSession) return { kind: 'blocked' };
 		if (pendingSelfOperation || pendingSelfMessage || pendingTraceReply) return { kind: 'pending' };
 		const accepted = resolveReplyTarget(input.rootId, input.targetId);
@@ -752,7 +753,7 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 		try {
 			const nowMs = Date.now();
 			const prepared = prepareTraceInspectionActivity({
-				presence: currentPresence(), selfId: options.selfAccount.pubkey,
+				presence: currentPresence(), selfId: options.selfSigner.pubkey,
 				target: accepted.root.position, nowMs, requireCurrentRange: true, activity: 'trace-reply'
 			});
 			if (prepared.kind === 'blocked') return { kind: 'out-of-range' };
@@ -763,13 +764,13 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 				if (disposed) return { kind: 'unavailable' };
 				if (positionResult.kind !== 'succeeded') return { kind: 'position-failed' };
 			}
-			const self = getParticipant(currentPresence(), options.selfAccount.pubkey);
+			const self = getParticipant(currentPresence(), options.selfSigner.pubkey);
 			if (!self || !isWithinTraceInvestigationRange(self.position, accepted.root.position)) return { kind: 'out-of-range' };
 			if (self.status !== 'active') return { kind: 'blocked' };
 			const event = finalizeWorldEvent(buildTraceReplyTemplate({
 				root: accepted.root, parent: accepted.target, content: input.content, speechType: input.speechType,
 				createdAt: Math.floor(Date.now() / 1000)
-			}), options.selfAccount.secretKey);
+			}), options.selfSigner.secretKey);
 			operation.eventId = event.id;
 			const results = await transport.publish(event);
 			if (disposed) return { kind: 'unavailable' };
@@ -846,8 +847,8 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 		enterSelf(): Promise<SelfPositionWriteResult> {
 			if (!bootstrapComplete) return Promise.resolve({ kind: 'blocked' });
 			if (pendingTraceReply) return Promise.resolve({ kind: 'pending' });
-			if (!options.selfAccount) return publishSelfPosition('entry');
-			const participant = getParticipant(currentPresence(), options.selfAccount.pubkey);
+			if (!options.selfSigner) return publishSelfPosition('entry');
+			const participant = getParticipant(currentPresence(), options.selfSigner.pubkey);
 			if (participant?.status === 'active' && !isBlockedFacilityCell(participant.position)) {
 				selfJoinedThisSession = true;
 				refreshSelfMessageAvailability();
@@ -859,8 +860,8 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 
 		moveSelf(direction: Direction): Promise<SelfPositionWriteResult> {
 			if (!bootstrapComplete) return Promise.resolve({ kind: 'blocked' });
-			if (!options.selfAccount) return publishSelfPosition('movement', direction);
-			const participant = getParticipant(currentPresence(), options.selfAccount.pubkey);
+			if (!options.selfSigner) return publishSelfPosition('movement', direction);
+			const participant = getParticipant(currentPresence(), options.selfSigner.pubkey);
 			if (!participant) return publishSelfPosition('entry');
 			return publishSelfPosition(
 				participant.status === 'inactive' && selfJoinedThisSession ? 'reactivation' : 'movement',
@@ -933,8 +934,8 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 		},
 
 		markTraceRootRead(rootId: string): Promise<boolean> {
-			if (disposed || !channel || !options.selfAccount) return Promise.resolve(false);
-			return markTraceRootRead({ channelId: channel.channelId, personaPubkey: options.selfAccount.pubkey, rootId })
+			if (disposed || !channel || !options.selfSigner) return Promise.resolve(false);
+			return markTraceRootRead({ channelId: channel.channelId, personaPubkey: options.selfSigner.pubkey, rootId })
 				.then((changed) => {
 					if (changed) refreshTraceReadSnapshot();
 					return changed;
@@ -942,8 +943,8 @@ export function createWorldReadSession(options: WorldReadSessionOptions) {
 		},
 
 		markTraceReplyRead(rootId: string, replyId: string): Promise<boolean> {
-			if (disposed || !channel || !options.selfAccount) return Promise.resolve(false);
-			return markTraceReplyRead({ channelId: channel.channelId, personaPubkey: options.selfAccount.pubkey, rootId, replyId })
+			if (disposed || !channel || !options.selfSigner) return Promise.resolve(false);
+			return markTraceReplyRead({ channelId: channel.channelId, personaPubkey: options.selfSigner.pubkey, rootId, replyId })
 				.then((changed) => {
 					if (changed) refreshTraceReadSnapshot();
 					return changed;

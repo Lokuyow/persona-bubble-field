@@ -28,6 +28,42 @@ const AUTHORITATIVE_RELAYS = [
 	'wss://r.kojira.io/'
 ] as const;
 
+// Deterministic fake signers for browser fixtures. Each value is the BIP85
+// Nostr child at generation 1/account index `value` from the zero root.
+const FIXTURE_SECRETS: Record<number, string> = {
+	19: 'f335af62a42ad626049d0a567ecc4424b2f81e1133b875b15fa2e8010c4effb4',
+	20: 'b9ccd756d9e5ea3adf54cf397c428c0b65c5a46b9e5e7c6579507fa89ea4a97d',
+	21: '878e92a0544e9c397e41de986796625a80d9f44d2a898d685be125d80c41c999',
+	23: 'cdc43b6e2538236754f9121a2fe2386ec5220ab8dfbab2fe79436616ddad4c52',
+	29: '1041d5136c4792d65775d606065ab96c63ed226ecddc3d453a05558181e39994',
+	30: '4fa79d5856177a8529fd9867fd2b3d7da29574639635a25927e49bdb90fb7c69',
+	31: '5d0b8960d3531594a234088bd419672973d964d957ad6f106bea4780b03156eb',
+	32: '975157b62406158fc46148dc9a8b965fca86eb64c3c1c03d3aa31f2a48f1c05b',
+	33: 'dfd9fefc0312aafe2286d1fa3ac9c921b1d5778807eccbec82f623552676b8a7',
+	34: '55ede28892492eeb9cb5f3180233aca852a8b5beaa5b2f1b9ad20a51e79509be',
+	35: 'a992fdb01332a6d714eb8ab4e65d0443e164e2879a347735470af44f8c5001b4',
+	36: '82c357c285865a7577b6c959df1f4338f467bb5df63c591f727a296f662219d1',
+	37: 'd5d06e780da31eef48d75e2534fe8b861031d08d0be2f2eedab97a6932fe9c63',
+	38: '43b87bbbe5a659e7b7c9cd00f8a1686da9dcec7b91c249bc3a9e79bc03437c7e',
+	39: 'cd365454ccd86eeb1a7106313a468937240b76a3166e805242c9d88c0ce0715b',
+	41: 'e2f9ad74f14ab860d8ff5645ac1eda073821d01342d95084a035b2a256315fb6',
+	43: 'e70f9acfebc0c27d7cc5d2346207e9f01552a67bc8807bb3880a960f33a79c7d',
+	47: '436b486771b65d43c3fe4a3483c938cf7b92c5a8d7bfa4fc3766f71e2e9be2a8',
+	51: 'ba4be536f46ef62938a58987c86c4c2962159482da07bf0c4c247053c7d35039',
+	53: '540a080927f01dd21404eec32d8981dcd2f5717c5ab32479cd4fc6bc7abb4dfb',
+	55: '8a23896ea2f05f1b07077f2d251cb3bbd5d78e5d91aa73ac72d8c2073eaa1439',
+	57: 'fc530b89301c30bb7a2c4a8bf610650ab2b7a4226c7d24aeb8eb3debf474312e',
+	59: 'c3108aa75c4f5dee19ac10ad2e1132a5965a20b7c5aef8f03d2b519699b47d65',
+	61: 'd2075cb374bfe196afe65373a20c85498d14895e5219613ba23855fe38c0149d',
+	63: '8a718e42a54c54e560da05bb88d84f6ce394f59fb854d1a5dc1424dd634e055a'
+};
+
+function fixtureSecret(value: number): Uint8Array {
+	const hex = FIXTURE_SECRETS[value];
+	if (!hex) throw new Error(`Missing fixture signer ${value}.`);
+	return Uint8Array.from(Buffer.from(hex, 'hex'));
+}
+
 // A public, verified kind 40 whose immutable id is the configured prototype
 // channel. Keeping it in the browser-local fake Relay avoids all network I/O.
 const CHANNEL_EVENT = {
@@ -55,7 +91,7 @@ async function openProfile(page: Page): Promise<void> {
 }
 
 function testEvents(nowMs = Date.now()) {
-	const secret = new Uint8Array(32).fill(19);
+	const secret = fixtureSecret(19);
 	const createdAt = Math.floor(nowMs / 1000);
 	const channel = { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' };
 	return {
@@ -76,8 +112,8 @@ function testEvents(nowMs = Date.now()) {
 }
 
 function traceRuntimeEvents() {
-	const selfSecret = new Uint8Array(32).fill(23);
-	const rootSecret = new Uint8Array(32).fill(29);
+	const selfSecret = fixtureSecret(23);
+	const rootSecret = fixtureSecret(29);
 	const createdAt = Math.floor(Date.now() / 1000);
 	const channel = { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' };
 	const selfPosition = finalizeEvent(buildPositionEventTemplate({
@@ -111,7 +147,7 @@ function traceRuntimeEvents() {
 	}
 	const parsedRoot = parseWorldMessage(root, CHANNEL_ID);
 	if (!parsedRoot) throw new Error('Relay trace root fixture did not parse.');
-	const replySecret = new Uint8Array(32).fill(31);
+	const replySecret = fixtureSecret(31);
 	const direct = finalizeEvent(buildTraceReplyTemplate({
 		root: parsedRoot,
 		parent: parsedRoot,
@@ -145,21 +181,21 @@ function traceRuntimeEvents() {
 		content: 'Relay great-grandchild reply',
 		speechType: 'shout',
 		createdAt: createdAt + 3
-	}), new Uint8Array(32).fill(37));
+	}), fixtureSecret(37));
 	const currentLive = finalizeEvent(buildTraceReplyTemplate({
 		root: parsedRoot,
 		parent: parsedDirect,
 		content: 'Relay live current child',
 		speechType: 'normal',
 		createdAt: createdAt + 4
-	}), new Uint8Array(32).fill(39));
+	}), fixtureSecret(39));
 	const staleOldGeneration = finalizeEvent(buildTraceReplyTemplate({
 		root: parsedRoot,
 		parent: parsedDirect,
 		content: 'Relay stale old-generation child',
 		speechType: 'normal',
 		createdAt: createdAt + 5
-	}), new Uint8Array(32).fill(41));
+	}), fixtureSecret(41));
 	const invalid = { ...direct, id: 'f'.repeat(64), content: 'Relay invalid reply' };
 	const live = finalizeEvent(buildTraceReplyTemplate({
 		root: parsedRoot,
@@ -167,7 +203,7 @@ function traceRuntimeEvents() {
 		content: 'Relay live direct reply',
 		speechType: 'shout',
 		createdAt: createdAt + 3
-	}), new Uint8Array(32).fill(33));
+	}), fixtureSecret(33));
 	return {
 		selfSecret, selfPubkey: getPublicKey(selfSecret), selfPosition, message, root,
 		direct, selfDirect, deeper, greatGrandchild, currentLive, staleOldGeneration, invalid, live
@@ -600,6 +636,8 @@ async function installVisualAnimationRafMetrics(page: Page): Promise<void> {
 async function openReadyRelayWorld(page: Page, expectedParticipantCount = 2): Promise<Locator> {
 	await installHostOwnedStub(page);
 	await installDelayedRelay(page, { deferPrimaryEvents: true });
+	const secret = fixtureSecret(expectedParticipantCount === 1 ? 19 : 41);
+	await seedRelayAccount(page, secret, getPublicKey(secret));
 	await page.goto('/');
 	await expect(page.locator('.composer-dock')).toBeVisible();
 	const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
@@ -642,38 +680,45 @@ async function installPromptApiStub(page: Page, availability: 'available' | 'una
 }
 
 async function seedRelayAccount(page: Page, secretKey: Uint8Array, pubkey: string, lifespanExpiresAtMs = Date.now() + 7 * 24 * 60 * 60 * 1000): Promise<void> {
+	const fixtureAccountIndex = Number(Object.entries(FIXTURE_SECRETS).find(([, value]) => value === Buffer.from(secretKey).toString('hex'))?.[0]);
+	if (!fixtureAccountIndex) throw new Error('Fixture secret is not a BIP85 child.');
 	await page.goto('/favicon.svg');
-	await page.evaluate(async ({ secret, accountPubkey, expiresAtMs }) => {
+	await page.evaluate(async ({ accountPubkey, accountIndex, expiresAtMs, characterId }) => {
 		const database = await new Promise<IDBDatabase>((resolve, reject) => {
-			const request = indexedDB.open('persona-bubble-field-account', 3);
+			const request = indexedDB.open('persona-bubble-field-account', 4);
 			request.onupgradeneeded = () => {
-				if (!request.result.objectStoreNames.contains('persona-bubble-field-account-state')) request.result.createObjectStore('persona-bubble-field-account-state');
-				if (!request.result.objectStoreNames.contains('persona-bubble-field-game-state')) request.result.createObjectStore('persona-bubble-field-game-state');
+				for (const name of Array.from(request.result.objectStoreNames)) request.result.deleteObjectStore(name);
+				request.result.createObjectStore('persona-bubble-field-root-secret');
+				request.result.createObjectStore('persona-bubble-field-player-state');
 			};
 			request.onsuccess = () => resolve(request.result);
 			request.onerror = () => reject(request.error);
 		});
 		const wrappingKey = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']) as CryptoKey;
 		const iv = crypto.getRandomValues(new Uint8Array(12));
-		const ciphertext = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, wrappingKey, new Uint8Array(secret)));
-		const transaction = database.transaction(['persona-bubble-field-account-state', 'persona-bubble-field-game-state'], 'readwrite');
-		const store = transaction.objectStore('persona-bubble-field-account-state');
-		store.put(wrappingKey, 'secret-wrapping-key');
-		store.put({ version: 1, iv, ciphertext }, 'encrypted-secret-key');
-		store.put(accountPubkey, 'account-pubkey');
-		store.put(Date.now(), 'last-changed-at-ms');
-		store.put({ pubkey: accountPubkey, revision: 2 }, 'initial-profile-published-pubkey');
-		transaction.objectStore('persona-bubble-field-game-state').put({
+		const ciphertext = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, wrappingKey, new Uint8Array(16)));
+		const now = Date.now();
+		const transaction = database.transaction(['persona-bubble-field-root-secret', 'persona-bubble-field-player-state'], 'readwrite');
+		transaction.objectStore('persona-bubble-field-root-secret').put(wrappingKey, 'root-wrapping-key');
+		transaction.objectStore('persona-bubble-field-root-secret').put({ version: 1, iv, ciphertext }, 'encrypted-root-entropy');
+		transaction.objectStore('persona-bubble-field-player-state').put({
+			schemaVersion: 1,
+			identities: [{ generation: 1, accountIndex, pubkey: accountPubkey, characterId, identityCreatedAtMs: now,
+				status: 'alive', characterProfileRevision: 2, runHistory: [] }],
+			mode: { kind: 'running', activeRun: { runNumber: 1, revision: 0, startedAtMs: now,
+				identity: { generation: 1, accountIndex, pubkey: accountPubkey },
+				gameState: {
 			version: 2, personaPubkey: accountPubkey, lifespanExpiresAtMs: expiresAtMs,
 			points: 0, abilities: { inferenceEfficiency: 0, contextCapacity: 0, hallucinationSuppression: 0 }, mendingJob: null
-		}, 'game-state');
+				} } }
+		}, 'player-lifecycle');
 		await new Promise<void>((resolve, reject) => {
 			transaction.oncomplete = () => resolve();
 			transaction.onerror = () => reject(transaction.error);
 			transaction.onabort = () => reject(transaction.error);
 		});
 		database.close();
-	}, { secret: [...secretKey], accountPubkey: pubkey, expiresAtMs: lifespanExpiresAtMs });
+	}, { accountPubkey: pubkey, accountIndex: fixtureAccountIndex, expiresAtMs: lifespanExpiresAtMs, characterId: deriveCharacterFromPubkey(pubkey, CHARACTER_CATALOG).characterId });
 }
 
 async function readRelayGameState(page: Page): Promise<{
@@ -690,10 +735,10 @@ async function readRelayGameState(page: Page): Promise<{
 			request.onerror = () => reject(request.error);
 		});
 		try {
-			const transaction = database.transaction('persona-bubble-field-game-state');
-			const request = transaction.objectStore('persona-bubble-field-game-state').get('game-state');
+			const transaction = database.transaction('persona-bubble-field-player-state');
+			const request = transaction.objectStore('persona-bubble-field-player-state').get('player-lifecycle');
 			return await new Promise<{ version: number; personaPubkey: string; lifespanExpiresAtMs: number; points: number; mendingJob: unknown }>((resolve, reject) => {
-				transaction.oncomplete = () => resolve(request.result as { version: number; personaPubkey: string; lifespanExpiresAtMs: number; points: number; mendingJob: unknown });
+				transaction.oncomplete = () => resolve((request.result as { mode: { activeRun: { gameState: { version: number; personaPubkey: string; lifespanExpiresAtMs: number; points: number; mendingJob: unknown } } } }).mode.activeRun.gameState);
 				transaction.onerror = () => reject(transaction.error);
 				transaction.onabort = () => reject(transaction.error);
 			});
@@ -701,72 +746,46 @@ async function readRelayGameState(page: Page): Promise<{
 	});
 }
 
-async function seedV2RelayAccount(page: Page, secretKey: Uint8Array, pubkey: string): Promise<void> {
-	await page.goto('/favicon.svg');
-	await page.evaluate(async ({ secret, accountPubkey }) => {
+async function overwriteRelayGameState(page: Page, gameState: Record<string, unknown>): Promise<void> {
+	await page.evaluate(async (nextGameState) => {
 		const database = await new Promise<IDBDatabase>((resolve, reject) => {
-			const request = indexedDB.open('persona-bubble-field-account', 2);
-			request.onupgradeneeded = () => request.result.createObjectStore('persona-bubble-field-account-state');
+			const request = indexedDB.open('persona-bubble-field-account');
 			request.onsuccess = () => resolve(request.result);
 			request.onerror = () => reject(request.error);
 		});
-		const wrappingKey = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']) as CryptoKey;
-		const iv = crypto.getRandomValues(new Uint8Array(12));
-		const ciphertext = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, wrappingKey, new Uint8Array(secret)));
-		const transaction = database.transaction('persona-bubble-field-account-state', 'readwrite');
-		const store = transaction.objectStore('persona-bubble-field-account-state');
-		store.put(wrappingKey, 'secret-wrapping-key');
-		store.put({ version: 1, iv, ciphertext }, 'encrypted-secret-key');
-		store.put(accountPubkey, 'account-pubkey');
-		store.put(Date.now(), 'last-changed-at-ms');
-		store.put({ pubkey: accountPubkey, revision: 2 }, 'initial-profile-published-pubkey');
-		await new Promise<void>((resolve, reject) => {
-			transaction.oncomplete = () => resolve();
-			transaction.onerror = () => reject(transaction.error);
-			transaction.onabort = () => reject(transaction.error);
-		});
-		database.close();
-	}, { secret: [...secretKey], accountPubkey: pubkey });
-}
-
-async function seedLegacyRelayAccount(page: Page, secretKey: Uint8Array, pubkey: string, personaCreatedAtMs: number): Promise<void> {
-	await page.goto('/favicon.svg');
-	await page.evaluate(async ({ secret, accountPubkey, createdAt }) => {
-		const database = await new Promise<IDBDatabase>((resolve, reject) => {
-			const request = indexedDB.open('persona-bubble-field-account', 1);
-			request.onupgradeneeded = () => request.result.createObjectStore('persona-bubble-field-account-state');
-			request.onsuccess = () => resolve(request.result);
-			request.onerror = () => reject(request.error);
-		});
-		const transaction = database.transaction('persona-bubble-field-account-state', 'readwrite');
-		const store = transaction.objectStore('persona-bubble-field-account-state');
-		store.put(new Uint8Array(secret), 'secret-key');
-		store.put(createdAt, 'last-changed-at-ms');
-		store.put({ pubkey: accountPubkey, revision: 2 }, 'initial-profile-published-pubkey');
-		await new Promise<void>((resolve, reject) => {
-			transaction.oncomplete = () => resolve();
-			transaction.onerror = () => reject(transaction.error);
-			transaction.onabort = () => reject(transaction.error);
-		});
-		database.close();
-	}, { secret: [...secretKey], accountPubkey: pubkey, createdAt: personaCreatedAtMs });
+		try {
+			const transaction = database.transaction('persona-bubble-field-player-state', 'readwrite');
+			const store = transaction.objectStore('persona-bubble-field-player-state');
+			const request = store.get('player-lifecycle');
+			await new Promise<void>((resolve, reject) => {
+				request.onsuccess = () => {
+					const lifecycle = request.result as { mode: { kind: 'running'; activeRun: { gameState: Record<string, unknown> } } };
+					lifecycle.mode.activeRun.gameState = nextGameState;
+					store.put(lifecycle, 'player-lifecycle');
+				};
+				transaction.oncomplete = () => resolve();
+				transaction.onerror = () => reject(transaction.error);
+				transaction.onabort = () => reject(transaction.error);
+			});
+		} finally { database.close(); }
+	}, gameState);
 }
 
 async function seedUnavailablePersona(page: Page, kind: 'missing' | 'corrupt'): Promise<void> {
 	await page.goto('/favicon.svg');
 	await page.evaluate((stateKind) => new Promise<void>((resolve, reject) => {
-		const request = indexedDB.open('persona-bubble-field-account', 3);
+		const request = indexedDB.open('persona-bubble-field-account', 4);
 		request.onupgradeneeded = () => {
-			if (!request.result.objectStoreNames.contains('persona-bubble-field-account-state')) request.result.createObjectStore('persona-bubble-field-account-state');
-			if (!request.result.objectStoreNames.contains('persona-bubble-field-game-state')) request.result.createObjectStore('persona-bubble-field-game-state');
+			for (const name of Array.from(request.result.objectStoreNames)) request.result.deleteObjectStore(name);
+			request.result.createObjectStore('persona-bubble-field-root-secret');
+			request.result.createObjectStore('persona-bubble-field-player-state');
 		};
 		request.onerror = () => reject(request.error);
 		request.onsuccess = () => {
 			const database = request.result;
-			const transaction = database.transaction('persona-bubble-field-account-state', 'readwrite');
-			const store = transaction.objectStore('persona-bubble-field-account-state');
-			store.put(Date.now(), 'last-changed-at-ms');
-			if (stateKind === 'corrupt') store.put(new Uint8Array(31), 'secret-key');
+			const transaction = database.transaction(['persona-bubble-field-root-secret', 'persona-bubble-field-player-state'], 'readwrite');
+			if (stateKind === 'missing') transaction.objectStore('persona-bubble-field-root-secret').put(true, 'partial');
+			if (stateKind === 'corrupt') transaction.objectStore('persona-bubble-field-player-state').put({ schemaVersion: 999 }, 'player-lifecycle');
 			transaction.oncomplete = () => { database.close(); resolve(); };
 			transaction.onerror = () => { database.close(); reject(transaction.error); };
 			transaction.onabort = () => { database.close(); reject(transaction.error); };
@@ -774,20 +793,20 @@ async function seedUnavailablePersona(page: Page, kind: 'missing' | 'corrupt'): 
 	}), kind);
 }
 
-async function installReincarnationFailure(page: Page): Promise<void> {
+async function installDeathTransitionFailure(page: Page): Promise<void> {
 	await page.addInitScript(() => {
-		const failureKey = 'persona-lifecycle-test-fail-reincarnation';
+		const failureKey = 'persona-lifecycle-test-fail-death-transition';
 		let armed = sessionStorage.getItem(failureKey) === '1';
 		let injected = 0;
 		const puts: string[] = [];
 		const originalPut = IDBObjectStore.prototype.put;
 		IDBObjectStore.prototype.put = function(value: unknown, key?: IDBValidKey) {
 			puts.push(this.name);
-			if (armed && this.name === 'persona-bubble-field-game-state' && this.transaction.mode === 'readwrite') {
+			if (armed && this.name === 'persona-bubble-field-player-state' && this.transaction.mode === 'readwrite') {
 				armed = false;
 				injected += 1;
 				sessionStorage.removeItem(failureKey);
-				throw new DOMException('Injected reincarnation persistence failure.', 'QuotaExceededError');
+				throw new DOMException('Injected death transition persistence failure.', 'QuotaExceededError');
 			}
 			return originalPut.call(this, value, key);
 		};
@@ -801,7 +820,7 @@ async function installReincarnationFailure(page: Page): Promise<void> {
 	});
 }
 
-async function armReincarnationFailure(page: Page): Promise<void> {
+async function armDeathTransitionFailure(page: Page): Promise<void> {
 	await page.evaluate(() => (window as typeof window & {
 		__personaLifecycleFailureTest: { arm(): void }
 	}).__personaLifecycleFailureTest.arm());
@@ -867,11 +886,11 @@ function reverseMoveKey(key: AvailableMove['key']): AvailableMove['key'] {
 }
 
 test.describe('Relay startup', () => {
-	test('falls back to a read-only world when startup reincarnation fails', async ({ page }) => {
-		const secret = new Uint8Array(32).fill(57);
+	test('falls back to a read-only world when startup death transition fails', async ({ page }) => {
+		const secret = fixtureSecret(57);
 		const pubkey = getPublicKey(secret);
 		const events = testEvents();
-		await installReincarnationFailure(page);
+		await installDeathTransitionFailure(page);
 		await installHostOwnedStub(page);
 		await installDelayedRelay(page, { primaryEvents: events });
 		await seedRelayAccount(page, secret, pubkey);
@@ -886,22 +905,11 @@ test.describe('Relay startup', () => {
 			relay.releaseMetadata(); relay.releasePrimary();
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
-		await page.evaluate((expiredPubkey) => new Promise<void>((resolve, reject) => {
-			const request = indexedDB.open('persona-bubble-field-account');
-			request.onerror = () => reject(request.error);
-			request.onsuccess = () => {
-				const database = request.result;
-				const transaction = database.transaction('persona-bubble-field-game-state', 'readwrite');
-				transaction.objectStore('persona-bubble-field-game-state').put({
-					version: 2, personaPubkey: expiredPubkey, lifespanExpiresAtMs: Date.now() - 1, points: 321, mendingJob: null,
-					abilities: { inferenceEfficiency: 4, contextCapacity: 3, hallucinationSuppression: 4 }
-				}, 'game-state');
-				transaction.oncomplete = () => { database.close(); resolve(); };
-				transaction.onerror = () => { database.close(); reject(transaction.error); };
-				transaction.onabort = () => { database.close(); reject(transaction.error); };
-			}
-		}), pubkey);
-		await armReincarnationFailure(page);
+		await overwriteRelayGameState(page, {
+			version: 2, personaPubkey: pubkey, lifespanExpiresAtMs: Date.now() - 1, points: 321, mendingJob: null,
+			abilities: { inferenceEfficiency: 4, contextCapacity: 3, hallucinationSuppression: 4 }
+		});
+		await armDeathTransitionFailure(page);
 		await page.reload({ waitUntil: 'domcontentloaded' });
 		await expect(page.locator('.composer-dock')).toBeVisible();
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
@@ -926,11 +934,13 @@ test.describe('Relay startup', () => {
 				request.onerror = () => reject(request.error);
 			});
 			try {
+				const transaction = database.transaction('persona-bubble-field-player-state');
+				const request = transaction.objectStore('persona-bubble-field-player-state').get('player-lifecycle');
 				return await new Promise<{ pubkey: string; lifespanExpiresAtMs: number }>((resolve, reject) => {
-					const transaction = database.transaction(['persona-bubble-field-account-state', 'persona-bubble-field-game-state']);
-					const accountRequest = transaction.objectStore('persona-bubble-field-account-state').get('account-pubkey');
-					const gameRequest = transaction.objectStore('persona-bubble-field-game-state').get('game-state');
-					transaction.oncomplete = () => resolve({ pubkey: accountRequest.result as string, lifespanExpiresAtMs: (gameRequest.result as { lifespanExpiresAtMs: number }).lifespanExpiresAtMs });
+					transaction.oncomplete = () => {
+						const state = request.result as { mode: { activeRun: { identity: { pubkey: string }; gameState: { lifespanExpiresAtMs: number } } } };
+						resolve({ pubkey: state.mode.activeRun.identity.pubkey, lifespanExpiresAtMs: state.mode.activeRun.gameState.lifespanExpiresAtMs });
+					};
 					transaction.onerror = () => reject(transaction.error);
 				});
 			} finally { database.close(); }
@@ -939,9 +949,49 @@ test.describe('Relay startup', () => {
 		expect(persisted.lifespanExpiresAtMs).toBeLessThan(Date.now());
 	});
 
+	test('keeps a deterministic three-choice selection pending until one Identity is chosen', async ({ page }) => {
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page);
+		await page.goto('/');
+		const candidateButtons = page.getByRole('button', { name: /を選ぶ$/ });
+		await expect(candidateButtons).toHaveCount(3);
+		const labelsBeforeReload = await candidateButtons.allTextContents();
+		await expect(page.locator('.participant[data-self="true"]')).toHaveCount(0);
+		await page.reload({ waitUntil: 'domcontentloaded' });
+		const reloadedButtons = page.getByRole('button', { name: /を選ぶ$/ });
+		await expect(reloadedButtons).toHaveCount(3);
+		expect(await reloadedButtons.allTextContents()).toEqual(labelsBeforeReload);
+		await reloadedButtons.nth(1).click();
+		await expect(page.getByRole('dialog')).toHaveCount(0);
+		await expect.poll(() => page.evaluate(() => Boolean((window as typeof window & { __relayStartupTest?: unknown }).__relayStartupTest))).toBe(true);
+		await page.evaluate(() => {
+			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
+			relay.releaseMetadata(); relay.releasePrimary();
+		});
+		await expect(page.locator('.participant[data-self="true"]')).toBeVisible();
+		const lifecycle = await page.evaluate(async () => {
+			const database = await new Promise<IDBDatabase>((resolve, reject) => {
+				const request = indexedDB.open('persona-bubble-field-account');
+				request.onsuccess = () => resolve(request.result);
+				request.onerror = () => reject(request.error);
+			});
+			try {
+				return await new Promise<{ mode: string; identities: number; runNumber: number }>((resolve, reject) => {
+					const request = database.transaction('persona-bubble-field-player-state').objectStore('persona-bubble-field-player-state').get('player-lifecycle');
+					request.onsuccess = () => {
+						const state = request.result as { identities: unknown[]; mode: { kind: string; activeRun?: { runNumber: number } } };
+						resolve({ mode: state.mode.kind, identities: state.identities.length, runNumber: state.mode.activeRun?.runNumber ?? 0 });
+					};
+					request.onerror = () => reject(request.error);
+				});
+			} finally { database.close(); }
+		});
+		expect(lifecycle).toEqual({ mode: 'running', identities: 1, runNumber: 1 });
+	});
+
 	test('runs and collects a mending job only from the adjacent terminal cells', async ({ page }) => {
 		const startTime = Date.now();
-		const secret = new Uint8Array(32).fill(19);
+		const secret = fixtureSecret(19);
 		const pubkey = getPublicKey(secret);
 		await page.clock.install({ time: startTime });
 		await installHostOwnedStub(page);
@@ -975,6 +1025,7 @@ test.describe('Relay startup', () => {
 		await expect(page.getByRole('dialog')).toBeVisible();
 		await page.getByRole('button', { name: '繕いを開始' }).click();
 		await expect(page.getByRole('dialog')).toHaveCount(0);
+		await expect.poll(() => readRelayGameState(page)).toMatchObject({ mendingJob: expect.any(Object) });
 		const started = await readRelayGameState(page);
 		expect(started).toMatchObject({ version: 2, points: 0, mendingJob: expect.objectContaining({ maximumDurationMs: 8 * 60 * 60 * 1000 }) });
 
@@ -988,6 +1039,7 @@ test.describe('Relay startup', () => {
 		await terminal.click();
 		await expect(page.getByRole('dialog')).toContainText('処理完了');
 		await page.getByRole('button', { name: '成果を受け取る' }).click();
+		await expect.poll(() => readRelayGameState(page)).toMatchObject({ mendingJob: null, points: 8 });
 		const collected = await readRelayGameState(page);
 		expect(collected.mendingJob).toBeNull();
 		expect(collected.points).toBe(8);
@@ -998,7 +1050,7 @@ test.describe('Relay startup', () => {
 	test('keeps an offline mending job alive across browser reopen after its stored expiry', async ({ page }) => {
 		const startTime = Date.now();
 		const hour = 60 * 60 * 1000;
-		const secret = new Uint8Array(32).fill(19);
+		const secret = fixtureSecret(19);
 		const pubkey = getPublicKey(secret);
 		await page.clock.install({ time: startTime });
 		await installHostOwnedStub(page);
@@ -1019,6 +1071,7 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,5');
 		await page.getByRole('button', { name: '繕い端末' }).click();
 		await page.getByRole('button', { name: '繕いを開始' }).click();
+		await expect.poll(() => readRelayGameState(page)).toMatchObject({ mendingJob: expect.any(Object) });
 		const started = await readRelayGameState(page);
 
 		await page.clock.setSystemTime(startTime + hour + 30 * 60 * 1000);
@@ -1036,7 +1089,7 @@ test.describe('Relay startup', () => {
 
 	test('closes a stale completed mending dialog before its reward can be collected', async ({ page }) => {
 		const startTime = Date.now();
-		const secret = new Uint8Array(32).fill(19);
+		const secret = fixtureSecret(19);
 		const pubkey = getPublicKey(secret);
 		await page.clock.install({ time: startTime });
 		await installHostOwnedStub(page);
@@ -1053,6 +1106,7 @@ test.describe('Relay startup', () => {
 		const terminal = page.getByRole('button', { name: '繕い端末' });
 		await terminal.click();
 		await page.getByRole('button', { name: '繕いを開始' }).click();
+		await expect.poll(() => readRelayGameState(page)).toMatchObject({ mendingJob: expect.any(Object) });
 		const started = await readRelayGameState(page);
 		const job = started.mendingJob as { startedAtMs: number; maximumDurationMs: number };
 		await page.clock.setSystemTime(job.startedAtMs + job.maximumDurationMs);
@@ -1077,7 +1131,7 @@ test.describe('Relay startup', () => {
 
 	test('converges two tabs on one mending start and collection', async ({ page }) => {
 		const startTime = Date.now();
-		const secret = new Uint8Array(32).fill(19);
+		const secret = fixtureSecret(19);
 		const pubkey = getPublicKey(secret);
 		const other = await page.context().newPage();
 		const clients = [page, other] as const;
@@ -1113,6 +1167,7 @@ test.describe('Relay startup', () => {
 				await expect(client.getByRole('button', { name: '繕いを開始' })).toBeVisible();
 			}));
 			await Promise.all(clients.map((client) => client.getByRole('button', { name: '繕いを開始' }).click()));
+			await expect.poll(() => readRelayGameState(page)).toMatchObject({ mendingJob: expect.any(Object) });
 			const started = await readRelayGameState(page);
 			expect(started.mendingJob).toEqual(expect.any(Object));
 
@@ -1127,6 +1182,7 @@ test.describe('Relay startup', () => {
 				await expect(client.getByRole('button', { name: '成果を受け取る' })).toBeVisible();
 			}
 			await Promise.all(clients.map((client) => client.getByRole('button', { name: '成果を受け取る' }).click()));
+			await expect.poll(() => readRelayGameState(page)).toMatchObject({ points: 8, mendingJob: null });
 			const collected = await readRelayGameState(page);
 			expect(collected).toMatchObject({ points: 8, mendingJob: null });
 		} finally {
@@ -1134,8 +1190,8 @@ test.describe('Relay startup', () => {
 		}
 	});
 
-	test('reloads an old terminal mutation into the persona reincarnated by another tab', async ({ page }) => {
-		const secret = new Uint8Array(32).fill(63);
+	test('reloads an old terminal mutation after another tab selects the next identity', async ({ page }) => {
+		const secret = fixtureSecret(63);
 		const oldPubkey = getPublicKey(secret);
 		await installHostOwnedStub(page);
 		await installDelayedRelay(page, { persistAcrossReload: true });
@@ -1166,22 +1222,13 @@ test.describe('Relay startup', () => {
 				relay.releaseMetadata(); relay.releasePrimary();
 			});
 			await expect(reincarnator.locator(`.participant[data-self="true"][data-participant-id="${oldPubkey}"]`)).toBeVisible();
-			await reincarnator.evaluate(async (pubkey) => {
-				const database = await new Promise<IDBDatabase>((resolve, reject) => {
-					const request = indexedDB.open('persona-bubble-field-account');
-					request.onsuccess = () => resolve(request.result);
-					request.onerror = () => reject(request.error);
-				});
-				try {
-					const transaction = database.transaction('persona-bubble-field-game-state', 'readwrite');
-					transaction.objectStore('persona-bubble-field-game-state').put({ version: 2, personaPubkey: pubkey, lifespanExpiresAtMs: Date.now() - 1, points: 0,
-						abilities: { inferenceEfficiency: 0, contextCapacity: 0, hallucinationSuppression: 0 }, mendingJob: null }, 'game-state');
-					await new Promise<void>((resolve, reject) => {
-						transaction.oncomplete = () => resolve(); transaction.onerror = () => reject(transaction.error); transaction.onabort = () => reject(transaction.error);
-					});
-				} finally { database.close(); }
-			}, oldPubkey);
+			await overwriteRelayGameState(reincarnator, { version: 2, personaPubkey: oldPubkey, lifespanExpiresAtMs: Date.now() - 1, points: 0,
+				abilities: { inferenceEfficiency: 0, contextCapacity: 0, hallucinationSuppression: 0 }, mendingJob: null });
 			await reincarnator.reload({ waitUntil: 'domcontentloaded' });
+			await expect(reincarnator.getByRole('dialog')).toBeVisible();
+			await expect(reincarnator.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
+			await reincarnator.getByRole('button', { name: /を選ぶ$/ }).first().click();
+			await expect(reincarnator.getByRole('dialog')).toHaveCount(0);
 			await reincarnator.evaluate(() => {
 				const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
 				relay.releaseMetadata(); relay.releasePrimary();
@@ -1221,7 +1268,7 @@ test.describe('Relay startup', () => {
 
 	test('fails closed to a public read-only world when a mending mutation finds corrupt storage', async ({ page }) => {
 		const startTime = Date.now();
-		const secret = new Uint8Array(32).fill(19);
+		const secret = fixtureSecret(19);
 		const pubkey = getPublicKey(secret);
 		await page.clock.install({ time: startTime });
 		await installHostOwnedStub(page);
@@ -1235,20 +1282,7 @@ test.describe('Relay startup', () => {
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
 		await moveRelaySelfTo(page, { x: 11, y: 5 });
-		await page.evaluate(async () => {
-			const database = await new Promise<IDBDatabase>((resolve, reject) => {
-				const request = indexedDB.open('persona-bubble-field-account');
-				request.onsuccess = () => resolve(request.result);
-				request.onerror = () => reject(request.error);
-			});
-			try {
-				const transaction = database.transaction('persona-bubble-field-game-state', 'readwrite');
-				transaction.objectStore('persona-bubble-field-game-state').put({ version: 2 }, 'game-state');
-				await new Promise<void>((resolve, reject) => {
-					transaction.oncomplete = () => resolve(); transaction.onerror = () => reject(transaction.error); transaction.onabort = () => reject(transaction.error);
-				});
-			} finally { database.close(); }
-		});
+		await overwriteRelayGameState(page, { version: 2 });
 		const before = (await publishedMessages(page)).length;
 		await page.getByRole('button', { name: '繕い端末' }).click();
 		await page.getByRole('button', { name: '繕いを開始' }).click();
@@ -1259,8 +1293,8 @@ test.describe('Relay startup', () => {
 		await expect.poll(async () => (await publishedMessages(page)).length).toBe(before);
 	});
 
-	test('reincarnates an expired persona and resets its game state', async ({ page }) => {
-		const secret = new Uint8Array(32).fill(51);
+	test('moves an expired persona to the next identity selection', async ({ page }) => {
+		const secret = fixtureSecret(51);
 		const pubkey = getPublicKey(secret);
 		await installHostOwnedStub(page);
 		await installDelayedRelay(page);
@@ -1273,53 +1307,20 @@ test.describe('Relay startup', () => {
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
 
-		await page.evaluate(async (expiredPubkey) => {
-			const database = await new Promise<IDBDatabase>((resolve, reject) => {
-				const request = indexedDB.open('persona-bubble-field-account');
-				request.onsuccess = () => resolve(request.result);
-				request.onerror = () => reject(request.error);
-			});
-			const transaction = database.transaction('persona-bubble-field-game-state', 'readwrite');
-			transaction.objectStore('persona-bubble-field-game-state').put({
-				version: 2,
-				personaPubkey: expiredPubkey,
-				lifespanExpiresAtMs: Date.now() - 1,
-				points: 321,
-				abilities: { inferenceEfficiency: 4, contextCapacity: 3, hallucinationSuppression: 4 },
-				mendingJob: null
-			}, 'game-state');
-			await new Promise<void>((resolve, reject) => {
-				transaction.oncomplete = () => resolve();
-				transaction.onerror = () => reject(transaction.error);
-				transaction.onabort = () => reject(transaction.error);
-			});
-			database.close();
-		}, pubkey);
+		await overwriteRelayGameState(page, {
+			version: 2,
+			personaPubkey: pubkey,
+			lifespanExpiresAtMs: Date.now() - 1,
+			points: 321,
+			abilities: { inferenceEfficiency: 4, contextCapacity: 3, hallucinationSuppression: 4 },
+			mendingJob: null
+		});
 		await page.reload({ waitUntil: 'domcontentloaded' });
 
-		await expect.poll(async () => page.evaluate(async () => {
-			const database = await new Promise<IDBDatabase>((resolve, reject) => {
-				const request = indexedDB.open('persona-bubble-field-account');
-				request.onsuccess = () => resolve(request.result);
-				request.onerror = () => reject(request.error);
-			});
-			try {
-				return await new Promise<{ pubkey: unknown; game: unknown }>((resolve, reject) => {
-					const accountRequest = database.transaction('persona-bubble-field-account-state').objectStore('persona-bubble-field-account-state').get('account-pubkey');
-					const gameRequest = database.transaction('persona-bubble-field-game-state').objectStore('persona-bubble-field-game-state').get('game-state');
-					let accountValue: unknown;
-					let gameValue: unknown;
-					let completed = 0;
-					const finish = () => { if (++completed === 2) resolve({ pubkey: accountValue, game: gameValue }); };
-					accountRequest.onsuccess = () => { accountValue = accountRequest.result; finish(); };
-					gameRequest.onsuccess = () => { gameValue = gameRequest.result; finish(); };
-					accountRequest.onerror = () => reject(accountRequest.error);
-					gameRequest.onerror = () => reject(gameRequest.error);
-				});
-			} finally { database.close(); }
-		})).toEqual(expect.objectContaining({
-			pubkey: expect.not.stringContaining(pubkey)
-		}));
+		await expect(page.getByRole('dialog')).toBeVisible();
+		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
+		await page.getByRole('button', { name: /を選ぶ$/ }).first().click();
+		await expect(page.getByRole('dialog')).toHaveCount(0);
 		const reset = await page.evaluate(async () => {
 			const database = await new Promise<IDBDatabase>((resolve, reject) => {
 				const request = indexedDB.open('persona-bubble-field-account');
@@ -1328,10 +1329,12 @@ test.describe('Relay startup', () => {
 			});
 			try {
 				return await new Promise<{ pubkey: string; game: { personaPubkey: string; points: number; abilities: Record<string, number> } }>((resolve, reject) => {
-					const tx = database.transaction(['persona-bubble-field-account-state', 'persona-bubble-field-game-state']);
-					const accountRequest = tx.objectStore('persona-bubble-field-account-state').get('account-pubkey');
-					const gameRequest = tx.objectStore('persona-bubble-field-game-state').get('game-state');
-					tx.oncomplete = () => resolve({ pubkey: accountRequest.result as string, game: gameRequest.result });
+					const tx = database.transaction('persona-bubble-field-player-state');
+					const playerRequest = tx.objectStore('persona-bubble-field-player-state').get('player-lifecycle');
+					tx.oncomplete = () => {
+						const lifecycle = playerRequest.result as { mode: { activeRun: { identity: { pubkey: string }; gameState: { personaPubkey: string; points: number; abilities: Record<string, number> } } } };
+						resolve({ pubkey: lifecycle.mode.activeRun.identity.pubkey, game: lifecycle.mode.activeRun.gameState });
+					};
 					tx.onerror = () => reject(tx.error);
 				});
 			} finally { database.close(); }
@@ -1347,91 +1350,14 @@ test.describe('Relay startup', () => {
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${reset.pubkey}"]`)).toBeVisible();
 		const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
 		const before = (await publishedMessages(page)).length;
-		await editor.fill('after reincarnation');
+		await editor.fill('after identity transition');
 		await page.locator('ehagaki-composer').getByRole('button', { name: 'Send' }).click();
 		await waitForPublishedMessageCount(page, before + 1);
 		const event = await page.evaluate((message) => {
 			const published = (window as typeof window & { __relayStartupTest: { state: { published: Array<{ kind: number; content: string; pubkey?: string }> } } }).__relayStartupTest.state.published;
 			return published.find((candidate) => candidate.kind === 42 && candidate.content === message);
-		}, 'after reincarnation');
+		}, 'after identity transition');
 		expect(event?.pubkey).toBe(reset.pubkey);
-	});
-
-	test('migrates a legacy v1 account in Chromium without changing its identity or profile state', async ({ page }) => {
-		const secret = new Uint8Array(32).fill(47);
-		const pubkey = getPublicKey(secret);
-		const personaCreatedAtMs = Date.now() - 12_345;
-		await installHostOwnedStub(page);
-		await installDelayedRelay(page);
-		await seedLegacyRelayAccount(page, secret, pubkey, personaCreatedAtMs);
-		await page.goto('/');
-		await expect(page.locator('.composer-dock')).toBeVisible();
-		await page.evaluate(() => {
-			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
-			relay.releaseMetadata(); relay.releasePrimary();
-		});
-		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
-		const persisted = await page.evaluate(async () => {
-			const database = await new Promise<IDBDatabase>((resolve, reject) => {
-				const request = indexedDB.open('persona-bubble-field-account');
-				request.onsuccess = () => resolve(request.result);
-				request.onerror = () => reject(request.error);
-			});
-			try {
-				return await new Promise<{ keys: string[]; timestamp: unknown; pubkey: unknown; marker: unknown; hasSecret: boolean; hasWrappingKey: boolean }>((resolve, reject) => {
-					const request = database.transaction('persona-bubble-field-account-state').objectStore('persona-bubble-field-account-state').getAll();
-					request.onsuccess = () => {
-						const store = database.transaction('persona-bubble-field-account-state').objectStore('persona-bubble-field-account-state');
-						const keysRequest = store.getAllKeys();
-						keysRequest.onsuccess = () => resolve({
-							keys: keysRequest.result.map(String), timestamp: (request.result as unknown[])[keysRequest.result.indexOf('last-changed-at-ms')],
-							pubkey: (request.result as unknown[])[keysRequest.result.indexOf('account-pubkey')],
-							marker: (request.result as unknown[])[keysRequest.result.indexOf('initial-profile-published-pubkey')],
-							hasSecret: keysRequest.result.includes('secret-key'), hasWrappingKey: keysRequest.result.includes('secret-wrapping-key')
-						});
-						keysRequest.onerror = () => reject(keysRequest.error);
-					};
-					request.onerror = () => reject(request.error);
-				});
-			} finally { database.close(); }
-		});
-		expect(persisted.keys).toEqual(expect.arrayContaining(['account-pubkey', 'encrypted-secret-key', 'secret-wrapping-key', 'last-changed-at-ms', 'initial-profile-published-pubkey']));
-		expect(persisted.hasSecret).toBe(false);
-		expect(persisted.hasWrappingKey).toBe(true);
-		expect(persisted.timestamp).toBe(personaCreatedAtMs);
-		expect(persisted.pubkey).toBe(pubkey);
-		expect(persisted.marker).toEqual({ pubkey, revision: 2 });
-	});
-
-	test('migrates a protected v2 account into a v3 lifecycle state in Chromium', async ({ page }) => {
-		const secret = new Uint8Array(32).fill(53);
-		const pubkey = getPublicKey(secret);
-		await installHostOwnedStub(page);
-		await installDelayedRelay(page);
-		await seedV2RelayAccount(page, secret, pubkey);
-		await page.goto('/');
-		await expect(page.locator('.composer-dock')).toBeVisible();
-		await page.evaluate(() => {
-			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
-			relay.releaseMetadata(); relay.releasePrimary();
-		});
-		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
-		const state = await page.evaluate(async () => {
-			const database = await new Promise<IDBDatabase>((resolve, reject) => {
-				const request = indexedDB.open('persona-bubble-field-account');
-				request.onsuccess = () => resolve(request.result);
-				request.onerror = () => reject(request.error);
-			});
-			try {
-				return await new Promise<{ version: number; personaPubkey: string; lifespanExpiresAtMs: number; points: number }>((resolve, reject) => {
-					const request = database.transaction('persona-bubble-field-game-state').objectStore('persona-bubble-field-game-state').get('game-state');
-					request.onsuccess = () => resolve(request.result);
-					request.onerror = () => reject(request.error);
-				});
-			} finally { database.close(); }
-		});
-		expect(state).toMatchObject({ version: 2, personaPubkey: pubkey, points: 0, mendingJob: null });
-		expect(state.lifespanExpiresAtMs).toBeGreaterThan(Date.now());
 	});
 
 	for (const stateKind of ['missing', 'corrupt'] as const) {
@@ -1467,15 +1393,11 @@ test.describe('Relay startup', () => {
 				});
 				try {
 					return await new Promise<string[]>((resolve, reject) => {
-						const request = database.transaction('persona-bubble-field-account-state').objectStore('persona-bubble-field-account-state').getAllKeys();
-						request.onsuccess = () => resolve(request.result.map(String));
-						request.onerror = () => reject(request.error);
+						resolve(Array.from(database.objectStoreNames));
 					});
 				} finally { database.close(); }
 			});
-			expect(persistedKeys).toContain('last-changed-at-ms');
-			expect(persistedKeys).not.toContain('account-pubkey');
-			expect(persistedKeys).not.toContain('encrypted-secret-key');
+			expect(persistedKeys).toEqual(['persona-bubble-field-player-state', 'persona-bubble-field-root-secret']);
 		});
 	}
 
@@ -1485,7 +1407,7 @@ test.describe('Relay startup', () => {
 		const day = 24 * hour;
 		const minute = 60 * 1000;
 		const expiresAtMs = startTime + 2 * day + 18 * hour + minute;
-		const secret = new Uint8Array(32).fill(61);
+		const secret = fixtureSecret(61);
 		const pubkey = getPublicKey(secret);
 		await page.clock.install({ time: startTime });
 		await installHostOwnedStub(page);
@@ -1511,35 +1433,19 @@ test.describe('Relay startup', () => {
 		await expect(hud).toHaveText('寿命 59分');
 	});
 
-	test('keeps public read-only updates after runtime reincarnation fails', async ({ page }) => {
+	test('keeps public read-only updates after runtime death transition fails', async ({ page }) => {
 		const startTime = Date.now();
-		const secret = new Uint8Array(32).fill(59);
+		const secret = fixtureSecret(59);
 		const pubkey = getPublicKey(secret);
 		const events = testEvents();
 		await page.clock.install({ time: startTime });
-		await installReincarnationFailure(page);
+		await installDeathTransitionFailure(page);
 		await installPromptApiStub(page);
 		await installHostOwnedStub(page);
 		await installDelayedRelay(page, { primaryEvents: events });
 		await seedRelayAccount(page, secret, pubkey);
-		await page.evaluate(async ({ accountPubkey, deadline }) => {
-			const database = await new Promise<IDBDatabase>((resolve, reject) => {
-				const request = indexedDB.open('persona-bubble-field-account');
-				request.onsuccess = () => resolve(request.result);
-				request.onerror = () => reject(request.error);
-			});
-			const transaction = database.transaction('persona-bubble-field-game-state', 'readwrite');
-			transaction.objectStore('persona-bubble-field-game-state').put({
-				version: 2, personaPubkey: accountPubkey, lifespanExpiresAtMs: deadline, points: 0, mendingJob: null,
-				abilities: { inferenceEfficiency: 0, contextCapacity: 0, hallucinationSuppression: 0 }
-			}, 'game-state');
-			await new Promise<void>((resolve, reject) => {
-				transaction.oncomplete = () => resolve();
-				transaction.onerror = () => reject(transaction.error);
-				transaction.onabort = () => reject(transaction.error);
-			});
-			database.close();
-		}, { accountPubkey: pubkey, deadline: startTime + 30_000 });
+		await overwriteRelayGameState(page, { version: 2, personaPubkey: pubkey, lifespanExpiresAtMs: startTime + 30_000, points: 0, mendingJob: null,
+			abilities: { inferenceEfficiency: 0, contextCapacity: 0, hallucinationSuppression: 0 } });
 		await page.goto('/');
 		await expect(page.locator('.composer-dock')).toBeVisible();
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
@@ -1553,7 +1459,7 @@ test.describe('Relay startup', () => {
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
 		await pauseAtCurrentBrowserTime(page);
 		const initialRequestCount = (await relayState(page)).state.requests.length;
-		await armReincarnationFailure(page);
+		await armDeathTransitionFailure(page);
 		await page.clock.runFor(31_000);
 		await expect.poll(() => page.evaluate(() => (window as typeof window & {
 			__personaLifecycleFailureTest: { injected(): number }
@@ -1584,32 +1490,16 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('.suggestion-panel')).toBeVisible();
 	});
 
-	test('reincarnates an active Relay session when its deadline is crossed', async ({ page }) => {
+	test('moves an active Relay session to identity selection when its deadline is crossed', async ({ page }) => {
 		const startTime = Date.now();
-		const secret = new Uint8Array(32).fill(55);
+		const secret = fixtureSecret(55);
 		const pubkey = getPublicKey(secret);
 		await page.clock.install({ time: startTime });
 		await installHostOwnedStub(page);
 		await installDelayedRelay(page);
 		await seedRelayAccount(page, secret, pubkey);
-		await page.evaluate(async ({ accountPubkey, deadline }) => {
-			const database = await new Promise<IDBDatabase>((resolve, reject) => {
-				const request = indexedDB.open('persona-bubble-field-account');
-				request.onsuccess = () => resolve(request.result);
-				request.onerror = () => reject(request.error);
-			});
-			const transaction = database.transaction('persona-bubble-field-game-state', 'readwrite');
-			transaction.objectStore('persona-bubble-field-game-state').put({
-				version: 2, personaPubkey: accountPubkey, lifespanExpiresAtMs: deadline, points: 0, mendingJob: null,
-				abilities: { inferenceEfficiency: 0, contextCapacity: 0, hallucinationSuppression: 0 }
-			}, 'game-state');
-			await new Promise<void>((resolve, reject) => {
-				transaction.oncomplete = () => resolve();
-				transaction.onerror = () => reject(transaction.error);
-				transaction.onabort = () => reject(transaction.error);
-			});
-			database.close();
-		}, { accountPubkey: pubkey, deadline: startTime + 30_000 });
+		await overwriteRelayGameState(page, { version: 2, personaPubkey: pubkey, lifespanExpiresAtMs: startTime + 30_000, points: 0, mendingJob: null,
+			abilities: { inferenceEfficiency: 0, contextCapacity: 0, hallucinationSuppression: 0 } });
 		await page.goto('/');
 		await expect(page.locator('.composer-dock')).toBeVisible();
 		await page.evaluate(() => {
@@ -1620,7 +1510,10 @@ test.describe('Relay startup', () => {
 		await pauseAtCurrentBrowserTime(page);
 
 		await page.clock.runFor(31_000);
-		await expect(page.locator('.composer-dock')).toBeVisible();
+		await expect(page.getByRole('dialog')).toBeVisible();
+		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
+		await page.getByRole('button', { name: /を選ぶ$/ }).first().click();
+		await expect(page.getByRole('dialog')).toHaveCount(0);
 		const persistedPubkey = async () => page.evaluate(async () => {
 			const database = await new Promise<IDBDatabase>((resolve, reject) => {
 				const request = indexedDB.open('persona-bubble-field-account');
@@ -1629,8 +1522,8 @@ test.describe('Relay startup', () => {
 			});
 			try {
 				return await new Promise<string>((resolve, reject) => {
-					const request = database.transaction('persona-bubble-field-account-state').objectStore('persona-bubble-field-account-state').get('account-pubkey');
-					request.onsuccess = () => resolve(request.result as string);
+					const request = database.transaction('persona-bubble-field-player-state').objectStore('persona-bubble-field-player-state').get('player-lifecycle');
+					request.onsuccess = () => resolve((request.result as { mode: { kind: 'running'; activeRun: { identity: { pubkey: string } } } }).mode.activeRun.identity.pubkey);
 					request.onerror = () => reject(request.error);
 				});
 			} finally { database.close(); }
@@ -1648,12 +1541,12 @@ test.describe('Relay startup', () => {
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toHaveCount(0);
 
 		const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
-		await editor.fill('runtime reincarnation message');
+		await editor.fill('runtime identity transition message');
 		await page.locator('ehagaki-composer').getByRole('button', { name: 'Send' }).click();
 		await waitForPublishedMessageCount(page, 1);
 		const event = await page.evaluate(() => {
 			const published = (window as typeof window & { __relayStartupTest: { state: { published: Array<{ kind: number; content: string; pubkey?: string }> } } }).__relayStartupTest.state.published;
-			return published.find((candidate) => candidate.kind === 42 && candidate.content === 'runtime reincarnation message');
+			return published.find((candidate) => candidate.kind === 42 && candidate.content === 'runtime identity transition message');
 		});
 		expect(event?.pubkey).toBe(newPubkey);
 	});
@@ -1690,6 +1583,8 @@ test.describe('Relay startup', () => {
 		await installHostOwnedStub(page);
 		await installDelayedRelay(page);
 		await installFieldFrameSampling(page);
+		const secret = fixtureSecret(41);
+		await seedRelayAccount(page, secret, getPublicKey(secret));
 		await page.goto('/');
 		await expect.poll(async () => (await readFieldFrames(page)).filter((frame) => frame.source === 'frame' && frame.visible).length).toBeGreaterThan(0);
 		const first = (await readFieldFrames(page)).find((frame) => frame.source === 'frame' && frame.visible)!;
@@ -1726,7 +1621,7 @@ test.describe('Relay startup', () => {
 		const readerContext = await browser.newContext({ viewport: { width: 1100, height: 850 } });
 		try {
 			const reader = await readerContext.newPage();
-			const readerSecret = new Uint8Array(32).fill(43);
+			const readerSecret = fixtureSecret(43);
 			const readerPubkey = getPublicKey(readerSecret);
 			expect(readerPubkey).not.toBe(trace.selfPubkey);
 			const readerPosition = finalizeEvent(buildPositionEventTemplate({
@@ -1822,7 +1717,7 @@ test.describe('Relay startup', () => {
 
 	test('persists Trace root and reply read state and keeps notification generic', async ({ page }) => {
 		const now = Date.now();
-		const selfSecret = new Uint8Array(32).fill(23);
+		const selfSecret = fixtureSecret(23);
 		const selfPubkey = getPublicKey(selfSecret);
 		const channel = { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' };
 		const primary = {
@@ -1839,8 +1734,8 @@ test.describe('Relay startup', () => {
 		for (let attempt = 1; BigInt(`0x${unreadRoot.id}`) % 5n !== 0n; attempt += 1) {
 			unreadRoot = finalizeEvent(buildWorldMessageTemplate({ channel, content: `read-state unread root ${attempt}`, speechType: 'normal', position: { x: 5, y: 2 }, createdAt: Math.floor(now / 1000) }), selfSecret);
 		}
-		const reply = finalizeEvent(buildTraceReplyTemplate({ root: parsedRoot, parent: parsedRoot, content: 'private reply detail', speechType: 'normal', createdAt: Math.floor(now / 1000) + 1 }), new Uint8Array(32).fill(31));
-		const replyAfterRootRead = finalizeEvent(buildTraceReplyTemplate({ root: parsedRoot, parent: parsedRoot, content: 'private reply after root read', speechType: 'normal', createdAt: Math.floor(now / 1000) + 2 }), new Uint8Array(32).fill(32));
+		const reply = finalizeEvent(buildTraceReplyTemplate({ root: parsedRoot, parent: parsedRoot, content: 'private reply detail', speechType: 'normal', createdAt: Math.floor(now / 1000) + 1 }), fixtureSecret(31));
+		const replyAfterRootRead = finalizeEvent(buildTraceReplyTemplate({ root: parsedRoot, parent: parsedRoot, content: 'private reply after root read', speechType: 'normal', createdAt: Math.floor(now / 1000) + 2 }), fixtureSecret(32));
 		await page.clock.setFixedTime(now);
 		await page.emulateMedia({ reducedMotion: 'reduce' });
 		await page.setViewportSize({ width: 1100, height: 850 });
@@ -2412,7 +2307,7 @@ test.describe('Relay startup', () => {
 
 	test('generates on-device candidates and directly sends the primary action once', async ({ page }) => {
 		await installPromptApiStub(page);
-		const selfSecret = new Uint8Array(32).fill(19);
+		const selfSecret = fixtureSecret(19);
 		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret));
 		const editor = await openReadyRelayWorld(page, 1);
 		await page.getByRole('button', { name: /発言タイプ: 通常/ }).click();
@@ -2445,7 +2340,7 @@ test.describe('Relay startup', () => {
 
 	test('adds a candidate through Composer without publishing and preserves the draft guard', async ({ page }) => {
 		await installPromptApiStub(page);
-		const selfSecret = new Uint8Array(32).fill(19);
+		const selfSecret = fixtureSecret(19);
 		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret));
 		const editor = await openReadyRelayWorld(page, 1);
 		const candidateButton = page.getByRole('button', { name: 'AI発言候補を生成' });
@@ -2463,7 +2358,7 @@ test.describe('Relay startup', () => {
 
 	test('closes the candidate panel from its explicit close button without side effects', async ({ page }) => {
 		await installPromptApiStub(page);
-		const selfSecret = new Uint8Array(32).fill(19);
+		const selfSecret = fixtureSecret(19);
 		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret));
 		const editor = await openReadyRelayWorld(page, 1);
 		const candidateButton = page.getByRole('button', { name: 'AI発言候補を生成' });
@@ -2481,7 +2376,7 @@ test.describe('Relay startup', () => {
 
 	test('keeps the candidate panel open while an outside speech-type toggle is used', async ({ page }) => {
 		await installPromptApiStub(page);
-		const selfSecret = new Uint8Array(32).fill(19);
+		const selfSecret = fixtureSecret(19);
 		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret));
 		const editor = await openReadyRelayWorld(page, 1);
 		const candidateButton = page.getByRole('button', { name: 'AI発言候補を生成' });
@@ -2500,7 +2395,7 @@ test.describe('Relay startup', () => {
 
 	test('keeps candidates open after direct publish failure and allows retry', async ({ page }) => {
 		await installPromptApiStub(page);
-		const selfSecret = new Uint8Array(32).fill(19);
+		const selfSecret = fixtureSecret(19);
 		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret));
 		await openReadyRelayWorld(page, 1);
 		const candidateButton = page.getByRole('button', { name: 'AI発言候補を生成' });
@@ -2519,7 +2414,7 @@ test.describe('Relay startup', () => {
 
 	test('keeps the normal Composer when Prompt API availability is unavailable', async ({ page }) => {
 		await installPromptApiStub(page, 'unavailable');
-		const selfSecret = new Uint8Array(32).fill(19);
+		const selfSecret = fixtureSecret(19);
 		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret));
 		const editor = await openReadyRelayWorld(page, 1);
 		await expect(editor).toBeVisible();
@@ -2665,7 +2560,7 @@ test.describe('Relay startup', () => {
 	});
 
 	test('keeps history-only messages in the timeline without restoring their presence or bubbles', async ({ page }) => {
-		const historySecret = new Uint8Array(32).fill(20);
+		const historySecret = fixtureSecret(20);
 		const createdAt = Math.floor(Date.now() / 1000) - 3_600;
 		const historyMessage = finalizeEvent(buildWorldMessageTemplate({
 			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' },
@@ -2695,7 +2590,7 @@ test.describe('Relay startup', () => {
 
 	test('continues timeline ingestion while its overlay is hidden', async ({ page }) => {
 		await page.setViewportSize({ width: 1200, height: 500 });
-		const liveSecret = new Uint8Array(32).fill(21);
+		const liveSecret = fixtureSecret(21);
 		const liveMessage = finalizeEvent(buildWorldMessageTemplate({
 			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' },
 			content: 'arrived while hidden',
@@ -2709,9 +2604,11 @@ test.describe('Relay startup', () => {
 			speechType: 'normal',
 			position: { x: 3, y: 3 },
 			createdAt: Math.floor(Date.now() / 1000) - 3_600 - index
-		}), new Uint8Array(32).fill(30 + index)));
+		}), fixtureSecret(30 + index)));
 		await installHostOwnedStub(page);
 		await installDelayedRelay(page, { historyMessages });
+		const selfSecret = fixtureSecret(41);
+		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret));
 		await page.goto('/');
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
@@ -2854,7 +2751,7 @@ test.describe('Relay startup', () => {
 				position: { x: participantX, y: participantY },
 				// A same-second bootstrap position outranks a message's position evidence.
 				createdAt: Math.floor(Date.now() / 1000) + 1
-			}), new Uint8Array(32).fill(19));
+			}), fixtureSecret(19));
 			await page.evaluate((event) => (window as typeof window & {
 				__relayStartupTest: { injectMessage(event: object): void };
 			}).__relayStartupTest.injectMessage(event), bubbleEvent);
@@ -2912,6 +2809,8 @@ test.describe('Relay startup', () => {
 	test('decouples Composer from metadata and participant projection from final primary EOSE', async ({ page }) => {
 		const hostOwned = await installHostOwnedStub(page);
 		await installDelayedRelay(page, { deferPrimaryEvents: true });
+		const selfSecret = fixtureSecret(41);
+		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret));
 		await page.goto('/');
 
 		await expect(page.locator('.composer-dock')).toBeVisible();
@@ -2972,6 +2871,8 @@ test.describe('Relay startup', () => {
 	test('aborting a metadata-waiting submit releases it without publishing later', async ({ page }) => {
 		await installHostOwnedStub(page);
 		await installDelayedRelay(page);
+		const selfSecret = fixtureSecret(41);
+		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret));
 		await page.goto('/');
 		await expect(page.locator('.composer-dock')).toBeVisible();
 		const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
@@ -3182,8 +3083,8 @@ test.describe('Relay startup', () => {
 		});
 		const channel = { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' };
 		const createdAt = Math.floor(Date.now() / 1000);
-		const selfSecret = new Uint8Array(32).fill(23);
-		const remoteSecret = new Uint8Array(32).fill(19);
+		const selfSecret = fixtureSecret(23);
+		const remoteSecret = fixtureSecret(19);
 		const speech = finalizeEvent(buildWorldMessageTemplate({
 			channel, createdAt, content: 'speech remains dismissed after the visual speaker returns',
 			speechType: 'normal', position: { x: 10, y: 3 }
@@ -3259,7 +3160,7 @@ test.describe('Relay startup', () => {
 			position: { x: 4, y: 2 },
 			slot: 0,
 			createdAt: Math.floor(Date.now() / 1000) + 1
-		}), new Uint8Array(32).fill(19));
+		}), fixtureSecret(19));
 
 		const initialPosition = await self.getAttribute('data-position');
 		if (!initialPosition) throw new Error('Expected the Relay self participant position.');

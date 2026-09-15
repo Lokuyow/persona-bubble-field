@@ -179,41 +179,35 @@ kind 0は専用世界識別用のNIP-32ラベルの対象にしない。
 
 ## 6. アカウント作成
 
-初回利用時に新しいNostr鍵ペアをブラウザ上で生成する。
+初回利用時にHako専用のRootをブラウザ上で生成する。RootはユーザーのBitcoin wallet seedではなく、このクライアント専用の16-byte entropyである。
 
-既存のNostrアカウントは持ち込ませない。
+RootからBIP39 English 12-word mnemonic、BIP32 master、BIP85 Nostr childを決定的に導出する。BIP85のpathは `m/83696968'/128002'/{generation}'/{account_index}'` とし、generationとaccount indexは1-basedである。
 
-MVPでは以下を提供しない。
+初回Root生成後、未選択のIdentity候補を3つだけ表示する。候補はRoot、generation、account indexから再導出できるが、候補の時点ではIdentityではない。ユーザーが1つを選択したときだけ、そのpubkey・account index・characterIdをIdentityとして記録し、Run #1を開始する。
+
+選択画面はdismissできず、reroll、close、候補の追加生成を提供しない。既存のselected IdentityのcharacterIdは、死亡後を含む以後の候補から除外する。保存されたpending selectionはreload後も同じ3候補として復元する。
+
+既存のNostrアカウントは持ち込ませない。MVPでは以下を提供しない。
 
 - nsec import
 - NIP-07による既存アカウント利用
 - NIP-46による既存アカウント利用
 
-既存Nostrユーザーも、このクライアント用に新しいNostrアカウントを作成する。
-
-生成された鍵は通常のNostr鍵であり、本クライアントだけで使用できる独自アカウントにはしない。
-
-新規Nostrユーザーにとっては、このアカウントが最初のNostrアカウントになり得る。
+RootはHako内のIdentityを再現可能にするためだけに使用する。active Identityのsignerだけを必要な下流処理へ一時的に渡し、Root、mnemonic、seed、xprv、HDKey、未選択candidateのsecretは渡さない。
 
 ---
 
 ## 7. 秘密鍵
 
-秘密鍵はブラウザ内に保存する。
+永続化するsecretはRoot entropyだけであり、non-extractableなAES-GCM 256 `CryptoKey`で暗号化してbrowser-localへ保存する。Root entropy以外に、mnemonic、BIP39 seed、xprv、HDKey、child secret、nsecを保存しない。Root復号後は16 bytesであることを検証する。
 
-`ソトへ出る` を選択して正式な秘密鍵exportが解放されるまでは、通常のUI、ブラウザストレージの単純な閲覧、容易なコピー操作だけで、一般ユーザーが秘密鍵を簡単に取得できない状態にする。一度1000pt以上に到達しただけでは、この保護を解除しない。`ハコに残る` を選択した場合も、二周目でこの保護を維持する。保存時には暗号化、難読化、その他のクライアント側処理を用い、平文の秘密鍵がそのまま容易に読み取れる状態を避ける。
-
-これは強固な暗号学的・セキュリティ上の境界ではない。JavaScript実行環境からのアクセス、DevTools、ソースコード解析・改変、ブラウザストレージの詳細解析、改造クライアント、独自コードによる抽出を行う利用者から秘密鍵を完全に保護することは要件としない。具体的な方式は [`SPEC-70-寿命・ゲーム・脱出.md`](./SPEC-70-寿命・ゲーム・脱出.md) を正とし、本資料では固定しない。
+Root entropyは暗号学的に保護されたbrowser-local barrierであるが、DevTools、JavaScript実行環境、ソース解析・改変、改造クライアント、詳細なストレージ解析から秘密を完全に保護するものではない。
 
 一般ユーザーには開始直後から秘密鍵を意識させない。
 
-ゲーム仕様で定める、現在所持ポイントが1000pt以上である状態での脱出選択で `ソトへ出る` を選択したときだけ、一般Nostrへ移行するための秘密鍵export UIを提供する。1000pt以上を所持しているだけで自動的に脱出させず、過去の到達を永久unlock flagとして扱わない。`ハコに残る` を選択する場合の扱いは [`SPEC-70-寿命・ゲーム・脱出.md`](./SPEC-70-寿命・ゲーム・脱出.md) を正とする。
+clear後はcurrent Identityのnsec取得を可能にする将来仕様とする。clear前にactive Identityのchild secretをexportするUIは提供しない。
 
-秘密鍵の内部保存形式は製品仕様として固定しない。
-
-サーバー側backupは存在しない。
-
-そのため、秘密鍵をexportしていない状態でブラウザのサイトデータを失うと、そのNostrアカウントも失われる可能性がある。
+Root entropyを含むサイトデータを失うと、そのRootから導出されるIdentityも失われる可能性がある。サーバー側backupは存在しない。
 
 この制約は、データ消失や転生など必要な場面でユーザーへ説明する。
 
@@ -221,7 +215,7 @@ MVPでは以下を提供しない。
 
 ## 11. kind 0
 
-初回アカウント作成時、割り当てられたキャラクターの情報を使用して通常のkind 0を発行する。
+Identityが初めて成立したとき、割り当てられたキャラクターの情報を使用して通常のkind 0を発行する。未選択candidateのkind 0は発行しない。
 
 初期kind 0には、例えば以下を反映する。
 
@@ -281,9 +275,9 @@ trace conversationのauthor表示は、kind 0ではなくpubkeyから導出し�
 
 キャラクターを即座に引き直す機能は設けない。
 
-キャラクター変更は「転生」として扱う。24時間に1回の任意転生、初回アカウント作成後の24時間禁止、任意のリセマラは設けない。転生は原則として死亡時のみ発生する。
+キャラクター変更は「転生」として扱う。24時間に1回の任意転生、初回アカウント作成後の24時間禁止、任意のリセマラは設けない。転生は原則として死亡時のみ発生する。死亡時はcurrent Runを閉じ、current Identityをdeadとして履歴へ残し、次generationの固定3択へ戻る。
 
-死亡時の人格、鍵、identity、ポイント、能力の扱い、および死亡後の新しい鍵ペア・新人格への転生は [`SPEC-70-寿命・ゲーム・脱出.md`](./SPEC-70-寿命・ゲーム・脱出.md) を正とする。バックアップからの復元時は同じpubkey・秘密鍵を維持する。
+死亡したIdentityは通常の候補選択へ戻さない。次に選択されたIdentityはRootから決定的に導出された別のpubkeyを持ち、既存のRun-local stateを引き継がずRun #1を開始する。将来、cleared Identityへ戻る場合は同じkey/pubkey/characterでfresh Runを開始できるものとする。
 
 ### アカウント切替
 

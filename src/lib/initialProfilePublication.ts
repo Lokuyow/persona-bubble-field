@@ -1,8 +1,8 @@
 import type { Character } from './character';
 import {
 	markCharacterProfilePublication,
-	type AccountSnapshot
-} from './nostrAccount';
+	type ActiveSignerSnapshot
+	} from './rootIdentity';
 import {
 	buildCharacterProfileTemplate,
 	finalizeCharacterProfileEvent
@@ -11,7 +11,7 @@ import type { PublishRelayResult } from './nostrRelayTransport';
 import type { VerifiedEvent } from 'nostr-tools/pure';
 
 export type PreparedCharacterProfilePublication = Readonly<{
-	account: AccountSnapshot;
+	signer: ActiveSignerSnapshot;
 	event: VerifiedEvent;
 }>;
 
@@ -20,7 +20,7 @@ export type CharacterProfilePublicationResult = Readonly<{
 }>;
 
 export function prepareCharacterProfilePublication(input: Readonly<{
-	account: AccountSnapshot;
+	signer: ActiveSignerSnapshot;
 	character: Character;
 	absolutePictureUrl: string;
 	createdAt: number;
@@ -31,8 +31,8 @@ export function prepareCharacterProfilePublication(input: Readonly<{
 		createdAt: input.createdAt
 	});
 	return {
-		account: input.account,
-		event: finalizeCharacterProfileEvent(template, input.account.secretKey)
+		signer: input.signer,
+		event: finalizeCharacterProfileEvent(template, input.signer.secretKey)
 	};
 }
 
@@ -52,7 +52,7 @@ export async function publishCharacterProfile(
 	try {
 		const results = await publish(publication.event);
 		if (!reachedAuthoritativeRelay(results)) return { kind: 'retryable' };
-		return await markCharacterProfilePublication(publication.account);
+		return await markCharacterProfilePublication(publication.signer);
 	} catch {
 		return { kind: 'retryable' };
 	}

@@ -109,7 +109,7 @@ traceを調査またはreplyを選択すると、そのeventをreply targetと�
 
 root readおよびreply read/unreadはbrowser-local persistent stateとし、Nostr eventとして発行せず、cross-device同期しない。
 
-root readはbrowser-person scopeで保持し、reincarnation後も維持する。reply read/unreadとnotificationはpersona/pubkey scopeで保持し、旧persona宛notificationをreincarnation後のpersonaへ引き継がない。
+root readはbrowser-person scopeで保持し、Identity transition後も維持する。reply read/unreadとnotificationはpersona/pubkey scopeで保持し、旧Identity宛notificationをIdentity transition後のIdentityへ引き継がない。
 
 root readは、root ghostと実際のroot本文bubbleの**両方**が実表示された時だけ成立する。light、menu、connector、offscreen arrow、ghostだけ、conversation open開始だけではroot readにしない。reply readは、実際のreply本文bubbleが表示された時だけ成立する。menu、offscreen arrow、connector、root openだけではreadにしない。
 

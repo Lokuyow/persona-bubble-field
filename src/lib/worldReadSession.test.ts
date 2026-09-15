@@ -60,7 +60,7 @@ describe('Trace reply publication ownership', () => {
 			bootstrapTraceRootCandidates: traceBootstrap(), configureTraceReplies, publish, dispose: vi.fn()
 		});
 		const onLiveMessage = vi.fn();
-		const session = createWorldReadSession({ field: { columns: 4, rows: 3 }, selfAccount: selfAccount(),
+		const session = createWorldReadSession({ field: { columns: 4, rows: 3 }, selfSigner: selfSigner(),
 			onPresenceChanged: vi.fn(), onLiveMessage, onStatusChanged: vi.fn() });
 		await session.start(); session.completeBootstrap(); await session.enterSelf(); await settle();
 		expect(session.openTraceConversation({ rootId: root.id, currentId: root.id }).kind).toBe('opened');
@@ -270,12 +270,13 @@ const alice = 'a'.repeat(64);
 const selfSecretKey = new Uint8Array(32).fill(7);
 const selfPubkey = getPublicKey(selfSecretKey);
 
-function selfAccount() {
+function selfSigner() {
 	return {
 		secretKey: selfSecretKey.slice(),
 		pubkey: selfPubkey,
-		personaCreatedAtMs: 700_000,
-		characterProfileRevision: 2
+		identityCreatedAtMs: 700_000,
+		characterProfileRevision: 2,
+		identity: { generation: 1, accountIndex: 1, pubkey: selfPubkey }
 	};
 }
 
@@ -379,7 +380,7 @@ describe('world read session', () => {
 
 	it('bounds planner inputs while processing 100 successive self position seconds', async () => {
 		const session = createWorldReadSession({
-			field: { columns: 4, rows: 3 }, selfAccount: selfAccount(),
+			field: { columns: 4, rows: 3 }, selfSigner: selfSigner(),
 			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn()
 		});
 		await session.start();
@@ -626,7 +627,7 @@ describe('world read session', () => {
 		});
 		publish.mockResolvedValue([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
 		const session = createWorldReadSession({
-			field: { columns: 4, rows: 3 }, selfAccount: selfAccount(), onPresenceChanged: vi.fn(),
+			field: { columns: 4, rows: 3 }, selfSigner: selfSigner(), onPresenceChanged: vi.fn(),
 			onLiveMessage: vi.fn(), onStatusChanged: vi.fn()
 		});
 
@@ -655,7 +656,7 @@ describe('world read session', () => {
 			publish
 		});
 		const session = createWorldReadSession({
-			field: { columns: 4, rows: 3 }, selfAccount: selfAccount(), onPresenceChanged: vi.fn(),
+			field: { columns: 4, rows: 3 }, selfSigner: selfSigner(), onPresenceChanged: vi.fn(),
 			onLiveMessage: vi.fn(), onStatusChanged: vi.fn()
 		});
 
@@ -814,7 +815,7 @@ describe('world read session', () => {
 		publish.mockResolvedValue([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
 		const session = createWorldReadSession({
 			field: { columns: 2, rows: 1 },
-			selfAccount: selfAccount(),
+			selfSigner: selfSigner(),
 			onPresenceChanged: vi.fn(),
 			onLiveMessage: vi.fn(),
 			onStatusChanged: vi.fn()
@@ -831,7 +832,7 @@ describe('world read session', () => {
 		result = startResult([], [position('self-bootstrap', 700, selfPubkey, 0, { x: 2, y: 1 })]);
 		const session = createWorldReadSession({
 			field: { columns: 4, rows: 3 },
-			selfAccount: selfAccount(),
+			selfSigner: selfSigner(),
 			onPresenceChanged: vi.fn(),
 			onLiveMessage: vi.fn(),
 			onStatusChanged: vi.fn()
@@ -848,7 +849,7 @@ describe('world read session', () => {
 		publish.mockResolvedValue([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
 		const session = createWorldReadSession({
 			field: { columns: 16, rows: 8 },
-			selfAccount: selfAccount(),
+			selfSigner: selfSigner(),
 			onPresenceChanged: vi.fn(),
 			onLiveMessage: vi.fn(),
 			onStatusChanged: vi.fn()
@@ -866,7 +867,7 @@ describe('world read session', () => {
 		publish.mockResolvedValueOnce([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
 		const session = createWorldReadSession({
 			field: { columns: 4, rows: 3 },
-			selfAccount: selfAccount(),
+			selfSigner: selfSigner(),
 			onPresenceChanged: vi.fn(),
 			onLiveMessage: vi.fn(),
 			onStatusChanged: vi.fn()
@@ -887,7 +888,7 @@ describe('world read session', () => {
 		const writeStates: string[] = [];
 		const session = createWorldReadSession({
 			field: { columns: 4, rows: 3 },
-			selfAccount: selfAccount(),
+			selfSigner: selfSigner(),
 			onPresenceChanged: vi.fn(),
 			onLiveMessage: vi.fn(),
 			onStatusChanged: vi.fn(),
@@ -920,7 +921,7 @@ describe('world read session', () => {
 		const writeStates: string[] = [];
 		const session = createWorldReadSession({
 			field: { columns: 4, rows: 3 },
-			selfAccount: selfAccount(),
+			selfSigner: selfSigner(),
 			onPresenceChanged: presenceChanged,
 			onLiveMessage: vi.fn(),
 			onStatusChanged: vi.fn(),
@@ -947,7 +948,7 @@ describe('world read session', () => {
 		const writeStates: string[] = [];
 		const session = createWorldReadSession({
 			field: { columns: 4, rows: 3 },
-			selfAccount: selfAccount(),
+			selfSigner: selfSigner(),
 			onPresenceChanged: vi.fn(),
 			onLiveMessage: vi.fn(),
 			onStatusChanged: vi.fn(),
@@ -971,7 +972,7 @@ describe('world read session', () => {
 		const writeStates: string[] = [];
 		const session = createWorldReadSession({
 			field: { columns: 4, rows: 3 },
-			selfAccount: selfAccount(),
+			selfSigner: selfSigner(),
 			onPresenceChanged: vi.fn(),
 			onLiveMessage: vi.fn(),
 			onStatusChanged: vi.fn(),
@@ -1001,7 +1002,7 @@ describe('world read session', () => {
 		const writeStates: string[] = [];
 		const session = createWorldReadSession({
 			field: { columns: 4, rows: 3 },
-			selfAccount: selfAccount(),
+			selfSigner: selfSigner(),
 			onPresenceChanged: vi.fn(),
 			onLiveMessage: vi.fn(),
 			onStatusChanged: vi.fn(),
@@ -1031,7 +1032,7 @@ describe('world read session', () => {
 		const presenceChanged = vi.fn();
 		const session = createWorldReadSession({
 			field: { columns: 4, rows: 3 },
-			selfAccount: selfAccount(),
+			selfSigner: selfSigner(),
 			onPresenceChanged: presenceChanged,
 			onLiveMessage: vi.fn(),
 			onStatusChanged: vi.fn()
@@ -1055,7 +1056,7 @@ describe('world read session', () => {
 		const presenceChanged = vi.fn();
 		const session = createWorldReadSession({
 			field: { columns: 4, rows: 3 },
-			selfAccount: selfAccount(),
+			selfSigner: selfSigner(),
 			onPresenceChanged: presenceChanged,
 			onLiveMessage: vi.fn(),
 			onStatusChanged: vi.fn()
@@ -1075,7 +1076,7 @@ describe('world read session', () => {
 		publish.mockResolvedValue([{ relayUrl: 'wss://relay.test/', outcome: 'no-response' }]);
 		const session = createWorldReadSession({
 			field: { columns: 4, rows: 3 },
-			selfAccount: selfAccount(),
+			selfSigner: selfSigner(),
 			onPresenceChanged: vi.fn(),
 			onLiveMessage: vi.fn(),
 			onStatusChanged: vi.fn()
@@ -1095,7 +1096,7 @@ describe('world read session', () => {
 	it('preserves newer exhausted planner state while an old retryable echo settles', async () => {
 		publish.mockResolvedValue([{ relayUrl: 'wss://relay.test/', outcome: 'no-response' }]);
 		const session = createWorldReadSession({
-			field: { columns: 4, rows: 3 }, selfAccount: selfAccount(),
+			field: { columns: 4, rows: 3 }, selfSigner: selfSigner(),
 			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn()
 		});
 		await session.start();
@@ -1131,7 +1132,7 @@ describe('world read session', () => {
 			});
 			publish.mockResolvedValue([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
 			const session = createWorldReadSession({
-				field: { columns: 4, rows: 3 }, selfAccount: selfAccount(),
+				field: { columns: 4, rows: 3 }, selfSigner: selfSigner(),
 				onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn()
 			});
 			await session.start();
@@ -1153,7 +1154,7 @@ describe('world read session', () => {
 		publish.mockResolvedValueOnce([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
 		const session = createWorldReadSession({
 			field: { columns: 4, rows: 3 },
-			selfAccount: selfAccount(),
+			selfSigner: selfSigner(),
 			onPresenceChanged: vi.fn(),
 			onLiveMessage: vi.fn(),
 			onStatusChanged: vi.fn()
@@ -1171,7 +1172,7 @@ describe('world read session', () => {
 		result = startResult([], [position('self-bootstrap', 700, selfPubkey, 0, { x: 2, y: 1 })]);
 		const session = createWorldReadSession({
 			field: { columns: 4, rows: 3 },
-			selfAccount: selfAccount(),
+			selfSigner: selfSigner(),
 			onPresenceChanged: vi.fn(),
 			onLiveMessage: vi.fn(),
 			onStatusChanged: vi.fn()
@@ -1191,7 +1192,7 @@ describe('world read session', () => {
 		const timeline = vi.fn();
 		const session = createWorldReadSession({
 			field: { columns: 4, rows: 3 },
-			selfAccount: selfAccount(),
+			selfSigner: selfSigner(),
 			onPresenceChanged: vi.fn(),
 			onLiveMessage: live,
 			onTimelineMessage: timeline,
@@ -1233,7 +1234,7 @@ describe('world read session', () => {
 		const timeline = vi.fn();
 		const session = createWorldReadSession({
 			field: { columns: 4, rows: 3 },
-			selfAccount: selfAccount(),
+			selfSigner: selfSigner(),
 			onPresenceChanged: vi.fn(),
 			onLiveMessage: vi.fn(),
 			onTimelineMessage: timeline,
@@ -1266,7 +1267,7 @@ describe('world read session', () => {
 		publish.mockResolvedValueOnce([{ relayUrl: 'wss://relay.test/', outcome: 'rejected', notice: 'duplicate: already have event' }]);
 		const session = createWorldReadSession({
 			field: { columns: 4, rows: 3 },
-			selfAccount: selfAccount(),
+			selfSigner: selfSigner(),
 			onPresenceChanged: vi.fn(),
 			onLiveMessage: vi.fn(),
 			onStatusChanged: vi.fn()
@@ -1284,7 +1285,7 @@ describe('world read session', () => {
 		publish.mockResolvedValueOnce([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
 		const session = createWorldReadSession({
 			field: { columns: 4, rows: 3 },
-			selfAccount: selfAccount(),
+			selfSigner: selfSigner(),
 			onPresenceChanged: vi.fn(),
 			onLiveMessage: vi.fn(),
 			onStatusChanged: vi.fn()
@@ -1311,7 +1312,7 @@ describe('world read session', () => {
 		const live = vi.fn();
 		const session = createWorldReadSession({
 			field: { columns: 4, rows: 3 },
-			selfAccount: selfAccount(),
+			selfSigner: selfSigner(),
 			onPresenceChanged: vi.fn(),
 			onLiveMessage: live,
 			onStatusChanged: vi.fn()
@@ -1337,7 +1338,7 @@ describe('world read session', () => {
 		publish.mockImplementationOnce(() => new Promise((resolve) => { resolvePublish = resolve; }));
 		const session = createWorldReadSession({
 			field: { columns: 4, rows: 3 },
-			selfAccount: selfAccount(),
+			selfSigner: selfSigner(),
 			onPresenceChanged: vi.fn(),
 			onLiveMessage: vi.fn(),
 			onStatusChanged: vi.fn()
@@ -1364,7 +1365,7 @@ describe('world read session', () => {
 		const live = vi.fn();
 		const session = createWorldReadSession({
 			field: { columns: 4, rows: 3 },
-			selfAccount: selfAccount(),
+			selfSigner: selfSigner(),
 			onPresenceChanged: vi.fn(),
 			onLiveMessage: live,
 			onStatusChanged: vi.fn()
@@ -1413,7 +1414,7 @@ describe('world read session', () => {
 		const availability: string[] = [];
 		const session = createWorldReadSession({
 			field: { columns: 4, rows: 3 },
-			selfAccount: selfAccount(),
+			selfSigner: selfSigner(),
 			onPresenceChanged: vi.fn(),
 			onLiveMessage: vi.fn(),
 			onStatusChanged: vi.fn(),
@@ -1479,7 +1480,7 @@ describe('world read session', () => {
 		publish.mockResolvedValue([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
 		const session = createWorldReadSession({
 			field: { columns: 2, rows: 1 },
-			selfAccount: selfAccount(),
+			selfSigner: selfSigner(),
 			onPresenceChanged: vi.fn(),
 			onLiveMessage: vi.fn(),
 			onStatusChanged: vi.fn()
@@ -1510,7 +1511,7 @@ describe('world read session', () => {
 		});
 		const session = createWorldReadSession({
 			field: { columns: 4, rows: 3 },
-			selfAccount: selfAccount(),
+			selfSigner: selfSigner(),
 			onPresenceChanged: vi.fn(),
 			onLiveMessage: vi.fn(),
 			onStatusChanged: vi.fn(),
@@ -1560,7 +1561,7 @@ describe('world read session', () => {
 		const rootsChanged = vi.fn();
 		const session = createWorldReadSession({
 			field: { columns: 4, rows: 3 },
-			selfAccount: selfAccount(),
+			selfSigner: selfSigner(),
 			onPresenceChanged: vi.fn(),
 			onLiveMessage: vi.fn(),
 			onEffectiveTraceRootsChanged: rootsChanged,
@@ -1646,7 +1647,7 @@ describe('world read session', () => {
 			publish
 		});
 		const session = createWorldReadSession({
-			field: { columns: 4, rows: 3 }, selfAccount: selfAccount(),
+			field: { columns: 4, rows: 3 }, selfSigner: selfSigner(),
 			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn()
 		});
 
@@ -1711,7 +1712,7 @@ describe('world read session', () => {
 			publish
 		});
 		const session = createWorldReadSession({
-			field: { columns: 4, rows: 3 }, selfAccount: selfAccount(),
+			field: { columns: 4, rows: 3 }, selfSigner: selfSigner(),
 			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn()
 		});
 
@@ -1781,7 +1782,7 @@ describe('world read session', () => {
 			publish
 		});
 		const session = createWorldReadSession({
-			field: { columns: 4, rows: 3 }, selfAccount: selfAccount(),
+			field: { columns: 4, rows: 3 }, selfSigner: selfSigner(),
 			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn()
 		});
 

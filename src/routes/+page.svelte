@@ -46,6 +46,7 @@
 	import { CHARACTER_CATALOG, getCharacterById, type Character } from '$lib/character';
 	import { deriveCharacterFromPubkey } from '$lib/characterAssignment';
 	import ProfileDialog from '$lib/ProfileDialog.svelte';
+	import IdentitySelectionDialog from '$lib/IdentitySelectionDialog.svelte';
 	import LifespanHud from '$lib/LifespanHud.svelte';
 	import MendingDialog from '$lib/MendingDialog.svelte';
 	import { MENDING_TERMINAL, isWithinFacilityInteractionRange, sameFieldCell } from '$lib/fieldFacilities';
@@ -53,12 +54,14 @@
 	import {
 		CURRENT_CHARACTER_PROFILE_REVISION,
 		collectCompletedMending,
-		loadOrCreatePersona,
-		reincarnateExpiredPersona,
+		loadOrCreateLifecycle,
+		selectIdentity,
+		transitionExpiredPersona,
 		startMending,
-		type AccountSnapshot,
-		type PersonaSnapshot
-	} from '$lib/nostrAccount';
+		type ActiveSignerSnapshot,
+		type PersonaSnapshot,
+		type PendingSelection
+	} from '$lib/rootIdentity';
 	import { isPersonaExpired } from '$lib/personaGameState';
 	import {
 		prepareCharacterProfilePublication,
@@ -184,8 +187,9 @@
 	let proximityFeedback = $state.raw<Readonly<{ position: { x: number; y: number }; label: string }> | null>(null);
 	let proximityFeedbackTimer: number | null = null;
 	let connectionStatus: WorldReadConnectionStatus = { kind: 'bootstrapping' };
-	let selfAccount = $state.raw<AccountSnapshot | null>(null);
+	let selfSigner = $state.raw<ActiveSignerSnapshot | null>(null);
 	let personaSnapshot = $state.raw<PersonaSnapshot | null>(null);
+	let pendingIdentitySelection = $state<PendingSelection | null>(null);
 	let personaLifecycleTransition = $state(false);
 	let lifespanHudNowMs = $state<number | null>(null);
 	let lifespanHudUpdatedAtMs = 0;
@@ -268,11 +272,11 @@
 		height: SPEECH_AREA.height
 	});
 	let fieldAreaBounds = $derived(getFieldAreaBounds(viewportSize, speechAreaBounds));
-	let selfProjectionId = $derived(devWorldSandboxEnabled ? DEV_WORLD_SELF_ID : selfAccount?.pubkey ?? 'you');
+	let selfProjectionId = $derived(devWorldSandboxEnabled ? DEV_WORLD_SELF_ID : selfSigner?.pubkey ?? 'you');
 	let presenceProjection = $derived(projectFrontendPresence({ presence: presenceState, selectedCharacterId, selfProjectionId,
 		geometry: { cellSize, fieldAreaBounds, cameraWorldBounds: fieldArtworkBounds }, colors: colorByPubkey }));
-	let isWorldSelfActive = $derived(Boolean(selfAccount && presenceState.participants.some((participant) =>
-		participant.id === selfAccount?.pubkey && participant.status === 'active'
+	let isWorldSelfActive = $derived(Boolean(selfSigner && presenceState.participants.some((participant) =>
+		participant.id === selfSigner?.pubkey && participant.status === 'active'
 	)));
 	let camera = $derived(visualCamera ?? presenceProjection.camera);
 	let actualFieldTop = $derived(getActualFieldTop(fieldAreaBounds, camera));
@@ -327,7 +331,7 @@
 	let speechSuggestionCharacter = $derived(
 		devWorldSandboxEnabled
 			? getDevWorldCharacter(selectedCharacterId)
-			: selfAccount ? deriveCharacterFromPubkey(selfAccount.pubkey, CHARACTER_CATALOG)
+			: selfSigner ? deriveCharacterFromPubkey(selfSigner.pubkey, CHARACTER_CATALOG)
 				: getCharacterById(selectedCharacterId) ?? CHARACTER_CATALOG[0]
 	);
 	let speechSuggestionConversation = $derived.by((): readonly SpeechSuggestionConversationEntry[] => {
@@ -796,7 +800,7 @@
 		}
 
 		const startReadSession = async (
-			account: AccountSnapshot | null,
+			signer: ActiveSignerSnapshot | null,
 			characterProfilePublication: PreparedCharacterProfilePublication | null = null
 		): Promise<void> => {
 			const previousSession = session;
@@ -805,7 +809,7 @@
 			previousSession?.dispose();
 			const nextSession = createWorldReadSession({
 				field: FIELD,
-				selfAccount: account,
+				selfSigner: signer,
 				onPresenceChanged: acceptPresence,
 				onLiveMessage: receiveLiveMessage,
 				onTimelineMessage: receiveTimelineMessage,
@@ -845,8 +849,8 @@
 					...bootstrap.timelineMessages
 				]);
 				nextSession.completeBootstrap();
-				if (account && !personaLifecycleTransition) void nextSession.enterSelf();
-				if (characterProfilePublication && account && !personaLifecycleTransition) {
+				if (signer && !personaLifecycleTransition) void nextSession.enterSelf();
+				if (characterProfilePublication && signer && !personaLifecycleTransition) {
 					void publishCharacterProfile(characterProfilePublication, (event) => {
 						if (personaLifecycleTransition || worldSession !== nextSession) {
 							return Promise.reject(new Error('Persona is unavailable for publishing.'));
@@ -865,37 +869,41 @@
 			startRequested = true;
 			let characterProfilePublication: PreparedCharacterProfilePublication | null = null;
 			try {
-				const personaResult = await loadOrCreatePersona();
-				if (personaResult.kind !== 'created' && personaResult.kind !== 'restored') {
+				const personaResult = await loadOrCreateLifecycle();
+				if (personaResult.kind === 'created' || personaResult.kind === 'selecting') {
+					pendingIdentitySelection = personaResult.selection;
+					selfSigner = null;
+					personaSnapshot = null;
+				} else if (personaResult.kind !== 'restored') {
 					setComposerTerminalError(new Error('Persona is unavailable for publishing.'));
 				} else {
 					personaSnapshot = personaResult.persona;
-					selfAccount = personaResult.persona.account;
+					selfSigner = personaResult.persona.signer;
 					mendingNowMs = Date.now();
 					updateLifespanHud(Date.now(), true);
 					if (isPersonaExpired(personaResult.persona.gameState, Date.now())) {
 						const result = await beginDeathTransition(personaResult.persona, session);
 						if (result === 'reloaded') return;
 					}
-					if (selfAccount.characterProfileRevision !== CURRENT_CHARACTER_PROFILE_REVISION) {
-						const character = deriveCharacterFromPubkey(selfAccount.pubkey, CHARACTER_CATALOG);
+					if (selfSigner.characterProfileRevision !== CURRENT_CHARACTER_PROFILE_REVISION) {
+						const character = deriveCharacterFromPubkey(selfSigner.pubkey, CHARACTER_CATALOG);
 						const absolutePictureUrl = new URL(
 							asset(`/${character.picture}`),
 							window.location.origin
 						).toString();
 						characterProfilePublication = prepareCharacterProfilePublication({
-							account: selfAccount,
+							signer: selfSigner,
 							character,
 							absolutePictureUrl,
 							createdAt: personaResult.kind === 'restored' ? Math.floor(Date.now() / 1000) :
-								Math.floor(selfAccount.personaCreatedAtMs / 1000)
+								Math.floor(selfSigner.identityCreatedAtMs / 1000)
 						});
 					}
 				}
 			} catch {
 				setComposerTerminalError(new Error('Persona is unavailable for publishing.'));
 			}
-			await startReadSession(selfAccount, characterProfilePublication);
+			await startReadSession(selfSigner, characterProfilePublication);
 		};
 
 		const updateViewport = () => {
@@ -1042,7 +1050,7 @@
 		const selectedId = selectedCharacterId;
 		const projectionId = selfProjectionId;
 		const geometry = { cellSize, fieldAreaBounds, cameraWorldBounds: fieldArtworkBounds };
-		const selfId = devWorldSandboxEnabled ? DEV_WORLD_SELF_ID : selfAccount?.pubkey;
+		const selfId = devWorldSandboxEnabled ? DEV_WORLD_SELF_ID : selfSigner?.pubkey;
 		const previousSelf = previousPresence.participants.find((participant) => participant.id === selfId);
 		const nextSelf = nextPresence.participants.find((participant) => participant.id === selfId);
 		const traceRangeExited = traceConversationState.kind === 'open' && nextSelf &&
@@ -1094,9 +1102,25 @@
 		mendingDialogOpen = false;
 	}
 
+	async function chooseIdentity(candidate: NonNullable<typeof pendingIdentitySelection>['candidates'][number]): Promise<void> {
+		const selection = pendingIdentitySelection;
+		if (!selection || personaLifecycleTransition) return;
+		personaLifecycleTransition = true;
+		try {
+			const result = await selectIdentity(selection.generation, candidate);
+			if (result.kind === 'selected' || result.kind === 'superseded') {
+				window.location.reload();
+				return;
+			}
+			enterReadOnlyFallback('Persona is unavailable for publishing.');
+		} catch {
+			enterReadOnlyFallback('Persona is unavailable for publishing.');
+		}
+	}
+
 	function samePersonaIdentity(first: PersonaSnapshot, second: PersonaSnapshot): boolean {
-		return first.account.pubkey === second.account.pubkey &&
-			first.account.personaCreatedAtMs === second.account.personaCreatedAtMs &&
+		return first.signer.pubkey === second.signer.pubkey &&
+			first.signer.identityCreatedAtMs === second.signer.identityCreatedAtMs &&
 			first.gameState.personaPubkey === second.gameState.personaPubkey;
 	}
 
@@ -1118,7 +1142,8 @@
 	function enterReadOnlyFallback(message: string): void {
 		stopPersonaInteractions(message);
 		disposePersonaWriter();
-		selfAccount = null;
+		pendingIdentitySelection = null;
+		selfSigner = null;
 		personaSnapshot = null;
 		selfPositionWriteState = { kind: 'unavailable' };
 		selfMessageAvailability = { kind: 'unavailable' };
@@ -1130,7 +1155,7 @@
 		stopPersonaInteractions('Persona identity changed in another tab.');
 		disposePersonaWriter();
 		personaSnapshot = latest;
-		selfAccount = latest.account;
+		selfSigner = latest.signer;
 		window.location.reload();
 	}
 
@@ -1157,7 +1182,7 @@
 				return;
 			}
 			personaSnapshot = result.persona;
-			selfAccount = result.persona.account;
+			selfSigner = result.persona.signer;
 			mendingNowMs = Date.now();
 			if (result.kind === 'started') closeMendingTerminal();
 			if (result.kind === 'expired') {
@@ -1432,7 +1457,7 @@
 	}
 
 	function moveWorldSelf(direction: Direction): void {
-		if (devWorldSandboxEnabled || !selfAccount) return;
+		if (devWorldSandboxEnabled || !selfSigner) return;
 		void worldSession?.moveSelf(direction);
 	}
 
@@ -1452,10 +1477,15 @@
 		deathTransitionInFlight = true;
 		disposePersonaWriter(currentSession);
 		try {
-			const result = await reincarnateExpiredPersona(expected);
-			if (result.kind === 'reincarnated' || result.kind === 'superseded' || result.kind === 'not-expired') {
-				reloadForPersonaIdentityChange(result.persona);
+			const result = await transitionExpiredPersona(expected);
+			if (result.kind === 'transitioned' || result.kind === 'superseded') {
+				window.location.reload();
 				return 'reloaded';
+			}
+			if (result.kind === 'not-expired') {
+				personaSnapshot = result.persona;
+				selfSigner = result.persona.signer;
+				return 'failed';
 			}
 			enterReadOnlyFallback('Persona is unavailable for publishing.');
 			return 'failed';
@@ -1537,7 +1567,7 @@
 	}
 
 	function retryWorldEntry(): void {
-		if (devWorldSandboxEnabled || !selfAccount || selfPositionWriteState.kind !== 'retryable') return;
+		if (devWorldSandboxEnabled || !selfSigner || selfPositionWriteState.kind !== 'retryable') return;
 		void worldSession?.enterSelf();
 	}
 
@@ -1786,6 +1816,7 @@
 		onOpenChange={handleProfileOpenChange}
 		onCloseAutoFocus={restoreProfileTriggerFocus}
 	/>
+	<IdentitySelectionDialog selection={pendingIdentitySelection} onSelect={(candidate) => { void chooseIdentity(candidate); }} />
 	<MendingDialog
 		open={mendingDialogOpen}
 		projection={mendingProjection}
