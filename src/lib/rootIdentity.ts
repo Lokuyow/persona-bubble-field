@@ -144,7 +144,7 @@ export type MendingMutationResult =
 export type AbilityUpgradeResult =
 	| Readonly<{ kind: 'upgraded'; persona: PersonaSnapshot }>
 	| Readonly<{ kind: 'superseded'; lifecycle: LoadLifecycleResult }>
-	| Readonly<{ kind: 'blocked'; persona: PersonaSnapshot }>
+	| Readonly<{ kind: 'blocked' | 'expired'; persona: PersonaSnapshot }>
 	| CorruptLifecycleState;
 
 export type DeathTransitionResult =
@@ -724,6 +724,13 @@ async function mutateAbilityUpgrade(expected: PersonaSnapshot, key: PersonaAbili
 					await tx.done;
 					const latest = await restoreCurrent(db);
 					return isCorruptLifecycle(latest) ? latest : { kind: 'superseded', lifecycle: latest };
+				}
+				const nowMs = Date.now();
+				if (!isSafeTimestamp(nowMs)) throw new Error('Invalid lifecycle timestamp.');
+				if (isPersonaExpired(current.mode.activeRun.gameState, nowMs)) {
+					await tx.done;
+					const latest = await hydrateLifecycle(observed.entropy, current);
+					return latest.kind === 'restored' ? { kind: 'expired', persona: latest.persona } : { kind: 'corrupt', reason: 'identity-reference' };
 				}
 				const nextGameState = upgradeAbility(current.mode.activeRun.gameState, key);
 				if (!nextGameState) {

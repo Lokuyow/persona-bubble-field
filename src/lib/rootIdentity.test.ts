@@ -198,6 +198,29 @@ describe('Root / Identity / Run lifecycle', () => {
 		expect(latest.activeRun.revision).toBe(1);
 	});
 
+	it('does not commit an ability upgrade at exact expiry', async () => {
+		const selection = await loadOrCreateLifecycle();
+		if (selection.kind !== 'created') throw new Error('Expected fresh state.');
+		const selected = await selectIdentity(selection.selection.generation, selection.selection.candidates[0]);
+		if (selected.kind !== 'selected') throw new Error('Expected selected state.');
+		const stored = (await records(PLAYER_LIFECYCLE_STORE_NAME))['player-lifecycle'] as object;
+		const fundedGameState = { ...selected.persona.gameState, points: 10 };
+		await putRecord(PLAYER_LIFECYCLE_STORE_NAME, 'player-lifecycle', {
+			...stored,
+			mode: { kind: 'running', activeRun: { ...selected.persona.activeRun, gameState: fundedGameState } }
+		});
+		const funded = restored(await loadOrCreateLifecycle());
+		vi.mocked(Date.now).mockReturnValue(funded.gameState.lifespanExpiresAtMs);
+		const result = await upgradePersonaAbility(funded, 'inferenceEfficiency');
+		expect(result.kind).toBe('expired');
+		const latest = restored(await loadOrCreateLifecycle());
+		expect(latest.gameState.points).toBe(10);
+		expect(latest.gameState.abilities).toEqual(funded.gameState.abilities);
+		expect(latest.activeRun.revision).toBe(funded.activeRun.revision);
+		expect((await transitionExpiredPersona(funded)).kind).toBe('transitioned');
+		expect((await loadOrCreateLifecycle()).kind).toBe('selecting');
+	});
+
 	it('treats stale mending after death as lifecycle supersession, not corruption', async () => {
 		const selection = await loadOrCreateLifecycle();
 		if (selection.kind !== 'created') throw new Error('Expected fresh state.');

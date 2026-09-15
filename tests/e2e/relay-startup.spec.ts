@@ -1277,8 +1277,35 @@ test.describe('Relay startup', () => {
 		await dialog.getByRole('button', { name: '1 level強化' }).first().click();
 		await expect(dialog).toContainText('所持ポイント: 5.00pt');
 		await expect(dialog).toContainText('推論効率 Lv1');
+		await expect(dialog.getByRole('button', { name: '1 level強化' }).nth(1)).toBeDisabled();
 		await page.reload();
 		await expect.poll(() => readRelayGameState(page)).toMatchObject({ points: 5, abilities: { inferenceEfficiency: 1, contextCapacity: 0, hallucinationSuppression: 0 } });
+	});
+
+	test('shows maxed abilities as unavailable at the adjustment terminal', async ({ page }) => {
+		const startTime = Date.now();
+		const secret = fixtureSecret(19);
+		const pubkey = getPublicKey(secret);
+		await page.clock.install({ time: startTime });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { primaryEvents: testEvents(startTime) });
+		await seedRelayAccount(page, secret, pubkey, startTime + 7 * 24 * 60 * 60 * 1000, 0, { inferenceEfficiency: 4, contextCapacity: 3, hallucinationSuppression: 4 });
+		await page.goto('/');
+		await page.evaluate(() => {
+			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
+			relay.releaseMetadata(); relay.releasePrimary();
+		});
+		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
+		const nearby = finalizeEvent(buildPositionEventTemplate({
+			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 14, y: 7 }, slot: 1,
+			createdAt: Math.floor(await page.evaluate(() => Date.now()) / 1000)
+		}), secret);
+		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), nearby);
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '14,7');
+		await page.getByRole('button', { name: '調整端末' }).click();
+		const dialog = page.getByRole('dialog', { name: '調整端末' });
+		await expect(dialog.getByRole('button', { name: '最大level' })).toHaveCount(3);
+		for (const button of await dialog.getByRole('button', { name: '最大level' }).all()) await expect(button).toBeDisabled();
 	});
 
 	test('keeps an offline mending job alive across browser reopen after its stored expiry', async ({ page }) => {

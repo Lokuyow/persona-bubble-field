@@ -1215,6 +1215,11 @@
 				}
 				return;
 			}
+			if (result.kind === 'expired') {
+				closeAdjustmentTerminal();
+				void beginDeathTransition(result.persona, worldSession);
+				return;
+			}
 			personaSnapshot = result.persona;
 			selfSigner = result.persona.signer;
 		} catch {
