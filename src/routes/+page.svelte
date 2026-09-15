@@ -1258,6 +1258,7 @@
 			personaSnapshot = result.persona;
 			selfSigner = result.persona.signer;
 			mendingNowMs = Date.now();
+			updateLifespanHud(mendingNowMs, true);
 			if (result.kind === 'started') closeMendingTerminal();
 			if (result.kind === 'expired') {
 				closeMendingTerminal();
@@ -1893,7 +1894,7 @@
 				registerReplyRemeasure={registerTraceReplyRemeasure}
 			/>
 			{#if lifespanHudNowMs !== null && personaSnapshot && !personaLifecycleTransition}
-				<LifespanHud expiresAtMs={projectMending(personaSnapshot.gameState, lifespanHudNowMs).effectiveExpiresAtMs} nowMs={lifespanHudNowMs} />
+				<LifespanHud expiresAtMs={projectMending(personaSnapshot.gameState, lifespanHudNowMs).effectiveExpiresAtMs} nowMs={lifespanHudNowMs} mendingJob={personaSnapshot.gameState.mendingJob} />
 			{/if}
 		{/snippet}
 	</FieldViewport>
@@ -1907,6 +1908,7 @@
 		open={mendingDialogOpen}
 		projection={mendingProjection}
 		hasJob={Boolean(personaSnapshot?.gameState.mendingJob)}
+		points={personaSnapshot?.gameState.points ?? 0}
 		onOpenChange={(open) => { mendingDialogOpen = open; }}
 		onStart={() => { void mutateMending('start'); }}
 		onCollect={() => { void mutateMending('collect'); }}

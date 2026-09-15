@@ -107,11 +107,11 @@ describe('world presence adapter', () => {
 	it('retains remote Nostr evidence at the local-only terminal cell', () => {
 		const state = reconstructWorldPresenceState(
 			{ columns: 16, rows: 8 },
-			[message('terminal-peer', alice, 100, { x: 12, y: 5 })],
+			[message('terminal-peer', alice, 100, { x: 12, y: 3 })],
 			[]
 		);
 
-		expect(participant(state, alice).position).toEqual({ x: 12, y: 5 });
+		expect(participant(state, alice).position).toEqual({ x: 12, y: 3 });
 	});
 
 	it('applies live evidence through the reducer and keeps deterministic ordering', () => {

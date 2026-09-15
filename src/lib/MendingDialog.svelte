@@ -6,14 +6,16 @@
 		open: boolean;
 		projection: MendingProjection | null;
 		hasJob: boolean;
+		points: number;
 		onOpenChange: (open: boolean) => void;
 		onStart: () => void;
 		onCollect: () => void;
 	}>;
-	let { open, projection, hasJob, onOpenChange, onStart, onCollect }: Props = $props();
+	let { open, projection, hasJob, points: ownedPointsValue, onOpenChange, onStart, onCollect }: Props = $props();
 	let hours = $derived(((projection?.processedDurationMs ?? 0) / (60 * 60 * 1000)).toFixed(2));
 	let lifespanHours = $derived(((projection?.lifespanExtensionMs ?? 0) / (60 * 60 * 1000)).toFixed(2));
-	let points = $derived((projection?.points ?? 0).toFixed(2));
+	let unclaimedPoints = $derived((projection?.points ?? 0).toFixed(2));
+	let ownedPoints = $derived(ownedPointsValue.toFixed(2));
 </script>
 
 <Dialog.Root bind:open={() => open, onOpenChange}>
@@ -23,14 +25,19 @@
 			<Dialog.Content class="mending-dialog-content" preventScroll={false}>
 				<Dialog.Title>繕い端末</Dialog.Title>
 				<Dialog.Description>非同期処理の状態を確認します。</Dialog.Description>
+				<p>所持ポイント: {ownedPoints}pt</p>
 				{#if !hasJob}
 					<p>繕いを開始できます。</p>
 					<button type="button" onclick={onStart}>繕いを開始</button>
 				{:else if projection?.completed}
-					<p>処理完了: 経過 {hours}時間 / 寿命延長 +{lifespanHours}時間 / 成果 {points}pt</p>
+					<p>処理済み時間: {hours}時間</p>
+					<p>寿命延長: +{lifespanHours}時間（反映済み）</p>
+					<p>未受取成果: +{unclaimedPoints}pt</p>
 					<button type="button" onclick={onCollect}>成果を受け取る</button>
 				{:else}
-					<p>繕い中: 経過 {hours}時間 / 寿命延長 +{lifespanHours}時間 / 推定 {points}pt</p>
+					<p>処理済み時間: {hours}時間</p>
+					<p>寿命延長: +{lifespanHours}時間（反映中）</p>
+					<p>未受取成果: +{unclaimedPoints}pt</p>
 				{/if}
 				<Dialog.Close>閉じる</Dialog.Close>
 			</Dialog.Content>

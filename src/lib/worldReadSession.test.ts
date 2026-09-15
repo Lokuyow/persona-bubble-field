@@ -869,7 +869,7 @@ describe('world read session', () => {
 	});
 
 	it('replaces an active bootstrap self on the terminal cell with a non-blocked entry publication', async () => {
-		result = startResult([], [position('self-at-terminal', 700, selfPubkey, 0, { x: 12, y: 5 })]);
+		result = startResult([], [position('self-at-terminal', 700, selfPubkey, 0, { x: 12, y: 3 })]);
 		publish.mockResolvedValue([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
 		const session = createWorldReadSession({
 			field: { columns: 16, rows: 8 },
@@ -883,7 +883,7 @@ describe('world read session', () => {
 		session.completeBootstrap();
 		await expect(session.enterSelf()).resolves.toEqual({ kind: 'succeeded', operation: 'entry' });
 		const event = parsePositionEvent(publish.mock.calls[0][0], 'c'.repeat(64));
-		expect(event?.position).not.toEqual({ x: 12, y: 5 });
+		expect(event?.position).not.toEqual({ x: 12, y: 3 });
 	});
 
 	it('uses the retained cell for the first post-timeout reactivation', async () => {

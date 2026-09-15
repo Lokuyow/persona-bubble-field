@@ -1,16 +1,22 @@
 <script lang="ts">
 	import { formatRemainingLifespan } from '$lib/lifespanHud';
+	import type { MendingJob } from '$lib/mending';
 
 	type Props = Readonly<{
 		expiresAtMs: number;
 		nowMs: number;
+		mendingJob: MendingJob | null;
 	}>;
 
-	let { expiresAtMs, nowMs }: Props = $props();
+	let { expiresAtMs, nowMs, mendingJob }: Props = $props();
 	let label = $derived(formatRemainingLifespan(expiresAtMs, nowMs));
+	let mendingLabel = $derived(mendingJob ? `繕い中 +${(mendingJob.lifespanExtensionPerHour.numerator / mendingJob.lifespanExtensionPerHour.denominator).toFixed(1)}h/h` : null);
 </script>
 
-<div class="lifespan-hud" aria-label={label}>{label}</div>
+<div class="lifespan-hud" aria-label={mendingLabel ? `${label}、${mendingLabel}` : label}>
+	<span>{label}</span>
+	{#if mendingLabel}<span class="mending-status">{mendingLabel}</span>{/if}
+</div>
 
 <style>
 	.lifespan-hud {
@@ -27,6 +33,14 @@
 		line-height: 1.25;
 		pointer-events: none;
 		white-space: nowrap;
+		display: grid;
+		gap: 2px;
+		text-align: right;
+
+		.mending-status {
+			color: #667a70;
+			font-size: 0.82em;
+		}
 
 		@media (max-width: 700px) {
 			padding: 5px 9px;

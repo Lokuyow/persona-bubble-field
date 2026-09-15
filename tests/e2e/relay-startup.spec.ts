@@ -1003,7 +1003,7 @@ test.describe('Relay startup', () => {
 			relay.releaseMetadata(); relay.releasePrimary();
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${oldPubkey}"]`)).toBeVisible();
-		await moveRelaySelfTo(page, { x: 11, y: 5 });
++		await moveRelaySelfTo(page, { x: 11, y: 3 });
 		await page.getByRole('button', { name: '繕い端末' }).click();
 		await expect(page.getByRole('button', { name: '繕いを開始' })).toBeVisible();
 
@@ -1208,16 +1208,16 @@ test.describe('Relay startup', () => {
 		await expect(page.getByRole('status')).toContainText('近づくと端末を使える');
 
 		const atTerminal = finalizeEvent(buildPositionEventTemplate({
-			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 11, y: 5 }, slot: 1,
+			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 11, y: 3 }, slot: 1,
 			createdAt: Math.floor(await page.evaluate(() => Date.now()) / 1000)
 		}), secret);
 		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), atTerminal);
-		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,5');
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,3');
 		await page.clock.runFor(1_001);
 		await page.keyboard.press('ArrowRight');
-		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,5');
-		await dragRelayJoystick(page, { x: 0, y: -100 }, { x: 12, y: 5 });
-		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,4');
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,3');
+		await dragRelayJoystick(page, { x: 0, y: -100 }, { x: 12, y: 4 });
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,2');
 		await expect(page.getByRole('dialog')).toHaveCount(0);
 
 		await terminal.click();
@@ -1227,18 +1227,28 @@ test.describe('Relay startup', () => {
 		await expect.poll(() => readRelayGameState(page)).toMatchObject({ mendingJob: expect.any(Object) });
 		const started = await readRelayGameState(page);
 		expect(started).toMatchObject({ version: 2, points: 0, mendingJob: expect.objectContaining({ maximumDurationMs: 8 * 60 * 60 * 1000 }) });
+		await terminal.click();
+		const activeDialog = page.getByRole('dialog');
+		await expect(activeDialog).toContainText('所持ポイント: 0.00pt');
+		await expect(activeDialog).toContainText('処理済み時間: 0.00時間');
+		await expect(activeDialog).toContainText('寿命延長: +0.00時間（反映中）');
+		await expect(activeDialog).toContainText('未受取成果: +0.00pt');
+		await expect(page.locator('.lifespan-hud')).toContainText('繕い中 +0.8h/h');
+		await page.getByRole('button', { name: '閉じる' }).click();
 
 		await page.clock.setSystemTime((started.mendingJob as { startedAtMs: number }).startedAtMs + 8 * 60 * 60 * 1000);
 		const completedAtTerminal = finalizeEvent(buildPositionEventTemplate({
-			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 11, y: 4 }, slot: 1,
+			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 11, y: 2 }, slot: 1,
 			createdAt: Math.floor(await page.evaluate(() => Date.now()) / 1000)
 		}), secret);
 		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), completedAtTerminal);
-		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,4');
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,2');
 		await terminal.click();
-		await expect(page.getByRole('dialog')).toContainText('処理完了');
+		await expect(page.getByRole('dialog')).toContainText('寿命延長: +6.40時間（反映済み）');
 		await page.getByRole('button', { name: '成果を受け取る' }).click();
 		await expect.poll(() => readRelayGameState(page)).toMatchObject({ mendingJob: null, points: 8 });
+		await expect(page.getByRole('dialog')).toContainText('所持ポイント: 8.00pt');
+		await expect(page.getByRole('dialog')).not.toContainText('未受取成果:');
 		const collected = await readRelayGameState(page);
 		expect(collected.mendingJob).toBeNull();
 		expect(collected.points).toBe(8);
@@ -1264,11 +1274,11 @@ test.describe('Relay startup', () => {
 		await expect(page.getByRole('status')).toContainText('近づくと端末を使える');
 
 		const nearby = finalizeEvent(buildPositionEventTemplate({
-			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 14, y: 7 }, slot: 1,
+			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 13, y: 3 }, slot: 1,
 			createdAt: Math.floor(await page.evaluate(() => Date.now()) / 1000)
 		}), secret);
 		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), nearby);
-		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '14,7');
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '13,3');
 		await adjustment.click();
 		const dialog = page.getByRole('dialog', { name: '調整端末' });
 		await expect(dialog).toContainText('所持ポイント: 10.00pt');
@@ -1297,11 +1307,11 @@ test.describe('Relay startup', () => {
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
 		const nearby = finalizeEvent(buildPositionEventTemplate({
-			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 14, y: 7 }, slot: 1,
+			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 13, y: 3 }, slot: 1,
 			createdAt: Math.floor(await page.evaluate(() => Date.now()) / 1000)
 		}), secret);
 		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), nearby);
-		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '14,7');
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '13,3');
 		await page.getByRole('button', { name: '調整端末' }).click();
 		const dialog = page.getByRole('dialog', { name: '調整端末' });
 		await expect(dialog.getByRole('button', { name: '最大level' })).toHaveCount(3);
@@ -1325,11 +1335,11 @@ test.describe('Relay startup', () => {
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
 		const atTerminal = finalizeEvent(buildPositionEventTemplate({
-			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 11, y: 5 }, slot: 1,
+			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 11, y: 3 }, slot: 1,
 			createdAt: Math.floor(await page.evaluate(() => Date.now()) / 1000)
 		}), secret);
 		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), atTerminal);
-		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,5');
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,3');
 		await page.getByRole('button', { name: '繕い端末' }).click();
 		await page.getByRole('button', { name: '繕いを開始' }).click();
 		await expect.poll(() => readRelayGameState(page)).toMatchObject({ mendingJob: expect.any(Object) });
@@ -1363,7 +1373,7 @@ test.describe('Relay startup', () => {
 			relay.releaseMetadata(); relay.releasePrimary();
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
-		await moveRelaySelfTo(page, { x: 11, y: 5 });
+		await moveRelaySelfTo(page, { x: 11, y: 3 });
 		const terminal = page.getByRole('button', { name: '繕い端末' });
 		await terminal.click();
 		await page.getByRole('button', { name: '繕いを開始' }).click();
@@ -1372,11 +1382,11 @@ test.describe('Relay startup', () => {
 		const job = started.mendingJob as { startedAtMs: number; maximumDurationMs: number };
 		await page.clock.setSystemTime(job.startedAtMs + job.maximumDurationMs);
 		const currentTerminalPosition = finalizeEvent(buildPositionEventTemplate({
-			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 11, y: 5 }, slot: 1,
+			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 11, y: 3 }, slot: 1,
 			createdAt: Math.floor(await page.evaluate(() => Date.now()) / 1000)
 		}), secret);
 		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), currentTerminalPosition);
-		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,5');
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,3');
 		await terminal.click();
 		await expect(page.getByRole('button', { name: '成果を受け取る' })).toBeVisible();
 		await page.clock.runFor(1_001);
@@ -1414,13 +1424,13 @@ test.describe('Relay startup', () => {
 			}));
 			const injectTerminalPosition = async (client: Page) => {
 				const event = finalizeEvent(buildPositionEventTemplate({
-					channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 11, y: 5 }, slot: 1,
+					channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 11, y: 3 }, slot: 1,
 					createdAt: Math.floor(await client.evaluate(() => Date.now()) / 1000)
 				}), secret);
 				await client.evaluate((position) => (window as typeof window & {
 					__relayStartupTest: { injectPosition(event: object): void }
 				}).__relayStartupTest.injectPosition(position), event);
-				await expect(client.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,5');
+				await expect(client.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,3');
 			};
 			await Promise.all(clients.map(injectTerminalPosition));
 			await Promise.all(clients.map(async (client) => {
@@ -1464,11 +1474,11 @@ test.describe('Relay startup', () => {
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${oldPubkey}"]`)).toBeVisible();
 		const atTerminal = finalizeEvent(buildPositionEventTemplate({
-			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 11, y: 5 }, slot: 1,
+			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 11, y: 3 }, slot: 1,
 			createdAt: Math.floor(await page.evaluate(() => Date.now()) / 1000)
 		}), secret);
 		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), atTerminal);
-		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,5');
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,3');
 		await page.getByRole('button', { name: '繕い端末' }).click();
 		await expect(page.getByRole('dialog')).toBeVisible();
 		const oldPublishedCount = (await relayState(page)).state.published.length;
@@ -1542,7 +1552,7 @@ test.describe('Relay startup', () => {
 			relay.releaseMetadata(); relay.releasePrimary();
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
-		await moveRelaySelfTo(page, { x: 11, y: 5 });
+		await moveRelaySelfTo(page, { x: 11, y: 3 });
 		await overwriteRelayGameState(page, { version: 2 });
 		const before = (await publishedMessages(page)).length;
 		await page.getByRole('button', { name: '繕い端末' }).click();
