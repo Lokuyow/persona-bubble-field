@@ -1136,6 +1136,25 @@ test.describe('Relay startup', () => {
 		expect(lifecycle).toEqual({ mode: 'running', identities: 1, runNumber: 1 });
 	});
 
+	for (const viewport of [{ width: 1280, height: 800 }, { width: 420, height: 800 }]) {
+		test(`centers the identity selection dialog at ${viewport.width}px`, async ({ page }) => {
+			await installHostOwnedStub(page);
+			await installDelayedRelay(page);
+			await page.goto('/');
+			await page.setViewportSize(viewport);
+			const dialog = page.locator('.selection-dialog');
+			await expect(dialog).toBeVisible();
+			const metrics = await dialog.evaluate((element) => {
+				const rect = element.getBoundingClientRect();
+				return { centerX: rect.left + rect.width / 2, centerY: rect.top + rect.height / 2, width: rect.width, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight };
+			});
+			expect(Math.abs(metrics.centerX - metrics.viewportWidth / 2)).toBeLessThanOrEqual(8);
+			expect(metrics.centerY).toBeGreaterThan(0);
+			expect(metrics.centerY).toBeLessThan(metrics.viewportHeight);
+			expect(metrics.width).toBeLessThanOrEqual(metrics.viewportWidth - 40);
+		});
+	}
+
 	test('converges two tabs selecting different candidates on one Identity', async ({ page }) => {
 		const other = await page.context().newPage();
 		try {
