@@ -182,6 +182,7 @@ kind 0は専用世界識別用のNIP-32ラベルの対象にしない。
 初回利用時にHako専用のRootをブラウザ上で生成する。RootはユーザーのBitcoin wallet seedではなく、このクライアント専用の16-byte entropyである。
 
 RootからBIP39 English 12-word mnemonic、BIP32 master、BIP85 Nostr childを決定的に導出する。BIP85のpathは `m/83696968'/128002'/{generation}'/{account_index}'` とし、generationとaccount indexは1-basedである。
+BIP39 passphraseは使用せず、empty passphrase（空文字列）で導出する。
 
 初回Root生成後、未選択のIdentity候補を3つだけ表示する。候補はRoot、generation、account indexから再導出できるが、候補の時点ではIdentityではない。ユーザーが1つを選択したときだけ、そのpubkey・account index・characterIdをIdentityとして記録し、Run #1を開始する。
 
@@ -210,6 +211,10 @@ clear後はcurrent Identityのnsec取得を可能にする。clear前にactive I
 Root entropyを含むサイトデータを失うと、そのRootから導出されるIdentityも失われる可能性がある。サーバー側backupは存在しない。
 
 この制約は、データ消失や転生など必要な場面でユーザーへ説明する。
+
+True Endでは、Hako専用Rootの12語English BIP39 mnemonicとIdentity Manifestをユーザーへ渡す。True Endはlocal Rootの自動削除を意味せず、Root削除機能そのものは現在scope外である。Identity Manifestは非secretの収容記録であり、実際にselected、born、playedとなったIdentityだけを対象とする。Manifestには、Identityを再導出・検証できるderivation mapping、pubkey、character、Run・clear・death等の履歴を含めるが、具体的なpublic export schema、field名、serialization formatはSPEC-90の未決定事項として残す。
+
+未選択candidateやcandidate生成中にskipしたcandidateはManifestへ含めず、Root mnemonic、child nsecその他のsecretも含めない。dead IdentityはTrue End後もHako上ではdeadのままとする。Root mnemonicからdead Identityのchild keyをcryptographically再導出できることと、Hako内でそのIdentityをresurrectできることは別概念である。
 
 ---
 

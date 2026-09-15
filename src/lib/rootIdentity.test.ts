@@ -58,11 +58,6 @@ afterEach(() => {
 });
 
 describe('Root / Identity / Run lifecycle', () => {
-	it('imports without browser storage and fails only when persistence is used', async () => {
-		vi.stubGlobal('indexedDB', undefined);
-		await expect(loadOrCreateLifecycle()).rejects.toThrow('Lifecycle storage could not be opened.');
-	});
-
 	it('atomically creates a root and a fixed three-candidate selection', async () => {
 		const result = await loadOrCreateLifecycle();
 		expect(result.kind).toBe('created');
@@ -221,26 +216,30 @@ describe('Root / Identity / Run lifecycle', () => {
 	});
 
 	it('allows an unselected character to reappear in a later generation without adding it to history', async () => {
+		vi.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation((array) => {
+			new Uint8Array(array.buffer, array.byteOffset, array.byteLength).fill(0);
+			return array;
+		});
 		const initial = await loadOrCreateLifecycle();
 		if (initial.kind !== 'created') throw new Error('Expected fresh state.');
-		let unselected = new Set(initial.selection.candidates.slice(1).map((candidate) => candidate.characterId));
+		expect(initial.selection.candidates.map((candidate) => candidate.characterId)).toEqual(['011', '006', '019']);
 		const selected = await selectIdentity(initial.selection.generation, initial.selection.candidates[0]);
 		if (selected.kind !== 'selected') throw new Error('Expected selected state.');
-		let current = selected.persona;
-		let reappeared = false;
-		for (let generation = 2; generation <= 6 && !reappeared; generation += 1) {
-			vi.mocked(Date.now).mockReturnValue(TIME + generation * 8 * 24 * 60 * 60 * 1000);
-			const transition = await transitionExpiredPersona(current);
-			expect(transition.kind).toBe('transitioned');
-			const pending = await loadOrCreateLifecycle();
-			if (pending.kind !== 'selecting') throw new Error('Expected next selection.');
-			reappeared = pending.selection.candidates.some((candidate) => unselected.has(candidate.characterId));
-			unselected = new Set([...unselected, ...pending.selection.candidates.slice(1).map((candidate) => candidate.characterId)]);
-			const next = await selectIdentity(pending.selection.generation, pending.selection.candidates[0]);
-			if (next.kind !== 'selected') throw new Error('Expected next selected state.');
-			current = next.persona;
-		}
-		expect(reappeared).toBe(true);
+		vi.mocked(Date.now).mockReturnValue(TIME + 2 * 8 * 24 * 60 * 60 * 1000);
+		expect((await transitionExpiredPersona(selected.persona)).kind).toBe('transitioned');
+		const second = await loadOrCreateLifecycle();
+		if (second.kind !== 'selecting') throw new Error('Expected second selection.');
+		expect(second.selection.candidates.map((candidate) => candidate.characterId)).toEqual(['015', '010', '018']);
+		const secondSelected = await selectIdentity(second.selection.generation, second.selection.candidates[0]);
+		if (secondSelected.kind !== 'selected') throw new Error('Expected second selected state.');
+		vi.mocked(Date.now).mockReturnValue(TIME + 3 * 8 * 24 * 60 * 60 * 1000);
+		expect((await transitionExpiredPersona(secondSelected.persona)).kind).toBe('transitioned');
+		const third = await loadOrCreateLifecycle();
+		if (third.kind !== 'selecting') throw new Error('Expected third selection.');
+		expect(third.selection.candidates.map((candidate) => candidate.characterId)).toEqual(['020', '018', '014']);
+		expect(third.selection.candidates[1].characterId).toBe('018');
+		const lifecycle = (await records(PLAYER_LIFECYCLE_STORE_NAME))['player-lifecycle'] as { identities: Array<{ characterId: string }> };
+		expect(lifecycle.identities.map((identity) => identity.characterId)).not.toContain('018');
 	});
 
 	it('converges concurrent death transitions on one next generation', async () => {

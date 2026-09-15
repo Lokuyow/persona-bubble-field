@@ -15,6 +15,7 @@ Hako専用RootからBIP85で決定的に導出されたNostr pubkeyから、キ�
 正式公開前のprototypeでは、catalogまたは導出規則を破壊的に変更した結果、同じpubkeyの割当が変化してよい。正式公開版としてキャラクター体系と導出規則をfreezeした後は、既存pubkey → characterの対応を維持する。
 
 Rootは初回に一度だけ生成し、各generationではaccount indexを1から順に走査して、重複しない3候補を固定表示する。選択された候補だけをIdentity historyへ追加し、未選択候補やskipした候補の履歴は保存しない。
+過去の3択に表示されただけで未選択のcharacterIdは消費扱いにしない。selected IdentityになったcharacterIdだけを以後の候補から除外し、未選択candidateは将来のgenerationで再登場してよい。
 
 一度選択されたcharacterIdは、dead Identityを含め、そのRootの以後の候補から除外する。死亡時は次generationの3候補を生成し、rerollや任意のリセマラは行わない。
 
