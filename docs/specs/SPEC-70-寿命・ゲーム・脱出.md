@@ -42,7 +42,7 @@
 
 ## 3. 1000pt到達と脱出
 
-normal clear working thresholdは現在所持ポイント1000ptとする。1000pt以上である間だけclear選択を利用でき、過去の到達だけで永久unlock flagにはしない。1000pt以上を所持しているだけで自動clearにはしない。clear後はcurrent Identityのnsec取得を可能にする将来仕様とする。
+normal clear working thresholdは現在所持ポイント1000ptとする。1000pt以上である間だけclear選択を利用でき、過去の到達だけで永久unlock flagにはしない。1000pt以上を所持しているだけで自動clearにはしない。clear後はcurrent Identityのnsec取得を可能にする。
 
 ### 脱出前の秘密鍵保護
 
@@ -194,4 +194,4 @@ Identityにはgeneration、account index、pubkey、characterId、`identityCreat
 
 Runにはrun number、monotonic revision、started timestamp、Identity reference、Run-local game stateを持たせる。寿命、points、abilities、`mendingJob`はRun-localであり、mending start/collectionと寿命死亡transitionはactive Runのrevisionを再確認するCASとして扱う。profile publication markerの更新はRun revisionを進めない。
 
-正常なclear後はcurrent Identityのnsec取得、Root-level permanent progression、同じIdentityでのfresh Runまたは別Identityの選択を可能にする将来仕様とする。cleared Identityへ戻る場合は同じkey/pubkey/characterを維持してfresh Runを開始でき、3周目以降にも上限を設けない。clear処理、True End、Root mnemonicとIdentity Manifestの受け渡しは別途実装する。
+正常なclear後はcurrent Identityのnsec取得、Root-level permanent progression、同じIdentityでのfresh Runまたは別Identityの選択を可能にする。cleared Identityへ戻る場合は同じkey/pubkey/characterを維持してfresh Runを開始でき、3周目以降にも上限を設けない。clear処理、True End、Root mnemonicとIdentity Manifestの受け渡しは別途実装する。

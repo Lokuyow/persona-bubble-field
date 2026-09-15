@@ -1483,9 +1483,11 @@
 				return 'reloaded';
 			}
 			if (result.kind === 'not-expired') {
-				personaSnapshot = result.persona;
-				selfSigner = result.persona.signer;
-				return 'failed';
+				// The writer and interaction paths were already stopped before the
+				// lifecycle recheck. Reconcile the current lifecycle through the
+				// normal startup path instead of reviving a stale writer in-place.
+				window.location.reload();
+				return 'reloaded';
 			}
 			enterReadOnlyFallback('Persona is unavailable for publishing.');
 			return 'failed';

@@ -1,4 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { HDKey } from '@scure/bip32';
+import { entropyToMnemonic, mnemonicToSeedSync } from '@scure/bip39';
+import { wordlist as englishWordlist } from '@scure/bip39/wordlists/english.js';
 import { finalizeEvent, getPublicKey, verifyEvent, type Event as NostrEvent } from 'nostr-tools/pure';
 import {
 	buildPositionEventTemplate,
@@ -11,6 +14,7 @@ import {
 import { SPEECH_SHORTCUT_IDS } from '../../src/lib/speechSubmission';
 import { CHARACTER_CATALOG, characterPicturePath } from '../../src/lib/character';
 import { deriveCharacterFromPubkey } from '../../src/lib/characterAssignment';
+import { deriveBip85NostrEntropy } from '../../src/lib/bip85';
 
 const CHANNEL_ID = '3212de4b75f0c41efa17e41affcfc3a811171ba930e5b657687b5f5148627d5b';
 const SEED_RELAYS = [
@@ -28,40 +32,38 @@ const AUTHORITATIVE_RELAYS = [
 	'wss://r.kojira.io/'
 ] as const;
 
-// Deterministic fake signers for browser fixtures. Each value is the BIP85
-// Nostr child at generation 1/account index `value` from the zero root.
-const FIXTURE_SECRETS: Record<number, string> = {
-	19: 'f335af62a42ad626049d0a567ecc4424b2f81e1133b875b15fa2e8010c4effb4',
-	20: 'b9ccd756d9e5ea3adf54cf397c428c0b65c5a46b9e5e7c6579507fa89ea4a97d',
-	21: '878e92a0544e9c397e41de986796625a80d9f44d2a898d685be125d80c41c999',
-	23: 'cdc43b6e2538236754f9121a2fe2386ec5220ab8dfbab2fe79436616ddad4c52',
-	29: '1041d5136c4792d65775d606065ab96c63ed226ecddc3d453a05558181e39994',
-	30: '4fa79d5856177a8529fd9867fd2b3d7da29574639635a25927e49bdb90fb7c69',
-	31: '5d0b8960d3531594a234088bd419672973d964d957ad6f106bea4780b03156eb',
-	32: '975157b62406158fc46148dc9a8b965fca86eb64c3c1c03d3aa31f2a48f1c05b',
-	33: 'dfd9fefc0312aafe2286d1fa3ac9c921b1d5778807eccbec82f623552676b8a7',
-	34: '55ede28892492eeb9cb5f3180233aca852a8b5beaa5b2f1b9ad20a51e79509be',
-	35: 'a992fdb01332a6d714eb8ab4e65d0443e164e2879a347735470af44f8c5001b4',
-	36: '82c357c285865a7577b6c959df1f4338f467bb5df63c591f727a296f662219d1',
-	37: 'd5d06e780da31eef48d75e2534fe8b861031d08d0be2f2eedab97a6932fe9c63',
-	38: '43b87bbbe5a659e7b7c9cd00f8a1686da9dcec7b91c249bc3a9e79bc03437c7e',
-	39: 'cd365454ccd86eeb1a7106313a468937240b76a3166e805242c9d88c0ce0715b',
-	41: 'e2f9ad74f14ab860d8ff5645ac1eda073821d01342d95084a035b2a256315fb6',
-	43: 'e70f9acfebc0c27d7cc5d2346207e9f01552a67bc8807bb3880a960f33a79c7d',
-	47: '436b486771b65d43c3fe4a3483c938cf7b92c5a8d7bfa4fc3766f71e2e9be2a8',
-	51: 'ba4be536f46ef62938a58987c86c4c2962159482da07bf0c4c247053c7d35039',
-	53: '540a080927f01dd21404eec32d8981dcd2f5717c5ab32479cd4fc6bc7abb4dfb',
-	55: '8a23896ea2f05f1b07077f2d251cb3bbd5d78e5d91aa73ac72d8c2073eaa1439',
-	57: 'fc530b89301c30bb7a2c4a8bf610650ab2b7a4226c7d24aeb8eb3debf474312e',
-	59: 'c3108aa75c4f5dee19ac10ad2e1132a5965a20b7c5aef8f03d2b519699b47d65',
-	61: 'd2075cb374bfe196afe65373a20c85498d14895e5219613ba23855fe38c0149d',
-	63: '8a718e42a54c54e560da05bb88d84f6ce394f59fb854d1a5dc1424dd634e055a'
-};
+// Deterministic fake signers are derived at test runtime from a zero root.
+const FIXTURE_ACCOUNT_INDICES = [19, 20, 21, 23, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 41, 43, 47, 51, 53, 55, 57, 59, 61, 63] as const;
+const FIXTURE_CHILDREN: ReadonlyMap<number, Uint8Array> = await (async () => {
+	const entropy = new Uint8Array(16);
+	const seed = mnemonicToSeedSync(entropyToMnemonic(entropy, englishWordlist), '');
+	const master = HDKey.fromMasterSeed(seed);
+	seed.fill(0);
+	try {
+		const entries: Array<readonly [number, Uint8Array]> = [];
+		for (const accountIndex of FIXTURE_ACCOUNT_INDICES) {
+			const child = await deriveBip85NostrEntropy(master, 1, accountIndex);
+			entries.push([accountIndex, child.slice()]);
+			child.fill(0);
+		}
+		return new Map(entries);
+	} finally {
+		master.wipePrivateData();
+		entropy.fill(0);
+	}
+})();
 
 function fixtureSecret(value: number): Uint8Array {
-	const hex = FIXTURE_SECRETS[value];
-	if (!hex) throw new Error(`Missing fixture signer ${value}.`);
-	return Uint8Array.from(Buffer.from(hex, 'hex'));
+	const secret = FIXTURE_CHILDREN.get(value);
+	if (!secret) throw new Error(`Missing fixture signer ${value}.`);
+	return secret.slice();
+}
+
+function fixtureAccountIndexForSecret(secretKey: Uint8Array): number {
+	for (const [accountIndex, secret] of FIXTURE_CHILDREN) {
+		if (secret.length === secretKey.length && secret.every((value, index) => value === secretKey[index])) return accountIndex;
+	}
+	throw new Error('Fixture secret is not derived from the zero root.');
 }
 
 // A public, verified kind 40 whose immutable id is the configured prototype
@@ -680,8 +682,7 @@ async function installPromptApiStub(page: Page, availability: 'available' | 'una
 }
 
 async function seedRelayAccount(page: Page, secretKey: Uint8Array, pubkey: string, lifespanExpiresAtMs = Date.now() + 7 * 24 * 60 * 60 * 1000): Promise<void> {
-	const fixtureAccountIndex = Number(Object.entries(FIXTURE_SECRETS).find(([, value]) => value === Buffer.from(secretKey).toString('hex'))?.[0]);
-	if (!fixtureAccountIndex) throw new Error('Fixture secret is not a BIP85 child.');
+	const fixtureAccountIndex = fixtureAccountIndexForSecret(secretKey);
 	await page.goto('/favicon.svg');
 	await page.evaluate(async ({ accountPubkey, accountIndex, expiresAtMs, characterId }) => {
 		const database = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -826,6 +827,34 @@ async function armDeathTransitionFailure(page: Page): Promise<void> {
 	}).__personaLifecycleFailureTest.arm());
 }
 
+async function installDeathTransitionClockRollback(page: Page, rollbackAtMs: number): Promise<void> {
+	await page.addInitScript((rollbackTime) => {
+		const rollbackKey = 'persona-lifecycle-test-clock-rollback';
+		const originalNow = Date.now;
+		let rolledBack = sessionStorage.getItem(rollbackKey) === '1';
+		let armed = false;
+		Date.now = () => rolledBack ? rollbackTime : originalNow();
+		const originalGet = IDBObjectStore.prototype.get;
+		IDBObjectStore.prototype.get = function (key: IDBValidKey | IDBKeyRange) {
+			if (armed && this.name === 'persona-bubble-field-player-state' && key === 'player-lifecycle') {
+				armed = false;
+				rolledBack = true;
+				sessionStorage.setItem(rollbackKey, '1');
+			}
+			return originalGet.call(this, key);
+		};
+		Object.assign(window, {
+			__personaLifecycleClockRollback: { arm: () => { armed = true; } }
+		});
+	}, rollbackAtMs);
+}
+
+async function armDeathTransitionClockRollback(page: Page): Promise<void> {
+	await page.evaluate(() => (window as typeof window & {
+		__personaLifecycleClockRollback: { arm(): void }
+	}).__personaLifecycleClockRollback.arm());
+}
+
 async function composerContextCalls(page: Page): Promise<Array<{
 	reply?: string | null;
 	preloadedEvents?: Record<string, { id: string; pubkey: string }>;
@@ -886,6 +915,40 @@ function reverseMoveKey(key: AvailableMove['key']): AvailableMove['key'] {
 }
 
 test.describe('Relay startup', () => {
+	test('reloads and reconciles a valid Run after a death transition clock rollback', async ({ page }) => {
+		const startTime = Date.now();
+		const secret = fixtureSecret(57);
+		const pubkey = getPublicKey(secret);
+		await page.clock.install({ time: startTime });
+		await installDeathTransitionClockRollback(page, startTime);
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page);
+		const expiresAtMs = startTime + 60_000;
+		await seedRelayAccount(page, secret, pubkey, expiresAtMs);
+		await page.goto('/');
+		await page.evaluate(() => {
+			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
+			relay.releaseMetadata(); relay.releasePrimary();
+		});
+		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
+		await armDeathTransitionClockRollback(page);
+		const reloaded = page.waitForEvent('framenavigated', (frame) => frame === page.mainFrame());
+		await page.clock.setSystemTime(expiresAtMs + 1);
+		await page.clock.runFor(1_000);
+		await reloaded;
+		await expect(page.locator('.composer-dock')).toBeVisible();
+		await page.evaluate(() => {
+			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
+			relay.releaseMetadata(); relay.releasePrimary();
+		});
+		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
+		await expect.poll(async () => (await relayState(page)).state.published.some((event) => event.kind === 30078 && event.pubkey === pubkey)).toBe(true);
+		const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
+		await editor.fill('valid run remains publishable after rollback reconciliation');
+		await page.locator('ehagaki-composer').getByRole('button', { name: 'Send' }).click();
+		await expect.poll(async () => (await relayState(page)).state.published.some((event) => event.kind === 42 && event.pubkey === pubkey)).toBe(true);
+	});
+
 	test('falls back to a read-only world when startup death transition fails', async ({ page }) => {
 		const secret = fixtureSecret(57);
 		const pubkey = getPublicKey(secret);
@@ -955,6 +1018,13 @@ test.describe('Relay startup', () => {
 		await page.goto('/');
 		const candidateButtons = page.getByRole('button', { name: /を選ぶ$/ });
 		await expect(candidateButtons).toHaveCount(3);
+		await expect.poll(() => page.locator('main > :not(.selection-backdrop)').evaluateAll((elements) => elements.every((element) => (element as HTMLElement).inert))).toBe(true);
+		await expect(candidateButtons.first()).toBeFocused();
+		await page.keyboard.press('Tab');
+		await expect(candidateButtons.nth(1)).toBeFocused();
+		await page.keyboard.press('Shift+Tab');
+		await expect(candidateButtons.first()).toBeFocused();
+		expect((await relayState(page)).state.published.filter((event) => event.kind === 0)).toHaveLength(0);
 		const labelsBeforeReload = await candidateButtons.allTextContents();
 		await expect(page.locator('.participant[data-self="true"]')).toHaveCount(0);
 		await page.reload({ waitUntil: 'domcontentloaded' });
@@ -987,6 +1057,38 @@ test.describe('Relay startup', () => {
 			} finally { database.close(); }
 		});
 		expect(lifecycle).toEqual({ mode: 'running', identities: 1, runNumber: 1 });
+	});
+
+	test('converges two tabs selecting different candidates on one Identity', async ({ page }) => {
+		const other = await page.context().newPage();
+		try {
+			await Promise.all([page, other].map(async (client) => {
+				await installHostOwnedStub(client);
+				await installDelayedRelay(client);
+				await client.goto('/');
+				await expect(client.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
+			}));
+			await Promise.all([
+				page.getByRole('button', { name: /を選ぶ$/ }).nth(0).click(),
+				other.getByRole('button', { name: /を選ぶ$/ }).nth(1).click()
+			]);
+			await expect.poll(async () => page.evaluate(async () => {
+				const database = await new Promise<IDBDatabase>((resolve, reject) => {
+					const request = indexedDB.open('persona-bubble-field-account');
+					request.onsuccess = () => resolve(request.result);
+					request.onerror = () => reject(request.error);
+				});
+				try {
+					const request = database.transaction('persona-bubble-field-player-state').objectStore('persona-bubble-field-player-state').get('player-lifecycle');
+					return await new Promise<{ identities: number; mode: string }>((resolve, reject) => {
+						request.onsuccess = () => resolve({ identities: (request.result as { identities: unknown[] }).identities.length, mode: (request.result as { mode: { kind: string } }).mode.kind });
+						request.onerror = () => reject(request.error);
+					});
+				} finally { database.close(); }
+			})).toEqual({ identities: 1, mode: 'running' });
+		} finally {
+			await other.close();
+		}
 	});
 
 	test('runs and collects a mending job only from the adjacent terminal cells', async ({ page }) => {
@@ -1319,6 +1421,22 @@ test.describe('Relay startup', () => {
 
 		await expect(page.getByRole('dialog')).toBeVisible();
 		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
+		const previousCharacterId = deriveCharacterFromPubkey(pubkey, CHARACTER_CATALOG).characterId;
+		const pendingCharacterIds = await page.evaluate(async () => {
+			const database = await new Promise<IDBDatabase>((resolve, reject) => {
+				const request = indexedDB.open('persona-bubble-field-account');
+				request.onsuccess = () => resolve(request.result);
+				request.onerror = () => reject(request.error);
+			});
+			try {
+				const request = database.transaction('persona-bubble-field-player-state').objectStore('persona-bubble-field-player-state').get('player-lifecycle');
+				return await new Promise<string[]>((resolve, reject) => {
+					request.onsuccess = () => resolve((request.result as { mode: { pendingSelection: { candidates: Array<{ characterId: string }> } } }).mode.pendingSelection.candidates.map((candidate) => candidate.characterId));
+					request.onerror = () => reject(request.error);
+				});
+			} finally { database.close(); }
+		});
+		expect(pendingCharacterIds).not.toContain(previousCharacterId);
 		await page.getByRole('button', { name: /を選ぶ$/ }).first().click();
 		await expect(page.getByRole('dialog')).toHaveCount(0);
 		const reset = await page.evaluate(async () => {

@@ -65,9 +65,10 @@ Rootの生成・暗号化保存、BIP85によるIdentity導出、固定3候補�
 - Root-level permanent progressionの具体式 / multiplier / soft cap
 - 高周回point sink
 - True Endのtrigger
-- clear後のcurrent Identity nsec取得
-- clear後のsame Identity fresh Run / 別Identity選択
-- cleared Identityの再選択と3周目以降の無制限Run
-- True End時のRoot mnemonic + Identity Manifestの受け渡し
+- Identity Manifestのpublic export schema
+- catalog exhaustion時のproduct behavior
+- dead Identity resurrection
+- explicit Root deletion
+- future BIP85 key rotation
 
 ---

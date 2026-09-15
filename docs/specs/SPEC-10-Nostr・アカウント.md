@@ -205,7 +205,7 @@ Root entropyは暗号学的に保護されたbrowser-local barrierであるが�
 
 一般ユーザーには開始直後から秘密鍵を意識させない。
 
-clear後はcurrent Identityのnsec取得を可能にする将来仕様とする。clear前にactive Identityのchild secretをexportするUIは提供しない。
+clear後はcurrent Identityのnsec取得を可能にする。clear前にactive Identityのchild secretをexportするUIは提供しない。
 
 Root entropyを含むサイトデータを失うと、そのRootから導出されるIdentityも失われる可能性がある。サーバー側backupは存在しない。
 
@@ -277,7 +277,7 @@ trace conversationのauthor表示は、kind 0ではなくpubkeyから導出し�
 
 キャラクター変更は「転生」として扱う。24時間に1回の任意転生、初回アカウント作成後の24時間禁止、任意のリセマラは設けない。転生は原則として死亡時のみ発生する。死亡時はcurrent Runを閉じ、current Identityをdeadとして履歴へ残し、次generationの固定3択へ戻る。
 
-死亡したIdentityは通常の候補選択へ戻さない。次に選択されたIdentityはRootから決定的に導出された別のpubkeyを持ち、既存のRun-local stateを引き継がずRun #1を開始する。将来、cleared Identityへ戻る場合は同じkey/pubkey/characterでfresh Runを開始できるものとする。
+死亡したIdentityは通常の候補選択へ戻さない。次に選択されたIdentityはRootから決定的に導出された別のpubkeyを持ち、既存のRun-local stateを引き継がずRun #1を開始する。clear済みIdentityへ戻る場合は同じkey/pubkey/characterでfresh Runを開始できるものとする。
 
 ### アカウント切替
 

@@ -7,19 +7,71 @@
 		selection: PendingSelection | null;
 		onSelect: (candidate: IdentityCandidate) => void;
 	} = $props();
+	let backdrop = $state<HTMLElement | null>(null);
 
 	function character(candidate: IdentityCandidate) {
 		const value = getCharacterById(candidate.characterId);
 		if (!value) throw new Error('Candidate character is unavailable.');
 		return value;
 	}
+
+	function focusableElements(dialog: HTMLElement): HTMLElement[] {
+		return Array.from(dialog.querySelectorAll<HTMLElement>(
+			'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+		));
+	}
+
+	$effect(() => {
+		if (!selection || !backdrop) return;
+		const dialog = backdrop.querySelector('dialog');
+		const app = backdrop.closest('main');
+		if (!dialog || !app) return;
+		const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+		const inertSiblings = Array.from(app.children).filter((child) => child !== backdrop) as HTMLElement[];
+		for (const sibling of inertSiblings) sibling.inert = true;
+		const focus = () => {
+			const first = focusableElements(dialog)[0];
+			if (first && !dialog.contains(document.activeElement)) first.focus();
+		};
+		const handleFocusIn = (event: FocusEvent) => {
+			if (!dialog.contains(event.target as Node)) focus();
+		};
+		const handleKeydown = (event: KeyboardEvent) => {
+			if (event.key === 'Escape') {
+				event.preventDefault();
+				return;
+			}
+			if (event.key !== 'Tab') return;
+			const elements = focusableElements(dialog);
+			if (elements.length === 0) {
+				event.preventDefault();
+				return;
+			}
+			const current = document.activeElement;
+			const index = elements.indexOf(current as HTMLElement);
+			const next = event.shiftKey
+				? elements[(index <= 0 ? elements.length : index) - 1]
+				: elements[(index + 1) % elements.length];
+			event.preventDefault();
+			next.focus();
+		};
+		document.addEventListener('focusin', handleFocusIn, true);
+		document.addEventListener('keydown', handleKeydown, true);
+		queueMicrotask(focus);
+		return () => {
+			document.removeEventListener('focusin', handleFocusIn, true);
+			document.removeEventListener('keydown', handleKeydown, true);
+			for (const sibling of inertSiblings) sibling.inert = false;
+			if (previousFocus?.isConnected) previousFocus.focus();
+		};
+	});
 </script>
 
 {#if selection}
-	<div class="selection-backdrop" role="presentation">
-		<dialog open class="selection-dialog" aria-labelledby="identity-selection-title" aria-modal="true" onkeydown={(event) => { if (event.key === 'Escape') event.preventDefault(); }}>
+	<div bind:this={backdrop} class="selection-backdrop" role="presentation">
+		<dialog open class="selection-dialog" aria-labelledby="identity-selection-title" aria-describedby="identity-selection-description" aria-modal="true">
 			<h1 id="identity-selection-title">ハコの中の人格を選ぶ</h1>
-			<p class="selection-introduction">この人格でハコの時間が始まります。</p>
+			<p id="identity-selection-description" class="selection-introduction">この人格でハコの時間が始まります。</p>
 			<div class="candidate-grid">
 				{#each selection.candidates as candidate}
 					{@const selectedCharacter = character(candidate)}

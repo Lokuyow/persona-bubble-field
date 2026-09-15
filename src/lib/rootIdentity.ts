@@ -208,7 +208,9 @@ function isValidIdentityRecord(value: unknown): value is IdentityRecord {
 		typeof candidate.characterId === 'string' && Boolean(CHARACTER_CATALOG.find((character) => character.characterId === candidate.characterId)) &&
 		isSafeTimestamp(candidate.identityCreatedAtMs) && (candidate.status === 'alive' || candidate.status === 'dead') &&
 		(candidate.characterProfileRevision === null || (Number.isSafeInteger(candidate.characterProfileRevision) && (candidate.characterProfileRevision as number) > 0)) &&
-		Array.isArray(candidate.runHistory) && candidate.runHistory.every(isValidRunHistorySummary);
+		Array.isArray(candidate.runHistory) && candidate.runHistory.every(isValidRunHistorySummary) &&
+		candidate.runHistory.every((run, index) => run.runNumber === index + 1) &&
+		(candidate.status === 'alive' || candidate.runHistory.length > 0);
 }
 
 function isValidCandidate(value: unknown): value is IdentityCandidate {
@@ -242,20 +244,27 @@ function isValidPlayerLifecycle(value: unknown): value is PlayerLifecycle {
 	const candidate = value as Record<string, unknown>;
 	if (candidate.schemaVersion !== 1 || !Array.isArray(candidate.identities) || !candidate.identities.every(isValidIdentityRecord)) return false;
 	const identities = candidate.identities as IdentityRecord[];
-	if (new Set(identities.map((item) => `${item.generation}:${item.accountIndex}`)).size !== identities.length ||
+	if (new Set(identities.map((item) => item.generation)).size !== identities.length ||
+		new Set(identities.map((item) => `${item.generation}:${item.accountIndex}`)).size !== identities.length ||
 		new Set(identities.map((item) => item.pubkey)).size !== identities.length ||
 		new Set(identities.map((item) => item.characterId)).size !== identities.length) return false;
 	if (typeof candidate.mode !== 'object' || candidate.mode === null || Array.isArray(candidate.mode)) return false;
 	const mode = candidate.mode as Record<string, unknown>;
 	if (mode.kind === 'selecting') {
-		return isValidPendingSelection(mode.pendingSelection) && !(identities.some((identity) =>
-			(mode.pendingSelection as PendingSelection).candidates.some((item) => item.characterId === identity.characterId)
+		if (identities.some((identity) => identity.status === 'alive') || !isValidPendingSelection(mode.pendingSelection)) return false;
+		const pending = mode.pendingSelection as PendingSelection;
+		const highestGeneration = Math.max(...identities.map((identity) => identity.generation), 0);
+		return pending.generation === highestGeneration + 1 && !(identities.some((identity) =>
+			pending.candidates.some((item) => item.characterId === identity.characterId || item.pubkey === identity.pubkey)
 		));
 	}
 	if (mode.kind !== 'running' || !isValidActiveRun(mode.activeRun)) return false;
 	const activeRun = mode.activeRun as ActiveRun;
 	const identity = identities.find((item) => item.pubkey === activeRun.identity.pubkey && item.generation === activeRun.identity.generation && item.accountIndex === activeRun.identity.accountIndex);
-	return Boolean(identity && identity.status === 'alive' && identity.runHistory.length === activeRun.runNumber - 1);
+	return identities.filter((item) => item.status === 'alive').length === 1 &&
+		Boolean(identity && identity.status === 'alive' && identity.runHistory.length === activeRun.runNumber - 1 &&
+			activeRun.startedAtMs >= identity.identityCreatedAtMs &&
+			identity.runHistory.every((run, index) => run.runNumber === index + 1));
 }
 
 function hasValidWrappingKey(value: unknown): value is CryptoKey {
@@ -402,10 +411,15 @@ async function preparePendingSelection(entropy: Uint8Array, generation: number, 
 async function prepareRoot(): Promise<PreparedRoot> {
 	const cryptoApi = webCrypto();
 	const entropy = cryptoApi.getRandomValues(new Uint8Array(ROOT_ENTROPY_BYTES));
-	const wrappingKey = await cryptoApi.subtle.generateKey({ name: 'AES-GCM', length: AES_KEY_LENGTH }, false, ['encrypt', 'decrypt']) as CryptoKey;
-	const iv = cryptoApi.getRandomValues(new Uint8Array(AES_GCM_IV_BYTES));
-	const ciphertext = new Uint8Array(await cryptoApi.subtle.encrypt({ name: 'AES-GCM', iv: cryptoBytes(iv) }, wrappingKey, cryptoBytes(entropy)));
-	return { entropy, wrappingKey, encryptedEntropy: { version: ROOT_RECORD_VERSION, iv, ciphertext } };
+	try {
+		const wrappingKey = await cryptoApi.subtle.generateKey({ name: 'AES-GCM', length: AES_KEY_LENGTH }, false, ['encrypt', 'decrypt']) as CryptoKey;
+		const iv = cryptoApi.getRandomValues(new Uint8Array(AES_GCM_IV_BYTES));
+		const ciphertext = new Uint8Array(await cryptoApi.subtle.encrypt({ name: 'AES-GCM', iv: cryptoBytes(iv) }, wrappingKey, cryptoBytes(entropy)));
+		return { entropy, wrappingKey, encryptedEntropy: { version: ROOT_RECORD_VERSION, iv, ciphertext } };
+	} catch (error) {
+		entropy.fill(0);
+		throw error;
+	}
 }
 
 function freshPlayer(selection: PendingSelection): PlayerLifecycle {
@@ -433,49 +447,60 @@ async function commitFresh(db: IDBPDatabase<LifecycleDatabase>, root: PreparedRo
 	}
 }
 
-async function deriveSigner(entropy: Uint8Array, identity: IdentityRecord): Promise<ActiveSignerSnapshot> {
-	const master = deriveMaster(entropy);
+async function deriveSignerFromMaster(master: HDKey, identity: IdentityRecord): Promise<ActiveSignerSnapshot> {
+	const childEntropy = await deriveBip85NostrEntropy(master, identity.generation, identity.accountIndex);
 	try {
-		const childEntropy = await deriveBip85NostrEntropy(master, identity.generation, identity.accountIndex);
-		try {
-			const secretKey = childEntropy.slice();
-			const pubkey = getPublicKey(secretKey);
-			if (pubkey !== identity.pubkey || deriveCharacterFromPubkey(pubkey, CHARACTER_CATALOG).characterId !== identity.characterId) {
-				secretKey.fill(0);
-				throw new Error('Derivation mismatch.');
-			}
-			return { secretKey, pubkey, identityCreatedAtMs: identity.identityCreatedAtMs, characterProfileRevision: identity.characterProfileRevision, identity: { generation: identity.generation, accountIndex: identity.accountIndex, pubkey: identity.pubkey } };
-		} finally {
-			childEntropy.fill(0);
+		const secretKey = childEntropy.slice();
+		const pubkey = getPublicKey(secretKey);
+		if (pubkey !== identity.pubkey || deriveCharacterFromPubkey(pubkey, CHARACTER_CATALOG).characterId !== identity.characterId) {
+			secretKey.fill(0);
+			throw new Error('Derivation mismatch.');
 		}
+		return { secretKey, pubkey, identityCreatedAtMs: identity.identityCreatedAtMs, characterProfileRevision: identity.characterProfileRevision, identity: { generation: identity.generation, accountIndex: identity.accountIndex, pubkey: identity.pubkey } };
 	} finally {
-		master.wipePrivateData();
+		childEntropy.fill(0);
 	}
 }
 
-async function validateIdentityDerivations(entropy: Uint8Array, identities: readonly IdentityRecord[]): Promise<void> {
+async function validateIdentityDerivations(master: HDKey, identities: readonly IdentityRecord[]): Promise<void> {
 	for (const identity of identities) {
-		const signer = await deriveSigner(entropy, identity);
+		const signer = await deriveSignerFromMaster(master, identity);
 		signer.secretKey.fill(0);
 	}
 }
 
 async function hydrateLifecycle(entropy: Uint8Array, player: PlayerLifecycle): Promise<LoadLifecycleResult> {
+	let master: HDKey | null = null;
 	try {
-		await validateIdentityDerivations(entropy, player.identities);
+		master = deriveMaster(entropy);
+		await validateIdentityDerivations(master, player.identities);
 		if (player.mode.kind === 'selecting') {
-			const expected = await preparePendingSelection(entropy, player.mode.pendingSelection.generation, new Set(player.identities.map((identity) => identity.characterId)));
+			const expectedCandidates: IdentityCandidate[] = [];
+			for (const candidate of player.mode.pendingSelection.candidates) {
+				const childEntropy = await deriveBip85NostrEntropy(master, player.mode.pendingSelection.generation, candidate.accountIndex);
+				try {
+					const derived = candidateFromSecret(candidate.accountIndex, childEntropy);
+					if (!derived || !candidateMatches(derived, candidate)) return { kind: 'corrupt', reason: 'invalid-candidate' };
+					expectedCandidates.push(derived);
+				} finally {
+					childEntropy.fill(0);
+				}
+			}
+			const expected: PendingSelection = { generation: player.mode.pendingSelection.generation, candidates: expectedCandidates as unknown as PendingSelection['candidates'] };
 			if (JSON.stringify(expected) !== JSON.stringify(player.mode.pendingSelection)) return { kind: 'corrupt', reason: 'invalid-candidate' };
 			return { kind: 'selecting', selection: player.mode.pendingSelection };
 		}
 		const activeRun = player.mode.activeRun;
 		const identity = player.identities.find((candidate) => candidate.generation === activeRun.identity.generation && candidate.accountIndex === activeRun.identity.accountIndex && candidate.pubkey === activeRun.identity.pubkey);
 		if (!identity || identity.status !== 'alive') return { kind: 'corrupt', reason: 'identity-reference' };
-		const signer = await deriveSigner(entropy, identity);
+		const signer = await deriveSignerFromMaster(master, identity);
 		return { kind: 'restored', persona: { signer, identity, activeRun, gameState: activeRun.gameState } };
 	} catch (error) {
 		if (error instanceof Error && error.message === 'Selection is unavailable.') return { kind: 'corrupt', reason: 'selection-unavailable' };
 		return { kind: 'corrupt', reason: 'derivation-mismatch' };
+	} finally {
+		master?.wipePrivateData();
+		entropy.fill(0);
 	}
 }
 
@@ -576,13 +601,14 @@ async function mutateMending(expected: PersonaSnapshot, operation: 'start' | 'co
 		const observed = await readRootAndPlayer(db);
 		if (!observed) return { kind: 'corrupt', reason: 'partial-state' };
 		if (isCorruptLifecycle(observed)) return observed;
-		if (observed.player.mode.kind !== 'running') return { kind: 'corrupt', reason: 'identity-reference' };
-		if (!samePersonaExpected(expected, observed.player.mode.activeRun)) {
-			const latest = await hydrateLifecycle(observed.entropy, observed.player);
-			return latest.kind === 'restored' ? { kind: 'superseded', persona: latest.persona } : { kind: 'corrupt', reason: 'identity-reference' };
-		}
-		const tx = db.transaction(PLAYER_LIFECYCLE_STORE_NAME, 'readwrite');
 		try {
+			if (observed.player.mode.kind !== 'running') return { kind: 'corrupt', reason: 'identity-reference' };
+			if (!samePersonaExpected(expected, observed.player.mode.activeRun)) {
+				const latest = await hydrateLifecycle(observed.entropy, observed.player);
+				return latest.kind === 'restored' ? { kind: 'superseded', persona: latest.persona } : { kind: 'corrupt', reason: 'identity-reference' };
+			}
+			const tx = db.transaction(PLAYER_LIFECYCLE_STORE_NAME, 'readwrite');
+			try {
 			const store = tx.objectStore(PLAYER_LIFECYCLE_STORE_NAME);
 			const current = await store.get(PLAYER_STATE);
 			if (!isValidPlayerLifecycle(current)) { await tx.done; return { kind: 'corrupt', reason: 'player-state' }; }
@@ -618,10 +644,13 @@ async function mutateMending(expected: PersonaSnapshot, operation: 'start' | 'co
 			await tx.done;
 			const latest = await loadOrCreateLifecycle();
 			return latest.kind === 'restored' ? { kind, persona: latest.persona } : { kind: 'corrupt', reason: 'identity-reference' };
-		} catch (error) {
-			try { tx.abort(); } catch { /* already aborted */ }
-			await tx.done.catch(() => {});
-			throw error;
+			} catch (error) {
+				try { tx.abort(); } catch { /* already aborted */ }
+				await tx.done.catch(() => {});
+				throw error;
+			}
+		} finally {
+			observed.entropy.fill(0);
 		}
 	});
 }
@@ -638,22 +667,23 @@ export async function transitionExpiredPersona(expected: PersonaSnapshot): Promi
 	const observed = await withLifecycle((db) => readRootAndPlayer(db));
 	if (!observed) return { kind: 'corrupt', reason: 'partial-state' };
 	if (isCorruptLifecycle(observed)) return observed;
-	if (observed.player.mode.kind !== 'running' || !samePersonaExpected(expected, observed.player.mode.activeRun)) {
-		const latest = await hydrateLifecycle(observed.entropy, observed.player);
-		return latest.kind === 'restored' ? { kind: 'superseded', } : { kind: 'superseded' };
-	}
-	if (!isPersonaExpired(observed.player.mode.activeRun.gameState, Date.now())) {
-		const latest = await hydrateLifecycle(observed.entropy, observed.player);
-		return latest.kind === 'restored' ? { kind: 'not-expired', persona: latest.persona } : { kind: 'corrupt', reason: 'identity-reference' };
-	}
-	const generation = Math.max(...observed.player.identities.map((identity) => identity.generation), 0) + 1;
-	let selection: PendingSelection;
 	try {
-		selection = await preparePendingSelection(observed.entropy, generation, new Set(observed.player.identities.map((identity) => identity.characterId)));
-	} catch (error) {
-		return { kind: error instanceof Error && error.message === 'Selection is unavailable.' ? 'corrupt' : 'corrupt', reason: error instanceof Error && error.message === 'Selection is unavailable.' ? 'selection-unavailable' : 'derivation-mismatch' };
-	}
-	return withLifecycle(async (db) => {
+		if (observed.player.mode.kind !== 'running' || !samePersonaExpected(expected, observed.player.mode.activeRun)) {
+			const latest = await hydrateLifecycle(observed.entropy, observed.player);
+			return latest.kind === 'restored' ? { kind: 'superseded', } : { kind: 'superseded' };
+		}
+		if (!isPersonaExpired(observed.player.mode.activeRun.gameState, Date.now())) {
+			const latest = await hydrateLifecycle(observed.entropy, observed.player);
+			return latest.kind === 'restored' ? { kind: 'not-expired', persona: latest.persona } : { kind: 'corrupt', reason: 'identity-reference' };
+		}
+		const generation = Math.max(...observed.player.identities.map((identity) => identity.generation), 0) + 1;
+		let selection: PendingSelection;
+		try {
+			selection = await preparePendingSelection(observed.entropy, generation, new Set(observed.player.identities.map((identity) => identity.characterId)));
+		} catch (error) {
+			return { kind: error instanceof Error && error.message === 'Selection is unavailable.' ? 'corrupt' : 'corrupt', reason: error instanceof Error && error.message === 'Selection is unavailable.' ? 'selection-unavailable' : 'derivation-mismatch' };
+		}
+		return withLifecycle(async (db) => {
 		const tx = db.transaction(PLAYER_LIFECYCLE_STORE_NAME, 'readwrite');
 		try {
 			const store = tx.objectStore(PLAYER_LIFECYCLE_STORE_NAME);
@@ -684,7 +714,10 @@ export async function transitionExpiredPersona(expected: PersonaSnapshot): Promi
 			await tx.done.catch(() => {});
 			throw error;
 		}
-	});
+		});
+	} finally {
+		observed.entropy.fill(0);
+	}
 }
 
 export async function markCharacterProfilePublication(signer: ActiveSignerSnapshot): Promise<MarkCharacterProfilePublicationResult> {
