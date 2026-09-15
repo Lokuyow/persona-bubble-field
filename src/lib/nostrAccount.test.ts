@@ -9,6 +9,8 @@ import {
 	loadOrCreatePersona,
 	markCharacterProfilePublication,
 	reincarnateExpiredPersona,
+	startMending,
+	collectCompletedMending,
 	type AccountSnapshot,
 	type LoadAccountResult
 } from './nostrAccount';
@@ -310,7 +312,7 @@ describe('persona lifecycle state and reincarnation', () => {
 		const firstAccount = accountFrom(first);
 		const game = (await storedGameRecords())['game-state'] as Record<string, unknown>;
 		expect(game).toMatchObject({
-			version: 1,
+			version: 2,
 			personaPubkey: firstAccount.pubkey,
 			lifespanExpiresAtMs: TIME + INITIAL_LIFESPAN_MS,
 			points: 0,
@@ -319,6 +321,62 @@ describe('persona lifecycle state and reincarnation', () => {
 		const restored = accountFrom(await loadOrCreateAccount());
 		expect(restored.pubkey).toBe(firstAccount.pubkey);
 		expect((await storedGameRecords())['game-state']).toEqual(game);
+	});
+
+	it('serializes concurrent start and completed-collection attempts without double rewards', async () => {
+		const loaded = await loadOrCreatePersona();
+		if (loaded.kind !== 'created' && loaded.kind !== 'restored') throw new Error('Expected persona.');
+		const started = await Promise.all([startMending(loaded.persona), startMending(loaded.persona)]);
+		expect(started.filter((result) => result.kind === 'started')).toHaveLength(1);
+		expect(started.filter((result) => result.kind === 'superseded')).toHaveLength(1);
+		const winner = started.find((result) => result.kind === 'started');
+		if (!winner || winner.kind !== 'started') return;
+
+		vi.mocked(Date.now).mockReturnValue(winner.persona.gameState.mendingJob!.startedAtMs + winner.persona.gameState.mendingJob!.maximumDurationMs);
+		const collected = await Promise.all([collectCompletedMending(winner.persona), collectCompletedMending(winner.persona)]);
+		expect(collected.filter((result) => result.kind === 'collected')).toHaveLength(1);
+		expect(collected.filter((result) => result.kind === 'superseded')).toHaveLength(1);
+		expect((await storedGameRecords())['game-state']).toMatchObject({ points: 8, mendingJob: null });
+	});
+
+	it('gives expiry replacement precedence over a concurrent start at the lifecycle boundary', async () => {
+		const loaded = await loadOrCreatePersona();
+		if (loaded.kind !== 'created' && loaded.kind !== 'restored') throw new Error('Expected persona.');
+		vi.mocked(Date.now).mockReturnValue(loaded.persona.gameState.lifespanExpiresAtMs);
+
+		const [started, replaced] = await Promise.all([startMending(loaded.persona), reincarnateExpiredPersona(loaded.persona)]);
+
+		expect(started.kind).toBe('expired');
+		expect(replaced.kind).toBe('reincarnated');
+		expect((await storedGameRecords())['game-state']).toMatchObject({ points: 0, mendingJob: null });
+	});
+
+	it('rolls back mending start and collection writes when their transaction aborts', async () => {
+		const loaded = await loadOrCreatePersona();
+		if (loaded.kind !== 'created' && loaded.kind !== 'restored') throw new Error('Expected persona.');
+		const originalPut = IDBObjectStore.prototype.put;
+		const abortStart = vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (this: IDBObjectStore, value, key) {
+			const request = originalPut.call(this, value, key);
+			if (this.name === GAME_STORE_NAME && key === 'game-state') request.addEventListener('success', () => this.transaction.abort(), { once: true });
+			return request;
+		});
+		const beforeStart = await storedGameRecords();
+		await expect(startMending(loaded.persona)).rejects.toThrow('Account operation failed.');
+		abortStart.mockRestore();
+		expect(await storedGameRecords()).toEqual(beforeStart);
+
+		const started = await startMending(loaded.persona);
+		if (started.kind !== 'started') throw new Error('Expected mending job to start.');
+		vi.mocked(Date.now).mockReturnValue(started.persona.gameState.mendingJob!.startedAtMs + started.persona.gameState.mendingJob!.maximumDurationMs);
+		const beforeCollection = await storedGameRecords();
+		const abortCollection = vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (this: IDBObjectStore, value, key) {
+			const request = originalPut.call(this, value, key);
+			if (this.name === GAME_STORE_NAME && key === 'game-state') request.addEventListener('success', () => this.transaction.abort(), { once: true });
+			return request;
+		});
+		await expect(collectCompletedMending(started.persona)).rejects.toThrow('Account operation failed.');
+		abortCollection.mockRestore();
+		expect(await storedGameRecords()).toEqual(beforeCollection);
 	});
 
 	it('returns not-expired without replacing a current persona', async () => {
@@ -394,7 +452,18 @@ describe('lifecycle fail-close states', () => {
 
 	it('rejects malformed, mismatched, orphan, and ambiguous game state', async () => {
 		await seed(await protectedRecords());
-		await seedRawGameState({ version: 1, personaPubkey: getPublicKey(SECRET), points: 0 });
+		await seedRawGameState({ version: 2, personaPubkey: getPublicKey(SECRET), points: 0, mendingJob: null });
+		expect(await loadOrCreatePersona()).toEqual({ kind: 'corrupt', reason: 'invalid-game-state' });
+
+		await seedRawGameState({
+			...createInitialPersonaGameState(getPublicKey(SECRET), TIME),
+			mendingJob: {
+				startedAtMs: TIME,
+				maximumDurationMs: 8 * 60 * 60 * 1000,
+				lifespanExtensionPerHour: { numerator: 4, denominator: 0 },
+				pointsPerHour: { numerator: 1, denominator: 1 }
+			}
+		});
 		expect(await loadOrCreatePersona()).toEqual({ kind: 'corrupt', reason: 'invalid-game-state' });
 
 		await seedRawGameState(createInitialPersonaGameState('f'.repeat(64), TIME));

@@ -6,6 +6,7 @@ import {
 	isValidPersonaGameState,
 	type PersonaGameState
 } from './personaGameState';
+import { createMendingJob, materializeCompletedMending, projectMending } from './mending';
 
 const DATABASE_NAME = 'persona-bubble-field-account';
 const ACCOUNT_STORE_NAME = 'persona-bubble-field-account-state';
@@ -74,6 +75,11 @@ export type LoadPersonaResult =
 
 export type ReincarnateExpiredResult =
 	| Readonly<{ kind: 'reincarnated' | 'superseded' | 'not-expired'; persona: PersonaSnapshot }>
+	| CorruptAccountState;
+
+export type MendingMutationResult =
+	| Readonly<{ kind: 'started' | 'collected' | 'superseded'; persona: PersonaSnapshot }>
+	| Readonly<{ kind: 'blocked' | 'not-complete' | 'expired'; persona: PersonaSnapshot }>
 	| CorruptAccountState;
 
 export type MarkCharacterProfilePublicationResult = Readonly<{ kind: 'recorded' | 'stale' }>;
@@ -190,7 +196,13 @@ function sameGameState(first: PersonaGameState, second: PersonaGameState): boole
 		first.lifespanExpiresAtMs === second.lifespanExpiresAtMs && first.points === second.points &&
 		first.abilities.inferenceEfficiency === second.abilities.inferenceEfficiency &&
 		first.abilities.contextCapacity === second.abilities.contextCapacity &&
-		first.abilities.hallucinationSuppression === second.abilities.hallucinationSuppression;
+		first.abilities.hallucinationSuppression === second.abilities.hallucinationSuppression &&
+		first.mendingJob?.startedAtMs === second.mendingJob?.startedAtMs &&
+		first.mendingJob?.maximumDurationMs === second.mendingJob?.maximumDurationMs &&
+		first.mendingJob?.lifespanExtensionPerHour.numerator === second.mendingJob?.lifespanExtensionPerHour.numerator &&
+		first.mendingJob?.lifespanExtensionPerHour.denominator === second.mendingJob?.lifespanExtensionPerHour.denominator &&
+		first.mendingJob?.pointsPerHour.numerator === second.mendingJob?.pointsPerHour.numerator &&
+		first.mendingJob?.pointsPerHour.denominator === second.mendingJob?.pointsPerHour.denominator;
 }
 
 async function openAccountDatabase(): Promise<IDBPDatabase<AccountDatabase>> {
@@ -280,8 +292,8 @@ async function readGameState(tx: ReadTransaction | LifecycleTransaction): Promis
 		return pending === true ? { kind: 'pending' } : { kind: 'malformed', reason: 'invalid-game-state' };
 	}
 	const [value]: unknown[] = await store.getAll(GAME_STATE_KEY, 1);
-	return isValidPersonaGameState(value) ? { kind: 'ready', gameState: value } :
-		{ kind: 'malformed', reason: 'invalid-game-state' };
+	if (isValidPersonaGameState(value)) return { kind: 'ready', gameState: value };
+	return { kind: 'malformed', reason: 'invalid-game-state' };
 }
 
 async function readLifecycleState(tx: ReadTransaction | LifecycleTransaction): Promise<StoredLifecycleState> {
@@ -297,7 +309,7 @@ async function readLifecycleState(tx: ReadTransaction | LifecycleTransaction): P
 	if (game.kind === 'malformed') return { kind: 'corrupt', reason: game.reason };
 	if (game.kind === 'missing') return { kind: 'corrupt', reason: 'missing-game-state' };
 	if (game.kind === 'pending') return { kind: 'ready', account, game };
-	if (game.gameState.personaPubkey !== account.pubkey) return { kind: 'corrupt', reason: 'game-account-mismatch' };
+	if (game.kind === 'ready' && game.gameState.personaPubkey !== account.pubkey) return { kind: 'corrupt', reason: 'game-account-mismatch' };
 	return { kind: 'ready', account, game };
 }
 
@@ -537,6 +549,109 @@ export async function reincarnateExpiredPersona(expected: PersonaSnapshot): Prom
 	}
 	if (replacement) return { kind: outcome, persona: replacement };
 	throw new Error('Account operation failed.');
+}
+
+async function mutateMending(expected: PersonaSnapshot, operation: 'start' | 'collect'): Promise<MendingMutationResult> {
+	const db = await openAccountDatabase();
+	let outcome: MendingMutationResult['kind'] | null = null;
+	let snapshot: PersonaSnapshot | null = null;
+	let snapshotAccount: LegacyReadyState | ProtectedReadyState | null = null;
+	let snapshotGame: PersonaGameState | null = null;
+	try {
+		const tx = db.transaction([ACCOUNT_STORE_NAME, GAME_STORE_NAME], 'readwrite');
+		void tx.done.catch(() => {});
+		try {
+			const current = await readLifecycleState(tx);
+			if (current.kind === 'corrupt') {
+				await tx.done;
+				return current;
+			}
+			if (current.kind !== 'ready' || current.game.kind !== 'ready') {
+				await tx.done;
+				return { kind: 'corrupt', reason: 'missing-game-state' };
+			}
+			const matches = current.account.pubkey === expected.account.pubkey &&
+				current.account.personaCreatedAtMs === expected.account.personaCreatedAtMs &&
+				sameGameState(current.game.gameState, expected.gameState);
+			if (!matches) {
+				await tx.done;
+				outcome = 'superseded';
+			} else {
+				const nowMs = Date.now();
+				assertAccountTimestamp(nowMs);
+				snapshotAccount = current.account;
+				snapshotGame = current.game.gameState;
+				if (isPersonaExpired(current.game.gameState, nowMs)) {
+					await tx.done;
+					outcome = 'expired';
+				} else if (operation === 'start') {
+					if (current.game.gameState.mendingJob) {
+						await tx.done;
+						outcome = 'blocked';
+					} else {
+						const gameState: PersonaGameState = {
+							...current.game.gameState,
+							mendingJob: createMendingJob(current.game.gameState.abilities, nowMs)
+						};
+						await gameStore(tx).put(gameState, GAME_STATE_KEY);
+						await tx.done;
+						snapshotGame = gameState;
+						outcome = 'started';
+					}
+				} else {
+					const job = current.game.gameState.mendingJob;
+					if (!job) {
+						await tx.done;
+						outcome = 'blocked';
+					} else if (!projectMending(current.game.gameState, nowMs).completed) {
+						await tx.done;
+						outcome = 'not-complete';
+					} else {
+						const reward = materializeCompletedMending(current.game.gameState);
+						const gameState: PersonaGameState = {
+							...current.game.gameState,
+							lifespanExpiresAtMs: reward.lifespanExpiresAtMs,
+							points: current.game.gameState.points + reward.points,
+							mendingJob: null
+						};
+						await gameStore(tx).put(gameState, GAME_STATE_KEY);
+						await tx.done;
+						snapshotGame = gameState;
+						outcome = 'collected';
+					}
+				}
+			}
+		} catch (error) {
+			try { tx.abort(); } catch { /* The transaction may already have aborted. */ }
+			await tx.done.catch(() => {});
+			throw error;
+		}
+	} catch (error) {
+		if (error instanceof Error && error.message === 'Account operation failed.') throw error;
+		throw new Error('Account operation failed.');
+	} finally {
+		db.close();
+	}
+	if (outcome === 'superseded') {
+		const current = await loadPersona();
+		if (current.kind === 'created' || current.kind === 'restored') return { kind: 'superseded', persona: current.persona };
+		return current.kind === 'corrupt' ? current : { kind: 'corrupt', reason: 'invalid-secret' };
+	}
+	if (outcome === 'started' || outcome === 'collected' || outcome === 'blocked' || outcome === 'not-complete' || outcome === 'expired') {
+		if (snapshotAccount && snapshotGame) {
+			snapshot = { account: await restoreAccount(snapshotAccount), gameState: snapshotGame };
+			return { kind: outcome, persona: snapshot };
+		}
+	}
+	throw new Error('Account operation failed.');
+}
+
+export function startMending(expected: PersonaSnapshot): Promise<MendingMutationResult> {
+	return mutateMending(expected, 'start');
+}
+
+export function collectCompletedMending(expected: PersonaSnapshot): Promise<MendingMutationResult> {
+	return mutateMending(expected, 'collect');
 }
 
 /** Records only the current account's current character-profile revision. */

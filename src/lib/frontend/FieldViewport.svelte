@@ -69,7 +69,10 @@
 			if (!gesture || gesture.pointerId !== event.pointerId) return;
 			activeGesture = null;
 			try { if (gesture.captureOwner.hasPointerCapture(event.pointerId)) gesture.captureOwner.releasePointerCapture(event.pointerId); release(event.pointerId); } catch { /* capture may already be lost */ }
-			if (gesture.dragging) onPointerMovementStop(event.pointerId);
+			if (gesture.dragging) {
+				event.preventDefault();
+				onPointerMovementStop(event.pointerId);
+			}
 			pointerJoystick = null;
 			if (select && !gesture.dragging && gesture.captureOwner === node && gesture.anchor) resolveFieldCellSelection(gesture.anchor);
 		};

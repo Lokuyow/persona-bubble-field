@@ -1,3 +1,5 @@
+import { isMendingExpired, isValidMendingJob, type MendingJob } from './mending';
+
 export const INITIAL_LIFESPAN_MS = 7 * 24 * 60 * 60 * 1000;
 export const MAX_LIFESPAN_MS = 14 * 24 * 60 * 60 * 1000;
 
@@ -14,11 +16,12 @@ export type PersonaAbilityLevels = Readonly<{
 }>;
 
 export type PersonaGameState = Readonly<{
-	version: 1;
+	version: 2;
 	personaPubkey: string;
 	lifespanExpiresAtMs: number;
 	points: number;
 	abilities: PersonaAbilityLevels;
+	mendingJob: MendingJob | null;
 }>;
 
 function isCanonicalPubkey(value: unknown): value is string {
@@ -36,12 +39,12 @@ function isAbilityLevel(value: unknown, maximum: number): value is number {
 export function isValidPersonaGameState(value: unknown): value is PersonaGameState {
 	if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
 	const candidate = value as Readonly<Record<string, unknown>>;
-	if (candidate.version !== 1 || !isCanonicalPubkey(candidate.personaPubkey) ||
+	if (candidate.version !== 2 || !isCanonicalPubkey(candidate.personaPubkey) ||
 		!isSafeTimestamp(candidate.lifespanExpiresAtMs) ||
 		typeof candidate.points !== 'number' || !Number.isFinite(candidate.points) || candidate.points < 0 ||
 		typeof candidate.abilities !== 'object' || candidate.abilities === null || Array.isArray(candidate.abilities)) return false;
 	const abilities = candidate.abilities as Readonly<Record<string, unknown>>;
-	return isAbilityLevel(abilities.inferenceEfficiency, ABILITY_LEVEL_LIMITS.inferenceEfficiency) &&
+	return (candidate.mendingJob === null || isValidMendingJob(candidate.mendingJob)) && isAbilityLevel(abilities.inferenceEfficiency, ABILITY_LEVEL_LIMITS.inferenceEfficiency) &&
 		isAbilityLevel(abilities.contextCapacity, ABILITY_LEVEL_LIMITS.contextCapacity) &&
 		isAbilityLevel(abilities.hallucinationSuppression, ABILITY_LEVEL_LIMITS.hallucinationSuppression);
 }
@@ -52,15 +55,16 @@ export function createInitialPersonaGameState(personaPubkey: string, birthAtMs: 
 		throw new TypeError('Invalid persona lifecycle input.');
 	}
 	return {
-		version: 1,
+		version: 2,
 		personaPubkey,
 		lifespanExpiresAtMs: birthAtMs + INITIAL_LIFESPAN_MS,
 		points: 0,
-		abilities: { inferenceEfficiency: 0, contextCapacity: 0, hallucinationSuppression: 0 }
+		abilities: { inferenceEfficiency: 0, contextCapacity: 0, hallucinationSuppression: 0 },
+		mendingJob: null
 	};
 }
 
 export function isPersonaExpired(gameState: PersonaGameState, nowMs: number): boolean {
 	if (!isValidPersonaGameState(gameState) || !isSafeTimestamp(nowMs)) throw new TypeError('Invalid persona lifecycle input.');
-	return nowMs >= gameState.lifespanExpiresAtMs;
+	return isMendingExpired(gameState, nowMs);
 }

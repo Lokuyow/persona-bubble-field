@@ -1,4 +1,5 @@
 import { moveOneCell, type Direction, type FieldSize, type GridPosition } from './geometry';
+import { isBlockedFacilityCell } from './fieldFacilities';
 
 export const PRESENCE_TIMEOUT_MS = 10 * 60 * 1000;
 
@@ -60,7 +61,8 @@ function allCells(field: PresenceField): GridPosition[] {
 }
 
 function chooseSpawnPosition(state: PresenceState, random: RandomSource, excludingId?: string): GridPosition {
-	const cells = allCells(state.field);
+	const cells = allCells(state.field).filter((cell) => !isBlockedFacilityCell(cell));
+	if (cells.length === 0) throw new Error('Field has no available local cells.');
 	const occupied = activeParticipants(state, excludingId).map((participant) => participant.position);
 	const empty = cells.filter((cell) => !occupied.some((position) => samePosition(position, cell)));
 	return copyPosition((empty.length > 0 ? empty : cells)[randomIndex(empty.length > 0 ? empty.length : cells.length, random)]);
@@ -77,7 +79,7 @@ function withParticipant(state: PresenceState, id: string, update: (participant:
 
 function reactivatePosition(state: PresenceState, participant: PresenceParticipant, random: RandomSource): GridPosition {
 	const occupied = activeParticipants(state, participant.id).map((other) => other.position);
-	if (!occupied.some((position) => samePosition(position, participant.position))) {
+	if (!isBlockedFacilityCell(participant.position) && !occupied.some((position) => samePosition(position, participant.position))) {
 		return copyPosition(participant.position);
 	}
 	return chooseSpawnPosition(state, random, participant.id);
@@ -150,7 +152,7 @@ export function enterParticipant(
 	random: RandomSource = Math.random
 ): PresenceState {
 	const participant = state.participants.find((candidate) => candidate.id === id);
-	if (participant?.status === 'active') return state;
+	if (participant?.status === 'active' && !isBlockedFacilityCell(participant.position)) return state;
 
 	const position = chooseSpawnPosition(state, random);
 	if (!participant) {
@@ -176,7 +178,7 @@ export function recordPresenceActivity(
 	const participant = state.participants.find((candidate) => candidate.id === id);
 	if (!participant) return state;
 
-	const position = participant.status === 'active'
+	const position = participant.status === 'active' && !isBlockedFacilityCell(participant.position)
 		? participant.position
 		: reactivatePosition(state, participant, random);
 	return withParticipant(state, id, (current) => activeWithActivity(current, position, now));
@@ -192,11 +194,11 @@ export function moveParticipant(
 	const participant = state.participants.find((candidate) => candidate.id === id);
 	if (!participant) return { state, moved: false };
 
-	const origin = participant.status === 'active'
+	const origin = participant.status === 'active' && !isBlockedFacilityCell(participant.position)
 		? participant.position
 		: reactivatePosition(state, participant, random);
 	const next = moveOneCell(origin, direction, state.field, getActiveOccupancy(state, id));
-	if (!next) return { state, moved: false };
+	if (!next || isBlockedFacilityCell(next)) return { state, moved: false };
 
 	return {
 		state: withParticipant(state, id, (current) => activeWithActivity(current, next, now)),

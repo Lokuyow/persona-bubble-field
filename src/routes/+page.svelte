@@ -47,10 +47,15 @@
 	import { deriveCharacterFromPubkey } from '$lib/characterAssignment';
 	import ProfileDialog from '$lib/ProfileDialog.svelte';
 	import LifespanHud from '$lib/LifespanHud.svelte';
+	import MendingDialog from '$lib/MendingDialog.svelte';
+	import { MENDING_TERMINAL, isWithinFacilityInteractionRange, sameFieldCell } from '$lib/fieldFacilities';
+	import { projectMending } from '$lib/mending';
 	import {
 		CURRENT_CHARACTER_PROFILE_REVISION,
+		collectCompletedMending,
 		loadOrCreatePersona,
 		reincarnateExpiredPersona,
+		startMending,
 		type AccountSnapshot,
 		type PersonaSnapshot
 	} from '$lib/nostrAccount';
@@ -176,7 +181,7 @@
 	let devTraceReplies = $state.raw<readonly ParsedTraceReply[]>([]);
 	let devTraceReplyFixtureEnabled = $state(false);
 	let fieldActionMenu = $state.raw<FieldActionMenu | null>(null);
-	let proximityFeedback = $state.raw<Readonly<{ position: { x: number; y: number } }> | null>(null);
+	let proximityFeedback = $state.raw<Readonly<{ position: { x: number; y: number }; label: string }> | null>(null);
 	let proximityFeedbackTimer: number | null = null;
 	let connectionStatus: WorldReadConnectionStatus = { kind: 'bootstrapping' };
 	let selfAccount = $state.raw<AccountSnapshot | null>(null);
@@ -184,6 +189,9 @@
 	let personaLifecycleTransition = $state(false);
 	let lifespanHudNowMs = $state<number | null>(null);
 	let lifespanHudUpdatedAtMs = 0;
+	let mendingNowMs = $state(0);
+	let mendingDialogOpen = $state(false);
+	let mendingMutationInFlight = $state(false);
 	const LIFESPAN_HUD_REFRESH_INTERVAL_MS = 30_000;
 	let selfPositionWriteState = $state.raw<SelfPositionWriteState>({ kind: 'unavailable' });
 	let selfMessageAvailability: SelfMessageAvailability = { kind: 'unavailable' };
@@ -221,6 +229,7 @@
 	let expiryCheckInFlight = false;
 	let deathTransitionInFlight = false;
 	let runRuntimeRefresh: (() => Promise<void>) | null = null;
+	let startReadOnlyWorld: (() => void) | null = null;
 	const movementInputController = createMovementInputController({
 		requestMovement: (direction) => {
 			closeFieldActionMenu();
@@ -299,6 +308,8 @@
 	let selfPresence = $derived(presenceState.participants.find((participant) => participant.id === selfProjectionId) ?? null);
 	let selfLogicalPosition = $derived(selfPresence?.position ?? null);
 	let selfIsActive = $derived(selfPresence?.status === 'active');
+	let mendingProjection = $derived(personaSnapshot ? projectMending(personaSnapshot.gameState, mendingNowMs) : null);
+	let canUseMendingTerminal = $derived(!devWorldSandboxEnabled && Boolean(personaSnapshot && selfIsActive && selfLogicalPosition && isWithinFacilityInteractionRange(selfLogicalPosition)));
 	let traceRootCells = $derived(groupTraceRoots(effectiveTraceRoots));
 	let traceMarkerCells: readonly TraceMarkerCell[] = $derived(traceRootCells
 		.filter((cell) => traceConversationState.kind !== 'open' || !sameCell(cell.position, traceConversationState.root.position))
@@ -379,6 +390,7 @@
 		!participantViews.some((participant) => sameCell(participant.position, position)) &&
 		traceMarkerCells.some((cell) => sameCell(cell.position, position))
 	));
+	let facilityCellTriggers = $derived([MENDING_TERMINAL.position]);
 
 	function isActuallyPresented(element: Element | null): element is HTMLElement {
 		if (!(element instanceof HTMLElement) || element.getClientRects().length === 0) return false;
@@ -846,6 +858,7 @@
 				if (session === nextSession) setComposerTerminalError(new Error('Relay startup failed.'));
 			}
 		};
+		startReadOnlyWorld = () => { void startReadSession(null); };
 
 		const begin = async () => {
 			if (devWorldSandboxEnabled || startRequested || !hasUsableViewport()) return;
@@ -858,6 +871,7 @@
 				} else {
 					personaSnapshot = personaResult.persona;
 					selfAccount = personaResult.persona.account;
+					mendingNowMs = Date.now();
 					updateLifespanHud(Date.now(), true);
 					if (isPersonaExpired(personaResult.persona.gameState, Date.now())) {
 						const result = await beginDeathTransition(personaResult.persona, session);
@@ -919,6 +933,7 @@
 					return;
 				}
 				const now = Date.now();
+				mendingNowMs = now;
 				updateLifespanHud(now);
 				const nextPresence = session?.refresh(now);
 				if (nextPresence) {
@@ -944,6 +959,7 @@
 			cancelVisualAnimation();
 			window.clearInterval(expiryTimer);
 			if (runRuntimeRefresh === refreshRuntime) runRuntimeRefresh = null;
+			if (startReadOnlyWorld) startReadOnlyWorld = null;
 			session?.dispose();
 			devTraceConversationRuntime?.dispose();
 			devTraceConversationRuntime = null;
@@ -1039,6 +1055,7 @@
 			.filter((participant) => participant.status === 'active').map((participant) => participant.id));
 		colorByPubkey = nextColors;
 		presenceState = nextPresence;
+		if (mendingDialogOpen && !hasLiveMendingProximity()) closeMendingTerminal();
 		const nextProjection = projectFrontendPresence({ presence: nextPresence,
 			selectedCharacterId: selectedId, selfProjectionId: projectionId, geometry, colors: nextColors });
 		animatePresenceTransition(previousProjection, nextProjection, projectionId);
@@ -1065,8 +1082,97 @@
 		fieldActionMenu = null;
 	}
 
-	function showTraceProximityFeedback(position: { x: number; y: number }): void {
-		proximityFeedback = { position: { ...position } };
+	function openMendingTerminal(): void {
+		if (!canUseMendingTerminal || mendingMutationInFlight) return;
+		movementInputController.cancelMovementHold();
+			fieldViewportComponent?.cancelPointerGesture();
+		mendingNowMs = Date.now();
+		mendingDialogOpen = true;
+	}
+
+	function closeMendingTerminal(): void {
+		mendingDialogOpen = false;
+	}
+
+	function samePersonaIdentity(first: PersonaSnapshot, second: PersonaSnapshot): boolean {
+		return first.account.pubkey === second.account.pubkey &&
+			first.account.personaCreatedAtMs === second.account.personaCreatedAtMs &&
+			first.gameState.personaPubkey === second.gameState.personaPubkey;
+	}
+
+	function disposePersonaWriter(currentSession: ReturnType<typeof createWorldReadSession> | null = worldSession): void {
+		currentSession?.dispose();
+		if (worldSession && worldSession !== currentSession) worldSession.dispose();
+		worldSession = null;
+		traceConversationController = null;
+	}
+
+	function stopPersonaInteractions(message: string): void {
+		personaLifecycleTransition = true;
+		closeMendingTerminal();
+		movementInputController.cancelMovementHold();
+		fieldViewportComponent?.cancelPointerGesture();
+		cancelPendingComposerSubmission(new Error(message));
+	}
+
+	function enterReadOnlyFallback(message: string): void {
+		stopPersonaInteractions(message);
+		disposePersonaWriter();
+		selfAccount = null;
+		personaSnapshot = null;
+		selfPositionWriteState = { kind: 'unavailable' };
+		selfMessageAvailability = { kind: 'unavailable' };
+		setComposerTerminalError(new Error(message));
+		startReadOnlyWorld?.();
+	}
+
+	function reloadForPersonaIdentityChange(latest: PersonaSnapshot): void {
+		stopPersonaInteractions('Persona identity changed in another tab.');
+		disposePersonaWriter();
+		personaSnapshot = latest;
+		selfAccount = latest.account;
+		window.location.reload();
+	}
+
+	function hasLiveMendingProximity(): boolean {
+		return Boolean(!devWorldSandboxEnabled && personaSnapshot && selfIsActive && selfLogicalPosition &&
+			isWithinFacilityInteractionRange(selfLogicalPosition));
+	}
+
+	async function mutateMending(operation: 'start' | 'collect'): Promise<void> {
+		const expected = personaSnapshot;
+		if (!expected || mendingMutationInFlight || !hasLiveMendingProximity()) {
+			closeMendingTerminal();
+			return;
+		}
+		mendingMutationInFlight = true;
+		try {
+			const result = operation === 'start' ? await startMending(expected) : await collectCompletedMending(expected);
+			if (result.kind === 'corrupt') {
+				enterReadOnlyFallback('Persona is unavailable for publishing.');
+				return;
+			}
+			if (result.kind === 'superseded' && !samePersonaIdentity(expected, result.persona)) {
+				reloadForPersonaIdentityChange(result.persona);
+				return;
+			}
+			personaSnapshot = result.persona;
+			selfAccount = result.persona.account;
+			mendingNowMs = Date.now();
+			if (result.kind === 'started') closeMendingTerminal();
+			if (result.kind === 'expired') {
+				closeMendingTerminal();
+				void beginDeathTransition(result.persona, worldSession);
+			}
+		} catch {
+			closeMendingTerminal();
+		} finally {
+			mendingMutationInFlight = false;
+		}
+	}
+
+	function showTraceProximityFeedback(position: { x: number; y: number }, label = '近づくと調べられる'): void {
+		proximityFeedback = { position: { ...position }, label };
 		if (proximityFeedbackTimer !== null) window.clearTimeout(proximityFeedbackTimer);
 		proximityFeedbackTimer = window.setTimeout(() => {
 			proximityFeedback = null;
@@ -1102,6 +1208,7 @@
 		}
 		return buildFieldCellActions({
 			participantIds,
+			mendingTerminal: canUseMendingTerminal && sameFieldCell(position, MENDING_TERMINAL.position),
 			trace
 		});
 	}
@@ -1148,6 +1255,10 @@
 		trigger?: HTMLButtonElement
 	): void {
 		closeFieldActionMenu();
+		if (action.kind === 'mending-terminal') {
+			openMendingTerminal();
+			return;
+		}
 		if (action.kind === 'trace') {
 			if (action.behavior === 'select-current') {
 				selectTraceSpeech(action.rootId);
@@ -1163,6 +1274,10 @@
 	function resolveFieldCellSelection(position: { x: number; y: number }, trigger?: HTMLButtonElement): void {
 		const resolution = resolveFieldCellActions(actionsForCell(position));
 		if (resolution.kind === 'none') {
+			if (sameFieldCell(position, MENDING_TERMINAL.position) && selfIsActive) {
+				showTraceProximityFeedback(position, '近づくと端末を使える');
+				return;
+			}
 			const visibleOutOfRangeTrace = selfIsActive && traceMarkerCells.some((cell) => sameCell(cell.position, position) && !cell.inInvestigationRange);
 			if (visibleOutOfRangeTrace) {
 				showTraceProximityFeedback(position);
@@ -1179,6 +1294,7 @@
 	}
 
 	function fieldActionLabel(action: FieldCellAction): string {
+		if (action.kind === 'mending-terminal') return '繕い端末を使う';
 		if (action.kind === 'trace') return '痕跡を調べる';
 		const participant = participantViews.find((candidate) => candidate.id === action.participantId);
 		return participant ? `${participant.character.name} のプロフィールを開く` : 'プロフィールを開く';
@@ -1309,6 +1425,7 @@
 			return;
 		}
 		if (force || lifespanHudNowMs === null || nowMs - lifespanHudUpdatedAtMs >= LIFESPAN_HUD_REFRESH_INTERVAL_MS) {
+			mendingNowMs = nowMs;
 			lifespanHudNowMs = nowMs;
 			lifespanHudUpdatedAtMs = nowMs;
 		}
@@ -1321,7 +1438,7 @@
 
 	function moveSelfFromCell(direction: Direction): void {
 		closeFieldActionMenu();
-		if (personaLifecycleTransition) return;
+		if (personaLifecycleTransition || mendingDialogOpen) return;
 		if (devWorldSandboxEnabled) moveSandboxSelf(direction);
 		else moveWorldSelf(direction);
 	}
@@ -1331,30 +1448,19 @@
 		currentSession: ReturnType<typeof createWorldReadSession> | null
 	): Promise<'reloaded' | 'failed'> {
 		if (devWorldSandboxEnabled || personaLifecycleTransition || deathTransitionInFlight) return 'failed';
-		personaLifecycleTransition = true;
+		stopPersonaInteractions('Persona lifetime ended.');
 		deathTransitionInFlight = true;
-		movementInputController.cancelMovementHold();
-		fieldViewportComponent?.cancelPointerGesture();
-		cancelPendingComposerSubmission(new Error('Persona lifetime ended.'));
-		currentSession?.dispose();
-		if (worldSession === currentSession) worldSession = null;
-		traceConversationController = null;
+		disposePersonaWriter(currentSession);
 		try {
 			const result = await reincarnateExpiredPersona(expected);
 			if (result.kind === 'reincarnated' || result.kind === 'superseded' || result.kind === 'not-expired') {
-				personaSnapshot = result.persona;
-				selfAccount = result.persona.account;
-				window.location.reload();
+				reloadForPersonaIdentityChange(result.persona);
 				return 'reloaded';
 			}
-			selfAccount = null;
-			personaSnapshot = null;
-			setComposerTerminalError(new Error('Persona is unavailable for publishing.'));
+			enterReadOnlyFallback('Persona is unavailable for publishing.');
 			return 'failed';
 		} catch {
-			selfAccount = null;
-			personaSnapshot = null;
-			setComposerTerminalError(new Error('Persona is unavailable for publishing.'));
+			enterReadOnlyFallback('Persona is unavailable for publishing.');
 			return 'failed';
 		} finally {
 			deathTransitionInFlight = false;
@@ -1635,6 +1741,7 @@
 				{traceMarkerCells}
 				{proximityFeedback}
 				{traceOnlyCellTriggers}
+				{facilityCellTriggers}
 				{participantViews}
 				{selfProjectionId}
 				{movingParticipantIds}
@@ -1670,7 +1777,7 @@
 				registerReplyRemeasure={registerTraceReplyRemeasure}
 			/>
 			{#if lifespanHudNowMs !== null && personaSnapshot && !personaLifecycleTransition}
-				<LifespanHud expiresAtMs={personaSnapshot.gameState.lifespanExpiresAtMs} nowMs={lifespanHudNowMs} />
+				<LifespanHud expiresAtMs={projectMending(personaSnapshot.gameState, lifespanHudNowMs).effectiveExpiresAtMs} nowMs={lifespanHudNowMs} />
 			{/if}
 		{/snippet}
 	</FieldViewport>
@@ -1678,6 +1785,14 @@
 	<ProfileDialog
 		onOpenChange={handleProfileOpenChange}
 		onCloseAutoFocus={restoreProfileTriggerFocus}
+	/>
+	<MendingDialog
+		open={mendingDialogOpen}
+		projection={mendingProjection}
+		hasJob={Boolean(personaSnapshot?.gameState.mendingJob)}
+		onOpenChange={(open) => { mendingDialogOpen = open; }}
+		onStart={() => { void mutateMending('start'); }}
+		onCollect={() => { void mutateMending('collect'); }}
 	/>
 
 	{#if devWorldSandboxEnabled}
