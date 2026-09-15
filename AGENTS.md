@@ -72,18 +72,33 @@ behavior.
 
 ### No speculative compatibility
 
-Do not add legacy paths, migrations, compatibility branches, adapters, or
-fallback behavior for hypothetical future users or unreleased designs.
+Do not add or retain compatibility behavior solely for hypothetical future
+users, unreleased designs, or stale callers. When an intentional change
+replaces a schema, interface, or protocol shape without an explicit
+compatibility requirement, prefer a clean replacement over maintaining old and
+new forms in parallel.
 
-Preserve compatibility when there is a confirmed requirement such as:
+#### Prototype clean breaks
 
-- Published behavior or interfaces that must remain supported
-- Existing persisted user data
-- Supported external integrations
-- An explicit product specification
+Before formal release, prototype-local data, identities, event or protocol
+formats, routes, internal/DEV/test interfaces, and fixtures are not
+backward-compatibility contracts merely because they exist. For an intentional
+prototype change, do not add or retain migration, legacy paths, adapters,
+aliases, dual support, or compatibility-only fallbacks to preserve them. If
+needed, update or remove the affected callers, tests, fixtures, or local data;
+do not keep production compatibility code solely for stale tests.
 
-When no such requirement exists, prefer a clean replacement over maintaining
-old and new implementations in parallel.
+#### Contracts that remain supported
+
+Maintain compatibility for data, identities, public interfaces, and external
+integrations that are explicitly supported, including currently required
+Nostr/NIP, Relay, browser, and Web Platform interoperability. Distinguish
+repository-internal use from an external compatibility contract.
+
+This policy applies only when the intentional change is within the task scope.
+It does not permit unrelated user-visible behavior changes or cleanup; outside
+that scope, preserve behavior unless the request or Source of Truth requires
+otherwise.
 
 ### Avoid premature abstraction
 
