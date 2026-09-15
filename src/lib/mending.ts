@@ -19,6 +19,7 @@ export type MendingState = Readonly<{
 export type MendingProjection = Readonly<{
 	processedDurationMs: number;
 	processedThroughMs: number;
+	remainingDurationMs: number;
 	effectiveExpiresAtMs: number;
 	lifespanExtensionMs: number;
 	lifespanExtensionPerHour: MendingRational | null;
@@ -96,6 +97,7 @@ export function projectMending(state: MendingState, nowMs: number): MendingProje
 	if (!state.mendingJob) return {
 		processedDurationMs: 0,
 		processedThroughMs: nowMs,
+		remainingDurationMs: 0,
 		effectiveExpiresAtMs: state.lifespanExpiresAtMs,
 		lifespanExtensionMs: 0,
 		lifespanExtensionPerHour: null,
@@ -113,6 +115,7 @@ export function projectMending(state: MendingState, nowMs: number): MendingProje
 	return {
 		processedDurationMs,
 		processedThroughMs,
+		remainingDurationMs: job.maximumDurationMs - processedDurationMs,
 		effectiveExpiresAtMs,
 		lifespanExtensionMs: effectiveExpiresAtMs - state.lifespanExpiresAtMs,
 		lifespanExtensionPerHour: copyRational(job.lifespanExtensionPerHour),

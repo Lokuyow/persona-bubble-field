@@ -13,6 +13,7 @@
 	}>;
 	let { open, projection, hasJob, points: ownedPointsValue, onOpenChange, onStart, onCollect }: Props = $props();
 	let hours = $derived(((projection?.processedDurationMs ?? 0) / (60 * 60 * 1000)).toFixed(2));
+	let remainingHours = $derived(((projection?.remainingDurationMs ?? 0) / (60 * 60 * 1000)).toFixed(2));
 	let lifespanHours = $derived(((projection?.lifespanExtensionMs ?? 0) / (60 * 60 * 1000)).toFixed(2));
 	let unclaimedPoints = $derived((projection?.points ?? 0).toFixed(2));
 	let ownedPoints = $derived(ownedPointsValue.toFixed(2));
@@ -36,8 +37,9 @@
 					<button type="button" onclick={onCollect}>成果を受け取る</button>
 				{:else}
 					<p>処理済み時間: {hours}時間</p>
+					<p>完了まで: {remainingHours}時間</p>
 					<p>寿命延長: +{lifespanHours}時間（反映中）</p>
-					<p>未受取成果: +{unclaimedPoints}pt</p>
+					<p>獲得予定ポイント: +{unclaimedPoints}pt（完了後に受け取れます）</p>
 				{/if}
 				<Dialog.Close>閉じる</Dialog.Close>
 			</Dialog.Content>

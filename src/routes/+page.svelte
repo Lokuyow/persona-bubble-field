@@ -1895,7 +1895,7 @@
 			/>
 			{#if lifespanHudNowMs !== null && personaSnapshot && !personaLifecycleTransition}
 				{@const lifespanProjection = projectMending(personaSnapshot.gameState, lifespanHudNowMs)}
-				<LifespanHud expiresAtMs={lifespanProjection.effectiveExpiresAtMs} nowMs={lifespanHudNowMs} mendingProjection={lifespanProjection} />
+				<LifespanHud expiresAtMs={lifespanProjection.effectiveExpiresAtMs} nowMs={lifespanHudNowMs} points={personaSnapshot.gameState.points} mendingProjection={lifespanProjection} />
 			{/if}
 		{/snippet}
 	</FieldViewport>
