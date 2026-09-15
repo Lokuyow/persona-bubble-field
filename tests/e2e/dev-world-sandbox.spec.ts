@@ -1076,6 +1076,28 @@ test.describe('DEV World Sandbox', () => {
 		const replyBubbles = page.locator('[data-trace-reply-id]');
 		await expect(replyBubbles).toHaveCount(5);
 		await expect(page.locator('[data-trace-reply-id="' + '7'.repeat(64) + '"]')).toContainText('newest same-cell direct reply');
+		const traceStacking = await page.locator('.bubble-layer').evaluate((layer) => {
+			const viewport = document.querySelector<HTMLElement>('.field-viewport');
+			const fieldArea = document.querySelector<HTMLElement>('.field-area');
+			const tail = document.querySelector<SVGElement>('.tail-layer');
+			const cards = [...layer.querySelectorAll<HTMLElement>('.trace-root-card, .trace-reply-card')];
+			if (!viewport || !fieldArea || !tail) throw new Error('Expected the Trace stacking layers.');
+			return {
+				layerRect: layer.getBoundingClientRect().toJSON(),
+				viewportRect: viewport.getBoundingClientRect().toJSON(),
+				fieldZIndex: getComputedStyle(fieldArea).zIndex,
+				bubbleZIndex: getComputedStyle(layer).zIndex,
+				tailZIndex: getComputedStyle(tail).zIndex,
+				cardPointerEvents: cards.map((card) => getComputedStyle(card).pointerEvents),
+				cardParents: cards.map((card) => card.parentElement === layer)
+			};
+		});
+		expect(traceStacking.layerRect).toEqual(traceStacking.viewportRect);
+		expect(traceStacking.fieldZIndex).toBe('2');
+		expect(traceStacking.bubbleZIndex).toBe('3');
+		expect(traceStacking.tailZIndex).toBe('4');
+		expect(traceStacking.cardPointerEvents.every((value) => value === 'auto')).toBe(true);
+		expect(traceStacking.cardParents.every(Boolean)).toBe(true);
 		const directChildIds = async () => page.locator('[data-trace-role="child"]').evaluateAll((cards) => cards.map((card) => card.getAttribute('data-trace-reply-id')));
 		expect(await directChildIds()).toEqual(['6', '7', '8', '9', 'a'].map((id) => id.repeat(64)));
 		const oldestDirectAnchor = await page.locator('[data-trace-reply-id="' + '6'.repeat(64) + '"]').evaluate((card) => getComputedStyle(card).transform);
@@ -1517,6 +1539,52 @@ test.describe('DEV World Sandbox', () => {
 		const characterGeometry = await readCharacterGeometry(page);
 		expect(Math.abs(characterGeometry.participantCenter.x - characterGeometry.gridCellCenter.x)).toBeLessThan(0.01);
 		expect(Math.abs(characterGeometry.participantCenter.y - characterGeometry.gridCellCenter.y)).toBeLessThan(0.01);
+	});
+
+	test('keeps live and merged bubble bodies above overscanned artwork on desktop and mobile', async ({ page }) => {
+		for (const viewport of [{ width: 1200, height: 900 }, { width: 390, height: 844 }]) {
+			await page.setViewportSize(viewport);
+			await page.goto('/?devWorld=1&devSpeech=merged2');
+			await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+			await expect(page.locator('.participant')).toHaveCount(4);
+			await expect(page.locator('.bubble-normal')).toHaveCount(1);
+			await expect(page.locator('.bubble-merged')).toHaveCount(1);
+
+			const stacking = await page.evaluate(() => {
+				const rect = (selector: string) => document.querySelector<HTMLElement>(selector)?.getBoundingClientRect();
+				const viewport = rect('.field-viewport');
+				const bubbleLayer = rect('.bubble-layer');
+				const artwork = rect('.field-artwork');
+				const fieldArea = document.querySelector<HTMLElement>('.field-area');
+				const bubbleLayerElement = document.querySelector<HTMLElement>('.bubble-layer');
+				const liveBubbles = [...document.querySelectorAll<HTMLElement>('.bubble')];
+				const tailLayer = document.querySelector<SVGElement>('.tail-layer');
+				if (!viewport || !bubbleLayer || !artwork || !fieldArea || !bubbleLayerElement || !tailLayer) {
+					throw new Error('Expected the viewport stacking layers.');
+				}
+				const overlaps = (a: DOMRect, b: DOMRect) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+				return {
+					viewport,
+					bubbleLayer,
+					fieldZIndex: getComputedStyle(fieldArea).zIndex,
+					bubbleZIndex: getComputedStyle(bubbleLayerElement).zIndex,
+					tailZIndex: getComputedStyle(tailLayer).zIndex,
+					bubblePointerEvents: getComputedStyle(bubbleLayerElement).pointerEvents,
+					bubbleSurfacePointerEvents: liveBubbles.map((bubble) => getComputedStyle(bubble).pointerEvents),
+					artworkOverlap: liveBubbles.map((bubble) => overlaps(bubble.getBoundingClientRect(), artwork)),
+					artworkCoversBubbleLayer: overlaps(artwork, bubbleLayer)
+				};
+			});
+
+			expect(stacking.bubbleLayer).toEqual(stacking.viewport);
+			expect(stacking.fieldZIndex).toBe('2');
+			expect(stacking.bubbleZIndex).toBe('3');
+			expect(stacking.tailZIndex).toBe('4');
+			expect(stacking.bubblePointerEvents).toBe('none');
+			expect(stacking.bubbleSurfacePointerEvents.every((value) => value === 'auto')).toBe(true);
+			expect(stacking.artworkCoversBubbleLayer).toBe(true);
+			if (viewport.width > 700) expect(stacking.artworkOverlap.some(Boolean)).toBe(true);
+		}
 	});
 
 		test('selects and presents character 020 from the catalog', async ({ page }) => {
