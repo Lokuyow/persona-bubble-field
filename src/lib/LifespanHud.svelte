@@ -1,16 +1,16 @@
 <script lang="ts">
-	import { formatRemainingLifespan } from '$lib/lifespanHud';
-	import type { MendingJob } from '$lib/mending';
+	import { formatMendingRate, formatRemainingLifespan } from '$lib/lifespanHud';
+	import type { MendingProjection } from '$lib/mending';
 
 	type Props = Readonly<{
 		expiresAtMs: number;
 		nowMs: number;
-		mendingJob: MendingJob | null;
+		mendingProjection: MendingProjection | null;
 	}>;
 
-	let { expiresAtMs, nowMs, mendingJob }: Props = $props();
+	let { expiresAtMs, nowMs, mendingProjection }: Props = $props();
 	let label = $derived(formatRemainingLifespan(expiresAtMs, nowMs));
-	let mendingLabel = $derived(mendingJob ? `繕い中 +${(mendingJob.lifespanExtensionPerHour.numerator / mendingJob.lifespanExtensionPerHour.denominator).toFixed(1)}h/h` : null);
+	let mendingLabel = $derived(mendingProjection?.completed ? '繕い完了' : mendingProjection?.lifespanExtensionPerHour ? `繕い中 +${formatMendingRate(mendingProjection.lifespanExtensionPerHour.numerator, mendingProjection.lifespanExtensionPerHour.denominator)}h/h` : null);
 </script>
 
 <div class="lifespan-hud" aria-label={mendingLabel ? `${label}、${mendingLabel}` : label}>

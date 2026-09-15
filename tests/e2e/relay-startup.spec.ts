@@ -1003,7 +1003,7 @@ test.describe('Relay startup', () => {
 			relay.releaseMetadata(); relay.releasePrimary();
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${oldPubkey}"]`)).toBeVisible();
-+		await moveRelaySelfTo(page, { x: 11, y: 3 });
+		await moveRelaySelfTo(page, { x: 11, y: 3 });
 		await page.getByRole('button', { name: '繕い端末' }).click();
 		await expect(page.getByRole('button', { name: '繕いを開始' })).toBeVisible();
 

@@ -1894,7 +1894,8 @@
 				registerReplyRemeasure={registerTraceReplyRemeasure}
 			/>
 			{#if lifespanHudNowMs !== null && personaSnapshot && !personaLifecycleTransition}
-				<LifespanHud expiresAtMs={projectMending(personaSnapshot.gameState, lifespanHudNowMs).effectiveExpiresAtMs} nowMs={lifespanHudNowMs} mendingJob={personaSnapshot.gameState.mendingJob} />
+				{@const lifespanProjection = projectMending(personaSnapshot.gameState, lifespanHudNowMs)}
+				<LifespanHud expiresAtMs={lifespanProjection.effectiveExpiresAtMs} nowMs={lifespanHudNowMs} mendingProjection={lifespanProjection} />
 			{/if}
 		{/snippet}
 	</FieldViewport>

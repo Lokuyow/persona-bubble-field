@@ -21,6 +21,7 @@ export type MendingProjection = Readonly<{
 	processedThroughMs: number;
 	effectiveExpiresAtMs: number;
 	lifespanExtensionMs: number;
+	lifespanExtensionPerHour: MendingRational | null;
 	points: number;
 	completed: boolean;
 }>;
@@ -97,6 +98,7 @@ export function projectMending(state: MendingState, nowMs: number): MendingProje
 		processedThroughMs: nowMs,
 		effectiveExpiresAtMs: state.lifespanExpiresAtMs,
 		lifespanExtensionMs: 0,
+		lifespanExtensionPerHour: null,
 		points: 0,
 		completed: false
 	};
@@ -113,6 +115,7 @@ export function projectMending(state: MendingState, nowMs: number): MendingProje
 		processedThroughMs,
 		effectiveExpiresAtMs,
 		lifespanExtensionMs: effectiveExpiresAtMs - state.lifespanExpiresAtMs,
+		lifespanExtensionPerHour: copyRational(job.lifespanExtensionPerHour),
 		points,
 		completed: processedDurationMs === job.maximumDurationMs
 	};
