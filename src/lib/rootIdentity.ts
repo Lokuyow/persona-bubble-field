@@ -94,6 +94,13 @@ export type ActiveSignerSnapshot = Readonly<{
 	identity: IdentityReference;
 }>;
 
+export type ActiveRunAuthorization = Readonly<{
+	identity: IdentityReference;
+	runNumber: number;
+}>;
+
+export type SelfWriteAuthorizationResult = 'authorized' | 'superseded' | 'corrupt';
+
 export type PersonaSnapshot = Readonly<{
 	signer: ActiveSignerSnapshot;
 	identity: IdentityRecord;
@@ -127,7 +134,8 @@ export type SelectionResult =
 	| CorruptLifecycleState;
 
 export type MendingMutationResult =
-	| Readonly<{ kind: 'started' | 'collected' | 'superseded'; persona: PersonaSnapshot }>
+	| Readonly<{ kind: 'started' | 'collected'; persona: PersonaSnapshot }>
+	| Readonly<{ kind: 'superseded'; lifecycle: LoadLifecycleResult }>
 	| Readonly<{ kind: 'blocked' | 'not-complete' | 'expired'; persona: PersonaSnapshot }>
 	| CorruptLifecycleState;
 
@@ -548,6 +556,29 @@ async function restoreCurrent(db: IDBPDatabase<LifecycleDatabase>): Promise<Load
 	return hydrateLifecycle(observed.entropy, observed.player);
 }
 
+export async function authorizeActiveRun(expected: ActiveRunAuthorization): Promise<SelfWriteAuthorizationResult> {
+	if (!isValidIdentityReference(expected.identity) || !Number.isSafeInteger(expected.runNumber) || expected.runNumber < 1) return 'corrupt';
+	return withLifecycle(async (db) => {
+		try {
+			const stored = await readStoredRecords(db);
+			const rootEmpty = stored.rootKeys.length === 0;
+			const playerEmpty = stored.playerKeys.length === 0;
+			if (rootEmpty !== playerEmpty || rootEmpty ||
+				stored.rootKeys.some((key) => key !== ROOT_WRAPPING_KEY && key !== ENCRYPTED_ROOT_ENTROPY) ||
+				stored.rootKeys.length !== 2 || stored.playerKeys.length !== 1 || stored.playerKeys[0] !== PLAYER_STATE ||
+				!hasValidWrappingKey(stored.rootWrappingKey) || !isEncryptedRootEntropy(stored.encryptedEntropy) ||
+				!isValidPlayerLifecycle(stored.player)) return 'corrupt';
+			const player = stored.player;
+			if (player.mode.kind !== 'running') return 'superseded';
+			const activeRun = player.mode.activeRun;
+			return sameIdentityReference(activeRun.identity, expected.identity) && activeRun.runNumber === expected.runNumber
+				? 'authorized' : 'superseded';
+		} catch {
+			return 'corrupt';
+		}
+	});
+}
+
 export async function selectIdentity(expectedGeneration: number, candidate: IdentityCandidate): Promise<SelectionResult> {
 	assertBip85Index(expectedGeneration, 'generation');
 	if (!isValidCandidate(candidate)) return { kind: 'corrupt', reason: 'invalid-candidate' };
@@ -602,10 +633,13 @@ async function mutateMending(expected: PersonaSnapshot, operation: 'start' | 'co
 		if (!observed) return { kind: 'corrupt', reason: 'partial-state' };
 		if (isCorruptLifecycle(observed)) return observed;
 		try {
-			if (observed.player.mode.kind !== 'running') return { kind: 'corrupt', reason: 'identity-reference' };
+			if (observed.player.mode.kind !== 'running') {
+				const latest = await hydrateLifecycle(observed.entropy, observed.player);
+				return isCorruptLifecycle(latest) ? latest : { kind: 'superseded', lifecycle: latest };
+			}
 			if (!samePersonaExpected(expected, observed.player.mode.activeRun)) {
 				const latest = await hydrateLifecycle(observed.entropy, observed.player);
-				return latest.kind === 'restored' ? { kind: 'superseded', persona: latest.persona } : { kind: 'corrupt', reason: 'identity-reference' };
+				return isCorruptLifecycle(latest) ? latest : { kind: 'superseded', lifecycle: latest };
 			}
 			const tx = db.transaction(PLAYER_LIFECYCLE_STORE_NAME, 'readwrite');
 			try {
@@ -615,7 +649,7 @@ async function mutateMending(expected: PersonaSnapshot, operation: 'start' | 'co
 			if (current.mode.kind !== 'running' || !samePersonaExpected(expected, current.mode.activeRun)) {
 				await tx.done;
 				const latest = await restoreCurrent(db);
-				return latest.kind === 'restored' ? { kind: 'superseded', persona: latest.persona } : { kind: 'corrupt', reason: 'identity-reference' };
+				return isCorruptLifecycle(latest) ? latest : { kind: 'superseded', lifecycle: latest };
 			}
 			const activeRun = current.mode.activeRun;
 			const nowMs = Date.now();

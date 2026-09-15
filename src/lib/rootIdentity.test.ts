@@ -7,6 +7,7 @@ import {
 	DATABASE_VERSION,
 	PLAYER_LIFECYCLE_STORE_NAME,
 	ROOT_SECRET_STORE_NAME,
+	authorizeActiveRun,
 	collectCompletedMending,
 	loadOrCreateLifecycle,
 	selectIdentity,
@@ -108,6 +109,23 @@ describe('Root / Identity / Run lifecycle', () => {
 		expect(lifecycle.mode.kind).toBe('running');
 	});
 
+	it('authorizes only the persisted current Identity and Run, independent of revision', async () => {
+		const selection = await loadOrCreateLifecycle();
+		if (selection.kind !== 'created') throw new Error('Expected fresh state.');
+		const candidate = selection.selection.candidates[0];
+		const identity = { generation: 1, accountIndex: candidate.accountIndex, pubkey: candidate.pubkey };
+		expect(await authorizeActiveRun({ identity, runNumber: 1 })).toBe('superseded');
+		const selected = await selectIdentity(selection.selection.generation, candidate);
+		if (selected.kind !== 'selected') throw new Error('Expected selected state.');
+		expect(await authorizeActiveRun({ identity, runNumber: 1 })).toBe('authorized');
+		const started = await startMending(selected.persona);
+		if (started.kind !== 'started') throw new Error('Expected mending start.');
+		expect(await authorizeActiveRun({ identity, runNumber: 1 })).toBe('authorized');
+		vi.mocked(Date.now).mockReturnValue(TIME + 8 * 24 * 60 * 60 * 1000);
+		expect((await transitionExpiredPersona(started.persona)).kind).toBe('transitioned');
+		expect(await authorizeActiveRun({ identity, runNumber: 1 })).toBe('superseded');
+	});
+
 	it('selects one candidate by CAS and re-derives the signer after reload', async () => {
 		const selection = await loadOrCreateLifecycle();
 		if (selection.kind !== 'created') throw new Error('Expected fresh state.');
@@ -139,6 +157,27 @@ describe('Root / Identity / Run lifecycle', () => {
 		if (collected.kind !== 'collected') return;
 		expect(collected.persona.gameState.mendingJob).toBeNull();
 		expect(collected.persona.activeRun.revision).toBe(2);
+	});
+
+	it('treats stale mending after death as lifecycle supersession, not corruption', async () => {
+		const selection = await loadOrCreateLifecycle();
+		if (selection.kind !== 'created') throw new Error('Expected fresh state.');
+		const selected = await selectIdentity(selection.selection.generation, selection.selection.candidates[0]);
+		if (selected.kind !== 'selected') throw new Error('Expected selected state.');
+		vi.mocked(Date.now).mockReturnValue(TIME + 8 * 24 * 60 * 60 * 1000);
+		expect((await transitionExpiredPersona(selected.persona)).kind).toBe('transitioned');
+		const staleStart = await startMending(selected.persona);
+		expect(staleStart.kind).toBe('superseded');
+		if (staleStart.kind !== 'superseded') return;
+		expect(staleStart.lifecycle.kind).toBe('selecting');
+
+		const latest = await loadOrCreateLifecycle();
+		if (latest.kind !== 'selecting') throw new Error('Expected pending selection.');
+		const next = await selectIdentity(latest.selection.generation, latest.selection.candidates[0]);
+		if (next.kind !== 'selected') throw new Error('Expected next selected state.');
+		const staleCollect = await collectCompletedMending(selected.persona);
+		expect(staleCollect.kind).toBe('superseded');
+		if (staleCollect.kind === 'superseded') expect(staleCollect.lifecycle.kind).toBe('restored');
 	});
 
 	it('rolls back fresh initialization when the aggregate transaction aborts', async () => {

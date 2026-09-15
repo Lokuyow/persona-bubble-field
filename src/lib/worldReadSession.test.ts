@@ -175,6 +175,7 @@ describe('Trace reply publication ownership', () => {
 		const pending = deferred<import('./nostrRelayTransport').PublishRelayResult[]>();
 		f.publish.mockImplementationOnce(() => pending.promise);
 		const result = f.submit();
+		await settle();
 		const rawEvent = f.publish.mock.calls[0][0];
 		f.callbacks().onLiveEvent(rawEvent);
 		f.callbacks().onBatch({ events: [rawEvent], relays: [] });
@@ -219,6 +220,7 @@ describe('Trace reply publication ownership', () => {
 		const pending = deferred<import('./nostrRelayTransport').PublishRelayResult[]>();
 		f.publish.mockImplementationOnce(() => pending.promise);
 		const result = f.submit();
+		await settle();
 		f.session.closeTraceConversation(); await settle();
 		const configurations = f.configureTraceReplies.mock.calls.length;
 		pending.resolve(accepted);
@@ -376,6 +378,28 @@ describe('world read session', () => {
 			dispose,
 			publish
 		});
+	});
+
+	it('stops every self-write boundary when persisted Run authorization is lost', async () => {
+		publish.mockResolvedValue([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
+		const authorize = vi.fn()
+			.mockResolvedValueOnce('authorized' as const)
+			.mockResolvedValueOnce('authorized' as const)
+			.mockResolvedValueOnce('superseded' as const);
+		const lost = vi.fn();
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 }, selfSigner: selfSigner(),
+			authorizeSelfWrite: authorize, onSelfWriteAuthorizationLost: lost,
+			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn()
+		});
+		await session.start();
+		session.completeBootstrap();
+		await expect(session.moveSelf('right')).resolves.toMatchObject({ kind: 'succeeded' });
+		await expect(session.publishMessage('stale', 'normal')).resolves.toMatchObject({ kind: 'succeeded' });
+		await expect(session.publish({} as VerifiedEvent)).rejects.toThrow('Self-write authorization was lost.');
+		expect(publish.mock.calls.map(([event]) => event.kind)).toEqual([30078, 42]);
+		expect(authorize).toHaveBeenCalledTimes(3);
+		expect(lost).toHaveBeenCalledTimes(1);
 	});
 
 	it('bounds planner inputs while processing 100 successive self position seconds', async () => {

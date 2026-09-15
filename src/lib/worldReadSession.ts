@@ -37,7 +37,7 @@ import {
 import type { Direction } from './geometry';
 import { isBlockedFacilityCell } from './fieldFacilities';
 import type { Event as NostrEvent, VerifiedEvent } from 'nostr-tools/pure';
-import type { ActiveSignerSnapshot } from './rootIdentity';
+import type { ActiveSignerSnapshot, SelfWriteAuthorizationResult } from './rootIdentity';
 import type { SpeechType } from './conversation';
 import { reachedAuthoritativeRelay } from './initialProfilePublication';
 import {
@@ -122,6 +122,8 @@ export type WorldReadSessionOptions = Readonly<{
 	onStatusChanged: (status: WorldReadConnectionStatus) => void;
 	onSelfPositionWriteStateChanged?: (state: SelfPositionWriteState) => void;
 	onSelfMessageAvailabilityChanged?: (state: SelfMessageAvailability) => void;
+	authorizeSelfWrite?: () => Promise<SelfWriteAuthorizationResult>;
+	onSelfWriteAuthorizationLost?: () => void;
 }>;
 
 type BufferedLiveEvent =
@@ -208,6 +210,20 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		if (next.kind === selfMessageAvailability.kind) return;
 		selfMessageAvailability = next;
 		if (!disposed) options.onSelfMessageAvailabilityChanged?.(next);
+	}
+
+	async function authorizeSelfWrite(): Promise<boolean> {
+		if (!options.authorizeSelfWrite) return true;
+		const result = await options.authorizeSelfWrite();
+		if (result === 'authorized') return true;
+		if (!disposed) {
+			disposed = true;
+			traceConversationGeneration += 1;
+			pendingLiveEvents.splice(0);
+			transport?.dispose();
+			options.onSelfWriteAuthorizationLost?.();
+		}
+		return false;
 	}
 
 	function project(nowMs: number): PresenceState {
@@ -427,6 +443,10 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		if (!candidate) return { kind: 'blocked' };
 		const { event, parsed } = candidate;
 		pendingSelfMessage = { id: parsed.id, echoConfirmed: false };
+		if (!await authorizeSelfWrite()) {
+			if (pendingSelfMessage?.id === parsed.id) pendingSelfMessage = null;
+			return { kind: 'unavailable' };
+		}
 
 		try {
 			const results = await transport.publish(event);
@@ -461,6 +481,11 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		pendingSelfOperation = { id: parsed.id, operation };
 		latestSelfOperationId = parsed.id;
 		emitSelfPositionWriteState({ kind: 'pending', operation });
+		if (!await authorizeSelfWrite()) {
+			if (pendingSelfOperation?.id === parsed.id) pendingSelfOperation = null;
+			emitSelfPositionWriteState({ kind: 'unavailable' });
+			return { kind: 'unavailable' };
+		}
 		try {
 			const results = await transport!.publish(event);
 			if (disposed) return { kind: 'unavailable' };
@@ -751,6 +776,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		const operation = { eventId: null as string | null };
 		pendingTraceReply = operation;
 		try {
+			if (!await authorizeSelfWrite()) return { kind: 'unavailable' };
 			const nowMs = Date.now();
 			const prepared = prepareTraceInspectionActivity({
 				presence: currentPresence(), selfId: options.selfSigner.pubkey,
@@ -771,6 +797,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 				root: accepted.root, parent: accepted.target, content: input.content, speechType: input.speechType,
 				createdAt: Math.floor(Date.now() / 1000)
 			}), options.selfSigner.secretKey);
+			if (!await authorizeSelfWrite()) return { kind: 'unavailable' };
 			operation.eventId = event.id;
 			const results = await transport.publish(event);
 			if (disposed) return { kind: 'unavailable' };
@@ -906,7 +933,10 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 
 		publish(event: VerifiedEvent): Promise<readonly PublishRelayResult[]> {
 			if (disposed || !transport) throw new Error('World read session must start before publishing.');
-			return transport.publish(event);
+			return authorizeSelfWrite().then((authorized) => {
+				if (!authorized) throw new Error('Self-write authorization was lost.');
+				return transport!.publish(event);
+			});
 		},
 
 		dispose(): void {

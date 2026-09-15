@@ -949,6 +949,83 @@ test.describe('Relay startup', () => {
 		await expect.poll(async () => (await relayState(page)).state.published.some((event) => event.kind === 42 && event.pubkey === pubkey)).toBe(true);
 	});
 
+	test('rejects a stale Run world write after another tab commits death selection', async ({ page }) => {
+		await page.clock.install({ time: Date.now() });
+		const secret = fixtureSecret(57);
+		const oldPubkey = getPublicKey(secret);
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { persistAcrossReload: true });
+		await seedRelayAccount(page, secret, oldPubkey);
+		await page.goto('/');
+		await page.evaluate(() => {
+			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
+			relay.releaseMetadata(); relay.releasePrimary();
+		});
+		await expect(page.locator('.composer-dock')).toBeVisible();
+		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${oldPubkey}"]`)).toBeVisible();
+		const deathTab = await page.context().newPage();
+		try {
+			await installHostOwnedStub(deathTab);
+			await installDelayedRelay(deathTab);
+			await deathTab.goto('/');
+			await overwriteRelayGameState(deathTab, { version: 2, personaPubkey: oldPubkey, lifespanExpiresAtMs: Date.now() - 1, points: 0,
+				abilities: { inferenceEfficiency: 0, contextCapacity: 0, hallucinationSuppression: 0 }, mendingJob: null });
+			await deathTab.reload({ waitUntil: 'domcontentloaded' });
+			await expect(deathTab.getByRole('dialog')).toBeVisible();
+			await expect(deathTab.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
+
+			const reloaded = page.waitForEvent('framenavigated', (frame) => frame === page.mainFrame());
+			const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
+			await editor.fill('stale Run must not publish after death commit');
+			await page.locator('ehagaki-composer').getByRole('button', { name: 'Send' }).click();
+			await reloaded;
+			await expect(page.getByRole('dialog')).toBeVisible();
+			await expect.poll(async () => {
+				const state = (await relayState(page)).state;
+				return state.published.some((event) => event.kind === 42 && event.pubkey === oldPubkey && event.content === 'stale Run must not publish after death commit');
+			}).toBe(false);
+		} finally {
+			await deathTab.close();
+		}
+	});
+
+	test('reconciles stale mending into pending selection after another tab commits death', async ({ page }) => {
+		await page.clock.install({ time: Date.now() });
+		const secret = fixtureSecret(57);
+		const oldPubkey = getPublicKey(secret);
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page);
+		await seedRelayAccount(page, secret, oldPubkey);
+		await page.goto('/');
+		await page.evaluate(() => {
+			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
+			relay.releaseMetadata(); relay.releasePrimary();
+		});
+		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${oldPubkey}"]`)).toBeVisible();
+		await moveRelaySelfTo(page, { x: 11, y: 5 });
+		await page.getByRole('button', { name: '繕い端末' }).click();
+		await expect(page.getByRole('button', { name: '繕いを開始' })).toBeVisible();
+
+		const deathTab = await page.context().newPage();
+		try {
+			await installHostOwnedStub(deathTab);
+			await installDelayedRelay(deathTab);
+			await deathTab.goto('/');
+			await overwriteRelayGameState(deathTab, { version: 2, personaPubkey: oldPubkey, lifespanExpiresAtMs: Date.now() - 1, points: 0,
+				abilities: { inferenceEfficiency: 0, contextCapacity: 0, hallucinationSuppression: 0 }, mendingJob: null });
+			await deathTab.reload({ waitUntil: 'domcontentloaded' });
+			await expect(deathTab.getByRole('dialog')).toBeVisible();
+
+			const reloaded = page.waitForEvent('framenavigated', (frame) => frame === page.mainFrame());
+			await page.getByRole('button', { name: '繕いを開始' }).click();
+			await reloaded;
+			await expect(page.getByRole('dialog')).toBeVisible();
+			await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
+		} finally {
+			await deathTab.close();
+		}
+	});
+
 	test('falls back to a read-only world when startup death transition fails', async ({ page }) => {
 		const secret = fixtureSecret(57);
 		const pubkey = getPublicKey(secret);

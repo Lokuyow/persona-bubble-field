@@ -53,6 +53,7 @@
 	import { projectMending } from '$lib/mending';
 	import {
 		CURRENT_CHARACTER_PROFILE_REVISION,
+		authorizeActiveRun,
 		collectCompletedMending,
 		loadOrCreateLifecycle,
 		selectIdentity,
@@ -801,7 +802,8 @@
 
 		const startReadSession = async (
 			signer: ActiveSignerSnapshot | null,
-			characterProfilePublication: PreparedCharacterProfilePublication | null = null
+			characterProfilePublication: PreparedCharacterProfilePublication | null = null,
+			authorizationRunNumber: number | null = signer ? personaSnapshot?.activeRun.runNumber ?? null : null
 		): Promise<void> => {
 			const previousSession = session;
 			session = null;
@@ -810,6 +812,12 @@
 			const nextSession = createWorldReadSession({
 				field: FIELD,
 				selfSigner: signer,
+				...(signer && authorizationRunNumber !== null ? {
+					authorizeSelfWrite: () => authorizeActiveRun({ identity: signer.identity, runNumber: authorizationRunNumber }),
+					onSelfWriteAuthorizationLost: () => {
+						if (!personaLifecycleTransition) window.location.reload();
+					}
+				} : {}),
 				onPresenceChanged: acceptPresence,
 				onLiveMessage: receiveLiveMessage,
 				onTimelineMessage: receiveTimelineMessage,
@@ -1121,7 +1129,8 @@
 	function samePersonaIdentity(first: PersonaSnapshot, second: PersonaSnapshot): boolean {
 		return first.signer.pubkey === second.signer.pubkey &&
 			first.signer.identityCreatedAtMs === second.signer.identityCreatedAtMs &&
-			first.gameState.personaPubkey === second.gameState.personaPubkey;
+			first.gameState.personaPubkey === second.gameState.personaPubkey &&
+			first.activeRun.runNumber === second.activeRun.runNumber;
 	}
 
 	function disposePersonaWriter(currentSession: ReturnType<typeof createWorldReadSession> | null = worldSession): void {
@@ -1177,8 +1186,17 @@
 				enterReadOnlyFallback('Persona is unavailable for publishing.');
 				return;
 			}
-			if (result.kind === 'superseded' && !samePersonaIdentity(expected, result.persona)) {
-				reloadForPersonaIdentityChange(result.persona);
+			if (result.kind === 'superseded') {
+				if (result.lifecycle.kind === 'restored') {
+					if (!samePersonaIdentity(expected, result.lifecycle.persona)) reloadForPersonaIdentityChange(result.lifecycle.persona);
+					else {
+						personaSnapshot = result.lifecycle.persona;
+						selfSigner = result.lifecycle.persona.signer;
+					}
+				} else {
+					stopPersonaInteractions('Persona lifecycle changed in another tab.');
+					window.location.reload();
+				}
 				return;
 			}
 			personaSnapshot = result.persona;
