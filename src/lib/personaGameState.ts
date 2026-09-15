@@ -9,6 +9,53 @@ export const ABILITY_LEVEL_LIMITS = {
 	hallucinationSuppression: 4
 } as const;
 
+export type PersonaAbilityKey = keyof typeof ABILITY_LEVEL_LIMITS;
+
+export type AbilityUpgrade = Readonly<{
+	key: PersonaAbilityKey;
+	level: number;
+	cost: number;
+	currentEffect: string;
+	nextEffect: string | null;
+}>;
+
+const ABILITY_EFFECTS: Readonly<Record<PersonaAbilityKey, readonly string[]>> = {
+	inferenceEfficiency: ['0.8h/h', '0.9h/h', '1.0h/h', '1.1h/h', '1.25h/h'],
+	contextCapacity: ['8h', '12h', '18h', '24h'],
+	hallucinationSuppression: ['1.0pt/h', '1.1pt/h', '1.2pt/h', '1.35pt/h', '1.5pt/h']
+};
+
+const ABILITY_UPGRADE_COSTS: Readonly<Record<PersonaAbilityKey, readonly number[]>> = {
+	inferenceEfficiency: [5, 10, 20, 40],
+	contextCapacity: [10, 20, 40],
+	hallucinationSuppression: [10, 20, 30, 40]
+};
+
+export function getAbilityUpgrade(key: PersonaAbilityKey, levels: PersonaAbilityLevels): AbilityUpgrade {
+	const level = levels[key];
+	const effects = ABILITY_EFFECTS[key];
+	const costs = ABILITY_UPGRADE_COSTS[key];
+	if (!isAbilityLevel(level, ABILITY_LEVEL_LIMITS[key])) throw new TypeError('Invalid ability levels.');
+	return {
+		key,
+		level,
+		cost: costs[level] ?? 0,
+		currentEffect: effects[level],
+		nextEffect: effects[level + 1] ?? null
+	};
+}
+
+export function upgradeAbility(gameState: PersonaGameState, key: PersonaAbilityKey): PersonaGameState | null {
+	if (!isValidPersonaGameState(gameState)) throw new TypeError('Invalid persona game state.');
+	const upgrade = getAbilityUpgrade(key, gameState.abilities);
+	if (!upgrade.nextEffect || gameState.points < upgrade.cost) return null;
+	return {
+		...gameState,
+		points: gameState.points - upgrade.cost,
+		abilities: { ...gameState.abilities, [key]: upgrade.level + 1 }
+	};
+}
+
 export type PersonaAbilityLevels = Readonly<{
 	inferenceEfficiency: number;
 	contextCapacity: number;

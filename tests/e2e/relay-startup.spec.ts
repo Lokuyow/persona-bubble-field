@@ -681,10 +681,10 @@ async function installPromptApiStub(page: Page, availability: 'available' | 'una
 		}, { availability });
 }
 
-async function seedRelayAccount(page: Page, secretKey: Uint8Array, pubkey: string, lifespanExpiresAtMs = Date.now() + 7 * 24 * 60 * 60 * 1000): Promise<void> {
+async function seedRelayAccount(page: Page, secretKey: Uint8Array, pubkey: string, lifespanExpiresAtMs = Date.now() + 7 * 24 * 60 * 60 * 1000, points = 0, abilities = { inferenceEfficiency: 0, contextCapacity: 0, hallucinationSuppression: 0 }): Promise<void> {
 	const fixtureAccountIndex = fixtureAccountIndexForSecret(secretKey);
 	await page.goto('/favicon.svg');
-	await page.evaluate(async ({ accountPubkey, accountIndex, expiresAtMs, characterId }) => {
+	await page.evaluate(async ({ accountPubkey, accountIndex, expiresAtMs, points, abilities, characterId }) => {
 		const database = await new Promise<IDBDatabase>((resolve, reject) => {
 			const request = indexedDB.open('persona-bubble-field-account', 4);
 			request.onupgradeneeded = () => {
@@ -710,7 +710,7 @@ async function seedRelayAccount(page: Page, secretKey: Uint8Array, pubkey: strin
 				identity: { generation: 1, accountIndex, pubkey: accountPubkey },
 				gameState: {
 			version: 2, personaPubkey: accountPubkey, lifespanExpiresAtMs: expiresAtMs,
-			points: 0, abilities: { inferenceEfficiency: 0, contextCapacity: 0, hallucinationSuppression: 0 }, mendingJob: null
+			points, abilities, mendingJob: null
 				} } }
 		}, 'player-lifecycle');
 		await new Promise<void>((resolve, reject) => {
@@ -719,7 +719,7 @@ async function seedRelayAccount(page: Page, secretKey: Uint8Array, pubkey: strin
 			transaction.onabort = () => reject(transaction.error);
 		});
 		database.close();
-	}, { accountPubkey: pubkey, accountIndex: fixtureAccountIndex, expiresAtMs: lifespanExpiresAtMs, characterId: deriveCharacterFromPubkey(pubkey, CHARACTER_CATALOG).characterId });
+	}, { accountPubkey: pubkey, accountIndex: fixtureAccountIndex, expiresAtMs: lifespanExpiresAtMs, points, abilities, characterId: deriveCharacterFromPubkey(pubkey, CHARACTER_CATALOG).characterId });
 }
 
 async function readRelayGameState(page: Page): Promise<{
@@ -727,6 +727,7 @@ async function readRelayGameState(page: Page): Promise<{
 	personaPubkey: string;
 	lifespanExpiresAtMs: number;
 	points: number;
+	abilities: { inferenceEfficiency: number; contextCapacity: number; hallucinationSuppression: number };
 	mendingJob: unknown;
 }> {
 	return page.evaluate(async () => {
@@ -738,8 +739,8 @@ async function readRelayGameState(page: Page): Promise<{
 		try {
 			const transaction = database.transaction('persona-bubble-field-player-state');
 			const request = transaction.objectStore('persona-bubble-field-player-state').get('player-lifecycle');
-			return await new Promise<{ version: number; personaPubkey: string; lifespanExpiresAtMs: number; points: number; mendingJob: unknown }>((resolve, reject) => {
-				transaction.oncomplete = () => resolve((request.result as { mode: { activeRun: { gameState: { version: number; personaPubkey: string; lifespanExpiresAtMs: number; points: number; mendingJob: unknown } } } }).mode.activeRun.gameState);
+			return await new Promise<{ version: number; personaPubkey: string; lifespanExpiresAtMs: number; points: number; abilities: { inferenceEfficiency: number; contextCapacity: number; hallucinationSuppression: number }; mendingJob: unknown }>((resolve, reject) => {
+				transaction.oncomplete = () => resolve((request.result as { mode: { activeRun: { gameState: { version: number; personaPubkey: string; lifespanExpiresAtMs: number; points: number; abilities: { inferenceEfficiency: number; contextCapacity: number; hallucinationSuppression: number }; mendingJob: unknown } } } }).mode.activeRun.gameState);
 				transaction.onerror = () => reject(transaction.error);
 				transaction.onabort = () => reject(transaction.error);
 			});
@@ -1243,6 +1244,41 @@ test.describe('Relay startup', () => {
 		expect(collected.points).toBe(8);
 		expect(collected.lifespanExpiresAtMs).toBe(started.lifespanExpiresAtMs + 6.4 * 60 * 60 * 1000);
 		await page.getByRole('button', { name: '閉じる' }).click();
+	});
+
+	test('opens the adjustment terminal only nearby and persists one ability upgrade', async ({ page }) => {
+		const startTime = Date.now();
+		const secret = fixtureSecret(19);
+		const pubkey = getPublicKey(secret);
+		await page.clock.install({ time: startTime });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { primaryEvents: testEvents(startTime) });
+		await seedRelayAccount(page, secret, pubkey, startTime + 7 * 24 * 60 * 60 * 1000, 10);
+		await page.goto('/');
+		await page.evaluate(() => {
+			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
+			relay.releaseMetadata(); relay.releasePrimary();
+		});
+		const adjustment = page.getByRole('button', { name: '調整端末' });
+		await adjustment.click();
+		await expect(page.getByRole('status')).toContainText('近づくと端末を使える');
+
+		const nearby = finalizeEvent(buildPositionEventTemplate({
+			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 14, y: 7 }, slot: 1,
+			createdAt: Math.floor(await page.evaluate(() => Date.now()) / 1000)
+		}), secret);
+		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), nearby);
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '14,7');
+		await adjustment.click();
+		const dialog = page.getByRole('dialog', { name: '調整端末' });
+		await expect(dialog).toContainText('所持ポイント: 10.00pt');
+		await expect(dialog).toContainText('推論効率 Lv0');
+		await expect(dialog).toContainText('次: 0.9h/h / 5pt');
+		await dialog.getByRole('button', { name: '1 level強化' }).first().click();
+		await expect(dialog).toContainText('所持ポイント: 5.00pt');
+		await expect(dialog).toContainText('推論効率 Lv1');
+		await page.reload();
+		await expect.poll(() => readRelayGameState(page)).toMatchObject({ points: 5, abilities: { inferenceEfficiency: 1, contextCapacity: 0, hallucinationSuppression: 0 } });
 	});
 
 	test('keeps an offline mending job alive across browser reopen after its stored expiry', async ({ page }) => {
