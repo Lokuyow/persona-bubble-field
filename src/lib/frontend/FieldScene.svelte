@@ -10,7 +10,7 @@
 	import type { Participant } from '$lib/frontend/presencePresentation';
 	import { isWithinTraceInvestigationRange, type TraceRootCell } from '$lib/traceInvestigation';
 	import type { ParsedWorldMessage } from '$lib/nostrProtocol';
-	import { FIXED_FIELD_FACILITIES } from '$lib/fieldFacilities';
+	import { ADJUSTMENT_TERMINAL, FIXED_FIELD_FACILITIES } from '$lib/fieldFacilities';
 
 	const FIELD_BACKGROUND_ASSET = '/field/prototype-danchi-courtyard.webp';
 	const TRACE_ICON_ASSET = '/trace/trace-icon.svg';
@@ -137,8 +137,8 @@
 		</div>
 		<div class="field-facility-layer" aria-hidden="true">
 			{#each FIXED_FIELD_FACILITIES as facility (facility.kind)}
-				<span class="field-facility field-mending-terminal" data-field-facility={facility.kind}
-					style={`left: ${(facility.position.x + 0.5) * cellSize}px; top: ${(facility.position.y + 0.5) * cellSize}px;`}>繕い</span>
+				<span class={['field-facility', facility.kind === 'mending-terminal' ? 'field-mending-terminal' : 'field-adjustment-terminal']} data-field-facility={facility.kind}
+					style={`left: ${(facility.position.x + 0.5) * cellSize}px; top: ${(facility.position.y + 0.5) * cellSize}px;`}>{facility.kind === 'mending-terminal' ? '繕い' : '調整'}</span>
 			{/each}
 		</div>
 		{#if proximityFeedback}
@@ -157,7 +157,7 @@
 					type="button"
 					ondragstart={(event) => event.preventDefault()}
 					data-cell-position={`${position.x},${position.y}`}
-					aria-label="繕い端末"
+					aria-label={position.x === ADJUSTMENT_TERMINAL.position.x && position.y === ADJUSTMENT_TERMINAL.position.y ? '調整端末' : '繕い端末'}
 					style={`left: ${position.x * cellSize}px; top: ${position.y * cellSize}px;`}
 					onclick={(event) => { event.stopPropagation(); resolveFieldCellSelection(position, event.currentTarget as HTMLButtonElement); }}
 				></button>

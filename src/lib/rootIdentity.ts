@@ -10,6 +10,8 @@ import {
 	createInitialPersonaGameState,
 	isPersonaExpired,
 	isValidPersonaGameState,
+	upgradeAbility,
+	type PersonaAbilityKey,
 	type PersonaGameState
 } from './personaGameState';
 import { createMendingJob, materializeCompletedMending, projectMending } from './mending';
@@ -137,6 +139,12 @@ export type MendingMutationResult =
 	| Readonly<{ kind: 'started' | 'collected'; persona: PersonaSnapshot }>
 	| Readonly<{ kind: 'superseded'; lifecycle: LoadLifecycleResult }>
 	| Readonly<{ kind: 'blocked' | 'not-complete' | 'expired'; persona: PersonaSnapshot }>
+	| CorruptLifecycleState;
+
+export type AbilityUpgradeResult =
+	| Readonly<{ kind: 'upgraded'; persona: PersonaSnapshot }>
+	| Readonly<{ kind: 'superseded'; lifecycle: LoadLifecycleResult }>
+	| Readonly<{ kind: 'blocked' | 'expired'; persona: PersonaSnapshot }>
 	| CorruptLifecycleState;
 
 export type DeathTransitionResult =
@@ -695,6 +703,60 @@ export function startMending(expected: PersonaSnapshot): Promise<MendingMutation
 
 export function collectCompletedMending(expected: PersonaSnapshot): Promise<MendingMutationResult> {
 	return mutateMending(expected, 'collect');
+}
+
+async function mutateAbilityUpgrade(expected: PersonaSnapshot, key: PersonaAbilityKey): Promise<AbilityUpgradeResult> {
+	return withLifecycle(async (db) => {
+		const observed = await readRootAndPlayer(db);
+		if (!observed) return { kind: 'corrupt', reason: 'partial-state' };
+		if (isCorruptLifecycle(observed)) return observed;
+		try {
+			if (observed.player.mode.kind !== 'running' || !samePersonaExpected(expected, observed.player.mode.activeRun)) {
+				const latest = await hydrateLifecycle(observed.entropy, observed.player);
+				return isCorruptLifecycle(latest) ? latest : { kind: 'superseded', lifecycle: latest };
+			}
+			const tx = db.transaction(PLAYER_LIFECYCLE_STORE_NAME, 'readwrite');
+			try {
+				const store = tx.objectStore(PLAYER_LIFECYCLE_STORE_NAME);
+				const current = await store.get(PLAYER_STATE);
+				if (!isValidPlayerLifecycle(current)) { await tx.done; return { kind: 'corrupt', reason: 'player-state' }; }
+				if (current.mode.kind !== 'running' || !samePersonaExpected(expected, current.mode.activeRun)) {
+					await tx.done;
+					const latest = await restoreCurrent(db);
+					return isCorruptLifecycle(latest) ? latest : { kind: 'superseded', lifecycle: latest };
+				}
+				const nowMs = Date.now();
+				if (!isSafeTimestamp(nowMs)) throw new Error('Invalid lifecycle timestamp.');
+				if (isPersonaExpired(current.mode.activeRun.gameState, nowMs)) {
+					await tx.done;
+					const latest = await hydrateLifecycle(observed.entropy, current);
+					return latest.kind === 'restored' ? { kind: 'expired', persona: latest.persona } : { kind: 'corrupt', reason: 'identity-reference' };
+				}
+				const nextGameState = upgradeAbility(current.mode.activeRun.gameState, key);
+				if (!nextGameState) {
+					await tx.done;
+					const latest = await hydrateLifecycle(observed.entropy, current);
+					return latest.kind === 'restored' ? { kind: 'blocked', persona: latest.persona } : { kind: 'corrupt', reason: 'identity-reference' };
+				}
+				const activeRun = current.mode.activeRun;
+				const next: PlayerLifecycle = { ...current, mode: { kind: 'running', activeRun: { ...activeRun, revision: activeRun.revision + 1, gameState: nextGameState } } };
+				await store.put(next, PLAYER_STATE);
+				await tx.done;
+				const latest = await loadOrCreateLifecycle();
+				return latest.kind === 'restored' ? { kind: 'upgraded', persona: latest.persona } : { kind: 'corrupt', reason: 'identity-reference' };
+			} catch (error) {
+				try { tx.abort(); } catch { /* already aborted */ }
+				await tx.done.catch(() => {});
+				throw error;
+			}
+		} finally {
+			observed.entropy.fill(0);
+		}
+	});
+}
+
+export function upgradePersonaAbility(expected: PersonaSnapshot, key: PersonaAbilityKey): Promise<AbilityUpgradeResult> {
+	return mutateAbilityUpgrade(expected, key);
 }
 
 export async function transitionExpiredPersona(expected: PersonaSnapshot): Promise<DeathTransitionResult> {

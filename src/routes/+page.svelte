@@ -49,8 +49,10 @@
 	import IdentitySelectionDialog from '$lib/IdentitySelectionDialog.svelte';
 	import LifespanHud from '$lib/LifespanHud.svelte';
 	import MendingDialog from '$lib/MendingDialog.svelte';
-	import { MENDING_TERMINAL, isWithinFacilityInteractionRange, sameFieldCell } from '$lib/fieldFacilities';
+	import AdjustmentDialog from '$lib/AdjustmentDialog.svelte';
+	import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL, isWithinFacilityInteractionRange, sameFieldCell } from '$lib/fieldFacilities';
 	import { projectMending } from '$lib/mending';
+	import { getAbilityUpgrade, type PersonaAbilityKey } from '$lib/personaGameState';
 	import {
 		CURRENT_CHARACTER_PROFILE_REVISION,
 		authorizeActiveRun,
@@ -59,6 +61,7 @@
 		selectIdentity,
 		transitionExpiredPersona,
 		startMending,
+		upgradePersonaAbility,
 		type ActiveSignerSnapshot,
 		type PersonaSnapshot,
 		type PendingSelection
@@ -197,6 +200,8 @@
 	let mendingNowMs = $state(0);
 	let mendingDialogOpen = $state(false);
 	let mendingMutationInFlight = $state(false);
+	let adjustmentDialogOpen = $state(false);
+	let abilityMutationInFlight = $state(false);
 	const LIFESPAN_HUD_REFRESH_INTERVAL_MS = 30_000;
 	let selfPositionWriteState = $state.raw<SelfPositionWriteState>({ kind: 'unavailable' });
 	let selfMessageAvailability: SelfMessageAvailability = { kind: 'unavailable' };
@@ -315,6 +320,7 @@
 	let selfIsActive = $derived(selfPresence?.status === 'active');
 	let mendingProjection = $derived(personaSnapshot ? projectMending(personaSnapshot.gameState, mendingNowMs) : null);
 	let canUseMendingTerminal = $derived(!devWorldSandboxEnabled && Boolean(personaSnapshot && selfIsActive && selfLogicalPosition && isWithinFacilityInteractionRange(selfLogicalPosition)));
+	let canUseAdjustmentTerminal = $derived(!devWorldSandboxEnabled && Boolean(personaSnapshot && selfIsActive && selfLogicalPosition && isWithinFacilityInteractionRange(selfLogicalPosition, ADJUSTMENT_TERMINAL)));
 	let traceRootCells = $derived(groupTraceRoots(effectiveTraceRoots));
 	let traceMarkerCells: readonly TraceMarkerCell[] = $derived(traceRootCells
 		.filter((cell) => traceConversationState.kind !== 'open' || !sameCell(cell.position, traceConversationState.root.position))
@@ -395,7 +401,7 @@
 		!participantViews.some((participant) => sameCell(participant.position, position)) &&
 		traceMarkerCells.some((cell) => sameCell(cell.position, position))
 	));
-	let facilityCellTriggers = $derived([MENDING_TERMINAL.position]);
+	let facilityCellTriggers = $derived([MENDING_TERMINAL.position, ADJUSTMENT_TERMINAL.position]);
 
 	function isActuallyPresented(element: Element | null): element is HTMLElement {
 		if (!(element instanceof HTMLElement) || element.getClientRects().length === 0) return false;
@@ -1072,6 +1078,7 @@
 		colorByPubkey = nextColors;
 		presenceState = nextPresence;
 		if (mendingDialogOpen && !hasLiveMendingProximity()) closeMendingTerminal();
+		if (adjustmentDialogOpen && !canUseAdjustmentTerminal) closeAdjustmentTerminal();
 		const nextProjection = projectFrontendPresence({ presence: nextPresence,
 			selectedCharacterId: selectedId, selfProjectionId: projectionId, geometry, colors: nextColors });
 		animatePresenceTransition(previousProjection, nextProjection, projectionId);
@@ -1110,6 +1117,17 @@
 		mendingDialogOpen = false;
 	}
 
+	function openAdjustmentTerminal(): void {
+		if (!canUseAdjustmentTerminal || abilityMutationInFlight) return;
+		movementInputController.cancelMovementHold();
+		fieldViewportComponent?.cancelPointerGesture();
+		adjustmentDialogOpen = true;
+	}
+
+	function closeAdjustmentTerminal(): void {
+		adjustmentDialogOpen = false;
+	}
+
 	async function chooseIdentity(candidate: NonNullable<typeof pendingIdentitySelection>['candidates'][number]): Promise<void> {
 		const selection = pendingIdentitySelection;
 		if (!selection || personaLifecycleTransition) return;
@@ -1143,6 +1161,7 @@
 	function stopPersonaInteractions(message: string): void {
 		personaLifecycleTransition = true;
 		closeMendingTerminal();
+		closeAdjustmentTerminal();
 		movementInputController.cancelMovementHold();
 		fieldViewportComponent?.cancelPointerGesture();
 		cancelPendingComposerSubmission(new Error(message));
@@ -1171,6 +1190,43 @@
 	function hasLiveMendingProximity(): boolean {
 		return Boolean(!devWorldSandboxEnabled && personaSnapshot && selfIsActive && selfLogicalPosition &&
 			isWithinFacilityInteractionRange(selfLogicalPosition));
+	}
+
+	async function mutateAbility(key: PersonaAbilityKey): Promise<void> {
+		const expected = personaSnapshot;
+		if (!expected || abilityMutationInFlight || !canUseAdjustmentTerminal) {
+			closeAdjustmentTerminal();
+			return;
+		}
+		abilityMutationInFlight = true;
+		try {
+			const result = await upgradePersonaAbility(expected, key);
+			if (result.kind === 'corrupt') {
+				enterReadOnlyFallback('Persona is unavailable for publishing.');
+				return;
+			}
+			if (result.kind === 'superseded') {
+				if (result.lifecycle.kind === 'restored') {
+					if (!samePersonaIdentity(expected, result.lifecycle.persona)) reloadForPersonaIdentityChange(result.lifecycle.persona);
+					else personaSnapshot = result.lifecycle.persona;
+				} else {
+					stopPersonaInteractions('Persona lifecycle changed in another tab.');
+					window.location.reload();
+				}
+				return;
+			}
+			if (result.kind === 'expired') {
+				closeAdjustmentTerminal();
+				void beginDeathTransition(result.persona, worldSession);
+				return;
+			}
+			personaSnapshot = result.persona;
+			selfSigner = result.persona.signer;
+		} catch {
+			closeAdjustmentTerminal();
+		} finally {
+			abilityMutationInFlight = false;
+		}
 	}
 
 	async function mutateMending(operation: 'start' | 'collect'): Promise<void> {
@@ -1252,6 +1308,7 @@
 		return buildFieldCellActions({
 			participantIds,
 			mendingTerminal: canUseMendingTerminal && sameFieldCell(position, MENDING_TERMINAL.position),
+			adjustmentTerminal: canUseAdjustmentTerminal && sameFieldCell(position, ADJUSTMENT_TERMINAL.position),
 			trace
 		});
 	}
@@ -1302,6 +1359,10 @@
 			openMendingTerminal();
 			return;
 		}
+		if (action.kind === 'adjustment-terminal') {
+			openAdjustmentTerminal();
+			return;
+		}
 		if (action.kind === 'trace') {
 			if (action.behavior === 'select-current') {
 				selectTraceSpeech(action.rootId);
@@ -1318,6 +1379,10 @@
 		const resolution = resolveFieldCellActions(actionsForCell(position));
 		if (resolution.kind === 'none') {
 			if (sameFieldCell(position, MENDING_TERMINAL.position) && selfIsActive) {
+				showTraceProximityFeedback(position, '近づくと端末を使える');
+				return;
+			}
+			if (sameFieldCell(position, ADJUSTMENT_TERMINAL.position) && selfIsActive) {
 				showTraceProximityFeedback(position, '近づくと端末を使える');
 				return;
 			}
@@ -1338,6 +1403,7 @@
 
 	function fieldActionLabel(action: FieldCellAction): string {
 		if (action.kind === 'mending-terminal') return '繕い端末を使う';
+		if (action.kind === 'adjustment-terminal') return '調整端末を使う';
 		if (action.kind === 'trace') return '痕跡を調べる';
 		const participant = participantViews.find((candidate) => candidate.id === action.participantId);
 		return participant ? `${participant.character.name} のプロフィールを開く` : 'プロフィールを開く';
@@ -1844,6 +1910,14 @@
 		onOpenChange={(open) => { mendingDialogOpen = open; }}
 		onStart={() => { void mutateMending('start'); }}
 		onCollect={() => { void mutateMending('collect'); }}
+	/>
+	<AdjustmentDialog
+		open={adjustmentDialogOpen}
+		points={personaSnapshot?.gameState.points ?? 0}
+		abilities={personaSnapshot?.gameState.abilities ?? { inferenceEfficiency: 0, contextCapacity: 0, hallucinationSuppression: 0 }}
+		busy={abilityMutationInFlight}
+		onOpenChange={(open) => { adjustmentDialogOpen = open; }}
+		onUpgrade={(key) => { void mutateAbility(key); }}
 	/>
 
 	{#if devWorldSandboxEnabled}

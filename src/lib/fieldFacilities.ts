@@ -1,14 +1,15 @@
 import type { GridPosition } from './geometry';
 
 export type FixedFieldFacility = Readonly<{
-	kind: 'mending-terminal';
+	kind: 'mending-terminal' | 'adjustment-terminal';
 	position: GridPosition;
 }>;
 
 /** Prototype placement only. The facility definition owns its presentation, collision, and interaction cell. */
 export const MENDING_TERMINAL: FixedFieldFacility = { kind: 'mending-terminal', position: { x: 12, y: 5 } };
+export const ADJUSTMENT_TERMINAL: FixedFieldFacility = { kind: 'adjustment-terminal', position: { x: 15, y: 7 } };
 
-export const FIXED_FIELD_FACILITIES: readonly FixedFieldFacility[] = [MENDING_TERMINAL];
+export const FIXED_FIELD_FACILITIES: readonly FixedFieldFacility[] = [MENDING_TERMINAL, ADJUSTMENT_TERMINAL];
 
 export function sameFieldCell(first: GridPosition, second: GridPosition): boolean {
 	return first.x === second.x && first.y === second.y;
