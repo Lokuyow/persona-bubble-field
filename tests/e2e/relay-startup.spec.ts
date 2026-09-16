@@ -1140,6 +1140,39 @@ test.describe('Relay startup', () => {
 		expect(lifecycle).toEqual({ mode: 'running', identities: 1, runNumber: 1 });
 	});
 
+	test('scrolls an overflowing mobile identity selection to the last candidate', async ({ page }) => {
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page);
+		await page.goto('/');
+
+		const dialog = page.locator('.selection-dialog');
+		const candidateButtons = page.getByRole('button', { name: /を選ぶ$/ });
+		await expect(candidateButtons).toHaveCount(3);
+		await page.setViewportSize({ width: 390, height: 640 });
+		await page.locator('.candidate-about').nth(1).evaluate((element) => {
+			element.textContent = '長いプロフィール。'.repeat(160);
+		});
+
+		const overflow = await dialog.evaluate((element) => ({
+			clientHeight: element.clientHeight,
+			scrollHeight: element.scrollHeight,
+			viewportHeight: window.innerHeight
+		}));
+		expect(overflow.scrollHeight).toBeGreaterThan(overflow.clientHeight);
+		expect(overflow.clientHeight).toBeLessThanOrEqual(overflow.viewportHeight - 40);
+
+		await candidateButtons.nth(2).scrollIntoViewIfNeeded();
+		await expect(candidateButtons.nth(2)).toBeVisible();
+		expect(await dialog.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+		await candidateButtons.nth(2).click();
+		await expect(page.getByRole('dialog')).toHaveCount(0);
+		await page.evaluate(() => {
+			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
+			relay.releaseMetadata(); relay.releasePrimary();
+		});
+		await expect(page.locator('.participant[data-self="true"]')).toBeVisible();
+	});
+
 	for (const viewport of [{ width: 1280, height: 800 }, { width: 420, height: 800 }]) {
 		test(`centers the identity selection dialog at ${viewport.width}px`, async ({ page }) => {
 			await installHostOwnedStub(page);
