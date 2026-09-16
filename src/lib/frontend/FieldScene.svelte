@@ -159,7 +159,7 @@
 					type="button"
 					ondragstart={(event) => event.preventDefault()}
 					data-cell-position={`${position.x},${position.y}`}
-					aria-label={position.x === ADJUSTMENT_TERMINAL.position.x && position.y === ADJUSTMENT_TERMINAL.position.y ? '調整端末' : '繕い端末'}
+					aria-label={position.x === ADJUSTMENT_TERMINAL.position.x && position.y === ADJUSTMENT_TERMINAL.position.y ? '調整端末' : '作業端末'}
 					style={`left: ${position.x * cellSize}px; top: ${position.y * cellSize}px;`}
 					onclick={(event) => { event.stopPropagation(); resolveFieldCellSelection(position, event.currentTarget as HTMLButtonElement); }}
 				></button>
