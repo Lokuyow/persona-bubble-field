@@ -14,9 +14,10 @@
 	let mendingLabel = $derived(mendingProjection?.completed ? '作業満杯' : mendingProjection?.lifespanExtensionPerHour ? `作業中 +${formatMendingRate(mendingProjection.lifespanExtensionPerHour.numerator, mendingProjection.lifespanExtensionPerHour.denominator)}h/h` : null);
 </script>
 
-<div class="lifespan-hud" aria-label={mendingLabel ? `${label}、ポイント ${points.toFixed(2)}pt、${mendingLabel}` : `${label}、ポイント ${points.toFixed(2)}pt`}>
+
+<div class="lifespan-hud" aria-label={mendingLabel ? `${label}、ポイント ${points}pt、${mendingLabel}` : `${label}、ポイント ${points}pt`}>
 	<span class="lifespan-value">{label}</span>
-	<span class="points-value">ポイント {points.toFixed(2)}pt</span>
+	<span class="points-value">ポイント {points}pt</span>
 	{#if mendingLabel}<span class="mending-status">{mendingLabel}</span>{/if}
 </div>
 

@@ -17,7 +17,7 @@ import {
 import { createMendingJob, materializeMending, projectMending } from './mending';
 
 export const DATABASE_NAME = 'persona-bubble-field-account';
-export const DATABASE_VERSION = 4;
+export const DATABASE_VERSION = 5;
 export const ROOT_SECRET_STORE_NAME = 'persona-bubble-field-root-secret';
 export const PLAYER_LIFECYCLE_STORE_NAME = 'persona-bubble-field-player-state';
 export const CURRENT_CHARACTER_PROFILE_REVISION = 2;
@@ -305,13 +305,12 @@ function sameBytes(first: Uint8Array, second: Uint8Array): boolean {
 
 function sameGameState(first: PersonaGameState, second: PersonaGameState): boolean {
 	return first.version === second.version && first.personaPubkey === second.personaPubkey && first.lifespanExpiresAtMs === second.lifespanExpiresAtMs &&
-		first.points === second.points && first.abilities.inferenceEfficiency === second.abilities.inferenceEfficiency &&
+		first.points === second.points && first.pointProgressTicks === second.pointProgressTicks && first.abilities.inferenceEfficiency === second.abilities.inferenceEfficiency &&
 		first.abilities.contextCapacity === second.abilities.contextCapacity && first.abilities.hallucinationSuppression === second.abilities.hallucinationSuppression &&
 		first.mendingJob?.startedAtMs === second.mendingJob?.startedAtMs && first.mendingJob?.maximumDurationMs === second.mendingJob?.maximumDurationMs &&
 		first.mendingJob?.lifespanExtensionPerHour.numerator === second.mendingJob?.lifespanExtensionPerHour.numerator &&
 		first.mendingJob?.lifespanExtensionPerHour.denominator === second.mendingJob?.lifespanExtensionPerHour.denominator &&
-		first.mendingJob?.pointsPerHour.numerator === second.mendingJob?.pointsPerHour.numerator &&
-		first.mendingJob?.pointsPerHour.denominator === second.mendingJob?.pointsPerHour.denominator;
+		first.mendingJob?.pointIntervalMs === second.mendingJob?.pointIntervalMs;
 }
 
 function sameIdentityReference(first: IdentityReference, second: IdentityReference): boolean {
@@ -677,7 +676,7 @@ async function mutateMending(expected: PersonaSnapshot, operation: 'start' | 'co
 				if (!gameState.mendingJob) { await tx.done; const latest = await hydrateLifecycle(observed.entropy, current); return latest.kind === 'restored' ? { kind: 'blocked', persona: latest.persona } : { kind: 'corrupt', reason: 'identity-reference' }; }
 				const reward = materializeMending(gameState, nowMs);
 				if (!reward) { await tx.done; const latest = await hydrateLifecycle(observed.entropy, current); return latest.kind === 'restored' ? { kind: 'blocked', persona: latest.persona } : { kind: 'corrupt', reason: 'identity-reference' }; }
-				gameState = { ...gameState, lifespanExpiresAtMs: reward.lifespanExpiresAtMs, points: reward.points, mendingJob: reward.mendingJob };
+				gameState = { ...gameState, lifespanExpiresAtMs: reward.lifespanExpiresAtMs, points: reward.points, pointProgressTicks: reward.pointProgressTicks, mendingJob: reward.mendingJob };
 				kind = 'collected';
 			}
 			const nextRun: ActiveRun = { ...activeRun, revision: activeRun.revision + 1, gameState };

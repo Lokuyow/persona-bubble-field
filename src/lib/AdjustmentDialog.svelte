@@ -30,7 +30,7 @@
 						<Dialog.Title>能力強化</Dialog.Title>
 						<Dialog.Description>ポイントを使って、より効率よく活動できるようにします。</Dialog.Description>
 					</div>
-					<div class="points-display">POINT {points.toFixed(2)} pt</div>
+					<div class="points-display">POINT {points} pt</div>
 				</div>
 				<div class="ability-list">
 					{#each abilityKeys as key}
@@ -38,7 +38,7 @@
 						<section class="ability-card">
 							<div class="ability-card-heading"><h3 aria-label={`${abilityLabels[key]} Lv${upgrade.level}`}>{abilityLabels[key]} <span>Lv{upgrade.level}</span></h3></div>
 							<p class="ability-description">
-								{key === 'inferenceEfficiency' ? '作業1時間あたりの寿命延長量が増えます。' : key === 'contextCapacity' ? '成果を回収せずに蓄積できる時間が増えます。' : '作業1時間あたりに得られるポイントが増えます。'}
+								{key === 'inferenceEfficiency' ? '作業1時間あたりの寿命延長量が増えます。' : key === 'contextCapacity' ? '成果を回収せずに蓄積できる時間が増えます。' : '1pt獲得に必要な作業時間が短くなります。'}
 							</p>
 							<p class="effect-row"><span>現在</span><strong>{upgrade.currentEffect}</strong></p>
 							{#if upgrade.nextEffect}

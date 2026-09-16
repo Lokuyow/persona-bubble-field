@@ -72,8 +72,8 @@ describe('Root / Identity / Run lifecycle', () => {
 		await expect(crypto.subtle.exportKey('raw', rootRecords['root-wrapping-key'] as CryptoKey)).rejects.toBeDefined();
 	});
 
-	it('cleanly replaces pre-v4 prototype stores instead of reading them', async () => {
-		const old = await openDB(DATABASE_NAME, 3, {
+	it('cleanly replaces pre-v5 prototype stores instead of reading them', async () => {
+		const old = await openDB(DATABASE_NAME, 4, {
 			upgrade(db) {
 				db.createObjectStore('persona-bubble-field-account-state');
 				db.createObjectStore('persona-bubble-field-game-state');
@@ -160,7 +160,7 @@ describe('Root / Identity / Run lifecycle', () => {
 		expect(collected.persona.activeRun.revision).toBe(2);
 	});
 
-	it('collects a partial bucket and rolls over without losing fractional points', async () => {
+	it('collects a partial bucket and rolls over without losing point progress', async () => {
 		const selection = await loadOrCreateLifecycle();
 		if (selection.kind !== 'created') throw new Error('Expected fresh state.');
 		const selected = await selectIdentity(selection.selection.generation, selection.selection.candidates[0]);
@@ -172,9 +172,32 @@ describe('Root / Identity / Run lifecycle', () => {
 		const collected = await collectMending(started.persona);
 		expect(collected.kind).toBe('collected');
 		if (collected.kind !== 'collected') return;
-		expect(collected.persona.gameState.points).toBeCloseTo(2.48, 10);
+		expect(collected.persona.gameState.points).toBe(2);
+		expect(collected.persona.gameState.pointProgressTicks).toBe(570_240_000);
 		expect(collected.persona.gameState.mendingJob).toEqual(expect.objectContaining({ startedAtMs: collectedAt }));
 		expect(collected.persona.activeRun.revision).toBe(2);
+	});
+
+	it('persists a zero-point partial collection and carries it into the next bucket', async () => {
+		const selection = await loadOrCreateLifecycle();
+		if (selection.kind !== 'created') throw new Error('Expected fresh state.');
+		const selected = await selectIdentity(selection.selection.generation, selection.selection.candidates[0]);
+		if (selected.kind !== 'selected') throw new Error('Expected selected state.');
+		const started = await startMending(selected.persona);
+		if (started.kind !== 'started') throw new Error('Expected mending start.');
+		const firstAt = TIME + 40 * 60 * 1000;
+		vi.mocked(Date.now).mockReturnValue(firstAt);
+		const partial = await collectMending(started.persona);
+		expect(partial.kind).toBe('collected');
+		if (partial.kind !== 'collected') return;
+		expect(partial.persona.gameState.points).toBe(0);
+		expect(partial.persona.gameState.pointProgressTicks).toBe(792_000_000);
+		vi.mocked(Date.now).mockReturnValue(firstAt + 20 * 60 * 1000);
+		const completed = await collectMending(partial.persona);
+		expect(completed.kind).toBe('collected');
+		if (completed.kind !== 'collected') return;
+		expect(completed.persona.gameState.points).toBe(1);
+		expect(completed.persona.gameState.pointProgressTicks).toBe(0);
 	});
 
 	it('collects while persisted expiry has passed if projected lifespan remains', async () => {
@@ -193,7 +216,7 @@ describe('Root / Identity / Run lifecycle', () => {
 		const collected = await collectMending(current);
 		expect(collected.kind).toBe('collected');
 		if (collected.kind !== 'collected') return;
-		expect(collected.persona.gameState.points).toBeCloseTo(2, 10);
+		expect(collected.persona.gameState.points).toBe(2);
 		expect(collected.persona.gameState.lifespanExpiresAtMs).toBeGreaterThan(now);
 	});
 
@@ -235,13 +258,13 @@ describe('Root / Identity / Run lifecycle', () => {
 		expect([first.kind, second.kind].filter((kind) => kind === 'collected')).toHaveLength(1);
 		expect([first.kind, second.kind].some((kind) => kind === 'superseded')).toBe(true);
 		const after = restored(await loadOrCreateLifecycle());
-		expect(after.gameState.points).toBeCloseTo(2, 10);
+		expect(after.gameState.points).toBe(2);
 		expect(after.gameState.mendingJob).toEqual(expect.objectContaining({ startedAtMs: now }));
 		expect(after.activeRun.revision).toBe(2);
 		const stale = await collectMending(started.persona);
 		expect(stale.kind).toBe('superseded');
 		const unchanged = restored(await loadOrCreateLifecycle());
-		expect(unchanged.gameState.points).toBeCloseTo(2, 10);
+		expect(unchanged.gameState.points).toBe(2);
 		expect(unchanged.activeRun.revision).toBe(2);
 	});
 
@@ -269,7 +292,7 @@ describe('Root / Identity / Run lifecycle', () => {
 		expect(collected.persona.gameState.mendingJob).toEqual(expect.objectContaining({
 			maximumDurationMs: 8 * 60 * 60 * 1000,
 			lifespanExtensionPerHour: { numerator: 9, denominator: 10 },
-			pointsPerHour: { numerator: 1, denominator: 1 }
+			pointIntervalMs: 60 * 60 * 1000
 		}));
 	});
 

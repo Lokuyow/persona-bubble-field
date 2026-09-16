@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Dialog } from 'bits-ui';
 	import type { MendingProjection } from '$lib/mending';
+	import { formatElapsedDuration, formatRemainingDuration } from '$lib/lifespanHud';
 
 	type Props = Readonly<{
 		open: boolean;
@@ -12,12 +13,13 @@
 		onCollect: () => void;
 	}>;
 	let { open, projection, hasJob, points: ownedPointsValue, onOpenChange, onStart, onCollect }: Props = $props();
-	let hours = $derived(((projection?.processedDurationMs ?? 0) / (60 * 60 * 1000)).toFixed(2));
-	let maximumHours = $derived(((projection ? projection.processedDurationMs + projection.remainingDurationMs : 0) / (60 * 60 * 1000)).toFixed(2));
-	let remainingHours = $derived(((projection?.remainingDurationMs ?? 0) / (60 * 60 * 1000)).toFixed(2));
-	let lifespanHours = $derived(((projection?.lifespanExtensionMs ?? 0) / (60 * 60 * 1000)).toFixed(2));
-	let unclaimedPoints = $derived((projection?.points ?? 0).toFixed(2));
-	let ownedPoints = $derived(ownedPointsValue.toFixed(2));
+	let elapsedDuration = $derived(formatElapsedDuration(projection?.processedDurationMs ?? 0));
+	let maximumDuration = $derived(formatElapsedDuration((projection?.processedDurationMs ?? 0) + (projection?.remainingDurationMs ?? 0)));
+	let remainingDuration = $derived(formatRemainingDuration(projection?.remainingDurationMs ?? 0));
+	let lifespanDuration = $derived(formatElapsedDuration(projection?.lifespanExtensionMs ?? 0));
+	let unclaimedPoints = $derived(String(projection?.points ?? 0));
+	let ownedPoints = $derived(String(ownedPointsValue));
+	let nextPointDuration = $derived(projection?.nextPointRemainingMs === null || projection?.nextPointRemainingMs === undefined ? null : formatRemainingDuration(projection.nextPointRemainingMs));
 	let totalDurationMs = $derived((projection?.processedDurationMs ?? 0) + (projection?.remainingDurationMs ?? 0));
 	let progressPercent = $derived(Math.min(100, totalDurationMs > 0 ? (projection?.processedDurationMs ?? 0) / totalDurationMs * 100 : 0));
 </script>
@@ -42,18 +44,19 @@
 				{:else}
 					<section class="progress-section" aria-label="作業の進捗">
 						<div class="progress-heading">
-							<strong>{hours} / {maximumHours}時間</strong>
+							<strong>{elapsedDuration} / {maximumDuration}</strong>
 							<span>{Math.round(progressPercent)}%</span>
 						</div>
 						<div class="progress-track" role="progressbar" aria-label="作業の蓄積進捗" aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(progressPercent)}>
 							<div class="progress-value" style={`width: ${progressPercent}%;`}></div>
 						</div>
-						<p class="remaining-value">{projection?.completed ? '蓄積上限に達しています' : `残り ${remainingHours}時間`}</p>
+						<p class="remaining-value">{projection?.completed ? '蓄積上限に達しています' : `残り ${remainingDuration}`}</p>
+						{#if nextPointDuration}<p class="remaining-value">次の1ptまで {nextPointDuration}</p>{/if}
 					</section>
 					<section class="result-section" aria-labelledby="mending-result-title">
 						<h3 id="mending-result-title">今回受け取れる成果</h3>
 						<div class="result-grid">
-							<div class="result-card"><span>寿命延長</span><strong>+{lifespanHours}時間</strong></div>
+							<div class="result-card"><span>寿命延長</span><strong>+{lifespanDuration}</strong></div>
 							<div class="result-card"><span>ポイント</span><strong>+{unclaimedPoints}pt</strong></div>
 						</div>
 					</section>
