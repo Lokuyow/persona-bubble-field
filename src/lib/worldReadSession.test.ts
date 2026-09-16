@@ -445,6 +445,39 @@ describe('world read session', () => {
 		expect(statuses.at(-1)).toBe('inactive');
 	});
 
+	it('re-evaluates realtime instance and since configuration when the same session restarts it', async () => {
+		const startRealtime = vi.fn().mockResolvedValue({ status: 'active', events: [], relays: [] });
+		const stopRealtime = vi.fn();
+		mocked.createTransport.mockReturnValue({
+			start: vi.fn(async (nextInput) => { input = nextInput; return startResult(); }),
+			startRealtime,
+			bootstrapTraceRootCandidates: traceBootstrap(),
+			dispose,
+			publish,
+			stopRealtime
+		});
+		let configuration = { instanceId: 'rift-day-1', since: 100 };
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 },
+			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn(),
+			realtime: {
+				registry: [{ eventType: 'fixture', protocolVersion: 1, protocolKey: protocolKeyFor('fixture', 1), parseAction: () => ({}) }],
+				instanceId: 'stale-instance', since: 1, getStartConfiguration: () => configuration,
+				onEvent: vi.fn()
+			}
+		});
+		await session.start();
+		await session.startRealtime();
+		configuration = { instanceId: 'rift-day-2', since: 200 };
+		await session.startRealtime();
+		expect(startRealtime).toHaveBeenCalledTimes(2);
+		expect(startRealtime.mock.calls.map(([next]) => ({ instanceId: next.instanceId, since: next.since }))).toEqual([
+			{ instanceId: 'rift-day-1', since: 100 },
+			{ instanceId: 'rift-day-2', since: 200 }
+		]);
+		expect(stopRealtime).toHaveBeenCalledOnce();
+	});
+
 	it('stops every self-write boundary when persisted Run authorization is lost', async () => {
 		publish.mockResolvedValue([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
 		const authorize = vi.fn()

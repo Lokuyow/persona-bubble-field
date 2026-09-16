@@ -1119,6 +1119,58 @@ test.describe('Relay startup', () => {
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
 			(request.filter.kinds as number[])[0] === 7070 && (request.filter['#i'] as string[]).includes(previousSchedule.instanceId))).toBe(true);
+		const earlyRealtimeRequests = (await relayState(page)).state.requests.filter((request) => (request.filter.kinds as number[])[0] === 7070);
+		expect(earlyRealtimeRequests.every((request) => {
+			const instances = request.filter['#i'] as string[] | undefined;
+			return instances?.length === 1 && instances[0] === previousSchedule.instanceId;
+		})).toBe(true);
+	});
+
+	test('restarts realtime for the next day without recreating the world session', async ({ page }) => {
+		const schedule = upcomingRegistrationSchedule();
+		const nextSchedule = getRiftSchedule(schedule.warningAtMs + 24 * 60 * 60 * 1_000);
+		const startTime = schedule.registrationAtMs + 1_000;
+		await page.clock.install({ time: startTime });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { primaryEvents: testEvents(startTime) });
+		const secret = fixtureSecret(19);
+		const pubkey = getPublicKey(secret);
+		await seedRelayAccount(page, secret, pubkey);
+		await page.goto('/');
+		await expect(page.locator('.composer-dock')).toBeVisible();
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => (request.filter.kinds as number[])[0] === 42)).toBe(true);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
+		await expect.poll(async () => (await relayState(page)).state.requests.filter((request) => (request.filter.kinds as number[])[0] === 7070).length).toBeGreaterThan(0);
+		const firstRealtimeRequests = (await relayState(page)).state.requests.filter((request) => (request.filter.kinds as number[])[0] === 7070);
+		expect(firstRealtimeRequests.every((request) => (request.filter['#i'] as string[]).length === 1 && (request.filter['#i'] as string[])[0] === schedule.instanceId)).toBe(true);
+		const primaryRequestCount = (await relayState(page)).state.requests.filter((request) =>
+			[42, 30078].includes((request.filter.kinds as number[])[0]) && request.filter.limit !== 1_000).length;
+
+		await page.clock.setSystemTime(schedule.endedAtMs + 1_000);
+		await page.clock.runFor(1_000);
+		await expect.poll(() => page.evaluate(() => (window as typeof window & { __relayStartupTest: { activeRealtimeCount(): number } }).__relayStartupTest.activeRealtimeCount())).toBe(0);
+		const closedAfterFirstDay = (await relayState(page)).state.closedSubscriptions;
+		const firstRequestIds = new Set(firstRealtimeRequests.map((request) => request.subId));
+		expect(closedAfterFirstDay.some((closed) => firstRequestIds.has(closed.subId))).toBe(true);
+
+		await page.clock.setSystemTime(nextSchedule.registrationAtMs + 1_000);
+		await page.clock.runFor(1_000);
+		await expect.poll(async () => (await relayState(page)).state.requests.filter((request) => (request.filter.kinds as number[])[0] === 7070).length).toBeGreaterThan(firstRealtimeRequests.length);
+		const allRealtimeRequests = (await relayState(page)).state.requests.filter((request) => (request.filter.kinds as number[])[0] === 7070);
+		const nextRealtimeRequests = allRealtimeRequests.slice(firstRealtimeRequests.length);
+		expect(nextRealtimeRequests.length).toBeGreaterThan(0);
+		expect(nextRealtimeRequests.every((request) => (request.filter['#i'] as string[]).length === 1 && (request.filter['#i'] as string[])[0] === nextSchedule.instanceId)).toBe(true);
+		expect((await relayState(page)).state.requests.filter((request) =>
+			[42, 30078].includes((request.filter.kinds as number[])[0]) && request.filter.limit !== 1_000)).toHaveLength(primaryRequestCount);
+
+		const nextHole = deriveRiftHolePositions(nextSchedule.instanceId, { columns: 16, rows: 8 })[0];
+		const nextJoin = signedRiftAction(secret, nextSchedule, { action: 'join', holeId: nextHole.id }, nextSchedule.registrationAtMs + 1_000);
+		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectRealtimeEvent(event: object): void } }).__relayStartupTest.injectRealtimeEvent(event), nextJoin);
+		await page.clock.setSystemTime(nextSchedule.gameAtMs + 1_000);
+		await page.clock.runFor(1_000);
+		await expect(page.locator('[data-realtime-panel]')).toContainText('参加者: 1');
 	});
 
 	test('keeps normal world movement and conversation available when realtime is unavailable', async ({ page }) => {

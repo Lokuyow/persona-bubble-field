@@ -163,6 +163,7 @@
 		createWorldReadSession,
 		type SelfMessageAvailability,
 		type SelfPositionWriteState,
+		type RealtimeStartConfiguration,
 		type WorldReadConnectionStatus
 	} from '$lib/worldReadSession';
 	import type { TraceReadSnapshot } from '$lib/traceReadState';
@@ -878,12 +879,23 @@
 			if (devRiftFixtureEnabled) reconcileRiftSession(initialRiftNowMs);
 		}
 
+		function getRealtimeStartConfiguration(nowMs: number): RealtimeStartConfiguration {
+			const currentSchedule = getRiftSchedule(nowMs);
+			const recoveryInstanceIds = [...realtimeRecoveryInstanceIds].filter((instanceId) => getRiftScheduleForInstance(instanceId, nowMs) !== null);
+			const includeCurrent = currentSchedule.phase === 'registration' || currentSchedule.phase === 'game';
+			const instanceIds = [...new Set([...recoveryInstanceIds, ...(includeCurrent ? [currentSchedule.instanceId] : [])])];
+			const since = Math.floor(Math.min(...[currentSchedule, ...recoveryInstanceIds.map((instanceId) => getRiftScheduleForInstance(instanceId, nowMs))]
+				.filter((schedule): schedule is typeof currentSchedule => schedule !== null)
+				.map((schedule) => schedule.warningAtMs)) / 1000);
+			return instanceIds.length === 1
+				? { instanceId: instanceIds[0], since }
+				: { instanceIds, since };
+		}
+
 		const startReadSession = async (
 			signer: ActiveSignerSnapshot | null,
 			characterProfilePublication: PreparedCharacterProfilePublication | null = null,
 			authorizationRunNumber: number | null = signer ? personaSnapshot?.activeRun.runNumber ?? null : null,
-			realtimeInstanceIds: readonly string[] | undefined = undefined,
-			realtimeSince: number | undefined = undefined,
 			realtimeStartImmediately: boolean | undefined = undefined
 		): Promise<void> => {
 			const previousSession = session;
@@ -897,9 +909,10 @@
 				selfSigner: signer,
 					realtime: {
 					registry: realtimeEventRegistry,
-					...(realtimeInstanceIds?.length ? { instanceIds: realtimeInstanceIds } : { instanceId: getRiftSchedule(Date.now()).instanceId }),
-					since: realtimeSince ?? Math.floor(getRiftSchedule(Date.now()).warningAtMs / 1000),
-					startImmediately: realtimeStartImmediately ?? Boolean(realtimeInstanceIds?.length || ['registration', 'game'].includes(getRiftSchedule(Date.now()).phase)),
+					instanceId: getRiftSchedule(Date.now()).instanceId,
+					since: Math.floor(getRiftSchedule(Date.now()).warningAtMs / 1000),
+					getStartConfiguration: () => getRealtimeStartConfiguration(Date.now()),
+					startImmediately: realtimeStartImmediately ?? ['registration', 'game'].includes(getRiftSchedule(Date.now()).phase),
 					onEvent: handleRealtimeEnvelope,
 					onBootstrapComplete: () => {
 						if (!mounted || session !== nextSession) return;
@@ -975,8 +988,6 @@
 			if (devWorldSandboxEnabled || startRequested || !hasUsableViewport()) return;
 			startRequested = true;
 			let characterProfilePublication: PreparedCharacterProfilePublication | null = null;
-			let realtimeInstanceIds: readonly string[] | undefined;
-			let realtimeSince: number | undefined;
 			let realtimeStartImmediately = false;
 			try {
 				const personaResult = await loadOrCreateLifecycle();
@@ -996,13 +1007,7 @@
 					realtimeRecoveryInstanceIds.clear();
 					for (const instanceId of pendingInstanceIds) realtimeRecoveryInstanceIds.add(instanceId);
 					const currentNeedsRealtime = currentRiftSchedule.phase === 'registration' || currentRiftSchedule.phase === 'game';
-					const recoveryNeedsEarlyRealtime = pendingInstanceIds.length > 0;
-					realtimeInstanceIds = pendingInstanceIds.length || currentNeedsRealtime
-						? [...new Set([...pendingInstanceIds, ...((currentNeedsRealtime || recoveryNeedsEarlyRealtime) ? [currentRiftSchedule.instanceId] : [])])]
-						: undefined;
 					realtimeStartImmediately = pendingInstanceIds.length > 0 || currentNeedsRealtime;
-					realtimeSince = Math.floor(Math.min(currentRiftSchedule.warningAtMs, ...pendingInstanceIds
-						.map((instanceId) => getRiftScheduleForInstance(instanceId, Date.now())?.warningAtMs ?? currentRiftSchedule.warningAtMs)) / 1000);
 					mendingNowMs = Date.now();
 					updateLifespanHud(Date.now(), true);
 					if (isPersonaExpired(personaResult.persona.gameState, Date.now())) {
@@ -1027,7 +1032,7 @@
 			} catch {
 				setComposerTerminalError(new Error('Persona is unavailable for publishing.'));
 			}
-			await startReadSession(selfSigner, characterProfilePublication, personaSnapshot?.activeRun.runNumber ?? null, realtimeInstanceIds, realtimeSince, realtimeStartImmediately);
+			await startReadSession(selfSigner, characterProfilePublication, personaSnapshot?.activeRun.runNumber ?? null, realtimeStartImmediately);
 		};
 
 		const updateViewport = () => {

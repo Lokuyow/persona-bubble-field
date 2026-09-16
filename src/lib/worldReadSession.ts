@@ -98,10 +98,17 @@ export type RealtimeSessionOptions = Readonly<{
 	instanceId?: string;
 	instanceIds?: readonly string[];
 	since: number;
+	getStartConfiguration?: () => RealtimeStartConfiguration;
 	startImmediately?: boolean;
 	onEvent: (event: RealtimeEnvelope) => void;
 	onBootstrapComplete?: () => void;
 	onStatusChanged?: (status: 'inactive' | 'active' | 'degraded') => void;
+}>;
+
+export type RealtimeStartConfiguration = Readonly<{
+	instanceId?: string;
+	instanceIds?: readonly string[];
+	since: number;
 }>;
 
 export type SelfPositionWriteState =
@@ -197,6 +204,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	let realtimeEvents: RealtimeEnvelope[] = [];
 	let realtimeStatus: 'inactive' | 'active' | 'degraded' = 'inactive';
 	let realtimeStartPromise: Promise<void> | null = null;
+	let realtimeStartConfiguration: RealtimeStartConfiguration | null = null;
 	let realtimeGeneration = 0;
 	let traceReplyReconcileTail: Promise<void> = Promise.resolve();
 	const pendingLiveEvents: BufferedLiveEvent[] = [];
@@ -239,18 +247,39 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		options.realtime.onEvent(parsed);
 	}
 
-	function startRealtimeSubscription(): Promise<void> {
-		if (realtimeStartPromise) return realtimeStartPromise;
+	function sameRealtimeConfiguration(first: RealtimeStartConfiguration, second: RealtimeStartConfiguration): boolean {
+		return JSON.stringify([first.instanceId ?? null, first.instanceIds ?? null, first.since]) ===
+			JSON.stringify([second.instanceId ?? null, second.instanceIds ?? null, second.since]);
+	}
+
+	function stopRealtimeSubscription(): void {
+		realtimeGeneration += 1;
+		realtimeStartPromise = null;
+		realtimeStartConfiguration = null;
+		if (transport && 'stopRealtime' in transport && typeof transport.stopRealtime === 'function') transport.stopRealtime();
+		realtimeStatus = 'inactive';
+		options.realtime?.onStatusChanged?.(realtimeStatus);
+	}
+
+	function startRealtimeSubscription(configuration?: RealtimeStartConfiguration): Promise<void> {
 		const realtimeOptions = options.realtime;
 		if (disposed || !transport || !channel || !realtimeOptions?.registry.length) return Promise.resolve();
+		const nextConfiguration = configuration ?? realtimeOptions.getStartConfiguration?.() ?? {
+			...(realtimeOptions.instanceId === undefined ? {} : { instanceId: realtimeOptions.instanceId }),
+			...(realtimeOptions.instanceIds === undefined ? {} : { instanceIds: realtimeOptions.instanceIds }),
+			since: realtimeOptions.since
+		};
+		if (realtimeStartPromise && realtimeStartConfiguration && sameRealtimeConfiguration(realtimeStartConfiguration, nextConfiguration)) return realtimeStartPromise;
+		if (realtimeStartPromise) stopRealtimeSubscription();
 		const generation = realtimeGeneration;
+		realtimeStartConfiguration = nextConfiguration;
 		realtimeStatus = 'degraded';
 		realtimeOptions.onStatusChanged?.(realtimeStatus);
 		realtimeStartPromise = transport.startRealtime({
 			eventTypes: realtimeOptions.registry,
-		...(realtimeOptions.instanceId === undefined ? {} : { instanceId: realtimeOptions.instanceId }),
-		...(realtimeOptions.instanceIds === undefined ? {} : { instanceIds: realtimeOptions.instanceIds }),
-		since: realtimeOptions.since,
+		...(nextConfiguration.instanceId === undefined ? {} : { instanceId: nextConfiguration.instanceId }),
+		...(nextConfiguration.instanceIds === undefined ? {} : { instanceIds: nextConfiguration.instanceIds }),
+		since: nextConfiguration.since,
 		onBootstrapEvent: receiveRealtimeEvent,
 		onLiveEvent: receiveRealtimeEvent
 	}).then((realtime) => {
@@ -1064,11 +1093,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		},
 
 		stopRealtime(): void {
-			realtimeGeneration += 1;
-			realtimeStartPromise = null;
-			if (transport && 'stopRealtime' in transport && typeof transport.stopRealtime === 'function') transport.stopRealtime();
-			realtimeStatus = 'inactive';
-			options.realtime?.onStatusChanged?.(realtimeStatus);
+			stopRealtimeSubscription();
 		},
 
 		getChannel(): ChannelReference | null {
