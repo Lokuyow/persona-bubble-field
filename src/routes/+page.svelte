@@ -1407,7 +1407,7 @@
 
 	function fieldActionLabel(action: FieldCellAction): string {
 		if (action.kind === 'mending-terminal') return '作業端末を使う';
-		if (action.kind === 'adjustment-terminal') return '調整端末を使う';
+		if (action.kind === 'adjustment-terminal') return '能力強化端末を使う';
 		if (action.kind === 'trace') return '痕跡を調べる';
 		const participant = participantViews.find((candidate) => candidate.id === action.participantId);
 		return participant ? `${participant.character.name} のプロフィールを開く` : 'プロフィールを開く';

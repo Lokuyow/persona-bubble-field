@@ -1209,7 +1209,7 @@ test.describe('Relay startup', () => {
 		await expect(mendingFacility.locator('img')).toHaveAttribute('src', /field\/objects\/mending-terminal\.webp$/);
 		await expect(mendingFacility).not.toContainText('作業');
 		await expect(page.locator('[data-field-facility="adjustment-terminal"] img')).toHaveAttribute('src', /field\/objects\/adjustment-terminal\.webp$/);
-		await expect(page.locator('[data-field-facility="adjustment-terminal"]')).not.toContainText('調整');
+		await expect(page.locator('[data-field-facility="adjustment-terminal"]')).not.toContainText('能力強化');
 		await terminal.click();
 		await expect(page.getByRole('status')).toContainText('近づくと端末を使える');
 
@@ -1287,7 +1287,7 @@ test.describe('Relay startup', () => {
 			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
 			relay.releaseMetadata(); relay.releasePrimary();
 		});
-		const adjustment = page.getByRole('button', { name: '調整端末' });
+		const adjustment = page.getByRole('button', { name: '能力強化端末' });
 		await adjustment.click();
 		await expect(page.getByRole('status')).toContainText('近づくと端末を使える');
 
@@ -1331,7 +1331,7 @@ test.describe('Relay startup', () => {
 		}), secret);
 		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), nearby);
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '13,3');
-		await page.getByRole('button', { name: '調整端末' }).click();
+		await page.getByRole('button', { name: '能力強化端末' }).click();
 		const dialog = page.getByRole('dialog', { name: '能力強化' });
 		await expect(dialog.getByRole('button', { name: '最大level' })).toHaveCount(3);
 		for (const button of await dialog.getByRole('button', { name: '最大level' }).all()) await expect(button).toBeDisabled();
@@ -2132,7 +2132,7 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('[data-cell-position="14,3"][aria-label*="痕跡"]')).toHaveCount(0);
 		await expect(page.locator('[data-cell-position="4,2"][aria-label*="痕跡"]')).toHaveCount(1);
 		await expect(page.locator('[data-cell-position="12,3"][aria-label="作業端末"]')).toHaveCount(1);
-		await expect(page.locator('[data-cell-position="14,3"][aria-label="調整端末"]')).toHaveCount(1);
+		await expect(page.locator('[data-cell-position="14,3"][aria-label="能力強化端末"]')).toHaveCount(1);
 
 		await page.locator('[data-cell-position="12,3"][aria-label="作業端末"]').click();
 		await expect(page.locator('.trace-proximity-feedback')).toContainText('近づくと端末を使える');
