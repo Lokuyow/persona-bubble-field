@@ -14,6 +14,7 @@
 
 	const FIELD_BACKGROUND_ASSET = '/field/prototype-danchi-courtyard.webp';
 	const TRACE_ICON_ASSET = '/trace/trace-icon.svg';
+	const MENDING_TERMINAL_ASSET = '/field/objects/mending-terminal.webp';
 
 	export type FieldParticipantView = ProjectedParticipant<Participant>;
 	export type TraceMarkerCell = TraceRootCell & Readonly<{
@@ -138,7 +139,7 @@
 		<div class="field-facility-layer" aria-hidden="true">
 			{#each FIXED_FIELD_FACILITIES as facility (facility.kind)}
 				<span class={['field-facility', facility.kind === 'mending-terminal' ? 'field-mending-terminal' : 'field-adjustment-terminal']} data-field-facility={facility.kind}
-					style={`left: ${(facility.position.x + 0.5) * cellSize}px; top: ${(facility.position.y + 0.5) * cellSize}px;`}>{facility.kind === 'mending-terminal' ? '繕い' : '調整'}</span>
+					style={`left: ${(facility.position.x + 0.5) * cellSize}px; top: ${(facility.position.y + 0.5) * cellSize}px;`}>{#if facility.kind === 'mending-terminal'}<img src={asset(MENDING_TERMINAL_ASSET)} alt="" />{:else}調整{/if}</span>
 			{/each}
 		</div>
 		{#if proximityFeedback}
@@ -307,6 +308,11 @@
 		color: #fffbe3; font-size: max(9px, calc(var(--cell-size) * 0.15)); font-weight: 900;
 		transform: translate(-50%, -50%); pointer-events: none;
 	}
+	.field-mending-terminal {
+		width: calc(var(--cell-size) * 0.84); height: calc(var(--cell-size) * 0.84);
+		border: 0; border-radius: 0; background: none; box-shadow: none;
+	}
+	.field-mending-terminal img { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
 
 	.trace-marker {
 		position: absolute;

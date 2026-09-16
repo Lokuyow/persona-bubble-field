@@ -1204,6 +1204,10 @@ test.describe('Relay startup', () => {
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
 		const terminal = page.getByRole('button', { name: '繕い端末' });
+		const mendingFacility = page.locator('[data-field-facility="mending-terminal"]');
+		await expect(mendingFacility.locator('img')).toHaveAttribute('src', /field\/objects\/mending-terminal\.webp$/);
+		await expect(mendingFacility).not.toContainText('繕い');
+		await expect(page.locator('[data-field-facility="adjustment-terminal"]')).toContainText('調整');
 		await terminal.click();
 		await expect(page.getByRole('status')).toContainText('近づくと端末を使える');
 
