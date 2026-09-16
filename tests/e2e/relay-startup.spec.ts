@@ -1260,6 +1260,13 @@ test.describe('Relay startup', () => {
 		await seedRelayAccount(page, selfSecret, selfPubkey);
 		await page.goto('/');
 		await expect(page.locator('[data-realtime-panel]')).toContainText('参加受付');
+		const panelLayout = await page.locator('[data-realtime-panel]').evaluate((panel) => {
+			const rect = panel.getBoundingClientRect();
+			return { centerX: rect.left + rect.width / 2, top: rect.top, right: rect.right, viewportWidth: window.innerWidth };
+		});
+		expect(Math.abs(panelLayout.centerX - panelLayout.viewportWidth / 2)).toBeLessThanOrEqual(1);
+		expect(panelLayout.top).toBeGreaterThanOrEqual(0);
+		expect(panelLayout.right).toBeLessThanOrEqual(panelLayout.viewportWidth);
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => (request.filter.kinds as number[])[0] === 42)).toBe(true);
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());

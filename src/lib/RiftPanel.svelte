@@ -77,7 +77,7 @@
 {/if}
 
 <style>
-	.rift-panel { position: absolute; z-index: 10; top: 12px; left: 16px; width: min(440px, calc(100vw - 32px)); padding: 12px 14px; border: 1px solid rgba(102, 28, 106, 0.25); border-radius: 14px; background: rgba(255, 250, 255, 0.93); color: #3d3144; box-shadow: 0 8px 24px rgba(75, 44, 75, 0.12); pointer-events: none; }
+	.rift-panel { position: absolute; z-index: 10; top: 12px; left: 50%; width: min(440px, calc(100vw - 32px)); padding: 12px 14px; border: 1px solid rgba(102, 28, 106, 0.25); border-radius: 14px; background: rgba(255, 250, 255, 0.93); color: #3d3144; box-shadow: 0 8px 24px rgba(75, 44, 75, 0.12); pointer-events: none; transform: translateX(-50%); }
 	.rift-heading, .rift-details, .rift-choice-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 	h2 { margin: 0; font-size: 16px; } h2 span { color: #7b397f; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
 	p { margin: 4px 0 0; font-size: 11px; } .rift-heading strong { font-size: 11px; white-space: nowrap; }
