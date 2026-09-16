@@ -1207,7 +1207,8 @@ test.describe('Relay startup', () => {
 		const mendingFacility = page.locator('[data-field-facility="mending-terminal"]');
 		await expect(mendingFacility.locator('img')).toHaveAttribute('src', /field\/objects\/mending-terminal\.webp$/);
 		await expect(mendingFacility).not.toContainText('繕い');
-		await expect(page.locator('[data-field-facility="adjustment-terminal"]')).toContainText('調整');
+		await expect(page.locator('[data-field-facility="adjustment-terminal"] img')).toHaveAttribute('src', /field\/objects\/adjustment-terminal\.webp$/);
+		await expect(page.locator('[data-field-facility="adjustment-terminal"]')).not.toContainText('調整');
 		await terminal.click();
 		await expect(page.getByRole('status')).toContainText('近づくと端末を使える');
 
