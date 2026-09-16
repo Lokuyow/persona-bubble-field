@@ -12,6 +12,7 @@
 		"build": "vite build",
 		"build:pages": "node scripts/build-pages.mjs",
 		"characters:images": "node scripts/convert-character-images.mjs",
+		"field-objects:images": "node scripts/convert-field-object-images.mjs",
 		"preview": "vite preview",
 		"test": "vitest run",
 		"test:e2e": "playwright test",
