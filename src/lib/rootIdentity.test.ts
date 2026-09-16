@@ -10,6 +10,7 @@ import {
 	authorizeActiveRun,
 	collectMending,
 	applyRealtimeOutcome,
+	completeRealtimeEventInstance,
 	getRealtimeSettlementLedger,
 	trackRealtimeEventInstance,
 	transitionRealtimeDeath,
@@ -145,7 +146,26 @@ describe('Root / Identity / Run lifecycle', () => {
 		expect(current.gameState.points).toBe(100);
 		const ledger = (await records(PLAYER_LIFECYCLE_STORE_NAME))['player-lifecycle'] as { realtimeSettlementLedger: { appliedOutcomeIds: string[]; pendingInstanceIds: string[] } };
 		expect(ledger.realtimeSettlementLedger.appliedOutcomeIds).toEqual([outcome.id]);
-		expect(ledger.realtimeSettlementLedger.pendingInstanceIds).toEqual([]);
+		expect(ledger.realtimeSettlementLedger.pendingInstanceIds).toEqual(['rift-instance']);
+		expect(await completeRealtimeEventInstance(current, 'rift-instance')).toBe(true);
+		expect((await getRealtimeSettlementLedger(current))?.pendingInstanceIds).toEqual([]);
+	});
+
+	it('retains recovery markers until each instance is explicitly complete', async () => {
+		const selection = await loadOrCreateLifecycle();
+		if (selection.kind !== 'created') throw new Error('Expected fresh state.');
+		const selected = await selectIdentity(selection.selection.generation, selection.selection.candidates[0]);
+		if (selected.kind !== 'selected') throw new Error('Expected selected state.');
+		await trackRealtimeEventInstance(selected.persona, 'rift-instance-1');
+		await trackRealtimeEventInstance(selected.persona, 'rift-instance-2');
+		await applyRealtimeOutcome(selected.persona, { id: 'outcome-1', kind: 'points', points: 20, instanceId: 'rift-instance-1' });
+		await applyRealtimeOutcome(selected.persona, { id: 'outcome-2', kind: 'points', points: 10, instanceId: 'rift-instance-2' });
+		const afterPoints = restored(await loadOrCreateLifecycle());
+		expect((await getRealtimeSettlementLedger(afterPoints))?.pendingInstanceIds).toEqual(['rift-instance-1', 'rift-instance-2']);
+		expect(await completeRealtimeEventInstance(afterPoints, 'rift-instance-1')).toBe(true);
+		expect((await getRealtimeSettlementLedger(afterPoints))?.pendingInstanceIds).toEqual(['rift-instance-2']);
+		expect(await completeRealtimeEventInstance(afterPoints, 'rift-instance-2')).toBe(true);
+		expect((await getRealtimeSettlementLedger(afterPoints))?.pendingInstanceIds).toEqual([]);
 	});
 
 	it('does not add points to an expired run and closes an event-death run only once', async () => {

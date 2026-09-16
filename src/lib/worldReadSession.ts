@@ -100,6 +100,7 @@ export type RealtimeSessionOptions = Readonly<{
 	since: number;
 	startImmediately?: boolean;
 	onEvent: (event: RealtimeEnvelope) => void;
+	onBootstrapComplete?: () => void;
 	onStatusChanged?: (status: 'inactive' | 'active' | 'degraded') => void;
 }>;
 
@@ -196,6 +197,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	let realtimeEvents: RealtimeEnvelope[] = [];
 	let realtimeStatus: 'inactive' | 'active' | 'degraded' = 'inactive';
 	let realtimeStartPromise: Promise<void> | null = null;
+	let realtimeGeneration = 0;
 	let traceReplyReconcileTail: Promise<void> = Promise.resolve();
 	const pendingLiveEvents: BufferedLiveEvent[] = [];
 	let selfPositionEvidence: PositionPublishEvidence = [];
@@ -241,6 +243,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		if (realtimeStartPromise) return realtimeStartPromise;
 		const realtimeOptions = options.realtime;
 		if (disposed || !transport || !channel || !realtimeOptions?.registry.length) return Promise.resolve();
+		const generation = realtimeGeneration;
 		realtimeStatus = 'degraded';
 		realtimeOptions.onStatusChanged?.(realtimeStatus);
 		realtimeStartPromise = transport.startRealtime({
@@ -251,12 +254,13 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		onBootstrapEvent: receiveRealtimeEvent,
 		onLiveEvent: receiveRealtimeEvent
 	}).then((realtime) => {
-		if (disposed) return;
+		if (disposed || generation !== realtimeGeneration) return;
 		realtimeStatus = realtime.status === 'active' ? 'active' : 'degraded';
 		realtimeOptions.onStatusChanged?.(realtimeStatus);
 		for (const event of realtime.events) receiveRealtimeEvent(event);
+		realtimeOptions.onBootstrapComplete?.();
 	}).catch(() => {
-		if (disposed) return;
+		if (disposed || generation !== realtimeGeneration) return;
 		realtimeStatus = 'degraded';
 		realtimeOptions.onStatusChanged?.(realtimeStatus);
 	});
@@ -993,6 +997,14 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			});
 		},
 
+		publishRealtime(event: VerifiedEvent) {
+			if (disposed || !transport) throw new Error('World read session must start before publishing.');
+			return authorizeSelfWrite().then((authorized) => {
+				if (!authorized) throw new Error('Self-write authorization was lost.');
+				return transport!.publishRealtime(event);
+			});
+		},
+
 		dispose(): void {
 			if (disposed) return;
 			disposed = true;
@@ -1049,6 +1061,14 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 
 		startRealtime(): Promise<void> {
 			return startRealtimeSubscription();
+		},
+
+		stopRealtime(): void {
+			realtimeGeneration += 1;
+			realtimeStartPromise = null;
+			if (transport && 'stopRealtime' in transport && typeof transport.stopRealtime === 'function') transport.stopRealtime();
+			realtimeStatus = 'inactive';
+			options.realtime?.onStatusChanged?.(realtimeStatus);
 		},
 
 		getChannel(): ChannelReference | null {

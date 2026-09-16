@@ -442,6 +442,102 @@ describe('supplemental realtime event lifecycle', () => {
 		expect(onLiveEvent).toHaveBeenCalledExactlyOnceWith(live);
 	});
 
+	it('accepts realtime publication from a readable relay', async () => {
+		const f = fixture(1);
+		const event = finalizeEvent(buildRiftActionTemplate({
+			channelId: f.channel.id,
+			relayHint: f.authorities[0].url,
+			instanceId: 'rift-instance',
+			action: { action: 'join', holeId: 'rift-instance:hole:0' },
+			createdAt: TIME
+		}), AUTHOR);
+		let realtimeRequest: WireRequest | undefined;
+		f.authorities[0].onRequest = (socket, request) => {
+			if (kind(request) === 7070) realtimeRequest = request;
+			send(socket, 'EOSE', request[1]);
+		};
+		f.authorities[0].onPublish = (socket, published) => send(socket, 'OK', published.id, true, '');
+		await f.start();
+		const realtime = f.transport.startRealtime({ eventTypes: [RIFT_EVENT_DEFINITION], instanceId: 'rift-instance', since: TIME - 100, onBootstrapEvent: vi.fn(), onLiveEvent: vi.fn() });
+		await vi.advanceTimersByTimeAsync(30);
+		await realtime;
+		const pending = f.transport.publishRealtime(event);
+		await vi.advanceTimersByTimeAsync(30);
+		const result = await pending;
+		expect(result.outcome).toBe('accepted');
+		expect(result.results).toEqual([{ relayUrl: f.authorities[0].url, outcome: 'accepted' }]);
+		expect(realtimeRequest).toBeDefined();
+	});
+
+	it('uses a self echo when OK is absent and does not retry the action', async () => {
+		const f = fixture(1);
+		const event = finalizeEvent(buildRiftActionTemplate({
+			channelId: f.channel.id,
+			relayHint: f.authorities[0].url,
+			instanceId: 'rift-instance',
+			action: { action: 'join', holeId: 'rift-instance:hole:0' },
+			createdAt: TIME
+		}), AUTHOR);
+		let realtimeRequest: WireRequest | undefined;
+		let publishCount = 0;
+		f.authorities[0].onRequest = (socket, request) => {
+			if (kind(request) === 7070) realtimeRequest = request;
+			send(socket, 'EOSE', request[1]);
+		};
+		f.authorities[0].onPublish = (socket, published) => {
+			publishCount += 1;
+			if (realtimeRequest) send(socket, 'EVENT', realtimeRequest[1], published);
+		};
+		await f.start();
+		const realtime = f.transport.startRealtime({ eventTypes: [RIFT_EVENT_DEFINITION], instanceId: 'rift-instance', since: TIME - 100, onBootstrapEvent: vi.fn(), onLiveEvent: vi.fn() });
+		await vi.advanceTimersByTimeAsync(30);
+		await realtime;
+		const pending = f.transport.publishRealtime(event);
+		await vi.advanceTimersByTimeAsync(TIMEOUT + 1);
+		await expect(pending).resolves.toMatchObject({ outcome: 'echoed', results: [{ outcome: 'no-response' }] });
+		expect(publishCount).toBe(1);
+	});
+
+	it('does not treat an excluded relay acceptance as shared when readable relay rejects', async () => {
+		const f = fixture(2);
+		Nip11Registry.set(f.authorities[1].url, { limitation: { max_subscriptions: 2 } });
+		const event = finalizeEvent(buildRiftActionTemplate({
+			channelId: f.channel.id,
+			relayHint: f.authorities[0].url,
+			instanceId: 'rift-instance',
+			action: { action: 'join', holeId: 'rift-instance:hole:0' },
+			createdAt: TIME
+		}), AUTHOR);
+		f.authorities[0].onRequest = (socket, request) => send(socket, 'EOSE', request[1]);
+		f.authorities[0].onPublish = (socket, published) => send(socket, 'OK', published.id, false, 'blocked');
+		f.authorities[1].onPublish = (socket, published) => send(socket, 'OK', published.id, true, '');
+		await f.start();
+		const realtime = f.transport.startRealtime({ eventTypes: [RIFT_EVENT_DEFINITION], instanceId: 'rift-instance', since: TIME - 100, onBootstrapEvent: vi.fn(), onLiveEvent: vi.fn() });
+		await vi.advanceTimersByTimeAsync(30);
+		await realtime;
+		const pending = f.transport.publishRealtime(event);
+		await vi.advanceTimersByTimeAsync(TIMEOUT + 1);
+		await expect(pending).resolves.toMatchObject({ outcome: 'unconfirmed' });
+		expect((await pending).results).toEqual(expect.arrayContaining([
+			{ relayUrl: f.authorities[0].url, outcome: 'rejected', notice: 'blocked' },
+			{ relayUrl: f.authorities[1].url, outcome: 'accepted' }
+		]));
+	});
+
+	it('stops only the supplemental realtime subscription', async () => {
+		const f = fixture(1);
+		await f.start();
+		const realtime = f.transport.startRealtime({ eventTypes: [RIFT_EVENT_DEFINITION], instanceId: 'rift-instance', since: TIME - 100, onBootstrapEvent: vi.fn(), onLiveEvent: vi.fn() });
+		await vi.advanceTimersByTimeAsync(30);
+		await realtime;
+		const realtimeRequest = f.authorities[0].requests.filter((request) => kind(request) === 7070).at(-1);
+		expect(realtimeRequest).toBeDefined();
+		f.transport.stopRealtime();
+		await vi.advanceTimersByTimeAsync(10);
+		expect(f.authorities[0].messages).toContainEqual(['CLOSE', realtimeRequest![1]]);
+		expect(f.transport.getDiagnostics().primaryPairs.every((pair) => pair.status === 'eose')).toBe(true);
+	});
+
 	it('does not open an event request when the enabled definition list is empty', async () => {
 		const f = fixture(1);
 		await f.start();
@@ -670,7 +766,7 @@ describe('trace root bootstrap', () => {
 		const pending = f.transport.bootstrapTraceRootCandidates();
 		await vi.advanceTimersByTimeAsync(10);
 		const result = await pending;
-		expect(result.rawEvents.map((event) => event.id)).toEqual([nip28Reply.id, invalidSignature.id]);
+		expect(result.rawEvents.map((event) => event.id)).toEqual([nip28Reply.id, invalidSignature.id].sort());
 		for (const relay of f.authorities) {
 			expect(relay.rootRequests().map((request) => request.slice(2))).toEqual([[expectedFilter]]);
 		}

@@ -856,6 +856,37 @@ export async function trackRealtimeEventInstance(expected: PersonaSnapshot, inst
 	});
 }
 
+/** Removes a recovery marker once the event definition proves its instance terminal. */
+export async function completeRealtimeEventInstance(expected: PersonaSnapshot, instanceId: string): Promise<boolean> {
+	if (!instanceId || instanceId.length > 160) return false;
+	return withLifecycle(async (db) => {
+		const tx = db.transaction(PLAYER_LIFECYCLE_STORE_NAME, 'readwrite');
+		try {
+			const store = tx.objectStore(PLAYER_LIFECYCLE_STORE_NAME);
+			const current = await store.get(PLAYER_STATE);
+			if (!isValidPlayerLifecycle(current) || current.mode.kind !== 'running' || !sameRealtimeRunScope(expected, current.mode.activeRun)) {
+				await tx.done;
+				return false;
+			}
+			const ledger = scopedRealtimeLedger(current, current.mode.activeRun);
+			if (!ledger.pendingInstanceIds.includes(instanceId)) {
+				await tx.done;
+				return true;
+			}
+			await store.put({ ...current, realtimeSettlementLedger: {
+				...ledger,
+				pendingInstanceIds: ledger.pendingInstanceIds.filter((candidate) => candidate !== instanceId)
+			} }, PLAYER_STATE);
+			await tx.done;
+			return true;
+		} catch (error) {
+			try { tx.abort(); } catch { /* already aborted */ }
+			await tx.done.catch(() => {});
+			throw error;
+		}
+	});
+}
+
 export async function getRealtimeSettlementLedger(expected: PersonaSnapshot): Promise<RealtimeSettlementLedger | null> {
 	return withLifecycle(async (db) => {
 		const stored = await readStoredRecords(db);
@@ -897,7 +928,6 @@ export async function applyRealtimeOutcome(expected: PersonaSnapshot, outcome: R
 						mode: { kind: 'running', activeRun: { ...activeRun, revision: activeRun.revision + 1 } },
 						realtimeSettlementLedger: {
 							...ledger,
-							pendingInstanceIds: ledger.pendingInstanceIds.filter((instanceId) => instanceId !== outcome.instanceId),
 							appliedOutcomeIds: [...ledger.appliedOutcomeIds, outcome.id]
 						}
 					};
@@ -916,7 +946,6 @@ export async function applyRealtimeOutcome(expected: PersonaSnapshot, outcome: R
 					mode: { kind: 'running', activeRun: { ...activeRun, revision: activeRun.revision + 1, gameState: nextGameState } },
 					realtimeSettlementLedger: {
 						...ledger,
-						pendingInstanceIds: ledger.pendingInstanceIds.filter((instanceId) => instanceId !== outcome.instanceId),
 						appliedOutcomeIds: [...ledger.appliedOutcomeIds, outcome.id]
 					}
 				};

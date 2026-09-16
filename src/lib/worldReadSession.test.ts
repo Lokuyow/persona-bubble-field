@@ -391,6 +391,7 @@ describe('world read session', () => {
 			publish
 		});
 		const onRealtimeStatus = vi.fn();
+		const onRealtimeBootstrapComplete = vi.fn();
 		const session = createWorldReadSession({
 			field: { columns: 4, rows: 3 },
 			onPresenceChanged: vi.fn(),
@@ -399,7 +400,8 @@ describe('world read session', () => {
 			realtime: {
 				registry: [{ eventType: 'fixture', protocolVersion: 1, protocolKey: protocolKeyFor('fixture', 1), parseAction: () => ({}) }],
 				instanceId: 'fixture-instance', since: 0, startImmediately: false,
-				onEvent: vi.fn(), onStatusChanged: onRealtimeStatus
+				onEvent: vi.fn(), onStatusChanged: onRealtimeStatus,
+				onBootstrapComplete: onRealtimeBootstrapComplete,
 			}
 		});
 		const bootstrap = await session.start();
@@ -409,6 +411,38 @@ describe('world read session', () => {
 		await session.startRealtime();
 		expect(startRealtime).toHaveBeenCalledOnce();
 		expect(onRealtimeStatus).toHaveBeenCalledWith('degraded');
+		expect(onRealtimeBootstrapComplete).toHaveBeenCalledOnce();
+	});
+
+	it('ignores a stale realtime bootstrap after the supplemental subscription is stopped', async () => {
+		const pendingRealtime = deferred<{ status: 'active'; events: []; relays: [] }>();
+		const startRealtime = vi.fn().mockReturnValue(pendingRealtime.promise);
+		const onRealtimeBootstrapComplete = vi.fn();
+		mocked.createTransport.mockReturnValue({
+			start: vi.fn(async (nextInput) => { input = nextInput; return startResult(); }),
+			startRealtime,
+			bootstrapTraceRootCandidates: traceBootstrap(),
+			dispose,
+			publish,
+			stopRealtime: vi.fn()
+		});
+		const statuses: string[] = [];
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 },
+			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn(),
+			realtime: {
+				registry: [{ eventType: 'fixture', protocolVersion: 1, protocolKey: protocolKeyFor('fixture', 1), parseAction: () => ({}) }],
+				instanceId: 'fixture-instance', since: 0, startImmediately: false,
+				onEvent: vi.fn(), onStatusChanged: (status) => statuses.push(status), onBootstrapComplete: onRealtimeBootstrapComplete
+			}
+		});
+		await session.start();
+		const started = session.startRealtime();
+		session.stopRealtime();
+		pendingRealtime.resolve({ status: 'active', events: [], relays: [] });
+		await started;
+		expect(onRealtimeBootstrapComplete).not.toHaveBeenCalled();
+		expect(statuses.at(-1)).toBe('inactive');
 	});
 
 	it('stops every self-write boundary when persisted Run authorization is lost', async () => {

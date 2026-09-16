@@ -64,6 +64,7 @@
 		startMending,
 		upgradePersonaAbility,
 		applyRealtimeOutcome,
+		completeRealtimeEventInstance,
 		getRealtimeSettlementLedger,
 		trackRealtimeEventInstance,
 		transitionRealtimeDeath,
@@ -84,6 +85,8 @@
 		getRiftSchedule,
 		getRiftScheduleForInstance,
 		getRiftParticipantHole,
+		isRiftSettlementComplete,
+		RIFT_EVENT_DEFINITION,
 		RIFT_CONSULTATION_MS,
 		parseRiftEvent,
 		riftPhaseLabel,
@@ -284,13 +287,15 @@
 	const realtimeEventRegistry = enabledRealtimeEventDefinitions();
 	const riftEventEnabled = realtimeEventRegistry.some((definition) => definition.eventType === 'rift');
 	let realtimeStatus = $state<'inactive' | 'active' | 'degraded'>(devRiftFixtureEnabled ? 'active' : 'inactive');
+	let riftRealtimeBootstrapComplete = $state(devRiftFixtureEnabled);
 	let riftSchedule = $state(getRiftSchedule(initialRiftNowMs));
 	let riftNowMs = $state(initialRiftNowMs);
 	let riftSession = $state.raw<RiftSessionState | null>(null);
-	let riftSelection = $state<Readonly<{ round: 1 | 2 | 3; choice: RiftChoice; nonce: string; commitId: string | null; commitPublished: boolean; revealPublished: boolean }> | null>(null);
+	let riftSelection = $state<Readonly<{ round: 1 | 2 | 3; choice: RiftChoice; nonce: string; commitId: string | null; commitPublished: boolean; revealAttempted: boolean; revealStatus: 'idle' | 'sending' | 'published' | 'failed' }> | null>(null);
 	let riftLastResult = $state<string | null>(null);
 	let riftSettlementInFlight = $state(false);
 	const appliedRiftOutcomeIds = new Set<string>();
+	const realtimeRecoveryInstanceIds = new Set<string>();
 	const recoveredRiftSessions = new Map<string, RiftSessionState>();
 	const movementInputController = createMovementInputController({
 		requestMovement: (direction) => {
@@ -457,17 +462,16 @@
 		traceMarkerCells.some((cell) => sameCell(cell.position, position))
 	));
 	let facilityCellTriggers = $derived([MENDING_TERMINAL.position, ADJUSTMENT_TERMINAL.position]);
-	let realtimeHoles = $derived(!riftEventEnabled || riftSchedule.phase === 'dormant' ? [] : (riftSession?.holes ?? createRiftSession({ instanceId: riftSchedule.instanceId, field }).holes));
+	let realtimeHoles = $derived(!riftEventEnabled || riftSchedule.phase === 'dormant' || riftSchedule.phase === 'ended' ? [] : (riftSession?.holes ?? createRiftSession({ instanceId: riftSchedule.instanceId, field }).holes));
 	let realtimeHoleTriggers = $derived(riftSchedule.phase === 'registration' ? realtimeHoles : []);
 	let riftSelfHoleId = $derived(selfSigner && riftSession ? getRiftParticipantHole(riftSession, riftSchedule, selfSigner.pubkey) : null);
 	let riftRound = $derived(riftSchedule.phase === 'game'
 		? ([1, 2, 3] as const).find((round) => riftNowMs < getRiftRoundSchedule(riftSchedule, round).endedAtMs) ?? 3
 		: null);
 	let riftRoundSchedule = $derived(riftRound ? getRiftRoundSchedule(riftSchedule, riftRound) : null);
-	let riftCanChoose = $derived(Boolean(riftSchedule.phase === 'game' && riftRoundSchedule && riftNowMs >= riftRoundSchedule.selectionAtMs && riftNowMs < riftRoundSchedule.resultAtMs && riftSelfHoleId && personaSnapshot && realtimeStatus === 'active'));
-	let riftCanReveal = $derived(Boolean(riftSchedule.phase === 'game' && riftRoundSchedule && riftSelection?.round === riftRound && riftNowMs >= riftRoundSchedule.resultAtMs && riftNowMs <= riftRoundSchedule.revealCutoffAtMs && riftSelection.commitId && !riftSelection.revealPublished && realtimeStatus === 'active'));
+	let riftCanChoose = $derived(Boolean(riftSchedule.phase === 'game' && riftRealtimeBootstrapComplete && riftRoundSchedule && riftNowMs >= riftRoundSchedule.selectionAtMs && riftNowMs < riftRoundSchedule.resultAtMs && riftSelfHoleId && personaSnapshot && realtimeStatus === 'active' && !(riftSelection?.round === riftRound && riftSelection.commitPublished)));
 	let riftCommitStatus = $derived(riftSelection && riftSelection.round === riftRound
-		? riftSelection.revealPublished ? '選択を公開済み' : riftSelection.commitPublished ? '秘密選択を送信済み' : '未送信'
+		? riftSelection.revealStatus === 'published' ? '選択を自動公開済み' : riftSelection.revealStatus === 'sending' ? '選択を自動公開中' : riftSelection.revealStatus === 'failed' ? '選択の自動公開に失敗（未reveal）' : riftSelection.commitPublished ? '秘密選択を送信済み' : '未送信'
 		: 'このラウンドの選択はまだありません');
 
 	function isActuallyPresented(element: Element | null): element is HTMLElement {
@@ -879,22 +883,33 @@
 			characterProfilePublication: PreparedCharacterProfilePublication | null = null,
 			authorizationRunNumber: number | null = signer ? personaSnapshot?.activeRun.runNumber ?? null : null,
 			realtimeInstanceIds: readonly string[] | undefined = undefined,
-			realtimeSince: number | undefined = undefined
+			realtimeSince: number | undefined = undefined,
+			realtimeStartImmediately: boolean | undefined = undefined
 		): Promise<void> => {
 			const previousSession = session;
 			session = null;
 			if (worldSession === previousSession) worldSession = null;
 			previousSession?.dispose();
-			const nextSession = createWorldReadSession({
+			riftRealtimeBootstrapComplete = devRiftFixtureEnabled;
+			let nextSession!: ReturnType<typeof createWorldReadSession>;
+			nextSession = createWorldReadSession({
 				field: FIELD,
 				selfSigner: signer,
 					realtime: {
 					registry: realtimeEventRegistry,
 					...(realtimeInstanceIds?.length ? { instanceIds: realtimeInstanceIds } : { instanceId: getRiftSchedule(Date.now()).instanceId }),
 					since: realtimeSince ?? Math.floor(getRiftSchedule(Date.now()).warningAtMs / 1000),
-					startImmediately: Boolean(realtimeInstanceIds?.length || getRiftSchedule(Date.now()).phase !== 'dormant'),
+					startImmediately: realtimeStartImmediately ?? Boolean(realtimeInstanceIds?.length || ['registration', 'game'].includes(getRiftSchedule(Date.now()).phase)),
 					onEvent: handleRealtimeEnvelope,
-					onStatusChanged: (next) => { realtimeStatus = next; }
+					onBootstrapComplete: () => {
+						if (!mounted || session !== nextSession) return;
+						riftRealtimeBootstrapComplete = true;
+						reconcileRiftSession(Date.now());
+					},
+					onStatusChanged: (next) => {
+						realtimeStatus = next;
+						if (next === 'inactive') riftRealtimeBootstrapComplete = false;
+					}
 				},
 				...(signer && authorizationRunNumber !== null ? {
 					authorizeSelfWrite: () => authorizeActiveRun({ identity: signer.identity, runNumber: authorizationRunNumber }),
@@ -962,6 +977,7 @@
 			let characterProfilePublication: PreparedCharacterProfilePublication | null = null;
 			let realtimeInstanceIds: readonly string[] | undefined;
 			let realtimeSince: number | undefined;
+			let realtimeStartImmediately = false;
 			try {
 				const personaResult = await loadOrCreateLifecycle();
 				if (personaResult.kind === 'created' || personaResult.kind === 'selecting') {
@@ -975,8 +991,16 @@
 					selfSigner = personaResult.persona.signer;
 					const currentRiftSchedule = getRiftSchedule(Date.now());
 					const ledger = await getRealtimeSettlementLedger(personaResult.persona);
-					const pendingInstanceIds = ledger?.pendingInstanceIds ?? [];
-					realtimeInstanceIds = [...new Set([currentRiftSchedule.instanceId, ...pendingInstanceIds])];
+					const pendingInstanceIds = (ledger?.pendingInstanceIds ?? [])
+						.filter((instanceId) => getRiftScheduleForInstance(instanceId, Date.now()) !== null);
+					realtimeRecoveryInstanceIds.clear();
+					for (const instanceId of pendingInstanceIds) realtimeRecoveryInstanceIds.add(instanceId);
+					const currentNeedsRealtime = currentRiftSchedule.phase === 'registration' || currentRiftSchedule.phase === 'game';
+					const recoveryNeedsEarlyRealtime = pendingInstanceIds.length > 0;
+					realtimeInstanceIds = pendingInstanceIds.length || currentNeedsRealtime
+						? [...new Set([...pendingInstanceIds, ...((currentNeedsRealtime || recoveryNeedsEarlyRealtime) ? [currentRiftSchedule.instanceId] : [])])]
+						: undefined;
+					realtimeStartImmediately = pendingInstanceIds.length > 0 || currentNeedsRealtime;
 					realtimeSince = Math.floor(Math.min(currentRiftSchedule.warningAtMs, ...pendingInstanceIds
 						.map((instanceId) => getRiftScheduleForInstance(instanceId, Date.now())?.warningAtMs ?? currentRiftSchedule.warningAtMs)) / 1000);
 					mendingNowMs = Date.now();
@@ -1003,7 +1027,7 @@
 			} catch {
 				setComposerTerminalError(new Error('Persona is unavailable for publishing.'));
 			}
-			await startReadSession(selfSigner, characterProfilePublication, personaSnapshot?.activeRun.runNumber ?? null, realtimeInstanceIds, realtimeSince);
+			await startReadSession(selfSigner, characterProfilePublication, personaSnapshot?.activeRun.runNumber ?? null, realtimeInstanceIds, realtimeSince, realtimeStartImmediately);
 		};
 
 		const updateViewport = () => {
@@ -1044,7 +1068,8 @@
 				mendingNowMs = now;
 				updateLifespanHud(now);
 				reconcileRiftSession(devRiftFixtureEnabled ? initialRiftNowMs : now);
-				if (!devWorldSandboxEnabled && riftSchedule.phase !== 'dormant') void worldSession?.startRealtime();
+				if (!devWorldSandboxEnabled && (riftSchedule.phase === 'registration' || riftSchedule.phase === 'game')) void worldSession?.startRealtime();
+				if (!devWorldSandboxEnabled && riftSchedule.phase === 'ended') maybeStopRealtime();
 				const nextPresence = session?.refresh(now);
 				if (nextPresence) {
 					conversationState = applyVisibility(conversationState, projectFrontendPresence({ presence: nextPresence, selectedCharacterId, selfProjectionId,
@@ -1392,7 +1417,20 @@
 		if (riftSettlementInFlight || !personaSnapshot || !selfSigner || !sourceSession) return;
 		const outcomes = sourceSession.results.flatMap((result) => result.outcomes).filter((outcome) => outcome.pubkey === selfSigner!.pubkey);
 		const next = outcomes.find((outcome) => !appliedRiftOutcomeIds.has(outcome.id));
-		if (!next) return;
+		if (!next) {
+			const sourceSchedule = sourceSession.instanceId === riftSchedule.instanceId
+				? riftSchedule
+				: getRiftScheduleForInstance(sourceSession.instanceId, Date.now());
+			if (sourceSchedule && isRiftSettlementComplete(sourceSession, sourceSchedule, selfSigner.pubkey)) {
+				const completed = await completeRealtimeEventInstance(personaSnapshot, sourceSession.instanceId);
+				if (completed) {
+					realtimeRecoveryInstanceIds.delete(sourceSession.instanceId);
+					if (sourceSession.instanceId !== riftSchedule.instanceId) recoveredRiftSessions.delete(sourceSession.instanceId);
+					maybeStopRealtime();
+				}
+			}
+			return;
+		}
 		riftSettlementInFlight = true;
 		try {
 			const outcome = next.kind === 'points'
@@ -1420,6 +1458,24 @@
 		}
 	}
 
+	async function autoRevealRiftChoice(nowMs: number): Promise<void> {
+		const selection = riftSelection;
+		const roundSchedule = riftRoundSchedule;
+		if (!selection || !roundSchedule || selection.round !== riftRound || !selection.commitId || !selection.commitPublished ||
+			selection.revealAttempted || selection.revealStatus === 'sending' || selection.revealStatus === 'published' ||
+			nowMs < roundSchedule.resultAtMs || nowMs > roundSchedule.revealCutoffAtMs || !selfSigner || !riftSelfHoleId) return;
+		riftSelection = { ...selection, revealAttempted: true, revealStatus: 'sending' };
+		const id = await publishRiftAction(buildRiftRevealAction({ holeId: riftSelfHoleId, round: selection.round,
+			commitId: selection.commitId, choice: selection.choice, nonce: selection.nonce }));
+		if (riftSelection?.round !== selection.round || riftSelection.commitId !== selection.commitId) return;
+		riftSelection = { ...riftSelection, revealStatus: id ? 'published' : 'failed' };
+	}
+
+	function maybeStopRealtime(): void {
+		if (riftSchedule.phase !== 'ended' || realtimeRecoveryInstanceIds.size > 0 || recoveredRiftSessions.size > 0) return;
+		worldSession?.stopRealtime();
+	}
+
 	function reconcileRiftSession(nowMs = Date.now()): void {
 		riftNowMs = nowMs;
 		riftSchedule = getRiftSchedule(nowMs);
@@ -1430,10 +1486,11 @@
 		}
 		if (!riftSession || riftSession.instanceId !== riftSchedule.instanceId) {
 			if (riftSchedule.phase !== 'dormant') riftSession = createRiftSession({ instanceId: riftSchedule.instanceId, field });
-		} else {
+		} else if (riftRealtimeBootstrapComplete) {
 			riftSession = settleRiftSession(riftSession, riftSchedule, nowMs);
 		}
 		riftLastResult = riftResultLabel();
+		void autoRevealRiftChoice(nowMs);
 		void settleOwnRiftOutcomes();
 		for (const [instanceId, recovered] of recoveredRiftSessions) {
 			const recoveredSchedule = getRiftScheduleForInstance(instanceId, nowMs);
@@ -1441,9 +1498,11 @@
 				recoveredRiftSessions.delete(instanceId);
 				continue;
 			}
-			const settled = settleRiftSession(recovered, recoveredSchedule, nowMs);
-			recoveredRiftSessions.set(instanceId, settled);
-			void settleOwnRiftOutcomes(settled);
+			if (riftRealtimeBootstrapComplete) {
+				const settled = settleRiftSession(recovered, recoveredSchedule, nowMs);
+				recoveredRiftSessions.set(instanceId, settled);
+				void settleOwnRiftOutcomes(settled);
+			}
 		}
 	}
 
@@ -1461,12 +1520,15 @@
 		});
 		if (parsed.instanceId === riftSchedule.instanceId) riftSession = next;
 		else recoveredRiftSessions.set(parsed.instanceId, next);
-		if (personaSnapshot) void trackRealtimeEventInstance(personaSnapshot, parsed.instanceId);
+		if (personaSnapshot && parsed.action.action === 'join' && envelope.event.pubkey === selfSigner?.pubkey) {
+			realtimeRecoveryInstanceIds.add(parsed.instanceId);
+			void trackRealtimeEventInstance(personaSnapshot, parsed.instanceId);
+		}
 		if (parsed.instanceId === riftSchedule.instanceId) reconcileRiftSession(Date.now());
 		else {
-			const settled = settleRiftSession(next, eventSchedule, Date.now());
+			const settled = riftRealtimeBootstrapComplete ? settleRiftSession(next, eventSchedule, Date.now()) : next;
 			recoveredRiftSessions.set(parsed.instanceId, settled);
-			void settleOwnRiftOutcomes(settled);
+			if (riftRealtimeBootstrapComplete) void settleOwnRiftOutcomes(settled);
 		}
 	}
 
@@ -1477,11 +1539,11 @@
 		try {
 			const event = finalizeRealtimeEvent(buildRiftActionTemplate({ channelId: channel.channelId, relayHint: channel.relayHint,
 				instanceId: riftSchedule.instanceId, action, createdAt: Math.floor(Date.now() / 1000) }), selfSigner.secretKey);
-			const results = await worldSession.publish(event);
-			if (!results.some((result) => result.outcome === 'accepted')) return null;
+			const result = await worldSession.publishRealtime(event);
+			if (result.outcome !== 'accepted' && result.outcome !== 'echoed') return null;
 			handleRealtimeEnvelope({ event, channelId: channel.channelId, eventType: 'rift', protocolVersion: 1,
-				protocolKey: 'io.github.lokuyow.persona-bubble-field:realtime:rift:1', instanceId: riftSchedule.instanceId,
-				payload: action, definition: realtimeEventRegistry[0] });
+				protocolKey: RIFT_EVENT_DEFINITION.protocolKey, instanceId: riftSchedule.instanceId,
+				payload: action, definition: RIFT_EVENT_DEFINITION });
 			return event.id;
 		} catch {
 			return null;
@@ -1498,19 +1560,13 @@
 	}
 
 	async function chooseRiftChoice(choice: RiftChoice): Promise<void> {
-		if (!riftCanChoose || !selfSigner || !riftSelfHoleId || !riftRound) return;
+		if (!riftCanChoose || !selfSigner || !riftSelfHoleId || !riftRound ||
+			(riftSelection?.round === riftRound && riftSelection.commitPublished)) return;
 		const nonce = createRiftNonce();
 		const action = buildRiftCommitAction({ instanceId: riftSchedule.instanceId, holeId: riftSelfHoleId, round: riftRound, authorPubkey: selfSigner.pubkey, choice, nonce });
 		const commitId = await publishRiftAction(action);
 		if (!commitId) return;
-		riftSelection = { round: riftRound, choice, nonce, commitId, commitPublished: true, revealPublished: false };
-	}
-
-	async function revealRiftChoice(): Promise<void> {
-		if (!riftCanReveal || !riftSelection) return;
-		const id = await publishRiftAction(buildRiftRevealAction({ holeId: riftSelfHoleId!, round: riftSelection.round,
-			commitId: riftSelection.commitId!, choice: riftSelection.choice, nonce: riftSelection.nonce }));
-		if (id) riftSelection = { ...riftSelection, revealPublished: true };
+		riftSelection = { round: riftRound, choice, nonce, commitId, commitPublished: true, revealAttempted: false, revealStatus: 'idle' };
 	}
 
 	function closeTraceConversation(discardReplyDraft = false): void {
@@ -2153,10 +2209,8 @@
 			selectedChoice={riftSelection?.round === riftRound ? riftSelection.choice : null}
 			commitStatus={riftCommitStatus}
 			canChoose={riftCanChoose}
-			canReveal={riftCanReveal}
 			lastResult={riftLastResult}
 			onChoice={(choice) => { void chooseRiftChoice(choice); }}
-			onReveal={() => { void revealRiftChoice(); }}
 		/>
 	{/if}
 

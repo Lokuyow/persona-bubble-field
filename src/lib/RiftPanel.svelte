@@ -10,13 +10,11 @@
 		selectedChoice: RiftChoice | null;
 		commitStatus: string;
 		canChoose: boolean;
-		canReveal: boolean;
 		lastResult: string | null;
 		onChoice: (choice: RiftChoice) => void;
-		onReveal: () => void;
 	}>;
 
-	let { schedule, nowMs, status, session, selfHoleId, selectedChoice, commitStatus, canChoose, canReveal, lastResult, onChoice, onReveal }: Props = $props();
+	let { schedule, nowMs, status, session, selfHoleId, selectedChoice, commitStatus, canChoose, lastResult, onChoice }: Props = $props();
 
 	let roundInfo = $derived.by(() => {
 		if (schedule.phase !== 'game') return null;
@@ -67,7 +65,7 @@
 					<button type="button" data-rift-choice="escape" class:selected={selectedChoice === 'escape'} disabled={!canChoose} onclick={() => onChoice('escape')}>抜け穴からの脱出を試みる</button>
 				</div>
 			{:else if roundInfo.phase === '結果表示'}
-				<button type="button" data-rift-reveal disabled={!canReveal} onclick={onReveal}>選択を公開する</button>
+				<p class="rift-note">選択を自動公開しています。</p>
 			{/if}
 			<p class="rift-status" data-rift-selection-status>{commitStatus}</p>
 		{:else if schedule.phase === 'ended'}
@@ -79,11 +77,11 @@
 {/if}
 
 <style>
-	.rift-panel { position: absolute; z-index: 10; top: 12px; left: 16px; width: min(440px, calc(100vw - 32px)); padding: 12px 14px; border: 1px solid rgba(102, 28, 106, 0.25); border-radius: 14px; background: rgba(255, 250, 255, 0.93); color: #3d3144; box-shadow: 0 8px 24px rgba(75, 44, 75, 0.12); }
+	.rift-panel { position: absolute; z-index: 10; top: 12px; left: 16px; width: min(440px, calc(100vw - 32px)); padding: 12px 14px; border: 1px solid rgba(102, 28, 106, 0.25); border-radius: 14px; background: rgba(255, 250, 255, 0.93); color: #3d3144; box-shadow: 0 8px 24px rgba(75, 44, 75, 0.12); pointer-events: none; }
 	.rift-heading, .rift-details, .rift-choice-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 	h2 { margin: 0; font-size: 16px; } h2 span { color: #7b397f; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
 	p { margin: 4px 0 0; font-size: 11px; } .rift-heading strong { font-size: 11px; white-space: nowrap; }
 	.rift-note { color: #665b69; } .rift-details { margin-top: 8px; font-size: 11px; }
-	.rift-choice-row { margin-top: 9px; } button { flex: 1; min-height: 34px; padding: 6px 8px; border: 1px solid rgba(102, 28, 106, 0.3); border-radius: 8px; background: #fff; color: #4d3150; font: inherit; font-size: 11px; font-weight: 700; cursor: pointer; } button.selected { background: #f0d9f3; border-color: #8d4692; } button:disabled { cursor: not-allowed; opacity: .5; }
+	.rift-choice-row { margin-top: 9px; } button { flex: 1; min-height: 34px; padding: 6px 8px; border: 1px solid rgba(102, 28, 106, 0.3); border-radius: 8px; background: #fff; color: #4d3150; font: inherit; font-size: 11px; font-weight: 700; cursor: pointer; pointer-events: auto; } button.selected { background: #f0d9f3; border-color: #8d4692; } button:disabled { cursor: not-allowed; opacity: .5; }
 	.rift-status { color: #69536d; } .rift-result { padding: 6px 8px; border-radius: 7px; background: rgba(211, 159, 215, .18); font-weight: 700; }
 </style>

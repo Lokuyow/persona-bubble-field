@@ -185,6 +185,11 @@ export type RealtimeStartResult = Readonly<{
 	relays: readonly RealtimeRelayDiagnostic[];
 }>;
 
+export type RealtimePublishResult = Readonly<{
+	outcome: 'accepted' | 'echoed' | 'unconfirmed';
+	results: readonly PublishRelayResult[];
+}>;
+
 export type PublishRelayResult = Readonly<{
 	relayUrl: string;
 	outcome: 'accepted' | 'rejected' | 'no-response';
@@ -398,10 +403,12 @@ export function createNostrRelayTransport(
 	let traceDiagnostics: TraceReplyDiagnostics | null = null;
 	let realtimeStarted = false;
 	let realtimeDiagnostics: { status: 'inactive' | 'initializing' | 'active'; relays: RealtimeRelayDiagnostic[] } = { status: 'inactive', relays: [] };
-	let realtimeStartInput: RealtimeStartInput | null = null;
+	let realtimeResources: Subscription | null = null;
 	let realtimeFilter: Filter | null = null;
 	const realtimeSubIds = new Map<string, string>();
 	const realtimeSeenIds = new Set<string>();
+	const realtimeReadableRelays = new Set<string>();
+	const realtimeEchoWaiters = new Map<string, Set<(echoed: boolean) => void>>();
 	const stableTraceCursors = new Map<string, Map<string, number>>();
 	function requireRxNostr(): RxNostr {
 		if (!rxNostr) throw new Error('Relay transport has not been initialized.');
@@ -473,6 +480,7 @@ export function createNostrRelayTransport(
 	function disposeRxNostr(): void {
 		cancelPrimaryStart?.();
 		disposeTraceGeneration(true);
+		stopRealtime();
 		subscriptions.unsubscribe();
 		rxNostr?.dispose();
 		rxNostr = null;
@@ -752,6 +760,32 @@ export function createNostrRelayTransport(
 			...realtimeDiagnostics,
 			relays: realtimeDiagnostics.relays.map((relay) => relay.relayUrl === relayUrl ? { ...next } : relay)
 		};
+		if (next.status === 'eose') realtimeReadableRelays.add(relayUrl);
+		else realtimeReadableRelays.delete(relayUrl);
+	}
+
+	function waitForRealtimeEcho(eventId: string, waitMs: number): Readonly<{ promise: Promise<boolean>; cancel: () => void }> {
+		let timer: ReturnType<typeof setTimeout> | null = null;
+		let settled = false;
+		let resolvePromise!: (echoed: boolean) => void;
+		const promise = new Promise<boolean>((resolve) => { resolvePromise = resolve; });
+		const listeners = realtimeEchoWaiters.get(eventId) ?? new Set<(echoed: boolean) => void>();
+		const finish = (echoed: boolean) => {
+			if (settled) return;
+			settled = true;
+			if (timer) clearTimeout(timer);
+			listeners.delete(finish);
+			if (listeners.size === 0) realtimeEchoWaiters.delete(eventId);
+			resolvePromise(echoed);
+		};
+		listeners.add(finish);
+		realtimeEchoWaiters.set(eventId, listeners);
+		timer = setTimeout(() => finish(false), waitMs);
+		return { promise, cancel: () => finish(false) };
+	}
+
+	function notifyRealtimeEcho(eventId: string): void {
+		for (const listener of realtimeEchoWaiters.get(eventId) ?? []) listener(true);
 	}
 
 	/**
@@ -774,7 +808,6 @@ export function createNostrRelayTransport(
 			...(input.instanceIds === undefined ? {} : { instanceIds: input.instanceIds }),
 			since: input.since
 		});
-		realtimeStartInput = input;
 		const capableRelays = metadata.relays.filter(realtimeCapacityAllows);
 		const skipped = metadata.relays.filter((relayUrl) => !capableRelays.includes(relayUrl)).map((relayUrl) => ({ relayUrl, status: 'unavailable' as const, notice: 'Relay subscription capacity is reserved for primary world reads.' }));
 		if (capableRelays.length === 0) {
@@ -787,7 +820,7 @@ export function createNostrRelayTransport(
 		let settled = false;
 		let deadline: ReturnType<typeof setTimeout> | null = null;
 		const resources = new Subscription();
-		subscriptions.add(resources);
+		realtimeResources = resources;
 		const finish = (resolve: (result: RealtimeStartResult) => void) => {
 			if (settled || realtimeDiagnostics.relays.some((relay) => relay.status === 'pending')) return;
 			settled = true;
@@ -810,7 +843,9 @@ export function createNostrRelayTransport(
 			}));
 			resources.add(client.createAllEventObservable().subscribe((packet) => {
 				const relayUrl = canonicalRelay(packet.from);
-				if (!relayUrl || realtimeSubIds.get(relayUrl) !== packet.subId || packet.event.kind !== REALTIME_EVENT_KIND || realtimeSeenIds.has(packet.event.id)) return;
+				if (!relayUrl || realtimeSubIds.get(relayUrl) !== packet.subId || packet.event.kind !== REALTIME_EVENT_KIND) return;
+				notifyRealtimeEcho(packet.event.id);
+				if (realtimeSeenIds.has(packet.event.id)) return;
 				realtimeSeenIds.add(packet.event.id);
 				if (!settled) {
 					initialEvents.push(packet.event);
@@ -855,6 +890,19 @@ export function createNostrRelayTransport(
 			}
 			finish(resolve);
 		});
+	}
+
+	function stopRealtime(): void {
+		if (!realtimeStarted) return;
+		realtimeStarted = false;
+		realtimeResources?.unsubscribe();
+		realtimeResources = null;
+		realtimeSubIds.clear();
+		realtimeFilter = null;
+		realtimeReadableRelays.clear();
+		for (const listeners of realtimeEchoWaiters.values()) for (const listener of listeners) listener(false);
+		realtimeEchoWaiters.clear();
+		realtimeDiagnostics = { status: 'inactive', relays: [] };
 	}
 
 	function refreshTraceDiagnostics(generation: TraceGeneration | null, status: TraceReplyDiagnostics['status']): void {
@@ -1216,6 +1264,50 @@ export function createNostrRelayTransport(
 		return requireRxNostr().use(req, { on: { relays: [relayUrl] } }).subscribe();
 	}
 
+	async function publishEvent(event: VerifiedEvent): Promise<readonly PublishRelayResult[]> {
+		if (state !== 'started' || !metadata) throw new Error('Relay transport must start before publishing.');
+		const client = requireRxNostr();
+		const results = new Map<string, PublishRelayResult>(metadata.relays.map((relayUrl) => [relayUrl, {
+			relayUrl,
+			outcome: 'no-response'
+		}]));
+		await new Promise<void>((resolve, reject) => {
+			client.send(event).subscribe({
+				next: (packet) => {
+					const relayUrl = canonicalRelay(packet.from);
+					if (!relayUrl) return;
+					results.set(relayUrl, {
+						relayUrl,
+						outcome: packet.ok ? 'accepted' : 'rejected',
+						...(packet.notice ? { notice: packet.notice } : {})
+					});
+				},
+				complete: resolve,
+				error: reject
+			});
+		});
+		return [...results.values()];
+	}
+
+	async function publishRealtimeEvent(event: VerifiedEvent): Promise<RealtimePublishResult> {
+		if (state !== 'started' || !metadata || !realtimeStarted) throw new Error('Realtime event subscription is not active.');
+		const echo = waitForRealtimeEcho(event.id, timeoutMs);
+		let results: readonly PublishRelayResult[];
+		try {
+			results = await publishEvent(event);
+		} catch (error) {
+			echo.cancel();
+			throw error;
+		}
+		const acceptedByReadableRelay = results.some((result) => result.outcome === 'accepted' && realtimeReadableRelays.has(result.relayUrl));
+		if (acceptedByReadableRelay) {
+			echo.cancel();
+			return { outcome: 'accepted', results };
+		}
+		if (await echo.promise) return { outcome: 'echoed', results };
+		return { outcome: 'unconfirmed', results };
+	}
+
 	return {
 		async start(input: PrimaryStartInput): Promise<PrimaryStartResult> {
 			if (state !== 'new') throw new Error('Relay transport start is only allowed once.');
@@ -1303,30 +1395,11 @@ export function createNostrRelayTransport(
 			return configureTraceReplies(input);
 		},
 
-		async publish(event: VerifiedEvent): Promise<readonly PublishRelayResult[]> {
-			if (state !== 'started' || !metadata) throw new Error('Relay transport must start before publishing.');
-			const client = requireRxNostr();
-			const results = new Map<string, PublishRelayResult>(metadata.relays.map((relayUrl) => [relayUrl, {
-				relayUrl,
-				outcome: 'no-response'
-			}]));
-			await new Promise<void>((resolve, reject) => {
-				client.send(event).subscribe({
-					next: (packet) => {
-						const relayUrl = canonicalRelay(packet.from);
-						if (!relayUrl) return;
-						results.set(relayUrl, {
-							relayUrl,
-							outcome: packet.ok ? 'accepted' : 'rejected',
-							...(packet.notice ? { notice: packet.notice } : {})
-						});
-					},
-					complete: resolve,
-					error: reject
-				});
-			});
-			return [...results.values()];
-		},
+		publish: publishEvent,
+
+		publishRealtime: publishRealtimeEvent,
+
+		stopRealtime,
 
 		dispose(): void {
 			if (state === 'disposed') return;

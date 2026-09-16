@@ -171,7 +171,7 @@ positionイベントの具体仕様は [`SPEC-30-フィールド・position・pr
 
 ### 交換可能なリアルタイムイベント
 
-リアルタイムイベントは、通常のworld read/write subscriptionから独立した補助subscriptionで取得する。リアルタイムイベントの障害・切断・購読拒否は、通常のworld状態やTrace状態を失敗扱いにせず、リアルタイムイベント機能だけをinactive/degradedとして扱う。Relayの既知の `max_subscriptions` が、既存のprimary subscription 2本、最大1本のTrace補助subscription、およびリアルタイムイベント補助subscriptionを同時に許容しない場合、そのRelayではリアルタイムイベント補助subscriptionを開始しない。値が不明な場合は試行してよい。
+リアルタイムイベントは、通常のworld read/write subscriptionから独立した補助subscriptionで取得する。リアルタイムイベントの障害・切断・購読拒否は、通常のworld状態やTrace状態を失敗扱いにせず、リアルタイムイベント機能だけをinactive/degradedとして扱う。Relayの既知の `max_subscriptions` が、既存のprimary subscription 2本、最大1本のTrace補助subscription、およびリアルタイムイベント補助subscriptionを同時に許容しない場合、そのRelayではリアルタイムイベント補助subscriptionを開始しない。値が不明な場合は試行してよい。イベント補助subscriptionは終日常駐させず、current instanceはイベント受付開始以降に開始し、settlement recoveryを含めて不要になった時点で停止する。pending recoveryがあるinstanceだけは、通常の開催時刻より早く開始してよい。
 
 prototypeの共通envelopeには、project-owned regular kind `7070`、次のtag、およびJSON objectのcontentを使用する。
 

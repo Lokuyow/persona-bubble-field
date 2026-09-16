@@ -6,6 +6,7 @@ import {
 	createRiftSession,
 	getRiftRoundSchedule,
 	getRiftSchedule,
+	isRiftSettlementComplete,
 	parseRiftAction,
 	settleRiftSession,
 	type RiftAction,
@@ -137,5 +138,22 @@ describe('Rift schedule and domain', () => {
 		const complete = settleRiftSession(withRounds, SCHEDULE, getRiftRoundSchedule(SCHEDULE, 3).revealCutoffAtMs);
 		expect(complete.results).toHaveLength(3);
 		expect(complete.closedHoleIds).toEqual([]);
+	});
+
+	it('keeps recovery open through every round and closes it for terminal no-outcome states', () => {
+		const { state, pubkeys, holeId } = addJoins(3);
+		const roundOne = settleRiftSession(addRoundActions(state, pubkeys, holeId, 1, ['maintain', 'maintain', 'maintain']), SCHEDULE, getRiftRoundSchedule(SCHEDULE, 1).revealCutoffAtMs);
+		expect(isRiftSettlementComplete(roundOne, { ...SCHEDULE, phase: 'ended' }, pubkeys[0])).toBe(false);
+
+		const allRounds = settleRiftSession(
+			[1, 2, 3].reduce((current, round) => addRoundActions(current, pubkeys, holeId, round as 1 | 2 | 3, ['maintain', 'maintain', 'maintain']), state),
+			{ ...SCHEDULE, phase: 'ended' },
+			getRiftRoundSchedule(SCHEDULE, 3).revealCutoffAtMs
+		);
+		expect(isRiftSettlementComplete(allRounds, { ...SCHEDULE, phase: 'ended' }, pubkeys[0])).toBe(true);
+
+		const closed = settleRiftSession(addRoundActions(state, pubkeys, holeId, 1, ['maintain', 'escape', 'escape']), SCHEDULE, getRiftRoundSchedule(SCHEDULE, 1).revealCutoffAtMs);
+		expect(isRiftSettlementComplete(closed, { ...SCHEDULE, phase: 'ended' }, pubkeys[1])).toBe(true);
+		expect(isRiftSettlementComplete(closed, { ...SCHEDULE, phase: 'ended' }, hex(999))).toBe(true);
 	});
 });

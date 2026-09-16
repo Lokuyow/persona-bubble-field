@@ -396,6 +396,21 @@ export function snapshotRiftParticipants(state: RiftSessionState, schedule: Rift
 	return state.participantSnapshot ? state : { ...state, participantSnapshot: joinSnapshot(state, schedule) };
 }
 
+/**
+ * Settlement recovery is complete only after the instance can no longer
+ * produce an outcome for this participant. This intentionally knows nothing
+ * about the core ledger; the event definition owns its terminal projection.
+ */
+export function isRiftSettlementComplete(state: RiftSessionState, schedule: RiftSchedule, pubkey: string): boolean {
+	if (schedule.phase !== 'ended') return false;
+	const snapshot = snapshotRiftParticipants(state, schedule).participantSnapshot;
+	if (!snapshot) return false;
+	const holeId = Object.entries(snapshot).find(([, participants]) => participants.includes(pubkey))?.[0];
+	if (!holeId) return true;
+	if (state.closedHoleIds.includes(holeId)) return true;
+	return state.results.some((result) => result.holeId === holeId && result.round === RIFT_ROUND_COUNT);
+}
+
 function resultFor(state: RiftSessionState, schedule: RiftSchedule, holeId: string, round: 1 | 2 | 3): RiftRoundResult {
 	const participants = state.participantSnapshot?.[holeId] ?? [];
 	const roundSchedule = getRiftRoundSchedule(schedule, round);
