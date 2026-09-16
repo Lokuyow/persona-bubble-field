@@ -1231,7 +1231,7 @@ test.describe('Relay startup', () => {
 		const activeDialog = page.getByRole('dialog');
 		await expect(activeDialog).toContainText('所持ポイント: 0.00pt');
 		await expect(activeDialog).toContainText('蓄積時間: 0.00 / 8.00時間');
-		await expect(activeDialog).toContainText('完了まで: 8.00時間');
+		await expect(activeDialog).toContainText('上限まで: 8.00時間');
 		await expect(activeDialog).toContainText('寿命延長: +0.00時間（寿命に反映中）');
 		await expect(activeDialog).toContainText('受取可能ポイント: +0.00pt');
 		await expect(activeDialog.getByRole('button', { name: '成果を受け取る' })).toBeVisible();

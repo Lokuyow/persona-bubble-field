@@ -177,6 +177,102 @@ describe('Root / Identity / Run lifecycle', () => {
 		expect(collected.persona.activeRun.revision).toBe(2);
 	});
 
+	it('collects while persisted expiry has passed if projected lifespan remains', async () => {
+		const selection = await loadOrCreateLifecycle();
+		if (selection.kind !== 'created') throw new Error('Expected fresh state.');
+		const selected = await selectIdentity(selection.selection.generation, selection.selection.candidates[0]);
+		if (selected.kind !== 'selected') throw new Error('Expected selected state.');
+		const started = await startMending(selected.persona);
+		if (started.kind !== 'started') throw new Error('Expected mending start.');
+		const stored = (await records(PLAYER_LIFECYCLE_STORE_NAME))['player-lifecycle'] as any;
+		stored.mode.activeRun.gameState.lifespanExpiresAtMs = TIME + 60 * 60 * 1000;
+		await putRecord(PLAYER_LIFECYCLE_STORE_NAME, 'player-lifecycle', stored);
+		const now = TIME + 2 * 60 * 60 * 1000;
+		vi.mocked(Date.now).mockReturnValue(now);
+		const current = restored(await loadOrCreateLifecycle());
+		const collected = await collectMending(current);
+		expect(collected.kind).toBe('collected');
+		if (collected.kind !== 'collected') return;
+		expect(collected.persona.gameState.points).toBeCloseTo(2, 10);
+		expect(collected.persona.gameState.lifespanExpiresAtMs).toBeGreaterThan(now);
+	});
+
+	it('rejects collection at exact projected expiry without mutating the bucket', async () => {
+		const selection = await loadOrCreateLifecycle();
+		if (selection.kind !== 'created') throw new Error('Expected fresh state.');
+		const selected = await selectIdentity(selection.selection.generation, selection.selection.candidates[0]);
+		if (selected.kind !== 'selected') throw new Error('Expected selected state.');
+		const started = await startMending(selected.persona);
+		if (started.kind !== 'started') throw new Error('Expected mending start.');
+		const stored = (await records(PLAYER_LIFECYCLE_STORE_NAME))['player-lifecycle'] as any;
+		stored.mode.activeRun.gameState.lifespanExpiresAtMs = TIME + 60 * 60 * 1000;
+		stored.mode.activeRun.gameState.points = 7;
+		await putRecord(PLAYER_LIFECYCLE_STORE_NAME, 'player-lifecycle', stored);
+		const exactExpiry = TIME + 5 * 60 * 60 * 1000;
+		vi.mocked(Date.now).mockReturnValue(exactExpiry);
+		const current = restored(await loadOrCreateLifecycle());
+		const result = await collectMending(current);
+		expect(result.kind).toBe('expired');
+		if (result.kind !== 'expired') return;
+		expect(result.persona.gameState.points).toBe(7);
+		expect(result.persona.gameState.lifespanExpiresAtMs).toBe(TIME + 60 * 60 * 1000);
+		expect(result.persona.gameState.mendingJob).toEqual(current.gameState.mendingJob);
+		expect(result.persona.activeRun.revision).toBe(current.activeRun.revision);
+		expect((await transitionExpiredPersona(result.persona)).kind).toBe('transitioned');
+		expect((await loadOrCreateLifecycle()).kind).toBe('selecting');
+	});
+
+	it('single-applies concurrent and stale collection for one bucket', async () => {
+		const selection = await loadOrCreateLifecycle();
+		if (selection.kind !== 'created') throw new Error('Expected fresh state.');
+		const selected = await selectIdentity(selection.selection.generation, selection.selection.candidates[0]);
+		if (selected.kind !== 'selected') throw new Error('Expected selected state.');
+		const started = await startMending(selected.persona);
+		if (started.kind !== 'started') throw new Error('Expected mending start.');
+		const now = TIME + 2 * 60 * 60 * 1000;
+		vi.mocked(Date.now).mockReturnValue(now);
+		const [first, second] = await Promise.all([collectMending(started.persona), collectMending(started.persona)]);
+		expect([first.kind, second.kind].filter((kind) => kind === 'collected')).toHaveLength(1);
+		expect([first.kind, second.kind].some((kind) => kind === 'superseded')).toBe(true);
+		const after = restored(await loadOrCreateLifecycle());
+		expect(after.gameState.points).toBeCloseTo(2, 10);
+		expect(after.gameState.mendingJob).toEqual(expect.objectContaining({ startedAtMs: now }));
+		expect(after.activeRun.revision).toBe(2);
+		const stale = await collectMending(started.persona);
+		expect(stale.kind).toBe('superseded');
+		const unchanged = restored(await loadOrCreateLifecycle());
+		expect(unchanged.gameState.points).toBeCloseTo(2, 10);
+		expect(unchanged.activeRun.revision).toBe(2);
+	});
+
+	it('snapshots the latest abilities only for the next bucket after collection', async () => {
+		const selection = await loadOrCreateLifecycle();
+		if (selection.kind !== 'created') throw new Error('Expected fresh state.');
+		const selected = await selectIdentity(selection.selection.generation, selection.selection.candidates[0]);
+		if (selected.kind !== 'selected') throw new Error('Expected selected state.');
+		const stored = (await records(PLAYER_LIFECYCLE_STORE_NAME))['player-lifecycle'] as any;
+		stored.mode.activeRun.gameState.points = 10;
+		await putRecord(PLAYER_LIFECYCLE_STORE_NAME, 'player-lifecycle', stored);
+		const funded = restored(await loadOrCreateLifecycle());
+		const started = await startMending(funded);
+		if (started.kind !== 'started') throw new Error('Expected mending start.');
+		const originalJob = started.persona.gameState.mendingJob;
+		const upgraded = await upgradePersonaAbility(started.persona, 'inferenceEfficiency');
+		expect(upgraded.kind).toBe('upgraded');
+		if (upgraded.kind !== 'upgraded') return;
+		expect(upgraded.persona.gameState.mendingJob).toEqual(originalJob);
+		vi.mocked(Date.now).mockReturnValue(TIME + 60 * 60 * 1000);
+		const collected = await collectMending(upgraded.persona);
+		expect(collected.kind).toBe('collected');
+		if (collected.kind !== 'collected') return;
+		expect(collected.persona.gameState.abilities.inferenceEfficiency).toBe(1);
+		expect(collected.persona.gameState.mendingJob).toEqual(expect.objectContaining({
+			maximumDurationMs: 8 * 60 * 60 * 1000,
+			lifespanExtensionPerHour: { numerator: 9, denominator: 10 },
+			pointsPerHour: { numerator: 1, denominator: 1 }
+		}));
+	});
+
 	it('atomically upgrades abilities and preserves a running mending snapshot', async () => {
 		const selection = await loadOrCreateLifecycle();
 		if (selection.kind !== 'created') throw new Error('Expected fresh state.');

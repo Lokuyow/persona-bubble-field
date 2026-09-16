@@ -33,7 +33,7 @@
 					<button type="button" onclick={onStart}>繕いを開始</button>
 				{:else}
 					<p>蓄積時間: {hours} / {maximumHours}時間</p>
-					{#if projection?.completed}<p>蓄積上限に達しています</p>{:else}<p>完了まで: {remainingHours}時間</p>{/if}
+					{#if projection?.completed}<p>蓄積上限に達しています</p>{:else}<p>上限まで: {remainingHours}時間</p>{/if}
 					<p>寿命延長: +{lifespanHours}時間（寿命に反映中）</p>
 					<p>受取可能ポイント: +{unclaimedPoints}pt</p>
 					<button type="button" onclick={onCollect}>成果を受け取る</button>
