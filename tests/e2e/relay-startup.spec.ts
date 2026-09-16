@@ -15,6 +15,7 @@ import { SPEECH_SHORTCUT_IDS } from '../../src/lib/speechSubmission';
 import { CHARACTER_CATALOG, characterPicturePath } from '../../src/lib/character';
 import { deriveCharacterFromPubkey } from '../../src/lib/characterAssignment';
 import { deriveBip85NostrEntropy } from '../../src/lib/bip85';
+import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL } from '../../src/lib/fieldFacilities';
 
 const CHANNEL_ID = '3212de4b75f0c41efa17e41affcfc3a811171ba930e5b657687b5f5148627d5b';
 const SEED_RELAYS = [
@@ -113,7 +114,7 @@ function testEvents(nowMs = Date.now()) {
 	};
 }
 
-function traceRuntimeEvents() {
+function traceRuntimeEvents(rootPosition: { x: number; y: number } = { x: 4, y: 2 }) {
 	const selfSecret = fixtureSecret(23);
 	const rootSecret = fixtureSecret(29);
 	const createdAt = Math.floor(Date.now() / 1000);
@@ -135,7 +136,7 @@ function traceRuntimeEvents() {
 		channel,
 		content: 'Relay trace root 0',
 		speechType: 'shout',
-		position: { x: 4, y: 2 },
+		position: rootPosition,
 		createdAt
 	}), rootSecret);
 	for (let attempt = 1; BigInt(`0x${root.id}`) % 5n !== 0n; attempt += 1) {
@@ -143,7 +144,7 @@ function traceRuntimeEvents() {
 			channel,
 			content: `Relay trace root ${attempt}`,
 			speechType: 'shout',
-			position: { x: 4, y: 2 },
+			position: rootPosition,
 			createdAt
 		}), rootSecret);
 	}
@@ -2099,6 +2100,40 @@ test.describe('Relay startup', () => {
 		await expect(marker).toHaveCSS('mask-image', /trace-icon\.svg/);
 		await expect(marker).toHaveCSS('color', 'rgb(89, 105, 127)');
 		await expect(marker).toHaveCSS('opacity', '0.34');
+	});
+
+	test('suppresses Trace presentation and investigation on fixed facility cells', async ({ page }) => {
+		const mendingTrace = traceRuntimeEvents(MENDING_TERMINAL.position);
+		const adjustmentTrace = traceRuntimeEvents(ADJUSTMENT_TERMINAL.position);
+		const ordinaryTrace = traceRuntimeEvents();
+		await page.clock.setFixedTime(Date.now());
+		await page.emulateMedia({ reducedMotion: 'reduce' });
+		await page.setViewportSize({ width: 1100, height: 850 });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, {
+			primaryEvents: { message: ordinaryTrace.message, position: ordinaryTrace.selfPosition },
+			traceRoots: [mendingTrace.root, adjustmentTrace.root, ordinaryTrace.root]
+		});
+		await seedRelayAccount(page, ordinaryTrace.selfSecret, ordinaryTrace.selfPubkey);
+		await page.goto('/');
+		await expect(page.locator('.composer-dock')).toBeVisible();
+		await page.evaluate(() => {
+			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
+			relay.releaseMetadata(); relay.releasePrimary();
+		});
+
+		await expect(page.locator('[data-trace-marker-position="12,3"]')).toHaveCount(0);
+		await expect(page.locator('[data-trace-marker-position="14,3"]')).toHaveCount(0);
+		await expect(page.locator('[data-trace-marker-position="4,2"]')).toBeVisible();
+		await expect(page.locator('[data-cell-position="12,3"][aria-label*="痕跡"]')).toHaveCount(0);
+		await expect(page.locator('[data-cell-position="14,3"][aria-label*="痕跡"]')).toHaveCount(0);
+		await expect(page.locator('[data-cell-position="4,2"][aria-label*="痕跡"]')).toHaveCount(1);
+		await expect(page.locator('[data-cell-position="12,3"][aria-label="繕い端末"]')).toHaveCount(1);
+		await expect(page.locator('[data-cell-position="14,3"][aria-label="調整端末"]')).toHaveCount(1);
+
+		await page.locator('[data-cell-position="12,3"][aria-label="繕い端末"]').click();
+		await expect(page.locator('.trace-proximity-feedback')).toContainText('近づくと端末を使える');
+		await expect(page.locator('[data-field-action-menu]')).toHaveCount(0);
 	});
 
 	test('passes target-author character profiles across root, nested reply, and clear context patches', async ({ page }) => {

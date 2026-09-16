@@ -50,7 +50,7 @@
 	import LifespanHud from '$lib/LifespanHud.svelte';
 	import MendingDialog from '$lib/MendingDialog.svelte';
 	import AdjustmentDialog from '$lib/AdjustmentDialog.svelte';
-	import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL, isWithinFacilityInteractionRange, sameFieldCell } from '$lib/fieldFacilities';
+	import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL, isBlockedFacilityCell, isWithinFacilityInteractionRange, sameFieldCell } from '$lib/fieldFacilities';
 	import { projectMending } from '$lib/mending';
 	import { getAbilityUpgrade, type PersonaAbilityKey } from '$lib/personaGameState';
 	import {
@@ -322,7 +322,10 @@
 	let canUseMendingTerminal = $derived(!devWorldSandboxEnabled && Boolean(personaSnapshot && selfIsActive && selfLogicalPosition && isWithinFacilityInteractionRange(selfLogicalPosition)));
 	let canUseAdjustmentTerminal = $derived(!devWorldSandboxEnabled && Boolean(personaSnapshot && selfIsActive && selfLogicalPosition && isWithinFacilityInteractionRange(selfLogicalPosition, ADJUSTMENT_TERMINAL)));
 	let traceRootCells = $derived(groupTraceRoots(effectiveTraceRoots));
-	let traceMarkerCells: readonly TraceMarkerCell[] = $derived(traceRootCells
+	// Keep grouped roots intact for the Trace data flow, but let fixed facilities
+	// own their cells at the field presentation/interaction boundary.
+	let fieldTraceRootCells = $derived(traceRootCells.filter((cell) => !isBlockedFacilityCell(cell.position)));
+	let traceMarkerCells: readonly TraceMarkerCell[] = $derived(fieldTraceRootCells
 		.filter((cell) => traceConversationState.kind !== 'open' || !sameCell(cell.position, traceConversationState.root.position))
 		.map((cell) => ({
 			...cell,
@@ -397,7 +400,7 @@
 			if (traceReplyMode.generation === context.generation) traceReplyMode = clearTraceReplyMode(traceReplyMode, true);
 		}
 	});
-	let traceOnlyCellTriggers = $derived(traceRootCells.map((cell) => cell.position).filter((position) =>
+	let traceOnlyCellTriggers = $derived(fieldTraceRootCells.map((cell) => cell.position).filter((position) =>
 		!participantViews.some((participant) => sameCell(participant.position, position)) &&
 		traceMarkerCells.some((cell) => sameCell(cell.position, position))
 	));
@@ -1298,7 +1301,7 @@
 		if (reselectCurrentRoot && !replyMode.target && selfIsActive && selfLogicalPosition && isWithinTraceInvestigationRange(selfLogicalPosition, position)) {
 			trace = { kind: 'trace', rootId: traceConversationProjection!.current.event.id, behavior: 'select-current' };
 		} else {
-			const rootCell = traceRootCells.find((cell) => sameCell(cell.position, position));
+			const rootCell = fieldTraceRootCells.find((cell) => sameCell(cell.position, position));
 			const currentIsRootCell = traceConversationProjection?.current.kind === 'root' &&
 				sameCell(traceConversationProjection.current.event.position, position);
 			const root = currentIsRootCell ? undefined : rootCell?.roots[0];
