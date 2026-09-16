@@ -14,6 +14,8 @@
 
 	const FIELD_BACKGROUND_ASSET = '/field/prototype-danchi-courtyard.webp';
 	const TRACE_ICON_ASSET = '/trace/trace-icon.svg';
+	const MENDING_TERMINAL_ASSET = '/field/objects/mending-terminal.webp';
+	const ADJUSTMENT_TERMINAL_ASSET = '/field/objects/adjustment-terminal.webp';
 
 	export type FieldParticipantView = ProjectedParticipant<Participant>;
 	export type TraceMarkerCell = TraceRootCell & Readonly<{
@@ -138,7 +140,7 @@
 		<div class="field-facility-layer" aria-hidden="true">
 			{#each FIXED_FIELD_FACILITIES as facility (facility.kind)}
 				<span class={['field-facility', facility.kind === 'mending-terminal' ? 'field-mending-terminal' : 'field-adjustment-terminal']} data-field-facility={facility.kind}
-					style={`left: ${(facility.position.x + 0.5) * cellSize}px; top: ${(facility.position.y + 0.5) * cellSize}px;`}>{facility.kind === 'mending-terminal' ? '繕い' : '調整'}</span>
+					style={`left: ${(facility.position.x + 0.5) * cellSize}px; top: ${(facility.position.y + 0.5) * cellSize}px;`}><img src={asset(facility.kind === 'mending-terminal' ? MENDING_TERMINAL_ASSET : ADJUSTMENT_TERMINAL_ASSET)} alt="" /></span>
 			{/each}
 		</div>
 		{#if proximityFeedback}
@@ -157,7 +159,7 @@
 					type="button"
 					ondragstart={(event) => event.preventDefault()}
 					data-cell-position={`${position.x},${position.y}`}
-					aria-label={position.x === ADJUSTMENT_TERMINAL.position.x && position.y === ADJUSTMENT_TERMINAL.position.y ? '調整端末' : '繕い端末'}
+					aria-label={position.x === ADJUSTMENT_TERMINAL.position.x && position.y === ADJUSTMENT_TERMINAL.position.y ? '能力強化端末' : '作業端末'}
 					style={`left: ${position.x * cellSize}px; top: ${position.y * cellSize}px;`}
 					onclick={(event) => { event.stopPropagation(); resolveFieldCellSelection(position, event.currentTarget as HTMLButtonElement); }}
 				></button>
@@ -301,12 +303,11 @@
 
 	.field-facility-layer { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
 	.field-facility {
-		position: absolute; display: grid; width: calc(var(--cell-size) * 0.72); height: calc(var(--cell-size) * 0.72);
-		place-items: center; border: 2px solid rgba(233, 246, 231, 0.9); border-radius: 14px;
-		background: linear-gradient(135deg, #47635b, #7da48a); box-shadow: 0 5px 10px rgba(35, 50, 42, 0.34);
-		color: #fffbe3; font-size: max(9px, calc(var(--cell-size) * 0.15)); font-weight: 900;
+		position: absolute; display: grid; width: calc(var(--cell-size) * 0.84); height: calc(var(--cell-size) * 0.84);
+		place-items: center; border: 0; border-radius: 0; background: none; box-shadow: none;
 		transform: translate(-50%, -50%); pointer-events: none;
 	}
+	.field-facility img { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
 
 	.trace-marker {
 		position: absolute;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatRemainingLifespan } from './lifespanHud';
+import { formatMendingRate, formatRemainingLifespan } from './lifespanHud';
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
@@ -18,5 +18,17 @@ describe('formatRemainingLifespan', () => {
 	it('shows only minutes below one hour and floors remaining time', () => {
 		expect(formatRemainingLifespan(42 * MINUTE_MS + 59 * 1000, 0)).toBe('寿命 42分');
 		expect(formatRemainingLifespan(59 * 1000, 0)).toBe('寿命 0分');
+	});
+});
+
+describe('formatMendingRate', () => {
+	it.each([
+		[{ numerator: 4, denominator: 5 }, '0.8'],
+		[{ numerator: 9, denominator: 10 }, '0.9'],
+		[{ numerator: 1, denominator: 1 }, '1.0'],
+		[{ numerator: 11, denominator: 10 }, '1.1'],
+		[{ numerator: 5, denominator: 4 }, '1.25']
+	] as const)('preserves the snapshot rate %s as %s', (rate, expected) => {
+		expect(formatMendingRate(rate.numerator, rate.denominator)).toBe(expected);
 	});
 });

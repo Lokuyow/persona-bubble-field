@@ -6,8 +6,8 @@ export type FixedFieldFacility = Readonly<{
 }>;
 
 /** Prototype placement only. The facility definition owns its presentation, collision, and interaction cell. */
-export const MENDING_TERMINAL: FixedFieldFacility = { kind: 'mending-terminal', position: { x: 12, y: 5 } };
-export const ADJUSTMENT_TERMINAL: FixedFieldFacility = { kind: 'adjustment-terminal', position: { x: 15, y: 7 } };
+export const MENDING_TERMINAL: FixedFieldFacility = { kind: 'mending-terminal', position: { x: 12, y: 3 } };
+export const ADJUSTMENT_TERMINAL: FixedFieldFacility = { kind: 'adjustment-terminal', position: { x: 14, y: 3 } };
 
 export const FIXED_FIELD_FACILITIES: readonly FixedFieldFacility[] = [MENDING_TERMINAL, ADJUSTMENT_TERMINAL];
 

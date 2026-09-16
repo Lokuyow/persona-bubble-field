@@ -64,7 +64,7 @@ describe('local position and presence domain', () => {
 
 	it('never chooses the fixed terminal cell for local spawn, entry, or reactivation', () => {
 		const terminalField = { columns: 16, rows: 8 };
-		const blocked = { x: 12, y: 5 };
+		const blocked = { x: 12, y: 3 };
 		const occupied = [] as { id: string; position: { x: number; y: number } }[];
 		for (let y = 0; y < terminalField.rows; y += 1) for (let x = 0; x < terminalField.columns; x += 1) {
 			if (x !== blocked.x || y !== blocked.y) occupied.push({ id: `${x}-${y}`, position: { x, y } });
@@ -124,7 +124,7 @@ describe('local position and presence domain', () => {
 
 	it('rejects local movement into the fixed terminal cell', () => {
 		const terminalField = { columns: 16, rows: 8 };
-		const state = createPresenceState(terminalField, 10, [{ id: 'alice', position: { x: 11, y: 5 } }]);
+		const state = createPresenceState(terminalField, 10, [{ id: 'alice', position: { x: 11, y: 3 } }]);
 
 		const result = moveParticipant(state, 'alice', 'right', 20);
 

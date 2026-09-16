@@ -14,7 +14,7 @@ import {
 	type PersonaAbilityKey,
 	type PersonaGameState
 } from './personaGameState';
-import { createMendingJob, materializeCompletedMending, projectMending } from './mending';
+import { createMendingJob, materializeMending, projectMending } from './mending';
 
 export const DATABASE_NAME = 'persona-bubble-field-account';
 export const DATABASE_VERSION = 4;
@@ -138,7 +138,7 @@ export type SelectionResult =
 export type MendingMutationResult =
 	| Readonly<{ kind: 'started' | 'collected'; persona: PersonaSnapshot }>
 	| Readonly<{ kind: 'superseded'; lifecycle: LoadLifecycleResult }>
-	| Readonly<{ kind: 'blocked' | 'not-complete' | 'expired'; persona: PersonaSnapshot }>
+	| Readonly<{ kind: 'blocked' | 'expired'; persona: PersonaSnapshot }>
 	| CorruptLifecycleState;
 
 export type AbilityUpgradeResult =
@@ -675,9 +675,9 @@ async function mutateMending(expected: PersonaSnapshot, operation: 'start' | 'co
 				kind = 'started';
 			} else {
 				if (!gameState.mendingJob) { await tx.done; const latest = await hydrateLifecycle(observed.entropy, current); return latest.kind === 'restored' ? { kind: 'blocked', persona: latest.persona } : { kind: 'corrupt', reason: 'identity-reference' }; }
-				if (!projectMending(gameState, nowMs).completed) { await tx.done; const latest = await hydrateLifecycle(observed.entropy, current); return latest.kind === 'restored' ? { kind: 'not-complete', persona: latest.persona } : { kind: 'corrupt', reason: 'identity-reference' }; }
-				const reward = materializeCompletedMending(gameState);
-				gameState = { ...gameState, lifespanExpiresAtMs: reward.lifespanExpiresAtMs, points: gameState.points + reward.points, mendingJob: null };
+				const reward = materializeMending(gameState, nowMs);
+				if (!reward) { await tx.done; const latest = await hydrateLifecycle(observed.entropy, current); return latest.kind === 'restored' ? { kind: 'blocked', persona: latest.persona } : { kind: 'corrupt', reason: 'identity-reference' }; }
+				gameState = { ...gameState, lifespanExpiresAtMs: reward.lifespanExpiresAtMs, points: reward.points, mendingJob: reward.mendingJob };
 				kind = 'collected';
 			}
 			const nextRun: ActiveRun = { ...activeRun, revision: activeRun.revision + 1, gameState };
@@ -701,7 +701,7 @@ export function startMending(expected: PersonaSnapshot): Promise<MendingMutation
 	return mutateMending(expected, 'start');
 }
 
-export function collectCompletedMending(expected: PersonaSnapshot): Promise<MendingMutationResult> {
+export function collectMending(expected: PersonaSnapshot): Promise<MendingMutationResult> {
 	return mutateMending(expected, 'collect');
 }
 

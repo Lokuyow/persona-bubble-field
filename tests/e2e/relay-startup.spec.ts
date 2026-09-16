@@ -15,6 +15,7 @@ import { SPEECH_SHORTCUT_IDS } from '../../src/lib/speechSubmission';
 import { CHARACTER_CATALOG, characterPicturePath } from '../../src/lib/character';
 import { deriveCharacterFromPubkey } from '../../src/lib/characterAssignment';
 import { deriveBip85NostrEntropy } from '../../src/lib/bip85';
+import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL } from '../../src/lib/fieldFacilities';
 
 const CHANNEL_ID = '3212de4b75f0c41efa17e41affcfc3a811171ba930e5b657687b5f5148627d5b';
 const SEED_RELAYS = [
@@ -113,7 +114,7 @@ function testEvents(nowMs = Date.now()) {
 	};
 }
 
-function traceRuntimeEvents() {
+function traceRuntimeEvents(rootPosition: { x: number; y: number } = { x: 4, y: 2 }) {
 	const selfSecret = fixtureSecret(23);
 	const rootSecret = fixtureSecret(29);
 	const createdAt = Math.floor(Date.now() / 1000);
@@ -135,7 +136,7 @@ function traceRuntimeEvents() {
 		channel,
 		content: 'Relay trace root 0',
 		speechType: 'shout',
-		position: { x: 4, y: 2 },
+		position: rootPosition,
 		createdAt
 	}), rootSecret);
 	for (let attempt = 1; BigInt(`0x${root.id}`) % 5n !== 0n; attempt += 1) {
@@ -143,7 +144,7 @@ function traceRuntimeEvents() {
 			channel,
 			content: `Relay trace root ${attempt}`,
 			speechType: 'shout',
-			position: { x: 4, y: 2 },
+			position: rootPosition,
 			createdAt
 		}), rootSecret);
 	}
@@ -1003,9 +1004,9 @@ test.describe('Relay startup', () => {
 			relay.releaseMetadata(); relay.releasePrimary();
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${oldPubkey}"]`)).toBeVisible();
-		await moveRelaySelfTo(page, { x: 11, y: 5 });
-		await page.getByRole('button', { name: '繕い端末' }).click();
-		await expect(page.getByRole('button', { name: '繕いを開始' })).toBeVisible();
+		await moveRelaySelfTo(page, { x: 11, y: 3 });
+		await page.getByRole('button', { name: '作業端末' }).click();
+		await expect(page.getByRole('button', { name: '作業を開始' })).toBeVisible();
 
 		const deathTab = await page.context().newPage();
 		try {
@@ -1018,7 +1019,7 @@ test.describe('Relay startup', () => {
 			await expect(deathTab.getByRole('dialog')).toBeVisible();
 
 			const reloaded = page.waitForEvent('framenavigated', (frame) => frame === page.mainFrame());
-			await page.getByRole('button', { name: '繕いを開始' }).click();
+			await page.getByRole('button', { name: '作業を開始' }).click();
 			await reloaded;
 			await expect(page.getByRole('dialog')).toBeVisible();
 			await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
@@ -1203,44 +1204,71 @@ test.describe('Relay startup', () => {
 			relay.releaseMetadata(); relay.releasePrimary();
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
-		const terminal = page.getByRole('button', { name: '繕い端末' });
+		const terminal = page.getByRole('button', { name: '作業端末' });
+		const mendingFacility = page.locator('[data-field-facility="mending-terminal"]');
+		await expect(mendingFacility.locator('img')).toHaveAttribute('src', /field\/objects\/mending-terminal\.webp$/);
+		await expect(mendingFacility).not.toContainText('作業');
+		await expect(page.locator('[data-field-facility="adjustment-terminal"] img')).toHaveAttribute('src', /field\/objects\/adjustment-terminal\.webp$/);
+		await expect(page.locator('[data-field-facility="adjustment-terminal"]')).not.toContainText('能力強化');
 		await terminal.click();
 		await expect(page.getByRole('status')).toContainText('近づくと端末を使える');
 
 		const atTerminal = finalizeEvent(buildPositionEventTemplate({
-			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 11, y: 5 }, slot: 1,
+			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 11, y: 3 }, slot: 1,
 			createdAt: Math.floor(await page.evaluate(() => Date.now()) / 1000)
 		}), secret);
 		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), atTerminal);
-		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,5');
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,3');
 		await page.clock.runFor(1_001);
 		await page.keyboard.press('ArrowRight');
-		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,5');
-		await dragRelayJoystick(page, { x: 0, y: -100 }, { x: 12, y: 5 });
-		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,4');
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,3');
+		await dragRelayJoystick(page, { x: 0, y: -100 }, { x: 12, y: 4 });
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,2');
 		await expect(page.getByRole('dialog')).toHaveCount(0);
 
 		await terminal.click();
 		await expect(page.getByRole('dialog')).toBeVisible();
-		await page.getByRole('button', { name: '繕いを開始' }).click();
+		await page.getByRole('button', { name: '作業を開始' }).click();
 		await expect(page.getByRole('dialog')).toHaveCount(0);
 		await expect.poll(() => readRelayGameState(page)).toMatchObject({ mendingJob: expect.any(Object) });
 		const started = await readRelayGameState(page);
 		expect(started).toMatchObject({ version: 2, points: 0, mendingJob: expect.objectContaining({ maximumDurationMs: 8 * 60 * 60 * 1000 }) });
+		await terminal.click();
+		const activeDialog = page.getByRole('dialog');
+		await expect(activeDialog).toContainText('POINT 0.00 pt');
+		await expect(activeDialog).toContainText('0.00 / 8.00時間');
+		await expect(activeDialog).toContainText('残り 8.00時間');
+		await expect(activeDialog).toContainText('寿命延長');
+		await expect(activeDialog).toContainText('ポイント');
+		await expect(activeDialog).toContainText('+0.00pt');
+		await expect(activeDialog.getByRole('button', { name: '受け取る' })).toBeVisible();
+		await expect(page.locator('.lifespan-hud')).toContainText('作業中 +0.8h/h');
+		await expect(page.locator('.lifespan-hud')).toContainText('ポイント 0.00pt');
+		await page.getByRole('button', { name: '閉じる' }).click();
 
 		await page.clock.setSystemTime((started.mendingJob as { startedAtMs: number }).startedAtMs + 8 * 60 * 60 * 1000);
 		const completedAtTerminal = finalizeEvent(buildPositionEventTemplate({
-			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 11, y: 4 }, slot: 1,
+			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 11, y: 2 }, slot: 1,
 			createdAt: Math.floor(await page.evaluate(() => Date.now()) / 1000)
 		}), secret);
 		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), completedAtTerminal);
-		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,4');
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,2');
 		await terminal.click();
-		await expect(page.getByRole('dialog')).toContainText('処理完了');
-		await page.getByRole('button', { name: '成果を受け取る' }).click();
-		await expect.poll(() => readRelayGameState(page)).toMatchObject({ mendingJob: null, points: 8 });
+		await expect(page.getByRole('dialog')).toContainText('蓄積上限に達しています');
+		await expect(page.getByRole('dialog')).toContainText('ポイント');
+		await expect(page.getByRole('dialog')).toContainText('+8.00pt');
+		await expect(page.locator('.lifespan-hud')).toContainText('作業満杯');
+		await expect(page.locator('.lifespan-hud')).not.toContainText('作業中 +');
+		await page.getByRole('button', { name: '受け取る' }).click();
+		await expect.poll(() => readRelayGameState(page)).toMatchObject({ mendingJob: expect.any(Object), points: 8 });
+		await expect(page.getByRole('dialog')).toContainText('POINT 8.00 pt');
+		await expect(page.getByRole('dialog')).toContainText('0.00 / 8.00時間');
+		await expect(page.getByRole('dialog')).toContainText('ポイント');
+		await expect(page.getByRole('dialog')).toContainText('+0.00pt');
+		await expect(page.locator('.lifespan-hud')).toContainText('作業中 +0.8h/h');
+		await expect(page.locator('.lifespan-hud')).toContainText('ポイント 8.00pt');
 		const collected = await readRelayGameState(page);
-		expect(collected.mendingJob).toBeNull();
+		expect(collected.mendingJob).toEqual(expect.objectContaining({ startedAtMs: expect.any(Number) }));
 		expect(collected.points).toBe(8);
 		expect(collected.lifespanExpiresAtMs).toBe(started.lifespanExpiresAtMs + 6.4 * 60 * 60 * 1000);
 		await page.getByRole('button', { name: '閉じる' }).click();
@@ -1259,23 +1287,24 @@ test.describe('Relay startup', () => {
 			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
 			relay.releaseMetadata(); relay.releasePrimary();
 		});
-		const adjustment = page.getByRole('button', { name: '調整端末' });
+		const adjustment = page.getByRole('button', { name: '能力強化端末' });
 		await adjustment.click();
 		await expect(page.getByRole('status')).toContainText('近づくと端末を使える');
 
 		const nearby = finalizeEvent(buildPositionEventTemplate({
-			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 14, y: 7 }, slot: 1,
+			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 13, y: 3 }, slot: 1,
 			createdAt: Math.floor(await page.evaluate(() => Date.now()) / 1000)
 		}), secret);
 		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), nearby);
-		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '14,7');
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '13,3');
 		await adjustment.click();
-		const dialog = page.getByRole('dialog', { name: '調整端末' });
-		await expect(dialog).toContainText('所持ポイント: 10.00pt');
+		const dialog = page.getByRole('dialog', { name: '能力強化' });
+		await expect(dialog).toContainText('POINT 10.00 pt');
 		await expect(dialog).toContainText('推論効率 Lv0');
-		await expect(dialog).toContainText('次: 0.9h/h / 5pt');
+		await expect(dialog).toContainText('次0.9h/h5pt');
 		await dialog.getByRole('button', { name: '1 level強化' }).first().click();
-		await expect(dialog).toContainText('所持ポイント: 5.00pt');
+		await expect(dialog).toContainText('POINT 5.00 pt');
+		await expect(page.locator('.lifespan-hud')).toContainText('ポイント 5.00pt');
 		await expect(dialog).toContainText('推論効率 Lv1');
 		await expect(dialog.getByRole('button', { name: '1 level強化' }).nth(1)).toBeDisabled();
 		await page.reload();
@@ -1297,13 +1326,13 @@ test.describe('Relay startup', () => {
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
 		const nearby = finalizeEvent(buildPositionEventTemplate({
-			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 14, y: 7 }, slot: 1,
+			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 13, y: 3 }, slot: 1,
 			createdAt: Math.floor(await page.evaluate(() => Date.now()) / 1000)
 		}), secret);
 		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), nearby);
-		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '14,7');
-		await page.getByRole('button', { name: '調整端末' }).click();
-		const dialog = page.getByRole('dialog', { name: '調整端末' });
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '13,3');
+		await page.getByRole('button', { name: '能力強化端末' }).click();
+		const dialog = page.getByRole('dialog', { name: '能力強化' });
 		await expect(dialog.getByRole('button', { name: '最大level' })).toHaveCount(3);
 		for (const button of await dialog.getByRole('button', { name: '最大level' }).all()) await expect(button).toBeDisabled();
 	});
@@ -1325,13 +1354,13 @@ test.describe('Relay startup', () => {
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
 		const atTerminal = finalizeEvent(buildPositionEventTemplate({
-			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 11, y: 5 }, slot: 1,
+			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 11, y: 3 }, slot: 1,
 			createdAt: Math.floor(await page.evaluate(() => Date.now()) / 1000)
 		}), secret);
 		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), atTerminal);
-		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,5');
-		await page.getByRole('button', { name: '繕い端末' }).click();
-		await page.getByRole('button', { name: '繕いを開始' }).click();
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,3');
+		await page.getByRole('button', { name: '作業端末' }).click();
+		await page.getByRole('button', { name: '作業を開始' }).click();
 		await expect.poll(() => readRelayGameState(page)).toMatchObject({ mendingJob: expect.any(Object) });
 		const started = await readRelayGameState(page);
 
@@ -1363,22 +1392,22 @@ test.describe('Relay startup', () => {
 			relay.releaseMetadata(); relay.releasePrimary();
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
-		await moveRelaySelfTo(page, { x: 11, y: 5 });
-		const terminal = page.getByRole('button', { name: '繕い端末' });
+		await moveRelaySelfTo(page, { x: 11, y: 3 });
+		const terminal = page.getByRole('button', { name: '作業端末' });
 		await terminal.click();
-		await page.getByRole('button', { name: '繕いを開始' }).click();
+		await page.getByRole('button', { name: '作業を開始' }).click();
 		await expect.poll(() => readRelayGameState(page)).toMatchObject({ mendingJob: expect.any(Object) });
 		const started = await readRelayGameState(page);
 		const job = started.mendingJob as { startedAtMs: number; maximumDurationMs: number };
 		await page.clock.setSystemTime(job.startedAtMs + job.maximumDurationMs);
 		const currentTerminalPosition = finalizeEvent(buildPositionEventTemplate({
-			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 11, y: 5 }, slot: 1,
+			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 11, y: 3 }, slot: 1,
 			createdAt: Math.floor(await page.evaluate(() => Date.now()) / 1000)
 		}), secret);
 		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), currentTerminalPosition);
-		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,5');
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,3');
 		await terminal.click();
-		await expect(page.getByRole('button', { name: '成果を受け取る' })).toBeVisible();
+		await expect(page.getByRole('button', { name: '受け取る' })).toBeVisible();
 		await page.clock.runFor(1_001);
 		const moved = finalizeEvent(buildPositionEventTemplate({
 			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 0, y: 0 }, slot: 1,
@@ -1414,20 +1443,20 @@ test.describe('Relay startup', () => {
 			}));
 			const injectTerminalPosition = async (client: Page) => {
 				const event = finalizeEvent(buildPositionEventTemplate({
-					channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 11, y: 5 }, slot: 1,
+					channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 11, y: 3 }, slot: 1,
 					createdAt: Math.floor(await client.evaluate(() => Date.now()) / 1000)
 				}), secret);
 				await client.evaluate((position) => (window as typeof window & {
 					__relayStartupTest: { injectPosition(event: object): void }
 				}).__relayStartupTest.injectPosition(position), event);
-				await expect(client.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,5');
+				await expect(client.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,3');
 			};
 			await Promise.all(clients.map(injectTerminalPosition));
 			await Promise.all(clients.map(async (client) => {
-				await client.getByRole('button', { name: '繕い端末' }).click();
-				await expect(client.getByRole('button', { name: '繕いを開始' })).toBeVisible();
+				await client.getByRole('button', { name: '作業端末' }).click();
+				await expect(client.getByRole('button', { name: '作業を開始' })).toBeVisible();
 			}));
-			await Promise.all(clients.map((client) => client.getByRole('button', { name: '繕いを開始' }).click()));
+			await Promise.all(clients.map((client) => client.getByRole('button', { name: '作業を開始' }).click()));
 			await expect.poll(() => readRelayGameState(page)).toMatchObject({ mendingJob: expect.any(Object) });
 			const started = await readRelayGameState(page);
 			expect(started.mendingJob).toEqual(expect.any(Object));
@@ -1439,13 +1468,13 @@ test.describe('Relay startup', () => {
 			for (const client of clients) {
 				const close = client.getByRole('button', { name: '閉じる' });
 				if (await close.isVisible()) await close.click();
-				await client.getByRole('button', { name: '繕い端末' }).click();
-				await expect(client.getByRole('button', { name: '成果を受け取る' })).toBeVisible();
+				await client.getByRole('button', { name: '作業端末' }).click();
+				await expect(client.getByRole('button', { name: '受け取る' })).toBeVisible();
 			}
-			await Promise.all(clients.map((client) => client.getByRole('button', { name: '成果を受け取る' }).click()));
-			await expect.poll(() => readRelayGameState(page)).toMatchObject({ points: 8, mendingJob: null });
+			await Promise.all(clients.map((client) => client.getByRole('button', { name: '受け取る' }).click()));
+			await expect.poll(() => readRelayGameState(page)).toMatchObject({ points: 8, mendingJob: expect.any(Object) });
 			const collected = await readRelayGameState(page);
-			expect(collected).toMatchObject({ points: 8, mendingJob: null });
+			expect(collected).toMatchObject({ points: 8, mendingJob: expect.any(Object) });
 		} finally {
 			await other.close();
 		}
@@ -1464,12 +1493,12 @@ test.describe('Relay startup', () => {
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${oldPubkey}"]`)).toBeVisible();
 		const atTerminal = finalizeEvent(buildPositionEventTemplate({
-			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 11, y: 5 }, slot: 1,
+			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 11, y: 3 }, slot: 1,
 			createdAt: Math.floor(await page.evaluate(() => Date.now()) / 1000)
 		}), secret);
 		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), atTerminal);
-		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,5');
-		await page.getByRole('button', { name: '繕い端末' }).click();
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,3');
+		await page.getByRole('button', { name: '作業端末' }).click();
 		await expect(page.getByRole('dialog')).toBeVisible();
 		const oldPublishedCount = (await relayState(page)).state.published.length;
 
@@ -1497,7 +1526,7 @@ test.describe('Relay startup', () => {
 			await expect.poll(async () => (await readRelayGameState(reincarnator)).personaPubkey).not.toBe(oldPubkey);
 
 			const reloaded = page.waitForEvent('framenavigated', (frame) => frame === page.mainFrame());
-			await page.getByRole('button', { name: '繕いを開始' }).click();
+			await page.getByRole('button', { name: '作業を開始' }).click();
 			await reloaded;
 			await page.waitForLoadState('load');
 			await expect(page.locator('.composer-dock')).toBeVisible();
@@ -1542,11 +1571,11 @@ test.describe('Relay startup', () => {
 			relay.releaseMetadata(); relay.releasePrimary();
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
-		await moveRelaySelfTo(page, { x: 11, y: 5 });
+		await moveRelaySelfTo(page, { x: 11, y: 3 });
 		await overwriteRelayGameState(page, { version: 2 });
 		const before = (await publishedMessages(page)).length;
-		await page.getByRole('button', { name: '繕い端末' }).click();
-		await page.getByRole('button', { name: '繕いを開始' }).click();
+		await page.getByRole('button', { name: '作業端末' }).click();
+		await page.getByRole('button', { name: '作業を開始' }).click();
 		await expect(page.locator('.participant[data-self="true"]')).toHaveCount(0);
 		const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
 		await editor.fill('must remain read-only after corrupt mending');
@@ -1698,16 +1727,16 @@ test.describe('Relay startup', () => {
 			(request.filter.kinds as number[])[0] === 42)).toBe(true);
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
 		const hud = page.locator('.lifespan-hud');
-		await expect(hud).toHaveText('寿命 2日 18時間');
+		await expect(hud).toContainText('寿命 2日 18時間');
 
 		await pauseAtCurrentBrowserTime(page);
 		await page.clock.setSystemTime(expiresAtMs - 23 * hour - 59 * minute);
 		await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
-		await expect(hud).toHaveText('寿命 23時間 59分');
+		await expect(hud).toContainText('寿命 23時間 59分');
 
 		await page.clock.setSystemTime(expiresAtMs - 59 * minute - 59 * 1000);
 		await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
-		await expect(hud).toHaveText('寿命 59分');
+		await expect(hud).toContainText('寿命 59分');
 	});
 
 	test('keeps public read-only updates after runtime death transition fails', async ({ page }) => {
@@ -2074,6 +2103,40 @@ test.describe('Relay startup', () => {
 		await expect(marker).toHaveCSS('mask-image', /trace-icon\.svg/);
 		await expect(marker).toHaveCSS('color', 'rgb(89, 105, 127)');
 		await expect(marker).toHaveCSS('opacity', '0.34');
+	});
+
+	test('suppresses Trace presentation and investigation on fixed facility cells', async ({ page }) => {
+		const mendingTrace = traceRuntimeEvents(MENDING_TERMINAL.position);
+		const adjustmentTrace = traceRuntimeEvents(ADJUSTMENT_TERMINAL.position);
+		const ordinaryTrace = traceRuntimeEvents();
+		await page.clock.setFixedTime(Date.now());
+		await page.emulateMedia({ reducedMotion: 'reduce' });
+		await page.setViewportSize({ width: 1100, height: 850 });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, {
+			primaryEvents: { message: ordinaryTrace.message, position: ordinaryTrace.selfPosition },
+			traceRoots: [mendingTrace.root, adjustmentTrace.root, ordinaryTrace.root]
+		});
+		await seedRelayAccount(page, ordinaryTrace.selfSecret, ordinaryTrace.selfPubkey);
+		await page.goto('/');
+		await expect(page.locator('.composer-dock')).toBeVisible();
+		await page.evaluate(() => {
+			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
+			relay.releaseMetadata(); relay.releasePrimary();
+		});
+
+		await expect(page.locator('[data-trace-marker-position="12,3"]')).toHaveCount(0);
+		await expect(page.locator('[data-trace-marker-position="14,3"]')).toHaveCount(0);
+		await expect(page.locator('[data-trace-marker-position="4,2"]')).toBeVisible();
+		await expect(page.locator('[data-cell-position="12,3"][aria-label*="痕跡"]')).toHaveCount(0);
+		await expect(page.locator('[data-cell-position="14,3"][aria-label*="痕跡"]')).toHaveCount(0);
+		await expect(page.locator('[data-cell-position="4,2"][aria-label*="痕跡"]')).toHaveCount(1);
+		await expect(page.locator('[data-cell-position="12,3"][aria-label="作業端末"]')).toHaveCount(1);
+		await expect(page.locator('[data-cell-position="14,3"][aria-label="能力強化端末"]')).toHaveCount(1);
+
+		await page.locator('[data-cell-position="12,3"][aria-label="作業端末"]').click();
+		await expect(page.locator('.trace-proximity-feedback')).toContainText('近づくと端末を使える');
+		await expect(page.locator('[data-field-action-menu]')).toHaveCount(0);
 	});
 
 	test('passes target-author character profiles across root, nested reply, and clear context patches', async ({ page }) => {

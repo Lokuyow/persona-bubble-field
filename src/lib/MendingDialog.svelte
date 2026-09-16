@@ -6,14 +6,20 @@
 		open: boolean;
 		projection: MendingProjection | null;
 		hasJob: boolean;
+		points: number;
 		onOpenChange: (open: boolean) => void;
 		onStart: () => void;
 		onCollect: () => void;
 	}>;
-	let { open, projection, hasJob, onOpenChange, onStart, onCollect }: Props = $props();
+	let { open, projection, hasJob, points: ownedPointsValue, onOpenChange, onStart, onCollect }: Props = $props();
 	let hours = $derived(((projection?.processedDurationMs ?? 0) / (60 * 60 * 1000)).toFixed(2));
+	let maximumHours = $derived(((projection ? projection.processedDurationMs + projection.remainingDurationMs : 0) / (60 * 60 * 1000)).toFixed(2));
+	let remainingHours = $derived(((projection?.remainingDurationMs ?? 0) / (60 * 60 * 1000)).toFixed(2));
 	let lifespanHours = $derived(((projection?.lifespanExtensionMs ?? 0) / (60 * 60 * 1000)).toFixed(2));
-	let points = $derived((projection?.points ?? 0).toFixed(2));
+	let unclaimedPoints = $derived((projection?.points ?? 0).toFixed(2));
+	let ownedPoints = $derived(ownedPointsValue.toFixed(2));
+	let totalDurationMs = $derived((projection?.processedDurationMs ?? 0) + (projection?.remainingDurationMs ?? 0));
+	let progressPercent = $derived(Math.min(100, totalDurationMs > 0 ? (projection?.processedDurationMs ?? 0) / totalDurationMs * 100 : 0));
 </script>
 
 <Dialog.Root bind:open={() => open, onOpenChange}>
@@ -21,25 +27,68 @@
 		<Dialog.Portal>
 			<Dialog.Overlay class="mending-dialog-overlay" />
 			<Dialog.Content class="mending-dialog-content" preventScroll={false}>
-				<Dialog.Title>繕い端末</Dialog.Title>
-				<Dialog.Description>非同期処理の状態を確認します。</Dialog.Description>
+				<div class="terminal-dialog-header">
+					<div>
+						<Dialog.Title>作業</Dialog.Title>
+						<Dialog.Description>時間の経過で進捗が蓄積され、寿命延長とポイントを受け取れます。</Dialog.Description>
+					</div>
+					<div class="terminal-status-chip">POINT {ownedPoints} pt</div>
+				</div>
 				{#if !hasJob}
-					<p>繕いを開始できます。</p>
-					<button type="button" onclick={onStart}>繕いを開始</button>
-				{:else if projection?.completed}
-					<p>処理完了: 経過 {hours}時間 / 寿命延長 +{lifespanHours}時間 / 成果 {points}pt</p>
-					<button type="button" onclick={onCollect}>成果を受け取る</button>
+					<section class="idle-state">
+						<p>作業を開始すると、時間に応じて成果が蓄積されます。</p>
+						<button class="terminal-primary-action" type="button" onclick={onStart}>作業を開始</button>
+					</section>
 				{:else}
-					<p>繕い中: 経過 {hours}時間 / 寿命延長 +{lifespanHours}時間 / 推定 {points}pt</p>
+					<section class="progress-section" aria-label="作業の進捗">
+						<div class="progress-heading">
+							<strong>{hours} / {maximumHours}時間</strong>
+							<span>{Math.round(progressPercent)}%</span>
+						</div>
+						<div class="progress-track" role="progressbar" aria-label="作業の蓄積進捗" aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(progressPercent)}>
+							<div class="progress-value" style={`width: ${progressPercent}%;`}></div>
+						</div>
+						<p class="remaining-value">{projection?.completed ? '蓄積上限に達しています' : `残り ${remainingHours}時間`}</p>
+					</section>
+					<section class="result-section" aria-labelledby="mending-result-title">
+						<h3 id="mending-result-title">今回受け取れる成果</h3>
+						<div class="result-grid">
+							<div class="result-card"><span>寿命延長</span><strong>+{lifespanHours}時間</strong></div>
+							<div class="result-card"><span>ポイント</span><strong>+{unclaimedPoints}pt</strong></div>
+						</div>
+					</section>
+					<button class="terminal-primary-action" type="button" onclick={onCollect}>受け取る</button>
 				{/if}
-				<Dialog.Close>閉じる</Dialog.Close>
+				<Dialog.Close class="terminal-secondary-action">閉じる</Dialog.Close>
 			</Dialog.Content>
 		</Dialog.Portal>
 	{/if}
 </Dialog.Root>
 
 <style>
-	:global(.mending-dialog-overlay) { position: fixed; inset: 0; z-index: 100; background: rgba(35, 44, 41, 0.48); }
-	:global(.mending-dialog-content) { position: fixed; top: 50%; left: 50%; z-index: 101; display: grid; gap: 14px; width: min(calc(100vw - 32px), 360px); padding: 24px; border-radius: 20px; background: #f7f7ef; color: #374345; transform: translate(-50%, -50%); }
-	:global(.mending-dialog-content button) { min-height: 42px; border: 1px solid rgba(57, 67, 64, 0.2); border-radius: 999px; background: #d9edf0; color: inherit; font: inherit; font-weight: 800; }
+	:global(.mending-dialog-overlay) { position: fixed; inset: 0; z-index: 100; background: rgba(2, 8, 18, 0.72); backdrop-filter: blur(2px); }
+	:global(.mending-dialog-content) { position: fixed; top: 50%; left: 50%; z-index: 101; display: grid; gap: 18px; width: min(calc(100vw - 32px), 700px); max-height: calc(100svh - 32px); overflow: auto; padding: clamp(20px, 4vw, 34px); border: 1px solid rgba(68, 222, 222, 0.7); border-radius: 14px; background: linear-gradient(145deg, rgba(4, 26, 38, 0.98), rgba(3, 14, 28, 0.96)); box-shadow: 0 0 28px rgba(26, 214, 224, 0.2), inset 0 0 22px rgba(28, 184, 202, 0.08); color: #ecfeff; transform: translate(-50%, -50%); }
+	:global(.mending-dialog-content)::before { position: absolute; inset: 0; z-index: -1; border-radius: inherit; background-image: linear-gradient(rgba(67, 214, 221, 0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(67, 214, 221, 0.035) 1px, transparent 1px); background-size: 22px 22px; content: ''; pointer-events: none; }
+	.terminal-dialog-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding-bottom: 16px; border-bottom: 1px solid rgba(68, 222, 222, 0.36); }
+	:global(.mending-dialog-content h2) { margin: 0; color: #f2ffff; font-size: clamp(1.6rem, 4vw, 2.25rem); letter-spacing: 0.08em; }
+	:global(.mending-dialog-content [data-slot='dialog-description']) { display: block; margin-top: 6px; color: rgba(208, 246, 248, 0.78); font-size: 0.92rem; line-height: 1.5; }
+	.terminal-status-chip { flex: 0 0 auto; padding: 7px 10px; border: 1px solid rgba(68, 222, 222, 0.52); border-radius: 6px; color: #89ffff; font-size: 0.82rem; font-weight: 800; letter-spacing: 0.08em; }
+	.progress-section, .result-section { display: grid; gap: 10px; }
+	.progress-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+	.progress-heading strong { font-size: clamp(1.35rem, 4vw, 2rem); }
+	.progress-heading span { color: #8ffcff; font-weight: 800; }
+	.progress-track { height: 13px; overflow: hidden; border: 1px solid rgba(68, 222, 222, 0.78); border-radius: 999px; background: rgba(1, 35, 47, 0.86); }
+	.progress-value { height: 100%; min-width: 2px; background: linear-gradient(90deg, #27e6dd, #80ffff); box-shadow: 0 0 12px rgba(39, 230, 221, 0.7); }
+	.remaining-value, .idle-state p { margin: 0; color: rgba(208, 246, 248, 0.78); }
+	.result-section h3 { margin: 0; padding-top: 4px; color: #a4ffff; font-size: 1.05rem; letter-spacing: 0.08em; }
+	.result-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+	.result-card { display: grid; gap: 6px; padding: 16px; border: 1px solid rgba(68, 222, 222, 0.46); border-radius: 9px; background: rgba(4, 53, 66, 0.48); }
+	.result-card span { color: rgba(208, 246, 248, 0.74); font-size: 0.9rem; }
+	.result-card strong { color: #f2ffff; font-size: clamp(1.25rem, 3.5vw, 1.7rem); }
+	.idle-state { display: grid; gap: 14px; }
+	.terminal-primary-action, :global(.terminal-secondary-action) { min-height: 46px; border-radius: 7px; font: inherit; font-weight: 800; cursor: pointer; }
+	.terminal-primary-action { border: 1px solid #72ffff; background: linear-gradient(135deg, #20cfd0, #087eaa); box-shadow: 0 0 15px rgba(45, 229, 231, 0.3); color: #02141e; }
+	:global(.terminal-secondary-action) { border: 1px solid rgba(141, 208, 218, 0.42); background: rgba(8, 31, 47, 0.7); color: rgba(224, 250, 252, 0.86); text-align: center; }
+	:global(.mending-dialog-content button:focus-visible) { outline: 3px solid var(--color-focus-ring); outline-offset: 3px; }
+	@media (max-width: 560px) { .terminal-dialog-header { flex-direction: column; } .terminal-status-chip { width: fit-content; } .result-grid { grid-template-columns: 1fr; } }
 </style>

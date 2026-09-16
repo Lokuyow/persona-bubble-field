@@ -278,7 +278,7 @@ async function profileTriggerCenter(page: Page, name: string): Promise<{ x: numb
 test.describe('DEV World Sandbox', () => {
 	test('does not open the mending terminal in DEV World', async ({ page }) => {
 		await openDevWorld(page);
-		await page.getByRole('button', { name: '繕い端末' }).click();
+		await page.getByRole('button', { name: '作業端末' }).click();
 		await expect(page.getByRole('dialog')).toHaveCount(0);
 		await expect(page.locator('.lifespan-hud')).toHaveCount(0);
 	});
@@ -1273,17 +1273,18 @@ test.describe('DEV World Sandbox', () => {
 			const entries = element.querySelector<HTMLElement>('.timeline-visible-entries');
 			return {
 				backgroundColor: style.backgroundColor,
+				backgroundImage: style.backgroundImage,
 				backdropFilter: style.backdropFilter,
 				boxShadow: style.boxShadow,
+				borderStyle: style.borderStyle,
 				overflowY: entries ? getComputedStyle(entries).overflowY : ''
 			};
 		});
-		expect(presentation).toEqual({
-			backgroundColor: 'rgba(0, 0, 0, 0)',
-			backdropFilter: 'none',
-			boxShadow: 'none',
-			overflowY: 'visible'
-		});
+		expect(presentation.backgroundImage).toContain('linear-gradient');
+		expect(presentation.boxShadow).not.toBe('none');
+		expect(presentation.borderStyle).toBe('solid');
+		expect(presentation.backdropFilter).toBe('none');
+		expect(presentation.overflowY).toBe('visible');
 
 		const timelineOrder = await visibleEntries.evaluateAll((entries) => entries.map((entry) => ({
 			id: entry.getAttribute('data-timeline-event-id'),

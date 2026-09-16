@@ -42,6 +42,8 @@ cellにcurrent participantがいなければghostはparticipant相当位置に�
 
 rootアイコンはcellごとに1つだけ表示し、件数表示は持たない。logical cellから調査できるrootも常に1件である。
 
+固定施設が占有するcellでは、施設をfield上の主対象とする。そこにTrace rootが存在しても、Trace marker、既読/未読reply表示、investigation indicator、Trace selection trigger、Trace用cell actionは生成しない。Trace event、root、reply tree、read stateなどのsource dataは保持し、施設が別cellへ移動してそのcellが通常cellになれば、同じTraceを通常どおり表示・調査できる。
+
 ### investigation range
 
 investigation rangeはrootの実際の `w` cell自身と周囲8 cellとする。replyは独自のworld/cell positionを持たない。

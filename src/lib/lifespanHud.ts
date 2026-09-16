@@ -2,6 +2,10 @@ const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 const MINUTE_MS = 60 * 1000;
 
+export function formatMendingRate(numerator: number, denominator: number): string {
+	return (numerator / denominator).toFixed(2).replace(/(\.\d)0$/, '$1');
+}
+
 export function formatRemainingLifespan(expiresAtMs: number, nowMs: number): string {
 	const remainingMs = Math.max(0, expiresAtMs - nowMs);
 	const remainingMinutes = Math.floor(remainingMs / MINUTE_MS);

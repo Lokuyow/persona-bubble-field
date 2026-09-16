@@ -19,8 +19,10 @@ export type MendingState = Readonly<{
 export type MendingProjection = Readonly<{
 	processedDurationMs: number;
 	processedThroughMs: number;
+	remainingDurationMs: number;
 	effectiveExpiresAtMs: number;
 	lifespanExtensionMs: number;
+	lifespanExtensionPerHour: MendingRational | null;
 	points: number;
 	completed: boolean;
 }>;
@@ -95,8 +97,10 @@ export function projectMending(state: MendingState, nowMs: number): MendingProje
 	if (!state.mendingJob) return {
 		processedDurationMs: 0,
 		processedThroughMs: nowMs,
+		remainingDurationMs: 0,
 		effectiveExpiresAtMs: state.lifespanExpiresAtMs,
 		lifespanExtensionMs: 0,
+		lifespanExtensionPerHour: null,
 		points: 0,
 		completed: false
 	};
@@ -111,8 +115,10 @@ export function projectMending(state: MendingState, nowMs: number): MendingProje
 	return {
 		processedDurationMs,
 		processedThroughMs,
+		remainingDurationMs: job.maximumDurationMs - processedDurationMs,
 		effectiveExpiresAtMs,
 		lifespanExtensionMs: effectiveExpiresAtMs - state.lifespanExpiresAtMs,
+		lifespanExtensionPerHour: copyRational(job.lifespanExtensionPerHour),
 		points,
 		completed: processedDurationMs === job.maximumDurationMs
 	};
@@ -122,9 +128,17 @@ export function isMendingExpired(state: MendingState, nowMs: number): boolean {
 	return nowMs >= projectMending(state, nowMs).effectiveExpiresAtMs;
 }
 
-export function materializeCompletedMending(state: MendingState): Readonly<{ lifespanExpiresAtMs: number; points: number }> {
+export function materializeMending(state: MendingState & Readonly<{ abilities: PersonaAbilityLevels; points: number }>, nowMs: number): Readonly<{
+	lifespanExpiresAtMs: number;
+	points: number;
+	mendingJob: MendingJob;
+}> | null {
 	if (!state.mendingJob) throw new TypeError('No mending job exists.');
-	const completedAtMs = state.mendingJob.startedAtMs + state.mendingJob.maximumDurationMs;
-	const projection = projectMending(state, completedAtMs);
-	return { lifespanExpiresAtMs: projection.effectiveExpiresAtMs, points: projection.points };
+	const projection = projectMending(state, nowMs);
+	if (projection.points <= 0) return null;
+	return {
+		lifespanExpiresAtMs: projection.effectiveExpiresAtMs,
+		points: state.points + projection.points,
+		mendingJob: createMendingJob(state.abilities, nowMs)
+	};
 }

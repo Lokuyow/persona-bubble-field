@@ -50,13 +50,13 @@
 	import LifespanHud from '$lib/LifespanHud.svelte';
 	import MendingDialog from '$lib/MendingDialog.svelte';
 	import AdjustmentDialog from '$lib/AdjustmentDialog.svelte';
-	import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL, isWithinFacilityInteractionRange, sameFieldCell } from '$lib/fieldFacilities';
+	import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL, isBlockedFacilityCell, isWithinFacilityInteractionRange, sameFieldCell } from '$lib/fieldFacilities';
 	import { projectMending } from '$lib/mending';
 	import { getAbilityUpgrade, type PersonaAbilityKey } from '$lib/personaGameState';
 	import {
 		CURRENT_CHARACTER_PROFILE_REVISION,
 		authorizeActiveRun,
-		collectCompletedMending,
+		collectMending,
 		loadOrCreateLifecycle,
 		selectIdentity,
 		transitionExpiredPersona,
@@ -322,7 +322,10 @@
 	let canUseMendingTerminal = $derived(!devWorldSandboxEnabled && Boolean(personaSnapshot && selfIsActive && selfLogicalPosition && isWithinFacilityInteractionRange(selfLogicalPosition)));
 	let canUseAdjustmentTerminal = $derived(!devWorldSandboxEnabled && Boolean(personaSnapshot && selfIsActive && selfLogicalPosition && isWithinFacilityInteractionRange(selfLogicalPosition, ADJUSTMENT_TERMINAL)));
 	let traceRootCells = $derived(groupTraceRoots(effectiveTraceRoots));
-	let traceMarkerCells: readonly TraceMarkerCell[] = $derived(traceRootCells
+	// Keep grouped roots intact for the Trace data flow, but let fixed facilities
+	// own their cells at the field presentation/interaction boundary.
+	let fieldTraceRootCells = $derived(traceRootCells.filter((cell) => !isBlockedFacilityCell(cell.position)));
+	let traceMarkerCells: readonly TraceMarkerCell[] = $derived(fieldTraceRootCells
 		.filter((cell) => traceConversationState.kind !== 'open' || !sameCell(cell.position, traceConversationState.root.position))
 		.map((cell) => ({
 			...cell,
@@ -397,7 +400,7 @@
 			if (traceReplyMode.generation === context.generation) traceReplyMode = clearTraceReplyMode(traceReplyMode, true);
 		}
 	});
-	let traceOnlyCellTriggers = $derived(traceRootCells.map((cell) => cell.position).filter((position) =>
+	let traceOnlyCellTriggers = $derived(fieldTraceRootCells.map((cell) => cell.position).filter((position) =>
 		!participantViews.some((participant) => sameCell(participant.position, position)) &&
 		traceMarkerCells.some((cell) => sameCell(cell.position, position))
 	));
@@ -1237,7 +1240,7 @@
 		}
 		mendingMutationInFlight = true;
 		try {
-			const result = operation === 'start' ? await startMending(expected) : await collectCompletedMending(expected);
+			const result = operation === 'start' ? await startMending(expected) : await collectMending(expected);
 			if (result.kind === 'corrupt') {
 				enterReadOnlyFallback('Persona is unavailable for publishing.');
 				return;
@@ -1258,6 +1261,7 @@
 			personaSnapshot = result.persona;
 			selfSigner = result.persona.signer;
 			mendingNowMs = Date.now();
+			updateLifespanHud(mendingNowMs, true);
 			if (result.kind === 'started') closeMendingTerminal();
 			if (result.kind === 'expired') {
 				closeMendingTerminal();
@@ -1297,7 +1301,7 @@
 		if (reselectCurrentRoot && !replyMode.target && selfIsActive && selfLogicalPosition && isWithinTraceInvestigationRange(selfLogicalPosition, position)) {
 			trace = { kind: 'trace', rootId: traceConversationProjection!.current.event.id, behavior: 'select-current' };
 		} else {
-			const rootCell = traceRootCells.find((cell) => sameCell(cell.position, position));
+			const rootCell = fieldTraceRootCells.find((cell) => sameCell(cell.position, position));
 			const currentIsRootCell = traceConversationProjection?.current.kind === 'root' &&
 				sameCell(traceConversationProjection.current.event.position, position);
 			const root = currentIsRootCell ? undefined : rootCell?.roots[0];
@@ -1402,8 +1406,8 @@
 	}
 
 	function fieldActionLabel(action: FieldCellAction): string {
-		if (action.kind === 'mending-terminal') return '繕い端末を使う';
-		if (action.kind === 'adjustment-terminal') return '調整端末を使う';
+		if (action.kind === 'mending-terminal') return '作業端末を使う';
+		if (action.kind === 'adjustment-terminal') return '能力強化端末を使う';
 		if (action.kind === 'trace') return '痕跡を調べる';
 		const participant = participantViews.find((candidate) => candidate.id === action.participantId);
 		return participant ? `${participant.character.name} のプロフィールを開く` : 'プロフィールを開く';
@@ -1893,7 +1897,8 @@
 				registerReplyRemeasure={registerTraceReplyRemeasure}
 			/>
 			{#if lifespanHudNowMs !== null && personaSnapshot && !personaLifecycleTransition}
-				<LifespanHud expiresAtMs={projectMending(personaSnapshot.gameState, lifespanHudNowMs).effectiveExpiresAtMs} nowMs={lifespanHudNowMs} />
+				{@const lifespanProjection = projectMending(personaSnapshot.gameState, lifespanHudNowMs)}
+				<LifespanHud expiresAtMs={lifespanProjection.effectiveExpiresAtMs} nowMs={lifespanHudNowMs} points={personaSnapshot.gameState.points} mendingProjection={lifespanProjection} />
 			{/if}
 		{/snippet}
 	</FieldViewport>
@@ -1907,6 +1912,7 @@
 		open={mendingDialogOpen}
 		projection={mendingProjection}
 		hasJob={Boolean(personaSnapshot?.gameState.mendingJob)}
+		points={personaSnapshot?.gameState.points ?? 0}
 		onOpenChange={(open) => { mendingDialogOpen = open; }}
 		onStart={() => { void mutateMending('start'); }}
 		onCollect={() => { void mutateMending('collect'); }}
