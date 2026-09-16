@@ -69,25 +69,47 @@ const EXPECTED_CHARACTERS = [
 	{ characterId: '017', name: 'お父さん', about: '最近どうしているか、聞こうと思っている。' },
 	{ characterId: '018', name: 'ゴブリン', about: '簿記2級' },
 	{ characterId: '019', name: 'ぽよる', about: 'べつに溶けてるわけじゃないです。' },
-	{ characterId: '020', name: 'アミナ', about: '静かな場所ではよく笑う。' }
+	{ characterId: '020', name: 'アミナ', about: '静かな場所ではよく笑う。' },
+	{ characterId: '021', name: 'アキ', about: '普通にここにいる。' },
+	{ characterId: '022', name: '知らないおじさん', about: 'たぶん誰の知り合いでもない。' },
+	{ characterId: '023', name: 'ミウラ', about: '知らないものは、とりあえず匂いをかぐ。' },
+	{ characterId: '024', name: '女王様', about: '命令するのには慣れている。' },
+	{ characterId: '025', name: '暴走トラック', about: '行き先については関知しない。' },
+	{ characterId: '026', name: '猫', about: '猫。' },
+	{ characterId: '027', name: '転生者レン', about: 'たぶん、この世界ではかなり強い。' },
+	{ characterId: '028', name: 'みゆきママ', about: 'まあまあ、そんな日もあるわよ。' },
+	{ characterId: '029', name: 'アウストラロピテクス', about: '最近、立って歩くことが増えた。' },
+	{ characterId: '030', name: '幽霊', about: '見えてるの…？' },
+	{ characterId: '031', name: '半袖タカシ', about: '今日も張り切っていきましょう！' },
+	{ characterId: '032', name: 'ヴぁびｐｂな＠え', about: 'なとえはぎｂｖのあ＠え' },
+	{ characterId: '033', name: 'はる', about: 'きょうどんぐりひろった' },
+	{ characterId: '034', name: '卵', about: '卵' },
+	{ characterId: '035', name: '佐伯', about: '会うとだいたい会釈してくれる。' },
+	{ characterId: '036', name: 'コンビニ三人組', about: 'いらっしゃいませー' },
+	{ characterId: '037', name: '老人', about: '朝は早い。' },
+	{ characterId: '038', name: 'ハンク', about: 'とりあえず嬉しそうにしておく。' },
+	{ characterId: '039', name: '犬', about: '犬。' },
+	{ characterId: '040', name: '校長先生', about: 'みなさんが静かになるまで校長先生は…もう待たない。' }
 ] as const;
 
 describe('character catalog', () => {
-	it('contains the exact 001 through 020 character master data in source order', () => {
+	it('contains the exact 001 through 040 character master data in source order', () => {
+		expect(CHARACTER_CATALOG).toHaveLength(40);
 		expect(CHARACTER_CATALOG.map(({ characterId, name, about }) => ({ characterId, name, about })))
 			.toEqual(EXPECTED_CHARACTERS);
 	});
 
 	it('has unique character IDs and names', () => {
 		expect(new Set(CHARACTER_CATALOG.map((character) => character.characterId)).size)
-			.toBe(20);
+			.toBe(40);
 		expect(new Set(CHARACTER_CATALOG.map((character) => character.name)).size)
-			.toBe(20);
+			.toBe(40);
 	});
 
-	it('derives picture paths deterministically through 020', () => {
+	it('derives picture paths deterministically through 040', () => {
 		expect(characterPicturePath('001')).toBe('characters/001.webp');
 		expect(characterPicturePath('020')).toBe('characters/020.webp');
+		expect(characterPicturePath('040')).toBe('characters/040.webp');
 		expect(CHARACTER_CATALOG.map((character) => character.picture)).toEqual(
 			CHARACTER_CATALOG.map((character) => characterPicturePath(character.characterId))
 		);
@@ -101,6 +123,7 @@ describe('character catalog', () => {
 
 	it('retrieves characters by ID without an implicit fallback', () => {
 		expect(getCharacterById('020')?.name).toBe('アミナ');
+		expect(getCharacterById('040')?.name).toBe('校長先生');
 		expect(getCharacterById('999')).toBeUndefined();
 		expect(getCharacterById('')).toBeUndefined();
 	});
