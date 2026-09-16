@@ -9,6 +9,10 @@ import {
 	ROOT_SECRET_STORE_NAME,
 	authorizeActiveRun,
 	collectMending,
+	applyRealtimeOutcome,
+	getRealtimeSettlementLedger,
+	trackRealtimeEventInstance,
+	transitionRealtimeDeath,
 	loadOrCreateLifecycle,
 	selectIdentity,
 	startMending,
@@ -125,6 +129,50 @@ describe('Root / Identity / Run lifecycle', () => {
 		vi.mocked(Date.now).mockReturnValue(TIME + 8 * 24 * 60 * 60 * 1000);
 		expect((await transitionExpiredPersona(started.persona)).kind).toBe('transitioned');
 		expect(await authorizeActiveRun({ identity, runNumber: 1 })).toBe('superseded');
+	});
+
+	it('atomically applies a realtime points outcome once across concurrent tabs', async () => {
+		const selection = await loadOrCreateLifecycle();
+		if (selection.kind !== 'created') throw new Error('Expected fresh state.');
+		const selected = await selectIdentity(selection.selection.generation, selection.selection.candidates[0]);
+		if (selected.kind !== 'selected') throw new Error('Expected selected state.');
+		expect(await trackRealtimeEventInstance(selected.persona, 'rift-instance')).toBe(true);
+		const outcome = { id: 'rift-instance:outcome-1', kind: 'points' as const, points: 100, instanceId: 'rift-instance' };
+		const results = await Promise.all([applyRealtimeOutcome(selected.persona, outcome), applyRealtimeOutcome(selected.persona, outcome)]);
+		expect(results.filter((result) => result.kind === 'applied')).toHaveLength(1);
+		expect(results.some((result) => result.kind === 'duplicate')).toBe(true);
+		const current = restored(await loadOrCreateLifecycle());
+		expect(current.gameState.points).toBe(100);
+		const ledger = (await records(PLAYER_LIFECYCLE_STORE_NAME))['player-lifecycle'] as { realtimeSettlementLedger: { appliedOutcomeIds: string[]; pendingInstanceIds: string[] } };
+		expect(ledger.realtimeSettlementLedger.appliedOutcomeIds).toEqual([outcome.id]);
+		expect(ledger.realtimeSettlementLedger.pendingInstanceIds).toEqual([]);
+	});
+
+	it('does not add points to an expired run and closes an event-death run only once', async () => {
+		const selection = await loadOrCreateLifecycle();
+		if (selection.kind !== 'created') throw new Error('Expected fresh state.');
+		const selected = await selectIdentity(selection.selection.generation, selection.selection.candidates[0]);
+		if (selected.kind !== 'selected') throw new Error('Expected selected state.');
+		vi.mocked(Date.now).mockReturnValue(TIME + 7 * 24 * 60 * 60 * 1000);
+		const expired = await applyRealtimeOutcome(selected.persona, { id: 'expired-points', kind: 'points', points: 20, instanceId: 'rift-instance' });
+		expect(expired.kind).toBe('expired');
+		expect(restored(await loadOrCreateLifecycle()).gameState.points).toBe(0);
+		const death = { id: 'rift-instance:death-1', kind: 'death' as const, instanceId: 'rift-instance' };
+		expect((await transitionRealtimeDeath(selected.persona, death)).kind).toBe('stale');
+
+		vi.mocked(Date.now).mockReturnValue(TIME);
+		const current = restored(await loadOrCreateLifecycle());
+		expect((await transitionRealtimeDeath(current, death)).kind).toBe('transitioned');
+		expect((await transitionRealtimeDeath(current, death)).kind).toBe('stale');
+		expect((await applyRealtimeOutcome(current, { id: 'stale-points', kind: 'points', points: 20, instanceId: 'rift-instance' })).kind).toBe('stale');
+		const selecting = await loadOrCreateLifecycle();
+		expect(selecting.kind).toBe('selecting');
+		if (selecting.kind === 'selecting') {
+			expect(selecting.selection.generation).toBe(2);
+			const fresh = await selectIdentity(selecting.selection.generation, selecting.selection.candidates[0]);
+			if (fresh.kind !== 'selected') throw new Error('Expected the next run to be selected.');
+			expect(await getRealtimeSettlementLedger(fresh.persona)).toEqual(expect.objectContaining({ pendingInstanceIds: [], appliedOutcomeIds: [] }));
+		}
 	});
 
 	it('selects one candidate by CAS and re-derives the signer after reload', async () => {

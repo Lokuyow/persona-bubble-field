@@ -5,6 +5,7 @@ import {
 	type PublishRelayResult,
 	type TraceReplyBatch
 } from './nostrRelayTransport';
+import { parseRealtimeEnvelope, type RealtimeEnvelope, type RealtimeEventRegistry } from './realtimeEvents';
 import { reconcileTraceRootCache } from './traceRootCache';
 import { loadTracePreviewEvent, reconcileTraceReplyCache, touchTraceReplyTree } from './traceReplyCache';
 import {
@@ -88,6 +89,18 @@ export type WorldReadBootstrap = Readonly<{
 	positions: readonly ParsedPositionEvent[];
 	presence: PresenceState;
 	status: WorldReadConnectionStatus;
+	realtimeEvents: readonly RealtimeEnvelope[];
+	realtimeStatus: 'inactive' | 'active' | 'degraded';
+}>;
+
+export type RealtimeSessionOptions = Readonly<{
+	registry: RealtimeEventRegistry;
+	instanceId?: string;
+	instanceIds?: readonly string[];
+	since: number;
+	startImmediately?: boolean;
+	onEvent: (event: RealtimeEnvelope) => void;
+	onStatusChanged?: (status: 'inactive' | 'active' | 'degraded') => void;
 }>;
 
 export type SelfPositionWriteState =
@@ -124,6 +137,7 @@ export type WorldReadSessionOptions = Readonly<{
 	onSelfMessageAvailabilityChanged?: (state: SelfMessageAvailability) => void;
 	authorizeSelfWrite?: () => Promise<SelfWriteAuthorizationResult>;
 	onSelfWriteAuthorizationLost?: () => void;
+	realtime?: RealtimeSessionOptions;
 }>;
 
 type BufferedLiveEvent =
@@ -179,6 +193,9 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	let traceRootBootstrapReadiness: Promise<'ready' | 'failed'> | null = null;
 	let traceConversationState: TraceConversationState = { kind: 'closed' };
 	let traceConversationGeneration = 0;
+	let realtimeEvents: RealtimeEnvelope[] = [];
+	let realtimeStatus: 'inactive' | 'active' | 'degraded' = 'inactive';
+	let realtimeStartPromise: Promise<void> | null = null;
 	let traceReplyReconcileTail: Promise<void> = Promise.resolve();
 	const pendingLiveEvents: BufferedLiveEvent[] = [];
 	let selfPositionEvidence: PositionPublishEvidence = [];
@@ -210,6 +227,40 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		if (next.kind === selfMessageAvailability.kind) return;
 		selfMessageAvailability = next;
 		if (!disposed) options.onSelfMessageAvailabilityChanged?.(next);
+	}
+
+	function receiveRealtimeEvent(rawEvent: NostrEvent): void {
+		if (!channel || !options.realtime || disposed) return;
+		const parsed = parseRealtimeEnvelope(rawEvent, channel.channelId, options.realtime.registry);
+		if (!parsed || realtimeEvents.some((event) => event.event.id === parsed.event.id)) return;
+		realtimeEvents = [...realtimeEvents, parsed];
+		options.realtime.onEvent(parsed);
+	}
+
+	function startRealtimeSubscription(): Promise<void> {
+		if (realtimeStartPromise) return realtimeStartPromise;
+		const realtimeOptions = options.realtime;
+		if (disposed || !transport || !channel || !realtimeOptions?.registry.length) return Promise.resolve();
+		realtimeStatus = 'degraded';
+		realtimeOptions.onStatusChanged?.(realtimeStatus);
+		realtimeStartPromise = transport.startRealtime({
+			eventTypes: realtimeOptions.registry,
+		...(realtimeOptions.instanceId === undefined ? {} : { instanceId: realtimeOptions.instanceId }),
+		...(realtimeOptions.instanceIds === undefined ? {} : { instanceIds: realtimeOptions.instanceIds }),
+		since: realtimeOptions.since,
+		onBootstrapEvent: receiveRealtimeEvent,
+		onLiveEvent: receiveRealtimeEvent
+	}).then((realtime) => {
+		if (disposed) return;
+		realtimeStatus = realtime.status === 'active' ? 'active' : 'degraded';
+		realtimeOptions.onStatusChanged?.(realtimeStatus);
+		for (const event of realtime.events) receiveRealtimeEvent(event);
+	}).catch(() => {
+		if (disposed) return;
+		realtimeStatus = 'degraded';
+		realtimeOptions.onStatusChanged?.(realtimeStatus);
+	});
+		return realtimeStartPromise;
 	}
 
 	async function authorizeSelfWrite(): Promise<boolean> {
@@ -844,6 +895,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 					observeLivePosition(event);
 				}
 				channel = result.metadata.channel;
+				if (options.realtime?.registry.length && options.realtime.startImmediately !== false) void startRealtimeSubscription();
 				const nextPresence = project(Date.now());
 				const issueCount = hasRelayIssue(result);
 				emitStatus(issueCount === 0 ? { kind: 'available' } : { kind: 'degraded', issueCount });
@@ -853,7 +905,9 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 					timelineMessages: result.messages,
 					positions: result.positions,
 					presence: nextPresence,
-					status
+					status,
+					realtimeEvents: [...realtimeEvents],
+					realtimeStatus
 				};
 			} catch (error) {
 				if (!disposed) {
@@ -983,6 +1037,22 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 
 		getTraceReadSnapshot(): TraceReadSnapshot {
 			return traceReadSnapshot;
+		},
+
+		getRealtimeEvents(): readonly RealtimeEnvelope[] {
+			return realtimeEvents;
+		},
+
+		getRealtimeStatus(): 'inactive' | 'active' | 'degraded' {
+			return realtimeStatus;
+		},
+
+		startRealtime(): Promise<void> {
+			return startRealtimeSubscription();
+		},
+
+		getChannel(): ChannelReference | null {
+			return channel;
 		}
 	};
 }

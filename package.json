@@ -39,6 +39,7 @@
 		"vitest": "^4.1.11"
 	},
 	"dependencies": {
+		"@noble/hashes": "^2.0.1",
 		"@scure/bip32": "2.4.0",
 		"@scure/bip39": "2.4.0",
 		"bits-ui": "^2.19.0",

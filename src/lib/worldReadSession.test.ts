@@ -12,6 +12,7 @@ import {
 import type { TraceReplyConfiguration } from './nostrRelayTransport';
 import { PRESENCE_TIMEOUT_MS, type PresenceState } from './presence';
 import { planPositionPublish, reconstructPositionPublishState } from './positionPublish';
+import { protocolKeyFor } from './realtimeEvents';
 import { createWorldReadSession, type WorldReadConnectionStatus } from './worldReadSession';
 
 const mocked = vi.hoisted(() => ({
@@ -378,6 +379,36 @@ describe('world read session', () => {
 			dispose,
 			publish
 		});
+	});
+
+	it('can defer realtime startup until its event window without delaying primary bootstrap', async () => {
+		const startRealtime = vi.fn().mockResolvedValue({ status: 'inactive', events: [], relays: [] });
+		mocked.createTransport.mockReturnValue({
+			start: vi.fn(async (nextInput) => { input = nextInput; return startResult(); }),
+			startRealtime,
+			bootstrapTraceRootCandidates: traceBootstrap(),
+			dispose,
+			publish
+		});
+		const onRealtimeStatus = vi.fn();
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 },
+			onPresenceChanged: vi.fn(),
+			onLiveMessage: vi.fn(),
+			onStatusChanged: vi.fn(),
+			realtime: {
+				registry: [{ eventType: 'fixture', protocolVersion: 1, protocolKey: protocolKeyFor('fixture', 1), parseAction: () => ({}) }],
+				instanceId: 'fixture-instance', since: 0, startImmediately: false,
+				onEvent: vi.fn(), onStatusChanged: onRealtimeStatus
+			}
+		});
+		const bootstrap = await session.start();
+		expect(bootstrap.status).toEqual({ kind: 'available' });
+		expect(bootstrap.realtimeStatus).toBe('inactive');
+		expect(startRealtime).not.toHaveBeenCalled();
+		await session.startRealtime();
+		expect(startRealtime).toHaveBeenCalledOnce();
+		expect(onRealtimeStatus).toHaveBeenCalledWith('degraded');
 	});
 
 	it('stops every self-write boundary when persisted Run authorization is lost', async () => {

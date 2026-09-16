@@ -11,6 +11,7 @@
 	import { isWithinTraceInvestigationRange, type TraceRootCell } from '$lib/traceInvestigation';
 	import type { ParsedWorldMessage } from '$lib/nostrProtocol';
 	import { ADJUSTMENT_TERMINAL, FIXED_FIELD_FACILITIES } from '$lib/fieldFacilities';
+	import type { RiftHole } from '$lib/rift';
 
 	const FIELD_BACKGROUND_ASSET = '/field/prototype-danchi-courtyard.webp';
 	const TRACE_ICON_ASSET = '/trace/trace-icon.svg';
@@ -49,6 +50,8 @@
 		proximityFeedback: Readonly<{ position: GridPosition; label: string }> | null;
 		traceOnlyCellTriggers: readonly GridPosition[];
 		facilityCellTriggers: readonly GridPosition[];
+		realtimeHoles: readonly RiftHole[];
+		realtimeHoleTriggers: readonly RiftHole[];
 		participantViews: readonly FieldParticipantView[];
 		selfProjectionId: string;
 		movingParticipantIds: ReadonlySet<string>;
@@ -77,6 +80,8 @@
 		proximityFeedback,
 		traceOnlyCellTriggers,
 		facilityCellTriggers,
+		realtimeHoles,
+		realtimeHoleTriggers,
 		participantViews,
 		selfProjectionId,
 		movingParticipantIds,
@@ -143,6 +148,12 @@
 					style={`left: ${(facility.position.x + 0.5) * cellSize}px; top: ${(facility.position.y + 0.5) * cellSize}px;`}><img src={asset(facility.kind === 'mending-terminal' ? MENDING_TERMINAL_ASSET : ADJUSTMENT_TERMINAL_ASSET)} alt="" /></span>
 			{/each}
 		</div>
+		<div class="realtime-hole-layer" aria-label="綻びの抜け穴">
+			{#each realtimeHoles as hole (hole.id)}
+				<span class="realtime-hole" data-realtime-hole-id={hole.id} data-realtime-hole-position={`${hole.position.x},${hole.position.y}`}
+					style={`left: ${(hole.position.x + 0.5) * cellSize}px; top: ${(hole.position.y + 0.5) * cellSize}px;`}>◌</span>
+			{/each}
+		</div>
 		{#if proximityFeedback}
 			<div
 				class="trace-proximity-feedback"
@@ -152,6 +163,19 @@
 			>{proximityFeedback.label}</div>
 		{/if}
 		<div class="field-cell-selection-layer" aria-label="Trace investigation cells">
+			{#each realtimeHoleTriggers as hole (hole.id)}
+				<button
+					class="field-cell-selection-trigger realtime-hole-trigger"
+					data-field-gesture-origin="selectable"
+					type="button"
+					data-realtime-hole-trigger={hole.id}
+					data-cell-position={`${hole.position.x},${hole.position.y}`}
+					aria-label="抜け穴へ参加"
+					style={`left: ${hole.position.x * cellSize}px; top: ${hole.position.y * cellSize}px;`}
+					ondragstart={(event) => event.preventDefault()}
+					onclick={(event) => { event.stopPropagation(); resolveFieldCellSelection(hole.position, event.currentTarget as HTMLButtonElement); }}
+				></button>
+			{/each}
 			{#each facilityCellTriggers as position (`facility-${position.x},${position.y}`)}
 				<button
 					class="field-cell-selection-trigger"
@@ -308,6 +332,13 @@
 		transform: translate(-50%, -50%); pointer-events: none;
 	}
 	.field-facility img { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+	.realtime-hole-layer { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
+	.realtime-hole {
+		position: absolute; display: grid; width: calc(var(--cell-size) * 0.7); height: calc(var(--cell-size) * 0.7);
+		place-items: center; border: 2px dashed rgba(102, 28, 106, 0.85); border-radius: 50%;
+		background: rgba(248, 181, 255, 0.32); color: #6b1b70; font-size: calc(var(--cell-size) * 0.68); font-weight: 900;
+		line-height: 0.7; transform: translate(-50%, -50%); pointer-events: none;
+	}
 
 	.trace-marker {
 		position: absolute;

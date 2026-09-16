@@ -466,6 +466,8 @@ logical primary subscriptionは引き続きkind 42 messageと`kind 30078` positi
 
 kind 1111は第3 logical subscriptionとする。第4の常時subscriptionは要求せず、notification、open root、current speechのNIP-22 filterを一つのfilter bundleとしてまとめる。個別filterの製品意味論は [`SPEC-50-発言の痕跡.md`](./SPEC-50-発言の痕跡.md) を正とする。
 
+リアルタイムイベントのkind 7070 subscriptionは、上記の2つのlogical primary world subscriptionへfilterを混在させず、別のsupplemental subscriptionとして扱う。既知のNIP-11 `max_subscriptions` がprimary 2本と必要なリアルタイムsubscriptionを同時に許容しないRelayでは、そのRelayのリアルタイム機能だけを利用不能とし、world messageとpositionの利用可能性を変更しない。共通envelopeとevent定義は [`SPEC-10-Nostr・アカウント.md`](./SPEC-10-Nostr・アカウント.md) を正とする。
+
 RelayごとのWebSocket接続自体をsubscriptionごとに別接続へ分ける必要はなく、同一Relay接続上で複数subscriptionを管理してよい。
 
 具体的なsubscription IDは製品仕様として固定しない。

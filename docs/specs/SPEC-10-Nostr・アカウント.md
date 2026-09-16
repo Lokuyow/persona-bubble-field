@@ -169,6 +169,20 @@ position同期等に使用するアプリ固有イベントについては、kin
 
 positionイベントの具体仕様は [`SPEC-30-フィールド・position・presence.md`](./SPEC-30-フィールド・position・presence.md) を正とする。
 
+### 交換可能なリアルタイムイベント
+
+リアルタイムイベントは、通常のworld read/write subscriptionから独立した補助subscriptionで取得する。リアルタイムイベントの障害・切断・購読拒否は、通常のworld状態やTrace状態を失敗扱いにせず、リアルタイムイベント機能だけをinactive/degradedとして扱う。Relayの既知の `max_subscriptions` が、既存のprimary subscription 2本、最大1本のTrace補助subscription、およびリアルタイムイベント補助subscriptionを同時に許容しない場合、そのRelayではリアルタイムイベント補助subscriptionを開始しない。値が不明な場合は試行してよい。
+
+prototypeの共通envelopeには、project-owned regular kind `7070`、次のtag、およびJSON objectのcontentを使用する。
+
+- `e` は対象NIP-28 channel kind 40を1つだけ参照し、必要なRelay hintを第3要素に持つ
+- `d` はイベント種別とprotocol versionから導出した不変のprotocol keyを1つだけ持つ
+- `i` はそのイベントのinstance identifierを1つだけ持つ単一文字indexed tagである
+
+受信側の共通parserは署名、kind、対象channel、tagの個数と基本形、protocol key、JSON objectを検証する。イベント固有のpayload検証はイベント定義側が行う。`L` / `l` を共通envelopeの識別子として重複付与しない。`kind 30078` はposition用途のため、リアルタイムイベントには使用しない。
+
+イベント定義はenabled registryに登録されたものだけを受理する。登録を外したイベントは、保存済みの古いイベントを互換経路で復活させず、購読・受理対象から外す。protocol keyの正式値、各イベントのinstance schema、payloadおよびsettlementはイベント定義ごとに定める。
+
 ### kind 0
 
 kind 0は専用世界識別用のNIP-32ラベルの対象にしない。

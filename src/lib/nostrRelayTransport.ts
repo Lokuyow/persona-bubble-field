@@ -30,6 +30,7 @@ import {
 	PROTOTYPE_NAMESPACE,
 	RECENT_MESSAGE_TIMELINE_LIMIT
 } from './nostrProtocol';
+import { buildRealtimeEventFilter, REALTIME_EVENT_KIND, type RealtimeEventRegistry } from './realtimeEvents';
 import { resolveChannelMetadata, type ResolvedChannelMetadata } from './nostrChannelMetadata';
 import type { PrototypeWorldConfig } from './prototypeWorld';
 
@@ -85,6 +86,17 @@ export type TraceReplyRelayDiagnostic = Readonly<{
 	notice?: string;
 }>;
 
+export type RealtimeRelayDiagnostic = Readonly<{
+	relayUrl: string;
+	status: 'pending' | RelayQueryStatus;
+	notice?: string;
+}>;
+
+export type RealtimeEventBatch = Readonly<{
+	events: readonly Event[];
+	relays: readonly RealtimeRelayDiagnostic[];
+}>;
+
 export type TraceReplyBatch = Readonly<{
 	events: readonly Event[];
 	relays: readonly TraceReplyRelayDiagnostic[];
@@ -125,6 +137,7 @@ export type NostrRelayTransportDiagnostics = Readonly<{
 	connections: readonly RelayConnectionDiagnostic[];
 	nip11: readonly Nip11Diagnostic[];
 	traceReplies: TraceReplyDiagnostics | null;
+	realtime: Readonly<{ status: 'inactive' | 'initializing' | 'active'; relays: readonly RealtimeRelayDiagnostic[] }>;
 }>;
 
 export type PrimaryStartInput = Readonly<{
@@ -155,6 +168,21 @@ export type PrimaryStartResult = Readonly<{
 export type TraceRootBootstrapResult = Readonly<{
 	rawEvents: readonly Event[];
 	relays: readonly RelayQueryDiagnostic[];
+}>;
+
+export type RealtimeStartInput = Readonly<{
+	eventTypes: RealtimeEventRegistry;
+	instanceId?: string;
+	instanceIds?: readonly string[];
+	since: number;
+	onBootstrapEvent: (event: Event) => void;
+	onLiveEvent: (event: Event) => void;
+}>;
+
+export type RealtimeStartResult = Readonly<{
+	status: 'active' | 'inactive';
+	events: readonly Event[];
+	relays: readonly RealtimeRelayDiagnostic[];
 }>;
 
 export type PublishRelayResult = Readonly<{
@@ -368,6 +396,12 @@ export function createNostrRelayTransport(
 	let traceGenerationSequence = 0;
 	let traceGeneration: TraceGeneration | null = null;
 	let traceDiagnostics: TraceReplyDiagnostics | null = null;
+	let realtimeStarted = false;
+	let realtimeDiagnostics: { status: 'inactive' | 'initializing' | 'active'; relays: RealtimeRelayDiagnostic[] } = { status: 'inactive', relays: [] };
+	let realtimeStartInput: RealtimeStartInput | null = null;
+	let realtimeFilter: Filter | null = null;
+	const realtimeSubIds = new Map<string, string>();
+	const realtimeSeenIds = new Set<string>();
 	const stableTraceCursors = new Map<string, Map<string, number>>();
 	function requireRxNostr(): RxNostr {
 		if (!rxNostr) throw new Error('Relay transport has not been initialized.');
@@ -396,9 +430,12 @@ export function createNostrRelayTransport(
 				}
 			}
 		}
+		if (!isConnectionUnavailable(connectionState)) return;
+		const realtimePair = realtimeDiagnostics.relays.find((relay) => relay.relayUrl === canonical);
+		if (realtimePair?.status === 'pending') updateRealtimeDiagnostic(canonical, { relayUrl: canonical, status: 'unavailable' });
 		const generation = traceGeneration;
 		const traceState = generation?.states.get(canonical);
-		if (!generation || !traceState || !isConnectionUnavailable(connectionState)) return;
+		if (!generation || !traceState) return;
 		if (!generation.initialSettled && traceState.initialStatus.status === 'pending') {
 			finishTraceInitialRelay(generation, traceState, { relayUrl: canonical, status: 'unavailable' });
 			return;
@@ -428,7 +465,8 @@ export function createNostrRelayTransport(
 			primaryPairs: copyPairDiagnostics(primaryPairs),
 			connections: [...connections.values()].map((connection) => ({ ...connection })),
 			nip11: nip11Diagnostics(),
-			traceReplies: traceDiagnostics
+			traceReplies: traceDiagnostics,
+			realtime: { status: realtimeDiagnostics.status, relays: realtimeDiagnostics.relays.map((relay) => ({ ...relay })) }
 		};
 	}
 
@@ -700,6 +738,123 @@ export function createNostrRelayTransport(
 
 	function copyTraceDiagnostic(diagnostic: TraceReplyRelayDiagnostic): TraceReplyRelayDiagnostic {
 		return { ...diagnostic };
+	}
+
+	function realtimeCapacityAllows(relayUrl: string): boolean {
+		const maxSubscriptions = Nip11Registry.get(relayUrl)?.limitation?.max_subscriptions;
+		// Reserve room for the two primary subscriptions and the existing Trace
+		// supplemental subscription before opening realtime events.
+		return typeof maxSubscriptions !== 'number' || maxSubscriptions >= 4;
+	}
+
+	function updateRealtimeDiagnostic(relayUrl: string, next: RealtimeRelayDiagnostic): void {
+		realtimeDiagnostics = {
+			...realtimeDiagnostics,
+			relays: realtimeDiagnostics.relays.map((relay) => relay.relayUrl === relayUrl ? { ...next } : relay)
+		};
+	}
+
+	/**
+	 * Starts the event stream as a supplemental Forward request. It deliberately
+	 * has its own terminal/error accounting and never changes primary status.
+	 */
+	async function startRealtime(input: RealtimeStartInput): Promise<RealtimeStartResult> {
+		if (state !== 'started' || !metadata) throw new Error('Relay transport must start before realtime events.');
+		if (realtimeStarted) throw new Error('Realtime event startup is only allowed once.');
+		realtimeStarted = true;
+		if (input.eventTypes.length === 0) {
+			realtimeDiagnostics = { status: 'inactive', relays: [] };
+			return { status: 'inactive', events: [], relays: [] };
+		}
+		assertTimestamp(input.since, 'realtime since');
+		realtimeFilter = buildRealtimeEventFilter({
+			channelId: metadata.channelId,
+			eventTypes: input.eventTypes,
+			...(input.instanceId === undefined ? {} : { instanceId: input.instanceId }),
+			...(input.instanceIds === undefined ? {} : { instanceIds: input.instanceIds }),
+			since: input.since
+		});
+		realtimeStartInput = input;
+		const capableRelays = metadata.relays.filter(realtimeCapacityAllows);
+		const skipped = metadata.relays.filter((relayUrl) => !capableRelays.includes(relayUrl)).map((relayUrl) => ({ relayUrl, status: 'unavailable' as const, notice: 'Relay subscription capacity is reserved for primary world reads.' }));
+		if (capableRelays.length === 0) {
+			realtimeDiagnostics = { status: 'inactive', relays: skipped };
+			return { status: 'inactive', events: [], relays: skipped };
+		}
+		realtimeDiagnostics = { status: 'initializing', relays: [...capableRelays.map((relayUrl) => ({ relayUrl, status: 'pending' as const })), ...skipped] };
+		const client = requireRxNostr();
+		const initialEvents: Event[] = [];
+		let settled = false;
+		let deadline: ReturnType<typeof setTimeout> | null = null;
+		const resources = new Subscription();
+		subscriptions.add(resources);
+		const finish = (resolve: (result: RealtimeStartResult) => void) => {
+			if (settled || realtimeDiagnostics.relays.some((relay) => relay.status === 'pending')) return;
+			settled = true;
+			if (deadline) clearTimeout(deadline);
+			realtimeDiagnostics = { ...realtimeDiagnostics, status: capableRelays.some((relayUrl) => realtimeDiagnostics.relays.find((relay) => relay.relayUrl === relayUrl)?.status === 'eose') ? 'active' : 'inactive' };
+			resolve({ status: realtimeDiagnostics.status === 'active' ? 'active' : 'inactive', events: [...initialEvents], relays: realtimeDiagnostics.relays.map((relay) => ({ ...relay })) });
+		};
+		return await new Promise<RealtimeStartResult>((resolve, reject) => {
+			resources.add(() => {
+				if (!settled) {
+					settled = true;
+					reject(new Error('Relay transport disposed during realtime startup.'));
+				}
+			});
+			resources.add(client.createOutgoingMessageObservable().subscribe((packet) => {
+				const request = reqFromOutgoing(packet);
+				const relayUrl = canonicalRelay(packet.to);
+				if (!request || !relayUrl || !capableRelays.includes(relayUrl) || !realtimeFilter || !matchesQueryFilter(request.filters, realtimeFilter)) return;
+				realtimeSubIds.set(relayUrl, request.subId);
+			}));
+			resources.add(client.createAllEventObservable().subscribe((packet) => {
+				const relayUrl = canonicalRelay(packet.from);
+				if (!relayUrl || realtimeSubIds.get(relayUrl) !== packet.subId || packet.event.kind !== REALTIME_EVENT_KIND || realtimeSeenIds.has(packet.event.id)) return;
+				realtimeSeenIds.add(packet.event.id);
+				if (!settled) {
+					initialEvents.push(packet.event);
+					input.onBootstrapEvent(packet.event);
+				} else input.onLiveEvent(packet.event);
+			}));
+			resources.add(client.createAllMessageObservable().subscribe((packet) => {
+				if (packet.type !== 'EOSE' && packet.type !== 'CLOSED') return;
+				const relayUrl = canonicalRelay(packet.from);
+				if (!relayUrl || realtimeSubIds.get(relayUrl) !== packet.subId) return;
+				const diagnostic: RealtimeRelayDiagnostic = packet.type === 'EOSE'
+					? { relayUrl, status: 'eose' }
+					: { relayUrl, status: 'closed', ...(packet.notice ? { notice: packet.notice } : {}) };
+				updateRealtimeDiagnostic(relayUrl, diagnostic);
+				if (!settled) finish(resolve);
+			}));
+			resources.add(client.createConnectionStateObservable().subscribe((packet) => {
+				const relayUrl = canonicalRelay(packet.from);
+				if (!relayUrl || !capableRelays.includes(relayUrl) || !isConnectionUnavailable(packet.state)) return;
+				const current = realtimeDiagnostics.relays.find((relay) => relay.relayUrl === relayUrl);
+				if (current?.status === 'pending') {
+					updateRealtimeDiagnostic(relayUrl, { relayUrl, status: 'unavailable' });
+					finish(resolve);
+				}
+			}));
+			const requests = capableRelays.map((relayUrl) => {
+				const req = createRxForwardReq();
+				resources.add(client.use(req, { on: { relays: [relayUrl] } }).subscribe());
+				return req;
+			});
+			deadline = setTimeout(() => {
+				for (const relayUrl of capableRelays) {
+					const current = realtimeDiagnostics.relays.find((relay) => relay.relayUrl === relayUrl);
+					if (current?.status === 'pending') updateRealtimeDiagnostic(relayUrl, { relayUrl, status: 'timeout' });
+				}
+				finish(resolve);
+			}, timeoutMs);
+			for (const request of requests) request.emit(realtimeFilter!);
+			for (const relayUrl of capableRelays) {
+				const connection = client.getRelayStatus(relayUrl)?.connection;
+				if (connection && isConnectionUnavailable(connection)) updateRealtimeDiagnostic(relayUrl, { relayUrl, status: 'unavailable' });
+			}
+			finish(resolve);
+		});
 	}
 
 	function refreshTraceDiagnostics(generation: TraceGeneration | null, status: TraceReplyDiagnostics['status']): void {
@@ -1099,6 +1254,10 @@ export function createNostrRelayTransport(
 				disposeRxNostr();
 				throw error;
 			}
+		},
+
+		startRealtime(input: RealtimeStartInput): Promise<RealtimeStartResult> {
+			return startRealtime(input);
 		},
 
 		getDiagnostics(): NostrRelayTransportDiagnostics {
