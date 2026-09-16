@@ -102,9 +102,11 @@
 		inset: auto;
 		box-sizing: border-box;
 		width: min(900px, 100%);
+		max-height: calc(100vh - 40px);
 		max-width: none;
 		margin: 0;
 		padding: 24px;
+		overflow-y: auto;
 		border: 1px solid rgb(255 255 255 / 24%);
 		border-radius: 18px;
 		background: #181827;
@@ -122,6 +124,7 @@
 	.candidate-about { min-height: 3.5em; color: rgb(255 255 255 / 74%); white-space: pre-line; }
 
 	@media (max-width: 700px) {
+		.selection-dialog { max-height: calc(100dvh - 40px); }
 		.candidate-grid { grid-template-columns: 1fr; }
 		.candidate { grid-template-columns: 80px 1fr; }
 		.candidate img { grid-row: span 2; }
