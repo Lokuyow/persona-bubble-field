@@ -1273,17 +1273,18 @@ test.describe('DEV World Sandbox', () => {
 			const entries = element.querySelector<HTMLElement>('.timeline-visible-entries');
 			return {
 				backgroundColor: style.backgroundColor,
+				backgroundImage: style.backgroundImage,
 				backdropFilter: style.backdropFilter,
 				boxShadow: style.boxShadow,
+				borderStyle: style.borderStyle,
 				overflowY: entries ? getComputedStyle(entries).overflowY : ''
 			};
 		});
-		expect(presentation).toEqual({
-			backgroundColor: 'rgba(0, 0, 0, 0)',
-			backdropFilter: 'none',
-			boxShadow: 'none',
-			overflowY: 'visible'
-		});
+		expect(presentation.backgroundImage).toContain('linear-gradient');
+		expect(presentation.boxShadow).not.toBe('none');
+		expect(presentation.borderStyle).toBe('solid');
+		expect(presentation.backdropFilter).toBe('none');
+		expect(presentation.overflowY).toBe('visible');
 
 		const timelineOrder = await visibleEntries.evaluateAll((entries) => entries.map((entry) => ({
 			id: entry.getAttribute('data-timeline-event-id'),

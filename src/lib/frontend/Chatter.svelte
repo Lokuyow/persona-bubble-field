@@ -127,7 +127,7 @@
 </script>
 
 {#if timelineInitialized && timelineOpen}
-	<aside class="recent-message-timeline" aria-label="Chatter">
+	<aside class={['recent-message-timeline', { 'timeline-has-messages': messages.length > 0 }]} aria-label="Chatter">
 		<header class="timeline-header">
 			<button
 				class="timeline-hide-control"
@@ -194,26 +194,33 @@
 <style>
 	.recent-message-timeline {
 		position: absolute;
-		top: 0;
-		bottom: 0;
-		left: 12px;
+		top: max(12px, env(safe-area-inset-top));
+		left: max(12px, env(safe-area-inset-left));
 		z-index: 9;
 		display: flex;
 		width: min(320px, calc(100% - 32px));
+		max-height: min(380px, calc(100% - 24px));
 		flex-direction: column;
-		border-radius: 18px;
-		background: transparent;
-		box-shadow: none;
-		color: #374345;
+		overflow: hidden;
+		border: 1px solid rgba(132, 142, 255, 0.46);
+		border-radius: 10px;
+		background: linear-gradient(145deg, rgba(8, 15, 31, 0.84), rgba(14, 17, 39, 0.72));
+		box-shadow: 0 0 16px rgba(80, 94, 255, 0.14), inset 0 0 14px rgba(96, 104, 220, 0.07);
+		color: rgba(239, 241, 255, 0.9);
 		pointer-events: auto;
+	}
+
+	.recent-message-timeline.timeline-has-messages {
+		height: calc(100% - 24px);
+		max-height: calc(100% - 24px);
 	}
 
 	.timeline-header {
 		display: flex;
 		align-items: center;
 		justify-content: flex-start;
-		padding: 16px 12px 10px 0;
-		border-bottom: 1px solid rgba(57, 67, 64, 0.12);
+		padding: 9px 10px 8px;
+		border-bottom: 1px solid rgba(132, 142, 255, 0.28);
 		flex: 0 0 auto;
 		gap: 12px;
 	}
@@ -221,21 +228,21 @@
 	.timeline-header h2 {
 		margin: 0;
 		color: #fff;
-		font-size: 16px;
+		font-size: 14px;
 		font-weight: 700;
 		letter-spacing: 0.1em;
 		text-transform: uppercase;
 		-webkit-text-stroke: 0;
-		text-shadow: 0 1px 1px rgba(0, 0, 0, 0.9);
+		text-shadow: 0 0 8px rgba(143, 147, 255, 0.32);
 	}
 
 	.timeline-hide-control,
 	.timeline-show-control {
-		border: 1px solid rgba(57, 67, 64, 0.16);
-		border-radius: 999px;
-		background: rgba(255, 255, 255, 0.78);
-		box-shadow: 0 4px 10px rgba(58, 70, 61, 0.1);
-		color: #596662;
+		border: 1px solid rgba(132, 142, 255, 0.46);
+		border-radius: 6px;
+		background: rgba(22, 25, 58, 0.76);
+		box-shadow: 0 0 9px rgba(92, 105, 255, 0.16);
+		color: #e7e9ff;
 		font-weight: 700;
 	}
 
@@ -245,14 +252,14 @@
 		height: 44px;
 		padding: 0;
 		place-items: center;
-		font-size: 30px;
+		font-size: 24px;
 		line-height: 1;
 	}
 
 	.timeline-visible-entries {
 		flex: 1 1 auto;
 		min-height: 0;
-		padding: 0;
+		padding: 0 10px 6px;
 		overflow: visible;
 	}
 
@@ -319,8 +326,8 @@
 	.timeline-text {
 		max-height: calc(1.45em * 5);
 		overflow: hidden;
-		color: #fff;
-		font-size: 18px;
+		color: rgba(239, 241, 255, 0.9);
+		font-size: 16px;
 		letter-spacing: 0.01em;
 		line-height: 1.45;
 		padding: 6px 0;
@@ -356,12 +363,12 @@
 
 	.timeline-show-control {
 		position: absolute;
-		top: 16px;
-		left: 12px;
+		top: max(12px, env(safe-area-inset-top));
+		left: max(12px, env(safe-area-inset-left));
 		z-index: 9;
 		min-height: 44px;
-		padding: 0 13px;
-		font-size: 16px;
+		padding: 0 12px;
+		font-size: 14px;
 		letter-spacing: 0.03em;
 		pointer-events: auto;
 	}
