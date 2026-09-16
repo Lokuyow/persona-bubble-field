@@ -3,6 +3,8 @@ node_modules
 # Local character artwork sources (delivery images remain tracked)
 /.character-sources/
 /.character-image-cache.json
+/.field-object-sources/
+/.field-object-image-cache.json
 
 # Output
 .output
