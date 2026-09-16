@@ -38,6 +38,8 @@
 
 ポイントは主に `作業` と `綻び` によって獲得する。ポイントは能力強化に消費でき、現在所持ポイントが1000pt以上である間だけ脱出条件を満たす。
 
+所持ポイントは0以上の整数とする。1pt未満の作業進捗は所持ポイントとは別のRun-localなcarryとして保持し、表示・消費・persistする所持ポイントへ小数を混在させない。
+
 能力強化に使用したポイントは所持ポイントから減少する。現在所持ポイントが1000pt未満になれば脱出条件を満たさなくなり、再び1000pt以上を所持すれば満たす。過去に一度1000ptへ到達したこと自体は、脱出条件を永久に解放するflagとして扱わない。「能力へ投資する」か「1000pt以上を所持して脱出する」かの選択が成立する。通常死亡・転生時には現在所持ポイントをすべて失う。
 
 ## 3. 1000pt到達と脱出
@@ -66,9 +68,9 @@ clear前はactive Identityのchild secretをexportしない。Root entropyの保
 
 ### 成果回収とbucket
 
-作業開始時に、最大蓄積時間、寿命延長率、ポイント率をabilityからsnapshotする。端末の近くであれば上限未満でも、その時点までのprocessed durationに対応する寿命延長とfractional pointsを1回のatomic mutationで回収できる。dialogを開くだけでは回収せず、途中終了や途中からの再開始操作は設けない。
+作業開始時に、最大蓄積時間、寿命延長率、1pt獲得に必要な作業時間をabilityからsnapshotする。ハルシネーション抑制によるpoint intervalは、初期60分/Lv1 55分/Lv2 50分/Lv3 45分/Lv4 40分である。端末の近くであれば上限未満でも、その時点までのprocessed durationに対応する寿命延長と整数pointsを1回のatomic mutationで回収でき、1pt未満のprogress carryは失わない。dialogを開くだけでは回収せず、途中終了や途中からの再開始操作は設けない。
 
-回収時には寿命延長をpersisted lifespanへmaterializeし、pointsを所持pointsへ加算する。同時に回収時刻を開始時刻として次のbucketを作成し、次bucketは回収時点の最新ability levelsをsnapshotする。回収後も`mendingJob`はactiveなままであり、蓄積時間と受取可能pointsは0から再開する。processed durationが0でpointsが存在しない回収は成立させない。
+回収時には寿命延長をpersisted lifespanへmaterializeし、pointsを所持pointsへ加算する。同時に回収時刻を開始時刻として次のbucketを作成し、次bucketは回収時点の最新ability levelsをsnapshotする。回収後も`mendingJob`はactiveなままであり、蓄積時間と受取可能pointsは0から再開する。processed durationが存在すれば今回の整数pointsが0でも回収を成立させ、寿命延長、progress carry、回収時刻から開始する次bucketをmaterializeする。processed durationが0の即時再回収は成立させない。active bucket中の能力強化は現在bucketへ遡及適用せず、carryを新rateでrevalueしない。
 
 maximum durationへ到達した後はpointsと寿命延長の増加を停止し、上限超過時間を次bucketへ持ち越さない。上限到達後も同じ回収操作を行える。
 
@@ -78,9 +80,9 @@ maximum durationへ到達した後はpointsと寿命延長の増加を停止し�
 
 初期状態の寿命延長量は、処理1時間あたり `+0.8時間` とする。
 
-作業の最大処理時間、寿命延長率、ポイント率は開始時点の能力値で固定する。進行中に能力を強化しても、そのjobへ遡及適用しない。
+作業の最大処理時間、寿命延長率、point intervalは開始時点の能力値で固定する。進行中に能力を強化しても、そのjobへ遡及適用しない。回収後に開始する次bucketだけが、その時点の最新abilityをsnapshotする。
 
-作業中には、作業中であること、経過時間、context使用率、受取可能ポイント、寿命延長量等の現在状態を表示してよい。active bucketの途中成果は所持pointsへは加算されないが、端末の近くで明示的に回収した時点までの成果はpartialでも受け取れる。`prompt`、`token`、`inference`、`context`、`hallucination`、`verification` 等の用語をフレーバーとしてログに使用してよいが、それらの本当の意味を作品内で説明する必要はない。
+作業中には、作業中であること、経過時間、context使用率、受取可能ポイント、1pt未満のprogress、次の1ptまでの時間、寿命延長量等の現在状態を表示してよい。active bucketの途中成果は所持pointsへは加算されないが、端末の近くで明示的に回収した時点までの成果はpartialでも受け取れる。`prompt`、`token`、`inference`、`context`、`hallucination`、`verification` 等の用語をフレーバーとしてログに使用してよいが、それらの本当の意味を作品内で説明する必要はない。
 
 作業中の死亡判定は、保存済みの `lifespanExpiresAtMs` 単独ではなく、current bucketの未materialize寿命延長を含むeffective lifespanを基準とする。保存済みexpiryが現在時刻を過ぎていても、current bucketの寿命延長込みのeffective lifespanが残っている間は死亡しない。effective lifespanのexact expiryは死亡扱いとし、それ以後の成果回収は成立させない。死亡時にcurrent bucketへ蓄積されていた未回収pointsは所持pointsへ加算せず、通常死亡時のRun-local stateとして失う。bucketが蓄積上限へ到達した後は寿命延長も停止するため、回収せず放置してeffective lifespanが尽きれば死亡する。
 
@@ -125,15 +127,15 @@ JOB等の具体的な処理内容をフレーバーとして変化させても�
 
 ### ハルシネーション抑制
 
-ハルシネーション抑制は、処理1時間あたりの有効ポイント獲得量を改善する。
+ハルシネーション抑制は、1pt獲得に必要な作業時間を短くする。
 
-| 段階 | ポイント獲得量 | 強化コスト |
+| 段階 | 1pt獲得に必要な作業時間 | 強化コスト |
 | --- | ---: | ---: |
-| 初期 | 1.0pt/h | - |
-| Lv1 | 1.1pt/h | 10pt |
-| Lv2 | 1.2pt/h | 20pt |
-| Lv3 | 1.35pt/h | 30pt |
-| Lv4 | 1.5pt/h | 40pt |
+| 初期 | 60分 / 1pt | - |
+| Lv1 | 55分 / 1pt | 10pt |
+| Lv2 | 50分 / 1pt | 20pt |
+| Lv3 | 45分 / 1pt | 30pt |
+| Lv4 | 40分 / 1pt | 40pt |
 
 ハルシネーションによる成果減少は、ランダムな大損を発生させる仕組みにはしない。同じ能力値・同じ有効処理時間なら、基本的に決定的に同じ成果を導出できる設計を優先する。
 

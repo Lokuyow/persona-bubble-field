@@ -1,4 +1,4 @@
-import { isMendingExpired, isValidMendingJob, type MendingJob } from './mending';
+import { isMendingExpired, isValidMendingJob, isValidPointProgressTicks, type MendingJob } from './mending';
 
 export const INITIAL_LIFESPAN_MS = 7 * 24 * 60 * 60 * 1000;
 export const MAX_LIFESPAN_MS = 14 * 24 * 60 * 60 * 1000;
@@ -22,7 +22,7 @@ export type AbilityUpgrade = Readonly<{
 const ABILITY_EFFECTS: Readonly<Record<PersonaAbilityKey, readonly string[]>> = {
 	inferenceEfficiency: ['0.8h/h', '0.9h/h', '1.0h/h', '1.1h/h', '1.25h/h'],
 	contextCapacity: ['8h', '12h', '18h', '24h'],
-	hallucinationSuppression: ['1.0pt/h', '1.1pt/h', '1.2pt/h', '1.35pt/h', '1.5pt/h']
+	hallucinationSuppression: ['60分 / 1pt', '55分 / 1pt', '50分 / 1pt', '45分 / 1pt', '40分 / 1pt']
 };
 
 const ABILITY_UPGRADE_COSTS: Readonly<Record<PersonaAbilityKey, readonly number[]>> = {
@@ -63,10 +63,11 @@ export type PersonaAbilityLevels = Readonly<{
 }>;
 
 export type PersonaGameState = Readonly<{
-	version: 2;
+	version: 3;
 	personaPubkey: string;
 	lifespanExpiresAtMs: number;
 	points: number;
+	pointProgressTicks: number;
 	abilities: PersonaAbilityLevels;
 	mendingJob: MendingJob | null;
 }>;
@@ -86,9 +87,10 @@ function isAbilityLevel(value: unknown, maximum: number): value is number {
 export function isValidPersonaGameState(value: unknown): value is PersonaGameState {
 	if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
 	const candidate = value as Readonly<Record<string, unknown>>;
-	if (candidate.version !== 2 || !isCanonicalPubkey(candidate.personaPubkey) ||
+	if (candidate.version !== 3 || !isCanonicalPubkey(candidate.personaPubkey) ||
 		!isSafeTimestamp(candidate.lifespanExpiresAtMs) ||
-		typeof candidate.points !== 'number' || !Number.isFinite(candidate.points) || candidate.points < 0 ||
+		typeof candidate.points !== 'number' || !Number.isSafeInteger(candidate.points) || candidate.points < 0 ||
+		!isValidPointProgressTicks(candidate.pointProgressTicks) ||
 		typeof candidate.abilities !== 'object' || candidate.abilities === null || Array.isArray(candidate.abilities)) return false;
 	const abilities = candidate.abilities as Readonly<Record<string, unknown>>;
 	return (candidate.mendingJob === null || isValidMendingJob(candidate.mendingJob)) && isAbilityLevel(abilities.inferenceEfficiency, ABILITY_LEVEL_LIMITS.inferenceEfficiency) &&
@@ -102,10 +104,11 @@ export function createInitialPersonaGameState(personaPubkey: string, birthAtMs: 
 		throw new TypeError('Invalid persona lifecycle input.');
 	}
 	return {
-		version: 2,
+		version: 3,
 		personaPubkey,
 		lifespanExpiresAtMs: birthAtMs + INITIAL_LIFESPAN_MS,
 		points: 0,
+		pointProgressTicks: 0,
 		abilities: { inferenceEfficiency: 0, contextCapacity: 0, hallucinationSuppression: 0 },
 		mendingJob: null
 	};

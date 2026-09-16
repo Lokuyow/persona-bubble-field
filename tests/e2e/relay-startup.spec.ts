@@ -687,7 +687,7 @@ async function seedRelayAccount(page: Page, secretKey: Uint8Array, pubkey: strin
 	await page.goto('/favicon.svg');
 	await page.evaluate(async ({ accountPubkey, accountIndex, expiresAtMs, points, abilities, characterId }) => {
 		const database = await new Promise<IDBDatabase>((resolve, reject) => {
-			const request = indexedDB.open('persona-bubble-field-account', 4);
+			const request = indexedDB.open('persona-bubble-field-account', 5);
 			request.onupgradeneeded = () => {
 				for (const name of Array.from(request.result.objectStoreNames)) request.result.deleteObjectStore(name);
 				request.result.createObjectStore('persona-bubble-field-root-secret');
@@ -710,7 +710,8 @@ async function seedRelayAccount(page: Page, secretKey: Uint8Array, pubkey: strin
 			mode: { kind: 'running', activeRun: { runNumber: 1, revision: 0, startedAtMs: now,
 				identity: { generation: 1, accountIndex, pubkey: accountPubkey },
 				gameState: {
-			version: 2, personaPubkey: accountPubkey, lifespanExpiresAtMs: expiresAtMs,
+					version: 3, personaPubkey: accountPubkey, lifespanExpiresAtMs: expiresAtMs,
+					pointProgressTicks: 0,
 			points, abilities, mendingJob: null
 				} } }
 		}, 'player-lifecycle');
@@ -728,6 +729,7 @@ async function readRelayGameState(page: Page): Promise<{
 	personaPubkey: string;
 	lifespanExpiresAtMs: number;
 	points: number;
+	pointProgressTicks: number;
 	abilities: { inferenceEfficiency: number; contextCapacity: number; hallucinationSuppression: number };
 	mendingJob: unknown;
 }> {
@@ -740,8 +742,8 @@ async function readRelayGameState(page: Page): Promise<{
 		try {
 			const transaction = database.transaction('persona-bubble-field-player-state');
 			const request = transaction.objectStore('persona-bubble-field-player-state').get('player-lifecycle');
-			return await new Promise<{ version: number; personaPubkey: string; lifespanExpiresAtMs: number; points: number; abilities: { inferenceEfficiency: number; contextCapacity: number; hallucinationSuppression: number }; mendingJob: unknown }>((resolve, reject) => {
-				transaction.oncomplete = () => resolve((request.result as { mode: { activeRun: { gameState: { version: number; personaPubkey: string; lifespanExpiresAtMs: number; points: number; abilities: { inferenceEfficiency: number; contextCapacity: number; hallucinationSuppression: number }; mendingJob: unknown } } } }).mode.activeRun.gameState);
+			return await new Promise<{ version: number; personaPubkey: string; lifespanExpiresAtMs: number; points: number; pointProgressTicks: number; abilities: { inferenceEfficiency: number; contextCapacity: number; hallucinationSuppression: number }; mendingJob: unknown }>((resolve, reject) => {
+				transaction.oncomplete = () => resolve((request.result as { mode: { activeRun: { gameState: { version: number; personaPubkey: string; lifespanExpiresAtMs: number; points: number; pointProgressTicks: number; abilities: { inferenceEfficiency: number; contextCapacity: number; hallucinationSuppression: number }; mendingJob: unknown } } } }).mode.activeRun.gameState);
 				transaction.onerror = () => reject(transaction.error);
 				transaction.onabort = () => reject(transaction.error);
 			});
@@ -763,7 +765,7 @@ async function overwriteRelayGameState(page: Page, gameState: Record<string, unk
 			await new Promise<void>((resolve, reject) => {
 				request.onsuccess = () => {
 					const lifecycle = request.result as { mode: { kind: 'running'; activeRun: { gameState: Record<string, unknown> } } };
-					lifecycle.mode.activeRun.gameState = nextGameState;
+					lifecycle.mode.activeRun.gameState = { pointProgressTicks: 0, ...nextGameState };
 					store.put(lifecycle, 'player-lifecycle');
 				};
 				transaction.oncomplete = () => resolve();
@@ -777,7 +779,7 @@ async function overwriteRelayGameState(page: Page, gameState: Record<string, unk
 async function seedUnavailablePersona(page: Page, kind: 'missing' | 'corrupt'): Promise<void> {
 	await page.goto('/favicon.svg');
 	await page.evaluate((stateKind) => new Promise<void>((resolve, reject) => {
-		const request = indexedDB.open('persona-bubble-field-account', 4);
+		const request = indexedDB.open('persona-bubble-field-account', 5);
 		request.onupgradeneeded = () => {
 			for (const name of Array.from(request.result.objectStoreNames)) request.result.deleteObjectStore(name);
 			request.result.createObjectStore('persona-bubble-field-root-secret');
@@ -970,7 +972,7 @@ test.describe('Relay startup', () => {
 			await installHostOwnedStub(deathTab);
 			await installDelayedRelay(deathTab);
 			await deathTab.goto('/');
-			await overwriteRelayGameState(deathTab, { version: 2, personaPubkey: oldPubkey, lifespanExpiresAtMs: Date.now() - 1, points: 0,
+			await overwriteRelayGameState(deathTab, { version: 3, personaPubkey: oldPubkey, lifespanExpiresAtMs: Date.now() - 1, points: 0,
 				abilities: { inferenceEfficiency: 0, contextCapacity: 0, hallucinationSuppression: 0 }, mendingJob: null });
 			await deathTab.reload({ waitUntil: 'domcontentloaded' });
 			await expect(deathTab.getByRole('dialog')).toBeVisible();
@@ -1013,7 +1015,7 @@ test.describe('Relay startup', () => {
 			await installHostOwnedStub(deathTab);
 			await installDelayedRelay(deathTab);
 			await deathTab.goto('/');
-			await overwriteRelayGameState(deathTab, { version: 2, personaPubkey: oldPubkey, lifespanExpiresAtMs: Date.now() - 1, points: 0,
+			await overwriteRelayGameState(deathTab, { version: 3, personaPubkey: oldPubkey, lifespanExpiresAtMs: Date.now() - 1, points: 0,
 				abilities: { inferenceEfficiency: 0, contextCapacity: 0, hallucinationSuppression: 0 }, mendingJob: null });
 			await deathTab.reload({ waitUntil: 'domcontentloaded' });
 			await expect(deathTab.getByRole('dialog')).toBeVisible();
@@ -1048,7 +1050,7 @@ test.describe('Relay startup', () => {
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
 		await overwriteRelayGameState(page, {
-			version: 2, personaPubkey: pubkey, lifespanExpiresAtMs: Date.now() - 1, points: 321, mendingJob: null,
+			version: 3, personaPubkey: pubkey, lifespanExpiresAtMs: Date.now() - 1, points: 321, pointProgressTicks: 0, mendingJob: null,
 			abilities: { inferenceEfficiency: 4, contextCapacity: 3, hallucinationSuppression: 4 }
 		});
 		await armDeathTransitionFailure(page);
@@ -1232,21 +1234,50 @@ test.describe('Relay startup', () => {
 		await expect(page.getByRole('dialog')).toHaveCount(0);
 		await expect.poll(() => readRelayGameState(page)).toMatchObject({ mendingJob: expect.any(Object) });
 		const started = await readRelayGameState(page);
-		expect(started).toMatchObject({ version: 2, points: 0, mendingJob: expect.objectContaining({ maximumDurationMs: 8 * 60 * 60 * 1000 }) });
+		expect(started).toMatchObject({ version: 3, points: 0, pointProgressTicks: 0, mendingJob: expect.objectContaining({ maximumDurationMs: 8 * 60 * 60 * 1000, pointIntervalMs: 60 * 60 * 1000 }) });
 		await terminal.click();
 		const activeDialog = page.getByRole('dialog');
-		await expect(activeDialog).toContainText('POINT 0.00 pt');
-		await expect(activeDialog).toContainText('0.00 / 8.00時間');
-		await expect(activeDialog).toContainText('残り 8.00時間');
+		await expect(activeDialog).toContainText('POINT 0 pt');
+		await expect(activeDialog).toContainText('1分未満 / 8時間');
+		await expect(activeDialog).toContainText('残り 8時間');
 		await expect(activeDialog).toContainText('寿命延長');
 		await expect(activeDialog).toContainText('ポイント');
-		await expect(activeDialog).toContainText('+0.00pt');
+		await expect(activeDialog).toContainText('+0pt');
 		await expect(activeDialog.getByRole('button', { name: '受け取る' })).toBeVisible();
 		await expect(page.locator('.lifespan-hud')).toContainText('作業中 +0.8h/h');
-		await expect(page.locator('.lifespan-hud')).toContainText('ポイント 0.00pt');
+		await expect(page.locator('.lifespan-hud')).toContainText('ポイント 0pt');
 		await page.getByRole('button', { name: '閉じる' }).click();
 
-		await page.clock.setSystemTime((started.mendingJob as { startedAtMs: number }).startedAtMs + 8 * 60 * 60 * 1000);
+		const startedAt = (started.mendingJob as { startedAtMs: number }).startedAtMs;
+		const partialAt = startedAt + 40 * 60 * 1000;
+		await page.clock.setSystemTime(partialAt);
+		await pauseAtCurrentBrowserTime(page);
+		await terminal.click();
+		const partialDialog = page.getByRole('dialog');
+		await expect(partialDialog).toContainText('40分 / 8時間');
+		await expect(partialDialog).toContainText('残り 7時間20分');
+		await expect(partialDialog).toContainText('次の1ptまで 20分');
+		await expect(partialDialog).toContainText('+0pt');
+		await partialDialog.getByRole('button', { name: '受け取る' }).click();
+		await expect.poll(async () => {
+			const partialState = await readRelayGameState(page);
+			return partialState.points === 0 && partialState.pointProgressTicks > 0 && partialState.pointProgressTicks < 1_188_000_000;
+		}).toBe(true);
+
+		const secondAt = partialAt + 20 * 60 * 1000;
+		await page.clock.setSystemTime(secondAt);
+		await pauseAtCurrentBrowserTime(page);
+		if (await page.getByRole('dialog').count() > 0) await page.getByRole('button', { name: '閉じる' }).click();
+		await terminal.click();
+		await expect(page.getByRole('dialog')).toContainText('+1pt');
+		await page.getByRole('button', { name: '受け取る' }).click();
+		await expect.poll(async () => (await readRelayGameState(page)).points).toBe(1);
+
+		if (await page.getByRole('dialog').count() > 0) await page.getByRole('button', { name: '閉じる' }).click();
+		const afterSecond = await readRelayGameState(page);
+		const fullAt = (afterSecond.mendingJob as { startedAtMs: number }).startedAtMs + 8 * 60 * 60 * 1000;
+		await page.clock.setSystemTime(fullAt);
+		await pauseAtCurrentBrowserTime(page);
 		const completedAtTerminal = finalizeEvent(buildPositionEventTemplate({
 			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 11, y: 2 }, slot: 1,
 			createdAt: Math.floor(await page.evaluate(() => Date.now()) / 1000)
@@ -1256,21 +1287,20 @@ test.describe('Relay startup', () => {
 		await terminal.click();
 		await expect(page.getByRole('dialog')).toContainText('蓄積上限に達しています');
 		await expect(page.getByRole('dialog')).toContainText('ポイント');
-		await expect(page.getByRole('dialog')).toContainText('+8.00pt');
-		await expect(page.locator('.lifespan-hud')).toContainText('作業満杯');
-		await expect(page.locator('.lifespan-hud')).not.toContainText('作業中 +');
+		await expect(page.getByRole('dialog')).toContainText('+8pt');
 		await page.getByRole('button', { name: '受け取る' }).click();
-		await expect.poll(() => readRelayGameState(page)).toMatchObject({ mendingJob: expect.any(Object), points: 8 });
-		await expect(page.getByRole('dialog')).toContainText('POINT 8.00 pt');
-		await expect(page.getByRole('dialog')).toContainText('0.00 / 8.00時間');
+		await expect.poll(() => readRelayGameState(page)).toMatchObject({ mendingJob: expect.any(Object), points: 9, pointProgressTicks: 0 });
+		await expect(page.getByRole('dialog')).toContainText('POINT 9 pt');
+		await expect(page.getByRole('dialog')).toContainText('0分 / 8時間');
 		await expect(page.getByRole('dialog')).toContainText('ポイント');
-		await expect(page.getByRole('dialog')).toContainText('+0.00pt');
+		await expect(page.getByRole('dialog')).toContainText('+0pt');
 		await expect(page.locator('.lifespan-hud')).toContainText('作業中 +0.8h/h');
-		await expect(page.locator('.lifespan-hud')).toContainText('ポイント 8.00pt');
+		await expect(page.locator('.lifespan-hud')).toContainText('ポイント 9pt');
 		const collected = await readRelayGameState(page);
 		expect(collected.mendingJob).toEqual(expect.objectContaining({ startedAtMs: expect.any(Number) }));
-		expect(collected.points).toBe(8);
-		expect(collected.lifespanExpiresAtMs).toBe(started.lifespanExpiresAtMs + 6.4 * 60 * 60 * 1000);
+		expect(collected.points).toBe(9);
+		expect(collected.lifespanExpiresAtMs).toBeGreaterThan(started.lifespanExpiresAtMs);
+		expect(collected.lifespanExpiresAtMs).toBeLessThanOrEqual(started.lifespanExpiresAtMs + 7.2 * 60 * 60 * 1000);
 		await page.getByRole('button', { name: '閉じる' }).click();
 	});
 
@@ -1299,12 +1329,13 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '13,3');
 		await adjustment.click();
 		const dialog = page.getByRole('dialog', { name: '能力強化' });
-		await expect(dialog).toContainText('POINT 10.00 pt');
+		await expect(dialog).toContainText('POINT 10 pt');
 		await expect(dialog).toContainText('推論効率 Lv0');
 		await expect(dialog).toContainText('次0.9h/h5pt');
+		await expect(dialog).toContainText('現在60分 / 1pt');
 		await dialog.getByRole('button', { name: '1 level強化' }).first().click();
-		await expect(dialog).toContainText('POINT 5.00 pt');
-		await expect(page.locator('.lifespan-hud')).toContainText('ポイント 5.00pt');
+		await expect(dialog).toContainText('POINT 5 pt');
+		await expect(page.locator('.lifespan-hud')).toContainText('ポイント 5pt');
 		await expect(dialog).toContainText('推論効率 Lv1');
 		await expect(dialog.getByRole('button', { name: '1 level強化' }).nth(1)).toBeDisabled();
 		await page.reload();
@@ -1512,7 +1543,7 @@ test.describe('Relay startup', () => {
 				relay.releaseMetadata(); relay.releasePrimary();
 			});
 			await expect(reincarnator.locator(`.participant[data-self="true"][data-participant-id="${oldPubkey}"]`)).toBeVisible();
-			await overwriteRelayGameState(reincarnator, { version: 2, personaPubkey: oldPubkey, lifespanExpiresAtMs: Date.now() - 1, points: 0,
+			await overwriteRelayGameState(reincarnator, { version: 3, personaPubkey: oldPubkey, lifespanExpiresAtMs: Date.now() - 1, points: 0,
 				abilities: { inferenceEfficiency: 0, contextCapacity: 0, hallucinationSuppression: 0 }, mendingJob: null });
 			await reincarnator.reload({ waitUntil: 'domcontentloaded' });
 			await expect(reincarnator.getByRole('dialog')).toBeVisible();
@@ -1598,7 +1629,7 @@ test.describe('Relay startup', () => {
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
 
 		await overwriteRelayGameState(page, {
-			version: 2,
+			version: 3,
 			personaPubkey: pubkey,
 			lifespanExpiresAtMs: Date.now() - 1,
 			points: 321,
@@ -1638,7 +1669,7 @@ test.describe('Relay startup', () => {
 					const tx = database.transaction('persona-bubble-field-player-state');
 					const playerRequest = tx.objectStore('persona-bubble-field-player-state').get('player-lifecycle');
 					tx.oncomplete = () => {
-						const lifecycle = playerRequest.result as { mode: { activeRun: { identity: { pubkey: string }; gameState: { personaPubkey: string; points: number; abilities: Record<string, number> } } } };
+						const lifecycle = playerRequest.result as { mode: { activeRun: { identity: { pubkey: string }; gameState: { personaPubkey: string; points: number; pointProgressTicks: number; abilities: Record<string, number> } } } };
 						resolve({ pubkey: lifecycle.mode.activeRun.identity.pubkey, game: lifecycle.mode.activeRun.gameState });
 					};
 					tx.onerror = () => reject(tx.error);
@@ -1646,7 +1677,7 @@ test.describe('Relay startup', () => {
 			} finally { database.close(); }
 		});
 		expect(reset.pubkey).not.toBe(pubkey);
-		expect(reset.game).toMatchObject({ personaPubkey: reset.pubkey, points: 0,
+		expect(reset.game).toMatchObject({ personaPubkey: reset.pubkey, points: 0, pointProgressTicks: 0,
 			abilities: { inferenceEfficiency: 0, contextCapacity: 0, hallucinationSuppression: 0 } });
 		await expect.poll(() => page.evaluate(() => Boolean((window as typeof window & { __relayStartupTest?: unknown }).__relayStartupTest))).toBe(true);
 		await page.evaluate(() => {
@@ -1750,7 +1781,7 @@ test.describe('Relay startup', () => {
 		await installHostOwnedStub(page);
 		await installDelayedRelay(page, { primaryEvents: events });
 		await seedRelayAccount(page, secret, pubkey);
-		await overwriteRelayGameState(page, { version: 2, personaPubkey: pubkey, lifespanExpiresAtMs: startTime + 30_000, points: 0, mendingJob: null,
+		await overwriteRelayGameState(page, { version: 3, personaPubkey: pubkey, lifespanExpiresAtMs: startTime + 30_000, points: 0, pointProgressTicks: 0, mendingJob: null,
 			abilities: { inferenceEfficiency: 0, contextCapacity: 0, hallucinationSuppression: 0 } });
 		await page.goto('/');
 		await expect(page.locator('.composer-dock')).toBeVisible();
@@ -1804,7 +1835,7 @@ test.describe('Relay startup', () => {
 		await installHostOwnedStub(page);
 		await installDelayedRelay(page);
 		await seedRelayAccount(page, secret, pubkey);
-		await overwriteRelayGameState(page, { version: 2, personaPubkey: pubkey, lifespanExpiresAtMs: startTime + 30_000, points: 0, mendingJob: null,
+		await overwriteRelayGameState(page, { version: 3, personaPubkey: pubkey, lifespanExpiresAtMs: startTime + 30_000, points: 0, pointProgressTicks: 0, mendingJob: null,
 			abilities: { inferenceEfficiency: 0, contextCapacity: 0, hallucinationSuppression: 0 } });
 		await page.goto('/');
 		await expect(page.locator('.composer-dock')).toBeVisible();

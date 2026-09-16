@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatMendingRate, formatRemainingLifespan } from './lifespanHud';
+import { formatElapsedDuration, formatMendingRate, formatRemainingDuration, formatRemainingLifespan } from './lifespanHud';
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
@@ -30,5 +30,21 @@ describe('formatMendingRate', () => {
 		[{ numerator: 5, denominator: 4 }, '1.25']
 	] as const)('preserves the snapshot rate %s as %s', (rate, expected) => {
 		expect(formatMendingRate(rate.numerator, rate.denominator)).toBe(expected);
+	});
+});
+
+describe('mending duration formatting', () => {
+	it('floors elapsed duration and shows sub-minute progress clearly', () => {
+		expect(formatElapsedDuration(0)).toBe('0分');
+		expect(formatElapsedDuration(4 * MINUTE_MS + 59 * 1000)).toBe('4分');
+		expect(formatElapsedDuration(30 * 1000)).toBe('1分未満');
+		expect(formatElapsedDuration(2 * HOUR_MS + 5 * MINUTE_MS)).toBe('2時間5分');
+		expect(formatElapsedDuration(3 * HOUR_MS)).toBe('3時間');
+	});
+
+	it('ceils remaining duration for wait-time display', () => {
+		expect(formatRemainingDuration(0)).toBe('0分');
+		expect(formatRemainingDuration(59 * 1000)).toBe('1分');
+		expect(formatRemainingDuration(7 * HOUR_MS + 56 * MINUTE_MS - 1)).toBe('7時間56分');
 	});
 });
