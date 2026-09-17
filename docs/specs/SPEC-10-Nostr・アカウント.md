@@ -169,6 +169,24 @@ position同期等に使用するアプリ固有イベントについては、kin
 
 positionイベントの具体仕様は [`SPEC-30-フィールド・position・presence.md`](./SPEC-30-フィールド・position・presence.md) を正とする。
 
+### 交換可能なリアルタイムイベント
+
+リアルタイムイベントは、通常のworld read/write subscriptionから独立した補助subscription 1本で取得する。最大構成はprimary world 2本、Trace補助subscription最大1本、リアルタイムイベント補助subscription 1本であり、control専用の5本目は作らない。リアルタイムイベントの障害・切断・購読拒否は、通常のworld状態やTrace状態を失敗扱いにせず、リアルタイムイベント機能だけをinactive/degradedとして扱う。realtimeはTraceより低優先で、Traceのroot bootstrapおよび必要なlong-lived configurationの確保またはterminal結果を待ってから試行する。後からTraceが必要になった場合はrealtimeだけをCLOSEしてTraceを先に構成し、その後にrealtimeを再試行する。Relayの既知の `max_subscriptions` が4未満の場合、そのRelayではリアルタイムイベント補助subscriptionを開始しない。値が不明な場合は試行してよい。
+
+realtimeの1本のREQには、channel creatorをauthorとして指定するbounded control filterと、enabled playable protocol keyごとのconcrete instance filterを含める。control filterは `kind=7070`、`#e` channel、control protocolの`#d`、creator `authors`、15分のbounded `since`を持ち、`#i`を持たない。各instance filterは`kind=7070`、`#e` channel、1つのplayable protocol keyの`#d`、そのprotocol keyに属するactive/recovery instanceの`#i`、および必要な`since`を持つ。過去の全gameplay historyを取得せず、protocol key、instance IDs、sinceの対応関係を跨いで混在させない。
+
+instance対象の変更では、現在のrealtime requestだけをCLOSE/disposeしてから新しいfilter bundleで同じ1本を開始する。primary worldとTraceはrestartしない。generationを持つため、古いgenerationのEOSE、CLOSED、timeout、EVENTは新しい状態へ作用しない。control historyはmanual Riftの最大活動期間を覆う15分に限定し、通常tickごとには再構成しない。
+
+prototypeの共通envelopeには、project-owned regular kind `7070`、次のtag、およびJSON objectのcontentを使用する。
+
+- `e` は対象NIP-28 channel kind 40を1つだけ参照し、必要なRelay hintを第3要素に持つ
+- `d` はイベント種別とprotocol versionから導出した不変のprotocol keyを1つだけ持つ
+- `i` はそのイベントのinstance identifierを1つだけ持つ単一文字indexed tagである
+
+受信側の共通parserは署名、kind、対象channel、tagの個数と基本形、protocol key、JSON objectを検証する。イベント固有のpayload検証はイベント定義側が行う。`L` / `l` を共通envelopeの識別子として重複付与しない。`kind 30078` はposition用途のため、リアルタイムイベントには使用しない。
+
+イベント定義はenabled registryに登録されたものだけを受理する。登録を外したイベントは、保存済みの古いイベントを互換経路で復活させず、購読・受理対象から外す。protocol keyの正式値、各イベントのinstance schema、payloadおよびsettlementはイベント定義ごとに定める。
+
 ### kind 0
 
 kind 0は専用世界識別用のNIP-32ラベルの対象にしない。

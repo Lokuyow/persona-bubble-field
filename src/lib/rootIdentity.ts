@@ -79,12 +79,28 @@ export type ActiveRun = Readonly<{
 	gameState: PersonaGameState;
 }>;
 
+export type RealtimeSettlementLedger = Readonly<{
+	schemaVersion: 1;
+	identity: IdentityReference;
+	runNumber: number;
+	pendingInstanceIds: readonly string[];
+	appliedOutcomeIds: readonly string[];
+}>;
+
+export type RealtimeOutcome = Readonly<{
+	id: string;
+	kind: 'points' | 'death';
+	points?: number;
+	instanceId: string;
+}>;
+
 export type PlayerLifecycle = Readonly<{
 	schemaVersion: 1;
 	identities: readonly IdentityRecord[];
 	mode:
 		| Readonly<{ kind: 'selecting'; pendingSelection: PendingSelection }>
 		| Readonly<{ kind: 'running'; activeRun: ActiveRun }>;
+	realtimeSettlementLedger?: RealtimeSettlementLedger;
 }>;
 
 /** The only signer shape exposed to world, profile, and composer code. */
@@ -153,6 +169,17 @@ export type DeathTransitionResult =
 	| CorruptLifecycleState;
 
 export type MarkCharacterProfilePublicationResult = Readonly<{ kind: 'recorded' | 'stale' }>;
+
+export type RealtimeSettlementResult =
+	| Readonly<{ kind: 'applied'; persona: PersonaSnapshot }>
+	| Readonly<{ kind: 'duplicate'; persona: PersonaSnapshot }>
+	| Readonly<{ kind: 'expired'; persona: PersonaSnapshot }>
+	| Readonly<{ kind: 'stale' }>
+	| CorruptLifecycleState;
+
+export type RealtimeDeathResult =
+	| Readonly<{ kind: 'transitioned' | 'duplicate' | 'stale' }>
+	| CorruptLifecycleState;
 
 type EncryptedRootEntropy = Readonly<{
 	version: 1;
@@ -246,6 +273,17 @@ function isValidPendingSelection(value: unknown): value is PendingSelection {
 		new Set(candidates.map((item) => item.characterId)).size === 3;
 }
 
+function isValidRealtimeSettlementLedger(value: unknown): value is RealtimeSettlementLedger {
+	if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+	const candidate = value as Record<string, unknown>;
+	return candidate.schemaVersion === 1 && isValidIdentityReference(candidate.identity) &&
+		Number.isSafeInteger(candidate.runNumber) && (candidate.runNumber as number) > 0 &&
+		Array.isArray(candidate.pendingInstanceIds) && candidate.pendingInstanceIds.every((id) => typeof id === 'string' && id.length > 0 && id.length <= 160) &&
+		new Set(candidate.pendingInstanceIds).size === candidate.pendingInstanceIds.length &&
+		Array.isArray(candidate.appliedOutcomeIds) && candidate.appliedOutcomeIds.every((id) => typeof id === 'string' && id.length > 0 && id.length <= 240) &&
+		new Set(candidate.appliedOutcomeIds).size === candidate.appliedOutcomeIds.length;
+}
+
 function isValidActiveRun(value: unknown): value is ActiveRun {
 	if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
 	const candidate = value as Record<string, unknown>;
@@ -258,7 +296,8 @@ function isValidActiveRun(value: unknown): value is ActiveRun {
 function isValidPlayerLifecycle(value: unknown): value is PlayerLifecycle {
 	if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
 	const candidate = value as Record<string, unknown>;
-	if (candidate.schemaVersion !== 1 || !Array.isArray(candidate.identities) || !candidate.identities.every(isValidIdentityRecord)) return false;
+	if (candidate.schemaVersion !== 1 || !Array.isArray(candidate.identities) || !candidate.identities.every(isValidIdentityRecord) ||
+		(candidate.realtimeSettlementLedger !== undefined && !isValidRealtimeSettlementLedger(candidate.realtimeSettlementLedger))) return false;
 	const identities = candidate.identities as IdentityRecord[];
 	if (new Set(identities.map((item) => item.generation)).size !== identities.length ||
 		new Set(identities.map((item) => `${item.generation}:${item.accountIndex}`)).size !== identities.length ||
@@ -614,8 +653,14 @@ export async function selectIdentity(expectedGeneration: number, candidate: Iden
 				runHistory: []
 			};
 			const gameState = createInitialPersonaGameState(candidate.pubkey, nowMs);
-			const activeRun: ActiveRun = { runNumber: 1, revision: 0, startedAtMs: nowMs, identity: { generation: selected.generation, accountIndex: selected.accountIndex, pubkey: selected.pubkey }, gameState };
-			const next: PlayerLifecycle = { schemaVersion: 1, identities: [...current.identities, selected], mode: { kind: 'running', activeRun } };
+			const identityReference: IdentityReference = { generation: selected.generation, accountIndex: selected.accountIndex, pubkey: selected.pubkey };
+			const activeRun: ActiveRun = { runNumber: 1, revision: 0, startedAtMs: nowMs, identity: identityReference, gameState };
+			const next: PlayerLifecycle = {
+				schemaVersion: 1,
+				identities: [...current.identities, selected],
+				mode: { kind: 'running', activeRun },
+				realtimeSettlementLedger: { schemaVersion: 1, identity: identityReference, runNumber: 1, pendingInstanceIds: [], appliedOutcomeIds: [] }
+			};
 			await store.put(next, PLAYER_STATE);
 			await tx.done;
 			const loaded = await loadOrCreateLifecycle();
@@ -756,6 +801,224 @@ async function mutateAbilityUpgrade(expected: PersonaSnapshot, key: PersonaAbili
 
 export function upgradePersonaAbility(expected: PersonaSnapshot, key: PersonaAbilityKey): Promise<AbilityUpgradeResult> {
 	return mutateAbilityUpgrade(expected, key);
+}
+
+function sameRealtimeRunScope(expected: PersonaSnapshot, activeRun: ActiveRun): boolean {
+	return sameIdentityReference(expected.activeRun.identity, activeRun.identity) && expected.activeRun.runNumber === activeRun.runNumber;
+}
+
+function emptyRealtimeLedger(activeRun: ActiveRun): RealtimeSettlementLedger {
+	return { schemaVersion: 1, identity: activeRun.identity, runNumber: activeRun.runNumber, pendingInstanceIds: [], appliedOutcomeIds: [] };
+}
+
+function scopedRealtimeLedger(player: PlayerLifecycle, activeRun: ActiveRun): RealtimeSettlementLedger {
+	const ledger = player.realtimeSettlementLedger;
+	return ledger && sameIdentityReference(ledger.identity, activeRun.identity) && ledger.runNumber === activeRun.runNumber
+		? ledger
+		: emptyRealtimeLedger(activeRun);
+}
+
+function validRealtimeOutcome(outcome: RealtimeOutcome): boolean {
+	return typeof outcome.id === 'string' && outcome.id.length > 0 && outcome.id.length <= 240 &&
+		typeof outcome.instanceId === 'string' && outcome.instanceId.length > 0 && outcome.instanceId.length <= 160 &&
+		(outcome.kind === 'death' || (outcome.kind === 'points' && Number.isSafeInteger(outcome.points) && (outcome.points as number) > 0));
+}
+
+/** Records a known instance in the existing lifecycle record for reload recovery. */
+export async function trackRealtimeEventInstance(expected: PersonaSnapshot, instanceId: string): Promise<boolean> {
+	if (!instanceId || instanceId.length > 160) return false;
+	return withLifecycle(async (db) => {
+		const tx = db.transaction(PLAYER_LIFECYCLE_STORE_NAME, 'readwrite');
+		try {
+			const store = tx.objectStore(PLAYER_LIFECYCLE_STORE_NAME);
+			const current = await store.get(PLAYER_STATE);
+			if (!isValidPlayerLifecycle(current) || current.mode.kind !== 'running' || !sameRealtimeRunScope(expected, current.mode.activeRun)) {
+				await tx.done;
+				return false;
+			}
+			const ledger = scopedRealtimeLedger(current, current.mode.activeRun);
+			if (ledger.pendingInstanceIds.includes(instanceId)) {
+				await tx.done;
+				return true;
+			}
+			const next: PlayerLifecycle = {
+				...current,
+				realtimeSettlementLedger: { ...ledger, pendingInstanceIds: [...ledger.pendingInstanceIds, instanceId] }
+			};
+			await store.put(next, PLAYER_STATE);
+			await tx.done;
+			return true;
+		} catch (error) {
+			try { tx.abort(); } catch { /* already aborted */ }
+			await tx.done.catch(() => {});
+			throw error;
+		}
+	});
+}
+
+/** Removes a recovery marker once the event definition proves its instance terminal. */
+export async function completeRealtimeEventInstance(expected: PersonaSnapshot, instanceId: string): Promise<boolean> {
+	if (!instanceId || instanceId.length > 160) return false;
+	return withLifecycle(async (db) => {
+		const tx = db.transaction(PLAYER_LIFECYCLE_STORE_NAME, 'readwrite');
+		try {
+			const store = tx.objectStore(PLAYER_LIFECYCLE_STORE_NAME);
+			const current = await store.get(PLAYER_STATE);
+			if (!isValidPlayerLifecycle(current) || current.mode.kind !== 'running' || !sameRealtimeRunScope(expected, current.mode.activeRun)) {
+				await tx.done;
+				return false;
+			}
+			const ledger = scopedRealtimeLedger(current, current.mode.activeRun);
+			if (!ledger.pendingInstanceIds.includes(instanceId)) {
+				await tx.done;
+				return true;
+			}
+			await store.put({ ...current, realtimeSettlementLedger: {
+				...ledger,
+				pendingInstanceIds: ledger.pendingInstanceIds.filter((candidate) => candidate !== instanceId)
+			} }, PLAYER_STATE);
+			await tx.done;
+			return true;
+		} catch (error) {
+			try { tx.abort(); } catch { /* already aborted */ }
+			await tx.done.catch(() => {});
+			throw error;
+		}
+	});
+}
+
+export async function getRealtimeSettlementLedger(expected: PersonaSnapshot): Promise<RealtimeSettlementLedger | null> {
+	return withLifecycle(async (db) => {
+		const stored = await readStoredRecords(db);
+		if (!isValidPlayerLifecycle(stored.player) || stored.player.mode.kind !== 'running' || !sameRealtimeRunScope(expected, stored.player.mode.activeRun)) return null;
+		return stored.player.realtimeSettlementLedger && sameIdentityReference(stored.player.realtimeSettlementLedger.identity, stored.player.mode.activeRun.identity) &&
+			stored.player.realtimeSettlementLedger.runNumber === stored.player.mode.activeRun.runNumber
+			? stored.player.realtimeSettlementLedger
+			: null;
+	});
+}
+
+/** Applies a small, opaque core outcome and its receipt in one IndexedDB transaction. */
+export async function applyRealtimeOutcome(expected: PersonaSnapshot, outcome: RealtimeOutcome): Promise<RealtimeSettlementResult> {
+	if (outcome.kind !== 'points' || !validRealtimeOutcome(outcome)) return { kind: 'corrupt', reason: 'player-state' };
+	return withLifecycle(async (db) => {
+		const observed = await readRootAndPlayer(db);
+		if (!observed) return { kind: 'corrupt', reason: 'partial-state' };
+		if (isCorruptLifecycle(observed)) return observed;
+		try {
+			const tx = db.transaction(PLAYER_LIFECYCLE_STORE_NAME, 'readwrite');
+			try {
+				const store = tx.objectStore(PLAYER_LIFECYCLE_STORE_NAME);
+				const current = await store.get(PLAYER_STATE);
+				if (!isValidPlayerLifecycle(current) || current.mode.kind !== 'running' || !sameRealtimeRunScope(expected, current.mode.activeRun)) {
+					await tx.done;
+					return { kind: 'stale' };
+				}
+				const activeRun = current.mode.activeRun;
+				const ledger = scopedRealtimeLedger(current, activeRun);
+				if (ledger.appliedOutcomeIds.includes(outcome.id)) {
+					await tx.done;
+					const latest = await loadOrCreateLifecycle();
+					return latest.kind === 'restored' ? { kind: 'duplicate', persona: latest.persona } : { kind: 'stale' };
+				}
+				const nowMs = Date.now();
+				if (isPersonaExpired(activeRun.gameState, nowMs)) {
+					const next: PlayerLifecycle = {
+						...current,
+						mode: { kind: 'running', activeRun: { ...activeRun, revision: activeRun.revision + 1 } },
+						realtimeSettlementLedger: {
+							...ledger,
+							appliedOutcomeIds: [...ledger.appliedOutcomeIds, outcome.id]
+						}
+					};
+					await store.put(next, PLAYER_STATE);
+					await tx.done;
+					const latest = await loadOrCreateLifecycle();
+					return latest.kind === 'restored' ? { kind: 'expired', persona: latest.persona } : { kind: 'stale' };
+				}
+				if (activeRun.gameState.points + outcome.points! > Number.MAX_SAFE_INTEGER) {
+					await tx.done;
+					return { kind: 'corrupt', reason: 'player-state' };
+				}
+				const nextGameState = { ...activeRun.gameState, points: activeRun.gameState.points + outcome.points! };
+				const next: PlayerLifecycle = {
+					...current,
+					mode: { kind: 'running', activeRun: { ...activeRun, revision: activeRun.revision + 1, gameState: nextGameState } },
+					realtimeSettlementLedger: {
+						...ledger,
+						appliedOutcomeIds: [...ledger.appliedOutcomeIds, outcome.id]
+					}
+				};
+				await store.put(next, PLAYER_STATE);
+				await tx.done;
+				const latest = await loadOrCreateLifecycle();
+				return latest.kind === 'restored' ? { kind: 'applied', persona: latest.persona } : { kind: 'stale' };
+			} catch (error) {
+				try { tx.abort(); } catch { /* already aborted */ }
+				await tx.done.catch(() => {});
+				throw error;
+			}
+		} finally {
+			observed.entropy.fill(0);
+		}
+	});
+}
+
+/** Explicit event-death path sharing current Run/Identity closing semantics. */
+export async function transitionRealtimeDeath(expected: PersonaSnapshot, outcome: RealtimeOutcome): Promise<RealtimeDeathResult> {
+	if (outcome.kind !== 'death' || !validRealtimeOutcome(outcome)) return { kind: 'corrupt', reason: 'player-state' };
+	const observed = await withLifecycle((db) => readRootAndPlayer(db));
+	if (!observed) return { kind: 'corrupt', reason: 'partial-state' };
+	if (isCorruptLifecycle(observed)) return observed;
+	try {
+		if (observed.player.mode.kind !== 'running' || !sameRealtimeRunScope(expected, observed.player.mode.activeRun)) return { kind: 'stale' };
+		if (isPersonaExpired(observed.player.mode.activeRun.gameState, Date.now())) return { kind: 'stale' };
+		const existingLedger = scopedRealtimeLedger(observed.player, observed.player.mode.activeRun);
+		if (existingLedger.appliedOutcomeIds.includes(outcome.id)) return { kind: 'duplicate' };
+		const generation = Math.max(...observed.player.identities.map((identity) => identity.generation), 0) + 1;
+		let selection: PendingSelection;
+		try {
+			selection = await preparePendingSelection(observed.entropy, generation, new Set(observed.player.identities.map((identity) => identity.characterId)));
+		} catch (error) {
+			return { kind: 'corrupt', reason: error instanceof Error && error.message === 'Selection is unavailable.' ? 'selection-unavailable' : 'derivation-mismatch' };
+		}
+		return withLifecycle(async (db) => {
+			const tx = db.transaction(PLAYER_LIFECYCLE_STORE_NAME, 'readwrite');
+			try {
+				const store = tx.objectStore(PLAYER_LIFECYCLE_STORE_NAME);
+				const current = await store.get(PLAYER_STATE);
+				if (!isValidPlayerLifecycle(current)) { await tx.done; return { kind: 'corrupt', reason: 'player-state' }; }
+				if (current.mode.kind !== 'running' || !sameRealtimeRunScope(expected, current.mode.activeRun)) { await tx.done; return { kind: 'stale' }; }
+				const activeRun = current.mode.activeRun;
+				if (isPersonaExpired(activeRun.gameState, Date.now())) { await tx.done; return { kind: 'stale' }; }
+				const ledger = scopedRealtimeLedger(current, activeRun);
+				if (ledger.appliedOutcomeIds.includes(outcome.id)) { await tx.done; return { kind: 'duplicate' }; }
+				const identity = current.identities.find((item) => sameIdentityReference(item, activeRun.identity));
+				if (!identity) { await tx.done; return { kind: 'corrupt', reason: 'identity-reference' }; }
+				const nowMs = Date.now();
+				const closedIdentity: IdentityRecord = {
+					...identity,
+					status: 'dead',
+					runHistory: [...identity.runHistory, { runNumber: activeRun.runNumber, startedAtMs: activeRun.startedAtMs, endedAtMs: nowMs, outcome: 'dead' }]
+				};
+				const next: PlayerLifecycle = {
+					schemaVersion: 1,
+					identities: current.identities.map((item) => item === identity ? closedIdentity : item),
+					mode: { kind: 'selecting', pendingSelection: selection },
+					realtimeSettlementLedger: { ...ledger, pendingInstanceIds: [], appliedOutcomeIds: [...ledger.appliedOutcomeIds, outcome.id] }
+				};
+				await store.put(next, PLAYER_STATE);
+				await tx.done;
+				return { kind: 'transitioned' };
+			} catch (error) {
+				try { tx.abort(); } catch { /* already aborted */ }
+				await tx.done.catch(() => {});
+				throw error;
+			}
+		});
+	} finally {
+		observed.entropy.fill(0);
+	}
 }
 
 export async function transitionExpiredPersona(expected: PersonaSnapshot): Promise<DeathTransitionResult> {

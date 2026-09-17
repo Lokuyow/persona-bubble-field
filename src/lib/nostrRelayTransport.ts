@@ -30,6 +30,17 @@ import {
 	PROTOTYPE_NAMESPACE,
 	RECENT_MESSAGE_TIMELINE_LIMIT
 } from './nostrProtocol';
+import {
+	buildRealtimeControlFilter,
+	buildRealtimeInstanceFilter,
+	normalizeRealtimeInstanceFilterConfigurations,
+	parseRealtimeControlEnvelope,
+	REALTIME_CONTROL_PROTOCOL_KEY,
+	REALTIME_EVENT_KIND,
+	type RealtimeControlEnvelope,
+	type RealtimeEventRegistry,
+	type RealtimeInstanceFilterConfiguration
+} from './realtimeEvents';
 import { resolveChannelMetadata, type ResolvedChannelMetadata } from './nostrChannelMetadata';
 import type { PrototypeWorldConfig } from './prototypeWorld';
 
@@ -85,6 +96,17 @@ export type TraceReplyRelayDiagnostic = Readonly<{
 	notice?: string;
 }>;
 
+export type RealtimeRelayDiagnostic = Readonly<{
+	relayUrl: string;
+	status: 'pending' | RelayQueryStatus;
+	notice?: string;
+}>;
+
+export type RealtimeEventBatch = Readonly<{
+	events: readonly Event[];
+	relays: readonly RealtimeRelayDiagnostic[];
+}>;
+
 export type TraceReplyBatch = Readonly<{
 	events: readonly Event[];
 	relays: readonly TraceReplyRelayDiagnostic[];
@@ -125,6 +147,7 @@ export type NostrRelayTransportDiagnostics = Readonly<{
 	connections: readonly RelayConnectionDiagnostic[];
 	nip11: readonly Nip11Diagnostic[];
 	traceReplies: TraceReplyDiagnostics | null;
+	realtime: Readonly<{ status: 'inactive' | 'initializing' | 'active'; relays: readonly RealtimeRelayDiagnostic[] }>;
 }>;
 
 export type PrimaryStartInput = Readonly<{
@@ -155,6 +178,28 @@ export type PrimaryStartResult = Readonly<{
 export type TraceRootBootstrapResult = Readonly<{
 	rawEvents: readonly Event[];
 	relays: readonly RelayQueryDiagnostic[];
+}>;
+
+export type RealtimeStartInput = Readonly<{
+	eventTypes: RealtimeEventRegistry;
+	controlSince: number;
+	instanceFilters: readonly RealtimeInstanceFilterConfiguration[];
+	onBootstrapEvent: (event: Event) => void;
+	onLiveEvent: (event: Event) => void;
+	onBootstrapControl?: (control: RealtimeControlEnvelope) => void;
+	onLiveControl?: (control: RealtimeControlEnvelope) => void;
+}>;
+
+export type RealtimeStartResult = Readonly<{
+	status: 'active' | 'inactive';
+	events: readonly Event[];
+	controls: readonly RealtimeControlEnvelope[];
+	relays: readonly RealtimeRelayDiagnostic[];
+}>;
+
+export type RealtimePublishResult = Readonly<{
+	outcome: 'accepted' | 'echoed' | 'unconfirmed';
+	results: readonly PublishRelayResult[];
 }>;
 
 export type PublishRelayResult = Readonly<{
@@ -297,8 +342,8 @@ function reqFromOutgoing(packet: OutgoingMessagePacket): { subId: string; filter
 
 /** Compare query conditions, ignoring key order and semantically absent values. */
 function matchesQueryFilter(filters: readonly unknown[], expected: Filter): boolean {
-	if (filters.length !== 1) return false;
-	const actualEntries = filterEntries(filters[0]);
+	if (filters.length === 0) return false;
+	const actualEntries = filterEntries(filters.find((filter) => matchesFilter(filter, expected)));
 	const expectedEntries = filterEntries(expected)!;
 	if (!actualEntries || actualEntries.length !== expectedEntries.length) return false;
 	const actual = Object.fromEntries(actualEntries);
@@ -315,6 +360,23 @@ function matchesFilter(candidate: unknown, expected: Filter): boolean {
 	return expectedEntries.every(([key, value]) => Array.isArray(value)
 		? hasExactly(actual[key], value)
 		: actual[key] === value);
+}
+
+function matchesRealtimeFilterBundle(actual: readonly unknown[], expected: readonly Filter[]): boolean {
+	return actual.length === expected.length && expected.every((filter) => matchesQueryFilter(actual, filter));
+}
+
+function matchesRealtimeEventFilter(event: Event, filter: Filter): boolean {
+	const candidate = filter as Record<string, unknown>;
+	if (Array.isArray(candidate.kinds) && !candidate.kinds.includes(event.kind)) return false;
+	if (Array.isArray(candidate.authors) && !candidate.authors.includes(event.pubkey)) return false;
+	if (typeof candidate.since === 'number' && event.created_at < candidate.since) return false;
+	for (const [key, value] of Object.entries(candidate)) {
+		if (!key.startsWith('#') || !Array.isArray(value)) continue;
+		const tagValues = event.tags.filter((tag) => tag[0] === key.slice(1)).map((tag) => tag[1]);
+		if (!value.some((expected) => tagValues.includes(expected as string))) return false;
+	}
+	return true;
 }
 
 function matchesFilterBundle(filters: readonly unknown[], expected: readonly Filter[]): boolean {
@@ -368,6 +430,15 @@ export function createNostrRelayTransport(
 	let traceGenerationSequence = 0;
 	let traceGeneration: TraceGeneration | null = null;
 	let traceDiagnostics: TraceReplyDiagnostics | null = null;
+	let realtimeStarted = false;
+	let realtimeGeneration = 0;
+	let realtimeDiagnostics: { status: 'inactive' | 'initializing' | 'active'; relays: RealtimeRelayDiagnostic[] } = { status: 'inactive', relays: [] };
+	let realtimeResources: Subscription | null = null;
+	let realtimeFilters: readonly Filter[] = [];
+	const realtimeSubIds = new Map<string, string>();
+	const realtimeSeenIds = new Set<string>();
+	const realtimeReadableRelays = new Set<string>();
+	const realtimeEchoWaiters = new Map<string, Set<(echoed: boolean) => void>>();
 	const stableTraceCursors = new Map<string, Map<string, number>>();
 	function requireRxNostr(): RxNostr {
 		if (!rxNostr) throw new Error('Relay transport has not been initialized.');
@@ -396,9 +467,12 @@ export function createNostrRelayTransport(
 				}
 			}
 		}
+		if (!isConnectionUnavailable(connectionState)) return;
+		const realtimePair = realtimeDiagnostics.relays.find((relay) => relay.relayUrl === canonical);
+		if (realtimePair?.status === 'pending') updateRealtimeDiagnostic(canonical, { relayUrl: canonical, status: 'unavailable' });
 		const generation = traceGeneration;
 		const traceState = generation?.states.get(canonical);
-		if (!generation || !traceState || !isConnectionUnavailable(connectionState)) return;
+		if (!generation || !traceState) return;
 		if (!generation.initialSettled && traceState.initialStatus.status === 'pending') {
 			finishTraceInitialRelay(generation, traceState, { relayUrl: canonical, status: 'unavailable' });
 			return;
@@ -428,13 +502,15 @@ export function createNostrRelayTransport(
 			primaryPairs: copyPairDiagnostics(primaryPairs),
 			connections: [...connections.values()].map((connection) => ({ ...connection })),
 			nip11: nip11Diagnostics(),
-			traceReplies: traceDiagnostics
+			traceReplies: traceDiagnostics,
+			realtime: { status: realtimeDiagnostics.status, relays: realtimeDiagnostics.relays.map((relay) => ({ ...relay })) }
 		};
 	}
 
 	function disposeRxNostr(): void {
 		cancelPrimaryStart?.();
 		disposeTraceGeneration(true);
+		stopRealtime();
 		subscriptions.unsubscribe();
 		rxNostr?.dispose();
 		rxNostr = null;
@@ -700,6 +776,172 @@ export function createNostrRelayTransport(
 
 	function copyTraceDiagnostic(diagnostic: TraceReplyRelayDiagnostic): TraceReplyRelayDiagnostic {
 		return { ...diagnostic };
+	}
+
+	function realtimeCapacityAllows(relayUrl: string): boolean {
+		const maxSubscriptions = Nip11Registry.get(relayUrl)?.limitation?.max_subscriptions;
+		// Reserve room for the two primary subscriptions and the existing Trace
+		// supplemental subscription before opening realtime events.
+		return typeof maxSubscriptions !== 'number' || maxSubscriptions >= 4;
+	}
+
+	function updateRealtimeDiagnostic(relayUrl: string, next: RealtimeRelayDiagnostic): void {
+		realtimeDiagnostics = {
+			...realtimeDiagnostics,
+			relays: realtimeDiagnostics.relays.map((relay) => relay.relayUrl === relayUrl ? { ...next } : relay)
+		};
+		if (next.status === 'eose') realtimeReadableRelays.add(relayUrl);
+		else realtimeReadableRelays.delete(relayUrl);
+	}
+
+	function waitForRealtimeEcho(eventId: string, waitMs: number): Readonly<{ promise: Promise<boolean>; cancel: () => void }> {
+		let timer: ReturnType<typeof setTimeout> | null = null;
+		let settled = false;
+		let resolvePromise!: (echoed: boolean) => void;
+		const promise = new Promise<boolean>((resolve) => { resolvePromise = resolve; });
+		const listeners = realtimeEchoWaiters.get(eventId) ?? new Set<(echoed: boolean) => void>();
+		const finish = (echoed: boolean) => {
+			if (settled) return;
+			settled = true;
+			if (timer) clearTimeout(timer);
+			listeners.delete(finish);
+			if (listeners.size === 0) realtimeEchoWaiters.delete(eventId);
+			resolvePromise(echoed);
+		};
+		listeners.add(finish);
+		realtimeEchoWaiters.set(eventId, listeners);
+		timer = setTimeout(() => finish(false), waitMs);
+		return { promise, cancel: () => finish(false) };
+	}
+
+	function notifyRealtimeEcho(eventId: string): void {
+		for (const listener of realtimeEchoWaiters.get(eventId) ?? []) listener(true);
+	}
+
+	/**
+	 * Starts the event stream as a supplemental Forward request. It deliberately
+	 * has its own terminal/error accounting and never changes primary status.
+	 */
+	async function startRealtime(input: RealtimeStartInput): Promise<RealtimeStartResult> {
+		if (state !== 'started' || !metadata) throw new Error('Relay transport must start before realtime events.');
+		if (realtimeStarted) throw new Error('Realtime event startup is only allowed once.');
+		realtimeStarted = true;
+		const generation = ++realtimeGeneration;
+		if (input.eventTypes.length === 0) {
+			realtimeDiagnostics = { status: 'inactive', relays: [] };
+			return { status: 'inactive', events: [], controls: [], relays: [] };
+		}
+		assertTimestamp(input.controlSince, 'realtime control since');
+		const enabledProtocolKeys = new Set(input.eventTypes.map((definition) => definition.protocolKey));
+		const instanceFilters = normalizeRealtimeInstanceFilterConfigurations(input.instanceFilters).map((configuration) => {
+			if (!enabledProtocolKeys.has(configuration.protocolKey)) throw new TypeError('Realtime instance filter targets a disabled protocol.');
+			return buildRealtimeInstanceFilter({ channelId: metadata!.channelId, configuration });
+		});
+		const controlFilter = buildRealtimeControlFilter({ channelId: metadata.channelId, creatorPubkey: metadata.creatorPubkey, since: input.controlSince });
+		realtimeFilters = [controlFilter, ...instanceFilters];
+		const capableRelays = metadata.relays.filter(realtimeCapacityAllows);
+		const skipped = metadata.relays.filter((relayUrl) => !capableRelays.includes(relayUrl)).map((relayUrl) => ({ relayUrl, status: 'unavailable' as const, notice: 'Relay subscription capacity is reserved for primary world reads.' }));
+		if (capableRelays.length === 0) {
+			realtimeDiagnostics = { status: 'inactive', relays: skipped };
+			return { status: 'inactive', events: [], controls: [], relays: skipped };
+		}
+		realtimeDiagnostics = { status: 'initializing', relays: [...capableRelays.map((relayUrl) => ({ relayUrl, status: 'pending' as const })), ...skipped] };
+		const client = requireRxNostr();
+		const initialEvents: Event[] = [];
+		const initialControls: RealtimeControlEnvelope[] = [];
+		let settled = false;
+		let deadline: ReturnType<typeof setTimeout> | null = null;
+		const resources = new Subscription();
+		realtimeResources = resources;
+		const finish = (resolve: (result: RealtimeStartResult) => void) => {
+			if (settled || realtimeDiagnostics.relays.some((relay) => relay.status === 'pending')) return;
+			settled = true;
+			if (deadline) clearTimeout(deadline);
+			realtimeDiagnostics = { ...realtimeDiagnostics, status: capableRelays.some((relayUrl) => realtimeDiagnostics.relays.find((relay) => relay.relayUrl === relayUrl)?.status === 'eose') ? 'active' : 'inactive' };
+			resolve({ status: realtimeDiagnostics.status === 'active' ? 'active' : 'inactive', events: [...initialEvents], controls: [...initialControls], relays: realtimeDiagnostics.relays.map((relay) => ({ ...relay })) });
+		};
+		return await new Promise<RealtimeStartResult>((resolve, reject) => {
+			resources.add(() => {
+				if (!settled) {
+					settled = true;
+					reject(new Error('Relay transport disposed during realtime startup.'));
+				}
+			});
+			resources.add(client.createOutgoingMessageObservable().subscribe((packet) => {
+				const request = reqFromOutgoing(packet);
+				const relayUrl = canonicalRelay(packet.to);
+				if (!request || !relayUrl || generation !== realtimeGeneration || !capableRelays.includes(relayUrl) || !matchesRealtimeFilterBundle(request.filters, realtimeFilters)) return;
+				realtimeSubIds.set(relayUrl, request.subId);
+			}));
+			resources.add(client.createAllEventObservable().subscribe((packet) => {
+				const relayUrl = canonicalRelay(packet.from);
+				if (generation !== realtimeGeneration || !relayUrl || realtimeSubIds.get(relayUrl) !== packet.subId || packet.event.kind !== REALTIME_EVENT_KIND) return;
+				const control = matchesRealtimeEventFilter(packet.event, controlFilter)
+					? parseRealtimeControlEnvelope(packet.event, metadata!.channelId, metadata!.creatorPubkey)
+					: null;
+				const isInstanceEvent = instanceFilters.some((filter) => matchesRealtimeEventFilter(packet.event, filter));
+				if (!control && !isInstanceEvent) return;
+				notifyRealtimeEcho(packet.event.id);
+				if (realtimeSeenIds.has(packet.event.id)) return;
+				realtimeSeenIds.add(packet.event.id);
+				if (!settled) {
+					if (control) { initialControls.push(control); input.onBootstrapControl?.(control); }
+					else { initialEvents.push(packet.event); input.onBootstrapEvent(packet.event); }
+				} else if (control) input.onLiveControl?.(control);
+				else input.onLiveEvent(packet.event);
+			}));
+			resources.add(client.createAllMessageObservable().subscribe((packet) => {
+				if (packet.type !== 'EOSE' && packet.type !== 'CLOSED') return;
+				const relayUrl = canonicalRelay(packet.from);
+				if (!relayUrl || realtimeSubIds.get(relayUrl) !== packet.subId) return;
+				const diagnostic: RealtimeRelayDiagnostic = packet.type === 'EOSE'
+					? { relayUrl, status: 'eose' }
+					: { relayUrl, status: 'closed', ...(packet.notice ? { notice: packet.notice } : {}) };
+				updateRealtimeDiagnostic(relayUrl, diagnostic);
+				if (!settled) finish(resolve);
+			}));
+			resources.add(client.createConnectionStateObservable().subscribe((packet) => {
+				const relayUrl = canonicalRelay(packet.from);
+				if (!relayUrl || !capableRelays.includes(relayUrl) || !isConnectionUnavailable(packet.state)) return;
+				const current = realtimeDiagnostics.relays.find((relay) => relay.relayUrl === relayUrl);
+				if (current?.status === 'pending') {
+					updateRealtimeDiagnostic(relayUrl, { relayUrl, status: 'unavailable' });
+					finish(resolve);
+				}
+			}));
+			const requests = capableRelays.map((relayUrl) => {
+				const req = createRxForwardReq();
+				resources.add(client.use(req, { on: { relays: [relayUrl] } }).subscribe());
+				return req;
+			});
+			deadline = setTimeout(() => {
+				for (const relayUrl of capableRelays) {
+					const current = realtimeDiagnostics.relays.find((relay) => relay.relayUrl === relayUrl);
+					if (current?.status === 'pending') updateRealtimeDiagnostic(relayUrl, { relayUrl, status: 'timeout' });
+				}
+				finish(resolve);
+			}, timeoutMs);
+			for (const request of requests) request.emit([...realtimeFilters] as Filter[]);
+			for (const relayUrl of capableRelays) {
+				const connection = client.getRelayStatus(relayUrl)?.connection;
+				if (connection && isConnectionUnavailable(connection)) updateRealtimeDiagnostic(relayUrl, { relayUrl, status: 'unavailable' });
+			}
+			finish(resolve);
+		});
+	}
+
+	function stopRealtime(): void {
+		if (!realtimeStarted) return;
+		realtimeGeneration += 1;
+		realtimeStarted = false;
+		realtimeResources?.unsubscribe();
+		realtimeResources = null;
+		realtimeSubIds.clear();
+		realtimeFilters = [];
+		realtimeReadableRelays.clear();
+		for (const listeners of realtimeEchoWaiters.values()) for (const listener of listeners) listener(false);
+		realtimeEchoWaiters.clear();
+		realtimeDiagnostics = { status: 'inactive', relays: [] };
 	}
 
 	function refreshTraceDiagnostics(generation: TraceGeneration | null, status: TraceReplyDiagnostics['status']): void {
@@ -1061,6 +1303,50 @@ export function createNostrRelayTransport(
 		return requireRxNostr().use(req, { on: { relays: [relayUrl] } }).subscribe();
 	}
 
+	async function publishEvent(event: VerifiedEvent): Promise<readonly PublishRelayResult[]> {
+		if (state !== 'started' || !metadata) throw new Error('Relay transport must start before publishing.');
+		const client = requireRxNostr();
+		const results = new Map<string, PublishRelayResult>(metadata.relays.map((relayUrl) => [relayUrl, {
+			relayUrl,
+			outcome: 'no-response'
+		}]));
+		await new Promise<void>((resolve, reject) => {
+			client.send(event).subscribe({
+				next: (packet) => {
+					const relayUrl = canonicalRelay(packet.from);
+					if (!relayUrl) return;
+					results.set(relayUrl, {
+						relayUrl,
+						outcome: packet.ok ? 'accepted' : 'rejected',
+						...(packet.notice ? { notice: packet.notice } : {})
+					});
+				},
+				complete: resolve,
+				error: reject
+			});
+		});
+		return [...results.values()];
+	}
+
+	async function publishRealtimeEvent(event: VerifiedEvent): Promise<RealtimePublishResult> {
+		if (state !== 'started' || !metadata || !realtimeStarted) throw new Error('Realtime event subscription is not active.');
+		const echo = waitForRealtimeEcho(event.id, timeoutMs);
+		let results: readonly PublishRelayResult[];
+		try {
+			results = await publishEvent(event);
+		} catch (error) {
+			echo.cancel();
+			throw error;
+		}
+		const acceptedByReadableRelay = results.some((result) => result.outcome === 'accepted' && realtimeReadableRelays.has(result.relayUrl));
+		if (acceptedByReadableRelay) {
+			echo.cancel();
+			return { outcome: 'accepted', results };
+		}
+		if (await echo.promise) return { outcome: 'echoed', results };
+		return { outcome: 'unconfirmed', results };
+	}
+
 	return {
 		async start(input: PrimaryStartInput): Promise<PrimaryStartResult> {
 			if (state !== 'new') throw new Error('Relay transport start is only allowed once.');
@@ -1099,6 +1385,10 @@ export function createNostrRelayTransport(
 				disposeRxNostr();
 				throw error;
 			}
+		},
+
+		startRealtime(input: RealtimeStartInput): Promise<RealtimeStartResult> {
+			return startRealtime(input);
 		},
 
 		getDiagnostics(): NostrRelayTransportDiagnostics {
@@ -1144,30 +1434,11 @@ export function createNostrRelayTransport(
 			return configureTraceReplies(input);
 		},
 
-		async publish(event: VerifiedEvent): Promise<readonly PublishRelayResult[]> {
-			if (state !== 'started' || !metadata) throw new Error('Relay transport must start before publishing.');
-			const client = requireRxNostr();
-			const results = new Map<string, PublishRelayResult>(metadata.relays.map((relayUrl) => [relayUrl, {
-				relayUrl,
-				outcome: 'no-response'
-			}]));
-			await new Promise<void>((resolve, reject) => {
-				client.send(event).subscribe({
-					next: (packet) => {
-						const relayUrl = canonicalRelay(packet.from);
-						if (!relayUrl) return;
-						results.set(relayUrl, {
-							relayUrl,
-							outcome: packet.ok ? 'accepted' : 'rejected',
-							...(packet.notice ? { notice: packet.notice } : {})
-						});
-					},
-					complete: resolve,
-					error: reject
-				});
-			});
-			return [...results.values()];
-		},
+		publish: publishEvent,
+
+		publishRealtime: publishRealtimeEvent,
+
+		stopRealtime,
 
 		dispose(): void {
 			if (state === 'disposed') return;

@@ -12,7 +12,8 @@ import {
 import type { TraceReplyConfiguration } from './nostrRelayTransport';
 import { PRESENCE_TIMEOUT_MS, type PresenceState } from './presence';
 import { planPositionPublish, reconstructPositionPublishState } from './positionPublish';
-import { createWorldReadSession, type WorldReadConnectionStatus } from './worldReadSession';
+import { protocolKeyFor } from './realtimeEvents';
+import { createWorldReadSession, type RealtimeStartConfiguration, type WorldReadConnectionStatus } from './worldReadSession';
 
 const mocked = vi.hoisted(() => ({
 	createTransport: vi.fn(),
@@ -378,6 +379,117 @@ describe('world read session', () => {
 			dispose,
 			publish
 		});
+	});
+
+	it('can defer realtime startup until its event window without delaying primary bootstrap', async () => {
+		const startRealtime = vi.fn().mockResolvedValue({ status: 'inactive', events: [], relays: [] });
+		mocked.createTransport.mockReturnValue({
+			start: vi.fn(async (nextInput) => { input = nextInput; return startResult(); }),
+			startRealtime,
+			bootstrapTraceRootCandidates: traceBootstrap(),
+			dispose,
+			publish
+		});
+		const onRealtimeStatus = vi.fn();
+		const onRealtimeBootstrapComplete = vi.fn();
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 },
+			onPresenceChanged: vi.fn(),
+			onLiveMessage: vi.fn(),
+			onStatusChanged: vi.fn(),
+				realtime: {
+					registry: [{ eventType: 'fixture', protocolVersion: 1, protocolKey: protocolKeyFor('fixture', 1), parseAction: () => ({}) }],
+					controlSince: 0, instanceFilters: [{ protocolKey: protocolKeyFor('fixture', 1), instanceIds: ['fixture-instance'], since: 0 }], startImmediately: false,
+				onEvent: vi.fn(), onStatusChanged: onRealtimeStatus,
+				onBootstrapComplete: onRealtimeBootstrapComplete,
+			}
+		});
+		const bootstrap = await session.start();
+		expect(bootstrap.status).toEqual({ kind: 'available' });
+		expect(bootstrap.realtimeStatus).toBe('inactive');
+		expect(startRealtime).not.toHaveBeenCalled();
+		await session.startRealtime();
+		expect(startRealtime).toHaveBeenCalledOnce();
+		expect(onRealtimeStatus).toHaveBeenCalledWith('degraded');
+		expect(onRealtimeBootstrapComplete).toHaveBeenCalledOnce();
+	});
+
+	it('ignores a stale realtime bootstrap after the supplemental subscription is stopped', async () => {
+		const pendingRealtime = deferred<{ status: 'active'; events: []; relays: [] }>();
+		const startRealtime = vi.fn().mockReturnValue(pendingRealtime.promise);
+		const onRealtimeBootstrapComplete = vi.fn();
+		mocked.createTransport.mockReturnValue({
+			start: vi.fn(async (nextInput) => { input = nextInput; return startResult(); }),
+			startRealtime,
+			bootstrapTraceRootCandidates: traceBootstrap(),
+			dispose,
+			publish,
+			stopRealtime: vi.fn()
+		});
+		const statuses: string[] = [];
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 },
+			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn(),
+				realtime: {
+					registry: [{ eventType: 'fixture', protocolVersion: 1, protocolKey: protocolKeyFor('fixture', 1), parseAction: () => ({}) }],
+					controlSince: 0, instanceFilters: [{ protocolKey: protocolKeyFor('fixture', 1), instanceIds: ['fixture-instance'], since: 0 }], startImmediately: false,
+				onEvent: vi.fn(), onStatusChanged: (status) => statuses.push(status), onBootstrapComplete: onRealtimeBootstrapComplete
+			}
+		});
+		await session.start();
+		const started = session.startRealtime();
+		session.stopRealtime();
+		pendingRealtime.resolve({ status: 'active', events: [], relays: [] });
+		await started;
+		expect(onRealtimeBootstrapComplete).not.toHaveBeenCalled();
+		expect(statuses.at(-1)).toBe('inactive');
+	});
+
+	it('re-evaluates realtime instance and refreshes the control cursor only for a new generation', async () => {
+		const startRealtime = vi.fn().mockResolvedValue({ status: 'active', events: [], relays: [] });
+		const stopRealtime = vi.fn();
+		mocked.createTransport.mockReturnValue({
+			start: vi.fn(async (nextInput) => { input = nextInput; return startResult(); }),
+			startRealtime,
+			bootstrapTraceRootCandidates: traceBootstrap(),
+			dispose,
+			publish,
+			stopRealtime
+		});
+		let configuration = { controlSince: 0, instanceFilters: [{ protocolKey: protocolKeyFor('fixture', 1), instanceIds: ['rift-day-1'], since: 100 }] };
+		const prepareStartConfiguration = vi.fn((next: RealtimeStartConfiguration, nowMs: number): RealtimeStartConfiguration => ({
+			...next,
+			controlSince: Math.max(0, Math.floor(nowMs / 1000) - 900)
+		}));
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 },
+			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn(),
+					realtime: {
+					registry: [{ eventType: 'fixture', protocolVersion: 1, protocolKey: protocolKeyFor('fixture', 1), parseAction: () => ({}) }],
+					controlSince: 0, instanceFilters: [], getStartConfiguration: () => configuration, prepareStartConfiguration, startImmediately: false,
+					onEvent: vi.fn()
+				}
+		});
+		await session.start();
+		await session.startRealtime();
+		const firstConfiguration = { ...configuration, controlSince: 0 };
+		await session.startRealtime();
+		expect(startRealtime).toHaveBeenCalledTimes(1);
+		configuration = { controlSince: 0, instanceFilters: [{ protocolKey: protocolKeyFor('fixture', 1), instanceIds: ['rift-day-2'], since: 200 }] };
+		vi.setSystemTime(3_600_000);
+		await session.startRealtime();
+		expect(startRealtime).toHaveBeenCalledTimes(2);
+		expect(startRealtime.mock.calls.map(([next]) => ({
+			controlSince: next.controlSince,
+			instanceFilters: next.instanceFilters
+		}))).toEqual([firstConfiguration, { ...configuration, controlSince: 2_700 }]);
+		expect(prepareStartConfiguration).toHaveBeenCalledTimes(2);
+		session.stopRealtime();
+		await session.startRealtime();
+		expect(startRealtime).toHaveBeenCalledTimes(3);
+		expect(startRealtime.mock.calls[2][0].controlSince).toBe(2_700);
+		expect(prepareStartConfiguration).toHaveBeenCalledTimes(3);
+		expect(stopRealtime).toHaveBeenCalledTimes(2);
 	});
 
 	it('stops every self-write boundary when persisted Run authorization is lost', async () => {

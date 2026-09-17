@@ -276,6 +276,24 @@ async function profileTriggerCenter(page: Page, name: string): Promise<{ x: numb
 }
 
 test.describe('DEV World Sandbox', () => {
+	test('renders the experimental Rift registration and game fixtures without fixed-facility overlap', async ({ page }) => {
+		await page.goto('/?devWorld=1&devRift=registration');
+		await expect(page.locator('[data-realtime-panel]')).toBeVisible();
+		await expect(page.locator('[data-realtime-panel]')).toContainText('参加受付');
+		const registration = await page.locator('[data-realtime-hole-id]').evaluateAll((holes) => holes.map((hole) => hole.getAttribute('data-realtime-hole-position')));
+		expect(registration.length).toBeGreaterThan(0);
+		expect(registration).not.toContain('12,3');
+		expect(registration).not.toContain('14,3');
+		await expect(page.locator('[data-realtime-hole-trigger]')).toHaveCount(registration.length);
+
+		await page.goto('/?devWorld=1&devRift=game');
+		await expect(page.locator('[data-realtime-panel]')).toBeVisible();
+		await expect(page.locator('[data-realtime-panel]')).toContainText('秘密選択');
+		await expect(page.locator('[data-rift-choice="maintain"]')).toBeDisabled();
+		await expect(page.locator('[data-rift-choice="escape"]')).toBeDisabled();
+		await expect(page.locator('[data-realtime-hole-trigger]')).toHaveCount(0);
+	});
+
 	test('does not open the mending terminal in DEV World', async ({ page }) => {
 		await openDevWorld(page);
 		await page.getByRole('button', { name: '作業端末' }).click();

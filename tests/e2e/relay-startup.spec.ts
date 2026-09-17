@@ -11,6 +11,20 @@ import {
 	parseWorldMessage,
 	validateTraceReplyCandidate
 } from '../../src/lib/nostrProtocol';
+import {
+	buildRiftActionTemplate,
+	buildRiftCommitAction,
+	buildRiftRevealAction,
+	buildManualRiftInstanceId,
+	deriveRiftHolePositions,
+	getRiftRoundSchedule,
+	getRiftSchedule,
+	getRiftScheduleForInstance,
+	RIFT_CONSULTATION_MS,
+	RIFT_PROTOCOL_KEY,
+	type RiftAction
+} from '../../src/lib/rift';
+import { buildRealtimeControlEventTemplate, finalizeRealtimeEvent } from '../../src/lib/realtimeEvents';
 import { SPEECH_SHORTCUT_IDS } from '../../src/lib/speechSubmission';
 import { CHARACTER_CATALOG, characterPicturePath } from '../../src/lib/character';
 import { deriveCharacterFromPubkey } from '../../src/lib/characterAssignment';
@@ -93,10 +107,10 @@ async function openProfile(page: Page): Promise<void> {
 	await expect(profileDialog(page)).toBeVisible();
 }
 
-function testEvents(nowMs = Date.now()) {
+function testEvents(nowMs = Date.now(), channelId = CHANNEL_ID) {
 	const secret = fixtureSecret(19);
 	const createdAt = Math.floor(nowMs / 1000);
-	const channel = { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' };
+	const channel = { channelId, relayHint: 'wss://nos.lol/' };
 	return {
 		message: finalizeEvent(buildWorldMessageTemplate({
 			channel,
@@ -111,6 +125,37 @@ function testEvents(nowMs = Date.now()) {
 			slot: 0,
 			createdAt
 		}), secret)
+	};
+}
+
+function upcomingRegistrationSchedule(): ReturnType<typeof getRiftSchedule> {
+	let schedule = getRiftSchedule(Date.now());
+	if (schedule.registrationAtMs <= Date.now()) schedule = getRiftSchedule(schedule.endedAtMs + 1);
+	return schedule;
+}
+
+function signedRiftAction(secretKey: Uint8Array, schedule: ReturnType<typeof getRiftSchedule>, action: RiftAction, createdAtMs: number, channelId = CHANNEL_ID): NostrEvent {
+	return finalizeEvent(buildRiftActionTemplate({
+		channelId,
+		relayHint: 'wss://nos.lol/',
+		instanceId: schedule.instanceId,
+		action,
+		createdAt: Math.floor(createdAtMs / 1000)
+	}), secretKey);
+}
+
+function syntheticChannelFixture() {
+	const secret = fixtureSecret(63);
+	const event = finalizeEvent({
+		kind: 40,
+		created_at: 1_800_000_000,
+		tags: [],
+		content: JSON.stringify({ name: 'synthetic Rift test channel', relays: [...AUTHORITATIVE_RELAYS] })
+	}, secret);
+	return {
+		secret,
+		event,
+		worldConfig: { channelId: event.id, metadataDiscoveryRelays: SEED_RELAYS, preferredRelayHint: SEED_RELAYS[0] }
 	};
 }
 
@@ -264,14 +309,21 @@ async function installDelayedRelay(page: Page, options: {
 	deferPrimaryEvents?: boolean;
 	historyMessages?: readonly object[];
 	primaryEvents?: Readonly<{ message: object; position: object }>;
+	realtimeEvents?: readonly object[];
+	deferRealtimeEvents?: boolean;
+	realtimeTerminal?: 'eose' | 'closed' | 'timeout';
+	realtimePublishOutcome?: 'accepted' | 'rejected' | 'echo' | 'no-response';
 	traceRoots?: readonly object[];
 	traceReplies?: readonly object[];
 	deferTraceRoots?: boolean;
 	deferTraceReplies?: boolean;
 	persistAcrossReload?: boolean;
+	channelEvent?: object;
+	testWorldConfig?: { channelId: string; metadataDiscoveryRelays: readonly string[]; preferredRelayHint: string };
+	hiddenSubscriptionLimit?: number;
 } = {}): Promise<void> {
 	const events = options.primaryEvents ?? testEvents();
-	await page.addInitScript(({ seedRelays, authoritativeRelays, channelEvent, primaryEvents, historyMessages, deferPrimaryEvents, traceRoots, traceReplies, deferTraceRoots, deferTraceReplies, persistAcrossReload }) => {
+	await page.addInitScript(({ seedRelays, authoritativeRelays, channelEvent, primaryEvents, historyMessages, realtimeEvents, deferPrimaryEvents, deferRealtimeEvents, realtimeTerminal, realtimePublishOutcome, traceRoots, traceReplies, deferTraceRoots, deferTraceReplies, persistAcrossReload, testWorldConfig, hiddenSubscriptionLimit }) => {
 		type Listener = (event?: { type: string; data?: string; code?: number; reason?: string }) => void;
 		type PendingRequest = { socket: FakeWebSocket; subId: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] };
 		const seed = new Set<string>(seedRelays);
@@ -280,8 +332,10 @@ async function installDelayedRelay(page: Page, options: {
 		const pendingPrimary: PendingRequest[] = [];
 		const pendingTraceRoots: PendingRequest[] = [];
 		const pendingTraceReplies: PendingRequest[] = [];
+		const pendingRealtime: PendingRequest[] = [];
 		const activePrimary: PendingRequest[] = [];
 		const activeTraceReplies: PendingRequest[] = [];
+		const activeRealtime: PendingRequest[] = [];
 		const closedTraceReplies: PendingRequest[] = [];
 		const pendingPublishes: Array<{ socket: FakeWebSocket; event: Record<string, unknown> }> = [];
 		const timelineHistory = (historyMessages ?? []) as Array<Record<string, unknown>>;
@@ -291,6 +345,10 @@ async function installDelayedRelay(page: Page, options: {
 			published: Array<Record<string, unknown>>;
 			closedSubscriptions: Array<{ subId: string; url: string }>;
 		} : { published: [], closedSubscriptions: [] };
+		const realtimeHistory = [
+			...(realtimeEvents ?? []) as Array<Record<string, unknown>>,
+			...previous.published.filter((event) => event.kind === 7070)
+		];
 		const state = {
 			traceDeliveries: [] as string[],
 			requests: [] as Array<{ url: string; subId: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] }>,
@@ -298,11 +356,15 @@ async function installDelayedRelay(page: Page, options: {
 			closedSubscriptions: [] as Array<{ subId: string; url: string }>,
 			previousPublished: previous.published,
 			previousClosedSubscriptions: previous.closedSubscriptions,
+			realtimeHistory,
 			metadataReleased: false,
 			primaryEventsReleased: !deferPrimaryEvents,
 			primaryReleased: false,
 			traceRootsReleased: !deferTraceRoots,
 			traceRepliesReleased: !deferTraceReplies,
+			realtimeEventsReleased: !deferRealtimeEvents,
+			realtimeTerminal: realtimeTerminal ?? 'eose' as 'eose' | 'closed' | 'timeout',
+			realtimePublishOutcome: realtimePublishOutcome ?? 'accepted' as 'accepted' | 'rejected' | 'echo' | 'no-response',
 			rejectMessagePublishes: false,
 			rejectPositionPublishes: false,
 			deferReplyPublishes: false,
@@ -322,6 +384,15 @@ async function installDelayedRelay(page: Page, options: {
 				(event.tags as string[][]).some((tag) => tag[0] === key.slice(1) && (values as string[]).includes(tag[1])));
 		const deliverTraceLive = (request: PendingRequest, event: Record<string, unknown>) => {
 			if (request.filters.some((filter) => matchesTraceFilter(event, filter))) deliver(request.socket, ['EVENT', request.subId, event]);
+		};
+		const matchesRealtimeFilter = (event: Record<string, unknown>, filter: Record<string, unknown>) =>
+			(!filter.kinds || (filter.kinds as number[]).includes(event.kind as number)) &&
+			(!filter.authors || (filter.authors as string[]).includes(event.pubkey as string)) &&
+			(filter.since === undefined || (event.created_at as number) >= (filter.since as number)) &&
+			Object.entries(filter).filter(([key]) => /^#[A-Za-z]$/.test(key)).every(([key, values]) =>
+				(event.tags as string[][]).some((tag) => tag[0] === key.slice(1) && (values as string[]).includes(tag[1])));
+		const deliverRealtimeLive = (request: PendingRequest, event: Record<string, unknown>) => {
+			if (request.filters.some((filter) => matchesRealtimeFilter(event, filter))) deliver(request.socket, ['EVENT', request.subId, event]);
 		};
 		const respondPublish = (socket: FakeWebSocket, event: Record<string, unknown>) => {
 			const reject = event.kind === 42 && state.rejectMessagePublishes || event.kind === 30078 && state.rejectPositionPublishes ||
@@ -365,6 +436,28 @@ async function installDelayedRelay(page: Page, options: {
 			for (const event of selected.values()) deliver(request.socket, ['EVENT', request.subId, event]);
 			deliver(request.socket, ['EOSE', request.subId]);
 		};
+		const respondRealtime = (request: PendingRequest) => {
+			queueMicrotask(() => {
+				for (const event of realtimeHistory) {
+					if (request.filters.some((filter) => matchesRealtimeFilter(event, filter))) deliver(request.socket, ['EVENT', request.subId, event]);
+				}
+				if (state.realtimeTerminal === 'eose') deliver(request.socket, ['EOSE', request.subId]);
+				if (state.realtimeTerminal === 'closed') deliver(request.socket, ['CLOSED', request.subId, 'realtime unavailable']);
+			});
+		};
+		const respondRealtimePublish = (socket: FakeWebSocket, event: Record<string, unknown>) => {
+			if (state.realtimePublishOutcome === 'rejected') {
+				deliver(socket, ['OK', event.id, false, 'blocked: realtime test rejection']);
+				return;
+			}
+			if (state.realtimePublishOutcome === 'no-response') return;
+			if (!realtimeHistory.some((known) => known.id === event.id)) realtimeHistory.push(event);
+			if (state.realtimePublishOutcome === 'echo') {
+				for (const request of activeRealtime) deliverRealtimeLive(request, event);
+				return;
+			}
+			deliver(socket, ['OK', event.id, true, '']);
+		};
 
 		class FakeWebSocket {
 			static CONNECTING = 0;
@@ -393,7 +486,7 @@ async function installDelayedRelay(page: Page, options: {
 				if (packet[0] === 'CLOSE') {
 					const subId = packet[1] as string;
 					state.closedSubscriptions.push({ subId, url: this.url });
-					for (const requests of [activePrimary, activeTraceReplies]) {
+					for (const requests of [activePrimary, activeTraceReplies, activeRealtime]) {
 						const index = requests.findIndex((request) => request.subId === subId && request.socket === this);
 						if (index >= 0) {
 							const [closed] = requests.splice(index, 1);
@@ -408,7 +501,9 @@ async function installDelayedRelay(page: Page, options: {
 					if (event.kind === 1111 && state.echoRepliesBeforeResult) {
 						for (const request of activeTraceReplies) deliverTraceLive(request, event);
 					}
-					if (event.kind === 1111 && state.deferReplyPublishes || event.kind === 30078 && state.deferPositionPublishes) {
+					if (event.kind === 7070) {
+						respondRealtimePublish(this, event);
+					} else if (event.kind === 1111 && state.deferReplyPublishes || event.kind === 30078 && state.deferPositionPublishes) {
 						pendingPublishes.push({ socket: this, event });
 					} else respondPublish(this, event);
 					return;
@@ -422,6 +517,21 @@ async function installDelayedRelay(page: Page, options: {
 					const previous = activeTraceReplies.findIndex((candidate) => candidate.socket === this && candidate.subId === request.subId);
 					if (previous >= 0) activeTraceReplies.splice(previous, 1);
 					deliver(this, ['CLOSED', request.subId, 'ERROR: bad req: too many tags in filter']);
+					return;
+				}
+				const isRealtime = filters.some((filter) => (filter.kinds as number[] | undefined)?.includes(7070));
+				if (isRealtime && authoritative.has(relayUrl)) {
+					const socketSubscriptions = [...activePrimary, ...activeTraceReplies, ...activeRealtime]
+						.filter((candidate) => candidate.socket.url === request.socket.url).length;
+					if (hiddenSubscriptionLimit !== undefined && (socketSubscriptions >= hiddenSubscriptionLimit || hiddenSubscriptionLimit <= 3)) {
+						pendingRealtime.push(request);
+						return;
+					}
+					const activeIndex = activeRealtime.findIndex((candidate) => candidate.socket === request.socket && candidate.subId === request.subId);
+					if (activeIndex >= 0) activeRealtime[activeIndex] = request;
+					else activeRealtime.push(request);
+					if (state.realtimeEventsReleased) respondRealtime(request);
+					else pendingRealtime.push(request);
 					return;
 				}
 				if (seed.has(relayUrl)) {
@@ -461,6 +571,7 @@ async function installDelayedRelay(page: Page, options: {
 		}
 
 		Object.defineProperty(window, 'WebSocket', { configurable: true, value: FakeWebSocket });
+		if (testWorldConfig) Object.assign(window, { __personaBubbleFieldTestWorldConfig: testWorldConfig });
 		if (persistAcrossReload) window.addEventListener('pagehide', () => {
 			sessionStorage.setItem(persistedKey, JSON.stringify({
 				published: [...state.previousPublished, ...state.published],
@@ -496,10 +607,22 @@ async function installDelayedRelay(page: Page, options: {
 					state.traceRootsReleased = true;
 					pendingTraceRoots.splice(0).forEach(respondTraceRoots);
 				},
-				releaseTraceReplies: () => {
+					releaseTraceReplies: () => {
 					state.traceRepliesReleased = true;
 					pendingTraceReplies.splice(0).forEach(respondTraceReplies);
-				},
+					},
+					releaseRealtimeEvents: () => {
+						state.realtimeEventsReleased = true;
+						pendingRealtime.splice(0).forEach(respondRealtime);
+					},
+					deferRealtimeEvents: () => { state.realtimeEventsReleased = false; },
+					setRealtimePublishOutcome: (outcome: 'accepted' | 'rejected' | 'echo' | 'no-response') => { state.realtimePublishOutcome = outcome; },
+					injectRealtimeEvent: (event: object) => {
+						const raw = event as Record<string, unknown>;
+						if (!realtimeHistory.some((known) => known.id === raw.id)) realtimeHistory.push(raw);
+						for (const request of activeRealtime) deliverRealtimeLive(request, raw);
+					},
+					activeRealtimeCount: () => activeRealtime.length,
 				deferTraceReplies: () => { state.traceRepliesReleased = false; },
 				injectTraceReply: (event: object) => {
 					const raw = event as Record<string, unknown>;
@@ -533,21 +656,27 @@ async function installDelayedRelay(page: Page, options: {
 	}, {
 		seedRelays: SEED_RELAYS,
 		authoritativeRelays: AUTHORITATIVE_RELAYS,
-		channelEvent: CHANNEL_EVENT,
+		channelEvent: options.channelEvent ?? CHANNEL_EVENT,
 		primaryEvents: events,
 		historyMessages: options.historyMessages ?? [],
 		deferPrimaryEvents: options.deferPrimaryEvents ?? false,
 		traceRoots: options.traceRoots ?? [],
 		traceReplies: options.traceReplies ?? [],
+		realtimeEvents: options.realtimeEvents ?? [],
 		deferTraceRoots: options.deferTraceRoots ?? false,
 		deferTraceReplies: options.deferTraceReplies ?? false,
-		persistAcrossReload: options.persistAcrossReload ?? false
+		deferRealtimeEvents: options.deferRealtimeEvents ?? false,
+		realtimeTerminal: options.realtimeTerminal ?? 'eose',
+		realtimePublishOutcome: options.realtimePublishOutcome ?? 'accepted',
+		persistAcrossReload: options.persistAcrossReload ?? false,
+		testWorldConfig: options.testWorldConfig,
+		hiddenSubscriptionLimit: options.hiddenSubscriptionLimit
 	});
 }
 
 function relayState(page: Page) {
 	return page.evaluate(() => (window as typeof window & {
-		__relayStartupTest: { state: { requests: Array<{ url: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] }>; published: Array<{ id: string; kind: number; content: string; tags: string[][]; pubkey?: string }> }; releaseMetadata(): void; releasePrimaryEvents(): void; releasePrimary(): void; releaseTraceRoots(): void; releaseTraceReplies(): void; deferTraceReplies(): void; injectTraceReply(event: object): void; injectClosedTraceReply(event: object): void; activeTraceReplyCount(): number; rejectMessagePublishes(): void; allowMessagePublishes(): void; rejectPositionPublishes(): void; allowPositionPublishes(): void; injectPosition(event: object): void; injectMessage(event: object): void };
+		__relayStartupTest: { state: { requests: Array<{ url: string; subId: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] }>; published: Array<{ id: string; kind: number; content: string; tags: string[][]; pubkey?: string }>; closedSubscriptions: Array<{ subId: string; url: string }> }; releaseMetadata(): void; releasePrimaryEvents(): void; releasePrimary(): void; releaseTraceRoots(): void; releaseTraceReplies(): void; deferTraceReplies(): void; injectTraceReply(event: object): void; injectClosedTraceReply(event: object): void; activeTraceReplyCount(): number; rejectMessagePublishes(): void; allowMessagePublishes(): void; rejectPositionPublishes(): void; allowPositionPublishes(): void; injectPosition(event: object): void; injectMessage(event: object): void };
 	}).__relayStartupTest);
 }
 
@@ -751,6 +880,65 @@ async function readRelayGameState(page: Page): Promise<{
 	});
 }
 
+function realtimeInstanceIds(request: { filters: Array<Record<string, unknown>> }): string[] {
+	return request.filters.flatMap((filter) => (filter['#i'] as string[] | undefined) ?? []);
+}
+
+function isRealtimeRequest(request: { filter: Record<string, unknown> }): boolean {
+	return (request.filter.kinds as number[] | undefined)?.includes(7070) ?? false;
+}
+
+async function readRealtimePendingInstances(page: Page): Promise<string[]> {
+	return page.evaluate(async () => {
+		const database = await new Promise<IDBDatabase>((resolve, reject) => {
+			const request = indexedDB.open('persona-bubble-field-account');
+			request.onsuccess = () => resolve(request.result);
+			request.onerror = () => reject(request.error);
+		});
+		try {
+			const transaction = database.transaction('persona-bubble-field-player-state');
+			const request = transaction.objectStore('persona-bubble-field-player-state').get('player-lifecycle');
+			return await new Promise<string[]>((resolve, reject) => {
+				transaction.oncomplete = () => resolve([...(request.result as { realtimeSettlementLedger?: { pendingInstanceIds?: string[] } } | undefined)?.realtimeSettlementLedger?.pendingInstanceIds ?? []]);
+				transaction.onerror = () => reject(transaction.error);
+				transaction.onabort = () => reject(transaction.error);
+			});
+		} finally { database.close(); }
+	});
+}
+
+async function seedRealtimePendingInstance(page: Page, instanceId: string): Promise<void> {
+	await page.evaluate(async (pendingInstanceId) => {
+		const database = await new Promise<IDBDatabase>((resolve, reject) => {
+			const request = indexedDB.open('persona-bubble-field-account');
+			request.onsuccess = () => resolve(request.result);
+			request.onerror = () => reject(request.error);
+		});
+		try {
+			const transaction = database.transaction('persona-bubble-field-player-state', 'readwrite');
+			const store = transaction.objectStore('persona-bubble-field-player-state');
+			const request = store.get('player-lifecycle');
+			await new Promise<void>((resolve, reject) => {
+				request.onsuccess = () => {
+					const current = request.result as { mode: { activeRun: { identity: unknown; runNumber: number } }; realtimeSettlementLedger?: { appliedOutcomeIds?: string[] } };
+					const ledger = current.realtimeSettlementLedger;
+					store.put({ ...current, realtimeSettlementLedger: {
+						schemaVersion: 1,
+						identity: current.mode.activeRun.identity,
+						runNumber: current.mode.activeRun.runNumber,
+						pendingInstanceIds: [pendingInstanceId],
+						appliedOutcomeIds: ledger?.appliedOutcomeIds ?? []
+					} }, 'player-lifecycle');
+				};
+				request.onerror = () => reject(request.error);
+				transaction.oncomplete = () => resolve();
+				transaction.onerror = () => reject(transaction.error);
+				transaction.onabort = () => reject(transaction.error);
+			});
+		} finally { database.close(); }
+	}, instanceId);
+}
+
 async function overwriteRelayGameState(page: Page, gameState: Record<string, unknown>): Promise<void> {
 	await page.evaluate(async (nextGameState) => {
 		const database = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -919,6 +1107,376 @@ function reverseMoveKey(key: AvailableMove['key']): AvailableMove['key'] {
 }
 
 test.describe('Relay startup', () => {
+	test('accepts a creator-signed manual Rift control from a synthetic DEV channel', async ({ page }) => {
+		const channel = syntheticChannelFixture();
+		const schedule = upcomingRegistrationSchedule();
+		const initialTime = schedule.warningAtMs - 30 * 60 * 1_000;
+		const createdAt = Math.floor(initialTime / 1_000);
+		const manualInstanceId = buildManualRiftInstanceId(createdAt, '0123456789abcdef0123456789abcdef');
+		const control = finalizeRealtimeEvent(buildRealtimeControlEventTemplate({
+			channelId: channel.event.id,
+			relayHint: AUTHORITATIVE_RELAYS[0],
+			instanceId: manualInstanceId,
+			payload: { command: 'start', targetProtocolKey: RIFT_PROTOCOL_KEY },
+			createdAt
+		}), channel.secret);
+		await page.clock.install({ time: initialTime });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, {
+			channelEvent: channel.event,
+			testWorldConfig: channel.worldConfig,
+			primaryEvents: testEvents(initialTime, channel.event.id),
+			realtimeEvents: [control]
+		});
+		const secret = fixtureSecret(19);
+		await seedRelayAccount(page, secret, getPublicKey(secret));
+		await page.goto('/');
+		await expect(page.locator('.composer-dock')).toBeVisible();
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => (request.filter.kinds as number[])[0] === 42)).toBe(true);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		await expect(page.locator('[data-realtime-panel]')).toContainText('参加受付');
+		await expect.poll(async () => (await relayState(page)).state.requests.filter(isRealtimeRequest).some((request) => realtimeInstanceIds(request).includes(manualInstanceId))).toBe(true);
+	});
+
+	test('promotes recovered manual Rift state to current after an active-game reload', async ({ page }) => {
+		const channel = syntheticChannelFixture();
+		const scheduled = upcomingRegistrationSchedule();
+		const initialTime = scheduled.warningAtMs - 30 * 60 * 1_000;
+		const createdAt = Math.floor(initialTime / 1_000);
+		const manualInstanceId = buildManualRiftInstanceId(createdAt, 'fedcba9876543210fedcba9876543210');
+		const manualSchedule = getRiftScheduleForInstance(manualInstanceId, initialTime);
+		if (!manualSchedule) throw new Error('Expected the manual schedule fixture.');
+		const secret = fixtureSecret(19);
+		const control = finalizeRealtimeEvent(buildRealtimeControlEventTemplate({
+			channelId: channel.event.id,
+			relayHint: AUTHORITATIVE_RELAYS[0],
+			instanceId: manualInstanceId,
+			payload: { command: 'start', targetProtocolKey: RIFT_PROTOCOL_KEY },
+			createdAt
+		}), channel.secret);
+		await page.clock.install({ time: initialTime });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, {
+			channelEvent: channel.event,
+			testWorldConfig: channel.worldConfig,
+			primaryEvents: testEvents(initialTime, channel.event.id),
+			realtimeEvents: [control],
+			persistAcrossReload: true
+		});
+		await seedRelayAccount(page, secret, getPublicKey(secret));
+		await page.goto('/');
+		await expect(page.locator('.composer-dock')).toBeVisible();
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => (request.filter.kinds as number[])[0] === 42)).toBe(true);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		await expect(page.locator('[data-realtime-panel]')).toContainText('参加受付');
+		await expect.poll(async () => (await relayState(page)).state.requests.filter(isRealtimeRequest).some((request) => realtimeInstanceIds(request).includes(manualInstanceId))).toBe(true);
+		const hole = deriveRiftHolePositions(manualInstanceId, { columns: 16, rows: 8 })[0];
+		const join = signedRiftAction(secret, manualSchedule, { action: 'join', holeId: hole.id }, initialTime + 1_000, channel.event.id);
+		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectRealtimeEvent(event: object): void } }).__relayStartupTest.injectRealtimeEvent(event), join);
+		await expect.poll(async () => readRealtimePendingInstances(page)).toEqual([manualInstanceId]);
+		await page.evaluate(({ controlEvent, joinEvent }) => {
+			const harness = (window as typeof window & { __relayStartupTest: { state: { published: object[] } } }).__relayStartupTest;
+			harness.state.published.push(controlEvent, joinEvent);
+		}, { controlEvent: control, joinEvent: join });
+		await page.clock.setSystemTime(manualSchedule.gameAtMs + RIFT_CONSULTATION_MS + 1_000);
+		await page.reload();
+		await expect(page.locator('.composer-dock')).toBeVisible();
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => (request.filter.kinds as number[])[0] === 42)).toBe(true);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		await expect(page.locator('[data-realtime-panel]')).toContainText('参加者: 1');
+		await expect(page.locator('[data-rift-choice="maintain"]')).toBeEnabled();
+		await expect.poll(async () => readRealtimePendingInstances(page)).toEqual([manualInstanceId]);
+	});
+
+	test('keeps primary and Trace ahead of an unknown-capacity realtime attempt', async ({ page }) => {
+		const schedule = upcomingRegistrationSchedule();
+		const startTime = schedule.registrationAtMs + 1_000;
+		await page.clock.install({ time: startTime });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { primaryEvents: testEvents(startTime), hiddenSubscriptionLimit: 3 });
+		const secret = fixtureSecret(19);
+		await seedRelayAccount(page, secret, getPublicKey(secret));
+		await page.goto('/');
+		await expect(page.locator('.composer-dock')).toBeVisible();
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => (request.filter.kinds as number[])[0] === 42)).toBe(true);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		await expect.poll(async () => (await relayState(page)).state.requests.filter(isRealtimeRequest).length).toBe(AUTHORITATIVE_RELAYS.length);
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
+			(request.filter.kinds as number[])[0] === 1111)).toBe(true);
+		const startupRequests = (await relayState(page)).state.requests;
+		expect(startupRequests.findIndex(isRealtimeRequest)).toBeGreaterThan(startupRequests.findIndex((request) => (request.filter.kinds as number[])[0] === 1111));
+		await page.clock.runFor(10_001);
+		await expect(page.locator('[data-realtime-panel]')).toHaveAttribute('data-realtime-status', 'degraded');
+		await expect.poll(() => page.evaluate(() => (window as typeof window & { __relayStartupTest: { activeRealtimeCount(): number; activeTraceReplyCount(): number } }).__relayStartupTest.activeRealtimeCount())).toBe(0);
+		await expect.poll(() => page.evaluate(() => (window as typeof window & { __relayStartupTest: { activeTraceReplyCount(): number } }).__relayStartupTest.activeTraceReplyCount())).toBeGreaterThan(0);
+		const primaryRequests = (await relayState(page)).state.requests.filter((request) =>
+			[42, 30078].includes((request.filter.kinds as number[])[0]) && request.filter.limit !== 1_000);
+		expect(primaryRequests).toHaveLength(AUTHORITATIVE_RELAYS.length * 2);
+	});
+
+	test('keeps control realtime during dormancy and switches to the scheduled instance at registration', async ({ page }) => {
+		const schedule = upcomingRegistrationSchedule();
+		const initialTime = schedule.warningAtMs - 1_000;
+		await page.clock.install({ time: initialTime });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { primaryEvents: testEvents(schedule.registrationAtMs + 1_000) });
+		const secret = fixtureSecret(19);
+		const pubkey = getPublicKey(secret);
+		await seedRelayAccount(page, secret, pubkey);
+		await page.goto('/');
+		await expect(page.locator('.composer-dock')).toBeVisible();
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
+			AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) && (request.filter.kinds as number[])[0] === 42)).toBe(true);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
+		await expect.poll(async () => (await relayState(page)).state.requests.filter(isRealtimeRequest).length).toBe(AUTHORITATIVE_RELAYS.length);
+		const realtimeRequestsBeforeRegistration = (await relayState(page)).state.requests.filter(isRealtimeRequest);
+		expect(realtimeRequestsBeforeRegistration).toHaveLength(AUTHORITATIVE_RELAYS.length);
+		expect(realtimeInstanceIds(realtimeRequestsBeforeRegistration[0])).toEqual([]);
+
+		await page.clock.setSystemTime(schedule.warningAtMs + 1_000);
+		await page.clock.runFor(1_000);
+		expect((await relayState(page)).state.requests.filter(isRealtimeRequest)).toHaveLength(AUTHORITATIVE_RELAYS.length);
+		await page.clock.setSystemTime(schedule.registrationAtMs + 1_000);
+		await page.clock.runFor(1_000);
+		await expect.poll(async () => (await relayState(page)).state.requests.filter(isRealtimeRequest).some((request) => realtimeInstanceIds(request).includes(schedule.instanceId))).toBe(true);
+
+		await page.clock.setSystemTime(schedule.endedAtMs + 1_000);
+		await page.clock.runFor(1_000);
+		await expect.poll(() => page.evaluate(() => (window as typeof window & {
+			__relayStartupTest: { activeRealtimeCount(): number }
+		}).__relayStartupTest.activeRealtimeCount())).toBe(AUTHORITATIVE_RELAYS.length);
+		const state = (await relayState(page)).state;
+		expect(state.closedSubscriptions.some((closed) => state.requests.some((request) => request.subId === closed.subId && isRealtimeRequest(request)))).toBe(true);
+	});
+
+	test('starts realtime early only for a persisted settlement recovery instance', async ({ page }) => {
+		const schedule = upcomingRegistrationSchedule();
+		const previousSchedule = getRiftSchedule(schedule.warningAtMs - 24 * 60 * 60 * 1000);
+		const initialTime = schedule.warningAtMs - 1_000;
+		await page.clock.install({ time: initialTime });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { primaryEvents: testEvents(initialTime) });
+		const secret = fixtureSecret(19);
+		await seedRelayAccount(page, secret, getPublicKey(secret));
+		await seedRealtimePendingInstance(page, previousSchedule.instanceId);
+		await page.goto('/');
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => (request.filter.kinds as number[])[0] === 42)).toBe(true);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
+			isRealtimeRequest(request) && realtimeInstanceIds(request).includes(previousSchedule.instanceId))).toBe(true);
+		const earlyRealtimeRequests = (await relayState(page)).state.requests.filter(isRealtimeRequest);
+		expect(earlyRealtimeRequests.every((request) => {
+			const instances = realtimeInstanceIds(request);
+			return instances?.length === 1 && instances[0] === previousSchedule.instanceId;
+		})).toBe(true);
+	});
+
+	test('restarts realtime for the next day without recreating the world session', async ({ page }) => {
+		const schedule = upcomingRegistrationSchedule();
+		const nextSchedule = getRiftSchedule(schedule.warningAtMs + 24 * 60 * 60 * 1_000);
+		const startTime = schedule.registrationAtMs + 1_000;
+		await page.clock.install({ time: startTime });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { primaryEvents: testEvents(startTime) });
+		const secret = fixtureSecret(19);
+		const pubkey = getPublicKey(secret);
+		await seedRelayAccount(page, secret, pubkey);
+		await page.goto('/');
+		await expect(page.locator('.composer-dock')).toBeVisible();
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => (request.filter.kinds as number[])[0] === 42)).toBe(true);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
+		await expect.poll(async () => (await relayState(page)).state.requests.filter(isRealtimeRequest).length).toBeGreaterThan(0);
+		const firstRealtimeRequests = (await relayState(page)).state.requests.filter(isRealtimeRequest);
+		expect(firstRealtimeRequests.some((request) => realtimeInstanceIds(request).length === 1 && realtimeInstanceIds(request)[0] === schedule.instanceId)).toBe(true);
+		const primaryRequestCount = (await relayState(page)).state.requests.filter((request) =>
+			[42, 30078].includes((request.filter.kinds as number[])[0]) && request.filter.limit !== 1_000).length;
+
+		await page.clock.setSystemTime(schedule.endedAtMs + 1_000);
+		await page.clock.runFor(1_000);
+		await expect.poll(() => page.evaluate(() => (window as typeof window & { __relayStartupTest: { activeRealtimeCount(): number } }).__relayStartupTest.activeRealtimeCount())).toBe(AUTHORITATIVE_RELAYS.length);
+		const closedAfterFirstDay = (await relayState(page)).state.closedSubscriptions;
+		const firstRequestIds = new Set(firstRealtimeRequests.map((request) => request.subId));
+		expect(closedAfterFirstDay.some((closed) => firstRequestIds.has(closed.subId))).toBe(true);
+
+		await page.clock.setSystemTime(nextSchedule.registrationAtMs + 1_000);
+		await page.clock.runFor(1_000);
+		await expect.poll(async () => (await relayState(page)).state.requests.filter(isRealtimeRequest).length).toBeGreaterThan(firstRealtimeRequests.length);
+		const allRealtimeRequests = (await relayState(page)).state.requests.filter(isRealtimeRequest);
+		const nextRealtimeRequests = allRealtimeRequests.slice(firstRealtimeRequests.length);
+		expect(nextRealtimeRequests.length).toBeGreaterThan(0);
+		expect(nextRealtimeRequests.some((request) => realtimeInstanceIds(request).length === 1 && realtimeInstanceIds(request)[0] === nextSchedule.instanceId)).toBe(true);
+		expect((await relayState(page)).state.requests.filter((request) =>
+			[42, 30078].includes((request.filter.kinds as number[])[0]) && request.filter.limit !== 1_000)).toHaveLength(primaryRequestCount);
+
+		const nextHole = deriveRiftHolePositions(nextSchedule.instanceId, { columns: 16, rows: 8 })[0];
+		const nextJoin = signedRiftAction(secret, nextSchedule, { action: 'join', holeId: nextHole.id }, nextSchedule.registrationAtMs + 1_000);
+		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectRealtimeEvent(event: object): void } }).__relayStartupTest.injectRealtimeEvent(event), nextJoin);
+		await page.clock.setSystemTime(nextSchedule.gameAtMs + 1_000);
+		await page.clock.runFor(1_000);
+		await expect(page.locator('[data-realtime-panel]')).toContainText('参加者: 1');
+	});
+
+	test('keeps normal world movement and conversation available when realtime is unavailable', async ({ page }) => {
+		const schedule = upcomingRegistrationSchedule();
+		const startTime = schedule.registrationAtMs + 1_000;
+		await page.clock.install({ time: startTime });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { primaryEvents: testEvents(startTime), realtimeTerminal: 'closed' });
+		const secret = fixtureSecret(41);
+		const pubkey = getPublicKey(secret);
+		await seedRelayAccount(page, secret, pubkey);
+		await page.goto('/');
+		const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
+		await expect(editor).toBeVisible();
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
+			AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) && (request.filter.kinds as number[])[0] === 42)).toBe(true);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimaryEvents(): void; releasePrimary(): void } }).__relayStartupTest.releasePrimaryEvents());
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		const self = page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`);
+		await expect(self).toBeVisible();
+		await expect.poll(async () => (await relayState(page)).state.requests.filter((request) => (request.filter.kinds as number[])[0] === 7070).length).toBeGreaterThan(0);
+		await expect(page.locator('[data-realtime-panel]')).toHaveAttribute('data-realtime-status', 'degraded');
+
+		await editor.fill('normal world survives realtime timeout');
+		await editor.press('Enter');
+		await expect.poll(async () => (await relayState(page)).state.published.some((event) =>
+			event.kind === 42 && event.content === 'normal world survives realtime timeout')).toBe(true);
+		const move = await chooseHorizontalMove(page);
+		await editor.fill('');
+		await editor.focus();
+		await page.clock.runFor(1_001);
+		await page.keyboard.press(move.key);
+		await expect(self).toHaveAttribute('data-position', move.expected);
+	});
+
+	test('does not create a settlement recovery marker for a spectator receiving another player join', async ({ page }) => {
+		const schedule = upcomingRegistrationSchedule();
+		const hole = deriveRiftHolePositions(schedule.instanceId, { columns: 16, rows: 8 })[0];
+		const spectatorEvent = signedRiftAction(fixtureSecret(20), schedule, { action: 'join', holeId: hole.id }, schedule.registrationAtMs + 1_000);
+		await page.clock.install({ time: schedule.registrationAtMs + 1_000 });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { primaryEvents: testEvents(schedule.registrationAtMs + 1_000), realtimeEvents: [spectatorEvent] });
+		const secret = fixtureSecret(19);
+		await seedRelayAccount(page, secret, getPublicKey(secret));
+		await page.goto('/');
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => (request.filter.kinds as number[])[0] === 42)).toBe(true);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => (request.filter.kinds as number[])[0] === 7070)).toBe(true);
+		await expect.poll(async () => readRealtimePendingInstances(page)).toEqual([]);
+	});
+
+	test('completes Rift join, snapshot, commit, automatic reveal, settlement, and reload recovery', async ({ page }) => {
+		let schedule = upcomingRegistrationSchedule();
+		const selfPosition = { x: 3, y: 2 };
+		while (true) {
+			const candidateHole = deriveRiftHolePositions(schedule.instanceId, { columns: 16, rows: 8 })[0];
+			if (Math.max(Math.abs(candidateHole.position.x - selfPosition.x), Math.abs(candidateHole.position.y - selfPosition.y)) > 1) break;
+			schedule = getRiftSchedule(schedule.endedAtMs + 1);
+		}
+		const hole = deriveRiftHolePositions(schedule.instanceId, { columns: 16, rows: 8 })[0];
+		const otherPlayers = [
+			{ secret: fixtureSecret(20), choice: 'maintain' as const, nonce: '1'.repeat(64) },
+			{ secret: fixtureSecret(21), choice: 'maintain' as const, nonce: '2'.repeat(64) }
+		];
+		const otherJoins = otherPlayers.map(({ secret }) => signedRiftAction(secret, schedule, { action: 'join', holeId: hole.id }, schedule.registrationAtMs + 1_000));
+		const otherCommits = otherPlayers.map(({ secret, choice, nonce }) => {
+			const pubkey = getPublicKey(secret);
+			const action = buildRiftCommitAction({ instanceId: schedule.instanceId, holeId: hole.id, round: 1, authorPubkey: pubkey, choice, nonce });
+			const event = signedRiftAction(secret, schedule, action, getRiftRoundSchedule(schedule, 1).selectionAtMs + 1_000);
+			return { secret, pubkey, choice, nonce, event };
+		});
+		const otherReveals = otherCommits.map(({ secret, choice, nonce, event }) => signedRiftAction(secret, schedule,
+			buildRiftRevealAction({ holeId: hole.id, round: 1, commitId: event.id, choice, nonce }), getRiftRoundSchedule(schedule, 1).resultAtMs + 1_000));
+		const startTime = schedule.registrationAtMs + 1_000;
+		await page.clock.install({ time: startTime });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, {
+			primaryEvents: testEvents(startTime),
+			realtimeEvents: [...otherJoins, ...otherCommits.map(({ event }) => event), ...otherReveals],
+			persistAcrossReload: true,
+			realtimePublishOutcome: 'accepted'
+		});
+		const selfSecret = fixtureSecret(19);
+		const selfPubkey = getPublicKey(selfSecret);
+		await seedRelayAccount(page, selfSecret, selfPubkey);
+		await page.goto('/');
+		await expect(page.locator('[data-realtime-panel]')).toContainText('参加受付');
+		const panelLayout = await page.locator('[data-realtime-panel]').evaluate((panel) => {
+			const rect = panel.getBoundingClientRect();
+			return { centerX: rect.left + rect.width / 2, top: rect.top, right: rect.right, viewportWidth: window.innerWidth };
+		});
+		expect(Math.abs(panelLayout.centerX - panelLayout.viewportWidth / 2)).toBeLessThanOrEqual(1);
+		expect(panelLayout.top).toBeGreaterThanOrEqual(0);
+		expect(panelLayout.right).toBeLessThanOrEqual(panelLayout.viewportWidth);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => (request.filter.kinds as number[])[0] === 42)).toBe(true);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => (request.filter.kinds as number[])[0] === 7070)).toBe(true);
+		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${selfPubkey}"]`)).toBeVisible();
+
+		await page.locator('[data-realtime-hole-trigger]').click();
+		await page.clock.runFor(50);
+		expect((await relayState(page)).state.published.filter((event) => event.kind === 7070 && event.pubkey === selfPubkey)).toHaveLength(0);
+		const nearPosition = hole.position.y > 0 ? { x: hole.position.x, y: hole.position.y - 1 } : { x: hole.position.x, y: hole.position.y + 1 };
+		const nearEvent = finalizeEvent(buildPositionEventTemplate({ channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: nearPosition, slot: 0, createdAt: Math.floor((startTime + 2_000) / 1000) }), selfSecret);
+		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), nearEvent);
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', `${nearPosition.x},${nearPosition.y}`);
+		await page.locator('[data-realtime-hole-trigger]').click();
+		await expect.poll(async () => (await relayState(page)).state.published.some((event) => {
+			if (event.kind !== 7070 || event.pubkey !== selfPubkey) return false;
+			try { return (JSON.parse(event.content) as { action?: string }).action === 'join'; } catch { return false; }
+		})).toBe(true);
+
+		const round = getRiftRoundSchedule(schedule, 1);
+		await page.clock.setSystemTime(round.selectionAtMs + 1_000);
+		await page.clock.runFor(1_000);
+		await expect(page.locator('[data-realtime-panel]')).toContainText('秘密選択');
+		await expect(page.locator('[data-realtime-panel]')).toContainText('参加者: 3');
+		await page.locator('[data-rift-choice="maintain"]').click();
+		await expect(page.locator('[data-rift-choice="maintain"]')).toBeDisabled();
+		await expect.poll(async () => (await relayState(page)).state.published.some((event) => event.kind === 7070 && event.pubkey === selfPubkey && JSON.parse(event.content).action === 'commit')).toBe(true);
+
+		await page.clock.setSystemTime(round.resultAtMs + 1_000);
+		await page.clock.runFor(1_000);
+		await expect.poll(async () => (await relayState(page)).state.published.some((event) => event.kind === 7070 && event.pubkey === selfPubkey && JSON.parse(event.content).action === 'reveal')).toBe(true);
+		await expect(page.locator('[data-rift-selection-status]')).toContainText('自動公開済み');
+
+		await page.clock.setSystemTime(round.resultAtMs + 2_000);
+		await page.reload({ waitUntil: 'domcontentloaded' });
+		await expect(page.locator('[data-realtime-panel]')).toContainText('綻びゲーム中');
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => (request.filter.kinds as number[])[0] === 42)).toBe(true);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => (request.filter.kinds as number[])[0] === 7070)).toBe(true);
+		await page.evaluate((events) => {
+			const relay = (window as typeof window & { __relayStartupTest: { injectRealtimeEvent(event: object): void } }).__relayStartupTest;
+			for (const event of events) relay.injectRealtimeEvent(event);
+		}, [...otherJoins, ...otherCommits.map(({ event }) => event), ...otherReveals]);
+		await page.clock.runFor(100);
+		await page.clock.setSystemTime(round.revealCutoffAtMs + 1_000);
+		await page.clock.runFor(2_000);
+		await expect.poll(async () => (await readRelayGameState(page)).points).toBe(20);
+		await expect(page.locator('[data-rift-round-result]')).toContainText('+20pt');
+
+		await page.clock.setSystemTime(schedule.endedAtMs + 1_000);
+		await page.clock.runFor(1_000);
+		await expect.poll(async () => readRealtimePendingInstances(page)).toEqual([]);
+		await expect.poll(async () => page.evaluate(() => (window as typeof window & { __relayStartupTest: { activeRealtimeCount(): number } }).__relayStartupTest.activeRealtimeCount())).toBe(AUTHORITATIVE_RELAYS.length);
+		await expect(page.locator('[data-realtime-hole-trigger]')).toHaveCount(0);
+		await expect.poll(async () => (await readRelayGameState(page)).points).toBe(20);
+	});
+
 	test('reloads and reconciles a valid Run after a death transition clock rollback', async ({ page }) => {
 		const startTime = Date.now();
 		const secret = fixtureSecret(57);
