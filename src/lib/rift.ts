@@ -9,7 +9,8 @@ import {
 	type RealtimeEventDefinition,
 	type RealtimeEventRegistry,
 	type RealtimeFieldTargetInput,
-	type RealtimeEventTemplate
+	type RealtimeEventTemplate,
+	type RealtimeControlEnvelope
 } from './realtimeEvents';
 
 export const RIFT_EVENT_TYPE = 'rift';
@@ -286,11 +287,48 @@ export function parseManualRiftInstanceId(instanceId: string): Readonly<{ create
 	return Number.isSafeInteger(createdAt) ? { createdAt, nonce: match[2] } : null;
 }
 
+function nextRiftDateKey(dateKey: string): string {
+	const date = new Date(`${dateKey}T00:00:00Z`);
+	date.setUTCDate(date.getUTCDate() + 1);
+	return date.toISOString().slice(0, 10);
+}
+
 export function riftScheduleIntervalsOverlap(
 	first: Readonly<{ warningAtMs: number; endedAtMs: number }>,
 	second: Readonly<{ registrationAtMs: number; endedAtMs: number }>
 ): boolean {
 	return first.warningAtMs < second.endedAtMs && second.registrationAtMs < first.endedAtMs;
+}
+
+/** Pure schedule/protocol eligibility shared by browser control handling and operator tooling. */
+export function isManualRiftInstanceScheduleEligible(instanceId: string, nowMs: number): boolean {
+	const manual = parseManualRiftInstanceId(instanceId);
+	if (!manual) return false;
+	const manualSchedule = getRiftScheduleForInstance(instanceId, nowMs);
+	if (!manualSchedule || !['registration', 'game'].includes(manualSchedule.phase)) return false;
+	const scheduled = getRiftSchedule(nowMs);
+	const nextScheduled = getRiftScheduleForDate(nextRiftDateKey(scheduled.dateKey), nowMs);
+	return !riftScheduleIntervalsOverlap(scheduled, manualSchedule) && !riftScheduleIntervalsOverlap(nextScheduled, manualSchedule);
+}
+
+export function isManualRiftControlScheduleEligible(control: RealtimeControlEnvelope, nowMs: number): boolean {
+	if (control.payload.targetProtocolKey !== RIFT_PROTOCOL_KEY) return false;
+	const manual = parseManualRiftInstanceId(control.instanceId);
+	if (!manual || manual.createdAt !== control.event.created_at || control.event.created_at > Math.floor(nowMs / 1000)) return false;
+	return isManualRiftInstanceScheduleEligible(control.instanceId, nowMs);
+}
+
+export function compareManualRiftControls(first: RealtimeControlEnvelope, second: RealtimeControlEnvelope): number {
+	return first.event.created_at - second.event.created_at || first.event.id.localeCompare(second.event.id);
+}
+
+export function selectCanonicalManualRiftControl(
+	controls: readonly RealtimeControlEnvelope[],
+	nowMs: number
+): RealtimeControlEnvelope | null {
+	return [...controls]
+		.filter((control) => isManualRiftControlScheduleEligible(control, nowMs))
+		.sort(compareManualRiftControls)[0] ?? null;
 }
 
 const RIFT_PROTOCOL_NAMESPACE_INSTANCE_PREFIX = `${RIFT_PROTOCOL_KEY}:instance`;

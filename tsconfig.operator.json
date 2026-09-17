@@ -1,0 +1,27 @@
+{
+	"compilerOptions": {
+		"target": "ES2023",
+		"module": "ESNext",
+		"moduleResolution": "bundler",
+		"lib": ["ES2023"],
+		"types": ["node"],
+		"strict": true,
+		"noEmit": true,
+		"skipLibCheck": true,
+		"allowImportingTsExtensions": false,
+		"forceConsistentCasingInFileNames": true
+	},
+	"include": [
+		"scripts/operator-rift-start.ts",
+		"scripts/operatorInput.ts",
+		"src/lib/operatorRelayAdapter.ts",
+		"src/lib/operatorRift.ts",
+		"src/lib/realtimeEvents.ts",
+		"src/lib/rift.ts",
+		"src/lib/nostrChannelMetadata.ts",
+		"src/lib/nostrProtocol.ts",
+		"src/lib/prototypeWorldConfig.ts",
+		"src/lib/geometry.ts",
+		"src/lib/fieldFacilities.ts"
+	]
+}

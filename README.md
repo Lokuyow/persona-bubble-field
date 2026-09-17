@@ -26,6 +26,37 @@ npm install
 npm run dev
 ```
 
+### Manual Rift operator CLI
+
+The local operator CLI runs on Node.js 24.19 or newer. The default command is
+a signed dry-run and never publishes:
+
+```sh
+npm run operator:rift:start
+```
+
+Use `--publish` to require a hidden local interactive TTY confirmation and
+then publish to the authoritative Relays:
+
+```sh
+npm run operator:rift:start -- --publish
+```
+
+The CLI accepts the creator `nsec` only through its hidden interactive TTY
+prompt. Never put an `nsec` in argv, an environment variable, a file, or a
+pipe. The CLI does not echo unknown argv values, but it cannot guarantee that
+an argv secret is hidden from shell history, process listings, npm, or another
+layer that runs before the CLI. An `nsec` must only ever be entered at the
+hidden TTY prompt. Secret input is not saved to disk or echoed; mutable bytes
+are best-effort zeroized, but complete memory erasure cannot be guaranteed.
+
+The creator key, active-manual preflight, and scheduled conflict checks are
+validated before publication. Publish results are reported per Relay; one
+accepted Relay is an overall success, while all failures are non-zero. Relay
+reasons, CLOSED reasons, and NOTICE/network messages are bounded and safely
+sanitized before display. The `PUBLISH` confirmation input is hidden and is
+also never echoed.
+
 ### DEV World Sandbox
 
 For local field, movement, camera, and viewport checks without connecting to a

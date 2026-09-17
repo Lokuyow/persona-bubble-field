@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { VerifiedEvent } from 'nostr-tools/pure';
 import {
 	applyRiftAction,
 	buildManualRiftInstanceId,
@@ -11,12 +12,14 @@ import {
 	isRiftSettlementComplete,
 	parseRiftAction,
 	parseManualRiftInstanceId,
+	selectCanonicalManualRiftControl,
 	riftScheduleIntervalsOverlap,
 	settleRiftSession,
 	type RiftAction,
 	type RiftActionEvent,
 	type RiftSessionState
 } from './rift';
+import { REALTIME_CONTROL_PROTOCOL_KEY, type RealtimeControlEnvelope } from './realtimeEvents';
 
 const FIELD = { columns: 16, rows: 8, cellSize: 50 };
 const INSTANCE = 'io.github.lokuyow.persona-bubble-field:realtime:rift:1:instance:2026-01-01';
@@ -86,6 +89,21 @@ describe('Rift schedule and domain', () => {
 		expect(riftScheduleIntervalsOverlap(scheduled, { registrationAtMs: scheduled.warningAtMs - 5 * 60 * 1000, endedAtMs: scheduled.warningAtMs + 5 * 60 * 1000 })).toBe(true);
 		expect(riftScheduleIntervalsOverlap(scheduled, { registrationAtMs: scheduled.endedAtMs, endedAtMs: scheduled.endedAtMs + 1 })).toBe(false);
 		expect(riftScheduleIntervalsOverlap(scheduled, { registrationAtMs: scheduled.warningAtMs - 1, endedAtMs: scheduled.warningAtMs })).toBe(false);
+	});
+
+	it('excludes an ended manual control before selecting the canonical active candidate', () => {
+		const nowMs = Date.UTC(2026, 0, 2, 10, 0);
+		const endedAt = Math.floor((nowMs - 20 * 60 * 1000) / 1000);
+		const activeAt = Math.floor((nowMs - 60 * 1000) / 1000);
+		const control = (createdAt: number, id: string): RealtimeControlEnvelope => ({
+			event: { id, created_at: createdAt } as VerifiedEvent,
+			channelId: 'a'.repeat(64),
+			protocolKey: REALTIME_CONTROL_PROTOCOL_KEY,
+			instanceId: buildManualRiftInstanceId(createdAt, '0123456789abcdef0123456789abcdef'),
+			payload: { command: 'start', targetProtocolKey: 'io.github.lokuyow.persona-bubble-field:realtime:rift:1' }
+		});
+		const selected = selectCanonicalManualRiftControl([control(activeAt, 'b'.repeat(64)), control(endedAt, 'a'.repeat(64))], nowMs);
+		expect(selected?.event.id).toBe('b'.repeat(64));
 	});
 
 	it('places at least one deterministic hole and avoids fixed facilities', () => {
