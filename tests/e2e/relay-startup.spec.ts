@@ -325,14 +325,13 @@ async function installDelayedRelay(page: Page, options: {
 	traceReplies?: readonly object[];
 	deferTraceRoots?: boolean;
 	deferTraceReplies?: boolean;
-	failMetadataDiscoveryOnce?: boolean;
 	persistAcrossReload?: boolean;
 	channelEvent?: object;
 	testWorldConfig?: { channelId: string; metadataDiscoveryRelays: readonly string[]; preferredRelayHint: string };
 	hiddenSubscriptionLimit?: number;
 } = {}): Promise<void> {
 	const events = options.primaryEvents ?? testEvents();
-	await page.addInitScript(({ seedRelays, authoritativeRelays, channelEvent, primaryEvents, historyMessages, realtimeEvents, deferPrimaryEvents, deferRealtimeEvents, realtimeTerminal, realtimePublishOutcome, traceRoots, traceReplies, deferTraceRoots, deferTraceReplies, failMetadataDiscoveryOnce, persistAcrossReload, testWorldConfig, hiddenSubscriptionLimit }) => {
+	await page.addInitScript(({ seedRelays, authoritativeRelays, channelEvent, primaryEvents, historyMessages, realtimeEvents, deferPrimaryEvents, deferRealtimeEvents, realtimeTerminal, realtimePublishOutcome, traceRoots, traceReplies, deferTraceRoots, deferTraceReplies, persistAcrossReload, testWorldConfig, hiddenSubscriptionLimit }) => {
 		type Listener = (event?: { type: string; data?: string; code?: number; reason?: string }) => void;
 		type PendingRequest = { socket: FakeWebSocket; subId: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] };
 		const seed = new Set<string>(seedRelays);
@@ -371,7 +370,7 @@ async function installDelayedRelay(page: Page, options: {
 			primaryReleased: false,
 			traceRootsReleased: !deferTraceRoots,
 			traceRepliesReleased: !deferTraceReplies,
-			metadataFailuresRemaining: failMetadataDiscoveryOnce ? 1 : 0,
+			metadataFailuresRemaining: 0,
 			realtimeEventsReleased: !deferRealtimeEvents,
 			realtimeTerminal: realtimeTerminal ?? 'eose' as 'eose' | 'closed' | 'timeout',
 			realtimePublishOutcome: realtimePublishOutcome ?? 'accepted' as 'accepted' | 'rejected' | 'echo' | 'no-response',
@@ -597,6 +596,12 @@ async function installDelayedRelay(page: Page, options: {
 		Object.assign(window, {
 			__relayStartupTest: {
 				state,
+				failMetadataDiscovery: () => {
+					// Fail every request already issued for the first discovery wave.
+					// There can be more than one metadata request per seed Relay.
+					state.metadataFailuresRemaining = pendingMetadata.length;
+					pendingMetadata.splice(0).forEach(respondMetadata);
+				},
 				releasePublishes: (kind: number) => {
 					if (kind === 1111) state.deferReplyPublishes = false;
 					if (kind === 30078) state.deferPositionPublishes = false;
@@ -680,7 +685,6 @@ async function installDelayedRelay(page: Page, options: {
 		realtimeEvents: options.realtimeEvents ?? [],
 		deferTraceRoots: options.deferTraceRoots ?? false,
 		deferTraceReplies: options.deferTraceReplies ?? false,
-		failMetadataDiscoveryOnce: options.failMetadataDiscoveryOnce ?? false,
 		deferRealtimeEvents: options.deferRealtimeEvents ?? false,
 		realtimeTerminal: options.realtimeTerminal ?? 'eose',
 		realtimePublishOutcome: options.realtimePublishOutcome ?? 'accepted',
@@ -692,7 +696,7 @@ async function installDelayedRelay(page: Page, options: {
 
 function relayState(page: Page) {
 	return page.evaluate(() => (window as typeof window & {
-		__relayStartupTest: { state: { requests: Array<{ url: string; subId: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] }>; published: Array<{ id: string; kind: number; content: string; tags: string[][]; pubkey?: string }>; closedSubscriptions: Array<{ subId: string; url: string }> }; releaseMetadata(): void; releasePrimaryEvents(): void; releasePrimary(): void; releaseTraceRoots(): void; releaseTraceReplies(): void; deferTraceReplies(): void; injectTraceReply(event: object): void; injectClosedTraceReply(event: object): void; activeTraceReplyCount(): number; rejectMessagePublishes(): void; allowMessagePublishes(): void; rejectPositionPublishes(): void; allowPositionPublishes(): void; injectPosition(event: object): void; injectMessage(event: object): void };
+		__relayStartupTest: { state: { requests: Array<{ url: string; subId: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] }>; published: Array<{ id: string; kind: number; content: string; tags: string[][]; pubkey?: string }>; closedSubscriptions: Array<{ subId: string; url: string }> }; failMetadataDiscovery(): void; releaseMetadata(): void; releasePrimaryEvents(): void; releasePrimary(): void; releaseTraceRoots(): void; releaseTraceReplies(): void; deferTraceReplies(): void; injectTraceReply(event: object): void; injectClosedTraceReply(event: object): void; activeTraceReplyCount(): number; rejectMessagePublishes(): void; allowMessagePublishes(): void; rejectPositionPublishes(): void; allowPositionPublishes(): void; injectPosition(event: object): void; injectMessage(event: object): void };
 	}).__relayStartupTest);
 }
 
@@ -1803,16 +1807,20 @@ test.describe('Relay startup', () => {
 
 	test('clears an anonymous startup error before fresh signed fallback recovery', async ({ page }) => {
 		await installHostOwnedStub(page);
-		await installDelayedRelay(page, { failMetadataDiscoveryOnce: true });
+		await installDelayedRelay(page);
 		await page.goto('/');
 		const candidateButtons = page.getByRole('button', { name: /を選ぶ$/ });
 		await expect(candidateButtons).toHaveCount(3);
+		const metadataRequestsBeforeSelection = (await relayState(page)).state.requests.filter((request) => [40, 41].includes(requestKind(request)!)).length;
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { failMetadataDiscovery(): void } }).__relayStartupTest.failMetadataDiscovery());
 		await candidateButtons.nth(0).click();
 		await expect(page.getByRole('dialog')).toHaveCount(0);
 		await page.evaluate(() => {
 			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
 			relay.releaseMetadata(); relay.releasePrimary();
 		});
+		await expect.poll(async () => (await relayState(page)).state.requests.filter((request) => [40, 41].includes(requestKind(request)!)).length)
+			.toBeGreaterThan(metadataRequestsBeforeSelection);
 		await expect(page.locator('.participant[data-self="true"]')).toBeVisible();
 		const selectedPubkey = await page.locator('.participant[data-self="true"]').getAttribute('data-participant-id');
 		const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
