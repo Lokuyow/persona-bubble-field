@@ -2,7 +2,7 @@
 	import { untrack } from 'svelte';
 	import type { Attachment } from 'svelte/attachments';
 	import type { Character } from '$lib/character';
-import { requireCharacterFromPubkey } from '$lib/characterAssignment';
+import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	import { DEV_WORLD_SELF_ID, getDevWorldCharacter, getDevWorldFixtureCharacter } from '$lib/devWorldSandbox';
 	import { MOBILE_FIELD_BREAKPOINT } from '$lib/geometry';
 	import type { BubbleTone } from '$lib/bubblePresentation';
@@ -39,7 +39,7 @@ import { requireCharacterFromPubkey } from '$lib/characterAssignment';
 	function timelineCharacter(pubkey: string): Character {
 		if (pubkey === DEV_WORLD_SELF_ID) return getDevWorldCharacter(selectedCharacterId);
 		try {
-			return requireCharacterFromPubkey(pubkey);
+			return requireWorldCharacterFromPubkey(pubkey);
 		} catch (error) {
 			if (isDevWorldSandbox) return getDevWorldFixtureCharacter(pubkey, selectedCharacterId);
 			throw error;

@@ -1,6 +1,6 @@
 import { BUBBLE_TONES, type BubbleTone } from '../bubblePresentation';
 import type { Character } from '../character';
-import { requireCharacterFromPubkey } from '../characterAssignment';
+import { requireWorldCharacterFromPubkey } from '../worldCharacterAssignment';
 import { DEV_WORLD_SELF_ID, getDevWorldCharacter, getDevWorldFixtureCharacter } from '../devWorldSandbox';
 import type { PresenceState } from '../presence';
 import { projectPresence, type PresenceProjectionOptions } from '../presenceProjection';
@@ -44,7 +44,7 @@ export function projectFrontendPresence(input: Readonly<{
 	const characterForParticipant = (id: string): Character => {
 		if (id === DEV_WORLD_SELF_ID) return getDevWorldCharacter(input.selectedCharacterId);
 		try {
-			return requireCharacterFromPubkey(id);
+			return requireWorldCharacterFromPubkey(id);
 		} catch (error) {
 			if (input.selfProjectionId === DEV_WORLD_SELF_ID) return getDevWorldFixtureCharacter(id, input.selectedCharacterId);
 			throw error;

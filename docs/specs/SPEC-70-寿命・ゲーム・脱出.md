@@ -149,7 +149,7 @@ prototypeではこの枠で複数のevent typeを順次試遊し、試遊結果�
 
 各イベントはイベント定義、protocol version、protocol key、payload parser、instance schedule、settlement規則を持つ。共通のNostr envelope、control、補助subscription、共通parserの仕様は [`SPEC-10-Nostr・アカウント.md`](./SPEC-10-Nostr・アカウント.md) を正とし、イベントの有効化・無効化はcompile-time registryで明示する。Relay障害、購読拒否、切断、ブラウザ終了だけを理由に死亡させない。settlementは既存のbrowser-local Player lifecycle store内の汎用ledgerへ、receiptと同じatomic mutationで記録する。ledgerはevent instanceのpendingと適用済みoutcome receiptを持ち、同じoutcomeを二重適用しない。古いIdentityまたは古いRun、既に期限切れのRunにはポイントを適用しない。イベント由来の死亡は、現在Runの死亡処理と同じRun close・Identity dead・次generation選択の経路を明示的に通る。
 
-playable eventのparticipantは、現在のcharacter slotへ解決できるauthorだけを有効参加者として扱う。未割当authorは参加枠、round、result、settlementへ入らない。controlのauthority条件はchannel creatorであり、このparticipant条件をcontrol eventへ適用しない。受信envelopeのprotocol条件と境界検証はSPEC-10を正とする。
+playable eventのparticipantは、現在のcharacter slotへ解決できるauthorだけを有効参加者として扱う。未割当authorは参加枠、round、result、settlementへ入らない。SPEC-10で定めるexternal world actorのcharacter overrideは、このparticipant判定には適用しない。controlのauthority条件はchannel creatorであり、このparticipant条件をcontrol eventへ適用しない。受信envelopeのprotocol条件と境界検証はSPEC-10を正とする。
 
 ### experimental event「綻び」
 

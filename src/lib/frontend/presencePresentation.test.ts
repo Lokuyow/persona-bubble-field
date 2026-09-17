@@ -24,6 +24,21 @@ describe('participant colors', () => {
 });
 
 describe('frontend presence projection', () => {
+	it('resolves the explicit Haiku bot world actor without changing core assignment', () => {
+		const haikuBot = '4afc021c034d6fc25aa7989f24f83d1ba214ca0aaf45e090efc98e4d866076b1';
+		const presence = createPresenceState({ columns: 16, rows: 8 }, 100, [
+			{ id: haikuBot, position: { x: 3, y: 2 } }
+		]);
+		const projected = projectFrontendPresence({
+			presence,
+			selectedCharacterId: '001',
+			selfProjectionId: 'different-self',
+			geometry: { cellSize: 50, fieldAreaBounds: { x: 0, y: 200, width: 300, height: 200 }, cameraWorldBounds: { x: 0, y: 0, width: 800, height: 400 } },
+			colors: {}
+		});
+		expect(projected.participants[0].character.characterId).toBe('002');
+	});
+
 	it('uses explicit old and next colors without changing either snapshot', () => {
 		const presence = createPresenceState({ columns: 16, rows: 8 }, 100, [
 			{ id: DEV_WORLD_SELF_ID, position: { x: 7, y: 3 } }
