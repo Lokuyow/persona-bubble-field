@@ -7,7 +7,7 @@ import {
 import { selectEffectiveTraceRoots } from './traceRoots';
 
 const CHANNEL_ID = 'a'.repeat(64);
-const SECRET_KEY = new Uint8Array(32).fill(7);
+const SECRET_KEY = new Uint8Array(32).fill(30);
 const channel: ChannelReference = { channelId: CHANNEL_ID, relayHint: 'wss://relay.example.com' };
 
 function root(

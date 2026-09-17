@@ -10,8 +10,8 @@ import { reconcileTraceRootCache } from './traceRootCache';
 import { loadTraceReadSnapshot, markTraceReplyRead, markTraceRootRead, setTraceReplyReadState } from './traceReadState';
 
 const CHANNEL_ID = 'a'.repeat(64);
-const PERSONA_SECRET = new Uint8Array(32).fill(4);
-const OTHER_SECRET = new Uint8Array(32).fill(5);
+const PERSONA_SECRET = new Uint8Array(32).fill(30);
+const OTHER_SECRET = new Uint8Array(32).fill(67);
 const PERSONA = getPublicKey(PERSONA_SECRET);
 
 function channel(): ChannelReference { return { channelId: CHANNEL_ID, relayHint: 'wss://relay.example.com' }; }

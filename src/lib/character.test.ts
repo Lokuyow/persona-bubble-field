@@ -121,6 +121,16 @@ describe('character catalog', () => {
 		}
 	});
 
+	it('has stable unique integer slots for the current catalog', () => {
+		expect(CHARACTER_CATALOG.map((character) => character.slot)).toEqual([...Array(40).keys()]);
+		expect(new Set(CHARACTER_CATALOG.map((character) => character.slot)).size).toBe(40);
+		for (const character of CHARACTER_CATALOG) {
+			expect(Number.isInteger(character.slot)).toBe(true);
+			expect(character.slot).toBeGreaterThanOrEqual(0);
+			expect(character.slot).toBeLessThan(1024);
+		}
+	});
+
 	it('retrieves characters by ID without an implicit fallback', () => {
 		expect(getCharacterById('020')?.name).toBe('アミナ');
 		expect(getCharacterById('040')?.name).toBe('校長先生');
@@ -128,10 +138,4 @@ describe('character catalog', () => {
 		expect(getCharacterById('')).toBeUndefined();
 	});
 
-	it('does not expose slot or pubkey assignment data', () => {
-		for (const character of CHARACTER_CATALOG) {
-			expect(character).not.toHaveProperty('slot');
-			expect(character).not.toHaveProperty('pubkey');
-		}
-	});
 });

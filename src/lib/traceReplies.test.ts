@@ -16,7 +16,7 @@ import { resolveLiveTraceReply, resolveTraceReplyBatch } from './traceReplies';
 
 const CHANNEL_ID = 'a'.repeat(64);
 const OTHER_CHANNEL_ID = 'b'.repeat(64);
-const SECRET_KEY = new Uint8Array(32).fill(9);
+const SECRET_KEY = new Uint8Array(32).fill(30);
 
 function makeRoot(channelId = CHANNEL_ID, content = 'root'): Readonly<{ raw: Event; parsed: ParsedWorldMessage }> {
 	const channel: ChannelReference = { channelId, relayHint: 'wss://relay.example.com' };

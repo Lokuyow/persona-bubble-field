@@ -184,7 +184,7 @@ describe('Trace reply publication ownership', () => {
 		expect(mocked.reconcileTraceReplyCache.mock.calls.flatMap(([input]) => input.rawEvents)).not.toContain(rawEvent);
 		const { buildTraceReplyTemplate, finalizeWorldEvent } = await import('./nostrProtocol');
 		const other = finalizeWorldEvent(buildTraceReplyTemplate({ root: f.root, parent: f.root, content: 'other',
-			speechType: 'normal', createdAt: 700 }), new Uint8Array(32).fill(8));
+			speechType: 'normal', createdAt: 700 }), new Uint8Array(32).fill(67));
 		f.callbacks().onLiveEvent(other);
 		f.callbacks().onBatch({ events: [], relays: [{ relayUrl: 'wss://relay.test/', status: 'closed' }] });
 		await settle();
@@ -270,7 +270,7 @@ vi.mock('./positionPublish', async (importOriginal) => {
 });
 
 const alice = 'a'.repeat(64);
-const selfSecretKey = new Uint8Array(32).fill(7);
+const selfSecretKey = new Uint8Array(32).fill(30);
 const selfPubkey = getPublicKey(selfSecretKey);
 
 function selfSigner() {

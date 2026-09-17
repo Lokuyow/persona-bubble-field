@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import type { Attachment } from 'svelte/attachments';
-	import { CHARACTER_CATALOG, type Character } from '$lib/character';
-	import { deriveCharacterFromPubkey } from '$lib/characterAssignment';
-	import { DEV_WORLD_SELF_ID, getDevWorldCharacter } from '$lib/devWorldSandbox';
+	import type { Character } from '$lib/character';
+import { requireCharacterFromPubkey } from '$lib/characterAssignment';
+	import { DEV_WORLD_SELF_ID, getDevWorldCharacter, getDevWorldFixtureCharacter } from '$lib/devWorldSandbox';
 	import { MOBILE_FIELD_BREAKPOINT } from '$lib/geometry';
 	import type { BubbleTone } from '$lib/bubblePresentation';
 	import type { RecentMessageTimeline } from '$lib/recentMessageTimeline';
@@ -13,8 +13,9 @@
 		tones: Readonly<Record<string, BubbleTone>>;
 		selectedCharacterId: string;
 		onOpenProfile: (characterId: string, trigger: HTMLButtonElement) => void;
+		isDevWorldSandbox: boolean;
 	};
-	let { messages, tones, selectedCharacterId, onOpenProfile }: Props = $props();
+	let { messages, tones, selectedCharacterId, onOpenProfile, isDevWorldSandbox }: Props = $props();
 	let timelineOverflowById = $state.raw<Record<string, boolean>>({});
 	let timelineEntryHeights = $state.raw<Record<string, number>>({});
 	let timelineAvailableHeight = $state(0);
@@ -36,9 +37,13 @@
 	}
 
 	function timelineCharacter(pubkey: string): Character {
-		return pubkey === DEV_WORLD_SELF_ID
-			? getDevWorldCharacter(selectedCharacterId)
-			: deriveCharacterFromPubkey(pubkey, CHARACTER_CATALOG);
+		if (pubkey === DEV_WORLD_SELF_ID) return getDevWorldCharacter(selectedCharacterId);
+		try {
+			return requireCharacterFromPubkey(pubkey);
+		} catch (error) {
+			if (isDevWorldSandbox) return getDevWorldFixtureCharacter(pubkey, selectedCharacterId);
+			throw error;
+		}
 	}
 
 	function timelineTone(pubkey: string): BubbleTone | null {

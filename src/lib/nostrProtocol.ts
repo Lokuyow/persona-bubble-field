@@ -2,6 +2,7 @@ import { finalizeEvent, verifyEvent, type Event, type EventTemplate, type Verifi
 import type { Filter } from 'nostr-tools/filter';
 import type { SpeechType } from './conversation';
 import type { Character } from './character';
+import { resolveCharacterFromPubkey } from './characterAssignment';
 import {
 	formatCanonicalGridPosition,
 	parseCanonicalGridPosition,
@@ -377,13 +378,21 @@ function isVerifiedEvent(event: Event): event is VerifiedEvent {
 	}
 }
 
+function hasAssignedCharacter(event: Event): boolean {
+	try {
+		return resolveCharacterFromPubkey(event.pubkey) !== undefined;
+	} catch {
+		return false;
+	}
+}
+
 /**
  * Validates a received kind 42 for this project's semantics. Relay hints are
  * intentionally ignored: the target kind 40 event ID is the channel identity.
  */
 export function parseWorldMessage(event: Event, channelId: string): ParsedWorldMessage | null {
 	assertChannelId(channelId);
-	if (!isVerifiedEvent(event) || event.kind !== CHANNEL_MESSAGE_KIND) return null;
+	if (!isVerifiedEvent(event) || event.kind !== CHANNEL_MESSAGE_KIND || !hasAssignedCharacter(event)) return null;
 	if (!Number.isSafeInteger(event.created_at) || event.created_at < 0) return null;
 	if (!hasExactlyChannelRootRelation(event, channelId)) return null;
 	if (!event.tags.some((tag) => tag[0] === 'L' && tag[1] === PROTOTYPE_NAMESPACE)) return null;
@@ -419,7 +428,7 @@ function validPointerAuthorHint(tag: readonly string[]): string | null | undefin
  * must still be compared with accepted root and parent events before use.
  */
 export function parseTraceReplyCandidate(event: Event): ParsedTraceReplyCandidate | null {
-	if (!isVerifiedEvent(event) || event.kind !== TRACE_REPLY_KIND) return null;
+	if (!isVerifiedEvent(event) || event.kind !== TRACE_REPLY_KIND || !hasAssignedCharacter(event)) return null;
 	if (!Number.isSafeInteger(event.created_at) || event.created_at < 0) return null;
 	if (!event.tags.some((tag) => tag[0] === 'L' && tag[1] === PROTOTYPE_NAMESPACE)) return null;
 	if (!hasProjectChatLabel(event)) return null;
@@ -510,7 +519,7 @@ function referencesChannel(event: Event, channelId: string): boolean {
  */
 export function parsePositionEvent(event: Event, channelId: string): ParsedPositionEvent | null {
 	assertChannelId(channelId);
-	if (!isVerifiedEvent(event) || event.kind !== POSITION_KIND) return null;
+	if (!isVerifiedEvent(event) || event.kind !== POSITION_KIND || !hasAssignedCharacter(event)) return null;
 	if (!Number.isSafeInteger(event.created_at) || event.created_at < 0) return null;
 	if (!referencesChannel(event, channelId)) return null;
 

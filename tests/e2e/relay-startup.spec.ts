@@ -26,8 +26,8 @@ import {
 } from '../../src/lib/rift';
 import { buildRealtimeControlEventTemplate, finalizeRealtimeEvent } from '../../src/lib/realtimeEvents';
 import { SPEECH_SHORTCUT_IDS } from '../../src/lib/speechSubmission';
-import { CHARACTER_CATALOG, characterPicturePath } from '../../src/lib/character';
-import { deriveCharacterFromPubkey } from '../../src/lib/characterAssignment';
+import { characterPicturePath } from '../../src/lib/character';
+import { requireCharacterFromPubkey, resolveCharacterFromPubkey } from '../../src/lib/characterAssignment';
 import { deriveBip85NostrEntropy } from '../../src/lib/bip85';
 import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL } from '../../src/lib/fieldFacilities';
 
@@ -48,19 +48,27 @@ const AUTHORITATIVE_RELAYS = [
 ] as const;
 
 // Deterministic fake signers are derived at test runtime from a zero root.
-const FIXTURE_ACCOUNT_INDICES = [19, 20, 21, 23, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 41, 43, 47, 51, 53, 55, 57, 59, 61, 63] as const;
-const FIXTURE_CHILDREN: ReadonlyMap<number, Uint8Array> = await (async () => {
+// Logical fixture labels are kept stable for the scenarios below; their actual
+// BIP85 account indexes are selected from currently assigned character slots.
+const FIXTURE_LABELS = [19, 20, 21, 23, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 41, 43, 47, 51, 53, 55, 57, 59, 61, 63] as const;
+const FIXTURE_CHILDREN: ReadonlyMap<number, Readonly<{ accountIndex: number; secret: Uint8Array }>> = await (async () => {
 	const entropy = new Uint8Array(16);
 	const seed = mnemonicToSeedSync(entropyToMnemonic(entropy, englishWordlist), '');
 	const master = HDKey.fromMasterSeed(seed);
 	seed.fill(0);
 	try {
-		const entries: Array<readonly [number, Uint8Array]> = [];
-		for (const accountIndex of FIXTURE_ACCOUNT_INDICES) {
+		const entries: Array<readonly [number, Readonly<{ accountIndex: number; secret: Uint8Array }>]> = [];
+		const usedSlots = new Set<number>();
+		for (let accountIndex = 1; accountIndex <= 100_000 && entries.length < FIXTURE_LABELS.length; accountIndex += 1) {
 			const child = await deriveBip85NostrEntropy(master, 1, accountIndex);
-			entries.push([accountIndex, child.slice()]);
+			const character = resolveCharacterFromPubkey(getPublicKey(child));
+			if (character && !usedSlots.has(character.slot)) {
+				usedSlots.add(character.slot);
+				entries.push([FIXTURE_LABELS[entries.length], { accountIndex, secret: child.slice() }]);
+			}
 			child.fill(0);
 		}
+		if (entries.length !== FIXTURE_LABELS.length) throw new Error('Could not find enough assigned fixture signers.');
 		return new Map(entries);
 	} finally {
 		master.wipePrivateData();
@@ -69,13 +77,13 @@ const FIXTURE_CHILDREN: ReadonlyMap<number, Uint8Array> = await (async () => {
 })();
 
 function fixtureSecret(value: number): Uint8Array {
-	const secret = FIXTURE_CHILDREN.get(value);
-	if (!secret) throw new Error(`Missing fixture signer ${value}.`);
-	return secret.slice();
+	const entry = FIXTURE_CHILDREN.get(value);
+	if (!entry) throw new Error(`Missing fixture signer ${value}.`);
+	return entry.secret.slice();
 }
 
 function fixtureAccountIndexForSecret(secretKey: Uint8Array): number {
-	for (const [accountIndex, secret] of FIXTURE_CHILDREN) {
+	for (const { accountIndex, secret } of FIXTURE_CHILDREN.values()) {
 		if (secret.length === secretKey.length && secret.every((value, index) => value === secretKey[index])) return accountIndex;
 	}
 	throw new Error('Fixture secret is not derived from the zero root.');
@@ -816,7 +824,7 @@ async function seedRelayAccount(page: Page, secretKey: Uint8Array, pubkey: strin
 	await page.goto('/favicon.svg');
 	await page.evaluate(async ({ accountPubkey, accountIndex, expiresAtMs, points, abilities, characterId }) => {
 		const database = await new Promise<IDBDatabase>((resolve, reject) => {
-			const request = indexedDB.open('persona-bubble-field-account', 5);
+			const request = indexedDB.open('persona-bubble-field-account', 6);
 			request.onupgradeneeded = () => {
 				for (const name of Array.from(request.result.objectStoreNames)) request.result.deleteObjectStore(name);
 				request.result.createObjectStore('persona-bubble-field-root-secret');
@@ -850,7 +858,7 @@ async function seedRelayAccount(page: Page, secretKey: Uint8Array, pubkey: strin
 			transaction.onabort = () => reject(transaction.error);
 		});
 		database.close();
-	}, { accountPubkey: pubkey, accountIndex: fixtureAccountIndex, expiresAtMs: lifespanExpiresAtMs, points, abilities, characterId: deriveCharacterFromPubkey(pubkey, CHARACTER_CATALOG).characterId });
+	}, { accountPubkey: pubkey, accountIndex: fixtureAccountIndex, expiresAtMs: lifespanExpiresAtMs, points, abilities, characterId: requireCharacterFromPubkey(pubkey).characterId });
 }
 
 async function readRelayGameState(page: Page): Promise<{
@@ -967,7 +975,7 @@ async function overwriteRelayGameState(page: Page, gameState: Record<string, unk
 async function seedUnavailablePersona(page: Page, kind: 'missing' | 'corrupt'): Promise<void> {
 	await page.goto('/favicon.svg');
 	await page.evaluate((stateKind) => new Promise<void>((resolve, reject) => {
-		const request = indexedDB.open('persona-bubble-field-account', 5);
+		const request = indexedDB.open('persona-bubble-field-account', 6);
 		request.onupgradeneeded = () => {
 			for (const name of Array.from(request.result.objectStoreNames)) request.result.deleteObjectStore(name);
 			request.result.createObjectStore('persona-bubble-field-root-secret');
@@ -2231,7 +2239,7 @@ test.describe('Relay startup', () => {
 
 		await expect(page.getByRole('dialog')).toBeVisible();
 		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
-		const previousCharacterId = deriveCharacterFromPubkey(pubkey, CHARACTER_CATALOG).characterId;
+		const previousCharacterId = requireCharacterFromPubkey(pubkey).characterId;
 		const pendingCharacterIds = await page.evaluate(async () => {
 			const database = await new Promise<IDBDatabase>((resolve, reject) => {
 				const request = indexedDB.open('persona-bubble-field-account');
@@ -2779,7 +2787,7 @@ test.describe('Relay startup', () => {
 		await page.locator('[data-cell-position="4,2"]').click();
 		await expect(page.getByLabel('Reply preview', { exact: true })).toContainText('Relay trace root');
 
-		const rootCharacter = deriveCharacterFromPubkey(trace.root.pubkey, CHARACTER_CATALOG);
+		const rootCharacter = requireCharacterFromPubkey(trace.root.pubkey);
 		const rootCalls = await composerContextCalls(page);
 		const rootCall = [...rootCalls].reverse().find((call) => call.preloadedEvents?.[trace.root.id]);
 		expect(rootCall?.preloadedEvents?.[trace.root.id]?.pubkey).toBe(trace.root.pubkey);
@@ -2791,7 +2799,7 @@ test.describe('Relay startup', () => {
 
 		await page.locator(`[data-trace-reply-id="${trace.direct.id}"] .trace-reply-content-button`).click();
 		await expect(page.getByLabel('Reply preview', { exact: true })).toContainText('Relay direct reply');
-		const replyCharacter = deriveCharacterFromPubkey(trace.direct.pubkey, CHARACTER_CATALOG);
+		const replyCharacter = requireCharacterFromPubkey(trace.direct.pubkey);
 		const replyCalls = await composerContextCalls(page);
 		const replyCall = [...replyCalls].reverse().find((call) => call.preloadedEvents?.[trace.direct.id]);
 		expect(replyCall?.preloadedEvents?.[trace.direct.id]?.pubkey).toBe(trace.direct.pubkey);

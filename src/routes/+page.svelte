@@ -38,13 +38,14 @@
 	import {
 		DEV_WORLD_SELF_ID,
 		getDevWorldCharacter,
+		getDevWorldFixtureCharacter,
 		isDevWorldSandboxEnabled,
 		moveDevWorldSelf,
 		resetDevWorldPresence,
 		resolveDevWorldCharacterId
 	} from '$lib/devWorldSandbox';
 	import { CHARACTER_CATALOG, getCharacterById, type Character } from '$lib/character';
-	import { deriveCharacterFromPubkey } from '$lib/characterAssignment';
+import { requireCharacterFromPubkey } from '$lib/characterAssignment';
 	import ProfileDialog from '$lib/ProfileDialog.svelte';
 	import IdentitySelectionDialog from '$lib/IdentitySelectionDialog.svelte';
 	import LifespanHud from '$lib/LifespanHud.svelte';
@@ -408,7 +409,7 @@
 	let speechSuggestionCharacter = $derived(
 		devWorldSandboxEnabled
 			? getDevWorldCharacter(selectedCharacterId)
-			: selfSigner ? deriveCharacterFromPubkey(selfSigner.pubkey, CHARACTER_CATALOG)
+			: selfSigner ? requireCharacterFromPubkey(selfSigner.pubkey)
 				: getCharacterById(selectedCharacterId) ?? CHARACTER_CATALOG[0]
 	);
 	let speechSuggestionConversation = $derived.by((): readonly SpeechSuggestionConversationEntry[] => {
@@ -428,9 +429,7 @@
 			.sort((left, right) => left.createdAt - right.createdAt || left.id.localeCompare(right.id))
 			.slice(-8)
 			.map((event) => ({
-				speaker: event.pubkey === DEV_WORLD_SELF_ID
-					? getDevWorldCharacter(selectedCharacterId).name
-					: deriveCharacterFromPubkey(event.pubkey, CHARACTER_CATALOG).name,
+				speaker: traceCharacter(event.pubkey, devWorldSandboxEnabled, selectedCharacterId).name,
 				content: event.content
 			}));
 	});
@@ -1038,7 +1037,7 @@
 						if (result === 'reloaded') return;
 					}
 					if (selfSigner.characterProfileRevision !== CURRENT_CHARACTER_PROFILE_REVISION) {
-						const character = deriveCharacterFromPubkey(selfSigner.pubkey, CHARACTER_CATALOG);
+						const character = requireCharacterFromPubkey(selfSigner.pubkey);
 						const absolutePictureUrl = new URL(
 							asset(`/${character.picture}`),
 							window.location.origin
@@ -1725,7 +1724,7 @@
 		if (target?.targetId !== targetId || !worldSession) return null;
 		const event = await worldSession.getTracePreviewEvent(target.rootId, targetId);
 		if (!event) return null;
-		const character = deriveCharacterFromPubkey(event.pubkey, CHARACTER_CATALOG);
+		const character = requireCharacterFromPubkey(event.pubkey);
 		return {
 			event,
 			profile: {
@@ -2176,8 +2175,13 @@
 	}
 
 	function traceCharacter(pubkey: string, isDevWorldSandbox: boolean, currentCharacterId: string): Character {
-		return isDevWorldSandbox && pubkey === DEV_WORLD_SELF_ID
-			? getDevWorldCharacter(currentCharacterId) : deriveCharacterFromPubkey(pubkey, CHARACTER_CATALOG);
+		if (isDevWorldSandbox && pubkey === DEV_WORLD_SELF_ID) return getDevWorldCharacter(currentCharacterId);
+		try {
+			return requireCharacterFromPubkey(pubkey);
+		} catch (error) {
+			if (isDevWorldSandbox) return getDevWorldFixtureCharacter(pubkey, currentCharacterId);
+			throw error;
+		}
 	}
 
 </script>
@@ -2235,6 +2239,7 @@
 				messages={recentMessageTimeline}
 				tones={colorByPubkey}
 				{selectedCharacterId}
+				isDevWorldSandbox={devWorldSandboxEnabled}
 				onOpenProfile={openProfile}
 			/>
 			<FieldScene

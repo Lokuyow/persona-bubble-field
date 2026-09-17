@@ -126,8 +126,11 @@ NIP-32のnamespaceは公開された語彙であり、認証・所有権・ア�
 - 所定のNIP-32 `L` namespaceが付いている
 - 同namespaceをmarkerとする `l=chat` が付いている
 - 発言時positionを表す単一canonical `w` が付いている
+- author pubkeyが現在のcharacter slotへ解決できる
 
 Relayのtag filterによる取得結果だけを認証結果として扱わず、受信したevent自体のtag構造をクライアント側でも検証する。
+
+専用clientは、現在の1024固定slot方式でauthor pubkeyからcharacterへ解決できないkind 42を専用世界の有効なactivityとして受理しない。これはofficial-client認証ではなく、同じ使用中slotへ対応するpubkeyを使う外部・改造clientまで防止するものではない。
 
 NIP-28形式のkind 42 replyは、外部client製を含め完全に無視する。live bubble、Chatter、presence evidence、trace root候補にせず、legacy reply互換経路も設けない。
 
@@ -148,12 +151,13 @@ kind 42には発言時の論理フィールド座標も保持する。
 - immediate parentを指すlowercase `e` / `k` / `p`
 - kind 1111自身のworld position tagは持たない
 - 必要な場合だけspeech type label
+- author pubkeyが現在のcharacter slotへ解決できる
 
 rootは有効なtop-level kind 42なので `K=42` とする。root kind 42へのdirect replyでは、rootを `E/K/P` と `e/k/p` の双方で参照する。kind 1111へのreplyでは、`E/K/P` は同じrootを維持し、`e/k/p` はparent kind 1111とそのauthorを指す。
 
 project labelsはtarget-channel membershipまたは公式client証明ではない。受理する1111のuppercase `E` rootは、対象kind 40 worldに属する有効なtop-level kind 42でなければならない。immediate parentはroot自身または同じroot treeの有効な1111でなければならない。`K/P` と `k/p` は実際のroot/parentのkindとauthorに照合する。
 
-external/modified client製1111も、署名、project labels、root/parent relation、kind、authorを全て検証できる場合だけ受理する。legacy signed replyに含まれる `w` はextra tagとして無視する。NIP-22の `p` は本文mentionにも使えるため、`p=self`だけで自分へのdirect replyや通知対象と判定してはならない。
+external/modified client製1111も、署名、project labels、root/parent relation、kind、author、character slot解決を全て検証できる場合だけ受理する。未割当slotのauthorによる1111は受理しない。これはofficial-client認証ではない。legacy signed replyに含まれる `w` はextra tagとして無視する。NIP-22の `p` は本文mentionにも使えるため、`p=self`だけで自分へのdirect replyや通知対象と判定してはならない。
 
 `K/k/P/p`等のsemantic correctnessは受信後に検証する。REQを過度に狭めるための `#K` filterは必須としない。trace conversationの取得意味論は [`SPEC-50-発言の痕跡.md`](./SPEC-50-発言の痕跡.md) を正とする。
 
@@ -168,6 +172,8 @@ position同期等に使用するアプリ固有イベントについては、kin
 各イベントのkind、`d` tag、channel参照等によって用途を十分に識別できる場合は、NIP-32 labelを重複して付与しない。
 
 positionイベントの具体仕様は [`SPEC-30-フィールド・position・presence.md`](./SPEC-30-フィールド・position・presence.md) を正とする。
+
+専用clientは、kind 30078についてもauthor pubkeyが現在のcharacter slotへ解決できる場合だけ、専用世界の有効なposition activityとして受理する。未割当slotのeventは署名やtagが正しくても専用世界では利用しない。これはofficial-client認証ではなく、使用中slotに対応する外部・改造clientを拒否するものではない。
 
 ### 交換可能なリアルタイムイベント
 
