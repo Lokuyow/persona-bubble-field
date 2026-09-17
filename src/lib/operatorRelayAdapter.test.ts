@@ -28,10 +28,10 @@ function fakePool(scenarios: Readonly<Record<string, Scenario>>) {
 					else if (scenario === 'connection-failure') params.onclose('relay connection failed');
 				});
 				return subscription;
-			})
+			}),
+			publish: vi.fn(async () => 'accepted')
 		})),
 		close: vi.fn(),
-		publish: vi.fn(() => [Promise.resolve('ok')])
 	} satisfies OperatorRelayPool;
 	return { pool, subscriptions, callbacks };
 }
@@ -77,9 +77,8 @@ describe('operator per-Relay finite read adapter', () => {
 		const close = vi.fn();
 		let params: { onevent: (value: Event) => void; oneose: () => void; onclose: (reason: string) => void } | undefined;
 		const pool = {
-			ensureRelay: vi.fn(async () => ({ subscribe: vi.fn((_filters: Filter[], next) => { params = next; return { close }; }) })),
-			close: vi.fn(),
-			publish: vi.fn(() => [Promise.resolve('ok')])
+			ensureRelay: vi.fn(async () => ({ subscribe: vi.fn((_filters: Filter[], next) => { params = next; return { close }; }), publish: vi.fn(async () => 'accepted') })),
+			close: vi.fn()
 		} satisfies OperatorRelayPool;
 		const adapter = createOperatorRelayAdapter({ poolFactory: () => pool, operationTimeoutMs: 2 });
 		const pending = adapter.query({ kinds: [1] }, ['relay']);
@@ -101,5 +100,29 @@ describe('operator per-Relay finite read adapter', () => {
 		expect(pool.close).toHaveBeenCalledTimes(1);
 		expect(pool.close).toHaveBeenCalledWith(['relay']);
 		expect(pool).not.toHaveProperty('destroy');
+	});
+
+	it('distinguishes connection failure, rejection, timeout, acceptance, and partial success per Relay', async () => {
+		const connection = (publish: () => Promise<string>) => ({
+			subscribe: vi.fn(() => ({ close: vi.fn() })),
+			publish: vi.fn(publish)
+		});
+		const accepted = connection(async () => 'accepted');
+		const rejected = connection(async () => { throw new Error('\u001b[31mconnection policy rejection\u001b]0;x\u0007'); });
+		const timedOut = connection(async () => { throw new Error('publish timed out'); });
+		const failed = connection(async () => { throw new Error('socket closed'); });
+		const pool = {
+			ensureRelay: vi.fn(async (url: string) => {
+				if (url === 'connect-failed') throw new Error('cannot connect');
+				return ({ 'accepted': accepted, 'rejected': rejected, 'timed-out': timedOut, 'failed': failed } as Record<string, typeof accepted>)[url];
+			}),
+			close: vi.fn()
+		} satisfies OperatorRelayPool;
+		const adapter = createOperatorRelayAdapter({ poolFactory: () => pool, operationTimeoutMs: 20 });
+		const result = await adapter.publish(event('publish-event') as never, ['accepted', 'rejected', 'timed-out', 'failed', 'connect-failed']);
+		expect(Object.fromEntries(result.map((value) => [value.relayUrl, value.outcome]))).toEqual({
+			accepted: 'accepted', rejected: 'rejected', 'timed-out': 'timeout', failed: 'connection-failure', 'connect-failed': 'connection-failure'
+		});
+		expect(result.find((value) => value.relayUrl === 'rejected')?.notice).toContain('connection policy rejection');
 	});
 });

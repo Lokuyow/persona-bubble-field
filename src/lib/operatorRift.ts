@@ -12,6 +12,7 @@ import {
 	getRiftScheduleForInstance,
 	isManualRiftControlScheduleEligible,
 	isManualRiftInstanceScheduleEligible,
+	isManualRiftRegistrationScheduleEligible,
 	RIFT_EVENT_DEFINITION,
 	RIFT_MANUAL_CONTROL_LOOKBACK_SECONDS,
 	selectCanonicalManualRiftControl
@@ -74,7 +75,7 @@ export type OperatorFailureReason =
 	| 'invalid operator secret'
 	| 'operator secret is not the channel creator'
 	| 'control self-validation failed'
-	| 'all authoritative Relays rejected the event';
+	| 'all authoritative Relays failed to accept the event';
 
 const SAFE_DISPLAY_MAX_LENGTH = 240;
 
@@ -162,6 +163,11 @@ async function activeManualPreflight(
 
 function assertNoActiveManual(control: ReturnType<typeof selectCanonicalManualRiftControl>): void {
 	if (control) throw new OperatorFailure('active manual Rift already exists');
+}
+
+function assertScheduledStartAllowed(nowMs: number): void {
+	const registrationAtMs = unixSeconds(nowMs) * 1000;
+	if (!isManualRiftRegistrationScheduleEligible(registrationAtMs)) throw new OperatorFailure('scheduled Rift conflict');
 }
 
 function formatIso(ms: number): string {
@@ -255,11 +261,14 @@ export async function runManualRiftOperator(
 		const metadata = await discoverMetadata(world, dependencies.relay, dependencies.output);
 		const currentTime = now();
 		assertNoActiveManual(await activeManualPreflight(metadata, dependencies.relay, currentTime, dependencies.output));
+		assertScheduledStartAllowed(currentTime);
 		writePreview(dependencies.output, metadata, mode, currentTime);
 
 		if (mode === 'publish') {
 			if ((await dependencies.confirmPublish()) !== 'confirmed') throw new OperatorCancelled('confirmation cancelled');
-			assertNoActiveManual(await activeManualPreflight(metadata, dependencies.relay, now(), dependencies.output));
+			const confirmedAt = now();
+			assertNoActiveManual(await activeManualPreflight(metadata, dependencies.relay, confirmedAt, dependencies.output));
+			assertScheduledStartAllowed(confirmedAt);
 		}
 
 		const secret = await dependencies.readSecret();
@@ -272,7 +281,7 @@ export async function runManualRiftOperator(
 			}
 			const results = await dependencies.relay.publish(control.event, metadata.relays);
 			reportPublish(dependencies.output, results);
-			if (!publishSucceeded(results)) throw new OperatorFailure('all authoritative Relays rejected the event');
+			if (!publishSucceeded(results)) throw new OperatorFailure('all authoritative Relays failed to accept the event');
 			dependencies.output.stdout('Manual Rift control published.');
 			return { exitCode: 0, mode, metadata, controlEvent: control.event, instanceId: control.instanceId };
 		} finally {

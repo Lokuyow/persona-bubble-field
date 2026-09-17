@@ -293,11 +293,25 @@ function nextRiftDateKey(dateKey: string): string {
 	return date.toISOString().slice(0, 10);
 }
 
+function manualRiftInterval(registrationAtMs: number): Readonly<{ registrationAtMs: number; endedAtMs: number }> | null {
+	if (!Number.isFinite(registrationAtMs)) return null;
+	return { registrationAtMs, endedAtMs: registrationAtMs + 5 * 60 * 1000 + RIFT_ROUND_COUNT * RIFT_ROUND_MS };
+}
+
 export function riftScheduleIntervalsOverlap(
 	first: Readonly<{ warningAtMs: number; endedAtMs: number }>,
 	second: Readonly<{ registrationAtMs: number; endedAtMs: number }>
 ): boolean {
 	return first.warningAtMs < second.endedAtMs && second.registrationAtMs < first.endedAtMs;
+}
+
+/** Checks whether a Rift beginning at the supplied registration time conflicts with scheduled Rift windows. */
+export function isManualRiftRegistrationScheduleEligible(registrationAtMs: number): boolean {
+	const manual = manualRiftInterval(registrationAtMs);
+	if (!manual) return false;
+	const scheduled = getRiftSchedule(registrationAtMs);
+	const nextScheduled = getRiftScheduleForDate(nextRiftDateKey(scheduled.dateKey), registrationAtMs);
+	return !riftScheduleIntervalsOverlap(scheduled, manual) && !riftScheduleIntervalsOverlap(nextScheduled, manual);
 }
 
 /** Pure schedule/protocol eligibility shared by browser control handling and operator tooling. */
@@ -306,9 +320,7 @@ export function isManualRiftInstanceScheduleEligible(instanceId: string, nowMs: 
 	if (!manual) return false;
 	const manualSchedule = getRiftScheduleForInstance(instanceId, nowMs);
 	if (!manualSchedule || !['registration', 'game'].includes(manualSchedule.phase)) return false;
-	const scheduled = getRiftSchedule(nowMs);
-	const nextScheduled = getRiftScheduleForDate(nextRiftDateKey(scheduled.dateKey), nowMs);
-	return !riftScheduleIntervalsOverlap(scheduled, manualSchedule) && !riftScheduleIntervalsOverlap(nextScheduled, manualSchedule);
+	return isManualRiftRegistrationScheduleEligible(manualSchedule.registrationAtMs);
 }
 
 export function isManualRiftControlScheduleEligible(control: RealtimeControlEnvelope, nowMs: number): boolean {

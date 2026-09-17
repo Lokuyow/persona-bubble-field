@@ -30,18 +30,19 @@ type RelaySubscription = Readonly<{
 }>;
 
 type RelayConnection = Readonly<{
+	connected?: boolean;
 	subscribe: (filters: Filter[], params: Readonly<{
 		onevent: (event: Event) => void;
 		oneose: () => void;
 		onclose: (reason: string) => void;
 		eoseTimeout?: number;
 	}>) => RelaySubscription;
+	publish: (event: VerifiedEvent) => Promise<string>;
 }>;
 
 export type OperatorRelayPool = Readonly<{
 	ensureRelay: (url: string, params?: Readonly<{ connectionTimeout?: number }>) => Promise<RelayConnection>;
 	close: (relays: string[]) => void;
-	publish: (relays: string[], event: VerifiedEvent, params?: Readonly<{ maxWait?: number }>) => Promise<string>[];
 }>;
 
 export type OperatorRelayAdapter = Readonly<{
@@ -61,10 +62,13 @@ function isErrorWithMessage(value: unknown): value is { message: string } {
 	return value instanceof Error && typeof value.message === 'string';
 }
 
-function classifyPublishFailure(error: unknown): Readonly<{ outcome: 'timeout' | 'connection-failure'; notice?: string }> {
+function classifyPublishFailure(error: unknown, relay: RelayConnection): Readonly<{ outcome: 'rejected' | 'timeout' | 'connection-failure'; notice?: string }> {
 	const message = isErrorWithMessage(error) ? error.message : '';
 	if (/timed? out|timeout/i.test(message)) return { outcome: 'timeout', notice: message };
-	return { outcome: 'connection-failure', notice: message || undefined };
+	if (relay.connected === false || /sending .*closed|(?:socket|websocket).*(?:closed|not open)|connection (?:closed|reset|lost|failed)|econn|enotfound|eai_again|network (?:error|unreachable)/i.test(message)) {
+		return { outcome: 'connection-failure', notice: message || undefined };
+	}
+	return { outcome: 'rejected', notice: message || undefined };
 }
 
 function classifySubscriptionClose(reason: string): Readonly<{ status: 'closed' | 'connection-failure'; notice?: string }> {
@@ -135,13 +139,18 @@ export function createOperatorRelayAdapter(options: OperatorRelayAdapterOptions 
 		if (closed) throw new Error('Operator Relay adapter is closed.');
 		return await Promise.all(relays.map(async (relayUrl): Promise<OperatorRelayPublishResult> => {
 			usedRelays.add(relayUrl);
+			let relay: RelayConnection;
 			try {
-				const pending = pool.publish([relayUrl], event, { maxWait: timeoutMs });
-				if (!pending[0]) throw new Error('publish request unavailable');
-				await pending[0];
+				relay = await pool.ensureRelay(relayUrl, { connectionTimeout: timeoutMs });
+			} catch (error) {
+				const notice = isErrorWithMessage(error) ? error.message : undefined;
+				return { relayUrl, outcome: 'connection-failure', ...(notice ? { notice } : {}) };
+			}
+			try {
+				await relay.publish(event);
 				return { relayUrl, outcome: 'accepted' };
 			} catch (error) {
-				return { relayUrl, ...classifyPublishFailure(error) };
+				return { relayUrl, ...classifyPublishFailure(error, relay) };
 			}
 		}));
 	}

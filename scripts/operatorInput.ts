@@ -75,9 +75,10 @@ export async function readHiddenNsec(io?: HiddenLineIo): Promise<Uint8Array> {
 	const encoded = await readHiddenLine('nsec: ', io);
 	const decoded = decode(encoded);
 	if (decoded.type !== 'nsec' || !(decoded.data instanceof Uint8Array) || decoded.data.length !== 32) {
+		if (decoded.data instanceof Uint8Array) decoded.data.fill(0);
 		throw new Error('invalid nsec');
 	}
-	return new Uint8Array(decoded.data);
+	return decoded.data;
 }
 
 export async function confirmPublish(io?: HiddenLineIo): Promise<'confirmed' | 'cancelled'> {

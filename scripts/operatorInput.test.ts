@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
+import { npubEncode, nsecEncode } from 'nostr-tools/nip19';
 import { describe, expect, it } from 'vitest';
-import { confirmPublish, OperatorInputCancelled, OperatorInputEof, readHiddenLine, type HiddenLineIo } from './operatorInput';
+import { confirmPublish, OperatorInputCancelled, OperatorInputEof, readHiddenLine, readHiddenNsec, type HiddenLineIo } from './operatorInput';
 
 class FakeTty extends EventEmitter {
 	isTTY = true;
@@ -42,5 +43,25 @@ describe('operator hidden TTY input', () => {
 		await expect(eof).rejects.toBeInstanceOf(OperatorInputEof);
 		expect(eofStreams.output.text).toBe('secret: ');
 		expect(eofInput.rawModes).toEqual([true, false]);
+	});
+
+	it('transfers decoded nsec bytes to the caller for zeroization ownership', async () => {
+		const input = new FakeTty();
+		const streams = io(input);
+		const pending = readHiddenNsec(streams.io);
+		input.emit('data', `${nsecEncode(new Uint8Array(32).fill(3))}\n`);
+		const secret = await pending;
+		expect(secret).toHaveLength(32);
+		secret.fill(0);
+		expect(secret.every((byte) => byte === 0)).toBe(true);
+	});
+
+	it('rejects non-nsec input without displaying it', async () => {
+		const input = new FakeTty();
+		const streams = io(input);
+		const pending = readHiddenNsec(streams.io);
+		input.emit('data', `${npubEncode('04'.repeat(32))}\n`);
+		await expect(pending).rejects.toThrow('invalid nsec');
+		expect(streams.output.text).toBe('nsec: ');
 	});
 });
