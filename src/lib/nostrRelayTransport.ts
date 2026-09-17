@@ -285,6 +285,11 @@ function isConnectionUnavailable(state: ConnectionState): boolean {
 	return state === 'error' || state === 'rejected';
 }
 
+function isInitialConnectionUnavailable(state: ConnectionState, requestSent: boolean): boolean {
+	return isConnectionUnavailable(state)
+		|| !requestSent && (state === 'waiting-for-retrying' || state === 'retrying');
+}
+
 function filterEntries(filter: unknown): readonly [string, unknown][] | null {
 	if (filter === null || typeof filter !== 'object' || Array.isArray(filter)) return null;
 	return Object.entries(filter as Record<string, unknown>).filter(([, value]) => value !== undefined);
@@ -416,6 +421,7 @@ export function createNostrRelayTransport(
 	let metadataDiagnostics: MetadataDiscoveryDiagnostics | null = null;
 	let startInput: PrimaryStartInput | null = null;
 	let initialPhase = false;
+	const primaryRequestsSent = new Set<PrimaryPairKey>();
 	const initialMessages: ParsedWorldMessage[] = [];
 	const initialPositions: ParsedPositionEvent[] = [];
 	const messageIds = new Set<string>();
@@ -458,11 +464,11 @@ export function createNostrRelayTransport(
 		const canonical = canonicalRelay(relayUrl);
 		if (!canonical) return;
 		connections.set(canonical, { relayUrl: canonical, state: connectionState });
-		if (initialPhase && isConnectionUnavailable(connectionState)) {
+		if (initialPhase) {
 			for (const subscription of ['world-messages', 'world-positions'] as const) {
 				const key = pairKey(canonical, subscription);
 				const pair = primaryPairs.get(key);
-				if (pair && pair.status === 'pending') {
+				if (pair && pair.status === 'pending' && isInitialConnectionUnavailable(connectionState, primaryRequestsSent.has(key))) {
 					primaryPairs.set(key, { ...pair, status: 'unavailable' });
 				}
 			}
@@ -528,6 +534,7 @@ export function createNostrRelayTransport(
 		const configuredRelay = (url: string) => aliases.get(new URL(url).toString());
 		const results = new Map<string, RelayQueryDiagnostic>();
 		const subIds = new Map<string, string>();
+		const requestsSent = new Set<string>();
 		return new Promise((resolve, reject) => {
 			let settled = false;
 			const resources = new Subscription();
@@ -555,7 +562,10 @@ export function createNostrRelayTransport(
 				const request = reqFromOutgoing(packet);
 				if (!request || !matchesQueryFilter(request.filters, filter)) return;
 				const relayUrl = configuredRelay(packet.to);
-				if (relayUrl && !results.has(relayUrl)) subIds.set(relayUrl, request.subId);
+				if (relayUrl && !results.has(relayUrl)) {
+					subIds.set(relayUrl, request.subId);
+					requestsSent.add(relayUrl);
+				}
 			}));
 			resources.add(client.createAllEventObservable().subscribe((packet) => {
 				const relayUrl = configuredRelay(packet.from);
@@ -571,7 +581,7 @@ export function createNostrRelayTransport(
 				finish();
 			}));
 			const unavailable = (relayUrl: string, connection: ConnectionState | undefined) => {
-				if (connection && isConnectionUnavailable(connection) && !results.has(relayUrl)) {
+				if (connection && isInitialConnectionUnavailable(connection, requestsSent.has(relayUrl)) && !results.has(relayUrl)) {
 					results.set(relayUrl, { relayUrl, status: 'unavailable' });
 				}
 			};
@@ -668,6 +678,7 @@ export function createNostrRelayTransport(
 		const client = requireRxNostr();
 		if (!metadata || !startInput) throw new Error('Primary startup is missing resolved metadata or callbacks.');
 		initialPhase = true;
+		primaryRequestsSent.clear();
 		const positionSlots = POSITION_SLOT_IDENTIFIERS;
 		for (const relayUrl of metadata.relays) {
 			for (const subscription of ['world-messages', 'world-positions'] as const) {
@@ -717,6 +728,7 @@ export function createNostrRelayTransport(
 				const mappingKey = `${relayUrl}\u0000${request.subId}`;
 				primarySubIds.set(mappingKey, logical);
 				activeSubIds.set(key, request.subId);
+				primaryRequestsSent.add(key);
 				closedSubIds.delete(mappingKey);
 			});
 			// Consume the public, filter-matched event stream synchronously. The
