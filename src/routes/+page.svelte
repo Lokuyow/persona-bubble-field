@@ -291,6 +291,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	let deathTransitionInFlight = false;
 	let runRuntimeRefresh: (() => Promise<void>) | null = null;
 	let startReadOnlyWorld: (() => void) | null = null;
+	let startSelectedWorld: ((persona: PersonaSnapshot) => Promise<void>) | null = null;
 	const realtimeEventRegistry = enabledRealtimeEventDefinitions();
 	const riftEventEnabled = realtimeEventRegistry.some((definition) => definition.eventType === 'rift');
 	let realtimeStatus = $state<'inactive' | 'active' | 'degraded'>(devRiftFixtureEnabled ? 'active' : 'inactive');
@@ -1008,6 +1009,43 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			}
 		};
 		startReadOnlyWorld = () => { void startReadSession(null); };
+		startSelectedWorld = async (persona: PersonaSnapshot): Promise<void> => {
+			personaSnapshot = persona;
+			selfSigner = persona.signer;
+			pendingIdentitySelection = null;
+			composerStartupError = null;
+			entryRetryable = false;
+			selfPositionWriteState = { kind: 'unavailable' };
+			selfMessageAvailability = { kind: 'unavailable' };
+			connectionStatus = { kind: 'bootstrapping' };
+			realtimeRecoveryInstanceIds.clear();
+			const ledger = await getRealtimeSettlementLedger(persona);
+			for (const instanceId of (ledger?.pendingInstanceIds ?? [])
+				.filter((id) => getRiftScheduleForInstance(id, Date.now()) !== null)) {
+				realtimeRecoveryInstanceIds.add(instanceId);
+			}
+			let characterProfilePublication: PreparedCharacterProfilePublication | null = null;
+			if (persona.signer.characterProfileRevision !== CURRENT_CHARACTER_PROFILE_REVISION) {
+				const character = requireCharacterFromPubkey(persona.signer.pubkey);
+				const absolutePictureUrl = new URL(
+					asset(`/${character.picture}`),
+					window.location.origin
+				).toString();
+				characterProfilePublication = prepareCharacterProfilePublication({
+					signer: persona.signer,
+					character,
+					absolutePictureUrl,
+					createdAt: Math.floor(persona.signer.identityCreatedAtMs / 1000)
+				});
+			}
+			const startup = startReadSession(persona.signer, characterProfilePublication, persona.activeRun.runNumber, true);
+			// startReadSession installs the new session synchronously before its first await.
+			// Release the selection guard only after the signed session owns the page state.
+			personaLifecycleTransition = false;
+			mendingNowMs = Date.now();
+			updateLifespanHud(mendingNowMs, true);
+			await startup;
+		};
 
 		const begin = async () => {
 			if (devWorldSandboxEnabled || startRequested || !hasUsableViewport()) return;
@@ -1123,6 +1161,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			window.clearInterval(expiryTimer);
 			if (runRuntimeRefresh === refreshRuntime) runRuntimeRefresh = null;
 			if (startReadOnlyWorld) startReadOnlyWorld = null;
+			if (startSelectedWorld) startSelectedWorld = null;
 			session?.dispose();
 			devTraceConversationRuntime?.dispose();
 			devTraceConversationRuntime = null;
@@ -1275,7 +1314,15 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		personaLifecycleTransition = true;
 		try {
 			const result = await selectIdentity(selection.generation, candidate);
-			if (result.kind === 'selected' || result.kind === 'superseded') {
+			if (result.kind === 'selected') {
+				if (startSelectedWorld) {
+					await startSelectedWorld(result.persona);
+					return;
+				}
+				enterReadOnlyFallback('Persona startup is unavailable.');
+				return;
+			}
+			if (result.kind === 'superseded') {
 				window.location.reload();
 				return;
 			}

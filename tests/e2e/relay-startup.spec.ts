@@ -1678,14 +1678,28 @@ test.describe('Relay startup', () => {
 		const reloadedButtons = page.getByRole('button', { name: /を選ぶ$/ });
 		await expect(reloadedButtons).toHaveCount(3);
 		expect(await reloadedButtons.allTextContents()).toEqual(labelsBeforeReload);
+		await page.evaluate(() => { document.documentElement.dataset.identitySelectionDocumentToken = crypto.randomUUID(); });
+		const documentToken = await page.locator('html').getAttribute('data-identity-selection-document-token');
 		await reloadedButtons.nth(1).click();
 		await expect(page.getByRole('dialog')).toHaveCount(0);
+		expect(await page.locator('html').getAttribute('data-identity-selection-document-token')).toBe(documentToken);
 		await expect.poll(() => page.evaluate(() => Boolean((window as typeof window & { __relayStartupTest?: unknown }).__relayStartupTest))).toBe(true);
 		await page.evaluate(() => {
 			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
 			relay.releaseMetadata(); relay.releasePrimary();
 		});
 		await expect(page.locator('.participant[data-self="true"]')).toBeVisible();
+		const selectedPubkey = await page.locator('.participant[data-self="true"]').getAttribute('data-participant-id');
+		expect(selectedPubkey).toBeTruthy();
+		await expect.poll(async () => (await relayState(page)).state.published.some((event) =>
+			event.kind === 30078 && event.pubkey === selectedPubkey)).toBe(true);
+		await expect.poll(async () => (await relayState(page)).state.published.some((event) =>
+			event.kind === 0 && event.pubkey === selectedPubkey)).toBe(true);
+		const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
+		await editor.fill('selected identity remains publishable without a reload');
+		await page.locator('ehagaki-composer').getByRole('button', { name: 'Send' }).click();
+		await expect.poll(async () => (await relayState(page)).state.published.some((event) =>
+			event.kind === 42 && event.pubkey === selectedPubkey && event.content === 'selected identity remains publishable without a reload')).toBe(true);
 		const lifecycle = await page.evaluate(async () => {
 			const database = await new Promise<IDBDatabase>((resolve, reject) => {
 				const request = indexedDB.open('persona-bubble-field-account');
