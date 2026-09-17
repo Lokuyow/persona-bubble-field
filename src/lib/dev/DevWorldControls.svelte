@@ -105,18 +105,17 @@
 		display: flex;
 		align-items: center;
 		gap: 5px;
-		color: #596662;
-		font-size: 10px;
-		font-weight: 800;
-		white-space: nowrap;
+		width: max-content;
 	}
+
+	.sandbox-speech-injector span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 	.sandbox-live-reply:disabled {
 		opacity: 0.48;
 	}
 
 	.sandbox-speech-injector button {
-		padding-inline: 8px;
+		padding-inline: 7px;
 	}
 
 	.sandbox-reset:focus-visible,
@@ -139,10 +138,15 @@
 		}
 
 		.sandbox-speech-injector {
-			width: min(100vw - 32px, 280px);
+			width: 100%;
 			justify-content: center;
-			flex-wrap: wrap;
-			white-space: normal;
+			gap: 4px;
+		}
+
+		.sandbox-speech-injector button {
+			min-width: 0;
+			flex: 1;
+			padding-inline: 3px;
 		}
 
 		.sandbox-character-picker select {
