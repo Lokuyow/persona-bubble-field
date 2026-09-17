@@ -42,10 +42,12 @@ confirmation and then publishes to the authoritative Relays:
 npm run operator:rift:publish
 ```
 
-Only this explicit command, after an exact `PUBLISH` confirmation and creator
-`nsec` verification, can publish a real EVENT. Automated tests and the Windows
-acceptance procedure never publish a real EVENT; the acceptance procedure uses
-only an invalid marker or Ctrl+C.
+This explicit npm command is the supported publish entrypoint; after an exact
+`PUBLISH` confirmation and creator `nsec` verification it can publish a real
+EVENT. The CLI's direct `--publish` mode is an implementation entrypoint, not
+the recommended invocation. Automated tests and the Windows acceptance
+procedure never publish a real EVENT; the acceptance procedure uses only an
+invalid marker or Ctrl+C.
 
 The CLI accepts the creator `nsec` only through its hidden interactive TTY
 prompt. Never put an `nsec` in argv, an environment variable, a file, or a

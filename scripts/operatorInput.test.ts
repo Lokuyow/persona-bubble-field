@@ -6,10 +6,10 @@ import { confirmPublish, createHiddenInputSession, OperatorInputCancelled, Opera
 class FakeTty extends EventEmitter {
 	isTTY = true;
 	rawModes: boolean[] = [];
-	paused = false;
+	resumeCalls = 0;
 	setRawMode(value: boolean): void { this.rawModes.push(value); }
-	pause(): this { this.paused = true; return this; }
-	resume(): this { this.paused = false; return this; }
+	pause(): this { return this; }
+	resume(): this { this.resumeCalls += 1; return this; }
 }
 
 function io(input: FakeTty): { io: HiddenLineIo; output: { isTTY: true; text: string } } {
@@ -86,6 +86,26 @@ describe('operator hidden TTY input', () => {
 			secret.fill(0);
 			await session.close();
 		}
+		expect(input.rawModes).toEqual([true, false]);
+	});
+
+	it('lazily creates readline and enters raw mode only at the first hidden prompt', async () => {
+		const input = new FakeTty();
+		const streams = io(input);
+		const session = createHiddenInputSession(streams.io);
+		expect(input.rawModes).toEqual([]);
+		expect(input.resumeCalls).toBe(0);
+
+		const confirmation = session.confirmPublish();
+		expect(input.rawModes).toEqual([true]);
+		expect(input.resumeCalls).toBeGreaterThan(0);
+		input.emit('data', 'PUBLISH\n');
+		expect(await confirmation).toBe('confirmed');
+		const nsec = session.readHiddenNsec();
+		setTimeout(() => input.emit('data', `${nsecEncode(new Uint8Array(32).fill(5))}\n`), 0);
+		const secret = await nsec;
+		secret.fill(0);
+		await session.close();
 		expect(input.rawModes).toEqual([true, false]);
 	});
 

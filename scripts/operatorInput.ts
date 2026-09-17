@@ -36,14 +36,8 @@ export function createHiddenInputSession(io: HiddenLineIo = {}): HiddenInputSess
 	const output = io.output ?? process.stdout;
 	assertInteractiveTty(input, output);
 
-	let rl: ReadlineInterface;
-	try {
-		rl = createInterface({ input, terminal: true, historySize: 0, crlfDelay: Infinity });
-	} catch {
-		throw new Error('TTY setup failed');
-	}
-
 	const commandController = new AbortController();
+	let rl: ReadlineInterface | undefined;
 	let activeQuestionController: AbortController | undefined;
 	let termination: 'cancelled' | 'eof' | undefined;
 	let intentionalClose = false;
@@ -66,10 +60,19 @@ export function createHiddenInputSession(io: HiddenLineIo = {}): HiddenInputSess
 		if (!intentionalClose) markTermination('eof');
 	};
 
-	rl.on('SIGINT', onSigint);
-	rl.on('close', onInterfaceClose);
-	input.on('end', onInputEnd);
-	input.on('close', onInputClose);
+	const ensureReadline = (): ReadlineInterface => {
+		if (rl) return rl;
+		try {
+			rl = createInterface({ input, terminal: true, historySize: 0, crlfDelay: Infinity });
+			rl.on('SIGINT', onSigint);
+			rl.on('close', onInterfaceClose);
+			input.on('end', onInputEnd);
+			input.on('close', onInputClose);
+			return rl;
+		} catch {
+			throw new Error('TTY setup failed');
+		}
+	};
 
 	const throwTermination = (): never => {
 		if (termination === 'cancelled') throw new OperatorInputCancelled();
@@ -79,11 +82,12 @@ export function createHiddenInputSession(io: HiddenLineIo = {}): HiddenInputSess
 
 	const readLine = async (prompt: string): Promise<string> => {
 		if (termination || closed) throwTermination();
+		const readline = ensureReadline();
 		output.write(prompt);
 		const questionController = new AbortController();
 		activeQuestionController = questionController;
 		try {
-			return await rl.question('', { signal: questionController.signal });
+			return await readline.question('', { signal: questionController.signal });
 		} catch {
 			if (!termination && !discarding && questionController.signal.aborted) throw new DiscardGapStopped();
 			return throwTermination();
@@ -110,7 +114,7 @@ export function createHiddenInputSession(io: HiddenLineIo = {}): HiddenInputSess
 	};
 
 	const clearEditingLine = (): void => {
-		rl.write(null, { ctrl: true, name: 'u' } satisfies Key);
+		ensureReadline().write(null, { ctrl: true, name: 'u' } satisfies Key);
 	};
 
 	const endDiscardGap = async (): Promise<void> => {
@@ -159,12 +163,14 @@ export function createHiddenInputSession(io: HiddenLineIo = {}): HiddenInputSess
 		intentionalClose = true;
 		commandController.abort();
 		abortActiveQuestion();
-		try { rl.close(); } catch { /* restoration is best effort */ }
+		try { rl?.close(); } catch { /* restoration is best effort */ }
 		try { await discardPromise; } catch { /* cleanup must not mask command results */ }
-		rl.off('SIGINT', onSigint);
-		rl.off('close', onInterfaceClose);
-		input.off('end', onInputEnd);
-		input.off('close', onInputClose);
+		if (rl) {
+			rl.off('SIGINT', onSigint);
+			rl.off('close', onInterfaceClose);
+			input.off('end', onInputEnd);
+			input.off('close', onInputClose);
+		}
 	};
 
 	return { signal: commandController.signal, readLine, confirmPublish, readHiddenNsec, close };
