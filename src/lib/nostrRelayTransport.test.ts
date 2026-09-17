@@ -313,13 +313,12 @@ describe('primary lifecycle', () => {
 	});
 
 	it('starts with available relay A when relay B cannot connect or send a REQ', async () => {
-		vi.mocked(createRxNostr).mockImplementationOnce((config) => actualRxNostr.createRxNostr({ ...config, retry: { strategy: 'off' } }));
 		const f = fixture();
 		f.authorities[1].server.options!.verifyClient = () => false;
-		const result = await f.start(150);
+		const result = await f.start(90);
 		expect(result.primaryPairs.map((pair) => pair.status)).toEqual(['eose', 'eose', 'unavailable', 'unavailable']);
 		expect(f.authorities[1].requests).toEqual([]);
-		expect(f.transport.getDiagnostics().connections[1].state).toBe('error');
+		expect(f.transport.getDiagnostics().connections[1].state).toBe('waiting-for-retrying');
 	});
 
 	it('times out unresolved pairs without losing completed pairs or initial events', async () => {
@@ -693,10 +692,9 @@ describe('metadata discovery network boundary', () => {
 	});
 
 	it('resolves metadata despite one unavailable bootstrap seed', async () => {
-		vi.mocked(createRxNostr).mockImplementationOnce((config) => actualRxNostr.createRxNostr({ ...config, retry: { strategy: 'off' } }));
 		const f = fixture();
 		f.seeds[2].server.options!.verifyClient = () => false;
-		const result = await f.start(150);
+		const result = await f.start(90);
 		expect(result.metadata.source.eventId).toBe(f.metadata.id);
 		expect(result.metadataDiscovery.relays[2].status).toBe('unavailable');
 	});
