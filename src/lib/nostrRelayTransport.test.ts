@@ -23,7 +23,7 @@ vi.mock('rx-nostr', async (importOriginal) => {
 
 const actualRxNostr = await vi.importActual<typeof import('rx-nostr')>('rx-nostr');
 const CREATOR = new Uint8Array(32).fill(11);
-const AUTHOR = new Uint8Array(32).fill(12);
+const AUTHOR = new Uint8Array(32).fill(30);
 const TIME = 1_700_000_010;
 const TIMEOUT = 100;
 const socketConstructor = WebSocket as unknown as IWebSocketConstructor;

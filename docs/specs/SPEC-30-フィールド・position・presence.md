@@ -217,6 +217,8 @@ NIP-78 `kind 30078` の `content` には、そのposition eventが示す論理�
 
 position eventは対象のNIP-28 channel kind 40を `e` tagで参照する。
 
+専用clientは、構造・署名・channel参照が正しい場合でも、author pubkeyが現在のcharacter slotへ解決できないposition eventを有効なparticipant evidenceとして扱わない。未割当authorをpresenceまたはoccupancyへ追加しないため、presentation層だけで隠すfallbackは設けない。これはofficial-client認証ではなく、使用中slotへ対応するpubkeyを使う外部・改造clientまで防止するものではない。
+
 概念的には以下の形式とする。
 
 slot 0：

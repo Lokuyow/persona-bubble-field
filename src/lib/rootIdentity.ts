@@ -4,7 +4,7 @@ import { wordlist as englishWordlist } from '@scure/bip39/wordlists/english.js';
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 import { getPublicKey } from 'nostr-tools/pure';
 import { CHARACTER_CATALOG } from './character';
-import { deriveCharacterFromPubkey } from './characterAssignment';
+import { requireCharacterFromPubkey, resolveCharacterFromPubkey } from './characterAssignment';
 import { deriveBip85NostrEntropy, assertBip85Index, BIP85_INDEX_MAX, BIP85_INDEX_MIN } from './bip85';
 import {
 	createInitialPersonaGameState,
@@ -17,7 +17,7 @@ import {
 import { createMendingJob, materializeMending, projectMending } from './mending';
 
 export const DATABASE_NAME = 'persona-bubble-field-account';
-export const DATABASE_VERSION = 5;
+export const DATABASE_VERSION = 6;
 export const ROOT_SECRET_STORE_NAME = 'persona-bubble-field-root-secret';
 export const PLAYER_LIFECYCLE_STORE_NAME = 'persona-bubble-field-player-state';
 export const CURRENT_CHARACTER_PROFILE_REVISION = 2;
@@ -428,8 +428,9 @@ function deriveMaster(entropy: Uint8Array): HDKey {
 function candidateFromSecret(accountIndex: number, secret: Uint8Array): IdentityCandidate | null {
 	try {
 		const pubkey = getPublicKey(secret);
-		const characterId = deriveCharacterFromPubkey(pubkey, CHARACTER_CATALOG).characterId;
-		return { accountIndex, pubkey, characterId };
+		const character = resolveCharacterFromPubkey(pubkey);
+		if (!character) return null;
+		return { accountIndex, pubkey, characterId: character.characterId };
 	} catch {
 		return null;
 	}
@@ -506,7 +507,7 @@ async function deriveSignerFromMaster(master: HDKey, identity: IdentityRecord): 
 	try {
 		const secretKey = childEntropy.slice();
 		const pubkey = getPublicKey(secretKey);
-		if (pubkey !== identity.pubkey || deriveCharacterFromPubkey(pubkey, CHARACTER_CATALOG).characterId !== identity.characterId) {
+		if (pubkey !== identity.pubkey || requireCharacterFromPubkey(pubkey).characterId !== identity.characterId) {
 			secretKey.fill(0);
 			throw new Error('Derivation mismatch.');
 		}

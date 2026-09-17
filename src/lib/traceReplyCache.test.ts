@@ -26,7 +26,7 @@ import { reconcileTraceRootCache } from './traceRootCache';
 
 const CHANNEL_ID = 'a'.repeat(64);
 const OTHER_CHANNEL_ID = 'b'.repeat(64);
-const SECRET_KEY = new Uint8Array(32).fill(7);
+const SECRET_KEY = new Uint8Array(32).fill(30);
 const connections: Array<Awaited<ReturnType<typeof openTraceDatabase>>> = [];
 
 type RootFixture = Readonly<{ raw: Event; parsed: ParsedWorldMessage }>;
@@ -136,7 +136,7 @@ afterEach(() => {
 describe('trace reply cache reconciliation', () => {
 	it('rejects a signed wrong-root candidate matching the direct query even when both roots are effective', async () => {
 		const root = capRoot;
-		const otherRoot = makeRoot(CHANNEL_ID, 'other-effective-root');
+		const otherRoot = makeRoot(CHANNEL_ID, 'other-effective-root', 100, { x: 1, y: 0 });
 		await reconcileTraceRootCache({ channelId: CHANNEL_ID, field: { columns: 20, rows: 1 }, rawEvents: [root.raw, otherRoot.raw] });
 		const valid = capReplies[0];
 		const template = buildTraceReplyTemplate({

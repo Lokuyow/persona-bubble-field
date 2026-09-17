@@ -1,7 +1,7 @@
 import { BUBBLE_TONES, type BubbleTone } from '../bubblePresentation';
-import { CHARACTER_CATALOG, type Character } from '../character';
-import { deriveCharacterFromPubkey } from '../characterAssignment';
-import { DEV_WORLD_SELF_ID, getDevWorldCharacter } from '../devWorldSandbox';
+import type { Character } from '../character';
+import { requireCharacterFromPubkey } from '../characterAssignment';
+import { DEV_WORLD_SELF_ID, getDevWorldCharacter, getDevWorldFixtureCharacter } from '../devWorldSandbox';
 import type { PresenceState } from '../presence';
 import { projectPresence, type PresenceProjectionOptions } from '../presenceProjection';
 
@@ -41,13 +41,20 @@ export function projectFrontendPresence(input: Readonly<{
 	geometry: PresenceProjectionOptions;
 	colors: Readonly<Record<string, BubbleTone>>;
 }>) {
+	const characterForParticipant = (id: string): Character => {
+		if (id === DEV_WORLD_SELF_ID) return getDevWorldCharacter(input.selectedCharacterId);
+		try {
+			return requireCharacterFromPubkey(id);
+		} catch (error) {
+			if (input.selfProjectionId === DEV_WORLD_SELF_ID) return getDevWorldFixtureCharacter(id, input.selectedCharacterId);
+			throw error;
+		}
+	};
 	const participants: Participant[] = input.presence.participants
 		.filter((participant) => participant.status === 'active')
 		.map((participant) => ({
 			id: participant.id,
-			character: participant.id === DEV_WORLD_SELF_ID
-				? getDevWorldCharacter(input.selectedCharacterId)
-				: deriveCharacterFromPubkey(participant.id, CHARACTER_CATALOG),
+			character: characterForParticipant(participant.id),
 			color: input.colors[participant.id] ?? BUBBLE_TONES[0]
 		}));
 	return projectPresence(input.presence, participants, input.geometry, input.selfProjectionId);

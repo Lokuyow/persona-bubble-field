@@ -48,25 +48,26 @@ Rootは初回に一度だけ生成し、各generationではaccount indexを1か�
 
 prototypeでは、NIP-01のcanonicalな32-byte lowercase hex pubkeyを入力とする。
 
-pubkey全体を符号なし整数として解釈し、候補character catalogの件数でmodを取る。得られたindexのcharacterを割当結果とする。
+character assignment spaceは0-basedの1024個の固定slotとする。pubkey全体を符号なし整数として解釈し、`pubkey integer % 1024`でslot `0..1023`を決定する。
 
-候補catalogには個別のweightやrarityを持たせない。追加hash、独自乱数、永続化されたassignment recordも導入しない。
+slotからcharacterIdへの対応は、各character masterが持つ明示的な永久slot metadataを正とする。現在はcharacterId `001`〜`040`をそれぞれslot `0`〜`39`へ割り当てる。catalogのarray順や件数はassignment semanticsではない。
+
+今後characterを追加する場合は未使用slotへ明示的に割り当て、既存のslot対応を変更しない。一度使用したslotを別characterへ再利用しない。未使用slotへ着地したpubkeyは専用世界内でcharacter未割当として扱う。
+
+候補生成では未使用slotをskipし、各active characterは1つのslotだけを持つ。個別のweightやrarity、追加hash、独自乱数、backend、永続化されたassignment recordは導入しない。
 
 invalid pubkeyまたは空の候補集合は、本来成立しない入力としてfail-closeする。デフォルトcharacterその他のsilent fallbackで隠さない。
 
-prototype期間は、キャラクター総数、catalog内容・順序、導出方式、slot数、slot順、slot → characterId対応等を破壊的に変更してよい。必要であれば既存browser-local account/dataをresetしてよい。
+この1024固定slot方式への変更は、旧来の「catalog件数でmodを取る」方式からのprototype期間中の一度限りのclean breakとする。旧方式で作成されたbrowser-local account / Identityを維持するmigration、legacy assignment、version別互換pathは設けず、account databaseのupgradeでclean resetする。
 
-prototype期間の旧割当を維持するmigration、legacy assignment、version別互換pathは設けない。
-
-正式公開版としてキャラクター体系と導出規則をfreezeした後、pubkey → characterの対応は既存ユーザーの専用世界での人格そのものである。
+正式公開版としてキャラクター体系と1024固定slot規則をfreezeした後、pubkey → characterの対応は既存ユーザーの専用世界での人格そのものである。
 
 そのためfreeze時に、少なくとも以下を確定し、テストfixture等によって固定する。
 
 - 導出アルゴリズム
 - アプリ固有の導出用識別文字列等
-- character catalogの内容・順序
-- character slot数
-- slot順
+- character catalogの内容
+- 固定slot数（1024）
 - slot → characterId の対応
 
 導出方式にversion識別子を含めることはできるが、**versionを変更するだけで既存pubkeyのキャラクターを変更してよいものとはしない。**

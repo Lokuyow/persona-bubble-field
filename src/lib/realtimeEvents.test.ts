@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { finalizeEvent, getPublicKey } from 'nostr-tools/pure';
 import {
 	buildRealtimeControlEventTemplate,
@@ -18,8 +18,10 @@ import {
 } from './realtimeEvents';
 
 const CHANNEL = 'a'.repeat(64);
-const SECRET = new Uint8Array(32).fill(7);
+const SECRET = new Uint8Array(32).fill(30);
 const PUBKEY = getPublicKey(SECRET);
+const UNASSIGNED_SECRET = new Uint8Array(32).fill(1);
+const UNASSIGNED_PUBKEY = getPublicKey(UNASSIGNED_SECRET);
 const DEFINITION: RealtimeEventDefinition<{ action: 'ping'; value: number }> = {
 	eventType: 'ping',
 	protocolVersion: 1,
@@ -75,6 +77,18 @@ describe('realtime event protocol', () => {
 		expect(parseRealtimeAction(signed, CHANNEL, [DEFINITION])).toBeNull();
 	});
 
+	it('rejects an otherwise valid playable event from an unassigned author before action parsing', () => {
+		const parseAction = vi.fn(DEFINITION.parseAction);
+		const definition = { ...DEFINITION, parseAction };
+		const signed = finalizeRealtimeEvent(buildRealtimeEventTemplate({
+			channelId: CHANNEL, relayHint: 'wss://relay.test/', eventType: 'ping', protocolVersion: 1,
+			instanceId: '2026-09-16', payload: { action: 'ping', value: 1 }, createdAt: 1_700_000_000
+		}), UNASSIGNED_SECRET);
+		expect(parseRealtimeEnvelope(signed, CHANNEL, [definition])).toBeNull();
+		expect(parseRealtimeAction(signed, CHANNEL, [definition])).toBeNull();
+		expect(parseAction).not.toHaveBeenCalled();
+	});
+
 	it('builds and validates a creator-signed control without adding an instance index to its filter', () => {
 		const createdAt = 1_700_000_000;
 		const instanceId = `rift:1:manual:${createdAt}:0123456789abcdef0123456789abcdef`;
@@ -89,6 +103,14 @@ describe('realtime event protocol', () => {
 		expect(buildRealtimeInstanceFilter({ channelId: CHANNEL, configuration: { protocolKey: DEFINITION.protocolKey, instanceIds: [instanceId], since: createdAt } })).toEqual({
 			kinds: [REALTIME_EVENT_KIND], '#e': [CHANNEL], '#d': [DEFINITION.protocolKey], '#i': [instanceId], since: createdAt
 		});
+	});
+
+	it('accepts a valid control from an unassigned creator because control authority is creator-based', () => {
+		const signed = finalizeRealtimeEvent(buildRealtimeControlEventTemplate({
+			channelId: CHANNEL, relayHint: 'wss://relay.test/', instanceId: 'rift:1:manual:1700000000:0123456789abcdef0123456789abcdef',
+			payload: { command: 'start', targetProtocolKey: DEFINITION.protocolKey }, createdAt: 1_700_000_000
+		}), UNASSIGNED_SECRET);
+		expect(parseRealtimeControlEnvelope(signed, CHANNEL, UNASSIGNED_PUBKEY)?.payload).toEqual({ command: 'start', targetProtocolKey: DEFINITION.protocolKey });
 	});
 
 	it('keeps instance IDs and history cursors independent for each playable protocol key', () => {

@@ -43,7 +43,8 @@ const otherRelayChannel: ChannelReference = {
 	channelId: CHANNEL_ID,
 	relayHint: 'wss://another-relay.example.com'
 };
-const TEST_SECRET_KEY = new Uint8Array(32).fill(1);
+const TEST_SECRET_KEY = new Uint8Array(32).fill(30);
+const UNMAPPED_SECRET_KEY = new Uint8Array(32).fill(1);
 
 function signedMessage(
 	speechType: 'normal' | 'shout' | 'monologue' = 'normal',
@@ -120,7 +121,8 @@ function parsedRoot(content = 'hello world') {
 function signedTraceReply(
 	root = parsedRoot(),
 	parent = root,
-	override: Partial<Omit<Parameters<typeof buildTraceReplyTemplate>[0], 'root' | 'parent'>> = {}
+	override: Partial<Omit<Parameters<typeof buildTraceReplyTemplate>[0], 'root' | 'parent'>> = {},
+	secretKey: Uint8Array = TEST_SECRET_KEY
 ): VerifiedEvent {
 	return finalizeWorldEvent(buildTraceReplyTemplate({
 		root,
@@ -130,7 +132,7 @@ function signedTraceReply(
 		createdAt: 1_700_000_001,
 		relayHint: channel.relayHint,
 		...override
-	}), TEST_SECRET_KEY);
+	}), secretKey);
 }
 
 describe('Nostr protocol foundation', () => {
@@ -275,6 +277,27 @@ describe('Nostr protocol foundation', () => {
 			slot: 1,
 			position: { x: 8, y: 3 }
 		});
+	});
+
+	it('rejects valid events authored from an unassigned character slot', () => {
+		const message = finalizeWorldEvent(buildWorldMessageTemplate({
+			channel,
+			content: 'unmapped',
+			speechType: 'normal',
+			position: { x: 7, y: 3 },
+			createdAt: 1_700_000_000
+		}), UNMAPPED_SECRET_KEY);
+		const position = finalizeWorldEvent(buildPositionEventTemplate({
+			channel,
+			position: { x: 8, y: 3 },
+			slot: 0,
+			createdAt: 1_700_000_000
+		}), UNMAPPED_SECRET_KEY);
+		const reply = signedTraceReply(parsedRoot(), parsedRoot(), {}, UNMAPPED_SECRET_KEY);
+
+		expect(parseWorldMessage(message, CHANNEL_ID)).toBeNull();
+		expect(parsePositionEvent(position, CHANNEL_ID)).toBeNull();
+		expect(parseTraceReplyCandidate(reply)).toBeNull();
 	});
 
 	it.each([-1, 1_700_000_000.5, Number.MAX_SAFE_INTEGER + 1])(

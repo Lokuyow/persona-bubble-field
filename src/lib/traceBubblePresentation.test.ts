@@ -6,7 +6,7 @@ import { createPresentationBubbleShape, type BubbleTone } from './bubblePresenta
 import { continuationBranchGeometry } from './traceContinuationGeometry';
 import { layoutTraceBubblePresentation, type TraceBubblePresentationInput } from './traceBubblePresentation';
 
-const character: Character = { characterId: '001', name: 'Test', about: 'Test character', picture: 'characters/001.webp' };
+const character: Character = { characterId: '001', slot: 0, name: 'Test', about: 'Test character', picture: 'characters/001.webp' };
 const id = (character: string) => character.repeat(64);
 const root: ParsedWorldMessage = {
 	id: id('a'), pubkey: id('1'), createdAt: 10, content: 'root', speechType: 'normal', position: { x: 1, y: 1 }

@@ -77,6 +77,17 @@ describe('Root / Identity / Run lifecycle', () => {
 		await expect(crypto.subtle.exportKey('raw', rootRecords['root-wrapping-key'] as CryptoKey)).rejects.toBeDefined();
 	});
 
+	it('skips BIP85 indexes that resolve to unassigned slots', async () => {
+		vi.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation((array) => {
+			new Uint8Array(array.buffer, array.byteOffset, array.byteLength).fill(0);
+			return array;
+		});
+		const result = await loadOrCreateLifecycle();
+		if (result.kind !== 'created') throw new Error('Expected fresh state.');
+		expect(result.selection.candidates.map((candidate) => candidate.accountIndex)).toEqual([41, 79, 109]);
+		expect(result.selection.candidates.map((candidate) => candidate.characterId)).toEqual(['038', '030', '012']);
+	});
+
 	it('cleanly replaces pre-v5 prototype stores instead of reading them', async () => {
 		const old = await openDB(DATABASE_NAME, 4, {
 			upgrade(db) {
@@ -92,6 +103,26 @@ describe('Root / Identity / Run lifecycle', () => {
 		const db = await openDB(DATABASE_NAME);
 		expect(Array.from(db.objectStoreNames).sort()).toEqual([PLAYER_LIFECYCLE_STORE_NAME, ROOT_SECRET_STORE_NAME].sort());
 		await db.close();
+	});
+
+	it('cleanly resets the current v5 account stores during the v6 upgrade', async () => {
+		const old = await openDB(DATABASE_NAME, 5, {
+			upgrade(db) {
+				db.createObjectStore(ROOT_SECRET_STORE_NAME);
+				db.createObjectStore(PLAYER_LIFECYCLE_STORE_NAME);
+			}
+		});
+		await old.put(ROOT_SECRET_STORE_NAME, 'old root', 'root-wrapping-key');
+		await old.put(PLAYER_LIFECYCLE_STORE_NAME, { schemaVersion: 1, mode: { kind: 'old' } }, 'player-lifecycle');
+		await old.close();
+
+		const result = await loadOrCreateLifecycle();
+		expect(result.kind).toBe('created');
+		const rootRecords = await records(ROOT_SECRET_STORE_NAME);
+		const playerRecords = await records(PLAYER_LIFECYCLE_STORE_NAME);
+		expect(Object.keys(rootRecords).sort()).toEqual(['encrypted-root-entropy', 'root-wrapping-key']);
+		expect(Object.keys(playerRecords)).toEqual(['player-lifecycle']);
+		expect((playerRecords['player-lifecycle'] as { mode: { kind: string } }).mode.kind).toBe('selecting');
 	});
 
 	it('converges concurrent fresh initialization on one pending selection', async () => {
@@ -527,22 +558,22 @@ describe('Root / Identity / Run lifecycle', () => {
 		});
 		const initial = await loadOrCreateLifecycle();
 		if (initial.kind !== 'created') throw new Error('Expected fresh state.');
-		expect(initial.selection.candidates.map((candidate) => candidate.characterId)).toEqual(['011', '026', '039']);
+		expect(initial.selection.candidates.map((candidate) => candidate.characterId)).toEqual(['038', '030', '012']);
 		const selected = await selectIdentity(initial.selection.generation, initial.selection.candidates[0]);
 		if (selected.kind !== 'selected') throw new Error('Expected selected state.');
 		vi.mocked(Date.now).mockReturnValue(TIME + 2 * 8 * 24 * 60 * 60 * 1000);
 		expect((await transitionExpiredPersona(selected.persona)).kind).toBe('transitioned');
 		const second = await loadOrCreateLifecycle();
 		if (second.kind !== 'selecting') throw new Error('Expected second selection.');
-		expect(second.selection.candidates.map((candidate) => candidate.characterId)).toEqual(['015', '010', '038']);
+		expect(second.selection.candidates.map((candidate) => candidate.characterId)).toEqual(['007', '027', '029']);
 		const secondSelected = await selectIdentity(second.selection.generation, second.selection.candidates[0]);
 		if (secondSelected.kind !== 'selected') throw new Error('Expected second selected state.');
 		vi.mocked(Date.now).mockReturnValue(TIME + 3 * 8 * 24 * 60 * 60 * 1000);
 		expect((await transitionExpiredPersona(secondSelected.persona)).kind).toBe('transitioned');
 		const third = await loadOrCreateLifecycle();
 		if (third.kind !== 'selecting') throw new Error('Expected third selection.');
-		expect(third.selection.candidates.map((candidate) => candidate.characterId)).toEqual(['040', '018', '014']);
-		expect(third.selection.candidates[1].characterId).toBe('018');
+		expect(third.selection.candidates.map((candidate) => candidate.characterId)).toEqual(['001', '024', '015']);
+		expect(third.selection.candidates[1].characterId).toBe('024');
 		const lifecycle = (await records(PLAYER_LIFECYCLE_STORE_NAME))['player-lifecycle'] as { identities: Array<{ characterId: string }> };
 		expect(lifecycle.identities.map((identity) => identity.characterId)).not.toContain('018');
 	});

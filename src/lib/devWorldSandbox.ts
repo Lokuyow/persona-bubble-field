@@ -13,6 +13,25 @@ export const DEV_WORLD_SELF_ID = 'you';
 
 export const DEV_WORLD_DEFAULT_CHARACTER_ID = '001';
 
+const DEV_WORLD_FIXTURE_CHARACTER_IDS: Readonly<Record<string, string>> = {
+	['0'.repeat(64)]: '001',
+	['1'.repeat(64)]: '010',
+	['2'.repeat(64)]: '019',
+	['3'.repeat(64)]: '028',
+	['4'.repeat(64)]: '037',
+	['5'.repeat(64)]: '006',
+	['6'.repeat(64)]: '015',
+	['7'.repeat(64)]: '024',
+	['8'.repeat(64)]: '033',
+	['9'.repeat(64)]: '002',
+	['a'.repeat(64)]: '011',
+	['b'.repeat(64)]: '020',
+	['c'.repeat(64)]: '029',
+	['d'.repeat(64)]: '038',
+	['e'.repeat(64)]: '007',
+	['f'.repeat(64)]: '016'
+};
+
 function initialPosition(field: PresenceField) {
 	const preferred = {
 		x: Math.floor((field.columns - 1) / 2),
@@ -39,6 +58,11 @@ export function resolveDevWorldCharacterId(search: URLSearchParams): string {
 /** Returns the catalog entry used by the DEV-only presentation. */
 export function getDevWorldCharacter(characterId: string): Character {
 	return getCharacterById(characterId) ?? CHARACTER_CATALOG[0];
+}
+
+/** Resolves the fixed characters used by deterministic DEV fixture pubkeys. */
+export function getDevWorldFixtureCharacter(pubkey: string, fallbackCharacterId: string): Character {
+	return getDevWorldCharacter(DEV_WORLD_FIXTURE_CHARACTER_IDS[pubkey] ?? fallbackCharacterId);
 }
 
 /** Creates the deterministic local presence used by the DEV world sandbox. */

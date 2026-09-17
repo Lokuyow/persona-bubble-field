@@ -19,7 +19,7 @@ import { reconcileTraceRootCache } from './traceRootCache';
 
 const CHANNEL_ID = 'a'.repeat(64);
 const OTHER_CHANNEL_ID = 'b'.repeat(64);
-const SECRET_KEY = new Uint8Array(32).fill(8);
+const SECRET_KEY = new Uint8Array(32).fill(30);
 const connections: IDBPDatabase<TraceDatabase>[] = [];
 
 function channel(channelId = CHANNEL_ID): ChannelReference {
