@@ -157,6 +157,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	import ComposerKeyboardBinding from '$lib/frontend/ComposerKeyboardBinding.svelte';
 	import { createMovementInputController } from '$lib/frontend/movementInputController';
 	import SpeechLayer from '$lib/frontend/SpeechLayer.svelte';
+	import SoundControl from '$lib/frontend/SoundControl.svelte';
 	import { matchesComposerSubmit, type ComposerSubmitEnvelope } from '$lib/hostOwnedComposerContext';
 	import {
 		acceptedTraceReplyTarget, clearTraceReplyMode, completeTraceReplySubmission,
@@ -165,6 +166,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	import { createSpeechPublicationCore, type SpeechPublicationContext, type SpeechPublicationOutcome } from '$lib/speechPublication';
 	import type { SpeechSuggestionConversationEntry } from '$lib/speechSuggestions';
 	import type { SpeechType } from '$lib/conversation';
+	import { createSpeechSoundController, DEFAULT_SOUND_PREFERENCE, newLiveBubbleEffects, type SpeechSoundController } from '$lib/speechSoundEffects';
 	import type { SpeechBubbleShape } from '$lib/speechBubblePath';
 	import {
 		createWorldReadSession,
@@ -205,6 +207,8 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	const mountedBubbleRemeasures = new Map<string, () => void>();
 	const mountedTraceReplyRemeasures = new Map<string, () => void>();
 	let conversationState = $state.raw<ConversationState>(createConversationState());
+	let soundPreference = $state(DEFAULT_SOUND_PREFERENCE);
+	let speechSoundController = $state.raw<SpeechSoundController | null>(null);
 	let lastPlacedAnchorById = $state.raw<Readonly<Record<string, WorldPoint>>>({});
 	let lastVisibilityKey: string | null = null;
 	let colorByPubkey = $state.raw<Record<string, BubbleTone>>({});
@@ -841,6 +845,14 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			`url("${asset(SITE_BACKGROUND_ASSET)}")`
 		);
 		let mounted = true;
+		let soundStorage: Storage | null = null;
+		try { soundStorage = window.localStorage; } catch { /* storage may be unavailable */ }
+		const soundController = createSpeechSoundController({ storage: soundStorage, document });
+		speechSoundController = soundController;
+		soundPreference = soundController.preference;
+		const unlockSound = () => soundController.unlock();
+		window.addEventListener('pointerdown', unlockSound, { passive: true });
+		window.addEventListener('keydown', unlockSound, { passive: true });
 		let startRequested = false;
 		let session: ReturnType<typeof createWorldReadSession> | null = null;
 		let currentSessionStartup: { session: ReturnType<typeof createWorldReadSession>; promise: Promise<void> } | null = null;
@@ -1196,6 +1208,10 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 
 		return () => {
 			mounted = false;
+			window.removeEventListener('pointerdown', unlockSound);
+			window.removeEventListener('keydown', unlockSound);
+			soundController.dispose();
+			speechSoundController = null;
 			if (proximityFeedbackTimer !== null) window.clearTimeout(proximityFeedbackTimer);
 			proximityFeedbackTimer = null;
 			cancelPendingComposerSubmission(new DOMException('Submission was cancelled.', 'AbortError'));
@@ -2212,12 +2228,24 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		const conversationMessage = toConversationMessage(message);
 		const visibleParticipantIds = projectFrontendPresence({ presence: nextPresence, selectedCharacterId, selfProjectionId,
 			geometry: { cellSize, fieldAreaBounds, cameraWorldBounds: fieldArtworkBounds }, colors: colorByPubkey }).visibleParticipantIds;
-		conversationState = receiveMessage(conversationState, conversationMessage, {
+		const previousConversationState = conversationState;
+		const nextConversationState = receiveMessage(previousConversationState, conversationMessage, {
 			isSpeakerVisible: visibleParticipantIds.has(message.pubkey),
 			duration: getPrototypeDisplayDuration(message.content),
 			now: conversationMessage.createdAt
 		});
-		conversationState = applyVisibility(conversationState, visibleParticipantIds);
+		conversationState = applyVisibility(nextConversationState, visibleParticipantIds);
+		for (const effect of newLiveBubbleEffects(previousConversationState, conversationState)) speechSoundController?.play(effect);
+	}
+
+	function updateSoundVolume(volume: number): void {
+		speechSoundController?.setVolume(volume);
+		soundPreference = speechSoundController?.preference ?? { ...soundPreference, volume };
+	}
+
+	function updateSoundMuted(muted: boolean): void {
+		speechSoundController?.setMuted(muted);
+		soundPreference = speechSoundController?.preference ?? { ...soundPreference, muted };
 	}
 
 	function tailTarget(participant: (typeof participantViews)[number]): WorldPoint {
@@ -2315,6 +2343,13 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		speechAreaVisualBounds={speechAreaVisualBounds}
 	>
 		{#snippet children()}
+			<SoundControl
+				volume={soundPreference.volume}
+				muted={soundPreference.muted}
+				onOpen={() => speechSoundController?.unlock()}
+				onVolume={updateSoundVolume}
+				onMute={updateSoundMuted}
+			/>
 			<Chatter
 				bind:this={chatterComponent}
 				messages={recentMessageTimeline}

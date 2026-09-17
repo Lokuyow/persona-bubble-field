@@ -3515,4 +3515,50 @@ test.describe('DEV World Sandbox', () => {
 		await expect(self).not.toHaveAttribute('data-movement-animation', 'active');
 		await expect(page.locator('.field-scene')).not.toHaveAttribute('data-camera-animation', 'active');
 	});
+
+	test('controls live speech sound preferences without starting field movement', async ({ page }) => {
+		await page.setViewportSize({ width: 390, height: 844 });
+		await page.goto('/?devWorld=1');
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+		await page.waitForTimeout(1000);
+		const speaker = page.getByRole('button', { name: /Open sound settings/ });
+		await expect(speaker).toBeVisible();
+		await speaker.click();
+		const panel = page.locator('.sound-panel');
+		await expect(panel).toBeVisible();
+		const slider = page.getByRole('slider', { name: 'Sound volume' });
+		await slider.fill('25');
+		await page.getByRole('button', { name: 'Mute sound' }).click();
+		await expect(page.getByRole('button', { name: 'Unmute sound' })).toBeVisible();
+		const viewport = await page.locator('.field-viewport').boundingBox();
+		const control = await speaker.boundingBox();
+		expect(viewport && control).toBeTruthy();
+		if (viewport && control) {
+			expect(control.x + control.width).toBeLessThanOrEqual(viewport.x + viewport.width);
+			expect(control.y).toBeGreaterThanOrEqual(viewport.y);
+		}
+		await page.reload();
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+		await page.waitForTimeout(1000);
+		await page.getByRole('button', { name: /Open sound settings/ }).click();
+		await expect(page.getByRole('slider', { name: 'Sound volume' })).toHaveValue('25');
+		await expect(page.getByRole('button', { name: 'Unmute sound' })).toBeVisible();
+	});
+
+	test('keeps the speaker control usable on desktop', async ({ page }) => {
+		await page.setViewportSize({ width: 1200, height: 900 });
+		await page.goto('/?devWorld=1');
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+		await page.waitForTimeout(1000);
+		const speaker = page.getByRole('button', { name: /Open sound settings/ });
+		await speaker.click();
+		await expect(page.locator('.sound-panel')).toBeVisible();
+		const viewport = await page.locator('.field-viewport').boundingBox();
+		const panel = await page.locator('.sound-panel').boundingBox();
+		expect(viewport && panel).toBeTruthy();
+		if (viewport && panel) {
+			expect(panel.x).toBeGreaterThanOrEqual(viewport.x);
+			expect(panel.x + panel.width).toBeLessThanOrEqual(viewport.x + viewport.width);
+		}
+	});
 });
