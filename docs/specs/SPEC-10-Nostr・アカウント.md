@@ -171,7 +171,11 @@ positionイベントの具体仕様は [`SPEC-30-フィールド・position・pr
 
 ### 交換可能なリアルタイムイベント
 
-リアルタイムイベントは、通常のworld read/write subscriptionから独立した補助subscriptionで取得する。リアルタイムイベントの障害・切断・購読拒否は、通常のworld状態やTrace状態を失敗扱いにせず、リアルタイムイベント機能だけをinactive/degradedとして扱う。Relayの既知の `max_subscriptions` が、既存のprimary subscription 2本、最大1本のTrace補助subscription、およびリアルタイムイベント補助subscriptionを同時に許容しない場合、そのRelayではリアルタイムイベント補助subscriptionを開始しない。値が不明な場合は試行してよい。イベント補助subscriptionは終日常駐させず、current instanceはイベント受付開始以降に開始し、settlement recoveryを含めて不要になった時点で停止する。pending recoveryがあるinstanceだけは、通常の開催時刻より早く開始してよい。
+リアルタイムイベントは、通常のworld read/write subscriptionから独立した補助subscription 1本で取得する。最大構成はprimary world 2本、Trace補助subscription最大1本、リアルタイムイベント補助subscription 1本であり、control専用の5本目は作らない。リアルタイムイベントの障害・切断・購読拒否は、通常のworld状態やTrace状態を失敗扱いにせず、リアルタイムイベント機能だけをinactive/degradedとして扱う。realtimeはTraceより低優先で、Traceのroot bootstrapおよび必要なlong-lived configurationの確保またはterminal結果を待ってから試行する。後からTraceが必要になった場合はrealtimeだけをCLOSEしてTraceを先に構成し、その後にrealtimeを再試行する。Relayの既知の `max_subscriptions` が4未満の場合、そのRelayではリアルタイムイベント補助subscriptionを開始しない。値が不明な場合は試行してよい。
+
+realtimeの1本のREQには、channel creatorをauthorとして指定するbounded control filterと、enabled playable protocol keyごとのconcrete instance filterを含める。control filterは `kind=7070`、`#e` channel、control protocolの`#d`、creator `authors`、15分のbounded `since`を持ち、`#i`を持たない。各instance filterは`kind=7070`、`#e` channel、1つのplayable protocol keyの`#d`、そのprotocol keyに属するactive/recovery instanceの`#i`、および必要な`since`を持つ。過去の全gameplay historyを取得せず、protocol key、instance IDs、sinceの対応関係を跨いで混在させない。
+
+instance対象の変更では、現在のrealtime requestだけをCLOSE/disposeしてから新しいfilter bundleで同じ1本を開始する。primary worldとTraceはrestartしない。generationを持つため、古いgenerationのEOSE、CLOSED、timeout、EVENTは新しい状態へ作用しない。control historyはmanual Riftの最大活動期間を覆う15分に限定し、通常tickごとには再構成しない。
 
 prototypeの共通envelopeには、project-owned regular kind `7070`、次のtag、およびJSON objectのcontentを使用する。
 

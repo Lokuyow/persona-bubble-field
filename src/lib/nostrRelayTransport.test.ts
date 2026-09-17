@@ -11,7 +11,7 @@ import { createNostrRelayTransport } from './nostrRelayTransport';
 import {
 	buildTraceRootBootstrapFilter, buildWorldMessageTemplate, buildPositionEventTemplate, buildWorldMessageFilter
 } from './nostrProtocol';
-import { buildRealtimeEventFilter } from './realtimeEvents';
+import { buildRealtimeControlEventTemplate, buildRealtimeControlFilter, buildRealtimeEventFilter, buildRealtimeInstanceFilter, finalizeRealtimeEvent, type RealtimeEventRegistry } from './realtimeEvents';
 import { RIFT_EVENT_DEFINITION, buildRiftActionTemplate } from './rift';
 
 // Capture only the public client. Tests still use the installed package,
@@ -388,6 +388,16 @@ describe('primary lifecycle', () => {
 });
 
 describe('supplemental realtime event lifecycle', () => {
+	const realtimeInput = (eventTypes: RealtimeEventRegistry = [RIFT_EVENT_DEFINITION], instanceIds: readonly string[] = ['rift-instance']) => ({
+		eventTypes,
+		controlSince: TIME - 100,
+		instanceFilters: eventTypes.length === 0 || instanceIds.length === 0 ? [] : [{ protocolKey: RIFT_EVENT_DEFINITION.protocolKey, instanceIds, since: TIME - 100 }],
+		onBootstrapEvent: vi.fn(),
+		onLiveEvent: vi.fn(),
+		onBootstrapControl: vi.fn(),
+		onLiveControl: vi.fn()
+	});
+
 	it('uses an independent kind-7070 subscription and preserves the two primary subscriptions', async () => {
 		const f = fixture(1);
 		const event = finalizeEvent(buildRiftActionTemplate({
@@ -406,22 +416,15 @@ describe('supplemental realtime event lifecycle', () => {
 		await f.start();
 		const onBootstrapEvent = vi.fn();
 		const onLiveEvent = vi.fn();
-		const pending = f.transport.startRealtime({
-			eventTypes: [RIFT_EVENT_DEFINITION],
-			instanceId: 'rift-instance',
-			since: TIME - 100,
-			onBootstrapEvent,
-			onLiveEvent
-		});
+		const pending = f.transport.startRealtime({ ...realtimeInput(), onBootstrapEvent, onLiveEvent });
 		await vi.advanceTimersByTimeAsync(30);
 		const result = await pending;
 		const realtimeRequests = f.authorities[0].requests.filter((request) => kind(request) === 7070);
 		expect(realtimeRequests).toHaveLength(1);
-		expect(realtimeRequests[0][2]).toEqual(buildRealtimeEventFilter({
+		expect(realtimeRequests[0][2]).toEqual(buildRealtimeControlFilter({ channelId: f.channel.id, creatorPubkey: f.channel.pubkey, since: TIME - 100 }));
+		expect(realtimeRequests[0][3]).toEqual(buildRealtimeInstanceFilter({
 			channelId: f.channel.id,
-			eventTypes: [RIFT_EVENT_DEFINITION],
-			instanceId: 'rift-instance',
-			since: TIME - 100
+			configuration: { protocolKey: RIFT_EVENT_DEFINITION.protocolKey, instanceIds: ['rift-instance'], since: TIME - 100 }
 		}));
 		expect(result.status).toBe('active');
 		expect(result.events.map((candidate) => candidate.id)).toEqual([event.id]);
@@ -442,6 +445,49 @@ describe('supplemental realtime event lifecycle', () => {
 		expect(onLiveEvent).toHaveBeenCalledExactlyOnceWith(live);
 	});
 
+	it('combines creator control and protocol-specific instance filters in one request', async () => {
+		const f = fixture(1);
+		const createdAt = TIME;
+		const control = finalizeRealtimeEvent(buildRealtimeControlEventTemplate({
+			channelId: f.channel.id,
+			relayHint: f.authorities[0].url,
+			instanceId: `rift:1:manual:${createdAt}:0123456789abcdef0123456789abcdef`,
+			payload: { command: 'start', targetProtocolKey: RIFT_EVENT_DEFINITION.protocolKey },
+			createdAt
+		}), CREATOR);
+		f.authorities[0].onRequest = (socket, request) => {
+			if (kind(request) === 7070) send(socket, 'EVENT', request[1], control);
+			send(socket, 'EOSE', request[1]);
+		};
+		await f.start();
+		const onControl = vi.fn();
+		const pending = f.transport.startRealtime({ ...realtimeInput([RIFT_EVENT_DEFINITION], []), onBootstrapControl: onControl });
+		await vi.advanceTimersByTimeAsync(30);
+		await pending;
+		const request = f.authorities[0].requests.filter((candidate) => kind(candidate) === 7070)[0];
+		expect(filters(request)).toHaveLength(1);
+		expect(request[2]).toEqual(buildRealtimeControlFilter({ channelId: f.channel.id, creatorPubkey: f.channel.pubkey, since: TIME - 100 }));
+		expect(onControl).toHaveBeenCalledOnce();
+	});
+
+	it('replaces only realtime with CLOSE before a new protocol-specific request', async () => {
+		const f = fixture(1);
+		await f.start();
+		const first = f.transport.startRealtime(realtimeInput());
+		await vi.advanceTimersByTimeAsync(30);
+		await first;
+		const firstRequest = f.authorities[0].requests.filter((request) => kind(request) === 7070)[0];
+		f.transport.stopRealtime();
+		const second = f.transport.startRealtime(realtimeInput([RIFT_EVENT_DEFINITION], ['next-instance']));
+		await vi.advanceTimersByTimeAsync(30);
+		await second;
+		const realtimeMessages = f.authorities[0].messages.filter((message) => message[0] === 'CLOSE' || (message[0] === 'REQ' && kind(message as WireRequest) === 7070));
+		expect(f.authorities[0].messages).toContainEqual(['CLOSE', firstRequest[1]]);
+		expect(f.authorities[0].requests.filter((request) => kind(request) === 7070)).toHaveLength(2);
+		expect(f.transport.getDiagnostics().primaryPairs.every((pair) => pair.status === 'eose')).toBe(true);
+		expect(realtimeMessages.length).toBeGreaterThan(0);
+	});
+
 	it('accepts realtime publication from a readable relay', async () => {
 		const f = fixture(1);
 		const event = finalizeEvent(buildRiftActionTemplate({
@@ -458,7 +504,7 @@ describe('supplemental realtime event lifecycle', () => {
 		};
 		f.authorities[0].onPublish = (socket, published) => send(socket, 'OK', published.id, true, '');
 		await f.start();
-		const realtime = f.transport.startRealtime({ eventTypes: [RIFT_EVENT_DEFINITION], instanceId: 'rift-instance', since: TIME - 100, onBootstrapEvent: vi.fn(), onLiveEvent: vi.fn() });
+		const realtime = f.transport.startRealtime(realtimeInput());
 		await vi.advanceTimersByTimeAsync(30);
 		await realtime;
 		const pending = f.transport.publishRealtime(event);
@@ -489,7 +535,7 @@ describe('supplemental realtime event lifecycle', () => {
 			if (realtimeRequest) send(socket, 'EVENT', realtimeRequest[1], published);
 		};
 		await f.start();
-		const realtime = f.transport.startRealtime({ eventTypes: [RIFT_EVENT_DEFINITION], instanceId: 'rift-instance', since: TIME - 100, onBootstrapEvent: vi.fn(), onLiveEvent: vi.fn() });
+		const realtime = f.transport.startRealtime(realtimeInput());
 		await vi.advanceTimersByTimeAsync(30);
 		await realtime;
 		const pending = f.transport.publishRealtime(event);
@@ -512,7 +558,7 @@ describe('supplemental realtime event lifecycle', () => {
 		f.authorities[0].onPublish = (socket, published) => send(socket, 'OK', published.id, false, 'blocked');
 		f.authorities[1].onPublish = (socket, published) => send(socket, 'OK', published.id, true, '');
 		await f.start();
-		const realtime = f.transport.startRealtime({ eventTypes: [RIFT_EVENT_DEFINITION], instanceId: 'rift-instance', since: TIME - 100, onBootstrapEvent: vi.fn(), onLiveEvent: vi.fn() });
+		const realtime = f.transport.startRealtime(realtimeInput());
 		await vi.advanceTimersByTimeAsync(30);
 		await realtime;
 		const pending = f.transport.publishRealtime(event);
@@ -527,7 +573,7 @@ describe('supplemental realtime event lifecycle', () => {
 	it('stops only the supplemental realtime subscription', async () => {
 		const f = fixture(1);
 		await f.start();
-		const realtime = f.transport.startRealtime({ eventTypes: [RIFT_EVENT_DEFINITION], instanceId: 'rift-instance', since: TIME - 100, onBootstrapEvent: vi.fn(), onLiveEvent: vi.fn() });
+		const realtime = f.transport.startRealtime(realtimeInput());
 		await vi.advanceTimersByTimeAsync(30);
 		await realtime;
 		const realtimeRequest = f.authorities[0].requests.filter((request) => kind(request) === 7070).at(-1);
@@ -541,12 +587,7 @@ describe('supplemental realtime event lifecycle', () => {
 	it('does not open an event request when the enabled definition list is empty', async () => {
 		const f = fixture(1);
 		await f.start();
-		const result = await f.transport.startRealtime({
-			eventTypes: [],
-			since: TIME - 100,
-			onBootstrapEvent: vi.fn(),
-			onLiveEvent: vi.fn()
-		});
+		const result = await f.transport.startRealtime(realtimeInput([]));
 		expect(result.status).toBe('inactive');
 		expect(f.authorities[0].requests.filter((request) => kind(request) === 7070)).toEqual([]);
 	});
@@ -555,13 +596,7 @@ describe('supplemental realtime event lifecycle', () => {
 		const f = fixture(1);
 		Nip11Registry.set(f.authorities[0].url, { limitation: { max_subscriptions: 2 } });
 		await f.start();
-		const result = await f.transport.startRealtime({
-			eventTypes: [RIFT_EVENT_DEFINITION],
-			instanceId: 'rift-instance',
-			since: TIME - 100,
-			onBootstrapEvent: vi.fn(),
-			onLiveEvent: vi.fn()
-		});
+		const result = await f.transport.startRealtime(realtimeInput());
 		expect(result.status).toBe('inactive');
 		expect(f.authorities[0].requests.filter((request) => kind(request) === 7070)).toEqual([]);
 		expect(f.transport.getDiagnostics().primaryPairs.every((pair) => pair.status === 'eose')).toBe(true);
@@ -574,13 +609,7 @@ describe('supplemental realtime event lifecycle', () => {
 		const f = fixture(1);
 		Nip11Registry.set(f.authorities[0].url, { limitation: { max_subscriptions: 3 } });
 		await f.start();
-		const result = await f.transport.startRealtime({
-			eventTypes: [RIFT_EVENT_DEFINITION],
-			instanceId: 'rift-instance',
-			since: TIME - 100,
-			onBootstrapEvent: vi.fn(),
-			onLiveEvent: vi.fn()
-		});
+		const result = await f.transport.startRealtime(realtimeInput());
 		expect(result.status).toBe('inactive');
 		expect(f.authorities[0].requests.filter((request) => kind(request) === 7070)).toEqual([]);
 		expect(f.transport.getDiagnostics().primaryPairs.every((pair) => pair.status === 'eose')).toBe(true);
@@ -590,13 +619,7 @@ describe('supplemental realtime event lifecycle', () => {
 		const f = fixture(1);
 		Nip11Registry.set(f.authorities[0].url, {});
 		await f.start();
-		const pending = f.transport.startRealtime({
-			eventTypes: [RIFT_EVENT_DEFINITION],
-			instanceId: 'rift-instance',
-			since: TIME - 100,
-			onBootstrapEvent: vi.fn(),
-			onLiveEvent: vi.fn()
-		});
+		const pending = f.transport.startRealtime(realtimeInput());
 		await vi.advanceTimersByTimeAsync(30);
 		await expect(pending).resolves.toMatchObject({ status: 'active' });
 		expect(f.authorities[0].requests.filter((request) => kind(request) === 7070)).toHaveLength(1);
@@ -618,13 +641,7 @@ describe('supplemental realtime event lifecycle', () => {
 			};
 		}
 		const primary = await f.start();
-		const pending = f.transport.startRealtime({
-			eventTypes: [RIFT_EVENT_DEFINITION],
-			instanceId: 'rift-instance',
-			since: TIME - 100,
-			onBootstrapEvent: vi.fn(),
-			onLiveEvent: vi.fn()
-		});
+		const pending = f.transport.startRealtime(realtimeInput());
 		await vi.advanceTimersByTimeAsync(mode === 'CLOSED' ? 30 : TIMEOUT + 1);
 		await expect(pending).resolves.toMatchObject({ status: 'inactive' });
 		expect(f.transport.getDiagnostics().realtime.relays[0].status).toBe(expectedStatus);

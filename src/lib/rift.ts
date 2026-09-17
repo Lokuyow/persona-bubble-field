@@ -24,6 +24,9 @@ export const RIFT_RESULT_MS = 20_000;
 export const RIFT_ROUND_MS = RIFT_CONSULTATION_MS + RIFT_SELECTION_MS + RIFT_RESULT_MS;
 export const RIFT_REVEAL_GRACE_MS = 5_000;
 export const RIFT_JST_OFFSET_MS = 9 * 60 * 60 * 1000;
+export const RIFT_MANUAL_CONTROL_LOOKBACK_SECONDS = 15 * 60;
+const RIFT_MANUAL_INSTANCE_PREFIX = 'rift:1:manual:';
+const RIFT_MANUAL_ID = /^rift:1:manual:(\d+):([0-9a-f]{32})$/;
 
 export type RiftChoice = 'maintain' | 'escape';
 
@@ -270,6 +273,26 @@ export function dailyRiftInstanceId(dateKey: string): string {
 	return `${RIFT_PROTOCOL_NAMESPACE_INSTANCE_PREFIX}:${dateKey}`;
 }
 
+export function buildManualRiftInstanceId(createdAt: number, nonce: string): string {
+	if (!Number.isSafeInteger(createdAt) || createdAt < 0) throw new TypeError('Manual Rift created_at must be a non-negative Unix timestamp.');
+	if (!/^[0-9a-f]{32}$/.test(nonce)) throw new TypeError('Manual Rift nonce must be lowercase 128-bit hex.');
+	return `${RIFT_MANUAL_INSTANCE_PREFIX}${createdAt}:${nonce}`;
+}
+
+export function parseManualRiftInstanceId(instanceId: string): Readonly<{ createdAt: number; nonce: string }> | null {
+	const match = RIFT_MANUAL_ID.exec(instanceId);
+	if (!match) return null;
+	const createdAt = Number(match[1]);
+	return Number.isSafeInteger(createdAt) ? { createdAt, nonce: match[2] } : null;
+}
+
+export function riftScheduleIntervalsOverlap(
+	first: Readonly<{ warningAtMs: number; endedAtMs: number }>,
+	second: Readonly<{ registrationAtMs: number; endedAtMs: number }>
+): boolean {
+	return first.warningAtMs < second.endedAtMs && second.registrationAtMs < first.endedAtMs;
+}
+
 const RIFT_PROTOCOL_NAMESPACE_INSTANCE_PREFIX = `${RIFT_PROTOCOL_KEY}:instance`;
 
 export function getRiftSchedule(nowMs: number): RiftSchedule {
@@ -291,6 +314,17 @@ export function getRiftScheduleForDate(dateKey: string, nowMs: number): RiftSche
 }
 
 export function getRiftScheduleForInstance(instanceId: string, nowMs: number): RiftSchedule | null {
+	const manual = parseManualRiftInstanceId(instanceId);
+	if (manual) {
+		const registrationAtMs = manual.createdAt * 1000;
+		const gameAtMs = registrationAtMs + 5 * 60 * 1000;
+		const warningAtMs = registrationAtMs;
+		const endedAtMs = gameAtMs + RIFT_ROUND_COUNT * RIFT_ROUND_MS;
+		const phase: RiftSchedule['phase'] = nowMs < registrationAtMs ? 'dormant'
+			: nowMs < gameAtMs ? 'registration'
+			: nowMs < endedAtMs ? 'game' : 'ended';
+		return { dateKey: `manual-${manual.createdAt}`, instanceId, warningAtMs, registrationAtMs, gameAtMs, endedAtMs, phase };
+	}
 	const prefix = `${RIFT_PROTOCOL_NAMESPACE_INSTANCE_PREFIX}:`;
 	if (!instanceId.startsWith(prefix)) return null;
 	const dateKey = instanceId.slice(prefix.length);

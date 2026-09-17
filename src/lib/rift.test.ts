@@ -1,13 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
 	applyRiftAction,
+	buildManualRiftInstanceId,
 	buildRiftCommitAction,
 	buildRiftRevealAction,
 	createRiftSession,
 	getRiftRoundSchedule,
 	getRiftSchedule,
+	getRiftScheduleForInstance,
 	isRiftSettlementComplete,
 	parseRiftAction,
+	parseManualRiftInstanceId,
+	riftScheduleIntervalsOverlap,
 	settleRiftSession,
 	type RiftAction,
 	type RiftActionEvent,
@@ -63,6 +67,25 @@ describe('Rift schedule and domain', () => {
 		expect(game.phase).toBe('game');
 		expect(game.dateKey).toBe('2026-01-01');
 		expect(game.instanceId).toBe(warning.instanceId);
+	});
+
+	it('reconstructs a manual schedule from its canonical ID and preserves Rift round timing', () => {
+		const createdAt = 1_767_272_400;
+		const instanceId = buildManualRiftInstanceId(createdAt, '0123456789abcdef0123456789abcdef');
+		expect(parseManualRiftInstanceId(instanceId)).toEqual({ createdAt, nonce: '0123456789abcdef0123456789abcdef' });
+		const registration = getRiftScheduleForInstance(instanceId, createdAt * 1000);
+		expect(registration?.phase).toBe('registration');
+		expect(registration?.warningAtMs).toBe(registration?.registrationAtMs);
+		expect(registration?.gameAtMs).toBe(createdAt * 1000 + 300_000);
+		expect(getRiftScheduleForInstance(instanceId, (createdAt + 630) * 1000)?.phase).toBe('ended');
+		expect(() => buildManualRiftInstanceId(createdAt, '0123456789ABCDEF0123456789ABCDEF')).toThrow();
+	});
+
+	it('treats every non-empty manual/scheduled interval intersection as a conflict', () => {
+		const scheduled = { warningAtMs: 20 * 60 * 60 * 1000 + 45 * 60 * 1000, endedAtMs: 21 * 60 * 60 * 1000 + 30 * 60 * 1000 };
+		expect(riftScheduleIntervalsOverlap(scheduled, { registrationAtMs: scheduled.warningAtMs - 5 * 60 * 1000, endedAtMs: scheduled.warningAtMs + 5 * 60 * 1000 })).toBe(true);
+		expect(riftScheduleIntervalsOverlap(scheduled, { registrationAtMs: scheduled.endedAtMs, endedAtMs: scheduled.endedAtMs + 1 })).toBe(false);
+		expect(riftScheduleIntervalsOverlap(scheduled, { registrationAtMs: scheduled.warningAtMs - 1, endedAtMs: scheduled.warningAtMs })).toBe(false);
 	});
 
 	it('places at least one deterministic hole and avoids fixed facilities', () => {

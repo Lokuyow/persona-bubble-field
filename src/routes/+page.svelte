@@ -83,18 +83,22 @@
 		enabledRealtimeEventDefinitions,
 		getRiftRoundSchedule,
 		getRiftSchedule,
+		getRiftScheduleForDate,
 		getRiftScheduleForInstance,
 		getRiftParticipantHole,
 		isRiftSettlementComplete,
+		parseManualRiftInstanceId,
+		riftScheduleIntervalsOverlap,
 		RIFT_EVENT_DEFINITION,
 		RIFT_CONSULTATION_MS,
+		RIFT_MANUAL_CONTROL_LOOKBACK_SECONDS,
 		parseRiftEvent,
 		riftPhaseLabel,
 		settleRiftSession,
 		type RiftChoice,
 		type RiftSessionState
 	} from '$lib/rift';
-	import { finalizeRealtimeEvent } from '$lib/realtimeEvents';
+	import { finalizeRealtimeEvent, type RealtimeControlEnvelope } from '$lib/realtimeEvents';
 	import type { RealtimeEnvelope } from '$lib/realtimeEvents';
 	import {
 		prepareCharacterProfilePublication,
@@ -297,6 +301,11 @@
 	let riftSettlementInFlight = $state(false);
 	const appliedRiftOutcomeIds = new Set<string>();
 	const realtimeRecoveryInstanceIds = new Set<string>();
+	let realtimeControlSince = 0;
+	let realtimeControlDateKey = '';
+	const realtimeControlIds = new Set<string>();
+	let selectedManualRiftInstanceId: string | null = null;
+	const pendingRealtimeControls: RealtimeControlEnvelope[] = [];
 	const recoveredRiftSessions = new Map<string, RiftSessionState>();
 	const movementInputController = createMovementInputController({
 		requestMovement: (direction) => {
@@ -881,15 +890,23 @@
 
 		function getRealtimeStartConfiguration(nowMs: number): RealtimeStartConfiguration {
 			const currentSchedule = getRiftSchedule(nowMs);
+			if (realtimeControlDateKey !== currentSchedule.dateKey) {
+				realtimeControlDateKey = currentSchedule.dateKey;
+				realtimeControlSince = Math.max(0, Math.floor(nowMs / 1000) - RIFT_MANUAL_CONTROL_LOOKBACK_SECONDS);
+			}
 			const recoveryInstanceIds = [...realtimeRecoveryInstanceIds].filter((instanceId) => getRiftScheduleForInstance(instanceId, nowMs) !== null);
 			const includeCurrent = currentSchedule.phase === 'registration' || currentSchedule.phase === 'game';
-			const instanceIds = [...new Set([...recoveryInstanceIds, ...(includeCurrent ? [currentSchedule.instanceId] : [])])];
-			const since = Math.floor(Math.min(...[currentSchedule, ...recoveryInstanceIds.map((instanceId) => getRiftScheduleForInstance(instanceId, nowMs))]
+			const activeManual = selectedManualRiftInstanceId ? getRiftScheduleForInstance(selectedManualRiftInstanceId, nowMs) : null;
+			const instanceIds = [...new Set([...recoveryInstanceIds, ...(includeCurrent ? [currentSchedule.instanceId] : []), ...(activeManual && (activeManual.phase === 'registration' || activeManual.phase === 'game') ? [activeManual.instanceId] : [])])];
+			const schedules = [...recoveryInstanceIds.map((instanceId) => getRiftScheduleForInstance(instanceId, nowMs)), ...(includeCurrent ? [currentSchedule] : []), activeManual]
+				.filter((schedule): schedule is typeof currentSchedule => schedule !== null);
+			const since = Math.floor(Math.min(...schedules
 				.filter((schedule): schedule is typeof currentSchedule => schedule !== null)
 				.map((schedule) => schedule.warningAtMs)) / 1000);
-			return instanceIds.length === 1
-				? { instanceId: instanceIds[0], since }
-				: { instanceIds, since };
+			return {
+				controlSince: realtimeControlSince,
+				instanceFilters: instanceIds.length === 0 ? [] : [{ protocolKey: RIFT_EVENT_DEFINITION.protocolKey, instanceIds, since }]
+			};
 		}
 
 		const startReadSession = async (
@@ -909,14 +926,16 @@
 				selfSigner: signer,
 					realtime: {
 					registry: realtimeEventRegistry,
-					instanceId: getRiftSchedule(Date.now()).instanceId,
-					since: Math.floor(getRiftSchedule(Date.now()).warningAtMs / 1000),
+					controlSince: Math.max(0, Math.floor(Date.now() / 1000) - 15 * 60),
+					instanceFilters: [],
 					getStartConfiguration: () => getRealtimeStartConfiguration(Date.now()),
-					startImmediately: realtimeStartImmediately ?? ['registration', 'game'].includes(getRiftSchedule(Date.now()).phase),
+					startImmediately: realtimeStartImmediately ?? true,
 					onEvent: handleRealtimeEnvelope,
+					onControl: handleRealtimeControl,
 					onBootstrapComplete: () => {
 						if (!mounted || session !== nextSession) return;
 						riftRealtimeBootstrapComplete = true;
+						selectBootstrapRealtimeControl();
 						reconcileRiftSession(Date.now());
 					},
 					onStatusChanged: (next) => {
@@ -1000,14 +1019,12 @@
 				} else {
 					personaSnapshot = personaResult.persona;
 					selfSigner = personaResult.persona.signer;
-					const currentRiftSchedule = getRiftSchedule(Date.now());
 					const ledger = await getRealtimeSettlementLedger(personaResult.persona);
 					const pendingInstanceIds = (ledger?.pendingInstanceIds ?? [])
 						.filter((instanceId) => getRiftScheduleForInstance(instanceId, Date.now()) !== null);
 					realtimeRecoveryInstanceIds.clear();
 					for (const instanceId of pendingInstanceIds) realtimeRecoveryInstanceIds.add(instanceId);
-					const currentNeedsRealtime = currentRiftSchedule.phase === 'registration' || currentRiftSchedule.phase === 'game';
-					realtimeStartImmediately = pendingInstanceIds.length > 0 || currentNeedsRealtime;
+					realtimeStartImmediately = true;
 					mendingNowMs = Date.now();
 					updateLifespanHud(Date.now(), true);
 					if (isPersonaExpired(personaResult.persona.gameState, Date.now())) {
@@ -1073,7 +1090,7 @@
 				mendingNowMs = now;
 				updateLifespanHud(now);
 				reconcileRiftSession(devRiftFixtureEnabled ? initialRiftNowMs : now);
-				if (!devWorldSandboxEnabled && (riftSchedule.phase === 'registration' || riftSchedule.phase === 'game')) void worldSession?.startRealtime();
+				if (!devWorldSandboxEnabled && riftEventEnabled) void worldSession?.startRealtime();
 				if (!devWorldSandboxEnabled && riftSchedule.phase === 'ended') maybeStopRealtime();
 				const nextPresence = session?.refresh(now);
 				if (nextPresence) {
@@ -1476,14 +1493,71 @@
 		riftSelection = { ...riftSelection, revealStatus: id ? 'published' : 'failed' };
 	}
 
+	function manualControlIsEligible(control: RealtimeControlEnvelope, nowMs: number): boolean {
+		if (control.payload.targetProtocolKey !== RIFT_EVENT_DEFINITION.protocolKey) return false;
+		const manual = parseManualRiftInstanceId(control.instanceId);
+		if (!manual || manual.createdAt !== control.event.created_at || control.event.created_at > Math.floor(nowMs / 1000)) return false;
+		const manualSchedule = getRiftScheduleForInstance(control.instanceId, nowMs);
+		if (!manualSchedule || !['registration', 'game'].includes(manualSchedule.phase)) return false;
+		const scheduled = getRiftSchedule(nowMs);
+		const nextScheduled = getRiftScheduleForDate(nextDateKey(scheduled.dateKey), nowMs);
+		if (riftScheduleIntervalsOverlap(scheduled, manualSchedule) || riftScheduleIntervalsOverlap(nextScheduled, manualSchedule)) return false;
+		return !selectedManualRiftInstanceId && !['warning', 'registration', 'game'].includes(scheduled.phase);
+	}
+
+	function nextDateKey(dateKey: string): string {
+		const date = new Date(`${dateKey}T00:00:00Z`);
+		date.setUTCDate(date.getUTCDate() + 1);
+		return date.toISOString().slice(0, 10);
+	}
+
+	function acceptRealtimeControl(control: RealtimeControlEnvelope): void {
+		if (realtimeControlIds.has(control.event.id)) return;
+		realtimeControlIds.add(control.event.id);
+		if (!manualControlIsEligible(control, Date.now())) return;
+		selectedManualRiftInstanceId = control.instanceId;
+		reconcileRiftSession(Date.now());
+		void worldSession?.startRealtime();
+	}
+
+	function handleRealtimeControl(control: RealtimeControlEnvelope): void {
+		if (!riftRealtimeBootstrapComplete) {
+			pendingRealtimeControls.push(control);
+			return;
+		}
+		acceptRealtimeControl(control);
+	}
+
+	function selectBootstrapRealtimeControl(): void {
+		const candidates = [...pendingRealtimeControls]
+			.filter((control) => manualControlIsEligible(control, Date.now()))
+			.sort((first, second) => first.event.created_at - second.event.created_at || first.event.id.localeCompare(second.event.id));
+		pendingRealtimeControls.length = 0;
+		if (candidates[0]) acceptRealtimeControl(candidates[0]);
+	}
+
 	function maybeStopRealtime(): void {
 		if (riftSchedule.phase !== 'ended' || realtimeRecoveryInstanceIds.size > 0 || recoveredRiftSessions.size > 0) return;
-		worldSession?.stopRealtime();
+		void worldSession?.startRealtime();
+	}
+
+	function resolveCurrentRiftSchedule(nowMs: number): ReturnType<typeof getRiftSchedule> {
+		const scheduled = getRiftSchedule(nowMs);
+		if (['warning', 'registration', 'game'].includes(scheduled.phase)) return scheduled;
+		const manual = selectedManualRiftInstanceId ? getRiftScheduleForInstance(selectedManualRiftInstanceId, nowMs) : null;
+		return manual && ['registration', 'game'].includes(manual.phase) ? manual : scheduled;
 	}
 
 	function reconcileRiftSession(nowMs = Date.now()): void {
 		riftNowMs = nowMs;
-		riftSchedule = getRiftSchedule(nowMs);
+		if (selectedManualRiftInstanceId) {
+			const selectedSchedule = getRiftScheduleForInstance(selectedManualRiftInstanceId, nowMs);
+			if (selectedSchedule?.phase === 'ended') {
+				selectedManualRiftInstanceId = null;
+				void worldSession?.startRealtime();
+			}
+		}
+		riftSchedule = resolveCurrentRiftSchedule(nowMs);
 		if (!riftEventEnabled) {
 			riftSession = null;
 			recoveredRiftSessions.clear();
@@ -1516,6 +1590,7 @@
 		const parsed = parseRiftEvent(envelope.event, envelope.channelId, realtimeEventRegistry);
 		const eventSchedule = parsed ? getRiftScheduleForInstance(parsed.instanceId, Date.now()) : null;
 		if (!parsed || !eventSchedule) return;
+		if (parseManualRiftInstanceId(parsed.instanceId) && parsed.instanceId !== selectedManualRiftInstanceId && !realtimeRecoveryInstanceIds.has(parsed.instanceId)) return;
 		const state = ensureRiftSession(parsed.instanceId);
 		const next = applyRiftAction(state, {
 			id: envelope.event.id,

@@ -147,7 +147,7 @@ JOB等の具体的な処理内容をフレーバーとして変化させても�
 
 prototypeではこの枠で複数のevent typeを順次試遊し、試遊結果を踏まえて正式採用するeventを決める。現時点でenabledなのは最初の試遊対象である `綻び` だけであり、別のevent typeを今回追加しない。
 
-各イベントはイベント定義、protocol version、protocol key、payload parser、instance schedule、settlement規則を持つ。共通のNostr envelope、補助subscription、共通parserの仕様は [`SPEC-10-Nostr・アカウント.md`](./SPEC-10-Nostr・アカウント.md) を正とし、イベントの有効化・無効化はcompile-time registryで明示する。Relay障害、購読拒否、切断、ブラウザ終了だけを理由に死亡させない。settlementは既存のbrowser-local Player lifecycle store内の汎用ledgerへ、receiptと同じatomic mutationで記録する。ledgerはevent instanceのpendingと適用済みoutcome receiptを持ち、同じoutcomeを二重適用しない。古いIdentityまたは古いRun、既に期限切れのRunにはポイントを適用しない。イベント由来の死亡は、現在Runの死亡処理と同じRun close・Identity dead・次generation選択の経路を明示的に通る。
+各イベントはイベント定義、protocol version、protocol key、payload parser、instance schedule、settlement規則を持つ。共通のNostr envelope、control、補助subscription、共通parserの仕様は [`SPEC-10-Nostr・アカウント.md`](./SPEC-10-Nostr・アカウント.md) を正とし、イベントの有効化・無効化はcompile-time registryで明示する。Relay障害、購読拒否、切断、ブラウザ終了だけを理由に死亡させない。settlementは既存のbrowser-local Player lifecycle store内の汎用ledgerへ、receiptと同じatomic mutationで記録する。ledgerはevent instanceのpendingと適用済みoutcome receiptを持ち、同じoutcomeを二重適用しない。古いIdentityまたは古いRun、既に期限切れのRunにはポイントを適用しない。イベント由来の死亡は、現在Runの死亡処理と同じRun close・Identity dead・次generation選択の経路を明示的に通る。
 
 ### experimental event「綻び」
 
@@ -156,6 +156,10 @@ prototypeでenabledにする最初のexperimental eventは `綻び`（event type
 - 20:45 JST：綻びの兆候を通知
 - 20:55 JST：参加受付開始
 - 21:00 JST：ゲーム開始
+
+channel creatorが署名したkind 7070のversioned controlで、任意時刻にもmanual綻びを開始できる。controlのpayloadは開始命令と対象playable protocol keyを持ち、対象instanceは `rift:1:manual:<created_at>:<nonce>` とする。`created_at` はcontrolのUnix timestamp秒、nonceはlowercase 16-byte hexであり、instance IDだけからscheduleを再構成できる。control時刻がregistration開始でwarningはなく、5分後にgameを開始する。controlは検証済みkind 40 channel creator本人の署名、対象channel、enabled definition、payload、instance scheduleを満たすものだけを受理する。
+
+manual綻びのregistration開始〜終了区間とscheduled綻びのwarning開始〜終了区間が少しでも交差する場合、そのmanual controlを無効とする。scheduled綻びを優先し、activeな綻びの置換・並行開催・queueは行わない。bootstrapで複数の有効候補がある場合は、現在時刻でregistrationまたはgame中の候補に絞った後、`created_at`昇順、同値ならcontrol event ID辞書順で選択する。終了済みcontrolから綻びを再開しない。
 
 抜け穴は固定施設ではなく、event instanceとfieldから決定的に異なる位置へ配置する。作業端末・能力強化端末などの固定施設とは別cellとする。参加需要が6人を超える場合は需要に応じて複数生成し、最低1つは生成する。プレイヤーは実際にフィールドを移動して抜け穴の近くで参加し、システムがランダムに振り分けない。1つの抜け穴の有効参加者は3人以上6人以下とし、最大6人は有効なjoin event IDの決定的順序で選ぶ。3人未満は不成立で、ポイント変動も死亡も発生しない。
 

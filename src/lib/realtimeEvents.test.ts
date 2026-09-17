@@ -1,13 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { getPublicKey } from 'nostr-tools/pure';
+import { finalizeEvent, getPublicKey } from 'nostr-tools/pure';
 import {
+	buildRealtimeControlEventTemplate,
+	buildRealtimeControlFilter,
 	buildRealtimeEventFilter,
+	buildRealtimeInstanceFilter,
 	buildRealtimeEventTemplate,
 	finalizeRealtimeEvent,
+	parseRealtimeControlEnvelope,
 	parseRealtimeAction,
 	parseRealtimeEnvelope,
+	normalizeRealtimeInstanceFilterConfigurations,
 	protocolKeyFor,
 	REALTIME_EVENT_KIND,
+	REALTIME_CONTROL_PROTOCOL_KEY,
 	type RealtimeEventDefinition
 } from './realtimeEvents';
 
@@ -67,5 +73,54 @@ describe('realtime event protocol', () => {
 		}), SECRET);
 		expect(parseRealtimeEnvelope(signed, CHANNEL, [DEFINITION])).not.toBeNull();
 		expect(parseRealtimeAction(signed, CHANNEL, [DEFINITION])).toBeNull();
+	});
+
+	it('builds and validates a creator-signed control without adding an instance index to its filter', () => {
+		const createdAt = 1_700_000_000;
+		const instanceId = `rift:1:manual:${createdAt}:0123456789abcdef0123456789abcdef`;
+		const signed = finalizeRealtimeEvent(buildRealtimeControlEventTemplate({
+			channelId: CHANNEL, relayHint: 'wss://relay.test/', instanceId,
+			payload: { command: 'start', targetProtocolKey: DEFINITION.protocolKey }, createdAt
+		}), SECRET);
+		expect(parseRealtimeControlEnvelope(signed, CHANNEL, PUBKEY)?.payload).toEqual({ command: 'start', targetProtocolKey: DEFINITION.protocolKey });
+		expect(buildRealtimeControlFilter({ channelId: CHANNEL, creatorPubkey: PUBKEY, since: createdAt - 900 })).toEqual({
+			kinds: [REALTIME_EVENT_KIND], authors: [PUBKEY], '#e': [CHANNEL], '#d': [REALTIME_CONTROL_PROTOCOL_KEY], since: createdAt - 900
+		});
+		expect(buildRealtimeInstanceFilter({ channelId: CHANNEL, configuration: { protocolKey: DEFINITION.protocolKey, instanceIds: [instanceId], since: createdAt } })).toEqual({
+			kinds: [REALTIME_EVENT_KIND], '#e': [CHANNEL], '#d': [DEFINITION.protocolKey], '#i': [instanceId], since: createdAt
+		});
+	});
+
+	it('keeps instance IDs and history cursors independent for each playable protocol key', () => {
+		const second = { ...DEFINITION, eventType: 'other', protocolKey: protocolKeyFor('other', 1) };
+		const filters = [
+			buildRealtimeInstanceFilter({ channelId: CHANNEL, configuration: { protocolKey: DEFINITION.protocolKey, instanceIds: ['rift-a', 'rift-b'], since: 10 } }),
+			buildRealtimeInstanceFilter({ channelId: CHANNEL, configuration: { protocolKey: second.protocolKey, instanceIds: ['other-a'], since: 20 } })
+		];
+		expect(filters).toEqual([
+			{ kinds: [REALTIME_EVENT_KIND], '#e': [CHANNEL], '#d': [DEFINITION.protocolKey], '#i': ['rift-a', 'rift-b'], since: 10 },
+			{ kinds: [REALTIME_EVENT_KIND], '#e': [CHANNEL], '#d': [second.protocolKey], '#i': ['other-a'], since: 20 }
+		]);
+	});
+
+	it('normalizes duplicate configuration entries without crossing protocol ownership', () => {
+		expect(normalizeRealtimeInstanceFilterConfigurations([
+			{ protocolKey: DEFINITION.protocolKey, instanceIds: ['b', 'a'], since: 20 },
+			{ protocolKey: DEFINITION.protocolKey, instanceIds: ['a', 'c'], since: 10 }
+		])).toEqual([{ protocolKey: DEFINITION.protocolKey, instanceIds: ['a', 'b', 'c'], since: 10 }]);
+	});
+
+	it('rejects controls from a foreign creator and controls with ambiguous payload keys', () => {
+		const signed = finalizeRealtimeEvent(buildRealtimeControlEventTemplate({
+			channelId: CHANNEL, relayHint: 'wss://relay.test/', instanceId: 'rift:1:manual:1700000000:0123456789abcdef0123456789abcdef',
+			payload: { command: 'start', targetProtocolKey: DEFINITION.protocolKey }, createdAt: 1_700_000_000
+		}), SECRET);
+		expect(parseRealtimeControlEnvelope(signed, CHANNEL, getPublicKey(new Uint8Array(32).fill(8)))).toBeNull();
+		const malformed = finalizeEvent({
+			kind: REALTIME_EVENT_KIND, created_at: 1_700_000_000,
+			tags: [['e', CHANNEL, 'wss://relay.test/'], ['d', REALTIME_CONTROL_PROTOCOL_KEY], ['i', 'rift:1:manual:1700000000:0123456789abcdef0123456789abcdef']],
+			content: JSON.stringify({ command: 'start', targetProtocolKey: DEFINITION.protocolKey, extra: true })
+		}, SECRET);
+		expect(parseRealtimeControlEnvelope(malformed, CHANNEL, PUBKEY)).toBeNull();
 	});
 });

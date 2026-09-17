@@ -397,9 +397,9 @@ describe('world read session', () => {
 			onPresenceChanged: vi.fn(),
 			onLiveMessage: vi.fn(),
 			onStatusChanged: vi.fn(),
-			realtime: {
-				registry: [{ eventType: 'fixture', protocolVersion: 1, protocolKey: protocolKeyFor('fixture', 1), parseAction: () => ({}) }],
-				instanceId: 'fixture-instance', since: 0, startImmediately: false,
+				realtime: {
+					registry: [{ eventType: 'fixture', protocolVersion: 1, protocolKey: protocolKeyFor('fixture', 1), parseAction: () => ({}) }],
+					controlSince: 0, instanceFilters: [{ protocolKey: protocolKeyFor('fixture', 1), instanceIds: ['fixture-instance'], since: 0 }], startImmediately: false,
 				onEvent: vi.fn(), onStatusChanged: onRealtimeStatus,
 				onBootstrapComplete: onRealtimeBootstrapComplete,
 			}
@@ -430,9 +430,9 @@ describe('world read session', () => {
 		const session = createWorldReadSession({
 			field: { columns: 4, rows: 3 },
 			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn(),
-			realtime: {
-				registry: [{ eventType: 'fixture', protocolVersion: 1, protocolKey: protocolKeyFor('fixture', 1), parseAction: () => ({}) }],
-				instanceId: 'fixture-instance', since: 0, startImmediately: false,
+				realtime: {
+					registry: [{ eventType: 'fixture', protocolVersion: 1, protocolKey: protocolKeyFor('fixture', 1), parseAction: () => ({}) }],
+					controlSince: 0, instanceFilters: [{ protocolKey: protocolKeyFor('fixture', 1), instanceIds: ['fixture-instance'], since: 0 }], startImmediately: false,
 				onEvent: vi.fn(), onStatusChanged: (status) => statuses.push(status), onBootstrapComplete: onRealtimeBootstrapComplete
 			}
 		});
@@ -456,25 +456,26 @@ describe('world read session', () => {
 			publish,
 			stopRealtime
 		});
-		let configuration = { instanceId: 'rift-day-1', since: 100 };
+		let configuration = { controlSince: 10, instanceFilters: [{ protocolKey: protocolKeyFor('fixture', 1), instanceIds: ['rift-day-1'], since: 100 }] };
 		const session = createWorldReadSession({
 			field: { columns: 4, rows: 3 },
 			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn(),
-			realtime: {
-				registry: [{ eventType: 'fixture', protocolVersion: 1, protocolKey: protocolKeyFor('fixture', 1), parseAction: () => ({}) }],
-				instanceId: 'stale-instance', since: 1, getStartConfiguration: () => configuration,
+				realtime: {
+					registry: [{ eventType: 'fixture', protocolVersion: 1, protocolKey: protocolKeyFor('fixture', 1), parseAction: () => ({}) }],
+					controlSince: 0, instanceFilters: [], getStartConfiguration: () => configuration,
 				onEvent: vi.fn()
 			}
 		});
 		await session.start();
 		await session.startRealtime();
-		configuration = { instanceId: 'rift-day-2', since: 200 };
+		const firstConfiguration = configuration;
+		configuration = { controlSince: 10, instanceFilters: [{ protocolKey: protocolKeyFor('fixture', 1), instanceIds: ['rift-day-2'], since: 200 }] };
 		await session.startRealtime();
 		expect(startRealtime).toHaveBeenCalledTimes(2);
-		expect(startRealtime.mock.calls.map(([next]) => ({ instanceId: next.instanceId, since: next.since }))).toEqual([
-			{ instanceId: 'rift-day-1', since: 100 },
-			{ instanceId: 'rift-day-2', since: 200 }
-		]);
+		expect(startRealtime.mock.calls.map(([next]) => ({
+			controlSince: next.controlSince,
+			instanceFilters: next.instanceFilters
+		}))).toEqual([firstConfiguration, configuration]);
 		expect(stopRealtime).toHaveBeenCalledOnce();
 	});
 

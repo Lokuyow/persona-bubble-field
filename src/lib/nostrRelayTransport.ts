@@ -30,7 +30,17 @@ import {
 	PROTOTYPE_NAMESPACE,
 	RECENT_MESSAGE_TIMELINE_LIMIT
 } from './nostrProtocol';
-import { buildRealtimeEventFilter, REALTIME_EVENT_KIND, type RealtimeEventRegistry } from './realtimeEvents';
+import {
+	buildRealtimeControlFilter,
+	buildRealtimeInstanceFilter,
+	normalizeRealtimeInstanceFilterConfigurations,
+	parseRealtimeControlEnvelope,
+	REALTIME_CONTROL_PROTOCOL_KEY,
+	REALTIME_EVENT_KIND,
+	type RealtimeControlEnvelope,
+	type RealtimeEventRegistry,
+	type RealtimeInstanceFilterConfiguration
+} from './realtimeEvents';
 import { resolveChannelMetadata, type ResolvedChannelMetadata } from './nostrChannelMetadata';
 import type { PrototypeWorldConfig } from './prototypeWorld';
 
@@ -172,16 +182,18 @@ export type TraceRootBootstrapResult = Readonly<{
 
 export type RealtimeStartInput = Readonly<{
 	eventTypes: RealtimeEventRegistry;
-	instanceId?: string;
-	instanceIds?: readonly string[];
-	since: number;
+	controlSince: number;
+	instanceFilters: readonly RealtimeInstanceFilterConfiguration[];
 	onBootstrapEvent: (event: Event) => void;
 	onLiveEvent: (event: Event) => void;
+	onBootstrapControl?: (control: RealtimeControlEnvelope) => void;
+	onLiveControl?: (control: RealtimeControlEnvelope) => void;
 }>;
 
 export type RealtimeStartResult = Readonly<{
 	status: 'active' | 'inactive';
 	events: readonly Event[];
+	controls: readonly RealtimeControlEnvelope[];
 	relays: readonly RealtimeRelayDiagnostic[];
 }>;
 
@@ -330,8 +342,8 @@ function reqFromOutgoing(packet: OutgoingMessagePacket): { subId: string; filter
 
 /** Compare query conditions, ignoring key order and semantically absent values. */
 function matchesQueryFilter(filters: readonly unknown[], expected: Filter): boolean {
-	if (filters.length !== 1) return false;
-	const actualEntries = filterEntries(filters[0]);
+	if (filters.length === 0) return false;
+	const actualEntries = filterEntries(filters.find((filter) => matchesFilter(filter, expected)));
 	const expectedEntries = filterEntries(expected)!;
 	if (!actualEntries || actualEntries.length !== expectedEntries.length) return false;
 	const actual = Object.fromEntries(actualEntries);
@@ -348,6 +360,23 @@ function matchesFilter(candidate: unknown, expected: Filter): boolean {
 	return expectedEntries.every(([key, value]) => Array.isArray(value)
 		? hasExactly(actual[key], value)
 		: actual[key] === value);
+}
+
+function matchesRealtimeFilterBundle(actual: readonly unknown[], expected: readonly Filter[]): boolean {
+	return actual.length === expected.length && expected.every((filter) => matchesQueryFilter(actual, filter));
+}
+
+function matchesRealtimeEventFilter(event: Event, filter: Filter): boolean {
+	const candidate = filter as Record<string, unknown>;
+	if (Array.isArray(candidate.kinds) && !candidate.kinds.includes(event.kind)) return false;
+	if (Array.isArray(candidate.authors) && !candidate.authors.includes(event.pubkey)) return false;
+	if (typeof candidate.since === 'number' && event.created_at < candidate.since) return false;
+	for (const [key, value] of Object.entries(candidate)) {
+		if (!key.startsWith('#') || !Array.isArray(value)) continue;
+		const tagValues = event.tags.filter((tag) => tag[0] === key.slice(1)).map((tag) => tag[1]);
+		if (!value.some((expected) => tagValues.includes(expected as string))) return false;
+	}
+	return true;
 }
 
 function matchesFilterBundle(filters: readonly unknown[], expected: readonly Filter[]): boolean {
@@ -402,9 +431,10 @@ export function createNostrRelayTransport(
 	let traceGeneration: TraceGeneration | null = null;
 	let traceDiagnostics: TraceReplyDiagnostics | null = null;
 	let realtimeStarted = false;
+	let realtimeGeneration = 0;
 	let realtimeDiagnostics: { status: 'inactive' | 'initializing' | 'active'; relays: RealtimeRelayDiagnostic[] } = { status: 'inactive', relays: [] };
 	let realtimeResources: Subscription | null = null;
-	let realtimeFilter: Filter | null = null;
+	let realtimeFilters: readonly Filter[] = [];
 	const realtimeSubIds = new Map<string, string>();
 	const realtimeSeenIds = new Set<string>();
 	const realtimeReadableRelays = new Set<string>();
@@ -796,27 +826,29 @@ export function createNostrRelayTransport(
 		if (state !== 'started' || !metadata) throw new Error('Relay transport must start before realtime events.');
 		if (realtimeStarted) throw new Error('Realtime event startup is only allowed once.');
 		realtimeStarted = true;
+		const generation = ++realtimeGeneration;
 		if (input.eventTypes.length === 0) {
 			realtimeDiagnostics = { status: 'inactive', relays: [] };
-			return { status: 'inactive', events: [], relays: [] };
+			return { status: 'inactive', events: [], controls: [], relays: [] };
 		}
-		assertTimestamp(input.since, 'realtime since');
-		realtimeFilter = buildRealtimeEventFilter({
-			channelId: metadata.channelId,
-			eventTypes: input.eventTypes,
-			...(input.instanceId === undefined ? {} : { instanceId: input.instanceId }),
-			...(input.instanceIds === undefined ? {} : { instanceIds: input.instanceIds }),
-			since: input.since
+		assertTimestamp(input.controlSince, 'realtime control since');
+		const enabledProtocolKeys = new Set(input.eventTypes.map((definition) => definition.protocolKey));
+		const instanceFilters = normalizeRealtimeInstanceFilterConfigurations(input.instanceFilters).map((configuration) => {
+			if (!enabledProtocolKeys.has(configuration.protocolKey)) throw new TypeError('Realtime instance filter targets a disabled protocol.');
+			return buildRealtimeInstanceFilter({ channelId: metadata!.channelId, configuration });
 		});
+		const controlFilter = buildRealtimeControlFilter({ channelId: metadata.channelId, creatorPubkey: metadata.creatorPubkey, since: input.controlSince });
+		realtimeFilters = [controlFilter, ...instanceFilters];
 		const capableRelays = metadata.relays.filter(realtimeCapacityAllows);
 		const skipped = metadata.relays.filter((relayUrl) => !capableRelays.includes(relayUrl)).map((relayUrl) => ({ relayUrl, status: 'unavailable' as const, notice: 'Relay subscription capacity is reserved for primary world reads.' }));
 		if (capableRelays.length === 0) {
 			realtimeDiagnostics = { status: 'inactive', relays: skipped };
-			return { status: 'inactive', events: [], relays: skipped };
+			return { status: 'inactive', events: [], controls: [], relays: skipped };
 		}
 		realtimeDiagnostics = { status: 'initializing', relays: [...capableRelays.map((relayUrl) => ({ relayUrl, status: 'pending' as const })), ...skipped] };
 		const client = requireRxNostr();
 		const initialEvents: Event[] = [];
+		const initialControls: RealtimeControlEnvelope[] = [];
 		let settled = false;
 		let deadline: ReturnType<typeof setTimeout> | null = null;
 		const resources = new Subscription();
@@ -826,7 +858,7 @@ export function createNostrRelayTransport(
 			settled = true;
 			if (deadline) clearTimeout(deadline);
 			realtimeDiagnostics = { ...realtimeDiagnostics, status: capableRelays.some((relayUrl) => realtimeDiagnostics.relays.find((relay) => relay.relayUrl === relayUrl)?.status === 'eose') ? 'active' : 'inactive' };
-			resolve({ status: realtimeDiagnostics.status === 'active' ? 'active' : 'inactive', events: [...initialEvents], relays: realtimeDiagnostics.relays.map((relay) => ({ ...relay })) });
+			resolve({ status: realtimeDiagnostics.status === 'active' ? 'active' : 'inactive', events: [...initialEvents], controls: [...initialControls], relays: realtimeDiagnostics.relays.map((relay) => ({ ...relay })) });
 		};
 		return await new Promise<RealtimeStartResult>((resolve, reject) => {
 			resources.add(() => {
@@ -838,19 +870,25 @@ export function createNostrRelayTransport(
 			resources.add(client.createOutgoingMessageObservable().subscribe((packet) => {
 				const request = reqFromOutgoing(packet);
 				const relayUrl = canonicalRelay(packet.to);
-				if (!request || !relayUrl || !capableRelays.includes(relayUrl) || !realtimeFilter || !matchesQueryFilter(request.filters, realtimeFilter)) return;
+				if (!request || !relayUrl || generation !== realtimeGeneration || !capableRelays.includes(relayUrl) || !matchesRealtimeFilterBundle(request.filters, realtimeFilters)) return;
 				realtimeSubIds.set(relayUrl, request.subId);
 			}));
 			resources.add(client.createAllEventObservable().subscribe((packet) => {
 				const relayUrl = canonicalRelay(packet.from);
-				if (!relayUrl || realtimeSubIds.get(relayUrl) !== packet.subId || packet.event.kind !== REALTIME_EVENT_KIND) return;
+				if (generation !== realtimeGeneration || !relayUrl || realtimeSubIds.get(relayUrl) !== packet.subId || packet.event.kind !== REALTIME_EVENT_KIND) return;
+				const control = matchesRealtimeEventFilter(packet.event, controlFilter)
+					? parseRealtimeControlEnvelope(packet.event, metadata!.channelId, metadata!.creatorPubkey)
+					: null;
+				const isInstanceEvent = instanceFilters.some((filter) => matchesRealtimeEventFilter(packet.event, filter));
+				if (!control && !isInstanceEvent) return;
 				notifyRealtimeEcho(packet.event.id);
 				if (realtimeSeenIds.has(packet.event.id)) return;
 				realtimeSeenIds.add(packet.event.id);
 				if (!settled) {
-					initialEvents.push(packet.event);
-					input.onBootstrapEvent(packet.event);
-				} else input.onLiveEvent(packet.event);
+					if (control) { initialControls.push(control); input.onBootstrapControl?.(control); }
+					else { initialEvents.push(packet.event); input.onBootstrapEvent(packet.event); }
+				} else if (control) input.onLiveControl?.(control);
+				else input.onLiveEvent(packet.event);
 			}));
 			resources.add(client.createAllMessageObservable().subscribe((packet) => {
 				if (packet.type !== 'EOSE' && packet.type !== 'CLOSED') return;
@@ -883,7 +921,7 @@ export function createNostrRelayTransport(
 				}
 				finish(resolve);
 			}, timeoutMs);
-			for (const request of requests) request.emit(realtimeFilter!);
+			for (const request of requests) request.emit([...realtimeFilters] as Filter[]);
 			for (const relayUrl of capableRelays) {
 				const connection = client.getRelayStatus(relayUrl)?.connection;
 				if (connection && isConnectionUnavailable(connection)) updateRealtimeDiagnostic(relayUrl, { relayUrl, status: 'unavailable' });
@@ -894,11 +932,12 @@ export function createNostrRelayTransport(
 
 	function stopRealtime(): void {
 		if (!realtimeStarted) return;
+		realtimeGeneration += 1;
 		realtimeStarted = false;
 		realtimeResources?.unsubscribe();
 		realtimeResources = null;
 		realtimeSubIds.clear();
-		realtimeFilter = null;
+		realtimeFilters = [];
 		realtimeReadableRelays.clear();
 		for (const listeners of realtimeEchoWaiters.values()) for (const listener of listeners) listener(false);
 		realtimeEchoWaiters.clear();
