@@ -558,6 +558,87 @@ describe('world read session', () => {
 		expect(publish).not.toHaveBeenCalled();
 	});
 
+	it('promotes a completed anonymous session without restarting its transport', async () => {
+		const promotedSecret = selfSecretKey.slice();
+		const promotedPubkey = selfPubkey;
+		result = startResult([], [position('promoted-slot-0', 700, promotedPubkey, 0)]);
+		publish.mockResolvedValue([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
+		const startRealtime = vi.fn().mockResolvedValue({ status: 'active', events: [], relays: [] });
+		mocked.createTransport.mockReturnValue({
+			start: vi.fn(async (nextInput) => { input = nextInput; return result; }),
+			startRealtime,
+			bootstrapTraceRootCandidates: traceBootstrap(),
+			dispose,
+			publish
+		});
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 }, onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn(),
+			realtime: {
+				registry: [{ eventType: 'fixture', protocolVersion: 1, protocolKey: protocolKeyFor('fixture', 1), parseAction: () => ({}) }],
+				controlSince: 0, instanceFilters: [], startImmediately: false, onEvent: vi.fn()
+			}
+		});
+		await session.start();
+		session.completeBootstrap();
+		await session.attachSelf({
+			signer: selfSigner(),
+			authorizeSelfWrite: vi.fn().mockResolvedValue('authorized')
+		});
+		await expect(session.moveSelf('right')).resolves.toMatchObject({ kind: 'succeeded' });
+		expect(parsePositionEvent(publish.mock.calls[0][0], 'c'.repeat(64))?.slot).toBe(1);
+		expect(startRealtime).toHaveBeenCalledOnce();
+		expect(mocked.createTransport.mock.results).toHaveLength(1);
+		expect(dispose).not.toHaveBeenCalled();
+	});
+
+	it('does not wait for delayed Trace promotion before attaching self', async () => {
+		const traceRoots = deferred<{ rawEvents: readonly never[]; relays: readonly never[] }>();
+		const startRealtime = vi.fn().mockResolvedValue({ status: 'active', events: [], relays: [] });
+		const configureTraceReplies = vi.fn().mockResolvedValue({ status: 'active', initialBatch: { events: [], relays: [] } });
+		result = startResult([], [position('promoted-slot-0', 700, selfPubkey, 0)]);
+		mocked.createTransport.mockReturnValue({
+			start: vi.fn(async (nextInput) => { input = nextInput; return result; }),
+			startRealtime,
+			bootstrapTraceRootCandidates: vi.fn(() => traceRoots.promise),
+			configureTraceReplies,
+			dispose,
+			publish
+		});
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 }, onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn(),
+			realtime: {
+				registry: [{ eventType: 'fixture', protocolVersion: 1, protocolKey: protocolKeyFor('fixture', 1), parseAction: () => ({}) }],
+				controlSince: 0, instanceFilters: [], startImmediately: false, onEvent: vi.fn()
+			}
+		});
+		await session.start();
+		session.completeBootstrap();
+		await expect(session.attachSelf({ signer: selfSigner(), authorizeSelfWrite: vi.fn().mockResolvedValue('authorized') })).resolves.toBeUndefined();
+		expect(startRealtime).not.toHaveBeenCalled();
+		await expect(session.enterSelf()).resolves.toMatchObject({ kind: 'not-needed' });
+
+		traceRoots.resolve({ rawEvents: [], relays: [] });
+		await vi.waitFor(() => expect(startRealtime).toHaveBeenCalledOnce());
+	});
+
+	it('retains anonymous position evidence for a full same-second pair before promotion', async () => {
+		const promotedSecret = selfSecretKey.slice();
+		const promotedPubkey = selfPubkey;
+		result = startResult([], [
+			position('promoted-slot-0', 700, promotedPubkey, 0),
+			position('promoted-slot-1', 700, promotedPubkey, 1)
+		]);
+		publish.mockResolvedValue([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 }, onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn()
+		});
+		await session.start();
+		session.completeBootstrap();
+		await session.attachSelf({ signer: selfSigner() });
+		await expect(session.moveSelf('right')).resolves.toEqual({ kind: 'blocked' });
+		expect(publish).not.toHaveBeenCalled();
+	});
+
 	it('emits final bootstrap presence before start resolves and orders canonical live callbacks', async () => {
 		result = startResult([message('bootstrap-message', 700)]);
 		const calls: string[] = [];

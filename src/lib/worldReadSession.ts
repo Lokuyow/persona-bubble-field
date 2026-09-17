@@ -148,6 +148,12 @@ export type WorldReadSessionOptions = Readonly<{
 	realtime?: RealtimeSessionOptions;
 }>;
 
+export type WorldReadSessionSelfAttachment = Readonly<{
+	signer: ActiveSignerSnapshot;
+	authorizeSelfWrite?: () => Promise<SelfWriteAuthorizationResult>;
+	onSelfWriteAuthorizationLost?: () => void;
+}>;
+
 type BufferedLiveEvent =
 	| Readonly<{ kind: 'message'; event: ParsedWorldMessage; rawEvent: NostrEvent }>
 	| Readonly<{ kind: 'position'; event: ParsedPositionEvent }>;
@@ -178,6 +184,9 @@ function hasRelayIssue(result: PrimaryStartResult): number {
  */
 export function createWorldReadSession(input: WorldReadSessionOptions) {
 	const options = input;
+	let selfSigner = options.selfSigner ?? null;
+	let authorizeSelfWriteCallback = options.authorizeSelfWrite;
+	let onSelfWriteAuthorizationLostCallback = options.onSelfWriteAuthorizationLost;
 	let disposed = false;
 	let started = false;
 	let bootstrapComplete = false;
@@ -191,7 +200,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	let selfJoinedThisSession = false;
 	let pendingSelfOperation: SelfPositionOperation | null = null;
 	let latestSelfOperationId: string | null = null;
-	let selfPositionWriteState: SelfPositionWriteState = options.selfSigner ? { kind: 'ready' } : { kind: 'unavailable' };
+	let selfPositionWriteState: SelfPositionWriteState = selfSigner ? { kind: 'ready' } : { kind: 'unavailable' };
 	let selfMessageAvailability: SelfMessageAvailability = { kind: 'unavailable' };
 	let pendingSelfMessage: SelfMessageOperation | null = null;
 	// Owns the entire reply pipeline, including coalesced position and post-position publication.
@@ -200,6 +209,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	let traceReadSnapshot: TraceReadSnapshot = { readRootIds: [], unreadReplyRootIds: [], hasUnreadReplies: false };
 	let traceRootBootstrapReadiness: Promise<'ready' | 'failed'> | null = null;
 	let traceStartupReadiness: Promise<'ready' | 'failed' | 'not-needed'> | null = null;
+	let traceNotificationStartup: Promise<'ready' | 'failed' | 'not-needed'> | null = null;
 	let traceConversationState: TraceConversationState = { kind: 'closed' };
 	let traceConversationGeneration = 0;
 	let realtimeEvents: RealtimeEnvelope[] = [];
@@ -211,6 +221,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	let traceReplyReconcileTail: Promise<void> = Promise.resolve();
 	const pendingLiveEvents: BufferedLiveEvent[] = [];
 	let selfPositionEvidence: PositionPublishEvidence = [];
+	const positionEvidenceByPubkey = new Map<string, PositionPublishEvidence>();
 	const retryableSelfOperations = new Map<string, SelfPositionOperation>();
 	const appliedCanonicalPositionEventIds = new Set<string>();
 	const appliedCanonicalMessageEventIds = new Set<string>();
@@ -232,8 +243,8 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 
 	function refreshSelfMessageAvailability(): void {
 		const next: SelfMessageAvailability = !disposed &&
-			Boolean(options.selfSigner && transport && channel && selfJoinedThisSession &&
-				presence.participants.some((participant) => participant.id === options.selfSigner?.pubkey))
+			Boolean(selfSigner && transport && channel && selfJoinedThisSession &&
+				presence.participants.some((participant) => participant.id === selfSigner?.pubkey))
 			? { kind: 'ready' }
 			: { kind: 'unavailable' };
 		if (next.kind === selfMessageAvailability.kind) return;
@@ -314,15 +325,15 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	}
 
 	async function authorizeSelfWrite(): Promise<boolean> {
-		if (!options.authorizeSelfWrite) return true;
-		const result = await options.authorizeSelfWrite();
+		if (!authorizeSelfWriteCallback) return true;
+		const result = await authorizeSelfWriteCallback();
 		if (result === 'authorized') return true;
 		if (!disposed) {
 			disposed = true;
 			traceConversationGeneration += 1;
 			pendingLiveEvents.splice(0);
 			transport?.dispose();
-			options.onSelfWriteAuthorizationLost?.();
+			onSelfWriteAuthorizationLostCallback?.();
 		}
 		return false;
 	}
@@ -341,8 +352,8 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	}
 
 	function refreshTraceReadSnapshot(): void {
-		if (!channel || !options.selfSigner || disposed) return;
-		void loadTraceReadSnapshot({ channelId: channel.channelId, personaPubkey: options.selfSigner.pubkey }).then((snapshot) => {
+		if (!channel || !selfSigner || disposed) return;
+		void loadTraceReadSnapshot({ channelId: channel.channelId, personaPubkey: selfSigner.pubkey }).then((snapshot) => {
 			if (disposed) return;
 			traceReadSnapshot = snapshot;
 			options.onTraceReadSnapshotChanged?.(snapshot);
@@ -366,6 +377,25 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		});
 	}
 
+	function startTraceNotification(): Promise<'ready' | 'failed' | 'not-needed'> {
+		if (!traceRootBootstrapReadiness || !selfSigner) return Promise.resolve('not-needed');
+		if (traceNotificationStartup) return traceNotificationStartup;
+		traceNotificationStartup = traceRootBootstrapReadiness.then(async (readiness) => {
+			if (readiness !== 'ready' || disposed || !transport) return 'failed' as const;
+			if (typeof transport.configureTraceReplies !== 'function') return 'not-needed' as const;
+			const notification = traceNotificationConfig();
+			if (!notification) return 'not-needed' as const;
+			const result = await transport.configureTraceReplies({
+				notification,
+				onBatch: (batch) => { void reconcileTraceReplies(traceConversationGeneration, undefined, batch.events); },
+				onLiveEvent: (event) => { void reconcileTraceReplies(traceConversationGeneration, undefined, [event]); }
+			}).catch(() => {});
+			if (result?.status === 'active') await reconcileTraceReplies(traceConversationGeneration, undefined, result.initialBatch.events);
+			return result?.status === 'active' ? 'ready' as const : 'failed' as const;
+		}).catch(() => 'failed' as const);
+		return traceNotificationStartup;
+	}
+
 	function startTraceBackground(): void {
 		void reconcileTraceRoots([]);
 		if (!transport) return;
@@ -375,26 +405,14 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		}).catch(() => {
 			return 'failed' as const;
 		});
-		traceStartupReadiness = traceRootBootstrapReadiness.then(async (readiness) => {
-			if (readiness !== 'ready' || disposed || !transport) return 'failed' as const;
-			if (typeof transport.configureTraceReplies !== 'function') return 'not-needed' as const;
-			const notification = traceNotificationConfig();
-			if (!notification) return 'not-needed' as const;
-			const result = await transport.configureTraceReplies({
-				...(notification ? { notification } : {}),
-				onBatch: (batch) => { void reconcileTraceReplies(traceConversationGeneration, undefined, batch.events); },
-				onLiveEvent: (event) => { void reconcileTraceReplies(traceConversationGeneration, undefined, [event]); }
-			}).catch(() => {});
-			if (result?.status === 'active') await reconcileTraceReplies(traceConversationGeneration, undefined, result.initialBatch.events);
-			return result?.status === 'active' ? 'ready' as const : 'failed' as const;
-		}).catch(() => 'failed' as const);
+		traceStartupReadiness = startTraceNotification();
 	}
 
 	function traceNotificationConfig() {
-		if (!options.selfSigner || !options.onTraceReadSnapshotChanged) return undefined;
+		if (!selfSigner || !options.onTraceReadSnapshotChanged) return undefined;
 		return {
-			personaPubkey: options.selfSigner.pubkey,
-			initialSince: Math.floor(options.selfSigner.identityCreatedAtMs / 1000)
+			personaPubkey: selfSigner.pubkey,
+			initialSince: Math.floor(selfSigner.identityCreatedAtMs / 1000)
 		};
 	}
 
@@ -436,9 +454,11 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	}
 
 	function observeLivePosition(event: ParsedPositionEvent): void {
-		if (!options.selfSigner || event.pubkey !== options.selfSigner.pubkey) return;
-		selfPositionEvidence = retainPositionPublishEvidence(selfPositionEvidence, event, options.selfSigner.pubkey);
-		positionPublishState = reconstructPositionPublishState(selfPositionEvidence, options.selfSigner.pubkey);
+		const retained = retainPositionPublishEvidence(positionEvidenceByPubkey.get(event.pubkey) ?? [], event, event.pubkey);
+		positionEvidenceByPubkey.set(event.pubkey, retained);
+		if (!selfSigner || event.pubkey !== selfSigner.pubkey) return;
+		selfPositionEvidence = retained;
+		positionPublishState = reconstructPositionPublishState(selfPositionEvidence, selfSigner.pubkey);
 	}
 
 	function applyCanonicalPosition(event: ParsedPositionEvent, nowMs: number): boolean {
@@ -446,7 +466,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		appliedCanonicalPositionEventIds.add(event.id);
 		worldPresence = applyWorldPresencePosition(worldPresence, event);
 		const nextPresence = project(nowMs);
-		if (options.selfSigner && event.pubkey === options.selfSigner.pubkey) {
+		if (selfSigner && event.pubkey === selfSigner.pubkey) {
 			selfJoinedThisSession = nextPresence.participants.some((participant) =>
 				participant.id === event.pubkey && participant.status === 'active'
 			);
@@ -475,21 +495,21 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		operation: Exclude<SelfPositionOperationKind, 'trace-inspection' | 'trace-reply'>,
 		direction?: Direction
 	): Readonly<{ event: VerifiedEvent; parsed: ParsedPositionEvent }> | null {
-		if (!options.selfSigner || !channel) return null;
+		if (!selfSigner || !channel) return null;
 		const nowMs = Date.now();
 		const state = currentPresence();
 		let candidate: PresenceState;
 		if (operation === 'entry') {
-			candidate = enterParticipant(state, options.selfSigner.pubkey, nowMs);
+			candidate = enterParticipant(state, selfSigner.pubkey, nowMs);
 		} else if (operation === 'reactivation') {
-			candidate = recordPresenceActivity(state, options.selfSigner.pubkey, 'movement', nowMs);
+			candidate = recordPresenceActivity(state, selfSigner.pubkey, 'movement', nowMs);
 		} else {
 			if (!direction) return null;
-			const movement = moveParticipant(state, options.selfSigner.pubkey, direction, nowMs);
+			const movement = moveParticipant(state, selfSigner.pubkey, direction, nowMs);
 			if (!movement.moved) return null;
 			candidate = movement.state;
 		}
-		const participant = getParticipant(candidate, options.selfSigner.pubkey);
+		const participant = getParticipant(candidate, selfSigner.pubkey);
 		if (!participant) return null;
 		return positionCandidate(participant.position, nowMs);
 	}
@@ -498,7 +518,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		position: ParsedPositionEvent['position'],
 		nowMs: number
 	): Readonly<{ event: VerifiedEvent; parsed: ParsedPositionEvent }> | null {
-		if (!options.selfSigner || !channel) return null;
+		if (!selfSigner || !channel) return null;
 		const createdAt = Math.floor(nowMs / 1000);
 		const plan = planPositionPublish(positionPublishState, createdAt);
 		if (plan.kind === 'unavailable') return null;
@@ -507,24 +527,25 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			position,
 			slot: plan.slot,
 			createdAt
-		}), options.selfSigner.secretKey);
+		}), selfSigner.secretKey);
 		const parsed = parsePositionEvent(signed, channel.channelId);
 		if (!parsed) throw new Error('Locally signed position event did not pass the project parser.');
 		positionPublishState = plan.nextState;
-		selfPositionEvidence = retainPositionPublishEvidence(selfPositionEvidence, parsed, options.selfSigner.pubkey);
+		selfPositionEvidence = retainPositionPublishEvidence(selfPositionEvidence, parsed, selfSigner.pubkey);
+		positionEvidenceByPubkey.set(selfSigner.pubkey, selfPositionEvidence);
 		return { event: signed, parsed };
 	}
 
 	function selfMessageCandidate(content: string, speechType: SpeechType): Readonly<{ event: VerifiedEvent; parsed: ParsedWorldMessage }> | null {
-		if (!options.selfSigner || !channel || !selfJoinedThisSession) return null;
+		if (!selfSigner || !channel || !selfJoinedThisSession) return null;
 		const nowMs = Date.now();
 		const state = currentPresence();
-		const current = getParticipant(state, options.selfSigner.pubkey);
+		const current = getParticipant(state, selfSigner.pubkey);
 		if (!current) return null;
 		const candidate = current.status === 'inactive'
-			? recordPresenceActivity(state, options.selfSigner.pubkey, 'message', nowMs)
+			? recordPresenceActivity(state, selfSigner.pubkey, 'message', nowMs)
 			: state;
-		const participant = getParticipant(candidate, options.selfSigner.pubkey);
+		const participant = getParticipant(candidate, selfSigner.pubkey);
 		if (!participant) return null;
 		const signed = finalizeWorldEvent(buildWorldMessageTemplate({
 			channel,
@@ -532,14 +553,14 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			speechType,
 			position: participant.position,
 			createdAt: Math.floor(nowMs / 1000)
-		}), options.selfSigner.secretKey);
+		}), selfSigner.secretKey);
 		const parsed = parseWorldMessage(signed, channel.channelId);
 		if (!parsed) throw new Error('Locally signed world message did not pass the project parser.');
 		return { event: signed, parsed };
 	}
 
 	async function publishMessage(content: string, speechType: SpeechType): Promise<SelfMessagePublishResult> {
-		if (disposed || !options.selfSigner || !transport || !channel) return { kind: 'unavailable' };
+		if (disposed || !selfSigner || !transport || !channel) return { kind: 'unavailable' };
 		if (pendingSelfMessage || pendingTraceReply) return { kind: 'pending' };
 		const candidate = selfMessageCandidate(content, speechType);
 		if (!candidate) return { kind: 'blocked' };
@@ -616,7 +637,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		operation: Exclude<SelfPositionOperationKind, 'trace-inspection' | 'trace-reply'>,
 		direction?: Direction
 	): Promise<SelfPositionWriteResult> {
-		if (!options.selfSigner) {
+		if (!selfSigner) {
 			emitSelfPositionWriteState({ kind: 'unavailable' });
 			return { kind: 'unavailable' };
 		}
@@ -673,7 +694,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 					channelId: channel.channelId,
 					effectiveRoots: effectiveTraceRoots,
 					rawEvents,
-					...(options.selfSigner ? { personaPubkey: options.selfSigner.pubkey } : {}),
+					...(selfSigner ? { personaPubkey: selfSigner.pubkey } : {}),
 					...(currentOpenRootId ? { currentOpenRootId } : {})
 				});
 				success = true;
@@ -754,7 +775,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	}
 
 	function openTraceConversation(config: TraceConversationConfig): TraceConversationOpenResult {
-		if (disposed || !options.selfSigner || !transport || !channel) return { kind: 'unavailable' };
+		if (disposed || !selfSigner || !transport || !channel) return { kind: 'unavailable' };
 		if (!bootstrapComplete) return { kind: 'blocked' };
 		const root = effectiveTraceRoots.find((candidate) => candidate.id === config.rootId);
 		if (!root || config.currentId !== root.id) return { kind: 'blocked' };
@@ -767,7 +788,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		const nowMs = Date.now();
 		const prepared = prepareTraceInspectionActivity({
 			presence: currentPresence(),
-			selfId: options.selfSigner.pubkey,
+			selfId: selfSigner.pubkey,
 			target: root.position,
 			nowMs,
 		});
@@ -782,7 +803,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	}
 
 	function selectTraceConversationSpeech(targetId: string): TraceConversationOpenResult {
-		if (disposed || !options.selfSigner || !transport || !channel) return { kind: 'unavailable' };
+		if (disposed || !selfSigner || !transport || !channel) return { kind: 'unavailable' };
 		if (!bootstrapComplete || traceConversationState.kind === 'closed') return { kind: 'blocked' };
 		const pendingTraceInspection = pendingSelfOperation?.operation === 'trace-inspection';
 		if (pendingTraceReply || (pendingSelfOperation && !pendingTraceInspection)) return { kind: 'pending' };
@@ -794,7 +815,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		const nowMs = Date.now();
 		const prepared = prepareTraceInspectionActivity({
 			presence: currentPresence(),
-			selfId: options.selfSigner.pubkey,
+			selfId: selfSigner.pubkey,
 			target: current.root.position,
 			nowMs,
 			requireCurrentRange: true
@@ -847,8 +868,8 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		}
 		const fallback = groupTraceRoots(roots)
 			.find((cell) => sameGridPosition(cell.position, current.root.position))?.roots[0];
-		const self = options.selfSigner
-			? getParticipant(projectWorldPresenceState(worldPresence, Date.now()), options.selfSigner.pubkey)
+		const self = selfSigner
+			? getParticipant(projectWorldPresenceState(worldPresence, Date.now()), selfSigner.pubkey)
 			: undefined;
 		if (!fallback || !self || !isWithinTraceInvestigationRange(self.position, fallback.position)) {
 			closeTraceConversation();
@@ -875,7 +896,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	}
 
 	async function publishTraceReply(input: TraceReplyPublication): Promise<TraceReplyPublishResult> {
-		if (disposed || !options.selfSigner || !transport || !channel) return { kind: 'unavailable' };
+		if (disposed || !selfSigner || !transport || !channel) return { kind: 'unavailable' };
 		if (!bootstrapComplete || !selfJoinedThisSession) return { kind: 'blocked' };
 		if (pendingSelfOperation || pendingSelfMessage || pendingTraceReply) return { kind: 'pending' };
 		const accepted = resolveReplyTarget(input.rootId, input.targetId);
@@ -886,7 +907,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			if (!await authorizeSelfWrite()) return { kind: 'unavailable' };
 			const nowMs = Date.now();
 			const prepared = prepareTraceInspectionActivity({
-				presence: currentPresence(), selfId: options.selfSigner.pubkey,
+				presence: currentPresence(), selfId: selfSigner.pubkey,
 				target: accepted.root.position, nowMs, requireCurrentRange: true, activity: 'trace-reply'
 			});
 			if (prepared.kind === 'blocked') return { kind: 'out-of-range' };
@@ -897,13 +918,13 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 				if (disposed) return { kind: 'unavailable' };
 				if (positionResult.kind !== 'succeeded') return { kind: 'position-failed' };
 			}
-			const self = getParticipant(currentPresence(), options.selfSigner.pubkey);
+			const self = getParticipant(currentPresence(), selfSigner.pubkey);
 			if (!self || !isWithinTraceInvestigationRange(self.position, accepted.root.position)) return { kind: 'out-of-range' };
 			if (self.status !== 'active') return { kind: 'blocked' };
 			const event = finalizeWorldEvent(buildTraceReplyTemplate({
 				root: accepted.root, parent: accepted.target, content: input.content, speechType: input.speechType,
 				createdAt: Math.floor(Date.now() / 1000)
-			}), options.selfSigner.secretKey);
+			}), selfSigner.secretKey);
 			if (!await authorizeSelfWrite()) return { kind: 'unavailable' };
 			operation.eventId = event.id;
 			const results = await transport.publish(event);
@@ -979,6 +1000,29 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			}
 		},
 
+		async attachSelf(attachment: WorldReadSessionSelfAttachment): Promise<void> {
+			if (disposed) throw new Error('Cannot attach self to a disposed world session.');
+			if (!started || !bootstrapComplete || !transport || !channel) {
+				throw new Error('World session must complete bootstrap before attaching self.');
+			}
+			if (selfSigner) throw new Error('World session already has a self attached.');
+			selfSigner = attachment.signer;
+			authorizeSelfWriteCallback = attachment.authorizeSelfWrite;
+			onSelfWriteAuthorizationLostCallback = attachment.onSelfWriteAuthorizationLost;
+			selfPositionEvidence = positionEvidenceByPubkey.get(selfSigner.pubkey) ?? [];
+			positionPublishState = reconstructPositionPublishState(selfPositionEvidence, selfSigner.pubkey);
+			for (const pubkey of positionEvidenceByPubkey.keys()) {
+				if (pubkey !== selfSigner.pubkey) positionEvidenceByPubkey.delete(pubkey);
+			}
+			emitSelfPositionWriteState({ kind: 'ready' });
+			refreshSelfMessageAvailability();
+			refreshTraceReadSnapshot();
+			traceStartupReadiness = startTraceNotification();
+			void traceStartupReadiness.then(() => {
+				if (!disposed && options.realtime?.registry.length) void startRealtimeSubscription();
+			}).catch(() => {});
+		},
+
 		completeBootstrap(): void {
 			if (disposed || !started || bootstrapComplete) return;
 			bootstrapComplete = true;
@@ -989,8 +1033,8 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		enterSelf(): Promise<SelfPositionWriteResult> {
 			if (!bootstrapComplete) return Promise.resolve({ kind: 'blocked' });
 			if (pendingTraceReply) return Promise.resolve({ kind: 'pending' });
-			if (!options.selfSigner) return publishSelfPosition('entry');
-			const participant = getParticipant(currentPresence(), options.selfSigner.pubkey);
+			if (!selfSigner) return publishSelfPosition('entry');
+			const participant = getParticipant(currentPresence(), selfSigner.pubkey);
 			if (participant?.status === 'active' && !isBlockedFacilityCell(participant.position)) {
 				selfJoinedThisSession = true;
 				refreshSelfMessageAvailability();
@@ -1002,8 +1046,8 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 
 		moveSelf(direction: Direction): Promise<SelfPositionWriteResult> {
 			if (!bootstrapComplete) return Promise.resolve({ kind: 'blocked' });
-			if (!options.selfSigner) return publishSelfPosition('movement', direction);
-			const participant = getParticipant(currentPresence(), options.selfSigner.pubkey);
+			if (!selfSigner) return publishSelfPosition('movement', direction);
+			const participant = getParticipant(currentPresence(), selfSigner.pubkey);
 			if (!participant) return publishSelfPosition('entry');
 			return publishSelfPosition(
 				participant.status === 'inactive' && selfJoinedThisSession ? 'reactivation' : 'movement',
@@ -1087,8 +1131,8 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		},
 
 		markTraceRootRead(rootId: string): Promise<boolean> {
-			if (disposed || !channel || !options.selfSigner) return Promise.resolve(false);
-			return markTraceRootRead({ channelId: channel.channelId, personaPubkey: options.selfSigner.pubkey, rootId })
+			if (disposed || !channel || !selfSigner) return Promise.resolve(false);
+			return markTraceRootRead({ channelId: channel.channelId, personaPubkey: selfSigner.pubkey, rootId })
 				.then((changed) => {
 					if (changed) refreshTraceReadSnapshot();
 					return changed;
@@ -1096,8 +1140,8 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		},
 
 		markTraceReplyRead(rootId: string, replyId: string): Promise<boolean> {
-			if (disposed || !channel || !options.selfSigner) return Promise.resolve(false);
-			return markTraceReplyRead({ channelId: channel.channelId, personaPubkey: options.selfSigner.pubkey, rootId, replyId })
+			if (disposed || !channel || !selfSigner) return Promise.resolve(false);
+			return markTraceReplyRead({ channelId: channel.channelId, personaPubkey: selfSigner.pubkey, rootId, replyId })
 				.then((changed) => {
 					if (changed) refreshTraceReadSnapshot();
 					return changed;
