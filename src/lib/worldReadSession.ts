@@ -1018,9 +1018,9 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			refreshSelfMessageAvailability();
 			refreshTraceReadSnapshot();
 			traceStartupReadiness = startTraceNotification();
-			await traceStartupReadiness;
-			if (disposed) throw new Error('World session was disposed during self attachment.');
-			if (options.realtime?.registry.length) await startRealtimeSubscription();
+			void traceStartupReadiness.then(() => {
+				if (!disposed && options.realtime?.registry.length) void startRealtimeSubscription();
+			}).catch(() => {});
 		},
 
 		completeBootstrap(): void {

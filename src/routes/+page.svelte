@@ -1081,6 +1081,8 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 					// A failed or superseded anonymous startup cannot be promoted.
 				}
 			}
+			// The anonymous startup error belongs to the superseded attempt, not this fresh signed session.
+			composerStartupError = null;
 			const startup = startReadSession(persona.signer, characterProfilePublication, persona.activeRun.runNumber, true);
 			// startReadSession installs the new session synchronously before its first await.
 			// Release the selection guard only after the signed session owns the page state.

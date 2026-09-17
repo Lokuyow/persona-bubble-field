@@ -591,6 +591,36 @@ describe('world read session', () => {
 		expect(dispose).not.toHaveBeenCalled();
 	});
 
+	it('does not wait for delayed Trace promotion before attaching self', async () => {
+		const traceRoots = deferred<{ rawEvents: readonly never[]; relays: readonly never[] }>();
+		const startRealtime = vi.fn().mockResolvedValue({ status: 'active', events: [], relays: [] });
+		const configureTraceReplies = vi.fn().mockResolvedValue({ status: 'active', initialBatch: { events: [], relays: [] } });
+		result = startResult([], [position('promoted-slot-0', 700, selfPubkey, 0)]);
+		mocked.createTransport.mockReturnValue({
+			start: vi.fn(async (nextInput) => { input = nextInput; return result; }),
+			startRealtime,
+			bootstrapTraceRootCandidates: vi.fn(() => traceRoots.promise),
+			configureTraceReplies,
+			dispose,
+			publish
+		});
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 }, onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn(),
+			realtime: {
+				registry: [{ eventType: 'fixture', protocolVersion: 1, protocolKey: protocolKeyFor('fixture', 1), parseAction: () => ({}) }],
+				controlSince: 0, instanceFilters: [], startImmediately: false, onEvent: vi.fn()
+			}
+		});
+		await session.start();
+		session.completeBootstrap();
+		await expect(session.attachSelf({ signer: selfSigner(), authorizeSelfWrite: vi.fn().mockResolvedValue('authorized') })).resolves.toBeUndefined();
+		expect(startRealtime).not.toHaveBeenCalled();
+		await expect(session.enterSelf()).resolves.toMatchObject({ kind: 'not-needed' });
+
+		traceRoots.resolve({ rawEvents: [], relays: [] });
+		await vi.waitFor(() => expect(startRealtime).toHaveBeenCalledOnce());
+	});
+
 	it('retains anonymous position evidence for a full same-second pair before promotion', async () => {
 		const promotedSecret = selfSecretKey.slice();
 		const promotedPubkey = selfPubkey;

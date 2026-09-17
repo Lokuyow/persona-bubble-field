@@ -325,13 +325,14 @@ async function installDelayedRelay(page: Page, options: {
 	traceReplies?: readonly object[];
 	deferTraceRoots?: boolean;
 	deferTraceReplies?: boolean;
+	failMetadataDiscoveryOnce?: boolean;
 	persistAcrossReload?: boolean;
 	channelEvent?: object;
 	testWorldConfig?: { channelId: string; metadataDiscoveryRelays: readonly string[]; preferredRelayHint: string };
 	hiddenSubscriptionLimit?: number;
 } = {}): Promise<void> {
 	const events = options.primaryEvents ?? testEvents();
-	await page.addInitScript(({ seedRelays, authoritativeRelays, channelEvent, primaryEvents, historyMessages, realtimeEvents, deferPrimaryEvents, deferRealtimeEvents, realtimeTerminal, realtimePublishOutcome, traceRoots, traceReplies, deferTraceRoots, deferTraceReplies, persistAcrossReload, testWorldConfig, hiddenSubscriptionLimit }) => {
+	await page.addInitScript(({ seedRelays, authoritativeRelays, channelEvent, primaryEvents, historyMessages, realtimeEvents, deferPrimaryEvents, deferRealtimeEvents, realtimeTerminal, realtimePublishOutcome, traceRoots, traceReplies, deferTraceRoots, deferTraceReplies, failMetadataDiscoveryOnce, persistAcrossReload, testWorldConfig, hiddenSubscriptionLimit }) => {
 		type Listener = (event?: { type: string; data?: string; code?: number; reason?: string }) => void;
 		type PendingRequest = { socket: FakeWebSocket; subId: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] };
 		const seed = new Set<string>(seedRelays);
@@ -370,6 +371,7 @@ async function installDelayedRelay(page: Page, options: {
 			primaryReleased: false,
 			traceRootsReleased: !deferTraceRoots,
 			traceRepliesReleased: !deferTraceReplies,
+			metadataFailuresRemaining: failMetadataDiscoveryOnce ? 1 : 0,
 			realtimeEventsReleased: !deferRealtimeEvents,
 			realtimeTerminal: realtimeTerminal ?? 'eose' as 'eose' | 'closed' | 'timeout',
 			realtimePublishOutcome: realtimePublishOutcome ?? 'accepted' as 'accepted' | 'rejected' | 'echo' | 'no-response',
@@ -410,6 +412,11 @@ async function installDelayedRelay(page: Page, options: {
 			deliver(socket, ['OK', event.id, !reject, notice]);
 		};
 		const respondMetadata = (request: PendingRequest) => {
+			if (state.metadataFailuresRemaining > 0) {
+				state.metadataFailuresRemaining -= 1;
+				deliver(request.socket, ['CLOSED', request.subId, 'metadata test failure']);
+				return;
+			}
 			if ((request.filter.kinds as number[] | undefined)?.includes(40)) {
 				deliver(request.socket, ['EVENT', request.subId, channelEvent]);
 			}
@@ -673,6 +680,7 @@ async function installDelayedRelay(page: Page, options: {
 		realtimeEvents: options.realtimeEvents ?? [],
 		deferTraceRoots: options.deferTraceRoots ?? false,
 		deferTraceReplies: options.deferTraceReplies ?? false,
+		failMetadataDiscoveryOnce: options.failMetadataDiscoveryOnce ?? false,
 		deferRealtimeEvents: options.deferRealtimeEvents ?? false,
 		realtimeTerminal: options.realtimeTerminal ?? 'eose',
 		realtimePublishOutcome: options.realtimePublishOutcome ?? 'accepted',
@@ -1763,6 +1771,55 @@ test.describe('Relay startup', () => {
 		await expect(page.getByRole('dialog')).toHaveCount(0);
 		await expect(page.locator('.participant[data-self="true"]')).toBeVisible();
 		expect(countBootstrapRequests((await relayState(page)).state.requests)).toEqual(countsBeforeSelection);
+	});
+
+	test('enters a selected identity before delayed Trace promotion and settles the existing ordering afterward', async ({ page }) => {
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { deferTraceRoots: true });
+		await page.goto('/');
+		const candidateButtons = page.getByRole('button', { name: /を選ぶ$/ });
+		await expect(candidateButtons).toHaveCount(3);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => request.filter.limit === undefined && [42, 30078].includes(requestKind(request)!))).toBe(true);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => request.filter.limit === undefined && requestKind(request) === 30078)).toBe(true);
+		const beforeSelection = await relayState(page);
+		const bootstrapCounts = (requests: typeof beforeSelection.state.requests) => ({
+			metadata: requests.filter((request) => [40, 41].includes(requestKind(request)!)).length,
+			primary: requests.filter((request) => request.filter.limit === undefined && [42, 30078].includes(requestKind(request)!)).length
+		});
+		const countsBeforeSelection = bootstrapCounts(beforeSelection.state.requests);
+
+		await candidateButtons.nth(0).click();
+		await expect(page.getByRole('dialog')).toHaveCount(0);
+		await expect(page.locator('.participant[data-self="true"]')).toBeVisible();
+		const selectedPubkey = await page.locator('.participant[data-self="true"]').getAttribute('data-participant-id');
+		await expect.poll(async () => (await relayState(page)).state.published.some((event) => event.kind === 30078 && event.pubkey === selectedPubkey)).toBe(true);
+		expect(bootstrapCounts((await relayState(page)).state.requests)).toEqual(countsBeforeSelection);
+
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseTraceRoots(): void } }).__relayStartupTest.releaseTraceRoots());
+		await expect.poll(async () => (await relayState(page)).state.requests.filter(isRealtimeRequest).length).toBeGreaterThan(0);
+	});
+
+	test('clears an anonymous startup error before fresh signed fallback recovery', async ({ page }) => {
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { failMetadataDiscoveryOnce: true });
+		await page.goto('/');
+		const candidateButtons = page.getByRole('button', { name: /を選ぶ$/ });
+		await expect(candidateButtons).toHaveCount(3);
+		await candidateButtons.nth(0).click();
+		await expect(page.getByRole('dialog')).toHaveCount(0);
+		await page.evaluate(() => {
+			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
+			relay.releaseMetadata(); relay.releasePrimary();
+		});
+		await expect(page.locator('.participant[data-self="true"]')).toBeVisible();
+		const selectedPubkey = await page.locator('.participant[data-self="true"]').getAttribute('data-participant-id');
+		const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
+		await editor.fill('fresh signed fallback remains publishable');
+		await page.locator('ehagaki-composer').getByRole('button', { name: 'Send' }).click();
+		await expect.poll(async () => (await relayState(page)).state.published.some((event) =>
+			event.kind === 42 && event.pubkey === selectedPubkey && event.content === 'fresh signed fallback remains publishable')).toBe(true);
 	});
 
 	test('scrolls an overflowing mobile identity selection to the last candidate', async ({ page }) => {
