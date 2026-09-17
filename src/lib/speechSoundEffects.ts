@@ -74,7 +74,7 @@ export function createSpeechSoundController(options: ControllerOptions = {}): Sp
 			return null;
 		}
 	};
- 
+
 	const unlock = () => {
 		const audio = ensureContext();
 		if (audio?.state === 'suspended') void audio.resume().catch(() => {});
