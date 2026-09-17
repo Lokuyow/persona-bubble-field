@@ -195,6 +195,8 @@ prototypeの共通envelopeには、project-owned regular kind `7070`、次のtag
 
 enabledなplayable realtime eventは、共通envelopeの署名author pubkeyが現在のcharacter slotへ解決できる場合だけ受理する。未割当slotのauthorによるplayable eventは、署名、channel、protocol、payloadがその他すべて正しくても専用worldへ渡さない。これはofficial-client認証ではなく、使用中slotへ対応する鍵を使うexternal / modified clientまで拒否するものではない。channel creatorが署名するcontrol eventはplayer actionではなく、検証済みchannel creatorであることがauthorityなので、このcharacter条件の対象外とする。
 
+専用worldのcharacter解決には、projectが明示的に指定したexternal world actorに限り、exact pubkeyからcharacterIdへのoverrideを定義できる。これは1024固定slotによるHako Identity assignment、通常のIdentity candidate生成、character catalogのslot metadataを変更するものではなく、genericなlegacy compatibilityでもない。external actor overrideはworld activityの受理と表示にだけ適用し、playable realtime participantのassigned-slot条件には適用しない。
+
 ### kind 0
 
 kind 0は専用世界識別用のNIP-32ラベルの対象にしない。

@@ -46,6 +46,7 @@
 	} from '$lib/devWorldSandbox';
 	import { CHARACTER_CATALOG, getCharacterById, type Character } from '$lib/character';
 import { requireCharacterFromPubkey } from '$lib/characterAssignment';
+import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	import ProfileDialog from '$lib/ProfileDialog.svelte';
 	import IdentitySelectionDialog from '$lib/IdentitySelectionDialog.svelte';
 	import LifespanHud from '$lib/LifespanHud.svelte';
@@ -1724,7 +1725,7 @@ import { requireCharacterFromPubkey } from '$lib/characterAssignment';
 		if (target?.targetId !== targetId || !worldSession) return null;
 		const event = await worldSession.getTracePreviewEvent(target.rootId, targetId);
 		if (!event) return null;
-		const character = requireCharacterFromPubkey(event.pubkey);
+		const character = requireWorldCharacterFromPubkey(event.pubkey);
 		return {
 			event,
 			profile: {
@@ -2177,7 +2178,7 @@ import { requireCharacterFromPubkey } from '$lib/characterAssignment';
 	function traceCharacter(pubkey: string, isDevWorldSandbox: boolean, currentCharacterId: string): Character {
 		if (isDevWorldSandbox && pubkey === DEV_WORLD_SELF_ID) return getDevWorldCharacter(currentCharacterId);
 		try {
-			return requireCharacterFromPubkey(pubkey);
+			return requireWorldCharacterFromPubkey(pubkey);
 		} catch (error) {
 			if (isDevWorldSandbox) return getDevWorldFixtureCharacter(pubkey, currentCharacterId);
 			throw error;

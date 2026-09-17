@@ -2,7 +2,7 @@ import { finalizeEvent, verifyEvent, type Event, type EventTemplate, type Verifi
 import type { Filter } from 'nostr-tools/filter';
 import type { SpeechType } from './conversation';
 import type { Character } from './character';
-import { resolveCharacterFromPubkey } from './characterAssignment';
+import { resolveWorldCharacterFromPubkey } from './worldCharacterAssignment';
 import {
 	formatCanonicalGridPosition,
 	parseCanonicalGridPosition,
@@ -380,7 +380,7 @@ function isVerifiedEvent(event: Event): event is VerifiedEvent {
 
 function hasAssignedCharacter(event: Event): boolean {
 	try {
-		return resolveCharacterFromPubkey(event.pubkey) !== undefined;
+		return resolveWorldCharacterFromPubkey(event.pubkey) !== undefined;
 	} catch {
 		return false;
 	}
