@@ -209,6 +209,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	let conversationState = $state.raw<ConversationState>(createConversationState());
 	let soundPreference = $state(DEFAULT_SOUND_PREFERENCE);
 	let speechSoundController = $state.raw<SpeechSoundController | null>(null);
+	let devSoundSequence = 0;
 	let lastPlacedAnchorById = $state.raw<Readonly<Record<string, WorldPoint>>>({});
 	let lastVisibilityKey: string | null = null;
 	let colorByPubkey = $state.raw<Record<string, BubbleTone>>({});
@@ -2238,6 +2239,24 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		for (const effect of newLiveBubbleEffects(previousConversationState, conversationState)) speechSoundController?.play(effect);
 	}
 
+	function injectDevLiveSpeech(speechType: SpeechType): void {
+		if (!devWorldSandboxEnabled) return;
+		const self = presenceState.participants.find((participant) => participant.id === DEV_WORLD_SELF_ID);
+		if (!self) return;
+		devSoundSequence += 1;
+		const sequence = devSoundSequence;
+		const message: ParsedWorldMessage = {
+			id: `dev-sound-test-${sequence}`,
+			pubkey: DEV_WORLD_SELF_ID,
+			createdAt: Math.floor(Date.now() / 1000),
+			content: `Sound test: ${speechType} #${sequence}`,
+			speechType,
+			position: self.position
+		};
+		receiveTimelineMessage(message);
+		receiveLiveMessage(message, presenceState);
+	}
+
 	function updateSoundVolume(volume: number): void {
 		speechSoundController?.setVolume(volume);
 		soundPreference = speechSoundController?.preference ?? { ...soundPreference, volume };
@@ -2460,6 +2479,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			onCharacterChange={selectSandboxCharacter}
 			onReset={resetSandbox}
 			onAddLiveReply={injectDevTraceLiveReply}
+			onInjectLiveSpeech={injectDevLiveSpeech}
 		/>
 	{:else if selfPositionWriteState.kind === 'retryable' && !isWorldSelfActive}
 		<WorldEntryControls onRetry={retryWorldEntry} />

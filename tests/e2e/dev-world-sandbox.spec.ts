@@ -3561,4 +3561,20 @@ test.describe('DEV World Sandbox', () => {
 			expect(panel.x + panel.width).toBeLessThanOrEqual(viewport.x + viewport.width);
 		}
 	});
+
+	test('injects DEV live speech through the production live bubble path', async ({ page }) => {
+		await page.setViewportSize({ width: 390, height: 844 });
+		await page.goto('/?devWorld=1');
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+		await page.waitForTimeout(1000);
+		const self = page.locator('.participant[data-self="true"]');
+		const positionBefore = await self.getAttribute('data-position');
+		for (const [label, speechType] of [['Normal', 'normal'], ['Shout', 'shout'], ['Monologue', 'monologue']] as const) {
+			await page.getByRole('button', { name: `Inject live ${label} speech` }).click();
+			await expect(page.locator(`.bubble-normal[data-speech-type="${speechType}"]`)).toBeVisible();
+		}
+		await page.getByRole('button', { name: 'Inject live Normal speech' }).click();
+		await expect(page.locator('.bubble-normal[data-speech-type="normal"]')).toContainText('Sound test: normal #4');
+		expect(await self.getAttribute('data-position')).toBe(positionBefore);
+	});
 });
