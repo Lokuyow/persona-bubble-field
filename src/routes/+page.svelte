@@ -843,6 +843,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		let mounted = true;
 		let startRequested = false;
 		let session: ReturnType<typeof createWorldReadSession> | null = null;
+		let currentSessionStartup: { session: ReturnType<typeof createWorldReadSession>; promise: Promise<void> } | null = null;
 		chatterComponent.initialize(window.innerWidth);
 		const reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
 		prefersReducedMotion = reducedMotionQuery.matches;
@@ -984,6 +985,14 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			session = nextSession;
 			worldSession = nextSession;
 			traceConversationController = nextSession;
+			let resolveSessionStartup!: () => void;
+			let rejectSessionStartup!: (error: unknown) => void;
+			const sessionStartup = new Promise<void>((resolve, reject) => {
+				resolveSessionStartup = resolve;
+				rejectSessionStartup = reject;
+			});
+			void sessionStartup.catch(() => {});
+			currentSessionStartup = { session: nextSession, promise: sessionStartup };
 			try {
 				const bootstrap = await nextSession.start();
 				if (!mounted || session !== nextSession) {
@@ -996,6 +1005,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 					...bootstrap.timelineMessages
 				]);
 				nextSession.completeBootstrap();
+				resolveSessionStartup();
 				if (signer && !personaLifecycleTransition) void nextSession.enterSelf();
 				if (characterProfilePublication && signer && !personaLifecycleTransition) {
 					void publishCharacterProfile(characterProfilePublication, (event) => {
@@ -1005,7 +1015,8 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 						return nextSession.publish(event);
 					}).catch(() => {});
 				}
-			} catch {
+			} catch (error) {
+				rejectSessionStartup(error);
 				if (session === nextSession) setComposerTerminalError(new Error('Relay startup failed.'));
 			}
 		};
@@ -1038,6 +1049,37 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 					absolutePictureUrl,
 					createdAt: Math.floor(persona.signer.identityCreatedAtMs / 1000)
 				});
+			}
+			const anonymousSession = session;
+			const anonymousStartup = currentSessionStartup;
+			if (anonymousSession && anonymousStartup?.session === anonymousSession) {
+				try {
+					await anonymousStartup.promise;
+					if (session !== anonymousSession || anonymousSession.getStatus().kind === 'failed') throw new Error('Anonymous world session is unavailable.');
+					await anonymousSession.attachSelf({
+						signer: persona.signer,
+						authorizeSelfWrite: () => authorizeActiveRun({ identity: persona.signer.identity, runNumber: persona.activeRun.runNumber }),
+						onSelfWriteAuthorizationLost: () => {
+							if (!personaLifecycleTransition) window.location.reload();
+						}
+					});
+					if (session !== anonymousSession) throw new Error('World session changed during self attachment.');
+					personaLifecycleTransition = false;
+					mendingNowMs = Date.now();
+					updateLifespanHud(mendingNowMs, true);
+					await anonymousSession.enterSelf();
+					if (characterProfilePublication) {
+						void publishCharacterProfile(characterProfilePublication, (event) => {
+							if (personaLifecycleTransition || worldSession !== anonymousSession) {
+								return Promise.reject(new Error('Persona is unavailable for publishing.'));
+							}
+							return anonymousSession.publish(event);
+						}).catch(() => {});
+					}
+					return;
+				} catch {
+					// A failed or superseded anonymous startup cannot be promoted.
+				}
 			}
 			const startup = startReadSession(persona.signer, characterProfilePublication, persona.activeRun.runNumber, true);
 			// startReadSession installs the new session synchronously before its first await.
@@ -1163,6 +1205,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			if (runRuntimeRefresh === refreshRuntime) runRuntimeRefresh = null;
 			if (startReadOnlyWorld) startReadOnlyWorld = null;
 			if (startSelectedWorld) startSelectedWorld = null;
+			currentSessionStartup = null;
 			session?.dispose();
 			devTraceConversationRuntime?.dispose();
 			devTraceConversationRuntime = null;
