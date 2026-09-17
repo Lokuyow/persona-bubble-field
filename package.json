@@ -17,10 +17,12 @@
 		"test": "vitest run",
 		"test:e2e": "playwright test",
 		"test:e2e:agent": "playwright test --reporter=dot",
+		"operator:rift:start": "tsx scripts/operator-rift-start.ts",
+		"operator:typecheck": "tsc -p tsconfig.operator.json --noEmit",
 		"prepare": "svelte-kit sync || echo ''",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
-		"validate": "npm test && npm run check && npm run build:pages && git diff --check",
+		"validate": "npm run operator:typecheck && npm test && npm run check && npm run build:pages && git diff --check",
 		"deploy": "gh workflow run deploy-pages.yml --ref main"
 	},
 	"devDependencies": {
@@ -29,11 +31,13 @@
 		"@sveltejs/kit": "^2.63.0",
 		"@sveltejs/vite-plugin-svelte": "^7.1.2",
 		"@types/dom-chromium-ai": "^0.0.17",
+		"@types/node": "^24.0.0",
 		"fake-indexeddb": "6.2.5",
 		"mock-socket": "9.3.1",
 		"sharp": "^0.35.4",
 		"svelte": "^5.56.1",
 		"svelte-check": "^4.6.0",
+		"tsx": "4.23.13",
 		"typescript": "^6.0.3",
 		"vite": "^8.0.16",
 		"vitest": "^4.1.11"

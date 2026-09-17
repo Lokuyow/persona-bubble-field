@@ -88,9 +88,10 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		getRiftScheduleForDate,
 		getRiftScheduleForInstance,
 		getRiftParticipantHole,
+		isManualRiftControlScheduleEligible,
+		compareManualRiftControls,
 		isRiftSettlementComplete,
 		parseManualRiftInstanceId,
-		riftScheduleIntervalsOverlap,
 		RIFT_EVENT_DEFINITION,
 		RIFT_CONSULTATION_MS,
 		RIFT_MANUAL_CONTROL_LOOKBACK_SECONDS,
@@ -1500,21 +1501,8 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	}
 
 	function manualControlIsEligible(control: RealtimeControlEnvelope, nowMs: number): boolean {
-		if (control.payload.targetProtocolKey !== RIFT_EVENT_DEFINITION.protocolKey) return false;
-		const manual = parseManualRiftInstanceId(control.instanceId);
-		if (!manual || manual.createdAt !== control.event.created_at || control.event.created_at > Math.floor(nowMs / 1000)) return false;
-		const manualSchedule = getRiftScheduleForInstance(control.instanceId, nowMs);
-		if (!manualSchedule || !['registration', 'game'].includes(manualSchedule.phase)) return false;
 		const scheduled = getRiftSchedule(nowMs);
-		const nextScheduled = getRiftScheduleForDate(nextDateKey(scheduled.dateKey), nowMs);
-		if (riftScheduleIntervalsOverlap(scheduled, manualSchedule) || riftScheduleIntervalsOverlap(nextScheduled, manualSchedule)) return false;
-		return !selectedManualRiftInstanceId && !['warning', 'registration', 'game'].includes(scheduled.phase);
-	}
-
-	function nextDateKey(dateKey: string): string {
-		const date = new Date(`${dateKey}T00:00:00Z`);
-		date.setUTCDate(date.getUTCDate() + 1);
-		return date.toISOString().slice(0, 10);
+		return isManualRiftControlScheduleEligible(control, nowMs) && !selectedManualRiftInstanceId && !['warning', 'registration', 'game'].includes(scheduled.phase);
 	}
 
 	function acceptRealtimeControl(control: RealtimeControlEnvelope): void {
@@ -1537,7 +1525,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	function selectBootstrapRealtimeControl(): void {
 		const candidates = [...pendingRealtimeControls]
 			.filter((control) => manualControlIsEligible(control, Date.now()))
-			.sort((first, second) => first.event.created_at - second.event.created_at || first.event.id.localeCompare(second.event.id));
+			.sort(compareManualRiftControls);
 		pendingRealtimeControls.length = 0;
 		if (candidates[0]) acceptRealtimeControl(candidates[0]);
 	}
