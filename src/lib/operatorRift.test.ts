@@ -134,6 +134,41 @@ describe('operator Rift flow', () => {
 		expect(readSecret).not.toHaveBeenCalled();
 	});
 
+	it('settles a second preflight before honoring cancellation and leaves no publish path', async () => {
+		const { channel, metadata } = metadataEvents();
+		const controller = new AbortController();
+		let queryCount = 0;
+		let settleSecond: (() => void) | undefined;
+		const secondQuery = new Promise<OperatorRelayQueryResult>((resolve) => { settleSecond = () => resolve(result()); });
+		const readSecret = vi.fn(async () => new Uint8Array(SECRET));
+		const base = fakeDependencies([], { readSecret, cancelSignal: controller.signal });
+		const relay: OperatorRelayAdapter = {
+			...base.relay,
+			query: vi.fn(async () => {
+				queryCount += 1;
+				if (queryCount === 1) return result([channel]);
+				if (queryCount === 2) return result([metadata]);
+				if (queryCount === 4) return secondQuery;
+				return result();
+			})
+		};
+		const dependencies = {
+			...base,
+			relay,
+			confirmPublish: vi.fn(async () => {
+				controller.abort();
+				return 'confirmed' as const;
+			})
+		};
+		const pending = runManualRiftOperator('publish', dependencies, testWorld(channel.id));
+		await new Promise<void>((resolve) => setTimeout(resolve, 0));
+		settleSecond!();
+		await expect(pending).rejects.toBeInstanceOf(OperatorCancelled);
+		expect(readSecret).not.toHaveBeenCalled();
+		expect(relay.publish).not.toHaveBeenCalled();
+		expect(queryCount).toBe(4);
+	});
+
 	it('performs a final exact conflict check after fresh time advances and before signing or publishing', async () => {
 		const { channel, metadata } = metadataEvents();
 		const safeTime = Date.UTC(2026, 0, 2, 10, 0);

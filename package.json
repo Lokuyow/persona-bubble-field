@@ -18,6 +18,7 @@
 		"test:e2e": "playwright test",
 		"test:e2e:agent": "playwright test --reporter=dot",
 		"operator:rift:start": "tsx scripts/operator-rift-start.ts",
+		"operator:rift:publish": "tsx scripts/operator-rift-start.ts --publish",
 		"operator:typecheck": "tsc -p tsconfig.operator.json --noEmit",
 		"prepare": "svelte-kit sync || echo ''",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
