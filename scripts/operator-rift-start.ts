@@ -8,15 +8,17 @@ import {
 import { PROTOTYPE_WORLD_CONFIG } from '../src/lib/prototypeWorldConfig';
 import {
 	confirmPublish,
+	createHiddenInputSession,
 	OperatorInputCancelled,
 	OperatorInputEof,
 	readHiddenNsec
 } from './operatorInput';
 
 function printUsage(): void {
-	console.log('Usage: npm run operator:rift:start [-- --publish]');
+	console.log('Usage: npm run operator:rift:start');
+	console.log('       npm run operator:rift:publish');
 	console.log('Default mode performs a signed dry-run without publishing.');
-	console.log('--publish  require hidden confirmation, then publish to authoritative Relays.');
+	console.log('The publish command requires hidden confirmation, then publishes to authoritative Relays.');
 }
 
 function parseMode(args: readonly string[]): 'dry-run' | 'publish' | 'help' {
@@ -47,11 +49,14 @@ async function main(): Promise<number> {
 	}
 
 	const relay = createOperatorRelayAdapter();
+	let inputSession: ReturnType<typeof createHiddenInputSession> | undefined;
 	try {
+		if (mode === 'publish') inputSession = createHiddenInputSession();
 		await runManualRiftOperator(mode, {
 			relay,
-			confirmPublish,
-			readSecret: readHiddenNsec,
+			confirmPublish: inputSession?.confirmPublish ?? (() => confirmPublish()),
+			readSecret: inputSession?.readHiddenNsec ?? (() => readHiddenNsec()),
+			cancelSignal: inputSession?.signal,
 			randomBytes,
 			nowMs: () => Date.now(),
 			output: {
@@ -72,6 +77,9 @@ async function main(): Promise<number> {
 		}
 		console.error('Operator command failed.');
 		return 1;
+	} finally {
+		await inputSession?.close();
+		relay.close();
 	}
 }
 

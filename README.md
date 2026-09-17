@@ -35,12 +35,19 @@ a signed dry-run and never publishes:
 npm run operator:rift:start
 ```
 
-Use `--publish` to require a hidden local interactive TTY confirmation and
-then publish to the authoritative Relays:
+The explicit publish command requires a hidden local interactive TTY
+confirmation and then publishes to the authoritative Relays:
 
 ```sh
-npm run operator:rift:start -- --publish
+npm run operator:rift:publish
 ```
+
+This explicit npm command is the supported publish entrypoint; after an exact
+`PUBLISH` confirmation and creator `nsec` verification it can publish a real
+EVENT. The CLI's direct `--publish` mode is an implementation entrypoint, not
+the recommended invocation. Automated tests and the Windows acceptance
+procedure never publish a real EVENT; the acceptance procedure uses only an
+invalid marker or Ctrl+C.
 
 The CLI accepts the creator `nsec` only through its hidden interactive TTY
 prompt. Never put an `nsec` in argv, an environment variable, a file, or a

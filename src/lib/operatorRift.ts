@@ -41,6 +41,7 @@ export type OperatorDependencies = Readonly<{
 	relay: OperatorRelayAdapter;
 	confirmPublish: () => Promise<'confirmed' | 'cancelled'>;
 	readSecret: () => Promise<Uint8Array>;
+	cancelSignal?: AbortSignal;
 	randomBytes: (length: number) => Uint8Array;
 	nowMs?: () => number;
 	output: OperatorOutput;
@@ -146,7 +147,8 @@ async function activeManualPreflight(
 	metadata: ResolvedChannelMetadata,
 	relay: OperatorRelayAdapter,
 	nowMs: number,
-	output: OperatorOutput
+	output: OperatorOutput,
+	cancelSignal?: AbortSignal
 ) {
 	const since = Math.max(0, unixSeconds(nowMs) - RIFT_MANUAL_CONTROL_LOOKBACK_SECONDS);
 	const result = await relay.query(
@@ -154,6 +156,9 @@ async function activeManualPreflight(
 		metadata.relays
 	);
 	reportQuery(output, result);
+	// The finite-read adapter has no cancellation contract. Let an already
+	// started query settle, then honor command cancellation before advancing.
+	if (cancelSignal?.aborted) throw new OperatorCancelled('operator command cancelled');
 	if (result.eoseCount === 0) throw new OperatorFailure('control preflight failed');
 	const controls = result.events
 		.map((event) => parseRealtimeControlEnvelope(event, metadata.channelId, metadata.creatorPubkey))
@@ -163,6 +168,10 @@ async function activeManualPreflight(
 
 function assertNoActiveManual(control: ReturnType<typeof selectCanonicalManualRiftControl>): void {
 	if (control) throw new OperatorFailure('active manual Rift already exists');
+}
+
+function assertNotCancelled(signal?: AbortSignal): void {
+	if (signal?.aborted) throw new OperatorCancelled('operator command cancelled');
 }
 
 function assertScheduledStartAllowed(nowMs: number): void {
@@ -260,25 +269,32 @@ export async function runManualRiftOperator(
 	try {
 		const metadata = await discoverMetadata(world, dependencies.relay, dependencies.output);
 		const currentTime = now();
-		assertNoActiveManual(await activeManualPreflight(metadata, dependencies.relay, currentTime, dependencies.output));
+		assertNoActiveManual(await activeManualPreflight(metadata, dependencies.relay, currentTime, dependencies.output, dependencies.cancelSignal));
 		assertScheduledStartAllowed(currentTime);
 		writePreview(dependencies.output, metadata, mode, currentTime);
 
 		if (mode === 'publish') {
 			if ((await dependencies.confirmPublish()) !== 'confirmed') throw new OperatorCancelled('confirmation cancelled');
 			const confirmedAt = now();
-			assertNoActiveManual(await activeManualPreflight(metadata, dependencies.relay, confirmedAt, dependencies.output));
+			assertNoActiveManual(await activeManualPreflight(metadata, dependencies.relay, confirmedAt, dependencies.output, dependencies.cancelSignal));
 			assertScheduledStartAllowed(confirmedAt);
 		}
 
+		assertNotCancelled(dependencies.cancelSignal);
 		const secret = await dependencies.readSecret();
 		try {
 			const control = await createAndValidateControl(metadata, dependencies, secret, now());
+			assertNotCancelled(dependencies.cancelSignal);
 			writeControl(dependencies.output, metadata, control.event, control.instanceId);
 			if (mode === 'dry-run') {
 				dependencies.output.stdout('DRY RUN: EVENT was not published.');
 				return { exitCode: 0, mode, metadata, controlEvent: control.event, instanceId: control.instanceId };
 			}
+			assertNotCancelled(dependencies.cancelSignal);
+			dependencies.output.stdout('Publication started; waiting for Relay results.');
+			// publish() is the irreversible side-effect boundary. It has no abort
+			// contract, so Ctrl+C is consumed by the input session and results are
+			// always awaited and classified.
 			const results = await dependencies.relay.publish(control.event, metadata.relays);
 			reportPublish(dependencies.output, results);
 			if (!publishSucceeded(results)) throw new OperatorFailure('all authoritative Relays failed to accept the event');
