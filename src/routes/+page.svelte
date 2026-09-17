@@ -909,6 +909,11 @@
 			};
 		}
 
+		function prepareRealtimeStartConfiguration(configuration: RealtimeStartConfiguration, nowMs: number): RealtimeStartConfiguration {
+			realtimeControlSince = Math.max(0, Math.floor(nowMs / 1000) - RIFT_MANUAL_CONTROL_LOOKBACK_SECONDS);
+			return { ...configuration, controlSince: realtimeControlSince };
+		}
+
 		const startReadSession = async (
 			signer: ActiveSignerSnapshot | null,
 			characterProfilePublication: PreparedCharacterProfilePublication | null = null,
@@ -929,6 +934,7 @@
 					controlSince: Math.max(0, Math.floor(Date.now() / 1000) - 15 * 60),
 					instanceFilters: [],
 					getStartConfiguration: () => getRealtimeStartConfiguration(Date.now()),
+					prepareStartConfiguration: prepareRealtimeStartConfiguration,
 					startImmediately: realtimeStartImmediately ?? true,
 					onEvent: handleRealtimeEnvelope,
 					onControl: handleRealtimeControl,
@@ -1564,7 +1570,15 @@
 			return;
 		}
 		if (!riftSession || riftSession.instanceId !== riftSchedule.instanceId) {
-			if (riftSchedule.phase !== 'dormant') riftSession = createRiftSession({ instanceId: riftSchedule.instanceId, field });
+			if (riftSchedule.phase !== 'dormant') {
+				const recovered = recoveredRiftSessions.get(riftSchedule.instanceId);
+				if (recovered) {
+					riftSession = recovered;
+					recoveredRiftSessions.delete(riftSchedule.instanceId);
+				} else {
+					riftSession = createRiftSession({ instanceId: riftSchedule.instanceId, field });
+				}
+			}
 		} else if (riftRealtimeBootstrapComplete) {
 			riftSession = settleRiftSession(riftSession, riftSchedule, nowMs);
 		}

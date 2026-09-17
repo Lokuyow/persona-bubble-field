@@ -19,6 +19,8 @@ import {
 	deriveRiftHolePositions,
 	getRiftRoundSchedule,
 	getRiftSchedule,
+	getRiftScheduleForInstance,
+	RIFT_CONSULTATION_MS,
 	RIFT_PROTOCOL_KEY,
 	type RiftAction
 } from '../../src/lib/rift';
@@ -1135,6 +1137,58 @@ test.describe('Relay startup', () => {
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
 		await expect(page.locator('[data-realtime-panel]')).toContainText('参加受付');
 		await expect.poll(async () => (await relayState(page)).state.requests.filter(isRealtimeRequest).some((request) => realtimeInstanceIds(request).includes(manualInstanceId))).toBe(true);
+	});
+
+	test('promotes recovered manual Rift state to current after an active-game reload', async ({ page }) => {
+		const channel = syntheticChannelFixture();
+		const scheduled = upcomingRegistrationSchedule();
+		const initialTime = scheduled.warningAtMs - 30 * 60 * 1_000;
+		const createdAt = Math.floor(initialTime / 1_000);
+		const manualInstanceId = buildManualRiftInstanceId(createdAt, 'fedcba9876543210fedcba9876543210');
+		const manualSchedule = getRiftScheduleForInstance(manualInstanceId, initialTime);
+		if (!manualSchedule) throw new Error('Expected the manual schedule fixture.');
+		const secret = fixtureSecret(19);
+		const control = finalizeRealtimeEvent(buildRealtimeControlEventTemplate({
+			channelId: channel.event.id,
+			relayHint: AUTHORITATIVE_RELAYS[0],
+			instanceId: manualInstanceId,
+			payload: { command: 'start', targetProtocolKey: RIFT_PROTOCOL_KEY },
+			createdAt
+		}), channel.secret);
+		await page.clock.install({ time: initialTime });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, {
+			channelEvent: channel.event,
+			testWorldConfig: channel.worldConfig,
+			primaryEvents: testEvents(initialTime, channel.event.id),
+			realtimeEvents: [control],
+			persistAcrossReload: true
+		});
+		await seedRelayAccount(page, secret, getPublicKey(secret));
+		await page.goto('/');
+		await expect(page.locator('.composer-dock')).toBeVisible();
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => (request.filter.kinds as number[])[0] === 42)).toBe(true);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		await expect(page.locator('[data-realtime-panel]')).toContainText('参加受付');
+		await expect.poll(async () => (await relayState(page)).state.requests.filter(isRealtimeRequest).some((request) => realtimeInstanceIds(request).includes(manualInstanceId))).toBe(true);
+		const hole = deriveRiftHolePositions(manualInstanceId, { columns: 16, rows: 8 })[0];
+		const join = signedRiftAction(secret, manualSchedule, { action: 'join', holeId: hole.id }, initialTime + 1_000, channel.event.id);
+		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectRealtimeEvent(event: object): void } }).__relayStartupTest.injectRealtimeEvent(event), join);
+		await expect.poll(async () => readRealtimePendingInstances(page)).toEqual([manualInstanceId]);
+		await page.evaluate(({ controlEvent, joinEvent }) => {
+			const harness = (window as typeof window & { __relayStartupTest: { state: { published: object[] } } }).__relayStartupTest;
+			harness.state.published.push(controlEvent, joinEvent);
+		}, { controlEvent: control, joinEvent: join });
+		await page.clock.setSystemTime(manualSchedule.gameAtMs + RIFT_CONSULTATION_MS + 1_000);
+		await page.reload();
+		await expect(page.locator('.composer-dock')).toBeVisible();
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => (request.filter.kinds as number[])[0] === 42)).toBe(true);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		await expect(page.locator('[data-realtime-panel]')).toContainText('参加者: 1');
+		await expect(page.locator('[data-rift-choice="maintain"]')).toBeEnabled();
+		await expect.poll(async () => readRealtimePendingInstances(page)).toEqual([manualInstanceId]);
 	});
 
 	test('keeps primary and Trace ahead of an unknown-capacity realtime attempt', async ({ page }) => {

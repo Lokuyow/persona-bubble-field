@@ -13,7 +13,7 @@ import type { TraceReplyConfiguration } from './nostrRelayTransport';
 import { PRESENCE_TIMEOUT_MS, type PresenceState } from './presence';
 import { planPositionPublish, reconstructPositionPublishState } from './positionPublish';
 import { protocolKeyFor } from './realtimeEvents';
-import { createWorldReadSession, type WorldReadConnectionStatus } from './worldReadSession';
+import { createWorldReadSession, type RealtimeStartConfiguration, type WorldReadConnectionStatus } from './worldReadSession';
 
 const mocked = vi.hoisted(() => ({
 	createTransport: vi.fn(),
@@ -445,7 +445,7 @@ describe('world read session', () => {
 		expect(statuses.at(-1)).toBe('inactive');
 	});
 
-	it('re-evaluates realtime instance and since configuration when the same session restarts it', async () => {
+	it('re-evaluates realtime instance and refreshes the control cursor only for a new generation', async () => {
 		const startRealtime = vi.fn().mockResolvedValue({ status: 'active', events: [], relays: [] });
 		const stopRealtime = vi.fn();
 		mocked.createTransport.mockReturnValue({
@@ -456,27 +456,40 @@ describe('world read session', () => {
 			publish,
 			stopRealtime
 		});
-		let configuration = { controlSince: 10, instanceFilters: [{ protocolKey: protocolKeyFor('fixture', 1), instanceIds: ['rift-day-1'], since: 100 }] };
+		let configuration = { controlSince: 0, instanceFilters: [{ protocolKey: protocolKeyFor('fixture', 1), instanceIds: ['rift-day-1'], since: 100 }] };
+		const prepareStartConfiguration = vi.fn((next: RealtimeStartConfiguration, nowMs: number): RealtimeStartConfiguration => ({
+			...next,
+			controlSince: Math.max(0, Math.floor(nowMs / 1000) - 900)
+		}));
 		const session = createWorldReadSession({
 			field: { columns: 4, rows: 3 },
 			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn(),
-				realtime: {
+					realtime: {
 					registry: [{ eventType: 'fixture', protocolVersion: 1, protocolKey: protocolKeyFor('fixture', 1), parseAction: () => ({}) }],
-					controlSince: 0, instanceFilters: [], getStartConfiguration: () => configuration,
-				onEvent: vi.fn()
-			}
+					controlSince: 0, instanceFilters: [], getStartConfiguration: () => configuration, prepareStartConfiguration, startImmediately: false,
+					onEvent: vi.fn()
+				}
 		});
 		await session.start();
 		await session.startRealtime();
-		const firstConfiguration = configuration;
-		configuration = { controlSince: 10, instanceFilters: [{ protocolKey: protocolKeyFor('fixture', 1), instanceIds: ['rift-day-2'], since: 200 }] };
+		const firstConfiguration = { ...configuration, controlSince: 0 };
+		await session.startRealtime();
+		expect(startRealtime).toHaveBeenCalledTimes(1);
+		configuration = { controlSince: 0, instanceFilters: [{ protocolKey: protocolKeyFor('fixture', 1), instanceIds: ['rift-day-2'], since: 200 }] };
+		vi.setSystemTime(3_600_000);
 		await session.startRealtime();
 		expect(startRealtime).toHaveBeenCalledTimes(2);
 		expect(startRealtime.mock.calls.map(([next]) => ({
 			controlSince: next.controlSince,
 			instanceFilters: next.instanceFilters
-		}))).toEqual([firstConfiguration, configuration]);
-		expect(stopRealtime).toHaveBeenCalledOnce();
+		}))).toEqual([firstConfiguration, { ...configuration, controlSince: 2_700 }]);
+		expect(prepareStartConfiguration).toHaveBeenCalledTimes(2);
+		session.stopRealtime();
+		await session.startRealtime();
+		expect(startRealtime).toHaveBeenCalledTimes(3);
+		expect(startRealtime.mock.calls[2][0].controlSince).toBe(2_700);
+		expect(prepareStartConfiguration).toHaveBeenCalledTimes(3);
+		expect(stopRealtime).toHaveBeenCalledTimes(2);
 	});
 
 	it('stops every self-write boundary when persisted Run authorization is lost', async () => {

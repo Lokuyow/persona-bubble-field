@@ -98,6 +98,7 @@ export type RealtimeSessionOptions = Readonly<{
 	controlSince: number;
 	instanceFilters: readonly RealtimeInstanceFilterConfiguration[];
 	getStartConfiguration?: () => RealtimeStartConfiguration;
+	prepareStartConfiguration?: (configuration: RealtimeStartConfiguration, nowMs: number) => RealtimeStartConfiguration;
 	startImmediately?: boolean;
 	onEvent: (event: RealtimeEnvelope) => void;
 	onControl?: (control: RealtimeControlEnvelope) => void;
@@ -279,12 +280,13 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	function startRealtimeSubscription(configuration?: RealtimeStartConfiguration): Promise<void> {
 		const realtimeOptions = options.realtime;
 		if (disposed || !transport || !channel || !realtimeOptions?.registry.length) return Promise.resolve();
-		const nextConfiguration = configuration ?? realtimeOptions.getStartConfiguration?.() ?? {
+		const candidateConfiguration = configuration ?? realtimeOptions.getStartConfiguration?.() ?? {
 			controlSince: realtimeOptions.controlSince,
 			instanceFilters: realtimeOptions.instanceFilters
 		};
-		if (realtimeStartPromise && realtimeStartConfiguration && sameRealtimeConfiguration(realtimeStartConfiguration, nextConfiguration)) return realtimeStartPromise;
+		if (realtimeStartPromise && realtimeStartConfiguration && sameRealtimeConfiguration(realtimeStartConfiguration, candidateConfiguration)) return realtimeStartPromise;
 		if (realtimeStartPromise) stopRealtimeSubscription();
+		const nextConfiguration = realtimeOptions.prepareStartConfiguration?.(candidateConfiguration, Date.now()) ?? candidateConfiguration;
 		const generation = realtimeGeneration;
 		realtimeStartConfiguration = nextConfiguration;
 		realtimeStatus = 'degraded';
