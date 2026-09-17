@@ -1,5 +1,6 @@
 import { finalizeEvent, verifyEvent, type Event, type EventTemplate, type VerifiedEvent } from 'nostr-tools/pure';
 import type { Filter } from 'nostr-tools/filter';
+import { resolveCharacterFromPubkey } from './characterAssignment';
 import { PROTOTYPE_NAMESPACE } from './nostrProtocol';
 
 /** Project-owned regular event kind for the realtime-event prototype. */
@@ -107,6 +108,14 @@ function findDefinition(registry: RealtimeEventRegistry, protocolKey: string): R
 	return registry.find((definition) => definition.protocolKey === protocolKey) ?? null;
 }
 
+function hasAssignedCharacter(pubkey: string): boolean {
+	try {
+		return resolveCharacterFromPubkey(pubkey) !== undefined;
+	} catch {
+		return false;
+	}
+}
+
 function parseProtocolKey(value: string): Readonly<{ eventType: string; protocolVersion: number }> | null {
 	const prefix = `${REALTIME_PROTOCOL_NAMESPACE}:`;
 	if (!value.startsWith(prefix)) return null;
@@ -185,6 +194,7 @@ export function parseRealtimeEnvelope(
 	}
 	const parsedKey = parseProtocolKey(descriptor[1]);
 	if (!parsedKey) return null;
+	if (descriptor[1] === REALTIME_CONTROL_PROTOCOL_KEY || !hasAssignedCharacter(event.pubkey)) return null;
 	const definition = findDefinition(registry, descriptor[1]);
 	if (!definition || definition.eventType !== parsedKey.eventType || definition.protocolVersion !== parsedKey.protocolVersion) return null;
 	let payload: unknown;

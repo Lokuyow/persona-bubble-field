@@ -193,6 +193,8 @@ prototypeの共通envelopeには、project-owned regular kind `7070`、次のtag
 
 イベント定義はenabled registryに登録されたものだけを受理する。登録を外したイベントは、保存済みの古いイベントを互換経路で復活させず、購読・受理対象から外す。protocol keyの正式値、各イベントのinstance schema、payloadおよびsettlementはイベント定義ごとに定める。
 
+enabledなplayable realtime eventは、共通envelopeの署名author pubkeyが現在のcharacter slotへ解決できる場合だけ受理する。未割当slotのauthorによるplayable eventは、署名、channel、protocol、payloadがその他すべて正しくても専用worldへ渡さない。これはofficial-client認証ではなく、使用中slotへ対応する鍵を使うexternal / modified clientまで拒否するものではない。channel creatorが署名するcontrol eventはplayer actionではなく、検証済みchannel creatorであることがauthorityなので、このcharacter条件の対象外とする。
+
 ### kind 0
 
 kind 0は専用世界識別用のNIP-32ラベルの対象にしない。
