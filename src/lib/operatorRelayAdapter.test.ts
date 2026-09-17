@@ -3,6 +3,7 @@ import type { Event } from 'nostr-tools/pure';
 import type { Filter } from 'nostr-tools/filter';
 import {
 	createOperatorRelayAdapter,
+	type OperatorRelayConnection,
 	type OperatorRelayPool
 } from './operatorRelayAdapter';
 
@@ -15,9 +16,14 @@ function event(id: string): Event {
 function fakePool(scenarios: Readonly<Record<string, Scenario>>) {
 	const subscriptions = new Map<string, { close: ReturnType<typeof vi.fn> }>();
 	const callbacks = new Map<string, { onevent: (value: Event) => void; oneose: () => void; onclose: (reason: string) => void }>();
+	const connections = new Map<string, OperatorRelayConnection>();
 	const pool = {
-		ensureRelay: vi.fn(async (url: string) => ({
-			subscribe: vi.fn((_filters: Filter[], params: { onevent: (value: Event) => void; oneose: () => void; onclose: (reason: string) => void }) => {
+		ensureRelay: vi.fn(async (url: string) => {
+			const existing = connections.get(url);
+			if (existing) return existing;
+			const connection: OperatorRelayConnection = {
+				onnotice: (message: string) => console.debug(message),
+				subscribe: vi.fn((_filters: Filter[], params: { onevent: (value: Event) => void; oneose: () => void; onclose: (reason: string) => void }) => {
 				const subscription = { close: vi.fn() };
 				subscriptions.set(url, subscription);
 				callbacks.set(url, params);
@@ -28,12 +34,15 @@ function fakePool(scenarios: Readonly<Record<string, Scenario>>) {
 					else if (scenario === 'connection-failure') params.onclose('relay connection failed');
 				});
 				return subscription;
-			}),
-			publish: vi.fn(async () => 'accepted')
-		})),
+				}) as unknown as OperatorRelayConnection['subscribe'],
+				publish: vi.fn(async () => 'accepted')
+			};
+			connections.set(url, connection);
+			return connection;
+		}),
 		close: vi.fn(),
 	} satisfies OperatorRelayPool;
-	return { pool, subscriptions, callbacks };
+	return { pool, subscriptions, callbacks, connections };
 }
 
 async function settle(): Promise<void> {
@@ -77,7 +86,7 @@ describe('operator per-Relay finite read adapter', () => {
 		const close = vi.fn();
 		let params: { onevent: (value: Event) => void; oneose: () => void; onclose: (reason: string) => void } | undefined;
 		const pool = {
-			ensureRelay: vi.fn(async () => ({ subscribe: vi.fn((_filters: Filter[], next) => { params = next; return { close }; }), publish: vi.fn(async () => 'accepted') })),
+			ensureRelay: vi.fn(async () => ({ onnotice: () => {}, subscribe: vi.fn((_filters: Filter[], next) => { params = next; return { close }; }), publish: vi.fn(async () => 'accepted') })),
 			close: vi.fn()
 		} satisfies OperatorRelayPool;
 		const adapter = createOperatorRelayAdapter({ poolFactory: () => pool, operationTimeoutMs: 2 });
@@ -104,6 +113,7 @@ describe('operator per-Relay finite read adapter', () => {
 
 	it('distinguishes connection failure, rejection, timeout, acceptance, and partial success per Relay', async () => {
 		const connection = (publish: () => Promise<string>) => ({
+			onnotice: () => {},
 			subscribe: vi.fn(() => ({ close: vi.fn() })),
 			publish: vi.fn(publish)
 		});
@@ -124,5 +134,24 @@ describe('operator per-Relay finite read adapter', () => {
 			accepted: 'accepted', rejected: 'rejected', 'timed-out': 'timeout', failed: 'connection-failure', 'connect-failed': 'connection-failure'
 		});
 		expect(result.find((value) => value.relayUrl === 'rejected')?.notice).toContain('connection policy rejection');
+	});
+
+	it('suppresses the nostr-tools default NOTICE logger before query and publish', async () => {
+		const { pool, connections } = fakePool({ relay: 'eose' });
+		const debug = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
+		try {
+			const adapter = createOperatorRelayAdapter({ poolFactory: () => pool, operationTimeoutMs: 20 });
+			await adapter.query({ kinds: [1] }, ['relay']);
+			const connection = connections.get('relay')!;
+			connection.onnotice('\u001b[31mNOTICE\u001b[1;1H\u001b]0;unsafe\u0007\r\n\u202ehidden');
+			expect(debug).not.toHaveBeenCalled();
+
+			connection.onnotice = (message: string) => console.debug(message);
+			await adapter.publish(event('notice-publish') as never, ['relay']);
+			connection.onnotice('another unsafe NOTICE');
+			expect(debug).not.toHaveBeenCalled();
+		} finally {
+			debug.mockRestore();
+		}
 	});
 });

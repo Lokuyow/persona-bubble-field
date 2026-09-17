@@ -53,9 +53,10 @@ are best-effort zeroized, but complete memory erasure cannot be guaranteed.
 The creator key, active-manual preflight, and scheduled conflict checks are
 validated before publication. Publish results are reported per Relay; one
 accepted Relay is an overall success, while all failures are non-zero. Relay
-reasons, CLOSED reasons, and NOTICE/network messages are bounded and safely
-sanitized before display. The `PUBLISH` confirmation input is hidden and is
-also never echoed.
+reasons and CLOSED/network messages that are displayed are bounded and safely
+sanitized. Unsolicited Relay NOTICE messages are suppressed by the operator
+CLI and are never written raw to the terminal. The `PUBLISH` confirmation input
+is hidden and is also never echoed.
 
 ### DEV World Sandbox
 

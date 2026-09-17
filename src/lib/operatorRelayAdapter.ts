@@ -29,8 +29,9 @@ type RelaySubscription = Readonly<{
 	close: (reason?: string) => void;
 }>;
 
-type RelayConnection = Readonly<{
-	connected?: boolean;
+export type OperatorRelayConnection = {
+	readonly connected?: boolean;
+	onnotice: (message: string) => void;
 	subscribe: (filters: Filter[], params: Readonly<{
 		onevent: (event: Event) => void;
 		oneose: () => void;
@@ -38,10 +39,10 @@ type RelayConnection = Readonly<{
 		eoseTimeout?: number;
 	}>) => RelaySubscription;
 	publish: (event: VerifiedEvent) => Promise<string>;
-}>;
+};
 
 export type OperatorRelayPool = Readonly<{
-	ensureRelay: (url: string, params?: Readonly<{ connectionTimeout?: number }>) => Promise<RelayConnection>;
+	ensureRelay: (url: string, params?: Readonly<{ connectionTimeout?: number }>) => Promise<OperatorRelayConnection>;
 	close: (relays: string[]) => void;
 }>;
 
@@ -62,7 +63,7 @@ function isErrorWithMessage(value: unknown): value is { message: string } {
 	return value instanceof Error && typeof value.message === 'string';
 }
 
-function classifyPublishFailure(error: unknown, relay: RelayConnection): Readonly<{ outcome: 'rejected' | 'timeout' | 'connection-failure'; notice?: string }> {
+function classifyPublishFailure(error: unknown, relay: OperatorRelayConnection): Readonly<{ outcome: 'rejected' | 'timeout' | 'connection-failure'; notice?: string }> {
 	const message = isErrorWithMessage(error) ? error.message : '';
 	if (/timed? out|timeout/i.test(message)) return { outcome: 'timeout', notice: message };
 	if (relay.connected === false || /sending .*closed|(?:socket|websocket).*(?:closed|not open)|connection (?:closed|reset|lost|failed)|econn|enotfound|eai_again|network (?:error|unreachable)/i.test(message)) {
@@ -74,6 +75,12 @@ function classifyPublishFailure(error: unknown, relay: RelayConnection): Readonl
 function classifySubscriptionClose(reason: string): Readonly<{ status: 'closed' | 'connection-failure'; notice?: string }> {
 	if (/relay connection (?:closed|failed|timed out)/i.test(reason)) return { status: 'connection-failure', notice: reason };
 	return { status: 'closed', notice: reason };
+}
+
+/** Disable nostr-tools' default raw NOTICE logger at the operator boundary. */
+export function prepareOperatorRelayConnection(relay: OperatorRelayConnection): OperatorRelayConnection {
+	relay.onnotice = () => {};
+	return relay;
 }
 
 export function createOperatorRelayAdapter(options: OperatorRelayAdapterOptions = {}): OperatorRelayAdapter {
@@ -103,7 +110,7 @@ export function createOperatorRelayAdapter(options: OperatorRelayAdapterOptions 
 			};
 			void (async () => {
 				try {
-					const relay = await pool.ensureRelay(relayUrl, { connectionTimeout: timeoutMs });
+						const relay = prepareOperatorRelayConnection(await pool.ensureRelay(relayUrl, { connectionTimeout: timeoutMs }));
 					if (terminal) return;
 					timer = setTimeout(() => finish({ relayUrl, status: 'timeout' }), timeoutMs);
 					subscription = relay.subscribe([filter], {
@@ -139,9 +146,9 @@ export function createOperatorRelayAdapter(options: OperatorRelayAdapterOptions 
 		if (closed) throw new Error('Operator Relay adapter is closed.');
 		return await Promise.all(relays.map(async (relayUrl): Promise<OperatorRelayPublishResult> => {
 			usedRelays.add(relayUrl);
-			let relay: RelayConnection;
+			let relay: OperatorRelayConnection;
 			try {
-				relay = await pool.ensureRelay(relayUrl, { connectionTimeout: timeoutMs });
+				relay = prepareOperatorRelayConnection(await pool.ensureRelay(relayUrl, { connectionTimeout: timeoutMs }));
 			} catch (error) {
 				const notice = isErrorWithMessage(error) ? error.message : undefined;
 				return { relayUrl, outcome: 'connection-failure', ...(notice ? { notice } : {}) };
