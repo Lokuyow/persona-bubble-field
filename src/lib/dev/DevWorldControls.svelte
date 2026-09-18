@@ -27,7 +27,7 @@
 		<summary class="sandbox-mobile-toggle">DEV controls</summary>
 	</details>
 	<div class="sandbox-control-panel">
-	<form class="sandbox-scenario-picker" method="get" action="/">
+	<form class="sandbox-scenario-picker" method="get">
 		<input type="hidden" name="devWorld" value="1" />
 		<input type="hidden" name="devCharacter" value={selectedCharacterId} />
 		<label>
