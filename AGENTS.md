@@ -251,6 +251,13 @@ Use clearly fake deterministic values when tests require secret-like data.
 Follow the Git workflow defined in `docs/PROJECT.md` and the current reviewed
 Plan or task instruction.
 
+通常のcoding agent作業では、必要なローカル検証、commit、push、通常Pull
+Requestの作成までで作業を完了してよく、PR作成後にGitHub Actionsの完了を
+待機・pollingしない。PR CIとrequired status checkの`Check and build`は
+merge gateとして維持し、`main`へのmerge前には最新headでの成功を確認する。
+現在のタスクまたはreviewed PlanがCI結果の確認を明示的に要求する場合は、
+その指示を優先する。
+
 Do not commit, push, create or update a pull request, merge, release, deploy,
 force-push, or rewrite history unless the current task or reviewed Plan
 explicitly requires that operation.
