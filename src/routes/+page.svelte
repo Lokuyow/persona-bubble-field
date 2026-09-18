@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, tick, untrack } from 'svelte';
-	import { pushState } from '$app/navigation';
+	import { pushState, replaceState } from '$app/navigation';
 	import { page } from '$app/state';
 	import { asset, base } from '$app/paths';
 	import {
@@ -44,6 +44,14 @@
 		resetDevWorldPresence,
 		resolveDevWorldCharacterId
 	} from '$lib/devWorldSandbox';
+	import { resolveDevScenario, type DevScenario } from '$lib/dev/devScenarios';
+	import {
+		createDevRiftPlayground,
+		DEV_RIFT_PLAYGROUND_SELF_PUBKEY,
+		type DevRiftBotPreset,
+		type DevRiftPlaygroundState,
+		DevRiftPlayground
+	} from '$lib/dev/devRiftPlayground';
 	import { CHARACTER_CATALOG, getCharacterById, type Character } from '$lib/character';
 import { requireCharacterFromPubkey } from '$lib/characterAssignment';
 import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
@@ -197,6 +205,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	const INITIAL_COMPOSER_PREFERRED_HEIGHT = 50;
 	const initialDevWorldSandboxEnabled = import.meta.env.DEV &&
 		isDevWorldSandboxEnabled(import.meta.env.DEV, page.url.searchParams);
+	const devScenario: DevScenario | null = initialDevWorldSandboxEnabled ? resolveDevScenario(page.url.searchParams) : null;
 
 	let presenceState = $state.raw<PresenceState>({ field: FIELD, participants: [] });
 	let viewportElement = $state<HTMLElement>();
@@ -253,21 +262,18 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	let worldSession: ReturnType<typeof createWorldReadSession> | null = null;
 	const runtimeMode: 'relay' | 'dev' = initialDevWorldSandboxEnabled ? 'dev' : 'relay';
 	const devWorldSandboxEnabled = initialDevWorldSandboxEnabled;
-	const DEV_RIFT_PHASES = ['warning', 'registration', 'game', 'ended'] as const;
-	type DevRiftPhase = (typeof DEV_RIFT_PHASES)[number];
-	const requestedDevRiftPhase = initialDevWorldSandboxEnabled && import.meta.env.DEV ? page.url.searchParams.get('devRift') : null;
-	const devRiftFixturePhase: DevRiftPhase | null = requestedDevRiftPhase && (DEV_RIFT_PHASES as readonly string[]).includes(requestedDevRiftPhase)
-		? requestedDevRiftPhase as DevRiftPhase : null;
-	const devRiftFixtureEnabled = devRiftFixturePhase !== null;
+	const devRiftStaticPhase = devScenario?.fixture.kind === 'rift-static' ? devScenario.fixture.phase : null;
+	const devRiftPlaygroundEnabled = devScenario?.fixture.kind === 'rift-playground';
+	const devRiftFixtureEnabled = devRiftStaticPhase !== null || devRiftPlaygroundEnabled;
 	function devRiftFixtureNowMs(): number {
 		const schedule = getRiftSchedule(Date.now());
-		if (devRiftFixturePhase === 'warning') return schedule.warningAtMs + 1_000;
-		if (devRiftFixturePhase === 'registration') return schedule.registrationAtMs + 1_000;
-		if (devRiftFixturePhase === 'game') return schedule.gameAtMs + RIFT_CONSULTATION_MS + 1_000;
-		if (devRiftFixturePhase === 'ended') return schedule.endedAtMs + 1_000;
+		if (devRiftStaticPhase === 'warning') return schedule.warningAtMs + 1_000;
+		if (devRiftStaticPhase === 'registration') return schedule.registrationAtMs + 1_000;
+		if (devRiftStaticPhase === 'game') return schedule.gameAtMs + RIFT_CONSULTATION_MS + 1_000;
+		if (devRiftStaticPhase === 'ended') return schedule.endedAtMs + 1_000;
 		return Date.now();
 	}
-	const initialRiftNowMs = devRiftFixtureEnabled ? devRiftFixtureNowMs() : Date.now();
+	const initialRiftNowMs = devRiftPlaygroundEnabled ? 0 : devRiftFixtureEnabled ? devRiftFixtureNowMs() : Date.now();
 	let composerAvailable = $derived(runtimeMode === 'relay' || devTraceReplyFixtureEnabled);
 	let pendingComposerSubmission: Readonly<{
 		resolve: () => void;
@@ -316,6 +322,8 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	let selectedManualRiftInstanceId: string | null = null;
 	const pendingRealtimeControls: RealtimeControlEnvelope[] = [];
 	const recoveredRiftSessions = new Map<string, RiftSessionState>();
+	let devRiftPlayground = $state<DevRiftPlayground | null>(null);
+	let devRiftPlaygroundState = $state.raw<DevRiftPlaygroundState | null>(null);
 	const movementInputController = createMovementInputController({
 		requestMovement: (direction) => {
 			closeFieldActionMenu();
@@ -481,15 +489,23 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	let facilityCellTriggers = $derived([MENDING_TERMINAL.position, ADJUSTMENT_TERMINAL.position]);
 	let realtimeHoles = $derived(!riftEventEnabled || riftSchedule.phase === 'dormant' || riftSchedule.phase === 'ended' ? [] : (riftSession?.holes ?? createRiftSession({ instanceId: riftSchedule.instanceId, field }).holes));
 	let realtimeHoleTriggers = $derived(riftSchedule.phase === 'registration' ? realtimeHoles : []);
-	let riftSelfHoleId = $derived(selfSigner && riftSession ? getRiftParticipantHole(riftSession, riftSchedule, selfSigner.pubkey) : null);
+	let riftActorPubkey = $derived(devRiftPlaygroundEnabled ? DEV_RIFT_PLAYGROUND_SELF_PUBKEY : selfSigner?.pubkey ?? null);
+	let riftSelfHoleId = $derived(riftActorPubkey && riftSession ? getRiftParticipantHole(riftSession, riftSchedule, riftActorPubkey) : null);
 	let riftRound = $derived(riftSchedule.phase === 'game'
 		? ([1, 2, 3] as const).find((round) => riftNowMs < getRiftRoundSchedule(riftSchedule, round).endedAtMs) ?? 3
 		: null);
 	let riftRoundSchedule = $derived(riftRound ? getRiftRoundSchedule(riftSchedule, riftRound) : null);
-	let riftCanChoose = $derived(Boolean(riftSchedule.phase === 'game' && riftRealtimeBootstrapComplete && riftRoundSchedule && riftNowMs >= riftRoundSchedule.selectionAtMs && riftNowMs < riftRoundSchedule.resultAtMs && riftSelfHoleId && personaSnapshot && realtimeStatus === 'active' && !(riftSelection?.round === riftRound && riftSelection.commitPublished)));
+	let riftCanChoose = $derived(Boolean(riftSchedule.phase === 'game' && riftRealtimeBootstrapComplete && riftRoundSchedule && riftNowMs >= riftRoundSchedule.selectionAtMs && riftNowMs < riftRoundSchedule.resultAtMs && riftSelfHoleId && realtimeStatus === 'active' && (devRiftPlaygroundEnabled ? !devRiftPlaygroundState?.selfChoice : Boolean(personaSnapshot)) && !(riftSelection?.round === riftRound && riftSelection.commitPublished)));
 	let riftCommitStatus = $derived(riftSelection && riftSelection.round === riftRound
 		? riftSelection.revealStatus === 'published' ? '選択を自動公開済み' : riftSelection.revealStatus === 'sending' ? '選択を自動公開中' : riftSelection.revealStatus === 'failed' ? '選択の自動公開に失敗（未reveal）' : riftSelection.commitPublished ? '秘密選択を送信済み' : '未送信'
 		: 'このラウンドの選択はまだありません');
+	let devRiftLastResult = $derived.by(() => {
+		if (!devRiftPlaygroundState) return null;
+		const result = devRiftPlaygroundState.session.results.at(-1);
+		if (!result) return devRiftPlaygroundState.message;
+		const outcome = result.outcomes.find((candidate) => candidate.pubkey === DEV_RIFT_PLAYGROUND_SELF_PUBKEY);
+		return outcome?.kind === 'death' ? `Round ${result.round}: simulated death` : outcome ? `Round ${result.round}: +${outcome.points}pt` : `Round ${result.round}: ${result.kind}`;
+	});
 
 	function isActuallyPresented(element: Element | null): element is HTMLElement {
 		if (!(element instanceof HTMLElement) || element.getClientRects().length === 0) return false;
@@ -869,9 +885,16 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		if (devWorldSandboxEnabled) {
 			const devSearchParams = new URLSearchParams(window.location.search);
 			selectedCharacterId = resolveDevWorldCharacterId(devSearchParams);
+			if (devRiftPlaygroundEnabled) {
+				devRiftPlayground = createDevRiftPlayground(FIELD);
+				devRiftPlaygroundState = devRiftPlayground.snapshot;
+				riftSchedule = devRiftPlaygroundState.schedule;
+				riftNowMs = devRiftPlaygroundState.nowMs;
+				riftSession = devRiftPlaygroundState.session;
+			}
 			resetSandbox();
 			if (import.meta.env.DEV) {
-				applyDevPageFixtures(devSearchParams, {
+				if (devScenario) applyDevPageFixtures(devScenario, {
 					field: FIELD,
 					setPresence: acceptPresence,
 					getConversation: () => conversationState,
@@ -882,7 +905,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 					enableTraceReplyFixture: () => { devTraceReplyFixtureEnabled = true; }
 				});
 			}
-			if (import.meta.env.DEV && devSearchParams.get('devPresence') === 'inactive') {
+			if (import.meta.env.DEV && devScenario?.fixture.kind === 'trace' && devScenario.fixture.inactiveSelf) {
 				acceptPresence(debugTimeoutParticipant(presenceState, DEV_WORLD_SELF_ID));
 			}
 			if (import.meta.env.DEV) {
@@ -901,7 +924,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 					traceConversationController = runtime;
 				});
 			}
-			if (devRiftFixtureEnabled) reconcileRiftSession(initialRiftNowMs);
+			if (devRiftFixtureEnabled && !devRiftPlaygroundEnabled) reconcileRiftSession(initialRiftNowMs);
 		}
 
 		function getRealtimeStartConfiguration(nowMs: number): RealtimeStartConfiguration {
@@ -1191,7 +1214,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 				const now = Date.now();
 				mendingNowMs = now;
 				updateLifespanHud(now);
-				reconcileRiftSession(devRiftFixtureEnabled ? initialRiftNowMs : now);
+				if (!devRiftPlaygroundEnabled) reconcileRiftSession(devRiftFixtureEnabled ? initialRiftNowMs : now);
 				if (!devWorldSandboxEnabled && riftEventEnabled) void worldSession?.startRealtime();
 				if (!devWorldSandboxEnabled && riftSchedule.phase === 'ended') maybeStopRealtime();
 				const nextPresence = session?.refresh(now);
@@ -1742,6 +1765,20 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	}
 
 	async function joinRiftHole(holeId: string, position: { x: number; y: number }): Promise<void> {
+		if (devRiftPlaygroundEnabled) {
+			if (!selfIsActive || !selfLogicalPosition) return;
+			if (Math.max(Math.abs(selfLogicalPosition.x - position.x), Math.abs(selfLogicalPosition.y - position.y)) > 1) {
+				showTraceProximityFeedback(position, '近づくと抜け穴へ参加できる');
+				return;
+			}
+			if (devRiftPlayground) {
+				devRiftPlaygroundState = devRiftPlayground.joinSelf(holeId);
+				riftSchedule = devRiftPlaygroundState.schedule;
+				riftNowMs = devRiftPlaygroundState.nowMs;
+				riftSession = devRiftPlaygroundState.session;
+			}
+			return;
+		}
 		if (!selfSigner || !selfIsActive || !selfLogicalPosition || riftSchedule.phase !== 'registration') return;
 		if (Math.max(Math.abs(selfLogicalPosition.x - position.x), Math.abs(selfLogicalPosition.y - position.y)) > 1) {
 			showTraceProximityFeedback(position, '近づくと抜け穴へ参加できる');
@@ -1751,6 +1788,15 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	}
 
 	async function chooseRiftChoice(choice: RiftChoice): Promise<void> {
+		if (devRiftPlaygroundEnabled) {
+			if (devRiftPlayground) {
+				devRiftPlaygroundState = devRiftPlayground.chooseSelf(choice);
+				riftSchedule = devRiftPlaygroundState.schedule;
+				riftNowMs = devRiftPlaygroundState.nowMs;
+				riftSession = devRiftPlaygroundState.session;
+			}
+			return;
+		}
 		if (!riftCanChoose || !selfSigner || !riftSelfHoleId || !riftRound ||
 			(riftSelection?.round === riftRound && riftSelection.commitPublished)) return;
 		const nonce = createRiftNonce();
@@ -2149,6 +2195,9 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	function selectSandboxCharacter(characterId: string): void {
 		if (!devWorldSandboxEnabled) return;
 		selectedCharacterId = resolveDevWorldCharacterId(new URLSearchParams(`?devCharacter=${encodeURIComponent(characterId)}`));
+		const url = new URL(window.location.href);
+		url.searchParams.set('devCharacter', selectedCharacterId);
+		replaceState(`${url.pathname}${url.search}${url.hash}`, page.state);
 	}
 
 	function resetSandbox(): void {
@@ -2163,6 +2212,25 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		lastVisibilityKey = null;
 		colorByPubkey = {};
 		acceptPresence(resetDevWorldPresence(FIELD, Date.now()));
+	}
+
+	function resetDevScenario(): void {
+		if (!devWorldSandboxEnabled) return;
+		const url = new URL(window.location.href);
+		window.location.assign(url.toString());
+	}
+
+	function changeDevRiftPreset(preset: DevRiftBotPreset): void {
+		if (!devRiftPlayground) return;
+		devRiftPlaygroundState = devRiftPlayground.setPreset(preset);
+	}
+
+	function advanceDevRiftPhase(): void {
+		if (!devRiftPlayground) return;
+		devRiftPlaygroundState = devRiftPlayground.advance();
+		riftSchedule = devRiftPlaygroundState.schedule;
+		riftNowMs = devRiftPlaygroundState.nowMs;
+		riftSession = devRiftPlaygroundState.session;
 	}
 
 	function traceMarkerWorldPosition(position: { x: number; y: number }): WorldPoint {
@@ -2436,7 +2504,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			selectedChoice={riftSelection?.round === riftRound ? riftSelection.choice : null}
 			commitStatus={riftCommitStatus}
 			canChoose={riftCanChoose}
-			lastResult={riftLastResult}
+			lastResult={devRiftLastResult ?? riftLastResult}
 			onChoice={(choice) => { void chooseRiftChoice(choice); }}
 		/>
 	{/if}
@@ -2466,13 +2534,19 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 
 	{#if devWorldSandboxEnabled}
 		<DevWorldControls
+			scenario={devScenario!}
 			{selectedCharacterId}
 			traceReplyFixtureEnabled={devTraceReplyFixtureEnabled}
 			canAddLiveReply={!devTraceReplies.some((reply) => reply.id === 'c'.repeat(64))}
+			riftPlaygroundEnabled={devRiftPlaygroundEnabled}
+			botPreset={devRiftPlaygroundState?.preset ?? 'cooperative'}
+			canAdvanceRift={Boolean(devRiftPlaygroundState && devRiftPlaygroundState.schedule.phase !== 'ended')}
 			onCharacterChange={selectSandboxCharacter}
-			onReset={resetSandbox}
+			onReset={resetDevScenario}
 			onAddLiveReply={injectDevTraceLiveReply}
 			onInjectLiveSpeech={injectDevLiveSpeech}
+			onBotPresetChange={changeDevRiftPreset}
+			onAdvanceRift={advanceDevRiftPhase}
 		/>
 	{:else if selfPositionWriteState.kind === 'retryable' && !isWorldSelfActive}
 		<WorldEntryControls onRetry={retryWorldEntry} />

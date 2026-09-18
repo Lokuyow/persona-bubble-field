@@ -67,16 +67,22 @@ is hidden and is also never echoed.
 
 ### DEV World Sandbox
 
-For local field, movement, camera, and viewport checks without connecting to a
-Relay, open the development server at:
+For local field, movement, camera, viewport, and fixture checks without
+connecting to a Relay:
 
 ```text
 http://localhost:5173/?devWorld=1
 ```
 
 This starts a DEV-only, local-only sandbox with one `Dev Wanderer` participant.
-It does not connect to a Relay or publish anything. The query is ignored in a
-production build, which continues to start the normal Relay world.
+Use the Scenario picker to choose a named fixture. Automation and direct
+debugging can select one with `?devWorld=1&devScenario=<id>`. The controls also
+keep `devCharacter=<id>` as an independent character option. `Rift Playground`
+is a fully local manual Rift simulation: it does not connect to a Relay and
+does not modify production persona or Run state.
+
+The DEV World query is ignored in a production build, which continues to start
+the normal Relay world.
 
 When checking Relay isolation in browser DevTools, confirm there are no
 connections or frames for Relay hosts or Nostr traffic. Vite's development HMR
