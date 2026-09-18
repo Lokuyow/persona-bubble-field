@@ -2262,11 +2262,6 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		soundPreference = speechSoundController?.preference ?? { ...soundPreference, volume };
 	}
 
-	function updateSoundMuted(muted: boolean): void {
-		speechSoundController?.setMuted(muted);
-		soundPreference = speechSoundController?.preference ?? { ...soundPreference, muted };
-	}
-
 	function tailTarget(participant: (typeof participantViews)[number]): WorldPoint {
 		return {
 			x: participant.screen.x,
@@ -2364,10 +2359,8 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		{#snippet children()}
 			<SoundControl
 				volume={soundPreference.volume}
-				muted={soundPreference.muted}
 				onOpen={() => speechSoundController?.unlock()}
 				onVolume={updateSoundVolume}
-				onMute={updateSoundMuted}
 			/>
 			<Chatter
 				bind:this={chatterComponent}

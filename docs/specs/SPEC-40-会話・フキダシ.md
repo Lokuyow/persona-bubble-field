@@ -384,7 +384,7 @@ live発言によって画面上に新しいliveフキダシが成立したとき
 
 入室時のbootstrap復元、Chatterへの追加、発言の痕跡（Trace root / Trace reply）、画面外発言、duplicate、既存の表示フキダシを変更しない発言では再生しない。通常フキダシから新しい合体フキダシが成立した場合は1回再生し、成立済みの合体フキダシへメンバーが追加されるだけの場合は再生しない。
 
-右上のspeaker controlで全効果音のmaster volumeとmuteを操作できる。音量とmuteは別々のlocal preferenceとして保存し、reload後も復元する。browserのautoplay制約により、user activation前に到着したlive発言の効果音は静かにskipし、unlock後に遅れて再生しない。documentがbackgroundまたはhidden、mute中、音量が実質0の場合も再生しない。
+右上のspeaker controlで全効果音のmaster volumeを操作できる。独立したmute buttonは持たず、volume 0をmuteとして扱う。volumeはlocal preferenceとして保存し、reload後も復元する。browserのautoplay制約により、user activation前に到着したlive発言の効果音は静かにskipし、unlock後に遅れて再生しない。documentがbackgroundまたはhidden、volume 0または実質0の場合も再生しない。
 
 ---
 

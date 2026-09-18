@@ -95,6 +95,7 @@ describe('speech sound effects', () => {
 	it('loads safe defaults for invalid persisted values and preserves valid preferences', () => {
 		const storage = { getItem: (key: string) => key === SPEECH_SOUND_PREFERENCE_KEY ? '{"volume":4,"muted":"no"}' : null };
 		expect(loadSoundPreference(storage)).toEqual(DEFAULT_SOUND_PREFERENCE);
-		expect(loadSoundPreference({ getItem: () => '{"volume":0.2,"muted":true}' })).toEqual({ volume: 0.2, muted: true });
+		expect(loadSoundPreference({ getItem: () => '{"volume":0.2,"muted":true}' })).toEqual({ volume: 0.2 });
+		expect(loadSoundPreference({ getItem: () => '{"volume":0}' })).toEqual({ volume: 0 });
 	});
 });

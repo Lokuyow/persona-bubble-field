@@ -3528,8 +3528,11 @@ test.describe('DEV World Sandbox', () => {
 		await expect(panel).toBeVisible();
 		const slider = page.getByRole('slider', { name: 'Sound volume' });
 		await slider.fill('25');
-		await page.getByRole('button', { name: 'Mute sound' }).click();
-		await expect(page.getByRole('button', { name: 'Unmute sound' })).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Mute sound' })).toHaveCount(0);
+		await slider.fill('0');
+		await expect(page.getByRole('button', { name: 'Open sound settings (muted)' })).toBeVisible();
+		await slider.fill('25');
+		await expect(page.getByRole('button', { name: 'Open sound settings' })).toBeVisible();
 		const viewport = await page.locator('.field-viewport').boundingBox();
 		const control = await speaker.boundingBox();
 		expect(viewport && control).toBeTruthy();
@@ -3542,7 +3545,13 @@ test.describe('DEV World Sandbox', () => {
 		await page.waitForTimeout(1000);
 		await page.getByRole('button', { name: /Open sound settings/ }).click();
 		await expect(page.getByRole('slider', { name: 'Sound volume' })).toHaveValue('25');
-		await expect(page.getByRole('button', { name: 'Unmute sound' })).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Mute sound' })).toHaveCount(0);
+		await page.getByRole('slider', { name: 'Sound volume' }).fill('0');
+		await expect(page.getByRole('button', { name: 'Open sound settings (muted)' })).toBeVisible();
+		await page.reload();
+		await page.waitForTimeout(1000);
+		await page.getByRole('button', { name: /Open sound settings/ }).click();
+		await expect(page.getByRole('slider', { name: 'Sound volume' })).toHaveValue('0');
 	});
 
 	test('keeps the speaker control usable on desktop', async ({ page }) => {

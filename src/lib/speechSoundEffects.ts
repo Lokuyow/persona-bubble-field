@@ -1,9 +1,9 @@
 import type { ConversationState, SpeechType } from './conversation';
 
-export type SoundPreference = Readonly<{ volume: number; muted: boolean }>;
+export type SoundPreference = Readonly<{ volume: number }>;
 export type SpeechSoundEffect = SpeechType;
 
-export const DEFAULT_SOUND_PREFERENCE: SoundPreference = { volume: 0.5, muted: false };
+export const DEFAULT_SOUND_PREFERENCE: SoundPreference = { volume: 0.5 };
 export const SPEECH_SOUND_PREFERENCE_KEY = 'persona-bubble-field:speech-sound:v1';
 
 export function loadSoundPreference(storage: Pick<Storage, 'getItem'> | null | undefined): SoundPreference {
@@ -13,10 +13,10 @@ export function loadSoundPreference(storage: Pick<Storage, 'getItem'> | null | u
 		const parsed: unknown = JSON.parse(raw);
 		if (typeof parsed !== 'object' || parsed === null) return DEFAULT_SOUND_PREFERENCE;
 		const value = parsed as Record<string, unknown>;
-		if (typeof value.volume !== 'number' || !Number.isFinite(value.volume) || value.volume < 0 || value.volume > 1 || typeof value.muted !== 'boolean') {
+		if (typeof value.volume !== 'number' || !Number.isFinite(value.volume) || value.volume < 0 || value.volume > 1) {
 			return DEFAULT_SOUND_PREFERENCE;
 		}
-		return { volume: value.volume, muted: value.muted };
+		return { volume: value.volume };
 	} catch {
 		return DEFAULT_SOUND_PREFERENCE;
 	}
@@ -194,7 +194,7 @@ export function createSpeechSoundSamples(effect: SpeechSoundEffect, sampleRate: 
 
 type AudioContextLike = AudioContext;
 type ControllerOptions = Readonly<{ storage?: Pick<Storage, 'getItem' | 'setItem'> | null; document?: Pick<Document, 'hidden'>; audioContextFactory?: () => AudioContextLike }>;
-export type SpeechSoundController = Readonly<{ preference: SoundPreference; unlock: () => void; setVolume: (volume: number) => void; setMuted: (muted: boolean) => void; play: (effect: SpeechSoundEffect) => void; dispose: () => void }>;
+export type SpeechSoundController = Readonly<{ preference: SoundPreference; unlock: () => void; setVolume: (volume: number) => void; play: (effect: SpeechSoundEffect) => void; dispose: () => void }>;
 
 export function createSpeechSoundController(options: ControllerOptions = {}): SpeechSoundController {
 	let preference = loadSoundPreference(options.storage);
@@ -204,7 +204,7 @@ export function createSpeechSoundController(options: ControllerOptions = {}): Sp
 	const buffers = new Map<SpeechSoundEffect, AudioBuffer>();
 	const applyGain = (at = context?.currentTime ?? 0) => {
 		if (!masterGain || !context) return;
-		masterGain.gain.cancelScheduledValues(at); masterGain.gain.setTargetAtTime(preference.muted ? 0 : preference.volume, at, 0.015);
+		masterGain.gain.cancelScheduledValues(at); masterGain.gain.setTargetAtTime(preference.volume, at, 0.015);
 	};
 	const ensureContext = (): AudioContextLike | null => {
 		if (disposed || context) return context;
@@ -216,10 +216,9 @@ export function createSpeechSoundController(options: ControllerOptions = {}): Sp
 	return {
 		get preference() { return preference; }, unlock,
 		setVolume: (volume) => setPreference({ ...preference, volume: Math.min(1, Math.max(0, volume)) }),
-		setMuted: (muted) => setPreference({ ...preference, muted }),
 		play: (effect) => {
 			const audio = context;
-			if (!audio || !masterGain || audio.state !== 'running' || options.document?.hidden || preference.muted || preference.volume <= 0.001) return;
+			if (!audio || !masterGain || audio.state !== 'running' || options.document?.hidden || preference.volume <= 0.001) return;
 			let buffer = buffers.get(effect);
 			if (!buffer) { const samples = createSpeechSoundSamples(effect, audio.sampleRate); buffer = audio.createBuffer(1, samples.length, audio.sampleRate); buffer.getChannelData(0).set(samples); buffers.set(effect, buffer); }
 			const source = audio.createBufferSource(); source.buffer = buffer; source.connect(masterGain); source.start(audio.currentTime + 0.005);
