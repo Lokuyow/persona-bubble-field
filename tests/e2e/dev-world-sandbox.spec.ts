@@ -284,6 +284,11 @@ test.describe('DEV World Sandbox', () => {
 		expect(registration.length).toBeGreaterThan(0);
 		expect(registration).not.toContain('12,3');
 		expect(registration).not.toContain('14,3');
+		const holeAsset = page.locator('[data-realtime-hole-id] img');
+		await expect(holeAsset).toHaveCount(registration.length);
+		await expect(holeAsset.first()).toHaveAttribute('src', /field\/objects\/rift\.webp(?:\?|$)/);
+		expect(await holeAsset.first().evaluate((image) => ({ complete: image.complete, naturalWidth: image.naturalWidth }))).toMatchObject({ complete: true });
+		expect(await holeAsset.first().evaluate((image) => image.naturalWidth)).toBeGreaterThan(0);
 		await expect(page.locator('[data-realtime-hole-trigger]')).toHaveCount(registration.length);
 
 		await page.goto('/?devWorld=1&devRift=game');
