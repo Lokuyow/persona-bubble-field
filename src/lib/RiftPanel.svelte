@@ -51,6 +51,21 @@
 			<p class="rift-note">20:55 JSTから、フィールド上の抜け穴へ近づいて参加できます。</p>
 		{:else if schedule.phase === 'registration'}
 			<p class="rift-note">参加する抜け穴まで移動して操作してください。自動割り当てはありません。</p>
+			<details class="rift-rules-disclosure">
+				<summary>ルールを見る</summary>
+				<div class="rift-rules-inline" role="dialog" aria-label="綻びのルール">
+					<p>ソトへ続く抜け穴を、参加者みんなで巡るゲームです。1つの抜け穴に3〜6人で参加し、全3ラウンドを進めます。</p>
+					<p><strong>各ラウンド：</strong>相談60秒 → 秘密選択30秒 → 結果発表20秒</p>
+					<p><strong>秘密の選択：</strong>「抜け穴を維持する」か「脱出を試みる」。選択は結果発表まで、ほかの参加者には見えません。</p>
+					<p><strong>維持に必要な人数：</strong>3人なら2人、4人なら3人、5人なら4人、6人なら4人。</p>
+					<ul>
+						<li>全員が維持：維持した人に+20pt</li>
+						<li>脱出する人がいて必要人数を維持：維持した人に+10pt、脱出を試みた人に+100pt</li>
+						<li>維持人数が不足：維持した人は0pt、脱出を試みた人は死亡</li>
+					</ul>
+					<p><strong>綻びで脱出に成功しても通常の1000pt clearにはならず、+100ptを得てハコへ戻ります。</strong></p>
+				</div>
+			</details>
 		{:else if schedule.phase === 'game' && roundInfo}
 			<div class="rift-details">
 				<span>参加先: {selfHoleId ?? '未参加'}</span>
@@ -83,5 +98,10 @@
 	p { margin: 4px 0 0; font-size: 11px; } .rift-heading strong { font-size: 11px; white-space: nowrap; }
 	.rift-note { color: #665b69; } .rift-details { margin-top: 8px; font-size: 11px; }
 	.rift-choice-row { margin-top: 9px; } button { flex: 1; min-height: 34px; padding: 6px 8px; border: 1px solid rgba(102, 28, 106, 0.3); border-radius: 8px; background: #fff; color: #4d3150; font: inherit; font-size: 11px; font-weight: 700; cursor: pointer; pointer-events: auto; } button.selected { background: #f0d9f3; border-color: #8d4692; } button:disabled { cursor: not-allowed; opacity: .5; }
+	.rift-rules-disclosure { margin-top: 9px; pointer-events: auto; }
+	.rift-rules-disclosure summary { padding: 8px; border: 1px solid rgba(102, 28, 106, .3); border-radius: 8px; background: white; color: #4d3150; font-size: 11px; font-weight: 700; cursor: pointer; text-align: center; }
+	.rift-rules-inline { display: grid; gap: 8px; max-height: min(55svh, 360px); overflow: auto; margin-top: 8px; padding: 10px; border: 1px solid rgba(102, 28, 106, .18); border-radius: 8px; background: rgba(255, 255, 255, .78); font-size: 11px; line-height: 1.5; }
+	.rift-rules-inline p, .rift-rules-inline ul { margin: 0; }
+	.rift-rules-inline ul { padding-left: 1.2rem; }
 	.rift-status { color: #69536d; } .rift-result { padding: 6px 8px; border-radius: 7px; background: rgba(211, 159, 215, .18); font-weight: 700; }
 </style>

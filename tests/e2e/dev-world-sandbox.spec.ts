@@ -277,6 +277,7 @@ async function profileTriggerCenter(page: Page, name: string): Promise<{ x: numb
 
 test.describe('DEV World Sandbox', () => {
 	test('renders the experimental Rift registration and game fixtures without fixed-facility overlap', async ({ page }) => {
+		await page.setViewportSize({ width: 360, height: 640 });
 		await page.goto('/?devWorld=1&devRift=registration');
 		await expect(page.locator('[data-realtime-panel]')).toBeVisible();
 		await expect(page.locator('[data-realtime-panel]')).toContainText('参加受付');
@@ -285,6 +286,11 @@ test.describe('DEV World Sandbox', () => {
 		expect(registration).not.toContain('12,3');
 		expect(registration).not.toContain('14,3');
 		await expect(page.locator('[data-realtime-hole-trigger]')).toHaveCount(registration.length);
+		await page.getByText('ルールを見る', { exact: true }).click();
+		await expect(page.getByRole('dialog')).toContainText('ソトへ続く抜け穴');
+		await expect(page.getByRole('dialog')).toContainText('相談60秒');
+		await expect(page.getByRole('dialog')).toContainText('維持人数が不足');
+		await page.getByText('ルールを見る', { exact: true }).click();
 
 		await page.goto('/?devWorld=1&devRift=game');
 		await expect(page.locator('[data-realtime-panel]')).toBeVisible();

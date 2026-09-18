@@ -1457,6 +1457,10 @@ test.describe('Relay startup', () => {
 		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), nearEvent);
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', `${nearPosition.x},${nearPosition.y}`);
 		await page.locator('[data-realtime-hole-trigger]').click();
+		await expect(page.getByRole('dialog')).toContainText('3〜6人 / 全3ラウンド');
+		await expect(page.getByRole('dialog')).toContainText('脱出を選んだ者は死亡');
+		expect((await relayState(page)).state.published.filter((event) => event.kind === 7070 && event.pubkey === selfPubkey)).toHaveLength(0);
+		await page.getByRole('button', { name: '参加する' }).click();
 		await expect.poll(async () => (await relayState(page)).state.published.some((event) => {
 			if (event.kind !== 7070 || event.pubkey !== selfPubkey) return false;
 			try { return (JSON.parse(event.content) as { action?: string }).action === 'join'; } catch { return false; }

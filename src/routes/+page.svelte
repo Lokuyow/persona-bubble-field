@@ -53,6 +53,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	import MendingDialog from '$lib/MendingDialog.svelte';
 	import AdjustmentDialog from '$lib/AdjustmentDialog.svelte';
 	import RiftPanel from '$lib/RiftPanel.svelte';
+	import RiftRulesDialog from '$lib/RiftRulesDialog.svelte';
 	import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL, isBlockedFacilityCell, isWithinFacilityInteractionRange, sameFieldCell } from '$lib/fieldFacilities';
 	import { projectMending } from '$lib/mending';
 	import { getAbilityUpgrade, type PersonaAbilityKey } from '$lib/personaGameState';
@@ -308,6 +309,9 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	let riftSelection = $state<Readonly<{ round: 1 | 2 | 3; choice: RiftChoice; nonce: string; commitId: string | null; commitPublished: boolean; revealAttempted: boolean; revealStatus: 'idle' | 'sending' | 'published' | 'failed' }> | null>(null);
 	let riftLastResult = $state<string | null>(null);
 	let riftSettlementInFlight = $state(false);
+	let riftRulesDialogOpen = $state(false);
+	let riftRulesDialogMode = $state<'rules' | 'join-confirmation'>('rules');
+	let pendingRiftJoin = $state<{ holeId: string; position: { x: number; y: number } } | null>(null);
 	const appliedRiftOutcomeIds = new Set<string>();
 	const realtimeRecoveryInstanceIds = new Set<string>();
 	let realtimeControlSince = 0;
@@ -1747,7 +1751,17 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			showTraceProximityFeedback(position, '近づくと抜け穴へ参加できる');
 			return;
 		}
-		await publishRiftAction({ action: 'join', holeId });
+		pendingRiftJoin = { holeId, position: { ...position } };
+		riftRulesDialogMode = 'join-confirmation';
+		riftRulesDialogOpen = true;
+	}
+
+	async function confirmRiftJoin(): Promise<void> {
+		const pending = pendingRiftJoin;
+		if (!pending) return;
+		riftRulesDialogOpen = false;
+		pendingRiftJoin = null;
+		await publishRiftAction({ action: 'join', holeId: pending.holeId });
 	}
 
 	async function chooseRiftChoice(choice: RiftChoice): Promise<void> {
@@ -2440,6 +2454,13 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			onChoice={(choice) => { void chooseRiftChoice(choice); }}
 		/>
 	{/if}
+
+	<RiftRulesDialog open={riftRulesDialogOpen} mode={riftRulesDialogMode} onOpenChange={(open) => {
+		if (!open) { riftRulesDialogOpen = false; pendingRiftJoin = null; }
+	}} onJoin={() => { void confirmRiftJoin(); }} onViewRules={() => {
+		riftRulesDialogMode = 'rules';
+		riftRulesDialogOpen = true;
+	}} />
 
 	<ProfileDialog
 		onOpenChange={handleProfileOpenChange}
