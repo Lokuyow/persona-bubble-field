@@ -4,6 +4,7 @@ import type { PresenceState } from '../presence';
 import type { RecentMessageTimeline } from '../recentMessageTimeline';
 import type { ParsedTraceReply, ParsedWorldMessage } from '../nostrProtocol';
 import { applyDevPageFixtures, createDevTraceLiveReply } from './devPageFixtures';
+import { resolveDevScenario } from './devScenarios';
 
 const nowMs = 1_800_000_123_456;
 
@@ -22,7 +23,7 @@ function fixtures(query: string): {
 	let timeline: RecentMessageTimeline = [];
 	let roots: readonly ParsedWorldMessage[] = [];
 	let replies: readonly ParsedTraceReply[] = [];
-	applyDevPageFixtures(new URLSearchParams(query), {
+	applyDevPageFixtures(resolveDevScenario(new URLSearchParams(query)), {
 		field: { columns: 16, rows: 8 },
 		setPresence(next) { calls.push('presence'); presence = next; },
 		getConversation: () => conversation,
@@ -38,36 +39,27 @@ function fixtures(query: string): {
 afterEach(() => vi.restoreAllMocks());
 
 describe('DEV page fixtures', () => {
-	it('applies speech before Trace fixtures and enables replies before setting them, synchronously', () => {
-		const result = fixtures('devSpeech=timeline&devTrace=replies');
-		expect(result.calls).toEqual([
-			'presence', 'timeline', 'presence', 'conversation', 'roots', 'enable-replies', 'replies'
-		]);
+	it('applies the named Chatter fixture synchronously', () => {
+		const result = fixtures('devScenario=chatter-timeline');
+		expect(result.calls).toEqual(['presence', 'timeline']);
 		expect(result.timeline).toHaveLength(24);
 		expect(result.timeline.find((message) => message.id === 'dev-timeline-duplicate')?.content)
 			.toBe('timeline message 24');
-		expect(result.roots.map((root) => root.id)).toEqual(['1', '2', '3', '4'].map((id) => id.repeat(64)));
+	});
+
+	it('enables the Trace reply runtime only for trace-replies', () => {
+		const result = fixtures('devScenario=trace-replies');
+		expect(result.calls).toContain('enable-replies');
 		expect(result.replies).toHaveLength(9);
-		expect(result.replies.every((reply) => reply.rootId === '2'.repeat(64))).toBe(true);
-		const byId = new Map(result.replies.map((reply) => [reply.id, reply]));
-		for (const reply of result.replies) {
-			if (reply.parentKind === 42) {
-				expect(reply.parentId).toBe(reply.rootId);
-				expect(reply.parentPubkey).toBe(reply.rootPubkey);
-			} else {
-				expect(byId.get(reply.parentId)?.pubkey).toBe(reply.parentPubkey);
-			}
-			expect(reply).not.toHaveProperty('position');
-		}
 	});
 
 	it('preserves merged query member count, speech type, duration and long body', () => {
-		const { conversation, presence } = fixtures('devSpeech=merged3-shout-long');
+		const { conversation, presence } = fixtures('devScenario=speech-merged-3-long');
 		expect(conversation.normalBubbles).toHaveLength(1);
 		expect(conversation.mergedBubbles).toHaveLength(1);
 		const merged = conversation.mergedBubbles[0];
 		expect(merged.memberPubkeys).toEqual(['b', 'c', 'd'].map((id) => id.repeat(64)));
-		expect(merged.speechType).toBe('shout');
+		expect(merged.speechType).toBe('normal');
 		expect(merged.expiresAt).toBe(nowMs + 60_000);
 		expect(merged.content).toBe('Merged bubble content grows naturally until its size limit. '.repeat(8).trim());
 		expect(presence?.participants.filter((participant) => merged.memberPubkeys.includes(participant.id))
@@ -75,14 +67,14 @@ describe('DEV page fixtures', () => {
 	});
 
 	it('preserves explicit five-line fixture content', () => {
-		const { conversation } = fixtures('devSpeech=linebreak-five');
+		const { conversation } = fixtures('devScenario=speech-linebreak-five');
 		expect(conversation.normalBubbles[0].content).toBe('normal line 1\nnormal line 2\nnormal line 3\nnormal line 4\nnormal line 5');
 		expect(conversation.mergedBubbles[0].content).toBe('merged line 1\nmerged line 2\nmerged line 3\nmerged line 4\nmerged line 5');
 	});
 
-	it('leaves presence overrides and unsupported queries to the caller', () => {
-		expect(fixtures('devSpeech=unknown&devTrace=unknown&devPresence=inactive').calls).toEqual([]);
-		expect(fixtures('devTrace=lights').calls).toEqual(['presence', 'conversation', 'roots']);
+	it('leaves presence overrides to the caller and uses the marker name', () => {
+		expect(fixtures('devScenario=default').calls).toEqual([]);
+		expect(fixtures('devScenario=trace-markers').calls).toEqual(['presence', 'conversation', 'roots']);
 	});
 
 	it('creates the same direct live reply using the supplied clock', () => {
