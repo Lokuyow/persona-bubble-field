@@ -27,7 +27,7 @@
 			</span>
 		</Popover.Trigger>
 		<Popover.Content class="sound-panel" side="bottom" align="end" sideOffset={6} role="dialog" aria-label="Sound settings" tabindex={-1} onpointerdown={(event) => event.stopPropagation()}>
-			<label><span>Volume</span><input type="range" min="0" max="100" value={Math.round(volume * 100)} aria-label="Sound volume" oninput={(event) => onVolume(Number(event.currentTarget.value) / 100)} /></label>
+			<label><input type="range" min="0" max="100" value={Math.round(volume * 100)} aria-label="Sound volume" oninput={(event) => onVolume(Number(event.currentTarget.value) / 100)} /></label>
 		</Popover.Content>
 	</Popover.Root>
 </div>
@@ -38,7 +38,7 @@
 	:global(.speaker-button:focus-visible) { outline: 3px solid var(--color-focus-ring); outline-offset: 2px; }
 	.speaker-icon { display: inline-flex; width: 24px; height: 24px; align-items: center; justify-content: center; }
 	.speaker-icon :global(svg) { width: 24px; height: 24px; }
-	:global(.sound-panel) { width: min(156px, calc(100vw - 20px - env(safe-area-inset-left) - env(safe-area-inset-right))); padding: 8px 10px 9px; display: grid; border: 1px solid rgba(255,255,255,.25); border-radius: 11px; background: rgba(10,17,35,.66); color: white; box-shadow: 0 5px 18px rgba(0,0,0,.2); backdrop-filter: blur(10px); }
+	:global(.sound-panel) { width: min(156px, calc(100vw - 20px - env(safe-area-inset-left) - env(safe-area-inset-right))); padding: 8px 10px 9px; display: grid; border: 1px solid rgba(255,255,255,.25); border-radius: 11px; background: rgba(10,17,35,.52); color: white; box-shadow: 0 5px 18px rgba(0,0,0,.2); backdrop-filter: blur(10px); }
 	:global(.sound-panel label) { display: grid; gap: 4px; font-size: 11px; font-weight: 600; letter-spacing: .02em; }
 	:global(.sound-panel input) { width: 100%; margin: 0; accent-color: white; }
 </style>
