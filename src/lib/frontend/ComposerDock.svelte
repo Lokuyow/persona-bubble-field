@@ -1,5 +1,8 @@
 <script lang="ts">
 	import type { ComponentProps } from 'svelte';
+	import SpeechMonologue from '~icons/hako/speech-monologue';
+	import SpeechNormal from '~icons/hako/speech-normal';
+	import SpeechShout from '~icons/hako/speech-shout';
 	import HostOwnedComposerLite from '$lib/HostOwnedComposerLite.svelte';
 	import SpeechSuggestions from '$lib/frontend/SpeechSuggestions.svelte';
 	import type { SpeechType } from '$lib/conversation';
@@ -64,10 +67,18 @@
 			data-speech-type={selectedSpeechType}
 			aria-label={`発言タイプ: ${SPEECH_TYPE_LABELS[selectedSpeechType]}（クリックで${SPEECH_TYPE_LABELS[nextSpeechType(selectedSpeechType)]}へ）`}
 			title={`発言タイプ: ${SPEECH_TYPE_LABELS[selectedSpeechType]}。クリックで${SPEECH_TYPE_LABELS[nextSpeechType(selectedSpeechType)]}へ`}
-			disabled={submissionInProgress}
+			 disabled={submissionInProgress}
 			onclick={cycleSpeechType}
 		>
-			<span aria-hidden="true">{SPEECH_TYPE_LABELS[selectedSpeechType]}</span>
+			<span class="speech-type-icon" data-speech-icon={selectedSpeechType} aria-hidden="true">
+				{#if selectedSpeechType === 'normal'}
+					<SpeechNormal />
+				{:else if selectedSpeechType === 'shout'}
+					<SpeechShout />
+				{:else}
+					<SpeechMonologue />
+				{/if}
+			</span>
 		</button>
 		<SpeechSuggestions
 			{character}
@@ -137,8 +148,11 @@
 
 	.speech-type-toggle {
 		flex: 0 0 54px;
-		min-width: 0;
-		min-height: 0;
+		min-width: 44px;
+		min-height: 44px;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
 		padding: 0 4px;
 		border: 1px solid rgba(57, 67, 64, 0.2);
 		border-radius: 12px;
@@ -149,6 +163,19 @@
 		font-weight: 800;
 		line-height: 1.15;
 		white-space: normal;
+	}
+
+	.speech-type-icon {
+		display: inline-flex;
+		width: 24px;
+		height: 24px;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.speech-type-icon :global(svg) {
+		width: 24px;
+		height: 24px;
 	}
 
 	.trace-unread-indicator {
