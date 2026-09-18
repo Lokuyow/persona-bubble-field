@@ -17,7 +17,7 @@
 			<div class="rift-rules-content" role="dialog" aria-modal="true" aria-labelledby="rift-rules-title" tabindex="-1">
 				<h2 id="rift-rules-title">{isConfirmation ? '抜け穴へ参加しますか？' : '綻びのルール'}</h2>
 				<p class="rift-rules-description">
-					{isConfirmation ? '参加する前に、次のことを確認してください。' : 'ソトへ続く抜け穴を、参加者みんなで巡るゲームです。'}
+					{isConfirmation ? '参加する前に、次のことを確認してください。' : 'ひとつの抜け穴には3〜6人が参加します。綻びは全3ラウンドです。'}
 				</p>
 
 				{#if isConfirmation}
@@ -32,29 +32,36 @@
 					</div>
 				{:else}
 					<div class="rift-rules-body">
-						<p>1つの抜け穴に3〜6人で参加し、全3ラウンドを進めます。</p>
 						<section>
-							<h3>各ラウンド</h3>
-							<p>相談60秒 → 秘密選択30秒 → 結果発表20秒</p>
+							<h3>1ラウンドの流れ</h3>
+							<p>相談 30秒 → 選択 30秒 → 結果発表 20秒</p>
+							<p>相談のあと、全員がどちらかを選びます。</p>
 						</section>
 						<section>
-							<h3>秘密の選択</h3>
+							<h3>選択肢</h3>
 							<ul>
-								<li>抜け穴を維持する</li>
-								<li>脱出を試みる</li>
+								<li><strong>抜け穴を維持する</strong></li>
+								<li><strong>脱出を試みる</strong></li>
 							</ul>
-							<p>選択は結果発表まで、ほかの参加者には見えません。</p>
+							<p>誰が何を選んだかは、結果発表まで分かりません。</p>
+						</section>
+						<section>
+							<h3>維持に必要な人数</h3>
+							<ul>
+								<li>3人 → <strong>2人</strong></li>
+								<li>4人 → <strong>3人</strong></li>
+								<li>5人 → <strong>4人</strong></li>
+								<li>6人 → <strong>4人</strong></li>
+							</ul>
 						</section>
 						<section>
 							<h3>結果</h3>
-							<p>維持に必要な人数は、3人なら2人、4人なら3人、5人なら4人、6人なら4人です。</p>
 							<ul>
-								<li>全員が維持：維持した人に+20pt</li>
-								<li>脱出する人がいて必要人数を維持：維持した人に+10pt、脱出を試みた人に+100pt</li>
-								<li>維持人数が不足：維持した人は0pt、脱出を試みた人は死亡</li>
+								<li>全員が維持 → <strong>全員 +20pt</strong></li>
+								<li>必要人数を維持し、一部が脱出 → <strong>維持 +10pt / 脱出 +100pt</strong></li>
+								<li>維持する人数が足りない → <strong>維持 0pt / 脱出を選んだ人は死亡</strong></li>
 							</ul>
 						</section>
-						<p class="rift-rules-note">綻びで脱出に成功しても通常の1000pt clearにはならず、+100ptを得てハコへ戻ります。</p>
 					</div>
 					<div class="rift-dialog-actions">
 						<button class="rift-primary-action" type="button" onclick={() => onOpenChange(false)}>閉じる</button>
@@ -74,7 +81,6 @@
 	.rift-rules-body section { display: grid; gap: 3px; padding-top: 10px; border-top: 1px solid rgba(102, 28, 106, .15); }
 	.rift-rules-body h3 { margin: 0; font-size: 1rem; }
 	.rift-rules-body ul { padding-left: 1.2rem; }
-	.rift-rules-note { color: #6f326f; font-weight: 700; }
 	.rift-warning { display: grid; gap: 8px; padding: 14px; border: 1px solid #c46b75; border-radius: 10px; background: #fff0f1; color: #6f2430; line-height: 1.5; }
 	.rift-dialog-actions { display: grid; gap: 9px; }
 	.rift-dialog-actions button { min-height: 44px; padding: 9px 12px; border-radius: 9px; font: inherit; font-weight: 800; cursor: pointer; }

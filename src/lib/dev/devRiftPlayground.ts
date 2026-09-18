@@ -12,6 +12,7 @@ import {
 	type RiftSchedule,
 	type RiftSessionState
 } from '../rift';
+import { RIFT_CONSULTATION_MS, RIFT_ROUND_COUNT, RIFT_ROUND_MS, RIFT_SELECTION_MS, RIFT_REVEAL_GRACE_MS } from '../rift';
 import type { FieldSize } from '../geometry';
 type PlaygroundField = Pick<FieldSize, 'columns' | 'rows'>;
 
@@ -40,7 +41,7 @@ const REGISTRATION_AT = 0;
 const GAME_AT = 1_000;
 
 function scheduleAt(nowMs: number): RiftSchedule {
-	const endedAtMs = GAME_AT + 3 * (60_000 + 30_000 + 20_000);
+	const endedAtMs = GAME_AT + RIFT_ROUND_COUNT * RIFT_ROUND_MS;
 	const phase: RiftSchedule['phase'] = nowMs < REGISTRATION_AT ? 'dormant' : nowMs < GAME_AT ? 'registration' : nowMs < endedAtMs ? 'game' : 'ended';
 	return { dateKey: 'playground', instanceId: INSTANCE_ID, warningAtMs: -1, registrationAtMs: REGISTRATION_AT, gameAtMs: GAME_AT, endedAtMs, phase };
 }
@@ -70,15 +71,15 @@ export class DevRiftPlayground {
 	private readonly phases = [
 		GAME_AT - 500,
 		GAME_AT + 1,
-		GAME_AT + 60_000 + 1,
-		GAME_AT + 90_000 + 5_001,
-		GAME_AT + 110_000 + 1,
-		GAME_AT + 170_000 + 1,
-		GAME_AT + 200_000 + 5_001,
-		GAME_AT + 220_000 + 1,
-		GAME_AT + 280_000 + 1,
-		GAME_AT + 310_000 + 5_001,
-		GAME_AT + 330_000 + 1
+		GAME_AT + RIFT_CONSULTATION_MS + 1,
+		GAME_AT + RIFT_CONSULTATION_MS + RIFT_SELECTION_MS + RIFT_REVEAL_GRACE_MS + 1,
+		GAME_AT + RIFT_ROUND_MS + 1,
+		GAME_AT + RIFT_ROUND_MS + RIFT_CONSULTATION_MS + 1,
+		GAME_AT + RIFT_ROUND_MS + RIFT_CONSULTATION_MS + RIFT_SELECTION_MS + RIFT_REVEAL_GRACE_MS + 1,
+		GAME_AT + RIFT_ROUND_MS * 2 + 1,
+		GAME_AT + RIFT_ROUND_MS * 2 + RIFT_CONSULTATION_MS + 1,
+		GAME_AT + RIFT_ROUND_MS * 2 + RIFT_CONSULTATION_MS + RIFT_SELECTION_MS + RIFT_REVEAL_GRACE_MS + 1,
+		GAME_AT + RIFT_ROUND_MS * 3 + 1
 	] as const;
 
 	constructor(field: PlaygroundField, preset: DevRiftBotPreset) {

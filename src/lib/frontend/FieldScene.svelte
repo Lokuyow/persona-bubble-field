@@ -53,6 +53,7 @@
 		facilityCellTriggers: readonly GridPosition[];
 		realtimeHoles: readonly RiftHole[];
 		realtimeHoleTriggers: readonly RiftHole[];
+		participatingRiftHoleId: string | null;
 		participantViews: readonly FieldParticipantView[];
 		selfProjectionId: string;
 		movingParticipantIds: ReadonlySet<string>;
@@ -83,6 +84,7 @@
 		facilityCellTriggers,
 		realtimeHoles,
 		realtimeHoleTriggers,
+		participatingRiftHoleId,
 		participantViews,
 		selfProjectionId,
 		movingParticipantIds,
@@ -151,7 +153,8 @@
 		</div>
 		<div class="realtime-hole-layer" aria-label="綻びの抜け穴">
 			{#each realtimeHoles as hole (hole.id)}
-				<span class="realtime-hole" data-realtime-hole-id={hole.id} data-realtime-hole-position={`${hole.position.x},${hole.position.y}`}
+				<span class={['realtime-hole', { 'realtime-hole-participating': hole.id === participatingRiftHoleId }]} data-realtime-hole-id={hole.id} data-realtime-hole-position={`${hole.position.x},${hole.position.y}`}
+					data-realtime-hole-participating={hole.id === participatingRiftHoleId ? 'true' : undefined}
 					style={`left: ${(hole.position.x + 0.5) * cellSize}px; top: ${(hole.position.y + 0.5) * cellSize}px;`}><img src={asset(RIFT_ASSET)} alt="" /></span>
 			{/each}
 		</div>
@@ -166,12 +169,13 @@
 		<div class="field-cell-selection-layer" aria-label="Trace investigation cells">
 			{#each realtimeHoleTriggers as hole (hole.id)}
 				<button
-					class="field-cell-selection-trigger realtime-hole-trigger"
+					class={['field-cell-selection-trigger', 'realtime-hole-trigger', { 'realtime-hole-trigger-participating': hole.id === participatingRiftHoleId }]}
 					data-field-gesture-origin="selectable"
 					type="button"
 					data-realtime-hole-trigger={hole.id}
 					data-cell-position={`${hole.position.x},${hole.position.y}`}
-					aria-label="抜け穴へ参加"
+					aria-label={hole.id === participatingRiftHoleId ? '抜け穴へ参加済み（参加先）' : '抜け穴へ参加'}
+					aria-pressed={hole.id === participatingRiftHoleId}
 					style={`left: ${hole.position.x * cellSize}px; top: ${hole.position.y * cellSize}px;`}
 					ondragstart={(event) => event.preventDefault()}
 					onclick={(event) => { event.stopPropagation(); resolveFieldCellSelection(hole.position, event.currentTarget as HTMLButtonElement); }}
@@ -339,6 +343,8 @@
 		place-items: center; transform: translate(-50%, -50%); pointer-events: none;
 	}
 	.realtime-hole img { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+	.realtime-hole-participating { border: 2px solid #8d4692; border-radius: 50%; box-shadow: 0 0 0 3px rgba(141, 70, 146, .28); }
+	.realtime-hole-participating::after { content: '参加済み'; position: absolute; top: calc(100% + 3px); left: 50%; padding: 1px 4px; border-radius: 4px; background: #8d4692; color: white; font-size: 9px; line-height: 1.2; white-space: nowrap; transform: translateX(-50%); }
 
 	.trace-marker {
 		position: absolute;
@@ -420,6 +426,7 @@
 		outline: 3px solid var(--color-focus-ring);
 		outline-offset: -5px;
 	}
+	.realtime-hole-trigger-participating { border-radius: 50%; }
 
 	.trace-ghost {
 		position: absolute;

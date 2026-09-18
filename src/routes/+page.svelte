@@ -2485,8 +2485,9 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 					{traceOnlyCellTriggers}
 					{facilityCellTriggers}
 					realtimeHoles={realtimeHoles}
-				realtimeHoleTriggers={realtimeHoleTriggers}
-				{participantViews}
+					realtimeHoleTriggers={realtimeHoleTriggers}
+					participatingRiftHoleId={riftSchedule.phase === 'registration' ? riftSelfHoleId : null}
+					{participantViews}
 				{selfProjectionId}
 				{movingParticipantIds}
 				{selfIsActive}

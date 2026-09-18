@@ -1509,12 +1509,23 @@ test.describe('Relay startup', () => {
 		await page.getByRole('button', { name: 'キャンセル' }).click();
 		await expect(page.getByRole('dialog')).toHaveCount(0);
 		expect((await relayState(page)).state.published.filter((event) => event.kind === 7070 && event.pubkey === selfPubkey)).toHaveLength(0);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { setRealtimePublishOutcome(outcome: 'accepted' | 'rejected' | 'echo' | 'no-response'): void } }).__relayStartupTest.setRealtimePublishOutcome('rejected'));
+		await page.locator('[data-realtime-hole-trigger]').click();
+		await page.getByRole('button', { name: '参加する' }).click();
+		await expect(page.getByRole('dialog')).toHaveCount(0);
+		await expect(page.locator('[data-realtime-panel]')).not.toContainText('参加済み');
+		await expect(page.locator('[data-realtime-hole-trigger][aria-pressed="true"]')).toHaveCount(0);
+		expect((await relayState(page)).state.published.filter((event) => event.kind === 7070 && event.pubkey === selfPubkey)).toHaveLength(0);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { setRealtimePublishOutcome(outcome: 'accepted' | 'rejected' | 'echo' | 'no-response'): void } }).__relayStartupTest.setRealtimePublishOutcome('accepted'));
 		await page.locator('[data-realtime-hole-trigger]').click();
 		await page.getByRole('button', { name: '参加する' }).click();
 		await expect.poll(async () => (await relayState(page)).state.published.some((event) => {
 			if (event.kind !== 7070 || event.pubkey !== selfPubkey) return false;
 			try { return (JSON.parse(event.content) as { action?: string }).action === 'join'; } catch { return false; }
 		})).toBe(true);
+		await expect(page.locator('[data-realtime-panel]')).toContainText('参加済み');
+		await expect(page.locator('[data-realtime-hole-trigger][aria-pressed="true"]')).toHaveCount(1);
+		await expect(page.locator('[data-realtime-hole-trigger][aria-pressed="true"]')).toHaveAttribute('aria-label', '抜け穴へ参加済み（参加先）');
 
 		const round = getRiftRoundSchedule(schedule, 1);
 		await page.clock.setSystemTime(round.selectionAtMs + 1_000);

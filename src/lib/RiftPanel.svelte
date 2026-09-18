@@ -50,20 +50,37 @@
 		{:else if schedule.phase === 'warning'}
 			<p class="rift-note">20:55 JSTから、フィールド上の抜け穴へ近づいて参加できます。</p>
 		{:else if schedule.phase === 'registration'}
-			<p class="rift-note">参加する抜け穴まで移動して操作してください。自動割り当てはありません。</p>
+			{#if selfHoleId}
+				<p class="rift-note"><strong>参加済み</strong></p>
+				<p class="rift-note">開始まで待ってください。</p>
+			{:else}
+				<p class="rift-note">参加する抜け穴まで移動して操作してください。自動割り当てはありません。</p>
+			{/if}
 			<details class="rift-rules-disclosure">
 				<summary>ルールを見る</summary>
 				<div class="rift-rules-inline" role="dialog" aria-label="綻びのルール">
-					<p>ソトへ続く抜け穴を、参加者みんなで巡るゲームです。1つの抜け穴に3〜6人で参加し、全3ラウンドを進めます。</p>
-					<p><strong>各ラウンド：</strong>相談60秒 → 秘密選択30秒 → 結果発表20秒</p>
-					<p><strong>秘密の選択：</strong>「抜け穴を維持する」か「脱出を試みる」。選択は結果発表まで、ほかの参加者には見えません。</p>
-					<p><strong>維持に必要な人数：</strong>3人なら2人、4人なら3人、5人なら4人、6人なら4人。</p>
+					<p>ひとつの抜け穴には3〜6人が参加します。綻びは全3ラウンドです。</p>
+					<p><strong>1ラウンドの流れ</strong></p>
+					<p>相談 30秒 → 選択 30秒 → 結果発表 20秒</p>
+					<p>相談のあと、全員がどちらかを選びます。</p>
 					<ul>
-						<li>全員が維持：維持した人に+20pt</li>
-						<li>脱出する人がいて必要人数を維持：維持した人に+10pt、脱出を試みた人に+100pt</li>
-						<li>維持人数が不足：維持した人は0pt、脱出を試みた人は死亡</li>
+						<li><strong>抜け穴を維持する</strong></li>
+						<li><strong>脱出を試みる</strong></li>
 					</ul>
-					<p><strong>綻びで脱出に成功しても通常の1000pt clearにはならず、+100ptを得てハコへ戻ります。</strong></p>
+					<p>誰が何を選んだかは、結果発表まで分かりません。</p>
+					<p><strong>維持に必要な人数</strong></p>
+					<ul>
+						<li>3人 → <strong>2人</strong></li>
+						<li>4人 → <strong>3人</strong></li>
+						<li>5人 → <strong>4人</strong></li>
+						<li>6人 → <strong>4人</strong></li>
+					</ul>
+					<p><strong>結果</strong></p>
+					<ul>
+						<li>全員が維持 → <strong>全員 +20pt</strong></li>
+						<li>必要人数を維持し、一部が脱出 → <strong>維持 +10pt / 脱出 +100pt</strong></li>
+						<li>維持する人数が足りない → <strong>維持 0pt / 脱出を選んだ人は死亡</strong></li>
+					</ul>
 				</div>
 			</details>
 		{:else if schedule.phase === 'game' && roundInfo}
@@ -104,4 +121,13 @@
 	.rift-rules-inline p, .rift-rules-inline ul { margin: 0; }
 	.rift-rules-inline ul { padding-left: 1.2rem; }
 	.rift-status { color: #69536d; } .rift-result { padding: 6px 8px; border-radius: 7px; background: rgba(211, 159, 215, .18); font-weight: 700; }
+	@media (min-width: 701px) {
+		.rift-panel { padding-top: 4px; padding-bottom: 4px; font-size: 16px; }
+		p, .rift-heading strong, .rift-details, button, .rift-rules-disclosure summary, .rift-rules-inline { font-size: 1em; }
+		h2 { font-size: 20px; }
+		h2 span { font-size: 11px; }
+		.rift-panel p { line-height: 1.25; }
+		.rift-rules-disclosure { margin-top: 4px; }
+		.rift-rules-disclosure summary { padding-top: 2px; padding-bottom: 2px; }
+	}
 </style>
