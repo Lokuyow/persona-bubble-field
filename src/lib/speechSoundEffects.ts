@@ -43,7 +43,7 @@ type Biquad = Readonly<{ b0: number; b1: number; b2: number; a1: number; a2: num
 
 const BUTTERWORTH_Q: Readonly<Record<number, readonly number[]>> = {
 	2: [0.7071067812],
-	3: [0.5773502692],
+	3: [1],
 	4: [0.5411961001, 1.3065629649]
 };
 
@@ -97,7 +97,7 @@ function seededNoise(length: number, seed: number, sampleRate: number, low: numb
 	const lowPass = createButterworthCascade(sampleRate, high, false, order);
 	for (let index = 0; index < length; index += 1) {
 		state ^= state << 13; state ^= state >>> 17; state ^= state << 5;
-		const white = ((state >>> 0) / 0xffffffff) * 2 - 1;
+		const white = (((state >>> 0) / 0xffffffff) * 2 - 1) * Math.sqrt(3);
 		let filtered = white;
 		for (const filter of highPass) filtered = filterSample(filtered, filter);
 		for (const filter of lowPass) filtered = filterSample(filtered, filter);
