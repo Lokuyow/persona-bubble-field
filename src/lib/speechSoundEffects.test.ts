@@ -10,8 +10,9 @@ function spectralEnergy(samples: Float32Array, sampleRate: number, frequency: nu
 	let imaginary = 0;
 	for (let index = 0; index < samples.length; index += 1) {
 		const phase = (Math.PI * 2 * frequency * index) / sampleRate;
-		real += samples[index] * Math.cos(phase);
-		imaginary -= samples[index] * Math.sin(phase);
+		const window = 0.5 - 0.5 * Math.cos((Math.PI * 2 * index) / (samples.length - 1));
+		real += samples[index] * window * Math.cos(phase);
+		imaginary -= samples[index] * window * Math.sin(phase);
 	}
 	return real * real + imaginary * imaginary;
 }
@@ -40,8 +41,8 @@ describe('speech sound effects', () => {
 		const midEnergy = bandEnergy(normal, sampleRate, 750, 5_000);
 		const highEnergy = bandEnergy(normal, sampleRate, 10_250, 23_750);
 		const totalEnergy = bandEnergy(normal, sampleRate, 250, 23_750);
-		expect(midEnergy / totalEnergy).toBeGreaterThan(0.30);
-		expect(highEnergy / totalEnergy).toBeLessThan(0.25);
+		expect(midEnergy / totalEnergy).toBeGreaterThan(0.70);
+		expect(highEnergy / totalEnergy).toBeLessThan(0.05);
 	});
 	it.each(['normal', 'shout', 'monologue'] as const)('maps a new %s bubble to one effect', (speechType) => {
 		const previous = createConversationState();

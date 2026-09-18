@@ -38,20 +38,70 @@ const TAU = Math.PI * 2;
 
 function clamp01(value: number): number { return Math.min(1, Math.max(0, value)); }
 
-function seededNoise(length: number, seed: number, sampleRate: number, low: number, high: number): Float32Array {
+type BiquadState = { x1: number; x2: number; y1: number; y2: number };
+type Biquad = Readonly<{ b0: number; b1: number; b2: number; a1: number; a2: number; state: BiquadState }>;
+
+const BUTTERWORTH_Q: Readonly<Record<number, readonly number[]>> = {
+	2: [0.7071067812],
+	3: [0.5773502692],
+	4: [0.5411961001, 1.3065629649]
+};
+
+function createBiquad(sampleRate: number, cutoff: number, highPass: boolean, q: number): Biquad {
+	const safeCutoff = Math.min(sampleRate * 0.49, Math.max(1, cutoff));
+	const omega = TAU * safeCutoff / sampleRate;
+	const cosine = Math.cos(omega);
+	const sine = Math.sin(omega);
+	const alpha = sine / (2 * q);
+	const scale = 1 / (1 + alpha);
+	const b0 = highPass ? (1 + cosine) / 2 : (1 - cosine) / 2;
+	const b1 = highPass ? -(1 + cosine) : 1 - cosine;
+	const b2 = b0;
+	return {
+		b0: b0 * scale,
+		b1: b1 * scale,
+		b2: b2 * scale,
+		a1: -2 * cosine * scale,
+		a2: (1 - alpha) * scale,
+		state: { x1: 0, x2: 0, y1: 0, y2: 0 }
+	};
+}
+
+function createFirstOrderFilter(sampleRate: number, cutoff: number, highPass: boolean): Biquad {
+	const safeCutoff = Math.min(sampleRate * 0.49, Math.max(1, cutoff));
+	const alpha = 1 - Math.exp(-TAU * safeCutoff / sampleRate);
+	return highPass
+		? { b0: 1 - alpha, b1: -(1 - alpha), b2: 0, a1: -(1 - alpha), a2: 0, state: { x1: 0, x2: 0, y1: 0, y2: 0 } }
+		: { b0: alpha, b1: 0, b2: 0, a1: -(1 - alpha), a2: 0, state: { x1: 0, x2: 0, y1: 0, y2: 0 } };
+}
+
+function filterSample(sample: number, filter: Biquad): number {
+	const { state } = filter;
+	const output = filter.b0 * sample + filter.b1 * state.x1 + filter.b2 * state.x2 - filter.a1 * state.y1 - filter.a2 * state.y2;
+	state.x2 = state.x1; state.x1 = sample; state.y2 = state.y1; state.y1 = output;
+	return output;
+}
+
+function createButterworthCascade(sampleRate: number, cutoff: number, highPass: boolean, order: number): Biquad[] {
+	const filters = BUTTERWORTH_Q[order];
+	if (!filters) throw new Error(`Unsupported Butterworth order: ${order}`);
+	const cascade = filters.map((q) => createBiquad(sampleRate, cutoff, highPass, q));
+	if (order % 2 === 1) cascade.unshift(createFirstOrderFilter(sampleRate, cutoff, highPass));
+	return cascade;
+}
+
+function seededNoise(length: number, seed: number, sampleRate: number, low: number, high: number, order: number): Float32Array {
 	const output = new Float32Array(length);
 	let state = seed >>> 0;
-	let lowCutoffLowPass = 0;
-	let bandPassLowPass = 0;
-	const lowCutoffAlpha = 1 - Math.exp(-TAU * low / sampleRate);
-	const highCutoffAlpha = 1 - Math.exp(-TAU * high / sampleRate);
+	const highPass = createButterworthCascade(sampleRate, low, true, order);
+	const lowPass = createButterworthCascade(sampleRate, high, false, order);
 	for (let index = 0; index < length; index += 1) {
 		state ^= state << 13; state ^= state >>> 17; state ^= state << 5;
 		const white = ((state >>> 0) / 0xffffffff) * 2 - 1;
-		lowCutoffLowPass += lowCutoffAlpha * (white - lowCutoffLowPass);
-		const highPassed = white - lowCutoffLowPass;
-		bandPassLowPass += highCutoffAlpha * (highPassed - bandPassLowPass);
-		output[index] = bandPassLowPass;
+		let filtered = white;
+		for (const filter of highPass) filtered = filterSample(filtered, filter);
+		for (const filter of lowPass) filtered = filterSample(filtered, filter);
+		output[index] = filtered;
 	}
 	return output;
 }
@@ -67,8 +117,8 @@ function normalize(samples: Float32Array): Float32Array {
 
 function createNormalSamples(sampleRate: number): Float32Array {
 	const length = Math.ceil(sampleRate * SPEECH_SOUND_DURATIONS.normal);
-	const layerA = seededNoise(length, 0x13579bdf, sampleRate, 750, 5000);
-	const layerB = seededNoise(length, 0x2468ace0, sampleRate, 2300, 7800);
+	const layerA = seededNoise(length, 0x13579bdf, sampleRate, 750, 5000, 4);
+	const layerB = seededNoise(length, 0x2468ace0, sampleRate, 2300, 7800, 3);
 	const output = new Float32Array(length);
 	for (let index = 0; index < length; index += 1) {
 		const t = index / sampleRate;
@@ -91,8 +141,8 @@ function createShoutSamples(sampleRate: number): Float32Array {
 		{ offset: 0.125, gain: 0.20, brightness: 0.92, shift: 18, seed: 0x9e3779b9 }
 	] as const;
 	for (const layer of layers) {
-		const noise = seededNoise(length, layer.seed, sampleRate, 380, Math.min(7600, 5200 * layer.brightness));
-		const crack = seededNoise(length, layer.seed ^ 0xabcdef01, sampleRate, 1400, 7800);
+		const noise = seededNoise(length, layer.seed, sampleRate, 380, Math.min(7600, 5200 * layer.brightness), 4);
+		const crack = seededNoise(length, layer.seed ^ 0xabcdef01, sampleRate, 1400, 7800, 3);
 		let phase = 0;
 		for (let index = 0; index < length; index += 1) {
 			const t = index / sampleRate - layer.offset;
@@ -107,7 +157,7 @@ function createShoutSamples(sampleRate: number): Float32Array {
 			output[index] += layer.gain * (0.35 * noise[index] * noiseEnvelope + 0.23 * Math.sin(phase) * bodyEnvelope + 0.22 * crack[index] * crackEnvelope + resonance);
 		}
 	}
-	const diffuse = seededNoise(length, 0xdeadbeef, sampleRate, 650, 4200);
+	const diffuse = seededNoise(length, 0xdeadbeef, sampleRate, 650, 4200, 3);
 	for (let index = 0; index < length; index += 1) {
 		const t = index / sampleRate;
 		output[index] += 0.075 * diffuse[index] * Math.exp(-t / 0.145) * clamp01(t / 0.003) * clamp01((0.420 - t) / 0.070);
@@ -119,7 +169,7 @@ function createMonologueSamples(sampleRate: number): Float32Array {
 	const pulseDuration = 0.205;
 	const length = Math.ceil(sampleRate * SPEECH_SOUND_DURATIONS.monologue);
 	const output = new Float32Array(length);
-	const breath = seededNoise(Math.ceil(sampleRate * pulseDuration), 0xabcdef12, sampleRate, 500, 3000);
+	const breath = seededNoise(Math.ceil(sampleRate * pulseDuration), 0xabcdef12, sampleRate, 500, 3000, 2);
 	for (let index = 0; index < length; index += 1) {
 		const t = index / sampleRate;
 		const pulse = Math.floor(t / 0.255);
