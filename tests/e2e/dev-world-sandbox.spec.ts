@@ -3526,9 +3526,23 @@ test.describe('DEV World Sandbox', () => {
 		await speaker.click();
 		const panel = page.locator('.sound-panel');
 		await expect(panel).toBeVisible();
+		const self = page.locator('.participant[data-self="true"]');
+		const positionBeforeSliderDrag = await self.getAttribute('data-position');
 		const slider = page.getByRole('slider', { name: 'Sound volume' });
-		await slider.fill('25');
+		const sliderBox = await slider.boundingBox();
+		expect(sliderBox).toBeTruthy();
+		if (sliderBox) {
+			const y = sliderBox.y + sliderBox.height / 2;
+			await page.mouse.move(sliderBox.x + sliderBox.width * 0.85, y);
+			await page.mouse.down();
+			await page.mouse.move(sliderBox.x + sliderBox.width * 0.25, y, { steps: 6 });
+			await page.mouse.up();
+		}
+		await expect.poll(async () => Number(await slider.inputValue())).toBeGreaterThan(0);
+		await expect(self).toHaveAttribute('data-position', positionBeforeSliderDrag ?? '');
+		await expect(page.locator('[data-pointer-joystick]')).toHaveCount(0);
 		await expect(page.getByRole('button', { name: 'Mute sound' })).toHaveCount(0);
+		await slider.fill('25');
 		await slider.fill('0');
 		await expect(page.getByRole('button', { name: 'Open sound settings (muted)' })).toBeVisible();
 		await slider.fill('25');
