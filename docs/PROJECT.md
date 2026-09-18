@@ -313,6 +313,10 @@ PRに追加commitがpushされた場合は、その最新状態に対してCIを
 
 同一PRの古いCI実行は、可能な場合はconcurrencyによってcancelし、最新状態の検証を優先する。
 
+PR CIは、通常のcoding agent作業の完了条件ではなく、`main` へmergeする前のrepository gateである。通常のcoding agent作業は、必要なローカル検証、commit、branchのpush、Draftではない通常Pull Requestの作成まで完了すれば終了してよく、PR作成後にGitHub Actionsの完了を待機・pollingする必要はない。その時点でCI状態を確認できる場合は、queued、pending、running、completed等の状態を最終報告に含めてよい。
+
+Pull Requestを`main`へmergeする前には、最新headに対するrequired status check `Check and build` の成功を確認する。CI結果の確認自体が明示されたタスク、またはCI固有の検証結果がそのタスクの完了条件である場合は、この限りではない。clean runner上の`npm ci`、Linux runner、全Playwright E2Eを含むPR CIの責務は維持する。
+
 ## Git運用
 
 通常のコード変更では `main` へ直接実装せず、次の流れを基本とする。
@@ -323,7 +327,7 @@ PRに追加commitがpushされた場合は、その最新状態に対してCIを
 4. commitする
 5. branchをpushする
 6. `main` 向けのDraftではない通常Pull Requestを作成する
-7. PR CIを成功させる
+7. merge前に、最新headに対するPR CIの`Check and build`成功を確認する
 8. Pull Request経由で `main` へmergeする
 
 bootstrap時に行った初期commit等の直接 `main` 更新は初期構築時の例外であり、通常運用の前例とはしない。
@@ -364,8 +368,6 @@ PR merge後の不要なhead branchは削除する。GitHubの自動branch削除�
 通常のローカル検証に `npm ci` を含めない。同じworktreeで `npm run dev` または `npm run dev:host` が起動中でも、`node_modules` を削除せず `npm run validate` を実行できる構成を維持する。
 
 clean installの保証はPR CIで `npm ci` を実行して担保する。依存関係やlockfileを変更する作業では、必要に応じてdev serverを停止したうえでローカルでもclean installを確認してよいが、通常作業の一律な完了条件にはしない。
-
-Pull Request作成後は、GitHub Actions上の `Check and build` が最新headで成功していることを確認する。
 
 本番deployへ影響する変更では、`main` merge後のGitHub Pages workflowと実際の公開結果も必要に応じて確認する。
 
