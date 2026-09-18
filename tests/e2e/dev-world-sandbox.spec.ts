@@ -3536,8 +3536,12 @@ test.describe('DEV World Sandbox', () => {
 		const iconBox = await page.locator('[data-sound-icon]').boundingBox();
 		expect(speakerBox && iconBox).toBeTruthy();
 		if (speakerBox && iconBox) {
+			expect(speakerBox.width).toBeGreaterThanOrEqual(44);
+			expect(speakerBox.height).toBeGreaterThanOrEqual(44);
 			expect(Math.abs((iconBox.x + iconBox.width / 2) - (speakerBox.x + speakerBox.width / 2))).toBeLessThan(1);
 			expect(Math.abs((iconBox.y + iconBox.height / 2) - (speakerBox.y + speakerBox.height / 2))).toBeLessThan(1);
+			expect(iconBox.width).toBeGreaterThanOrEqual(24);
+			expect(iconBox.height).toBeGreaterThanOrEqual(24);
 		}
 		await speaker.click();
 		const panel = page.locator('.sound-panel');
