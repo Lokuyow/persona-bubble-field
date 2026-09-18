@@ -1,27 +1,27 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
-  <path d="M 38,82
-           L 15,105
-           L 48,85
-           L 65,102
-           L 72,82
-           L 98,95
-           L 85,72
-           L 112,60
-           L 88,50
-           L 108,22
-           L 78,38
-           L 70,8
-           L 55,32
-           L 32,12
-           L 40,38
-           L 10,35
-           L 28,55
-           L 12,72
-           L 32,75
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M 7.6,16.4
+           L 3,21
+           L 9.6,17
+           L 13,20.4
+           L 14.4,16.4
+           L 19.6,19
+           L 17,14.4
+           L 22.4,12
+           L 17.6,10
+           L 21.6,4.4
+           L 15.6,7.6
+           L 14,1.6
+           L 11,6.4
+           L 6.4,2.4
+           L 8,7.6
+           L 2,7
+           L 5.6,11
+           L 2.4,14.4
+           L 6.4,15
            Z"
         fill="none"
         stroke="currentColor"
-        stroke-width="8"
+        stroke-width="2"
         stroke-linejoin="round"
         stroke-linecap="round" />
 </svg>
