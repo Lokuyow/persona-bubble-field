@@ -1517,9 +1517,13 @@ test.describe('Relay startup', () => {
 		await page.locator('[data-realtime-hole-trigger]').click();
 		await page.getByRole('button', { name: '参加する' }).click();
 		await expect(page.getByRole('dialog')).toHaveCount(0);
+		await expect.poll(async () => (await relayState(page)).state.published.filter((event) => {
+			if (event.kind !== 7070 || event.pubkey !== selfPubkey) return false;
+			try { return (JSON.parse(event.content) as { action?: string }).action === 'join'; } catch { return false; }
+		}).length).toBeGreaterThan(0);
 		await expect(page.locator('[data-realtime-panel]')).not.toContainText('参加済み');
 		await expect(page.locator('[data-realtime-hole-trigger][aria-pressed="true"]')).toHaveCount(0);
-		expect((await relayState(page)).state.published.filter((event) => event.kind === 7070 && event.pubkey === selfPubkey)).toHaveLength(0);
+		await expect.poll(async () => readRealtimePendingInstances(page)).toEqual([]);
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { setRealtimePublishOutcome(outcome: 'accepted' | 'rejected' | 'echo' | 'no-response'): void } }).__relayStartupTest.setRealtimePublishOutcome('accepted'));
 		await page.locator('[data-realtime-hole-trigger]').click();
 		await page.getByRole('button', { name: '参加する' }).click();
