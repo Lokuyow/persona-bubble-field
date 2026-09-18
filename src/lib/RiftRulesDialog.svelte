@@ -81,4 +81,10 @@
 	.rift-primary-action { border: 1px solid #8d4692; background: #8d4692; color: white; }
 	.rift-secondary-action { border: 1px solid rgba(102, 28, 106, .3); background: white; color: #4d3150; }
 	:global(.rift-rules-content button:focus-visible) { outline: 3px solid var(--color-focus-ring); outline-offset: 3px; }
+	@media (min-width: 701px) {
+		:global(.rift-rules-content) { font-size: 16px; }
+		:global(.rift-rules-content h2) { font-size: 2rem; }
+		.rift-rules-body h3 { font-size: 1.1rem; }
+		.rift-dialog-actions button { font-size: 1rem; }
+	}
 </style>
