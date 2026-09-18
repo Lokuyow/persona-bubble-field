@@ -117,16 +117,16 @@ function normalize(samples: Float32Array): Float32Array {
 
 function createNormalSamples(sampleRate: number): Float32Array {
 	const length = Math.ceil(sampleRate * SPEECH_SOUND_DURATIONS.normal);
-	const layerA = seededNoise(length, 0x13579bdf, sampleRate, 750, 5000, 4);
-	const layerB = seededNoise(length, 0x2468ace0, sampleRate, 2300, 7800, 3);
+	const layerA = seededNoise(length, 0x13579bdf, sampleRate, 650, 4300, 4);
+	const layerB = seededNoise(length, 0x2468ace0, sampleRate, 1900, 6000, 3);
 	const output = new Float32Array(length);
 	for (let index = 0; index < length; index += 1) {
 		const t = index / sampleRate;
 		const attack = Math.pow(clamp01(t / 0.022), 1.2);
-		const release = Math.pow(clamp01((0.225 - t) / 0.045), 1.25);
-		const envelope = attack * Math.exp(-t / 0.09) * release;
+		const release = Math.pow(clamp01((0.225 - t) / 0.050), 1.25);
+		const envelope = attack * Math.exp(-t / 0.085) * release;
 		const modulation = 0.97 + 0.03 * Math.sin(TAU * 9 * t + 0.3);
-		output[index] = 0.45 * (0.88 * layerA[index] + 0.20 * layerB[index]) * envelope * modulation;
+		output[index] = 0.30 * (0.88 * layerA[index] + 0.13 * layerB[index]) * envelope * modulation;
 	}
 	return normalize(output);
 }

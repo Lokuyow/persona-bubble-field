@@ -39,18 +39,29 @@ describe('speech sound effects', () => {
 		expect(buffers[0]).toEqual(createSpeechSoundSamples('normal', 10_000));
 		expect(buffers[0]).not.toEqual(buffers[1]);
 	});
-	it('keeps normal noise energy in its specified mid band instead of leaking into ultrasonic highs', () => {
+	it('keeps normal noise energy in its selected mid band instead of leaking into ultrasonic highs', () => {
 		const sampleRate = 48_000;
 		const normal = createSpeechSoundSamples('normal', sampleRate);
-		const midEnergy = bandEnergy(normal, sampleRate, 750, 5_000);
+		const midEnergy = bandEnergy(normal, sampleRate, 650, 4_300);
 		const highEnergy = bandEnergy(normal, sampleRate, 10_250, 23_750);
 		const totalEnergy = bandEnergy(normal, sampleRate, 250, 23_750);
-		expect(midEnergy / totalEnergy).toBeGreaterThan(0.70);
+		expect(midEnergy / totalEnergy).toBeGreaterThan(0.65);
 		expect(highEnergy / totalEnergy).toBeLessThan(0.05);
 	});
-	it('keeps normal noise at a unit-variance-derived level', () => {
+	it('keeps normal quieter without collapsing its procedural noise level', () => {
 		const normal = createSpeechSoundSamples('normal', 48_000);
-		expect(rms(normal)).toBeGreaterThan(0.05);
+		expect(rms(normal)).toBeGreaterThan(0.025);
+		expect(rms(normal)).toBeLessThan(0.05);
+	});
+	it('keeps normal centroid in a present but softer midrange', () => {
+		const sampleRate = 48_000;
+		const normal = createSpeechSoundSamples('normal', sampleRate);
+		const totalEnergy = bandEnergy(normal, sampleRate, 250, 23_750);
+		let weightedEnergy = 0;
+		for (let frequency = 250; frequency <= 23_750; frequency += 250) weightedEnergy += frequency * spectralEnergy(normal, sampleRate, frequency);
+		const centroid = weightedEnergy / totalEnergy;
+		expect(centroid).toBeGreaterThan(1_800);
+		expect(centroid).toBeLessThan(3_000);
 	});
 	it('keeps shout noise energy and centroid out of the overly-low one-pole range', () => {
 		const sampleRate = 48_000;
