@@ -1,4 +1,5 @@
 <script lang="ts">
+	import X from '~icons/tabler/x';
 	import { untrack } from 'svelte';
 	import type { Attachment } from 'svelte/attachments';
 	import type { Character } from '$lib/character';
@@ -140,7 +141,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 				aria-label="Hide Chatter"
 				aria-keyshortcuts="C"
 				onclick={hideRecentMessageTimeline}
-			>×</button>
+			><X aria-hidden="true" /></button>
 			<h2>Chatter</h2>
 		</header>
 		<div class="timeline-visible-entries" {@attach observeTimelineVisibleArea}>
@@ -256,9 +257,19 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		width: 44px;
 		height: 44px;
 		padding: 0;
+		border: 0;
+		border-radius: 0;
+		background: transparent;
+		box-shadow: none;
 		place-items: center;
-		font-size: 24px;
-		line-height: 1;
+		color: #e7e9ff;
+		font-size: initial;
+		line-height: initial;
+	}
+
+	.timeline-hide-control :global(svg) {
+		width: 24px;
+		height: 24px;
 	}
 
 	.timeline-visible-entries {

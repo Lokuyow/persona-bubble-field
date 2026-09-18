@@ -3459,8 +3459,19 @@ test.describe('Relay startup', () => {
 		await candidateButton.click();
 		await expect(page.locator('.suggestion-panel')).toBeVisible();
 		const publishedBefore = (await publishedMessages(page)).length;
+		const close = page.getByRole('button', { name: '発言候補を閉じる' });
+		const closeBox = await close.boundingBox();
+		const closeIconBox = await close.locator('svg').boundingBox();
+		expect(closeBox && closeIconBox).toBeTruthy();
+		if (closeBox && closeIconBox) {
+			expect(closeBox.width).toBeGreaterThanOrEqual(44);
+			expect(closeBox.height).toBeGreaterThanOrEqual(44);
+			expect(Math.abs((closeIconBox.x + closeIconBox.width / 2) - (closeBox.x + closeBox.width / 2))).toBeLessThan(1);
+			expect(Math.abs((closeIconBox.y + closeIconBox.height / 2) - (closeBox.y + closeBox.height / 2))).toBeLessThan(1);
+		}
+		await expect(close.locator('svg')).toBeVisible();
 
-		await page.getByRole('button', { name: '発言候補を閉じる' }).click();
+		await close.click();
 
 		await expect(page.locator('.suggestion-panel')).toHaveCount(0);
 		expect((await publishedMessages(page)).length).toBe(publishedBefore);
@@ -3610,16 +3621,30 @@ test.describe('Relay startup', () => {
 		expect(event.tags.some((tag) => tag[0] === 'l' && tag[1]?.startsWith('speech:'))).toBe(false);
 	});
 
-	test('cycles the one-shot speech selector and only resets it after a successful submit', async ({ page }) => {
+		test('cycles the one-shot speech selector and only resets it after a successful submit', async ({ page }) => {
 		const editor = await openReadyRelayWorld(page);
 		const send = page.locator('ehagaki-composer').getByRole('button', { name: 'Send' });
 		const selector = page.locator('.speech-type-toggle');
+		const assertSpeechIcon = async (speechType: 'normal' | 'shout' | 'monologue', accessibleName: RegExp): Promise<void> => {
+			await expect(selector).toHaveAttribute('data-speech-type', speechType);
+			await expect(selector).toHaveAccessibleName(accessibleName);
+			await expect(page.locator(`[data-speech-icon="${speechType}"]`)).toBeVisible();
+			const buttonBox = await selector.boundingBox();
+			const iconBox = await page.locator(`[data-speech-icon="${speechType}"]`).boundingBox();
+			expect(buttonBox && iconBox).toBeTruthy();
+			if (buttonBox && iconBox) {
+				expect(buttonBox.width).toBeGreaterThanOrEqual(44);
+				expect(buttonBox.height).toBeGreaterThanOrEqual(44);
+				expect(Math.abs((iconBox.x + iconBox.width / 2) - (buttonBox.x + buttonBox.width / 2))).toBeLessThan(1);
+				expect(Math.abs((iconBox.y + iconBox.height / 2) - (buttonBox.y + buttonBox.height / 2))).toBeLessThan(1);
+			}
+		};
 
-		await expect(selector).toHaveAttribute('data-speech-type', 'normal');
+		await assertSpeechIcon('normal', /発言タイプ: 通常.*叫び/);
 		await selector.click();
-		await expect(selector).toHaveAttribute('data-speech-type', 'shout');
+		await assertSpeechIcon('shout', /発言タイプ: 叫び.*モノローグ/);
 		await selector.click();
-		await expect(selector).toHaveAttribute('data-speech-type', 'monologue');
+		await assertSpeechIcon('monologue', /発言タイプ: モノローグ.*通常/);
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { rejectMessagePublishes(): void } }).__relayStartupTest.rejectMessagePublishes());
 		await editor.fill('keep monologue on failure');
 		await send.click();
