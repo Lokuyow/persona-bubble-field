@@ -3515,4 +3515,89 @@ test.describe('DEV World Sandbox', () => {
 		await expect(self).not.toHaveAttribute('data-movement-animation', 'active');
 		await expect(page.locator('.field-scene')).not.toHaveAttribute('data-camera-animation', 'active');
 	});
+
+	test('controls live speech sound preferences without starting field movement', async ({ page }) => {
+		await page.setViewportSize({ width: 390, height: 844 });
+		await page.goto('/?devWorld=1');
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+		await page.waitForTimeout(1000);
+		const speaker = page.getByRole('button', { name: /Open sound settings/ });
+		await expect(speaker).toBeVisible();
+		await speaker.click();
+		const panel = page.locator('.sound-panel');
+		await expect(panel).toBeVisible();
+		const self = page.locator('.participant[data-self="true"]');
+		const positionBeforeSliderDrag = await self.getAttribute('data-position');
+		const slider = page.getByRole('slider', { name: 'Sound volume' });
+		const sliderBox = await slider.boundingBox();
+		expect(sliderBox).toBeTruthy();
+		if (sliderBox) {
+			const y = sliderBox.y + sliderBox.height / 2;
+			await page.mouse.move(sliderBox.x + sliderBox.width * 0.85, y);
+			await page.mouse.down();
+			await page.mouse.move(sliderBox.x + sliderBox.width * 0.25, y, { steps: 6 });
+			await page.mouse.up();
+		}
+		await expect.poll(async () => Number(await slider.inputValue())).toBeGreaterThan(0);
+		await expect(self).toHaveAttribute('data-position', positionBeforeSliderDrag ?? '');
+		await expect(page.locator('[data-pointer-joystick]')).toHaveCount(0);
+		await expect(page.getByRole('button', { name: 'Mute sound' })).toHaveCount(0);
+		await slider.fill('25');
+		await slider.fill('0');
+		await expect(page.getByRole('button', { name: 'Open sound settings (muted)' })).toBeVisible();
+		await slider.fill('25');
+		await expect(page.getByRole('button', { name: 'Open sound settings' })).toBeVisible();
+		const viewport = await page.locator('.field-viewport').boundingBox();
+		const control = await speaker.boundingBox();
+		expect(viewport && control).toBeTruthy();
+		if (viewport && control) {
+			expect(control.x + control.width).toBeLessThanOrEqual(viewport.x + viewport.width);
+			expect(control.y).toBeGreaterThanOrEqual(viewport.y);
+		}
+		await page.reload();
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+		await page.waitForTimeout(1000);
+		await page.getByRole('button', { name: /Open sound settings/ }).click();
+		await expect(page.getByRole('slider', { name: 'Sound volume' })).toHaveValue('25');
+		await expect(page.getByRole('button', { name: 'Mute sound' })).toHaveCount(0);
+		await page.getByRole('slider', { name: 'Sound volume' }).fill('0');
+		await expect(page.getByRole('button', { name: 'Open sound settings (muted)' })).toBeVisible();
+		await page.reload();
+		await page.waitForTimeout(1000);
+		await page.getByRole('button', { name: /Open sound settings/ }).click();
+		await expect(page.getByRole('slider', { name: 'Sound volume' })).toHaveValue('0');
+	});
+
+	test('keeps the speaker control usable on desktop', async ({ page }) => {
+		await page.setViewportSize({ width: 1200, height: 900 });
+		await page.goto('/?devWorld=1');
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+		await page.waitForTimeout(1000);
+		const speaker = page.getByRole('button', { name: /Open sound settings/ });
+		await speaker.click();
+		await expect(page.locator('.sound-panel')).toBeVisible();
+		const viewport = await page.locator('.field-viewport').boundingBox();
+		const panel = await page.locator('.sound-panel').boundingBox();
+		expect(viewport && panel).toBeTruthy();
+		if (viewport && panel) {
+			expect(panel.x).toBeGreaterThanOrEqual(viewport.x);
+			expect(panel.x + panel.width).toBeLessThanOrEqual(viewport.x + viewport.width);
+		}
+	});
+
+	test('injects DEV live speech through the production live bubble path', async ({ page }) => {
+		await page.setViewportSize({ width: 390, height: 844 });
+		await page.goto('/?devWorld=1');
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+		await page.waitForTimeout(1000);
+		const self = page.locator('.participant[data-self="true"]');
+		const positionBefore = await self.getAttribute('data-position');
+		for (const [label, speechType] of [['Normal', 'normal'], ['Shout', 'shout'], ['Monologue', 'monologue']] as const) {
+			await page.getByRole('button', { name: `Inject live ${label} speech` }).click();
+			await expect(page.locator(`.bubble-normal[data-speech-type="${speechType}"]`)).toBeVisible();
+		}
+		await page.getByRole('button', { name: 'Inject live Normal speech' }).click();
+		await expect(page.locator('.bubble-normal[data-speech-type="normal"]')).toContainText('Sound test: normal #4');
+		expect(await self.getAttribute('data-position')).toBe(positionBefore);
+	});
 });

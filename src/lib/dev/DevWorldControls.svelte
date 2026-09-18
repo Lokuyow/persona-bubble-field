@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { CHARACTER_CATALOG } from '$lib/character';
+	import type { SpeechType } from '$lib/conversation';
 	type Props = {
 		selectedCharacterId: string;
 		traceReplyFixtureEnabled: boolean;
@@ -7,9 +8,10 @@
 		onCharacterChange: (characterId: string) => void;
 		onReset: () => void;
 		onAddLiveReply: () => void;
+		onInjectLiveSpeech: (speechType: SpeechType) => void;
 	};
 	let { selectedCharacterId, traceReplyFixtureEnabled, canAddLiveReply,
-		onCharacterChange, onReset, onAddLiveReply }: Props = $props();
+		onCharacterChange, onReset, onAddLiveReply, onInjectLiveSpeech }: Props = $props();
 </script>
 
 <div class="sandbox-controls" aria-label="DEV sandbox controls">
@@ -29,6 +31,12 @@
 			onclick={onAddLiveReply}
 		>Add live trace reply</button>
 	{/if}
+	<div class="sandbox-speech-injector" aria-label="DEV speech sound injector">
+		<span>Live speech sound</span>
+		<button type="button" aria-label="Inject live Normal speech" onclick={() => onInjectLiveSpeech('normal')}>Normal</button>
+		<button type="button" aria-label="Inject live Shout speech" onclick={() => onInjectLiveSpeech('shout')}>Shout</button>
+		<button type="button" aria-label="Inject live Monologue speech" onclick={() => onInjectLiveSpeech('monologue')}>Monologue</button>
+	</div>
 	<button class="sandbox-reset" type="button" onclick={onReset}>Reset sandbox</button>
 </div>
 
@@ -74,7 +82,8 @@
 	}
 
 	.sandbox-reset,
-	.sandbox-live-reply {
+	.sandbox-live-reply,
+	.sandbox-speech-injector button {
 		border: 1px solid rgba(57, 67, 64, 0.2);
 		background: rgba(255, 255, 255, 0.86);
 		box-shadow: 0 5px 12px rgba(58, 70, 61, 0.14);
@@ -83,7 +92,8 @@
 	}
 
 	.sandbox-reset,
-	.sandbox-live-reply {
+	.sandbox-live-reply,
+	.sandbox-speech-injector button {
 		min-height: 38px;
 		padding: 0 11px;
 		border-radius: 999px;
@@ -91,8 +101,21 @@
 		letter-spacing: 0.04em;
 	}
 
+	.sandbox-speech-injector {
+		display: flex;
+		align-items: center;
+		gap: 5px;
+		width: max-content;
+	}
+
+	.sandbox-speech-injector span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
 	.sandbox-live-reply:disabled {
 		opacity: 0.48;
+	}
+
+	.sandbox-speech-injector button {
+		padding-inline: 7px;
 	}
 
 	.sandbox-reset:focus-visible,
@@ -112,6 +135,18 @@
 		.sandbox-character-picker {
 			width: min(100vw - 32px, 280px);
 			justify-content: space-between;
+		}
+
+		.sandbox-speech-injector {
+			width: 100%;
+			justify-content: center;
+			gap: 4px;
+		}
+
+		.sandbox-speech-injector button {
+			min-width: 0;
+			flex: 1;
+			padding-inline: 3px;
 		}
 
 		.sandbox-character-picker select {

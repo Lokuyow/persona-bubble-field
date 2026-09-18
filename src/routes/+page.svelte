@@ -157,6 +157,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	import ComposerKeyboardBinding from '$lib/frontend/ComposerKeyboardBinding.svelte';
 	import { createMovementInputController } from '$lib/frontend/movementInputController';
 	import SpeechLayer from '$lib/frontend/SpeechLayer.svelte';
+	import SoundControl from '$lib/frontend/SoundControl.svelte';
 	import { matchesComposerSubmit, type ComposerSubmitEnvelope } from '$lib/hostOwnedComposerContext';
 	import {
 		acceptedTraceReplyTarget, clearTraceReplyMode, completeTraceReplySubmission,
@@ -165,6 +166,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	import { createSpeechPublicationCore, type SpeechPublicationContext, type SpeechPublicationOutcome } from '$lib/speechPublication';
 	import type { SpeechSuggestionConversationEntry } from '$lib/speechSuggestions';
 	import type { SpeechType } from '$lib/conversation';
+	import { createSpeechSoundController, DEFAULT_SOUND_PREFERENCE, newLiveBubbleEffects, type SpeechSoundController } from '$lib/speechSoundEffects';
 	import type { SpeechBubbleShape } from '$lib/speechBubblePath';
 	import {
 		createWorldReadSession,
@@ -205,6 +207,9 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	const mountedBubbleRemeasures = new Map<string, () => void>();
 	const mountedTraceReplyRemeasures = new Map<string, () => void>();
 	let conversationState = $state.raw<ConversationState>(createConversationState());
+	let soundPreference = $state(DEFAULT_SOUND_PREFERENCE);
+	let speechSoundController = $state.raw<SpeechSoundController | null>(null);
+	let devSoundSequence = 0;
 	let lastPlacedAnchorById = $state.raw<Readonly<Record<string, WorldPoint>>>({});
 	let lastVisibilityKey: string | null = null;
 	let colorByPubkey = $state.raw<Record<string, BubbleTone>>({});
@@ -841,6 +846,14 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			`url("${asset(SITE_BACKGROUND_ASSET)}")`
 		);
 		let mounted = true;
+		let soundStorage: Storage | null = null;
+		try { soundStorage = window.localStorage; } catch { /* storage may be unavailable */ }
+		const soundController = createSpeechSoundController({ storage: soundStorage, document });
+		speechSoundController = soundController;
+		soundPreference = soundController.preference;
+		const unlockSound = () => soundController.unlock();
+		window.addEventListener('pointerdown', unlockSound, { passive: true });
+		window.addEventListener('keydown', unlockSound, { passive: true });
 		let startRequested = false;
 		let session: ReturnType<typeof createWorldReadSession> | null = null;
 		let currentSessionStartup: { session: ReturnType<typeof createWorldReadSession>; promise: Promise<void> } | null = null;
@@ -1196,6 +1209,10 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 
 		return () => {
 			mounted = false;
+			window.removeEventListener('pointerdown', unlockSound);
+			window.removeEventListener('keydown', unlockSound);
+			soundController.dispose();
+			speechSoundController = null;
 			if (proximityFeedbackTimer !== null) window.clearTimeout(proximityFeedbackTimer);
 			proximityFeedbackTimer = null;
 			cancelPendingComposerSubmission(new DOMException('Submission was cancelled.', 'AbortError'));
@@ -2212,12 +2229,37 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		const conversationMessage = toConversationMessage(message);
 		const visibleParticipantIds = projectFrontendPresence({ presence: nextPresence, selectedCharacterId, selfProjectionId,
 			geometry: { cellSize, fieldAreaBounds, cameraWorldBounds: fieldArtworkBounds }, colors: colorByPubkey }).visibleParticipantIds;
-		conversationState = receiveMessage(conversationState, conversationMessage, {
+		const previousConversationState = conversationState;
+		const nextConversationState = receiveMessage(previousConversationState, conversationMessage, {
 			isSpeakerVisible: visibleParticipantIds.has(message.pubkey),
 			duration: getPrototypeDisplayDuration(message.content),
 			now: conversationMessage.createdAt
 		});
-		conversationState = applyVisibility(conversationState, visibleParticipantIds);
+		conversationState = applyVisibility(nextConversationState, visibleParticipantIds);
+		for (const effect of newLiveBubbleEffects(previousConversationState, conversationState)) speechSoundController?.play(effect);
+	}
+
+	function injectDevLiveSpeech(speechType: SpeechType): void {
+		if (!devWorldSandboxEnabled) return;
+		const self = presenceState.participants.find((participant) => participant.id === DEV_WORLD_SELF_ID);
+		if (!self) return;
+		devSoundSequence += 1;
+		const sequence = devSoundSequence;
+		const message: ParsedWorldMessage = {
+			id: `dev-sound-test-${sequence}`,
+			pubkey: DEV_WORLD_SELF_ID,
+			createdAt: Math.floor(Date.now() / 1000),
+			content: `Sound test: ${speechType} #${sequence}`,
+			speechType,
+			position: self.position
+		};
+		receiveTimelineMessage(message);
+		receiveLiveMessage(message, presenceState);
+	}
+
+	function updateSoundVolume(volume: number): void {
+		speechSoundController?.setVolume(volume);
+		soundPreference = speechSoundController?.preference ?? { ...soundPreference, volume };
 	}
 
 	function tailTarget(participant: (typeof participantViews)[number]): WorldPoint {
@@ -2315,6 +2357,11 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		speechAreaVisualBounds={speechAreaVisualBounds}
 	>
 		{#snippet children()}
+			<SoundControl
+				volume={soundPreference.volume}
+				onOpen={() => speechSoundController?.unlock()}
+				onVolume={updateSoundVolume}
+			/>
 			<Chatter
 				bind:this={chatterComponent}
 				messages={recentMessageTimeline}
@@ -2425,6 +2472,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			onCharacterChange={selectSandboxCharacter}
 			onReset={resetSandbox}
 			onAddLiveReply={injectDevTraceLiveReply}
+			onInjectLiveSpeech={injectDevLiveSpeech}
 		/>
 	{:else if selfPositionWriteState.kind === 'retryable' && !isWorldSelfActive}
 		<WorldEntryControls onRetry={retryWorldEntry} />

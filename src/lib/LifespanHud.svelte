@@ -25,7 +25,7 @@
 	.lifespan-hud {
 		position: absolute;
 		top: max(12px, env(safe-area-inset-top));
-		right: max(12px, env(safe-area-inset-right));
+		right: max(72px, calc(env(safe-area-inset-right) + 72px));
 		z-index: 8;
 		min-width: 172px;
 		padding: 10px 14px;
