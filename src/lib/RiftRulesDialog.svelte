@@ -5,9 +5,10 @@
 		onOpenChange: (open: boolean) => void;
 		onJoin: () => void;
 		onViewRules: () => void;
+		onCancel: () => void;
 	}>;
 
-	let { open, mode, onOpenChange, onJoin, onViewRules }: Props = $props();
+	let { open, mode, onOpenChange, onJoin, onViewRules, onCancel }: Props = $props();
 	let isConfirmation = $derived(mode === 'join-confirmation');
 </script>
 
@@ -27,6 +28,7 @@
 					<div class="rift-dialog-actions">
 						<button class="rift-primary-action" type="button" onclick={onJoin}>参加する</button>
 						<button class="rift-secondary-action" type="button" onclick={onViewRules}>ルールを見る</button>
+						<button class="rift-secondary-action" type="button" onclick={onCancel}>キャンセル</button>
 					</div>
 				{:else}
 					<div class="rift-rules-body">
