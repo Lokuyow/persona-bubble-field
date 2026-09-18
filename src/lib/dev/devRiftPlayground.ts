@@ -101,6 +101,15 @@ export class DevRiftPlayground {
 		return this.update(this.state.nowMs, this.state.session, { preset });
 	}
 
+	canAdvance(): boolean {
+		if (this.phaseIndex >= this.phases.length - 1) return false;
+		const nextIndex = this.phaseIndex + 1;
+		const nextNow = this.phases[nextIndex];
+		if (scheduleAt(nextNow).phase === 'game' && !this.state.selfJoined) return false;
+		const enteringResult = nextIndex === 3 || nextIndex === 6 || nextIndex === 9;
+		return !enteringResult || this.state.selfChoice !== null;
+	}
+
 	joinSelf(holeId?: string): DevRiftPlaygroundState {
 		if (this.state.schedule.phase !== 'registration' || this.state.selfJoined) return this.state;
 		let session = this.state.session;
@@ -148,7 +157,15 @@ export class DevRiftPlayground {
 	}
 
 	advance(): DevRiftPlaygroundState {
-		if (this.phaseIndex >= this.phases.length - 1) return this.state;
+		if (!this.canAdvance()) {
+			if (this.state.schedule.phase === 'registration' && !this.state.selfJoined) {
+				return this.update(this.state.nowMs, this.state.session, { message: 'Join the local Rift before advancing to the game.' });
+			}
+			if (this.state.schedule.phase === 'game' && !this.state.selfChoice) {
+				return this.update(this.state.nowMs, this.state.session, { message: 'Choose Maintain or Escape before advancing to the result.' });
+			}
+			return this.state;
+		}
 		const nextIndex = this.phaseIndex + 1;
 		const nextNow = this.phases[nextIndex];
 		const enteringResult = nextIndex === 3 || nextIndex === 6 || nextIndex === 9;
@@ -156,12 +173,13 @@ export class DevRiftPlayground {
 		if (scheduleAt(nextNow).phase === 'game') session = snapshotRiftParticipants(session, scheduleAt(nextNow));
 		if (enteringResult) {
 			const round = (nextIndex === 3 ? 1 : nextIndex === 6 ? 2 : 3) as 1 | 2 | 3;
-			if (!this.state.selfChoice) return this.update(this.state.nowMs, session, { message: 'Choose Maintain or Escape before advancing to the result.' });
+			const selfChoice = this.state.selfChoice;
+			if (!selfChoice) return this.state;
 			const roundSchedule = getRiftRoundSchedule(this.state.schedule, round);
 			const nonce = `${round}`.repeat(64).slice(0, 64);
 			const commitId = this.state.session.actions.find((event) => event.pubkey === DEV_RIFT_PLAYGROUND_SELF_PUBKEY && event.action.action === 'commit' && event.action.round === round)?.id;
 			if (commitId) {
-				const selfReveal = actionEvent(DEV_RIFT_PLAYGROUND_SELF_PUBKEY, buildRiftRevealAction({ holeId: this.selfHole(), round, commitId, choice: this.state.selfChoice, nonce }), roundSchedule.resultAtMs + 1, `self-reveal-${round}`);
+				const selfReveal = actionEvent(DEV_RIFT_PLAYGROUND_SELF_PUBKEY, buildRiftRevealAction({ holeId: this.selfHole(), round, commitId, choice: selfChoice, nonce }), roundSchedule.resultAtMs + 1, `self-reveal-${round}`);
 				session = applyRiftAction(session, selfReveal);
 			}
 			session = this.supplyBots(session, round);

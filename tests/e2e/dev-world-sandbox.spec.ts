@@ -297,6 +297,8 @@ test.describe('DEV World Sandbox', () => {
 	test('runs a local Rift Playground flow with bot settlement and virtual phases', async ({ page }) => {
 		await page.goto('/?devWorld=1&devScenario=rift-playground');
 		await expect(page.getByRole('heading', { name: '綻び experimental' })).toBeVisible();
+		const next = page.getByRole('button', { name: 'Advance Rift Playground phase' });
+		await expect(next).toBeDisabled();
 		const hole = page.locator('[data-realtime-hole-trigger]').first();
 		const holePosition = (await hole.getAttribute('data-cell-position'))!.split(',').map(Number);
 		for (let index = 0; index < 8; index += 1) {
@@ -309,12 +311,14 @@ test.describe('DEV World Sandbox', () => {
 		const nearHole = await page.locator('.participant[data-self="true"]').getAttribute('data-position');
 		expect(nearHole).not.toBe(`${holePosition[0]},${holePosition[1]}`);
 		await hole.click();
-		const next = page.getByRole('button', { name: 'Advance Rift Playground phase' });
+		await expect(next).toBeEnabled();
 		await next.click();
 		await expect(page.locator('[data-realtime-panel]')).toContainText('参加者: 3');
 		await next.click();
-		await next.click();
+		await expect(page.getByRole('button', { name: '抜け穴を維持する' })).toBeEnabled();
 		await page.getByRole('button', { name: '抜け穴を維持する' }).click();
+		await expect(page.getByRole('button', { name: '抜け穴を維持する' })).toHaveClass(/selected/);
+		await expect(page.locator('[data-rift-selection-status]')).not.toContainText('まだありません');
 		await next.click();
 		await expect(page.locator('[data-rift-round-result]')).toContainText('+20pt');
 		await next.click();
@@ -327,6 +331,23 @@ test.describe('DEV World Sandbox', () => {
 		await next.click();
 		await expect(page.locator('[data-rift-round-result]')).toContainText('+20pt');
 	});
+
+	for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+		test(`keeps Rift Playground controls and panel separate at ${viewport.width}px`, async ({ page }) => {
+			await page.setViewportSize(viewport);
+			await page.goto('/?devWorld=1&devScenario=rift-playground');
+			if (viewport.width <= 700) await page.locator('.sandbox-mobile-toggle').click();
+			const controls = page.getByLabel('DEV sandbox controls');
+			const panel = page.locator('[data-realtime-panel]');
+			await expect(controls).toBeVisible();
+			await expect(panel).toBeVisible();
+			const boxes = await Promise.all([controls.boundingBox(), panel.boundingBox()]);
+			if (!boxes[0] || !boxes[1]) throw new Error('Expected DEV controls and Rift panel geometry.');
+			const [a, b] = boxes;
+			expect(a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y).toBe(false);
+			await expect(page.getByRole('button', { name: 'Advance Rift Playground phase' })).toBeVisible();
+		});
+	}
 	test('renders the experimental Rift registration and game fixtures without fixed-facility overlap', async ({ page }) => {
 		await page.goto('/?devWorld=1&devScenario=rift-registration');
 		await expect(page.locator('[data-realtime-panel]')).toBeVisible();

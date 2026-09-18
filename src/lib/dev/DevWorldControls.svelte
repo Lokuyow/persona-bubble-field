@@ -22,7 +22,7 @@
 		onCharacterChange, onReset, onAddLiveReply, onInjectLiveSpeech, onBotPresetChange, onAdvanceRift }: Props = $props();
 </script>
 
-<div class="sandbox-controls" class:chatter-scenario={scenario.fixture.kind === 'chatter-timeline'} aria-label="DEV sandbox controls">
+<div class="sandbox-controls" class:chatter-scenario={scenario.fixture.kind === 'chatter-timeline'} class:rift-scenario={scenario.fixture.kind === 'rift-static' || scenario.fixture.kind === 'rift-playground'} aria-label="DEV sandbox controls">
 	<details class="sandbox-mobile-toggle-wrapper">
 		<summary class="sandbox-mobile-toggle">DEV controls</summary>
 	</details>
@@ -114,6 +114,8 @@
 		top: 8px;
 	}
 	.sandbox-controls.chatter-scenario { top: 132px; }
+	.sandbox-controls.rift-scenario { top: 148px; }
+	:global(.composer-available) .sandbox-controls.rift-scenario { top: 148px; }
 
 	.sandbox-character-picker {
 		display: flex;
@@ -190,6 +192,7 @@
 			gap: 7px;
 		}
 		.sandbox-controls.chatter-scenario { top: 8px; }
+		.sandbox-controls.rift-scenario { top: 148px; }
 		.sandbox-mobile-toggle-wrapper { display: block; }
 		.sandbox-control-panel { flex-direction: column; gap: 7px; }
 		.sandbox-control-panel { display: none; }

@@ -496,9 +496,14 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		: null);
 	let riftRoundSchedule = $derived(riftRound ? getRiftRoundSchedule(riftSchedule, riftRound) : null);
 	let riftCanChoose = $derived(Boolean(riftSchedule.phase === 'game' && riftRealtimeBootstrapComplete && riftRoundSchedule && riftNowMs >= riftRoundSchedule.selectionAtMs && riftNowMs < riftRoundSchedule.resultAtMs && riftSelfHoleId && realtimeStatus === 'active' && (devRiftPlaygroundEnabled ? !devRiftPlaygroundState?.selfChoice : Boolean(personaSnapshot)) && !(riftSelection?.round === riftRound && riftSelection.commitPublished)));
-	let riftCommitStatus = $derived(riftSelection && riftSelection.round === riftRound
-		? riftSelection.revealStatus === 'published' ? '選択を自動公開済み' : riftSelection.revealStatus === 'sending' ? '選択を自動公開中' : riftSelection.revealStatus === 'failed' ? '選択の自動公開に失敗（未reveal）' : riftSelection.commitPublished ? '秘密選択を送信済み' : '未送信'
-		: 'このラウンドの選択はまだありません');
+	let riftSelectedChoice = $derived(devRiftPlaygroundEnabled
+		? devRiftPlaygroundState?.selfChoice ?? null
+		: riftSelection?.round === riftRound ? riftSelection.choice : null);
+	let riftCommitStatus = $derived(devRiftPlaygroundEnabled
+		? devRiftPlaygroundState?.selfChoice ? '秘密選択を送信済み' : 'このラウンドの選択はまだありません'
+		: riftSelection && riftSelection.round === riftRound
+			? riftSelection.revealStatus === 'published' ? '選択を自動公開済み' : riftSelection.revealStatus === 'sending' ? '選択を自動公開中' : riftSelection.revealStatus === 'failed' ? '選択の自動公開に失敗（未reveal）' : riftSelection.commitPublished ? '秘密選択を送信済み' : '未送信'
+			: 'このラウンドの選択はまだありません');
 	let devRiftLastResult = $derived.by(() => {
 		if (!devRiftPlaygroundState) return null;
 		const result = devRiftPlaygroundState.session.results.at(-1);
@@ -2501,7 +2506,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			status={realtimeStatus}
 			session={riftSession}
 			selfHoleId={riftSelfHoleId}
-			selectedChoice={riftSelection?.round === riftRound ? riftSelection.choice : null}
+			selectedChoice={riftSelectedChoice}
 			commitStatus={riftCommitStatus}
 			canChoose={riftCanChoose}
 			lastResult={devRiftLastResult ?? riftLastResult}
@@ -2540,7 +2545,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			canAddLiveReply={!devTraceReplies.some((reply) => reply.id === 'c'.repeat(64))}
 			riftPlaygroundEnabled={devRiftPlaygroundEnabled}
 			botPreset={devRiftPlaygroundState?.preset ?? 'cooperative'}
-			canAdvanceRift={Boolean(devRiftPlaygroundState && devRiftPlaygroundState.schedule.phase !== 'ended')}
+			canAdvanceRift={Boolean(devRiftPlaygroundState && devRiftPlayground?.canAdvance())}
 			onCharacterChange={selectSandboxCharacter}
 			onReset={resetDevScenario}
 			onAddLiveReply={injectDevTraceLiveReply}
