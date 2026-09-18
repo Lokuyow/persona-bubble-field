@@ -5,6 +5,23 @@ import { createSpeechSoundSamples, DEFAULT_SOUND_PREFERENCE, loadSoundPreference
 const options = { isSpeakerVisible: true, duration: 100, now: 0 };
 const message = (id: string, pubkey: string, content: string, speechType: SpeechType = 'normal') => ({ id, pubkey, content, speechType, createdAt: 0 });
 
+function spectralEnergy(samples: Float32Array, sampleRate: number, frequency: number): number {
+	let real = 0;
+	let imaginary = 0;
+	for (let index = 0; index < samples.length; index += 1) {
+		const phase = (Math.PI * 2 * frequency * index) / sampleRate;
+		real += samples[index] * Math.cos(phase);
+		imaginary -= samples[index] * Math.sin(phase);
+	}
+	return real * real + imaginary * imaginary;
+}
+
+function bandEnergy(samples: Float32Array, sampleRate: number, from: number, to: number): number {
+	let total = 0;
+	for (let frequency = from; frequency <= to; frequency += 250) total += spectralEnergy(samples, sampleRate, frequency);
+	return total;
+}
+
 describe('speech sound effects', () => {
 	it('creates deterministic, finite, non-clipping buffers at the specified durations', () => {
 		const effects = ['normal', 'shout', 'monologue'] as const;
@@ -16,6 +33,15 @@ describe('speech sound effects', () => {
 		}
 		expect(buffers[0]).toEqual(createSpeechSoundSamples('normal', 10_000));
 		expect(buffers[0]).not.toEqual(buffers[1]);
+	});
+	it('keeps normal noise energy in its specified mid band instead of leaking into ultrasonic highs', () => {
+		const sampleRate = 48_000;
+		const normal = createSpeechSoundSamples('normal', sampleRate);
+		const midEnergy = bandEnergy(normal, sampleRate, 750, 5_000);
+		const highEnergy = bandEnergy(normal, sampleRate, 10_250, 23_750);
+		const totalEnergy = bandEnergy(normal, sampleRate, 250, 23_750);
+		expect(midEnergy / totalEnergy).toBeGreaterThan(0.30);
+		expect(highEnergy / totalEnergy).toBeLessThan(0.25);
 	});
 	it.each(['normal', 'shout', 'monologue'] as const)('maps a new %s bubble to one effect', (speechType) => {
 		const previous = createConversationState();

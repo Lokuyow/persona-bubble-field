@@ -41,17 +41,17 @@ function clamp01(value: number): number { return Math.min(1, Math.max(0, value))
 function seededNoise(length: number, seed: number, sampleRate: number, low: number, high: number): Float32Array {
 	const output = new Float32Array(length);
 	let state = seed >>> 0;
-	let lowPass = 0;
-	let highPass = 0;
-	const lowAlpha = 1 - Math.exp(-TAU * high / sampleRate);
-	const highAlpha = 1 - Math.exp(-TAU * low / sampleRate);
+	let lowCutoffLowPass = 0;
+	let bandPassLowPass = 0;
+	const lowCutoffAlpha = 1 - Math.exp(-TAU * low / sampleRate);
+	const highCutoffAlpha = 1 - Math.exp(-TAU * high / sampleRate);
 	for (let index = 0; index < length; index += 1) {
 		state ^= state << 13; state ^= state >>> 17; state ^= state << 5;
 		const white = ((state >>> 0) / 0xffffffff) * 2 - 1;
-		lowPass += lowAlpha * (white - lowPass);
-		highPass = white - lowPass;
-		output[index] = highPass;
-		lowPass += highAlpha * (highPass - lowPass);
+		lowCutoffLowPass += lowCutoffAlpha * (white - lowCutoffLowPass);
+		const highPassed = white - lowCutoffLowPass;
+		bandPassLowPass += highCutoffAlpha * (highPassed - bandPassLowPass);
+		output[index] = bandPassLowPass;
 	}
 	return output;
 }
@@ -126,10 +126,10 @@ function createMonologueSamples(sampleRate: number): Float32Array {
 		const local = t - pulse * 0.255;
 		if (pulse > 2 || local >= pulseDuration) continue;
 		const u = clamp01(local / pulseDuration);
-		const bloomFrequency = 470 + 450 * Math.pow(u, 0.62);
 		const envelope = Math.pow(Math.min(clamp01(local / 0.026), clamp01((pulseDuration - local) / 0.060)), 0.72) * (0.84 + 0.16 * Math.sin(Math.PI * u));
 		const phase = TAU * (235 * local + 170 * Math.pow(u, 1.78) * pulseDuration / 1.78 + 8 * pulse * local);
-		const bloom = 0.22 * Math.exp(-Math.pow((u - 0.62) / 0.28, 2)) * Math.sin(TAU * bloomFrequency * local + 0.55);
+		const bloomPhase = TAU * (470 * local + 450 * pulseDuration * Math.pow(u, 1.62) / 1.62) + 0.55;
+		const bloom = 0.22 * Math.exp(-Math.pow((u - 0.62) / 0.28, 2)) * Math.sin(bloomPhase);
 		output[index] = 0.34 * (0.72 * Math.sin(phase) + 0.20 * Math.sin(2 * phase + 0.25) + 0.07 * Math.sin(3 * phase + 0.8) + bloom) * envelope + 0.018 * breath[Math.min(breath.length - 1, Math.floor(local * sampleRate))] * Math.exp(-local / 0.028) * clamp01(local / 0.004);
 	}
 	return normalize(output);
