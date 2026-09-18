@@ -374,6 +374,17 @@ test.describe('DEV World Sandbox', () => {
 		expect(registration.length).toBeGreaterThan(0);
 		expect(registration).not.toContain('12,3');
 		expect(registration).not.toContain('14,3');
+		const holeAsset = page.locator('[data-realtime-hole-id] img');
+		await expect(holeAsset).toHaveCount(registration.length);
+		await expect.poll(async () => holeAsset.first().evaluate((element) => {
+			if (!(element instanceof HTMLImageElement)) return { isImage: false, referencesRift: false, complete: false, naturalWidthPositive: false };
+			return {
+				isImage: true,
+				referencesRift: element.src.includes('/field/objects/rift.webp'),
+				complete: element.complete,
+				naturalWidthPositive: element.naturalWidth > 0
+			};
+		})).toEqual({ isImage: true, referencesRift: true, complete: true, naturalWidthPositive: true });
 		await expect(page.locator('[data-realtime-hole-trigger]')).toHaveCount(registration.length);
 
 		await page.goto('/?devWorld=1&devScenario=rift-game');
