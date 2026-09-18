@@ -3523,9 +3523,38 @@ test.describe('DEV World Sandbox', () => {
 		await page.waitForTimeout(1000);
 		const speaker = page.getByRole('button', { name: /Open sound settings/ });
 		await expect(speaker).toBeVisible();
+		const speakerChrome = await speaker.evaluate((element) => {
+			const style = getComputedStyle(element);
+			return { border: style.border, background: style.backgroundColor, boxShadow: style.boxShadow, backdropFilter: style.backdropFilter };
+		});
+		expect(speakerChrome.border).toBe('0px none rgb(255, 255, 255)');
+		expect(speakerChrome.background).toBe('rgba(0, 0, 0, 0)');
+		expect(speakerChrome.boxShadow).toBe('none');
+		expect(speakerChrome.backdropFilter).toBe('none');
+		await expect(page.locator('[data-sound-icon="volume-2"]')).toBeVisible();
+		const speakerBox = await speaker.boundingBox();
+		const iconBox = await page.locator('[data-sound-icon]').boundingBox();
+		expect(speakerBox && iconBox).toBeTruthy();
+		if (speakerBox && iconBox) {
+			expect(Math.abs((iconBox.x + iconBox.width / 2) - (speakerBox.x + speakerBox.width / 2))).toBeLessThan(1);
+			expect(Math.abs((iconBox.y + iconBox.height / 2) - (speakerBox.y + speakerBox.height / 2))).toBeLessThan(1);
+		}
 		await speaker.click();
 		const panel = page.locator('.sound-panel');
 		await expect(panel).toBeVisible();
+		await page.getByLabel('DEV sandbox controls').click({ position: { x: 5, y: 5 } });
+		await expect(panel).toBeHidden();
+		await speaker.click();
+		await expect(panel).toBeVisible();
+		const controlsBox = await page.getByLabel('DEV sandbox controls').boundingBox();
+		expect(controlsBox).toBeTruthy();
+		const hasTouch = await page.evaluate(() => 'ontouchstart' in window);
+		if (hasTouch && controlsBox) {
+			await page.touchscreen.tap(controlsBox.x + 5, controlsBox.y + 5);
+			await expect(panel).toBeHidden();
+			await speaker.click();
+			await expect(panel).toBeVisible();
+		}
 		const self = page.locator('.participant[data-self="true"]');
 		const positionBeforeSliderDrag = await self.getAttribute('data-position');
 		const slider = page.getByRole('slider', { name: 'Sound volume' });
@@ -3541,9 +3570,17 @@ test.describe('DEV World Sandbox', () => {
 		await expect.poll(async () => Number(await slider.inputValue())).toBeGreaterThan(0);
 		await expect(self).toHaveAttribute('data-position', positionBeforeSliderDrag ?? '');
 		await expect(page.locator('[data-pointer-joystick]')).toHaveCount(0);
+		await expect(panel).toBeVisible();
 		await expect(page.getByRole('button', { name: 'Mute sound' })).toHaveCount(0);
 		await slider.fill('25');
+		await expect(page.locator('[data-sound-icon="volume-4"]')).toBeVisible();
+		await expect(panel).toBeVisible();
+		await slider.fill('34');
+		await expect(page.locator('[data-sound-icon="volume-2"]')).toBeVisible();
+		await slider.fill('67');
+		await expect(page.locator('[data-sound-icon="volume"]')).toBeVisible();
 		await slider.fill('0');
+		await expect(page.locator('[data-sound-icon="volume-off"]')).toBeVisible();
 		await expect(page.getByRole('button', { name: 'Open sound settings (muted)' })).toBeVisible();
 		await slider.fill('25');
 		await expect(page.getByRole('button', { name: 'Open sound settings' })).toBeVisible();
