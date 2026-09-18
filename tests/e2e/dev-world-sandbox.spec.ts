@@ -3556,6 +3556,8 @@ test.describe('DEV World Sandbox', () => {
 		await speaker.click();
 		const panel = page.locator('.sound-panel');
 		await expect(panel).toBeVisible();
+		await expect(panel.getByText('Volume', { exact: true })).toHaveCount(0);
+		await expect(panel.getByRole('slider', { name: 'Sound volume' })).toBeVisible();
 		await page.getByLabel('DEV sandbox controls').click({ position: { x: 5, y: 5 } });
 		await expect(panel).toBeHidden();
 		await speaker.click();
