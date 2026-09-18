@@ -1381,6 +1381,16 @@ test.describe('DEV World Sandbox', () => {
 		const hide = page.getByRole('button', { name: 'Hide Chatter' });
 		await expect(chatter).toBeVisible();
 		await expect(hide).toHaveAttribute('aria-keyshortcuts', 'C');
+		const hideBox = await hide.boundingBox();
+		const hideIconBox = await hide.locator('svg').boundingBox();
+		expect(hideBox && hideIconBox).toBeTruthy();
+		if (hideBox && hideIconBox) {
+			expect(hideBox.width).toBeGreaterThanOrEqual(44);
+			expect(hideBox.height).toBeGreaterThanOrEqual(44);
+			expect(Math.abs((hideIconBox.x + hideIconBox.width / 2) - (hideBox.x + hideBox.width / 2))).toBeLessThan(1);
+			expect(Math.abs((hideIconBox.y + hideIconBox.height / 2) - (hideBox.y + hideBox.height / 2))).toBeLessThan(1);
+		}
+		await expect(hide.locator('svg')).toBeVisible();
 		const beforeIds = await page.locator('.timeline-visible-entries .timeline-entry').evaluateAll((entries) =>
 			entries.map((entry) => entry.getAttribute('data-timeline-event-id')));
 

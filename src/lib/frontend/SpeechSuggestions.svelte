@@ -1,4 +1,5 @@
 <script lang="ts">
+	import X from '~icons/tabler/x';
 	import { onMount } from 'svelte';
 	import type { Character } from '$lib/character';
 	import type { SpeechType } from '$lib/conversation';
@@ -155,7 +156,7 @@
 						aria-label="発言候補を閉じる"
 						title="発言候補を閉じる"
 						onclick={() => { panelOpen = false; }}
-					>×</button>
+					><X aria-hidden="true" /></button>
 				</div>
 				{#each candidates as candidate, index}
 					<div class="suggestion-item">
@@ -236,20 +237,20 @@
 	.suggestion-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 	.suggestion-heading { margin: 0 2px 2px; color: #59635e; font-size: 11px; font-weight: 800; }
 	.suggestion-close {
-		flex: 0 0 24px;
-		width: 24px;
-		height: 24px;
+		flex: 0 0 44px;
+		width: 44px;
+		height: 44px;
 		padding: 0;
-		border: 1px solid rgba(57, 67, 64, 0.2);
-		border-radius: 6px;
-		background: rgba(245, 241, 233, 0.9);
+		border: 0;
+		border-radius: 0;
+		background: transparent;
 		color: #59635e;
-		font: inherit;
-		font-size: 16px;
-		font-weight: 700;
-		line-height: 1;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
 	}
-	.suggestion-close:hover { background: #e9f0e7; }
+	.suggestion-close :global(svg) { width: 24px; height: 24px; }
+	.suggestion-close:hover { background: transparent; }
 	.suggestion-close:focus-visible { outline: 3px solid var(--color-focus-ring); outline-offset: 1px; }
 	.suggestion-item {
 		display: grid;

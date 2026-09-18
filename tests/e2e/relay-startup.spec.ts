@@ -3459,8 +3459,19 @@ test.describe('Relay startup', () => {
 		await candidateButton.click();
 		await expect(page.locator('.suggestion-panel')).toBeVisible();
 		const publishedBefore = (await publishedMessages(page)).length;
+		const close = page.getByRole('button', { name: '発言候補を閉じる' });
+		const closeBox = await close.boundingBox();
+		const closeIconBox = await close.locator('svg').boundingBox();
+		expect(closeBox && closeIconBox).toBeTruthy();
+		if (closeBox && closeIconBox) {
+			expect(closeBox.width).toBeGreaterThanOrEqual(44);
+			expect(closeBox.height).toBeGreaterThanOrEqual(44);
+			expect(Math.abs((closeIconBox.x + closeIconBox.width / 2) - (closeBox.x + closeBox.width / 2))).toBeLessThan(1);
+			expect(Math.abs((closeIconBox.y + closeIconBox.height / 2) - (closeBox.y + closeBox.height / 2))).toBeLessThan(1);
+		}
+		await expect(close.locator('svg')).toBeVisible();
 
-		await page.getByRole('button', { name: '発言候補を閉じる' }).click();
+		await close.click();
 
 		await expect(page.locator('.suggestion-panel')).toHaveCount(0);
 		expect((await publishedMessages(page)).length).toBe(publishedBefore);
