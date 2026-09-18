@@ -294,6 +294,24 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.locator('.trace-marker')).toHaveCount(3);
 	});
 
+	test('keeps desktop Trace DEV controls and Chatter actions independently operable', async ({ page }) => {
+		await page.setViewportSize({ width: 900, height: 720 });
+		await page.goto('/?devWorld=1&devScenario=trace-replies');
+		const controls = page.getByLabel('DEV sandbox controls');
+		const chatter = page.getByLabel('Chatter', { exact: true });
+		const hide = page.getByRole('button', { name: 'Hide Chatter' });
+		const boxes = await Promise.all([controls.boundingBox(), chatter.boundingBox(), hide.boundingBox()]);
+		if (!boxes[0] || !boxes[1] || !boxes[2]) throw new Error('Expected Trace controls and Chatter geometry.');
+		const [controlBox, chatterBox, hideBox] = boxes;
+		expect(controlBox.x < chatterBox.x + chatterBox.width && controlBox.x + controlBox.width > chatterBox.x && controlBox.y < chatterBox.y + chatterBox.height && controlBox.y + controlBox.height > chatterBox.y).toBe(false);
+		expect(controlBox.x < hideBox.x + hideBox.width && controlBox.x + controlBox.width > hideBox.x && controlBox.y < hideBox.y + hideBox.height && controlBox.y + controlBox.height > hideBox.y).toBe(false);
+		await hide.click();
+		await expect(chatter).toBeHidden();
+		await page.getByLabel('Select DEV scenario').selectOption('chatter-timeline');
+		await page.getByRole('button', { name: 'Open selected DEV scenario' }).click();
+		await expect(page).toHaveURL(/devWorld=1&devCharacter=001&devScenario=chatter-timeline|devWorld=1&devScenario=chatter-timeline&devCharacter=001/);
+	});
+
 	test('runs a local Rift Playground flow with bot settlement and virtual phases', async ({ page }) => {
 		await page.goto('/?devWorld=1&devScenario=rift-playground');
 		await expect(page.getByRole('heading', { name: '綻び experimental' })).toBeVisible();

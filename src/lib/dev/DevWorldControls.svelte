@@ -22,7 +22,7 @@
 		onCharacterChange, onReset, onAddLiveReply, onInjectLiveSpeech, onBotPresetChange, onAdvanceRift }: Props = $props();
 </script>
 
-<div class="sandbox-controls" class:chatter-scenario={scenario.fixture.kind === 'chatter-timeline'} class:rift-scenario={scenario.fixture.kind === 'rift-static' || scenario.fixture.kind === 'rift-playground'} aria-label="DEV sandbox controls">
+<div class="sandbox-controls" class:chatter-scenario={scenario.fixture.kind === 'chatter-timeline'} class:trace-scenario={scenario.fixture.kind === 'trace'} class:rift-scenario={scenario.fixture.kind === 'rift-static' || scenario.fixture.kind === 'rift-playground'} aria-label="DEV sandbox controls">
 	<details class="sandbox-mobile-toggle-wrapper">
 		<summary class="sandbox-mobile-toggle">DEV controls</summary>
 	</details>
@@ -114,6 +114,11 @@
 		top: 8px;
 	}
 	.sandbox-controls.chatter-scenario { top: 132px; }
+	.sandbox-controls.trace-scenario { top: auto; right: 12px; bottom: 12px; left: auto; width: min(340px, calc(100vw - 360px)); align-items: stretch; transform: none; }
+	.sandbox-controls.trace-scenario .sandbox-control-panel { flex-direction: column; align-items: stretch; }
+	.sandbox-controls.trace-scenario .sandbox-scenario-picker,
+	.sandbox-controls.trace-scenario .sandbox-character-picker,
+	.sandbox-controls.trace-scenario .sandbox-speech-injector { width: 100%; max-width: none; }
 	.sandbox-controls.rift-scenario { top: 148px; }
 	:global(.composer-available) .sandbox-controls.rift-scenario { top: 148px; }
 
@@ -192,6 +197,8 @@
 			gap: 7px;
 		}
 		.sandbox-controls.chatter-scenario { top: 8px; }
+		.sandbox-controls.trace-scenario { top: 8px; right: auto; bottom: auto; left: 50%; width: auto; align-items: center; transform: translateX(-50%); }
+		.sandbox-controls.trace-scenario .sandbox-control-panel { align-items: center; }
 		.sandbox-controls.rift-scenario { top: 148px; }
 		.sandbox-mobile-toggle-wrapper { display: block; }
 		.sandbox-control-panel { flex-direction: column; gap: 7px; }
