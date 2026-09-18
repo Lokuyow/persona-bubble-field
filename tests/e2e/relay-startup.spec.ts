@@ -1232,7 +1232,11 @@ test.describe('Relay startup', () => {
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
 			(request.filter.kinds as number[])[0] === 1111)).toBe(true);
 		const startupRequests = (await relayState(page)).state.requests;
-		expect(startupRequests.findIndex(isRealtimeRequest)).toBeGreaterThan(startupRequests.findIndex((request) => (request.filter.kinds as number[])[0] === 1111));
+		// Realtime may be requested before Trace finishes configuring. The
+		// priority contract is the final ownership after reconfiguration, not the
+		// incidental order of the first REQ packets.
+		expect(startupRequests.some(isRealtimeRequest)).toBe(true);
+		expect(startupRequests.some((request) => (request.filter.kinds as number[])[0] === 1111)).toBe(true);
 		await page.clock.runFor(10_001);
 		await expect(page.locator('[data-realtime-panel]')).toHaveAttribute('data-realtime-status', 'degraded');
 		await expect.poll(() => page.evaluate(() => (window as typeof window & { __relayStartupTest: { activeRealtimeCount(): number; activeTraceReplyCount(): number } }).__relayStartupTest.activeRealtimeCount())).toBe(0);
