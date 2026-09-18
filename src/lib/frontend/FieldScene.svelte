@@ -17,6 +17,7 @@
 	const TRACE_ICON_ASSET = '/trace/trace-icon.svg';
 	const MENDING_TERMINAL_ASSET = '/field/objects/mending-terminal.webp';
 	const ADJUSTMENT_TERMINAL_ASSET = '/field/objects/adjustment-terminal.webp';
+	const RIFT_ASSET = '/field/objects/rift.webp';
 
 	export type FieldParticipantView = ProjectedParticipant<Participant>;
 	export type TraceMarkerCell = TraceRootCell & Readonly<{
@@ -151,7 +152,7 @@
 		<div class="realtime-hole-layer" aria-label="綻びの抜け穴">
 			{#each realtimeHoles as hole (hole.id)}
 				<span class="realtime-hole" data-realtime-hole-id={hole.id} data-realtime-hole-position={`${hole.position.x},${hole.position.y}`}
-					style={`left: ${(hole.position.x + 0.5) * cellSize}px; top: ${(hole.position.y + 0.5) * cellSize}px;`}>◌</span>
+					style={`left: ${(hole.position.x + 0.5) * cellSize}px; top: ${(hole.position.y + 0.5) * cellSize}px;`}><img src={asset(RIFT_ASSET)} alt="" /></span>
 			{/each}
 		</div>
 		{#if proximityFeedback}
@@ -334,11 +335,10 @@
 	.field-facility img { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
 	.realtime-hole-layer { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
 	.realtime-hole {
-		position: absolute; display: grid; width: calc(var(--cell-size) * 0.7); height: calc(var(--cell-size) * 0.7);
-		place-items: center; border: 2px dashed rgba(102, 28, 106, 0.85); border-radius: 50%;
-		background: rgba(248, 181, 255, 0.32); color: #6b1b70; font-size: calc(var(--cell-size) * 0.68); font-weight: 900;
-		line-height: 0.7; transform: translate(-50%, -50%); pointer-events: none;
+		position: absolute; display: grid; width: calc(var(--cell-size) * 0.84); height: calc(var(--cell-size) * 0.84);
+		place-items: center; transform: translate(-50%, -50%); pointer-events: none;
 	}
+	.realtime-hole img { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
 
 	.trace-marker {
 		position: absolute;

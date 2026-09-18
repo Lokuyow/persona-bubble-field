@@ -276,15 +276,116 @@ async function profileTriggerCenter(page: Page, name: string): Promise<{ x: numb
 }
 
 test.describe('DEV World Sandbox', () => {
+	test('lists categorized scenarios and keeps the selected character across scenario reset', async ({ page }) => {
+		await page.goto('/?devWorld=1&devCharacter=020');
+		await expect(page.getByLabel('Select DEV scenario')).toHaveValue('default');
+		await expect(page.locator('optgroup[label="Speech"]')).toHaveCount(1);
+		await expect(page.getByText('Plain DEV World with no seeded fixture.')).toBeVisible();
+		await expect(page.getByLabel('Select sandbox character')).toHaveValue('020');
+		const scenarioSelect = page.getByLabel('Select DEV scenario');
+		await scenarioSelect.selectOption('trace-replies');
+		await page.getByRole('button', { name: 'Open selected DEV scenario' }).click();
+		await expect(scenarioSelect).toHaveValue('trace-replies');
+		await expect(page).toHaveURL(/devWorld=1&devCharacter=020&devScenario=trace-replies|devWorld=1&devScenario=trace-replies&devCharacter=020/);
+		await expect(page.getByLabel('Select sandbox character')).toHaveValue('020');
+		await page.getByRole('button', { name: 'Reset scenario' }).click();
+		await expect(page).toHaveURL(/devScenario=trace-replies/);
+		await expect(page.getByLabel('Select sandbox character')).toHaveValue('020');
+		await expect(page.locator('.trace-marker')).toHaveCount(3);
+	});
+
+	test('keeps desktop Trace DEV controls and Chatter actions independently operable', async ({ page }) => {
+		await page.setViewportSize({ width: 900, height: 720 });
+		await page.goto('/?devWorld=1&devScenario=trace-replies');
+		const controls = page.getByLabel('DEV sandbox controls');
+		const chatter = page.getByLabel('Chatter', { exact: true });
+		const hide = page.getByRole('button', { name: 'Hide Chatter' });
+		const boxes = await Promise.all([controls.boundingBox(), chatter.boundingBox(), hide.boundingBox()]);
+		if (!boxes[0] || !boxes[1] || !boxes[2]) throw new Error('Expected Trace controls and Chatter geometry.');
+		const [controlBox, chatterBox, hideBox] = boxes;
+		expect(controlBox.x < chatterBox.x + chatterBox.width && controlBox.x + controlBox.width > chatterBox.x && controlBox.y < chatterBox.y + chatterBox.height && controlBox.y + controlBox.height > chatterBox.y).toBe(false);
+		expect(controlBox.x < hideBox.x + hideBox.width && controlBox.x + controlBox.width > hideBox.x && controlBox.y < hideBox.y + hideBox.height && controlBox.y + controlBox.height > hideBox.y).toBe(false);
+		await hide.click();
+		await expect(chatter).toBeHidden();
+		await page.getByLabel('Select DEV scenario').selectOption('chatter-timeline');
+		await page.getByRole('button', { name: 'Open selected DEV scenario' }).click();
+		await expect(page).toHaveURL(/devWorld=1&devCharacter=001&devScenario=chatter-timeline|devWorld=1&devScenario=chatter-timeline&devCharacter=001/);
+	});
+
+	test('runs a local Rift Playground flow with bot settlement and virtual phases', async ({ page }) => {
+		await page.goto('/?devWorld=1&devScenario=rift-playground');
+		await expect(page.getByRole('heading', { name: '綻び experimental' })).toBeVisible();
+		const next = page.getByRole('button', { name: 'Advance Rift Playground phase' });
+		await expect(next).toBeDisabled();
+		const hole = page.locator('[data-realtime-hole-trigger]').first();
+		const holePosition = (await hole.getAttribute('data-cell-position'))!.split(',').map(Number);
+		for (let index = 0; index < 8; index += 1) {
+			const current = await page.locator('.participant[data-self="true"]').getAttribute('data-position');
+			if (!current) throw new Error('Expected the DEV self position.');
+			const [x, y] = current.split(',').map(Number);
+			if (Math.max(Math.abs(x - holePosition[0]), Math.abs(y - holePosition[1])) <= 1) break;
+			await page.keyboard.press(x > holePosition[0] ? 'ArrowLeft' : x < holePosition[0] ? 'ArrowRight' : y > holePosition[1] ? 'ArrowUp' : 'ArrowDown');
+		}
+		const nearHole = await page.locator('.participant[data-self="true"]').getAttribute('data-position');
+		expect(nearHole).not.toBe(`${holePosition[0]},${holePosition[1]}`);
+		await hole.click();
+		await expect(next).toBeEnabled();
+		await next.click();
+		await expect(page.locator('[data-realtime-panel]')).toContainText('参加者: 3');
+		await next.click();
+		await expect(page.getByRole('button', { name: '抜け穴を維持する' })).toBeEnabled();
+		await page.getByRole('button', { name: '抜け穴を維持する' }).click();
+		await expect(page.getByRole('button', { name: '抜け穴を維持する' })).toHaveClass(/selected/);
+		await expect(page.locator('[data-rift-selection-status]')).not.toContainText('まだありません');
+		await next.click();
+		await expect(page.locator('[data-rift-round-result]')).toContainText('+20pt');
+		await next.click();
+		await next.click();
+		await page.getByRole('button', { name: '抜け穴を維持する' }).click();
+		await next.click();
+		await next.click();
+		await next.click();
+		await page.getByRole('button', { name: '抜け穴を維持する' }).click();
+		await next.click();
+		await expect(page.locator('[data-rift-round-result]')).toContainText('+20pt');
+	});
+
+	for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+		test(`keeps Rift Playground controls and panel separate at ${viewport.width}px`, async ({ page }) => {
+			await page.setViewportSize(viewport);
+			await page.goto('/?devWorld=1&devScenario=rift-playground');
+			if (viewport.width <= 700) await page.locator('.sandbox-mobile-toggle').click();
+			const controls = page.getByLabel('DEV sandbox controls');
+			const panel = page.locator('[data-realtime-panel]');
+			await expect(controls).toBeVisible();
+			await expect(panel).toBeVisible();
+			const boxes = await Promise.all([controls.boundingBox(), panel.boundingBox()]);
+			if (!boxes[0] || !boxes[1]) throw new Error('Expected DEV controls and Rift panel geometry.');
+			const [a, b] = boxes;
+			expect(a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y).toBe(false);
+			await expect(page.getByRole('button', { name: 'Advance Rift Playground phase' })).toBeVisible();
+		});
+	}
 	test('renders the experimental Rift registration and game fixtures without fixed-facility overlap', async ({ page }) => {
 		await page.setViewportSize({ width: 360, height: 640 });
-		await page.goto('/?devWorld=1&devRift=registration');
+		await page.goto('/?devWorld=1&devScenario=rift-registration');
 		await expect(page.locator('[data-realtime-panel]')).toBeVisible();
 		await expect(page.locator('[data-realtime-panel]')).toContainText('参加受付');
 		const registration = await page.locator('[data-realtime-hole-id]').evaluateAll((holes) => holes.map((hole) => hole.getAttribute('data-realtime-hole-position')));
 		expect(registration.length).toBeGreaterThan(0);
 		expect(registration).not.toContain('12,3');
 		expect(registration).not.toContain('14,3');
+		const holeAsset = page.locator('[data-realtime-hole-id] img');
+		await expect(holeAsset).toHaveCount(registration.length);
+		await expect.poll(async () => holeAsset.first().evaluate((element) => {
+			if (!(element instanceof HTMLImageElement)) return { isImage: false, referencesRift: false, complete: false, naturalWidthPositive: false };
+			return {
+				isImage: true,
+				referencesRift: element.src.includes('/field/objects/rift.webp'),
+				complete: element.complete,
+				naturalWidthPositive: element.naturalWidth > 0
+			};
+		})).toEqual({ isImage: true, referencesRift: true, complete: true, naturalWidthPositive: true });
 		await expect(page.locator('[data-realtime-hole-trigger]')).toHaveCount(registration.length);
 		await page.getByText('ルールを見る', { exact: true }).click();
 		await expect(page.getByRole('dialog')).toContainText('ソトへ続く抜け穴');
@@ -292,7 +393,7 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.getByRole('dialog')).toContainText('維持人数が不足');
 		await page.getByText('ルールを見る', { exact: true }).click();
 
-		await page.goto('/?devWorld=1&devRift=game');
+		await page.goto('/?devWorld=1&devScenario=rift-game');
 		await expect(page.locator('[data-realtime-panel]')).toBeVisible();
 		await expect(page.locator('[data-realtime-panel]')).toContainText('秘密選択');
 		await expect(page.locator('[data-rift-choice="maintain"]')).toBeDisabled();
@@ -367,7 +468,7 @@ test.describe('DEV World Sandbox', () => {
 		test(`shows measured Trace special geometry from its first visible frame on ${viewport.name}`, async ({ page }) => {
 			await page.setViewportSize(viewport);
 			await installTraceGeometryFrameSampling(page);
-			await page.goto('/?devWorld=1&devTrace=replies');
+			await page.goto('/?devWorld=1&devScenario=trace-replies');
 			if (viewport.name === 'desktop') await page.getByRole('button', { name: 'Hide Chatter' }).click();
 			const rootCard = page.locator('.trace-root-card');
 			await page.locator('[data-cell-position="8,4"]').click();
@@ -424,7 +525,7 @@ test.describe('DEV World Sandbox', () => {
 	test('preserves Trace reply drafts across clear and close, changes ownership and publishes locally', async ({ page }) => {
 		await page.setViewportSize({ width: 1100, height: 850 });
 		await page.emulateMedia({ reducedMotion: 'reduce' });
-		await page.goto('/?devWorld=1&devTrace=replies');
+		await page.goto('/?devWorld=1&devScenario=trace-replies');
 		await page.getByRole('button', { name: 'Hide Chatter' }).click();
 		const editor = page.getByRole('textbox', { name: '投稿エディター' });
 		const preview = page.getByLabel('Reply preview', { exact: true });
@@ -483,13 +584,13 @@ test.describe('DEV World Sandbox', () => {
 	test('shows current Trace selection only when multiple speeches are visible', async ({ page }) => {
 		await page.setViewportSize({ width: 1100, height: 850 });
 		await page.emulateMedia({ reducedMotion: 'reduce' });
-		await page.goto('/?devWorld=1&devTrace=lights');
+		await page.goto('/?devWorld=1&devScenario=trace-markers');
 		await page.locator('[data-cell-position="8,4"]').click();
 		await expect(page.locator('.trace-root-card')).toBeVisible();
 		await expect(page.locator('[data-trace-selection="current"]')).toHaveCount(0);
 		await expect(page.locator('.trace-current-selection-outline')).toHaveCount(0);
 
-		await page.goto('/?devWorld=1&devTrace=replies');
+		await page.goto('/?devWorld=1&devScenario=trace-replies');
 		await page.getByRole('button', { name: 'Hide Chatter' }).click();
 		await page.locator('[data-cell-position="8,4"]').click();
 		await expect(page.locator('[data-trace-selection="current"]')).toHaveCount(1);
@@ -525,7 +626,7 @@ test.describe('DEV World Sandbox', () => {
 	for (const viewport of [{ name: 'desktop', width: 1100, height: 850 }, { name: 'mobile', width: 390, height: 844 }]) {
 		test(`keeps a deep tree-only cluster interactive on ${viewport.name}`, async ({ page }) => {
 			await page.setViewportSize(viewport);
-			await page.goto('/?devWorld=1&devTrace=replies');
+			await page.goto('/?devWorld=1&devScenario=trace-replies');
 			if (viewport.name === 'desktop') await page.getByRole('button', { name: 'Hide Chatter' }).click();
 			await page.locator('[data-cell-position="8,4"]').click();
 			await expect(page.locator('.trace-root-card')).toHaveAttribute('data-trace-geometry-ready', 'ready');
@@ -655,9 +756,10 @@ test.describe('DEV World Sandbox', () => {
 			await expect(page.locator('[data-trace-current-reply-id]')).toHaveAttribute('data-trace-current-reply-id', 'f'.repeat(64));
 		});
 
-		test(`preserves existing Trace anchors when a direct reply is added on ${viewport.name}`, async ({ page }) => {
+			test(`preserves existing Trace anchors when a direct reply is added on ${viewport.name}`, async ({ page }) => {
 			await page.setViewportSize(viewport);
-			await page.goto('/?devWorld=1&devTrace=replies');
+			await page.goto('/?devWorld=1&devScenario=trace-replies');
+			if (viewport.name === 'mobile') await page.locator('.sandbox-mobile-toggle').click();
 			if (viewport.name === 'desktop') await page.getByRole('button', { name: 'Hide Chatter' }).click();
 			await page.locator('[data-cell-position="8,4"]').click();
 			await expect(page.locator('.trace-root-card')).toHaveAttribute('data-trace-geometry-ready', 'ready');
@@ -670,7 +772,7 @@ test.describe('DEV World Sandbox', () => {
 
 		test(`preserves selected Trace positions across direct and deep navigation on ${viewport.name}`, async ({ page }) => {
 			await page.setViewportSize(viewport);
-			await page.goto('/?devWorld=1&devTrace=replies');
+			await page.goto('/?devWorld=1&devScenario=trace-replies');
 			if (viewport.name === 'desktop') await page.getByRole('button', { name: 'Hide Chatter' }).click();
 			await page.locator('[data-cell-position="8,4"]').click();
 			await expect(page.locator('.trace-root-card')).toHaveAttribute('data-trace-geometry-ready', 'ready');
@@ -704,7 +806,7 @@ test.describe('DEV World Sandbox', () => {
 
 		test(`shows known Trace continuation branches without hidden cards on ${viewport.name}`, async ({ page }) => {
 			await page.setViewportSize(viewport);
-			await page.goto('/?devWorld=1&devTrace=replies');
+			await page.goto('/?devWorld=1&devScenario=trace-replies');
 			if (viewport.name === 'desktop') await page.getByRole('button', { name: 'Hide Chatter' }).click();
 			await page.locator('[data-cell-position="8,4"]').click();
 			await expect(page.locator('.trace-root-card')).toHaveAttribute('data-trace-geometry-ready', 'ready');
@@ -738,7 +840,7 @@ test.describe('DEV World Sandbox', () => {
 	test('reselects the current reply without losing its draft, preserves it through profiles, and clears on range exit', async ({ page }) => {
 		await page.setViewportSize({ width: 1100, height: 850 });
 		await page.emulateMedia({ reducedMotion: 'reduce' });
-		await page.goto('/?devWorld=1&devTrace=replies');
+		await page.goto('/?devWorld=1&devScenario=trace-replies');
 		await page.getByRole('button', { name: 'Hide Chatter' }).click();
 		const editor = page.getByRole('textbox', { name: '投稿エディター' });
 		const preview = page.getByLabel('Reply preview', { exact: true });
@@ -822,7 +924,7 @@ test.describe('DEV World Sandbox', () => {
 				return nativeOpen(...args);
 			}) as IDBFactory['open'];
 		});
-		await page.goto('/?devWorld=1&devTrace=lights');
+		await page.goto('/?devWorld=1&devScenario=trace-markers');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 		await expect(page.locator('main')).toHaveAttribute('data-trace-runtime', 'dev');
 		const externalCallBaseline = await page.evaluate(() => (window as never as {
@@ -902,7 +1004,7 @@ test.describe('DEV World Sandbox', () => {
 	test('opens and navigates the shared DEV trace conversation without changing it on menu open', async ({ page }) => {
 		await page.setViewportSize({ width: 900, height: 720 });
 		await page.emulateMedia({ reducedMotion: 'reduce' });
-		await page.goto('/?devWorld=1&devTrace=lights');
+		await page.goto('/?devWorld=1&devScenario=trace-markers');
 		await expect(page.locator('main')).toHaveAttribute('data-trace-runtime', 'dev');
 		const markers = page.locator('.trace-marker');
 		const hideTimeline = page.getByRole('button', { name: 'Hide Chatter' });
@@ -1032,7 +1134,7 @@ test.describe('DEV World Sandbox', () => {
 	test('does not leave a selectable trigger behind for the hidden open Trace marker', async ({ page }) => {
 		await page.setViewportSize({ width: 900, height: 720 });
 		await page.emulateMedia({ reducedMotion: 'reduce' });
-		await page.goto('/?devWorld=1&devTrace=lights');
+		await page.goto('/?devWorld=1&devScenario=trace-markers');
 		await expect(page.locator('[data-cell-position="8,4"]')).toBeVisible();
 		const markers = page.locator('.trace-marker');
 		await page.locator('[data-cell-position="8,4"]').click();
@@ -1054,7 +1156,7 @@ test.describe('DEV World Sandbox', () => {
 	test('reactivates an inactive DEV self through Trace inspection', async ({ page }) => {
 		await page.setViewportSize({ width: 900, height: 720 });
 		await page.emulateMedia({ reducedMotion: 'reduce' });
-		await page.goto('/?devWorld=1&devTrace=lights&devPresence=inactive');
+		await page.goto('/?devWorld=1&devScenario=trace-inactive-self');
 		await expect(page.locator('.participant[data-self="true"]')).toHaveCount(0);
 		await expect(page.locator('[data-cell-position="8,4"]')).toHaveAttribute('aria-label', '痕跡を調べる');
 		await page.locator('[data-cell-position="8,4"]').click();
@@ -1083,7 +1185,7 @@ test.describe('DEV World Sandbox', () => {
 				return nativeOpen(...args);
 			}) as IDBFactory['open'];
 		});
-		await page.goto('/?devWorld=1&devTrace=replies');
+		await page.goto('/?devWorld=1&devScenario=trace-replies');
 		await expect(page.locator('main')).toHaveAttribute('data-trace-runtime', 'dev');
 		const hideTimeline = page.getByRole('button', { name: 'Hide Chatter' });
 		if (await hideTimeline.isVisible()) await hideTimeline.click();
@@ -1260,7 +1362,7 @@ test.describe('DEV World Sandbox', () => {
 	test('navigates a deep DEV Trace one adjacent speech at a time through shared cell actions', async ({ page }) => {
 		await page.setViewportSize({ width: 900, height: 720 });
 		await page.emulateMedia({ reducedMotion: 'reduce' });
-		await page.goto('/?devWorld=1&devTrace=replies');
+		await page.goto('/?devWorld=1&devScenario=trace-replies');
 		const hideTimeline = page.getByRole('button', { name: 'Hide Chatter' });
 		await hideTimeline.click();
 		await page.locator('[data-cell-position="8,4"]').click();
@@ -1273,7 +1375,7 @@ test.describe('DEV World Sandbox', () => {
 
 	test('shows a finite recent-message overlay with semantic colors and existing profile focus restoration', async ({ page }) => {
 		await page.setViewportSize({ width: 1200, height: 1600 });
-		await page.goto('/?devWorld=1&devSpeech=timeline');
+		await page.goto('/?devWorld=1&devScenario=chatter-timeline');
 		const timeline = page.getByLabel('Chatter', { exact: true });
 		const visibleEntries = timeline.locator('.timeline-visible-entries .timeline-entry');
 		await expect(timeline).toBeVisible();
@@ -1382,7 +1484,7 @@ test.describe('DEV World Sandbox', () => {
 
 	test('toggles Chatter with the unmodified C shortcut and preserves its guards', async ({ page }) => {
 		await page.setViewportSize({ width: 1200, height: 900 });
-		await page.goto('/?devWorld=1&devSpeech=timeline');
+		await page.goto('/?devWorld=1&devScenario=chatter-timeline');
 		const chatter = page.locator('aside.recent-message-timeline');
 		const hide = page.getByRole('button', { name: 'Hide Chatter' });
 		await expect(chatter).toBeVisible();
@@ -1434,7 +1536,7 @@ test.describe('DEV World Sandbox', () => {
 
 	test('renders only fully fitting entries without a scroll container', async ({ page }) => {
 		await page.setViewportSize({ width: 1200, height: 500 });
-		await page.goto('/?devWorld=1&devSpeech=timeline');
+		await page.goto('/?devWorld=1&devScenario=chatter-timeline');
 		const timeline = page.locator('aside.recent-message-timeline');
 		const visibleEntries = timeline.locator('.timeline-visible-entries .timeline-entry');
 		await expect.poll(() => visibleEntries.count()).toBeGreaterThan(0);
@@ -1470,7 +1572,7 @@ test.describe('DEV World Sandbox', () => {
 
 	test('starts closed on mobile, preserves manual show/hide through resize, and leaves field geometry unchanged', async ({ page }) => {
 		await page.setViewportSize({ width: 390, height: 844 });
-		await page.goto('/?devWorld=1&devSpeech=timeline');
+		await page.goto('/?devWorld=1&devScenario=chatter-timeline');
 		const timeline = page.locator('aside.recent-message-timeline');
 		const show = page.getByRole('button', { name: 'Show Chatter' });
 		await expect(timeline).toBeHidden();
@@ -1579,7 +1681,7 @@ test.describe('DEV World Sandbox', () => {
 	test('keeps live and merged bubble bodies above overscanned artwork on desktop and mobile', async ({ page }) => {
 		for (const viewport of [{ width: 1200, height: 900 }, { width: 390, height: 844 }]) {
 			await page.setViewportSize(viewport);
-			await page.goto('/?devWorld=1&devSpeech=merged2');
+			await page.goto('/?devWorld=1&devScenario=speech-merged-2');
 			await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 			await expect(page.locator('.participant')).toHaveCount(4);
 			await expect(page.locator('.bubble-normal')).toHaveCount(1);
@@ -1638,7 +1740,7 @@ test.describe('DEV World Sandbox', () => {
 	});
 
 	test('renders deterministic normal and merged speech tails in the DEV fixture', async ({ page }) => {
-		await page.goto('/?devWorld=1&devSpeech=merged2');
+		await page.goto('/?devWorld=1&devScenario=speech-merged-2');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 		await expect(page.locator('.bubble-normal')).toHaveCount(1);
 		await expect(page.locator('.bubble-merged')).toHaveCount(1);
@@ -1732,7 +1834,7 @@ test.describe('DEV World Sandbox', () => {
 	});
 
 	test('renders burst and cloud surfaces with outline-continuous special tails', async ({ page }) => {
-		await page.goto('/?devWorld=1&devSpeech=types');
+		await page.goto('/?devWorld=1&devScenario=speech-types');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 		await expect(page.locator('.bubble[data-speech-type="normal"]')).toHaveCount(1);
 		await expect(page.locator('.bubble-normal[data-speech-type="shout"]')).toHaveCount(1);
@@ -1954,7 +2056,7 @@ test.describe('DEV World Sandbox', () => {
 
 	test('keeps long merged shout body placement independent from decorative overflow', async ({ page }) => {
 		await expectNoConsoleProblems(page, async () => {
-			await page.goto('/?devWorld=1&devSpeech=merged2-shout-long');
+			await page.goto('/?devWorld=1&devScenario=speech-merged-2-shout-long');
 			await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 			await expect(page.locator('.bubble-merged[data-speech-type="shout"]')).toHaveCount(1);
 			await expect(page.locator('.bubble-merged[data-speech-type="shout"] .bubble-surface')).toBeVisible();
@@ -1987,7 +2089,7 @@ test.describe('DEV World Sandbox', () => {
 		for (const speechType of ['shout', 'monologue'] as const) {
 			await page.setViewportSize({ width: 1440, height: 1000 });
 			await expectNoConsoleProblems(page, async () => {
-				await page.goto(`/?devWorld=1&devSpeech=merged2-${speechType}-long`);
+				await page.goto(`/?devWorld=1&devScenario=speech-merged-2-${speechType}-long`);
 				await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 				await expect(page.locator(`.bubble-merged[data-speech-type="${speechType}"]`)).toHaveCount(1);
 			});
@@ -2046,7 +2148,7 @@ test.describe('DEV World Sandbox', () => {
 
 		await page.setViewportSize({ width: 1440, height: 1000 });
 		await expectNoConsoleProblems(page, async () => {
-			await page.goto('/?devWorld=1&devSpeech=types');
+			await page.goto('/?devWorld=1&devScenario=speech-types');
 			await expect(page.locator('.bubble[data-speech-type="normal"]')).toHaveCount(1);
 		});
 		const normalBubble = page.locator('.bubble[data-speech-type="normal"]');
@@ -2072,7 +2174,7 @@ test.describe('DEV World Sandbox', () => {
 	for (const speechType of ['shout', 'monologue'] as const) {
 		test(`keeps five-line clamping, dynamic size, and safe bounds for ${speechType} bubbles`, async ({ page }) => {
 			await page.setViewportSize({ width: 320, height: 844 });
-			await page.goto(`/?devWorld=1&devSpeech=merged2-${speechType}-long`);
+			await page.goto(`/?devWorld=1&devScenario=speech-merged-2-${speechType}-long`);
 			await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 			const bubble = page.locator(`.bubble-merged[data-speech-type="${speechType}"]`);
 			await expect(bubble).toHaveCount(1);
@@ -2122,7 +2224,7 @@ test.describe('DEV World Sandbox', () => {
 	}
 
 	test('preserves explicit line breaks in normal and merged bubbles without clamping short content', async ({ page }) => {
-		await page.goto('/?devWorld=1&devSpeech=linebreak');
+		await page.goto('/?devWorld=1&devScenario=speech-linebreak');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 
 		const bubbles = page.locator('.bubble');
@@ -2160,23 +2262,23 @@ test.describe('DEV World Sandbox', () => {
 
 	for (const [query, expectedTexts] of [
 		[
-			'long',
+			'speech-long',
 			[
 				'Normal bubble message that wraps repeatedly inside the speech bubble width. '.repeat(8).trim(),
 				'Merged bubble message that wraps repeatedly inside the speech bubble width. '.repeat(8).trim()
 			]
 		],
 		[
-			'linebreak-overflow',
+			'speech-linebreak-overflow',
 			[
 				'normal line 1\nnormal line 2\nnormal line 3\nnormal line 4\nnormal line 5\nnormal line 6',
 				'merged line 1\nmerged line 2\nmerged line 3\nmerged line 4\nmerged line 5\nmerged line 6'
 			]
 		]
 	] as const) {
-		test(`clamps ${query === 'long' ? 'wrapped long text' : 'explicit six-line text'} in normal and merged bubbles`, async ({ page }) => {
+		test(`clamps ${query === 'speech-long' ? 'wrapped long text' : 'explicit six-line text'} in normal and merged bubbles`, async ({ page }) => {
 			await page.setViewportSize({ width: 390, height: 844 });
-			await page.goto(`/?devWorld=1&devSpeech=${query}`);
+			await page.goto(`/?devWorld=1&devScenario=${query}`);
 			await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 
 			const bubbles = page.locator('.bubble');
@@ -2222,7 +2324,7 @@ test.describe('DEV World Sandbox', () => {
 	}
 
 	test('sizes normal bubbles by content up to the 240px safe maximum', async ({ page }) => {
-		await page.goto('/?devWorld=1&devSpeech=normal-sizes');
+		await page.goto('/?devWorld=1&devScenario=speech-normal-sizes');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 
 		const bubbles = page.locator('.bubble-normal');
@@ -2241,18 +2343,18 @@ test.describe('DEV World Sandbox', () => {
 
 	test('grows merged bubbles by content while increasing the maximum with member count', async ({ page }) => {
 		const fixtures = [
-			{ query: 'merged2', longQuery: 'merged2-long', count: 2, maxWidth: 330, members: ['b', 'c'] },
-			{ query: 'merged3', longQuery: 'merged3-long', count: 3, maxWidth: 345, members: ['b', 'c', 'd'] },
-			{ query: 'merged4', longQuery: 'merged4-long', count: 4, maxWidth: 360, members: ['b', 'c', 'd', 'e'] }
+			{ query: 'speech-merged-2', longQuery: 'speech-merged-2-long', count: 2, maxWidth: 330, members: ['b', 'c'] },
+			{ query: 'speech-merged-3', longQuery: 'speech-merged-3-long', count: 3, maxWidth: 345, members: ['b', 'c', 'd'] },
+			{ query: 'speech-merged-4', longQuery: 'speech-merged-4-long', count: 4, maxWidth: 360, members: ['b', 'c', 'd', 'e'] }
 		] as const;
 
 		for (const fixture of fixtures) {
-			await page.goto(`/?devWorld=1&devSpeech=${fixture.query}`);
+			await page.goto(`/?devWorld=1&devScenario=${fixture.query}`);
 			await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 			await expect(page.locator('.bubble-merged')).toHaveAttribute('data-merged-members', String(fixture.count));
 			const short = await readMergedBubbleGeometry(page, fixture.members);
 
-			await page.goto(`/?devWorld=1&devSpeech=${fixture.longQuery}`);
+			await page.goto(`/?devWorld=1&devScenario=${fixture.longQuery}`);
 			await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 			const long = await readMergedBubbleGeometry(page, fixture.members);
 
@@ -2265,12 +2367,12 @@ test.describe('DEV World Sandbox', () => {
 	});
 
 	test('changes bubble height with rendered lines and keeps the five-line ceiling', async ({ page }) => {
-		const fixtures = ['merged2', 'linebreak', 'linebreak-five', 'linebreak-overflow'] as const;
+		const fixtures = ['speech-merged-2', 'speech-linebreak', 'speech-linebreak-five', 'speech-linebreak-overflow'] as const;
 		const normalHeights: number[] = [];
 		const mergedHeights: number[] = [];
 
 		for (const query of fixtures) {
-			await page.goto(`/?devWorld=1&devSpeech=${query}`);
+			await page.goto(`/?devWorld=1&devScenario=${query}`);
 			await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 			normalHeights.push(await page.locator('.bubble-normal').first().evaluate((element) => element.getBoundingClientRect().height));
 			mergedHeights.push(await page.locator('.bubble-merged').first().evaluate((element) => element.getBoundingClientRect().height));
@@ -2285,7 +2387,7 @@ test.describe('DEV World Sandbox', () => {
 	});
 
 	test('does not add an ellipsis when both bubbles fit exactly five rendered lines', async ({ page }) => {
-		await page.goto('/?devWorld=1&devSpeech=linebreak-five');
+		await page.goto('/?devWorld=1&devScenario=speech-linebreak-five');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 
 		const bubbles = page.locator('.bubble');
@@ -2313,7 +2415,7 @@ test.describe('DEV World Sandbox', () => {
 	});
 
 	test('keeps similar wrapping information when the same content becomes merged', async ({ page }) => {
-		await page.goto('/?devWorld=1&devSpeech=comparison');
+		await page.goto('/?devWorld=1&devScenario=speech-comparison');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 		await expect(page.locator('.bubble-normal[data-speech-type="shout"]')).toHaveCount(1);
 		await expect(page.locator('.bubble-merged')).toHaveCount(1);
@@ -2344,7 +2446,7 @@ test.describe('DEV World Sandbox', () => {
 
 	test('prevents field UI selection while keeping speech and profile text selectable', async ({ page }) => {
 		await page.setViewportSize({ width: 1200, height: 900 });
-		await page.goto('/?devWorld=1&devSpeech=comparison');
+		await page.goto('/?devWorld=1&devScenario=speech-comparison');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 
 		const blank = await fieldOwnedBlankPoint(page, { x: 2, y: 2 });
@@ -2373,7 +2475,7 @@ test.describe('DEV World Sandbox', () => {
 		await page.evaluate(() => window.getSelection()?.removeAllRanges());
 		expect(await dragSelect(liveText)).not.toBe('');
 		expect(await dragSelect(page.locator('.bubble-merged .bubble-content'))).not.toBe('');
-		await page.goto('/?devWorld=1&devSpeech=timeline');
+		await page.goto('/?devWorld=1&devScenario=chatter-timeline');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 		const showChatter = page.getByRole('button', { name: 'Show Chatter' });
 		if (await showChatter.count()) await showChatter.click();
@@ -2381,13 +2483,13 @@ test.describe('DEV World Sandbox', () => {
 		expect(await dragSelect(page.locator('.timeline-content').first())).not.toBe('');
 		expect(await dragSelect(page.locator('.timeline-name').first())).not.toBe('');
 
-		await page.goto('/?devWorld=1&devTrace=replies');
+		await page.goto('/?devWorld=1&devScenario=trace-replies');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 		await page.locator('[data-cell-position="8,4"]').click();
 		await expect(page.locator('.trace-root-bubble .bubble-content')).toBeVisible();
 		expect(await dragSelect(page.locator('.trace-root-bubble .bubble-content'))).not.toBe('');
 
-		await page.goto('/?devWorld=1&devSpeech=timeline');
+		await page.goto('/?devWorld=1&devScenario=chatter-timeline');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 		await page.locator('.timeline-name').first().click();
 		const dialog = profileDialog(page);
@@ -2406,7 +2508,7 @@ test.describe('DEV World Sandbox', () => {
 
 	test('keeps clamped bubbles and explicit ellipsis inside the safe bounds at 320px', async ({ page }) => {
 		await page.setViewportSize({ width: 320, height: 844 });
-		await page.goto('/?devWorld=1&devSpeech=linebreak-overflow');
+		await page.goto('/?devWorld=1&devScenario=speech-linebreak-overflow');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 
 		const bubbles = page.locator('.bubble-merged');
@@ -2436,7 +2538,7 @@ test.describe('DEV World Sandbox', () => {
 	});
 
 	test('renders the full speech showcase with eight colors and a merged bubble', async ({ page }) => {
-		await page.goto('/?devWorld=1&devSpeech=1');
+		await page.goto('/?devWorld=1&devScenario=speech-showcase');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 		await expect(page.locator('.participant')).toHaveCount(8);
 		await expect(page.locator('.bubble-normal')).toHaveCount(8);
@@ -2540,14 +2642,14 @@ test.describe('DEV World Sandbox', () => {
 
 	test('scales merged bubbles and distributes merged tail starts for 2, 3, and 4 members', async ({ page }) => {
 		const fixtures = [
-			{ query: 'merged2', count: 2, members: ['b', 'c'] },
-			{ query: 'merged3', count: 3, members: ['b', 'c', 'd'] },
-			{ query: 'merged4', count: 4, members: ['b', 'c', 'd', 'e'] }
+			{ query: 'speech-merged-2', count: 2, members: ['b', 'c'] },
+			{ query: 'speech-merged-3', count: 3, members: ['b', 'c', 'd'] },
+			{ query: 'speech-merged-4', count: 4, members: ['b', 'c', 'd', 'e'] }
 		] as const;
 		const geometries = [];
 
 		for (const fixture of fixtures) {
-			await page.goto(`/?devWorld=1&devSpeech=${fixture.query}`);
+			await page.goto(`/?devWorld=1&devScenario=${fixture.query}`);
 			await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 			await expect(page.locator('.bubble-merged')).toHaveAttribute('data-merged-members', String(fixture.count));
 			await expect(page.locator('.bubble-merged small')).toHaveCount(0);
@@ -2581,7 +2683,7 @@ test.describe('DEV World Sandbox', () => {
 
 	test('uses compact mobile presentation values and remeasures normal bubbles across the breakpoint', async ({ page }) => {
 		await page.setViewportSize({ width: 1100, height: 850 });
-		await page.goto('/?devWorld=1&devSpeech=long');
+		await page.goto('/?devWorld=1&devScenario=speech-long');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 		const readNormalStyle = () => page.locator('.bubble-normal').first().evaluate((element) => {
 			const style = getComputedStyle(element);
@@ -2595,7 +2697,7 @@ test.describe('DEV World Sandbox', () => {
 		expect(await readNormalStyle()).toMatchObject({ fontSize: '16px', maxWidth: 240, padding: '12px 15px' });
 
 		await page.setViewportSize({ width: 390, height: 844 });
-		await page.goto('/?devWorld=1&devSpeech=long');
+		await page.goto('/?devWorld=1&devScenario=speech-long');
 		await expect(page.locator('.bubble-normal')).toBeVisible();
 		await expect.poll(readNormalStyle).toMatchObject({ fontSize: '13px', maxWidth: 180, padding: '8px 10px' });
 		const mobileLongWidth = (await readNormalStyle()).width;
@@ -2611,11 +2713,11 @@ test.describe('DEV World Sandbox', () => {
 		await page.setViewportSize({ width: 390, height: 844 });
 		const geometries = [];
 		for (const fixture of [
-			{ query: 'merged2', count: 2, fontSize: '15px', minWidth: '72px', maxWidth: '220px', padding: '9px 12px', members: ['b', 'c'] },
-			{ query: 'merged3', count: 3, fontSize: '16px', minWidth: '88px', maxWidth: '232px', padding: '10px 14px', members: ['b', 'c', 'd'] },
-			{ query: 'merged4', count: 4, fontSize: '17px', minWidth: '104px', maxWidth: '244px', padding: '11px 16px', members: ['b', 'c', 'd', 'e'] }
+			{ query: 'speech-merged-2', count: 2, fontSize: '15px', minWidth: '72px', maxWidth: '220px', padding: '9px 12px', members: ['b', 'c'] },
+			{ query: 'speech-merged-3', count: 3, fontSize: '16px', minWidth: '88px', maxWidth: '232px', padding: '10px 14px', members: ['b', 'c', 'd'] },
+			{ query: 'speech-merged-4', count: 4, fontSize: '17px', minWidth: '104px', maxWidth: '244px', padding: '11px 16px', members: ['b', 'c', 'd', 'e'] }
 		] as const) {
-			await page.goto(`/?devWorld=1&devSpeech=${fixture.query}`);
+			await page.goto(`/?devWorld=1&devScenario=${fixture.query}`);
 			await expect(page.locator('.bubble-merged')).toHaveAttribute('data-merged-members', String(fixture.count));
 			const style = await page.locator('.bubble-merged').evaluate((element) => {
 				const computed = getComputedStyle(element);
@@ -2630,13 +2732,13 @@ test.describe('DEV World Sandbox', () => {
 		expect(geometries[1].height).toBeGreaterThan(geometries[0].height);
 		expect(geometries[2].height).toBeGreaterThan(geometries[1].height);
 
-		await page.goto('/?devWorld=1&devSpeech=long');
+		await page.goto('/?devWorld=1&devScenario=speech-long');
 		await expect.poll(() => page.locator('.bubble-merged').evaluate((element) => element.getBoundingClientRect().width)).toBeLessThanOrEqual(220);
 	});
 
 	test('compacts Trace root and replies on mobile and restores desktop values after resize', async ({ page }) => {
 		await page.setViewportSize({ width: 390, height: 844 });
-		await page.goto('/?devWorld=1&devTrace=replies');
+		await page.goto('/?devWorld=1&devScenario=trace-replies');
 		await page.locator('[data-cell-position="8,4"]').click();
 		await expect(page.locator('.trace-root-card')).toHaveAttribute('data-trace-geometry-ready', 'ready');
 		const root = page.locator('.trace-root-bubble');
@@ -2732,7 +2834,7 @@ test.describe('DEV World Sandbox', () => {
 	});
 
 	test('starts movement from noninteractive Chatter space', async ({ page }) => {
-		await page.goto('/?devWorld=1&devSpeech=timeline');
+		await page.goto('/?devWorld=1&devScenario=chatter-timeline');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 		const showChatter = page.getByRole('button', { name: 'Show Chatter' });
 		if (await showChatter.count()) await showChatter.click();
@@ -2747,7 +2849,7 @@ test.describe('DEV World Sandbox', () => {
 	});
 
 	test('starts movement from movement-capable speech presentation space', async ({ page }) => {
-		await page.goto('/?devWorld=1&devSpeech=comparison');
+		await page.goto('/?devWorld=1&devScenario=speech-comparison');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 		const start = await speechMovementPoint(page);
 		await page.mouse.move(start.x, start.y);
@@ -2759,7 +2861,7 @@ test.describe('DEV World Sandbox', () => {
 	});
 
 	test('does not start movement from the Composer dock', async ({ page }) => {
-		await page.goto('/?devWorld=1&devTrace=replies');
+		await page.goto('/?devWorld=1&devScenario=trace-replies');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 		await expect(page.locator('.composer-dock')).toBeVisible();
 		const self = page.locator('.participant[data-self="true"]');
@@ -2843,7 +2945,7 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '8,3');
 		await expect(profileDialog(page)).toBeHidden();
 
-		await page.goto('/?devWorld=1&devTrace=lights');
+		await page.goto('/?devWorld=1&devScenario=trace-markers');
 		const cellTrigger = page.locator('[data-cell-position="8,4"]');
 		const cellBox = await cellTrigger.boundingBox();
 		if (!cellBox) throw new Error('Expected the trace cell selection trigger to be visible.');
@@ -2857,7 +2959,7 @@ test.describe('DEV World Sandbox', () => {
 	});
 
 	test('starts mouse movement from the investigated root author ghost', async ({ page }) => {
-		await page.goto('/?devWorld=1&devTrace=lights');
+		await page.goto('/?devWorld=1&devScenario=trace-markers');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 		await page.locator('[data-cell-position="8,4"]').click();
 		const ghost = page.locator('.trace-ghost-profile-trigger');
@@ -2891,7 +2993,7 @@ test.describe('DEV World Sandbox', () => {
 	});
 
 	test('keeps tap selection separate from pointer movement and preserves participant trace menus', async ({ page }) => {
-		await page.goto('/?devWorld=1&devTrace=lights');
+		await page.goto('/?devWorld=1&devScenario=trace-markers');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 		await page.locator('[data-cell-position="8,4"]').click();
 		await expect(page.getByRole('menu', { name: 'Cell actions' })).toHaveCount(0);
@@ -2927,7 +3029,7 @@ test.describe('DEV World Sandbox', () => {
 	});
 
 	test('does not move into an occupied cell through the pointer joystick', async ({ page }) => {
-		await page.goto('/?devWorld=1&devSpeech=1');
+		await page.goto('/?devWorld=1&devScenario=speech-showcase');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '7,3');
@@ -2941,7 +3043,7 @@ test.describe('DEV World Sandbox', () => {
 	});
 
 		test('allows a diagonal when only its orthogonal side cells are occupied', async ({ page }) => {
-		await page.goto('/?devWorld=1&devSpeech=1');
+		await page.goto('/?devWorld=1&devScenario=speech-showcase');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 
 		const self = page.locator('.participant[data-self="true"]');
@@ -2956,7 +3058,7 @@ test.describe('DEV World Sandbox', () => {
 	});
 
 	test('blocks an occupied diagonal destination and a diagonal field edge', async ({ page }) => {
-		await page.goto('/?devWorld=1&devSpeech=1');
+		await page.goto('/?devWorld=1&devScenario=speech-showcase');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 		const self = page.locator('.participant[data-self="true"]');
 		await expect(self).toHaveAttribute('data-position', '7,3');
@@ -3648,14 +3750,16 @@ test.describe('DEV World Sandbox', () => {
 		await page.setViewportSize({ width: 390, height: 844 });
 		await page.goto('/?devWorld=1');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
-		await page.waitForTimeout(1000);
+		await page.locator('.sandbox-mobile-toggle').click();
+		await expect(page.locator('.sandbox-mobile-toggle-wrapper')).toHaveAttribute('open', '');
+		await expect(page.getByLabel('DEV speech sound injector')).toBeVisible();
 		const self = page.locator('.participant[data-self="true"]');
 		const positionBefore = await self.getAttribute('data-position');
 		for (const [label, speechType] of [['Normal', 'normal'], ['Shout', 'shout'], ['Monologue', 'monologue']] as const) {
-			await page.getByRole('button', { name: `Inject live ${label} speech` }).click();
+			await page.locator('.sandbox-speech-injector button').nth(label === 'Normal' ? 0 : label === 'Shout' ? 1 : 2).click();
 			await expect(page.locator(`.bubble-normal[data-speech-type="${speechType}"]`)).toBeVisible();
 		}
-		await page.getByRole('button', { name: 'Inject live Normal speech' }).click();
+		await page.locator('.sandbox-speech-injector button').first().click();
 		await expect(page.locator('.bubble-normal[data-speech-type="normal"]')).toContainText('Sound test: normal #4');
 		expect(await self.getAttribute('data-position')).toBe(positionBefore);
 	});

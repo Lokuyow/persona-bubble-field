@@ -3,6 +3,7 @@ import { createPresenceState, type PresenceField, type PresenceState } from '../
 import { DEV_WORLD_SELF_ID } from '../devWorldSandbox';
 import { createRecentMessageTimeline, type RecentMessageTimeline } from '../recentMessageTimeline';
 import type { ParsedTraceReply, ParsedWorldMessage } from '../nostrProtocol';
+import type { DevScenario } from './devScenarios';
 
 type FixturePorts = Readonly<{
 	field: PresenceField;
@@ -16,32 +17,32 @@ type FixturePorts = Readonly<{
 }>;
 
 /** Apply the existing fixtures synchronously, before DEV presence overrides and runtime setup. */
-export function applyDevPageFixtures(searchParams: URLSearchParams, ports: FixturePorts): void {
-	const devSpeech = searchParams.get('devSpeech');
-	if (devSpeech) {
-		if (devSpeech === '1') seedDevSpeechNormalFixture();
-		const mergedMemberCount = devSpeech.startsWith('merged2') ? 2 : devSpeech.startsWith('merged3') ? 3 : devSpeech.startsWith('merged4') ? 4 : 0;
+export function applyDevPageFixtures(scenario: DevScenario, ports: FixturePorts): void {
+	const fixture = scenario.fixture;
+	if (fixture.kind === 'speech') {
+		const fixtureId = fixture.fixture;
+		if (fixtureId === 'showcase') seedDevSpeechNormalFixture();
+		const mergedMemberCount = fixtureId.startsWith('merged2') ? 2 : fixtureId.startsWith('merged3') ? 3 : fixtureId.startsWith('merged4') ? 4 : 0;
 		if (mergedMemberCount > 0) {
-			const mergedContent = devSpeech.endsWith('-long')
+			const mergedContent = fixtureId.endsWith('-long')
 				? 'Merged bubble content grows naturally until its size limit. '.repeat(8).trim()
 				: undefined;
-			const mergedSpeechType = devSpeech.includes('shout') ? 'shout' : devSpeech.includes('monologue') ? 'monologue' : 'normal';
+			const mergedSpeechType = fixtureId.includes('shout') ? 'shout' : fixtureId.includes('monologue') ? 'monologue' : 'normal';
 			seedDevSpeechMergedFixture(mergedMemberCount, mergedContent, mergedSpeechType);
 		}
-		if (devSpeech === 'types') seedDevSpeechTypeFixture();
-		if (devSpeech === 'normal-sizes') seedDevSpeechNormalSizeFixture();
-		if (devSpeech === 'comparison') seedDevSpeechComparisonFixture();
-		if (devSpeech === 'linebreak') seedDevSpeechLinebreakFixture();
-		if (devSpeech === 'linebreak-five') seedDevSpeechLinebreakFiveFixture();
-		if (devSpeech === 'long') seedDevSpeechLongFixture();
-		if (devSpeech === 'linebreak-overflow') seedDevSpeechLinebreakOverflowFixture();
-		if (devSpeech === 'timeline') seedDevRecentMessageTimelineFixture();
+		if (fixtureId === 'types') seedDevSpeechTypeFixture();
+		if (fixtureId === 'normal-sizes') seedDevSpeechNormalSizeFixture();
+		if (fixtureId === 'comparison') seedDevSpeechComparisonFixture();
+		if (fixtureId === 'linebreak') seedDevSpeechLinebreakFixture();
+		if (fixtureId === 'linebreak-five') seedDevSpeechLinebreakFiveFixture();
+		if (fixtureId === 'long') seedDevSpeechLongFixture();
+		if (fixtureId === 'linebreak-overflow') seedDevSpeechLinebreakOverflowFixture();
 	}
-	const devTrace = searchParams.get('devTrace');
-	if (devTrace === 'lights' || devTrace === 'replies') {
+	if (fixture.kind === 'chatter-timeline') seedDevRecentMessageTimelineFixture();
+	if (fixture.kind === 'trace') {
 		seedDevTraceMarkerFixture();
 	}
-	if (devTrace === 'replies') {
+	if (fixture.kind === 'trace' && fixture.replies) {
 		ports.enableTraceReplyFixture();
 		seedDevTraceReplyFixture();
 	}
@@ -73,6 +74,7 @@ export function applyDevPageFixtures(searchParams: URLSearchParams, ports: Fixtu
 		messages.push({ ...messages[22], id: 'dev-timeline-duplicate', content: 'duplicate event ID' });
 		ports.setRecentMessageTimeline(createRecentMessageTimeline(messages));
 	}
+
 
 	function seedDevTraceMarkerFixture(): void {
 		const nowMs = Date.now();
