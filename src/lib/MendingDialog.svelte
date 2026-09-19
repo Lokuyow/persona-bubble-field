@@ -1,5 +1,11 @@
 <script lang="ts">
 	import { Dialog } from 'bits-ui';
+	import Coins from '~icons/tabler/coins';
+	import Clock from '~icons/tabler/clock';
+	import ChevronDown from '~icons/tabler/chevron-down';
+	import ChevronUp from '~icons/tabler/chevron-up';
+	import Heart from '~icons/tabler/heart';
+	import Wallet from '~icons/tabler/wallet';
 	import type { MendingProjection } from '$lib/mending';
 	import { formatElapsedDuration, formatRemainingDuration } from '$lib/lifespanHud';
 
@@ -12,16 +18,38 @@
 		onStart: () => void;
 		onCollect: () => void;
 	}>;
+
 	let { open, projection, hasJob, points: ownedPointsValue, onOpenChange, onStart, onCollect }: Props = $props();
-	let elapsedDuration = $derived(formatElapsedDuration(projection?.processedDurationMs ?? 0));
-	let maximumDuration = $derived(formatElapsedDuration((projection?.processedDurationMs ?? 0) + (projection?.remainingDurationMs ?? 0)));
+	let detailsOpen = $state(false);
 	let remainingDuration = $derived(formatRemainingDuration(projection?.remainingDurationMs ?? 0));
 	let lifespanDuration = $derived(formatElapsedDuration(projection?.lifespanExtensionMs ?? 0));
 	let unclaimedPoints = $derived(String(projection?.points ?? 0));
 	let ownedPoints = $derived(String(ownedPointsValue));
-	let nextPointDuration = $derived(projection?.nextPointRemainingMs === null || projection?.nextPointRemainingMs === undefined ? null : formatRemainingDuration(projection.nextPointRemainingMs));
+	let nextPointSeconds = $derived(projection?.nextPointRemainingMs === null || projection?.nextPointRemainingMs === undefined
+		? null
+		: Math.min(60, Math.max(1, Math.ceil(projection.nextPointRemainingMs / 1000))));
 	let totalDurationMs = $derived((projection?.processedDurationMs ?? 0) + (projection?.remainingDurationMs ?? 0));
 	let progressPercent = $derived(Math.min(100, totalDurationMs > 0 ? (projection?.processedDurationMs ?? 0) / totalDurationMs * 100 : 0));
+	let pointRate = $derived(((projection?.pointRateHundredthsPerMinute ?? 0) / 100).toFixed(2));
+	let lifespanRateMinutes = $derived(formatRateMinutes(projection?.lifespanExtensionRateHundredthsPerHour ?? 0));
+	let accelerationMultiplier = $derived(((projection?.accelerationMultiplierTenths ?? 10) / 10).toFixed(2));
+	let maximumLifespan = $derived(formatDaysOrDuration(projection?.maximumLifespanMs ?? 0));
+	let accelerationRemaining = $derived(`有効作業 残り${formatElapsedDuration(projection?.accelerationRemainingMs ?? 0)}`);
+
+	function formatRateMinutes(rateHundredthsPerHour: number): string {
+		const minutes = rateHundredthsPerHour * 0.6;
+		return Number.isInteger(minutes) ? String(minutes) : minutes.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+	}
+
+	function formatDaysOrDuration(durationMs: number): string {
+		const dayMs = 24 * 60 * 60 * 1000;
+		if (durationMs >= dayMs && durationMs % dayMs === 0) return `${durationMs / dayMs}日`;
+		return formatElapsedDuration(durationMs);
+	}
+
+	$effect(() => {
+		if (!open) detailsOpen = false;
+	});
 </script>
 
 <Dialog.Root bind:open={() => open, onOpenChange}>
@@ -31,10 +59,13 @@
 			<Dialog.Content class="mending-dialog-content" preventScroll={false}>
 				<div class="terminal-dialog-header">
 					<div>
-						<Dialog.Title>作業</Dialog.Title>
-						<Dialog.Description>時間の経過で進捗が蓄積され、寿命延長とポイントを受け取れます。</Dialog.Description>
+						<Dialog.Title>作業中</Dialog.Title>
+						<Dialog.Description class="sr-only">時間の経過で成果が蓄積され、ポイントと寿命延長を受け取れます。</Dialog.Description>
 					</div>
-					<div class="terminal-status-chip">POINT {ownedPoints} pt</div>
+					<div class="owned-points" data-mending-icon="wallet" aria-label={`所持ポイント ${ownedPoints} pt`}>
+						<Wallet aria-hidden="true" />
+						<span>{ownedPoints} pt</span>
+					</div>
 				</div>
 				{#if !hasJob}
 					<section class="idle-state">
@@ -43,30 +74,37 @@
 					</section>
 				{:else}
 					<section class="progress-section" aria-label="作業の進捗">
-						<div class="progress-heading">
-							<strong>{elapsedDuration} / {maximumDuration}</strong>
-							<span>{Math.round(progressPercent)}%</span>
-						</div>
+						<strong class="progress-heading">{projection?.completed ? '上限に達しました' : `上限まで あと${remainingDuration}`}</strong>
 						<div class="progress-track" role="progressbar" aria-label="作業の蓄積進捗" aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(progressPercent)}>
 							<div class="progress-value" style={`width: ${progressPercent}%;`}></div>
 						</div>
-						<p class="remaining-value">{projection?.completed ? '蓄積上限に達しています' : `残り ${remainingDuration}`}</p>
-						{#if nextPointDuration}<p class="remaining-value">次の1ptまで {nextPointDuration}</p>{/if}
 					</section>
 					<section class="result-section" aria-labelledby="mending-result-title">
-						<h3 id="mending-result-title">今回受け取れる成果</h3>
-						<div class="result-grid">
-							<div class="result-card"><span>寿命延長</span><strong>+{lifespanDuration}</strong></div>
-							<div class="result-card"><span>ポイント</span><strong>+{unclaimedPoints}pt</strong></div>
+						<h3 id="mending-result-title">今受け取れる</h3>
+						<div class="result-list">
+							<div class="result-row" data-mending-icon="coins"><Coins aria-hidden="true" /><span>+{unclaimedPoints} pt</span></div>
+							<div class="result-row" data-mending-icon="heart"><Heart aria-hidden="true" /><span>寿命 +{lifespanDuration}</span></div>
 						</div>
 					</section>
-					<section class="details-section" aria-label="作業の現在効果">
-						<p>通常作業: {projection?.regularDurationMs ? formatElapsedDuration(projection.regularDurationMs) : '0分'} / Context {formatElapsedDuration(projection?.contextCapacityMs ?? 0)}</p>
-						<p>現在のポイント率: {((projection?.pointRateHundredthsPerMinute ?? 0) / 100).toFixed(2)} pt/分</p>
-						<p>現在の寿命延長率: +{((projection?.lifespanExtensionRateHundredthsPerHour ?? 0) / 100).toFixed(2)} h/h</p>
-						<p>最大寿命: {formatElapsedDuration(projection?.maximumLifespanMs ?? 0)} / 加速残り: {formatElapsedDuration(projection?.accelerationRemainingMs ?? 0)}</p>
+					{#if nextPointSeconds !== null}
+						<p class="next-point" data-mending-icon="clock"><Clock aria-hidden="true" />次の1ptまで {nextPointSeconds}秒</p>
+					{/if}
+					<section class="details-section" aria-label="作業の詳細">
+						<button class="details-toggle" type="button" aria-expanded={detailsOpen} onclick={() => detailsOpen = !detailsOpen}>
+							<span>{detailsOpen ? '詳細を閉じる' : '詳細を見る'}</span>
+							{#if detailsOpen}<ChevronUp aria-hidden="true" />{:else}<ChevronDown aria-hidden="true" />{/if}
+						</button>
+						{#if detailsOpen}
+							<div class="details-content">
+								<p>現在のポイント速度 <strong>{pointRate} pt/分</strong></p>
+								<p>最大蓄積 <strong>{formatElapsedDuration(projection?.contextCapacityMs ?? 0)}</strong></p>
+								<p>1時間の作業で寿命 <strong>+{lifespanRateMinutes}分</strong></p>
+								<p>推論加速 <strong>×{accelerationMultiplier}</strong>（{accelerationRemaining}）</p>
+								<p>最大寿命 <strong>{maximumLifespan}</strong></p>
+							</div>
+						{/if}
 					</section>
-					<button class="terminal-primary-action" type="button" onclick={onCollect}>受け取る</button>
+					<button class="terminal-primary-action" type="button" onclick={onCollect}>成果を受け取る</button>
 				{/if}
 				<Dialog.Close class="terminal-secondary-action">閉じる</Dialog.Close>
 			</Dialog.Content>
@@ -80,24 +118,30 @@
 	:global(.mending-dialog-content)::before { position: absolute; inset: 0; z-index: -1; border-radius: inherit; background-image: linear-gradient(rgba(67, 214, 221, 0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(67, 214, 221, 0.035) 1px, transparent 1px); background-size: 22px 22px; content: ''; pointer-events: none; }
 	.terminal-dialog-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding-bottom: 16px; border-bottom: 1px solid rgba(68, 222, 222, 0.36); }
 	:global(.mending-dialog-content h2) { margin: 0; color: #f2ffff; font-size: clamp(1.6rem, 4vw, 2.25rem); letter-spacing: 0.08em; }
-	:global(.mending-dialog-content [data-slot='dialog-description']) { display: block; margin-top: 6px; color: rgba(208, 246, 248, 0.78); font-size: 0.92rem; line-height: 1.5; }
-	.terminal-status-chip { flex: 0 0 auto; padding: 7px 10px; border: 1px solid rgba(68, 222, 222, 0.52); border-radius: 6px; color: #89ffff; font-size: 0.82rem; font-weight: 800; letter-spacing: 0.08em; }
-	.progress-section, .result-section { display: grid; gap: 10px; }
-	.progress-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-	.progress-heading strong { font-size: clamp(1.35rem, 4vw, 2rem); }
-	.progress-heading span { color: #8ffcff; font-weight: 800; }
+	:global(.mending-dialog-content .sr-only) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+	.owned-points { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 5px; padding-top: 4px; color: rgba(208, 246, 248, 0.78); font-size: 0.9rem; }
+	.owned-points :global(svg), .result-row :global(svg), .next-point :global(svg), .details-toggle :global(svg) { width: 18px; height: 18px; }
+	.owned-points :global(svg) { color: #9de8ed; }
+	.progress-section, .result-section, .details-section { display: grid; gap: 10px; }
+	.progress-heading { color: #f2ffff; font-size: clamp(1.35rem, 4vw, 2rem); }
 	.progress-track { height: 13px; overflow: hidden; border: 1px solid rgba(68, 222, 222, 0.78); border-radius: 999px; background: rgba(1, 35, 47, 0.86); }
 	.progress-value { height: 100%; min-width: 2px; background: linear-gradient(90deg, #27e6dd, #80ffff); box-shadow: 0 0 12px rgba(39, 230, 221, 0.7); }
-	.remaining-value, .idle-state p { margin: 0; color: rgba(208, 246, 248, 0.78); }
 	.result-section h3 { margin: 0; padding-top: 4px; color: #a4ffff; font-size: 1.05rem; letter-spacing: 0.08em; }
-	.result-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-	.result-card { display: grid; gap: 6px; padding: 16px; border: 1px solid rgba(68, 222, 222, 0.46); border-radius: 9px; background: rgba(4, 53, 66, 0.48); }
-	.result-card span { color: rgba(208, 246, 248, 0.74); font-size: 0.9rem; }
-	.result-card strong { color: #f2ffff; font-size: clamp(1.25rem, 3.5vw, 1.7rem); }
+	.result-list { display: grid; gap: 10px; }
+	.result-row, .next-point, .details-toggle { display: flex; align-items: center; gap: 9px; }
+	.result-row { color: #f2ffff; font-size: 1.15rem; font-weight: 800; }
+	.result-row :global(svg) { color: #85ffff; }
+	.next-point { margin: 0; color: rgba(208, 246, 248, 0.82); }
+	.next-point :global(svg) { color: #9de8ed; }
+	.details-toggle { justify-content: space-between; width: 100%; min-height: 40px; padding: 8px 0; border: 0; border-top: 1px solid rgba(68, 222, 222, 0.24); border-bottom: 1px solid rgba(68, 222, 222, 0.24); background: transparent; color: #a4ffff; font: inherit; font-weight: 800; text-align: left; cursor: pointer; }
+	.details-content { display: grid; gap: 8px; padding: 2px 0 4px; color: rgba(208, 246, 248, 0.78); font-size: 0.92rem; line-height: 1.45; }
+	.details-content p { margin: 0; display: flex; justify-content: space-between; gap: 16px; }
+	.details-content strong { color: #f2ffff; font-weight: 700; text-align: right; }
 	.idle-state { display: grid; gap: 14px; }
+	.idle-state p { margin: 0; color: rgba(208, 246, 248, 0.78); }
 	.terminal-primary-action, :global(.terminal-secondary-action) { min-height: 46px; border-radius: 7px; font: inherit; font-weight: 800; cursor: pointer; }
 	.terminal-primary-action { border: 1px solid #72ffff; background: linear-gradient(135deg, #20cfd0, #087eaa); box-shadow: 0 0 15px rgba(45, 229, 231, 0.3); color: #02141e; }
 	:global(.terminal-secondary-action) { border: 1px solid rgba(141, 208, 218, 0.42); background: rgba(8, 31, 47, 0.7); color: rgba(224, 250, 252, 0.86); text-align: center; }
 	:global(.mending-dialog-content button:focus-visible) { outline: 3px solid var(--color-focus-ring); outline-offset: 3px; }
-	@media (max-width: 560px) { .terminal-dialog-header { flex-direction: column; } .terminal-status-chip { width: fit-content; } .result-grid { grid-template-columns: 1fr; } }
+	@media (max-width: 560px) { .terminal-dialog-header { flex-direction: column; } .owned-points { padding-top: 0; } .details-content p { align-items: flex-start; flex-direction: column; gap: 2px; } .details-content strong { text-align: left; } }
 </style>
