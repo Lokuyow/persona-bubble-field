@@ -6,6 +6,11 @@ import {
 	buildRiftCommitAction,
 	buildRiftRevealAction,
 	createRiftSession,
+	RIFT_CONSULTATION_MS,
+	RIFT_RESULT_MS,
+	RIFT_ROUND_COUNT,
+	RIFT_ROUND_MS,
+	RIFT_SELECTION_MS,
 	getRiftRoundSchedule,
 	getRiftSchedule,
 	getRiftScheduleForInstance,
@@ -82,6 +87,20 @@ describe('Rift schedule and domain', () => {
 		expect(registration?.gameAtMs).toBe(createdAt * 1000 + 300_000);
 		expect(getRiftScheduleForInstance(instanceId, (createdAt + 630) * 1000)?.phase).toBe('ended');
 		expect(() => buildManualRiftInstanceId(createdAt, '0123456789ABCDEF0123456789ABCDEF')).toThrow();
+	});
+
+	it('uses the current adjustable phase parameters for all Rift schedules', () => {
+		expect(RIFT_CONSULTATION_MS).toBe(30_000);
+		expect(RIFT_SELECTION_MS).toBe(30_000);
+		expect(RIFT_RESULT_MS).toBe(20_000);
+		expect(RIFT_ROUND_MS).toBe(80_000);
+		const firstRound = getRiftRoundSchedule(SCHEDULE, 1);
+		const finalRound = getRiftRoundSchedule(SCHEDULE, RIFT_ROUND_COUNT);
+		expect(firstRound.selectionAtMs - firstRound.consultationAtMs).toBe(RIFT_CONSULTATION_MS);
+		expect(firstRound.resultAtMs - firstRound.selectionAtMs).toBe(RIFT_SELECTION_MS);
+		expect(firstRound.endedAtMs - firstRound.resultAtMs).toBe(RIFT_RESULT_MS);
+		expect(finalRound.endedAtMs - SCHEDULE.gameAtMs).toBe(240_000);
+		expect(SCHEDULE.endedAtMs - SCHEDULE.gameAtMs).toBe(240_000);
 	});
 
 	it('treats every non-empty manual/scheduled interval intersection as a conflict', () => {

@@ -330,6 +330,11 @@ test.describe('DEV World Sandbox', () => {
 		expect(nearHole).not.toBe(`${holePosition[0]},${holePosition[1]}`);
 		await hole.click();
 		await expect(next).toBeEnabled();
+		await expect(page.locator('[data-realtime-panel]')).toContainText('参加済み');
+		await expect(page.locator('[data-realtime-panel]')).toContainText('開始まで待ってください。');
+		await expect(page.locator('[data-realtime-hole-participating="true"]')).toHaveCount(1);
+		await expect(page.locator('[data-realtime-hole-trigger][aria-pressed="true"]')).toHaveCount(1);
+		await expect(page.locator('[data-realtime-hole-trigger][aria-pressed="true"]')).toHaveAttribute('aria-label', '抜け穴へ参加済み（参加先）');
 		await next.click();
 		await expect(page.locator('[data-realtime-panel]')).toContainText('参加者: 3');
 		await next.click();
@@ -367,6 +372,7 @@ test.describe('DEV World Sandbox', () => {
 		});
 	}
 	test('renders the experimental Rift registration and game fixtures without fixed-facility overlap', async ({ page }) => {
+		await page.setViewportSize({ width: 360, height: 640 });
 		await page.goto('/?devWorld=1&devScenario=rift-registration');
 		await expect(page.locator('[data-realtime-panel]')).toBeVisible();
 		await expect(page.locator('[data-realtime-panel]')).toContainText('参加受付');
@@ -386,6 +392,11 @@ test.describe('DEV World Sandbox', () => {
 			};
 		})).toEqual({ isImage: true, referencesRift: true, complete: true, naturalWidthPositive: true });
 		await expect(page.locator('[data-realtime-hole-trigger]')).toHaveCount(registration.length);
+		await page.getByText('ルールを見る', { exact: true }).click();
+		await expect(page.getByRole('dialog')).toContainText('ひとつの抜け穴には3〜6人が参加します。綻びは全3ラウンドです。');
+		await expect(page.getByRole('dialog')).toContainText('相談 30秒 → 選択 30秒 → 結果発表 20秒');
+		await expect(page.getByRole('dialog')).toContainText('維持する人数が足りない');
+		await page.getByText('ルールを見る', { exact: true }).click();
 
 		await page.goto('/?devWorld=1&devScenario=rift-game');
 		await expect(page.locator('[data-realtime-panel]')).toBeVisible();

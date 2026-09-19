@@ -61,6 +61,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	import MendingDialog from '$lib/MendingDialog.svelte';
 	import AdjustmentDialog from '$lib/AdjustmentDialog.svelte';
 	import RiftPanel from '$lib/RiftPanel.svelte';
+	import RiftRulesDialog from '$lib/RiftRulesDialog.svelte';
 	import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL, isBlockedFacilityCell, isWithinFacilityInteractionRange, sameFieldCell } from '$lib/fieldFacilities';
 	import { projectMending } from '$lib/mending';
 	import { getAbilityUpgrade, type PersonaAbilityKey } from '$lib/personaGameState';
@@ -314,6 +315,9 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	let riftSelection = $state<Readonly<{ round: 1 | 2 | 3; choice: RiftChoice; nonce: string; commitId: string | null; commitPublished: boolean; revealAttempted: boolean; revealStatus: 'idle' | 'sending' | 'published' | 'failed' }> | null>(null);
 	let riftLastResult = $state<string | null>(null);
 	let riftSettlementInFlight = $state(false);
+	let riftRulesDialogOpen = $state(false);
+	let riftRulesDialogMode = $state<'rules' | 'join-confirmation'>('rules');
+	let pendingRiftJoin = $state<{ instanceId: string; holeId: string; position: { x: number; y: number } } | null>(null);
 	const appliedRiftOutcomeIds = new Set<string>();
 	const realtimeRecoveryInstanceIds = new Set<string>();
 	let realtimeControlSince = 0;
@@ -1789,7 +1793,31 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			showTraceProximityFeedback(position, '近づくと抜け穴へ参加できる');
 			return;
 		}
-		await publishRiftAction({ action: 'join', holeId });
+		pendingRiftJoin = { instanceId: riftSchedule.instanceId, holeId, position: { ...position } };
+		riftRulesDialogMode = 'join-confirmation';
+		riftRulesDialogOpen = true;
+	}
+
+	function discardPendingRiftJoin(): void {
+		riftRulesDialogOpen = false;
+		pendingRiftJoin = null;
+	}
+
+	async function confirmRiftJoin(): Promise<void> {
+		const pending = pendingRiftJoin;
+		if (!pending) return;
+		const currentHole = realtimeHoles.find((hole) => hole.id === pending.holeId);
+		const isCurrentHole = currentHole?.position.x === pending.position.x && currentHole.position.y === pending.position.y;
+		const isInRange = Boolean(selfLogicalPosition && Math.max(
+			Math.abs(selfLogicalPosition.x - pending.position.x),
+			Math.abs(selfLogicalPosition.y - pending.position.y)
+		) <= 1);
+		const canStillJoin = Boolean(selfSigner && selfIsActive && selfLogicalPosition &&
+			riftSchedule.phase === 'registration' && pending.instanceId === riftSchedule.instanceId &&
+			isCurrentHole && isInRange);
+		discardPendingRiftJoin();
+		if (!canStillJoin) return;
+		await publishRiftAction({ action: 'join', holeId: pending.holeId });
 	}
 
 	async function chooseRiftChoice(choice: RiftChoice): Promise<void> {
@@ -2457,8 +2485,9 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 					{traceOnlyCellTriggers}
 					{facilityCellTriggers}
 					realtimeHoles={realtimeHoles}
-				realtimeHoleTriggers={realtimeHoleTriggers}
-				{participantViews}
+					realtimeHoleTriggers={realtimeHoleTriggers}
+					participatingRiftHoleId={riftSchedule.phase === 'registration' ? riftSelfHoleId : null}
+					{participantViews}
 				{selfProjectionId}
 				{movingParticipantIds}
 				{selfIsActive}
@@ -2513,6 +2542,13 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			onChoice={(choice) => { void chooseRiftChoice(choice); }}
 		/>
 	{/if}
+
+	<RiftRulesDialog open={riftRulesDialogOpen} mode={riftRulesDialogMode} onOpenChange={(open) => {
+		if (!open) discardPendingRiftJoin();
+	}} onJoin={() => { void confirmRiftJoin(); }} onViewRules={() => {
+		riftRulesDialogMode = 'rules';
+		riftRulesDialogOpen = true;
+	}} onCancel={discardPendingRiftJoin} />
 
 	<ProfileDialog
 		onOpenChange={handleProfileOpenChange}

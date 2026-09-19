@@ -199,7 +199,8 @@
 		.sandbox-controls.chatter-scenario { top: 8px; }
 		.sandbox-controls.trace-scenario { top: 8px; right: auto; bottom: auto; left: 50%; width: auto; align-items: center; transform: translateX(-50%); }
 		.sandbox-controls.trace-scenario .sandbox-control-panel { align-items: center; }
-		.sandbox-controls.rift-scenario { top: 148px; }
+		.sandbox-controls.rift-scenario { top: auto; right: 12px; bottom: 8px; left: auto; width: min(340px, calc(100vw - 24px)); align-items: stretch; transform: none; }
+		:global(.composer-available) .sandbox-controls.rift-scenario { top: auto; bottom: 8px; }
 		.sandbox-mobile-toggle-wrapper { display: block; }
 		.sandbox-control-panel { flex-direction: column; gap: 7px; }
 		.sandbox-control-panel { display: none; }

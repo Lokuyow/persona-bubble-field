@@ -1232,7 +1232,11 @@ test.describe('Relay startup', () => {
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
 			(request.filter.kinds as number[])[0] === 1111)).toBe(true);
 		const startupRequests = (await relayState(page)).state.requests;
-		expect(startupRequests.findIndex(isRealtimeRequest)).toBeGreaterThan(startupRequests.findIndex((request) => (request.filter.kinds as number[])[0] === 1111));
+		// Realtime may be requested before Trace finishes configuring. The
+		// priority contract is the final ownership after reconfiguration, not the
+		// incidental order of the first REQ packets.
+		expect(startupRequests.some(isRealtimeRequest)).toBe(true);
+		expect(startupRequests.some((request) => (request.filter.kinds as number[])[0] === 1111)).toBe(true);
 		await page.clock.runFor(10_001);
 		await expect(page.locator('[data-realtime-panel]')).toHaveAttribute('data-realtime-status', 'degraded');
 		await expect.poll(() => page.evaluate(() => (window as typeof window & { __relayStartupTest: { activeRealtimeCount(): number; activeTraceReplyCount(): number } }).__relayStartupTest.activeRealtimeCount())).toBe(0);
@@ -1400,6 +1404,52 @@ test.describe('Relay startup', () => {
 		await expect.poll(async () => readRealtimePendingInstances(page)).toEqual([]);
 	});
 
+	test('rejects a stale Rift join confirmation after movement or registration ends', async ({ page }) => {
+		let schedule = upcomingRegistrationSchedule();
+		const selfPosition = { x: 3, y: 2 };
+		while (true) {
+			const candidateHole = deriveRiftHolePositions(schedule.instanceId, { columns: 16, rows: 8 })[0];
+			if (Math.max(Math.abs(candidateHole.position.x - selfPosition.x), Math.abs(candidateHole.position.y - selfPosition.y)) > 1) break;
+			schedule = getRiftSchedule(schedule.endedAtMs + 1);
+		}
+		const hole = deriveRiftHolePositions(schedule.instanceId, { columns: 16, rows: 8 })[0];
+		const startTime = schedule.registrationAtMs + 1_000;
+		const selfSecret = fixtureSecret(19);
+		const selfPubkey = getPublicKey(selfSecret);
+		await page.clock.install({ time: startTime });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { primaryEvents: testEvents(startTime), realtimeEvents: [], realtimePublishOutcome: 'accepted' });
+		await seedRelayAccount(page, selfSecret, selfPubkey);
+		await page.goto('/');
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => (request.filter.kinds as number[])[0] === 42)).toBe(true);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		await expect(page.locator('[data-realtime-hole-trigger]')).toHaveCount(1);
+
+		const nearPosition = hole.position.y > 0 ? { x: hole.position.x, y: hole.position.y - 1 } : { x: hole.position.x, y: hole.position.y + 1 };
+		const nearEvent = finalizeEvent(buildPositionEventTemplate({ channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: nearPosition, slot: 0, createdAt: Math.floor((startTime + 2_000) / 1000) }), selfSecret);
+		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), nearEvent);
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', `${nearPosition.x},${nearPosition.y}`);
+
+		const farPosition = { x: hole.position.x > 2 ? hole.position.x - 2 : hole.position.x + 2, y: hole.position.y };
+		const farEvent = finalizeEvent(buildPositionEventTemplate({ channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: farPosition, slot: 0, createdAt: Math.floor((startTime + 3_000) / 1000) }), selfSecret);
+		await page.locator('[data-realtime-hole-trigger]').click();
+		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), farEvent);
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', `${farPosition.x},${farPosition.y}`);
+		await page.getByRole('button', { name: '参加する' }).click();
+		await expect(page.getByRole('dialog')).toHaveCount(0);
+
+		const nearEventAgain = finalizeEvent(buildPositionEventTemplate({ channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: nearPosition, slot: 0, createdAt: Math.floor((startTime + 4_000) / 1000) }), selfSecret);
+		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), nearEventAgain);
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', `${nearPosition.x},${nearPosition.y}`);
+		await page.locator('[data-realtime-hole-trigger]').click();
+		await page.clock.setSystemTime(schedule.gameAtMs + 1_000);
+		await page.clock.runFor(1_000);
+		await page.getByRole('button', { name: '参加する' }).click();
+		await expect(page.getByRole('dialog')).toHaveCount(0);
+		expect((await relayState(page)).state.published.filter((event) => event.kind === 7070 && event.pubkey === selfPubkey)).toHaveLength(0);
+	});
+
 	test('completes Rift join, snapshot, commit, automatic reveal, settlement, and reload recovery', async ({ page }) => {
 		let schedule = upcomingRegistrationSchedule();
 		const selfPosition = { x: 3, y: 2 };
@@ -1457,10 +1507,33 @@ test.describe('Relay startup', () => {
 		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), nearEvent);
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', `${nearPosition.x},${nearPosition.y}`);
 		await page.locator('[data-realtime-hole-trigger]').click();
+		await expect(page.getByRole('dialog')).toContainText('3〜6人 / 全3ラウンド');
+		await expect(page.getByRole('dialog')).toContainText('脱出を選んだ者は死亡');
+		expect((await relayState(page)).state.published.filter((event) => event.kind === 7070 && event.pubkey === selfPubkey)).toHaveLength(0);
+		await page.getByRole('button', { name: 'キャンセル' }).click();
+		await expect(page.getByRole('dialog')).toHaveCount(0);
+		expect((await relayState(page)).state.published.filter((event) => event.kind === 7070 && event.pubkey === selfPubkey)).toHaveLength(0);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { setRealtimePublishOutcome(outcome: 'accepted' | 'rejected' | 'echo' | 'no-response'): void } }).__relayStartupTest.setRealtimePublishOutcome('rejected'));
+		await page.locator('[data-realtime-hole-trigger]').click();
+		await page.getByRole('button', { name: '参加する' }).click();
+		await expect(page.getByRole('dialog')).toHaveCount(0);
+		await expect.poll(async () => (await relayState(page)).state.published.filter((event) => {
+			if (event.kind !== 7070 || event.pubkey !== selfPubkey) return false;
+			try { return (JSON.parse(event.content) as { action?: string }).action === 'join'; } catch { return false; }
+		}).length).toBeGreaterThan(0);
+		await expect(page.locator('[data-realtime-panel]')).not.toContainText('参加済み');
+		await expect(page.locator('[data-realtime-hole-trigger][aria-pressed="true"]')).toHaveCount(0);
+		await expect.poll(async () => readRealtimePendingInstances(page)).toEqual([]);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { setRealtimePublishOutcome(outcome: 'accepted' | 'rejected' | 'echo' | 'no-response'): void } }).__relayStartupTest.setRealtimePublishOutcome('accepted'));
+		await page.locator('[data-realtime-hole-trigger]').click();
+		await page.getByRole('button', { name: '参加する' }).click();
 		await expect.poll(async () => (await relayState(page)).state.published.some((event) => {
 			if (event.kind !== 7070 || event.pubkey !== selfPubkey) return false;
 			try { return (JSON.parse(event.content) as { action?: string }).action === 'join'; } catch { return false; }
 		})).toBe(true);
+		await expect(page.locator('[data-realtime-panel]')).toContainText('参加済み');
+		await expect(page.locator('[data-realtime-hole-trigger][aria-pressed="true"]')).toHaveCount(1);
+		await expect(page.locator('[data-realtime-hole-trigger][aria-pressed="true"]')).toHaveAttribute('aria-label', '抜け穴へ参加済み（参加先）');
 
 		const round = getRiftRoundSchedule(schedule, 1);
 		await page.clock.setSystemTime(round.selectionAtMs + 1_000);
