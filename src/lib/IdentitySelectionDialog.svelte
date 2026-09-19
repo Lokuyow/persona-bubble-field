@@ -13,6 +13,11 @@
 	let backdrop = $state<HTMLElement | null>(null);
 	let chosen = $state<SelectionCandidate | null>(null);
 	let rootBuild = $state<RootBuild>({ inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0 });
+	const ROOT_EFFECTS = {
+		inferenceAcceleration: ['×1.00', '×1.30', '×1.60', '×2.00'],
+		contextCompression: ['×1.00 / overflow lifespan 0%', '×1.50 / overflow lifespan 20%', '×2.00 / overflow lifespan 35%', '×3.00 / overflow lifespan 50%'],
+		hallucinationResistance: ['最大7日', '最大14日', '最大21日', '最大30日']
+	} as const;
 
 	function character(candidate: IdentityCandidate) {
 		const value = getCharacterById(candidate.characterId);
@@ -108,7 +113,7 @@
 					{#each selection.reusableIdentities as candidate}
 						{@const selectedCharacter = character(candidate)}
 						<div class="return-card" class:chosen={chosen === candidate}>
-							<button class="return-choice" type="button" onclick={() => choose(candidate)}>{selectedCharacter.name}（Run {candidate.generation}のIdentity）を使う</button>
+							<button class="return-choice" type="button" onclick={() => choose(candidate)}>{selectedCharacter.name}（Generation {candidate.generation}のIdentity）を使う</button>
 							<button class="export-nsec" type="button" onclick={() => onExportNsec(candidate)}>nsecを取得</button>
 						</div>
 					{/each}
@@ -118,7 +123,11 @@
 				<h2>Root build</h2>
 				<p>合計 {rootBuildCost(rootBuild)} / {usableRootPoints(rootPoints)} RP</p>
 				{#each [['inferenceAcceleration', '推論加速'], ['contextCompression', 'コンテキスト圧縮'], ['hallucinationResistance', 'ハルシネーション耐性']] as [key, label]}
+					{@const effects = ROOT_EFFECTS[key as keyof RootBuild]}
 					<div class="rank-row"><span>{label} Rank {rootBuild[key as keyof RootBuild]}</span><button type="button" onclick={() => changeRank(key as keyof RootBuild, -1)} disabled={rootBuild[key as keyof RootBuild] === 0}>−</button><button type="button" onclick={() => changeRank(key as keyof RootBuild, 1)} disabled={rootBuild[key as keyof RootBuild] === 3}>＋</button></div>
+					<ul class="rank-effects" aria-label={`${label}の効果`}>{#each effects as effect, rank}<li>Rank {rank}: {effect}</li>{/each}</ul>
+					{#if key === 'inferenceAcceleration'}<p class="rank-note">最初の有効通常作業24時間のpoint生成だけに適用</p>{/if}
+					{#if key === 'hallucinationResistance'}<p class="rank-note">fresh Run開始時寿命は常に7日</p>{/if}
 				{/each}
 				<button class="start-run" type="button" onclick={startRun} disabled={!chosen || !isRootBuildAllocatable(rootBuild, rootPoints)}>このbuildでRun開始</button>
 			</section>
@@ -174,6 +183,8 @@
 	.root-build p { margin: 0; color: rgb(255 255 255 / 75%); }
 	.rank-row { display: grid; grid-template-columns: 1fr 42px 42px; align-items: center; gap: 7px; }
 	.rank-row button { font-size: 1.2rem; }
+	.rank-effects { display: grid; gap: 2px; margin: 0 0 2px; padding-left: 18px; color: rgb(255 255 255 / 72%); font-size: .86rem; }
+	.rank-note { margin: -2px 0 2px; color: rgb(255 255 255 / 62%); font-size: .82rem; }
 	.rank-row button:disabled, .start-run:disabled { cursor: not-allowed; opacity: .45; }
 	.start-run { min-height: 46px; border-color: #72ffff; background: linear-gradient(135deg, #20cfd0, #087eaa); color: #02141e; font-weight: 800; }
 

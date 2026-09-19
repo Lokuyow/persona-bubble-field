@@ -141,8 +141,8 @@ function applyExtension(expiry: number, segmentEndMs: number, durationMs: number
 	return { expiry: addSafe(expiry, extension), extension };
 }
 
-function segmentEnd(job: MendingJob, elapsedBeforeMs: number, durationMs: number): number {
-	return addSafe(job.checkpointAtMs, elapsedBeforeMs + durationMs);
+function segmentEnd(checkpointAtMs: number, elapsedBeforeMs: number, durationMs: number): number {
+	return addSafe(checkpointAtMs, elapsedBeforeMs + durationMs);
 }
 
 /** Projects only the time since the persisted checkpoint using current abilities. */
@@ -194,13 +194,12 @@ export function projectMending(state: MendingState, nowMs: number, rootBuild: Ro
 	const regularRate = getHallucinationExtensionHundredths(abilities.hallucinationSuppression);
 	const currentPointRateHundredthsPerMinute = processedDurationMs >= contextCapacityMs ? 0 : state.inferenceAccelerationUsedMs + regularDurationMs < INFERENCE_ACCELERATION_BUDGET_MS ? baseRate * accelerationMultiplierTenths / 10 : baseRate;
 	const currentLifespanExtensionRateHundredthsPerHour = processedDurationMs >= contextCapacityMs ? regularRate * rootOverflowLifespanPercent(rootBuild.contextCompression) / 100 : regularRate;
-	const checkpointElapsed = job.processedDurationMs;
 	for (const [durationMs, rateHundredths, offset] of [
-		[acceleratedDurationMs, regularRate, checkpointElapsed],
-		[normalDurationMs, regularRate, checkpointElapsed + acceleratedDurationMs],
-		[overflowDurationMs, regularRate * rootOverflowLifespanPercent(rootBuild.contextCompression) / 100, checkpointElapsed + regularDurationMs]
+		[acceleratedDurationMs, regularRate, 0],
+		[normalDurationMs, regularRate, acceleratedDurationMs],
+		[overflowDurationMs, regularRate * rootOverflowLifespanPercent(rootBuild.contextCompression) / 100, regularDurationMs]
 	] as const) {
-		const result = applyExtension(expiry, segmentEnd(job, offset, durationMs), durationMs, rateHundredths, rootMaximumLifespanMs(rootBuild.hallucinationResistance));
+		const result = applyExtension(expiry, segmentEnd(job.checkpointAtMs, offset, durationMs), durationMs, rateHundredths, rootMaximumLifespanMs(rootBuild.hallucinationResistance));
 		expiry = result.expiry;
 		extension = addPoints(extension, result.extension);
 	}

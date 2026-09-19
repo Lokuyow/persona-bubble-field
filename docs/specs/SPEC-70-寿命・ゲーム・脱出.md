@@ -68,9 +68,9 @@ clear前はactive Identityのchild secretをexportしない。Root entropyの保
 
 作業の進行はcheckpoint settlementで計算する。能力effectをjobへsnapshotしない。最後のcheckpointから能力強化または回収までの期間を、その期間に有効だった能力とRoot buildで確定し、その後の期間には新しい能力を適用する。能力強化時は未回収の整数pointsを所持pointsへ移さず、unclaimed bucketへ残す。端末の近くで明示的に回収した時点までの成果はpartialでも受け取れ、1pt未満のprogress carryは失わない。dialogを開くだけでは回収しない。
 
-回収時には寿命延長をpersisted lifespanへmaterializeし、unclaimed pointsを所持pointsへ加算する。同時に回収時刻をcheckpointとして次のbucketを開始し、回収後も`mendingJob`はactiveなままである。current bucketの通常processed duration、unclaimed points、fractional carryは0から再開するが、Run全体の推論加速budgetはresetしない。processed durationが存在すれば今回の整数pointsが0でも回収を成立させ、processed durationが0の即時再回収は成立させない。
+回収時には寿命延長をpersisted lifespanへmaterializeし、unclaimed pointsを所持pointsへ加算する。同時に回収時刻をcheckpointとして次のbucketを開始し、回収後も`mendingJob`はactiveなままである。current bucketの通常processed durationとunclaimed integer pointsは0から再開するが、1pt未満のfractional point carryとRun全体の推論加速budgetは保持する。processed durationが存在すれば今回の整数pointsが0でも回収を成立させ、processed durationが0の即時再回収は成立させない。
 
-maximum durationへ到達した後はpointsと寿命延長の増加を停止し、上限超過時間を次bucketへ持ち越さない。上限到達後も同じ回収操作を行える。
+通常作業とpoint生成はmaximum durationへ到達した時点で停止し、overflow時間はpointsを生成せず、推論加速budgetも消費しない。overflow中の寿命延長はRootコンテキスト圧縮Rank 0/1/2/3に応じて通常率の0/20/35/50%だけ継続する。上限超過時間を次bucketへ持ち越さず、上限到達後も同じ回収操作を行える。
 
 ### 寿命延長
 
@@ -202,6 +202,6 @@ Runにはrun number、monotonic revision、started timestamp、Identity referenc
 
 正常なclear 1回につきRoot Pointを1つ加算する。Root PointはIdentity変更、fresh Run、死亡でも失わず、死亡やrealtime eventでは増えない。Root PointはRoot buildへ配分し、usable RPは`min(総RP, 9)`、各能力Rankは0〜3、Run開始時はusable RPを全て配分する。推論加速Rank 0/1/2/3は最初の有効通常作業24時間へ×1.00/1.30/1.60/2.00、コンテキスト圧縮Rank 0/1/2/3は通常容量へ×1.00/1.50/2.00/3.00を適用し、overflowの寿命延長率は0/20/35/50%、ハルシネーション耐性Rank 0/1/2/3は最大寿命を7/14/21/30日にする。出生時は常に7日である。Root buildはRun開始前にのみ配分・再配分でき、active Run中はfreezeする。RP9を超える余剰用途、高周回point sink、True End triggerは未決定とする。
 
-clear後はcurrent Identityのnsec取得、同じIdentityのfresh Runまたは別Identityの選択を可能にする。cleared Identityへ戻る場合は同じkey/pubkey/characterを維持してRun numberだけを増やし、Run-local stateを初期化する。clear済みIdentityの再利用回数に上限は設けない。clear処理、True End、Root mnemonicとIdentity Manifestの受け渡しは別途実装する。
+clear後はcurrent Identityのnsec取得、同じIdentityのfresh Runまたは別Identityの選択を可能にする。cleared Identityへ戻る場合は同じkey/pubkey/characterを維持してRun numberだけを増やし、Run-local stateを初期化する。clear済みIdentityの再利用回数に上限は設けない。True End、Root mnemonicとIdentity Manifestの受け渡しは別途実装する。
 
 True Endでは、Hako専用Rootの12語English BIP39 mnemonicとIdentity Manifestをユーザーへ渡す。ただしTrue Endはlocal Rootの自動削除を意味せず、Root削除機能は現在scope外である。Manifestは実際にselected、born、playedとなったIdentityのderivation mapping、pubkey、character、Run・clear・death等の履歴を記録する非secretの収容記録であり、未選択candidateやcandidate生成中にskipしたcandidate、Root mnemonicやchild nsec等のsecretは含めない。dead IdentityはTrue End後もHako上ではdeadのままとし、Root mnemonicからchild keyを再導出できることとHako内でresurrectできることは別概念である。Manifestの具体的なpublic export schemaはSPEC-90の未決定事項として残す。

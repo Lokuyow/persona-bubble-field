@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createInitialPersonaGameState } from './personaGameState';
 import { createMendingJob, isValidMendingJob, materializeMending, projectMending, settleMending } from './mending';
-import { INFERENCE_ACCELERATION_BUDGET_MS, type RootBuild } from './rootProgression';
+import { INFERENCE_ACCELERATION_BUDGET_MS, rootMaximumLifespanMs, type RootBuild } from './rootProgression';
 
 const minute = 60 * 1000;
 const hour = 60 * minute;
@@ -38,6 +38,40 @@ describe('checkpoint-settled asynchronous work', () => {
 		const projection = projectMending(afterUpgrade, 1_000 + 2 * hour, ZERO_BUILD);
 		expect(projection.lifespanExtensionMs).toBeGreaterThan(0);
 		expect(projection.lifespanExtensionMs).toBeGreaterThan(projectMending({ ...before, ...checkpointed }, 1_000 + 2 * hour, ZERO_BUILD).lifespanExtensionMs);
+	});
+
+	it('caps a checkpointed next segment at its actual wall-clock end', () => {
+		const before = { ...state(), abilities: { ...state().abilities, contextCapacity: 20, hallucinationSuppression: 100 } };
+		const checkpoint = settleMending(before, 1_000 + minute, ZERO_BUILD, false)!;
+		const checkpointed = { ...before, ...checkpoint };
+		const now = 1_000 + 2 * minute;
+		const projection = projectMending(checkpointed, now, ZERO_BUILD);
+		expect(checkpointed.mendingJob.processedDurationMs).toBe(minute);
+		expect(projection.effectiveExpiresAtMs).toBeLessThanOrEqual(now + rootMaximumLifespanMs(0));
+	});
+
+	it('keeps the maximum lifespan cap correct across multiple ability checkpoints', () => {
+		const before = { ...state(), abilities: { ...state().abilities, contextCapacity: 20, hallucinationSuppression: 100 } };
+		const first = settleMending(before, 1_000 + minute, ZERO_BUILD, false)!;
+		const afterFirst = { ...before, ...first, abilities: { ...before.abilities, hallucinationSuppression: 2 } };
+		const second = settleMending(afterFirst, 1_000 + 2 * minute, ZERO_BUILD, false)!;
+		const afterSecond = { ...afterFirst, ...second, abilities: { ...afterFirst.abilities, hallucinationSuppression: 3 } };
+		const now = 1_000 + 3 * minute;
+		const projection = projectMending(afterSecond, now, ZERO_BUILD);
+		expect(afterSecond.mendingJob.processedDurationMs).toBe(2 * minute);
+		expect(projection.effectiveExpiresAtMs).toBeLessThanOrEqual(now + rootMaximumLifespanMs(0));
+	});
+
+	it('keeps the actual-end cap invariant for every Root hallucination resistance rank', () => {
+		for (const rank of [0, 1, 2, 3]) {
+			const rootBuild = { ...ZERO_BUILD, hallucinationResistance: rank };
+			const before = { ...state(), abilities: { ...state().abilities, contextCapacity: 20, hallucinationSuppression: 100 } };
+			const checkpoint = settleMending(before, 1_000 + minute, rootBuild, false)!;
+			const checkpointed = { ...before, ...checkpoint };
+			const now = 1_000 + 2 * minute;
+			const projection = projectMending(checkpointed, now, rootBuild);
+			expect(projection.effectiveExpiresAtMs).toBeLessThanOrEqual(now + rootMaximumLifespanMs(rank));
+		}
 	});
 
 	it('does not backfill time lost at the old Context cap', () => {

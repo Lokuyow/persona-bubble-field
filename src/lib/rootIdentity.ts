@@ -329,12 +329,15 @@ function openLifecycleDatabase(): Promise<IDBPDatabase<LifecycleDatabase>> {
 		if (typeof indexedDB === 'undefined') throw new Error('IndexedDB is unavailable.');
 		return openDB<LifecycleDatabase>(DATABASE_NAME, DATABASE_VERSION, {
 			upgrade(db, oldVersion, _newVersion, transaction) {
-				if (oldVersion >= 6 && db.objectStoreNames.contains(ROOT_SECRET_STORE_NAME)) {
-					if (db.objectStoreNames.contains(PLAYER_LIFECYCLE_STORE_NAME)) db.deleteObjectStore(PLAYER_LIFECYCLE_STORE_NAME);
+				const hasRootStore = db.objectStoreNames.contains(ROOT_SECRET_STORE_NAME);
+				const hasPlayerStore = db.objectStoreNames.contains(PLAYER_LIFECYCLE_STORE_NAME);
+				if (oldVersion >= 6 && hasRootStore && hasPlayerStore) {
+					db.deleteObjectStore(PLAYER_LIFECYCLE_STORE_NAME);
 					db.createObjectStore(PLAYER_LIFECYCLE_STORE_NAME);
 					transaction.objectStore(PLAYER_LIFECYCLE_STORE_NAME).put({ kind: 'legacy-player-reset', sourceVersion: 1 }, PLAYER_STATE);
 					return;
 				}
+				if (oldVersion >= 6 && hasRootStore !== hasPlayerStore) return;
 				for (const name of Array.from(db.objectStoreNames)) db.deleteObjectStore(name);
 				db.createObjectStore(ROOT_SECRET_STORE_NAME);
 				db.createObjectStore(PLAYER_LIFECYCLE_STORE_NAME);
@@ -369,6 +372,10 @@ async function decryptRootEntropy(wrappingKey: CryptoKey, encryptedEntropy: Encr
 }
 
 async function readRootAndPlayer(db: IDBPDatabase<LifecycleDatabase>): Promise<ReadStorage> {
+	const hasRootStore = db.objectStoreNames.contains(ROOT_SECRET_STORE_NAME);
+	const hasPlayerStore = db.objectStoreNames.contains(PLAYER_LIFECYCLE_STORE_NAME);
+	if (hasRootStore !== hasPlayerStore) return { kind: 'corrupt', reason: 'partial-state' };
+	if (!hasRootStore && !hasPlayerStore) return null;
 	const stored = await readStoredRecords(db);
 	const rootEmpty = stored.rootKeys.length === 0;
 	const playerEmpty = stored.playerKeys.length === 0;
@@ -783,7 +790,7 @@ export async function applyRealtimeOutcome(expected: PersonaSnapshot, outcome: R
 
 async function prepareDeathSelection(entropy: Uint8Array, player: PlayerLifecycle): Promise<PendingSelection> {
 	const generation = Math.max(...player.identities.map((identity) => identity.generation), 0) + 1;
-	return preparePendingSelection(entropy, generation, new Set(player.identities.map((identity) => identity.characterId)), reusableIdentityCandidates(player.identities));
+	return preparePendingSelection(entropy, generation, new Set(player.identities.map((identity) => identity.characterId)));
 }
 
 export async function transitionRealtimeDeath(expected: PersonaSnapshot, outcome: RealtimeOutcome): Promise<RealtimeDeathResult> {

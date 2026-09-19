@@ -1881,11 +1881,19 @@ test.describe('Relay startup', () => {
 		await installHostOwnedStub(page);
 		await installDelayedRelay(page);
 		await page.goto('/');
+		await page.setViewportSize({ width: 390, height: 640 });
 		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
 		await setPendingRootPoints(page, 3);
 		await page.reload({ waitUntil: 'domcontentloaded' });
 
 		await expect(page.locator('.root-points')).toContainText('3 RP');
+		const rootBuild = page.locator('.root-build');
+		await expect(rootBuild).toContainText('Rank 0: ×1.00');
+		await expect(rootBuild).toContainText('Rank 3: ×2.00');
+		await expect(rootBuild).toContainText('Rank 3: ×3.00 / overflow lifespan 50%');
+		await expect(rootBuild).toContainText('Rank 3: 最大30日');
+		await expect(rootBuild).toContainText('最初の有効通常作業24時間のpoint生成だけに適用');
+		await expect(rootBuild).toContainText('fresh Run開始時寿命は常に7日');
 		await page.getByRole('button', { name: /を選ぶ$/ }).first().click();
 		const rankRows = page.locator('.rank-row');
 		for (let index = 0; index < 3; index += 1) {

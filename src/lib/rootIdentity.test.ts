@@ -16,6 +16,7 @@ import {
 	selectIdentity,
 	startMending,
 	trackRealtimeEventInstance,
+	transitionRealtimeDeath,
 	transitionExpiredPersona,
 	upgradePersonaAbility,
 	type LoadLifecycleResult,
@@ -96,6 +97,29 @@ describe('Root / Identity / Run lifecycle', () => {
 		expect(player).toMatchObject({ schemaVersion: 2, rootPoints: 0 });
 		const root = (await records(ROOT_SECRET_STORE_NAME))['encrypted-root-entropy'] as { ciphertext: Uint8Array };
 		expect([...root.ciphertext]).toEqual([...ciphertext]);
+	});
+
+	it('fails closed for a v6 Root-only partial state', async () => {
+		const old = await openDB(DATABASE_NAME, 6, { upgrade(db) { db.createObjectStore(ROOT_SECRET_STORE_NAME); } });
+		await old.close();
+		expect(await loadOrCreateLifecycle()).toEqual({ kind: 'corrupt', reason: 'partial-state' });
+	});
+
+	it('fails closed for a v6 Player-only partial state', async () => {
+		const old = await openDB(DATABASE_NAME, 6, { upgrade(db) { db.createObjectStore(PLAYER_LIFECYCLE_STORE_NAME); } });
+		await old.close();
+		expect(await loadOrCreateLifecycle()).toEqual({ kind: 'corrupt', reason: 'partial-state' });
+	});
+
+	it('fails closed for an invalid v6 Root while keeping the migration boundary strict', async () => {
+		const old = await openDB(DATABASE_NAME, 6, { upgrade(db) {
+			db.createObjectStore(ROOT_SECRET_STORE_NAME);
+			db.createObjectStore(PLAYER_LIFECYCLE_STORE_NAME);
+		} });
+		await old.put(ROOT_SECRET_STORE_NAME, { version: 99 }, 'encrypted-root-entropy');
+		await old.put(PLAYER_LIFECYCLE_STORE_NAME, { schemaVersion: 1 }, 'player-lifecycle');
+		await old.close();
+		expect(await loadOrCreateLifecycle()).toEqual({ kind: 'corrupt', reason: 'root-record' });
 	});
 
 	it('fails closed for malformed current-schema Player state', async () => {
@@ -186,6 +210,40 @@ describe('Root / Identity / Run lifecycle', () => {
 		expect(fresh.persona.activeRun.runNumber).toBe(2);
 		expect(fresh.persona.gameState.points).toBe(0);
 		expect(fresh.persona.gameState.abilities).toEqual({ inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 });
+	});
+
+	it('does not expose cleared Identities after a later normal death', async () => {
+		const first = await selected();
+		await putPlayer({ ...(await records(PLAYER_LIFECYCLE_STORE_NAME))['player-lifecycle'] as object, mode: { kind: 'running', activeRun: { ...first.activeRun, gameState: { ...first.gameState, points: 100_000 } } } });
+		const funded = restored(await loadOrCreateLifecycle());
+		expect((await clearPersona(funded)).kind).toBe('cleared');
+		const afterClear = await loadOrCreateLifecycle();
+		if (afterClear.kind !== 'selecting') throw new Error('Expected post-clear selection.');
+		const next = await selectIdentity(afterClear.selection.generation, afterClear.selection.candidates[0], { inferenceAcceleration: 1, contextCompression: 0, hallucinationResistance: 0 });
+		if (next.kind !== 'selected') throw new Error('Expected the next Run.');
+		vi.mocked(Date.now).mockReturnValue(TIME + DAY * 7);
+		expect((await transitionExpiredPersona(next.persona)).kind).toBe('transitioned');
+		const afterDeath = await loadOrCreateLifecycle();
+		if (afterDeath.kind !== 'selecting') throw new Error('Expected post-death selection.');
+		expect(afterDeath.selection.reusableIdentities).toEqual([]);
+		expect(afterDeath.selection.candidates).toHaveLength(3);
+		expect(afterDeath.selection.candidates.some((candidate) => candidate.pubkey === first.identity.pubkey)).toBe(false);
+	});
+
+	it('uses the same fixed-three-only selection after realtime death', async () => {
+		const first = await selected();
+		await putPlayer({ ...(await records(PLAYER_LIFECYCLE_STORE_NAME))['player-lifecycle'] as object, mode: { kind: 'running', activeRun: { ...first.activeRun, gameState: { ...first.gameState, points: 100_000 } } } });
+		const funded = restored(await loadOrCreateLifecycle());
+		expect((await clearPersona(funded)).kind).toBe('cleared');
+		const afterClear = await loadOrCreateLifecycle();
+		if (afterClear.kind !== 'selecting') throw new Error('Expected post-clear selection.');
+		const next = await selectIdentity(afterClear.selection.generation, afterClear.selection.candidates[0], { inferenceAcceleration: 1, contextCompression: 0, hallucinationResistance: 0 });
+		if (next.kind !== 'selected') throw new Error('Expected the next Run.');
+		expect((await transitionRealtimeDeath(next.persona, { id: 'realtime-death', kind: 'death', instanceId: 'realtime-death' })).kind).toBe('transitioned');
+		const afterDeath = await loadOrCreateLifecycle();
+		if (afterDeath.kind !== 'selecting') throw new Error('Expected post-realtime-death selection.');
+		expect(afterDeath.selection.reusableIdentities).toEqual([]);
+		expect(afterDeath.selection.candidates).toHaveLength(3);
 	});
 
 	it('does not award RP on death and does not reuse a dead Identity', async () => {
