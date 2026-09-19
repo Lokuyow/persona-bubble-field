@@ -2124,7 +2124,7 @@ test.describe('Relay startup', () => {
 		await expect(activeDialog).toContainText('作業中');
 		await expect(activeDialog).toContainText('0 pt');
 		await expect(activeDialog).toContainText('上限まで あと5分');
-		await expect(activeDialog).toContainText('今受け取れる');
+		await expect(activeDialog).not.toContainText('今受け取れる');
 		await expect(activeDialog).toContainText('+0 pt');
 		await expect(activeDialog.locator('[data-mending-icon="wallet"] svg')).toHaveCount(1);
 		await expect(activeDialog.locator('.result-card[data-mending-icon="coins"] > svg')).toHaveCount(1);
@@ -2179,7 +2179,7 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,2');
 		await terminal.click();
 		await expect(page.getByRole('dialog')).toContainText('上限に達しました');
-		await expect(page.getByRole('dialog')).toContainText('今受け取れる');
+		await expect(page.getByRole('dialog')).not.toContainText('今受け取れる');
 		await expect(page.getByRole('dialog')).toContainText('+5 pt');
 		await expect(page.getByRole('dialog')).not.toContainText('次の1ptまで');
 		await expect(page.getByRole('dialog').locator('[data-mending-icon="coins"] .next-point')).toHaveCount(0);

@@ -73,8 +73,7 @@
 						<button class="terminal-primary-action" type="button" onclick={onStart}>作業を開始</button>
 					</section>
 				{:else}
-					<section class="reward-group" aria-labelledby="mending-result-title">
-						<h3 id="mending-result-title">今受け取れる</h3>
+					<section class="reward-group" aria-label="受け取れる成果">
 						<div class="result-list">
 							<div class="result-card" data-mending-icon="coins">
 								<Coins aria-hidden="true" />
@@ -129,8 +128,7 @@
 
 <style>
 	:global(.mending-dialog-overlay) { position: fixed; inset: 0; z-index: 100; background: rgba(2, 8, 18, 0.72); backdrop-filter: blur(2px); }
-	:global(.mending-dialog-content) { position: fixed; top: 50%; left: 50%; z-index: 101; display: grid; gap: 0; width: min(720px, calc(100vw - 24px)); max-height: calc(100svh - 32px); overflow: auto; padding: 34px; border: 1px solid rgba(35, 220, 226, .78); border-radius: 18px; background-image: linear-gradient(rgba(34, 131, 143, .10) 1px, transparent 1px), linear-gradient(90deg, rgba(34, 131, 143, .10) 1px, transparent 1px), linear-gradient(180deg, rgba(4, 29, 43, .92), rgba(3, 20, 30, .94)); background-size: 38px 38px, 38px 38px, auto; box-shadow: 0 0 0 1px rgba(53, 227, 232, .10) inset, 0 18px 60px rgba(0, 0, 0, .42), 0 0 30px rgba(26, 212, 220, .08); backdrop-filter: blur(14px); color: #ecfbff; transform: translate(-50%, -50%); }
-	:global(.mending-dialog-content)::before { position: absolute; inset: 0; z-index: -1; border-radius: inherit; background-image: linear-gradient(rgba(67, 214, 221, 0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(67, 214, 221, 0.035) 1px, transparent 1px); background-size: 22px 22px; content: ''; pointer-events: none; }
+	:global(.mending-dialog-content) { position: fixed; top: 50%; left: 50%; z-index: 101; display: grid; gap: 0; width: min(720px, calc(100vw - 24px)); max-height: calc(100svh - 32px); overflow: auto; padding: 34px; border: 1px solid rgba(35, 220, 226, .78); border-radius: 18px; background: linear-gradient(180deg, rgba(4, 29, 43, .92), rgba(3, 20, 30, .94)); box-shadow: 0 0 0 1px rgba(53, 227, 232, .10) inset, 0 18px 60px rgba(0, 0, 0, .42), 0 0 30px rgba(26, 212, 220, .08); backdrop-filter: blur(14px); color: #ecfbff; transform: translate(-50%, -50%); }
 	.terminal-dialog-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 48px; }
 	:global(.mending-dialog-content .mending-dialog-title) { margin: 0; color: #ecfbff; font-size: 22px; line-height: 1; font-weight: 800; letter-spacing: .03em; }
 	:global(.mending-dialog-content .sr-only) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
@@ -139,7 +137,6 @@
 	.owned-points :global(svg) { color: #9bb4bf; }
 	.owned-points-value { color: #ecfbff; font-size: 16px; font-weight: 800; }
 	.reward-group { display: grid; gap: 18px; margin-bottom: clamp(38px, 6vw, 54px); }
-	.reward-group h3 { margin: 0; color: #bff8fa; font-size: 16px; font-weight: 800; }
 	.status-group { margin-bottom: clamp(28px, 4vw, 34px); }
 	.progress-heading { display: block; margin: 0 0 16px; color: #cfe7ee; font-size: clamp(18px, 3.2vw, 22px); font-weight: 700; line-height: 1.2; letter-spacing: .01em; font-variant-numeric: tabular-nums; text-align: center; }
 	.progress-duration { color: #79cfd3; font-weight: 800; }
