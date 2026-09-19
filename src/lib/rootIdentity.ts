@@ -328,13 +328,24 @@ function openLifecycleDatabase(): Promise<IDBPDatabase<LifecycleDatabase>> {
 	try {
 		if (typeof indexedDB === 'undefined') throw new Error('IndexedDB is unavailable.');
 		return openDB<LifecycleDatabase>(DATABASE_NAME, DATABASE_VERSION, {
-			upgrade(db, oldVersion, _newVersion, transaction) {
+			async upgrade(db, oldVersion, _newVersion, transaction) {
 				const hasRootStore = db.objectStoreNames.contains(ROOT_SECRET_STORE_NAME);
 				const hasPlayerStore = db.objectStoreNames.contains(PLAYER_LIFECYCLE_STORE_NAME);
 				if (oldVersion >= 6 && hasRootStore && hasPlayerStore) {
-					db.deleteObjectStore(PLAYER_LIFECYCLE_STORE_NAME);
-					db.createObjectStore(PLAYER_LIFECYCLE_STORE_NAME);
-					transaction.objectStore(PLAYER_LIFECYCLE_STORE_NAME).put({ kind: 'legacy-player-reset', sourceVersion: 1 }, PLAYER_STATE);
+					const rootStore = transaction.objectStore(ROOT_SECRET_STORE_NAME);
+					const playerStore = transaction.objectStore(PLAYER_LIFECYCLE_STORE_NAME);
+					const [rootKeys, rootWrappingKey, encryptedEntropy, playerKeys] = await Promise.all([
+						rootStore.getAllKeys(),
+						rootStore.get(ROOT_WRAPPING_KEY),
+						rootStore.get(ENCRYPTED_ROOT_ENTROPY),
+						playerStore.getAllKeys()
+					]);
+					const rootRecordsPresent = rootKeys.length === 2 && rootKeys.every((key) => key === ROOT_WRAPPING_KEY || key === ENCRYPTED_ROOT_ENTROPY) && hasValidWrappingKey(rootWrappingKey) && isEncryptedRootEntropy(encryptedEntropy);
+					if (rootRecordsPresent && playerKeys.includes(PLAYER_STATE)) {
+						db.deleteObjectStore(PLAYER_LIFECYCLE_STORE_NAME);
+						db.createObjectStore(PLAYER_LIFECYCLE_STORE_NAME);
+						transaction.objectStore(PLAYER_LIFECYCLE_STORE_NAME).put({ kind: 'legacy-player-reset', sourceVersion: 1 }, PLAYER_STATE);
+					}
 					return;
 				}
 				if (oldVersion >= 6 && hasRootStore !== hasPlayerStore) return;
@@ -381,6 +392,7 @@ async function readRootAndPlayer(db: IDBPDatabase<LifecycleDatabase>): Promise<R
 	const playerEmpty = stored.playerKeys.length === 0;
 	if (rootEmpty && playerEmpty) return null;
 	const validRootShape = stored.rootKeys.length === 2 && stored.rootKeys.every((key) => key === ROOT_WRAPPING_KEY || key === ENCRYPTED_ROOT_ENTROPY) && hasValidWrappingKey(stored.rootWrappingKey) && isEncryptedRootEntropy(stored.encryptedEntropy);
+	if (validRootShape && !stored.playerKeys.includes(PLAYER_STATE)) return { kind: 'corrupt', reason: 'partial-state' };
 	if (validRootShape && stored.playerKeys.length === 1 && stored.playerKeys[0] === PLAYER_STATE && isLegacyPlayerResetMarker(stored.player)) {
 		try {
 			return { kind: 'legacy-player-reset', entropy: await decryptRootEntropy(stored.rootWrappingKey, stored.encryptedEntropy) };
@@ -793,6 +805,11 @@ async function prepareDeathSelection(entropy: Uint8Array, player: PlayerLifecycl
 	return preparePendingSelection(entropy, generation, new Set(player.identities.map((identity) => identity.characterId)));
 }
 
+async function prepareClearSelection(entropy: Uint8Array, player: PlayerLifecycle): Promise<PendingSelection> {
+	const generation = Math.max(...player.identities.map((identity) => identity.generation), 0) + 1;
+	return preparePendingSelection(entropy, generation, new Set(player.identities.map((identity) => identity.characterId)), reusableIdentityCandidates(player.identities));
+}
+
 export async function transitionRealtimeDeath(expected: PersonaSnapshot, outcome: RealtimeOutcome): Promise<RealtimeDeathResult> {
 	if (!validRealtimeOutcome(outcome) || outcome.kind !== 'death') return { kind: 'corrupt', reason: 'player-state' };
 	const observed = await withLifecycle((db) => readRootAndPlayer(db));
@@ -864,7 +881,7 @@ export async function clearPersona(expected: PersonaSnapshot): Promise<ClearResu
 		if (activeRun.gameState.points < NORMAL_CLEAR_THRESHOLD) return { kind: 'blocked', reason: 'points' };
 		if (isPersonaExpired(activeRun.gameState, Date.now(), activeRun.rootBuild)) return { kind: 'blocked', reason: 'expired' };
 		if (ledger.pendingInstanceIds.length > 0) return { kind: 'blocked', reason: 'pending-realtime' };
-		const selection = await prepareDeathSelection(observed.entropy, observed.player);
+		const selection = await prepareClearSelection(observed.entropy, observed.player);
 		return withLifecycle(async (db) => {
 			const tx = db.transaction(PLAYER_LIFECYCLE_STORE_NAME, 'readwrite');
 			try {

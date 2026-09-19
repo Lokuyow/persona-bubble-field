@@ -20,6 +20,7 @@ import {
 	transitionExpiredPersona,
 	upgradePersonaAbility,
 	type LoadLifecycleResult,
+	type PendingSelection,
 	type PersonaSnapshot
 } from './rootIdentity';
 import type { RootBuild } from './rootProgression';
@@ -29,6 +30,7 @@ const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
 const connections: IDBPDatabase[] = [];
 const ZERO_BUILD: RootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0 };
+type SelectingLifecycle = Readonly<{ kind: 'selecting'; selection: PendingSelection; rootPoints: number }>;
 
 async function records(storeName: string): Promise<Record<string, unknown>> {
 	const db = await openDB(DATABASE_NAME, DATABASE_VERSION);
@@ -97,6 +99,34 @@ describe('Root / Identity / Run lifecycle', () => {
 		expect(player).toMatchObject({ schemaVersion: 2, rootPoints: 0 });
 		const root = (await records(ROOT_SECRET_STORE_NAME))['encrypted-root-entropy'] as { ciphertext: Uint8Array };
 		expect([...root.ciphertext]).toEqual([...ciphertext]);
+	});
+
+	it('fails closed when valid v6 Root records have no Player lifecycle record', async () => {
+		const old = await openDB(DATABASE_NAME, 6, { upgrade(db) {
+			db.createObjectStore(ROOT_SECRET_STORE_NAME);
+			db.createObjectStore(PLAYER_LIFECYCLE_STORE_NAME);
+		} });
+		const wrappingKey = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']) as CryptoKey;
+		const entropy = new Uint8Array(16).fill(8);
+		const iv = new Uint8Array(12).fill(4);
+		const ciphertext = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, wrappingKey, entropy));
+		await old.put(ROOT_SECRET_STORE_NAME, wrappingKey, 'root-wrapping-key');
+		await old.put(ROOT_SECRET_STORE_NAME, { version: 1, iv, ciphertext }, 'encrypted-root-entropy');
+		await old.close();
+		expect(await loadOrCreateLifecycle()).toEqual({ kind: 'corrupt', reason: 'partial-state' });
+		expect(Object.keys(await records(PLAYER_LIFECYCLE_STORE_NAME))).toEqual([]);
+		expect([...((await records(ROOT_SECRET_STORE_NAME))['encrypted-root-entropy'] as { ciphertext: Uint8Array }).ciphertext]).toEqual([...ciphertext]);
+	});
+
+	it('fails closed when a v6 Player record exists without Root records', async () => {
+		const old = await openDB(DATABASE_NAME, 6, { upgrade(db) {
+			db.createObjectStore(ROOT_SECRET_STORE_NAME);
+			db.createObjectStore(PLAYER_LIFECYCLE_STORE_NAME);
+		} });
+		await old.put(PLAYER_LIFECYCLE_STORE_NAME, { schemaVersion: 1, mode: { kind: 'obsolete' } }, 'player-lifecycle');
+		await old.close();
+		expect(await loadOrCreateLifecycle()).toEqual({ kind: 'corrupt', reason: 'partial-state' });
+		expect(Object.keys(await records(PLAYER_LIFECYCLE_STORE_NAME))).toEqual(['player-lifecycle']);
 	});
 
 	it('fails closed for a v6 Root-only partial state', async () => {
@@ -210,6 +240,68 @@ describe('Root / Identity / Run lifecycle', () => {
 		expect(fresh.persona.activeRun.runNumber).toBe(2);
 		expect(fresh.persona.gameState.points).toBe(0);
 		expect(fresh.persona.gameState.abilities).toEqual({ inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 });
+	});
+
+	it('keeps all previously cleared Identities reusable after consecutive normal clears', async () => {
+		const fundAndClear = async (persona: PersonaSnapshot): Promise<SelectingLifecycle> => {
+			await putPlayer({ ...(await records(PLAYER_LIFECYCLE_STORE_NAME))['player-lifecycle'] as object, mode: { kind: 'running', activeRun: { ...persona.activeRun, gameState: { ...persona.gameState, points: 100_000 } } } });
+			const funded = restored(await loadOrCreateLifecycle());
+			expect((await clearPersona(funded)).kind).toBe('cleared');
+			const pending = await loadOrCreateLifecycle();
+			if (pending.kind !== 'selecting') throw new Error('Expected post-clear selection.');
+			return pending as SelectingLifecycle;
+		};
+
+		const first = await selected();
+		const afterFirstClear = await fundAndClear(first);
+		const second = await selectIdentity(afterFirstClear.selection.generation, afterFirstClear.selection.candidates[0], { inferenceAcceleration: 1, contextCompression: 0, hallucinationResistance: 0 });
+		if (second.kind !== 'selected') throw new Error('Expected the second Run.');
+		const afterSecondClear = await fundAndClear(second.persona);
+		expect(afterSecondClear.selection.reusableIdentities.map((identity) => identity.pubkey)).toEqual(expect.arrayContaining([first.identity.pubkey, second.persona.identity.pubkey]));
+
+		const firstCandidate = afterSecondClear.selection.reusableIdentities.find((identity) => identity.pubkey === first.identity.pubkey);
+		if (!firstCandidate) throw new Error('Expected the first cleared Identity to remain reusable.');
+		const reusedFirst = await selectIdentity(afterSecondClear.selection.generation, firstCandidate, { inferenceAcceleration: 2, contextCompression: 0, hallucinationResistance: 0 });
+		if (reusedFirst.kind !== 'selected') throw new Error('Expected the cleared Identity to start again.');
+		expect(reusedFirst.persona.signer.pubkey).toBe(first.signer.pubkey);
+		expect(reusedFirst.persona.activeRun.runNumber).toBe(2);
+		const afterReusedFirstClear = await fundAndClear(reusedFirst.persona);
+		expect(afterReusedFirstClear.selection.reusableIdentities.map((identity) => identity.pubkey)).toEqual(expect.arrayContaining([first.identity.pubkey, second.persona.identity.pubkey]));
+	});
+
+	it('keeps every cleared Identity reusable after later clears while excluding dead Identities', async () => {
+		const fundAndClear = async (persona: PersonaSnapshot): Promise<SelectingLifecycle> => {
+			await putPlayer({ ...(await records(PLAYER_LIFECYCLE_STORE_NAME))['player-lifecycle'] as object, mode: { kind: 'running', activeRun: { ...persona.activeRun, gameState: { ...persona.gameState, points: 100_000 } } } });
+			const funded = restored(await loadOrCreateLifecycle());
+			expect((await clearPersona(funded)).kind).toBe('cleared');
+			const pending = await loadOrCreateLifecycle();
+			if (pending.kind !== 'selecting') throw new Error('Expected post-clear selection.');
+			return pending as SelectingLifecycle;
+		};
+
+		const first = await selected();
+		const afterFirstClear = await fundAndClear(first);
+		const second = await selectIdentity(afterFirstClear.selection.generation, afterFirstClear.selection.candidates[0], { inferenceAcceleration: 1, contextCompression: 0, hallucinationResistance: 0 });
+		if (second.kind !== 'selected') throw new Error('Expected the second Run.');
+		vi.mocked(Date.now).mockReturnValue(TIME + DAY * 7);
+		expect((await transitionExpiredPersona(second.persona)).kind).toBe('transitioned');
+		const afterDeath = await loadOrCreateLifecycle();
+		if (afterDeath.kind !== 'selecting') throw new Error('Expected post-death selection.');
+		const third = await selectIdentity(afterDeath.selection.generation, afterDeath.selection.candidates[0], { inferenceAcceleration: 1, contextCompression: 0, hallucinationResistance: 0 });
+		if (third.kind !== 'selected') throw new Error('Expected the third Run.');
+		const afterThirdClear = await fundAndClear(third.persona);
+		const reusableAfterThird = afterThirdClear.selection.reusableIdentities.map((identity) => identity.pubkey);
+		expect(reusableAfterThird).toEqual(expect.arrayContaining([first.identity.pubkey, third.persona.identity.pubkey]));
+		expect(reusableAfterThird).not.toContain(second.persona.identity.pubkey);
+
+		const firstCandidate = afterThirdClear.selection.reusableIdentities.find((identity) => identity.pubkey === first.identity.pubkey);
+		if (!firstCandidate) throw new Error('Expected the first cleared Identity to remain reusable.');
+		const reusedFirst = await selectIdentity(afterThirdClear.selection.generation, firstCandidate, { inferenceAcceleration: 2, contextCompression: 0, hallucinationResistance: 0 });
+		if (reusedFirst.kind !== 'selected') throw new Error('Expected the cleared Identity to start again.');
+		expect(reusedFirst.persona.signer.pubkey).toBe(first.signer.pubkey);
+		expect(reusedFirst.persona.activeRun.runNumber).toBe(2);
+		const afterReusedFirstClear = await fundAndClear(reusedFirst.persona);
+		expect(afterReusedFirstClear.selection.reusableIdentities.map((identity) => identity.pubkey)).toEqual(expect.arrayContaining([first.identity.pubkey, third.persona.identity.pubkey]));
 	});
 
 	it('does not expose cleared Identities after a later normal death', async () => {
