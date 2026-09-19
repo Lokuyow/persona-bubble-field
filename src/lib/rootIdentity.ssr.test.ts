@@ -12,7 +12,7 @@ describe('rootIdentity SSR contract', () => {
 		vi.resetModules();
 
 		const rootIdentity = await import('./rootIdentity');
-		expect(rootIdentity.DATABASE_VERSION).toBe(6);
+		expect(rootIdentity.DATABASE_VERSION).toBe(7);
 		expect(typeof globalThis.window).toBe('undefined');
 		expect(typeof globalThis.indexedDB).toBe('undefined');
 		await expect(rootIdentity.loadOrCreateLifecycle()).rejects.toThrow('Lifecycle storage could not be opened.');

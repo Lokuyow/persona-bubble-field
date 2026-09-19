@@ -234,7 +234,7 @@ Root entropyは暗号学的に保護されたbrowser-local barrierであるが�
 
 一般ユーザーには開始直後から秘密鍵を意識させない。
 
-clear後はcurrent Identityのnsec取得を可能にする。clear前にactive Identityのchild secretをexportするUIは提供しない。
+clear後はcurrent Identityのnsec取得を可能にする。normal clearはcurrent owned points 100,000pt以上、effective lifespan未満、pending realtime settlementなしを条件とし、current Identityをclearedとして閉じる。clear前にactive Identityのchild secretをexportするUIは提供しない。clear済みIdentityはRootから同じkey/pubkey/characterを再導出してfresh Runへ再利用できる。
 
 Root entropyを含むサイトデータを失うと、そのRootから導出されるIdentityも失われる可能性がある。サーバー側backupは存在しない。
 
