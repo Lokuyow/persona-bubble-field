@@ -59,12 +59,12 @@
 			<Dialog.Content class="mending-dialog-content" preventScroll={false}>
 				<div class="terminal-dialog-header">
 					<div>
-						<Dialog.Title>作業中</Dialog.Title>
+						<Dialog.Title class="mending-dialog-title">作業中</Dialog.Title>
 						<Dialog.Description class="sr-only">時間の経過で成果が蓄積され、ポイントと寿命延長を受け取れます。</Dialog.Description>
 					</div>
 					<div class="owned-points" data-mending-icon="wallet" aria-label={`所持ポイント ${ownedPoints} pt`}>
 						<Wallet aria-hidden="true" />
-						<span>{ownedPoints} pt</span>
+						<span class="owned-points-value">{ownedPoints} pt</span>
 					</div>
 				</div>
 				{#if !hasJob}
@@ -123,41 +123,42 @@
 
 <style>
 	:global(.mending-dialog-overlay) { position: fixed; inset: 0; z-index: 100; background: rgba(2, 8, 18, 0.72); backdrop-filter: blur(2px); }
-	:global(.mending-dialog-content) { position: fixed; top: 50%; left: 50%; z-index: 101; display: grid; gap: clamp(22px, 4vw, 32px); width: min(calc(100vw - 32px), 720px); max-height: calc(100svh - 32px); overflow: auto; padding: clamp(24px, 5vw, 34px); border: 1px solid rgba(68, 222, 222, 0.62); border-radius: 18px; background: linear-gradient(145deg, rgba(4, 26, 38, 0.98), rgba(3, 14, 28, 0.96)); box-shadow: 0 0 24px rgba(26, 214, 224, 0.16), inset 0 0 22px rgba(28, 184, 202, 0.06); color: #ecfeff; transform: translate(-50%, -50%); }
+	:global(.mending-dialog-content) { position: fixed; top: 50%; left: 50%; z-index: 101; display: grid; gap: 0; width: min(720px, calc(100vw - 32px)); max-height: calc(100svh - 32px); overflow: auto; padding: 34px; border: 1px solid rgba(35, 220, 226, .78); border-radius: 18px; background: rgba(3, 20, 30, .92); box-shadow: 0 0 0 1px rgba(53, 227, 232, .06) inset, 0 22px 80px rgba(0, 0, 0, .46), 0 0 40px rgba(25, 196, 213, .08); backdrop-filter: blur(12px); color: #ecfbff; transform: translate(-50%, -50%); }
 	:global(.mending-dialog-content)::before { position: absolute; inset: 0; z-index: -1; border-radius: inherit; background-image: linear-gradient(rgba(67, 214, 221, 0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(67, 214, 221, 0.035) 1px, transparent 1px); background-size: 22px 22px; content: ''; pointer-events: none; }
-	.terminal-dialog-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-	:global(.mending-dialog-content h2) { margin: 0; color: #f2ffff; font-size: clamp(1.6rem, 4vw, 2.25rem); letter-spacing: 0.08em; }
+	.terminal-dialog-header { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 26px; }
+	:global(.mending-dialog-content .mending-dialog-title) { margin: 0; color: #ecfbff; font-size: 22px; line-height: 1; font-weight: 800; letter-spacing: .03em; }
 	:global(.mending-dialog-content .sr-only) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-	.owned-points { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 5px; padding-top: 4px; color: rgba(208, 246, 248, 0.78); font-size: 0.9rem; }
+	.owned-points { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 7px; color: #ecfbff; white-space: nowrap; }
 	.owned-points :global(svg), .details-toggle :global(svg) { width: 18px; height: 18px; }
-	.owned-points :global(svg) { color: #9de8ed; }
-	.progress-section, .result-section, .details-section { display: grid; gap: 14px; }
-	.progress-section { justify-items: center; text-align: center; }
-	.progress-heading { color: #f2ffff; font-size: clamp(1.65rem, 5vw, 2.35rem); line-height: 1.2; }
-	.progress-duration { color: #85ffff; }
-	.progress-track { height: 13px; overflow: hidden; border: 1px solid rgba(68, 222, 222, 0.78); border-radius: 999px; background: rgba(1, 35, 47, 0.86); }
-	.progress-track { width: 100%; }
-	.progress-value { height: 100%; min-width: 2px; background: linear-gradient(90deg, #27e6dd, #80ffff); box-shadow: 0 0 12px rgba(39, 230, 221, 0.7); }
-	.result-section h3 { margin: 0; padding-top: 4px; color: #a4ffff; font-size: 1.05rem; letter-spacing: 0.08em; }
+	.owned-points :global(svg) { color: #9bb4bf; }
+	.owned-points-value { color: #ecfbff; font-size: 16px; font-weight: 800; }
+	.progress-section, .result-section, .details-section { display: grid; gap: 0; }
+	.progress-section { justify-items: center; padding: 22px 0 4px; text-align: center; }
+	.progress-heading { margin: 0 0 18px; color: #ecfbff; font-size: clamp(28px, 5.2vw, 42px); font-weight: 850; line-height: 1.15; letter-spacing: .01em; }
+	.progress-duration { color: #35e3e8; }
+	.progress-track { width: 100%; height: 13px; overflow: hidden; border: 1px solid #35e3e8; border-radius: 999px; background: #06303d; box-shadow: 0 0 12px rgba(53, 227, 232, .06) inset; }
+	.progress-value { height: 100%; min-width: 2px; background: linear-gradient(90deg, #2ee3df, #64f5f0); border-radius: inherit; }
+	.result-section h3 { margin: 30px 0 14px; color: #bff8fa; font-size: 16px; font-weight: 800; }
 	.result-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 	.result-card { display: flex; align-items: center; gap: 18px; min-height: 118px; padding: 20px; border: 1px solid rgba(68, 222, 222, 0.38); border-radius: 12px; background: rgba(4, 53, 66, 0.42); }
-	.result-card :global(svg) { width: 34px; height: 34px; color: #85ffff; }
+	.result-card :global(svg) { width: 34px; height: 34px; color: #35e3e8; }
 	.result-copy { display: grid; gap: 5px; min-width: 0; }
-	.result-label { color: rgba(208, 246, 248, 0.74); font-size: 0.9rem; }
-	.result-card strong { color: #f2ffff; font-size: clamp(1.35rem, 4vw, 1.8rem); line-height: 1.15; }
-	.next-point { display: flex; align-items: center; justify-content: center; gap: 9px; margin: -6px 0 0; color: rgba(208, 246, 248, 0.82); }
-	.next-point :global(svg) { width: 18px; height: 18px; color: #9de8ed; }
-	.details-toggle { display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%; min-height: 40px; padding: 8px 0; border: 0; border-top: 1px solid rgba(154, 188, 194, 0.16); border-bottom: 1px solid rgba(154, 188, 194, 0.16); background: transparent; color: rgba(208, 220, 222, 0.62); font: inherit; font-weight: 500; text-align: center; cursor: pointer; }
-	.details-toggle :global(svg) { color: rgba(208, 220, 222, 0.62); }
-	.details-content { display: grid; gap: 8px; padding: 2px 0 4px; color: rgba(208, 246, 248, 0.78); font-size: 0.92rem; line-height: 1.45; }
+	.result-label { color: #9bb4bf; font-size: 14px; font-weight: 650; }
+	.result-card strong { color: #ecfbff; font-size: 30px; font-weight: 850; line-height: 1.1; letter-spacing: .01em; }
+	.next-point { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 20px 0 8px; color: #cfe7ee; font-size: 15px; font-weight: 650; }
+	.next-point :global(svg) { width: 18px; height: 18px; color: #35e3e8; }
+	.details-toggle { display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%; min-height: 0; padding: 16px 0; border: 0; background: transparent; color: #9bb4bf; font: inherit; font-weight: 400; text-align: center; cursor: pointer; }
+	.details-section { margin-top: 12px; border-top: 1px solid rgba(35, 220, 226, .16); border-bottom: 1px solid rgba(35, 220, 226, .16); }
+	.details-toggle :global(svg) { color: #9bb4bf; }
+	.details-content { display: grid; gap: 8px; padding: 0 0 18px; color: rgba(208, 246, 248, 0.78); font-size: 0.92rem; line-height: 1.45; }
 	.details-content p { margin: 0; display: flex; justify-content: space-between; gap: 16px; }
 	.details-content strong { color: #f2ffff; font-weight: 700; text-align: right; }
 	.idle-state { display: grid; gap: 14px; }
 	.idle-state p { margin: 0; color: rgba(208, 246, 248, 0.78); }
-	.action-group { display: grid; gap: 10px; margin-top: -6px; }
+	.action-group { display: grid; gap: 10px; margin-top: 26px; }
 	.terminal-primary-action, :global(.terminal-secondary-action) { min-height: 50px; border-radius: 9px; font: inherit; font-weight: 800; cursor: pointer; }
-	.terminal-primary-action { border: 1px solid #72ffff; background: linear-gradient(135deg, #20cfd0, #087eaa); box-shadow: 0 0 15px rgba(45, 229, 231, 0.3); color: #02141e; }
-	:global(.terminal-secondary-action) { border: 1px solid rgba(141, 208, 218, 0.32); background: rgba(8, 31, 47, 0.62); color: rgba(224, 250, 252, 0.78); text-align: center; }
+	.terminal-primary-action { border: 1px solid #6ef4f0; background: linear-gradient(90deg, #29d5d6, #20abd2); box-shadow: 0 0 16px rgba(31, 210, 222, .18); color: #00141d; }
+	:global(.terminal-secondary-action) { border: 1px solid #46599a; background: #111a42; color: #dbe4f4; text-align: center; }
 	:global(.mending-dialog-content button:focus-visible) { outline: 3px solid var(--color-focus-ring); outline-offset: 3px; }
-	@media (max-width: 560px) { .terminal-dialog-header { flex-direction: column; } .owned-points { padding-top: 0; } .result-list { grid-template-columns: 1fr; } .details-content p { align-items: flex-start; flex-direction: column; gap: 2px; } .details-content strong { text-align: left; } }
+	@media (max-width: 560px) { :global(.mending-dialog-content) { padding: 22px 18px; border-radius: 14px; } .terminal-dialog-header { flex-direction: column; } .owned-points { padding-top: 0; } .result-list { grid-template-columns: 1fr; } .result-card { min-height: 96px; } .details-content p { align-items: flex-start; flex-direction: column; gap: 2px; } .details-content strong { text-align: left; } }
 </style>
