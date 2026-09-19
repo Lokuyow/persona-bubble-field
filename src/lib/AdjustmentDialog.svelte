@@ -7,11 +7,16 @@
 		points: number;
 		abilities: PersonaAbilityLevels;
 		busy: boolean;
+		rootPoints: number;
+		canClear: boolean;
+		clearBlockedReason: string | null;
+		clearBusy: boolean;
 		onOpenChange: (open: boolean) => void;
 		onUpgrade: (key: PersonaAbilityKey) => void;
+		onClear: () => void;
 	}>;
 
-	let { open, points, abilities, busy, onOpenChange, onUpgrade }: Props = $props();
+	let { open, points, abilities, busy, rootPoints, canClear, clearBlockedReason, clearBusy, onOpenChange, onUpgrade, onClear }: Props = $props();
 	const abilityLabels: Readonly<Record<PersonaAbilityKey, string>> = {
 		inferenceEfficiency: '推論効率',
 		contextCapacity: 'コンテキスト容量',
@@ -38,7 +43,7 @@
 						<section class="ability-card">
 							<div class="ability-card-heading"><h3 aria-label={`${abilityLabels[key]} Lv${upgrade.level}`}>{abilityLabels[key]} <span>Lv{upgrade.level}</span></h3></div>
 							<p class="ability-description">
-								{key === 'inferenceEfficiency' ? '作業1時間あたりの寿命延長量が増えます。' : key === 'contextCapacity' ? '成果を回収せずに蓄積できる時間が増えます。' : '1pt獲得に必要な作業時間が短くなります。'}
+								{key === 'inferenceEfficiency' ? '作業によるポイント生成速度が上がります。' : key === 'contextCapacity' ? '回収せずに通常作業を蓄積できる時間が増えます。' : '通常作業1時間あたりの寿命延長量が増えます。'}
 							</p>
 							<p class="effect-row"><span>現在</span><strong>{upgrade.currentEffect}</strong></p>
 							{#if upgrade.nextEffect}
@@ -51,6 +56,13 @@
 						</section>
 					{/each}
 				</div>
+				<section class="clear-section" aria-labelledby="normal-clear-title">
+					<h3 id="normal-clear-title">normal clear</h3>
+					<p>現在所持ポイントが100,000pt以上のとき、Runを終了してRoot Pointを1つ獲得します。未回収の作業ポイントは含まれません。</p>
+					<p class="root-total">Root Point: {rootPoints} RP</p>
+					{#if clearBlockedReason}<p class="clear-reason">clear不可: {clearBlockedReason}</p>{/if}
+					<button class="clear-action" type="button" disabled={!canClear || clearBusy} onclick={onClear}>normal clear（+1 RP）</button>
+				</section>
 				<Dialog.Close class="terminal-secondary-action">閉じる</Dialog.Close>
 			</Dialog.Content>
 		</Dialog.Portal>
@@ -78,6 +90,14 @@
 	.effect-row strong { margin-left: auto; color: #f6f7ff; font-size: 1rem; }
 	.upgrade-cost { color: #c0c5ff; font-weight: 800; }
 	.max-level { color: #adb4ff; font-weight: 800; }
+	.clear-section { display: grid; gap: 9px; padding: 16px; border: 1px solid rgba(255, 195, 104, 0.5); border-radius: 9px; background: rgba(70, 47, 23, 0.42); }
+	.clear-section h3, .clear-section p { margin: 0; }
+	.clear-section h3 { color: #ffd58d; }
+	.clear-section p { color: rgba(255, 236, 202, 0.78); line-height: 1.45; }
+	.root-total { font-weight: 800; }
+	.clear-reason { color: #ffcf9c !important; }
+	.clear-action { min-height: 46px; border: 1px solid #ffd58d; border-radius: 7px; background: linear-gradient(135deg, #c98242, #7e4727); color: #fff7e8; font: inherit; font-weight: 800; cursor: pointer; }
+	.clear-action:disabled { cursor: not-allowed; opacity: .45; }
 	.upgrade-action, :global(.terminal-secondary-action) { min-height: 46px; border-radius: 7px; font: inherit; font-weight: 800; cursor: pointer; }
 	.upgrade-action { border: 1px solid #aab0ff; background: linear-gradient(135deg, #5361e8, #2936a9); box-shadow: 0 0 14px rgba(90, 103, 255, 0.24); color: #fff; }
 	.upgrade-action:disabled { cursor: not-allowed; border-color: rgba(158, 166, 221, 0.3); background: rgba(59, 69, 115, 0.58); box-shadow: none; color: rgba(219, 222, 255, 0.48); }

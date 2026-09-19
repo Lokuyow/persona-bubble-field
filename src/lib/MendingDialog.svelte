@@ -60,6 +60,12 @@
 							<div class="result-card"><span>ポイント</span><strong>+{unclaimedPoints}pt</strong></div>
 						</div>
 					</section>
+					<section class="details-section" aria-label="作業の現在効果">
+						<p>通常作業: {projection?.regularDurationMs ? formatElapsedDuration(projection.regularDurationMs) : '0分'} / Context {formatElapsedDuration(projection?.contextCapacityMs ?? 0)}</p>
+						<p>現在のポイント率: {((projection?.pointRateHundredthsPerMinute ?? 0) / 100).toFixed(2)} pt/分</p>
+						<p>現在の寿命延長率: +{((projection?.lifespanExtensionRateHundredthsPerHour ?? 0) / 100).toFixed(2)} h/h</p>
+						<p>最大寿命: {formatElapsedDuration(projection?.maximumLifespanMs ?? 0)} / 加速残り: {formatElapsedDuration(projection?.accelerationRemainingMs ?? 0)}</p>
+					</section>
 					<button class="terminal-primary-action" type="button" onclick={onCollect}>受け取る</button>
 				{/if}
 				<Dialog.Close class="terminal-secondary-action">閉じる</Dialog.Close>
