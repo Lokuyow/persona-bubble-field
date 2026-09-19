@@ -2127,8 +2127,10 @@ test.describe('Relay startup', () => {
 		await expect(activeDialog).toContainText('今受け取れる');
 		await expect(activeDialog).toContainText('+0 pt');
 		await expect(activeDialog.locator('[data-mending-icon="wallet"] svg')).toHaveCount(1);
-		await expect(activeDialog.locator('[data-mending-icon="coins"] svg')).toHaveCount(1);
-		await expect(activeDialog.locator('[data-mending-icon="heart"] svg')).toHaveCount(1);
+		await expect(activeDialog.locator('.result-card[data-mending-icon="coins"] > svg')).toHaveCount(1);
+		await expect(activeDialog.locator('.result-card[data-mending-icon="heart"] > svg')).toHaveCount(1);
+		await expect(activeDialog.locator('[data-mending-icon="coins"] .next-point')).toHaveCount(1);
+		await expect(activeDialog.locator('.reward-group .action-group')).toHaveCount(1);
 		await expect(activeDialog.getByRole('button', { name: '成果を受け取る' })).toBeVisible();
 		await expect(activeDialog.getByRole('button', { name: '詳細を見る' })).toHaveAttribute('aria-expanded', 'false');
 		await activeDialog.getByRole('button', { name: '詳細を見る' }).click();
@@ -2146,7 +2148,8 @@ test.describe('Relay startup', () => {
 		const partialDialog = page.getByRole('dialog');
 		await expect(partialDialog).toContainText('上限まで あと3分');
 		await expect(partialDialog).toContainText(/次の1ptまで [1-9][0-9]?秒/);
-		await expect(partialDialog.locator('[data-mending-icon="clock"] svg')).toHaveCount(1);
+		await expect(partialDialog.locator('.next-point[data-mending-icon="clock"] > svg')).toHaveCount(1);
+		await expect(partialDialog.locator('[data-mending-icon="coins"] .next-point')).toHaveCount(1);
 		await expect(partialDialog).toContainText('+2 pt');
 		await partialDialog.getByRole('button', { name: '成果を受け取る' }).click();
 		await expect.poll(async () => {
@@ -2179,6 +2182,7 @@ test.describe('Relay startup', () => {
 		await expect(page.getByRole('dialog')).toContainText('今受け取れる');
 		await expect(page.getByRole('dialog')).toContainText('+5 pt');
 		await expect(page.getByRole('dialog')).not.toContainText('次の1ptまで');
+		await expect(page.getByRole('dialog').locator('[data-mending-icon="coins"] .next-point')).toHaveCount(0);
 		await page.getByRole('button', { name: '成果を受け取る' }).click();
 		await expect.poll(() => readRelayGameState(page)).toMatchObject({ mendingJob: expect.any(Object), points: 10, pointProgressTicks: 30_000_000 });
 		await expect(page.getByRole('dialog')).toContainText('10 pt');

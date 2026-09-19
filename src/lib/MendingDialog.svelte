@@ -73,7 +73,24 @@
 						<button class="terminal-primary-action" type="button" onclick={onStart}>作業を開始</button>
 					</section>
 				{:else}
-					<section class="progress-section" aria-label="作業の進捗">
+					<section class="reward-group" aria-labelledby="mending-result-title">
+						<h3 id="mending-result-title">今受け取れる</h3>
+						<div class="result-list">
+							<div class="result-card" data-mending-icon="coins">
+								<Coins aria-hidden="true" />
+								<div class="result-copy">
+									<span class="result-label">ポイント</span>
+									<strong>+{unclaimedPoints} pt</strong>
+									{#if nextPointSeconds !== null}<span class="next-point" data-mending-icon="clock"><Clock aria-hidden="true" />次の1ptまで {nextPointSeconds}秒</span>{/if}
+								</div>
+							</div>
+							<div class="result-card" data-mending-icon="heart"><Heart aria-hidden="true" /><div class="result-copy"><span class="result-label">寿命</span><strong>+{lifespanDuration}</strong></div></div>
+						</div>
+						<div class="action-group">
+							<button class="terminal-primary-action" type="button" onclick={onCollect}>成果を受け取る</button>
+						</div>
+					</section>
+					<section class="status-group" aria-label="作業の蓄積状況">
 						<strong class="progress-heading">
 							{#if projection?.completed}
 								上限に達しました
@@ -85,17 +102,8 @@
 							<div class="progress-value" style={`width: ${progressPercent}%;`}></div>
 						</div>
 					</section>
-					<section class="result-section" aria-labelledby="mending-result-title">
-						<h3 id="mending-result-title">今受け取れる</h3>
-						<div class="result-list">
-							<div class="result-card" data-mending-icon="coins"><Coins aria-hidden="true" /><div class="result-copy"><span class="result-label">ポイント</span><strong>+{unclaimedPoints} pt</strong></div></div>
-							<div class="result-card" data-mending-icon="heart"><Heart aria-hidden="true" /><div class="result-copy"><span class="result-label">寿命</span><strong>+{lifespanDuration}</strong></div></div>
-						</div>
-					</section>
-					{#if nextPointSeconds !== null}
-						<p class="next-point" data-mending-icon="clock"><Clock aria-hidden="true" />次の1ptまで {nextPointSeconds}秒</p>
-					{/if}
-					<section class="details-section" aria-label="作業の詳細">
+					<section class="utility-group" aria-label="作業の詳細と操作">
+						<section class="details-section" aria-label="作業の詳細">
 						<button class="details-toggle" type="button" aria-expanded={detailsOpen} onclick={() => detailsOpen = !detailsOpen}>
 							<span>{detailsOpen ? '詳細を閉じる' : '詳細を見る'}</span>
 							{#if detailsOpen}<ChevronUp aria-hidden="true" />{:else}<ChevronDown aria-hidden="true" />{/if}
@@ -109,11 +117,9 @@
 								<p>最大寿命 <strong>{maximumLifespan}</strong></p>
 							</div>
 						{/if}
-					</section>
-					<div class="action-group">
-						<button class="terminal-primary-action" type="button" onclick={onCollect}>成果を受け取る</button>
+						</section>
 						<Dialog.Close class="terminal-secondary-action">閉じる</Dialog.Close>
-					</div>
+					</section>
 				{/if}
 				{#if !hasJob}<Dialog.Close class="terminal-secondary-action">閉じる</Dialog.Close>{/if}
 			</Dialog.Content>
@@ -123,42 +129,44 @@
 
 <style>
 	:global(.mending-dialog-overlay) { position: fixed; inset: 0; z-index: 100; background: rgba(2, 8, 18, 0.72); backdrop-filter: blur(2px); }
-	:global(.mending-dialog-content) { position: fixed; top: 50%; left: 50%; z-index: 101; display: grid; gap: 0; width: min(720px, calc(100vw - 32px)); max-height: calc(100svh - 32px); overflow: auto; padding: 34px; border: 1px solid rgba(35, 220, 226, .78); border-radius: 18px; background: rgba(3, 20, 30, .92); box-shadow: 0 0 0 1px rgba(53, 227, 232, .06) inset, 0 22px 80px rgba(0, 0, 0, .46), 0 0 40px rgba(25, 196, 213, .08); backdrop-filter: blur(12px); color: #ecfbff; transform: translate(-50%, -50%); }
+	:global(.mending-dialog-content) { position: fixed; top: 50%; left: 50%; z-index: 101; display: grid; gap: 0; width: min(720px, calc(100vw - 24px)); max-height: calc(100svh - 32px); overflow: auto; padding: 34px; border: 1px solid rgba(35, 220, 226, .78); border-radius: 18px; background-image: linear-gradient(rgba(34, 131, 143, .10) 1px, transparent 1px), linear-gradient(90deg, rgba(34, 131, 143, .10) 1px, transparent 1px), linear-gradient(180deg, rgba(4, 29, 43, .92), rgba(3, 20, 30, .94)); background-size: 38px 38px, 38px 38px, auto; box-shadow: 0 0 0 1px rgba(53, 227, 232, .10) inset, 0 18px 60px rgba(0, 0, 0, .42), 0 0 30px rgba(26, 212, 220, .08); backdrop-filter: blur(14px); color: #ecfbff; transform: translate(-50%, -50%); }
 	:global(.mending-dialog-content)::before { position: absolute; inset: 0; z-index: -1; border-radius: inherit; background-image: linear-gradient(rgba(67, 214, 221, 0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(67, 214, 221, 0.035) 1px, transparent 1px); background-size: 22px 22px; content: ''; pointer-events: none; }
-	.terminal-dialog-header { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 26px; }
+	.terminal-dialog-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 48px; }
 	:global(.mending-dialog-content .mending-dialog-title) { margin: 0; color: #ecfbff; font-size: 22px; line-height: 1; font-weight: 800; letter-spacing: .03em; }
 	:global(.mending-dialog-content .sr-only) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 	.owned-points { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 7px; color: #ecfbff; white-space: nowrap; }
 	.owned-points :global(svg), .details-toggle :global(svg) { width: 18px; height: 18px; }
 	.owned-points :global(svg) { color: #9bb4bf; }
 	.owned-points-value { color: #ecfbff; font-size: 16px; font-weight: 800; }
-	.progress-section, .result-section, .details-section { display: grid; gap: 0; }
-	.progress-section { justify-items: center; padding: 22px 0 4px; text-align: center; }
-	.progress-heading { margin: 0 0 18px; color: #ecfbff; font-size: clamp(28px, 5.2vw, 42px); font-weight: 850; line-height: 1.15; letter-spacing: .01em; }
-	.progress-duration { color: #35e3e8; }
-	.progress-track { width: 100%; height: 13px; overflow: hidden; border: 1px solid #35e3e8; border-radius: 999px; background: #06303d; box-shadow: 0 0 12px rgba(53, 227, 232, .06) inset; }
+	.reward-group { display: grid; gap: 18px; margin-bottom: clamp(38px, 6vw, 54px); }
+	.reward-group h3 { margin: 0; color: #bff8fa; font-size: 16px; font-weight: 800; }
+	.status-group { margin-bottom: clamp(28px, 4vw, 34px); }
+	.progress-heading { display: block; margin: 0 0 16px; color: #cfe7ee; font-size: clamp(18px, 3.2vw, 22px); font-weight: 700; line-height: 1.2; letter-spacing: .01em; font-variant-numeric: tabular-nums; text-align: center; }
+	.progress-duration { color: #79cfd3; font-weight: 800; }
+	.progress-track { width: 100%; height: 11px; overflow: hidden; border: 1px solid rgba(53, 227, 232, .72); border-radius: 999px; background: #06303d; box-shadow: 0 0 0 1px rgba(53, 227, 232, .03) inset; }
 	.progress-value { height: 100%; min-width: 2px; background: linear-gradient(90deg, #2ee3df, #64f5f0); border-radius: inherit; }
-	.result-section h3 { margin: 30px 0 14px; color: #bff8fa; font-size: 16px; font-weight: 800; }
-	.result-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-	.result-card { display: flex; align-items: center; gap: 18px; min-height: 118px; padding: 20px; border: 1px solid rgba(68, 222, 222, 0.38); border-radius: 12px; background: rgba(4, 53, 66, 0.42); }
+	.result-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+	.result-card { display: flex; align-items: center; gap: 18px; min-height: 124px; padding: 20px; border: 1px solid rgba(35, 220, 226, .32); border-radius: 12px; background: rgba(9, 40, 52, .62); }
 	.result-card :global(svg) { width: 34px; height: 34px; color: #35e3e8; }
-	.result-copy { display: grid; gap: 5px; min-width: 0; }
-	.result-label { color: #9bb4bf; font-size: 14px; font-weight: 650; }
+	.result-copy { display: grid; gap: 0; min-width: 0; }
+	.result-label { margin-bottom: 5px; color: #9bb4bf; font-size: 14px; font-weight: 650; }
 	.result-card strong { color: #ecfbff; font-size: 30px; font-weight: 850; line-height: 1.1; letter-spacing: .01em; }
-	.next-point { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 20px 0 8px; color: #cfe7ee; font-size: 15px; font-weight: 650; }
-	.next-point :global(svg) { width: 18px; height: 18px; color: #35e3e8; }
+	.next-point { display: inline-flex; align-items: center; gap: 6px; margin-top: 4px; color: #cfe7ee; font-size: 13px; line-height: 1.2; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+	.next-point :global(svg) { width: 15px; height: 15px; color: #35e3e8; }
 	.details-toggle { display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%; min-height: 0; padding: 16px 0; border: 0; background: transparent; color: #9bb4bf; font: inherit; font-weight: 400; text-align: center; cursor: pointer; }
-	.details-section { margin-top: 12px; border-top: 1px solid rgba(35, 220, 226, .16); border-bottom: 1px solid rgba(35, 220, 226, .16); }
+	.utility-group { display: grid; gap: 16px; }
+	.details-section { border-top: 1px solid rgba(35, 220, 226, .16); border-bottom: 1px solid rgba(35, 220, 226, .16); }
 	.details-toggle :global(svg) { color: #9bb4bf; }
 	.details-content { display: grid; gap: 8px; padding: 0 0 18px; color: rgba(208, 246, 248, 0.78); font-size: 0.92rem; line-height: 1.45; }
 	.details-content p { margin: 0; display: flex; justify-content: space-between; gap: 16px; }
 	.details-content strong { color: #f2ffff; font-weight: 700; text-align: right; }
 	.idle-state { display: grid; gap: 14px; }
 	.idle-state p { margin: 0; color: rgba(208, 246, 248, 0.78); }
-	.action-group { display: grid; gap: 10px; margin-top: 26px; }
+	.action-group { display: grid; gap: 10px; margin: 4px 0 0; }
 	.terminal-primary-action, :global(.terminal-secondary-action) { min-height: 50px; border-radius: 9px; font: inherit; font-weight: 800; cursor: pointer; }
 	.terminal-primary-action { border: 1px solid #6ef4f0; background: linear-gradient(90deg, #29d5d6, #20abd2); box-shadow: 0 0 16px rgba(31, 210, 222, .18); color: #00141d; }
 	:global(.terminal-secondary-action) { border: 1px solid #46599a; background: #111a42; color: #dbe4f4; text-align: center; }
 	:global(.mending-dialog-content button:focus-visible) { outline: 3px solid var(--color-focus-ring); outline-offset: 3px; }
-	@media (max-width: 560px) { :global(.mending-dialog-content) { padding: 22px 18px; border-radius: 14px; } .terminal-dialog-header { flex-direction: column; } .owned-points { padding-top: 0; } .result-list { grid-template-columns: 1fr; } .result-card { min-height: 96px; } .details-content p { align-items: flex-start; flex-direction: column; gap: 2px; } .details-content strong { text-align: left; } }
+	@media (max-width: 700px) { :global(.mending-dialog-content) { width: min(calc(100vw - 16px), 720px); padding: 24px; } .terminal-dialog-header { flex-direction: column; margin-bottom: 36px; } .result-list { grid-template-columns: 1fr; } .result-card { min-height: 112px; } }
+	@media (max-width: 560px) { :global(.mending-dialog-content) { padding: 22px 18px; border-radius: 14px; } .owned-points { padding-top: 0; } .details-content p { align-items: flex-start; flex-direction: column; gap: 2px; } .details-content strong { text-align: left; } }
 </style>
