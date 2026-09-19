@@ -134,9 +134,9 @@
 	.result-card :global(svg) { width: 34px; height: 34px; color: #85ffff; }
 	.result-label { color: rgba(208, 246, 248, 0.74); font-size: 0.9rem; }
 	.result-card strong { color: #f2ffff; font-size: clamp(1.35rem, 4vw, 1.8rem); line-height: 1.15; }
-	.next-point { justify-content: center; margin: -6px 0 0; color: rgba(208, 246, 248, 0.82); }
+	.next-point { display: flex; align-items: center; justify-content: center; gap: 9px; margin: -6px 0 0; color: rgba(208, 246, 248, 0.82); }
 	.next-point :global(svg) { width: 18px; height: 18px; color: #9de8ed; }
-	.details-toggle { justify-content: center; width: 100%; min-height: 40px; padding: 8px 0; border: 0; border-top: 1px solid rgba(68, 222, 222, 0.24); border-bottom: 1px solid rgba(68, 222, 222, 0.24); background: transparent; color: #a4ffff; font: inherit; font-weight: 800; text-align: center; cursor: pointer; }
+	.details-toggle { display: flex; align-items: center; justify-content: center; gap: 9px; width: 100%; min-height: 40px; padding: 8px 0; border: 0; border-top: 1px solid rgba(68, 222, 222, 0.24); border-bottom: 1px solid rgba(68, 222, 222, 0.24); background: transparent; color: #a4ffff; font: inherit; font-weight: 800; text-align: center; cursor: pointer; }
 	.details-content { display: grid; gap: 8px; padding: 2px 0 4px; color: rgba(208, 246, 248, 0.78); font-size: 0.92rem; line-height: 1.45; }
 	.details-content p { margin: 0; display: flex; justify-content: space-between; gap: 16px; }
 	.details-content strong { color: #f2ffff; font-weight: 700; text-align: right; }
