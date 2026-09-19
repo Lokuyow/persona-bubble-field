@@ -2223,12 +2223,24 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '13,3');
 		await adjustment.click();
 		const dialog = page.getByRole('dialog', { name: '能力強化' });
-		await expect(dialog).toContainText('POINT 10 pt');
-		await expect(dialog).toContainText('推論効率 Lv1');
-		await expect(dialog).toContainText('次1.18 pt/分');
-		await expect(dialog).toContainText('現在1.00 pt/分');
-		await dialog.getByRole('button', { name: '1 level強化' }).first().click();
-		await expect(dialog).toContainText('POINT 9 pt');
+		await expect(dialog).toContainText('10 pt');
+		await expect(dialog).not.toContainText('POINT');
+		await expect(dialog).not.toContainText('ポイントを使って、より効率よく活動できるようにします。');
+		await expect(dialog.locator('.ability-card')).toHaveCount(3);
+		await expect(dialog).toContainText('推論効率');
+		await expect(dialog).toContainText('コンテキスト容量');
+		await expect(dialog).toContainText('ハルシネーション抑制');
+		await expect(dialog).toContainText('Lv1');
+		await expect(dialog).toContainText('1.00');
+		await expect(dialog).toContainText('1.18');
+		await expect(dialog).toContainText('ポイント生成速度');
+		await expect(dialog).toContainText('必要ポイント');
+		await expect(dialog.getByRole('button', { name: 'Lv2へ強化' }).first()).toBeVisible();
+		await expect(dialog).not.toContainText('強化後');
+		await expect(dialog).not.toContainText('normal clear');
+		await expect(dialog).not.toContainText('Root Point');
+		await dialog.getByRole('button', { name: 'Lv2へ強化' }).first().click();
+		await expect(dialog).toContainText('9 pt');
 		await expect(page.locator('.lifespan-hud')).toContainText('ポイント 9pt');
 		await expect(dialog).toContainText('推論効率 Lv2');
 		await page.reload();
@@ -2257,8 +2269,8 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '13,3');
 		await page.getByRole('button', { name: '能力強化端末' }).click();
 		const dialog = page.getByRole('dialog', { name: '能力強化' });
-		await expect(dialog.getByRole('button', { name: '最大level' })).toHaveCount(3);
-		for (const button of await dialog.getByRole('button', { name: '最大level' }).all()) await expect(button).toBeDisabled();
+		await expect(dialog.getByRole('button', { name: '最大Lv' })).toHaveCount(3);
+		for (const button of await dialog.getByRole('button', { name: '最大Lv' }).all()) await expect(button).toBeDisabled();
 	});
 
 	test('keeps an offline mending job alive across browser reopen after its stored expiry', async ({ page }) => {

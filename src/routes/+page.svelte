@@ -2615,13 +2615,8 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		points={personaSnapshot?.gameState.points ?? 0}
 		abilities={personaSnapshot?.gameState.abilities ?? { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 }}
 		busy={abilityMutationInFlight}
-		rootPoints={personaSnapshot?.rootPoints ?? pendingRootPoints}
-		canClear={canClear}
-		clearBlockedReason={clearBlockedReason}
-		clearBusy={clearMutationInFlight}
 		onOpenChange={(open) => { adjustmentDialogOpen = open; }}
 		onUpgrade={(key) => { void mutateAbility(key); }}
-		onClear={() => { void clearCurrentRun(); }}
 	/>
 
 	{#if devWorldSandboxEnabled}
