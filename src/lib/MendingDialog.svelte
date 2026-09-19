@@ -74,7 +74,13 @@
 					</section>
 				{:else}
 					<section class="progress-section" aria-label="作業の進捗">
-						<strong class="progress-heading">{projection?.completed ? '上限に達しました' : `上限まで あと${remainingDuration}`}</strong>
+						<strong class="progress-heading">
+							{#if projection?.completed}
+								上限に達しました
+							{:else}
+								<span>上限まで あと</span><span class="progress-duration">{remainingDuration}</span>
+							{/if}
+						</strong>
 						<div class="progress-track" role="progressbar" aria-label="作業の蓄積進捗" aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(progressPercent)}>
 							<div class="progress-value" style={`width: ${progressPercent}%;`}></div>
 						</div>
@@ -82,8 +88,8 @@
 					<section class="result-section" aria-labelledby="mending-result-title">
 						<h3 id="mending-result-title">今受け取れる</h3>
 						<div class="result-list">
-							<div class="result-card" data-mending-icon="coins"><Coins aria-hidden="true" /><span class="result-label">ポイント</span><strong>+{unclaimedPoints} pt</strong></div>
-							<div class="result-card" data-mending-icon="heart"><Heart aria-hidden="true" /><span class="result-label">寿命</span><strong>+{lifespanDuration}</strong></div>
+							<div class="result-card" data-mending-icon="coins"><Coins aria-hidden="true" /><div class="result-copy"><span class="result-label">ポイント</span><strong>+{unclaimedPoints} pt</strong></div></div>
+							<div class="result-card" data-mending-icon="heart"><Heart aria-hidden="true" /><div class="result-copy"><span class="result-label">寿命</span><strong>+{lifespanDuration}</strong></div></div>
 						</div>
 					</section>
 					{#if nextPointSeconds !== null}
@@ -104,9 +110,12 @@
 							</div>
 						{/if}
 					</section>
-					<button class="terminal-primary-action" type="button" onclick={onCollect}>成果を受け取る</button>
+					<div class="action-group">
+						<button class="terminal-primary-action" type="button" onclick={onCollect}>成果を受け取る</button>
+						<Dialog.Close class="terminal-secondary-action">閉じる</Dialog.Close>
+					</div>
 				{/if}
-				<Dialog.Close class="terminal-secondary-action">閉じる</Dialog.Close>
+				{#if !hasJob}<Dialog.Close class="terminal-secondary-action">閉じる</Dialog.Close>{/if}
 			</Dialog.Content>
 		</Dialog.Portal>
 	{/if}
@@ -114,9 +123,9 @@
 
 <style>
 	:global(.mending-dialog-overlay) { position: fixed; inset: 0; z-index: 100; background: rgba(2, 8, 18, 0.72); backdrop-filter: blur(2px); }
-	:global(.mending-dialog-content) { position: fixed; top: 50%; left: 50%; z-index: 101; display: grid; gap: clamp(22px, 4vw, 32px); width: min(calc(100vw - 32px), 700px); max-height: calc(100svh - 32px); overflow: auto; padding: clamp(24px, 5vw, 40px); border: 1px solid rgba(68, 222, 222, 0.7); border-radius: 14px; background: linear-gradient(145deg, rgba(4, 26, 38, 0.98), rgba(3, 14, 28, 0.96)); box-shadow: 0 0 28px rgba(26, 214, 224, 0.2), inset 0 0 22px rgba(28, 184, 202, 0.08); color: #ecfeff; transform: translate(-50%, -50%); }
+	:global(.mending-dialog-content) { position: fixed; top: 50%; left: 50%; z-index: 101; display: grid; gap: clamp(22px, 4vw, 32px); width: min(calc(100vw - 32px), 720px); max-height: calc(100svh - 32px); overflow: auto; padding: clamp(24px, 5vw, 34px); border: 1px solid rgba(68, 222, 222, 0.62); border-radius: 18px; background: linear-gradient(145deg, rgba(4, 26, 38, 0.98), rgba(3, 14, 28, 0.96)); box-shadow: 0 0 24px rgba(26, 214, 224, 0.16), inset 0 0 22px rgba(28, 184, 202, 0.06); color: #ecfeff; transform: translate(-50%, -50%); }
 	:global(.mending-dialog-content)::before { position: absolute; inset: 0; z-index: -1; border-radius: inherit; background-image: linear-gradient(rgba(67, 214, 221, 0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(67, 214, 221, 0.035) 1px, transparent 1px); background-size: 22px 22px; content: ''; pointer-events: none; }
-	.terminal-dialog-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding-bottom: 16px; border-bottom: 1px solid rgba(68, 222, 222, 0.36); }
+	.terminal-dialog-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 	:global(.mending-dialog-content h2) { margin: 0; color: #f2ffff; font-size: clamp(1.6rem, 4vw, 2.25rem); letter-spacing: 0.08em; }
 	:global(.mending-dialog-content .sr-only) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 	.owned-points { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 5px; padding-top: 4px; color: rgba(208, 246, 248, 0.78); font-size: 0.9rem; }
@@ -125,26 +134,30 @@
 	.progress-section, .result-section, .details-section { display: grid; gap: 14px; }
 	.progress-section { justify-items: center; text-align: center; }
 	.progress-heading { color: #f2ffff; font-size: clamp(1.65rem, 5vw, 2.35rem); line-height: 1.2; }
+	.progress-duration { color: #85ffff; }
 	.progress-track { height: 13px; overflow: hidden; border: 1px solid rgba(68, 222, 222, 0.78); border-radius: 999px; background: rgba(1, 35, 47, 0.86); }
 	.progress-track { width: 100%; }
 	.progress-value { height: 100%; min-width: 2px; background: linear-gradient(90deg, #27e6dd, #80ffff); box-shadow: 0 0 12px rgba(39, 230, 221, 0.7); }
 	.result-section h3 { margin: 0; padding-top: 4px; color: #a4ffff; font-size: 1.05rem; letter-spacing: 0.08em; }
 	.result-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-	.result-card { display: grid; justify-items: center; gap: 7px; min-height: 132px; padding: 18px 14px; border: 1px solid rgba(68, 222, 222, 0.46); border-radius: 9px; background: rgba(4, 53, 66, 0.48); text-align: center; }
+	.result-card { display: flex; align-items: center; gap: 18px; min-height: 118px; padding: 20px; border: 1px solid rgba(68, 222, 222, 0.38); border-radius: 12px; background: rgba(4, 53, 66, 0.42); }
 	.result-card :global(svg) { width: 34px; height: 34px; color: #85ffff; }
+	.result-copy { display: grid; gap: 5px; min-width: 0; }
 	.result-label { color: rgba(208, 246, 248, 0.74); font-size: 0.9rem; }
 	.result-card strong { color: #f2ffff; font-size: clamp(1.35rem, 4vw, 1.8rem); line-height: 1.15; }
 	.next-point { display: flex; align-items: center; justify-content: center; gap: 9px; margin: -6px 0 0; color: rgba(208, 246, 248, 0.82); }
 	.next-point :global(svg) { width: 18px; height: 18px; color: #9de8ed; }
-	.details-toggle { display: flex; align-items: center; justify-content: center; gap: 9px; width: 100%; min-height: 40px; padding: 8px 0; border: 0; border-top: 1px solid rgba(68, 222, 222, 0.24); border-bottom: 1px solid rgba(68, 222, 222, 0.24); background: transparent; color: #a4ffff; font: inherit; font-weight: 800; text-align: center; cursor: pointer; }
+	.details-toggle { display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%; min-height: 40px; padding: 8px 0; border: 0; border-top: 1px solid rgba(154, 188, 194, 0.16); border-bottom: 1px solid rgba(154, 188, 194, 0.16); background: transparent; color: rgba(208, 220, 222, 0.62); font: inherit; font-weight: 500; text-align: center; cursor: pointer; }
+	.details-toggle :global(svg) { color: rgba(208, 220, 222, 0.62); }
 	.details-content { display: grid; gap: 8px; padding: 2px 0 4px; color: rgba(208, 246, 248, 0.78); font-size: 0.92rem; line-height: 1.45; }
 	.details-content p { margin: 0; display: flex; justify-content: space-between; gap: 16px; }
 	.details-content strong { color: #f2ffff; font-weight: 700; text-align: right; }
 	.idle-state { display: grid; gap: 14px; }
 	.idle-state p { margin: 0; color: rgba(208, 246, 248, 0.78); }
-	.terminal-primary-action, :global(.terminal-secondary-action) { min-height: 46px; border-radius: 7px; font: inherit; font-weight: 800; cursor: pointer; }
+	.action-group { display: grid; gap: 10px; margin-top: -6px; }
+	.terminal-primary-action, :global(.terminal-secondary-action) { min-height: 50px; border-radius: 9px; font: inherit; font-weight: 800; cursor: pointer; }
 	.terminal-primary-action { border: 1px solid #72ffff; background: linear-gradient(135deg, #20cfd0, #087eaa); box-shadow: 0 0 15px rgba(45, 229, 231, 0.3); color: #02141e; }
-	:global(.terminal-secondary-action) { border: 1px solid rgba(141, 208, 218, 0.42); background: rgba(8, 31, 47, 0.7); color: rgba(224, 250, 252, 0.86); text-align: center; }
+	:global(.terminal-secondary-action) { border: 1px solid rgba(141, 208, 218, 0.32); background: rgba(8, 31, 47, 0.62); color: rgba(224, 250, 252, 0.78); text-align: center; }
 	:global(.mending-dialog-content button:focus-visible) { outline: 3px solid var(--color-focus-ring); outline-offset: 3px; }
 	@media (max-width: 560px) { .terminal-dialog-header { flex-direction: column; } .owned-points { padding-top: 0; } .result-list { grid-template-columns: 1fr; } .details-content p { align-items: flex-start; flex-direction: column; gap: 2px; } .details-content strong { text-align: left; } }
 </style>
