@@ -2114,7 +2114,9 @@ test.describe('Relay startup', () => {
 
 		await terminal.click();
 		await expect(page.getByRole('dialog')).toBeVisible();
-		await page.getByRole('button', { name: '作業を開始' }).click();
+		const startButton = page.getByRole('button', { name: '作業を開始' });
+		await expect(startButton).toHaveCSS('color', 'rgb(255, 255, 255)');
+		await startButton.click();
 		await expect(page.getByRole('dialog')).toHaveCount(0);
 		await expect.poll(() => readRelayGameState(page)).toMatchObject({ mendingJob: expect.any(Object) });
 		const started = await readRelayGameState(page);
@@ -2132,6 +2134,7 @@ test.describe('Relay startup', () => {
 		await expect(activeDialog.locator('[data-mending-icon="coins"] .next-point')).toHaveCount(1);
 		await expect(activeDialog.locator('.reward-group .action-group')).toHaveCount(1);
 		await expect(activeDialog.getByRole('button', { name: '成果を受け取る' })).toBeVisible();
+		await expect(activeDialog.getByRole('button', { name: '成果を受け取る' })).toHaveCSS('color', 'rgb(255, 255, 255)');
 		await expect(activeDialog.getByRole('button', { name: '詳細を見る' })).toHaveAttribute('aria-expanded', 'false');
 		await activeDialog.getByRole('button', { name: '詳細を見る' }).click();
 		await expect(activeDialog).toContainText('現在のポイント速度');
@@ -2236,6 +2239,7 @@ test.describe('Relay startup', () => {
 		await expect(dialog).toContainText('ポイント生成速度');
 		await expect(dialog).toContainText('必要ポイント');
 		await expect(dialog.getByRole('button', { name: 'Lv2へ強化' }).first()).toBeVisible();
+		await expect(dialog.getByRole('button', { name: 'Lv2へ強化' }).first()).toHaveCSS('color', 'rgb(255, 255, 255)');
 		await expect(dialog).not.toContainText('強化後');
 		await expect(dialog).not.toContainText('normal clear');
 		await expect(dialog).not.toContainText('Root Point');

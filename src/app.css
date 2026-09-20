@@ -6,7 +6,7 @@
 	--color-primary-background: var(--color-accent);
 	--color-primary-background-hover: color-mix(in srgb, var(--color-accent) 86%, black);
 	--color-primary-background-active: color-mix(in srgb, var(--color-accent) 72%, black);
-	--color-primary-foreground: color-mix(in srgb, var(--color-accent) 10%, #111 90%);
+	--color-primary-foreground: #fff;
 	--color-primary-border: color-mix(in srgb, var(--color-accent) 70%, white);
 	--color-primary-shadow: color-mix(in srgb, var(--color-accent) 24%, transparent);
 	--color-primary-disabled-background: color-mix(in srgb, var(--color-accent) 20%, #5b6168);
