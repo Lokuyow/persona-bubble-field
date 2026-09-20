@@ -33,7 +33,7 @@ const AES_KEY_LENGTH = 256;
 const AES_GCM_IV_BYTES = 12;
 const ROOT_ENTROPY_BYTES = 16;
 const MAX_CANDIDATE_SCAN = 100_000;
-const NORMAL_CLEAR_THRESHOLD = 100_000;
+export const NORMAL_CLEAR_THRESHOLD = 100_000;
 
 interface LifecycleDatabase extends DBSchema {
 	[ROOT_SECRET_STORE_NAME]: { key: string; value: unknown };
@@ -66,6 +66,7 @@ export type SelectionCandidate = IdentityCandidate | ClearedIdentityCandidate;
 
 export type SelectIdentityOptions = Readonly<{
 	initialLifespanMs?: number;
+	initialPoints?: number;
 }>;
 
 export type PendingSelection = Readonly<{
@@ -604,6 +605,7 @@ function isValidSelectionCandidate(value: SelectionCandidate): boolean {
 export async function selectIdentity(expectedGeneration: number, candidate: SelectionCandidate, rootBuild: RootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0 }, options: SelectIdentityOptions = {}): Promise<SelectionResult> {
 	assertBip85Index(expectedGeneration, 'generation');
 	if (!isValidSelectionCandidate(candidate)) return { kind: 'corrupt', reason: 'invalid-candidate' };
+	if (options.initialPoints !== undefined && (!Number.isSafeInteger(options.initialPoints) || options.initialPoints < 0)) throw new TypeError('Invalid initial points.');
 	return withLifecycle(async (db) => {
 		const tx = db.transaction(PLAYER_LIFECYCLE_STORE_NAME, 'readwrite');
 		try {
@@ -636,7 +638,8 @@ export async function selectIdentity(expectedGeneration: number, candidate: Sele
 				identities = [...current.identities, selected];
 			}
 			const identityReference: IdentityReference = { generation: selected.generation, accountIndex: selected.accountIndex, pubkey: selected.pubkey };
-			const activeRun: ActiveRun = { runNumber, revision: 0, startedAtMs: nowMs, identity: identityReference, rootBuild: persistedRootBuild, gameState: createInitialPersonaGameState(selected.pubkey, nowMs, options.initialLifespanMs) };
+			const initialGameState = createInitialPersonaGameState(selected.pubkey, nowMs, options.initialLifespanMs);
+			const activeRun: ActiveRun = { runNumber, revision: 0, startedAtMs: nowMs, identity: identityReference, rootBuild: persistedRootBuild, gameState: { ...initialGameState, points: options.initialPoints ?? initialGameState.points } };
 			const next: PlayerLifecycle = { schemaVersion: PLAYER_SCHEMA_VERSION, rootPoints: current.rootPoints, identities, mode: { kind: 'running', activeRun }, realtimeSettlementLedger: emptyRealtimeLedger(activeRun) };
 			await store.put(next, PLAYER_STATE);
 			await tx.done;
