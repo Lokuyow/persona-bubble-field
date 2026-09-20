@@ -36,6 +36,13 @@ export function newLiveBubbleEffects(previous: ConversationState, next: Conversa
 
 export const SPEECH_SOUND_DURATIONS = { normal: 0.225, shout: 0.420, monologue: 0.715 } as const;
 export const UI_SOUND_DURATIONS = { collect: 0.19, 'level-up': 0.32 } as const;
+export const SOUND_EFFECT_GAINS: Readonly<Record<SoundEffect, number>> = {
+	normal: 1,
+	shout: 1,
+	monologue: 1,
+	collect: 0.75,
+	'level-up': 0.75
+};
 const TAU = Math.PI * 2;
 
 function clamp01(value: number): number { return Math.min(1, Math.max(0, value)); }
@@ -248,7 +255,13 @@ export function createSoundController(options: ControllerOptions = {}): SoundCon
 			if (!audio || !masterGain || audio.state !== 'running' || options.document?.hidden || preference.volume <= 0.001) return;
 			let buffer = buffers.get(effect);
 			if (!buffer) { const samples = createSoundSamples(effect, audio.sampleRate); buffer = audio.createBuffer(1, samples.length, audio.sampleRate); buffer.getChannelData(0).set(samples); buffers.set(effect, buffer); }
-			const source = audio.createBufferSource(); source.buffer = buffer; source.connect(masterGain); source.start(audio.currentTime + 0.005);
+			const source = audio.createBufferSource();
+			const effectGain = audio.createGain();
+			source.buffer = buffer;
+			effectGain.gain.value = SOUND_EFFECT_GAINS[effect];
+			source.connect(effectGain);
+			effectGain.connect(masterGain);
+			source.start(audio.currentTime + 0.005);
 		},
 		dispose: () => { disposed = true; buffers.clear(); if (context) void context.close().catch(() => {}); context = null; masterGain = null; }
 	};
