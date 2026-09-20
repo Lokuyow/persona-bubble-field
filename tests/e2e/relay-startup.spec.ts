@@ -2289,6 +2289,21 @@ test.describe('Relay startup', () => {
 		await expect(dialog).toContainText('Root Point');
 		await expect(dialog).toContainText('脱出');
 		await expect(dialog).not.toContainText('Normal Clear');
+		const escapeDetails = dialog.locator('.escape-details');
+		const escapeTrigger = escapeDetails.locator('.escape-details-trigger');
+		const escapeContent = escapeDetails.locator('.escape-details-content');
+		await expect(escapeTrigger).toBeVisible();
+		await expect(escapeTrigger).toHaveAttribute('data-state', 'closed');
+		await expect(escapeContent).toBeHidden();
+		await escapeTrigger.click();
+		await expect(escapeTrigger).toHaveAttribute('data-state', 'open');
+		await expect(escapeContent).toBeVisible();
+		await expect(escapeContent).toContainText('現在のRunを終了');
+		await expect(escapeContent).toContainText('Root Point +1');
+		await expect(escapeContent).toContainText('次の人格を選択');
+		await expect(escapeContent).toContainText('秘密鍵を取得可能');
+		await escapeTrigger.click();
+		await expect(escapeContent).toBeHidden();
 		await expect(dialog).toContainText(character.about);
 		const headerAvatarBox = await dialog.locator('.self-profile-avatar').boundingBox();
 		expect(headerAvatarBox).not.toBeNull();
@@ -2344,6 +2359,11 @@ test.describe('Relay startup', () => {
 		expect(viewportBox!.y).toBeGreaterThanOrEqual(dialogBox!.y);
 		expect(viewportBox!.y + viewportBox!.height).toBeLessThanOrEqual(dialogBox!.y + dialogBox!.height);
 		expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight);
+		const escapeTrigger = dialog.locator('.escape-details-trigger');
+		await escapeTrigger.click();
+		await expect(dialog.locator('.escape-details-content')).toBeVisible();
+		await dialog.getByRole('button', { name: '脱出', exact: true }).scrollIntoViewIfNeeded();
+		await expect(dialog.getByRole('button', { name: '脱出', exact: true })).toBeVisible();
 	});
 
 	test('places the ComposerDock controls below the editor on mobile', async ({ page }) => {
