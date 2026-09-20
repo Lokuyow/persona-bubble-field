@@ -49,6 +49,8 @@ rollbackせず、wire formatとposition条件はSPEC-30を参照する。
 
 normal clear working thresholdは現在所持ポイント100,000ptとする。100,000pt以上である間だけclear選択を利用でき、過去の到達だけで永久unlock flagにはしない。100,000ptを所持しているだけで自動clearにはしない。未回収作業pointsはthresholdへ含めない。effective lifespanが尽きている場合、またはcurrent Runに未解決のrealtime settlementがある場合もclearできない。clearはactive Runを`cleared`として閉じ、Root Pointを1つ加算し、blockingなRun選択状態へ移行する。clear後はcurrent Identityのnsec取得と同じIdentityのfresh Runを可能にする。
 
+clearはbrowser-local lifecycleへdurably commitして成立し、commit成功後にlive World sessionがあれば旧RunのPublic World State terminal `exit`をbest-effortで通知する。Relay failureやexit publication failureはclearをrollbackしない。同じcleared Identityをfresh Runで再利用する場合は、新しいworld entryとして再参加し、exitより新しいpositive activityでpresenceへ戻る。wire上のexitとpresence timestampの詳細は [`SPEC-30-フィールド・position・presence.md`](./SPEC-30-フィールド・position・presence.md) を正とする。
+
 ### 脱出前の秘密鍵保護
 
 clear前はactive Identityのchild secretをexportしない。Root entropyの保存保護、export後の一般Nostr利用、暗号学的な完全保護を目的としないことは [`SPEC-10-Nostr・アカウント.md`](./SPEC-10-Nostr・アカウント.md) を正とする。

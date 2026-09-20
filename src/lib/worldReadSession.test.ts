@@ -553,6 +553,24 @@ describe('world read session', () => {
 		expect(reconstructPositionPublishState).not.toHaveBeenCalled();
 	});
 
+	it('makes same-second re-entry strictly newer than the known self exit', async () => {
+		result = startResult([], [
+			position('self-before-exit', 99, selfPubkey, 0, { x: 1, y: 1 }),
+			{ ...position('self-exit', 100, selfPubkey, 0, { x: 1, y: 1 }), state: 'exit', slot: null }
+		]);
+		publish.mockResolvedValue([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 }, selfSigner: selfSigner(),
+			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn()
+		});
+		await session.start(); session.completeBootstrap();
+		vi.setSystemTime(100_000);
+
+		await expect(session.enterSelf()).resolves.toMatchObject({ kind: 'succeeded', operation: 'entry' });
+		const entry = parseWorldStateEvent(publish.mock.calls[0][0], 'c'.repeat(64));
+		expect(entry).toMatchObject({ state: 'active', createdAt: 101 });
+	});
+
 	it('does not prepare an exit without canonical self position and quiesces normal writes', async () => {
 		const session = createWorldReadSession({
 			field: { columns: 4, rows: 3 }, selfSigner: selfSigner(),

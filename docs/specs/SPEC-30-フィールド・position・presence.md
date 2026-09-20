@@ -217,15 +217,16 @@ replacement identityに `e` tagが含まれないためであり、別channelの
 
 `exit` participantはlast positionを保持するが、active occupancyには含めない。
 
-live clientでnormalまたはrealtimeのdeathがbrowser-local lifecycleへdurably
-commitされた場合、validなcanonical last positionを保持しているWorld sessionは、
-そのdeath Identityの署名済みWorld State `exit`をbest-effortでpublishする。exitは
-active slot quotaを消費せず、death commitより前にはpublishしない。Relay failure、
-exitをprepareできない状態、またはdeath commit後のpublication failureによってlocal
-deathをrollbackしない。exitがない場合は通常どおり10分のpresence timeoutがfallback
-となる。startup時点ですでにexpiredでlive canonical positionを持たない場合は、
-network bootstrapを待つためにexitを要求しない。browser close、unload、network
-disconnectだけではexitをpublishしない。
+live clientでnormalまたはrealtimeのdeath、またはnormal clearがbrowser-local lifecycleへ
+durably commitされた場合、validなcanonical last positionを保持しているWorld sessionは、
+そのIdentityの署名済みWorld State `exit`をbest-effortでpublishする。exitはactive slot
+quotaを消費せず、対応するlifecycle mutationより前にはpublishしない。Relay failure、
+exitをprepareできない状態、またはmutation後のpublication failureによってlocal lifecycle
+mutationをrollbackしない。exitがない場合は通常どおり10分のpresence timeoutがfallback
+となる。startup時点ですでにexpiredでlive canonical positionを持たない場合は、network
+bootstrapを待つためにexitを要求しない。clear後に同じcleared Identityでfresh Runを開始
+する場合、最初のpositive World Stateはexitよりstrictly newerなcreated_atでre-entryする。
+browser close、unload、network disconnectだけではexitをpublishしない。
 
 namespaceの扱いは [`SPEC-10-Nostr・アカウント.md`](./SPEC-10-Nostr・アカウント.md) を正とする。
 
