@@ -2134,6 +2134,7 @@ test.describe('Relay startup', () => {
 		await expect(activeDialog.locator('[data-mending-icon="coins"] .next-point')).toHaveCount(1);
 		await expect(activeDialog.locator('.reward-group .action-group')).toHaveCount(1);
 		await expect(activeDialog.getByRole('button', { name: '成果を受け取る' })).toBeVisible();
+		await expect(activeDialog.locator('.mending-success-feedback')).toHaveCount(0);
 		await expect(activeDialog.getByRole('button', { name: '成果を受け取る' })).toHaveCSS('color', 'rgb(255, 255, 255)');
 		await expect(activeDialog.getByRole('button', { name: '詳細を見る' })).toHaveAttribute('aria-expanded', 'false');
 		await activeDialog.getByRole('button', { name: '詳細を見る' }).click();
@@ -2159,6 +2160,7 @@ test.describe('Relay startup', () => {
 			const partialState = await readRelayGameState(page);
 			return partialState.points === 2 && partialState.pointProgressTicks > 0 && partialState.pointProgressTicks < 60_000_000;
 		}).toBe(true);
+		await expect(page.locator('.mending-success-feedback')).toContainText('+2 pt');
 
 		const secondAt = partialAt + 3 * 60 * 1000;
 		await page.clock.setSystemTime(secondAt);
@@ -2245,6 +2247,7 @@ test.describe('Relay startup', () => {
 		await expect(dialog).not.toContainText('Root Point');
 		await dialog.getByRole('button', { name: 'Lv2へ強化' }).first().click();
 		await expect(dialog).toContainText('9 pt');
+		await expect(dialog.locator('.level-up-badge')).toHaveCount(1);
 		await expect(page.locator('.lifespan-hud')).toContainText('ポイント 9pt');
 		await expect(dialog).toContainText('推論効率 Lv2');
 		await page.reload();

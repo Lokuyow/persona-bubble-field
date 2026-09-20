@@ -19,9 +19,10 @@
 		busy: boolean;
 		onOpenChange: (open: boolean) => void;
 		onUpgrade: (key: PersonaAbilityKey) => void;
+		upgradeFeedback?: Readonly<{ id: number; key: PersonaAbilityKey; level: number }> | null;
 	}>;
 
-	let { open, points, abilities, busy, onOpenChange, onUpgrade }: Props = $props();
+	let { open, points, abilities, busy, onOpenChange, onUpgrade, upgradeFeedback = null }: Props = $props();
 	const abilityLabels: Readonly<Record<PersonaAbilityKey, string>> = {
 		inferenceEfficiency: '推論効率',
 		contextCapacity: 'コンテキスト容量',
@@ -68,11 +69,14 @@
 				<section class="ability-list" aria-label="Run能力">
 					{#each abilityKeys as key}
 						{@const upgrade = getAbilityUpgrade(key, abilities)}
-						<article class="ability-card">
+						<article class:success-flash={upgradeFeedback?.key === key} class="ability-card">
 							<div class="ability-card-heading">
 								<h2 class="ability-name">{abilityLabels[key]}</h2>
-								<span class="ability-level">Lv{upgrade.level}</span>
+								<span class:level-up-highlight={upgradeFeedback?.key === key} class="ability-level">Lv{upgrade.level}</span>
 							</div>
+							{#if upgradeFeedback?.key === key}
+								{#key upgradeFeedback.id}<span class="level-up-badge" aria-live="polite">LEVEL UP</span>{/key}
+							{/if}
 							<p class="ability-type">{abilityTypes[key]}</p>
 							<div class="change">
 								{#if upgrade.nextEffect}
@@ -110,6 +114,16 @@
 	.points-display :global(svg) { width: 18px; height: 18px; color: #aeb5d7; }
 	.ability-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
 	.ability-card { display: grid; grid-template-rows: auto auto 1fr auto auto; gap: 14px; min-height: 292px; padding: 20px; border: 1px solid rgba(122, 135, 255, .42); border-radius: 12px; background: rgba(19, 26, 61, .78); }
+	.success-flash { animation: ability-card-flash 420ms ease-out; }
+	.level-up-highlight { animation: level-up-pop 420ms ease-out; }
+	.level-up-badge { color: #aeb6ff; font-size: 11px; font-weight: 900; letter-spacing: .08em; animation: level-up-badge 420ms ease-out both; }
+	@keyframes ability-card-flash { 0%, 100% { border-color: rgba(122, 135, 255, .42); box-shadow: none; } 35% { border-color: #aeb6ff; box-shadow: 0 0 0 2px rgba(174, 182, 255, .3), 0 0 24px rgba(90, 103, 255, .3); } }
+	@keyframes level-up-pop { 0%, 100% { color: #aeb6ff; } 35% { color: #fff; transform: scale(1.08); } }
+	@keyframes level-up-badge { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+	@media (prefers-reduced-motion: reduce) { .success-flash { animation-name: ability-card-highlight; } .level-up-highlight { animation-name: level-up-color; } .level-up-badge { animation-name: level-up-fade; } }
+	@keyframes ability-card-highlight { 0%, 100% { border-color: rgba(122, 135, 255, .42); } 35% { border-color: #aeb6ff; } }
+	@keyframes level-up-color { 0%, 100% { color: #aeb6ff; } 35% { color: #fff; } }
+	@keyframes level-up-fade { from { opacity: 0; } to { opacity: 1; } }
 	.ability-card-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 	.ability-name { margin: 0; color: #f4f6ff; font-size: 17px; font-weight: 800; }
 	.ability-level { color: #aeb6ff; font-size: 14px; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }

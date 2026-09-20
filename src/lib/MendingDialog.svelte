@@ -18,9 +18,10 @@
 		onOpenChange: (open: boolean) => void;
 		onStart: () => void;
 		onCollect: () => void;
+		collectFeedback?: Readonly<{ id: number; points: number; lifespanMs: number }> | null;
 	}>;
 
-	let { open, projection, hasJob, points: ownedPointsValue, onOpenChange, onStart, onCollect }: Props = $props();
+	let { open, projection, hasJob, points: ownedPointsValue, onOpenChange, onStart, onCollect, collectFeedback = null }: Props = $props();
 	let detailsOpen = $state(false);
 	let remainingDuration = $derived(formatRemainingDuration(projection?.remainingDurationMs ?? 0));
 	let lifespanDuration = $derived(formatElapsedDuration(projection?.lifespanExtensionMs ?? 0));
@@ -63,11 +64,19 @@
 						<Dialog.Title class="mending-dialog-title">作業中</Dialog.Title>
 						<Dialog.Description class="sr-only">時間の経過で成果が蓄積され、ポイントと寿命延長を受け取れます。</Dialog.Description>
 					</div>
-					<div class="owned-points" data-mending-icon="wallet" aria-label={`所持ポイント ${ownedPoints} pt`}>
+					<div class:points-highlight={collectFeedback} class="owned-points" data-mending-icon="wallet" aria-label={`所持ポイント ${ownedPoints} pt`}>
 						<Wallet aria-hidden="true" />
 						<span class="owned-points-value">{ownedPoints} pt</span>
 					</div>
 				</div>
+				{#if collectFeedback}
+					{#key collectFeedback.id}
+						<div class="mending-success-feedback" aria-live="polite" aria-atomic="true">
+							<strong>+{collectFeedback.points} pt</strong>
+							<span>寿命 +{formatElapsedDuration(collectFeedback.lifespanMs)}</span>
+						</div>
+					{/key}
+				{/if}
 				{#if !hasJob}
 					<section class="idle-state">
 						<p>作業を開始すると、時間に応じて成果が蓄積されます。</p>
@@ -76,7 +85,7 @@
 				{:else}
 					<section class="reward-group" aria-label="受け取れる成果">
 						<div class="result-list">
-							<div class="result-card" data-mending-icon="coins">
+							<div class:success-flash={collectFeedback} class="result-card" data-mending-icon="coins">
 								<Coins aria-hidden="true" />
 								<div class="result-copy">
 									<span class="result-label">ポイント</span>
@@ -84,7 +93,7 @@
 									{#if nextPointSeconds !== null}<span class="next-point" data-mending-icon="clock"><Clock aria-hidden="true" />次の1ptまで {nextPointSeconds}秒</span>{/if}
 								</div>
 							</div>
-							<div class="result-card" data-mending-icon="heart"><Heart aria-hidden="true" /><div class="result-copy"><span class="result-label">寿命</span><strong>+{lifespanDuration}</strong></div></div>
+							<div class:success-flash={collectFeedback} class="result-card" data-mending-icon="heart"><Heart aria-hidden="true" /><div class="result-copy"><span class="result-label">寿命</span><strong>+{lifespanDuration}</strong></div></div>
 						</div>
 						<div class="action-group">
 							<PrimaryButton type="button" onclick={onCollect}>成果を受け取る</PrimaryButton>
@@ -130,6 +139,18 @@
 <style>
 	:global(.mending-dialog-overlay) { position: fixed; inset: 0; z-index: 100; background: rgba(2, 8, 18, 0.72); backdrop-filter: blur(2px); }
 	:global(.mending-dialog-content) { position: fixed; top: 50%; left: 50%; z-index: 101; display: grid; gap: 0; width: min(720px, calc(100vw - 24px)); max-height: calc(100svh - 32px); overflow: auto; padding: 34px; border: 1px solid rgba(35, 220, 226, .78); border-radius: 18px; background: linear-gradient(180deg, rgba(4, 29, 43, .92), rgba(3, 20, 30, .94)); box-shadow: 0 0 0 1px rgba(53, 227, 232, .10) inset, 0 18px 60px rgba(0, 0, 0, .42), 0 0 30px rgba(26, 212, 220, .08); backdrop-filter: blur(14px); color: #ecfbff; transform: translate(-50%, -50%); }
+	.mending-success-feedback { position: absolute; top: 72px; right: 34px; z-index: 1; display: grid; gap: 2px; pointer-events: none; color: #64f5f0; text-align: right; animation: mending-success-float 420ms ease-out both; }
+	.mending-success-feedback strong { font-size: 18px; font-weight: 850; }
+	.mending-success-feedback span { color: #cfe7ee; font-size: 13px; font-weight: 700; }
+	.points-highlight { animation: mending-points-highlight 420ms ease-out; }
+	.success-flash { animation: mending-card-flash 420ms ease-out; }
+	@keyframes mending-success-float { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(-8px); } }
+	@keyframes mending-card-flash { 0%, 100% { box-shadow: none; } 35% { box-shadow: 0 0 0 2px rgba(53, 227, 232, .4), 0 0 24px rgba(53, 227, 232, .34); } }
+	@keyframes mending-points-highlight { 0%, 100% { color: #ecfbff; } 35% { color: #64f5f0; transform: scale(1.04); } }
+	@media (prefers-reduced-motion: reduce) { .mending-success-feedback { animation-name: mending-success-fade; } .success-flash { animation-name: mending-card-highlight; } .points-highlight { animation-name: mending-points-color; } }
+	@keyframes mending-success-fade { from { opacity: 0; } to { opacity: 1; } }
+	@keyframes mending-card-highlight { 0%, 100% { box-shadow: none; } 35% { box-shadow: 0 0 0 2px rgba(53, 227, 232, .4); } }
+	@keyframes mending-points-color { 0%, 100% { color: #ecfbff; } 35% { color: #64f5f0; } }
 	.terminal-dialog-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 48px; }
 	:global(.mending-dialog-content .mending-dialog-title) { margin: 0; color: #ecfbff; font-size: 22px; line-height: 1; font-weight: 800; letter-spacing: .03em; }
 	:global(.mending-dialog-content .sr-only) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

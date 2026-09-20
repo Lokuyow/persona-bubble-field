@@ -386,6 +386,8 @@ live発言によって画面上に新しいliveフキダシが成立したとき
 
 右上のspeaker controlで全効果音のmaster volumeを操作できる。独立したmute buttonは持たず、volume 0をmuteとして扱う。volumeはlocal preferenceとして保存し、reload後も復元する。browserのautoplay制約により、user activation前に到着したlive発言の効果音は静かにskipし、unlock後に遅れて再生しない。documentがbackgroundまたはhidden、volume 0または実質0の場合も再生しない。
 
+作業成果の回収成功時とRun能力の強化成功時にも、短いクライアント生成効果音を1回再生する。これらを含む全効果音は同じspeaker controlのmaster volume、volume 0のmute、user activation、document visibilityの条件に従う。mutationが成功しなかった場合は再生しない。
+
 ---
 
 ## 22. 同一発言の合体表示

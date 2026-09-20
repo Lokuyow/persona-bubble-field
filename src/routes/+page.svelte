@@ -181,7 +181,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	import { createSpeechPublicationCore, type SpeechPublicationContext, type SpeechPublicationOutcome } from '$lib/speechPublication';
 	import type { SpeechSuggestionConversationEntry } from '$lib/speechSuggestions';
 	import type { SpeechType } from '$lib/conversation';
-	import { createSpeechSoundController, DEFAULT_SOUND_PREFERENCE, newLiveBubbleEffects, type SpeechSoundController } from '$lib/speechSoundEffects';
+	import { createSoundController, DEFAULT_SOUND_PREFERENCE, newLiveBubbleEffects, type SoundController } from '$lib/speechSoundEffects';
 	import type { SpeechBubbleShape } from '$lib/speechBubblePath';
 	import {
 		createWorldReadSession,
@@ -224,7 +224,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	const mountedTraceReplyRemeasures = new Map<string, () => void>();
 	let conversationState = $state.raw<ConversationState>(createConversationState());
 	let soundPreference = $state(DEFAULT_SOUND_PREFERENCE);
-	let speechSoundController = $state.raw<SpeechSoundController | null>(null);
+	let soundController = $state.raw<SoundController | null>(null);
 	let devSoundSequence = 0;
 	let lastPlacedAnchorById = $state.raw<Readonly<Record<string, WorldPoint>>>({});
 	let lastVisibilityKey: string | null = null;
@@ -259,10 +259,15 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	let mendingNowMs = $state(0);
 	let mendingDialogOpen = $state(false);
 	let mendingMutationInFlight = $state(false);
+	let collectFeedback = $state<Readonly<{ id: number; points: number; lifespanMs: number }> | null>(null);
+	let collectFeedbackTimer: number | null = null;
 	let adjustmentDialogOpen = $state(false);
 	let selfProfileDialogOpen = $state(false);
 	let lastSelfProfileTrigger: HTMLButtonElement | null = null;
 	let abilityMutationInFlight = $state(false);
+	let upgradeFeedback = $state<Readonly<{ id: number; key: PersonaAbilityKey; level: number }> | null>(null);
+	let upgradeFeedbackTimer: number | null = null;
+	let feedbackSequence = 0;
 	let clearMutationInFlight = $state(false);
 	let pendingRealtimeSettlement = $state(false);
 	const LIFESPAN_HUD_REFRESH_INTERVAL_MS = 30_000;
@@ -886,10 +891,10 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		let mounted = true;
 		let soundStorage: Storage | null = null;
 		try { soundStorage = window.localStorage; } catch { /* storage may be unavailable */ }
-		const soundController = createSpeechSoundController({ storage: soundStorage, document });
-		speechSoundController = soundController;
-		soundPreference = soundController.preference;
-		const unlockSound = () => soundController.unlock();
+		const appSoundController = createSoundController({ storage: soundStorage, document });
+		soundController = appSoundController;
+		soundPreference = appSoundController.preference;
+		const unlockSound = () => appSoundController.unlock();
 		window.addEventListener('pointerdown', unlockSound, { passive: true });
 		window.addEventListener('keydown', unlockSound, { passive: true });
 		let startRequested = false;
@@ -1261,8 +1266,10 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			mounted = false;
 			window.removeEventListener('pointerdown', unlockSound);
 			window.removeEventListener('keydown', unlockSound);
-			soundController.dispose();
-			speechSoundController = null;
+			appSoundController.dispose();
+			soundController = null;
+			if (collectFeedbackTimer !== null) window.clearTimeout(collectFeedbackTimer);
+			if (upgradeFeedbackTimer !== null) window.clearTimeout(upgradeFeedbackTimer);
 			if (proximityFeedbackTimer !== null) window.clearTimeout(proximityFeedbackTimer);
 			proximityFeedbackTimer = null;
 			cancelPendingComposerSubmission(new DOMException('Submission was cancelled.', 'AbortError'));
@@ -1552,6 +1559,12 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			}
 			personaSnapshot = result.persona;
 			selfSigner = result.persona.signer;
+			if (result.kind === 'upgraded') {
+				if (upgradeFeedbackTimer !== null) window.clearTimeout(upgradeFeedbackTimer);
+				upgradeFeedback = { id: ++feedbackSequence, key, level: result.persona.activeRun.gameState.abilities[key] };
+				upgradeFeedbackTimer = window.setTimeout(() => { upgradeFeedback = null; upgradeFeedbackTimer = null; }, 500);
+				soundController?.play('level-up');
+			}
 		} catch {
 			closeAdjustmentTerminal();
 		} finally {
@@ -1587,6 +1600,16 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			}
 			personaSnapshot = result.persona;
 			selfSigner = result.persona.signer;
+			if (result.kind === 'collected') {
+				if (collectFeedbackTimer !== null) window.clearTimeout(collectFeedbackTimer);
+				collectFeedback = {
+					id: ++feedbackSequence,
+					points: Math.max(0, result.persona.activeRun.gameState.points - expected.gameState.points),
+					lifespanMs: Math.max(0, result.persona.activeRun.gameState.lifespanExpiresAtMs - expected.gameState.lifespanExpiresAtMs)
+				};
+				collectFeedbackTimer = window.setTimeout(() => { collectFeedback = null; collectFeedbackTimer = null; }, 500);
+				soundController?.play('collect');
+			}
 			mendingNowMs = Date.now();
 			updateLifespanHud(mendingNowMs, true);
 			if (result.kind === 'started') closeMendingTerminal();
@@ -2391,7 +2414,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			now: conversationMessage.createdAt
 		});
 		conversationState = applyVisibility(nextConversationState, visibleParticipantIds);
-		for (const effect of newLiveBubbleEffects(previousConversationState, conversationState)) speechSoundController?.play(effect);
+		for (const effect of newLiveBubbleEffects(previousConversationState, conversationState)) soundController?.play(effect);
 	}
 
 	function injectDevLiveSpeech(speechType: SpeechType): void {
@@ -2413,8 +2436,8 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	}
 
 	function updateSoundVolume(volume: number): void {
-		speechSoundController?.setVolume(volume);
-		soundPreference = speechSoundController?.preference ?? { ...soundPreference, volume };
+		soundController?.setVolume(volume);
+		soundPreference = soundController?.preference ?? { ...soundPreference, volume };
 	}
 
 	function tailTarget(participant: (typeof participantViews)[number]): WorldPoint {
@@ -2514,7 +2537,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		{#snippet children()}
 			<SoundControl
 				volume={soundPreference.volume}
-				onOpen={() => speechSoundController?.unlock()}
+				onOpen={() => soundController?.unlock()}
 				onVolume={updateSoundVolume}
 			/>
 			<Chatter
@@ -2618,6 +2641,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		onOpenChange={(open) => { mendingDialogOpen = open; }}
 		onStart={() => { void mutateMending('start'); }}
 		onCollect={() => { void mutateMending('collect'); }}
+		collectFeedback={collectFeedback}
 	/>
 	<AdjustmentDialog
 		open={adjustmentDialogOpen}
@@ -2626,6 +2650,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		busy={abilityMutationInFlight}
 		onOpenChange={(open) => { adjustmentDialogOpen = open; }}
 		onUpgrade={(key) => { void mutateAbility(key); }}
+		upgradeFeedback={upgradeFeedback}
 	/>
 	<SelfProfileDialog
 		open={selfProfileDialogOpen}
