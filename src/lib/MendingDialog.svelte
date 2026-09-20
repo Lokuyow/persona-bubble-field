@@ -146,7 +146,7 @@
 	.mending-success-feedback { position: absolute; top: 72px; right: 34px; z-index: 1; display: grid; gap: 2px; pointer-events: none; color: #64f5f0; text-align: right; animation: mending-success-float 420ms ease-out both; }
 	.mending-success-feedback strong { font-size: 18px; font-weight: 850; }
 	.mending-success-feedback span { color: #cfe7ee; font-size: 13px; font-weight: 700; }
-	.mending-startup-feedback { position: absolute; inset: 0; z-index: 2; display: grid; place-items: center; pointer-events: none; border: 1px solid rgba(53, 227, 232, .86); border-radius: inherit; color: #64f5f0; font-size: 16px; font-weight: 800; letter-spacing: .04em; text-shadow: 0 0 18px rgba(53, 227, 232, .7); animation: mending-startup-scan 1000ms ease-out both; box-shadow: 0 0 24px rgba(53, 227, 232, .18) inset; }
+	.mending-startup-feedback { position: absolute; inset: 0; z-index: 2; display: grid; place-items: center; overflow: hidden; pointer-events: none; border: 1px solid rgba(53, 227, 232, .86); border-radius: inherit; color: #64f5f0; font-size: 16px; font-weight: 800; letter-spacing: .04em; text-shadow: 0 0 18px rgba(53, 227, 232, .7); animation: mending-startup-scan 1000ms ease-out both; box-shadow: 0 0 24px rgba(53, 227, 232, .18) inset; }
 	.mending-startup-feedback::after { position: absolute; inset: 0; content: ''; background: linear-gradient(180deg, transparent 0%, rgba(53, 227, 232, .22) 48%, transparent 54%); animation: mending-startup-sweep 1000ms ease-out both; }
 	.points-highlight { animation: mending-points-highlight 420ms ease-out; }
 	.success-flash { animation: mending-card-flash 420ms ease-out; }
@@ -155,7 +155,7 @@
 	@keyframes mending-points-highlight { 0%, 100% { color: #ecfbff; } 35% { color: #64f5f0; transform: scale(1.04); } }
 	@media (prefers-reduced-motion: reduce) { .mending-success-feedback { animation-name: mending-success-fade; } .mending-startup-feedback { animation-name: mending-startup-fade; } .mending-startup-feedback::after { animation: none; } .success-flash { animation-name: mending-card-highlight; } .points-highlight { animation-name: mending-points-color; } }
 	@keyframes mending-success-fade { from { opacity: 0; } to { opacity: 1; } }
-	@keyframes mending-startup-scan { from { opacity: 0; transform: scale(.985); } 35% { opacity: 1; transform: scale(1); } to { opacity: 0; transform: scale(1.01); } }
+	@keyframes mending-startup-scan { from { opacity: 0; } 35% { opacity: 1; } to { opacity: 0; } }
 	@keyframes mending-startup-sweep { from { opacity: 0; transform: translateY(-45%); } 45% { opacity: 1; } to { opacity: 0; transform: translateY(45%); } }
 	@keyframes mending-startup-fade { from { opacity: 0; } 35% { opacity: 1; } to { opacity: 0; } }
 	@keyframes mending-card-highlight { 0%, 100% { box-shadow: none; } 35% { box-shadow: 0 0 0 2px rgba(53, 227, 232, .4); } }

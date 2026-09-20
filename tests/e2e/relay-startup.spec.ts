@@ -2193,6 +2193,17 @@ test.describe('Relay startup', () => {
 		expect(started).toMatchObject({ version: 4, points: 0, pointProgressTicks: 0, mendingJob: expect.objectContaining({ processedDurationMs: 0, unclaimedPoints: 0 }) });
 		const activeDialog = page.getByRole('dialog');
 		await expect(activeDialog.locator('.mending-startup-feedback')).toContainText('作業を開始しました');
+		const startupScrollExtent = await activeDialog.evaluate((element) => ({
+			scrollWidth: element.scrollWidth,
+			clientWidth: element.clientWidth,
+			scrollHeight: element.scrollHeight,
+			clientHeight: element.clientHeight
+		}));
+		expect(startupScrollExtent.scrollWidth).toBeLessThanOrEqual(startupScrollExtent.clientWidth);
+		await expect.poll(async () => activeDialog.locator('.mending-startup-feedback').count()).toBe(0);
+		const settledScrollExtent = await activeDialog.evaluate((element) => ({ scrollWidth: element.scrollWidth, clientWidth: element.clientWidth, scrollHeight: element.scrollHeight, clientHeight: element.clientHeight }));
+		expect(settledScrollExtent.scrollWidth).toBeLessThanOrEqual(settledScrollExtent.clientWidth);
+		expect(settledScrollExtent.scrollHeight - settledScrollExtent.clientHeight).toBe(startupScrollExtent.scrollHeight - startupScrollExtent.clientHeight);
 		await expect(activeDialog.getByRole('button', { name: '作業を開始' })).toHaveCount(0);
 		await expect(activeDialog).toContainText('作業中');
 		await expect(activeDialog).toContainText('0 pt');
