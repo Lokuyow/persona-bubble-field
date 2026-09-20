@@ -53,6 +53,7 @@
 				</header>
 				<ScrollArea.Root class="self-profile-scroll" type="auto">
 					<ScrollArea.Viewport class="self-profile-viewport">
+						<p class="self-profile-about">{character.about}</p>
 						<section class="summary-grid" aria-label="現在状態">
 							<div class="summary-card"><span>残り寿命</span><strong>{formatRemainingLifespan(effectiveExpiry, nowMs)}</strong></div>
 							<div class="summary-card"><span>所持ポイント</span><strong>{points} pt</strong></div>
@@ -91,8 +92,8 @@
 <style>
 	:global(.self-profile-overlay) { position: fixed; inset: 0; z-index: 100; background: rgba(35, 44, 41, .48); backdrop-filter: blur(3px); }
 	:global(.self-profile-content) { position: fixed; top: 50%; left: 50%; z-index: 101; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 22px; box-sizing: border-box; width: min(560px, calc(100vw - 32px)); max-height: min(760px, calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 24px)); padding: 24px; overflow: hidden; border: 1px solid rgba(57, 67, 64, .26); border-radius: 24px; background: #f1f5f0; box-shadow: 0 22px 60px rgba(32, 42, 38, .28); color: #374345; font-family: 'Trebuchet MS', 'Avenir Next', system-ui, sans-serif; transform: translate(-50%, -50%); }
-	.self-profile-head { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 18px; align-items: center; }
-	:global(.self-profile-avatar) { position: relative !important; inset: auto !important; display: grid; width: 96px; height: 96px; place-items: center; border: 2px solid rgba(255, 255, 255, .9); border-radius: 42% 58% 48% 52%; box-shadow: 0 5px 10px rgba(58, 70, 61, .14); transform: none !important; }
+	.self-profile-head { display: grid; grid-template-columns: 128px minmax(0, 1fr); gap: 18px; align-items: center; }
+	:global(.self-profile-avatar) { position: relative !important; inset: auto !important; display: grid; width: 128px; height: 128px; place-items: center; border: 2px solid rgba(255, 255, 255, .9); border-radius: 42% 58% 48% 52%; box-shadow: 0 5px 10px rgba(58, 70, 61, .14); transform: none !important; }
 	:global(.self-profile-avatar img) { width: 100%; height: 100%; object-fit: contain; }
 	.self-profile-identity { display: grid; gap: 5px; }
 	:global(.self-profile-identity [data-dialog-title]) { margin: 0; font-size: 24px; font-weight: 900; }
@@ -100,6 +101,7 @@
 	:global(.self-profile-content .sr-only) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 	:global(.self-profile-scroll) { min-height: 0; overflow: hidden; }
 	:global(.self-profile-viewport) { display: grid; gap: 22px; min-height: 0; max-height: 100%; overflow-y: auto; padding-right: 8px; }
+	.self-profile-about { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; color: #56625e; font-size: 14px; font-weight: 700; line-height: 1.65; }
 	.summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 	.summary-card, .ability-row, .root-row { border: 1px solid rgba(57, 67, 64, .14); border-radius: 12px; background: rgba(255, 255, 255, .68); }
 	.summary-card { padding: 14px 15px; }
@@ -133,5 +135,5 @@
 	:global(.self-profile-content button:focus-visible) { outline: 3px solid var(--color-focus-ring); outline-offset: 2px; }
 	:global(.self-profile-scrollbar) { display: flex; width: 10px; padding: 2px; border-radius: 999px; background: rgba(86, 105, 98, .12); }
 	:global(.self-profile-thumb) { flex: 1; border-radius: inherit; background: #8fa8a0; }
-	@media (max-width: 600px) { :global(.self-profile-content) { gap: 18px; width: min(560px, calc(100vw - 20px)); max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 16px); padding: 18px; } .self-profile-head { grid-template-columns: 72px minmax(0, 1fr); } :global(.self-profile-avatar) { width: 72px; height: 72px; border-radius: 22px; } :global(.self-profile-identity [data-dialog-title]) { font-size: 20px; } .summary-grid { grid-template-columns: 1fr; } }
+	@media (max-width: 600px) { :global(.self-profile-content) { gap: 18px; width: min(560px, calc(100vw - 20px)); max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 16px); padding: 18px; } .self-profile-head { grid-template-columns: 96px minmax(0, 1fr); } :global(.self-profile-avatar) { width: 96px; height: 96px; border-radius: 32% 68% 42% 58%; } :global(.self-profile-identity [data-dialog-title]) { font-size: 20px; } .summary-grid { grid-template-columns: 1fr; } }
 </style>

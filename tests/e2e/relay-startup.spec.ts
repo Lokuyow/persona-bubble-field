@@ -2264,6 +2264,9 @@ test.describe('Relay startup', () => {
 		});
 		expect(avatarColors.dockBackground).toBe(avatarColors.fieldBackground);
 		expect(avatarColors.dockBorder).toBe(avatarColors.fieldBorder);
+		const dockBox = await profileTrigger.boundingBox();
+		expect(dockBox).not.toBeNull();
+		expect(dockBox!.width).toBeCloseTo(54, 0);
 		const character = requireCharacterFromPubkey(getPublicKey(fixtureSecret(41)));
 		const avatarImage = profileTrigger.locator('img');
 		await expect(avatarImage).toHaveCount(1);
@@ -2285,6 +2288,10 @@ test.describe('Relay startup', () => {
 		await expect(dialog).toContainText('ハルシネーション抑制');
 		await expect(dialog).toContainText('Root Point');
 		await expect(dialog).toContainText('Normal Clear');
+		await expect(dialog).toContainText(character.about);
+		const headerAvatarBox = await dialog.locator('.self-profile-avatar').boundingBox();
+		expect(headerAvatarBox).not.toBeNull();
+		expect(headerAvatarBox!.width).toBeGreaterThan(96);
 		await expect(dialog).toContainText('100,000 ptで現在のRunを終了します。');
 		await expect(dialog).toContainText('所持ポイント');
 		await expect(dialog).toContainText('未回収の作業ポイントは含まれません。');
@@ -2324,8 +2331,11 @@ test.describe('Relay startup', () => {
 		const dialogBox = await dialog.boundingBox();
 		const viewportBox = await dialog.locator('.self-profile-viewport').boundingBox();
 		const metrics = await dialog.locator('.self-profile-viewport').evaluate((element) => ({ clientHeight: element.clientHeight, scrollHeight: element.scrollHeight }));
+		const headerAvatarBox = await dialog.locator('.self-profile-avatar').boundingBox();
 		expect(dialogBox).not.toBeNull();
 		expect(viewportBox).not.toBeNull();
+		expect(headerAvatarBox).not.toBeNull();
+		expect(headerAvatarBox!.width).toBeGreaterThan(72);
 		expect(dialogBox!.y).toBeGreaterThanOrEqual(0);
 		expect(dialogBox!.y + dialogBox!.height).toBeLessThanOrEqual(420);
 		expect(viewportBox!.y).toBeGreaterThanOrEqual(dialogBox!.y);
