@@ -149,14 +149,11 @@
 	:global(.escape-info-trigger svg) { width: 18px; height: 18px; }
 	:global(.escape-info-trigger:hover) { background: rgba(156, 104, 87, .1); }
 	:global(.escape-info-trigger:focus-visible) { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
-	:global(.escape-info-popover) { z-index: 110; box-sizing: border-box; width: min(330px, calc(100vw - 32px)); max-height: min(420px, calc(100dvh - 64px)); overflow-y: auto; padding: 14px; border: 1px solid #ddb9a8; border-radius: 12px; background: #fff1eb; box-shadow: 0 14px 32px rgba(32, 42, 38, .24); color: #765d58; }
+	:global(.escape-info-popover) { z-index: 110; box-sizing: border-box; width: min(330px, calc(100vw - 32px)); max-height: min(420px, var(--bits-floating-available-height, calc(100dvh - 64px))); overflow-y: auto; padding: 14px; border: 1px solid #ddb9a8; border-radius: 12px; background: #fff1eb; box-shadow: 0 14px 32px rgba(32, 42, 38, .24); color: #765d58; }
 	:global(.escape-info-items) { display: grid; gap: 12px; }
 	:global(.escape-info-items > div) { display: grid; gap: 2px; }
 	:global(.escape-info-items strong) { color: #765d58; font-size: 12px; font-weight: 900; }
 	:global(.escape-info-items span) { color: #876f69; font-size: 12px; line-height: 1.45; }
-	@media (max-height: 500px) {
-		:global(.escape-info-popover) { margin-top: -25px; }
-	}
 	.clear-progress-head { display: flex; justify-content: space-between; gap: 12px; color: #7e706d; font-size: 12px; }
 	.clear-progress-head strong { color: #5e514f; font-size: 13px; font-variant-numeric: tabular-nums; }
 	.clear-progress { height: 9px; overflow: hidden; border: 1px solid #d8b3a5; border-radius: 999px; background: #f0dcd4; }
