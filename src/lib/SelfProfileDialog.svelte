@@ -43,23 +43,26 @@
 		<Dialog.Portal>
 			<Dialog.Overlay class="self-profile-overlay" />
 			<Dialog.Content class="self-profile-content" preventScroll={false} {onCloseAutoFocus}>
-				<header class="self-profile-head">
-					<CharacterAvatar class={`avatar avatar-${avatarTone} self-profile-avatar`} {character} />
-					<div class="self-profile-identity">
-						<Dialog.Title>{character.name}</Dialog.Title>
-						<Dialog.Description class="sr-only">自分のプロフィールと現在のRun情報</Dialog.Description>
-						<span>Run #{persona.activeRun.runNumber}</span>
-					</div>
-				</header>
 				<ScrollArea.Root class="self-profile-scroll" type="auto">
 					<ScrollArea.Viewport class="self-profile-viewport">
-						<p class="self-profile-about">{character.about}</p>
-						<section class="summary-grid" aria-label="現在状態">
-							<div class="summary-card"><span>残り寿命</span><strong>{formatRemainingLifespan(effectiveExpiry, nowMs)}</strong></div>
-							<div class="summary-card"><span>所持ポイント</span><strong>{points} pt</strong></div>
+						<section class="profile-section" aria-labelledby="self-profile-profile">
+							<h2 id="self-profile-profile">プロフィール</h2>
+							<header class="self-profile-head">
+								<CharacterAvatar class={`avatar avatar-${avatarTone} self-profile-avatar`} {character} />
+								<div class="self-profile-identity">
+									<Dialog.Title>{character.name}</Dialog.Title>
+									<Dialog.Description class="sr-only">自分のプロフィールと現在のRun情報</Dialog.Description>
+									<span>Run #{persona.activeRun.runNumber}</span>
+								</div>
+							</header>
+							<p class="self-profile-about">{character.about}</p>
 						</section>
-						<section class="profile-section" aria-labelledby="self-profile-abilities">
-							<h2 id="self-profile-abilities">Run能力</h2>
+						<section class="profile-section" aria-labelledby="self-profile-run">
+							<h2 id="self-profile-run">Run</h2>
+							<div class="summary-grid" aria-label="現在状態">
+								<div class="summary-card"><span>残り寿命</span><strong>{formatRemainingLifespan(effectiveExpiry, nowMs)}</strong></div>
+								<div class="summary-card"><span>所持ポイント</span><strong>{points} pt</strong></div>
+							</div>
 							<div class="ability-list">
 								{#each abilityKeys as key}
 									{@const upgrade = getAbilityUpgrade(key, persona.gameState.abilities)}
@@ -70,15 +73,15 @@
 						<section class="profile-section" aria-labelledby="self-profile-root">
 							<h2 id="self-profile-root">Root</h2>
 							<div class="root-row"><span>Root Point</span><strong>{persona.rootPoints} RP</strong></div>
-						</section>
-						<section class="clear-section" aria-labelledby="self-profile-clear">
-							<div class="clear-title-row"><h2 id="self-profile-clear">Normal Clear</h2><strong>+1 RP</strong></div>
+							<div class="clear-section" aria-labelledby="self-profile-clear">
+							<div class="clear-title-row"><h3 id="self-profile-clear">脱出</h3><strong>+1 RP</strong></div>
 							<p>100,000 ptで現在のRunを終了します。</p>
 							<div class="clear-progress-head"><span>所持ポイント</span><strong>{points.toLocaleString()} / 100,000 pt</strong></div>
-							<div class="clear-progress" role="progressbar" aria-label="Normal Clearに必要なポイント" aria-valuemin="0" aria-valuemax="100000" aria-valuenow={points}><span style={`width: ${clearProgress}%;`}></span></div>
+							<div class="clear-progress" role="progressbar" aria-label="脱出に必要なポイント" aria-valuemin="0" aria-valuemax="100000" aria-valuenow={points}><span style={`width: ${clearProgress}%;`}></span></div>
 							<p>未回収の作業ポイントは含まれません。</p>
 							{#if clearBlockedReason && !pointBlocked}<p class="clear-reason">clear不可: {clearBlockedReason}</p>{/if}
-							<button class="clear-button" type="button" disabled={clearBlocked} onclick={onClear}>Normal Clear（+1 RP）</button>
+							<button class="clear-button" type="button" disabled={clearBlocked} onclick={onClear}>脱出</button>
+							</div>
 						</section>
 					</ScrollArea.Viewport>
 					<ScrollArea.Scrollbar class="self-profile-scrollbar" orientation="vertical"><ScrollArea.Thumb class="self-profile-thumb" /></ScrollArea.Scrollbar>
@@ -100,7 +103,7 @@
 	.self-profile-identity span { color: #75817d; font-size: 13px; font-weight: 900; letter-spacing: .04em; }
 	:global(.self-profile-content .sr-only) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 	:global(.self-profile-scroll) { min-height: 0; overflow: hidden; }
-	:global(.self-profile-viewport) { display: grid; gap: 22px; min-height: 0; max-height: 100%; overflow-y: auto; padding-right: 8px; }
+	:global(.self-profile-viewport) { display: grid; gap: 32px; min-height: 0; max-height: 100%; overflow-y: auto; padding-right: 8px; }
 	.self-profile-about { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; color: #56625e; font-size: 14px; font-weight: 700; line-height: 1.65; }
 	.summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 	.summary-card, .ability-row, .root-row { border: 1px solid rgba(57, 67, 64, .14); border-radius: 12px; background: rgba(255, 255, 255, .68); }
@@ -120,7 +123,7 @@
 	.root-row strong { font-variant-numeric: tabular-nums; }
 	.clear-section { display: grid; gap: 12px; padding: 16px; border: 1px solid #ddb9a8; border-radius: 14px; background: #fff1eb; }
 	.clear-title-row { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
-	.clear-title-row h2 { margin: 0; color: #8c584b; font-size: 16px; font-weight: 900; }
+	.clear-title-row h3 { margin: 0; color: #8c584b; font-size: 16px; font-weight: 900; }
 	.clear-title-row strong { color: #8c584b; font-size: 13px; }
 	.clear-section p { margin: 0; color: #765d58; font-size: 13px; line-height: 1.45; }
 	.clear-progress-head { display: flex; justify-content: space-between; gap: 12px; color: #7e706d; font-size: 12px; }
@@ -135,5 +138,5 @@
 	:global(.self-profile-content button:focus-visible) { outline: 3px solid var(--color-focus-ring); outline-offset: 2px; }
 	:global(.self-profile-scrollbar) { display: flex; width: 10px; padding: 2px; border-radius: 999px; background: rgba(86, 105, 98, .12); }
 	:global(.self-profile-thumb) { flex: 1; border-radius: inherit; background: #8fa8a0; }
-	@media (max-width: 600px) { :global(.self-profile-content) { gap: 18px; width: min(560px, calc(100vw - 20px)); max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 16px); padding: 18px; } .self-profile-head { grid-template-columns: 96px minmax(0, 1fr); } :global(.self-profile-avatar) { width: 96px; height: 96px; border-radius: 32% 68% 42% 58%; } :global(.self-profile-identity [data-dialog-title]) { font-size: 20px; } .summary-grid { grid-template-columns: 1fr; } }
+	@media (max-width: 600px) { :global(.self-profile-content) { gap: 18px; width: min(560px, calc(100vw - 20px)); max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 16px); padding: 18px; } :global(.self-profile-viewport) { gap: 24px; } .self-profile-head { grid-template-columns: 96px minmax(0, 1fr); } :global(.self-profile-avatar) { width: 96px; height: 96px; border-radius: 32% 68% 42% 58%; } :global(.self-profile-identity [data-dialog-title]) { font-size: 20px; } .summary-grid { grid-template-columns: 1fr; } }
 </style>

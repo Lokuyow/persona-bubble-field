@@ -2287,7 +2287,8 @@ test.describe('Relay startup', () => {
 		await expect(dialog).toContainText('コンテキスト容量');
 		await expect(dialog).toContainText('ハルシネーション抑制');
 		await expect(dialog).toContainText('Root Point');
-		await expect(dialog).toContainText('Normal Clear');
+		await expect(dialog).toContainText('脱出');
+		await expect(dialog).not.toContainText('Normal Clear');
 		await expect(dialog).toContainText(character.about);
 		const headerAvatarBox = await dialog.locator('.self-profile-avatar').boundingBox();
 		expect(headerAvatarBox).not.toBeNull();
@@ -2297,7 +2298,7 @@ test.describe('Relay startup', () => {
 		await expect(dialog).toContainText('未回収の作業ポイントは含まれません。');
 		await expect(dialog).not.toContainText('100,000 ptで現在のRunを終了します。未回収の作業ポイントは含まれません。');
 		await expect(dialog).toContainText('100,000 pt');
-		await expect(dialog.getByRole('button', { name: 'Normal Clear（+1 RP）' })).toBeDisabled();
+		await expect(dialog.getByRole('button', { name: '脱出', exact: true })).toBeDisabled();
 		await expect(dialog.getByText('clear不可: 所持ポイントが100,000pt未満です')).toHaveCount(0);
 		await expect(dialog.getByRole('button', { name: /へ強化/ })).toHaveCount(0);
 
@@ -2309,7 +2310,8 @@ test.describe('Relay startup', () => {
 		await fieldTrigger.click();
 		await expect(dialog).toBeVisible();
 		await expect(dialog).toContainText('Run #1');
-		await expect(dialog).toContainText('Normal Clear');
+		await expect(dialog).toContainText('脱出');
+		await expect(dialog).not.toContainText('Normal Clear');
 		const headerAvatarColors = await page.evaluate(() => {
 			const field = document.querySelector<HTMLElement>('.participant[data-self="true"] .avatar');
 			const header = document.querySelector<HTMLElement>('.self-profile-avatar');
