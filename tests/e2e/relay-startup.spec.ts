@@ -761,6 +761,39 @@ async function pauseAtCurrentBrowserTime(page: Page): Promise<void> {
 	await page.clock.setSystemTime(now);
 }
 
+async function startSelectedRun(page: Page): Promise<void> {
+	const start = page.getByRole('button', { name: 'このbuildでRun開始' });
+	await expect(start).toBeEnabled();
+	await start.click();
+}
+
+async function setPendingRootPoints(page: Page, rootPoints: number): Promise<void> {
+	await page.evaluate(async (nextRootPoints) => {
+		const database = await new Promise<IDBDatabase>((resolve, reject) => {
+			const request = indexedDB.open('persona-bubble-field-account');
+			request.onsuccess = () => resolve(request.result);
+			request.onerror = () => reject(request.error);
+		});
+		try {
+			const transaction = database.transaction('persona-bubble-field-player-state', 'readwrite');
+			const store = transaction.objectStore('persona-bubble-field-player-state');
+			const request = store.get('player-lifecycle');
+			await new Promise<void>((resolve, reject) => {
+				request.onsuccess = () => {
+					const state = request.result as { rootPoints: number };
+					store.put({ ...state, rootPoints: nextRootPoints }, 'player-lifecycle');
+				};
+				request.onerror = () => reject(request.error);
+				transaction.oncomplete = () => resolve();
+				transaction.onerror = () => reject(transaction.error);
+				transaction.onabort = () => reject(transaction.error);
+			});
+		} finally {
+			database.close();
+		}
+	}, rootPoints);
+}
+
 async function installVisualAnimationRafMetrics(page: Page): Promise<void> {
 	await page.evaluate(() => {
 		const clockRequestAnimationFrame = window.requestAnimationFrame.bind(window);
@@ -835,12 +868,12 @@ async function installPromptApiStub(page: Page, availability: 'available' | 'una
 		}, { availability });
 }
 
-async function seedRelayAccount(page: Page, secretKey: Uint8Array, pubkey: string, lifespanExpiresAtMs = Date.now() + 7 * 24 * 60 * 60 * 1000, points = 0, abilities = { inferenceEfficiency: 0, contextCapacity: 0, hallucinationSuppression: 0 }): Promise<void> {
+async function seedRelayAccount(page: Page, secretKey: Uint8Array, pubkey: string, lifespanExpiresAtMs = Date.now() + 7 * 24 * 60 * 60 * 1000, points = 0, abilities = { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 }, rootPoints = 0): Promise<void> {
 	const fixtureAccountIndex = fixtureAccountIndexForSecret(secretKey);
 	await page.goto('/favicon.svg');
-	await page.evaluate(async ({ accountPubkey, accountIndex, expiresAtMs, points, abilities, characterId }) => {
+	await page.evaluate(async ({ accountPubkey, accountIndex, expiresAtMs, points, abilities, characterId, rootPoints }) => {
 		const database = await new Promise<IDBDatabase>((resolve, reject) => {
-			const request = indexedDB.open('persona-bubble-field-account', 6);
+			const request = indexedDB.open('persona-bubble-field-account', 7);
 			request.onupgradeneeded = () => {
 				for (const name of Array.from(request.result.objectStoreNames)) request.result.deleteObjectStore(name);
 				request.result.createObjectStore('persona-bubble-field-root-secret');
@@ -857,14 +890,16 @@ async function seedRelayAccount(page: Page, secretKey: Uint8Array, pubkey: strin
 		transaction.objectStore('persona-bubble-field-root-secret').put(wrappingKey, 'root-wrapping-key');
 		transaction.objectStore('persona-bubble-field-root-secret').put({ version: 1, iv, ciphertext }, 'encrypted-root-entropy');
 		transaction.objectStore('persona-bubble-field-player-state').put({
-			schemaVersion: 1,
+			schemaVersion: 2,
+			rootPoints,
 			identities: [{ generation: 1, accountIndex, pubkey: accountPubkey, characterId, identityCreatedAtMs: now,
 				status: 'alive', characterProfileRevision: 2, runHistory: [] }],
 			mode: { kind: 'running', activeRun: { runNumber: 1, revision: 0, startedAtMs: now,
 				identity: { generation: 1, accountIndex, pubkey: accountPubkey },
+				rootBuild: { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0 },
 				gameState: {
-					version: 3, personaPubkey: accountPubkey, lifespanExpiresAtMs: expiresAtMs,
-					pointProgressTicks: 0,
+					version: 4, personaPubkey: accountPubkey, lifespanExpiresAtMs: expiresAtMs,
+					pointProgressTicks: 0, inferenceAccelerationUsedMs: 0,
 			points, abilities, mendingJob: null
 				} } }
 		}, 'player-lifecycle');
@@ -874,7 +909,7 @@ async function seedRelayAccount(page: Page, secretKey: Uint8Array, pubkey: strin
 			transaction.onabort = () => reject(transaction.error);
 		});
 		database.close();
-	}, { accountPubkey: pubkey, accountIndex: fixtureAccountIndex, expiresAtMs: lifespanExpiresAtMs, points, abilities, characterId: requireCharacterFromPubkey(pubkey).characterId });
+	}, { accountPubkey: pubkey, accountIndex: fixtureAccountIndex, expiresAtMs: lifespanExpiresAtMs, points, abilities, rootPoints, characterId: requireCharacterFromPubkey(pubkey).characterId });
 }
 
 async function readRelayGameState(page: Page): Promise<{
@@ -977,7 +1012,20 @@ async function overwriteRelayGameState(page: Page, gameState: Record<string, unk
 			await new Promise<void>((resolve, reject) => {
 				request.onsuccess = () => {
 					const lifecycle = request.result as { mode: { kind: 'running'; activeRun: { gameState: Record<string, unknown> } } };
-					lifecycle.mode.activeRun.gameState = { pointProgressTicks: 0, ...nextGameState };
+					if (nextGameState.version === 99) {
+						lifecycle.mode.activeRun.gameState = nextGameState;
+					} else {
+						const currentGameState = lifecycle.mode.activeRun.gameState;
+						const incomingAbilities = (nextGameState.abilities ?? {}) as Record<string, unknown>;
+						lifecycle.mode.activeRun.gameState = {
+							...currentGameState,
+							...nextGameState,
+							version: 4,
+							pointProgressTicks: 0,
+							inferenceAccelerationUsedMs: 0,
+							abilities: { ...(currentGameState.abilities as Record<string, unknown>), ...incomingAbilities }
+						};
+					}
 					store.put(lifecycle, 'player-lifecycle');
 				};
 				transaction.oncomplete = () => resolve();
@@ -991,7 +1039,7 @@ async function overwriteRelayGameState(page: Page, gameState: Record<string, unk
 async function seedUnavailablePersona(page: Page, kind: 'missing' | 'corrupt'): Promise<void> {
 	await page.goto('/favicon.svg');
 	await page.evaluate((stateKind) => new Promise<void>((resolve, reject) => {
-		const request = indexedDB.open('persona-bubble-field-account', 6);
+		const request = indexedDB.open('persona-bubble-field-account', 7);
 		request.onupgradeneeded = () => {
 			for (const name of Array.from(request.result.objectStoreNames)) request.result.deleteObjectStore(name);
 			request.result.createObjectStore('persona-bubble-field-root-secret');
@@ -1019,7 +1067,9 @@ async function installDeathTransitionFailure(page: Page): Promise<void> {
 		const originalPut = IDBObjectStore.prototype.put;
 		IDBObjectStore.prototype.put = function(value: unknown, key?: IDBValidKey) {
 			puts.push(this.name);
-			if (armed && this.name === 'persona-bubble-field-player-state' && this.transaction.mode === 'readwrite') {
+			const nextLifecycle = value as { mode?: { kind?: string }; identities?: Array<{ status?: string }> } | null;
+			const isDeathTransition = nextLifecycle?.mode?.kind === 'selecting' && nextLifecycle.identities?.some((identity) => identity.status === 'dead') === true;
+			if (armed && isDeathTransition && this.name === 'persona-bubble-field-player-state' && this.transaction.mode === 'readwrite') {
 				armed = false;
 				injected += 1;
 				sessionStorage.removeItem(failureKey);
@@ -1627,8 +1677,8 @@ test.describe('Relay startup', () => {
 			await installHostOwnedStub(deathTab);
 			await installDelayedRelay(deathTab);
 			await deathTab.goto('/');
-			await overwriteRelayGameState(deathTab, { version: 3, personaPubkey: oldPubkey, lifespanExpiresAtMs: Date.now() - 1, points: 0,
-				abilities: { inferenceEfficiency: 0, contextCapacity: 0, hallucinationSuppression: 0 }, mendingJob: null });
+			await overwriteRelayGameState(deathTab, { version: 4, personaPubkey: oldPubkey, lifespanExpiresAtMs: Date.now() - 1, points: 0,
+				abilities: { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 }, mendingJob: null });
 			await deathTab.reload({ waitUntil: 'domcontentloaded' });
 			await expect(deathTab.getByRole('dialog')).toBeVisible();
 			await expect(deathTab.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
@@ -1670,8 +1720,8 @@ test.describe('Relay startup', () => {
 			await installHostOwnedStub(deathTab);
 			await installDelayedRelay(deathTab);
 			await deathTab.goto('/');
-			await overwriteRelayGameState(deathTab, { version: 3, personaPubkey: oldPubkey, lifespanExpiresAtMs: Date.now() - 1, points: 0,
-				abilities: { inferenceEfficiency: 0, contextCapacity: 0, hallucinationSuppression: 0 }, mendingJob: null });
+			await overwriteRelayGameState(deathTab, { version: 4, personaPubkey: oldPubkey, lifespanExpiresAtMs: Date.now() - 1, points: 0,
+				abilities: { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 }, mendingJob: null });
 			await deathTab.reload({ waitUntil: 'domcontentloaded' });
 			await expect(deathTab.getByRole('dialog')).toBeVisible();
 
@@ -1705,8 +1755,8 @@ test.describe('Relay startup', () => {
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
 		await overwriteRelayGameState(page, {
-			version: 3, personaPubkey: pubkey, lifespanExpiresAtMs: Date.now() - 1, points: 321, pointProgressTicks: 0, mendingJob: null,
-			abilities: { inferenceEfficiency: 4, contextCapacity: 3, hallucinationSuppression: 4 }
+			version: 4, personaPubkey: pubkey, lifespanExpiresAtMs: Date.now() - 1, points: 321, pointProgressTicks: 0, mendingJob: null,
+			abilities: { inferenceEfficiency: 100, contextCapacity: 100, hallucinationSuppression: 100 }
 		});
 		await armDeathTransitionFailure(page);
 		await page.reload({ waitUntil: 'domcontentloaded' });
@@ -1770,6 +1820,7 @@ test.describe('Relay startup', () => {
 		await page.evaluate(() => { document.documentElement.dataset.identitySelectionDocumentToken = crypto.randomUUID(); });
 		const documentToken = await page.locator('html').getAttribute('data-identity-selection-document-token');
 		await reloadedButtons.nth(1).click();
+		await startSelectedRun(page);
 		await expect(page.getByRole('dialog')).toHaveCount(0);
 		expect(await page.locator('html').getAttribute('data-identity-selection-document-token')).toBe(documentToken);
 		await expect.poll(() => page.evaluate(() => Boolean((window as typeof window & { __relayStartupTest?: unknown }).__relayStartupTest))).toBe(true);
@@ -1826,6 +1877,38 @@ test.describe('Relay startup', () => {
 		expect(lifecycle).toEqual({ mode: 'running', identities: 1, runNumber: 1 });
 	});
 
+	test('allocates a Root build before starting a Run', async ({ page }) => {
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page);
+		await page.goto('/');
+		await page.setViewportSize({ width: 390, height: 640 });
+		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
+		await setPendingRootPoints(page, 3);
+		await page.reload({ waitUntil: 'domcontentloaded' });
+
+		await expect(page.locator('.root-points')).toContainText('3 RP');
+		const rootBuild = page.locator('.root-build');
+		await expect(rootBuild).toContainText('Rank 0: ×1.00');
+		await expect(rootBuild).toContainText('Rank 3: ×2.00');
+		await expect(rootBuild).toContainText('Rank 3: ×3.00 / overflow lifespan 50%');
+		await expect(rootBuild).toContainText('Rank 3: 最大30日');
+		await expect(rootBuild).toContainText('最初の有効通常作業24時間のpoint生成だけに適用');
+		await expect(rootBuild).toContainText('fresh Run開始時寿命は常に7日');
+		await page.getByRole('button', { name: /を選ぶ$/ }).first().click();
+		const rankRows = page.locator('.rank-row');
+		for (let index = 0; index < 3; index += 1) {
+			await rankRows.nth(index).getByRole('button').nth(1).click();
+		}
+		await expect(page.getByRole('button', { name: 'このbuildでRun開始' })).toBeEnabled();
+		await startSelectedRun(page);
+		await expect(page.getByRole('dialog')).toHaveCount(0);
+		await page.evaluate(() => {
+			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
+			relay.releaseMetadata(); relay.releasePrimary();
+		});
+		await expect(page.locator('.participant[data-self="true"]')).toBeVisible();
+	});
+
 	test('reuses a completed anonymous world session after Identity selection', async ({ page }) => {
 		await installHostOwnedStub(page);
 		await installDelayedRelay(page);
@@ -1845,6 +1928,7 @@ test.describe('Relay startup', () => {
 		});
 		const countsBeforeSelection = countBootstrapRequests(requestsBeforeSelection.state.requests);
 		await candidateButtons.nth(0).click();
+		await startSelectedRun(page);
 		await expect(page.getByRole('dialog')).toHaveCount(0);
 		await expect(page.locator('.participant[data-self="true"]')).toBeVisible();
 		expect(countBootstrapRequests((await relayState(page)).state.requests)).toEqual(countsBeforeSelection);
@@ -1868,6 +1952,7 @@ test.describe('Relay startup', () => {
 		const countsBeforeSelection = bootstrapCounts(beforeSelection.state.requests);
 
 		await candidateButtons.nth(0).click();
+		await startSelectedRun(page);
 		await expect(page.getByRole('dialog')).toHaveCount(0);
 		await expect(page.locator('.participant[data-self="true"]')).toBeVisible();
 		const selectedPubkey = await page.locator('.participant[data-self="true"]').getAttribute('data-participant-id');
@@ -1887,6 +1972,7 @@ test.describe('Relay startup', () => {
 		const metadataRequestsBeforeSelection = (await relayState(page)).state.requests.filter((request) => [40, 41].includes(requestKind(request)!)).length;
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { failMetadataDiscovery(): void } }).__relayStartupTest.failMetadataDiscovery());
 		await candidateButtons.nth(0).click();
+		await startSelectedRun(page);
 		await expect(page.getByRole('dialog')).toHaveCount(0);
 		await page.evaluate(() => {
 			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
@@ -1928,6 +2014,7 @@ test.describe('Relay startup', () => {
 		await expect(candidateButtons.nth(2)).toBeVisible();
 		expect(await dialog.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
 		await candidateButtons.nth(2).click();
+		await startSelectedRun(page);
 		await expect(page.getByRole('dialog')).toHaveCount(0);
 		await page.evaluate(() => {
 			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
@@ -1964,10 +2051,11 @@ test.describe('Relay startup', () => {
 				await client.goto('/');
 				await expect(client.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
 			}));
-			await Promise.all([
-				page.getByRole('button', { name: /を選ぶ$/ }).nth(0).click(),
-				other.getByRole('button', { name: /を選ぶ$/ }).nth(1).click()
-			]);
+			await page.getByRole('button', { name: /を選ぶ$/ }).nth(0).click();
+			await startSelectedRun(page);
+			await expect(page.getByRole('dialog')).toHaveCount(0);
+			await other.getByRole('button', { name: /を選ぶ$/ }).nth(1).click();
+			await startSelectedRun(other);
 			await expect.poll(async () => page.evaluate(async () => {
 				const database = await new Promise<IDBDatabase>((resolve, reject) => {
 					const request = indexedDB.open('persona-bubble-field-account');
@@ -2026,52 +2114,66 @@ test.describe('Relay startup', () => {
 
 		await terminal.click();
 		await expect(page.getByRole('dialog')).toBeVisible();
-		await page.getByRole('button', { name: '作業を開始' }).click();
+		const startButton = page.getByRole('button', { name: '作業を開始' });
+		await expect(startButton).toHaveCSS('color', 'rgb(255, 255, 255)');
+		await startButton.click();
 		await expect(page.getByRole('dialog')).toHaveCount(0);
 		await expect.poll(() => readRelayGameState(page)).toMatchObject({ mendingJob: expect.any(Object) });
 		const started = await readRelayGameState(page);
-		expect(started).toMatchObject({ version: 3, points: 0, pointProgressTicks: 0, mendingJob: expect.objectContaining({ maximumDurationMs: 8 * 60 * 60 * 1000, pointIntervalMs: 60 * 60 * 1000 }) });
+		expect(started).toMatchObject({ version: 4, points: 0, pointProgressTicks: 0, mendingJob: expect.objectContaining({ processedDurationMs: 0, unclaimedPoints: 0 }) });
 		await terminal.click();
 		const activeDialog = page.getByRole('dialog');
-		await expect(activeDialog).toContainText('POINT 0 pt');
-		await expect(activeDialog).toContainText('1分未満 / 8時間');
-		await expect(activeDialog).toContainText('残り 8時間');
-		await expect(activeDialog).toContainText('寿命延長');
-		await expect(activeDialog).toContainText('ポイント');
-		await expect(activeDialog).toContainText('+0pt');
-		await expect(activeDialog.getByRole('button', { name: '受け取る' })).toBeVisible();
-		await expect(page.locator('.lifespan-hud')).toContainText('作業中 +0.8h/h');
+		await expect(activeDialog).toContainText('作業中');
+		await expect(activeDialog).toContainText('0 pt');
+		await expect(activeDialog).toContainText('上限まで あと5分');
+		await expect(activeDialog).not.toContainText('今受け取れる');
+		await expect(activeDialog).toContainText('+0 pt');
+		await expect(activeDialog.locator('[data-mending-icon="wallet"] svg')).toHaveCount(1);
+		await expect(activeDialog.locator('.result-card[data-mending-icon="coins"] > svg')).toHaveCount(1);
+		await expect(activeDialog.locator('.result-card[data-mending-icon="heart"] > svg')).toHaveCount(1);
+		await expect(activeDialog.locator('[data-mending-icon="coins"] .next-point')).toHaveCount(1);
+		await expect(activeDialog.locator('.reward-group .action-group')).toHaveCount(1);
+		await expect(activeDialog.getByRole('button', { name: '成果を受け取る' })).toBeVisible();
+		await expect(activeDialog.locator('.mending-success-feedback')).toHaveCount(0);
+		await expect(activeDialog.getByRole('button', { name: '成果を受け取る' })).toHaveCSS('color', 'rgb(255, 255, 255)');
+		await expect(activeDialog.getByRole('button', { name: '詳細を見る' })).toHaveAttribute('aria-expanded', 'false');
+		await activeDialog.getByRole('button', { name: '詳細を見る' }).click();
+		await expect(activeDialog).toContainText('現在のポイント速度');
+		await expect(activeDialog.getByRole('button', { name: '詳細を閉じる' })).toHaveAttribute('aria-expanded', 'true');
+		await expect(page.locator('.lifespan-hud')).toContainText('作業中 +0.1h/h');
 		await expect(page.locator('.lifespan-hud')).toContainText('ポイント 0pt');
-		await page.getByRole('button', { name: '閉じる' }).click();
+		await page.getByRole('button', { name: '閉じる', exact: true }).click();
 
 		const startedAt = (started.mendingJob as { startedAtMs: number }).startedAtMs;
-		const partialAt = startedAt + 40 * 60 * 1000;
+		const partialAt = startedAt + 2 * 60 * 1000 + 30 * 1000;
 		await page.clock.setSystemTime(partialAt);
 		await pauseAtCurrentBrowserTime(page);
 		await terminal.click();
 		const partialDialog = page.getByRole('dialog');
-		await expect(partialDialog).toContainText('40分 / 8時間');
-		await expect(partialDialog).toContainText('残り 7時間20分');
-		await expect(partialDialog).toContainText('次の1ptまで 20分');
-		await expect(partialDialog).toContainText('+0pt');
-		await partialDialog.getByRole('button', { name: '受け取る' }).click();
+		await expect(partialDialog).toContainText('上限まで あと3分');
+		await expect(partialDialog).toContainText(/次の1ptまで [1-9][0-9]?秒/);
+		await expect(partialDialog.locator('.next-point[data-mending-icon="clock"] > svg')).toHaveCount(1);
+		await expect(partialDialog.locator('[data-mending-icon="coins"] .next-point')).toHaveCount(1);
+		await expect(partialDialog).toContainText('+2 pt');
+		await partialDialog.getByRole('button', { name: '成果を受け取る' }).click();
 		await expect.poll(async () => {
 			const partialState = await readRelayGameState(page);
-			return partialState.points === 0 && partialState.pointProgressTicks > 0 && partialState.pointProgressTicks < 1_188_000_000;
+			return partialState.points === 2 && partialState.pointProgressTicks > 0 && partialState.pointProgressTicks < 60_000_000;
 		}).toBe(true);
+		await expect(page.locator('.mending-success-feedback')).toContainText('+2 pt');
 
-		const secondAt = partialAt + 20 * 60 * 1000;
+		const secondAt = partialAt + 3 * 60 * 1000;
 		await page.clock.setSystemTime(secondAt);
 		await pauseAtCurrentBrowserTime(page);
-		if (await page.getByRole('dialog').count() > 0) await page.getByRole('button', { name: '閉じる' }).click();
+		if (await page.getByRole('dialog').count() > 0) await page.getByRole('button', { name: '閉じる', exact: true }).click();
 		await terminal.click();
-		await expect(page.getByRole('dialog')).toContainText('+1pt');
-		await page.getByRole('button', { name: '受け取る' }).click();
-		await expect.poll(async () => (await readRelayGameState(page)).points).toBe(1);
+		await expect(page.getByRole('dialog')).toContainText('+3 pt');
+		await page.getByRole('button', { name: '成果を受け取る' }).click();
+		await expect.poll(async () => (await readRelayGameState(page)).points).toBe(5);
 
-		if (await page.getByRole('dialog').count() > 0) await page.getByRole('button', { name: '閉じる' }).click();
+		if (await page.getByRole('dialog').count() > 0) await page.getByRole('button', { name: '閉じる', exact: true }).click();
 		const afterSecond = await readRelayGameState(page);
-		const fullAt = (afterSecond.mendingJob as { startedAtMs: number }).startedAtMs + 8 * 60 * 60 * 1000;
+		const fullAt = (afterSecond.mendingJob as { startedAtMs: number }).startedAtMs + 5 * 60 * 1000;
 		await page.clock.setSystemTime(fullAt);
 		await pauseAtCurrentBrowserTime(page);
 		const completedAtTerminal = finalizeEvent(buildPositionEventTemplate({
@@ -2081,23 +2183,24 @@ test.describe('Relay startup', () => {
 		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), completedAtTerminal);
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,2');
 		await terminal.click();
-		await expect(page.getByRole('dialog')).toContainText('蓄積上限に達しています');
-		await expect(page.getByRole('dialog')).toContainText('ポイント');
-		await expect(page.getByRole('dialog')).toContainText('+8pt');
-		await page.getByRole('button', { name: '受け取る' }).click();
-		await expect.poll(() => readRelayGameState(page)).toMatchObject({ mendingJob: expect.any(Object), points: 9, pointProgressTicks: 0 });
-		await expect(page.getByRole('dialog')).toContainText('POINT 9 pt');
-		await expect(page.getByRole('dialog')).toContainText('0分 / 8時間');
-		await expect(page.getByRole('dialog')).toContainText('ポイント');
-		await expect(page.getByRole('dialog')).toContainText('+0pt');
-		await expect(page.locator('.lifespan-hud')).toContainText('作業中 +0.8h/h');
-		await expect(page.locator('.lifespan-hud')).toContainText('ポイント 9pt');
+		await expect(page.getByRole('dialog')).toContainText('上限に達しました');
+		await expect(page.getByRole('dialog')).not.toContainText('今受け取れる');
+		await expect(page.getByRole('dialog')).toContainText('+5 pt');
+		await expect(page.getByRole('dialog')).not.toContainText('次の1ptまで');
+		await expect(page.getByRole('dialog').locator('[data-mending-icon="coins"] .next-point')).toHaveCount(0);
+		await page.getByRole('button', { name: '成果を受け取る' }).click();
+		await expect.poll(() => readRelayGameState(page)).toMatchObject({ mendingJob: expect.any(Object), points: 10, pointProgressTicks: 30_000_000 });
+		await expect(page.getByRole('dialog')).toContainText('10 pt');
+		await expect(page.getByRole('dialog')).toContainText('上限まで あと5分');
+		await expect(page.getByRole('dialog')).toContainText('+0 pt');
+		await expect(page.locator('.lifespan-hud')).toContainText('作業中 +0.1h/h');
+		await expect(page.locator('.lifespan-hud')).toContainText('ポイント 10pt');
 		const collected = await readRelayGameState(page);
 		expect(collected.mendingJob).toEqual(expect.objectContaining({ startedAtMs: expect.any(Number) }));
-		expect(collected.points).toBe(9);
+		expect(collected.points).toBe(10);
 		expect(collected.lifespanExpiresAtMs).toBeGreaterThan(started.lifespanExpiresAtMs);
-		expect(collected.lifespanExpiresAtMs).toBeLessThanOrEqual(started.lifespanExpiresAtMs + 7.2 * 60 * 60 * 1000);
-		await page.getByRole('button', { name: '閉じる' }).click();
+		expect(collected.lifespanExpiresAtMs).toBeLessThanOrEqual(started.lifespanExpiresAtMs + 6 * 60 * 1000);
+		await page.getByRole('button', { name: '閉じる', exact: true }).click();
 	});
 
 	test('opens the adjustment terminal only nearby and persists one ability upgrade', async ({ page }) => {
@@ -2125,17 +2228,206 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '13,3');
 		await adjustment.click();
 		const dialog = page.getByRole('dialog', { name: '能力強化' });
-		await expect(dialog).toContainText('POINT 10 pt');
-		await expect(dialog).toContainText('推論効率 Lv0');
-		await expect(dialog).toContainText('次0.9h/h5pt');
-		await expect(dialog).toContainText('現在60分 / 1pt');
-		await dialog.getByRole('button', { name: '1 level強化' }).first().click();
-		await expect(dialog).toContainText('POINT 5 pt');
-		await expect(page.locator('.lifespan-hud')).toContainText('ポイント 5pt');
-		await expect(dialog).toContainText('推論効率 Lv1');
-		await expect(dialog.getByRole('button', { name: '1 level強化' }).nth(1)).toBeDisabled();
+		await expect(dialog).toContainText('10 pt');
+		await expect(dialog).not.toContainText('POINT');
+		await expect(dialog).not.toContainText('ポイントを使って、より効率よく活動できるようにします。');
+		await expect(dialog.locator('.ability-card')).toHaveCount(3);
+		await expect(dialog).toContainText('推論効率');
+		await expect(dialog).toContainText('コンテキスト容量');
+		await expect(dialog).toContainText('ハルシネーション抑制');
+		await expect(dialog).toContainText('Lv1');
+		await expect(dialog).toContainText('1.00');
+		await expect(dialog).toContainText('1.18');
+		await expect(dialog).toContainText('ポイント生成速度');
+		await expect(dialog).toContainText('必要ポイント');
+		await expect(dialog.getByRole('button', { name: 'Lv2へ強化' }).first()).toBeVisible();
+		await expect(dialog.getByRole('button', { name: 'Lv2へ強化' }).first()).toHaveCSS('color', 'rgb(255, 255, 255)');
+		const upgradedCard = dialog.locator('.ability-card').first();
+		const stableBefore = await upgradedCard.evaluate((card) => {
+			const type = card.querySelector('.ability-type')!.getBoundingClientRect();
+			const cost = card.querySelector('.cost')!.getBoundingClientRect();
+			const button = card.querySelector('button')!.getBoundingClientRect();
+			return { typeY: type.y, costY: cost.y, buttonY: button.y };
+		});
+		await expect(dialog).not.toContainText('強化後');
+		await expect(dialog).not.toContainText('normal clear');
+		await expect(dialog).not.toContainText('Root Point');
+		await dialog.getByRole('button', { name: 'Lv2へ強化' }).first().click();
+		await expect(dialog).toContainText('9 pt');
+		await expect(dialog.locator('.level-up-badge')).toHaveCount(1);
+		const stableDuring = await upgradedCard.evaluate((card) => ({
+			typeY: card.querySelector('.ability-type')!.getBoundingClientRect().y,
+			costY: card.querySelector('.cost')!.getBoundingClientRect().y,
+			buttonY: card.querySelector('button')!.getBoundingClientRect().y
+		}));
+		expect(stableDuring).toEqual(stableBefore);
+		await expect(dialog.locator('.level-up-badge')).toHaveCount(0, { timeout: 1_500 });
+		const stableAfter = await upgradedCard.evaluate((card) => ({
+			typeY: card.querySelector('.ability-type')!.getBoundingClientRect().y,
+			costY: card.querySelector('.cost')!.getBoundingClientRect().y,
+			buttonY: card.querySelector('button')!.getBoundingClientRect().y
+		}));
+		expect(stableAfter).toEqual(stableBefore);
+		await expect(page.locator('.lifespan-hud')).toContainText('ポイント 9pt');
+		await expect(dialog).toContainText('推論効率 Lv2');
 		await page.reload();
-		await expect.poll(() => readRelayGameState(page)).toMatchObject({ points: 5, abilities: { inferenceEfficiency: 1, contextCapacity: 0, hallucinationSuppression: 0 } });
+		await expect.poll(() => readRelayGameState(page)).toMatchObject({ points: 9, abilities: { inferenceEfficiency: 2, contextCapacity: 1, hallucinationSuppression: 1 } });
+	});
+
+	test('opens the self profile from the ComposerDock without adjustment-terminal proximity', async ({ page }) => {
+		await page.setViewportSize({ width: 1200, height: 900 });
+		await openReadyRelayWorld(page);
+
+		const profileTrigger = page.getByRole('button', { name: '自分のプロフィールを開く' });
+		await expect(profileTrigger).toBeVisible();
+		await expect(page.locator('.composer-controls .profile-trigger')).toHaveCount(1);
+		const avatarColors = await page.evaluate(() => {
+			const field = document.querySelector<HTMLElement>('.participant[data-self="true"] .avatar');
+			const dock = document.querySelector<HTMLElement>('.profile-trigger-character-avatar');
+			if (!field || !dock) throw new Error('Expected field and ComposerDock self avatars.');
+			const fieldStyle = getComputedStyle(field);
+			const dockStyle = getComputedStyle(dock);
+			return { fieldBackground: fieldStyle.backgroundColor, dockBackground: dockStyle.backgroundColor, fieldBorder: fieldStyle.borderTopColor, dockBorder: dockStyle.borderTopColor };
+		});
+		expect(avatarColors.dockBackground).toBe(avatarColors.fieldBackground);
+		expect(avatarColors.dockBorder).toBe(avatarColors.fieldBorder);
+		const dockBox = await profileTrigger.boundingBox();
+		expect(dockBox).not.toBeNull();
+		expect(dockBox!.width).toBeCloseTo(54, 0);
+		const character = requireCharacterFromPubkey(getPublicKey(fixtureSecret(41)));
+		const avatarImage = profileTrigger.locator('img');
+		await expect(avatarImage).toHaveCount(1);
+		await expect(avatarImage).toHaveAttribute('src', `/${character.picture}`);
+		await expect.poll(() => avatarImage.evaluate((image) => {
+			const loadedImage = image as HTMLImageElement;
+			return { complete: loadedImage.complete, naturalWidth: loadedImage.naturalWidth };
+		})).toEqual({ complete: true, naturalWidth: expect.any(Number) });
+		await expect.poll(() => avatarImage.evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+		await profileTrigger.click();
+
+		const dialog = page.getByRole('dialog');
+		await expect(dialog).toBeVisible();
+		const viewportSize = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
+		await expect(dialog).toContainText('Run #1');
+		await expect(dialog).toContainText('残り寿命');
+		await expect(dialog).toContainText('所持ポイント');
+		await expect(dialog).toContainText('推論効率');
+		await expect(dialog).toContainText('コンテキスト容量');
+		await expect(dialog).toContainText('ハルシネーション抑制');
+		await expect(dialog).toContainText('Root Point');
+		await expect(dialog).toContainText('脱出');
+		await expect(dialog).not.toContainText('Normal Clear');
+		const escapeTrigger = dialog.locator('.escape-info-trigger');
+		const escapeContent = page.locator('.escape-info-popover');
+		await expect(escapeTrigger).toBeVisible();
+		await expect(escapeTrigger).toHaveAttribute('data-state', 'closed');
+		await expect(escapeContent).toBeHidden();
+		await escapeTrigger.click();
+		await expect(escapeTrigger).toHaveAttribute('data-state', 'open');
+		await expect(escapeContent).toBeVisible();
+		await expect(escapeContent).toContainText('現在のRunを終了');
+		await expect(escapeContent).toContainText('Root Point +1');
+		await expect(escapeContent).toContainText('次の人格を選択');
+		await expect(escapeContent).toContainText('秘密鍵を取得可能');
+		await page.keyboard.press('Escape');
+		await expect(escapeContent).toBeHidden();
+		await expect(dialog).toBeVisible();
+		await escapeTrigger.click();
+		await expect(escapeContent).toBeVisible();
+		await escapeTrigger.click();
+		await expect(escapeContent).toBeHidden();
+		await expect(dialog).toContainText(character.about);
+		const headerAvatarBox = await dialog.locator('.self-profile-avatar').boundingBox();
+		expect(headerAvatarBox).not.toBeNull();
+		expect(headerAvatarBox!.width).toBeGreaterThan(96);
+		await expect(dialog).toContainText('100,000 ptで現在のRunを終了します。');
+		await expect(dialog).toContainText('所持ポイント');
+		await expect(dialog).toContainText('未回収の作業ポイントは含まれません。');
+		await expect(dialog).not.toContainText('100,000 ptで現在のRunを終了します。未回収の作業ポイントは含まれません。');
+		await expect(dialog).toContainText('100,000 pt');
+		await expect(dialog.getByRole('button', { name: '脱出', exact: true })).toBeDisabled();
+		await expect(dialog.getByText('clear不可: 所持ポイントが100,000pt未満です')).toHaveCount(0);
+		await expect(dialog.getByRole('button', { name: /へ強化/ })).toHaveCount(0);
+
+		await dialog.getByRole('button', { name: '閉じる', exact: true }).click();
+		await expect(dialog).toBeHidden();
+		await expect(profileTrigger).toBeFocused();
+
+		const fieldTrigger = page.locator('.participant[data-self="true"] .participant-profile-trigger');
+		await fieldTrigger.click();
+		await expect(dialog).toBeVisible();
+		await expect(dialog).toContainText('Run #1');
+		await expect(dialog).toContainText('脱出');
+		await expect(dialog).not.toContainText('Normal Clear');
+		const headerAvatarColors = await page.evaluate(() => {
+			const field = document.querySelector<HTMLElement>('.participant[data-self="true"] .avatar');
+			const header = document.querySelector<HTMLElement>('.self-profile-avatar');
+			if (!field || !header) throw new Error('Expected field and self profile avatars.');
+			return { field: getComputedStyle(field).backgroundColor, header: getComputedStyle(header).backgroundColor };
+		});
+		expect(headerAvatarColors.header).toBe(headerAvatarColors.field);
+		await dialog.getByRole('button', { name: '閉じる', exact: true }).click();
+		await expect(fieldTrigger).toBeFocused();
+	});
+
+	test('keeps the self profile dialog inside a short mobile viewport and scrolls its content', async ({ page }) => {
+		await page.setViewportSize({ width: 420, height: 420 });
+		const viewportSize = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
+		await openReadyRelayWorld(page);
+		await page.getByRole('button', { name: '自分のプロフィールを開く' }).click();
+
+		const dialog = page.getByRole('dialog');
+		await expect(dialog).toBeVisible();
+		const dialogBox = await dialog.boundingBox();
+		const viewportBox = await dialog.locator('.self-profile-viewport').boundingBox();
+		const metrics = await dialog.locator('.self-profile-viewport').evaluate((element) => ({ clientHeight: element.clientHeight, scrollHeight: element.scrollHeight }));
+		await expect(dialog.locator('.self-profile-sections > section')).toHaveCount(3);
+		const headerAvatarBox = await dialog.locator('.self-profile-avatar').boundingBox();
+		expect(dialogBox).not.toBeNull();
+		expect(viewportBox).not.toBeNull();
+		expect(headerAvatarBox).not.toBeNull();
+		expect(headerAvatarBox!.width).toBeGreaterThan(72);
+		expect(dialogBox!.y).toBeGreaterThanOrEqual(0);
+		expect(dialogBox!.y + dialogBox!.height).toBeLessThanOrEqual(420);
+		expect(viewportBox!.y).toBeGreaterThanOrEqual(dialogBox!.y);
+		expect(viewportBox!.y + viewportBox!.height).toBeLessThanOrEqual(dialogBox!.y + dialogBox!.height);
+		expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight);
+		const escapeTrigger = dialog.locator('.escape-info-trigger');
+		await escapeTrigger.click();
+		const escapePopover = page.locator('.escape-info-popover');
+		await expect(escapePopover).toBeVisible();
+		const popoverBox = await escapePopover.boundingBox();
+		const expandedMetrics = await dialog.locator('.self-profile-viewport').evaluate((element) => ({ clientHeight: element.clientHeight, scrollHeight: element.scrollHeight }));
+		expect(popoverBox).not.toBeNull();
+		expect(popoverBox!.x).toBeGreaterThanOrEqual(0);
+		expect(popoverBox!.x + popoverBox!.width).toBeLessThanOrEqual(viewportSize.width);
+		expect(popoverBox!.y).toBeGreaterThanOrEqual(0);
+		expect(popoverBox!.y + popoverBox!.height).toBeLessThanOrEqual(viewportSize.height);
+		expect(expandedMetrics).toEqual(metrics);
+		await dialog.getByRole('button', { name: '脱出', exact: true }).scrollIntoViewIfNeeded();
+		await expect(dialog.getByRole('button', { name: '脱出', exact: true })).toBeVisible();
+	});
+
+	test('places the ComposerDock controls below the editor on mobile', async ({ page }) => {
+		await page.setViewportSize({ width: 390, height: 844 });
+		await openReadyRelayWorld(page);
+
+		const editor = page.locator('.composer-editor-slot');
+		const controls = page.locator('.composer-controls');
+		const profileTrigger = page.locator('.profile-trigger');
+		const speechToggle = page.locator('.speech-type-toggle');
+		const editorBox = await editor.boundingBox();
+		const controlsBox = await controls.boundingBox();
+		const profileBox = await profileTrigger.boundingBox();
+		const speechBox = await speechToggle.boundingBox();
+		expect(editorBox).not.toBeNull();
+		expect(controlsBox).not.toBeNull();
+		expect(profileBox).not.toBeNull();
+		expect(speechBox).not.toBeNull();
+		expect(editorBox!.y + editorBox!.height).toBeLessThanOrEqual(controlsBox!.y + 1);
+		expect(profileBox!.y).toBeGreaterThanOrEqual(controlsBox!.y);
+		expect(speechBox!.y).toBeGreaterThanOrEqual(controlsBox!.y);
+		expect(Math.abs(profileBox!.y - speechBox!.y)).toBeLessThan(2);
 	});
 
 	test('shows maxed abilities as unavailable at the adjustment terminal', async ({ page }) => {
@@ -2145,7 +2437,7 @@ test.describe('Relay startup', () => {
 		await page.clock.install({ time: startTime });
 		await installHostOwnedStub(page);
 		await installDelayedRelay(page, { primaryEvents: testEvents(startTime) });
-		await seedRelayAccount(page, secret, pubkey, startTime + 7 * 24 * 60 * 60 * 1000, 0, { inferenceEfficiency: 4, contextCapacity: 3, hallucinationSuppression: 4 });
+		await seedRelayAccount(page, secret, pubkey, startTime + 7 * 24 * 60 * 60 * 1000, 0, { inferenceEfficiency: 100, contextCapacity: 100, hallucinationSuppression: 100 });
 		await page.goto('/');
 		await page.evaluate(() => {
 			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
@@ -2160,8 +2452,8 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '13,3');
 		await page.getByRole('button', { name: '能力強化端末' }).click();
 		const dialog = page.getByRole('dialog', { name: '能力強化' });
-		await expect(dialog.getByRole('button', { name: '最大level' })).toHaveCount(3);
-		for (const button of await dialog.getByRole('button', { name: '最大level' }).all()) await expect(button).toBeDisabled();
+		await expect(dialog.getByRole('button', { name: '最大Lv' })).toHaveCount(3);
+		for (const button of await dialog.getByRole('button', { name: '最大Lv' }).all()) await expect(button).toBeDisabled();
 	});
 
 	test('keeps an offline mending job alive across browser reopen after its stored expiry', async ({ page }) => {
@@ -2172,7 +2464,7 @@ test.describe('Relay startup', () => {
 		await page.clock.install({ time: startTime });
 		await installHostOwnedStub(page);
 		await installDelayedRelay(page, { primaryEvents: testEvents(startTime) });
-		await seedRelayAccount(page, secret, pubkey, startTime + hour);
+		await seedRelayAccount(page, secret, pubkey, startTime + 2 * 60 * 1000);
 		await page.goto('/');
 		await expect(page.locator('.composer-dock')).toBeVisible();
 		await page.evaluate(() => {
@@ -2191,7 +2483,7 @@ test.describe('Relay startup', () => {
 		await expect.poll(() => readRelayGameState(page)).toMatchObject({ mendingJob: expect.any(Object) });
 		const started = await readRelayGameState(page);
 
-		await page.clock.setSystemTime(startTime + hour + 30 * 60 * 1000);
+		await page.clock.setSystemTime(startTime + 2 * 60 * 1000 + 10 * 1000);
 		await page.reload({ waitUntil: 'domcontentloaded' });
 		await expect(page.locator('.composer-dock')).toBeVisible();
 		await page.evaluate(() => {
@@ -2225,8 +2517,8 @@ test.describe('Relay startup', () => {
 		await page.getByRole('button', { name: '作業を開始' }).click();
 		await expect.poll(() => readRelayGameState(page)).toMatchObject({ mendingJob: expect.any(Object) });
 		const started = await readRelayGameState(page);
-		const job = started.mendingJob as { startedAtMs: number; maximumDurationMs: number };
-		await page.clock.setSystemTime(job.startedAtMs + job.maximumDurationMs);
+		const job = started.mendingJob as { startedAtMs: number };
+		await page.clock.setSystemTime(job.startedAtMs + 5 * 60 * 1000);
 		const currentTerminalPosition = finalizeEvent(buildPositionEventTemplate({
 			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 11, y: 3 }, slot: 1,
 			createdAt: Math.floor(await page.evaluate(() => Date.now()) / 1000)
@@ -2234,7 +2526,7 @@ test.describe('Relay startup', () => {
 		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), currentTerminalPosition);
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,3');
 		await terminal.click();
-		await expect(page.getByRole('button', { name: '受け取る' })).toBeVisible();
+		await expect(page.getByRole('button', { name: '成果を受け取る' })).toBeVisible();
 		await page.clock.runFor(1_001);
 		const moved = finalizeEvent(buildPositionEventTemplate({
 			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 0, y: 0 }, slot: 1,
@@ -2288,20 +2580,19 @@ test.describe('Relay startup', () => {
 			const started = await readRelayGameState(page);
 			expect(started.mendingJob).toEqual(expect.any(Object));
 
-			const completedAt = (started.mendingJob as { startedAtMs: number; maximumDurationMs: number }).startedAtMs +
-				(started.mendingJob as { maximumDurationMs: number }).maximumDurationMs;
+			const completedAt = (started.mendingJob as { startedAtMs: number }).startedAtMs + 5 * 60 * 1000;
 			await Promise.all(clients.map((client) => client.clock.setSystemTime(completedAt)));
 			await Promise.all(clients.map(injectTerminalPosition));
 			for (const client of clients) {
-				const close = client.getByRole('button', { name: '閉じる' });
+				const close = client.getByRole('button', { name: '閉じる', exact: true });
 				if (await close.isVisible()) await close.click();
 				await client.getByRole('button', { name: '作業端末' }).click();
-				await expect(client.getByRole('button', { name: '受け取る' })).toBeVisible();
+				await expect(client.getByRole('button', { name: '成果を受け取る' })).toBeVisible();
 			}
-			await Promise.all(clients.map((client) => client.getByRole('button', { name: '受け取る' }).click()));
-			await expect.poll(() => readRelayGameState(page)).toMatchObject({ points: 8, mendingJob: expect.any(Object) });
+			await Promise.all(clients.map((client) => client.getByRole('button', { name: '成果を受け取る' }).click()));
+			await expect.poll(() => readRelayGameState(page)).toMatchObject({ points: 5, mendingJob: expect.any(Object) });
 			const collected = await readRelayGameState(page);
-			expect(collected).toMatchObject({ points: 8, mendingJob: expect.any(Object) });
+			expect(collected).toMatchObject({ points: 5, mendingJob: expect.any(Object) });
 		} finally {
 			await other.close();
 		}
@@ -2339,12 +2630,13 @@ test.describe('Relay startup', () => {
 				relay.releaseMetadata(); relay.releasePrimary();
 			});
 			await expect(reincarnator.locator(`.participant[data-self="true"][data-participant-id="${oldPubkey}"]`)).toBeVisible();
-			await overwriteRelayGameState(reincarnator, { version: 3, personaPubkey: oldPubkey, lifespanExpiresAtMs: Date.now() - 1, points: 0,
-				abilities: { inferenceEfficiency: 0, contextCapacity: 0, hallucinationSuppression: 0 }, mendingJob: null });
+			await overwriteRelayGameState(reincarnator, { version: 4, personaPubkey: oldPubkey, lifespanExpiresAtMs: Date.now() - 1, points: 0,
+				abilities: { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 }, mendingJob: null });
 			await reincarnator.reload({ waitUntil: 'domcontentloaded' });
 			await expect(reincarnator.getByRole('dialog')).toBeVisible();
 			await expect(reincarnator.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
 			await reincarnator.getByRole('button', { name: /を選ぶ$/ }).first().click();
+			await startSelectedRun(reincarnator);
 			await expect(reincarnator.getByRole('dialog')).toHaveCount(0);
 			await reincarnator.evaluate(() => {
 				const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
@@ -2399,7 +2691,7 @@ test.describe('Relay startup', () => {
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
 		await moveRelaySelfTo(page, { x: 11, y: 3 });
-		await overwriteRelayGameState(page, { version: 2 });
+		await overwriteRelayGameState(page, { version: 99 });
 		const before = (await publishedMessages(page)).length;
 		await page.getByRole('button', { name: '作業端末' }).click();
 		await page.getByRole('button', { name: '作業を開始' }).click();
@@ -2425,11 +2717,11 @@ test.describe('Relay startup', () => {
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
 
 		await overwriteRelayGameState(page, {
-			version: 3,
+			version: 4,
 			personaPubkey: pubkey,
 			lifespanExpiresAtMs: Date.now() - 1,
 			points: 321,
-			abilities: { inferenceEfficiency: 4, contextCapacity: 3, hallucinationSuppression: 4 },
+			abilities: { inferenceEfficiency: 100, contextCapacity: 100, hallucinationSuppression: 100 },
 			mendingJob: null
 		});
 		await page.reload({ waitUntil: 'domcontentloaded' });
@@ -2453,6 +2745,7 @@ test.describe('Relay startup', () => {
 		});
 		expect(pendingCharacterIds).not.toContain(previousCharacterId);
 		await page.getByRole('button', { name: /を選ぶ$/ }).first().click();
+		await startSelectedRun(page);
 		await expect(page.getByRole('dialog')).toHaveCount(0);
 		const reset = await page.evaluate(async () => {
 			const database = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -2474,7 +2767,7 @@ test.describe('Relay startup', () => {
 		});
 		expect(reset.pubkey).not.toBe(pubkey);
 		expect(reset.game).toMatchObject({ personaPubkey: reset.pubkey, points: 0, pointProgressTicks: 0,
-			abilities: { inferenceEfficiency: 0, contextCapacity: 0, hallucinationSuppression: 0 } });
+			abilities: { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 } });
 		await expect.poll(() => page.evaluate(() => Boolean((window as typeof window & { __relayStartupTest?: unknown }).__relayStartupTest))).toBe(true);
 		await page.evaluate(() => {
 			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
@@ -2577,8 +2870,8 @@ test.describe('Relay startup', () => {
 		await installHostOwnedStub(page);
 		await installDelayedRelay(page, { primaryEvents: events });
 		await seedRelayAccount(page, secret, pubkey);
-		await overwriteRelayGameState(page, { version: 3, personaPubkey: pubkey, lifespanExpiresAtMs: startTime + 30_000, points: 0, pointProgressTicks: 0, mendingJob: null,
-			abilities: { inferenceEfficiency: 0, contextCapacity: 0, hallucinationSuppression: 0 } });
+		await overwriteRelayGameState(page, { version: 4, personaPubkey: pubkey, lifespanExpiresAtMs: startTime + 30_000, points: 0, pointProgressTicks: 0, mendingJob: null,
+			abilities: { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 } });
 		await page.goto('/');
 		await expect(page.locator('.composer-dock')).toBeVisible();
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
@@ -2631,8 +2924,8 @@ test.describe('Relay startup', () => {
 		await installHostOwnedStub(page);
 		await installDelayedRelay(page);
 		await seedRelayAccount(page, secret, pubkey);
-		await overwriteRelayGameState(page, { version: 3, personaPubkey: pubkey, lifespanExpiresAtMs: startTime + 30_000, points: 0, pointProgressTicks: 0, mendingJob: null,
-			abilities: { inferenceEfficiency: 0, contextCapacity: 0, hallucinationSuppression: 0 } });
+		await overwriteRelayGameState(page, { version: 4, personaPubkey: pubkey, lifespanExpiresAtMs: startTime + 30_000, points: 0, pointProgressTicks: 0, mendingJob: null,
+			abilities: { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 } });
 		await page.goto('/');
 		await expect(page.locator('.composer-dock')).toBeVisible();
 		await page.evaluate(() => {
@@ -2646,6 +2939,7 @@ test.describe('Relay startup', () => {
 		await expect(page.getByRole('dialog')).toBeVisible();
 		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
 		await page.getByRole('button', { name: /を選ぶ$/ }).first().click();
+		await startSelectedRun(page);
 		await expect(page.getByRole('dialog')).toHaveCount(0);
 		const persistedPubkey = async () => page.evaluate(async () => {
 			const database = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -3851,7 +4145,8 @@ test.describe('Relay startup', () => {
 			});
 			expect(beforePreferredHeight.initialPreferredHeight).toBe('50px');
 			expect(beforePreferredHeight.preferredHeight).toBe('50px');
-			expect(beforePreferredHeight.dockHeight).toBeCloseTo(67, 1);
+			const expectedInitialDockHeight = viewport.name === 'mobile' ? 121 : 67;
+			expect(beforePreferredHeight.dockHeight).toBeCloseTo(expectedInitialDockHeight, 1);
 			expect(beforePreferredHeight.fieldHeight + beforePreferredHeight.dockHeight)
 				.toBeCloseTo(beforePreferredHeight.viewportHeight, 1);
 

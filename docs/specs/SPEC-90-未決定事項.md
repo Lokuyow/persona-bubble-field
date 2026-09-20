@@ -65,7 +65,7 @@ Rootの生成・暗号化保存、BIP85によるIdentity導出、固定3候補�
 
 - 将来の画像・動画対応
 - 将来のカスタム絵文字対応
-- Root-level permanent progressionの具体式 / multiplier / soft cap
+- RP9を超える余剰Root Pointの用途
 - 高周回point sink
 - True Endのtrigger
 - Identity Manifestのpublic export schema

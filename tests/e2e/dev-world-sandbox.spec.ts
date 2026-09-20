@@ -24,7 +24,8 @@ async function openDevWorld(page: Page): Promise<void> {
 async function openClockedDevWorld(page: Page): Promise<void> {
 	await page.clock.install({ time: Date.now() });
 	await openDevWorld(page);
-	await page.clock.pauseAt(Date.now());
+	const now = await page.evaluate(() => Date.now());
+	await page.clock.pauseAt(now + 1_000);
 }
 
 async function readMergedBubbleGeometry(page: Page, memberPrefixes: readonly string[]) {

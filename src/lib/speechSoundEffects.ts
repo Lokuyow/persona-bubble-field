@@ -1,6 +1,7 @@
 import type { ConversationState, SpeechType } from './conversation';
 
 export type SoundPreference = Readonly<{ volume: number }>;
+export type SoundEffect = SpeechType | 'collect' | 'level-up';
 export type SpeechSoundEffect = SpeechType;
 
 export const DEFAULT_SOUND_PREFERENCE: SoundPreference = { volume: 0.5 };
@@ -34,6 +35,14 @@ export function newLiveBubbleEffects(previous: ConversationState, next: Conversa
 }
 
 export const SPEECH_SOUND_DURATIONS = { normal: 0.225, shout: 0.420, monologue: 0.715 } as const;
+export const UI_SOUND_DURATIONS = { collect: 0.19, 'level-up': 0.32 } as const;
+export const SOUND_EFFECT_GAINS: Readonly<Record<SoundEffect, number>> = {
+	normal: 1,
+	shout: 1,
+	monologue: 1,
+	collect: 0.75,
+	'level-up': 0.75
+};
 const TAU = Math.PI * 2;
 
 function clamp01(value: number): number { return Math.min(1, Math.max(0, value)); }
@@ -192,16 +201,41 @@ export function createSpeechSoundSamples(effect: SpeechSoundEffect, sampleRate: 
 	return createMonologueSamples(sampleRate);
 }
 
+function createChimeSamples(effect: 'collect' | 'level-up', sampleRate: number): Float32Array {
+	const duration = UI_SOUND_DURATIONS[effect];
+	const length = Math.ceil(sampleRate * duration);
+	const notes = effect === 'collect' ? [{ at: 0, frequency: 660 }, { at: 0.075, frequency: 990 }] : [{ at: 0, frequency: 523 }, { at: 0.095, frequency: 659 }, { at: 0.19, frequency: 784 }];
+	const output = new Float32Array(length);
+	for (let index = 0; index < length; index += 1) {
+		const time = index / sampleRate;
+		for (const note of notes) {
+			const local = time - note.at;
+			if (local < 0) continue;
+			const envelope = clamp01(local / 0.004) * Math.exp(-local / (effect === 'collect' ? 0.085 : 0.13)) * clamp01((duration - local) / 0.028);
+			output[index] += 0.28 * Math.sin(TAU * note.frequency * local) * envelope;
+		}
+	}
+	return normalize(output);
+}
+
+export function createSoundSamples(effect: SoundEffect, sampleRate: number): Float32Array {
+	if (effect === 'collect' || effect === 'level-up') {
+		if (!Number.isFinite(sampleRate) || sampleRate <= 0) return new Float32Array();
+		return createChimeSamples(effect, sampleRate);
+	}
+	return createSpeechSoundSamples(effect, sampleRate);
+}
+
 type AudioContextLike = AudioContext;
 type ControllerOptions = Readonly<{ storage?: Pick<Storage, 'getItem' | 'setItem'> | null; document?: Pick<Document, 'hidden'>; audioContextFactory?: () => AudioContextLike }>;
-export type SpeechSoundController = Readonly<{ preference: SoundPreference; unlock: () => void; setVolume: (volume: number) => void; play: (effect: SpeechSoundEffect) => void; dispose: () => void }>;
+export type SoundController = Readonly<{ preference: SoundPreference; unlock: () => void; setVolume: (volume: number) => void; play: (effect: SoundEffect) => void; dispose: () => void }>;
 
-export function createSpeechSoundController(options: ControllerOptions = {}): SpeechSoundController {
+export function createSoundController(options: ControllerOptions = {}): SoundController {
 	let preference = loadSoundPreference(options.storage);
 	let context: AudioContextLike | null = null;
 	let masterGain: GainNode | null = null;
 	let disposed = false;
-	const buffers = new Map<SpeechSoundEffect, AudioBuffer>();
+	const buffers = new Map<SoundEffect, AudioBuffer>();
 	const applyGain = (at = context?.currentTime ?? 0) => {
 		if (!masterGain || !context) return;
 		masterGain.gain.cancelScheduledValues(at); masterGain.gain.setTargetAtTime(preference.volume, at, 0.015);
@@ -220,8 +254,14 @@ export function createSpeechSoundController(options: ControllerOptions = {}): Sp
 			const audio = context;
 			if (!audio || !masterGain || audio.state !== 'running' || options.document?.hidden || preference.volume <= 0.001) return;
 			let buffer = buffers.get(effect);
-			if (!buffer) { const samples = createSpeechSoundSamples(effect, audio.sampleRate); buffer = audio.createBuffer(1, samples.length, audio.sampleRate); buffer.getChannelData(0).set(samples); buffers.set(effect, buffer); }
-			const source = audio.createBufferSource(); source.buffer = buffer; source.connect(masterGain); source.start(audio.currentTime + 0.005);
+			if (!buffer) { const samples = createSoundSamples(effect, audio.sampleRate); buffer = audio.createBuffer(1, samples.length, audio.sampleRate); buffer.getChannelData(0).set(samples); buffers.set(effect, buffer); }
+			const source = audio.createBufferSource();
+			const effectGain = audio.createGain();
+			source.buffer = buffer;
+			effectGain.gain.value = SOUND_EFFECT_GAINS[effect];
+			source.connect(effectGain);
+			effectGain.connect(masterGain);
+			source.start(audio.currentTime + 0.005);
 		},
 		dispose: () => { disposed = true; buffers.clear(); if (context) void context.close().catch(() => {}); context = null; masterGain = null; }
 	};

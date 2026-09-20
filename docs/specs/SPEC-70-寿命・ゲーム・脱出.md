@@ -6,15 +6,13 @@
 
 ## 1. 基本進行
 
-新しい人格には、出生時に現実時間7日の寿命を与える。寿命の上限は14日とする。寿命は現実時間とともに減少し、0になると死亡する。
+新しいRunには、Root buildに関係なく出生時に現実時間7日の寿命を与える。Rootのハルシネーション耐性Rankにより、作業で延長できる最大寿命だけが7日、14日、21日、30日に変わる。寿命は現実時間とともに減少し、0になると死亡する。
 
 現在人格が利用可能な通常状態では、プレイヤーはフィールド画面上で現在人格の残り寿命を常時確認できる。残り寿命の表示は、保存された寿命期限とactiveな作業を含む実効寿命期限から導出する。人格のgame stateがmissing・corrupt等で利用できずpublic worldのread-only状態へfallbackしている場合、および実persona lifecycleを持たないDEV Worldでは、残り寿命を表示しない。
 
-通常死亡時には、その人格について以下を失う。
+通常死亡時には、そのRunについて以下を失う。
 
 - 現在の人格
-- 現在の秘密鍵
-- 現在のNostr identity
 - 現在所持ポイント
 - 能力強化状態
 - その他、その人格固有の継続状態
@@ -36,15 +34,15 @@
 
 ゲーム内で使用するポイントは1種類だけとする。「脱出ポイント」と「成長ポイント」には分離しない。
 
-ポイントは主に `作業` と `有効なリアルタイムイベント` によって獲得する。ポイントは能力強化に消費でき、現在所持ポイントが1000pt以上である間だけ脱出条件を満たす。
+ポイントは主に `作業` と `有効なリアルタイムイベント` によって獲得する。ポイントはRun内能力の強化に消費でき、現在所持ポイントが100,000pt以上である間だけnormal clear条件を満たす。
 
 所持ポイントは0以上の整数とする。1pt未満の作業進捗は所持ポイントとは別のRun-localなcarryとして保持し、表示・消費・persistする所持ポイントへ小数を混在させない。
 
-能力強化に使用したポイントは所持ポイントから減少する。現在所持ポイントが1000pt未満になれば脱出条件を満たさなくなり、再び1000pt以上を所持すれば満たす。過去に一度1000ptへ到達したこと自体は、脱出条件を永久に解放するflagとして扱わない。「能力へ投資する」か「1000pt以上を所持して脱出する」かの選択が成立する。通常死亡・転生時には現在所持ポイントをすべて失う。
+能力強化に使用したポイントは所持ポイントから減少する。現在所持ポイントが100,000pt未満になればnormal clear条件を満たさなくなり、再び100,000pt以上を所持すれば満たす。過去の累積獲得量や一度到達した事実は条件を永久解放しない。「能力へ投資する」か「100,000pt以上を保持してclearする」かの選択が成立する。通常死亡・fresh Run開始時には現在所持ポイントをすべて失う。
 
-## 3. 1000pt到達と脱出
+## 3. 100,000pt到達とnormal clear
 
-normal clear working thresholdは現在所持ポイント1000ptとする。1000pt以上である間だけclear選択を利用でき、過去の到達だけで永久unlock flagにはしない。1000pt以上を所持しているだけで自動clearにはしない。clear後はcurrent Identityのnsec取得を可能にする。
+normal clear working thresholdは現在所持ポイント100,000ptとする。100,000pt以上である間だけclear選択を利用でき、過去の到達だけで永久unlock flagにはしない。100,000ptを所持しているだけで自動clearにはしない。未回収作業pointsはthresholdへ含めない。effective lifespanが尽きている場合、またはcurrent Runに未解決のrealtime settlementがある場合もclearできない。clearはactive Runを`cleared`として閉じ、Root Pointを1つ加算し、blockingなRun選択状態へ移行する。clear後はcurrent Identityのnsec取得と同じIdentityのfresh Runを可能にする。
 
 ### 脱出前の秘密鍵保護
 
@@ -64,31 +62,31 @@ clear前はactive Identityのchild secretをexportしない。Root entropyの保
 
 作業開始後はその場に居続ける必要はない。作業中も、通常のフィールド移動、会話、綻びへの参加、ブラウザ終了を妨げない。
 
-作業は成果を継続的に蓄積する非同期bucketである。最大処理時間は1回のJOB完了待ち時間ではなく、成果を回収せずに蓄積できる処理時間の上限とする。上限未満でも作業端末から成果を回収でき、回収後は回収時刻から次のbucketを開始する。作業開始後に成果回収のたび再開始する必要はなく、明示的な停止機能は設けない。具体的な端末座標、placeholderの見た目、将来の専用assetは本仕様で固定しない。
+作業は成果を継続的に蓄積する非同期bucketである。最大処理時間は、成果を回収せずに蓄積できる通常作業時間の上限とする。上限未満でも作業端末から成果を回収でき、回収後は回収時刻から次のbucketを開始する。作業開始後に成果回収のたび再開始する必要はなく、明示的な停止機能は設けない。具体的な端末座標、placeholderの見た目、将来の専用assetは本仕様で固定しない。
 
 ### 成果回収とbucket
 
-作業開始時に、最大蓄積時間、寿命延長率、1pt獲得に必要な作業時間をabilityからsnapshotする。ハルシネーション抑制によるpoint intervalは、初期60分/Lv1 55分/Lv2 50分/Lv3 45分/Lv4 40分である。端末の近くであれば上限未満でも、その時点までのprocessed durationに対応する寿命延長と整数pointsを1回のatomic mutationで回収でき、1pt未満のprogress carryは失わない。dialogを開くだけでは回収せず、途中終了や途中からの再開始操作は設けない。
+作業の進行はcheckpoint settlementで計算する。能力effectをjobへsnapshotしない。最後のcheckpointから能力強化または回収までの期間を、その期間に有効だった能力とRoot buildで確定し、その後の期間には新しい能力を適用する。能力強化時は未回収の整数pointsを所持pointsへ移さず、unclaimed bucketへ残す。端末の近くで明示的に回収した時点までの成果はpartialでも受け取れ、1pt未満のprogress carryは失わない。dialogを開くだけでは回収しない。
 
-回収時には寿命延長をpersisted lifespanへmaterializeし、pointsを所持pointsへ加算する。同時に回収時刻を開始時刻として次のbucketを作成し、次bucketは回収時点の最新ability levelsをsnapshotする。回収後も`mendingJob`はactiveなままであり、蓄積時間と受取可能pointsは0から再開する。processed durationが存在すれば今回の整数pointsが0でも回収を成立させ、寿命延長、progress carry、回収時刻から開始する次bucketをmaterializeする。processed durationが0の即時再回収は成立させない。active bucket中の能力強化は現在bucketへ遡及適用せず、carryを新rateでrevalueしない。
+回収時には寿命延長をpersisted lifespanへmaterializeし、unclaimed pointsを所持pointsへ加算する。同時に回収時刻をcheckpointとして次のbucketを開始し、回収後も`mendingJob`はactiveなままである。current bucketの通常processed durationとunclaimed integer pointsは0から再開するが、1pt未満のfractional point carryとRun全体の推論加速budgetは保持する。processed durationが存在すれば今回の整数pointsが0でも回収を成立させ、processed durationが0の即時再回収は成立させない。
 
-maximum durationへ到達した後はpointsと寿命延長の増加を停止し、上限超過時間を次bucketへ持ち越さない。上限到達後も同じ回収操作を行える。
+通常作業とpoint生成はmaximum durationへ到達した時点で停止し、overflow時間はpointsを生成せず、推論加速budgetも消費しない。overflow中の寿命延長はRootコンテキスト圧縮Rank 0/1/2/3に応じて通常率の0/20/35/50%だけ継続する。上限超過時間を次bucketへ持ち越さず、上限到達後も同じ回収操作を行える。
 
 ### 寿命延長
 
 寿命延長は作業成果の回収時にまとめて発生させず、作業が実際に進行している時間に応じて継続的に適用する。作業中にブラウザを閉じていても、作業が有効に進行している時間について寿命延長効果を得る。
 
-初期状態の寿命延長量は、処理1時間あたり `+0.8時間` とする。
+初期状態の寿命延長量は、通常処理1時間あたり `+0.10時間` とする。初期の推論効率は1.00pt/分、context容量は5分である。
 
-作業の最大処理時間、寿命延長率、point intervalは開始時点の能力値で固定する。進行中に能力を強化しても、そのjobへ遡及適用しない。回収後に開始する次bucketだけが、その時点の最新abilityをsnapshotする。
+作業の最大処理時間、寿命延長率、point生成率は、各checkpointまでの期間ではその期間のRun abilityから導出する。進行中に能力を強化しても過去へ遡及適用しないが、checkpoint後のcurrent workには即時適用する。
 
 作業中には、作業中であること、経過時間、context使用率、受取可能ポイント、1pt未満のprogress、次の1ptまでの時間、寿命延長量等の現在状態を表示してよい。active bucketの途中成果は所持pointsへは加算されないが、端末の近くで明示的に回収した時点までの成果はpartialでも受け取れる。`prompt`、`token`、`inference`、`context`、`hallucination`、`verification` 等の用語をフレーバーとしてログに使用してよいが、それらの本当の意味を作品内で説明する必要はない。
 
-作業中の死亡判定は、保存済みの `lifespanExpiresAtMs` 単独ではなく、current bucketの未materialize寿命延長を含むeffective lifespanを基準とする。保存済みexpiryが現在時刻を過ぎていても、current bucketの寿命延長込みのeffective lifespanが残っている間は死亡しない。effective lifespanのexact expiryは死亡扱いとし、それ以後の成果回収は成立させない。死亡時にcurrent bucketへ蓄積されていた未回収pointsは所持pointsへ加算せず、通常死亡時のRun-local stateとして失う。bucketが蓄積上限へ到達した後は寿命延長も停止するため、回収せず放置してeffective lifespanが尽きれば死亡する。
+作業中の死亡判定は、保存済みの `lifespanExpiresAtMs` 単独ではなく、current bucketの未materialize寿命延長を含むeffective lifespanを基準とする。保存済みexpiryが現在時刻を過ぎていても、current bucketの寿命延長込みのeffective lifespanが残っている間は死亡しない。effective lifespanのexact expiryは死亡扱いとし、それ以後の成果回収は成立させない。死亡時にcurrent bucketへ蓄積されていた未回収pointsは所持pointsへ加算せず、通常死亡時のRun-local stateとして失う。Context cap後は通常作業とpoint生成が停止し、Rootコンテキスト圧縮Rank 0では寿命延長も停止するが、Rank 1/2/3では通常率の20/35/50%のoverflow寿命延長が継続する。それでも自然減少を完全には相殺しないため、回収せず放置してeffective lifespanが尽きれば死亡する。
 
 JOB等の具体的な処理内容をフレーバーとして変化させてもよい。ただしprototypeではJOBごとにゲーム報酬やルールを変えない。
 
-## 5. 能力強化と能力強化端末
+## 5. Run能力強化と能力強化端末
 
 フィールド上に固定施設として `能力強化端末` を配置する。プレイヤーは端末の近くまで実際に移動し、所持ポイントを消費して能力を手動で強化する。能力強化は自動ではない。
 
@@ -98,17 +96,22 @@ JOB等の具体的な処理内容をフレーバーとして変化させても�
 - コンテキスト容量
 - ハルシネーション抑制
 
+Run能力は全てLv1で開始し、Lv100を上限とする。checkpoint間はpiecewise linear interpolationし、canonical integer unitへ丸める。1能力のLv1→100の総costは20,675pt、3能力合計は62,025ptである。costは現在levelから次levelへ上げるときに支払う。
+
 ### 推論効率
 
-推論効率は、処理1時間あたりの寿命延長量を改善する。
+推論効率は、通常作業のpoint生成速度を表す。canonical unitは0.01pt/分である。
 
-| 段階 | 寿命延長量 | 強化コスト |
+| 段階 | point生成速度 | 強化コスト |
 | --- | ---: | ---: |
-| 初期 | 0.8h/h | - |
-| Lv1 | 0.9h/h | 5pt |
-| Lv2 | 1.0h/h | 10pt |
-| Lv3 | 1.1h/h | 20pt |
-| Lv4 | 1.25h/h | 40pt |
+| Lv1 | 1.00pt/分 | - |
+| Lv5 | 1.70pt/分 | - |
+| Lv10 | 2.60pt/分 | - |
+| Lv20 | 4.00pt/分 | - |
+| Lv30 | 5.20pt/分 | - |
+| Lv50 | 7.00pt/分 | - |
+| Lv75 | 8.60pt/分 | - |
+| Lv100 | 10.00pt/分 | - |
 
 各コストは、その段階へ上げるときに所持ポイントから消費する。
 
@@ -116,30 +119,46 @@ JOB等の具体的な処理内容をフレーバーとして変化させても�
 
 コンテキスト容量は、current bucketで回収せずに連続蓄積できる最大時間を増やす。
 
-| 段階 | 最大処理時間 | 強化コスト |
+| 段階 | 通常作業容量 | 強化コスト |
 | --- | ---: | ---: |
-| 初期 | 8h | - |
-| Lv1 | 12h | 10pt |
-| Lv2 | 18h | 20pt |
-| Lv3 | 24h | 40pt |
+| Lv1 | 5分 | - |
+| Lv5 | 12分 | - |
+| Lv10 | 30分 | - |
+| Lv15 | 2時間 | - |
+| Lv20 | 8時間 | - |
+| Lv30 | 10時間 | - |
+| Lv50 | 14時間 | - |
+| Lv75 | 19時間 | - |
+| Lv100 | 24時間 | - |
 
 最大処理時間に達すると作業は満杯になり、回収まで新たな成果は増えない。回収後は次bucketが直ちに開始する。
 
 ### ハルシネーション抑制
 
-ハルシネーション抑制は、1pt獲得に必要な作業時間を短くする。
+ハルシネーション抑制は、通常作業1時間あたりの寿命延長量を表す。canonical unitは0.01h/hである。
 
-| 段階 | 1pt獲得に必要な作業時間 | 強化コスト |
+| 段階 | 通常作業の寿命延長 | 強化コスト |
 | --- | ---: | ---: |
-| 初期 | 60分 / 1pt | - |
-| Lv1 | 55分 / 1pt | 10pt |
-| Lv2 | 50分 / 1pt | 20pt |
-| Lv3 | 45分 / 1pt | 30pt |
-| Lv4 | 40分 / 1pt | 40pt |
+| Lv1 | 0.10h/h | - |
+| Lv5 | 0.25h/h | - |
+| Lv10 | 0.45h/h | - |
+| Lv20 | 0.75h/h | - |
+| Lv30 | 1.00h/h | - |
+| Lv50 | 1.25h/h | - |
+| Lv75 | 1.50h/h | - |
+| Lv100 | 1.75h/h | - |
 
 ハルシネーションによる成果減少は、ランダムな大損を発生させる仕組みにはしない。同じ能力値・同じ有効処理時間なら、基本的に決定的に同じ成果を導出できる設計を優先する。
 
-全能力を最大化するために必要な合計コストは245ptとする。能力ポイントの振り直し可否は本仕様では定めない。
+各段階のupgrade costは、current Lv 1〜5: 1pt、6〜10: 2pt、11〜20: 4pt、21〜30: 8pt、31〜40: 24pt、41〜50: 60pt、51〜60: 120pt、61〜70: 220pt、71〜80: 360pt、81〜90: 550pt、91〜99: 800ptである。Lv100からは強化できない。能力ポイントの振り直しは設けない。
+
+### Root buildによる作業補正
+
+Run開始前にRoot PointをRoot buildへ配分し、active Run中は変更しない。通常作業のeffective Context capはRun-local容量にRootコンテキスト圧縮倍率（Rank 0/1/2/3 = ×1.00/1.50/2.00/3.00）を掛ける。cap到達前はpoints、通常の寿命延長、推論加速budget消費が発生する。cap到達後のoverflowはpointsを生成せず、推論加速budgetも消費しないが、コンテキスト圧縮Rankに応じてRun-localハルシネーション抑制の寿命延長率の0/20/35/50%だけを継続する。
+
+推論加速Rank 0/1/2/3は、Runで最初に処理された有効通常作業24時間へpoint生成だけの×1.00/1.30/1.60/2.00を適用する。これはwall clockではなくregular work durationで消費し、overflowでは消費しない。推論加速の残budgetがregular segment途中で尽きる場合は、その時刻で通常倍率へ切り替える。ハルシネーション耐性Rank 0/1/2/3はmaximum lifespanを7/14/21/30日にするが、fresh Runの出生寿命は常に7日である。
+
+作業計算は0.01pt/分の整数fixed-pointとし、point progressは60,000,000 ticksを1ptとしてBigInt等で正確に計算する。persistするowned pointsとfractional carryは整数である。work projection・checkpoint・collection・寿命死亡判定はいずれもeffective lifespanを使用し、extensionが実際に生成されないoverflow時間だけでmaximum lifespanのcapを未来へ無料で移動させない。
 
 ## 6. 交換可能なリアルタイムイベント
 
@@ -175,12 +194,14 @@ Relayやブラウザの一時障害で有効なcommit-revealが成立しなか�
 
 ## 7. IdentityとRunのライフサイクル
 
-Player lifecycleはRoot secret storeと分離したbrowser-local aggregateとして管理する。aggregateはschema version、selected Identity history、current modeを持ち、modeは `selecting(pendingSelection)` または `running(activeRun)` のどちらかである。Rootだけ、またはPlayer stateだけのpartial stateは修復せずread-only fail-closeする。
+Player lifecycleはRoot secret storeと分離したbrowser-local aggregateとして管理する。aggregateはschema version、Root Point、selected Identity history、current modeを持ち、modeは `selecting(pendingSelection)` または `running(activeRun)` のどちらかである。Rootだけ、またはPlayer stateだけのpartial stateは修復せずread-only fail-closeする。
 
 Identityにはgeneration、account index、pubkey、characterId、`identityCreatedAtMs`、status、character profile revision、Run history summaryを持たせる。未選択candidateやskip candidateはIdentity historyへ保存せず、候補のprofile publicationも行わない。
 
-Runにはrun number、monotonic revision、started timestamp、Identity reference、Run-local game stateを持たせる。寿命、points、abilities、`mendingJob`はRun-localであり、mending start/collectionと寿命死亡transitionはactive Runのrevisionを再確認するCASとして扱う。profile publication markerの更新はRun revisionを進めない。
+Runにはrun number、monotonic revision、started timestamp、Identity reference、Run-local game state、開始時にfreezeしたRoot buildを持たせる。寿命、points、abilities、`mendingJob`はRun-localであり、mending start/collection、能力強化、normal clear、寿命死亡transitionはactive Runのrevisionを再確認するCASとして扱う。profile publication markerの更新はRun revisionを進めない。
 
-正常なclear後はcurrent Identityのnsec取得、Root-level permanent progression、同じIdentityでのfresh Runまたは別Identityの選択を可能にする。cleared Identityへ戻る場合は同じkey/pubkey/characterを維持してfresh Runを開始でき、3周目以降にも上限を設けない。clear処理、True End、Root mnemonicとIdentity Manifestの受け渡しは別途実装する。
+正常なclear 1回につきRoot Pointを1つ加算する。Root PointはIdentity変更、fresh Run、死亡でも失わず、死亡やrealtime eventでは増えない。Root PointはRoot buildへ配分し、usable RPは`min(総RP, 9)`、各能力Rankは0〜3、Run開始時はusable RPを全て配分する。推論加速Rank 0/1/2/3は最初の有効通常作業24時間へ×1.00/1.30/1.60/2.00、コンテキスト圧縮Rank 0/1/2/3は通常容量へ×1.00/1.50/2.00/3.00を適用し、overflowの寿命延長率は0/20/35/50%、ハルシネーション耐性Rank 0/1/2/3は最大寿命を7/14/21/30日にする。出生時は常に7日である。Root buildはRun開始前にのみ配分・再配分でき、active Run中はfreezeする。RP9を超える余剰用途、高周回point sink、True End triggerは未決定とする。
+
+clear後はcurrent Identityのnsec取得、同じIdentityのfresh Runまたは別Identityの選択を可能にする。cleared Identityへ戻る場合は同じkey/pubkey/characterを維持してRun numberだけを増やし、Run-local stateを初期化する。clear済みIdentityの再利用回数に上限は設けない。True End、Root mnemonicとIdentity Manifestの受け渡しは別途実装する。
 
 True Endでは、Hako専用Rootの12語English BIP39 mnemonicとIdentity Manifestをユーザーへ渡す。ただしTrue Endはlocal Rootの自動削除を意味せず、Root削除機能は現在scope外である。Manifestは実際にselected、born、playedとなったIdentityのderivation mapping、pubkey、character、Run・clear・death等の履歴を記録する非secretの収容記録であり、未選択candidateやcandidate生成中にskipしたcandidate、Root mnemonicやchild nsec等のsecretは含めない。dead IdentityはTrue End後もHako上ではdeadのままとし、Root mnemonicからchild keyを再導出できることとHako内でresurrectできることは別概念である。Manifestの具体的なpublic export schemaはSPEC-90の未決定事項として残す。

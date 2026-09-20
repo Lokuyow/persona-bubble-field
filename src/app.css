@@ -3,6 +3,15 @@
 	--color-accent: #cf06fe;
 	--color-accent-soft: #fbe9ff;
 	--color-focus-ring: #6dabb9;
+	--color-primary-background: var(--color-accent);
+	--color-primary-background-hover: color-mix(in srgb, var(--color-accent) 86%, black);
+	--color-primary-background-active: color-mix(in srgb, var(--color-accent) 72%, black);
+	--color-primary-foreground: #fff;
+	--color-primary-border: color-mix(in srgb, var(--color-accent) 70%, white);
+	--color-primary-shadow: color-mix(in srgb, var(--color-accent) 24%, transparent);
+	--color-primary-disabled-background: color-mix(in srgb, var(--color-accent) 20%, #5b6168);
+	--color-primary-disabled-border: color-mix(in srgb, var(--color-accent) 24%, #81878d);
+	--color-primary-disabled-foreground: color-mix(in srgb, var(--color-accent) 16%, #e3e7ea);
 }
 
 @supports (color: oklch(63.2% 0.306 317.3)) {

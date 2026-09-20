@@ -60,6 +60,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	import LifespanHud from '$lib/LifespanHud.svelte';
 	import MendingDialog from '$lib/MendingDialog.svelte';
 	import AdjustmentDialog from '$lib/AdjustmentDialog.svelte';
+	import SelfProfileDialog from '$lib/SelfProfileDialog.svelte';
 	import RiftPanel from '$lib/RiftPanel.svelte';
 	import RiftRulesDialog from '$lib/RiftRulesDialog.svelte';
 	import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL, isBlockedFacilityCell, isWithinFacilityInteractionRange, sameFieldCell } from '$lib/fieldFacilities';
@@ -79,10 +80,15 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		getRealtimeSettlementLedger,
 		trackRealtimeEventInstance,
 		transitionRealtimeDeath,
+		clearPersona,
+		exportClearedIdentityNsec,
 		type ActiveSignerSnapshot,
+		type ClearedIdentityCandidate,
 		type PersonaSnapshot,
-		type PendingSelection
+		type PendingSelection,
+		type SelectionCandidate
 	} from '$lib/rootIdentity';
+	import type { RootBuild } from '$lib/rootProgression';
 	import { isPersonaExpired } from '$lib/personaGameState';
 	import {
 		applyRiftAction,
@@ -175,7 +181,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	import { createSpeechPublicationCore, type SpeechPublicationContext, type SpeechPublicationOutcome } from '$lib/speechPublication';
 	import type { SpeechSuggestionConversationEntry } from '$lib/speechSuggestions';
 	import type { SpeechType } from '$lib/conversation';
-	import { createSpeechSoundController, DEFAULT_SOUND_PREFERENCE, newLiveBubbleEffects, type SpeechSoundController } from '$lib/speechSoundEffects';
+	import { createSoundController, DEFAULT_SOUND_PREFERENCE, newLiveBubbleEffects, type SoundController } from '$lib/speechSoundEffects';
 	import type { SpeechBubbleShape } from '$lib/speechBubblePath';
 	import {
 		createWorldReadSession,
@@ -218,7 +224,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	const mountedTraceReplyRemeasures = new Map<string, () => void>();
 	let conversationState = $state.raw<ConversationState>(createConversationState());
 	let soundPreference = $state(DEFAULT_SOUND_PREFERENCE);
-	let speechSoundController = $state.raw<SpeechSoundController | null>(null);
+	let soundController = $state.raw<SoundController | null>(null);
 	let devSoundSequence = 0;
 	let lastPlacedAnchorById = $state.raw<Readonly<Record<string, WorldPoint>>>({});
 	let lastVisibilityKey: string | null = null;
@@ -246,14 +252,24 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	let selfSigner = $state.raw<ActiveSignerSnapshot | null>(null);
 	let personaSnapshot = $state.raw<PersonaSnapshot | null>(null);
 	let pendingIdentitySelection = $state<PendingSelection | null>(null);
+	let pendingRootPoints = $state(0);
 	let personaLifecycleTransition = $state(false);
 	let lifespanHudNowMs = $state<number | null>(null);
 	let lifespanHudUpdatedAtMs = 0;
 	let mendingNowMs = $state(0);
 	let mendingDialogOpen = $state(false);
 	let mendingMutationInFlight = $state(false);
+	let collectFeedback = $state<Readonly<{ id: number; points: number; lifespanMs: number }> | null>(null);
+	let collectFeedbackTimer: number | null = null;
 	let adjustmentDialogOpen = $state(false);
+	let selfProfileDialogOpen = $state(false);
+	let lastSelfProfileTrigger: HTMLButtonElement | null = null;
 	let abilityMutationInFlight = $state(false);
+	let upgradeFeedback = $state<Readonly<{ id: number; key: PersonaAbilityKey; level: number }> | null>(null);
+	let upgradeFeedbackTimer: number | null = null;
+	let feedbackSequence = 0;
+	let clearMutationInFlight = $state(false);
+	let pendingRealtimeSettlement = $state(false);
 	const LIFESPAN_HUD_REFRESH_INTERVAL_MS = 30_000;
 	let selfPositionWriteState = $state.raw<SelfPositionWriteState>({ kind: 'unavailable' });
 	let selfMessageAvailability: SelfMessageAvailability = { kind: 'unavailable' };
@@ -406,9 +422,10 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	let selfPresence = $derived(presenceState.participants.find((participant) => participant.id === selfProjectionId) ?? null);
 	let selfLogicalPosition = $derived(selfPresence?.position ?? null);
 	let selfIsActive = $derived(selfPresence?.status === 'active');
-	let mendingProjection = $derived(personaSnapshot ? projectMending(personaSnapshot.gameState, mendingNowMs) : null);
+	let mendingProjection = $derived(personaSnapshot ? projectMending(personaSnapshot.gameState, mendingNowMs, personaSnapshot.activeRun.rootBuild) : null);
 	let canUseMendingTerminal = $derived(!devWorldSandboxEnabled && Boolean(personaSnapshot && selfIsActive && selfLogicalPosition && isWithinFacilityInteractionRange(selfLogicalPosition)));
 	let canUseAdjustmentTerminal = $derived(!devWorldSandboxEnabled && Boolean(personaSnapshot && selfIsActive && selfLogicalPosition && isWithinFacilityInteractionRange(selfLogicalPosition, ADJUSTMENT_TERMINAL)));
+	let clearBlockedReason = $derived(!personaSnapshot ? 'Runがありません' : personaSnapshot.gameState.points < 100_000 ? '所持ポイントが100,000pt未満です' : isPersonaExpired(personaSnapshot.gameState, mendingNowMs, personaSnapshot.activeRun.rootBuild) ? '寿命が尽きています' : pendingRealtimeSettlement ? '綻びのsettlementが未完了です' : null);
 	let traceRootCells = $derived(groupTraceRoots(effectiveTraceRoots));
 	// Keep grouped roots intact for the Trace data flow, but let fixed facilities
 	// own their cells at the field presentation/interaction boundary.
@@ -432,6 +449,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			: selfSigner ? requireCharacterFromPubkey(selfSigner.pubkey)
 				: getCharacterById(selectedCharacterId) ?? CHARACTER_CATALOG[0]
 	);
+	let selfProfileCharacter = $derived(!devWorldSandboxEnabled && personaSnapshot ? getCharacterById(personaSnapshot.identity.characterId) ?? null : null);
 	let speechSuggestionConversation = $derived.by((): readonly SpeechSuggestionConversationEntry[] => {
 		const traceEvents = traceConversationProjection
 			? [
@@ -873,10 +891,10 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		let mounted = true;
 		let soundStorage: Storage | null = null;
 		try { soundStorage = window.localStorage; } catch { /* storage may be unavailable */ }
-		const soundController = createSpeechSoundController({ storage: soundStorage, document });
-		speechSoundController = soundController;
-		soundPreference = soundController.preference;
-		const unlockSound = () => soundController.unlock();
+		const appSoundController = createSoundController({ storage: soundStorage, document });
+		soundController = appSoundController;
+		soundPreference = appSoundController.preference;
+		const unlockSound = () => appSoundController.unlock();
 		window.addEventListener('pointerdown', unlockSound, { passive: true });
 		window.addEventListener('keydown', unlockSound, { passive: true });
 		let startRequested = false;
@@ -999,8 +1017,8 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 				},
 				...(signer && authorizationRunNumber !== null ? {
 					authorizeSelfWrite: () => authorizeActiveRun({ identity: signer.identity, runNumber: authorizationRunNumber }),
-					onSelfWriteAuthorizationLost: () => {
-						if (!personaLifecycleTransition) window.location.reload();
+						 onSelfWriteAuthorizationLost: () => {
+							if (!personaLifecycleTransition && !deathTransitionInFlight) window.location.reload();
 					}
 				} : {}),
 				onPresenceChanged: acceptPresence,
@@ -1068,6 +1086,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		startReadOnlyWorld = () => { void startReadSession(null); };
 		startSelectedWorld = async (persona: PersonaSnapshot): Promise<void> => {
 			personaSnapshot = persona;
+			pendingRootPoints = persona.rootPoints;
 			selfSigner = persona.signer;
 			pendingIdentitySelection = null;
 			composerStartupError = null;
@@ -1077,6 +1096,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			connectionStatus = { kind: 'bootstrapping' };
 			realtimeRecoveryInstanceIds.clear();
 			const ledger = await getRealtimeSettlementLedger(persona);
+			pendingRealtimeSettlement = (ledger?.pendingInstanceIds.length ?? 0) > 0;
 			for (const instanceId of (ledger?.pendingInstanceIds ?? [])
 				.filter((id) => getRiftScheduleForInstance(id, Date.now()) !== null)) {
 				realtimeRecoveryInstanceIds.add(instanceId);
@@ -1105,7 +1125,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 						signer: persona.signer,
 						authorizeSelfWrite: () => authorizeActiveRun({ identity: persona.signer.identity, runNumber: persona.activeRun.runNumber }),
 						onSelfWriteAuthorizationLost: () => {
-							if (!personaLifecycleTransition) window.location.reload();
+							if (!personaLifecycleTransition && !deathTransitionInFlight) window.location.reload();
 						}
 					});
 					if (session !== anonymousSession) throw new Error('World session changed during self attachment.');
@@ -1146,24 +1166,27 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 				const personaResult = await loadOrCreateLifecycle();
 				if (personaResult.kind === 'created' || personaResult.kind === 'selecting') {
 					pendingIdentitySelection = personaResult.selection;
+					pendingRootPoints = personaResult.rootPoints;
 					selfSigner = null;
 					personaSnapshot = null;
 				} else if (personaResult.kind !== 'restored') {
 					setComposerTerminalError(new Error('Persona is unavailable for publishing.'));
 				} else {
 					personaSnapshot = personaResult.persona;
+					pendingRootPoints = personaResult.persona.rootPoints;
 					selfSigner = personaResult.persona.signer;
 					const ledger = await getRealtimeSettlementLedger(personaResult.persona);
 					const pendingInstanceIds = (ledger?.pendingInstanceIds ?? [])
 						.filter((instanceId) => getRiftScheduleForInstance(instanceId, Date.now()) !== null);
 					realtimeRecoveryInstanceIds.clear();
+					pendingRealtimeSettlement = (ledger?.pendingInstanceIds.length ?? 0) > 0;
 					for (const instanceId of pendingInstanceIds) realtimeRecoveryInstanceIds.add(instanceId);
 					realtimeStartImmediately = true;
 					mendingNowMs = Date.now();
 					updateLifespanHud(Date.now(), true);
-					if (isPersonaExpired(personaResult.persona.gameState, Date.now())) {
+					if (isPersonaExpired(personaResult.persona.gameState, Date.now(), personaResult.persona.activeRun.rootBuild)) {
 						const result = await beginDeathTransition(personaResult.persona, session);
-						if (result === 'reloaded') return;
+						if (result === 'reloaded' || result === 'failed') return;
 					}
 					if (selfSigner.characterProfileRevision !== CURRENT_CHARACTER_PROFILE_REVISION) {
 						const character = requireCharacterFromPubkey(selfSigner.pubkey);
@@ -1243,8 +1266,10 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			mounted = false;
 			window.removeEventListener('pointerdown', unlockSound);
 			window.removeEventListener('keydown', unlockSound);
-			soundController.dispose();
-			speechSoundController = null;
+			appSoundController.dispose();
+			soundController = null;
+			if (collectFeedbackTimer !== null) window.clearTimeout(collectFeedbackTimer);
+			if (upgradeFeedbackTimer !== null) window.clearTimeout(upgradeFeedbackTimer);
 			if (proximityFeedbackTimer !== null) window.clearTimeout(proximityFeedbackTimer);
 			proximityFeedbackTimer = null;
 			cancelPendingComposerSubmission(new DOMException('Submission was cancelled.', 'AbortError'));
@@ -1403,12 +1428,12 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		adjustmentDialogOpen = false;
 	}
 
-	async function chooseIdentity(candidate: NonNullable<typeof pendingIdentitySelection>['candidates'][number]): Promise<void> {
+	async function chooseIdentity(candidate: SelectionCandidate, rootBuild: RootBuild): Promise<void> {
 		const selection = pendingIdentitySelection;
 		if (!selection || personaLifecycleTransition) return;
 		personaLifecycleTransition = true;
 		try {
-			const result = await selectIdentity(selection.generation, candidate);
+			const result = await selectIdentity(selection.generation, candidate, rootBuild);
 			if (result.kind === 'selected') {
 				if (startSelectedWorld) {
 					await startSelectedWorld(result.persona);
@@ -1424,6 +1449,35 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			enterReadOnlyFallback('Persona is unavailable for publishing.');
 		} catch {
 			enterReadOnlyFallback('Persona is unavailable for publishing.');
+		}
+	}
+
+	async function exportIdentityNsec(candidate: ClearedIdentityCandidate): Promise<void> {
+		try {
+			const nsec = await exportClearedIdentityNsec({ generation: candidate.generation, accountIndex: candidate.accountIndex, pubkey: candidate.pubkey });
+			if (nsec) window.prompt('clear済みIdentityのnsec（安全な場所へ移してください）', nsec);
+		} catch {
+			setComposerTerminalError(new Error('nsecを取得できませんでした。'));
+		}
+	}
+
+	async function clearCurrentRun(): Promise<void> {
+		const expected = personaSnapshot;
+		if (!expected || clearMutationInFlight) return;
+		clearMutationInFlight = true;
+		try {
+			const result = await clearPersona(expected);
+			if (result.kind === 'cleared') {
+				stopPersonaInteractions('Run cleared.');
+				disposePersonaWriter();
+				window.location.reload();
+			} else if (result.kind === 'superseded') {
+				window.location.reload();
+			} else if (result.kind === 'corrupt') {
+				enterReadOnlyFallback('Persona is unavailable for publishing.');
+			}
+		} finally {
+			clearMutationInFlight = false;
 		}
 	}
 
@@ -1505,6 +1559,12 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			}
 			personaSnapshot = result.persona;
 			selfSigner = result.persona.signer;
+			if (result.kind === 'upgraded') {
+				if (upgradeFeedbackTimer !== null) window.clearTimeout(upgradeFeedbackTimer);
+				upgradeFeedback = { id: ++feedbackSequence, key, level: result.persona.activeRun.gameState.abilities[key] };
+				upgradeFeedbackTimer = window.setTimeout(() => { upgradeFeedback = null; upgradeFeedbackTimer = null; }, 500);
+				soundController?.play('level-up');
+			}
 		} catch {
 			closeAdjustmentTerminal();
 		} finally {
@@ -1540,6 +1600,16 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			}
 			personaSnapshot = result.persona;
 			selfSigner = result.persona.signer;
+			if (result.kind === 'collected') {
+				if (collectFeedbackTimer !== null) window.clearTimeout(collectFeedbackTimer);
+				collectFeedback = {
+					id: ++feedbackSequence,
+					points: Math.max(0, result.persona.activeRun.gameState.points - expected.gameState.points),
+					lifespanMs: Math.max(0, result.persona.activeRun.gameState.lifespanExpiresAtMs - expected.gameState.lifespanExpiresAtMs)
+				};
+				collectFeedbackTimer = window.setTimeout(() => { collectFeedback = null; collectFeedbackTimer = null; }, 500);
+				soundController?.play('collect');
+			}
 			mendingNowMs = Date.now();
 			updateLifespanHud(mendingNowMs, true);
 			if (result.kind === 'started') closeMendingTerminal();
@@ -1595,6 +1665,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 				const completed = await completeRealtimeEventInstance(personaSnapshot, sourceSession.instanceId);
 				if (completed) {
 					realtimeRecoveryInstanceIds.delete(sourceSession.instanceId);
+					pendingRealtimeSettlement = realtimeRecoveryInstanceIds.size > 0;
 					if (sourceSession.instanceId !== riftSchedule.instanceId) recoveredRiftSessions.delete(sourceSession.instanceId);
 					maybeStopRealtime();
 				}
@@ -1745,6 +1816,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		else recoveredRiftSessions.set(parsed.instanceId, next);
 		if (personaSnapshot && parsed.action.action === 'join' && envelope.event.pubkey === selfSigner?.pubkey) {
 			realtimeRecoveryInstanceIds.add(parsed.instanceId);
+			pendingRealtimeSettlement = true;
 			void trackRealtimeEventInstance(personaSnapshot, parsed.instanceId);
 		}
 		if (parsed.instanceId === riftSchedule.instanceId) reconcileRiftSession(Date.now());
@@ -2125,8 +2197,8 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		currentSession: ReturnType<typeof createWorldReadSession> | null
 	): Promise<'reloaded' | 'failed'> {
 		if (devWorldSandboxEnabled || personaLifecycleTransition || deathTransitionInFlight) return 'failed';
-		stopPersonaInteractions('Persona lifetime ended.');
 		deathTransitionInFlight = true;
+		stopPersonaInteractions('Persona lifetime ended.');
 		disposePersonaWriter(currentSession);
 		try {
 			const result = await transitionExpiredPersona(expected);
@@ -2155,7 +2227,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		currentSession: ReturnType<typeof createWorldReadSession> | null
 	): Promise<'unchanged' | 'reloaded' | 'failed'> {
 		if (devWorldSandboxEnabled || personaLifecycleTransition || !personaSnapshot) return 'unchanged';
-		if (!isPersonaExpired(personaSnapshot.gameState, Date.now())) return 'unchanged';
+		if (!isPersonaExpired(personaSnapshot.gameState, Date.now(), personaSnapshot.activeRun.rootBuild)) return 'unchanged';
 		return beginDeathTransition(personaSnapshot, currentSession);
 	}
 
@@ -2283,6 +2355,11 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		pushState('', { ...page.state, profileCharacterId: characterId });
 	}
 
+	function openSelfProfile(trigger: HTMLButtonElement): void {
+		lastSelfProfileTrigger = trigger;
+		selfProfileDialogOpen = true;
+	}
+
 
 	function receiveTimelineMessage(message: ParsedWorldMessage): void {
 		recentMessageTimeline = addRecentMessage(recentMessageTimeline, message);
@@ -2337,7 +2414,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			now: conversationMessage.createdAt
 		});
 		conversationState = applyVisibility(nextConversationState, visibleParticipantIds);
-		for (const effect of newLiveBubbleEffects(previousConversationState, conversationState)) speechSoundController?.play(effect);
+		for (const effect of newLiveBubbleEffects(previousConversationState, conversationState)) soundController?.play(effect);
 	}
 
 	function injectDevLiveSpeech(speechType: SpeechType): void {
@@ -2359,8 +2436,8 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	}
 
 	function updateSoundVolume(volume: number): void {
-		speechSoundController?.setVolume(volume);
-		soundPreference = speechSoundController?.preference ?? { ...soundPreference, volume };
+		soundController?.setVolume(volume);
+		soundPreference = soundController?.preference ?? { ...soundPreference, volume };
 	}
 
 	function tailTarget(participant: (typeof participantViews)[number]): WorldPoint {
@@ -2460,7 +2537,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		{#snippet children()}
 			<SoundControl
 				volume={soundPreference.volume}
-				onOpen={() => speechSoundController?.unlock()}
+				onOpen={() => soundController?.unlock()}
 				onVolume={updateSoundVolume}
 			/>
 			<Chatter
@@ -2499,6 +2576,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 				fieldActionLabel={fieldActionLabel}
 				closeFieldActionMenu={closeFieldActionMenu}
 				onOpenProfile={openProfile}
+				onOpenSelfProfile={selfProfileCharacter ? openSelfProfile : undefined}
 				traceMarkerWorldPosition={traceMarkerWorldPosition}
 			/>
 			<SpeechLayer
@@ -2522,7 +2600,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 				registerReplyRemeasure={registerTraceReplyRemeasure}
 			/>
 			{#if lifespanHudNowMs !== null && personaSnapshot && !personaLifecycleTransition}
-				{@const lifespanProjection = projectMending(personaSnapshot.gameState, lifespanHudNowMs)}
+				{@const lifespanProjection = projectMending(personaSnapshot.gameState, lifespanHudNowMs, personaSnapshot.activeRun.rootBuild)}
 				<LifespanHud expiresAtMs={lifespanProjection.effectiveExpiresAtMs} nowMs={lifespanHudNowMs} points={personaSnapshot.gameState.points} mendingProjection={lifespanProjection} />
 			{/if}
 		{/snippet}
@@ -2554,7 +2632,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		onOpenChange={handleProfileOpenChange}
 		onCloseAutoFocus={restoreProfileTriggerFocus}
 	/>
-	<IdentitySelectionDialog selection={pendingIdentitySelection} onSelect={(candidate) => { void chooseIdentity(candidate); }} />
+	<IdentitySelectionDialog selection={pendingIdentitySelection} rootPoints={pendingRootPoints} onSelect={(candidate, rootBuild) => { void chooseIdentity(candidate, rootBuild); }} onExportNsec={(candidate) => { void exportIdentityNsec(candidate); }} />
 	<MendingDialog
 		open={mendingDialogOpen}
 		projection={mendingProjection}
@@ -2563,14 +2641,28 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		onOpenChange={(open) => { mendingDialogOpen = open; }}
 		onStart={() => { void mutateMending('start'); }}
 		onCollect={() => { void mutateMending('collect'); }}
+		collectFeedback={collectFeedback}
 	/>
 	<AdjustmentDialog
 		open={adjustmentDialogOpen}
 		points={personaSnapshot?.gameState.points ?? 0}
-		abilities={personaSnapshot?.gameState.abilities ?? { inferenceEfficiency: 0, contextCapacity: 0, hallucinationSuppression: 0 }}
+		abilities={personaSnapshot?.gameState.abilities ?? { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 }}
 		busy={abilityMutationInFlight}
 		onOpenChange={(open) => { adjustmentDialogOpen = open; }}
 		onUpgrade={(key) => { void mutateAbility(key); }}
+		upgradeFeedback={upgradeFeedback}
+	/>
+	<SelfProfileDialog
+		open={selfProfileDialogOpen}
+		persona={personaSnapshot}
+		mendingProjection={mendingProjection}
+		nowMs={mendingNowMs}
+		clearBlockedReason={clearBlockedReason}
+		clearBusy={clearMutationInFlight}
+		avatarTone={colorByPubkey[selfProjectionId] ?? 'coral'}
+		onOpenChange={(open) => { selfProfileDialogOpen = open; }}
+		onCloseAutoFocus={() => { lastSelfProfileTrigger?.focus(); }}
+		onClear={() => { void clearCurrentRun(); }}
 	/>
 
 	{#if devWorldSandboxEnabled}
@@ -2599,7 +2691,10 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			{selectedSpeechType}
 			submissionInProgress={composerSubmissionInProgress}
 			hasUnreadReplies={traceReadSnapshot.hasUnreadReplies}
-			character={speechSuggestionCharacter}
+			character={selfProfileCharacter ?? speechSuggestionCharacter}
+		avatarTone={colorByPubkey[selfProjectionId] ?? 'coral'}
+			canOpenSelfProfile={selfProfileCharacter !== null}
+			onOpenSelfProfile={openSelfProfile}
 			suggestionConversation={speechSuggestionConversation}
 			onSpeechTypeChange={(next) => { selectedSpeechType = next; }}
 			submitContent={submitComposerContent}
@@ -2644,6 +2739,13 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 
 	.composer-available {
 		padding-bottom: var(--composer-reserved-height);
+	}
+
+	@media (max-width: 700px) {
+		.app-shell {
+			--composer-dock-height: calc(var(--composer-preferred-height) + 8px + 46px + 8px + var(--composer-dock-padding-block) + var(--composer-dock-border-width) + env(safe-area-inset-bottom));
+			--composer-reserved-height: calc(var(--composer-initial-preferred-height) + 8px + 46px + 8px + var(--composer-dock-padding-block) + var(--composer-dock-border-width) + env(safe-area-inset-bottom));
+		}
 	}
 
 </style>

@@ -13,6 +13,7 @@
 		world: WorldPoint;
 		movementAnimation: boolean;
 		onProfile: (position: GridPosition, trigger: HTMLButtonElement) => void;
+		onSelfProfile?: (trigger: HTMLButtonElement) => void;
 	}>;
 
 	let {
@@ -23,7 +24,8 @@
 		position,
 		world,
 		movementAnimation,
-		onProfile
+		onProfile,
+		onSelfProfile
 	}: Props = $props();
 </script>
 
@@ -41,9 +43,11 @@
 		type="button"
 		ondragstart={(event) => event.preventDefault()}
 		aria-label={`${character.name} のプロフィールを開く`}
-		onclick={(event) => {
+		 onclick={(event) => {
 			event.stopPropagation();
-			onProfile(position, event.currentTarget as HTMLButtonElement);
+			const trigger = event.currentTarget as HTMLButtonElement;
+			if (self && onSelfProfile) onSelfProfile(trigger);
+			else onProfile(position, trigger);
 		}}
 	>
 		<CharacterAvatar class={`avatar avatar-${color}`} {character} />

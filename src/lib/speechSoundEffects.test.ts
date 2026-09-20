@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createConversationState, receiveMessage, type SpeechType } from './conversation';
-import { createSpeechSoundSamples, DEFAULT_SOUND_PREFERENCE, loadSoundPreference, newLiveBubbleEffects, SPEECH_SOUND_DURATIONS, SPEECH_SOUND_PREFERENCE_KEY } from './speechSoundEffects';
+import { createSoundSamples, createSpeechSoundSamples, DEFAULT_SOUND_PREFERENCE, loadSoundPreference, newLiveBubbleEffects, SOUND_EFFECT_GAINS, SPEECH_SOUND_DURATIONS, SPEECH_SOUND_PREFERENCE_KEY, UI_SOUND_DURATIONS } from './speechSoundEffects';
 
 const options = { isSpeakerVisible: true, duration: 100, now: 0 };
 const message = (id: string, pubkey: string, content: string, speechType: SpeechType = 'normal') => ({ id, pubkey, content, speechType, createdAt: 0 });
@@ -28,6 +28,22 @@ function rms(samples: Float32Array): number {
 }
 
 describe('speech sound effects', () => {
+	it('creates deterministic collection and level-up chimes', () => {
+		for (const effect of ['collect', 'level-up'] as const) {
+			const samples = createSoundSamples(effect, 10_000);
+			expect(samples.length).toBe(Math.ceil(UI_SOUND_DURATIONS[effect] * 10_000));
+			expect([...samples].every(Number.isFinite)).toBe(true);
+			expect(Math.max(...samples.map(Math.abs))).toBeLessThanOrEqual(0.920001);
+			expect(samples).toEqual(createSoundSamples(effect, 10_000));
+		}
+	});
+	it('keeps speech gain at unity and attenuates only UI success sounds', () => {
+		expect(SOUND_EFFECT_GAINS.normal).toBe(1);
+		expect(SOUND_EFFECT_GAINS.shout).toBe(1);
+		expect(SOUND_EFFECT_GAINS.monologue).toBe(1);
+		expect(SOUND_EFFECT_GAINS.collect).toBeCloseTo(0.75);
+		expect(SOUND_EFFECT_GAINS['level-up']).toBeCloseTo(0.75);
+	});
 	it('creates deterministic, finite, non-clipping buffers at the specified durations', () => {
 		const effects = ['normal', 'shout', 'monologue'] as const;
 		const buffers = effects.map((effect) => createSpeechSoundSamples(effect, 10_000));

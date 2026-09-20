@@ -4,23 +4,28 @@
 	import SpeechNormal from '~icons/hako/speech-normal';
 	import SpeechShout from '~icons/hako/speech-shout';
 	import HostOwnedComposerLite from '$lib/HostOwnedComposerLite.svelte';
+	import CharacterAvatar from '$lib/CharacterAvatar.svelte';
 	import SpeechSuggestions from '$lib/frontend/SpeechSuggestions.svelte';
 	import type { SpeechType } from '$lib/conversation';
 	import type { Character } from '$lib/character';
+	import type { BubbleTone } from '$lib/bubblePresentation';
 	import type { SpeechSuggestionConversationEntry } from '$lib/speechSuggestions';
 
 	type Props = ComponentProps<typeof HostOwnedComposerLite> & {
 		selectedSpeechType: SpeechType;
 		submissionInProgress: boolean;
 		hasUnreadReplies: boolean;
-		character: Pick<Character, 'name' | 'about'>;
+		character: Character;
+		avatarTone: BubbleTone;
+		canOpenSelfProfile: boolean;
 		suggestionConversation: readonly SpeechSuggestionConversationEntry[];
 		onSpeechTypeChange: (next: SpeechType) => void;
+		onOpenSelfProfile: (trigger: HTMLButtonElement) => void;
 		submitCandidate: (content: string, signal: AbortSignal) => Promise<Readonly<{ eventId: string }>>;
 	};
-	let { selectedSpeechType, submissionInProgress, onSpeechTypeChange, submitContent, submitCandidate,
+	let { selectedSpeechType, submissionInProgress, onSpeechTypeChange, onOpenSelfProfile, submitContent, submitCandidate,
 		desiredContext, loadPreview, onPreviewClear, onEditorEmptyChange, onPreferredHeightChange,
-		hasUnreadReplies, character, suggestionConversation }: Props = $props();
+		hasUnreadReplies, character, avatarTone, suggestionConversation, canOpenSelfProfile }: Props = $props();
 	let composerComponent: { focusEditor(): boolean; blurEditor(): boolean; applyContentIfEmpty(content: string): Promise<boolean> } | null = null;
 	let editorIsEmpty = $state<boolean | null>(null);
 	let explanationVisible = $state(false);
@@ -59,8 +64,14 @@
 
 </script>
 
-<div class="composer-dock" aria-label="Message composer">
+	<div class="composer-dock" aria-label="Message composer">
 	<div class="composer-dock-content">
+		<div class="composer-controls">
+		{#if canOpenSelfProfile}
+		<button class="profile-trigger" type="button" aria-label="自分のプロフィールを開く" title="自分のプロフィール" onclick={(event) => onOpenSelfProfile(event.currentTarget)}>
+			<span class="profile-trigger-avatar" aria-hidden="true"><CharacterAvatar class={`avatar avatar-${avatarTone} profile-trigger-character-avatar`} {character} /></span>
+		</button>
+		{/if}
 		<button
 			class="speech-type-toggle"
 			type="button"
@@ -103,6 +114,7 @@
 				{/if}
 			</button>
 		{/if}
+		</div>
 		<div class="composer-editor-slot">
 			<HostOwnedComposerLite
 				bind:this={composerComponent}
@@ -145,6 +157,13 @@
 		margin: 0 auto;
 		min-width: 0;
 	}
+
+	.profile-trigger { flex: 0 0 54px; width: 54px; min-width: 44px; min-height: 44px; height: 54px; padding: 3px; border: 1px solid rgba(57, 67, 64, 0.2); border-radius: 12px; background: rgba(255, 255, 255, 0.86); box-shadow: 0 5px 12px rgba(58, 70, 61, 0.1); cursor: pointer; overflow: hidden; }
+	.profile-trigger-avatar { display: block; position: relative; width: 100%; height: 100%; overflow: hidden; border-radius: 8px; background: transparent; }
+	:global(.profile-trigger-character-avatar) { position: absolute; inset: 0; width: 100%; height: 100%; border: 2px solid rgba(255, 255, 255, 0.88); border-radius: 42% 58% 48% 52%; box-shadow: 0 5px 10px rgba(58, 70, 61, 0.16); transform: none; }
+	:global(.profile-trigger-character-avatar img) { display: block; width: 100%; height: 100%; object-fit: contain; object-position: center; transform: scale(1.12); transform-origin: center; }
+	.profile-trigger:focus-visible { outline: 3px solid var(--color-focus-ring); outline-offset: 2px; }
+	.composer-controls { display: contents; }
 
 	.speech-type-toggle {
 		flex: 0 0 54px;
@@ -233,5 +252,15 @@
 		width: 100%;
 		height: 100%;
 		min-width: 0;
+	}
+
+	@media (max-width: 700px) {
+		.composer-dock-content { display: grid; grid-template-rows: minmax(0, 1fr) 46px; gap: 8px; }
+		.composer-editor-slot { grid-row: 1; }
+		.composer-controls { display: flex; grid-row: 2; gap: 8px; align-items: stretch; min-width: 0; }
+		.composer-controls .profile-trigger { order: 1; flex-basis: 46px; width: 46px; height: 46px; }
+		.composer-controls .speech-type-toggle { order: 2; flex-basis: 46px; }
+		.composer-controls :global(.suggestions-anchor) { order: 3; }
+		.composer-controls .trace-unread-indicator { order: 4; flex-basis: 38px; }
 	}
 </style>

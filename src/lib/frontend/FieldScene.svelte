@@ -66,6 +66,7 @@
 		fieldActionLabel: (action: FieldCellAction) => string;
 		closeFieldActionMenu: () => void;
 		onOpenProfile: (characterId: string, trigger: HTMLButtonElement) => void;
+		onOpenSelfProfile?: (trigger: HTMLButtonElement) => void;
 		traceMarkerWorldPosition: (position: GridPosition) => WorldPoint;
 	}>;
 
@@ -97,6 +98,7 @@
 		fieldActionLabel,
 		closeFieldActionMenu,
 		onOpenProfile,
+		onOpenSelfProfile,
 		traceMarkerWorldPosition,
 	}: Props = $props();
 
@@ -221,6 +223,7 @@
 				world={participant.world}
 				movementAnimation={movingParticipantIds.has(participant.id)}
 				onProfile={resolveFieldCellSelection}
+				onSelfProfile={onOpenSelfProfile}
 			/>
 		{/each}
 		{#if traceRootGhost}
