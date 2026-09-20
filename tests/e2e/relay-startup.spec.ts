@@ -762,7 +762,7 @@ async function pauseAtCurrentBrowserTime(page: Page): Promise<void> {
 }
 
 async function startSelectedRun(page: Page): Promise<void> {
-	const start = page.getByRole('button', { name: 'このbuildでRun開始' });
+	const start = page.getByRole('button', { name: 'Runを開始' });
 	await expect(start).toBeEnabled();
 	await start.click();
 }
@@ -1883,23 +1883,27 @@ test.describe('Relay startup', () => {
 		await page.goto('/');
 		await page.setViewportSize({ width: 390, height: 640 });
 		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
+		await setPendingRootPoints(page, 0);
+		await page.reload({ waitUntil: 'domcontentloaded' });
+		await page.getByRole('button', { name: /を選ぶ$/ }).first().click();
+		await expect(page.locator('.rank-controls button[aria-label$="を上げる"]')).toHaveCount(3);
+		await expect.poll(async () => page.locator('.rank-controls button[aria-label$="を上げる"]').evaluateAll((buttons) => buttons.every((button) => (button as HTMLButtonElement).disabled))).toBe(true);
+		await expect(page.getByRole('button', { name: 'Runを開始' })).toBeEnabled();
 		await setPendingRootPoints(page, 3);
 		await page.reload({ waitUntil: 'domcontentloaded' });
 
-		await expect(page.locator('.root-points')).toContainText('3 RP');
+		await expect(page.locator('.rp-summary')).toContainText('3 RP');
 		const rootBuild = page.locator('.root-build');
-		await expect(rootBuild).toContainText('Rank 0: ×1.00');
-		await expect(rootBuild).toContainText('Rank 3: ×2.00');
-		await expect(rootBuild).toContainText('Rank 3: ×3.00 / overflow lifespan 50%');
-		await expect(rootBuild).toContainText('Rank 3: 最大30日');
-		await expect(rootBuild).toContainText('最初の有効通常作業24時間のpoint生成だけに適用');
-		await expect(rootBuild).toContainText('fresh Run開始時寿命は常に7日');
+		await expect(rootBuild.locator('.ability-row')).toHaveCount(3);
+		await expect(rootBuild.getByRole('button', { name: '推論加速の詳細' })).toBeVisible();
+		await expect(rootBuild).not.toContainText('Rank 3: ×2.00');
 		await page.getByRole('button', { name: /を選ぶ$/ }).first().click();
-		const rankRows = page.locator('.rank-row');
+		const rankRows = page.locator('.ability-row');
 		for (let index = 0; index < 3; index += 1) {
-			await rankRows.nth(index).getByRole('button').nth(1).click();
+			await rankRows.nth(index).getByRole('button', { name: /を上げる$/ }).click();
 		}
-		await expect(page.getByRole('button', { name: 'このbuildでRun開始' })).toBeEnabled();
+		await expect.poll(async () => page.locator('.rank-controls button[aria-label$="を上げる"]').evaluateAll((buttons) => buttons.every((button) => (button as HTMLButtonElement).disabled))).toBe(true);
+		await expect(page.getByRole('button', { name: 'Runを開始' })).toBeEnabled();
 		await startSelectedRun(page);
 		await expect(page.getByRole('dialog')).toHaveCount(0);
 		await page.evaluate(() => {
