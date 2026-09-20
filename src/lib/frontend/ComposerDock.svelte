@@ -67,7 +67,7 @@
 		<div class="composer-controls">
 		{#if canOpenSelfProfile}
 		<button class="profile-trigger" type="button" aria-label="自分のプロフィールを開く" title="自分のプロフィール" onclick={(event) => onOpenSelfProfile(event.currentTarget)}>
-			<span class="profile-trigger-avatar" aria-hidden="true"><CharacterAvatar {character} /></span>
+			<span class="profile-trigger-avatar" aria-hidden="true"><CharacterAvatar class="profile-trigger-character-avatar" {character} /></span>
 		</button>
 		{/if}
 		<button
@@ -158,7 +158,8 @@
 
 	.profile-trigger { flex: 0 0 54px; width: 54px; min-width: 44px; min-height: 44px; height: 54px; padding: 3px; border: 1px solid rgba(57, 67, 64, 0.2); border-radius: 12px; background: rgba(255, 255, 255, 0.86); box-shadow: 0 5px 12px rgba(58, 70, 61, 0.1); cursor: pointer; overflow: hidden; }
 	.profile-trigger-avatar { display: block; position: relative; width: 100%; height: 100%; overflow: hidden; border-radius: 8px; background: #9bc6d5; }
-	.profile-trigger-avatar :global(.avatar) { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; border-radius: 8px; box-shadow: none; transform: none; }
+	:global(.profile-trigger-character-avatar) { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; border-radius: 8px; box-shadow: none; transform: none; }
+	:global(.profile-trigger-character-avatar img) { display: block; width: 100%; height: 100%; object-fit: contain; object-position: center; }
 	.profile-trigger:focus-visible { outline: 3px solid var(--color-focus-ring); outline-offset: 2px; }
 	.composer-controls { display: contents; }
 

@@ -2254,6 +2254,15 @@ test.describe('Relay startup', () => {
 		const profileTrigger = page.getByRole('button', { name: '自分のプロフィールを開く' });
 		await expect(profileTrigger).toBeVisible();
 		await expect(page.locator('.composer-controls .profile-trigger')).toHaveCount(1);
+		const character = requireCharacterFromPubkey(getPublicKey(fixtureSecret(41)));
+		const avatarImage = profileTrigger.locator('img');
+		await expect(avatarImage).toHaveCount(1);
+		await expect(avatarImage).toHaveAttribute('src', `/${character.picture}`);
+		await expect.poll(() => avatarImage.evaluate((image) => {
+			const loadedImage = image as HTMLImageElement;
+			return { complete: loadedImage.complete, naturalWidth: loadedImage.naturalWidth };
+		})).toEqual({ complete: true, naturalWidth: expect.any(Number) });
+		await expect.poll(() => avatarImage.evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
 		await profileTrigger.click();
 
 		const dialog = page.getByRole('dialog');
