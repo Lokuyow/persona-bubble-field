@@ -261,6 +261,8 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	let mendingMutationInFlight = $state(false);
 	let collectFeedback = $state<Readonly<{ id: number; points: number; lifespanMs: number }> | null>(null);
 	let collectFeedbackTimer: number | null = null;
+	let mendingStartupFeedback = $state<Readonly<{ id: number; phase: 'starting' | 'started' }> | null>(null);
+	let mendingStartupFeedbackTimer: number | null = null;
 	let adjustmentDialogOpen = $state(false);
 	let selfProfileDialogOpen = $state(false);
 	let lastSelfProfileTrigger: HTMLButtonElement | null = null;
@@ -1269,6 +1271,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			appSoundController.dispose();
 			soundController = null;
 			if (collectFeedbackTimer !== null) window.clearTimeout(collectFeedbackTimer);
+			if (mendingStartupFeedbackTimer !== null) window.clearTimeout(mendingStartupFeedbackTimer);
 			if (upgradeFeedbackTimer !== null) window.clearTimeout(upgradeFeedbackTimer);
 			if (proximityFeedbackTimer !== null) window.clearTimeout(proximityFeedbackTimer);
 			proximityFeedbackTimer = null;
@@ -1411,10 +1414,19 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			fieldViewportComponent?.cancelPointerGesture();
 		mendingNowMs = Date.now();
 		mendingDialogOpen = true;
+		if (!personaSnapshot?.gameState.mendingJob) {
+			mendingStartupFeedback = { id: ++feedbackSequence, phase: 'starting' };
+			void mutateMending('start');
+		}
 	}
 
 	function closeMendingTerminal(): void {
 		mendingDialogOpen = false;
+		mendingStartupFeedback = null;
+		if (mendingStartupFeedbackTimer !== null) {
+			window.clearTimeout(mendingStartupFeedbackTimer);
+			mendingStartupFeedbackTimer = null;
+		}
 	}
 
 	function openAdjustmentTerminal(): void {
@@ -1582,10 +1594,12 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		try {
 			const result = operation === 'start' ? await startMending(expected) : await collectMending(expected);
 			if (result.kind === 'corrupt') {
+				mendingStartupFeedback = null;
 				enterReadOnlyFallback('Persona is unavailable for publishing.');
 				return;
 			}
 			if (result.kind === 'superseded') {
+				mendingStartupFeedback = null;
 				if (result.lifecycle.kind === 'restored') {
 					if (!samePersonaIdentity(expected, result.lifecycle.persona)) reloadForPersonaIdentityChange(result.lifecycle.persona);
 					else {
@@ -1598,6 +1612,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 				}
 				return;
 			}
+			if (result.kind === 'blocked') mendingStartupFeedback = null;
 			personaSnapshot = result.persona;
 			selfSigner = result.persona.signer;
 			if (result.kind === 'collected') {
@@ -1612,12 +1627,21 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			}
 			mendingNowMs = Date.now();
 			updateLifespanHud(mendingNowMs, true);
-			if (result.kind === 'started') closeMendingTerminal();
+			if (result.kind === 'started') {
+				if (mendingStartupFeedbackTimer !== null) window.clearTimeout(mendingStartupFeedbackTimer);
+				if (mendingDialogOpen) {
+					mendingStartupFeedback = { id: ++feedbackSequence, phase: 'started' };
+					mendingStartupFeedbackTimer = window.setTimeout(() => { mendingStartupFeedback = null; mendingStartupFeedbackTimer = null; }, 3000);
+				}
+				soundController?.play('startup');
+			}
 			if (result.kind === 'expired') {
+				mendingStartupFeedback = null;
 				closeMendingTerminal();
 				void beginDeathTransition(result.persona, worldSession);
 			}
 		} catch {
+			mendingStartupFeedback = null;
 			closeMendingTerminal();
 		} finally {
 			mendingMutationInFlight = false;
@@ -2637,11 +2661,12 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		open={mendingDialogOpen}
 		projection={mendingProjection}
 		hasJob={Boolean(personaSnapshot?.gameState.mendingJob)}
+		starting={mendingMutationInFlight && !Boolean(personaSnapshot?.gameState.mendingJob)}
 		points={personaSnapshot?.gameState.points ?? 0}
-		onOpenChange={(open) => { mendingDialogOpen = open; }}
-		onStart={() => { void mutateMending('start'); }}
+		onOpenChange={(open) => { if (open) mendingDialogOpen = true; else closeMendingTerminal(); }}
 		onCollect={() => { void mutateMending('collect'); }}
 		collectFeedback={collectFeedback}
+		startupFeedback={mendingStartupFeedback}
 	/>
 	<AdjustmentDialog
 		open={adjustmentDialogOpen}
