@@ -39,8 +39,7 @@
 	let maximumLifespan = $derived(formatDaysOrDuration(projection?.maximumLifespanMs ?? 0));
 	let accelerationRemaining = $derived(`有効作業 残り${formatElapsedDuration(projection?.accelerationRemainingMs ?? 0)}`);
 	let lifespanExtensionAvailable = $derived(Boolean(projection?.completed &&
-		(projection.lifespanExtensionRateHundredthsPerHour ?? 0) > 0 &&
-		(projection.effectiveExpiresAtMs ?? 0) < (projection?.processedThroughMs ?? 0) + (projection?.maximumLifespanMs ?? 0)));
+		(projection.lifespanExtensionRateHundredthsPerHour ?? 0) > 0));
 	let workStatusTitle = $derived(!projection?.completed ? '作業中' : lifespanExtensionAvailable ? '延命中' : '作業停止中');
 
 	function formatRateMinutes(rateHundredthsPerHour: number): string {
