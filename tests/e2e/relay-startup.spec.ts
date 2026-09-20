@@ -762,7 +762,7 @@ async function pauseAtCurrentBrowserTime(page: Page): Promise<void> {
 }
 
 async function startSelectedRun(page: Page): Promise<void> {
-	const start = page.getByRole('button', { name: 'このbuildでRun開始' });
+	const start = page.getByRole('button', { name: 'Runを開始' });
 	await expect(start).toBeEnabled();
 	await start.click();
 }
@@ -1881,25 +1881,79 @@ test.describe('Relay startup', () => {
 		await installHostOwnedStub(page);
 		await installDelayedRelay(page);
 		await page.goto('/');
-		await page.setViewportSize({ width: 390, height: 640 });
+		await page.setViewportSize({ width: 420, height: 420 });
 		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
+		await setPendingRootPoints(page, 0);
+		await page.reload({ waitUntil: 'domcontentloaded' });
+		await page.getByRole('button', { name: /を選ぶ$/ }).first().click();
+		const rootToggle = page.locator('.root-build-toggle');
+		await expect(rootToggle).toHaveAttribute('aria-expanded', 'false');
+		await expect(rootToggle).toContainText('使用 0 / 0 RP');
+		await expect(page.locator('.rank-controls')).toHaveCount(0);
+		await expect(page.getByRole('button', { name: 'Runを開始' })).toBeEnabled();
 		await setPendingRootPoints(page, 3);
 		await page.reload({ waitUntil: 'domcontentloaded' });
 
-		await expect(page.locator('.root-points')).toContainText('3 RP');
+		await expect(page.locator('.rp-summary')).toContainText('3 RP');
 		const rootBuild = page.locator('.root-build');
-		await expect(rootBuild).toContainText('Rank 0: ×1.00');
-		await expect(rootBuild).toContainText('Rank 3: ×2.00');
-		await expect(rootBuild).toContainText('Rank 3: ×3.00 / overflow lifespan 50%');
-		await expect(rootBuild).toContainText('Rank 3: 最大30日');
-		await expect(rootBuild).toContainText('最初の有効通常作業24時間のpoint生成だけに適用');
-		await expect(rootBuild).toContainText('fresh Run開始時寿命は常に7日');
+		await expect(rootToggle).toHaveAttribute('aria-expanded', 'true');
+		await expect(rootBuild.locator('.ability-row')).toHaveCount(3);
+		await rootToggle.focus();
+		await page.keyboard.press('Enter');
+		await expect(rootToggle).toHaveAttribute('aria-expanded', 'false');
+		await page.keyboard.press('Space');
+		await expect(rootToggle).toHaveAttribute('aria-expanded', 'true');
+		await expect(rootBuild.getByRole('button', { name: '推論加速の詳細' })).toBeVisible();
+		const mobileLayout = await rootBuild.locator('.ability-row').first().evaluate((row) => {
+			const main = row.querySelector('.ability-main')?.getBoundingClientRect();
+			const content = row.closest('.selection-content');
+			if (!main || !(content instanceof HTMLElement)) throw new Error('ability layout is incomplete');
+			return { mainWidth: main.width, noHorizontalOverflow: content.scrollWidth <= content.clientWidth };
+		});
+		expect(mobileLayout.mainWidth).toBeGreaterThan(120);
+		expect(mobileLayout.noHorizontalOverflow).toBe(true);
+		await page.setViewportSize({ width: 1280, height: 800 });
+		const desktopCenters = await rootBuild.locator('.ability-row').first().evaluate((row) => {
+			const help = row.querySelector('.help-trigger')?.getBoundingClientRect();
+			const rank = row.querySelector('.rank-controls button')?.getBoundingClientRect();
+			if (!help || !rank) throw new Error('ability controls are incomplete');
+			return { helpCenter: help.top + help.height / 2, rankCenter: rank.top + rank.height / 2 };
+		});
+		expect(Math.abs(desktopCenters.helpCenter - desktopCenters.rankCenter)).toBeLessThanOrEqual(1);
+		await expect.poll(async () => rootBuild.locator('.help-trigger').evaluateAll((elements) => elements.every((element) => {
+			const rect = element.getBoundingClientRect();
+			return rect.width >= 44 && rect.height >= 44;
+		}))).toBe(true);
+		await expect.poll(async () => rootBuild.locator('.rank-controls button').first().evaluate((element) => {
+			const rect = element.getBoundingClientRect();
+			return rect.width >= 44 && rect.height >= 44;
+		})).toBe(true);
+		const selectionContent = page.locator('.selection-content');
+		await selectionContent.evaluate((element) => { element.scrollTop = element.scrollHeight - element.clientHeight; });
+		const help = rootBuild.getByRole('button', { name: '推論加速の詳細' });
+		await help.scrollIntoViewIfNeeded();
+		const scrollBeforeHelp = await selectionContent.evaluate((element) => element.scrollTop);
+		await help.click();
+		await expect(page.locator('.help-content')).toBeVisible();
+		await expect.poll(async () => selectionContent.evaluate((element) => element.scrollTop)).toBe(scrollBeforeHelp);
+		await expect.poll(async () => page.evaluate(() => document.activeElement?.getAttribute('aria-label'))).toBe('推論加速の詳細');
+		await help.click();
+		await expect(page.locator('.help-content')).toHaveCount(0);
+		await expect.poll(async () => selectionContent.evaluate((element) => element.scrollTop)).toBe(scrollBeforeHelp);
+		await help.focus();
+		await page.keyboard.press('Enter');
+		await expect(page.locator('.help-content')).toBeVisible();
+		await expect.poll(async () => selectionContent.evaluate((element) => element.scrollTop)).toBe(scrollBeforeHelp);
+		await expect.poll(async () => page.evaluate(() => document.activeElement?.getAttribute('aria-label'))).toBe('推論加速の詳細');
+		await page.keyboard.press('Escape');
+		await expect(rootBuild).not.toContainText('Rank 3: ×2.00');
 		await page.getByRole('button', { name: /を選ぶ$/ }).first().click();
-		const rankRows = page.locator('.rank-row');
+		const rankRows = page.locator('.ability-row');
 		for (let index = 0; index < 3; index += 1) {
-			await rankRows.nth(index).getByRole('button').nth(1).click();
+			await rankRows.nth(index).getByRole('button', { name: /を上げる$/ }).click();
 		}
-		await expect(page.getByRole('button', { name: 'このbuildでRun開始' })).toBeEnabled();
+		await expect.poll(async () => page.locator('.rank-controls button[aria-label$="を上げる"]').evaluateAll((buttons) => buttons.every((button) => (button as HTMLButtonElement).disabled))).toBe(true);
+		await expect(page.getByRole('button', { name: 'Runを開始' })).toBeEnabled();
 		await startSelectedRun(page);
 		await expect(page.getByRole('dialog')).toHaveCount(0);
 		await page.evaluate(() => {
@@ -1997,22 +2051,40 @@ test.describe('Relay startup', () => {
 		const dialog = page.locator('.selection-dialog');
 		const candidateButtons = page.getByRole('button', { name: /を選ぶ$/ });
 		await expect(candidateButtons).toHaveCount(3);
-		await page.setViewportSize({ width: 390, height: 640 });
+		await page.setViewportSize({ width: 420, height: 420 });
 		await page.locator('.candidate-about').nth(1).evaluate((element) => {
 			element.textContent = '長いプロフィール。'.repeat(160);
 		});
 
-		const overflow = await dialog.evaluate((element) => ({
-			clientHeight: element.clientHeight,
-			scrollHeight: element.scrollHeight,
-			viewportHeight: window.innerHeight
-		}));
-		expect(overflow.scrollHeight).toBeGreaterThan(overflow.clientHeight);
-		expect(overflow.clientHeight).toBeLessThanOrEqual(overflow.viewportHeight - 40);
-
+		const content = page.locator('.selection-content');
+		const footer = page.locator('.selection-footer');
+		const before = await dialog.evaluate((element) => {
+			const content = element.querySelector('.selection-content');
+			const footer = element.querySelector('.selection-footer');
+			if (!(content instanceof HTMLElement) || !(footer instanceof HTMLElement)) throw new Error('selection layout is incomplete');
+			const dialogRect = element.getBoundingClientRect();
+			const footerRect = footer.getBoundingClientRect();
+			return {
+				dialogInsideViewport: dialogRect.top >= 0 && dialogRect.bottom <= window.innerHeight && dialogRect.left >= 0 && dialogRect.right <= window.innerWidth,
+				contentScrollable: content.scrollHeight > content.clientHeight,
+				contentScrollTop: content.scrollTop,
+				footerBottom: footerRect.bottom,
+				footerHeight: footerRect.height
+			};
+		});
+		expect(before.dialogInsideViewport).toBe(true);
+		expect(before.contentScrollable).toBe(true);
+		expect(before.footerBottom).toBeLessThanOrEqual(420);
 		await candidateButtons.nth(2).scrollIntoViewIfNeeded();
 		await expect(candidateButtons.nth(2)).toBeVisible();
-		expect(await dialog.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+		const afterScroll = await content.evaluate((element) => ({ scrollTop: element.scrollTop, scrollHeight: element.scrollHeight, clientHeight: element.clientHeight }));
+		expect(afterScroll.scrollTop).toBeGreaterThan(0);
+		expect(afterScroll.scrollTop).toBeLessThanOrEqual(afterScroll.scrollHeight - afterScroll.clientHeight);
+		await expect(footer).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Runを開始' })).toBeVisible();
+		const footerAfterScroll = await footer.boundingBox();
+		expect(footerAfterScroll).not.toBeNull();
+		expect(footerAfterScroll!.y + footerAfterScroll!.height).toBeLessThanOrEqual(420);
 		await candidateButtons.nth(2).click();
 		await startSelectedRun(page);
 		await expect(page.getByRole('dialog')).toHaveCount(0);
@@ -2038,7 +2110,9 @@ test.describe('Relay startup', () => {
 			expect(Math.abs(metrics.centerX - metrics.viewportWidth / 2)).toBeLessThanOrEqual(8);
 			expect(metrics.centerY).toBeGreaterThan(0);
 			expect(metrics.centerY).toBeLessThan(metrics.viewportHeight);
-			expect(metrics.width).toBeLessThanOrEqual(metrics.viewportWidth - 40);
+			expect(metrics.width).toBeLessThanOrEqual(metrics.viewportWidth);
+			expect(metrics.centerX - metrics.width / 2).toBeGreaterThanOrEqual(0);
+			expect(metrics.centerX + metrics.width / 2).toBeLessThanOrEqual(metrics.viewportWidth);
 		});
 	}
 
