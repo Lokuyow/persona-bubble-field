@@ -70,9 +70,10 @@
 						</section>
 						<section class="clear-section" aria-labelledby="self-profile-clear">
 							<div class="clear-title-row"><h2 id="self-profile-clear">Normal Clear</h2><strong>+1 RP</strong></div>
-							<p>100,000 ptで現在のRunを終了します。未回収の作業ポイントは含まれません。</p>
-							<div class="clear-progress-head"><span>現在所持 / 100,000 pt</span><strong>{points.toLocaleString()} / 100,000 pt</strong></div>
+							<p>100,000 ptで現在のRunを終了します。</p>
+							<div class="clear-progress-head"><span>所持ポイント</span><strong>{points.toLocaleString()} / 100,000 pt</strong></div>
 							<div class="clear-progress" role="progressbar" aria-label="Normal Clearに必要なポイント" aria-valuemin="0" aria-valuemax="100000" aria-valuenow={points}><span style={`width: ${clearProgress}%;`}></span></div>
+							<p>未回収の作業ポイントは含まれません。</p>
 							{#if clearBlockedReason && !pointBlocked}<p class="clear-reason">clear不可: {clearBlockedReason}</p>{/if}
 							<button class="clear-button" type="button" disabled={clearBlocked} onclick={onClear}>Normal Clear（+1 RP）</button>
 						</section>

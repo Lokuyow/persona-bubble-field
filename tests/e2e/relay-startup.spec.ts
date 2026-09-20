@@ -2275,6 +2275,10 @@ test.describe('Relay startup', () => {
 		await expect(dialog).toContainText('ハルシネーション抑制');
 		await expect(dialog).toContainText('Root Point');
 		await expect(dialog).toContainText('Normal Clear');
+		await expect(dialog).toContainText('100,000 ptで現在のRunを終了します。');
+		await expect(dialog).toContainText('所持ポイント');
+		await expect(dialog).toContainText('未回収の作業ポイントは含まれません。');
+		await expect(dialog).not.toContainText('100,000 ptで現在のRunを終了します。未回収の作業ポイントは含まれません。');
 		await expect(dialog).toContainText('100,000 pt');
 		await expect(dialog.getByRole('button', { name: 'Normal Clear（+1 RP）' })).toBeDisabled();
 		await expect(dialog.getByText('clear不可: 所持ポイントが100,000pt未満です')).toHaveCount(0);
