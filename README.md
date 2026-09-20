@@ -26,6 +26,19 @@ npm install
 npm run dev
 ```
 
+For manual verification of the real expiry and death lifecycle, use the
+isolated death DEV server:
+
+```text
+npm run dev:death
+http://localhost:5174/
+```
+
+This development-only mode gives newly started Runs an initial lifespan of
+3 seconds. It uses a separate origin and browser storage from normal DEV, so
+the normal `http://localhost:5173/` Identity and Run are unaffected. The
+production initial lifespan remains 7 days.
+
 ### Manual Rift operator CLI
 
 The local operator CLI runs on Node.js 24.19 or newer. The default command is

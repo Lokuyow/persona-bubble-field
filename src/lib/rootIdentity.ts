@@ -64,6 +64,10 @@ export type IdentityCandidate = Readonly<{ accountIndex: number; pubkey: string;
 export type ClearedIdentityCandidate = IdentityCandidate & Readonly<{ generation: number }>;
 export type SelectionCandidate = IdentityCandidate | ClearedIdentityCandidate;
 
+export type SelectIdentityOptions = Readonly<{
+	initialLifespanMs?: number;
+}>;
+
 export type PendingSelection = Readonly<{
 	generation: number;
 	candidates: readonly [IdentityCandidate, IdentityCandidate, IdentityCandidate];
@@ -597,7 +601,7 @@ function isValidSelectionCandidate(value: SelectionCandidate): boolean {
 	return isValidCandidate(value) && (!('generation' in value) || isPositiveIndex(value.generation));
 }
 
-export async function selectIdentity(expectedGeneration: number, candidate: SelectionCandidate, rootBuild: RootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0 }): Promise<SelectionResult> {
+export async function selectIdentity(expectedGeneration: number, candidate: SelectionCandidate, rootBuild: RootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0 }, options: SelectIdentityOptions = {}): Promise<SelectionResult> {
 	assertBip85Index(expectedGeneration, 'generation');
 	if (!isValidSelectionCandidate(candidate)) return { kind: 'corrupt', reason: 'invalid-candidate' };
 	return withLifecycle(async (db) => {
@@ -632,7 +636,7 @@ export async function selectIdentity(expectedGeneration: number, candidate: Sele
 				identities = [...current.identities, selected];
 			}
 			const identityReference: IdentityReference = { generation: selected.generation, accountIndex: selected.accountIndex, pubkey: selected.pubkey };
-			const activeRun: ActiveRun = { runNumber, revision: 0, startedAtMs: nowMs, identity: identityReference, rootBuild: persistedRootBuild, gameState: createInitialPersonaGameState(selected.pubkey, nowMs) };
+			const activeRun: ActiveRun = { runNumber, revision: 0, startedAtMs: nowMs, identity: identityReference, rootBuild: persistedRootBuild, gameState: createInitialPersonaGameState(selected.pubkey, nowMs, options.initialLifespanMs) };
 			const next: PlayerLifecycle = { schemaVersion: PLAYER_SCHEMA_VERSION, rootPoints: current.rootPoints, identities, mode: { kind: 'running', activeRun }, realtimeSettlementLedger: emptyRealtimeLedger(activeRun) };
 			await store.put(next, PLAYER_STATE);
 			await tx.done;

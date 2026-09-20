@@ -133,14 +133,14 @@ export function isValidPersonaGameState(value: unknown): value is PersonaGameSta
 		isAbilityLevel(abilities.hallucinationSuppression, ABILITY_LEVEL_LIMITS.hallucinationSuppression);
 }
 
-export function createInitialPersonaGameState(personaPubkey: string, birthAtMs: number): PersonaGameState {
-	if (!isCanonicalPubkey(personaPubkey) || !isSafeTimestamp(birthAtMs) || birthAtMs > Number.MAX_SAFE_INTEGER - INITIAL_LIFESPAN_MS) {
+export function createInitialPersonaGameState(personaPubkey: string, birthAtMs: number, initialLifespanMs = INITIAL_LIFESPAN_MS): PersonaGameState {
+	if (!isCanonicalPubkey(personaPubkey) || !isSafeTimestamp(birthAtMs) || !Number.isSafeInteger(initialLifespanMs) || initialLifespanMs <= 0 || birthAtMs > Number.MAX_SAFE_INTEGER - initialLifespanMs) {
 		throw new TypeError('Invalid persona lifecycle input.');
 	}
 	return {
 		version: 4,
 		personaPubkey,
-		lifespanExpiresAtMs: birthAtMs + INITIAL_LIFESPAN_MS,
+		lifespanExpiresAtMs: birthAtMs + initialLifespanMs,
 		points: 0,
 		pointProgressTicks: 0,
 		inferenceAccelerationUsedMs: 0,

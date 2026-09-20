@@ -21,7 +21,8 @@ import {
 	upgradePersonaAbility,
 	type LoadLifecycleResult,
 	type PendingSelection,
-	type PersonaSnapshot
+	type PersonaSnapshot,
+	type SelectIdentityOptions
 } from './rootIdentity';
 import type { RootBuild } from './rootProgression';
 
@@ -53,10 +54,10 @@ function restored(result: LoadLifecycleResult): PersonaSnapshot {
 	return result.persona;
 }
 
-async function selected(build: RootBuild = ZERO_BUILD): Promise<PersonaSnapshot> {
+async function selected(build: RootBuild = ZERO_BUILD, options: SelectIdentityOptions = {}): Promise<PersonaSnapshot> {
 	const pending = await loadOrCreateLifecycle();
 	if (pending.kind !== 'created' && pending.kind !== 'selecting') throw new Error('Expected a pending selection.');
-	const result = await selectIdentity(pending.selection.generation, pending.selection.candidates[0], build);
+	const result = await selectIdentity(pending.selection.generation, pending.selection.candidates[0], build, options);
 	if (result.kind !== 'selected') throw new Error(`Expected selected state, got ${result.kind}.`);
 	return result.persona;
 }
@@ -73,6 +74,22 @@ afterEach(() => {
 });
 
 describe('Root / Identity / Run lifecycle', () => {
+	it('persists an explicit short initial lifespan, does not reset it on restore, and applies it to the next Run', async () => {
+		const first = await selected(ZERO_BUILD, { initialLifespanMs: 3_000 });
+		expect(first.gameState.lifespanExpiresAtMs).toBe(TIME + 3_000);
+		expect(restored(await loadOrCreateLifecycle()).gameState.lifespanExpiresAtMs).toBe(TIME + 3_000);
+
+		vi.mocked(Date.now).mockReturnValue(TIME + 3_001);
+		expect((await transitionExpiredPersona(first)).kind).toBe('transitioned');
+		const pending = await loadOrCreateLifecycle();
+		if (pending.kind !== 'selecting') throw new Error('Expected post-death selection.');
+
+		vi.mocked(Date.now).mockReturnValue(TIME + 4_000);
+		const second = await selectIdentity(pending.selection.generation, pending.selection.candidates[0], ZERO_BUILD, { initialLifespanMs: 3_000 });
+		if (second.kind !== 'selected') throw new Error(`Expected selected state, got ${second.kind}.`);
+		expect(second.persona.gameState.lifespanExpiresAtMs).toBe(TIME + 7_000);
+	});
+
 	it('creates a Root, fixed three selection, and no active signer before Run start', async () => {
 		const result = await loadOrCreateLifecycle();
 		expect(result.kind).toBe('created');

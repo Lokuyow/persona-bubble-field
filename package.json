@@ -8,6 +8,7 @@
 	"type": "module",
 	"scripts": {
 		"dev": "vite dev",
+		"dev:death": "vite dev --mode death --port 5174 --strictPort",
 		"dev:host": "vite dev --host",
 		"build": "vite build",
 		"build:pages": "node scripts/build-pages.mjs",
