@@ -1651,6 +1651,169 @@ test.describe('Relay startup', () => {
 		await expect.poll(async () => (await readRelayGameState(page)).points).toBe(20);
 	});
 
+	test('publishes a World State exit after a realtime death outcome commits locally', async ({ page }) => {
+		let schedule = upcomingRegistrationSchedule();
+		const selfPosition = { x: 3, y: 2 };
+		while (true) {
+			const candidateHole = deriveRiftHolePositions(schedule.instanceId, { columns: 16, rows: 8 })[0];
+			if (Math.max(Math.abs(candidateHole.position.x - selfPosition.x), Math.abs(candidateHole.position.y - selfPosition.y)) > 1) break;
+			schedule = getRiftSchedule(schedule.endedAtMs + 1);
+		}
+		const hole = deriveRiftHolePositions(schedule.instanceId, { columns: 16, rows: 8 })[0];
+		const otherPlayers = [
+			{ secret: fixtureSecret(20), choice: 'maintain' as const, nonce: '1'.repeat(64) },
+			{ secret: fixtureSecret(21), choice: 'escape' as const, nonce: '2'.repeat(64) }
+		];
+		const otherJoins = otherPlayers.map(({ secret }) => signedRiftAction(secret, schedule, { action: 'join', holeId: hole.id }, schedule.registrationAtMs + 1_000));
+		const otherCommits = otherPlayers.map(({ secret, choice, nonce }) => {
+			const pubkey = getPublicKey(secret);
+			const action = buildRiftCommitAction({ instanceId: schedule.instanceId, holeId: hole.id, round: 1, authorPubkey: pubkey, choice, nonce });
+			const event = signedRiftAction(secret, schedule, action, getRiftRoundSchedule(schedule, 1).selectionAtMs + 1_000);
+			return { secret, choice, nonce, event };
+		});
+		const otherReveals = otherCommits.map(({ secret, choice, nonce, event }) => signedRiftAction(secret, schedule,
+			buildRiftRevealAction({ holeId: hole.id, round: 1, commitId: event.id, choice, nonce }), getRiftRoundSchedule(schedule, 1).resultAtMs + 1_000));
+		const startTime = schedule.registrationAtMs + 1_000;
+		const selfSecret = fixtureSecret(19);
+		const selfPubkey = getPublicKey(selfSecret);
+		await page.clock.install({ time: startTime });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, {
+			primaryEvents: testEvents(startTime),
+			realtimeEvents: [...otherJoins, ...otherCommits.map(({ event }) => event), ...otherReveals],
+			persistAcrossReload: true,
+			realtimePublishOutcome: 'accepted'
+		});
+		await seedRelayAccount(page, selfSecret, selfPubkey);
+		await page.goto('/');
+		await expect(page.locator('[data-realtime-panel]')).toContainText('参加受付');
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest.releaseMetadata());
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${selfPubkey}"]`)).toBeVisible();
+
+		await page.locator('[data-realtime-hole-trigger]').click();
+		await page.clock.runFor(50);
+		const nearPosition = hole.position.y > 0 ? { x: hole.position.x, y: hole.position.y - 1 } : { x: hole.position.x, y: hole.position.y + 1 };
+		const nearEvent = finalizeEvent(buildWorldStateEventTemplate({ channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: nearPosition, slot: 0, createdAt: Math.floor((startTime + 2_000) / 1000) }), selfSecret);
+		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), nearEvent);
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', `${nearPosition.x},${nearPosition.y}`);
+		await page.locator('[data-realtime-hole-trigger]').click();
+		await page.getByRole('button', { name: '参加する' }).click();
+		await expect(page.locator('[data-realtime-panel]')).toContainText('参加済み');
+
+		const round = getRiftRoundSchedule(schedule, 1);
+		await page.clock.setSystemTime(round.selectionAtMs + 1_000);
+		await page.clock.runFor(1_000);
+		await page.locator('[data-rift-choice="escape"]').click();
+		await expect.poll(async () => (await relayState(page)).state.published.some((event) => event.kind === 7070 && event.pubkey === selfPubkey && JSON.parse(event.content).action === 'commit')).toBe(true);
+		await page.clock.setSystemTime(round.resultAtMs + 1_000);
+		await page.clock.runFor(1_000);
+		await expect.poll(async () => (await relayState(page)).state.published.some((event) => event.kind === 7070 && event.pubkey === selfPubkey && JSON.parse(event.content).action === 'reveal')).toBe(true);
+		await page.clock.setSystemTime(round.revealCutoffAtMs + 1_000);
+		await page.clock.runFor(2_000);
+
+		await expect(page.getByRole('dialog')).toBeVisible();
+		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
+		const exits = await page.evaluate((expectedPubkey) => {
+			const state = (window as typeof window & { __relayStartupTest: { state: { previousPublished: Array<{ id: string; kind: number; pubkey?: string; content: string; tags: string[][] }>; published: Array<{ id: string; kind: number; pubkey?: string; content: string; tags: string[][] }> } } }).__relayStartupTest.state;
+			return [...new Map([...state.previousPublished, ...state.published]
+				.filter((event) => event.kind === 30078 && event.pubkey === expectedPubkey && event.tags.some((tag) => tag[0] === 'd' && tag[1]?.endsWith(':exit')))
+				.map((event) => [event.id, event])).values()];
+		}, selfPubkey);
+		expect(exits).toHaveLength(1);
+		expect(exits[0]?.content).toMatch(/^\d+:\d+$/);
+		expect(exits[0]?.tags.find((tag) => tag[0] === 'e')?.[1]).toBe(CHANNEL_ID);
+	});
+
+	test('does not publish a terminal exit when a realtime death outcome is duplicate', async ({ page }) => {
+		let schedule = upcomingRegistrationSchedule();
+		const selfPosition = { x: 3, y: 2 };
+		while (true) {
+			const candidateHole = deriveRiftHolePositions(schedule.instanceId, { columns: 16, rows: 8 })[0];
+			if (Math.max(Math.abs(candidateHole.position.x - selfPosition.x), Math.abs(candidateHole.position.y - selfPosition.y)) > 1) break;
+			schedule = getRiftSchedule(schedule.endedAtMs + 1);
+		}
+		const hole = deriveRiftHolePositions(schedule.instanceId, { columns: 16, rows: 8 })[0];
+		const otherPlayers = [
+			{ secret: fixtureSecret(20), choice: 'maintain' as const, nonce: '1'.repeat(64) },
+			{ secret: fixtureSecret(21), choice: 'escape' as const, nonce: '2'.repeat(64) }
+		];
+		const otherJoins = otherPlayers.map(({ secret }) => signedRiftAction(secret, schedule, { action: 'join', holeId: hole.id }, schedule.registrationAtMs + 1_000));
+		const otherCommits = otherPlayers.map(({ secret, choice, nonce }) => {
+			const pubkey = getPublicKey(secret);
+			const action = buildRiftCommitAction({ instanceId: schedule.instanceId, holeId: hole.id, round: 1, authorPubkey: pubkey, choice, nonce });
+			const event = signedRiftAction(secret, schedule, action, getRiftRoundSchedule(schedule, 1).selectionAtMs + 1_000);
+			return { secret, choice, nonce, event };
+		});
+		const otherReveals = otherCommits.map(({ secret, choice, nonce, event }) => signedRiftAction(secret, schedule,
+			buildRiftRevealAction({ holeId: hole.id, round: 1, commitId: event.id, choice, nonce }), getRiftRoundSchedule(schedule, 1).resultAtMs + 1_000));
+		const startTime = schedule.registrationAtMs + 1_000;
+		const selfSecret = fixtureSecret(19);
+		const selfPubkey = getPublicKey(selfSecret);
+		await page.clock.install({ time: startTime });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, {
+			primaryEvents: testEvents(startTime),
+			realtimeEvents: [...otherJoins, ...otherCommits.map(({ event }) => event), ...otherReveals],
+			persistAcrossReload: true,
+			realtimePublishOutcome: 'accepted'
+		});
+		await seedRelayAccount(page, selfSecret, selfPubkey);
+		await page.goto('/');
+		await expect(page.locator('[data-realtime-panel]')).toContainText('参加受付');
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest.releaseMetadata());
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${selfPubkey}"]`)).toBeVisible();
+		await page.locator('[data-realtime-hole-trigger]').click();
+		await page.clock.runFor(50);
+		const nearPosition = hole.position.y > 0 ? { x: hole.position.x, y: hole.position.y - 1 } : { x: hole.position.x, y: hole.position.y + 1 };
+		const nearEvent = finalizeEvent(buildWorldStateEventTemplate({ channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: nearPosition, slot: 0, createdAt: Math.floor((startTime + 2_000) / 1000) }), selfSecret);
+		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), nearEvent);
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', `${nearPosition.x},${nearPosition.y}`);
+		await page.locator('[data-realtime-hole-trigger]').click();
+		await page.getByRole('button', { name: '参加する' }).click();
+		await expect(page.locator('[data-realtime-panel]')).toContainText('参加済み');
+		const round = getRiftRoundSchedule(schedule, 1);
+		await page.clock.setSystemTime(round.selectionAtMs + 1_000);
+		await page.clock.runFor(1_000);
+		await page.locator('[data-rift-choice="escape"]').click();
+		await expect.poll(async () => (await relayState(page)).state.published.some((event) => event.kind === 7070 && event.pubkey === selfPubkey && JSON.parse(event.content).action === 'commit')).toBe(true);
+		await page.clock.setSystemTime(round.resultAtMs + 1_000);
+		await page.clock.runFor(1_000);
+		await expect.poll(async () => (await relayState(page)).state.published.some((event) => event.kind === 7070 && event.pubkey === selfPubkey && JSON.parse(event.content).action === 'reveal')).toBe(true);
+		const outcomeId = `${schedule.instanceId}:${hole.id}:r1:${selfPubkey}:death`;
+		await page.evaluate(async (appliedOutcomeId) => {
+			const database = await new Promise<IDBDatabase>((resolve, reject) => {
+				const request = indexedDB.open('persona-bubble-field-account');
+				request.onsuccess = () => resolve(request.result);
+				request.onerror = () => reject(request.error);
+			});
+			try {
+				const transaction = database.transaction('persona-bubble-field-player-state', 'readwrite');
+				const store = transaction.objectStore('persona-bubble-field-player-state');
+				const request = store.get('player-lifecycle');
+				await new Promise<void>((resolve, reject) => {
+					request.onsuccess = () => {
+						const current = request.result as { realtimeSettlementLedger?: { schemaVersion: number; identity: unknown; runNumber: number; pendingInstanceIds: string[]; appliedOutcomeIds: string[] } };
+						const ledger = current.realtimeSettlementLedger;
+						if (!ledger) throw new Error('Expected a realtime settlement ledger.');
+						store.put({ ...current, realtimeSettlementLedger: { ...ledger, appliedOutcomeIds: [...ledger.appliedOutcomeIds, appliedOutcomeId] } }, 'player-lifecycle');
+					};
+					transaction.oncomplete = () => resolve();
+					transaction.onerror = () => reject(transaction.error);
+					transaction.onabort = () => reject(transaction.error);
+				});
+			} finally { database.close(); }
+		}, outcomeId);
+		await page.clock.setSystemTime(round.revealCutoffAtMs + 1_000);
+		await page.clock.runFor(2_000);
+		await expect(page.getByRole('dialog')).toHaveCount(0);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest.releaseMetadata());
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		const exits = (await relayState(page)).state.published.filter((event) => event.kind === 30078 && event.pubkey === selfPubkey && event.tags.some((tag) => tag[0] === 'd' && tag[1]?.endsWith(':exit')));
+		expect(exits).toHaveLength(0);
+	});
+
 	test('reloads and reconciles a valid Run after a death transition clock rollback', async ({ page }) => {
 		const startTime = Date.now();
 		const secret = fixtureSecret(57);
@@ -1678,6 +1841,7 @@ test.describe('Relay startup', () => {
 			relay.releaseMetadata(); relay.releasePrimary();
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
+		expect((await relayState(page)).state.published.some((event) => event.kind === 30078 && event.pubkey === pubkey && event.tags.some((tag) => tag[0] === 'd' && tag[1]?.endsWith(':exit')))).toBe(false);
 		await expect.poll(async () => (await relayState(page)).state.published.some((event) => event.kind === 30078 && event.pubkey === pubkey)).toBe(true);
 		const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
 		await editor.fill('valid run remains publishable after rollback reconciliation');
@@ -3096,6 +3260,7 @@ test.describe('Relay startup', () => {
 			__personaLifecycleFailureTest: { injected(): number }
 		}).__personaLifecycleFailureTest.injected())).toBe(1);
 		await expect(page.locator('.participant[data-self="true"]')).toHaveCount(0);
+		expect((await relayState(page)).state.published.some((event) => event.kind === 30078 && event.tags.some((tag) => tag[0] === 'd' && tag[1]?.endsWith(':exit')))).toBe(false);
 		await expect.poll(async () => (await relayState(page)).state.requests.length).toBeGreaterThan(initialRequestCount);
 
 		const live = testEvents(startTime + 31_000);
@@ -3181,6 +3346,67 @@ test.describe('Relay startup', () => {
 			return published.find((candidate) => candidate.kind === 42 && candidate.content === 'runtime identity transition message');
 		});
 		expect(event?.pubkey).toBe(newPubkey);
+	});
+
+	test('publishes a terminal World State exit after live runtime death commits locally', async ({ page }) => {
+		const startTime = Date.now();
+		const secret = fixtureSecret(57);
+		const pubkey = getPublicKey(secret);
+		await page.clock.install({ time: startTime });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { primaryEvents: testEvents(startTime), persistAcrossReload: true });
+		await seedRelayAccount(page, secret, pubkey, startTime + 30_000);
+		await page.goto('/');
+		await expect(page.locator('.composer-dock')).toBeVisible();
+		await page.evaluate(() => {
+			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
+			relay.releaseMetadata(); relay.releasePrimary();
+		});
+		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
+		await pauseAtCurrentBrowserTime(page);
+
+		await page.clock.runFor(31_000);
+		await expect(page.getByRole('dialog')).toBeVisible();
+		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
+		await expect.poll(async () => page.evaluate((expectedPubkey) => {
+			const state = (window as unknown as { __relayStartupTest: { state: { previousPublished: Array<{ id: string; kind: number; pubkey?: string; content: string; tags: string[][]; created_at?: number }>; published: Array<{ id: string; kind: number; pubkey?: string; content: string; tags: string[][]; created_at?: number }> } } }).__relayStartupTest.state;
+			return [...new Map([...state.previousPublished, ...state.published]
+				.filter((event) => event.kind === 30078 && event.pubkey === expectedPubkey && event.tags.some((tag) => tag[0] === 'd' && tag[1]?.endsWith(':exit')))
+				.map((event) => [event.id, event])).values()];
+		}, pubkey)).toHaveLength(1);
+		const exit = await page.evaluate((expectedPubkey) => {
+			const state = (window as unknown as { __relayStartupTest: { state: { previousPublished: Array<{ id: string; kind: number; pubkey?: string; content: string; tags: string[][]; created_at?: number }>; published: Array<{ id: string; kind: number; pubkey?: string; content: string; tags: string[][]; created_at?: number }> } } }).__relayStartupTest.state;
+			const published = [...state.previousPublished, ...state.published];
+			return published.find((event) => event.kind === 30078 && event.pubkey === expectedPubkey && event.tags.some((tag) => tag[0] === 'd' && tag[1]?.endsWith(':exit')));
+		}, pubkey);
+		expect(exit?.content).toMatch(/^\d+:\d+$/);
+		expect(exit?.tags.find((tag) => tag[0] === 'e')?.[1]).toBe(CHANNEL_ID);
+	});
+
+	test('keeps local death committed when the terminal exit is rejected by Relay', async ({ page }) => {
+		const startTime = Date.now();
+		const secret = fixtureSecret(63);
+		const pubkey = getPublicKey(secret);
+		await page.clock.install({ time: startTime });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { primaryEvents: testEvents(startTime), persistAcrossReload: true });
+		await seedRelayAccount(page, secret, pubkey, startTime + 30_000);
+		await page.goto('/');
+		await expect(page.locator('.composer-dock')).toBeVisible();
+		await page.evaluate(() => {
+			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
+			relay.releaseMetadata(); relay.releasePrimary();
+		});
+		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
+		await pauseAtCurrentBrowserTime(page);
+		await page.evaluate(() => (window as unknown as { __relayStartupTest: { rejectPositionPublishes(): void } }).__relayStartupTest.rejectPositionPublishes());
+		await page.clock.runFor(31_000);
+		await expect(page.getByRole('dialog')).toBeVisible();
+		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
+		await expect.poll(() => page.evaluate((expectedPubkey) => {
+			const state = (window as unknown as { __relayStartupTest: { state: { previousPublished: Array<{ id: string; kind: number; pubkey?: string; tags: string[][] }>; published: Array<{ id: string; kind: number; pubkey?: string; tags: string[][] }> } } }).__relayStartupTest.state;
+			return [...state.previousPublished, ...state.published].some((event) => event.kind === 30078 && event.pubkey === expectedPubkey && event.tags.some((tag) => tag[0] === 'd' && tag[1]?.endsWith(':exit')));
+		}, pubkey)).toBe(true);
 	});
 
 	for (const width of [700, 701]) {

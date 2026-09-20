@@ -217,6 +217,16 @@ replacement identityに `e` tagが含まれないためであり、別channelの
 
 `exit` participantはlast positionを保持するが、active occupancyには含めない。
 
+live clientでnormalまたはrealtimeのdeathがbrowser-local lifecycleへdurably
+commitされた場合、validなcanonical last positionを保持しているWorld sessionは、
+そのdeath Identityの署名済みWorld State `exit`をbest-effortでpublishする。exitは
+active slot quotaを消費せず、death commitより前にはpublishしない。Relay failure、
+exitをprepareできない状態、またはdeath commit後のpublication failureによってlocal
+deathをrollbackしない。exitがない場合は通常どおり10分のpresence timeoutがfallback
+となる。startup時点ですでにexpiredでlive canonical positionを持たない場合は、
+network bootstrapを待つためにexitを要求しない。browser close、unload、network
+disconnectだけではexitをpublishしない。
+
 namespaceの扱いは [`SPEC-10-Nostr・アカウント.md`](./SPEC-10-Nostr・アカウント.md) を正とする。
 
 NIP-78 `kind 30078` の `content` には、そのWorld State eventが示す論理フィールド座標をcanonical形式で格納する。

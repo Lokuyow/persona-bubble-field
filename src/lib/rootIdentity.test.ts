@@ -355,6 +355,24 @@ describe('Root / Identity / Run lifecycle', () => {
 		expect(afterDeath.selection.candidates).toHaveLength(3);
 	});
 
+	it('does not transition a realtime death twice or from a stale lifecycle', async () => {
+		const first = await selected();
+		const outcome = { id: 'realtime-death-once', kind: 'death' as const, instanceId: 'realtime-death-instance' };
+		expect((await transitionRealtimeDeath(first, outcome)).kind).toBe('transitioned');
+		expect((await transitionRealtimeDeath(first, outcome)).kind).toBe('stale');
+
+		const running = await selected();
+		const player = (await records(PLAYER_LIFECYCLE_STORE_NAME))['player-lifecycle'] as Record<string, unknown>;
+		await putPlayer({ ...player, realtimeSettlementLedger: {
+			schemaVersion: 1,
+			identity: running.activeRun.identity,
+			runNumber: running.activeRun.runNumber,
+			pendingInstanceIds: [],
+			appliedOutcomeIds: [outcome.id]
+		} });
+		expect((await transitionRealtimeDeath(running, outcome)).kind).toBe('duplicate');
+	});
+
 	it('does not award RP on death and does not reuse a dead Identity', async () => {
 		const persona = await selected();
 		vi.mocked(Date.now).mockReturnValue(TIME + DAY * 7);

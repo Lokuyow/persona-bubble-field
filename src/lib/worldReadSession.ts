@@ -131,6 +131,14 @@ export type SelfMessagePublishResult =
 	| Readonly<{ kind: 'succeeded'; eventId: string }>
 	| Readonly<{ kind: 'blocked' | 'pending' | 'retryable' | 'unavailable' }>;
 
+export type TerminalExitPreparation =
+	| Readonly<{ kind: 'prepared'; event: VerifiedEvent; parsed: ParsedWorldStateEvent }>
+	| Readonly<{ kind: 'unavailable'; reason: 'disposed' | 'not-ready' | 'missing-self' | 'missing-position' | 'identity-mismatch' }>;
+
+export type TerminalExitPublishResult =
+	| Readonly<{ kind: 'published'; results: readonly PublishRelayResult[] }>
+	| Readonly<{ kind: 'failed' | 'unavailable' }>;
+
 export type WorldReadSessionOptions = Readonly<{
 	field: PresenceField;
 	selfSigner?: ActiveSignerSnapshot | null;
@@ -188,6 +196,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	let authorizeSelfWriteCallback = options.authorizeSelfWrite;
 	let onSelfWriteAuthorizationLostCallback = options.onSelfWriteAuthorizationLost;
 	let disposed = false;
+	let terminal = false;
 	let started = false;
 	let bootstrapComplete = false;
 	let transport: ReturnType<typeof createNostrRelayTransport> | null = null;
@@ -225,6 +234,8 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	const retryableSelfOperations = new Map<string, SelfPositionOperation>();
 	const appliedCanonicalPositionEventIds = new Set<string>();
 	const appliedCanonicalMessageEventIds = new Set<string>();
+	let preparedTerminalExit: Extract<TerminalExitPreparation, { kind: 'prepared' }> | null = null;
+	let terminalExitAttempted = false;
 
 	function emitStatus(next: WorldReadConnectionStatus): void {
 		status = next;
@@ -324,9 +335,51 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		return realtimeStartPromise;
 	}
 
+	function prepareTerminalExit(expectedPubkey?: string): TerminalExitPreparation {
+		if (disposed) return { kind: 'unavailable', reason: 'disposed' };
+		terminal = true;
+		if (!selfSigner || !channel) return { kind: 'unavailable', reason: 'missing-self' };
+		if (expectedPubkey !== undefined && expectedPubkey !== selfSigner.pubkey) return { kind: 'unavailable', reason: 'identity-mismatch' };
+		if (!started || !bootstrapComplete || !transport) return { kind: 'unavailable', reason: 'not-ready' };
+		const self = worldPresence.participants.find((participant) => participant.pubkey === selfSigner!.pubkey);
+		if (!self) return { kind: 'unavailable', reason: 'missing-position' };
+		const latestPositionEvidence = Math.max(
+			self.positionEvidence.createdAt,
+			...selfPositionEvidence.map((event) => event.createdAt),
+			0
+		);
+		const createdAt = Math.max(
+			Math.floor(Date.now() / 1000),
+			self.lastPositiveActivityCreatedAt ?? 0,
+			latestPositionEvidence
+		);
+		const event = finalizeWorldEvent(buildWorldStateEventTemplate({
+			channel,
+			position: self.position,
+			slot: 'exit',
+			createdAt
+		}), selfSigner.secretKey);
+		const parsed = parseWorldStateEvent(event, channel.channelId);
+		if (!parsed) throw new Error('Locally signed terminal exit did not pass the project parser.');
+		preparedTerminalExit = { kind: 'prepared', event, parsed };
+		return preparedTerminalExit;
+	}
+
+	async function publishTerminalExit(): Promise<TerminalExitPublishResult> {
+		if (disposed || !terminal || !transport || !preparedTerminalExit || terminalExitAttempted) return { kind: 'unavailable' };
+		terminalExitAttempted = true;
+		try {
+			return { kind: 'published', results: await transport.publish(preparedTerminalExit.event) };
+		} catch {
+			return { kind: 'failed' };
+		}
+	}
+
 	async function authorizeSelfWrite(): Promise<boolean> {
-		if (!authorizeSelfWriteCallback) return true;
+		if (terminal) return false;
+		if (!authorizeSelfWriteCallback) return !terminal;
 		const result = await authorizeSelfWriteCallback();
+		if (terminal) return false;
 		if (result === 'authorized') return true;
 		if (!disposed) {
 			disposed = true;
@@ -560,13 +613,13 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	}
 
 	async function publishMessage(content: string, speechType: SpeechType): Promise<SelfMessagePublishResult> {
-		if (disposed || !selfSigner || !transport || !channel) return { kind: 'unavailable' };
+		if (disposed || terminal || !selfSigner || !transport || !channel) return { kind: 'unavailable' };
 		if (pendingSelfMessage || pendingTraceReply) return { kind: 'pending' };
 		const candidate = selfMessageCandidate(content, speechType);
 		if (!candidate) return { kind: 'blocked' };
 		const { event, parsed } = candidate;
 		pendingSelfMessage = { id: parsed.id, echoConfirmed: false };
-		if (!await authorizeSelfWrite()) {
+		if (!await authorizeSelfWrite() || terminal) {
 			if (pendingSelfMessage?.id === parsed.id) pendingSelfMessage = null;
 			return { kind: 'unavailable' };
 		}
@@ -604,7 +657,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		pendingSelfOperation = { id: parsed.id, operation };
 		latestSelfOperationId = parsed.id;
 		emitSelfPositionWriteState({ kind: 'pending', operation });
-		if (!await authorizeSelfWrite()) {
+		if (!await authorizeSelfWrite() || terminal) {
 			if (pendingSelfOperation?.id === parsed.id) pendingSelfOperation = null;
 			emitSelfPositionWriteState({ kind: 'unavailable' });
 			return { kind: 'unavailable' };
@@ -641,7 +694,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			emitSelfPositionWriteState({ kind: 'unavailable' });
 			return { kind: 'unavailable' };
 		}
-		if (disposed) return { kind: 'unavailable' };
+		if (disposed || terminal) return { kind: 'unavailable' };
 		if (pendingSelfOperation || pendingTraceReply) return { kind: 'pending' };
 		const candidate = selfOperationCandidate(operation, direction);
 		if (!candidate) return { kind: 'blocked' };
@@ -650,7 +703,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 
 	/** Best-effort positive activity refresh for successful browser-local actions. */
 	async function refreshSelfActivity(): Promise<SelfPositionWriteResult> {
-		if (disposed || !selfSigner || !transport || !channel) return { kind: 'unavailable' };
+		if (disposed || terminal || !selfSigner || !transport || !channel) return { kind: 'unavailable' };
 		if (!bootstrapComplete || !selfJoinedThisSession) return { kind: 'blocked' };
 		if (pendingSelfOperation || pendingSelfMessage || pendingTraceReply) return { kind: 'pending' };
 		const participant = getParticipant(currentPresence(), selfSigner.pubkey);
@@ -914,7 +967,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	}
 
 	async function publishTraceReply(input: TraceReplyPublication): Promise<TraceReplyPublishResult> {
-		if (disposed || !selfSigner || !transport || !channel) return { kind: 'unavailable' };
+		if (disposed || terminal || !selfSigner || !transport || !channel) return { kind: 'unavailable' };
 		if (!bootstrapComplete || !selfJoinedThisSession) return { kind: 'blocked' };
 		if (pendingSelfOperation || pendingSelfMessage || pendingTraceReply) return { kind: 'pending' };
 		const accepted = resolveReplyTarget(input.rootId, input.targetId);
@@ -922,7 +975,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		const operation = { eventId: null as string | null };
 		pendingTraceReply = operation;
 		try {
-			if (!await authorizeSelfWrite()) return { kind: 'unavailable' };
+			if (!await authorizeSelfWrite() || terminal) return { kind: 'unavailable' };
 			const nowMs = Date.now();
 			const prepared = prepareTraceInspectionActivity({
 				presence: currentPresence(), selfId: selfSigner.pubkey,
@@ -943,7 +996,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 				root: accepted.root, parent: accepted.target, content: input.content, speechType: input.speechType,
 				createdAt: Math.floor(Date.now() / 1000)
 			}), selfSigner.secretKey);
-			if (!await authorizeSelfWrite()) return { kind: 'unavailable' };
+			if (!await authorizeSelfWrite() || terminal) return { kind: 'unavailable' };
 			operation.eventId = event.id;
 			const results = await transport.publish(event);
 			if (disposed) return { kind: 'unavailable' };
@@ -1049,6 +1102,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		},
 
 		enterSelf(): Promise<SelfPositionWriteResult> {
+			if (disposed || terminal) return Promise.resolve({ kind: 'unavailable' });
 			if (!bootstrapComplete) return Promise.resolve({ kind: 'blocked' });
 			if (pendingTraceReply) return Promise.resolve({ kind: 'pending' });
 			if (!selfSigner) return publishSelfPosition('entry');
@@ -1063,6 +1117,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		},
 
 		moveSelf(direction: Direction): Promise<SelfPositionWriteResult> {
+			if (disposed || terminal) return Promise.resolve({ kind: 'unavailable' });
 			if (!bootstrapComplete) return Promise.resolve({ kind: 'blocked' });
 			if (!selfSigner) return publishSelfPosition('movement', direction);
 			const participant = getParticipant(currentPresence(), selfSigner.pubkey);
@@ -1111,20 +1166,24 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		},
 
 		publish(event: VerifiedEvent): Promise<readonly PublishRelayResult[]> {
-			if (disposed || !transport) throw new Error('World read session must start before publishing.');
+			if (disposed || terminal || !transport) throw new Error('World read session must start before publishing.');
 			return authorizeSelfWrite().then((authorized) => {
-				if (!authorized) throw new Error('Self-write authorization was lost.');
+				if (!authorized || terminal) throw new Error('Self-write authorization was lost.');
 				return transport!.publish(event);
 			});
 		},
 
 		publishRealtime(event: VerifiedEvent) {
-			if (disposed || !transport) throw new Error('World read session must start before publishing.');
+			if (disposed || terminal || !transport) throw new Error('World read session must start before publishing.');
 			return authorizeSelfWrite().then((authorized) => {
-				if (!authorized) throw new Error('Self-write authorization was lost.');
+				if (!authorized || terminal) throw new Error('Self-write authorization was lost.');
 				return transport!.publishRealtime(event);
 			});
 		},
+
+		prepareTerminalExit,
+
+		publishTerminalExit,
 
 		dispose(): void {
 			if (disposed) return;
