@@ -1682,14 +1682,16 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 
 	async function settleOwnRiftOutcomes(sourceSession: RiftSessionState | null = riftSession): Promise<void> {
 		if (riftSettlementInFlight || !personaSnapshot || !selfSigner || !sourceSession) return;
-		const outcomes = sourceSession.results.flatMap((result) => result.outcomes).filter((outcome) => outcome.pubkey === selfSigner!.pubkey);
+		const currentPersona = personaSnapshot;
+		const currentSigner = selfSigner;
+		const outcomes = sourceSession.results.flatMap((result) => result.outcomes).filter((outcome) => outcome.pubkey === currentSigner.pubkey);
 		const next = outcomes.find((outcome) => !appliedRiftOutcomeIds.has(outcome.id));
 		if (!next) {
 			const sourceSchedule = sourceSession.instanceId === riftSchedule.instanceId
 				? riftSchedule
 				: getRiftScheduleForInstance(sourceSession.instanceId, Date.now());
 			if (sourceSchedule && isRiftSettlementComplete(sourceSession, sourceSchedule, selfSigner.pubkey)) {
-				const completed = await completeRealtimeEventInstance(personaSnapshot, sourceSession.instanceId);
+				const completed = await completeRealtimeEventInstance(currentPersona, sourceSession.instanceId);
 				if (completed) {
 					realtimeRecoveryInstanceIds.delete(sourceSession.instanceId);
 					pendingRealtimeSettlement = realtimeRecoveryInstanceIds.size > 0;
@@ -1701,19 +1703,18 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		}
 		riftSettlementInFlight = true;
 		try {
-			const outcome = next.kind === 'points'
-				? await applyRealtimeOutcome(personaSnapshot, { id: next.id, kind: 'points', points: next.points, instanceId: next.instanceId })
-				: await transitionRealtimeDeath(personaSnapshot, { id: next.id, kind: 'death', instanceId: next.instanceId });
+			if (next.kind === 'death') {
+				const deathOutcome = await beginDeathTransition(currentPersona, worldSession, () => transitionRealtimeDeath(currentPersona, { id: next.id, kind: 'death', instanceId: next.instanceId }));
+				if (deathOutcome === 'reloaded') appliedRiftOutcomeIds.add(next.id);
+				return;
+			}
+			const outcome = await applyRealtimeOutcome(currentPersona, { id: next.id, kind: 'points', points: next.points, instanceId: next.instanceId });
 			if (outcome.kind === 'applied' || outcome.kind === 'duplicate' || outcome.kind === 'expired') {
 				appliedRiftOutcomeIds.add(next.id);
 				if ('persona' in outcome) {
 					personaSnapshot = outcome.persona;
 					selfSigner = outcome.persona.signer;
 				}
-			} else if (outcome.kind === 'transitioned') {
-				appliedRiftOutcomeIds.add(next.id);
-				stopPersonaInteractions('綻びの結果を反映しました。');
-				window.location.reload();
 			} else if (outcome.kind === 'stale') {
 				appliedRiftOutcomeIds.add(next.id);
 				window.location.reload();
@@ -2221,25 +2222,34 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 
 	async function beginDeathTransition(
 		expected: PersonaSnapshot,
-		currentSession: ReturnType<typeof createWorldReadSession> | null
+		currentSession: ReturnType<typeof createWorldReadSession> | null,
+		commitDeath: () => Promise<Awaited<ReturnType<typeof transitionExpiredPersona>> | Awaited<ReturnType<typeof transitionRealtimeDeath>>> = () => transitionExpiredPersona(expected)
 	): Promise<'reloaded' | 'failed'> {
 		if (devWorldSandboxEnabled || personaLifecycleTransition || deathTransitionInFlight) return 'failed';
 		deathTransitionInFlight = true;
 		stopPersonaInteractions('Persona lifetime ended.');
-		disposePersonaWriter(currentSession);
+		const preparedExit = currentSession?.prepareTerminalExit(expected.signer.pubkey);
 		try {
-			const result = await transitionExpiredPersona(expected);
-			if (result.kind === 'transitioned' || result.kind === 'superseded') {
+			const result = await commitDeath();
+			if (result.kind === 'transitioned') {
+				try {
+					if (preparedExit?.kind === 'prepared') await currentSession?.publishTerminalExit();
+				} catch {
+					// The local death is already durable; World State exit is best effort.
+				}
+				disposePersonaWriter(currentSession);
 				window.location.reload();
 				return 'reloaded';
 			}
-			if (result.kind === 'not-expired') {
+			if (result.kind === 'superseded' || result.kind === 'stale' || result.kind === 'duplicate' || result.kind === 'not-expired') {
 				// The writer and interaction paths were already stopped before the
 				// lifecycle recheck. Reconcile the current lifecycle through the
 				// normal startup path instead of reviving a stale writer in-place.
+				disposePersonaWriter(currentSession);
 				window.location.reload();
 				return 'reloaded';
 			}
+			disposePersonaWriter(currentSession);
 			enterReadOnlyFallback('Persona is unavailable for publishing.');
 			return 'failed';
 		} catch {

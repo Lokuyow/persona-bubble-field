@@ -514,6 +514,56 @@ describe('world read session', () => {
 		expect(lost).toHaveBeenCalledTimes(1);
 	});
 
+	it('prepares and publishes a terminal exit from canonical self position without consuming the active planner', async () => {
+		result = startResult([], [position('self-slot-0', 701, selfPubkey, 0, { x: 2, y: 1 })]);
+		publish.mockResolvedValue([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 }, selfSigner: selfSigner(),
+			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn()
+		});
+		await session.start(); session.completeBootstrap();
+		const prepared = session.prepareTerminalExit(selfPubkey);
+		expect(prepared.kind).toBe('prepared');
+		if (prepared.kind !== 'prepared') throw new Error('Expected a prepared exit.');
+		expect(prepared.parsed).toMatchObject({ state: 'exit', slot: null, position: { x: 2, y: 1 }, createdAt: 701 });
+		expect(prepared.event.tags.find((tag) => tag[0] === 'd')?.[1]).toBe(`io.github.lokuyow.persona-bubble-field:world-state:1:${'c'.repeat(64)}:exit`);
+		expect(parseWorldStateEvent(prepared.event, 'c'.repeat(64))).toMatchObject({ state: 'exit', position: { x: 2, y: 1 } });
+		expect(await session.publishTerminalExit()).toMatchObject({ kind: 'published' });
+		expect(publish).toHaveBeenCalledOnce();
+		expect(parseWorldStateEvent(publish.mock.calls[0][0], 'c'.repeat(64))).toMatchObject({ state: 'exit', position: { x: 2, y: 1 } });
+		expect(await session.publishTerminalExit()).toEqual({ kind: 'unavailable' });
+		expect(await session.moveSelf('right')).toEqual({ kind: 'unavailable' });
+	});
+
+	it('does not prepare an exit without canonical self position and quiesces normal writes', async () => {
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 }, selfSigner: selfSigner(),
+			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn()
+		});
+		await session.start(); session.completeBootstrap();
+		expect(session.prepareTerminalExit(selfPubkey)).toEqual({ kind: 'unavailable', reason: 'missing-position' });
+		expect(await session.moveSelf('right')).toEqual({ kind: 'unavailable' });
+		expect(await session.publishMessage('blocked', 'normal')).toEqual({ kind: 'unavailable' });
+		expect(() => session.publish({} as VerifiedEvent)).toThrow('World read session must start before publishing.');
+		expect(publish).not.toHaveBeenCalled();
+	});
+
+	it('blocks a write whose authorization resolves after terminal quiesce', async () => {
+		const authorization = deferred<'authorized'>();
+		const authorize = vi.fn(() => authorization.promise);
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 }, selfSigner: selfSigner(), authorizeSelfWrite: authorize,
+			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn()
+		});
+		await session.start(); session.completeBootstrap();
+		const movement = session.moveSelf('right');
+		await Promise.resolve();
+		expect(session.prepareTerminalExit(selfPubkey)).toEqual({ kind: 'unavailable', reason: 'missing-position' });
+		authorization.resolve('authorized');
+		expect(await movement).toEqual({ kind: 'unavailable' });
+		expect(publish).not.toHaveBeenCalled();
+	});
+
 	it('bounds planner inputs while processing 100 successive self position seconds', async () => {
 		const session = createWorldReadSession({
 			field: { columns: 4, rows: 3 }, selfSigner: selfSigner(),

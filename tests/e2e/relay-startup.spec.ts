@@ -1678,6 +1678,7 @@ test.describe('Relay startup', () => {
 			relay.releaseMetadata(); relay.releasePrimary();
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
+		expect((await relayState(page)).state.published.some((event) => event.kind === 30078 && event.pubkey === pubkey && event.tags.some((tag) => tag[0] === 'd' && tag[1]?.endsWith(':exit')))).toBe(false);
 		await expect.poll(async () => (await relayState(page)).state.published.some((event) => event.kind === 30078 && event.pubkey === pubkey)).toBe(true);
 		const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
 		await editor.fill('valid run remains publishable after rollback reconciliation');
@@ -3096,6 +3097,7 @@ test.describe('Relay startup', () => {
 			__personaLifecycleFailureTest: { injected(): number }
 		}).__personaLifecycleFailureTest.injected())).toBe(1);
 		await expect(page.locator('.participant[data-self="true"]')).toHaveCount(0);
+		expect((await relayState(page)).state.published.some((event) => event.kind === 30078 && event.tags.some((tag) => tag[0] === 'd' && tag[1]?.endsWith(':exit')))).toBe(false);
 		await expect.poll(async () => (await relayState(page)).state.requests.length).toBeGreaterThan(initialRequestCount);
 
 		const live = testEvents(startTime + 31_000);
@@ -3181,6 +3183,67 @@ test.describe('Relay startup', () => {
 			return published.find((candidate) => candidate.kind === 42 && candidate.content === 'runtime identity transition message');
 		});
 		expect(event?.pubkey).toBe(newPubkey);
+	});
+
+	test('publishes a terminal World State exit after live runtime death commits locally', async ({ page }) => {
+		const startTime = Date.now();
+		const secret = fixtureSecret(57);
+		const pubkey = getPublicKey(secret);
+		await page.clock.install({ time: startTime });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { primaryEvents: testEvents(startTime), persistAcrossReload: true });
+		await seedRelayAccount(page, secret, pubkey, startTime + 30_000);
+		await page.goto('/');
+		await expect(page.locator('.composer-dock')).toBeVisible();
+		await page.evaluate(() => {
+			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
+			relay.releaseMetadata(); relay.releasePrimary();
+		});
+		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
+		await pauseAtCurrentBrowserTime(page);
+
+		await page.clock.runFor(31_000);
+		await expect(page.getByRole('dialog')).toBeVisible();
+		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
+		await expect.poll(async () => page.evaluate((expectedPubkey) => {
+			const state = (window as unknown as { __relayStartupTest: { state: { previousPublished: Array<{ id: string; kind: number; pubkey?: string; content: string; tags: string[][]; created_at?: number }>; published: Array<{ id: string; kind: number; pubkey?: string; content: string; tags: string[][]; created_at?: number }> } } }).__relayStartupTest.state;
+			return [...new Map([...state.previousPublished, ...state.published]
+				.filter((event) => event.kind === 30078 && event.pubkey === expectedPubkey && event.tags.some((tag) => tag[0] === 'd' && tag[1]?.endsWith(':exit')))
+				.map((event) => [event.id, event])).values()];
+		}, pubkey)).toHaveLength(1);
+		const exit = await page.evaluate((expectedPubkey) => {
+			const state = (window as unknown as { __relayStartupTest: { state: { previousPublished: Array<{ id: string; kind: number; pubkey?: string; content: string; tags: string[][]; created_at?: number }>; published: Array<{ id: string; kind: number; pubkey?: string; content: string; tags: string[][]; created_at?: number }> } } }).__relayStartupTest.state;
+			const published = [...state.previousPublished, ...state.published];
+			return published.find((event) => event.kind === 30078 && event.pubkey === expectedPubkey && event.tags.some((tag) => tag[0] === 'd' && tag[1]?.endsWith(':exit')));
+		}, pubkey);
+		expect(exit?.content).toMatch(/^\d+:\d+$/);
+		expect(exit?.tags.find((tag) => tag[0] === 'e')?.[1]).toBe(CHANNEL_ID);
+	});
+
+	test('keeps local death committed when the terminal exit is rejected by Relay', async ({ page }) => {
+		const startTime = Date.now();
+		const secret = fixtureSecret(63);
+		const pubkey = getPublicKey(secret);
+		await page.clock.install({ time: startTime });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { primaryEvents: testEvents(startTime), persistAcrossReload: true });
+		await seedRelayAccount(page, secret, pubkey, startTime + 30_000);
+		await page.goto('/');
+		await expect(page.locator('.composer-dock')).toBeVisible();
+		await page.evaluate(() => {
+			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
+			relay.releaseMetadata(); relay.releasePrimary();
+		});
+		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
+		await pauseAtCurrentBrowserTime(page);
+		await page.evaluate(() => (window as unknown as { __relayStartupTest: { rejectPositionPublishes(): void } }).__relayStartupTest.rejectPositionPublishes());
+		await page.clock.runFor(31_000);
+		await expect(page.getByRole('dialog')).toBeVisible();
+		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
+		await expect.poll(() => page.evaluate((expectedPubkey) => {
+			const state = (window as unknown as { __relayStartupTest: { state: { previousPublished: Array<{ id: string; kind: number; pubkey?: string; tags: string[][] }>; published: Array<{ id: string; kind: number; pubkey?: string; tags: string[][] }> } } }).__relayStartupTest.state;
+			return [...state.previousPublished, ...state.published].some((event) => event.kind === 30078 && event.pubkey === expectedPubkey && event.tags.some((tag) => tag[0] === 'd' && tag[1]?.endsWith(':exit')));
+		}, pubkey)).toBe(true);
 	});
 
 	for (const width of [700, 701]) {

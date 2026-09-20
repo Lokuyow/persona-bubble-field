@@ -19,6 +19,11 @@
 
 通常死亡後は、current Runを閉じ、current Identityを `dead` として履歴へ残す。その後、Rootから次generationの未選択candidateを3つ準備し、blockingな選択画面へ戻る。候補を1つ選択すると、そのIdentityにRun #1を作成する。
 
+normal deathおよびrealtime deathは、まずbrowser-local lifecycleへdurably commit
+する。live World sessionが利用できる場合は、そのcommit成功後にPublic World State
+のterminal `exit`をbest-effortで通知する。Relay publication failureはdeathを
+rollbackせず、wire formatとposition条件はSPEC-30を参照する。
+
 新Run #1は次から開始する。
 
 1. 寿命を7日にする
