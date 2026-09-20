@@ -38,6 +38,10 @@
 	let accelerationMultiplier = $derived(((projection?.accelerationMultiplierTenths ?? 10) / 10).toFixed(2));
 	let maximumLifespan = $derived(formatDaysOrDuration(projection?.maximumLifespanMs ?? 0));
 	let accelerationRemaining = $derived(`有効作業 残り${formatElapsedDuration(projection?.accelerationRemainingMs ?? 0)}`);
+	let lifespanExtensionAvailable = $derived(Boolean(projection?.completed &&
+		(projection.lifespanExtensionRateHundredthsPerHour ?? 0) > 0 &&
+		(projection.effectiveExpiresAtMs ?? 0) < (projection?.processedThroughMs ?? 0) + (projection?.maximumLifespanMs ?? 0)));
+	let workStatusTitle = $derived(!projection?.completed ? '作業中' : lifespanExtensionAvailable ? '延命中' : '作業停止中');
 
 	function formatRateMinutes(rateHundredthsPerHour: number): string {
 		const minutes = rateHundredthsPerHour * 0.6;
@@ -62,7 +66,7 @@
 			<Dialog.Content class="mending-dialog-content" preventScroll={false}>
 				<div class="terminal-dialog-header">
 					<div>
-						<Dialog.Title class="mending-dialog-title">作業中</Dialog.Title>
+						<Dialog.Title class="mending-dialog-title">{workStatusTitle}</Dialog.Title>
 						<Dialog.Description class="sr-only">時間の経過で成果が蓄積され、ポイントと寿命延長を受け取れます。</Dialog.Description>
 					</div>
 					<div class:points-highlight={collectFeedback} class="owned-points" data-mending-icon="wallet" aria-label={`所持ポイント ${ownedPoints} pt`}>
@@ -105,11 +109,13 @@
 						</div>
 					</section>
 					<section class="status-group" aria-label="作業の蓄積状況">
-						<strong class="progress-heading">
-							{#if projection?.completed}
-								上限に達しました
-							{:else}
+						<strong class:overflow-lifespan-status={lifespanExtensionAvailable} class="progress-heading">
+							{#if !projection?.completed}
 								<span>上限まで あと</span><span class="progress-duration">{remainingDuration}</span>
+							{:else if lifespanExtensionAvailable}
+								<span>ポイント蓄積は上限</span><span>寿命延長のみ継続中</span>
+							{:else}
+								上限に達しました
 							{/if}
 						</strong>
 						<div class="progress-track" role="progressbar" aria-label="作業の蓄積進捗" aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(progressPercent)}>
@@ -161,7 +167,7 @@
 	@keyframes mending-card-highlight { 0%, 100% { box-shadow: none; } 35% { box-shadow: 0 0 0 2px rgba(53, 227, 232, .4); } }
 	@keyframes mending-points-color { 0%, 100% { color: #ecfbff; } 35% { color: #64f5f0; } }
 	.terminal-dialog-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 48px; }
-	:global(.mending-dialog-content .mending-dialog-title) { margin: 0; color: #ecfbff; font-size: 22px; line-height: 1; font-weight: 800; letter-spacing: .03em; }
+	:global(.mending-dialog-content .mending-dialog-title) { min-width: 5em; margin: 0; color: #ecfbff; font-size: 22px; line-height: 1; font-weight: 800; letter-spacing: .03em; }
 	:global(.mending-dialog-content .sr-only) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 	.owned-points { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 7px; color: #ecfbff; white-space: nowrap; }
 	.owned-points :global(svg), .details-toggle :global(svg) { width: 18px; height: 18px; }
@@ -170,6 +176,7 @@
 	.reward-group { display: grid; gap: 18px; margin-bottom: clamp(38px, 6vw, 54px); }
 	.status-group { margin-bottom: clamp(28px, 4vw, 34px); }
 	.progress-heading { display: block; margin: 0 0 16px; color: #cfe7ee; font-size: clamp(18px, 3.2vw, 22px); font-weight: 700; line-height: 1.2; letter-spacing: .01em; font-variant-numeric: tabular-nums; text-align: center; }
+	.progress-heading.overflow-lifespan-status span { display: block; }
 	.progress-duration { color: #79cfd3; font-weight: 800; }
 	.progress-track { width: 100%; height: 11px; overflow: hidden; border: 1px solid rgba(53, 227, 232, .72); border-radius: 999px; background: #06303d; box-shadow: 0 0 0 1px rgba(53, 227, 232, .03) inset; }
 	.progress-value { height: 100%; min-width: 2px; background: linear-gradient(90deg, #2ee3df, #64f5f0); border-radius: inherit; }

@@ -2192,6 +2192,7 @@ test.describe('Relay startup', () => {
 		const started = await readRelayGameState(page);
 		expect(started).toMatchObject({ version: 4, points: 0, pointProgressTicks: 0, mendingJob: expect.objectContaining({ processedDurationMs: 0, unclaimedPoints: 0 }) });
 		const activeDialog = page.getByRole('dialog');
+		await expect(activeDialog.getByRole('heading', { name: '作業中' })).toBeVisible();
 		await expect(activeDialog.locator('.mending-startup-feedback')).toContainText('作業を開始しました');
 		const startupScrollExtent = await activeDialog.evaluate((element) => ({
 			scrollWidth: element.scrollWidth,
@@ -2267,6 +2268,7 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,2');
 		await terminal.click();
 		await expect(page.getByRole('dialog')).toContainText('上限に達しました');
+		await expect(page.getByRole('dialog').getByRole('heading', { name: '作業停止中' })).toBeVisible();
 		await expect(page.getByRole('dialog')).not.toContainText('今受け取れる');
 		await expect(page.getByRole('dialog')).toContainText('+5 pt');
 		await expect(page.getByRole('dialog')).not.toContainText('次の1ptまで');
