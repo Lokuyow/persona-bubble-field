@@ -1,7 +1,6 @@
 <script lang="ts">
-	import { Collapsible, Dialog, ScrollArea } from 'bits-ui';
-	import ChevronDown from '~icons/tabler/chevron-down';
-	import ChevronUp from '~icons/tabler/chevron-up';
+	import { Dialog, Popover, ScrollArea } from 'bits-ui';
+	import HelpCircle from '~icons/tabler/help-circle';
 	import type { MendingProjection } from '$lib/mending';
 	import { formatRemainingLifespan } from '$lib/lifespanHud';
 	import { getAbilityUpgrade, type PersonaAbilityKey } from '$lib/personaGameState';
@@ -34,11 +33,6 @@
 	let clearProgress = $derived(Math.min(100, points / 100_000 * 100));
 	let pointBlocked = $derived(points < 100_000);
 	let clearBlocked = $derived(pointBlocked || clearBusy || clearBlockedReason !== null);
-	let escapeDetailsOpen = $state(false);
-
-	$effect(() => {
-		if (!open) escapeDetailsOpen = false;
-	});
 
 	function abilityType(key: PersonaAbilityKey): string {
 		return key === 'inferenceEfficiency' ? 'ポイント生成速度' : key === 'contextCapacity' ? '最大蓄積時間' : '寿命延長量 / 作業1時間';
@@ -82,20 +76,22 @@
 							<h2 id="self-profile-root">Root</h2>
 							<div class="root-row"><span>Root Point</span><strong>{persona.rootPoints} RP</strong></div>
 							<div class="clear-section" aria-labelledby="self-profile-clear">
-							<div class="clear-title-row"><h3 id="self-profile-clear">脱出</h3><strong>+1 RP</strong></div>
+							<div class="clear-title-row"><div class="clear-title-group"><h3 id="self-profile-clear">脱出</h3><Popover.Root>
+								<Popover.Trigger class="escape-info-trigger" aria-label="脱出するとどうなるかを見る">
+									<HelpCircle aria-hidden="true" />
+								</Popover.Trigger>
+								<Popover.Portal>
+																				<Popover.Content class="escape-info-popover" trapFocus={false} side="bottom" align="start" sideOffset={8} avoidCollisions={true} collisionPadding={16}>
+										<div class="escape-info-items">
+											<div><strong>現在のRunを終了</strong><span>ポイント・能力・作業状態など、Run内の状態は次のRunへ引き継がれません。</span></div>
+											<div><strong>Root Point +1</strong><span>獲得したRoot Pointは、次のRunや別の人格でも残ります。</span></div>
+											<div><strong>次の人格を選択</strong><span>同じ人格で新しいRunを始めることも、別の人格を選ぶこともできます。</span></div>
+											<div><strong>秘密鍵を取得可能</strong><span>脱出した人格のnsecを取得できるようになります。</span></div>
+										</div>
+									</Popover.Content>
+								</Popover.Portal>
+							</Popover.Root></div><strong>+1 RP</strong></div>
 							<p>100,000 ptで現在のRunを終了します。</p>
-							<Collapsible.Root bind:open={escapeDetailsOpen} class="escape-details">
-								<Collapsible.Trigger class="escape-details-trigger" aria-label="脱出後の説明を開閉">
-									<span>脱出するとどうなる？</span>
-									{#if escapeDetailsOpen}<ChevronUp aria-hidden="true" />{:else}<ChevronDown aria-hidden="true" />{/if}
-								</Collapsible.Trigger>
-								<Collapsible.Content class="escape-details-content">
-									<div><strong>現在のRunを終了</strong><span>ポイント・能力・作業状態など、Run内の状態は次のRunへ引き継がれません。</span></div>
-									<div><strong>Root Point +1</strong><span>獲得したRoot Pointは、次のRunや別の人格でも残ります。</span></div>
-									<div><strong>次の人格を選択</strong><span>同じ人格で新しいRunを始めることも、別の人格を選ぶこともできます。</span></div>
-									<div><strong>秘密鍵を取得可能</strong><span>脱出した人格のnsecを取得できるようになります。</span></div>
-								</Collapsible.Content>
-							</Collapsible.Root>
 							<div class="clear-progress-head"><span>所持ポイント</span><strong>{points.toLocaleString()} / 100,000 pt</strong></div>
 							<div class="clear-progress" role="progressbar" aria-label="脱出に必要なポイント" aria-valuemin="0" aria-valuemax="100000" aria-valuenow={points}><span style={`width: ${clearProgress}%;`}></span></div>
 							<p>未回収の作業ポイントは含まれません。</p>
@@ -145,18 +141,22 @@
 	.root-row strong { font-variant-numeric: tabular-nums; }
 	.clear-section { display: grid; gap: 12px; padding: 16px; border: 1px solid #ddb9a8; border-radius: 14px; background: #fff1eb; }
 	.clear-title-row { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+	.clear-title-group { display: inline-flex; align-items: center; gap: 2px; min-width: 0; }
 	.clear-title-row h3 { margin: 0; color: #8c584b; font-size: 16px; font-weight: 900; }
 	.clear-title-row strong { color: #8c584b; font-size: 13px; }
 	.clear-section p { margin: 0; color: #765d58; font-size: 13px; line-height: 1.45; }
-	:global(.escape-details) { display: grid; gap: 8px; }
-	:global(.escape-details-trigger) { display: inline-flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; padding: 6px 0; border: 0; border-top: 1px solid rgba(156, 104, 87, .18); border-bottom: 1px solid rgba(156, 104, 87, .18); background: transparent; color: #8c665d; font: inherit; font-size: 12px; font-weight: 800; text-align: left; cursor: pointer; }
-	:global(.escape-details-trigger svg) { width: 16px; height: 16px; flex: 0 0 auto; }
-	:global(.escape-details-trigger:focus-visible) { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
-	:global(.escape-details-content) { display: grid; gap: 10px; padding: 4px 4px 2px 10px; border-left: 2px solid rgba(156, 104, 87, .18); }
-	:global(.escape-details-content[hidden]) { display: none; }
-	:global(.escape-details-content > div) { display: grid; gap: 2px; }
-	:global(.escape-details-content strong) { color: #765d58; font-size: 12px; font-weight: 900; }
-	:global(.escape-details-content span) { color: #876f69; font-size: 12px; line-height: 1.45; }
+	:global(.escape-info-trigger) { display: inline-flex; width: 32px; height: 32px; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: 999px; background: transparent; color: #8c665d; cursor: pointer; }
+	:global(.escape-info-trigger svg) { width: 18px; height: 18px; }
+	:global(.escape-info-trigger:hover) { background: rgba(156, 104, 87, .1); }
+	:global(.escape-info-trigger:focus-visible) { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
+	:global(.escape-info-popover) { z-index: 110; box-sizing: border-box; width: min(330px, calc(100vw - 32px)); max-height: min(420px, calc(100dvh - 64px)); overflow-y: auto; padding: 14px; border: 1px solid #ddb9a8; border-radius: 12px; background: #fff1eb; box-shadow: 0 14px 32px rgba(32, 42, 38, .24); color: #765d58; }
+	:global(.escape-info-items) { display: grid; gap: 12px; }
+	:global(.escape-info-items > div) { display: grid; gap: 2px; }
+	:global(.escape-info-items strong) { color: #765d58; font-size: 12px; font-weight: 900; }
+	:global(.escape-info-items span) { color: #876f69; font-size: 12px; line-height: 1.45; }
+	@media (max-height: 500px) {
+		:global(.escape-info-popover) { margin-top: -25px; }
+	}
 	.clear-progress-head { display: flex; justify-content: space-between; gap: 12px; color: #7e706d; font-size: 12px; }
 	.clear-progress-head strong { color: #5e514f; font-size: 13px; font-variant-numeric: tabular-nums; }
 	.clear-progress { height: 9px; overflow: hidden; border: 1px solid #d8b3a5; border-radius: 999px; background: #f0dcd4; }

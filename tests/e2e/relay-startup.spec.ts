@@ -2280,6 +2280,7 @@ test.describe('Relay startup', () => {
 
 		const dialog = page.getByRole('dialog');
 		await expect(dialog).toBeVisible();
+		const viewportSize = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
 		await expect(dialog).toContainText('Run #1');
 		await expect(dialog).toContainText('残り寿命');
 		await expect(dialog).toContainText('所持ポイント');
@@ -2289,9 +2290,8 @@ test.describe('Relay startup', () => {
 		await expect(dialog).toContainText('Root Point');
 		await expect(dialog).toContainText('脱出');
 		await expect(dialog).not.toContainText('Normal Clear');
-		const escapeDetails = dialog.locator('.escape-details');
-		const escapeTrigger = escapeDetails.locator('.escape-details-trigger');
-		const escapeContent = escapeDetails.locator('.escape-details-content');
+		const escapeTrigger = dialog.locator('.escape-info-trigger');
+		const escapeContent = page.locator('.escape-info-popover');
 		await expect(escapeTrigger).toBeVisible();
 		await expect(escapeTrigger).toHaveAttribute('data-state', 'closed');
 		await expect(escapeContent).toBeHidden();
@@ -2302,6 +2302,11 @@ test.describe('Relay startup', () => {
 		await expect(escapeContent).toContainText('Root Point +1');
 		await expect(escapeContent).toContainText('次の人格を選択');
 		await expect(escapeContent).toContainText('秘密鍵を取得可能');
+		await page.keyboard.press('Escape');
+		await expect(escapeContent).toBeHidden();
+		await expect(dialog).toBeVisible();
+		await escapeTrigger.click();
+		await expect(escapeContent).toBeVisible();
 		await escapeTrigger.click();
 		await expect(escapeContent).toBeHidden();
 		await expect(dialog).toContainText(character.about);
@@ -2340,6 +2345,7 @@ test.describe('Relay startup', () => {
 
 	test('keeps the self profile dialog inside a short mobile viewport and scrolls its content', async ({ page }) => {
 		await page.setViewportSize({ width: 420, height: 420 });
+		const viewportSize = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
 		await openReadyRelayWorld(page);
 		await page.getByRole('button', { name: '自分のプロフィールを開く' }).click();
 
@@ -2359,9 +2365,18 @@ test.describe('Relay startup', () => {
 		expect(viewportBox!.y).toBeGreaterThanOrEqual(dialogBox!.y);
 		expect(viewportBox!.y + viewportBox!.height).toBeLessThanOrEqual(dialogBox!.y + dialogBox!.height);
 		expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight);
-		const escapeTrigger = dialog.locator('.escape-details-trigger');
+		const escapeTrigger = dialog.locator('.escape-info-trigger');
 		await escapeTrigger.click();
-		await expect(dialog.locator('.escape-details-content')).toBeVisible();
+		const escapePopover = page.locator('.escape-info-popover');
+		await expect(escapePopover).toBeVisible();
+		const popoverBox = await escapePopover.boundingBox();
+		const expandedMetrics = await dialog.locator('.self-profile-viewport').evaluate((element) => ({ clientHeight: element.clientHeight, scrollHeight: element.scrollHeight }));
+		expect(popoverBox).not.toBeNull();
+		expect(popoverBox!.x).toBeGreaterThanOrEqual(0);
+		expect(popoverBox!.x + popoverBox!.width).toBeLessThanOrEqual(viewportSize.width);
+		expect(popoverBox!.y).toBeGreaterThanOrEqual(0);
+		expect(popoverBox!.y + popoverBox!.height).toBeLessThanOrEqual(viewportSize.height);
+		expect(expandedMetrics).toEqual(metrics);
 		await dialog.getByRole('button', { name: '脱出', exact: true }).scrollIntoViewIfNeeded();
 		await expect(dialog.getByRole('button', { name: '脱出', exact: true })).toBeVisible();
 	});
