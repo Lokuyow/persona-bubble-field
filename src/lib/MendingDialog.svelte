@@ -157,7 +157,7 @@
 	@keyframes mending-success-fade { from { opacity: 0; } to { opacity: 1; } }
 	@keyframes mending-startup-scan { 0% { opacity: 0; } 8% { opacity: 1; } 78% { opacity: 1; } 100% { opacity: 0; } }
 	@keyframes mending-startup-sweep { from { opacity: 0; transform: translateY(-45%); } 45% { opacity: 1; } to { opacity: 0; transform: translateY(45%); } }
-	@keyframes mending-startup-fade { from { opacity: 0; } 35% { opacity: 1; } to { opacity: 0; } }
+	@keyframes mending-startup-fade { 0% { opacity: 0; } 8% { opacity: 1; } 78% { opacity: 1; } 100% { opacity: 0; } }
 	@keyframes mending-card-highlight { 0%, 100% { box-shadow: none; } 35% { box-shadow: 0 0 0 2px rgba(53, 227, 232, .4); } }
 	@keyframes mending-points-color { 0%, 100% { color: #ecfbff; } 35% { color: #64f5f0; } }
 	.terminal-dialog-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 48px; }
