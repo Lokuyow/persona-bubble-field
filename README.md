@@ -39,6 +39,23 @@ This development-only mode gives newly started Runs an initial lifespan of
 the normal `http://localhost:5173/` Identity and Run are unaffected. The
 production initial lifespan remains 7 days.
 
+For manual verification of the normal clear lifecycle, use the isolated clear
+DEV server:
+
+```text
+npm run dev:clear
+http://localhost:5175/
+```
+
+This development-only mode gives newly started Runs 100,000 points so the
+normal clear, World State exit, Identity selection, and same-Identity
+re-entry can be checked through the real lifecycle. It uses separate browser
+storage from normal DEV and death DEV. Production fresh Runs still start with
+0 points, and reloading an existing Run never reseeds its points. Selecting a
+cleared Identity starts its next Run with the same clear-ready points. If an
+older `localhost:5175` site has stale storage, start a new Run or clear that
+site's data first.
+
 ### Manual Rift operator CLI
 
 The local operator CLI runs on Node.js 24.19 or newer. The default command is

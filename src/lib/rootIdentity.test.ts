@@ -355,6 +355,28 @@ describe('Root / Identity / Run lifecycle', () => {
 		expect(afterDeath.selection.candidates).toHaveLength(3);
 	});
 
+	it('applies initial points only when creating a fresh Run', async () => {
+		const first = await selected(ZERO_BUILD, { initialPoints: 100_000 });
+		expect(first.gameState.points).toBe(100_000);
+
+		await putPlayer({ ...(await records(PLAYER_LIFECYCLE_STORE_NAME))['player-lifecycle'] as object, mode: { kind: 'running', activeRun: { ...first.activeRun, gameState: { ...first.gameState, points: 42 } } } });
+		expect(restored(await loadOrCreateLifecycle()).gameState.points).toBe(42);
+
+		vi.mocked(Date.now).mockReturnValue(TIME + 1);
+		const current = restored(await loadOrCreateLifecycle());
+		await putPlayer({ ...(await records(PLAYER_LIFECYCLE_STORE_NAME))['player-lifecycle'] as object, mode: { kind: 'running', activeRun: { ...current.activeRun, gameState: { ...current.gameState, points: 100_000 } } } });
+		expect((await clearPersona(restored(await loadOrCreateLifecycle()))).kind).toBe('cleared');
+		const pending = await loadOrCreateLifecycle();
+		if (pending.kind !== 'selecting') throw new Error('Expected post-clear selection.');
+		const reusable = pending.selection.reusableIdentities[0];
+		if (!reusable) throw new Error(`Expected reusable Identity: ${JSON.stringify(pending.selection)}`);
+		const reused = await selectIdentity(pending.selection.generation, reusable, { inferenceAcceleration: 1, contextCompression: 0, hallucinationResistance: 0 }, { initialPoints: 100_000 });
+		if (reused.kind !== 'selected') throw new Error(`Expected reused Run, got ${reused.kind}.`);
+		expect(reused.persona.activeRun.runNumber).toBe(2);
+		expect(reused.persona.signer.pubkey).toBe(first.signer.pubkey);
+		expect(reused.persona.gameState.points).toBe(100_000);
+	});
+
 	it('does not transition a realtime death twice or from a stale lifecycle', async () => {
 		const first = await selected();
 		const outcome = { id: 'realtime-death-once', kind: 'death' as const, instanceId: 'realtime-death-instance' };

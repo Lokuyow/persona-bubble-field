@@ -91,6 +91,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	import type { RootBuild } from '$lib/rootProgression';
 	import { isPersonaExpired } from '$lib/personaGameState';
 	import { deathDevMode, DEATH_DEV_INITIAL_LIFESPAN_MS } from '$lib/deathDevMode';
+	import { clearDevMode, CLEAR_DEV_INITIAL_POINTS } from '$lib/clearDevMode';
 	import {
 		applyRiftAction,
 		buildRiftActionTemplate,
@@ -1446,7 +1447,11 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		if (!selection || personaLifecycleTransition) return;
 		personaLifecycleTransition = true;
 		try {
-			const result = await selectIdentity(selection.generation, candidate, rootBuild, deathDevMode ? { initialLifespanMs: DEATH_DEV_INITIAL_LIFESPAN_MS } : undefined);
+			const selectionOptions = deathDevMode || clearDevMode ? {
+				...(deathDevMode ? { initialLifespanMs: DEATH_DEV_INITIAL_LIFESPAN_MS } : {}),
+				...(clearDevMode ? { initialPoints: CLEAR_DEV_INITIAL_POINTS } : {})
+			} : undefined;
+			const result = await selectIdentity(selection.generation, candidate, rootBuild, selectionOptions);
 			if (result.kind === 'selected') {
 				if (startSelectedWorld) {
 					await startSelectedWorld(result.persona);
