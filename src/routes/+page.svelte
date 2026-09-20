@@ -1422,6 +1422,11 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 
 	function closeMendingTerminal(): void {
 		mendingDialogOpen = false;
+		mendingStartupFeedback = null;
+		if (mendingStartupFeedbackTimer !== null) {
+			window.clearTimeout(mendingStartupFeedbackTimer);
+			mendingStartupFeedbackTimer = null;
+		}
 	}
 
 	function openAdjustmentTerminal(): void {
@@ -1624,8 +1629,11 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			updateLifespanHud(mendingNowMs, true);
 			if (result.kind === 'started') {
 				if (mendingStartupFeedbackTimer !== null) window.clearTimeout(mendingStartupFeedbackTimer);
-				mendingStartupFeedback = { id: ++feedbackSequence, phase: 'started' };
-				mendingStartupFeedbackTimer = window.setTimeout(() => { mendingStartupFeedback = null; mendingStartupFeedbackTimer = null; }, 500);
+				if (mendingDialogOpen) {
+					mendingStartupFeedback = { id: ++feedbackSequence, phase: 'started' };
+					mendingStartupFeedbackTimer = window.setTimeout(() => { mendingStartupFeedback = null; mendingStartupFeedbackTimer = null; }, 1000);
+				}
+				soundController?.play('startup');
 			}
 			if (result.kind === 'expired') {
 				mendingStartupFeedback = null;
@@ -2655,7 +2663,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		hasJob={Boolean(personaSnapshot?.gameState.mendingJob)}
 		starting={mendingMutationInFlight && !Boolean(personaSnapshot?.gameState.mendingJob)}
 		points={personaSnapshot?.gameState.points ?? 0}
-		onOpenChange={(open) => { mendingDialogOpen = open; }}
+		onOpenChange={(open) => { if (open) mendingDialogOpen = true; else closeMendingTerminal(); }}
 		onCollect={() => { void mutateMending('collect'); }}
 		collectFeedback={collectFeedback}
 		startupFeedback={mendingStartupFeedback}

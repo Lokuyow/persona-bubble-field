@@ -1,7 +1,7 @@
 import type { ConversationState, SpeechType } from './conversation';
 
 export type SoundPreference = Readonly<{ volume: number }>;
-export type SoundEffect = SpeechType | 'collect' | 'level-up';
+export type SoundEffect = SpeechType | 'collect' | 'level-up' | 'startup';
 export type SpeechSoundEffect = SpeechType;
 
 export const DEFAULT_SOUND_PREFERENCE: SoundPreference = { volume: 0.5 };
@@ -35,13 +35,14 @@ export function newLiveBubbleEffects(previous: ConversationState, next: Conversa
 }
 
 export const SPEECH_SOUND_DURATIONS = { normal: 0.225, shout: 0.420, monologue: 0.715 } as const;
-export const UI_SOUND_DURATIONS = { collect: 0.19, 'level-up': 0.32 } as const;
+export const UI_SOUND_DURATIONS = { collect: 0.19, 'level-up': 0.32, startup: 0.38 } as const;
 export const SOUND_EFFECT_GAINS: Readonly<Record<SoundEffect, number>> = {
 	normal: 1,
 	shout: 1,
 	monologue: 1,
 	collect: 0.75,
-	'level-up': 0.75
+	'level-up': 0.75,
+	startup: 0.65
 };
 const TAU = Math.PI * 2;
 
@@ -201,17 +202,21 @@ export function createSpeechSoundSamples(effect: SpeechSoundEffect, sampleRate: 
 	return createMonologueSamples(sampleRate);
 }
 
-function createChimeSamples(effect: 'collect' | 'level-up', sampleRate: number): Float32Array {
+function createChimeSamples(effect: 'collect' | 'level-up' | 'startup', sampleRate: number): Float32Array {
 	const duration = UI_SOUND_DURATIONS[effect];
 	const length = Math.ceil(sampleRate * duration);
-	const notes = effect === 'collect' ? [{ at: 0, frequency: 660 }, { at: 0.075, frequency: 990 }] : [{ at: 0, frequency: 523 }, { at: 0.095, frequency: 659 }, { at: 0.19, frequency: 784 }];
+	const notes = effect === 'collect'
+		? [{ at: 0, frequency: 660 }, { at: 0.075, frequency: 990 }]
+		: effect === 'level-up'
+			? [{ at: 0, frequency: 523 }, { at: 0.095, frequency: 659 }, { at: 0.19, frequency: 784 }]
+			: [{ at: 0, frequency: 330 }, { at: 0.14, frequency: 494 }, { at: 0.25, frequency: 659 }];
 	const output = new Float32Array(length);
 	for (let index = 0; index < length; index += 1) {
 		const time = index / sampleRate;
 		for (const note of notes) {
 			const local = time - note.at;
 			if (local < 0) continue;
-			const envelope = clamp01(local / 0.004) * Math.exp(-local / (effect === 'collect' ? 0.085 : 0.13)) * clamp01((duration - local) / 0.028);
+			const envelope = clamp01(local / 0.004) * Math.exp(-local / (effect === 'collect' ? 0.085 : effect === 'level-up' ? 0.13 : 0.16)) * clamp01((duration - local) / 0.028);
 			output[index] += 0.28 * Math.sin(TAU * note.frequency * local) * envelope;
 		}
 	}
@@ -219,7 +224,7 @@ function createChimeSamples(effect: 'collect' | 'level-up', sampleRate: number):
 }
 
 export function createSoundSamples(effect: SoundEffect, sampleRate: number): Float32Array {
-	if (effect === 'collect' || effect === 'level-up') {
+	if (effect === 'collect' || effect === 'level-up' || effect === 'startup') {
 		if (!Number.isFinite(sampleRate) || sampleRate <= 0) return new Float32Array();
 		return createChimeSamples(effect, sampleRate);
 	}

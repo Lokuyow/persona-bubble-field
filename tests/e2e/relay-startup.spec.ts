@@ -2259,7 +2259,7 @@ test.describe('Relay startup', () => {
 		await expect(page.getByRole('dialog')).not.toContainText('今受け取れる');
 		await expect(page.getByRole('dialog')).toContainText('+5 pt');
 		await expect(page.getByRole('dialog')).not.toContainText('次の1ptまで');
-		await expect(page.getByRole('dialog').locator('[data-mending-icon="coins"] .next-point')).toHaveCount(0);
+		await expect(page.getByRole('dialog').locator('[data-mending-icon="coins"] .next-point')).toHaveClass(/next-point-hidden/);
 		await page.getByRole('button', { name: '成果を受け取る' }).click();
 		await expect.poll(() => readRelayGameState(page)).toMatchObject({ mendingJob: expect.any(Object), points: 10, pointProgressTicks: 30_000_000 });
 		await expect(page.getByRole('dialog')).toContainText('10 pt');
