@@ -129,6 +129,11 @@ protocol violations, specification violations, or reproducible defects.
 
 ### Modern Svelte
 
+- New or changed ordinary primary actions should use the shared `PrimaryButton`
+  component and semantic accent tokens; do not hard-code primary colors in an
+  individual component. Special or destructive actions may use their own
+  semantic treatment when their meaning clearly differs from ordinary primary.
+
 - For new or changed Svelte code, prefer current non-legacy APIs from the
   installed Svelte 5 version and established repository patterns. For an
   unfamiliar or version-sensitive API, check the installed version and current

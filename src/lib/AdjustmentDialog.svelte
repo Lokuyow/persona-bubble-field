@@ -2,6 +2,7 @@
 	import { Dialog } from 'bits-ui';
 	import ArrowRight from '~icons/tabler/arrow-right';
 	import Wallet from '~icons/tabler/wallet';
+	import PrimaryButton from '$lib/PrimaryButton.svelte';
 	import {
 		getAbilityUpgrade,
 		getContextCapacityMinutes,
@@ -87,7 +88,7 @@
 								{/if}
 							</div>
 							<div class="cost"><span>必要ポイント</span><strong>{upgrade.nextEffect ? `${upgrade.cost} pt` : '—'}</strong></div>
-							<button class="upgrade-action" type="button" disabled={busy || points < upgrade.cost || !upgrade.nextEffect} onclick={() => onUpgrade(key)}>{upgrade.nextEffect ? `Lv${upgrade.level + 1}へ強化` : '最大Lv'}</button>
+							<PrimaryButton type="button" disabled={busy || points < upgrade.cost || !upgrade.nextEffect} onclick={() => onUpgrade(key)}>{upgrade.nextEffect ? `Lv${upgrade.level + 1}へ強化` : '最大Lv'}</PrimaryButton>
 						</article>
 					{/each}
 				</section>
@@ -121,9 +122,6 @@
 	.delta { color: #aeb6ff; font-size: 12px; font-weight: 700; }
 	.cost { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: #aeb5d7; font-size: 13px; }
 	.cost strong { color: #f4f6ff; font-size: 14px; font-variant-numeric: tabular-nums; }
-	.upgrade-action, :global(.terminal-secondary-action) { min-height: 48px; border-radius: 9px; font: inherit; font-weight: 800; cursor: pointer; }
-	.upgrade-action { border: 1px solid #a9b0ff; background: linear-gradient(90deg, #5667e7, #3949c6); box-shadow: 0 0 16px rgba(90, 103, 255, .16); color: white; }
-	.upgrade-action:disabled { cursor: not-allowed; border-color: rgba(158, 166, 221, .24); background: rgba(53, 61, 103, .72); color: rgba(220, 224, 255, .44); box-shadow: none; }
 	.adjustment-dialog-footer { margin-top: 28px; }
 	:global(.terminal-secondary-action) { width: 100%; border: 1px solid rgba(150, 164, 230, .34); background: #151b41; color: #dde1f7; text-align: center; }
 	:global(.adjustment-dialog-content button:focus-visible) { outline: 3px solid var(--color-focus-ring); outline-offset: 3px; }

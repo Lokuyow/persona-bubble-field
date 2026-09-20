@@ -6,6 +6,7 @@
 	import ChevronUp from '~icons/tabler/chevron-up';
 	import Heart from '~icons/tabler/heart';
 	import Wallet from '~icons/tabler/wallet';
+	import PrimaryButton from '$lib/PrimaryButton.svelte';
 	import type { MendingProjection } from '$lib/mending';
 	import { formatElapsedDuration, formatRemainingDuration } from '$lib/lifespanHud';
 
@@ -70,7 +71,7 @@
 				{#if !hasJob}
 					<section class="idle-state">
 						<p>作業を開始すると、時間に応じて成果が蓄積されます。</p>
-						<button class="terminal-primary-action" type="button" onclick={onStart}>作業を開始</button>
+						<PrimaryButton type="button" onclick={onStart}>作業を開始</PrimaryButton>
 					</section>
 				{:else}
 					<section class="reward-group" aria-label="受け取れる成果">
@@ -86,7 +87,7 @@
 							<div class="result-card" data-mending-icon="heart"><Heart aria-hidden="true" /><div class="result-copy"><span class="result-label">寿命</span><strong>+{lifespanDuration}</strong></div></div>
 						</div>
 						<div class="action-group">
-							<button class="terminal-primary-action" type="button" onclick={onCollect}>成果を受け取る</button>
+							<PrimaryButton type="button" onclick={onCollect}>成果を受け取る</PrimaryButton>
 						</div>
 					</section>
 					<section class="status-group" aria-label="作業の蓄積状況">
@@ -160,10 +161,7 @@
 	.idle-state { display: grid; gap: 14px; }
 	.idle-state p { margin: 0; color: rgba(208, 246, 248, 0.78); }
 	.action-group { display: grid; gap: 10px; margin: 4px 0 0; }
-	.terminal-primary-action, :global(.terminal-secondary-action) { min-height: 50px; border-radius: 9px; font: inherit; font-weight: 800; cursor: pointer; }
-	.terminal-primary-action { border: 1px solid #6ef4f0; background: linear-gradient(90deg, #29d5d6, #20abd2); box-shadow: 0 0 16px rgba(31, 210, 222, .18); color: #00141d; }
 	:global(.terminal-secondary-action) { border: 1px solid #46599a; background: #111a42; color: #dbe4f4; text-align: center; }
-	:global(.mending-dialog-content button:focus-visible) { outline: 3px solid var(--color-focus-ring); outline-offset: 3px; }
 	@media (max-width: 700px) { :global(.mending-dialog-content) { width: min(calc(100vw - 16px), 720px); padding: 24px; } .terminal-dialog-header { flex-direction: column; margin-bottom: 36px; } .result-list { grid-template-columns: 1fr; } .result-card { min-height: 112px; } }
 	@media (max-width: 560px) { :global(.mending-dialog-content) { padding: 22px 18px; border-radius: 14px; } .owned-points { padding-top: 0; } .details-content p { align-items: flex-start; flex-direction: column; gap: 2px; } .details-content strong { text-align: left; } }
 </style>
