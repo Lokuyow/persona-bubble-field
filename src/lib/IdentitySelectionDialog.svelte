@@ -15,6 +15,7 @@
 		onExportNsec: (candidate: ClearedIdentityCandidate) => void;
 	} = $props();
 	let backdrop = $state<HTMLElement | null>(null);
+	let initialFocusTarget = $state<HTMLElement | null>(null);
 	let chosen = $state<SelectionCandidate | null>(null);
 	let rootBuild = $state<RootBuild>({ inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0 });
 	let usablePoints = $derived(usableRootPoints(rootPoints));
@@ -74,8 +75,7 @@
 		const inertSiblings = Array.from(app.children).filter((child) => child !== backdrop) as HTMLElement[];
 		for (const sibling of inertSiblings) sibling.inert = true;
 		const focus = () => {
-			const first = focusableElements(dialog)[0];
-			if (first && !dialog.contains(document.activeElement)) first.focus();
+			if (initialFocusTarget && !dialog.contains(document.activeElement)) initialFocusTarget.focus();
 		};
 		const handleFocusIn = (event: FocusEvent) => {
 			if (!dialog.contains(event.target as Node)) focus();
@@ -117,7 +117,7 @@
 			<div class="selection-content">
 				<header class="selection-header">
 					<div>
-						<h1 id="identity-selection-title">Runを始める</h1>
+						<h1 bind:this={initialFocusTarget} id="identity-selection-title" tabindex="-1">Runを始める</h1>
 						<p id="identity-selection-description" class="selection-introduction">人格を選び、今回のRunで使うRoot buildを決めてください。Run開始後は変更できません。</p>
 					</div>
 					<div class="rp-summary"><span>Root Point</span><strong>{rootPoints} RP</strong></div>
