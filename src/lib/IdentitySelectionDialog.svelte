@@ -206,6 +206,7 @@
 		border-radius: 20px;
 		background: linear-gradient(150deg, rgb(24 27 48 / 98%), rgb(13 16 32 / 98%));
 		color: #fff;
+		display: grid;
 		grid-template-rows: minmax(0, 1fr) auto;
 	}
 

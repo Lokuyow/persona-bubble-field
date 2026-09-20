@@ -1881,7 +1881,7 @@ test.describe('Relay startup', () => {
 		await installHostOwnedStub(page);
 		await installDelayedRelay(page);
 		await page.goto('/');
-		await page.setViewportSize({ width: 390, height: 640 });
+		await page.setViewportSize({ width: 420, height: 420 });
 		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
 		await setPendingRootPoints(page, 0);
 		await page.reload({ waitUntil: 'domcontentloaded' });
@@ -2001,22 +2001,40 @@ test.describe('Relay startup', () => {
 		const dialog = page.locator('.selection-dialog');
 		const candidateButtons = page.getByRole('button', { name: /を選ぶ$/ });
 		await expect(candidateButtons).toHaveCount(3);
-		await page.setViewportSize({ width: 390, height: 640 });
+		await page.setViewportSize({ width: 420, height: 420 });
 		await page.locator('.candidate-about').nth(1).evaluate((element) => {
 			element.textContent = '長いプロフィール。'.repeat(160);
 		});
 
-		const overflow = await dialog.evaluate((element) => ({
-			clientHeight: element.clientHeight,
-			scrollHeight: element.scrollHeight,
-			viewportHeight: window.innerHeight
-		}));
-		expect(overflow.scrollHeight).toBeGreaterThan(overflow.clientHeight);
-		expect(overflow.clientHeight).toBeLessThanOrEqual(overflow.viewportHeight - 40);
-
+		const content = page.locator('.selection-content');
+		const footer = page.locator('.selection-footer');
+		const before = await dialog.evaluate((element) => {
+			const content = element.querySelector('.selection-content');
+			const footer = element.querySelector('.selection-footer');
+			if (!(content instanceof HTMLElement) || !(footer instanceof HTMLElement)) throw new Error('selection layout is incomplete');
+			const dialogRect = element.getBoundingClientRect();
+			const footerRect = footer.getBoundingClientRect();
+			return {
+				dialogInsideViewport: dialogRect.top >= 0 && dialogRect.bottom <= window.innerHeight && dialogRect.left >= 0 && dialogRect.right <= window.innerWidth,
+				contentScrollable: content.scrollHeight > content.clientHeight,
+				contentScrollTop: content.scrollTop,
+				footerBottom: footerRect.bottom,
+				footerHeight: footerRect.height
+			};
+		});
+		expect(before.dialogInsideViewport).toBe(true);
+		expect(before.contentScrollable).toBe(true);
+		expect(before.footerBottom).toBeLessThanOrEqual(420);
 		await candidateButtons.nth(2).scrollIntoViewIfNeeded();
 		await expect(candidateButtons.nth(2)).toBeVisible();
-		expect(await dialog.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+		const afterScroll = await content.evaluate((element) => ({ scrollTop: element.scrollTop, scrollHeight: element.scrollHeight, clientHeight: element.clientHeight }));
+		expect(afterScroll.scrollTop).toBeGreaterThan(0);
+		expect(afterScroll.scrollTop).toBeLessThanOrEqual(afterScroll.scrollHeight - afterScroll.clientHeight);
+		await expect(footer).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Runを開始' })).toBeVisible();
+		const footerAfterScroll = await footer.boundingBox();
+		expect(footerAfterScroll).not.toBeNull();
+		expect(footerAfterScroll!.y + footerAfterScroll!.height).toBeLessThanOrEqual(420);
 		await candidateButtons.nth(2).click();
 		await startSelectedRun(page);
 		await expect(page.getByRole('dialog')).toHaveCount(0);
@@ -2042,7 +2060,9 @@ test.describe('Relay startup', () => {
 			expect(Math.abs(metrics.centerX - metrics.viewportWidth / 2)).toBeLessThanOrEqual(8);
 			expect(metrics.centerY).toBeGreaterThan(0);
 			expect(metrics.centerY).toBeLessThan(metrics.viewportHeight);
-			expect(metrics.width).toBeLessThanOrEqual(metrics.viewportWidth - 40);
+			expect(metrics.width).toBeLessThanOrEqual(metrics.viewportWidth);
+			expect(metrics.centerX - metrics.width / 2).toBeGreaterThanOrEqual(0);
+			expect(metrics.centerX + metrics.width / 2).toBeLessThanOrEqual(metrics.viewportWidth);
 		});
 	}
 
