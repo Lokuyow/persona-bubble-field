@@ -1904,6 +1904,22 @@ test.describe('Relay startup', () => {
 		await page.keyboard.press('Space');
 		await expect(rootToggle).toHaveAttribute('aria-expanded', 'true');
 		await expect(rootBuild.getByRole('button', { name: '推論加速の詳細' })).toBeVisible();
+		const mobileLayout = await rootBuild.locator('.ability-row').first().evaluate((row) => {
+			const main = row.querySelector('.ability-main')?.getBoundingClientRect();
+			const content = row.closest('.selection-content');
+			if (!main || !(content instanceof HTMLElement)) throw new Error('ability layout is incomplete');
+			return { mainWidth: main.width, noHorizontalOverflow: content.scrollWidth <= content.clientWidth };
+		});
+		expect(mobileLayout.mainWidth).toBeGreaterThan(120);
+		expect(mobileLayout.noHorizontalOverflow).toBe(true);
+		await page.setViewportSize({ width: 1280, height: 800 });
+		const desktopCenters = await rootBuild.locator('.ability-row').first().evaluate((row) => {
+			const help = row.querySelector('.help-trigger')?.getBoundingClientRect();
+			const rank = row.querySelector('.rank-controls button')?.getBoundingClientRect();
+			if (!help || !rank) throw new Error('ability controls are incomplete');
+			return { helpCenter: help.top + help.height / 2, rankCenter: rank.top + rank.height / 2 };
+		});
+		expect(Math.abs(desktopCenters.helpCenter - desktopCenters.rankCenter)).toBeLessThanOrEqual(1);
 		await expect.poll(async () => rootBuild.locator('.help-trigger').evaluateAll((elements) => elements.every((element) => {
 			const rect = element.getBoundingClientRect();
 			return rect.width >= 44 && rect.height >= 44;

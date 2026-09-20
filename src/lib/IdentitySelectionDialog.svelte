@@ -168,14 +168,13 @@
 							{@const details = ROOT_DETAILS[rootKey]}
 							<div class="ability-row">
 								<div class="ability-main">
-									<div class="ability-title"><strong>{label}</strong><span class="rank-label">Rank {rank}</span>
-										<Popover.Root>
-											<Popover.Trigger class="help-trigger" aria-label={`${label}の詳細`}><HelpCircle aria-hidden="true" /></Popover.Trigger>
-											<Popover.Portal><Popover.Content class="help-content" side="bottom" align="start" sideOffset={6} collisionPadding={12} trapFocus={false} onOpenAutoFocus={(event) => event.preventDefault()}><strong>{label}</strong><ul>{#each details.slice(0, 4) as detail}<li>{detail}</li>{/each}</ul>{#if details[4]}<p>{details[4]}</p>{/if}</Popover.Content></Popover.Portal>
-										</Popover.Root>
-									</div>
+									<div class="ability-title"><strong>{label}</strong><span class="rank-label">Rank {rank}</span></div>
 									<div class="ability-effect"><span>{effectLabel}</span><strong>{effects[rank]}</strong>{#if rank < 3 && usedPoints < usablePoints}<small>次: {effects[rank + 1]}</small>{/if}</div>
 								</div>
+								<Popover.Root>
+									<Popover.Trigger class="help-trigger" aria-label={`${label}の詳細`}><HelpCircle aria-hidden="true" /></Popover.Trigger>
+									<Popover.Portal><Popover.Content class="help-content" side="bottom" align="start" sideOffset={6} collisionPadding={12} trapFocus={false} onOpenAutoFocus={(event) => event.preventDefault()}><strong>{label}</strong><ul>{#each details.slice(0, 4) as detail}<li>{detail}</li>{/each}</ul>{#if details[4]}<p>{details[4]}</p>{/if}</Popover.Content></Popover.Portal>
+								</Popover.Root>
 								<div class="rank-controls" aria-label={`${label}のRank操作`}>
 									<button type="button" aria-label={`${label}を下げる`} onclick={() => changeRank(rootKey, -1)} disabled={rank === 0}>−</button>
 									<span aria-label={`${label}の現在Rank`}>{rank}</span>
@@ -264,12 +263,12 @@
 	.root-build-panel { padding-bottom: 14px; }
 	.rp-notice { margin: 0 0 12px; color: rgb(255 255 255 / 62%); font-size: .82rem; }
 	.ability-list { border-top: 1px solid rgb(255 255 255 / 12%); }
-	.ability-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 16px; padding: 13px 0; border-bottom: 1px solid rgb(255 255 255 / 12%); }
+	.ability-row { display: grid; grid-template-columns: minmax(0, 1fr) 44px auto; align-items: center; gap: 16px; padding: 13px 0; border-bottom: 1px solid rgb(255 255 255 / 12%); }
 	.ability-main { min-width: 0; }
 	.ability-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
 	.ability-title strong { font-size: .92rem; }
 	.rank-label { color: rgb(255 255 255 / 62%); font-size: .8rem; }
-	:global(.help-trigger) { display: grid; width: 44px; height: 44px; flex: 0 0 44px; place-items: center; align-content: center; justify-content: center; margin-left: auto; padding: 0; border: 1px solid rgb(255 255 255 / 25%); border-radius: 50%; background: transparent; color: rgb(255 255 255 / 70%); cursor: pointer; line-height: 0; }
+	:global(.help-trigger) { display: grid; width: 44px; height: 44px; flex: 0 0 44px; place-items: center; align-content: center; justify-content: center; margin-left: 0; padding: 0; border: 1px solid rgb(255 255 255 / 25%); border-radius: 50%; background: transparent; color: rgb(255 255 255 / 70%); cursor: pointer; line-height: 0; }
 	:global(.help-trigger svg) { display: block; width: 18px; height: 18px; }
 	:global(.help-trigger:focus-visible) { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
 	.ability-effect { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; margin-top: 4px; color: rgb(255 255 255 / 58%); font-size: .8rem; }
@@ -299,8 +298,12 @@
 		.candidate { grid-template-columns: 82px minmax(0, 1fr); align-items: center; min-height: 104px; }
 		.candidate-image { grid-row: span 2; }
 		.candidate-about { min-height: auto; }
-		.ability-row { gap: 8px; }
-		.ability-effect { gap: 5px; }
+		.ability-row { grid-template-columns: minmax(0, 1fr) 44px; grid-template-areas: "main help" "controls controls"; gap: 8px 10px; padding: 14px 0; }
+		.ability-main { grid-area: main; min-width: 0; }
+		:global(.help-trigger) { grid-area: help; justify-self: end; }
+		.rank-controls { grid-area: controls; justify-self: end; }
+		.ability-effect { gap: 5px; min-width: 0; }
+		.ability-effect strong, .ability-effect small { overflow-wrap: anywhere; }
 		.root-build { padding-inline: 12px; }
 		.selection-footer { align-items: stretch; flex-direction: column; gap: 12px; padding: 14px 16px max(16px, env(safe-area-inset-bottom)); }
 		.selection-footer :global(.site-primary-button) { width: 100%; }
