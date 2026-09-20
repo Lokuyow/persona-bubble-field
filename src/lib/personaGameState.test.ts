@@ -22,6 +22,12 @@ describe('Run ability curves and costs', () => {
 		expect([1, 5, 10, 20, 30, 50, 75, 100].map(getHallucinationExtensionHundredths)).toEqual([10, 25, 45, 75, 100, 125, 150, 175]);
 	});
 
+	it('accepts an explicit initial lifespan without changing the production default', () => {
+		const deathDev = createInitialPersonaGameState(PUBKEY, BIRTH, 3_000);
+		expect(deathDev.lifespanExpiresAtMs).toBe(BIRTH + 3_000);
+		expect(createInitialPersonaGameState(PUBKEY, BIRTH).lifespanExpiresAtMs).toBe(BIRTH + 7 * 24 * 60 * 60 * 1000);
+	});
+
 	it('uses linear interpolation and the cost bands at both boundaries', () => {
 		expect(getInferenceRateHundredths(2)).toBe(118);
 		expect(getContextCapacityMinutes(16)).toBe(192);
