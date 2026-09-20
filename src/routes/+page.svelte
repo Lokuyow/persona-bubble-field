@@ -92,6 +92,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	import { isPersonaExpired } from '$lib/personaGameState';
 	import { deathDevMode, DEATH_DEV_INITIAL_LIFESPAN_MS } from '$lib/deathDevMode';
 	import { clearDevMode, CLEAR_DEV_INITIAL_POINTS } from '$lib/clearDevMode';
+	import { consumeRunTransitionNotice, storeRunTransitionNotice, type RunTransitionNotice } from '$lib/runTransitionNotice';
 	import {
 		applyRiftAction,
 		buildRiftActionTemplate,
@@ -254,6 +255,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	let selfSigner = $state.raw<ActiveSignerSnapshot | null>(null);
 	let personaSnapshot = $state.raw<PersonaSnapshot | null>(null);
 	let pendingIdentitySelection = $state<PendingSelection | null>(null);
+	let runTransitionNotice = $state<RunTransitionNotice | null>(null);
 	let pendingRootPoints = $state(0);
 	let personaLifecycleTransition = $state(false);
 	let lifespanHudNowMs = $state<number | null>(null);
@@ -1164,6 +1166,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		const begin = async () => {
 			if (devWorldSandboxEnabled || startRequested || !hasUsableViewport()) return;
 			startRequested = true;
+			const transitionNotice = consumeRunTransitionNotice();
 			let characterProfilePublication: PreparedCharacterProfilePublication | null = null;
 			let realtimeStartImmediately = false;
 			try {
@@ -1171,11 +1174,14 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 				if (personaResult.kind === 'created' || personaResult.kind === 'selecting') {
 					pendingIdentitySelection = personaResult.selection;
 					pendingRootPoints = personaResult.rootPoints;
+					runTransitionNotice = transitionNotice;
 					selfSigner = null;
 					personaSnapshot = null;
 				} else if (personaResult.kind !== 'restored') {
+					runTransitionNotice = null;
 					setComposerTerminalError(new Error('Persona is unavailable for publishing.'));
 				} else {
+					runTransitionNotice = null;
 					personaSnapshot = personaResult.persona;
 					pendingRootPoints = personaResult.persona.rootPoints;
 					selfSigner = personaResult.persona.signer;
@@ -1489,6 +1495,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			const preparedExit = currentSession?.prepareTerminalExit(expected.signer.pubkey);
 			const result = await clearPersona(expected);
 			if (result.kind === 'cleared') {
+				storeRunTransitionNotice('cleared');
 				try {
 					if (preparedExit?.kind === 'prepared') await currentSession?.publishTerminalExit();
 				} catch {
@@ -2247,6 +2254,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		try {
 			const result = await commitDeath();
 			if (result.kind === 'transitioned') {
+				storeRunTransitionNotice('dead');
 				try {
 					if (preparedExit?.kind === 'prepared') await currentSession?.publishTerminalExit();
 				} catch {
@@ -2684,7 +2692,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		onOpenChange={handleProfileOpenChange}
 		onCloseAutoFocus={restoreProfileTriggerFocus}
 	/>
-	<IdentitySelectionDialog selection={pendingIdentitySelection} rootPoints={pendingRootPoints} onSelect={(candidate, rootBuild) => { void chooseIdentity(candidate, rootBuild); }} onExportNsec={(candidate) => { void exportIdentityNsec(candidate); }} />
+	<IdentitySelectionDialog selection={pendingIdentitySelection} rootPoints={pendingRootPoints} transitionNotice={runTransitionNotice} onSelect={(candidate, rootBuild) => { void chooseIdentity(candidate, rootBuild); }} onExportNsec={(candidate) => { void exportIdentityNsec(candidate); }} />
 	<MendingDialog
 		open={mendingDialogOpen}
 		projection={mendingProjection}
