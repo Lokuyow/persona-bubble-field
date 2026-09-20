@@ -123,7 +123,7 @@
 	.cost { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: #aeb5d7; font-size: 13px; }
 	.cost strong { color: #f4f6ff; font-size: 14px; font-variant-numeric: tabular-nums; }
 	.adjustment-dialog-footer { margin-top: 28px; }
-	:global(.terminal-secondary-action) { width: 100%; border: 1px solid rgba(150, 164, 230, .34); background: #151b41; color: #dde1f7; text-align: center; }
+	:global(.terminal-secondary-action) { width: 100%; min-height: 48px; border: 1px solid rgba(150, 164, 230, .34); border-radius: 9px; background: #151b41; color: #dde1f7; font: inherit; font-weight: 800; text-align: center; cursor: pointer; }
 	:global(.adjustment-dialog-content button:focus-visible) { outline: 3px solid var(--color-focus-ring); outline-offset: 3px; }
 	@media (max-width: 820px) { :global(.adjustment-dialog-content) { padding: 24px; } .ability-list { grid-template-columns: 1fr; } .ability-card { min-height: 0; } }
 </style>

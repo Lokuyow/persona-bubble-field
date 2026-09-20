@@ -161,7 +161,8 @@
 	.idle-state { display: grid; gap: 14px; }
 	.idle-state p { margin: 0; color: rgba(208, 246, 248, 0.78); }
 	.action-group { display: grid; gap: 10px; margin: 4px 0 0; }
-	:global(.terminal-secondary-action) { border: 1px solid #46599a; background: #111a42; color: #dbe4f4; text-align: center; }
+	:global(.terminal-secondary-action) { min-height: 50px; border: 1px solid #46599a; border-radius: 9px; background: #111a42; color: #dbe4f4; font: inherit; font-weight: 800; text-align: center; cursor: pointer; }
+	:global(.mending-dialog-content button:focus-visible) { outline: 3px solid var(--color-focus-ring); outline-offset: 3px; }
 	@media (max-width: 700px) { :global(.mending-dialog-content) { width: min(calc(100vw - 16px), 720px); padding: 24px; } .terminal-dialog-header { flex-direction: column; margin-bottom: 36px; } .result-list { grid-template-columns: 1fr; } .result-card { min-height: 112px; } }
 	@media (max-width: 560px) { :global(.mending-dialog-content) { padding: 22px 18px; border-radius: 14px; } .owned-points { padding-top: 0; } .details-content p { align-items: flex-start; flex-direction: column; gap: 2px; } .details-content strong { text-align: left; } }
 </style>
