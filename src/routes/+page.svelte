@@ -60,6 +60,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	import LifespanHud from '$lib/LifespanHud.svelte';
 	import MendingDialog from '$lib/MendingDialog.svelte';
 	import AdjustmentDialog from '$lib/AdjustmentDialog.svelte';
+	import SelfProfileDialog from '$lib/SelfProfileDialog.svelte';
 	import RiftPanel from '$lib/RiftPanel.svelte';
 	import RiftRulesDialog from '$lib/RiftRulesDialog.svelte';
 	import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL, isBlockedFacilityCell, isWithinFacilityInteractionRange, sameFieldCell } from '$lib/fieldFacilities';
@@ -259,6 +260,8 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	let mendingDialogOpen = $state(false);
 	let mendingMutationInFlight = $state(false);
 	let adjustmentDialogOpen = $state(false);
+	let selfProfileDialogOpen = $state(false);
+	let lastSelfProfileTrigger: HTMLButtonElement | null = null;
 	let abilityMutationInFlight = $state(false);
 	let clearMutationInFlight = $state(false);
 	let pendingRealtimeSettlement = $state(false);
@@ -418,7 +421,6 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	let canUseMendingTerminal = $derived(!devWorldSandboxEnabled && Boolean(personaSnapshot && selfIsActive && selfLogicalPosition && isWithinFacilityInteractionRange(selfLogicalPosition)));
 	let canUseAdjustmentTerminal = $derived(!devWorldSandboxEnabled && Boolean(personaSnapshot && selfIsActive && selfLogicalPosition && isWithinFacilityInteractionRange(selfLogicalPosition, ADJUSTMENT_TERMINAL)));
 	let clearBlockedReason = $derived(!personaSnapshot ? 'Runがありません' : personaSnapshot.gameState.points < 100_000 ? '所持ポイントが100,000pt未満です' : isPersonaExpired(personaSnapshot.gameState, mendingNowMs, personaSnapshot.activeRun.rootBuild) ? '寿命が尽きています' : pendingRealtimeSettlement ? '綻びのsettlementが未完了です' : null);
-	let canClear = $derived(Boolean(canUseAdjustmentTerminal && !clearBlockedReason && !clearMutationInFlight));
 	let traceRootCells = $derived(groupTraceRoots(effectiveTraceRoots));
 	// Keep grouped roots intact for the Trace data flow, but let fixed facilities
 	// own their cells at the field presentation/interaction boundary.
@@ -442,6 +444,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			: selfSigner ? requireCharacterFromPubkey(selfSigner.pubkey)
 				: getCharacterById(selectedCharacterId) ?? CHARACTER_CATALOG[0]
 	);
+	let selfProfileCharacter = $derived(!devWorldSandboxEnabled && personaSnapshot ? getCharacterById(personaSnapshot.identity.characterId) ?? null : null);
 	let speechSuggestionConversation = $derived.by((): readonly SpeechSuggestionConversationEntry[] => {
 		const traceEvents = traceConversationProjection
 			? [
@@ -2618,6 +2621,17 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		onOpenChange={(open) => { adjustmentDialogOpen = open; }}
 		onUpgrade={(key) => { void mutateAbility(key); }}
 	/>
+	<SelfProfileDialog
+		open={selfProfileDialogOpen}
+		persona={personaSnapshot}
+		mendingProjection={mendingProjection}
+		nowMs={mendingNowMs}
+		clearBlockedReason={clearBlockedReason}
+		clearBusy={clearMutationInFlight}
+		onOpenChange={(open) => { selfProfileDialogOpen = open; }}
+		onCloseAutoFocus={() => { lastSelfProfileTrigger?.focus(); }}
+		onClear={() => { void clearCurrentRun(); }}
+	/>
 
 	{#if devWorldSandboxEnabled}
 		<DevWorldControls
@@ -2645,7 +2659,9 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			{selectedSpeechType}
 			submissionInProgress={composerSubmissionInProgress}
 			hasUnreadReplies={traceReadSnapshot.hasUnreadReplies}
-			character={speechSuggestionCharacter}
+			character={selfProfileCharacter ?? speechSuggestionCharacter}
+			canOpenSelfProfile={selfProfileCharacter !== null}
+			onOpenSelfProfile={(trigger) => { lastSelfProfileTrigger = trigger; selfProfileDialogOpen = true; }}
 			suggestionConversation={speechSuggestionConversation}
 			onSpeechTypeChange={(next) => { selectedSpeechType = next; }}
 			submitContent={submitComposerContent}
@@ -2690,6 +2706,13 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 
 	.composer-available {
 		padding-bottom: var(--composer-reserved-height);
+	}
+
+	@media (max-width: 700px) {
+		.app-shell {
+			--composer-dock-height: calc(var(--composer-preferred-height) + 8px + 46px + 8px + var(--composer-dock-padding-block) + var(--composer-dock-border-width) + env(safe-area-inset-bottom));
+			--composer-reserved-height: calc(var(--composer-initial-preferred-height) + 8px + 46px + 8px + var(--composer-dock-padding-block) + var(--composer-dock-border-width) + env(safe-area-inset-bottom));
+		}
 	}
 
 </style>

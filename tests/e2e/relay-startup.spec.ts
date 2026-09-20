@@ -2247,6 +2247,57 @@ test.describe('Relay startup', () => {
 		await expect.poll(() => readRelayGameState(page)).toMatchObject({ points: 9, abilities: { inferenceEfficiency: 2, contextCapacity: 1, hallucinationSuppression: 1 } });
 	});
 
+	test('opens the self profile from the ComposerDock without adjustment-terminal proximity', async ({ page }) => {
+		await page.setViewportSize({ width: 1200, height: 900 });
+		await openReadyRelayWorld(page);
+
+		const profileTrigger = page.getByRole('button', { name: '自分のプロフィールを開く' });
+		await expect(profileTrigger).toBeVisible();
+		await expect(page.locator('.composer-controls .profile-trigger')).toHaveCount(1);
+		await profileTrigger.click();
+
+		const dialog = page.getByRole('dialog');
+		await expect(dialog).toBeVisible();
+		await expect(dialog).toContainText('Run #1');
+		await expect(dialog).toContainText('残り寿命');
+		await expect(dialog).toContainText('所持ポイント');
+		await expect(dialog).toContainText('推論効率');
+		await expect(dialog).toContainText('コンテキスト容量');
+		await expect(dialog).toContainText('ハルシネーション抑制');
+		await expect(dialog).toContainText('Root Point');
+		await expect(dialog).toContainText('Normal Clear');
+		await expect(dialog).toContainText('100,000 pt');
+		await expect(dialog.getByRole('button', { name: 'Normal Clear（+1 RP）' })).toBeDisabled();
+		await expect(dialog.getByText('clear不可: 所持ポイントが100,000pt未満です')).toHaveCount(0);
+		await expect(dialog.getByRole('button', { name: /へ強化/ })).toHaveCount(0);
+
+		await dialog.getByRole('button', { name: '閉じる', exact: true }).click();
+		await expect(dialog).toBeHidden();
+		await expect(profileTrigger).toBeFocused();
+	});
+
+	test('places the ComposerDock controls below the editor on mobile', async ({ page }) => {
+		await page.setViewportSize({ width: 390, height: 844 });
+		await openReadyRelayWorld(page);
+
+		const editor = page.locator('.composer-editor-slot');
+		const controls = page.locator('.composer-controls');
+		const profileTrigger = page.locator('.profile-trigger');
+		const speechToggle = page.locator('.speech-type-toggle');
+		const editorBox = await editor.boundingBox();
+		const controlsBox = await controls.boundingBox();
+		const profileBox = await profileTrigger.boundingBox();
+		const speechBox = await speechToggle.boundingBox();
+		expect(editorBox).not.toBeNull();
+		expect(controlsBox).not.toBeNull();
+		expect(profileBox).not.toBeNull();
+		expect(speechBox).not.toBeNull();
+		expect(editorBox!.y + editorBox!.height).toBeLessThanOrEqual(controlsBox!.y + 1);
+		expect(profileBox!.y).toBeGreaterThanOrEqual(controlsBox!.y);
+		expect(speechBox!.y).toBeGreaterThanOrEqual(controlsBox!.y);
+		expect(Math.abs(profileBox!.y - speechBox!.y)).toBeLessThan(2);
+	});
+
 	test('shows maxed abilities as unavailable at the adjustment terminal', async ({ page }) => {
 		const startTime = Date.now();
 		const secret = fixtureSecret(19);
@@ -3962,7 +4013,8 @@ test.describe('Relay startup', () => {
 			});
 			expect(beforePreferredHeight.initialPreferredHeight).toBe('50px');
 			expect(beforePreferredHeight.preferredHeight).toBe('50px');
-			expect(beforePreferredHeight.dockHeight).toBeCloseTo(67, 1);
+			const expectedInitialDockHeight = viewport.name === 'mobile' ? 121 : 67;
+			expect(beforePreferredHeight.dockHeight).toBeCloseTo(expectedInitialDockHeight, 1);
 			expect(beforePreferredHeight.fieldHeight + beforePreferredHeight.dockHeight)
 				.toBeCloseTo(beforePreferredHeight.viewportHeight, 1);
 
