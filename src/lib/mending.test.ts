@@ -101,6 +101,18 @@ describe('checkpoint-settled asynchronous work', () => {
 		expect(projection.lifespanExtensionMs).toBeGreaterThan(30_000);
 	});
 
+	it('keeps overflow lifespan extension active after the Context cap for Root compression ranks 1 through 3', () => {
+		const work = { ...state(), abilities: { ...state().abilities, contextCapacity: 1 } };
+		for (const rank of [1, 3]) {
+			const projection = projectMending(work, 1_000 + hour, { ...ZERO_BUILD, contextCompression: rank });
+			expect(projection.completed).toBe(true);
+			expect(projection.lifespanExtensionRateHundredthsPerHour).toBeGreaterThan(0);
+		}
+		const stopped = projectMending(work, 1_000 + hour, ZERO_BUILD);
+		expect(stopped.completed).toBe(true);
+		expect(stopped.lifespanExtensionRateHundredthsPerHour).toBe(0);
+	});
+
 	it('keeps fractional carry and transfers integer unclaimed points only on collection', () => {
 		const before = state();
 		const checkpoint = settleMending(before, 1_000 + 30 * 1000, ZERO_BUILD, false)!;

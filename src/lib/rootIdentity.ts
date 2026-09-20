@@ -649,6 +649,8 @@ async function restoreCurrent(db: IDBPDatabase<LifecycleDatabase>): Promise<Load
 }
 
 async function mutateMending(expected: PersonaSnapshot, operation: 'start' | 'collect'): Promise<MendingMutationResult> {
+	const testHook = (globalThis as typeof globalThis & { __personaBubbleFieldTestHooks?: { beforeMendingMutation?: (operation: 'start' | 'collect') => void | Promise<void> } }).__personaBubbleFieldTestHooks?.beforeMendingMutation;
+	if (testHook) await testHook(operation);
 	return withLifecycle(async (db) => {
 		const observed = await readRootAndPlayer(db);
 		if (!observed) return { kind: 'corrupt', reason: 'partial-state' };

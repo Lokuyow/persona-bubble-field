@@ -28,8 +28,8 @@ function rms(samples: Float32Array): number {
 }
 
 describe('speech sound effects', () => {
-	it('creates deterministic collection and level-up chimes', () => {
-		for (const effect of ['collect', 'level-up'] as const) {
+	it('creates deterministic UI chimes with effect-specific gains', () => {
+		for (const effect of ['collect', 'level-up', 'startup'] as const) {
 			const samples = createSoundSamples(effect, 10_000);
 			expect(samples.length).toBe(Math.ceil(UI_SOUND_DURATIONS[effect] * 10_000));
 			expect([...samples].every(Number.isFinite)).toBe(true);
@@ -43,6 +43,7 @@ describe('speech sound effects', () => {
 		expect(SOUND_EFFECT_GAINS.monologue).toBe(1);
 		expect(SOUND_EFFECT_GAINS.collect).toBeCloseTo(0.75);
 		expect(SOUND_EFFECT_GAINS['level-up']).toBeCloseTo(0.75);
+		expect(SOUND_EFFECT_GAINS.startup).toBeCloseTo(0.65);
 	});
 	it('creates deterministic, finite, non-clipping buffers at the specified durations', () => {
 		const effects = ['normal', 'shout', 'monologue'] as const;
