@@ -1478,17 +1478,27 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		const expected = personaSnapshot;
 		if (!expected || clearMutationInFlight) return;
 		clearMutationInFlight = true;
+		const currentSession = worldSession;
+		stopPersonaInteractions('Run cleared.');
 		try {
+			const preparedExit = currentSession?.prepareTerminalExit(expected.signer.pubkey);
 			const result = await clearPersona(expected);
 			if (result.kind === 'cleared') {
-				stopPersonaInteractions('Run cleared.');
-				disposePersonaWriter();
+				try {
+					if (preparedExit?.kind === 'prepared') await currentSession?.publishTerminalExit();
+				} catch {
+					// The local clear is already durable; World State exit is best effort.
+				}
+				disposePersonaWriter(currentSession);
 				window.location.reload();
-			} else if (result.kind === 'superseded') {
+			} else if (result.kind === 'superseded' || result.kind === 'blocked') {
+				disposePersonaWriter(currentSession);
 				window.location.reload();
 			} else if (result.kind === 'corrupt') {
 				enterReadOnlyFallback('Persona is unavailable for publishing.');
 			}
+		} catch {
+			enterReadOnlyFallback('Persona is unavailable for publishing.');
 		} finally {
 			clearMutationInFlight = false;
 		}

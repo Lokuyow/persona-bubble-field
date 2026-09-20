@@ -845,6 +845,22 @@ async function openReadyRelayWorld(page: Page, expectedParticipantCount = 2): Pr
 	return editor;
 }
 
+async function openClearReadyWorld(page: Page): Promise<{ secret: Uint8Array; pubkey: string }> {
+	const startTime = Date.now();
+	const secret = fixtureSecret(19);
+	const pubkey = getPublicKey(secret);
+	await installHostOwnedStub(page);
+	await installDelayedRelay(page, { primaryEvents: testEvents(startTime), persistAcrossReload: true });
+	await seedRelayAccount(page, secret, pubkey, startTime + 7 * 24 * 60 * 60 * 1000, 100_000);
+	await page.goto('/');
+	await page.evaluate(() => {
+		const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
+		relay.releaseMetadata(); relay.releasePrimary();
+	});
+	await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
+	return { secret, pubkey };
+}
+
 async function installPromptApiStub(page: Page, availability: 'available' | 'unavailable' = 'available'): Promise<void> {
 	await page.addInitScript(({ availability }) => {
 		const state = { prompts: [] as string[], published: false };
@@ -2682,6 +2698,74 @@ test.describe('Relay startup', () => {
 		expect(headerAvatarColors.header).toBe(headerAvatarColors.field);
 		await dialog.getByRole('button', { name: '閉じる', exact: true }).click();
 		await expect(fieldTrigger).toBeFocused();
+	});
+
+	test('publishes a World State exit after normal clear and advances to Identity selection', async ({ page }) => {
+		const { pubkey } = await openClearReadyWorld(page);
+		const position = await page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`).getAttribute('data-position');
+		expect(position).toMatch(/^\d+,\d+$/);
+		await page.getByRole('button', { name: '自分のプロフィールを開く' }).click();
+		const profile = page.getByRole('dialog');
+		await expect(profile.getByRole('button', { name: '脱出', exact: true })).toBeEnabled();
+		await profile.getByRole('button', { name: '脱出', exact: true }).click();
+		await expect(page.getByRole('dialog')).toBeVisible();
+		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
+		const lifecycle = await page.evaluate(async () => {
+			const database = await new Promise<IDBDatabase>((resolve, reject) => {
+				const request = indexedDB.open('persona-bubble-field-account');
+				request.onsuccess = () => resolve(request.result);
+				request.onerror = () => reject(request.error);
+			});
+			try {
+				const transaction = database.transaction('persona-bubble-field-player-state');
+				const request = transaction.objectStore('persona-bubble-field-player-state').get('player-lifecycle');
+				return await new Promise<{ rootPoints: number; mode: string; status: string; outcome: string }>((resolve, reject) => {
+					transaction.oncomplete = () => {
+						const state = request.result as { rootPoints: number; mode: { kind: string; pendingSelection?: { reusableIdentities?: Array<{ pubkey: string }> } }; identities: Array<{ pubkey: string; status: string; runHistory: Array<{ outcome: string }> }> };
+						const identity = state.identities[0];
+						resolve({ rootPoints: state.rootPoints, mode: state.mode.kind, status: identity.status, outcome: identity.runHistory.at(-1)?.outcome ?? '' });
+					};
+					transaction.onerror = () => reject(transaction.error);
+				});
+			} finally { database.close(); }
+		});
+		expect(lifecycle).toMatchObject({ rootPoints: 1, mode: 'selecting', status: 'cleared', outcome: 'cleared' });
+		const exits = await page.evaluate((expectedPubkey) => {
+			const state = (window as typeof window & { __relayStartupTest: { state: { previousPublished: Array<{ id: string; kind: number; pubkey?: string; content: string; tags: string[][] }>; published: Array<{ id: string; kind: number; pubkey?: string; content: string; tags: string[][] }> } } }).__relayStartupTest.state;
+			return [...new Map([...state.previousPublished, ...state.published]
+				.filter((event) => event.kind === 30078 && event.pubkey === expectedPubkey && event.tags.some((tag) => tag[0] === 'd' && tag[1]?.endsWith(':exit')))
+				.map((event) => [event.id, event])).values()];
+		}, pubkey);
+		expect(exits).toHaveLength(1);
+		expect(exits[0]?.content).toBe(position?.replace(',', ':'));
+	});
+
+	test('keeps normal clear committed when terminal exit publication is rejected', async ({ page }) => {
+		const { pubkey } = await openClearReadyWorld(page);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { rejectPositionPublishes(): void } }).__relayStartupTest.rejectPositionPublishes());
+		await page.getByRole('button', { name: '自分のプロフィールを開く' }).click();
+		await page.getByRole('dialog').getByRole('button', { name: '脱出', exact: true }).click();
+		await expect(page.getByRole('dialog')).toBeVisible();
+		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
+		const lifecycle = await page.evaluate(async () => {
+			const database = await new Promise<IDBDatabase>((resolve, reject) => {
+				const request = indexedDB.open('persona-bubble-field-account');
+				request.onsuccess = () => resolve(request.result);
+				request.onerror = () => reject(request.error);
+			});
+			try {
+				const transaction = database.transaction('persona-bubble-field-player-state');
+				const request = transaction.objectStore('persona-bubble-field-player-state').get('player-lifecycle');
+				return await new Promise<{ rootPoints: number; mode: string; status: string }>((resolve, reject) => {
+					transaction.oncomplete = () => {
+						const state = request.result as { rootPoints: number; mode: { kind: string }; identities: Array<{ status: string }> };
+						resolve({ rootPoints: state.rootPoints, mode: state.mode.kind, status: state.identities[0]?.status ?? '' });
+					};
+					transaction.onerror = () => reject(transaction.error);
+				});
+			} finally { database.close(); }
+		});
+		expect(lifecycle).toEqual({ rootPoints: 1, mode: 'selecting', status: 'cleared' });
 	});
 
 	test('keeps the self profile dialog inside a short mobile viewport and scrolls its content', async ({ page }) => {

@@ -564,15 +564,19 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		}
 		const participant = getParticipant(candidate, selfSigner.pubkey);
 		if (!participant) return null;
-		return positionCandidate(participant.position, nowMs);
+		const latestExitCreatedAt = operation === 'entry'
+			? worldPresence.participants.find((known) => known.pubkey === selfSigner!.pubkey)?.latestExitCreatedAt ?? null
+			: null;
+		return positionCandidate(participant.position, nowMs, latestExitCreatedAt === null ? 0 : latestExitCreatedAt + 1);
 	}
 
 	function positionCandidate(
 		position: ParsedWorldStateEvent['position'],
-		nowMs: number
+		nowMs: number,
+		minimumCreatedAt = 0
 	): Readonly<{ event: VerifiedEvent; parsed: ParsedWorldStateEvent }> | null {
 		if (!selfSigner || !channel) return null;
-		const createdAt = Math.floor(nowMs / 1000);
+		const createdAt = Math.max(Math.floor(nowMs / 1000), minimumCreatedAt);
 		const plan = planPositionPublish(positionPublishState, createdAt);
 		if (plan.kind === 'unavailable') return null;
 		const signed = finalizeWorldEvent(buildWorldStateEventTemplate({
