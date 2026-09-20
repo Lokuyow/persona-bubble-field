@@ -535,6 +535,24 @@ describe('world read session', () => {
 		expect(await session.moveSelf('right')).toEqual({ kind: 'unavailable' });
 	});
 
+	it('uses latest positive message activity when preparing an exit after clock regression', async () => {
+		const selfMessage = { ...message('self-message', 110), pubkey: selfPubkey, position: { x: 2, y: 1 } };
+		result = startResult([selfMessage], [position('self-position', 100, selfPubkey, 0, { x: 2, y: 1 })]);
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 }, selfSigner: selfSigner(),
+			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn()
+		});
+		await session.start(); session.completeBootstrap();
+		vi.mocked(reconstructPositionPublishState).mockClear();
+		vi.setSystemTime(105_000);
+
+		const prepared = session.prepareTerminalExit(selfPubkey);
+		expect(prepared.kind).toBe('prepared');
+		if (prepared.kind !== 'prepared') throw new Error('Expected a prepared exit.');
+		expect(prepared.parsed).toMatchObject({ state: 'exit', slot: null, position: { x: 2, y: 1 }, createdAt: 110 });
+		expect(reconstructPositionPublishState).not.toHaveBeenCalled();
+	});
+
 	it('does not prepare an exit without canonical self position and quiesces normal writes', async () => {
 		const session = createWorldReadSession({
 			field: { columns: 4, rows: 3 }, selfSigner: selfSigner(),

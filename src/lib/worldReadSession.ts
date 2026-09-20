@@ -348,7 +348,11 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			...selfPositionEvidence.map((event) => event.createdAt),
 			0
 		);
-		const createdAt = Math.max(Math.floor(Date.now() / 1000), latestPositionEvidence);
+		const createdAt = Math.max(
+			Math.floor(Date.now() / 1000),
+			self.lastPositiveActivityCreatedAt ?? 0,
+			latestPositionEvidence
+		);
 		const event = finalizeWorldEvent(buildWorldStateEventTemplate({
 			channel,
 			position: self.position,
