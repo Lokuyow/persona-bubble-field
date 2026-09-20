@@ -6,14 +6,21 @@
 	import { getCharacterById } from '$lib/character';
 	import PrimaryButton from '$lib/PrimaryButton.svelte';
 	import type { ClearedIdentityCandidate, IdentityCandidate, PendingSelection, SelectionCandidate } from '$lib/rootIdentity';
+	import type { RunTransitionNotice } from '$lib/runTransitionNotice';
 	import { isRootBuildAllocatable, rootBuildCost, usableRootPoints, type RootBuild } from '$lib/rootProgression';
 
-	let { selection, rootPoints, onSelect, onExportNsec }: {
+	let { selection, rootPoints, transitionNotice, onSelect, onExportNsec }: {
 		selection: PendingSelection | null;
 		rootPoints: number;
+		transitionNotice?: RunTransitionNotice | null;
 		onSelect: (candidate: SelectionCandidate, rootBuild: RootBuild) => void;
 		onExportNsec: (candidate: ClearedIdentityCandidate) => void;
 	} = $props();
+	let noticeCopy = $derived(transitionNotice === 'dead'
+		? { heading: 'Runが終了しました', body: 'この人格のRunは死亡として終了しました。次の人格を選んでください。' }
+		: transitionNotice === 'cleared'
+			? { heading: '脱出しました', body: '現在のRunを終了し、Root Pointを1獲得しました。' }
+			: null);
 	let backdrop = $state<HTMLElement | null>(null);
 	let initialFocusTarget = $state<HTMLElement | null>(null);
 	let chosen = $state<SelectionCandidate | null>(null);
@@ -122,6 +129,12 @@
 					</div>
 					<div class="rp-summary"><span>Root Point</span><strong>{rootPoints} RP</strong></div>
 				</header>
+				{#if noticeCopy}
+					<div class="transition-notice" role="status">
+						<strong>{noticeCopy.heading}</strong>
+						<span>{noticeCopy.body}</span>
+					</div>
+				{/if}
 
 				<section class="identity-section" aria-label="人格を選択">
 					<div class="section-heading"><h2>人格を選択</h2><span>Runの舞台となる人格</span></div>
@@ -228,6 +241,9 @@
 	.selection-dialog::backdrop { background: transparent; }
 	.selection-content { min-height: 0; overflow: auto; padding: 26px 26px 24px; }
 	.selection-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+	.transition-notice { display: grid; gap: 4px; margin: 16px 0 2px; padding: 12px 14px; border: 1px solid rgb(104 241 221 / 34%); border-radius: 12px; background: rgb(104 241 221 / 9%); color: rgb(241 255 253 / 92%); }
+	.transition-notice strong { color: #fff; }
+	.transition-notice span { color: rgb(241 255 253 / 78%); font-size: 0.92rem; line-height: 1.5; }
 	.selection-dialog h1 { margin: 0; font-size: 24px; line-height: 1.2; }
 	.selection-dialog .initial-focus-target:focus { outline: none; }
 	.selection-introduction { max-width: 620px; margin: 8px 0 0; color: rgb(255 255 255 / 64%); font-size: .9rem; }

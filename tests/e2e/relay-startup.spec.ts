@@ -2710,6 +2710,11 @@ test.describe('Relay startup', () => {
 		await profile.getByRole('button', { name: '脱出', exact: true }).click();
 		await expect(page.getByRole('dialog')).toBeVisible();
 		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
+		await expect(page.getByText('脱出しました', { exact: true })).toBeVisible();
+		await expect(page.getByText('現在のRunを終了し、Root Pointを1獲得しました。', { exact: true })).toBeVisible();
+		await page.reload();
+		await expect(page.getByRole('dialog')).toBeVisible();
+		await expect(page.getByText('脱出しました', { exact: true })).toHaveCount(0);
 		const lifecycle = await page.evaluate(async () => {
 			const database = await new Promise<IDBDatabase>((resolve, reject) => {
 				const request = indexedDB.open('persona-bubble-field-account');
@@ -3452,6 +3457,11 @@ test.describe('Relay startup', () => {
 		await page.clock.runFor(31_000);
 		await expect(page.getByRole('dialog')).toBeVisible();
 		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
+		await expect(page.getByText('Runが終了しました', { exact: true })).toBeVisible();
+		await expect(page.getByText('この人格のRunは死亡として終了しました。次の人格を選んでください。', { exact: true })).toBeVisible();
+		await page.reload();
+		await expect(page.getByRole('dialog')).toBeVisible();
+		await expect(page.getByText('Runが終了しました', { exact: true })).toHaveCount(0);
 		await expect.poll(async () => page.evaluate((expectedPubkey) => {
 			const state = (window as unknown as { __relayStartupTest: { state: { previousPublished: Array<{ id: string; kind: number; pubkey?: string; content: string; tags: string[][]; created_at?: number }>; published: Array<{ id: string; kind: number; pubkey?: string; content: string; tags: string[][]; created_at?: number }> } } }).__relayStartupTest.state;
 			return [...new Map([...state.previousPublished, ...state.published]
