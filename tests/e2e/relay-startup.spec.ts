@@ -1832,11 +1832,11 @@ test.describe('Relay startup', () => {
 		const candidateButtons = page.getByRole('button', { name: /を選ぶ$/ });
 		await expect(candidateButtons).toHaveCount(3);
 		await expect.poll(() => page.locator('main > :not(.selection-backdrop)').evaluateAll((elements) => elements.every((element) => (element as HTMLElement).inert))).toBe(true);
-		await expect(candidateButtons.first()).toBeFocused();
+		await expect(page.getByRole('heading', { name: 'Runを始める' })).toBeFocused();
 		await page.keyboard.press('Tab');
-		await expect(candidateButtons.nth(1)).toBeFocused();
-		await page.keyboard.press('Shift+Tab');
 		await expect(candidateButtons.first()).toBeFocused();
+		await page.keyboard.press('Shift+Tab');
+		await expect(page.getByRole('button', { name: /Root build/ })).toBeFocused();
 		expect((await relayState(page)).state.published.filter((event) => event.kind === 0)).toHaveLength(0);
 		const labelsBeforeReload = await candidateButtons.allTextContents();
 		await expect(page.locator('.participant[data-self="true"]')).toHaveCount(0);
@@ -2120,6 +2120,35 @@ test.describe('Relay startup', () => {
 			relay.releaseMetadata(); relay.releasePrimary();
 		});
 		await expect(page.locator('.participant[data-self="true"]')).toBeVisible();
+	});
+
+	test('starts identity selection with the heading focused and keeps candidate keyboard selection available', async ({ page }) => {
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page);
+		await page.goto('/');
+
+		const dialog = page.locator('.selection-dialog');
+		const candidates = page.getByRole('button', { name: /を選ぶ$/ });
+		const runButton = page.getByRole('button', { name: 'Runを開始' });
+		await expect(candidates).toHaveCount(3);
+		await expect(dialog).toBeVisible();
+		await expect(dialog.getByRole('heading', { name: 'Runを始める' })).toBeFocused();
+		await expect(candidates).toHaveCount(3);
+		await expect(dialog.locator('.candidate.chosen')).toHaveCount(0);
+		await expect(dialog.locator('.candidate-check')).toHaveCount(0);
+		await expect(dialog).toContainText('選択中未選択');
+		await expect(runButton).toBeDisabled();
+
+		await page.keyboard.press('Shift+Tab');
+		await expect(dialog.getByRole('button', { name: /Root build/ })).toBeFocused();
+		await dialog.getByRole('heading', { name: 'Runを始める' }).focus();
+		await page.keyboard.press('Tab');
+		await expect(candidates.first()).toBeFocused();
+		await page.keyboard.press('Enter');
+		await expect(candidates.first()).toHaveClass(/chosen/);
+		await expect(dialog.locator('.candidate-check')).toHaveCount(1);
+		await expect(dialog).not.toContainText('選択中未選択');
+		await expect(runButton).toBeEnabled();
 	});
 
 	for (const viewport of [{ width: 1280, height: 800 }, { width: 420, height: 800 }]) {
