@@ -14,14 +14,15 @@
 		open: boolean;
 		projection: MendingProjection | null;
 		hasJob: boolean;
+		starting?: boolean;
 		points: number;
 		onOpenChange: (open: boolean) => void;
-		onStart: () => void;
 		onCollect: () => void;
 		collectFeedback?: Readonly<{ id: number; points: number; lifespanMs: number }> | null;
+		startupFeedback?: Readonly<{ id: number; phase: 'starting' | 'started' }> | null;
 	}>;
 
-	let { open, projection, hasJob, points: ownedPointsValue, onOpenChange, onStart, onCollect, collectFeedback = null }: Props = $props();
+	let { open, projection, hasJob, starting = false, points: ownedPointsValue, onOpenChange, onCollect, collectFeedback = null, startupFeedback = null }: Props = $props();
 	let detailsOpen = $state(false);
 	let remainingDuration = $derived(formatRemainingDuration(projection?.remainingDurationMs ?? 0));
 	let lifespanDuration = $derived(formatElapsedDuration(projection?.lifespanExtensionMs ?? 0));
@@ -77,12 +78,14 @@
 						</div>
 					{/key}
 				{/if}
-				{#if !hasJob}
-					<section class="idle-state">
-						<p>作業を開始すると、時間に応じて成果が蓄積されます。</p>
-						<PrimaryButton type="button" onclick={onStart}>作業を開始</PrimaryButton>
-					</section>
-				{:else}
+				{#if startupFeedback}
+					{#key startupFeedback.id}
+						<div class="mending-startup-feedback" aria-live="polite" aria-atomic="true">
+							<span>{startupFeedback.phase === 'started' ? '作業を開始しました' : '起動中…'}</span>
+						</div>
+					{/key}
+				{/if}
+				{#if hasJob || starting}
 					<section class="reward-group" aria-label="受け取れる成果">
 						<div class="result-list">
 							<div class:success-flash={collectFeedback} class="result-card" data-mending-icon="coins">
@@ -130,7 +133,6 @@
 						<Dialog.Close class="terminal-secondary-action">閉じる</Dialog.Close>
 					</section>
 				{/if}
-				{#if !hasJob}<Dialog.Close class="terminal-secondary-action">閉じる</Dialog.Close>{/if}
 			</Dialog.Content>
 		</Dialog.Portal>
 	{/if}
@@ -142,13 +144,18 @@
 	.mending-success-feedback { position: absolute; top: 72px; right: 34px; z-index: 1; display: grid; gap: 2px; pointer-events: none; color: #64f5f0; text-align: right; animation: mending-success-float 420ms ease-out both; }
 	.mending-success-feedback strong { font-size: 18px; font-weight: 850; }
 	.mending-success-feedback span { color: #cfe7ee; font-size: 13px; font-weight: 700; }
+	.mending-startup-feedback { position: absolute; inset: 0; z-index: 2; display: grid; place-items: center; pointer-events: none; border: 1px solid rgba(53, 227, 232, .72); border-radius: inherit; color: #64f5f0; font-size: 16px; font-weight: 800; letter-spacing: .04em; text-shadow: 0 0 18px rgba(53, 227, 232, .7); animation: mending-startup-scan 420ms ease-out both; }
+	.mending-startup-feedback::after { position: absolute; inset: 0; content: ''; background: linear-gradient(180deg, transparent 0%, rgba(53, 227, 232, .16) 48%, transparent 54%); animation: mending-startup-sweep 420ms ease-out both; }
 	.points-highlight { animation: mending-points-highlight 420ms ease-out; }
 	.success-flash { animation: mending-card-flash 420ms ease-out; }
 	@keyframes mending-success-float { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(-8px); } }
 	@keyframes mending-card-flash { 0%, 100% { box-shadow: none; } 35% { box-shadow: 0 0 0 2px rgba(53, 227, 232, .4), 0 0 24px rgba(53, 227, 232, .34); } }
 	@keyframes mending-points-highlight { 0%, 100% { color: #ecfbff; } 35% { color: #64f5f0; transform: scale(1.04); } }
-	@media (prefers-reduced-motion: reduce) { .mending-success-feedback { animation-name: mending-success-fade; } .success-flash { animation-name: mending-card-highlight; } .points-highlight { animation-name: mending-points-color; } }
+	@media (prefers-reduced-motion: reduce) { .mending-success-feedback { animation-name: mending-success-fade; } .mending-startup-feedback { animation-name: mending-startup-fade; } .mending-startup-feedback::after { animation: none; } .success-flash { animation-name: mending-card-highlight; } .points-highlight { animation-name: mending-points-color; } }
 	@keyframes mending-success-fade { from { opacity: 0; } to { opacity: 1; } }
+	@keyframes mending-startup-scan { from { opacity: 0; transform: scale(.985); } 35% { opacity: 1; transform: scale(1); } to { opacity: 0; transform: scale(1.01); } }
+	@keyframes mending-startup-sweep { from { opacity: 0; transform: translateY(-45%); } 45% { opacity: 1; } to { opacity: 0; transform: translateY(45%); } }
+	@keyframes mending-startup-fade { from { opacity: 0; } 35% { opacity: 1; } to { opacity: 0; } }
 	@keyframes mending-card-highlight { 0%, 100% { box-shadow: none; } 35% { box-shadow: 0 0 0 2px rgba(53, 227, 232, .4); } }
 	@keyframes mending-points-color { 0%, 100% { color: #ecfbff; } 35% { color: #64f5f0; } }
 	.terminal-dialog-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 48px; }
@@ -179,8 +186,6 @@
 	.details-content { display: grid; gap: 8px; padding: 0 0 18px; color: rgba(208, 246, 248, 0.78); font-size: 0.92rem; line-height: 1.45; }
 	.details-content p { margin: 0; display: flex; justify-content: space-between; gap: 16px; }
 	.details-content strong { color: #f2ffff; font-weight: 700; text-align: right; }
-	.idle-state { display: grid; gap: 14px; }
-	.idle-state p { margin: 0; color: rgba(208, 246, 248, 0.78); }
 	.action-group { display: grid; gap: 10px; margin: 4px 0 0; }
 	:global(.terminal-secondary-action) { min-height: 50px; border: 1px solid #46599a; border-radius: 9px; background: #111a42; color: #dbe4f4; font: inherit; font-weight: 800; text-align: center; cursor: pointer; }
 	:global(.mending-dialog-content button:focus-visible) { outline: 3px solid var(--color-focus-ring); outline-offset: 3px; }

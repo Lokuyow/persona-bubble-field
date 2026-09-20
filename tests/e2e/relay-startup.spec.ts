@@ -1713,7 +1713,8 @@ test.describe('Relay startup', () => {
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${oldPubkey}"]`)).toBeVisible();
 		await moveRelaySelfTo(page, { x: 11, y: 3 });
 		await page.getByRole('button', { name: '作業端末' }).click();
-		await expect(page.getByRole('button', { name: '作業を開始' })).toBeVisible();
+		await expect(page.getByRole('dialog')).toBeVisible();
+		await expect(page.getByRole('button', { name: '作業を開始' })).toHaveCount(0);
 
 		const deathTab = await page.context().newPage();
 		try {
@@ -1725,9 +1726,8 @@ test.describe('Relay startup', () => {
 			await deathTab.reload({ waitUntil: 'domcontentloaded' });
 			await expect(deathTab.getByRole('dialog')).toBeVisible();
 
-			const reloaded = page.waitForEvent('framenavigated', (frame) => frame === page.mainFrame());
-			await page.getByRole('button', { name: '作業を開始' }).click();
-			await reloaded;
+			await page.getByRole('dialog').getByRole('button', { name: '閉じる', exact: true }).click();
+			await page.reload({ waitUntil: 'domcontentloaded' });
 			await expect(page.getByRole('dialog')).toBeVisible();
 			await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
 		} finally {
@@ -2188,15 +2188,12 @@ test.describe('Relay startup', () => {
 
 		await terminal.click();
 		await expect(page.getByRole('dialog')).toBeVisible();
-		const startButton = page.getByRole('button', { name: '作業を開始' });
-		await expect(startButton).toHaveCSS('color', 'rgb(255, 255, 255)');
-		await startButton.click();
-		await expect(page.getByRole('dialog')).toHaveCount(0);
 		await expect.poll(() => readRelayGameState(page)).toMatchObject({ mendingJob: expect.any(Object) });
 		const started = await readRelayGameState(page);
 		expect(started).toMatchObject({ version: 4, points: 0, pointProgressTicks: 0, mendingJob: expect.objectContaining({ processedDurationMs: 0, unclaimedPoints: 0 }) });
-		await terminal.click();
 		const activeDialog = page.getByRole('dialog');
+		await expect(activeDialog.locator('.mending-startup-feedback')).toContainText('作業を開始しました');
+		await expect(activeDialog.getByRole('button', { name: '作業を開始' })).toHaveCount(0);
 		await expect(activeDialog).toContainText('作業中');
 		await expect(activeDialog).toContainText('0 pt');
 		await expect(activeDialog).toContainText('上限まで あと5分');
@@ -2224,6 +2221,7 @@ test.describe('Relay startup', () => {
 		await pauseAtCurrentBrowserTime(page);
 		await terminal.click();
 		const partialDialog = page.getByRole('dialog');
+		await expect(partialDialog.locator('.mending-startup-feedback')).toHaveCount(0);
 		await expect(partialDialog).toContainText('上限まで あと3分');
 		await expect(partialDialog).toContainText(/次の1ptまで [1-9][0-9]?秒/);
 		await expect(partialDialog.locator('.next-point[data-mending-icon="clock"] > svg')).toHaveCount(1);
@@ -2553,7 +2551,6 @@ test.describe('Relay startup', () => {
 		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), atTerminal);
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,3');
 		await page.getByRole('button', { name: '作業端末' }).click();
-		await page.getByRole('button', { name: '作業を開始' }).click();
 		await expect.poll(() => readRelayGameState(page)).toMatchObject({ mendingJob: expect.any(Object) });
 		const started = await readRelayGameState(page);
 
@@ -2588,10 +2585,10 @@ test.describe('Relay startup', () => {
 		await moveRelaySelfTo(page, { x: 11, y: 3 });
 		const terminal = page.getByRole('button', { name: '作業端末' });
 		await terminal.click();
-		await page.getByRole('button', { name: '作業を開始' }).click();
 		await expect.poll(() => readRelayGameState(page)).toMatchObject({ mendingJob: expect.any(Object) });
 		const started = await readRelayGameState(page);
 		const job = started.mendingJob as { startedAtMs: number };
+		await page.getByRole('button', { name: '閉じる', exact: true }).click();
 		await page.clock.setSystemTime(job.startedAtMs + 5 * 60 * 1000);
 		const currentTerminalPosition = finalizeEvent(buildPositionEventTemplate({
 			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 11, y: 3 }, slot: 1,
@@ -2647,9 +2644,8 @@ test.describe('Relay startup', () => {
 			await Promise.all(clients.map(injectTerminalPosition));
 			await Promise.all(clients.map(async (client) => {
 				await client.getByRole('button', { name: '作業端末' }).click();
-				await expect(client.getByRole('button', { name: '作業を開始' })).toBeVisible();
+				await expect(client.getByRole('dialog')).toBeVisible();
 			}));
-			await Promise.all(clients.map((client) => client.getByRole('button', { name: '作業を開始' }).click()));
 			await expect.poll(() => readRelayGameState(page)).toMatchObject({ mendingJob: expect.any(Object) });
 			const started = await readRelayGameState(page);
 			expect(started.mendingJob).toEqual(expect.any(Object));
@@ -2719,7 +2715,6 @@ test.describe('Relay startup', () => {
 			await expect.poll(async () => (await readRelayGameState(reincarnator)).personaPubkey).not.toBe(oldPubkey);
 
 			const reloaded = page.waitForEvent('framenavigated', (frame) => frame === page.mainFrame());
-			await page.getByRole('button', { name: '作業を開始' }).click();
 			await reloaded;
 			await page.waitForLoadState('load');
 			await expect(page.locator('.composer-dock')).toBeVisible();
@@ -2768,7 +2763,6 @@ test.describe('Relay startup', () => {
 		await overwriteRelayGameState(page, { version: 99 });
 		const before = (await publishedMessages(page)).length;
 		await page.getByRole('button', { name: '作業端末' }).click();
-		await page.getByRole('button', { name: '作業を開始' }).click();
 		await expect(page.locator('.participant[data-self="true"]')).toHaveCount(0);
 		const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
 		await editor.fill('must remain read-only after corrupt mending');
