@@ -66,7 +66,7 @@
 		fieldActionLabel: (action: FieldCellAction) => string;
 		closeFieldActionMenu: () => void;
 		onOpenProfile: (characterId: string, trigger: HTMLButtonElement) => void;
-		onOpenSelfProfile: (trigger: HTMLButtonElement) => void;
+		onOpenSelfProfile?: (trigger: HTMLButtonElement) => void;
 		traceMarkerWorldPosition: (position: GridPosition) => WorldPoint;
 	}>;
 

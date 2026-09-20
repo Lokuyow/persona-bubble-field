@@ -2337,11 +2337,6 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		selfProfileDialogOpen = true;
 	}
 
-	function openFieldSelfProfile(trigger: HTMLButtonElement): void {
-		if (selfProfileCharacter) openSelfProfile(trigger);
-		else openProfile(selectedCharacterId, trigger);
-	}
-
 
 	function receiveTimelineMessage(message: ParsedWorldMessage): void {
 		recentMessageTimeline = addRecentMessage(recentMessageTimeline, message);
@@ -2558,7 +2553,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 				fieldActionLabel={fieldActionLabel}
 				closeFieldActionMenu={closeFieldActionMenu}
 				onOpenProfile={openProfile}
-				onOpenSelfProfile={openFieldSelfProfile}
+				onOpenSelfProfile={selfProfileCharacter ? openSelfProfile : undefined}
 				traceMarkerWorldPosition={traceMarkerWorldPosition}
 			/>
 			<SpeechLayer

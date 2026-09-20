@@ -13,7 +13,7 @@
 		world: WorldPoint;
 		movementAnimation: boolean;
 		onProfile: (position: GridPosition, trigger: HTMLButtonElement) => void;
-		onSelfProfile: (trigger: HTMLButtonElement) => void;
+		onSelfProfile?: (trigger: HTMLButtonElement) => void;
 	}>;
 
 	let {
@@ -46,7 +46,7 @@
 		 onclick={(event) => {
 			event.stopPropagation();
 			const trigger = event.currentTarget as HTMLButtonElement;
-			if (self) onSelfProfile(trigger);
+			if (self && onSelfProfile) onSelfProfile(trigger);
 			else onProfile(position, trigger);
 		}}
 	>
