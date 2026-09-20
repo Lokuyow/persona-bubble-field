@@ -13,9 +13,6 @@ export const PROTOTYPE_NAMESPACE = 'io.github.lokuyow.persona-bubble-field';
 export const CHANNEL_MESSAGE_KIND = 42;
 export const TRACE_REPLY_KIND = 1111;
 export const WORLD_STATE_KIND = 30078;
-// The kind is intentionally unchanged: this is a source-level name for the
-// public World State protocol, not a new Nostr kind.
-export const POSITION_KIND = WORLD_STATE_KIND;
 export const PROFILE_KIND = 0;
 export const RECENT_MESSAGE_TIMELINE_LIMIT = 50;
 export const WORLD_STATE_SLOT_SUFFIXES = ['0', '1', 'exit'] as const;
@@ -30,16 +27,6 @@ export function worldStateIdentifier(channelId: string, slot: WorldStateSlot | '
 export function worldStateIdentifiers(channelId: string): readonly string[] {
 	return WORLD_STATE_SLOT_SUFFIXES.map((slot) => worldStateIdentifier(channelId, slot === 'exit' ? 'exit' : Number(slot) as WorldStateSlot));
 }
-
-// Kept only as a source-level migration aid for existing tests/callers. The
-// builder below always emits the channel-scoped World State schema, and the
-// parser never accepts the retired position identifiers.
-export const POSITION_SLOT_IDENTIFIERS = [
-	`${PROTOTYPE_NAMESPACE}:world-state:1:${'a'.repeat(64)}:0`,
-	`${PROTOTYPE_NAMESPACE}:world-state:1:${'a'.repeat(64)}:1`
-] as const;
-
-export type PositionSlot = WorldStateSlot;
 
 export type ChannelReference = {
 	/** NIP-01 event ID. This is the channel identity. */
@@ -63,7 +50,6 @@ export type WorldStateEventInput = {
 	createdAt: number;
 };
 
-export type PositionEventInput = WorldStateEventInput;
 
 export type TraceReplyInput = {
 	root: ParsedWorldMessage;
@@ -89,7 +75,6 @@ export type WorldStateEventTemplate = EventTemplate & {
 	kind: typeof WORLD_STATE_KIND;
 };
 
-export type PositionEventTemplate = WorldStateEventTemplate;
 
 export type TraceReplyTemplate = EventTemplate & {
 	kind: typeof TRACE_REPLY_KIND;
@@ -114,12 +99,11 @@ export type ParsedWorldStateEvent = {
 	id: string;
 	pubkey: string;
 	createdAt: number;
-	state?: WorldStateState;
+	state: WorldStateState;
 	slot: WorldStateSlot | null;
 	position: GridPosition;
 };
 
-export type ParsedPositionEvent = ParsedWorldStateEvent;
 
 /** A structurally valid kind 1111 whose root and parent still need lookup. */
 export type ParsedTraceReplyCandidate = {
@@ -336,11 +320,6 @@ export function buildWorldStateEventTemplate(input: WorldStateEventInput): World
 		],
 		content: formatCanonicalGridPosition(input.position)
 	};
-}
-
-/** Source-level name retained while callers migrate; wire output is World State. */
-export function buildPositionEventTemplate(input: PositionEventInput): PositionEventTemplate {
-	return buildWorldStateEventTemplate(input);
 }
 
 export function buildCharacterProfileTemplate(input: CharacterProfileInput): CharacterProfileTemplate {
@@ -569,11 +548,6 @@ export function parseWorldStateEvent(event: Event, channelId: string): ParsedWor
 	};
 }
 
-/** Source-level name retained while callers migrate; retired position wire IDs are rejected. */
-export function parsePositionEvent(event: Event, channelId: string): ParsedPositionEvent | null {
-	return parseWorldStateEvent(event, channelId);
-}
-
 export function buildWorldMessageFilter(options: LiveFilterOptions): Filter {
 	assertChannelId(options.channelId);
 	assertCreatedAt(options.since);
@@ -610,11 +584,6 @@ export function buildWorldStateFilter(options: LiveFilterOptions): Filter {
 		'#e': [options.channelId],
 		since: options.since
 	};
-}
-
-/** Source-level name retained while callers migrate; filter targets all World State states. */
-export function buildPositionFilter(options: LiveFilterOptions): Filter {
-	return buildWorldStateFilter(options);
 }
 
 export function buildTraceRootBootstrapFilter(options: TraceRootBootstrapFilterOptions): Filter {

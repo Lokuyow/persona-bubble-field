@@ -1,7 +1,7 @@
 import type { GridPosition } from './geometry';
 import type { ParsedWorldStateEvent, ParsedWorldMessage } from './nostrProtocol';
 
-export type PresenceEvidenceSource = 'message' | 'world-state-slot-0' | 'world-state-slot-1' | 'world-state-exit' | 'position-slot-0' | 'position-slot-1';
+export type PresenceEvidenceSource = 'message' | 'world-state-slot-0' | 'world-state-slot-1' | 'world-state-exit';
 
 export type PresenceEvidence = Readonly<{
 	eventId: string;
@@ -15,15 +15,14 @@ export type ReducedPresenceParticipant = Readonly<{
 	pubkey: string;
 	position: GridPosition;
 	positionEvidence: Readonly<Pick<PresenceEvidence, 'eventId' | 'createdAt' | 'source'>>;
-	lastPositiveActivityCreatedAt?: number | null;
-	latestExitCreatedAt?: number | null;
-	lastActivityCreatedAt?: number;
+	lastPositiveActivityCreatedAt: number | null;
+	latestExitCreatedAt: number | null;
 }>;
 
 function sourceRank(source: PresenceEvidenceSource): number {
 	if (source === 'message') return 0;
-	if (source === 'world-state-slot-0' || source === 'position-slot-0') return 1;
-	if (source === 'world-state-slot-1' || source === 'position-slot-1') return 2;
+	if (source === 'world-state-slot-0') return 1;
+	if (source === 'world-state-slot-1') return 2;
 	return 3;
 }
 
@@ -44,12 +43,7 @@ function copyPosition(position: GridPosition): GridPosition { return { x: positi
 function copyEvidence(evidence: PresenceEvidence): PresenceEvidence { return { ...evidence, position: copyPosition(evidence.position) }; }
 
 function copyReducedParticipant(participant: ReducedPresenceParticipant): ReducedPresenceParticipant {
-	return participant.lastActivityCreatedAt !== undefined ? {
-		pubkey: participant.pubkey,
-		position: copyPosition(participant.position),
-		positionEvidence: { ...participant.positionEvidence },
-		lastActivityCreatedAt: participant.lastActivityCreatedAt
-	} : {
+	return {
 		pubkey: participant.pubkey,
 		position: copyPosition(participant.position),
 		positionEvidence: { ...participant.positionEvidence },
@@ -59,12 +53,7 @@ function copyReducedParticipant(participant: ReducedPresenceParticipant): Reduce
 }
 
 function reducedParticipant(evidence: PresenceEvidence): ReducedPresenceParticipant {
-	return evidence.source === 'message' || evidence.source === 'position-slot-0' || evidence.source === 'position-slot-1' ? {
-		pubkey: evidence.pubkey,
-		position: copyPosition(evidence.position),
-		positionEvidence: { eventId: evidence.eventId, createdAt: evidence.createdAt, source: evidence.source },
-		lastActivityCreatedAt: evidence.createdAt
-	} : {
+	return {
 		pubkey: evidence.pubkey,
 		position: copyPosition(evidence.position),
 		positionEvidence: { eventId: evidence.eventId, createdAt: evidence.createdAt, source: evidence.source },
@@ -83,9 +72,7 @@ export function presenceEvidenceFromWorldState(event: ParsedWorldStateEvent): Pr
 		pubkey: event.pubkey,
 		createdAt: event.createdAt,
 		position: copyPosition(event.position),
-		source: event.state === undefined
-			? event.slot === 0 ? 'position-slot-0' : 'position-slot-1'
-			: event.state === 'exit' ? 'world-state-exit' : event.slot === 0 ? 'world-state-slot-0' : 'world-state-slot-1'
+		source: event.state === 'exit' ? 'world-state-exit' : event.slot === 0 ? 'world-state-slot-0' : 'world-state-slot-1'
 	};
 }
 
@@ -100,23 +87,15 @@ export function applyPresenceEvidence(current: ReducedPresenceParticipant | unde
 		source: current.positionEvidence.source
 	};
 	const nextEvidence = comparePositionEvidence(evidence, currentEvidence) > 0 ? copyEvidence(evidence) : currentEvidence;
-	const currentPositive = current.lastPositiveActivityCreatedAt ?? current.lastActivityCreatedAt ?? null;
+	const currentPositive = current.lastPositiveActivityCreatedAt;
 	const positive = isPositiveSource(evidence.source) ? Math.max(currentPositive ?? -1, evidence.createdAt) : currentPositive;
 	const exit = evidence.source === 'world-state-exit' ? Math.max(current.latestExitCreatedAt ?? -1, evidence.createdAt) : (current.latestExitCreatedAt ?? null);
-	if (current.lastActivityCreatedAt !== undefined && !evidence.source.startsWith('world-state-')) {
-		return {
-			pubkey: current.pubkey,
-			position: copyPosition(nextEvidence.position),
-			positionEvidence: { eventId: nextEvidence.eventId, createdAt: nextEvidence.createdAt, source: nextEvidence.source },
-			lastActivityCreatedAt: positive ?? evidence.createdAt
-		};
-	}
 	return {
 		pubkey: current.pubkey,
 		position: copyPosition(nextEvidence.position),
 		positionEvidence: { eventId: nextEvidence.eventId, createdAt: nextEvidence.createdAt, source: nextEvidence.source },
-		lastPositiveActivityCreatedAt: positive !== null && positive >= 0 ? positive : null,
-		latestExitCreatedAt: exit !== null && exit < 0 ? null : exit
+		lastPositiveActivityCreatedAt: positive,
+		latestExitCreatedAt: exit
 	};
 }
 
@@ -124,17 +103,7 @@ export function reconstructPresenceEvidence(messages: readonly ParsedWorldMessag
 	const participants = new Map<string, ReducedPresenceParticipant>();
 	const evidence = [...messages.map(presenceEvidenceFromMessage), ...worldStates.map(presenceEvidenceFromWorldState)];
 	for (const item of evidence) participants.set(item.pubkey, applyPresenceEvidence(participants.get(item.pubkey), item));
-	const reduced = [...participants.values()].sort((first, second) => first.pubkey < second.pubkey ? -1 : first.pubkey > second.pubkey ? 1 : 0).map(copyReducedParticipant);
-	if (worldStates.every((event) => event.state === undefined)) {
-		return reduced.map((participant) => participant.lastActivityCreatedAt !== undefined ? participant : {
-			pubkey: participant.pubkey,
-			position: copyPosition(participant.position),
-			positionEvidence: { ...participant.positionEvidence },
-			lastActivityCreatedAt: participant.lastPositiveActivityCreatedAt ?? 0
-		});
-	}
-	return reduced;
+	return [...participants.values()]
+		.sort((first, second) => first.pubkey < second.pubkey ? -1 : first.pubkey > second.pubkey ? 1 : 0)
+		.map(copyReducedParticipant);
 }
-
-// The alias is source-only; it still parses and emits only World State wire data.
-export const presenceEvidenceFromPosition = presenceEvidenceFromWorldState;

@@ -52,7 +52,7 @@ import {
 import { resolvePrototypeWorldConfig } from './prototypeWorld';
 import {
 	applyWorldPresenceMessage,
-	applyWorldPresencePosition,
+	applyWorldPresenceWorldState,
 	projectWorldPresenceState,
 	reconstructWorldPresenceState,
 	type WorldPresenceState
@@ -449,7 +449,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 
 	function applyBootstrapPosition(event: ParsedWorldStateEvent, nowMs: number): void {
 		observeLivePosition(event);
-		worldPresence = applyWorldPresencePosition(worldPresence, event);
+		worldPresence = applyWorldPresenceWorldState(worldPresence, event);
 		project(nowMs);
 	}
 
@@ -464,7 +464,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	function applyCanonicalPosition(event: ParsedWorldStateEvent, nowMs: number): boolean {
 		if (appliedCanonicalPositionEventIds.has(event.id)) return false;
 		appliedCanonicalPositionEventIds.add(event.id);
-		worldPresence = applyWorldPresencePosition(worldPresence, event);
+		worldPresence = applyWorldPresenceWorldState(worldPresence, event);
 		const nextPresence = project(nowMs);
 		if (selfSigner && event.pubkey === selfSigner.pubkey) {
 			selfJoinedThisSession = nextPresence.participants.some((participant) =>
@@ -974,21 +974,18 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 				const result = await transport.start({
 					messageSince: since,
 					worldStateSince: since,
-					positionSince: since,
 					onBootstrapMessage: (event) => applyBootstrapMessage(event, Date.now()),
 					onBootstrapWorldState: (event) => applyBootstrapPosition(event, Date.now()),
-					onBootstrapPosition: (event) => applyBootstrapPosition(event, Date.now()),
 					onLiveMessage: (event, rawEvent) => receiveLive({ kind: 'message', event, rawEvent }),
 					onLiveWorldState: (event) => receiveLive({ kind: 'world-state', event }),
-					onLivePosition: (event) => receiveLive({ kind: 'world-state', event }),
 					onPrimaryClosed: markDegraded
 				});
 				if (disposed) throw new Error('World read session was disposed during startup.');
 
 				const recentMessages = result.messages.filter((message) => message.createdAt >= messageSince);
-				worldPresence = reconstructWorldPresenceState(options.field, recentMessages, result.worldStates ?? result.positions ?? []);
+				worldPresence = reconstructWorldPresenceState(options.field, recentMessages, result.worldStates);
 				for (const event of result.messages) appliedCanonicalMessageEventIds.add(event.id);
-				for (const event of result.worldStates ?? result.positions ?? []) {
+				for (const event of result.worldStates) {
 					appliedCanonicalPositionEventIds.add(event.id);
 					observeLivePosition(event);
 				}
@@ -1006,7 +1003,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 				return {
 					messages: recentMessages,
 					timelineMessages: result.messages,
-					worldStates: result.worldStates ?? result.positions ?? [],
+					worldStates: result.worldStates,
 					presence: nextPresence,
 					status,
 					realtimeEvents: [...realtimeEvents],

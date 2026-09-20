@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import type { ParsedPositionEvent, ParsedWorldMessage } from './nostrProtocol';
+import type { ParsedWorldStateEvent, ParsedWorldMessage } from './nostrProtocol';
 import { getActiveOccupancy, PRESENCE_TIMEOUT_MS } from './presence';
 import {
 	applyWorldPresenceMessage,
-	applyWorldPresencePosition,
+	applyWorldPresenceWorldState,
 	projectWorldPresenceState,
 	reconstructWorldPresenceState,
 	type WorldPresenceState
@@ -28,8 +28,8 @@ function position(
 	createdAt: number,
 	slot: 0 | 1,
 	cell = { x: 2, y: 2 }
-): ParsedPositionEvent {
-	return { id, pubkey, createdAt, slot, position: cell };
+): ParsedWorldStateEvent {
+	return { id, pubkey, createdAt, state: 'active', slot, position: cell };
 }
 
 function participant(state: WorldPresenceState, pubkey: string) {
@@ -46,16 +46,17 @@ describe('world presence adapter', () => {
 
 		expect(participant(state, alice)).toMatchObject({
 			position: { x: 2, y: 1 },
-			positionEvidence: { source: 'position-slot-0', eventId: 'slot-0' },
-			lastActivityCreatedAt: 100
+			positionEvidence: { source: 'world-state-slot-0', eventId: 'slot-0' },
+			lastPositiveActivityCreatedAt: 100
 		});
 		expect(reconstructWorldPresenceState(field, [], [position('position', alice, 101, 1)])).toEqual({
 			field,
 			participants: [{
 				pubkey: alice,
 				position: { x: 2, y: 2 },
-				positionEvidence: { eventId: 'position', createdAt: 101, source: 'position-slot-1' },
-				lastActivityCreatedAt: 101
+				positionEvidence: { eventId: 'position', createdAt: 101, source: 'world-state-slot-1' },
+				lastPositiveActivityCreatedAt: 101,
+				latestExitCreatedAt: null
 			}]
 		});
 	});
@@ -90,7 +91,7 @@ describe('world presence adapter', () => {
 		expect(participant(state, alice)).toMatchObject({
 			position: { x: 3, y: 2 },
 			positionEvidence: { eventId: 'valid', createdAt: 100 },
-			lastActivityCreatedAt: 100
+			lastPositiveActivityCreatedAt: 100
 		});
 	});
 
@@ -117,7 +118,7 @@ describe('world presence adapter', () => {
 	it('applies live evidence through the reducer and keeps deterministic ordering', () => {
 		const initial = reconstructWorldPresenceState(field, [], []);
 		const afterMessage = applyWorldPresenceMessage(initial, message('message', bob, 100, { x: 1, y: 1 }));
-		const afterPosition = applyWorldPresencePosition(afterMessage, position('position', alice, 101, 0, { x: 2, y: 2 }));
+		const afterPosition = applyWorldPresenceWorldState(afterMessage, position('position', alice, 101, 0, { x: 2, y: 2 }));
 
 		expect(afterPosition.participants.map((candidate) => candidate.pubkey)).toEqual([alice, bob]);
 		expect(participant(afterPosition, alice).position).toEqual({ x: 2, y: 2 });
@@ -128,19 +129,19 @@ describe('world presence adapter', () => {
 		const initial = reconstructWorldPresenceState(field, [message('valid', alice, 100, { x: 0, y: 0 })], []);
 
 		expect(applyWorldPresenceMessage(initial, message('outside', alice, 101, { x: 999, y: 999 }))).toBe(initial);
-		expect(applyWorldPresencePosition(initial, position('outside', bob, 101, 0, { x: -1, y: 0 }))).toBe(initial);
+		expect(applyWorldPresenceWorldState(initial, position('outside', bob, 101, 0, { x: -1, y: 0 }))).toBe(initial);
 	});
 
 	it('keeps newer position and activity against old replay, including all ordering tie-breaks', () => {
 		let state = reconstructWorldPresenceState(field, [], []);
-		state = applyWorldPresencePosition(state, position('new-position', alice, 101, 0, { x: 3, y: 2 }));
+		state = applyWorldPresenceWorldState(state, position('new-position', alice, 101, 0, { x: 3, y: 2 }));
 		state = applyWorldPresenceMessage(state, message('old-message', alice, 99, { x: 0, y: 0 }));
-		state = applyWorldPresencePosition(state, position('old-position', alice, 100, 1, { x: 1, y: 1 }));
-		expect(participant(state, alice)).toMatchObject({ position: { x: 3, y: 2 }, lastActivityCreatedAt: 101 });
+		state = applyWorldPresenceWorldState(state, position('old-position', alice, 100, 1, { x: 1, y: 1 }));
+		expect(participant(state, alice)).toMatchObject({ position: { x: 3, y: 2 }, lastPositiveActivityCreatedAt: 101 });
 
 		state = applyWorldPresenceMessage(state, message('message', alice, 102, { x: 0, y: 2 }));
-		state = applyWorldPresencePosition(state, position('slot-0', alice, 102, 0, { x: 1, y: 2 }));
-		state = applyWorldPresencePosition(state, position('slot-1', alice, 102, 1, { x: 2, y: 2 }));
+		state = applyWorldPresenceWorldState(state, position('slot-0', alice, 102, 0, { x: 1, y: 2 }));
+		state = applyWorldPresenceWorldState(state, position('slot-1', alice, 102, 1, { x: 2, y: 2 }));
 		expect(participant(state, alice).position).toEqual({ x: 2, y: 2 });
 
 		const tieFirst = applyWorldPresenceMessage(state, message('z-event', alice, 103, { x: 0, y: 1 }));
@@ -161,12 +162,12 @@ describe('world presence adapter', () => {
 		expect(twice).toEqual(once);
 		expect(twice).not.toBe(once);
 
-		const firstOrder = applyWorldPresencePosition(
+		const firstOrder = applyWorldPresenceWorldState(
 			applyWorldPresenceMessage(initial, message('message', alice, 100, { x: 0, y: 0 })),
 			position('position', alice, 100, 1, { x: 3, y: 2 })
 		);
 		const secondOrder = applyWorldPresenceMessage(
-			applyWorldPresencePosition(initial, position('position', alice, 100, 1, { x: 3, y: 2 })),
+			applyWorldPresenceWorldState(initial, position('position', alice, 100, 1, { x: 3, y: 2 })),
 			message('message', alice, 100, { x: 0, y: 0 })
 		);
 		expect(firstOrder).toEqual(secondOrder);
@@ -213,5 +214,21 @@ describe('world presence adapter', () => {
 			status: 'active'
 		});
 		expect(getActiveOccupancy(projected)).toEqual([{ x: 1, y: 1 }, { x: 1, y: 1 }]);
+	});
+
+	it('projects exit as inactive with retained position, order-independent same-second precedence, and later reactivation', () => {
+		const active = position('active', alice, 500, 0, { x: 2, y: 1 });
+		const exit: ParsedWorldStateEvent = { id: 'exit', pubkey: alice, createdAt: 500, state: 'exit', slot: null, position: { x: 2, y: 1 } };
+		const first = reconstructWorldPresenceState(field, [], [active, exit]);
+		const reversed = reconstructWorldPresenceState(field, [], [exit, active]);
+		const projected = projectWorldPresenceState(first, 500 * 1000);
+		expect(projected).toEqual(projectWorldPresenceState(reversed, 500 * 1000));
+		expect(projected.participants).toEqual([{ id: alice, position: { x: 2, y: 1 }, lastActivityAt: null, status: 'inactive' }]);
+		expect(getActiveOccupancy(projected)).toEqual([]);
+
+		const reactivated = applyWorldPresenceWorldState(first, position('new-active', alice, 501, 1, { x: 1, y: 2 }));
+		const reactivatedProjection = projectWorldPresenceState(reactivated, 501 * 1000);
+		expect(reactivatedProjection.participants.find((candidate) => candidate.id === alice)).toMatchObject({ position: { x: 1, y: 2 }, status: 'active' });
+		expect(getActiveOccupancy(reactivatedProjection)).toEqual([{ x: 1, y: 2 }]);
 	});
 });

@@ -5,7 +5,7 @@ import {
 	type PresenceEvidence,
 	type ReducedPresenceParticipant
 } from './presenceEvidence';
-import type { ParsedPositionEvent, ParsedWorldMessage } from './nostrProtocol';
+import type { ParsedWorldStateEvent, ParsedWorldMessage } from './nostrProtocol';
 
 function message(
 	id: string,
@@ -22,8 +22,8 @@ function position(
 	createdAt: number,
 	slot: 0 | 1,
 	cell = { x: 2, y: 2 }
-): ParsedPositionEvent {
-	return { id, pubkey, createdAt, slot, position: cell };
+): ParsedWorldStateEvent {
+	return { id, pubkey, createdAt, state: 'active', slot, position: cell };
 }
 
 function evidence(
@@ -40,9 +40,9 @@ function participant(
 	pubkey: string,
 	positionValue: { x: number; y: number },
 	positionEvidence: ReducedPresenceParticipant['positionEvidence'],
-	lastActivityCreatedAt: number
+	lastPositiveActivityCreatedAt: number
 ): ReducedPresenceParticipant {
-	return { pubkey, position: positionValue, positionEvidence, lastActivityCreatedAt };
+	return { pubkey, position: positionValue, positionEvidence, lastPositiveActivityCreatedAt, latestExitCreatedAt: null };
 }
 
 describe('presence evidence reducer', () => {
@@ -51,10 +51,10 @@ describe('presence evidence reducer', () => {
 			participant('a'.repeat(64), { x: 1, y: 1 }, { eventId: 'message', createdAt: 100, source: 'message' }, 100)
 		]);
 		expect(reconstructPresenceEvidence([], [position('slot-0', 'b'.repeat(64), 100, 0)])).toEqual([
-			participant('b'.repeat(64), { x: 2, y: 2 }, { eventId: 'slot-0', createdAt: 100, source: 'position-slot-0' }, 100)
+			participant('b'.repeat(64), { x: 2, y: 2 }, { eventId: 'slot-0', createdAt: 100, source: 'world-state-slot-0' }, 100)
 		]);
 		expect(reconstructPresenceEvidence([], [position('slot-1', 'c'.repeat(64), 100, 1)])).toEqual([
-			participant('c'.repeat(64), { x: 2, y: 2 }, { eventId: 'slot-1', createdAt: 100, source: 'position-slot-1' }, 100)
+			participant('c'.repeat(64), { x: 2, y: 2 }, { eventId: 'slot-1', createdAt: 100, source: 'world-state-slot-1' }, 100)
 		]);
 	});
 
@@ -99,7 +99,7 @@ describe('presence evidence reducer', () => {
 		])[0]).toEqual(participant(
 			'a'.repeat(64),
 			{ x: 3, y: 3 },
-			{ eventId: 'slot-1', createdAt: 100, source: 'position-slot-1' },
+			{ eventId: 'slot-1', createdAt: 100, source: 'world-state-slot-1' },
 			100
 		));
 	});
@@ -162,7 +162,7 @@ describe('presence evidence reducer', () => {
 			position: { ...alice.position },
 			positionEvidence: { ...alice.positionEvidence }
 		};
-		const bobEvidence = evidence('bob-event', 'b'.repeat(64), 101, 'position-slot-1', { x: 2, y: 2 });
+		const bobEvidence = evidence('bob-event', 'b'.repeat(64), 101, 'world-state-slot-1', { x: 2, y: 2 });
 
 		expect(() => applyPresenceEvidence(alice, bobEvidence)).toThrow(TypeError);
 		expect(alice).toEqual(aliceBefore);

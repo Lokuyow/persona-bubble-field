@@ -2,7 +2,7 @@ import type { GridPosition } from './geometry';
 import {
 	applyPresenceEvidence,
 	presenceEvidenceFromMessage,
-	presenceEvidenceFromPosition,
+	presenceEvidenceFromWorldState,
 	reconstructPresenceEvidence,
 	type ReducedPresenceParticipant
 } from './presenceEvidence';
@@ -28,9 +28,8 @@ function copyParticipant(participant: ReducedPresenceParticipant): ReducedPresen
 		pubkey: participant.pubkey,
 		position: copyPosition(participant.position),
 		positionEvidence: { ...participant.positionEvidence },
-		...(participant.lastActivityCreatedAt !== undefined
-			? { lastActivityCreatedAt: participant.lastActivityCreatedAt }
-			: { lastPositiveActivityCreatedAt: participant.lastPositiveActivityCreatedAt, latestExitCreatedAt: participant.latestExitCreatedAt })
+		lastPositiveActivityCreatedAt: participant.lastPositiveActivityCreatedAt,
+		latestExitCreatedAt: participant.latestExitCreatedAt
 	};
 }
 
@@ -86,12 +85,12 @@ export function applyWorldPresenceMessage(
 }
 
 /** Applies one live position event without invoking local presence lifecycle semantics. */
-export function applyWorldPresencePosition(
+export function applyWorldPresenceWorldState(
 	state: WorldPresenceState,
 	position: ParsedWorldStateEvent
 ): WorldPresenceState {
 	if (!isWithinField(position.position, state.field)) return state;
-	return applyWorldPresenceEvidence(state, presenceEvidenceFromPosition(position));
+	return applyWorldPresenceEvidence(state, presenceEvidenceFromWorldState(position));
 }
 
 /** Projects Nostr seconds into the existing millisecond-based presence domain. */
@@ -102,7 +101,7 @@ export function projectWorldPresenceState(state: WorldPresenceState, nowMs: numb
 			id: participant.pubkey,
 			position: copyPosition(participant.position),
 			lastActivityAt: (() => {
-				const positive = participant.lastPositiveActivityCreatedAt ?? participant.lastActivityCreatedAt ?? null;
+				const positive = participant.lastPositiveActivityCreatedAt;
 				const exit = participant.latestExitCreatedAt ?? null;
 				return positive !== null && (exit === null || positive > exit) ? positive * 1000 : null;
 			})(),

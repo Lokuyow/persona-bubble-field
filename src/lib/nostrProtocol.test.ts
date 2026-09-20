@@ -4,15 +4,11 @@ import {
 	CHANNEL_MESSAGE_KIND,
 	PROFILE_KIND,
 	WORLD_STATE_KIND,
-	POSITION_KIND,
-	POSITION_SLOT_IDENTIFIERS,
 	PROTOTYPE_NAMESPACE,
 	RECENT_MESSAGE_TIMELINE_LIMIT,
 	TRACE_REPLY_KIND,
-	buildPositionEventTemplate,
-	buildCharacterProfileTemplate,
-	buildPositionFilter,
 	buildWorldStateEventTemplate,
+	buildCharacterProfileTemplate,
 	buildWorldStateFilter,
 	buildTraceDirectReplyFilter,
 	buildTraceNotificationFilter,
@@ -24,13 +20,12 @@ import {
 	buildWorldMessageTemplate,
 	finalizeWorldEvent,
 	finalizeCharacterProfileEvent,
-	parsePositionEvent,
 	parseWorldStateEvent,
 	parseTraceReplyCandidate,
 	parseWorldMessage,
 	validateTraceReplyCandidate,
 	type ChannelReference,
-	type PositionEventTemplate,
+	type WorldStateEventTemplate,
 	type TraceReplyTemplate,
 	type WorldEventTemplate,
 	type WorldMessageTemplate,
@@ -66,8 +61,8 @@ function signedMessage(
 	}), TEST_SECRET_KEY);
 }
 
-function signedPosition(slot: 0 | 1, override: Partial<Parameters<typeof buildPositionEventTemplate>[0]> = {}): VerifiedEvent {
-	return finalizeWorldEvent(buildPositionEventTemplate({
+function signedPosition(slot: 0 | 1, override: Partial<Parameters<typeof buildWorldStateEventTemplate>[0]> = {}): VerifiedEvent {
+	return finalizeWorldEvent(buildWorldStateEventTemplate({
 		channel,
 		position: { x: 8, y: 3 },
 		slot,
@@ -78,14 +73,14 @@ function signedPosition(slot: 0 | 1, override: Partial<Parameters<typeof buildPo
 
 function signedPositionWithCreatedAt(createdAt: number): VerifiedEvent {
 	return finalizeWorldEvent({
-		kind: POSITION_KIND,
+		kind: WORLD_STATE_KIND,
 		created_at: createdAt,
 		tags: [
-			['d', POSITION_SLOT_IDENTIFIERS[0]],
+			['d', worldStateIdentifier(CHANNEL_ID, 0)],
 			['e', channel.channelId, channel.relayHint]
 		],
 		content: '8:3'
-	} as PositionEventTemplate, TEST_SECRET_KEY);
+	} as WorldStateEventTemplate, TEST_SECRET_KEY);
 }
 
 function signedMessageWithCreatedAt(createdAt: number): VerifiedEvent {
@@ -240,13 +235,13 @@ describe('Nostr protocol foundation', () => {
 	});
 
 	it('builds canonical position slots without labels or w tags', () => {
-		const first = buildPositionEventTemplate({
+		const first = buildWorldStateEventTemplate({
 			channel,
 			position: { x: 7, y: 3 },
 			slot: 0,
 			createdAt: 1_700_000_000
 		});
-		const second = buildPositionEventTemplate({
+		const second = buildWorldStateEventTemplate({
 			channel,
 			position: { x: 8, y: 3 },
 			slot: 1,
@@ -254,15 +249,15 @@ describe('Nostr protocol foundation', () => {
 		});
 
 		expect(first).toEqual({
-			kind: POSITION_KIND,
+			kind: WORLD_STATE_KIND,
 			created_at: 1_700_000_000,
 			tags: [
-				['d', POSITION_SLOT_IDENTIFIERS[0]],
+				['d', worldStateIdentifier(CHANNEL_ID, 0)],
 				['e', CHANNEL_ID, 'wss://relay.example.com']
 			],
 			content: '7:3'
 		});
-		expect(second.tags[0]).toEqual(['d', POSITION_SLOT_IDENTIFIERS[1]]);
+		expect(second.tags[0]).toEqual(['d', worldStateIdentifier(CHANNEL_ID, 1)]);
 		expect(second.content).toBe('8:3');
 	});
 
@@ -278,7 +273,7 @@ describe('Nostr protocol foundation', () => {
 			speechType: 'shout',
 			position: { x: 7, y: 3 }
 		});
-		expect(parsePositionEvent(position, CHANNEL_ID)).toMatchObject({
+		expect(parseWorldStateEvent(position, CHANNEL_ID)).toMatchObject({
 			id: position.id,
 			slot: 1,
 			position: { x: 8, y: 3 }
@@ -293,7 +288,7 @@ describe('Nostr protocol foundation', () => {
 			position: { x: 7, y: 3 },
 			createdAt: 1_700_000_000
 		}), UNMAPPED_SECRET_KEY);
-		const position = finalizeWorldEvent(buildPositionEventTemplate({
+		const position = finalizeWorldEvent(buildWorldStateEventTemplate({
 			channel,
 			position: { x: 8, y: 3 },
 			slot: 0,
@@ -302,7 +297,7 @@ describe('Nostr protocol foundation', () => {
 		const reply = signedTraceReply(parsedRoot(), parsedRoot(), {}, UNMAPPED_SECRET_KEY);
 
 		expect(parseWorldMessage(message, CHANNEL_ID)).toBeNull();
-		expect(parsePositionEvent(position, CHANNEL_ID)).toBeNull();
+		expect(parseWorldStateEvent(position, CHANNEL_ID)).toBeNull();
 		expect(parseTraceReplyCandidate(reply)).toBeNull();
 	});
 
@@ -312,7 +307,7 @@ describe('Nostr protocol foundation', () => {
 			const event = signedPositionWithCreatedAt(createdAt);
 
 			expect(verifyEvent(event)).toBe(true);
-			expect(parsePositionEvent(event, CHANNEL_ID)).toBeNull();
+			expect(parseWorldStateEvent(event, CHANNEL_ID)).toBeNull();
 		}
 	);
 
@@ -359,7 +354,7 @@ describe('Nostr protocol foundation', () => {
 
 	it('uses the channel event ID, not the relay hint, as inbound position identity', () => {
 		const receivedFromAnotherRelay = signedPosition(0, { channel: otherRelayChannel });
-		const receivedWithoutRelayHint = buildPositionEventTemplate({
+		const receivedWithoutRelayHint = buildWorldStateEventTemplate({
 			channel,
 			position: { x: 8, y: 3 },
 			slot: 0,
@@ -367,9 +362,9 @@ describe('Nostr protocol foundation', () => {
 		});
 		receivedWithoutRelayHint.tags[1][2] = '';
 
-		expect(parsePositionEvent(receivedFromAnotherRelay, CHANNEL_ID)).not.toBeNull();
-		expect(parsePositionEvent(resign(receivedWithoutRelayHint), CHANNEL_ID)).not.toBeNull();
-		expect(parsePositionEvent(receivedFromAnotherRelay, OTHER_CHANNEL_ID)).toBeNull();
+		expect(parseWorldStateEvent(receivedFromAnotherRelay, CHANNEL_ID)).not.toBeNull();
+		expect(parseWorldStateEvent(resign(receivedWithoutRelayHint), CHANNEL_ID)).not.toBeNull();
+		expect(parseWorldStateEvent(receivedFromAnotherRelay, OTHER_CHANNEL_ID)).toBeNull();
 	});
 
 	it('accepts unrelated inbound tags, including a client tag', () => {
@@ -491,13 +486,13 @@ describe('Nostr protocol foundation', () => {
 	});
 
 	it('rejects ambiguous position semantics while allowing unrelated extra tags', () => {
-		const targetOnly = buildPositionEventTemplate({
+		const targetOnly = buildWorldStateEventTemplate({
 			channel,
 			position: { x: 8, y: 3 },
 			slot: 0,
 			createdAt: 1_700_000_000
 		});
-		const accepted = buildPositionEventTemplate({
+		const accepted = buildWorldStateEventTemplate({
 			channel,
 			position: { x: 8, y: 3 },
 			slot: 0,
@@ -505,15 +500,15 @@ describe('Nostr protocol foundation', () => {
 		});
 		accepted.tags.push(['client', 'external-client'], ['L', 'org.example.other'], ['w', '0:0']);
 
-		const conflictingSlot = buildPositionEventTemplate({
+		const conflictingSlot = buildWorldStateEventTemplate({
 			channel,
 			position: { x: 8, y: 3 },
 			slot: 0,
 			createdAt: 1_700_000_000
 		});
-		conflictingSlot.tags.push(['d', POSITION_SLOT_IDENTIFIERS[1]]);
+		conflictingSlot.tags.push(['d', worldStateIdentifier(CHANNEL_ID, 1)]);
 
-		const conflictingChannel = buildPositionEventTemplate({
+		const conflictingChannel = buildWorldStateEventTemplate({
 			channel,
 			position: { x: 8, y: 3 },
 			slot: 0,
@@ -521,7 +516,7 @@ describe('Nostr protocol foundation', () => {
 		});
 		conflictingChannel.tags.push(['e', OTHER_CHANNEL_ID, 'wss://other-relay.example.com']);
 
-		const malformedContent = buildPositionEventTemplate({
+		const malformedContent = buildWorldStateEventTemplate({
 			channel,
 			position: { x: 8, y: 3 },
 			slot: 0,
@@ -529,11 +524,11 @@ describe('Nostr protocol foundation', () => {
 		});
 		malformedContent.content = '08:3';
 
-		expect(parsePositionEvent(resign(targetOnly), CHANNEL_ID)).not.toBeNull();
-		expect(parsePositionEvent(resign(accepted), CHANNEL_ID)).not.toBeNull();
-		expect(parsePositionEvent(resign(conflictingSlot), CHANNEL_ID)).toBeNull();
-		expect(parsePositionEvent(resign(conflictingChannel), CHANNEL_ID)).toBeNull();
-		expect(parsePositionEvent(resign(malformedContent), CHANNEL_ID)).toBeNull();
+		expect(parseWorldStateEvent(resign(targetOnly), CHANNEL_ID)).not.toBeNull();
+		expect(parseWorldStateEvent(resign(accepted), CHANNEL_ID)).not.toBeNull();
+		expect(parseWorldStateEvent(resign(conflictingSlot), CHANNEL_ID)).toBeNull();
+		expect(parseWorldStateEvent(resign(conflictingChannel), CHANNEL_ID)).toBeNull();
+		expect(parseWorldStateEvent(resign(malformedContent), CHANNEL_ID)).toBeNull();
 	});
 
 	it('builds and validates canonical direct and deeper trace replies', () => {
@@ -705,7 +700,7 @@ describe('Nostr protocol foundation', () => {
 				limit: RECENT_MESSAGE_TIMELINE_LIMIT
 			}
 		]);
-		expect(buildPositionFilter({ channelId: CHANNEL_ID, since: 1_700_000_100 })).toEqual({
+		expect(buildWorldStateFilter({ channelId: CHANNEL_ID, since: 1_700_000_100 })).toEqual({
 			kinds: [30078],
 			'#d': [...worldStateIdentifiers(CHANNEL_ID)],
 			'#e': [CHANNEL_ID],
@@ -749,7 +744,7 @@ describe('Nostr protocol foundation', () => {
 			expect(() => buildTraceDirectReplyFilter({ currentId })).toThrow(TypeError);
 		}
 		expect(() => buildTraceNotificationFilter({ personaPubkey: 'A'.repeat(64) })).toThrow(TypeError);
-		expect(() => buildPositionEventTemplate({
+		expect(() => buildWorldStateEventTemplate({
 			channel: { channelId: CHANNEL_ID, relayHint: 'https://not-a-relay.example.com' },
 			position: { x: 0, y: 0 },
 			slot: 0,
@@ -768,7 +763,7 @@ describe('Nostr protocol foundation', () => {
 	});
 
 	it('rejects retired, mismatched, duplicate, and contradictory World State tags', () => {
-		const retired = buildPositionEventTemplate({ channel, position: { x: 1, y: 1 }, slot: 0, createdAt: 1 });
+		const retired = buildWorldStateEventTemplate({ channel, position: { x: 1, y: 1 }, slot: 0, createdAt: 1 });
 		retired.tags[0][1] = `${PROTOTYPE_NAMESPACE}:position:0`;
 		const duplicateChannel = buildWorldStateEventTemplate({ channel, position: { x: 1, y: 1 }, slot: 0, createdAt: 1 });
 		duplicateChannel.tags.push(['e', CHANNEL_ID]);
