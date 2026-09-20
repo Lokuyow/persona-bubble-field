@@ -1631,7 +1631,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 				if (mendingStartupFeedbackTimer !== null) window.clearTimeout(mendingStartupFeedbackTimer);
 				if (mendingDialogOpen) {
 					mendingStartupFeedback = { id: ++feedbackSequence, phase: 'started' };
-					mendingStartupFeedbackTimer = window.setTimeout(() => { mendingStartupFeedback = null; mendingStartupFeedbackTimer = null; }, 1000);
+					mendingStartupFeedbackTimer = window.setTimeout(() => { mendingStartupFeedback = null; mendingStartupFeedbackTimer = null; }, 3000);
 				}
 				soundController?.play('startup');
 			}
