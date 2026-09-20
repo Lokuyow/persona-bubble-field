@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getPublicKey, type VerifiedEvent } from 'nostr-tools/pure';
 import {
-	parsePositionEvent,
+	parseWorldStateEvent,
 	parseTraceReplyCandidate,
 	validateTraceReplyCandidate,
 	parseWorldMessage,
-	type ParsedPositionEvent,
+	type ParsedWorldStateEvent,
 	type ParsedTraceReply,
 	type ParsedWorldMessage
 } from './nostrProtocol';
@@ -39,7 +39,7 @@ describe('Trace reply publication ownership', () => {
 		const child = traceReply('b'.repeat(64), root, 699);
 		let cached: readonly ParsedTraceReply[] = nested ? [child] : [];
 		let callbacks!: TraceReplyConfiguration;
-		let primary!: { onLivePosition: (event: ParsedPositionEvent) => void };
+		let primary!: { onLiveWorldState: (event: ParsedWorldStateEvent) => void };
 		const publish = vi.fn(async (_event: VerifiedEvent) => accepted as import('./nostrRelayTransport').PublishRelayResult[]);
 		const configureTraceReplies = vi.fn(async (input: TraceReplyConfiguration) => {
 			callbacks = input;
@@ -149,7 +149,7 @@ describe('Trace reply publication ownership', () => {
 		f.publish.mockImplementation((event) => event.kind === 1111 ? pending.promise : Promise.resolve(accepted));
 		const result = f.submit(); await settle();
 		const calls = f.publish.mock.calls.map(([event]) => event);
-		if (positionRequired) f.primary.onLivePosition(parsePositionEvent(calls[0], 'c'.repeat(64))!);
+		if (positionRequired) f.primary.onLiveWorldState(parseWorldStateEvent(calls[0], 'c'.repeat(64))!);
 		await expect(f.session.moveSelf('right')).resolves.toEqual({ kind: 'pending' });
 		await expect(f.session.enterSelf()).resolves.toEqual({ kind: 'pending' });
 		await expect(f.session.publishMessage('normal', 'normal')).resolves.toEqual({ kind: 'pending' });
@@ -237,7 +237,7 @@ describe('Trace reply publication ownership', () => {
 			? [{ relayUrl: 'wss://relay.test/', outcome: 'rejected', notice: 'blocked: no' }] : accepted);
 		await expect(f.submit()).resolves.toEqual({ kind: 'reply-failed' });
 		await f.session.moveSelf('right');
-		expect(parsePositionEvent(f.publish.mock.calls.at(-1)![0], 'c'.repeat(64))?.slot).toBe(1);
+		expect(parseWorldStateEvent(f.publish.mock.calls.at(-1)![0], 'c'.repeat(64))?.slot).toBe(1);
 		await expect(f.session.moveSelf('left')).resolves.toEqual({ kind: 'blocked' });
 	});
 
@@ -293,8 +293,8 @@ function position(
 	pubkey = alice,
 	slot: 0 | 1 = 0,
 	cell = { x: 2, y: 1 }
-): ParsedPositionEvent {
-	return { id, pubkey, createdAt, slot, position: cell };
+): ParsedWorldStateEvent {
+	return { id, pubkey, createdAt, state: 'active', slot, position: cell };
 }
 
 function raw(event: ParsedWorldMessage) {
@@ -330,14 +330,14 @@ function traceBootstrap() {
 	return vi.fn().mockResolvedValue({ rawEvents: [], relays: [] });
 }
 
-function startResult(messages: readonly ParsedWorldMessage[] = [], positions: readonly ParsedPositionEvent[] = [], statuses: readonly string[] = ['eose']) {
+function startResult(messages: readonly ParsedWorldMessage[] = [], worldStates: readonly ParsedWorldStateEvent[] = [], statuses: readonly string[] = ['eose']) {
 	return {
 		metadata: {
 			channel: { channelId: 'c'.repeat(64), relayHint: 'wss://relay.test/' }
 		},
 		messages,
 		timelineMessages: messages,
-		positions,
+		worldStates,
 		metadataDiscovery: { relays: [{ relayUrl: 'ws://relay.test/', status: 'eose' }] },
 		primaryPairs: statuses.map((status) => ({ relayUrl: 'ws://relay.test/', subscription: 'world-messages', status })),
 		nip11: []
@@ -347,12 +347,12 @@ function startResult(messages: readonly ParsedWorldMessage[] = [], positions: re
 describe('world read session', () => {
 	let input: {
 	onBootstrapMessage: (event: ParsedWorldMessage) => void;
-	onBootstrapPosition: (event: ParsedPositionEvent) => void;
+	onBootstrapWorldState: (event: ParsedWorldStateEvent) => void;
 	onLiveMessage: (event: ParsedWorldMessage, rawEvent: never) => void;
-		onLivePosition: (event: ParsedPositionEvent) => void;
+		onLiveWorldState: (event: ParsedWorldStateEvent) => void;
 		onPrimaryClosed: (diagnostic: never) => void;
 		messageSince: number;
-		positionSince: number;
+		worldStateSince: number;
 	} | undefined;
 	let dispose: ReturnType<typeof vi.fn>;
 	let publish: ReturnType<typeof vi.fn>;
@@ -524,7 +524,7 @@ describe('world read session', () => {
 		vi.mocked(reconstructPositionPublishState).mockClear();
 		for (let second = 700; second < 800; second += 1) {
 			vi.setSystemTime(second * 1000);
-			input!.onLivePosition(position(`self-${second}`, second, selfPubkey));
+			input!.onLiveWorldState(position(`self-${second}`, second, selfPubkey));
 		}
 		const calls = vi.mocked(reconstructPositionPublishState).mock.calls;
 		expect(calls).toHaveLength(100);
@@ -535,7 +535,7 @@ describe('world read session', () => {
 		expect(planPositionPublish(state, 798)).toEqual({ kind: 'unavailable', reason: 'clock-regressed' });
 		publish.mockResolvedValue([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
 		await expect(session.moveSelf('right')).resolves.toMatchObject({ kind: 'succeeded' });
-		expect(parsePositionEvent(publish.mock.calls[0][0], 'c'.repeat(64))?.slot).toBe(1);
+		expect(parseWorldStateEvent(publish.mock.calls[0][0], 'c'.repeat(64))?.slot).toBe(1);
 	});
 
 	it('reconstructs the bootstrap snapshot and uses the 11 minute window', async () => {
@@ -550,7 +550,7 @@ describe('world read session', () => {
 
 		const bootstrap = await session.start();
 
-		expect(input).toMatchObject({ messageSince: 40, positionSince: 40 });
+		expect(input).toMatchObject({ messageSince: 40, worldStateSince: 40 });
 		expect(bootstrap.presence.participants).toEqual([
 			{ id: alice, position: { x: 2, y: 1 }, lastActivityAt: 700_000, status: 'active' }
 		]);
@@ -585,7 +585,7 @@ describe('world read session', () => {
 			authorizeSelfWrite: vi.fn().mockResolvedValue('authorized')
 		});
 		await expect(session.moveSelf('right')).resolves.toMatchObject({ kind: 'succeeded' });
-		expect(parsePositionEvent(publish.mock.calls[0][0], 'c'.repeat(64))?.slot).toBe(1);
+		expect(parseWorldStateEvent(publish.mock.calls[0][0], 'c'.repeat(64))?.slot).toBe(1);
 		expect(startRealtime).toHaveBeenCalledOnce();
 		expect(mocked.createTransport.mock.results).toHaveLength(1);
 		expect(dispose).not.toHaveBeenCalled();
@@ -926,7 +926,7 @@ describe('world read session', () => {
 			start: vi.fn(async (nextInput) => {
 				input = nextInput;
 				nextInput.onLiveMessage(liveMessage, raw(liveMessage));
-				nextInput.onLivePosition(livePosition);
+				nextInput.onLiveWorldState(livePosition);
 				return startResult();
 			}),
 			bootstrapTraceRootCandidates: traceBootstrap(),
@@ -1022,7 +1022,7 @@ describe('world read session', () => {
 		mocked.createTransport.mockReturnValue({
 			start: vi.fn(async (nextInput) => {
 				input = nextInput;
-				nextInput.onLivePosition(occupied);
+				nextInput.onLiveWorldState(occupied);
 				return startResult();
 			}),
 			bootstrapTraceRootCandidates: traceBootstrap(),
@@ -1041,7 +1041,7 @@ describe('world read session', () => {
 		await session.start();
 		session.completeBootstrap();
 		await expect(session.enterSelf()).resolves.toEqual({ kind: 'succeeded', operation: 'entry' });
-		const event = parsePositionEvent(publish.mock.calls[0][0], 'c'.repeat(64));
+		const event = parseWorldStateEvent(publish.mock.calls[0][0], 'c'.repeat(64));
 		expect(event?.position).toEqual({ x: 1, y: 0 });
 	});
 
@@ -1075,7 +1075,7 @@ describe('world read session', () => {
 		await session.start();
 		session.completeBootstrap();
 		await expect(session.enterSelf()).resolves.toEqual({ kind: 'succeeded', operation: 'entry' });
-		const event = parsePositionEvent(publish.mock.calls[0][0], 'c'.repeat(64));
+		const event = parseWorldStateEvent(publish.mock.calls[0][0], 'c'.repeat(64));
 		expect(event?.position).not.toEqual({ x: 12, y: 3 });
 	});
 
@@ -1095,7 +1095,7 @@ describe('world read session', () => {
 		await session.enterSelf();
 		vi.setSystemTime(700_000 + PRESENCE_TIMEOUT_MS);
 		await expect(session.moveSelf('right')).resolves.toEqual({ kind: 'succeeded', operation: 'reactivation' });
-		const event = parsePositionEvent(publish.mock.calls[0][0], 'c'.repeat(64));
+		const event = parseWorldStateEvent(publish.mock.calls[0][0], 'c'.repeat(64));
 		expect(event?.position).toEqual({ x: 2, y: 1 });
 	});
 
@@ -1116,9 +1116,9 @@ describe('world read session', () => {
 		session.completeBootstrap();
 		const pending = session.enterSelf();
 		await Promise.resolve();
-		const echoed = parsePositionEvent(publish.mock.calls[0][0], 'c'.repeat(64))!;
-		input!.onLivePosition(echoed);
-		input!.onLivePosition(echoed);
+		const echoed = parseWorldStateEvent(publish.mock.calls[0][0], 'c'.repeat(64))!;
+		input!.onLiveWorldState(echoed);
+		input!.onLiveWorldState(echoed);
 		resolvePublish!([{ relayUrl: 'wss://relay.test/', outcome: 'no-response' }]);
 
 		await expect(pending).resolves.toEqual({ kind: 'succeeded', operation: 'entry' });
@@ -1129,7 +1129,7 @@ describe('world read session', () => {
 		publish.mockResolvedValue([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
 		vi.setSystemTime(700_250);
 		await expect(session.moveSelf(echoed.position.x < 3 ? 'right' : 'left')).resolves.toMatchObject({ kind: 'succeeded' });
-		expect(parsePositionEvent(publish.mock.calls[1][0], 'c'.repeat(64))?.slot).toBe(1);
+		expect(parseWorldStateEvent(publish.mock.calls[1][0], 'c'.repeat(64))?.slot).toBe(1);
 	});
 
 	it('settles a retryable no-response operation when its matching live echo arrives later', async () => {
@@ -1148,10 +1148,10 @@ describe('world read session', () => {
 		await session.start();
 		session.completeBootstrap();
 		await expect(session.enterSelf()).resolves.toEqual({ kind: 'retryable', operation: 'entry' });
-		const echoed = parsePositionEvent(publish.mock.calls[0][0], 'c'.repeat(64))!;
+		const echoed = parseWorldStateEvent(publish.mock.calls[0][0], 'c'.repeat(64))!;
 		const beforeEcho = presenceChanged.mock.calls.length;
-		input!.onLivePosition(echoed);
-		input!.onLivePosition(echoed);
+		input!.onLiveWorldState(echoed);
+		input!.onLiveWorldState(echoed);
 
 		expect(presenceChanged).toHaveBeenCalledTimes(beforeEcho + 1);
 		expect(session.refresh(700_000).participants).toEqual([
@@ -1175,7 +1175,7 @@ describe('world read session', () => {
 		await session.start();
 		session.completeBootstrap();
 		await expect(session.enterSelf()).resolves.toEqual({ kind: 'retryable', operation: 'entry' });
-		input!.onLivePosition(parsePositionEvent(publish.mock.calls[0][0], 'c'.repeat(64))!);
+		input!.onLiveWorldState(parseWorldStateEvent(publish.mock.calls[0][0], 'c'.repeat(64))!);
 
 		expect(writeStates.at(-1)).toBe('succeeded');
 	});
@@ -1200,11 +1200,11 @@ describe('world read session', () => {
 		session.completeBootstrap();
 		await session.enterSelf();
 		await expect(session.moveSelf('right')).resolves.toEqual({ kind: 'retryable', operation: 'movement' });
-		const oldEcho = parsePositionEvent(publish.mock.calls[0][0], 'c'.repeat(64))!;
+		const oldEcho = parseWorldStateEvent(publish.mock.calls[0][0], 'c'.repeat(64))!;
 		vi.setSystemTime(701_000);
 		const newerPending = session.moveSelf('down');
 		await Promise.resolve();
-		input!.onLivePosition(oldEcho);
+		input!.onLiveWorldState(oldEcho);
 
 		expect(writeStates.at(-1)).toBe('pending');
 		resolvePublish([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
@@ -1230,12 +1230,12 @@ describe('world read session', () => {
 		session.completeBootstrap();
 		await session.enterSelf();
 		await expect(session.moveSelf('right')).resolves.toEqual({ kind: 'retryable', operation: 'movement' });
-		const oldEcho = parsePositionEvent(publish.mock.calls[0][0], 'c'.repeat(64))!;
+		const oldEcho = parseWorldStateEvent(publish.mock.calls[0][0], 'c'.repeat(64))!;
 		vi.setSystemTime(701_000);
 		await expect(session.moveSelf('down')).resolves.toEqual({ kind: 'succeeded', operation: 'movement' });
-		const newer = parsePositionEvent(publish.mock.calls[1][0], 'c'.repeat(64))!;
+		const newer = parseWorldStateEvent(publish.mock.calls[1][0], 'c'.repeat(64))!;
 		const beforeOldEcho = writeStates.length;
-		input!.onLivePosition(oldEcho);
+		input!.onLiveWorldState(oldEcho);
 
 		expect(writeStates).toHaveLength(beforeOldEcho);
 		expect(session.refresh(701_000).participants).toEqual([
@@ -1259,8 +1259,8 @@ describe('world read session', () => {
 		session.completeBootstrap();
 		const pending = session.enterSelf();
 		await Promise.resolve();
-		const echoed = parsePositionEvent(publish.mock.calls[0][0], 'c'.repeat(64))!;
-		input!.onLivePosition(echoed);
+		const echoed = parseWorldStateEvent(publish.mock.calls[0][0], 'c'.repeat(64))!;
+		input!.onLiveWorldState(echoed);
 		const beforeCompletion = presenceChanged.mock.calls.length;
 		resolvePublish!([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
 
@@ -1282,9 +1282,9 @@ describe('world read session', () => {
 		await session.start();
 		session.completeBootstrap();
 		await session.enterSelf();
-		const echoed = parsePositionEvent(publish.mock.calls[0][0], 'c'.repeat(64))!;
+		const echoed = parseWorldStateEvent(publish.mock.calls[0][0], 'c'.repeat(64))!;
 		const beforeEcho = presenceChanged.mock.calls.length;
-		input!.onLivePosition(echoed);
+		input!.onLiveWorldState(echoed);
 
 		expect(presenceChanged).toHaveBeenCalledTimes(beforeEcho);
 	});
@@ -1304,8 +1304,8 @@ describe('world read session', () => {
 		await expect(session.enterSelf()).resolves.toEqual({ kind: 'retryable', operation: 'entry' });
 		await expect(session.enterSelf()).resolves.toEqual({ kind: 'retryable', operation: 'entry' });
 		await expect(session.enterSelf()).resolves.toEqual({ kind: 'blocked' });
-		const first = parsePositionEvent(publish.mock.calls[0][0], 'c'.repeat(64))!;
-		const second = parsePositionEvent(publish.mock.calls[1][0], 'c'.repeat(64))!;
+		const first = parseWorldStateEvent(publish.mock.calls[0][0], 'c'.repeat(64))!;
+		const second = parseWorldStateEvent(publish.mock.calls[1][0], 'c'.repeat(64))!;
 		expect([first.slot, second.slot]).toEqual([0, 1]);
 		expect(session.refresh(700_000).participants.find((participant) => participant.id === selfPubkey)).toBeUndefined();
 	});
@@ -1319,10 +1319,10 @@ describe('world read session', () => {
 		await session.start();
 		session.completeBootstrap();
 		await expect(session.enterSelf()).resolves.toMatchObject({ kind: 'retryable' });
-		const old = parsePositionEvent(publish.mock.calls[0][0], 'c'.repeat(64))!;
+		const old = parseWorldStateEvent(publish.mock.calls[0][0], 'c'.repeat(64))!;
 		vi.setSystemTime(701_000);
-		input!.onLivePosition(position('new-slot-1', 701, selfPubkey, 1));
-		input!.onLivePosition(old);
+		input!.onLiveWorldState(position('new-slot-1', 701, selfPubkey, 1));
+		input!.onLiveWorldState(old);
 		expect(session.getSelfPositionWriteState()).toMatchObject({ kind: 'succeeded' });
 		await expect(session.moveSelf('right')).resolves.toEqual({ kind: 'blocked' });
 		expect(publish).toHaveBeenCalledTimes(1);
@@ -1338,11 +1338,11 @@ describe('world read session', () => {
 			mocked.createTransport.mockReturnValue({
 				start: vi.fn(async (nextInput) => {
 					input = nextInput;
-					input!.onBootstrapPosition(older);
-					input!.onBootstrapPosition(latest);
-					input!.onBootstrapPosition({ ...latest });
-					if (scenario === 'two-slot-0') input!.onBootstrapPosition(position('distinct', 700, selfPubkey, 0));
-					if (scenario === 'buffered-slot-1') input!.onLivePosition(position('buffered', 700, selfPubkey, 1));
+					input!.onBootstrapWorldState(older);
+					input!.onBootstrapWorldState(latest);
+					input!.onBootstrapWorldState({ ...latest });
+					if (scenario === 'two-slot-0') input!.onBootstrapWorldState(position('distinct', 700, selfPubkey, 0));
+					if (scenario === 'buffered-slot-1') input!.onLiveWorldState(position('buffered', 700, selfPubkey, 1));
 					return startResult([], [older, { ...older }]);
 				}),
 				bootstrapTraceRootCandidates: traceBootstrap(), dispose, publish
@@ -1358,7 +1358,7 @@ describe('world read session', () => {
 			const outcome = await session.moveSelf('right');
 			if (scenario === 'slot-0') {
 				expect(outcome).toMatchObject({ kind: 'succeeded' });
-				expect(parsePositionEvent(publish.mock.calls[0][0], 'c'.repeat(64))?.slot).toBe(1);
+				expect(parseWorldStateEvent(publish.mock.calls[0][0], 'c'.repeat(64))?.slot).toBe(1);
 			} else {
 				expect(outcome).toEqual({ kind: 'blocked' });
 				expect(publish).not.toHaveBeenCalled();
@@ -1381,7 +1381,7 @@ describe('world read session', () => {
 		session.completeBootstrap();
 		await session.enterSelf();
 		await expect(session.moveSelf('right')).resolves.toEqual({ kind: 'succeeded', operation: 'movement' });
-		const event = parsePositionEvent(publish.mock.calls[0][0], 'c'.repeat(64));
+		const event = parseWorldStateEvent(publish.mock.calls[0][0], 'c'.repeat(64));
 		expect(event?.slot).toBe(1);
 	});
 
@@ -1512,7 +1512,7 @@ describe('world read session', () => {
 		session.completeBootstrap();
 		await session.enterSelf();
 		vi.setSystemTime(700_000 + PRESENCE_TIMEOUT_MS);
-		input!.onLivePosition(position('occupied', 700 + PRESENCE_TIMEOUT_MS / 1000, alice, 0, { x: 2, y: 1 }));
+		input!.onLiveWorldState(position('occupied', 700 + PRESENCE_TIMEOUT_MS / 1000, alice, 0, { x: 2, y: 1 }));
 		await expect(session.publishMessage('back', 'normal')).resolves.toEqual({ kind: 'succeeded', eventId: expect.any(String) });
 		const parsed = parseWorldMessage(publish.mock.calls[0][0], 'c'.repeat(64));
 
@@ -1654,7 +1654,7 @@ describe('world read session', () => {
 			start: vi.fn(async (nextInput) => {
 				input = nextInput;
 				nextInput.onBootstrapMessage(bootstrapMessage);
-				nextInput.onBootstrapPosition(bootstrapPosition);
+				nextInput.onBootstrapWorldState(bootstrapPosition);
 				nextInput.onLiveMessage(bootstrapMessage, raw(bootstrapMessage));
 				return startResult([bootstrapMessage], [bootstrapPosition]);
 			}),
@@ -1687,7 +1687,7 @@ describe('world read session', () => {
 		mocked.createTransport.mockReturnValue({
 			start: vi.fn(async (nextInput) => {
 				input = nextInput;
-				nextInput.onBootstrapPosition(occupied);
+				nextInput.onBootstrapWorldState(occupied);
 				return result;
 			}),
 			bootstrapTraceRootCandidates: traceBootstrap(),
@@ -1708,7 +1708,7 @@ describe('world read session', () => {
 		expect(publish).not.toHaveBeenCalled();
 		session.completeBootstrap();
 		await expect(session.enterSelf()).resolves.toEqual({ kind: 'succeeded', operation: 'entry' });
-		const event = parsePositionEvent(publish.mock.calls[0][0], 'c'.repeat(64));
+		const event = parseWorldStateEvent(publish.mock.calls[0][0], 'c'.repeat(64));
 		expect(event?.position).toEqual({ x: 1, y: 0 });
 	});
 
@@ -1719,7 +1719,7 @@ describe('world read session', () => {
 		mocked.createTransport.mockReturnValue({
 			start: vi.fn(async (nextInput) => {
 				input = nextInput;
-				nextInput.onBootstrapPosition(recovered);
+				nextInput.onBootstrapWorldState(recovered);
 				return result;
 			}),
 			bootstrapTraceRootCandidates: traceBootstrap(),
@@ -1974,7 +1974,7 @@ describe('world read session', () => {
 		}));
 		expect(session.selectTraceConversationSpeech(child.id)).toEqual({ kind: 'opened' });
 		expect(session.selectTraceConversationSpeech(root.id)).toEqual({ kind: 'opened' });
-		input!.onLivePosition(position('self-moved-away', 703, selfPubkey, 1, { x: 3, y: 2 }));
+		input!.onLiveWorldState(position('self-moved-away', 703, selfPubkey, 1, { x: 3, y: 2 }));
 		const beforeBlockedSelection = session.getTraceConversationState();
 		expect(session.selectTraceConversationSpeech(child.id)).toEqual({ kind: 'blocked' });
 		expect(session.getTraceConversationState()).toEqual(beforeBlockedSelection);

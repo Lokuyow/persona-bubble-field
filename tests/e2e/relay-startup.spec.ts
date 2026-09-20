@@ -4,7 +4,7 @@ import { entropyToMnemonic, mnemonicToSeedSync } from '@scure/bip39';
 import { wordlist as englishWordlist } from '@scure/bip39/wordlists/english.js';
 import { finalizeEvent, getPublicKey, verifyEvent, type Event as NostrEvent } from 'nostr-tools/pure';
 import {
-	buildPositionEventTemplate,
+	buildWorldStateEventTemplate,
 	buildTraceReplyTemplate,
 	buildWorldMessageTemplate,
 	parseTraceReplyCandidate,
@@ -127,7 +127,7 @@ function testEvents(nowMs = Date.now(), channelId = CHANNEL_ID) {
 			position: { x: 3, y: 2 },
 			createdAt
 		}), secret),
-		position: finalizeEvent(buildPositionEventTemplate({
+		position: finalizeEvent(buildWorldStateEventTemplate({
 			channel,
 			position: { x: 3, y: 2 },
 			slot: 0,
@@ -172,7 +172,7 @@ function traceRuntimeEvents(rootPosition: { x: number; y: number } = { x: 4, y: 
 	const rootSecret = fixtureSecret(29);
 	const createdAt = Math.floor(Date.now() / 1000);
 	const channel = { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' };
-	const selfPosition = finalizeEvent(buildPositionEventTemplate({
+	const selfPosition = finalizeEvent(buildWorldStateEventTemplate({
 		channel,
 		position: { x: 3, y: 2 },
 		slot: 0,
@@ -1504,19 +1504,19 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('[data-realtime-hole-trigger]')).toHaveCount(1);
 
 		const nearPosition = hole.position.y > 0 ? { x: hole.position.x, y: hole.position.y - 1 } : { x: hole.position.x, y: hole.position.y + 1 };
-		const nearEvent = finalizeEvent(buildPositionEventTemplate({ channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: nearPosition, slot: 0, createdAt: Math.floor((startTime + 2_000) / 1000) }), selfSecret);
+		const nearEvent = finalizeEvent(buildWorldStateEventTemplate({ channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: nearPosition, slot: 0, createdAt: Math.floor((startTime + 2_000) / 1000) }), selfSecret);
 		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), nearEvent);
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', `${nearPosition.x},${nearPosition.y}`);
 
 		const farPosition = { x: hole.position.x > 2 ? hole.position.x - 2 : hole.position.x + 2, y: hole.position.y };
-		const farEvent = finalizeEvent(buildPositionEventTemplate({ channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: farPosition, slot: 0, createdAt: Math.floor((startTime + 3_000) / 1000) }), selfSecret);
+		const farEvent = finalizeEvent(buildWorldStateEventTemplate({ channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: farPosition, slot: 0, createdAt: Math.floor((startTime + 3_000) / 1000) }), selfSecret);
 		await page.locator('[data-realtime-hole-trigger]').click();
 		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), farEvent);
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', `${farPosition.x},${farPosition.y}`);
 		await page.getByRole('button', { name: '参加する' }).click();
 		await expect(page.getByRole('dialog')).toHaveCount(0);
 
-		const nearEventAgain = finalizeEvent(buildPositionEventTemplate({ channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: nearPosition, slot: 0, createdAt: Math.floor((startTime + 4_000) / 1000) }), selfSecret);
+		const nearEventAgain = finalizeEvent(buildWorldStateEventTemplate({ channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: nearPosition, slot: 0, createdAt: Math.floor((startTime + 4_000) / 1000) }), selfSecret);
 		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), nearEventAgain);
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', `${nearPosition.x},${nearPosition.y}`);
 		await page.locator('[data-realtime-hole-trigger]').click();
@@ -1580,7 +1580,7 @@ test.describe('Relay startup', () => {
 		await page.clock.runFor(50);
 		expect((await relayState(page)).state.published.filter((event) => event.kind === 7070 && event.pubkey === selfPubkey)).toHaveLength(0);
 		const nearPosition = hole.position.y > 0 ? { x: hole.position.x, y: hole.position.y - 1 } : { x: hole.position.x, y: hole.position.y + 1 };
-		const nearEvent = finalizeEvent(buildPositionEventTemplate({ channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: nearPosition, slot: 0, createdAt: Math.floor((startTime + 2_000) / 1000) }), selfSecret);
+		const nearEvent = finalizeEvent(buildWorldStateEventTemplate({ channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: nearPosition, slot: 0, createdAt: Math.floor((startTime + 2_000) / 1000) }), selfSecret);
 		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), nearEvent);
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', `${nearPosition.x},${nearPosition.y}`);
 		await page.locator('[data-realtime-hole-trigger]').click();
@@ -2200,7 +2200,7 @@ test.describe('Relay startup', () => {
 		await terminal.click();
 		await expect(page.getByRole('status')).toContainText('近づくと端末を使える');
 
-		const atTerminal = finalizeEvent(buildPositionEventTemplate({
+		const atTerminal = finalizeEvent(buildWorldStateEventTemplate({
 			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 11, y: 3 }, slot: 1,
 			createdAt: Math.floor(await page.evaluate(() => Date.now()) / 1000)
 		}), secret);
@@ -2213,9 +2213,13 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,2');
 		await expect(page.getByRole('dialog')).toHaveCount(0);
 
+		const publishedWorldStateCount = async () => (await relayState(page)).state.published.filter((event) => event.kind === 30078 && event.pubkey === pubkey).length;
+		const beforeMendingStart = await publishedWorldStateCount();
+		await page.clock.runFor(1_001);
 		await terminal.click();
 		await expect(page.getByRole('dialog')).toBeVisible();
 		await expect.poll(() => readRelayGameState(page)).toMatchObject({ mendingJob: expect.any(Object) });
+		await expect.poll(publishedWorldStateCount).toBeGreaterThan(beforeMendingStart);
 		const started = await readRelayGameState(page);
 		expect(started).toMatchObject({ version: 4, points: 0, pointProgressTicks: 0, mendingJob: expect.objectContaining({ processedDurationMs: 0, unclaimedPoints: 0 }) });
 		const activeDialog = page.getByRole('dialog');
@@ -2266,11 +2270,13 @@ test.describe('Relay startup', () => {
 		await expect(partialDialog.locator('.next-point[data-mending-icon="clock"] > svg')).toHaveCount(1);
 		await expect(partialDialog.locator('[data-mending-icon="coins"] .next-point')).toHaveCount(1);
 		await expect(partialDialog).toContainText('+2 pt');
+		const beforeMendingReward = await publishedWorldStateCount();
 		await partialDialog.getByRole('button', { name: '成果を受け取る' }).click();
 		await expect.poll(async () => {
 			const partialState = await readRelayGameState(page);
 			return partialState.points === 2 && partialState.pointProgressTicks > 0 && partialState.pointProgressTicks < 60_000_000;
 		}).toBe(true);
+		await expect.poll(publishedWorldStateCount).toBeGreaterThan(beforeMendingReward);
 		await expect(page.locator('.mending-success-feedback')).toContainText('+2 pt');
 
 		const secondAt = partialAt + 3 * 60 * 1000;
@@ -2287,7 +2293,7 @@ test.describe('Relay startup', () => {
 		const fullAt = (afterSecond.mendingJob as { startedAtMs: number }).startedAtMs + 5 * 60 * 1000;
 		await page.clock.setSystemTime(fullAt);
 		await pauseAtCurrentBrowserTime(page);
-		const completedAtTerminal = finalizeEvent(buildPositionEventTemplate({
+		const completedAtTerminal = finalizeEvent(buildWorldStateEventTemplate({
 			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 11, y: 2 }, slot: 1,
 			createdAt: Math.floor(await page.evaluate(() => Date.now()) / 1000)
 		}), secret);
@@ -2332,7 +2338,7 @@ test.describe('Relay startup', () => {
 		await adjustment.click();
 		await expect(page.getByRole('status')).toContainText('近づくと端末を使える');
 
-		const nearby = finalizeEvent(buildPositionEventTemplate({
+		const nearby = finalizeEvent(buildWorldStateEventTemplate({
 			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 13, y: 3 }, slot: 1,
 			createdAt: Math.floor(await page.evaluate(() => Date.now()) / 1000)
 		}), secret);
@@ -2354,6 +2360,8 @@ test.describe('Relay startup', () => {
 		await expect(dialog).toContainText('必要ポイント');
 		await expect(dialog.getByRole('button', { name: 'Lv2へ強化' }).first()).toBeVisible();
 		await expect(dialog.getByRole('button', { name: 'Lv2へ強化' }).first()).toHaveCSS('color', 'rgb(255, 255, 255)');
+		const beforeAbilityUpgrade = (await relayState(page)).state.published.filter((event) => event.kind === 30078 && event.pubkey === pubkey).length;
+		await page.clock.runFor(1_001);
 		const upgradedCard = dialog.locator('.ability-card').first();
 		const stableBefore = await upgradedCard.evaluate((card) => {
 			const type = card.querySelector('.ability-type')!.getBoundingClientRect();
@@ -2366,6 +2374,7 @@ test.describe('Relay startup', () => {
 		await expect(dialog).not.toContainText('Root Point');
 		await dialog.getByRole('button', { name: 'Lv2へ強化' }).first().click();
 		await expect(dialog).toContainText('9 pt');
+		await expect.poll(async () => (await relayState(page)).state.published.filter((event) => event.kind === 30078 && event.pubkey === pubkey).length).toBeGreaterThan(beforeAbilityUpgrade);
 		await expect(dialog.locator('.level-up-badge')).toHaveCount(1);
 		const stableDuring = await upgradedCard.evaluate((card) => ({
 			typeY: card.querySelector('.ability-type')!.getBoundingClientRect().y,
@@ -2556,7 +2565,7 @@ test.describe('Relay startup', () => {
 			relay.releaseMetadata(); relay.releasePrimary();
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
-		const nearby = finalizeEvent(buildPositionEventTemplate({
+		const nearby = finalizeEvent(buildWorldStateEventTemplate({
 			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 13, y: 3 }, slot: 1,
 			createdAt: Math.floor(await page.evaluate(() => Date.now()) / 1000)
 		}), secret);
@@ -2584,7 +2593,7 @@ test.describe('Relay startup', () => {
 			relay.releaseMetadata(); relay.releasePrimary();
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
-		const atTerminal = finalizeEvent(buildPositionEventTemplate({
+		const atTerminal = finalizeEvent(buildWorldStateEventTemplate({
 			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 11, y: 3 }, slot: 1,
 			createdAt: Math.floor(await page.evaluate(() => Date.now()) / 1000)
 		}), secret);
@@ -2630,7 +2639,7 @@ test.describe('Relay startup', () => {
 		const job = started.mendingJob as { startedAtMs: number };
 		await page.getByRole('button', { name: '閉じる', exact: true }).click();
 		await page.clock.setSystemTime(job.startedAtMs + 5 * 60 * 1000);
-		const currentTerminalPosition = finalizeEvent(buildPositionEventTemplate({
+		const currentTerminalPosition = finalizeEvent(buildWorldStateEventTemplate({
 			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 11, y: 3 }, slot: 1,
 			createdAt: Math.floor(await page.evaluate(() => Date.now()) / 1000)
 		}), secret);
@@ -2639,7 +2648,7 @@ test.describe('Relay startup', () => {
 		await terminal.click();
 		await expect(page.getByRole('button', { name: '成果を受け取る' })).toBeVisible();
 		await page.clock.runFor(1_001);
-		const moved = finalizeEvent(buildPositionEventTemplate({
+		const moved = finalizeEvent(buildWorldStateEventTemplate({
 			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 0, y: 0 }, slot: 1,
 			createdAt: Math.floor(await page.evaluate(() => Date.now()) / 1000)
 		}), secret);
@@ -2672,7 +2681,7 @@ test.describe('Relay startup', () => {
 				await expect(client.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
 			}));
 			const injectTerminalPosition = async (client: Page) => {
-				const event = finalizeEvent(buildPositionEventTemplate({
+				const event = finalizeEvent(buildWorldStateEventTemplate({
 					channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 11, y: 3 }, slot: 1,
 					createdAt: Math.floor(await client.evaluate(() => Date.now()) / 1000)
 				}), secret);
@@ -2720,7 +2729,7 @@ test.describe('Relay startup', () => {
 			relay.releaseMetadata(); relay.releasePrimary();
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${oldPubkey}"]`)).toBeVisible();
-		const atTerminal = finalizeEvent(buildPositionEventTemplate({
+		const atTerminal = finalizeEvent(buildWorldStateEventTemplate({
 			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 11, y: 3 }, slot: 1,
 			createdAt: Math.floor(await page.evaluate(() => Date.now()) / 1000)
 		}), secret);
@@ -2814,7 +2823,7 @@ test.describe('Relay startup', () => {
 			relay.releaseMetadata(); relay.releasePrimary();
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
-		const atTerminal = finalizeEvent(buildPositionEventTemplate({
+		const atTerminal = finalizeEvent(buildWorldStateEventTemplate({
 			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 11, y: 3 }, slot: 1,
 			createdAt: Math.floor(await page.evaluate(() => Date.now()) / 1000)
 		}), secret);
@@ -3214,7 +3223,7 @@ test.describe('Relay startup', () => {
 			const readerSecret = fixtureSecret(43);
 			const readerPubkey = getPublicKey(readerSecret);
 			expect(readerPubkey).not.toBe(trace.selfPubkey);
-			const readerPosition = finalizeEvent(buildPositionEventTemplate({
+			const readerPosition = finalizeEvent(buildWorldStateEventTemplate({
 				channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 3, y: 2 }, slot: 0, createdAt: trace.selfPosition.created_at
 			}), readerSecret);
 			const openClient = async (client: Page, secret: Uint8Array, pubkey: string, position: NostrEvent, history: NostrEvent[]) => {
@@ -3312,7 +3321,7 @@ test.describe('Relay startup', () => {
 		const channel = { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' };
 		const primary = {
 			message: finalizeEvent(buildWorldMessageTemplate({ channel, content: 'read-state participant', speechType: 'normal', position: { x: 3, y: 2 }, createdAt: Math.floor(now / 1000) }), selfSecret),
-			position: finalizeEvent(buildPositionEventTemplate({ channel, position: { x: 3, y: 2 }, slot: 0, createdAt: Math.floor(now / 1000) }), selfSecret)
+			position: finalizeEvent(buildWorldStateEventTemplate({ channel, position: { x: 3, y: 2 }, slot: 0, createdAt: Math.floor(now / 1000) }), selfSecret)
 		};
 		let root = finalizeEvent(buildWorldMessageTemplate({ channel, content: 'read-state root 0', speechType: 'normal', position: { x: 4, y: 2 }, createdAt: Math.floor(now / 1000) }), selfSecret);
 		for (let attempt = 1; BigInt(`0x${root.id}`) % 5n !== 0n; attempt += 1) {
@@ -4739,7 +4748,7 @@ test.describe('Relay startup', () => {
 			channel, createdAt, content: 'speech remains dismissed after the visual speaker returns',
 			speechType: 'normal', position: { x: 10, y: 3 }
 		}), remoteSecret);
-		const selfPosition = finalizeEvent(buildPositionEventTemplate({
+		const selfPosition = finalizeEvent(buildWorldStateEventTemplate({
 			channel, createdAt, position: { x: 7, y: 3 }, slot: 0
 		}), selfSecret);
 		await installHostOwnedStub(page);
@@ -4774,7 +4783,7 @@ test.describe('Relay startup', () => {
 		expect(initial.x).toBeGreaterThan(initial.left);
 		expect(initial.x).toBeLessThan(initial.right);
 		const injectPosition = async (x: number, slot: 0 | 1) => {
-			const event = finalizeEvent(buildPositionEventTemplate({ channel, createdAt, position: { x, y: 3 }, slot }), remoteSecret);
+			const event = finalizeEvent(buildWorldStateEventTemplate({ channel, createdAt, position: { x, y: 3 }, slot }), remoteSecret);
 			await page.evaluate((event) => (window as unknown as {
 				__relayStartupTest: { injectPosition(event: object): void };
 			}).__relayStartupTest.injectPosition(event), event);
@@ -4797,6 +4806,38 @@ test.describe('Relay startup', () => {
 		await expect(bubble).toHaveCount(0);
 	});
 
+	test('removes a remote participant immediately when a live World State exit arrives', async ({ page }) => {
+		const selfSecret = fixtureSecret(19);
+		const remoteSecret = fixtureSecret(20);
+		const createdAt = Math.floor(Date.now() / 1000);
+		const channel = { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' };
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { deferPrimaryEvents: true });
+		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret));
+		await page.goto('/');
+		await expect(page.locator('.composer-dock')).toBeVisible();
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
+			AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) &&
+			(request.filter.kinds as number[])[0] === 30078
+		)).toBe(true);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimaryEvents(): void; releasePrimary(): void } }).__relayStartupTest.releasePrimaryEvents());
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+
+		const cell = { x: 2, y: 1 };
+		const active = finalizeEvent(buildWorldStateEventTemplate({ channel, createdAt, position: cell, slot: 0 }), remoteSecret);
+		const exit = finalizeEvent(buildWorldStateEventTemplate({ channel, createdAt, position: cell, slot: 'exit' }), remoteSecret);
+		const inject = (event: NostrEvent) => page.evaluate((nextEvent) => (window as typeof window & {
+			__relayStartupTest: { injectPosition(event: object): void }
+		}).__relayStartupTest.injectPosition(nextEvent), event);
+		await inject(active);
+		const remote = page.locator(`.participant[data-participant-id="${active.pubkey}"]`);
+		await expect(remote).toHaveAttribute('data-position', `${cell.x},${cell.y}`);
+		await inject(exit);
+		await expect(remote).toHaveCount(0);
+		await expect(page.locator(`.participant[data-position="${cell.x},${cell.y}"]`)).toHaveCount(0);
+	});
+
 	test('retargets active participant and camera animation when another participant updates', async ({ page }) => {
 		await page.setViewportSize({ width: 390, height: 844 });
 		await page.clock.install({ time: Date.now() });
@@ -4805,7 +4846,7 @@ test.describe('Relay startup', () => {
 		await installVisualAnimationRafMetrics(page);
 		const self = page.locator('.participant[data-self="true"]');
 		const scene = page.locator('.field-scene');
-		const remotePosition = finalizeEvent(buildPositionEventTemplate({
+		const remotePosition = finalizeEvent(buildWorldStateEventTemplate({
 			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' },
 			position: { x: 4, y: 2 },
 			slot: 0,

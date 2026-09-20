@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ParsedPositionEvent } from './nostrProtocol';
+import type { ParsedWorldStateEvent } from './nostrProtocol';
 import {
 	createPositionPublishState,
 	planPositionPublish,
@@ -17,11 +17,12 @@ function parsedPosition(
 	pubkey: string,
 	createdAt: number,
 	slot: 0 | 1
-): ParsedPositionEvent {
+): ParsedWorldStateEvent {
 	return {
 		id,
 		pubkey,
 		createdAt,
+		state: 'active',
 		slot,
 		position: { x: 1, y: 2 }
 	};
@@ -34,7 +35,7 @@ function availablePlan(plan: PositionPublishPlan): Extract<PositionPublishPlan, 
 
 describe('position publish slot planner', () => {
 	it('retains at most two events and matches full-history reconstruction at every prefix', () => {
-		const stream: ParsedPositionEvent[] = [];
+		const stream: ParsedWorldStateEvent[] = [];
 		for (let second = 100; second < 200; second += 1) {
 			const event = parsedPosition(`own-${second}`, OWN_PUBKEY, second, second % 2 ? 1 : 0);
 			stream.push(event, { ...event }, parsedPosition(`other-${second}`, OTHER_PUBKEY, second + 100, 1));
@@ -42,7 +43,7 @@ describe('position publish slot planner', () => {
 		}
 		for (let index = 0; index < 100; index += 1) stream.push(parsedPosition(`same-${index}`, OWN_PUBKEY, 199, 0));
 		let evidence: PositionPublishEvidence = [];
-		const history: ParsedPositionEvent[] = [];
+		const history: ParsedWorldStateEvent[] = [];
 		for (const event of stream) {
 			const previous = evidence;
 			const snapshot = [...previous];
@@ -178,5 +179,14 @@ describe('position publish slot planner', () => {
 
 		expect(state).toEqual({ lastPublishSecond: 100, consumedSlots: 1 });
 		expect(planPositionPublish(state, 100)).toMatchObject({ kind: 'available', slot: 1 });
+	});
+
+	it('does not consume active quota for exit evidence', () => {
+		const exit = {
+			id: 'exit', pubkey: OWN_PUBKEY, createdAt: 100, state: 'exit' as const, slot: null,
+			position: { x: 1, y: 2 }
+		};
+		expect(reconstructPositionPublishState([exit], OWN_PUBKEY)).toEqual(createPositionPublishState());
+		expect(planPositionPublish(reconstructPositionPublishState([exit], OWN_PUBKEY), 100)).toMatchObject({ kind: 'available', slot: 0 });
 	});
 });

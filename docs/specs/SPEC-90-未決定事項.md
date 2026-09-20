@@ -19,8 +19,8 @@ Rootの生成・暗号化保存、BIP85によるIdentity導出、固定3候補�
 - 正式公開時の恒久NIP-32 namespace
   - prototypeでは `io.github.lokuyow.persona-bubble-field` を使用する
   - `l=chat`、`speech:shout`、`speech:monologue` の語彙はprototype仕様として確定済み
-- 正式公開時のposition用 `kind 30078` の恒久 `d` tag値
-  - prototypeでは `io.github.lokuyow.persona-bubble-field:position:0` / `io.github.lokuyow.persona-bubble-field:position:1` を使用する
+- 正式公開時のPublic World State用 `kind 30078` の恒久 `d` tag値
+	- prototypeでは `io.github.lokuyow.persona-bubble-field:world-state:1:<channel-id>:0` / `:1` / `:exit` を使用する
 - kind 42の発言位置tag `w` を正式公開仕様として恒久採用するか
 	- prototypeではkind 42だけが `["w", "<x>:<y>"]` を使用する。kind 1111 replyはtree-onlyであり、`w` を発行しない
   - 正式公開仕様として固定する前に、その時点の最新NIPおよび既存の単一文字tag利用状況を再確認する

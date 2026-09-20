@@ -1,4 +1,4 @@
-import type { ParsedPositionEvent, PositionSlot } from './nostrProtocol';
+import type { ParsedWorldStateEvent, WorldStateSlot } from './nostrProtocol';
 
 export type PositionPublishState = Readonly<{
 	/** The latest Unix second represented by this planner, or null for fresh state. */
@@ -11,16 +11,16 @@ export type PositionPublishUnavailableReason = 'second-exhausted' | 'clock-regre
 
 export type PositionPublishEvidence =
 	| readonly []
-	| readonly [ParsedPositionEvent]
-	| readonly [ParsedPositionEvent, ParsedPositionEvent];
+	| readonly [ParsedWorldStateEvent]
+	| readonly [ParsedWorldStateEvent, ParsedWorldStateEvent];
 
 /** Retains enough own evidence to reconstruct slot consumption, without history growth. */
 export function retainPositionPublishEvidence(
 	evidence: PositionPublishEvidence,
-	event: ParsedPositionEvent,
+	event: ParsedWorldStateEvent,
 	pubkey: string
 ): PositionPublishEvidence {
-	if (event.pubkey !== pubkey) return evidence;
+	if (event.pubkey !== pubkey || event.state === 'exit' || event.slot === null) return evidence;
 	if (evidence.length === 0 || event.createdAt > evidence[0].createdAt) return [event];
 	if (event.createdAt < evidence[0].createdAt || evidence.some((known) => known.id === event.id)) return evidence;
 	// Two distinct events already exhaust this second, regardless of their slots.
@@ -30,7 +30,7 @@ export function retainPositionPublishEvidence(
 export type PositionPublishPlan =
 	| Readonly<{
 			kind: 'available';
-			slot: PositionSlot;
+	slot: WorldStateSlot;
 			nextState: PositionPublishState;
 		}>
 	| Readonly<{
@@ -85,12 +85,12 @@ export function planPositionPublish(
  * both slots for that second have been consumed.
  */
 export function reconstructPositionPublishState(
-	events: readonly ParsedPositionEvent[],
+	events: readonly ParsedWorldStateEvent[],
 	pubkey: string
 ): PositionPublishState {
-	const uniqueOwnEvents = new Map<string, ParsedPositionEvent>();
+	const uniqueOwnEvents = new Map<string, ParsedWorldStateEvent>();
 	for (const event of events) {
-		if (event.pubkey === pubkey && !uniqueOwnEvents.has(event.id)) {
+		if (event.pubkey === pubkey && event.state !== 'exit' && event.slot !== null && !uniqueOwnEvents.has(event.id)) {
 			uniqueOwnEvents.set(event.id, event);
 		}
 	}

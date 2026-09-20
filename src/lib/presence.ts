@@ -9,7 +9,8 @@ export type PresenceStatus = 'active' | 'inactive';
 export type PresenceParticipant = {
 	id: string;
 	position: GridPosition;
-	lastActivityAt: number;
+	/** Null means no positive activity has been observed (for example exit-only bootstrap). */
+	lastActivityAt: number | null;
 	status: PresenceStatus;
 };
 
@@ -209,7 +210,7 @@ export function moveParticipant(
 export function prunePresence(state: PresenceState, now: number): PresenceState {
 	let changed = false;
 	const participants = state.participants.map((participant) => {
-		if (participant.status === 'inactive' || now - participant.lastActivityAt < PRESENCE_TIMEOUT_MS) {
+		if (participant.status === 'inactive' || participant.lastActivityAt === null || now - participant.lastActivityAt < PRESENCE_TIMEOUT_MS) {
 			return copyParticipant(participant);
 		}
 		changed = true;
@@ -223,7 +224,7 @@ export function reconstructPresenceState(snapshot: PresenceSnapshot, now: number
 		field: { ...snapshot.field },
 		participants: snapshot.participants.map((participant) => ({
 			...copyParticipant(participant),
-			status: now - participant.lastActivityAt < PRESENCE_TIMEOUT_MS ? 'active' : 'inactive'
+			status: participant.lastActivityAt !== null && now - participant.lastActivityAt < PRESENCE_TIMEOUT_MS ? 'active' : 'inactive'
 		}))
 	};
 }

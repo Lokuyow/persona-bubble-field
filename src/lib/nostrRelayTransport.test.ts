@@ -9,7 +9,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createNostrRelayTransport } from './nostrRelayTransport';
 import {
-	buildTraceRootBootstrapFilter, buildWorldMessageTemplate, buildPositionEventTemplate, buildWorldMessageFilter
+	buildTraceRootBootstrapFilter, buildWorldMessageTemplate, buildWorldStateEventTemplate, buildWorldMessageFilter
 } from './nostrProtocol';
 import { buildRealtimeControlEventTemplate, buildRealtimeControlFilter, buildRealtimeEventFilter, buildRealtimeInstanceFilter, finalizeRealtimeEvent, type RealtimeEventRegistry } from './realtimeEvents';
 import { RIFT_EVENT_DEFINITION, buildRiftActionTemplate } from './rift';
@@ -114,16 +114,16 @@ function fixture(authorityCount = 2, websocketCtor = socketConstructor, operatio
 	transports.push(transport);
 	const input = {
 		messageSince: TIME - 50,
-		positionSince: TIME - 100,
+		worldStateSince: TIME - 100,
 		onBootstrapMessage: vi.fn(),
-		onBootstrapPosition: vi.fn(),
+		onBootstrapWorldState: vi.fn(),
 		onLiveMessage: vi.fn(),
-		onLivePosition: vi.fn(),
+		onLiveWorldState: vi.fn(),
 		onPrimaryClosed: vi.fn()
 	};
 	const reference = { channelId: channel.id, relayHint: authorities[0].url };
 	const message = (content = 'hello', createdAt = TIME) => finalizeEvent(buildWorldMessageTemplate({ channel: reference, content, createdAt, speechType: 'normal', position: { x: 1, y: 2 } }), AUTHOR);
-	const position = (createdAt = TIME) => finalizeEvent(buildPositionEventTemplate({ channel: reference, createdAt, slot: 0, position: { x: 1, y: 2 } }), AUTHOR);
+	const position = (createdAt = TIME) => finalizeEvent(buildWorldStateEventTemplate({ channel: reference, createdAt, slot: 0, position: { x: 1, y: 2 } }), AUTHOR);
 	const start = async (elapsed = 30) => {
 		const pending = transport.start(input);
 		await vi.advanceTimersByTimeAsync(elapsed);
@@ -206,7 +206,7 @@ describe('primary lifecycle', () => {
 		}
 		expect(result.primaryPairs).toHaveLength(4);
 		expect(result.primaryPairs.map((pair) => pair.subscription)).toEqual([
-			'world-messages', 'world-positions', 'world-messages', 'world-positions'
+			'world-messages', 'world-state', 'world-messages', 'world-state'
 		]);
 	});
 
@@ -218,8 +218,8 @@ describe('primary lifecycle', () => {
 			send(socket, 'EOSE', request[1]);
 		};
 		const result = await f.start();
-		expect(result.positions.map((position) => position.id)).toEqual([event.id]);
-		expect(f.input.onLivePosition).not.toHaveBeenCalled();
+		expect(result.worldStates.map((position) => position.id)).toEqual([event.id]);
+		expect(f.input.onLiveWorldState).not.toHaveBeenCalled();
 	});
 
 	it('projects each verified primary bootstrap event before final EOSE and retains it once in the snapshot', async () => {
@@ -262,9 +262,9 @@ describe('primary lifecycle', () => {
 		};
 		const result = await f.start();
 		expect(result.messages.map((event) => event.id)).toEqual([storedMessage.id]);
-		expect(result.positions.map((event) => event.id)).toEqual([storedPosition.id]);
+		expect(result.worldStates.map((event) => event.id)).toEqual([storedPosition.id]);
 		expect(f.input.onLiveMessage).not.toHaveBeenCalled();
-		expect(f.input.onLivePosition).not.toHaveBeenCalled();
+		expect(f.input.onLiveWorldState).not.toHaveBeenCalled();
 		const liveMessage = f.message('live', TIME + 1);
 		const livePosition = f.position(TIME + 1);
 		for (const relay of f.authorities) {
@@ -276,7 +276,7 @@ describe('primary lifecycle', () => {
 		expect(f.input.onLiveMessage).toHaveBeenCalledExactlyOnceWith(
 			expect.objectContaining({ id: liveMessage.id }), expect.objectContaining({ id: liveMessage.id })
 		);
-		expect(f.input.onLivePosition).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: livePosition.id }));
+		expect(f.input.onLiveWorldState).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: livePosition.id }));
 		expect(f.authorities.map((relay) => relay.sockets.length)).toEqual([1, 1]);
 		expect(f.authorities.flatMap((relay) => relay.messages.filter((message) => message[0] === 'CLOSE'))).toEqual([]);
 	});
@@ -356,11 +356,11 @@ describe('primary lifecycle', () => {
 				expect(request[3].limit).toBe(50);
 				expect(request[3].since).toBeUndefined();
 			} else {
-				expect(request[2].since).toBe(f.input.positionSince);
+				expect(request[2].since).toBe(f.input.worldStateSince);
 			}
 		}
 		expect(f.input.onLiveMessage).not.toHaveBeenCalled();
-		expect(f.input.onLivePosition).not.toHaveBeenCalled();
+		expect(f.input.onLiveWorldState).not.toHaveBeenCalled();
 		const live = f.message('after reconnect', TIME + 2);
 		send(relay.latestSocket(), 'EVENT', relay.primaryId(42), live);
 		await vi.advanceTimersByTimeAsync(5);
@@ -736,7 +736,7 @@ describe('NIP-11 capability and queue', () => {
 		if (limit === 1) {
 			expect(relay.primaryRequests()).toHaveLength(1);
 			expect(result.primaryPairs.map((pair) => pair.status).sort()).toEqual(['eose', 'timeout']);
-			const sentLogical = kind(relay.primaryRequests()[0]) === 42 ? 'world-messages' : 'world-positions';
+			const sentLogical = kind(relay.primaryRequests()[0]) === 42 ? 'world-messages' : 'world-state';
 			expect(result.primaryPairs.find((pair) => pair.subscription === sentLogical)?.status).toBe('eose');
 		} else {
 			expect(relay.primaryRequests()).toHaveLength(2);
@@ -1248,7 +1248,7 @@ describe('trace reply transport', () => {
 		expect(f.input.onLiveMessage).toHaveBeenCalledExactlyOnceWith(
 			expect.objectContaining({ id: message.id }), expect.objectContaining(message)
 		);
-		expect(f.input.onLivePosition).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: position.id }));
+		expect(f.input.onLiveWorldState).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: position.id }));
 		expect(f.input.onPrimaryClosed).not.toHaveBeenCalled();
 		expect(f.transport.getDiagnostics().primaryPairs).toEqual(primaryDiagnostics);
 	});
