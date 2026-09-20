@@ -2242,12 +2242,32 @@ test.describe('Relay startup', () => {
 		await expect(dialog).toContainText('必要ポイント');
 		await expect(dialog.getByRole('button', { name: 'Lv2へ強化' }).first()).toBeVisible();
 		await expect(dialog.getByRole('button', { name: 'Lv2へ強化' }).first()).toHaveCSS('color', 'rgb(255, 255, 255)');
+		const upgradedCard = dialog.locator('.ability-card').first();
+		const stableBefore = await upgradedCard.evaluate((card) => {
+			const type = card.querySelector('.ability-type')!.getBoundingClientRect();
+			const cost = card.querySelector('.cost')!.getBoundingClientRect();
+			const button = card.querySelector('button')!.getBoundingClientRect();
+			return { typeY: type.y, costY: cost.y, buttonY: button.y };
+		});
 		await expect(dialog).not.toContainText('強化後');
 		await expect(dialog).not.toContainText('normal clear');
 		await expect(dialog).not.toContainText('Root Point');
 		await dialog.getByRole('button', { name: 'Lv2へ強化' }).first().click();
 		await expect(dialog).toContainText('9 pt');
 		await expect(dialog.locator('.level-up-badge')).toHaveCount(1);
+		const stableDuring = await upgradedCard.evaluate((card) => ({
+			typeY: card.querySelector('.ability-type')!.getBoundingClientRect().y,
+			costY: card.querySelector('.cost')!.getBoundingClientRect().y,
+			buttonY: card.querySelector('button')!.getBoundingClientRect().y
+		}));
+		expect(stableDuring).toEqual(stableBefore);
+		await expect(dialog.locator('.level-up-badge')).toHaveCount(0, { timeout: 1_500 });
+		const stableAfter = await upgradedCard.evaluate((card) => ({
+			typeY: card.querySelector('.ability-type')!.getBoundingClientRect().y,
+			costY: card.querySelector('.cost')!.getBoundingClientRect().y,
+			buttonY: card.querySelector('button')!.getBoundingClientRect().y
+		}));
+		expect(stableAfter).toEqual(stableBefore);
 		await expect(page.locator('.lifespan-hud')).toContainText('ポイント 9pt');
 		await expect(dialog).toContainText('推論効率 Lv2');
 		await page.reload();
