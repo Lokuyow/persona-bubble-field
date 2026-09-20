@@ -12,7 +12,7 @@ import {
 	type PresenceSnapshot,
 	type PresenceState
 } from './presence';
-import type { ParsedPositionEvent, ParsedWorldMessage } from './nostrProtocol';
+import type { ParsedWorldStateEvent, ParsedWorldMessage } from './nostrProtocol';
 
 export type WorldPresenceState = Readonly<{
 	field: PresenceField;
@@ -28,7 +28,9 @@ function copyParticipant(participant: ReducedPresenceParticipant): ReducedPresen
 		pubkey: participant.pubkey,
 		position: copyPosition(participant.position),
 		positionEvidence: { ...participant.positionEvidence },
-		lastActivityCreatedAt: participant.lastActivityCreatedAt
+		...(participant.lastActivityCreatedAt !== undefined
+			? { lastActivityCreatedAt: participant.lastActivityCreatedAt }
+			: { lastPositiveActivityCreatedAt: participant.lastPositiveActivityCreatedAt, latestExitCreatedAt: participant.latestExitCreatedAt })
 	};
 }
 
@@ -63,14 +65,14 @@ function applyWorldPresenceEvidence(
 export function reconstructWorldPresenceState(
 	field: PresenceField,
 	messages: readonly ParsedWorldMessage[],
-	positions: readonly ParsedPositionEvent[]
+	worldStates: readonly ParsedWorldStateEvent[]
 ): WorldPresenceState {
 	const validMessages = messages.filter((message) => isWithinField(message.position, field));
-	const validPositions = positions.filter((position) => isWithinField(position.position, field));
+	const validWorldStates = worldStates.filter((event) => isWithinField(event.position, field));
 
 	return {
 		field: { ...field },
-		participants: reconstructPresenceEvidence(validMessages, validPositions)
+		participants: reconstructPresenceEvidence(validMessages, validWorldStates)
 	};
 }
 
@@ -86,7 +88,7 @@ export function applyWorldPresenceMessage(
 /** Applies one live position event without invoking local presence lifecycle semantics. */
 export function applyWorldPresencePosition(
 	state: WorldPresenceState,
-	position: ParsedPositionEvent
+	position: ParsedWorldStateEvent
 ): WorldPresenceState {
 	if (!isWithinField(position.position, state.field)) return state;
 	return applyWorldPresenceEvidence(state, presenceEvidenceFromPosition(position));
@@ -99,8 +101,12 @@ export function projectWorldPresenceState(state: WorldPresenceState, nowMs: numb
 		participants: state.participants.map((participant) => ({
 			id: participant.pubkey,
 			position: copyPosition(participant.position),
-			lastActivityAt: participant.lastActivityCreatedAt * 1000,
-			status: 'active'
+			lastActivityAt: (() => {
+				const positive = participant.lastPositiveActivityCreatedAt ?? participant.lastActivityCreatedAt ?? null;
+				const exit = participant.latestExitCreatedAt ?? null;
+				return positive !== null && (exit === null || positive > exit) ? positive * 1000 : null;
+			})(),
+			status: 'inactive'
 		}))
 	};
 

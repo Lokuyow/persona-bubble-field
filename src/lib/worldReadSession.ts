@@ -15,14 +15,14 @@ import {
 	type TraceReadSnapshot
 } from './traceReadState';
 import {
-	buildPositionEventTemplate,
+	buildWorldStateEventTemplate,
 	buildTraceReplyTemplate,
 	buildWorldMessageTemplate,
 	finalizeWorldEvent,
-	parsePositionEvent,
+	parseWorldStateEvent,
 	parseWorldMessage,
 	type ChannelReference,
-	type ParsedPositionEvent,
+	type ParsedWorldStateEvent,
 	type ParsedTraceReply,
 	type ParsedWorldMessage
 } from './nostrProtocol';
@@ -86,7 +86,7 @@ export type WorldReadConnectionStatus =
 export type WorldReadBootstrap = Readonly<{
 	messages: readonly ParsedWorldMessage[];
 	timelineMessages: readonly ParsedWorldMessage[];
-	positions: readonly ParsedPositionEvent[];
+	worldStates: readonly ParsedWorldStateEvent[];
 	presence: PresenceState;
 	status: WorldReadConnectionStatus;
 	realtimeEvents: readonly RealtimeEnvelope[];
@@ -118,7 +118,7 @@ export type SelfPositionWriteState =
 	| Readonly<{ kind: 'retryable'; operation: SelfPositionOperationKind }>
 	| Readonly<{ kind: 'unavailable' }>;
 
-export type SelfPositionOperationKind = 'entry' | 'movement' | 'reactivation' | 'trace-inspection' | 'trace-reply';
+export type SelfPositionOperationKind = 'entry' | 'movement' | 'reactivation' | 'trace-inspection' | 'trace-reply' | 'game-action';
 
 export type SelfPositionWriteResult =
 	| Readonly<{ kind: 'not-needed' | 'blocked' | 'unavailable' | 'pending' }>
@@ -156,7 +156,7 @@ export type WorldReadSessionSelfAttachment = Readonly<{
 
 type BufferedLiveEvent =
 	| Readonly<{ kind: 'message'; event: ParsedWorldMessage; rawEvent: NostrEvent }>
-	| Readonly<{ kind: 'position'; event: ParsedPositionEvent }>;
+	| Readonly<{ kind: 'world-state'; event: ParsedWorldStateEvent }>;
 
 type SelfPositionOperation = Readonly<{
 	id: string;
@@ -433,7 +433,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		applyCanonicalMessage(message, nowMs, rawEvent);
 	}
 
-	function applyLivePosition(event: ParsedPositionEvent, nowMs: number): void {
+	function applyLivePosition(event: ParsedWorldStateEvent, nowMs: number): void {
 		observeLivePosition(event);
 		applyCanonicalPosition(event, nowMs);
 	}
@@ -447,13 +447,13 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		project(nowMs);
 	}
 
-	function applyBootstrapPosition(event: ParsedPositionEvent, nowMs: number): void {
+	function applyBootstrapPosition(event: ParsedWorldStateEvent, nowMs: number): void {
 		observeLivePosition(event);
 		worldPresence = applyWorldPresencePosition(worldPresence, event);
 		project(nowMs);
 	}
 
-	function observeLivePosition(event: ParsedPositionEvent): void {
+	function observeLivePosition(event: ParsedWorldStateEvent): void {
 		const retained = retainPositionPublishEvidence(positionEvidenceByPubkey.get(event.pubkey) ?? [], event, event.pubkey);
 		positionEvidenceByPubkey.set(event.pubkey, retained);
 		if (!selfSigner || event.pubkey !== selfSigner.pubkey) return;
@@ -461,7 +461,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		positionPublishState = reconstructPositionPublishState(selfPositionEvidence, selfSigner.pubkey);
 	}
 
-	function applyCanonicalPosition(event: ParsedPositionEvent, nowMs: number): boolean {
+	function applyCanonicalPosition(event: ParsedWorldStateEvent, nowMs: number): boolean {
 		if (appliedCanonicalPositionEventIds.has(event.id)) return false;
 		appliedCanonicalPositionEventIds.add(event.id);
 		worldPresence = applyWorldPresencePosition(worldPresence, event);
@@ -494,7 +494,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	function selfOperationCandidate(
 		operation: Exclude<SelfPositionOperationKind, 'trace-inspection' | 'trace-reply'>,
 		direction?: Direction
-	): Readonly<{ event: VerifiedEvent; parsed: ParsedPositionEvent }> | null {
+	): Readonly<{ event: VerifiedEvent; parsed: ParsedWorldStateEvent }> | null {
 		if (!selfSigner || !channel) return null;
 		const nowMs = Date.now();
 		const state = currentPresence();
@@ -515,20 +515,20 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	}
 
 	function positionCandidate(
-		position: ParsedPositionEvent['position'],
+		position: ParsedWorldStateEvent['position'],
 		nowMs: number
-	): Readonly<{ event: VerifiedEvent; parsed: ParsedPositionEvent }> | null {
+	): Readonly<{ event: VerifiedEvent; parsed: ParsedWorldStateEvent }> | null {
 		if (!selfSigner || !channel) return null;
 		const createdAt = Math.floor(nowMs / 1000);
 		const plan = planPositionPublish(positionPublishState, createdAt);
 		if (plan.kind === 'unavailable') return null;
-		const signed = finalizeWorldEvent(buildPositionEventTemplate({
+		const signed = finalizeWorldEvent(buildWorldStateEventTemplate({
 			channel,
 			position,
 			slot: plan.slot,
 			createdAt
 		}), selfSigner.secretKey);
-		const parsed = parsePositionEvent(signed, channel.channelId);
+		const parsed = parseWorldStateEvent(signed, channel.channelId);
 		if (!parsed) throw new Error('Locally signed position event did not pass the project parser.');
 		positionPublishState = plan.nextState;
 		selfPositionEvidence = retainPositionPublishEvidence(selfPositionEvidence, parsed, selfSigner.pubkey);
@@ -597,7 +597,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 
 	async function publishPreparedSelfPosition(
 		operation: SelfPositionOperationKind,
-		candidate: Readonly<{ event: VerifiedEvent; parsed: ParsedPositionEvent }>
+		candidate: Readonly<{ event: VerifiedEvent; parsed: ParsedWorldStateEvent }>
 	): Promise<SelfPositionWriteResult> {
 		const { event, parsed } = candidate;
 		// The planner was consumed before this call. It must never be rolled back.
@@ -646,6 +646,24 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		const candidate = selfOperationCandidate(operation, direction);
 		if (!candidate) return { kind: 'blocked' };
 		return publishPreparedSelfPosition(operation, candidate);
+	}
+
+	/** Best-effort positive activity refresh for successful browser-local actions. */
+	async function refreshSelfActivity(): Promise<SelfPositionWriteResult> {
+		if (disposed || !selfSigner || !transport || !channel) return { kind: 'unavailable' };
+		if (!bootstrapComplete || !selfJoinedThisSession) return { kind: 'blocked' };
+		if (pendingSelfOperation || pendingSelfMessage || pendingTraceReply) return { kind: 'pending' };
+		const participant = getParticipant(currentPresence(), selfSigner.pubkey);
+		if (!participant || participant.status !== 'active') return { kind: 'blocked' };
+		const nowMs = Date.now();
+		const createdAt = Math.floor(nowMs / 1000);
+		const coalesced = selfPositionEvidence.some((event) =>
+			event.state === 'active' && event.createdAt === createdAt && event.position.x === participant.position.x && event.position.y === participant.position.y
+		);
+		if (coalesced) return { kind: 'not-needed' };
+		const candidate = positionCandidate(participant.position, nowMs);
+		if (!candidate) return { kind: 'not-needed' };
+		return publishPreparedSelfPosition('game-action', candidate);
 	}
 
 	function traceStateFor(
@@ -955,19 +973,22 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			try {
 				const result = await transport.start({
 					messageSince: since,
+					worldStateSince: since,
 					positionSince: since,
 					onBootstrapMessage: (event) => applyBootstrapMessage(event, Date.now()),
+					onBootstrapWorldState: (event) => applyBootstrapPosition(event, Date.now()),
 					onBootstrapPosition: (event) => applyBootstrapPosition(event, Date.now()),
 					onLiveMessage: (event, rawEvent) => receiveLive({ kind: 'message', event, rawEvent }),
-					onLivePosition: (event) => receiveLive({ kind: 'position', event }),
+					onLiveWorldState: (event) => receiveLive({ kind: 'world-state', event }),
+					onLivePosition: (event) => receiveLive({ kind: 'world-state', event }),
 					onPrimaryClosed: markDegraded
 				});
 				if (disposed) throw new Error('World read session was disposed during startup.');
 
 				const recentMessages = result.messages.filter((message) => message.createdAt >= messageSince);
-				worldPresence = reconstructWorldPresenceState(options.field, recentMessages, result.positions);
+				worldPresence = reconstructWorldPresenceState(options.field, recentMessages, result.worldStates ?? result.positions ?? []);
 				for (const event of result.messages) appliedCanonicalMessageEventIds.add(event.id);
-				for (const event of result.positions) {
+				for (const event of result.worldStates ?? result.positions ?? []) {
 					appliedCanonicalPositionEventIds.add(event.id);
 					observeLivePosition(event);
 				}
@@ -985,7 +1006,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 				return {
 					messages: recentMessages,
 					timelineMessages: result.messages,
-					positions: result.positions,
+					worldStates: result.worldStates ?? result.positions ?? [],
 					presence: nextPresence,
 					status,
 					realtimeEvents: [...realtimeEvents],
@@ -1058,6 +1079,8 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		publishMessage(content: string, speechType: SpeechType): Promise<SelfMessagePublishResult> {
 			return publishMessage(content, speechType);
 		},
+
+		refreshSelfActivity,
 
 		publishTraceReply,
 

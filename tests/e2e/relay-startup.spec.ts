@@ -2116,9 +2116,13 @@ test.describe('Relay startup', () => {
 		await expect(page.getByRole('dialog')).toBeVisible();
 		const startButton = page.getByRole('button', { name: '作業を開始' });
 		await expect(startButton).toHaveCSS('color', 'rgb(255, 255, 255)');
+		const publishedWorldStateCount = async () => (await relayState(page)).state.published.filter((event) => event.kind === 30078 && event.pubkey === pubkey).length;
+		const beforeMendingStart = await publishedWorldStateCount();
+		await page.clock.runFor(1_001);
 		await startButton.click();
 		await expect(page.getByRole('dialog')).toHaveCount(0);
 		await expect.poll(() => readRelayGameState(page)).toMatchObject({ mendingJob: expect.any(Object) });
+		await expect.poll(publishedWorldStateCount).toBeGreaterThan(beforeMendingStart);
 		const started = await readRelayGameState(page);
 		expect(started).toMatchObject({ version: 4, points: 0, pointProgressTicks: 0, mendingJob: expect.objectContaining({ processedDurationMs: 0, unclaimedPoints: 0 }) });
 		await terminal.click();
@@ -2155,11 +2159,13 @@ test.describe('Relay startup', () => {
 		await expect(partialDialog.locator('.next-point[data-mending-icon="clock"] > svg')).toHaveCount(1);
 		await expect(partialDialog.locator('[data-mending-icon="coins"] .next-point')).toHaveCount(1);
 		await expect(partialDialog).toContainText('+2 pt');
+		const beforeMendingReward = await publishedWorldStateCount();
 		await partialDialog.getByRole('button', { name: '成果を受け取る' }).click();
 		await expect.poll(async () => {
 			const partialState = await readRelayGameState(page);
 			return partialState.points === 2 && partialState.pointProgressTicks > 0 && partialState.pointProgressTicks < 60_000_000;
 		}).toBe(true);
+		await expect.poll(publishedWorldStateCount).toBeGreaterThan(beforeMendingReward);
 		await expect(page.locator('.mending-success-feedback')).toContainText('+2 pt');
 
 		const secondAt = partialAt + 3 * 60 * 1000;
@@ -2242,6 +2248,8 @@ test.describe('Relay startup', () => {
 		await expect(dialog).toContainText('必要ポイント');
 		await expect(dialog.getByRole('button', { name: 'Lv2へ強化' }).first()).toBeVisible();
 		await expect(dialog.getByRole('button', { name: 'Lv2へ強化' }).first()).toHaveCSS('color', 'rgb(255, 255, 255)');
+		const beforeAbilityUpgrade = (await relayState(page)).state.published.filter((event) => event.kind === 30078 && event.pubkey === pubkey).length;
+		await page.clock.runFor(1_001);
 		const upgradedCard = dialog.locator('.ability-card').first();
 		const stableBefore = await upgradedCard.evaluate((card) => {
 			const type = card.querySelector('.ability-type')!.getBoundingClientRect();
@@ -2254,6 +2262,7 @@ test.describe('Relay startup', () => {
 		await expect(dialog).not.toContainText('Root Point');
 		await dialog.getByRole('button', { name: 'Lv2へ強化' }).first().click();
 		await expect(dialog).toContainText('9 pt');
+		await expect.poll(async () => (await relayState(page)).state.published.filter((event) => event.kind === 30078 && event.pubkey === pubkey).length).toBeGreaterThan(beforeAbilityUpgrade);
 		await expect(dialog.locator('.level-up-badge')).toHaveCount(1);
 		const stableDuring = await upgradedCard.evaluate((card) => ({
 			typeY: card.querySelector('.ability-type')!.getBoundingClientRect().y,

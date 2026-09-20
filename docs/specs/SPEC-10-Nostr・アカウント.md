@@ -165,15 +165,16 @@ external/modified client製1111も、署名、project labels、root/parent relat
 
 NIP-09 / kind 5はMVP完全非対応とする。kind 5を発行、購読、検索せず、外部clientのdeletion requestをUI/cacheへ反映しない。tombstoneやdeleted-reply placeholderは導入しない。browserがすでに取得・cacheしたroot/replyをkind 5を理由に削除しない。Relayが物理削除したeventを未取得browserが取得できないことまでは制御しない。
 
-### kind 30078等のアプリ固有イベント
+### kind 30078 Public World State
 
 position同期等に使用するアプリ固有イベントについては、kind 42と同じNIP-32 `L` / `l` self-labelを必須とはしない。
 
 各イベントのkind、`d` tag、channel参照等によって用途を十分に識別できる場合は、NIP-32 labelを重複して付与しない。
 
-positionイベントの具体仕様は [`SPEC-30-フィールド・position・presence.md`](./SPEC-30-フィールド・position・presence.md) を正とする。
+kind 30078はposition専用ではなく、positionとexplicit presence stateを同じ公開application-specific
+World State wire contractで表現する。具体仕様は [`SPEC-30-フィールド・position・presence.md`](./SPEC-30-フィールド・position・presence.md) を正とする。
 
-専用clientは、kind 30078についてもauthor pubkeyが現在のcharacter slotへ解決できる場合だけ、専用世界の有効なposition activityとして受理する。未割当slotのeventは署名やtagが正しくても専用世界では利用しない。これはofficial-client認証ではなく、使用中slotに対応する外部・改造clientを拒否するものではない。
+専用clientは、kind 30078についてもauthor pubkeyが現在のcharacter slotへ解決できる場合だけ、専用世界の有効なWorld State evidenceとして受理する。未割当slotのeventは署名やtagが正しくても専用世界では利用しない。これはofficial-client認証ではなく、使用中slotに対応する外部・改造clientを拒否するものではない。
 
 ### 交換可能なリアルタイムイベント
 
@@ -189,7 +190,7 @@ prototypeの共通envelopeには、project-owned regular kind `7070`、次のtag
 - `d` はイベント種別とprotocol versionから導出した不変のprotocol keyを1つだけ持つ
 - `i` はそのイベントのinstance identifierを1つだけ持つ単一文字indexed tagである
 
-受信側の共通parserは署名、kind、対象channel、tagの個数と基本形、protocol key、JSON objectを検証する。イベント固有のpayload検証はイベント定義側が行う。`L` / `l` を共通envelopeの識別子として重複付与しない。`kind 30078` はposition用途のため、リアルタイムイベントには使用しない。
+受信側の共通parserは署名、kind、対象channel、tagの個数と基本形、protocol key、JSON objectを検証する。イベント固有のpayload検証はイベント定義側が行う。`L` / `l` を共通envelopeの識別子として重複付与しない。`kind 30078` Public World Stateはrealtime eventには使用しない。
 
 イベント定義はenabled registryに登録されたものだけを受理する。登録を外したイベントは、保存済みの古いイベントを互換経路で復活させず、購読・受理対象から外す。protocol keyの正式値、各イベントのinstance schema、payloadおよびsettlementはイベント定義ごとに定める。
 

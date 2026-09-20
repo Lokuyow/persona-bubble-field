@@ -176,4 +176,16 @@ describe('presence evidence reducer', () => {
 			reconstructPresenceEvidence([...messages].reverse(), [...positions].reverse())
 		);
 	});
+
+	it('keeps exit separate, gives it same-second precedence, and permits generic re-entry', () => {
+		const active = { id: 'active', pubkey: 'a'.repeat(64), createdAt: 100, state: 'active' as const, slot: 0 as const, position: { x: 1, y: 1 } };
+		const exit = { id: 'exit', pubkey: 'a'.repeat(64), createdAt: 100, state: 'exit' as const, slot: null, position: { x: 2, y: 2 } };
+		const sameSecond = reconstructPresenceEvidence([], [active, exit]);
+		expect(sameSecond[0]).toMatchObject({ position: { x: 2, y: 2 }, lastPositiveActivityCreatedAt: 100, latestExitCreatedAt: 100, positionEvidence: { source: 'world-state-exit' } });
+		const exitOnly = reconstructPresenceEvidence([], [exit])[0];
+		expect(exitOnly).toMatchObject({ lastPositiveActivityCreatedAt: null, latestExitCreatedAt: 100 });
+		const reentered = reconstructPresenceEvidence([], [exit, { ...active, id: 'new-active', createdAt: 101, position: { x: 3, y: 3 } }])[0];
+		expect(reentered).toMatchObject({ position: { x: 3, y: 3 }, lastPositiveActivityCreatedAt: 101, latestExitCreatedAt: 100, positionEvidence: { source: 'world-state-slot-0' } });
+		expect(reconstructPresenceEvidence([], [active, exit])).toEqual(reconstructPresenceEvidence([], [exit, active]));
+	});
 });

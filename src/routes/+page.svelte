@@ -1560,6 +1560,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			personaSnapshot = result.persona;
 			selfSigner = result.persona.signer;
 			if (result.kind === 'upgraded') {
+				void worldSession?.refreshSelfActivity();
 				if (upgradeFeedbackTimer !== null) window.clearTimeout(upgradeFeedbackTimer);
 				upgradeFeedback = { id: ++feedbackSequence, key, level: result.persona.activeRun.gameState.abilities[key] };
 				upgradeFeedbackTimer = window.setTimeout(() => { upgradeFeedback = null; upgradeFeedbackTimer = null; }, 500);
@@ -1600,6 +1601,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			}
 			personaSnapshot = result.persona;
 			selfSigner = result.persona.signer;
+			if (result.kind === 'started' || result.kind === 'collected') void worldSession?.refreshSelfActivity();
 			if (result.kind === 'collected') {
 				if (collectFeedbackTimer !== null) window.clearTimeout(collectFeedbackTimer);
 				collectFeedback = {

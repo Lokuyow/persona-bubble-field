@@ -77,7 +77,7 @@ export function prepareTraceInspectionActivity(input: Readonly<{
 	);
 	const next = getParticipant(nextPresence, input.selfId);
 	if (!next || !isWithinTraceInvestigationRange(next.position, input.target)) return { kind: 'blocked' };
-	const coalesced = current.status === 'active' &&
+	const coalesced = current.status === 'active' && current.lastActivityAt !== null &&
 		Math.floor(current.lastActivityAt / 1000) === Math.floor(input.nowMs / 1000) &&
 		sameGridPosition(current.position, next.position);
 	return {

@@ -191,33 +191,43 @@ Relay上にposition情報が存在することだけを理由としてpresence�
 
 positionは、フィールド上で最後に確認されたユーザーの位置を表す。
 
-MVPのposition同期にはNIP-78 `kind 30078` のaddressable eventを使用する。
+MVPのPublic World State同期にはNIP-78 `kind 30078` のaddressable eventを使用する。
 
 独自kindは追加しない。
 
-positionは2つのaddressable slotを使用する。
+active World Stateは2つのaddressable slotを使用する。`exit` stateはこの2-slot quotaと独立する。
 
-プロトタイプでは `d` tagを以下とする。
+プロトタイプでは `d` tagをchannel-scoped canonical形式とする。
 
 slot 0：
 
-`io.github.lokuyow.persona-bubble-field:position:0`
+`io.github.lokuyow.persona-bubble-field:world-state:1:<channel-id>:0`
 
 slot 1：
 
-`io.github.lokuyow.persona-bubble-field:position:1`
+`io.github.lokuyow.persona-bubble-field:world-state:1:<channel-id>:1`
+
+explicit inactive World State：
+
+`io.github.lokuyow.persona-bubble-field:world-state:1:<channel-id>:exit`
+
+active / exitいずれも対象channelを `e` tagで1つだけ参照し、`content`には最後に有効だった
+canonical grid coordinateを格納する。channel IDを `d` に含めるのは、NIP-01のaddressable
+replacement identityに `e` tagが含まれないためであり、別channelのstateを置換しないためである。
+
+`exit` participantはlast positionを保持するが、active occupancyには含めない。
 
 namespaceの扱いは [`SPEC-10-Nostr・アカウント.md`](./SPEC-10-Nostr・アカウント.md) を正とする。
 
-NIP-78 `kind 30078` の `content` には、そのposition eventが示す論理フィールド座標をcanonical形式で格納する。
+NIP-78 `kind 30078` の `content` には、そのWorld State eventが示す論理フィールド座標をcanonical形式で格納する。
 
 例：
 
 `7:3`
 
-position eventは対象のNIP-28 channel kind 40を `e` tagで参照する。
+World State eventは対象のNIP-28 channel kind 40を `e` tagで参照する。
 
-専用clientは、構造・署名・channel参照が正しい場合でも、author pubkeyが現在のcharacter slotへ解決できないposition eventを有効なparticipant evidenceとして扱わない。未割当authorをpresenceまたはoccupancyへ追加しないため、presentation層だけで隠すfallbackは設けない。これはofficial-client認証ではなく、使用中slotへ対応するpubkeyを使う外部・改造clientまで防止するものではない。
+専用clientは、構造・署名・channel参照が正しい場合でも、author pubkeyが現在のcharacter slotへ解決できないWorld State eventを有効なparticipant evidenceとして扱わない。未割当authorをpresenceまたはoccupancyへ追加しないため、presentation層だけで隠すfallbackは設けない。これはofficial-client認証ではなく、使用中slotへ対応するpubkeyを使う外部・改造clientまで防止するものではない。
 
 概念的には以下の形式とする。
 
@@ -225,7 +235,7 @@ slot 0：
 
 `kind = 30078`
 
-`["d", "io.github.lokuyow.persona-bubble-field:position:0"]`
+`["d", "io.github.lokuyow.persona-bubble-field:world-state:1:<channel-id>:0"]`
 
 `["e", "<kind40-event-id>", "<relay-url>"]`
 
@@ -235,13 +245,13 @@ slot 1：
 
 `kind = 30078`
 
-`["d", "io.github.lokuyow.persona-bubble-field:position:1"]`
+`["d", "io.github.lokuyow.persona-bubble-field:world-state:1:<channel-id>:1"]`
 
 `["e", "<kind40-event-id>", "<relay-url>"]`
 
 `content = "8:3"`
 
-position eventには、kindと `d` tagおよびkind 40参照によって用途を識別できるため、NIP-32 `L` / `l` を必須としない。
+World State eventには、kindとchannel-scoped `d` tagおよびkind 40参照によって用途を識別できるため、NIP-32 `L` / `l` を必須としない。
 
 position座標自体をNIP-32 `l` labelとして表現しない。
 
@@ -354,13 +364,14 @@ presence状態のユーザーについてcurrent positionを復元する際は�
 
 これにより、presence状態の復元のために全期間のposition履歴を取得する必要をなくす。
 
-### 同一秒のposition evidence
+### World State / position evidenceの同一秒優先順位
 
 公式クライアントが生成するeventについて、同一 `created_at` 秒に複数のposition evidenceが存在する場合は、position決定上の優先順位を以下とする。
 
-1. `kind 30078` slot 1
-2. `kind 30078` slot 0
-3. `kind 42` の `w`
+1. World State `exit`
+2. World State active slot 1
+3. World State active slot 0
+4. `kind 42` の `w`
 
 まず `created_at` が新しいeventを優先し、同一 `created_at` の場合に上記優先順位を使用する。
 
@@ -391,15 +402,34 @@ presenceは、そのユーザーが最近この空間で**能動的に活動し�
 
 定期heartbeatによるpresence延命は行わない。
 
+### presence evidenceの分離
+
+presence projectionは `latestPositiveActivity` と `latestExit` を独立して保持する。
+
+positive activityは有効なtop-level kind 42、World State active slot 0、World State active slot 1、
+および下記の明示的な成功操作から得る。World State `exit` はpositive activityではない。
+active条件は、positive activityが存在し、`positive.created_at > exit.created_at`（exitがある場合）
+で、かつpositive activityが10分timeout内であることとする。同一秒はexitを優先しinactiveとする。
+exitだけをbootstrapしたparticipantはlast positionを保持するが、positive lastActivityをexit時刻で
+偽装せず、inactiveかつoccupancy外とする。新しいpositive activityはexit後のgeneric re-entryとして
+activeへ戻せる。
+
 ### presence活動とNostr event
 
-フィールド移動は、移動後の座標を持つ `kind 30078` position更新として表現する。
+フィールド移動は、移動後の座標を持つ kind 30078 World State active更新として表現する。
 
 専用世界での通常メッセージ発言は、発言位置を `w` tagに持つ有効なtop-level kind 42そのものをpresence activityとして扱う。kind 1111 reply投稿もpresence activityとするが、reply自身は位置tagを持たない。
 
 発言のためだけに追加の `kind 30078` を必ず発行する必要はない。
 
-発言の痕跡を明示的に調べた場合またはreply投稿時は、必要に応じて現在座標を持つ `kind 30078` position更新を発行し、その操作をpresence activityとして表現する。presence timeout後にreplyする場合も、reactivation後のpositionを確定してから `w` なしの1111を投稿する。
+発言の痕跡を明示的に調べた場合またはreply投稿時は、必要に応じて現在座標を持つ kind 30078
+World State active更新を発行し、その操作をpresence activityとして表現する。presence timeout後に
+replyする場合も、reactivation後のpositionを確定してから `w` なしの1111を投稿する。
+
+mending job開始成功、mending reward受取成功、ability upgrade成功の後にも、現在位置のWorld State
+activeをbest-effortで発行する。game-state mutation成功後に発行し、World State publish失敗で成立済み
+mutationをrollbackしない。dialogを開いただけ、blocked / insufficient points / max level / stale-no-op /
+CAS不成立、settings等world gameplayでない操作では発行しない。
 
 痕跡調査と同一秒内に、すでに同じユーザーによるposition更新等のpresence activityが存在する場合は、同一座標の冗長なposition eventを必ず追加する必要はなく、presence更新をcoalesceしてよい。
 
@@ -459,10 +489,10 @@ MVPでは、少なくとも以下を論理的に別subscriptionとして扱う�
 - `kind 30078` position
 - trace conversation kind 1111
 
-logical primary subscriptionは引き続きkind 42 messageと`kind 30078` positionの2本とする。
+logical primary subscriptionは引き続きkind 42 messageとkind 30078 World Stateの2本とする。
 `world-messages`は同一責務内で、recent用filterと直近タイムラインhistory用filterを2つ持つ
 1つのREQとしてよい。recent用filterのbootstrap windowは従来どおりpresenceと生存bubbleの
-復元に必要な範囲とし、timeline history用filterは`limit: 50`で取得する。`world-positions`は
+復元に必要な範囲とし、timeline history用filterは`limit: 50`で取得する。`world-state`は
 従来どおり1つのfilterを持つ。したがって、logical primaryの数を増やさずにREQ内の複数filterを
 使用する構成を今回の仕様とする。
 
@@ -502,16 +532,16 @@ message subscriptionの具体的なbootstrap期間は、presence timeoutとフ�
 
 フキダシ表示時間の具体仕様が未決定であるため、現時点で固定秒数にはしない。
 
-### position subscription
+### World State subscription
 
-`kind 30078` positionについて、概念的に以下の条件で購読する。
+kind 30078 World Stateについて、概念的に以下の条件で購読する。
 
 - `kind = 30078`
-- `#d` = slot 0 / slot 1
+- `#d` = channel-scoped active slot 0 / active slot 1 / exit
 - 対象kind 40
 - presence復元に必要な `since`
 
-position subscriptionでは、presence timeoutである10分より必要に応じて若干広いbootstrap範囲を取得してよい。
+World State subscriptionでは、presence timeoutである10分より必要に応じて若干広いbootstrap範囲を取得してよい。
 
 取得範囲にsafety marginを設ける場合でも、presenceそのものを10分より長く維持してはならない。
 
@@ -519,7 +549,7 @@ safety marginの具体値は製品仕様として現時点では固定しない�
 
 ### 初期presence snapshot
 
-初期presenceとcurrent positionは、message subscriptionとposition subscriptionの双方から得た有効なactivityを統合して復元する。
+初期presenceとcurrent positionは、message subscriptionとWorld State subscriptionの双方から得た有効なactivityを統合して復元する。
 
 どちらか片方の初期同期だけを見てpresence snapshot完成と判定しない。
 

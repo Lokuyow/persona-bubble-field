@@ -179,4 +179,13 @@ describe('position publish slot planner', () => {
 		expect(state).toEqual({ lastPublishSecond: 100, consumedSlots: 1 });
 		expect(planPositionPublish(state, 100)).toMatchObject({ kind: 'available', slot: 1 });
 	});
+
+	it('does not consume active quota for exit evidence', () => {
+		const exit = {
+			id: 'exit', pubkey: OWN_PUBKEY, createdAt: 100, state: 'exit' as const, slot: null,
+			position: { x: 1, y: 2 }
+		};
+		expect(reconstructPositionPublishState([exit], OWN_PUBKEY)).toEqual(createPositionPublishState());
+		expect(planPositionPublish(reconstructPositionPublishState([exit], OWN_PUBKEY), 100)).toMatchObject({ kind: 'available', slot: 0 });
+	});
 });

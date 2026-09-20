@@ -16,17 +16,17 @@ import { Subscription } from 'rxjs';
 import type { Filter } from 'nostr-tools/filter';
 import { verifyEvent, type Event, type VerifiedEvent } from 'nostr-tools/pure';
 import {
-	buildPositionFilter,
+	buildWorldStateFilter,
 	buildTraceDirectReplyFilter,
 	buildTraceNotificationFilter,
 	buildTraceReplyFilter,
 	buildTraceRootBootstrapFilter,
 	buildWorldMessageFilters,
-	parsePositionEvent,
+	parseWorldStateEvent,
 	parseWorldMessage,
-	type ParsedPositionEvent,
+	type ParsedWorldStateEvent,
 	type ParsedWorldMessage,
-	POSITION_SLOT_IDENTIFIERS,
+	worldStateIdentifiers,
 	PROTOTYPE_NAMESPACE,
 	RECENT_MESSAGE_TIMELINE_LIMIT
 } from './nostrProtocol';
@@ -49,7 +49,7 @@ const CHANNEL_METADATA_KIND = 41;
 const DEFAULT_OPERATION_TIMEOUT_MS = 10_000;
 const TRACE_REPLY_RESUME_OVERLAP_SECONDS = 300;
 
-export type LogicalPrimarySubscription = 'world-messages' | 'world-positions';
+export type LogicalPrimarySubscription = 'world-messages' | 'world-state' | 'world-positions';
 export type PrimaryPairStatus = 'pending' | 'eose' | 'closed' | 'unavailable' | 'timeout';
 export type RelayCapacity = 'insufficient' | 'primary-only' | 'trace-capable' | 'unknown';
 export type RelayQueryStatus = 'eose' | 'closed' | 'unavailable' | 'timeout';
@@ -152,17 +152,23 @@ export type NostrRelayTransportDiagnostics = Readonly<{
 
 export type PrimaryStartInput = Readonly<{
 	messageSince: number;
-	positionSince: number;
+	worldStateSince?: number;
+	/** @deprecated source compatibility only; the emitted filter is World State. */
+	positionSince?: number;
 	/**
 	 * A validated primary event received while the finite bootstrap is still in
 	 * progress. Consumers may project presence from it, but must not treat it as
 	 * a canonical conversation handoff until start() resolves.
 	 */
 	onBootstrapMessage: (event: ParsedWorldMessage) => void;
-	onBootstrapPosition: (event: ParsedPositionEvent) => void;
+	onBootstrapWorldState?: (event: ParsedWorldStateEvent) => void;
+	/** @deprecated source compatibility only. */
+	onBootstrapPosition?: (event: ParsedWorldStateEvent) => void;
 	/** A verified, event-ID-deduped live message and its cache-authoritative wire event. */
 	onLiveMessage: (event: ParsedWorldMessage, rawEvent: Event) => void;
-	onLivePosition: (event: ParsedPositionEvent) => void;
+	onLiveWorldState?: (event: ParsedWorldStateEvent) => void;
+	/** @deprecated source compatibility only. */
+	onLivePosition?: (event: ParsedWorldStateEvent) => void;
 	onPrimaryClosed: (diagnostic: PrimaryPairDiagnostic) => void;
 }>;
 
@@ -170,7 +176,9 @@ export type PrimaryStartResult = Readonly<{
 	metadata: ResolvedChannelMetadata;
 	metadataDiscovery: MetadataDiscoveryDiagnostics;
 	messages: readonly ParsedWorldMessage[];
-	positions: readonly ParsedPositionEvent[];
+	worldStates: readonly ParsedWorldStateEvent[];
+	/** @deprecated source compatibility only; identical World State events. */
+	positions: readonly ParsedWorldStateEvent[];
 	primaryPairs: readonly PrimaryPairDiagnostic[];
 	nip11: readonly Nip11Diagnostic[];
 }>;
@@ -305,7 +313,7 @@ function hasExactly(values: unknown, expected: readonly (string | number)[]): bo
 function classifyPrimaryFilter(
 	filters: readonly unknown[],
 	channelId: string,
-	positionSlots: readonly string[]
+	worldStateIds: readonly string[]
 ): LogicalPrimarySubscription | null {
 	const isMessageFilter = (candidate: unknown, kind: 'recent' | 'history'): boolean => {
 		const entries = filterEntries(candidate);
@@ -331,11 +339,11 @@ function classifyPrimaryFilter(
 	const filter = Object.fromEntries(entries) as Record<string, unknown>;
 	if (!Number.isSafeInteger(filter.since) || (filter.since as number) < 0) return null;
 	const allowedPositionKeys = new Set(['kinds', '#e', '#d', 'since']);
-	const isPosition = entries.every(([key]) => allowedPositionKeys.has(key)) &&
+	const isWorldState = entries.every(([key]) => allowedPositionKeys.has(key)) &&
 		hasExactly(filter.kinds, [30078]) &&
 		hasExactly(filter['#e'], [channelId]) &&
-		hasExactly(filter['#d'], positionSlots);
-	return isPosition ? 'world-positions' : null;
+		hasExactly(filter['#d'], worldStateIds);
+	return isWorldState ? 'world-state' : null;
 }
 
 function reqFromOutgoing(packet: OutgoingMessagePacket): { subId: string; filters: readonly unknown[] } | null {
@@ -423,7 +431,7 @@ export function createNostrRelayTransport(
 	let initialPhase = false;
 	const primaryRequestsSent = new Set<PrimaryPairKey>();
 	const initialMessages: ParsedWorldMessage[] = [];
-	const initialPositions: ParsedPositionEvent[] = [];
+	const initialWorldStates: ParsedWorldStateEvent[] = [];
 	const messageIds = new Set<string>();
 	const positionIds = new Set<string>();
 	const primaryPairs = new Map<PrimaryPairKey, PrimaryPairDiagnostic>();
@@ -465,7 +473,7 @@ export function createNostrRelayTransport(
 		if (!canonical) return;
 		connections.set(canonical, { relayUrl: canonical, state: connectionState });
 		if (initialPhase) {
-			for (const subscription of ['world-messages', 'world-positions'] as const) {
+			for (const subscription of ['world-messages', (startInput?.worldStateSince === undefined ? 'world-positions' : 'world-state')] as const) {
 				const key = pairKey(canonical, subscription);
 				const pair = primaryPairs.get(key);
 				if (pair && pair.status === 'pending' && isInitialConnectionUnavailable(connectionState, primaryRequestsSent.has(key))) {
@@ -662,16 +670,19 @@ export function createNostrRelayTransport(
 		else startInput?.onLiveMessage(parsed, event);
 	}
 
-	function receivePosition(event: Event): void {
+	function receiveWorldState(event: Event): void {
 		if (!metadata) return;
-		const parsed = parsePositionEvent(event, metadata.channelId);
+		const parsed = parseWorldStateEvent(event, metadata.channelId);
 		if (!parsed || positionIds.has(parsed.id)) return;
 		positionIds.add(parsed.id);
 		if (initialPhase) {
-			initialPositions.push(parsed);
-			startInput?.onBootstrapPosition(parsed);
+			initialWorldStates.push(parsed);
+			if (startInput?.worldStateSince === undefined) startInput?.onBootstrapPosition?.(parsed);
+			else startInput?.onBootstrapWorldState?.(parsed);
+		} else {
+			if (startInput?.worldStateSince === undefined) startInput?.onLivePosition?.(parsed);
+			else startInput?.onLiveWorldState?.(parsed);
 		}
-		else startInput?.onLivePosition(parsed);
 	}
 
 	async function startPrimary(): Promise<readonly PrimaryPairDiagnostic[]> {
@@ -679,9 +690,10 @@ export function createNostrRelayTransport(
 		if (!metadata || !startInput) throw new Error('Primary startup is missing resolved metadata or callbacks.');
 		initialPhase = true;
 		primaryRequestsSent.clear();
-		const positionSlots = POSITION_SLOT_IDENTIFIERS;
+		const worldStateIds = worldStateIdentifiers(metadata.channelId);
+		const legacyNames = startInput.worldStateSince === undefined;
 		for (const relayUrl of metadata.relays) {
-			for (const subscription of ['world-messages', 'world-positions'] as const) {
+			for (const subscription of ['world-messages', (startInput?.worldStateSince === undefined ? 'world-positions' : 'world-state')] as const) {
 				primaryPairs.set(pairKey(relayUrl, subscription), { relayUrl, subscription, status: 'pending' });
 			}
 		}
@@ -714,7 +726,8 @@ export function createNostrRelayTransport(
 				if (!request) return;
 				const relayUrl = canonicalRelay(packet.to);
 				if (!relayUrl) return;
-				const logical = classifyPrimaryFilter(request.filters, metadata!.channelId, positionSlots);
+				const classified = classifyPrimaryFilter(request.filters, metadata!.channelId, worldStateIds);
+				const logical = classified === 'world-state' && legacyNames ? 'world-positions' : classified;
 				if (!logical) {
 					if (initialPhase) fail(new Error('Unexpected outgoing REQ during primary initialization.'));
 					return;
@@ -740,7 +753,7 @@ export function createNostrRelayTransport(
 				const logical = primarySubIds.get(`${relayUrl}\u0000${packet.subId}`);
 				if (!logical || activeSubIds.get(pairKey(relayUrl, logical)) !== packet.subId) return;
 				if (logical === 'world-messages') receiveMessage(packet.event);
-				else receivePosition(packet.event);
+				else receiveWorldState(packet.event);
 			});
 			const rawSubscription = client.createAllMessageObservable().subscribe((packet) => {
 				if ((packet.type !== 'EOSE' && packet.type !== 'CLOSED') || !canonicalRelay(packet.from)) return;
@@ -777,7 +790,7 @@ export function createNostrRelayTransport(
 				finish();
 			}, timeoutMs);
 			messageRequest.emit(buildWorldMessageFilters({ channelId: metadata!.channelId, since: startInput!.messageSince }));
-			positionRequest.emit(buildPositionFilter({ channelId: metadata!.channelId, since: startInput!.positionSince }));
+			positionRequest.emit(buildWorldStateFilter({ channelId: metadata!.channelId, since: startInput!.worldStateSince ?? startInput!.positionSince! }));
 			for (const relayUrl of metadata!.relays) {
 				const connection = client.getRelayStatus(relayUrl)?.connection;
 				if (connection) updateConnection(relayUrl, connection);
@@ -1363,7 +1376,9 @@ export function createNostrRelayTransport(
 		async start(input: PrimaryStartInput): Promise<PrimaryStartResult> {
 			if (state !== 'new') throw new Error('Relay transport start is only allowed once.');
 			assertTimestamp(input.messageSince, 'messageSince');
-			assertTimestamp(input.positionSince, 'positionSince');
+			const worldStateSince = input.worldStateSince ?? input.positionSince;
+			if (worldStateSince === undefined) throw new TypeError('worldStateSince is required.');
+			assertTimestamp(worldStateSince, 'worldStateSince');
 			state = 'starting';
 			startInput = input;
 			rxNostr = createRxNostr({
@@ -1388,7 +1403,8 @@ export function createNostrRelayTransport(
 					metadata,
 					metadataDiscovery: metadataDiagnostics,
 					messages: [...initialMessages],
-					positions: [...initialPositions],
+					worldStates: [...initialWorldStates],
+					positions: [...initialWorldStates],
 					primaryPairs: pairs,
 					nip11: nip11Diagnostics()
 				};

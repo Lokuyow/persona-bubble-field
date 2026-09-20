@@ -3,6 +3,7 @@ import { verifyEvent, type Event, type EventTemplate, type VerifiedEvent } from 
 import {
 	CHANNEL_MESSAGE_KIND,
 	PROFILE_KIND,
+	WORLD_STATE_KIND,
 	POSITION_KIND,
 	POSITION_SLOT_IDENTIFIERS,
 	PROTOTYPE_NAMESPACE,
@@ -11,6 +12,8 @@ import {
 	buildPositionEventTemplate,
 	buildCharacterProfileTemplate,
 	buildPositionFilter,
+	buildWorldStateEventTemplate,
+	buildWorldStateFilter,
 	buildTraceDirectReplyFilter,
 	buildTraceNotificationFilter,
 	buildTraceReplyFilter,
@@ -22,6 +25,7 @@ import {
 	finalizeWorldEvent,
 	finalizeCharacterProfileEvent,
 	parsePositionEvent,
+	parseWorldStateEvent,
 	parseTraceReplyCandidate,
 	parseWorldMessage,
 	validateTraceReplyCandidate,
@@ -29,7 +33,9 @@ import {
 	type PositionEventTemplate,
 	type TraceReplyTemplate,
 	type WorldEventTemplate,
-	type WorldMessageTemplate
+	type WorldMessageTemplate,
+	worldStateIdentifier,
+	worldStateIdentifiers
 } from './nostrProtocol';
 import { CHARACTER_CATALOG } from './character';
 
@@ -701,7 +707,7 @@ describe('Nostr protocol foundation', () => {
 		]);
 		expect(buildPositionFilter({ channelId: CHANNEL_ID, since: 1_700_000_100 })).toEqual({
 			kinds: [30078],
-			'#d': [...POSITION_SLOT_IDENTIFIERS],
+			'#d': [...worldStateIdentifiers(CHANNEL_ID)],
 			'#e': [CHANNEL_ID],
 			since: 1_700_000_100
 		});
@@ -749,5 +755,25 @@ describe('Nostr protocol foundation', () => {
 			slot: 0,
 			createdAt: 1
 		})).toThrow(TypeError);
+	});
+
+	it('builds and parses channel-scoped active and exit World State', () => {
+		const active = finalizeWorldEvent(buildWorldStateEventTemplate({ channel, position: { x: 4, y: 5 }, slot: 0, createdAt: 10 }), TEST_SECRET_KEY);
+		const exit = finalizeWorldEvent(buildWorldStateEventTemplate({ channel, position: { x: 4, y: 5 }, slot: 'exit', createdAt: 11 }), TEST_SECRET_KEY);
+		expect(active.kind).toBe(WORLD_STATE_KIND);
+		expect(active.tags[0]).toEqual(['d', worldStateIdentifier(CHANNEL_ID, 0)]);
+		expect(parseWorldStateEvent(active, CHANNEL_ID)).toMatchObject({ state: 'active', slot: 0, position: { x: 4, y: 5 } });
+		expect(parseWorldStateEvent(exit, CHANNEL_ID)).toMatchObject({ state: 'exit', slot: null, position: { x: 4, y: 5 } });
+		expect(buildWorldStateFilter({ channelId: CHANNEL_ID, since: 1 })).toMatchObject({ '#d': worldStateIdentifiers(CHANNEL_ID) });
+	});
+
+	it('rejects retired, mismatched, duplicate, and contradictory World State tags', () => {
+		const retired = buildPositionEventTemplate({ channel, position: { x: 1, y: 1 }, slot: 0, createdAt: 1 });
+		retired.tags[0][1] = `${PROTOTYPE_NAMESPACE}:position:0`;
+		const duplicateChannel = buildWorldStateEventTemplate({ channel, position: { x: 1, y: 1 }, slot: 0, createdAt: 1 });
+		duplicateChannel.tags.push(['e', CHANNEL_ID]);
+		const mismatchedD = buildWorldStateEventTemplate({ channel, position: { x: 1, y: 1 }, slot: 0, createdAt: 1 });
+		mismatchedD.tags[0][1] = worldStateIdentifier(OTHER_CHANNEL_ID, 0);
+		for (const template of [retired, duplicateChannel, mismatchedD]) expect(parseWorldStateEvent(resign(template), CHANNEL_ID)).toBeNull();
 	});
 });
