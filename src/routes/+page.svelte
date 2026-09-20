@@ -2660,6 +2660,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			submissionInProgress={composerSubmissionInProgress}
 			hasUnreadReplies={traceReadSnapshot.hasUnreadReplies}
 			character={selfProfileCharacter ?? speechSuggestionCharacter}
+			avatarTone={colorByPubkey[selfProjectionId] ?? 'coral'}
 			canOpenSelfProfile={selfProfileCharacter !== null}
 			onOpenSelfProfile={(trigger) => { lastSelfProfileTrigger = trigger; selfProfileDialogOpen = true; }}
 			suggestionConversation={speechSuggestionConversation}

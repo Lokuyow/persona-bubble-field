@@ -8,6 +8,7 @@
 	import SpeechSuggestions from '$lib/frontend/SpeechSuggestions.svelte';
 	import type { SpeechType } from '$lib/conversation';
 	import type { Character } from '$lib/character';
+	import type { BubbleTone } from '$lib/bubblePresentation';
 	import type { SpeechSuggestionConversationEntry } from '$lib/speechSuggestions';
 
 	type Props = ComponentProps<typeof HostOwnedComposerLite> & {
@@ -15,6 +16,7 @@
 		submissionInProgress: boolean;
 		hasUnreadReplies: boolean;
 		character: Character;
+		avatarTone: BubbleTone;
 		canOpenSelfProfile: boolean;
 		suggestionConversation: readonly SpeechSuggestionConversationEntry[];
 		onSpeechTypeChange: (next: SpeechType) => void;
@@ -23,7 +25,7 @@
 	};
 	let { selectedSpeechType, submissionInProgress, onSpeechTypeChange, onOpenSelfProfile, submitContent, submitCandidate,
 		desiredContext, loadPreview, onPreviewClear, onEditorEmptyChange, onPreferredHeightChange,
-		hasUnreadReplies, character, suggestionConversation, canOpenSelfProfile }: Props = $props();
+		hasUnreadReplies, character, avatarTone, suggestionConversation, canOpenSelfProfile }: Props = $props();
 	let composerComponent: { focusEditor(): boolean; blurEditor(): boolean; applyContentIfEmpty(content: string): Promise<boolean> } | null = null;
 	let editorIsEmpty = $state<boolean | null>(null);
 	let explanationVisible = $state(false);
@@ -67,7 +69,7 @@
 		<div class="composer-controls">
 		{#if canOpenSelfProfile}
 		<button class="profile-trigger" type="button" aria-label="自分のプロフィールを開く" title="自分のプロフィール" onclick={(event) => onOpenSelfProfile(event.currentTarget)}>
-			<span class="profile-trigger-avatar" aria-hidden="true"><CharacterAvatar class="profile-trigger-character-avatar" {character} /></span>
+			<span class="profile-trigger-avatar" aria-hidden="true"><CharacterAvatar class={`avatar avatar-${avatarTone} profile-trigger-character-avatar`} {character} /></span>
 		</button>
 		{/if}
 		<button
@@ -157,8 +159,8 @@
 	}
 
 	.profile-trigger { flex: 0 0 54px; width: 54px; min-width: 44px; min-height: 44px; height: 54px; padding: 3px; border: 1px solid rgba(57, 67, 64, 0.2); border-radius: 12px; background: rgba(255, 255, 255, 0.86); box-shadow: 0 5px 12px rgba(58, 70, 61, 0.1); cursor: pointer; overflow: hidden; }
-	.profile-trigger-avatar { display: block; position: relative; width: 100%; height: 100%; overflow: hidden; border-radius: 8px; background: #9bc6d5; }
-	:global(.profile-trigger-character-avatar) { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; border-radius: 8px; box-shadow: none; transform: none; }
+	.profile-trigger-avatar { display: block; position: relative; width: 100%; height: 100%; overflow: hidden; border-radius: 8px; background: transparent; }
+	:global(.profile-trigger-character-avatar) { position: absolute; inset: 0; width: 100%; height: 100%; border: 2px solid rgba(255, 255, 255, 0.88); border-radius: 42% 58% 48% 52%; box-shadow: 0 5px 10px rgba(58, 70, 61, 0.16); transform: none; }
 	:global(.profile-trigger-character-avatar img) { display: block; width: 100%; height: 100%; object-fit: contain; object-position: center; }
 	.profile-trigger:focus-visible { outline: 3px solid var(--color-focus-ring); outline-offset: 2px; }
 	.composer-controls { display: contents; }

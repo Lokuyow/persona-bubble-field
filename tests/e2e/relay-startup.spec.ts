@@ -2254,6 +2254,16 @@ test.describe('Relay startup', () => {
 		const profileTrigger = page.getByRole('button', { name: '自分のプロフィールを開く' });
 		await expect(profileTrigger).toBeVisible();
 		await expect(page.locator('.composer-controls .profile-trigger')).toHaveCount(1);
+		const avatarColors = await page.evaluate(() => {
+			const field = document.querySelector<HTMLElement>('.participant[data-self="true"] .avatar');
+			const dock = document.querySelector<HTMLElement>('.profile-trigger-character-avatar');
+			if (!field || !dock) throw new Error('Expected field and ComposerDock self avatars.');
+			const fieldStyle = getComputedStyle(field);
+			const dockStyle = getComputedStyle(dock);
+			return { fieldBackground: fieldStyle.backgroundColor, dockBackground: dockStyle.backgroundColor, fieldBorder: fieldStyle.borderTopColor, dockBorder: dockStyle.borderTopColor };
+		});
+		expect(avatarColors.dockBackground).toBe(avatarColors.fieldBackground);
+		expect(avatarColors.dockBorder).toBe(avatarColors.fieldBorder);
 		const character = requireCharacterFromPubkey(getPublicKey(fixtureSecret(41)));
 		const avatarImage = profileTrigger.locator('img');
 		await expect(avatarImage).toHaveCount(1);
@@ -2287,6 +2297,25 @@ test.describe('Relay startup', () => {
 		await dialog.getByRole('button', { name: '閉じる', exact: true }).click();
 		await expect(dialog).toBeHidden();
 		await expect(profileTrigger).toBeFocused();
+	});
+
+	test('keeps the self profile dialog inside a short mobile viewport and scrolls its content', async ({ page }) => {
+		await page.setViewportSize({ width: 420, height: 420 });
+		await openReadyRelayWorld(page);
+		await page.getByRole('button', { name: '自分のプロフィールを開く' }).click();
+
+		const dialog = page.getByRole('dialog');
+		await expect(dialog).toBeVisible();
+		const dialogBox = await dialog.boundingBox();
+		const viewportBox = await dialog.locator('.self-profile-viewport').boundingBox();
+		const metrics = await dialog.locator('.self-profile-viewport').evaluate((element) => ({ clientHeight: element.clientHeight, scrollHeight: element.scrollHeight }));
+		expect(dialogBox).not.toBeNull();
+		expect(viewportBox).not.toBeNull();
+		expect(dialogBox!.y).toBeGreaterThanOrEqual(0);
+		expect(dialogBox!.y + dialogBox!.height).toBeLessThanOrEqual(420);
+		expect(viewportBox!.y).toBeGreaterThanOrEqual(dialogBox!.y);
+		expect(viewportBox!.y + viewportBox!.height).toBeLessThanOrEqual(dialogBox!.y + dialogBox!.height);
+		expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight);
 	});
 
 	test('places the ComposerDock controls below the editor on mobile', async ({ page }) => {
