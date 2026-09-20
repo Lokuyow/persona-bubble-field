@@ -2333,6 +2333,7 @@ test.describe('Relay startup', () => {
 		const dialogBox = await dialog.boundingBox();
 		const viewportBox = await dialog.locator('.self-profile-viewport').boundingBox();
 		const metrics = await dialog.locator('.self-profile-viewport').evaluate((element) => ({ clientHeight: element.clientHeight, scrollHeight: element.scrollHeight }));
+		await expect(dialog.locator('.self-profile-sections > section')).toHaveCount(3);
 		const headerAvatarBox = await dialog.locator('.self-profile-avatar').boundingBox();
 		expect(dialogBox).not.toBeNull();
 		expect(viewportBox).not.toBeNull();
