@@ -2332,6 +2332,16 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		pushState('', { ...page.state, profileCharacterId: characterId });
 	}
 
+	function openSelfProfile(trigger: HTMLButtonElement): void {
+		lastSelfProfileTrigger = trigger;
+		selfProfileDialogOpen = true;
+	}
+
+	function openFieldSelfProfile(trigger: HTMLButtonElement): void {
+		if (selfProfileCharacter) openSelfProfile(trigger);
+		else openProfile(selectedCharacterId, trigger);
+	}
+
 
 	function receiveTimelineMessage(message: ParsedWorldMessage): void {
 		recentMessageTimeline = addRecentMessage(recentMessageTimeline, message);
@@ -2548,6 +2558,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 				fieldActionLabel={fieldActionLabel}
 				closeFieldActionMenu={closeFieldActionMenu}
 				onOpenProfile={openProfile}
+				onOpenSelfProfile={openFieldSelfProfile}
 				traceMarkerWorldPosition={traceMarkerWorldPosition}
 			/>
 			<SpeechLayer
@@ -2628,6 +2639,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		nowMs={mendingNowMs}
 		clearBlockedReason={clearBlockedReason}
 		clearBusy={clearMutationInFlight}
+		avatarTone={colorByPubkey[selfProjectionId] ?? 'coral'}
 		onOpenChange={(open) => { selfProfileDialogOpen = open; }}
 		onCloseAutoFocus={() => { lastSelfProfileTrigger?.focus(); }}
 		onClear={() => { void clearCurrentRun(); }}
@@ -2660,9 +2672,9 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			submissionInProgress={composerSubmissionInProgress}
 			hasUnreadReplies={traceReadSnapshot.hasUnreadReplies}
 			character={selfProfileCharacter ?? speechSuggestionCharacter}
-			avatarTone={colorByPubkey[selfProjectionId] ?? 'coral'}
+		avatarTone={colorByPubkey[selfProjectionId] ?? 'coral'}
 			canOpenSelfProfile={selfProfileCharacter !== null}
-			onOpenSelfProfile={(trigger) => { lastSelfProfileTrigger = trigger; selfProfileDialogOpen = true; }}
+			onOpenSelfProfile={openSelfProfile}
 			suggestionConversation={speechSuggestionConversation}
 			onSpeechTypeChange={(next) => { selectedSpeechType = next; }}
 			submitContent={submitComposerContent}

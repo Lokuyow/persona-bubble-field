@@ -4,6 +4,7 @@
 	import { formatRemainingLifespan } from '$lib/lifespanHud';
 	import { getAbilityUpgrade, type PersonaAbilityKey } from '$lib/personaGameState';
 	import type { PersonaSnapshot } from '$lib/rootIdentity';
+	import type { BubbleTone } from '$lib/bubblePresentation';
 	import CharacterAvatar from './CharacterAvatar.svelte';
 	import { getCharacterById } from './character';
 
@@ -14,12 +15,13 @@
 		nowMs: number;
 		clearBlockedReason: string | null;
 		clearBusy: boolean;
+		avatarTone: BubbleTone;
 		onOpenChange: (open: boolean) => void;
 		onCloseAutoFocus: (event: Event) => void;
 		onClear: () => void;
 	}>;
 
-	let { open, persona, mendingProjection, nowMs, clearBlockedReason, clearBusy, onOpenChange, onCloseAutoFocus, onClear }: Props = $props();
+	let { open, persona, mendingProjection, nowMs, clearBlockedReason, clearBusy, avatarTone, onOpenChange, onCloseAutoFocus, onClear }: Props = $props();
 	const abilityKeys: readonly PersonaAbilityKey[] = ['inferenceEfficiency', 'contextCapacity', 'hallucinationSuppression'];
 	const abilityLabels: Readonly<Record<PersonaAbilityKey, string>> = {
 		inferenceEfficiency: '推論効率', contextCapacity: 'コンテキスト容量', hallucinationSuppression: 'ハルシネーション抑制'
@@ -42,7 +44,7 @@
 			<Dialog.Overlay class="self-profile-overlay" />
 			<Dialog.Content class="self-profile-content" preventScroll={false} {onCloseAutoFocus}>
 				<header class="self-profile-head">
-					<CharacterAvatar class="self-profile-avatar" {character} />
+					<CharacterAvatar class={`avatar avatar-${avatarTone} self-profile-avatar`} {character} />
 					<div class="self-profile-identity">
 						<Dialog.Title>{character.name}</Dialog.Title>
 						<Dialog.Description class="sr-only">自分のプロフィールと現在のRun情報</Dialog.Description>
@@ -90,7 +92,7 @@
 	:global(.self-profile-overlay) { position: fixed; inset: 0; z-index: 100; background: rgba(35, 44, 41, .48); backdrop-filter: blur(3px); }
 	:global(.self-profile-content) { position: fixed; top: 50%; left: 50%; z-index: 101; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 22px; box-sizing: border-box; width: min(560px, calc(100vw - 32px)); max-height: min(760px, calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 24px)); padding: 24px; overflow: hidden; border: 1px solid rgba(57, 67, 64, .26); border-radius: 24px; background: #f1f5f0; box-shadow: 0 22px 60px rgba(32, 42, 38, .28); color: #374345; font-family: 'Trebuchet MS', 'Avenir Next', system-ui, sans-serif; transform: translate(-50%, -50%); }
 	.self-profile-head { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 18px; align-items: center; }
-	:global(.self-profile-avatar) { position: relative !important; inset: auto !important; display: grid; width: 96px; height: 96px; place-items: center; border: 2px solid rgba(255, 255, 255, .9); border-radius: 28px; background: #9bc6d5; box-shadow: 0 5px 10px rgba(58, 70, 61, .14); transform: none !important; }
+	:global(.self-profile-avatar) { position: relative !important; inset: auto !important; display: grid; width: 96px; height: 96px; place-items: center; border: 2px solid rgba(255, 255, 255, .9); border-radius: 42% 58% 48% 52%; box-shadow: 0 5px 10px rgba(58, 70, 61, .14); transform: none !important; }
 	:global(.self-profile-avatar img) { width: 100%; height: 100%; object-fit: contain; }
 	.self-profile-identity { display: grid; gap: 5px; }
 	:global(.self-profile-identity [data-dialog-title]) { margin: 0; font-size: 24px; font-weight: 900; }

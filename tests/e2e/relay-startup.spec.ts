@@ -2297,6 +2297,21 @@ test.describe('Relay startup', () => {
 		await dialog.getByRole('button', { name: '閉じる', exact: true }).click();
 		await expect(dialog).toBeHidden();
 		await expect(profileTrigger).toBeFocused();
+
+		const fieldTrigger = page.locator('.participant[data-self="true"] .participant-profile-trigger');
+		await fieldTrigger.click();
+		await expect(dialog).toBeVisible();
+		await expect(dialog).toContainText('Run #1');
+		await expect(dialog).toContainText('Normal Clear');
+		const headerAvatarColors = await page.evaluate(() => {
+			const field = document.querySelector<HTMLElement>('.participant[data-self="true"] .avatar');
+			const header = document.querySelector<HTMLElement>('.self-profile-avatar');
+			if (!field || !header) throw new Error('Expected field and self profile avatars.');
+			return { field: getComputedStyle(field).backgroundColor, header: getComputedStyle(header).backgroundColor };
+		});
+		expect(headerAvatarColors.header).toBe(headerAvatarColors.field);
+		await dialog.getByRole('button', { name: '閉じる', exact: true }).click();
+		await expect(fieldTrigger).toBeFocused();
 	});
 
 	test('keeps the self profile dialog inside a short mobile viewport and scrolls its content', async ({ page }) => {
