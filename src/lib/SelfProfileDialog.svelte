@@ -28,6 +28,7 @@
 		inferenceEfficiency: '推論効率', contextCapacity: 'コンテキスト容量', hallucinationSuppression: 'ハルシネーション抑制'
 	};
 	let character = $derived(persona ? getCharacterById(persona.identity.characterId) ?? null : null);
+	let initialFocusTarget = $state<HTMLElement | null>(null);
 	let effectiveExpiry = $derived(mendingProjection?.effectiveExpiresAtMs ?? persona?.gameState.lifespanExpiresAtMs ?? nowMs);
 	let points = $derived(persona?.gameState.points ?? 0);
 	let clearProgress = $derived(Math.min(100, points / 100_000 * 100));
@@ -43,12 +44,12 @@
 	{#if open && persona && character}
 		<Dialog.Portal>
 			<Dialog.Overlay class="self-profile-overlay" />
-			<Dialog.Content class="self-profile-content" preventScroll={false} {onCloseAutoFocus}>
+			<Dialog.Content class="self-profile-content" preventScroll={false} {onCloseAutoFocus} onOpenAutoFocus={(event) => { event.preventDefault(); initialFocusTarget?.focus(); }}>
 				<ScrollArea.Root class="self-profile-scroll" type="auto">
 					<ScrollArea.Viewport class="self-profile-viewport">
 						<div class="self-profile-sections">
 						<section class="profile-section" aria-labelledby="self-profile-profile">
-							<h2 id="self-profile-profile">プロフィール</h2>
+							<h2 bind:this={initialFocusTarget} id="self-profile-profile" tabindex="-1" data-initial-focus>プロフィール</h2>
 							<header class="self-profile-head">
 								<CharacterAvatar class={`avatar avatar-${avatarTone} self-profile-avatar`} {character} />
 								<div class="self-profile-identity">
@@ -130,6 +131,7 @@
 	.summary-card strong { font-size: 20px; font-weight: 900; font-variant-numeric: tabular-nums; }
 	.profile-section { display: grid; gap: 10px; }
 	.profile-section h2 { margin: 0; color: #56625e; font-size: 14px; font-weight: 900; letter-spacing: .04em; }
+	:global(.self-profile-content [data-initial-focus]:focus) { outline: none; }
 	.ability-list { display: grid; gap: 8px; }
 	.ability-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 11px 12px; }
 	.ability-row > div { display: grid; gap: 2px; }

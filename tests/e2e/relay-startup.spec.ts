@@ -2528,9 +2528,13 @@ test.describe('Relay startup', () => {
 
 		const dialog = page.getByRole('dialog');
 		await expect(dialog).toBeVisible();
+		const scrollViewport = dialog.locator('.self-profile-viewport');
+		await expect.poll(() => scrollViewport.evaluate((element) => element.scrollTop)).toBe(0);
+		await expect(dialog.locator('.escape-info-trigger')).not.toBeFocused();
+		await expect(dialog.locator('[data-initial-focus]')).toBeFocused();
 		const dialogBox = await dialog.boundingBox();
-		const viewportBox = await dialog.locator('.self-profile-viewport').boundingBox();
-		const metrics = await dialog.locator('.self-profile-viewport').evaluate((element) => ({ clientHeight: element.clientHeight, scrollHeight: element.scrollHeight }));
+		const viewportBox = await scrollViewport.boundingBox();
+		const metrics = await scrollViewport.evaluate((element) => ({ clientHeight: element.clientHeight, scrollHeight: element.scrollHeight }));
 		await expect(dialog.locator('.self-profile-sections > section')).toHaveCount(3);
 		const headerAvatarBox = await dialog.locator('.self-profile-avatar').boundingBox();
 		expect(dialogBox).not.toBeNull();
