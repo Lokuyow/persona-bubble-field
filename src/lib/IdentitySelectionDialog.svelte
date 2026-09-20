@@ -117,7 +117,7 @@
 			<div class="selection-content">
 				<header class="selection-header">
 					<div>
-						<h1 bind:this={initialFocusTarget} id="identity-selection-title" tabindex="-1">Runを始める</h1>
+						<h1 bind:this={initialFocusTarget} class="initial-focus-target" id="identity-selection-title" tabindex="-1">Runを始める</h1>
 						<p id="identity-selection-description" class="selection-introduction">人格を選び、今回のRunで使うRoot buildを決めてください。Run開始後は変更できません。</p>
 					</div>
 					<div class="rp-summary"><span>Root Point</span><strong>{rootPoints} RP</strong></div>
@@ -229,6 +229,7 @@
 	.selection-content { min-height: 0; overflow: auto; padding: 26px 26px 24px; }
 	.selection-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
 	.selection-dialog h1 { margin: 0; font-size: 24px; line-height: 1.2; }
+	.selection-dialog .initial-focus-target:focus { outline: none; }
 	.selection-introduction { max-width: 620px; margin: 8px 0 0; color: rgb(255 255 255 / 64%); font-size: .9rem; }
 	.rp-summary { display: grid; justify-items: end; gap: 2px; color: rgb(255 255 255 / 62%); font-size: .82rem; white-space: nowrap; }
 	.rp-summary strong { color: #fff; font-size: 1.05rem; }
