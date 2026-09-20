@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { asset } from '$app/paths';
 	import { Popover } from 'bits-ui';
+	import ChevronDown from '~icons/tabler/chevron-down';
 	import HelpCircle from '~icons/tabler/help-circle';
 	import { getCharacterById } from '$lib/character';
 	import PrimaryButton from '$lib/PrimaryButton.svelte';
@@ -18,6 +19,8 @@
 	let rootBuild = $state<RootBuild>({ inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0 });
 	let usablePoints = $derived(usableRootPoints(rootPoints));
 	let usedPoints = $derived(rootBuildCost(rootBuild));
+	let rootBuildOpen = $state(false);
+	let rootBuildSelection = $state<PendingSelection | null>(null);
 	const ROOT_EFFECTS = {
 		inferenceAcceleration: ['×1.00', '×1.30', '×1.60', '×2.00'],
 		contextCompression: ['×1.00 / overflow lifespan 0%', '×1.50 / overflow lifespan 20%', '×2.00 / overflow lifespan 35%', '×3.00 / overflow lifespan 50%'],
@@ -28,6 +31,12 @@
 		contextCompression: ['Rank 0: ×1.00 / overflow lifespan 0%', 'Rank 1: ×1.50 / overflow lifespan 20%', 'Rank 2: ×2.00 / overflow lifespan 35%', 'Rank 3: ×3.00 / overflow lifespan 50%'],
 		hallucinationResistance: ['Rank 0: 最大7日', 'Rank 1: 最大14日', 'Rank 2: 最大21日', 'Rank 3: 最大30日', 'fresh Run開始時の寿命は常に7日。']
 	} as const;
+
+	$effect(() => {
+		if (!selection || selection === rootBuildSelection) return;
+		rootBuildSelection = selection;
+		rootBuildOpen = usableRootPoints(rootPoints) > 0;
+	});
 
 	function character(candidate: IdentityCandidate) {
 		const value = getCharacterById(candidate.characterId);
@@ -144,7 +153,12 @@
 				{/if}
 
 				<section class="root-build" aria-label="Root build">
-					<div class="section-heading root-heading"><div><h2>Root build</h2><span>今回のRunに割り当てる能力</span></div><strong>使用 {usedPoints} / {usablePoints} RP</strong></div>
+					<button class:open={rootBuildOpen} class="root-build-toggle" type="button" aria-expanded={rootBuildOpen} aria-controls="root-build-panel" onclick={() => rootBuildOpen = !rootBuildOpen}>
+						<span class="root-build-toggle-copy"><strong>Root build</strong><small>今回のRunに割り当てる能力</small></span>
+						<span class="root-build-toggle-meta"><span>使用 {usedPoints} / {usablePoints} RP</span><ChevronDown aria-hidden="true" /></span>
+					</button>
+					{#if rootBuildOpen}
+					<div id="root-build-panel" class="root-build-panel">
 					<p class="rp-notice" role="status">{usablePoints === 0 ? '今回は割り当て可能なRPがありません。Rank 0で開始します。' : usedPoints === usablePoints ? '使用可能なRPをすべて割り当てています。配分はRun開始まで変更できます。' : `あと ${usablePoints - usedPoints} RP 割り当てできます。配分はRun開始まで変更できます。`}</p>
 					<div class="ability-list">
 						{#each [['inferenceAcceleration', '推論加速', 'ポイント生成'], ['contextCompression', 'コンテキスト圧縮', '最大蓄積'], ['hallucinationResistance', 'ハルシネーション耐性', '最大寿命']] as [key, label, effectLabel]}
@@ -170,6 +184,8 @@
 							</div>
 						{/each}
 					</div>
+					</div>
+					{/if}
 				</section>
 			</div>
 			<footer class="selection-footer">
@@ -220,7 +236,7 @@
 	.identity-section, .return-section, .root-build { margin-top: 28px; }
 	.section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 	.section-heading h2 { margin: 0; font-size: 1rem; }
-	.section-heading > span, .section-heading div > span { color: rgb(255 255 255 / 56%); font-size: .8rem; }
+	.section-heading > span { color: rgb(255 255 255 / 56%); font-size: .8rem; }
 	.candidate-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 	.candidate { position: relative; display: grid; gap: 10px; padding: 12px; border: 1px solid rgb(255 255 255 / 17%); border-radius: 14px; background: rgb(37 37 58 / 68%); color: inherit; text-align: left; cursor: pointer; }
 	.candidate:hover, .candidate:focus-visible { border-color: var(--color-accent); outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
@@ -236,9 +252,16 @@
 	.return-choice, .export-nsec, .rank-controls button { min-height: 38px; border: 1px solid rgb(255 255 255 / 24%); border-radius: 7px; background: #30304b; color: inherit; cursor: pointer; }
 	.return-choice { flex: 1; text-align: left; }
 	.export-nsec { padding: 0 10px; }
-	.root-build { padding-top: 22px; border-top: 1px solid rgb(255 255 255 / 18%); }
-	.root-heading { margin-bottom: 7px; }
-	.root-heading strong { color: #fff; font-size: .88rem; white-space: nowrap; }
+	.root-build { padding: 14px 14px 0; border: 1px solid rgb(104 241 221 / 23%); border-radius: 14px; background: rgb(19 24 43 / 42%); }
+	.root-build-toggle { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 16px; padding: 4px 0 14px; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+	.root-build-toggle:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 4px; }
+	.root-build-toggle-copy { display: grid; gap: 3px; }
+	.root-build-toggle-copy strong { font-size: 1rem; }
+	.root-build-toggle-copy small { color: rgb(255 255 255 / 56%); font-size: .8rem; }
+	.root-build-toggle-meta { display: flex; align-items: center; gap: 10px; color: rgb(255 255 255 / 78%); font-size: .86rem; white-space: nowrap; }
+	:global(.root-build-toggle-meta svg) { width: 20px; height: 20px; color: var(--color-accent); transition: transform 160ms ease; }
+	:global(.root-build-toggle.open .root-build-toggle-meta svg) { transform: rotate(180deg); }
+	.root-build-panel { padding-bottom: 14px; }
 	.rp-notice { margin: 0 0 12px; color: rgb(255 255 255 / 62%); font-size: .82rem; }
 	.ability-list { border-top: 1px solid rgb(255 255 255 / 12%); }
 	.ability-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 16px; padding: 13px 0; border-bottom: 1px solid rgb(255 255 255 / 12%); }
@@ -246,14 +269,14 @@
 	.ability-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
 	.ability-title strong { font-size: .92rem; }
 	.rank-label { color: rgb(255 255 255 / 62%); font-size: .8rem; }
-	:global(.help-trigger) { display: grid; width: 28px; height: 28px; place-items: center; margin-left: auto; border: 1px solid rgb(255 255 255 / 25%); border-radius: 50%; background: transparent; color: rgb(255 255 255 / 70%); cursor: pointer; }
-	:global(.help-trigger svg) { width: 17px; height: 17px; }
+	:global(.help-trigger) { display: grid; width: 44px; height: 44px; flex: 0 0 44px; place-items: center; align-content: center; justify-content: center; margin-left: auto; padding: 0; border: 1px solid rgb(255 255 255 / 25%); border-radius: 50%; background: transparent; color: rgb(255 255 255 / 70%); cursor: pointer; line-height: 0; }
+	:global(.help-trigger svg) { display: block; width: 18px; height: 18px; }
 	:global(.help-trigger:focus-visible) { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
 	.ability-effect { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; margin-top: 4px; color: rgb(255 255 255 / 58%); font-size: .8rem; }
 	.ability-effect strong { color: #fff; font-size: .92rem; }
 	.ability-effect small { color: var(--color-accent); }
-	.rank-controls { display: grid; grid-template-columns: 38px 34px 38px; align-items: center; gap: 6px; text-align: center; }
-	.rank-controls button { font-size: 1.2rem; }
+	.rank-controls { display: grid; grid-template-columns: 44px 34px 44px; align-items: center; gap: 6px; text-align: center; }
+	.rank-controls button { width: 44px; min-height: 44px; padding: 0; font-size: 1.2rem; line-height: 1; }
 	.rank-controls button:disabled { cursor: not-allowed; opacity: .35; }
 	.rank-controls span { font-weight: 750; }
 	:global(.help-content) { z-index: 110; width: min(320px, calc(100vw - 32px)); padding: 13px 15px; border: 1px solid rgb(111 255 233 / 42%); border-radius: 10px; background: #20243b; color: #fff; box-shadow: 0 12px 35px rgb(0 0 0 / 32%); font-size: .8rem; }
@@ -278,6 +301,7 @@
 		.candidate-about { min-height: auto; }
 		.ability-row { gap: 8px; }
 		.ability-effect { gap: 5px; }
+		.root-build { padding-inline: 12px; }
 		.selection-footer { align-items: stretch; flex-direction: column; gap: 12px; padding: 14px 16px max(16px, env(safe-area-inset-bottom)); }
 		.selection-footer :global(.site-primary-button) { width: 100%; }
 	}

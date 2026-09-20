@@ -1886,16 +1886,32 @@ test.describe('Relay startup', () => {
 		await setPendingRootPoints(page, 0);
 		await page.reload({ waitUntil: 'domcontentloaded' });
 		await page.getByRole('button', { name: /を選ぶ$/ }).first().click();
-		await expect(page.locator('.rank-controls button[aria-label$="を上げる"]')).toHaveCount(3);
-		await expect.poll(async () => page.locator('.rank-controls button[aria-label$="を上げる"]').evaluateAll((buttons) => buttons.every((button) => (button as HTMLButtonElement).disabled))).toBe(true);
+		const rootToggle = page.locator('.root-build-toggle');
+		await expect(rootToggle).toHaveAttribute('aria-expanded', 'false');
+		await expect(rootToggle).toContainText('使用 0 / 0 RP');
+		await expect(page.locator('.rank-controls')).toHaveCount(0);
 		await expect(page.getByRole('button', { name: 'Runを開始' })).toBeEnabled();
 		await setPendingRootPoints(page, 3);
 		await page.reload({ waitUntil: 'domcontentloaded' });
 
 		await expect(page.locator('.rp-summary')).toContainText('3 RP');
 		const rootBuild = page.locator('.root-build');
+		await expect(rootToggle).toHaveAttribute('aria-expanded', 'true');
 		await expect(rootBuild.locator('.ability-row')).toHaveCount(3);
+		await rootToggle.focus();
+		await page.keyboard.press('Enter');
+		await expect(rootToggle).toHaveAttribute('aria-expanded', 'false');
+		await page.keyboard.press('Space');
+		await expect(rootToggle).toHaveAttribute('aria-expanded', 'true');
 		await expect(rootBuild.getByRole('button', { name: '推論加速の詳細' })).toBeVisible();
+		await expect.poll(async () => rootBuild.locator('.help-trigger').evaluateAll((elements) => elements.every((element) => {
+			const rect = element.getBoundingClientRect();
+			return rect.width >= 44 && rect.height >= 44;
+		}))).toBe(true);
+		await expect.poll(async () => rootBuild.locator('.rank-controls button').first().evaluate((element) => {
+			const rect = element.getBoundingClientRect();
+			return rect.width >= 44 && rect.height >= 44;
+		})).toBe(true);
 		await expect(rootBuild).not.toContainText('Rank 3: ×2.00');
 		await page.getByRole('button', { name: /を選ぶ$/ }).first().click();
 		const rankRows = page.locator('.ability-row');
