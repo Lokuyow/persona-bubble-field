@@ -713,7 +713,7 @@ describe('Nostr protocol foundation', () => {
 			}
 		]);
 		expect(buildWorldStateFilter({ channelId: CHANNEL_ID, since: 1_700_000_100 })).toEqual({
-			kinds: [30078],
+			kinds: [30079],
 			'#d': [...worldStateIdentifiers(CHANNEL_ID)],
 			'#e': [CHANNEL_ID],
 			since: 1_700_000_100
@@ -836,6 +836,14 @@ describe('Nostr protocol foundation', () => {
 		expect(parseWorldStateEvent(active, CHANNEL_ID)).toMatchObject({ state: 'active', slot: 0, position: { x: 4, y: 5 } });
 		expect(parseWorldStateEvent(exit, CHANNEL_ID)).toMatchObject({ state: 'exit', slot: null, position: { x: 4, y: 5 } });
 		expect(buildWorldStateFilter({ channelId: CHANNEL_ID, since: 1 })).toMatchObject({ '#d': worldStateIdentifiers(CHANNEL_ID) });
+	});
+
+	it('rejects legacy kind 30078 World State', () => {
+		const legacy = {
+			...buildWorldStateEventTemplate({ channel, position: { x: 1, y: 1 }, slot: 0, createdAt: 1 }),
+			kind: 30078
+		} as unknown as WorldEventTemplate;
+		expect(parseWorldStateEvent(finalizeWorldEvent(legacy, TEST_SECRET_KEY), CHANNEL_ID)).toBeNull();
 	});
 
 	it('rejects retired, mismatched, duplicate, and contradictory World State tags', () => {

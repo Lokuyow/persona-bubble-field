@@ -12,7 +12,7 @@ import {
 export const PROTOTYPE_NAMESPACE = 'io.github.lokuyow.persona-bubble-field';
 export const CHANNEL_MESSAGE_KIND = 42;
 export const TRACE_REPLY_KIND = 1111;
-export const WORLD_STATE_KIND = 30078;
+export const WORLD_STATE_KIND = 30079;
 export const PROFILE_KIND = 0;
 export const RECENT_MESSAGE_TIMELINE_LIMIT = 50;
 export const WORLD_STATE_SLOT_SUFFIXES = ['0', '1', 'exit'] as const;
@@ -576,7 +576,7 @@ function referencesChannel(event: Event, channelId: string): boolean {
 }
 
 /**
- * Validates a received kind 30078 position event. Its channel reference is
+ * Validates a received experimental kind 30079 position event. Its channel reference is
  * matched by event ID only; relay hints remain non-authoritative recommendations.
  */
 export function parseWorldStateEvent(event: Event, channelId: string): ParsedWorldStateEvent | null {

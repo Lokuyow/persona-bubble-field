@@ -191,9 +191,9 @@ Relay上にposition情報が存在することだけを理由としてpresence�
 
 positionは、フィールド上で最後に確認されたユーザーの位置を表す。
 
-MVPのPublic World State同期にはNIP-78 `kind 30078` のaddressable eventを使用する。
+MVPのPublic World State同期には、public application-specific dataの実験用として未登録のaddressable `kind 30079`を使用する。これはNIP-79準拠を意味しない。
 
-独自kindは追加しない。
+`30079`以外のWorld State kindは使用せず、relayへNIP-79固有の処理やNIP-42 AUTHを要求しない。
 
 active World Stateは2つのaddressable slotを使用する。`exit` stateはこの2-slot quotaと独立する。
 
@@ -230,7 +230,7 @@ browser close、unload、network disconnectだけではexitをpublishしない�
 
 namespaceの扱いは [`SPEC-10-Nostr・アカウント.md`](./SPEC-10-Nostr・アカウント.md) を正とする。
 
-NIP-78 `kind 30078` の `content` には、そのWorld State eventが示す論理フィールド座標をcanonical形式で格納する。
+`kind 30079` の `content` には、そのWorld State eventが示す論理フィールド座標をcanonical形式で格納する。
 
 例：
 
@@ -244,7 +244,7 @@ World State eventは対象のNIP-28 channel kind 40を `e` tagで参照する。
 
 slot 0：
 
-`kind = 30078`
+`kind = 30079`
 
 `["d", "io.github.lokuyow.persona-bubble-field:world-state:1:<channel-id>:0"]`
 
@@ -254,7 +254,7 @@ slot 0：
 
 slot 1：
 
-`kind = 30078`
+`kind = 30079`
 
 `["d", "io.github.lokuyow.persona-bubble-field:world-state:1:<channel-id>:1"]`
 
@@ -280,7 +280,7 @@ NIP-32はイベントの分類に使用し、座標値そのものとは責務�
 
 とする。
 
-同じ `d` の `kind 30078` を同一 `created_at` 秒内に複数回更新しない。
+同じ `d` の `kind 30079` を同一 `created_at` 秒内に複数回更新しない。
 
 これにより、addressable eventで同一timestampの更新順をevent IDのtie-breakへ依存させない。
 
@@ -360,7 +360,7 @@ NIP上の地理的位置tagへ本プロジェクトの架空の論理フィー�
 
 ## 18. position evidence
 
-presence状態のユーザーについてcurrent positionを復元する際は、`kind 30078` だけでなく、通常chatとして受理したtop-level kind 42に含まれる `w` もposition evidenceとして扱う。explicit Traceであるkind 42の `w` はimmutableなTrace表示位置であり、presence/position evidenceには使用しない。kind 1111もposition evidenceに使用しない。
+presence状態のユーザーについてcurrent positionを復元する際は、`kind 30079` だけでなく、通常chatとして受理したtop-level kind 42に含まれる `w` もposition evidenceとして扱う。explicit Traceであるkind 42の `w` はimmutableなTrace表示位置であり、presence/position evidenceには使用しない。kind 1111もposition evidenceに使用しない。
 
 これはkind 42の `w` が、その発言が行われた時点での送信者のpositionを直接保持しているためである。
 
@@ -371,7 +371,7 @@ presence状態のユーザーについてcurrent positionを復元する際は�
 
 ユーザーについては、20分前のposition eventを取得しなくても、1分前のkind 42の `w` から現在positionを復元できる。
 
-その後に移動していれば、より新しい `kind 30078` を使用する。
+その後に移動していれば、より新しい `kind 30079` を使用する。
 
 これにより、presence状態の復元のために全期間のposition履歴を取得する必要をなくす。
 
@@ -427,13 +427,13 @@ activeへ戻せる。
 
 ### presence活動とNostr event
 
-フィールド移動は、移動後の座標を持つ kind 30078 World State active更新として表現する。
+フィールド移動は、移動後の座標を持つ kind 30079 World State active更新として表現する。
 
 専用世界での通常メッセージ発言は、`l=chat`を持ちTrace labelを持たず、発言位置を `w` tagに持つ有効なtop-level kind 42そのものをpresence activityとして扱う。`l=trace` kind 42のTrace rootはpositive activityではなく、death後のpresenceを再活性化しない。kind 1111 reply投稿もpresence activityとするが、reply自身は位置tagを持たない。
 
-発言のためだけに追加の `kind 30078` を必ず発行する必要はない。
+発言のためだけに追加の `kind 30079` を必ず発行する必要はない。
 
-発言の痕跡を明示的に調べた場合またはreply投稿時は、必要に応じて現在座標を持つ kind 30078
+発言の痕跡を明示的に調べた場合またはreply投稿時は、必要に応じて現在座標を持つ kind 30079
 World State active更新を発行し、その操作をpresence activityとして表現する。presence timeout後に
 replyする場合も、reactivation後のpositionを確定してから `w` なしの1111を投稿する。
 
@@ -468,7 +468,7 @@ presence切れ前に、
 
 場合は、同じ在室の継続として扱い、元の位置を復元する。
 
-復元には、直近の有効な `kind 30078` と通常chatとして受理した専用世界kind 42の `w` をposition evidenceとして利用できる。Trace kind 42の `w` は利用しない。
+復元には、直近の有効な `kind 30079` と通常chatとして受理した専用世界kind 42の `w` をposition evidenceとして利用できる。Trace kind 42の `w` は利用しない。
 
 ### presence切れ後の復帰
 
@@ -497,10 +497,10 @@ NIP-01の `EOSE` を、各subscriptionについて保存済みeventの初期受�
 MVPでは、少なくとも以下を論理的に別subscriptionとして扱う。
 
 - 専用世界のkind 42 message
-- `kind 30078` position
+- `kind 30079` position
 - trace conversation kind 1111
 
-logical primary subscriptionは引き続きkind 42 messageとkind 30078 World Stateの2本とする。
+logical primary subscriptionは引き続きkind 42 messageとkind 30079 World Stateの2本とする。
 `world-messages`は同一責務内で、recent用filterと直近タイムラインhistory用filterを2つ持つ
 1つのREQとしてよい。recent用filterのbootstrap windowは従来どおりpresenceと生存bubbleの
 復元に必要な範囲とし、timeline history用filterは`limit: 50`で取得する。`world-state`は
@@ -545,9 +545,9 @@ message subscriptionの具体的なbootstrap期間は、presence timeoutとフ�
 
 ### World State subscription
 
-kind 30078 World Stateについて、概念的に以下の条件で購読する。
+kind 30079 World Stateについて、概念的に以下の条件で購読する。
 
-- `kind = 30078`
+- `kind = 30079`
 - `#d` = channel-scoped active slot 0 / active slot 1 / exit
 - 対象kind 40
 - presence復元に必要な `since`
@@ -574,7 +574,7 @@ safety marginの具体値は製品仕様として現時点では固定しない�
 
 初期同期後も同じsubscriptionを維持する。
 
-新しい有効な `kind 30078` を受信した場合は、
+新しい有効な `kind 30079` を受信した場合は、
 
 - position
 - last presence activity

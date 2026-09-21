@@ -26,6 +26,7 @@ import {
 	parseWorldMessage,
 	parseTraceEvent,
 	CHANNEL_MESSAGE_KIND,
+	WORLD_STATE_KIND,
 	type ParsedWorldStateEvent,
 	type ParsedWorldMessage,
 	type ParsedTraceEvent,
@@ -338,7 +339,7 @@ function classifyPrimaryFilter(
 	if (!Number.isSafeInteger(filter.since) || (filter.since as number) < 0) return null;
 	const allowedPositionKeys = new Set(['kinds', '#e', '#d', 'since']);
 	const isWorldState = entries.every(([key]) => allowedPositionKeys.has(key)) &&
-		hasExactly(filter.kinds, [30078]) &&
+		hasExactly(filter.kinds, [WORLD_STATE_KIND]) &&
 		hasExactly(filter['#e'], [channelId]) &&
 		hasExactly(filter['#d'], worldStateIds);
 	return isWorldState ? 'world-state' : null;
