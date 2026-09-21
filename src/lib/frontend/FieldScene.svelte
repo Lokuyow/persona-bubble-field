@@ -356,7 +356,7 @@
 		position: absolute;
 		width: max(22px, min(40px, calc(var(--cell-size) * 0.36)));
 		height: max(22px, min(40px, calc(var(--cell-size) * 0.36)));
-		color: #3f7fbd;
+		color: #526886;
 		opacity: 0.72;
 		background-color: currentColor;
 		-webkit-mask-image: var(--trace-icon-image);
@@ -372,11 +372,12 @@
 	}
 
 	.trace-marker-read:not(.trace-marker-unread-reply) {
-		color: #aeb4ba;
+		filter: grayscale(1) brightness(1.12);
 	}
 
 	.trace-marker-unread-reply {
 		color: #cf06fe;
+		filter: none;
 	}
 
 	.trace-investigation-indicator {
