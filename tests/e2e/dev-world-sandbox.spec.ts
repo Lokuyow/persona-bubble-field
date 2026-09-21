@@ -2492,8 +2492,27 @@ test.describe('DEV World Sandbox', () => {
 		await page.goto('/?devWorld=1&devScenario=trace-replies');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 		await page.locator('[data-cell-position="8,4"]').click();
-		await expect(page.locator('.trace-root-bubble .bubble-content')).toBeVisible();
-		expect(await dragSelect(page.locator('.trace-root-bubble .bubble-content'))).not.toBe('');
+		const traceRoot = page.locator('.trace-root-bubble');
+		const traceContent = traceRoot.locator('.bubble-content');
+		await expect(traceContent).toBeVisible();
+		expect(await traceRoot.evaluate((root) => {
+			const content = root.querySelector<HTMLElement>('.bubble-content');
+			if (!content) throw new Error('Expected Trace root content.');
+			const rootStyle = getComputedStyle(root);
+			const contentStyle = getComputedStyle(content);
+			return {
+				rootUserSelect: rootStyle.userSelect,
+				rootWebkitUserSelect: rootStyle.getPropertyValue('-webkit-user-select'),
+				contentUserSelect: contentStyle.userSelect,
+				contentWebkitUserSelect: contentStyle.getPropertyValue('-webkit-user-select')
+			};
+		})).toEqual({
+			rootUserSelect: 'text',
+			rootWebkitUserSelect: 'text',
+			contentUserSelect: 'text',
+			contentWebkitUserSelect: 'text'
+		});
+		expect(await dragSelect(traceContent)).not.toBe('');
 
 		await page.goto('/?devWorld=1&devScenario=chatter-timeline');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
