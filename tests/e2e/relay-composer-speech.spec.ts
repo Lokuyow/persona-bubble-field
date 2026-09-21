@@ -47,6 +47,13 @@ test.describe('Relay startup', () => {
 			await expect(page.getByRole('button', { name: 'AI発言候補を生成' })).toBeVisible();
 			await expect(chatterToggle.locator('svg')).toHaveCount(1);
 			await expect(chatterToggle).not.toContainText('Chatter');
+			const buttonBox = await chatterToggle.boundingBox();
+			const iconBox = await chatterToggle.locator('svg').boundingBox();
+			expect(buttonBox && iconBox).toBeTruthy();
+			if (buttonBox && iconBox) {
+				expect(Math.abs((iconBox.x + iconBox.width / 2) - (buttonBox.x + buttonBox.width / 2))).toBeLessThan(1);
+				expect(Math.abs((iconBox.y + iconBox.height / 2) - (buttonBox.y + buttonBox.height / 2))).toBeLessThan(1);
+			}
 			const initiallyOpen = width > 700;
 			await expect(chatterToggle).toHaveAttribute('aria-label', initiallyOpen ? 'Chatterを閉じる' : 'Chatterを開く');
 			await expect(chatterToggle).toHaveAttribute('aria-pressed', String(initiallyOpen));

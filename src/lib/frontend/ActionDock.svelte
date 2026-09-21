@@ -178,9 +178,13 @@
 	.profile-trigger:focus-visible { outline: 3px solid var(--color-focus-ring); outline-offset: 2px; }
 	.composer-controls { display: contents; }
 	.chatter-toggle {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
 		flex: 0 0 54px;
 		min-width: 44px;
 		min-height: 44px;
+		padding: 0;
 		border: 1px solid rgba(57, 67, 64, 0.2);
 		border-radius: 12px;
 		background: rgba(255, 255, 255, 0.86);
