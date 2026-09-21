@@ -44,7 +44,20 @@ test.describe('Relay startup', () => {
 			await page.setViewportSize({ width, height: 844 });
 			await openReadyRelayWorld(page, 1);
 			const chatterToggle = page.locator('.chatter-toggle');
+			const suggestionsToggle = page.locator('.suggestions-toggle');
 			await expect(page.getByRole('button', { name: 'AI発言候補を生成' })).toBeVisible();
+			await expect(suggestionsToggle.locator('svg')).toHaveCount(1);
+			await expect(suggestionsToggle).not.toContainText('候補');
+			await expect(suggestionsToggle).toHaveAccessibleName('AI発言候補を生成');
+			const suggestionsButtonBox = await suggestionsToggle.boundingBox();
+			const suggestionsIconBox = await suggestionsToggle.locator('svg').boundingBox();
+			expect(suggestionsButtonBox && suggestionsIconBox).toBeTruthy();
+			if (suggestionsButtonBox && suggestionsIconBox) {
+				expect(suggestionsButtonBox.width).toBeGreaterThanOrEqual(44);
+				expect(suggestionsButtonBox.height).toBeGreaterThanOrEqual(44);
+				expect(Math.abs((suggestionsIconBox.x + suggestionsIconBox.width / 2) - (suggestionsButtonBox.x + suggestionsButtonBox.width / 2))).toBeLessThan(1);
+				expect(Math.abs((suggestionsIconBox.y + suggestionsIconBox.height / 2) - (suggestionsButtonBox.y + suggestionsButtonBox.height / 2))).toBeLessThan(1);
+			}
 			await expect(chatterToggle.locator('svg')).toHaveCount(1);
 			await expect(chatterToggle).not.toContainText('Chatter');
 			const buttonBox = await chatterToggle.boundingBox();

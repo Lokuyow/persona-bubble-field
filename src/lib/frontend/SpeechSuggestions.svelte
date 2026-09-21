@@ -1,5 +1,6 @@
 <script lang="ts">
 	import X from '~icons/tabler/x';
+	import Sparkles from '~icons/tabler/sparkles';
 	import { onMount } from 'svelte';
 	import type { Character } from '$lib/character';
 	import type { SpeechType } from '$lib/conversation';
@@ -144,7 +145,7 @@
 			disabled={busy || editorIsEmpty !== true}
 			onclick={() => void generate()}
 		>
-			<span aria-hidden="true">{generating ? '…' : '候補'}</span>
+			<span class="suggestions-toggle-icon" aria-hidden="true"><Sparkles /></span>
 		</button>
 		{#if panelOpen && candidates.length > 0}
 			<div class="suggestion-panel" aria-label="発言候補">
@@ -202,10 +203,13 @@
 	}
 
 	.suggestions-toggle {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
 		width: 100%;
 		height: 100%;
 		min-height: 0;
-		padding: 0 4px;
+		padding: 0;
 		border: 1px solid rgba(57, 67, 64, 0.2);
 		border-radius: 12px;
 		background: rgba(255, 255, 255, 0.86);
@@ -215,6 +219,8 @@
 		font-weight: 800;
 		line-height: 1.15;
 	}
+	.suggestions-toggle-icon { display: inline-flex; width: 24px; height: 24px; align-items: center; justify-content: center; }
+	.suggestions-toggle-icon :global(svg) { width: 24px; height: 24px; }
 
 	.suggestions-toggle:disabled { cursor: wait; opacity: 0.58; }
 	.suggestions-toggle:focus-visible { outline: 3px solid var(--color-focus-ring); outline-offset: 2px; }

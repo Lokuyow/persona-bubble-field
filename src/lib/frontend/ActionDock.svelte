@@ -294,6 +294,6 @@
 		.composer-controls .chatter-toggle { order: 2; flex-basis: 46px; }
 		.composer-controls .trace-unread-indicator { order: 3; flex-basis: 38px; }
 		.composer-controls .speech-type-toggle { order: 4; flex-basis: 46px; }
-		.composer-controls :global(.suggestions-anchor) { order: 5; }
+		.composer-controls :global(.suggestions-anchor) { order: 5; flex-basis: 46px; }
 	}
 </style>
