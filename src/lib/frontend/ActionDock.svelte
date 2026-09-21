@@ -166,7 +166,7 @@
 		width: min(720px, 100%);
 		height: 100%;
 		align-items: stretch;
-		gap: 8px;
+		gap: 4px;
 		margin: 0 auto;
 		min-width: 0;
 	}
