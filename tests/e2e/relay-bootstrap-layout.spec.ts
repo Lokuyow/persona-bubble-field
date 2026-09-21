@@ -453,4 +453,14 @@ test.describe('Relay startup', () => {
 		expect(new Set((await relayState(page)).state.published.filter((event) => event.kind === 42).map((event) => event.id)).size).toBe(0);
 		await expect(editor).toHaveValue('abort while waiting for metadata');
 	});
+
+	test('never mounts or loads the Host-owned Composer in DEV World', async ({ page }) => {
+		const hostOwned = await installHostOwnedStub(page);
+		await page.goto('/?devWorld=1');
+
+		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+		await expect(page.locator('.composer-dock')).toHaveCount(0);
+		await expect(page.locator('ehagaki-composer')).toHaveCount(0);
+		expect(hostOwned.requests()).toBe(0);
+	});
 });
