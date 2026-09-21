@@ -2614,7 +2614,8 @@ test.describe('Relay startup', () => {
 			buttonY: card.querySelector('button')!.getBoundingClientRect().y
 		}));
 		expect(stableAfter).toEqual(stableBefore);
-		await expect(page.locator('.lifespan-hud')).toContainText('ポイント 9pt');
+		await expect(page.locator('.lifespan-hud [data-stat-icon="wallet"]')).toHaveText('9pt');
+		await expect(page.locator('.lifespan-hud')).toHaveAttribute('aria-label', /ポイント 9pt/);
 		await expect(dialog).toContainText('推論効率 Lv2');
 		await page.reload();
 		await expect.poll(() => readRelayGameState(page)).toMatchObject({ points: 9, abilities: { inferenceEfficiency: 2, contextCapacity: 1, hallucinationSuppression: 1 } });
