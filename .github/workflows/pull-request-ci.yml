@@ -44,3 +44,31 @@ jobs:
 
       - name: Run E2E
         run: npm run test:e2e
+
+  benchmark-e2e:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/chore/benchmark-e2e-workers'
+    name: E2E benchmark (workers=${{ matrix.workers }}, trial=${{ matrix.trial }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        workers: [2, 3, 4]
+        trial: [1, 2, 3]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.19.0
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run E2E benchmark
+        run: CI=1 npm run test:e2e -- --workers=${{ matrix.workers }}
