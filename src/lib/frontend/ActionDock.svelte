@@ -3,6 +3,7 @@
 	import SpeechMonologue from '~icons/hako/speech-monologue';
 	import SpeechNormal from '~icons/hako/speech-normal';
 	import SpeechShout from '~icons/hako/speech-shout';
+	import ListDetails from '~icons/tabler/list-details';
 	import HostOwnedComposerLite from '$lib/HostOwnedComposerLite.svelte';
 	import CharacterAvatar from '$lib/CharacterAvatar.svelte';
 	import SpeechSuggestions from '$lib/frontend/SpeechSuggestions.svelte';
@@ -81,7 +82,9 @@
 			aria-pressed={chatterOpen}
 			aria-keyshortcuts="C"
 			onclick={onToggleChatter}
-		>Chatter</button>
+		>
+			<span class="chatter-toggle-icon" aria-hidden="true"><ListDetails /></span>
+		</button>
 		{#if hasUnreadReplies}
 			<button
 				class="trace-unread-indicator"
@@ -175,7 +178,7 @@
 	.profile-trigger:focus-visible { outline: 3px solid var(--color-focus-ring); outline-offset: 2px; }
 	.composer-controls { display: contents; }
 	.chatter-toggle {
-		flex: 0 0 76px;
+		flex: 0 0 54px;
 		min-width: 44px;
 		min-height: 44px;
 		border: 1px solid rgba(57, 67, 64, 0.2);
@@ -186,6 +189,8 @@
 		font-weight: 800;
 		cursor: pointer;
 	}
+	.chatter-toggle-icon { display: inline-flex; width: 24px; height: 24px; align-items: center; justify-content: center; }
+	.chatter-toggle-icon :global(svg) { width: 24px; height: 24px; }
 	.chatter-toggle:focus-visible { outline: 3px solid var(--color-focus-ring); outline-offset: 2px; }
 
 	.speech-type-toggle {
@@ -282,7 +287,7 @@
 		.composer-editor-slot { grid-row: 1; }
 		.composer-controls { display: flex; grid-row: 2; gap: 8px; align-items: stretch; min-width: 0; }
 		.composer-controls .profile-trigger { order: 1; flex-basis: 46px; width: 46px; height: 46px; }
-		.composer-controls .chatter-toggle { order: 2; flex-basis: 76px; }
+		.composer-controls .chatter-toggle { order: 2; flex-basis: 46px; }
 		.composer-controls .trace-unread-indicator { order: 3; flex-basis: 38px; }
 		.composer-controls .speech-type-toggle { order: 4; flex-basis: 46px; }
 		.composer-controls :global(.suggestions-anchor) { order: 5; }

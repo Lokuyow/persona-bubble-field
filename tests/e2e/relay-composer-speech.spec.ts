@@ -43,7 +43,19 @@ test.describe('Relay startup', () => {
 		for (const width of [1200, 390]) {
 			await page.setViewportSize({ width, height: 844 });
 			await openReadyRelayWorld(page, 1);
+			const chatterToggle = page.locator('.chatter-toggle');
 			await expect(page.getByRole('button', { name: 'AI発言候補を生成' })).toBeVisible();
+			await expect(chatterToggle.locator('svg')).toHaveCount(1);
+			await expect(chatterToggle).not.toContainText('Chatter');
+			const initiallyOpen = width > 700;
+			await expect(chatterToggle).toHaveAttribute('aria-label', initiallyOpen ? 'Chatterを閉じる' : 'Chatterを開く');
+			await expect(chatterToggle).toHaveAttribute('aria-pressed', String(initiallyOpen));
+			const toggleBox = await chatterToggle.boundingBox();
+			expect(toggleBox?.width ?? 0).toBeGreaterThanOrEqual(44);
+			expect(toggleBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+			await chatterToggle.click();
+			await expect(chatterToggle).toHaveAttribute('aria-label', initiallyOpen ? 'Chatterを開く' : 'Chatterを閉じる');
+			await expect(chatterToggle).toHaveAttribute('aria-pressed', String(!initiallyOpen));
 			await expect(page.locator('.trace-unread-indicator')).toHaveCount(0);
 			expect(await readActionDockControlOrder(page)).toEqual([
 				'profile-trigger', 'chatter-toggle', 'speech-type-toggle', 'suggestions-anchor'
