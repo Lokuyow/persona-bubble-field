@@ -144,9 +144,9 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.locator('.lifespan-hud')).toHaveCount(0);
 	});
 
-	test('does not paint the default-viewport field scene before measurement and keeps it visible after resize', async ({ page, browser }) => {
+	test('does not paint the default-viewport field scene before measurement and keeps it visible after resize', async ({ page, browser, baseURL }) => {
 		const ssrContext = await browser.newContext({
-			baseURL: test.info().project.use.baseURL as string,
+			baseURL,
 			javaScriptEnabled: false,
 			viewport: { width: 1440, height: 900 }
 		});
