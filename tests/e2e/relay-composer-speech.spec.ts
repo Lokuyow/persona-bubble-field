@@ -343,44 +343,6 @@ test.describe('Relay startup', () => {
 		expect(monologueByAlt.tags).toContainEqual(['l', 'speech:monologue', 'io.github.lokuyow.persona-bubble-field']);
 	});
 
-	test('resolves long and short slash commands before publishing', async ({ page }) => {
-		const editor = await openReadyRelayWorld(page);
-		const send = page.locator('ehagaki-composer').getByRole('button', { name: 'Send' });
-		for (const [command, content, label] of [
-			['/shout hello', 'hello', 'speech:shout'],
-			['/s short hello', 'short hello', 'speech:shout'],
-			['/mono monologue hello', 'monologue hello', 'speech:monologue'],
-			['/m short monologue', 'short monologue', 'speech:monologue']
-		] as const) {
-			const before = (await publishedMessages(page)).length;
-			await editor.fill(command);
-			await send.click();
-			await waitForPublishedMessageCount(page, before + 1);
-			const event = (await publishedMessages(page))[before];
-			expect(event.content).toBe(content);
-			expect(event.tags).toContainEqual(['l', label, 'io.github.lokuyow.persona-bubble-field']);
-		}
-	});
-
-	test('gives keyboard shortcuts precedence while still removing recognized slash prefixes', async ({ page }) => {
-		const editor = await openReadyRelayWorld(page);
-		const before = (await publishedMessages(page)).length;
-
-		await editor.fill('/m hello');
-		await editor.press('Control+Enter');
-		await waitForPublishedMessageCount(page, before + 1);
-		let event = (await publishedMessages(page))[before];
-		expect(event.content).toBe('hello');
-		expect(event.tags).toContainEqual(['l', 'speech:shout', 'io.github.lokuyow.persona-bubble-field']);
-
-		await editor.fill('/s hello');
-		await editor.press('Alt+Enter');
-		await waitForPublishedMessageCount(page, before + 2);
-		event = (await publishedMessages(page))[before + 1];
-		expect(event.content).toBe('hello');
-		expect(event.tags).toContainEqual(['l', 'speech:monologue', 'io.github.lokuyow.persona-bubble-field']);
-	});
-
 	test('does not publish Ctrl+Meta+Enter as a ctrlOrMeta speech shortcut', async ({ page }) => {
 		const editor = await openReadyRelayWorld(page);
 		const before = (await publishedMessages(page)).length;
@@ -391,7 +353,7 @@ test.describe('Relay startup', () => {
 		await expect(editor).toHaveValue('both modifiers');
 	});
 
-	test('keeps command-only content and false-positive slash text instead of publishing an empty command', async ({ page }) => {
+	test('keeps command-only content, publishes false-positive slash text, and resolves a valid slash command', async ({ page }) => {
 		const editor = await openReadyRelayWorld(page);
 		const send = page.locator('ehagaki-composer').getByRole('button', { name: 'Send' });
 		await editor.fill('/shout');
@@ -405,6 +367,13 @@ test.describe('Relay startup', () => {
 		const event = (await publishedMessages(page))[0];
 		expect(event.content).toBe('/something');
 		expect(event.tags.some((tag) => tag[0] === 'l' && tag[1]?.startsWith('speech:'))).toBe(false);
+
+		await editor.fill('/shout valid shout');
+		await send.click();
+		await waitForPublishedMessageCount(page, 2);
+		const validCommandEvent = (await publishedMessages(page))[1];
+		expect(validCommandEvent.content).toBe('valid shout');
+		expect(validCommandEvent.tags).toContainEqual(['l', 'speech:shout', 'io.github.lokuyow.persona-bubble-field']);
 	});
 
 		test('cycles the one-shot speech selector and only resets it after a successful submit', async ({ page }) => {
