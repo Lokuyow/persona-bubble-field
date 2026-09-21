@@ -2,12 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { verifyEvent, type Event, type EventTemplate, type VerifiedEvent } from 'nostr-tools/pure';
 import {
 	CHANNEL_MESSAGE_KIND,
+	TRACE_EVENT_KIND,
 	PROFILE_KIND,
 	WORLD_STATE_KIND,
 	PROTOTYPE_NAMESPACE,
 	RECENT_MESSAGE_TIMELINE_LIMIT,
 	TRACE_REPLY_KIND,
 	buildWorldStateEventTemplate,
+	buildTraceEventTemplate,
 	buildCharacterProfileTemplate,
 	buildWorldStateFilter,
 	buildTraceDirectReplyFilter,
@@ -21,6 +23,7 @@ import {
 	finalizeWorldEvent,
 	finalizeCharacterProfileEvent,
 	parseWorldStateEvent,
+	parseTraceEvent,
 	parseTraceReplyCandidate,
 	parseWorldMessage,
 	validateTraceReplyCandidate,
@@ -81,6 +84,17 @@ function signedPositionWithCreatedAt(createdAt: number): VerifiedEvent {
 		],
 		content: '8:3'
 	} as WorldStateEventTemplate, TEST_SECRET_KEY);
+}
+
+function signedDeathTrace(content = 'I was here'): VerifiedEvent {
+	return finalizeWorldEvent(buildTraceEventTemplate({
+		channel,
+		content,
+		position: { x: 7, y: 3 },
+		createdAt: 1_700_000_001,
+		source: 'death',
+		identifier: 'trace:death:test'
+	}), TEST_SECRET_KEY);
 }
 
 function signedMessageWithCreatedAt(createdAt: number): VerifiedEvent {
@@ -678,7 +692,7 @@ describe('Nostr protocol foundation', () => {
 
 	it('builds exact message, position, and trace filters', () => {
 		expect(buildWorldMessageFilter({ channelId: CHANNEL_ID, since: 1_700_000_000 })).toEqual({
-			kinds: [42],
+			kinds: [42, 30079],
 			'#e': [CHANNEL_ID],
 			'#L': [PROTOTYPE_NAMESPACE],
 			'#l': ['chat'],
@@ -686,14 +700,14 @@ describe('Nostr protocol foundation', () => {
 		});
 		expect(buildWorldMessageFilters({ channelId: CHANNEL_ID, since: 1_700_000_000 })).toEqual([
 			{
-				kinds: [42],
+				kinds: [42, 30079],
 				'#e': [CHANNEL_ID],
 				'#L': [PROTOTYPE_NAMESPACE],
 				'#l': ['chat'],
 				since: 1_700_000_000
 			},
 			{
-				kinds: [42],
+				kinds: [42, 30079],
 				'#e': [CHANNEL_ID],
 				'#L': [PROTOTYPE_NAMESPACE],
 				'#l': ['chat'],
@@ -707,7 +721,7 @@ describe('Nostr protocol foundation', () => {
 			since: 1_700_000_100
 		});
 		expect(buildTraceRootBootstrapFilter({ channelId: CHANNEL_ID })).toEqual({
-			kinds: [42],
+			kinds: [42, 30079],
 			'#e': [CHANNEL_ID],
 			'#L': [PROTOTYPE_NAMESPACE],
 			'#l': ['chat'],
@@ -750,6 +764,26 @@ describe('Nostr protocol foundation', () => {
 			slot: 0,
 			createdAt: 1
 		})).toThrow(TypeError);
+	});
+
+	it('builds and parses a dedicated death trace event without treating it as a kind 42 message', () => {
+		const event = signedDeathTrace('Remember this field.');
+		expect(event.kind).toBe(TRACE_EVENT_KIND);
+		expect(parseWorldMessage(event, CHANNEL_ID)).toBeNull();
+		expect(parseTraceEvent(event, CHANNEL_ID)).toMatchObject({
+		content: 'Remember this field.',
+		position: { x: 7, y: 3 },
+			source: 'death'
+			});
+		const invalid = resign({ ...buildTraceEventTemplate({
+			channel,
+			content: 'invalid',
+			position: { x: 7, y: 3 },
+			createdAt: 1_700_000_001,
+			source: 'death',
+			identifier: 'trace:death:invalid'
+		}), tags: [['e', CHANNEL_ID, channel.relayHint, 'root']] });
+		expect(parseTraceEvent(invalid, CHANNEL_ID)).toBeNull();
 	});
 
 	it('builds and parses channel-scoped active and exit World State', () => {

@@ -12,6 +12,7 @@ import {
 export const PROTOTYPE_NAMESPACE = 'io.github.lokuyow.persona-bubble-field';
 export const CHANNEL_MESSAGE_KIND = 42;
 export const TRACE_REPLY_KIND = 1111;
+export const TRACE_EVENT_KIND = 30079;
 export const WORLD_STATE_KIND = 30078;
 export const PROFILE_KIND = 0;
 export const RECENT_MESSAGE_TIMELINE_LIMIT = 50;
@@ -50,6 +51,17 @@ export type WorldStateEventInput = {
 	createdAt: number;
 };
 
+export type TraceEventSource = 'death';
+
+export type TraceEventInput = {
+	channel: ChannelReference;
+	content: string;
+	position: GridPosition;
+	createdAt: number;
+	source: TraceEventSource;
+	identifier: string;
+};
+
 
 export type TraceReplyInput = {
 	root: ParsedWorldMessage;
@@ -75,6 +87,10 @@ export type WorldStateEventTemplate = EventTemplate & {
 	kind: typeof WORLD_STATE_KIND;
 };
 
+export type TraceEventTemplate = EventTemplate & {
+	kind: typeof TRACE_EVENT_KIND;
+};
+
 
 export type TraceReplyTemplate = EventTemplate & {
 	kind: typeof TRACE_REPLY_KIND;
@@ -84,7 +100,7 @@ export type CharacterProfileTemplate = EventTemplate & {
 	kind: typeof PROFILE_KIND;
 };
 
-export type WorldEventTemplate = WorldMessageTemplate | WorldStateEventTemplate | TraceReplyTemplate;
+export type WorldEventTemplate = WorldMessageTemplate | WorldStateEventTemplate | TraceEventTemplate | TraceReplyTemplate;
 
 export type ParsedWorldMessage = {
 	id: string;
@@ -93,6 +109,7 @@ export type ParsedWorldMessage = {
 	content: string;
 	speechType: SpeechType;
 	position: GridPosition;
+	source?: 'message' | TraceEventSource;
 };
 
 export type ParsedWorldStateEvent = {
@@ -102,6 +119,15 @@ export type ParsedWorldStateEvent = {
 	state: WorldStateState;
 	slot: WorldStateSlot | null;
 	position: GridPosition;
+};
+
+export type ParsedTraceEvent = {
+	id: string;
+	pubkey: string;
+	createdAt: number;
+	content: string;
+	position: GridPosition;
+	source: TraceEventSource;
 };
 
 
@@ -207,6 +233,10 @@ function assertWorldStateSlot(slot: WorldStateSlot | 'exit'): void {
 	if (slot !== 0 && slot !== 1) {
 		if (slot !== 'exit') throw new TypeError('World State slot must be 0, 1, or exit.');
 	}
+}
+
+function assertTraceIdentifier(value: string): void {
+	if (!/^[A-Za-z0-9._:-]{1,200}$/.test(value)) throw new TypeError('Trace identifier is invalid.');
 }
 
 function assertChannelReference(channel: ChannelReference): void {
@@ -319,6 +349,27 @@ export function buildWorldStateEventTemplate(input: WorldStateEventInput): World
 			['e', input.channel.channelId, input.channel.relayHint]
 		],
 		content: formatCanonicalGridPosition(input.position)
+	};
+}
+
+export function buildTraceEventTemplate(input: TraceEventInput): TraceEventTemplate {
+	assertChannelReference(input.channel);
+	assertCreatedAt(input.createdAt);
+	assertTraceIdentifier(input.identifier);
+	if (input.source !== 'death') throw new TypeError('Trace source is invalid.');
+	return {
+		kind: TRACE_EVENT_KIND,
+		created_at: input.createdAt,
+		tags: [
+			['d', input.identifier],
+			['e', input.channel.channelId, input.channel.relayHint, 'root'],
+			['w', formatCanonicalGridPosition(input.position)],
+			['L', PROTOTYPE_NAMESPACE],
+			['l', 'chat', PROTOTYPE_NAMESPACE],
+			['l', 'trace', PROTOTYPE_NAMESPACE],
+			['l', `trace:${input.source}`, PROTOTYPE_NAMESPACE]
+		],
+		content: input.content
 	};
 }
 
@@ -548,11 +599,27 @@ export function parseWorldStateEvent(event: Event, channelId: string): ParsedWor
 	};
 }
 
+export function parseTraceEvent(event: Event, channelId: string): ParsedTraceEvent | null {
+	assertChannelId(channelId);
+	if (!isVerifiedEvent(event) || event.kind !== TRACE_EVENT_KIND || !hasAssignedCharacter(event)) return null;
+	if (!Number.isSafeInteger(event.created_at) || event.created_at < 0) return null;
+	if (!referencesChannel(event, channelId)) return null;
+	if (!event.tags.some((tag) => tag[0] === 'L' && tag[1] === PROTOTYPE_NAMESPACE)) return null;
+	if (!event.tags.some((tag) => tag[0] === 'l' && tag[1] === 'chat' && tag[2] === PROTOTYPE_NAMESPACE)) return null;
+	if (!event.tags.some((tag) => tag[0] === 'l' && tag[1] === 'trace' && tag[2] === PROTOTYPE_NAMESPACE)) return null;
+	const sourceTags = event.tags.filter((tag) => tag[0] === 'l' && tag[2] === PROTOTYPE_NAMESPACE && tag[1]?.startsWith('trace:'));
+	if (sourceTags.length !== 1 || sourceTags[0][1] !== 'trace:death') return null;
+	const identifier = event.tags.filter((tag) => tag[0] === 'd');
+	const position = parseUnambiguousWorldPosition(event);
+	if (identifier.length !== 1 || !identifier[0][1] || !position) return null;
+	return { id: event.id, pubkey: event.pubkey, createdAt: event.created_at, content: event.content, position, source: 'death' };
+}
+
 export function buildWorldMessageFilter(options: LiveFilterOptions): Filter {
 	assertChannelId(options.channelId);
 	assertCreatedAt(options.since);
 	return {
-		kinds: [CHANNEL_MESSAGE_KIND],
+		kinds: [CHANNEL_MESSAGE_KIND, TRACE_EVENT_KIND],
 		'#e': [options.channelId],
 		'#L': [PROTOTYPE_NAMESPACE],
 		'#l': ['chat'],
@@ -563,7 +630,7 @@ export function buildWorldMessageFilter(options: LiveFilterOptions): Filter {
 export function buildWorldMessageHistoryFilter(options: Pick<LiveFilterOptions, 'channelId'>): Filter {
 	assertChannelId(options.channelId);
 	return {
-		kinds: [CHANNEL_MESSAGE_KIND],
+		kinds: [CHANNEL_MESSAGE_KIND, TRACE_EVENT_KIND],
 		'#e': [options.channelId],
 		'#L': [PROTOTYPE_NAMESPACE],
 		'#l': ['chat'],
@@ -589,7 +656,7 @@ export function buildWorldStateFilter(options: LiveFilterOptions): Filter {
 export function buildTraceRootBootstrapFilter(options: TraceRootBootstrapFilterOptions): Filter {
 	assertChannelId(options.channelId);
 	return {
-		kinds: [CHANNEL_MESSAGE_KIND],
+		kinds: [CHANNEL_MESSAGE_KIND, TRACE_EVENT_KIND],
 		'#e': [options.channelId],
 		'#L': [PROTOTYPE_NAMESPACE],
 		'#l': ['chat'],

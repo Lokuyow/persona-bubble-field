@@ -24,8 +24,11 @@ import {
 	buildWorldMessageFilters,
 	parseWorldStateEvent,
 	parseWorldMessage,
+	parseTraceEvent,
+	TRACE_EVENT_KIND,
 	type ParsedWorldStateEvent,
 	type ParsedWorldMessage,
+	type ParsedTraceEvent,
 	worldStateIdentifiers,
 	PROTOTYPE_NAMESPACE,
 	RECENT_MESSAGE_TIMELINE_LIMIT
@@ -160,9 +163,11 @@ export type PrimaryStartInput = Readonly<{
 	 */
 	onBootstrapMessage: (event: ParsedWorldMessage) => void;
 	onBootstrapWorldState: (event: ParsedWorldStateEvent) => void;
+	onBootstrapTrace?: (event: ParsedTraceEvent) => void;
 	/** A verified, event-ID-deduped live message and its cache-authoritative wire event. */
 	onLiveMessage: (event: ParsedWorldMessage, rawEvent: Event) => void;
 	onLiveWorldState: (event: ParsedWorldStateEvent) => void;
+	onLiveTrace?: (event: ParsedTraceEvent, rawEvent: Event) => void;
 	onPrimaryClosed: (diagnostic: PrimaryPairDiagnostic) => void;
 }>;
 
@@ -171,6 +176,7 @@ export type PrimaryStartResult = Readonly<{
 	metadataDiscovery: MetadataDiscoveryDiagnostics;
 	messages: readonly ParsedWorldMessage[];
 	worldStates: readonly ParsedWorldStateEvent[];
+	traces: readonly ParsedTraceEvent[];
 	primaryPairs: readonly PrimaryPairDiagnostic[];
 	nip11: readonly Nip11Diagnostic[];
 }>;
@@ -313,7 +319,7 @@ function classifyPrimaryFilter(
 		const filter = Object.fromEntries(entries) as Record<string, unknown>;
 		const allowedKeys = new Set(['kinds', '#e', '#L', '#l', kind === 'recent' ? 'since' : 'limit']);
 		if (!entries.every(([key]) => allowedKeys.has(key)) ||
-			!hasExactly(filter.kinds, [42]) ||
+			!hasExactly(filter.kinds, [42, TRACE_EVENT_KIND]) ||
 			!hasExactly(filter['#e'], [channelId]) ||
 			!hasExactly(filter['#L'], [PROTOTYPE_NAMESPACE]) ||
 			!hasExactly(filter['#l'], ['chat'])) return false;
@@ -424,8 +430,10 @@ export function createNostrRelayTransport(
 	const primaryRequestsSent = new Set<PrimaryPairKey>();
 	const initialMessages: ParsedWorldMessage[] = [];
 	const initialWorldStates: ParsedWorldStateEvent[] = [];
+	const initialTraces: ParsedTraceEvent[] = [];
 	const messageIds = new Set<string>();
 	const positionIds = new Set<string>();
+	const traceIds = new Set<string>();
 	const primaryPairs = new Map<PrimaryPairKey, PrimaryPairDiagnostic>();
 	const connections = new Map<string, RelayConnectionDiagnostic>();
 	const relayAliases = new Map<string, string>();
@@ -675,6 +683,19 @@ export function createNostrRelayTransport(
 		}
 	}
 
+	function receiveTrace(event: Event): void {
+		if (!metadata) return;
+		const parsed = parseTraceEvent(event, metadata.channelId);
+		if (!parsed || traceIds.has(parsed.id)) return;
+		traceIds.add(parsed.id);
+		if (initialPhase) {
+			initialTraces.push(parsed);
+			startInput?.onBootstrapTrace?.(parsed);
+		} else {
+			startInput?.onLiveTrace?.(parsed, event);
+		}
+	}
+
 	async function startPrimary(): Promise<readonly PrimaryPairDiagnostic[]> {
 		const client = requireRxNostr();
 		if (!metadata || !startInput) throw new Error('Primary startup is missing resolved metadata or callbacks.');
@@ -741,7 +762,10 @@ export function createNostrRelayTransport(
 				if (!relayUrl) return;
 				const logical = primarySubIds.get(`${relayUrl}\u0000${packet.subId}`);
 				if (!logical || activeSubIds.get(pairKey(relayUrl, logical)) !== packet.subId) return;
-				if (logical === 'world-messages') receiveMessage(packet.event);
+				if (logical === 'world-messages') {
+					if (packet.event.kind === TRACE_EVENT_KIND) receiveTrace(packet.event);
+					else receiveMessage(packet.event);
+				}
 				else receiveWorldState(packet.event);
 			});
 			const rawSubscription = client.createAllMessageObservable().subscribe((packet) => {
@@ -1391,6 +1415,7 @@ export function createNostrRelayTransport(
 					metadataDiscovery: metadataDiagnostics,
 					messages: [...initialMessages],
 					worldStates: [...initialWorldStates],
+					traces: [...initialTraces],
 					primaryPairs: pairs,
 					nip11: nip11Diagnostics()
 				};

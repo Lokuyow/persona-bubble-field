@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	buildWorldMessageTemplate,
+	buildTraceEventTemplate,
 	finalizeWorldEvent,
 	type ChannelReference
 } from './nostrProtocol';
@@ -36,6 +37,21 @@ function lotteryRoot(options: Parameters<typeof root>[0] = {}, wins = true) {
 	throw new Error('Could not make a deterministic lottery fixture.');
 }
 
+function lotteryDeathTrace(content = 'last words') {
+	for (let attempt = 0; attempt < 10_000; attempt += 1) {
+		const event = finalizeWorldEvent(buildTraceEventTemplate({
+			channel,
+			content: `${content}-${attempt}`,
+			createdAt: 200,
+			position: { x: 4, y: 2 },
+			source: 'death',
+			identifier: `trace:death:test-${attempt}`
+		}), SECRET_KEY);
+		if (BigInt(`0x${event.id}`) % 5n === 0n) return event;
+	}
+	throw new Error('Could not make a deterministic death trace fixture.');
+}
+
 describe('trace root selection', () => {
 	it('validates channel IDs even when no raw events are supplied', () => {
 		expect(() => selectEffectiveTraceRoots([], 'A'.repeat(64), { columns: 1, rows: 1 })).toThrow(TypeError);
@@ -56,6 +72,14 @@ describe('trace root selection', () => {
 
 		expect(selectEffectiveTraceRoots([...winners, loser], CHANNEL_ID, { columns: 8, rows: 8 })
 			.map((candidate) => candidate.id).sort()).toEqual(winners.map((event) => event.id).sort());
+	});
+
+	it('projects a dedicated death trace into the existing clickable root projection', () => {
+		const event = lotteryDeathTrace();
+		const roots = selectEffectiveTraceRoots([event, event], CHANNEL_ID, { columns: 20, rows: 10 });
+		const [root] = roots;
+		expect(root).toMatchObject({ id: event.id, content: expect.stringContaining('last words'), source: 'death', speechType: 'normal' });
+		expect(roots).toHaveLength(1);
 	});
 
 	it('rejects out-of-bounds roots and retains roots regardless of age', () => {

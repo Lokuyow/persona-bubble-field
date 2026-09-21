@@ -1,6 +1,6 @@
 import type { Event } from 'nostr-tools/pure';
 import type { FieldSize } from './geometry';
-import { parseWorldMessage, type ParsedWorldMessage } from './nostrProtocol';
+import { parseTraceEvent, parseWorldMessage, type ParsedWorldMessage } from './nostrProtocol';
 
 export type TraceRootField = Pick<FieldSize, 'columns' | 'rows'>;
 
@@ -44,8 +44,10 @@ function compareRoots(first: TraceRootCandidate, second: TraceRootCandidate): nu
 
 function parseCandidate(event: Event, channelId: string, field: TraceRootField): TraceRootCandidate | null {
 	try {
-		const root = parseWorldMessage(event, channelId);
-		if (!root || !isWithinField(root, field) || !winsTraceRootLottery(root.id)) return null;
+		const message = parseWorldMessage(event, channelId);
+		const trace = parseTraceEvent(event, channelId);
+		const root = message ?? (trace ? { ...trace, speechType: 'normal' as const, source: trace.source } : null);
+		if (!root || !isWithinField(root, field) || root.source !== 'death' && !winsTraceRootLottery(root.id)) return null;
 		return { rawEvent: event, root };
 	} catch {
 		// IndexedDB is untrusted and malformed values must never become effective roots.
@@ -81,7 +83,7 @@ export function capTraceRootCandidates(
 }
 
 /**
- * Validates raw kind 42 events for one world and selects its effective roots.
+ * Validates supported trace-root events for one world and selects its effective roots.
  * The boundary validation is intentional even when rawEvents is empty.
  */
 export function selectTraceRootCandidates(

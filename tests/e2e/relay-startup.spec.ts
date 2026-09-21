@@ -321,6 +321,7 @@ async function installDelayedRelay(page: Page, options: {
 	deferRealtimeEvents?: boolean;
 	realtimeTerminal?: 'eose' | 'closed' | 'timeout';
 	realtimePublishOutcome?: 'accepted' | 'rejected' | 'echo' | 'no-response';
+	rejectTracePublishes?: boolean;
 	traceRoots?: readonly object[];
 	traceReplies?: readonly object[];
 	deferTraceRoots?: boolean;
@@ -331,7 +332,7 @@ async function installDelayedRelay(page: Page, options: {
 	hiddenSubscriptionLimit?: number;
 } = {}): Promise<void> {
 	const events = options.primaryEvents ?? testEvents();
-	await page.addInitScript(({ seedRelays, authoritativeRelays, channelEvent, primaryEvents, historyMessages, realtimeEvents, deferPrimaryEvents, deferRealtimeEvents, realtimeTerminal, realtimePublishOutcome, traceRoots, traceReplies, deferTraceRoots, deferTraceReplies, persistAcrossReload, testWorldConfig, hiddenSubscriptionLimit }) => {
+	await page.addInitScript(({ seedRelays, authoritativeRelays, channelEvent, primaryEvents, historyMessages, realtimeEvents, deferPrimaryEvents, deferRealtimeEvents, realtimeTerminal, realtimePublishOutcome, rejectTracePublishes, traceRoots, traceReplies, deferTraceRoots, deferTraceReplies, persistAcrossReload, testWorldConfig, hiddenSubscriptionLimit }) => {
 		type Listener = (event?: { type: string; data?: string; code?: number; reason?: string }) => void;
 		type PendingRequest = { socket: FakeWebSocket; subId: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] };
 		const seed = new Set<string>(seedRelays);
@@ -376,6 +377,7 @@ async function installDelayedRelay(page: Page, options: {
 			realtimePublishOutcome: realtimePublishOutcome ?? 'accepted' as 'accepted' | 'rejected' | 'echo' | 'no-response',
 			rejectMessagePublishes: false,
 			rejectPositionPublishes: false,
+			rejectTracePublishes: rejectTracePublishes ?? false,
 			deferReplyPublishes: false,
 			deferPositionPublishes: false,
 			echoRepliesBeforeResult: false,
@@ -404,7 +406,7 @@ async function installDelayedRelay(page: Page, options: {
 			if (request.filters.some((filter) => matchesRealtimeFilter(event, filter))) deliver(request.socket, ['EVENT', request.subId, event]);
 		};
 		const respondPublish = (socket: FakeWebSocket, event: Record<string, unknown>) => {
-			const reject = event.kind === 42 && state.rejectMessagePublishes || event.kind === 30078 && state.rejectPositionPublishes ||
+			const reject = event.kind === 42 && state.rejectMessagePublishes || event.kind === 30078 && state.rejectPositionPublishes || event.kind === 30079 && state.rejectTracePublishes ||
 				event.kind === 1111 && state.replyOutcome !== 'accepted';
 			const notice = event.kind === 1111 && state.replyOutcome === 'duplicate' ? 'duplicate: already stored' : reject ? 'blocked: test rejection' : '';
 			if (event.kind === 1111 && state.replyOutcome !== 'rejected' && !traceReplyHistory.some((known) => known.id === event.id)) traceReplyHistory.push(event);
@@ -437,7 +439,7 @@ async function installDelayedRelay(page: Page, options: {
 			if (state.primaryReleased) deliver(request.socket, ['EOSE', request.subId]);
 		};
 		const respondTraceRoots = (request: PendingRequest) => {
-			for (const event of traceRoots) deliver(request.socket, ['EVENT', request.subId, event]);
+			for (const event of [...traceRoots, ...previous.published.filter((candidate) => candidate.kind === 30079)]) deliver(request.socket, ['EVENT', request.subId, event]);
 			deliver(request.socket, ['EOSE', request.subId]);
 		};
 		const respondTraceReplies = (request: PendingRequest) => {
@@ -656,6 +658,8 @@ async function installDelayedRelay(page: Page, options: {
 				rejectMessagePublishes: () => { state.rejectMessagePublishes = true; },
 				rejectPositionPublishes: () => { state.rejectPositionPublishes = true; },
 				allowPositionPublishes: () => { state.rejectPositionPublishes = false; },
+				rejectTracePublishes: () => { state.rejectTracePublishes = true; },
+				allowTracePublishes: () => { state.rejectTracePublishes = false; },
 				allowMessagePublishes: () => { state.rejectMessagePublishes = false; },
 				injectPosition: (event: object) => {
 					for (const request of activePrimary) {
@@ -688,6 +692,7 @@ async function installDelayedRelay(page: Page, options: {
 		deferRealtimeEvents: options.deferRealtimeEvents ?? false,
 		realtimeTerminal: options.realtimeTerminal ?? 'eose',
 		realtimePublishOutcome: options.realtimePublishOutcome ?? 'accepted',
+		rejectTracePublishes: options.rejectTracePublishes ?? false,
 		persistAcrossReload: options.persistAcrossReload ?? false,
 		testWorldConfig: options.testWorldConfig,
 		hiddenSubscriptionLimit: options.hiddenSubscriptionLimit
@@ -696,7 +701,7 @@ async function installDelayedRelay(page: Page, options: {
 
 function relayState(page: Page) {
 	return page.evaluate(() => (window as typeof window & {
-		__relayStartupTest: { state: { requests: Array<{ url: string; subId: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] }>; published: Array<{ id: string; kind: number; content: string; tags: string[][]; pubkey?: string }>; closedSubscriptions: Array<{ subId: string; url: string }> }; failMetadataDiscovery(): void; releaseMetadata(): void; releasePrimaryEvents(): void; releasePrimary(): void; releaseTraceRoots(): void; releaseTraceReplies(): void; deferTraceReplies(): void; injectTraceReply(event: object): void; injectClosedTraceReply(event: object): void; activeTraceReplyCount(): number; rejectMessagePublishes(): void; allowMessagePublishes(): void; rejectPositionPublishes(): void; allowPositionPublishes(): void; injectPosition(event: object): void; injectMessage(event: object): void };
+		__relayStartupTest: { state: { requests: Array<{ url: string; subId: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] }>; published: Array<{ id: string; kind: number; content: string; tags: string[][]; pubkey?: string }>; closedSubscriptions: Array<{ subId: string; url: string }> }; failMetadataDiscovery(): void; releaseMetadata(): void; releasePrimaryEvents(): void; releasePrimary(): void; releaseTraceRoots(): void; releaseTraceReplies(): void; deferTraceReplies(): void; injectTraceReply(event: object): void; injectClosedTraceReply(event: object): void; activeTraceReplyCount(): number; rejectMessagePublishes(): void; allowMessagePublishes(): void; rejectPositionPublishes(): void; allowPositionPublishes(): void; rejectTracePublishes(): void; allowTracePublishes(): void; injectPosition(event: object): void; injectMessage(event: object): void };
 	}).__relayStartupTest);
 }
 
@@ -1728,6 +1733,9 @@ test.describe('Relay startup', () => {
 		await page.clock.setSystemTime(round.revealCutoffAtMs + 1_000);
 		await page.clock.runFor(2_000);
 
+		await expect(page.locator('[data-death-presentation]')).toBeVisible();
+		await page.locator('[data-death-presentation] textarea').fill('A last word from this Run');
+		await page.locator('[data-death-presentation]').getByRole('button', { name: '残して進む' }).click();
 		await expect(page.getByRole('dialog')).toBeVisible();
 		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
 		const exits = await page.evaluate((expectedPubkey) => {
@@ -1739,6 +1747,14 @@ test.describe('Relay startup', () => {
 		expect(exits).toHaveLength(1);
 		expect(exits[0]?.content).toMatch(/^\d+:\d+$/);
 		expect(exits[0]?.tags.find((tag) => tag[0] === 'e')?.[1]).toBe(CHANNEL_ID);
+		const traces = await page.evaluate((expectedPubkey) => {
+			const state = (window as typeof window & { __relayStartupTest: { state: { previousPublished: Array<{ id: string; kind: number; pubkey?: string; content: string; tags: string[][] }>; published: Array<{ id: string; kind: number; pubkey?: string; content: string; tags: string[][] }> } } }).__relayStartupTest.state;
+			return [...new Map([...state.previousPublished, ...state.published]
+				.filter((event) => event.kind === 30079 && event.pubkey === expectedPubkey && event.content === 'A last word from this Run')
+				.map((event) => [event.id, event])).values()];
+		}, selfPubkey);
+		expect(traces).toHaveLength(1);
+		expect(traces[0]?.tags.find((tag) => tag[0] === 'w')?.[1]).toBe(exits[0]?.content);
 	});
 
 	test('does not publish a terminal exit when a realtime death outcome is duplicate', async ({ page }) => {
@@ -3395,6 +3411,8 @@ test.describe('Relay startup', () => {
 		await pauseAtCurrentBrowserTime(page);
 
 		await page.clock.runFor(31_000);
+		await expect(page.locator('[data-death-presentation]')).toBeVisible();
+		await page.locator('[data-death-presentation]').getByRole('button', { name: '残さず進む' }).click();
 		await expect(page.getByRole('dialog')).toBeVisible();
 		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
 		await page.getByRole('button', { name: /を選ぶ$/ }).first().click();
@@ -3443,7 +3461,7 @@ test.describe('Relay startup', () => {
 		const pubkey = getPublicKey(secret);
 		await page.clock.install({ time: startTime });
 		await installHostOwnedStub(page);
-		await installDelayedRelay(page, { primaryEvents: testEvents(startTime), persistAcrossReload: true });
+		await installDelayedRelay(page, { primaryEvents: testEvents(startTime), persistAcrossReload: true, rejectTracePublishes: true });
 		await seedRelayAccount(page, secret, pubkey, startTime + 30_000);
 		await page.goto('/');
 		await expect(page.locator('.composer-dock')).toBeVisible();
@@ -3455,6 +3473,9 @@ test.describe('Relay startup', () => {
 		await pauseAtCurrentBrowserTime(page);
 
 		await page.clock.runFor(31_000);
+		await expect(page.locator('[data-death-presentation]')).toBeVisible();
+		await page.locator('[data-death-presentation] textarea').fill('A last word from this Run');
+		await page.locator('[data-death-presentation]').getByRole('button', { name: '残して進む' }).click();
 		await expect(page.getByRole('dialog')).toBeVisible();
 		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
 		await expect(page.getByText('Runが終了しました', { exact: true })).toBeVisible();
@@ -3475,6 +3496,14 @@ test.describe('Relay startup', () => {
 		}, pubkey);
 		expect(exit?.content).toMatch(/^\d+:\d+$/);
 		expect(exit?.tags.find((tag) => tag[0] === 'e')?.[1]).toBe(CHANNEL_ID);
+		const traces = await page.evaluate((expectedPubkey) => {
+			const state = (window as typeof window & { __relayStartupTest: { state: { previousPublished: Array<{ id: string; kind: number; pubkey?: string; content: string; tags: string[][] }>; published: Array<{ id: string; kind: number; pubkey?: string; content: string; tags: string[][] }> } } }).__relayStartupTest.state;
+			return [...new Map([...state.previousPublished, ...state.published]
+				.filter((event) => event.kind === 30079 && event.pubkey === expectedPubkey && event.content === 'A last word from this Run')
+				.map((event) => [event.id, event])).values()];
+		}, pubkey);
+		expect(traces).toHaveLength(1);
+		expect(traces[0]?.tags.find((tag) => tag[0] === 'w')?.[1]).toBe(exit?.content);
 	});
 
 	test('keeps local death committed when the terminal exit is rejected by Relay', async ({ page }) => {
@@ -3495,12 +3524,17 @@ test.describe('Relay startup', () => {
 		await pauseAtCurrentBrowserTime(page);
 		await page.evaluate(() => (window as unknown as { __relayStartupTest: { rejectPositionPublishes(): void } }).__relayStartupTest.rejectPositionPublishes());
 		await page.clock.runFor(31_000);
+		await expect(page.locator('[data-death-presentation]')).toBeVisible();
+		await page.locator('[data-death-presentation] textarea').fill('trace publication is best effort');
+		await page.locator('[data-death-presentation]').getByRole('button', { name: '残して進む' }).click();
 		await expect(page.getByRole('dialog')).toBeVisible();
 		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
 		await expect.poll(() => page.evaluate((expectedPubkey) => {
 			const state = (window as unknown as { __relayStartupTest: { state: { previousPublished: Array<{ id: string; kind: number; pubkey?: string; tags: string[][] }>; published: Array<{ id: string; kind: number; pubkey?: string; tags: string[][] }> } } }).__relayStartupTest.state;
 			return [...state.previousPublished, ...state.published].some((event) => event.kind === 30078 && event.pubkey === expectedPubkey && event.tags.some((tag) => tag[0] === 'd' && tag[1]?.endsWith(':exit')));
 		}, pubkey)).toBe(true);
+		const traces = (await relayState(page)).state.published.filter((event) => event.kind === 30079 && event.pubkey === pubkey);
+		expect(traces).toHaveLength(0);
 	});
 
 	for (const width of [700, 701]) {

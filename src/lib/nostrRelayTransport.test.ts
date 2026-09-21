@@ -200,8 +200,8 @@ describe('primary lifecycle', () => {
 			const messageRequests = relay.primaryRequests().filter((request) => kind(request) === 42);
 			expect(messageRequests).toHaveLength(1);
 			expect(messageRequests[0]).toHaveLength(4);
-			expect(messageRequests[0][2]).toMatchObject({ kinds: [42], since: f.input.messageSince });
-			expect(messageRequests[0][3]).toMatchObject({ kinds: [42], limit: 50 });
+			expect(messageRequests[0][2]).toMatchObject({ kinds: [42, 30079], since: f.input.messageSince });
+			expect(messageRequests[0][3]).toMatchObject({ kinds: [42, 30079], limit: 50 });
 			expect(messageRequests[0][3].since).toBeUndefined();
 		}
 		expect(result.primaryPairs).toHaveLength(4);

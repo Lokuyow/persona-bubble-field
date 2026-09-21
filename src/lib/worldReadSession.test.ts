@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getPublicKey, type VerifiedEvent } from 'nostr-tools/pure';
 import {
 	parseWorldStateEvent,
+	parseTraceEvent,
 	parseTraceReplyCandidate,
 	validateTraceReplyCandidate,
 	parseWorldMessage,
@@ -348,8 +349,9 @@ describe('world read session', () => {
 	let input: {
 	onBootstrapMessage: (event: ParsedWorldMessage) => void;
 	onBootstrapWorldState: (event: ParsedWorldStateEvent) => void;
-	onLiveMessage: (event: ParsedWorldMessage, rawEvent: never) => void;
+		onLiveMessage: (event: ParsedWorldMessage, rawEvent: never) => void;
 		onLiveWorldState: (event: ParsedWorldStateEvent) => void;
+		onLiveTrace: (event: { id: string; source: 'death' }, rawEvent: never) => void;
 		onPrimaryClosed: (diagnostic: never) => void;
 		messageSince: number;
 		worldStateSince: number;
@@ -533,6 +535,42 @@ describe('world read session', () => {
 		expect(parseWorldStateEvent(publish.mock.calls[0][0], 'c'.repeat(64))).toMatchObject({ state: 'exit', position: { x: 2, y: 1 } });
 		expect(await session.publishTerminalExit()).toEqual({ kind: 'unavailable' });
 		expect(await session.moveSelf('right')).toEqual({ kind: 'unavailable' });
+	});
+
+	it('routes live death traces to the trace reducer without entering world presence', async () => {
+		const onLiveMessage = vi.fn();
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 }, selfSigner: selfSigner(),
+			onPresenceChanged: vi.fn(), onLiveMessage, onStatusChanged: vi.fn()
+		});
+		await session.start(); session.completeBootstrap();
+		const rawEvent = { id: 'death-trace' } as never;
+		input?.onLiveTrace({ id: 'death-trace', source: 'death' }, rawEvent);
+		await Promise.resolve();
+		expect(onLiveMessage).not.toHaveBeenCalled();
+		expect(mocked.reconcileTraceRootCache).toHaveBeenCalledWith(expect.objectContaining({ rawEvents: [rawEvent] }));
+	});
+
+	it('publishes one dedicated death Last Words trace after terminal exit without using the presence writer', async () => {
+		result = startResult([], [position('self-slot-0', 701, selfPubkey, 0, { x: 2, y: 1 })]);
+		publish.mockResolvedValue([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 }, selfSigner: selfSigner(),
+			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn()
+		});
+		await session.start(); session.completeBootstrap();
+		expect(session.prepareTerminalExit(selfPubkey).kind).toBe('prepared');
+		expect(await session.publishTerminalExit()).toMatchObject({ kind: 'published' });
+		expect(session.enableDeathLastWords()).toBe(true);
+		const publishedExit = publish.mock.calls[0][0] as VerifiedEvent;
+		const first = await session.publishDeathLastWords('  last words  ');
+		expect(first).toMatchObject({ kind: 'published' });
+		expect(publish).toHaveBeenCalledTimes(2);
+		const publishedTrace = publish.mock.calls[1][0] as VerifiedEvent;
+		expect(publishedTrace.kind).toBe(30079);
+		expect(parseTraceEvent(publishedTrace, 'c'.repeat(64))).toMatchObject({ content: 'last words', position: { x: 2, y: 1 }, source: 'death' });
+		expect(publishedTrace.tags.find((tag) => tag[0] === 'w')?.[1]).toBe(publishedExit.content);
+		expect(await session.publishDeathLastWords('duplicate')).toEqual({ kind: 'unavailable' });
 	});
 
 	it('uses latest positive message activity when preparing an exit after clock regression', async () => {

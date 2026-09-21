@@ -16,6 +16,7 @@ import {
 } from './traceReadState';
 import {
 	buildWorldStateEventTemplate,
+	buildTraceEventTemplate,
 	buildTraceReplyTemplate,
 	buildWorldMessageTemplate,
 	finalizeWorldEvent,
@@ -24,7 +25,8 @@ import {
 	type ChannelReference,
 	type ParsedWorldStateEvent,
 	type ParsedTraceReply,
-	type ParsedWorldMessage
+	type ParsedWorldMessage,
+	type ParsedTraceEvent
 } from './nostrProtocol';
 import {
 	enterParticipant,
@@ -139,6 +141,10 @@ export type TerminalExitPublishResult =
 	| Readonly<{ kind: 'published'; results: readonly PublishRelayResult[] }>
 	| Readonly<{ kind: 'failed' | 'unavailable' }>;
 
+export type DeathLastWordsPublishResult =
+	| Readonly<{ kind: 'published'; eventId: string; results: readonly PublishRelayResult[] }>
+	| Readonly<{ kind: 'failed' | 'unavailable' }>;
+
 export type WorldReadSessionOptions = Readonly<{
 	field: PresenceField;
 	selfSigner?: ActiveSignerSnapshot | null;
@@ -164,7 +170,8 @@ export type WorldReadSessionSelfAttachment = Readonly<{
 
 type BufferedLiveEvent =
 	| Readonly<{ kind: 'message'; event: ParsedWorldMessage; rawEvent: NostrEvent }>
-	| Readonly<{ kind: 'world-state'; event: ParsedWorldStateEvent }>;
+	| Readonly<{ kind: 'world-state'; event: ParsedWorldStateEvent }>
+	| Readonly<{ kind: 'trace'; event: ParsedTraceEvent; rawEvent: NostrEvent }>;
 
 type SelfPositionOperation = Readonly<{
 	id: string;
@@ -236,6 +243,9 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	const appliedCanonicalMessageEventIds = new Set<string>();
 	let preparedTerminalExit: Extract<TerminalExitPreparation, { kind: 'prepared' }> | null = null;
 	let terminalExitAttempted = false;
+	let deathTraceEnabled = false;
+	let deathTraceAttempted = false;
+	let deathTraceSequence = 0;
 
 	function emitStatus(next: WorldReadConnectionStatus): void {
 		status = next;
@@ -373,6 +383,36 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		} catch {
 			return { kind: 'failed' };
 		}
+	}
+
+	async function publishDeathLastWords(content: string): Promise<DeathLastWordsPublishResult> {
+		if (disposed || !deathTraceEnabled || !terminal || !transport || !channel || !selfSigner || !preparedTerminalExit || deathTraceAttempted) {
+			return { kind: 'unavailable' };
+		}
+		const trimmed = content.trim();
+		if (!trimmed) return { kind: 'unavailable' };
+		deathTraceAttempted = true;
+		try {
+			const event = finalizeWorldEvent(buildTraceEventTemplate({
+				channel,
+				content: trimmed,
+				position: preparedTerminalExit.parsed.position,
+				createdAt: Math.floor(Date.now() / 1000),
+				source: 'death',
+				identifier: `trace:death:${Date.now()}:${deathTraceSequence++}`
+			}), selfSigner.secretKey);
+			const results = await transport.publish(event);
+			if (!reachedAuthoritativeRelay(results)) return { kind: 'failed' };
+			return { kind: 'published', eventId: event.id, results };
+		} catch {
+			return { kind: 'failed' };
+		}
+	}
+
+	function enableDeathLastWords(): boolean {
+		if (disposed || !terminal || !preparedTerminalExit || deathTraceAttempted) return false;
+		deathTraceEnabled = true;
+		return true;
 	}
 
 	async function authorizeSelfWrite(): Promise<boolean> {
@@ -849,6 +889,11 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		void startTraceConversationWork(generation, root, config);
 	}
 
+	function activateDeathTraceConversation(root: ParsedWorldMessage, config: TraceConversationConfig): void {
+		++traceConversationGeneration;
+		emitTraceConversationState(traceStateFor(root, config, [], 'settled'));
+	}
+
 	function openTraceConversation(config: TraceConversationConfig): TraceConversationOpenResult {
 		if (disposed || !selfSigner || !transport || !channel) return { kind: 'unavailable' };
 		if (!bootstrapComplete) return { kind: 'blocked' };
@@ -858,6 +903,10 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			return traceConversationState.config.currentId === config.currentId
 				? selectTraceConversationSpeech(config.currentId)
 				: { kind: 'blocked' };
+		}
+		if (root.source === 'death') {
+			activateDeathTraceConversation(root, config);
+			return { kind: 'opened' };
 		}
 		if (pendingSelfOperation || pendingTraceReply) return { kind: 'pending' };
 		const nowMs = Date.now();
@@ -883,6 +932,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		const pendingTraceInspection = pendingSelfOperation?.operation === 'trace-inspection';
 		if (pendingTraceReply || (pendingSelfOperation && !pendingTraceInspection)) return { kind: 'pending' };
 		const current = traceConversationState;
+		if (current.root.source === 'death') return targetId === current.root.id ? { kind: 'opened' } : { kind: 'blocked' };
 		const projection = resolveTraceConversationProjection(current);
 		const target = projection ? projection.current.event.id === targetId
 			? projection.current : adjacentTraceSpeech(projection, targetId) : null;
@@ -960,7 +1010,8 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			return;
 		}
 		if (event.kind === 'message') applyLiveMessage(event.event, event.rawEvent, Date.now());
-		else applyLivePosition(event.event, Date.now());
+		else if (event.kind === 'world-state') applyLivePosition(event.event, Date.now());
+		else void reconcileTraceRoots([event.rawEvent]);
 	}
 
 	function resolveReplyTarget(rootId: string, targetId: string) {
@@ -1033,8 +1084,10 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 					worldStateSince: since,
 					onBootstrapMessage: (event) => applyBootstrapMessage(event, Date.now()),
 					onBootstrapWorldState: (event) => applyBootstrapPosition(event, Date.now()),
+					onBootstrapTrace: () => {},
 					onLiveMessage: (event, rawEvent) => receiveLive({ kind: 'message', event, rawEvent }),
 					onLiveWorldState: (event) => receiveLive({ kind: 'world-state', event }),
+					onLiveTrace: (event, rawEvent) => receiveLive({ kind: 'trace', event, rawEvent }),
 					onPrimaryClosed: markDegraded
 				});
 				if (disposed) throw new Error('World read session was disposed during startup.');
@@ -1188,6 +1241,10 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		prepareTerminalExit,
 
 		publishTerminalExit,
+
+		enableDeathLastWords,
+
+		publishDeathLastWords,
 
 		dispose(): void {
 			if (disposed) return;

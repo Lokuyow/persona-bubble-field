@@ -24,6 +24,8 @@ normal deathおよびrealtime deathは、まずbrowser-local lifecycleへdurably
 のterminal `exit`をbest-effortで通知する。Relay publication failureはdeathを
 rollbackせず、wire formatとposition条件はSPEC-30を参照する。
 
+同じtabでruntime death transitionが成立した場合は、terminal exitのpublication後に一度だけ死亡演出を表示し、任意のLast Wordsを残す機会を与える。Last Wordsは専用の非presence trace eventとしてcanonical last positionへbest-effortでpublishし、空入力またはskipではpublishしない。publish失敗でもdurableなdeathや次のIdentity selectionをrollbackせず、startup時点ですでに期限切れだったRunにはこの演出を表示しない。専用eventの表示・reply制約はSPEC-50を正とする。
+
 新Run #1は次から開始する。
 
 1. 寿命を7日にする
