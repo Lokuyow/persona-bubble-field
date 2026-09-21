@@ -8,7 +8,7 @@
 	type Props = Readonly<{
 		viewportElement?: HTMLElement;
 		geometryReady: boolean;
-		composerAvailable: boolean;
+		actionDockAvailable: boolean;
 		fieldAreaBounds: Bounds;
 		field: FieldSize;
 		camera: WorldPoint;
@@ -26,7 +26,7 @@
 	let {
 		viewportElement = $bindable(),
 		geometryReady,
-		composerAvailable,
+		actionDockAvailable,
 		fieldAreaBounds,
 		field,
 		camera,
@@ -45,7 +45,7 @@
 
 	const pointerGesture: Attachment<HTMLElement> = (node) => {
 		let activeGesture: Readonly<{ pointerId: number; start: JoystickPoint; anchor: GridPosition | null; dragging: boolean; captureOwner: HTMLElement }> | null = null;
-		const interactive = 'button, input, textarea, select, [contenteditable="true"], .field-action-menu, .composer-dock, .sandbox-controls, [role="dialog"], .bubble-content, .trace-reply-card';
+		const interactive = 'button, input, textarea, select, [contenteditable="true"], .field-action-menu, .action-dock, .sandbox-controls, [role="dialog"], .bubble-content, .trace-reply-card';
 		const textSelectionTarget = (event: PointerEvent) => {
 			if (event.target instanceof Element && event.target.closest('.bubble-content, .trace-root-bubble, .trace-root-card, .timeline-content')) return true;
 			return event.composedPath().some((target) => target instanceof HTMLElement && target.matches('.bubble-content, .trace-root-bubble, .trace-root-card, .timeline-content'));
@@ -81,7 +81,7 @@
 			if (event.target instanceof Element && event.target.closest('.trace-root-bubble, .trace-reply-content-button')) return;
 			const gestureOrigin = origin(event);
 			if (textSelectionTarget(event)) return;
-			if (event.composedPath().some((target) => target instanceof HTMLElement && target.matches('.composer-dock, [role="dialog"], .sandbox-controls')) ||
+			if (event.composedPath().some((target) => target instanceof HTMLElement && target.matches('.action-dock, [role="dialog"], .sandbox-controls')) ||
 				(!textSelectionTarget(event) && event.composedPath().some((target) => target instanceof HTMLElement && target.matches('button, input, textarea, select, [contenteditable="true"], .field-action-menu, .trace-reply-card')) && !gestureOrigin)) return;
 			const start = { x: event.clientX, y: event.clientY };
 			const anchor = viewportPointToLogicalCell({ point: start, fieldArea: fieldAreaBounds, camera, field });
@@ -114,7 +114,7 @@
 <section
 	class={['field-viewport', {
 		'initial-field-geometry-ready': geometryReady,
-		'composer-available': composerAvailable
+		'action-dock-available': actionDockAvailable
 	}]}
 	bind:this={viewportElement}
 	aria-label="Conversation field"
@@ -150,7 +150,7 @@
 	.pointer-joystick-base { inset: 0; border: 1px solid rgba(50, 82, 70, 0.32); background: rgba(221, 235, 221, 0.32); }
 	.pointer-joystick-thumb { left: calc(50% + var(--joystick-thumb-x)); top: calc(50% + var(--joystick-thumb-y)); width: 32px; height: 32px; transform: translate(-50%, -50%); border: 1px solid rgba(43, 77, 63, 0.48); background: rgba(108, 153, 132, 0.58); }
 
-	.field-viewport.composer-available {
+	.field-viewport.action-dock-available {
 		min-height: 0;
 	}
 

@@ -122,19 +122,7 @@ test.describe('DEV World Sandbox', () => {
 		await page.setViewportSize({ width: 1200, height: 900 });
 		await page.goto('/?devWorld=1&devScenario=chatter-timeline');
 		const chatter = page.locator('aside.recent-message-timeline');
-		const hide = page.getByRole('button', { name: 'Hide Chatter' });
 		await expect(chatter).toBeVisible();
-		await expect(hide).toHaveAttribute('aria-keyshortcuts', 'C');
-		const hideBox = await hide.boundingBox();
-		const hideIconBox = await hide.locator('svg').boundingBox();
-		expect(hideBox && hideIconBox).toBeTruthy();
-		if (hideBox && hideIconBox) {
-			expect(hideBox.width).toBeGreaterThanOrEqual(44);
-			expect(hideBox.height).toBeGreaterThanOrEqual(44);
-			expect(Math.abs((hideIconBox.x + hideIconBox.width / 2) - (hideBox.x + hideBox.width / 2))).toBeLessThan(1);
-			expect(Math.abs((hideIconBox.y + hideIconBox.height / 2) - (hideBox.y + hideBox.height / 2))).toBeLessThan(1);
-		}
-		await expect(hide.locator('svg')).toBeVisible();
 		const beforeIds = await page.locator('.timeline-visible-entries .timeline-entry').evaluateAll((entries) =>
 			entries.map((entry) => entry.getAttribute('data-timeline-event-id')));
 
@@ -143,7 +131,6 @@ test.describe('DEV World Sandbox', () => {
 		await page.keyboard.press('C');
 		await expect(chatter).toBeVisible();
 		await expect(page.locator('.timeline-visible-entries .timeline-entry')).toHaveCount(beforeIds.length);
-		await expect(page.getByRole('button', { name: 'Hide Chatter' })).toHaveAttribute('aria-keyshortcuts', 'C');
 
 		await page.keyboard.press('Control+c');
 		await expect(chatter).toBeVisible();
@@ -210,11 +197,9 @@ test.describe('DEV World Sandbox', () => {
 		await page.setViewportSize({ width: 390, height: 844 });
 		await page.goto('/?devWorld=1&devScenario=chatter-timeline');
 		const timeline = page.locator('aside.recent-message-timeline');
-		const show = page.getByRole('button', { name: 'Show Chatter' });
+		await expect(page.locator('[data-chatter-initialized="true"]')).toHaveCount(1);
 		await expect(timeline).toBeHidden();
-		await expect(show).toBeVisible();
-		await expect(show).toHaveAttribute('aria-keyshortcuts', 'C');
-		await page.keyboard.press('c');
+		await page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', code: 'KeyC', bubbles: true })));
 		await expect(timeline).toBeVisible();
 		await page.setViewportSize({ width: 1200, height: 900 });
 		await expect(timeline).toBeVisible();
@@ -229,10 +214,9 @@ test.describe('DEV World Sandbox', () => {
 			scene: getComputedStyle(document.querySelector<HTMLElement>('.field-scene')!).transform,
 			participants: [...document.querySelectorAll<HTMLElement>('.participant')].map((participant) => participant.getBoundingClientRect().toJSON())
 		}));
-		await show.click();
+		await page.keyboard.press('c');
 		await expect(timeline).toBeVisible();
-		await expect(page.getByRole('button', { name: 'Hide Chatter' })).toBeVisible();
-		await page.getByRole('button', { name: 'Hide Chatter' }).click();
+		await page.keyboard.press('c');
 		await expect(timeline).toBeHidden();
 		const afterMobileHide = await page.evaluate(() => ({
 			field: document.querySelector<HTMLElement>('.field-area')!.getBoundingClientRect().toJSON(),
@@ -244,8 +228,7 @@ test.describe('DEV World Sandbox', () => {
 		expect(afterMobileHide.participants).toEqual(before.participants);
 		await page.setViewportSize({ width: 1200, height: 900 });
 		await expect(timeline).toBeHidden();
-		await expect(show).toBeVisible();
-		await show.click();
+		await page.keyboard.press('c');
 		await expect(timeline).toBeVisible();
 
 		await page.setViewportSize({ width: 390, height: 844 });

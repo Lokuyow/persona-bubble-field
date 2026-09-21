@@ -32,13 +32,11 @@ test.describe('DEV World Sandbox', () => {
 		await page.goto('/?devWorld=1&devScenario=trace-replies');
 		const controls = page.getByLabel('DEV sandbox controls');
 		const chatter = page.getByLabel('Chatter', { exact: true });
-		const hide = page.getByRole('button', { name: 'Hide Chatter' });
-		const boxes = await Promise.all([controls.boundingBox(), chatter.boundingBox(), hide.boundingBox()]);
-		if (!boxes[0] || !boxes[1] || !boxes[2]) throw new Error('Expected Trace controls and Chatter geometry.');
-		const [controlBox, chatterBox, hideBox] = boxes;
+		const boxes = await Promise.all([controls.boundingBox(), chatter.boundingBox()]);
+		if (!boxes[0] || !boxes[1]) throw new Error('Expected Trace controls and Chatter geometry.');
+		const [controlBox, chatterBox] = boxes;
 		expect(controlBox.x < chatterBox.x + chatterBox.width && controlBox.x + controlBox.width > chatterBox.x && controlBox.y < chatterBox.y + chatterBox.height && controlBox.y + controlBox.height > chatterBox.y).toBe(false);
-		expect(controlBox.x < hideBox.x + hideBox.width && controlBox.x + controlBox.width > hideBox.x && controlBox.y < hideBox.y + hideBox.height && controlBox.y + controlBox.height > hideBox.y).toBe(false);
-		await hide.click();
+		await page.keyboard.press('c');
 		await expect(chatter).toBeHidden();
 		await page.getByLabel('Select DEV scenario').selectOption('chatter-timeline');
 		await page.getByRole('button', { name: 'Open selected DEV scenario' }).click();

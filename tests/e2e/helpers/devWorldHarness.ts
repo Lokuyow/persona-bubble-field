@@ -128,7 +128,7 @@ export async function fieldOwnedBlankPoint(page: Page, preferred: { x: number; y
 			const point = { x: gridRect.left + (cell.x + 0.5) * cellSize, y: gridRect.top + (cell.y + 0.5) * cellSize };
 			const hit = document.elementFromPoint(point.x, point.y);
 			if (!hit || !fieldArea.contains(hit)) continue;
-			if (hit.closest('.participant, [data-field-gesture-origin="selectable"], .field-action-menu, .sandbox-controls, .composer-dock, [role="dialog"]')) continue;
+			if (hit.closest('.participant, [data-field-gesture-origin="selectable"], .field-action-menu, .sandbox-controls, .action-dock, [role="dialog"]')) continue;
 			return point;
 		}
 		const rect = (element: Element) => {
@@ -143,7 +143,7 @@ export async function viewportExternalPoint(page: Page): Promise<{ x: number; y:
 	return page.locator('.field-viewport').evaluate((viewport) => {
 		const viewportRect = viewport.getBoundingClientRect();
 		const fieldRect = document.querySelector<HTMLElement>('.field-area')!.getBoundingClientRect();
-		const composerRect = document.querySelector<HTMLElement>('.composer-dock')?.getBoundingClientRect() ?? null;
+		const composerRect = document.querySelector<HTMLElement>('.action-dock')?.getBoundingClientRect() ?? null;
 		const candidates = [
 			{ x: viewportRect.left + viewportRect.width / 2, y: viewportRect.top + 20 },
 			{ x: viewportRect.left + 20, y: viewportRect.top + viewportRect.height / 2 },

@@ -887,8 +887,7 @@ test.describe('DEV World Sandbox', () => {
 		expect(await dragSelect(page.locator('.bubble-merged .bubble-content'))).not.toBe('');
 		await page.goto('/?devWorld=1&devScenario=chatter-timeline');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
-		const showChatter = page.getByRole('button', { name: 'Show Chatter' });
-		if (await showChatter.count()) await showChatter.click();
+		await page.keyboard.press('c');
 		await expect(page.locator('aside[aria-label="Chatter"]')).toBeVisible();
 		expect(await dragSelect(page.locator('.timeline-content').first())).not.toBe('');
 		expect(await dragSelect(page.locator('.timeline-name').first())).not.toBe('');

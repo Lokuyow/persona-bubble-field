@@ -25,7 +25,7 @@ export async function installFieldFrameSampling(page: Page): Promise<void> {
 			const area = document.querySelector('.field-area');
 			if (!scene || !viewport || !area) return;
 			const style = getComputedStyle(scene);
-			const composer = document.querySelector('.composer-dock');
+			const composer = document.querySelector('.action-dock');
 			state.__fieldFrames.push({ source, visible: style.visibility === 'visible' && style.display !== 'none',
 				scene: rect(scene), viewport: rect(viewport), area: rect(area),
 				composer: composer ? rect(composer) : null, transform: style.transform });

@@ -101,7 +101,7 @@ export function profileDialog(page: Page) {
 
 export async function openProfile(page: Page): Promise<void> {
 	const timeline = page.getByLabel('Chatter', { exact: true });
-	if (await timeline.isVisible()) await page.getByRole('button', { name: 'Hide Chatter' }).click();
+	if (await timeline.isVisible()) await page.locator('.chatter-toggle').click();
 	await page.locator('[data-self="true"] .participant-profile-trigger').click();
 	await expect(profileDialog(page)).toBeVisible();
 }
@@ -833,7 +833,7 @@ export async function openReadyRelayWorld(page: Page, expectedParticipantCount =
 	const secret = fixtureSecret(expectedParticipantCount === 1 ? 19 : 41);
 	await seedRelayAccount(page, secret, getPublicKey(secret));
 	await page.goto('/');
-	await expect(page.locator('.composer-dock')).toBeVisible();
+	await expect(page.locator('.action-dock')).toBeVisible();
 	const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
 	await expect(editor).toBeVisible();
 	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());

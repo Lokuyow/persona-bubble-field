@@ -14,7 +14,7 @@ test.describe('DEV World Sandbox', () => {
 			await page.setViewportSize(viewport);
 			await installTraceGeometryFrameSampling(page);
 			await page.goto('/?devWorld=1&devScenario=trace-replies');
-			if (viewport.name === 'desktop') await page.getByRole('button', { name: 'Hide Chatter' }).click();
+			if (viewport.name === 'desktop') await page.keyboard.press('c');
 			const rootCard = page.locator('.trace-root-card');
 			await page.locator('[data-cell-position="8,4"]').click();
 			await expect(rootCard).toHaveAttribute('data-trace-geometry-ready', 'ready');
@@ -71,7 +71,7 @@ test.describe('DEV World Sandbox', () => {
 		await page.setViewportSize({ width: 1100, height: 850 });
 		await page.emulateMedia({ reducedMotion: 'reduce' });
 		await page.goto('/?devWorld=1&devScenario=trace-replies');
-		await page.getByRole('button', { name: 'Hide Chatter' }).click();
+		await page.keyboard.press('c');
 		const editor = page.getByRole('textbox', { name: '投稿エディター' });
 		const preview = page.getByLabel('Reply preview', { exact: true });
 		const selectCell = async (position: string) => {
@@ -136,7 +136,7 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.locator('.trace-current-selection-outline')).toHaveCount(0);
 
 		await page.goto('/?devWorld=1&devScenario=trace-replies');
-		await page.getByRole('button', { name: 'Hide Chatter' }).click();
+		await page.keyboard.press('c');
 		await page.locator('[data-cell-position="8,4"]').click();
 		await expect(page.locator('[data-trace-selection="current"]')).toHaveCount(1);
 		await expect(page.locator('[data-trace-root-id][data-trace-selection="current"]')).toHaveCount(1);
@@ -172,7 +172,7 @@ test.describe('DEV World Sandbox', () => {
 		test(`keeps a deep tree-only cluster interactive on ${viewport.name}`, async ({ page }) => {
 			await page.setViewportSize(viewport);
 			await page.goto('/?devWorld=1&devScenario=trace-replies');
-			if (viewport.name === 'desktop') await page.getByRole('button', { name: 'Hide Chatter' }).click();
+			if (viewport.name === 'desktop') await page.keyboard.press('c');
 			await page.locator('[data-cell-position="8,4"]').click();
 			await expect(page.locator('.trace-root-card')).toHaveAttribute('data-trace-geometry-ready', 'ready');
 			const direct = page.locator(`[data-trace-reply-id="${'7'.repeat(64)}"]`);
@@ -305,7 +305,7 @@ test.describe('DEV World Sandbox', () => {
 			await page.setViewportSize(viewport);
 			await page.goto('/?devWorld=1&devScenario=trace-replies');
 			if (viewport.name === 'mobile') await page.locator('.sandbox-mobile-toggle').click();
-			if (viewport.name === 'desktop') await page.getByRole('button', { name: 'Hide Chatter' }).click();
+			if (viewport.name === 'desktop') await page.keyboard.press('c');
 			await page.locator('[data-cell-position="8,4"]').click();
 			await expect(page.locator('.trace-root-card')).toHaveAttribute('data-trace-geometry-ready', 'ready');
 			const existing = page.locator('[data-trace-reply-id="' + '6'.repeat(64) + '"]');
@@ -318,7 +318,7 @@ test.describe('DEV World Sandbox', () => {
 		test(`preserves selected Trace positions across direct and deep navigation on ${viewport.name}`, async ({ page }) => {
 			await page.setViewportSize(viewport);
 			await page.goto('/?devWorld=1&devScenario=trace-replies');
-			if (viewport.name === 'desktop') await page.getByRole('button', { name: 'Hide Chatter' }).click();
+			if (viewport.name === 'desktop') await page.keyboard.press('c');
 			await page.locator('[data-cell-position="8,4"]').click();
 			await expect(page.locator('.trace-root-card')).toHaveAttribute('data-trace-geometry-ready', 'ready');
 			await expect(page.locator('.field-scene')).not.toHaveAttribute('data-camera-animation', 'active');
@@ -331,7 +331,7 @@ test.describe('DEV World Sandbox', () => {
 			await expect.poll(() => readAnchor(rightUpper)).toBe(rightUpperBefore);
 
 			await page.reload();
-			if (viewport.name === 'desktop') await page.getByRole('button', { name: 'Hide Chatter' }).click();
+			if (viewport.name === 'desktop') await page.keyboard.press('c');
 			await page.locator('[data-cell-position="8,4"]').click();
 			await expect(page.locator('.trace-root-card')).toHaveAttribute('data-trace-geometry-ready', 'ready');
 			await expect(page.locator('.field-scene')).not.toHaveAttribute('data-camera-animation', 'active');
@@ -352,7 +352,7 @@ test.describe('DEV World Sandbox', () => {
 		test(`shows known Trace continuation branches without hidden cards on ${viewport.name}`, async ({ page }) => {
 			await page.setViewportSize(viewport);
 			await page.goto('/?devWorld=1&devScenario=trace-replies');
-			if (viewport.name === 'desktop') await page.getByRole('button', { name: 'Hide Chatter' }).click();
+			if (viewport.name === 'desktop') await page.keyboard.press('c');
 			await page.locator('[data-cell-position="8,4"]').click();
 			await expect(page.locator('.trace-root-card')).toHaveAttribute('data-trace-geometry-ready', 'ready');
 			const id = (value: string) => value.repeat(64);
@@ -386,7 +386,7 @@ test.describe('DEV World Sandbox', () => {
 		await page.setViewportSize({ width: 1100, height: 850 });
 		await page.emulateMedia({ reducedMotion: 'reduce' });
 		await page.goto('/?devWorld=1&devScenario=trace-replies');
-		await page.getByRole('button', { name: 'Hide Chatter' }).click();
+		await page.keyboard.press('c');
 		const editor = page.getByRole('textbox', { name: '投稿エディター' });
 		const preview = page.getByLabel('Reply preview', { exact: true });
 		await page.locator('[data-cell-position="8,4"]').click();
@@ -416,7 +416,7 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.locator('[data-trace-marker-position="8,4"]')).toHaveCount(1);
 
 		await page.reload();
-		await page.getByRole('button', { name: 'Hide Chatter' }).click();
+		await page.keyboard.press('c');
 		await page.locator('[data-cell-position="8,4"]').click();
 		const activeCurrent = page.locator('[data-trace-reply-id="' + '7'.repeat(64) + '"]');
 		await activeCurrent.locator('.trace-reply-content-button').click();
@@ -552,8 +552,8 @@ test.describe('DEV World Sandbox', () => {
 		await page.goto('/?devWorld=1&devScenario=trace-markers');
 		await expect(page.locator('main')).toHaveAttribute('data-trace-runtime', 'dev');
 		const markers = page.locator('.trace-marker');
-		const hideTimeline = page.getByRole('button', { name: 'Hide Chatter' });
-		if (await hideTimeline.isVisible()) await hideTimeline.click();
+
+		if (await page.locator('aside[aria-label="Chatter"]').isVisible()) await page.keyboard.press('c');
 
 		await page.locator('[data-cell-position="2,2"]').focus();
 		await page.keyboard.press('Enter');
@@ -732,8 +732,8 @@ test.describe('DEV World Sandbox', () => {
 		});
 		await page.goto('/?devWorld=1&devScenario=trace-replies');
 		await expect(page.locator('main')).toHaveAttribute('data-trace-runtime', 'dev');
-		const hideTimeline = page.getByRole('button', { name: 'Hide Chatter' });
-		if (await hideTimeline.isVisible()) await hideTimeline.click();
+
+		if (await page.locator('aside[aria-label="Chatter"]').isVisible()) await page.keyboard.press('c');
 		const externalBaseline = await page.evaluate(() => (window as never as {
 			__traceReplyExternalCalls: { webSocketUrls: string[]; indexedDbOpen: number }
 		}).__traceReplyExternalCalls);
@@ -908,8 +908,8 @@ test.describe('DEV World Sandbox', () => {
 		await page.setViewportSize({ width: 900, height: 720 });
 		await page.emulateMedia({ reducedMotion: 'reduce' });
 		await page.goto('/?devWorld=1&devScenario=trace-replies');
-		const hideTimeline = page.getByRole('button', { name: 'Hide Chatter' });
-		await hideTimeline.click();
+
+		await page.keyboard.press('c');
 		await page.locator('[data-cell-position="8,4"]').click();
 		await page.locator('[data-trace-reply-id="' + '7'.repeat(64) + '"]').locator('.trace-reply-content-button').click();
 		await expect(page.locator('[data-trace-current-reply-id="' + '7'.repeat(64) + '"]')).toBeVisible();

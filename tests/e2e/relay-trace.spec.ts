@@ -58,13 +58,13 @@ test.describe('Relay startup', () => {
 				await installDelayedRelay(client, { primaryEvents: { message: trace.message, position }, traceRoots: [trace.root], traceReplies: history });
 				await seedRelayAccount(client, secret, pubkey);
 				await client.goto('/');
-				await expect(client.locator('.composer-dock')).toBeVisible();
+				await expect(client.locator('.action-dock')).toBeVisible();
 				await client.evaluate(() => {
 					const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
 					relay.releaseMetadata(); relay.releasePrimary();
 				});
 				await expect(client.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '3,2');
-				await client.getByRole('button', { name: 'Hide Chatter' }).click();
+				await client.locator('.chatter-toggle').click();
 				await expect(client.locator('[data-trace-marker-position="4,2"]')).toBeVisible();
 			};
 			const publish = async (content: string) => {
@@ -172,7 +172,7 @@ test.describe('Relay startup', () => {
 		await installDelayedRelay(page, { primaryEvents: primary, traceRoots: [root, unreadRoot, deathRoot], traceReplies: [reply] });
 		await seedRelayAccount(page, selfSecret, selfPubkey);
 		await page.goto('/');
-		await expect(page.locator('.composer-dock')).toBeVisible();
+		await expect(page.locator('.action-dock')).toBeVisible();
 		await page.evaluate(() => {
 			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
 			relay.releaseMetadata(); relay.releasePrimary();
@@ -195,7 +195,7 @@ test.describe('Relay startup', () => {
 		await page.locator('.trace-unread-indicator').click();
 		await expect(page.locator('.trace-unread-explanation')).toContainText('どこかにあなたへの返信の痕跡があります');
 		await expect(page.locator('[data-trace-root-id]')).toHaveCount(0);
-		await page.getByRole('button', { name: 'Hide Chatter' }).click();
+		await page.locator('.chatter-toggle').click();
 		await selectRelayTraceCell(page, '4,2');
 		await expect(page.locator(`[data-trace-root-id="${root.id}"]`)).toContainText(root.content);
 		await expect(page.locator(`[data-trace-root-id="${root.id}"]`)).toHaveAttribute('data-trace-current-kind', 'root');
@@ -228,7 +228,7 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('.trace-unread-indicator')).toBeVisible();
 		await selectRelayTraceCell(page, '4,2');
 		await expect(page.locator(`[data-trace-reply-id="${replyAfterRootRead.id}"]`)).toContainText(replyAfterRootRead.content);
-		const hideTimeline = page.getByRole('button', { name: 'Hide Chatter' });
+		const hideTimeline = page.locator('.chatter-toggle');
 		if (await hideTimeline.isVisible()) await hideTimeline.click();
 		await clickRelayLogicalCell(page, { x: 0, y: 0 });
 		await expect(marker).toHaveAttribute('data-trace-root-read', 'true');
@@ -253,7 +253,7 @@ test.describe('Relay startup', () => {
 		});
 		await seedRelayAccount(page, ordinaryTrace.selfSecret, ordinaryTrace.selfPubkey);
 		await page.goto('/');
-		await expect(page.locator('.composer-dock')).toBeVisible();
+		await expect(page.locator('.action-dock')).toBeVisible();
 		await page.evaluate(() => {
 			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
 			relay.releaseMetadata(); relay.releasePrimary();
@@ -287,7 +287,7 @@ test.describe('Relay startup', () => {
 		});
 		await expect(page.locator('.participant')).toHaveCount(2);
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '3,2');
-		await page.getByRole('button', { name: 'Hide Chatter' }).click();
+		await page.locator('.chatter-toggle').click();
 		await page.locator('[data-cell-position="4,2"]').click();
 		await expect(page.getByLabel('Reply preview', { exact: true })).toContainText('Relay trace root');
 
@@ -334,7 +334,7 @@ test.describe('Relay startup', () => {
 			relay.releaseMetadata(); relay.releasePrimary(); relay.releaseTraceRoots(); relay.releaseTraceReplies();
 		});
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '3,2');
-		await page.getByRole('button', { name: 'Hide Chatter' }).click();
+		await page.locator('.chatter-toggle').click();
 		await page.locator('[data-cell-position="4,2"]').click();
 		await expect(page.getByLabel('Reply preview', { exact: true })).toContainText('Relay trace root');
 		await page.locator(`[data-trace-reply-id="${trace.direct.id}"] .trace-reply-content-button`).click();
@@ -373,7 +373,7 @@ test.describe('Relay startup', () => {
 			relay.releaseMetadata(); relay.releasePrimary();
 		});
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '3,2');
-		await page.getByRole('button', { name: 'Hide Chatter' }).click();
+		await page.locator('.chatter-toggle').click();
 		await page.locator('[data-cell-position="4,2"]').click();
 		const editor = page.getByRole('textbox', { name: '投稿エディター' });
 		const preview = page.getByLabel('Reply preview', { exact: true });
@@ -417,7 +417,7 @@ test.describe('Relay startup', () => {
 				relay.releaseMetadata(); relay.releasePrimary();
 			});
 			await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '3,2');
-			await page.getByRole('button', { name: 'Hide Chatter' }).click();
+			await page.locator('.chatter-toggle').click();
 			await page.locator('[data-cell-position="4,2"]').click();
 			const preview = page.getByLabel('Reply preview', { exact: true });
 			const editor = page.getByRole('textbox', { name: '投稿エディター' });
@@ -479,7 +479,7 @@ test.describe('Relay startup', () => {
 		await seedRelayAccount(page, trace.selfSecret, trace.selfPubkey);
 		await page.goto('/');
 		await expect(page.locator('main')).toHaveAttribute('data-trace-runtime', 'relay');
-		const hideTimeline = page.getByRole('button', { name: 'Hide Chatter' });
+		const hideTimeline = page.locator('.chatter-toggle');
 		if (await hideTimeline.isVisible()) await hideTimeline.click();
 
 		await page.evaluate(() => (window as typeof window & {
@@ -555,7 +555,7 @@ test.describe('Relay startup', () => {
 		});
 		await seedRelayAccount(page, trace.selfSecret, trace.selfPubkey);
 		await page.goto('/');
-		const hideTimeline = page.getByRole('button', { name: 'Hide Chatter' });
+		const hideTimeline = page.locator('.chatter-toggle');
 		await hideTimeline.click();
 
 		await page.evaluate(() => (window as typeof window & {

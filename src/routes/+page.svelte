@@ -19,6 +19,7 @@
 		getFieldAreaBounds,
 		getFieldWorldSize,
 		getResponsiveCellSize,
+		MOBILE_FIELD_BREAKPOINT,
 		gridToWorld,
 		mergedBubblePreferredAnchor,
 		normalBubblePreferredAnchor,
@@ -160,7 +161,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		isTracePresentationMeasured,
 		layoutTraceBubblePresentation
 	} from '$lib/traceBubblePresentation';
-	import ComposerDock from '$lib/frontend/ComposerDock.svelte';
+	import ActionDock from '$lib/frontend/ActionDock.svelte';
 	import Chatter from '$lib/frontend/Chatter.svelte';
 	import WorldEntryControls from '$lib/frontend/WorldEntryControls.svelte';
 	import DevWorldControls from '$lib/dev/DevWorldControls.svelte';
@@ -297,7 +298,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		return Date.now();
 	}
 	const initialRiftNowMs = devRiftPlaygroundEnabled ? 0 : devRiftFixtureEnabled ? devRiftFixtureNowMs() : Date.now();
-	let composerAvailable = $derived(runtimeMode === 'relay' || devTraceReplyFixtureEnabled);
+	let actionDockAvailable = $derived(runtimeMode === 'relay' || devTraceReplyFixtureEnabled);
 	let pendingComposerSubmission: Readonly<{
 		resolve: () => void;
 		reject: (error: Error) => void;
@@ -313,7 +314,8 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	));
 	let lastProfileTrigger: HTMLButtonElement | null = null;
 	let composerEditorIsEmpty: boolean | null = null;
-	let chatterComponent: { initialize(width: number): void; isInitialized(): boolean; toggle(): void; resetMeasurements(): void };
+	let chatterComponent: { initialize(width: number): void; isInitialized(): boolean; resetMeasurements(): void };
+	let chatterOpen = $state(false);
 	let composerComponent = $state.raw<{ focusEditor(): boolean; blurEditor(): boolean; applyContentIfEmpty(content: string): Promise<boolean> } | null>(null);
 	let fieldViewportComponent: FieldViewportHandle | null = null;
 	let visualWorldById = $state.raw<Record<string, WorldPoint>>({});
@@ -2178,7 +2180,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 				target.matches('input, textarea, select') || target.isContentEditable
 			))
 		) {
-			chatterComponent.toggle();
+			chatterOpen = !chatterOpen;
 			event.preventDefault();
 			return;
 		}
@@ -2599,8 +2601,8 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 />
 
 <main
-	class={['app-shell', { 'composer-available': composerAvailable,
-		'composer-keyboard-visible': composerKeyboardInset > 0 }]}
+	class={['app-shell', { 'action-dock-available': actionDockAvailable,
+		'action-dock-keyboard-visible': composerKeyboardInset > 0 }]}
 	data-trace-runtime={traceConversationController ? runtimeMode : undefined}
 	style={`--composer-keyboard-inset: ${composerKeyboardInset}px;--composer-initial-preferred-height: ${INITIAL_COMPOSER_PREFERRED_HEIGHT}px;${composerPreferredHeight === null ? '' : `--composer-preferred-height: ${composerPreferredHeight}px;`}`}
 >
@@ -2608,7 +2610,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		bind:this={fieldViewportComponent}
 		bind:viewportElement
 		geometryReady={initialFieldGeometryReady}
-		composerAvailable={composerAvailable}
+		actionDockAvailable={actionDockAvailable}
 		{fieldAreaBounds}
 		{field}
 		{camera}
@@ -2631,6 +2633,8 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 				tones={colorByPubkey}
 				{selectedCharacterId}
 				isDevWorldSandbox={devWorldSandboxEnabled}
+				open={chatterOpen}
+				onInitialized={(width) => { chatterOpen = width > MOBILE_FIELD_BREAKPOINT; }}
 				onOpenProfile={openProfile}
 			/>
 			<FieldScene
@@ -2791,11 +2795,13 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	{/if}
 
 	{#if runtimeMode === 'relay' || devTraceReplyFixtureEnabled}
-		<ComposerDock
+		<ActionDock
 			bind:this={composerComponent}
 			{selectedSpeechType}
 			submissionInProgress={composerSubmissionInProgress}
 			hasUnreadReplies={traceReadSnapshot.hasUnreadReplies}
+			chatterOpen={chatterOpen}
+			onToggleChatter={() => { chatterOpen = !chatterOpen; }}
 			character={selfProfileCharacter ?? speechSuggestionCharacter}
 		avatarTone={colorByPubkey[selfProjectionId] ?? 'coral'}
 			canOpenSelfProfile={selfProfileCharacter !== null}
@@ -2816,21 +2822,21 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 
 <style>
 	.app-shell {
-		--composer-dock-padding-block: 8px;
-		--composer-dock-border-width: 1px;
+		--action-dock-padding-block: 8px;
+		--action-dock-border-width: 1px;
 		--composer-preferred-height: var(--composer-initial-preferred-height);
-		--composer-dock-height: calc(
+		--action-dock-height: calc(
 			var(--composer-preferred-height)
-			+ var(--composer-dock-padding-block)
-			+ var(--composer-dock-padding-block)
-			+ var(--composer-dock-border-width)
+			+ var(--action-dock-padding-block)
+			+ var(--action-dock-padding-block)
+			+ var(--action-dock-border-width)
 			+ env(safe-area-inset-bottom)
 		);
-		--composer-reserved-height: calc(
+		--action-reserved-height: calc(
 			var(--composer-initial-preferred-height)
-			+ var(--composer-dock-padding-block)
-			+ var(--composer-dock-padding-block)
-			+ var(--composer-dock-border-width)
+			+ var(--action-dock-padding-block)
+			+ var(--action-dock-padding-block)
+			+ var(--action-dock-border-width)
 			+ env(safe-area-inset-bottom)
 		);
 		position: relative;
@@ -2842,8 +2848,8 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		background: transparent;
 	}
 
-	.composer-available {
-		padding-bottom: var(--composer-reserved-height);
+	.action-dock-available {
+		padding-bottom: var(--action-reserved-height);
 	}
 
 	.death-presentation-backdrop {
@@ -2914,8 +2920,8 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 
 	@media (max-width: 700px) {
 		.app-shell {
-			--composer-dock-height: calc(var(--composer-preferred-height) + 8px + 46px + 8px + var(--composer-dock-padding-block) + var(--composer-dock-border-width) + env(safe-area-inset-bottom));
-			--composer-reserved-height: calc(var(--composer-initial-preferred-height) + 8px + 46px + 8px + var(--composer-dock-padding-block) + var(--composer-dock-border-width) + env(safe-area-inset-bottom));
+			--action-dock-height: calc(var(--composer-preferred-height) + 8px + 46px + 8px + var(--action-dock-padding-block) + var(--action-dock-border-width) + env(safe-area-inset-bottom));
+			--action-reserved-height: calc(var(--composer-initial-preferred-height) + 8px + 46px + 8px + var(--action-dock-padding-block) + var(--action-dock-border-width) + env(safe-area-inset-bottom));
 		}
 	}
 

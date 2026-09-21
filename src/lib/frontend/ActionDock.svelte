@@ -19,13 +19,15 @@
 		avatarTone: BubbleTone;
 		canOpenSelfProfile: boolean;
 		suggestionConversation: readonly SpeechSuggestionConversationEntry[];
+		chatterOpen: boolean;
+		onToggleChatter: () => void;
 		onSpeechTypeChange: (next: SpeechType) => void;
 		onOpenSelfProfile: (trigger: HTMLButtonElement) => void;
 		submitCandidate: (content: string, signal: AbortSignal) => Promise<Readonly<{ eventId: string }>>;
 	};
 	let { selectedSpeechType, submissionInProgress, onSpeechTypeChange, onOpenSelfProfile, submitContent, submitCandidate,
 		desiredContext, loadPreview, onPreviewClear, onEditorEmptyChange, onPreferredHeightChange,
-		hasUnreadReplies, character, avatarTone, suggestionConversation, canOpenSelfProfile }: Props = $props();
+		 hasUnreadReplies, character, avatarTone, suggestionConversation, canOpenSelfProfile, chatterOpen, onToggleChatter }: Props = $props();
 	let composerComponent: { focusEditor(): boolean; blurEditor(): boolean; applyContentIfEmpty(content: string): Promise<boolean> } | null = null;
 	let editorIsEmpty = $state<boolean | null>(null);
 	let explanationVisible = $state(false);
@@ -64,13 +66,35 @@
 
 </script>
 
-	<div class="composer-dock" aria-label="Message composer">
-	<div class="composer-dock-content">
+	<div class="action-dock" aria-label="主要操作">
+	<div class="action-dock-content">
 		<div class="composer-controls">
 		{#if canOpenSelfProfile}
 		<button class="profile-trigger" type="button" aria-label="自分のプロフィールを開く" title="自分のプロフィール" onclick={(event) => onOpenSelfProfile(event.currentTarget)}>
 			<span class="profile-trigger-avatar" aria-hidden="true"><CharacterAvatar class={`avatar avatar-${avatarTone} profile-trigger-character-avatar`} {character} /></span>
 		</button>
+		{/if}
+		<button
+			class="chatter-toggle"
+			type="button"
+			aria-label={chatterOpen ? 'Chatterを閉じる' : 'Chatterを開く'}
+			aria-pressed={chatterOpen}
+			aria-keyshortcuts="C"
+			onclick={onToggleChatter}
+		>Chatter</button>
+		{#if hasUnreadReplies}
+			<button
+				class="trace-unread-indicator"
+				class:explanation-visible={explanationVisible}
+				type="button"
+				aria-label="あなたへの返信の痕跡があります"
+				onclick={() => { explanationVisible = !explanationVisible; }}
+			>
+				<span aria-hidden="true">●</span>
+				{#if explanationVisible}
+					<span class="trace-unread-explanation" role="status">どこかにあなたへの返信の痕跡があります</span>
+				{/if}
+			</button>
 		{/if}
 		<button
 			class="speech-type-toggle"
@@ -100,20 +124,6 @@
 			applyContentIfEmpty={(content) => composerComponent?.applyContentIfEmpty(content) ?? Promise.resolve(false)}
 			{submitCandidate}
 		/>
-		{#if hasUnreadReplies}
-			<button
-				class="trace-unread-indicator"
-				class:explanation-visible={explanationVisible}
-				type="button"
-				aria-label="あなたへの返信の痕跡があります"
-				onclick={() => { explanationVisible = !explanationVisible; }}
-			>
-				<span aria-hidden="true">●</span>
-				{#if explanationVisible}
-					<span class="trace-unread-explanation" role="status">どこかにあなたへの返信の痕跡があります</span>
-				{/if}
-			</button>
-		{/if}
 		</div>
 		<div class="composer-editor-slot">
 			<HostOwnedComposerLite
@@ -130,25 +140,25 @@
 </div>
 
 <style>
-	.composer-dock {
+	.action-dock {
 		position: fixed;
 		bottom: var(--composer-keyboard-inset);
 		left: 0;
 		right: 0;
 		z-index: 12;
-		height: var(--composer-dock-visible-height, var(--composer-dock-height));
-		padding: var(--composer-dock-padding-block) 16px
-			calc(var(--composer-dock-padding-block) + env(safe-area-inset-bottom));
-		border-top: var(--composer-dock-border-width) solid rgba(57, 67, 64, 0.14);
+		height: var(--action-dock-visible-height, var(--action-dock-height));
+		padding: var(--action-dock-padding-block) 16px
+			calc(var(--action-dock-padding-block) + env(safe-area-inset-bottom));
+		border-top: var(--action-dock-border-width) solid rgba(57, 67, 64, 0.14);
 		background: rgba(245, 241, 233, 0.98);
 	}
 
-	:global(.composer-keyboard-visible) .composer-dock {
-		--composer-dock-visible-height: calc(var(--composer-dock-height) - env(safe-area-inset-bottom));
-		padding-bottom: var(--composer-dock-padding-block);
+	:global(.action-dock-keyboard-visible) .action-dock {
+		--action-dock-visible-height: calc(var(--action-dock-height) - env(safe-area-inset-bottom));
+		padding-bottom: var(--action-dock-padding-block);
 	}
 
-	.composer-dock-content {
+	.action-dock-content {
 		display: flex;
 		width: min(720px, 100%);
 		height: 100%;
@@ -164,6 +174,19 @@
 	:global(.profile-trigger-character-avatar img) { display: block; width: 100%; height: 100%; object-fit: contain; object-position: center; transform: scale(1.12); transform-origin: center; }
 	.profile-trigger:focus-visible { outline: 3px solid var(--color-focus-ring); outline-offset: 2px; }
 	.composer-controls { display: contents; }
+	.chatter-toggle {
+		flex: 0 0 76px;
+		min-width: 44px;
+		min-height: 44px;
+		border: 1px solid rgba(57, 67, 64, 0.2);
+		border-radius: 12px;
+		background: rgba(255, 255, 255, 0.86);
+		box-shadow: 0 5px 12px rgba(58, 70, 61, 0.1);
+		color: #3f4a47;
+		font-weight: 800;
+		cursor: pointer;
+	}
+	.chatter-toggle:focus-visible { outline: 3px solid var(--color-focus-ring); outline-offset: 2px; }
 
 	.speech-type-toggle {
 		flex: 0 0 54px;
@@ -248,19 +271,20 @@
 		min-height: 0;
 	}
 
-	.composer-dock-content :global(.host-owned-composer) {
+	.action-dock-content :global(.host-owned-composer) {
 		width: 100%;
 		height: 100%;
 		min-width: 0;
 	}
 
 	@media (max-width: 700px) {
-		.composer-dock-content { display: grid; grid-template-rows: minmax(0, 1fr) 46px; gap: 8px; }
+		.action-dock-content { display: grid; grid-template-rows: minmax(0, 1fr) 46px; gap: 8px; }
 		.composer-editor-slot { grid-row: 1; }
 		.composer-controls { display: flex; grid-row: 2; gap: 8px; align-items: stretch; min-width: 0; }
 		.composer-controls .profile-trigger { order: 1; flex-basis: 46px; width: 46px; height: 46px; }
-		.composer-controls .speech-type-toggle { order: 2; flex-basis: 46px; }
-		.composer-controls :global(.suggestions-anchor) { order: 3; }
-		.composer-controls .trace-unread-indicator { order: 4; flex-basis: 38px; }
+		.composer-controls .chatter-toggle { order: 2; flex-basis: 76px; }
+		.composer-controls .trace-unread-indicator { order: 3; flex-basis: 38px; }
+		.composer-controls .speech-type-toggle { order: 4; flex-basis: 46px; }
+		.composer-controls :global(.suggestions-anchor) { order: 5; }
 	}
 </style>

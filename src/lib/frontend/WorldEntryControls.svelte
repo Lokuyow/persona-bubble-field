@@ -19,8 +19,8 @@
 		transform: translateX(-50%);
 	}
 
-	:global(.composer-available) .world-controls {
-		bottom: calc(var(--composer-dock-height) + 76px);
+	:global(.action-dock-available) .world-controls {
+	bottom: calc(var(--action-dock-height) + 76px);
 	}
 
 	.world-entry-retry {

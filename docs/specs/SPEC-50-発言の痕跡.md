@@ -123,7 +123,7 @@ root readは、root ghostと実際のroot本文bubbleの**両方**が実表示�
 
 - root read/unreadはrootアイコンの状態画像へ反映する。reply unreadの有無もreply未読用アイコンとして表示する。
 - reply unreadが存在する場合はroot既読よりpresentation上優先し、rootが既読でもreply未読用アイコンを表示する。既存のread/unread意味論は変更しない。
-- global unread indicatorはComposer dockに置き、Chatterとは別UIとする。操作時は「どこかにあなたへの返信の痕跡があります」のように未読存在だけを説明する。本文、author、場所、方向、距離、件数を表示せず、auto-navigationもしない。
+- global unread indicatorはActionDockに置き、Chatterとは別UIとする。操作時は「どこかにあなたへの返信の痕跡があります」のように未読存在だけを説明する。本文、author、場所、方向、距離、件数を表示せず、auto-navigationもしない。
 
 ## 27. trace bubbleの視覚的優先順位
 

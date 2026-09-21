@@ -50,8 +50,7 @@ test.describe('DEV World Sandbox', () => {
 	test('starts movement from noninteractive Chatter space', async ({ page }) => {
 		await page.goto('/?devWorld=1&devScenario=chatter-timeline');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
-		const showChatter = page.getByRole('button', { name: 'Show Chatter' });
-		if (await showChatter.count()) await showChatter.click();
+		await page.keyboard.press('c');
 		await expect(page.locator('aside[aria-label="Chatter"]')).toBeVisible();
 		const start = await chatterNonInteractivePoint(page);
 		await page.mouse.move(start.x, start.y);
@@ -74,14 +73,14 @@ test.describe('DEV World Sandbox', () => {
 		await page.mouse.up();
 	});
 
-	test('does not start movement from the Composer dock', async ({ page }) => {
+	test('does not start movement from the ActionDock', async ({ page }) => {
 		await page.goto('/?devWorld=1&devScenario=trace-replies');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
-		await expect(page.locator('.composer-dock')).toBeVisible();
+		await expect(page.locator('.action-dock')).toBeVisible();
 		const self = page.locator('.participant[data-self="true"]');
-		const composer = page.locator('.composer-dock');
+		const composer = page.locator('.action-dock');
 		const box = await composer.boundingBox();
-		if (!box) throw new Error('Expected the composer dock to be visible.');
+		if (!box) throw new Error('Expected the ActionDock to be visible.');
 		const start = { x: box.x + box.width / 2, y: box.y + Math.min(20, box.height / 2) };
 		await page.mouse.move(start.x, start.y);
 		await page.mouse.down();
