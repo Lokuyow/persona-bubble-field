@@ -354,7 +354,7 @@ PR merge後の不要なhead branchは削除する。GitHubの自動branch削除�
 
 ## 検証
 
-通常のローカル実装作業では、変更内容に応じた固有テスト・実ブラウザ確認等に加え、原則として `npm run validate` を基礎検証とする。
+通常のローカル実装作業では、変更内容に最も近いunit test・Playwright E2E・実ブラウザ確認等を優先し、原則として `npm run validate` を基礎検証とする。ブラウザ挙動の変更でも、coding agentの通常のローカル完了条件としてPlaywright full E2E suiteを一律には要求しない。
 
 `npm run validate` は次を順に実行する。
 
@@ -363,7 +363,9 @@ PR merge後の不要なhead branchは削除する。GitHubの自動branch削除�
 3. `npm run build:pages`
 4. `git diff --check`
 
-ブラウザの挙動に関係する変更では、上記に加えて適切なPlaywright E2Eを実行する。人間向けの通常経路は `npm run test:e2e`、coding agent向けの低出力経路は `npm run test:e2e:agent` とする。ローカルのChromium binaryが未installの場合は `npx playwright install chromium` を実行する。E2Eには、ローカルのDEV World Sandboxを使う検証と、Fake RelayやComposer stub等のローカルtest doublesを使って通常画面を検証する経路がある。いずれも実Relay、外部network、実account、実secretへ依存しない。
+アプリケーションの挙動やtoolingを変更しないdocumentation-only変更では、文書間の整合性確認と `git diff --check` を行えばよく、application test・build・E2Eは実行しなくてよい。未実行の検証は最終報告で明記する。
+
+ブラウザの挙動に関係する変更では、上記に加えて変更範囲を十分にカバーする、変更内容に最も近いPlaywright E2Eを実行する。人間向けの通常経路は `npm run test:e2e`、coding agent向けの低出力経路は `npm run test:e2e:agent` とする。E2E harness、共有fixture・test double、global application lifecycle、routing等へ広く影響する変更、関連subsetを合理的に限定できない変更、またはreviewed Plan / taskで明示的に要求された変更では、ローカルfull E2Eを実行する。test failureや追加変更によって必要な検証範囲が広がった場合も、その根拠に応じて追加検証する。ローカルのChromium binaryが未installの場合は `npx playwright install chromium` を実行する。E2Eには、ローカルのDEV World Sandboxを使う検証と、Fake RelayやComposer stub等のローカルtest doublesを使って通常画面を検証する経路がある。いずれも実Relay、外部network、実account、実secretへ依存しない。
 
 通常のローカル検証に `npm ci` を含めない。同じworktreeで `npm run dev` または `npm run dev:host` が起動中でも、`node_modules` を削除せず `npm run validate` を実行できる構成を維持する。
 
