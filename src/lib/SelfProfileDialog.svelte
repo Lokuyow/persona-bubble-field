@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { Dialog, Popover, ScrollArea } from 'bits-ui';
 	import HelpCircle from '~icons/tabler/help-circle';
+	import Heart from '~icons/tabler/heart';
+	import Wallet from '~icons/tabler/wallet';
 	import type { MendingProjection } from '$lib/mending';
 	import { formatRemainingLifespan } from '$lib/lifespanHud';
 	import { getAbilityUpgrade, type PersonaAbilityKey } from '$lib/personaGameState';
@@ -63,8 +65,8 @@
 						<section class="profile-section" aria-labelledby="self-profile-run">
 							<h2 id="self-profile-run">Run</h2>
 							<div class="summary-grid" aria-label="現在状態">
-								<div class="summary-card"><span>残り寿命</span><strong>{formatRemainingLifespan(effectiveExpiry, nowMs)}</strong></div>
-								<div class="summary-card"><span>所持ポイント</span><strong>{points} pt</strong></div>
+								<div class="summary-card" data-stat-icon="heart"><span><Heart aria-hidden="true" />残り寿命</span><strong>{formatRemainingLifespan(effectiveExpiry, nowMs)}</strong></div>
+								<div class="summary-card" data-stat-icon="wallet"><span><Wallet aria-hidden="true" />所持ポイント</span><strong>{points} pt</strong></div>
 							</div>
 							<div class="ability-list">
 								{#each abilityKeys as key}
@@ -93,7 +95,7 @@
 								</Popover.Portal>
 							</Popover.Root></div><strong>+1 RP</strong></div>
 							<p>100,000 ptで現在のRunを終了します。</p>
-							<div class="clear-progress-head"><span>所持ポイント</span><strong>{points.toLocaleString()} / 100,000 pt</strong></div>
+							<div class="clear-progress-head" data-stat-icon="wallet"><span><Wallet aria-hidden="true" />所持ポイント</span><strong>{points.toLocaleString()} / 100,000 pt</strong></div>
 							<div class="clear-progress" role="progressbar" aria-label="脱出に必要なポイント" aria-valuemin="0" aria-valuemax="100000" aria-valuenow={points}><span style={`width: ${clearProgress}%;`}></span></div>
 							<p>未回収の作業ポイントは含まれません。</p>
 							{#if clearBlockedReason && !pointBlocked}<p class="clear-reason">clear不可: {clearBlockedReason}</p>{/if}
@@ -127,7 +129,8 @@
 	.summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 	.summary-card, .ability-row, .root-row { border: 1px solid rgba(57, 67, 64, .14); border-radius: 12px; background: rgba(255, 255, 255, .68); }
 	.summary-card { padding: 14px 15px; }
-	.summary-card span { display: block; margin-bottom: 5px; color: #75817d; font-size: 12px; font-weight: 800; }
+	.summary-card span { display: inline-flex; align-items: center; gap: 5px; margin-bottom: 5px; color: #75817d; font-size: 12px; font-weight: 800; }
+	.summary-card span :global(svg), .clear-progress-head span :global(svg) { width: 15px; height: 15px; flex: 0 0 auto; }
 	.summary-card strong { font-size: 20px; font-weight: 900; font-variant-numeric: tabular-nums; }
 	.profile-section { display: grid; gap: 10px; }
 	.profile-section h2 { margin: 0; color: #56625e; font-size: 14px; font-weight: 900; letter-spacing: .04em; }
@@ -157,6 +160,7 @@
 	:global(.escape-info-items strong) { color: #765d58; font-size: 12px; font-weight: 900; }
 	:global(.escape-info-items span) { color: #876f69; font-size: 12px; line-height: 1.45; }
 	.clear-progress-head { display: flex; justify-content: space-between; gap: 12px; color: #7e706d; font-size: 12px; }
+	.clear-progress-head span { display: inline-flex; align-items: center; gap: 5px; }
 	.clear-progress-head strong { color: #5e514f; font-size: 13px; font-variant-numeric: tabular-nums; }
 	.clear-progress { height: 9px; overflow: hidden; border: 1px solid #d8b3a5; border-radius: 999px; background: #f0dcd4; }
 	.clear-progress span { display: block; min-width: 2px; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #d98d76, #e6ad92); }

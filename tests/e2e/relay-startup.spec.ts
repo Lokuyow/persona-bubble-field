@@ -2641,6 +2641,8 @@ test.describe('Relay startup', () => {
 		await expect(dialog).toContainText('Run #1');
 		await expect(dialog).toContainText('残り寿命');
 		await expect(dialog).toContainText('所持ポイント');
+		await expect(dialog.locator('.summary-card[data-stat-icon="heart"] > span > svg')).toHaveCount(1);
+		await expect(dialog.locator('.summary-card[data-stat-icon="wallet"] > span > svg')).toHaveCount(1);
 		await expect(dialog).toContainText('推論効率');
 		await expect(dialog).toContainText('コンテキスト容量');
 		await expect(dialog).toContainText('ハルシネーション抑制');
@@ -2675,6 +2677,7 @@ test.describe('Relay startup', () => {
 		await expect(dialog).toContainText('未回収の作業ポイントは含まれません。');
 		await expect(dialog).not.toContainText('100,000 ptで現在のRunを終了します。未回収の作業ポイントは含まれません。');
 		await expect(dialog).toContainText('100,000 pt');
+		await expect(dialog.locator('.clear-progress-head[data-stat-icon="wallet"] > span > svg')).toHaveCount(1);
 		await expect(dialog.getByRole('button', { name: '脱出', exact: true })).toBeDisabled();
 		await expect(dialog.getByText('clear不可: 所持ポイントが100,000pt未満です')).toHaveCount(0);
 		await expect(dialog.getByRole('button', { name: /へ強化/ })).toHaveCount(0);
@@ -3305,6 +3308,8 @@ test.describe('Relay startup', () => {
 			(request.filter.kinds as number[])[0] === 42)).toBe(true);
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
 		const hud = page.locator('.lifespan-hud');
+		await expect(hud.locator('[data-stat-icon="heart"] > svg')).toHaveCount(1);
+		await expect(hud.locator('[data-stat-icon="wallet"] > svg')).toHaveCount(1);
 		await expect(hud).toContainText('寿命 2日 18時間');
 
 		await pauseAtCurrentBrowserTime(page);

@@ -1,4 +1,6 @@
 <script lang="ts">
+	import Heart from '~icons/tabler/heart';
+	import Wallet from '~icons/tabler/wallet';
 	import { formatMendingRate, formatRemainingLifespan } from '$lib/lifespanHud';
 	import type { MendingProjection } from '$lib/mending';
 
@@ -16,8 +18,8 @@
 
 
 <div class="lifespan-hud" aria-label={mendingLabel ? `${label}、ポイント ${points}pt、${mendingLabel}` : `${label}、ポイント ${points}pt`}>
-	<span class="lifespan-value">{label}</span>
-	<span class="points-value">ポイント {points}pt</span>
+	<span class="lifespan-value" data-stat-icon="heart"><Heart aria-hidden="true" />{label}</span>
+	<span class="points-value" data-stat-icon="wallet"><Wallet aria-hidden="true" />ポイント {points}pt</span>
 	{#if mendingLabel}<span class="mending-status">{mendingLabel}</span>{/if}
 </div>
 
@@ -44,12 +46,17 @@
 		text-align: right;
 
 		.lifespan-value {
+			display: inline-flex;
+			align-items: center;
+			justify-content: flex-end;
+			gap: 6px;
 			color: #fff;
 			font-size: 1.18em;
 			font-weight: 800;
 		}
 
-		.points-value { color: rgba(226, 230, 255, 0.86); }
+		.points-value { display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; color: rgba(226, 230, 255, 0.86); }
+		.lifespan-value :global(svg), .points-value :global(svg) { width: 16px; height: 16px; flex: 0 0 auto; }
 
 		.mending-status {
 			color: #b9b8ff;
