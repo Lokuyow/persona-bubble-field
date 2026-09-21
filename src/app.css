@@ -51,9 +51,12 @@ body {
 	font-family: 'Trebuchet MS', 'Avenir Next', system-ui, sans-serif;
 }
 
-button:not(.trace-root-bubble):not(.trace-reply-content-button):not(.timeline-name) {
+button {
 	font: inherit;
 	cursor: pointer;
+}
+
+button:not(:where(.trace-root-bubble, .trace-reply-content-button, .timeline-name)) {
 	user-select: none;
 	-webkit-user-select: none;
 }

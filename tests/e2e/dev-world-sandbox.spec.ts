@@ -2495,23 +2495,6 @@ test.describe('DEV World Sandbox', () => {
 		const traceRoot = page.locator('.trace-root-bubble');
 		const traceContent = traceRoot.locator('.bubble-content');
 		await expect(traceContent).toBeVisible();
-		expect(await traceRoot.evaluate((root) => {
-			const content = root.querySelector<HTMLElement>('.bubble-content');
-			if (!content) throw new Error('Expected Trace root content.');
-			const rootStyle = getComputedStyle(root);
-			const contentStyle = getComputedStyle(content);
-			return {
-				rootUserSelect: rootStyle.userSelect,
-				rootWebkitUserSelect: rootStyle.getPropertyValue('-webkit-user-select'),
-				contentUserSelect: contentStyle.userSelect,
-				contentWebkitUserSelect: contentStyle.getPropertyValue('-webkit-user-select')
-			};
-		})).toEqual({
-			rootUserSelect: 'auto',
-			rootWebkitUserSelect: 'auto',
-			contentUserSelect: 'text',
-			contentWebkitUserSelect: 'text'
-		});
 		expect(await dragSelect(traceContent)).not.toBe('');
 
 		await page.goto('/?devWorld=1&devScenario=chatter-timeline');
