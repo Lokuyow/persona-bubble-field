@@ -3822,9 +3822,7 @@ test.describe('Relay startup', () => {
 		await expect(unreadMarker).toHaveAttribute('data-trace-marker-kind', 'normal');
 		await expect(unreadMarker).toHaveCSS('mask-image', /trace-icon\.svg/);
 		await expect(unreadMarker).toHaveCSS('color', 'rgb(82, 104, 134)');
-		const commonMarkerOpacity = await unreadMarker.evaluate((element) => getComputedStyle(element).opacity);
-		expect(Number(commonMarkerOpacity)).toBeGreaterThan(0);
-		expect(Number(commonMarkerOpacity)).toBeLessThan(1);
+		await expect(unreadMarker).toHaveCSS('opacity', '0.72');
 		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveCSS('mask-image', /trace-icon\.svg/);
 		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveAttribute('data-trace-marker-kind', 'normal');
 		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveCSS('color', 'rgb(207, 6, 254)');
@@ -3843,9 +3841,9 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveAttribute('data-trace-root-read', 'true');
 		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveCSS('mask-image', /trace-icon\.svg/);
 		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveCSS('color', 'rgb(82, 104, 134)');
-		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveCSS('opacity', commonMarkerOpacity);
+		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveCSS('opacity', '0.66');
 		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveCSS('filter', 'grayscale(1) brightness(1.12)');
-		await expect(deathMarker).toHaveCSS('opacity', commonMarkerOpacity);
+		await expect(deathMarker).toHaveCSS('opacity', '0.72');
 		await page.reload();
 		await page.evaluate(() => {
 			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
@@ -3860,7 +3858,7 @@ test.describe('Relay startup', () => {
 		await expect(marker).toHaveAttribute('data-trace-root-unread-reply', 'true');
 		await expect(marker).toHaveCSS('mask-image', /trace-icon\.svg/);
 		await expect(marker).toHaveCSS('color', 'rgb(207, 6, 254)');
-		await expect(marker).toHaveCSS('opacity', commonMarkerOpacity);
+		await expect(marker).toHaveCSS('opacity', '0.72');
 		await expect(marker).toHaveCSS('filter', 'none');
 		await expect(page.locator('.trace-unread-indicator')).toBeVisible();
 		await selectRelayTraceCell(page, '4,2');
@@ -3872,7 +3870,7 @@ test.describe('Relay startup', () => {
 		await expect(marker).not.toHaveAttribute('data-trace-root-unread-reply');
 		await expect(marker).toHaveCSS('mask-image', /trace-icon\.svg/);
 		await expect(marker).toHaveCSS('color', 'rgb(82, 104, 134)');
-		await expect(marker).toHaveCSS('opacity', commonMarkerOpacity);
+		await expect(marker).toHaveCSS('opacity', '0.66');
 		await expect(marker).toHaveCSS('filter', 'grayscale(1) brightness(1.12)');
 	});
 

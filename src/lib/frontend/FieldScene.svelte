@@ -372,6 +372,7 @@
 	}
 
 	.trace-marker-read:not(.trace-marker-unread-reply) {
+		opacity: 0.66;
 		filter: grayscale(1) brightness(1.12);
 	}
 
