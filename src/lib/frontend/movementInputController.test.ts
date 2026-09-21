@@ -82,9 +82,38 @@ describe('movement input controller', () => {
 		{ name: 'Arrow left', events: [{ key: 'ArrowLeft', code: 'ArrowLeft' }], expected: 'left' },
 		{ name: 'Arrow down', events: [{ key: 'ArrowDown', code: 'ArrowDown' }], expected: 'down' },
 		{ name: 'Arrow right', events: [{ key: 'ArrowRight', code: 'ArrowRight' }], expected: 'right' },
+		{ name: 'WASD up-right', events: [{ key: 'w', code: 'KeyW' }, { key: 'd', code: 'KeyD' }], expected: 'up-right' },
+		{ name: 'WASD up-left', events: [{ key: 'w', code: 'KeyW' }, { key: 'a', code: 'KeyA' }], expected: 'up-left' },
+		{ name: 'WASD down-right', events: [{ key: 's', code: 'KeyS' }, { key: 'd', code: 'KeyD' }], expected: 'down-right' },
+		{ name: 'WASD down-left', events: [{ key: 's', code: 'KeyS' }, { key: 'a', code: 'KeyA' }], expected: 'down-left' },
 		{
-			name: 'mixed diagonal',
+			name: 'Arrow up-right',
+			events: [{ key: 'ArrowUp', code: 'ArrowUp' }, { key: 'ArrowRight', code: 'ArrowRight' }],
+			expected: 'up-right'
+		},
+		{
+			name: 'Arrow up-left',
+			events: [{ key: 'ArrowUp', code: 'ArrowUp' }, { key: 'ArrowLeft', code: 'ArrowLeft' }],
+			expected: 'up-left'
+		},
+		{
+			name: 'Arrow down-right',
+			events: [{ key: 'ArrowDown', code: 'ArrowDown' }, { key: 'ArrowRight', code: 'ArrowRight' }],
+			expected: 'down-right'
+		},
+		{
+			name: 'Arrow down-left',
+			events: [{ key: 'ArrowDown', code: 'ArrowDown' }, { key: 'ArrowLeft', code: 'ArrowLeft' }],
+			expected: 'down-left'
+		},
+		{
+			name: 'WASD and Arrow up-right',
 			events: [{ key: 'w', code: 'KeyW' }, { key: 'ArrowRight', code: 'ArrowRight' }],
+			expected: 'up-right'
+		},
+		{
+			name: 'Arrow and WASD up-right',
+			events: [{ key: 'ArrowUp', code: 'ArrowUp' }, { key: 'd', code: 'KeyD' }],
 			expected: 'up-right'
 		}
 	])('resolves $name directions from keyboard keys', ({ events, expected }) => {
@@ -201,6 +230,20 @@ describe('movement input controller', () => {
 		vi.advanceTimersByTime(500);
 		expect(requests).toEqual(['right', 'right']);
 		release(controller, { key: 'd', code: 'KeyD' });
+		controller.destroy();
+	});
+
+	it('cancels an active movement hold and its timer', () => {
+		vi.useFakeTimers();
+		const { controller, requests } = createFixture();
+
+		press(controller, { key: 'd', code: 'KeyD' });
+		vi.advanceTimersByTime(50);
+		expect(requests).toEqual(['right']);
+
+		controller.cancelMovementHold();
+		vi.advanceTimersByTime(2_000);
+		expect(requests).toEqual(['right']);
 		controller.destroy();
 	});
 
