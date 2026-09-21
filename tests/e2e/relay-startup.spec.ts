@@ -2643,6 +2643,14 @@ test.describe('Relay startup', () => {
 		await expect(dialog).toContainText('所持ポイント');
 		await expect(dialog.locator('.summary-card[data-stat-icon="heart"] > span > svg')).toHaveCount(1);
 		await expect(dialog.locator('.summary-card[data-stat-icon="wallet"] > span > svg')).toHaveCount(1);
+		for (const statIcon of ['heart', 'wallet']) {
+			const card = dialog.locator(`.summary-card[data-stat-icon="${statIcon}"]`);
+			const labelBox = await card.locator('span').boundingBox();
+			const valueBox = await card.locator('strong').boundingBox();
+			expect(labelBox).not.toBeNull();
+			expect(valueBox).not.toBeNull();
+			expect(valueBox!.y).toBeGreaterThan(labelBox!.y + labelBox!.height - 1);
+		}
 		await expect(dialog).toContainText('推論効率');
 		await expect(dialog).toContainText('コンテキスト容量');
 		await expect(dialog).toContainText('ハルシネーション抑制');
@@ -2792,6 +2800,14 @@ test.describe('Relay startup', () => {
 		const viewportBox = await scrollViewport.boundingBox();
 		const metrics = await scrollViewport.evaluate((element) => ({ clientHeight: element.clientHeight, scrollHeight: element.scrollHeight }));
 		await expect(dialog.locator('.self-profile-sections > section')).toHaveCount(3);
+		for (const statIcon of ['heart', 'wallet']) {
+			const card = dialog.locator(`.summary-card[data-stat-icon="${statIcon}"]`);
+			const labelBox = await card.locator('span').boundingBox();
+			const valueBox = await card.locator('strong').boundingBox();
+			expect(labelBox).not.toBeNull();
+			expect(valueBox).not.toBeNull();
+			expect(valueBox!.y).toBeGreaterThan(labelBox!.y + labelBox!.height - 1);
+		}
 		const headerAvatarBox = await dialog.locator('.self-profile-avatar').boundingBox();
 		expect(dialogBox).not.toBeNull();
 		expect(viewportBox).not.toBeNull();
@@ -3310,6 +3326,8 @@ test.describe('Relay startup', () => {
 		const hud = page.locator('.lifespan-hud');
 		await expect(hud.locator('[data-stat-icon="heart"] > svg')).toHaveCount(1);
 		await expect(hud.locator('[data-stat-icon="wallet"] > svg')).toHaveCount(1);
+		const hudIconLefts = await hud.locator('[data-stat-icon] > svg').evaluateAll((icons) => icons.map((icon) => Math.round(icon.getBoundingClientRect().left)));
+		expect(hudIconLefts).toEqual([hudIconLefts[0], hudIconLefts[0]]);
 		await expect(hud).toContainText('寿命 2日 18時間');
 
 		await pauseAtCurrentBrowserTime(page);

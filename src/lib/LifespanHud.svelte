@@ -46,16 +46,18 @@
 		text-align: right;
 
 		.lifespan-value {
-			display: inline-flex;
+			display: grid;
+			grid-template-columns: 16px minmax(0, 1fr);
 			align-items: center;
-			justify-content: flex-end;
 			gap: 6px;
+			width: 100%;
+			text-align: left;
 			color: #fff;
 			font-size: 1.18em;
 			font-weight: 800;
 		}
 
-		.points-value { display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; color: rgba(226, 230, 255, 0.86); }
+		.points-value { display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: center; gap: 6px; width: 100%; text-align: left; color: rgba(226, 230, 255, 0.86); }
 		.lifespan-value :global(svg), .points-value :global(svg) { width: 16px; height: 16px; flex: 0 0 auto; }
 
 		.mending-status {

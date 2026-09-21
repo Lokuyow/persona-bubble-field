@@ -129,7 +129,8 @@
 	.summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 	.summary-card, .ability-row, .root-row { border: 1px solid rgba(57, 67, 64, .14); border-radius: 12px; background: rgba(255, 255, 255, .68); }
 	.summary-card { padding: 14px 15px; }
-	.summary-card span { display: inline-flex; align-items: center; gap: 5px; margin-bottom: 5px; color: #75817d; font-size: 12px; font-weight: 800; }
+	.summary-card span { display: block; margin-bottom: 5px; color: #75817d; font-size: 12px; font-weight: 800; }
+	.summary-card span :global(svg) { vertical-align: -3px; margin-right: 5px; }
 	.summary-card span :global(svg), .clear-progress-head span :global(svg) { width: 15px; height: 15px; flex: 0 0 auto; }
 	.summary-card strong { font-size: 20px; font-weight: 900; font-variant-numeric: tabular-nums; }
 	.profile-section { display: grid; gap: 10px; }
