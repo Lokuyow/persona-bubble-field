@@ -360,7 +360,7 @@ NIP上の地理的位置tagへ本プロジェクトの架空の論理フィー�
 
 ## 18. position evidence
 
-presence状態のユーザーについてcurrent positionを復元する際は、`kind 30078` だけでなく、有効なtop-level kind 42に含まれる `w` もposition evidenceとして扱う。kind 1111はposition evidenceに使用しない。
+presence状態のユーザーについてcurrent positionを復元する際は、`kind 30078` だけでなく、通常chatとして受理したtop-level kind 42に含まれる `w` もposition evidenceとして扱う。explicit Traceであるkind 42の `w` はimmutableなTrace表示位置であり、presence/position evidenceには使用しない。kind 1111もposition evidenceに使用しない。
 
 これはkind 42の `w` が、その発言が行われた時点での送信者のpositionを直接保持しているためである。
 
@@ -382,7 +382,7 @@ presence状態のユーザーについてcurrent positionを復元する際は�
 1. World State `exit`
 2. World State active slot 1
 3. World State active slot 0
-4. `kind 42` の `w`
+4. 通常chat `kind 42` の `w`
 
 まず `created_at` が新しいeventを優先し、同一 `created_at` の場合に上記優先順位を使用する。
 
@@ -417,7 +417,7 @@ presenceは、そのユーザーが最近この空間で**能動的に活動し�
 
 presence projectionは `latestPositiveActivity` と `latestExit` を独立して保持する。
 
-positive activityは有効なtop-level kind 42、World State active slot 0、World State active slot 1、
+positive activityは通常chatとして受理したtop-level kind 42、World State active slot 0、World State active slot 1、
 および下記の明示的な成功操作から得る。World State `exit` はpositive activityではない。
 active条件は、positive activityが存在し、`positive.created_at > exit.created_at`（exitがある場合）
 で、かつpositive activityが10分timeout内であることとする。同一秒はexitを優先しinactiveとする。
@@ -429,7 +429,7 @@ activeへ戻せる。
 
 フィールド移動は、移動後の座標を持つ kind 30078 World State active更新として表現する。
 
-専用世界での通常メッセージ発言は、発言位置を `w` tagに持つ有効なtop-level kind 42そのものをpresence activityとして扱う。kind 1111 reply投稿もpresence activityとするが、reply自身は位置tagを持たない。
+専用世界での通常メッセージ発言は、`l=chat`を持ちTrace labelを持たず、発言位置を `w` tagに持つ有効なtop-level kind 42そのものをpresence activityとして扱う。`l=trace` kind 42のTrace rootはpositive activityではなく、death後のpresenceを再活性化しない。kind 1111 reply投稿もpresence activityとするが、reply自身は位置tagを持たない。
 
 発言のためだけに追加の `kind 30078` を必ず発行する必要はない。
 
@@ -468,7 +468,7 @@ presence切れ前に、
 
 場合は、同じ在室の継続として扱い、元の位置を復元する。
 
-復元には、直近の有効な `kind 30078` と専用世界kind 42の `w` をposition evidenceとして利用できる。
+復元には、直近の有効な `kind 30078` と通常chatとして受理した専用世界kind 42の `w` をposition evidenceとして利用できる。Trace kind 42の `w` は利用しない。
 
 ### presence切れ後の復帰
 
@@ -522,10 +522,10 @@ RelayごとのWebSocket接続自体をsubscriptionごとに別接続へ分ける
 - `kind = 42`
 - 対象kind 40
 - prototype NIP-32 namespace
-- `l = chat`
-- 初期同期に必要な `since`
+- recent filter: `l = chat` または `l = trace`、初期同期に必要な `since`
+- history filter: `l = chat`、`limit = 50`
 
-recent用filterで初期取得したkind 42は、
+recent用filterで初期取得した通常chat kind 42は、
 
 - presence activity
 - current position evidence
@@ -533,7 +533,7 @@ recent用filterで初期取得したkind 42は、
 
 に利用できる。
 
-timeline history用filterで取得した古いkind 42はtimeline表示には利用するが、presence activity、
+timeline history用filterで取得した古い通常chat kind 42はtimeline表示には利用するが、presence activity、
 current position evidence、生存bubble復元の根拠には利用しない。transportのbootstrap unionに
 含まれるeventはclient側でevent ID dedupeし、`created_at >= messageSince`の境界をinitial
 bootstrap後のlive/reconnect処理でも維持する。古いeventをlive callbackで受け取った場合も
@@ -582,7 +582,7 @@ safety marginの具体値は製品仕様として現時点では固定しない�
 
 等を更新する。
 
-新しい有効なtop-level kind 42を受信した場合は、
+新しい有効な通常chat kind 42を受信した場合は、
 
 - `w` によるposition evidence
 - last presence activity
@@ -613,19 +613,20 @@ Relay接続が切れてsubscriptionを再作成する場合も、catch-up取得�
 
 ## 21. trace root bootstrapとconversation transport
 
-旧`#w`位置別on-demand REQを撤回する。trace root bootstrapでは、起動時に各authoritative Relayへ次のworld識別用history filterを要求する。
+旧`#w`位置別on-demand REQを撤回する。trace root bootstrapでは、起動時に各authoritative Relayへ次の2つのworld識別用history filterを同じREQで要求する。
 
 - `kinds=[42]`
 - `#e=[対象kind40 event ID]`
 - `#L=[project namespace]`
-- `#l=["chat"]`
+- normal candidate: `#l=["chat"]`
+- explicit trace candidate: `#l=["trace"]`
 - `limit=1000`
 
 これはworld識別用Relay prefilterを維持し、旧`#w`位置filterだけを撤去する形である。他channelまたはproject外の全kind 42を取得して母集団へ含めない。
 
-RelayのNIP-11 max limit等により1000未満になることは許容する。1000件を埋めるための追加paginationは保証しない。各RelayのEOSE / CLOSED / timeout後に結果を統合し、event IDでdedupeする。`created_at`とevent IDで決定的に並べた最新1000 unique raw kind 42をclient-side semantic validationへ渡す。
+RelayのNIP-11 max limit等により1000未満になることは許容する。1000件を埋めるための追加paginationは保証しない。各RelayのEOSE / CLOSED / timeout後に結果を統合し、event IDでdedupeする。semantic validation後、normal chat candidateとexplicit trace candidateを独立してそれぞれ最大1000件へcapし、各class内およびcap後unionを`created_at`とevent IDで決定的に並べる。Trace candidateは通常chatのquotaを消費しない。
 
-ここでrawとは上記Relay prefilterを通過したkind 42を意味する。NIP-28形式kind 42 reply、invalid signature、invalid `w`等、後段validationで落ちるeventもraw 1000枠を消費し得る。その後にsemantic validation、top-level判定、20%抽選、cell/global root capを適用する。network受信途中にglobal capが埋まったことを理由にmulti-Relay bootstrapを早期終了しない。
+ここでrawとは上記Relay prefilterを通過したkind 42を意味する。Relay filterはcandidate narrowingでありauthorityではないため、最終的なnamespace marker、semantic class、canonical relation、署名、`w`はparserで検証する。normal chatには20%抽選を適用し、explicit Traceは抽選をbypassする。その後にcell/global root capを適用し、network受信途中にglobal capが埋まったことを理由にmulti-Relay bootstrapを早期終了しない。
 
 第3 logical subscriptionでは、`SPEC-50`で定義するNIP-22 filter bundleをForward subscriptionとして扱う。filter bundle変更、per-Relay EOSE / CLOSED / timeout、reconnect、multi-Relay event ID dedupe、不要なhistory再取得の抑制はtransportの責務とする。cursor / since等のrx-nostr内部詳細は製品仕様として固定しない。
 

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getPublicKey, type VerifiedEvent } from 'nostr-tools/pure';
 import {
 	parseWorldStateEvent,
+	parseTraceEvent,
 	parseTraceReplyCandidate,
 	validateTraceReplyCandidate,
 	parseWorldMessage,
@@ -9,7 +10,7 @@ import {
 	type ParsedTraceReply,
 	type ParsedWorldMessage
 } from './nostrProtocol';
-import type { TraceReplyConfiguration } from './nostrRelayTransport';
+import type { TraceReplyConfiguration, TraceReplyConfigurationResult } from './nostrRelayTransport';
 import { PRESENCE_TIMEOUT_MS, type PresenceState } from './presence';
 import { planPositionPublish, reconstructPositionPublishState } from './positionPublish';
 import { protocolKeyFor } from './realtimeEvents';
@@ -287,6 +288,10 @@ function message(id = 'message', createdAt = 100): ParsedWorldMessage {
 	return { id, pubkey: alice, createdAt, content: 'hello', speechType: 'normal', position: { x: 1, y: 1 } };
 }
 
+function deathRoot(id = 'death-root', position = { x: 1, y: 1 }): ParsedWorldMessage & { source: 'death' } {
+	return { ...message(id, 700), position, source: 'death' };
+}
+
 function position(
 	id = 'position',
 	createdAt = 100,
@@ -348,8 +353,9 @@ describe('world read session', () => {
 	let input: {
 	onBootstrapMessage: (event: ParsedWorldMessage) => void;
 	onBootstrapWorldState: (event: ParsedWorldStateEvent) => void;
-	onLiveMessage: (event: ParsedWorldMessage, rawEvent: never) => void;
+		onLiveMessage: (event: ParsedWorldMessage, rawEvent: never) => void;
 		onLiveWorldState: (event: ParsedWorldStateEvent) => void;
+		onLiveTrace: (event: { id: string; source: 'death' }, rawEvent: never) => void;
 		onPrimaryClosed: (diagnostic: never) => void;
 		messageSince: number;
 		worldStateSince: number;
@@ -533,6 +539,92 @@ describe('world read session', () => {
 		expect(parseWorldStateEvent(publish.mock.calls[0][0], 'c'.repeat(64))).toMatchObject({ state: 'exit', position: { x: 2, y: 1 } });
 		expect(await session.publishTerminalExit()).toEqual({ kind: 'unavailable' });
 		expect(await session.moveSelf('right')).toEqual({ kind: 'unavailable' });
+	});
+
+	it('routes live death traces to the trace reducer without entering world presence', async () => {
+		const onLiveMessage = vi.fn();
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 }, selfSigner: selfSigner(),
+			onPresenceChanged: vi.fn(), onLiveMessage, onStatusChanged: vi.fn()
+		});
+		await session.start(); session.completeBootstrap();
+		const rawEvent = { id: 'death-trace' } as never;
+		input?.onLiveTrace({ id: 'death-trace', source: 'death' }, rawEvent);
+		await Promise.resolve();
+		expect(onLiveMessage).not.toHaveBeenCalled();
+		expect(mocked.reconcileTraceRootCache).toHaveBeenCalledWith(expect.objectContaining({ rawEvents: [rawEvent] }));
+	});
+
+	it('publishes one dedicated death Last Words trace after terminal exit without using the presence writer', async () => {
+		const selfMessage = { ...message('self-message', 110), pubkey: selfPubkey, position: { x: 2, y: 1 } };
+		result = startResult([selfMessage], [position('self-slot-0', 100, selfPubkey, 0, { x: 2, y: 1 })]);
+		publish.mockResolvedValue([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 }, selfSigner: selfSigner(),
+			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn()
+		});
+		await session.start(); session.completeBootstrap();
+		vi.setSystemTime(105_000);
+		expect(session.prepareTerminalExit(selfPubkey).kind).toBe('prepared');
+		expect(await session.publishTerminalExit()).toMatchObject({ kind: 'published' });
+		expect(session.enableDeathLastWords()).toBe(true);
+		const publishedExit = publish.mock.calls[0][0] as VerifiedEvent;
+		expect(publishedExit.created_at).toBe(110);
+		const first = await session.publishDeathLastWords('  last words  ');
+		expect(first).toMatchObject({ kind: 'published' });
+		expect(publish).toHaveBeenCalledTimes(2);
+		const publishedTrace = publish.mock.calls[1][0] as VerifiedEvent;
+		expect(publishedTrace.kind).toBe(42);
+		expect(publishedTrace.created_at).toBeGreaterThanOrEqual(publishedExit.created_at);
+		expect(parseTraceEvent(publishedTrace, 'c'.repeat(64))).toMatchObject({ content: 'last words', position: { x: 2, y: 1 }, source: 'death' });
+		expect(publishedTrace.tags.find((tag) => tag[0] === 'w')?.[1]).toBe(publishedExit.content);
+		expect(await session.publishDeathLastWords('duplicate')).toEqual({ kind: 'unavailable' });
+	});
+
+	it('requires range and trace-inspection activity before opening a death root', async () => {
+		const outside = deathRoot('death-outside', { x: 3, y: 2 });
+		mocked.reconcileTraceRootCache.mockResolvedValue([outside]);
+		result = startResult([], [position('self-position', 700, selfPubkey, 0, { x: 1, y: 1 })]);
+		publish.mockResolvedValue([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 }, selfSigner: selfSigner(),
+			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn()
+		});
+		await session.start(); session.completeBootstrap();
+		await vi.waitFor(() => expect(mocked.reconcileTraceRootCache).toHaveBeenCalled());
+		expect(session.openTraceConversation({ rootId: outside.id, currentId: outside.id })).toEqual({ kind: 'blocked' });
+		expect(publish).not.toHaveBeenCalled();
+
+		const inside = deathRoot('death-inside');
+		mocked.reconcileTraceRootCache.mockResolvedValue([inside]);
+		session.closeTraceConversation();
+		input?.onLiveTrace({ id: inside.id, source: 'death' }, raw(inside));
+		await vi.waitFor(() => expect(mocked.reconcileTraceRootCache).toHaveBeenCalledWith(expect.objectContaining({ rawEvents: [expect.objectContaining({ id: inside.id })] })));
+		vi.setSystemTime(701_000);
+		expect(session.openTraceConversation({ rootId: inside.id, currentId: inside.id })).toEqual({ kind: 'opened' });
+		await Promise.resolve();
+		expect(publish.mock.calls.map(([event]) => event.kind)).toEqual([30078]);
+	});
+
+	it('rejects kind 1111 publication to a death root at the session domain boundary', async () => {
+		const root = deathRoot();
+		mocked.reconcileTraceRootCache.mockResolvedValue([root]);
+		result = startResult([], [position('self-position', 700, selfPubkey, 0, { x: 1, y: 1 })]);
+		publish.mockResolvedValue([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 }, selfSigner: selfSigner(),
+			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn()
+		});
+		await session.start(); session.completeBootstrap(); await vi.waitFor(() => expect(mocked.reconcileTraceRootCache).toHaveBeenCalled());
+		await session.enterSelf();
+		vi.setSystemTime(701_000);
+		expect(session.openTraceConversation({ rootId: root.id, currentId: root.id })).toEqual({ kind: 'opened' });
+		await vi.waitFor(() => expect(publish).toHaveBeenCalledTimes(1));
+		const publicationCountBeforeReply = publish.mock.calls.length;
+		await expect(session.publishTraceReply({ rootId: root.id, targetId: root.id, content: 'no reply', speechType: 'normal' }))
+			.resolves.toEqual({ kind: 'blocked' });
+		expect(publish).toHaveBeenCalledTimes(publicationCountBeforeReply);
+		expect(publish.mock.calls.map(([event]) => event.kind)).not.toContain(1111);
 	});
 
 	it('uses latest positive message activity when preparing an exit after clock regression', async () => {
@@ -2066,8 +2158,8 @@ describe('world read session', () => {
 		expect(session.getTraceConversationState()).toEqual(beforeBlockedSelection);
 	});
 
-	it('reconciles an open root to the newer effective root in the same cell', async () => {
-		const newest = { ...message('newest-root', 701), pubkey: 'b'.repeat(64), position: { x: 1, y: 1 } };
+	it('reconciles an open root to a death root without starting its reply conversation', async () => {
+		const newest = { ...deathRoot('newest-death-root'), createdAt: 701, pubkey: 'b'.repeat(64), position: { x: 1, y: 1 } };
 		const older = { ...message('older-root', 700), pubkey: 'c'.repeat(64), position: { x: 1, y: 1 } };
 		mocked.reconcileTraceRootCache.mockResolvedValue([older]);
 		result = startResult([], [position('self-position', 700, selfPubkey, 0, { x: 1, y: 1 })]);
@@ -2095,13 +2187,76 @@ describe('world read session', () => {
 		expect(session.openTraceConversation({ rootId: older.id, currentId: older.id })).toEqual({ kind: 'opened' });
 		await vi.waitFor(() => expect(configureTraceReplies).toHaveBeenCalledTimes(1));
 		mocked.reconcileTraceRootCache.mockResolvedValue([newest]);
-		input!.onLiveMessage(newest, raw(newest));
+		input!.onLiveTrace({ id: newest.id, source: 'death' }, raw(newest));
 		await vi.waitFor(() => expect(session.getTraceConversationState()).toEqual(expect.objectContaining({ root: newest })));
 		expect(session.getTraceConversationState()).toEqual(expect.objectContaining({ root: newest, config: { rootId: newest.id, currentId: newest.id } }));
+		expect(session.getTraceConversationState()).toEqual(expect.objectContaining({ replyRefresh: 'settled', replies: [] }));
 		expect(publish).not.toHaveBeenCalled();
 		await vi.waitFor(() => expect(configureTraceReplies).toHaveBeenCalledTimes(2));
+		expect(configureTraceReplies.mock.calls[1][0]).not.toHaveProperty('conversation');
+		expect(configureTraceReplies.mock.calls[1][0]).not.toHaveProperty('rootId');
+		expect(configureTraceReplies.mock.calls[1][0]).not.toHaveProperty('currentId');
 		session.closeTraceConversation();
 		await vi.waitFor(() => expect(configureTraceReplies).toHaveBeenCalledTimes(3));
 		expect(configureTraceReplies.mock.calls[2][0]).not.toHaveProperty('conversation');
+	});
+
+	it('restores realtime when a stale normal conversation loses the race to death activation', async () => {
+		const normal = { ...message('normal-race-root', 700), position: { x: 1, y: 1 } };
+		const death = deathRoot('death-race-root');
+		mocked.reconcileTraceRootCache.mockResolvedValue([normal]);
+		result = startResult([], [position('self-position', 700, selfPubkey, 0, { x: 1, y: 1 })]);
+		const oldConversation = deferred<TraceReplyConfigurationResult>();
+		const deathConfiguration = deferred<TraceReplyConfigurationResult>();
+		const configureTraceReplies = vi.fn((configuration: TraceReplyConfiguration) =>
+			configuration.conversation ? oldConversation.promise : deathConfiguration.promise
+		);
+		const startRealtime = vi.fn().mockResolvedValue({ status: 'active', events: [], relays: [] });
+		const stopRealtime = vi.fn();
+		mocked.createTransport.mockReturnValue({
+			start: vi.fn(async (nextInput) => { input = nextInput; return result; }),
+			bootstrapTraceRootCandidates: traceBootstrap(),
+			configureTraceReplies,
+			startRealtime,
+			stopRealtime,
+			dispose,
+			publish
+		});
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 }, selfSigner: selfSigner(),
+			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn(),
+			realtime: {
+				registry: [{ eventType: 'fixture', protocolVersion: 1, protocolKey: protocolKeyFor('fixture', 1), parseAction: () => ({}) }],
+				controlSince: 0,
+				instanceFilters: [{ protocolKey: protocolKeyFor('fixture', 1), instanceIds: ['fixture-instance'], since: 0 }],
+				startImmediately: false,
+				onEvent: vi.fn()
+			}
+		});
+
+		await session.start();
+		session.completeBootstrap();
+		await session.startRealtime();
+		expect(startRealtime).toHaveBeenCalledOnce();
+		expect(session.openTraceConversation({ rootId: normal.id, currentId: normal.id })).toEqual({ kind: 'opened' });
+		await vi.waitFor(() => expect(configureTraceReplies).toHaveBeenCalledTimes(1));
+		expect(stopRealtime).toHaveBeenCalledOnce();
+
+		mocked.reconcileTraceRootCache.mockResolvedValue([death]);
+		input!.onLiveTrace({ id: death.id, source: 'death' }, raw(death));
+		await vi.waitFor(() => expect(session.getTraceConversationState()).toEqual(expect.objectContaining({
+			root: death, replyRefresh: 'settled', replies: []
+		})));
+		await vi.waitFor(() => expect(configureTraceReplies).toHaveBeenCalledTimes(2));
+		expect(configureTraceReplies.mock.calls[1][0]).not.toHaveProperty('conversation');
+		expect(configureTraceReplies.mock.calls.map(([configuration]) => configuration.conversation?.rootId))
+			.toEqual([normal.id, undefined]);
+
+		oldConversation.resolve({ status: 'superseded', generation: 1 });
+		await Promise.resolve();
+		expect(startRealtime).toHaveBeenCalledOnce();
+		deathConfiguration.resolve({ status: 'active', generation: 2, initialBatch: { events: [], relays: [] } });
+		await vi.waitFor(() => expect(startRealtime).toHaveBeenCalledTimes(2));
+		expect(session.getTraceConversationState()).toEqual(expect.objectContaining({ root: death, replyRefresh: 'settled', replies: [] }));
 	});
 });

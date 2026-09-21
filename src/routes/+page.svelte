@@ -324,6 +324,9 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	let prefersReducedMotion = false;
 	let expiryCheckInFlight = false;
 	let deathTransitionInFlight = false;
+	let deathPresentationSession = $state.raw<ReturnType<typeof createWorldReadSession> | null>(null);
+	let deathPresentationContent = $state('');
+	let deathPresentationSubmitting = $state(false);
 	let runRuntimeRefresh: (() => Promise<void>) | null = null;
 	let startReadOnlyWorld: (() => void) | null = null;
 	let startSelectedWorld: ((persona: PersonaSnapshot) => Promise<void>) | null = null;
@@ -1195,7 +1198,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 					mendingNowMs = Date.now();
 					updateLifespanHud(Date.now(), true);
 					if (isPersonaExpired(personaResult.persona.gameState, Date.now(), personaResult.persona.activeRun.rootBuild)) {
-						const result = await beginDeathTransition(personaResult.persona, session);
+						const result = await beginDeathTransition(personaResult.persona, session, undefined, false);
 						if (result === 'reloaded' || result === 'failed') return;
 					}
 					if (selfSigner.characterProfileRevision !== CURRENT_CHARACTER_PROFILE_REVISION) {
@@ -1248,7 +1251,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			expiryCheckInFlight = true;
 			try {
 				const expiryResult = await checkPersonaExpiry(session);
-				if (expiryResult === 'reloaded') return;
+				if (expiryResult === 'reloaded' || expiryResult === 'presenting') return;
 				if (expiryResult === 'failed') {
 					await startReadSession(null);
 					return;
@@ -2005,7 +2008,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	function activateReplyTarget(rootId: string, targetId: string): void {
 		const accepted = traceConversationController?.getTraceConversationState();
 		const target = accepted && acceptedTraceReplyTarget(accepted, { rootId, targetId });
-		if (target) traceReplyMode = selectTraceReplyTarget(traceReplyMode, target);
+		if (target && accepted?.kind === 'open' && accepted.root.source !== 'death') traceReplyMode = selectTraceReplyTarget(traceReplyMode, target);
 	}
 
 	function selectTraceSpeech(targetId: string): void {
@@ -2245,8 +2248,9 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	async function beginDeathTransition(
 		expected: PersonaSnapshot,
 		currentSession: ReturnType<typeof createWorldReadSession> | null,
-		commitDeath: () => Promise<Awaited<ReturnType<typeof transitionExpiredPersona>> | Awaited<ReturnType<typeof transitionRealtimeDeath>>> = () => transitionExpiredPersona(expected)
-	): Promise<'reloaded' | 'failed'> {
+		commitDeath: () => Promise<Awaited<ReturnType<typeof transitionExpiredPersona>> | Awaited<ReturnType<typeof transitionRealtimeDeath>>> = () => transitionExpiredPersona(expected),
+		showPresentation = true
+	): Promise<'reloaded' | 'presenting' | 'failed'> {
 		if (devWorldSandboxEnabled || personaLifecycleTransition || deathTransitionInFlight) return 'failed';
 		deathTransitionInFlight = true;
 		stopPersonaInteractions('Persona lifetime ended.');
@@ -2259,6 +2263,12 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 					if (preparedExit?.kind === 'prepared') await currentSession?.publishTerminalExit();
 				} catch {
 					// The local death is already durable; World State exit is best effort.
+				}
+				if (showPresentation && currentSession) {
+					if (preparedExit?.kind === 'prepared') currentSession.enableDeathLastWords();
+					deathPresentationSession = currentSession;
+					deathPresentationContent = '';
+					return 'presenting';
 				}
 				disposePersonaWriter(currentSession);
 				window.location.reload();
@@ -2283,9 +2293,23 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		}
 	}
 
+	async function finishDeathPresentation(publish: boolean): Promise<void> {
+		const currentSession = deathPresentationSession;
+		if (!currentSession || deathPresentationSubmitting) return;
+		deathPresentationSubmitting = true;
+		if (publish && deathPresentationContent.trim()) {
+			await currentSession.publishDeathLastWords(deathPresentationContent);
+		}
+		deathPresentationSession = null;
+		deathPresentationContent = '';
+		deathPresentationSubmitting = false;
+		disposePersonaWriter(currentSession);
+		window.location.reload();
+	}
+
 	async function checkPersonaExpiry(
 		currentSession: ReturnType<typeof createWorldReadSession> | null
-	): Promise<'unchanged' | 'reloaded' | 'failed'> {
+	): Promise<'unchanged' | 'reloaded' | 'presenting' | 'failed'> {
 		if (devWorldSandboxEnabled || personaLifecycleTransition || !personaSnapshot) return 'unchanged';
 		if (!isPersonaExpired(personaSnapshot.gameState, Date.now(), personaSnapshot.activeRun.rootBuild)) return 'unchanged';
 		return beginDeathTransition(personaSnapshot, currentSession);
@@ -2665,6 +2689,26 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		{/snippet}
 	</FieldViewport>
 
+	{#if deathPresentationSession}
+		<div class="death-presentation-backdrop" data-death-presentation role="dialog" aria-modal="true" aria-labelledby="death-presentation-title">
+			<section class="death-presentation-card">
+				<h2 id="death-presentation-title">このRunは終わりました</h2>
+				<p>最後に、会話の痕跡をひとこと残せます。</p>
+				<textarea
+					aria-label="Last Words"
+					bind:value={deathPresentationContent}
+					maxlength="280"
+					placeholder="残したい言葉（任意）"
+					disabled={deathPresentationSubmitting}
+				></textarea>
+				<div class="death-presentation-actions">
+					<button type="button" onclick={() => { void finishDeathPresentation(false); }} disabled={deathPresentationSubmitting}>残さず進む</button>
+					<button type="button" class="primary" onclick={() => { void finishDeathPresentation(true); }} disabled={deathPresentationSubmitting}>残して進む</button>
+				</div>
+			</section>
+		</div>
+	{/if}
+
 	{#if riftEventEnabled && (!devWorldSandboxEnabled || devRiftFixtureEnabled)}
 		<RiftPanel
 			schedule={riftSchedule}
@@ -2799,6 +2843,72 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 
 	.composer-available {
 		padding-bottom: var(--composer-reserved-height);
+	}
+
+	.death-presentation-backdrop {
+		position: fixed;
+		inset: 0;
+		z-index: 100;
+		display: grid;
+		place-items: center;
+		padding: 24px;
+		background: rgb(12 10 20 / 72%);
+	}
+
+	.death-presentation-card {
+		width: min(100%, 460px);
+		padding: 24px;
+		border: 1px solid rgb(255 255 255 / 18%);
+		border-radius: 18px;
+		background: var(--surface-elevated, #211c2c);
+		box-shadow: 0 18px 60px rgb(0 0 0 / 35%);
+		color: var(--text-primary, #fff);
+	}
+
+	.death-presentation-card h2 {
+		margin: 0 0 8px;
+	}
+
+	.death-presentation-card p {
+		margin: 0 0 16px;
+		color: var(--text-secondary, #d2cce0);
+	}
+
+	.death-presentation-card textarea {
+		width: 100%;
+		min-height: 108px;
+		resize: vertical;
+		box-sizing: border-box;
+		padding: 12px;
+		border: 1px solid rgb(255 255 255 / 22%);
+		border-radius: 10px;
+		background: rgb(0 0 0 / 18%);
+		color: inherit;
+		font: inherit;
+	}
+
+	.death-presentation-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 10px;
+		margin-top: 16px;
+	}
+
+	.death-presentation-actions button {
+		min-height: 44px;
+		padding: 0 16px;
+		border: 1px solid rgb(255 255 255 / 22%);
+		border-radius: 10px;
+		background: transparent;
+		color: inherit;
+		font: inherit;
+		cursor: pointer;
+	}
+
+	.death-presentation-actions button.primary {
+		border-color: transparent;
+		background: var(--accent-primary, #e59b70);
+		color: #1b1110;
 	}
 
 	@media (max-width: 700px) {

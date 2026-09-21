@@ -16,6 +16,7 @@ import {
 } from './traceReadState';
 import {
 	buildWorldStateEventTemplate,
+	buildDeathTraceEventTemplate,
 	buildTraceReplyTemplate,
 	buildWorldMessageTemplate,
 	finalizeWorldEvent,
@@ -24,7 +25,8 @@ import {
 	type ChannelReference,
 	type ParsedWorldStateEvent,
 	type ParsedTraceReply,
-	type ParsedWorldMessage
+	type ParsedWorldMessage,
+	type ParsedTraceEvent
 } from './nostrProtocol';
 import {
 	enterParticipant,
@@ -139,6 +141,10 @@ export type TerminalExitPublishResult =
 	| Readonly<{ kind: 'published'; results: readonly PublishRelayResult[] }>
 	| Readonly<{ kind: 'failed' | 'unavailable' }>;
 
+export type DeathLastWordsPublishResult =
+	| Readonly<{ kind: 'published'; eventId: string; results: readonly PublishRelayResult[] }>
+	| Readonly<{ kind: 'failed' | 'unavailable' }>;
+
 export type WorldReadSessionOptions = Readonly<{
 	field: PresenceField;
 	selfSigner?: ActiveSignerSnapshot | null;
@@ -164,7 +170,8 @@ export type WorldReadSessionSelfAttachment = Readonly<{
 
 type BufferedLiveEvent =
 	| Readonly<{ kind: 'message'; event: ParsedWorldMessage; rawEvent: NostrEvent }>
-	| Readonly<{ kind: 'world-state'; event: ParsedWorldStateEvent }>;
+	| Readonly<{ kind: 'world-state'; event: ParsedWorldStateEvent }>
+	| Readonly<{ kind: 'trace'; event: ParsedTraceEvent; rawEvent: NostrEvent }>;
 
 type SelfPositionOperation = Readonly<{
 	id: string;
@@ -236,6 +243,8 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	const appliedCanonicalMessageEventIds = new Set<string>();
 	let preparedTerminalExit: Extract<TerminalExitPreparation, { kind: 'prepared' }> | null = null;
 	let terminalExitAttempted = false;
+	let deathTraceEnabled = false;
+	let deathTraceAttempted = false;
 
 	function emitStatus(next: WorldReadConnectionStatus): void {
 		status = next;
@@ -373,6 +382,37 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		} catch {
 			return { kind: 'failed' };
 		}
+	}
+
+	async function publishDeathLastWords(content: string): Promise<DeathLastWordsPublishResult> {
+		if (disposed || !deathTraceEnabled || !terminal || !transport || !channel || !selfSigner || !preparedTerminalExit || deathTraceAttempted) {
+			return { kind: 'unavailable' };
+		}
+		const trimmed = content.trim();
+		if (!trimmed) return { kind: 'unavailable' };
+		deathTraceAttempted = true;
+		try {
+			const event = finalizeWorldEvent(buildDeathTraceEventTemplate({
+				channel,
+				content: trimmed,
+				position: preparedTerminalExit.parsed.position,
+				createdAt: Math.max(
+					Math.floor(Date.now() / 1000),
+					preparedTerminalExit.parsed.createdAt
+				)
+			}), selfSigner.secretKey);
+			const results = await transport.publish(event);
+			if (!reachedAuthoritativeRelay(results)) return { kind: 'failed' };
+			return { kind: 'published', eventId: event.id, results };
+		} catch {
+			return { kind: 'failed' };
+		}
+	}
+
+	function enableDeathLastWords(): boolean {
+		if (disposed || !terminal || !preparedTerminalExit || deathTraceAttempted) return false;
+		deathTraceEnabled = true;
+		return true;
 	}
 
 	async function authorizeSelfWrite(): Promise<boolean> {
@@ -819,6 +859,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		}
 		try {
 			suspendRealtimeForTrace();
+			if (disposed || generation !== traceConversationGeneration) return;
 			const result = await transport.configureTraceReplies({
 				...(traceNotificationConfig() ? { notification: traceNotificationConfig() } : {}),
 				conversation: config,
@@ -849,6 +890,21 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		void startTraceConversationWork(generation, root, config);
 	}
 
+	function activateDeathTraceConversation(root: ParsedWorldMessage, config: TraceConversationConfig): void {
+		const generation = ++traceConversationGeneration;
+		emitTraceConversationState(traceStateFor(root, config, [], 'settled'));
+		reconfigureTraceBackground(generation, () =>
+			traceConversationState.kind === 'open' &&
+			traceConversationState.root.id === root.id &&
+			traceConversationState.root.source === 'death'
+		);
+	}
+
+	function activateTraceRootConversation(root: ParsedWorldMessage, config: TraceConversationConfig): void {
+		if (root.source === 'death') activateDeathTraceConversation(root, config);
+		else activateTraceConversation(root, config);
+	}
+
 	function openTraceConversation(config: TraceConversationConfig): TraceConversationOpenResult {
 		if (disposed || !selfSigner || !transport || !channel) return { kind: 'unavailable' };
 		if (!bootstrapComplete) return { kind: 'blocked' };
@@ -873,7 +929,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			if (!candidate) return { kind: 'blocked' };
 			void publishPreparedSelfPosition('trace-inspection', candidate);
 		}
-		activateTraceConversation(root, config);
+		activateTraceRootConversation(root, config);
 		return { kind: 'opened' };
 	}
 
@@ -883,6 +939,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		const pendingTraceInspection = pendingSelfOperation?.operation === 'trace-inspection';
 		if (pendingTraceReply || (pendingSelfOperation && !pendingTraceInspection)) return { kind: 'pending' };
 		const current = traceConversationState;
+		if (current.root.source === 'death') return targetId === current.root.id ? { kind: 'opened' } : { kind: 'blocked' };
 		const projection = resolveTraceConversationProjection(current);
 		const target = projection ? projection.current.event.id === targetId
 			? projection.current : adjacentTraceSpeech(projection, targetId) : null;
@@ -909,19 +966,32 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		return { kind: 'opened' };
 	}
 
-	function deactivateTraceSubscription(generation: number): void {
-		const deactivate = async () => {
+	function reconfigureTraceBackground(generation: number, isCurrent: () => boolean): void {
+		const reconfigure = async () => {
 			const readiness = traceRootBootstrapReadiness ? await traceRootBootstrapReadiness : 'failed';
-			if (disposed || generation !== traceConversationGeneration || traceConversationState.kind !== 'closed' || readiness !== 'ready') return;
+			if (disposed || generation !== traceConversationGeneration || !isCurrent() || readiness !== 'ready') return;
 			const notification = traceNotificationConfig();
 			suspendRealtimeForTrace();
-			await transport?.configureTraceReplies({
-				...(notification ? { notification } : {}),
-				onBatch: (batch) => { void reconcileTraceReplies(traceConversationGeneration, undefined, batch.events); },
-				onLiveEvent: (event) => { void reconcileTraceReplies(traceConversationGeneration, undefined, [event]); }
-			}).catch(() => {}).finally(() => { void startRealtimeSubscription(); });
+			if (disposed || generation !== traceConversationGeneration || !isCurrent()) return;
+			try {
+				if (typeof transport?.configureTraceReplies === 'function') {
+					await transport.configureTraceReplies({
+						...(notification ? { notification } : {}),
+						onBatch: (batch) => { void reconcileTraceReplies(traceConversationGeneration, undefined, batch.events); },
+						onLiveEvent: (event) => { void reconcileTraceReplies(traceConversationGeneration, undefined, [event]); }
+					});
+				}
+			} catch {
+				// Trace configuration is supplemental; realtime still owns its independent recovery.
+			} finally {
+				if (!disposed && generation === traceConversationGeneration && isCurrent()) void startRealtimeSubscription();
+			}
 		};
-		void deactivate();
+		void reconfigure();
+	}
+
+	function deactivateTraceSubscription(generation: number): void {
+		reconfigureTraceBackground(generation, () => traceConversationState.kind === 'closed');
 	}
 
 	function closeTraceConversation(): void {
@@ -950,7 +1020,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			closeTraceConversation();
 			return;
 		}
-		activateTraceConversation(fallback, { rootId: fallback.id, currentId: fallback.id });
+		activateTraceRootConversation(fallback, { rootId: fallback.id, currentId: fallback.id });
 	}
 
 	function receiveLive(event: BufferedLiveEvent): void {
@@ -960,7 +1030,8 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			return;
 		}
 		if (event.kind === 'message') applyLiveMessage(event.event, event.rawEvent, Date.now());
-		else applyLivePosition(event.event, Date.now());
+		else if (event.kind === 'world-state') applyLivePosition(event.event, Date.now());
+		else void reconcileTraceRoots([event.rawEvent]);
 	}
 
 	function resolveReplyTarget(rootId: string, targetId: string) {
@@ -976,6 +1047,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		if (pendingSelfOperation || pendingSelfMessage || pendingTraceReply) return { kind: 'pending' };
 		const accepted = resolveReplyTarget(input.rootId, input.targetId);
 		if (!accepted) return { kind: 'blocked' };
+		if (accepted.root.source === 'death') return { kind: 'blocked' };
 		const operation = { eventId: null as string | null };
 		pendingTraceReply = operation;
 		try {
@@ -1033,8 +1105,10 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 					worldStateSince: since,
 					onBootstrapMessage: (event) => applyBootstrapMessage(event, Date.now()),
 					onBootstrapWorldState: (event) => applyBootstrapPosition(event, Date.now()),
+					onBootstrapTrace: () => {},
 					onLiveMessage: (event, rawEvent) => receiveLive({ kind: 'message', event, rawEvent }),
 					onLiveWorldState: (event) => receiveLive({ kind: 'world-state', event }),
+					onLiveTrace: (event, rawEvent) => receiveLive({ kind: 'trace', event, rawEvent }),
 					onPrimaryClosed: markDegraded
 				});
 				if (disposed) throw new Error('World read session was disposed during startup.');
@@ -1188,6 +1262,10 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		prepareTerminalExit,
 
 		publishTerminalExit,
+
+		enableDeathLastWords,
+
+		publishDeathLastWords,
 
 		dispose(): void {
 			if (disposed) return;

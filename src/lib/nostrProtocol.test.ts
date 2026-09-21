@@ -8,6 +8,7 @@ import {
 	RECENT_MESSAGE_TIMELINE_LIMIT,
 	TRACE_REPLY_KIND,
 	buildWorldStateEventTemplate,
+	buildDeathTraceEventTemplate,
 	buildCharacterProfileTemplate,
 	buildWorldStateFilter,
 	buildTraceDirectReplyFilter,
@@ -15,12 +16,14 @@ import {
 	buildTraceReplyFilter,
 	buildTraceReplyTemplate,
 	buildTraceRootBootstrapFilter,
+	buildTraceRootBootstrapFilters,
 	buildWorldMessageFilter,
 	buildWorldMessageFilters,
 	buildWorldMessageTemplate,
 	finalizeWorldEvent,
 	finalizeCharacterProfileEvent,
 	parseWorldStateEvent,
+	parseTraceEvent,
 	parseTraceReplyCandidate,
 	parseWorldMessage,
 	validateTraceReplyCandidate,
@@ -81,6 +84,15 @@ function signedPositionWithCreatedAt(createdAt: number): VerifiedEvent {
 		],
 		content: '8:3'
 	} as WorldStateEventTemplate, TEST_SECRET_KEY);
+}
+
+function signedDeathTrace(content = 'I was here'): VerifiedEvent {
+	return finalizeWorldEvent(buildDeathTraceEventTemplate({
+		channel,
+		content,
+		position: { x: 7, y: 3 },
+		createdAt: 1_700_000_001
+	}), TEST_SECRET_KEY);
 }
 
 function signedMessageWithCreatedAt(createdAt: number): VerifiedEvent {
@@ -681,7 +693,7 @@ describe('Nostr protocol foundation', () => {
 			kinds: [42],
 			'#e': [CHANNEL_ID],
 			'#L': [PROTOTYPE_NAMESPACE],
-			'#l': ['chat'],
+			'#l': ['chat', 'trace'],
 			since: 1_700_000_000
 		});
 		expect(buildWorldMessageFilters({ channelId: CHANNEL_ID, since: 1_700_000_000 })).toEqual([
@@ -689,7 +701,7 @@ describe('Nostr protocol foundation', () => {
 				kinds: [42],
 				'#e': [CHANNEL_ID],
 				'#L': [PROTOTYPE_NAMESPACE],
-				'#l': ['chat'],
+				'#l': ['chat', 'trace'],
 				since: 1_700_000_000
 			},
 			{
@@ -713,6 +725,14 @@ describe('Nostr protocol foundation', () => {
 			'#l': ['chat'],
 			limit: 1000
 		});
+		expect(buildTraceRootBootstrapFilters({ channelId: CHANNEL_ID })).toEqual([
+			{
+				kinds: [42], '#e': [CHANNEL_ID], '#L': [PROTOTYPE_NAMESPACE], '#l': ['chat'], limit: 1000
+			},
+			{
+				kinds: [42], '#e': [CHANNEL_ID], '#L': [PROTOTYPE_NAMESPACE], '#l': ['trace'], limit: 1000
+			}
+		]);
 		expect(buildTraceReplyFilter({ rootId: CHANNEL_ID })).toEqual({
 			kinds: [1111], '#E': [CHANNEL_ID], '#L': [PROTOTYPE_NAMESPACE], '#l': ['chat'], limit: 100
 		});
@@ -750,6 +770,62 @@ describe('Nostr protocol foundation', () => {
 			slot: 0,
 			createdAt: 1
 		})).toThrow(TypeError);
+	});
+
+	it('builds and parses a labeled death trace kind 42 without treating it as a chat message', () => {
+		const event = signedDeathTrace('Remember this field.');
+		expect(event.kind).toBe(CHANNEL_MESSAGE_KIND);
+		expect(event.tags).not.toContainEqual(['d', expect.any(String)]);
+		expect(event.tags).toContainEqual(['l', 'trace', PROTOTYPE_NAMESPACE]);
+		expect(event.tags).toContainEqual(['l', 'trace:death', PROTOTYPE_NAMESPACE]);
+		expect(event.tags).not.toContainEqual(['l', 'chat', PROTOTYPE_NAMESPACE]);
+		expect(parseWorldMessage(event, CHANNEL_ID)).toBeNull();
+		expect(parseTraceEvent(signedMessage(), CHANNEL_ID)).toBeNull();
+		expect(parseTraceEvent(event, CHANNEL_ID)).toMatchObject({
+		content: 'Remember this field.',
+		position: { x: 7, y: 3 },
+			source: 'death'
+			});
+		const invalid = resign({ ...buildDeathTraceEventTemplate({
+			channel,
+			content: 'invalid',
+			position: { x: 7, y: 3 },
+			createdAt: 1_700_000_001
+		}), tags: [['e', CHANNEL_ID, channel.relayHint, 'root']] });
+		expect(parseTraceEvent(invalid, CHANNEL_ID)).toBeNull();
+	});
+
+	it('accepts canonical death traces only through the trace parser', () => {
+		const event = signedDeathTrace();
+		expect(parseWorldMessage(event, CHANNEL_ID)).toBeNull();
+		expect(parseTraceEvent(event, CHANNEL_ID)).not.toBeNull();
+	});
+
+	it('fails closed for ambiguous kind 42 chat and trace labels', () => {
+		for (const chatCount of [1, 2]) {
+			const event = signedDeathTrace();
+			for (let index = 0; index < chatCount; index += 1) {
+				event.tags.push(['l', 'chat', PROTOTYPE_NAMESPACE]);
+			}
+			const resigned = resign(event);
+			expect(parseWorldMessage(resigned, CHANNEL_ID)).toBeNull();
+			expect(parseTraceEvent(resigned, CHANNEL_ID)).toBeNull();
+		}
+	});
+
+	it('fails closed for duplicate or contradictory death trace labels', () => {
+		for (const mutate of [
+			(event: VerifiedEvent) => { event.tags.push(['l', 'trace', PROTOTYPE_NAMESPACE]); },
+			(event: VerifiedEvent) => { event.tags.push(['l', 'trace:death', PROTOTYPE_NAMESPACE]); },
+			(event: VerifiedEvent) => { event.tags.push(['l', 'trace:other', PROTOTYPE_NAMESPACE]); },
+			(event: VerifiedEvent) => { event.tags.push(['l', 'speech:shout', PROTOTYPE_NAMESPACE]); },
+			(event: VerifiedEvent) => { event.tags.push(['d', 'retired']); },
+			(event: VerifiedEvent) => { event.tags[0][3] = 'reply'; }
+		]) {
+			const event = signedDeathTrace();
+			mutate(event);
+			expect(parseTraceEvent(resign(event), CHANNEL_ID)).toBeNull();
+		}
 	});
 
 	it('builds and parses channel-scoped active and exit World State', () => {

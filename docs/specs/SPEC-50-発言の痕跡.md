@@ -4,17 +4,21 @@
 
 ## 24. 発言の痕跡
 
-通常の発言は揮発し、Twitter型の過去ログとして時系列に蓄積表示しない。そのうえで、過去の対象kind 42の一部だけを、元の発言位置に残る**発言の痕跡**として扱う。痕跡は過去ログや履歴ビューではなく、空間に残った一部の発言の記憶である。投稿日時、経過時間、「さっき」「今日」「数日前」等の古さはroot/replyのいずれにも表示しない。
+通常の発言は揮発し、Twitter型の過去ログとして時系列に蓄積表示しない。そのうえで、過去の通常chat kind 42の一部だけを、元の発言位置に残る**発言の痕跡**として扱う。痕跡は過去ログや履歴ビューではなく、空間に残った一部の発言の記憶である。投稿日時、経過時間、「さっき」「今日」「数日前」等の古さはroot/replyのいずれにも表示しない。死亡時のLast Wordsもkind 42のexplicit Traceとして同じ空間投影へ加わる。
 
 ### rootの選択と上限
 
-trace root候補は、有効なtop-level kind 42だけとする。normal / shout / monologueを同率で対象にし、merged bubbleは表示上の集約にすぎないため、抽選は元event単位で行う。
+通常trace root候補は、通常chatとして受理した有効なtop-level kind 42だけとする。normal / shout / monologueを同率で対象にし、merged bubbleは表示上の集約にすぎないため、抽選は元event単位で行う。explicit Traceはこの通常chat候補には含めない。
 
 ```ts
 BigInt(`0x${event.id}`) % 5n === 0n
 ```
 
 上の決定的20%抽選にsparse-world boost、密度補正、時間expiryは設けない。effective rootは1 logical cellあたり最大1件とし、同一cellに複数のeligible root candidateがある場合はnewest rootだけを残す。`createdAt` が同じ場合は既存の決定的event ID orderingで1件を決める。global root上限は `floor(total logical cell count / 10)` とする。per-cell survivorを決めた後にglobal capを適用し、上限はrootだけを数え、kind 1111 replyは数えない。
+
+### death Last Words
+
+death Last WordsはNIP-28 kind 42のexplicit Traceであり、project `L`、`l=trace`、`l=trace:death`、canonical channel root `e`、canonical `w`、本文contentを持つ。`l=chat`、`speech:*`、`d` tagは持たない。これはpresence activityやactive slot plannerへは入力せず、`w`はTrace表示位置だけを表す。durableなdeath transitionとterminal exitの準備が成立した同一tabだけが、canonical last positionに1件だけbest-effortでpublishできる。bootstrapとlive受信の双方で通常Trace rootと同じ決定的cell projectionへ取り込むが、通常発言の20%抽選は適用しない。Last Wordsのrootはクリックして内容を表示できるが、通常のreply treeやreply publicationは持たない。死亡直後の送信失敗はlifecycleをrollbackせず、空入力・skipではeventをpublishしない。一般的なNIP-28 clientが通常channel messageとして表示する場合があることは許容する。
 
 ### root cache
 

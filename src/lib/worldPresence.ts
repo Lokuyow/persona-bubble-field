@@ -81,7 +81,8 @@ export function applyWorldPresenceMessage(
 	message: ParsedWorldMessage
 ): WorldPresenceState {
 	if (!isWithinField(message.position, state.field)) return state;
-	return applyWorldPresenceEvidence(state, presenceEvidenceFromMessage(message));
+	const evidence = presenceEvidenceFromMessage(message);
+	return evidence ? applyWorldPresenceEvidence(state, evidence) : state;
 }
 
 /** Applies one live position event without invoking local presence lifecycle semantics. */

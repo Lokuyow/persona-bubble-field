@@ -69,7 +69,7 @@ kind 42の `w` は発言時点の不変な座標であり、その後発言者�
 左側へ直近発言タイムラインをoverlay表示する。これは空間型チャットを置き換えるSNS型の
 主画面ではなく、無制限の過去ログやfeedでもない。
 
-専用世界のparserを通過した有効なtop-level kind 42だけを、通常・叫び・モノローグ、閲覧者の画面内外、
+専用世界のparserを通過した有効な通常chat top-level kind 42だけを、通常・叫び・モノローグ、閲覧者の画面内外、
 authorの現在presenceの有無にかかわらず対象とする。合体フキダシの表示状態にかかわらず、
 元event単位で表示する。同じevent IDは一度だけ扱うが、本文が同じでもevent IDが異なる
 発言は別entryとする。Relayからbootstrapで取得できた範囲とlive更新を合わせ、NIP-01の
@@ -538,9 +538,9 @@ NIP-28 kind 42による有効なtop-level messageを使用する。
 
 ただし、過去のkind 42の一部は「発言の痕跡」として空間上に残り、後から探索・調査できる。
 
-### 専用世界kind 42の基本構造
+### 通常chat kind 42の基本構造
 
-プロトタイプの専用世界top-level kind 42には、少なくとも以下を持たせる。
+プロトタイプの専用世界で通常chatとして受理するtop-level kind 42には、少なくとも以下を持たせる。
 
 - 対象NIP-28 channel kind 40へのroot参照
 - NIP-32 namespace
@@ -575,7 +575,7 @@ NIP-28 kind 42による有効なtop-level messageを使用する。
 
 `client` tagは使用しない。
 
-専用世界kind 42の識別条件、namespace、正式公開時のnamespace変更方針等は [`SPEC-10-Nostr・アカウント.md`](./SPEC-10-Nostr・アカウント.md) を正とする。
+通常chat kind 42の識別条件、namespace、正式公開時のnamespace変更方針等は [`SPEC-10-Nostr・アカウント.md`](./SPEC-10-Nostr・アカウント.md) を正とする。explicit Traceのwire構造は [`SPEC-50-発言の痕跡.md`](./SPEC-50-発言の痕跡.md) を正とする。
 
 position、`w`、初期同期、live更新等は [`SPEC-30-フィールド・position・presence.md`](./SPEC-30-フィールド・position・presence.md) を正とする。
 

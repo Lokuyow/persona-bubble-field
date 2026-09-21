@@ -84,19 +84,21 @@ NIP-32のnamespaceは公開された語彙であり、認証・所有権・ア�
 
 正式namespaceの具体値・表記形式は、公開サービス名の確定後に決定する。
 
-### kind 42の基本ラベル
+### kind 42のsemantic class
 
 専用世界のkind 42には、以下を必須とする。
 
 - `L` = `io.github.lokuyow.persona-bubble-field`
-- `l` = `chat`
-- `l` のnamespace marker = `io.github.lokuyow.persona-bubble-field`
+- 対象kind 40へのcanonical root `e`
+- 発言時positionを表す単一canonical `w`
+- author pubkeyのcharacter slot解決
 
-プロトタイプでは、概念的に以下のtagを付与する。
+kind 42はproject namespaceのself-labelによって、専用client内では次のsemantic classへ排他的に分類する。
 
-`["L", "io.github.lokuyow.persona-bubble-field"]`
+- 通常chat: `l=chat` が1つあり、`l=trace` / `l=trace:*` がない
+- explicit Trace: `l=trace` と、対応するsource label `l=trace:death` がそれぞれ1つあり、`l=chat` がない
 
-`["l", "chat", "io.github.lokuyow.persona-bubble-field"]`
+通常chatには必要な場合だけ `speech:shout` または `speech:monologue` を追加する。death Last Wordsはexplicit Traceであり、`l=chat`、`speech:*`、`d` tagを持たない。通常chatとTraceの両方に解釈できる、またはsource labelが重複・矛盾するkind 42はfail closedとする。
 
 ### 発言タイプのラベル
 
@@ -120,13 +122,7 @@ NIP-32のnamespaceは公開された語彙であり、認証・所有権・ア�
 
 ### kind 42の表示条件
 
-以下を満たす**top-level** kind 42だけを、専用世界のチャットメッセージとして扱う。
-
-- 対象のNIP-28 channel kind 40へのroot参照だけを持つ
-- 所定のNIP-32 `L` namespaceが付いている
-- 同namespaceをmarkerとする `l=chat` が付いている
-- 発言時positionを表す単一canonical `w` が付いている
-- author pubkeyが現在のcharacter slotへ解決できる
+上記のcanonical構造を満たすtop-level kind 42のうち、通常chatだけをlive speech、Chatter、presence activityへ流す。explicit TraceはTrace root候補、Trace root cache、Trace reconciliationへだけ流し、通常timelineやpresence/position evidenceへは流さない。
 
 Relayのtag filterによる取得結果だけを認証結果として扱わず、受信したevent自体のtag構造をクライアント側でも検証する。
 

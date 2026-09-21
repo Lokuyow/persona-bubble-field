@@ -62,7 +62,8 @@ function reducedParticipant(evidence: PresenceEvidence): ReducedPresenceParticip
 	};
 }
 
-export function presenceEvidenceFromMessage(message: ParsedWorldMessage): PresenceEvidence {
+export function presenceEvidenceFromMessage(message: ParsedWorldMessage): PresenceEvidence | null {
+	if (message.source === 'death') return null;
 	return { eventId: message.id, pubkey: message.pubkey, createdAt: message.createdAt, position: copyPosition(message.position), source: 'message' };
 }
 
@@ -101,7 +102,7 @@ export function applyPresenceEvidence(current: ReducedPresenceParticipant | unde
 
 export function reconstructPresenceEvidence(messages: readonly ParsedWorldMessage[], worldStates: readonly ParsedWorldStateEvent[]): ReducedPresenceParticipant[] {
 	const participants = new Map<string, ReducedPresenceParticipant>();
-	const evidence = [...messages.map(presenceEvidenceFromMessage), ...worldStates.map(presenceEvidenceFromWorldState)];
+	const evidence = [...messages.map(presenceEvidenceFromMessage).filter((item): item is PresenceEvidence => item !== null), ...worldStates.map(presenceEvidenceFromWorldState)];
 	for (const item of evidence) participants.set(item.pubkey, applyPresenceEvidence(participants.get(item.pubkey), item));
 	return [...participants.values()]
 		.sort((first, second) => first.pubkey < second.pubkey ? -1 : first.pubkey > second.pubkey ? 1 : 0)
