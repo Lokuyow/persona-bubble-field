@@ -244,6 +244,41 @@ test.describe('Relay startup', () => {
 		await expect(marker).toHaveCSS('filter', 'grayscale(1) brightness(1.12)');
 	});
 
+	test('keeps the unread ActionDock order on mobile', async ({ page }) => {
+		const now = Date.now();
+		const selfSecret = fixtureSecret(23);
+		const channel = { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' };
+		const primary = {
+			message: finalizeEvent(buildWorldMessageTemplate({ channel, content: 'mobile unread participant', speechType: 'normal', position: { x: 3, y: 2 }, createdAt: Math.floor(now / 1000) }), selfSecret),
+			position: finalizeEvent(buildWorldStateEventTemplate({ channel, position: { x: 3, y: 2 }, slot: 0, createdAt: Math.floor(now / 1000) }), selfSecret)
+		};
+		let root = finalizeEvent(buildWorldMessageTemplate({ channel, content: 'mobile unread root', speechType: 'normal', position: { x: 4, y: 2 }, createdAt: Math.floor(now / 1000) }), selfSecret);
+		for (let attempt = 1; BigInt(`0x${root.id}`) % 5n !== 0n; attempt += 1) {
+			root = finalizeEvent(buildWorldMessageTemplate({ channel, content: `mobile unread root ${attempt}`, speechType: 'normal', position: { x: 4, y: 2 }, createdAt: Math.floor(now / 1000) }), selfSecret);
+		}
+		const parsedRoot = parseWorldMessage(root, CHANNEL_ID);
+		if (!parsedRoot) throw new Error('Mobile unread root fixture did not parse.');
+		const reply = finalizeEvent(buildTraceReplyTemplate({ root: parsedRoot, parent: parsedRoot, content: 'mobile unread reply', speechType: 'normal', createdAt: Math.floor(now / 1000) + 1 }), fixtureSecret(31));
+		await page.clock.setFixedTime(now);
+		await page.setViewportSize({ width: 390, height: 844 });
+		await installHostOwnedStub(page);
+		await installPromptApiStub(page);
+		await installDelayedRelay(page, { primaryEvents: primary, traceRoots: [root], traceReplies: [reply] });
+		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret));
+		await page.goto('/');
+		await expect(page.locator('.action-dock')).toBeVisible();
+		await page.evaluate(() => {
+			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
+			relay.releaseMetadata(); relay.releasePrimary();
+		});
+		await expect(page.locator('[data-trace-marker-position="4,2"]')).toBeVisible();
+		await expect(page.locator('.trace-unread-indicator')).toBeVisible();
+		await expect(page.getByRole('button', { name: 'AI発言候補を生成' })).toBeVisible();
+		expect(await readActionDockControlOrder(page)).toEqual([
+			'profile-trigger', 'chatter-toggle', 'trace-unread-indicator', 'speech-type-toggle', 'suggestions-anchor'
+		]);
+	});
+
 	test('suppresses Trace presentation and investigation on fixed facility cells', async ({ page }) => {
 		const mendingTrace = traceRuntimeEvents(MENDING_TERMINAL.position);
 		const adjustmentTrace = traceRuntimeEvents(ADJUSTMENT_TERMINAL.position);
