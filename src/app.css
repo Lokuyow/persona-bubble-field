@@ -38,6 +38,7 @@ html {
 	background-color: var(--app-background);
 	background-image: var(--site-background-image, none);
 	background-repeat: repeat;
+	-webkit-tap-highlight-color: transparent;
 }
 
 body {
@@ -53,4 +54,9 @@ body {
 button {
 	font: inherit;
 	cursor: pointer;
+}
+
+button:not(:where(.trace-root-bubble, .trace-reply-content-button, .timeline-name)) {
+	user-select: none;
+	-webkit-user-select: none;
 }
