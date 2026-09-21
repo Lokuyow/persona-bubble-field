@@ -38,6 +38,7 @@ html {
 	background-color: var(--app-background);
 	background-image: var(--site-background-image, none);
 	background-repeat: repeat;
+	-webkit-tap-highlight-color: transparent;
 }
 
 body {
@@ -53,4 +54,6 @@ body {
 button {
 	font: inherit;
 	cursor: pointer;
+	user-select: none;
+	-webkit-user-select: none;
 }
