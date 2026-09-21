@@ -574,7 +574,7 @@ describe('world read session', () => {
 		expect(first).toMatchObject({ kind: 'published' });
 		expect(publish).toHaveBeenCalledTimes(2);
 		const publishedTrace = publish.mock.calls[1][0] as VerifiedEvent;
-		expect(publishedTrace.kind).toBe(30079);
+		expect(publishedTrace.kind).toBe(42);
 		expect(publishedTrace.created_at).toBeGreaterThanOrEqual(publishedExit.created_at);
 		expect(parseTraceEvent(publishedTrace, 'c'.repeat(64))).toMatchObject({ content: 'last words', position: { x: 2, y: 1 }, source: 'death' });
 		expect(publishedTrace.tags.find((tag) => tag[0] === 'w')?.[1]).toBe(publishedExit.content);

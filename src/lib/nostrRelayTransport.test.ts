@@ -9,7 +9,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createNostrRelayTransport } from './nostrRelayTransport';
 import {
-	buildTraceRootBootstrapFilter, buildWorldMessageTemplate, buildWorldStateEventTemplate, buildWorldMessageFilter
+	buildDeathTraceEventTemplate, buildTraceRootBootstrapFilter, buildWorldMessageTemplate, buildWorldStateEventTemplate, buildWorldMessageFilter
 } from './nostrProtocol';
 import { buildRealtimeControlEventTemplate, buildRealtimeControlFilter, buildRealtimeEventFilter, buildRealtimeInstanceFilter, finalizeRealtimeEvent, type RealtimeEventRegistry } from './realtimeEvents';
 import { RIFT_EVENT_DEFINITION, buildRiftActionTemplate } from './rift';
@@ -117,7 +117,9 @@ function fixture(authorityCount = 2, websocketCtor = socketConstructor, operatio
 		worldStateSince: TIME - 100,
 		onBootstrapMessage: vi.fn(),
 		onBootstrapWorldState: vi.fn(),
+		onBootstrapTrace: vi.fn(),
 		onLiveMessage: vi.fn(),
+		onLiveTrace: vi.fn(),
 		onLiveWorldState: vi.fn(),
 		onPrimaryClosed: vi.fn()
 	};
@@ -200,8 +202,8 @@ describe('primary lifecycle', () => {
 			const messageRequests = relay.primaryRequests().filter((request) => kind(request) === 42);
 			expect(messageRequests).toHaveLength(1);
 			expect(messageRequests[0]).toHaveLength(4);
-			expect(messageRequests[0][2]).toMatchObject({ kinds: [42, 30079], since: f.input.messageSince });
-			expect(messageRequests[0][3]).toMatchObject({ kinds: [42], limit: 50 });
+			expect(messageRequests[0][2]).toMatchObject({ kinds: [42], '#l': ['chat', 'trace'], since: f.input.messageSince });
+			expect(messageRequests[0][3]).toMatchObject({ kinds: [42], '#l': ['chat'], limit: 50 });
 			expect(messageRequests[0][3].since).toBeUndefined();
 		}
 		expect(result.primaryPairs).toHaveLength(4);
@@ -762,17 +764,16 @@ describe('trace root bootstrap', () => {
 		const f = fixture(2);
 		await f.start();
 		const expectedFilter = buildTraceRootBootstrapFilter({ channelId: f.channel.id });
-		const invalidSignature = f.message('invalid-signature');
-		invalidSignature.sig = '0'.repeat(128);
-		const nip28Reply = {
-			...f.message('nip28-reply'),
-			tags: [['e', f.channel.id, '', 'reply'], ['L', expectedFilter['#L']![0]], ['l', 'chat'], ['w', '1:2']]
-		};
+		const normal = f.message('normal-root');
+		const death = finalizeEvent(buildDeathTraceEventTemplate({
+			channel: { channelId: f.channel.id, relayHint: f.authorities[0].url },
+			content: 'death-root', position: { x: 1, y: 2 }, createdAt: TIME - 1
+		}), AUTHOR);
 		for (const relay of f.authorities) {
 			relay.onRequest = (socket, request) => {
 				if (request[2].limit === 1000) {
-					send(socket, 'EVENT', request[1], invalidSignature);
-					send(socket, 'EVENT', request[1], nip28Reply);
+					send(socket, 'EVENT', request[1], normal);
+					send(socket, 'EVENT', request[1], death);
 				}
 				send(socket, 'EOSE', request[1]);
 			};
@@ -781,11 +782,11 @@ describe('trace root bootstrap', () => {
 		const pending = f.transport.bootstrapTraceRootCandidates();
 		await vi.advanceTimersByTimeAsync(10);
 		const result = await pending;
-		expect(result.rawEvents.map((event) => event.id)).toEqual([nip28Reply.id, invalidSignature.id].sort());
+		expect(result.rawEvents.map((event) => event.id)).toEqual([normal.id, death.id].sort());
 		for (const relay of f.authorities) {
 			expect(relay.rootRequests().map((request) => request.slice(2))).toEqual([[
 				expect.objectContaining(expectedFilter),
-				expect.objectContaining({ kinds: [30079], limit: 1000 })
+				expect.objectContaining({ kinds: [42], '#l': ['trace'], limit: 1000 })
 			]]);
 		}
 		expect(f.seeds.flatMap((relay) => relay.rootRequests())).toEqual([]);
@@ -804,28 +805,50 @@ describe('trace root bootstrap', () => {
 		await pending;
 		const rootRequest = f.authorities[0].rootRequests()[0];
 		expect(rootRequest.slice(2)).toEqual([
-			expect.objectContaining({ kinds: [42], limit: 1000 }),
-			expect.objectContaining({ kinds: [30079], limit: 1000 })
+			expect.objectContaining({ kinds: [42], '#l': ['chat'], limit: 1000 }),
+			expect.objectContaining({ kinds: [42], '#l': ['trace'], limit: 1000 })
 		]);
+	});
+
+	it('classifies kind 42 chat and death trace events exclusively at the primary boundary', async () => {
+		const f = fixture(1);
+		const death = finalizeEvent(buildDeathTraceEventTemplate({
+			channel: { channelId: f.channel.id, relayHint: f.authorities[0].url },
+			content: 'death trace', position: { x: 2, y: 2 }, createdAt: TIME
+		}), AUTHOR);
+		const normal = f.message('normal chat');
+		f.authorities[0].onRequest = (socket, request) => {
+			if (request[2].limit === undefined && (request[2].kinds as number[]).includes(42)) {
+				send(socket, 'EVENT', request[1], normal);
+				send(socket, 'EVENT', request[1], death);
+			}
+			send(socket, 'EOSE', request[1]);
+		};
+		const result = await f.start();
+		expect(result.messages.map((event) => event.id)).toEqual([normal.id]);
+		expect(result.traces.map((event) => event.id)).toEqual([death.id]);
+		expect(f.input.onBootstrapMessage).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: normal.id }));
+		expect(f.input.onBootstrapMessage).not.toHaveBeenCalledWith(expect.objectContaining({ id: death.id }));
+		expect(f.input.onBootstrapTrace).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: death.id }));
+
+		const liveDeath = finalizeEvent(buildDeathTraceEventTemplate({
+			channel: { channelId: f.channel.id, relayHint: f.authorities[0].url },
+			content: 'live death trace', position: { x: 3, y: 2 }, createdAt: TIME + 1
+		}), AUTHOR);
+		send(f.authorities[0].latestSocket(), 'EVENT', f.authorities[0].primaryId(42), liveDeath);
+		await vi.advanceTimersByTimeAsync(10);
+		expect(f.input.onLiveTrace).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: liveDeath.id }), liveDeath);
+		expect(f.input.onLiveMessage).not.toHaveBeenCalledWith(expect.objectContaining({ id: liveDeath.id }), expect.anything());
 	});
 
 	it('dedupes and deterministically orders a bounded union without early termination', async () => {
 		const f = fixture(2);
 		await f.start();
-		const rootFilter = buildTraceRootBootstrapFilter({ channelId: f.channel.id });
-		const rootTags = [
-			['e', rootFilter['#e']![0]],
-			['L', rootFilter['#L']![0]],
-			['l', rootFilter['#l']![0]]
-		];
-		const events = Array.from({ length: 1000 }, (_, index) => rawEvent(index.toString(16).padStart(64, '0'), TIME - index, { content: `authority-${index}`, tags: rootTags }));
-		const sameRelayId = 'f'.repeat(64);
-		const sameRelayFirst = rawEvent(sameRelayId, TIME + 1, { content: 'a', tags: rootTags });
-		const sameRelaySecond = rawEvent(sameRelayId, TIME + 1, { content: 'z', tags: rootTags });
-		const lateA = rawEvent('a'.repeat(64), TIME + 2, { content: 'late-a', tags: rootTags });
-		const lateB = rawEvent('b'.repeat(64), TIME + 2, { content: 'late-b', tags: rootTags });
-		const deathA = finalizeEvent({ kind: 30079, created_at: TIME - 3, tags: rootTags, content: 'death-a' }, AUTHOR);
-		const deathB = finalizeEvent({ kind: 30079, created_at: TIME - 4, tags: rootTags, content: 'death-b' }, AUTHOR);
+		const events = Array.from({ length: 1001 }, (_, index) => f.message(`authority-${index}`, TIME - index));
+		const sameRelayFirst = events[0];
+		const sameRelaySecond = events[0];
+		const deathA = finalizeEvent(buildDeathTraceEventTemplate({ channel: { channelId: f.channel.id, relayHint: f.authorities[0].url }, createdAt: TIME - 3, position: { x: 2, y: 2 }, content: 'death-a' }), AUTHOR);
+		const deathB = finalizeEvent(buildDeathTraceEventTemplate({ channel: { channelId: f.channel.id, relayHint: f.authorities[0].url }, createdAt: TIME - 4, position: { x: 3, y: 2 }, content: 'death-b' }), AUTHOR);
 		let firstRootRequest: WireRequest | null = null;
 		f.authorities[0].onRequest = (socket, request) => {
 			if (request[2].limit !== 1000) return;
@@ -834,8 +857,6 @@ describe('trace root bootstrap', () => {
 		};
 		f.authorities[1].onRequest = (socket, request) => {
 			if (request[2].limit !== 1000) return;
-			send(socket, 'EVENT', request[1], lateB);
-			send(socket, 'EVENT', request[1], lateA);
 			send(socket, 'EVENT', request[1], events[1]);
 			send(socket, 'EVENT', request[1], sameRelayFirst);
 			send(socket, 'EVENT', request[1], sameRelaySecond);
@@ -856,13 +877,16 @@ describe('trace root bootstrap', () => {
 
 		const result = await pending;
 		expect(result.rawEvents).toHaveLength(1002);
-		expect(result.rawEvents.filter((event) => event.kind === 42)).toHaveLength(1000);
-		expect(result.rawEvents.filter((event) => event.kind === 30079)).toHaveLength(2);
-		expect(result.rawEvents.slice(0, 2).map((event) => event.id)).toEqual([lateA.id, lateB.id]);
+		expect(result.rawEvents.filter((event) => event.tags.some((tag) => tag[0] === 'l' && tag[1] === 'chat'))).toHaveLength(1000);
+		expect(result.rawEvents.filter((event) => event.tags.some((tag) => tag[0] === 'l' && tag[1] === 'trace'))).toHaveLength(2);
+		const expectedOrder = [...events.slice(0, 1000), deathA, deathB]
+			.sort((first, second) => second.created_at - first.created_at || (first.id < second.id ? -1 : first.id > second.id ? 1 : 0))
+			.map((event) => event.id);
+		expect(result.rawEvents.map((event) => event.id)).toEqual(expectedOrder);
 		expect(result.rawEvents.find((event) => event.id === events[1].id)?.content).toBe(events[1].content);
-		expect(result.rawEvents.find((event) => event.id === sameRelayId)?.content).toBe('a');
+		expect(result.rawEvents.filter((event) => event.id === sameRelayFirst.id)).toHaveLength(1);
 		expect(result.rawEvents.some((event) => event.id === events.at(-1)!.id)).toBe(false);
-	});
+	}, 15_000);
 
 	it('reports mixed EOSE and CLOSED terminal diagnostics', async () => {
 		const f = fixture(2);

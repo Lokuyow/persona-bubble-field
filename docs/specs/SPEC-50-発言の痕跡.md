@@ -4,7 +4,7 @@
 
 ## 24. 発言の痕跡
 
-通常の発言は揮発し、Twitter型の過去ログとして時系列に蓄積表示しない。そのうえで、過去の対象kind 42の一部だけを、元の発言位置に残る**発言の痕跡**として扱う。痕跡は過去ログや履歴ビューではなく、空間に残った一部の発言の記憶である。投稿日時、経過時間、「さっき」「今日」「数日前」等の古さはroot/replyのいずれにも表示しない。死亡時のLast Wordsは通常発言とは別の専用trace eventとして同じ空間投影へ加わる。
+通常の発言は揮発し、Twitter型の過去ログとして時系列に蓄積表示しない。そのうえで、過去の通常chat kind 42の一部だけを、元の発言位置に残る**発言の痕跡**として扱う。痕跡は過去ログや履歴ビューではなく、空間に残った一部の発言の記憶である。投稿日時、経過時間、「さっき」「今日」「数日前」等の古さはroot/replyのいずれにも表示しない。死亡時のLast Wordsもkind 42のexplicit Traceとして同じ空間投影へ加わる。
 
 ### rootの選択と上限
 
@@ -18,7 +18,7 @@ BigInt(`0x${event.id}`) % 5n === 0n
 
 ### death Last Words
 
-death Last Wordsはkind 42、kind 1111、kind 30078、kind 7070とは別の専用trace eventであり、presence activityやactive slot plannerへは入力しない。durableなdeath transitionとterminal exitの準備が成立した同一tabだけが、canonical last positionに1件だけbest-effortでpublishできる。eventにはdeath author、position、channel、sourceを含め、bootstrapとlive受信の双方で通常Trace rootと同じ決定的cell projectionへ取り込む。Last Wordsは通常発言の20%抽選を適用せず、field上で確実に候補となる。Last Wordsのrootはクリックして内容を表示できるが、通常のreply treeやreply publicationは持たない。死亡直後の送信失敗はlifecycleをrollbackせず、空入力・skipではeventをpublishしない。
+death Last WordsはNIP-28 kind 42のexplicit Traceであり、project `L`、`l=trace`、`l=trace:death`、canonical channel root `e`、canonical `w`、本文contentを持つ。`l=chat`、`speech:*`、`d` tagは持たない。これはpresence activityやactive slot plannerへは入力せず、`w`はTrace表示位置だけを表す。durableなdeath transitionとterminal exitの準備が成立した同一tabだけが、canonical last positionに1件だけbest-effortでpublishできる。bootstrapとlive受信の双方で通常Trace rootと同じ決定的cell projectionへ取り込むが、通常発言の20%抽選は適用しない。Last Wordsのrootはクリックして内容を表示できるが、通常のreply treeやreply publicationは持たない。死亡直後の送信失敗はlifecycleをrollbackせず、空入力・skipではeventをpublishしない。一般的なNIP-28 clientが通常channel messageとして表示する場合があることは許容する。
 
 ### root cache
 

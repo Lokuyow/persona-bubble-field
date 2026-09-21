@@ -2,14 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { verifyEvent, type Event, type EventTemplate, type VerifiedEvent } from 'nostr-tools/pure';
 import {
 	CHANNEL_MESSAGE_KIND,
-	TRACE_EVENT_KIND,
 	PROFILE_KIND,
 	WORLD_STATE_KIND,
 	PROTOTYPE_NAMESPACE,
 	RECENT_MESSAGE_TIMELINE_LIMIT,
 	TRACE_REPLY_KIND,
 	buildWorldStateEventTemplate,
-	buildTraceEventTemplate,
+	buildDeathTraceEventTemplate,
 	buildCharacterProfileTemplate,
 	buildWorldStateFilter,
 	buildTraceDirectReplyFilter,
@@ -88,13 +87,11 @@ function signedPositionWithCreatedAt(createdAt: number): VerifiedEvent {
 }
 
 function signedDeathTrace(content = 'I was here'): VerifiedEvent {
-	return finalizeWorldEvent(buildTraceEventTemplate({
+	return finalizeWorldEvent(buildDeathTraceEventTemplate({
 		channel,
 		content,
 		position: { x: 7, y: 3 },
-		createdAt: 1_700_000_001,
-		source: 'death',
-		identifier: 'trace:death:test'
+		createdAt: 1_700_000_001
 	}), TEST_SECRET_KEY);
 }
 
@@ -693,18 +690,18 @@ describe('Nostr protocol foundation', () => {
 
 	it('builds exact message, position, and trace filters', () => {
 		expect(buildWorldMessageFilter({ channelId: CHANNEL_ID, since: 1_700_000_000 })).toEqual({
-			kinds: [42, 30079],
+			kinds: [42],
 			'#e': [CHANNEL_ID],
 			'#L': [PROTOTYPE_NAMESPACE],
-			'#l': ['chat'],
+			'#l': ['chat', 'trace'],
 			since: 1_700_000_000
 		});
 		expect(buildWorldMessageFilters({ channelId: CHANNEL_ID, since: 1_700_000_000 })).toEqual([
 			{
-				kinds: [42, 30079],
+				kinds: [42],
 				'#e': [CHANNEL_ID],
 				'#L': [PROTOTYPE_NAMESPACE],
-				'#l': ['chat'],
+				'#l': ['chat', 'trace'],
 				since: 1_700_000_000
 			},
 			{
@@ -733,7 +730,7 @@ describe('Nostr protocol foundation', () => {
 				kinds: [42], '#e': [CHANNEL_ID], '#L': [PROTOTYPE_NAMESPACE], '#l': ['chat'], limit: 1000
 			},
 			{
-				kinds: [30079], '#e': [CHANNEL_ID], '#L': [PROTOTYPE_NAMESPACE], '#l': ['chat'], limit: 1000
+				kinds: [42], '#e': [CHANNEL_ID], '#L': [PROTOTYPE_NAMESPACE], '#l': ['trace'], limit: 1000
 			}
 		]);
 		expect(buildTraceReplyFilter({ rootId: CHANNEL_ID })).toEqual({
@@ -775,33 +772,45 @@ describe('Nostr protocol foundation', () => {
 		})).toThrow(TypeError);
 	});
 
-	it('builds and parses a dedicated death trace event without treating it as a kind 42 message', () => {
+	it('builds and parses a labeled death trace kind 42 without treating it as a chat message', () => {
 		const event = signedDeathTrace('Remember this field.');
-		expect(event.kind).toBe(TRACE_EVENT_KIND);
+		expect(event.kind).toBe(CHANNEL_MESSAGE_KIND);
+		expect(event.tags).not.toContainEqual(['d', expect.any(String)]);
+		expect(event.tags).toContainEqual(['l', 'trace', PROTOTYPE_NAMESPACE]);
+		expect(event.tags).toContainEqual(['l', 'trace:death', PROTOTYPE_NAMESPACE]);
+		expect(event.tags).not.toContainEqual(['l', 'chat', PROTOTYPE_NAMESPACE]);
 		expect(parseWorldMessage(event, CHANNEL_ID)).toBeNull();
+		expect(parseTraceEvent(signedMessage(), CHANNEL_ID)).toBeNull();
 		expect(parseTraceEvent(event, CHANNEL_ID)).toMatchObject({
 		content: 'Remember this field.',
 		position: { x: 7, y: 3 },
 			source: 'death'
 			});
-		const invalid = resign({ ...buildTraceEventTemplate({
+		const invalid = resign({ ...buildDeathTraceEventTemplate({
 			channel,
 			content: 'invalid',
 			position: { x: 7, y: 3 },
-			createdAt: 1_700_000_001,
-			source: 'death',
-			identifier: 'trace:death:invalid'
+			createdAt: 1_700_000_001
 		}), tags: [['e', CHANNEL_ID, channel.relayHint, 'root']] });
 		expect(parseTraceEvent(invalid, CHANNEL_ID)).toBeNull();
 	});
 
-	it('fails closed for non-canonical death trace identifiers and root relations', () => {
+	it('fails closed when a kind 42 claims both chat and trace semantics', () => {
+		const ambiguous = signedMessage();
+		ambiguous.tags.push(['l', 'trace', PROTOTYPE_NAMESPACE]);
+		ambiguous.tags.push(['l', 'trace:death', PROTOTYPE_NAMESPACE]);
+		const resigned = resign(ambiguous);
+		expect(parseWorldMessage(resigned, CHANNEL_ID)).toBeNull();
+		expect(parseTraceEvent(resigned, CHANNEL_ID)).toBeNull();
+	});
+
+	it('fails closed for ambiguous death trace labels and root relations', () => {
 		for (const mutate of [
-			(event: VerifiedEvent) => { event.tags[0][1] = ''; },
-			(event: VerifiedEvent) => { event.tags[0][1] = 'trace:death:bad space'; },
-			(event: VerifiedEvent) => { event.tags[0][1] = 'x'.repeat(201); },
-			(event: VerifiedEvent) => { event.tags.push(['d', 'trace:death:duplicate']); },
-			(event: VerifiedEvent) => { event.tags[1][3] = 'reply'; }
+			(event: VerifiedEvent) => { event.tags.push(['l', 'chat', PROTOTYPE_NAMESPACE]); },
+			(event: VerifiedEvent) => { event.tags.push(['l', 'trace:death', PROTOTYPE_NAMESPACE]); },
+			(event: VerifiedEvent) => { event.tags.push(['l', 'trace:other', PROTOTYPE_NAMESPACE]); },
+			(event: VerifiedEvent) => { event.tags.push(['d', 'retired']); },
+			(event: VerifiedEvent) => { event.tags[0][3] = 'reply'; }
 		]) {
 			const event = signedDeathTrace();
 			mutate(event);

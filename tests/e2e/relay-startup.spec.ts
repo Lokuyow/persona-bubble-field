@@ -167,6 +167,11 @@ function syntheticChannelFixture() {
 	};
 }
 
+function isDeathTraceEvent(event: { kind?: number; tags?: readonly (readonly string[])[] }): boolean {
+	return event.kind === 42 && Boolean(event.tags?.some((tag) => tag[0] === 'l' && tag[1] === 'trace' && tag[2] === 'io.github.lokuyow.persona-bubble-field')) &&
+		Boolean(event.tags?.some((tag) => tag[0] === 'l' && tag[1] === 'trace:death' && tag[2] === 'io.github.lokuyow.persona-bubble-field'));
+}
+
 function traceRuntimeEvents(rootPosition: { x: number; y: number } = { x: 4, y: 2 }) {
 	const selfSecret = fixtureSecret(23);
 	const rootSecret = fixtureSecret(29);
@@ -406,7 +411,10 @@ async function installDelayedRelay(page: Page, options: {
 			if (request.filters.some((filter) => matchesRealtimeFilter(event, filter))) deliver(request.socket, ['EVENT', request.subId, event]);
 		};
 		const respondPublish = (socket: FakeWebSocket, event: Record<string, unknown>) => {
-			const reject = event.kind === 42 && state.rejectMessagePublishes || event.kind === 30078 && state.rejectPositionPublishes || event.kind === 30079 && state.rejectTracePublishes ||
+			const labels = (event.tags as string[][] | undefined) ?? [];
+			const isDeathTrace = event.kind === 42 && labels.some((tag) => tag[0] === 'l' && tag[1] === 'trace' && tag[2] === 'io.github.lokuyow.persona-bubble-field');
+			const isNormalMessage = event.kind === 42 && labels.some((tag) => tag[0] === 'l' && tag[1] === 'chat' && tag[2] === 'io.github.lokuyow.persona-bubble-field') && !isDeathTrace;
+			const reject = isNormalMessage && state.rejectMessagePublishes || event.kind === 30078 && state.rejectPositionPublishes || isDeathTrace && state.rejectTracePublishes ||
 				event.kind === 1111 && state.replyOutcome !== 'accepted';
 			const notice = event.kind === 1111 && state.replyOutcome === 'duplicate' ? 'duplicate: already stored' : reject ? 'blocked: test rejection' : '';
 			if (event.kind === 1111 && state.replyOutcome !== 'rejected' && !traceReplyHistory.some((known) => known.id === event.id)) traceReplyHistory.push(event);
@@ -439,7 +447,7 @@ async function installDelayedRelay(page: Page, options: {
 			if (state.primaryReleased) deliver(request.socket, ['EOSE', request.subId]);
 		};
 		const respondTraceRoots = (request: PendingRequest) => {
-			for (const event of [...traceRoots, ...previous.published.filter((candidate) => candidate.kind === 30079)]) deliver(request.socket, ['EVENT', request.subId, event]);
+			for (const event of [...traceRoots, ...previous.published.filter((candidate) => candidate.kind === 42 && (candidate.tags as string[][]).some((tag) => tag[0] === 'l' && tag[1] === 'trace'))]) deliver(request.socket, ['EVENT', request.subId, event]);
 			deliver(request.socket, ['EOSE', request.subId]);
 		};
 		const respondTraceReplies = (request: PendingRequest) => {
@@ -1750,7 +1758,7 @@ test.describe('Relay startup', () => {
 		const traces = await page.evaluate((expectedPubkey) => {
 			const state = (window as typeof window & { __relayStartupTest: { state: { previousPublished: Array<{ id: string; kind: number; pubkey?: string; content: string; tags: string[][] }>; published: Array<{ id: string; kind: number; pubkey?: string; content: string; tags: string[][] }> } } }).__relayStartupTest.state;
 			return [...new Map([...state.previousPublished, ...state.published]
-				.filter((event) => event.kind === 30079 && event.pubkey === expectedPubkey && event.content === 'A last word from this Run')
+				.filter((event) => event.kind === 42 && event.tags.some((tag) => tag[0] === 'l' && tag[1] === 'trace' && tag[2] === 'io.github.lokuyow.persona-bubble-field') && event.tags.some((tag) => tag[0] === 'l' && tag[1] === 'trace:death' && tag[2] === 'io.github.lokuyow.persona-bubble-field') && event.pubkey === expectedPubkey && event.content === 'A last word from this Run')
 				.map((event) => [event.id, event])).values()];
 		}, selfPubkey);
 		expect(traces).toHaveLength(1);
@@ -3560,7 +3568,7 @@ test.describe('Relay startup', () => {
 		const traces = await page.evaluate((expectedPubkey) => {
 			const state = (window as typeof window & { __relayStartupTest: { state: { previousPublished: Array<{ id: string; kind: number; pubkey?: string; content: string; tags: string[][] }>; published: Array<{ id: string; kind: number; pubkey?: string; content: string; tags: string[][] }> } } }).__relayStartupTest.state;
 			return [...new Map([...state.previousPublished, ...state.published]
-				.filter((event) => event.kind === 30079 && event.pubkey === expectedPubkey && event.content === 'A last word from this Run')
+				.filter((event) => event.kind === 42 && event.tags.some((tag) => tag[0] === 'l' && tag[1] === 'trace' && tag[2] === 'io.github.lokuyow.persona-bubble-field') && event.tags.some((tag) => tag[0] === 'l' && tag[1] === 'trace:death' && tag[2] === 'io.github.lokuyow.persona-bubble-field') && event.pubkey === expectedPubkey && event.content === 'A last word from this Run')
 				.map((event) => [event.id, event])).values()];
 		}, pubkey);
 		expect(traces).toHaveLength(1);
@@ -3594,7 +3602,7 @@ test.describe('Relay startup', () => {
 			const state = (window as unknown as { __relayStartupTest: { state: { previousPublished: Array<{ id: string; kind: number; pubkey?: string; tags: string[][] }>; published: Array<{ id: string; kind: number; pubkey?: string; tags: string[][] }> } } }).__relayStartupTest.state;
 			return [...state.previousPublished, ...state.published].some((event) => event.kind === 30078 && event.pubkey === expectedPubkey && event.tags.some((tag) => tag[0] === 'd' && tag[1]?.endsWith(':exit')));
 		}, pubkey)).toBe(true);
-		const traces = (await relayState(page)).state.published.filter((event) => event.kind === 30079 && event.pubkey === pubkey);
+		const traces = (await relayState(page)).state.published.filter((event) => isDeathTraceEvent(event) && event.pubkey === pubkey);
 		expect(traces).toHaveLength(0);
 	});
 

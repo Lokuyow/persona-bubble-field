@@ -46,7 +46,7 @@ function parseCandidate(event: Event, channelId: string, field: TraceRootField):
 	try {
 		const message = parseWorldMessage(event, channelId);
 		const trace = parseTraceEvent(event, channelId);
-		const root = message ?? (trace ? { ...trace, speechType: 'normal' as const, source: trace.source } : null);
+		const root = message ?? trace;
 		if (!root || !isWithinField(root, field) || root.source !== 'death' && !winsTraceRootLottery(root.id)) return null;
 		return { rawEvent: event, root };
 	} catch {

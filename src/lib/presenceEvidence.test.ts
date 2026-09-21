@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	applyPresenceEvidence,
+	presenceEvidenceFromMessage,
 	reconstructPresenceEvidence,
 	type PresenceEvidence,
 	type ReducedPresenceParticipant
@@ -46,6 +47,17 @@ function participant(
 }
 
 describe('presence evidence reducer', () => {
+	it('does not turn a death trace position into positive activity evidence', () => {
+		const trace = { ...message('death-trace', 'a'.repeat(64), 100), source: 'death' as const };
+		expect(presenceEvidenceFromMessage(trace)).toBeNull();
+		expect(reconstructPresenceEvidence([trace], [])).toEqual([]);
+		const exit = { id: 'exit', pubkey: 'a'.repeat(64), createdAt: 100, state: 'exit' as const, slot: null, position: { x: 2, y: 2 } };
+		expect(reconstructPresenceEvidence([trace], [exit])[0]).toMatchObject({
+			lastPositiveActivityCreatedAt: null,
+			latestExitCreatedAt: 100
+		});
+	});
+
 	it('converts message, slot 0, and slot 1 into independent participant results', () => {
 		expect(reconstructPresenceEvidence([message('message', 'a'.repeat(64), 100)], [])).toEqual([
 			participant('a'.repeat(64), { x: 1, y: 1 }, { eventId: 'message', createdAt: 100, source: 'message' }, 100)

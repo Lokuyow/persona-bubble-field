@@ -16,7 +16,7 @@ import {
 } from './traceReadState';
 import {
 	buildWorldStateEventTemplate,
-	buildTraceEventTemplate,
+	buildDeathTraceEventTemplate,
 	buildTraceReplyTemplate,
 	buildWorldMessageTemplate,
 	finalizeWorldEvent,
@@ -245,7 +245,6 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	let terminalExitAttempted = false;
 	let deathTraceEnabled = false;
 	let deathTraceAttempted = false;
-	let deathTraceSequence = 0;
 
 	function emitStatus(next: WorldReadConnectionStatus): void {
 		status = next;
@@ -393,16 +392,14 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		if (!trimmed) return { kind: 'unavailable' };
 		deathTraceAttempted = true;
 		try {
-			const event = finalizeWorldEvent(buildTraceEventTemplate({
+			const event = finalizeWorldEvent(buildDeathTraceEventTemplate({
 				channel,
 				content: trimmed,
 				position: preparedTerminalExit.parsed.position,
 				createdAt: Math.max(
 					Math.floor(Date.now() / 1000),
 					preparedTerminalExit.parsed.createdAt
-				),
-				source: 'death',
-				identifier: `trace:death:${Date.now()}:${deathTraceSequence++}`
+				)
 			}), selfSigner.secretKey);
 			const results = await transport.publish(event);
 			if (!reachedAuthoritativeRelay(results)) return { kind: 'failed' };

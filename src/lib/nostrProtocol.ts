@@ -12,7 +12,6 @@ import {
 export const PROTOTYPE_NAMESPACE = 'io.github.lokuyow.persona-bubble-field';
 export const CHANNEL_MESSAGE_KIND = 42;
 export const TRACE_REPLY_KIND = 1111;
-export const TRACE_EVENT_KIND = 30079;
 export const WORLD_STATE_KIND = 30078;
 export const PROFILE_KIND = 0;
 export const RECENT_MESSAGE_TIMELINE_LIMIT = 50;
@@ -51,15 +50,11 @@ export type WorldStateEventInput = {
 	createdAt: number;
 };
 
-export type TraceEventSource = 'death';
-
-export type TraceEventInput = {
+export type DeathTraceEventInput = {
 	channel: ChannelReference;
 	content: string;
 	position: GridPosition;
 	createdAt: number;
-	source: TraceEventSource;
-	identifier: string;
 };
 
 
@@ -87,8 +82,8 @@ export type WorldStateEventTemplate = EventTemplate & {
 	kind: typeof WORLD_STATE_KIND;
 };
 
-export type TraceEventTemplate = EventTemplate & {
-	kind: typeof TRACE_EVENT_KIND;
+export type DeathTraceEventTemplate = EventTemplate & {
+	kind: typeof CHANNEL_MESSAGE_KIND;
 };
 
 
@@ -100,7 +95,7 @@ export type CharacterProfileTemplate = EventTemplate & {
 	kind: typeof PROFILE_KIND;
 };
 
-export type WorldEventTemplate = WorldMessageTemplate | WorldStateEventTemplate | TraceEventTemplate | TraceReplyTemplate;
+export type WorldEventTemplate = WorldMessageTemplate | WorldStateEventTemplate | DeathTraceEventTemplate | TraceReplyTemplate;
 
 export type ParsedWorldMessage = {
 	id: string;
@@ -109,7 +104,7 @@ export type ParsedWorldMessage = {
 	content: string;
 	speechType: SpeechType;
 	position: GridPosition;
-	source?: 'message' | TraceEventSource;
+	source?: 'message' | 'death';
 };
 
 export type ParsedWorldStateEvent = {
@@ -126,8 +121,9 @@ export type ParsedTraceEvent = {
 	pubkey: string;
 	createdAt: number;
 	content: string;
+	speechType: 'normal';
 	position: GridPosition;
-	source: TraceEventSource;
+	source: 'death';
 };
 
 
@@ -233,10 +229,6 @@ function assertWorldStateSlot(slot: WorldStateSlot | 'exit'): void {
 	if (slot !== 0 && slot !== 1) {
 		if (slot !== 'exit') throw new TypeError('World State slot must be 0, 1, or exit.');
 	}
-}
-
-function assertTraceIdentifier(value: string): void {
-	if (!/^[A-Za-z0-9._:-]{1,200}$/.test(value)) throw new TypeError('Trace identifier is invalid.');
 }
 
 function assertChannelReference(channel: ChannelReference): void {
@@ -352,22 +344,18 @@ export function buildWorldStateEventTemplate(input: WorldStateEventInput): World
 	};
 }
 
-export function buildTraceEventTemplate(input: TraceEventInput): TraceEventTemplate {
+export function buildDeathTraceEventTemplate(input: DeathTraceEventInput): DeathTraceEventTemplate {
 	assertChannelReference(input.channel);
 	assertCreatedAt(input.createdAt);
-	assertTraceIdentifier(input.identifier);
-	if (input.source !== 'death') throw new TypeError('Trace source is invalid.');
 	return {
-		kind: TRACE_EVENT_KIND,
+		kind: CHANNEL_MESSAGE_KIND,
 		created_at: input.createdAt,
 		tags: [
-			['d', input.identifier],
 			['e', input.channel.channelId, input.channel.relayHint, 'root'],
 			['w', formatCanonicalGridPosition(input.position)],
 			['L', PROTOTYPE_NAMESPACE],
-			['l', 'chat', PROTOTYPE_NAMESPACE],
 			['l', 'trace', PROTOTYPE_NAMESPACE],
-			['l', `trace:${input.source}`, PROTOTYPE_NAMESPACE]
+			['l', 'trace:death', PROTOTYPE_NAMESPACE]
 		],
 		content: input.content
 	};
@@ -402,10 +390,18 @@ export function finalizeCharacterProfileEvent(
 	return finalizeEvent(template, secretKey);
 }
 
-function hasProjectChatLabel(event: Event): boolean {
+function hasExactlyProjectLabel(event: Event, value: string): boolean {
+	return event.tags.filter((tag) => tag[0] === 'l' && tag[1] === value && tag[2] === PROTOTYPE_NAMESPACE).length === 1;
+}
+
+function hasProjectTraceLabel(event: Event): boolean {
 	return event.tags.some((tag) =>
-		tag[0] === 'l' && tag[1] === 'chat' && tag[2] === PROTOTYPE_NAMESPACE
+		tag[0] === 'l' && (tag[1] === 'trace' || tag[1]?.startsWith('trace:')) && tag[2] === PROTOTYPE_NAMESPACE
 	);
+}
+
+function hasProjectSpeechLabel(event: Event): boolean {
+	return event.tags.some((tag) => tag[0] === 'l' && tag[2] === PROTOTYPE_NAMESPACE && tag[1]?.startsWith('speech:'));
 }
 
 function parseSpeechType(event: Event): SpeechType | null {
@@ -457,7 +453,7 @@ export function parseWorldMessage(event: Event, channelId: string): ParsedWorldM
 	if (!Number.isSafeInteger(event.created_at) || event.created_at < 0) return null;
 	if (!hasExactlyChannelRootRelation(event, channelId)) return null;
 	if (!event.tags.some((tag) => tag[0] === 'L' && tag[1] === PROTOTYPE_NAMESPACE)) return null;
-	if (!hasProjectChatLabel(event)) return null;
+	if (!hasExactlyProjectLabel(event, 'chat') || hasProjectTraceLabel(event)) return null;
 
 	const speechType = parseSpeechType(event);
 	const position = parseUnambiguousWorldPosition(event);
@@ -492,7 +488,7 @@ export function parseTraceReplyCandidate(event: Event): ParsedTraceReplyCandidat
 	if (!isVerifiedEvent(event) || event.kind !== TRACE_REPLY_KIND || !hasAssignedCharacter(event)) return null;
 	if (!Number.isSafeInteger(event.created_at) || event.created_at < 0) return null;
 	if (!event.tags.some((tag) => tag[0] === 'L' && tag[1] === PROTOTYPE_NAMESPACE)) return null;
-	if (!hasProjectChatLabel(event)) return null;
+	if (!hasExactlyProjectLabel(event, 'chat') || hasProjectTraceLabel(event)) return null;
 	if (event.tags.some((tag) => ['A', 'I', 'a', 'i'].includes(tag[0]))) return null;
 
 	const rootEvent = exactlyOneTag(event, 'E');
@@ -601,33 +597,27 @@ export function parseWorldStateEvent(event: Event, channelId: string): ParsedWor
 
 export function parseTraceEvent(event: Event, channelId: string): ParsedTraceEvent | null {
 	assertChannelId(channelId);
-	if (!isVerifiedEvent(event) || event.kind !== TRACE_EVENT_KIND || !hasAssignedCharacter(event)) return null;
+	if (!isVerifiedEvent(event) || event.kind !== CHANNEL_MESSAGE_KIND || !hasAssignedCharacter(event)) return null;
 	if (!Number.isSafeInteger(event.created_at) || event.created_at < 0) return null;
 	if (!hasExactlyChannelRootRelation(event, channelId)) return null;
 	if (!event.tags.some((tag) => tag[0] === 'L' && tag[1] === PROTOTYPE_NAMESPACE)) return null;
-	if (!event.tags.some((tag) => tag[0] === 'l' && tag[1] === 'chat' && tag[2] === PROTOTYPE_NAMESPACE)) return null;
-	if (!event.tags.some((tag) => tag[0] === 'l' && tag[1] === 'trace' && tag[2] === PROTOTYPE_NAMESPACE)) return null;
+	if (event.tags.some((tag) => tag[0] === 'd')) return null;
+	if (hasExactlyProjectLabel(event, 'chat') || !hasExactlyProjectLabel(event, 'trace')) return null;
 	const sourceTags = event.tags.filter((tag) => tag[0] === 'l' && tag[2] === PROTOTYPE_NAMESPACE && tag[1]?.startsWith('trace:'));
-	if (sourceTags.length !== 1 || sourceTags[0][1] !== 'trace:death') return null;
-	const identifier = event.tags.filter((tag) => tag[0] === 'd');
+	if (sourceTags.length !== 1 || sourceTags[0][1] !== 'trace:death' || hasProjectSpeechLabel(event)) return null;
 	const position = parseUnambiguousWorldPosition(event);
-	if (identifier.length !== 1 || !identifier[0][1] || !position) return null;
-	try {
-		assertTraceIdentifier(identifier[0][1]);
-	} catch {
-		return null;
-	}
-	return { id: event.id, pubkey: event.pubkey, createdAt: event.created_at, content: event.content, position, source: 'death' };
+	if (!position) return null;
+	return { id: event.id, pubkey: event.pubkey, createdAt: event.created_at, content: event.content, speechType: 'normal', position, source: 'death' };
 }
 
 export function buildWorldMessageFilter(options: LiveFilterOptions): Filter {
 	assertChannelId(options.channelId);
 	assertCreatedAt(options.since);
 	return {
-		kinds: [CHANNEL_MESSAGE_KIND, TRACE_EVENT_KIND],
+		kinds: [CHANNEL_MESSAGE_KIND],
 		'#e': [options.channelId],
 		'#L': [PROTOTYPE_NAMESPACE],
-		'#l': ['chat'],
+		'#l': ['chat', 'trace'],
 		since: options.since
 	};
 }
@@ -674,12 +664,11 @@ export function buildTraceRootBootstrapFilters(options: TraceRootBootstrapFilter
 	const base = {
 		'#e': [options.channelId],
 		'#L': [PROTOTYPE_NAMESPACE],
-		'#l': ['chat'],
 		limit: TRACE_ROOT_BOOTSTRAP_LIMIT
 	};
 	return [
-		{ kinds: [CHANNEL_MESSAGE_KIND], ...base },
-		{ kinds: [TRACE_EVENT_KIND], ...base }
+		{ kinds: [CHANNEL_MESSAGE_KIND], ...base, '#l': ['chat'] },
+		{ kinds: [CHANNEL_MESSAGE_KIND], ...base, '#l': ['trace'] }
 	];
 }
 
