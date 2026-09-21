@@ -19,8 +19,8 @@
 
 
 <div class="lifespan-hud" aria-label={mendingLabel ? `${label}、ポイント ${points}pt、${mendingLabel}` : `${label}、ポイント ${points}pt`}>
-	<span class="lifespan-value" data-stat-icon="heart"><Heart aria-hidden="true" />{lifespanValue}</span>
-	<span class="points-value" data-stat-icon="wallet"><Wallet aria-hidden="true" />{points}pt</span>
+	<span class="lifespan-value" data-stat-icon="heart"><Heart aria-hidden="true" /><span class="stat-value">{lifespanValue}</span></span>
+	<span class="points-value" data-stat-icon="wallet"><Wallet aria-hidden="true" /><span class="stat-value">{points}pt</span></span>
 	{#if mendingLabel}<span class="mending-status">{mendingLabel}</span>{/if}
 </div>
 
@@ -52,13 +52,13 @@
 			align-items: center;
 			gap: 6px;
 			width: 100%;
-			text-align: left;
 			color: #fff;
 			font-size: 1.18em;
 			font-weight: 800;
 		}
 
-		.points-value { display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: center; gap: 6px; width: 100%; text-align: left; color: rgba(226, 230, 255, 0.86); }
+		.points-value { display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: center; gap: 6px; width: 100%; color: rgba(226, 230, 255, 0.86); }
+		.stat-value { text-align: right; }
 		.lifespan-value :global(svg), .points-value :global(svg) { width: 16px; height: 16px; flex: 0 0 auto; }
 
 		.mending-status {

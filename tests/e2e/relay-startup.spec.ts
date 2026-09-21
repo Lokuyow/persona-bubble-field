@@ -3328,6 +3328,14 @@ test.describe('Relay startup', () => {
 		await expect(hud.locator('[data-stat-icon="wallet"] > svg')).toHaveCount(1);
 		const hudIconLefts = await hud.locator('[data-stat-icon] > svg').evaluateAll((icons) => icons.map((icon) => Math.round(icon.getBoundingClientRect().left)));
 		expect(hudIconLefts).toEqual([hudIconLefts[0], hudIconLefts[0]]);
+		const hudStatBoxes = await hud.locator('[data-stat-icon]').evaluateAll((stats) => stats.map((stat) => {
+			const icon = stat.querySelector('svg')!.getBoundingClientRect();
+			const value = stat.querySelector('.stat-value')!.getBoundingClientRect();
+			return { iconLeft: Math.round(icon.left), iconRight: Math.round(icon.right), valueLeft: Math.round(value.left), valueRight: Math.round(value.right) };
+		}));
+		expect(hudStatBoxes[0]?.iconLeft).toBe(hudStatBoxes[1]?.iconLeft);
+		expect(hudStatBoxes[0]?.valueRight).toBe(hudStatBoxes[1]?.valueRight);
+		for (const stat of hudStatBoxes) expect(stat.valueLeft).toBeGreaterThan(stat.iconRight);
 		await expect(hud.locator('[data-stat-icon="heart"]')).toHaveText('2日 18時間');
 		await expect(hud.locator('[data-stat-icon="wallet"]')).toHaveText('0pt');
 		await expect(hud).not.toContainText('寿命');
