@@ -216,11 +216,22 @@ commands.
 - Do not claim that a test, check, build, browser verification, or CI job
   passed unless it was actually run and observed to pass.
 - Report relevant verification that was not run and the reason.
+- For documentation-only changes that do not alter application behavior or
+  tooling, focused document consistency checks and `git diff --check` are
+  sufficient; application tests, builds, and E2E may be omitted and should be
+  reported as intentionally unrun.
 
-Browser behavior changes require the appropriate Playwright E2E coverage in
-addition to unit and static checks. Use `npm run test:e2e` for the normal
-human-readable browser path; coding agents may prefer
-`npm run test:e2e:agent` for its low-output `dot` reporter.
+For browser behavior changes, prioritize the unit tests and Playwright E2E
+coverage closest to the changed behavior in addition to static checks. A
+normal coding-agent local completion does not require the full Playwright
+suite unconditionally. Run the local full suite when the change broadly
+affects the E2E harness, shared fixtures or test doubles, global application
+lifecycle, or routing; when the relevant subset cannot reasonably be limited;
+or when the reviewed Plan or task explicitly requires it. Broaden local
+verification when a test failure or additional change gives a concrete reason
+to do so. Use `npm run test:e2e` for the normal human-readable browser path;
+coding agents may prefer `npm run test:e2e:agent` for its low-output `dot`
+reporter.
 The E2E suite includes checks using the local DEV World Sandbox and checks
 of the normal application using local test doubles such as Fake Relays
 and Composer stubs. It must not depend on real Relays, external network
