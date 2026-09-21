@@ -1,5 +1,4 @@
 <script lang="ts">
-	import X from '~icons/tabler/x';
 	import { untrack } from 'svelte';
 	import type { Attachment } from 'svelte/attachments';
 	import type { Character } from '$lib/character';
@@ -15,22 +14,22 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		selectedCharacterId: string;
 		onOpenProfile: (characterId: string, trigger: HTMLButtonElement) => void;
 		isDevWorldSandbox: boolean;
+		open: boolean;
+		onInitialized: (width: number) => void;
 	};
-	let { messages, tones, selectedCharacterId, onOpenProfile, isDevWorldSandbox }: Props = $props();
+	let { messages, tones, selectedCharacterId, onOpenProfile, isDevWorldSandbox, open, onInitialized }: Props = $props();
 	let timelineOverflowById = $state.raw<Record<string, boolean>>({});
 	let timelineEntryHeights = $state.raw<Record<string, number>>({});
 	let timelineAvailableHeight = $state(0);
 	let timelineInitialized = $state(false);
-	let timelineOpen = $state(false);
 
 	export function initialize(viewportWidth: number): void {
 		if (timelineInitialized) return;
 		timelineInitialized = true;
-		timelineOpen = viewportWidth > MOBILE_FIELD_BREAKPOINT;
+		onInitialized(viewportWidth);
 	}
 
 	export function isInitialized(): boolean { return timelineInitialized; }
-	export function toggle(): void { timelineOpen = !timelineOpen; }
 	export function resetMeasurements(): void {
 		timelineOverflowById = {};
 		timelineEntryHeights = {};
@@ -63,14 +62,6 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		return count;
 	});
 	let timelineVisibleMessages = $derived(messages.slice(0, timelineVisibleMessageCount));
-
-	function showRecentMessageTimeline(): void {
-		timelineOpen = true;
-	}
-
-	function hideRecentMessageTimeline(): void {
-		timelineOpen = false;
-	}
 
 	const observeTimelineContent: Attachment<HTMLElement> = (node) => untrack(() => {
 		const id = node.dataset.measurementId;
@@ -132,16 +123,9 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 
 </script>
 
-{#if timelineInitialized && timelineOpen}
+{#if timelineInitialized && open}
 	<aside class={['recent-message-timeline', { 'timeline-has-messages': messages.length > 0 }]} aria-label="Chatter">
 		<header class="timeline-header">
-			<button
-				class="timeline-hide-control"
-				type="button"
-				aria-label="Hide Chatter"
-				aria-keyshortcuts="C"
-				onclick={hideRecentMessageTimeline}
-			><X aria-hidden="true" /></button>
 			<h2>Chatter</h2>
 		</header>
 		<div class="timeline-visible-entries" {@attach observeTimelineVisibleArea}>
@@ -187,14 +171,6 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			{/each}
 		</div>
 	</aside>
-{:else if timelineInitialized}
-	<button
-		class="timeline-show-control"
-		type="button"
-		aria-label="Show Chatter"
-		aria-keyshortcuts="C"
-		onclick={showRecentMessageTimeline}
-	>Chatter</button>
 {/if}
 
 <style>
@@ -242,35 +218,6 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		text-shadow: 0 0 8px rgba(143, 147, 255, 0.32);
 	}
 
-	.timeline-hide-control,
-	.timeline-show-control {
-		border: 1px solid rgba(132, 142, 255, 0.46);
-		border-radius: 6px;
-		background: rgba(22, 25, 58, 0.76);
-		box-shadow: 0 0 9px rgba(92, 105, 255, 0.16);
-		color: #e7e9ff;
-		font-weight: 700;
-	}
-
-	.timeline-hide-control {
-		display: grid;
-		width: 44px;
-		height: 44px;
-		padding: 0;
-		border: 0;
-		border-radius: 0;
-		background: transparent;
-		box-shadow: none;
-		place-items: center;
-		color: #e7e9ff;
-		font-size: initial;
-		line-height: initial;
-	}
-
-	.timeline-hide-control :global(svg) {
-		width: 24px;
-		height: 24px;
-	}
 
 	.timeline-visible-entries {
 		flex: 1 1 auto;
@@ -377,21 +324,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		text-shadow: 0 1px 1px rgba(0, 0, 0, 0.9);
 	}
 
-	.timeline-show-control {
-		position: absolute;
-		top: max(12px, env(safe-area-inset-top));
-		left: max(12px, env(safe-area-inset-left));
-		z-index: 9;
-		min-height: 44px;
-		padding: 0 12px;
-		font-size: 14px;
-		letter-spacing: 0.03em;
-		pointer-events: auto;
-	}
-
-	.timeline-hide-control:focus-visible,
-	.timeline-name:focus-visible,
-	.timeline-show-control:focus-visible {
+	.timeline-name:focus-visible {
 		outline: 3px solid var(--color-focus-ring);
 		outline-offset: 2px;
 	}

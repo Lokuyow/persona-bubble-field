@@ -101,7 +101,7 @@ export function profileDialog(page: Page) {
 
 export async function openProfile(page: Page): Promise<void> {
 	const timeline = page.getByLabel('Chatter', { exact: true });
-	if (await timeline.isVisible()) await page.getByRole('button', { name: 'Hide Chatter' }).click();
+	if (await timeline.isVisible()) await page.locator('.chatter-toggle').click();
 	await page.locator('[data-self="true"] .participant-profile-trigger').click();
 	await expect(profileDialog(page)).toBeVisible();
 }
@@ -833,7 +833,7 @@ export async function openReadyRelayWorld(page: Page, expectedParticipantCount =
 	const secret = fixtureSecret(expectedParticipantCount === 1 ? 19 : 41);
 	await seedRelayAccount(page, secret, getPublicKey(secret));
 	await page.goto('/');
-	await expect(page.locator('.composer-dock')).toBeVisible();
+	await expect(page.locator('.action-dock')).toBeVisible();
 	const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
 	await expect(editor).toBeVisible();
 	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
@@ -848,6 +848,19 @@ export async function openReadyRelayWorld(page: Page, expectedParticipantCount =
 	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
 	await expect(page.locator('.participant')).toHaveCount(expectedParticipantCount);
 	return editor;
+}
+
+export async function readActionDockControlOrder(page: Page): Promise<string[]> {
+	return page.locator('.composer-controls > *').evaluateAll((elements) => elements
+		.map((element) => {
+			const rect = element.getBoundingClientRect();
+			const className = ['profile-trigger', 'chatter-toggle', 'trace-unread-indicator', 'speech-type-toggle', 'suggestions-anchor']
+				.find((name) => element.classList.contains(name));
+			return className && rect.width > 0 && rect.height > 0 ? { className, left: rect.left, top: rect.top } : null;
+		})
+		.filter((item): item is { className: string; left: number; top: number } => item !== null)
+		.sort((left, right) => left.top - right.top || left.left - right.left)
+		.map((item) => item.className));
 }
 
 export async function openClearReadyWorld(page: Page): Promise<{ secret: Uint8Array; pubkey: string }> {

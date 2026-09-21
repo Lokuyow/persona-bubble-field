@@ -34,7 +34,7 @@ import { deriveBip85NostrEntropy } from '../../src/lib/bip85';
 import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL } from '../../src/lib/fieldFacilities';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { installFieldFrameSampling, readFieldFrames, sampleRenderedField } from './helpers/fieldFrames';
-import { CHANNEL_ID, AUTHORITATIVE_RELAYS, fixtureSecret, traceRuntimeEvents, installDelayedRelay, relayState, relayFieldCellCenter, selectRelayTraceCell, clickRelayLogicalCell, dragRelayJoystick, pauseAtCurrentBrowserTime, installPromptApiStub, seedRelayAccount, composerContextCalls } from './helpers/relayHarness';
+import { CHANNEL_ID, AUTHORITATIVE_RELAYS, fixtureSecret, traceRuntimeEvents, installDelayedRelay, relayState, relayFieldCellCenter, selectRelayTraceCell, clickRelayLogicalCell, dragRelayJoystick, pauseAtCurrentBrowserTime, installPromptApiStub, seedRelayAccount, composerContextCalls, readActionDockControlOrder } from './helpers/relayHarness';
 
 
 test.describe('Relay startup', () => {
@@ -58,13 +58,13 @@ test.describe('Relay startup', () => {
 				await installDelayedRelay(client, { primaryEvents: { message: trace.message, position }, traceRoots: [trace.root], traceReplies: history });
 				await seedRelayAccount(client, secret, pubkey);
 				await client.goto('/');
-				await expect(client.locator('.composer-dock')).toBeVisible();
+				await expect(client.locator('.action-dock')).toBeVisible();
 				await client.evaluate(() => {
 					const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
 					relay.releaseMetadata(); relay.releasePrimary();
 				});
 				await expect(client.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '3,2');
-				await client.getByRole('button', { name: 'Hide Chatter' }).click();
+				await client.locator('.chatter-toggle').click();
 				await expect(client.locator('[data-trace-marker-position="4,2"]')).toBeVisible();
 			};
 			const publish = async (content: string) => {
@@ -169,10 +169,11 @@ test.describe('Relay startup', () => {
 		await page.emulateMedia({ reducedMotion: 'reduce' });
 		await page.setViewportSize({ width: 1100, height: 850 });
 		await installHostOwnedStub(page);
+		await installPromptApiStub(page);
 		await installDelayedRelay(page, { primaryEvents: primary, traceRoots: [root, unreadRoot, deathRoot], traceReplies: [reply] });
 		await seedRelayAccount(page, selfSecret, selfPubkey);
 		await page.goto('/');
-		await expect(page.locator('.composer-dock')).toBeVisible();
+		await expect(page.locator('.action-dock')).toBeVisible();
 		await page.evaluate(() => {
 			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
 			relay.releaseMetadata(); relay.releasePrimary();
@@ -192,10 +193,16 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveAttribute('data-trace-marker-kind', 'normal');
 		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveCSS('color', 'rgb(207, 6, 254)');
 		await expect(page.locator('.trace-unread-indicator')).toBeVisible();
+		await page.locator('.trace-unread-indicator').hover();
+		await expect(page.getByRole('tooltip')).toHaveText('未読の返信の痕跡');
+		await expect(page.getByRole('button', { name: 'AI発言候補を生成' })).toBeVisible();
+		expect(await readActionDockControlOrder(page)).toEqual([
+			'profile-trigger', 'chatter-toggle', 'trace-unread-indicator', 'speech-type-toggle', 'suggestions-anchor'
+		]);
 		await page.locator('.trace-unread-indicator').click();
 		await expect(page.locator('.trace-unread-explanation')).toContainText('どこかにあなたへの返信の痕跡があります');
 		await expect(page.locator('[data-trace-root-id]')).toHaveCount(0);
-		await page.getByRole('button', { name: 'Hide Chatter' }).click();
+		await page.locator('.chatter-toggle').click();
 		await selectRelayTraceCell(page, '4,2');
 		await expect(page.locator(`[data-trace-root-id="${root.id}"]`)).toContainText(root.content);
 		await expect(page.locator(`[data-trace-root-id="${root.id}"]`)).toHaveAttribute('data-trace-current-kind', 'root');
@@ -228,7 +235,7 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('.trace-unread-indicator')).toBeVisible();
 		await selectRelayTraceCell(page, '4,2');
 		await expect(page.locator(`[data-trace-reply-id="${replyAfterRootRead.id}"]`)).toContainText(replyAfterRootRead.content);
-		const hideTimeline = page.getByRole('button', { name: 'Hide Chatter' });
+		const hideTimeline = page.locator('.chatter-toggle');
 		if (await hideTimeline.isVisible()) await hideTimeline.click();
 		await clickRelayLogicalCell(page, { x: 0, y: 0 });
 		await expect(marker).toHaveAttribute('data-trace-root-read', 'true');
@@ -237,6 +244,41 @@ test.describe('Relay startup', () => {
 		await expect(marker).toHaveCSS('color', 'rgb(82, 104, 134)');
 		await expect(marker).toHaveCSS('opacity', '0.66');
 		await expect(marker).toHaveCSS('filter', 'grayscale(1) brightness(1.12)');
+	});
+
+	test('keeps the unread ActionDock order on mobile', async ({ page }) => {
+		const now = Date.now();
+		const selfSecret = fixtureSecret(23);
+		const channel = { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' };
+		const primary = {
+			message: finalizeEvent(buildWorldMessageTemplate({ channel, content: 'mobile unread participant', speechType: 'normal', position: { x: 3, y: 2 }, createdAt: Math.floor(now / 1000) }), selfSecret),
+			position: finalizeEvent(buildWorldStateEventTemplate({ channel, position: { x: 3, y: 2 }, slot: 0, createdAt: Math.floor(now / 1000) }), selfSecret)
+		};
+		let root = finalizeEvent(buildWorldMessageTemplate({ channel, content: 'mobile unread root', speechType: 'normal', position: { x: 4, y: 2 }, createdAt: Math.floor(now / 1000) }), selfSecret);
+		for (let attempt = 1; BigInt(`0x${root.id}`) % 5n !== 0n; attempt += 1) {
+			root = finalizeEvent(buildWorldMessageTemplate({ channel, content: `mobile unread root ${attempt}`, speechType: 'normal', position: { x: 4, y: 2 }, createdAt: Math.floor(now / 1000) }), selfSecret);
+		}
+		const parsedRoot = parseWorldMessage(root, CHANNEL_ID);
+		if (!parsedRoot) throw new Error('Mobile unread root fixture did not parse.');
+		const reply = finalizeEvent(buildTraceReplyTemplate({ root: parsedRoot, parent: parsedRoot, content: 'mobile unread reply', speechType: 'normal', createdAt: Math.floor(now / 1000) + 1 }), fixtureSecret(31));
+		await page.clock.setFixedTime(now);
+		await page.setViewportSize({ width: 390, height: 844 });
+		await installHostOwnedStub(page);
+		await installPromptApiStub(page);
+		await installDelayedRelay(page, { primaryEvents: primary, traceRoots: [root], traceReplies: [reply] });
+		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret));
+		await page.goto('/');
+		await expect(page.locator('.action-dock')).toBeVisible();
+		await page.evaluate(() => {
+			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
+			relay.releaseMetadata(); relay.releasePrimary();
+		});
+		await expect(page.locator('[data-trace-marker-position="4,2"]')).toBeVisible();
+		await expect(page.locator('.trace-unread-indicator')).toBeVisible();
+		await expect(page.getByRole('button', { name: 'AI発言候補を生成' })).toBeVisible();
+		expect(await readActionDockControlOrder(page)).toEqual([
+			'profile-trigger', 'chatter-toggle', 'trace-unread-indicator', 'speech-type-toggle', 'suggestions-anchor'
+		]);
 	});
 
 	test('suppresses Trace presentation and investigation on fixed facility cells', async ({ page }) => {
@@ -253,7 +295,7 @@ test.describe('Relay startup', () => {
 		});
 		await seedRelayAccount(page, ordinaryTrace.selfSecret, ordinaryTrace.selfPubkey);
 		await page.goto('/');
-		await expect(page.locator('.composer-dock')).toBeVisible();
+		await expect(page.locator('.action-dock')).toBeVisible();
 		await page.evaluate(() => {
 			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
 			relay.releaseMetadata(); relay.releasePrimary();
@@ -287,7 +329,7 @@ test.describe('Relay startup', () => {
 		});
 		await expect(page.locator('.participant')).toHaveCount(2);
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '3,2');
-		await page.getByRole('button', { name: 'Hide Chatter' }).click();
+		await page.locator('.chatter-toggle').click();
 		await page.locator('[data-cell-position="4,2"]').click();
 		await expect(page.getByLabel('Reply preview', { exact: true })).toContainText('Relay trace root');
 
@@ -334,7 +376,7 @@ test.describe('Relay startup', () => {
 			relay.releaseMetadata(); relay.releasePrimary(); relay.releaseTraceRoots(); relay.releaseTraceReplies();
 		});
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '3,2');
-		await page.getByRole('button', { name: 'Hide Chatter' }).click();
+		await page.locator('.chatter-toggle').click();
 		await page.locator('[data-cell-position="4,2"]').click();
 		await expect(page.getByLabel('Reply preview', { exact: true })).toContainText('Relay trace root');
 		await page.locator(`[data-trace-reply-id="${trace.direct.id}"] .trace-reply-content-button`).click();
@@ -373,7 +415,7 @@ test.describe('Relay startup', () => {
 			relay.releaseMetadata(); relay.releasePrimary();
 		});
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '3,2');
-		await page.getByRole('button', { name: 'Hide Chatter' }).click();
+		await page.locator('.chatter-toggle').click();
 		await page.locator('[data-cell-position="4,2"]').click();
 		const editor = page.getByRole('textbox', { name: '投稿エディター' });
 		const preview = page.getByLabel('Reply preview', { exact: true });
@@ -417,7 +459,7 @@ test.describe('Relay startup', () => {
 				relay.releaseMetadata(); relay.releasePrimary();
 			});
 			await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '3,2');
-			await page.getByRole('button', { name: 'Hide Chatter' }).click();
+			await page.locator('.chatter-toggle').click();
 			await page.locator('[data-cell-position="4,2"]').click();
 			const preview = page.getByLabel('Reply preview', { exact: true });
 			const editor = page.getByRole('textbox', { name: '投稿エディター' });
@@ -479,7 +521,7 @@ test.describe('Relay startup', () => {
 		await seedRelayAccount(page, trace.selfSecret, trace.selfPubkey);
 		await page.goto('/');
 		await expect(page.locator('main')).toHaveAttribute('data-trace-runtime', 'relay');
-		const hideTimeline = page.getByRole('button', { name: 'Hide Chatter' });
+		const hideTimeline = page.locator('.chatter-toggle');
 		if (await hideTimeline.isVisible()) await hideTimeline.click();
 
 		await page.evaluate(() => (window as typeof window & {
@@ -555,7 +597,7 @@ test.describe('Relay startup', () => {
 		});
 		await seedRelayAccount(page, trace.selfSecret, trace.selfPubkey);
 		await page.goto('/');
-		const hideTimeline = page.getByRole('button', { name: 'Hide Chatter' });
+		const hideTimeline = page.locator('.chatter-toggle');
 		await hideTimeline.click();
 
 		await page.evaluate(() => (window as typeof window & {

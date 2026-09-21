@@ -47,7 +47,7 @@ test.describe('Relay startup', () => {
 		await installDelayedRelay(page, { primaryEvents: testEvents(startTime) });
 		await seedRelayAccount(page, secret, pubkey);
 		await page.goto('/');
-		await expect(page.locator('.composer-dock')).toBeVisible();
+		await expect(page.locator('.action-dock')).toBeVisible();
 		await page.evaluate(() => {
 			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
 			relay.releaseMetadata(); relay.releasePrimary();
@@ -277,7 +277,7 @@ test.describe('Relay startup', () => {
 		await expect.poll(() => readRelayGameState(page)).toMatchObject({ points: 9, abilities: { inferenceEfficiency: 2, contextCapacity: 1, hallucinationSuppression: 1 } });
 	});
 
-	test('opens the self profile from the ComposerDock without adjustment-terminal proximity', async ({ page }) => {
+	test('opens the self profile from the ActionDock without adjustment-terminal proximity', async ({ page }) => {
 		await page.setViewportSize({ width: 1200, height: 900 });
 		await openReadyRelayWorld(page);
 
@@ -287,7 +287,7 @@ test.describe('Relay startup', () => {
 		const avatarColors = await page.evaluate(() => {
 			const field = document.querySelector<HTMLElement>('.participant[data-self="true"] .avatar');
 			const dock = document.querySelector<HTMLElement>('.profile-trigger-character-avatar');
-			if (!field || !dock) throw new Error('Expected field and ComposerDock self avatars.');
+			if (!field || !dock) throw new Error('Expected field and ActionDock self avatars.');
 			const fieldStyle = getComputedStyle(field);
 			const dockStyle = getComputedStyle(dock);
 			return { fieldBackground: fieldStyle.backgroundColor, dockBackground: dockStyle.backgroundColor, fieldBorder: fieldStyle.borderTopColor, dockBorder: dockStyle.borderTopColor };
@@ -507,7 +507,7 @@ test.describe('Relay startup', () => {
 		await expect(dialog.getByRole('button', { name: '脱出', exact: true })).toBeVisible();
 	});
 
-	test('places the ComposerDock controls below the editor on mobile', async ({ page }) => {
+	test('places the ActionDock controls below the editor on mobile', async ({ page }) => {
 		await page.setViewportSize({ width: 390, height: 844 });
 		await openReadyRelayWorld(page);
 
@@ -565,7 +565,7 @@ test.describe('Relay startup', () => {
 		await installDelayedRelay(page, { primaryEvents: testEvents(startTime) });
 		await seedRelayAccount(page, secret, pubkey, startTime + 2 * 60 * 1000);
 		await page.goto('/');
-		await expect(page.locator('.composer-dock')).toBeVisible();
+		await expect(page.locator('.action-dock')).toBeVisible();
 		await page.evaluate(() => {
 			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
 			relay.releaseMetadata(); relay.releasePrimary();
@@ -583,7 +583,7 @@ test.describe('Relay startup', () => {
 
 		await page.clock.setSystemTime(startTime + 2 * 60 * 1000 + 10 * 1000);
 		await page.reload({ waitUntil: 'domcontentloaded' });
-		await expect(page.locator('.composer-dock')).toBeVisible();
+		await expect(page.locator('.action-dock')).toBeVisible();
 		await page.evaluate(() => {
 			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
 			relay.releaseMetadata(); relay.releasePrimary();
@@ -603,7 +603,7 @@ test.describe('Relay startup', () => {
 		await installDelayedRelay(page, { primaryEvents: testEvents(startTime) });
 		await seedRelayAccount(page, secret, pubkey);
 		await page.goto('/');
-		await expect(page.locator('.composer-dock')).toBeVisible();
+		await expect(page.locator('.action-dock')).toBeVisible();
 		await page.evaluate(() => {
 			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
 			relay.releaseMetadata(); relay.releasePrimary();
@@ -651,7 +651,7 @@ test.describe('Relay startup', () => {
 			await seedRelayAccount(page, secret, pubkey);
 			await Promise.all(clients.map(async (client) => {
 				await client.goto('/');
-				await expect(client.locator('.composer-dock')).toBeVisible();
+				await expect(client.locator('.action-dock')).toBeVisible();
 				await client.evaluate(() => {
 					const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
 					relay.releaseMetadata(); relay.releasePrimary();
@@ -759,7 +759,7 @@ test.describe('Relay startup', () => {
 			await page.evaluate(() => (window as typeof window & { __personaBubbleFieldTestHooks: { release: () => void } }).__personaBubbleFieldTestHooks.release());
 			await reloaded;
 			await page.waitForLoadState('load');
-			await expect(page.locator('.composer-dock')).toBeVisible();
+			await expect(page.locator('.action-dock')).toBeVisible();
 			await expect.poll(() => page.evaluate(() => Boolean((window as typeof window & { __relayStartupTest?: unknown }).__relayStartupTest))).toBe(true);
 			await page.evaluate(() => {
 				const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
@@ -838,7 +838,7 @@ test.describe('Relay startup', () => {
 		await installDelayedRelay(page, { primaryEvents: testEvents(startTime) });
 		await seedRelayAccount(page, secret, pubkey);
 		await page.goto('/');
-		await expect(page.locator('.composer-dock')).toBeVisible();
+		await expect(page.locator('.action-dock')).toBeVisible();
 		await page.evaluate(() => {
 			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
 			relay.releaseMetadata(); relay.releasePrimary();
@@ -862,7 +862,7 @@ test.describe('Relay startup', () => {
 		await installDelayedRelay(page);
 		await seedRelayAccount(page, secret, pubkey);
 		await page.goto('/');
-		await expect(page.locator('.composer-dock')).toBeVisible();
+		await expect(page.locator('.action-dock')).toBeVisible();
 		await page.evaluate(() => {
 			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
 			relay.releaseMetadata(); relay.releasePrimary();
@@ -946,7 +946,7 @@ test.describe('Relay startup', () => {
 			await installDelayedRelay(page, { primaryEvents: events });
 			await seedUnavailablePersona(page, stateKind);
 			await page.goto('/');
-			await expect(page.locator('.composer-dock')).toBeVisible();
+			await expect(page.locator('.action-dock')).toBeVisible();
 			await page.evaluate(() => (window as unknown as { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
 			await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
 				AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) &&
@@ -993,7 +993,7 @@ test.describe('Relay startup', () => {
 		await installDelayedRelay(page, { primaryEvents: testEvents(startTime) });
 		await seedRelayAccount(page, secret, pubkey, expiresAtMs);
 		await page.goto('/');
-		await expect(page.locator('.composer-dock')).toBeVisible();
+		await expect(page.locator('.action-dock')).toBeVisible();
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
 			AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) &&
@@ -1045,7 +1045,7 @@ test.describe('Relay startup', () => {
 		await overwriteRelayGameState(page, { version: 4, personaPubkey: pubkey, lifespanExpiresAtMs: startTime + 30_000, points: 0, pointProgressTicks: 0, mendingJob: null,
 			abilities: { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 } });
 		await page.goto('/');
-		await expect(page.locator('.composer-dock')).toBeVisible();
+		await expect(page.locator('.action-dock')).toBeVisible();
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
 			AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) &&
@@ -1100,7 +1100,7 @@ test.describe('Relay startup', () => {
 		await overwriteRelayGameState(page, { version: 4, personaPubkey: pubkey, lifespanExpiresAtMs: startTime + 30_000, points: 0, pointProgressTicks: 0, mendingJob: null,
 			abilities: { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 } });
 		await page.goto('/');
-		await expect(page.locator('.composer-dock')).toBeVisible();
+		await expect(page.locator('.action-dock')).toBeVisible();
 		await page.evaluate(() => {
 			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
 			relay.releaseMetadata(); relay.releasePrimary();
@@ -1162,7 +1162,7 @@ test.describe('Relay startup', () => {
 		await installDelayedRelay(page, { primaryEvents: testEvents(startTime), persistAcrossReload: true, rejectTracePublishes: true });
 		await seedRelayAccount(page, secret, pubkey, startTime + 30_000);
 		await page.goto('/');
-		await expect(page.locator('.composer-dock')).toBeVisible();
+		await expect(page.locator('.action-dock')).toBeVisible();
 		await page.evaluate(() => {
 			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
 			relay.releaseMetadata(); relay.releasePrimary();
@@ -1213,7 +1213,7 @@ test.describe('Relay startup', () => {
 		await installDelayedRelay(page, { primaryEvents: testEvents(startTime), persistAcrossReload: true });
 		await seedRelayAccount(page, secret, pubkey, startTime + 30_000);
 		await page.goto('/');
-		await expect(page.locator('.composer-dock')).toBeVisible();
+		await expect(page.locator('.action-dock')).toBeVisible();
 		await page.evaluate(() => {
 			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
 			relay.releaseMetadata(); relay.releasePrimary();

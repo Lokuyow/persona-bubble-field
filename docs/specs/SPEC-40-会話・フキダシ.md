@@ -96,8 +96,7 @@ cell、participant座標、speech area、bubble placement bounds、Composer領�
 panel内はscrollせず、表示領域へ完全に収まる新しいentryから順に表示する。内部stateは最新50件を
 保持する。既存の`MOBILE_FIELD_BREAKPOINT = 700`を使い、width > 700
 ではreload時の初期表示をON、width <= 700ではOFFとする。この初期判定はページ初期化時に
-一度だけ行い、表示後のresize・端末回転でユーザーのshow/hide状態を上書きしない。hide button
-と、閉じた状態でも残るshow controlを設け、timeline内容をlocalStorage、IndexedDB等へ保存しない。
+一度だけ行い、表示後のresize・端末回転でユーザーのshow/hide状態を上書きしない。Chatterの可視toggleはActionDock内の`list-details` iconによる単一buttonとし、visible textは持たず、accessible nameでopen/closed semanticsを提供する。timeline内容をlocalStorage、IndexedDB等へ保存しない。
 SSR/hydration中はclosedとして扱う。timelineの更新・表示はbubbleの寿命判定および
 `ConversationState`から独立させる。
 
@@ -307,7 +306,7 @@ range、max widthの製品ルール、merge巨大化ルール、animationを変�
 発言タイプは1投稿ごとのexplicit choiceとし、通常をdefaultとする。ユーザーは以下の3方法で
 選択できる。
 
-1. Composer dockの発言タイプ切り替えbutton
+1. ActionDockの発言タイプ切り替えbutton
 2. Composer本文先頭のslash command
 3. modified Enter shortcut
 

@@ -43,16 +43,20 @@ test.describe('Relay startup', () => {
 			await page.setViewportSize({ width, height: 900 });
 			await openReadyRelayWorld(page);
 			const chatter = page.locator('aside.recent-message-timeline');
+			const chatterToggle = page.locator('.chatter-toggle');
 			await expect(chatter).toBeVisible({ visible: width > 700 });
+			await expect(chatterToggle).toHaveAttribute('aria-pressed', String(width > 700));
+			await expect(page.locator('.timeline-hide-control, .timeline-show-control')).toHaveCount(0);
 			const geometry = () => page.evaluate(() => ({
-				rects: ['.field-viewport', '.field-area', '.field-scene', '.speech-area', '.composer-dock', '.participant']
+				rects: ['.field-viewport', '.field-area', '.field-scene', '.speech-area', '.action-dock', '.participant']
 					.map((selector) => [...document.querySelectorAll(selector)].map((node) => node.getBoundingClientRect().toJSON())),
 				camera: getComputedStyle(document.querySelector('.field-scene')!).transform
 			}));
 			const before = await geometry();
 			for (const open of [width <= 700, width > 700]) {
-				await page.getByRole('button', { name: open ? 'Show Chatter' : 'Hide Chatter' }).click();
+				await chatterToggle.click();
 				await expect(chatter).toBeVisible({ visible: open });
+				await expect(chatterToggle).toHaveAttribute('aria-pressed', String(open));
 				expect(await geometry()).toEqual(before);
 			}
 			// Keep a manual choice opposite to the next viewport's reload default.
@@ -112,11 +116,11 @@ test.describe('Relay startup', () => {
 
 		const response = await page.goto('/?devWorld=1');
 		expect(response).not.toBeNull();
-		expect(await response!.text()).not.toContain('<div class="composer-dock');
+		expect(await response!.text()).not.toContain('<div class="action-dock');
 
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 		await expect(page.locator('.participant')).toHaveCount(1);
-		await expect(page.locator('.composer-dock')).toHaveCount(0);
+		await expect(page.locator('.action-dock')).toHaveCount(0);
 		await expect(page.locator('ehagaki-composer')).toHaveCount(0);
 		expect(hostOwned.requests()).toBe(0);
 		expect(consoleIssues).toEqual([]);
@@ -135,7 +139,7 @@ test.describe('Relay startup', () => {
 		await installHostOwnedStub(page);
 		await installDelayedRelay(page, { historyMessages: [historyMessage] });
 		await page.goto('/');
-		await expect(page.locator('.composer-dock')).toBeVisible();
+		await expect(page.locator('.action-dock')).toBeVisible();
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
 			AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) &&
@@ -183,10 +187,10 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('aside.recent-message-timeline')).toBeVisible();
 		const visibleTimeline = page.locator('.timeline-visible-entries .timeline-entry');
 		const beforeHiddenIds = await visibleTimeline.evaluateAll((entries) => entries.map((entry) => entry.getAttribute('data-timeline-event-id')));
-		await page.getByRole('button', { name: 'Hide Chatter' }).click();
+		await page.locator('.chatter-toggle').click();
 		await expect(page.locator('aside.recent-message-timeline')).toBeHidden();
 		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectMessage(event: object): void } }).__relayStartupTest.injectMessage(event), liveMessage);
-		await page.getByRole('button', { name: 'Show Chatter' }).click();
+		await page.locator('.chatter-toggle').click();
 		await expect(page.locator(`[data-timeline-event-id="${liveMessage.id}"]`)).toHaveCount(1);
 		const afterShownIds = await visibleTimeline.evaluateAll((entries) => entries.map((entry) => entry.getAttribute('data-timeline-event-id')));
 		expect(afterShownIds.some((id) => !beforeHiddenIds.includes(id))).toBe(true);
@@ -203,13 +207,13 @@ test.describe('Relay startup', () => {
 
 			const response = await page.goto('/', { waitUntil: 'commit' });
 			expect(response).not.toBeNull();
-			expect(await response!.text()).toContain('composer-dock');
+			expect(await response!.text()).toContain('action-dock');
 
-			await expect(page.locator('.composer-dock')).toBeVisible();
+			await expect(page.locator('.action-dock')).toBeVisible();
 			await expect(page.locator('ehagaki-composer')).toBeVisible();
 			const beforePreferredHeight = await page.evaluate(() => {
 				const shell = document.querySelector<HTMLElement>('.app-shell')!;
-				const dock = document.querySelector<HTMLElement>('.composer-dock')!;
+				const dock = document.querySelector<HTMLElement>('.action-dock')!;
 				const field = document.querySelector<HTMLElement>('.field-viewport')!;
 				return {
 					dockHeight: dock.getBoundingClientRect().height,
@@ -230,11 +234,11 @@ test.describe('Relay startup', () => {
 			await page.evaluate(() => (window as typeof window & {
 				__ehagakiSetPreferredHeight(height: number): void;
 			}).__ehagakiSetPreferredHeight(50));
-			await expect.poll(() => page.evaluate(() => document.querySelector<HTMLElement>('.composer-dock')!.getBoundingClientRect().height))
+			await expect.poll(() => page.evaluate(() => document.querySelector<HTMLElement>('.action-dock')!.getBoundingClientRect().height))
 				.toBeCloseTo(beforePreferredHeight.dockHeight, 1);
 
 			const afterPreferredHeight = await page.evaluate(() => ({
-				dockHeight: document.querySelector<HTMLElement>('.composer-dock')!.getBoundingClientRect().height,
+				dockHeight: document.querySelector<HTMLElement>('.action-dock')!.getBoundingClientRect().height,
 				fieldHeight: document.querySelector<HTMLElement>('.field-viewport')!.getBoundingClientRect().height
 			}));
 			expect(Math.abs(afterPreferredHeight.dockHeight - beforePreferredHeight.dockHeight)).toBeLessThan(0.5);
@@ -251,7 +255,7 @@ test.describe('Relay startup', () => {
 		}).__virtualKeyboardTest.state().overlaysContent)).toBe(true);
 
 		const before = await page.evaluate(() => {
-			const dock = document.querySelector<HTMLElement>('.composer-dock')!;
+			const dock = document.querySelector<HTMLElement>('.action-dock')!;
 			const field = document.querySelector<HTMLElement>('.field-viewport')!;
 			const self = document.querySelector<HTMLElement>('.participant[data-self="true"]')!;
 			return {
@@ -274,7 +278,7 @@ test.describe('Relay startup', () => {
 			.getPropertyValue('--composer-keyboard-inset').trim())).toBe('300px');
 
 		const keyboardOpen = await page.evaluate(() => {
-			const dock = document.querySelector<HTMLElement>('.composer-dock')!;
+			const dock = document.querySelector<HTMLElement>('.action-dock')!;
 			const field = document.querySelector<HTMLElement>('.field-viewport')!;
 			const self = document.querySelector<HTMLElement>('.participant[data-self="true"]')!;
 			return {
@@ -294,7 +298,7 @@ test.describe('Relay startup', () => {
 		}).__virtualKeyboardTest.setBottomInset(0));
 		await expect.poll(() => page.evaluate(() => getComputedStyle(document.querySelector('.app-shell')!)
 			.getPropertyValue('--composer-keyboard-inset').trim())).toBe('0px');
-		await expect(page.locator('.composer-dock')).toHaveCSS('bottom', '0px');
+		await expect(page.locator('.action-dock')).toHaveCSS('bottom', '0px');
 
 	});
 
@@ -328,7 +332,7 @@ test.describe('Relay startup', () => {
 					return element?.getBoundingClientRect().toJSON() ?? null;
 				};
 				return {
-					dock: rect('.composer-dock'),
+					dock: rect('.action-dock'),
 					viewport: rect('.field-viewport'),
 					area: rect('.field-area'),
 					scene: rect('.field-scene'),
@@ -377,7 +381,7 @@ test.describe('Relay startup', () => {
 		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret));
 		await page.goto('/');
 
-		await expect(page.locator('.composer-dock')).toBeVisible();
+		await expect(page.locator('.action-dock')).toBeVisible();
 		await expect.poll(hostOwned.requests).toBeGreaterThan(0);
 		const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
 		await expect(editor).toBeVisible();
@@ -438,7 +442,7 @@ test.describe('Relay startup', () => {
 		const selfSecret = fixtureSecret(41);
 		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret));
 		await page.goto('/');
-		await expect(page.locator('.composer-dock')).toBeVisible();
+		await expect(page.locator('.action-dock')).toBeVisible();
 		const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
 		await editor.fill('abort while waiting for metadata');
 		await page.locator('ehagaki-composer').getByRole('button', { name: 'Send' }).click();
@@ -459,7 +463,7 @@ test.describe('Relay startup', () => {
 		await page.goto('/?devWorld=1');
 
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
-		await expect(page.locator('.composer-dock')).toHaveCount(0);
+		await expect(page.locator('.action-dock')).toHaveCount(0);
 		await expect(page.locator('ehagaki-composer')).toHaveCount(0);
 		expect(hostOwned.requests()).toBe(0);
 	});

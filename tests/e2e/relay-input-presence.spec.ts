@@ -244,7 +244,7 @@ test.describe('Relay startup', () => {
 		await installDelayedRelay(page, { primaryEvents: { message: speech, position: selfPosition } });
 		await seedRelayAccount(page, selfSecret, selfPosition.pubkey);
 		await page.goto('/');
-		await expect(page.locator('.composer-dock')).toBeVisible();
+		await expect(page.locator('.action-dock')).toBeVisible();
 		await page.evaluate(() => {
 			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
 			relay.releaseMetadata(); relay.releasePrimary();
@@ -304,7 +304,7 @@ test.describe('Relay startup', () => {
 		await installDelayedRelay(page, { deferPrimaryEvents: true });
 		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret));
 		await page.goto('/');
-		await expect(page.locator('.composer-dock')).toBeVisible();
+		await expect(page.locator('.action-dock')).toBeVisible();
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
 			AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) &&

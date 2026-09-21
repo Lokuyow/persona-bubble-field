@@ -34,10 +34,93 @@ import { deriveBip85NostrEntropy } from '../../src/lib/bip85';
 import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL } from '../../src/lib/fieldFacilities';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { installFieldFrameSampling, readFieldFrames, sampleRenderedField } from './helpers/fieldFrames';
-import { fixtureSecret, installDelayedRelay, publishedMessages, waitForPublishedMessageCount, openReadyRelayWorld, installPromptApiStub, seedRelayAccount, composerContextCalls } from './helpers/relayHarness';
+import { fixtureSecret, installDelayedRelay, publishedMessages, waitForPublishedMessageCount, openReadyRelayWorld, installPromptApiStub, seedRelayAccount, composerContextCalls, readActionDockControlOrder } from './helpers/relayHarness';
 
 
 test.describe('Relay startup', () => {
+	test('shows ActionDock tooltips for the current control meanings', async ({ page }) => {
+		await installPromptApiStub(page);
+		const editor = await openReadyRelayWorld(page, 1);
+		const tooltip = page.getByRole('tooltip');
+		const moveAway = async (): Promise<void> => { await page.mouse.move(1, 1); };
+		const expectTooltip = async (trigger: Locator, text: string): Promise<void> => {
+			await moveAway();
+			await trigger.hover();
+			await expect(tooltip).toHaveText(text);
+			await expect(tooltip).toBeVisible();
+		};
+
+		const profile = page.locator('.profile-trigger');
+		const chatter = page.locator('.chatter-toggle');
+		const speechType = page.locator('.speech-type-toggle');
+		const suggestions = page.locator('.suggestions-tooltip-trigger');
+		await expect(profile).not.toHaveAttribute('title');
+		await expect(chatter).not.toHaveAttribute('title');
+		await expect(speechType).not.toHaveAttribute('title');
+		await expect(page.locator('.suggestions-toggle')).not.toHaveAttribute('title');
+
+		await expectTooltip(profile, '自分のプロフィール');
+		await expectTooltip(chatter, 'Chatterを閉じる');
+		await chatter.click();
+		await expect(chatter).toHaveAttribute('aria-pressed', 'false');
+		await expectTooltip(chatter, 'Chatterを開く');
+		await chatter.click();
+
+		await expectTooltip(speechType, '発言タイプ：通常');
+		await speechType.click();
+		await expectTooltip(speechType, '発言タイプ：叫び');
+
+		await expectTooltip(suggestions, 'AI発言候補を生成');
+		await editor.fill('disabled candidate tooltip');
+		await expect(page.locator('.suggestions-toggle')).toBeDisabled();
+		await expectTooltip(suggestions, 'AI発言候補を生成');
+	});
+
+	test('renders ActionDock controls in order on desktop and mobile without an unread slot', async ({ page }) => {
+		await installPromptApiStub(page);
+		for (const width of [1200, 390]) {
+			await page.setViewportSize({ width, height: 844 });
+			await openReadyRelayWorld(page, 1);
+			const chatterToggle = page.locator('.chatter-toggle');
+			const suggestionsToggle = page.locator('.suggestions-toggle');
+			await expect(page.getByRole('button', { name: 'AI発言候補を生成' })).toBeVisible();
+			await expect(suggestionsToggle.locator('svg')).toHaveCount(1);
+			await expect(suggestionsToggle).not.toContainText('候補');
+			await expect(suggestionsToggle).toHaveAccessibleName('AI発言候補を生成');
+			const suggestionsButtonBox = await suggestionsToggle.boundingBox();
+			const suggestionsIconBox = await suggestionsToggle.locator('svg').boundingBox();
+			expect(suggestionsButtonBox && suggestionsIconBox).toBeTruthy();
+			if (suggestionsButtonBox && suggestionsIconBox) {
+				expect(suggestionsButtonBox.width).toBeGreaterThanOrEqual(44);
+				expect(suggestionsButtonBox.height).toBeGreaterThanOrEqual(44);
+				expect(Math.abs((suggestionsIconBox.x + suggestionsIconBox.width / 2) - (suggestionsButtonBox.x + suggestionsButtonBox.width / 2))).toBeLessThan(1);
+				expect(Math.abs((suggestionsIconBox.y + suggestionsIconBox.height / 2) - (suggestionsButtonBox.y + suggestionsButtonBox.height / 2))).toBeLessThan(1);
+			}
+			await expect(chatterToggle.locator('svg')).toHaveCount(1);
+			await expect(chatterToggle).not.toContainText('Chatter');
+			const buttonBox = await chatterToggle.boundingBox();
+			const iconBox = await chatterToggle.locator('svg').boundingBox();
+			expect(buttonBox && iconBox).toBeTruthy();
+			if (buttonBox && iconBox) {
+				expect(Math.abs((iconBox.x + iconBox.width / 2) - (buttonBox.x + buttonBox.width / 2))).toBeLessThan(1);
+				expect(Math.abs((iconBox.y + iconBox.height / 2) - (buttonBox.y + buttonBox.height / 2))).toBeLessThan(1);
+			}
+			const initiallyOpen = width > 700;
+			await expect(chatterToggle).toHaveAttribute('aria-label', initiallyOpen ? 'Chatterを閉じる' : 'Chatterを開く');
+			await expect(chatterToggle).toHaveAttribute('aria-pressed', String(initiallyOpen));
+			const toggleBox = await chatterToggle.boundingBox();
+			expect(toggleBox?.width ?? 0).toBeGreaterThanOrEqual(44);
+			expect(toggleBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+			await chatterToggle.click();
+			await expect(chatterToggle).toHaveAttribute('aria-label', initiallyOpen ? 'Chatterを開く' : 'Chatterを閉じる');
+			await expect(chatterToggle).toHaveAttribute('aria-pressed', String(!initiallyOpen));
+			await expect(page.locator('.trace-unread-indicator')).toHaveCount(0);
+			expect(await readActionDockControlOrder(page)).toEqual([
+				'profile-trigger', 'chatter-toggle', 'speech-type-toggle', 'suggestions-anchor'
+			]);
+		}
+	});
+
 	test('passes the Host-owned editor submit button option without enabling the keyboard button bar', async ({ page }) => {
 		await installHostOwnedStub(page);
 		await installDelayedRelay(page);

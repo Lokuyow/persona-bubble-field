@@ -104,7 +104,7 @@ blockingは行わない。blocked diagonalをcardinal movementへfallbackまた�
 成立したmovementの最大レートはcardinal / diagonalで共通の1秒あたり2回とする。
 
 pointer movementはPCとmobile/tabletで共通とし、mouse、pen、touchをWeb標準の
-Pointer Eventsによる同じpointer gestureとして扱う。composer-dockを除く通常のfield
+Pointer Eventsによる同じpointer gestureとして扱う。action-dockを除く通常のfield
 viewport領域（fieldのvisual artwork・gridの外側を含む）から開始でき、fieldが所有する
 selectable target（participant icon / profile trigger、Traceを調査するlogical-cell
 selection target、調査中rootのauthor ghost profile trigger）では既存のtap/clickを維持しつつ、
