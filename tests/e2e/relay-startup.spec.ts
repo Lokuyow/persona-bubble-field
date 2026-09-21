@@ -3862,7 +3862,6 @@ test.describe('Relay startup', () => {
 		await expect(marker).toHaveCSS('color', 'rgb(207, 6, 254)');
 		await expect(marker).toHaveCSS('opacity', commonMarkerOpacity);
 		await expect(marker).toHaveCSS('filter', 'none');
-		await expect(marker).toHaveCSS('filter', 'none');
 		await expect(page.locator('.trace-unread-indicator')).toBeVisible();
 		await selectRelayTraceCell(page, '4,2');
 		await expect(page.locator(`[data-trace-reply-id="${replyAfterRootRead.id}"]`)).toContainText(replyAfterRootRead.content);
