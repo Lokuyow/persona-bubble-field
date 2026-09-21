@@ -14,7 +14,7 @@ test('keeps button labels unselectable while preserving text selection elsewhere
 			buttonUserSelect: getComputedStyle(button).userSelect,
 			buttonWebkitUserSelect: getComputedStyle(button).webkitUserSelect,
 			inputUserSelect: getComputedStyle(input).userSelect,
-			tapHighlight: root.webkitTapHighlightColor
+			tapHighlight: root.getPropertyValue('-webkit-tap-highlight-color')
 		};
 	});
 
