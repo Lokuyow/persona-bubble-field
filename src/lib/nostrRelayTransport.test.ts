@@ -60,7 +60,7 @@ function mockRelay() {
 		onPublish: (_socket: Client, _event: VerifiedEvent) => {},
 		primaryRequests: (): WireRequest[] => relay.requests.filter((request) => [42, 30078].includes(kind(request)!) && request[2].limit === undefined),
 		traceRequests: (): WireRequest[] => relay.requests.filter((request) => filters(request).every((filter) => (filter.kinds as number[])[0] === 1111)),
-		rootRequests: (): WireRequest[] => relay.requests.filter((request) => kind(request) === 42 && request[2].limit === 1000),
+		rootRequests: (): WireRequest[] => relay.requests.filter((request) => kind(request) === 42 && request[2].limit === 1000 && request[3]?.limit === 1000),
 		primaryId: (eventKind: 42 | 30078): string => relay.primaryRequests().filter((request) => kind(request) === eventKind).at(-1)![1],
 		latestSocket: (): Client => relay.sockets.at(-1)!
 	};
@@ -201,7 +201,7 @@ describe('primary lifecycle', () => {
 			expect(messageRequests).toHaveLength(1);
 			expect(messageRequests[0]).toHaveLength(4);
 			expect(messageRequests[0][2]).toMatchObject({ kinds: [42, 30079], since: f.input.messageSince });
-			expect(messageRequests[0][3]).toMatchObject({ kinds: [42, 30079], limit: 50 });
+			expect(messageRequests[0][3]).toMatchObject({ kinds: [42], limit: 50 });
 			expect(messageRequests[0][3].since).toBeUndefined();
 		}
 		expect(result.primaryPairs).toHaveLength(4);
@@ -783,10 +783,30 @@ describe('trace root bootstrap', () => {
 		const result = await pending;
 		expect(result.rawEvents.map((event) => event.id)).toEqual([nip28Reply.id, invalidSignature.id].sort());
 		for (const relay of f.authorities) {
-			expect(relay.rootRequests().map((request) => request.slice(2))).toEqual([[expectedFilter]]);
+			expect(relay.rootRequests().map((request) => request.slice(2))).toEqual([[
+				expect.objectContaining(expectedFilter),
+				expect.objectContaining({ kinds: [30079], limit: 1000 })
+			]]);
 		}
 		expect(f.seeds.flatMap((relay) => relay.rootRequests())).toEqual([]);
 		expect(result.relays.map((diagnostic) => diagnostic.status)).toEqual(['eose', 'eose']);
+	});
+
+	it('keeps death trace history in a separate bounded filter from kind 42 roots', async () => {
+		const f = fixture(1);
+		await f.start();
+		f.authorities[0].onRequest = (socket, request) => {
+			send(socket, 'EOSE', request[1]);
+		};
+
+		const pending = f.transport.bootstrapTraceRootCandidates();
+		await vi.advanceTimersByTimeAsync(10);
+		await pending;
+		const rootRequest = f.authorities[0].rootRequests()[0];
+		expect(rootRequest.slice(2)).toEqual([
+			expect.objectContaining({ kinds: [42], limit: 1000 }),
+			expect.objectContaining({ kinds: [30079], limit: 1000 })
+		]);
 	});
 
 	it('dedupes and deterministically orders a bounded union without early termination', async () => {
@@ -831,11 +851,11 @@ describe('trace root bootstrap', () => {
 		await vi.advanceTimersByTimeAsync(10);
 
 		const result = await pending;
-		expect(result.rawEvents).toHaveLength(1000);
+		expect(result.rawEvents).toHaveLength(1003);
 		expect(result.rawEvents.slice(0, 2).map((event) => event.id)).toEqual([lateA.id, lateB.id]);
 		expect(result.rawEvents.find((event) => event.id === events[1].id)?.content).toBe(events[1].content);
 		expect(result.rawEvents.find((event) => event.id === sameRelayId)?.content).toBe('a');
-		expect(result.rawEvents.some((event) => event.id === events.at(-1)!.id)).toBe(false);
+		expect(result.rawEvents.some((event) => event.id === events.at(-1)!.id)).toBe(true);
 	});
 
 	it('reports mixed EOSE and CLOSED terminal diagnostics', async () => {

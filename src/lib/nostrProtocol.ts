@@ -603,7 +603,7 @@ export function parseTraceEvent(event: Event, channelId: string): ParsedTraceEve
 	assertChannelId(channelId);
 	if (!isVerifiedEvent(event) || event.kind !== TRACE_EVENT_KIND || !hasAssignedCharacter(event)) return null;
 	if (!Number.isSafeInteger(event.created_at) || event.created_at < 0) return null;
-	if (!referencesChannel(event, channelId)) return null;
+	if (!hasExactlyChannelRootRelation(event, channelId)) return null;
 	if (!event.tags.some((tag) => tag[0] === 'L' && tag[1] === PROTOTYPE_NAMESPACE)) return null;
 	if (!event.tags.some((tag) => tag[0] === 'l' && tag[1] === 'chat' && tag[2] === PROTOTYPE_NAMESPACE)) return null;
 	if (!event.tags.some((tag) => tag[0] === 'l' && tag[1] === 'trace' && tag[2] === PROTOTYPE_NAMESPACE)) return null;
@@ -612,6 +612,11 @@ export function parseTraceEvent(event: Event, channelId: string): ParsedTraceEve
 	const identifier = event.tags.filter((tag) => tag[0] === 'd');
 	const position = parseUnambiguousWorldPosition(event);
 	if (identifier.length !== 1 || !identifier[0][1] || !position) return null;
+	try {
+		assertTraceIdentifier(identifier[0][1]);
+	} catch {
+		return null;
+	}
 	return { id: event.id, pubkey: event.pubkey, createdAt: event.created_at, content: event.content, position, source: 'death' };
 }
 
@@ -630,7 +635,7 @@ export function buildWorldMessageFilter(options: LiveFilterOptions): Filter {
 export function buildWorldMessageHistoryFilter(options: Pick<LiveFilterOptions, 'channelId'>): Filter {
 	assertChannelId(options.channelId);
 	return {
-		kinds: [CHANNEL_MESSAGE_KIND, TRACE_EVENT_KIND],
+		kinds: [CHANNEL_MESSAGE_KIND],
 		'#e': [options.channelId],
 		'#L': [PROTOTYPE_NAMESPACE],
 		'#l': ['chat'],
@@ -656,12 +661,26 @@ export function buildWorldStateFilter(options: LiveFilterOptions): Filter {
 export function buildTraceRootBootstrapFilter(options: TraceRootBootstrapFilterOptions): Filter {
 	assertChannelId(options.channelId);
 	return {
-		kinds: [CHANNEL_MESSAGE_KIND, TRACE_EVENT_KIND],
+		kinds: [CHANNEL_MESSAGE_KIND],
 		'#e': [options.channelId],
 		'#L': [PROTOTYPE_NAMESPACE],
 		'#l': ['chat'],
 		limit: TRACE_ROOT_BOOTSTRAP_LIMIT
 	};
+}
+
+export function buildTraceRootBootstrapFilters(options: TraceRootBootstrapFilterOptions): [Filter, Filter] {
+	assertChannelId(options.channelId);
+	const base = {
+		'#e': [options.channelId],
+		'#L': [PROTOTYPE_NAMESPACE],
+		'#l': ['chat'],
+		limit: TRACE_ROOT_BOOTSTRAP_LIMIT
+	};
+	return [
+		{ kinds: [CHANNEL_MESSAGE_KIND], ...base },
+		{ kinds: [TRACE_EVENT_KIND], ...base }
+	];
 }
 
 export function buildTraceReplyFilter(options: TraceReplyFilterOptions): Filter {

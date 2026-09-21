@@ -397,7 +397,10 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 				channel,
 				content: trimmed,
 				position: preparedTerminalExit.parsed.position,
-				createdAt: Math.floor(Date.now() / 1000),
+				createdAt: Math.max(
+					Math.floor(Date.now() / 1000),
+					preparedTerminalExit.parsed.createdAt
+				),
 				source: 'death',
 				identifier: `trace:death:${Date.now()}:${deathTraceSequence++}`
 			}), selfSigner.secretKey);
@@ -904,10 +907,6 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 				? selectTraceConversationSpeech(config.currentId)
 				: { kind: 'blocked' };
 		}
-		if (root.source === 'death') {
-			activateDeathTraceConversation(root, config);
-			return { kind: 'opened' };
-		}
 		if (pendingSelfOperation || pendingTraceReply) return { kind: 'pending' };
 		const nowMs = Date.now();
 		const prepared = prepareTraceInspectionActivity({
@@ -921,6 +920,10 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			const candidate = positionCandidate(prepared.position, nowMs);
 			if (!candidate) return { kind: 'blocked' };
 			void publishPreparedSelfPosition('trace-inspection', candidate);
+		}
+		if (root.source === 'death') {
+			activateDeathTraceConversation(root, config);
+			return { kind: 'opened' };
 		}
 		activateTraceConversation(root, config);
 		return { kind: 'opened' };
@@ -1027,6 +1030,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		if (pendingSelfOperation || pendingSelfMessage || pendingTraceReply) return { kind: 'pending' };
 		const accepted = resolveReplyTarget(input.rootId, input.targetId);
 		if (!accepted) return { kind: 'blocked' };
+		if (accepted.root.source === 'death') return { kind: 'blocked' };
 		const operation = { eventId: null as string | null };
 		pendingTraceReply = operation;
 		try {

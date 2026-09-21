@@ -17,6 +17,7 @@ import {
 	buildTraceReplyFilter,
 	buildTraceReplyTemplate,
 	buildTraceRootBootstrapFilter,
+	buildTraceRootBootstrapFilters,
 	buildWorldMessageFilter,
 	buildWorldMessageFilters,
 	buildWorldMessageTemplate,
@@ -707,7 +708,7 @@ describe('Nostr protocol foundation', () => {
 				since: 1_700_000_000
 			},
 			{
-				kinds: [42, 30079],
+				kinds: [42],
 				'#e': [CHANNEL_ID],
 				'#L': [PROTOTYPE_NAMESPACE],
 				'#l': ['chat'],
@@ -721,12 +722,20 @@ describe('Nostr protocol foundation', () => {
 			since: 1_700_000_100
 		});
 		expect(buildTraceRootBootstrapFilter({ channelId: CHANNEL_ID })).toEqual({
-			kinds: [42, 30079],
+			kinds: [42],
 			'#e': [CHANNEL_ID],
 			'#L': [PROTOTYPE_NAMESPACE],
 			'#l': ['chat'],
 			limit: 1000
 		});
+		expect(buildTraceRootBootstrapFilters({ channelId: CHANNEL_ID })).toEqual([
+			{
+				kinds: [42], '#e': [CHANNEL_ID], '#L': [PROTOTYPE_NAMESPACE], '#l': ['chat'], limit: 1000
+			},
+			{
+				kinds: [30079], '#e': [CHANNEL_ID], '#L': [PROTOTYPE_NAMESPACE], '#l': ['chat'], limit: 1000
+			}
+		]);
 		expect(buildTraceReplyFilter({ rootId: CHANNEL_ID })).toEqual({
 			kinds: [1111], '#E': [CHANNEL_ID], '#L': [PROTOTYPE_NAMESPACE], '#l': ['chat'], limit: 100
 		});
@@ -784,6 +793,20 @@ describe('Nostr protocol foundation', () => {
 			identifier: 'trace:death:invalid'
 		}), tags: [['e', CHANNEL_ID, channel.relayHint, 'root']] });
 		expect(parseTraceEvent(invalid, CHANNEL_ID)).toBeNull();
+	});
+
+	it('fails closed for non-canonical death trace identifiers and root relations', () => {
+		for (const mutate of [
+			(event: VerifiedEvent) => { event.tags[0][1] = ''; },
+			(event: VerifiedEvent) => { event.tags[0][1] = 'trace:death:bad space'; },
+			(event: VerifiedEvent) => { event.tags[0][1] = 'x'.repeat(201); },
+			(event: VerifiedEvent) => { event.tags.push(['d', 'trace:death:duplicate']); },
+			(event: VerifiedEvent) => { event.tags[1][3] = 'reply'; }
+		]) {
+			const event = signedDeathTrace();
+			mutate(event);
+			expect(parseTraceEvent(resign(event), CHANNEL_ID)).toBeNull();
+		}
 	});
 
 	it('builds and parses channel-scoped active and exit World State', () => {
