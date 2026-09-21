@@ -538,9 +538,9 @@ NIP-28 kind 42による有効なtop-level messageを使用する。
 
 ただし、過去のkind 42の一部は「発言の痕跡」として空間上に残り、後から探索・調査できる。
 
-### 専用世界kind 42の基本構造
+### 通常chat kind 42の基本構造
 
-プロトタイプの専用世界top-level kind 42には、少なくとも以下を持たせる。
+プロトタイプの専用世界で通常chatとして受理するtop-level kind 42には、少なくとも以下を持たせる。
 
 - 対象NIP-28 channel kind 40へのroot参照
 - NIP-32 namespace
@@ -575,7 +575,7 @@ NIP-28 kind 42による有効なtop-level messageを使用する。
 
 `client` tagは使用しない。
 
-専用世界kind 42の識別条件、namespace、正式公開時のnamespace変更方針等は [`SPEC-10-Nostr・アカウント.md`](./SPEC-10-Nostr・アカウント.md) を正とする。
+通常chat kind 42の識別条件、namespace、正式公開時のnamespace変更方針等は [`SPEC-10-Nostr・アカウント.md`](./SPEC-10-Nostr・アカウント.md) を正とする。explicit Traceのwire構造は [`SPEC-50-発言の痕跡.md`](./SPEC-50-発言の痕跡.md) を正とする。
 
 position、`w`、初期同期、live更新等は [`SPEC-30-フィールド・position・presence.md`](./SPEC-30-フィールド・position・presence.md) を正とする。
 

@@ -8,7 +8,7 @@
 
 ### rootの選択と上限
 
-通常trace root候補は、有効なtop-level kind 42だけとする。normal / shout / monologueを同率で対象にし、merged bubbleは表示上の集約にすぎないため、抽選は元event単位で行う。
+通常trace root候補は、通常chatとして受理した有効なtop-level kind 42だけとする。normal / shout / monologueを同率で対象にし、merged bubbleは表示上の集約にすぎないため、抽選は元event単位で行う。explicit Traceはこの通常chat候補には含めない。
 
 ```ts
 BigInt(`0x${event.id}`) % 5n === 0n

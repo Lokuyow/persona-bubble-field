@@ -795,20 +795,30 @@ describe('Nostr protocol foundation', () => {
 		expect(parseTraceEvent(invalid, CHANNEL_ID)).toBeNull();
 	});
 
-	it('fails closed when a kind 42 claims both chat and trace semantics', () => {
-		const ambiguous = signedMessage();
-		ambiguous.tags.push(['l', 'trace', PROTOTYPE_NAMESPACE]);
-		ambiguous.tags.push(['l', 'trace:death', PROTOTYPE_NAMESPACE]);
-		const resigned = resign(ambiguous);
-		expect(parseWorldMessage(resigned, CHANNEL_ID)).toBeNull();
-		expect(parseTraceEvent(resigned, CHANNEL_ID)).toBeNull();
+	it('accepts canonical death traces only through the trace parser', () => {
+		const event = signedDeathTrace();
+		expect(parseWorldMessage(event, CHANNEL_ID)).toBeNull();
+		expect(parseTraceEvent(event, CHANNEL_ID)).not.toBeNull();
 	});
 
-	it('fails closed for ambiguous death trace labels and root relations', () => {
+	it('fails closed for ambiguous kind 42 chat and trace labels', () => {
+		for (const chatCount of [1, 2]) {
+			const event = signedDeathTrace();
+			for (let index = 0; index < chatCount; index += 1) {
+				event.tags.push(['l', 'chat', PROTOTYPE_NAMESPACE]);
+			}
+			const resigned = resign(event);
+			expect(parseWorldMessage(resigned, CHANNEL_ID)).toBeNull();
+			expect(parseTraceEvent(resigned, CHANNEL_ID)).toBeNull();
+		}
+	});
+
+	it('fails closed for duplicate or contradictory death trace labels', () => {
 		for (const mutate of [
-			(event: VerifiedEvent) => { event.tags.push(['l', 'chat', PROTOTYPE_NAMESPACE]); },
+			(event: VerifiedEvent) => { event.tags.push(['l', 'trace', PROTOTYPE_NAMESPACE]); },
 			(event: VerifiedEvent) => { event.tags.push(['l', 'trace:death', PROTOTYPE_NAMESPACE]); },
 			(event: VerifiedEvent) => { event.tags.push(['l', 'trace:other', PROTOTYPE_NAMESPACE]); },
+			(event: VerifiedEvent) => { event.tags.push(['l', 'speech:shout', PROTOTYPE_NAMESPACE]); },
 			(event: VerifiedEvent) => { event.tags.push(['d', 'retired']); },
 			(event: VerifiedEvent) => { event.tags[0][3] = 'reply'; }
 		]) {

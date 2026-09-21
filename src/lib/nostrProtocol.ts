@@ -394,6 +394,10 @@ function hasExactlyProjectLabel(event: Event, value: string): boolean {
 	return event.tags.filter((tag) => tag[0] === 'l' && tag[1] === value && tag[2] === PROTOTYPE_NAMESPACE).length === 1;
 }
 
+function hasProjectLabel(event: Event, value: string): boolean {
+	return event.tags.some((tag) => tag[0] === 'l' && tag[1] === value && tag[2] === PROTOTYPE_NAMESPACE);
+}
+
 function hasProjectTraceLabel(event: Event): boolean {
 	return event.tags.some((tag) =>
 		tag[0] === 'l' && (tag[1] === 'trace' || tag[1]?.startsWith('trace:')) && tag[2] === PROTOTYPE_NAMESPACE
@@ -602,7 +606,7 @@ export function parseTraceEvent(event: Event, channelId: string): ParsedTraceEve
 	if (!hasExactlyChannelRootRelation(event, channelId)) return null;
 	if (!event.tags.some((tag) => tag[0] === 'L' && tag[1] === PROTOTYPE_NAMESPACE)) return null;
 	if (event.tags.some((tag) => tag[0] === 'd')) return null;
-	if (hasExactlyProjectLabel(event, 'chat') || !hasExactlyProjectLabel(event, 'trace')) return null;
+	if (hasProjectLabel(event, 'chat') || !hasExactlyProjectLabel(event, 'trace')) return null;
 	const sourceTags = event.tags.filter((tag) => tag[0] === 'l' && tag[2] === PROTOTYPE_NAMESPACE && tag[1]?.startsWith('trace:'));
 	if (sourceTags.length !== 1 || sourceTags[0][1] !== 'trace:death' || hasProjectSpeechLabel(event)) return null;
 	const position = parseUnambiguousWorldPosition(event);
