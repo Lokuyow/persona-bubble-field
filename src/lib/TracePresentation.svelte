@@ -172,6 +172,7 @@
 	.trace-root-bubble.bubble-normal::after { content: none; }
 	.trace-root-bubble,
 	.trace-reply-card { width: fit-content; min-width: 72px; max-width: min(240px, calc(100% - 32px)); padding: 12px 15px; border-style: dashed; background: var(--trace-surface); pointer-events: auto; }
+	.trace-root-bubble { user-select: text; -webkit-user-select: text; }
 	.trace-root-card,
 	.trace-reply-card { position: absolute; pointer-events: auto; }
 	.trace-presentation-pending { visibility: hidden; pointer-events: none; }
