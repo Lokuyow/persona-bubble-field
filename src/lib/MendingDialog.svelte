@@ -104,7 +104,7 @@
 							<div class:success-flash={collectFeedback} class="result-card" data-mending-icon="heart"><Heart aria-hidden="true" /><div class="result-copy"><span class="result-label">寿命</span><strong>+{lifespanDuration}</strong></div></div>
 						</div>
 						<div class="action-group">
-							<PrimaryButton type="button" disabled={starting} onclick={onCollect}>成果を受け取る</PrimaryButton>
+							<PrimaryButton type="button" disabled={starting || (projection?.points ?? 0) < 1} onclick={onCollect}>成果を受け取る</PrimaryButton>
 						</div>
 					</section>
 					<section class="status-group" aria-label="作業の蓄積状況">
