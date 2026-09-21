@@ -897,6 +897,11 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		emitTraceConversationState(traceStateFor(root, config, [], 'settled'));
 	}
 
+	function activateTraceRootConversation(root: ParsedWorldMessage, config: TraceConversationConfig): void {
+		if (root.source === 'death') activateDeathTraceConversation(root, config);
+		else activateTraceConversation(root, config);
+	}
+
 	function openTraceConversation(config: TraceConversationConfig): TraceConversationOpenResult {
 		if (disposed || !selfSigner || !transport || !channel) return { kind: 'unavailable' };
 		if (!bootstrapComplete) return { kind: 'blocked' };
@@ -921,11 +926,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			if (!candidate) return { kind: 'blocked' };
 			void publishPreparedSelfPosition('trace-inspection', candidate);
 		}
-		if (root.source === 'death') {
-			activateDeathTraceConversation(root, config);
-			return { kind: 'opened' };
-		}
-		activateTraceConversation(root, config);
+		activateTraceRootConversation(root, config);
 		return { kind: 'opened' };
 	}
 
@@ -1003,7 +1004,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			closeTraceConversation();
 			return;
 		}
-		activateTraceConversation(fallback, { rootId: fallback.id, currentId: fallback.id });
+		activateTraceRootConversation(fallback, { rootId: fallback.id, currentId: fallback.id });
 	}
 
 	function receiveLive(event: BufferedLiveEvent): void {

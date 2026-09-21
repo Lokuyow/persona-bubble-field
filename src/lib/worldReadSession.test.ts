@@ -2158,8 +2158,8 @@ describe('world read session', () => {
 		expect(session.getTraceConversationState()).toEqual(beforeBlockedSelection);
 	});
 
-	it('reconciles an open root to the newer effective root in the same cell', async () => {
-		const newest = { ...message('newest-root', 701), pubkey: 'b'.repeat(64), position: { x: 1, y: 1 } };
+	it('reconciles an open root to a death root without starting its reply conversation', async () => {
+		const newest = { ...deathRoot('newest-death-root'), createdAt: 701, pubkey: 'b'.repeat(64), position: { x: 1, y: 1 } };
 		const older = { ...message('older-root', 700), pubkey: 'c'.repeat(64), position: { x: 1, y: 1 } };
 		mocked.reconcileTraceRootCache.mockResolvedValue([older]);
 		result = startResult([], [position('self-position', 700, selfPubkey, 0, { x: 1, y: 1 })]);
@@ -2190,10 +2190,11 @@ describe('world read session', () => {
 		input!.onLiveMessage(newest, raw(newest));
 		await vi.waitFor(() => expect(session.getTraceConversationState()).toEqual(expect.objectContaining({ root: newest })));
 		expect(session.getTraceConversationState()).toEqual(expect.objectContaining({ root: newest, config: { rootId: newest.id, currentId: newest.id } }));
+		expect(session.getTraceConversationState()).toEqual(expect.objectContaining({ replyRefresh: 'settled', replies: [] }));
 		expect(publish).not.toHaveBeenCalled();
-		await vi.waitFor(() => expect(configureTraceReplies).toHaveBeenCalledTimes(2));
+		expect(configureTraceReplies).toHaveBeenCalledTimes(1);
 		session.closeTraceConversation();
-		await vi.waitFor(() => expect(configureTraceReplies).toHaveBeenCalledTimes(3));
-		expect(configureTraceReplies.mock.calls[2][0]).not.toHaveProperty('conversation');
+		await vi.waitFor(() => expect(configureTraceReplies).toHaveBeenCalledTimes(2));
+		expect(configureTraceReplies.mock.calls[1][0]).not.toHaveProperty('conversation');
 	});
 });

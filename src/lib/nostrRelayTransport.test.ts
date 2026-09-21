@@ -824,6 +824,8 @@ describe('trace root bootstrap', () => {
 		const sameRelaySecond = rawEvent(sameRelayId, TIME + 1, { content: 'z', tags: rootTags });
 		const lateA = rawEvent('a'.repeat(64), TIME + 2, { content: 'late-a', tags: rootTags });
 		const lateB = rawEvent('b'.repeat(64), TIME + 2, { content: 'late-b', tags: rootTags });
+		const deathA = finalizeEvent({ kind: 30079, created_at: TIME - 3, tags: rootTags, content: 'death-a' }, AUTHOR);
+		const deathB = finalizeEvent({ kind: 30079, created_at: TIME - 4, tags: rootTags, content: 'death-b' }, AUTHOR);
 		let firstRootRequest: WireRequest | null = null;
 		f.authorities[0].onRequest = (socket, request) => {
 			if (request[2].limit !== 1000) return;
@@ -837,6 +839,8 @@ describe('trace root bootstrap', () => {
 			send(socket, 'EVENT', request[1], events[1]);
 			send(socket, 'EVENT', request[1], sameRelayFirst);
 			send(socket, 'EVENT', request[1], sameRelaySecond);
+			send(socket, 'EVENT', request[1], deathA);
+			send(socket, 'EVENT', request[1], deathB);
 			send(socket, 'EOSE', request[1]);
 		};
 
@@ -851,11 +855,13 @@ describe('trace root bootstrap', () => {
 		await vi.advanceTimersByTimeAsync(10);
 
 		const result = await pending;
-		expect(result.rawEvents).toHaveLength(1003);
+		expect(result.rawEvents).toHaveLength(1002);
+		expect(result.rawEvents.filter((event) => event.kind === 42)).toHaveLength(1000);
+		expect(result.rawEvents.filter((event) => event.kind === 30079)).toHaveLength(2);
 		expect(result.rawEvents.slice(0, 2).map((event) => event.id)).toEqual([lateA.id, lateB.id]);
 		expect(result.rawEvents.find((event) => event.id === events[1].id)?.content).toBe(events[1].content);
 		expect(result.rawEvents.find((event) => event.id === sameRelayId)?.content).toBe('a');
-		expect(result.rawEvents.some((event) => event.id === events.at(-1)!.id)).toBe(true);
+		expect(result.rawEvents.some((event) => event.id === events.at(-1)!.id)).toBe(false);
 	});
 
 	it('reports mixed EOSE and CLOSED terminal diagnostics', async () => {

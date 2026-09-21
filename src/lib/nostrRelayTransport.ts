@@ -25,6 +25,7 @@ import {
 	parseWorldStateEvent,
 	parseWorldMessage,
 	parseTraceEvent,
+	CHANNEL_MESSAGE_KIND,
 	TRACE_EVENT_KIND,
 	type ParsedWorldStateEvent,
 	type ParsedWorldMessage,
@@ -1439,6 +1440,7 @@ export function createNostrRelayTransport(
 			}
 			traceRootBootstrapStarted = true;
 			const filters = buildTraceRootBootstrapFilters({ channelId: metadata.channelId });
+			const bootstrapLimit = filters[0].limit!;
 			const eventsByRelay = new Map<string, Event[]>(metadata.relays.map((relayUrl) => [relayUrl, []]));
 			const diagnostics = await queryRelays(filters, metadata.relays, (packet, relayUrl) => {
 				eventsByRelay.get(relayUrl)?.push(packet.event);
@@ -1459,7 +1461,11 @@ export function createNostrRelayTransport(
 			}
 			const rawEvents = [...uniqueEvents.values()]
 				.sort((first, second) => second.created_at - first.created_at || compareEventIds(first, second));
-			const result = { rawEvents, relays: diagnostics };
+			const boundedEvents = [
+				...rawEvents.filter((event) => event.kind === CHANNEL_MESSAGE_KIND).slice(0, bootstrapLimit),
+				...rawEvents.filter((event) => event.kind === TRACE_EVENT_KIND).slice(0, bootstrapLimit)
+			].sort((first, second) => second.created_at - first.created_at || compareEventIds(first, second));
+			const result = { rawEvents: boundedEvents, relays: diagnostics };
 			traceRootBootstrapComplete = true;
 			return result;
 		},
