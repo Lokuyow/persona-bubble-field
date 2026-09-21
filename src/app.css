@@ -51,7 +51,7 @@ body {
 	font-family: 'Trebuchet MS', 'Avenir Next', system-ui, sans-serif;
 }
 
-button {
+button:not(.trace-root-bubble):not(.trace-reply-content-button):not(.timeline-name) {
 	font: inherit;
 	cursor: pointer;
 	user-select: none;

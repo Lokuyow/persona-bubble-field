@@ -2507,8 +2507,8 @@ test.describe('DEV World Sandbox', () => {
 				contentWebkitUserSelect: contentStyle.getPropertyValue('-webkit-user-select')
 			};
 		})).toEqual({
-			rootUserSelect: 'text',
-			rootWebkitUserSelect: 'text',
+			rootUserSelect: 'auto',
+			rootWebkitUserSelect: 'auto',
 			contentUserSelect: 'text',
 			contentWebkitUserSelect: 'text'
 		});
