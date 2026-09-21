@@ -3818,8 +3818,10 @@ test.describe('Relay startup', () => {
 		const deathMarker = page.locator('[data-trace-marker-position="6,2"]');
 		await expect(deathMarker).toHaveAttribute('data-trace-marker-kind', 'death');
 		await expect(deathMarker).toHaveCSS('mask-image', /trace-death-icon\.svg/);
+		await expect(deathMarker).toHaveCSS('color', 'rgb(63, 127, 189)');
 		await expect(unreadMarker).toHaveAttribute('data-trace-marker-kind', 'normal');
 		await expect(unreadMarker).toHaveCSS('mask-image', /trace-icon\.svg/);
+		await expect(unreadMarker).toHaveCSS('color', 'rgb(63, 127, 189)');
 		const commonMarkerOpacity = await unreadMarker.evaluate((element) => getComputedStyle(element).opacity);
 		expect(Number(commonMarkerOpacity)).toBeGreaterThan(0);
 		expect(Number(commonMarkerOpacity)).toBeLessThan(1);
@@ -3840,9 +3842,8 @@ test.describe('Relay startup', () => {
 		await clickRelayLogicalCell(page, { x: 0, y: 0 });
 		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveAttribute('data-trace-root-read', 'true');
 		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveCSS('mask-image', /trace-icon\.svg/);
-		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveCSS('color', 'rgb(89, 105, 127)');
+		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveCSS('color', 'rgb(174, 180, 186)');
 		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveCSS('opacity', commonMarkerOpacity);
-		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveCSS('filter', 'grayscale(1)');
 		await expect(deathMarker).toHaveCSS('opacity', commonMarkerOpacity);
 		await page.reload();
 		await page.evaluate(() => {
@@ -3869,9 +3870,8 @@ test.describe('Relay startup', () => {
 		await expect(marker).toHaveAttribute('data-trace-root-read', 'true');
 		await expect(marker).not.toHaveAttribute('data-trace-root-unread-reply');
 		await expect(marker).toHaveCSS('mask-image', /trace-icon\.svg/);
-		await expect(marker).toHaveCSS('color', 'rgb(89, 105, 127)');
+		await expect(marker).toHaveCSS('color', 'rgb(174, 180, 186)');
 		await expect(marker).toHaveCSS('opacity', commonMarkerOpacity);
-		await expect(marker).toHaveCSS('filter', 'grayscale(1)');
 	});
 
 	test('suppresses Trace presentation and investigation on fixed facility cells', async ({ page }) => {
