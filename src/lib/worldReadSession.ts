@@ -862,6 +862,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		}
 		try {
 			suspendRealtimeForTrace();
+			if (disposed || generation !== traceConversationGeneration) return;
 			const result = await transport.configureTraceReplies({
 				...(traceNotificationConfig() ? { notification: traceNotificationConfig() } : {}),
 				conversation: config,
@@ -893,8 +894,13 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	}
 
 	function activateDeathTraceConversation(root: ParsedWorldMessage, config: TraceConversationConfig): void {
-		++traceConversationGeneration;
+		const generation = ++traceConversationGeneration;
 		emitTraceConversationState(traceStateFor(root, config, [], 'settled'));
+		reconfigureTraceBackground(generation, () =>
+			traceConversationState.kind === 'open' &&
+			traceConversationState.root.id === root.id &&
+			traceConversationState.root.source === 'death'
+		);
 	}
 
 	function activateTraceRootConversation(root: ParsedWorldMessage, config: TraceConversationConfig): void {
@@ -963,19 +969,32 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		return { kind: 'opened' };
 	}
 
-	function deactivateTraceSubscription(generation: number): void {
-		const deactivate = async () => {
+	function reconfigureTraceBackground(generation: number, isCurrent: () => boolean): void {
+		const reconfigure = async () => {
 			const readiness = traceRootBootstrapReadiness ? await traceRootBootstrapReadiness : 'failed';
-			if (disposed || generation !== traceConversationGeneration || traceConversationState.kind !== 'closed' || readiness !== 'ready') return;
+			if (disposed || generation !== traceConversationGeneration || !isCurrent() || readiness !== 'ready') return;
 			const notification = traceNotificationConfig();
 			suspendRealtimeForTrace();
-			await transport?.configureTraceReplies({
-				...(notification ? { notification } : {}),
-				onBatch: (batch) => { void reconcileTraceReplies(traceConversationGeneration, undefined, batch.events); },
-				onLiveEvent: (event) => { void reconcileTraceReplies(traceConversationGeneration, undefined, [event]); }
-			}).catch(() => {}).finally(() => { void startRealtimeSubscription(); });
+			if (disposed || generation !== traceConversationGeneration || !isCurrent()) return;
+			try {
+				if (typeof transport?.configureTraceReplies === 'function') {
+					await transport.configureTraceReplies({
+						...(notification ? { notification } : {}),
+						onBatch: (batch) => { void reconcileTraceReplies(traceConversationGeneration, undefined, batch.events); },
+						onLiveEvent: (event) => { void reconcileTraceReplies(traceConversationGeneration, undefined, [event]); }
+					});
+				}
+			} catch {
+				// Trace configuration is supplemental; realtime still owns its independent recovery.
+			} finally {
+				if (!disposed && generation === traceConversationGeneration && isCurrent()) void startRealtimeSubscription();
+			}
 		};
-		void deactivate();
+		void reconfigure();
+	}
+
+	function deactivateTraceSubscription(generation: number): void {
+		reconfigureTraceBackground(generation, () => traceConversationState.kind === 'closed');
 	}
 
 	function closeTraceConversation(): void {

@@ -10,7 +10,7 @@ import {
 	type ParsedTraceReply,
 	type ParsedWorldMessage
 } from './nostrProtocol';
-import type { TraceReplyConfiguration } from './nostrRelayTransport';
+import type { TraceReplyConfiguration, TraceReplyConfigurationResult } from './nostrRelayTransport';
 import { PRESENCE_TIMEOUT_MS, type PresenceState } from './presence';
 import { planPositionPublish, reconstructPositionPublishState } from './positionPublish';
 import { protocolKeyFor } from './realtimeEvents';
@@ -2187,14 +2187,76 @@ describe('world read session', () => {
 		expect(session.openTraceConversation({ rootId: older.id, currentId: older.id })).toEqual({ kind: 'opened' });
 		await vi.waitFor(() => expect(configureTraceReplies).toHaveBeenCalledTimes(1));
 		mocked.reconcileTraceRootCache.mockResolvedValue([newest]);
-		input!.onLiveMessage(newest, raw(newest));
+		input!.onLiveTrace({ id: newest.id, source: 'death' }, raw(newest));
 		await vi.waitFor(() => expect(session.getTraceConversationState()).toEqual(expect.objectContaining({ root: newest })));
 		expect(session.getTraceConversationState()).toEqual(expect.objectContaining({ root: newest, config: { rootId: newest.id, currentId: newest.id } }));
 		expect(session.getTraceConversationState()).toEqual(expect.objectContaining({ replyRefresh: 'settled', replies: [] }));
 		expect(publish).not.toHaveBeenCalled();
-		expect(configureTraceReplies).toHaveBeenCalledTimes(1);
-		session.closeTraceConversation();
 		await vi.waitFor(() => expect(configureTraceReplies).toHaveBeenCalledTimes(2));
 		expect(configureTraceReplies.mock.calls[1][0]).not.toHaveProperty('conversation');
+		expect(configureTraceReplies.mock.calls[1][0]).not.toHaveProperty('rootId');
+		expect(configureTraceReplies.mock.calls[1][0]).not.toHaveProperty('currentId');
+		session.closeTraceConversation();
+		await vi.waitFor(() => expect(configureTraceReplies).toHaveBeenCalledTimes(3));
+		expect(configureTraceReplies.mock.calls[2][0]).not.toHaveProperty('conversation');
+	});
+
+	it('restores realtime when a stale normal conversation loses the race to death activation', async () => {
+		const normal = { ...message('normal-race-root', 700), position: { x: 1, y: 1 } };
+		const death = deathRoot('death-race-root');
+		mocked.reconcileTraceRootCache.mockResolvedValue([normal]);
+		result = startResult([], [position('self-position', 700, selfPubkey, 0, { x: 1, y: 1 })]);
+		const oldConversation = deferred<TraceReplyConfigurationResult>();
+		const deathConfiguration = deferred<TraceReplyConfigurationResult>();
+		const configureTraceReplies = vi.fn((configuration: TraceReplyConfiguration) =>
+			configuration.conversation ? oldConversation.promise : deathConfiguration.promise
+		);
+		const startRealtime = vi.fn().mockResolvedValue({ status: 'active', events: [], relays: [] });
+		const stopRealtime = vi.fn();
+		mocked.createTransport.mockReturnValue({
+			start: vi.fn(async (nextInput) => { input = nextInput; return result; }),
+			bootstrapTraceRootCandidates: traceBootstrap(),
+			configureTraceReplies,
+			startRealtime,
+			stopRealtime,
+			dispose,
+			publish
+		});
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 }, selfSigner: selfSigner(),
+			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn(),
+			realtime: {
+				registry: [{ eventType: 'fixture', protocolVersion: 1, protocolKey: protocolKeyFor('fixture', 1), parseAction: () => ({}) }],
+				controlSince: 0,
+				instanceFilters: [{ protocolKey: protocolKeyFor('fixture', 1), instanceIds: ['fixture-instance'], since: 0 }],
+				startImmediately: false,
+				onEvent: vi.fn()
+			}
+		});
+
+		await session.start();
+		session.completeBootstrap();
+		await session.startRealtime();
+		expect(startRealtime).toHaveBeenCalledOnce();
+		expect(session.openTraceConversation({ rootId: normal.id, currentId: normal.id })).toEqual({ kind: 'opened' });
+		await vi.waitFor(() => expect(configureTraceReplies).toHaveBeenCalledTimes(1));
+		expect(stopRealtime).toHaveBeenCalledOnce();
+
+		mocked.reconcileTraceRootCache.mockResolvedValue([death]);
+		input!.onLiveTrace({ id: death.id, source: 'death' }, raw(death));
+		await vi.waitFor(() => expect(session.getTraceConversationState()).toEqual(expect.objectContaining({
+			root: death, replyRefresh: 'settled', replies: []
+		})));
+		await vi.waitFor(() => expect(configureTraceReplies).toHaveBeenCalledTimes(2));
+		expect(configureTraceReplies.mock.calls[1][0]).not.toHaveProperty('conversation');
+		expect(configureTraceReplies.mock.calls.map(([configuration]) => configuration.conversation?.rootId))
+			.toEqual([normal.id, undefined]);
+
+		oldConversation.resolve({ status: 'superseded', generation: 1 });
+		await Promise.resolve();
+		expect(startRealtime).toHaveBeenCalledOnce();
+		deathConfiguration.resolve({ status: 'active', generation: 2, initialBatch: { events: [], relays: [] } });
+		await vi.waitFor(() => expect(startRealtime).toHaveBeenCalledTimes(2));
+		expect(session.getTraceConversationState()).toEqual(expect.objectContaining({ root: death, replyRefresh: 'settled', replies: [] }));
 	});
 });
