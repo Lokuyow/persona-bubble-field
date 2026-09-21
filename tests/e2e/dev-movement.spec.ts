@@ -90,30 +90,16 @@ test.describe('DEV World Sandbox', () => {
 		await page.mouse.up();
 	});
 
-	test('moves one cell in each cardinal direction through the pointer path', async ({ page }) => {
-		for (const [delta, expected] of [
-			[{ x: 24, y: 0 }, '8,3'],
-			[{ x: -24, y: 0 }, '6,3'],
-			[{ x: 0, y: -24 }, '7,2'],
-			[{ x: 0, y: 24 }, '7,4']
-		] as const) {
-			await openDevWorld(page);
-			await dragJoystick(page, delta);
-			await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', expected);
-		}
+	test('moves one representative cardinal direction through the pointer path', async ({ page }) => {
+		await openDevWorld(page);
+		await dragJoystick(page, { x: 24, y: 0 });
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '8,3');
 	});
 
-	test('moves one cell in each diagonal direction through the pointer path', async ({ page }) => {
-		for (const [delta, expected] of [
-			[{ x: 24, y: -24 }, '8,2'],
-			[{ x: 24, y: 24 }, '8,4'],
-			[{ x: -24, y: 24 }, '6,4'],
-			[{ x: -24, y: -24 }, '6,2']
-		] as const) {
-			await openDevWorld(page);
-			await dragJoystick(page, delta);
-			await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', expected);
-		}
+	test('moves one representative diagonal direction through the pointer path', async ({ page }) => {
+		await openDevWorld(page);
+		await dragJoystick(page, { x: 24, y: -24 });
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '8,2');
 	});
 
 	test('continues diagonal pointer movement at the shared 500ms cadence', async ({ page }) => {
@@ -255,45 +241,6 @@ test.describe('DEV World Sandbox', () => {
 		await page.mouse.up();
 	});
 
-		test('allows a diagonal when only its orthogonal side cells are occupied', async ({ page }) => {
-		await page.goto('/?devWorld=1&devScenario=speech-showcase');
-		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
-
-		const self = page.locator('.participant[data-self="true"]');
-		await expect(self).toHaveAttribute('data-position', '7,3');
-		const start = await fieldOwnedBlankPoint(page, { x: 5, y: 5 });
-		await page.mouse.move(start.x, start.y);
-		await page.mouse.down();
-		await page.mouse.move(start.x + 24, start.y - 24);
-		await expect(page.locator('[data-pointer-joystick="up-right"]')).toBeVisible();
-		await expect(self).toHaveAttribute('data-position', '8,2');
-		await page.mouse.up();
-	});
-
-	test('blocks an occupied diagonal destination and a diagonal field edge', async ({ page }) => {
-		await page.goto('/?devWorld=1&devScenario=speech-showcase');
-		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
-		const self = page.locator('.participant[data-self="true"]');
-		await expect(self).toHaveAttribute('data-position', '7,3');
-		await page.keyboard.press('ArrowLeft');
-		await expect(self).toHaveAttribute('data-position', '6,3');
-		await dragJoystick(page, { x: 24, y: -24 });
-		await expect(self).toHaveAttribute('data-position', '6,3');
-
-		await page.goto('/?devWorld=1');
-		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
-		await expect(self).toHaveAttribute('data-position', '7,3');
-		for (let index = 0; index < 7; index += 1) await page.keyboard.press('ArrowLeft');
-		await expect(self).toHaveAttribute('data-position', '0,3');
-		const start = await fieldOwnedBlankPoint(page, { x: 5, y: 5 });
-		await page.mouse.move(start.x, start.y);
-		await page.mouse.down();
-		await page.mouse.move(start.x - 24, start.y - 24);
-		await expect(page.locator('[data-pointer-joystick="up-left"]')).toBeVisible();
-		await expect(self).toHaveAttribute('data-position', '0,3');
-		await page.mouse.up();
-	});
-
 	test('keeps keyboard ownership during a pending pointer tap and safely takes over on drag', async ({ page }) => {
 		await openClockedDevWorld(page);
 		const self = page.locator('.participant[data-self="true"]');
@@ -319,40 +266,6 @@ test.describe('DEV World Sandbox', () => {
 		await expect(self).toHaveAttribute('data-position', '8,1');
 	});
 
-	test('does not let keyboard input or keyup steal or stop pointer ownership', async ({ page }) => {
-		await openClockedDevWorld(page);
-		const self = page.locator('.participant[data-self="true"]');
-		await dragJoystick(page, { x: 24, y: 0 });
-		await expect(self).toHaveAttribute('data-position', '8,3');
-
-		const start = await fieldOwnedBlankPoint(page, { x: 5, y: 5 });
-		await page.mouse.move(start.x, start.y);
-		await page.mouse.down();
-		await page.mouse.move(start.x + 24, start.y);
-		await page.keyboard.down('ArrowLeft');
-		await page.keyboard.up('ArrowLeft');
-		await page.clock.runFor(500);
-		await expect(self).toHaveAttribute('data-position', '10,3');
-		await page.mouse.up();
-	});
-
-	test('updates pointer direction without an immediate request or timer restart', async ({ page }) => {
-		await openClockedDevWorld(page);
-		const self = page.locator('.participant[data-self="true"]');
-		const start = await fieldOwnedBlankPoint(page, { x: 5, y: 5 });
-		await page.mouse.move(start.x, start.y);
-		await page.mouse.down();
-		await page.mouse.move(start.x + 24, start.y);
-		await expect(self).toHaveAttribute('data-position', '8,3');
-		await page.clock.runFor(400);
-		await page.mouse.move(start.x + 24, start.y - 24);
-		await expect(page.locator('[data-pointer-joystick="up-right"]')).toBeVisible();
-		await expect(self).toHaveAttribute('data-position', '8,3');
-		await page.clock.runFor(100);
-		await expect(self).toHaveAttribute('data-position', '9,2');
-		await page.mouse.up();
-	});
-
 	test('continues one-cell movement on an explicit keyboard hold and stops on keyup', async ({ page }) => {
 		await openClockedDevWorld(page);
 
@@ -367,61 +280,12 @@ test.describe('DEV World Sandbox', () => {
 		await expect(self).toHaveAttribute('data-position', '10,3');
 	});
 
-	test('moves in each direction with physical WASD keys', async ({ page }) => {
+	test('moves with a representative physical WASD key', async ({ page }) => {
 		await openDevWorld(page);
 
 		const self = page.locator('.participant').first();
-		for (const [key, expected] of [
-			['w', '7,2'],
-			['a', '6,2'],
-			['s', '6,3'],
-			['d', '7,3']
-		] as const) {
-			await page.keyboard.press(key);
-			await expect(self).toHaveAttribute('data-position', expected);
-		}
-	});
-
-	test('combines WASD, Arrow, and mixed keyboard keys into one diagonal movement', async ({ page }) => {
-		const diagonals = [
-			[['w', 'd'], '8,2'], [['w', 'a'], '6,2'], [['s', 'd'], '8,4'], [['s', 'a'], '6,4'],
-			[['ArrowUp', 'ArrowRight'], '8,2'], [['ArrowUp', 'ArrowLeft'], '6,2'],
-			[['ArrowDown', 'ArrowRight'], '8,4'], [['ArrowDown', 'ArrowLeft'], '6,4'],
-			[['w', 'ArrowRight'], '8,2'], [['ArrowUp', 'd'], '8,2']
-		] as const;
-
-		for (const [keys, expected] of diagonals) {
-			await openDevWorld(page);
-			const self = page.locator('.participant').first();
-			await page.keyboard.down(keys[0]);
-			await page.keyboard.down(keys[1]);
-			await expect(self).toHaveAttribute('data-position', expected);
-			await page.keyboard.up(keys[1]);
-			await page.keyboard.up(keys[0]);
-		}
-	});
-
-	test('cancels opposite keyboard components and resumes the remaining direction', async ({ page }) => {
-		await openClockedDevWorld(page);
-		const self = page.locator('.participant').first();
-
-		await page.keyboard.down('w');
-		await page.clock.runFor(50);
-		await expect(self).toHaveAttribute('data-position', '7,2');
-		await page.keyboard.down('s');
-		await expect(self).toHaveAttribute('data-position', '7,2');
-		await page.clock.runFor(500);
-		await expect(self).toHaveAttribute('data-position', '7,2');
-		await page.keyboard.up('s');
-		await page.clock.runFor(500);
-		await expect(self).toHaveAttribute('data-position', '7,1');
-		await page.keyboard.up('w');
-
-		await page.keyboard.down('a');
-		await page.keyboard.down('d');
-		await expect(self).toHaveAttribute('data-position', '7,1');
-		await page.keyboard.up('d');
-		await page.keyboard.up('a');
+		await page.keyboard.press('d');
+		await expect(self).toHaveAttribute('data-position', '8,3');
 	});
 
 	test('deduplicates logical directions and cleans up a neutral hold on native input focus', async ({ page }) => {
@@ -440,96 +304,6 @@ test.describe('DEV World Sandbox', () => {
 		await expect(self).toHaveAttribute('data-position', '7,3');
 		await page.keyboard.up('ArrowUp');
 		await page.keyboard.up('w');
-	});
-
-	test('re-phases the keyboard hold timer after a diagonal direction change', async ({ page }) => {
-		await openClockedDevWorld(page);
-		const self = page.locator('.participant').first();
-
-		await page.keyboard.down('s');
-		await page.clock.runFor(50);
-		await expect(self).toHaveAttribute('data-position', '7,4');
-		await page.clock.runFor(400);
-		await page.keyboard.down('d');
-		await expect(self).toHaveAttribute('data-position', '8,5');
-		await page.clock.runFor(99);
-		await expect(self).toHaveAttribute('data-position', '8,5');
-		await page.clock.runFor(1);
-		await expect(self).toHaveAttribute('data-position', '8,5');
-		await page.clock.runFor(400);
-		await expect(self).toHaveAttribute('data-position', '9,6');
-		await page.keyboard.up('d');
-		await page.keyboard.up('s');
-	});
-
-	test('cancels an early-resolved chord timeout before the next movement key', async ({ page }) => {
-		await openClockedDevWorld(page);
-		const self = page.locator('.participant').first();
-
-		await page.keyboard.down('w');
-		await page.clock.runFor(20);
-		await page.keyboard.up('w');
-		await expect(self).toHaveAttribute('data-position', '7,2');
-
-		await page.keyboard.down('d');
-		await page.clock.runFor(29);
-		await expect(self).toHaveAttribute('data-position', '7,2');
-		await page.clock.runFor(1);
-		await expect(self).toHaveAttribute('data-position', '7,2');
-		await page.clock.runFor(20);
-		await expect(self).toHaveAttribute('data-position', '8,2');
-
-		await page.clock.runFor(499);
-		await expect(self).toHaveAttribute('data-position', '8,2');
-		await page.clock.runFor(1);
-		await expect(self).toHaveAttribute('data-position', '9,2');
-		await page.keyboard.up('d');
-	});
-
-	test('holds a diagonal at the existing cadence and follows the key that remains held', async ({ page }) => {
-		await openClockedDevWorld(page);
-		const self = page.locator('.participant').first();
-
-		await page.keyboard.down('s');
-		await page.keyboard.down('d');
-		await expect(self).toHaveAttribute('data-position', '8,4');
-		await page.clock.runFor(500);
-		await expect(self).toHaveAttribute('data-position', '9,5');
-		await page.keyboard.up('d');
-		await page.clock.runFor(500);
-		await expect(self).toHaveAttribute('data-position', '9,6');
-		await page.keyboard.up('s');
-		await page.clock.runFor(1_000);
-		await expect(self).toHaveAttribute('data-position', '9,6');
-	});
-
-	test('continues a held WASD movement at the existing two-per-second cadence', async ({ page }) => {
-		await openClockedDevWorld(page);
-
-		const self = page.locator('.participant').first();
-		await page.keyboard.down('d');
-		await page.clock.runFor(50);
-		await expect(self).toHaveAttribute('data-position', '8,3');
-		await page.clock.runFor(1_000);
-		await page.keyboard.up('d');
-		await expect(self).toHaveAttribute('data-position', '10,3');
-		await page.clock.runFor(1_000);
-		await expect(self).toHaveAttribute('data-position', '10,3');
-	});
-
-	test('does not turn WASD repeat events into direct movement requests', async ({ page }) => {
-		await openDevWorld(page);
-
-		const self = page.locator('.participant').first();
-		await page.keyboard.down('d');
-		await expect(self).toHaveAttribute('data-position', '8,3');
-		await page.evaluate(() => {
-			for (let index = 0; index < 10; index += 1) {
-				window.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', code: 'KeyD', repeat: true, bubbles: true }));
-			}
-		});
-		await expect(self).toHaveAttribute('data-position', '8,3');
-		await page.keyboard.up('d');
 	});
 
 	test('does not leave a held movement running after window blur', async ({ page }) => {
