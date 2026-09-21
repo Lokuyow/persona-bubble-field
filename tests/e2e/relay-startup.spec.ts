@@ -2465,8 +2465,20 @@ test.describe('Relay startup', () => {
 		await activeDialog.getByRole('button', { name: '詳細を見る' }).click();
 		await expect(activeDialog).toContainText('現在のポイント速度');
 		await expect(activeDialog.getByRole('button', { name: '詳細を閉じる' })).toHaveAttribute('aria-expanded', 'true');
-		await expect(page.locator('.lifespan-hud')).toContainText('作業中 +0.1h/h');
-		await expect(page.locator('.lifespan-hud')).toContainText('ポイント 0pt');
+		await expect(page.locator('.lifespan-hud [data-mending-status]')).toHaveAttribute('aria-label', '作業中');
+		await expect(page.locator('.lifespan-hud [data-mending-status]')).toHaveAttribute('data-mending-icon', 'tool');
+		await expect(page.locator('.lifespan-hud [data-mending-rate]')).toHaveText('1.00 pt/分+0.1h/h');
+		const activeMendingRow = page.locator('.lifespan-hud [data-mending-row]');
+		const activeRowBoxes = await activeMendingRow.evaluate((row) => {
+			const status = row.querySelector('[data-mending-status]')!.getBoundingClientRect();
+			const rate = row.querySelector('[data-mending-rate]')!.getBoundingClientRect();
+			const pointRate = row.querySelector('[data-mending-rate] > span:first-child')!.getBoundingClientRect();
+			const lifespanRate = row.querySelector('[data-mending-rate] > span:last-child')!.getBoundingClientRect();
+			return { statusRight: status.right, rateLeft: rate.left, pointLeft: pointRate.left, pointRight: pointRate.right, lifespanLeft: lifespanRate.left, lifespanRight: lifespanRate.right, rowRight: row.getBoundingClientRect().right };
+		});
+		expect(activeRowBoxes.rateLeft).toBeGreaterThanOrEqual(activeRowBoxes.statusRight);
+		expect(activeRowBoxes.lifespanLeft).toBeGreaterThan(activeRowBoxes.pointRight);
+		expect(Math.round(activeRowBoxes.lifespanRight)).toBe(Math.round(activeRowBoxes.rowRight));
 		await page.getByRole('button', { name: '閉じる', exact: true }).click();
 
 		const startedAt = (started.mendingJob as { startedAtMs: number }).startedAtMs;
@@ -2514,6 +2526,9 @@ test.describe('Relay startup', () => {
 		await terminal.click();
 		await expect(page.getByRole('dialog')).toContainText('上限に達しました');
 		await expect(page.getByRole('dialog').getByRole('heading', { name: '作業停止中' })).toBeVisible();
+		await expect(page.locator('.lifespan-hud [data-mending-status]')).toHaveAttribute('aria-label', '作業停止中');
+		await expect(page.locator('.lifespan-hud [data-mending-status]')).toHaveAttribute('data-mending-icon', 'player-pause');
+		await expect(page.locator('.lifespan-hud [data-mending-rate]')).toHaveText('0.00 pt/分+0.0h/h');
 		await expect(page.getByRole('dialog')).not.toContainText('今受け取れる');
 		await expect(page.getByRole('dialog')).toContainText('+5 pt');
 		await expect(page.getByRole('dialog')).not.toContainText('次の1ptまで');
@@ -2523,8 +2538,9 @@ test.describe('Relay startup', () => {
 		await expect(page.getByRole('dialog')).toContainText('9 pt');
 		await expect(page.getByRole('dialog')).toContainText('上限まで あと5分');
 		await expect(page.getByRole('dialog')).toContainText('+0 pt');
-		await expect(page.locator('.lifespan-hud')).toContainText('作業中 +0.1h/h');
-		await expect(page.locator('.lifespan-hud')).toContainText('ポイント 9pt');
+		await expect(page.locator('.lifespan-hud [data-mending-status]')).toHaveAttribute('aria-label', '作業中');
+		await expect(page.locator('.lifespan-hud [data-mending-status]')).toHaveAttribute('data-mending-icon', 'tool');
+		await expect(page.locator('.lifespan-hud [data-mending-rate]')).toHaveText('1.00 pt/分+0.1h/h');
 		const collected = await readRelayGameState(page);
 		expect(collected.mendingJob).toEqual(expect.objectContaining({ startedAtMs: expect.any(Number) }));
 		expect(collected.points).toBe(9);
@@ -2601,7 +2617,8 @@ test.describe('Relay startup', () => {
 			buttonY: card.querySelector('button')!.getBoundingClientRect().y
 		}));
 		expect(stableAfter).toEqual(stableBefore);
-		await expect(page.locator('.lifespan-hud')).toContainText('ポイント 9pt');
+		await expect(page.locator('.lifespan-hud [data-stat-icon="wallet"]')).toHaveText('9pt');
+		await expect(page.locator('.lifespan-hud')).toHaveAttribute('aria-label', /ポイント 9pt/);
 		await expect(dialog).toContainText('推論効率 Lv2');
 		await page.reload();
 		await expect.poll(() => readRelayGameState(page)).toMatchObject({ points: 9, abilities: { inferenceEfficiency: 2, contextCapacity: 1, hallucinationSuppression: 1 } });
@@ -2644,6 +2661,16 @@ test.describe('Relay startup', () => {
 		await expect(dialog).toContainText('Run #1');
 		await expect(dialog).toContainText('残り寿命');
 		await expect(dialog).toContainText('所持ポイント');
+		await expect(dialog.locator('.summary-card[data-stat-icon="heart"] > span > svg')).toHaveCount(1);
+		await expect(dialog.locator('.summary-card[data-stat-icon="wallet"] > span > svg')).toHaveCount(1);
+		for (const statIcon of ['heart', 'wallet']) {
+			const card = dialog.locator(`.summary-card[data-stat-icon="${statIcon}"]`);
+			const labelBox = await card.locator('span').boundingBox();
+			const valueBox = await card.locator('strong').boundingBox();
+			expect(labelBox).not.toBeNull();
+			expect(valueBox).not.toBeNull();
+			expect(valueBox!.y).toBeGreaterThan(labelBox!.y + labelBox!.height - 1);
+		}
 		await expect(dialog).toContainText('推論効率');
 		await expect(dialog).toContainText('コンテキスト容量');
 		await expect(dialog).toContainText('ハルシネーション抑制');
@@ -2678,6 +2705,7 @@ test.describe('Relay startup', () => {
 		await expect(dialog).toContainText('未回収の作業ポイントは含まれません。');
 		await expect(dialog).not.toContainText('100,000 ptで現在のRunを終了します。未回収の作業ポイントは含まれません。');
 		await expect(dialog).toContainText('100,000 pt');
+		await expect(dialog.locator('.clear-progress-head[data-stat-icon="wallet"] > span > svg')).toHaveCount(1);
 		await expect(dialog.getByRole('button', { name: '脱出', exact: true })).toBeDisabled();
 		await expect(dialog.getByText('clear不可: 所持ポイントが100,000pt未満です')).toHaveCount(0);
 		await expect(dialog.getByRole('button', { name: /へ強化/ })).toHaveCount(0);
@@ -2792,6 +2820,14 @@ test.describe('Relay startup', () => {
 		const viewportBox = await scrollViewport.boundingBox();
 		const metrics = await scrollViewport.evaluate((element) => ({ clientHeight: element.clientHeight, scrollHeight: element.scrollHeight }));
 		await expect(dialog.locator('.self-profile-sections > section')).toHaveCount(3);
+		for (const statIcon of ['heart', 'wallet']) {
+			const card = dialog.locator(`.summary-card[data-stat-icon="${statIcon}"]`);
+			const labelBox = await card.locator('span').boundingBox();
+			const valueBox = await card.locator('strong').boundingBox();
+			expect(labelBox).not.toBeNull();
+			expect(valueBox).not.toBeNull();
+			expect(valueBox!.y).toBeGreaterThan(labelBox!.y + labelBox!.height - 1);
+		}
 		const headerAvatarBox = await dialog.locator('.self-profile-avatar').boundingBox();
 		expect(dialogBox).not.toBeNull();
 		expect(viewportBox).not.toBeNull();
@@ -3135,6 +3171,9 @@ test.describe('Relay startup', () => {
 		await expect(dialog.getByRole('heading', { name: '延命中' })).toBeVisible();
 		await expect(dialog).toContainText('ポイント蓄積は上限');
 		await expect(dialog).toContainText('寿命延長のみ継続中');
+		await expect(page.locator('.lifespan-hud [data-mending-status]')).toHaveAttribute('aria-label', '延命中');
+		await expect(page.locator('.lifespan-hud [data-mending-status]')).toHaveAttribute('data-mending-icon', 'heart-plus');
+		await expect(page.locator('.lifespan-hud [data-mending-rate]')).toHaveText('0.00 pt/分+0.02h/h');
 	});
 
 	test('fails closed to a public read-only world when a mending mutation finds corrupt storage', async ({ page }) => {
@@ -3308,16 +3347,35 @@ test.describe('Relay startup', () => {
 			(request.filter.kinds as number[])[0] === 42)).toBe(true);
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
 		const hud = page.locator('.lifespan-hud');
-		await expect(hud).toContainText('寿命 2日 18時間');
+		await expect(hud.locator('[data-stat-icon="heart"] > svg')).toHaveCount(1);
+		await expect(hud.locator('[data-stat-icon="wallet"] > svg')).toHaveCount(1);
+		const hudIconLefts = await hud.locator('[data-stat-icon] > svg').evaluateAll((icons) => icons.map((icon) => Math.round(icon.getBoundingClientRect().left)));
+		expect(hudIconLefts).toEqual([hudIconLefts[0], hudIconLefts[0]]);
+		const hudStatBoxes = await hud.locator('[data-stat-icon]').evaluateAll((stats) => stats.map((stat) => {
+			const icon = stat.querySelector('svg')!.getBoundingClientRect();
+			const value = stat.querySelector('.stat-value')!.getBoundingClientRect();
+			return { iconLeft: Math.round(icon.left), iconRight: Math.round(icon.right), valueLeft: Math.round(value.left), valueRight: Math.round(value.right) };
+		}));
+		expect(hudStatBoxes[0]?.iconLeft).toBe(hudStatBoxes[1]?.iconLeft);
+		expect(hudStatBoxes[0]?.valueRight).toBe(hudStatBoxes[1]?.valueRight);
+		for (const stat of hudStatBoxes) expect(stat.valueLeft).toBeGreaterThan(stat.iconRight);
+		await expect(hud.locator('[data-stat-icon="heart"]')).toHaveText('2日 18時間');
+		await expect(hud.locator('[data-stat-icon="wallet"]')).toHaveText('0pt');
+		await expect(hud).not.toContainText('寿命');
+		await expect(hud).not.toContainText('ポイント');
+		await expect(hud).toHaveAttribute('aria-label', /寿命 .*ポイント 0pt/);
+		await expect(hud.locator('[data-mending-status]')).toHaveCount(0);
+		await expect(hud.locator('[data-mending-rate]')).toHaveCount(0);
+		await expect(hud.locator('[data-mending-row]')).toHaveCount(0);
 
 		await pauseAtCurrentBrowserTime(page);
 		await page.clock.setSystemTime(expiresAtMs - 23 * hour - 59 * minute);
 		await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
-		await expect(hud).toContainText('寿命 23時間 59分');
+		await expect(hud.locator('[data-stat-icon="heart"]')).toHaveText('23時間 59分');
 
 		await page.clock.setSystemTime(expiresAtMs - 59 * minute - 59 * 1000);
 		await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
-		await expect(hud).toContainText('寿命 59分');
+		await expect(hud.locator('[data-stat-icon="heart"]')).toHaveText('59分');
 	});
 
 	test('keeps public read-only updates after runtime death transition fails', async ({ page }) => {
