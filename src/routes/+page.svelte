@@ -449,7 +449,8 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			inInvestigationRange: selfIsActive && selfLogicalPosition !== null &&
 				isWithinTraceInvestigationRange(selfLogicalPosition, cell.position),
 			read: traceReadSnapshot.readRootIds.includes(cell.roots[0].id),
-			unreadReply: traceReadSnapshot.unreadReplyRootIds.includes(cell.roots[0].id)
+			unreadReply: traceReadSnapshot.unreadReplyRootIds.includes(cell.roots[0].id),
+			kind: cell.roots[0].source === 'death' ? 'death' : 'normal'
 		})));
 	let traceConversationProjection = $derived(resolveTraceConversationProjection(traceConversationState));
 	let speechSuggestionCharacter = $derived(

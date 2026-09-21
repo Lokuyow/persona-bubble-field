@@ -15,6 +15,7 @@
 
 	const FIELD_BACKGROUND_ASSET = '/field/prototype-danchi-courtyard.webp';
 	const TRACE_ICON_ASSET = '/trace/trace-icon.svg';
+	const TRACE_DEATH_ICON_ASSET = '/trace/trace-death-icon.svg';
 	const MENDING_TERMINAL_ASSET = '/field/objects/mending-terminal.webp';
 	const ADJUSTMENT_TERMINAL_ASSET = '/field/objects/adjustment-terminal.webp';
 	const RIFT_ASSET = '/field/objects/rift.webp';
@@ -25,6 +26,7 @@
 		inInvestigationRange: boolean;
 		read: boolean;
 		unreadReply: boolean;
+		kind: 'normal' | 'death';
 	}>;
 	export type TraceRootGhost = Readonly<{
 		event: Pick<ParsedWorldMessage, 'id'>;
@@ -130,11 +132,12 @@
 					<span
 						class="trace-marker"
 						data-trace-marker-position={`${cell.position.x},${cell.position.y}`}
+						data-trace-marker-kind={cell.kind}
 						data-trace-root-read={cell.read ? 'true' : 'false'}
 						data-trace-root-unread-reply={cell.unreadReply ? 'true' : undefined}
 						class:trace-marker-read={cell.read}
 						class:trace-marker-unread-reply={cell.unreadReply}
-						style={`left: ${world.x}px; top: ${world.y}px; --trace-icon-image: url("${asset(TRACE_ICON_ASSET)}");`}
+						style={`left: ${world.x}px; top: ${world.y}px; --trace-icon-image: url("${asset(cell.kind === 'death' ? TRACE_DEATH_ICON_ASSET : TRACE_ICON_ASSET)}");`}
 					></span>
 				{/if}
 				{#if cell.inInvestigationRange}
@@ -354,6 +357,7 @@
 		width: max(22px, min(40px, calc(var(--cell-size) * 0.36)));
 		height: max(22px, min(40px, calc(var(--cell-size) * 0.36)));
 		color: #59697f;
+		opacity: 0.72;
 		background-color: currentColor;
 		-webkit-mask-image: var(--trace-icon-image);
 		-webkit-mask-position: center;
@@ -368,11 +372,12 @@
 	}
 
 	.trace-marker-read:not(.trace-marker-unread-reply) {
-		opacity: 0.34;
+		filter: grayscale(1);
 	}
 
 	.trace-marker-unread-reply {
 		color: #cf06fe;
+		filter: none;
 	}
 
 	.trace-investigation-indicator {
