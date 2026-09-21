@@ -3328,16 +3328,20 @@ test.describe('Relay startup', () => {
 		await expect(hud.locator('[data-stat-icon="wallet"] > svg')).toHaveCount(1);
 		const hudIconLefts = await hud.locator('[data-stat-icon] > svg').evaluateAll((icons) => icons.map((icon) => Math.round(icon.getBoundingClientRect().left)));
 		expect(hudIconLefts).toEqual([hudIconLefts[0], hudIconLefts[0]]);
-		await expect(hud).toContainText('寿命 2日 18時間');
+		await expect(hud.locator('[data-stat-icon="heart"]')).toHaveText('2日 18時間');
+		await expect(hud.locator('[data-stat-icon="wallet"]')).toHaveText('0pt');
+		await expect(hud).not.toContainText('寿命');
+		await expect(hud).not.toContainText('ポイント');
+		await expect(hud).toHaveAttribute('aria-label', /寿命 .*ポイント 0pt/);
 
 		await pauseAtCurrentBrowserTime(page);
 		await page.clock.setSystemTime(expiresAtMs - 23 * hour - 59 * minute);
 		await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
-		await expect(hud).toContainText('寿命 23時間 59分');
+		await expect(hud.locator('[data-stat-icon="heart"]')).toHaveText('23時間 59分');
 
 		await page.clock.setSystemTime(expiresAtMs - 59 * minute - 59 * 1000);
 		await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
-		await expect(hud).toContainText('寿命 59分');
+		await expect(hud.locator('[data-stat-icon="heart"]')).toHaveText('59分');
 	});
 
 	test('keeps public read-only updates after runtime death transition fails', async ({ page }) => {

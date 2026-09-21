@@ -13,13 +13,14 @@
 
 	let { expiresAtMs, nowMs, points, mendingProjection }: Props = $props();
 	let label = $derived(formatRemainingLifespan(expiresAtMs, nowMs));
+	let lifespanValue = $derived(label.replace(/^寿命\s+/, ''));
 	let mendingLabel = $derived(mendingProjection?.completed ? '作業満杯' : mendingProjection?.lifespanExtensionPerHour ? `作業中 +${formatMendingRate(mendingProjection.lifespanExtensionPerHour.numerator, mendingProjection.lifespanExtensionPerHour.denominator)}h/h` : null);
 </script>
 
 
 <div class="lifespan-hud" aria-label={mendingLabel ? `${label}、ポイント ${points}pt、${mendingLabel}` : `${label}、ポイント ${points}pt`}>
-	<span class="lifespan-value" data-stat-icon="heart"><Heart aria-hidden="true" />{label}</span>
-	<span class="points-value" data-stat-icon="wallet"><Wallet aria-hidden="true" />ポイント {points}pt</span>
+	<span class="lifespan-value" data-stat-icon="heart"><Heart aria-hidden="true" />{lifespanValue}</span>
+	<span class="points-value" data-stat-icon="wallet"><Wallet aria-hidden="true" />{points}pt</span>
 	{#if mendingLabel}<span class="mending-status">{mendingLabel}</span>{/if}
 </div>
 
