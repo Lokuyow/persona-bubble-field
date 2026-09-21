@@ -2463,8 +2463,20 @@ test.describe('Relay startup', () => {
 		await activeDialog.getByRole('button', { name: '詳細を見る' }).click();
 		await expect(activeDialog).toContainText('現在のポイント速度');
 		await expect(activeDialog.getByRole('button', { name: '詳細を閉じる' })).toHaveAttribute('aria-expanded', 'true');
-		await expect(page.locator('.lifespan-hud [data-mending-status]')).toHaveText('作業中');
+		await expect(page.locator('.lifespan-hud [data-mending-status]')).toHaveAttribute('aria-label', '作業中');
+		await expect(page.locator('.lifespan-hud [data-mending-status]')).toHaveAttribute('data-mending-icon', 'tool');
 		await expect(page.locator('.lifespan-hud [data-mending-rate]')).toHaveText('1.00 pt/分+0.1h/h');
+		const activeMendingRow = page.locator('.lifespan-hud [data-mending-row]');
+		const activeRowBoxes = await activeMendingRow.evaluate((row) => {
+			const status = row.querySelector('[data-mending-status]')!.getBoundingClientRect();
+			const rate = row.querySelector('[data-mending-rate]')!.getBoundingClientRect();
+			const pointRate = row.querySelector('[data-mending-rate] > span:first-child')!.getBoundingClientRect();
+			const lifespanRate = row.querySelector('[data-mending-rate] > span:last-child')!.getBoundingClientRect();
+			return { statusRight: status.right, rateLeft: rate.left, pointLeft: pointRate.left, pointRight: pointRate.right, lifespanLeft: lifespanRate.left, lifespanRight: lifespanRate.right, rowRight: row.getBoundingClientRect().right };
+		});
+		expect(activeRowBoxes.rateLeft).toBeGreaterThanOrEqual(activeRowBoxes.statusRight);
+		expect(activeRowBoxes.lifespanLeft).toBeGreaterThan(activeRowBoxes.pointRight);
+		expect(Math.round(activeRowBoxes.lifespanRight)).toBe(Math.round(activeRowBoxes.rowRight));
 		await page.getByRole('button', { name: '閉じる', exact: true }).click();
 
 		const startedAt = (started.mendingJob as { startedAtMs: number }).startedAtMs;
@@ -2511,7 +2523,8 @@ test.describe('Relay startup', () => {
 		await terminal.click();
 		await expect(page.getByRole('dialog')).toContainText('上限に達しました');
 		await expect(page.getByRole('dialog').getByRole('heading', { name: '作業停止中' })).toBeVisible();
-		await expect(page.locator('.lifespan-hud [data-mending-status]')).toHaveText('作業停止中');
+		await expect(page.locator('.lifespan-hud [data-mending-status]')).toHaveAttribute('aria-label', '作業停止中');
+		await expect(page.locator('.lifespan-hud [data-mending-status]')).toHaveAttribute('data-mending-icon', 'player-pause');
 		await expect(page.locator('.lifespan-hud [data-mending-rate]')).toHaveText('0.00 pt/分+0.0h/h');
 		await expect(page.getByRole('dialog')).not.toContainText('今受け取れる');
 		await expect(page.getByRole('dialog')).toContainText('+5 pt');
@@ -2522,7 +2535,8 @@ test.describe('Relay startup', () => {
 		await expect(page.getByRole('dialog')).toContainText('10 pt');
 		await expect(page.getByRole('dialog')).toContainText('上限まで あと5分');
 		await expect(page.getByRole('dialog')).toContainText('+0 pt');
-		await expect(page.locator('.lifespan-hud [data-mending-status]')).toHaveText('作業中');
+		await expect(page.locator('.lifespan-hud [data-mending-status]')).toHaveAttribute('aria-label', '作業中');
+		await expect(page.locator('.lifespan-hud [data-mending-status]')).toHaveAttribute('data-mending-icon', 'tool');
 		await expect(page.locator('.lifespan-hud [data-mending-rate]')).toHaveText('1.00 pt/分+0.1h/h');
 		const collected = await readRelayGameState(page);
 		expect(collected.mendingJob).toEqual(expect.objectContaining({ startedAtMs: expect.any(Number) }));
@@ -3153,7 +3167,8 @@ test.describe('Relay startup', () => {
 		await expect(dialog.getByRole('heading', { name: '延命中' })).toBeVisible();
 		await expect(dialog).toContainText('ポイント蓄積は上限');
 		await expect(dialog).toContainText('寿命延長のみ継続中');
-		await expect(page.locator('.lifespan-hud [data-mending-status]')).toHaveText('延命中');
+		await expect(page.locator('.lifespan-hud [data-mending-status]')).toHaveAttribute('aria-label', '延命中');
+		await expect(page.locator('.lifespan-hud [data-mending-status]')).toHaveAttribute('data-mending-icon', 'heart-plus');
 		await expect(page.locator('.lifespan-hud [data-mending-rate]')).toHaveText('0.00 pt/分+0.02h/h');
 	});
 
@@ -3347,6 +3362,7 @@ test.describe('Relay startup', () => {
 		await expect(hud).toHaveAttribute('aria-label', /寿命 .*ポイント 0pt/);
 		await expect(hud.locator('[data-mending-status]')).toHaveCount(0);
 		await expect(hud.locator('[data-mending-rate]')).toHaveCount(0);
+		await expect(hud.locator('[data-mending-row]')).toHaveCount(0);
 
 		await pauseAtCurrentBrowserTime(page);
 		await page.clock.setSystemTime(expiresAtMs - 23 * hour - 59 * minute);

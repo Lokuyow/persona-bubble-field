@@ -1,5 +1,8 @@
 <script lang="ts">
 	import Heart from '~icons/tabler/heart';
+	import HeartPlus from '~icons/tabler/heart-plus';
+	import PlayerPause from '~icons/tabler/player-pause';
+	import Tool from '~icons/tabler/tool';
 	import Wallet from '~icons/tabler/wallet';
 	import { formatMendingRate, formatRemainingLifespan } from '$lib/lifespanHud';
 	import type { MendingProjection } from '$lib/mending';
@@ -15,16 +18,23 @@
 	let { expiresAtMs, nowMs, points, hasJob, mendingProjection }: Props = $props();
 	let label = $derived(formatRemainingLifespan(expiresAtMs, nowMs));
 	let lifespanValue = $derived(label.replace(/^寿命\s+/, ''));
-	let mendingLabel = $derived(!hasJob || !mendingProjection ? null : !mendingProjection.completed ? '作業中' : mendingProjection.lifespanExtensionRateHundredthsPerHour > 0 ? '延命中' : '作業停止中');
+	let mendingState = $derived(!hasJob || !mendingProjection ? null : !mendingProjection.completed ? '作業中' : mendingProjection.lifespanExtensionRateHundredthsPerHour > 0 ? '延命中' : '作業停止中');
 	let pointRate = $derived(hasJob && mendingProjection ? `${(mendingProjection.pointRateHundredthsPerMinute / 100).toFixed(2)} pt/分` : null);
 	let lifespanRate = $derived(hasJob && mendingProjection ? `+${formatMendingRate(mendingProjection.lifespanExtensionRateHundredthsPerHour, 100)}h/h` : null);
 </script>
 
 
-<div class="lifespan-hud" aria-label={mendingLabel ? `${label}、ポイント ${points}pt、${mendingLabel}` : `${label}、ポイント ${points}pt`}>
+<div class="lifespan-hud" aria-label={mendingState ? `${label}、ポイント ${points}pt、${mendingState}` : `${label}、ポイント ${points}pt`}>
 	<span class="lifespan-value" data-stat-icon="heart"><Heart aria-hidden="true" /><span class="stat-value">{lifespanValue}</span></span>
 	<span class="points-value" data-stat-icon="wallet"><Wallet aria-hidden="true" /><span class="stat-value">{points}pt</span></span>
-	{#if mendingLabel}<span class="mending-status" data-mending-status>{mendingLabel}</span><span class="mending-rate" data-mending-rate><span>{pointRate}</span><span>{lifespanRate}</span></span>{/if}
+	{#if mendingState}
+		<div class="mending-row" data-mending-row>
+			<span class="mending-status" data-mending-status data-mending-icon={mendingState === '作業中' ? 'tool' : mendingState === '延命中' ? 'heart-plus' : 'player-pause'} role="img" aria-label={mendingState}>
+				{#if mendingState === '作業中'}<Tool aria-hidden="true" />{:else if mendingState === '延命中'}<HeartPlus aria-hidden="true" />{:else}<PlayerPause aria-hidden="true" />{/if}
+			</span>
+			<span class="mending-rate" data-mending-rate><span>{pointRate}</span><span>{lifespanRate}</span></span>
+		</div>
+	{/if}
 </div>
 
 <style>
@@ -64,11 +74,9 @@
 		.stat-value { text-align: right; }
 		.lifespan-value :global(svg), .points-value :global(svg) { width: 16px; height: 16px; flex: 0 0 auto; }
 
-		.mending-status {
-			color: #b9b8ff;
-			font-size: 0.88em;
-			font-weight: 700;
-		}
+		.mending-row { display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: center; gap: 6px; width: 100%; }
+		.mending-status { display: grid; width: 16px; height: 16px; place-items: center; color: #b9b8ff; }
+		.mending-status :global(svg) { width: 16px; height: 16px; }
 
 		.mending-rate { display: flex; justify-content: space-between; gap: 12px; width: 100%; color: rgba(226, 230, 255, 0.86); font-size: 0.82em; font-weight: 600; }
 
