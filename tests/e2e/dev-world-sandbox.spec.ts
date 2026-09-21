@@ -2468,12 +2468,29 @@ test.describe('DEV World Sandbox', () => {
 
 		const liveText = page.locator('.bubble-normal[data-speech-type="shout"] .bubble-content');
 		const dragSelect = async (locator: Locator): Promise<string> => {
-			const box = await locator.boundingBox();
-			if (!box) throw new Error('Expected selectable text to be visible.');
+			const textRect = await locator.evaluate((element) => {
+				const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+				const rects: DOMRect[] = [];
+				while (walker.nextNode()) {
+					const textNode = walker.currentNode;
+					if (!textNode.textContent?.trim()) continue;
+					const range = document.createRange();
+					range.selectNodeContents(textNode);
+					for (const rect of range.getClientRects()) {
+						if (rect.width > 4 && rect.height > 4) rects.push(rect);
+					}
+					range.detach();
+				}
+				const rect = rects.sort((left, right) => right.width - left.width)[0];
+				if (!rect) throw new Error('Expected selectable text glyphs to be visible.');
+				return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+			});
 			await page.evaluate(() => window.getSelection()?.removeAllRanges());
-			await page.mouse.move(box.x + box.width - 2, box.y + box.height / 2);
+			const inset = Math.min(2, Math.max(0.5, textRect.width / 10));
+			const y = textRect.y + textRect.height / 2;
+			await page.mouse.move(textRect.x + textRect.width - inset, y);
 			await page.mouse.down();
-			await page.mouse.move(box.x + 2, box.y + box.height / 2, { steps: 5 });
+			await page.mouse.move(textRect.x + inset, y, { steps: 5 });
 			await page.mouse.up();
 			return page.evaluate(() => window.getSelection()?.toString() ?? '');
 		};
