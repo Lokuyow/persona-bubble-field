@@ -11,6 +11,7 @@
 	import type { Character } from '$lib/character';
 	import type { BubbleTone } from '$lib/bubblePresentation';
 	import type { SpeechSuggestionConversationEntry } from '$lib/speechSuggestions';
+	import { Tooltip } from 'bits-ui';
 
 	type Props = ComponentProps<typeof HostOwnedComposerLite> & {
 		selectedSpeechType: SpeechType;
@@ -69,55 +70,94 @@
 
 	<div class="action-dock" aria-label="主要操作">
 	<div class="action-dock-content">
+		<Tooltip.Provider delayDuration={400} skipDelayDuration={100} disableHoverableContent>
 		<div class="composer-controls">
 		{#if canOpenSelfProfile}
-		<button class="profile-trigger" type="button" aria-label="自分のプロフィールを開く" title="自分のプロフィール" onclick={(event) => onOpenSelfProfile(event.currentTarget)}>
-			<span class="profile-trigger-avatar" aria-hidden="true"><CharacterAvatar class={`avatar avatar-${avatarTone} profile-trigger-character-avatar`} {character} /></span>
-		</button>
+		<Tooltip.Root>
+			<Tooltip.Trigger>
+				{#snippet child({ props })}
+					<button {...props} class="profile-trigger" type="button" aria-label="自分のプロフィールを開く" onclick={(event) => onOpenSelfProfile(event.currentTarget)}>
+						<span class="profile-trigger-avatar" aria-hidden="true"><CharacterAvatar class={`avatar avatar-${avatarTone} profile-trigger-character-avatar`} {character} /></span>
+					</button>
+				{/snippet}
+			</Tooltip.Trigger>
+			<Tooltip.Portal>
+				<Tooltip.Content role="tooltip" class="action-dock-tooltip" side="top" sideOffset={8}>自分のプロフィール</Tooltip.Content>
+			</Tooltip.Portal>
+		</Tooltip.Root>
 		{/if}
-		<button
-			class="chatter-toggle"
-			type="button"
-			aria-label={chatterOpen ? 'Chatterを閉じる' : 'Chatterを開く'}
-			aria-pressed={chatterOpen}
-			aria-keyshortcuts="C"
-			onclick={onToggleChatter}
-		>
-			<span class="chatter-toggle-icon" aria-hidden="true"><ListDetails /></span>
-		</button>
+		<Tooltip.Root>
+			<Tooltip.Trigger>
+				{#snippet child({ props })}
+					<button
+						{...props}
+						class="chatter-toggle"
+						type="button"
+						aria-label={chatterOpen ? 'Chatterを閉じる' : 'Chatterを開く'}
+						aria-pressed={chatterOpen}
+						aria-keyshortcuts="C"
+						onclick={onToggleChatter}
+					>
+						<span class="chatter-toggle-icon" aria-hidden="true"><ListDetails /></span>
+					</button>
+				{/snippet}
+			</Tooltip.Trigger>
+			<Tooltip.Portal>
+				<Tooltip.Content role="tooltip" class="action-dock-tooltip" side="top" sideOffset={8}>{chatterOpen ? 'Chatterを閉じる' : 'Chatterを開く'}</Tooltip.Content>
+			</Tooltip.Portal>
+		</Tooltip.Root>
 		{#if hasUnreadReplies}
-			<button
-				class="trace-unread-indicator"
-				class:explanation-visible={explanationVisible}
-				type="button"
-				aria-label="あなたへの返信の痕跡があります"
-				onclick={() => { explanationVisible = !explanationVisible; }}
-			>
-				<span aria-hidden="true">●</span>
-				{#if explanationVisible}
-					<span class="trace-unread-explanation" role="status">どこかにあなたへの返信の痕跡があります</span>
-				{/if}
-			</button>
+			<Tooltip.Root>
+				<Tooltip.Trigger>
+					{#snippet child({ props })}
+						<button
+							{...props}
+							class="trace-unread-indicator"
+							class:explanation-visible={explanationVisible}
+							type="button"
+							aria-label="あなたへの返信の痕跡があります"
+							onclick={() => { explanationVisible = !explanationVisible; }}
+						>
+							<span aria-hidden="true">●</span>
+							{#if explanationVisible}
+								<span class="trace-unread-explanation" role="status">どこかにあなたへの返信の痕跡があります</span>
+							{/if}
+						</button>
+					{/snippet}
+				</Tooltip.Trigger>
+				<Tooltip.Portal>
+					<Tooltip.Content role="tooltip" class="action-dock-tooltip" side="top" sideOffset={8}>未読の返信の痕跡</Tooltip.Content>
+				</Tooltip.Portal>
+			</Tooltip.Root>
 		{/if}
-		<button
-			class="speech-type-toggle"
-			type="button"
-			data-speech-type={selectedSpeechType}
-			aria-label={`発言タイプ: ${SPEECH_TYPE_LABELS[selectedSpeechType]}（クリックで${SPEECH_TYPE_LABELS[nextSpeechType(selectedSpeechType)]}へ）`}
-			title={`発言タイプ: ${SPEECH_TYPE_LABELS[selectedSpeechType]}。クリックで${SPEECH_TYPE_LABELS[nextSpeechType(selectedSpeechType)]}へ`}
-			 disabled={submissionInProgress}
-			onclick={cycleSpeechType}
-		>
-			<span class="speech-type-icon" data-speech-icon={selectedSpeechType} aria-hidden="true">
-				{#if selectedSpeechType === 'normal'}
-					<SpeechNormal />
-				{:else if selectedSpeechType === 'shout'}
-					<SpeechShout />
-				{:else}
-					<SpeechMonologue />
-				{/if}
-			</span>
-		</button>
+		<Tooltip.Root>
+			<Tooltip.Trigger>
+				{#snippet child({ props })}
+					<button
+						{...props}
+						class="speech-type-toggle"
+						type="button"
+						data-speech-type={selectedSpeechType}
+						aria-label={`発言タイプ: ${SPEECH_TYPE_LABELS[selectedSpeechType]}（クリックで${SPEECH_TYPE_LABELS[nextSpeechType(selectedSpeechType)]}へ）`}
+						disabled={submissionInProgress}
+						onclick={cycleSpeechType}
+					>
+						<span class="speech-type-icon" data-speech-icon={selectedSpeechType} aria-hidden="true">
+							{#if selectedSpeechType === 'normal'}
+								<SpeechNormal />
+							{:else if selectedSpeechType === 'shout'}
+								<SpeechShout />
+							{:else}
+								<SpeechMonologue />
+							{/if}
+						</span>
+					</button>
+				{/snippet}
+			</Tooltip.Trigger>
+			<Tooltip.Portal>
+				<Tooltip.Content role="tooltip" class="action-dock-tooltip" side="top" sideOffset={8}>発言タイプ：{SPEECH_TYPE_LABELS[selectedSpeechType]}</Tooltip.Content>
+			</Tooltip.Portal>
+		</Tooltip.Root>
 		<SpeechSuggestions
 			{character}
 			speechType={selectedSpeechType}
@@ -128,6 +168,7 @@
 			{submitCandidate}
 		/>
 		</div>
+		</Tooltip.Provider>
 		<div class="composer-editor-slot">
 			<HostOwnedComposerLite
 				bind:this={composerComponent}
@@ -175,6 +216,7 @@
 	.profile-trigger-avatar { display: block; position: relative; width: 100%; height: 100%; overflow: hidden; border-radius: 8px; background: transparent; }
 	:global(.profile-trigger-character-avatar) { position: absolute; inset: 0; width: 100%; height: 100%; border: 2px solid rgba(255, 255, 255, 0.88); border-radius: 42% 58% 48% 52%; box-shadow: 0 5px 10px rgba(58, 70, 61, 0.16); transform: none; }
 	:global(.profile-trigger-character-avatar img) { display: block; width: 100%; height: 100%; object-fit: contain; object-position: center; transform: scale(1.12); transform-origin: center; }
+	:global(.action-dock-tooltip) { z-index: 30; padding: 5px 8px; border: 1px solid rgba(82, 77, 68, 0.24); border-radius: 6px; background: rgba(50, 56, 52, 0.96); color: #fffdf2; font-size: 11px; font-weight: 700; line-height: 1.2; white-space: nowrap; }
 	.profile-trigger:focus-visible { outline: 3px solid var(--color-focus-ring); outline-offset: 2px; }
 	.composer-controls { display: contents; }
 	.chatter-toggle {

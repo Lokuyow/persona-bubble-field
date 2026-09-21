@@ -1,6 +1,7 @@
 <script lang="ts">
 	import X from '~icons/tabler/x';
 	import Sparkles from '~icons/tabler/sparkles';
+	import { Tooltip } from 'bits-ui';
 	import { onMount } from 'svelte';
 	import type { Character } from '$lib/character';
 	import type { SpeechType } from '$lib/conversation';
@@ -137,16 +138,26 @@
 
 {#if availability !== 'unsupported' && availability !== 'unavailable'}
 	<div class="suggestions-anchor">
-		<button
-			class="suggestions-toggle"
-			type="button"
-			aria-label="AI発言候補を生成"
-			title={editorIsEmpty === true ? '現在の会話から発言候補を生成' : '本文が空のときだけ候補を生成できます'}
-			disabled={busy || editorIsEmpty !== true}
-			onclick={() => void generate()}
-		>
-			<span class="suggestions-toggle-icon" aria-hidden="true"><Sparkles /></span>
-		</button>
+		<Tooltip.Root>
+			<Tooltip.Trigger tabindex={-1}>
+				{#snippet child({ props })}
+					<span class="suggestions-tooltip-trigger" {...props}>
+						<button
+							class="suggestions-toggle"
+							type="button"
+							aria-label="AI発言候補を生成"
+							disabled={busy || editorIsEmpty !== true}
+							onclick={() => void generate()}
+						>
+							<span class="suggestions-toggle-icon" aria-hidden="true"><Sparkles /></span>
+						</button>
+					</span>
+				{/snippet}
+			</Tooltip.Trigger>
+			<Tooltip.Portal>
+				<Tooltip.Content role="tooltip" class="action-dock-tooltip" side="top" sideOffset={8}>AI発言候補を生成</Tooltip.Content>
+			</Tooltip.Portal>
+		</Tooltip.Root>
 		{#if panelOpen && candidates.length > 0}
 			<div class="suggestion-panel" aria-label="発言候補">
 				<div class="suggestion-header">
@@ -219,6 +230,7 @@
 		font-weight: 800;
 		line-height: 1.15;
 	}
+	.suggestions-tooltip-trigger { display: block; width: 100%; height: 100%; }
 	.suggestions-toggle-icon { display: inline-flex; width: 24px; height: 24px; align-items: center; justify-content: center; }
 	.suggestions-toggle-icon :global(svg) { width: 24px; height: 24px; }
 

@@ -38,6 +38,44 @@ import { fixtureSecret, installDelayedRelay, publishedMessages, waitForPublished
 
 
 test.describe('Relay startup', () => {
+	test('shows ActionDock tooltips for the current control meanings', async ({ page }) => {
+		await installPromptApiStub(page);
+		const editor = await openReadyRelayWorld(page, 1);
+		const tooltip = page.getByRole('tooltip');
+		const moveAway = async (): Promise<void> => { await page.mouse.move(1, 1); };
+		const expectTooltip = async (trigger: Locator, text: string): Promise<void> => {
+			await moveAway();
+			await trigger.hover();
+			await expect(tooltip).toHaveText(text);
+			await expect(tooltip).toBeVisible();
+		};
+
+		const profile = page.locator('.profile-trigger');
+		const chatter = page.locator('.chatter-toggle');
+		const speechType = page.locator('.speech-type-toggle');
+		const suggestions = page.locator('.suggestions-tooltip-trigger');
+		await expect(profile).not.toHaveAttribute('title');
+		await expect(chatter).not.toHaveAttribute('title');
+		await expect(speechType).not.toHaveAttribute('title');
+		await expect(page.locator('.suggestions-toggle')).not.toHaveAttribute('title');
+
+		await expectTooltip(profile, '自分のプロフィール');
+		await expectTooltip(chatter, 'Chatterを閉じる');
+		await chatter.click();
+		await expect(chatter).toHaveAttribute('aria-pressed', 'false');
+		await expectTooltip(chatter, 'Chatterを開く');
+		await chatter.click();
+
+		await expectTooltip(speechType, '発言タイプ：通常');
+		await speechType.click();
+		await expectTooltip(speechType, '発言タイプ：叫び');
+
+		await expectTooltip(suggestions, 'AI発言候補を生成');
+		await editor.fill('disabled candidate tooltip');
+		await expect(page.locator('.suggestions-toggle')).toBeDisabled();
+		await expectTooltip(suggestions, 'AI発言候補を生成');
+	});
+
 	test('renders ActionDock controls in order on desktop and mobile without an unread slot', async ({ page }) => {
 		await installPromptApiStub(page);
 		for (const width of [1200, 390]) {

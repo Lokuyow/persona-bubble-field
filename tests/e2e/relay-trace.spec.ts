@@ -193,6 +193,8 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveAttribute('data-trace-marker-kind', 'normal');
 		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveCSS('color', 'rgb(207, 6, 254)');
 		await expect(page.locator('.trace-unread-indicator')).toBeVisible();
+		await page.locator('.trace-unread-indicator').hover();
+		await expect(page.getByRole('tooltip')).toHaveText('未読の返信の痕跡');
 		await expect(page.getByRole('button', { name: 'AI発言候補を生成' })).toBeVisible();
 		expect(await readActionDockControlOrder(page)).toEqual([
 			'profile-trigger', 'chatter-toggle', 'trace-unread-indicator', 'speech-type-toggle', 'suggestions-anchor'
