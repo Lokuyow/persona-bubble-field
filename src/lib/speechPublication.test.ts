@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { SPEECH_SHORTCUT_IDS } from './speechSubmission';
 import { createSpeechPublicationCore, type SpeechPublicationContext, type SpeechPublicationOutcome } from './speechPublication';
 
 const topLevel: SpeechPublicationContext = { generation: 1, target: null };
@@ -29,6 +30,15 @@ describe('speech publication core', () => {
 		expect(f.publish).toHaveBeenCalledWith({ content: 'candidate', speechType: 'shout' }, topLevel, expect.any(AbortSignal));
 		expect(f.onSucceeded).toHaveBeenCalledWith(topLevel);
 		expect(f.isInProgress()).toBe(false);
+	});
+
+	it('passes shortcut and slash content through the resolver before publishing', async () => {
+		const f = fixture();
+		await expect(f.core.publish('/s hello', topLevel, {
+			signal: new AbortController().signal,
+			shortcutId: SPEECH_SHORTCUT_IDS.monologue
+		})).resolves.toEqual({ eventId: 'event-id' });
+		expect(f.publish).toHaveBeenCalledWith({ content: 'hello', speechType: 'monologue' }, topLevel, expect.any(AbortSignal));
 	});
 
 	it('fails closed when another submission starts first and rechecks context after readiness', async () => {

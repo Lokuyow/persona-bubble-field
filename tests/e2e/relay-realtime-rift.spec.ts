@@ -34,8 +34,24 @@ import { deriveBip85NostrEntropy } from '../../src/lib/bip85';
 import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL } from '../../src/lib/fieldFacilities';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { installFieldFrameSampling, readFieldFrames, sampleRenderedField } from './helpers/fieldFrames';
-import { CHANNEL_ID, AUTHORITATIVE_RELAYS, fixtureSecret, testEvents, upcomingRegistrationSchedule, signedRiftAction, syntheticChannelFixture, installDelayedRelay, relayState, seedRelayAccount, readRelayGameState, realtimeInstanceIds, isRealtimeRequest, readRealtimePendingInstances, seedRealtimePendingInstance, chooseHorizontalMove } from './helpers/relayHarness';
+import { CHANNEL_ID, AUTHORITATIVE_RELAYS, fixtureSecret, testEvents, upcomingRegistrationSchedule, nextScheduledRiftSchedule, signedRiftAction, syntheticChannelFixture, installDelayedRelay, relayState, seedRelayAccount, readRelayGameState, realtimeInstanceIds, isRealtimeRequest, readRealtimePendingInstances, seedRealtimePendingInstance, chooseHorizontalMove } from './helpers/relayHarness';
 
+const RIFT_SELF_POSITION = { x: 3, y: 2 } as const;
+const RIFT_FIELD_SIZE = { columns: 16, rows: 8 } as const;
+
+function scheduleWithDistantFirstHole(startSchedule: ReturnType<typeof getRiftSchedule>) {
+	let schedule = startSchedule;
+	for (let attempt = 0; attempt < 32; attempt += 1) {
+		const hole = deriveRiftHolePositions(schedule.instanceId, RIFT_FIELD_SIZE)[0];
+		if (Math.max(Math.abs(hole.position.x - RIFT_SELF_POSITION.x), Math.abs(hole.position.y - RIFT_SELF_POSITION.y)) > 1) {
+			return { schedule, hole };
+		}
+		const nextSchedule = nextScheduledRiftSchedule(schedule);
+		if (nextSchedule.instanceId === schedule.instanceId) throw new Error('Rift schedule search did not advance to a new instance.');
+		schedule = nextSchedule;
+	}
+	throw new Error('Could not find a Rift schedule with a distant first hole within 32 days.');
+}
 
 test.describe('Relay startup', () => {
 	test('accepts a creator-signed manual Rift control from a synthetic DEV channel', async ({ page }) => {
@@ -312,14 +328,7 @@ test.describe('Relay startup', () => {
 	});
 
 	test('rejects a stale Rift join confirmation after movement or registration ends', async ({ page }) => {
-		let schedule = upcomingRegistrationSchedule();
-		const selfPosition = { x: 3, y: 2 };
-		while (true) {
-			const candidateHole = deriveRiftHolePositions(schedule.instanceId, { columns: 16, rows: 8 })[0];
-			if (Math.max(Math.abs(candidateHole.position.x - selfPosition.x), Math.abs(candidateHole.position.y - selfPosition.y)) > 1) break;
-			schedule = getRiftSchedule(schedule.endedAtMs + 1);
-		}
-		const hole = deriveRiftHolePositions(schedule.instanceId, { columns: 16, rows: 8 })[0];
+		const { schedule, hole } = scheduleWithDistantFirstHole(upcomingRegistrationSchedule());
 		const startTime = schedule.registrationAtMs + 1_000;
 		const selfSecret = fixtureSecret(19);
 		const selfPubkey = getPublicKey(selfSecret);
@@ -358,14 +367,7 @@ test.describe('Relay startup', () => {
 	});
 
 	test('completes Rift join, snapshot, commit, automatic reveal, settlement, and reload recovery', async ({ page }) => {
-		let schedule = upcomingRegistrationSchedule();
-		const selfPosition = { x: 3, y: 2 };
-		while (true) {
-			const candidateHole = deriveRiftHolePositions(schedule.instanceId, { columns: 16, rows: 8 })[0];
-			if (Math.max(Math.abs(candidateHole.position.x - selfPosition.x), Math.abs(candidateHole.position.y - selfPosition.y)) > 1) break;
-			schedule = getRiftSchedule(schedule.endedAtMs + 1);
-		}
-		const hole = deriveRiftHolePositions(schedule.instanceId, { columns: 16, rows: 8 })[0];
+		const { schedule, hole } = scheduleWithDistantFirstHole(upcomingRegistrationSchedule());
 		const otherPlayers = [
 			{ secret: fixtureSecret(20), choice: 'maintain' as const, nonce: '1'.repeat(64) },
 			{ secret: fixtureSecret(21), choice: 'maintain' as const, nonce: '2'.repeat(64) }
@@ -482,14 +484,7 @@ test.describe('Relay startup', () => {
 	});
 
 	test('publishes a World State exit after a realtime death outcome commits locally', async ({ page }) => {
-		let schedule = upcomingRegistrationSchedule();
-		const selfPosition = { x: 3, y: 2 };
-		while (true) {
-			const candidateHole = deriveRiftHolePositions(schedule.instanceId, { columns: 16, rows: 8 })[0];
-			if (Math.max(Math.abs(candidateHole.position.x - selfPosition.x), Math.abs(candidateHole.position.y - selfPosition.y)) > 1) break;
-			schedule = getRiftSchedule(schedule.endedAtMs + 1);
-		}
-		const hole = deriveRiftHolePositions(schedule.instanceId, { columns: 16, rows: 8 })[0];
+		const { schedule, hole } = scheduleWithDistantFirstHole(upcomingRegistrationSchedule());
 		const otherPlayers = [
 			{ secret: fixtureSecret(20), choice: 'maintain' as const, nonce: '1'.repeat(64) },
 			{ secret: fixtureSecret(21), choice: 'escape' as const, nonce: '2'.repeat(64) }
@@ -567,14 +562,7 @@ test.describe('Relay startup', () => {
 	});
 
 	test('does not publish a terminal exit when a realtime death outcome is duplicate', async ({ page }) => {
-		let schedule = upcomingRegistrationSchedule();
-		const selfPosition = { x: 3, y: 2 };
-		while (true) {
-			const candidateHole = deriveRiftHolePositions(schedule.instanceId, { columns: 16, rows: 8 })[0];
-			if (Math.max(Math.abs(candidateHole.position.x - selfPosition.x), Math.abs(candidateHole.position.y - selfPosition.y)) > 1) break;
-			schedule = getRiftSchedule(schedule.endedAtMs + 1);
-		}
-		const hole = deriveRiftHolePositions(schedule.instanceId, { columns: 16, rows: 8 })[0];
+		const { schedule, hole } = scheduleWithDistantFirstHole(upcomingRegistrationSchedule());
 		const otherPlayers = [
 			{ secret: fixtureSecret(20), choice: 'maintain' as const, nonce: '1'.repeat(64) },
 			{ secret: fixtureSecret(21), choice: 'escape' as const, nonce: '2'.repeat(64) }
