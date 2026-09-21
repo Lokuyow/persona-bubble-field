@@ -850,6 +850,19 @@ export async function openReadyRelayWorld(page: Page, expectedParticipantCount =
 	return editor;
 }
 
+export async function readActionDockControlOrder(page: Page): Promise<string[]> {
+	return page.locator('.composer-controls > *').evaluateAll((elements) => elements
+		.map((element) => {
+			const rect = element.getBoundingClientRect();
+			const className = ['profile-trigger', 'chatter-toggle', 'trace-unread-indicator', 'speech-type-toggle', 'suggestions-anchor']
+				.find((name) => element.classList.contains(name));
+			return className && rect.width > 0 && rect.height > 0 ? { className, left: rect.left, top: rect.top } : null;
+		})
+		.filter((item): item is { className: string; left: number; top: number } => item !== null)
+		.sort((left, right) => left.top - right.top || left.left - right.left)
+		.map((item) => item.className));
+}
+
 export async function openClearReadyWorld(page: Page): Promise<{ secret: Uint8Array; pubkey: string }> {
 	const startTime = Date.now();
 	const secret = fixtureSecret(19);

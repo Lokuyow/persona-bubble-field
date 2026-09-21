@@ -34,10 +34,23 @@ import { deriveBip85NostrEntropy } from '../../src/lib/bip85';
 import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL } from '../../src/lib/fieldFacilities';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { installFieldFrameSampling, readFieldFrames, sampleRenderedField } from './helpers/fieldFrames';
-import { fixtureSecret, installDelayedRelay, publishedMessages, waitForPublishedMessageCount, openReadyRelayWorld, installPromptApiStub, seedRelayAccount, composerContextCalls } from './helpers/relayHarness';
+import { fixtureSecret, installDelayedRelay, publishedMessages, waitForPublishedMessageCount, openReadyRelayWorld, installPromptApiStub, seedRelayAccount, composerContextCalls, readActionDockControlOrder } from './helpers/relayHarness';
 
 
 test.describe('Relay startup', () => {
+	test('renders ActionDock controls in order on desktop and mobile without an unread slot', async ({ page }) => {
+		await installPromptApiStub(page);
+		for (const width of [1200, 390]) {
+			await page.setViewportSize({ width, height: 844 });
+			await openReadyRelayWorld(page, 1);
+			await expect(page.getByRole('button', { name: 'AI発言候補を生成' })).toBeVisible();
+			await expect(page.locator('.trace-unread-indicator')).toHaveCount(0);
+			expect(await readActionDockControlOrder(page)).toEqual([
+				'profile-trigger', 'chatter-toggle', 'speech-type-toggle', 'suggestions-anchor'
+			]);
+		}
+	});
+
 	test('passes the Host-owned editor submit button option without enabling the keyboard button bar', async ({ page }) => {
 		await installHostOwnedStub(page);
 		await installDelayedRelay(page);

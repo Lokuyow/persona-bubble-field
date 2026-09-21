@@ -197,7 +197,7 @@ test.describe('DEV World Sandbox', () => {
 		await page.setViewportSize({ width: 390, height: 844 });
 		await page.goto('/?devWorld=1&devScenario=chatter-timeline');
 		const timeline = page.locator('aside.recent-message-timeline');
-		await expect(page.locator('[data-chatter-initialized="true"]')).toHaveCount(1);
+		await expect(page.locator('.field-viewport')).toHaveClass(/initial-field-geometry-ready/);
 		await expect(timeline).toBeHidden();
 		await page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', code: 'KeyC', bubbles: true })));
 		await expect(timeline).toBeVisible();

@@ -34,7 +34,7 @@ import { deriveBip85NostrEntropy } from '../../src/lib/bip85';
 import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL } from '../../src/lib/fieldFacilities';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { installFieldFrameSampling, readFieldFrames, sampleRenderedField } from './helpers/fieldFrames';
-import { CHANNEL_ID, AUTHORITATIVE_RELAYS, fixtureSecret, traceRuntimeEvents, installDelayedRelay, relayState, relayFieldCellCenter, selectRelayTraceCell, clickRelayLogicalCell, dragRelayJoystick, pauseAtCurrentBrowserTime, installPromptApiStub, seedRelayAccount, composerContextCalls } from './helpers/relayHarness';
+import { CHANNEL_ID, AUTHORITATIVE_RELAYS, fixtureSecret, traceRuntimeEvents, installDelayedRelay, relayState, relayFieldCellCenter, selectRelayTraceCell, clickRelayLogicalCell, dragRelayJoystick, pauseAtCurrentBrowserTime, installPromptApiStub, seedRelayAccount, composerContextCalls, readActionDockControlOrder } from './helpers/relayHarness';
 
 
 test.describe('Relay startup', () => {
@@ -169,6 +169,7 @@ test.describe('Relay startup', () => {
 		await page.emulateMedia({ reducedMotion: 'reduce' });
 		await page.setViewportSize({ width: 1100, height: 850 });
 		await installHostOwnedStub(page);
+		await installPromptApiStub(page);
 		await installDelayedRelay(page, { primaryEvents: primary, traceRoots: [root, unreadRoot, deathRoot], traceReplies: [reply] });
 		await seedRelayAccount(page, selfSecret, selfPubkey);
 		await page.goto('/');
@@ -192,6 +193,10 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveAttribute('data-trace-marker-kind', 'normal');
 		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveCSS('color', 'rgb(207, 6, 254)');
 		await expect(page.locator('.trace-unread-indicator')).toBeVisible();
+		await expect(page.getByRole('button', { name: 'AI発言候補を生成' })).toBeVisible();
+		expect(await readActionDockControlOrder(page)).toEqual([
+			'profile-trigger', 'chatter-toggle', 'trace-unread-indicator', 'speech-type-toggle', 'suggestions-anchor'
+		]);
 		await page.locator('.trace-unread-indicator').click();
 		await expect(page.locator('.trace-unread-explanation')).toContainText('どこかにあなたへの返信の痕跡があります');
 		await expect(page.locator('[data-trace-root-id]')).toHaveCount(0);

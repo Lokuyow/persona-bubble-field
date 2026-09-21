@@ -123,8 +123,6 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 
 </script>
 
-<span class="chatter-state-marker" data-chatter-initialized={timelineInitialized ? 'true' : undefined} hidden aria-hidden="true"></span>
-
 {#if timelineInitialized && open}
 	<aside class={['recent-message-timeline', { 'timeline-has-messages': messages.length > 0 }]} aria-label="Chatter">
 		<header class="timeline-header">
@@ -193,8 +191,6 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		color: rgba(239, 241, 255, 0.9);
 		pointer-events: auto;
 	}
-
-	.chatter-state-marker { display: none; }
 
 	.recent-message-timeline.timeline-has-messages {
 		height: calc(100% - 24px);
