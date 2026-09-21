@@ -8,20 +8,23 @@
 		expiresAtMs: number;
 		nowMs: number;
 		points: number;
+		hasJob: boolean;
 		mendingProjection: MendingProjection | null;
 	}>;
 
-	let { expiresAtMs, nowMs, points, mendingProjection }: Props = $props();
+	let { expiresAtMs, nowMs, points, hasJob, mendingProjection }: Props = $props();
 	let label = $derived(formatRemainingLifespan(expiresAtMs, nowMs));
 	let lifespanValue = $derived(label.replace(/^寿命\s+/, ''));
-	let mendingLabel = $derived(mendingProjection?.completed ? '作業満杯' : mendingProjection?.lifespanExtensionPerHour ? `作業中 +${formatMendingRate(mendingProjection.lifespanExtensionPerHour.numerator, mendingProjection.lifespanExtensionPerHour.denominator)}h/h` : null);
+	let mendingLabel = $derived(!hasJob || !mendingProjection ? null : !mendingProjection.completed ? '作業中' : mendingProjection.lifespanExtensionRateHundredthsPerHour > 0 ? '延命中' : '作業停止中');
+	let pointRate = $derived(hasJob && mendingProjection ? `${(mendingProjection.pointRateHundredthsPerMinute / 100).toFixed(2)} pt/分` : null);
+	let lifespanRate = $derived(hasJob && mendingProjection ? `+${formatMendingRate(mendingProjection.lifespanExtensionRateHundredthsPerHour, 100)}h/h` : null);
 </script>
 
 
 <div class="lifespan-hud" aria-label={mendingLabel ? `${label}、ポイント ${points}pt、${mendingLabel}` : `${label}、ポイント ${points}pt`}>
 	<span class="lifespan-value" data-stat-icon="heart"><Heart aria-hidden="true" /><span class="stat-value">{lifespanValue}</span></span>
 	<span class="points-value" data-stat-icon="wallet"><Wallet aria-hidden="true" /><span class="stat-value">{points}pt</span></span>
-	{#if mendingLabel}<span class="mending-status">{mendingLabel}</span>{/if}
+	{#if mendingLabel}<span class="mending-status" data-mending-status>{mendingLabel}</span><span class="mending-rate" data-mending-rate><span>{pointRate}</span><span>{lifespanRate}</span></span>{/if}
 </div>
 
 <style>
@@ -66,6 +69,8 @@
 			font-size: 0.88em;
 			font-weight: 700;
 		}
+
+		.mending-rate { display: flex; justify-content: space-between; gap: 12px; width: 100%; color: rgba(226, 230, 255, 0.86); font-size: 0.82em; font-weight: 600; }
 
 		@media (max-width: 700px) {
 			min-width: 0;

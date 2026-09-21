@@ -2660,8 +2660,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 				registerReplyRemeasure={registerTraceReplyRemeasure}
 			/>
 			{#if lifespanHudNowMs !== null && personaSnapshot && !personaLifecycleTransition}
-				{@const lifespanProjection = projectMending(personaSnapshot.gameState, lifespanHudNowMs, personaSnapshot.activeRun.rootBuild)}
-				<LifespanHud expiresAtMs={lifespanProjection.effectiveExpiresAtMs} nowMs={lifespanHudNowMs} points={personaSnapshot.gameState.points} mendingProjection={lifespanProjection} />
+				<LifespanHud expiresAtMs={mendingProjection?.effectiveExpiresAtMs ?? personaSnapshot.gameState.lifespanExpiresAtMs} nowMs={lifespanHudNowMs} points={personaSnapshot.gameState.points} hasJob={Boolean(personaSnapshot.gameState.mendingJob)} mendingProjection={mendingProjection} />
 			{/if}
 		{/snippet}
 	</FieldViewport>
