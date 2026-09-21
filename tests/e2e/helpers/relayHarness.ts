@@ -16,6 +16,7 @@ import {
 	buildRiftActionTemplate,
 	getRiftRoundSchedule,
 	getRiftSchedule,
+	getRiftScheduleForDate,
 	getRiftScheduleForInstance,
 	type RiftAction
 } from '../../../src/lib/rift';
@@ -127,9 +128,24 @@ export function testEvents(nowMs = Date.now(), channelId = CHANNEL_ID) {
 	};
 }
 
+function nextRiftDateKey(dateKey: string): string {
+	const date = new Date(`${dateKey}T00:00:00Z`);
+	date.setUTCDate(date.getUTCDate() + 1);
+	return date.toISOString().slice(0, 10);
+}
+
+export function nextScheduledRiftSchedule(schedule: ReturnType<typeof getRiftSchedule>): ReturnType<typeof getRiftSchedule> {
+	const next = getRiftScheduleForDate(nextRiftDateKey(schedule.dateKey), schedule.endedAtMs + 1);
+	if (next.instanceId === schedule.instanceId || next.dateKey === schedule.dateKey || next.phase === 'ended') {
+		throw new Error(`Expected a distinct upcoming Rift schedule after ${schedule.instanceId}.`);
+	}
+	return next;
+}
+
 export function upcomingRegistrationSchedule(): ReturnType<typeof getRiftSchedule> {
-	let schedule = getRiftSchedule(Date.now());
-	if (schedule.registrationAtMs <= Date.now()) schedule = getRiftSchedule(schedule.endedAtMs + 1);
+	const nowMs = Date.now();
+	let schedule = getRiftSchedule(nowMs);
+	if (schedule.registrationAtMs <= nowMs) schedule = nextScheduledRiftSchedule(schedule);
 	return schedule;
 }
 
