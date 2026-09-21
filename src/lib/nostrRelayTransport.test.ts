@@ -9,7 +9,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createNostrRelayTransport } from './nostrRelayTransport';
 import {
-	buildDeathTraceEventTemplate, buildTraceRootBootstrapFilter, buildWorldMessageTemplate, buildWorldStateEventTemplate, buildWorldMessageFilter
+	buildDeathTraceEventTemplate, buildTraceRootBootstrapFilter, buildWorldMessageTemplate, buildWorldStateEventTemplate, buildWorldMessageFilter, WORLD_STATE_KIND
 } from './nostrProtocol';
 import { buildRealtimeControlEventTemplate, buildRealtimeControlFilter, buildRealtimeEventFilter, buildRealtimeInstanceFilter, finalizeRealtimeEvent, type RealtimeEventRegistry } from './realtimeEvents';
 import { RIFT_EVENT_DEFINITION, buildRiftActionTemplate } from './rift';
@@ -58,10 +58,10 @@ function mockRelay() {
 		onConnection: (_socket: Client) => {},
 		onRequest: (socket: Client, request: WireRequest) => send(socket, 'EOSE', request[1]),
 		onPublish: (_socket: Client, _event: VerifiedEvent) => {},
-		primaryRequests: (): WireRequest[] => relay.requests.filter((request) => [42, 30078].includes(kind(request)!) && request[2].limit === undefined),
+		primaryRequests: (): WireRequest[] => relay.requests.filter((request) => [42, WORLD_STATE_KIND].includes(kind(request)!) && request[2].limit === undefined),
 		traceRequests: (): WireRequest[] => relay.requests.filter((request) => filters(request).every((filter) => (filter.kinds as number[])[0] === 1111)),
 		rootRequests: (): WireRequest[] => relay.requests.filter((request) => kind(request) === 42 && request[2].limit === 1000 && request[3]?.limit === 1000),
-		primaryId: (eventKind: 42 | 30078): string => relay.primaryRequests().filter((request) => kind(request) === eventKind).at(-1)![1],
+		primaryId: (eventKind: 42 | typeof WORLD_STATE_KIND): string => relay.primaryRequests().filter((request) => kind(request) === eventKind).at(-1)![1],
 		latestSocket: (): Client => relay.sockets.at(-1)!
 	};
 	server.on('connection', (socket) => {
@@ -216,7 +216,7 @@ describe('primary lifecycle', () => {
 		const f = fixture(1);
 		const event = f.position();
 		f.authorities[0].onRequest = (socket, request) => {
-			if (kind(request) === 30078) send(socket, 'EVENT', request[1], event);
+			if (kind(request) === WORLD_STATE_KIND) send(socket, 'EVENT', request[1], event);
 			send(socket, 'EOSE', request[1]);
 		};
 		const result = await f.start();
@@ -271,7 +271,7 @@ describe('primary lifecycle', () => {
 		const livePosition = f.position(TIME + 1);
 		for (const relay of f.authorities) {
 			send(relay.latestSocket(), 'EVENT', relay.primaryId(42), liveMessage);
-			send(relay.latestSocket(), 'EVENT', relay.primaryId(30078), livePosition);
+			send(relay.latestSocket(), 'EVENT', relay.primaryId(WORLD_STATE_KIND), livePosition);
 			send(relay.latestSocket(), 'EVENT', relay.primaryId(42), storedMessage);
 		}
 		await vi.advanceTimersByTimeAsync(10);
@@ -291,9 +291,9 @@ describe('primary lifecycle', () => {
 		await vi.advanceTimersByTimeAsync(30);
 		const [a, b] = f.authorities;
 		send(a.latestSocket(), 'EOSE', 'unrelated opaque value');
-		send(b.latestSocket(), 'EOSE', b.primaryId(30078));
+		send(b.latestSocket(), 'EOSE', b.primaryId(WORLD_STATE_KIND));
 		send(a.latestSocket(), 'EOSE', a.primaryId(42));
-		send(a.latestSocket(), 'EOSE', a.primaryId(30078));
+		send(a.latestSocket(), 'EOSE', a.primaryId(WORLD_STATE_KIND));
 		await vi.advanceTimersByTimeAsync(5);
 		expect(settled).toBe(false);
 		send(b.latestSocket(), 'EOSE', b.primaryId(42));
@@ -1292,7 +1292,7 @@ describe('trace reply transport', () => {
 		const message = f.message('primary after trace closure');
 		const position = f.position();
 		send(a.latestSocket(), 'EVENT', a.primaryId(42), message);
-		send(a.latestSocket(), 'EVENT', a.primaryId(30078), position);
+		send(a.latestSocket(), 'EVENT', a.primaryId(WORLD_STATE_KIND), position);
 		await vi.advanceTimersByTimeAsync(5);
 		expect(config.onLiveEvent).toHaveBeenCalledExactlyOnceWith(expect.objectContaining(reply));
 		expect(f.input.onLiveMessage).toHaveBeenCalledExactlyOnceWith(
@@ -1645,7 +1645,7 @@ describe('semantic primary classifier', () => {
 		const f = fixture();
 		const result = await f.start();
 		expect(result.primaryPairs.every((pair) => pair.status === 'eose')).toBe(true);
-		const primary = observed.filter((message) => message[0] === 'REQ' && [42, 30078].includes(((message[2] as Record<string, number[]>).kinds)[0]));
+		const primary = observed.filter((message) => message[0] === 'REQ' && [42, WORLD_STATE_KIND].includes(((message[2] as Record<string, number[]>).kinds)[0]));
 		expect(primary).toHaveLength(4);
 		for (const message of primary) {
 			expect(message[2]).toHaveProperty('until', undefined);
@@ -1661,6 +1661,7 @@ describe('semantic primary classifier', () => {
 	});
 
 	it.each([
+		['legacy World State kind', { kinds: [30078] }],
 		['unexpected #w condition', { '#w': ['1:2'] }],
 		['numeric until', { until: TIME + 1 }],
 		['limit', { limit: 1 }],

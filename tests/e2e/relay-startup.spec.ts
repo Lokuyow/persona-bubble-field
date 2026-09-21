@@ -5,6 +5,7 @@ import { wordlist as englishWordlist } from '@scure/bip39/wordlists/english.js';
 import { finalizeEvent, getPublicKey, verifyEvent, type Event as NostrEvent } from 'nostr-tools/pure';
 import {
 	buildWorldStateEventTemplate,
+	WORLD_STATE_KIND,
 	buildTraceReplyTemplate,
 	buildWorldMessageTemplate,
 	parseTraceReplyCandidate,
@@ -338,6 +339,7 @@ async function installDelayedRelay(page: Page, options: {
 } = {}): Promise<void> {
 	const events = options.primaryEvents ?? testEvents();
 	await page.addInitScript(({ seedRelays, authoritativeRelays, channelEvent, primaryEvents, historyMessages, realtimeEvents, deferPrimaryEvents, deferRealtimeEvents, realtimeTerminal, realtimePublishOutcome, rejectTracePublishes, traceRoots, traceReplies, deferTraceRoots, deferTraceReplies, persistAcrossReload, testWorldConfig, hiddenSubscriptionLimit }) => {
+		const WORLD_STATE_KIND = 30079;
 		type Listener = (event?: { type: string; data?: string; code?: number; reason?: string }) => void;
 		type PendingRequest = { socket: FakeWebSocket; subId: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] };
 		const seed = new Set<string>(seedRelays);
@@ -414,7 +416,7 @@ async function installDelayedRelay(page: Page, options: {
 			const labels = (event.tags as string[][] | undefined) ?? [];
 			const isDeathTrace = event.kind === 42 && labels.some((tag) => tag[0] === 'l' && tag[1] === 'trace' && tag[2] === 'io.github.lokuyow.persona-bubble-field');
 			const isNormalMessage = event.kind === 42 && labels.some((tag) => tag[0] === 'l' && tag[1] === 'chat' && tag[2] === 'io.github.lokuyow.persona-bubble-field') && !isDeathTrace;
-			const reject = isNormalMessage && state.rejectMessagePublishes || event.kind === 30078 && state.rejectPositionPublishes || isDeathTrace && state.rejectTracePublishes ||
+			const reject = isNormalMessage && state.rejectMessagePublishes || event.kind === WORLD_STATE_KIND && state.rejectPositionPublishes || isDeathTrace && state.rejectTracePublishes ||
 				event.kind === 1111 && state.replyOutcome !== 'accepted';
 			const notice = event.kind === 1111 && state.replyOutcome === 'duplicate' ? 'duplicate: already stored' : reject ? 'blocked: test rejection' : '';
 			if (event.kind === 1111 && state.replyOutcome !== 'rejected' && !traceReplyHistory.some((known) => known.id === event.id)) traceReplyHistory.push(event);
@@ -435,7 +437,7 @@ async function installDelayedRelay(page: Page, options: {
 			if (request.filters.some((filter) => (filter.kinds as number[] | undefined)?.includes(42))) {
 				deliver(request.socket, ['EVENT', request.subId, primaryEvents.message]);
 			}
-			if (request.filters.some((filter) => (filter.kinds as number[] | undefined)?.includes(30078))) {
+			if (request.filters.some((filter) => (filter.kinds as number[] | undefined)?.includes(WORLD_STATE_KIND))) {
 				deliver(request.socket, ['EVENT', request.subId, primaryEvents.position]);
 			}
 			if (request.filters.some((filter) => filter.limit === 50)) {
@@ -527,7 +529,7 @@ async function installDelayedRelay(page: Page, options: {
 					}
 					if (event.kind === 7070) {
 						respondRealtimePublish(this, event);
-					} else if (event.kind === 1111 && state.deferReplyPublishes || event.kind === 30078 && state.deferPositionPublishes) {
+					} else if (event.kind === 1111 && state.deferReplyPublishes || event.kind === WORLD_STATE_KIND && state.deferPositionPublishes) {
 						pendingPublishes.push({ socket: this, event });
 					} else respondPublish(this, event);
 					return;
@@ -614,7 +616,7 @@ async function installDelayedRelay(page: Page, options: {
 				},
 				releasePublishes: (kind: number) => {
 					if (kind === 1111) state.deferReplyPublishes = false;
-					if (kind === 30078) state.deferPositionPublishes = false;
+					if (kind === WORLD_STATE_KIND) state.deferPositionPublishes = false;
 					for (let index = pendingPublishes.length - 1; index >= 0; index--) {
 						if (pendingPublishes[index].event.kind !== kind) continue;
 						const pending = pendingPublishes.splice(index, 1)[0];
@@ -671,7 +673,7 @@ async function installDelayedRelay(page: Page, options: {
 				allowMessagePublishes: () => { state.rejectMessagePublishes = false; },
 				injectPosition: (event: object) => {
 					for (const request of activePrimary) {
-						if (request.filters.some((filter) => (filter.kinds as number[] | undefined)?.includes(30078))) {
+						if (request.filters.some((filter) => (filter.kinds as number[] | undefined)?.includes(WORLD_STATE_KIND))) {
 							deliver(request.socket, ['EVENT', request.subId, event]);
 						}
 					}
@@ -847,7 +849,7 @@ async function openReadyRelayWorld(page: Page, expectedParticipantCount = 2): Pr
 	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
 	await expect.poll(async () => {
 		const requests = (await relayState(page)).state.requests;
-		return [42, 30078].every((kind) => requests.some((request) =>
+		return [42, WORLD_STATE_KIND].every((kind) => requests.some((request) =>
 			AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) &&
 			(request.filter.kinds as number[])[0] === kind
 		));
@@ -1348,7 +1350,7 @@ test.describe('Relay startup', () => {
 		await expect.poll(() => page.evaluate(() => (window as typeof window & { __relayStartupTest: { activeRealtimeCount(): number; activeTraceReplyCount(): number } }).__relayStartupTest.activeRealtimeCount())).toBe(0);
 		await expect.poll(() => page.evaluate(() => (window as typeof window & { __relayStartupTest: { activeTraceReplyCount(): number } }).__relayStartupTest.activeTraceReplyCount())).toBeGreaterThan(0);
 		const primaryRequests = (await relayState(page)).state.requests.filter((request) =>
-			[42, 30078].includes((request.filter.kinds as number[])[0]) && request.filter.limit !== 1_000);
+			[42, WORLD_STATE_KIND].includes((request.filter.kinds as number[])[0]) && request.filter.limit !== 1_000);
 		expect(primaryRequests).toHaveLength(AUTHORITATIVE_RELAYS.length * 2);
 	});
 
@@ -1432,7 +1434,7 @@ test.describe('Relay startup', () => {
 		const firstRealtimeRequests = (await relayState(page)).state.requests.filter(isRealtimeRequest);
 		expect(firstRealtimeRequests.some((request) => realtimeInstanceIds(request).length === 1 && realtimeInstanceIds(request)[0] === schedule.instanceId)).toBe(true);
 		const primaryRequestCount = (await relayState(page)).state.requests.filter((request) =>
-			[42, 30078].includes((request.filter.kinds as number[])[0]) && request.filter.limit !== 1_000).length;
+			[42, WORLD_STATE_KIND].includes((request.filter.kinds as number[])[0]) && request.filter.limit !== 1_000).length;
 
 		await page.clock.setSystemTime(schedule.endedAtMs + 1_000);
 		await page.clock.runFor(1_000);
@@ -1449,7 +1451,7 @@ test.describe('Relay startup', () => {
 		expect(nextRealtimeRequests.length).toBeGreaterThan(0);
 		expect(nextRealtimeRequests.some((request) => realtimeInstanceIds(request).length === 1 && realtimeInstanceIds(request)[0] === nextSchedule.instanceId)).toBe(true);
 		expect((await relayState(page)).state.requests.filter((request) =>
-			[42, 30078].includes((request.filter.kinds as number[])[0]) && request.filter.limit !== 1_000)).toHaveLength(primaryRequestCount);
+			[42, WORLD_STATE_KIND].includes((request.filter.kinds as number[])[0]) && request.filter.limit !== 1_000)).toHaveLength(primaryRequestCount);
 
 		const nextHole = deriveRiftHolePositions(nextSchedule.instanceId, { columns: 16, rows: 8 })[0];
 		const nextJoin = signedRiftAction(secret, nextSchedule, { action: 'join', holeId: nextHole.id }, nextSchedule.registrationAtMs + 1_000);
@@ -1749,7 +1751,7 @@ test.describe('Relay startup', () => {
 		const exits = await page.evaluate((expectedPubkey) => {
 			const state = (window as typeof window & { __relayStartupTest: { state: { previousPublished: Array<{ id: string; kind: number; pubkey?: string; content: string; tags: string[][] }>; published: Array<{ id: string; kind: number; pubkey?: string; content: string; tags: string[][] }> } } }).__relayStartupTest.state;
 			return [...new Map([...state.previousPublished, ...state.published]
-				.filter((event) => event.kind === 30078 && event.pubkey === expectedPubkey && event.tags.some((tag) => tag[0] === 'd' && tag[1]?.endsWith(':exit')))
+				.filter((event) => event.kind === 30079 && event.pubkey === expectedPubkey && event.tags.some((tag) => tag[0] === 'd' && tag[1]?.endsWith(':exit')))
 				.map((event) => [event.id, event])).values()];
 		}, selfPubkey);
 		expect(exits).toHaveLength(1);
@@ -1850,7 +1852,7 @@ test.describe('Relay startup', () => {
 		await expect(page.getByRole('dialog')).toHaveCount(0);
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest.releaseMetadata());
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
-		const exits = (await relayState(page)).state.published.filter((event) => event.kind === 30078 && event.pubkey === selfPubkey && event.tags.some((tag) => tag[0] === 'd' && tag[1]?.endsWith(':exit')));
+		const exits = (await relayState(page)).state.published.filter((event) => event.kind === WORLD_STATE_KIND && event.pubkey === selfPubkey && event.tags.some((tag) => tag[0] === 'd' && tag[1]?.endsWith(':exit')));
 		expect(exits).toHaveLength(0);
 	});
 
@@ -1881,8 +1883,8 @@ test.describe('Relay startup', () => {
 			relay.releaseMetadata(); relay.releasePrimary();
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
-		expect((await relayState(page)).state.published.some((event) => event.kind === 30078 && event.pubkey === pubkey && event.tags.some((tag) => tag[0] === 'd' && tag[1]?.endsWith(':exit')))).toBe(false);
-		await expect.poll(async () => (await relayState(page)).state.published.some((event) => event.kind === 30078 && event.pubkey === pubkey)).toBe(true);
+		expect((await relayState(page)).state.published.some((event) => event.kind === WORLD_STATE_KIND && event.pubkey === pubkey && event.tags.some((tag) => tag[0] === 'd' && tag[1]?.endsWith(':exit')))).toBe(false);
+		await expect.poll(async () => (await relayState(page)).state.published.some((event) => event.kind === WORLD_STATE_KIND && event.pubkey === pubkey)).toBe(true);
 		const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
 		await editor.fill('valid run remains publishable after rollback reconciliation');
 		await page.locator('ehagaki-composer').getByRole('button', { name: 'Send' }).click();
@@ -2060,12 +2062,12 @@ test.describe('Relay startup', () => {
 			relay.releaseMetadata(); relay.releasePrimary();
 		});
 		await expect.poll(async () => (await relayState(page)).state.requests.filter((request) =>
-			request.filter.limit === undefined && [42, 30078].includes(requestKind(request)!)).length).toBeGreaterThan(0);
+			request.filter.limit === undefined && [42, WORLD_STATE_KIND].includes(requestKind(request)!)).length).toBeGreaterThan(0);
 		const requestCountsAfterRelease = await (async () => {
 			const requests = (await relayState(page)).state.requests;
 			return {
 				metadata: requests.filter((request) => [40, 41].includes(requestKind(request)!)).length,
-				primary: requests.filter((request) => request.filter.limit === undefined && [42, 30078].includes(requestKind(request)!)).length
+				primary: requests.filter((request) => request.filter.limit === undefined && [42, WORLD_STATE_KIND].includes(requestKind(request)!)).length
 			};
 		})();
 		await expect(page.locator('.participant[data-self="true"]')).toBeVisible();
@@ -2073,14 +2075,14 @@ test.describe('Relay startup', () => {
 			const requests = (await relayState(page)).state.requests;
 			return {
 				metadata: requests.filter((request) => [40, 41].includes(requestKind(request)!)).length,
-				primary: requests.filter((request) => request.filter.limit === undefined && [42, 30078].includes(requestKind(request)!)).length
+				primary: requests.filter((request) => request.filter.limit === undefined && [42, WORLD_STATE_KIND].includes(requestKind(request)!)).length
 			};
 		})();
 		expect(requestCountsAfterSelection).toEqual(requestCountsAfterRelease);
 		const selectedPubkey = await page.locator('.participant[data-self="true"]').getAttribute('data-participant-id');
 		expect(selectedPubkey).toBeTruthy();
 		await expect.poll(async () => (await relayState(page)).state.published.some((event) =>
-			event.kind === 30078 && event.pubkey === selectedPubkey)).toBe(true);
+			event.kind === WORLD_STATE_KIND && event.pubkey === selectedPubkey)).toBe(true);
 		await expect.poll(async () => (await relayState(page)).state.published.some((event) =>
 			event.kind === 0 && event.pubkey === selectedPubkey)).toBe(true);
 		const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
@@ -2202,14 +2204,14 @@ test.describe('Relay startup', () => {
 		await expect(candidateButtons).toHaveCount(3);
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
 		await expect.poll(async () => (await relayState(page)).state.requests.filter((request) =>
-			request.filter.limit === undefined && [42, 30078].includes(requestKind(request)!)).length).toBeGreaterThan(0);
+			request.filter.limit === undefined && [42, WORLD_STATE_KIND].includes(requestKind(request)!)).length).toBeGreaterThan(0);
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
-			request.filter.limit === undefined && requestKind(request) === 30078)).toBe(true);
+			request.filter.limit === undefined && requestKind(request) === WORLD_STATE_KIND)).toBe(true);
 		const requestsBeforeSelection = await relayState(page);
 		const countBootstrapRequests = (requests: typeof requestsBeforeSelection.state.requests) => ({
 			metadata: requests.filter((request) => [40, 41].includes(requestKind(request)!)).length,
-			primary: requests.filter((request) => request.filter.limit === undefined && [42, 30078].includes(requestKind(request)!)).length
+				primary: requests.filter((request) => request.filter.limit === undefined && [42, WORLD_STATE_KIND].includes(requestKind(request)!)).length
 		});
 		const countsBeforeSelection = countBootstrapRequests(requestsBeforeSelection.state.requests);
 		await candidateButtons.nth(0).click();
@@ -2226,13 +2228,13 @@ test.describe('Relay startup', () => {
 		const candidateButtons = page.getByRole('button', { name: /を選ぶ$/ });
 		await expect(candidateButtons).toHaveCount(3);
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
-		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => request.filter.limit === undefined && [42, 30078].includes(requestKind(request)!))).toBe(true);
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => request.filter.limit === undefined && [42, WORLD_STATE_KIND].includes(requestKind(request)!))).toBe(true);
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
-		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => request.filter.limit === undefined && requestKind(request) === 30078)).toBe(true);
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => request.filter.limit === undefined && requestKind(request) === WORLD_STATE_KIND)).toBe(true);
 		const beforeSelection = await relayState(page);
 		const bootstrapCounts = (requests: typeof beforeSelection.state.requests) => ({
 			metadata: requests.filter((request) => [40, 41].includes(requestKind(request)!)).length,
-			primary: requests.filter((request) => request.filter.limit === undefined && [42, 30078].includes(requestKind(request)!)).length
+				primary: requests.filter((request) => request.filter.limit === undefined && [42, WORLD_STATE_KIND].includes(requestKind(request)!)).length
 		});
 		const countsBeforeSelection = bootstrapCounts(beforeSelection.state.requests);
 
@@ -2241,7 +2243,7 @@ test.describe('Relay startup', () => {
 		await expect(page.getByRole('dialog')).toHaveCount(0);
 		await expect(page.locator('.participant[data-self="true"]')).toBeVisible();
 		const selectedPubkey = await page.locator('.participant[data-self="true"]').getAttribute('data-participant-id');
-		await expect.poll(async () => (await relayState(page)).state.published.some((event) => event.kind === 30078 && event.pubkey === selectedPubkey)).toBe(true);
+		await expect.poll(async () => (await relayState(page)).state.published.some((event) => event.kind === WORLD_STATE_KIND && event.pubkey === selectedPubkey)).toBe(true);
 		expect(bootstrapCounts((await relayState(page)).state.requests)).toEqual(countsBeforeSelection);
 
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseTraceRoots(): void } }).__relayStartupTest.releaseTraceRoots());
@@ -2446,7 +2448,7 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,2');
 		await expect(page.getByRole('dialog')).toHaveCount(0);
 
-		const publishedWorldStateCount = async () => (await relayState(page)).state.published.filter((event) => event.kind === 30078 && event.pubkey === pubkey).length;
+		const publishedWorldStateCount = async () => (await relayState(page)).state.published.filter((event) => event.kind === WORLD_STATE_KIND && event.pubkey === pubkey).length;
 		const beforeMendingStart = await publishedWorldStateCount();
 		await page.clock.runFor(1_001);
 		await terminal.click();
@@ -2612,7 +2614,7 @@ test.describe('Relay startup', () => {
 		await expect(dialog).toContainText('必要ポイント');
 		await expect(dialog.getByRole('button', { name: 'Lv2へ強化' }).first()).toBeVisible();
 		await expect(dialog.getByRole('button', { name: 'Lv2へ強化' }).first()).toHaveCSS('color', 'rgb(255, 255, 255)');
-		const beforeAbilityUpgrade = (await relayState(page)).state.published.filter((event) => event.kind === 30078 && event.pubkey === pubkey).length;
+		const beforeAbilityUpgrade = (await relayState(page)).state.published.filter((event) => event.kind === WORLD_STATE_KIND && event.pubkey === pubkey).length;
 		await page.clock.runFor(1_001);
 		const upgradedCard = dialog.locator('.ability-card').first();
 		const stableBefore = await upgradedCard.evaluate((card) => {
@@ -2626,7 +2628,7 @@ test.describe('Relay startup', () => {
 		await expect(dialog).not.toContainText('Root Point');
 		await dialog.getByRole('button', { name: 'Lv2へ強化' }).first().click();
 		await expect(dialog).toContainText('9 pt');
-		await expect.poll(async () => (await relayState(page)).state.published.filter((event) => event.kind === 30078 && event.pubkey === pubkey).length).toBeGreaterThan(beforeAbilityUpgrade);
+		await expect.poll(async () => (await relayState(page)).state.published.filter((event) => event.kind === WORLD_STATE_KIND && event.pubkey === pubkey).length).toBeGreaterThan(beforeAbilityUpgrade);
 		await expect(dialog.locator('.level-up-badge')).toHaveCount(1);
 		const stableDuring = await upgradedCard.evaluate((card) => ({
 			typeY: card.querySelector('.ability-type')!.getBoundingClientRect().y,
@@ -2793,7 +2795,7 @@ test.describe('Relay startup', () => {
 		const exits = await page.evaluate((expectedPubkey) => {
 			const state = (window as typeof window & { __relayStartupTest: { state: { previousPublished: Array<{ id: string; kind: number; pubkey?: string; content: string; tags: string[][] }>; published: Array<{ id: string; kind: number; pubkey?: string; content: string; tags: string[][] }> } } }).__relayStartupTest.state;
 			return [...new Map([...state.previousPublished, ...state.published]
-				.filter((event) => event.kind === 30078 && event.pubkey === expectedPubkey && event.tags.some((tag) => tag[0] === 'd' && tag[1]?.endsWith(':exit')))
+				.filter((event) => event.kind === 30079 && event.pubkey === expectedPubkey && event.tags.some((tag) => tag[0] === 'd' && tag[1]?.endsWith(':exit')))
 				.map((event) => [event.id, event])).values()];
 		}, pubkey);
 		expect(exits).toHaveLength(1);
@@ -3149,8 +3151,8 @@ test.describe('Relay startup', () => {
 			});
 			expect(observed.closed.length).toBeGreaterThan(0);
 			const postSupersession = observed.published.slice(oldPublishedCount);
-			expect(postSupersession.filter((event) => [30078, 42, 1111].includes(event.kind))).not.toContainEqual(expect.objectContaining({ pubkey: oldPubkey }));
-			expect(postSupersession).toContainEqual(expect.objectContaining({ kind: 30078, pubkey: newPubkey }));
+			expect(postSupersession.filter((event) => [WORLD_STATE_KIND, 42, 1111].includes(event.kind))).not.toContainEqual(expect.objectContaining({ pubkey: oldPubkey }));
+			expect(postSupersession).toContainEqual(expect.objectContaining({ kind: WORLD_STATE_KIND, pubkey: newPubkey }));
 			expect(postSupersession).toContainEqual(expect.objectContaining({ kind: 42, pubkey: newPubkey }));
 		} finally {
 			await reincarnator.close();
@@ -3434,7 +3436,7 @@ test.describe('Relay startup', () => {
 			__personaLifecycleFailureTest: { injected(): number }
 		}).__personaLifecycleFailureTest.injected())).toBe(1);
 		await expect(page.locator('.participant[data-self="true"]')).toHaveCount(0);
-		expect((await relayState(page)).state.published.some((event) => event.kind === 30078 && event.tags.some((tag) => tag[0] === 'd' && tag[1]?.endsWith(':exit')))).toBe(false);
+		expect((await relayState(page)).state.published.some((event) => event.kind === WORLD_STATE_KIND && event.tags.some((tag) => tag[0] === 'd' && tag[1]?.endsWith(':exit')))).toBe(false);
 		await expect.poll(async () => (await relayState(page)).state.requests.length).toBeGreaterThan(initialRequestCount);
 
 		const live = testEvents(startTime + 31_000);
@@ -3555,13 +3557,13 @@ test.describe('Relay startup', () => {
 		await expect.poll(async () => page.evaluate((expectedPubkey) => {
 			const state = (window as unknown as { __relayStartupTest: { state: { previousPublished: Array<{ id: string; kind: number; pubkey?: string; content: string; tags: string[][]; created_at?: number }>; published: Array<{ id: string; kind: number; pubkey?: string; content: string; tags: string[][]; created_at?: number }> } } }).__relayStartupTest.state;
 			return [...new Map([...state.previousPublished, ...state.published]
-				.filter((event) => event.kind === 30078 && event.pubkey === expectedPubkey && event.tags.some((tag) => tag[0] === 'd' && tag[1]?.endsWith(':exit')))
+				.filter((event) => event.kind === 30079 && event.pubkey === expectedPubkey && event.tags.some((tag) => tag[0] === 'd' && tag[1]?.endsWith(':exit')))
 				.map((event) => [event.id, event])).values()];
 		}, pubkey)).toHaveLength(1);
 		const exit = await page.evaluate((expectedPubkey) => {
 			const state = (window as unknown as { __relayStartupTest: { state: { previousPublished: Array<{ id: string; kind: number; pubkey?: string; content: string; tags: string[][]; created_at?: number }>; published: Array<{ id: string; kind: number; pubkey?: string; content: string; tags: string[][]; created_at?: number }> } } }).__relayStartupTest.state;
 			const published = [...state.previousPublished, ...state.published];
-			return published.find((event) => event.kind === 30078 && event.pubkey === expectedPubkey && event.tags.some((tag) => tag[0] === 'd' && tag[1]?.endsWith(':exit')));
+			return published.find((event) => event.kind === 30079 && event.pubkey === expectedPubkey && event.tags.some((tag) => tag[0] === 'd' && tag[1]?.endsWith(':exit')));
 		}, pubkey);
 		expect(exit?.content).toMatch(/^\d+:\d+$/);
 		expect(exit?.tags.find((tag) => tag[0] === 'e')?.[1]).toBe(CHANNEL_ID);
@@ -3600,7 +3602,7 @@ test.describe('Relay startup', () => {
 		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
 		await expect.poll(() => page.evaluate((expectedPubkey) => {
 			const state = (window as unknown as { __relayStartupTest: { state: { previousPublished: Array<{ id: string; kind: number; pubkey?: string; tags: string[][] }>; published: Array<{ id: string; kind: number; pubkey?: string; tags: string[][] }> } } }).__relayStartupTest.state;
-			return [...state.previousPublished, ...state.published].some((event) => event.kind === 30078 && event.pubkey === expectedPubkey && event.tags.some((tag) => tag[0] === 'd' && tag[1]?.endsWith(':exit')));
+			return [...state.previousPublished, ...state.published].some((event) => event.kind === 30079 && event.pubkey === expectedPubkey && event.tags.some((tag) => tag[0] === 'd' && tag[1]?.endsWith(':exit')));
 		}, pubkey)).toBe(true);
 		const traces = (await relayState(page)).state.published.filter((event) => isDeathTraceEvent(event) && event.pubkey === pubkey);
 		expect(traces).toHaveLength(0);
@@ -4053,11 +4055,11 @@ test.describe('Relay startup', () => {
 			const bubble = page.locator(`[data-trace-reply-id="${raw.id}"]`);
 			await expect(bubble).toHaveCount(0);
 			await expect(editor).toHaveValue('own Trace shout');
-			const positionsBefore = (await relayState(page)).state.published.filter((event) => event.kind === 30078).length;
+			const positionsBefore = (await relayState(page)).state.published.filter((event) => event.kind === WORLD_STATE_KIND).length;
 			await editor.press('Escape');
 			await page.keyboard.press('ArrowRight');
 			await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '3,2');
-			expect((await relayState(page)).state.published.filter((event) => event.kind === 30078)).toHaveLength(positionsBefore);
+			expect((await relayState(page)).state.published.filter((event) => event.kind === WORLD_STATE_KIND)).toHaveLength(positionsBefore);
 			await page.evaluate(() => (window as unknown as { __relayStartupTest: { releasePublishes(kind: number): void } }).__relayStartupTest.releasePublishes(1111));
 			await expect.poll(() => page.evaluate(() => (window as unknown as { __ehagakiTerminalCount: number }).__ehagakiTerminalCount)).toBe(1);
 			if (outcome === 'rejected') {
@@ -4102,7 +4104,7 @@ test.describe('Relay startup', () => {
 		}).__relayStartupTest.releaseMetadata());
 		await expect.poll(async () => {
 			const requests = (await relayState(page)).state.requests;
-			return [42, 30078].every((kind) => requests.some((request) =>
+			return [42, WORLD_STATE_KIND].every((kind) => requests.some((request) =>
 				AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) &&
 				(request.filter.kinds as number[])[0] === kind && request.filter.limit !== 1000
 			));
@@ -4127,7 +4129,7 @@ test.describe('Relay startup', () => {
 			(window as typeof window & { __relayStartupTest: { state: { published: unknown[] } } }).__relayStartupTest.state.published.length = 0;
 		});
 		const publishedPositionIds = async () => new Set(
-			(await relayState(page)).state.published.filter((event) => event.kind === 30078).map((event) => event.id)
+			(await relayState(page)).state.published.filter((event) => event.kind === WORLD_STATE_KIND).map((event) => event.id)
 		).size;
 		const positionsBefore = await publishedPositionIds();
 		await dragRelayJoystick(page, { x: 24, y: -24 });
@@ -4178,7 +4180,7 @@ test.describe('Relay startup', () => {
 		}).__relayStartupTest.releaseMetadata());
 		await expect.poll(async () => {
 			const requests = (await relayState(page)).state.requests;
-			return [42, 30078].every((kind) => requests.some((request) =>
+			return [42, WORLD_STATE_KIND].every((kind) => requests.some((request) =>
 				AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) &&
 				(request.filter.kinds as number[])[0] === kind && request.filter.limit !== 1000
 			));
@@ -4211,7 +4213,7 @@ test.describe('Relay startup', () => {
 		await expect(page.locator(`[data-trace-reply-ghost-id="${trace.selfDirect.id}"]`)).toHaveCount(0);
 		await expect(page.locator(`[data-trace-tail-reply-id]`)).toHaveCount(0);
 		const publishedPositionIds = async () => new Set(
-			(await relayState(page)).state.published.filter((event) => event.kind === 30078).map((event) => event.id)
+			(await relayState(page)).state.published.filter((event) => event.kind === WORLD_STATE_KIND).map((event) => event.id)
 		).size;
 		const positionsBeforeCurrentSwitch = await publishedPositionIds();
 		await page.clock.install({ time: Date.now() });
@@ -4236,7 +4238,7 @@ test.describe('Relay startup', () => {
 		await expect.poll(publishedPositionIds).toBe(positionsBeforeCurrentSwitch + 1);
 		await page.evaluate(() => (window as typeof window & {
 			__relayStartupTest: { releasePublishes(kind: number): void }
-		}).__relayStartupTest.releasePublishes(30078));
+		}).__relayStartupTest.releasePublishes(30079));
 
 		await page.evaluate((event) => (window as typeof window & {
 			__relayStartupTest: { injectTraceReply(event: object): void }
@@ -4937,13 +4939,13 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('.speech-type-toggle')).toBeDisabled();
 
 		const beforeMetadata = await relayState(page);
-		expect(beforeMetadata.state.requests.some((request) => AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) && [42, 30078].includes((request.filter.kinds as number[])[0]))).toBe(false);
+		expect(beforeMetadata.state.requests.some((request) => AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) && [42, WORLD_STATE_KIND].includes((request.filter.kinds as number[])[0]))).toBe(false);
 		expect(beforeMetadata.state.published.filter((event) => event.kind === 42)).toHaveLength(0);
 
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
 		await expect.poll(async () => {
 			const requests = (await relayState(page)).state.requests;
-			return [42, 30078].every((kind) => requests.some((request) =>
+			return [42, WORLD_STATE_KIND].every((kind) => requests.some((request) =>
 				AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) &&
 				(request.filter.kinds as number[])[0] === kind
 			));
@@ -4998,7 +5000,7 @@ test.describe('Relay startup', () => {
 		await expect(editor).toHaveValue('abort while waiting for metadata');
 
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
-		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) && [42, 30078].includes((request.filter.kinds as number[])[0]))).toBe(true);
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) && [42, WORLD_STATE_KIND].includes((request.filter.kinds as number[])[0]))).toBe(true);
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
 	await expect(page.locator('.participant')).toHaveCount(2);
 		expect(new Set((await relayState(page)).state.published.filter((event) => event.kind === 42).map((event) => event.id)).size).toBe(0);
@@ -5275,7 +5277,7 @@ test.describe('Relay startup', () => {
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
 			AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) &&
-			(request.filter.kinds as number[])[0] === 30078
+			(request.filter.kinds as number[])[0] === WORLD_STATE_KIND
 		)).toBe(true);
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimaryEvents(): void; releasePrimary(): void } }).__relayStartupTest.releasePrimaryEvents());
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());

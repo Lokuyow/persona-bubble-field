@@ -6,6 +6,7 @@ import {
 	parseTraceReplyCandidate,
 	validateTraceReplyCandidate,
 	parseWorldMessage,
+	WORLD_STATE_KIND,
 	type ParsedWorldStateEvent,
 	type ParsedTraceReply,
 	type ParsedWorldMessage
@@ -124,19 +125,19 @@ describe('Trace reply publication ownership', () => {
 		expect(f.publish).toHaveBeenCalledTimes(1);
 		pending.resolve(accepted); await settle();
 		await expect(f.submit()).resolves.toMatchObject({ kind: 'succeeded' });
-		expect(f.publish.mock.calls.map(([event]) => event.kind)).toEqual([30078, 1111]);
+		expect(f.publish.mock.calls.map(([event]) => event.kind)).toEqual([WORLD_STATE_KIND, 1111]);
 	});
 
 	it('allows local Trace navigation while its inspection position is pending without publishing again', async () => {
 		const f = await fixture(true); vi.setSystemTime(701_000);
 		const pending = deferred<import('./nostrRelayTransport').PublishRelayResult[]>();
-		f.publish.mockImplementation((event) => event.kind === 30078 ? pending.promise : Promise.resolve(accepted));
+		f.publish.mockImplementation((event) => event.kind === WORLD_STATE_KIND ? pending.promise : Promise.resolve(accepted));
 
 		expect(f.session.selectTraceConversationSpeech(f.child.id)).toEqual({ kind: 'opened' });
 		await settle();
 		expect(f.session.getTraceConversationState()).toMatchObject({ config: { currentId: f.child.id } });
 		expect(f.publish).toHaveBeenCalledTimes(1);
-		expect(f.publish.mock.calls[0][0].kind).toBe(30078);
+		expect(f.publish.mock.calls[0][0].kind).toBe(WORLD_STATE_KIND);
 
 		expect(f.session.selectTraceConversationSpeech(f.root.id)).toEqual({ kind: 'opened' });
 		expect(f.session.getTraceConversationState()).toMatchObject({ config: { rootId: f.root.id, currentId: f.root.id } });
@@ -248,7 +249,7 @@ describe('Trace reply publication ownership', () => {
 		await expect(f.submit()).resolves.toEqual({ kind: 'position-failed' });
 		await expect(f.submit()).resolves.toEqual({ kind: 'position-failed' });
 		await expect(f.submit()).resolves.toEqual({ kind: 'blocked' });
-		expect(f.publish.mock.calls.map(([event]) => event.kind)).toEqual([30078, 30078]);
+		expect(f.publish.mock.calls.map(([event]) => event.kind)).toEqual([WORLD_STATE_KIND, WORLD_STATE_KIND]);
 	});
 });
 
@@ -515,7 +516,7 @@ describe('world read session', () => {
 		await expect(session.moveSelf('right')).resolves.toMatchObject({ kind: 'succeeded' });
 		await expect(session.publishMessage('stale', 'normal')).resolves.toMatchObject({ kind: 'succeeded' });
 		await expect(session.publish({} as VerifiedEvent)).rejects.toThrow('Self-write authorization was lost.');
-		expect(publish.mock.calls.map(([event]) => event.kind)).toEqual([30078, 42]);
+		expect(publish.mock.calls.map(([event]) => event.kind)).toEqual([WORLD_STATE_KIND, 42]);
 		expect(authorize).toHaveBeenCalledTimes(3);
 		expect(lost).toHaveBeenCalledTimes(1);
 	});
@@ -603,7 +604,7 @@ describe('world read session', () => {
 		vi.setSystemTime(701_000);
 		expect(session.openTraceConversation({ rootId: inside.id, currentId: inside.id })).toEqual({ kind: 'opened' });
 		await Promise.resolve();
-		expect(publish.mock.calls.map(([event]) => event.kind)).toEqual([30078]);
+		expect(publish.mock.calls.map(([event]) => event.kind)).toEqual([WORLD_STATE_KIND]);
 	});
 
 	it('rejects kind 1111 publication to a death root at the session domain boundary', async () => {
