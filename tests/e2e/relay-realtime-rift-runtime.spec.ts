@@ -186,6 +186,4 @@ test.describe('Relay startup', () => {
 		await page.keyboard.press(move.key);
 		await expect(self).toHaveAttribute('data-position', move.expected);
 	});
-
 });
-

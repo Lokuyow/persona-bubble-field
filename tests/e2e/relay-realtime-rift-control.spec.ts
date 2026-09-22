@@ -144,6 +144,4 @@ test.describe('Relay startup', () => {
 			return instances?.length === 1 && instances[0] === previousSchedule.instanceId;
 		})).toBe(true);
 	});
-
 });
-

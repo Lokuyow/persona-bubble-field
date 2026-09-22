@@ -215,4 +215,3 @@ test.describe('Relay startup', () => {
 		expect(exits).toHaveLength(0);
 	});
 });
-

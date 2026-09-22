@@ -227,6 +227,4 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('[data-realtime-hole-trigger]')).toHaveCount(0);
 		await expect.poll(async () => (await readRelayGameState(page)).points).toBe(20);
 	});
-
 });
-
