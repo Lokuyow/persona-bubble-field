@@ -9,7 +9,7 @@ import {
 	rootContextCompressionMultiplierTenths,
 	rootInferenceAccelerationMultiplierTenths,
 	rootMaximumLifespanMs,
-	rootOverflowLifespanPercent,
+	rootOverflowRewardPercent,
 	type RootBuild,
 	ZERO_ROOT_BUILD
 } from './rootProgression';
@@ -184,7 +184,7 @@ export function projectMending(state: MendingState, nowMs: number, rootBuild: Ro
 	const accelerationMultiplierTenths = rootInferenceAccelerationMultiplierTenths(rootBuild.inferenceAcceleration);
 	let progressTicks = state.pointProgressTicks;
 	let generatedPoints = 0;
-	const overflowRatePercent = rootOverflowLifespanPercent(rootBuild.contextCompression);
+	const overflowRatePercent = rootOverflowRewardPercent(rootBuild.contextCompression);
 	for (const [durationMs, multiplierNumerator, multiplierDenominator] of [
 		[acceleratedDurationMs, accelerationMultiplierTenths, 10],
 		[normalDurationMs, 10, 10],
@@ -197,12 +197,13 @@ export function projectMending(state: MendingState, nowMs: number, rootBuild: Ro
 	let expiry = state.lifespanExpiresAtMs;
 	let extension = 0;
 	const regularRate = getHallucinationExtensionHundredths(abilities.hallucinationSuppression);
-	const currentPointRateHundredthsPerMinute = overflowDurationMs > 0
+	const completed = processedDurationMs >= contextCapacityMs;
+	const currentPointRateHundredthsPerMinute = completed
 		? baseRate * overflowRatePercent / 100
 		: state.inferenceAccelerationUsedMs + regularDurationMs < INFERENCE_ACCELERATION_BUDGET_MS
 			? baseRate * accelerationMultiplierTenths / 10
 			: baseRate;
-	const currentLifespanExtensionRateHundredthsPerHour = overflowDurationMs > 0 ? regularRate * overflowRatePercent / 100 : regularRate;
+	const currentLifespanExtensionRateHundredthsPerHour = completed ? regularRate * overflowRatePercent / 100 : regularRate;
 	for (const [durationMs, rateNumerator, rateDenominator, offset] of [
 		[acceleratedDurationMs, regularRate, 100, 0],
 		[normalDurationMs, regularRate, 100, acceleratedDurationMs],
@@ -215,7 +216,7 @@ export function projectMending(state: MendingState, nowMs: number, rootBuild: Ro
 	const totalUnclaimedPoints = addPoints(job.unclaimedPoints, generatedPoints);
 	const nextPointRemainingMs = currentPointRateHundredthsPerMinute <= 0 || progressTicks === POINT_PROGRESS_SCALE - 1
 		? null
-		: Math.max(1, Math.ceil((POINT_PROGRESS_SCALE - progressTicks) / currentPointRateHundredthsPerMinute));
+		: Math.max(1, Math.ceil((POINT_PROGRESS_SCALE - progressTicks) * 100 * MENDING_MINUTE_MS / (currentPointRateHundredthsPerMinute * POINT_PROGRESS_SCALE)));
 	return {
 		processedDurationMs,
 		processedThroughMs: addSafe(job.checkpointAtMs, elapsedMs),
@@ -228,7 +229,7 @@ export function projectMending(state: MendingState, nowMs: number, rootBuild: Ro
 		points: totalUnclaimedPoints,
 		pointProgressTicks: progressTicks,
 		nextPointRemainingMs,
-		completed: processedDurationMs >= contextCapacityMs,
+		completed,
 		accelerationMultiplierTenths,
 		accelerationRemainingMs: Math.max(0, accelerationRemainingMs - acceleratedDurationMs),
 		contextCapacityMs,

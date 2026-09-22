@@ -17,7 +17,7 @@ export const ZERO_ROOT_BUILD: RootBuild = {
 
 const INFERENCE_ACCELERATION_MULTIPLIERS_TENTHS = [10, 20, 30, 40] as const;
 const CONTEXT_COMPRESSION_MULTIPLIERS_TENTHS = [10, 20, 30, 40] as const;
-const OVERFLOW_LIFESPAN_PERCENT = [0, 20, 35, 50] as const;
+const OVERFLOW_REWARD_PERCENT = [0, 20, 35, 50] as const;
 const MAXIMUM_LIFESPAN_DAYS = [7, 14, 21, 30] as const;
 
 function isRank(value: unknown): value is number {
@@ -55,9 +55,9 @@ export function rootContextCompressionMultiplierTenths(rank: number): number {
 	return CONTEXT_COMPRESSION_MULTIPLIERS_TENTHS[rank];
 }
 
-export function rootOverflowLifespanPercent(rank: number): number {
+export function rootOverflowRewardPercent(rank: number): number {
 	if (!isRank(rank)) throw new TypeError('Invalid Root rank.');
-	return OVERFLOW_LIFESPAN_PERCENT[rank];
+	return OVERFLOW_REWARD_PERCENT[rank];
 }
 
 export function rootMaximumLifespanMs(rank: number): number {
