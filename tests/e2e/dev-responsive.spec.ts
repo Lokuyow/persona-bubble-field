@@ -3,6 +3,9 @@ import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { installFieldFrameSampling, sampleRenderedField } from './helpers/fieldFrames';
 import { openDevWorld, readCharacterGeometry, dragJoystick, expectNoConsoleProblems } from './helpers/devWorldHarness';
 
+async function waitForInitialFieldGeometry(page: Page): Promise<void> {
+	await expect(page.locator('.field-viewport')).toHaveClass(/initial-field-geometry-ready/);
+}
 
 test.describe('DEV World Sandbox', () => {
 	test.beforeEach(async ({ page }) => {
@@ -93,7 +96,7 @@ test.describe('DEV World Sandbox', () => {
 		await page.setViewportSize({ width: 390, height: 844 });
 		await page.goto('/?devWorld=1');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
-		await page.waitForTimeout(1000);
+		await waitForInitialFieldGeometry(page);
 		const speaker = page.getByRole('button', { name: /Open sound settings/ });
 		await expect(speaker).toBeVisible();
 		const speakerChrome = await speaker.evaluate((element) => {
@@ -172,14 +175,14 @@ test.describe('DEV World Sandbox', () => {
 		}
 		await page.reload();
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
-		await page.waitForTimeout(1000);
+		await waitForInitialFieldGeometry(page);
 		await page.getByRole('button', { name: /Open sound settings/ }).click();
 		await expect(page.getByRole('slider', { name: 'Sound volume' })).toHaveValue('25');
 		await expect(page.getByRole('button', { name: 'Mute sound' })).toHaveCount(0);
 		await page.getByRole('slider', { name: 'Sound volume' }).fill('0');
 		await expect(page.getByRole('button', { name: 'Open sound settings (muted)' })).toBeVisible();
 		await page.reload();
-		await page.waitForTimeout(1000);
+		await waitForInitialFieldGeometry(page);
 		await page.getByRole('button', { name: /Open sound settings/ }).click();
 		await expect(page.getByRole('slider', { name: 'Sound volume' })).toHaveValue('0');
 	});
@@ -188,7 +191,7 @@ test.describe('DEV World Sandbox', () => {
 		await page.setViewportSize({ width: 1200, height: 900 });
 		await page.goto('/?devWorld=1');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
-		await page.waitForTimeout(1000);
+		await waitForInitialFieldGeometry(page);
 		const speaker = page.getByRole('button', { name: /Open sound settings/ });
 		await speaker.click();
 		await expect(page.locator('.sound-panel')).toBeVisible();
