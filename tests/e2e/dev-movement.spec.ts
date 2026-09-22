@@ -160,7 +160,9 @@ test.describe('DEV World Sandbox', () => {
 	test('starts mouse movement from the investigated root author ghost', async ({ page }) => {
 		await page.goto('/?devWorld=1&devScenario=trace-markers');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
-		await page.locator('[data-cell-position="8,4"]').click();
+		const traceCell = page.locator('[data-cell-position="8,4"]');
+		await expect(traceCell).toHaveAttribute('aria-label', '痕跡を調べる');
+		await traceCell.click();
 		const ghost = page.locator('.trace-ghost-profile-trigger');
 		await expect(ghost).toBeVisible();
 		const box = await ghost.boundingBox();
