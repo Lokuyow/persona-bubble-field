@@ -24,7 +24,9 @@ normal deathおよびrealtime deathは、まずbrowser-local lifecycleへdurably
 のterminal `exit`をbest-effortで通知する。Relay publication failureはdeathを
 rollbackせず、wire formatとposition条件はSPEC-30を参照する。
 
-同じtabでruntime death transitionが成立した場合は、terminal exitのpublication後に一度だけ死亡演出を表示し、任意のLast Wordsを残す機会を与える。Last WordsはSPEC-50で定めるNIP-28 kind 42のexplicit Traceとしてcanonical last positionへbest-effortでpublishし、空入力またはskipではpublishしない。publish失敗でもdurableなdeathや次のIdentity selectionをrollbackせず、startup時点ですでに期限切れだったRunにはこの演出を表示しない。death Traceの表示・reply制約はSPEC-50を正とする。
+同じtabでruntime death transitionが成立した場合は、terminal exitのpublication attempt完了後に一度だけ死亡演出を表示する。演出はfull-screenの「死亡」を主表示とし、fieldを暗く低彩度にしてselfをpresentation上消失させる。terminal exitから得られるcanonical last positionがある場合は、既存のdeath iconによるpresentation-only墓標をそのcellへ表示する。この墓標はNostr event、Trace root、presence/world state、永続化markerではない。短いintroの後にLast Words操作へ遷移し、短いnon-loopのdeath soundをshared volume preferenceでbest-effortに再生する。prefers-reduced-motionではmotionと待ち時間を削減する。
+
+Last WordsはSPEC-50で定めるNIP-28 kind 42のexplicit Traceとしてcanonical last positionへbest-effortでpublishし、空入力またはskipではpublishしない。publish失敗でもdurableなdeathや次のIdentity selectionをrollbackせず、startup時点ですでに期限切れだったRunにはこの演出を表示しない。death Traceの表示・reply制約はSPEC-50を正とする。
 
 新Run #1は次から開始する。
 

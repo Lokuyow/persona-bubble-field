@@ -1,7 +1,7 @@
 import type { ConversationState, SpeechType } from './conversation';
 
 export type SoundPreference = Readonly<{ volume: number }>;
-export type SoundEffect = SpeechType | 'collect' | 'level-up' | 'startup';
+export type SoundEffect = SpeechType | 'collect' | 'level-up' | 'startup' | 'death';
 export type SpeechSoundEffect = SpeechType;
 
 export const DEFAULT_SOUND_PREFERENCE: SoundPreference = { volume: 0.5 };
@@ -36,13 +36,15 @@ export function newLiveBubbleEffects(previous: ConversationState, next: Conversa
 
 export const SPEECH_SOUND_DURATIONS = { normal: 0.225, shout: 0.420, monologue: 0.715 } as const;
 export const UI_SOUND_DURATIONS = { collect: 0.19, 'level-up': 0.32, startup: 0.38 } as const;
+export const DEATH_SOUND_DURATION = 6.4;
 export const SOUND_EFFECT_GAINS: Readonly<Record<SoundEffect, number>> = {
 	normal: 1,
 	shout: 1,
 	monologue: 1,
 	collect: 0.75,
 	'level-up': 0.75,
-	startup: 0.65
+	startup: 0.65,
+	death: 0.70
 };
 const TAU = Math.PI * 2;
 
@@ -223,7 +225,37 @@ function createChimeSamples(effect: 'collect' | 'level-up' | 'startup', sampleRa
 	return normalize(output);
 }
 
+function createDeathSamples(sampleRate: number): Float32Array {
+	const length = Math.ceil(sampleRate * DEATH_SOUND_DURATION);
+	const output = new Float32Array(length);
+	const texture = seededNoise(length, 0x6d656d6f, sampleRate, 70, 900, 3);
+	let dronePhase = 0;
+	for (let index = 0; index < length; index += 1) {
+		const time = index / sampleRate;
+		const fadeIn = clamp01(time / 0.16);
+		const fadeOut = clamp01((DEATH_SOUND_DURATION - time) / 1.25);
+		const envelope = fadeIn * Math.pow(fadeOut, 2.2) * Math.exp(-time / 8.5);
+		const fundamental = 110 - 48 * clamp01(time / 3.8);
+		dronePhase += TAU * fundamental / sampleRate;
+		const drone = 0.34 * Math.sin(dronePhase) + 0.12 * Math.sin(dronePhase * 2 + 0.25) + 0.055 * Math.sin(dronePhase * 3 + 1.1);
+		let bell = 0;
+		for (const event of [{ at: 0.82, gain: 1 }, { at: 3.85, gain: 0.22 }] as const) {
+			const local = time - event.at;
+			if (local < 0) continue;
+			const bellEnvelope = event.gain * (1 - Math.exp(-local / 0.006)) * Math.exp(-local / 0.62) * fadeOut;
+			bell += bellEnvelope * (0.18 * Math.sin(TAU * 176 * local + 0.2) + 0.07 * Math.sin(TAU * 263 * local) + 0.035 * Math.sin(TAU * 351 * local + 0.5));
+		}
+		const textureEnvelope = 0.075 * texture[index] * Math.exp(-time / 3.1) * fadeOut * fadeOut * clamp01(time / 0.12);
+		output[index] = (drone * envelope + bell + textureEnvelope) * 1.55;
+	}
+	return normalize(output);
+}
+
 export function createSoundSamples(effect: SoundEffect, sampleRate: number): Float32Array {
+	if (effect === 'death') {
+		if (!Number.isFinite(sampleRate) || sampleRate <= 0) return new Float32Array();
+		return createDeathSamples(sampleRate);
+	}
 	if (effect === 'collect' || effect === 'level-up' || effect === 'startup') {
 		if (!Number.isFinite(sampleRate) || sampleRate <= 0) return new Float32Array();
 		return createChimeSamples(effect, sampleRate);

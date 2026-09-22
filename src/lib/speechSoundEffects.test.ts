@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createConversationState, receiveMessage, type SpeechType } from './conversation';
-import { createSoundSamples, createSpeechSoundSamples, DEFAULT_SOUND_PREFERENCE, loadSoundPreference, newLiveBubbleEffects, SOUND_EFFECT_GAINS, SPEECH_SOUND_DURATIONS, SPEECH_SOUND_PREFERENCE_KEY, UI_SOUND_DURATIONS } from './speechSoundEffects';
+import { createSoundSamples, createSpeechSoundSamples, DEFAULT_SOUND_PREFERENCE, DEATH_SOUND_DURATION, loadSoundPreference, newLiveBubbleEffects, SOUND_EFFECT_GAINS, SPEECH_SOUND_DURATIONS, SPEECH_SOUND_PREFERENCE_KEY, UI_SOUND_DURATIONS } from './speechSoundEffects';
 
 const options = { isSpeakerVisible: true, duration: 100, now: 0 };
 const message = (id: string, pubkey: string, content: string, speechType: SpeechType = 'normal') => ({ id, pubkey, content, speechType, createdAt: 0 });
@@ -44,6 +44,19 @@ describe('speech sound effects', () => {
 		expect(SOUND_EFFECT_GAINS.collect).toBeCloseTo(0.75);
 		expect(SOUND_EFFECT_GAINS['level-up']).toBeCloseTo(0.75);
 		expect(SOUND_EFFECT_GAINS.startup).toBeCloseTo(0.65);
+		expect(SOUND_EFFECT_GAINS.death).toBeCloseTo(0.70);
+	});
+	it('creates a deterministic death soundscape with a decaying tail', () => {
+		const sampleRate = 10_000;
+		const death = createSoundSamples('death', sampleRate);
+		expect(death.length).toBe(Math.ceil(DEATH_SOUND_DURATION * sampleRate));
+		expect([...death].every(Number.isFinite)).toBe(true);
+		expect(Math.max(...death.map(Math.abs))).toBeLessThanOrEqual(0.920001);
+		expect(death.some((sample) => Math.abs(sample) > 0.001)).toBe(true);
+		expect(death).toEqual(createSoundSamples('death', sampleRate));
+		const firstSecond = death.slice(0, sampleRate);
+		const lastSecond = death.slice(-sampleRate);
+		expect(rms(lastSecond)).toBeLessThan(rms(firstSecond) * 0.2);
 	});
 	it('creates deterministic, finite, non-clipping buffers at the specified durations', () => {
 		const effects = ['normal', 'shout', 'monologue'] as const;

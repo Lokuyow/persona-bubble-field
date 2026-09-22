@@ -10,6 +10,7 @@
 		geometryReady: boolean;
 		actionDockAvailable: boolean;
 		fieldAreaBounds: Bounds;
+		deathPresentationActive: boolean;
 		field: FieldSize;
 		camera: WorldPoint;
 		resolveFieldCellSelection: (position: GridPosition) => void;
@@ -28,6 +29,7 @@
 		geometryReady,
 		actionDockAvailable,
 		fieldAreaBounds,
+		deathPresentationActive,
 		field,
 		camera,
 		resolveFieldCellSelection,
@@ -114,7 +116,8 @@
 <section
 	class={['field-viewport', {
 		'initial-field-geometry-ready': geometryReady,
-		'action-dock-available': actionDockAvailable
+		'action-dock-available': actionDockAvailable,
+		'death-presentation-active': deathPresentationActive
 	}]}
 	bind:this={viewportElement}
 	aria-label="Conversation field"
@@ -149,6 +152,15 @@
 	.pointer-joystick-base, .pointer-joystick-thumb { position: absolute; border-radius: 50%; pointer-events: none; }
 	.pointer-joystick-base { inset: 0; border: 1px solid rgba(50, 82, 70, 0.32); background: rgba(221, 235, 221, 0.32); }
 	.pointer-joystick-thumb { left: calc(50% + var(--joystick-thumb-x)); top: calc(50% + var(--joystick-thumb-y)); width: 32px; height: 32px; transform: translate(-50%, -50%); border: 1px solid rgba(43, 77, 63, 0.48); background: rgba(108, 153, 132, 0.58); }
+
+	.field-viewport.death-presentation-active {
+		filter: brightness(0.55) saturate(0.2);
+		transition: filter 2.4s ease;
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.field-viewport.death-presentation-active { transition: none; }
+	}
 
 	.field-viewport.action-dock-available {
 		min-height: 0;

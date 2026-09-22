@@ -27,6 +27,7 @@
 		placeBubblesWithFixed,
 		type Bounds,
 		type Direction,
+		type GridPosition,
 		type Size,
 		type WorldPoint,
 		worldToScreen
@@ -326,9 +327,25 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	let prefersReducedMotion = false;
 	let expiryCheckInFlight = false;
 	let deathTransitionInFlight = false;
-	let deathPresentationSession = $state.raw<ReturnType<typeof createWorldReadSession> | null>(null);
+	type DeathPresentationPhase = 'intro' | 'last-words';
+	type DeathPresentationState = Readonly<{
+		session: ReturnType<typeof createWorldReadSession> | null;
+		phase: DeathPresentationPhase;
+		canonicalPosition: GridPosition | null;
+	}>;
+	const DEATH_INTRO_DURATION_MS = 2_400;
+	let deathPresentation = $state.raw<DeathPresentationState | null>(null);
+	let deathPresentationTimer: number | null = null;
+	let deathPresentationElement = $state<HTMLElement | null>(null);
 	let deathPresentationContent = $state('');
 	let deathPresentationSubmitting = $state(false);
+	$effect(() => {
+		const presentation = deathPresentation;
+		if (!presentation || typeof document === 'undefined') return;
+		void tick().then(() => {
+			if (deathPresentation === presentation) deathPresentationElement?.focus();
+		});
+	});
 	let runRuntimeRefresh: (() => Promise<void>) | null = null;
 	let startReadOnlyWorld: (() => void) | null = null;
 	let startSelectedWorld: ((persona: PersonaSnapshot) => Promise<void>) | null = null;
@@ -420,14 +437,16 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		height: Math.max(bubbleSafeBounds.height, ...Object.values(bubbleSizes).map((size) => size.height))
 	});
 
-	let participantViews: FieldParticipantView[] = $derived(presenceProjection.participants.map((participant) => {
-		const world = visualWorldById[participant.id] ?? participant.world;
-		return {
-			...participant,
-			world,
-			screen: fieldLocalToViewport(worldToScreen(world, camera), fieldAreaBounds)
-		};
-	}));
+	let participantViews: FieldParticipantView[] = $derived(presenceProjection.participants
+		.filter((participant) => !(deathPresentation && participant.id === selfProjectionId))
+		.map((participant) => {
+			const world = visualWorldById[participant.id] ?? participant.world;
+			return {
+				...participant,
+				world,
+				screen: fieldLocalToViewport(worldToScreen(world, camera), fieldAreaBounds)
+			};
+		}));
 
 	let participantById = $derived(new Map(participantViews.map((participant) => [participant.id, participant])));
 	let selfPresence = $derived(presenceState.participants.find((participant) => participant.id === selfProjectionId) ?? null);
@@ -1280,6 +1299,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 
 		return () => {
 			mounted = false;
+			clearDeathPresentationTimer();
 			window.removeEventListener('pointerdown', unlockSound);
 			window.removeEventListener('keydown', unlockSound);
 			appSoundController.dispose();
@@ -1543,6 +1563,27 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		movementInputController.cancelMovementHold();
 		fieldViewportComponent?.cancelPointerGesture();
 		cancelPendingComposerSubmission(new Error(message));
+	}
+
+	function clearDeathPresentationTimer(): void {
+		if (deathPresentationTimer !== null) window.clearTimeout(deathPresentationTimer);
+		deathPresentationTimer = null;
+	}
+
+	function startDeathPresentation(
+		currentSession: ReturnType<typeof createWorldReadSession> | null,
+		canonicalPosition: GridPosition | null
+	): void {
+		clearDeathPresentationTimer();
+		const phase: DeathPresentationPhase = prefersReducedMotion ? 'last-words' : 'intro';
+		deathPresentation = { session: currentSession, phase, canonicalPosition };
+		soundController?.play('death');
+		if (phase === 'intro') {
+			deathPresentationTimer = window.setTimeout(() => {
+				if (deathPresentation?.phase === 'intro') deathPresentation = { ...deathPresentation, phase: 'last-words' };
+				deathPresentationTimer = null;
+			}, DEATH_INTRO_DURATION_MS);
+		}
 	}
 
 	function enterReadOnlyFallback(message: string): void {
@@ -2113,6 +2154,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 
 	function canUseArrowForMovement(event: KeyboardEvent): boolean {
 		if (
+			deathPresentation ||
 			event.isComposing ||
 			event.shiftKey ||
 			event.ctrlKey ||
@@ -2131,6 +2173,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 
 	function canUseWASDForMovement(event: KeyboardEvent): boolean {
 		if (
+			deathPresentation ||
 			event.isComposing ||
 			event.shiftKey ||
 			event.ctrlKey ||
@@ -2146,6 +2189,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 
 	function canUseComposerFocusShortcut(event: KeyboardEvent): boolean {
 		if (
+			deathPresentation ||
 			event.isComposing ||
 			event.shiftKey ||
 			event.ctrlKey ||
@@ -2161,6 +2205,10 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	}
 
 	function handleGlobalKeydown(event: KeyboardEvent): void {
+		if (deathPresentation) {
+			if (event.code === 'Escape') event.preventDefault();
+			return;
+		}
 		if (event.code === 'Escape' && fieldActionMenu) {
 			closeFieldActionMenu();
 			event.preventDefault();
@@ -2196,6 +2244,10 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	}
 
 	function handleDocumentFocusIn(event: FocusEvent): void {
+		if (deathPresentation && deathPresentationElement && event.target instanceof Node && !deathPresentationElement.contains(event.target)) {
+			deathPresentationElement.focus();
+			return;
+		}
 		movementInputController.handleFocusIn(event);
 	}
 
@@ -2208,6 +2260,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	}
 
 	function handleDocumentPointerDown(event: PointerEvent): void {
+		if (deathPresentation) return;
 		if (fieldActionMenu && !event.composedPath().some((target) =>
 			target instanceof HTMLElement && target.classList.contains('field-action-menu')
 		)) closeFieldActionMenu();
@@ -2267,10 +2320,13 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 				} catch {
 					// The local death is already durable; World State exit is best effort.
 				}
-				if (showPresentation && currentSession) {
-					if (preparedExit?.kind === 'prepared') currentSession.enableDeathLastWords();
-					deathPresentationSession = currentSession;
+				if (showPresentation) {
+					if (preparedExit?.kind === 'prepared') currentSession?.enableDeathLastWords();
+					const canonicalPosition = preparedExit?.kind === 'prepared'
+						? { ...preparedExit.parsed.position }
+						: null;
 					deathPresentationContent = '';
+					startDeathPresentation(currentSession, canonicalPosition);
 					return 'presenting';
 				}
 				disposePersonaWriter(currentSession);
@@ -2297,13 +2353,15 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	}
 
 	async function finishDeathPresentation(publish: boolean): Promise<void> {
-		const currentSession = deathPresentationSession;
-		if (!currentSession || deathPresentationSubmitting) return;
+		const presentation = deathPresentation;
+		const currentSession = presentation?.session ?? null;
+		if (!presentation || deathPresentationSubmitting) return;
 		deathPresentationSubmitting = true;
 		if (publish && deathPresentationContent.trim()) {
-			await currentSession.publishDeathLastWords(deathPresentationContent);
+			try { await currentSession?.publishDeathLastWords(deathPresentationContent); } catch { /* Last Words is best effort. */ }
 		}
-		deathPresentationSession = null;
+		clearDeathPresentationTimer();
+		deathPresentation = null;
 		deathPresentationContent = '';
 		deathPresentationSubmitting = false;
 		disposePersonaWriter(currentSession);
@@ -2611,6 +2669,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		bind:viewportElement
 		geometryReady={initialFieldGeometryReady}
 		actionDockAvailable={actionDockAvailable}
+		deathPresentationActive={deathPresentation !== null}
 		{fieldAreaBounds}
 		{field}
 		{camera}
@@ -2658,6 +2717,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 				{movingParticipantIds}
 				{selfIsActive}
 				{selfLogicalPosition}
+				presentationTombstonePosition={deathPresentation?.canonicalPosition ?? null}
 				{traceRootGhost}
 				{fieldActionMenu}
 				resolveFieldCellSelection={resolveFieldCellSelection}
@@ -2694,22 +2754,37 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		{/snippet}
 	</FieldViewport>
 
-	{#if deathPresentationSession}
-		<div class="death-presentation-backdrop" data-death-presentation role="dialog" aria-modal="true" aria-labelledby="death-presentation-title">
-			<section class="death-presentation-card">
-				<h2 id="death-presentation-title">このRunは終わりました</h2>
-				<p>最後に、会話の痕跡をひとこと残せます。</p>
-				<textarea
-					aria-label="Last Words"
-					bind:value={deathPresentationContent}
-					maxlength="280"
-					placeholder="残したい言葉（任意）"
-					disabled={deathPresentationSubmitting}
-				></textarea>
-				<div class="death-presentation-actions">
-					<button type="button" onclick={() => { void finishDeathPresentation(false); }} disabled={deathPresentationSubmitting}>残さず進む</button>
-					<button type="button" class="primary" onclick={() => { void finishDeathPresentation(true); }} disabled={deathPresentationSubmitting}>残して進む</button>
-				</div>
+	{#if deathPresentation}
+		<div
+			class={['death-presentation-backdrop', { 'death-presentation-intro': deathPresentation.phase === 'intro' }]}
+			data-death-presentation
+			data-death-phase={deathPresentation.phase}
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="death-presentation-title"
+		>
+			<section
+				class={['death-presentation-card', { 'death-presentation-card-intro': deathPresentation.phase === 'intro' }]}
+				bind:this={deathPresentationElement}
+				tabindex="-1"
+			>
+				<h2 id="death-presentation-title">死亡</h2>
+				{#if deathPresentation.phase === 'intro'}
+					<p>この人格のRunは終わりました。</p>
+				{:else}
+					<p>このRunは終わりました。最後に、会話の痕跡をひとこと残せます。</p>
+					<textarea
+						aria-label="Last Words"
+						bind:value={deathPresentationContent}
+						maxlength="280"
+						placeholder="残したい言葉（任意）"
+						disabled={deathPresentationSubmitting}
+					></textarea>
+					<div class="death-presentation-actions">
+						<button type="button" onclick={() => { void finishDeathPresentation(false); }} disabled={deathPresentationSubmitting}>残さず進む</button>
+						<button type="button" class="primary" onclick={() => { void finishDeathPresentation(true); }} disabled={deathPresentationSubmitting}>残して進む</button>
+					</div>
+				{/if}
 			</section>
 		</div>
 	{/if}
@@ -2859,8 +2934,9 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		display: grid;
 		place-items: center;
 		padding: 24px;
-		background: rgb(12 10 20 / 72%);
-	}
+		background: rgb(8 7 14 / 70%);
+		pointer-events: auto;
+}
 
 	.death-presentation-card {
 		width: min(100%, 460px);
@@ -2870,10 +2946,36 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		background: var(--surface-elevated, #211c2c);
 		box-shadow: 0 18px 60px rgb(0 0 0 / 35%);
 		color: var(--text-primary, #fff);
+		outline: none;
+	}
+
+	.death-presentation-card-intro {
+		width: min(100%, 900px);
+		padding: 32px;
+		border-color: transparent;
+		background: transparent;
+		box-shadow: none;
+		text-align: center;
 	}
 
 	.death-presentation-card h2 {
 		margin: 0 0 8px;
+		font-size: 2rem;
+		line-height: 1;
+		transition: font-size 500ms ease, letter-spacing 500ms ease, opacity 500ms ease;
+	}
+
+	.death-presentation-card-intro h2 {
+		font-size: clamp(5rem, 22vw, 12rem);
+		letter-spacing: 0.12em;
+		text-shadow: 0 8px 40px rgb(0 0 0 / 48%);
+	}
+
+	.death-presentation-card-intro p {
+		margin-bottom: 0;
+		font-size: 1.1rem;
+		letter-spacing: 0.08em;
+		opacity: 0.82;
 	}
 
 	.death-presentation-card p {
@@ -2916,6 +3018,10 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		border-color: transparent;
 		background: var(--accent-primary, #e59b70);
 		color: #1b1110;
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.death-presentation-card h2 { transition: none; }
 	}
 
 	@media (max-width: 700px) {

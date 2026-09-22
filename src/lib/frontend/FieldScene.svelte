@@ -61,6 +61,7 @@
 		movingParticipantIds: ReadonlySet<string>;
 		selfIsActive: boolean;
 		selfLogicalPosition: GridPosition | null;
+		presentationTombstonePosition: GridPosition | null;
 		traceRootGhost: TraceRootGhost | null;
 		fieldActionMenu: FieldActionMenu | null;
 		resolveFieldCellSelection: (position: GridPosition, trigger?: HTMLButtonElement) => void;
@@ -93,6 +94,7 @@
 		movingParticipantIds,
 		selfIsActive,
 		selfLogicalPosition,
+		presentationTombstonePosition,
 		traceRootGhost,
 		fieldActionMenu,
 		resolveFieldCellSelection,
@@ -126,6 +128,15 @@
 			aria-hidden="true"
 		></div>
 		<div class="trace-marker-layer" aria-hidden="true">
+			{#if presentationTombstonePosition}
+				{const world = traceMarkerWorldPosition(presentationTombstonePosition)}
+				<span
+					class="trace-marker death-presentation-tombstone"
+					data-death-presentation-tombstone
+					data-death-presentation-tombstone-position={`${presentationTombstonePosition.x},${presentationTombstonePosition.y}`}
+					style={`left: ${world.x}px; top: ${world.y}px; --trace-icon-image: url("${asset(TRACE_DEATH_ICON_ASSET)}");`}
+				></span>
+			{/if}
 			{#each traceMarkerCells as cell (`${cell.position.x},${cell.position.y}`)}
 				{#if !cell.occupied}
 					{const world = traceMarkerWorldPosition(cell.position)}
@@ -379,6 +390,15 @@
 	.trace-marker-unread-reply {
 		color: #cf06fe;
 		filter: none;
+	}
+
+	.death-presentation-tombstone {
+		z-index: 6;
+		width: max(30px, min(52px, calc(var(--cell-size) * 0.46)));
+		height: max(30px, min(52px, calc(var(--cell-size) * 0.46)));
+		color: #a9b5c5;
+		opacity: 0.96;
+		filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.5));
 	}
 
 	.trace-investigation-indicator {

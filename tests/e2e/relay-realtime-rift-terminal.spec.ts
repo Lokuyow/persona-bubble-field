@@ -53,6 +53,22 @@ function scheduleWithDistantFirstHole(startSchedule: ReturnType<typeof getRiftSc
 	throw new Error('Could not find a Rift schedule with a distant first hole within 32 days.');
 }
 
+async function waitForDeathLastWords(page: Page): Promise<void> {
+	const presentation = page.locator('[data-death-presentation]');
+	await expect(presentation).toBeVisible();
+	await expect(presentation).toHaveAttribute('data-death-phase', 'intro');
+	await expect(presentation.getByRole('heading', { name: '死亡' })).toBeVisible();
+	await expect(presentation.locator('textarea')).toHaveCount(0);
+	await expect(presentation.getByRole('button')).toHaveCount(0);
+	await expect(page.locator('.field-viewport.death-presentation-active')).toHaveCount(1);
+	await expect(page.locator('.participant[data-self="true"]')).toHaveCount(0);
+	await expect(page.locator('[data-death-presentation-tombstone]')).toHaveCount(1);
+	await page.clock.runFor(2_500);
+	await expect(presentation).toHaveAttribute('data-death-phase', 'last-words');
+	await expect(presentation.locator('textarea')).toBeVisible();
+	await expect(presentation.locator('.death-presentation-card')).toBeFocused();
+}
+
 
 test.describe('Relay startup', () => {
 	test('publishes a World State exit after a realtime death outcome commits locally', async ({ page }) => {
@@ -109,7 +125,7 @@ test.describe('Relay startup', () => {
 		await page.clock.setSystemTime(round.revealCutoffAtMs + 1_000);
 		await page.clock.runFor(2_000);
 
-		await expect(page.locator('[data-death-presentation]')).toBeVisible();
+		await waitForDeathLastWords(page);
 		await page.locator('[data-death-presentation] textarea').fill('A last word from this Run');
 		await page.locator('[data-death-presentation]').getByRole('button', { name: '残して進む' }).click();
 		await expect(page.getByRole('dialog')).toBeVisible();
