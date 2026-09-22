@@ -73,7 +73,7 @@ test.describe('Relay startup', () => {
 		const dialog = page.getByRole('dialog');
 		await expect(dialog).toBeVisible();
 		const viewportSize = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
-		await expect(dialog).toContainText('Run #1');
+		await expect(dialog).toContainText('人生 #1');
 		await expect(dialog).toContainText('残り寿命');
 		await expect(dialog).toContainText('所持ポイント');
 		await expect(dialog.locator('.summary-card[data-stat-icon="heart"] > span > svg')).toHaveCount(1);
@@ -100,7 +100,7 @@ test.describe('Relay startup', () => {
 		await escapeTrigger.click();
 		await expect(escapeTrigger).toHaveAttribute('data-state', 'open');
 		await expect(escapeContent).toBeVisible();
-		await expect(escapeContent).toContainText('現在のRunを終了');
+		await expect(escapeContent).toContainText('現在の一生を終える');
 		await expect(escapeContent).toContainText('Root Point +1');
 		await expect(escapeContent).toContainText('次の人格を選択');
 		await expect(escapeContent).toContainText('秘密鍵を取得可能');
@@ -115,10 +115,10 @@ test.describe('Relay startup', () => {
 		const headerAvatarBox = await dialog.locator('.self-profile-avatar').boundingBox();
 		expect(headerAvatarBox).not.toBeNull();
 		expect(headerAvatarBox!.width).toBeGreaterThan(96);
-		await expect(dialog).toContainText('100,000 ptで現在のRunを終了します。');
+		await expect(dialog).toContainText('100,000 ptで現在の一生を終えます。');
 		await expect(dialog).toContainText('所持ポイント');
 		await expect(dialog).toContainText('未回収の作業ポイントは含まれません。');
-		await expect(dialog).not.toContainText('100,000 ptで現在のRunを終了します。未回収の作業ポイントは含まれません。');
+		await expect(dialog).not.toContainText('100,000 ptで現在の一生を終えます。未回収の作業ポイントは含まれません。');
 		await expect(dialog).toContainText('100,000 pt');
 		await expect(dialog.locator('.clear-progress-head[data-stat-icon="wallet"] > span > svg')).toHaveCount(1);
 		await expect(dialog.getByRole('button', { name: '脱出', exact: true })).toBeDisabled();
@@ -132,7 +132,7 @@ test.describe('Relay startup', () => {
 		const fieldTrigger = page.locator('.participant[data-self="true"] .participant-profile-trigger');
 		await fieldTrigger.click();
 		await expect(dialog).toBeVisible();
-		await expect(dialog).toContainText('Run #1');
+		await expect(dialog).toContainText('人生 #1');
 		await expect(dialog).toContainText('脱出');
 		await expect(dialog).not.toContainText('Normal Clear');
 		const headerAvatarColors = await page.evaluate(() => {

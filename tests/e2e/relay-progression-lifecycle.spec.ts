@@ -41,6 +41,7 @@ async function waitForDeathLastWords(page: Page, canonicalPosition?: string | nu
 	await expect(presentation).toBeVisible();
 	await expect(presentation).toHaveAttribute('data-death-phase', 'intro');
 	await expect(presentation.getByRole('heading', { name: '死亡' })).toBeVisible();
+	await expect(presentation.getByText('一生が終わりました。', { exact: true })).toBeVisible();
 	await expect(presentation.locator('textarea')).toHaveCount(0);
 	await expect(presentation.getByRole('button')).toHaveCount(0);
 	await expect(page.locator('.field-viewport.death-presentation-active')).toHaveCount(1);
@@ -50,6 +51,7 @@ async function waitForDeathLastWords(page: Page, canonicalPosition?: string | nu
 	if (canonicalPosition) await expect(tombstone).toHaveAttribute('data-death-presentation-tombstone-position', canonicalPosition);
 	await page.clock.runFor(2_500);
 	await expect(presentation).toHaveAttribute('data-death-phase', 'last-words');
+	await expect(presentation.getByText('一生が終わりました。最後に、世界にひとこと残せます。', { exact: true })).toBeVisible();
 	await expect(presentation.locator('textarea')).toBeVisible();
 	await expect(presentation.locator('.death-presentation-card')).toBeFocused();
 }
@@ -77,7 +79,7 @@ test.describe('Relay startup', () => {
 		await expect(page.getByRole('dialog')).toBeVisible();
 		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
 		await expect(page.getByText('脱出しました', { exact: true })).toBeVisible();
-		await expect(page.getByText('現在のRunを終了し、Root Pointを1獲得しました。', { exact: true })).toBeVisible();
+		await expect(page.getByText('一生を終え、Root Pointを1獲得しました。', { exact: true })).toBeVisible();
 		await page.reload();
 		await expect(page.getByRole('dialog')).toBeVisible();
 		await expect(page.getByText('脱出しました', { exact: true })).toHaveCount(0);
@@ -407,11 +409,11 @@ test.describe('Relay startup', () => {
 		await page.locator('[data-death-presentation]').getByRole('button', { name: '残して進む' }).click();
 		await expect(page.getByRole('dialog')).toBeVisible();
 		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
-		await expect(page.getByText('Runが終了しました', { exact: true })).toBeVisible();
-		await expect(page.getByText('この人格のRunは死亡として終了しました。次の人格を選んでください。', { exact: true })).toBeVisible();
+		await expect(page.getByText('一生を終えました', { exact: true })).toBeVisible();
+		await expect(page.getByText('死亡しました。転生してください。', { exact: true })).toBeVisible();
 		await page.reload();
 		await expect(page.getByRole('dialog')).toBeVisible();
-		await expect(page.getByText('Runが終了しました', { exact: true })).toHaveCount(0);
+		await expect(page.getByText('一生を終えました', { exact: true })).toHaveCount(0);
 		await expect.poll(async () => page.evaluate((expectedPubkey) => {
 			const state = (window as unknown as { __relayStartupTest: { state: { previousPublished: Array<{ id: string; kind: number; pubkey?: string; content: string; tags: string[][]; created_at?: number }>; published: Array<{ id: string; kind: number; pubkey?: string; content: string; tags: string[][]; created_at?: number }> } } }).__relayStartupTest.state;
 			return [...new Map([...state.previousPublished, ...state.published]

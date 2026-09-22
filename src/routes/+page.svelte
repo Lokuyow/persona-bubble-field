@@ -2773,9 +2773,9 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			>
 				<h2 id="death-presentation-title">死亡</h2>
 				{#if deathPresentation.phase === 'intro'}
-					<p>この人格のRunは終わりました。</p>
+					<p>一生が終わりました。</p>
 				{:else}
-					<p>このRunは終わりました。最後に、会話の痕跡をひとこと残せます。</p>
+					<p>一生が終わりました。最後に、世界にひとこと残せます。</p>
 					<textarea
 						aria-label="Last Words"
 						bind:value={deathPresentationContent}

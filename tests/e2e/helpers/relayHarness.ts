@@ -785,7 +785,7 @@ export async function pauseAtCurrentBrowserTime(page: Page): Promise<void> {
 }
 
 export async function startSelectedRun(page: Page): Promise<void> {
-	const start = page.getByRole('button', { name: 'Runを開始' });
+	const start = page.getByRole('button', { name: '開始' });
 	await expect(start).toBeEnabled();
 	await start.click();
 }

@@ -56,14 +56,14 @@
 								<CharacterAvatar class={`avatar avatar-${avatarTone} self-profile-avatar`} {character} />
 								<div class="self-profile-identity">
 									<Dialog.Title>{character.name}</Dialog.Title>
-									<Dialog.Description class="sr-only">自分のプロフィールと現在のRun情報</Dialog.Description>
-									<span>Run #{persona.activeRun.runNumber}</span>
+									<Dialog.Description class="sr-only">自分のプロフィールと現在の人生情報</Dialog.Description>
+									<span>人生 #{persona.activeRun.runNumber}</span>
 								</div>
 							</header>
 							<p class="self-profile-about">{character.about}</p>
 						</section>
 						<section class="profile-section" aria-labelledby="self-profile-run">
-							<h2 id="self-profile-run">Run</h2>
+							<h2 id="self-profile-run">人生</h2>
 							<div class="summary-grid" aria-label="現在状態">
 								<div class="summary-card" data-stat-icon="heart"><span><Heart aria-hidden="true" />残り寿命</span><strong>{formatRemainingLifespan(effectiveExpiry, nowMs)}</strong></div>
 								<div class="summary-card" data-stat-icon="wallet"><span><Wallet aria-hidden="true" />所持ポイント</span><strong>{points} pt</strong></div>
@@ -86,15 +86,15 @@
 								<Popover.Portal>
 																				<Popover.Content class="escape-info-popover" trapFocus={false} side="bottom" align="start" sideOffset={8} avoidCollisions={true} collisionPadding={16}>
 										<div class="escape-info-items">
-											<div><strong>現在のRunを終了</strong><span>ポイント・能力・作業状態など、Run内の状態は次のRunへ引き継がれません。</span></div>
-											<div><strong>Root Point +1</strong><span>獲得したRoot Pointは、次のRunや別の人格でも残ります。</span></div>
-											<div><strong>次の人格を選択</strong><span>同じ人格で新しいRunを始めることも、別の人格を選ぶこともできます。</span></div>
+											<div><strong>現在の一生を終える</strong><span>ポイント・能力・作業状態など、この人生の状態は次の人生へ引き継がれません。</span></div>
+											<div><strong>Root Point +1</strong><span>獲得したRoot Pointは、次の人生や別の人格でも残ります。</span></div>
+											<div><strong>次の人格を選択</strong><span>同じ人格で新しい人生を始めることも、別の人格を選ぶこともできます。</span></div>
 											<div><strong>秘密鍵を取得可能</strong><span>脱出した人格のnsecを取得できるようになります。</span></div>
 										</div>
 									</Popover.Content>
 								</Popover.Portal>
 							</Popover.Root></div><strong>+1 RP</strong></div>
-							<p>100,000 ptで現在のRunを終了します。</p>
+							<p>100,000 ptで現在の一生を終えます。</p>
 							<div class="clear-progress-head" data-stat-icon="wallet"><span><Wallet aria-hidden="true" />所持ポイント</span><strong>{points.toLocaleString()} / 100,000 pt</strong></div>
 							<div class="clear-progress" role="progressbar" aria-label="脱出に必要なポイント" aria-valuemin="0" aria-valuemax="100000" aria-valuenow={points}><span style={`width: ${clearProgress}%;`}></span></div>
 							<p>未回収の作業ポイントは含まれません。</p>

@@ -220,7 +220,7 @@ test.describe('Relay startup', () => {
 		const candidateButtons = page.getByRole('button', { name: /を選ぶ$/ });
 		await expect(candidateButtons).toHaveCount(3);
 		await expect.poll(() => page.locator('main > :not(.selection-backdrop)').evaluateAll((elements) => elements.every((element) => (element as HTMLElement).inert))).toBe(true);
-		await expect(page.getByRole('heading', { name: 'Runを始める' })).toBeFocused();
+		await expect(page.getByRole('heading', { name: '命を始める' })).toBeFocused();
 		await page.keyboard.press('Tab');
 		await expect(candidateButtons.first()).toBeFocused();
 		await page.keyboard.press('Shift+Tab');
@@ -305,7 +305,7 @@ test.describe('Relay startup', () => {
 		await expect(rootToggle).toHaveAttribute('aria-expanded', 'false');
 		await expect(rootToggle).toContainText('使用 0 / 0 RP');
 		await expect(page.locator('.rank-controls')).toHaveCount(0);
-		await expect(page.getByRole('button', { name: 'Runを開始' })).toBeEnabled();
+		await expect(page.getByRole('button', { name: '開始' })).toBeEnabled();
 		await setPendingRootPoints(page, 3);
 		await page.reload({ waitUntil: 'domcontentloaded' });
 
@@ -368,7 +368,7 @@ test.describe('Relay startup', () => {
 			await rankRows.nth(index).getByRole('button', { name: /を上げる$/ }).click();
 		}
 		await expect.poll(async () => page.locator('.rank-controls button[aria-label$="を上げる"]').evaluateAll((buttons) => buttons.every((button) => (button as HTMLButtonElement).disabled))).toBe(true);
-		await expect(page.getByRole('button', { name: 'Runを開始' })).toBeEnabled();
+		await expect(page.getByRole('button', { name: '開始' })).toBeEnabled();
 		await startSelectedRun(page);
 		await expect(page.getByRole('dialog')).toHaveCount(0);
 		await page.evaluate(() => {
@@ -496,7 +496,7 @@ test.describe('Relay startup', () => {
 		expect(afterScroll.scrollTop).toBeGreaterThan(0);
 		expect(afterScroll.scrollTop).toBeLessThanOrEqual(afterScroll.scrollHeight - afterScroll.clientHeight);
 		await expect(footer).toBeVisible();
-		await expect(page.getByRole('button', { name: 'Runを開始' })).toBeVisible();
+		await expect(page.getByRole('button', { name: '開始' })).toBeVisible();
 		const footerAfterScroll = await footer.boundingBox();
 		expect(footerAfterScroll).not.toBeNull();
 		expect(footerAfterScroll!.y + footerAfterScroll!.height).toBeLessThanOrEqual(420);
@@ -517,10 +517,12 @@ test.describe('Relay startup', () => {
 
 		const dialog = page.locator('.selection-dialog');
 		const candidates = page.getByRole('button', { name: /を選ぶ$/ });
-		const runButton = page.getByRole('button', { name: 'Runを開始' });
+		const runButton = page.getByRole('button', { name: '開始' });
 		await expect(candidates).toHaveCount(3);
 		await expect(dialog).toBeVisible();
-		await expect(dialog.getByRole('heading', { name: 'Runを始める' })).toBeFocused();
+		await expect(dialog.getByRole('heading', { name: '命を始める' })).toBeFocused();
+		await expect(dialog.locator('#identity-selection-description')).toHaveText('開始後は変更できません。');
+		await expect(dialog.getByRole('region', { name: '転生先を選択' })).toBeVisible();
 		await expect(candidates).toHaveCount(3);
 		await expect(dialog.locator('.candidate.chosen')).toHaveCount(0);
 		await expect(dialog.locator('.candidate-check')).toHaveCount(0);
@@ -529,7 +531,7 @@ test.describe('Relay startup', () => {
 
 		await page.keyboard.press('Shift+Tab');
 		await expect(dialog.getByRole('button', { name: /Root build/ })).toBeFocused();
-		await dialog.getByRole('heading', { name: 'Runを始める' }).focus();
+		await dialog.getByRole('heading', { name: '命を始める' }).focus();
 		await page.keyboard.press('Tab');
 		await expect(candidates.first()).toBeFocused();
 		await page.keyboard.press('Enter');

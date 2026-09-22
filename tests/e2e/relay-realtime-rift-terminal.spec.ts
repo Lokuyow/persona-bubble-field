@@ -58,6 +58,7 @@ async function waitForDeathLastWords(page: Page): Promise<void> {
 	await expect(presentation).toBeVisible();
 	await expect(presentation).toHaveAttribute('data-death-phase', 'intro');
 	await expect(presentation.getByRole('heading', { name: '死亡' })).toBeVisible();
+	await expect(presentation.getByText('一生が終わりました。', { exact: true })).toBeVisible();
 	await expect(presentation.locator('textarea')).toHaveCount(0);
 	await expect(presentation.getByRole('button')).toHaveCount(0);
 	await expect(page.locator('.field-viewport.death-presentation-active')).toHaveCount(1);
@@ -65,6 +66,7 @@ async function waitForDeathLastWords(page: Page): Promise<void> {
 	await expect(page.locator('[data-death-presentation-tombstone]')).toHaveCount(1);
 	await page.clock.runFor(2_500);
 	await expect(presentation).toHaveAttribute('data-death-phase', 'last-words');
+	await expect(presentation.getByText('一生が終わりました。最後に、世界にひとこと残せます。', { exact: true })).toBeVisible();
 	await expect(presentation.locator('textarea')).toBeVisible();
 	await expect(presentation.locator('.death-presentation-card')).toBeFocused();
 }
