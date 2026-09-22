@@ -1225,6 +1225,11 @@ export type AvailableMove = {
 	expected: string;
 };
 
+type RelayKeyboardMove = Readonly<{
+	key: string;
+	expected: string;
+}>;
+
 export async function chooseMoveToward(page: Page, target: { x: number; y: number }): Promise<AvailableMove> {
 	const position = await page.locator('.participant[data-self="true"]').getAttribute('data-position');
 	if (!position) throw new Error('Expected the Relay self participant position.');
@@ -1236,14 +1241,33 @@ export async function chooseMoveToward(page: Page, target: { x: number; y: numbe
 	throw new Error('Expected the Relay participant to differ from the target.');
 }
 
+export async function pressRelayKeyboardMovement(
+	page: Page,
+	move: RelayKeyboardMove,
+	options: Readonly<{ advanceToNextPositionSecond?: boolean }> = {}
+): Promise<void> {
+	if (options.advanceToNextPositionSecond) await page.clock.runFor(1_001);
+	const self = page.locator('.participant[data-self="true"]');
+	const selfPubkey = await self.getAttribute('data-participant-id');
+	if (!selfPubkey) throw new Error('Expected the Relay self participant public key.');
+	const publishedSelfPositionIds = async () => new Set(
+		(await relayState(page)).state.published
+			.filter((event) => event.kind === WORLD_STATE_KIND && event.pubkey === selfPubkey)
+			.map((event) => event.id)
+	).size;
+	const initialPublishedPositionCount = await publishedSelfPositionIds();
+	await page.keyboard.press(move.key);
+	await expect.poll(publishedSelfPositionIds).toBeGreaterThan(initialPublishedPositionCount);
+	await expect(self).toHaveAttribute('data-position', move.expected);
+}
+
 export async function moveRelaySelfTo(page: Page, target: { x: number; y: number }): Promise<void> {
 	for (let step = 0; step < 24; step += 1) {
 		const position = await page.locator('.participant[data-self="true"]').getAttribute('data-position');
 		if (position === `${target.x},${target.y}`) return;
 		const move = await chooseMoveToward(page, target);
 		await page.clock.runFor(1_001);
-		await page.keyboard.press(move.key);
-		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', move.expected);
+		await pressRelayKeyboardMovement(page, move);
 	}
 	throw new Error(`Self did not reach ${target.x},${target.y}.`);
 }

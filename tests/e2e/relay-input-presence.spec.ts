@@ -34,7 +34,7 @@ import { deriveBip85NostrEntropy } from '../../src/lib/bip85';
 import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL } from '../../src/lib/fieldFacilities';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { installFieldFrameSampling, readFieldFrames, sampleRenderedField } from './helpers/fieldFrames';
-import { CHANNEL_ID, AUTHORITATIVE_RELAYS, fixtureSecret, profileDialog, openProfile, installDelayedRelay, relayState, openClockedReadyRelayWorld, pauseAtCurrentBrowserTime, installVisualAnimationRafMetrics, openReadyRelayWorld, seedRelayAccount, chooseHorizontalMove, chooseMoveToward, reverseMoveKey, type AvailableMove } from './helpers/relayHarness';
+import { CHANNEL_ID, AUTHORITATIVE_RELAYS, fixtureSecret, profileDialog, openProfile, installDelayedRelay, relayState, openClockedReadyRelayWorld, pauseAtCurrentBrowserTime, installVisualAnimationRafMetrics, openReadyRelayWorld, seedRelayAccount, chooseHorizontalMove, chooseMoveToward, pressRelayKeyboardMovement, reverseMoveKey, type AvailableMove } from './helpers/relayHarness';
 
 
 test.describe('Relay startup', () => {
@@ -49,8 +49,7 @@ test.describe('Relay startup', () => {
 			});
 		});
 		await editor.focus();
-		await page.keyboard.press(move.key);
-		await expect(self).toHaveAttribute('data-position', move.expected);
+		await pressRelayKeyboardMovement(page, move, { advanceToNextPositionSecond: true });
 		await expect(self).toHaveAttribute('data-movement-animation', 'active');
 		await page.clock.runFor(16);
 		await expect(self).toHaveAttribute('data-movement-animation', 'active');
@@ -92,8 +91,7 @@ test.describe('Relay startup', () => {
 		await editor.fill('');
 		const move = await chooseHorizontalMove(page);
 		await editor.focus();
-		await page.keyboard.press(move.key);
-		await expect(self).toHaveAttribute('data-position', move.expected);
+		await pressRelayKeyboardMovement(page, move);
 	});
 
 	test('fails closed for Composer empty-state null and preserves modifier Arrow behavior', async ({ page }) => {
@@ -116,8 +114,7 @@ test.describe('Relay startup', () => {
 		await expect(self).toHaveAttribute('data-position', before ?? '');
 
 		await editor.fill('');
-		await page.keyboard.press(move.key);
-		await expect(self).toHaveAttribute('data-position', move.expected);
+		await pressRelayKeyboardMovement(page, move);
 	});
 
 	test('continues Composer-empty movement on a hold at the Relay movement cadence', async ({ page }) => {
@@ -171,8 +168,7 @@ test.describe('Relay startup', () => {
 		await page.keyboard.press('Escape');
 		await expect(editor).not.toBeFocused();
 		await expect(editor).toHaveValue('keep this content');
-		await page.keyboard.press(move.key === 'ArrowRight' ? 'd' : 'a');
-		await expect(self).toHaveAttribute('data-position', move.expected);
+		await pressRelayKeyboardMovement(page, { key: move.key === 'ArrowRight' ? 'd' : 'a', expected: move.expected });
 	});
 
 	test('keeps WASD and N as normal Composer input while the editor is focused', async ({ page }) => {
@@ -369,8 +365,7 @@ test.describe('Relay startup', () => {
 			const positionBeforeMove = await self.getAttribute('data-position');
 			if (!positionBeforeMove) throw new Error('Expected the Relay self participant position.');
 			await editor.focus();
-			await page.keyboard.press(move.key);
-			await expect(self).toHaveAttribute('data-position', move.expected);
+			await pressRelayKeyboardMovement(page, move, { advanceToNextPositionSecond: true });
 			await expect(self).toHaveAttribute('data-movement-animation', 'active');
 			await page.clock.runFor(2_000);
 			const transformAfterMove = await scene.evaluate((element) => getComputedStyle(element).transform);
@@ -388,8 +383,7 @@ test.describe('Relay startup', () => {
 
 		const transformBeforeRetarget = await scene.evaluate((element) => getComputedStyle(element).transform);
 		await editor.focus();
-		await page.keyboard.press(retargetMove!.key);
-		await expect(self).toHaveAttribute('data-position', retargetMove!.expected);
+		await pressRelayKeyboardMovement(page, retargetMove!, { advanceToNextPositionSecond: true });
 		await expect(self).toHaveAttribute('data-movement-animation', 'active');
 		await page.evaluate((event) => {
 			(window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event);
