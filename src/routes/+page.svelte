@@ -332,6 +332,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		session: ReturnType<typeof createWorldReadSession> | null;
 		phase: DeathPresentationPhase;
 		canonicalPosition: GridPosition | null;
+		terminalExitPublication: Promise<void> | null;
 	}>;
 	const DEATH_INTRO_DURATION_MS = 2_400;
 	let deathPresentation = $state.raw<DeathPresentationState | null>(null);
@@ -1572,11 +1573,12 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 
 	function startDeathPresentation(
 		currentSession: ReturnType<typeof createWorldReadSession> | null,
-		canonicalPosition: GridPosition | null
+		canonicalPosition: GridPosition | null,
+		terminalExitPublication: Promise<void> | null
 	): void {
 		clearDeathPresentationTimer();
 		const phase: DeathPresentationPhase = prefersReducedMotion ? 'last-words' : 'intro';
-		deathPresentation = { session: currentSession, phase, canonicalPosition };
+		deathPresentation = { session: currentSession, phase, canonicalPosition, terminalExitPublication };
 		soundController?.play('death');
 		if (phase === 'intro') {
 			deathPresentationTimer = window.setTimeout(() => {
@@ -2315,19 +2317,23 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			const result = await commitDeath();
 			if (result.kind === 'transitioned') {
 				storeRunTransitionNotice('dead');
+				const canonicalPosition = preparedExit?.kind === 'prepared'
+					? { ...preparedExit.parsed.position }
+					: null;
+				if (showPresentation) {
+					if (preparedExit?.kind === 'prepared') currentSession?.enableDeathLastWords();
+					deathPresentationContent = '';
+					startDeathPresentation(currentSession, canonicalPosition, null);
+					const terminalExitPublication = preparedExit?.kind === 'prepared' && currentSession
+						? currentSession.publishTerminalExit().then(() => undefined).catch(() => undefined)
+						: null;
+					if (deathPresentation) deathPresentation = { ...deathPresentation, terminalExitPublication };
+					return 'presenting';
+				}
 				try {
 					if (preparedExit?.kind === 'prepared') await currentSession?.publishTerminalExit();
 				} catch {
 					// The local death is already durable; World State exit is best effort.
-				}
-				if (showPresentation) {
-					if (preparedExit?.kind === 'prepared') currentSession?.enableDeathLastWords();
-					const canonicalPosition = preparedExit?.kind === 'prepared'
-						? { ...preparedExit.parsed.position }
-						: null;
-					deathPresentationContent = '';
-					startDeathPresentation(currentSession, canonicalPosition);
-					return 'presenting';
 				}
 				disposePersonaWriter(currentSession);
 				window.location.reload();
@@ -2355,8 +2361,10 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	async function finishDeathPresentation(publish: boolean): Promise<void> {
 		const presentation = deathPresentation;
 		const currentSession = presentation?.session ?? null;
+		const terminalExitPublication = presentation?.terminalExitPublication;
 		if (!presentation || deathPresentationSubmitting) return;
 		deathPresentationSubmitting = true;
+		if (terminalExitPublication) await terminalExitPublication;
 		if (publish && deathPresentationContent.trim()) {
 			try { await currentSession?.publishDeathLastWords(deathPresentationContent); } catch { /* Last Words is best effort. */ }
 		}

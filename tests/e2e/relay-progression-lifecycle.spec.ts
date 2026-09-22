@@ -385,6 +385,42 @@ test.describe('Relay startup', () => {
 		await expect(page.getByRole('dialog')).toHaveCount(0);
 	});
 
+	test('starts death presentation before terminal exit publication settles', async ({ page }) => {
+		const startTime = Date.now();
+		const secret = fixtureSecret(57);
+		const pubkey = getPublicKey(secret);
+		await page.clock.install({ time: startTime });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { primaryEvents: testEvents(startTime), persistAcrossReload: true });
+		await seedRelayAccount(page, secret, pubkey, startTime + 30_000);
+		await page.goto('/');
+		await expect(page.locator('.action-dock')).toBeVisible();
+		await page.evaluate(() => {
+			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
+			relay.releaseMetadata(); relay.releasePrimary();
+		});
+		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
+		await pauseAtCurrentBrowserTime(page);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { deferPositionPublishes(): void } }).__relayStartupTest.deferPositionPublishes());
+
+		await advanceToRuntimeDeath(page, startTime + 30_000);
+		const presentation = page.locator('[data-death-presentation]');
+		await expect(presentation).toHaveAttribute('data-death-phase', 'intro');
+		await expect.poll(async () => (await relayState(page)).state.published.filter((event) =>
+			event.kind === WORLD_STATE_KIND && event.pubkey === pubkey && event.tags.some((tag) => tag[0] === 'd' && tag[1]?.endsWith(':exit'))
+		).length).toBeGreaterThan(0);
+		await expect(presentation).toBeVisible();
+
+		await page.clock.runFor(2_500);
+		await presentation.locator('textarea').fill('delayed terminal exit');
+		await presentation.getByRole('button', { name: '残して進む' }).click();
+		await expect(presentation.getByRole('button', { name: '残して進む' })).toBeDisabled();
+		await expect(page.locator('.selection-dialog')).toHaveCount(0);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePublishes(kind: number): void } }).__relayStartupTest.releasePublishes(30079));
+		await expect(page.getByRole('dialog')).toBeVisible();
+		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
+	});
+
 	test('publishes a terminal World State exit after live runtime death commits locally', async ({ page }) => {
 		const startTime = Date.now();
 		const secret = fixtureSecret(57);
