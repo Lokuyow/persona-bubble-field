@@ -361,7 +361,7 @@ test.describe('Relay startup', () => {
 		await expect.poll(async () => selectionContent.evaluate((element) => element.scrollTop)).toBe(scrollBeforeHelp);
 		await expect.poll(async () => page.evaluate(() => document.activeElement?.getAttribute('aria-label'))).toBe('推論加速の詳細');
 		await page.keyboard.press('Escape');
-		await expect(rootBuild).not.toContainText('Rank 3: ×2.00');
+		await expect(rootBuild).not.toContainText('Rank 3: ×4.00');
 		await page.getByRole('button', { name: /を選ぶ$/ }).first().click();
 		const rankRows = page.locator('.ability-row');
 		for (let index = 0; index < 3; index += 1) {

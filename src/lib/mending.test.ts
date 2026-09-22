@@ -88,29 +88,62 @@ describe('checkpoint-settled asynchronous work', () => {
 		const projection = projectMending(work, 1_000 + 2 * hour, { ...ZERO_BUILD, inferenceAcceleration: 3 });
 		expect(projection.regularDurationMs).toBe(2 * hour);
 		expect(projection.accelerationRemainingMs).toBe(0);
-		expect(projection.points).toBe(180);
+		expect(projection.points).toBe(300);
 	});
 
-	it('does not spend acceleration budget in overflow and keeps overflow points at zero', () => {
+	it('reports next-point time from the fixed-point rate units', () => {
+		const regular = projectMending({ ...state(), abilities: { ...state().abilities, contextCapacity: 100 } }, 1_000, ZERO_BUILD);
+		expect(regular.pointRateHundredthsPerMinute).toBe(100);
+		expect(regular.nextPointRemainingMs).toBe(60 * 1000);
+
+		const overflow = projectMending({ ...state(), abilities: { ...state().abilities, contextCapacity: 1 } }, 1_000 + 10 * minute, { ...ZERO_BUILD, contextCompression: 1 });
+		expect(overflow.pointRateHundredthsPerMinute).toBe(20);
+		expect(overflow.nextPointRemainingMs).toBe(5 * minute);
+	});
+
+	it('applies Root context capacity and overflow point rates without acceleration in overflow', () => {
 		const work = { ...state(), abilities: { ...state().abilities, contextCapacity: 1 } };
-		const projection = projectMending(work, 1_000 + hour, { ...ZERO_BUILD, contextCompression: 3 });
-		expect(projection.regularDurationMs).toBe(15 * minute);
-		expect(projection.overflowDurationMs).toBe(45 * minute);
-		expect(projection.points).toBe(15);
-		expect(projection.accelerationRemainingMs).toBe(INFERENCE_ACCELERATION_BUDGET_MS - 15 * minute);
-		expect(projection.lifespanExtensionMs).toBeGreaterThan(30_000);
+		for (const [rank, capacityMinutes, expectedRate, expectedPoints] of [[0, 5, 0, 20], [1, 10, 20, 50], [2, 15, 35, 75], [3, 20, 50, 100]] as const) {
+			const projection = projectMending({ ...work, abilities: { ...work.abilities, inferenceEfficiency: 1 } }, 1_000 + hour, { inferenceAcceleration: 3, contextCompression: rank, hallucinationResistance: 0 });
+			expect(projection.contextCapacityMs).toBe(capacityMinutes * minute);
+			expect(projection.overflowDurationMs).toBe((60 - capacityMinutes) * minute);
+			expect(projection.points).toBe(expectedPoints);
+			expect(projection.pointRateHundredthsPerMinute).toBe(expectedRate);
+			expect(projection.accelerationRemainingMs).toBe(INFERENCE_ACCELERATION_BUDGET_MS - capacityMinutes * minute);
+		}
 	});
 
 	it('keeps overflow lifespan extension active after the Context cap for Root compression ranks 1 through 3', () => {
 		const work = { ...state(), abilities: { ...state().abilities, contextCapacity: 1 } };
-		for (const rank of [1, 3]) {
+		for (const [rank, expectedRate] of [[1, 2], [2, 3.5], [3, 5]] as const) {
 			const projection = projectMending(work, 1_000 + hour, { ...ZERO_BUILD, contextCompression: rank });
 			expect(projection.completed).toBe(true);
-			expect(projection.lifespanExtensionRateHundredthsPerHour).toBeGreaterThan(0);
+			expect(projection.lifespanExtensionRateHundredthsPerHour).toBe(expectedRate);
 		}
 		const stopped = projectMending(work, 1_000 + hour, ZERO_BUILD);
 		expect(stopped.completed).toBe(true);
 		expect(stopped.lifespanExtensionRateHundredthsPerHour).toBe(0);
+	});
+
+	it('switches to the overflow rate exactly at the Context cap', () => {
+		for (const [rank, expectedPointRate, expectedLifespanRate] of [[0, 0, 0], [1, 20, 2], [2, 35, 3.5], [3, 50, 5]] as const) {
+			const projection = projectMending({ ...state(), abilities: { ...state().abilities, contextCapacity: 1 } }, 1_000 + (5 * (rank + 1)) * minute, { inferenceAcceleration: 3, contextCompression: rank, hallucinationResistance: 0 });
+			expect(projection.overflowDurationMs).toBe(0);
+			expect(projection.completed).toBe(true);
+			expect(projection.pointRateHundredthsPerMinute).toBe(expectedPointRate);
+			expect(projection.lifespanExtensionRateHundredthsPerHour).toBe(expectedLifespanRate);
+			expect(projection.accelerationRemainingMs).toBe(INFERENCE_ACCELERATION_BUDGET_MS - 5 * (rank + 1) * minute);
+		}
+	});
+
+	it('settles the regular-to-overflow boundary at each segment rate', () => {
+		const work = { ...state(), abilities: { ...state().abilities, contextCapacity: 1 } };
+		const projection = projectMending(work, 1_000 + 15 * minute, { inferenceAcceleration: 3, contextCompression: 1, hallucinationResistance: 0 });
+		expect(projection.regularDurationMs).toBe(10 * minute);
+		expect(projection.overflowDurationMs).toBe(5 * minute);
+		expect(projection.points).toBe(41);
+		expect(projection.lifespanExtensionMs).toBe(66_000);
+		expect(projection.accelerationRemainingMs).toBe(INFERENCE_ACCELERATION_BUDGET_MS - 10 * minute);
 	});
 
 	it('keeps fractional carry and transfers integer unclaimed points only on collection', () => {

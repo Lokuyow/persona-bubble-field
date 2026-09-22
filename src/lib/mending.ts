@@ -9,7 +9,7 @@ import {
 	rootContextCompressionMultiplierTenths,
 	rootInferenceAccelerationMultiplierTenths,
 	rootMaximumLifespanMs,
-	rootOverflowLifespanPercent,
+	rootOverflowRewardPercent,
 	type RootBuild,
 	ZERO_ROOT_BUILD
 } from './rootProgression';
@@ -114,9 +114,9 @@ function multiplyDuration(durationMs: number, numerator: number, denominator: nu
 	return Number(value);
 }
 
-function pointSegment(pointProgressTicks: number, durationMs: number, rateHundredths: number, multiplierTenths: number): Readonly<{ points: number; pointProgressTicks: number }> {
+function pointSegment(pointProgressTicks: number, durationMs: number, rateHundredths: number, multiplierNumerator: number, multiplierDenominator: number): Readonly<{ points: number; pointProgressTicks: number }> {
 	if (!isValidPointProgressTicks(pointProgressTicks) || !isSafeInteger(durationMs) || durationMs < 0) throw new TypeError('Invalid point progress.');
-	const ticks = BigInt(pointProgressTicks) + BigInt(durationMs) * BigInt(rateHundredths) * BigInt(multiplierTenths);
+	const ticks = BigInt(pointProgressTicks) + BigInt(durationMs) * BigInt(rateHundredths) * BigInt(multiplierNumerator) * 10n / BigInt(multiplierDenominator);
 	const points = ticks / BigInt(POINT_PROGRESS_SCALE);
 	if (points > BigInt(Number.MAX_SAFE_INTEGER)) throw new TypeError('Mending points are unsafe.');
 	return { points: Number(points), pointProgressTicks: Number(ticks % BigInt(POINT_PROGRESS_SCALE)) };
@@ -132,9 +132,9 @@ function resolveAbilities(state: MendingState): PersonaAbilityLevels {
 	return state.abilities;
 }
 
-function applyExtension(expiry: number, segmentEndMs: number, durationMs: number, rateHundredths: number, maximumLifespanMs: number): Readonly<{ expiry: number; extension: number }> {
-	if (durationMs <= 0 || rateHundredths <= 0) return { expiry, extension: 0 };
-	const raw = multiplyDuration(durationMs, rateHundredths, 100);
+function applyExtension(expiry: number, segmentEndMs: number, durationMs: number, rateNumerator: number, rateDenominator: number, maximumLifespanMs: number): Readonly<{ expiry: number; extension: number }> {
+	if (durationMs <= 0 || rateNumerator <= 0) return { expiry, extension: 0 };
+	const raw = multiplyDuration(durationMs, rateNumerator, rateDenominator);
 	const cap = addSafe(segmentEndMs, maximumLifespanMs);
 	const available = Math.max(0, cap - expiry);
 	const extension = Math.min(raw, available);
@@ -184,29 +184,39 @@ export function projectMending(state: MendingState, nowMs: number, rootBuild: Ro
 	const accelerationMultiplierTenths = rootInferenceAccelerationMultiplierTenths(rootBuild.inferenceAcceleration);
 	let progressTicks = state.pointProgressTicks;
 	let generatedPoints = 0;
-	for (const segment of [[acceleratedDurationMs, accelerationMultiplierTenths], [normalDurationMs, 10]] as const) {
-		const result = pointSegment(progressTicks, segment[0], baseRate, segment[1]);
+	const overflowRatePercent = rootOverflowRewardPercent(rootBuild.contextCompression);
+	for (const [durationMs, multiplierNumerator, multiplierDenominator] of [
+		[acceleratedDurationMs, accelerationMultiplierTenths, 10],
+		[normalDurationMs, 10, 10],
+		[overflowDurationMs, overflowRatePercent, 100]
+	] as const) {
+		const result = pointSegment(progressTicks, durationMs, baseRate, multiplierNumerator, multiplierDenominator);
 		generatedPoints = addPoints(generatedPoints, result.points);
 		progressTicks = result.pointProgressTicks;
 	}
 	let expiry = state.lifespanExpiresAtMs;
 	let extension = 0;
 	const regularRate = getHallucinationExtensionHundredths(abilities.hallucinationSuppression);
-	const currentPointRateHundredthsPerMinute = processedDurationMs >= contextCapacityMs ? 0 : state.inferenceAccelerationUsedMs + regularDurationMs < INFERENCE_ACCELERATION_BUDGET_MS ? baseRate * accelerationMultiplierTenths / 10 : baseRate;
-	const currentLifespanExtensionRateHundredthsPerHour = processedDurationMs >= contextCapacityMs ? regularRate * rootOverflowLifespanPercent(rootBuild.contextCompression) / 100 : regularRate;
-	for (const [durationMs, rateHundredths, offset] of [
-		[acceleratedDurationMs, regularRate, 0],
-		[normalDurationMs, regularRate, acceleratedDurationMs],
-		[overflowDurationMs, regularRate * rootOverflowLifespanPercent(rootBuild.contextCompression) / 100, regularDurationMs]
+	const completed = processedDurationMs >= contextCapacityMs;
+	const currentPointRateHundredthsPerMinute = completed
+		? baseRate * overflowRatePercent / 100
+		: state.inferenceAccelerationUsedMs + regularDurationMs < INFERENCE_ACCELERATION_BUDGET_MS
+			? baseRate * accelerationMultiplierTenths / 10
+			: baseRate;
+	const currentLifespanExtensionRateHundredthsPerHour = completed ? regularRate * overflowRatePercent / 100 : regularRate;
+	for (const [durationMs, rateNumerator, rateDenominator, offset] of [
+		[acceleratedDurationMs, regularRate, 100, 0],
+		[normalDurationMs, regularRate, 100, acceleratedDurationMs],
+		[overflowDurationMs, regularRate * overflowRatePercent, 10_000, regularDurationMs]
 	] as const) {
-		const result = applyExtension(expiry, segmentEnd(job.checkpointAtMs, offset, durationMs), durationMs, rateHundredths, rootMaximumLifespanMs(rootBuild.hallucinationResistance));
+		const result = applyExtension(expiry, segmentEnd(job.checkpointAtMs, offset, durationMs), durationMs, rateNumerator, rateDenominator, rootMaximumLifespanMs(rootBuild.hallucinationResistance));
 		expiry = result.expiry;
 		extension = addPoints(extension, result.extension);
 	}
 	const totalUnclaimedPoints = addPoints(job.unclaimedPoints, generatedPoints);
-	const nextPointRemainingMs = processedDurationMs >= contextCapacityMs || progressTicks === POINT_PROGRESS_SCALE - 1
+	const nextPointRemainingMs = currentPointRateHundredthsPerMinute <= 0 || progressTicks === POINT_PROGRESS_SCALE - 1
 		? null
-		: Math.max(1, Math.ceil((POINT_PROGRESS_SCALE - progressTicks) / (baseRate * (acceleratedDurationMs < regularDurationMs ? 10 : accelerationMultiplierTenths))));
+		: Math.max(1, Math.ceil((POINT_PROGRESS_SCALE - progressTicks) * 100 * MENDING_MINUTE_MS / (currentPointRateHundredthsPerMinute * POINT_PROGRESS_SCALE)));
 	return {
 		processedDurationMs,
 		processedThroughMs: addSafe(job.checkpointAtMs, elapsedMs),
@@ -219,7 +229,7 @@ export function projectMending(state: MendingState, nowMs: number, rootBuild: Ro
 		points: totalUnclaimedPoints,
 		pointProgressTicks: progressTicks,
 		nextPointRemainingMs,
-		completed: processedDurationMs >= contextCapacityMs,
+		completed,
 		accelerationMultiplierTenths,
 		accelerationRemainingMs: Math.max(0, accelerationRemainingMs - acceleratedDurationMs),
 		contextCapacityMs,

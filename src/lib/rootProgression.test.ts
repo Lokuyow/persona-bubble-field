@@ -5,7 +5,7 @@ import {
 	rootContextCompressionMultiplierTenths,
 	rootInferenceAccelerationMultiplierTenths,
 	rootMaximumLifespanMs,
-	rootOverflowLifespanPercent,
+	rootOverflowRewardPercent,
 	usableRootPoints,
 	type RootBuild
 } from './rootProgression';
@@ -23,9 +23,9 @@ describe('Root permanent progression', () => {
 	});
 
 	it('exposes the specified rank effects', () => {
-		expect([0, 1, 2, 3].map(rootInferenceAccelerationMultiplierTenths)).toEqual([10, 13, 16, 20]);
-		expect([0, 1, 2, 3].map(rootContextCompressionMultiplierTenths)).toEqual([10, 15, 20, 30]);
-		expect([0, 1, 2, 3].map(rootOverflowLifespanPercent)).toEqual([0, 20, 35, 50]);
+		expect([0, 1, 2, 3].map(rootInferenceAccelerationMultiplierTenths)).toEqual([10, 20, 30, 40]);
+		expect([0, 1, 2, 3].map(rootContextCompressionMultiplierTenths)).toEqual([10, 20, 30, 40]);
+		expect([0, 1, 2, 3].map(rootOverflowRewardPercent)).toEqual([0, 20, 35, 50]);
 		expect([0, 1, 2, 3].map(rootMaximumLifespanMs)).toEqual([7 * 24 * HOUR, 14 * 24 * HOUR, 21 * 24 * HOUR, 30 * 24 * HOUR]);
 	});
 });

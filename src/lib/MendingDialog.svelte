@@ -38,9 +38,10 @@
 	let accelerationMultiplier = $derived(((projection?.accelerationMultiplierTenths ?? 10) / 10).toFixed(2));
 	let maximumLifespan = $derived(formatDaysOrDuration(projection?.maximumLifespanMs ?? 0));
 	let accelerationRemaining = $derived(`有効作業 残り${formatElapsedDuration(projection?.accelerationRemainingMs ?? 0)}`);
-	let lifespanExtensionAvailable = $derived(Boolean(projection?.completed &&
-		(projection.lifespanExtensionRateHundredthsPerHour ?? 0) > 0));
-	let workStatusTitle = $derived(!projection?.completed ? '作業中' : lifespanExtensionAvailable ? '延命中' : '作業停止中');
+	let overflowPointAvailable = $derived(Boolean(projection?.completed && (projection?.pointRateHundredthsPerMinute ?? 0) > 0));
+	let overflowLifespanAvailable = $derived(Boolean(projection?.completed && (projection?.lifespanExtensionRateHundredthsPerHour ?? 0) > 0));
+	let overflowRewardAvailable = $derived(overflowPointAvailable || overflowLifespanAvailable);
+	let workStatusTitle = $derived(!projection?.completed ? '作業中' : overflowRewardAvailable ? '延命中' : '作業停止中');
 
 	function formatRateMinutes(rateHundredthsPerHour: number): string {
 		const minutes = rateHundredthsPerHour * 0.6;
@@ -108,11 +109,11 @@
 						</div>
 					</section>
 					<section class="status-group" aria-label="作業の蓄積状況">
-						<strong class:overflow-lifespan-status={lifespanExtensionAvailable} class="progress-heading">
+						<strong class:overflow-lifespan-status={overflowRewardAvailable} class="progress-heading">
 							{#if !projection?.completed}
 								<span>上限まで あと</span><span class="progress-duration">{remainingDuration}</span>
-							{:else if lifespanExtensionAvailable}
-								<span>ポイント蓄積は上限</span><span>寿命延長のみ継続中</span>
+							{:else if overflowRewardAvailable}
+								<span>通常作業は上限</span><span>{overflowPointAvailable && overflowLifespanAvailable ? 'ポイント・寿命延長が継続中' : overflowPointAvailable ? 'ポイント蓄積のみ継続中' : '寿命延長のみ継続中'}</span>
 							{:else}
 								上限に達しました
 							{/if}
