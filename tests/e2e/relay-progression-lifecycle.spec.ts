@@ -36,6 +36,35 @@ import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { installFieldFrameSampling, readFieldFrames, sampleRenderedField } from './helpers/fieldFrames';
 import { CHANNEL_ID, AUTHORITATIVE_RELAYS, fixtureSecret, testEvents, isDeathTraceEvent, installDelayedRelay, relayState, dragRelayJoystick, publishedMessages, waitForPublishedMessageCount, pauseAtCurrentBrowserTime, startSelectedRun, openReadyRelayWorld, openClearReadyWorld, installPromptApiStub, seedRelayAccount, readRelayGameState, overwriteRelayGameState, overwriteRelayMendingBuild, seedUnavailablePersona, installDeathTransitionFailure, armDeathTransitionFailure, moveRelaySelfTo } from './helpers/relayHarness';
 
+async function waitForDeathLastWords(page: Page, canonicalPosition?: string | null): Promise<void> {
+	const presentation = page.locator('[data-death-presentation]');
+	await expect(presentation).toBeVisible();
+	await expect(presentation).toHaveAttribute('data-death-phase', 'intro');
+	await expect(presentation.getByRole('heading', { name: '死亡' })).toBeVisible();
+	await expect(presentation.getByText('一生が終わりました。', { exact: true })).toBeVisible();
+	await expect(presentation.locator('textarea')).toHaveCount(0);
+	await expect(presentation.getByRole('button')).toHaveCount(0);
+	await expect(page.locator('.field-viewport.death-presentation-active')).toHaveCount(1);
+	await expect(page.locator('.participant[data-self="true"]')).toHaveCount(0);
+	const tombstone = page.locator('[data-death-presentation-tombstone]');
+	await expect(tombstone).toHaveCount(1);
+	if (canonicalPosition) await expect(tombstone).toHaveAttribute('data-death-presentation-tombstone-position', canonicalPosition);
+	await page.clock.runFor(2_500);
+	await expect(presentation).toHaveAttribute('data-death-phase', 'last-words');
+	await expect(presentation.getByText('一生が終わりました。最後に、世界にひとこと残せます。', { exact: true })).toBeVisible();
+	await expect(presentation.locator('textarea')).toBeVisible();
+	await expect(presentation.locator('.death-presentation-card')).toBeFocused();
+}
+
+async function advanceToRuntimeDeath(page: Page, expiryAtMs: number): Promise<void> {
+	await page.clock.setSystemTime(expiryAtMs + 1);
+	await page.clock.runFor(500);
+}
+
+async function publishedDeathTraceCount(page: Page, pubkey: string): Promise<number> {
+	return (await relayState(page)).state.published.filter((event) => isDeathTraceEvent(event) && event.pubkey === pubkey).length;
+}
+
 
 test.describe('Relay startup', () => {
 
@@ -50,7 +79,7 @@ test.describe('Relay startup', () => {
 		await expect(page.getByRole('dialog')).toBeVisible();
 		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
 		await expect(page.getByText('脱出しました', { exact: true })).toBeVisible();
-		await expect(page.getByText('現在のRunを終了し、Root Pointを1獲得しました。', { exact: true })).toBeVisible();
+		await expect(page.getByText('一生を終え、Root Pointを1獲得しました。', { exact: true })).toBeVisible();
 		await page.reload();
 		await expect(page.getByRole('dialog')).toBeVisible();
 		await expect(page.getByText('脱出しました', { exact: true })).toHaveCount(0);
@@ -137,6 +166,8 @@ test.describe('Relay startup', () => {
 		await page.reload({ waitUntil: 'domcontentloaded' });
 
 		await expect(page.getByRole('dialog')).toBeVisible();
+		await expect(page.locator('[data-death-presentation]')).toHaveCount(0);
+		await expect(page.locator('[data-death-presentation-tombstone]')).toHaveCount(0);
 		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
 		const previousCharacterId = requireCharacterFromPubkey(pubkey).characterId;
 		const pendingCharacterIds = await page.evaluate(async () => {
@@ -272,12 +303,15 @@ test.describe('Relay startup', () => {
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
 		await pauseAtCurrentBrowserTime(page);
+		const canonicalPosition = await page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`).getAttribute('data-position');
 
-		await page.clock.runFor(31_000);
-		await expect(page.locator('[data-death-presentation]')).toBeVisible();
+		await advanceToRuntimeDeath(page, startTime + 30_000);
+		await waitForDeathLastWords(page, canonicalPosition);
+		expect(await publishedDeathTraceCount(page, pubkey)).toBe(0);
 		await page.locator('[data-death-presentation]').getByRole('button', { name: '残さず進む' }).click();
 		await expect(page.getByRole('dialog')).toBeVisible();
 		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
+		expect(await publishedDeathTraceCount(page, pubkey)).toBe(0);
 		await page.getByRole('button', { name: /を選ぶ$/ }).first().click();
 		await startSelectedRun(page);
 		await expect(page.getByRole('dialog')).toHaveCount(0);
@@ -318,6 +352,83 @@ test.describe('Relay startup', () => {
 		expect(event?.pubkey).toBe(newPubkey);
 	});
 
+	test('uses an immediate reduced-motion death presentation and still advances after skip', async ({ page }) => {
+		const startTime = Date.now();
+		const secret = fixtureSecret(61);
+		const pubkey = getPublicKey(secret);
+		await page.emulateMedia({ reducedMotion: 'reduce' });
+		await page.clock.install({ time: startTime });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { primaryEvents: testEvents(startTime), persistAcrossReload: true });
+		await seedRelayAccount(page, secret, pubkey, startTime + 30_000);
+		await page.goto('/');
+		await expect(page.locator('.action-dock')).toBeVisible();
+		await page.evaluate(() => {
+			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
+			relay.releaseMetadata(); relay.releasePrimary();
+		});
+		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
+		await pauseAtCurrentBrowserTime(page);
+		await advanceToRuntimeDeath(page, startTime + 30_000);
+		const presentation = page.locator('[data-death-presentation]');
+		await expect(presentation).toHaveAttribute('data-death-phase', 'last-words');
+		await expect(presentation.getByRole('heading', { name: '死亡' })).toBeVisible();
+		await expect(page.locator('.field-viewport.death-presentation-active')).toHaveCount(1);
+		await expect(page.locator('.participant[data-self="true"]')).toHaveCount(0);
+		await expect(page.locator('[data-death-presentation-tombstone]')).toHaveCount(1);
+		await expect(presentation.locator('textarea')).toBeVisible();
+		await expect(presentation.locator('.death-presentation-card')).toBeFocused();
+		await presentation.getByRole('button', { name: '残さず進む' }).click();
+		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
+		await page.getByRole('button', { name: /を選ぶ$/ }).first().click();
+		await startSelectedRun(page);
+		await expect(page.getByRole('dialog')).toHaveCount(0);
+	});
+
+	test('starts death presentation before terminal exit publication settles', async ({ page }) => {
+		const startTime = Date.now();
+		const secret = fixtureSecret(57);
+		const pubkey = getPublicKey(secret);
+		await page.clock.install({ time: startTime });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { primaryEvents: testEvents(startTime), persistAcrossReload: true });
+		await seedRelayAccount(page, secret, pubkey, startTime + 30_000);
+		await page.goto('/');
+		await expect(page.locator('.action-dock')).toBeVisible();
+		await page.evaluate(() => {
+			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
+			relay.releaseMetadata(); relay.releasePrimary();
+		});
+		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
+		await pauseAtCurrentBrowserTime(page);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { deferPositionPublishes(): void } }).__relayStartupTest.deferPositionPublishes());
+
+		const canonicalPosition = await page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`).getAttribute('data-position');
+		expect(canonicalPosition).toMatch(/^\d+,\d+$/);
+		await advanceToRuntimeDeath(page, startTime + 30_000);
+		const presentation = page.locator('[data-death-presentation]');
+		const tombstone = page.locator('[data-death-presentation-tombstone]');
+		await expect(presentation).toHaveAttribute('data-death-phase', 'intro');
+		await expect(presentation).toBeVisible();
+		await expect(page.locator('.field-viewport.death-presentation-active')).toHaveCount(1);
+		await expect(page.locator('.participant[data-self="true"]')).toHaveCount(0);
+		await expect(tombstone).toHaveCount(1);
+		await expect(tombstone).toHaveAttribute('data-death-presentation-tombstone-position', canonicalPosition!);
+		await expect.poll(async () => (await relayState(page)).state.published.filter((event) =>
+			event.kind === WORLD_STATE_KIND && event.pubkey === pubkey && event.tags.some((tag) => tag[0] === 'd' && tag[1]?.endsWith(':exit'))
+		).length).toBeGreaterThan(0);
+
+		await page.clock.runFor(2_500);
+		await expect(presentation).toHaveAttribute('data-death-phase', 'last-words');
+		await presentation.locator('textarea').fill('delayed terminal exit');
+		await presentation.getByRole('button', { name: '残して進む' }).click();
+		await expect(presentation.getByRole('button', { name: '残して進む' })).toBeDisabled();
+		await expect(page.locator('.selection-dialog')).toHaveCount(0);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePublishes(kind: number): void } }).__relayStartupTest.releasePublishes(30079));
+		await expect(page.getByRole('dialog')).toBeVisible();
+		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
+	});
+
 	test('publishes a terminal World State exit after live runtime death commits locally', async ({ page }) => {
 		const startTime = Date.now();
 		const secret = fixtureSecret(57);
@@ -335,17 +446,18 @@ test.describe('Relay startup', () => {
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
 		await pauseAtCurrentBrowserTime(page);
 
-		await page.clock.runFor(31_000);
-		await expect(page.locator('[data-death-presentation]')).toBeVisible();
+		await advanceToRuntimeDeath(page, startTime + 30_000);
+		await waitForDeathLastWords(page);
+		expect(await publishedDeathTraceCount(page, pubkey)).toBe(0);
 		await page.locator('[data-death-presentation] textarea').fill('A last word from this Run');
 		await page.locator('[data-death-presentation]').getByRole('button', { name: '残して進む' }).click();
 		await expect(page.getByRole('dialog')).toBeVisible();
 		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
-		await expect(page.getByText('Runが終了しました', { exact: true })).toBeVisible();
-		await expect(page.getByText('この人格のRunは死亡として終了しました。次の人格を選んでください。', { exact: true })).toBeVisible();
+		await expect(page.getByText('一生を終えました', { exact: true })).toBeVisible();
+		await expect(page.getByText('死亡しました。転生してください。', { exact: true })).toBeVisible();
 		await page.reload();
 		await expect(page.getByRole('dialog')).toBeVisible();
-		await expect(page.getByText('Runが終了しました', { exact: true })).toHaveCount(0);
+		await expect(page.getByText('一生を終えました', { exact: true })).toHaveCount(0);
 		await expect.poll(async () => page.evaluate((expectedPubkey) => {
 			const state = (window as unknown as { __relayStartupTest: { state: { previousPublished: Array<{ id: string; kind: number; pubkey?: string; content: string; tags: string[][]; created_at?: number }>; published: Array<{ id: string; kind: number; pubkey?: string; content: string; tags: string[][]; created_at?: number }> } } }).__relayStartupTest.state;
 			return [...new Map([...state.previousPublished, ...state.published]
@@ -386,8 +498,8 @@ test.describe('Relay startup', () => {
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
 		await pauseAtCurrentBrowserTime(page);
 		await page.evaluate(() => (window as unknown as { __relayStartupTest: { rejectPositionPublishes(): void } }).__relayStartupTest.rejectPositionPublishes());
-		await page.clock.runFor(31_000);
-		await expect(page.locator('[data-death-presentation]')).toBeVisible();
+		await advanceToRuntimeDeath(page, startTime + 30_000);
+		await waitForDeathLastWords(page);
 		await page.locator('[data-death-presentation] textarea').fill('trace publication is best effort');
 		await page.locator('[data-death-presentation]').getByRole('button', { name: '残して進む' }).click();
 		await expect(page.getByRole('dialog')).toBeVisible();

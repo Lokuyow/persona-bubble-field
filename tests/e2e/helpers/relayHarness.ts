@@ -390,11 +390,11 @@ export async function installDelayedRelay(page: Page, options: {
 			realtimeEventsReleased: !deferRealtimeEvents,
 			realtimeTerminal: realtimeTerminal ?? 'eose' as 'eose' | 'closed' | 'timeout',
 			realtimePublishOutcome: realtimePublishOutcome ?? 'accepted' as 'accepted' | 'rejected' | 'echo' | 'no-response',
+			deferPositionPublishes: false,
 			rejectMessagePublishes: false,
 			rejectPositionPublishes: false,
 			rejectTracePublishes: rejectTracePublishes ?? false,
 			deferReplyPublishes: false,
-			deferPositionPublishes: false,
 			echoRepliesBeforeResult: false,
 			replyOutcome: 'accepted' as 'accepted' | 'rejected' | 'duplicate'
 		};
@@ -651,6 +651,7 @@ export async function installDelayedRelay(page: Page, options: {
 					state.traceRepliesReleased = true;
 					pendingTraceReplies.splice(0).forEach(respondTraceReplies);
 					},
+					deferPositionPublishes: () => { state.deferPositionPublishes = true; },
 					releaseRealtimeEvents: () => {
 						state.realtimeEventsReleased = true;
 						pendingRealtime.splice(0).forEach(respondRealtime);
@@ -719,7 +720,7 @@ export async function installDelayedRelay(page: Page, options: {
 
 export function relayState(page: Page) {
 	return page.evaluate(() => (window as typeof window & {
-		__relayStartupTest: { state: { requests: Array<{ url: string; subId: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] }>; published: Array<{ id: string; kind: number; content: string; tags: string[][]; pubkey?: string }>; closedSubscriptions: Array<{ subId: string; url: string }> }; failMetadataDiscovery(): void; releaseMetadata(): void; releasePrimaryEvents(): void; releasePrimary(): void; releaseTraceRoots(): void; releaseTraceReplies(): void; deferTraceReplies(): void; injectTraceReply(event: object): void; injectClosedTraceReply(event: object): void; activeTraceReplyCount(): number; rejectMessagePublishes(): void; allowMessagePublishes(): void; rejectPositionPublishes(): void; allowPositionPublishes(): void; rejectTracePublishes(): void; allowTracePublishes(): void; injectPosition(event: object): void; injectMessage(event: object): void };
+		__relayStartupTest: { state: { requests: Array<{ url: string; subId: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] }>; published: Array<{ id: string; kind: number; content: string; tags: string[][]; pubkey?: string }>; closedSubscriptions: Array<{ subId: string; url: string }> }; failMetadataDiscovery(): void; releasePublishes(kind: number): void; deferPositionPublishes(): void; releaseMetadata(): void; releasePrimaryEvents(): void; releasePrimary(): void; releaseTraceRoots(): void; releaseTraceReplies(): void; deferTraceReplies(): void; injectTraceReply(event: object): void; injectClosedTraceReply(event: object): void; activeTraceReplyCount(): number; rejectMessagePublishes(): void; allowMessagePublishes(): void; rejectPositionPublishes(): void; allowPositionPublishes(): void; rejectTracePublishes(): void; allowTracePublishes(): void; injectPosition(event: object): void; injectMessage(event: object): void };
 	}).__relayStartupTest);
 }
 
@@ -785,7 +786,7 @@ export async function pauseAtCurrentBrowserTime(page: Page): Promise<void> {
 }
 
 export async function startSelectedRun(page: Page): Promise<void> {
-	const start = page.getByRole('button', { name: 'Runを開始' });
+	const start = page.getByRole('button', { name: '開始' });
 	await expect(start).toBeEnabled();
 	await start.click();
 }

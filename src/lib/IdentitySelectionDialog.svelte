@@ -17,9 +17,9 @@
 		onExportNsec: (candidate: ClearedIdentityCandidate) => void;
 	} = $props();
 	let noticeCopy = $derived(transitionNotice === 'dead'
-		? { heading: 'Runが終了しました', body: 'この人格のRunは死亡として終了しました。次の人格を選んでください。' }
+		? { heading: '一生を終えました', body: '死亡しました。転生してください。' }
 		: transitionNotice === 'cleared'
-			? { heading: '脱出しました', body: '現在のRunを終了し、Root Pointを1獲得しました。' }
+			? { heading: '脱出しました', body: '一生を終え、Root Pointを1獲得しました。' }
 			: null);
 	let backdrop = $state<HTMLElement | null>(null);
 	let initialFocusTarget = $state<HTMLElement | null>(null);
@@ -37,7 +37,7 @@
 	const ROOT_DETAILS = {
 		inferenceAcceleration: ['Rank 0: ×1.00', 'Rank 1: ×1.30', 'Rank 2: ×1.60', 'Rank 3: ×2.00', '最初の有効通常作業24時間のポイント生成に適用。'],
 		contextCompression: ['Rank 0: ×1.00 / overflow lifespan 0%', 'Rank 1: ×1.50 / overflow lifespan 20%', 'Rank 2: ×2.00 / overflow lifespan 35%', 'Rank 3: ×3.00 / overflow lifespan 50%'],
-		hallucinationResistance: ['Rank 0: 最大7日', 'Rank 1: 最大14日', 'Rank 2: 最大21日', 'Rank 3: 最大30日', 'fresh Run開始時の寿命は常に7日。']
+		hallucinationResistance: ['Rank 0: 最大7日', 'Rank 1: 最大14日', 'Rank 2: 最大21日', 'Rank 3: 最大30日', '新しい一生の開始時の寿命は常に7日。']
 	} as const;
 
 	$effect(() => {
@@ -124,8 +124,8 @@
 			<div class="selection-content">
 				<header class="selection-header">
 					<div>
-						<h1 bind:this={initialFocusTarget} class="initial-focus-target" id="identity-selection-title" tabindex="-1">Runを始める</h1>
-						<p id="identity-selection-description" class="selection-introduction">人格を選び、今回のRunで使うRoot buildを決めてください。Run開始後は変更できません。</p>
+						<h1 bind:this={initialFocusTarget} class="initial-focus-target" id="identity-selection-title" tabindex="-1">命を始める</h1>
+						<p id="identity-selection-description" class="selection-introduction">開始後は変更できません。</p>
 					</div>
 					<div class="rp-summary"><span>Root Point</span><strong>{rootPoints} RP</strong></div>
 				</header>
@@ -136,8 +136,8 @@
 					</div>
 				{/if}
 
-				<section class="identity-section" aria-label="人格を選択">
-					<div class="section-heading"><h2>人格を選択</h2><span>Runの舞台となる人格</span></div>
+				<section class="identity-section" aria-label="転生先を選択">
+					<div class="section-heading"><h2>転生先を選択</h2><span>次の一生を送る人格</span></div>
 					<div class="candidate-grid">
 						{#each selection.candidates as candidate}
 							{@const selectedCharacter = character(candidate)}
@@ -152,7 +152,7 @@
 
 				{#if selection.reusableIdentities.length > 0}
 					<section class="return-section" aria-label="再利用可能なIdentity">
-						<div class="section-heading"><h2>再利用可能なIdentity</h2><span>過去のRunを続ける</span></div>
+						<div class="section-heading"><h2>再利用可能なIdentity</h2><span>過去の人格で新しい一生を始める</span></div>
 						<div class="return-list">
 							{#each selection.reusableIdentities as candidate}
 								{@const selectedCharacter = character(candidate)}
@@ -167,12 +167,12 @@
 
 				<section class="root-build" aria-label="Root build">
 					<button class:open={rootBuildOpen} class="root-build-toggle" type="button" aria-expanded={rootBuildOpen} aria-controls="root-build-panel" onclick={() => rootBuildOpen = !rootBuildOpen}>
-						<span class="root-build-toggle-copy"><strong>Root build</strong><small>今回のRunに割り当てる能力</small></span>
+						<span class="root-build-toggle-copy"><strong>Root build</strong><small>今回の一生に割り当てる能力</small></span>
 						<span class="root-build-toggle-meta"><span>使用 {usedPoints} / {usablePoints} RP</span><ChevronDown aria-hidden="true" /></span>
 					</button>
 					{#if rootBuildOpen}
 					<div id="root-build-panel" class="root-build-panel">
-					<p class="rp-notice" role="status">{usablePoints === 0 ? '今回は割り当て可能なRPがありません。Rank 0で開始します。' : usedPoints === usablePoints ? '使用可能なRPをすべて割り当てています。配分はRun開始まで変更できます。' : `あと ${usablePoints - usedPoints} RP 割り当てできます。配分はRun開始まで変更できます。`}</p>
+					<p class="rp-notice" role="status">{usablePoints === 0 ? '今回は割り当て可能なRPがありません。Rank 0で開始します。' : usedPoints === usablePoints ? '使用可能なRPをすべて割り当てています。配分は開始まで変更できます。' : `あと ${usablePoints - usedPoints} RP 割り当てできます。配分は開始まで変更できます。`}</p>
 					<div class="ability-list">
 						{#each [['inferenceAcceleration', '推論加速', 'ポイント生成'], ['contextCompression', 'コンテキスト圧縮', '最大蓄積'], ['hallucinationResistance', 'ハルシネーション耐性', '最大寿命']] as [key, label, effectLabel]}
 							{@const rootKey = key as keyof RootBuild}
@@ -202,7 +202,7 @@
 			</div>
 			<footer class="selection-footer">
 				<div class="selection-summary"><span>選択中</span><strong>{chosen ? character(chosen).name : '未選択'}</strong><span class="summary-divider" aria-hidden="true"></span><span>使用 {usedPoints} / {usablePoints} RP</span></div>
-				<PrimaryButton type="button" onclick={startRun} disabled={!chosen || !isRootBuildAllocatable(rootBuild, rootPoints)}>Runを開始</PrimaryButton>
+				<PrimaryButton type="button" onclick={startRun} disabled={!chosen || !isRootBuildAllocatable(rootBuild, rootPoints)}>開始</PrimaryButton>
 			</footer>
 		</dialog>
 	</div>

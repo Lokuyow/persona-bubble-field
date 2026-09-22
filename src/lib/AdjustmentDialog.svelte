@@ -60,13 +60,13 @@
 			<Dialog.Content class="adjustment-dialog-content" preventScroll={false}>
 				<header class="adjustment-dialog-header">
 					<Dialog.Title class="adjustment-dialog-title">能力強化</Dialog.Title>
-					<Dialog.Description class="sr-only">Run能力を強化して作業の効果を高めます。</Dialog.Description>
+					<Dialog.Description class="sr-only">能力を強化して作業の効果を高めます。</Dialog.Description>
 					<div class="points-display" aria-label={`所持ポイント ${points} pt`}>
 						<Wallet aria-hidden="true" />
 						<span>{points} pt</span>
 					</div>
 				</header>
-				<section class="ability-list" aria-label="Run能力">
+				<section class="ability-list" aria-label="能力">
 					{#each abilityKeys as key}
 						{@const upgrade = getAbilityUpgrade(key, abilities)}
 						<article class:success-flash={upgradeFeedback?.key === key} class="ability-card">
