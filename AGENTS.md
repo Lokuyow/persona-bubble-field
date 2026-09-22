@@ -1,304 +1,114 @@
 # Repository instructions
 
-This file defines repository-level working rules for coding agents.
+This file defines repository-wide rules for coding agents.
 
-Product specifications and design start at [docs/PROJECT.md](docs/PROJECT.md).
-Individual domain specifications are in [docs/specs/](docs/specs/).
+Product specifications and design start at [docs/PROJECT.md](docs/PROJECT.md);
+domain specifications are in [docs/specs/](docs/specs/). Before planning or
+implementing, read `docs/PROJECT.md` and the specifications relevant to the
+task. `docs/research/` is reference material, not the Source of Truth.
 
-Before planning or implementing work, read `docs/PROJECT.md` and the
-specifications relevant to the task.
+Read additional guidance only when its scope applies:
 
-`docs/research/` contains reference material. It may inform technical
-decisions, but it is not the Source of Truth for product specifications.
+- For Svelte source or component changes, read [Svelte implementation
+  guidance](docs/guides/svelte.md).
+- For adding or changing tests, especially Playwright, browser, UI, or layout
+  tests, read [testing guidance](docs/guides/testing.md).
+- For local validation, CI, and Git workflow, use `docs/PROJECT.md`; do not
+  duplicate its operational policy here.
 
 ## Source of Truth
 
-- Treat `docs/PROJECT.md` and the applicable documents under `docs/specs/` as
-  the Source of Truth for product behavior and design.
-- Normally use the specifications merged into `main`.
-- When a branch or pull request intentionally changes specifications together
-  with implementation, use the specifications in that checkout as part of the
-  proposed change.
-- Do not infer or change specifications merely to fit the existing
-  implementation.
-- Do not invent product behavior, protocol behavior, compatibility
-  requirements, or undocumented APIs.
-- If an important prerequisite is not satisfied and the repository or
-  applicable specifications cannot resolve it, report the finding instead of
-  guessing.
-- Do not duplicate product specifications into this file. Put product
-  decisions in the appropriate specification document.
+- Treat `docs/PROJECT.md` and applicable `docs/specs/` documents as the Source
+  of Truth for product behavior and design. Normally use the specifications
+  merged into `main`; use branch specifications only when they intentionally
+  change with the implementation.
+- Do not infer or change specifications to fit implementation, invent product,
+  protocol, compatibility, or undocumented API behavior, or duplicate product
+  decisions here. Report unresolved prerequisites instead of guessing.
 
 ## Before editing
 
-- Read the target files, their callers, related state, services, utilities, and
-  relevant tests before deciding how to change them.
-- Follow the current code's naming, architecture, and responsibility
-  boundaries.
-- Preserve existing user-visible behavior unless the requested change or an
-  applicable specification requires otherwise.
-- Keep changes within the requested scope. Do not mix unrelated refactoring,
-  cleanup, or redesign into feature work or bug fixes.
-- Check the repository, `package.json`, local types, existing project usage,
-  and relevant documentation before adding a dependency or duplicating
-  functionality.
-- Prefer existing project abstractions and installed-library APIs over new
-  bespoke implementations when they already satisfy the requirement.
-- When work depends on an external library API or web-platform behavior,
-  verify the current API or specification rather than relying on assumptions.
-- For Nostr protocol work, verify the applicable NIPs and the project
-  specifications. Do not infer protocol semantics from UI behavior or from
-  another client's implementation.
+- Read the target, its callers, related state/services/utilities, and relevant
+  tests. Follow established naming, architecture, and responsibility boundaries.
+- Preserve user-visible behavior unless the task or applicable specification
+  requires a change; keep work within scope and avoid unrelated cleanup.
+- Inspect existing project facilities before adding dependencies or duplicating
+  behavior. Verify unfamiliar library or web-platform APIs; for Nostr work,
+  verify the applicable NIPs and project specifications.
 
 ## Implementation principles
 
 ### Root cause before fallback
 
-When fixing a defect or unexpected behavior:
-
-1. Reproduce or identify the failing behavior.
-2. Trace the relevant control flow and state transitions.
-3. Determine the root cause.
-4. Apply the smallest change that fixes that cause.
-5. Add or update regression coverage at the lowest sufficient level.
-
-Do not leave a known root cause in place and hide it behind a fallback,
-workaround, arbitrary delay, duplicate state, broad catch, silent default, or
-unrelated invalidation.
-
-A fallback is appropriate only when it is required by an explicit product
-requirement, a supported compatibility requirement, or verified runtime
-behavior.
+Reproduce or trace the problem, identify its cause, make the smallest causal
+change, and add the lowest sufficient regression coverage. Do not hide a known
+cause behind a fallback, delay, duplicate state, broad catch, silent default,
+or unrelated invalidation. Use a fallback only when an explicit product or
+supported-compatibility requirement, or verified runtime behavior, requires it.
 
 ### No speculative compatibility
 
-Do not add or retain compatibility behavior solely for hypothetical future
-users, unreleased designs, or stale callers. When an intentional change
-replaces a schema, interface, or protocol shape without an explicit
-compatibility requirement, prefer a clean replacement over maintaining old and
-new forms in parallel.
+Do not retain compatibility for hypothetical users, unreleased designs, or
+stale callers. Intentional prototype changes are clean breaks: update or remove
+affected callers, tests, fixtures, and local data instead of adding aliases,
+migrations, adapters, dual support, or compatibility-only fallbacks.
 
-#### Prototype clean breaks
-
-Before formal release, prototype-local data, identities, event or protocol
-formats, routes, internal/DEV/test interfaces, and fixtures are not
-backward-compatibility contracts merely because they exist. For an intentional
-prototype change, do not add or retain migration, legacy paths, adapters,
-aliases, dual support, or compatibility-only fallbacks to preserve them. If
-needed, update or remove the affected callers, tests, fixtures, or local data;
-do not keep production compatibility code solely for stale tests.
-
-#### Contracts that remain supported
-
-Maintain compatibility for data, identities, public interfaces, and external
-integrations that are explicitly supported, including currently required
-Nostr/NIP, Relay, browser, and Web Platform interoperability. Distinguish
-repository-internal use from an external compatibility contract.
-
-This policy applies only when the intentional change is within the task scope.
-It does not permit unrelated user-visible behavior changes or cleanup; outside
-that scope, preserve behavior unless the request or Source of Truth requires
-otherwise.
+Maintain explicitly supported data, identities, public interfaces, and external
+integrations, including required Nostr/NIP, Relay, browser, and Web Platform
+interoperability. This does not authorize unrelated behavior changes.
 
 ### Avoid premature abstraction
 
-Do not turn one implementation case, one review finding, or an artificial edge
-case into a repository-wide abstraction.
-
-Before introducing a new shared helper, adapter, service layer, state machine,
-generic extension point, or coordination mechanism, confirm that it solves a
-real repeated problem and is simpler than keeping the behavior local.
-
-For isolated cases, prefer the smallest clear implementation that satisfies the
-current requirement.
-
-This does not prevent immediate fixes for security problems, data loss,
-protocol violations, specification violations, or reproducible defects.
+Do not create a shared helper, adapter, service, state machine, generic
+extension point, or coordination mechanism for one case. Introduce one only for
+a demonstrated repeated problem when it is simpler than a local solution. This
+does not delay fixes for security, data loss, protocol, specification, or
+reproducible defects.
 
 ### Keep responsibilities explicit
 
-- Keep rendering concerns separate from protocol, persistence, and domain
-  logic where the existing architecture already makes that distinction.
-- Keep Nostr event construction, validation, signing, relay behavior, and
-  product-specific semantics in the responsibility boundaries defined by the
-  project specifications.
+- Preserve established separation of rendering, protocol, persistence, and
+  domain logic.
+- Keep Nostr construction, validation, signing, and Relay behavior within the
+  boundaries specified by the project.
 - Do not move persona-bubble-field-specific behavior into eHagaki merely
-  because eHagaki is involved in the posting flow.
-- Reuse existing responsibility boundaries instead of creating parallel paths
-  for the same operation.
-
-### Modern Svelte
-
-- New or changed ordinary primary actions should use the shared `PrimaryButton`
-  component and semantic accent tokens; do not hard-code primary colors in an
-  individual component. Special or destructive actions may use their own
-  semantic treatment when their meaning clearly differs from ordinary primary.
-
-- For new or changed Svelte code, prefer current non-legacy APIs from the
-  installed Svelte 5 version and established repository patterns. For an
-  unfamiliar or version-sensitive API, check the installed version and current
-  official Svelte documentation first.
-- Do not introduce `svelte/legacy` or deprecated APIs into new code without an
-  explicit compatibility requirement. Do not perform unrelated modernization;
-  change existing code to modern conventions only within the task's safe scope.
-- Use runes mode: `$props()` for component props, `$state` for local reactive
-  state, and `$derived` for pure derived values. Use `$effect` only for side
-  effects and `$effect.pre` only when there is a clear need to run before DOM
-  updates. Prefer `$derived` over effects that merely synchronize calculations.
-- Use `$state.raw` only when immutable snapshots, identity-sensitive objects,
-  or the absence of deep proxying gives it a meaningful purpose. Use `$bindable`
-  only for props that genuinely require component-owned two-way binding. Do not
-  introduce top-level `$:` reactivity in new runes-mode code.
-- Use callback props for component-to-parent notifications; do not use the
-  deprecated `createEventDispatcher` in new code. Use event attributes such as
-  `onclick` and `onkeydown`, not legacy `on:click` or similar directives.
-- For new component composition, prefer snippets and `{@render ...}` over
-  introducing the legacy slot API. Do not add stores, context, or `.svelte.ts`
-  reactive owners merely to reduce prop count or file length when state and
-  responsibility do not need to be shared.
-- Prefer native `{@attach ...}` for element-local measurement, observers, and
-  imperative DOM lifecycle when the attachment is the natural owner. Do not
-  create a legacy action only to wrap it with `fromAction`; understand
-  attachment reactivity and avoid unnecessary dependencies that recreate
-  observers or listeners.
-- Prefer `<svelte:window>` and `<svelte:document>` for global events when
-  ownership and SSR semantics fit. `onMount` remains valid for browser-only
-  resources, dynamic custom-element integration, and external object listeners;
-  do not replace it with `$effect` merely for modernization. Choose the API
-  that matches the resource ownership and cleanup semantics of ResizeObserver,
-  VisualViewport, VirtualKeyboard, and custom elements.
-- When adding conditional classes or substantially changing markup, prefer the
-  repository's class array/object syntax such as
-  `class={['base', { active: condition }]}`. The `class:` directive remains
-  valid; do not remove it as unrelated cleanup. Keep component-scoped CSS by
-  default, avoid broad `:global(...)`, and do not add wrappers when they could
-  affect geometry, positioning, stacking, measurement, SSR DOM contracts, or
-  other existing behavior.
-- Do not increase compiler or `svelte-check` warnings in new or changed Svelte
-  code. Confirm existing modern patterns before inventing a new one, and
-  preserve behavior, DOM contracts, measurement ownership, and lifecycle
-  ordering even when a newer syntax is available.
+  because it participates in posting; reuse existing ownership boundaries.
 
 ## Tests and verification
 
-Use the repository's current scripts and `docs/PROJECT.md` to determine
-required verification. `package.json` is the Source of Truth for available npm
-commands.
-
-- Run the narrowest relevant tests while implementing.
-- Add or update tests when behavior, protocol construction, deterministic
-  domain logic, or a regression requires coverage.
-- Broaden verification according to the affected area before finishing.
-- Run the project-required validation for the task when specified by
-  `docs/PROJECT.md` or the reviewed Plan.
-- Use real-browser verification when unit-level tests cannot establish the
-  relevant browser or layout behavior.
-- For new or changed UI, layout, and geometry tests, do not assert exact
-  values for incidental design-tuning details—such as position, width,
-  height, padding, gap, color, opacity, or animation duration—unless the
-  value is fixed by product specification or has another clear correctness
-  reason. Prefer assertions about user-visible behavior and layout
-  invariants where possible: non-overlap, required spatial relationships,
-  containment within the viewport or an intended container, correct
-  connections or correspondence between targets, renderability of content,
-  actionability for click/tap/drag, responsive constraints, and arrival at
-  the correct final state after animation. Use exact values, ranges,
-  relationships, or behavior/invariants according to the contract the test
-  is meant to protect; an exact assertion remains appropriate when an
-  explicitly specified dimension, bound, color, or duration—or algorithmic,
-  protocol, or accessibility correctness—makes that value meaningful. Do
-  not make tests resilient merely by widening tolerances and weakening the
-  contract.
-- Keep tests deterministic. Do not depend on real relays, external network
-  availability, real accounts, secrets, or timing races unless the task
-  explicitly requires an integration check that cannot be performed
-  otherwise.
-- Do not claim that a test, check, build, browser verification, or CI job
-  passed unless it was actually run and observed to pass.
-- Report relevant verification that was not run and the reason.
-- For documentation-only changes that do not alter application behavior or
-  tooling, focused document consistency checks and `git diff --check` are
-  sufficient; application tests, builds, and E2E may be omitted and should be
-  reported as intentionally unrun.
-
-For browser behavior changes, prioritize the unit tests and Playwright E2E
-coverage closest to the changed behavior in addition to static checks. A
-normal coding-agent local completion does not require the full Playwright
-suite unconditionally. Run the local full suite when the change broadly
-affects the E2E harness, shared fixtures or test doubles, global application
-lifecycle, or routing; when the relevant subset cannot reasonably be limited;
-or when the reviewed Plan or task explicitly requires it. Broaden local
-verification when a test failure or additional change gives a concrete reason
-to do so. Use `npm run test:e2e` for the normal human-readable browser path;
-coding agents may prefer `npm run test:e2e:agent` for its low-output `dot`
-reporter.
-The E2E suite includes checks using the local DEV World Sandbox and checks
-of the normal application using local test doubles such as Fake Relays
-and Composer stubs. It must not depend on real Relays, external network
-access, real accounts, or secrets. If the local Chromium binary is not
-installed, run `npx playwright install chromium`.
-
-Once all checks required for the task have passed for the final relevant
-changes and no relevant concern remains unresolved, proceed toward task
-completion. Add, repeat, or broaden verification only when further changes,
-failures, or unresolved concerns justify it.
-
-Remove temporary logs, debugging instrumentation, test harnesses, screenshots,
-traces, and discarded experimental changes before finishing unless they are
-intentionally part of the requested deliverable.
+- Run and add the lowest sufficient deterministic coverage for changed behavior
+  or regressions; use browser verification when unit-level checks cannot prove
+  browser or layout behavior.
+- Do not rely on real relays, external network, real accounts, secrets, or
+  timing races unless an explicitly required integration check cannot avoid it.
+- Follow `docs/PROJECT.md` and the reviewed Plan for required validation. Claim
+  only checks actually observed, and report relevant checks intentionally not
+  run and why.
+- Remove temporary logs, instrumentation, harnesses, screenshots, traces, and
+  discarded experiments unless they are an intentional deliverable.
 
 ## Secrets and sensitive material
 
 Never expose Nostr private keys, `nsec` values, authentication material,
-tokens, credentials, or other secrets in:
-
-- Logs
-- Test fixtures
-- Screenshots
-- Error messages
-- Commit messages
-- Pull request descriptions
-- Final reports
-
-Use clearly fake deterministic values when tests require secret-like data.
+tokens, credentials, or other secrets in logs, test fixtures, screenshots,
+errors, commits, pull requests, or final reports. Use clearly fake,
+deterministic values where tests need secret-like data.
 
 ## Git and task scope
 
-Follow the Git workflow defined in `docs/PROJECT.md` and the current reviewed
-Plan or task instruction.
+Follow the Git workflow in `docs/PROJECT.md` and the current reviewed Plan or
+task instruction. Do not commit, push, create or update a pull request, merge,
+release, deploy, force-push, or rewrite history unless explicitly authorized.
 
-通常のcoding agent作業では、必要なローカル検証、commit、push、通常Pull
-Requestの作成までで作業を完了してよく、PR作成後にGitHub Actionsの完了を
-待機・pollingしない。PR CIとrequired status checkの`Check and build`は
-merge gateとして維持し、`main`へのmerge前には最新headでの成功を確認する。
-現在のタスクまたはreviewed PlanがCI結果の確認を明示的に要求する場合は、
-その指示を優先する。
-
-Do not commit, push, create or update a pull request, merge, release, deploy,
-force-push, or rewrite history unless the current task or reviewed Plan
-explicitly requires that operation.
-
-Do not modify repository instruction files, specifications, or unrelated
-documentation as a side effect of implementation work unless the task requires
-those changes.
-
-When implementation reveals that an existing specification must change, do not
-silently change product behavior. Treat it as a specification issue and report
-the conflict or update the specification only when that change is part of the
-approved task.
+Do not modify repository instructions, specifications, or unrelated
+documentation as an implementation side effect. If implementation exposes a
+specification conflict, report it; change the specification only when that is
+part of the approved task.
 
 ## Final report
 
-For implementation work, report the information needed to review the result:
-
-- Root cause or implementation rationale
-- Files and responsibilities changed
-- Why the solution satisfies the applicable specification
-- Existing behavior intentionally preserved
-- Relevant risks or limitations that remain
-- Tests, checks, builds, or browser verification actually run and their results
-- Relevant verification not run and why
-- Branch, commit, and pull request details when Git operations were part of the
-  task
-
-Keep the report focused on evidence needed to review the change.
+For implementation work, report the rationale/root cause, changed files and
+responsibilities, specification fit and intentionally preserved behavior,
+remaining risks, verification run and omitted (with reasons), and branch,
+commit, and pull-request details when Git operations occurred. Keep the report
+focused on reviewable evidence.
