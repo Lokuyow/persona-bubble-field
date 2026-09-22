@@ -34,7 +34,7 @@ import { deriveBip85NostrEntropy } from '../../src/lib/bip85';
 import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL } from '../../src/lib/fieldFacilities';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { installFieldFrameSampling, readFieldFrames, sampleRenderedField } from './helpers/fieldFrames';
-import { CHANNEL_ID, AUTHORITATIVE_RELAYS, fixtureSecret, testEvents, isDeathTraceEvent, installDelayedRelay, relayState, dragRelayJoystick, publishedMessages, waitForPublishedMessageCount, pauseAtCurrentBrowserTime, startSelectedRun, openReadyRelayWorld, openClearReadyWorld, installPromptApiStub, seedRelayAccount, readRelayGameState, overwriteRelayGameState, overwriteRelayMendingBuild, seedUnavailablePersona, installDeathTransitionFailure, armDeathTransitionFailure, moveRelaySelfTo } from './helpers/relayHarness';
+import { CHANNEL_ID, AUTHORITATIVE_RELAYS, fixtureSecret, testEvents, isDeathTraceEvent, installDelayedRelay, relayState, dragRelayJoystick, publishedMessages, waitForPublishedMessageCount, pauseAtCurrentBrowserTime, startSelectedRun, openReadyRelayWorld, openClearReadyWorld, installPromptApiStub, seedRelayAccount, readRelayGameState, overwriteRelayGameState, overwriteRelayMendingBuild, seedUnavailablePersona, installDeathTransitionFailure, armDeathTransitionFailure, chooseMoveToward, moveRelaySelfTo } from './helpers/relayHarness';
 
 
 test.describe('Relay startup', () => {
@@ -303,5 +303,37 @@ test.describe('Relay startup', () => {
 		const dialog = page.getByRole('dialog', { name: '能力強化' });
 		await expect(dialog.getByRole('button', { name: '最大Lv' })).toHaveCount(3);
 		for (const button of await dialog.getByRole('button', { name: '最大Lv' }).all()) await expect(button).toBeDisabled();
+	});
+
+	test('routes self around fixed terminals and active participants', async ({ page }) => {
+		const startTime = Date.now();
+		const secret = fixtureSecret(19);
+		const pubkey = getPublicKey(secret);
+		const remoteSecret = fixtureSecret(20);
+		await page.clock.install({ time: startTime });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { primaryEvents: testEvents(startTime) });
+		await seedRelayAccount(page, secret, pubkey);
+		await page.goto('/');
+		await page.evaluate(() => {
+			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
+			relay.releaseMetadata(); relay.releasePrimary();
+		});
+		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
+		const atThirteenThree = finalizeEvent(buildWorldStateEventTemplate({
+			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 13, y: 3 }, slot: 1,
+			createdAt: Math.floor(await page.evaluate(() => Date.now()) / 1000)
+		}), secret);
+		const occupiedAbove = finalizeEvent(buildWorldStateEventTemplate({
+			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 13, y: 2 }, slot: 0,
+			createdAt: Math.floor(await page.evaluate(() => Date.now()) / 1000)
+		}), remoteSecret);
+		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), atThirteenThree);
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '13,3');
+		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), occupiedAbove);
+		await expect(page.locator(`.participant[data-participant-id="${occupiedAbove.pubkey}"]`)).toHaveAttribute('data-position', '13,2');
+		await expect(chooseMoveToward(page, { x: 11, y: 3 })).resolves.toEqual({ key: 'ArrowDown', expected: '13,4' });
+		await moveRelaySelfTo(page, { x: 11, y: 3 });
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,3');
 	});
 });
