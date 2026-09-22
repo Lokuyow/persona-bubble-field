@@ -128,10 +128,26 @@ test.describe('Relay startup', () => {
 		const [x] = position.split(',').map(Number);
 		const move = await chooseHorizontalMove(page);
 		const key = move.key;
+		const publishedPositionIds = async () => new Set(
+			(await relayState(page)).state.published
+				.filter((event) => event.kind === WORLD_STATE_KIND)
+				.map((event) => event.id)
+		).size;
+		const initialPublishedPositionCount = await publishedPositionIds();
 		await editor.focus();
+		await page.evaluate((movementKey) => {
+			(window as typeof window & { __relayCadenceKeydown?: string }).__relayCadenceKeydown = undefined;
+			window.addEventListener('keydown', (event) => {
+				if (event.key === movementKey) (window as typeof window & { __relayCadenceKeydown?: string }).__relayCadenceKeydown = event.key;
+			}, { once: true });
+		}, key);
 		await page.keyboard.down(key);
+		await expect.poll(() => page.evaluate(() => (window as typeof window & { __relayCadenceKeydown?: string }).__relayCadenceKeydown)).toBe(key);
 		await page.clock.runFor(50);
-		await expect(self).not.toHaveAttribute('data-position', position);
+		// Let the fake-clock timer at the 50ms boundary dispatch before observing the publish.
+		await page.clock.runFor(1);
+		await expect.poll(publishedPositionIds).toBeGreaterThan(initialPublishedPositionCount);
+		await expect(self).toHaveAttribute('data-position', move.expected);
 		await page.clock.runFor(750);
 		await page.clock.runFor(750);
 		await page.keyboard.up(key);
