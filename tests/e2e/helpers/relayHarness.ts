@@ -23,6 +23,7 @@ import {
 import { requireCharacterFromPubkey, resolveCharacterFromPubkey } from '../../../src/lib/characterAssignment';
 import { deriveBip85NostrEntropy } from '../../../src/lib/bip85';
 import { isBlockedFacilityCell } from '../../../src/lib/fieldFacilities';
+import { moveOneCell, type Direction, type GridPosition } from '../../../src/lib/geometry';
 import { installHostOwnedStub } from './hostOwnedComposerStub';
 import { installFieldFrameSampling, readFieldFrames, sampleRenderedField } from './fieldFrames';
 
@@ -1234,6 +1235,28 @@ export type AvailableMove = {
 	expected: string;
 };
 
+const RELAY_FIELD = { columns: 16, rows: 8 } as const;
+
+const CARDINAL_RELAY_MOVES = [
+	{ key: 'ArrowUp', direction: 'up' },
+	{ key: 'ArrowRight', direction: 'right' },
+	{ key: 'ArrowDown', direction: 'down' },
+	{ key: 'ArrowLeft', direction: 'left' }
+] as const satisfies readonly Readonly<{ key: AvailableMove['key']; direction: Direction }>[];
+
+function relayPositionKey(position: GridPosition): string {
+	return `${position.x},${position.y}`;
+}
+
+function orderedRelayMoves(current: GridPosition, target: GridPosition): readonly (typeof CARDINAL_RELAY_MOVES)[number][] {
+	const preferred: Array<(typeof CARDINAL_RELAY_MOVES)[number]> = [];
+	if (current.x < target.x) preferred.push(CARDINAL_RELAY_MOVES[1]);
+	if (current.x > target.x) preferred.push(CARDINAL_RELAY_MOVES[3]);
+	if (current.y < target.y) preferred.push(CARDINAL_RELAY_MOVES[2]);
+	if (current.y > target.y) preferred.push(CARDINAL_RELAY_MOVES[0]);
+	return [...preferred, ...CARDINAL_RELAY_MOVES.filter((candidate) => !preferred.includes(candidate))];
+}
+
 type RelayKeyboardMove = Readonly<{
 	key: string;
 	expected: string;
@@ -1243,11 +1266,40 @@ export async function chooseMoveToward(page: Page, target: { x: number; y: numbe
 	const position = await page.locator('.participant[data-self="true"]').getAttribute('data-position');
 	if (!position) throw new Error('Expected the Relay self participant position.');
 	const [x, y] = position.split(',').map(Number);
-	if (x < target.x) return { key: 'ArrowRight', expected: `${x + 1},${y}` };
-	if (x > target.x) return { key: 'ArrowLeft', expected: `${x - 1},${y}` };
-	if (y < target.y) return { key: 'ArrowDown', expected: `${x},${y + 1}` };
-	if (y > target.y) return { key: 'ArrowUp', expected: `${x},${y - 1}` };
-	throw new Error('Expected the Relay participant to differ from the target.');
+	const current = { x, y };
+	if (current.x === target.x && current.y === target.y) {
+		throw new Error('Expected the Relay participant to differ from the target.');
+	}
+	const occupied = await page.locator('.participant').evaluateAll((participants) => participants
+		.filter((participant) => participant.getAttribute('data-self') !== 'true')
+		.map((participant) => participant.getAttribute('data-position'))
+		.filter((candidate): candidate is string => candidate !== null)
+		.map((candidate) => {
+			const [x, y] = candidate.split(',').map(Number);
+			return { x, y };
+		})
+	);
+	const visited = new Set([relayPositionKey(current)]);
+	const queue: Array<{ position: GridPosition; firstMove: AvailableMove }> = [];
+	for (const candidate of orderedRelayMoves(current, target)) {
+		const next = moveOneCell(current, candidate.direction, RELAY_FIELD, occupied);
+		if (!next || isBlockedFacilityCell(next) || visited.has(relayPositionKey(next))) continue;
+		const firstMove = { key: candidate.key, expected: relayPositionKey(next) };
+		if (next.x === target.x && next.y === target.y) return firstMove;
+		visited.add(relayPositionKey(next));
+		queue.push({ position: next, firstMove });
+	}
+	for (let index = 0; index < queue.length; index += 1) {
+		const currentRoute = queue[index];
+		for (const candidate of orderedRelayMoves(currentRoute.position, target)) {
+			const next = moveOneCell(currentRoute.position, candidate.direction, RELAY_FIELD, occupied);
+			if (!next || isBlockedFacilityCell(next) || visited.has(relayPositionKey(next))) continue;
+			if (next.x === target.x && next.y === target.y) return currentRoute.firstMove;
+			visited.add(relayPositionKey(next));
+			queue.push({ position: next, firstMove: currentRoute.firstMove });
+		}
+	}
+	throw new Error(`Expected a reachable Relay movement route from ${relayPositionKey(current)} to ${relayPositionKey(target)}.`);
 }
 
 export async function pressRelayKeyboardMovement(
@@ -1271,7 +1323,7 @@ export async function pressRelayKeyboardMovement(
 }
 
 export async function moveRelaySelfTo(page: Page, target: { x: number; y: number }): Promise<void> {
-	for (let step = 0; step < 24; step += 1) {
+	for (let step = 0; step < RELAY_FIELD.columns * RELAY_FIELD.rows; step += 1) {
 		const position = await page.locator('.participant[data-self="true"]').getAttribute('data-position');
 		if (position === `${target.x},${target.y}`) return;
 		const move = await chooseMoveToward(page, target);
