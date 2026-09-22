@@ -1,6 +1,6 @@
 <script lang="ts">
 	import X from '~icons/tabler/x';
-	import Sparkles from '~icons/tabler/sparkles';
+	import Sparkles2 from '~icons/tabler/sparkles-2';
 	import { Tooltip } from 'bits-ui';
 	import { onMount } from 'svelte';
 	import type { Character } from '$lib/character';
@@ -149,7 +149,7 @@
 							disabled={busy || editorIsEmpty !== true}
 							onclick={() => void generate()}
 						>
-							<span class="suggestions-toggle-icon" aria-hidden="true"><Sparkles /></span>
+							<span class="suggestions-toggle-icon" aria-hidden="true"><Sparkles2 /></span>
 						</button>
 					</span>
 				{/snippet}
