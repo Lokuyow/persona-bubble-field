@@ -211,13 +211,15 @@ test.describe('Relay startup', () => {
 		await installDelayedRelay(page, { primaryEvents: testEvents(startTime) });
 		await seedRelayAccount(page, secret, pubkey, startTime + 7 * 24 * 60 * 60 * 1000, 10);
 		await page.goto('/');
+		const adjustment = page.getByRole('button', { name: '能力強化端末' });
 		await page.evaluate(() => {
 			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
 			relay.releaseMetadata(); relay.releasePrimary();
 		});
-		const adjustment = page.getByRole('button', { name: '能力強化端末' });
+		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '3,2');
 		await adjustment.click();
-		await expect(page.getByRole('status')).toContainText('近づくと端末を使える');
+		await expect(page.locator('.trace-proximity-feedback[role="status"]')).toContainText('近づくと端末を使える');
 
 		const nearby = finalizeEvent(buildWorldStateEventTemplate({
 			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 13, y: 3 }, slot: 1,
