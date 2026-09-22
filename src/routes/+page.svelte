@@ -2371,7 +2371,10 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	async function checkPersonaExpiry(
 		currentSession: ReturnType<typeof createWorldReadSession> | null
 	): Promise<'unchanged' | 'reloaded' | 'presenting' | 'failed'> {
-		if (devWorldSandboxEnabled || personaLifecycleTransition || !personaSnapshot) return 'unchanged';
+		// Startup restores the expired run through the explicit non-presenting path.
+		// A runtime refresh must own a live session before it can start presentation;
+		// otherwise it can race startup while the session is intentionally null.
+		if (devWorldSandboxEnabled || personaLifecycleTransition || !personaSnapshot || !currentSession) return 'unchanged';
 		if (!isPersonaExpired(personaSnapshot.gameState, Date.now(), personaSnapshot.activeRun.rootBuild)) return 'unchanged';
 		return beginDeathTransition(personaSnapshot, currentSession);
 	}

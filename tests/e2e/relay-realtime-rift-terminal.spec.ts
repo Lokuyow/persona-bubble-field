@@ -34,7 +34,7 @@ import { deriveBip85NostrEntropy } from '../../src/lib/bip85';
 import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL } from '../../src/lib/fieldFacilities';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { installFieldFrameSampling, readFieldFrames, sampleRenderedField } from './helpers/fieldFrames';
-import { CHANNEL_ID, AUTHORITATIVE_RELAYS, fixtureSecret, testEvents, upcomingRegistrationSchedule, nextScheduledRiftSchedule, signedRiftAction, syntheticChannelFixture, installDelayedRelay, relayState, seedRelayAccount, readRelayGameState, realtimeInstanceIds, isRealtimeRequest, readRealtimePendingInstances, seedRealtimePendingInstance, chooseHorizontalMove } from './helpers/relayHarness';
+import { CHANNEL_ID, AUTHORITATIVE_RELAYS, fixtureSecret, testEvents, upcomingRegistrationSchedule, nextScheduledRiftSchedule, signedRiftAction, syntheticChannelFixture, installDelayedRelay, relayState, seedRelayAccount, readRelayGameState, realtimeInstanceIds, isRealtimeRequest, isDeathTraceEvent, readRealtimePendingInstances, seedRealtimePendingInstance, chooseHorizontalMove } from './helpers/relayHarness';
 
 const RIFT_SELF_POSITION = { x: 3, y: 2 } as const;
 const RIFT_FIELD_SIZE = { columns: 16, rows: 8 } as const;
@@ -67,6 +67,10 @@ async function waitForDeathLastWords(page: Page): Promise<void> {
 	await expect(presentation).toHaveAttribute('data-death-phase', 'last-words');
 	await expect(presentation.locator('textarea')).toBeVisible();
 	await expect(presentation.locator('.death-presentation-card')).toBeFocused();
+}
+
+async function publishedDeathTraceCount(page: Page, pubkey: string): Promise<number> {
+	return (await relayState(page)).state.published.filter((event) => isDeathTraceEvent(event) && event.pubkey === pubkey).length;
 }
 
 
@@ -123,9 +127,10 @@ test.describe('Relay startup', () => {
 		await page.clock.runFor(1_000);
 		await expect.poll(async () => (await relayState(page)).state.published.some((event) => event.kind === 7070 && event.pubkey === selfPubkey && JSON.parse(event.content).action === 'reveal')).toBe(true);
 		await page.clock.setSystemTime(round.revealCutoffAtMs + 1_000);
-		await page.clock.runFor(2_000);
+		await page.clock.runFor(1_000);
 
 		await waitForDeathLastWords(page);
+		expect(await publishedDeathTraceCount(page, selfPubkey)).toBe(0);
 		await page.locator('[data-death-presentation] textarea').fill('A last word from this Run');
 		await page.locator('[data-death-presentation]').getByRole('button', { name: '残して進む' }).click();
 		await expect(page.getByRole('dialog')).toBeVisible();
