@@ -22,6 +22,7 @@ import {
 } from '../../../src/lib/rift';
 import { requireCharacterFromPubkey, resolveCharacterFromPubkey } from '../../../src/lib/characterAssignment';
 import { deriveBip85NostrEntropy } from '../../../src/lib/bip85';
+import { isBlockedFacilityCell } from '../../../src/lib/fieldFacilities';
 import { installHostOwnedStub } from './hostOwnedComposerStub';
 import { installFieldFrameSampling, readFieldFrames, sampleRenderedField } from './fieldFrames';
 
@@ -1214,10 +1215,18 @@ export async function chooseHorizontalMove(page: Page): Promise<{ key: 'ArrowLef
 	const position = await page.locator('.participant[data-self="true"]').getAttribute('data-position');
 	if (!position) throw new Error('Expected the Relay self participant position.');
 	const [x, y] = position.split(',').map(Number);
-	if (x < 15) {
-		return { key: 'ArrowRight', expected: `${x + 1},${y}` };
-	}
-	return { key: 'ArrowLeft', expected: `${x - 1},${y}` };
+	const occupied = new Set(await page.locator('.participant').evaluateAll((participants) => participants
+		.filter((participant) => participant.getAttribute('data-self') !== 'true')
+		.map((participant) => participant.getAttribute('data-position'))
+		.filter((candidate): candidate is string => candidate !== null)
+	));
+	const move = [
+		{ key: 'ArrowRight' as const, x: x + 1 },
+		{ key: 'ArrowLeft' as const, x: x - 1 }
+	].find((candidate) => candidate.x >= 0 && candidate.x < 16 &&
+		!isBlockedFacilityCell({ x: candidate.x, y }) && !occupied.has(`${candidate.x},${y}`));
+	if (!move) throw new Error('Expected an unoccupied horizontal Relay movement cell.');
+	return { key: move.key, expected: `${move.x},${y}` };
 }
 
 export type AvailableMove = {
