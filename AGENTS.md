@@ -84,6 +84,10 @@ reproducible defects.
 - Follow `docs/PROJECT.md` and the reviewed Plan for required validation. Claim
   only checks actually observed, and report relevant checks intentionally not
   run and why.
+- Once checks required for the final relevant changes pass and no relevant
+  concern remains unresolved, proceed to task completion. Repeat or broaden
+  verification only for further changes, failures, or unresolved concerns; do
+  not repeat it or expand scope without a concrete reason.
 - Remove temporary logs, instrumentation, harnesses, screenshots, traces, and
   discarded experiments unless they are an intentional deliverable.
 
