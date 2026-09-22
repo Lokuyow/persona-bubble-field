@@ -3,7 +3,7 @@ import { WORLD_STATE_KIND } from '../../src/lib/nostrProtocol';
 import { characterPicturePath } from '../../src/lib/character';
 import { requireCharacterFromPubkey } from '../../src/lib/characterAssignment';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
-import { traceRuntimeEvents, installDelayedRelay, relayState, installPromptApiStub, seedRelayAccount, composerContextCalls } from './helpers/relayHarness';
+import { AUTHORITATIVE_RELAYS, traceRuntimeEvents, installDelayedRelay, relayState, installPromptApiStub, seedRelayAccount, composerContextCalls } from './helpers/relayHarness';
 
 
 
@@ -98,6 +98,7 @@ test.describe('Relay startup', () => {
 
 	test('rejects mismatched structured reply output before position or message publication', async ({ page }) => {
 		const trace = traceRuntimeEvents();
+		await page.clock.setFixedTime((trace.selfPosition.created_at + 1) * 1_000);
 		await page.emulateMedia({ reducedMotion: 'reduce' });
 		await page.setViewportSize({ width: 1100, height: 850 });
 		await installHostOwnedStub(page);
@@ -114,6 +115,11 @@ test.describe('Relay startup', () => {
 		const editor = page.getByRole('textbox', { name: '投稿エディター' });
 		const preview = page.getByLabel('Reply preview', { exact: true });
 		await expect(preview).toContainText('Relay trace root');
+		const inspectionPublishes = async () => (await relayState(page)).state.published.filter((event) =>
+			event.kind === WORLD_STATE_KIND && event.pubkey === trace.selfPubkey && event.content === '3:2'
+		);
+		await expect.poll(inspectionPublishes).toHaveLength(AUTHORITATIVE_RELAYS.length);
+		expect([...new Set((await inspectionPublishes()).map((event) => event.id))]).toHaveLength(1);
 		const before = (await relayState(page)).state.published.length;
 		let terminals = 0;
 		for (const target of ['f'.repeat(64), null]) {
