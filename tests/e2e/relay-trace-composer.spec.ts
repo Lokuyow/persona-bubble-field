@@ -97,9 +97,8 @@ test.describe('Relay startup', () => {
 	});
 
 	test('rejects mismatched structured reply output before position or message publication', async ({ page }) => {
-		const fixtureTime = Date.now();
 		const trace = traceRuntimeEvents();
-		await page.clock.setFixedTime(fixtureTime + 1_000);
+		await page.clock.setFixedTime((trace.selfPosition.created_at + 1) * 1_000);
 		await page.emulateMedia({ reducedMotion: 'reduce' });
 		await page.setViewportSize({ width: 1100, height: 850 });
 		await installHostOwnedStub(page);
