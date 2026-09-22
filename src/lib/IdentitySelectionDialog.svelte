@@ -30,13 +30,13 @@
 	let rootBuildOpen = $state(false);
 	let rootBuildSelection = $state<PendingSelection | null>(null);
 	const ROOT_EFFECTS = {
-		inferenceAcceleration: ['×1.00', '×1.30', '×1.60', '×2.00'],
-		contextCompression: ['×1.00 / overflow lifespan 0%', '×1.50 / overflow lifespan 20%', '×2.00 / overflow lifespan 35%', '×3.00 / overflow lifespan 50%'],
+		inferenceAcceleration: ['×1.00', '×2.00', '×3.00', '×4.00'],
+		contextCompression: ['×1.00 / overflow point・lifespan 0%', '×2.00 / overflow point・lifespan 20%', '×3.00 / overflow point・lifespan 35%', '×4.00 / overflow point・lifespan 50%'],
 		hallucinationResistance: ['最大7日', '最大14日', '最大21日', '最大30日']
 	} as const;
 	const ROOT_DETAILS = {
-		inferenceAcceleration: ['Rank 0: ×1.00', 'Rank 1: ×1.30', 'Rank 2: ×1.60', 'Rank 3: ×2.00', '最初の有効通常作業24時間のポイント生成に適用。'],
-		contextCompression: ['Rank 0: ×1.00 / overflow lifespan 0%', 'Rank 1: ×1.50 / overflow lifespan 20%', 'Rank 2: ×2.00 / overflow lifespan 35%', 'Rank 3: ×3.00 / overflow lifespan 50%'],
+		inferenceAcceleration: ['Rank 0: ×1.00', 'Rank 1: ×2.00', 'Rank 2: ×3.00', 'Rank 3: ×4.00', '最初の有効通常作業24時間のポイント生成に適用。'],
+		contextCompression: ['Rank 0: ×1.00 / overflow point・lifespan 0%', 'Rank 1: ×2.00 / overflow point・lifespan 20%', 'Rank 2: ×3.00 / overflow point・lifespan 35%', 'Rank 3: ×4.00 / overflow point・lifespan 50%'],
 		hallucinationResistance: ['Rank 0: 最大7日', 'Rank 1: 最大14日', 'Rank 2: 最大21日', 'Rank 3: 最大30日', '新しい一生の開始時の寿命は常に7日。']
 	} as const;
 

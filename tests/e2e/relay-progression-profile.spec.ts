@@ -218,7 +218,7 @@ test.describe('Relay startup', () => {
 		expect(Math.abs(profileBox!.y - speechBox!.y)).toBeLessThan(2);
 	});
 
-	test('shows overflow lifespan extension status after the Context cap', async ({ page }) => {
+	test('shows overflow point and lifespan status after the Context cap', async ({ page }) => {
 		const startTime = Date.now();
 		const secret = fixtureSecret(19);
 		const pubkey = getPublicKey(secret);
@@ -249,16 +249,16 @@ test.describe('Relay startup', () => {
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
 		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), atTerminal);
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,3');
-		await page.clock.setSystemTime(startTime + 8 * 60 * 1000);
+		await page.clock.setSystemTime(startTime + 12 * 60 * 1000);
 		await pauseAtCurrentBrowserTime(page);
 		await page.getByRole('button', { name: '作業端末' }).click();
 		const dialog = page.getByRole('dialog');
 		await expect(dialog.getByRole('heading', { name: '延命中' })).toBeVisible();
-		await expect(dialog).toContainText('ポイント蓄積は上限');
-		await expect(dialog).toContainText('寿命延長のみ継続中');
+		await expect(dialog).toContainText('通常作業は上限');
+		await expect(dialog).toContainText('ポイント・寿命延長が継続中');
 		await expect(page.locator('.lifespan-hud [data-mending-status]')).toHaveAttribute('aria-label', '延命中');
 		await expect(page.locator('.lifespan-hud [data-mending-status]')).toHaveAttribute('data-mending-icon', 'heart-plus');
-		await expect(page.locator('.lifespan-hud [data-mending-rate]')).toHaveText('0.00 pt/分+0.02h/h');
+		await expect(page.locator('.lifespan-hud [data-mending-rate]')).toHaveText('0.20 pt/分+0.02h/h');
 	});
 for (const stateKind of ['missing', 'corrupt'] as const) {
 		test(`keeps public world read available for ${stateKind} persona storage`, async ({ page }) => {

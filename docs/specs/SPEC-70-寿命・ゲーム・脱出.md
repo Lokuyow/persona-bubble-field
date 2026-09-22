@@ -83,7 +83,7 @@ clear前はactive Identityのchild secretをexportしない。Root entropyの保
 
 作業端末UIでは、受取可能な整数pointsが0ptの場合は成果回収操作をdisabledとし、1pt以上の場合だけ回収できる。これはplayable UIの操作制限であり、fractional carryを含む低レベルのcheckpoint・settlement計算は変更しない。したがって、整数pointsが0でもprocessed durationが存在する場合に回収を成立させるsettlement semanticsは維持するが、通常の作業端末UIからその操作は開始しない。
 
-通常作業とpoint生成はmaximum durationへ到達した時点で停止し、overflow時間はpointsを生成せず、推論加速budgetも消費しない。overflow中の寿命延長はRootコンテキスト圧縮Rank 0/1/2/3に応じて通常率の0/20/35/50%だけ継続する。上限超過時間を次bucketへ持ち越さず、上限到達後も同じ回収操作を行える。
+通常作業はmaximum durationへ到達した時点で停止する。overflow時間はRootコンテキスト圧縮Rank 0/1/2/3に応じて、通常point生成速度と通常寿命延長率の両方を0/20/35/50%だけ継続する。overflow中は推論加速倍率を適用せず、推論加速budgetも消費しない。上限超過時間を次bucketへ持ち越さず、上限到達後も同じ回収操作を行える。
 
 ### 寿命延長
 
@@ -95,7 +95,7 @@ clear前はactive Identityのchild secretをexportしない。Root entropyの保
 
 作業中には、作業中であること、経過時間、context使用率、受取可能ポイント、1pt未満のprogress、次の1ptまでの時間、寿命延長量等の現在状態を表示してよい。active bucketの途中成果は所持pointsへは加算されないが、端末の近くで明示的に回収した時点までの成果はpartialでも受け取れる。`prompt`、`token`、`inference`、`context`、`hallucination`、`verification` 等の用語をフレーバーとしてログに使用してよいが、それらの本当の意味を作品内で説明する必要はない。
 
-作業中の死亡判定は、保存済みの `lifespanExpiresAtMs` 単独ではなく、current bucketの未materialize寿命延長を含むeffective lifespanを基準とする。保存済みexpiryが現在時刻を過ぎていても、current bucketの寿命延長込みのeffective lifespanが残っている間は死亡しない。effective lifespanのexact expiryは死亡扱いとし、それ以後の成果回収は成立させない。死亡時にcurrent bucketへ蓄積されていた未回収pointsは所持pointsへ加算せず、通常死亡時のRun-local stateとして失う。Context cap後は通常作業とpoint生成が停止し、Rootコンテキスト圧縮Rank 0では寿命延長も停止するが、Rank 1/2/3では通常率の20/35/50%のoverflow寿命延長が継続する。それでも自然減少を完全には相殺しないため、回収せず放置してeffective lifespanが尽きれば死亡する。
+作業中の死亡判定は、保存済みの `lifespanExpiresAtMs` 単独ではなく、current bucketの未materialize寿命延長を含むeffective lifespanを基準とする。保存済みexpiryが現在時刻を過ぎていても、current bucketの寿命延長込みのeffective lifespanが残っている間は死亡しない。effective lifespanのexact expiryは死亡扱いとし、それ以後の成果回収は成立させない。死亡時にcurrent bucketへ蓄積されていた未回収pointsは所持pointsへ加算せず、通常死亡時のRun-local stateとして失う。Context cap後は通常作業が停止するが、Rootコンテキスト圧縮Rank 0/1/2/3では通常point生成速度と通常寿命延長率の0/20/35/50%が継続する。Rank 0ではpoint生成・寿命延長とも停止する。それでも自然減少を完全には相殺しないため、回収せず放置してeffective lifespanが尽きれば死亡する。
 
 JOB等の具体的な処理内容をフレーバーとして変化させてもよい。ただしprototypeではJOBごとにゲーム報酬やルールを変えない。
 
@@ -167,9 +167,9 @@ Run能力は全てLv1で開始し、Lv100を上限とする。checkpoint間はpi
 
 ### Root buildによる作業補正
 
-Run開始前にRoot PointをRoot buildへ配分し、active Run中は変更しない。通常作業のeffective Context capはRun-local容量にRootコンテキスト圧縮倍率（Rank 0/1/2/3 = ×1.00/1.50/2.00/3.00）を掛ける。cap到達前はpoints、通常の寿命延長、推論加速budget消費が発生する。cap到達後のoverflowはpointsを生成せず、推論加速budgetも消費しないが、コンテキスト圧縮Rankに応じてRun-localハルシネーション抑制の寿命延長率の0/20/35/50%だけを継続する。
+Run開始前にRoot PointをRoot buildへ配分し、active Run中は変更しない。通常作業のeffective Context capはRun-local容量にRootコンテキスト圧縮倍率（Rank 0/1/2/3 = ×1.00/2.00/3.00/4.00）を掛ける。cap到達前はpoints、通常の寿命延長、推論加速budget消費が発生する。cap到達後のoverflowは、コンテキスト圧縮Rankに応じてRun-localの通常point生成速度と通常のハルシネーション抑制による寿命延長率の0/20/35/50%を継続する。overflowでは推論加速倍率を適用せず、推論加速budgetも消費しない。
 
-推論加速Rank 0/1/2/3は、Runで最初に処理された有効通常作業24時間へpoint生成だけの×1.00/1.30/1.60/2.00を適用する。これはwall clockではなくregular work durationで消費し、overflowでは消費しない。推論加速の残budgetがregular segment途中で尽きる場合は、その時刻で通常倍率へ切り替える。ハルシネーション耐性Rank 0/1/2/3はmaximum lifespanを7/14/21/30日にするが、fresh Runの出生寿命は常に7日である。
+推論加速Rank 0/1/2/3は、Runで最初に処理された有効通常作業24時間へpoint生成だけの×1.00/2.00/3.00/4.00を適用する。これはwall clockではなくregular work durationで消費し、overflowでは消費しない。推論加速の残budgetがregular segment途中で尽きる場合は、その時刻で通常倍率へ切り替える。ハルシネーション耐性Rank 0/1/2/3はmaximum lifespanを7/14/21/30日にするが、fresh Runの出生寿命は常に7日である。
 
 作業計算は0.01pt/分の整数fixed-pointとし、point progressは60,000,000 ticksを1ptとしてBigInt等で正確に計算する。persistするowned pointsとfractional carryは整数である。work projection・checkpoint・collection・寿命死亡判定はいずれもeffective lifespanを使用し、extensionが実際に生成されないoverflow時間だけでmaximum lifespanのcapを未来へ無料で移動させない。
 
@@ -213,7 +213,7 @@ Identityにはgeneration、account index、pubkey、characterId、`identityCreat
 
 Runにはrun number、monotonic revision、started timestamp、Identity reference、Run-local game state、開始時にfreezeしたRoot buildを持たせる。寿命、points、abilities、`mendingJob`はRun-localであり、mending start/collection、能力強化、normal clear、寿命死亡transitionはactive Runのrevisionを再確認するCASとして扱う。profile publication markerの更新はRun revisionを進めない。
 
-正常なclear 1回につきRoot Pointを1つ加算する。Root PointはIdentity変更、fresh Run、死亡でも失わず、死亡やrealtime eventでは増えない。Root PointはRoot buildへ配分し、usable RPは`min(総RP, 9)`、各能力Rankは0〜3、Run開始時はusable RPを全て配分する。推論加速Rank 0/1/2/3は最初の有効通常作業24時間へ×1.00/1.30/1.60/2.00、コンテキスト圧縮Rank 0/1/2/3は通常容量へ×1.00/1.50/2.00/3.00を適用し、overflowの寿命延長率は0/20/35/50%、ハルシネーション耐性Rank 0/1/2/3は最大寿命を7/14/21/30日にする。出生時は常に7日である。Root buildはRun開始前にのみ配分・再配分でき、active Run中はfreezeする。RP9を超える余剰用途、高周回point sink、True End triggerは未決定とする。
+正常なclear 1回につきRoot Pointを1つ加算する。Root PointはIdentity変更、fresh Run、死亡でも失わず、死亡やrealtime eventでは増えない。Root PointはRoot buildへ配分し、usable RPは`min(総RP, 9)`、各能力Rankは0〜3、Run開始時はusable RPを全て配分する。推論加速Rank 0/1/2/3は最初の有効通常作業24時間へ×1.00/2.00/3.00/4.00、コンテキスト圧縮Rank 0/1/2/3は通常容量へ×1.00/2.00/3.00/4.00を適用し、overflowのpoint生成速度と寿命延長率は0/20/35/50%（overflowでは推論加速倍率を適用せず、budgetも消費しない）、ハルシネーション耐性Rank 0/1/2/3は最大寿命を7/14/21/30日にする。出生時は常に7日である。Root buildはRun開始前にのみ配分・再配分でき、active Run中はfreezeする。RP9を超える余剰用途、高周回point sink、True End triggerは未決定とする。
 
 clear後はcurrent Identityのnsec取得、同じIdentityのfresh Runまたは別Identityの選択を可能にする。cleared Identityへ戻る場合は同じkey/pubkey/characterを維持してRun numberだけを増やし、Run-local stateを初期化する。clear済みIdentityの再利用回数に上限は設けない。True End、Root mnemonicとIdentity Manifestの受け渡しは別途実装する。
 
