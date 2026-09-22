@@ -854,24 +854,56 @@ test.describe('DEV World Sandbox', () => {
 		expect(await page.evaluate(() => window.getSelection()?.toString() ?? '')).toBe('');
 
 		const liveText = page.locator('.bubble-normal[data-speech-type="shout"] .bubble-content');
+		const fieldViewport = page.locator('.field-viewport');
 		const dragSelect = async (locator: Locator): Promise<string> => {
-			const textRect = await locator.evaluate((element) => {
-				const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
-				const rects: DOMRect[] = [];
-				while (walker.nextNode()) {
-					const textNode = walker.currentNode;
-					if (!textNode.textContent?.trim()) continue;
-					const range = document.createRange();
-					range.selectNodeContents(textNode);
-					for (const rect of range.getClientRects()) {
-						if (rect.width > 4 && rect.height > 4) rects.push(rect);
-					}
-					range.detach();
-				}
-				const rect = rects.sort((left, right) => right.width - left.width)[0];
-				if (!rect) throw new Error('Expected selectable text glyphs to be visible.');
-				return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
-			});
+			await expect(fieldViewport).toHaveClass(/initial-field-geometry-ready/);
+			let textRect: { x: number; y: number; width: number; height: number } | undefined;
+			await expect.poll(async () => {
+				const sample = await locator.evaluate(async (element) => {
+					const read = () => {
+						const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+						const rects: DOMRect[] = [];
+						while (walker.nextNode()) {
+							const textNode = walker.currentNode;
+							if (!textNode.textContent?.trim()) continue;
+							const range = document.createRange();
+							range.selectNodeContents(textNode);
+							for (const rect of range.getClientRects()) {
+								if (rect.width > 4 && rect.height > 4) rects.push(rect);
+							}
+							range.detach();
+						}
+						const glyph = rects.sort((left, right) => right.width - left.width)[0];
+						const bubble = element.closest<HTMLElement>('.bubble')?.getBoundingClientRect();
+						if (!glyph) return null;
+						return {
+							text: { x: glyph.x, y: glyph.y, width: glyph.width, height: glyph.height },
+							bubble: bubble && { x: bubble.x, y: bubble.y, width: bubble.width, height: bubble.height }
+						};
+					};
+					await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+					const first = read();
+					await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+					const second = read();
+					if (!first || !second) return null;
+					const values = [
+						first.text.x - second.text.x,
+						first.text.y - second.text.y,
+						first.text.width - second.text.width,
+						first.text.height - second.text.height,
+						...(first.bubble && second.bubble ? [
+							first.bubble.x - second.bubble.x,
+							first.bubble.y - second.bubble.y,
+							first.bubble.width - second.bubble.width,
+							first.bubble.height - second.bubble.height
+						] : [])
+					];
+					return { stable: values.every((value) => Math.abs(value) <= 0.1), text: second.text };
+				});
+				if (sample?.stable) textRect = sample.text;
+				return sample?.stable ?? false;
+			}).toBe(true);
+			if (!textRect) throw new Error('Expected stable selectable text glyph geometry.');
 			await page.evaluate(() => window.getSelection()?.removeAllRanges());
 			const inset = Math.min(2, Math.max(0.5, textRect.width / 10));
 			const y = textRect.y + textRect.height / 2;
