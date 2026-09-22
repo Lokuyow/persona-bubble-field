@@ -403,15 +403,23 @@ test.describe('Relay startup', () => {
 		await pauseAtCurrentBrowserTime(page);
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { deferPositionPublishes(): void } }).__relayStartupTest.deferPositionPublishes());
 
+		const canonicalPosition = await page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`).getAttribute('data-position');
+		expect(canonicalPosition).toMatch(/^\d+,\d+$/);
 		await advanceToRuntimeDeath(page, startTime + 30_000);
 		const presentation = page.locator('[data-death-presentation]');
+		const tombstone = page.locator('[data-death-presentation-tombstone]');
 		await expect(presentation).toHaveAttribute('data-death-phase', 'intro');
+		await expect(presentation).toBeVisible();
+		await expect(page.locator('.field-viewport.death-presentation-active')).toHaveCount(1);
+		await expect(page.locator('.participant[data-self="true"]')).toHaveCount(0);
+		await expect(tombstone).toHaveCount(1);
+		await expect(tombstone).toHaveAttribute('data-death-presentation-tombstone-position', canonicalPosition!);
 		await expect.poll(async () => (await relayState(page)).state.published.filter((event) =>
 			event.kind === WORLD_STATE_KIND && event.pubkey === pubkey && event.tags.some((tag) => tag[0] === 'd' && tag[1]?.endsWith(':exit'))
 		).length).toBeGreaterThan(0);
-		await expect(presentation).toBeVisible();
 
 		await page.clock.runFor(2_500);
+		await expect(presentation).toHaveAttribute('data-death-phase', 'last-words');
 		await presentation.locator('textarea').fill('delayed terminal exit');
 		await presentation.getByRole('button', { name: '残して進む' }).click();
 		await expect(presentation.getByRole('button', { name: '残して進む' })).toBeDisabled();
