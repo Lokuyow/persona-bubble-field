@@ -284,7 +284,9 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	let traceReadSnapshot = $state<TraceReadSnapshot>({ readRootIds: [], unreadReplyRootIds: [], hasUnreadReplies: false });
 	let composerPreferredHeight = $state<number | null>(null);
 	let composerKeyboardInset = $state(0);
-	let worldSession: ReturnType<typeof createWorldReadSession> | null = null;
+	let worldReader: ReturnType<typeof createWorldReadSession> | null = null;
+	// Only an attached self (or a directly signed session) owns persona writes.
+	let worldSession = $state.raw<ReturnType<typeof createWorldReadSession> | null>(null);
 	const runtimeMode: 'relay' | 'dev' = initialDevWorldSandboxEnabled ? 'dev' : 'relay';
 	const devWorldSandboxEnabled = initialDevWorldSandboxEnabled;
 	const devRiftStaticPhase = devScenario?.fixture.kind === 'rift-static' ? devScenario.fixture.phase : null;
@@ -454,8 +456,8 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	let selfLogicalPosition = $derived(selfPresence?.position ?? null);
 	let selfIsActive = $derived(selfPresence?.status === 'active');
 	let mendingProjection = $derived(personaSnapshot ? projectMending(personaSnapshot.gameState, mendingNowMs, personaSnapshot.activeRun.rootBuild) : null);
-	let canUseMendingTerminal = $derived(!devWorldSandboxEnabled && Boolean(personaSnapshot && selfIsActive && selfLogicalPosition && isWithinFacilityInteractionRange(selfLogicalPosition)));
-	let canUseAdjustmentTerminal = $derived(!devWorldSandboxEnabled && Boolean(personaSnapshot && selfIsActive && selfLogicalPosition && isWithinFacilityInteractionRange(selfLogicalPosition, ADJUSTMENT_TERMINAL)));
+	let canUseMendingTerminal = $derived(!devWorldSandboxEnabled && !personaLifecycleTransition && Boolean(worldSession && personaSnapshot && selfIsActive && selfLogicalPosition && isWithinFacilityInteractionRange(selfLogicalPosition)));
+	let canUseAdjustmentTerminal = $derived(!devWorldSandboxEnabled && !personaLifecycleTransition && Boolean(worldSession && personaSnapshot && selfIsActive && selfLogicalPosition && isWithinFacilityInteractionRange(selfLogicalPosition, ADJUSTMENT_TERMINAL)));
 	let clearBlockedReason = $derived(!personaSnapshot ? 'Runがありません' : personaSnapshot.gameState.points < 100_000 ? '所持ポイントが100,000pt未満です' : isPersonaExpired(personaSnapshot.gameState, mendingNowMs, personaSnapshot.activeRun.rootBuild) ? '寿命が尽きています' : pendingRealtimeSettlement ? '綻びのsettlementが未完了です' : null);
 	let traceRootCells = $derived(groupTraceRoots(effectiveTraceRoots));
 	// Keep grouped roots intact for the Trace data flow, but let fixed facilities
@@ -578,10 +580,10 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		const ready = tracePresentationReady;
 		const layout = traceTreeLayout;
 		const ghost = traceRootGhost;
-		const session = worldSession;
+		const session = worldReader;
 		if (!ready || !layout || !ghost || !session || typeof document === 'undefined') return;
 		void tick().then(() => {
-			if (worldSession !== session || !tracePresentationReady) return;
+			if (worldReader !== session || !tracePresentationReady) return;
 			const rootGhost = document.querySelector(`[data-trace-ghost-root-id="${ghost.event.id}"]`);
 			const rootBubble = document.querySelector(`[data-trace-root-id="${ghost.event.id}"]`);
 			if (isActuallyPresented(rootGhost) && isActuallyPresented(rootBubble)) {
@@ -930,8 +932,17 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		window.addEventListener('pointerdown', unlockSound, { passive: true });
 		window.addEventListener('keydown', unlockSound, { passive: true });
 		let startRequested = false;
-		let session: ReturnType<typeof createWorldReadSession> | null = null;
 		let currentSessionStartup: { session: ReturnType<typeof createWorldReadSession>; promise: Promise<void> } | null = null;
+		let localLifecycleReady = false;
+		let pendingBootstrapMessages: ParsedWorldMessage[] | null = null;
+		const restoreMeasuredBootstrapConversation = () => {
+			if (!pendingBootstrapMessages || !localLifecycleReady || !initialFieldGeometryReady) return;
+			const messages = pendingBootstrapMessages;
+			pendingBootstrapMessages = null;
+			// The reader may have projected presence before the restored self id existed.
+			syncVisualToCanonical();
+			restoreBootstrapConversation(messages, presenceState, Date.now());
+		};
 		chatterComponent.initialize(window.innerWidth);
 		const reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
 		prefersReducedMotion = reducedMotionQuery.matches;
@@ -1018,10 +1029,14 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			authorizationRunNumber: number | null = signer ? personaSnapshot?.activeRun.runNumber ?? null : null,
 			realtimeStartImmediately: boolean | undefined = undefined
 		): Promise<void> => {
-			const previousSession = session;
-			session = null;
+			const previousSession = worldReader;
+			worldReader = null;
+			pendingBootstrapMessages = null;
 			if (worldSession === previousSession) worldSession = null;
 			previousSession?.dispose();
+			selfPositionWriteState = { kind: 'unavailable' };
+			selfMessageAvailability = { kind: 'unavailable' };
+			entryRetryable = false;
 			riftRealtimeBootstrapComplete = devRiftFixtureEnabled;
 			let nextSession!: ReturnType<typeof createWorldReadSession>;
 			nextSession = createWorldReadSession({
@@ -1037,33 +1052,36 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 					onEvent: handleRealtimeEnvelope,
 					onControl: handleRealtimeControl,
 					onBootstrapComplete: () => {
-						if (!mounted || session !== nextSession) return;
+						if (!mounted || worldReader !== nextSession) return;
 						riftRealtimeBootstrapComplete = true;
 						selectBootstrapRealtimeControl();
 						reconcileRiftSession(Date.now());
 					},
 					onStatusChanged: (next) => {
+						if (!mounted || worldReader !== nextSession) return;
 						realtimeStatus = next;
 						if (next === 'inactive') riftRealtimeBootstrapComplete = false;
 					}
 				},
 				...(signer && authorizationRunNumber !== null ? {
 					authorizeSelfWrite: () => authorizeActiveRun({ identity: signer.identity, runNumber: authorizationRunNumber }),
-						 onSelfWriteAuthorizationLost: () => {
-							if (!personaLifecycleTransition && !deathTransitionInFlight) window.location.reload();
+					onSelfWriteAuthorizationLost: () => {
+						if (!personaLifecycleTransition && !deathTransitionInFlight) window.location.reload();
 					}
 				} : {}),
 				onPresenceChanged: acceptPresence,
 				onLiveMessage: receiveLiveMessage,
-				onTimelineMessage: receiveTimelineMessage,
+				onTimelineMessage: receiveSessionTimelineMessage,
 				onEffectiveTraceRootsChanged: setEffectiveTraceRoots,
 				onTraceReadSnapshotChanged: (snapshot) => { traceReadSnapshot = snapshot; },
 				onTraceConversationChanged: setTraceConversation,
 				onStatusChanged: (status) => {
+					if (!mounted || worldReader !== nextSession) return;
 					connectionStatus = status;
 					if (status.kind === 'failed') setComposerTerminalError(new Error(status.message));
 				},
 				onSelfPositionWriteStateChanged: (state) => {
+					if (!mounted || worldReader !== nextSession) return;
 					selfPositionWriteState = state;
 					if ('operation' in state && state.operation === 'entry') {
 						if (state.kind === 'retryable') {
@@ -1073,12 +1091,12 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 					}
 				},
 				onSelfMessageAvailabilityChanged: (state) => {
+					if (!mounted || worldReader !== nextSession) return;
 					selfMessageAvailability = state;
-					if (state.kind === 'ready') resolvePendingComposerSubmission();
+					if (state.kind === 'ready' && worldSession === nextSession) resolvePendingComposerSubmission();
 				}
 			});
-			session = nextSession;
-			worldSession = nextSession;
+			worldReader = nextSession;
 			traceConversationController = nextSession;
 			let resolveSessionStartup!: () => void;
 			let rejectSessionStartup!: (error: unknown) => void;
@@ -1090,16 +1108,22 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			currentSessionStartup = { session: nextSession, promise: sessionStartup };
 			try {
 				const bootstrap = await nextSession.start();
-				if (!mounted || session !== nextSession) {
+				if (!mounted || worldReader !== nextSession) {
 					nextSession.dispose();
 					return;
 				}
-				restoreBootstrapConversation(bootstrap.messages, bootstrap.presence, Date.now());
 				recentMessageTimeline = createRecentMessageTimeline([
 					...recentMessageTimeline,
 					...bootstrap.timelineMessages
 				]);
+				pendingBootstrapMessages = [...bootstrap.messages];
+				restoreMeasuredBootstrapConversation();
 				nextSession.completeBootstrap();
+				if (signer) {
+					worldSession = nextSession;
+					personaLifecycleTransition = false;
+					if (selfMessageAvailability.kind === 'ready') resolvePendingComposerSubmission();
+				}
 				resolveSessionStartup();
 				if (signer && !personaLifecycleTransition) void nextSession.enterSelf();
 				if (characterProfilePublication && signer && !personaLifecycleTransition) {
@@ -1112,14 +1136,77 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 				}
 			} catch (error) {
 				rejectSessionStartup(error);
-				if (session === nextSession) setComposerTerminalError(new Error('Relay startup failed.'));
+				if (worldReader === nextSession) setComposerTerminalError(new Error('Relay startup failed.'));
 			}
 		};
-		startReadOnlyWorld = () => { void startReadSession(null); };
+		const receiveSessionTimelineMessage = (message: ParsedWorldMessage) => {
+			receiveTimelineMessage(message);
+			if (pendingBootstrapMessages && !pendingBootstrapMessages.some((pending) => pending.id === message.id)) {
+				pendingBootstrapMessages.push(message);
+			}
+		};
+		startReadOnlyWorld = () => { void startReadSession(null, null, null, false); };
+		const promoteOrStartSignedWorld = async (
+			persona: PersonaSnapshot,
+			characterProfilePublication: PreparedCharacterProfilePublication | null,
+			restored = false
+		): Promise<void> => {
+			const anonymousSession = worldReader;
+			const anonymousStartup = currentSessionStartup;
+			if (anonymousSession && anonymousStartup?.session === anonymousSession && !worldSession) {
+				try {
+					await anonymousStartup.promise;
+					if (restored && isPersonaExpired(persona.gameState, Date.now(), persona.activeRun.rootBuild)) {
+						personaLifecycleTransition = false;
+						await beginDeathTransition(persona, null, undefined, false);
+						return;
+					}
+					if (worldReader !== anonymousSession || anonymousSession.getStatus().kind === 'failed') throw new Error('Anonymous world session is unavailable.');
+					await anonymousSession.attachSelf({
+						signer: persona.signer,
+						authorizeSelfWrite: () => authorizeActiveRun({ identity: persona.signer.identity, runNumber: persona.activeRun.runNumber }),
+						onSelfWriteAuthorizationLost: () => {
+							if (!personaLifecycleTransition && !deathTransitionInFlight) window.location.reload();
+						}
+					});
+					if (worldReader !== anonymousSession) throw new Error('World session changed during self attachment.');
+					worldSession = anonymousSession;
+					personaLifecycleTransition = false;
+					if (selfMessageAvailability.kind === 'ready') resolvePendingComposerSubmission();
+					mendingNowMs = Date.now();
+					updateLifespanHud(mendingNowMs, true);
+					await anonymousSession.enterSelf();
+					if (characterProfilePublication) {
+						void publishCharacterProfile(characterProfilePublication, (event) => {
+							if (personaLifecycleTransition || worldSession !== anonymousSession) {
+								return Promise.reject(new Error('Persona is unavailable for publishing.'));
+							}
+							return anonymousSession.publish(event);
+						}).catch(() => {});
+					}
+					return;
+				} catch {
+					// A failed or superseded anonymous startup cannot be promoted.
+				}
+			}
+			// The anonymous startup error belongs to the superseded attempt, not this fresh signed session.
+			if (restored && isPersonaExpired(persona.gameState, Date.now(), persona.activeRun.rootBuild)) {
+				personaLifecycleTransition = false;
+				await beginDeathTransition(persona, null, undefined, false);
+				return;
+			}
+			composerStartupError = null;
+			const startup = startReadSession(persona.signer, characterProfilePublication, persona.activeRun.runNumber, true);
+			// The signed session replaces the reader synchronously before its first await.
+			mendingNowMs = Date.now();
+			updateLifespanHud(mendingNowMs, true);
+			await startup;
+		};
 		startSelectedWorld = async (persona: PersonaSnapshot): Promise<void> => {
 			personaSnapshot = persona;
 			pendingRootPoints = persona.rootPoints;
 			selfSigner = persona.signer;
+			if (initialFieldGeometryReady) syncVisualToCanonical();
 			pendingIdentitySelection = null;
 			composerStartupError = null;
 			entryRetryable = false;
@@ -1147,54 +1234,14 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 					createdAt: Math.floor(persona.signer.identityCreatedAtMs / 1000)
 				});
 			}
-			const anonymousSession = session;
-			const anonymousStartup = currentSessionStartup;
-			if (anonymousSession && anonymousStartup?.session === anonymousSession) {
-				try {
-					await anonymousStartup.promise;
-					if (session !== anonymousSession || anonymousSession.getStatus().kind === 'failed') throw new Error('Anonymous world session is unavailable.');
-					await anonymousSession.attachSelf({
-						signer: persona.signer,
-						authorizeSelfWrite: () => authorizeActiveRun({ identity: persona.signer.identity, runNumber: persona.activeRun.runNumber }),
-						onSelfWriteAuthorizationLost: () => {
-							if (!personaLifecycleTransition && !deathTransitionInFlight) window.location.reload();
-						}
-					});
-					if (session !== anonymousSession) throw new Error('World session changed during self attachment.');
-					personaLifecycleTransition = false;
-					mendingNowMs = Date.now();
-					updateLifespanHud(mendingNowMs, true);
-					await anonymousSession.enterSelf();
-					if (characterProfilePublication) {
-						void publishCharacterProfile(characterProfilePublication, (event) => {
-							if (personaLifecycleTransition || worldSession !== anonymousSession) {
-								return Promise.reject(new Error('Persona is unavailable for publishing.'));
-							}
-							return anonymousSession.publish(event);
-						}).catch(() => {});
-					}
-					return;
-				} catch {
-					// A failed or superseded anonymous startup cannot be promoted.
-				}
-			}
-			// The anonymous startup error belongs to the superseded attempt, not this fresh signed session.
-			composerStartupError = null;
-			const startup = startReadSession(persona.signer, characterProfilePublication, persona.activeRun.runNumber, true);
-			// startReadSession installs the new session synchronously before its first await.
-			// Release the selection guard only after the signed session owns the page state.
-			personaLifecycleTransition = false;
-			mendingNowMs = Date.now();
-			updateLifespanHud(mendingNowMs, true);
-			await startup;
+			await promoteOrStartSignedWorld(persona, characterProfilePublication);
 		};
 
 		const begin = async () => {
-			if (devWorldSandboxEnabled || startRequested || !hasUsableViewport()) return;
+			if (devWorldSandboxEnabled || startRequested) return;
 			startRequested = true;
 			const transitionNotice = consumeRunTransitionNotice();
 			let characterProfilePublication: PreparedCharacterProfilePublication | null = null;
-			let realtimeStartImmediately = false;
 			try {
 				const personaResult = await loadOrCreateLifecycle();
 				if (personaResult.kind === 'created' || personaResult.kind === 'selecting') {
@@ -1211,17 +1258,18 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 					personaSnapshot = personaResult.persona;
 					pendingRootPoints = personaResult.persona.rootPoints;
 					selfSigner = personaResult.persona.signer;
+					if (initialFieldGeometryReady) syncVisualToCanonical();
 					const ledger = await getRealtimeSettlementLedger(personaResult.persona);
 					const pendingInstanceIds = (ledger?.pendingInstanceIds ?? [])
 						.filter((instanceId) => getRiftScheduleForInstance(instanceId, Date.now()) !== null);
 					realtimeRecoveryInstanceIds.clear();
 					pendingRealtimeSettlement = (ledger?.pendingInstanceIds.length ?? 0) > 0;
 					for (const instanceId of pendingInstanceIds) realtimeRecoveryInstanceIds.add(instanceId);
-					realtimeStartImmediately = true;
 					mendingNowMs = Date.now();
 					updateLifespanHud(Date.now(), true);
 					if (isPersonaExpired(personaResult.persona.gameState, Date.now(), personaResult.persona.activeRun.rootBuild)) {
-						const result = await beginDeathTransition(personaResult.persona, session, undefined, false);
+						personaLifecycleTransition = false;
+						const result = await beginDeathTransition(personaResult.persona, null, undefined, false);
 						if (result === 'reloaded' || result === 'failed') return;
 					}
 					if (selfSigner.characterProfileRevision !== CURRENT_CHARACTER_PROFILE_REVISION) {
@@ -1241,8 +1289,13 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 				}
 			} catch {
 				setComposerTerminalError(new Error('Persona is unavailable for publishing.'));
+				localLifecycleReady = true;
+				restoreMeasuredBootstrapConversation();
+				return;
 			}
-			await startReadSession(selfSigner, characterProfilePublication, personaSnapshot?.activeRun.runNumber ?? null, realtimeStartImmediately);
+			localLifecycleReady = true;
+			restoreMeasuredBootstrapConversation();
+			if (personaSnapshot && selfSigner) await promoteOrStartSignedWorld(personaSnapshot, characterProfilePublication, true);
 		};
 
 		const updateViewport = () => {
@@ -1263,20 +1316,24 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 				syncVisualToCanonical();
 				// Reveal only with the visual projection of the measured geometry.
 				initialFieldGeometryReady = true;
+				restoreMeasuredBootstrapConversation();
 			});
-			if (!devWorldSandboxEnabled) void begin();
 		};
 		const observer = new ResizeObserver(updateViewport);
 		observer.observe(viewportElement!);
 		updateViewport();
+		if (!devWorldSandboxEnabled) {
+			void startReadSession(null, null, null, false);
+			void begin();
+		}
 		const refreshRuntime = async () => {
 			if (expiryCheckInFlight || deathTransitionInFlight) return;
 			expiryCheckInFlight = true;
 			try {
-				const expiryResult = await checkPersonaExpiry(session);
+				const expiryResult = await checkPersonaExpiry(worldSession);
 				if (expiryResult === 'reloaded' || expiryResult === 'presenting') return;
 				if (expiryResult === 'failed') {
-					await startReadSession(null);
+					await startReadSession(null, null, null, false);
 					return;
 				}
 				const now = Date.now();
@@ -1285,7 +1342,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 				if (!devRiftPlaygroundEnabled) reconcileRiftSession(devRiftFixtureEnabled ? initialRiftNowMs : now);
 				if (!devWorldSandboxEnabled && riftEventEnabled) void worldSession?.startRealtime();
 				if (!devWorldSandboxEnabled && riftSchedule.phase === 'ended') maybeStopRealtime();
-				const nextPresence = session?.refresh(now);
+				const nextPresence = worldReader?.refresh(now);
 				if (nextPresence) {
 					conversationState = applyVisibility(conversationState, projectFrontendPresence({ presence: nextPresence, selectedCharacterId, selfProjectionId,
 						geometry: { cellSize, fieldAreaBounds, cameraWorldBounds: fieldArtworkBounds }, colors: colorByPubkey }).visibleParticipantIds);
@@ -1320,11 +1377,12 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			if (startReadOnlyWorld) startReadOnlyWorld = null;
 			if (startSelectedWorld) startSelectedWorld = null;
 			currentSessionStartup = null;
-			session?.dispose();
+			worldReader?.dispose();
 			devTraceConversationRuntime?.dispose();
 			devTraceConversationRuntime = null;
 			traceConversationController = null;
-			if (worldSession === session) worldSession = null;
+			worldReader = null;
+			worldSession = null;
 		};
 	});
 
@@ -1390,10 +1448,6 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 
 	function mergedBubbleTone(members: readonly Participant[]): string {
 		return participantTone(members[0] ?? { color: 'lavender' });
-	}
-
-	function hasUsableViewport(): boolean {
-		return viewportSize.width > 0 && viewportSize.height > 0;
 	}
 
 	function acceptPresence(nextPresence: PresenceState): void {
@@ -1514,7 +1568,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 
 	async function clearCurrentRun(): Promise<void> {
 		const expected = personaSnapshot;
-		if (!expected || clearMutationInFlight) return;
+		if (!expected || !worldSession || personaLifecycleTransition || clearMutationInFlight) return;
 		clearMutationInFlight = true;
 		const currentSession = worldSession;
 		stopPersonaInteractions('Run cleared.');
@@ -1609,13 +1663,13 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	}
 
 	function hasLiveMendingProximity(): boolean {
-		return Boolean(!devWorldSandboxEnabled && personaSnapshot && selfIsActive && selfLogicalPosition &&
+		return Boolean(!devWorldSandboxEnabled && !personaLifecycleTransition && worldSession && personaSnapshot && selfIsActive && selfLogicalPosition &&
 			isWithinFacilityInteractionRange(selfLogicalPosition));
 	}
 
 	async function mutateAbility(key: PersonaAbilityKey): Promise<void> {
 		const expected = personaSnapshot;
-		if (!expected || abilityMutationInFlight || !canUseAdjustmentTerminal) {
+		if (!expected || !worldSession || personaLifecycleTransition || abilityMutationInFlight || !canUseAdjustmentTerminal) {
 			closeAdjustmentTerminal();
 			return;
 		}
@@ -1659,7 +1713,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 
 	async function mutateMending(operation: 'start' | 'collect'): Promise<void> {
 		const expected = personaSnapshot;
-		if (!expected || mendingMutationInFlight || !hasLiveMendingProximity()) {
+		if (!expected || !worldSession || personaLifecycleTransition || mendingMutationInFlight || !hasLiveMendingProximity()) {
 			closeMendingTerminal();
 			return;
 		}
@@ -2069,8 +2123,8 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 
 	async function loadComposerPreview(targetId: string) {
 		const target = traceReplyMode.target;
-		if (target?.targetId !== targetId || !worldSession) return null;
-		const event = await worldSession.getTracePreviewEvent(target.rootId, targetId);
+		if (target?.targetId !== targetId || !worldReader) return null;
+		const event = await worldReader.getTracePreviewEvent(target.rootId, targetId);
 		if (!event) return null;
 		const character = requireWorldCharacterFromPubkey(event.pubkey);
 		return {
@@ -2380,8 +2434,8 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		currentSession: ReturnType<typeof createWorldReadSession> | null
 	): Promise<'unchanged' | 'reloaded' | 'presenting' | 'failed'> {
 		// Startup restores the expired run through the explicit non-presenting path.
-		// A runtime refresh must own a live session before it can start presentation;
-		// otherwise it can race startup while the session is intentionally null.
+		// A runtime refresh must own a persona writer before it can start presentation;
+		// the early anonymous reader cannot publish a terminal exit.
 		if (devWorldSandboxEnabled || personaLifecycleTransition || !personaSnapshot || !currentSession) return 'unchanged';
 		if (!isPersonaExpired(personaSnapshot.gameState, Date.now(), personaSnapshot.activeRun.rootBuild)) return 'unchanged';
 		return beginDeathTransition(personaSnapshot, currentSession);

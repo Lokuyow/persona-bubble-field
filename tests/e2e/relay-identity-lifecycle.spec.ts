@@ -185,7 +185,14 @@ test.describe('Relay startup', () => {
 			relay.releaseMetadata(); relay.releasePrimary();
 		});
 		await expect(page.locator(`.participant[data-participant-id="${events.message.pubkey}"]`)).toBeVisible();
-		await expect(page.locator(`.bubble[data-bubble-id="${events.message.id}"]`)).toBeVisible();
+		// The first fixture was created before two navigations and may naturally
+		// expire while this failure path runs. Verify the read-only live path with
+		// fresh speech rather than extending its product display lifetime.
+		const freshMessage = testEvents().message;
+		await page.evaluate((message) => (window as typeof window & {
+			__relayStartupTest: { injectMessage(event: object): void }
+		}).__relayStartupTest.injectMessage(message), freshMessage);
+		await expect(page.locator(`.bubble[data-bubble-id="${freshMessage.id}"]`)).toBeVisible();
 		await expect(page.locator('.participant[data-self="true"]')).toHaveCount(0);
 		expect((await publishedMessages(page))).toHaveLength(0);
 		await expect.poll(() => page.evaluate(() => (window as typeof window & {
