@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
-import { openDevWorld, openClockedDevWorld, fieldOwnedBlankPoint, profileTrigger, profileDialog } from './helpers/devWorldHarness';
+import { openDevWorld, openClockedDevWorld, openDevTraceWorld, fieldOwnedBlankPoint, profileTrigger, profileDialog } from './helpers/devWorldHarness';
 
 test.describe('DEV World Sandbox', () => {
 	test.beforeEach(async ({ page }) => {
@@ -33,7 +33,7 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '8,3');
 		await expect(profileDialog(page)).toBeHidden();
 
-		await page.goto('/?devWorld=1&devScenario=trace-markers');
+		await openDevTraceWorld(page, 'trace-markers');
 		const cellTrigger = page.locator('[data-cell-position="8,4"]');
 		const cellBox = await cellTrigger.boundingBox();
 		if (!cellBox) throw new Error('Expected the trace cell selection trigger to be visible.');
@@ -47,7 +47,7 @@ test.describe('DEV World Sandbox', () => {
 	});
 
 	test('starts mouse movement from the investigated root author ghost', async ({ page }) => {
-		await page.goto('/?devWorld=1&devScenario=trace-markers');
+		await openDevTraceWorld(page, 'trace-markers');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 		const traceCell = page.locator('[data-cell-position="8,4"]');
 		await expect(traceCell).toHaveAttribute('aria-label', '痕跡を調べる');
@@ -83,7 +83,7 @@ test.describe('DEV World Sandbox', () => {
 	});
 
 	test('keeps tap selection separate from pointer movement and preserves participant trace menus', async ({ page }) => {
-		await page.goto('/?devWorld=1&devScenario=trace-markers');
+		await openDevTraceWorld(page, 'trace-markers');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 		await page.locator('[data-cell-position="8,4"]').click();
 		await expect(page.getByRole('menu', { name: 'Cell actions' })).toHaveCount(0);

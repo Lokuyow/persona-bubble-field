@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
-import { readMergedBubbleGeometry, fieldOwnedBlankPoint, profileDialog } from './helpers/devWorldHarness';
+import { readMergedBubbleGeometry, fieldOwnedBlankPoint, openDevTraceWorld, profileDialog } from './helpers/devWorldHarness';
 
 
 test.describe('DEV World Sandbox', () => {
@@ -95,7 +95,7 @@ test.describe('DEV World Sandbox', () => {
 		expect(await dragSelect(page.locator('.timeline-content').first())).not.toBe('');
 		expect(await dragSelect(page.locator('.timeline-name').first())).not.toBe('');
 
-		await page.goto('/?devWorld=1&devScenario=trace-replies');
+		await openDevTraceWorld(page, 'trace-replies');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 		await page.locator('[data-cell-position="8,4"]').click();
 		const traceRoot = page.locator('.trace-root-bubble');
@@ -321,7 +321,7 @@ test.describe('DEV World Sandbox', () => {
 
 	test('compacts Trace root and replies on mobile and restores desktop values after resize', async ({ page }) => {
 		await page.setViewportSize({ width: 390, height: 844 });
-		await page.goto('/?devWorld=1&devScenario=trace-replies');
+		await openDevTraceWorld(page, 'trace-replies');
 		await page.locator('[data-cell-position="8,4"]').click();
 		await expect(page.locator('.trace-root-card')).toHaveAttribute('data-trace-geometry-ready', 'ready');
 		const root = page.locator('.trace-root-bubble');

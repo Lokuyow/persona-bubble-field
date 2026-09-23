@@ -19,6 +19,12 @@ export async function openDevWorld(page: Page): Promise<void> {
 	await expect(page.locator('.lifespan-hud')).toHaveCount(0);
 }
 
+export async function openDevTraceWorld(page: Page, scenario: 'trace-markers' | 'trace-replies' | 'trace-inactive-self'): Promise<void> {
+	await page.goto(`/?devWorld=1&devScenario=${scenario}`);
+	await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+	await expect(page.locator('main')).toHaveAttribute('data-trace-runtime', 'dev');
+}
+
 export async function openClockedDevWorld(page: Page): Promise<void> {
 	await page.clock.install({ time: Date.now() });
 	await openDevWorld(page);

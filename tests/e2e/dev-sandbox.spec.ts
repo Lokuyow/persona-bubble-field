@@ -1,7 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { installFieldFrameSampling, sampleRenderedField } from './helpers/fieldFrames';
-import { openDevWorld } from './helpers/devWorldHarness';
+import { openDevTraceWorld, openDevWorld } from './helpers/devWorldHarness';
 
 
 test.describe('DEV World Sandbox', () => {
@@ -29,7 +29,7 @@ test.describe('DEV World Sandbox', () => {
 
 	test('keeps desktop Trace DEV controls and Chatter actions independently operable', async ({ page }) => {
 		await page.setViewportSize({ width: 900, height: 720 });
-		await page.goto('/?devWorld=1&devScenario=trace-replies');
+		await openDevTraceWorld(page, 'trace-replies');
 		const controls = page.getByLabel('DEV sandbox controls');
 		const chatter = page.getByLabel('Chatter', { exact: true });
 		const boxes = await Promise.all([controls.boundingBox(), chatter.boundingBox()]);

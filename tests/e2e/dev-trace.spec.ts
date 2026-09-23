@@ -1,7 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { installFieldFrameSampling, sampleRenderedField } from './helpers/fieldFrames';
-import { openDevWorld, fieldOwnedBlankPoint, installTraceGeometryFrameSampling, sampleTraceGeometryFrames, profileTrigger, profileDialog } from './helpers/devWorldHarness';
+import { openDevTraceWorld, openDevWorld, fieldOwnedBlankPoint, installTraceGeometryFrameSampling, sampleTraceGeometryFrames, profileTrigger, profileDialog } from './helpers/devWorldHarness';
 
 
 test.describe('DEV World Sandbox', () => {
@@ -13,7 +13,7 @@ test.describe('DEV World Sandbox', () => {
 		test(`shows measured Trace special geometry from its first visible frame on ${viewport.name}`, async ({ page }) => {
 			await page.setViewportSize(viewport);
 			await installTraceGeometryFrameSampling(page);
-			await page.goto('/?devWorld=1&devScenario=trace-replies');
+			await openDevTraceWorld(page, 'trace-replies');
 			if (viewport.name === 'desktop') await page.keyboard.press('c');
 			const rootCard = page.locator('.trace-root-card');
 			await page.locator('[data-cell-position="8,4"]').click();
@@ -70,7 +70,7 @@ test.describe('DEV World Sandbox', () => {
 	test('preserves Trace reply drafts across clear and close, changes ownership and publishes locally', async ({ page }) => {
 		await page.setViewportSize({ width: 1100, height: 850 });
 		await page.emulateMedia({ reducedMotion: 'reduce' });
-		await page.goto('/?devWorld=1&devScenario=trace-replies');
+		await openDevTraceWorld(page, 'trace-replies');
 		await page.keyboard.press('c');
 		const editor = page.getByRole('textbox', { name: '投稿エディター' });
 		const preview = page.getByLabel('Reply preview', { exact: true });
@@ -129,13 +129,13 @@ test.describe('DEV World Sandbox', () => {
 	test('shows current Trace selection only when multiple speeches are visible', async ({ page }) => {
 		await page.setViewportSize({ width: 1100, height: 850 });
 		await page.emulateMedia({ reducedMotion: 'reduce' });
-		await page.goto('/?devWorld=1&devScenario=trace-markers');
+		await openDevTraceWorld(page, 'trace-markers');
 		await page.locator('[data-cell-position="8,4"]').click();
 		await expect(page.locator('.trace-root-card')).toBeVisible();
 		await expect(page.locator('[data-trace-selection="current"]')).toHaveCount(0);
 		await expect(page.locator('.trace-current-selection-outline')).toHaveCount(0);
 
-		await page.goto('/?devWorld=1&devScenario=trace-replies');
+		await openDevTraceWorld(page, 'trace-replies');
 		await page.keyboard.press('c');
 		await page.locator('[data-cell-position="8,4"]').click();
 		await expect(page.locator('[data-trace-selection="current"]')).toHaveCount(1);
@@ -171,7 +171,7 @@ test.describe('DEV World Sandbox', () => {
 	for (const viewport of [{ name: 'desktop', width: 1100, height: 850 }, { name: 'mobile', width: 390, height: 844 }]) {
 		test(`keeps a deep tree-only cluster interactive on ${viewport.name}`, async ({ page }) => {
 			await page.setViewportSize(viewport);
-			await page.goto('/?devWorld=1&devScenario=trace-replies');
+			await openDevTraceWorld(page, 'trace-replies');
 			if (viewport.name === 'desktop') await page.keyboard.press('c');
 			await page.locator('[data-cell-position="8,4"]').click();
 			await expect(page.locator('.trace-root-card')).toHaveAttribute('data-trace-geometry-ready', 'ready');
@@ -303,7 +303,7 @@ test.describe('DEV World Sandbox', () => {
 
 			test(`preserves existing Trace anchors when a direct reply is added on ${viewport.name}`, async ({ page }) => {
 			await page.setViewportSize(viewport);
-			await page.goto('/?devWorld=1&devScenario=trace-replies');
+			await openDevTraceWorld(page, 'trace-replies');
 			if (viewport.name === 'mobile') await page.locator('.sandbox-mobile-toggle').click();
 			if (viewport.name === 'desktop') await page.keyboard.press('c');
 			await page.locator('[data-cell-position="8,4"]').click();
@@ -317,7 +317,7 @@ test.describe('DEV World Sandbox', () => {
 
 		test(`preserves selected Trace positions across direct and deep navigation on ${viewport.name}`, async ({ page }) => {
 			await page.setViewportSize(viewport);
-			await page.goto('/?devWorld=1&devScenario=trace-replies');
+			await openDevTraceWorld(page, 'trace-replies');
 			if (viewport.name === 'desktop') await page.keyboard.press('c');
 			await page.locator('[data-cell-position="8,4"]').click();
 			await expect(page.locator('.trace-root-card')).toHaveAttribute('data-trace-geometry-ready', 'ready');
@@ -351,7 +351,7 @@ test.describe('DEV World Sandbox', () => {
 
 		test(`shows known Trace continuation branches without hidden cards on ${viewport.name}`, async ({ page }) => {
 			await page.setViewportSize(viewport);
-			await page.goto('/?devWorld=1&devScenario=trace-replies');
+			await openDevTraceWorld(page, 'trace-replies');
 			if (viewport.name === 'desktop') await page.keyboard.press('c');
 			await page.locator('[data-cell-position="8,4"]').click();
 			await expect(page.locator('.trace-root-card')).toHaveAttribute('data-trace-geometry-ready', 'ready');
@@ -385,7 +385,7 @@ test.describe('DEV World Sandbox', () => {
 	test('reselects the current reply without losing its draft, preserves it through profiles, and clears on range exit', async ({ page }) => {
 		await page.setViewportSize({ width: 1100, height: 850 });
 		await page.emulateMedia({ reducedMotion: 'reduce' });
-		await page.goto('/?devWorld=1&devScenario=trace-replies');
+		await openDevTraceWorld(page, 'trace-replies');
 		await page.keyboard.press('c');
 		const editor = page.getByRole('textbox', { name: '投稿エディター' });
 		const preview = page.getByLabel('Reply preview', { exact: true });
@@ -469,7 +469,7 @@ test.describe('DEV World Sandbox', () => {
 				return nativeOpen(...args);
 			}) as IDBFactory['open'];
 		});
-		await page.goto('/?devWorld=1&devScenario=trace-markers');
+		await openDevTraceWorld(page, 'trace-markers');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 		await expect(page.locator('main')).toHaveAttribute('data-trace-runtime', 'dev');
 		const externalCallBaseline = await page.evaluate(() => (window as never as {
@@ -549,7 +549,7 @@ test.describe('DEV World Sandbox', () => {
 	test('opens and navigates the shared DEV trace conversation without changing it on menu open', async ({ page }) => {
 		await page.setViewportSize({ width: 900, height: 720 });
 		await page.emulateMedia({ reducedMotion: 'reduce' });
-		await page.goto('/?devWorld=1&devScenario=trace-markers');
+		await openDevTraceWorld(page, 'trace-markers');
 		await expect(page.locator('main')).toHaveAttribute('data-trace-runtime', 'dev');
 		const markers = page.locator('.trace-marker');
 
@@ -679,7 +679,7 @@ test.describe('DEV World Sandbox', () => {
 	test('does not leave a selectable trigger behind for the hidden open Trace marker', async ({ page }) => {
 		await page.setViewportSize({ width: 900, height: 720 });
 		await page.emulateMedia({ reducedMotion: 'reduce' });
-		await page.goto('/?devWorld=1&devScenario=trace-markers');
+		await openDevTraceWorld(page, 'trace-markers');
 		await expect(page.locator('[data-cell-position="8,4"]')).toBeVisible();
 		const markers = page.locator('.trace-marker');
 		await page.locator('[data-cell-position="8,4"]').click();
@@ -701,7 +701,7 @@ test.describe('DEV World Sandbox', () => {
 	test('reactivates an inactive DEV self through Trace inspection', async ({ page }) => {
 		await page.setViewportSize({ width: 900, height: 720 });
 		await page.emulateMedia({ reducedMotion: 'reduce' });
-		await page.goto('/?devWorld=1&devScenario=trace-inactive-self');
+		await openDevTraceWorld(page, 'trace-inactive-self');
 		await expect(page.locator('.participant[data-self="true"]')).toHaveCount(0);
 		await expect(page.locator('[data-cell-position="8,4"]')).toHaveAttribute('aria-label', '痕跡を調べる');
 		await page.locator('[data-cell-position="8,4"]').click();
@@ -730,7 +730,7 @@ test.describe('DEV World Sandbox', () => {
 				return nativeOpen(...args);
 			}) as IDBFactory['open'];
 		});
-		await page.goto('/?devWorld=1&devScenario=trace-replies');
+		await openDevTraceWorld(page, 'trace-replies');
 		await expect(page.locator('main')).toHaveAttribute('data-trace-runtime', 'dev');
 
 		if (await page.locator('aside[aria-label="Chatter"]').isVisible()) await page.keyboard.press('c');
@@ -907,7 +907,7 @@ test.describe('DEV World Sandbox', () => {
 	test('navigates a deep DEV Trace one adjacent speech at a time through shared cell actions', async ({ page }) => {
 		await page.setViewportSize({ width: 900, height: 720 });
 		await page.emulateMedia({ reducedMotion: 'reduce' });
-		await page.goto('/?devWorld=1&devScenario=trace-replies');
+		await openDevTraceWorld(page, 'trace-replies');
 
 		await page.keyboard.press('c');
 		await page.locator('[data-cell-position="8,4"]').click();
