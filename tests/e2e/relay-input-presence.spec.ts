@@ -161,7 +161,7 @@ test.describe('Relay startup', () => {
 	test('focuses the Composer with N and blurs it with Escape before WASD movement', async ({ page }) => {
 		const editor = await openReadyRelayWorld(page);
 		const self = page.locator('.participant[data-self="true"]');
-		const move = await chooseHorizontalMove(page);
+		const move = await chooseAvailableRelayMove(page);
 
 		await page.locator('.participant').first().focus();
 		await page.keyboard.press('n');
@@ -171,7 +171,8 @@ test.describe('Relay startup', () => {
 		await page.keyboard.press('Escape');
 		await expect(editor).not.toBeFocused();
 		await expect(editor).toHaveValue('keep this content');
-		await pressRelayKeyboardMovement(page, { key: move.key === 'ArrowRight' ? 'd' : 'a', expected: move.expected });
+		const wasdKey = { ArrowUp: 'w', ArrowRight: 'd', ArrowDown: 's', ArrowLeft: 'a' }[move.key];
+		await pressRelayKeyboardMovement(page, { key: wasdKey, expected: move.expected });
 	});
 
 	test('keeps WASD and N as normal Composer input while the editor is focused', async ({ page }) => {
