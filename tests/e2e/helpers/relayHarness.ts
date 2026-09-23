@@ -869,6 +869,13 @@ export async function openReadyRelayWorld(page: Page, expectedParticipantCount =
 	return editor;
 }
 
+export async function waitForRelayComposerReady(page: Page): Promise<Locator> {
+	await expect(page.locator('.action-dock')).toBeVisible();
+	const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
+	await expect(editor).toBeVisible();
+	return editor;
+}
+
 export async function readActionDockControlOrder(page: Page): Promise<string[]> {
 	return page.locator('.composer-controls > *').evaluateAll((elements) => elements
 		.map((element) => {
@@ -1244,6 +1251,26 @@ const CARDINAL_RELAY_MOVES = [
 	{ key: 'ArrowDown', direction: 'down' },
 	{ key: 'ArrowLeft', direction: 'left' }
 ] as const satisfies readonly Readonly<{ key: AvailableMove['key']; direction: Direction }>[];
+
+export async function chooseAvailableRelayMove(page: Page): Promise<AvailableMove> {
+	const position = await page.locator('.participant[data-self="true"]').getAttribute('data-position');
+	if (!position) throw new Error('Expected the Relay self participant position.');
+	const [x, y] = position.split(',').map(Number);
+	const occupied = await page.locator('.participant').evaluateAll((participants) => participants
+		.filter((participant) => participant.getAttribute('data-self') !== 'true')
+		.map((participant) => participant.getAttribute('data-position'))
+		.filter((candidate): candidate is string => candidate !== null)
+		.map((candidate) => {
+			const [x, y] = candidate.split(',').map(Number);
+			return { x, y };
+		})
+	);
+	for (const candidate of CARDINAL_RELAY_MOVES) {
+		const next = moveOneCell({ x, y }, candidate.direction, RELAY_FIELD, occupied);
+		if (next && !isBlockedFacilityCell(next)) return { key: candidate.key, expected: relayPositionKey(next) };
+	}
+	throw new Error(`Expected an available Relay movement cell from ${position}.`);
+}
 
 function relayPositionKey(position: GridPosition): string {
 	return `${position.x},${position.y}`;

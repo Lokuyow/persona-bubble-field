@@ -34,7 +34,7 @@ import { deriveBip85NostrEntropy } from '../../src/lib/bip85';
 import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL } from '../../src/lib/fieldFacilities';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { installFieldFrameSampling, readFieldFrames, sampleRenderedField } from './helpers/fieldFrames';
-import { CHANNEL_ID, AUTHORITATIVE_RELAYS, fixtureSecret, profileDialog, openProfile, installDelayedRelay, relayState, openClockedReadyRelayWorld, pauseAtCurrentBrowserTime, installVisualAnimationRafMetrics, openReadyRelayWorld, seedRelayAccount, chooseHorizontalMove, chooseMoveToward, pressRelayKeyboardMovement, reverseMoveKey, type AvailableMove } from './helpers/relayHarness';
+import { CHANNEL_ID, AUTHORITATIVE_RELAYS, fixtureSecret, profileDialog, openProfile, installDelayedRelay, relayState, openClockedReadyRelayWorld, pauseAtCurrentBrowserTime, installVisualAnimationRafMetrics, openReadyRelayWorld, seedRelayAccount, chooseAvailableRelayMove, chooseHorizontalMove, chooseMoveToward, pressRelayKeyboardMovement, reverseMoveKey, type AvailableMove } from './helpers/relayHarness';
 
 
 test.describe('Relay startup', () => {
@@ -122,8 +122,7 @@ test.describe('Relay startup', () => {
 		const self = page.locator('.participant[data-self="true"]');
 		const position = await self.getAttribute('data-position');
 		if (!position) throw new Error('Expected the Relay self participant position.');
-		const [x] = position.split(',').map(Number);
-		const move = await chooseHorizontalMove(page);
+		const move = await chooseAvailableRelayMove(page);
 		const key = move.key;
 		const publishedPositionIds = async () => new Set(
 			(await relayState(page)).state.published
@@ -134,8 +133,12 @@ test.describe('Relay startup', () => {
 		await editor.focus();
 		await page.evaluate((movementKey) => {
 			(window as typeof window & { __relayCadenceKeydown?: string }).__relayCadenceKeydown = undefined;
+			(window as typeof window & { __relayCadenceKeyup?: string }).__relayCadenceKeyup = undefined;
 			window.addEventListener('keydown', (event) => {
 				if (event.key === movementKey) (window as typeof window & { __relayCadenceKeydown?: string }).__relayCadenceKeydown = event.key;
+			}, { once: true });
+			window.addEventListener('keyup', (event) => {
+				if (event.key === movementKey) (window as typeof window & { __relayCadenceKeyup?: string }).__relayCadenceKeyup = event.key;
 			}, { once: true });
 		}, key);
 		await page.keyboard.down(key);
@@ -148,9 +151,9 @@ test.describe('Relay startup', () => {
 		await page.clock.runFor(750);
 		await page.clock.runFor(750);
 		await page.keyboard.up(key);
+		await expect.poll(() => page.evaluate(() => (window as typeof window & { __relayCadenceKeyup?: string }).__relayCadenceKeyup)).toBe(key);
 		const finalPosition = await self.getAttribute('data-position');
-		const [finalX] = (finalPosition ?? '').split(',').map(Number);
-		expect(Math.abs(finalX - x)).toBeGreaterThanOrEqual(1);
+		expect(finalPosition).not.toBe(position);
 		await page.clock.runFor(1_000);
 		await expect(self).toHaveAttribute('data-position', finalPosition ?? '');
 	});

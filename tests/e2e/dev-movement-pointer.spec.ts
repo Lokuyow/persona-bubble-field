@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
-import { openDevWorld, openClockedDevWorld, fieldOwnedBlankPoint, viewportExternalPoint, chatterNonInteractivePoint, speechMovementPoint, dragJoystick } from './helpers/devWorldHarness';
+import { openDevWorld, openClockedDevWorld, openDevTraceWorld, fieldOwnedBlankPoint, viewportExternalPoint, chatterNonInteractivePoint, speechMovementPoint, dragJoystick } from './helpers/devWorldHarness';
 
 test.describe('DEV World Sandbox', () => {
 	test.beforeEach(async ({ page }) => {
@@ -72,7 +72,7 @@ test.describe('DEV World Sandbox', () => {
 	});
 
 	test('does not start movement from the ActionDock', async ({ page }) => {
-		await page.goto('/?devWorld=1&devScenario=trace-replies');
+		await openDevTraceWorld(page, 'trace-replies');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 		await expect(page.locator('.action-dock')).toBeVisible();
 		const self = page.locator('.participant[data-self="true"]');
