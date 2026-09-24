@@ -99,6 +99,9 @@ test.describe('DEV World Sandbox', () => {
 			if (!boxes[0] || !boxes[1]) throw new Error('Expected DEV controls and game panel geometry.');
 			const [a, b] = boxes;
 			expect(a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y).toBe(false);
+			const botPreset = page.getByLabel('Select Cooperation and Defection bot preset');
+			await botPreset.selectOption('split');
+			await expect(botPreset).toHaveValue('split');
 			await expect(page.getByRole('button', { name: 'Advance Cooperation and Defection Playground phase' })).toBeVisible();
 		});
 	}

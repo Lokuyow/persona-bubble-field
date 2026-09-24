@@ -119,8 +119,8 @@
 	.sandbox-controls.trace-scenario .sandbox-scenario-picker,
 	.sandbox-controls.trace-scenario .sandbox-character-picker,
 	.sandbox-controls.trace-scenario .sandbox-speech-injector { width: 100%; max-width: none; }
-	.sandbox-controls.cooperation-defection-scenario { top: 148px; }
-	:global(.action-dock-available) .sandbox-controls.cooperation-defection-scenario { top: 148px; }
+	.sandbox-controls.cooperation-defection-scenario { top: auto; bottom: 8px; }
+	:global(.action-dock-available) .sandbox-controls.cooperation-defection-scenario { top: auto; bottom: calc(var(--action-reserved-height) + 8px); }
 
 	.sandbox-character-picker {
 		display: flex;

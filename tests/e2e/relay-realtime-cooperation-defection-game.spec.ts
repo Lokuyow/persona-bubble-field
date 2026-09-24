@@ -36,6 +36,10 @@ import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { installFieldFrameSampling, readFieldFrames, sampleRenderedField } from './helpers/fieldFrames';
 import { CHANNEL_ID, AUTHORITATIVE_RELAYS, fixtureSecret, testEvents, upcomingRegistrationSchedule, nextScheduledCooperationDefectionSchedule, signedCooperationDefectionAction, syntheticChannelFixture, installDelayedRelay, relayState, seedRelayAccount, readRelayGameState, realtimeInstanceIds, isRealtimeRequest, readRealtimePendingInstances, seedRealtimePendingInstance, chooseHorizontalMove } from './helpers/relayHarness';
 
+const formatJstDeadline = (timeMs: number) => `${new Intl.DateTimeFormat('ja-JP', {
+	timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
+}).format(new Date(timeMs))} JST`;
+
 const COOPERATION_DEFECTION_SELF_POSITION = { x: 3, y: 2 } as const;
 const COOPERATION_DEFECTION_FIELD_SIZE = { columns: 16, rows: 8 } as const;
 
@@ -225,6 +229,8 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', `${nearPosition.x},${nearPosition.y}`);
 		await page.locator('[data-realtime-group-trigger]').click();
 		await expect(page.getByRole('dialog')).toContainText('3〜6人 / 全3ラウンド');
+		await expect(page.getByRole('dialog').locator('[data-cooperation-defection-registration-deadline]')).toHaveText(`受付締切: ${formatJstDeadline(schedule.gameAtMs)}`);
+		await expect(page.getByRole('dialog').locator('[data-cooperation-defection-registration-countdown]')).toContainText(/^残り時間: 04:\d{2}$/);
 		await expect(page.getByRole('dialog')).toContainText('寿命を3日失います。残り寿命によっては死亡します。');
 		expect((await relayState(page)).state.published.filter((event) => event.kind === 7070 && event.pubkey === selfPubkey)).toHaveLength(0);
 		await page.getByRole('button', { name: 'キャンセル' }).click();
@@ -249,6 +255,7 @@ test.describe('Relay startup', () => {
 			try { return (JSON.parse(event.content) as { action?: string }).action === 'join'; } catch { return false; }
 		})).toBe(true);
 		await expect(page.locator('[data-realtime-panel]')).toContainText('参加済み');
+		await expect(page.locator('[data-cooperation-defection-registration-deadline]')).toHaveText(`受付締切: ${formatJstDeadline(schedule.gameAtMs)}`);
 		await expect(page.locator('[data-realtime-group-trigger][aria-pressed="true"]')).toHaveCount(1);
 		await expect(page.locator('[data-realtime-group-trigger][aria-pressed="true"]')).toHaveAttribute('aria-label', '参加地点に参加済み（参加先）');
 

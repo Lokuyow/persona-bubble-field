@@ -4,6 +4,8 @@
 	type Props = Readonly<{
 		schedule: CooperationDefectionSchedule;
 		nowMs: number;
+		registrationDeadline: string | null;
+		registrationCountdown: string | null;
 		status: 'inactive' | 'active' | 'degraded';
 		session: CooperationDefectionSessionState | null;
 		selfGroupId: string | null;
@@ -16,7 +18,7 @@
 		onChoice: (choice: CooperationDefectionChoice) => void;
 	}>;
 
-	let { schedule, nowMs, status, session, selfGroupId, selfPubkey, participantName, selectedChoice, commitStatus, canChoose, message, onChoice }: Props = $props();
+	let { schedule, nowMs, registrationDeadline, registrationCountdown, status, session, selfGroupId, selfPubkey, participantName, selectedChoice, commitStatus, canChoose, message, onChoice }: Props = $props();
 	let lastRoundResult = $derived(session?.results.filter((result) => result.groupId === selfGroupId).at(-1) ?? null);
 
 	let roundInfo = $derived.by(() => {
@@ -61,12 +63,16 @@
 		<div class="cooperation-defection-heading">
 			<div>
 				<h2>協力と抜け駆け <span>experimental</span></h2>
-				<p>{cooperationDefectionPhaseLabel(schedule.phase)} · {schedule.dateKey}</p>
+				<p>{cooperationDefectionPhaseLabel(schedule.phase)} · {schedule.dateKey.startsWith('manual-') ? '運営開催' : schedule.dateKey}</p>
 			</div>
 			{#if roundInfo}
 				<strong>ラウンド {roundInfo.round} · {roundInfo.phase}</strong>
 			{/if}
 		</div>
+		{#if schedule.phase === 'registration' && registrationDeadline && registrationCountdown}
+			<p class="cooperation-defection-registration-deadline" data-cooperation-defection-registration-deadline>受付締切: {registrationDeadline}</p>
+			<p class="cooperation-defection-registration-countdown" data-cooperation-defection-registration-countdown>残り時間: {registrationCountdown}</p>
+		{/if}
 		{#if status === 'degraded'}
 			<p class="cooperation-defection-note">イベント通信が利用できません。通常の会話と移動は継続できます。</p>
 		{:else if schedule.phase === 'warning'}
