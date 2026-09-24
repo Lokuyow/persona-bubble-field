@@ -18,8 +18,8 @@ test.describe('Relay startup', () => {
 		await seedRelayAccount(page, trace.selfSecret, trace.selfPubkey);
 		await page.goto('/');
 		await page.evaluate(() => {
-			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void; releaseTraceRoots(): void; releaseTraceReplies(): void } }).__relayStartupTest;
-			relay.releaseMetadata(); relay.releasePrimary(); relay.releaseTraceRoots(); relay.releaseTraceReplies();
+			const relay = (window as unknown as { __relayStartupTest: { releasePrimary(): void; releaseTraceRoots(): void; releaseTraceReplies(): void } }).__relayStartupTest;
+			relay.releasePrimary(); relay.releaseTraceRoots(); relay.releaseTraceReplies();
 		});
 		await expect(page.locator('.participant')).toHaveCount(2);
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '3,2');
@@ -66,8 +66,8 @@ test.describe('Relay startup', () => {
 		await seedRelayAccount(page, trace.selfSecret, trace.selfPubkey);
 		await page.goto('/');
 		await page.evaluate(() => {
-			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void; releaseTraceRoots(): void; releaseTraceReplies(): void } }).__relayStartupTest;
-			relay.releaseMetadata(); relay.releasePrimary(); relay.releaseTraceRoots(); relay.releaseTraceReplies();
+			const relay = (window as unknown as { __relayStartupTest: { releasePrimary(): void; releaseTraceRoots(): void; releaseTraceReplies(): void } }).__relayStartupTest;
+			relay.releasePrimary(); relay.releaseTraceRoots(); relay.releaseTraceReplies();
 		});
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '3,2');
 		await page.locator('.chatter-toggle').click();
@@ -106,8 +106,8 @@ test.describe('Relay startup', () => {
 		await seedRelayAccount(page, trace.selfSecret, trace.selfPubkey);
 		await page.goto('/');
 		await page.evaluate(() => {
-			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
-			relay.releaseMetadata(); relay.releasePrimary();
+			const relay = (window as unknown as { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest;
+			relay.releasePrimary();
 		});
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '3,2');
 		await page.locator('.chatter-toggle').click();
@@ -155,8 +155,8 @@ test.describe('Relay startup', () => {
 			await seedRelayAccount(page, trace.selfSecret, trace.selfPubkey);
 			await page.goto('/');
 			await page.evaluate(() => {
-				const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
-				relay.releaseMetadata(); relay.releasePrimary();
+				const relay = (window as unknown as { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest;
+				relay.releasePrimary();
 			});
 			await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '3,2');
 			await page.locator('.chatter-toggle').click();

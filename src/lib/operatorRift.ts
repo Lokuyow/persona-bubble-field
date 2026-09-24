@@ -17,13 +17,7 @@ import {
 	RIFT_MANUAL_CONTROL_LOOKBACK_SECONDS,
 	selectCanonicalManualRiftControl
 } from './rift';
-import {
-	CHANNEL_CREATE_KIND,
-	CHANNEL_METADATA_KIND,
-	resolveChannelMetadata,
-	type ResolvedChannelMetadata
-} from './nostrChannelMetadata';
-import { PROTOTYPE_WORLD_CONFIG, type PrototypeWorldConfig } from './prototypeWorldConfig';
+import { assertPrototypeWorldConfig, PROTOTYPE_WORLD_CONFIG, type PrototypeWorldConfig } from './prototypeWorldConfig';
 import type {
 	OperatorRelayAdapter,
 	OperatorRelayPublishResult,
@@ -50,7 +44,7 @@ export type OperatorDependencies = Readonly<{
 export type OperatorCommandResult = Readonly<{
 	exitCode: 0 | 1 | 130;
 	mode: OperatorMode;
-	metadata: ResolvedChannelMetadata;
+	world: PrototypeWorldConfig;
 	controlEvent?: VerifiedEvent;
 	instanceId?: string;
 }>;
@@ -68,7 +62,6 @@ export class OperatorFailure extends Error {
 
 export type OperatorFailureReason =
 	| 'invalid configuration'
-	| 'metadata discovery failed'
 	| 'control preflight failed'
 	| 'active manual Rift already exists'
 	| 'scheduled Rift conflict'
@@ -110,14 +103,6 @@ function unixSeconds(nowMs: number): number {
 	return Math.floor(nowMs / 1000);
 }
 
-function eventUnion(results: readonly OperatorRelayQueryResult[]): readonly Event[] {
-	const events = new Map<string, Event>();
-	for (const result of results) {
-		for (const event of result.events) events.set(event.id, event);
-	}
-	return [...events.values()];
-}
-
 function reportQuery(output: OperatorOutput, result: OperatorRelayQueryResult): void {
 	for (const relay of result.relays) {
 		const notice = relay.notice ? `: ${outputValue(relay.notice)}` : '';
@@ -125,26 +110,8 @@ function reportQuery(output: OperatorOutput, result: OperatorRelayQueryResult): 
 	}
 }
 
-async function discoverMetadata(
-	world: PrototypeWorldConfig,
-	relay: OperatorRelayAdapter,
-	output: OperatorOutput
-): Promise<ResolvedChannelMetadata> {
-	const kind40 = await relay.query({ ids: [world.channelId], kinds: [CHANNEL_CREATE_KIND] }, world.metadataDiscoveryRelays);
-	const kind41 = await relay.query(
-		{ kinds: [CHANNEL_METADATA_KIND], '#e': [world.channelId] } as Filter,
-		world.metadataDiscoveryRelays
-	);
-	reportQuery(output, kind40);
-	reportQuery(output, kind41);
-	if (kind40.eoseCount === 0 || kind41.eoseCount === 0) throw new OperatorFailure('metadata discovery failed');
-	const metadata = resolveChannelMetadata([...eventUnion([kind40, kind41])], world.channelId, world.preferredRelayHint);
-	if (!metadata) throw new OperatorFailure('metadata discovery failed');
-	return metadata;
-}
-
 async function activeManualPreflight(
-	metadata: ResolvedChannelMetadata,
+	world: PrototypeWorldConfig,
 	relay: OperatorRelayAdapter,
 	nowMs: number,
 	output: OperatorOutput,
@@ -152,8 +119,8 @@ async function activeManualPreflight(
 ) {
 	const since = Math.max(0, unixSeconds(nowMs) - RIFT_MANUAL_CONTROL_LOOKBACK_SECONDS);
 	const result = await relay.query(
-		buildRealtimeControlFilter({ channelId: metadata.channelId, creatorPubkey: metadata.creatorPubkey, since }),
-		metadata.relays
+		buildRealtimeControlFilter({ channelId: world.channelId, creatorPubkey: world.creatorPubkey, since }),
+		world.authoritativeRelays
 	);
 	reportQuery(output, result);
 	// The finite-read adapter has no cancellation contract. Let an already
@@ -161,7 +128,7 @@ async function activeManualPreflight(
 	if (cancelSignal?.aborted) throw new OperatorCancelled('operator command cancelled');
 	if (result.eoseCount === 0) throw new OperatorFailure('control preflight failed');
 	const controls = result.events
-		.map((event) => parseRealtimeControlEnvelope(event, metadata.channelId, metadata.creatorPubkey))
+		.map((event) => parseRealtimeControlEnvelope(event, world.channelId, world.creatorPubkey))
 		.filter((control): control is NonNullable<ReturnType<typeof parseRealtimeControlEnvelope>> => control !== null);
 	return selectCanonicalManualRiftControl(controls, nowMs);
 }
@@ -183,16 +150,17 @@ function formatIso(ms: number): string {
 	return new Date(ms).toISOString();
 }
 
-function writePreview(output: OperatorOutput, metadata: ResolvedChannelMetadata, mode: OperatorMode, nowMs: number): void {
-	output.stdout(`Channel: ${outputValue(metadata.channelId)}`);
-	output.stdout(`Creator: ${outputValue(metadata.creatorPubkey)}`);
-	output.stdout(`Authoritative Relays: ${metadata.relays.map(outputValue).join(', ')}`);
+function writePreview(output: OperatorOutput, world: PrototypeWorldConfig, mode: OperatorMode, nowMs: number): void {
+	output.stdout(`World config revision: ${world.configRevision}`);
+	output.stdout(`Channel: ${outputValue(world.channelId)}`);
+	output.stdout(`Creator: ${outputValue(world.creatorPubkey)}`);
+	output.stdout(`Authoritative Relays: ${world.authoritativeRelays.map(outputValue).join(', ')}`);
 	output.stdout(`Mode: ${mode === 'publish' ? 'PUBLISH' : 'DRY RUN'}`);
 	output.stdout('Registration starts when the signed control is created; game starts 5 minutes later.');
 	output.stdout(`Preview time: ${formatIso(nowMs)}`);
 }
 
-function writeControl(output: OperatorOutput, metadata: ResolvedChannelMetadata, event: VerifiedEvent, instanceId: string): void {
+function writeControl(output: OperatorOutput, world: PrototypeWorldConfig, event: VerifiedEvent, instanceId: string): void {
 	const schedule = getRiftScheduleForInstance(instanceId, event.created_at * 1000);
 	if (!schedule) throw new OperatorFailure('control self-validation failed');
 	output.stdout(`Control event ID: ${outputValue(event.id)}`);
@@ -200,7 +168,7 @@ function writeControl(output: OperatorOutput, metadata: ResolvedChannelMetadata,
 	output.stdout(`Registration: ${formatIso(schedule.registrationAtMs)}`);
 	output.stdout(`Game: ${formatIso(schedule.gameAtMs)}`);
 	output.stdout(`Event end: ${formatIso(schedule.endedAtMs)}`);
-	output.stdout(`Channel creator: ${outputValue(metadata.creatorPubkey)}`);
+	output.stdout(`Channel creator: ${outputValue(world.creatorPubkey)}`);
 }
 
 function publishSucceeded(results: readonly OperatorRelayPublishResult[]): boolean {
@@ -215,7 +183,7 @@ function reportPublish(output: OperatorOutput, results: readonly OperatorRelayPu
 }
 
 function createSignedControl(
-	metadata: ResolvedChannelMetadata,
+	world: PrototypeWorldConfig,
 	dependencies: OperatorDependencies,
 	secret: Uint8Array,
 	nowMs: number
@@ -227,14 +195,14 @@ function createSignedControl(
 		const instanceId = buildManualRiftInstanceId(createdAt, hex(random));
 		if (!isManualRiftInstanceScheduleEligible(instanceId, nowMs)) throw new OperatorFailure('scheduled Rift conflict');
 		const template = buildRealtimeControlEventTemplate({
-			channelId: metadata.channelId,
-			relayHint: metadata.channel.relayHint,
+			channelId: world.channelId,
+			relayHint: world.preferredRelayHint,
 			instanceId,
 			payload: { command: 'start', targetProtocolKey: RIFT_EVENT_DEFINITION.protocolKey },
 			createdAt
 		});
 		const event = finalizeRealtimeEvent(template, secret);
-		const parsed = parseRealtimeControlEnvelope(event, metadata.channelId, metadata.creatorPubkey);
+		const parsed = parseRealtimeControlEnvelope(event, world.channelId, world.creatorPubkey);
 		if (!parsed || !isManualRiftControlScheduleEligible(parsed, nowMs)) {
 			throw new OperatorFailure('control self-validation failed');
 		}
@@ -245,7 +213,7 @@ function createSignedControl(
 }
 
 async function createAndValidateControl(
-	metadata: ResolvedChannelMetadata,
+	world: PrototypeWorldConfig,
 	dependencies: OperatorDependencies,
 	secret: Uint8Array,
 	nowMs: number
@@ -256,8 +224,8 @@ async function createAndValidateControl(
 	} catch {
 		throw new OperatorFailure('invalid operator secret');
 	}
-	if (creatorPubkey !== metadata.creatorPubkey) throw new OperatorFailure('operator secret is not the channel creator');
-	return createSignedControl(metadata, dependencies, secret, nowMs);
+	if (creatorPubkey !== world.creatorPubkey) throw new OperatorFailure('operator secret is not the channel creator');
+	return createSignedControl(world, dependencies, secret, nowMs);
 }
 
 export async function runManualRiftOperator(
@@ -267,39 +235,43 @@ export async function runManualRiftOperator(
 ): Promise<OperatorCommandResult> {
 	const now = dependencies.nowMs ?? (() => Date.now());
 	try {
-		const metadata = await discoverMetadata(world, dependencies.relay, dependencies.output);
+		try {
+			assertPrototypeWorldConfig(world);
+		} catch {
+			throw new OperatorFailure('invalid configuration');
+		}
 		const currentTime = now();
-		assertNoActiveManual(await activeManualPreflight(metadata, dependencies.relay, currentTime, dependencies.output, dependencies.cancelSignal));
+		assertNoActiveManual(await activeManualPreflight(world, dependencies.relay, currentTime, dependencies.output, dependencies.cancelSignal));
 		assertScheduledStartAllowed(currentTime);
-		writePreview(dependencies.output, metadata, mode, currentTime);
+		writePreview(dependencies.output, world, mode, currentTime);
 
 		if (mode === 'publish') {
 			if ((await dependencies.confirmPublish()) !== 'confirmed') throw new OperatorCancelled('confirmation cancelled');
 			const confirmedAt = now();
-			assertNoActiveManual(await activeManualPreflight(metadata, dependencies.relay, confirmedAt, dependencies.output, dependencies.cancelSignal));
+			assertNoActiveManual(await activeManualPreflight(world, dependencies.relay, confirmedAt, dependencies.output, dependencies.cancelSignal));
 			assertScheduledStartAllowed(confirmedAt);
 		}
 
 		assertNotCancelled(dependencies.cancelSignal);
 		const secret = await dependencies.readSecret();
 		try {
-			const control = await createAndValidateControl(metadata, dependencies, secret, now());
+			const control = await createAndValidateControl(world, dependencies, secret, now());
 			assertNotCancelled(dependencies.cancelSignal);
-			writeControl(dependencies.output, metadata, control.event, control.instanceId);
+			writeControl(dependencies.output, world, control.event, control.instanceId);
 			if (mode === 'dry-run') {
 				dependencies.output.stdout('DRY RUN: EVENT was not published.');
-				return { exitCode: 0, mode, metadata, controlEvent: control.event, instanceId: control.instanceId };
+				return { exitCode: 0, mode, world, controlEvent: control.event, instanceId: control.instanceId };
 			}
 			assertNotCancelled(dependencies.cancelSignal);
 			dependencies.output.stdout('Publication started; waiting for Relay results.');
 			// publish() is the irreversible side-effect boundary. It has no abort
 			// contract, so Ctrl+C is consumed by the input session and results are
 			// always awaited and classified.
-			const results = await dependencies.relay.publish(control.event, metadata.relays);
+			const results = await dependencies.relay.publish(control.event, world.authoritativeRelays);
 			reportPublish(dependencies.output, results);
 			if (!publishSucceeded(results)) throw new OperatorFailure('all authoritative Relays failed to accept the event');
 			dependencies.output.stdout('Manual Rift control published.');
-			return { exitCode: 0, mode, metadata, controlEvent: control.event, instanceId: control.instanceId };
+			return { exitCode: 0, mode, world, controlEvent: control.event, instanceId: control.instanceId };
 		} finally {
 			secret.fill(0);
 		}

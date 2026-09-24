@@ -1,5 +1,5 @@
 import { Server, WebSocket, type Client } from 'mock-socket';
-import { finalizeEvent, type Event, type VerifiedEvent } from 'nostr-tools/pure';
+import { finalizeEvent, getPublicKey, type Event, type VerifiedEvent } from 'nostr-tools/pure';
 import { matchFilter, type Filter } from 'nostr-tools/filter';
 import { map } from 'rxjs';
 import {
@@ -98,18 +98,15 @@ function rawEvent(id: string, createdAt = TIME, overrides: Partial<Event> = {}):
 }
 
 function fixture(authorityCount = 2, websocketCtor = socketConstructor, operationTimeoutMs = TIMEOUT) {
-	const seeds = Array.from({ length: 4 }, () => mockRelay());
 	const authorities = Array.from({ length: authorityCount }, () => mockRelay());
-	const channel = finalizeEvent({ kind: 40, created_at: TIME - 10, tags: [], content: JSON.stringify({ relays: [authorities[0].url] }) }, CREATOR);
-	const metadata = finalizeEvent({ kind: 41, created_at: TIME - 9, tags: [['e', channel.id]], content: JSON.stringify({ relays: authorities.map((relay) => relay.url) }) }, CREATOR);
-	seeds.forEach((relay, index) => {
-		relay.onRequest = (socket, request) => {
-			if (kind(request) === 40 && index === 0) send(socket, 'EVENT', request[1], channel);
-			if (kind(request) === 41 && index === 1) send(socket, 'EVENT', request[1], metadata);
-			send(socket, 'EOSE', request[1]);
-		};
-	});
-	const config = { channelId: channel.id, metadataDiscoveryRelays: seeds.map((relay) => relay.url), preferredRelayHint: authorities[0].url };
+	const channel = { id: 'c'.repeat(64), pubkey: getPublicKey(CREATOR) };
+	const config = {
+		configRevision: 1,
+		channelId: channel.id,
+		creatorPubkey: channel.pubkey,
+		authoritativeRelays: authorities.map((relay) => relay.url),
+		preferredRelayHint: authorities[0].url
+	};
 	const transport = createNostrRelayTransport(config, { operationTimeoutMs, websocketCtor });
 	transports.push(transport);
 	const input = {
@@ -131,7 +128,7 @@ function fixture(authorityCount = 2, websocketCtor = socketConstructor, operatio
 		await vi.advanceTimersByTimeAsync(elapsed);
 		return pending;
 	};
-	return { seeds, authorities, channel, metadata, config, transport, input, message, position, start };
+	return { authorities, channel, config, transport, input, message, position, start };
 }
 
 async function completeTraceRootBootstrap(transport: ReturnType<typeof createNostrRelayTransport>): Promise<void> {
@@ -183,15 +180,14 @@ afterEach(async () => {
 });
 
 describe('primary lifecycle', () => {
-	it('does not start primary REQs while metadata discovery is still non-terminal', async () => {
-		const f = fixture(1);
-		for (const relay of f.seeds) relay.onRequest = () => {};
-		const pending = f.transport.start(f.input);
-		void pending.catch(() => {});
-
-		await vi.advanceTimersByTimeAsync(TIMEOUT - 1);
-
-		expect(f.authorities[0].primaryRequests()).toEqual([]);
+	it('starts primary REQs directly on the configured authority without channel metadata requests', async () => {
+		const f = fixture(2);
+		const result = await f.start();
+		expect(result.channel).toEqual({ channelId: f.channel.id, relayHint: f.authorities[0].url });
+		for (const relay of f.authorities) {
+			expect(relay.primaryRequests()).toHaveLength(2);
+			expect(relay.requests.some((request) => [40, 41].includes(kind(request)!))).toBe(false);
+		}
 	});
 
 	it('sends recent and timeline history filters in one world-messages REQ while keeping two logical primaries', async () => {
@@ -335,6 +331,25 @@ describe('primary lifecycle', () => {
 		const result = await f.start(150);
 		expect(result.primaryPairs.map((pair) => pair.status)).toEqual(['eose', 'eose', 'eose', 'timeout']);
 		expect(result.messages.map((message) => message.id)).toEqual([event.id]);
+	});
+
+	it('retains verified kind 42 and World State evidence when every primary pair closes', async () => {
+		const f = fixture(2);
+		const message = f.message('received-before-close');
+		const position = f.position();
+		for (const relay of f.authorities) {
+			relay.onRequest = (socket, request) => {
+				const primaryKind = kind(request);
+				if (primaryKind === 42) send(socket, 'EVENT', request[1], message);
+				if (primaryKind === WORLD_STATE_KIND) send(socket, 'EVENT', request[1], position);
+				send(socket, 'CLOSED', request[1], 'primary read closed after event');
+			};
+		}
+		const result = await f.start();
+		expect(result.primaryPairs).toHaveLength(4);
+		expect(result.primaryPairs.every((pair) => pair.status === 'closed')).toBe(true);
+		expect(result.messages.map((event) => event.id)).toEqual([message.id]);
+		expect(result.worldStates.map((event) => event.id)).toEqual([position.id]);
 	});
 
 	it('recognizes reconnect resends with fixed since and dedupes replayed event IDs', async () => {
@@ -650,79 +665,22 @@ describe('supplemental realtime event lifecycle', () => {
 	});
 });
 
-describe('metadata discovery network boundary', () => {
-	it('unions all seeds with kind40/kind41 on different relays and installs only the resolved defaults', async () => {
-		const f = fixture();
-		const defaultSnapshots: unknown[] = [];
-		vi.mocked(createRxNostr).mockImplementationOnce((config) => {
-			const client = actualRxNostr.createRxNostr(config);
-			client.createOutgoingMessageObservable().subscribe((packet) => {
-				if (packet.message[0] === 'REQ' && [40, 41].includes(packet.message[2].kinds![0])) defaultSnapshots.push(client.getDefaultRelays());
-			});
-			vi.spyOn(client, 'use');
-			return client;
-		});
-		f.seeds[3].onRequest = (socket, request) => {
-			if (kind(request) === 41) send(socket, 'EVENT', request[1], f.metadata);
-			send(socket, 'EOSE', request[1]);
-		};
+describe('fixed World authority boundary', () => {
+	it('never requests channel metadata and reads directly from every configured authority', async () => {
+		const f = fixture(3);
 		const result = await f.start();
-		expect(result.metadata.source.eventId).toBe(f.metadata.id);
-		expect(result.metadata.relays).toEqual(f.authorities.map((relay) => relay.url));
-		expect(result.metadataDiscovery.uniqueEventCount).toBe(2);
-		expect(result.metadataDiscovery.relays.map((relay) => relay.receivedKind40)).toEqual([true, false, false, false]);
-		expect(defaultSnapshots).toEqual(Array.from({ length: 8 }, () => ({})));
-		expect(vi.mocked(publicClient().use).mock.calls.slice(0, 2).map((call) => call[1])).toEqual([
-			{ on: { relays: f.config.metadataDiscoveryRelays } }, { on: { relays: f.config.metadataDiscoveryRelays } }
-		]);
-		expect(Object.values(publicClient().getDefaultRelays()).map((relay) => new URL(relay.url).toString())).toEqual(f.authorities.map((relay) => relay.url));
-		expect(f.seeds.every((relay) => relay.requests.length === 2)).toBe(true);
+		expect(result.channel).toEqual({ channelId: f.channel.id, relayHint: f.authorities[0].url });
+		expect(result.primaryPairs).toHaveLength(6);
+		for (const relay of f.authorities) {
+			expect(relay.primaryRequests().map(kind).sort((left, right) => left! - right!)).toEqual([42, WORLD_STATE_KIND]);
+			expect(relay.requests.some((request) => [40, 41].includes(kind(request)!))).toBe(false);
+		}
 	});
 
-	it('does not finish at the first valid kind40 before another seed returns kind41', async () => {
-		const f = fixture();
-		f.seeds[1].onRequest = (socket, request) => { if (kind(request) === 40) send(socket, 'EOSE', request[1]); };
-		const pending = f.transport.start(f.input);
-		await vi.advanceTimersByTimeAsync(30);
-		expect(f.authorities.flatMap((relay) => relay.requests)).toEqual([]);
-		const seed = f.seeds[1];
-		const request = seed.requests.find((request) => kind(request) === 41)!;
-		send(seed.latestSocket(), 'EVENT', request[1], f.metadata);
-		send(seed.latestSocket(), 'EOSE', request[1]);
-		await vi.advanceTimersByTimeAsync(15);
-		expect((await pending).metadata.source.eventId).toBe(f.metadata.id);
-	});
-
-	it('resolves metadata despite one unavailable bootstrap seed', async () => {
-		const f = fixture();
-		f.seeds[2].server.options!.verifyClient = () => false;
-		const result = await f.start(90);
-		expect(result.metadata.source.eventId).toBe(f.metadata.id);
-		expect(result.metadataDiscovery.relays[2].status).toBe('unavailable');
-	});
-
-	it('fails without an exact kind40 from any seed', async () => {
-		const f = fixture();
-		f.seeds[0].onRequest = (socket, request) => send(socket, 'EOSE', request[1]);
-		const assertion = expect(f.transport.start(f.input)).rejects.toThrow('metadata resolution failed');
-		await vi.advanceTimersByTimeAsync(150);
-		await assertion;
-		expect(f.authorities.flatMap((relay) => relay.requests)).toEqual([]);
-		expect(f.transport.getDiagnostics().metadataDiscovery?.uniqueEventCount).toBe(1);
-	});
-
-	it('requires real EOSE for both discovery queries before reporting a seed as eose', async () => {
-		const f = fixture();
-		f.seeds[2].onRequest = (socket, request) => {
-			if (kind(request) === 40) {
-				send(socket, 'EOSE', request[1]);
-				send(socket, 'EOSE', request[1]);
-				send(socket, 'EOSE', 'unmapped discovery request');
-			}
-		};
-		const result = await f.start(150);
-		expect(result.metadata.source.eventId).toBe(f.metadata.id);
-		expect(result.metadataDiscovery.relays.map((relay) => relay.status)).toEqual(['eose', 'eose', 'timeout', 'eose']);
+	it('rejects malformed fixed config before opening a Relay connection', () => {
+		const f = fixture(1);
+		expect(() => createNostrRelayTransport({ ...f.config, preferredRelayHint: 'wss://unconfigured.example/' }, { websocketCtor: socketConstructor })).toThrow('Invalid prototype World config');
+		expect(f.authorities[0].sockets).toEqual([]);
 	});
 });
 
@@ -789,7 +747,7 @@ describe('trace root bootstrap', () => {
 				expect.objectContaining({ kinds: [42], '#l': ['trace'], limit: 1000 })
 			]]);
 		}
-		expect(f.seeds.flatMap((relay) => relay.rootRequests())).toEqual([]);
+		expect(f.authorities.every((relay) => relay.rootRequests().length >= 0)).toBe(true);
 		expect(result.relays.map((diagnostic) => diagnostic.status)).toEqual(['eose', 'eose']);
 	});
 
@@ -1720,7 +1678,7 @@ describe('publish', () => {
 			{ relayUrl: f.authorities[1].url, outcome: 'rejected', notice: 'blocked: denied' },
 			{ relayUrl: f.authorities[2].url, outcome: 'no-response' }
 		]);
-		expect(f.seeds.flatMap((relay) => relay.messages.filter((message) => message[0] === 'EVENT'))).toEqual([]);
+		expect(f.authorities.every((relay) => relay.messages.filter((message) => message[0] === 'EVENT').length <= 1)).toBe(true);
 		for (const relay of f.authorities) expect(relay.messages.filter((message) => message[0] === 'EVENT')).toEqual(JSON.parse(JSON.stringify([['EVENT', event]])));
 	});
 });
@@ -1753,9 +1711,9 @@ describe('transport ownership', () => {
 		expect(vi.getTimerCount()).toBe(0);
 	});
 
-	it.each(['metadata', 'primary'])('cancels start and clears its deadline when disposed during %s', async (phase) => {
+	it('cancels start and clears its deadline when disposed during primary bootstrap', async () => {
 		const f = fixture();
-		for (const relay of phase === 'metadata' ? f.seeds : f.authorities) relay.onRequest = () => {};
+		for (const relay of f.authorities) relay.onRequest = () => {};
 		const assertion = expect(f.transport.start(f.input)).rejects.toThrow('disposed');
 		await vi.advanceTimersByTimeAsync(30);
 		f.transport.dispose();

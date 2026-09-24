@@ -262,8 +262,8 @@ test.describe('Relay startup', () => {
 		await page.goto('/');
 		await expect(page.locator('.action-dock')).toBeVisible();
 		await page.evaluate(() => {
-			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
-			relay.releaseMetadata(); relay.releasePrimary();
+			const relay = (window as unknown as { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest;
+			relay.releasePrimary();
 		});
 		const bubble = page.locator(`[data-bubble-participant-id="${speech.pubkey}"]`);
 		const speaker = page.locator(`.participant[data-participant-id="${speech.pubkey}"]`);
@@ -321,7 +321,6 @@ test.describe('Relay startup', () => {
 		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret));
 		await page.goto('/');
 		await expect(page.locator('.action-dock')).toBeVisible();
-		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
 			AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) &&
 			(request.filter.kinds as number[])[0] === WORLD_STATE_KIND

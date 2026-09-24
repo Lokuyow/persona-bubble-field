@@ -24,24 +24,12 @@ import { requireCharacterFromPubkey, resolveCharacterFromPubkey } from '../../..
 import { deriveBip85NostrEntropy } from '../../../src/lib/bip85';
 import { isBlockedFacilityCell } from '../../../src/lib/fieldFacilities';
 import { moveOneCell, type Direction, type GridPosition } from '../../../src/lib/geometry';
+import { PROTOTYPE_AUTHORITATIVE_RELAYS, PROTOTYPE_CHANNEL_ID, PROTOTYPE_WORLD_CONFIG, type PrototypeWorldConfig } from '../../../src/lib/prototypeWorldConfig';
 import { installHostOwnedStub } from './hostOwnedComposerStub';
 import { installFieldFrameSampling, readFieldFrames, sampleRenderedField } from './fieldFrames';
 
-export const CHANNEL_ID = '3212de4b75f0c41efa17e41affcfc3a811171ba930e5b657687b5f5148627d5b';
-export const SEED_RELAYS = [
-	'wss://nos.lol/',
-	'wss://x.kojira.io/',
-	'wss://relay.nostr.wirednet.jp/',
-	'wss://yabu.me/'
-] as const;
-export const AUTHORITATIVE_RELAYS = [
-	'wss://yabu.me/',
-	'wss://relay-jp.nostr.wirednet.jp/',
-	'wss://nos.lol/',
-	'wss://relay.damus.io/',
-	'wss://snowflare.cc/',
-	'wss://r.kojira.io/'
-] as const;
+export const CHANNEL_ID = PROTOTYPE_CHANNEL_ID;
+export const AUTHORITATIVE_RELAYS = PROTOTYPE_AUTHORITATIVE_RELAYS;
 
 // Deterministic fake signers are derived at test runtime from a zero root.
 // Logical fixture labels are kept stable for the scenarios below; their actual
@@ -84,19 +72,6 @@ export function fixtureAccountIndexForSecret(secretKey: Uint8Array): number {
 	}
 	throw new Error('Fixture secret is not derived from the zero root.');
 }
-
-// A public, verified kind 40 whose immutable id is the configured prototype
-// channel. Keeping it in the browser-local fake Relay avoids all network I/O.
-export const CHANNEL_EVENT = {
-	content: '{"name":"name: persona-bubble-field prototype","about":"about:\\nPrototype public chat channel for a spatial character chat client built on Nostr.","picture":"","relays":["wss://yabu.me/","wss://relay-jp.nostr.wirednet.jp/","wss://nos.lol/","wss://relay.damus.io/","wss://snowflare.cc/","wss://r.kojira.io/"]}',
-	created_at: 1787801905,
-	id: CHANNEL_ID,
-	kind: 40,
-	pubkey: '89ae5e1f887b68ebc093b1e971164f59ee1e8d3bb02fd1fe168f77d7e4b2c10b',
-	sig: '7d86e48506fc1b5796b38b131e39a2ef7654f223b8388e81dd22c2be8102e76ffa6cf1517d09290d3b0477f54cc42fc3d5e1cccf913b462eb1296dbdc12212db',
-	tags: [['client', 'lumilumi', '31990:84b0c46ab699ac35eb2ca286470b85e081db2087cdef63932236c397417782f5:1727506446612', 'wss://cagliostr.compile-error.net']]
-} as const;
-
 
 export function profileDialog(page: Page) {
 	return page.getByRole('dialog');
@@ -167,12 +142,17 @@ export function syntheticChannelFixture() {
 		kind: 40,
 		created_at: 1_800_000_000,
 		tags: [],
-		content: JSON.stringify({ name: 'synthetic Rift test channel', relays: [...AUTHORITATIVE_RELAYS] })
+		content: JSON.stringify({ name: 'synthetic Rift test channel' })
 	}, secret);
 	return {
 		secret,
 		event,
-		worldConfig: { channelId: event.id, metadataDiscoveryRelays: SEED_RELAYS, preferredRelayHint: SEED_RELAYS[0] }
+		worldConfig: {
+			...PROTOTYPE_WORLD_CONFIG,
+			channelId: event.id,
+			creatorPubkey: getPublicKey(secret),
+			authoritativeRelays: [...AUTHORITATIVE_RELAYS]
+		}
 	};
 }
 
@@ -331,6 +311,7 @@ export async function installDelayedRelay(page: Page, options: {
 	deferPrimaryEvents?: boolean;
 	historyMessages?: readonly object[];
 	primaryEvents?: Readonly<{ message: object; position: object }>;
+	primaryTerminal?: 'eose' | 'closed';
 	realtimeEvents?: readonly object[];
 	deferRealtimeEvents?: boolean;
 	realtimeTerminal?: 'eose' | 'closed' | 'timeout';
@@ -341,18 +322,15 @@ export async function installDelayedRelay(page: Page, options: {
 	deferTraceRoots?: boolean;
 	deferTraceReplies?: boolean;
 	persistAcrossReload?: boolean;
-	channelEvent?: object;
-	testWorldConfig?: { channelId: string; metadataDiscoveryRelays: readonly string[]; preferredRelayHint: string };
+	testWorldConfig?: PrototypeWorldConfig;
 	hiddenSubscriptionLimit?: number;
 } = {}): Promise<void> {
 	const events = options.primaryEvents ?? testEvents();
-	await page.addInitScript(({ seedRelays, authoritativeRelays, channelEvent, primaryEvents, historyMessages, realtimeEvents, deferPrimaryEvents, deferRealtimeEvents, realtimeTerminal, realtimePublishOutcome, rejectTracePublishes, traceRoots, traceReplies, deferTraceRoots, deferTraceReplies, persistAcrossReload, testWorldConfig, hiddenSubscriptionLimit }) => {
+	await page.addInitScript(({ authoritativeRelays, primaryEvents, historyMessages, realtimeEvents, deferPrimaryEvents, deferRealtimeEvents, primaryTerminal, realtimeTerminal, realtimePublishOutcome, rejectTracePublishes, traceRoots, traceReplies, deferTraceRoots, deferTraceReplies, persistAcrossReload, testWorldConfig, hiddenSubscriptionLimit }) => {
 		const WORLD_STATE_KIND = 30079;
 		type Listener = (event?: { type: string; data?: string; code?: number; reason?: string }) => void;
 		type PendingRequest = { socket: FakeWebSocket; subId: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] };
-		const seed = new Set<string>(seedRelays);
 		const authoritative = new Set<string>(authoritativeRelays);
-		const pendingMetadata: PendingRequest[] = [];
 		const pendingPrimary: PendingRequest[] = [];
 		const pendingTraceRoots: PendingRequest[] = [];
 		const pendingTraceReplies: PendingRequest[] = [];
@@ -381,12 +359,11 @@ export async function installDelayedRelay(page: Page, options: {
 			previousPublished: previous.published,
 			previousClosedSubscriptions: previous.closedSubscriptions,
 			realtimeHistory,
-			metadataReleased: false,
 			primaryEventsReleased: !deferPrimaryEvents,
 			primaryReleased: false,
+			primaryTerminal: primaryTerminal ?? 'eose',
 			traceRootsReleased: !deferTraceRoots,
 			traceRepliesReleased: !deferTraceReplies,
-			metadataFailuresRemaining: 0,
 			realtimeEventsReleased: !deferRealtimeEvents,
 			realtimeTerminal: realtimeTerminal ?? 'eose' as 'eose' | 'closed' | 'timeout',
 			realtimePublishOutcome: realtimePublishOutcome ?? 'accepted' as 'accepted' | 'rejected' | 'echo' | 'no-response',
@@ -429,17 +406,6 @@ export async function installDelayedRelay(page: Page, options: {
 			const notice = event.kind === 1111 && state.replyOutcome === 'duplicate' ? 'duplicate: already stored' : reject ? 'blocked: test rejection' : '';
 			if (event.kind === 1111 && state.replyOutcome !== 'rejected' && !traceReplyHistory.some((known) => known.id === event.id)) traceReplyHistory.push(event);
 			deliver(socket, ['OK', event.id, !reject, notice]);
-		};
-		const respondMetadata = (request: PendingRequest) => {
-			if (state.metadataFailuresRemaining > 0) {
-				state.metadataFailuresRemaining -= 1;
-				deliver(request.socket, ['CLOSED', request.subId, 'metadata test failure']);
-				return;
-			}
-			if ((request.filter.kinds as number[] | undefined)?.includes(40)) {
-				deliver(request.socket, ['EVENT', request.subId, channelEvent]);
-			}
-			deliver(request.socket, ['EOSE', request.subId]);
 		};
 		const respondPrimaryEvent = (request: PendingRequest) => {
 			if (request.filters.some((filter) => (filter.kinds as number[] | undefined)?.includes(42))) {
@@ -568,10 +534,7 @@ export async function installDelayedRelay(page: Page, options: {
 					else pendingRealtime.push(request);
 					return;
 				}
-				if (seed.has(relayUrl)) {
-					if (state.metadataReleased) respondMetadata(request);
-					else pendingMetadata.push(request);
-				} else if (authoritative.has(relayUrl)) {
+				if (authoritative.has(relayUrl)) {
 					const isTraceRoot = request.filters.some((filter) =>
 						(filter.kinds as number[] | undefined)?.includes(42) && filter.limit === 1000
 					);
@@ -616,12 +579,6 @@ export async function installDelayedRelay(page: Page, options: {
 		Object.assign(window, {
 			__relayStartupTest: {
 				state,
-				failMetadataDiscovery: () => {
-					// Fail every request already issued for the first discovery wave.
-					// There can be more than one metadata request per seed Relay.
-					state.metadataFailuresRemaining = pendingMetadata.length;
-					pendingMetadata.splice(0).forEach(respondMetadata);
-				},
 				releasePublishes: (kind: number) => {
 					if (kind === 1111) state.deferReplyPublishes = false;
 					if (kind === WORLD_STATE_KIND) state.deferPositionPublishes = false;
@@ -631,17 +588,14 @@ export async function installDelayedRelay(page: Page, options: {
 						respondPublish(pending.socket, pending.event);
 					}
 				},
-				releaseMetadata: () => {
-					state.metadataReleased = true;
-					pendingMetadata.splice(0).forEach(respondMetadata);
-				},
 				releasePrimaryEvents: () => {
 					state.primaryEventsReleased = true;
 					pendingPrimary.forEach(respondPrimaryEvent);
 				},
 				releasePrimary: () => {
 					state.primaryReleased = true;
-					pendingPrimary.splice(0).forEach((request) => deliver(request.socket, ['EOSE', request.subId]));
+					pendingPrimary.splice(0).forEach((request) => deliver(request.socket,
+						state.primaryTerminal === 'closed' ? ['CLOSED', request.subId, 'primary test closure'] : ['EOSE', request.subId]));
 				},
 				releaseTraceRoots: () => {
 					state.traceRootsReleased = true;
@@ -697,12 +651,11 @@ export async function installDelayedRelay(page: Page, options: {
 			}
 		});
 	}, {
-		seedRelays: SEED_RELAYS,
 		authoritativeRelays: AUTHORITATIVE_RELAYS,
-		channelEvent: options.channelEvent ?? CHANNEL_EVENT,
 		primaryEvents: events,
 		historyMessages: options.historyMessages ?? [],
 		deferPrimaryEvents: options.deferPrimaryEvents ?? false,
+		primaryTerminal: options.primaryTerminal ?? 'eose',
 		traceRoots: options.traceRoots ?? [],
 		traceReplies: options.traceReplies ?? [],
 		realtimeEvents: options.realtimeEvents ?? [],
@@ -720,7 +673,7 @@ export async function installDelayedRelay(page: Page, options: {
 
 export function relayState(page: Page) {
 	return page.evaluate(() => (window as typeof window & {
-		__relayStartupTest: { state: { requests: Array<{ url: string; subId: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] }>; published: Array<{ id: string; kind: number; content: string; tags: string[][]; pubkey?: string }>; closedSubscriptions: Array<{ subId: string; url: string }> }; failMetadataDiscovery(): void; releasePublishes(kind: number): void; deferPositionPublishes(): void; releaseMetadata(): void; releasePrimaryEvents(): void; releasePrimary(): void; releaseTraceRoots(): void; releaseTraceReplies(): void; deferTraceReplies(): void; injectTraceReply(event: object): void; injectClosedTraceReply(event: object): void; activeTraceReplyCount(): number; rejectMessagePublishes(): void; allowMessagePublishes(): void; rejectPositionPublishes(): void; allowPositionPublishes(): void; rejectTracePublishes(): void; allowTracePublishes(): void; injectPosition(event: object): void; injectMessage(event: object): void };
+		__relayStartupTest: { state: { requests: Array<{ url: string; subId: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] }>; published: Array<{ id: string; kind: number; content: string; tags: string[][]; pubkey?: string }>; closedSubscriptions: Array<{ subId: string; url: string }> }; releasePublishes(kind: number): void; deferPositionPublishes(): void; releasePrimaryEvents(): void; releasePrimary(): void; releaseTraceRoots(): void; releaseTraceReplies(): void; deferTraceReplies(): void; injectTraceReply(event: object): void; injectClosedTraceReply(event: object): void; activeTraceReplyCount(): number; rejectMessagePublishes(): void; allowMessagePublishes(): void; rejectPositionPublishes(): void; allowPositionPublishes(): void; rejectTracePublishes(): void; allowTracePublishes(): void; injectPosition(event: object): void; injectMessage(event: object): void };
 	}).__relayStartupTest);
 }
 
@@ -855,7 +808,6 @@ export async function openReadyRelayWorld(page: Page, expectedParticipantCount =
 	await expect(page.locator('.action-dock')).toBeVisible();
 	const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
 	await expect(editor).toBeVisible();
-	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
 	await expect.poll(async () => {
 		const requests = (await relayState(page)).state.requests;
 		return [42, WORLD_STATE_KIND].every((kind) => requests.some((request) =>
@@ -898,8 +850,8 @@ export async function openClearReadyWorld(page: Page): Promise<{ secret: Uint8Ar
 	await seedRelayAccount(page, secret, pubkey, startTime + 7 * 24 * 60 * 60 * 1000, 100_000);
 	await page.goto('/');
 	await page.evaluate(() => {
-		const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
-		relay.releaseMetadata(); relay.releasePrimary();
+		const relay = (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest;
+		relay.releasePrimary();
 	});
 	await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
 	return { secret, pubkey };

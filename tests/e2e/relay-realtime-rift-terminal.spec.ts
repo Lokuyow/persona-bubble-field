@@ -106,7 +106,6 @@ test.describe('Relay startup', () => {
 		await seedRelayAccount(page, selfSecret, selfPubkey);
 		await page.goto('/');
 		await expect(page.locator('[data-realtime-panel]')).toContainText('参加受付');
-		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest.releaseMetadata());
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${selfPubkey}"]`)).toBeVisible();
 
@@ -185,7 +184,6 @@ test.describe('Relay startup', () => {
 		await seedRelayAccount(page, selfSecret, selfPubkey);
 		await page.goto('/');
 		await expect(page.locator('[data-realtime-panel]')).toContainText('参加受付');
-		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest.releaseMetadata());
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${selfPubkey}"]`)).toBeVisible();
 		await page.locator('[data-realtime-hole-trigger]').click();
@@ -232,7 +230,6 @@ test.describe('Relay startup', () => {
 		await page.clock.setSystemTime(round.revealCutoffAtMs + 1_000);
 		await page.clock.runFor(2_000);
 		await expect(page.getByRole('dialog')).toHaveCount(0);
-		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest.releaseMetadata());
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
 		const exits = (await relayState(page)).state.published.filter((event) => event.kind === WORLD_STATE_KIND && event.pubkey === selfPubkey && event.tags.some((tag) => tag[0] === 'd' && tag[1]?.endsWith(':exit')));
 		expect(exits).toHaveLength(0);

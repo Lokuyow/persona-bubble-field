@@ -31,12 +31,11 @@ async function releaseRootDecryption(page: Page) {
 }
 
 async function waitForPrimary(page: Page) {
-	await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
-		AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) &&
-		[42, WORLD_STATE_KIND].includes(requestKind(request)!))).toBe(true);
+	await expect.poll(async () => (await relayState(page)).state.requests.filter((request) =>
+		request.filter.limit === undefined && [42, WORLD_STATE_KIND].includes(requestKind(request)!)).length).toBe(10);
 }
 
-test('starts world read before restored Root decryption and writes self only after restoration', async ({ page }) => {
+test('starts fixed-authority world reads before Root decryption and writes self only after restoration', async ({ page }) => {
 	const secret = fixtureSecret(23);
 	const selfPubkey = getPublicKey(secret);
 	const events = testEvents();
@@ -45,9 +44,10 @@ test('starts world read before restored Root decryption and writes self only aft
 	await seedRelayAccount(page, secret, selfPubkey);
 	await holdRootDecryption(page);
 	await page.goto('/');
-	await expect.poll(async () => (await relayState(page)).state.requests.filter((request) => [40, 41].includes(requestKind(request)!)).length).toBe(8);
-	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
 	await waitForPrimary(page);
+	const requests = (await relayState(page)).state.requests;
+	expect(requests.filter((request) => [40, 41].includes(requestKind(request)!))).toHaveLength(0);
+	expect(new Set(requests.map((request) => request.url))).toEqual(new Set(AUTHORITATIVE_RELAYS));
 	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimaryEvents(): void } }).__relayStartupTest.releasePrimaryEvents());
 	await expect(page.locator(`.participant[data-participant-id="${events.position.pubkey}"]`)).toBeVisible();
 	expect((await relayState(page)).state.published.filter((event) => event.pubkey === selfPubkey)).toHaveLength(0);
@@ -56,7 +56,6 @@ test('starts world read before restored Root decryption and writes self only aft
 	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
 	await expect(page.locator(`.participant[data-self="true"][data-participant-id="${selfPubkey}"]`)).toBeVisible();
 	await expect.poll(async () => (await relayState(page)).state.published.some((event) => event.kind === WORLD_STATE_KIND && event.pubkey === selfPubkey)).toBe(true);
-	expect((await relayState(page)).state.requests.filter((request) => [40, 41].includes(requestKind(request)!))).toHaveLength(8);
 	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseTraceRoots(): void } }).__relayStartupTest.releaseTraceRoots());
 	await expect.poll(async () => (await relayState(page)).state.requests.filter(isRealtimeRequest).length).toBeGreaterThan(0);
 });
@@ -74,8 +73,6 @@ test('keeps a queued Composer submission until the anonymous reader becomes the 
 	await installDelayedRelay(page, { primaryEvents: { message: events.message, position: selfPosition }, deferPrimaryEvents: true });
 	await holdRootDecryption(page);
 	await page.goto('/');
-	await expect.poll(async () => (await relayState(page)).state.requests.filter((request) => [40, 41].includes(requestKind(request)!)).length).toBe(8);
-	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
 	await waitForPrimary(page);
 	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimaryEvents(): void } }).__relayStartupTest.releasePrimaryEvents());
 	await expect(page.locator(`.participant[data-participant-id="${selfPubkey}"]`)).toBeVisible();
@@ -89,7 +86,7 @@ test('keeps a queued Composer submission until the anonymous reader becomes the 
 		event.kind === 42 && event.pubkey === selfPubkey && event.content === 'queued for owned writer').map((event) => event.id)).size).toBe(1);
 });
 
-test('keeps pre-geometry evidence until measured layout can reveal one participant', async ({ page }) => {
+test('retains primary evidence received before field geometry becomes ready', async ({ page }) => {
 	const events = testEvents();
 	await page.addInitScript(() => {
 		let released = false;
@@ -103,13 +100,11 @@ test('keeps pre-geometry evidence until measured layout can reveal one participa
 	await installHostOwnedStub(page);
 	await installDelayedRelay(page, { primaryEvents: events, deferPrimaryEvents: true });
 	await page.goto('/');
-	await expect.poll(async () => (await relayState(page)).state.requests.filter((request) => [40, 41].includes(requestKind(request)!)).length).toBe(8);
-	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
 	await waitForPrimary(page);
 	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimaryEvents(): void } }).__relayStartupTest.releasePrimaryEvents());
 	await expect(page.locator('.field-viewport.initial-field-geometry-ready')).toHaveCount(0);
 	await expect(page.locator(`.participant[data-participant-id="${events.position.pubkey}"]`)).toHaveCount(1);
-	const requestsBeforeGeometry = (await relayState(page)).state.requests.filter((request) => [40, 41, 42, WORLD_STATE_KIND].includes(requestKind(request)!)).length;
+	const requestsBeforeGeometry = (await relayState(page)).state.requests.length;
 	await page.evaluate(() => (window as typeof window & { __geometryBarrier: { release(): void } }).__geometryBarrier.release());
 	await page.setViewportSize({ width: 1279, height: 720 });
 	await expect(page.locator('.field-viewport.initial-field-geometry-ready')).toBeVisible();
@@ -124,30 +119,23 @@ test('keeps pre-geometry evidence until measured layout can reveal one participa
 	expect(layout.bottom).toBeGreaterThan(0);
 	expect(layout.left).toBeLessThan(1279);
 	expect(layout.top).toBeLessThan(720);
-	expect((await relayState(page)).state.requests.filter((request) => [40, 41, 42, WORLD_STATE_KIND].includes(requestKind(request)!))).toHaveLength(requestsBeforeGeometry);
+	expect((await relayState(page)).state.requests).toHaveLength(requestsBeforeGeometry);
 });
 
-test('clears failed early anonymous attempt when restored persona falls back to signed startup', async ({ page }) => {
-	const secret = fixtureSecret(23);
-	const selfPubkey = getPublicKey(secret);
+test('keeps validated evidence after every primary pair closes without metadata fallback', async ({ page }) => {
+	const events = testEvents();
 	await installHostOwnedStub(page);
-	await installDelayedRelay(page);
-	await seedRelayAccount(page, secret, selfPubkey);
-	await holdRootDecryption(page);
+	await installDelayedRelay(page, { primaryEvents: events, deferPrimaryEvents: true, primaryTerminal: 'closed' });
 	await page.goto('/');
-	await expect.poll(async () => (await relayState(page)).state.requests.filter((request) => [40, 41].includes(requestKind(request)!)).length).toBe(8);
-	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { failMetadataDiscovery(): void } }).__relayStartupTest.failMetadataDiscovery());
-	await releaseRootDecryption(page);
-	await expect.poll(async () => (await relayState(page)).state.requests.filter((request) => [40, 41].includes(requestKind(request)!)).length).toBeGreaterThan(8);
-	await page.evaluate(() => {
-		const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
-		relay.releaseMetadata(); relay.releasePrimary();
-	});
-	await expect(page.locator(`.participant[data-self="true"][data-participant-id="${selfPubkey}"]`)).toBeVisible();
-	const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
-	await editor.fill('signed startup recovered');
-	await page.locator('ehagaki-composer').getByRole('button', { name: 'Send' }).click();
-	await expect.poll(async () => (await relayState(page)).state.published.some((event) => event.kind === 42 && event.pubkey === selfPubkey && event.content === 'signed startup recovered')).toBe(true);
+	await waitForPrimary(page);
+	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimaryEvents(): void; releasePrimary(): void } }).__relayStartupTest.releasePrimaryEvents());
+	await expect(page.locator(`.participant[data-participant-id="${events.position.pubkey}"]`)).toBeVisible();
+	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+	await expect(page.locator(`.participant[data-participant-id="${events.position.pubkey}"]`)).toBeVisible();
+	const state = await relayState(page);
+	expect(state.state.requests.filter((request) => [40, 41].includes(requestKind(request)!))).toHaveLength(0);
+	expect(new Set(state.state.requests.map((request) => request.url))).toEqual(new Set(AUTHORITATIVE_RELAYS));
+	expect(state.state.requests.filter((request) => request.filter.limit === undefined && [42, WORLD_STATE_KIND].includes(requestKind(request)!))).toHaveLength(10);
 });
 
 test('does not use the early reader for an already expired persona terminal exit', async ({ page }) => {
@@ -158,12 +146,8 @@ test('does not use the early reader for an already expired persona terminal exit
 	await seedRelayAccount(page, secret, selfPubkey, Date.now() - 1000);
 	await holdRootDecryption(page);
 	await page.goto('/');
-	await expect.poll(async () => (await relayState(page)).state.requests.filter((request) => [40, 41].includes(requestKind(request)!)).length).toBe(8);
-	await page.evaluate(() => {
-		const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
-		relay.releaseMetadata(); relay.releasePrimary();
-	});
 	await waitForPrimary(page);
+	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
 	await releaseRootDecryption(page);
 	await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
 	const published = await page.evaluate(() => {
