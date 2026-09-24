@@ -79,6 +79,7 @@ test.describe('Relay startup', () => {
 		await seedRelayAccount(page, secret, pubkey);
 		await page.goto('/');
 		await expect(page.locator('.action-dock')).toBeVisible();
+		await expect(page.locator('[data-realtime-panel]')).toHaveCount(0);
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
 			AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) && (request.filter.kinds as number[])[0] === 42)).toBe(true);
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
@@ -90,13 +91,16 @@ test.describe('Relay startup', () => {
 
 		await page.clock.setSystemTime(schedule.warningAtMs + 1_000);
 		await page.clock.runFor(1_000);
+		await expect(page.locator('[data-realtime-panel]')).toBeVisible();
 		expect((await relayState(page)).state.requests.filter(isRealtimeRequest)).toHaveLength(AUTHORITATIVE_RELAYS.length);
 		await page.clock.setSystemTime(schedule.registrationAtMs + 1_000);
 		await page.clock.runFor(1_000);
+		await expect(page.locator('[data-realtime-panel]')).toBeVisible();
 		await expect.poll(async () => (await relayState(page)).state.requests.filter(isRealtimeRequest).some((request) => realtimeInstanceIds(request).includes(schedule.instanceId))).toBe(true);
 
 		await page.clock.setSystemTime(schedule.endedAtMs + 1_000);
 		await page.clock.runFor(1_000);
+		await expect(page.locator('[data-realtime-panel]')).toHaveCount(0);
 		await expect.poll(() => page.evaluate(() => (window as typeof window & {
 			__relayStartupTest: { activeRealtimeCount(): number }
 		}).__relayStartupTest.activeRealtimeCount())).toBe(AUTHORITATIVE_RELAYS.length);
@@ -127,6 +131,7 @@ test.describe('Relay startup', () => {
 
 		await page.clock.setSystemTime(schedule.endedAtMs + 1_000);
 		await page.clock.runFor(1_000);
+		await expect(page.locator('[data-realtime-panel]')).toHaveCount(0);
 		await expect.poll(() => page.evaluate(() => (window as typeof window & { __relayStartupTest: { activeRealtimeCount(): number } }).__relayStartupTest.activeRealtimeCount())).toBe(AUTHORITATIVE_RELAYS.length);
 		const closedAfterFirstDay = (await relayState(page)).state.closedSubscriptions;
 		const firstRequestIds = new Set(firstRealtimeRequests.map((request) => request.subId));
@@ -134,6 +139,7 @@ test.describe('Relay startup', () => {
 
 		await page.clock.setSystemTime(nextSchedule.registrationAtMs + 1_000);
 		await page.clock.runFor(1_000);
+		await expect(page.locator('[data-realtime-panel]')).toBeVisible();
 		await expect.poll(async () => (await relayState(page)).state.requests.filter(isRealtimeRequest).length).toBeGreaterThan(firstRealtimeRequests.length);
 		const allRealtimeRequests = (await relayState(page)).state.requests.filter(isRealtimeRequest);
 		const nextRealtimeRequests = allRealtimeRequests.slice(firstRealtimeRequests.length);

@@ -56,7 +56,7 @@
 	}
 </script>
 
-{#if schedule.phase !== 'dormant'}
+{#if schedule.phase === 'warning' || schedule.phase === 'registration' || schedule.phase === 'game'}
 	<section class="cooperation-defection-panel" data-realtime-panel data-realtime-status={status} aria-label="協力と抜け駆け">
 		<div class="cooperation-defection-heading">
 			<div>
@@ -124,8 +124,6 @@
 				<p class="cooperation-defection-note">公開猶予の終了後に、確定した選択をまとめて表示します。</p>
 			{/if}
 			<p class="cooperation-defection-status" data-cooperation-defection-selection-status>{commitStatus}</p>
-		{:else if schedule.phase === 'ended'}
-			<p class="cooperation-defection-note">本日の開催は終了しました。</p>
 		{/if}
 		{#if lastRoundResult}
 			<section class="cooperation-defection-result" data-cooperation-defection-round-result aria-label={`ラウンド${lastRoundResult.round}の結果`}>
