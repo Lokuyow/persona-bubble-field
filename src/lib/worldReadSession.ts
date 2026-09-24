@@ -40,7 +40,17 @@ import {
 import type { Direction } from './geometry';
 import { isBlockedFacilityCell } from './fieldFacilities';
 import type { Event as NostrEvent, VerifiedEvent } from 'nostr-tools/pure';
-import type { ActiveSignerSnapshot, SelfWriteAuthorizationResult } from './rootIdentity';
+import {
+	confirmWorldPosition,
+	loadWorldWriteJournal,
+	reserveWorldPositive,
+	type ActiveSignerSnapshot,
+	type CommittedTerminalExit,
+	type SelfWriteAuthorizationResult,
+	type WorldWriteJournalScope,
+	type WorldWriteJournalSnapshot,
+	type WorldWriteReservation
+} from './rootIdentity';
 import type { SpeechType } from './conversation';
 import { reachedAuthoritativeRelay } from './initialProfilePublication';
 import {
@@ -148,6 +158,7 @@ export type DeathLastWordsPublishResult =
 export type WorldReadSessionOptions = Readonly<{
 	field: PresenceField;
 	selfSigner?: ActiveSignerSnapshot | null;
+	selfRunNumber?: number;
 	onPresenceChanged: (presence: PresenceState) => void;
 	onLiveMessage: (message: ParsedWorldMessage, presence: PresenceState) => void;
 	onTimelineMessage?: (message: ParsedWorldMessage) => void;
@@ -164,6 +175,7 @@ export type WorldReadSessionOptions = Readonly<{
 
 export type WorldReadSessionSelfAttachment = Readonly<{
 	signer: ActiveSignerSnapshot;
+	runNumber?: number;
 	authorizeSelfWrite?: () => Promise<SelfWriteAuthorizationResult>;
 	onSelfWriteAuthorizationLost?: () => void;
 }>;
@@ -176,11 +188,15 @@ type BufferedLiveEvent =
 type SelfPositionOperation = Readonly<{
 	id: string;
 	operation: SelfPositionOperationKind;
+	reservation?: WorldWriteReservation;
+	event?: VerifiedEvent;
+	onEcho?: () => void;
 }>;
 
 type SelfMessageOperation = {
 	id: string;
 	echoConfirmed: boolean;
+	onEcho?: () => void;
 };
 
 function bootstrapSince(nowMs: number): number {
@@ -205,6 +221,18 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	let terminal = false;
 	let started = false;
 	let bootstrapComplete = false;
+	let selfReadReady = false;
+	let resolveSelfReadReady!: () => void;
+	let rejectSelfReadReady!: (error: Error) => void;
+	const selfReadReadyPromise = new Promise<void>((resolve, reject) => { resolveSelfReadReady = resolve; rejectSelfReadReady = reject; });
+	void selfReadReadyPromise.catch(() => {});
+	let journalScope: WorldWriteJournalScope | null = null;
+	let journalSnapshot: WorldWriteJournalSnapshot | null = null;
+	let journalLoaded = false;
+	let journalLoadPromise: Promise<void> | null = null;
+	let startupSecond = 0;
+	const locallyConfirmedPositions: ParsedWorldStateEvent[] = [];
+	const locallyConfirmedMessages: ParsedWorldMessage[] = [];
 	let transport: ReturnType<typeof createNostrRelayTransport> | null = null;
 	let channel: ChannelReference | null = null;
 	let messageSince = 0;
@@ -241,6 +269,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	const appliedCanonicalPositionEventIds = new Set<string>();
 	const appliedCanonicalMessageEventIds = new Set<string>();
 	let preparedTerminalExit: Extract<TerminalExitPreparation, { kind: 'prepared' }> | null = null;
+	let terminalExitCommitted = false;
 	let terminalExitAttempted = false;
 	let deathTraceEnabled = false;
 	let deathTraceAttempted = false;
@@ -261,7 +290,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	}
 
 	function refreshSelfMessageAvailability(): void {
-		const next: SelfMessageAvailability = !disposed &&
+		const next: SelfMessageAvailability = !disposed && !terminal &&
 			Boolean(selfSigner && transport && channel && selfJoinedThisSession &&
 				presence.participants.some((participant) => participant.id === selfSigner?.pubkey))
 			? { kind: 'ready' }
@@ -309,7 +338,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 
 	function startRealtimeSubscription(configuration?: RealtimeStartConfiguration): Promise<void> {
 		const realtimeOptions = options.realtime;
-		if (disposed || !transport || !channel || !realtimeOptions?.registry.length) return Promise.resolve();
+		if (disposed || journalScope && !bootstrapComplete || !transport || !channel || !realtimeOptions?.registry.length) return Promise.resolve();
 		const candidateConfiguration = configuration ?? realtimeOptions.getStartConfiguration?.() ?? {
 			controlSince: realtimeOptions.controlSince,
 			instanceFilters: realtimeOptions.instanceFilters
@@ -348,7 +377,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		terminal = true;
 		if (!selfSigner || !channel) return { kind: 'unavailable', reason: 'missing-self' };
 		if (expectedPubkey !== undefined && expectedPubkey !== selfSigner.pubkey) return { kind: 'unavailable', reason: 'identity-mismatch' };
-		if (!started || !bootstrapComplete || !transport) return { kind: 'unavailable', reason: 'not-ready' };
+		if (!started || !selfReadReady || !transport) return { kind: 'unavailable', reason: 'not-ready' };
 		const self = worldPresence.participants.find((participant) => participant.pubkey === selfSigner!.pubkey);
 		if (!self) return { kind: 'unavailable', reason: 'missing-position' };
 		const latestPositionEvidence = Math.max(
@@ -373,11 +402,23 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		return preparedTerminalExit;
 	}
 
+	function commitTerminalExit(exit: CommittedTerminalExit): void {
+		if (!terminal || !preparedTerminalExit || !selfSigner || !channel || disposed) throw new Error('Terminal exit was not prepared.');
+		const event = finalizeWorldEvent(buildWorldStateEventTemplate({
+			channel, position: exit.position, slot: 'exit', createdAt: exit.createdAt
+		}), selfSigner.secretKey);
+		const parsed = parseWorldStateEvent(event, channel.channelId);
+		if (!parsed || parsed.state !== 'exit') throw new Error('Committed terminal exit is invalid.');
+		preparedTerminalExit = { kind: 'prepared', event, parsed };
+		terminalExitCommitted = true;
+	}
+
 	async function publishTerminalExit(): Promise<TerminalExitPublishResult> {
-		if (disposed || !terminal || !transport || !preparedTerminalExit || terminalExitAttempted) return { kind: 'unavailable' };
+		if (disposed || !terminal || !transport || !preparedTerminalExit || !terminalExitCommitted || terminalExitAttempted) return { kind: 'unavailable' };
 		terminalExitAttempted = true;
 		try {
-			return { kind: 'published', results: await transport.publish(preparedTerminalExit.event) };
+			const handle = transport.publishSelf?.(preparedTerminalExit.event, selfSigner!.pubkey);
+			return { kind: 'published', results: handle ? await handle.settled : await transport.publish(preparedTerminalExit.event) };
 		} catch {
 			return { kind: 'failed' };
 		}
@@ -510,9 +551,14 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 
 	function applyCanonicalMessage(message: ParsedWorldMessage, nowMs: number, rawEvent?: NostrEvent): boolean {
 		if (appliedCanonicalMessageEventIds.has(message.id)) return false;
+		if (terminal && pendingSelfMessage?.id === message.id) return false;
 		appliedCanonicalMessageEventIds.add(message.id);
 		if (!disposed) options.onTimelineMessage?.(message);
-		if (pendingSelfMessage?.id === message.id) pendingSelfMessage.echoConfirmed = true;
+		if (pendingSelfMessage?.id === message.id) {
+			pendingSelfMessage.echoConfirmed = true;
+			pendingSelfMessage.onEcho?.();
+			if (!locallyConfirmedMessages.some((known) => known.id === message.id)) locallyConfirmedMessages.push(message);
+		}
 		if (message.createdAt < messageSince) return true;
 		worldPresence = applyWorldPresenceMessage(worldPresence, message);
 		const nextPresence = project(nowMs);
@@ -522,11 +568,24 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	}
 
 	function applyLiveMessage(message: ParsedWorldMessage, rawEvent: NostrEvent, nowMs: number): void {
+		if (journalScope && pendingSelfMessage?.id === message.id) {
+			void authorizeSelfWrite().then((authorized) => {
+				if (authorized && !disposed && !terminal) applyCanonicalMessage(message, Date.now(), rawEvent);
+			}).catch(() => {});
+			return;
+		}
 		applyCanonicalMessage(message, nowMs, rawEvent);
 	}
 
 	function applyLivePosition(event: ParsedWorldStateEvent, nowMs: number): void {
 		observeLivePosition(event);
+		const ownOperation = pendingSelfOperation?.id === event.id ? pendingSelfOperation : retryableSelfOperations.get(event.id);
+		if (journalScope && ownOperation?.reservation && ownOperation.event) {
+			void confirmWorldPosition(journalScope, ownOperation.reservation, ownOperation.event).then((confirmed) => {
+				if (confirmed && !disposed && !terminal) applyCanonicalPosition(event, Date.now());
+			}).catch(() => {});
+			return;
+		}
 		applyCanonicalPosition(event, nowMs);
 	}
 
@@ -534,12 +593,22 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	// It can safely improve the visible field before final EOSE, but it must not
 	// produce conversation or make self writes available before canonical handoff.
 	function applyBootstrapMessage(message: ParsedWorldMessage, nowMs: number): void {
+		if (journalScope && pendingSelfMessage?.id === message.id) {
+			void authorizeSelfWrite().then((authorized) => {
+				if (authorized && !disposed && !terminal) applyCanonicalMessage(message, Date.now());
+			}).catch(() => {});
+			return;
+		}
 		if (message.createdAt < messageSince) return;
 		worldPresence = applyWorldPresenceMessage(worldPresence, message);
 		project(nowMs);
 	}
 
 	function applyBootstrapPosition(event: ParsedWorldStateEvent, nowMs: number): void {
+		if (journalScope && (pendingSelfOperation?.id === event.id || retryableSelfOperations.has(event.id))) {
+			applyLivePosition(event, nowMs);
+			return;
+		}
 		observeLivePosition(event);
 		worldPresence = applyWorldPresenceWorldState(worldPresence, event);
 		project(nowMs);
@@ -555,6 +624,8 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 
 	function applyCanonicalPosition(event: ParsedWorldStateEvent, nowMs: number): boolean {
 		if (appliedCanonicalPositionEventIds.has(event.id)) return false;
+		if (terminal && event.state === 'active' && selfSigner && event.pubkey === selfSigner.pubkey &&
+			(pendingSelfOperation?.id === event.id || retryableSelfOperations.has(event.id))) return false;
 		appliedCanonicalPositionEventIds.add(event.id);
 		worldPresence = applyWorldPresenceWorldState(worldPresence, event);
 		const nextPresence = project(nowMs);
@@ -564,6 +635,13 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			);
 			const pendingOperation = pendingSelfOperation?.id === event.id ? pendingSelfOperation : null;
 			const retryableOperation = retryableSelfOperations.get(event.id);
+			if (pendingOperation || retryableOperation) {
+				if (!locallyConfirmedPositions.some((known) => known.id === event.id)) locallyConfirmedPositions.push(event);
+				pendingOperation?.onEcho?.();
+				if (retryableOperation?.reservation && retryableOperation.event && journalScope) {
+					void confirmWorldPosition(journalScope, retryableOperation.reservation, retryableOperation.event).catch(() => {});
+				}
+			}
 			if (pendingOperation) {
 				retryableSelfOperations.delete(event.id);
 				emitSelfPositionWriteState({ kind: 'succeeded', operation: pendingOperation.operation });
@@ -583,10 +661,43 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		return project(Date.now());
 	}
 
+	function ensureJournalLoaded(): Promise<void> {
+		if (journalLoaded) return Promise.resolve();
+		if (journalLoadPromise) return journalLoadPromise;
+		journalLoadPromise = (async () => {
+			if (journalScope) {
+				journalSnapshot = await loadWorldWriteJournal(journalScope);
+				const confirmed = journalSnapshot?.confirmedPosition;
+				const parsed = confirmed && channel ? parseWorldStateEvent(confirmed, channel.channelId) : null;
+				if (confirmed && (!parsed || parsed.pubkey !== journalScope.identity.pubkey)) throw new Error('World write journal is invalid.');
+				if (parsed && parsed.state === 'active' && parsed.createdAt > (journalSnapshot?.exitSecond ?? -1)) {
+					if (!locallyConfirmedPositions.some((known) => known.id === parsed.id)) locallyConfirmedPositions.push(parsed);
+					observeLivePosition(parsed);
+					worldPresence = applyWorldPresenceWorldState(worldPresence, parsed);
+					project(Date.now());
+				}
+			}
+			journalLoaded = true;
+	})();
+		return journalLoadPromise;
+	}
+
+	function requiresNewRunEntry(): boolean {
+		return Boolean(journalScope && journalScope.runNumber > 1 && !selfJoinedThisSession && !journalSnapshot?.confirmedPosition);
+	}
+
+	async function waitForActualSecond(afterSecond: number): Promise<boolean> {
+		while (!disposed && !terminal && Math.floor(Date.now() / 1000) <= afterSecond) {
+			const until = (afterSecond + 1) * 1000 - Date.now();
+			await new Promise<void>((resolve) => setTimeout(resolve, Math.max(1, Math.min(until, 1000))));
+		}
+		return !disposed && !terminal;
+	}
+
 	function selfOperationCandidate(
 		operation: Exclude<SelfPositionOperationKind, 'trace-inspection' | 'trace-reply'>,
 		direction?: Direction
-	): Readonly<{ event: VerifiedEvent; parsed: ParsedWorldStateEvent }> | null {
+	): Readonly<{ event: VerifiedEvent; parsed: ParsedWorldStateEvent; previousState: PositionPublishState }> | null {
 		if (!selfSigner || !channel) return null;
 		const nowMs = Date.now();
 		const state = currentPresence();
@@ -613,9 +724,11 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		position: ParsedWorldStateEvent['position'],
 		nowMs: number,
 		minimumCreatedAt = 0
-	): Readonly<{ event: VerifiedEvent; parsed: ParsedWorldStateEvent }> | null {
+	): Readonly<{ event: VerifiedEvent; parsed: ParsedWorldStateEvent; previousState: PositionPublishState }> | null {
 		if (!selfSigner || !channel) return null;
-		const createdAt = Math.max(Math.floor(nowMs / 1000), minimumCreatedAt);
+		const createdAt = journalScope ? Math.floor(nowMs / 1000) : Math.max(Math.floor(nowMs / 1000), minimumCreatedAt);
+		if (createdAt < minimumCreatedAt) return null;
+		const previousState = positionPublishState;
 		const plan = planPositionPublish(positionPublishState, createdAt);
 		if (plan.kind === 'unavailable') return null;
 		const signed = finalizeWorldEvent(buildWorldStateEventTemplate({
@@ -629,10 +742,10 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		positionPublishState = plan.nextState;
 		selfPositionEvidence = retainPositionPublishEvidence(selfPositionEvidence, parsed, selfSigner.pubkey);
 		positionEvidenceByPubkey.set(selfSigner.pubkey, selfPositionEvidence);
-		return { event: signed, parsed };
+		return { event: signed, parsed, previousState };
 	}
 
-	function selfMessageCandidate(content: string, speechType: SpeechType): Readonly<{ event: VerifiedEvent; parsed: ParsedWorldMessage }> | null {
+	function selfMessageCandidate(content: string, speechType: SpeechType, createdAt = Math.floor(Date.now() / 1000)): Readonly<{ event: VerifiedEvent; parsed: ParsedWorldMessage }> | null {
 		if (!selfSigner || !channel || !selfJoinedThisSession) return null;
 		const nowMs = Date.now();
 		const state = currentPresence();
@@ -648,7 +761,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			content,
 			speechType,
 			position: participant.position,
-			createdAt: Math.floor(nowMs / 1000)
+			createdAt
 		}), selfSigner.secretKey);
 		const parsed = parseWorldMessage(signed, channel.channelId);
 		if (!parsed) throw new Error('Locally signed world message did not pass the project parser.');
@@ -658,16 +771,72 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	async function publishMessage(content: string, speechType: SpeechType): Promise<SelfMessagePublishResult> {
 		if (disposed || terminal || !selfSigner || !transport || !channel) return { kind: 'unavailable' };
 		if (pendingSelfMessage || pendingTraceReply) return { kind: 'pending' };
-		const candidate = selfMessageCandidate(content, speechType);
+		if (journalScope) await ensureJournalLoaded();
+		let createdAt = Math.floor(Date.now() / 1000);
+		if (journalScope) {
+			for (;;) {
+				const observedExitSecond = worldPresence.participants.find((known) => known.pubkey === selfSigner?.pubkey)?.latestExitCreatedAt ?? null;
+				const reserved = await reserveWorldPositive({ scope: journalScope, kind: 'message', nowSecond: createdAt,
+					observedSecond: positionPublishState.lastPublishSecond, observedConsumedSlots: positionPublishState.consumedSlots,
+					observedExitSecond });
+				if (reserved.kind === 'wait') {
+					if (!await waitForActualSecond(reserved.untilSecond - 1)) return { kind: 'unavailable' };
+					createdAt = Math.floor(Date.now() / 1000);
+					continue;
+				}
+				if (reserved.kind !== 'reserved') {
+					if (reserved.kind === 'stale') await authorizeSelfWrite();
+					else {
+						terminal = true;
+						refreshSelfMessageAvailability();
+						emitSelfPositionWriteState({ kind: 'unavailable' });
+					}
+					return { kind: 'unavailable' };
+				}
+				createdAt = reserved.reservation.createdAt;
+				break;
+			}
+		}
+		const candidate = selfMessageCandidate(content, speechType, createdAt);
 		if (!candidate) return { kind: 'blocked' };
 		const { event, parsed } = candidate;
-		pendingSelfMessage = { id: parsed.id, echoConfirmed: false };
+		let resolveEcho!: () => void;
+		const echoed = new Promise<void>((resolve) => { resolveEcho = resolve; });
+		pendingSelfMessage = { id: parsed.id, echoConfirmed: false, onEcho: resolveEcho };
 		if (!await authorizeSelfWrite() || terminal) {
 			if (pendingSelfMessage?.id === parsed.id) pendingSelfMessage = null;
 			return { kind: 'unavailable' };
 		}
 
 		try {
+			if (journalScope && transport.publishSelf) {
+				const handle = transport.publishSelf(event, selfSigner.pubkey);
+				void handle.settled.catch(() => {});
+				const confirmed = await Promise.race([handle.firstSuccess.then((success) => success ? 'ack' as const : 'none' as const),
+					echoed.then(() => 'echo' as const)]);
+				if (disposed || terminal || !await authorizeSelfWrite().catch(() => false)) {
+					if (pendingSelfMessage?.id === parsed.id) pendingSelfMessage = null;
+					return { kind: 'unavailable' };
+				}
+				if (confirmed === 'ack' || confirmed === 'echo') {
+					applyCanonicalMessage(parsed, Date.now(), event);
+					if (pendingSelfMessage?.id === parsed.id) pendingSelfMessage = null;
+					return { kind: 'succeeded', eventId: parsed.id };
+				}
+				await handle.settled.catch(() => []);
+				if (disposed || terminal || !await authorizeSelfWrite().catch(() => false)) {
+					if (pendingSelfMessage?.id === parsed.id) pendingSelfMessage = null;
+					return { kind: 'unavailable' };
+				}
+				const echoConfirmed = pendingSelfMessage?.id === parsed.id && pendingSelfMessage.echoConfirmed;
+				if (echoConfirmed) {
+					applyCanonicalMessage(parsed, Date.now(), event);
+					pendingSelfMessage = null;
+					return { kind: 'succeeded', eventId: parsed.id };
+				}
+				if (pendingSelfMessage?.id === parsed.id) pendingSelfMessage = null;
+				return { kind: 'retryable' };
+			}
 			const results = await transport.publish(event);
 			if (disposed) return { kind: 'unavailable' };
 			const echoConfirmed = pendingSelfMessage?.id === parsed.id && pendingSelfMessage.echoConfirmed;
@@ -693,11 +862,51 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 
 	async function publishPreparedSelfPosition(
 		operation: SelfPositionOperationKind,
-		candidate: Readonly<{ event: VerifiedEvent; parsed: ParsedWorldStateEvent }>
+		candidate: Readonly<{ event: VerifiedEvent; parsed: ParsedWorldStateEvent; previousState: PositionPublishState }>
 	): Promise<SelfPositionWriteResult> {
 		const { event, parsed } = candidate;
+		let reservation: WorldWriteReservation | undefined;
+		if (journalScope) {
+			const observedExitSecond = worldPresence.participants.find((known) => known.pubkey === selfSigner?.pubkey)?.latestExitCreatedAt ?? null;
+			const reserved = await reserveWorldPositive({ scope: journalScope, kind: 'position', nowSecond: parsed.createdAt,
+				observedSecond: candidate.previousState.lastPublishSecond, observedConsumedSlots: candidate.previousState.consumedSlots,
+				observedExitSecond,
+				...(operation === 'entry' && requiresNewRunEntry()
+					? { freshAfterSecond: candidate.previousState.lastPublishSecond ?? -1 }
+					: operation === 'entry' && !bootstrapComplete && !journalSnapshot ? { freshAfterSecond: startupSecond } : {}) });
+			if (reserved.kind === 'wait' && operation === 'entry') {
+				if (!await waitForActualSecond(reserved.untilSecond - 1)) return { kind: 'unavailable' };
+				const active = getParticipant(currentPresence(), selfSigner!.pubkey);
+				if (bootstrapComplete && !requiresNewRunEntry() && active?.status === 'active' && !isBlockedFacilityCell(active.position)) {
+					selfJoinedThisSession = true;
+					refreshSelfMessageAvailability();
+					return { kind: 'not-needed' };
+				}
+				const next = selfOperationCandidate('entry');
+				return next ? publishPreparedSelfPosition('entry', next) : { kind: 'blocked' };
+			}
+			if (reserved.kind !== 'reserved') {
+				if (reserved.kind === 'stale') await authorizeSelfWrite();
+				else if (reserved.kind !== 'wait') {
+					terminal = true;
+					refreshSelfMessageAvailability();
+					emitSelfPositionWriteState({ kind: 'unavailable' });
+				}
+				return { kind: reserved.kind === 'wait' ? 'blocked' : 'unavailable' };
+			}
+			if (reserved.reservation.createdAt !== parsed.createdAt || reserved.reservation.slot !== parsed.slot) {
+				onSelfWriteAuthorizationLostCallback?.();
+				return { kind: 'unavailable' };
+			}
+			reservation = reserved.reservation;
+			journalSnapshot = { lastReservedSecond: parsed.createdAt, consumedSlots: parsed.slot === 0 ? 1 : 2,
+				lastPositiveSecond: parsed.createdAt, exitSecond: journalSnapshot?.exitSecond ?? null,
+				confirmedPosition: journalSnapshot?.confirmedPosition ?? null };
+		}
 		// The planner was consumed before this call. It must never be rolled back.
-		pendingSelfOperation = { id: parsed.id, operation };
+		let resolveEcho!: () => void;
+		const echoed = new Promise<void>((resolve) => { resolveEcho = resolve; });
+		pendingSelfOperation = { id: parsed.id, operation, event, ...(reservation ? { reservation } : {}), onEcho: resolveEcho };
 		latestSelfOperationId = parsed.id;
 		emitSelfPositionWriteState({ kind: 'pending', operation });
 		if (!await authorizeSelfWrite() || terminal) {
@@ -706,6 +915,37 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			return { kind: 'unavailable' };
 		}
 		try {
+			const publishSelf = (transport as Partial<NonNullable<typeof transport>>).publishSelf;
+			const handle = reservation && publishSelf ? publishSelf(event, selfSigner!.pubkey) : null;
+			if (handle) {
+				void handle.settled.catch(() => {});
+				const confirmed = await Promise.race([handle.firstSuccess.then((success) => success ? 'ack' as const : 'none' as const),
+					echoed.then(() => 'echo' as const)]);
+				if (confirmed === 'ack' || confirmed === 'echo') {
+					if (disposed || terminal) return { kind: 'unavailable' };
+					if (journalScope && reservation) {
+						let confirmedPosition = false;
+						try { confirmedPosition = await confirmWorldPosition(journalScope, reservation, event); } catch { /* Fail closed below. */ }
+						if (!confirmedPosition) {
+							await authorizeSelfWrite().catch(() => false);
+							terminal = true;
+							if (pendingSelfOperation?.id === parsed.id) pendingSelfOperation = null;
+							refreshSelfMessageAvailability();
+							emitSelfPositionWriteState({ kind: 'unavailable' });
+							return { kind: 'unavailable' };
+						}
+					}
+					applyCanonicalPosition(parsed, Date.now());
+					return { kind: 'succeeded', operation };
+				}
+				await handle.settled.catch(() => []);
+				if (disposed || terminal) return { kind: 'unavailable' };
+				if (pendingSelfOperation?.id !== parsed.id) return { kind: 'succeeded', operation };
+				retryableSelfOperations.set(parsed.id, pendingSelfOperation);
+				pendingSelfOperation = null;
+				emitSelfPositionWriteState({ kind: 'retryable', operation });
+				return { kind: 'retryable', operation };
+			}
 			const results = await transport!.publish(event);
 			if (disposed) return { kind: 'unavailable' };
 			if (pendingSelfOperation?.id !== parsed.id) {
@@ -747,7 +987,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	/** Best-effort positive activity refresh for successful browser-local actions. */
 	async function refreshSelfActivity(): Promise<SelfPositionWriteResult> {
 		if (disposed || terminal || !selfSigner || !transport || !channel) return { kind: 'unavailable' };
-		if (!bootstrapComplete || !selfJoinedThisSession) return { kind: 'blocked' };
+		if ((!bootstrapComplete && !(journalScope && selfReadReady)) || !selfJoinedThisSession) return { kind: 'blocked' };
 		if (pendingSelfOperation || pendingSelfMessage || pendingTraceReply) return { kind: 'pending' };
 		const participant = getParticipant(currentPresence(), selfSigner.pubkey);
 		if (!participant || participant.status !== 'active') return { kind: 'blocked' };
@@ -1092,9 +1332,15 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		async start(): Promise<WorldReadBootstrap> {
 			if (started) throw new Error('World read session start is only allowed once.');
 			started = true;
-			transport = createNostrRelayTransport(resolvePrototypeWorldConfig());
+			const world = resolvePrototypeWorldConfig();
+			channel = { channelId: world.channelId, relayHint: world.preferredRelayHint };
+			transport = createNostrRelayTransport(world);
 			emitStatus({ kind: 'bootstrapping' });
 			const nowMs = Date.now();
+			startupSecond = Math.floor(nowMs / 1000);
+			if (selfSigner && options.selfRunNumber !== undefined) journalScope = {
+				identity: selfSigner.identity, runNumber: options.selfRunNumber, channelId: world.channelId
+			};
 			const since = bootstrapSince(nowMs);
 			messageSince = since;
 
@@ -1102,6 +1348,11 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 				const result = await transport.start({
 					messageSince: since,
 					worldStateSince: since,
+					onEarlySelfReadReady: () => {
+						if (disposed || selfReadReady) return;
+						selfReadReady = true;
+						resolveSelfReadReady();
+					},
 					onBootstrapMessage: (event) => applyBootstrapMessage(event, Date.now()),
 					onBootstrapWorldState: (event) => applyBootstrapPosition(event, Date.now()),
 					onBootstrapTrace: () => {},
@@ -1110,10 +1361,16 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 					onLiveTrace: (event, rawEvent) => receiveLive({ kind: 'trace', event, rawEvent }),
 					onPrimaryClosed: markDegraded
 				});
+				if (!selfReadReady) {
+					selfReadReady = true;
+					resolveSelfReadReady();
+				}
 				if (disposed) throw new Error('World read session was disposed during startup.');
 
 				const recentMessages = result.messages.filter((message) => message.createdAt >= messageSince);
-				worldPresence = reconstructWorldPresenceState(options.field, recentMessages, result.worldStates);
+				worldPresence = reconstructWorldPresenceState(options.field,
+					[...new Map([...recentMessages, ...locallyConfirmedMessages].map((event) => [event.id, event])).values()],
+					[...new Map([...result.worldStates, ...locallyConfirmedPositions].map((event) => [event.id, event])).values()]);
 				for (const event of result.messages) appliedCanonicalMessageEventIds.add(event.id);
 				for (const event of result.worldStates) {
 					appliedCanonicalPositionEventIds.add(event.id);
@@ -1140,6 +1397,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 					realtimeStatus
 				};
 			} catch (error) {
+				rejectSelfReadReady(error instanceof Error ? error : new Error('Relay startup failed.'));
 				if (!disposed) {
 					const message = error instanceof Error ? error.message : 'Relay startup failed.';
 					emitStatus({ kind: 'failed', message });
@@ -1148,13 +1406,19 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			}
 		},
 
+		whenSelfReadReady(): Promise<void> {
+			return selfReadReadyPromise;
+		},
+
 		async attachSelf(attachment: WorldReadSessionSelfAttachment): Promise<void> {
 			if (disposed) throw new Error('Cannot attach self to a disposed world session.');
-			if (!started || !bootstrapComplete || !transport || !channel) {
-				throw new Error('World session must complete bootstrap before attaching self.');
+			if (!started || !selfReadReady || !transport || !channel) {
+				throw new Error('World session must reach the bounded primary read boundary before attaching self.');
 			}
 			if (selfSigner) throw new Error('World session already has a self attached.');
 			selfSigner = attachment.signer;
+			if (attachment.runNumber !== undefined) journalScope = { identity: attachment.signer.identity,
+				runNumber: attachment.runNumber, channelId: channel.channelId };
 			authorizeSelfWriteCallback = attachment.authorizeSelfWrite;
 			onSelfWriteAuthorizationLostCallback = attachment.onSelfWriteAuthorizationLost;
 			selfPositionEvidence = positionEvidenceByPubkey.get(selfSigner.pubkey) ?? [];
@@ -1162,13 +1426,16 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			for (const pubkey of positionEvidenceByPubkey.keys()) {
 				if (pubkey !== selfSigner.pubkey) positionEvidenceByPubkey.delete(pubkey);
 			}
+			await ensureJournalLoaded();
 			emitSelfPositionWriteState({ kind: 'ready' });
 			refreshSelfMessageAvailability();
 			refreshTraceReadSnapshot();
-			traceStartupReadiness = startTraceNotification();
-			void traceStartupReadiness.then(() => {
-				if (!disposed && options.realtime?.registry.length) void startRealtimeSubscription();
-			}).catch(() => {});
+			if (bootstrapComplete) {
+				traceStartupReadiness = startTraceNotification();
+				void traceStartupReadiness.then(() => {
+					if (!disposed && options.realtime?.registry.length) void startRealtimeSubscription();
+				}).catch(() => {});
+			}
 		},
 
 		completeBootstrap(): void {
@@ -1176,26 +1443,43 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			bootstrapComplete = true;
 			const buffered = pendingLiveEvents.splice(0);
 			for (const event of buffered) receiveLive(event);
+			if (selfSigner && !traceStartupReadiness) {
+				traceStartupReadiness = startTraceNotification();
+				void traceStartupReadiness.then(() => {
+					if (!disposed && options.realtime?.registry.length) void startRealtimeSubscription();
+				}).catch(() => {});
+			}
 		},
 
-		enterSelf(): Promise<SelfPositionWriteResult> {
+		async enterSelf(): Promise<SelfPositionWriteResult> {
 			if (disposed || terminal) return Promise.resolve({ kind: 'unavailable' });
-			if (!bootstrapComplete) return Promise.resolve({ kind: 'blocked' });
+			if (!bootstrapComplete && !(journalScope && selfReadReady)) return { kind: 'blocked' };
 			if (pendingTraceReply) return Promise.resolve({ kind: 'pending' });
 			if (!selfSigner) return publishSelfPosition('entry');
-			const participant = getParticipant(currentPresence(), selfSigner.pubkey);
-			if (participant?.status === 'active' && !isBlockedFacilityCell(participant.position)) {
+			if (journalScope) await ensureJournalLoaded();
+			const alreadyActive = getParticipant(currentPresence(), selfSigner.pubkey);
+			if (!requiresNewRunEntry() && alreadyActive?.status === 'active' && !isBlockedFacilityCell(alreadyActive.position)) {
 				selfJoinedThisSession = true;
 				refreshSelfMessageAvailability();
 				emitSelfPositionWriteState({ kind: 'ready' });
-				return Promise.resolve({ kind: 'not-needed' });
+				return { kind: 'not-needed' };
+			}
+			if (journalScope && !journalSnapshot && !bootstrapComplete) {
+				if (!await waitForActualSecond(startupSecond)) return { kind: 'unavailable' };
+			}
+			const participant = getParticipant(currentPresence(), selfSigner.pubkey);
+			if (!requiresNewRunEntry() && participant?.status === 'active' && !isBlockedFacilityCell(participant.position)) {
+				selfJoinedThisSession = true;
+				refreshSelfMessageAvailability();
+				emitSelfPositionWriteState({ kind: 'ready' });
+				return { kind: 'not-needed' };
 			}
 			return publishSelfPosition('entry');
 		},
 
 		moveSelf(direction: Direction): Promise<SelfPositionWriteResult> {
 			if (disposed || terminal) return Promise.resolve({ kind: 'unavailable' });
-			if (!bootstrapComplete) return Promise.resolve({ kind: 'blocked' });
+			if (!bootstrapComplete && !(journalScope && selfReadReady)) return Promise.resolve({ kind: 'blocked' });
 			if (!selfSigner) return publishSelfPosition('movement', direction);
 			const participant = getParticipant(currentPresence(), selfSigner.pubkey);
 			if (!participant) return publishSelfPosition('entry');
@@ -1259,6 +1543,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		},
 
 		prepareTerminalExit,
+		commitTerminalExit,
 
 		publishTerminalExit,
 

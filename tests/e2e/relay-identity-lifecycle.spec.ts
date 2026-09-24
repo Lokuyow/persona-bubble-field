@@ -38,7 +38,7 @@ import { AUTHORITATIVE_RELAYS, fixtureSecret, testEvents, installDelayedRelay, r
 
 
 test.describe('Relay startup', () => {
-	test('reloads and reconciles a valid Run after a death transition clock rollback', async ({ page }) => {
+	test('reloads a valid Run after death CAS rollback and fails closed on the regressed write clock', async ({ page }) => {
 		const startTime = Date.now();
 		const secret = fixtureSecret(57);
 		const pubkey = getPublicKey(secret);
@@ -66,11 +66,12 @@ test.describe('Relay startup', () => {
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
 		expect((await relayState(page)).state.published.some((event) => event.kind === WORLD_STATE_KIND && event.pubkey === pubkey && event.tags.some((tag) => tag[0] === 'd' && tag[1]?.endsWith(':exit')))).toBe(false);
-		await expect.poll(async () => (await relayState(page)).state.published.some((event) => event.kind === WORLD_STATE_KIND && event.pubkey === pubkey)).toBe(true);
+		// The confirmed self position is restored from the durable journal; a
+		// redundant entry on this valid Run is no longer required.
 		const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
 		await editor.fill('valid run remains publishable after rollback reconciliation');
 		await page.locator('ehagaki-composer').getByRole('button', { name: 'Send' }).click();
-		await expect.poll(async () => (await relayState(page)).state.published.some((event) => event.kind === 42 && event.pubkey === pubkey)).toBe(true);
+		expect((await relayState(page)).state.published.some((event) => event.kind === 42 && event.pubkey === pubkey)).toBe(false);
 	});
 
 	test('rejects a stale Run world write after another tab commits death selection', async ({ page }) => {

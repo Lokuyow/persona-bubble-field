@@ -180,6 +180,60 @@ afterEach(async () => {
 });
 
 describe('primary lifecycle', () => {
+	it('opens self publication at three paired EOSEs while the other primaries and publication remain live', async () => {
+		const f = fixture(5, socketConstructor, 2_000);
+		const published = f.position();
+		for (const relay of f.authorities) relay.onRequest = () => {};
+		const early = vi.fn();
+		const pending = f.transport.start({ ...f.input, onEarlySelfReadReady: early });
+		await vi.advanceTimersByTimeAsync(30);
+		for (const relay of f.authorities.slice(0, 3)) {
+			send(relay.latestSocket(), 'EOSE', relay.primaryId(42));
+			send(relay.latestSocket(), 'EOSE', relay.primaryId(WORLD_STATE_KIND));
+		}
+		await vi.advanceTimersByTimeAsync(5);
+		expect(early).toHaveBeenCalledOnce();
+		expect(f.transport.getDiagnostics().primaryPairs.filter((pair) => pair.status === 'pending')).toHaveLength(4);
+		for (const relay of f.authorities) relay.onPublish = (socket, event) => {
+			if (relay === f.authorities[0]) send(socket, 'OK', event.id, true, '');
+		};
+		const handle = f.transport.publishSelf(published, published.pubkey);
+		let allSettled = false;
+		void handle.settled.then(() => { allSettled = true; });
+		await vi.advanceTimersByTimeAsync(20);
+		expect(await handle.firstSuccess).toBe(true);
+		expect(allSettled).toBe(false);
+		expect(f.authorities.every((relay) => relay.messages.some((message) => message[0] === 'EVENT' && (message[1] as Event).id === published.id))).toBe(true);
+		for (const relay of f.authorities.slice(3)) {
+			send(relay.latestSocket(), 'EOSE', relay.primaryId(42));
+			send(relay.latestSocket(), 'EOSE', relay.primaryId(WORLD_STATE_KIND));
+		}
+		await vi.advanceTimersByTimeAsync(10);
+		expect((await pending).primaryPairs.every((pair) => pair.status === 'eose')).toBe(true);
+		await vi.advanceTimersByTimeAsync(2_000);
+		expect((await handle.settled)[0]).toMatchObject({ relayUrl: f.authorities[0].url, outcome: 'accepted' });
+	});
+
+	it('uses the bounded deadline only after both logical primaries have an EOSE', async () => {
+		const f = fixture(5, socketConstructor, 2_000);
+		for (const relay of f.authorities) relay.onRequest = () => {};
+		const early = vi.fn();
+		const pending = f.transport.start({ ...f.input, onEarlySelfReadReady: early });
+		await vi.advanceTimersByTimeAsync(30);
+		const [a, b] = f.authorities;
+		send(a.latestSocket(), 'EOSE', a.primaryId(42));
+		await vi.advanceTimersByTimeAsync(751);
+		expect(early).not.toHaveBeenCalled();
+		send(b.latestSocket(), 'EOSE', b.primaryId(WORLD_STATE_KIND));
+		await vi.advanceTimersByTimeAsync(5);
+		expect(early).toHaveBeenCalledOnce();
+		for (const relay of f.authorities) {
+			for (const request of relay.primaryRequests()) send(relay.latestSocket(), 'EOSE', request[1]);
+		}
+		await vi.advanceTimersByTimeAsync(5);
+		await pending;
+	});
+
 	it('starts primary REQs directly on the configured authority without channel metadata requests', async () => {
 		const f = fixture(2);
 		const result = await f.start();
@@ -740,7 +794,7 @@ describe('trace root bootstrap', () => {
 		const pending = f.transport.bootstrapTraceRootCandidates();
 		await vi.advanceTimersByTimeAsync(10);
 		const result = await pending;
-		expect(result.rawEvents.map((event) => event.id)).toEqual([normal.id, death.id].sort());
+		expect(result.rawEvents.map((event) => event.id)).toEqual([normal.id, death.id]);
 		for (const relay of f.authorities) {
 			expect(relay.rootRequests().map((request) => request.slice(2))).toEqual([[
 				expect.objectContaining(expectedFilter),

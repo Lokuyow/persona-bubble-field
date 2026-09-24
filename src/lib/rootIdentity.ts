@@ -2,7 +2,7 @@ import { HDKey } from '@scure/bip32';
 import { entropyToMnemonic, mnemonicToSeedSync } from '@scure/bip39';
 import { wordlist as englishWordlist } from '@scure/bip39/wordlists/english.js';
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
-import { getPublicKey } from 'nostr-tools/pure';
+import { getPublicKey, type VerifiedEvent } from 'nostr-tools/pure';
 import { nip19 } from 'nostr-tools';
 import { CHARACTER_CATALOG } from './character';
 import { requireCharacterFromPubkey, resolveCharacterFromPubkey } from './characterAssignment';
@@ -19,9 +19,11 @@ import { createMendingJob, settleMending, projectMending, type MendingJob } from
 import { isRootBuildAllocatable, isValidRootBuild, type RootBuild, rootBuildCost } from './rootProgression';
 
 export const DATABASE_NAME = 'persona-bubble-field-account';
-export const DATABASE_VERSION = 7;
+export const DATABASE_VERSION = 8;
 export const ROOT_SECRET_STORE_NAME = 'persona-bubble-field-root-secret';
 export const PLAYER_LIFECYCLE_STORE_NAME = 'persona-bubble-field-player-state';
+export const WORLD_WRITE_JOURNAL_STORE_NAME = 'persona-bubble-field-world-write-journal';
+export const LIFECYCLE_UPGRADE_BLOCKED_MESSAGE = 'Close other open Hako tabs, then reload to finish account storage upgrade.';
 export const CURRENT_CHARACTER_PROFILE_REVISION = 2;
 
 const ROOT_WRAPPING_KEY = 'root-wrapping-key';
@@ -38,6 +40,7 @@ export const NORMAL_CLEAR_THRESHOLD = 100_000;
 interface LifecycleDatabase extends DBSchema {
 	[ROOT_SECRET_STORE_NAME]: { key: string; value: unknown };
 	[PLAYER_LIFECYCLE_STORE_NAME]: { key: string; value: unknown };
+	[WORLD_WRITE_JOURNAL_STORE_NAME]: { key: string; value: unknown };
 }
 
 export type IdentityReference = Readonly<{ generation: number; accountIndex: number; pubkey: string }>;
@@ -114,6 +117,25 @@ export type ActiveSignerSnapshot = Readonly<{
 
 export type ActiveRunAuthorization = Readonly<{ identity: IdentityReference; runNumber: number }>;
 export type SelfWriteAuthorizationResult = 'authorized' | 'superseded' | 'corrupt';
+export type WorldWriteJournalScope = ActiveRunAuthorization & Readonly<{ channelId: string }>;
+export type WorldWriteJournalSnapshot = Readonly<{
+	lastReservedSecond: number | null;
+	consumedSlots: 0 | 1 | 2;
+	lastPositiveSecond: number | null;
+	exitSecond: number | null;
+	confirmedPosition: VerifiedEvent | null;
+}>;
+export type WorldWriteReservation = Readonly<{ token: number; createdAt: number; slot: 0 | 1 | null }>;
+export type WorldWriteReservationResult =
+	| Readonly<{ kind: 'reserved'; reservation: WorldWriteReservation }>
+	| Readonly<{ kind: 'wait'; untilSecond: number }>
+	| Readonly<{ kind: 'stale' | 'corrupt' | 'clock-regressed' }>;
+export type TerminalExitJournalRequest = Readonly<{
+	channelId: string;
+	position: Readonly<{ x: number; y: number }>;
+	lastPositiveCreatedAt: number;
+}>;
+export type CommittedTerminalExit = Readonly<{ createdAt: number; position: Readonly<{ x: number; y: number }> }>;
 export type PersonaSnapshot = Readonly<{ rootPoints: number; signer: ActiveSignerSnapshot; identity: IdentityRecord; activeRun: ActiveRun; gameState: PersonaGameState }>;
 
 export type CorruptLifecycleState = Readonly<{
@@ -146,12 +168,13 @@ export type AbilityUpgradeResult =
 	| CorruptLifecycleState;
 
 export type DeathTransitionResult =
-	| Readonly<{ kind: 'transitioned' | 'superseded' }>
+	| Readonly<{ kind: 'transitioned'; exit?: CommittedTerminalExit }>
+	| Readonly<{ kind: 'superseded' }>
 	| Readonly<{ kind: 'not-expired'; persona: PersonaSnapshot }>
 	| CorruptLifecycleState;
 
 export type ClearResult =
-	| Readonly<{ kind: 'cleared' }>
+	| Readonly<{ kind: 'cleared'; exit?: CommittedTerminalExit }>
 	| Readonly<{ kind: 'blocked'; reason: 'points' | 'expired' | 'pending-realtime' }>
 	| Readonly<{ kind: 'superseded'; lifecycle: LoadLifecycleResult }>
 	| CorruptLifecycleState;
@@ -163,7 +186,7 @@ export type RealtimeSettlementResult =
 	| Readonly<{ kind: 'expired'; persona: PersonaSnapshot }>
 	| Readonly<{ kind: 'stale' }>
 	| CorruptLifecycleState;
-export type RealtimeDeathResult = Readonly<{ kind: 'transitioned' | 'duplicate' | 'stale' }> | CorruptLifecycleState;
+export type RealtimeDeathResult = Readonly<{ kind: 'transitioned'; exit?: CommittedTerminalExit }> | Readonly<{ kind: 'duplicate' | 'stale' }> | CorruptLifecycleState;
 
 type EncryptedRootEntropy = Readonly<{ version: 1; iv: Uint8Array; ciphertext: Uint8Array }>;
 type PreparedRoot = Readonly<{ entropy: Uint8Array; wrappingKey: CryptoKey; encryptedEntropy: EncryptedRootEntropy }>;
@@ -332,11 +355,23 @@ function samePersonaExpected(expected: PersonaSnapshot, activeRun: ActiveRun): b
 function openLifecycleDatabase(): Promise<IDBPDatabase<LifecycleDatabase>> {
 	try {
 		if (typeof indexedDB === 'undefined') throw new Error('IndexedDB is unavailable.');
-		return openDB<LifecycleDatabase>(DATABASE_NAME, DATABASE_VERSION, {
+		return new Promise((resolve, reject) => {
+			let blocked = false;
+			void openDB<LifecycleDatabase>(DATABASE_NAME, DATABASE_VERSION, {
+			blocked() {
+				blocked = true;
+				reject(new Error(LIFECYCLE_UPGRADE_BLOCKED_MESSAGE));
+			},
 			async upgrade(db, oldVersion, _newVersion, transaction) {
 				const hasRootStore = db.objectStoreNames.contains(ROOT_SECRET_STORE_NAME);
 				const hasPlayerStore = db.objectStoreNames.contains(PLAYER_LIFECYCLE_STORE_NAME);
+				// v7 is the current lifecycle format. Preserve it when adding the journal.
+				if (oldVersion === 7 && hasRootStore && hasPlayerStore) {
+					db.createObjectStore(WORLD_WRITE_JOURNAL_STORE_NAME);
+					return;
+				}
 				if (oldVersion >= 6 && hasRootStore && hasPlayerStore) {
+					if (!db.objectStoreNames.contains(WORLD_WRITE_JOURNAL_STORE_NAME)) db.createObjectStore(WORLD_WRITE_JOURNAL_STORE_NAME);
 					const rootStore = transaction.objectStore(ROOT_SECRET_STORE_NAME);
 					const playerStore = transaction.objectStore(PLAYER_LIFECYCLE_STORE_NAME);
 					const [rootKeys, rootWrappingKey, encryptedEntropy, playerKeys] = await Promise.all([
@@ -357,7 +392,12 @@ function openLifecycleDatabase(): Promise<IDBPDatabase<LifecycleDatabase>> {
 				for (const name of Array.from(db.objectStoreNames)) db.deleteObjectStore(name);
 				db.createObjectStore(ROOT_SECRET_STORE_NAME);
 				db.createObjectStore(PLAYER_LIFECYCLE_STORE_NAME);
+				db.createObjectStore(WORLD_WRITE_JOURNAL_STORE_NAME);
 			}
+			}).then((db) => {
+				if (blocked) db.close();
+				else resolve(db);
+			}, reject);
 		});
 	} catch {
 		return Promise.reject(new Error('Lifecycle storage could not be opened.'));
@@ -586,6 +626,143 @@ export async function authorizeActiveRun(expected: ActiveRunAuthorization): Prom
 		if (stored.player.mode.kind !== 'running') return 'superseded';
 		const activeRun = stored.player.mode.activeRun;
 		return sameIdentityReference(activeRun.identity, expected.identity) && activeRun.runNumber === expected.runNumber ? 'authorized' : 'superseded';
+	});
+}
+
+type WorldWriteJournalRecord = Readonly<{
+	version: 1;
+	channelId: string;
+	pubkey: string;
+	runNumber: number;
+	lastReservedSecond: number | null;
+	consumedSlots: 0 | 1 | 2;
+	lastPositiveSecond: number | null;
+	exitSecond: number | null;
+	nextToken: number;
+	confirmedPosition: VerifiedEvent | null;
+}>;
+
+function journalKey(channelId: string, pubkey: string): string {
+	return `${channelId}\u0000${pubkey}`;
+}
+
+function validJournal(value: unknown, channelId: string, pubkey: string): value is WorldWriteJournalRecord {
+	if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+	const record = value as Record<string, unknown>;
+	const second = (item: unknown) => item === null || Number.isSafeInteger(item) && (item as number) >= 0;
+	return record.version === 1 && record.channelId === channelId && record.pubkey === pubkey &&
+		Number.isSafeInteger(record.runNumber) && (record.runNumber as number) > 0 &&
+		second(record.lastReservedSecond) && second(record.lastPositiveSecond) && second(record.exitSecond) &&
+		(record.consumedSlots === 0 || record.consumedSlots === 1 || record.consumedSlots === 2) &&
+		Number.isSafeInteger(record.nextToken) && (record.nextToken as number) >= 0 &&
+		(record.confirmedPosition === null || typeof record.confirmedPosition === 'object' && !Array.isArray(record.confirmedPosition));
+}
+
+function emptyJournal(scope: WorldWriteJournalScope): WorldWriteJournalRecord {
+	return { version: 1, channelId: scope.channelId, pubkey: scope.identity.pubkey, runNumber: scope.runNumber,
+		lastReservedSecond: null, consumedSlots: 0, lastPositiveSecond: null, exitSecond: null,
+		nextToken: 0, confirmedPosition: null };
+}
+
+function journalScopeIsActive(player: unknown, scope: WorldWriteJournalScope): player is PlayerLifecycle {
+	return isValidPlayerLifecycle(player) && player.mode.kind === 'running' &&
+		sameIdentityReference(player.mode.activeRun.identity, scope.identity) && player.mode.activeRun.runNumber === scope.runNumber;
+}
+
+export async function loadWorldWriteJournal(scope: WorldWriteJournalScope): Promise<WorldWriteJournalSnapshot | null> {
+	return withLifecycle(async (db) => {
+		const tx = db.transaction([PLAYER_LIFECYCLE_STORE_NAME, WORLD_WRITE_JOURNAL_STORE_NAME], 'readonly');
+		const player = await tx.objectStore(PLAYER_LIFECYCLE_STORE_NAME).get(PLAYER_STATE);
+		const raw = await tx.objectStore(WORLD_WRITE_JOURNAL_STORE_NAME).get(journalKey(scope.channelId, scope.identity.pubkey));
+		await tx.done;
+		if (!journalScopeIsActive(player, scope)) throw new Error('Account operation failed.');
+		if (raw === undefined) return null;
+		if (!validJournal(raw, scope.channelId, scope.identity.pubkey)) throw new Error('Account operation failed.');
+		return { lastReservedSecond: raw.lastReservedSecond, consumedSlots: raw.consumedSlots,
+			lastPositiveSecond: raw.lastPositiveSecond, exitSecond: raw.exitSecond,
+			confirmedPosition: raw.runNumber === scope.runNumber ? raw.confirmedPosition : null };
+	});
+}
+
+/** The Player check and timestamp/slot consumption share one cross-tab transaction. */
+export async function reserveWorldPositive(input: Readonly<{
+	scope: WorldWriteJournalScope;
+	kind: 'position' | 'message';
+	nowSecond: number;
+	observedSecond: number | null;
+	observedConsumedSlots: 0 | 1 | 2;
+	observedExitSecond: number | null;
+	freshAfterSecond?: number;
+}>): Promise<WorldWriteReservationResult> {
+	const { scope } = input;
+	if (!Number.isSafeInteger(input.nowSecond) || input.nowSecond < 0) return { kind: 'corrupt' };
+	return withLifecycle(async (db) => {
+		const tx = db.transaction([PLAYER_LIFECYCLE_STORE_NAME, WORLD_WRITE_JOURNAL_STORE_NAME], 'readwrite');
+		try {
+			const player = await tx.objectStore(PLAYER_LIFECYCLE_STORE_NAME).get(PLAYER_STATE);
+			if (!journalScopeIsActive(player, scope)) { await tx.done; return { kind: 'stale' } as const; }
+			const store = tx.objectStore(WORLD_WRITE_JOURNAL_STORE_NAME);
+			const key = journalKey(scope.channelId, scope.identity.pubkey);
+			const raw = await store.get(key);
+			if (raw !== undefined && !validJournal(raw, scope.channelId, scope.identity.pubkey)) { await tx.done; return { kind: 'corrupt' } as const; }
+			const record = (raw ?? emptyJournal(scope)) as WorldWriteJournalRecord;
+			if (input.observedSecond !== null && input.observedSecond > input.nowSecond ||
+				record.runNumber === scope.runNumber && ((record.lastPositiveSecond ?? -1) > input.nowSecond ||
+					(record.lastReservedSecond ?? -1) > input.nowSecond)) {
+				await tx.done; return { kind: 'clock-regressed' } as const;
+			}
+			const exitSecond = Math.max(record.exitSecond ?? -1, input.observedExitSecond ?? -1);
+			const positiveSecond = Math.max(record.lastPositiveSecond ?? -1, input.observedSecond ?? -1);
+			let untilSecond = Math.max(exitSecond + 1, positiveSecond, (input.freshAfterSecond ?? -1) + 1);
+			if (record.runNumber !== scope.runNumber) untilSecond = Math.max(untilSecond, positiveSecond + 1);
+			if (input.kind === 'position') {
+				const lastSecond = Math.max(record.lastReservedSecond ?? -1, input.observedSecond ?? -1);
+				const consumed = lastSecond === record.lastReservedSecond && lastSecond === input.observedSecond
+					? Math.max(record.consumedSlots, input.observedConsumedSlots)
+					: lastSecond === record.lastReservedSecond ? record.consumedSlots : input.observedConsumedSlots;
+				if (consumed === 2) untilSecond = Math.max(untilSecond, lastSecond + 1);
+			}
+			if (input.nowSecond < untilSecond) { await tx.done; return { kind: 'wait', untilSecond } as const; }
+			const createdAt = input.nowSecond;
+			const priorSecond = Math.max(record.lastReservedSecond ?? -1, input.observedSecond ?? -1);
+			const priorConsumed = priorSecond === record.lastReservedSecond && priorSecond === input.observedSecond
+				? Math.max(record.consumedSlots, input.observedConsumedSlots)
+				: priorSecond === record.lastReservedSecond ? record.consumedSlots : input.observedConsumedSlots;
+			const slot = input.kind === 'position' ? (createdAt === priorSecond && priorConsumed === 1 ? 1 : 0) : null;
+			const token = record.nextToken + 1;
+			if (!Number.isSafeInteger(token)) { await tx.done; return { kind: 'corrupt' } as const; }
+			await store.put({ ...record, runNumber: scope.runNumber, nextToken: token,
+				lastReservedSecond: slot === null ? record.lastReservedSecond : createdAt,
+				consumedSlots: slot === null ? record.consumedSlots : slot === 0 ? 1 : 2,
+				lastPositiveSecond: Math.max(record.lastPositiveSecond ?? -1, createdAt), exitSecond: exitSecond < 0 ? null : exitSecond,
+				confirmedPosition: record.runNumber === scope.runNumber ? record.confirmedPosition : null }, key);
+			await tx.done;
+			return { kind: 'reserved', reservation: { token, createdAt, slot } } as const;
+		} catch (error) { try { tx.abort(); } catch { /* already aborted */ } await tx.done.catch(() => {}); throw error; }
+	});
+}
+
+export async function confirmWorldPosition(scope: WorldWriteJournalScope, reservation: WorldWriteReservation, event: VerifiedEvent): Promise<boolean> {
+	return withLifecycle(async (db) => {
+		const tx = db.transaction([PLAYER_LIFECYCLE_STORE_NAME, WORLD_WRITE_JOURNAL_STORE_NAME], 'readwrite');
+		try {
+			const player = await tx.objectStore(PLAYER_LIFECYCLE_STORE_NAME).get(PLAYER_STATE);
+			const store = tx.objectStore(WORLD_WRITE_JOURNAL_STORE_NAME);
+			const key = journalKey(scope.channelId, scope.identity.pubkey);
+			const raw = await store.get(key);
+			if (!journalScopeIsActive(player, scope) || !validJournal(raw, scope.channelId, scope.identity.pubkey) ||
+				raw.runNumber !== scope.runNumber || reservation.token > raw.nextToken || event.pubkey !== scope.identity.pubkey) {
+				await tx.done; return false;
+			}
+			const previous = raw.confirmedPosition;
+			const previousSlot = previous?.tags.find((tag) => tag[0] === 'd')?.[1]?.endsWith(':1') ? 1 : 0;
+			const nextSlot = reservation.slot ?? 0;
+			if (!previous || event.created_at > previous.created_at || event.created_at === previous.created_at && nextSlot >= previousSlot) {
+				await store.put({ ...raw, confirmedPosition: event }, key);
+			}
+			await tx.done;
+			return true;
+		} catch (error) { try { tx.abort(); } catch { /* already aborted */ } await tx.done.catch(() => {}); throw error; }
 	});
 }
 
@@ -819,7 +996,25 @@ async function prepareClearSelection(entropy: Uint8Array, player: PlayerLifecycl
 	return preparePendingSelection(entropy, generation, new Set(player.identities.map((identity) => identity.characterId)), reusableIdentityCandidates(player.identities));
 }
 
-export async function transitionRealtimeDeath(expected: PersonaSnapshot, outcome: RealtimeOutcome): Promise<RealtimeDeathResult> {
+async function commitTerminalFence(
+	store: { get(key: string): Promise<unknown>; put(value: unknown, key: string): Promise<unknown> },
+	activeRun: ActiveRun,
+	request: TerminalExitJournalRequest | undefined
+): Promise<CommittedTerminalExit | undefined> {
+	if (!request) return undefined;
+	if (!Number.isSafeInteger(request.lastPositiveCreatedAt) || request.lastPositiveCreatedAt < 0) throw new Error('Invalid terminal exit timestamp.');
+	const scope = { identity: activeRun.identity, runNumber: activeRun.runNumber, channelId: request.channelId };
+	const key = journalKey(request.channelId, activeRun.identity.pubkey);
+	const raw = await store.get(key);
+	if (raw !== undefined && !validJournal(raw, request.channelId, activeRun.identity.pubkey)) throw new Error('Invalid world write journal.');
+	const record = (raw ?? emptyJournal(scope)) as WorldWriteJournalRecord;
+	const createdAt = Math.max(Math.floor(Date.now() / 1000), request.lastPositiveCreatedAt,
+		record.lastPositiveSecond ?? 0, record.exitSecond ?? 0);
+	await store.put({ ...record, runNumber: activeRun.runNumber, exitSecond: createdAt }, key);
+	return { createdAt, position: { ...request.position } };
+}
+
+export async function transitionRealtimeDeath(expected: PersonaSnapshot, outcome: RealtimeOutcome, terminalExit?: TerminalExitJournalRequest): Promise<RealtimeDeathResult> {
 	if (!validRealtimeOutcome(outcome) || outcome.kind !== 'death') return { kind: 'corrupt', reason: 'player-state' };
 	const observed = await withLifecycle((db) => readRootAndPlayer(db));
 	if (!observed || isCorruptLifecycle(observed) || ('kind' in observed && observed.kind === 'legacy-player-reset')) return !observed ? { kind: 'corrupt', reason: 'partial-state' } : isCorruptLifecycle(observed) ? observed : { kind: 'corrupt', reason: 'partial-state' };
@@ -828,13 +1023,13 @@ export async function transitionRealtimeDeath(expected: PersonaSnapshot, outcome
 		const ledger = scopedRealtimeLedger(observed.player, observed.player.mode.activeRun);
 		if (ledger.appliedOutcomeIds.includes(outcome.id)) return { kind: 'duplicate' };
 		const selection = await prepareDeathSelection(observed.entropy, observed.player);
-		return closeRunAsDeath(expected, outcome.id, selection);
+		return closeRunAsDeath(expected, outcome.id, selection, terminalExit);
 	} finally { observed.entropy.fill(0); }
 }
 
-async function closeRunAsDeath(expected: PersonaSnapshot, outcomeId: string, selection: PendingSelection): Promise<RealtimeDeathResult> {
+async function closeRunAsDeath(expected: PersonaSnapshot, outcomeId: string, selection: PendingSelection, terminalExit?: TerminalExitJournalRequest): Promise<RealtimeDeathResult> {
 	return withLifecycle(async (db) => {
-		const tx = db.transaction(PLAYER_LIFECYCLE_STORE_NAME, 'readwrite');
+		const tx = db.transaction([PLAYER_LIFECYCLE_STORE_NAME, WORLD_WRITE_JOURNAL_STORE_NAME], 'readwrite');
 		try {
 			const store = tx.objectStore(PLAYER_LIFECYCLE_STORE_NAME);
 			const current = await store.get(PLAYER_STATE);
@@ -846,14 +1041,15 @@ async function closeRunAsDeath(expected: PersonaSnapshot, outcomeId: string, sel
 			if (!identity) { await tx.done; return { kind: 'corrupt', reason: 'identity-reference' }; }
 			const nowMs = Date.now();
 			const closedIdentity: IdentityRecord = { ...identity, status: 'dead', runHistory: [...identity.runHistory, { runNumber: activeRun.runNumber, startedAtMs: activeRun.startedAtMs, endedAtMs: nowMs, outcome: 'dead' }] };
+			const exit = await commitTerminalFence(tx.objectStore(WORLD_WRITE_JOURNAL_STORE_NAME), activeRun, terminalExit);
 			await store.put({ schemaVersion: PLAYER_SCHEMA_VERSION, rootPoints: current.rootPoints, identities: current.identities.map((item) => item === identity ? closedIdentity : item), mode: { kind: 'selecting', pendingSelection: selection }, realtimeSettlementLedger: { ...ledger, pendingInstanceIds: [], appliedOutcomeIds: [...ledger.appliedOutcomeIds, outcomeId] } }, PLAYER_STATE);
 			await tx.done;
-			return { kind: 'transitioned' };
+			return { kind: 'transitioned', ...(exit ? { exit } : {}) };
 		} catch (error) { try { tx.abort(); } catch { /* already aborted */ } await tx.done.catch(() => {}); throw error; }
 	});
 }
 
-export async function transitionExpiredPersona(expected: PersonaSnapshot): Promise<DeathTransitionResult> {
+export async function transitionExpiredPersona(expected: PersonaSnapshot, terminalExit?: TerminalExitJournalRequest): Promise<DeathTransitionResult> {
 	const observed = await withLifecycle((db) => readRootAndPlayer(db));
 	if (!observed || isCorruptLifecycle(observed) || ('kind' in observed && observed.kind === 'legacy-player-reset')) return !observed ? { kind: 'corrupt', reason: 'partial-state' } : isCorruptLifecycle(observed) ? observed : { kind: 'corrupt', reason: 'partial-state' };
 	try {
@@ -861,7 +1057,7 @@ export async function transitionExpiredPersona(expected: PersonaSnapshot): Promi
 		if (!isPersonaExpired(observed.player.mode.activeRun.gameState, Date.now(), observed.player.mode.activeRun.rootBuild)) return { kind: 'not-expired', persona: { ...expected, activeRun: observed.player.mode.activeRun, gameState: observed.player.mode.activeRun.gameState } };
 		const selection = await prepareDeathSelection(observed.entropy, observed.player);
 		return withLifecycle(async (db) => {
-			const tx = db.transaction(PLAYER_LIFECYCLE_STORE_NAME, 'readwrite');
+			const tx = db.transaction([PLAYER_LIFECYCLE_STORE_NAME, WORLD_WRITE_JOURNAL_STORE_NAME], 'readwrite');
 			try {
 				const store = tx.objectStore(PLAYER_LIFECYCLE_STORE_NAME);
 				const current = await store.get(PLAYER_STATE);
@@ -872,15 +1068,16 @@ export async function transitionExpiredPersona(expected: PersonaSnapshot): Promi
 				if (!currentIdentity) { await tx.done; return { kind: 'corrupt', reason: 'identity-reference' }; }
 				const nowMs = Date.now();
 				const closedIdentity: IdentityRecord = { ...currentIdentity, status: 'dead', runHistory: [...currentIdentity.runHistory, { runNumber: activeRun.runNumber, startedAtMs: activeRun.startedAtMs, endedAtMs: nowMs, outcome: 'dead' }] };
+				const exit = await commitTerminalFence(tx.objectStore(WORLD_WRITE_JOURNAL_STORE_NAME), activeRun, terminalExit);
 				await store.put({ schemaVersion: PLAYER_SCHEMA_VERSION, rootPoints: current.rootPoints, identities: current.identities.map((item) => item === currentIdentity ? closedIdentity : item), mode: { kind: 'selecting', pendingSelection: selection }, realtimeSettlementLedger: current.realtimeSettlementLedger ? { ...current.realtimeSettlementLedger, pendingInstanceIds: [] } : undefined }, PLAYER_STATE);
 				await tx.done;
-				return { kind: 'transitioned' };
+				return { kind: 'transitioned', ...(exit ? { exit } : {}) };
 			} catch (error) { try { tx.abort(); } catch { /* already aborted */ } await tx.done.catch(() => {}); throw error; }
 		});
 	} finally { observed.entropy.fill(0); }
 }
 
-export async function clearPersona(expected: PersonaSnapshot): Promise<ClearResult> {
+export async function clearPersona(expected: PersonaSnapshot, terminalExit?: TerminalExitJournalRequest): Promise<ClearResult> {
 	const observed = await withLifecycle((db) => readRootAndPlayer(db));
 	if (!observed || isCorruptLifecycle(observed) || ('kind' in observed && observed.kind === 'legacy-player-reset')) return !observed ? { kind: 'corrupt', reason: 'partial-state' } : isCorruptLifecycle(observed) ? observed : { kind: 'corrupt', reason: 'partial-state' };
 	try {
@@ -892,7 +1089,7 @@ export async function clearPersona(expected: PersonaSnapshot): Promise<ClearResu
 		if (ledger.pendingInstanceIds.length > 0) return { kind: 'blocked', reason: 'pending-realtime' };
 		const selection = await prepareClearSelection(observed.entropy, observed.player);
 		return withLifecycle(async (db) => {
-			const tx = db.transaction(PLAYER_LIFECYCLE_STORE_NAME, 'readwrite');
+			const tx = db.transaction([PLAYER_LIFECYCLE_STORE_NAME, WORLD_WRITE_JOURNAL_STORE_NAME], 'readwrite');
 			try {
 				const store = tx.objectStore(PLAYER_LIFECYCLE_STORE_NAME);
 				const current = await store.get(PLAYER_STATE);
@@ -909,9 +1106,10 @@ export async function clearPersona(expected: PersonaSnapshot): Promise<ClearResu
 				if (current.rootPoints >= Number.MAX_SAFE_INTEGER) { await tx.done; return { kind: 'corrupt', reason: 'player-state' }; }
 				const reusableCurrentIdentity: ClearedIdentityCandidate = { generation: identity.generation, accountIndex: identity.accountIndex, pubkey: identity.pubkey, characterId: identity.characterId };
 				const selectionWithClearedIdentity: PendingSelection = { ...selection, reusableIdentities: [...selection.reusableIdentities, reusableCurrentIdentity] };
+				const exit = await commitTerminalFence(tx.objectStore(WORLD_WRITE_JOURNAL_STORE_NAME), currentRun, terminalExit);
 				await store.put({ schemaVersion: PLAYER_SCHEMA_VERSION, rootPoints: current.rootPoints + 1, identities: current.identities.map((item) => item === identity ? clearedIdentity : item), mode: { kind: 'selecting', pendingSelection: selectionWithClearedIdentity } }, PLAYER_STATE);
 				await tx.done;
-				return { kind: 'cleared' };
+				return { kind: 'cleared', ...(exit ? { exit } : {}) };
 			} catch (error) { try { tx.abort(); } catch { /* already aborted */ } await tx.done.catch(() => {}); throw error; }
 		});
 	} finally { observed.entropy.fill(0); }

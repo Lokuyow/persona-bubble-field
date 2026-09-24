@@ -597,6 +597,13 @@ export async function installDelayedRelay(page: Page, options: {
 					pendingPrimary.splice(0).forEach((request) => deliver(request.socket,
 						state.primaryTerminal === 'closed' ? ['CLOSED', request.subId, 'primary test closure'] : ['EOSE', request.subId]));
 				},
+				releasePrimaryRelays: (urls: string[]) => {
+					for (let index = pendingPrimary.length - 1; index >= 0; index--) {
+						if (!urls.includes(new URL(pendingPrimary[index].socket.url).toString())) continue;
+						const [request] = pendingPrimary.splice(index, 1);
+						deliver(request.socket, ['EOSE', request.subId]);
+					}
+				},
 				releaseTraceRoots: () => {
 					state.traceRootsReleased = true;
 					pendingTraceRoots.splice(0).forEach(respondTraceRoots);
@@ -673,7 +680,7 @@ export async function installDelayedRelay(page: Page, options: {
 
 export function relayState(page: Page) {
 	return page.evaluate(() => (window as typeof window & {
-		__relayStartupTest: { state: { requests: Array<{ url: string; subId: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] }>; published: Array<{ id: string; kind: number; content: string; tags: string[][]; pubkey?: string }>; closedSubscriptions: Array<{ subId: string; url: string }> }; releasePublishes(kind: number): void; deferPositionPublishes(): void; releasePrimaryEvents(): void; releasePrimary(): void; releaseTraceRoots(): void; releaseTraceReplies(): void; deferTraceReplies(): void; injectTraceReply(event: object): void; injectClosedTraceReply(event: object): void; activeTraceReplyCount(): number; rejectMessagePublishes(): void; allowMessagePublishes(): void; rejectPositionPublishes(): void; allowPositionPublishes(): void; rejectTracePublishes(): void; allowTracePublishes(): void; injectPosition(event: object): void; injectMessage(event: object): void };
+		__relayStartupTest: { state: { requests: Array<{ url: string; subId: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] }>; published: Array<{ id: string; kind: number; created_at: number; content: string; tags: string[][]; pubkey?: string }>; closedSubscriptions: Array<{ subId: string; url: string }> }; releasePublishes(kind: number): void; deferPositionPublishes(): void; releasePrimaryEvents(): void; releasePrimary(): void; releaseTraceRoots(): void; releaseTraceReplies(): void; deferTraceReplies(): void; injectTraceReply(event: object): void; injectClosedTraceReply(event: object): void; activeTraceReplyCount(): number; rejectMessagePublishes(): void; allowMessagePublishes(): void; rejectPositionPublishes(): void; allowPositionPublishes(): void; rejectTracePublishes(): void; allowTracePublishes(): void; injectPosition(event: object): void; injectMessage(event: object): void };
 	}).__relayStartupTest);
 }
 
@@ -885,11 +892,12 @@ export async function seedRelayAccount(page: Page, secretKey: Uint8Array, pubkey
 	await page.goto('/favicon.svg');
 	await page.evaluate(async ({ accountPubkey, accountIndex, expiresAtMs, points, abilities, characterId, rootPoints }) => {
 		const database = await new Promise<IDBDatabase>((resolve, reject) => {
-			const request = indexedDB.open('persona-bubble-field-account', 7);
+			const request = indexedDB.open('persona-bubble-field-account', 8);
 			request.onupgradeneeded = () => {
 				for (const name of Array.from(request.result.objectStoreNames)) request.result.deleteObjectStore(name);
 				request.result.createObjectStore('persona-bubble-field-root-secret');
 				request.result.createObjectStore('persona-bubble-field-player-state');
+				request.result.createObjectStore('persona-bubble-field-world-write-journal');
 			};
 			request.onsuccess = () => resolve(request.result);
 			request.onerror = () => reject(request.error);
@@ -1078,11 +1086,12 @@ export async function overwriteRelayMendingBuild(page: Page, rootBuild: { infere
 export async function seedUnavailablePersona(page: Page, kind: 'missing' | 'corrupt'): Promise<void> {
 	await page.goto('/favicon.svg');
 	await page.evaluate((stateKind) => new Promise<void>((resolve, reject) => {
-		const request = indexedDB.open('persona-bubble-field-account', 7);
+		const request = indexedDB.open('persona-bubble-field-account', 8);
 		request.onupgradeneeded = () => {
 			for (const name of Array.from(request.result.objectStoreNames)) request.result.deleteObjectStore(name);
 			request.result.createObjectStore('persona-bubble-field-root-secret');
 			request.result.createObjectStore('persona-bubble-field-player-state');
+			request.result.createObjectStore('persona-bubble-field-world-write-journal');
 		};
 		request.onerror = () => reject(request.error);
 		request.onsuccess = () => {

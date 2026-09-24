@@ -48,6 +48,7 @@ import {
 import { assertPrototypeWorldConfig, type PrototypeWorldConfig } from './prototypeWorld';
 
 const DEFAULT_OPERATION_TIMEOUT_MS = 10_000;
+const EARLY_SELF_READ_DEADLINE_MS = 750;
 const TRACE_REPLY_RESUME_OVERLAP_SECONDS = 300;
 
 export type LogicalPrimarySubscription = 'world-messages' | 'world-state';
@@ -154,6 +155,8 @@ export type PrimaryStartInput = Readonly<{
 	onLiveWorldState: (event: ParsedWorldStateEvent) => void;
 	onLiveTrace?: (event: ParsedTraceEvent, rawEvent: Event) => void;
 	onPrimaryClosed: (diagnostic: PrimaryPairDiagnostic) => void;
+	/** Primary reads continue after this bounded self-read boundary. */
+	onEarlySelfReadReady?: () => void;
 }>;
 
 export type PrimaryStartResult = Readonly<{
@@ -163,6 +166,11 @@ export type PrimaryStartResult = Readonly<{
 	traces: readonly ParsedTraceEvent[];
 	primaryPairs: readonly PrimaryPairDiagnostic[];
 	nip11: readonly Nip11Diagnostic[];
+}>;
+
+export type SelfPublishHandle = Readonly<{
+	firstSuccess: Promise<boolean>;
+	settled: Promise<readonly PublishRelayResult[]>;
 }>;
 
 export type TraceRootBootstrapResult = Readonly<{
@@ -404,6 +412,7 @@ export function createNostrRelayTransport(
 	let rxNostr: RxNostr | null = null;
 	let startInput: PrimaryStartInput | null = null;
 	let initialPhase = false;
+	let earlySelfReadReady = false;
 	const primaryRequestsSent = new Set<PrimaryPairKey>();
 	const initialMessages: ParsedWorldMessage[] = [];
 	const initialWorldStates: ParsedWorldStateEvent[] = [];
@@ -652,15 +661,34 @@ export function createNostrRelayTransport(
 		return await new Promise<readonly PrimaryPairDiagnostic[]>((resolve, reject) => {
 			let settled = false;
 			let deadline: ReturnType<typeof setTimeout> | undefined;
+			let earlyDeadline: ReturnType<typeof setTimeout> | undefined;
+			let earlyDeadlineReached = false;
 			const primarySubIds = new Map<string, LogicalPrimarySubscription>();
 			const activeSubIds = new Map<PrimaryPairKey, string>();
 			const closedSubIds = new Set<string>();
+			const maybeEarlyReady = () => {
+				if (settled || earlySelfReadReady || !startInput) return;
+				const eosePairs = world.authoritativeRelays.filter((relayUrl) =>
+					primaryPairs.get(pairKey(relayUrl, 'world-messages'))?.status === 'eose' &&
+					primaryPairs.get(pairKey(relayUrl, 'world-state'))?.status === 'eose').length;
+				const messageEose = [...primaryPairs.values()].some((pair) => pair.subscription === 'world-messages' && pair.status === 'eose');
+				const stateEose = [...primaryPairs.values()].some((pair) => pair.subscription === 'world-state' && pair.status === 'eose');
+				if ((eosePairs >= 3 || earlyDeadlineReached && messageEose && stateEose) && primaryRequestsSent.size > 0) {
+					earlySelfReadReady = true;
+					startInput.onEarlySelfReadReady?.();
+				}
+			};
 			const finish = () => {
 				if (settled || ![...primaryPairs.values()].every((pair) => isTerminal(pair.status))) return;
 				settled = true;
 				cancelPrimaryStart = null;
 				if (deadline) clearTimeout(deadline);
+				if (earlyDeadline) clearTimeout(earlyDeadline);
 				initialPhase = false;
+				if (!earlySelfReadReady) {
+					earlySelfReadReady = true;
+					startInput?.onEarlySelfReadReady?.();
+				}
 				resolve(copyPairDiagnostics(primaryPairs));
 			};
 			const fail = (error: Error) => {
@@ -668,6 +696,7 @@ export function createNostrRelayTransport(
 				settled = true;
 				cancelPrimaryStart = null;
 				if (deadline) clearTimeout(deadline);
+				if (earlyDeadline) clearTimeout(earlyDeadline);
 				initialPhase = false;
 				reject(error);
 			};
@@ -693,6 +722,10 @@ export function createNostrRelayTransport(
 				primarySubIds.set(mappingKey, logical);
 				activeSubIds.set(key, request.subId);
 				primaryRequestsSent.add(key);
+				if (!earlyDeadline) earlyDeadline = setTimeout(() => {
+					earlyDeadlineReached = true;
+					maybeEarlyReady();
+				}, EARLY_SELF_READ_DEADLINE_MS);
 				closedSubIds.delete(mappingKey);
 			});
 			// Consume the public, filter-matched event stream synchronously. The
@@ -723,6 +756,7 @@ export function createNostrRelayTransport(
 					? { ...pair, status: 'eose' as const }
 					: { ...pair, status: 'closed' as const, notice: packet.notice };
 				primaryPairs.set(key, next);
+				maybeEarlyReady();
 				if (packet.type === 'CLOSED') startInput?.onPrimaryClosed(next);
 				finish();
 			});
@@ -1306,6 +1340,66 @@ export function createNostrRelayTransport(
 		return [...results.values()];
 	}
 
+	function publishSelfEvent(event: VerifiedEvent, selfPubkey: string): SelfPublishHandle {
+		if ((state !== 'started' && !(state === 'starting' && earlySelfReadReady)) ||
+			event.pubkey !== selfPubkey || (event.kind !== CHANNEL_MESSAGE_KIND && event.kind !== WORLD_STATE_KIND)) {
+			throw new Error('Self publication is unavailable before the bounded primary read boundary.');
+		}
+		const client = requireRxNostr();
+		const results = new Map<string, PublishRelayResult>(world.authoritativeRelays.map((relayUrl) => [relayUrl, {
+			relayUrl, outcome: 'no-response'
+		}]));
+		let resolveFirst!: (success: boolean) => void;
+		let firstResolved = false;
+		const firstSuccess = new Promise<boolean>((resolve) => { resolveFirst = resolve; });
+		const finishFirst = (success: boolean) => {
+			if (firstResolved) return;
+			firstResolved = true;
+			resolveFirst(success);
+		};
+		const settled = new Promise<readonly PublishRelayResult[]>((resolve, reject) => {
+			let finished = false;
+			let subscription: Subscription | undefined;
+			const onDispose = () => {
+				if (!finished) {
+					finished = true;
+					finishFirst(false);
+					reject(new Error('Relay transport disposed during self publication.'));
+				}
+			};
+			const removePending = () => {
+				if (subscription) subscriptions.remove(subscription);
+				subscriptions.remove(onDispose);
+			};
+			subscription = client.send(event).subscribe({
+				next: (packet) => {
+					const relayUrl = canonicalRelay(packet.from);
+					if (!relayUrl) return;
+					results.set(relayUrl, { relayUrl, outcome: packet.ok ? 'accepted' : 'rejected',
+						...(packet.notice ? { notice: packet.notice } : {}) });
+					if (packet.ok || packet.notice?.startsWith('duplicate:')) finishFirst(true);
+				},
+				complete: () => {
+					finished = true;
+					removePending();
+					finishFirst(false);
+					resolve([...results.values()]);
+				},
+				error: (error) => {
+					finished = true;
+					removePending();
+					finishFirst(false);
+					reject(error);
+				}
+			});
+			if (!finished) {
+				subscriptions.add(subscription);
+				subscriptions.add(onDispose);
+			}
+		});
+		return { firstSuccess, settled };
+	}
+
 	async function publishRealtimeEvent(event: VerifiedEvent): Promise<RealtimePublishResult> {
 		if (state !== 'started' || !realtimeStarted) throw new Error('Realtime event subscription is not active.');
 		const echo = waitForRealtimeEcho(event.id, timeoutMs);
@@ -1369,6 +1463,7 @@ export function createNostrRelayTransport(
 		getDiagnostics(): NostrRelayTransportDiagnostics {
 			return diagnostics();
 		},
+		publishSelf: publishSelfEvent,
 
 		async bootstrapTraceRootCandidates(): Promise<TraceRootBootstrapResult> {
 			if (state !== 'started') {
