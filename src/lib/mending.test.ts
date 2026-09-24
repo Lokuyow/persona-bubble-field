@@ -21,6 +21,19 @@ describe('checkpoint-settled asynchronous work', () => {
 		expect(projection.lifespanExtensionMs).toBe(30_000);
 	});
 
+	it('uses level 11 Run effects for point generation, capacity, and lifespan extension', () => {
+		const work = {
+			...state(),
+			abilities: { inferenceEfficiency: 11, contextCapacity: 11, hallucinationSuppression: 11 }
+		};
+		const projection = projectMending(work, 1_000 + hour, ZERO_BUILD);
+		expect(projection.pointRateHundredthsPerMinute).toBe(200);
+		expect(projection.points).toBe(120);
+		expect(projection.contextCapacityMs).toBe(155 * minute);
+		expect(projection.lifespanExtensionRateHundredthsPerHour).toBe(30);
+		expect(projection.lifespanExtensionMs).toBe(18 * minute);
+	});
+
 	it('applies an upgraded inference effect only after its checkpoint', () => {
 		const before = { ...state(), abilities: { ...state().abilities, contextCapacity: 20 } };
 		const checkpointed = settleMending(before, 1_000 + hour, ZERO_BUILD, false)!;
