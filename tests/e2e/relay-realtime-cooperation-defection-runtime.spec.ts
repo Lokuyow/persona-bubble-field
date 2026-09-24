@@ -163,10 +163,15 @@ test.describe('Relay startup', () => {
 
 		const nextGroup = deriveCooperationDefectionGroupPositions(nextSchedule.instanceId, { columns: 16, rows: 8 })[0];
 		const nextJoin = signedCooperationDefectionAction(secret, nextSchedule, { action: 'join', groupId: nextGroup.id }, nextSchedule.registrationAtMs + 1_000);
-		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectRealtimeEvent(event: object): void } }).__relayStartupTest.injectRealtimeEvent(event), nextJoin);
+		const nextOtherJoins = [fixtureSecret(20), fixtureSecret(21)].map((otherSecret, index) => signedCooperationDefectionAction(otherSecret, nextSchedule,
+			{ action: 'join', groupId: nextGroup.id }, nextSchedule.registrationAtMs + 2_000 + index));
+		await page.evaluate((events) => {
+			const harness = (window as typeof window & { __relayStartupTest: { injectRealtimeEvent(event: object): void } }).__relayStartupTest;
+			for (const event of events) harness.injectRealtimeEvent(event);
+		}, [nextJoin, ...nextOtherJoins]);
 		await page.clock.setSystemTime(nextSchedule.gameAtMs + 1_000);
 		await page.clock.runFor(1_000);
-		await expect(page.locator('[data-realtime-panel]')).toContainText('参加者: 1');
+		await expect(page.locator('[data-realtime-panel]')).toContainText('参加中（3人）');
 	});
 
 	test('keeps normal world movement and conversation available when realtime is unavailable', async ({ page }) => {

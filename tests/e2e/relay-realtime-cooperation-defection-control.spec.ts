@@ -119,18 +119,23 @@ test.describe('Relay startup', () => {
 		await expect.poll(async () => (await relayState(page)).state.requests.filter(isRealtimeRequest).some((request) => realtimeInstanceIds(request).includes(manualInstanceId))).toBe(true);
 		const group = deriveCooperationDefectionGroupPositions(manualInstanceId, { columns: 16, rows: 8 })[0];
 		const join = signedCooperationDefectionAction(secret, manualSchedule, { action: 'join', groupId: group.id }, initialTime + 1_000, channel.event.id);
-		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectRealtimeEvent(event: object): void } }).__relayStartupTest.injectRealtimeEvent(event), join);
+		const otherJoins = [fixtureSecret(20), fixtureSecret(21)].map((otherSecret, index) => signedCooperationDefectionAction(otherSecret, manualSchedule,
+			{ action: 'join', groupId: group.id }, initialTime + 2_000 + index, channel.event.id));
+		await page.evaluate((events) => {
+			const harness = (window as typeof window & { __relayStartupTest: { injectRealtimeEvent(event: object): void } }).__relayStartupTest;
+			for (const event of events) harness.injectRealtimeEvent(event);
+		}, [join, ...otherJoins]);
 		await expect.poll(async () => readRealtimePendingInstances(page)).toEqual([manualInstanceId]);
 		await page.evaluate(({ controlEvent, joinEvent }) => {
 			const harness = (window as typeof window & { __relayStartupTest: { state: { published: object[] } } }).__relayStartupTest;
-			harness.state.published.push(controlEvent, joinEvent);
-		}, { controlEvent: control, joinEvent: join });
+			harness.state.published.push(controlEvent, ...joinEvent);
+		}, { controlEvent: control, joinEvent: [join, ...otherJoins] });
 		await page.clock.setSystemTime(manualSchedule.gameAtMs + COOPERATION_DEFECTION_CONSULTATION_MS + 1_000);
 		await page.reload();
 		await waitForRelayComposerReady(page);
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => (request.filter.kinds as number[])[0] === 42)).toBe(true);
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
-		await expect(page.locator('[data-realtime-panel]')).toContainText('参加者: 1');
+		await expect(page.locator('[data-realtime-panel]')).toContainText('参加中（3人）');
 		await expect(page.locator('[data-cooperation-defection-choice="cooperate"]')).toBeEnabled();
 		await expect.poll(async () => readRealtimePendingInstances(page)).toEqual([manualInstanceId]);
 	});

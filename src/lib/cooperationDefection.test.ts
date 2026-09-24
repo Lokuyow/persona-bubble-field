@@ -9,6 +9,7 @@ import {
 	COOPERATION_DEFECTION_EVENT_TYPE,
 	COOPERATION_DEFECTION_PROTOCOL_KEY,
 	createCooperationDefectionSession,
+	deriveCooperationDefectionGroupPositions,
 	COOPERATION_DEFECTION_CONSULTATION_MS,
 	COOPERATION_DEFECTION_RESULT_MS,
 	COOPERATION_DEFECTION_ROUND_COUNT,
@@ -24,6 +25,7 @@ import {
 	parseManualCooperationDefectionInstanceId,
 	selectCanonicalManualCooperationDefectionControl,
 	cooperationDefectionScheduleIntervalsOverlap,
+	snapshotCooperationDefectionParticipants,
 	settleCooperationDefectionSession,
 	type CooperationDefectionAction,
 	type CooperationDefectionActionEvent,
@@ -162,6 +164,56 @@ describe('CooperationDefection schedule and domain', () => {
 		const snap = settleCooperationDefectionSession(switched, SCHEDULE, SCHEDULE.gameAtMs + 1);
 		expect(snap.participantSnapshot?.[groupId]).toHaveLength(6);
 		expect(snap.participantSnapshot?.[secondGroup.id]).toEqual([pubkeys[0]]);
+	});
+
+	it.each([0, 1, 2])('cancels a group with %i effective participants at game start without creating a round result', (count) => {
+		const { state, pubkeys, groupId } = addJoins(count);
+		const beforeRegistrationEnds = snapshotCooperationDefectionParticipants(state, { ...SCHEDULE, phase: 'registration' });
+		expect(beforeRegistrationEnds.participantSnapshot).toBeNull();
+		expect(beforeRegistrationEnds.cancelledGroupIds).toEqual([]);
+		if (pubkeys[0]) expect(isCooperationDefectionSettlementComplete(state, { ...SCHEDULE, phase: 'game' }, pubkeys[0])).toBe(false);
+
+		const settled = settleCooperationDefectionSession(state, { ...SCHEDULE, phase: 'game' }, SCHEDULE.gameAtMs + 1);
+		expect(settled.participantSnapshot?.[groupId] ?? []).toHaveLength(count);
+		expect(settled.cancelledGroupIds).toContain(groupId);
+		expect(settled.results).toEqual([]);
+		for (const pubkey of pubkeys) expect(isCooperationDefectionSettlementComplete(settled, { ...SCHEDULE, phase: 'game' }, pubkey)).toBe(true);
+	});
+
+	it('keeps the confirmed underfilled snapshot after delayed joins expand session groups', () => {
+		const { state, groupId } = addJoins(2);
+		const frozen = settleCooperationDefectionSession(state, { ...SCHEDULE, phase: 'game' }, SCHEDULE.gameAtMs + 1);
+		const lateGroup = deriveCooperationDefectionGroupPositions(INSTANCE, FIELD, 7)[1];
+		if (!lateGroup) throw new Error('Expected the delayed joins to derive a second group.');
+		let withLateJoins = frozen;
+		for (let index = 0; index < 5; index += 1) {
+			withLateJoins = addAction(withLateJoins, 700 + index, hex(100 + index), SCHEDULE.registrationAtMs + 2_000 + index, { action: 'join', groupId: lateGroup.id });
+		}
+
+		expect(withLateJoins.groups).toHaveLength(2);
+		expect(withLateJoins.participantSnapshot).toEqual(frozen.participantSnapshot);
+		expect(withLateJoins.cancelledGroupIds).toEqual([groupId]);
+	});
+
+	it('cancels only the underfilled group while another group proceeds and settles normally', () => {
+		const { state: crowded, pubkeys } = addJoins(7);
+		const [underfilledGroup, activeGroup] = crowded.groups;
+		if (!underfilledGroup || !activeGroup) throw new Error('Expected two groups for seven registered participants.');
+		let reassigned = crowded;
+		for (let index = 2; index < 7; index += 1) {
+			reassigned = addAction(reassigned, 500 + index, pubkeys[index], SCHEDULE.registrationAtMs + 1_000 + index, { action: 'join', groupId: activeGroup.id });
+		}
+		const activePubkeys = pubkeys.slice(2, 5);
+		const withChoices = addRoundActions(reassigned, activePubkeys, activeGroup.id, 1, ['cooperate', 'cooperate', 'cooperate']);
+		const settled = settleCooperationDefectionSession(withChoices, SCHEDULE, getCooperationDefectionRoundSchedule(SCHEDULE, 1).revealCutoffAtMs);
+
+		expect(settled.cancelledGroupIds).toContain(underfilledGroup.id);
+		expect(settled.cancelledGroupIds).not.toContain(activeGroup.id);
+		expect(settled.results.map((result) => result.groupId)).toEqual([activeGroup.id]);
+		expect(settled.results[0]?.kind).toBe('all-cooperate');
+		expect(settled.results[0]?.outcomes).toHaveLength(3);
+		expect(isCooperationDefectionSettlementComplete(settled, { ...SCHEDULE, phase: 'game' }, pubkeys[0])).toBe(true);
+		expect(isCooperationDefectionSettlementComplete(settled, { ...SCHEDULE, phase: 'game' }, pubkeys[2])).toBe(false);
 	});
 
 	it('publishes only a commitment during secret selection and rejects a mismatched reveal', () => {

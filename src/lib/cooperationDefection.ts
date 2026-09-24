@@ -95,6 +95,7 @@ export type CooperationDefectionSessionState = Readonly<{
 	participantSnapshot: Readonly<Record<string, readonly string[]>> | null;
 	results: readonly CooperationDefectionRoundResult[];
 	closedGroupIds: readonly string[];
+	cancelledGroupIds: readonly string[];
 }>;
 
 export const COOPERATION_DEFECTION_EVENT_DEFINITION: RealtimeEventDefinition<CooperationDefectionAction> = {
@@ -460,7 +461,7 @@ export function cooperationDefectionPublicationKey(instanceId: string, groupId: 
 }
 
 export function createCooperationDefectionSession(input: Readonly<{ instanceId: string; field: FieldSize }>): CooperationDefectionSessionState {
-	return { instanceId: input.instanceId, field: input.field, groups: deriveCooperationDefectionGroupPositions(input.instanceId, input.field), actions: [], participantSnapshot: null, results: [], closedGroupIds: [] };
+	return { instanceId: input.instanceId, field: input.field, groups: deriveCooperationDefectionGroupPositions(input.instanceId, input.field), actions: [], participantSnapshot: null, results: [], closedGroupIds: [], cancelledGroupIds: [] };
 }
 
 export function applyCooperationDefectionAction(state: CooperationDefectionSessionState, event: CooperationDefectionActionEvent): CooperationDefectionSessionState {
@@ -498,20 +499,28 @@ export function getCooperationDefectionParticipantGroup(state: CooperationDefect
 
 export function snapshotCooperationDefectionParticipants(state: CooperationDefectionSessionState, schedule: CooperationDefectionSchedule): CooperationDefectionSessionState {
 	if (schedule.phase !== 'game' && schedule.phase !== 'ended') return state;
-	return state.participantSnapshot ? state : { ...state, participantSnapshot: joinSnapshot(state, schedule) };
+	if (state.participantSnapshot) return state;
+	const participantSnapshot = joinSnapshot(state, schedule);
+	const cancelledGroupIds = state.groups
+		.filter((group) => (participantSnapshot[group.id]?.length ?? 0) < COOPERATION_DEFECTION_MIN_PARTICIPANTS)
+		.map((group) => group.id);
+	return { ...state, participantSnapshot, cancelledGroupIds };
 }
 
 /**
  * Settlement recovery is complete only after the instance can no longer
- * produce an outcome for this participant. This intentionally knows nothing
- * about the core ledger; the event definition owns its terminal projection.
+ * produce an outcome for this participant. Only use an already-committed
+ * participant snapshot here: callers may ask before realtime bootstrap ends,
+ * when the currently observed joins are incomplete. This intentionally knows
+ * nothing about the core ledger; the event definition owns its terminal projection.
  */
 export function isCooperationDefectionSettlementComplete(state: CooperationDefectionSessionState, schedule: CooperationDefectionSchedule, pubkey: string): boolean {
-	if (schedule.phase !== 'ended') return false;
-	const snapshot = snapshotCooperationDefectionParticipants(state, schedule).participantSnapshot;
+	const snapshot = state.participantSnapshot;
 	if (!snapshot) return false;
 	const groupId = Object.entries(snapshot).find(([, participants]) => participants.includes(pubkey))?.[0];
-	if (!groupId) return true;
+	if (!groupId) return schedule.phase === 'ended';
+	if (state.cancelledGroupIds.includes(groupId)) return true;
+	if (schedule.phase !== 'ended') return false;
 	if (state.closedGroupIds.includes(groupId)) return true;
 	return state.results.some((result) => result.groupId === groupId && result.round === COOPERATION_DEFECTION_ROUND_COUNT);
 }
@@ -554,7 +563,7 @@ export function settleCooperationDefectionSession(state: CooperationDefectionSes
 	let next = snapshotCooperationDefectionParticipants(state, schedule);
 	if (!next.participantSnapshot) return next;
 	for (const group of next.groups) {
-		if (next.closedGroupIds.includes(group.id)) continue;
+		if (next.closedGroupIds.includes(group.id) || next.cancelledGroupIds.includes(group.id)) continue;
 		for (let round = 1 as 1 | 2 | 3; round <= COOPERATION_DEFECTION_ROUND_COUNT; round = (round + 1) as 1 | 2 | 3) {
 			if (next.results.some((result) => result.groupId === group.id && result.round === round)) continue;
 			const roundSchedule = getCooperationDefectionRoundSchedule(schedule, round);

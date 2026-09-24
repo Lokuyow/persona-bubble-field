@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getCooperationDefectionRoundSchedule, cooperationDefectionPhaseLabel, type CooperationDefectionChoice, type CooperationDefectionRoundResult, type CooperationDefectionSchedule, type CooperationDefectionSessionState } from '$lib/cooperationDefection';
+	import { getCooperationDefectionRoundSchedule, cooperationDefectionPhaseLabel, COOPERATION_DEFECTION_MIN_PARTICIPANTS, type CooperationDefectionChoice, type CooperationDefectionRoundResult, type CooperationDefectionSchedule, type CooperationDefectionSessionState } from '$lib/cooperationDefection';
 
 	type Props = Readonly<{
 		schedule: CooperationDefectionSchedule;
@@ -9,6 +9,7 @@
 		status: 'inactive' | 'active' | 'degraded';
 		session: CooperationDefectionSessionState | null;
 		selfGroupId: string | null;
+		cancelled: boolean;
 		selfPubkey: string | null;
 		participantName: (pubkey: string) => string;
 		selectedChoice: CooperationDefectionChoice | null;
@@ -18,11 +19,23 @@
 		onChoice: (choice: CooperationDefectionChoice) => void;
 	}>;
 
-	let { schedule, nowMs, registrationDeadline, registrationCountdown, status, session, selfGroupId, selfPubkey, participantName, selectedChoice, commitStatus, canChoose, message, onChoice }: Props = $props();
-	let lastRoundResult = $derived(session?.results.filter((result) => result.groupId === selfGroupId).at(-1) ?? null);
+	let { schedule, nowMs, registrationDeadline, registrationCountdown, status, session, selfGroupId, cancelled, selfPubkey, participantName, selectedChoice, commitStatus, canChoose, message, onChoice }: Props = $props();
+	let selfGroupCancelled = $derived(cancelled && schedule.phase === 'game');
+	let cancellationNoticeKey = $derived(selfGroupCancelled && selfGroupId ? `${schedule.instanceId}:${selfGroupId}` : null);
+	let dismissedCancellationKey = $state<string | null>(null);
+	let cancellationNoticeVisible = $derived(Boolean(cancellationNoticeKey && dismissedCancellationKey !== cancellationNoticeKey));
+	let lastRoundResult = $derived(selfGroupCancelled ? null : session?.results.filter((result) => result.groupId === selfGroupId).at(-1) ?? null);
+	let hasPlayableGroups = $derived(Boolean(session?.participantSnapshot && Object.values(session.participantSnapshot).some((participants) => participants.length >= COOPERATION_DEFECTION_MIN_PARTICIPANTS)));
+
+	$effect(() => {
+		const key = cancellationNoticeKey;
+		if (!key) return;
+		const timeout = window.setTimeout(() => { dismissedCancellationKey = key; }, 5_000);
+		return () => window.clearTimeout(timeout);
+	});
 
 	let roundInfo = $derived.by(() => {
-		if (schedule.phase !== 'game') return null;
+		if (schedule.phase !== 'game' || selfGroupCancelled || !hasPlayableGroups) return null;
 		for (const round of [1, 2, 3] as const) {
 			const current = getCooperationDefectionRoundSchedule(schedule, round);
 			if (nowMs < current.endedAtMs) return {
@@ -58,20 +71,26 @@
 	}
 </script>
 
-{#if schedule.phase === 'warning' || schedule.phase === 'registration' || schedule.phase === 'game'}
+{#if schedule.phase === 'warning' || schedule.phase === 'registration' || (schedule.phase === 'game' && (!selfGroupCancelled || cancellationNoticeVisible))}
 	<section class="cooperation-defection-panel" data-realtime-panel data-realtime-status={status} aria-label="協力と抜け駆け">
 		<div class="cooperation-defection-heading">
 			<div>
 				<h2>協力と抜け駆け <span>experimental</span></h2>
 				<p>{cooperationDefectionPhaseLabel(schedule.phase)} · {schedule.dateKey.startsWith('manual-') ? '運営開催' : schedule.dateKey}</p>
 			</div>
-			{#if roundInfo}
-				<strong>ラウンド {roundInfo.round} · {roundInfo.phase}</strong>
+			{#if roundInfo && !selfGroupCancelled}
+				<strong data-cooperation-defection-round-progress>ラウンド {roundInfo.round} · {roundInfo.phase}</strong>
 			{/if}
 		</div>
+		{#if selfGroupCancelled}
+			<p class="cooperation-defection-cancelled" data-cooperation-defection-cancelled>参加人数が足りなかったため開催されませんでした</p>
+		{:else}
 		{#if schedule.phase === 'registration' && registrationDeadline && registrationCountdown}
 			<p class="cooperation-defection-registration-deadline" data-cooperation-defection-registration-deadline>受付締切: {registrationDeadline}</p>
 			<p class="cooperation-defection-registration-countdown" data-cooperation-defection-registration-countdown>残り時間: {registrationCountdown}</p>
+		{/if}
+		{#if schedule.phase === 'game' && !session?.participantSnapshot}
+			<p class="cooperation-defection-note" data-cooperation-defection-participants-loading>参加情報を取得中です。取得が完了するまでラウンド進行は表示されません。</p>
 		{/if}
 		{#if status === 'degraded'}
 			<p class="cooperation-defection-note">イベント通信が利用できません。通常の会話と移動は継続できます。</p>
@@ -136,6 +155,7 @@
 				{#if ownOutcome(lastRoundResult)}<p>{ownOutcome(lastRoundResult)}</p>{/if}
 			</section>
 		{:else if message}<p class="cooperation-defection-result" data-cooperation-defection-round-result>{message}</p>{/if}
+		{/if}
 	</section>
 {/if}
 
@@ -144,6 +164,7 @@
 	.cooperation-defection-heading, .cooperation-defection-details, .cooperation-defection-choice-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
 	h2 { margin: 0; font-size: 16px; } h2 span { color: #7b397f; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
 	p { margin: 4px 0 0; font-size: 11px; overflow-wrap: anywhere; } .cooperation-defection-heading strong { font-size: 11px; white-space: nowrap; }
+	.cooperation-defection-cancelled { font-weight: 700; }
 	.cooperation-defection-note { color: #665b69; } .cooperation-defection-details { flex-wrap: wrap; justify-content: flex-start; margin-top: 8px; font-size: 11px; }
 	.cooperation-defection-choice-row { margin-top: 9px; } button { flex: 1; min-width: 0; min-height: 34px; padding: 6px 8px; border: 1px solid rgba(102, 28, 106, 0.3); border-radius: 8px; background: #fff; color: #4d3150; font: inherit; font-size: 11px; font-weight: 700; cursor: pointer; pointer-events: auto; } button.selected { background: #f0d9f3; border-color: #8d4692; } button:disabled { cursor: not-allowed; opacity: .5; }
 	.cooperation-defection-rules-disclosure { margin-top: 9px; pointer-events: auto; }
