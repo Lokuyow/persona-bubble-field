@@ -3,10 +3,10 @@ import { describe, expect, it, vi } from 'vitest';
 import {
 	OperatorCancelled,
 	OperatorFailure,
-	runManualRiftOperator,
+	runManualCooperationDefectionOperator,
 	sanitizeOperatorDisplayText,
 	type OperatorDependencies
-} from './operatorRift';
+} from './operatorCooperationDefection';
 import type { OperatorRelayAdapter, OperatorRelayPublishResult, OperatorRelayQueryResult } from './operatorRelayAdapter';
 import { REALTIME_EVENT_KIND, REALTIME_CONTROL_PROTOCOL_KEY } from './realtimeEvents';
 import { PROTOTYPE_WORLD_CONFIG, type PrototypeWorldConfig } from './prototypeWorldConfig';
@@ -41,7 +41,7 @@ function testWorld(channelId: string): PrototypeWorldConfig {
 	return { ...PROTOTYPE_WORLD_CONFIG, channelId, creatorPubkey: CREATOR, authoritativeRelays: ['wss://relay.example/'], preferredRelayHint: 'wss://relay.example/' };
 }
 
-describe('operator Rift flow', () => {
+describe('operator CooperationDefection flow', () => {
 	it('sanitizes terminal controls, bidi/format characters, and bounds remote text', () => {
 		const unsafe = `reason\u001b[31m\u001b]0;title\u0007\r\n\u202ehidden\u200b${'x'.repeat(500)}`;
 		const safe = sanitizeOperatorDisplayText(unsafe, 80);
@@ -57,7 +57,7 @@ describe('operator Rift flow', () => {
 		const world = testWorld('c'.repeat(64));
 		const secret = new Uint8Array(SECRET);
 		const dependencies = fakeDependencies([result()], { readSecret: vi.fn(async () => secret) });
-		const command = await runManualRiftOperator('dry-run', dependencies, world);
+		const command = await runManualCooperationDefectionOperator('dry-run', dependencies, world);
 		expect(command.exitCode).toBe(0);
 		expect(command.world).toEqual(world);
 		expect(dependencies.relay.query).toHaveBeenCalledTimes(1);
@@ -72,7 +72,7 @@ describe('operator Rift flow', () => {
 
 	it('rejects invalid fixed World config without querying Relay', async () => {
 		const dependencies = fakeDependencies([]);
-		await expect(runManualRiftOperator('dry-run', dependencies, {
+		await expect(runManualCooperationDefectionOperator('dry-run', dependencies, {
 			...testWorld('c'.repeat(64)),
 			preferredRelayHint: 'wss://not-authoritative.example/'
 		})).rejects.toMatchObject({ reason: 'invalid configuration' } satisfies Partial<OperatorFailure>);
@@ -84,7 +84,7 @@ describe('operator Rift flow', () => {
 		const dependencies = fakeDependencies([
 			{ events: [], eventSources: [], relays: [{ relayUrl: 'wss://relay.example/', status: 'closed' }], eoseCount: 0 }
 		]);
-		await expect(runManualRiftOperator('dry-run', dependencies, world)).rejects.toMatchObject({ reason: 'control preflight failed' } satisfies Partial<OperatorFailure>);
+		await expect(runManualCooperationDefectionOperator('dry-run', dependencies, world)).rejects.toMatchObject({ reason: 'control preflight failed' } satisfies Partial<OperatorFailure>);
 		expect(dependencies.readSecret).not.toHaveBeenCalled();
 		expect(dependencies.relay.close).toHaveBeenCalledTimes(1);
 	});
@@ -96,7 +96,7 @@ describe('operator Rift flow', () => {
 		const dependencies = fakeDependencies([result()], {
 			confirmPublish: vi.fn(async () => 'cancelled' as const), readSecret, output
 		});
-		await expect(runManualRiftOperator('publish', dependencies, world)).rejects.toBeInstanceOf(OperatorCancelled);
+		await expect(runManualCooperationDefectionOperator('publish', dependencies, world)).rejects.toBeInstanceOf(OperatorCancelled);
 		expect(readSecret).not.toHaveBeenCalled();
 		expect(dependencies.relay.publish).not.toHaveBeenCalled();
 		expect(output.stdout.mock.calls.flat().join('\n')).not.toContain('nsec1fake');
@@ -109,7 +109,7 @@ describe('operator Rift flow', () => {
 			const confirmPublish = vi.fn(async () => 'confirmed' as const);
 			const readSecret = vi.fn(async () => new Uint8Array(SECRET));
 			const dependencies = fakeDependencies([result()], { nowMs: () => conflictTime, confirmPublish, readSecret });
-			await expect(runManualRiftOperator(mode, dependencies, world)).rejects.toMatchObject({ reason: 'scheduled Rift conflict' });
+			await expect(runManualCooperationDefectionOperator(mode, dependencies, world)).rejects.toMatchObject({ reason: 'scheduled CooperationDefection conflict' });
 			expect(readSecret).not.toHaveBeenCalled();
 			if (mode === 'publish') expect(confirmPublish).not.toHaveBeenCalled();
 		}
@@ -124,7 +124,7 @@ describe('operator Rift flow', () => {
 		const dependencies = fakeDependencies([result(), result()], {
 			confirmPublish: vi.fn(async () => 'confirmed' as const), readSecret, nowMs: () => calls++ === 0 ? safeTime : conflictTime
 		});
-		await expect(runManualRiftOperator('publish', dependencies, world)).rejects.toMatchObject({ reason: 'scheduled Rift conflict' });
+		await expect(runManualCooperationDefectionOperator('publish', dependencies, world)).rejects.toMatchObject({ reason: 'scheduled CooperationDefection conflict' });
 		expect(readSecret).not.toHaveBeenCalled();
 	});
 
@@ -152,7 +152,7 @@ describe('operator Rift flow', () => {
 				return 'confirmed' as const;
 			})
 		};
-		const pending = runManualRiftOperator('publish', dependencies, world);
+		const pending = runManualCooperationDefectionOperator('publish', dependencies, world);
 		await new Promise<void>((resolve) => setTimeout(resolve, 0));
 		settleSecond!();
 		await expect(pending).rejects.toBeInstanceOf(OperatorCancelled);
@@ -172,7 +172,7 @@ describe('operator Rift flow', () => {
 				return secret;
 			})
 		});
-		await expect(runManualRiftOperator('publish', base, world)).rejects.toBeInstanceOf(OperatorCancelled);
+		await expect(runManualCooperationDefectionOperator('publish', base, world)).rejects.toBeInstanceOf(OperatorCancelled);
 		expect(base.relay.publish).not.toHaveBeenCalled();
 		expect(secret.every((byte) => byte === 0)).toBe(true);
 	});
@@ -189,7 +189,7 @@ describe('operator Rift flow', () => {
 				return new Promise((resolve) => { resolvePublish = resolve; });
 			})
 		};
-		const pending = runManualRiftOperator('publish', { ...base, relay }, world);
+		const pending = runManualCooperationDefectionOperator('publish', { ...base, relay }, world);
 		await new Promise<void>((resolve) => setTimeout(resolve, 0));
 		resolvePublish!([{ relayUrl: 'wss://relay.example/', outcome: 'accepted' }]);
 		await expect(pending).resolves.toMatchObject({ exitCode: 0 });
@@ -204,7 +204,7 @@ describe('operator Rift flow', () => {
 		const dependencies = fakeDependencies([result()], {
 			readSecret, nowMs: () => calls++ === 0 ? safeTime : conflictTime
 		});
-		await expect(runManualRiftOperator('dry-run', dependencies, world)).rejects.toMatchObject({ reason: 'scheduled Rift conflict' });
+		await expect(runManualCooperationDefectionOperator('dry-run', dependencies, world)).rejects.toMatchObject({ reason: 'scheduled CooperationDefection conflict' });
 		expect(readSecret).toHaveBeenCalledTimes(1);
 		expect(dependencies.relay.publish).not.toHaveBeenCalled();
 	});
@@ -214,7 +214,7 @@ describe('operator Rift flow', () => {
 		const secret = new Uint8Array(SECRET);
 		const readSecret = vi.fn(async () => secret);
 		const dependencies = fakeDependencies([result(), result()], { readSecret });
-		const command = await runManualRiftOperator('publish', dependencies, world);
+		const command = await runManualCooperationDefectionOperator('publish', dependencies, world);
 		expect(command.exitCode).toBe(0);
 		expect(dependencies.confirmPublish).toHaveBeenCalledTimes(1);
 		expect(dependencies.relay.publish).toHaveBeenCalledTimes(1);
@@ -232,7 +232,7 @@ describe('operator Rift flow', () => {
 				{ relayUrl: 'wss://relay-2.example/', outcome: 'rejected' as const, notice: '\u001b]0;rejected\u0007\r\n' }
 			])
 		};
-		const command = await runManualRiftOperator('publish', { ...base, relay }, world);
+		const command = await runManualCooperationDefectionOperator('publish', { ...base, relay }, world);
 		expect(command.exitCode).toBe(0);
 		const displayed = output.stdout.mock.calls.flat().join('\n');
 		expect(displayed).not.toContain('\u001b');
@@ -250,7 +250,7 @@ describe('operator Rift flow', () => {
 				{ relayUrl: 'wss://relay-2.example/', outcome: 'timeout' as const }
 			])
 		};
-		await expect(runManualRiftOperator('publish', { ...base, relay }, world)).rejects.toMatchObject({ reason: 'all authoritative Relays failed to accept the event' });
+		await expect(runManualCooperationDefectionOperator('publish', { ...base, relay }, world)).rejects.toMatchObject({ reason: 'all authoritative Relays failed to accept the event' });
 		expect(secret.every((byte) => byte === 0)).toBe(true);
 		expect(base.relay.close).toHaveBeenCalledTimes(1);
 	});
@@ -261,7 +261,7 @@ describe('operator Rift flow', () => {
 	] as const)('rejects %s secret without publishing', async (_label, secret, reason) => {
 		const world = testWorld('c'.repeat(64));
 		const dependencies = fakeDependencies([result()], { readSecret: vi.fn(async () => secret) });
-		await expect(runManualRiftOperator('dry-run', dependencies, world)).rejects.toMatchObject({ reason });
+		await expect(runManualCooperationDefectionOperator('dry-run', dependencies, world)).rejects.toMatchObject({ reason });
 		expect(dependencies.relay.publish).not.toHaveBeenCalled();
 		expect(secret.every((byte) => byte === 0)).toBe(true);
 	});

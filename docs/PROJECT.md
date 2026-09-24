@@ -29,7 +29,7 @@ repository-trackedな本資料と、以下に列挙する `docs/specs/` 配下�
 - [`SPEC-60-eHagaki・Composer・Media.md`](specs/SPEC-60-eHagaki・Composer・Media.md)
   - eHagakiとの責務分担、Host-owned Composer Lite版、Media
 - [`SPEC-70-寿命・ゲーム・脱出.md`](specs/SPEC-70-寿命・ゲーム・脱出.md)
-  - 寿命、ポイント、作業、交換可能なリアルタイムイベント（prototypeでは綻び）、死亡・転生、Root / Identity / Run、clear、脱出
+  - 寿命、ポイント、作業、交換可能なリアルタイムイベント（prototypeでは協力と抜け駆け）、死亡・転生、Root / Identity / Run、clear、脱出
 - [`SPEC-90-未決定事項.md`](specs/SPEC-90-未決定事項.md)
   - 現時点で未決定としている製品仕様
 

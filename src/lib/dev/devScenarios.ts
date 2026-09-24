@@ -5,8 +5,8 @@ export type DevScenarioFixture =
 	| Readonly<{ kind: 'speech'; fixture: 'showcase' | 'types' | 'normal-sizes' | 'merged2' | 'merged2-long' | 'merged3' | 'merged3-long' | 'merged4' | 'merged4-long' | 'merged2-shout-long' | 'merged2-monologue-long' | 'long' | 'linebreak' | 'linebreak-five' | 'linebreak-overflow' | 'comparison' }>
 	| Readonly<{ kind: 'chatter-timeline' }>
 	| Readonly<{ kind: 'trace'; replies: boolean; inactiveSelf?: boolean }>
-	| Readonly<{ kind: 'rift-static'; phase: 'warning' | 'registration' | 'game' | 'ended' }>
-	| Readonly<{ kind: 'rift-playground' }>;
+	| Readonly<{ kind: 'cooperation-defection-static'; phase: 'warning' | 'registration' | 'game' | 'ended' }>
+	| Readonly<{ kind: 'cooperation-defection-playground' }>;
 
 export type DevScenario = Readonly<{
 	id: string;
@@ -16,7 +16,7 @@ export type DevScenario = Readonly<{
 	fixture: DevScenarioFixture;
 }>;
 
-const speech = (id: string, label: string, description: string, fixture: Exclude<DevScenarioFixture, { kind: 'default' | 'chatter-timeline' | 'trace' | 'rift-static' | 'rift-playground' }>): DevScenario => ({ id, category: 'Speech', label, description, fixture });
+const speech = (id: string, label: string, description: string, fixture: Exclude<DevScenarioFixture, { kind: 'default' | 'chatter-timeline' | 'trace' | 'cooperation-defection-static' | 'cooperation-defection-playground' }>): DevScenario => ({ id, category: 'Speech', label, description, fixture });
 
 export const DEV_SCENARIOS: readonly DevScenario[] = [
 	{ id: 'default', category: 'World', label: 'Default', description: 'Plain DEV World with no seeded fixture.', fixture: { kind: 'default' } },
@@ -40,11 +40,11 @@ export const DEV_SCENARIOS: readonly DevScenario[] = [
 	{ id: 'trace-markers', category: 'Trace', label: 'Trace markers', description: 'Deterministic Trace marker presentation.', fixture: { kind: 'trace', replies: false } },
 	{ id: 'trace-replies', category: 'Trace', label: 'Trace replies', description: 'Trace markers with a local reply tree and composer.', fixture: { kind: 'trace', replies: true } },
 	{ id: 'trace-inactive-self', category: 'Trace', label: 'Trace inactive self', description: 'Trace markers with an inactive self for reactivation checks.', fixture: { kind: 'trace', replies: false, inactiveSelf: true } },
-	{ id: 'rift-warning', category: 'Realtime', label: 'Rift warning', description: 'Static warning-phase Rift presentation.', fixture: { kind: 'rift-static', phase: 'warning' } },
-	{ id: 'rift-registration', category: 'Realtime', label: 'Rift registration', description: 'Static registration-phase Rift presentation.', fixture: { kind: 'rift-static', phase: 'registration' } },
-	{ id: 'rift-game', category: 'Realtime', label: 'Rift game', description: 'Static game-phase Rift presentation.', fixture: { kind: 'rift-static', phase: 'game' } },
-	{ id: 'rift-ended', category: 'Realtime', label: 'Rift ended', description: 'Static ended-phase Rift presentation.', fixture: { kind: 'rift-static', phase: 'ended' } },
-	{ id: 'rift-playground', category: 'Realtime', label: 'Rift Playground', description: 'Fully local manual Rift simulation using production domain rules.', fixture: { kind: 'rift-playground' } }
+	{ id: 'cooperation-defection-warning', category: 'Realtime', label: 'Cooperation and Defection warning', description: 'Static warning phase for 協力と抜け駆け.', fixture: { kind: 'cooperation-defection-static', phase: 'warning' } },
+	{ id: 'cooperation-defection-registration', category: 'Realtime', label: 'Cooperation and Defection registration', description: 'Static registration phase for 協力と抜け駆け.', fixture: { kind: 'cooperation-defection-static', phase: 'registration' } },
+	{ id: 'cooperation-defection-game', category: 'Realtime', label: 'Cooperation and Defection game', description: 'Static game phase for 協力と抜け駆け.', fixture: { kind: 'cooperation-defection-static', phase: 'game' } },
+	{ id: 'cooperation-defection-ended', category: 'Realtime', label: 'Cooperation and Defection ended', description: 'Static ended phase for 協力と抜け駆け.', fixture: { kind: 'cooperation-defection-static', phase: 'ended' } },
+	{ id: 'cooperation-defection-playground', category: 'Realtime', label: 'Cooperation and Defection Playground', description: 'Local simulation using the production game rules.', fixture: { kind: 'cooperation-defection-playground' } }
 ];
 
 const SCENARIO_BY_ID = new Map(DEV_SCENARIOS.map((scenario) => [scenario.id, scenario]));

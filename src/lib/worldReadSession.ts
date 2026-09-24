@@ -141,7 +141,7 @@ export type SelfMessageAvailability = Readonly<{ kind: 'ready' | 'unavailable' }
 
 export type SelfMessagePublishResult =
 	| Readonly<{ kind: 'succeeded'; eventId: string }>
-	| Readonly<{ kind: 'blocked' | 'pending' | 'retryable' | 'unavailable' }>;
+	| Readonly<{ kind: 'blocked' | 'duplicate' | 'pending' | 'retryable' | 'unavailable' }>;
 
 export type TerminalExitPreparation =
 	| Readonly<{ kind: 'prepared'; event: VerifiedEvent; parsed: ParsedWorldStateEvent }>
@@ -840,7 +840,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		return { event: signed, parsed };
 	}
 
-	async function publishMessage(content: string, speechType: SpeechType): Promise<SelfMessagePublishResult> {
+	async function publishMessage(content: string, speechType: SpeechType, messageDedupeId?: string): Promise<SelfMessagePublishResult> {
 		if (disposed || terminal || !selfSigner || !transport || !channel) return { kind: 'unavailable' };
 		if (pendingSelfMessage || pendingTraceReply) return { kind: 'pending' };
 		if (journalScope) await ensureJournalLoaded();
@@ -850,12 +850,13 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 				const observedExitSecond = worldPresence.participants.find((known) => known.pubkey === selfSigner?.pubkey)?.latestExitCreatedAt ?? null;
 				const reserved = await reserveWorldPositive({ scope: journalScope, kind: 'message', nowSecond: createdAt,
 					observedSecond: positionPublishState.lastPublishSecond, observedConsumedSlots: positionPublishState.consumedSlots,
-					observedExitSecond });
+					observedExitSecond, ...(messageDedupeId ? { messageDedupeId } : {}) });
 				if (reserved.kind === 'wait') {
 					if (!await waitForActualSecond(reserved.untilSecond - 1)) return { kind: 'unavailable' };
 					createdAt = Math.floor(Date.now() / 1000);
 					continue;
 				}
+				if (reserved.kind === 'duplicate') return { kind: 'duplicate' };
 				if (reserved.kind !== 'reserved') {
 					if (reserved.kind === 'stale') await authorizeSelfWrite();
 					else {
@@ -1562,8 +1563,8 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			);
 		},
 
-		publishMessage(content: string, speechType: SpeechType): Promise<SelfMessagePublishResult> {
-			return publishMessage(content, speechType);
+		publishMessage(content: string, speechType: SpeechType, messageDedupeId?: string): Promise<SelfMessagePublishResult> {
+			return publishMessage(content, speechType, messageDedupeId);
 		},
 
 		refreshSelfActivity,

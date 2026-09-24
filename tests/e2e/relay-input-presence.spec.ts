@@ -13,19 +13,6 @@ import {
 	parseWorldMessage,
 	validateTraceReplyCandidate
 } from '../../src/lib/nostrProtocol';
-import {
-	buildRiftActionTemplate,
-	buildRiftCommitAction,
-	buildRiftRevealAction,
-	buildManualRiftInstanceId,
-	deriveRiftHolePositions,
-	getRiftRoundSchedule,
-	getRiftSchedule,
-	getRiftScheduleForInstance,
-	RIFT_CONSULTATION_MS,
-	RIFT_PROTOCOL_KEY,
-	type RiftAction
-} from '../../src/lib/rift';
 import { buildRealtimeControlEventTemplate, finalizeRealtimeEvent } from '../../src/lib/realtimeEvents';
 import { SPEECH_SHORTCUT_IDS } from '../../src/lib/speechSubmission';
 import { characterPicturePath } from '../../src/lib/character';

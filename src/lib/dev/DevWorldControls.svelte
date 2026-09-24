@@ -2,27 +2,27 @@
 	import { CHARACTER_CATALOG } from '$lib/character';
 	import type { SpeechType } from '$lib/conversation';
 	import { DEV_SCENARIOS, devScenarioCategories, type DevScenario } from './devScenarios';
-	import type { DevRiftBotPreset } from './devRiftPlayground';
+	import type { DevCooperationDefectionBotPreset } from './devCooperationDefectionPlayground';
 	type Props = {
 		scenario: DevScenario;
 		selectedCharacterId: string;
 		traceReplyFixtureEnabled: boolean;
 		canAddLiveReply: boolean;
-		riftPlaygroundEnabled: boolean;
-		botPreset: DevRiftBotPreset;
-		canAdvanceRift: boolean;
+		cooperationDefectionPlaygroundEnabled: boolean;
+		botPreset: DevCooperationDefectionBotPreset;
+		canAdvanceCooperationDefection: boolean;
 		onCharacterChange: (characterId: string) => void;
 		onReset: () => void;
 		onAddLiveReply: () => void;
 		onInjectLiveSpeech: (speechType: SpeechType) => void;
-		onBotPresetChange: (preset: DevRiftBotPreset) => void;
-		onAdvanceRift: () => void;
+		onBotPresetChange: (preset: DevCooperationDefectionBotPreset) => void;
+		onAdvanceCooperationDefection: () => void;
 	};
-	let { scenario, selectedCharacterId, traceReplyFixtureEnabled, canAddLiveReply, riftPlaygroundEnabled, botPreset, canAdvanceRift,
-		onCharacterChange, onReset, onAddLiveReply, onInjectLiveSpeech, onBotPresetChange, onAdvanceRift }: Props = $props();
+	let { scenario, selectedCharacterId, traceReplyFixtureEnabled, canAddLiveReply, cooperationDefectionPlaygroundEnabled, botPreset, canAdvanceCooperationDefection,
+		onCharacterChange, onReset, onAddLiveReply, onInjectLiveSpeech, onBotPresetChange, onAdvanceCooperationDefection }: Props = $props();
 </script>
 
-<div class="sandbox-controls" class:chatter-scenario={scenario.fixture.kind === 'chatter-timeline'} class:trace-scenario={scenario.fixture.kind === 'trace'} class:rift-scenario={scenario.fixture.kind === 'rift-static' || scenario.fixture.kind === 'rift-playground'} aria-label="DEV sandbox controls">
+<div class="sandbox-controls" class:chatter-scenario={scenario.fixture.kind === 'chatter-timeline'} class:trace-scenario={scenario.fixture.kind === 'trace'} class:cooperation-defection-scenario={scenario.fixture.kind === 'cooperation-defection-static' || scenario.fixture.kind === 'cooperation-defection-playground'} aria-label="DEV sandbox controls">
 	<details class="sandbox-mobile-toggle-wrapper">
 		<summary class="sandbox-mobile-toggle">DEV controls</summary>
 	</details>
@@ -67,14 +67,14 @@
 		<button type="button" aria-label="Inject live Shout speech" onclick={() => onInjectLiveSpeech('shout')}>Shout</button>
 		<button type="button" aria-label="Inject live Monologue speech" onclick={() => onInjectLiveSpeech('monologue')}>Monologue</button>
 	</div>
-	{#if riftPlaygroundEnabled}
-		<div class="sandbox-rift-tools" aria-label="Rift Playground tools">
-			<label>Bot preset
-				<select aria-label="Select Rift bot preset" value={botPreset} onchange={(event) => onBotPresetChange((event.currentTarget as HTMLSelectElement).value as DevRiftBotPreset)}>
-					<option value="cooperative">Cooperative</option><option value="split">Split</option><option value="escape">Escape</option><option value="missing-reveal">Missing reveal</option>
+	{#if cooperationDefectionPlaygroundEnabled}
+		<div class="sandbox-cooperation-defection-tools" aria-label="Cooperation and Defection Playground tools">
+			<label>Bot choices
+				<select aria-label="Select Cooperation and Defection bot preset" value={botPreset} onchange={(event) => onBotPresetChange((event.currentTarget as HTMLSelectElement).value as DevCooperationDefectionBotPreset)}>
+					<option value="cooperative">Cooperative</option><option value="split">Split</option><option value="defection">Defection</option><option value="missing-reveal">Missing reveal</option>
 				</select>
 			</label>
-			<button type="button" aria-label="Advance Rift Playground phase" disabled={!canAdvanceRift} onclick={onAdvanceRift}>Next phase</button>
+			<button type="button" aria-label="Advance Cooperation and Defection Playground phase" disabled={!canAdvanceCooperationDefection} onclick={onAdvanceCooperationDefection}>Next phase</button>
 		</div>
 	{/if}
 	<button class="sandbox-reset" type="button" onclick={onReset}>Reset scenario</button>
@@ -86,7 +86,7 @@
 		position: absolute;
 		z-index: 10;
 	}
-	.sandbox-scenario-picker, .sandbox-rift-tools { display: flex; align-items: center; gap: 6px; }
+	.sandbox-scenario-picker, .sandbox-cooperation-defection-tools { display: flex; align-items: center; gap: 6px; }
 	.sandbox-scenario-picker { flex-wrap: wrap; max-width: 300px; }
 	.sandbox-scenario-picker small { width: 100%; color: #596662; font-size: 9px; }
 
@@ -119,8 +119,8 @@
 	.sandbox-controls.trace-scenario .sandbox-scenario-picker,
 	.sandbox-controls.trace-scenario .sandbox-character-picker,
 	.sandbox-controls.trace-scenario .sandbox-speech-injector { width: 100%; max-width: none; }
-	.sandbox-controls.rift-scenario { top: 148px; }
-	:global(.action-dock-available) .sandbox-controls.rift-scenario { top: 148px; }
+	.sandbox-controls.cooperation-defection-scenario { top: 148px; }
+	:global(.action-dock-available) .sandbox-controls.cooperation-defection-scenario { top: 148px; }
 
 	.sandbox-character-picker {
 		display: flex;
@@ -142,11 +142,11 @@
 		color: #3f4a47;
 		font: inherit;
 	}
-	.sandbox-scenario-picker select, .sandbox-rift-tools select { min-height: 38px; max-width: 220px; padding: 0 9px; border: 1px solid rgba(57, 67, 64, 0.2); border-radius: 10px; background: rgba(255,255,255,.86); color: #3f4a47; font: inherit; }
+	.sandbox-scenario-picker select, .sandbox-cooperation-defection-tools select { min-height: 38px; max-width: 220px; padding: 0 9px; border: 1px solid rgba(57, 67, 64, 0.2); border-radius: 10px; background: rgba(255,255,255,.86); color: #3f4a47; font: inherit; }
 
 	.sandbox-reset,
 	.sandbox-live-reply,
-	.sandbox-rift-tools button,
+	.sandbox-cooperation-defection-tools button,
 	.sandbox-speech-injector button {
 		border: 1px solid rgba(57, 67, 64, 0.2);
 		background: rgba(255, 255, 255, 0.86);
@@ -157,7 +157,7 @@
 
 	.sandbox-reset,
 	.sandbox-live-reply,
-	.sandbox-rift-tools button,
+	.sandbox-cooperation-defection-tools button,
 	.sandbox-speech-injector button {
 		min-height: 38px;
 		padding: 0 11px;
@@ -199,13 +199,13 @@
 		.sandbox-controls.chatter-scenario { top: 8px; }
 		.sandbox-controls.trace-scenario { top: 8px; right: auto; bottom: auto; left: 50%; width: auto; align-items: center; transform: translateX(-50%); }
 		.sandbox-controls.trace-scenario .sandbox-control-panel { align-items: center; }
-		.sandbox-controls.rift-scenario { top: auto; right: 12px; bottom: 8px; left: auto; width: min(340px, calc(100vw - 24px)); align-items: stretch; transform: none; }
-		:global(.action-dock-available) .sandbox-controls.rift-scenario { top: auto; bottom: 8px; }
+		.sandbox-controls.cooperation-defection-scenario { top: auto; right: 12px; bottom: 8px; left: auto; width: min(340px, calc(100vw - 24px)); align-items: stretch; transform: none; }
+		:global(.action-dock-available) .sandbox-controls.cooperation-defection-scenario { top: auto; bottom: 8px; }
 		.sandbox-mobile-toggle-wrapper { display: block; }
 		.sandbox-control-panel { flex-direction: column; gap: 7px; }
 		.sandbox-control-panel { display: none; }
 		.sandbox-mobile-toggle-wrapper[open] + .sandbox-control-panel { display: flex; }
-		.sandbox-scenario-picker, .sandbox-rift-tools { width: min(100vw - 32px, 340px); justify-content: space-between; }
+		.sandbox-scenario-picker, .sandbox-cooperation-defection-tools { width: min(100vw - 32px, 340px); justify-content: space-between; }
 		.sandbox-scenario-picker select { flex: 1; max-width: none; }
 
 		.sandbox-character-picker {

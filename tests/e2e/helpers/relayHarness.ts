@@ -13,13 +13,13 @@ import {
 	validateTraceReplyCandidate
 } from '../../../src/lib/nostrProtocol';
 import {
-	buildRiftActionTemplate,
-	getRiftRoundSchedule,
-	getRiftSchedule,
-	getRiftScheduleForDate,
-	getRiftScheduleForInstance,
-	type RiftAction
-} from '../../../src/lib/rift';
+	buildCooperationDefectionActionTemplate,
+	getCooperationDefectionRoundSchedule,
+	getCooperationDefectionSchedule,
+	getCooperationDefectionScheduleForDate,
+	getCooperationDefectionScheduleForInstance,
+	type CooperationDefectionAction
+} from '../../../src/lib/cooperationDefection';
 import { requireCharacterFromPubkey, resolveCharacterFromPubkey } from '../../../src/lib/characterAssignment';
 import { deriveBip85NostrEntropy } from '../../../src/lib/bip85';
 import { isBlockedFacilityCell } from '../../../src/lib/fieldFacilities';
@@ -105,29 +105,29 @@ export function testEvents(nowMs = Date.now(), channelId = CHANNEL_ID) {
 	};
 }
 
-function nextRiftDateKey(dateKey: string): string {
+function nextCooperationDefectionDateKey(dateKey: string): string {
 	const date = new Date(`${dateKey}T00:00:00Z`);
 	date.setUTCDate(date.getUTCDate() + 1);
 	return date.toISOString().slice(0, 10);
 }
 
-export function nextScheduledRiftSchedule(schedule: ReturnType<typeof getRiftSchedule>): ReturnType<typeof getRiftSchedule> {
-	const next = getRiftScheduleForDate(nextRiftDateKey(schedule.dateKey), schedule.endedAtMs + 1);
+export function nextScheduledCooperationDefectionSchedule(schedule: ReturnType<typeof getCooperationDefectionSchedule>): ReturnType<typeof getCooperationDefectionSchedule> {
+	const next = getCooperationDefectionScheduleForDate(nextCooperationDefectionDateKey(schedule.dateKey), schedule.endedAtMs + 1);
 	if (next.instanceId === schedule.instanceId || next.dateKey === schedule.dateKey || next.phase === 'ended') {
-		throw new Error(`Expected a distinct upcoming Rift schedule after ${schedule.instanceId}.`);
+		throw new Error(`Expected a distinct upcoming CooperationDefection schedule after ${schedule.instanceId}.`);
 	}
 	return next;
 }
 
-export function upcomingRegistrationSchedule(): ReturnType<typeof getRiftSchedule> {
+export function upcomingRegistrationSchedule(): ReturnType<typeof getCooperationDefectionSchedule> {
 	const nowMs = Date.now();
-	let schedule = getRiftSchedule(nowMs);
-	if (schedule.registrationAtMs <= nowMs) schedule = nextScheduledRiftSchedule(schedule);
+	let schedule = getCooperationDefectionSchedule(nowMs);
+	if (schedule.registrationAtMs <= nowMs) schedule = nextScheduledCooperationDefectionSchedule(schedule);
 	return schedule;
 }
 
-export function signedRiftAction(secretKey: Uint8Array, schedule: ReturnType<typeof getRiftSchedule>, action: RiftAction, createdAtMs: number, channelId = CHANNEL_ID): NostrEvent {
-	return finalizeEvent(buildRiftActionTemplate({
+export function signedCooperationDefectionAction(secretKey: Uint8Array, schedule: ReturnType<typeof getCooperationDefectionSchedule>, action: CooperationDefectionAction, createdAtMs: number, channelId = CHANNEL_ID): NostrEvent {
+	return finalizeEvent(buildCooperationDefectionActionTemplate({
 		channelId,
 		relayHint: 'wss://nos.lol/',
 		instanceId: schedule.instanceId,
@@ -142,7 +142,7 @@ export function syntheticChannelFixture() {
 		kind: 40,
 		created_at: 1_800_000_000,
 		tags: [],
-		content: JSON.stringify({ name: 'synthetic Rift test channel' })
+		content: JSON.stringify({ name: 'synthetic CooperationDefection test channel' })
 	}, secret);
 	return {
 		secret,
@@ -738,7 +738,7 @@ export async function installDelayedRelay(page: Page, options: {
 
 export function relayState(page: Page) {
 	return page.evaluate(() => (window as typeof window & {
-		__relayStartupTest: { state: { requests: Array<{ url: string; subId: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] }>; persistedPrimaryDeliveries: Array<{ relayUrl: string; eventId: string }>; published: Array<{ id: string; kind: number; created_at: number; content: string; tags: string[][]; pubkey?: string }>; closedSubscriptions: Array<{ subId: string; url: string }> }; releasePublishes(kind: number): void; deferPositionPublishes(): void; releasePrimaryEvents(): void; releasePrimary(): void; releaseTraceRoots(): void; releaseTraceReplies(): void; deferTraceReplies(): void; injectTraceReply(event: object): void; injectClosedTraceReply(event: object): void; activeTraceReplyCount(): number; rejectMessagePublishes(): void; allowMessagePublishes(): void; rejectPositionPublishes(): void; allowPositionPublishes(): void; rejectTracePublishes(): void; allowTracePublishes(): void; injectPosition(event: object): void; injectPositionToRelay(event: object, relayUrl: string): void; injectMessage(event: object): void };
+		__relayStartupTest: { state: { requests: Array<{ url: string; subId: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] }>; persistedPrimaryDeliveries: Array<{ relayUrl: string; eventId: string }>; published: Array<{ id: string; kind: number; created_at: number; content: string; tags: string[][]; pubkey?: string }>; previousPublished: Array<{ id: string; kind: number; created_at: number; content: string; tags: string[][]; pubkey?: string }>; closedSubscriptions: Array<{ subId: string; url: string }> }; releasePublishes(kind: number): void; deferPositionPublishes(): void; releasePrimaryEvents(): void; releasePrimary(): void; releaseTraceRoots(): void; releaseTraceReplies(): void; deferTraceReplies(): void; injectTraceReply(event: object): void; injectClosedTraceReply(event: object): void; activeTraceReplyCount(): number; rejectMessagePublishes(): void; allowMessagePublishes(): void; rejectPositionPublishes(): void; allowPositionPublishes(): void; rejectTracePublishes(): void; allowTracePublishes(): void; injectPosition(event: object): void; injectPositionToRelay(event: object, relayUrl: string): void; injectMessage(event: object): void };
 	}).__relayStartupTest);
 }
 

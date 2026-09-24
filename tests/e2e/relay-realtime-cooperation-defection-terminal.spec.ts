@@ -14,18 +14,19 @@ import {
 	validateTraceReplyCandidate
 } from '../../src/lib/nostrProtocol';
 import {
-	buildRiftActionTemplate,
-	buildRiftCommitAction,
-	buildRiftRevealAction,
-	buildManualRiftInstanceId,
-	deriveRiftHolePositions,
-	getRiftRoundSchedule,
-	getRiftSchedule,
-	getRiftScheduleForInstance,
-	RIFT_CONSULTATION_MS,
-	RIFT_PROTOCOL_KEY,
-	type RiftAction
-} from '../../src/lib/rift';
+	buildCooperationDefectionActionTemplate,
+	buildCooperationDefectionCommitAction,
+	buildCooperationDefectionRevealAction,
+	buildManualCooperationDefectionInstanceId,
+	deriveCooperationDefectionGroupPositions,
+	getCooperationDefectionRoundSchedule,
+	cooperationDefectionOutcomeId,
+	getCooperationDefectionSchedule,
+	getCooperationDefectionScheduleForInstance,
+	COOPERATION_DEFECTION_CONSULTATION_MS,
+	COOPERATION_DEFECTION_PROTOCOL_KEY,
+	type CooperationDefectionAction
+} from '../../src/lib/cooperationDefection';
 import { buildRealtimeControlEventTemplate, finalizeRealtimeEvent } from '../../src/lib/realtimeEvents';
 import { SPEECH_SHORTCUT_IDS } from '../../src/lib/speechSubmission';
 import { characterPicturePath } from '../../src/lib/character';
@@ -34,23 +35,23 @@ import { deriveBip85NostrEntropy } from '../../src/lib/bip85';
 import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL } from '../../src/lib/fieldFacilities';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { installFieldFrameSampling, readFieldFrames, sampleRenderedField } from './helpers/fieldFrames';
-import { CHANNEL_ID, AUTHORITATIVE_RELAYS, fixtureSecret, testEvents, upcomingRegistrationSchedule, nextScheduledRiftSchedule, signedRiftAction, syntheticChannelFixture, installDelayedRelay, relayState, seedRelayAccount, readRelayGameState, realtimeInstanceIds, isRealtimeRequest, isDeathTraceEvent, readRealtimePendingInstances, seedRealtimePendingInstance, chooseHorizontalMove } from './helpers/relayHarness';
+import { CHANNEL_ID, AUTHORITATIVE_RELAYS, fixtureSecret, testEvents, upcomingRegistrationSchedule, nextScheduledCooperationDefectionSchedule, signedCooperationDefectionAction, syntheticChannelFixture, installDelayedRelay, relayState, seedRelayAccount, readRelayGameState, realtimeInstanceIds, isRealtimeRequest, isDeathTraceEvent, readRealtimePendingInstances, seedRealtimePendingInstance, chooseHorizontalMove } from './helpers/relayHarness';
 
-const RIFT_SELF_POSITION = { x: 3, y: 2 } as const;
-const RIFT_FIELD_SIZE = { columns: 16, rows: 8 } as const;
+const COOPERATION_DEFECTION_SELF_POSITION = { x: 3, y: 2 } as const;
+const COOPERATION_DEFECTION_FIELD_SIZE = { columns: 16, rows: 8 } as const;
 
-function scheduleWithDistantFirstHole(startSchedule: ReturnType<typeof getRiftSchedule>) {
+function scheduleWithDistantFirstGroup(startSchedule: ReturnType<typeof getCooperationDefectionSchedule>) {
 	let schedule = startSchedule;
 	for (let attempt = 0; attempt < 32; attempt += 1) {
-		const hole = deriveRiftHolePositions(schedule.instanceId, RIFT_FIELD_SIZE)[0];
-		if (Math.max(Math.abs(hole.position.x - RIFT_SELF_POSITION.x), Math.abs(hole.position.y - RIFT_SELF_POSITION.y)) > 1) {
-			return { schedule, hole };
+		const group = deriveCooperationDefectionGroupPositions(schedule.instanceId, COOPERATION_DEFECTION_FIELD_SIZE)[0];
+		if (Math.max(Math.abs(group.position.x - COOPERATION_DEFECTION_SELF_POSITION.x), Math.abs(group.position.y - COOPERATION_DEFECTION_SELF_POSITION.y)) > 1) {
+			return { schedule, group };
 		}
-		const nextSchedule = nextScheduledRiftSchedule(schedule);
-		if (nextSchedule.instanceId === schedule.instanceId) throw new Error('Rift schedule search did not advance to a new instance.');
+		const nextSchedule = nextScheduledCooperationDefectionSchedule(schedule);
+		if (nextSchedule.instanceId === schedule.instanceId) throw new Error('CooperationDefection schedule search did not advance to a new instance.');
 		schedule = nextSchedule;
 	}
-	throw new Error('Could not find a Rift schedule with a distant first hole within 32 days.');
+	throw new Error('Could not find a CooperationDefection schedule with a distant first group within 32 days.');
 }
 
 async function waitForDeathLastWords(page: Page): Promise<void> {
@@ -78,20 +79,20 @@ async function publishedDeathTraceCount(page: Page, pubkey: string): Promise<num
 
 test.describe('Relay startup', () => {
 	test('publishes a World State exit after a realtime death outcome commits locally', async ({ page }) => {
-		const { schedule, hole } = scheduleWithDistantFirstHole(upcomingRegistrationSchedule());
+		const { schedule, group } = scheduleWithDistantFirstGroup(upcomingRegistrationSchedule());
 		const otherPlayers = [
-			{ secret: fixtureSecret(20), choice: 'maintain' as const, nonce: '1'.repeat(64) },
-			{ secret: fixtureSecret(21), choice: 'escape' as const, nonce: '2'.repeat(64) }
+			{ secret: fixtureSecret(20), choice: 'cooperate' as const, nonce: '1'.repeat(64) },
+			{ secret: fixtureSecret(21), choice: 'defect' as const, nonce: '2'.repeat(64) }
 		];
-		const otherJoins = otherPlayers.map(({ secret }) => signedRiftAction(secret, schedule, { action: 'join', holeId: hole.id }, schedule.registrationAtMs + 1_000));
+		const otherJoins = otherPlayers.map(({ secret }) => signedCooperationDefectionAction(secret, schedule, { action: 'join', groupId: group.id }, schedule.registrationAtMs + 1_000));
 		const otherCommits = otherPlayers.map(({ secret, choice, nonce }) => {
 			const pubkey = getPublicKey(secret);
-			const action = buildRiftCommitAction({ instanceId: schedule.instanceId, holeId: hole.id, round: 1, authorPubkey: pubkey, choice, nonce });
-			const event = signedRiftAction(secret, schedule, action, getRiftRoundSchedule(schedule, 1).selectionAtMs + 1_000);
+			const action = buildCooperationDefectionCommitAction({ instanceId: schedule.instanceId, groupId: group.id, round: 1, authorPubkey: pubkey, choice, nonce });
+			const event = signedCooperationDefectionAction(secret, schedule, action, getCooperationDefectionRoundSchedule(schedule, 1).selectionAtMs + 1_000);
 			return { secret, choice, nonce, event };
 		});
-		const otherReveals = otherCommits.map(({ secret, choice, nonce, event }) => signedRiftAction(secret, schedule,
-			buildRiftRevealAction({ holeId: hole.id, round: 1, commitId: event.id, choice, nonce }), getRiftRoundSchedule(schedule, 1).resultAtMs + 1_000));
+		const otherReveals = otherCommits.map(({ secret, choice, nonce, event }) => signedCooperationDefectionAction(secret, schedule,
+			buildCooperationDefectionRevealAction({ groupId: group.id, round: 1, commitId: event.id, choice, nonce }), getCooperationDefectionRoundSchedule(schedule, 1).resultAtMs + 1_000));
 		const startTime = schedule.registrationAtMs + 1_000;
 		const selfSecret = fixtureSecret(19);
 		const selfPubkey = getPublicKey(selfSecret);
@@ -103,26 +104,26 @@ test.describe('Relay startup', () => {
 			persistAcrossReload: true,
 			realtimePublishOutcome: 'accepted'
 		});
-		await seedRelayAccount(page, selfSecret, selfPubkey);
+		await seedRelayAccount(page, selfSecret, selfPubkey, startTime + 2 * 24 * 60 * 60 * 1000);
 		await page.goto('/');
 		await expect(page.locator('[data-realtime-panel]')).toContainText('参加受付');
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${selfPubkey}"]`)).toBeVisible();
 
-		await page.locator('[data-realtime-hole-trigger]').click();
+		await page.locator('[data-realtime-group-trigger]').click();
 		await page.clock.runFor(50);
-		const nearPosition = hole.position.y > 0 ? { x: hole.position.x, y: hole.position.y - 1 } : { x: hole.position.x, y: hole.position.y + 1 };
+		const nearPosition = group.position.y > 0 ? { x: group.position.x, y: group.position.y - 1 } : { x: group.position.x, y: group.position.y + 1 };
 		const nearEvent = finalizeEvent(buildWorldStateEventTemplate({ channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: nearPosition, slot: 0, createdAt: Math.floor((startTime + 2_000) / 1000) }), selfSecret);
 		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), nearEvent);
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', `${nearPosition.x},${nearPosition.y}`);
-		await page.locator('[data-realtime-hole-trigger]').click();
+		await page.locator('[data-realtime-group-trigger]').click();
 		await page.getByRole('button', { name: '参加する' }).click();
 		await expect(page.locator('[data-realtime-panel]')).toContainText('参加済み');
 
-		const round = getRiftRoundSchedule(schedule, 1);
+		const round = getCooperationDefectionRoundSchedule(schedule, 1);
 		await page.clock.setSystemTime(round.selectionAtMs + 1_000);
 		await page.clock.runFor(1_000);
-		await page.locator('[data-rift-choice="escape"]').click();
+		await page.locator('[data-cooperation-defection-choice="defect"]').click();
 		await expect.poll(async () => (await relayState(page)).state.published.some((event) => event.kind === 7070 && event.pubkey === selfPubkey && JSON.parse(event.content).action === 'commit')).toBe(true);
 		await page.clock.setSystemTime(round.resultAtMs + 1_000);
 		await page.clock.runFor(1_000);
@@ -156,20 +157,20 @@ test.describe('Relay startup', () => {
 	});
 
 	test('does not publish a terminal exit when a realtime death outcome is duplicate', async ({ page }) => {
-		const { schedule, hole } = scheduleWithDistantFirstHole(upcomingRegistrationSchedule());
+		const { schedule, group } = scheduleWithDistantFirstGroup(upcomingRegistrationSchedule());
 		const otherPlayers = [
-			{ secret: fixtureSecret(20), choice: 'maintain' as const, nonce: '1'.repeat(64) },
-			{ secret: fixtureSecret(21), choice: 'escape' as const, nonce: '2'.repeat(64) }
+			{ secret: fixtureSecret(20), choice: 'cooperate' as const, nonce: '1'.repeat(64) },
+			{ secret: fixtureSecret(21), choice: 'defect' as const, nonce: '2'.repeat(64) }
 		];
-		const otherJoins = otherPlayers.map(({ secret }) => signedRiftAction(secret, schedule, { action: 'join', holeId: hole.id }, schedule.registrationAtMs + 1_000));
+		const otherJoins = otherPlayers.map(({ secret }) => signedCooperationDefectionAction(secret, schedule, { action: 'join', groupId: group.id }, schedule.registrationAtMs + 1_000));
 		const otherCommits = otherPlayers.map(({ secret, choice, nonce }) => {
 			const pubkey = getPublicKey(secret);
-			const action = buildRiftCommitAction({ instanceId: schedule.instanceId, holeId: hole.id, round: 1, authorPubkey: pubkey, choice, nonce });
-			const event = signedRiftAction(secret, schedule, action, getRiftRoundSchedule(schedule, 1).selectionAtMs + 1_000);
+			const action = buildCooperationDefectionCommitAction({ instanceId: schedule.instanceId, groupId: group.id, round: 1, authorPubkey: pubkey, choice, nonce });
+			const event = signedCooperationDefectionAction(secret, schedule, action, getCooperationDefectionRoundSchedule(schedule, 1).selectionAtMs + 1_000);
 			return { secret, choice, nonce, event };
 		});
-		const otherReveals = otherCommits.map(({ secret, choice, nonce, event }) => signedRiftAction(secret, schedule,
-			buildRiftRevealAction({ holeId: hole.id, round: 1, commitId: event.id, choice, nonce }), getRiftRoundSchedule(schedule, 1).resultAtMs + 1_000));
+		const otherReveals = otherCommits.map(({ secret, choice, nonce, event }) => signedCooperationDefectionAction(secret, schedule,
+			buildCooperationDefectionRevealAction({ groupId: group.id, round: 1, commitId: event.id, choice, nonce }), getCooperationDefectionRoundSchedule(schedule, 1).resultAtMs + 1_000));
 		const startTime = schedule.registrationAtMs + 1_000;
 		const selfSecret = fixtureSecret(19);
 		const selfPubkey = getPublicKey(selfSecret);
@@ -186,24 +187,24 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('[data-realtime-panel]')).toContainText('参加受付');
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${selfPubkey}"]`)).toBeVisible();
-		await page.locator('[data-realtime-hole-trigger]').click();
+		await page.locator('[data-realtime-group-trigger]').click();
 		await page.clock.runFor(50);
-		const nearPosition = hole.position.y > 0 ? { x: hole.position.x, y: hole.position.y - 1 } : { x: hole.position.x, y: hole.position.y + 1 };
+		const nearPosition = group.position.y > 0 ? { x: group.position.x, y: group.position.y - 1 } : { x: group.position.x, y: group.position.y + 1 };
 		const nearEvent = finalizeEvent(buildWorldStateEventTemplate({ channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: nearPosition, slot: 0, createdAt: Math.floor((startTime + 2_000) / 1000) }), selfSecret);
 		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), nearEvent);
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', `${nearPosition.x},${nearPosition.y}`);
-		await page.locator('[data-realtime-hole-trigger]').click();
+		await page.locator('[data-realtime-group-trigger]').click();
 		await page.getByRole('button', { name: '参加する' }).click();
 		await expect(page.locator('[data-realtime-panel]')).toContainText('参加済み');
-		const round = getRiftRoundSchedule(schedule, 1);
+		const round = getCooperationDefectionRoundSchedule(schedule, 1);
 		await page.clock.setSystemTime(round.selectionAtMs + 1_000);
 		await page.clock.runFor(1_000);
-		await page.locator('[data-rift-choice="escape"]').click();
+		await page.locator('[data-cooperation-defection-choice="defect"]').click();
 		await expect.poll(async () => (await relayState(page)).state.published.some((event) => event.kind === 7070 && event.pubkey === selfPubkey && JSON.parse(event.content).action === 'commit')).toBe(true);
 		await page.clock.setSystemTime(round.resultAtMs + 1_000);
 		await page.clock.runFor(1_000);
 		await expect.poll(async () => (await relayState(page)).state.published.some((event) => event.kind === 7070 && event.pubkey === selfPubkey && JSON.parse(event.content).action === 'reveal')).toBe(true);
-		const outcomeId = `${schedule.instanceId}:${hole.id}:r1:${selfPubkey}:death`;
+		const outcomeId = cooperationDefectionOutcomeId(schedule.instanceId, group.id, 1, selfPubkey);
 		await page.evaluate(async (appliedOutcomeId) => {
 			const database = await new Promise<IDBDatabase>((resolve, reject) => {
 				const request = indexedDB.open('persona-bubble-field-account');
@@ -227,8 +228,10 @@ test.describe('Relay startup', () => {
 				});
 			} finally { database.close(); }
 		}, outcomeId);
+		const reloaded = page.waitForEvent('framenavigated', (frame) => frame === page.mainFrame());
 		await page.clock.setSystemTime(round.revealCutoffAtMs + 1_000);
 		await page.clock.runFor(2_000);
+		await reloaded;
 		await expect(page.getByRole('dialog')).toHaveCount(0);
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
 		const exits = (await relayState(page)).state.published.filter((event) => event.kind === WORLD_STATE_KIND && event.pubkey === selfPubkey && event.tags.some((tag) => tag[0] === 'd' && tag[1]?.endsWith(':exit')));

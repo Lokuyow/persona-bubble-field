@@ -43,98 +43,89 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page).toHaveURL(/devWorld=1&devCharacter=001&devScenario=chatter-timeline|devWorld=1&devScenario=chatter-timeline&devCharacter=001/);
 	});
 
-	test('runs a local Rift Playground flow with bot settlement and virtual phases', async ({ page }) => {
-		await page.goto('/?devWorld=1&devScenario=rift-playground');
-		await expect(page.getByRole('heading', { name: '綻び experimental' })).toBeVisible();
-		const next = page.getByRole('button', { name: 'Advance Rift Playground phase' });
+	test('runs a local Cooperation and Defection Playground flow with bot settlement and virtual phases', async ({ page }) => {
+		await page.goto('/?devWorld=1&devScenario=cooperation-defection-playground');
+		await expect(page.getByRole('heading', { name: '協力と抜け駆け experimental' })).toBeVisible();
+		const next = page.getByRole('button', { name: 'Advance Cooperation and Defection Playground phase' });
 		await expect(next).toBeDisabled();
-		const hole = page.locator('[data-realtime-hole-trigger]').first();
-		const holePosition = (await hole.getAttribute('data-cell-position'))!.split(',').map(Number);
+		const group = page.locator('[data-realtime-group-trigger]').first();
+		const groupPosition = (await group.getAttribute('data-cell-position'))!.split(',').map(Number);
 		for (let index = 0; index < 8; index += 1) {
 			const current = await page.locator('.participant[data-self="true"]').getAttribute('data-position');
 			if (!current) throw new Error('Expected the DEV self position.');
 			const [x, y] = current.split(',').map(Number);
-			if (Math.max(Math.abs(x - holePosition[0]), Math.abs(y - holePosition[1])) <= 1) break;
-			await page.keyboard.press(x > holePosition[0] ? 'ArrowLeft' : x < holePosition[0] ? 'ArrowRight' : y > holePosition[1] ? 'ArrowUp' : 'ArrowDown');
+			if (Math.max(Math.abs(x - groupPosition[0]), Math.abs(y - groupPosition[1])) <= 1) break;
+			await page.keyboard.press(x > groupPosition[0] ? 'ArrowLeft' : x < groupPosition[0] ? 'ArrowRight' : y > groupPosition[1] ? 'ArrowUp' : 'ArrowDown');
 		}
-		const nearHole = await page.locator('.participant[data-self="true"]').getAttribute('data-position');
-		expect(nearHole).not.toBe(`${holePosition[0]},${holePosition[1]}`);
-		await hole.click();
+		const nearGroup = await page.locator('.participant[data-self="true"]').getAttribute('data-position');
+		expect(nearGroup).not.toBe(`${groupPosition[0]},${groupPosition[1]}`);
+		await group.click();
 		await expect(next).toBeEnabled();
 		await expect(page.locator('[data-realtime-panel]')).toContainText('参加済み');
 		await expect(page.locator('[data-realtime-panel]')).toContainText('開始まで待ってください。');
-		await expect(page.locator('[data-realtime-hole-participating="true"]')).toHaveCount(1);
-		await expect(page.locator('[data-realtime-hole-trigger][aria-pressed="true"]')).toHaveCount(1);
-		await expect(page.locator('[data-realtime-hole-trigger][aria-pressed="true"]')).toHaveAttribute('aria-label', '抜け穴へ参加済み（参加先）');
+		await expect(page.locator('[data-realtime-group-participating="true"]')).toHaveCount(1);
+		await expect(page.locator('[data-realtime-group-trigger][aria-pressed="true"]')).toHaveCount(1);
+		await expect(page.locator('[data-realtime-group-trigger][aria-pressed="true"]')).toHaveAttribute('aria-label', '参加地点に参加済み（参加先）');
 		await next.click();
 		await expect(page.locator('[data-realtime-panel]')).toContainText('参加者: 3');
 		await next.click();
-		await expect(page.getByRole('button', { name: '抜け穴を維持する' })).toBeEnabled();
-		await page.getByRole('button', { name: '抜け穴を維持する' }).click();
-		await expect(page.getByRole('button', { name: '抜け穴を維持する' })).toHaveClass(/selected/);
-		await expect(page.locator('[data-rift-selection-status]')).not.toContainText('まだありません');
+		await expect(page.getByRole('button', { name: '協力する' })).toBeEnabled();
+		await page.getByRole('button', { name: '協力する' }).click();
+		await expect(page.getByRole('button', { name: '協力する' })).toHaveClass(/selected/);
+		await expect(page.locator('[data-cooperation-defection-selection-status]')).not.toContainText('まだありません');
 		await next.click();
-		await expect(page.locator('[data-rift-round-result]')).toContainText('+20pt');
-		await next.click();
-		await next.click();
-		await page.getByRole('button', { name: '抜け穴を維持する' }).click();
+		await expect(page.locator('[data-cooperation-defection-round-result]')).toContainText('+1,000pt');
 		await next.click();
 		await next.click();
+		await page.getByRole('button', { name: '協力する' }).click();
 		await next.click();
-		await page.getByRole('button', { name: '抜け穴を維持する' }).click();
 		await next.click();
-		await expect(page.locator('[data-rift-round-result]')).toContainText('+20pt');
+		await next.click();
+		await page.getByRole('button', { name: '協力する' }).click();
+		await next.click();
+		await expect(page.locator('[data-cooperation-defection-round-result]')).toContainText('+1,000pt');
 	});
 
 	for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
-		test(`keeps Rift Playground controls and panel separate at ${viewport.width}px`, async ({ page }) => {
+		test(`keeps Cooperation and Defection Playground controls and panel separate at ${viewport.width}px`, async ({ page }) => {
 			await page.setViewportSize(viewport);
-			await page.goto('/?devWorld=1&devScenario=rift-playground');
+			await page.goto('/?devWorld=1&devScenario=cooperation-defection-playground');
 			if (viewport.width <= 700) await page.locator('.sandbox-mobile-toggle').click();
 			const controls = page.getByLabel('DEV sandbox controls');
 			const panel = page.locator('[data-realtime-panel]');
 			await expect(controls).toBeVisible();
 			await expect(panel).toBeVisible();
 			const boxes = await Promise.all([controls.boundingBox(), panel.boundingBox()]);
-			if (!boxes[0] || !boxes[1]) throw new Error('Expected DEV controls and Rift panel geometry.');
+			if (!boxes[0] || !boxes[1]) throw new Error('Expected DEV controls and game panel geometry.');
 			const [a, b] = boxes;
 			expect(a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y).toBe(false);
-			await expect(page.getByRole('button', { name: 'Advance Rift Playground phase' })).toBeVisible();
+			await expect(page.getByRole('button', { name: 'Advance Cooperation and Defection Playground phase' })).toBeVisible();
 		});
 	}
-	test('renders the experimental Rift registration and game fixtures without fixed-facility overlap', async ({ page }) => {
+	test('renders the Cooperation and Defection registration and game fixtures without fixed-facility overlap', async ({ page }) => {
 		await page.setViewportSize({ width: 360, height: 640 });
-		await page.goto('/?devWorld=1&devScenario=rift-registration');
+		await page.goto('/?devWorld=1&devScenario=cooperation-defection-registration');
 		await expect(page.locator('[data-realtime-panel]')).toBeVisible();
 		await expect(page.locator('[data-realtime-panel]')).toContainText('参加受付');
-		const registration = await page.locator('[data-realtime-hole-id]').evaluateAll((holes) => holes.map((hole) => hole.getAttribute('data-realtime-hole-position')));
+		const registration = await page.locator('[data-realtime-group-id]').evaluateAll((groups) => groups.map((group) => group.getAttribute('data-realtime-group-position')));
 		expect(registration.length).toBeGreaterThan(0);
 		expect(registration).not.toContain('12,3');
 		expect(registration).not.toContain('14,3');
-		const holeAsset = page.locator('[data-realtime-hole-id] img');
-		await expect(holeAsset).toHaveCount(registration.length);
-		await expect.poll(async () => holeAsset.first().evaluate((element) => {
-			if (!(element instanceof HTMLImageElement)) return { isImage: false, referencesRift: false, complete: false, naturalWidthPositive: false };
-			return {
-				isImage: true,
-				referencesRift: element.src.includes('/field/objects/rift.webp'),
-				complete: element.complete,
-				naturalWidthPositive: element.naturalWidth > 0
-			};
-		})).toEqual({ isImage: true, referencesRift: true, complete: true, naturalWidthPositive: true });
-		await expect(page.locator('[data-realtime-hole-trigger]')).toHaveCount(registration.length);
+		await expect(page.locator('[data-realtime-group-id] img')).toHaveCount(0);
+		await expect(page.locator('[data-realtime-group-id]').first()).toHaveCSS('border-radius', '50%');
+		await expect(page.locator('[data-realtime-group-trigger]')).toHaveCount(registration.length);
 		await page.getByText('ルールを見る', { exact: true }).click();
-		await expect(page.getByRole('dialog')).toContainText('ひとつの抜け穴には3〜6人が参加します。綻びは全3ラウンドです。');
+		await expect(page.getByRole('dialog')).toContainText('1グループ3〜6人、全3ラウンドです。');
 		await expect(page.getByRole('dialog')).toContainText('相談 30秒 → 選択 30秒 → 結果発表 20秒');
-		await expect(page.getByRole('dialog')).toContainText('維持する人数が足りない');
+		await expect(page.getByRole('dialog')).toContainText('協力失敗');
 		await page.getByText('ルールを見る', { exact: true }).click();
 
-		await page.goto('/?devWorld=1&devScenario=rift-game');
+		await page.goto('/?devWorld=1&devScenario=cooperation-defection-game');
 		await expect(page.locator('[data-realtime-panel]')).toBeVisible();
-		await expect(page.locator('[data-realtime-panel]')).toContainText('秘密選択');
-		await expect(page.locator('[data-rift-choice="maintain"]')).toBeDisabled();
-		await expect(page.locator('[data-rift-choice="escape"]')).toBeDisabled();
-		await expect(page.locator('[data-realtime-hole-trigger]')).toHaveCount(0);
+		await expect(page.locator('[data-realtime-panel]')).toContainText('選択内容は結果発表まで秘密です');
+		await expect(page.locator('[data-cooperation-defection-choice="cooperate"]')).toBeDisabled();
+		await expect(page.locator('[data-cooperation-defection-choice="defect"]')).toBeDisabled();
+		await expect(page.locator('[data-realtime-group-trigger]')).toHaveCount(0);
 	});
 
 	test('does not open the mending terminal in DEV World', async ({ page }) => {
