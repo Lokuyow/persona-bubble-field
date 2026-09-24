@@ -20,21 +20,9 @@ export type AbilityUpgrade = Readonly<{
 	nextEffect: string | null;
 }>;
 
-const INFERENCE_CHECKPOINTS = [
-	[1, 100], [5, 170], [10, 260], [20, 400], [30, 520], [50, 700], [75, 860], [100, 1000]
-] as const;
-const CONTEXT_CHECKPOINTS = [
-	[1, 5], [5, 12], [10, 30], [15, 120], [20, 480], [30, 600], [50, 840], [75, 1140], [100, 1440]
-] as const;
-const HALLUCINATION_CHECKPOINTS = [
-	[1, 10], [5, 25], [10, 45], [20, 75], [30, 100], [50, 125], [75, 150], [100, 175]
-] as const;
-
-const ABILITY_UPGRADE_COSTS: Readonly<Record<PersonaAbilityKey, readonly [number, number, number][]>> = {
-	inferenceEfficiency: [[1, 5, 1], [6, 10, 2], [11, 20, 4], [21, 30, 8], [31, 40, 24], [41, 50, 60], [51, 60, 120], [61, 70, 220], [71, 80, 360], [81, 90, 550], [91, 99, 800]],
-	contextCapacity: [[1, 5, 1], [6, 10, 2], [11, 20, 4], [21, 30, 8], [31, 40, 24], [41, 50, 60], [51, 60, 120], [61, 70, 220], [71, 80, 360], [81, 90, 550], [91, 99, 800]],
-	hallucinationSuppression: [[1, 5, 1], [6, 10, 2], [11, 20, 4], [21, 30, 8], [31, 40, 24], [41, 50, 60], [51, 60, 120], [61, 70, 220], [71, 80, 360], [81, 90, 550], [91, 99, 800]]
-};
+function abilityUpgradeCost(targetLevel: number): number {
+	return 2 ** Math.floor((targetLevel - 1) / 10);
+}
 
 function isCanonicalPubkey(value: unknown): value is string {
 	return typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
@@ -48,42 +36,28 @@ function isAbilityLevel(value: unknown, maximum: number): value is number {
 	return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1 && value <= maximum;
 }
 
-function interpolate(checkpoints: readonly (readonly [number, number])[], level: number): number {
-	for (let index = 1; index < checkpoints.length; index += 1) {
-		const [rightLevel, rightValue] = checkpoints[index];
-		const [leftLevel, leftValue] = checkpoints[index - 1];
-		if (level <= rightLevel) {
-			const offset = level - leftLevel;
-			const span = rightLevel - leftLevel;
-			const delta = rightValue - leftValue;
-			return Math.floor((2 * (leftValue * span + offset * delta) + span) / (2 * span));
-		}
-	}
-	return checkpoints.at(-1)![1];
-}
-
 export function getInferenceRateHundredths(level: number): number {
 	if (!isAbilityLevel(level, 100)) throw new TypeError('Invalid ability level.');
-	return interpolate(INFERENCE_CHECKPOINTS, level);
+	return 100 + (level - 1) * 10;
 }
 
 export function getContextCapacityMinutes(level: number): number {
 	if (!isAbilityLevel(level, 100)) throw new TypeError('Invalid ability level.');
-	return interpolate(CONTEXT_CHECKPOINTS, level);
+	return 5 + (level - 1) * 15;
 }
 
 export function getHallucinationExtensionHundredths(level: number): number {
 	if (!isAbilityLevel(level, 100)) throw new TypeError('Invalid ability level.');
-	return interpolate(HALLUCINATION_CHECKPOINTS, level);
+	return 10 + (level - 1) * 2;
 }
 
 export function getAbilityUpgrade(key: PersonaAbilityKey, levels: PersonaAbilityLevels): AbilityUpgrade {
 	const level = levels[key];
 	if (!isAbilityLevel(level, ABILITY_LEVEL_LIMITS[key])) throw new TypeError('Invalid ability levels.');
-	const cost = ABILITY_UPGRADE_COSTS[key].find(([first, last]) => level >= first && level <= last)?.[2] ?? 0;
+	const nextLevel = level < ABILITY_LEVEL_LIMITS[key] ? level + 1 : null;
+	const cost = nextLevel === null ? 0 : abilityUpgradeCost(nextLevel);
 	const currentEffect = key === 'inferenceEfficiency' ? `${(getInferenceRateHundredths(level) / 100).toFixed(2)} pt/分` :
 		key === 'contextCapacity' ? `${getContextCapacityMinutes(level)}分` : `${(getHallucinationExtensionHundredths(level) / 100).toFixed(2)} h/h`;
-	const nextLevel = level < ABILITY_LEVEL_LIMITS[key] ? level + 1 : null;
 	const nextEffect = nextLevel === null ? null : key === 'inferenceEfficiency' ? `${(getInferenceRateHundredths(nextLevel) / 100).toFixed(2)} pt/分` :
 		key === 'contextCapacity' ? `${getContextCapacityMinutes(nextLevel)}分` : `${(getHallucinationExtensionHundredths(nextLevel) / 100).toFixed(2)} h/h`;
 	return { key, level, cost, currentEffect, nextEffect };

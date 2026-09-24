@@ -238,7 +238,7 @@ test.describe('Relay startup', () => {
 		await expect(dialog).toContainText('ハルシネーション抑制');
 		await expect(dialog).toContainText('Lv1');
 		await expect(dialog).toContainText('1.00');
-		await expect(dialog).toContainText('1.18');
+		await expect(dialog).toContainText('1.10');
 		await expect(dialog).toContainText('ポイント生成速度');
 		await expect(dialog).toContainText('必要ポイント');
 		await expect(dialog.getByRole('button', { name: 'Lv2へ強化' }).first()).toBeVisible();
@@ -277,6 +277,37 @@ test.describe('Relay startup', () => {
 		await expect(dialog).toContainText('推論効率 Lv2');
 		await page.reload();
 		await expect.poll(() => readRelayGameState(page)).toMatchObject({ points: 9, abilities: { inferenceEfficiency: 2, contextCapacity: 1, hallucinationSuppression: 1 } });
+	});
+
+	test('shows the linear Run effect and arrival-level cost at the adjustment terminal', async ({ page }) => {
+		const startTime = Date.now();
+		const secret = fixtureSecret(19);
+		const pubkey = getPublicKey(secret);
+		await page.clock.install({ time: startTime });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { primaryEvents: testEvents(startTime) });
+		await seedRelayAccount(page, secret, pubkey, startTime + 7 * 24 * 60 * 60 * 1000, 10, { inferenceEfficiency: 10, contextCapacity: 1, hallucinationSuppression: 1 });
+		await page.goto('/');
+		await page.evaluate(() => {
+			(window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary();
+		});
+		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
+		const nearby = finalizeEvent(buildWorldStateEventTemplate({
+			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 13, y: 3 }, slot: 1,
+			createdAt: Math.floor(await page.evaluate(() => Date.now()) / 1000)
+		}), secret);
+		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), nearby);
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '13,3');
+		await page.getByRole('button', { name: '能力強化端末' }).click();
+		const dialog = page.getByRole('dialog', { name: '能力強化' });
+		const inference = dialog.locator('.ability-card').first();
+		await expect(inference).toContainText('1.90');
+		await expect(inference).toContainText('+0.10 pt/分');
+		await expect(inference.locator('.cost')).toContainText('2 pt');
+		await inference.getByRole('button', { name: 'Lv11へ強化' }).click();
+		await expect(inference).toContainText('2.00');
+		await expect(inference.locator('.cost')).toContainText('2 pt');
+		await expect.poll(() => readRelayGameState(page)).toMatchObject({ points: 8, abilities: { inferenceEfficiency: 11 } });
 	});
 
 	test('shows maxed abilities as unavailable at the adjustment terminal', async ({ page }) => {
