@@ -28,6 +28,7 @@ function layout(projection: TraceConversationProjection, bubbleSizes: Record<str
 		return layoutTraceBubblePresentation({
 		projection,
 		fixedBubbles: [],
+		fixedObstacles: [],
 		bubbleSizes,
 		traceReplyCardFootprints: footprints,
 		bubbleSafeBounds: { x: 0, y: 0, width: 1000, height: 700 },
@@ -178,5 +179,23 @@ describe('trace bubble presentation', () => {
 		expect(moved.root.anchor.x).toBe(60);
 		expect(moved.root.anchor.y).toBe(first.root.anchor.y);
 		expect(resized.root.anchor).not.toEqual(first.root.anchor);
+	});
+
+	it('avoids measured panel obstacles for Trace roots and replies and recalculates when the panel moves', () => {
+		const projection: TraceConversationProjection = { root, current: { kind: 'reply', event: current }, parent: { kind: 'root', event: root }, directReplies: [child], continuationReplyIds: [] };
+		const sizes = {
+			[`trace-root-${root.id}`]: { width: 140, height: 70 },
+			[`trace-reply-${current.id}`]: { width: 140, height: 70 },
+			[`trace-reply-${child.id}`]: { width: 140, height: 70 }
+		};
+		const panel = (x: number) => [{ id: 'panel', preferred: { x, y: 0 }, anchor: { x, y: 0 }, size: { width: 440, height: 90 } }];
+		const first = layout(projection, sizes, {}, undefined, { fixedObstacles: panel(280) })!;
+		const moved = layout(projection, sizes, {}, first, { fixedObstacles: panel(0) })!;
+		const intersectsPanel = (anchor: { x: number; y: number }, size: { width: number; height: number }, x: number) =>
+			anchor.x < x + 440 && anchor.x + size.width > x && anchor.y < 90 && anchor.y + size.height > 0;
+		for (const card of [first.root, ...first.cards]) expect(intersectsPanel(card.anchor, card.footprint, 280)).toBe(false);
+		for (const card of [moved.root, ...moved.cards]) expect(intersectsPanel(card.anchor, card.footprint, 0)).toBe(false);
+		expect(moved.root.anchor).not.toEqual(first.root.anchor);
+		expect(moved.fixedContext).not.toBe(first.fixedContext);
 	});
 });

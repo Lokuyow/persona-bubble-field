@@ -7,6 +7,7 @@ import {
 	normalBubblePreferredAnchor,
 	placeBubblesWithFixed,
 	type Bounds,
+	type FixedBubblePlacement,
 	type Size,
 	type WorldPoint,
 	worldToScreen
@@ -59,6 +60,7 @@ export type TraceBubblePresentationLayout = Readonly<{
 export type TraceBubblePresentationInput = Readonly<{
 	projection: TraceConversationProjection | null;
 	fixedBubbles: readonly Readonly<{ id: string; anchor: WorldPoint; size: Size; speechType: SpeechType; shape: SpeechBubbleShape | null }>[];
+	fixedObstacles: readonly FixedBubblePlacement[];
 	bubbleSizes: Readonly<Record<string, Size>>;
 	traceReplyCardFootprints: Readonly<Record<string, Size>>;
 	bubbleSafeBounds: Bounds;
@@ -84,6 +86,7 @@ function tracePresentationContext(input: TraceBubblePresentationInput): string {
 		fieldAreaBounds: input.fieldAreaBounds,
 		bubbleSafeBounds: input.bubbleSafeBounds,
 		bubbleVisualRegion: input.bubbleVisualRegion,
+		fixedObstacles: input.fixedObstacles,
 		fieldRows: input.fieldRows,
 		viewportWidth: input.viewportWidth
 	});
@@ -101,14 +104,16 @@ function traceReplyContinuityContext(input: TraceBubblePresentationInput): strin
 }
 
 function traceFixedContext(input: TraceBubblePresentationInput): string {
-	return JSON.stringify([...input.fixedBubbles]
-		.map((bubble) => ({
+	return JSON.stringify([
+		...input.fixedBubbles.map((bubble) => ({
 			id: bubble.id,
 			anchor: bubble.anchor,
 			size: bubble.size,
 			speechType: bubble.speechType,
 			visualBounds: bubble.shape?.bounds ?? null
-		}))
+		})),
+		...input.fixedObstacles.map((obstacle) => ({ id: obstacle.id, anchor: obstacle.anchor, size: obstacle.size, visualBounds: obstacle.visualBounds ?? null }))
+	]
 		.sort((first, second) => first.id.localeCompare(second.id)));
 }
 
@@ -143,10 +148,13 @@ export function layoutTraceBubblePresentation(input: TraceBubblePresentationInpu
 	const replyContext = traceReplyContinuityContext(input);
 	const fixedContext = traceFixedContext(input);
 	const rootContinuityLayout = input.previousLayout?.context === context ? input.previousLayout : null;
-	const fixed = input.fixedBubbles.map((bubble) => ({
+	const fixed = [
+		...input.fixedBubbles.map((bubble) => ({
 		id: bubble.id, preferred: bubble.anchor, anchor: bubble.anchor, size: bubble.size,
 		visualBounds: bubble.speechType === 'shout' ? undefined : bubble.shape?.bounds
-	}));
+		})),
+		...input.fixedObstacles
+	];
 	const rootId = `trace-root-${projection.root.id}`;
 	const rootSize = input.bubbleSizes[rootId] ?? input.defaultBubbleSize;
 	const rootShape = createPresentationBubbleShape(projection.root.speechType, rootId, rootSize, input.viewportWidth, input.bubbleSafeBounds);
