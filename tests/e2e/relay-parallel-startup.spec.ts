@@ -210,10 +210,15 @@ test(`stops the early writer and reloads when a late primary delivers a newer un
 	}), secret);
 	const loadsBeforeConflict = await page.evaluate(() => Number(sessionStorage.getItem('world-resync-loads')));
 	const resynced = page.waitForEvent('framenavigated', (frame) => frame === page.mainFrame());
-	await page.evaluate((event) => (window as typeof window & {
-		__relayStartupTest: { injectPosition(event: object): void }
-	}).__relayStartupTest.injectPosition(event), conflicting);
+	const slowRelay = AUTHORITATIVE_RELAYS.at(-1)!;
+	await page.evaluate(({ event, relayUrl }) => (window as typeof window & {
+		__relayStartupTest: { injectPositionToRelay(event: object, relayUrl: string): void }
+	}).__relayStartupTest.injectPositionToRelay(event, relayUrl), { event: conflicting, relayUrl: slowRelay });
 	await resynced;
+	await expect.poll(() => page.evaluate(() => Number(sessionStorage.getItem('world-resync-loads')))).toBe(loadsBeforeConflict + 1);
+	await waitForPrimary(page);
+	await expect.poll(async () => (await relayState(page)).state.persistedPrimaryDeliveries).toContainEqual({ relayUrl: slowRelay, eventId: conflicting.id });
+	await page.clock.runFor(2_000);
 	await expect.poll(() => page.evaluate(() => Number(sessionStorage.getItem('world-resync-loads')))).toBe(loadsBeforeConflict + 1);
 	expect((await relayState(page)).state.published.filter((event) =>
 		event.kind === WORLD_STATE_KIND && event.pubkey === selfPubkey)).toHaveLength(0);

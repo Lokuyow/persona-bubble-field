@@ -678,12 +678,36 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			event.createdAt === snapshot.lastReservedSecond && event.slot !== null && event.slot < snapshot.consumedSlots;
 	}
 
-	function stopConflictingSelfWriter(): void {
+	function conflictResyncStorageKey(): string | null {
+		if (typeof window === 'undefined' || !journalScope) return null;
+		return `world-self-conflict-resync:${journalScope.channelId}:${journalScope.identity.pubkey}:${journalScope.runNumber}`;
+	}
+
+	function conflictResyncAlreadyAttempted(): boolean {
+		const key = conflictResyncStorageKey();
+		if (!key) return false;
+		try { return window.sessionStorage.getItem(key) === 'attempted'; } catch { return false; }
+	}
+
+	function markConflictResyncAttempted(): boolean {
+		const key = conflictResyncStorageKey();
+		if (!key) return false;
+		try {
+			if (window.sessionStorage.getItem(key) === 'attempted') return false;
+			window.sessionStorage.setItem(key, 'attempted');
+			return true;
+		} catch {
+			// Keep the writer stopped when the per-tab reload latch cannot be persisted.
+			return false;
+		}
+	}
+
+	function stopConflictingSelfWriter(requestResync = true): void {
 		if (disposed || terminal) return;
 		terminal = true;
 		refreshSelfMessageAvailability();
 		emitSelfPositionWriteState({ kind: 'unavailable' });
-		onSelfWriteAuthorizationLostCallback?.();
+		if (requestResync && markConflictResyncAttempted()) onSelfWriteAuthorizationLostCallback?.();
 	}
 
 	function reconcileSelfWorldState(event: ParsedWorldStateEvent): void {
@@ -725,6 +749,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 				}
 			}
 			journalLoaded = true;
+			if (conflictResyncAlreadyAttempted()) stopConflictingSelfWriter(false);
 	})();
 		return journalLoadPromise;
 	}
@@ -1474,6 +1499,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 				if (pubkey !== selfSigner.pubkey) positionEvidenceByPubkey.delete(pubkey);
 			}
 			await ensureJournalLoaded();
+			if (terminal) return;
 			emitSelfPositionWriteState({ kind: 'ready' });
 			refreshSelfMessageAvailability();
 			refreshTraceReadSnapshot();

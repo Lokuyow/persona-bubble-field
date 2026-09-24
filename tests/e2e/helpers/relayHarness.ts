@@ -343,6 +343,10 @@ export async function installDelayedRelay(page: Page, options: {
 		const timelineHistory = (historyMessages ?? []) as Array<Record<string, unknown>>;
 		const traceReplyHistory = traceReplies as Array<Record<string, unknown>>;
 		const persistedKey = 'relay-startup-persisted-state';
+		const persistedLatePositionKey = 'relay-startup-persisted-late-position';
+		const persistedLatePosition = persistAcrossReload
+			? JSON.parse(sessionStorage.getItem(persistedLatePositionKey) ?? 'null') as { relayUrl: string; event: Record<string, unknown> } | null
+			: null;
 		const previous = persistAcrossReload ? JSON.parse(sessionStorage.getItem(persistedKey) ?? '{"published":[],"closedSubscriptions":[]}') as {
 			published: Array<Record<string, unknown>>;
 			closedSubscriptions: Array<{ subId: string; url: string }>;
@@ -354,6 +358,7 @@ export async function installDelayedRelay(page: Page, options: {
 		const state = {
 			traceDeliveries: [] as string[],
 			requests: [] as Array<{ url: string; subId: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] }>,
+			persistedPrimaryDeliveries: [] as Array<{ relayUrl: string; eventId: string }>,
 			published: [] as Array<Record<string, unknown>>,
 			closedSubscriptions: [] as Array<{ subId: string; url: string }>,
 			previousPublished: previous.published,
@@ -413,11 +418,54 @@ export async function installDelayedRelay(page: Page, options: {
 			}
 			if (request.filters.some((filter) => (filter.kinds as number[] | undefined)?.includes(WORLD_STATE_KIND))) {
 				deliver(request.socket, ['EVENT', request.subId, primaryEvents.position]);
+				if (persistedLatePosition?.relayUrl === new URL(request.socket.url).toString()) {
+					state.persistedPrimaryDeliveries.push({ relayUrl: persistedLatePosition.relayUrl, eventId: String(persistedLatePosition.event.id) });
+					deliver(request.socket, ['EVENT', request.subId, persistedLatePosition.event]);
+				}
 			}
 			if (request.filters.some((filter) => filter.limit === 50)) {
 				for (const event of timelineHistory) deliver(request.socket, ['EVENT', request.subId, event]);
 			}
 		};
+		const recordInjectedPositionReservation = (rawEvent: object) => new Promise<void>((resolve, reject) => {
+			const event = rawEvent as { pubkey?: string; created_at?: number; tags?: string[][] };
+			const channelId = event.tags?.find((tag) => tag[0] === 'e')?.[1];
+			const key = channelId && event.pubkey ? `${channelId}\u0000${event.pubkey}` : null;
+			const slotTag = event.tags?.find((tag) => tag[0] === 'd')?.[1] ?? '';
+			if (!key || !Number.isSafeInteger(event.created_at) || slotTag.endsWith(':exit')) { resolve(); return; }
+			const database = indexedDB.open('persona-bubble-field-account', 8);
+			database.onerror = () => reject(database.error);
+			database.onsuccess = () => {
+				const db = database.result;
+				if (!db.objectStoreNames.contains('persona-bubble-field-world-write-journal')) { db.close(); resolve(); return; }
+				const tx = db.transaction(['persona-bubble-field-player-state', 'persona-bubble-field-world-write-journal'], 'readwrite');
+				const store = tx.objectStore('persona-bubble-field-world-write-journal');
+				const playerStore = tx.objectStore('persona-bubble-field-player-state');
+				const read = store.get(key);
+				const playerRead = playerStore.get('player-lifecycle');
+				read.onsuccess = () => {
+					const record = read.result;
+					if (record?.confirmedPosition?.id === (rawEvent as { id?: string }).id) return;
+					const createdAt = event.created_at!;
+					const slot = slotTag.endsWith(':1') ? 1 : 0;
+					const sameSecond = record?.lastReservedSecond === createdAt;
+					const available = !sameSecond || slot >= record.consumedSlots;
+					if (record && (!available || record.lastReservedSecond !== null && record.lastReservedSecond > createdAt)) return;
+					playerRead.onsuccess = () => {
+						const activeRun = playerRead.result?.mode?.activeRun;
+						if (!activeRun) return;
+						store.put({ version: 1, channelId, pubkey: event.pubkey, runNumber: record?.runNumber ?? activeRun.runNumber,
+							...(record ?? { nextToken: 0, exitSecond: null }), nextToken: (record?.nextToken ?? 0) + 1,
+							lastReservedSecond: createdAt, consumedSlots: sameSecond ? Math.max(record.consumedSlots, slot + 1) : slot + 1,
+							lastPositiveSecond: Math.max(record?.lastPositiveSecond ?? -1, createdAt), confirmedPosition: rawEvent
+						}, key);
+					};
+				};
+				tx.oncomplete = () => { db.close(); resolve(); };
+				tx.onerror = () => { db.close(); reject(tx.error); };
+				tx.onabort = () => { db.close(); reject(tx.error); };
+			};
+		});
 		const respondPrimary = (request: PendingRequest) => {
 			if (state.primaryEventsReleased) respondPrimaryEvent(request);
 			if (state.primaryReleased) deliver(request.socket, ['EOSE', request.subId]);
@@ -641,9 +689,19 @@ export async function installDelayedRelay(page: Page, options: {
 				rejectTracePublishes: () => { state.rejectTracePublishes = true; },
 				allowTracePublishes: () => { state.rejectTracePublishes = false; },
 				allowMessagePublishes: () => { state.rejectMessagePublishes = false; },
-				injectPosition: (event: object) => {
+				injectPosition: async (event: object) => {
+					await recordInjectedPositionReservation(event);
 					for (const request of activePrimary) {
 						if (request.filters.some((filter) => (filter.kinds as number[] | undefined)?.includes(WORLD_STATE_KIND))) {
+							deliver(request.socket, ['EVENT', request.subId, event]);
+						}
+					}
+				},
+				injectPositionToRelay: (event: object, relayUrl: string) => {
+					sessionStorage.setItem(persistedLatePositionKey, JSON.stringify({ relayUrl: new URL(relayUrl).toString(), event }));
+					for (const request of activePrimary) {
+						if (new URL(request.socket.url).toString() === new URL(relayUrl).toString() &&
+							request.filters.some((filter) => (filter.kinds as number[] | undefined)?.includes(WORLD_STATE_KIND))) {
 							deliver(request.socket, ['EVENT', request.subId, event]);
 						}
 					}
@@ -680,7 +738,7 @@ export async function installDelayedRelay(page: Page, options: {
 
 export function relayState(page: Page) {
 	return page.evaluate(() => (window as typeof window & {
-		__relayStartupTest: { state: { requests: Array<{ url: string; subId: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] }>; published: Array<{ id: string; kind: number; created_at: number; content: string; tags: string[][]; pubkey?: string }>; closedSubscriptions: Array<{ subId: string; url: string }> }; releasePublishes(kind: number): void; deferPositionPublishes(): void; releasePrimaryEvents(): void; releasePrimary(): void; releaseTraceRoots(): void; releaseTraceReplies(): void; deferTraceReplies(): void; injectTraceReply(event: object): void; injectClosedTraceReply(event: object): void; activeTraceReplyCount(): number; rejectMessagePublishes(): void; allowMessagePublishes(): void; rejectPositionPublishes(): void; allowPositionPublishes(): void; rejectTracePublishes(): void; allowTracePublishes(): void; injectPosition(event: object): void; injectMessage(event: object): void };
+		__relayStartupTest: { state: { requests: Array<{ url: string; subId: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] }>; persistedPrimaryDeliveries: Array<{ relayUrl: string; eventId: string }>; published: Array<{ id: string; kind: number; created_at: number; content: string; tags: string[][]; pubkey?: string }>; closedSubscriptions: Array<{ subId: string; url: string }> }; releasePublishes(kind: number): void; deferPositionPublishes(): void; releasePrimaryEvents(): void; releasePrimary(): void; releaseTraceRoots(): void; releaseTraceReplies(): void; deferTraceReplies(): void; injectTraceReply(event: object): void; injectClosedTraceReply(event: object): void; activeTraceReplyCount(): number; rejectMessagePublishes(): void; allowMessagePublishes(): void; rejectPositionPublishes(): void; allowPositionPublishes(): void; rejectTracePublishes(): void; allowTracePublishes(): void; injectPosition(event: object): void; injectPositionToRelay(event: object, relayUrl: string): void; injectMessage(event: object): void };
 	}).__relayStartupTest);
 }
 
