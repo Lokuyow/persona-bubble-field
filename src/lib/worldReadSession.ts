@@ -230,6 +230,8 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	let journalSnapshot: WorldWriteJournalSnapshot | null = null;
 	let journalLoaded = false;
 	let journalLoadPromise: Promise<void> | null = null;
+	let selfEvidenceReconciliation: Promise<void> = Promise.resolve();
+	let selfEvidenceChecksPending = 0;
 	let startupSecond = 0;
 	const locallyConfirmedPositions: ParsedWorldStateEvent[] = [];
 	const locallyConfirmedMessages: ParsedWorldMessage[] = [];
@@ -290,7 +292,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	}
 
 	function refreshSelfMessageAvailability(): void {
-		const next: SelfMessageAvailability = !disposed && !terminal &&
+		const next: SelfMessageAvailability = !disposed && !terminal && selfEvidenceChecksPending === 0 &&
 			Boolean(selfSigner && transport && channel && selfJoinedThisSession &&
 				presence.participants.some((participant) => participant.id === selfSigner?.pubkey))
 			? { kind: 'ready' }
@@ -456,9 +458,11 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	}
 
 	async function authorizeSelfWrite(): Promise<boolean> {
+		if (selfEvidenceChecksPending) await selfEvidenceReconciliation;
 		if (terminal) return false;
 		if (!authorizeSelfWriteCallback) return !terminal;
 		const result = await authorizeSelfWriteCallback();
+		if (selfEvidenceChecksPending) await selfEvidenceReconciliation;
 		if (terminal) return false;
 		if (result === 'authorized') return true;
 		if (!disposed) {
@@ -578,6 +582,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	}
 
 	function applyLivePosition(event: ParsedWorldStateEvent, nowMs: number): void {
+		reconcileSelfWorldState(event);
 		observeLivePosition(event);
 		const ownOperation = pendingSelfOperation?.id === event.id ? pendingSelfOperation : retryableSelfOperations.get(event.id);
 		if (journalScope && ownOperation?.reservation && ownOperation.event) {
@@ -605,6 +610,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	}
 
 	function applyBootstrapPosition(event: ParsedWorldStateEvent, nowMs: number): void {
+		reconcileSelfWorldState(event);
 		if (journalScope && (pendingSelfOperation?.id === event.id || retryableSelfOperations.has(event.id))) {
 			applyLivePosition(event, nowMs);
 			return;
@@ -659,6 +665,47 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 
 	function currentPresence(): PresenceState {
 		return project(Date.now());
+	}
+
+	function journalCoversWorldState(event: ParsedWorldStateEvent, snapshot: WorldWriteJournalSnapshot | null): boolean {
+		if (!snapshot) return false;
+		if (event.createdAt <= (snapshot.exitSecond ?? -1) || event.createdAt < (snapshot.lastPositiveSecond ?? -1)) return true;
+		if (event.state === 'exit') return false;
+		const confirmed = snapshot.confirmedPosition && channel ? parseWorldStateEvent(snapshot.confirmedPosition, channel.channelId) : null;
+		if (snapshot.confirmedPosition && !confirmed) return false;
+		if (confirmed && confirmed.createdAt === event.createdAt && confirmed.slot === event.slot && confirmed.id !== event.id) return false;
+		return event.createdAt < (snapshot.lastReservedSecond ?? -1) ||
+			event.createdAt === snapshot.lastReservedSecond && event.slot !== null && event.slot < snapshot.consumedSlots;
+	}
+
+	function stopConflictingSelfWriter(): void {
+		if (disposed || terminal) return;
+		terminal = true;
+		refreshSelfMessageAvailability();
+		emitSelfPositionWriteState({ kind: 'unavailable' });
+		onSelfWriteAuthorizationLostCallback?.();
+	}
+
+	function reconcileSelfWorldState(event: ParsedWorldStateEvent): void {
+		if (disposed || terminal || !journalScope || !journalLoaded || !selfSigner || event.pubkey !== selfSigner.pubkey) return;
+		if (pendingSelfOperation?.id === event.id || retryableSelfOperations.has(event.id) ||
+			locallyConfirmedPositions.some((known) => known.id === event.id) ||
+			journalSnapshot?.confirmedPosition?.id === event.id || journalCoversWorldState(event, journalSnapshot)) return;
+		selfEvidenceChecksPending += 1;
+		refreshSelfMessageAvailability();
+		selfEvidenceReconciliation = selfEvidenceReconciliation.then(async () => {
+			if (disposed || terminal || !journalScope) return;
+			const latest = await loadWorldWriteJournal(journalScope);
+			if (disposed || terminal) return;
+			if (latest?.confirmedPosition?.id === event.id || journalCoversWorldState(event, latest)) {
+				journalSnapshot = latest;
+				return;
+			}
+			stopConflictingSelfWriter();
+		}).catch(stopConflictingSelfWriter).finally(() => {
+			selfEvidenceChecksPending -= 1;
+			refreshSelfMessageAvailability();
+		});
 	}
 
 	function ensureJournalLoaded(): Promise<void> {

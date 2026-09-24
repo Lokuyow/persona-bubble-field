@@ -177,6 +177,116 @@ test('keeps a journal-confirmed self position through late canonical handoff on 
 		event.kind === WORLD_STATE_KIND && event.pubkey === selfPubkey)).toHaveLength(0);
 });
 
+for (const { state, slot } of [{ state: 'exit', slot: 'exit' }, { state: 'active', slot: 0 }] as const) {
+test(`stops the early writer and reloads when a late primary delivers a newer unknown self ${state}`, async ({ page }) => {
+	const secret = fixtureSecret(23);
+	const selfPubkey = getPublicKey(secret);
+	await page.clock.install({ time: Date.now() });
+	await page.addInitScript(() => {
+		sessionStorage.setItem('world-resync-loads', String(Number(sessionStorage.getItem('world-resync-loads') ?? 0) + 1));
+	});
+	await installHostOwnedStub(page);
+	await installDelayedRelay(page, { persistAcrossReload: true, deferTraceRoots: true });
+	await seedRelayAccount(page, secret, selfPubkey);
+	await page.goto('/');
+	await waitForPrimary(page);
+	await page.evaluate(() => (window as typeof window & {
+		__relayStartupTest: { releasePrimary(): void }
+	}).__relayStartupTest.releasePrimary());
+	await page.clock.runFor(1_100);
+	await expect.poll(async () => (await relayState(page)).state.published.some((event) =>
+		event.kind === WORLD_STATE_KIND && event.pubkey === selfPubkey)).toBe(true);
+
+	await page.reload({ waitUntil: 'domcontentloaded' });
+	await waitForPrimary(page);
+	await page.evaluate((urls) => (window as typeof window & {
+		__relayStartupTest: { releasePrimaryRelays(urls: string[]): void }
+	}).__relayStartupTest.releasePrimaryRelays(urls), AUTHORITATIVE_RELAYS.slice(0, 3));
+	await expect(page.locator(`.participant[data-self="true"][data-participant-id="${selfPubkey}"]`)).toBeVisible();
+	await page.clock.runFor(1_100);
+	const conflicting = finalizeEvent(buildWorldStateEventTemplate({
+		channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' },
+		position: { x: 7, y: 3 }, slot, createdAt: await page.evaluate(() => Math.floor(Date.now() / 1000))
+	}), secret);
+	const loadsBeforeConflict = await page.evaluate(() => Number(sessionStorage.getItem('world-resync-loads')));
+	const resynced = page.waitForEvent('framenavigated', (frame) => frame === page.mainFrame());
+	await page.evaluate((event) => (window as typeof window & {
+		__relayStartupTest: { injectPosition(event: object): void }
+	}).__relayStartupTest.injectPosition(event), conflicting);
+	await resynced;
+	await expect.poll(() => page.evaluate(() => Number(sessionStorage.getItem('world-resync-loads')))).toBe(loadsBeforeConflict + 1);
+	expect((await relayState(page)).state.published.filter((event) =>
+		event.kind === WORLD_STATE_KIND && event.pubkey === selfPubkey)).toHaveLength(0);
+});
+}
+
+test('keeps the early writer for old, own, and journal-reserved other-tab self evidence', async ({ page, context }) => {
+	const secret = fixtureSecret(23);
+	const selfPubkey = getPublicKey(secret);
+	await page.clock.install({ time: Date.now() });
+	await installHostOwnedStub(page);
+	await installDelayedRelay(page, { persistAcrossReload: true, deferTraceRoots: true });
+	await seedRelayAccount(page, secret, selfPubkey);
+	await page.goto('/');
+	await waitForPrimary(page);
+	await page.evaluate(() => (window as typeof window & {
+		__relayStartupTest: { releasePrimary(): void }
+	}).__relayStartupTest.releasePrimary());
+	await page.clock.runFor(1_100);
+	await expect.poll(async () => (await relayState(page)).state.published.some((event) =>
+		event.kind === WORLD_STATE_KIND && event.pubkey === selfPubkey)).toBe(true);
+	const ownPosition = (await relayState(page)).state.published.find((event) =>
+		event.kind === WORLD_STATE_KIND && event.pubkey === selfPubkey)!;
+	await page.reload({ waitUntil: 'domcontentloaded' });
+	await waitForPrimary(page);
+	await page.evaluate((urls) => (window as typeof window & {
+		__relayStartupTest: { releasePrimaryRelays(urls: string[]): void }
+	}).__relayStartupTest.releasePrimaryRelays(urls), AUTHORITATIVE_RELAYS.slice(0, 3));
+	await expect(page.locator(`.participant[data-self="true"][data-participant-id="${selfPubkey}"]`)).toBeVisible();
+	const old = finalizeEvent(buildWorldStateEventTemplate({
+		channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' },
+		position: { x: 7, y: 3 }, slot: 0, createdAt: ownPosition.created_at - 1
+	}), secret);
+	const oldExit = finalizeEvent(buildWorldStateEventTemplate({
+		channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' },
+		position: { x: 7, y: 3 }, slot: 'exit', createdAt: ownPosition.created_at - 1
+	}), secret);
+	await page.evaluate(([own, older, olderExit]) => {
+		const relay = (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest;
+		relay.injectPosition(own);
+		relay.injectPosition(own);
+		relay.injectPosition(older);
+		relay.injectPosition(olderExit);
+	}, [ownPosition, old, oldExit]);
+
+	const otherTab = await context.newPage();
+	await otherTab.clock.install({ time: await page.evaluate(() => Date.now()) });
+	await installHostOwnedStub(otherTab);
+	await installDelayedRelay(otherTab, { deferTraceRoots: true });
+	await otherTab.goto('/');
+	await waitForPrimary(otherTab);
+	await otherTab.evaluate((urls) => (window as typeof window & {
+		__relayStartupTest: { releasePrimaryRelays(urls: string[]): void }
+	}).__relayStartupTest.releasePrimaryRelays(urls), AUTHORITATIVE_RELAYS.slice(0, 3));
+	await expect(otherTab.locator(`.participant[data-self="true"][data-participant-id="${selfPubkey}"]`)).toBeVisible();
+	await otherTab.clock.runFor(1_100);
+	await otherTab.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' }).focus();
+	await otherTab.keyboard.press(Number(ownPosition.content.split(':')[0]) > 0 ? 'ArrowLeft' : 'ArrowRight');
+	await expect.poll(async () => (await relayState(otherTab)).state.published.some((event) =>
+		event.kind === WORLD_STATE_KIND && event.pubkey === selfPubkey)).toBe(true);
+	const otherPosition = (await relayState(otherTab)).state.published.find((event) =>
+		event.kind === WORLD_STATE_KIND && event.pubkey === selfPubkey)!;
+	await page.evaluate((event) => (window as typeof window & {
+		__relayStartupTest: { injectPosition(event: object): void }
+	}).__relayStartupTest.injectPosition(event), otherPosition);
+	await page.clock.runFor(2_200);
+	const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
+	await editor.fill('journal-consistent evidence keeps writer ready');
+	await page.locator('ehagaki-composer').getByRole('button', { name: 'Send' }).click();
+	await expect.poll(async () => (await relayState(page)).state.published.some((event) =>
+		event.kind === 42 && event.pubkey === selfPubkey && event.content === 'journal-consistent evidence keeps writer ready')).toBe(true);
+});
+
 test('re-enters a reused Identity after a rejected exit even when its old Relay position is active', async ({ page }) => {
 	const secret = fixtureSecret(19);
 	const selfPubkey = getPublicKey(secret);
