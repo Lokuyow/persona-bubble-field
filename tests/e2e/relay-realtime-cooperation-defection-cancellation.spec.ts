@@ -101,6 +101,16 @@ test.describe('Cooperation and Defection underfilled group cancellation', () => 
 		await expect(page.locator('[data-cooperation-defection-participants-loading]')).toHaveCount(0);
 		await expect(page.locator('[data-cooperation-defection-round-progress]')).toHaveCount(0);
 		await expect(page.locator('[data-cooperation-defection-round-result]')).toHaveCount(0);
+
+		const delayedGroup = deriveCooperationDefectionGroupPositions(schedule.instanceId, FIELD, 7)[1];
+		if (!delayedGroup) throw new Error('Expected delayed joins to derive a second group.');
+		const delayedJoins = [21, 23, 29, 30, 31, 32, 33].map((label, index) => signedAction(fixtureSecret(label), schedule,
+			{ action: 'join', groupId: delayedGroup.id }, schedule.registrationAtMs + 2_000 + index));
+		await page.evaluate((events) => {
+			const harness = (window as typeof window & { __relayStartupTest: { injectRealtimeEvent(event: object): void } }).__relayStartupTest;
+			for (const event of events) harness.injectRealtimeEvent(event);
+		}, delayedJoins);
+		await expect(page.locator('[data-cooperation-defection-round-progress]')).toHaveCount(0);
 	});
 
 	test('applies underfilled cancellation to a manually started event', async ({ page }) => {

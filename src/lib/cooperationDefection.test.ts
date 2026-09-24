@@ -9,6 +9,7 @@ import {
 	COOPERATION_DEFECTION_EVENT_TYPE,
 	COOPERATION_DEFECTION_PROTOCOL_KEY,
 	createCooperationDefectionSession,
+	deriveCooperationDefectionGroupPositions,
 	COOPERATION_DEFECTION_CONSULTATION_MS,
 	COOPERATION_DEFECTION_RESULT_MS,
 	COOPERATION_DEFECTION_ROUND_COUNT,
@@ -177,6 +178,21 @@ describe('CooperationDefection schedule and domain', () => {
 		expect(settled.cancelledGroupIds).toContain(groupId);
 		expect(settled.results).toEqual([]);
 		for (const pubkey of pubkeys) expect(isCooperationDefectionSettlementComplete(settled, { ...SCHEDULE, phase: 'game' }, pubkey)).toBe(true);
+	});
+
+	it('keeps the confirmed underfilled snapshot after delayed joins expand session groups', () => {
+		const { state, groupId } = addJoins(2);
+		const frozen = settleCooperationDefectionSession(state, { ...SCHEDULE, phase: 'game' }, SCHEDULE.gameAtMs + 1);
+		const lateGroup = deriveCooperationDefectionGroupPositions(INSTANCE, FIELD, 7)[1];
+		if (!lateGroup) throw new Error('Expected the delayed joins to derive a second group.');
+		let withLateJoins = frozen;
+		for (let index = 0; index < 5; index += 1) {
+			withLateJoins = addAction(withLateJoins, 700 + index, hex(100 + index), SCHEDULE.registrationAtMs + 2_000 + index, { action: 'join', groupId: lateGroup.id });
+		}
+
+		expect(withLateJoins.groups).toHaveLength(2);
+		expect(withLateJoins.participantSnapshot).toEqual(frozen.participantSnapshot);
+		expect(withLateJoins.cancelledGroupIds).toEqual([groupId]);
 	});
 
 	it('cancels only the underfilled group while another group proceeds and settles normally', () => {

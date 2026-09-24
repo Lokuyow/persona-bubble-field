@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getCooperationDefectionRoundSchedule, cooperationDefectionPhaseLabel, type CooperationDefectionChoice, type CooperationDefectionRoundResult, type CooperationDefectionSchedule, type CooperationDefectionSessionState } from '$lib/cooperationDefection';
+	import { getCooperationDefectionRoundSchedule, cooperationDefectionPhaseLabel, COOPERATION_DEFECTION_MIN_PARTICIPANTS, type CooperationDefectionChoice, type CooperationDefectionRoundResult, type CooperationDefectionSchedule, type CooperationDefectionSessionState } from '$lib/cooperationDefection';
 
 	type Props = Readonly<{
 		schedule: CooperationDefectionSchedule;
@@ -25,7 +25,7 @@
 	let dismissedCancellationKey = $state<string | null>(null);
 	let cancellationNoticeVisible = $derived(Boolean(cancellationNoticeKey && dismissedCancellationKey !== cancellationNoticeKey));
 	let lastRoundResult = $derived(selfGroupCancelled ? null : session?.results.filter((result) => result.groupId === selfGroupId).at(-1) ?? null);
-	let hasPlayableGroups = $derived(Boolean(session?.participantSnapshot && session.groups.some((group) => !session.cancelledGroupIds.includes(group.id))));
+	let hasPlayableGroups = $derived(Boolean(session?.participantSnapshot && Object.values(session.participantSnapshot).some((participants) => participants.length >= COOPERATION_DEFECTION_MIN_PARTICIPANTS)));
 
 	$effect(() => {
 		const key = cancellationNoticeKey;
