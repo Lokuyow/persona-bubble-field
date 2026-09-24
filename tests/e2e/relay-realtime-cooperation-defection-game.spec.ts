@@ -309,6 +309,7 @@ test.describe('Relay startup', () => {
 
 		await page.clock.setSystemTime(schedule.endedAtMs + 1_000);
 		await page.clock.runFor(1_000);
+		await expect(page.locator('[data-realtime-panel]')).toHaveCount(0);
 		await expect.poll(async () => readRealtimePendingInstances(page)).toEqual([]);
 		await expect.poll(async () => page.evaluate(() => (window as typeof window & { __relayStartupTest: { activeRealtimeCount(): number } }).__relayStartupTest.activeRealtimeCount())).toBe(AUTHORITATIVE_RELAYS.length);
 		await expect(page.locator('[data-realtime-group-trigger]')).toHaveCount(0);
