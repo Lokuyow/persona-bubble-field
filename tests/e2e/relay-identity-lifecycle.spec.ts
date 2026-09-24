@@ -50,8 +50,8 @@ test.describe('Relay startup', () => {
 		await seedRelayAccount(page, secret, pubkey, expiresAtMs);
 		await page.goto('/');
 		await page.evaluate(() => {
-			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
-			relay.releaseMetadata(); relay.releasePrimary();
+			const relay = (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest;
+			relay.releasePrimary();
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
 		await armDeathTransitionClockRollback(page);
@@ -61,8 +61,8 @@ test.describe('Relay startup', () => {
 		await reloaded;
 		await expect(page.locator('.action-dock')).toBeVisible();
 		await page.evaluate(() => {
-			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
-			relay.releaseMetadata(); relay.releasePrimary();
+			const relay = (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest;
+			relay.releasePrimary();
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
 		expect((await relayState(page)).state.published.some((event) => event.kind === WORLD_STATE_KIND && event.pubkey === pubkey && event.tags.some((tag) => tag[0] === 'd' && tag[1]?.endsWith(':exit')))).toBe(false);
@@ -82,8 +82,8 @@ test.describe('Relay startup', () => {
 		await seedRelayAccount(page, secret, oldPubkey);
 		await page.goto('/');
 		await page.evaluate(() => {
-			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
-			relay.releaseMetadata(); relay.releasePrimary();
+			const relay = (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest;
+			relay.releasePrimary();
 		});
 		await expect(page.locator('.action-dock')).toBeVisible();
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${oldPubkey}"]`)).toBeVisible();
@@ -122,8 +122,8 @@ test.describe('Relay startup', () => {
 		await seedRelayAccount(page, secret, oldPubkey);
 		await page.goto('/');
 		await page.evaluate(() => {
-			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
-			relay.releaseMetadata(); relay.releasePrimary();
+			const relay = (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest;
+			relay.releasePrimary();
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${oldPubkey}"]`)).toBeVisible();
 		await moveRelaySelfTo(page, { x: 11, y: 3 });
@@ -160,13 +160,12 @@ test.describe('Relay startup', () => {
 		await seedRelayAccount(page, secret, pubkey);
 		await page.goto('/');
 		await expect(page.locator('.action-dock')).toBeVisible();
-		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
 			AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) &&
 			(request.filter.kinds as number[])[0] === 42)).toBe(true);
 		await page.evaluate(() => {
-			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
-			relay.releaseMetadata(); relay.releasePrimary();
+			const relay = (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest;
+			relay.releasePrimary();
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
 		await overwriteRelayGameState(page, {
@@ -176,13 +175,12 @@ test.describe('Relay startup', () => {
 		await armDeathTransitionFailure(page);
 		await page.reload({ waitUntil: 'domcontentloaded' });
 		await expect(page.locator('.action-dock')).toBeVisible();
-		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
 			AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) &&
 			(request.filter.kinds as number[])[0] === 42)).toBe(true);
 		await page.evaluate(() => {
-			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
-			relay.releaseMetadata(); relay.releasePrimary();
+			const relay = (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest;
+			relay.releasePrimary();
 		});
 		await expect(page.locator(`.participant[data-participant-id="${events.message.pubkey}"]`)).toBeVisible();
 		// The first fixture was created before two navigations and may naturally
@@ -247,8 +245,8 @@ test.describe('Relay startup', () => {
 		expect(await page.locator('html').getAttribute('data-identity-selection-document-token')).toBe(documentToken);
 		await expect.poll(() => page.evaluate(() => Boolean((window as typeof window & { __relayStartupTest?: unknown }).__relayStartupTest))).toBe(true);
 		await page.evaluate(() => {
-			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
-			relay.releaseMetadata(); relay.releasePrimary();
+			const relay = (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest;
+			relay.releasePrimary();
 		});
 		await expect.poll(async () => (await relayState(page)).state.requests.filter((request) =>
 			request.filter.limit === undefined && [42, WORLD_STATE_KIND].includes(requestKind(request)!)).length).toBeGreaterThan(0);
@@ -379,8 +377,8 @@ test.describe('Relay startup', () => {
 		await startSelectedRun(page);
 		await expect(page.getByRole('dialog')).toHaveCount(0);
 		await page.evaluate(() => {
-			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
-			relay.releaseMetadata(); relay.releasePrimary();
+			const relay = (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest;
+			relay.releasePrimary();
 		});
 		await expect(page.locator('.participant[data-self="true"]')).toBeVisible();
 	});
@@ -391,7 +389,6 @@ test.describe('Relay startup', () => {
 		await page.goto('/');
 		const candidateButtons = page.getByRole('button', { name: /を選ぶ$/ });
 		await expect(candidateButtons).toHaveCount(3);
-		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
 		await expect.poll(async () => (await relayState(page)).state.requests.filter((request) =>
 			request.filter.limit === undefined && [42, WORLD_STATE_KIND].includes(requestKind(request)!)).length).toBeGreaterThan(0);
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
@@ -400,7 +397,7 @@ test.describe('Relay startup', () => {
 		const requestsBeforeSelection = await relayState(page);
 		const countBootstrapRequests = (requests: typeof requestsBeforeSelection.state.requests) => ({
 			metadata: requests.filter((request) => [40, 41].includes(requestKind(request)!)).length,
-				primary: requests.filter((request) => request.filter.limit === undefined && [42, WORLD_STATE_KIND].includes(requestKind(request)!)).length
+			primary: requests.filter((request) => request.filter.limit === undefined && [42, WORLD_STATE_KIND].includes(requestKind(request)!)).length
 		});
 		const countsBeforeSelection = countBootstrapRequests(requestsBeforeSelection.state.requests);
 		await candidateButtons.nth(0).click();
@@ -416,7 +413,6 @@ test.describe('Relay startup', () => {
 		await page.goto('/');
 		const candidateButtons = page.getByRole('button', { name: /を選ぶ$/ });
 		await expect(candidateButtons).toHaveCount(3);
-		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => request.filter.limit === undefined && [42, WORLD_STATE_KIND].includes(requestKind(request)!))).toBe(true);
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => request.filter.limit === undefined && requestKind(request) === WORLD_STATE_KIND)).toBe(true);
@@ -434,35 +430,10 @@ test.describe('Relay startup', () => {
 		const selectedPubkey = await page.locator('.participant[data-self="true"]').getAttribute('data-participant-id');
 		await expect.poll(async () => (await relayState(page)).state.published.some((event) => event.kind === WORLD_STATE_KIND && event.pubkey === selectedPubkey)).toBe(true);
 		expect(bootstrapCounts((await relayState(page)).state.requests)).toEqual(countsBeforeSelection);
+		expect(countsBeforeSelection.metadata).toBe(0);
 
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseTraceRoots(): void } }).__relayStartupTest.releaseTraceRoots());
 		await expect.poll(async () => (await relayState(page)).state.requests.filter(isRealtimeRequest).length).toBeGreaterThan(0);
-	});
-
-	test('clears an anonymous startup error before fresh signed fallback recovery', async ({ page }) => {
-		await installHostOwnedStub(page);
-		await installDelayedRelay(page);
-		await page.goto('/');
-		const candidateButtons = page.getByRole('button', { name: /を選ぶ$/ });
-		await expect(candidateButtons).toHaveCount(3);
-		const metadataRequestsBeforeSelection = (await relayState(page)).state.requests.filter((request) => [40, 41].includes(requestKind(request)!)).length;
-		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { failMetadataDiscovery(): void } }).__relayStartupTest.failMetadataDiscovery());
-		await candidateButtons.nth(0).click();
-		await startSelectedRun(page);
-		await expect(page.getByRole('dialog')).toHaveCount(0);
-		await page.evaluate(() => {
-			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
-			relay.releaseMetadata(); relay.releasePrimary();
-		});
-		await expect.poll(async () => (await relayState(page)).state.requests.filter((request) => [40, 41].includes(requestKind(request)!)).length)
-			.toBeGreaterThan(metadataRequestsBeforeSelection);
-		await expect(page.locator('.participant[data-self="true"]')).toBeVisible();
-		const selectedPubkey = await page.locator('.participant[data-self="true"]').getAttribute('data-participant-id');
-		const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
-		await editor.fill('fresh signed fallback remains publishable');
-		await page.locator('ehagaki-composer').getByRole('button', { name: 'Send' }).click();
-		await expect.poll(async () => (await relayState(page)).state.published.some((event) =>
-			event.kind === 42 && event.pubkey === selectedPubkey && event.content === 'fresh signed fallback remains publishable')).toBe(true);
 	});
 
 	test('scrolls an overflowing mobile identity selection to the last candidate', async ({ page }) => {
@@ -511,8 +482,8 @@ test.describe('Relay startup', () => {
 		await startSelectedRun(page);
 		await expect(page.getByRole('dialog')).toHaveCount(0);
 		await page.evaluate(() => {
-			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
-			relay.releaseMetadata(); relay.releasePrimary();
+			const relay = (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest;
+			relay.releasePrimary();
 		});
 		await expect(page.locator('.participant[data-self="true"]')).toBeVisible();
 	});

@@ -191,7 +191,7 @@ prototypeでenabledにする最初のexperimental eventは `綻び`（event type
 - 20:55 JST：参加受付開始
 - 21:00 JST：ゲーム開始
 
-channel creatorが署名したkind 7070のversioned controlで、任意時刻にもmanual綻びを開始できる。controlのpayloadは開始命令と対象playable protocol keyを持ち、対象instanceは `rift:1:manual:<created_at>:<nonce>` とする。`created_at` はcontrolのUnix timestamp秒、nonceはlowercase 16-byte hexであり、instance IDだけからscheduleを再構成できる。control時刻がregistration開始でwarningはなく、5分後にgameを開始する。controlは検証済みkind 40 channel creator本人の署名、対象channel、enabled definition、payload、instance scheduleを満たすものだけを受理する。
+channel creator authorityが署名したkind 7070のversioned controlで、任意時刻にもmanual綻びを開始できる。controlのpayloadは開始命令と対象playable protocol keyを持ち、対象instanceは `rift:1:manual:<created_at>:<nonce>` とする。`created_at` はcontrolのUnix timestamp秒、nonceはlowercase 16-byte hexであり、instance IDだけからscheduleを再構成できる。control時刻がregistration開始でwarningはなく、5分後にgameを開始する。controlはSPEC-10の固定World configで定めるcreator本人の有効な署名、対象channel、enabled definition、payload、instance scheduleを満たすものだけを受理する。
 
 manual綻びのregistration開始〜終了区間とscheduled綻びのwarning開始〜終了区間が少しでも交差する場合、そのmanual controlを無効とする。scheduled綻びを優先し、activeな綻びの置換・並行開催・queueは行わない。bootstrapで複数の有効候補がある場合は、現在時刻でregistrationまたはgame中の候補に絞った後、`created_at`昇順、同値ならcontrol event ID辞書順で選択する。終了済みcontrolから綻びを再開しない。
 

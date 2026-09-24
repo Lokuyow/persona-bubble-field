@@ -37,8 +37,8 @@ test.describe('Relay startup', () => {
 				await client.goto('/');
 				await expect(client.locator('.action-dock')).toBeVisible();
 				await client.evaluate(() => {
-					const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
-					relay.releaseMetadata(); relay.releasePrimary();
+					const relay = (window as unknown as { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest;
+					relay.releasePrimary();
 				});
 				await expect(client.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '3,2');
 				await client.locator('.chatter-toggle').click();
@@ -152,8 +152,8 @@ test.describe('Relay startup', () => {
 		await page.goto('/');
 		await expect(page.locator('.action-dock')).toBeVisible();
 		await page.evaluate(() => {
-			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
-			relay.releaseMetadata(); relay.releasePrimary();
+			const relay = (window as unknown as { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest;
+			relay.releasePrimary();
 		});
 		await expect(page.locator('[data-trace-marker-position="4,2"]')).toBeVisible();
 		const unreadMarker = page.locator('[data-trace-marker-position="5,2"]');
@@ -195,8 +195,8 @@ test.describe('Relay startup', () => {
 		await expect(deathMarker).toHaveCSS('opacity', '0.72');
 		await page.reload();
 		await page.evaluate(() => {
-			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
-			relay.releaseMetadata(); relay.releasePrimary();
+			const relay = (window as unknown as { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest;
+			relay.releasePrimary();
 		});
 		await expect(page.locator('[data-trace-marker-position="4,2"]')).toBeVisible();
 		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveAttribute('data-trace-root-read', 'true');
@@ -247,8 +247,8 @@ test.describe('Relay startup', () => {
 		await page.goto('/');
 		await expect(page.locator('.action-dock')).toBeVisible();
 		await page.evaluate(() => {
-			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
-			relay.releaseMetadata(); relay.releasePrimary();
+			const relay = (window as unknown as { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest;
+			relay.releasePrimary();
 		});
 		await expect(page.locator('[data-trace-marker-position="4,2"]')).toBeVisible();
 		await expect(page.locator('.trace-unread-indicator')).toBeVisible();

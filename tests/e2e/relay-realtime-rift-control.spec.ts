@@ -54,7 +54,6 @@ test.describe('Relay startup', () => {
 		await page.clock.install({ time: initialTime });
 		await installHostOwnedStub(page);
 		await installDelayedRelay(page, {
-			channelEvent: channel.event,
 			testWorldConfig: channel.worldConfig,
 			primaryEvents: testEvents(initialTime, channel.event.id),
 			realtimeEvents: [control]
@@ -63,7 +62,6 @@ test.describe('Relay startup', () => {
 		await seedRelayAccount(page, secret, getPublicKey(secret));
 		await page.goto('/');
 		await waitForRelayComposerReady(page);
-		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => (request.filter.kinds as number[])[0] === 42)).toBe(true);
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
 		await expect(page.locator('[data-realtime-panel]')).toContainText('参加受付');
@@ -89,7 +87,6 @@ test.describe('Relay startup', () => {
 		await page.clock.install({ time: initialTime });
 		await installHostOwnedStub(page);
 		await installDelayedRelay(page, {
-			channelEvent: channel.event,
 			testWorldConfig: channel.worldConfig,
 			primaryEvents: testEvents(initialTime, channel.event.id),
 			realtimeEvents: [control],
@@ -98,7 +95,6 @@ test.describe('Relay startup', () => {
 		await seedRelayAccount(page, secret, getPublicKey(secret));
 		await page.goto('/');
 		await waitForRelayComposerReady(page);
-		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => (request.filter.kinds as number[])[0] === 42)).toBe(true);
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
 		await expect(page.locator('[data-realtime-panel]')).toContainText('参加受付');
@@ -114,7 +110,6 @@ test.describe('Relay startup', () => {
 		await page.clock.setSystemTime(manualSchedule.gameAtMs + RIFT_CONSULTATION_MS + 1_000);
 		await page.reload();
 		await waitForRelayComposerReady(page);
-		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => (request.filter.kinds as number[])[0] === 42)).toBe(true);
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
 		await expect(page.locator('[data-realtime-panel]')).toContainText('参加者: 1');
@@ -133,7 +128,6 @@ test.describe('Relay startup', () => {
 		await seedRelayAccount(page, secret, getPublicKey(secret));
 		await seedRealtimePendingInstance(page, previousSchedule.instanceId);
 		await page.goto('/');
-		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => (request.filter.kinds as number[])[0] === 42)).toBe(true);
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>

@@ -25,9 +25,7 @@ test.describe('Relay startup', () => {
 		const hideTimeline = page.locator('.chatter-toggle');
 		await hideTimeline.click();
 
-		await page.evaluate(() => (window as typeof window & {
-			__relayStartupTest: { releaseMetadata(): void }
-		}).__relayStartupTest.releaseMetadata());
+
 		await expect.poll(async () => {
 			const requests = (await relayState(page)).state.requests;
 			return [42, WORLD_STATE_KIND].every((kind) => requests.some((request) =>

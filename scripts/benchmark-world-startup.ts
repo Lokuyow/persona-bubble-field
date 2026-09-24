@@ -1,7 +1,9 @@
 /**
  * Run `npm run build`, then `npm run preview -- --host 127.0.0.1 --port 5180`.
- * `visible` is the first rAF observing a viewport-visible participant with a loaded image or visible fallback.
- * p50/p90 use linear interpolation over navigation-relative samples; neither is a CI wall-clock gate.
+ * T_visible is the first rAF observing a viewport-visible participant and field,
+ * with either a loaded Avatar image or a visible Avatar fallback. This is a
+ * repeatable proxy for visibility, not a direct measurement of painted pixels.
+ * Percentiles are navigation-relative and are never a CI wall-clock gate.
  */
 import { chromium, type Page } from '@playwright/test';
 import { getPublicKey } from 'nostr-tools/pure';
@@ -9,44 +11,23 @@ import { fixtureSecret, installDelayedRelay, seedRelayAccount } from '../tests/e
 import { installHostOwnedStub } from '../tests/e2e/helpers/hostOwnedComposerStub';
 
 type Marks = Record<string, number>;
-type Condition = 'fast' | 'slowMetadata' | 'slowPrimary' | 'partialMetadataFailure';
+type Condition = 'fast' | 'slowPrimary';
 type Row = { scenario: string; condition: Condition; marks: Marks };
 const baseURL = process.env.BENCHMARK_URL ?? 'http://127.0.0.1:5180';
-const repetitions = Number(process.env.BENCHMARK_REPETITIONS ?? 8);
+const repetitions = Number(process.env.BENCHMARK_REPETITIONS ?? 20);
 const phase = process.env.BENCHMARK_PHASE ?? 'unspecified';
-const conditions: readonly Condition[] = ['fast', 'slowMetadata', 'slowPrimary', 'partialMetadataFailure'];
-const metrics = ['metadataReq', 'metadataReleased', 'primaryReq', 'firstEvidence', 'geometry', 'participantDom', 'visible', 'selfReady'] as const;
+const conditions: readonly Condition[] = ['fast', 'slowPrimary'];
+const scenarios = ['savedActiveCold', 'savedActiveWarmReload'] as const;
+const metrics = ['navigation', 'primaryReq', 'firstEvidence', 'geometry', 'participantDom', 'visible', 'selfReady'] as const;
 if (!Number.isSafeInteger(repetitions) || repetitions < 1) throw new Error('BENCHMARK_REPETITIONS must be a positive integer.');
 
 async function installMarks(page: Page): Promise<void> {
 	await page.addInitScript(() => {
-		const marks: Marks = { navigation: 0 };
+		type RelayTest = { releasePrimaryEvents(): void };
+		const marks: Marks = { navigation: performance.now() };
 		Object.assign(window, { __startupMarks: marks });
 		const mark = (name: string) => { if (!(name in marks)) marks[name] = performance.now(); };
-		const relay = (window as typeof window & { __relayStartupTest: {
-			state: { requests: unknown[]; metadataFailuresRemaining: number };
-			releaseMetadata(): void; releasePrimaryEvents(): void;
-		} }).__relayStartupTest;
-		const requests = relay.state.requests;
-		const pushRequest = requests.push;
-		requests.push = function (...next) {
-			const length = pushRequest.apply(this, next);
-			if (length === 8) {
-				const params = new URLSearchParams(location.search);
-				const delayMs = Number(params.get('benchmarkMetadataDelay') ?? 0);
-				const release = () => {
-					if (params.has('benchmarkPartialMetadataFailure')) {
-						relay.state.metadataFailuresRemaining = 1;
-						mark('metadataFailureInjected');
-					}
-					mark('metadataReleased');
-					relay.releaseMetadata();
-				};
-				if (delayMs > 0) setTimeout(release, delayMs);
-				else queueMicrotask(release);
-			}
-			return length;
-		};
+		const relay = (window as typeof window & { __relayStartupTest: RelayTest }).__relayStartupTest;
 		const socket = (window as typeof window & { WebSocket: typeof WebSocket }).WebSocket;
 		const send = socket.prototype.send;
 		let primaryReleaseScheduled = false;
@@ -56,11 +37,11 @@ async function installMarks(page: Page): Promise<void> {
 				const packet = JSON.parse(String(data));
 				if (packet[0] === 'REQ') {
 					const kinds = (packet.slice(2) as Array<{ kinds?: number[] }>).flatMap((filter) => filter.kinds ?? []);
-					if (kinds.includes(40) || kinds.includes(41)) mark('metadataReq');
 					if (kinds.includes(42) || kinds.includes(30079)) {
 						mark('primaryReq');
 						primaryRequest = true;
 					}
+					if (kinds.includes(40) || kinds.includes(41)) mark('metadataReq');
 				}
 			} catch { /* Ignore non-REQ frames. */ }
 			const result = send.call(this, data);
@@ -100,8 +81,9 @@ async function installMarks(page: Page): Promise<void> {
 			if (participant) mark('participantDom');
 			if (field && participant && visible(participant) && visible(field)) {
 				const image = participant.querySelector<HTMLImageElement>('[data-avatar-image]');
-				const fallback = participant.querySelector('[data-avatar-fallback]');
-				if ((image && image.complete && image.naturalWidth > 0 && visible(image)) || (fallback && visible(fallback))) mark('visible');
+				const fallback = participant.querySelector<HTMLElement>('[data-avatar-fallback]');
+				const imageReady = Boolean(image && image.complete && image.naturalWidth > 0 && visible(image));
+				if (imageReady || (fallback && visible(fallback))) mark('visible');
 			}
 			if (!marks.visible) requestAnimationFrame(frame);
 		};
@@ -110,12 +92,9 @@ async function installMarks(page: Page): Promise<void> {
 }
 
 async function measure(page: Page, condition: Condition, reload: boolean, selfPubkey: string): Promise<Marks> {
-	const params = new URLSearchParams();
-	if (condition === 'slowMetadata') params.set('benchmarkMetadataDelay', '500');
-	if (condition === 'slowPrimary') params.set('benchmarkPrimaryDelay', '500');
-	if (condition === 'partialMetadataFailure') params.set('benchmarkPartialMetadataFailure', '1');
+	const delayQuery = condition === 'slowPrimary' ? '?benchmarkPrimaryDelay=500' : '';
 	if (reload) await page.reload({ waitUntil: 'domcontentloaded' });
-	else await page.goto(`/?${params}`, { waitUntil: 'domcontentloaded' });
+	else await page.goto(`/${delayQuery}`, { waitUntil: 'domcontentloaded' });
 	try {
 		await page.waitForFunction(() => Boolean((window as typeof window & { __startupMarks?: Marks }).__startupMarks?.visible), null, { timeout: 20_000 });
 	} catch (error) {
@@ -126,18 +105,16 @@ async function measure(page: Page, condition: Condition, reload: boolean, selfPu
 			participants: document.querySelectorAll('.participant').length,
 			fieldReady: Boolean(document.querySelector('.field-viewport.initial-field-geometry-ready'))
 		}));
-		throw new Error(`Missing T_visible for ${condition} (${reload ? 'reload' : 'cold'}): ${JSON.stringify(state)}`, { cause: error });
+		throw new Error(`Missing T_visible for ${condition} (${reload ? 'warm reload' : 'cold'}): ${JSON.stringify(state)}`, { cause: error });
 	}
 	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
 	await page.locator(`.participant[data-self="true"][data-participant-id="${selfPubkey}"]`).waitFor({ state: 'visible', timeout: 20_000 });
 	const marks = await page.evaluate(() => {
-		const marks = (window as typeof window & { __startupMarks: Marks }).__startupMarks;
-		marks.selfReady = performance.now();
-		return { ...marks };
+		const result = (window as typeof window & { __startupMarks: Marks }).__startupMarks;
+		result.selfReady = performance.now();
+		return { ...result };
 	});
-	if (condition === 'partialMetadataFailure' && !Number.isFinite(marks.metadataFailureInjected)) {
-		throw new Error('The partial metadata failure was not injected.');
-	}
+	if (Number.isFinite(marks.metadataReq)) throw new Error('Fixed World startup unexpectedly requested channel metadata.');
 	if (condition === 'slowPrimary' && !(marks.primaryEventsReleased > marks.primaryReq)) {
 		throw new Error('Primary evidence was not delayed after its REQ.');
 	}
@@ -161,11 +138,11 @@ try {
 				await page.addInitScript({ content: 'window.__name = (fn) => fn;' });
 				await installHostOwnedStub(page);
 				await installDelayedRelay(page, { deferPrimaryEvents: condition === 'slowPrimary' });
-				await installMarks(page);
 				const secret = fixtureSecret(23);
 				const selfPubkey = getPublicKey(secret);
-				// The context has not loaded the app, but its selected Identity and active Run are durable in IndexedDB.
+				// This creates a selected Identity and active Run in IndexedDB before the app starts.
 				await seedRelayAccount(page, secret, selfPubkey);
+				await installMarks(page);
 				rows.push({ scenario: 'savedActiveCold', condition, marks: await measure(page, condition, false, selfPubkey) });
 				rows.push({ scenario: 'savedActiveWarmReload', condition, marks: await measure(page, condition, true, selfPubkey) });
 			} finally {
@@ -177,7 +154,7 @@ try {
 	await browser.close();
 }
 
-const summary = Object.fromEntries(conditions.flatMap((condition) => ['savedActiveCold', 'savedActiveWarmReload'].map((scenario) => {
+const summary = Object.fromEntries(conditions.flatMap((condition) => scenarios.map((scenario) => {
 	const selected = rows.filter((row) => row.scenario === scenario && row.condition === condition);
 	return [`${scenario}/${condition}`, Object.fromEntries(metrics.map((metric) => {
 		const values = selected.map((row) => row.marks[metric]);

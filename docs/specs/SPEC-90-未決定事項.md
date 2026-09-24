@@ -25,10 +25,8 @@ Rootの生成・暗号化保存、BIP85によるIdentity導出、固定3候補�
 - kind 42の発言位置tag `w` を正式公開仕様として恒久採用するか
 	- prototypeではkind 42だけが `["w", "<x>:<y>"]` を使用する。kind 1111 replyはtree-onlyであり、`w` を発行しない
   - 正式公開仕様として固定する前に、その時点の最新NIPおよび既存の単一文字tag利用状況を再確認する
-- 正式公開時のmetadata discovery bootstrap Relay set
-  - prototypeでは `wss://nos.lol/`、`wss://x.kojira.io/`、`wss://relay.nostr.wirednet.jp/`、`wss://yabu.me/` を使用する
-- 正式公開時に使用するNIP-28 channel kind 40
-  - prototypeでは `3212de4b75f0c41efa17e41affcfc3a811171ba930e5b657687b5f5148627d5b` を使用する
+- 正式公開時に使用するNIP-28 channel kind 40とWorld Relay topology
+  - prototypeのchannel ID、creator、authoritative Relay set、preferred hint、config revisionはSPEC-10で固定する
 - モデレーション方針
 - 通報・ミュート等の扱い
 

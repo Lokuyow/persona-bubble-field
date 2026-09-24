@@ -89,7 +89,6 @@ test.describe('Relay startup', () => {
 	)).toBeLessThan(0.5);
 		expect(first.viewport).toEqual({ x: 0, y: 0, width: 2560, height: 1373 });
 		expect(first.composer?.height).toBe(67);
-		await page.evaluate(() => (window as unknown as { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
 			AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) &&
 			(request.filter.kinds as number[])[0] === 42)).toBe(true);
@@ -140,7 +139,6 @@ test.describe('Relay startup', () => {
 		await installDelayedRelay(page, { historyMessages: [historyMessage] });
 		await page.goto('/');
 		await expect(page.locator('.action-dock')).toBeVisible();
-		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
 			AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) &&
 			(request.filter.kinds as number[])[0] === 42 &&
@@ -177,7 +175,6 @@ test.describe('Relay startup', () => {
 		const selfSecret = fixtureSecret(41);
 		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret));
 		await page.goto('/');
-		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
 			AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) &&
 			(request.filter.kinds as number[])[0] === 42
@@ -374,7 +371,7 @@ test.describe('Relay startup', () => {
 		});
 	}
 
-	test('decouples Composer from metadata and participant projection from final primary EOSE', async ({ page }) => {
+	test('starts primary reads without delaying Composer and projects evidence before final primary EOSE', async ({ page }) => {
 		const hostOwned = await installHostOwnedStub(page);
 		await installDelayedRelay(page, { deferPrimaryEvents: true });
 		const selfSecret = fixtureSecret(41);
@@ -389,11 +386,9 @@ test.describe('Relay startup', () => {
 		await page.locator('ehagaki-composer').getByRole('button', { name: 'Send' }).click();
 		await expect(page.locator('.speech-type-toggle')).toBeDisabled();
 
-		const beforeMetadata = await relayState(page);
-		expect(beforeMetadata.state.requests.some((request) => AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) && [42, WORLD_STATE_KIND].includes((request.filter.kinds as number[])[0]))).toBe(false);
-		expect(beforeMetadata.state.published.filter((event) => event.kind === 42)).toHaveLength(0);
-
-		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
+		const duringPendingPrimary = await relayState(page);
+		expect(duringPendingPrimary.state.requests.some((request) => AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) && [42, WORLD_STATE_KIND].includes((request.filter.kinds as number[])[0]))).toBe(true);
+		expect(duringPendingPrimary.state.published.filter((event) => event.kind === 42)).toHaveLength(0);
 		await expect.poll(async () => {
 			const requests = (await relayState(page)).state.requests;
 			return [42, WORLD_STATE_KIND].every((kind) => requests.some((request) =>
@@ -436,7 +431,7 @@ test.describe('Relay startup', () => {
 		await expect(editor).toHaveValue('retain after abort');
 	});
 
-	test('aborting a metadata-waiting submit releases it without publishing later', async ({ page }) => {
+	test('aborting a primary-waiting submit releases it without publishing later', async ({ page }) => {
 		await installHostOwnedStub(page);
 		await installDelayedRelay(page);
 		const selfSecret = fixtureSecret(41);
@@ -444,18 +439,16 @@ test.describe('Relay startup', () => {
 		await page.goto('/');
 		await expect(page.locator('.action-dock')).toBeVisible();
 		const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
-		await editor.fill('abort while waiting for metadata');
+		await editor.fill('abort while waiting for primary bootstrap');
 		await page.locator('ehagaki-composer').getByRole('button', { name: 'Send' }).click();
 		await expect.poll(() => page.evaluate(() => Boolean((window as typeof window & { __ehagakiSubmitStarted?: boolean }).__ehagakiSubmitStarted))).toBe(true);
 		await page.evaluate(() => (window as typeof window & { __ehagakiAbortActiveSubmit(): void }).__ehagakiAbortActiveSubmit());
-		await expect(editor).toHaveValue('abort while waiting for metadata');
-
-		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
+		await expect(editor).toHaveValue('abort while waiting for primary bootstrap');
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) && [42, WORLD_STATE_KIND].includes((request.filter.kinds as number[])[0]))).toBe(true);
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
-	await expect(page.locator('.participant')).toHaveCount(2);
+		await expect(page.locator('.participant')).toHaveCount(2);
 		expect(new Set((await relayState(page)).state.published.filter((event) => event.kind === 42).map((event) => event.id)).size).toBe(0);
-		await expect(editor).toHaveValue('abort while waiting for metadata');
+		await expect(editor).toHaveValue('abort while waiting for primary bootstrap');
 	});
 
 	test('never mounts or loads the Host-owned Composer in DEV World', async ({ page }) => {

@@ -188,9 +188,8 @@ function bootstrapSince(nowMs: number): number {
 }
 
 function hasRelayIssue(result: PrimaryStartResult): number {
-	const metadataIssues = result.metadataDiscovery.relays.filter((relay) => relay.status !== 'eose').length;
 	const primaryIssues = result.primaryPairs.filter((pair) => pair.status !== 'eose').length;
-	return metadataIssues + primaryIssues;
+	return primaryIssues;
 }
 
 /**
@@ -1120,7 +1119,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 					appliedCanonicalPositionEventIds.add(event.id);
 					observeLivePosition(event);
 				}
-				channel = result.metadata.channel;
+				channel = result.channel;
 				const nextPresence = project(Date.now());
 				const issueCount = hasRelayIssue(result);
 				emitStatus(issueCount === 0 ? { kind: 'available' } : { kind: 'degraded', issueCount });

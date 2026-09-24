@@ -1,4 +1,4 @@
-import { finalizeEvent, getPublicKey, type Event, type VerifiedEvent } from 'nostr-tools/pure';
+import { getPublicKey, type Event } from 'nostr-tools/pure';
 import { describe, expect, it, vi } from 'vitest';
 import {
 	OperatorCancelled,
@@ -14,22 +14,6 @@ import { PROTOTYPE_WORLD_CONFIG, type PrototypeWorldConfig } from './prototypeWo
 const SECRET = new Uint8Array(32).fill(7);
 const CREATOR = getPublicKey(SECRET);
 const NOW = Date.UTC(2026, 0, 2, 10, 0);
-
-function metadataEvents(): { channel: VerifiedEvent; metadata: VerifiedEvent } {
-	const channel = finalizeEvent({
-		kind: 40,
-		created_at: 1,
-		tags: [],
-		content: JSON.stringify({ relays: ['wss://relay.example/'] })
-	}, SECRET);
-	const metadata = finalizeEvent({
-		kind: 41,
-		created_at: 2,
-		tags: [['e', channel.id]],
-		content: JSON.stringify({ relays: ['wss://relay.example/'] })
-	}, SECRET);
-	return { channel, metadata };
-}
 
 function result(events: readonly Event[] = []): OperatorRelayQueryResult {
 	return { events, eventSources: events.map((value) => ({ event: value, relayUrl: 'wss://relay.example/' })), relays: [{ relayUrl: 'wss://relay.example/', status: 'eose' }], eoseCount: 1 };
@@ -54,7 +38,7 @@ function fakeDependencies(results: readonly OperatorRelayQueryResult[], override
 }
 
 function testWorld(channelId: string): PrototypeWorldConfig {
-	return { ...PROTOTYPE_WORLD_CONFIG, channelId, metadataDiscoveryRelays: ['wss://relay.example/'], preferredRelayHint: 'wss://relay.example/' };
+	return { ...PROTOTYPE_WORLD_CONFIG, channelId, creatorPubkey: CREATOR, authoritativeRelays: ['wss://relay.example/'], preferredRelayHint: 'wss://relay.example/' };
 }
 
 describe('operator Rift flow', () => {
@@ -70,38 +54,48 @@ describe('operator Rift flow', () => {
 	});
 
 	it('runs a dry-run with production-shaped metadata and zeroizes the secret bytes', async () => {
-		const { channel, metadata } = metadataEvents();
+		const world = testWorld('c'.repeat(64));
 		const secret = new Uint8Array(SECRET);
-		const dependencies = fakeDependencies([result([channel]), result([metadata]), result()], { readSecret: vi.fn(async () => secret) });
-		const world = testWorld(channel.id);
+		const dependencies = fakeDependencies([result()], { readSecret: vi.fn(async () => secret) });
 		const command = await runManualRiftOperator('dry-run', dependencies, world);
 		expect(command.exitCode).toBe(0);
+		expect(command.world).toEqual(world);
+		expect(dependencies.relay.query).toHaveBeenCalledTimes(1);
+		expect(dependencies.relay.query).toHaveBeenCalledWith(
+			expect.objectContaining({ kinds: [REALTIME_EVENT_KIND], authors: [CREATOR] }),
+			world.authoritativeRelays
+		);
 		expect(dependencies.relay.publish).not.toHaveBeenCalled();
 		expect(secret.every((byte) => byte === 0)).toBe(true);
 		expect(dependencies.relay.close).toHaveBeenCalledTimes(1);
 	});
 
+	it('rejects invalid fixed World config without querying Relay', async () => {
+		const dependencies = fakeDependencies([]);
+		await expect(runManualRiftOperator('dry-run', dependencies, {
+			...testWorld('c'.repeat(64)),
+			preferredRelayHint: 'wss://not-authoritative.example/'
+		})).rejects.toMatchObject({ reason: 'invalid configuration' } satisfies Partial<OperatorFailure>);
+		expect(dependencies.relay.query).not.toHaveBeenCalled();
+	});
+
 	it('fails closed without asking for a secret when control preflight has no real EOSE', async () => {
-		const { channel, metadata } = metadataEvents();
+		const world = testWorld('c'.repeat(64));
 		const dependencies = fakeDependencies([
-			result([channel]),
-			result([metadata]),
 			{ events: [], eventSources: [], relays: [{ relayUrl: 'wss://relay.example/', status: 'closed' }], eoseCount: 0 }
 		]);
-		const world = testWorld(channel.id);
 		await expect(runManualRiftOperator('dry-run', dependencies, world)).rejects.toMatchObject({ reason: 'control preflight failed' } satisfies Partial<OperatorFailure>);
 		expect(dependencies.readSecret).not.toHaveBeenCalled();
 		expect(dependencies.relay.close).toHaveBeenCalledTimes(1);
 	});
 
 	it('does not read a secret after confirmation cancellation, including a pasted fake nsec', async () => {
-		const { channel, metadata } = metadataEvents();
+		const world = testWorld('c'.repeat(64));
 		const readSecret = vi.fn(async () => new Uint8Array(SECRET));
 		const output = { stdout: vi.fn(), stderr: vi.fn() };
-		const dependencies = fakeDependencies([result([channel]), result([metadata]), result()], {
+		const dependencies = fakeDependencies([result()], {
 			confirmPublish: vi.fn(async () => 'cancelled' as const), readSecret, output
 		});
-		const world = testWorld(channel.id);
 		await expect(runManualRiftOperator('publish', dependencies, world)).rejects.toBeInstanceOf(OperatorCancelled);
 		expect(readSecret).not.toHaveBeenCalled();
 		expect(dependencies.relay.publish).not.toHaveBeenCalled();
@@ -109,33 +103,33 @@ describe('operator Rift flow', () => {
 	});
 
 	it('preflights scheduled conflict before reading a secret in dry-run and publish modes', async () => {
-		const { channel, metadata } = metadataEvents();
+		const world = testWorld('c'.repeat(64));
 		const conflictTime = Date.UTC(2026, 0, 2, 11, 50);
 		for (const mode of ['dry-run', 'publish'] as const) {
 			const confirmPublish = vi.fn(async () => 'confirmed' as const);
 			const readSecret = vi.fn(async () => new Uint8Array(SECRET));
-			const dependencies = fakeDependencies([result([channel]), result([metadata]), result()], { nowMs: () => conflictTime, confirmPublish, readSecret });
-			await expect(runManualRiftOperator(mode, dependencies, testWorld(channel.id))).rejects.toMatchObject({ reason: 'scheduled Rift conflict' });
+			const dependencies = fakeDependencies([result()], { nowMs: () => conflictTime, confirmPublish, readSecret });
+			await expect(runManualRiftOperator(mode, dependencies, world)).rejects.toMatchObject({ reason: 'scheduled Rift conflict' });
 			expect(readSecret).not.toHaveBeenCalled();
 			if (mode === 'publish') expect(confirmPublish).not.toHaveBeenCalled();
 		}
 	});
 
 	it('rechecks scheduled conflict after confirmation before requesting the secret', async () => {
-		const { channel, metadata } = metadataEvents();
+		const world = testWorld('c'.repeat(64));
 		const safeTime = Date.UTC(2026, 0, 2, 10, 0);
 		const conflictTime = Date.UTC(2026, 0, 2, 11, 50);
 		let calls = 0;
 		const readSecret = vi.fn(async () => new Uint8Array(SECRET));
-		const dependencies = fakeDependencies([result([channel]), result([metadata]), result(), result()], {
+		const dependencies = fakeDependencies([result(), result()], {
 			confirmPublish: vi.fn(async () => 'confirmed' as const), readSecret, nowMs: () => calls++ === 0 ? safeTime : conflictTime
 		});
-		await expect(runManualRiftOperator('publish', dependencies, testWorld(channel.id))).rejects.toMatchObject({ reason: 'scheduled Rift conflict' });
+		await expect(runManualRiftOperator('publish', dependencies, world)).rejects.toMatchObject({ reason: 'scheduled Rift conflict' });
 		expect(readSecret).not.toHaveBeenCalled();
 	});
 
 	it('settles a second preflight before honoring cancellation and leaves no publish path', async () => {
-		const { channel, metadata } = metadataEvents();
+		const world = testWorld('c'.repeat(64));
 		const controller = new AbortController();
 		let queryCount = 0;
 		let settleSecond: (() => void) | undefined;
@@ -146,9 +140,7 @@ describe('operator Rift flow', () => {
 			...base.relay,
 			query: vi.fn(async () => {
 				queryCount += 1;
-				if (queryCount === 1) return result([channel]);
-				if (queryCount === 2) return result([metadata]);
-				if (queryCount === 4) return secondQuery;
+				if (queryCount === 2) return secondQuery;
 				return result();
 			})
 		};
@@ -160,36 +152,36 @@ describe('operator Rift flow', () => {
 				return 'confirmed' as const;
 			})
 		};
-		const pending = runManualRiftOperator('publish', dependencies, testWorld(channel.id));
+		const pending = runManualRiftOperator('publish', dependencies, world);
 		await new Promise<void>((resolve) => setTimeout(resolve, 0));
 		settleSecond!();
 		await expect(pending).rejects.toBeInstanceOf(OperatorCancelled);
 		expect(readSecret).not.toHaveBeenCalled();
 		expect(relay.publish).not.toHaveBeenCalled();
-		expect(queryCount).toBe(4);
+		expect(queryCount).toBe(2);
 	});
 
 	it('honors cancellation before relay.publish is invoked', async () => {
-		const { channel, metadata } = metadataEvents();
+		const world = testWorld('c'.repeat(64));
 		const controller = new AbortController();
 		const secret = new Uint8Array(SECRET);
-		const base = fakeDependencies([result([channel]), result([metadata]), result()], {
+		const base = fakeDependencies([result()], {
 			cancelSignal: controller.signal,
 			readSecret: vi.fn(async () => {
 				controller.abort();
 				return secret;
 			})
 		});
-		await expect(runManualRiftOperator('publish', base, testWorld(channel.id))).rejects.toBeInstanceOf(OperatorCancelled);
+		await expect(runManualRiftOperator('publish', base, world)).rejects.toBeInstanceOf(OperatorCancelled);
 		expect(base.relay.publish).not.toHaveBeenCalled();
 		expect(secret.every((byte) => byte === 0)).toBe(true);
 	});
 
 	it('waits for relay results when cancellation arrives after publish starts', async () => {
-		const { channel, metadata } = metadataEvents();
+		const world = testWorld('c'.repeat(64));
 		const controller = new AbortController();
 		let resolvePublish: ((value: readonly OperatorRelayPublishResult[]) => void) | undefined;
-		const base = fakeDependencies([result([channel]), result([metadata]), result(), result()], { cancelSignal: controller.signal });
+		const base = fakeDependencies([result(), result()], { cancelSignal: controller.signal });
 		const relay: OperatorRelayAdapter = {
 			...base.relay,
 			publish: vi.fn((): Promise<readonly OperatorRelayPublishResult[]> => {
@@ -197,32 +189,32 @@ describe('operator Rift flow', () => {
 				return new Promise((resolve) => { resolvePublish = resolve; });
 			})
 		};
-		const pending = runManualRiftOperator('publish', { ...base, relay }, testWorld(channel.id));
+		const pending = runManualRiftOperator('publish', { ...base, relay }, world);
 		await new Promise<void>((resolve) => setTimeout(resolve, 0));
 		resolvePublish!([{ relayUrl: 'wss://relay.example/', outcome: 'accepted' }]);
 		await expect(pending).resolves.toMatchObject({ exitCode: 0 });
 	});
 
 	it('performs a final exact conflict check after fresh time advances and before signing or publishing', async () => {
-		const { channel, metadata } = metadataEvents();
+		const world = testWorld('c'.repeat(64));
 		const safeTime = Date.UTC(2026, 0, 2, 10, 0);
 		const conflictTime = Date.UTC(2026, 0, 2, 11, 50);
 		let calls = 0;
 		const readSecret = vi.fn(async () => new Uint8Array(SECRET));
-		const dependencies = fakeDependencies([result([channel]), result([metadata]), result()], {
+		const dependencies = fakeDependencies([result()], {
 			readSecret, nowMs: () => calls++ === 0 ? safeTime : conflictTime
 		});
-		await expect(runManualRiftOperator('dry-run', dependencies, testWorld(channel.id))).rejects.toMatchObject({ reason: 'scheduled Rift conflict' });
+		await expect(runManualRiftOperator('dry-run', dependencies, world)).rejects.toMatchObject({ reason: 'scheduled Rift conflict' });
 		expect(readSecret).toHaveBeenCalledTimes(1);
 		expect(dependencies.relay.publish).not.toHaveBeenCalled();
 	});
 
 	it('runs the confirmed publish orchestration with the creator secret and authoritative Relay', async () => {
-		const { channel, metadata } = metadataEvents();
+		const world = testWorld('c'.repeat(64));
 		const secret = new Uint8Array(SECRET);
 		const readSecret = vi.fn(async () => secret);
-		const dependencies = fakeDependencies([result([channel]), result([metadata]), result(), result()], { readSecret });
-		const command = await runManualRiftOperator('publish', dependencies, testWorld(channel.id));
+		const dependencies = fakeDependencies([result(), result()], { readSecret });
+		const command = await runManualRiftOperator('publish', dependencies, world);
 		expect(command.exitCode).toBe(0);
 		expect(dependencies.confirmPublish).toHaveBeenCalledTimes(1);
 		expect(dependencies.relay.publish).toHaveBeenCalledTimes(1);
@@ -230,9 +222,9 @@ describe('operator Rift flow', () => {
 	});
 
 	it('treats accepted plus failed Relays as partial success and sanitizes rejection reasons', async () => {
-		const { channel, metadata } = metadataEvents();
+		const world = testWorld('c'.repeat(64));
 		const output = { stdout: vi.fn(), stderr: vi.fn() };
-		const base = fakeDependencies([result([channel]), result([metadata]), result(), result()], { output });
+		const base = fakeDependencies([result(), result()], { output });
 		const relay: OperatorRelayAdapter = {
 			...base.relay,
 			publish: vi.fn(async () => [
@@ -240,7 +232,7 @@ describe('operator Rift flow', () => {
 				{ relayUrl: 'wss://relay-2.example/', outcome: 'rejected' as const, notice: '\u001b]0;rejected\u0007\r\n' }
 			])
 		};
-		const command = await runManualRiftOperator('publish', { ...base, relay }, testWorld(channel.id));
+		const command = await runManualRiftOperator('publish', { ...base, relay }, world);
 		expect(command.exitCode).toBe(0);
 		const displayed = output.stdout.mock.calls.flat().join('\n');
 		expect(displayed).not.toContain('\u001b');
@@ -248,9 +240,9 @@ describe('operator Rift flow', () => {
 	});
 
 	it('returns a fixed overall failure for all rejected/timeout Relays and still zeroizes and closes', async () => {
-		const { channel, metadata } = metadataEvents();
+		const world = testWorld('c'.repeat(64));
 		const secret = new Uint8Array(SECRET);
-		const base = fakeDependencies([result([channel]), result([metadata]), result(), result()], { readSecret: vi.fn(async () => secret) });
+		const base = fakeDependencies([result(), result()], { readSecret: vi.fn(async () => secret) });
 		const relay: OperatorRelayAdapter = {
 			...base.relay,
 			publish: vi.fn(async () => [
@@ -258,7 +250,7 @@ describe('operator Rift flow', () => {
 				{ relayUrl: 'wss://relay-2.example/', outcome: 'timeout' as const }
 			])
 		};
-		await expect(runManualRiftOperator('publish', { ...base, relay }, testWorld(channel.id))).rejects.toMatchObject({ reason: 'all authoritative Relays failed to accept the event' });
+		await expect(runManualRiftOperator('publish', { ...base, relay }, world)).rejects.toMatchObject({ reason: 'all authoritative Relays failed to accept the event' });
 		expect(secret.every((byte) => byte === 0)).toBe(true);
 		expect(base.relay.close).toHaveBeenCalledTimes(1);
 	});
@@ -267,9 +259,9 @@ describe('operator Rift flow', () => {
 		['wrong creator', new Uint8Array(32).fill(8), 'operator secret is not the channel creator'],
 		['malformed', new Uint8Array(1), 'invalid operator secret']
 	] as const)('rejects %s secret without publishing', async (_label, secret, reason) => {
-		const { channel, metadata } = metadataEvents();
-		const dependencies = fakeDependencies([result([channel]), result([metadata]), result()], { readSecret: vi.fn(async () => secret) });
-		await expect(runManualRiftOperator('dry-run', dependencies, testWorld(channel.id))).rejects.toMatchObject({ reason });
+		const world = testWorld('c'.repeat(64));
+		const dependencies = fakeDependencies([result()], { readSecret: vi.fn(async () => secret) });
+		await expect(runManualRiftOperator('dry-run', dependencies, world)).rejects.toMatchObject({ reason });
 		expect(dependencies.relay.publish).not.toHaveBeenCalled();
 		expect(secret.every((byte) => byte === 0)).toBe(true);
 	});

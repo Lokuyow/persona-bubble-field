@@ -150,8 +150,8 @@ test.describe('Relay startup', () => {
 		await page.goto('/');
 		await expect(page.locator('.action-dock')).toBeVisible();
 		await page.evaluate(() => {
-			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
-			relay.releaseMetadata(); relay.releasePrimary();
+			const relay = (window as unknown as { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest;
+			relay.releasePrimary();
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
 
@@ -211,8 +211,8 @@ test.describe('Relay startup', () => {
 			abilities: { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 } });
 		await expect.poll(() => page.evaluate(() => Boolean((window as typeof window & { __relayStartupTest?: unknown }).__relayStartupTest))).toBe(true);
 		await page.evaluate(() => {
-			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
-			relay.releaseMetadata(); relay.releasePrimary();
+			const relay = (window as unknown as { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest;
+			relay.releasePrimary();
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${reset.pubkey}"]`)).toBeVisible();
 		const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
@@ -242,7 +242,6 @@ test.describe('Relay startup', () => {
 			abilities: { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 } });
 		await page.goto('/');
 		await expect(page.locator('.action-dock')).toBeVisible();
-		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
 			AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) &&
 			(request.filter.kinds as number[])[0] === 42)).toBe(true);
@@ -298,8 +297,8 @@ test.describe('Relay startup', () => {
 		await page.goto('/');
 		await expect(page.locator('.action-dock')).toBeVisible();
 		await page.evaluate(() => {
-			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
-			relay.releaseMetadata(); relay.releasePrimary();
+			const relay = (window as unknown as { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest;
+			relay.releasePrimary();
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
 		await pauseAtCurrentBrowserTime(page);
@@ -335,8 +334,8 @@ test.describe('Relay startup', () => {
 
 		await expect.poll(() => page.evaluate(() => Boolean((window as typeof window & { __relayStartupTest?: unknown }).__relayStartupTest))).toBe(true);
 		await page.evaluate(() => {
-			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
-			relay.releaseMetadata(); relay.releasePrimary();
+			const relay = (window as unknown as { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest;
+			relay.releasePrimary();
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${newPubkey}"]`)).toBeVisible();
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toHaveCount(0);
@@ -364,8 +363,8 @@ test.describe('Relay startup', () => {
 		await page.goto('/');
 		await expect(page.locator('.action-dock')).toBeVisible();
 		await page.evaluate(() => {
-			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
-			relay.releaseMetadata(); relay.releasePrimary();
+			const relay = (window as unknown as { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest;
+			relay.releasePrimary();
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
 		await pauseAtCurrentBrowserTime(page);
@@ -396,8 +395,8 @@ test.describe('Relay startup', () => {
 		await page.goto('/');
 		await expect(page.locator('.action-dock')).toBeVisible();
 		await page.evaluate(() => {
-			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
-			relay.releaseMetadata(); relay.releasePrimary();
+			const relay = (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest;
+			relay.releasePrimary();
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
 		await pauseAtCurrentBrowserTime(page);
@@ -440,8 +439,8 @@ test.describe('Relay startup', () => {
 		await page.goto('/');
 		await expect(page.locator('.action-dock')).toBeVisible();
 		await page.evaluate(() => {
-			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
-			relay.releaseMetadata(); relay.releasePrimary();
+			const relay = (window as unknown as { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest;
+			relay.releasePrimary();
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
 		await pauseAtCurrentBrowserTime(page);
@@ -492,8 +491,8 @@ test.describe('Relay startup', () => {
 		await page.goto('/');
 		await expect(page.locator('.action-dock')).toBeVisible();
 		await page.evaluate(() => {
-			const relay = (window as unknown as { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
-			relay.releaseMetadata(); relay.releasePrimary();
+			const relay = (window as unknown as { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest;
+			relay.releasePrimary();
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
 		await pauseAtCurrentBrowserTime(page);

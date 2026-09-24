@@ -338,13 +338,10 @@ function traceBootstrap() {
 
 function startResult(messages: readonly ParsedWorldMessage[] = [], worldStates: readonly ParsedWorldStateEvent[] = [], statuses: readonly string[] = ['eose']) {
 	return {
-		metadata: {
-			channel: { channelId: 'c'.repeat(64), relayHint: 'wss://relay.test/' }
-		},
+		channel: { channelId: 'c'.repeat(64), relayHint: 'wss://relay.test/' },
 		messages,
 		timelineMessages: messages,
 		worldStates,
-		metadataDiscovery: { relays: [{ relayUrl: 'ws://relay.test/', status: 'eose' }] },
 		primaryPairs: statuses.map((status) => ({ relayUrl: 'ws://relay.test/', subscription: 'world-messages', status })),
 		nip11: []
 	} as never;
@@ -1128,7 +1125,7 @@ describe('world read session', () => {
 	});
 
 	it('keeps usable snapshots on partial Relay failure and reports degradation', async () => {
-		result = startResult([], [], ['eose', 'timeout']);
+		result = startResult([message('valid-before-terminal', 700)], [], Array(10).fill('closed'));
 		const statuses: WorldReadConnectionStatus[] = [];
 		const session = createWorldReadSession({
 			field: { columns: 4, rows: 3 },
@@ -1139,8 +1136,9 @@ describe('world read session', () => {
 
 		const bootstrap = await session.start();
 
-		expect(bootstrap.status).toEqual({ kind: 'degraded', issueCount: 1 });
-		expect(statuses.at(-1)).toEqual({ kind: 'degraded', issueCount: 1 });
+		expect(bootstrap.status).toEqual({ kind: 'degraded', issueCount: 10 });
+		expect(statuses.at(-1)).toEqual({ kind: 'degraded', issueCount: 10 });
+		expect(bootstrap.presence.participants.map((participant) => participant.id)).toEqual([alice]);
 	});
 
 	it('reports a post-bootstrap primary close as degraded without discarding presence', async () => {

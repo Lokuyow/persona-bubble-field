@@ -229,8 +229,8 @@ test.describe('Relay startup', () => {
 		await overwriteRelayMendingBuild(page, { inferenceAcceleration: 0, contextCompression: 1, hallucinationResistance: 0 }, { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 });
 		await page.goto('/');
 		await page.evaluate(() => {
-			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
-			relay.releaseMetadata(); relay.releasePrimary();
+			const relay = (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest;
+			relay.releasePrimary();
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
 		const atTerminal = finalizeEvent(buildWorldStateEventTemplate({
@@ -243,8 +243,8 @@ test.describe('Relay startup', () => {
 		await expect.poll(() => readRelayGameState(page)).toMatchObject({ mendingJob: expect.any(Object) });
 		await page.reload({ waitUntil: 'domcontentloaded' });
 		await page.evaluate(() => {
-			const relay = (window as typeof window & { __relayStartupTest: { releaseMetadata(): void; releasePrimary(): void } }).__relayStartupTest;
-			relay.releaseMetadata(); relay.releasePrimary();
+			const relay = (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest;
+			relay.releasePrimary();
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
 		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), atTerminal);
@@ -268,7 +268,6 @@ for (const stateKind of ['missing', 'corrupt'] as const) {
 			await seedUnavailablePersona(page, stateKind);
 			await page.goto('/');
 			await expect(page.locator('.action-dock')).toBeVisible();
-			await page.evaluate(() => (window as unknown as { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
 			await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
 				AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) &&
 				(request.filter.kinds as number[])[0] === 42)).toBe(true);
@@ -315,7 +314,6 @@ for (const stateKind of ['missing', 'corrupt'] as const) {
 		await seedRelayAccount(page, secret, pubkey, expiresAtMs);
 		await page.goto('/');
 		await expect(page.locator('.action-dock')).toBeVisible();
-		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseMetadata(): void } }).__relayStartupTest.releaseMetadata());
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
 			AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) &&
 			(request.filter.kinds as number[])[0] === 42)).toBe(true);
