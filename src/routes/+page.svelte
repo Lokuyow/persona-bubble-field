@@ -600,10 +600,10 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		? devCooperationDefectionPlaygroundState?.selfChoice ?? null
 		: cooperationDefectionSelection?.round === cooperationDefectionRound ? cooperationDefectionSelection.choice : null);
 	let cooperationDefectionCommitStatus = $derived(devCooperationDefectionPlaygroundEnabled
-		? devCooperationDefectionPlaygroundState?.selfChoice ? '秘密選択を送信済み' : 'このラウンドの選択はまだありません'
+		? devCooperationDefectionPlaygroundState?.selfChoice ? '秘密選択を送信済み' : null
 		: cooperationDefectionSelection && cooperationDefectionSelection.round === cooperationDefectionRound
 			? cooperationDefectionSelection.revealStatus === 'published' ? '選択を自動公開済み' : cooperationDefectionSelection.revealStatus === 'sending' ? '選択を自動公開中' : cooperationDefectionSelection.revealStatus === 'failed' ? '選択の自動公開に失敗（未reveal）' : cooperationDefectionSelection.commitPublished ? '秘密選択を送信済み' : '未送信'
-			: 'このラウンドの選択はまだありません');
+			: null);
 	function cooperationDefectionParticipantName(pubkey: string): string {
 		try { return requireCharacterFromPubkey(pubkey).name; }
 		catch { return pubkey.slice(0, 8); }

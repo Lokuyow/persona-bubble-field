@@ -171,7 +171,7 @@ test.describe('Relay startup', () => {
 		}, [nextJoin, ...nextOtherJoins]);
 		await page.clock.setSystemTime(nextSchedule.gameAtMs + 1_000);
 		await page.clock.runFor(1_000);
-		await expect(page.locator('[data-realtime-panel]')).toContainText('参加者: 3');
+		await expect(page.locator('[data-realtime-panel]')).toContainText('参加中（3人）');
 	});
 
 	test('keeps normal world movement and conversation available when realtime is unavailable', async ({ page }) => {

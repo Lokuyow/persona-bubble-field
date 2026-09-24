@@ -263,7 +263,7 @@ test.describe('Relay startup', () => {
 		await page.clock.setSystemTime(round.selectionAtMs + 1_000);
 		await page.clock.runFor(1_000);
 		await expect(page.locator('[data-realtime-panel]')).toContainText('選択');
-		await expect(page.locator('[data-realtime-panel]')).toContainText('参加者: 3');
+		await expect(page.locator('[data-realtime-panel]')).toContainText('参加中（3人）');
 		await page.locator('[data-cooperation-defection-choice="cooperate"]').click();
 		await expect(page.locator('[data-cooperation-defection-choice="cooperate"]')).toBeDisabled();
 		await expect.poll(async () => (await relayState(page)).state.published.some((event) => event.kind === 7070 && event.pubkey === selfPubkey && JSON.parse(event.content).action === 'commit')).toBe(true);

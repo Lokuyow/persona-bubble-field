@@ -135,7 +135,7 @@ test.describe('Relay startup', () => {
 		await waitForRelayComposerReady(page);
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => (request.filter.kinds as number[])[0] === 42)).toBe(true);
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
-		await expect(page.locator('[data-realtime-panel]')).toContainText('参加者: 3');
+		await expect(page.locator('[data-realtime-panel]')).toContainText('参加中（3人）');
 		await expect(page.locator('[data-cooperation-defection-choice="cooperate"]')).toBeEnabled();
 		await expect.poll(async () => readRealtimePendingInstances(page)).toEqual([manualInstanceId]);
 	});
