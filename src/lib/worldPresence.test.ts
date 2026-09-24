@@ -154,6 +154,18 @@ describe('world presence adapter', () => {
 		expect(participant(tieSecond, alice).position).toEqual({ x: 1, y: 0 });
 	});
 
+	it('keeps a new Run active when an older Run exit is delivered afterward', () => {
+		const currentRun = { ...position('run-2-active', alice, 501, 0, { x: 2, y: 1 }), runNumber: 2 };
+		const oldRunExit: ParsedWorldStateEvent = { id: 'run-1-exit', pubkey: alice, createdAt: 500, state: 'exit', slot: null,
+			position: { x: 2, y: 1 }, runNumber: 1, exitReason: 'death' };
+		const active = reconstructWorldPresenceState(field, [], [currentRun]);
+		const afterOldExit = applyWorldPresenceWorldState(active, oldRunExit);
+		expect(participant(afterOldExit, alice)).toMatchObject({ position: { x: 2, y: 1 }, lastPositiveActivityCreatedAt: 501, latestExitCreatedAt: 500 });
+		expect(projectWorldPresenceState(afterOldExit, 501_000).participants).toMatchObject([
+			{ id: alice, status: 'active', lastActivityAt: 501_000 }
+		]);
+	});
+
 	it('is idempotent for exact live evidence and arrival-order independent', () => {
 		const initial = reconstructWorldPresenceState(field, [], []);
 		const event = message('same', alice, 100, { x: 1, y: 2 });

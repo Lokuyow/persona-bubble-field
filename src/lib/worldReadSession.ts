@@ -40,6 +40,7 @@ import {
 import type { Direction } from './geometry';
 import { isBlockedFacilityCell } from './fieldFacilities';
 import type { Event as NostrEvent, VerifiedEvent } from 'nostr-tools/pure';
+import type { Filter } from 'nostr-tools/filter';
 import {
 	confirmWorldPosition,
 	loadWorldWriteJournal,
@@ -109,10 +110,12 @@ export type RealtimeSessionOptions = Readonly<{
 	registry: RealtimeEventRegistry;
 	controlSince: number;
 	instanceFilters: readonly RealtimeInstanceFilterConfiguration[];
+	supplementalFilters?: readonly Filter[];
 	getStartConfiguration?: () => RealtimeStartConfiguration;
 	prepareStartConfiguration?: (configuration: RealtimeStartConfiguration, nowMs: number) => RealtimeStartConfiguration;
 	startImmediately?: boolean;
 	onEvent: (event: RealtimeEnvelope) => void;
+	onSupplementalEvent?: (event: NostrEvent) => void;
 	onControl?: (control: RealtimeControlEnvelope) => void;
 	onBootstrapComplete?: (configuration: RealtimeStartConfiguration) => void;
 	onStatusChanged?: (status: 'inactive' | 'active' | 'degraded') => void;
@@ -121,6 +124,7 @@ export type RealtimeSessionOptions = Readonly<{
 export type RealtimeStartConfiguration = Readonly<{
 	controlSince: number;
 	instanceFilters: readonly RealtimeInstanceFilterConfiguration[];
+	supplementalFilters?: readonly Filter[];
 }>;
 
 export type SelfPositionWriteState =
@@ -160,6 +164,7 @@ export type WorldReadSessionOptions = Readonly<{
 	selfSigner?: ActiveSignerSnapshot | null;
 	selfRunNumber?: number;
 	onPresenceChanged: (presence: PresenceState) => void;
+	onWorldStateEvent?: (event: ParsedWorldStateEvent) => void;
 	onLiveMessage: (message: ParsedWorldMessage, presence: PresenceState) => void;
 	onTimelineMessage?: (message: ParsedWorldMessage) => void;
 	onEffectiveTraceRootsChanged?: (roots: readonly ParsedWorldMessage[]) => void;
@@ -215,6 +220,7 @@ function hasRelayIssue(result: PrimaryStartResult): number {
 export function createWorldReadSession(input: WorldReadSessionOptions) {
 	const options = input;
 	let selfSigner = options.selfSigner ?? null;
+	let selfRunNumber = options.selfRunNumber;
 	let authorizeSelfWriteCallback = options.authorizeSelfWrite;
 	let onSelfWriteAuthorizationLostCallback = options.onSelfWriteAuthorizationLost;
 	let disposed = false;
@@ -316,11 +322,17 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		options.realtime?.onControl?.(control);
 	}
 
+	function receiveSupplementalEvent(event: NostrEvent): void {
+		if (disposed || !options.realtime) return;
+		options.realtime.onSupplementalEvent?.(event);
+	}
+
 	function sameRealtimeConfiguration(first: RealtimeStartConfiguration, second: RealtimeStartConfiguration): boolean {
 		const normalize = (configuration: RealtimeStartConfiguration) => [
 			configuration.controlSince,
 			...normalizeRealtimeInstanceFilterConfigurations(configuration.instanceFilters)
-				.map((filter) => [filter.protocolKey, filter.instanceIds, filter.since])
+				.map((filter) => [filter.protocolKey, filter.instanceIds, filter.since]),
+			configuration.supplementalFilters ?? []
 		];
 		return JSON.stringify(normalize(first)) === JSON.stringify(normalize(second));
 	}
@@ -343,7 +355,8 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		if (disposed || journalScope && !bootstrapComplete || !transport || !channel || !realtimeOptions?.registry.length) return Promise.resolve();
 		const candidateConfiguration = configuration ?? realtimeOptions.getStartConfiguration?.() ?? {
 			controlSince: realtimeOptions.controlSince,
-			instanceFilters: realtimeOptions.instanceFilters
+			instanceFilters: realtimeOptions.instanceFilters,
+			supplementalFilters: realtimeOptions.supplementalFilters ?? []
 		};
 		if (realtimeStartPromise && realtimeStartConfiguration && sameRealtimeConfiguration(realtimeStartConfiguration, candidateConfiguration)) return realtimeStartPromise;
 		if (realtimeStartPromise) stopRealtimeSubscription();
@@ -356,6 +369,8 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			eventTypes: realtimeOptions.registry,
 		controlSince: nextConfiguration.controlSince,
 		instanceFilters: nextConfiguration.instanceFilters,
+		supplementalFilters: nextConfiguration.supplementalFilters,
+		onSupplementalEvent: receiveSupplementalEvent,
 		onBootstrapEvent: receiveRealtimeEvent,
 		onLiveEvent: receiveRealtimeEvent,
 		onBootstrapControl: receiveRealtimeControl,
@@ -374,7 +389,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		return realtimeStartPromise;
 	}
 
-	function prepareTerminalExit(expectedPubkey?: string): TerminalExitPreparation {
+	function prepareTerminalExit(expectedPubkey?: string, exitReason?: 'death' | 'clear'): TerminalExitPreparation {
 		if (disposed) return { kind: 'unavailable', reason: 'disposed' };
 		terminal = true;
 		if (!selfSigner || !channel) return { kind: 'unavailable', reason: 'missing-self' };
@@ -396,7 +411,9 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			channel,
 			position: self.position,
 			slot: 'exit',
-			createdAt
+			createdAt,
+			runNumber: selfRunNumber,
+			exitReason
 		}), selfSigner.secretKey);
 		const parsed = parseWorldStateEvent(event, channel.channelId);
 		if (!parsed) throw new Error('Locally signed terminal exit did not pass the project parser.');
@@ -407,7 +424,8 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	function commitTerminalExit(exit: CommittedTerminalExit): void {
 		if (!terminal || !preparedTerminalExit || !selfSigner || !channel || disposed) throw new Error('Terminal exit was not prepared.');
 		const event = finalizeWorldEvent(buildWorldStateEventTemplate({
-			channel, position: exit.position, slot: 'exit', createdAt: exit.createdAt
+			channel, position: exit.position, slot: 'exit', createdAt: exit.createdAt,
+			runNumber: selfRunNumber, exitReason: preparedTerminalExit.parsed.exitReason ?? undefined
 		}), selfSigner.secretKey);
 		const parsed = parseWorldStateEvent(event, channel.channelId);
 		if (!parsed || parsed.state !== 'exit') throw new Error('Committed terminal exit is invalid.');
@@ -610,6 +628,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	}
 
 	function applyBootstrapPosition(event: ParsedWorldStateEvent, nowMs: number): void {
+		options.onWorldStateEvent?.(event);
 		reconcileSelfWorldState(event);
 		if (journalScope && (pendingSelfOperation?.id === event.id || retryableSelfOperations.has(event.id))) {
 			applyLivePosition(event, nowMs);
@@ -633,6 +652,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		if (terminal && event.state === 'active' && selfSigner && event.pubkey === selfSigner.pubkey &&
 			(pendingSelfOperation?.id === event.id || retryableSelfOperations.has(event.id))) return false;
 		appliedCanonicalPositionEventIds.add(event.id);
+		options.onWorldStateEvent?.(event);
 		worldPresence = applyWorldPresenceWorldState(worldPresence, event);
 		const nextPresence = project(nowMs);
 		if (selfSigner && event.pubkey === selfSigner.pubkey) {
@@ -807,7 +827,8 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			channel,
 			position,
 			slot: plan.slot,
-			createdAt
+			createdAt,
+			runNumber: selfRunNumber
 		}), selfSigner.secretKey);
 		const parsed = parseWorldStateEvent(signed, channel.channelId);
 		if (!parsed) throw new Error('Locally signed position event did not pass the project parser.');
@@ -1428,8 +1449,8 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			emitStatus({ kind: 'bootstrapping' });
 			const nowMs = Date.now();
 			startupSecond = Math.floor(nowMs / 1000);
-			if (selfSigner && options.selfRunNumber !== undefined) journalScope = {
-				identity: selfSigner.identity, runNumber: options.selfRunNumber, channelId: world.channelId
+			if (selfSigner && selfRunNumber !== undefined) journalScope = {
+				identity: selfSigner.identity, runNumber: selfRunNumber, channelId: world.channelId
 			};
 			const since = bootstrapSince(nowMs);
 			messageSince = since;
@@ -1507,6 +1528,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			}
 			if (selfSigner) throw new Error('World session already has a self attached.');
 			selfSigner = attachment.signer;
+			selfRunNumber = attachment.runNumber;
 			if (attachment.runNumber !== undefined) journalScope = { identity: attachment.signer.identity,
 				runNumber: attachment.runNumber, channelId: channel.channelId };
 			authorizeSelfWriteCallback = attachment.authorizeSelfWrite;

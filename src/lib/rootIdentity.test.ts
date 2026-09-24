@@ -12,6 +12,8 @@ import {
 	WORLD_WRITE_JOURNAL_STORE_NAME,
 	applyRealtimeOutcome,
 	applyRealtimeLifespanLoss,
+	activateTagGameRun,
+	applyTagGameCumulative,
 	completeRealtimeEventInstance,
 	clearPersona,
 	confirmWorldPosition,
@@ -24,6 +26,7 @@ import {
 	selectIdentity,
 	startMending,
 	trackRealtimeEventInstance,
+	reserveTagGameParticipation,
 	transitionRealtimeDeath,
 	transitionExpiredPersona,
 	upgradePersonaAbility,
@@ -84,6 +87,67 @@ afterEach(() => {
 });
 
 describe('Root / Identity / Run lifecycle', () => {
+	it('allows clear and ability upgrade during a tag-game reservation, then gates both during the Run lock and settles cumulatively once', async () => {
+		const initial = await selected(ZERO_BUILD, { initialPoints: 200_000 });
+		const gameId = `game-${'a'.repeat(64)}`;
+		expect(await reserveTagGameParticipation(initial, gameId)).toBe(true);
+		const upgraded = await upgradePersonaAbility(initial, 'inferenceEfficiency');
+		expect(upgraded.kind).toBe('upgraded');
+		if (upgraded.kind !== 'upgraded') return;
+		const afterUpgrade = upgraded.persona;
+		expect((await clearPersona(afterUpgrade)).kind).toBe('cleared');
+	});
+
+	it('accepts a normal final settlement arriving after 180 seconds, applies its delta atomically, and releases the Run', async () => {
+		const persona = await selected(ZERO_BUILD, { initialPoints: 200_000 });
+		const gameId = `game-${'b'.repeat(64)}`;
+		expect(await reserveTagGameParticipation(persona, gameId)).toBe(true);
+		expect(await activateTagGameRun(persona, gameId, TIME, TIME + 180_000, TIME + 210_000)).toBe(true);
+		expect(await clearPersona(persona)).toEqual({ kind: 'blocked', reason: 'tag-game' });
+		expect((await upgradePersonaAbility(persona, 'inferenceEfficiency')).kind).toBe('blocked');
+		const partial = await applyTagGameCumulative(persona, gameId, 250, HOUR, false);
+		expect(partial.kind).toBe('applied');
+		if (partial.kind !== 'applied') return;
+		expect(partial.persona.gameState.points).toBe(persona.gameState.points + 250);
+		expect(partial.persona.gameState.lifespanExpiresAtMs).toBe(persona.gameState.lifespanExpiresAtMs - HOUR);
+		vi.spyOn(Date, 'now').mockReturnValue(TIME + 185_000);
+		const final = await applyTagGameCumulative(persona, gameId, 500, 2 * HOUR, true);
+		expect(final.kind).toBe('applied');
+		if (final.kind !== 'applied') return;
+		expect(final.persona.gameState.points).toBe(persona.gameState.points + 500);
+		expect(final.persona.gameState.lifespanExpiresAtMs).toBe(persona.gameState.lifespanExpiresAtMs - 2 * HOUR);
+		expect((await upgradePersonaAbility(final.persona, 'inferenceEfficiency')).kind).toBe('upgraded');
+	});
+
+	it('releases the last confirmed settlement after the finite final wait when reload cannot fetch a final event', async () => {
+		const persona = await selected();
+		const gameId = `game-${'d'.repeat(64)}`;
+		expect(await reserveTagGameParticipation(persona, gameId)).toBe(true);
+		expect(await activateTagGameRun(persona, gameId, TIME, TIME + 180_000, TIME + 210_000)).toBe(true);
+		const partial = await applyTagGameCumulative(persona, gameId, 300, HOUR, false);
+		expect(partial.kind).toBe('applied');
+		vi.spyOn(Date, 'now').mockReturnValue(TIME + 210_001);
+		const recovered = restored(await loadOrCreateLifecycle());
+		expect(recovered.gameState.points).toBe(persona.gameState.points + 300);
+		expect(recovered.gameState.lifespanExpiresAtMs).toBe(persona.gameState.lifespanExpiresAtMs - HOUR);
+		expect((await upgradePersonaAbility(recovered, 'inferenceEfficiency')).kind).toBe('upgraded');
+	});
+
+	it('serializes Run close against game start so an old Run cannot enter after clear', async () => {
+		const persona = await selected(ZERO_BUILD, { initialPoints: 200_000 });
+		const gameId = `game-${'c'.repeat(64)}`;
+		expect(await reserveTagGameParticipation(persona, gameId)).toBe(true);
+		const [activation, clearing] = await Promise.all([
+			activateTagGameRun(persona, gameId, TIME, TIME + 180_000, TIME + 210_000),
+			clearPersona(persona)
+		]);
+		if (clearing.kind === 'cleared') expect(activation).toBe(false);
+		else {
+			expect(clearing).toEqual({ kind: 'blocked', reason: 'tag-game' });
+			expect(activation).toBe(true);
+		}
+	});
+
 	it('preserves a valid v7 Root and active Player while adding the write journal', async () => {
 		const original = await selected();
 		const root = await records(ROOT_SECRET_STORE_NAME);

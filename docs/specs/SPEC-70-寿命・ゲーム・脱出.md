@@ -162,7 +162,7 @@ Run開始前にRoot PointをRoot buildへ配分し、active Run中は変更し�
 
 リアルタイムイベントは、寿命・ポイント・死亡などのsettlementを持ち得る、交換可能なexperimental event枠である。イベント固有の状態は `PersonaGameState` に混在させず、イベントinstanceとaction、participant、round、resultとして独立管理する。実験を終了するときは、その定義をenabled registryから外し、購読・受理・表示・settlementを停止する。旧payloadや旧kindを救済するlegacy path、隠れた自動移行、恒久採用を前提にした互換層は設けない。
 
-prototypeではこの枠で複数のevent typeを順次試遊し、試遊結果を踏まえて正式採用するeventを決める。現時点でenabledなのは「協力と抜け駆け」（event type `cooperation-defection`、protocol version 1）だけであり、別のevent typeを今回追加しない。
+prototypeではこの枠で複数のevent typeを順次試遊し、試遊結果を踏まえて正式採用するeventを決める。現時点でenabledなのは「協力と抜け駆け」（event type `cooperation-defection`、protocol version 1）とプレイヤー主催の「鬼ごっこ」だけである。
 
 各イベントはイベント定義、protocol version、protocol key、payload parser、instance schedule、settlement規則を持つ。共通のNostr envelope、control、補助subscription、共通parserの仕様は [`SPEC-10-Nostr・アカウント.md`](./SPEC-10-Nostr・アカウント.md) を正とし、イベントの有効化・無効化はcompile-time registryで明示する。Relay障害、購読拒否、切断、ブラウザ終了だけを理由に死亡させない。settlementは既存のbrowser-local Player lifecycle store内の汎用ledgerへ、receiptと同じatomic mutationで記録する。ledgerはevent instanceのpendingと適用済みoutcome receiptを持ち、同じoutcomeを二重適用しない。古いIdentityまたは古いRun、既に期限切れのRunにはポイントを適用しない。イベント由来の死亡は、現在Runの死亡処理と同じRun close・Identity dead・次generation選択の経路を明示的に通る。
 
@@ -195,6 +195,20 @@ channel creator authorityが署名したkind 7070のversioned controlで、任�
 有効な選択をした各参加者は、結果確定後に自分のIdentityでtop-level kind 42を通常発言としてbest-effort投稿する。本文は協力なら `協力`、抜け駆けなら `抜け駆け` のみとする。選択・結果判定は従来どおりkind 7070 commit-revealを根拠とし、kind 42の本文や成否を使わない。投稿はreveal猶予終了後かつそのラウンドの結果発表中に限り、結果不成立や無効選択では行わず、発表期間外の遅延投稿もしない。重複投稿は同一Run・instance・group・roundで抑止する。死亡を伴う場合もkind 42の応答を待って死亡永続化・演出を遅らせない。公式UIは結果発表後に全参加者の有効選択と共通報酬・ペナルティを表示するが、他者の実際の死亡は推測表示しない。
 
 参加受付中はゲーム内からルール説明を開ける。説明には、3〜6人・最大3ラウンド、phase、選択肢、人数別の必要協力人数、報酬とペナルティ、選択の秘匿を短く示す。参加確定前には、協力失敗で抜け駆け者が寿命を3日失い、残り寿命によっては即死することを明示する。説明と確認および操作ボタンはスマートフォンのviewport内でスクロールして到達できる。旧event protocolは受け入れない。切替時には旧「綻び」の未精算instance IDだけをpending ledgerから終了させ、旧outcomeを再計算・補償・適用しない。
+
+### experimental event「鬼ごっこ」
+
+各開催者は自由に募集し、開催回IDを `<host pubkey>:<created_at>:<random>` とする。署名済み募集状態はaddressable `kind 37070`、`d=<game ID>`、`e=<World channel>`、`t=tag-game`で発行し、募集継続中は30秒ごとに同じ開催回を更新する。発見filterは直近90秒を取得し、署名・channel・index・開催者公開鍵とIDの一致を検証し、updatedAtから90秒を過ぎた募集を無効にする。署名済みephemeral `kind 27070`はjoin、leave、提案への同意、所持者応答、能力移転要求に用いる。いずれも既存のkind 7070イベント定義・購読対象を変更しない。
+
+募集は2〜8人。参加予約は単一参加制限として管理し、開始前の脱出・能力強化は禁止しない。開始前にRunを終了した登録者は参加資格を失い、開催者は有効なRunを再確認して開始を確定する。開始提案は登録者全員の同意を必要とし、30秒の応答期限内に同意しなかった登録者を除外して募集へ戻す。開催者は除外後に再提案でき、同意した有効参加者が2人以上なら5秒カウントダウン後に開始する。開始時に参加者のPlayer lifecycle transactionでRunと参加予約を照合して操作lockを有効化する。開始後は脱出・能力強化を同じlifecycle transaction境界で拒否し、通常作業は許可する。
+
+ゲーム進行は開始から180秒。8区間が交互にbenefit/calamityとなり、各効果は合計90秒、各区間は10〜40秒。benefitでは所持者に50pt/秒、calamityでは所持者の寿命を1時間/秒失わせる。能力移転は隣接・有効なsigned Run・有効状態を検証し、移転後3秒のcooldownを適用する。開催者は署名済み27070応答と通常World activityの両方から所持者の最終活動を求める。10秒無反応で効果を止めて5秒の応答確認を行い、応答がなければ一時対象外として再抽選する。確認応答はWorld Presenceを延命しない。参加者全員のheartbeatは発行しない。
+
+累積精算は参加者1人あたり最大9,000pt、寿命損失648,000,000msを上限とする。ゲーム時間は180秒で停止し、通常終了時だけ通信可能な参加者は最大30秒（開始から210秒まで）開催者の最終37070を待つ。最終結果が届けばその確定済み累積値を、届かなければ最後に確認済みの累積値を、settlement receiptと同じPlayer lifecycle transactionで一度だけ適用する。180秒以降は追加報酬・寿命損失を生成しない。未確定寿命損失では死亡させない。永続化完了後に参加lockを解除し、再読込・通信断時も210秒で有限に確定して解除する。確定後に届いたイベントは追加精算へ使用しない。
+
+判定者のdeath/clear exitまたは継続不能な通信競合は正常な180秒終了と区別し、最後に確認済みの累積値で精算を打ち切る。解決待ちの参加記録を終了させ、参加予約と操作lockを解除し、終了後のイベントは適用しない。同一秒の37070競合で状態選択ができない場合は新しい一意時刻の状態で解消を試み、30秒以内に解消できなければ最後に確認済みの状態を使い中断・精算する。terminalとなったworldReadSessionから終了通知を発行できる前提を置かない。30079 exitは対象の署名済みRun numberとreasonを照合し、遅延した旧Run exitを現在のRunへ適用しない。
+
+ゲーム開始前は募集画面の脱出・能力強化を許可し、同一Runの参加予約だけを重複拒否する。ゲーム中の操作禁止はUIだけに依存せずPlayer lifecycle更新transactionで検証する。複数タブ・開始とRun closeの競合で古いRunが開始対象にならないよう、開始確定時に保存済みRunを再検証する。ゲーム結果を保存してlockを解除する更新は原子的に行い、重複イベント・再読込で累積値を二重適用しない。
 
 ## 7. IdentityとRunのライフサイクル
 

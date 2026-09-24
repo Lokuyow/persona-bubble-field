@@ -181,6 +181,8 @@ World State wire contractで表現する。具体仕様は [`SPEC-30-フィー�
 
 realtimeの1本のREQには、channel creatorをauthorとして指定するbounded control filterと、enabled playable protocol keyごとのconcrete instance filterを含める。control filterは `kind=7070`、`#e` channel、control protocolの`#d`、creator `authors`、15分のbounded `since`を持ち、`#i`を持たない。各instance filterは`kind=7070`、`#e` channel、1つのplayable protocol keyの`#d`、そのprotocol keyに属するactive/recovery instanceの`#i`、および必要な`since`を持つ。過去の全gameplay historyを取得せず、protocol key、instance IDs、sinceの対応関係を跨いで混在させない。
 
+プレイヤー主催の鬼ごっこは同じrealtime補助REQへ追加filterを載せ、別REQを増やさない。募集・状態はaddressable `kind 37070`（`#e` channel、`#t=tag-game`、`since=now-90s`）で取得し、開催者は募集継続中に30秒ごとに同じ開催回の状態を更新する。発見時は署名、channel、`t`、`d`、authorを検証し、`d`に含む開催者公開鍵がevent authorと一致する開催回だけを受理する。`updatedAt`が現在から90秒以内の募集だけを有効とし、定期更新が途絶えた募集は表示・参加対象から外す。参加操作・確認応答は署名済みephemeral `kind 27070`で受け取り、同じ補助REQのcallbackへ渡す。これらのkindは既存公式イベントの `kind 7070` を変更・置換しない。
+
 instance対象の変更では、現在のrealtime requestだけをCLOSE/disposeしてから新しいfilter bundleで同じ1本を開始する。primary worldとTraceはrestartしない。generationを持つため、古いgenerationのEOSE、CLOSED、timeout、EVENTは新しい状態へ作用しない。control historyは手動開催の最大活動期間を覆う15分に限定し、通常tickごとには再構成しない。
 
 prototypeの共通envelopeには、project-owned regular kind `7070`、次のtag、およびJSON objectのcontentを使用する。

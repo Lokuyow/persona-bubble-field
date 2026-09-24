@@ -10,7 +10,7 @@
 	import type { Participant } from '$lib/frontend/presencePresentation';
 	import { isWithinTraceInvestigationRange, type TraceRootCell } from '$lib/traceInvestigation';
 	import type { ParsedWorldMessage } from '$lib/nostrProtocol';
-	import { ADJUSTMENT_TERMINAL, FIXED_FIELD_FACILITIES } from '$lib/fieldFacilities';
+	import { ADJUSTMENT_TERMINAL, FIXED_FIELD_FACILITIES, TAG_GAME_TERMINAL } from '$lib/fieldFacilities';
 	import type { CooperationDefectionGroup } from '$lib/cooperationDefection';
 
 	const FIELD_BACKGROUND_ASSET = '/field/prototype-danchi-courtyard.webp';
@@ -162,8 +162,8 @@
 		</div>
 		<div class="field-facility-layer" aria-hidden="true">
 			{#each FIXED_FIELD_FACILITIES as facility (facility.kind)}
-				<span class={['field-facility', facility.kind === 'mending-terminal' ? 'field-mending-terminal' : 'field-adjustment-terminal']} data-field-facility={facility.kind}
-					style={`left: ${(facility.position.x + 0.5) * cellSize}px; top: ${(facility.position.y + 0.5) * cellSize}px;`}><img src={asset(facility.kind === 'mending-terminal' ? MENDING_TERMINAL_ASSET : ADJUSTMENT_TERMINAL_ASSET)} alt="" /></span>
+				<span class={['field-facility', `field-${facility.kind}`]} data-field-facility={facility.kind}
+					style={`left: ${(facility.position.x + 0.5) * cellSize}px; top: ${(facility.position.y + 0.5) * cellSize}px;`}>{#if facility.kind === 'mending-terminal'}<img src={asset(MENDING_TERMINAL_ASSET)} alt="" />{:else if facility.kind === 'adjustment-terminal'}<img src={asset(ADJUSTMENT_TERMINAL_ASSET)} alt="" />{:else}<span aria-hidden="true">鬼</span>{/if}</span>
 			{/each}
 		</div>
 		<div class="realtime-group-layer" aria-label="協力と抜け駆けの参加地点">
@@ -203,7 +203,7 @@
 					type="button"
 					ondragstart={(event) => event.preventDefault()}
 					data-cell-position={`${position.x},${position.y}`}
-					aria-label={position.x === ADJUSTMENT_TERMINAL.position.x && position.y === ADJUSTMENT_TERMINAL.position.y ? '能力強化端末' : '作業端末'}
+					aria-label={position.x === TAG_GAME_TERMINAL.position.x && position.y === TAG_GAME_TERMINAL.position.y ? '鬼ごっこ端末' : position.x === ADJUSTMENT_TERMINAL.position.x && position.y === ADJUSTMENT_TERMINAL.position.y ? '能力強化端末' : '作業端末'}
 					style={`left: ${position.x * cellSize}px; top: ${position.y * cellSize}px;`}
 					onclick={(event) => { event.stopPropagation(); resolveFieldCellSelection(position, event.currentTarget as HTMLButtonElement); }}
 				></button>
@@ -353,6 +353,7 @@
 		transform: translate(-50%, -50%); pointer-events: none;
 	}
 	.field-facility img { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+	.field-tag-game-terminal span { display: grid; width: 64%; height: 64%; place-items: center; border: 2px solid #765432; border-radius: 50%; background: #f4e5bd; color: #765432; font-size: calc(var(--cell-size) * .34); font-weight: 800; }
 	.realtime-group-layer { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
 	.realtime-group {
 		position: absolute; display: grid; width: calc(var(--cell-size) * 0.84); height: calc(var(--cell-size) * 0.84);
