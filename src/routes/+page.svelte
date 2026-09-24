@@ -590,11 +590,12 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	let realtimeGroupTriggers = $derived(cooperationDefectionSchedule.phase === 'registration' ? realtimeGroups : []);
 	let cooperationDefectionActorPubkey = $derived(devCooperationDefectionPlaygroundEnabled ? DEV_COOPERATION_DEFECTION_PLAYGROUND_SELF_PUBKEY : selfSigner?.pubkey ?? null);
 	let cooperationDefectionSelfGroupId = $derived(cooperationDefectionActorPubkey && cooperationDefectionSession ? getCooperationDefectionParticipantGroup(cooperationDefectionSession, cooperationDefectionSchedule, cooperationDefectionActorPubkey) : null);
+	let cooperationDefectionSelfGroupCancelled = $derived(Boolean(cooperationDefectionSelfGroupId && cooperationDefectionSession?.cancelledGroupIds.includes(cooperationDefectionSelfGroupId)));
 	let cooperationDefectionRound = $derived(cooperationDefectionSchedule.phase === 'game'
 		? ([1, 2, 3] as const).find((round) => cooperationDefectionNowMs < getCooperationDefectionRoundSchedule(cooperationDefectionSchedule, round).endedAtMs) ?? 3
 		: null);
 	let cooperationDefectionRoundSchedule = $derived(cooperationDefectionRound ? getCooperationDefectionRoundSchedule(cooperationDefectionSchedule, cooperationDefectionRound) : null);
-	let cooperationDefectionCanChoose = $derived(Boolean(cooperationDefectionSchedule.phase === 'game' && cooperationDefectionRealtimeBootstrapComplete && cooperationDefectionRoundSchedule && cooperationDefectionNowMs >= cooperationDefectionRoundSchedule.selectionAtMs && cooperationDefectionNowMs < cooperationDefectionRoundSchedule.resultAtMs && cooperationDefectionSelfGroupId && realtimeStatus === 'active' && (devCooperationDefectionPlaygroundEnabled ? !devCooperationDefectionPlaygroundState?.selfChoice : Boolean(personaSnapshot)) && !(cooperationDefectionSelection?.round === cooperationDefectionRound && cooperationDefectionSelection.commitPublished)));
+	let cooperationDefectionCanChoose = $derived(Boolean(cooperationDefectionSchedule.phase === 'game' && cooperationDefectionRealtimeBootstrapComplete && !cooperationDefectionSelfGroupCancelled && cooperationDefectionRoundSchedule && cooperationDefectionNowMs >= cooperationDefectionRoundSchedule.selectionAtMs && cooperationDefectionNowMs < cooperationDefectionRoundSchedule.resultAtMs && cooperationDefectionSelfGroupId && realtimeStatus === 'active' && (devCooperationDefectionPlaygroundEnabled ? !devCooperationDefectionPlaygroundState?.selfChoice : Boolean(personaSnapshot)) && !(cooperationDefectionSelection?.round === cooperationDefectionRound && cooperationDefectionSelection.commitPublished)));
 	let cooperationDefectionSelectedChoice = $derived(devCooperationDefectionPlaygroundEnabled
 		? devCooperationDefectionPlaygroundState?.selfChoice ?? null
 		: cooperationDefectionSelection?.round === cooperationDefectionRound ? cooperationDefectionSelection.choice : null);
@@ -2055,7 +2056,13 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 					cooperationDefectionSession = recovered;
 					recoveredCooperationDefectionSessions.delete(cooperationDefectionSchedule.instanceId);
 				} else {
-					cooperationDefectionSession = createCooperationDefectionSession({ instanceId: cooperationDefectionSchedule.instanceId, field });
+					const session = createCooperationDefectionSession({ instanceId: cooperationDefectionSchedule.instanceId, field });
+					if (devCooperationDefectionStaticPhase === 'game') {
+						const groupId = session.groups[0]?.id;
+						cooperationDefectionSession = groupId ? { ...session, participantSnapshot: { [groupId]: ['1'.repeat(64), '2'.repeat(64), '3'.repeat(64)] } } : session;
+					} else {
+						cooperationDefectionSession = session;
+					}
 				}
 			}
 		} else if (cooperationDefectionRealtimeBootstrapComplete) {
@@ -3001,6 +3008,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			status={realtimeStatus}
 			session={cooperationDefectionSession}
 			selfGroupId={cooperationDefectionSelfGroupId}
+			cancelled={cooperationDefectionSelfGroupCancelled}
 			selfPubkey={selfSigner?.pubkey ?? null}
 			participantName={cooperationDefectionParticipantName}
 			selectedChoice={cooperationDefectionSelectedChoice}
