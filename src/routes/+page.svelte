@@ -325,6 +325,33 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	let composerEditorIsEmpty: boolean | null = null;
 	let chatterComponent: { initialize(width: number): void; isInitialized(): boolean; resetMeasurements(): void };
 	let chatterOpen = $state(false);
+	const CHATTER_VISIBILITY_STORAGE_KEY = 'persona-bubble-field:chatter-open';
+
+	function readChatterVisibility(): boolean | null {
+		try {
+			const value = window.localStorage.getItem(CHATTER_VISIBILITY_STORAGE_KEY);
+			return value === 'true' ? true : value === 'false' ? false : null;
+		} catch {
+			return null;
+		}
+	}
+
+	function setChatterOpen(open: boolean): void {
+		chatterOpen = open;
+		try {
+			window.localStorage.setItem(CHATTER_VISIBILITY_STORAGE_KEY, String(open));
+		} catch {
+			// Storage may be unavailable; keep the in-memory control usable.
+		}
+	}
+
+	function toggleChatter(): void {
+		setChatterOpen(!chatterOpen);
+	}
+
+	function initializeChatterVisibility(width: number): void {
+		chatterOpen = readChatterVisibility() ?? width > MOBILE_FIELD_BREAKPOINT;
+	}
 	let composerComponent = $state.raw<{ focusEditor(): boolean; blurEditor(): boolean; applyContentIfEmpty(content: string): Promise<boolean> } | null>(null);
 	let fieldViewportComponent: FieldViewportHandle | null = null;
 	let visualWorldById = $state.raw<Record<string, WorldPoint>>({});
@@ -2378,7 +2405,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 				target.matches('input, textarea, select') || target.isContentEditable
 			))
 		) {
-			chatterOpen = !chatterOpen;
+			toggleChatter();
 			event.preventDefault();
 			return;
 		}
@@ -2858,7 +2885,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 				{selectedCharacterId}
 				isDevWorldSandbox={devWorldSandboxEnabled}
 				open={chatterOpen}
-				onInitialized={(width) => { chatterOpen = width > MOBILE_FIELD_BREAKPOINT; }}
+				onInitialized={initializeChatterVisibility}
 				onOpenProfile={openProfile}
 			/>
 			<FieldScene
@@ -3043,7 +3070,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			submissionInProgress={composerSubmissionInProgress}
 			hasUnreadReplies={traceReadSnapshot.hasUnreadReplies}
 			chatterOpen={chatterOpen}
-			onToggleChatter={() => { chatterOpen = !chatterOpen; }}
+			onToggleChatter={toggleChatter}
 			character={selfProfileCharacter ?? speechSuggestionCharacter}
 		avatarTone={colorByPubkey[selfProjectionId] ?? 'coral'}
 			canOpenSelfProfile={selfProfileCharacter !== null}

@@ -2,6 +2,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { installFieldFrameSampling, sampleRenderedField } from './helpers/fieldFrames';
 import { profileDialog } from './helpers/devWorldHarness';
+import { installDelayedRelay, traceRuntimeEvents, seedRelayAccount } from './helpers/relayHarness';
 
 
 test.describe('DEV World Sandbox', () => {
@@ -15,6 +16,7 @@ test.describe('DEV World Sandbox', () => {
 		const timeline = page.getByLabel('Chatter', { exact: true });
 		const visibleEntries = timeline.locator('.timeline-visible-entries .timeline-entry');
 		await expect(timeline).toBeVisible();
+		await expect.poll(() => page.evaluate(() => localStorage.getItem('persona-bubble-field:chatter-open'))).toBeNull();
 		expect(await visibleEntries.count()).toBeGreaterThan(20);
 		const measurementParity = await visibleEntries.first().evaluate((entry) => {
 			const measurement = document.querySelector<HTMLElement>('.timeline-measurements .timeline-entry');
@@ -233,5 +235,64 @@ test.describe('DEV World Sandbox', () => {
 
 		await page.setViewportSize({ width: 390, height: 844 });
 		await expect(timeline).toBeVisible();
+	});
+
+	test('persists ActionDock button selection across reloads and prefers the saved value at every width', async ({ page }) => {
+		const trace = traceRuntimeEvents();
+		await installDelayedRelay(page, { persistAcrossReload: true });
+		await seedRelayAccount(page, trace.selfSecret, trace.selfPubkey);
+		await page.setViewportSize({ width: 1200, height: 900 });
+		await page.goto('/');
+		const chatter = page.locator('aside.recent-message-timeline');
+		const toggle = page.locator('.chatter-toggle');
+		await expect(chatter).toBeVisible();
+		await toggle.click();
+		await expect(chatter).toBeHidden();
+		await expect.poll(() => page.evaluate(() => localStorage.getItem('persona-bubble-field:chatter-open'))).toBe('false');
+		await page.reload();
+		await expect(chatter).toBeHidden();
+		await page.setViewportSize({ width: 390, height: 844 });
+		await expect(chatter).toBeHidden();
+		await page.reload();
+		await expect(chatter).toBeHidden();
+	});
+
+	test('persists the C shortcut preference across reload and ignores later viewport changes', async ({ page }) => {
+		await page.setViewportSize({ width: 390, height: 844 });
+		await page.goto('/?devWorld=1&devScenario=chatter-timeline');
+		const chatter = page.locator('aside.recent-message-timeline');
+		await expect(page.locator('.field-viewport')).toHaveClass(/initial-field-geometry-ready/);
+		await expect(chatter).toBeHidden();
+		await expect.poll(() => page.evaluate(() => localStorage.getItem('persona-bubble-field:chatter-open'))).toBeNull();
+		await page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', code: 'KeyC', bubbles: true })));
+		await expect(chatter).toBeVisible();
+		await expect.poll(() => page.evaluate(() => localStorage.getItem('persona-bubble-field:chatter-open'))).toBe('true');
+		await page.setViewportSize({ width: 1200, height: 900 });
+		await expect(chatter).toBeVisible();
+		await page.reload();
+		await expect(chatter).toBeVisible();
+		await page.setViewportSize({ width: 390, height: 844 });
+		await expect(chatter).toBeVisible();
+	});
+
+	test('keeps Chatter operable when localStorage writes are unavailable', async ({ page }) => {
+		const trace = traceRuntimeEvents();
+		await page.addInitScript(() => {
+			const originalSetItem = Storage.prototype.setItem;
+			Storage.prototype.setItem = function (key: string, value: string) {
+				if (key === 'persona-bubble-field:chatter-open') throw new DOMException('Blocked', 'SecurityError');
+				return originalSetItem.call(this, key, value);
+			};
+		});
+		await installDelayedRelay(page, { persistAcrossReload: true });
+		await seedRelayAccount(page, trace.selfSecret, trace.selfPubkey);
+		await page.setViewportSize({ width: 1200, height: 900 });
+		await page.goto('/');
+		const chatter = page.locator('aside.recent-message-timeline');
+		await expect(chatter).toBeVisible();
+		await page.locator('.chatter-toggle').click();
+		await expect(chatter).toBeHidden();
+		await page.locator('main').evaluate((element) => element.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', code: 'KeyC', bubbles: true })));
+		await expect(chatter).toBeVisible();
 	});
 });

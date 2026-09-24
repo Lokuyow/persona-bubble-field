@@ -94,16 +94,21 @@ kind 1111はChatterへ一切表示しない。authorのpubkeyから既存の決�
 timelineは真のoverlayであり、表示状態によってfield viewportのgeometry、field width、camera、
 cell、participant座標、speech area、bubble placement bounds、Composer領域を変更しない。
 panel内はscrollせず、表示領域へ完全に収まる新しいentryから順に表示する。内部stateは最新50件を
-保持する。既存の`MOBILE_FIELD_BREAKPOINT = 700`を使い、width > 700
-ではreload時の初期表示をON、width <= 700ではOFFとする。この初期判定はページ初期化時に
-一度だけ行い、表示後のresize・端末回転でユーザーのshow/hide状態を上書きしない。Chatterの可視toggleはActionDock内の`list-details` iconによる単一buttonとし、visible textは持たず、accessible nameでopen/closed semanticsを提供する。timeline内容をlocalStorage、IndexedDB等へ保存しない。
+保持する。既存の`MOBILE_FIELD_BREAKPOINT = 700`を使い、保存済みの開閉設定がない場合は
+width > 700で初期表示をON、width <= 700でOFFとする。ブラウザ単位の開閉設定をlocalStorageへ
+保存し、設定がある場合は画面幅にかかわらず初期表示へ復元する。localStorageが使用できない
+場合は現在のページ内で通常どおり操作できる。この初期判定はページ初期化時に一度だけ行い、
+表示後のresize・端末回転でユーザーのshow/hide状態を上書きしない。Chatterの可視toggleは
+ActionDock内の`list-details` iconによる単一buttonとし、visible textは持たず、accessible nameで
+open/closed semanticsを提供する。timeline内容はlocalStorage、IndexedDB等へ保存しない。
 SSR/hydration中はclosedとして扱う。timelineの更新・表示はbubbleの寿命判定および
 `ConversationState`から独立させる。
 
 ユーザー向け名称は`Chatter`とする。修飾キーなしの`C`で現在の表示状態をshow/hide toggleする。
 入力中、IME composition中、modifier付き、Profile Dialog等のmodal状態ではショートカットを
 横取りせず、`event.repeat`のkeydownでは再toggleしない。Chatterのtoggleは既存の表示状態を
-直接操作し、resizeで上書きせず、reload時はdesktop初期ON/mobile初期OFFへ戻す。
+直接操作して開閉設定を保存し、resizeで上書きしない。保存設定がない場合だけreload時に
+desktop初期ON/mobile初期OFFを使用する。
 
 ### 通常フキダシの配置
 
