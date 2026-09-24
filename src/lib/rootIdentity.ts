@@ -999,7 +999,7 @@ export async function applyRealtimeOutcome(expected: PersonaSnapshot, outcome: R
 export async function applyRealtimeLifespanLoss(
 	expected: PersonaSnapshot,
 	outcome: RealtimeOutcome,
-	terminalExit?: TerminalExitJournalRequest
+	prepareTerminalExit?: () => TerminalExitJournalRequest | undefined
 ): Promise<RealtimeLifespanLossResult> {
 	if (!validRealtimeOutcome(outcome) || outcome.kind !== 'lifespan-loss') return { kind: 'corrupt', reason: 'player-state' };
 	const observed = await withLifecycle((db) => readRootAndPlayer(db));
@@ -1038,7 +1038,8 @@ export async function applyRealtimeLifespanLoss(
 						status: 'dead',
 						runHistory: [...identity.runHistory, { runNumber: activeRun.runNumber, startedAtMs: activeRun.startedAtMs, endedAtMs: nowMs, outcome: 'dead' }]
 					};
-					const exit = await commitTerminalFence(tx.objectStore(WORLD_WRITE_JOURNAL_STORE_NAME), activeRun, terminalExit);
+					const exitRequest = prepareTerminalExit?.();
+					const exit = await commitTerminalFence(tx.objectStore(WORLD_WRITE_JOURNAL_STORE_NAME), activeRun, exitRequest);
 					await store.put({ schemaVersion: PLAYER_SCHEMA_VERSION, rootPoints: current.rootPoints,
 						identities: current.identities.map((item) => item === identity ? closedIdentity : item),
 						mode: { kind: 'selecting', pendingSelection: selection },

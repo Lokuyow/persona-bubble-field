@@ -197,6 +197,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		createWorldReadSession,
 		type SelfMessageAvailability,
 		type SelfPositionWriteState,
+		type TerminalExitPreparation,
 		type RealtimeStartConfiguration,
 		type WorldReadConnectionStatus
 	} from '$lib/worldReadSession';
@@ -1814,11 +1815,12 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		return next;
 	}
 
-	function publishCooperationDefectionResultMessages(sourceSession: CooperationDefectionSessionState, sourceSchedule: ReturnType<typeof getCooperationDefectionScheduleForInstance>): void {
+	function publishCooperationDefectionResultMessages(sourceSession: CooperationDefectionSessionState, sourceSchedule: ReturnType<typeof getCooperationDefectionScheduleForInstance>): Promise<void> {
 		const pubkey = selfSigner?.pubkey;
 		const currentSession = worldSession;
-		if (!pubkey || !currentSession || !sourceSchedule || devWorldSandboxEnabled) return;
+		if (!pubkey || !currentSession || !sourceSchedule || devWorldSandboxEnabled) return Promise.resolve();
 		const nowMs = Date.now();
+		const dispatches: Promise<void>[] = [];
 		for (const result of sourceSession.results) {
 			if (result.kind === 'insufficient' || !result.validParticipantPubkeys.includes(pubkey)) continue;
 			const roundSchedule = getCooperationDefectionRoundSchedule(sourceSchedule, result.round);
@@ -1826,26 +1828,32 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			const choice = result.cooperatePubkeys.includes(pubkey) ? '協力' : result.defectPubkeys.includes(pubkey) ? '抜け駆け' : null;
 			if (!choice) continue;
 			const dedupeId = cooperationDefectionPublicationKey(sourceSession.instanceId, result.groupId, result.round, pubkey);
-			void currentSession.publishMessage(choice, 'normal', dedupeId).catch(() => {});
+			let markDispatched!: () => void;
+			dispatches.push(new Promise<void>((resolve) => { markDispatched = resolve; }));
+			void currentSession.publishMessage(choice, 'normal', dedupeId, markDispatched).catch(() => {});
 		}
+		return Promise.all(dispatches).then(() => undefined);
 	}
 
 	async function settleCooperationDefectionLifespanLoss(expected: PersonaSnapshot, outcome: CooperationDefectionOutcome): Promise<'survived' | 'presenting' | 'reloaded' | 'failed'> {
 		if (deathTransitionInFlight) return 'reloaded';
 		deathTransitionInFlight = true;
 		const currentSession = worldSession;
-		const preparedExit = currentSession?.prepareTerminalExit(expected.signer.pubkey);
-		const exitRequest = preparedExit?.kind === 'prepared' && currentSession?.getChannel()
-			? { channelId: currentSession.getChannel()!.channelId, position: preparedExit.parsed.position,
-				lastPositiveCreatedAt: preparedExit.parsed.createdAt }
-			: undefined;
+		const preparedExitRef: { current: TerminalExitPreparation | null } = { current: null };
 		try {
 			const result = await applyRealtimeLifespanLoss(expected, {
 				id: outcome.id,
 				kind: 'lifespan-loss',
 				lifespanLossMs: outcome.lifespanLossMs,
 				instanceId: outcome.instanceId
-			}, exitRequest);
+			}, () => {
+				preparedExitRef.current = currentSession?.prepareTerminalExit(expected.signer.pubkey) ?? null;
+				const channel = currentSession?.getChannel();
+				return preparedExitRef.current?.kind === 'prepared' && channel
+					? { channelId: channel.channelId, position: preparedExitRef.current.parsed.position, lastPositiveCreatedAt: preparedExitRef.current.parsed.createdAt }
+					: undefined;
+			});
+			const preparedExit = preparedExitRef.current;
 			if (result.kind === 'survived') {
 				personaSnapshot = result.persona;
 				selfSigner = result.persona.signer;
@@ -1882,7 +1890,10 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		}
 	}
 
-	async function settleOwnCooperationDefectionOutcomes(sourceSession: CooperationDefectionSessionState | null = cooperationDefectionSession): Promise<void> {
+	async function settleOwnCooperationDefectionOutcomes(
+		sourceSession: CooperationDefectionSessionState | null = cooperationDefectionSession,
+		resultMessageDispatch: Promise<void> = Promise.resolve()
+	): Promise<void> {
 		if (cooperationDefectionSettlementInFlight || !personaSnapshot || !selfSigner || !sourceSession) return;
 		const currentPersona = personaSnapshot;
 		const currentSigner = selfSigner;
@@ -1906,6 +1917,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		cooperationDefectionSettlementInFlight = true;
 		try {
 			if (next.kind === 'lifespan-loss') {
+				await resultMessageDispatch;
 				await settleCooperationDefectionLifespanLoss(currentPersona, next);
 				return;
 			}
@@ -2012,8 +2024,10 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			cooperationDefectionSession = settleCooperationDefectionSession(cooperationDefectionSession, cooperationDefectionSchedule, nowMs);
 		}
 		void autoRevealCooperationDefectionChoice(nowMs);
-		if (cooperationDefectionSession) publishCooperationDefectionResultMessages(cooperationDefectionSession, cooperationDefectionSchedule);
-		void settleOwnCooperationDefectionOutcomes();
+		const currentResultMessageDispatch = cooperationDefectionSession
+			? publishCooperationDefectionResultMessages(cooperationDefectionSession, cooperationDefectionSchedule)
+			: Promise.resolve();
+		void settleOwnCooperationDefectionOutcomes(cooperationDefectionSession, currentResultMessageDispatch);
 		for (const [instanceId, recovered] of recoveredCooperationDefectionSessions) {
 			const recoveredSchedule = getCooperationDefectionScheduleForInstance(instanceId, nowMs);
 			if (!recoveredSchedule) {
@@ -2023,8 +2037,8 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			if (cooperationDefectionRealtimeBootstrapComplete) {
 				const settled = settleCooperationDefectionSession(recovered, recoveredSchedule, nowMs);
 				recoveredCooperationDefectionSessions.set(instanceId, settled);
-				publishCooperationDefectionResultMessages(settled, recoveredSchedule);
-				void settleOwnCooperationDefectionOutcomes(settled);
+				const resultMessageDispatch = publishCooperationDefectionResultMessages(settled, recoveredSchedule);
+				void settleOwnCooperationDefectionOutcomes(settled, resultMessageDispatch);
 			}
 		}
 	}
@@ -2054,8 +2068,8 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			const settled = cooperationDefectionRealtimeBootstrapComplete ? settleCooperationDefectionSession(next, eventSchedule, Date.now()) : next;
 			recoveredCooperationDefectionSessions.set(parsed.instanceId, settled);
 			if (cooperationDefectionRealtimeBootstrapComplete) {
-				publishCooperationDefectionResultMessages(settled, eventSchedule);
-				void settleOwnCooperationDefectionOutcomes(settled);
+				const resultMessageDispatch = publishCooperationDefectionResultMessages(settled, eventSchedule);
+				void settleOwnCooperationDefectionOutcomes(settled, resultMessageDispatch);
 			}
 		}
 	}

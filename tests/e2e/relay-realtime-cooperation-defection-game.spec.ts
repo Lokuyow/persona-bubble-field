@@ -55,6 +55,72 @@ function scheduleWithDistantFirstGroup(startSchedule: ReturnType<typeof getCoope
 
 
 test.describe('Relay startup', () => {
+	test('shows each participant the result for their own group', async ({ browser }) => {
+		const schedule = upcomingRegistrationSchedule();
+		const groups = deriveCooperationDefectionGroupPositions(schedule.instanceId, { columns: 16, rows: 8 }, 7);
+		const [cooperationGroup, defectionGroup] = groups;
+		if (!cooperationGroup || !defectionGroup) throw new Error('Expected two event groups.');
+		const round = getCooperationDefectionRoundSchedule(schedule, 1);
+		const players = [
+			{ secret: fixtureSecret(31), groupId: cooperationGroup.id, choice: 'cooperate' as const, nonce: '1'.repeat(64) },
+			{ secret: fixtureSecret(32), groupId: defectionGroup.id, choice: 'defect' as const, nonce: '2'.repeat(64) },
+			{ secret: fixtureSecret(33), groupId: cooperationGroup.id, choice: 'cooperate' as const, nonce: '3'.repeat(64) },
+			{ secret: fixtureSecret(34), groupId: cooperationGroup.id, choice: 'cooperate' as const, nonce: '4'.repeat(64) },
+			{ secret: fixtureSecret(35), groupId: defectionGroup.id, choice: 'cooperate' as const, nonce: '5'.repeat(64) },
+			{ secret: fixtureSecret(36), groupId: defectionGroup.id, choice: 'defect' as const, nonce: '6'.repeat(64) },
+			{ secret: fixtureSecret(37), groupId: defectionGroup.id, choice: 'defect' as const, nonce: '7'.repeat(64) }
+		];
+		const joins = players.map(({ secret, groupId }) => signedCooperationDefectionAction(secret, schedule, { action: 'join', groupId }, schedule.registrationAtMs + 1_000));
+		const commits = players.map(({ secret, groupId, choice, nonce }) => {
+			const pubkey = getPublicKey(secret);
+			const action = buildCooperationDefectionCommitAction({ instanceId: schedule.instanceId, groupId, round: 1, authorPubkey: pubkey, choice, nonce });
+			return { event: signedCooperationDefectionAction(secret, schedule, action, round.selectionAtMs + 1_000), choice, nonce, groupId };
+		});
+		const reveals = commits.map(({ event, choice, nonce, groupId }, index) => signedCooperationDefectionAction(players[index]!.secret, schedule,
+			buildCooperationDefectionRevealAction({ groupId, round: 1, commitId: event.id, choice, nonce }), round.resultAtMs + 1_000));
+		const realtimeEvents = [...joins, ...commits.map(({ event }) => event), ...reveals];
+		const startTime = schedule.registrationAtMs + 1_000;
+		const pageCooperate = await browser.newPage();
+		const pageDefect = await browser.newPage();
+		const selfCooperate = players[0]!;
+		const selfDefect = players[1]!;
+		const prepareParticipant = async (page: Page, player: (typeof players)[number]) => {
+			const pubkey = getPublicKey(player.secret);
+			await page.clock.install({ time: startTime });
+			await installHostOwnedStub(page);
+			await installDelayedRelay(page, { primaryEvents: testEvents(startTime), realtimeEvents, persistAcrossReload: true, realtimePublishOutcome: 'accepted' });
+			await seedRelayAccount(page, player.secret, pubkey, startTime + 5 * 24 * 60 * 60 * 1_000);
+			await page.goto('/');
+			await expect(page.locator('[data-realtime-panel]')).toContainText('参加受付');
+			await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+			await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
+			await expect.poll(async () => (await relayState(page)).state.requests.some((request) => (request.filter.kinds as number[])[0] === 7070)).toBe(true);
+			await page.evaluate((events) => {
+				const relay = (window as typeof window & { __relayStartupTest: { injectRealtimeEvent(event: object): void } }).__relayStartupTest;
+				for (const event of events) relay.injectRealtimeEvent(event);
+			}, realtimeEvents);
+			await page.clock.setSystemTime(round.selectionAtMs + 1_000);
+			await page.clock.runFor(1_000);
+			await page.clock.setSystemTime(round.resultAtMs + 1_000);
+			await page.clock.runFor(1_000);
+			await page.clock.setSystemTime(round.revealCutoffAtMs + 1_000);
+			await page.clock.runFor(1_000);
+		};
+		try {
+			await Promise.all([prepareParticipant(pageCooperate, selfCooperate), prepareParticipant(pageDefect, selfDefect)]);
+			const cooperateResult = pageCooperate.locator('[data-cooperation-defection-round-result]');
+			const defectResult = pageDefect.locator('[data-cooperation-defection-round-result]');
+			await expect(cooperateResult).toContainText('全員協力');
+			await expect(cooperateResult).toContainText('あなた: +1,000pt');
+			await expect(cooperateResult).not.toContainText('協力失敗');
+			await expect(defectResult).toContainText('協力失敗');
+			await expect(defectResult).toContainText('あなた: 寿命 −3日');
+			await expect(defectResult).not.toContainText('全員協力');
+		} finally {
+			await Promise.all([pageCooperate.close(), pageDefect.close()]);
+		}
+	});
+
 	test('does not create a settlement recovery marker for a spectator receiving another player join', async ({ page }) => {
 		const schedule = upcomingRegistrationSchedule();
 		const group = deriveCooperationDefectionGroupPositions(schedule.instanceId, { columns: 16, rows: 8 })[0];

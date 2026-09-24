@@ -840,7 +840,21 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		return { event: signed, parsed };
 	}
 
-	async function publishMessage(content: string, speechType: SpeechType, messageDedupeId?: string): Promise<SelfMessagePublishResult> {
+	async function publishMessage(content: string, speechType: SpeechType, messageDedupeId?: string, onDispatched?: () => void): Promise<SelfMessagePublishResult> {
+		let dispatchNotified = false;
+		const notifyDispatch = () => {
+			if (dispatchNotified) return;
+			dispatchNotified = true;
+			onDispatched?.();
+		};
+		try {
+			return await publishMessageInternal(content, speechType, messageDedupeId, notifyDispatch);
+		} finally {
+			notifyDispatch();
+		}
+	}
+
+	async function publishMessageInternal(content: string, speechType: SpeechType, messageDedupeId: string | undefined, onDispatched: () => void): Promise<SelfMessagePublishResult> {
 		if (disposed || terminal || !selfSigner || !transport || !channel) return { kind: 'unavailable' };
 		if (pendingSelfMessage || pendingTraceReply) return { kind: 'pending' };
 		if (journalScope) await ensureJournalLoaded();
@@ -884,6 +898,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		try {
 			if (journalScope && transport.publishSelf) {
 				const handle = transport.publishSelf(event, selfSigner.pubkey);
+				onDispatched();
 				void handle.settled.catch(() => {});
 				const confirmed = await Promise.race([handle.firstSuccess.then((success) => success ? 'ack' as const : 'none' as const),
 					echoed.then(() => 'echo' as const)]);
@@ -910,7 +925,9 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 				if (pendingSelfMessage?.id === parsed.id) pendingSelfMessage = null;
 				return { kind: 'retryable' };
 			}
-			const results = await transport.publish(event);
+			const publication = transport.publish(event);
+			onDispatched();
+			const results = await publication;
 			if (disposed) return { kind: 'unavailable' };
 			const echoConfirmed = pendingSelfMessage?.id === parsed.id && pendingSelfMessage.echoConfirmed;
 			if (reachedAuthoritativeRelay(results) || echoConfirmed) {
@@ -1563,8 +1580,8 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			);
 		},
 
-		publishMessage(content: string, speechType: SpeechType, messageDedupeId?: string): Promise<SelfMessagePublishResult> {
-			return publishMessage(content, speechType, messageDedupeId);
+		publishMessage(content: string, speechType: SpeechType, messageDedupeId?: string, onDispatched?: () => void): Promise<SelfMessagePublishResult> {
+			return publishMessage(content, speechType, messageDedupeId, onDispatched);
 		},
 
 		refreshSelfActivity,

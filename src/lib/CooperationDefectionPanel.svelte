@@ -17,7 +17,7 @@
 	}>;
 
 	let { schedule, nowMs, status, session, selfGroupId, selfPubkey, participantName, selectedChoice, commitStatus, canChoose, message, onChoice }: Props = $props();
-	let lastRoundResult = $derived(session?.results.at(-1) ?? null);
+	let lastRoundResult = $derived(session?.results.filter((result) => result.groupId === selfGroupId).at(-1) ?? null);
 
 	let roundInfo = $derived.by(() => {
 		if (schedule.phase !== 'game') return null;

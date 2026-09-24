@@ -304,8 +304,10 @@ describe('Root / Identity / Run lifecycle', () => {
 
 	it('subtracts exactly 72 hours from an idle Run and preserves the Run', async () => {
 		const persona = await selected();
-		const loss = await applyRealtimeLifespanLoss(persona, { id: 'lifespan-loss-idle', kind: 'lifespan-loss', lifespanLossMs: 72 * HOUR, instanceId: 'game-instance' });
+		const prepareExit = vi.fn(() => ({ channelId: 'a'.repeat(64), position: { x: 2, y: 3 }, lastPositiveCreatedAt: Math.floor(TIME / 1000) }));
+		const loss = await applyRealtimeLifespanLoss(persona, { id: 'lifespan-loss-idle', kind: 'lifespan-loss', lifespanLossMs: 72 * HOUR, instanceId: 'game-instance' }, prepareExit);
 		expect(loss.kind).toBe('survived');
+		expect(prepareExit).not.toHaveBeenCalled();
 		const latest = restored(await loadOrCreateLifecycle());
 		expect(latest.activeRun.runNumber).toBe(persona.activeRun.runNumber);
 		expect(latest.gameState.lifespanExpiresAtMs).toBe(persona.gameState.lifespanExpiresAtMs - 72 * HOUR);
@@ -340,8 +342,10 @@ describe('Root / Identity / Run lifecycle', () => {
 	it.each([3, 2] as const)('atomically closes the Run when a 72-hour loss leaves %s days of lifespan', async (daysRemaining) => {
 		const persona = await selected(ZERO_BUILD, { initialLifespanMs: daysRemaining * DAY });
 		const exit = { channelId: 'a'.repeat(64), position: { x: 2, y: 3 }, lastPositiveCreatedAt: Math.floor(TIME / 1000) };
-		const loss = await applyRealtimeLifespanLoss(persona, { id: `lifespan-loss-death-${daysRemaining}`, kind: 'lifespan-loss', lifespanLossMs: 72 * HOUR, instanceId: 'game-instance' }, exit);
+		const prepareExit = vi.fn(() => exit);
+		const loss = await applyRealtimeLifespanLoss(persona, { id: `lifespan-loss-death-${daysRemaining}`, kind: 'lifespan-loss', lifespanLossMs: 72 * HOUR, instanceId: 'game-instance' }, prepareExit);
 		expect(loss.kind).toBe('transitioned');
+		expect(prepareExit).toHaveBeenCalledOnce();
 		const pending = await loadOrCreateLifecycle();
 		if (pending.kind !== 'selecting') throw new Error('Expected next-generation selection after death.');
 		const player = (await records(PLAYER_LIFECYCLE_STORE_NAME))['player-lifecycle'] as { identities: Array<{ pubkey: string; status: string }>; realtimeSettlementLedger: { appliedOutcomeIds: string[]; pendingInstanceIds: string[] } };
@@ -350,6 +354,16 @@ describe('Root / Identity / Run lifecycle', () => {
 		expect(player.realtimeSettlementLedger.pendingInstanceIds).toEqual([]);
 		const journal = Object.values(await records(WORLD_WRITE_JOURNAL_STORE_NAME))[0] as { exitSecond: number };
 		expect(journal.exitSecond).toBeGreaterThanOrEqual(Math.floor(TIME / 1000));
+	});
+
+	it('does not prepare a terminal exit from an obsolete Run snapshot', async () => {
+		const persona = await selected();
+		const newer = restored(await loadOrCreateLifecycle());
+		await applyRealtimeOutcome(newer, { id: 'revision-advance', kind: 'points', points: 1, instanceId: 'other-instance' });
+		const prepareExit = vi.fn(() => ({ channelId: 'a'.repeat(64), position: { x: 2, y: 3 }, lastPositiveCreatedAt: Math.floor(TIME / 1000) }));
+		const result = await applyRealtimeLifespanLoss(persona, { id: 'lifespan-loss-stale', kind: 'lifespan-loss', lifespanLossMs: 72 * HOUR, instanceId: 'game-instance' }, prepareExit);
+		expect(result.kind).toBe('stale');
+		expect(prepareExit).not.toHaveBeenCalled();
 	});
 
 	it('does not overwrite a competing ability upgrade and can retry against the current Run revision', async () => {
