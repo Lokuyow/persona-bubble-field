@@ -70,6 +70,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	import { getAbilityUpgrade, type PersonaAbilityKey } from '$lib/personaGameState';
 	import {
 		CURRENT_CHARACTER_PROFILE_REVISION,
+		LIFECYCLE_UPGRADE_BLOCKED_MESSAGE,
 		authorizeActiveRun,
 		collectMending,
 		loadOrCreateLifecycle,
@@ -85,6 +86,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		clearPersona,
 		exportClearedIdentityNsec,
 		type ActiveSignerSnapshot,
+		type TerminalExitJournalRequest,
 		type ClearedIdentityCandidate,
 		type PersonaSnapshot,
 		type PendingSelection,
@@ -1042,7 +1044,8 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			nextSession = createWorldReadSession({
 				field: FIELD,
 				selfSigner: signer,
-					realtime: {
+				...(signer && authorizationRunNumber !== null ? { selfRunNumber: authorizationRunNumber } : {}),
+				realtime: {
 					registry: realtimeEventRegistry,
 					controlSince: Math.max(0, Math.floor(Date.now() / 1000) - 15 * 60),
 					instanceFilters: [],
@@ -1155,7 +1158,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			const anonymousStartup = currentSessionStartup;
 			if (anonymousSession && anonymousStartup?.session === anonymousSession && !worldSession) {
 				try {
-					await anonymousStartup.promise;
+					await Promise.race([anonymousStartup.promise, anonymousSession.whenSelfReadReady()]);
 					if (restored && isPersonaExpired(persona.gameState, Date.now(), persona.activeRun.rootBuild)) {
 						personaLifecycleTransition = false;
 						await beginDeathTransition(persona, null, undefined, false);
@@ -1164,6 +1167,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 					if (worldReader !== anonymousSession || anonymousSession.getStatus().kind === 'failed') throw new Error('Anonymous world session is unavailable.');
 					await anonymousSession.attachSelf({
 						signer: persona.signer,
+						runNumber: persona.activeRun.runNumber,
 						authorizeSelfWrite: () => authorizeActiveRun({ identity: persona.signer.identity, runNumber: persona.activeRun.runNumber }),
 						onSelfWriteAuthorizationLost: () => {
 							if (!personaLifecycleTransition && !deathTransitionInFlight) window.location.reload();
@@ -1177,12 +1181,12 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 					updateLifespanHud(mendingNowMs, true);
 					await anonymousSession.enterSelf();
 					if (characterProfilePublication) {
-						void publishCharacterProfile(characterProfilePublication, (event) => {
+						void anonymousStartup.promise.then(() => publishCharacterProfile(characterProfilePublication, (event) => {
 							if (personaLifecycleTransition || worldSession !== anonymousSession) {
 								return Promise.reject(new Error('Persona is unavailable for publishing.'));
 							}
 							return anonymousSession.publish(event);
-						}).catch(() => {});
+						})).catch(() => {});
 					}
 					return;
 				} catch {
@@ -1287,8 +1291,9 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 						});
 					}
 				}
-			} catch {
-				setComposerTerminalError(new Error('Persona is unavailable for publishing.'));
+			} catch (error) {
+				setComposerTerminalError(new Error(error instanceof Error && error.message === LIFECYCLE_UPGRADE_BLOCKED_MESSAGE
+					? LIFECYCLE_UPGRADE_BLOCKED_MESSAGE : 'Persona is unavailable for publishing.'));
 				localLifecycleReady = true;
 				restoreMeasuredBootstrapConversation();
 				return;
@@ -1574,11 +1579,18 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		stopPersonaInteractions('Run cleared.');
 		try {
 			const preparedExit = currentSession?.prepareTerminalExit(expected.signer.pubkey);
-			const result = await clearPersona(expected);
+			const exitRequest = preparedExit?.kind === 'prepared' && currentSession?.getChannel()
+				? { channelId: currentSession.getChannel()!.channelId, position: preparedExit.parsed.position,
+					lastPositiveCreatedAt: preparedExit.parsed.createdAt }
+				: undefined;
+			const result = await clearPersona(expected, exitRequest);
 			if (result.kind === 'cleared') {
 				storeRunTransitionNotice('cleared');
 				try {
-					if (preparedExit?.kind === 'prepared') await currentSession?.publishTerminalExit();
+					if (result.exit && preparedExit?.kind === 'prepared') {
+						currentSession?.commitTerminalExit(result.exit);
+						await currentSession?.publishTerminalExit();
+					}
 				} catch {
 					// The local clear is already durable; World State exit is best effort.
 				}
@@ -1829,7 +1841,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		riftSettlementInFlight = true;
 		try {
 			if (next.kind === 'death') {
-				const deathOutcome = await beginDeathTransition(currentPersona, worldSession, () => transitionRealtimeDeath(currentPersona, { id: next.id, kind: 'death', instanceId: next.instanceId }));
+				const deathOutcome = await beginDeathTransition(currentPersona, worldSession, (exit) => transitionRealtimeDeath(currentPersona, { id: next.id, kind: 'death', instanceId: next.instanceId }, exit));
 				if (deathOutcome === 'reloaded') appliedRiftOutcomeIds.add(next.id);
 				return;
 			}
@@ -2360,32 +2372,39 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	async function beginDeathTransition(
 		expected: PersonaSnapshot,
 		currentSession: ReturnType<typeof createWorldReadSession> | null,
-		commitDeath: () => Promise<Awaited<ReturnType<typeof transitionExpiredPersona>> | Awaited<ReturnType<typeof transitionRealtimeDeath>>> = () => transitionExpiredPersona(expected),
+		commitDeath: (exit?: TerminalExitJournalRequest) => Promise<Awaited<ReturnType<typeof transitionExpiredPersona>> | Awaited<ReturnType<typeof transitionRealtimeDeath>>> = (exit) => transitionExpiredPersona(expected, exit),
 		showPresentation = true
 	): Promise<'reloaded' | 'presenting' | 'failed'> {
 		if (devWorldSandboxEnabled || personaLifecycleTransition || deathTransitionInFlight) return 'failed';
 		deathTransitionInFlight = true;
 		stopPersonaInteractions('Persona lifetime ended.');
 		const preparedExit = currentSession?.prepareTerminalExit(expected.signer.pubkey);
+		const exitRequest = preparedExit?.kind === 'prepared' && currentSession?.getChannel()
+			? { channelId: currentSession.getChannel()!.channelId, position: preparedExit.parsed.position,
+				lastPositiveCreatedAt: preparedExit.parsed.createdAt }
+			: undefined;
 		try {
-			const result = await commitDeath();
+			const result = await commitDeath(exitRequest);
 			if (result.kind === 'transitioned') {
+				if (result.exit && preparedExit?.kind === 'prepared') {
+					try { currentSession?.commitTerminalExit(result.exit); } catch { /* Durable death is already committed. */ }
+				}
 				storeRunTransitionNotice('dead');
 				const canonicalPosition = preparedExit?.kind === 'prepared'
 					? { ...preparedExit.parsed.position }
 					: null;
 				if (showPresentation) {
-					if (preparedExit?.kind === 'prepared') currentSession?.enableDeathLastWords();
+					if (result.exit && preparedExit?.kind === 'prepared') currentSession?.enableDeathLastWords();
 					deathPresentationContent = '';
 					startDeathPresentation(currentSession, canonicalPosition, null);
-					const terminalExitPublication = preparedExit?.kind === 'prepared' && currentSession
+					const terminalExitPublication = result.exit && preparedExit?.kind === 'prepared' && currentSession
 						? currentSession.publishTerminalExit().then(() => undefined).catch(() => undefined)
 						: null;
 					if (deathPresentation) deathPresentation = { ...deathPresentation, terminalExitPublication };
 					return 'presenting';
 				}
 				try {
-					if (preparedExit?.kind === 'prepared') await currentSession?.publishTerminalExit();
+					if (result.exit && preparedExit?.kind === 'prepared') await currentSession?.publishTerminalExit();
 				} catch {
 					// The local death is already durable; World State exit is best effort.
 				}

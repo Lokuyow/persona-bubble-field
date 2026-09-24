@@ -228,6 +228,30 @@ bootstrapを待つためにexitを要求しない。clear後に同じcleared Ide
 する場合、最初のpositive World Stateはexitよりstrictly newerなcreated_atでre-entryする。
 browser close、unload、network disconnectだけではexitをpublishしない。
 
+復元済みのactive Runでは、固定World Relayへのprimary REQを維持したまま、5 Relay中3 Relayで
+messageとWorld Stateの双方がEOSEになった時点でselfの通常position・通常chatを開始できる。
+3 Relayに達しない場合も、最初のprimary REQから750msが経過し、messageとWorld Stateの
+双方で少なくとも1件のEOSEがあれば開始できる。この境界はbootstrap完了ではない。
+残りのprimary購読、late evidence、最終的なcanonical handoffを継続し、Traceとrealtimeの
+起動順序は変えない。全primaryが先に完了した場合は既存の完了境界を使用する。
+
+この早期境界でのself writeは、browser-localのactive Runと同一Identityを確認した上で、
+channel・Identity単位のdurable journalへtimestampとactive slotを先に予約する。
+通常positionの発行経路は共通の予約を使い、通常chatもpositive activityとしてtimestampを
+予約する。予約の失敗、古いRun、時計の逆行、または保存状態の不整合ではwriteを行わない。
+初回journalがなく全bootstrapより先にentryが必要な場合は、起動秒より新しい実時刻まで
+待つ。全bootstrapが先に完了して有効なself positionを復元できた場合は、この待機と
+再entryを不要とする。成功したself positionはjournalへ記録し、reloadでの復元に使える。
+最初の成功ACKまたは既存のechoで操作結果を確定しても、残りのauthoritative Relayへの
+publicationと結果収集を継続する。後着ACKは終了済みsessionや旧Runの状態を変更しない。
+
+terminal exitはdurableなdeath/clear lifecycle commitと同じtransactionでjournalの
+timestamp fenceを確定し、その後だけbest-effortで発行する。publication failureや
+process crashでもlifecycleを巻き戻さない。旧Runの予約や後着ACKは新しいRunを変更せず、
+旧Runのjournal確認済み位置を新Runの位置として復元しない。同じIdentityのre-entryは
+確定したexitより新しい実時刻を使用する。exitのpublicationが失敗して旧Runのactive
+Relay evidenceが残っていても、新Runのpositive World Stateを発行する。
+
 namespaceの扱いは [`SPEC-10-Nostr・アカウント.md`](./SPEC-10-Nostr・アカウント.md) を正とする。
 
 `kind 30079` の `content` には、そのWorld State eventが示す論理フィールド座標をcanonical形式で格納する。

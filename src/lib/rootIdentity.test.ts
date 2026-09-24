@@ -1,18 +1,24 @@
 import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
 import { openDB, type IDBPDatabase } from 'idb';
+import { finalizeEvent } from 'nostr-tools/pure';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	DATABASE_NAME,
 	DATABASE_VERSION,
+	LIFECYCLE_UPGRADE_BLOCKED_MESSAGE,
 	PLAYER_LIFECYCLE_STORE_NAME,
 	ROOT_SECRET_STORE_NAME,
+	WORLD_WRITE_JOURNAL_STORE_NAME,
 	applyRealtimeOutcome,
 	clearPersona,
+	confirmWorldPosition,
 	collectMending,
 	exportClearedIdentityNsec,
 	getRealtimeSettlementLedger,
 	loadOrCreateLifecycle,
+	loadWorldWriteJournal,
+	reserveWorldPositive,
 	selectIdentity,
 	startMending,
 	trackRealtimeEventInstance,
@@ -25,6 +31,7 @@ import {
 	type SelectIdentityOptions
 } from './rootIdentity';
 import type { RootBuild } from './rootProgression';
+import { buildWorldStateEventTemplate } from './nostrProtocol';
 
 const TIME = 1_700_000_000_000;
 const HOUR = 60 * 60 * 1000;
@@ -74,6 +81,97 @@ afterEach(() => {
 });
 
 describe('Root / Identity / Run lifecycle', () => {
+	it('preserves a valid v7 Root and active Player while adding the write journal', async () => {
+		const original = await selected();
+		const root = await records(ROOT_SECRET_STORE_NAME);
+		const player = await records(PLAYER_LIFECYCLE_STORE_NAME);
+		while (connections.length) connections.pop()!.close();
+		vi.stubGlobal('indexedDB', new IDBFactory());
+		const old = await openDB(DATABASE_NAME, 7, { upgrade(db) {
+			db.createObjectStore(ROOT_SECRET_STORE_NAME);
+			db.createObjectStore(PLAYER_LIFECYCLE_STORE_NAME);
+		} });
+		for (const [key, value] of Object.entries(root)) await old.put(ROOT_SECRET_STORE_NAME, value, key);
+		for (const [key, value] of Object.entries(player)) await old.put(PLAYER_LIFECYCLE_STORE_NAME, value, key);
+		old.close();
+		const upgraded = restored(await loadOrCreateLifecycle());
+		expect(upgraded.signer.pubkey).toBe(original.signer.pubkey);
+		expect(upgraded.activeRun.runNumber).toBe(original.activeRun.runNumber);
+		expect(await records(WORLD_WRITE_JOURNAL_STORE_NAME)).toEqual({});
+	});
+
+	it('fails closed while an old tab blocks the v7 to v8 upgrade', async () => {
+		const old = await openDB(DATABASE_NAME, 7, { upgrade(db) {
+			db.createObjectStore(ROOT_SECRET_STORE_NAME);
+			db.createObjectStore(PLAYER_LIFECYCLE_STORE_NAME);
+		} });
+		await expect(loadOrCreateLifecycle()).rejects.toThrow(LIFECYCLE_UPGRADE_BLOCKED_MESSAGE);
+		old.close();
+	});
+
+	it('serializes slot reservations across tabs and never reuses a consumed second', async () => {
+		const persona = await selected();
+		const scope = { identity: persona.signer.identity, runNumber: persona.activeRun.runNumber, channelId: 'c'.repeat(64) };
+		const input = { scope, kind: 'position' as const, nowSecond: TIME / 1000,
+			observedSecond: null, observedConsumedSlots: 0 as const, observedExitSecond: null };
+		const first = await reserveWorldPositive(input);
+		const second = await reserveWorldPositive(input);
+		expect(first).toMatchObject({ kind: 'reserved', reservation: { slot: 0 } });
+		expect(second).toMatchObject({ kind: 'reserved', reservation: { slot: 1 } });
+		expect(await reserveWorldPositive(input)).toEqual({ kind: 'wait', untilSecond: TIME / 1000 + 1 });
+		expect(await reserveWorldPositive({ ...input, nowSecond: TIME / 1000 + 1 })).toMatchObject({ kind: 'reserved', reservation: { slot: 0 } });
+		expect(await loadWorldWriteJournal(scope)).toMatchObject({ lastReservedSecond: TIME / 1000 + 1, consumedSlots: 1 });
+	});
+
+	it('commits the terminal fence with death and rejects an old Run reservation', async () => {
+		const persona = await selected(ZERO_BUILD, { initialLifespanMs: 1_000 });
+		const scope = { identity: persona.signer.identity, runNumber: persona.activeRun.runNumber, channelId: 'c'.repeat(64) };
+		const reserved = await reserveWorldPositive({ scope, kind: 'position', nowSecond: TIME / 1000,
+			observedSecond: null, observedConsumedSlots: 0, observedExitSecond: null });
+		expect(reserved.kind).toBe('reserved');
+		if (reserved.kind !== 'reserved') throw new Error('Expected a position reservation.');
+		const oldEvent = finalizeEvent(buildWorldStateEventTemplate({
+			channel: { channelId: scope.channelId, relayHint: 'wss://nos.lol/' },
+			position: { x: 2, y: 1 }, slot: 0, createdAt: reserved.reservation.createdAt
+		}), persona.signer.secretKey);
+		vi.mocked(Date.now).mockReturnValue(TIME + 1_001);
+		const result = await transitionExpiredPersona(persona, { channelId: scope.channelId,
+			position: { x: 2, y: 1 }, lastPositiveCreatedAt: TIME / 1000 });
+		expect(result).toMatchObject({ kind: 'transitioned', exit: { createdAt: Math.floor((TIME + 1_001) / 1000), position: { x: 2, y: 1 } } });
+		const journal = Object.values(await records(WORLD_WRITE_JOURNAL_STORE_NAME))[0] as { exitSecond: number };
+		expect(journal.exitSecond).toBe(Math.floor((TIME + 1_001) / 1000));
+		expect(await confirmWorldPosition(scope, reserved.reservation, oldEvent)).toBe(false);
+		expect(await reserveWorldPositive({ scope, kind: 'position', nowSecond: TIME / 1000 + 2,
+			observedSecond: null, observedConsumedSlots: 0, observedExitSecond: null })).toEqual({ kind: 'stale' });
+	});
+
+	it('does not restore a confirmed position from an earlier Run of the same Identity', async () => {
+		const first = await selected(ZERO_BUILD, { initialPoints: 100_000 });
+		const channelId = 'c'.repeat(64);
+		const scope = { identity: first.signer.identity, runNumber: first.activeRun.runNumber, channelId };
+		const prior = await reserveWorldPositive({ scope, kind: 'position', nowSecond: TIME / 1000,
+			observedSecond: null, observedConsumedSlots: 0, observedExitSecond: null });
+		if (prior.kind !== 'reserved') throw new Error('Expected first Run reservation.');
+		const oldEvent = finalizeEvent(buildWorldStateEventTemplate({
+			channel: { channelId, relayHint: 'wss://nos.lol/' }, position: { x: 2, y: 1 },
+			slot: 0, createdAt: prior.reservation.createdAt
+		}), first.signer.secretKey);
+		expect(await confirmWorldPosition(scope, prior.reservation, oldEvent)).toBe(true);
+		expect((await clearPersona(first)).kind).toBe('cleared');
+		const selecting = await loadOrCreateLifecycle();
+		if (selecting.kind !== 'selecting') throw new Error('Expected selection after clear.');
+		const reusable = selecting.selection.reusableIdentities.find((item) => item.pubkey === first.signer.pubkey);
+		if (!reusable) throw new Error('Expected reusable Identity.');
+		const next = await selectIdentity(selecting.selection.generation, reusable,
+			{ inferenceAcceleration: 1, contextCompression: 0, hallucinationResistance: 0 });
+		if (next.kind !== 'selected') throw new Error(`Expected a new Run, got ${next.kind}.`);
+		const nextScope = { identity: next.persona.signer.identity, runNumber: next.persona.activeRun.runNumber, channelId };
+		expect((await loadWorldWriteJournal(nextScope))?.confirmedPosition).toBeNull();
+		expect(await reserveWorldPositive({ scope: nextScope, kind: 'position', nowSecond: TIME / 1000,
+			observedSecond: null, observedConsumedSlots: 0, observedExitSecond: null })).toEqual({ kind: 'wait', untilSecond: TIME / 1000 + 1 });
+		expect(await reserveWorldPositive({ scope: nextScope, kind: 'position', nowSecond: TIME / 1000 + 1,
+			observedSecond: null, observedConsumedSlots: 0, observedExitSecond: null })).toMatchObject({ kind: 'reserved', reservation: { slot: 0 } });
+	});
 	it('persists an explicit short initial lifespan, does not reset it on restore, and applies it to the next Run', async () => {
 		const first = await selected(ZERO_BUILD, { initialLifespanMs: 3_000 });
 		expect(first.gameState.lifespanExpiresAtMs).toBe(TIME + 3_000);

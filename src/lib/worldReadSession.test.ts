@@ -532,6 +532,8 @@ describe('world read session', () => {
 		expect(prepared.parsed).toMatchObject({ state: 'exit', slot: null, position: { x: 2, y: 1 }, createdAt: 701 });
 		expect(prepared.event.tags.find((tag) => tag[0] === 'd')?.[1]).toBe(`io.github.lokuyow.persona-bubble-field:world-state:1:${'c'.repeat(64)}:exit`);
 		expect(parseWorldStateEvent(prepared.event, 'c'.repeat(64))).toMatchObject({ state: 'exit', position: { x: 2, y: 1 } });
+		expect(await session.publishTerminalExit()).toEqual({ kind: 'unavailable' });
+		session.commitTerminalExit({ createdAt: 701, position: prepared.parsed.position });
 		expect(await session.publishTerminalExit()).toMatchObject({ kind: 'published' });
 		expect(publish).toHaveBeenCalledOnce();
 		expect(parseWorldStateEvent(publish.mock.calls[0][0], 'c'.repeat(64))).toMatchObject({ state: 'exit', position: { x: 2, y: 1 } });
@@ -563,7 +565,10 @@ describe('world read session', () => {
 		});
 		await session.start(); session.completeBootstrap();
 		vi.setSystemTime(105_000);
-		expect(session.prepareTerminalExit(selfPubkey).kind).toBe('prepared');
+		const prepared = session.prepareTerminalExit(selfPubkey);
+		expect(prepared.kind).toBe('prepared');
+		if (prepared.kind !== 'prepared') throw new Error('Expected a prepared exit.');
+		session.commitTerminalExit({ createdAt: 110, position: prepared.parsed.position });
 		expect(await session.publishTerminalExit()).toMatchObject({ kind: 'published' });
 		expect(session.enableDeathLastWords()).toBe(true);
 		const publishedExit = publish.mock.calls[0][0] as VerifiedEvent;

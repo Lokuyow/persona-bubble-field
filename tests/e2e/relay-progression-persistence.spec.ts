@@ -263,7 +263,8 @@ test.describe('Relay startup', () => {
 			expect(observed.closed.length).toBeGreaterThan(0);
 			const postSupersession = observed.published.slice(oldPublishedCount);
 			expect(postSupersession.filter((event) => [WORLD_STATE_KIND, 42, 1111].includes(event.kind))).not.toContainEqual(expect.objectContaining({ pubkey: oldPubkey }));
-			expect(postSupersession).toContainEqual(expect.objectContaining({ kind: WORLD_STATE_KIND, pubkey: newPubkey }));
+			// The new Run's confirmed position is restored from its journal; this tab need not re-enter.
+			expect(postSupersession.filter((event) => event.kind === WORLD_STATE_KIND && event.pubkey === newPubkey)).toHaveLength(0);
 			expect(postSupersession).toContainEqual(expect.objectContaining({ kind: 42, pubkey: newPubkey }));
 		} finally {
 			await reincarnator.close();
