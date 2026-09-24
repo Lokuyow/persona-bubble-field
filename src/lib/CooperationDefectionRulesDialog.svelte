@@ -2,13 +2,15 @@
 	type Props = Readonly<{
 		open: boolean;
 		mode: 'rules' | 'join-confirmation';
+		registrationDeadline: string | null;
+		registrationCountdown: string | null;
 		onOpenChange: (open: boolean) => void;
 		onJoin: () => void;
 		onViewRules: () => void;
 		onCancel: () => void;
 	}>;
 
-	let { open, mode, onOpenChange, onJoin, onViewRules, onCancel }: Props = $props();
+	let { open, mode, registrationDeadline, registrationCountdown, onOpenChange, onJoin, onViewRules, onCancel }: Props = $props();
 	let isConfirmation = $derived(mode === 'join-confirmation');
 </script>
 
@@ -21,6 +23,10 @@
 				</p>
 
 				{#if isConfirmation}
+					{#if registrationDeadline && registrationCountdown}
+						<p class="cooperation-defection-registration-deadline" data-cooperation-defection-registration-deadline>受付締切: {registrationDeadline}</p>
+						<p class="cooperation-defection-registration-countdown" data-cooperation-defection-registration-countdown>残り時間: {registrationCountdown}</p>
+					{/if}
 					<div class="cooperation-defection-warning" role="alert">
 						<strong>3〜6人 / 全3ラウンド</strong>
 						<span>協力人数が不足すると、抜け駆けした参加者は寿命を3日失います。残り寿命によっては死亡します。</span>

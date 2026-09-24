@@ -36,6 +36,9 @@ import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { installFieldFrameSampling, readFieldFrames, sampleRenderedField } from './helpers/fieldFrames';
 import { CHANNEL_ID, AUTHORITATIVE_RELAYS, fixtureSecret, testEvents, upcomingRegistrationSchedule, nextScheduledCooperationDefectionSchedule, signedCooperationDefectionAction, syntheticChannelFixture, installDelayedRelay, relayState, seedRelayAccount, readRelayGameState, realtimeInstanceIds, isRealtimeRequest, readRealtimePendingInstances, seedRealtimePendingInstance, chooseHorizontalMove, pressRelayKeyboardMovement } from './helpers/relayHarness';
 
+const formatJstDeadline = (timeMs: number) => `${new Intl.DateTimeFormat('ja-JP', {
+	timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
+}).format(new Date(timeMs))} JST`;
 
 test.describe('Relay startup', () => {
 	test('keeps primary and Trace ahead of an unknown-capacity realtime attempt', async ({ page }) => {
@@ -96,7 +99,17 @@ test.describe('Relay startup', () => {
 		await page.clock.setSystemTime(schedule.registrationAtMs + 1_000);
 		await page.clock.runFor(1_000);
 		await expect(page.locator('[data-realtime-panel]')).toBeVisible();
+		await expect(page.locator('[data-cooperation-defection-registration-deadline]')).toHaveText(`受付締切: ${formatJstDeadline(schedule.gameAtMs)}`);
+		await expect(page.locator('[data-cooperation-defection-registration-countdown]')).toContainText(/^残り時間: 04:\d{2}$/);
 		await expect.poll(async () => (await relayState(page)).state.requests.filter(isRealtimeRequest).some((request) => realtimeInstanceIds(request).includes(schedule.instanceId))).toBe(true);
+
+		await page.clock.setSystemTime(schedule.registrationAtMs + 76_000);
+		await page.clock.runFor(500);
+		await expect(page.locator('[data-cooperation-defection-registration-countdown]')).toContainText(/^残り時間: 03:\d{2}$/);
+		await page.clock.setSystemTime(schedule.gameAtMs + 1_000);
+		await page.clock.runFor(500);
+		await expect(page.locator('[data-cooperation-defection-registration-deadline]')).toHaveCount(0);
+		await expect(page.locator('[data-realtime-panel]')).toContainText('ゲーム中');
 
 		await page.clock.setSystemTime(schedule.endedAtMs + 1_000);
 		await page.clock.runFor(1_000);
@@ -176,6 +189,7 @@ test.describe('Relay startup', () => {
 		await expect(self).toBeVisible();
 		await expect.poll(async () => (await relayState(page)).state.requests.filter((request) => (request.filter.kinds as number[])[0] === 7070).length).toBeGreaterThan(0);
 		await expect(page.locator('[data-realtime-panel]')).toHaveAttribute('data-realtime-status', 'degraded');
+		await expect(page.locator('[data-cooperation-defection-registration-deadline]')).toHaveText(`受付締切: ${formatJstDeadline(schedule.gameAtMs)}`);
 
 		await editor.fill('normal world survives realtime timeout');
 		await editor.press('Enter');

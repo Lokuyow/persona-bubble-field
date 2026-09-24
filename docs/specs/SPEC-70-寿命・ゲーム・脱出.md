@@ -168,6 +168,8 @@ prototypeではこの枠で複数のevent typeを順次試遊し、試遊結果�
 
 公式イベントパネルは開催予告・参加受付・ゲーム中に表示し、開催前と開催終了後はパネル全体を表示しない。ゲーム中の結果発表では結果を表示する。パネルの表示状態は、イベントの精算・未精算結果の復旧を制御しない。
 
+参加受付中は、scheduleの `gameAtMs` を受付締切としてJSTの年月日・時刻と残り時間（`MM:SS`）を表示する。残り時間はscheduleの締切と現在時刻から計算し、手動開催もイベントの `created_at` 由来の締切を使う。締切は参加状態や通信状態にかかわらずパネルに表示し、参加確認ダイアログを開いている間も確認できる。参加受付終了後はゲーム進行表示へ切り替える。手動開催の開催識別表示は「運営開催」とする。
+
 playable eventのparticipantは、現在のcharacter slotへ解決できるauthorだけを有効参加者として扱う。未割当authorは参加枠、round、result、settlementへ入らない。SPEC-10で定めるexternal world actorのcharacter overrideは、このparticipant判定には適用しない。controlのauthority条件はchannel creatorであり、このparticipant条件をcontrol eventへ適用しない。受信envelopeのprotocol条件と境界検証はSPEC-10を正とする。
 
 ### experimental event「協力と抜け駆け」

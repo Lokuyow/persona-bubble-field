@@ -391,6 +391,17 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	let cooperationDefectionRealtimeBootstrapComplete = $state(devCooperationDefectionFixtureEnabled);
 	let cooperationDefectionSchedule = $state(getCooperationDefectionSchedule(initialCooperationDefectionNowMs));
 	let cooperationDefectionNowMs = $state(initialCooperationDefectionNowMs);
+	const cooperationDefectionJstDateTimeFormatter = new Intl.DateTimeFormat('ja-JP', {
+		timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
+	});
+	let cooperationDefectionRegistrationDeadline = $derived.by(() => {
+		if (cooperationDefectionSchedule.phase !== 'registration') return null;
+		const remainingSeconds = Math.max(0, Math.ceil((cooperationDefectionSchedule.gameAtMs - cooperationDefectionNowMs) / 1_000));
+		return {
+			deadline: `${cooperationDefectionJstDateTimeFormatter.format(new Date(cooperationDefectionSchedule.gameAtMs))} JST`,
+			remaining: `${Math.floor(remainingSeconds / 60).toString().padStart(2, '0')}:${(remainingSeconds % 60).toString().padStart(2, '0')}`
+		};
+	});
 	let cooperationDefectionSession = $state.raw<CooperationDefectionSessionState | null>(null);
 	let cooperationDefectionSelection = $state<Readonly<{ round: 1 | 2 | 3; choice: CooperationDefectionChoice; nonce: string; commitId: string | null; commitPublished: boolean; revealAttempted: boolean; revealStatus: 'idle' | 'sending' | 'published' | 'failed' }> | null>(null);
 	let cooperationDefectionSettlementInFlight = $state(false);
@@ -2985,6 +2996,8 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		<CooperationDefectionPanel
 			schedule={cooperationDefectionSchedule}
 			nowMs={cooperationDefectionNowMs}
+			registrationDeadline={cooperationDefectionRegistrationDeadline?.deadline ?? null}
+			registrationCountdown={cooperationDefectionRegistrationDeadline?.remaining ?? null}
 			status={realtimeStatus}
 			session={cooperationDefectionSession}
 			selfGroupId={cooperationDefectionSelfGroupId}
@@ -2998,7 +3011,9 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		/>
 	{/if}
 
-	<CooperationDefectionRulesDialog open={cooperationDefectionRulesDialogOpen} mode={cooperationDefectionRulesDialogMode} onOpenChange={(open) => {
+	<CooperationDefectionRulesDialog open={cooperationDefectionRulesDialogOpen} mode={cooperationDefectionRulesDialogMode}
+		registrationDeadline={cooperationDefectionRegistrationDeadline?.deadline ?? null}
+		registrationCountdown={cooperationDefectionRegistrationDeadline?.remaining ?? null} onOpenChange={(open) => {
 		if (!open) discardPendingCooperationDefectionJoin();
 	}} onJoin={() => { void confirmCooperationDefectionJoin(); }} onViewRules={() => {
 		cooperationDefectionRulesDialogMode = 'rules';

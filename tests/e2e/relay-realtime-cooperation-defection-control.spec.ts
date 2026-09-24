@@ -36,6 +36,10 @@ import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { installFieldFrameSampling, readFieldFrames, sampleRenderedField } from './helpers/fieldFrames';
 import { CHANNEL_ID, AUTHORITATIVE_RELAYS, fixtureSecret, testEvents, upcomingRegistrationSchedule, nextScheduledCooperationDefectionSchedule, signedCooperationDefectionAction, syntheticChannelFixture, installDelayedRelay, relayState, seedRelayAccount, readRelayGameState, realtimeInstanceIds, isRealtimeRequest, readRealtimePendingInstances, seedRealtimePendingInstance, chooseHorizontalMove, waitForRelayComposerReady } from './helpers/relayHarness';
 
+const formatJstDeadline = (timeMs: number) => `${new Intl.DateTimeFormat('ja-JP', {
+	timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
+}).format(new Date(timeMs))} JST`;
+
 
 test.describe('Relay startup', () => {
 	test('accepts a creator-signed manual CooperationDefection control from a synthetic DEV channel', async ({ page }) => {
@@ -65,7 +69,21 @@ test.describe('Relay startup', () => {
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => (request.filter.kinds as number[])[0] === 42)).toBe(true);
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
 		await expect(page.locator('[data-realtime-panel]')).toContainText('参加受付');
+		await expect(page.locator('[data-realtime-panel]')).toContainText('· 運営開催');
+		await expect(page.locator('[data-cooperation-defection-registration-deadline]')).toHaveText(`受付締切: ${formatJstDeadline((createdAt + 5 * 60) * 1_000)}`);
+		await expect(page.locator('[data-cooperation-defection-registration-countdown]')).toContainText(/^残り時間: 04:\d{2}$/);
 		await expect.poll(async () => (await relayState(page)).state.requests.filter(isRealtimeRequest).some((request) => realtimeInstanceIds(request).includes(manualInstanceId))).toBe(true);
+
+		await page.clock.setSystemTime(initialTime + 73_000);
+		await page.clock.runFor(500);
+		await expect(page.locator('[data-cooperation-defection-registration-countdown]')).toContainText(/^残り時間: 03:\d{2}$/);
+		await page.reload();
+		await waitForRelayComposerReady(page);
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => (request.filter.kinds as number[])[0] === 42)).toBe(true);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		await expect(page.locator('[data-realtime-panel]')).toContainText('· 運営開催');
+		await expect(page.locator('[data-cooperation-defection-registration-deadline]')).toHaveText(`受付締切: ${formatJstDeadline((createdAt + 5 * 60) * 1_000)}`);
+		await expect(page.locator('[data-cooperation-defection-registration-countdown]')).toContainText(/^残り時間: 03:\d{2}$/);
 	});
 
 	test('promotes recovered manual CooperationDefection state to current after an active-game reload', async ({ page }) => {
