@@ -60,9 +60,12 @@ test.describe('Cooperation and Defection underfilled group cancellation', () => 
 		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret), initialExpiry, 100_000);
 		await page.goto('/');
 		await expect(page.locator('[data-cooperation-defection-cancelled]')).toHaveCount(0);
+		await expect(page.locator('[data-cooperation-defection-participants-loading]')).toBeVisible();
+		await expect(page.locator('[data-cooperation-defection-round-progress]')).toHaveCount(0);
 		await releaseInitialSubscriptions(page);
 		const notice = page.locator('[data-cooperation-defection-cancelled]');
 		await expect(notice).toHaveText(CANCELLATION_NOTICE);
+		await expect(page.locator('[data-cooperation-defection-participants-loading]')).toHaveCount(0);
 		await expect(page.locator('[data-cooperation-defection-choice]')).toHaveCount(0);
 		await expect(page.locator('[data-cooperation-defection-round-result]')).toHaveCount(0);
 		await expect.poll(async () => readRealtimePendingInstances(page)).toEqual([]);
@@ -83,6 +86,21 @@ test.describe('Cooperation and Defection underfilled group cancellation', () => 
 		await expect(profile.getByRole('button', { name: '脱出', exact: true })).toBeEnabled();
 		await profile.getByRole('button', { name: '脱出', exact: true }).click();
 		await expect(page.getByText('脱出しました', { exact: true })).toBeVisible();
+	});
+
+	test('does not show round progress for a spectator when there are no participants', async ({ page }) => {
+		const schedule = upcomingRegistrationSchedule();
+		const nowMs = getCooperationDefectionRoundSchedule(schedule, 1).selectionAtMs + 1_000;
+		const secret = fixtureSecret(19);
+		await prepare(page, nowMs, []);
+		await seedRelayAccount(page, secret, getPublicKey(secret));
+		await page.goto('/');
+		await expect(page.locator('[data-cooperation-defection-participants-loading]')).toBeVisible();
+		await expect(page.locator('[data-cooperation-defection-round-progress]')).toHaveCount(0);
+		await releaseInitialSubscriptions(page);
+		await expect(page.locator('[data-cooperation-defection-participants-loading]')).toHaveCount(0);
+		await expect(page.locator('[data-cooperation-defection-round-progress]')).toHaveCount(0);
+		await expect(page.locator('[data-cooperation-defection-round-result]')).toHaveCount(0);
 	});
 
 	test('applies underfilled cancellation to a manually started event', async ({ page }) => {
@@ -139,6 +157,7 @@ test.describe('Cooperation and Defection underfilled group cancellation', () => 
 		const nowMs = round.revealCutoffAtMs + 1_000;
 		const cancelledPage = await browser.newPage();
 		const activePage = await browser.newPage();
+		const spectatorPage = await browser.newPage();
 		const cancelledSelf = players[0]!;
 		const activeSelf = players[2]!;
 		const prepareParticipant = async (page: Page, player: (typeof players)[number]) => {
@@ -147,19 +166,30 @@ test.describe('Cooperation and Defection underfilled group cancellation', () => 
 			await page.goto('/');
 			await releaseInitialSubscriptions(page);
 		};
+		const prepareSpectator = async () => {
+			const secret = fixtureSecret(41);
+			await prepare(spectatorPage, nowMs, realtimeEvents);
+			await seedRelayAccount(spectatorPage, secret, getPublicKey(secret), nowMs + 5 * 24 * 60 * 60 * 1_000);
+			await spectatorPage.goto('/');
+			await releaseInitialSubscriptions(spectatorPage);
+		};
 		try {
-			await Promise.all([prepareParticipant(cancelledPage, cancelledSelf), prepareParticipant(activePage, activeSelf)]);
+			await Promise.all([prepareParticipant(cancelledPage, cancelledSelf), prepareParticipant(activePage, activeSelf), prepareSpectator()]);
 			await expect(cancelledPage.locator('[data-cooperation-defection-cancelled]')).toHaveText(CANCELLATION_NOTICE);
 			await expect(cancelledPage.locator('[data-cooperation-defection-round-result]')).toHaveCount(0);
 			await expect(cancelledPage.locator('[data-cooperation-defection-choice]')).toHaveCount(0);
+			await expect(cancelledPage.locator('[data-cooperation-defection-round-progress]')).toHaveCount(0);
 			await expect(activePage.locator('[data-cooperation-defection-round-result]')).toContainText('全員協力');
 			await expect(activePage.locator('[data-cooperation-defection-round-result]')).toContainText('あなた: +1,000pt');
+			await expect(activePage.locator('[data-cooperation-defection-round-progress]')).toBeVisible();
+			await expect(spectatorPage.locator('[data-cooperation-defection-round-progress]')).toBeVisible();
+			await expect(spectatorPage.locator('[data-cooperation-defection-round-result]')).toHaveCount(0);
 			await expect.poll(async () => readRealtimePendingInstances(cancelledPage)).toEqual([]);
 			await expect.poll(async () => readRealtimePendingInstances(activePage)).toEqual([schedule.instanceId]);
 			expect(await readRelayGameState(cancelledPage)).toMatchObject({ points: 0 });
 			expect(await readRelayGameState(activePage)).toMatchObject({ points: 1_000 });
 		} finally {
-			await Promise.all([cancelledPage.close(), activePage.close()]);
+			await Promise.all([cancelledPage.close(), activePage.close(), spectatorPage.close()]);
 		}
 	});
 });

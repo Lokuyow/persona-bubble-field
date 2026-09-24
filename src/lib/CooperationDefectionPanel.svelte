@@ -25,6 +25,7 @@
 	let dismissedCancellationKey = $state<string | null>(null);
 	let cancellationNoticeVisible = $derived(Boolean(cancellationNoticeKey && dismissedCancellationKey !== cancellationNoticeKey));
 	let lastRoundResult = $derived(selfGroupCancelled ? null : session?.results.filter((result) => result.groupId === selfGroupId).at(-1) ?? null);
+	let hasPlayableGroups = $derived(Boolean(session?.participantSnapshot && session.groups.some((group) => !session.cancelledGroupIds.includes(group.id))));
 
 	$effect(() => {
 		const key = cancellationNoticeKey;
@@ -34,7 +35,7 @@
 	});
 
 	let roundInfo = $derived.by(() => {
-		if (schedule.phase !== 'game' || selfGroupCancelled) return null;
+		if (schedule.phase !== 'game' || selfGroupCancelled || !hasPlayableGroups) return null;
 		for (const round of [1, 2, 3] as const) {
 			const current = getCooperationDefectionRoundSchedule(schedule, round);
 			if (nowMs < current.endedAtMs) return {
@@ -78,7 +79,7 @@
 				<p>{cooperationDefectionPhaseLabel(schedule.phase)} · {schedule.dateKey.startsWith('manual-') ? '運営開催' : schedule.dateKey}</p>
 			</div>
 			{#if roundInfo && !selfGroupCancelled}
-				<strong>ラウンド {roundInfo.round} · {roundInfo.phase}</strong>
+				<strong data-cooperation-defection-round-progress>ラウンド {roundInfo.round} · {roundInfo.phase}</strong>
 			{/if}
 		</div>
 		{#if selfGroupCancelled}
@@ -87,6 +88,9 @@
 		{#if schedule.phase === 'registration' && registrationDeadline && registrationCountdown}
 			<p class="cooperation-defection-registration-deadline" data-cooperation-defection-registration-deadline>受付締切: {registrationDeadline}</p>
 			<p class="cooperation-defection-registration-countdown" data-cooperation-defection-registration-countdown>残り時間: {registrationCountdown}</p>
+		{/if}
+		{#if schedule.phase === 'game' && !session?.participantSnapshot}
+			<p class="cooperation-defection-note" data-cooperation-defection-participants-loading>参加情報を取得中です。取得が完了するまでラウンド進行は表示されません。</p>
 		{/if}
 		{#if status === 'degraded'}
 			<p class="cooperation-defection-note">イベント通信が利用できません。通常の会話と移動は継続できます。</p>

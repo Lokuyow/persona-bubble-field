@@ -2056,7 +2056,13 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 					cooperationDefectionSession = recovered;
 					recoveredCooperationDefectionSessions.delete(cooperationDefectionSchedule.instanceId);
 				} else {
-					cooperationDefectionSession = createCooperationDefectionSession({ instanceId: cooperationDefectionSchedule.instanceId, field });
+					const session = createCooperationDefectionSession({ instanceId: cooperationDefectionSchedule.instanceId, field });
+					if (devCooperationDefectionStaticPhase === 'game') {
+						const groupId = session.groups[0]?.id;
+						cooperationDefectionSession = groupId ? { ...session, participantSnapshot: { [groupId]: ['1'.repeat(64), '2'.repeat(64), '3'.repeat(64)] } } : session;
+					} else {
+						cooperationDefectionSession = session;
+					}
 				}
 			}
 		} else if (cooperationDefectionRealtimeBootstrapComplete) {
