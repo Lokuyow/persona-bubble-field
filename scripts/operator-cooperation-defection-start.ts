@@ -3,8 +3,8 @@ import { createOperatorRelayAdapter } from '../src/lib/operatorRelayAdapter';
 import {
 	OperatorCancelled,
 	OperatorFailure,
-	runManualRiftOperator
-} from '../src/lib/operatorRift';
+	runManualCooperationDefectionOperator
+} from '../src/lib/operatorCooperationDefection';
 import { PROTOTYPE_WORLD_CONFIG } from '../src/lib/prototypeWorldConfig';
 import {
 	confirmPublish,
@@ -15,8 +15,8 @@ import {
 } from './operatorInput';
 
 function printUsage(): void {
-	console.log('Usage: npm run operator:rift:start');
-	console.log('       npm run operator:rift:publish');
+	console.log('Usage: npm run operator:cooperation-defection:start');
+	console.log('       npm run operator:cooperation-defection:publish');
 	console.log('Default mode performs a signed dry-run without publishing.');
 	console.log('The publish command requires hidden confirmation, then publishes to authoritative Relays.');
 }
@@ -52,7 +52,7 @@ async function main(): Promise<number> {
 	let inputSession: ReturnType<typeof createHiddenInputSession> | undefined;
 	try {
 		if (mode === 'publish') inputSession = createHiddenInputSession();
-		await runManualRiftOperator(mode, {
+		await runManualCooperationDefectionOperator(mode, {
 			relay,
 			confirmPublish: inputSession?.confirmPublish ?? (() => confirmPublish()),
 			readSecret: inputSession?.readHiddenNsec ?? (() => readHiddenNsec()),

@@ -539,6 +539,7 @@ describe('world read session', () => {
 		expect(parseWorldStateEvent(publish.mock.calls[0][0], 'c'.repeat(64))).toMatchObject({ state: 'exit', position: { x: 2, y: 1 } });
 		expect(await session.publishTerminalExit()).toEqual({ kind: 'unavailable' });
 		expect(await session.moveSelf('right')).toEqual({ kind: 'unavailable' });
+		expect(await session.publishMessage('normal message after death', 'normal')).toEqual({ kind: 'unavailable' });
 	});
 
 	it('routes live death traces to the trace reducer without entering world presence', async () => {

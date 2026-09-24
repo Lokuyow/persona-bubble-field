@@ -48,12 +48,12 @@
 	} from '$lib/devWorldSandbox';
 	import { resolveDevScenario, type DevScenario } from '$lib/dev/devScenarios';
 	import {
-		createDevRiftPlayground,
-		DEV_RIFT_PLAYGROUND_SELF_PUBKEY,
-		type DevRiftBotPreset,
-		type DevRiftPlaygroundState,
-		DevRiftPlayground
-	} from '$lib/dev/devRiftPlayground';
+		createDevCooperationDefectionPlayground,
+		DEV_COOPERATION_DEFECTION_PLAYGROUND_SELF_PUBKEY,
+		type DevCooperationDefectionBotPreset,
+		type DevCooperationDefectionPlaygroundState,
+		DevCooperationDefectionPlayground
+	} from '$lib/dev/devCooperationDefectionPlayground';
 	import { CHARACTER_CATALOG, getCharacterById, type Character } from '$lib/character';
 import { requireCharacterFromPubkey } from '$lib/characterAssignment';
 import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
@@ -63,8 +63,8 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	import MendingDialog from '$lib/MendingDialog.svelte';
 	import AdjustmentDialog from '$lib/AdjustmentDialog.svelte';
 	import SelfProfileDialog from '$lib/SelfProfileDialog.svelte';
-	import RiftPanel from '$lib/RiftPanel.svelte';
-	import RiftRulesDialog from '$lib/RiftRulesDialog.svelte';
+	import CooperationDefectionPanel from '$lib/CooperationDefectionPanel.svelte';
+	import CooperationDefectionRulesDialog from '$lib/CooperationDefectionRulesDialog.svelte';
 	import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL, isBlockedFacilityCell, isWithinFacilityInteractionRange, sameFieldCell } from '$lib/fieldFacilities';
 	import { projectMending } from '$lib/mending';
 	import { getAbilityUpgrade, type PersonaAbilityKey } from '$lib/personaGameState';
@@ -79,10 +79,10 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		startMending,
 		upgradePersonaAbility,
 		applyRealtimeOutcome,
+		applyRealtimeLifespanLoss,
 		completeRealtimeEventInstance,
 		getRealtimeSettlementLedger,
 		trackRealtimeEventInstance,
-		transitionRealtimeDeath,
 		clearPersona,
 		exportClearedIdentityNsec,
 		type ActiveSignerSnapshot,
@@ -98,31 +98,34 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	import { clearDevMode, CLEAR_DEV_INITIAL_POINTS } from '$lib/clearDevMode';
 	import { consumeRunTransitionNotice, storeRunTransitionNotice, type RunTransitionNotice } from '$lib/runTransitionNotice';
 	import {
-		applyRiftAction,
-		buildRiftActionTemplate,
-		buildRiftCommitAction,
-		buildRiftRevealAction,
-		createRiftNonce,
-		createRiftSession,
+		applyCooperationDefectionAction,
+		buildCooperationDefectionActionTemplate,
+		buildCooperationDefectionCommitAction,
+		buildCooperationDefectionRevealAction,
+		createCooperationDefectionNonce,
+		createCooperationDefectionSession,
 		enabledRealtimeEventDefinitions,
-		getRiftRoundSchedule,
-		getRiftSchedule,
-		getRiftScheduleForDate,
-		getRiftScheduleForInstance,
-		getRiftParticipantHole,
-		isManualRiftControlScheduleEligible,
-		compareManualRiftControls,
-		isRiftSettlementComplete,
-		parseManualRiftInstanceId,
-		RIFT_EVENT_DEFINITION,
-		RIFT_CONSULTATION_MS,
-		RIFT_MANUAL_CONTROL_LOOKBACK_SECONDS,
-		parseRiftEvent,
-		riftPhaseLabel,
-		settleRiftSession,
-		type RiftChoice,
-		type RiftSessionState
-	} from '$lib/rift';
+		getCooperationDefectionRoundSchedule,
+		getCooperationDefectionSchedule,
+		getCooperationDefectionScheduleForDate,
+		getCooperationDefectionScheduleForInstance,
+		getCooperationDefectionParticipantGroup,
+		isManualCooperationDefectionControlScheduleEligible,
+		compareManualCooperationDefectionControls,
+		isCooperationDefectionSettlementComplete,
+		cooperationDefectionPublicationKey,
+		parseManualCooperationDefectionInstanceId,
+		isRetiredRiftSettlementInstanceId,
+		COOPERATION_DEFECTION_EVENT_DEFINITION,
+		COOPERATION_DEFECTION_CONSULTATION_MS,
+		COOPERATION_DEFECTION_MANUAL_CONTROL_LOOKBACK_SECONDS,
+		parseCooperationDefectionEvent,
+		cooperationDefectionPhaseLabel,
+		settleCooperationDefectionSession,
+		type CooperationDefectionChoice,
+		type CooperationDefectionOutcome,
+		type CooperationDefectionSessionState
+	} from '$lib/cooperationDefection';
 	import { finalizeRealtimeEvent, type RealtimeControlEnvelope } from '$lib/realtimeEvents';
 	import type { RealtimeEnvelope } from '$lib/realtimeEvents';
 	import {
@@ -194,6 +197,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		createWorldReadSession,
 		type SelfMessageAvailability,
 		type SelfPositionWriteState,
+		type TerminalExitPreparation,
 		type RealtimeStartConfiguration,
 		type WorldReadConnectionStatus
 	} from '$lib/worldReadSession';
@@ -291,18 +295,18 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	let worldSession = $state.raw<ReturnType<typeof createWorldReadSession> | null>(null);
 	const runtimeMode: 'relay' | 'dev' = initialDevWorldSandboxEnabled ? 'dev' : 'relay';
 	const devWorldSandboxEnabled = initialDevWorldSandboxEnabled;
-	const devRiftStaticPhase = devScenario?.fixture.kind === 'rift-static' ? devScenario.fixture.phase : null;
-	const devRiftPlaygroundEnabled = devScenario?.fixture.kind === 'rift-playground';
-	const devRiftFixtureEnabled = devRiftStaticPhase !== null || devRiftPlaygroundEnabled;
-	function devRiftFixtureNowMs(): number {
-		const schedule = getRiftSchedule(Date.now());
-		if (devRiftStaticPhase === 'warning') return schedule.warningAtMs + 1_000;
-		if (devRiftStaticPhase === 'registration') return schedule.registrationAtMs + 1_000;
-		if (devRiftStaticPhase === 'game') return schedule.gameAtMs + RIFT_CONSULTATION_MS + 1_000;
-		if (devRiftStaticPhase === 'ended') return schedule.endedAtMs + 1_000;
+	const devCooperationDefectionStaticPhase = devScenario?.fixture.kind === 'cooperation-defection-static' ? devScenario.fixture.phase : null;
+	const devCooperationDefectionPlaygroundEnabled = devScenario?.fixture.kind === 'cooperation-defection-playground';
+	const devCooperationDefectionFixtureEnabled = devCooperationDefectionStaticPhase !== null || devCooperationDefectionPlaygroundEnabled;
+	function devCooperationDefectionFixtureNowMs(): number {
+		const schedule = getCooperationDefectionSchedule(Date.now());
+		if (devCooperationDefectionStaticPhase === 'warning') return schedule.warningAtMs + 1_000;
+		if (devCooperationDefectionStaticPhase === 'registration') return schedule.registrationAtMs + 1_000;
+		if (devCooperationDefectionStaticPhase === 'game') return schedule.gameAtMs + COOPERATION_DEFECTION_CONSULTATION_MS + 1_000;
+		if (devCooperationDefectionStaticPhase === 'ended') return schedule.endedAtMs + 1_000;
 		return Date.now();
 	}
-	const initialRiftNowMs = devRiftPlaygroundEnabled ? 0 : devRiftFixtureEnabled ? devRiftFixtureNowMs() : Date.now();
+	const initialCooperationDefectionNowMs = devCooperationDefectionPlaygroundEnabled ? 0 : devCooperationDefectionFixtureEnabled ? devCooperationDefectionFixtureNowMs() : Date.now();
 	let actionDockAvailable = $derived(runtimeMode === 'relay' || devTraceReplyFixtureEnabled);
 	let pendingComposerSubmission: Readonly<{
 		resolve: () => void;
@@ -355,28 +359,27 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	let startReadOnlyWorld: (() => void) | null = null;
 	let startSelectedWorld: ((persona: PersonaSnapshot) => Promise<void>) | null = null;
 	const realtimeEventRegistry = enabledRealtimeEventDefinitions();
-	const riftEventEnabled = realtimeEventRegistry.some((definition) => definition.eventType === 'rift');
-	let realtimeStatus = $state<'inactive' | 'active' | 'degraded'>(devRiftFixtureEnabled ? 'active' : 'inactive');
-	let riftRealtimeBootstrapComplete = $state(devRiftFixtureEnabled);
-	let riftSchedule = $state(getRiftSchedule(initialRiftNowMs));
-	let riftNowMs = $state(initialRiftNowMs);
-	let riftSession = $state.raw<RiftSessionState | null>(null);
-	let riftSelection = $state<Readonly<{ round: 1 | 2 | 3; choice: RiftChoice; nonce: string; commitId: string | null; commitPublished: boolean; revealAttempted: boolean; revealStatus: 'idle' | 'sending' | 'published' | 'failed' }> | null>(null);
-	let riftLastResult = $state<string | null>(null);
-	let riftSettlementInFlight = $state(false);
-	let riftRulesDialogOpen = $state(false);
-	let riftRulesDialogMode = $state<'rules' | 'join-confirmation'>('rules');
-	let pendingRiftJoin = $state<{ instanceId: string; holeId: string; position: { x: number; y: number } } | null>(null);
-	const appliedRiftOutcomeIds = new Set<string>();
+	const cooperationDefectionEventEnabled = realtimeEventRegistry.some((definition) => definition.eventType === 'cooperation-defection');
+	let realtimeStatus = $state<'inactive' | 'active' | 'degraded'>(devCooperationDefectionFixtureEnabled ? 'active' : 'inactive');
+	let cooperationDefectionRealtimeBootstrapComplete = $state(devCooperationDefectionFixtureEnabled);
+	let cooperationDefectionSchedule = $state(getCooperationDefectionSchedule(initialCooperationDefectionNowMs));
+	let cooperationDefectionNowMs = $state(initialCooperationDefectionNowMs);
+	let cooperationDefectionSession = $state.raw<CooperationDefectionSessionState | null>(null);
+	let cooperationDefectionSelection = $state<Readonly<{ round: 1 | 2 | 3; choice: CooperationDefectionChoice; nonce: string; commitId: string | null; commitPublished: boolean; revealAttempted: boolean; revealStatus: 'idle' | 'sending' | 'published' | 'failed' }> | null>(null);
+	let cooperationDefectionSettlementInFlight = $state(false);
+	let cooperationDefectionRulesDialogOpen = $state(false);
+	let cooperationDefectionRulesDialogMode = $state<'rules' | 'join-confirmation'>('rules');
+	let pendingCooperationDefectionJoin = $state<{ instanceId: string; groupId: string; position: { x: number; y: number } } | null>(null);
+	const appliedCooperationDefectionOutcomeIds = new Set<string>();
 	const realtimeRecoveryInstanceIds = new Set<string>();
 	let realtimeControlSince = 0;
 	let realtimeControlDateKey = '';
 	const realtimeControlIds = new Set<string>();
-	let selectedManualRiftInstanceId: string | null = null;
+	let selectedManualCooperationDefectionInstanceId: string | null = null;
 	const pendingRealtimeControls: RealtimeControlEnvelope[] = [];
-	const recoveredRiftSessions = new Map<string, RiftSessionState>();
-	let devRiftPlayground = $state<DevRiftPlayground | null>(null);
-	let devRiftPlaygroundState = $state.raw<DevRiftPlaygroundState | null>(null);
+	const recoveredCooperationDefectionSessions = new Map<string, CooperationDefectionSessionState>();
+	let devCooperationDefectionPlayground = $state<DevCooperationDefectionPlayground | null>(null);
+	let devCooperationDefectionPlaygroundState = $state.raw<DevCooperationDefectionPlaygroundState | null>(null);
 	const movementInputController = createMovementInputController({
 		requestMovement: (direction) => {
 			closeFieldActionMenu();
@@ -460,7 +463,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	let mendingProjection = $derived(personaSnapshot ? projectMending(personaSnapshot.gameState, mendingNowMs, personaSnapshot.activeRun.rootBuild) : null);
 	let canUseMendingTerminal = $derived(!devWorldSandboxEnabled && !personaLifecycleTransition && Boolean(worldSession && personaSnapshot && selfIsActive && selfLogicalPosition && isWithinFacilityInteractionRange(selfLogicalPosition)));
 	let canUseAdjustmentTerminal = $derived(!devWorldSandboxEnabled && !personaLifecycleTransition && Boolean(worldSession && personaSnapshot && selfIsActive && selfLogicalPosition && isWithinFacilityInteractionRange(selfLogicalPosition, ADJUSTMENT_TERMINAL)));
-	let clearBlockedReason = $derived(!personaSnapshot ? 'Runがありません' : personaSnapshot.gameState.points < 100_000 ? '所持ポイントが100,000pt未満です' : isPersonaExpired(personaSnapshot.gameState, mendingNowMs, personaSnapshot.activeRun.rootBuild) ? '寿命が尽きています' : pendingRealtimeSettlement ? '綻びのsettlementが未完了です' : null);
+	let clearBlockedReason = $derived(!personaSnapshot ? 'Runがありません' : personaSnapshot.gameState.points < 100_000 ? '所持ポイントが100,000pt未満です' : isPersonaExpired(personaSnapshot.gameState, mendingNowMs, personaSnapshot.activeRun.rootBuild) ? '寿命が尽きています' : pendingRealtimeSettlement ? '協力と抜け駆けの精算が未完了です' : null);
 	let traceRootCells = $derived(groupTraceRoots(effectiveTraceRoots));
 	// Keep grouped roots intact for the Trace data flow, but let fixed facilities
 	// own their cells at the field presentation/interaction boundary.
@@ -545,30 +548,27 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		traceMarkerCells.some((cell) => sameCell(cell.position, position))
 	));
 	let facilityCellTriggers = $derived([MENDING_TERMINAL.position, ADJUSTMENT_TERMINAL.position]);
-	let realtimeHoles = $derived(!riftEventEnabled || riftSchedule.phase === 'dormant' || riftSchedule.phase === 'ended' ? [] : (riftSession?.holes ?? createRiftSession({ instanceId: riftSchedule.instanceId, field }).holes));
-	let realtimeHoleTriggers = $derived(riftSchedule.phase === 'registration' ? realtimeHoles : []);
-	let riftActorPubkey = $derived(devRiftPlaygroundEnabled ? DEV_RIFT_PLAYGROUND_SELF_PUBKEY : selfSigner?.pubkey ?? null);
-	let riftSelfHoleId = $derived(riftActorPubkey && riftSession ? getRiftParticipantHole(riftSession, riftSchedule, riftActorPubkey) : null);
-	let riftRound = $derived(riftSchedule.phase === 'game'
-		? ([1, 2, 3] as const).find((round) => riftNowMs < getRiftRoundSchedule(riftSchedule, round).endedAtMs) ?? 3
+	let realtimeGroups = $derived(!cooperationDefectionEventEnabled || cooperationDefectionSchedule.phase === 'dormant' || cooperationDefectionSchedule.phase === 'ended' ? [] : (cooperationDefectionSession?.groups ?? createCooperationDefectionSession({ instanceId: cooperationDefectionSchedule.instanceId, field }).groups));
+	let realtimeGroupTriggers = $derived(cooperationDefectionSchedule.phase === 'registration' ? realtimeGroups : []);
+	let cooperationDefectionActorPubkey = $derived(devCooperationDefectionPlaygroundEnabled ? DEV_COOPERATION_DEFECTION_PLAYGROUND_SELF_PUBKEY : selfSigner?.pubkey ?? null);
+	let cooperationDefectionSelfGroupId = $derived(cooperationDefectionActorPubkey && cooperationDefectionSession ? getCooperationDefectionParticipantGroup(cooperationDefectionSession, cooperationDefectionSchedule, cooperationDefectionActorPubkey) : null);
+	let cooperationDefectionRound = $derived(cooperationDefectionSchedule.phase === 'game'
+		? ([1, 2, 3] as const).find((round) => cooperationDefectionNowMs < getCooperationDefectionRoundSchedule(cooperationDefectionSchedule, round).endedAtMs) ?? 3
 		: null);
-	let riftRoundSchedule = $derived(riftRound ? getRiftRoundSchedule(riftSchedule, riftRound) : null);
-	let riftCanChoose = $derived(Boolean(riftSchedule.phase === 'game' && riftRealtimeBootstrapComplete && riftRoundSchedule && riftNowMs >= riftRoundSchedule.selectionAtMs && riftNowMs < riftRoundSchedule.resultAtMs && riftSelfHoleId && realtimeStatus === 'active' && (devRiftPlaygroundEnabled ? !devRiftPlaygroundState?.selfChoice : Boolean(personaSnapshot)) && !(riftSelection?.round === riftRound && riftSelection.commitPublished)));
-	let riftSelectedChoice = $derived(devRiftPlaygroundEnabled
-		? devRiftPlaygroundState?.selfChoice ?? null
-		: riftSelection?.round === riftRound ? riftSelection.choice : null);
-	let riftCommitStatus = $derived(devRiftPlaygroundEnabled
-		? devRiftPlaygroundState?.selfChoice ? '秘密選択を送信済み' : 'このラウンドの選択はまだありません'
-		: riftSelection && riftSelection.round === riftRound
-			? riftSelection.revealStatus === 'published' ? '選択を自動公開済み' : riftSelection.revealStatus === 'sending' ? '選択を自動公開中' : riftSelection.revealStatus === 'failed' ? '選択の自動公開に失敗（未reveal）' : riftSelection.commitPublished ? '秘密選択を送信済み' : '未送信'
+	let cooperationDefectionRoundSchedule = $derived(cooperationDefectionRound ? getCooperationDefectionRoundSchedule(cooperationDefectionSchedule, cooperationDefectionRound) : null);
+	let cooperationDefectionCanChoose = $derived(Boolean(cooperationDefectionSchedule.phase === 'game' && cooperationDefectionRealtimeBootstrapComplete && cooperationDefectionRoundSchedule && cooperationDefectionNowMs >= cooperationDefectionRoundSchedule.selectionAtMs && cooperationDefectionNowMs < cooperationDefectionRoundSchedule.resultAtMs && cooperationDefectionSelfGroupId && realtimeStatus === 'active' && (devCooperationDefectionPlaygroundEnabled ? !devCooperationDefectionPlaygroundState?.selfChoice : Boolean(personaSnapshot)) && !(cooperationDefectionSelection?.round === cooperationDefectionRound && cooperationDefectionSelection.commitPublished)));
+	let cooperationDefectionSelectedChoice = $derived(devCooperationDefectionPlaygroundEnabled
+		? devCooperationDefectionPlaygroundState?.selfChoice ?? null
+		: cooperationDefectionSelection?.round === cooperationDefectionRound ? cooperationDefectionSelection.choice : null);
+	let cooperationDefectionCommitStatus = $derived(devCooperationDefectionPlaygroundEnabled
+		? devCooperationDefectionPlaygroundState?.selfChoice ? '秘密選択を送信済み' : 'このラウンドの選択はまだありません'
+		: cooperationDefectionSelection && cooperationDefectionSelection.round === cooperationDefectionRound
+			? cooperationDefectionSelection.revealStatus === 'published' ? '選択を自動公開済み' : cooperationDefectionSelection.revealStatus === 'sending' ? '選択を自動公開中' : cooperationDefectionSelection.revealStatus === 'failed' ? '選択の自動公開に失敗（未reveal）' : cooperationDefectionSelection.commitPublished ? '秘密選択を送信済み' : '未送信'
 			: 'このラウンドの選択はまだありません');
-	let devRiftLastResult = $derived.by(() => {
-		if (!devRiftPlaygroundState) return null;
-		const result = devRiftPlaygroundState.session.results.at(-1);
-		if (!result) return devRiftPlaygroundState.message;
-		const outcome = result.outcomes.find((candidate) => candidate.pubkey === DEV_RIFT_PLAYGROUND_SELF_PUBKEY);
-		return outcome?.kind === 'death' ? `Round ${result.round}: simulated death` : outcome ? `Round ${result.round}: +${outcome.points}pt` : `Round ${result.round}: ${result.kind}`;
-	});
+	function cooperationDefectionParticipantName(pubkey: string): string {
+		try { return requireCharacterFromPubkey(pubkey).name; }
+		catch { return pubkey.slice(0, 8); }
+	}
 
 	function isActuallyPresented(element: Element | null): element is HTMLElement {
 		if (!(element instanceof HTMLElement) || element.getClientRects().length === 0) return false;
@@ -957,12 +957,12 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		if (devWorldSandboxEnabled) {
 			const devSearchParams = new URLSearchParams(window.location.search);
 			selectedCharacterId = resolveDevWorldCharacterId(devSearchParams);
-			if (devRiftPlaygroundEnabled) {
-				devRiftPlayground = createDevRiftPlayground(FIELD);
-				devRiftPlaygroundState = devRiftPlayground.snapshot;
-				riftSchedule = devRiftPlaygroundState.schedule;
-				riftNowMs = devRiftPlaygroundState.nowMs;
-				riftSession = devRiftPlaygroundState.session;
+			if (devCooperationDefectionPlaygroundEnabled) {
+				devCooperationDefectionPlayground = createDevCooperationDefectionPlayground(FIELD);
+				devCooperationDefectionPlaygroundState = devCooperationDefectionPlayground.snapshot;
+				cooperationDefectionSchedule = devCooperationDefectionPlaygroundState.schedule;
+				cooperationDefectionNowMs = devCooperationDefectionPlaygroundState.nowMs;
+				cooperationDefectionSession = devCooperationDefectionPlaygroundState.session;
 			}
 			resetSandbox();
 			if (import.meta.env.DEV) {
@@ -996,32 +996,32 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 					traceConversationController = runtime;
 				});
 			}
-			if (devRiftFixtureEnabled && !devRiftPlaygroundEnabled) reconcileRiftSession(initialRiftNowMs);
+			if (devCooperationDefectionFixtureEnabled && !devCooperationDefectionPlaygroundEnabled) reconcileCooperationDefectionSession(initialCooperationDefectionNowMs);
 		}
 
 		function getRealtimeStartConfiguration(nowMs: number): RealtimeStartConfiguration {
-			const currentSchedule = getRiftSchedule(nowMs);
+			const currentSchedule = getCooperationDefectionSchedule(nowMs);
 			if (realtimeControlDateKey !== currentSchedule.dateKey) {
 				realtimeControlDateKey = currentSchedule.dateKey;
-				realtimeControlSince = Math.max(0, Math.floor(nowMs / 1000) - RIFT_MANUAL_CONTROL_LOOKBACK_SECONDS);
+				realtimeControlSince = Math.max(0, Math.floor(nowMs / 1000) - COOPERATION_DEFECTION_MANUAL_CONTROL_LOOKBACK_SECONDS);
 			}
-			const recoveryInstanceIds = [...realtimeRecoveryInstanceIds].filter((instanceId) => getRiftScheduleForInstance(instanceId, nowMs) !== null);
+			const recoveryInstanceIds = [...realtimeRecoveryInstanceIds].filter((instanceId) => getCooperationDefectionScheduleForInstance(instanceId, nowMs) !== null);
 			const includeCurrent = currentSchedule.phase === 'registration' || currentSchedule.phase === 'game';
-			const activeManual = selectedManualRiftInstanceId ? getRiftScheduleForInstance(selectedManualRiftInstanceId, nowMs) : null;
+			const activeManual = selectedManualCooperationDefectionInstanceId ? getCooperationDefectionScheduleForInstance(selectedManualCooperationDefectionInstanceId, nowMs) : null;
 			const instanceIds = [...new Set([...recoveryInstanceIds, ...(includeCurrent ? [currentSchedule.instanceId] : []), ...(activeManual && (activeManual.phase === 'registration' || activeManual.phase === 'game') ? [activeManual.instanceId] : [])])];
-			const schedules = [...recoveryInstanceIds.map((instanceId) => getRiftScheduleForInstance(instanceId, nowMs)), ...(includeCurrent ? [currentSchedule] : []), activeManual]
+			const schedules = [...recoveryInstanceIds.map((instanceId) => getCooperationDefectionScheduleForInstance(instanceId, nowMs)), ...(includeCurrent ? [currentSchedule] : []), activeManual]
 				.filter((schedule): schedule is typeof currentSchedule => schedule !== null);
 			const since = Math.floor(Math.min(...schedules
 				.filter((schedule): schedule is typeof currentSchedule => schedule !== null)
 				.map((schedule) => schedule.warningAtMs)) / 1000);
 			return {
 				controlSince: realtimeControlSince,
-				instanceFilters: instanceIds.length === 0 ? [] : [{ protocolKey: RIFT_EVENT_DEFINITION.protocolKey, instanceIds, since }]
+				instanceFilters: instanceIds.length === 0 ? [] : [{ protocolKey: COOPERATION_DEFECTION_EVENT_DEFINITION.protocolKey, instanceIds, since }]
 			};
 		}
 
 		function prepareRealtimeStartConfiguration(configuration: RealtimeStartConfiguration, nowMs: number): RealtimeStartConfiguration {
-			realtimeControlSince = Math.max(0, Math.floor(nowMs / 1000) - RIFT_MANUAL_CONTROL_LOOKBACK_SECONDS);
+			realtimeControlSince = Math.max(0, Math.floor(nowMs / 1000) - COOPERATION_DEFECTION_MANUAL_CONTROL_LOOKBACK_SECONDS);
 			return { ...configuration, controlSince: realtimeControlSince };
 		}
 
@@ -1039,7 +1039,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			selfPositionWriteState = { kind: 'unavailable' };
 			selfMessageAvailability = { kind: 'unavailable' };
 			entryRetryable = false;
-			riftRealtimeBootstrapComplete = devRiftFixtureEnabled;
+			cooperationDefectionRealtimeBootstrapComplete = devCooperationDefectionFixtureEnabled;
 			let nextSession!: ReturnType<typeof createWorldReadSession>;
 			nextSession = createWorldReadSession({
 				field: FIELD,
@@ -1056,14 +1056,14 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 					onControl: handleRealtimeControl,
 					onBootstrapComplete: () => {
 						if (!mounted || worldReader !== nextSession) return;
-						riftRealtimeBootstrapComplete = true;
+						cooperationDefectionRealtimeBootstrapComplete = true;
 						selectBootstrapRealtimeControl();
-						reconcileRiftSession(Date.now());
+						reconcileCooperationDefectionSession(Date.now());
 					},
 					onStatusChanged: (next) => {
 						if (!mounted || worldReader !== nextSession) return;
 						realtimeStatus = next;
-						if (next === 'inactive') riftRealtimeBootstrapComplete = false;
+						if (next === 'inactive') cooperationDefectionRealtimeBootstrapComplete = false;
 					}
 				},
 				...(signer && authorizationRunNumber !== null ? {
@@ -1161,7 +1161,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 					await Promise.race([anonymousStartup.promise, anonymousSession.whenSelfReadReady()]);
 					if (restored && isPersonaExpired(persona.gameState, Date.now(), persona.activeRun.rootBuild)) {
 						personaLifecycleTransition = false;
-						await beginDeathTransition(persona, null, undefined, false);
+						await beginDeathTransition(persona, null, false);
 						return;
 					}
 					if (worldReader !== anonymousSession || anonymousSession.getStatus().kind === 'failed') throw new Error('Anonymous world session is unavailable.');
@@ -1196,7 +1196,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			// The anonymous startup error belongs to the superseded attempt, not this fresh signed session.
 			if (restored && isPersonaExpired(persona.gameState, Date.now(), persona.activeRun.rootBuild)) {
 				personaLifecycleTransition = false;
-				await beginDeathTransition(persona, null, undefined, false);
+				await beginDeathTransition(persona, null, false);
 				return;
 			}
 			composerStartupError = null;
@@ -1206,6 +1206,15 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			updateLifespanHud(mendingNowMs, true);
 			await startup;
 		};
+		async function loadPendingCooperationDefectionInstances(persona: PersonaSnapshot): Promise<readonly string[]> {
+			let ledger = await getRealtimeSettlementLedger(persona);
+			for (const instanceId of ledger?.pendingInstanceIds ?? []) {
+				if (isRetiredRiftSettlementInstanceId(instanceId)) await completeRealtimeEventInstance(persona, instanceId);
+			}
+			ledger = await getRealtimeSettlementLedger(persona);
+			return ledger?.pendingInstanceIds ?? [];
+		}
+
 		startSelectedWorld = async (persona: PersonaSnapshot): Promise<void> => {
 			personaSnapshot = persona;
 			pendingRootPoints = persona.rootPoints;
@@ -1218,10 +1227,10 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			selfMessageAvailability = { kind: 'unavailable' };
 			connectionStatus = { kind: 'bootstrapping' };
 			realtimeRecoveryInstanceIds.clear();
-			const ledger = await getRealtimeSettlementLedger(persona);
-			pendingRealtimeSettlement = (ledger?.pendingInstanceIds.length ?? 0) > 0;
-			for (const instanceId of (ledger?.pendingInstanceIds ?? [])
-				.filter((id) => getRiftScheduleForInstance(id, Date.now()) !== null)) {
+			const pendingInstanceIds = await loadPendingCooperationDefectionInstances(persona);
+			pendingRealtimeSettlement = pendingInstanceIds.length > 0;
+			for (const instanceId of pendingInstanceIds
+				.filter((id) => getCooperationDefectionScheduleForInstance(id, Date.now()) !== null)) {
 				realtimeRecoveryInstanceIds.add(instanceId);
 			}
 			let characterProfilePublication: PreparedCharacterProfilePublication | null = null;
@@ -1263,17 +1272,16 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 					pendingRootPoints = personaResult.persona.rootPoints;
 					selfSigner = personaResult.persona.signer;
 					if (initialFieldGeometryReady) syncVisualToCanonical();
-					const ledger = await getRealtimeSettlementLedger(personaResult.persona);
-					const pendingInstanceIds = (ledger?.pendingInstanceIds ?? [])
-						.filter((instanceId) => getRiftScheduleForInstance(instanceId, Date.now()) !== null);
+					const pendingInstanceIds = (await loadPendingCooperationDefectionInstances(personaResult.persona))
+						.filter((instanceId) => getCooperationDefectionScheduleForInstance(instanceId, Date.now()) !== null);
 					realtimeRecoveryInstanceIds.clear();
-					pendingRealtimeSettlement = (ledger?.pendingInstanceIds.length ?? 0) > 0;
+					pendingRealtimeSettlement = pendingInstanceIds.length > 0;
 					for (const instanceId of pendingInstanceIds) realtimeRecoveryInstanceIds.add(instanceId);
 					mendingNowMs = Date.now();
 					updateLifespanHud(Date.now(), true);
 					if (isPersonaExpired(personaResult.persona.gameState, Date.now(), personaResult.persona.activeRun.rootBuild)) {
 						personaLifecycleTransition = false;
-						const result = await beginDeathTransition(personaResult.persona, null, undefined, false);
+						const result = await beginDeathTransition(personaResult.persona, null, false);
 						if (result === 'reloaded' || result === 'failed') return;
 					}
 					if (selfSigner.characterProfileRevision !== CURRENT_CHARACTER_PROFILE_REVISION) {
@@ -1344,9 +1352,9 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 				const now = Date.now();
 				mendingNowMs = now;
 				updateLifespanHud(now);
-				if (!devRiftPlaygroundEnabled) reconcileRiftSession(devRiftFixtureEnabled ? initialRiftNowMs : now);
-				if (!devWorldSandboxEnabled && riftEventEnabled) void worldSession?.startRealtime();
-				if (!devWorldSandboxEnabled && riftSchedule.phase === 'ended') maybeStopRealtime();
+				if (!devCooperationDefectionPlaygroundEnabled) reconcileCooperationDefectionSession(devCooperationDefectionFixtureEnabled ? initialCooperationDefectionNowMs : now);
+				if (!devWorldSandboxEnabled && cooperationDefectionEventEnabled) void worldSession?.startRealtime();
+				if (!devWorldSandboxEnabled && cooperationDefectionSchedule.phase === 'ended') maybeStopRealtime();
 				const nextPresence = worldReader?.refresh(now);
 				if (nextPresence) {
 					conversationState = applyVisibility(conversationState, projectFrontendPresence({ presence: nextPresence, selectedCharacterId, selfProjectionId,
@@ -1797,102 +1805,170 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		}, 1_000);
 	}
 
-	function ensureRiftSession(instanceId: string): RiftSessionState {
-		if (riftSession?.instanceId === instanceId) return riftSession;
-		const recovered = recoveredRiftSessions.get(instanceId);
+	function ensureCooperationDefectionSession(instanceId: string): CooperationDefectionSessionState {
+		if (cooperationDefectionSession?.instanceId === instanceId) return cooperationDefectionSession;
+		const recovered = recoveredCooperationDefectionSessions.get(instanceId);
 		if (recovered) return recovered;
-		const next = createRiftSession({ instanceId, field });
-		if (instanceId === riftSchedule.instanceId) riftSession = next;
-		else recoveredRiftSessions.set(instanceId, next);
+		const next = createCooperationDefectionSession({ instanceId, field });
+		if (instanceId === cooperationDefectionSchedule.instanceId) cooperationDefectionSession = next;
+		else recoveredCooperationDefectionSessions.set(instanceId, next);
 		return next;
 	}
 
-	function riftResultLabel(): string | null {
+	function publishCooperationDefectionResultMessages(sourceSession: CooperationDefectionSessionState, sourceSchedule: ReturnType<typeof getCooperationDefectionScheduleForInstance>): Promise<void> {
 		const pubkey = selfSigner?.pubkey;
-		if (!pubkey || !riftSession) return null;
-		const results = riftSession.results.filter((result) => result.outcomes.some((outcome) => outcome.pubkey === pubkey));
-		const result = results.at(-1);
-		const outcome = result?.outcomes.find((candidate) => candidate.pubkey === pubkey);
-		if (!result || !outcome) return null;
-		return outcome.kind === 'death' ? `Round ${result.round}: 綻びの失敗により死亡` : `Round ${result.round}: +${outcome.points}pt`;
+		const currentSession = worldSession;
+		if (!pubkey || !currentSession || !sourceSchedule || devWorldSandboxEnabled) return Promise.resolve();
+		const nowMs = Date.now();
+		const dispatches: Promise<void>[] = [];
+		for (const result of sourceSession.results) {
+			if (result.kind === 'insufficient' || !result.validParticipantPubkeys.includes(pubkey)) continue;
+			const roundSchedule = getCooperationDefectionRoundSchedule(sourceSchedule, result.round);
+			if (nowMs < roundSchedule.revealCutoffAtMs || nowMs >= roundSchedule.endedAtMs) continue;
+			const choice = result.cooperatePubkeys.includes(pubkey) ? '協力' : result.defectPubkeys.includes(pubkey) ? '抜け駆け' : null;
+			if (!choice) continue;
+			const dedupeId = cooperationDefectionPublicationKey(sourceSession.instanceId, result.groupId, result.round, pubkey);
+			let markDispatched!: () => void;
+			dispatches.push(new Promise<void>((resolve) => { markDispatched = resolve; }));
+			void currentSession.publishMessage(choice, 'normal', dedupeId, markDispatched).catch(() => {});
+		}
+		return Promise.all(dispatches).then(() => undefined);
 	}
 
-	async function settleOwnRiftOutcomes(sourceSession: RiftSessionState | null = riftSession): Promise<void> {
-		if (riftSettlementInFlight || !personaSnapshot || !selfSigner || !sourceSession) return;
+	async function settleCooperationDefectionLifespanLoss(expected: PersonaSnapshot, outcome: CooperationDefectionOutcome): Promise<'survived' | 'presenting' | 'reloaded' | 'failed'> {
+		if (deathTransitionInFlight) return 'reloaded';
+		deathTransitionInFlight = true;
+		const currentSession = worldSession;
+		const preparedExitRef: { current: TerminalExitPreparation | null } = { current: null };
+		try {
+			const result = await applyRealtimeLifespanLoss(expected, {
+				id: outcome.id,
+				kind: 'lifespan-loss',
+				lifespanLossMs: outcome.lifespanLossMs,
+				instanceId: outcome.instanceId
+			}, () => {
+				preparedExitRef.current = currentSession?.prepareTerminalExit(expected.signer.pubkey) ?? null;
+				const channel = currentSession?.getChannel();
+				return preparedExitRef.current?.kind === 'prepared' && channel
+					? { channelId: channel.channelId, position: preparedExitRef.current.parsed.position, lastPositiveCreatedAt: preparedExitRef.current.parsed.createdAt }
+					: undefined;
+			});
+			const preparedExit = preparedExitRef.current;
+			if (result.kind === 'survived') {
+				personaSnapshot = result.persona;
+				selfSigner = result.persona.signer;
+				appliedCooperationDefectionOutcomeIds.add(outcome.id);
+				return 'survived';
+			}
+			if (result.kind === 'transitioned') {
+				stopPersonaInteractions('Persona lifetime ended.');
+				if (result.exit && preparedExit?.kind === 'prepared') {
+					try { currentSession?.commitTerminalExit(result.exit); } catch { /* Durable death is already committed. */ }
+				}
+				storeRunTransitionNotice('dead');
+				const canonicalPosition = preparedExit?.kind === 'prepared' ? { ...preparedExit.parsed.position } : null;
+				if (result.exit && preparedExit?.kind === 'prepared') currentSession?.enableDeathLastWords();
+				deathPresentationContent = '';
+				startDeathPresentation(currentSession, canonicalPosition, null);
+				const terminalExitPublication = result.exit && preparedExit?.kind === 'prepared' && currentSession
+					? currentSession.publishTerminalExit().then(() => undefined).catch(() => undefined)
+					: null;
+				if (deathPresentation) deathPresentation = { ...deathPresentation, terminalExitPublication };
+				appliedCooperationDefectionOutcomeIds.add(outcome.id);
+				return 'presenting';
+			}
+			if (result.kind === 'duplicate' || result.kind === 'stale') {
+				disposePersonaWriter(currentSession);
+				window.location.reload();
+				return 'reloaded';
+			}
+			disposePersonaWriter(currentSession);
+			enterReadOnlyFallback('Persona is unavailable for publishing.');
+			return 'failed';
+		} finally {
+			deathTransitionInFlight = false;
+		}
+	}
+
+	async function settleOwnCooperationDefectionOutcomes(
+		sourceSession: CooperationDefectionSessionState | null = cooperationDefectionSession,
+		resultMessageDispatch: Promise<void> = Promise.resolve()
+	): Promise<void> {
+		if (cooperationDefectionSettlementInFlight || !personaSnapshot || !selfSigner || !sourceSession) return;
 		const currentPersona = personaSnapshot;
 		const currentSigner = selfSigner;
 		const outcomes = sourceSession.results.flatMap((result) => result.outcomes).filter((outcome) => outcome.pubkey === currentSigner.pubkey);
-		const next = outcomes.find((outcome) => !appliedRiftOutcomeIds.has(outcome.id));
+		const next = outcomes.find((outcome) => !appliedCooperationDefectionOutcomeIds.has(outcome.id));
 		if (!next) {
-			const sourceSchedule = sourceSession.instanceId === riftSchedule.instanceId
-				? riftSchedule
-				: getRiftScheduleForInstance(sourceSession.instanceId, Date.now());
-			if (sourceSchedule && isRiftSettlementComplete(sourceSession, sourceSchedule, selfSigner.pubkey)) {
+			const sourceSchedule = sourceSession.instanceId === cooperationDefectionSchedule.instanceId
+				? cooperationDefectionSchedule
+				: getCooperationDefectionScheduleForInstance(sourceSession.instanceId, Date.now());
+			if (sourceSchedule && isCooperationDefectionSettlementComplete(sourceSession, sourceSchedule, selfSigner.pubkey)) {
 				const completed = await completeRealtimeEventInstance(currentPersona, sourceSession.instanceId);
 				if (completed) {
 					realtimeRecoveryInstanceIds.delete(sourceSession.instanceId);
 					pendingRealtimeSettlement = realtimeRecoveryInstanceIds.size > 0;
-					if (sourceSession.instanceId !== riftSchedule.instanceId) recoveredRiftSessions.delete(sourceSession.instanceId);
+					if (sourceSession.instanceId !== cooperationDefectionSchedule.instanceId) recoveredCooperationDefectionSessions.delete(sourceSession.instanceId);
 					maybeStopRealtime();
 				}
 			}
 			return;
 		}
-		riftSettlementInFlight = true;
+		cooperationDefectionSettlementInFlight = true;
 		try {
-			if (next.kind === 'death') {
-				const deathOutcome = await beginDeathTransition(currentPersona, worldSession, (exit) => transitionRealtimeDeath(currentPersona, { id: next.id, kind: 'death', instanceId: next.instanceId }, exit));
-				if (deathOutcome === 'reloaded') appliedRiftOutcomeIds.add(next.id);
+			if (next.kind === 'lifespan-loss') {
+				await resultMessageDispatch;
+				await settleCooperationDefectionLifespanLoss(currentPersona, next);
 				return;
 			}
 			const outcome = await applyRealtimeOutcome(currentPersona, { id: next.id, kind: 'points', points: next.points, instanceId: next.instanceId });
 			if (outcome.kind === 'applied' || outcome.kind === 'duplicate' || outcome.kind === 'expired') {
-				appliedRiftOutcomeIds.add(next.id);
+				appliedCooperationDefectionOutcomeIds.add(next.id);
 				if ('persona' in outcome) {
 					personaSnapshot = outcome.persona;
 					selfSigner = outcome.persona.signer;
 				}
 			} else if (outcome.kind === 'stale') {
-				appliedRiftOutcomeIds.add(next.id);
+				appliedCooperationDefectionOutcomeIds.add(next.id);
 				window.location.reload();
 			}
 		} catch {
 			// A temporary settlement failure leaves the outcome unmarked for the
 			// next refresh; it never turns a publication failure into death.
 		} finally {
-			riftSettlementInFlight = false;
+			cooperationDefectionSettlementInFlight = false;
 		}
 	}
 
-	async function autoRevealRiftChoice(nowMs: number): Promise<void> {
-		const selection = riftSelection;
-		const roundSchedule = riftRoundSchedule;
-		if (!selection || !roundSchedule || selection.round !== riftRound || !selection.commitId || !selection.commitPublished ||
+	async function autoRevealCooperationDefectionChoice(nowMs: number): Promise<void> {
+		const selection = cooperationDefectionSelection;
+		const roundSchedule = cooperationDefectionRoundSchedule;
+		if (!selection || !roundSchedule || selection.round !== cooperationDefectionRound || !selection.commitId || !selection.commitPublished ||
 			selection.revealAttempted || selection.revealStatus === 'sending' || selection.revealStatus === 'published' ||
-			nowMs < roundSchedule.resultAtMs || nowMs > roundSchedule.revealCutoffAtMs || !selfSigner || !riftSelfHoleId) return;
-		riftSelection = { ...selection, revealAttempted: true, revealStatus: 'sending' };
-		const id = await publishRiftAction(buildRiftRevealAction({ holeId: riftSelfHoleId, round: selection.round,
+			nowMs < roundSchedule.resultAtMs || nowMs > roundSchedule.revealCutoffAtMs || !selfSigner || !cooperationDefectionSelfGroupId) return;
+		cooperationDefectionSelection = { ...selection, revealAttempted: true, revealStatus: 'sending' };
+		const id = await publishCooperationDefectionAction(buildCooperationDefectionRevealAction({ groupId: cooperationDefectionSelfGroupId, round: selection.round,
 			commitId: selection.commitId, choice: selection.choice, nonce: selection.nonce }));
-		if (riftSelection?.round !== selection.round || riftSelection.commitId !== selection.commitId) return;
-		riftSelection = { ...riftSelection, revealStatus: id ? 'published' : 'failed' };
+		if (cooperationDefectionSelection?.round !== selection.round || cooperationDefectionSelection.commitId !== selection.commitId) return;
+		cooperationDefectionSelection = { ...cooperationDefectionSelection, revealStatus: id ? 'published' : 'failed' };
 	}
 
 	function manualControlIsEligible(control: RealtimeControlEnvelope, nowMs: number): boolean {
-		const scheduled = getRiftSchedule(nowMs);
-		return isManualRiftControlScheduleEligible(control, nowMs) && !selectedManualRiftInstanceId && !['warning', 'registration', 'game'].includes(scheduled.phase);
+		const scheduled = getCooperationDefectionSchedule(nowMs);
+		return isManualCooperationDefectionControlScheduleEligible(control, nowMs) && !selectedManualCooperationDefectionInstanceId && !['warning', 'registration', 'game'].includes(scheduled.phase);
 	}
 
 	function acceptRealtimeControl(control: RealtimeControlEnvelope): void {
 		if (realtimeControlIds.has(control.event.id)) return;
 		realtimeControlIds.add(control.event.id);
 		if (!manualControlIsEligible(control, Date.now())) return;
-		selectedManualRiftInstanceId = control.instanceId;
-		reconcileRiftSession(Date.now());
+		selectedManualCooperationDefectionInstanceId = control.instanceId;
+		reconcileCooperationDefectionSession(Date.now());
 		void worldSession?.startRealtime();
 	}
 
 	function handleRealtimeControl(control: RealtimeControlEnvelope): void {
-		if (!riftRealtimeBootstrapComplete) {
+		if (!cooperationDefectionRealtimeBootstrapComplete) {
 			pendingRealtimeControls.push(control);
 			return;
 		}
@@ -1902,178 +1978,184 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	function selectBootstrapRealtimeControl(): void {
 		const candidates = [...pendingRealtimeControls]
 			.filter((control) => manualControlIsEligible(control, Date.now()))
-			.sort(compareManualRiftControls);
+			.sort(compareManualCooperationDefectionControls);
 		pendingRealtimeControls.length = 0;
 		if (candidates[0]) acceptRealtimeControl(candidates[0]);
 	}
 
 	function maybeStopRealtime(): void {
-		if (riftSchedule.phase !== 'ended' || realtimeRecoveryInstanceIds.size > 0 || recoveredRiftSessions.size > 0) return;
+		if (cooperationDefectionSchedule.phase !== 'ended' || realtimeRecoveryInstanceIds.size > 0 || recoveredCooperationDefectionSessions.size > 0) return;
 		void worldSession?.startRealtime();
 	}
 
-	function resolveCurrentRiftSchedule(nowMs: number): ReturnType<typeof getRiftSchedule> {
-		const scheduled = getRiftSchedule(nowMs);
+	function resolveCurrentCooperationDefectionSchedule(nowMs: number): ReturnType<typeof getCooperationDefectionSchedule> {
+		const scheduled = getCooperationDefectionSchedule(nowMs);
 		if (['warning', 'registration', 'game'].includes(scheduled.phase)) return scheduled;
-		const manual = selectedManualRiftInstanceId ? getRiftScheduleForInstance(selectedManualRiftInstanceId, nowMs) : null;
+		const manual = selectedManualCooperationDefectionInstanceId ? getCooperationDefectionScheduleForInstance(selectedManualCooperationDefectionInstanceId, nowMs) : null;
 		return manual && ['registration', 'game'].includes(manual.phase) ? manual : scheduled;
 	}
 
-	function reconcileRiftSession(nowMs = Date.now()): void {
-		riftNowMs = nowMs;
-		if (selectedManualRiftInstanceId) {
-			const selectedSchedule = getRiftScheduleForInstance(selectedManualRiftInstanceId, nowMs);
+	function reconcileCooperationDefectionSession(nowMs = Date.now()): void {
+		cooperationDefectionNowMs = nowMs;
+		if (selectedManualCooperationDefectionInstanceId) {
+			const selectedSchedule = getCooperationDefectionScheduleForInstance(selectedManualCooperationDefectionInstanceId, nowMs);
 			if (selectedSchedule?.phase === 'ended') {
-				selectedManualRiftInstanceId = null;
+				selectedManualCooperationDefectionInstanceId = null;
 				void worldSession?.startRealtime();
 			}
 		}
-		riftSchedule = resolveCurrentRiftSchedule(nowMs);
-		if (!riftEventEnabled) {
-			riftSession = null;
-			recoveredRiftSessions.clear();
+		cooperationDefectionSchedule = resolveCurrentCooperationDefectionSchedule(nowMs);
+		if (!cooperationDefectionEventEnabled) {
+			cooperationDefectionSession = null;
+			recoveredCooperationDefectionSessions.clear();
 			return;
 		}
-		if (!riftSession || riftSession.instanceId !== riftSchedule.instanceId) {
-			if (riftSchedule.phase !== 'dormant') {
-				const recovered = recoveredRiftSessions.get(riftSchedule.instanceId);
+		if (!cooperationDefectionSession || cooperationDefectionSession.instanceId !== cooperationDefectionSchedule.instanceId) {
+			if (cooperationDefectionSchedule.phase !== 'dormant') {
+				const recovered = recoveredCooperationDefectionSessions.get(cooperationDefectionSchedule.instanceId);
 				if (recovered) {
-					riftSession = recovered;
-					recoveredRiftSessions.delete(riftSchedule.instanceId);
+					cooperationDefectionSession = recovered;
+					recoveredCooperationDefectionSessions.delete(cooperationDefectionSchedule.instanceId);
 				} else {
-					riftSession = createRiftSession({ instanceId: riftSchedule.instanceId, field });
+					cooperationDefectionSession = createCooperationDefectionSession({ instanceId: cooperationDefectionSchedule.instanceId, field });
 				}
 			}
-		} else if (riftRealtimeBootstrapComplete) {
-			riftSession = settleRiftSession(riftSession, riftSchedule, nowMs);
+		} else if (cooperationDefectionRealtimeBootstrapComplete) {
+			cooperationDefectionSession = settleCooperationDefectionSession(cooperationDefectionSession, cooperationDefectionSchedule, nowMs);
 		}
-		riftLastResult = riftResultLabel();
-		void autoRevealRiftChoice(nowMs);
-		void settleOwnRiftOutcomes();
-		for (const [instanceId, recovered] of recoveredRiftSessions) {
-			const recoveredSchedule = getRiftScheduleForInstance(instanceId, nowMs);
+		void autoRevealCooperationDefectionChoice(nowMs);
+		const currentResultMessageDispatch = cooperationDefectionSession
+			? publishCooperationDefectionResultMessages(cooperationDefectionSession, cooperationDefectionSchedule)
+			: Promise.resolve();
+		void settleOwnCooperationDefectionOutcomes(cooperationDefectionSession, currentResultMessageDispatch);
+		for (const [instanceId, recovered] of recoveredCooperationDefectionSessions) {
+			const recoveredSchedule = getCooperationDefectionScheduleForInstance(instanceId, nowMs);
 			if (!recoveredSchedule) {
-				recoveredRiftSessions.delete(instanceId);
+				recoveredCooperationDefectionSessions.delete(instanceId);
 				continue;
 			}
-			if (riftRealtimeBootstrapComplete) {
-				const settled = settleRiftSession(recovered, recoveredSchedule, nowMs);
-				recoveredRiftSessions.set(instanceId, settled);
-				void settleOwnRiftOutcomes(settled);
+			if (cooperationDefectionRealtimeBootstrapComplete) {
+				const settled = settleCooperationDefectionSession(recovered, recoveredSchedule, nowMs);
+				recoveredCooperationDefectionSessions.set(instanceId, settled);
+				const resultMessageDispatch = publishCooperationDefectionResultMessages(settled, recoveredSchedule);
+				void settleOwnCooperationDefectionOutcomes(settled, resultMessageDispatch);
 			}
 		}
 	}
 
 	function handleRealtimeEnvelope(envelope: RealtimeEnvelope): void {
-		if (envelope.eventType !== 'rift') return;
-		const parsed = parseRiftEvent(envelope.event, envelope.channelId, realtimeEventRegistry);
-		const eventSchedule = parsed ? getRiftScheduleForInstance(parsed.instanceId, Date.now()) : null;
+		if (envelope.eventType !== 'cooperation-defection') return;
+		const parsed = parseCooperationDefectionEvent(envelope.event, envelope.channelId, realtimeEventRegistry);
+		const eventSchedule = parsed ? getCooperationDefectionScheduleForInstance(parsed.instanceId, Date.now()) : null;
 		if (!parsed || !eventSchedule) return;
-		if (parseManualRiftInstanceId(parsed.instanceId) && parsed.instanceId !== selectedManualRiftInstanceId && !realtimeRecoveryInstanceIds.has(parsed.instanceId)) return;
-		const state = ensureRiftSession(parsed.instanceId);
-		const next = applyRiftAction(state, {
+		if (parseManualCooperationDefectionInstanceId(parsed.instanceId) && parsed.instanceId !== selectedManualCooperationDefectionInstanceId && !realtimeRecoveryInstanceIds.has(parsed.instanceId)) return;
+		const state = ensureCooperationDefectionSession(parsed.instanceId);
+		const next = applyCooperationDefectionAction(state, {
 			id: envelope.event.id,
 			pubkey: envelope.event.pubkey,
 			createdAt: envelope.event.created_at * 1000,
 			action: parsed.action
 		});
-		if (parsed.instanceId === riftSchedule.instanceId) riftSession = next;
-		else recoveredRiftSessions.set(parsed.instanceId, next);
+		if (parsed.instanceId === cooperationDefectionSchedule.instanceId) cooperationDefectionSession = next;
+		else recoveredCooperationDefectionSessions.set(parsed.instanceId, next);
 		if (personaSnapshot && parsed.action.action === 'join' && envelope.event.pubkey === selfSigner?.pubkey) {
 			realtimeRecoveryInstanceIds.add(parsed.instanceId);
 			pendingRealtimeSettlement = true;
 			void trackRealtimeEventInstance(personaSnapshot, parsed.instanceId);
 		}
-		if (parsed.instanceId === riftSchedule.instanceId) reconcileRiftSession(Date.now());
+		if (parsed.instanceId === cooperationDefectionSchedule.instanceId) reconcileCooperationDefectionSession(Date.now());
 		else {
-			const settled = riftRealtimeBootstrapComplete ? settleRiftSession(next, eventSchedule, Date.now()) : next;
-			recoveredRiftSessions.set(parsed.instanceId, settled);
-			if (riftRealtimeBootstrapComplete) void settleOwnRiftOutcomes(settled);
+			const settled = cooperationDefectionRealtimeBootstrapComplete ? settleCooperationDefectionSession(next, eventSchedule, Date.now()) : next;
+			recoveredCooperationDefectionSessions.set(parsed.instanceId, settled);
+			if (cooperationDefectionRealtimeBootstrapComplete) {
+				const resultMessageDispatch = publishCooperationDefectionResultMessages(settled, eventSchedule);
+				void settleOwnCooperationDefectionOutcomes(settled, resultMessageDispatch);
+			}
 		}
 	}
 
-	async function publishRiftAction(action: Parameters<typeof buildRiftActionTemplate>[0]['action']): Promise<string | null> {
+	async function publishCooperationDefectionAction(action: Parameters<typeof buildCooperationDefectionActionTemplate>[0]['action']): Promise<string | null> {
 		if (!selfSigner || !worldSession || realtimeStatus !== 'active') return null;
 		const channel = worldSession.getChannel();
 		if (!channel) return null;
 		try {
-			const event = finalizeRealtimeEvent(buildRiftActionTemplate({ channelId: channel.channelId, relayHint: channel.relayHint,
-				instanceId: riftSchedule.instanceId, action, createdAt: Math.floor(Date.now() / 1000) }), selfSigner.secretKey);
+			const event = finalizeRealtimeEvent(buildCooperationDefectionActionTemplate({ channelId: channel.channelId, relayHint: channel.relayHint,
+				instanceId: cooperationDefectionSchedule.instanceId, action, createdAt: Math.floor(Date.now() / 1000) }), selfSigner.secretKey);
 			const result = await worldSession.publishRealtime(event);
 			if (result.outcome !== 'accepted' && result.outcome !== 'echoed') return null;
-			handleRealtimeEnvelope({ event, channelId: channel.channelId, eventType: 'rift', protocolVersion: 1,
-				protocolKey: RIFT_EVENT_DEFINITION.protocolKey, instanceId: riftSchedule.instanceId,
-				payload: action, definition: RIFT_EVENT_DEFINITION });
+			handleRealtimeEnvelope({ event, channelId: channel.channelId, eventType: 'cooperation-defection', protocolVersion: 1,
+				protocolKey: COOPERATION_DEFECTION_EVENT_DEFINITION.protocolKey, instanceId: cooperationDefectionSchedule.instanceId,
+				payload: action, definition: COOPERATION_DEFECTION_EVENT_DEFINITION });
 			return event.id;
 		} catch {
 			return null;
 		}
 	}
 
-	async function joinRiftHole(holeId: string, position: { x: number; y: number }): Promise<void> {
-		if (devRiftPlaygroundEnabled) {
+	async function joinCooperationDefectionGroup(groupId: string, position: { x: number; y: number }): Promise<void> {
+		if (devCooperationDefectionPlaygroundEnabled) {
 			if (!selfIsActive || !selfLogicalPosition) return;
 			if (Math.max(Math.abs(selfLogicalPosition.x - position.x), Math.abs(selfLogicalPosition.y - position.y)) > 1) {
-				showTraceProximityFeedback(position, '近づくと抜け穴へ参加できる');
+				showTraceProximityFeedback(position, '近づくと参加地点を操作できる');
 				return;
 			}
-			if (devRiftPlayground) {
-				devRiftPlaygroundState = devRiftPlayground.joinSelf(holeId);
-				riftSchedule = devRiftPlaygroundState.schedule;
-				riftNowMs = devRiftPlaygroundState.nowMs;
-				riftSession = devRiftPlaygroundState.session;
+			if (devCooperationDefectionPlayground) {
+				devCooperationDefectionPlaygroundState = devCooperationDefectionPlayground.joinSelf(groupId);
+				cooperationDefectionSchedule = devCooperationDefectionPlaygroundState.schedule;
+				cooperationDefectionNowMs = devCooperationDefectionPlaygroundState.nowMs;
+				cooperationDefectionSession = devCooperationDefectionPlaygroundState.session;
 			}
 			return;
 		}
-		if (!selfSigner || !selfIsActive || !selfLogicalPosition || riftSchedule.phase !== 'registration') return;
+		if (!selfSigner || !selfIsActive || !selfLogicalPosition || cooperationDefectionSchedule.phase !== 'registration') return;
 		if (Math.max(Math.abs(selfLogicalPosition.x - position.x), Math.abs(selfLogicalPosition.y - position.y)) > 1) {
-			showTraceProximityFeedback(position, '近づくと抜け穴へ参加できる');
+			showTraceProximityFeedback(position, '近づくと参加地点を操作できる');
 			return;
 		}
-		pendingRiftJoin = { instanceId: riftSchedule.instanceId, holeId, position: { ...position } };
-		riftRulesDialogMode = 'join-confirmation';
-		riftRulesDialogOpen = true;
+		pendingCooperationDefectionJoin = { instanceId: cooperationDefectionSchedule.instanceId, groupId, position: { ...position } };
+		cooperationDefectionRulesDialogMode = 'join-confirmation';
+		cooperationDefectionRulesDialogOpen = true;
 	}
 
-	function discardPendingRiftJoin(): void {
-		riftRulesDialogOpen = false;
-		pendingRiftJoin = null;
+	function discardPendingCooperationDefectionJoin(): void {
+		cooperationDefectionRulesDialogOpen = false;
+		pendingCooperationDefectionJoin = null;
 	}
 
-	async function confirmRiftJoin(): Promise<void> {
-		const pending = pendingRiftJoin;
+	async function confirmCooperationDefectionJoin(): Promise<void> {
+		const pending = pendingCooperationDefectionJoin;
 		if (!pending) return;
-		const currentHole = realtimeHoles.find((hole) => hole.id === pending.holeId);
-		const isCurrentHole = currentHole?.position.x === pending.position.x && currentHole.position.y === pending.position.y;
+		const currentGroup = realtimeGroups.find((group) => group.id === pending.groupId);
+		const isCurrentGroup = currentGroup?.position.x === pending.position.x && currentGroup.position.y === pending.position.y;
 		const isInRange = Boolean(selfLogicalPosition && Math.max(
 			Math.abs(selfLogicalPosition.x - pending.position.x),
 			Math.abs(selfLogicalPosition.y - pending.position.y)
 		) <= 1);
 		const canStillJoin = Boolean(selfSigner && selfIsActive && selfLogicalPosition &&
-			riftSchedule.phase === 'registration' && pending.instanceId === riftSchedule.instanceId &&
-			isCurrentHole && isInRange);
-		discardPendingRiftJoin();
+			cooperationDefectionSchedule.phase === 'registration' && pending.instanceId === cooperationDefectionSchedule.instanceId &&
+			isCurrentGroup && isInRange);
+		discardPendingCooperationDefectionJoin();
 		if (!canStillJoin) return;
-		await publishRiftAction({ action: 'join', holeId: pending.holeId });
+		await publishCooperationDefectionAction({ action: 'join', groupId: pending.groupId });
 	}
 
-	async function chooseRiftChoice(choice: RiftChoice): Promise<void> {
-		if (devRiftPlaygroundEnabled) {
-			if (devRiftPlayground) {
-				devRiftPlaygroundState = devRiftPlayground.chooseSelf(choice);
-				riftSchedule = devRiftPlaygroundState.schedule;
-				riftNowMs = devRiftPlaygroundState.nowMs;
-				riftSession = devRiftPlaygroundState.session;
+	async function chooseCooperationDefectionChoice(choice: CooperationDefectionChoice): Promise<void> {
+		if (devCooperationDefectionPlaygroundEnabled) {
+			if (devCooperationDefectionPlayground) {
+				devCooperationDefectionPlaygroundState = devCooperationDefectionPlayground.chooseSelf(choice);
+				cooperationDefectionSchedule = devCooperationDefectionPlaygroundState.schedule;
+				cooperationDefectionNowMs = devCooperationDefectionPlaygroundState.nowMs;
+				cooperationDefectionSession = devCooperationDefectionPlaygroundState.session;
 			}
 			return;
 		}
-		if (!riftCanChoose || !selfSigner || !riftSelfHoleId || !riftRound ||
-			(riftSelection?.round === riftRound && riftSelection.commitPublished)) return;
-		const nonce = createRiftNonce();
-		const action = buildRiftCommitAction({ instanceId: riftSchedule.instanceId, holeId: riftSelfHoleId, round: riftRound, authorPubkey: selfSigner.pubkey, choice, nonce });
-		const commitId = await publishRiftAction(action);
+		if (!cooperationDefectionCanChoose || !selfSigner || !cooperationDefectionSelfGroupId || !cooperationDefectionRound ||
+			(cooperationDefectionSelection?.round === cooperationDefectionRound && cooperationDefectionSelection.commitPublished)) return;
+		const nonce = createCooperationDefectionNonce();
+		const action = buildCooperationDefectionCommitAction({ instanceId: cooperationDefectionSchedule.instanceId, groupId: cooperationDefectionSelfGroupId, round: cooperationDefectionRound, authorPubkey: selfSigner.pubkey, choice, nonce });
+		const commitId = await publishCooperationDefectionAction(action);
 		if (!commitId) return;
-		riftSelection = { round: riftRound, choice, nonce, commitId, commitPublished: true, revealAttempted: false, revealStatus: 'idle' };
+		cooperationDefectionSelection = { round: cooperationDefectionRound, choice, nonce, commitId, commitPublished: true, revealAttempted: false, revealStatus: 'idle' };
 	}
 
 	function closeTraceConversation(discardReplyDraft = false): void {
@@ -2089,7 +2171,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			.map((participant) => participant.id);
 		let trace: Extract<FieldCellAction, { kind: 'trace' }> | null = null;
 		const visibleTraceAtCell = traceMarkerCells.some((cell) => sameCell(cell.position, position));
-		const riftHole = riftSchedule.phase === 'registration' ? realtimeHoles.find((hole) => sameCell(hole.position, position)) : undefined;
+		const cooperationDefectionGroup = cooperationDefectionSchedule.phase === 'registration' ? realtimeGroups.find((group) => sameCell(group.position, position)) : undefined;
 		const reselectCurrentRoot = traceConversationProjection?.current.kind === 'root' &&
 			sameCell(traceConversationProjection.current.event.position, position) && visibleTraceAtCell;
 		if (reselectCurrentRoot && !replyMode.target && selfIsActive && selfLogicalPosition && isWithinTraceInvestigationRange(selfLogicalPosition, position)) {
@@ -2107,7 +2189,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			participantIds,
 			mendingTerminal: canUseMendingTerminal && sameFieldCell(position, MENDING_TERMINAL.position),
 			adjustmentTerminal: canUseAdjustmentTerminal && sameFieldCell(position, ADJUSTMENT_TERMINAL.position),
-			riftHoleId: riftHole?.id,
+			cooperationDefectionGroupId: cooperationDefectionGroup?.id,
 			trace
 		});
 	}
@@ -2162,9 +2244,9 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			openAdjustmentTerminal();
 			return;
 		}
-		if (action.kind === 'rift-hole') {
-			const hole = realtimeHoles.find((candidate) => candidate.id === action.holeId);
-			if (hole) void joinRiftHole(hole.id, hole.position);
+		if (action.kind === 'cooperation-defection-group') {
+			const group = realtimeGroups.find((candidate) => candidate.id === action.groupId);
+			if (group) void joinCooperationDefectionGroup(group.id, group.position);
 			return;
 		}
 		if (action.kind === 'trace') {
@@ -2208,7 +2290,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	function fieldActionLabel(action: FieldCellAction): string {
 		if (action.kind === 'mending-terminal') return '作業端末を使う';
 		if (action.kind === 'adjustment-terminal') return '能力強化端末を使う';
-		if (action.kind === 'rift-hole') return 'この抜け穴へ参加';
+		if (action.kind === 'cooperation-defection-group') return '参加地点から参加';
 		if (action.kind === 'trace') return '痕跡を調べる';
 		const participant = participantViews.find((candidate) => candidate.id === action.participantId);
 		return participant ? `${participant.character.name} のプロフィールを開く` : 'プロフィールを開く';
@@ -2372,7 +2454,6 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	async function beginDeathTransition(
 		expected: PersonaSnapshot,
 		currentSession: ReturnType<typeof createWorldReadSession> | null,
-		commitDeath: (exit?: TerminalExitJournalRequest) => Promise<Awaited<ReturnType<typeof transitionExpiredPersona>> | Awaited<ReturnType<typeof transitionRealtimeDeath>>> = (exit) => transitionExpiredPersona(expected, exit),
 		showPresentation = true
 	): Promise<'reloaded' | 'presenting' | 'failed'> {
 		if (devWorldSandboxEnabled || personaLifecycleTransition || deathTransitionInFlight) return 'failed';
@@ -2384,7 +2465,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 				lastPositiveCreatedAt: preparedExit.parsed.createdAt }
 			: undefined;
 		try {
-			const result = await commitDeath(exitRequest);
+			const result = await transitionExpiredPersona(expected, exitRequest);
 			if (result.kind === 'transitioned') {
 				if (result.exit && preparedExit?.kind === 'prepared') {
 					try { currentSession?.commitTerminalExit(result.exit); } catch { /* Durable death is already committed. */ }
@@ -2412,7 +2493,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 				window.location.reload();
 				return 'reloaded';
 			}
-			if (result.kind === 'superseded' || result.kind === 'stale' || result.kind === 'duplicate' || result.kind === 'not-expired') {
+			if (result.kind === 'superseded' || result.kind === 'not-expired') {
 				// The writer and interaction paths were already stopped before the
 				// lifecycle recheck. Reconcile the current lifecycle through the
 				// normal startup path instead of reviving a stale writer in-place.
@@ -2554,17 +2635,17 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		window.location.assign(url.toString());
 	}
 
-	function changeDevRiftPreset(preset: DevRiftBotPreset): void {
-		if (!devRiftPlayground) return;
-		devRiftPlaygroundState = devRiftPlayground.setPreset(preset);
+	function changeDevCooperationDefectionPreset(preset: DevCooperationDefectionBotPreset): void {
+		if (!devCooperationDefectionPlayground) return;
+		devCooperationDefectionPlaygroundState = devCooperationDefectionPlayground.setPreset(preset);
 	}
 
-	function advanceDevRiftPhase(): void {
-		if (!devRiftPlayground) return;
-		devRiftPlaygroundState = devRiftPlayground.advance();
-		riftSchedule = devRiftPlaygroundState.schedule;
-		riftNowMs = devRiftPlaygroundState.nowMs;
-		riftSession = devRiftPlaygroundState.session;
+	function advanceDevCooperationDefectionPhase(): void {
+		if (!devCooperationDefectionPlayground) return;
+		devCooperationDefectionPlaygroundState = devCooperationDefectionPlayground.advance();
+		cooperationDefectionSchedule = devCooperationDefectionPlaygroundState.schedule;
+		cooperationDefectionNowMs = devCooperationDefectionPlaygroundState.nowMs;
+		cooperationDefectionSession = devCooperationDefectionPlaygroundState.session;
 	}
 
 	function traceMarkerWorldPosition(position: { x: number; y: number }): WorldPoint {
@@ -2793,9 +2874,9 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 				{proximityFeedback}
 					{traceOnlyCellTriggers}
 					{facilityCellTriggers}
-					realtimeHoles={realtimeHoles}
-					realtimeHoleTriggers={realtimeHoleTriggers}
-					participatingRiftHoleId={riftSchedule.phase === 'registration' ? riftSelfHoleId : null}
+					realtimeGroups={realtimeGroups}
+					realtimeGroupTriggers={realtimeGroupTriggers}
+					participatingCooperationDefectionGroupId={cooperationDefectionSchedule.phase === 'registration' ? cooperationDefectionSelfGroupId : null}
 					{participantViews}
 				{selfProjectionId}
 				{movingParticipantIds}
@@ -2873,27 +2954,29 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		</div>
 	{/if}
 
-	{#if riftEventEnabled && (!devWorldSandboxEnabled || devRiftFixtureEnabled)}
-		<RiftPanel
-			schedule={riftSchedule}
-			nowMs={riftNowMs}
+	{#if cooperationDefectionEventEnabled && (!devWorldSandboxEnabled || devCooperationDefectionFixtureEnabled)}
+		<CooperationDefectionPanel
+			schedule={cooperationDefectionSchedule}
+			nowMs={cooperationDefectionNowMs}
 			status={realtimeStatus}
-			session={riftSession}
-			selfHoleId={riftSelfHoleId}
-			selectedChoice={riftSelectedChoice}
-			commitStatus={riftCommitStatus}
-			canChoose={riftCanChoose}
-			lastResult={devRiftLastResult ?? riftLastResult}
-			onChoice={(choice) => { void chooseRiftChoice(choice); }}
+			session={cooperationDefectionSession}
+			selfGroupId={cooperationDefectionSelfGroupId}
+			selfPubkey={selfSigner?.pubkey ?? null}
+			participantName={cooperationDefectionParticipantName}
+			selectedChoice={cooperationDefectionSelectedChoice}
+			commitStatus={cooperationDefectionCommitStatus}
+			canChoose={cooperationDefectionCanChoose}
+			message={devCooperationDefectionPlaygroundState?.message ?? null}
+			onChoice={(choice) => { void chooseCooperationDefectionChoice(choice); }}
 		/>
 	{/if}
 
-	<RiftRulesDialog open={riftRulesDialogOpen} mode={riftRulesDialogMode} onOpenChange={(open) => {
-		if (!open) discardPendingRiftJoin();
-	}} onJoin={() => { void confirmRiftJoin(); }} onViewRules={() => {
-		riftRulesDialogMode = 'rules';
-		riftRulesDialogOpen = true;
-	}} onCancel={discardPendingRiftJoin} />
+	<CooperationDefectionRulesDialog open={cooperationDefectionRulesDialogOpen} mode={cooperationDefectionRulesDialogMode} onOpenChange={(open) => {
+		if (!open) discardPendingCooperationDefectionJoin();
+	}} onJoin={() => { void confirmCooperationDefectionJoin(); }} onViewRules={() => {
+		cooperationDefectionRulesDialogMode = 'rules';
+		cooperationDefectionRulesDialogOpen = true;
+	}} onCancel={discardPendingCooperationDefectionJoin} />
 
 	<ProfileDialog
 		onOpenChange={handleProfileOpenChange}
@@ -2939,15 +3022,15 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			{selectedCharacterId}
 			traceReplyFixtureEnabled={devTraceReplyFixtureEnabled}
 			canAddLiveReply={!devTraceReplies.some((reply) => reply.id === 'c'.repeat(64))}
-			riftPlaygroundEnabled={devRiftPlaygroundEnabled}
-			botPreset={devRiftPlaygroundState?.preset ?? 'cooperative'}
-			canAdvanceRift={Boolean(devRiftPlaygroundState && devRiftPlayground?.canAdvance())}
+			cooperationDefectionPlaygroundEnabled={devCooperationDefectionPlaygroundEnabled}
+			botPreset={devCooperationDefectionPlaygroundState?.preset ?? 'cooperative'}
+			canAdvanceCooperationDefection={Boolean(devCooperationDefectionPlaygroundState && devCooperationDefectionPlayground?.canAdvance())}
 			onCharacterChange={selectSandboxCharacter}
 			onReset={resetDevScenario}
 			onAddLiveReply={injectDevTraceLiveReply}
 			onInjectLiveSpeech={injectDevLiveSpeech}
-			onBotPresetChange={changeDevRiftPreset}
-			onAdvanceRift={advanceDevRiftPhase}
+			onBotPresetChange={changeDevCooperationDefectionPreset}
+			onAdvanceCooperationDefection={advanceDevCooperationDefectionPhase}
 		/>
 	{:else if selfPositionWriteState.kind === 'retryable' && !isWorldSelfActive}
 		<WorldEntryControls onRetry={retryWorldEntry} />

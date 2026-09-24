@@ -14,7 +14,7 @@ Rootの生成・暗号化保存、BIP85によるIdentity導出、固定3候補�
 
 - 公開サービス名 / サイトタイトル
 - 正式公開時のリアルタイムイベント種別と公式protocol key
-  - prototypeでは最初のexperimental eventとして `綻び` / `rift` を使用する
+  - prototypeでは最初のexperimental eventとして「協力と抜け駆け」 / `cooperation-defection:1` を使用する
   - prototypeの `kind 7070` は実験用であり、正式公開時に恒久採用する公式event kindは未決定である
 - 正式公開時の恒久NIP-32 namespace
   - prototypeでは `io.github.lokuyow.persona-bubble-field` を使用する

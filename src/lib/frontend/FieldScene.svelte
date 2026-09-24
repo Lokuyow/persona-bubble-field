@@ -11,14 +11,13 @@
 	import { isWithinTraceInvestigationRange, type TraceRootCell } from '$lib/traceInvestigation';
 	import type { ParsedWorldMessage } from '$lib/nostrProtocol';
 	import { ADJUSTMENT_TERMINAL, FIXED_FIELD_FACILITIES } from '$lib/fieldFacilities';
-	import type { RiftHole } from '$lib/rift';
+	import type { CooperationDefectionGroup } from '$lib/cooperationDefection';
 
 	const FIELD_BACKGROUND_ASSET = '/field/prototype-danchi-courtyard.webp';
 	const TRACE_ICON_ASSET = '/trace/trace-icon.svg';
 	const TRACE_DEATH_ICON_ASSET = '/trace/trace-death-icon.svg';
 	const MENDING_TERMINAL_ASSET = '/field/objects/mending-terminal.webp';
 	const ADJUSTMENT_TERMINAL_ASSET = '/field/objects/adjustment-terminal.webp';
-	const RIFT_ASSET = '/field/objects/rift.webp';
 
 	export type FieldParticipantView = ProjectedParticipant<Participant>;
 	export type TraceMarkerCell = TraceRootCell & Readonly<{
@@ -53,9 +52,9 @@
 		proximityFeedback: Readonly<{ position: GridPosition; label: string }> | null;
 		traceOnlyCellTriggers: readonly GridPosition[];
 		facilityCellTriggers: readonly GridPosition[];
-		realtimeHoles: readonly RiftHole[];
-		realtimeHoleTriggers: readonly RiftHole[];
-		participatingRiftHoleId: string | null;
+		realtimeGroups: readonly CooperationDefectionGroup[];
+		realtimeGroupTriggers: readonly CooperationDefectionGroup[];
+		participatingCooperationDefectionGroupId: string | null;
 		participantViews: readonly FieldParticipantView[];
 		selfProjectionId: string;
 		movingParticipantIds: ReadonlySet<string>;
@@ -86,9 +85,9 @@
 		proximityFeedback,
 		traceOnlyCellTriggers,
 		facilityCellTriggers,
-		realtimeHoles,
-		realtimeHoleTriggers,
-		participatingRiftHoleId,
+		realtimeGroups,
+		realtimeGroupTriggers,
+		participatingCooperationDefectionGroupId,
 		participantViews,
 		selfProjectionId,
 		movingParticipantIds,
@@ -167,11 +166,11 @@
 					style={`left: ${(facility.position.x + 0.5) * cellSize}px; top: ${(facility.position.y + 0.5) * cellSize}px;`}><img src={asset(facility.kind === 'mending-terminal' ? MENDING_TERMINAL_ASSET : ADJUSTMENT_TERMINAL_ASSET)} alt="" /></span>
 			{/each}
 		</div>
-		<div class="realtime-hole-layer" aria-label="綻びの抜け穴">
-			{#each realtimeHoles as hole (hole.id)}
-				<span class={['realtime-hole', { 'realtime-hole-participating': hole.id === participatingRiftHoleId }]} data-realtime-hole-id={hole.id} data-realtime-hole-position={`${hole.position.x},${hole.position.y}`}
-					data-realtime-hole-participating={hole.id === participatingRiftHoleId ? 'true' : undefined}
-					style={`left: ${(hole.position.x + 0.5) * cellSize}px; top: ${(hole.position.y + 0.5) * cellSize}px;`}><img src={asset(RIFT_ASSET)} alt="" /></span>
+		<div class="realtime-group-layer" aria-label="協力と抜け駆けの参加地点">
+			{#each realtimeGroups as group (group.id)}
+				<span class={['realtime-group', { 'realtime-group-participating': group.id === participatingCooperationDefectionGroupId }]} data-realtime-group-id={group.id} data-realtime-group-position={`${group.position.x},${group.position.y}`}
+					data-realtime-group-participating={group.id === participatingCooperationDefectionGroupId ? 'true' : undefined}
+					style={`left: ${(group.position.x + 0.5) * cellSize}px; top: ${(group.position.y + 0.5) * cellSize}px;`}></span>
 			{/each}
 		</div>
 		{#if proximityFeedback}
@@ -183,18 +182,18 @@
 			>{proximityFeedback.label}</div>
 		{/if}
 		<div class="field-cell-selection-layer" aria-label="Trace investigation cells">
-			{#each realtimeHoleTriggers as hole (hole.id)}
+			{#each realtimeGroupTriggers as group (group.id)}
 				<button
-					class={['field-cell-selection-trigger', 'realtime-hole-trigger', { 'realtime-hole-trigger-participating': hole.id === participatingRiftHoleId }]}
+					class={['field-cell-selection-trigger', 'realtime-group-trigger', { 'realtime-group-trigger-participating': group.id === participatingCooperationDefectionGroupId }]}
 					data-field-gesture-origin="selectable"
 					type="button"
-					data-realtime-hole-trigger={hole.id}
-					data-cell-position={`${hole.position.x},${hole.position.y}`}
-					aria-label={hole.id === participatingRiftHoleId ? '抜け穴へ参加済み（参加先）' : '抜け穴へ参加'}
-					aria-pressed={hole.id === participatingRiftHoleId}
-					style={`left: ${hole.position.x * cellSize}px; top: ${hole.position.y * cellSize}px;`}
+					data-realtime-group-trigger={group.id}
+					data-cell-position={`${group.position.x},${group.position.y}`}
+					aria-label={group.id === participatingCooperationDefectionGroupId ? '参加地点に参加済み（参加先）' : '参加地点へ参加'}
+					aria-pressed={group.id === participatingCooperationDefectionGroupId}
+					style={`left: ${group.position.x * cellSize}px; top: ${group.position.y * cellSize}px;`}
 					ondragstart={(event) => event.preventDefault()}
-					onclick={(event) => { event.stopPropagation(); resolveFieldCellSelection(hole.position, event.currentTarget as HTMLButtonElement); }}
+					onclick={(event) => { event.stopPropagation(); resolveFieldCellSelection(group.position, event.currentTarget as HTMLButtonElement); }}
 				></button>
 			{/each}
 			{#each facilityCellTriggers as position (`facility-${position.x},${position.y}`)}
@@ -354,14 +353,16 @@
 		transform: translate(-50%, -50%); pointer-events: none;
 	}
 	.field-facility img { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
-	.realtime-hole-layer { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
-	.realtime-hole {
+	.realtime-group-layer { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
+	.realtime-group {
 		position: absolute; display: grid; width: calc(var(--cell-size) * 0.84); height: calc(var(--cell-size) * 0.84);
-		place-items: center; transform: translate(-50%, -50%); pointer-events: none;
+		place-items: center; border: 2px solid #486c82; border-radius: 50%; background: rgba(231, 241, 245, .92);
+		box-shadow: inset 0 0 0 4px rgba(72, 108, 130, .12); transform: translate(-50%, -50%); pointer-events: none;
 	}
-	.realtime-hole img { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
-	.realtime-hole-participating { border: 2px solid #8d4692; border-radius: 50%; box-shadow: 0 0 0 3px rgba(141, 70, 146, .28); }
-	.realtime-hole-participating::after { content: '参加済み'; position: absolute; top: calc(100% + 3px); left: 50%; padding: 1px 4px; border-radius: 4px; background: #8d4692; color: white; font-size: 9px; line-height: 1.2; white-space: nowrap; transform: translateX(-50%); }
+	.realtime-group::before { content: ''; width: 34%; height: 34%; border-radius: 50%; background: #486c82; }
+	.realtime-group-participating { border-color: #8d4692; box-shadow: 0 0 0 3px rgba(141, 70, 146, .28); }
+	.realtime-group-participating::before { background: #8d4692; }
+	.realtime-group-participating::after { content: '参加済み'; position: absolute; top: calc(100% + 3px); left: 50%; padding: 1px 4px; border-radius: 4px; background: #8d4692; color: white; font-size: 9px; line-height: 1.2; white-space: nowrap; transform: translateX(-50%); }
 
 	.trace-marker {
 		position: absolute;
@@ -455,7 +456,7 @@
 		outline: 3px solid var(--color-focus-ring);
 		outline-offset: -5px;
 	}
-	.realtime-hole-trigger-participating { border-radius: 50%; }
+	.realtime-group-trigger-participating { border-radius: 50%; }
 
 	.trace-ghost {
 		position: absolute;

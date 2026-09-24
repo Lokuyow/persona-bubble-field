@@ -1,0 +1,317 @@
+import { expect, test, type Locator, type Page } from '@playwright/test';
+import { HDKey } from '@scure/bip32';
+import { entropyToMnemonic, mnemonicToSeedSync } from '@scure/bip39';
+import { wordlist as englishWordlist } from '@scure/bip39/wordlists/english.js';
+import { finalizeEvent, getPublicKey, verifyEvent, type Event as NostrEvent } from 'nostr-tools/pure';
+import {
+	buildWorldStateEventTemplate,
+	WORLD_STATE_KIND,
+	buildDeathTraceEventTemplate,
+	buildTraceReplyTemplate,
+	buildWorldMessageTemplate,
+	parseTraceReplyCandidate,
+	parseWorldMessage,
+	validateTraceReplyCandidate
+} from '../../src/lib/nostrProtocol';
+import {
+	buildCooperationDefectionActionTemplate,
+	buildCooperationDefectionCommitAction,
+	buildCooperationDefectionRevealAction,
+	buildManualCooperationDefectionInstanceId,
+	deriveCooperationDefectionGroupPositions,
+	getCooperationDefectionRoundSchedule,
+	getCooperationDefectionSchedule,
+	getCooperationDefectionScheduleForInstance,
+	COOPERATION_DEFECTION_CONSULTATION_MS,
+	COOPERATION_DEFECTION_PROTOCOL_KEY,
+	type CooperationDefectionAction
+} from '../../src/lib/cooperationDefection';
+import { buildRealtimeControlEventTemplate, finalizeRealtimeEvent } from '../../src/lib/realtimeEvents';
+import { SPEECH_SHORTCUT_IDS } from '../../src/lib/speechSubmission';
+import { characterPicturePath } from '../../src/lib/character';
+import { requireCharacterFromPubkey, resolveCharacterFromPubkey } from '../../src/lib/characterAssignment';
+import { deriveBip85NostrEntropy } from '../../src/lib/bip85';
+import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL } from '../../src/lib/fieldFacilities';
+import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
+import { installFieldFrameSampling, readFieldFrames, sampleRenderedField } from './helpers/fieldFrames';
+import { CHANNEL_ID, AUTHORITATIVE_RELAYS, fixtureSecret, testEvents, upcomingRegistrationSchedule, nextScheduledCooperationDefectionSchedule, signedCooperationDefectionAction, syntheticChannelFixture, installDelayedRelay, relayState, seedRelayAccount, readRelayGameState, realtimeInstanceIds, isRealtimeRequest, readRealtimePendingInstances, seedRealtimePendingInstance, chooseHorizontalMove } from './helpers/relayHarness';
+
+const COOPERATION_DEFECTION_SELF_POSITION = { x: 3, y: 2 } as const;
+const COOPERATION_DEFECTION_FIELD_SIZE = { columns: 16, rows: 8 } as const;
+
+function scheduleWithDistantFirstGroup(startSchedule: ReturnType<typeof getCooperationDefectionSchedule>) {
+	let schedule = startSchedule;
+	for (let attempt = 0; attempt < 32; attempt += 1) {
+		const group = deriveCooperationDefectionGroupPositions(schedule.instanceId, COOPERATION_DEFECTION_FIELD_SIZE)[0];
+		if (Math.max(Math.abs(group.position.x - COOPERATION_DEFECTION_SELF_POSITION.x), Math.abs(group.position.y - COOPERATION_DEFECTION_SELF_POSITION.y)) > 1) {
+			return { schedule, group };
+		}
+		const nextSchedule = nextScheduledCooperationDefectionSchedule(schedule);
+		if (nextSchedule.instanceId === schedule.instanceId) throw new Error('CooperationDefection schedule search did not advance to a new instance.');
+		schedule = nextSchedule;
+	}
+	throw new Error('Could not find a CooperationDefection schedule with a distant first group within 32 days.');
+}
+
+
+test.describe('Relay startup', () => {
+	test('shows each participant the result for their own group', async ({ browser }) => {
+		const schedule = upcomingRegistrationSchedule();
+		const groups = deriveCooperationDefectionGroupPositions(schedule.instanceId, { columns: 16, rows: 8 }, 7);
+		const [cooperationGroup, defectionGroup] = groups;
+		if (!cooperationGroup || !defectionGroup) throw new Error('Expected two event groups.');
+		const round = getCooperationDefectionRoundSchedule(schedule, 1);
+		const players = [
+			{ secret: fixtureSecret(31), groupId: cooperationGroup.id, choice: 'cooperate' as const, nonce: '1'.repeat(64) },
+			{ secret: fixtureSecret(32), groupId: defectionGroup.id, choice: 'defect' as const, nonce: '2'.repeat(64) },
+			{ secret: fixtureSecret(33), groupId: cooperationGroup.id, choice: 'cooperate' as const, nonce: '3'.repeat(64) },
+			{ secret: fixtureSecret(34), groupId: cooperationGroup.id, choice: 'cooperate' as const, nonce: '4'.repeat(64) },
+			{ secret: fixtureSecret(35), groupId: defectionGroup.id, choice: 'cooperate' as const, nonce: '5'.repeat(64) },
+			{ secret: fixtureSecret(36), groupId: defectionGroup.id, choice: 'defect' as const, nonce: '6'.repeat(64) },
+			{ secret: fixtureSecret(37), groupId: defectionGroup.id, choice: 'defect' as const, nonce: '7'.repeat(64) }
+		];
+		const joins = players.map(({ secret, groupId }) => signedCooperationDefectionAction(secret, schedule, { action: 'join', groupId }, schedule.registrationAtMs + 1_000));
+		const commits = players.map(({ secret, groupId, choice, nonce }) => {
+			const pubkey = getPublicKey(secret);
+			const action = buildCooperationDefectionCommitAction({ instanceId: schedule.instanceId, groupId, round: 1, authorPubkey: pubkey, choice, nonce });
+			return { event: signedCooperationDefectionAction(secret, schedule, action, round.selectionAtMs + 1_000), choice, nonce, groupId };
+		});
+		const reveals = commits.map(({ event, choice, nonce, groupId }, index) => signedCooperationDefectionAction(players[index]!.secret, schedule,
+			buildCooperationDefectionRevealAction({ groupId, round: 1, commitId: event.id, choice, nonce }), round.resultAtMs + 1_000));
+		const realtimeEvents = [...joins, ...commits.map(({ event }) => event), ...reveals];
+		const startTime = schedule.registrationAtMs + 1_000;
+		const pageCooperate = await browser.newPage();
+		const pageDefect = await browser.newPage();
+		const selfCooperate = players[0]!;
+		const selfDefect = players[1]!;
+		const prepareParticipant = async (page: Page, player: (typeof players)[number]) => {
+			const pubkey = getPublicKey(player.secret);
+			await page.clock.install({ time: startTime });
+			await installHostOwnedStub(page);
+			await installDelayedRelay(page, { primaryEvents: testEvents(startTime), realtimeEvents, persistAcrossReload: true, realtimePublishOutcome: 'accepted' });
+			await seedRelayAccount(page, player.secret, pubkey, startTime + 5 * 24 * 60 * 60 * 1_000);
+			await page.goto('/');
+			await expect(page.locator('[data-realtime-panel]')).toContainText('参加受付');
+			await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+			await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
+			await expect.poll(async () => (await relayState(page)).state.requests.some((request) => (request.filter.kinds as number[])[0] === 7070)).toBe(true);
+			await page.evaluate((events) => {
+				const relay = (window as typeof window & { __relayStartupTest: { injectRealtimeEvent(event: object): void } }).__relayStartupTest;
+				for (const event of events) relay.injectRealtimeEvent(event);
+			}, realtimeEvents);
+			await page.clock.setSystemTime(round.selectionAtMs + 1_000);
+			await page.clock.runFor(1_000);
+			await page.clock.setSystemTime(round.resultAtMs + 1_000);
+			await page.clock.runFor(1_000);
+			await page.clock.setSystemTime(round.revealCutoffAtMs + 1_000);
+			await page.clock.runFor(1_000);
+		};
+		try {
+			await Promise.all([prepareParticipant(pageCooperate, selfCooperate), prepareParticipant(pageDefect, selfDefect)]);
+			const cooperateResult = pageCooperate.locator('[data-cooperation-defection-round-result]');
+			const defectResult = pageDefect.locator('[data-cooperation-defection-round-result]');
+			await expect(cooperateResult).toContainText('全員協力');
+			await expect(cooperateResult).toContainText('あなた: +1,000pt');
+			await expect(cooperateResult).not.toContainText('協力失敗');
+			await expect(defectResult).toContainText('協力失敗');
+			await expect(defectResult).toContainText('あなた: 寿命 −3日');
+			await expect(defectResult).not.toContainText('全員協力');
+		} finally {
+			await Promise.all([pageCooperate.close(), pageDefect.close()]);
+		}
+	});
+
+	test('does not create a settlement recovery marker for a spectator receiving another player join', async ({ page }) => {
+		const schedule = upcomingRegistrationSchedule();
+		const group = deriveCooperationDefectionGroupPositions(schedule.instanceId, { columns: 16, rows: 8 })[0];
+		const spectatorEvent = signedCooperationDefectionAction(fixtureSecret(20), schedule, { action: 'join', groupId: group.id }, schedule.registrationAtMs + 1_000);
+		await page.clock.install({ time: schedule.registrationAtMs + 1_000 });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { primaryEvents: testEvents(schedule.registrationAtMs + 1_000), realtimeEvents: [spectatorEvent] });
+		const secret = fixtureSecret(19);
+		await seedRelayAccount(page, secret, getPublicKey(secret));
+		await page.goto('/');
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => (request.filter.kinds as number[])[0] === 42)).toBe(true);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => (request.filter.kinds as number[])[0] === 7070)).toBe(true);
+		await expect.poll(async () => readRealtimePendingInstances(page)).toEqual([]);
+	});
+
+	test('rejects a stale CooperationDefection join confirmation after movement or registration ends', async ({ page }) => {
+		const { schedule, group } = scheduleWithDistantFirstGroup(upcomingRegistrationSchedule());
+		const startTime = schedule.registrationAtMs + 1_000;
+		const selfSecret = fixtureSecret(19);
+		const selfPubkey = getPublicKey(selfSecret);
+		await page.clock.install({ time: startTime });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { primaryEvents: testEvents(startTime), realtimeEvents: [], realtimePublishOutcome: 'accepted' });
+		await seedRelayAccount(page, selfSecret, selfPubkey);
+		await page.goto('/');
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => (request.filter.kinds as number[])[0] === 42)).toBe(true);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		await expect(page.locator('[data-realtime-group-trigger]')).toHaveCount(1);
+
+		const nearPosition = group.position.y > 0 ? { x: group.position.x, y: group.position.y - 1 } : { x: group.position.x, y: group.position.y + 1 };
+		const nearEvent = finalizeEvent(buildWorldStateEventTemplate({ channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: nearPosition, slot: 0, createdAt: Math.floor((startTime + 2_000) / 1000) }), selfSecret);
+		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), nearEvent);
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', `${nearPosition.x},${nearPosition.y}`);
+
+		const farPosition = { x: group.position.x > 2 ? group.position.x - 2 : group.position.x + 2, y: group.position.y };
+		const farEvent = finalizeEvent(buildWorldStateEventTemplate({ channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: farPosition, slot: 0, createdAt: Math.floor((startTime + 3_000) / 1000) }), selfSecret);
+		await page.locator('[data-realtime-group-trigger]').click();
+		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), farEvent);
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', `${farPosition.x},${farPosition.y}`);
+		await page.getByRole('button', { name: '参加する' }).click();
+		await expect(page.getByRole('dialog')).toHaveCount(0);
+
+		const nearEventAgain = finalizeEvent(buildWorldStateEventTemplate({ channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: nearPosition, slot: 0, createdAt: Math.floor((startTime + 4_000) / 1000) }), selfSecret);
+		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), nearEventAgain);
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', `${nearPosition.x},${nearPosition.y}`);
+		await page.locator('[data-realtime-group-trigger]').click();
+		await page.clock.setSystemTime(schedule.gameAtMs + 1_000);
+		await page.clock.runFor(1_000);
+		await page.getByRole('button', { name: '参加する' }).click();
+		await expect(page.getByRole('dialog')).toHaveCount(0);
+		expect((await relayState(page)).state.published.filter((event) => event.kind === 7070 && event.pubkey === selfPubkey)).toHaveLength(0);
+	});
+
+	test('completes CooperationDefection join, snapshot, commit, automatic reveal, settlement, and reload recovery', async ({ page }) => {
+		const { schedule, group } = scheduleWithDistantFirstGroup(upcomingRegistrationSchedule());
+		const otherPlayers = [
+			{ secret: fixtureSecret(20), choice: 'cooperate' as const, nonce: '1'.repeat(64) },
+			{ secret: fixtureSecret(21), choice: 'cooperate' as const, nonce: '2'.repeat(64) }
+		];
+		const otherJoins = otherPlayers.map(({ secret }) => signedCooperationDefectionAction(secret, schedule, { action: 'join', groupId: group.id }, schedule.registrationAtMs + 1_000));
+		const otherCommits = otherPlayers.map(({ secret, choice, nonce }) => {
+			const pubkey = getPublicKey(secret);
+			const action = buildCooperationDefectionCommitAction({ instanceId: schedule.instanceId, groupId: group.id, round: 1, authorPubkey: pubkey, choice, nonce });
+			const event = signedCooperationDefectionAction(secret, schedule, action, getCooperationDefectionRoundSchedule(schedule, 1).selectionAtMs + 1_000);
+			return { secret, pubkey, choice, nonce, event };
+		});
+		const otherReveals = otherCommits.map(({ secret, choice, nonce, event }) => signedCooperationDefectionAction(secret, schedule,
+			buildCooperationDefectionRevealAction({ groupId: group.id, round: 1, commitId: event.id, choice, nonce }), getCooperationDefectionRoundSchedule(schedule, 1).resultAtMs + 1_000));
+		const startTime = schedule.registrationAtMs + 1_000;
+		await page.clock.install({ time: startTime });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, {
+			primaryEvents: testEvents(startTime),
+			realtimeEvents: [...otherJoins, ...otherCommits.map(({ event }) => event), ...otherReveals],
+			persistAcrossReload: true,
+			realtimePublishOutcome: 'accepted'
+		});
+		const selfSecret = fixtureSecret(19);
+		const selfPubkey = getPublicKey(selfSecret);
+		await seedRelayAccount(page, selfSecret, selfPubkey);
+		await page.goto('/');
+		await expect(page.locator('[data-realtime-panel]')).toContainText('参加受付');
+		const panelLayout = await page.locator('[data-realtime-panel]').evaluate((panel) => {
+			const rect = panel.getBoundingClientRect();
+			return { centerX: rect.left + rect.width / 2, top: rect.top, right: rect.right, viewportWidth: window.innerWidth };
+		});
+		expect(Math.abs(panelLayout.centerX - panelLayout.viewportWidth / 2)).toBeLessThanOrEqual(1);
+		expect(panelLayout.top).toBeGreaterThanOrEqual(0);
+		expect(panelLayout.right).toBeLessThanOrEqual(panelLayout.viewportWidth);
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => (request.filter.kinds as number[])[0] === 42)).toBe(true);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => (request.filter.kinds as number[])[0] === 7070)).toBe(true);
+		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${selfPubkey}"]`)).toBeVisible();
+
+		await page.locator('[data-realtime-group-trigger]').click();
+		await page.clock.runFor(50);
+		expect((await relayState(page)).state.published.filter((event) => event.kind === 7070 && event.pubkey === selfPubkey)).toHaveLength(0);
+		const nearPosition = group.position.y > 0 ? { x: group.position.x, y: group.position.y - 1 } : { x: group.position.x, y: group.position.y + 1 };
+		const nearEvent = finalizeEvent(buildWorldStateEventTemplate({ channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: nearPosition, slot: 0, createdAt: Math.floor((startTime + 2_000) / 1000) }), selfSecret);
+		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), nearEvent);
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', `${nearPosition.x},${nearPosition.y}`);
+		await page.locator('[data-realtime-group-trigger]').click();
+		await expect(page.getByRole('dialog')).toContainText('3〜6人 / 全3ラウンド');
+		await expect(page.getByRole('dialog')).toContainText('寿命を3日失います。残り寿命によっては死亡します。');
+		expect((await relayState(page)).state.published.filter((event) => event.kind === 7070 && event.pubkey === selfPubkey)).toHaveLength(0);
+		await page.getByRole('button', { name: 'キャンセル' }).click();
+		await expect(page.getByRole('dialog')).toHaveCount(0);
+		expect((await relayState(page)).state.published.filter((event) => event.kind === 7070 && event.pubkey === selfPubkey)).toHaveLength(0);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { setRealtimePublishOutcome(outcome: 'accepted' | 'rejected' | 'echo' | 'no-response'): void } }).__relayStartupTest.setRealtimePublishOutcome('rejected'));
+		await page.locator('[data-realtime-group-trigger]').click();
+		await page.getByRole('button', { name: '参加する' }).click();
+		await expect(page.getByRole('dialog')).toHaveCount(0);
+		await expect.poll(async () => (await relayState(page)).state.published.filter((event) => {
+			if (event.kind !== 7070 || event.pubkey !== selfPubkey) return false;
+			try { return (JSON.parse(event.content) as { action?: string }).action === 'join'; } catch { return false; }
+		}).length).toBeGreaterThan(0);
+		await expect(page.locator('[data-realtime-panel]')).not.toContainText('参加済み');
+		await expect(page.locator('[data-realtime-group-trigger][aria-pressed="true"]')).toHaveCount(0);
+		await expect.poll(async () => readRealtimePendingInstances(page)).toEqual([]);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { setRealtimePublishOutcome(outcome: 'accepted' | 'rejected' | 'echo' | 'no-response'): void } }).__relayStartupTest.setRealtimePublishOutcome('accepted'));
+		await page.locator('[data-realtime-group-trigger]').click();
+		await page.getByRole('button', { name: '参加する' }).click();
+		await expect.poll(async () => (await relayState(page)).state.published.some((event) => {
+			if (event.kind !== 7070 || event.pubkey !== selfPubkey) return false;
+			try { return (JSON.parse(event.content) as { action?: string }).action === 'join'; } catch { return false; }
+		})).toBe(true);
+		await expect(page.locator('[data-realtime-panel]')).toContainText('参加済み');
+		await expect(page.locator('[data-realtime-group-trigger][aria-pressed="true"]')).toHaveCount(1);
+		await expect(page.locator('[data-realtime-group-trigger][aria-pressed="true"]')).toHaveAttribute('aria-label', '参加地点に参加済み（参加先）');
+
+		const round = getCooperationDefectionRoundSchedule(schedule, 1);
+		await page.clock.setSystemTime(round.selectionAtMs + 1_000);
+		await page.clock.runFor(1_000);
+		await expect(page.locator('[data-realtime-panel]')).toContainText('選択');
+		await expect(page.locator('[data-realtime-panel]')).toContainText('参加者: 3');
+		await page.locator('[data-cooperation-defection-choice="cooperate"]').click();
+		await expect(page.locator('[data-cooperation-defection-choice="cooperate"]')).toBeDisabled();
+		await expect.poll(async () => (await relayState(page)).state.published.some((event) => event.kind === 7070 && event.pubkey === selfPubkey && JSON.parse(event.content).action === 'commit')).toBe(true);
+
+		await page.clock.setSystemTime(round.resultAtMs + 1_000);
+		await page.clock.runFor(1_000);
+		await expect.poll(async () => (await relayState(page)).state.published.some((event) => event.kind === 7070 && event.pubkey === selfPubkey && JSON.parse(event.content).action === 'reveal')).toBe(true);
+		await expect(page.locator('[data-cooperation-defection-selection-status]')).toContainText('自動公開済み');
+
+		await page.clock.setSystemTime(round.resultAtMs + 2_000);
+		await page.reload({ waitUntil: 'domcontentloaded' });
+		await expect(page.locator('[data-realtime-panel]')).toContainText('ゲーム中');
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => (request.filter.kinds as number[])[0] === 42)).toBe(true);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => (request.filter.kinds as number[])[0] === 7070)).toBe(true);
+		await page.evaluate((events) => {
+			const relay = (window as typeof window & { __relayStartupTest: { injectRealtimeEvent(event: object): void } }).__relayStartupTest;
+			for (const event of events) relay.injectRealtimeEvent(event);
+		}, [...otherJoins, ...otherCommits.map(({ event }) => event), ...otherReveals]);
+		await page.clock.runFor(100);
+		await expect.poll(async () => (await relayState(page)).state.published.some((event) => event.kind === 42 && event.pubkey === selfPubkey && event.content === '協力')).toBe(false);
+		await page.locator('.speech-type-toggle').click();
+		await expect(page.locator('.speech-type-toggle')).toHaveAttribute('data-speech-type', 'shout');
+		await page.clock.setSystemTime(round.revealCutoffAtMs + 1_000);
+		await page.clock.runFor(2_000);
+		await expect.poll(async () => (await readRelayGameState(page)).points).toBe(1_000);
+		await expect(page.locator('[data-cooperation-defection-round-result]')).toContainText('+1,000pt');
+		const automaticSpeech = (await relayState(page)).state.published.find((event) => event.kind === 42 && event.pubkey === selfPubkey && event.content === '協力');
+		expect(automaticSpeech).toBeDefined();
+		expect(verifyEvent(automaticSpeech as unknown as NostrEvent)).toBe(true);
+		expect(parseWorldMessage(automaticSpeech as unknown as NostrEvent, CHANNEL_ID)).toMatchObject({ content: '協力', speechType: 'normal' });
+		expect(automaticSpeech?.tags).toContainEqual(['l', 'chat', 'io.github.lokuyow.persona-bubble-field']);
+		await expect(page.locator(`.bubble[data-bubble-participant-id="${selfPubkey}"]`).filter({ hasText: '協力' })).toBeVisible();
+		await expect(page.locator(`.recent-message-timeline [data-timeline-pubkey="${selfPubkey}"] .timeline-content`).filter({ hasText: /^協力$/ })).toBeVisible();
+		await expect(page.locator('.speech-type-toggle')).toHaveAttribute('data-speech-type', 'shout');
+		await expect(page.locator('.participant[data-self="true"]')).toBeVisible();
+
+		await page.reload({ waitUntil: 'domcontentloaded' });
+		await expect(page.locator('[data-realtime-panel]')).toContainText('ゲーム中');
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => (request.filter.kinds as number[])[0] === 42)).toBe(true);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => (request.filter.kinds as number[])[0] === 7070)).toBe(true);
+		await expect.poll(async () => {
+			const state = (await relayState(page)).state;
+			const messageIds = [...state.previousPublished, ...state.published]
+				.filter((event) => event.kind === 42 && event.pubkey === selfPubkey && event.content === '協力')
+				.map((event) => event.id);
+			return new Set(messageIds).size;
+		}).toBe(1);
+
+		await page.clock.setSystemTime(schedule.endedAtMs + 1_000);
+		await page.clock.runFor(1_000);
+		await expect.poll(async () => readRealtimePendingInstances(page)).toEqual([]);
+		await expect.poll(async () => page.evaluate(() => (window as typeof window & { __relayStartupTest: { activeRealtimeCount(): number } }).__relayStartupTest.activeRealtimeCount())).toBe(AUTHORITATIVE_RELAYS.length);
+		await expect(page.locator('[data-realtime-group-trigger]')).toHaveCount(0);
+		await expect.poll(async () => (await readRelayGameState(page)).points).toBe(1_000);
+	});
+});

@@ -95,7 +95,7 @@ export type RealtimeSettlementLedger = Readonly<{
 	appliedOutcomeIds: readonly string[];
 }>;
 
-export type RealtimeOutcome = Readonly<{ id: string; kind: 'points' | 'death'; points?: number; instanceId: string }>;
+export type RealtimeOutcome = Readonly<{ id: string; kind: 'points' | 'death' | 'lifespan-loss'; points?: number; lifespanLossMs?: number; instanceId: string }>;
 
 export type PlayerLifecycle = Readonly<{
 	schemaVersion: 2;
@@ -129,7 +129,7 @@ export type WorldWriteReservation = Readonly<{ token: number; createdAt: number;
 export type WorldWriteReservationResult =
 	| Readonly<{ kind: 'reserved'; reservation: WorldWriteReservation }>
 	| Readonly<{ kind: 'wait'; untilSecond: number }>
-	| Readonly<{ kind: 'stale' | 'corrupt' | 'clock-regressed' }>;
+	| Readonly<{ kind: 'duplicate' | 'stale' | 'corrupt' | 'clock-regressed' }>;
 export type TerminalExitJournalRequest = Readonly<{
 	channelId: string;
 	position: Readonly<{ x: number; y: number }>;
@@ -187,6 +187,7 @@ export type RealtimeSettlementResult =
 	| Readonly<{ kind: 'stale' }>
 	| CorruptLifecycleState;
 export type RealtimeDeathResult = Readonly<{ kind: 'transitioned'; exit?: CommittedTerminalExit }> | Readonly<{ kind: 'duplicate' | 'stale' }> | CorruptLifecycleState;
+export type RealtimeLifespanLossResult = Readonly<{ kind: 'survived'; persona: PersonaSnapshot }> | Readonly<{ kind: 'transitioned'; exit?: CommittedTerminalExit }> | Readonly<{ kind: 'duplicate' | 'stale' }> | CorruptLifecycleState;
 
 type EncryptedRootEntropy = Readonly<{ version: 1; iv: Uint8Array; ciphertext: Uint8Array }>;
 type PreparedRoot = Readonly<{ entropy: Uint8Array; wrappingKey: CryptoKey; encryptedEntropy: EncryptedRootEntropy }>;
@@ -640,6 +641,7 @@ type WorldWriteJournalRecord = Readonly<{
 	exitSecond: number | null;
 	nextToken: number;
 	confirmedPosition: VerifiedEvent | null;
+	messageDedupeIds?: readonly string[];
 }>;
 
 function journalKey(channelId: string, pubkey: string): string {
@@ -655,13 +657,14 @@ function validJournal(value: unknown, channelId: string, pubkey: string): value 
 		second(record.lastReservedSecond) && second(record.lastPositiveSecond) && second(record.exitSecond) &&
 		(record.consumedSlots === 0 || record.consumedSlots === 1 || record.consumedSlots === 2) &&
 		Number.isSafeInteger(record.nextToken) && (record.nextToken as number) >= 0 &&
+		(record.messageDedupeIds === undefined || Array.isArray(record.messageDedupeIds) && record.messageDedupeIds.every((id) => typeof id === 'string' && /^[0-9a-f]{64}$/.test(id)) && new Set(record.messageDedupeIds).size === record.messageDedupeIds.length) &&
 		(record.confirmedPosition === null || typeof record.confirmedPosition === 'object' && !Array.isArray(record.confirmedPosition));
 }
 
 function emptyJournal(scope: WorldWriteJournalScope): WorldWriteJournalRecord {
 	return { version: 1, channelId: scope.channelId, pubkey: scope.identity.pubkey, runNumber: scope.runNumber,
 		lastReservedSecond: null, consumedSlots: 0, lastPositiveSecond: null, exitSecond: null,
-		nextToken: 0, confirmedPosition: null };
+		nextToken: 0, confirmedPosition: null, messageDedupeIds: [] };
 }
 
 function journalScopeIsActive(player: unknown, scope: WorldWriteJournalScope): player is PlayerLifecycle {
@@ -693,9 +696,11 @@ export async function reserveWorldPositive(input: Readonly<{
 	observedConsumedSlots: 0 | 1 | 2;
 	observedExitSecond: number | null;
 	freshAfterSecond?: number;
+	messageDedupeId?: string;
 }>): Promise<WorldWriteReservationResult> {
 	const { scope } = input;
-	if (!Number.isSafeInteger(input.nowSecond) || input.nowSecond < 0) return { kind: 'corrupt' };
+	if (!Number.isSafeInteger(input.nowSecond) || input.nowSecond < 0 || input.messageDedupeId !== undefined &&
+		(input.kind !== 'message' || !/^[0-9a-f]{64}$/.test(input.messageDedupeId))) return { kind: 'corrupt' };
 	return withLifecycle(async (db) => {
 		const tx = db.transaction([PLAYER_LIFECYCLE_STORE_NAME, WORLD_WRITE_JOURNAL_STORE_NAME], 'readwrite');
 		try {
@@ -706,6 +711,8 @@ export async function reserveWorldPositive(input: Readonly<{
 			const raw = await store.get(key);
 			if (raw !== undefined && !validJournal(raw, scope.channelId, scope.identity.pubkey)) { await tx.done; return { kind: 'corrupt' } as const; }
 			const record = (raw ?? emptyJournal(scope)) as WorldWriteJournalRecord;
+			const messageDedupeIds = record.runNumber === scope.runNumber ? record.messageDedupeIds ?? [] : [];
+			if (input.messageDedupeId && messageDedupeIds.includes(input.messageDedupeId)) { await tx.done; return { kind: 'duplicate' } as const; }
 			if (input.observedSecond !== null && input.observedSecond > input.nowSecond ||
 				record.runNumber === scope.runNumber && ((record.lastPositiveSecond ?? -1) > input.nowSecond ||
 					(record.lastReservedSecond ?? -1) > input.nowSecond)) {
@@ -735,7 +742,8 @@ export async function reserveWorldPositive(input: Readonly<{
 				lastReservedSecond: slot === null ? record.lastReservedSecond : createdAt,
 				consumedSlots: slot === null ? record.consumedSlots : slot === 0 ? 1 : 2,
 				lastPositiveSecond: Math.max(record.lastPositiveSecond ?? -1, createdAt), exitSecond: exitSecond < 0 ? null : exitSecond,
-				confirmedPosition: record.runNumber === scope.runNumber ? record.confirmedPosition : null }, key);
+				confirmedPosition: record.runNumber === scope.runNumber ? record.confirmedPosition : null,
+				messageDedupeIds: input.messageDedupeId ? [...messageDedupeIds, input.messageDedupeId] : messageDedupeIds }, key);
 			await tx.done;
 			return { kind: 'reserved', reservation: { token, createdAt, slot } } as const;
 		} catch (error) { try { tx.abort(); } catch { /* already aborted */ } await tx.done.catch(() => {}); throw error; }
@@ -917,7 +925,8 @@ function sameRealtimeRunScope(expected: PersonaSnapshot, activeRun: ActiveRun): 
 
 function validRealtimeOutcome(outcome: RealtimeOutcome): boolean {
 	return typeof outcome.id === 'string' && outcome.id.length > 0 && outcome.id.length <= 240 && typeof outcome.instanceId === 'string' && outcome.instanceId.length > 0 && outcome.instanceId.length <= 160 &&
-		(outcome.kind === 'death' || (outcome.kind === 'points' && Number.isSafeInteger(outcome.points) && (outcome.points as number) > 0));
+		(outcome.kind === 'death' || (outcome.kind === 'points' && Number.isSafeInteger(outcome.points) && (outcome.points as number) > 0) ||
+			(outcome.kind === 'lifespan-loss' && Number.isSafeInteger(outcome.lifespanLossMs) && (outcome.lifespanLossMs as number) > 0));
 }
 
 export async function trackRealtimeEventInstance(expected: PersonaSnapshot, instanceId: string): Promise<boolean> {
@@ -984,6 +993,79 @@ export async function applyRealtimeOutcome(expected: PersonaSnapshot, outcome: R
 			return latest.kind === 'restored' ? { kind: 'applied', persona: latest.persona } : { kind: 'stale' };
 		} catch (error) { try { tx.abort(); } catch { /* already aborted */ } await tx.done.catch(() => {}); throw error; }
 	});
+}
+
+/** Applies a lifespan penalty and its receipt atomically, closing the Run if the effective expiry is reached. */
+export async function applyRealtimeLifespanLoss(
+	expected: PersonaSnapshot,
+	outcome: RealtimeOutcome,
+	prepareTerminalExit?: () => TerminalExitJournalRequest | undefined
+): Promise<RealtimeLifespanLossResult> {
+	if (!validRealtimeOutcome(outcome) || outcome.kind !== 'lifespan-loss') return { kind: 'corrupt', reason: 'player-state' };
+	const observed = await withLifecycle((db) => readRootAndPlayer(db));
+	if (!observed || isCorruptLifecycle(observed) || ('kind' in observed && observed.kind === 'legacy-player-reset')) {
+		return !observed ? { kind: 'corrupt', reason: 'partial-state' } : isCorruptLifecycle(observed) ? observed : { kind: 'corrupt', reason: 'partial-state' };
+	}
+	try {
+		if (observed.player.mode.kind !== 'running' || !samePersonaExpected(expected, observed.player.mode.activeRun)) return { kind: 'stale' };
+		const selection = await prepareDeathSelection(observed.entropy, observed.player);
+		const mutation = await withLifecycle(async (db): Promise<RealtimeLifespanLossResult> => {
+			const tx = db.transaction([PLAYER_LIFECYCLE_STORE_NAME, WORLD_WRITE_JOURNAL_STORE_NAME], 'readwrite');
+			try {
+				const store = tx.objectStore(PLAYER_LIFECYCLE_STORE_NAME);
+				const current = await store.get(PLAYER_STATE);
+				if (!isValidPlayerLifecycle(current)) { await tx.done; return { kind: 'corrupt', reason: 'player-state' }; }
+				const previousLedger = current.realtimeSettlementLedger;
+				if (previousLedger && sameIdentityReference(previousLedger.identity, expected.activeRun.identity) &&
+					previousLedger.runNumber === expected.activeRun.runNumber && previousLedger.appliedOutcomeIds.includes(outcome.id)) {
+					await tx.done;
+					return { kind: 'duplicate' };
+				}
+				if (current.mode.kind !== 'running' || !samePersonaExpected(expected, current.mode.activeRun)) { await tx.done; return { kind: 'stale' }; }
+				const activeRun = current.mode.activeRun;
+				const ledger = scopedRealtimeLedger(current, activeRun);
+				const nowMs = Date.now();
+				if (!isSafeTimestamp(nowMs)) throw new Error('Invalid lifecycle timestamp.');
+				const effectiveExpiry = projectMending(activeRun.gameState, nowMs, activeRun.rootBuild).effectiveExpiresAtMs;
+				const reducedExpiry = effectiveExpiry - (outcome.lifespanLossMs as number);
+				if (!Number.isSafeInteger(reducedExpiry)) throw new Error('Invalid realtime lifespan result.');
+				const receipt = { ...ledger, appliedOutcomeIds: [...ledger.appliedOutcomeIds, outcome.id] };
+				if (nowMs >= reducedExpiry) {
+					const identity = current.identities.find((item) => sameIdentityReference(item, activeRun.identity));
+					if (!identity) { await tx.done; return { kind: 'corrupt', reason: 'identity-reference' }; }
+					const closedIdentity: IdentityRecord = {
+						...identity,
+						status: 'dead',
+						runHistory: [...identity.runHistory, { runNumber: activeRun.runNumber, startedAtMs: activeRun.startedAtMs, endedAtMs: nowMs, outcome: 'dead' }]
+					};
+					const exitRequest = prepareTerminalExit?.();
+					const exit = await commitTerminalFence(tx.objectStore(WORLD_WRITE_JOURNAL_STORE_NAME), activeRun, exitRequest);
+					await store.put({ schemaVersion: PLAYER_SCHEMA_VERSION, rootPoints: current.rootPoints,
+						identities: current.identities.map((item) => item === identity ? closedIdentity : item),
+						mode: { kind: 'selecting', pendingSelection: selection },
+						realtimeSettlementLedger: { ...receipt, pendingInstanceIds: [] } }, PLAYER_STATE);
+					await tx.done;
+					return { kind: 'transitioned', ...(exit ? { exit } : {}) };
+				}
+				const checkpoint = activeRun.gameState.mendingJob
+					? settleMending(activeRun.gameState, nowMs, activeRun.rootBuild, false)
+					: null;
+				const gameState: PersonaGameState = {
+					...activeRun.gameState,
+					...(checkpoint ?? {}),
+					lifespanExpiresAtMs: reducedExpiry
+				};
+				await store.put({ ...current,
+					mode: { kind: 'running', activeRun: { ...activeRun, revision: activeRun.revision + 1, gameState } },
+					realtimeSettlementLedger: receipt }, PLAYER_STATE);
+				await tx.done;
+				return { kind: 'survived', persona: expected };
+			} catch (error) { try { tx.abort(); } catch { /* already aborted */ } await tx.done.catch(() => {}); throw error; }
+		});
+		if (mutation.kind !== 'survived') return mutation;
+		const latest = await loadOrCreateLifecycle();
+		return latest.kind === 'restored' ? { kind: 'survived', persona: latest.persona } : { kind: 'corrupt', reason: 'identity-reference' };
+	} finally { observed.entropy.fill(0); }
 }
 
 async function prepareDeathSelection(entropy: Uint8Array, player: PlayerLifecycle): Promise<PendingSelection> {

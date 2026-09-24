@@ -181,7 +181,7 @@ World State wire contractで表現する。具体仕様は [`SPEC-30-フィー�
 
 realtimeの1本のREQには、channel creatorをauthorとして指定するbounded control filterと、enabled playable protocol keyごとのconcrete instance filterを含める。control filterは `kind=7070`、`#e` channel、control protocolの`#d`、creator `authors`、15分のbounded `since`を持ち、`#i`を持たない。各instance filterは`kind=7070`、`#e` channel、1つのplayable protocol keyの`#d`、そのprotocol keyに属するactive/recovery instanceの`#i`、および必要な`since`を持つ。過去の全gameplay historyを取得せず、protocol key、instance IDs、sinceの対応関係を跨いで混在させない。
 
-instance対象の変更では、現在のrealtime requestだけをCLOSE/disposeしてから新しいfilter bundleで同じ1本を開始する。primary worldとTraceはrestartしない。generationを持つため、古いgenerationのEOSE、CLOSED、timeout、EVENTは新しい状態へ作用しない。control historyはmanual Riftの最大活動期間を覆う15分に限定し、通常tickごとには再構成しない。
+instance対象の変更では、現在のrealtime requestだけをCLOSE/disposeしてから新しいfilter bundleで同じ1本を開始する。primary worldとTraceはrestartしない。generationを持つため、古いgenerationのEOSE、CLOSED、timeout、EVENTは新しい状態へ作用しない。control historyは手動開催の最大活動期間を覆う15分に限定し、通常tickごとには再構成しない。
 
 prototypeの共通envelopeには、project-owned regular kind `7070`、次のtag、およびJSON objectのcontentを使用する。
 

@@ -8,15 +8,15 @@ import {
 	REALTIME_CONTROL_PROTOCOL_KEY
 } from './realtimeEvents';
 import {
-	buildManualRiftInstanceId,
-	getRiftScheduleForInstance,
-	isManualRiftControlScheduleEligible,
-	isManualRiftInstanceScheduleEligible,
-	isManualRiftRegistrationScheduleEligible,
-	RIFT_EVENT_DEFINITION,
-	RIFT_MANUAL_CONTROL_LOOKBACK_SECONDS,
-	selectCanonicalManualRiftControl
-} from './rift';
+	buildManualCooperationDefectionInstanceId,
+	getCooperationDefectionScheduleForInstance,
+	isManualCooperationDefectionControlScheduleEligible,
+	isManualCooperationDefectionInstanceScheduleEligible,
+	isManualCooperationDefectionRegistrationScheduleEligible,
+	COOPERATION_DEFECTION_EVENT_DEFINITION,
+	COOPERATION_DEFECTION_MANUAL_CONTROL_LOOKBACK_SECONDS,
+	selectCanonicalManualCooperationDefectionControl
+} from './cooperationDefection';
 import { assertPrototypeWorldConfig, PROTOTYPE_WORLD_CONFIG, type PrototypeWorldConfig } from './prototypeWorldConfig';
 import type {
 	OperatorRelayAdapter,
@@ -63,8 +63,8 @@ export class OperatorFailure extends Error {
 export type OperatorFailureReason =
 	| 'invalid configuration'
 	| 'control preflight failed'
-	| 'active manual Rift already exists'
-	| 'scheduled Rift conflict'
+	| 'active manual CooperationDefection already exists'
+	| 'scheduled CooperationDefection conflict'
 	| 'confirmation cancelled'
 	| 'invalid operator secret'
 	| 'operator secret is not the channel creator'
@@ -117,7 +117,7 @@ async function activeManualPreflight(
 	output: OperatorOutput,
 	cancelSignal?: AbortSignal
 ) {
-	const since = Math.max(0, unixSeconds(nowMs) - RIFT_MANUAL_CONTROL_LOOKBACK_SECONDS);
+	const since = Math.max(0, unixSeconds(nowMs) - COOPERATION_DEFECTION_MANUAL_CONTROL_LOOKBACK_SECONDS);
 	const result = await relay.query(
 		buildRealtimeControlFilter({ channelId: world.channelId, creatorPubkey: world.creatorPubkey, since }),
 		world.authoritativeRelays
@@ -130,11 +130,11 @@ async function activeManualPreflight(
 	const controls = result.events
 		.map((event) => parseRealtimeControlEnvelope(event, world.channelId, world.creatorPubkey))
 		.filter((control): control is NonNullable<ReturnType<typeof parseRealtimeControlEnvelope>> => control !== null);
-	return selectCanonicalManualRiftControl(controls, nowMs);
+	return selectCanonicalManualCooperationDefectionControl(controls, nowMs);
 }
 
-function assertNoActiveManual(control: ReturnType<typeof selectCanonicalManualRiftControl>): void {
-	if (control) throw new OperatorFailure('active manual Rift already exists');
+function assertNoActiveManual(control: ReturnType<typeof selectCanonicalManualCooperationDefectionControl>): void {
+	if (control) throw new OperatorFailure('active manual CooperationDefection already exists');
 }
 
 function assertNotCancelled(signal?: AbortSignal): void {
@@ -143,7 +143,7 @@ function assertNotCancelled(signal?: AbortSignal): void {
 
 function assertScheduledStartAllowed(nowMs: number): void {
 	const registrationAtMs = unixSeconds(nowMs) * 1000;
-	if (!isManualRiftRegistrationScheduleEligible(registrationAtMs)) throw new OperatorFailure('scheduled Rift conflict');
+	if (!isManualCooperationDefectionRegistrationScheduleEligible(registrationAtMs)) throw new OperatorFailure('scheduled CooperationDefection conflict');
 }
 
 function formatIso(ms: number): string {
@@ -161,7 +161,7 @@ function writePreview(output: OperatorOutput, world: PrototypeWorldConfig, mode:
 }
 
 function writeControl(output: OperatorOutput, world: PrototypeWorldConfig, event: VerifiedEvent, instanceId: string): void {
-	const schedule = getRiftScheduleForInstance(instanceId, event.created_at * 1000);
+	const schedule = getCooperationDefectionScheduleForInstance(instanceId, event.created_at * 1000);
 	if (!schedule) throw new OperatorFailure('control self-validation failed');
 	output.stdout(`Control event ID: ${outputValue(event.id)}`);
 	output.stdout(`Manual instance ID: ${outputValue(instanceId)}`);
@@ -192,18 +192,18 @@ function createSignedControl(
 	const random = dependencies.randomBytes(16);
 	try {
 		if (random.length !== 16) throw new OperatorFailure('control self-validation failed');
-		const instanceId = buildManualRiftInstanceId(createdAt, hex(random));
-		if (!isManualRiftInstanceScheduleEligible(instanceId, nowMs)) throw new OperatorFailure('scheduled Rift conflict');
+		const instanceId = buildManualCooperationDefectionInstanceId(createdAt, hex(random));
+		if (!isManualCooperationDefectionInstanceScheduleEligible(instanceId, nowMs)) throw new OperatorFailure('scheduled CooperationDefection conflict');
 		const template = buildRealtimeControlEventTemplate({
 			channelId: world.channelId,
 			relayHint: world.preferredRelayHint,
 			instanceId,
-			payload: { command: 'start', targetProtocolKey: RIFT_EVENT_DEFINITION.protocolKey },
+			payload: { command: 'start', targetProtocolKey: COOPERATION_DEFECTION_EVENT_DEFINITION.protocolKey },
 			createdAt
 		});
 		const event = finalizeRealtimeEvent(template, secret);
 		const parsed = parseRealtimeControlEnvelope(event, world.channelId, world.creatorPubkey);
-		if (!parsed || !isManualRiftControlScheduleEligible(parsed, nowMs)) {
+		if (!parsed || !isManualCooperationDefectionControlScheduleEligible(parsed, nowMs)) {
 			throw new OperatorFailure('control self-validation failed');
 		}
 		return { event, instanceId };
@@ -228,7 +228,7 @@ async function createAndValidateControl(
 	return createSignedControl(world, dependencies, secret, nowMs);
 }
 
-export async function runManualRiftOperator(
+export async function runManualCooperationDefectionOperator(
 	mode: OperatorMode,
 	dependencies: OperatorDependencies,
 	world: PrototypeWorldConfig = PROTOTYPE_WORLD_CONFIG
@@ -270,7 +270,7 @@ export async function runManualRiftOperator(
 			const results = await dependencies.relay.publish(control.event, world.authoritativeRelays);
 			reportPublish(dependencies.output, results);
 			if (!publishSucceeded(results)) throw new OperatorFailure('all authoritative Relays failed to accept the event');
-			dependencies.output.stdout('Manual Rift control published.');
+			dependencies.output.stdout('Manual CooperationDefection control published.');
 			return { exitCode: 0, mode, world, controlEvent: control.event, instanceId: control.instanceId };
 		} finally {
 			secret.fill(0);

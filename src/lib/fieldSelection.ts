@@ -4,7 +4,7 @@ export type FieldCellAction =
 	| Readonly<{ kind: 'participant'; participantId: string }>
 	| Readonly<{ kind: 'mending-terminal' }>
 	| Readonly<{ kind: 'adjustment-terminal' }>
-	| Readonly<{ kind: 'rift-hole'; holeId: string }>
+	| Readonly<{ kind: 'cooperation-defection-group'; groupId: string }>
 	| Readonly<{ kind: 'trace'; rootId: string; behavior: 'open-root' | 'select-current' }>;
 
 export type FieldCellActionResolution =
@@ -32,7 +32,7 @@ export function buildFieldCellActions(input: Readonly<{
 	participantIds?: readonly string[];
 	mendingTerminal?: boolean;
 	adjustmentTerminal?: boolean;
-	riftHoleId?: string;
+	cooperationDefectionGroupId?: string;
 	trace?: Extract<FieldCellAction, { kind: 'trace' }> | null;
 }>): readonly FieldCellAction[] {
 	const participantIds = [...new Set(input.participantIds ?? [])].sort();
@@ -43,7 +43,7 @@ export function buildFieldCellActions(input: Readonly<{
 		})),
 		...(input.mendingTerminal ? [{ kind: 'mending-terminal' as const }] : []),
 		...(input.adjustmentTerminal ? [{ kind: 'adjustment-terminal' as const }] : []),
-		...(input.riftHoleId ? [{ kind: 'rift-hole' as const, holeId: input.riftHoleId }] : []),
+		...(input.cooperationDefectionGroupId ? [{ kind: 'cooperation-defection-group' as const, groupId: input.cooperationDefectionGroupId }] : []),
 		...(input.trace ? [input.trace] : [])
 	];
 }

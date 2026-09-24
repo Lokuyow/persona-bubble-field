@@ -12,7 +12,7 @@ import {
 	buildDeathTraceEventTemplate, buildTraceRootBootstrapFilter, buildWorldMessageTemplate, buildWorldStateEventTemplate, buildWorldMessageFilter, WORLD_STATE_KIND
 } from './nostrProtocol';
 import { buildRealtimeControlEventTemplate, buildRealtimeControlFilter, buildRealtimeEventFilter, buildRealtimeInstanceFilter, finalizeRealtimeEvent, type RealtimeEventRegistry } from './realtimeEvents';
-import { RIFT_EVENT_DEFINITION, buildRiftActionTemplate } from './rift';
+import { COOPERATION_DEFECTION_EVENT_DEFINITION, buildCooperationDefectionActionTemplate } from './cooperationDefection';
 
 // Capture only the public client. Tests still use the installed package,
 // real RxReqs and mock WebSockets; no internal IDs or fields are inspected.
@@ -458,10 +458,10 @@ describe('primary lifecycle', () => {
 });
 
 describe('supplemental realtime event lifecycle', () => {
-	const realtimeInput = (eventTypes: RealtimeEventRegistry = [RIFT_EVENT_DEFINITION], instanceIds: readonly string[] = ['rift-instance']) => ({
+	const realtimeInput = (eventTypes: RealtimeEventRegistry = [COOPERATION_DEFECTION_EVENT_DEFINITION], instanceIds: readonly string[] = ['cooperation-defection-instance']) => ({
 		eventTypes,
 		controlSince: TIME - 100,
-		instanceFilters: eventTypes.length === 0 || instanceIds.length === 0 ? [] : [{ protocolKey: RIFT_EVENT_DEFINITION.protocolKey, instanceIds, since: TIME - 100 }],
+		instanceFilters: eventTypes.length === 0 || instanceIds.length === 0 ? [] : [{ protocolKey: COOPERATION_DEFECTION_EVENT_DEFINITION.protocolKey, instanceIds, since: TIME - 100 }],
 		onBootstrapEvent: vi.fn(),
 		onLiveEvent: vi.fn(),
 		onBootstrapControl: vi.fn(),
@@ -470,11 +470,11 @@ describe('supplemental realtime event lifecycle', () => {
 
 	it('uses an independent kind-7070 subscription and preserves the two primary subscriptions', async () => {
 		const f = fixture(1);
-		const event = finalizeEvent(buildRiftActionTemplate({
+		const event = finalizeEvent(buildCooperationDefectionActionTemplate({
 			channelId: f.channel.id,
 			relayHint: f.authorities[0].url,
-			instanceId: 'rift-instance',
-			action: { action: 'join', holeId: 'rift-instance:hole:0' },
+			instanceId: 'cooperation-defection-instance',
+			action: { action: 'join', groupId: 'cooperation-defection-instance:group:0' },
 			createdAt: TIME
 		}), AUTHOR);
 		for (const relay of f.authorities) {
@@ -494,7 +494,7 @@ describe('supplemental realtime event lifecycle', () => {
 		expect(realtimeRequests[0][2]).toEqual(buildRealtimeControlFilter({ channelId: f.channel.id, creatorPubkey: f.channel.pubkey, since: TIME - 100 }));
 		expect(realtimeRequests[0][3]).toEqual(buildRealtimeInstanceFilter({
 			channelId: f.channel.id,
-			configuration: { protocolKey: RIFT_EVENT_DEFINITION.protocolKey, instanceIds: ['rift-instance'], since: TIME - 100 }
+			configuration: { protocolKey: COOPERATION_DEFECTION_EVENT_DEFINITION.protocolKey, instanceIds: ['cooperation-defection-instance'], since: TIME - 100 }
 		}));
 		expect(result.status).toBe('active');
 		expect(result.events.map((candidate) => candidate.id)).toEqual([event.id]);
@@ -502,11 +502,11 @@ describe('supplemental realtime event lifecycle', () => {
 		expect(onLiveEvent).not.toHaveBeenCalled();
 		expect(f.transport.getDiagnostics().primaryPairs).toHaveLength(2);
 		expect(f.transport.getDiagnostics().realtime.status).toBe('active');
-		const live = finalizeEvent(buildRiftActionTemplate({
+		const live = finalizeEvent(buildCooperationDefectionActionTemplate({
 			channelId: f.channel.id,
 			relayHint: f.authorities[0].url,
-			instanceId: 'rift-instance',
-			action: { action: 'join', holeId: 'rift-instance:hole:0' },
+			instanceId: 'cooperation-defection-instance',
+			action: { action: 'join', groupId: 'cooperation-defection-instance:group:0' },
 			createdAt: TIME + 1
 		}), AUTHOR);
 		send(f.authorities[0].latestSocket(), 'EVENT', realtimeRequests[0][1], live);
@@ -521,8 +521,8 @@ describe('supplemental realtime event lifecycle', () => {
 		const control = finalizeRealtimeEvent(buildRealtimeControlEventTemplate({
 			channelId: f.channel.id,
 			relayHint: f.authorities[0].url,
-			instanceId: `rift:1:manual:${createdAt}:0123456789abcdef0123456789abcdef`,
-			payload: { command: 'start', targetProtocolKey: RIFT_EVENT_DEFINITION.protocolKey },
+			instanceId: `cooperation-defection:1:manual:${createdAt}:0123456789abcdef0123456789abcdef`,
+			payload: { command: 'start', targetProtocolKey: COOPERATION_DEFECTION_EVENT_DEFINITION.protocolKey },
 			createdAt
 		}), CREATOR);
 		f.authorities[0].onRequest = (socket, request) => {
@@ -531,7 +531,7 @@ describe('supplemental realtime event lifecycle', () => {
 		};
 		await f.start();
 		const onControl = vi.fn();
-		const pending = f.transport.startRealtime({ ...realtimeInput([RIFT_EVENT_DEFINITION], []), onBootstrapControl: onControl });
+		const pending = f.transport.startRealtime({ ...realtimeInput([COOPERATION_DEFECTION_EVENT_DEFINITION], []), onBootstrapControl: onControl });
 		await vi.advanceTimersByTimeAsync(30);
 		await pending;
 		const request = f.authorities[0].requests.filter((candidate) => kind(candidate) === 7070)[0];
@@ -548,7 +548,7 @@ describe('supplemental realtime event lifecycle', () => {
 		await first;
 		const firstRequest = f.authorities[0].requests.filter((request) => kind(request) === 7070)[0];
 		f.transport.stopRealtime();
-		const second = f.transport.startRealtime(realtimeInput([RIFT_EVENT_DEFINITION], ['next-instance']));
+		const second = f.transport.startRealtime(realtimeInput([COOPERATION_DEFECTION_EVENT_DEFINITION], ['next-instance']));
 		await vi.advanceTimersByTimeAsync(30);
 		await second;
 		const realtimeMessages = f.authorities[0].messages.filter((message) => message[0] === 'CLOSE' || (message[0] === 'REQ' && kind(message as WireRequest) === 7070));
@@ -560,11 +560,11 @@ describe('supplemental realtime event lifecycle', () => {
 
 	it('accepts realtime publication from a readable relay', async () => {
 		const f = fixture(1);
-		const event = finalizeEvent(buildRiftActionTemplate({
+		const event = finalizeEvent(buildCooperationDefectionActionTemplate({
 			channelId: f.channel.id,
 			relayHint: f.authorities[0].url,
-			instanceId: 'rift-instance',
-			action: { action: 'join', holeId: 'rift-instance:hole:0' },
+			instanceId: 'cooperation-defection-instance',
+			action: { action: 'join', groupId: 'cooperation-defection-instance:group:0' },
 			createdAt: TIME
 		}), AUTHOR);
 		let realtimeRequest: WireRequest | undefined;
@@ -587,11 +587,11 @@ describe('supplemental realtime event lifecycle', () => {
 
 	it('uses a self echo when OK is absent and does not retry the action', async () => {
 		const f = fixture(1);
-		const event = finalizeEvent(buildRiftActionTemplate({
+		const event = finalizeEvent(buildCooperationDefectionActionTemplate({
 			channelId: f.channel.id,
 			relayHint: f.authorities[0].url,
-			instanceId: 'rift-instance',
-			action: { action: 'join', holeId: 'rift-instance:hole:0' },
+			instanceId: 'cooperation-defection-instance',
+			action: { action: 'join', groupId: 'cooperation-defection-instance:group:0' },
 			createdAt: TIME
 		}), AUTHOR);
 		let realtimeRequest: WireRequest | undefined;
@@ -617,11 +617,11 @@ describe('supplemental realtime event lifecycle', () => {
 	it('does not treat an excluded relay acceptance as shared when readable relay rejects', async () => {
 		const f = fixture(2);
 		Nip11Registry.set(f.authorities[1].url, { limitation: { max_subscriptions: 2 } });
-		const event = finalizeEvent(buildRiftActionTemplate({
+		const event = finalizeEvent(buildCooperationDefectionActionTemplate({
 			channelId: f.channel.id,
 			relayHint: f.authorities[0].url,
-			instanceId: 'rift-instance',
-			action: { action: 'join', holeId: 'rift-instance:hole:0' },
+			instanceId: 'cooperation-defection-instance',
+			action: { action: 'join', groupId: 'cooperation-defection-instance:group:0' },
 			createdAt: TIME
 		}), AUTHOR);
 		f.authorities[0].onRequest = (socket, request) => send(socket, 'EOSE', request[1]);

@@ -14,18 +14,18 @@ import {
 	validateTraceReplyCandidate
 } from '../../src/lib/nostrProtocol';
 import {
-	buildRiftActionTemplate,
-	buildRiftCommitAction,
-	buildRiftRevealAction,
-	buildManualRiftInstanceId,
-	deriveRiftHolePositions,
-	getRiftRoundSchedule,
-	getRiftSchedule,
-	getRiftScheduleForInstance,
-	RIFT_CONSULTATION_MS,
-	RIFT_PROTOCOL_KEY,
-	type RiftAction
-} from '../../src/lib/rift';
+	buildCooperationDefectionActionTemplate,
+	buildCooperationDefectionCommitAction,
+	buildCooperationDefectionRevealAction,
+	buildManualCooperationDefectionInstanceId,
+	deriveCooperationDefectionGroupPositions,
+	getCooperationDefectionRoundSchedule,
+	getCooperationDefectionSchedule,
+	getCooperationDefectionScheduleForInstance,
+	COOPERATION_DEFECTION_CONSULTATION_MS,
+	COOPERATION_DEFECTION_PROTOCOL_KEY,
+	type CooperationDefectionAction
+} from '../../src/lib/cooperationDefection';
 import { buildRealtimeControlEventTemplate, finalizeRealtimeEvent } from '../../src/lib/realtimeEvents';
 import { SPEECH_SHORTCUT_IDS } from '../../src/lib/speechSubmission';
 import { characterPicturePath } from '../../src/lib/character';
@@ -34,7 +34,7 @@ import { deriveBip85NostrEntropy } from '../../src/lib/bip85';
 import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL } from '../../src/lib/fieldFacilities';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { installFieldFrameSampling, readFieldFrames, sampleRenderedField } from './helpers/fieldFrames';
-import { CHANNEL_ID, AUTHORITATIVE_RELAYS, fixtureSecret, testEvents, upcomingRegistrationSchedule, nextScheduledRiftSchedule, signedRiftAction, syntheticChannelFixture, installDelayedRelay, relayState, seedRelayAccount, readRelayGameState, realtimeInstanceIds, isRealtimeRequest, readRealtimePendingInstances, seedRealtimePendingInstance, chooseHorizontalMove, pressRelayKeyboardMovement } from './helpers/relayHarness';
+import { CHANNEL_ID, AUTHORITATIVE_RELAYS, fixtureSecret, testEvents, upcomingRegistrationSchedule, nextScheduledCooperationDefectionSchedule, signedCooperationDefectionAction, syntheticChannelFixture, installDelayedRelay, relayState, seedRelayAccount, readRelayGameState, realtimeInstanceIds, isRealtimeRequest, readRealtimePendingInstances, seedRealtimePendingInstance, chooseHorizontalMove, pressRelayKeyboardMovement } from './helpers/relayHarness';
 
 
 test.describe('Relay startup', () => {
@@ -106,7 +106,7 @@ test.describe('Relay startup', () => {
 
 	test('restarts realtime for the next day without recreating the world session', async ({ page }) => {
 		const schedule = upcomingRegistrationSchedule();
-		const nextSchedule = getRiftSchedule(schedule.warningAtMs + 24 * 60 * 60 * 1_000);
+		const nextSchedule = getCooperationDefectionSchedule(schedule.warningAtMs + 24 * 60 * 60 * 1_000);
 		const startTime = schedule.registrationAtMs + 1_000;
 		await page.clock.install({ time: startTime });
 		await installHostOwnedStub(page);
@@ -142,8 +142,8 @@ test.describe('Relay startup', () => {
 		expect((await relayState(page)).state.requests.filter((request) =>
 			[42, WORLD_STATE_KIND].includes((request.filter.kinds as number[])[0]) && request.filter.limit !== 1_000)).toHaveLength(primaryRequestCount);
 
-		const nextHole = deriveRiftHolePositions(nextSchedule.instanceId, { columns: 16, rows: 8 })[0];
-		const nextJoin = signedRiftAction(secret, nextSchedule, { action: 'join', holeId: nextHole.id }, nextSchedule.registrationAtMs + 1_000);
+		const nextGroup = deriveCooperationDefectionGroupPositions(nextSchedule.instanceId, { columns: 16, rows: 8 })[0];
+		const nextJoin = signedCooperationDefectionAction(secret, nextSchedule, { action: 'join', groupId: nextGroup.id }, nextSchedule.registrationAtMs + 1_000);
 		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectRealtimeEvent(event: object): void } }).__relayStartupTest.injectRealtimeEvent(event), nextJoin);
 		await page.clock.setSystemTime(nextSchedule.gameAtMs + 1_000);
 		await page.clock.runFor(1_000);

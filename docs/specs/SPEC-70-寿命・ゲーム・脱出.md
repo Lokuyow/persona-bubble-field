@@ -71,7 +71,7 @@ clear前はactive Identityのchild secretをexportしない。Root entropyの保
 - 現在bucketの状態確認
 - 蓄積済みポイント成果の受け取り
 
-作業開始後はその場に居続ける必要はない。作業中も、通常のフィールド移動、会話、綻びへの参加、ブラウザ終了を妨げない。
+作業開始後はその場に居続ける必要はない。作業中も、通常のフィールド移動、会話、協力と抜け駆けへの参加、ブラウザ終了を妨げない。
 
 作業は成果を継続的に蓄積する非同期bucketである。最大処理時間は、成果を回収せずに蓄積できる通常作業時間の上限とする。上限未満でも作業端末から成果を回収でき、回収後は回収時刻から次のbucketを開始する。作業開始後に成果回収のたび再開始する必要はなく、明示的な停止機能は設けない。具体的な端末座標、placeholderの見た目、将来の専用assetは本仕様で固定しない。
 
@@ -162,33 +162,33 @@ Run開始前にRoot PointをRoot buildへ配分し、active Run中は変更し�
 
 リアルタイムイベントは、寿命・ポイント・死亡などのsettlementを持ち得る、交換可能なexperimental event枠である。イベント固有の状態は `PersonaGameState` に混在させず、イベントinstanceとaction、participant、round、resultとして独立管理する。実験を終了するときは、その定義をenabled registryから外し、購読・受理・表示・settlementを停止する。旧payloadや旧kindを救済するlegacy path、隠れた自動移行、恒久採用を前提にした互換層は設けない。
 
-prototypeではこの枠で複数のevent typeを順次試遊し、試遊結果を踏まえて正式採用するeventを決める。現時点でenabledなのは最初の試遊対象である `綻び` だけであり、別のevent typeを今回追加しない。
+prototypeではこの枠で複数のevent typeを順次試遊し、試遊結果を踏まえて正式採用するeventを決める。現時点でenabledなのは「協力と抜け駆け」（event type `cooperation-defection`、protocol version 1）だけであり、別のevent typeを今回追加しない。
 
 各イベントはイベント定義、protocol version、protocol key、payload parser、instance schedule、settlement規則を持つ。共通のNostr envelope、control、補助subscription、共通parserの仕様は [`SPEC-10-Nostr・アカウント.md`](./SPEC-10-Nostr・アカウント.md) を正とし、イベントの有効化・無効化はcompile-time registryで明示する。Relay障害、購読拒否、切断、ブラウザ終了だけを理由に死亡させない。settlementは既存のbrowser-local Player lifecycle store内の汎用ledgerへ、receiptと同じatomic mutationで記録する。ledgerはevent instanceのpendingと適用済みoutcome receiptを持ち、同じoutcomeを二重適用しない。古いIdentityまたは古いRun、既に期限切れのRunにはポイントを適用しない。イベント由来の死亡は、現在Runの死亡処理と同じRun close・Identity dead・次generation選択の経路を明示的に通る。
 
 playable eventのparticipantは、現在のcharacter slotへ解決できるauthorだけを有効参加者として扱う。未割当authorは参加枠、round、result、settlementへ入らない。SPEC-10で定めるexternal world actorのcharacter overrideは、このparticipant判定には適用しない。controlのauthority条件はchannel creatorであり、このparticipant条件をcontrol eventへ適用しない。受信envelopeのprotocol条件と境界検証はSPEC-10を正とする。
 
-### experimental event「綻び」
+### experimental event「協力と抜け駆け」
 
-prototypeでenabledにする最初のexperimental eventは `綻び`（event type `rift`）である。綻びによって、フィールド上にソトへ続く `抜け穴` が形成される。綻びは毎日自動開催し、時刻はJST（UTC+09:00）とする。
+prototypeでenabledにするexperimental eventは「協力と抜け駆け」（event type `cooperation-defection`、protocol version 1）である。毎日自動開催し、時刻はJST（UTC+09:00）とする。
 
-- 20:45 JST：綻びの兆候を通知
+- 20:45 JST：開催予告
 - 20:55 JST：参加受付開始
 - 21:00 JST：ゲーム開始
 
-channel creator authorityが署名したkind 7070のversioned controlで、任意時刻にもmanual綻びを開始できる。controlのpayloadは開始命令と対象playable protocol keyを持ち、対象instanceは `rift:1:manual:<created_at>:<nonce>` とする。`created_at` はcontrolのUnix timestamp秒、nonceはlowercase 16-byte hexであり、instance IDだけからscheduleを再構成できる。control時刻がregistration開始でwarningはなく、5分後にgameを開始する。controlはSPEC-10の固定World configで定めるcreator本人の有効な署名、対象channel、enabled definition、payload、instance scheduleを満たすものだけを受理する。
+channel creator authorityが署名したkind 7070のversioned controlで、任意時刻にも手動開催を開始できる。controlのpayloadは開始命令と対象playable protocol keyを持ち、対象instanceは `cooperation-defection:1:manual:<created_at>:<nonce>` とする。`created_at` はcontrolのUnix timestamp秒、nonceはlowercase 16-byte hexであり、instance IDだけからscheduleを再構成できる。control時刻がregistration開始でwarningはなく、5分後にgameを開始する。controlはSPEC-10の固定World configで定めるcreator本人の有効な署名、対象channel、enabled definition、payload、instance scheduleを満たすものだけを受理する。
 
-manual綻びのregistration開始〜終了区間とscheduled綻びのwarning開始〜終了区間が少しでも交差する場合、そのmanual controlを無効とする。scheduled綻びを優先し、activeな綻びの置換・並行開催・queueは行わない。bootstrapで複数の有効候補がある場合は、現在時刻でregistrationまたはgame中の候補に絞った後、`created_at`昇順、同値ならcontrol event ID辞書順で選択する。終了済みcontrolから綻びを再開しない。
+手動開催のregistration開始〜終了区間とscheduled開催のwarning開始〜終了区間が少しでも交差する場合、そのmanual controlを無効とする。scheduled開催を優先し、active gameの置換・並行開催・queueは行わない。bootstrapで複数の有効候補がある場合は、現在時刻でregistrationまたはgame中の候補に絞った後、`created_at`昇順、同値ならcontrol event ID辞書順で選択する。終了済みcontrolからゲームを再開しない。
 
-抜け穴は固定施設ではなく、event instanceとfieldから決定的に異なる位置へ配置する。作業端末・能力強化端末などの固定施設とは別cellとする。参加需要が6人を超える場合は需要に応じて複数生成し、最低1つは生成する。プレイヤーは実際にフィールドを移動して抜け穴の近くで参加し、システムがランダムに振り分けない。1つの抜け穴の有効参加者は3人以上6人以下とし、最大6人は有効なjoin event IDの決定的順序で選ぶ。3人未満は不成立で、ポイント変動も死亡も発生しない。
+参加地点は固定施設ではなく、event instanceとfieldから決定的に異なる位置へ配置する。作業端末・能力強化端末などの固定施設とは別cellとする。参加需要が6人を超える場合は需要に応じて複数生成し、最低1つは生成する。プレイヤーは実際にフィールドを移動して参加地点の近くで参加し、システムがランダムに振り分けない。1グループの有効参加者は3人以上6人以下とし、最大6人は有効なjoin event IDの決定的順序で選ぶ。
 
-綻びは3ラウンド制とし、各ラウンドを相談、秘密選択、結果表示の順で構成する。各phaseの具体的な継続時間は、調整可能なruntimeの実装parameterとして管理する。秘密選択は `抜け穴を維持する` または `抜け穴からの脱出を試みる` の二択とし、commit-revealで締切後に一斉判定する。commitが成立したclientは選択締切を越えた時点でrevealを自動publishし、結果表示内の通信・publicationの猶予は猶予時間としてのみ扱う。それ以後は無効とする。browser reload・終了等でnonceを失った選択は推測・復元しない。同一selection window内のchoice変更は最初のconfirmed commit後は受け付けず、複数commitのcanonical選択を曖昧にしない。判定対象となる有効参加者が3人未満なら安全に不成立とする。
+ゲームは最大3ラウンドとし、各ラウンドを相談、秘密選択、結果発表の順で構成する。各phaseの継続時間は相談30秒、選択30秒、結果発表20秒。相談には既存World会話を使い、専用chatを追加しない。通常の会話・フィールド移動は選択中も制限しない。選択は `cooperate`（協力する）または `defect`（抜け駆けする）の二択とし、commit-revealで締切後に判定する。commitが成立したclientは選択締切後にrevealを自動publishする。結果発表内のreveal猶予は判定猶予としてのみ扱い、その終了後は無効とする。browser reload・終了等でnonceを失った選択は推測・復元しない。同一selection window内のchoice変更は最初のconfirmed commit後は受け付けない。判定対象となる有効選択が3人未満なら不成立とする。
 
-必要な維持人数は `ceil(有効参加人数 × 2 / 3)` とする。全員が維持した場合は維持者全員に20ptを与える。脱出試行があり、必要人数を満たした場合は維持者に10pt/人、脱出試行者に100pt/人を与え、脱出試行者はその後ハコへ戻る。必要人数を満たさない場合は抜け穴を閉じ、維持者には0pt、脱出試行者にはイベント由来の死亡を適用する。threshold failure後はその抜け穴の残りラウンドを行わない。通常の寿命死亡・clear・能力強化など、綻び以外のルールは変更しない。
+必要な協力人数は `ceil(有効選択人数 × 2 / 3)` とし、3人なら2人、4人なら3人、5人なら4人、6人なら4人。全員が協力した場合は全員に1,000ptを与える。協力者が必要人数に達し、抜け駆けが一部にいる場合は、協力者に100pt/人、抜け駆け者に10,000pt/人を与える。協力者が必要人数に達しない場合は協力者に0pt、抜け駆け者の実効寿命を72時間減らす。減算には作業で未確定の寿命延長を含め、寿命が残ればRunを続け、実効期限が到達済みなら通常の死亡lifecycleへ移行する。協力失敗後はそのグループの残りラウンドを中止する。有効選択が3人未満なら報酬もペナルティも適用しない。Relayやブラウザの一時障害による無効選択は参加人数と判定から除外し、障害そのものに罰を与えない。
 
-Relayやブラウザの一時障害で有効なcommit-revealが成立しなかった参加者は、そのラウンドの人数・報酬・死亡判定から除外する。行動を協力・裏切り・善・悪に分類せず、維持人数と脱出人数という結果だけを扱う。prototype UIは、phase、参加者数、round、残り時間、二択、commit/reveal状態、resultを表示する。DEV/testでは決定的なinstance・時刻・fake Relayを差し替えて各phaseと実際の参加・選択・自動reveal・結果表示を検証できるようにする。
+有効な選択をした各参加者は、結果確定後に自分のIdentityでtop-level kind 42を通常発言としてbest-effort投稿する。本文は協力なら `協力`、抜け駆けなら `抜け駆け` のみとする。選択・結果判定は従来どおりkind 7070 commit-revealを根拠とし、kind 42の本文や成否を使わない。投稿はreveal猶予終了後かつそのラウンドの結果発表中に限り、結果不成立や無効選択では行わず、発表期間外の遅延投稿もしない。重複投稿は同一Run・instance・group・roundで抑止する。死亡を伴う場合もkind 42の応答を待って死亡永続化・演出を遅らせない。公式UIは結果発表後に全参加者の有効選択と共通報酬・ペナルティを表示するが、他者の実際の死亡は推測表示しない。
 
-参加受付中はゲーム内からルール説明を開ける。説明には、3〜6人・全3ラウンド、phaseの流れ、二つの選択肢、人数ごとの必要な維持人数、報酬、維持人数不足時の死亡、選択が結果発表まで公開されないことを、一般ユーザー向けの自然な短い文で示す。抜け穴への参加を確定する直前には、`3〜6人 / 全3ラウンド` と、維持人数不足時に脱出を選んだ者が死亡する旨を表示し、ルール確認、参加、キャンセルを選べるようにする。説明と確認の全文および操作ボタンはスマートフォンのviewport内でスクロールして到達できる。
+参加受付中はゲーム内からルール説明を開ける。説明には、3〜6人・最大3ラウンド、phase、選択肢、人数別の必要協力人数、報酬とペナルティ、選択の秘匿を短く示す。参加確定前には、協力失敗で抜け駆け者が寿命を3日失い、残り寿命によっては即死することを明示する。説明と確認および操作ボタンはスマートフォンのviewport内でスクロールして到達できる。旧event protocolは受け入れない。切替時には旧「綻び」の未精算instance IDだけをpending ledgerから終了させ、旧outcomeを再計算・補償・適用しない。
 
 ## 7. IdentityとRunのライフサイクル
 

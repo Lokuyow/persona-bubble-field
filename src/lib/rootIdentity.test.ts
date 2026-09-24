@@ -11,6 +11,8 @@ import {
 	ROOT_SECRET_STORE_NAME,
 	WORLD_WRITE_JOURNAL_STORE_NAME,
 	applyRealtimeOutcome,
+	applyRealtimeLifespanLoss,
+	completeRealtimeEventInstance,
 	clearPersona,
 	confirmWorldPosition,
 	collectMending,
@@ -32,6 +34,7 @@ import {
 } from './rootIdentity';
 import type { RootBuild } from './rootProgression';
 import { buildWorldStateEventTemplate } from './nostrProtocol';
+import { projectMending } from './mending';
 
 const TIME = 1_700_000_000_000;
 const HOUR = 60 * 60 * 1000;
@@ -299,6 +302,105 @@ describe('Root / Identity / Run lifecycle', () => {
 		expect(upgraded.persona.gameState.mendingJob?.processedDurationMs).toBe(5 * 60 * 1000);
 	});
 
+	it('subtracts exactly 72 hours from an idle Run and preserves the Run', async () => {
+		const persona = await selected();
+		const prepareExit = vi.fn(() => ({ channelId: 'a'.repeat(64), position: { x: 2, y: 3 }, lastPositiveCreatedAt: Math.floor(TIME / 1000) }));
+		const loss = await applyRealtimeLifespanLoss(persona, { id: 'lifespan-loss-idle', kind: 'lifespan-loss', lifespanLossMs: 72 * HOUR, instanceId: 'game-instance' }, prepareExit);
+		expect(loss.kind).toBe('survived');
+		expect(prepareExit).not.toHaveBeenCalled();
+		const latest = restored(await loadOrCreateLifecycle());
+		expect(latest.activeRun.runNumber).toBe(persona.activeRun.runNumber);
+		expect(latest.gameState.lifespanExpiresAtMs).toBe(persona.gameState.lifespanExpiresAtMs - 72 * HOUR);
+		expect((await getRealtimeSettlementLedger(latest))?.appliedOutcomeIds).toContain('lifespan-loss-idle');
+	});
+
+	it('checkpoints active Mending before subtracting lifespan without collecting points or losing carry', async () => {
+		const pending = await loadOrCreateLifecycle();
+		if (pending.kind !== 'created' && pending.kind !== 'selecting') throw new Error('Expected a pending selection.');
+		const player = (await records(PLAYER_LIFECYCLE_STORE_NAME))['player-lifecycle'] as object;
+		await putPlayer({ ...player, rootPoints: 1 });
+		const persona = await selected({ inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 1 });
+		const started = await startMending(persona);
+		if (started.kind !== 'started') throw new Error('Expected started work.');
+		const nowMs = TIME + 90 * 60 * 1000;
+		vi.mocked(Date.now).mockReturnValue(nowMs);
+		const projection = projectMending(started.persona.gameState, nowMs, started.persona.activeRun.rootBuild);
+		const loss = await applyRealtimeLifespanLoss(started.persona, { id: 'lifespan-loss-mending', kind: 'lifespan-loss', lifespanLossMs: 72 * HOUR, instanceId: 'game-instance' });
+		expect(loss.kind).toBe('survived');
+		const latest = restored(await loadOrCreateLifecycle());
+		expect(latest.gameState.points).toBe(started.persona.gameState.points);
+		expect(latest.gameState.lifespanExpiresAtMs).toBe(projection.effectiveExpiresAtMs - 72 * HOUR);
+		expect(latest.gameState.pointProgressTicks).toBe(projection.pointProgressTicks);
+		expect(latest.gameState.mendingJob).toMatchObject({
+			startedAtMs: started.persona.gameState.mendingJob?.startedAtMs,
+			checkpointAtMs: nowMs,
+			processedDurationMs: projection.processedDurationMs,
+			unclaimedPoints: projection.points
+		});
+	});
+
+	it.each([3, 2] as const)('atomically closes the Run when a 72-hour loss leaves %s days of lifespan', async (daysRemaining) => {
+		const persona = await selected(ZERO_BUILD, { initialLifespanMs: daysRemaining * DAY });
+		const exit = { channelId: 'a'.repeat(64), position: { x: 2, y: 3 }, lastPositiveCreatedAt: Math.floor(TIME / 1000) };
+		const prepareExit = vi.fn(() => exit);
+		const loss = await applyRealtimeLifespanLoss(persona, { id: `lifespan-loss-death-${daysRemaining}`, kind: 'lifespan-loss', lifespanLossMs: 72 * HOUR, instanceId: 'game-instance' }, prepareExit);
+		expect(loss.kind).toBe('transitioned');
+		expect(prepareExit).toHaveBeenCalledOnce();
+		const pending = await loadOrCreateLifecycle();
+		if (pending.kind !== 'selecting') throw new Error('Expected next-generation selection after death.');
+		const player = (await records(PLAYER_LIFECYCLE_STORE_NAME))['player-lifecycle'] as { identities: Array<{ pubkey: string; status: string }>; realtimeSettlementLedger: { appliedOutcomeIds: string[]; pendingInstanceIds: string[] } };
+		expect(player.identities.find((identity) => identity.pubkey === persona.signer.pubkey)?.status).toBe('dead');
+		expect(player.realtimeSettlementLedger.appliedOutcomeIds).toContain(`lifespan-loss-death-${daysRemaining}`);
+		expect(player.realtimeSettlementLedger.pendingInstanceIds).toEqual([]);
+		const journal = Object.values(await records(WORLD_WRITE_JOURNAL_STORE_NAME))[0] as { exitSecond: number };
+		expect(journal.exitSecond).toBeGreaterThanOrEqual(Math.floor(TIME / 1000));
+	});
+
+	it('does not prepare a terminal exit from an obsolete Run snapshot', async () => {
+		const persona = await selected();
+		const newer = restored(await loadOrCreateLifecycle());
+		await applyRealtimeOutcome(newer, { id: 'revision-advance', kind: 'points', points: 1, instanceId: 'other-instance' });
+		const prepareExit = vi.fn(() => ({ channelId: 'a'.repeat(64), position: { x: 2, y: 3 }, lastPositiveCreatedAt: Math.floor(TIME / 1000) }));
+		const result = await applyRealtimeLifespanLoss(persona, { id: 'lifespan-loss-stale', kind: 'lifespan-loss', lifespanLossMs: 72 * HOUR, instanceId: 'game-instance' }, prepareExit);
+		expect(result.kind).toBe('stale');
+		expect(prepareExit).not.toHaveBeenCalled();
+	});
+
+	it('does not overwrite a competing ability upgrade and can retry against the current Run revision', async () => {
+		const persona = await selected();
+		expect((await applyRealtimeOutcome(persona, { id: 'upgrade-funding', kind: 'points', points: 1, instanceId: 'funding' })).kind).toBe('applied');
+		const funded = restored(await loadOrCreateLifecycle());
+		const outcome = { id: 'lifespan-loss-concurrent', kind: 'lifespan-loss' as const, lifespanLossMs: 72 * HOUR, instanceId: 'game-instance' };
+		const [lossResult, upgradeResult] = await Promise.all([
+			applyRealtimeLifespanLoss(funded, outcome),
+			upgradePersonaAbility(funded, 'inferenceEfficiency')
+		]);
+		expect(['survived', 'stale', 'duplicate'].includes(lossResult.kind)).toBe(true);
+		expect(['upgraded', 'superseded'].includes(upgradeResult.kind)).toBe(true);
+		let latest = restored(await loadOrCreateLifecycle());
+		if (!(await getRealtimeSettlementLedger(latest))?.appliedOutcomeIds.includes(outcome.id)) {
+			expect((await applyRealtimeLifespanLoss(latest, outcome)).kind).toBe('survived');
+			latest = restored(await loadOrCreateLifecycle());
+		}
+		if (latest.gameState.abilities.inferenceEfficiency === 1) {
+			const upgraded = await upgradePersonaAbility(latest, 'inferenceEfficiency');
+			expect(upgraded.kind).toBe('upgraded');
+		}
+		latest = restored(await loadOrCreateLifecycle());
+		expect(latest.gameState.abilities.inferenceEfficiency).toBe(2);
+		expect(latest.gameState.lifespanExpiresAtMs).toBe(funded.gameState.lifespanExpiresAtMs - 72 * HOUR);
+	});
+
+	it('deduplicates automatic message reservations across concurrent tabs in the active Run', async () => {
+		const persona = await selected();
+		const input = { scope: { identity: persona.activeRun.identity, runNumber: persona.activeRun.runNumber, channelId: 'a'.repeat(64) },
+			kind: 'message' as const, nowSecond: Math.floor(TIME / 1000), observedSecond: null, observedConsumedSlots: 0 as const,
+			observedExitSecond: null, messageDedupeId: 'f'.repeat(64) };
+		const results = await Promise.all([reserveWorldPositive(input), reserveWorldPositive(input)]);
+		expect(results.filter((result) => result.kind === 'reserved')).toHaveLength(1);
+		expect(results.filter((result) => result.kind === 'duplicate')).toHaveLength(1);
+	});
+
 	it('collects partial work as integer owned points and keeps the bucket active', async () => {
 		const persona = await selected();
 		const started = await startMending(persona);
@@ -326,7 +428,7 @@ describe('Root / Identity / Run lifecycle', () => {
 		const persona = await selected();
 		await putPlayer({ ...(await records(PLAYER_LIFECYCLE_STORE_NAME))['player-lifecycle'] as object, mode: { kind: 'running', activeRun: { ...persona.activeRun, gameState: { ...persona.gameState, points: 100_000 } } } });
 		const funded = restored(await loadOrCreateLifecycle());
-		expect(await trackRealtimeEventInstance(funded, 'rift-pending')).toBe(true);
+		expect(await trackRealtimeEventInstance(funded, 'cooperation-defection-pending')).toBe(true);
 		expect(await clearPersona(funded)).toEqual({ kind: 'blocked', reason: 'pending-realtime' });
 		await putPlayer({ ...(await records(PLAYER_LIFECYCLE_STORE_NAME))['player-lifecycle'] as object, realtimeSettlementLedger: { schemaVersion: 1, identity: funded.activeRun.identity, runNumber: funded.activeRun.runNumber, pendingInstanceIds: [], appliedOutcomeIds: [] } });
 		const current = restored(await loadOrCreateLifecycle());
@@ -505,7 +607,10 @@ describe('Root / Identity / Run lifecycle', () => {
 
 	it('keeps a pending ledger scoped to the active Run', async () => {
 		const persona = await selected();
-		expect(await trackRealtimeEventInstance(persona, 'rift')).toBe(true);
-		expect((await getRealtimeSettlementLedger(persona))?.pendingInstanceIds).toEqual(['rift']);
+		expect(await trackRealtimeEventInstance(persona, 'io.github.lokuyow.persona-bubble-field:realtime:rift:1:instance:2026-09-24')).toBe(true);
+		expect(await trackRealtimeEventInstance(persona, 'cooperation-defection:1:instance:2026-09-24')).toBe(true);
+		expect((await getRealtimeSettlementLedger(persona))?.pendingInstanceIds).toHaveLength(2);
+		expect(await completeRealtimeEventInstance(persona, 'io.github.lokuyow.persona-bubble-field:realtime:rift:1:instance:2026-09-24')).toBe(true);
+		expect((await getRealtimeSettlementLedger(persona))?.pendingInstanceIds).toEqual(['cooperation-defection:1:instance:2026-09-24']);
 	});
 });
