@@ -46,13 +46,16 @@ test.describe('Relay startup', () => {
 				await expect(chatterToggle).toHaveAttribute('aria-pressed', String(open));
 				expect(await geometry()).toEqual(before);
 			}
+			await expect.poll(() => page.evaluate(() => localStorage.getItem('persona-bubble-field:chatter-open')))
+				.toBe(String(width > 700));
 			// Keep a manual choice opposite to the next viewport's reload default.
 			await page.setViewportSize({ width: width === 700 ? 701 : 700, height: 900 });
 			await expect(page.locator('.field-area')).toHaveCSS('width', width === 700 ? '685px' : '684px');
 			await expect(chatter).toBeVisible({ visible: width > 700 });
 			await page.reload();
 			await expect(page.locator('.field-viewport')).toHaveClass(/initial-field-geometry-ready/);
-			await expect(chatter).toBeVisible({ visible: width === 700 });
+			await expect(chatter).toBeVisible({ visible: width > 700 });
+			await expect(chatterToggle).toHaveAttribute('aria-pressed', String(width > 700));
 		});
 	}
 
