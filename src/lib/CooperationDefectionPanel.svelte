@@ -12,7 +12,7 @@
 		selfPubkey: string | null;
 		participantName: (pubkey: string) => string;
 		selectedChoice: CooperationDefectionChoice | null;
-		commitStatus: string;
+		commitStatus: string | null;
 		canChoose: boolean;
 		message: string | null;
 		onChoice: (choice: CooperationDefectionChoice) => void;
@@ -109,18 +109,14 @@
 						<li>協力成功・一部が抜け駆け → <strong>協力 +100pt / 抜け駆け +10,000pt</strong></li>
 						<li>協力失敗 → <strong>協力 0pt / 抜け駆け 寿命 −3日</strong></li>
 					</ul>
-					<p>このゲームの抜け駆けは、所持100,000ptによる通常の脱出とは別です。</p>
 				</div>
 			</details>
 		{:else if schedule.phase === 'game' && roundInfo}
 			<div class="cooperation-defection-details">
-				<span>参加グループ: {selfGroupId ?? '未参加'}</span>
-				<span>参加者: {selfGroupId && session?.participantSnapshot?.[selfGroupId] ? session.participantSnapshot[selfGroupId].length : '未確定'}</span>
+				{#if selfGroupId}<span>{#if session?.participantSnapshot?.[selfGroupId]}参加中（{session.participantSnapshot[selfGroupId].length}人）{:else}参加中{/if}</span>{/if}
 				<span>残り: {formatRemaining(roundInfo.remainingMs)}</span>
 			</div>
-			{#if roundInfo.phase === '相談'}
-				<p class="cooperation-defection-note">既存のworld conversationで相談できます。</p>
-			{:else if roundInfo.phase === '選択'}
+			{#if roundInfo.phase === '選択'}
 				<p class="cooperation-defection-note">選択内容は結果発表まで秘密です。</p>
 				<div class="cooperation-defection-choice-row" aria-label="秘密選択">
 					<button type="button" data-cooperation-defection-choice="cooperate" class:selected={selectedChoice === 'cooperate'} disabled={!canChoose} onclick={() => onChoice('cooperate')}>協力する</button>
@@ -129,7 +125,7 @@
 			{:else if roundInfo.phase === '結果発表'}
 				<p class="cooperation-defection-note">公開猶予の終了後に、確定した選択をまとめて表示します。</p>
 			{/if}
-			<p class="cooperation-defection-status" data-cooperation-defection-selection-status>{commitStatus}</p>
+			{#if commitStatus}<p class="cooperation-defection-status" data-cooperation-defection-selection-status>{commitStatus}</p>{/if}
 		{/if}
 		{#if lastRoundResult}
 			<section class="cooperation-defection-result" data-cooperation-defection-round-result aria-label={`ラウンド${lastRoundResult.round}の結果`}>
@@ -144,12 +140,12 @@
 {/if}
 
 <style>
-	.cooperation-defection-panel { position: absolute; z-index: 10; top: 12px; left: 50%; width: min(440px, calc(100vw - 32px)); padding: 12px 14px; border: 1px solid rgba(102, 28, 106, 0.25); border-radius: 14px; background: rgba(255, 250, 255, 0.93); color: #3d3144; box-shadow: 0 8px 24px rgba(75, 44, 75, 0.12); pointer-events: none; transform: translateX(-50%); }
-	.cooperation-defection-heading, .cooperation-defection-details, .cooperation-defection-choice-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+	.cooperation-defection-panel { box-sizing: border-box; position: absolute; z-index: 10; top: 12px; left: 50%; width: min(440px, calc(100vw - 32px)); min-width: 0; padding: 12px 14px; border: 1px solid rgba(102, 28, 106, 0.25); border-radius: 14px; background: rgba(255, 250, 255, 0.93); color: #3d3144; box-shadow: 0 8px 24px rgba(75, 44, 75, 0.12); pointer-events: none; transform: translateX(-50%); }
+	.cooperation-defection-heading, .cooperation-defection-details, .cooperation-defection-choice-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
 	h2 { margin: 0; font-size: 16px; } h2 span { color: #7b397f; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
-	p { margin: 4px 0 0; font-size: 11px; } .cooperation-defection-heading strong { font-size: 11px; white-space: nowrap; }
-	.cooperation-defection-note { color: #665b69; } .cooperation-defection-details { margin-top: 8px; font-size: 11px; }
-	.cooperation-defection-choice-row { margin-top: 9px; } button { flex: 1; min-height: 34px; padding: 6px 8px; border: 1px solid rgba(102, 28, 106, 0.3); border-radius: 8px; background: #fff; color: #4d3150; font: inherit; font-size: 11px; font-weight: 700; cursor: pointer; pointer-events: auto; } button.selected { background: #f0d9f3; border-color: #8d4692; } button:disabled { cursor: not-allowed; opacity: .5; }
+	p { margin: 4px 0 0; font-size: 11px; overflow-wrap: anywhere; } .cooperation-defection-heading strong { font-size: 11px; white-space: nowrap; }
+	.cooperation-defection-note { color: #665b69; } .cooperation-defection-details { flex-wrap: wrap; justify-content: flex-start; margin-top: 8px; font-size: 11px; }
+	.cooperation-defection-choice-row { margin-top: 9px; } button { flex: 1; min-width: 0; min-height: 34px; padding: 6px 8px; border: 1px solid rgba(102, 28, 106, 0.3); border-radius: 8px; background: #fff; color: #4d3150; font: inherit; font-size: 11px; font-weight: 700; cursor: pointer; pointer-events: auto; } button.selected { background: #f0d9f3; border-color: #8d4692; } button:disabled { cursor: not-allowed; opacity: .5; }
 	.cooperation-defection-rules-disclosure { margin-top: 9px; pointer-events: auto; }
 	.cooperation-defection-rules-disclosure summary { padding: 8px; border: 1px solid rgba(102, 28, 106, .3); border-radius: 8px; background: white; color: #4d3150; font-size: 11px; font-weight: 700; cursor: pointer; text-align: center; }
 	.cooperation-defection-rules-inline { display: grid; gap: 8px; max-height: min(55svh, 360px); overflow: auto; margin-top: 8px; padding: 10px; border: 1px solid rgba(102, 28, 106, .18); border-radius: 8px; background: rgba(255, 255, 255, .78); font-size: 11px; line-height: 1.5; }

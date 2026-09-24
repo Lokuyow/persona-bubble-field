@@ -67,7 +67,6 @@
 								<li>協力成功・一部が抜け駆け → <strong>協力 +100pt / 抜け駆け +10,000pt</strong></li>
 								<li>協力失敗 → <strong>協力 0pt / 抜け駆け 寿命 −3日</strong></li>
 							</ul>
-							<p>抜け駆けは、所持100,000ptによる通常の脱出とは別です。</p>
 						</section>
 					</div>
 					<div class="cooperation-defection-dialog-actions">

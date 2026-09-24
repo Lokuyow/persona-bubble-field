@@ -46,6 +46,11 @@ test.describe('DEV World Sandbox', () => {
 	test('runs a local Cooperation and Defection Playground flow with bot settlement and virtual phases', async ({ page }) => {
 		await page.goto('/?devWorld=1&devScenario=cooperation-defection-playground');
 		await expect(page.getByRole('heading', { name: '協力と抜け駆け experimental' })).toBeVisible();
+		const panel = page.locator('[data-realtime-panel]');
+		await expect(panel).not.toContainText('所持100,000ptによる通常の脱出');
+		await expect(panel).not.toContainText('既存のworld conversationで相談できます。');
+		await expect(panel).not.toContainText('このラウンドの選択はまだありません');
+		await expect(panel).not.toContainText(/cooperation-defection:.*:group:/);
 		const next = page.getByRole('button', { name: 'Advance Cooperation and Defection Playground phase' });
 		await expect(next).toBeDisabled();
 		const group = page.locator('[data-realtime-group-trigger]').first();
@@ -67,14 +72,18 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.locator('[data-realtime-group-trigger][aria-pressed="true"]')).toHaveCount(1);
 		await expect(page.locator('[data-realtime-group-trigger][aria-pressed="true"]')).toHaveAttribute('aria-label', '参加地点に参加済み（参加先）');
 		await next.click();
-		await expect(page.locator('[data-realtime-panel]')).toContainText('参加者: 3');
+		await expect(panel).toContainText('参加中（3人）');
+		await expect(panel.locator('[data-cooperation-defection-selection-status]')).toHaveCount(0);
+		await expect(panel).not.toContainText('既存のworld conversationで相談できます。');
 		await next.click();
 		await expect(page.getByRole('button', { name: '協力する' })).toBeEnabled();
+		await expect(panel.locator('[data-cooperation-defection-selection-status]')).toHaveCount(0);
 		await page.getByRole('button', { name: '協力する' }).click();
 		await expect(page.getByRole('button', { name: '協力する' })).toHaveClass(/selected/);
-		await expect(page.locator('[data-cooperation-defection-selection-status]')).not.toContainText('まだありません');
+		await expect(panel.locator('[data-cooperation-defection-selection-status]')).toContainText('秘密選択を送信済み');
 		await next.click();
 		await expect(page.locator('[data-cooperation-defection-round-result]')).toContainText('+1,000pt');
+		await expect(panel).not.toContainText('まだありません');
 		await next.click();
 		await next.click();
 		await page.getByRole('button', { name: '協力する' }).click();
@@ -95,6 +104,11 @@ test.describe('DEV World Sandbox', () => {
 			const panel = page.locator('[data-realtime-panel]');
 			await expect(controls).toBeVisible();
 			await expect(panel).toBeVisible();
+			const withinViewport = await panel.evaluate((element) => {
+				const rect = element.getBoundingClientRect();
+				return rect.left >= 0 && rect.right <= window.innerWidth && element.scrollWidth <= element.clientWidth;
+			});
+			expect(withinViewport).toBe(true);
 			const boxes = await Promise.all([controls.boundingBox(), panel.boundingBox()]);
 			if (!boxes[0] || !boxes[1]) throw new Error('Expected DEV controls and game panel geometry.');
 			const [a, b] = boxes;
@@ -119,6 +133,7 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.locator('[data-realtime-group-trigger]')).toHaveCount(registration.length);
 		await page.getByText('ルールを見る', { exact: true }).click();
 		await expect(page.getByRole('dialog')).toContainText('1グループ3〜6人、全3ラウンドです。');
+		await expect(page.getByRole('dialog')).not.toContainText('所持100,000ptによる通常の脱出');
 		await expect(page.getByRole('dialog')).toContainText('相談 30秒 → 選択 30秒 → 結果発表 20秒');
 		await expect(page.getByRole('dialog')).toContainText('協力失敗');
 		await page.getByText('ルールを見る', { exact: true }).click();
