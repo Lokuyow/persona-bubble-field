@@ -203,7 +203,7 @@ test.describe('Relay startup', () => {
 		await expect.poll(async () => readRealtimePendingInstances(page)).toEqual([]);
 	});
 
-	test('does not publish a terminal exit when a realtime death outcome is duplicate', async ({ page }) => {
+	test('restores an already committed lifespan loss without reapplying or reloading', async ({ page }) => {
 		const { schedule, group } = scheduleWithDistantFirstGroup(upcomingRegistrationSchedule());
 		const otherPlayers = [
 			{ secret: fixtureSecret(20), choice: 'cooperate' as const, nonce: '1'.repeat(64) },
@@ -221,6 +221,8 @@ test.describe('Relay startup', () => {
 		const startTime = schedule.registrationAtMs + 1_000;
 		const selfSecret = fixtureSecret(19);
 		const selfPubkey = getPublicKey(selfSecret);
+		let mainFrameNavigations = 0;
+		page.on('framenavigated', (frame) => { if (frame === page.mainFrame()) mainFrameNavigations += 1; });
 		await page.clock.install({ time: startTime });
 		await installHostOwnedStub(page);
 		await installDelayedRelay(page, {
@@ -234,6 +236,7 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('[data-realtime-panel]')).toContainText('参加受付');
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${selfPubkey}"]`)).toBeVisible();
+		const initialMainFrameNavigations = mainFrameNavigations;
 		await page.locator('[data-realtime-group-trigger]').click();
 		await page.clock.runFor(50);
 		const nearPosition = group.position.y > 0 ? { x: group.position.x, y: group.position.y - 1 } : { x: group.position.x, y: group.position.y + 1 };
@@ -252,7 +255,7 @@ test.describe('Relay startup', () => {
 		await page.clock.runFor(1_000);
 		await expect.poll(async () => (await relayState(page)).state.published.some((event) => event.kind === 7070 && event.pubkey === selfPubkey && JSON.parse(event.content).action === 'reveal')).toBe(true);
 		const outcomeId = cooperationDefectionOutcomeId(schedule.instanceId, group.id, 1, selfPubkey);
-		await page.evaluate(async (appliedOutcomeId) => {
+		const lifespanAfterCommittedLoss = await page.evaluate(async (appliedOutcomeId) => {
 			const database = await new Promise<IDBDatabase>((resolve, reject) => {
 				const request = indexedDB.open('persona-bubble-field-account');
 				request.onsuccess = () => resolve(request.result);
@@ -262,25 +265,63 @@ test.describe('Relay startup', () => {
 				const transaction = database.transaction('persona-bubble-field-player-state', 'readwrite');
 				const store = transaction.objectStore('persona-bubble-field-player-state');
 				const request = store.get('player-lifecycle');
+				let lifespanAfterLoss = 0;
 				await new Promise<void>((resolve, reject) => {
 					request.onsuccess = () => {
-						const current = request.result as { realtimeSettlementLedger?: { schemaVersion: number; identity: unknown; runNumber: number; pendingInstanceIds: string[]; appliedOutcomeIds: string[] } };
+						const current = request.result as {
+							realtimeSettlementLedger?: { schemaVersion: number; identity: unknown; runNumber: number; pendingInstanceIds: string[]; appliedOutcomeIds: string[] };
+							mode: { kind: 'running'; activeRun: { revision: number; gameState: { lifespanExpiresAtMs: number } } };
+						};
 						const ledger = current.realtimeSettlementLedger;
 						if (!ledger) throw new Error('Expected a realtime settlement ledger.');
-						store.put({ ...current, realtimeSettlementLedger: { ...ledger, appliedOutcomeIds: [...ledger.appliedOutcomeIds, appliedOutcomeId] } }, 'player-lifecycle');
+						lifespanAfterLoss = current.mode.activeRun.gameState.lifespanExpiresAtMs - 72 * 60 * 60 * 1_000;
+						store.put({
+							...current,
+							mode: { kind: 'running', activeRun: { ...current.mode.activeRun, revision: current.mode.activeRun.revision + 1,
+								gameState: { ...current.mode.activeRun.gameState, lifespanExpiresAtMs: lifespanAfterLoss } } },
+							realtimeSettlementLedger: { ...ledger, appliedOutcomeIds: [...new Set([...ledger.appliedOutcomeIds, appliedOutcomeId])] }
+						}, 'player-lifecycle');
 					};
+					request.onerror = () => reject(request.error);
 					transaction.oncomplete = () => resolve();
 					transaction.onerror = () => reject(transaction.error);
 					transaction.onabort = () => reject(transaction.error);
 				});
+				return lifespanAfterLoss;
 			} finally { database.close(); }
 		}, outcomeId);
-		const reloaded = page.waitForEvent('framenavigated', (frame) => frame === page.mainFrame());
-		await page.clock.setSystemTime(round.revealCutoffAtMs + 1_000);
-		await page.clock.runFor(2_000);
-		await reloaded;
-		await expect(page.getByRole('dialog')).toHaveCount(0);
+		await page.reload();
+		const navigationsAfterRestore = mainFrameNavigations;
+		expect(navigationsAfterRestore).toBe(initialMainFrameNavigations + 1);
+		await expect(page.locator('.action-dock')).toBeVisible();
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		await page.clock.setSystemTime(round.revealCutoffAtMs + 1_000);
+		await page.clock.runFor(12_000);
+		await expect.poll(async () => mainFrameNavigations).toBe(navigationsAfterRestore);
+		await page.clock.setSystemTime(schedule.endedAtMs + 1_000);
+		await page.clock.runFor(1_000);
+		await expect.poll(async () => readRealtimePendingInstances(page)).toEqual([]);
+		const persistedSettlement = await page.evaluate((appliedOutcomeId) => new Promise<{ lifespanExpiresAtMs: number; outcomeCount: number; pendingInstanceIds: string[] }>((resolve, reject) => {
+			const request = indexedDB.open('persona-bubble-field-account');
+			request.onerror = () => reject(request.error);
+			request.onsuccess = () => {
+				const database = request.result;
+				const transaction = database.transaction('persona-bubble-field-player-state', 'readonly');
+				const read = transaction.objectStore('persona-bubble-field-player-state').get('player-lifecycle');
+				read.onerror = () => reject(read.error);
+				read.onsuccess = () => {
+					const state = read.result as { mode: { kind: string; activeRun?: { gameState: { lifespanExpiresAtMs: number } } }; realtimeSettlementLedger?: { appliedOutcomeIds: string[]; pendingInstanceIds: string[] } };
+					resolve({ lifespanExpiresAtMs: state.mode.activeRun?.gameState.lifespanExpiresAtMs ?? 0,
+						outcomeCount: state.realtimeSettlementLedger?.appliedOutcomeIds.filter((id) => id === appliedOutcomeId).length ?? 0,
+						pendingInstanceIds: state.realtimeSettlementLedger?.pendingInstanceIds ?? [] });
+				};
+				transaction.oncomplete = () => database.close();
+			};
+		}), outcomeId);
+		expect(persistedSettlement.lifespanExpiresAtMs).toBe(lifespanAfterCommittedLoss);
+		expect(persistedSettlement.outcomeCount).toBe(1);
+		expect(persistedSettlement.pendingInstanceIds).not.toContain(schedule.instanceId);
+		await expect(page.getByRole('dialog')).toHaveCount(0);
 		const exits = (await relayState(page)).state.published.filter((event) => event.kind === WORLD_STATE_KIND && event.pubkey === selfPubkey && event.tags.some((tag) => tag[0] === 'd' && tag[1]?.endsWith(':exit')));
 		expect(exits).toHaveLength(0);
 	});

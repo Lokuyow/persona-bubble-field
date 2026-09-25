@@ -1893,7 +1893,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 					: undefined;
 			});
 			const preparedExit = preparedExitRef.current;
-			if (result.kind === 'survived') {
+			if (result.kind === 'survived' || result.kind === 'duplicate') {
 				personaSnapshot = result.persona;
 				selfSigner = result.persona.signer;
 				appliedCooperationDefectionOutcomeIds.add(outcome.id);
@@ -1916,7 +1916,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 				appliedCooperationDefectionOutcomeIds.add(outcome.id);
 				return 'presenting';
 			}
-			if (result.kind === 'duplicate' || result.kind === 'stale') {
+			if (result.kind === 'stale') {
 				disposePersonaWriter(currentSession);
 				window.location.reload();
 				return 'reloaded';
