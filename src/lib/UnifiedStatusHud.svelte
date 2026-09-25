@@ -99,7 +99,7 @@
 		.lifespan-value { font-size: 1.05em; font-weight: 780; font-variant-numeric: tabular-nums; }
 		.points-value { color: #fff; font-size: 1.45em; font-weight: 850; line-height: 1; font-variant-numeric: tabular-nums; }
 		.points-value span { margin-left: 3px; font-size: .56em; }
-		:global(.status-meter) { display: block; position: relative; height: 8px; overflow: hidden; border: 1px solid rgba(236, 239, 255, .2); border-radius: 999px; background: rgba(3, 7, 20, .58); }
+		:global(.status-meter) { box-sizing: border-box; display: block; position: relative; height: 14px; overflow: hidden; border: 1px solid rgba(236, 239, 255, .2); border-radius: 999px; background: rgba(3, 7, 20, .58); }
 		.meter-fill { height: 100%; min-width: 0; border-radius: inherit; transition: width 180ms linear; }
 		.lifespan-fill { background: linear-gradient(90deg, #e19b6b, #f2c47b); box-shadow: 0 0 10px rgba(241, 180, 114, .3); }
 		.points-fill { background: linear-gradient(90deg, #7b81ff, #b8adff); box-shadow: 0 0 10px rgba(135, 137, 255, .34); }
@@ -110,12 +110,20 @@
 		.mending-status :global(svg) { width: 16px; height: 16px; }
 		.mending-rate { min-width: 0; display: flex; justify-content: space-between; gap: 12px; color: rgba(226, 230, 255, .86); font-size: .82em; font-weight: 600; }
 
+		@media (min-width: 960px) {
+			.meter-row { grid-template-columns: 112px minmax(0, 1fr) 160px; align-items: center; column-gap: 14px; row-gap: 0; }
+			.meter-heading { display: contents; }
+			.meter-label { grid-column: 1; grid-row: 1; align-self: center; white-space: nowrap; }
+			.meter-row :global(.status-meter) { grid-column: 2; grid-row: 1; align-self: center; width: 100%; }
+			.lifespan-value, .points-value { grid-column: 3; grid-row: 1; align-self: center; text-align: right; white-space: nowrap; }
+		}
+
 		@media (max-width: 700px) {
 			padding: 7px 10px;
 			font-size: 11px;
 			gap: 5px;
 			.points-value { font-size: 1.35em; }
-			:global(.status-meter) { height: 7px; }
+			:global(.status-meter) { height: 12px; }
 		}
 	}
 	@media (prefers-reduced-motion: reduce) { .unified-status-hud .meter-fill { transition: none; } }

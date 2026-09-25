@@ -273,6 +273,7 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 		const participantTwoViewport = participantTwoPage.viewportSize();
 		await exerciseTagGameControlsAtViewport(participantTwoPage, gameId, { width: 1200, height: 900 });
 		await exerciseTagGameControlsAtViewport(participantTwoPage, gameId, { width: 390, height: 844 });
+		await exerciseTagGameControlsAtViewport(participantTwoPage, gameId, { width: 390, height: 480 });
 		if (participantTwoViewport) await participantTwoPage.setViewportSize(participantTwoViewport);
 		await Promise.all([moveRelaySelfTo(hostPage, { x: 7, y: 5 }), moveRelaySelfTo(participantPage, { x: 7, y: 6 }), moveRelaySelfTo(participantTwoPage, { x: 8, y: 5 })]);
 		const [latestHostPosition, latestParticipantPosition, latestParticipantTwoPosition] = await Promise.all([

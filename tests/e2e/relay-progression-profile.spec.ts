@@ -360,6 +360,9 @@ for (const stateKind of ['missing', 'corrupt'] as const) {
 		await expect(hud.locator('[data-points-value]')).toHaveText('125,000pt');
 		await expect(hud).not.toContainText('脱出');
 
+		const chatter = page.locator('aside[aria-label="Chatter"]');
+		if (!(await chatter.isVisible())) await page.keyboard.press('c');
+		await expect(chatter).toBeVisible();
 		const sound = page.getByRole('button', { name: 'Open sound settings' });
 		await sound.click();
 		const slider = page.getByRole('slider', { name: 'Sound volume' });
@@ -368,7 +371,7 @@ for (const stateKind of ['missing', 'corrupt'] as const) {
 		await expect(slider).toHaveValue('35');
 		await page.keyboard.press('Escape');
 
-		for (const viewport of [{ width: 1_200, height: 900 }, { width: 390, height: 844 }, { width: 390, height: 620 }]) {
+		for (const viewport of [{ width: 1_200, height: 900 }, { width: 390, height: 844 }, { width: 390, height: 480 }]) {
 			await page.setViewportSize(viewport);
 			const hudBox = await hud.boundingBox();
 			const topStackBox = await page.locator('[data-top-status-hud]').boundingBox();
@@ -380,13 +383,42 @@ for (const stateKind of ['missing', 'corrupt'] as const) {
 				expect(soundBox.x + soundBox.width).toBeGreaterThanOrEqual(hudBox.x + hudBox.width - 2);
 				expect(topStackBox.height).toBeGreaterThan(hudBox.height);
 			}
-			const chatter = page.locator('aside[aria-label="Chatter"]');
-			if (await chatter.isVisible()) {
-				const chatterBox = await chatter.boundingBox();
-				if (hudBox && chatterBox) {
-					expect(chatterBox.y).toBeGreaterThanOrEqual(topStackBox!.y + topStackBox!.height);
-					expect(chatterBox.y + chatterBox.height).toBeLessThanOrEqual(viewport.height + 1);
+			const meterRows = await hud.locator('.meter-row').evaluateAll((rows) => rows.map((row) => {
+				const box = (element: Element) => {
+					const rect = element.getBoundingClientRect();
+					return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height };
+				};
+				return {
+					row: box(row),
+					label: box(row.querySelector('.meter-label')!),
+					bar: box(row.querySelector('[role="meter"]')!),
+					value: box(row.querySelector('strong')!)
+				};
+			}));
+			const expectedBarHeight = viewport.width >= 960 ? 14 : 12;
+			expect(meterRows).toHaveLength(2);
+			for (const row of meterRows) expect(row.bar.height).toBe(expectedBarHeight);
+			if (viewport.width >= 960) {
+				for (const row of meterRows) {
+					expect(row.label.right).toBeLessThanOrEqual(row.bar.left);
+					expect(row.bar.right).toBeLessThanOrEqual(row.value.left);
+					for (const item of [row.label, row.bar, row.value]) expect(Math.abs((item.top + item.bottom) / 2 - (row.row.top + row.row.bottom) / 2)).toBeLessThanOrEqual(1);
 				}
+				expect(Math.abs(meterRows[0].bar.left - meterRows[1].bar.left)).toBeLessThanOrEqual(1);
+				expect(Math.abs(meterRows[0].bar.right - meterRows[1].bar.right)).toBeLessThanOrEqual(1);
+			} else {
+				for (const row of meterRows) {
+					expect(row.label.right).toBeLessThan(row.value.left);
+					expect(row.bar.top).toBeGreaterThanOrEqual(row.label.bottom);
+					expect(row.bar.top).toBeGreaterThanOrEqual(row.value.bottom);
+					expect(row.bar.width).toBeGreaterThanOrEqual(row.row.width - 1);
+				}
+			}
+			const chatterBox = await chatter.boundingBox();
+			expect(chatterBox).toBeTruthy();
+			if (topStackBox && chatterBox) {
+				expect(chatterBox.y).toBeGreaterThanOrEqual(topStackBox.y + topStackBox.height);
+				expect(chatterBox.y + chatterBox.height).toBeLessThanOrEqual(viewport.height + 1);
 			}
 		}
 	});
