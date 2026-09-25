@@ -14,6 +14,7 @@ import {
 	createTagGameSchedule,
 	finalizeTagGameState,
 	isFreshTagGameTouchAction,
+	isTagGameTouchProofSuperseded,
 	isTagGameTouchPositionProof,
 	isFreshTagGameLobby,
 	leaveTagGameParticipant,
@@ -77,6 +78,27 @@ describe('player-hosted tag-game protocol and rules', () => {
 		expect(isFreshTagGameTouchAction({ createdAtSeconds: 10, nowMs, elapsedSinceFirstReceiptMs: 3_000 })).toBe(true);
 		expect(isFreshTagGameTouchAction({ createdAtSeconds: 10, nowMs, elapsedSinceFirstReceiptMs: 3_001 })).toBe(false);
 		expect(isFreshTagGameTouchAction({ createdAtSeconds: 10, nowMs: 21_001, elapsedSinceFirstReceiptMs: 1_001 })).toBe(false);
+	});
+
+	it('rejects a first-arriving touch action whose coarse created_at freshness has expired', () => {
+		expect(isFreshTagGameTouchAction({ createdAtSeconds: 100, nowMs: 111_000, elapsedSinceFirstReceiptMs: 0 })).toBe(false);
+	});
+
+	it('rejects a referenced position proof after newer evidence supersedes it', () => {
+		const proof = { worldStateEventId: '1'.repeat(64), positionEvidenceEventId: '2'.repeat(64) };
+		const current = {
+			proof,
+			currentWorldStateEventId: proof.worldStateEventId,
+			currentWorldState: 'active' as const,
+			currentRunNumber: 1,
+			memberRunNumber: 1,
+			currentPositionEvidenceEventId: '3'.repeat(64),
+			knownWorldStateEventIds: [proof.worldStateEventId],
+			knownPositionEvidenceEventIds: [proof.positionEvidenceEventId, '3'.repeat(64)]
+		};
+		expect(isTagGameTouchProofSuperseded(current)).toBe(true);
+		expect(isTagGameTouchProofSuperseded({ ...current, currentPositionEvidenceEventId: proof.positionEvidenceEventId })).toBe(false);
+		expect(isTagGameTouchProofSuperseded({ ...current, currentRunNumber: 2 })).toBe(true);
 	});
 
 	it('renews unbounded lobbies and rejects expired ones using the event timestamp', () => {

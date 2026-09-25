@@ -28,6 +28,21 @@ export type TagGameTouchPositionProof = Readonly<{
 	positionEvidenceEventId: string;
 }>;
 
+export function isTagGameTouchProofSuperseded(input: Readonly<{
+	proof: TagGameTouchPositionProof;
+	currentWorldStateEventId: string;
+	currentWorldState: 'active' | 'exit';
+	currentRunNumber: number | null;
+	memberRunNumber: number;
+	currentPositionEvidenceEventId: string;
+	knownWorldStateEventIds: readonly string[];
+	knownPositionEvidenceEventIds: readonly string[];
+}>): boolean {
+	return input.currentWorldState !== 'active' || input.currentRunNumber !== input.memberRunNumber ||
+		(input.currentWorldStateEventId !== input.proof.worldStateEventId && input.knownWorldStateEventIds.includes(input.proof.worldStateEventId)) ||
+		(input.currentPositionEvidenceEventId !== input.proof.positionEvidenceEventId && input.knownPositionEvidenceEventIds.includes(input.proof.positionEvidenceEventId));
+}
+
 export function isTagGameTouchPositionProof(value: unknown): value is TagGameTouchPositionProof {
 	if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
 	const proof = value as Record<string, unknown>;

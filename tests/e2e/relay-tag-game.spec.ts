@@ -31,6 +31,10 @@ async function injectPosition(page: Page, event: NostrEvent): Promise<void> {
 	await page.evaluate((next) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(next), event);
 }
 
+async function injectWorldMessage(page: Page, event: NostrEvent): Promise<void> {
+	await page.evaluate((next) => (window as typeof window & { __relayStartupTest: { injectMessage(event: object): void } }).__relayStartupTest.injectMessage(next), event);
+}
+
 async function latestGameEvent(page: Page, gameId: string): Promise<NostrEvent> {
 	const events = await page.evaluate((id) => {
 		const published = (window as typeof window & { __relayStartupTest: { state: { published: Array<Record<string, unknown>> } } }).__relayStartupTest.state.published;
@@ -319,8 +323,22 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 		await expect(fieldEffectLabel.locator('strong')).toBeVisible();
 		await expect(fieldEffectLabel.locator('small')).toHaveCount(0);
 		if (holderViewport) await holderPage.setViewportSize(holderViewport);
-		const touchStateEvent = await latestGameEvent(hostPage, gameId);
-		const touchState = parseTagGameEvent(touchStateEvent, CHANNEL_ID)!.state;
+		const currentTouchState = parseTagGameEvent(await latestGameEvent(hostPage, gameId), CHANNEL_ID)!.state;
+		await Promise.all([hostPage, participantPage, participantTwoPage].map(async (page) => {
+			const pageNow = await page.evaluate(() => Date.now());
+			await page.clock.setSystemTime(Math.max(pageNow, (currentTouchState.transferAt ?? pageNow) + 4_000));
+		}));
+		await Promise.all([hostPage, participantPage, participantTwoPage].map((page) => page.clock.runFor(300)));
+		let touchStateEvent = await latestGameEvent(hostPage, gameId);
+		let touchState = parseTagGameEvent(touchStateEvent, CHANNEL_ID)!.state;
+		const activeAt = Math.max(...await Promise.all([hostPage, participantPage, participantTwoPage].map((page) => page.evaluate(() => Math.floor(Date.now() / 1_000)))));
+		for (const [secret, position] of [[hostSecret, { x: 7, y: 5 }], [participantSecret, { x: 7, y: 6 }], [participantTwoSecret, { x: 8, y: 5 }]] as const) {
+			const activity = finalizeEvent(buildWorldMessageTemplate({ channel: { channelId: CHANNEL_ID, relayHint: 'wss://relay.test/' }, createdAt: activeAt, position, content: 'active touch E2E participant', speechType: 'normal' }), secret);
+			await Promise.all([hostPage, participantPage, participantTwoPage].map((page) => injectWorldMessage(page, activity)));
+		}
+		await hostPage.clock.runFor(300);
+		touchStateEvent = await latestGameEvent(hostPage, gameId);
+		touchState = parseTagGameEvent(touchStateEvent, CHANNEL_ID)!.state;
 		await Promise.all([participantPage, participantTwoPage].map((page) => injectRealtime(page, touchStateEvent)));
 		await Promise.all([hostPage, participantPage, participantTwoPage].map((page) => expect(page.locator(`.participant[data-participant-id="${touchState.ownerPubkey}"]`)).toHaveAttribute('data-tag-game-role', 'holder')));
 		const holder = cells.get(touchState.ownerPubkey!)!;
@@ -331,35 +349,37 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 		const touchTargetPubkey = touchState.effect === 'benefit' ? touchState.ownerPubkey! : target[0];
 		let transferredEvent = touchStateEvent;
 		let transferred = touchState;
-		if (await actor.locator(`.participant[data-participant-id="${touchTargetPubkey}"]`).getAttribute('data-tag-game-touch-target') === 'true') {
-			await expect(actor.locator(`.participant[data-participant-id="${actorPubkey}"]`)).toHaveAttribute('data-position', `${actorEntry[1].position.x},${actorEntry[1].position.y}`);
-			await expect(actor.locator(`.participant[data-participant-id="${touchTargetPubkey}"]`)).toHaveAttribute('data-position', `${cells.get(touchTargetPubkey)!.position.x},${cells.get(touchTargetPubkey)!.position.y}`);
-			const dx = cells.get(touchTargetPubkey)!.position.x - actorEntry[1].position.x;
-			const dy = cells.get(touchTargetPubkey)!.position.y - actorEntry[1].position.y;
-			await Promise.all([hostPage, participantPage, participantTwoPage].map(async (page) => {
-				const pageNow = await page.evaluate(() => Date.now());
-				const touchReadyAt = Math.max(pageNow, (touchState.transferAt ?? pageNow) + 4_000);
-				await page.clock.setSystemTime(touchReadyAt);
-				await page.clock.runFor(10);
-			}));
-			await expect(actor.locator('main')).toHaveAttribute('data-realtime-status', 'active');
-			const actionCountBeforeTouch = (await relayState(actor)).state.published.filter((event) => event.kind === 27070 && event.pubkey === actorPubkey).length;
-			await dragRelayJoystick(actor, { x: dx * 100, y: dy * 100 }, actorEntry[1].position);
-			await expect(actor.locator(`.participant[data-participant-id="${actorPubkey}"]`)).toHaveAttribute('data-tag-game-touch-attempt', /\d+/);
-			await expect.poll(async () => (await relayState(actor)).state.published.filter((event) => event.kind === 27070 && event.pubkey === actorPubkey).length).toBeGreaterThan(actionCountBeforeTouch);
-			await expect.poll(async () => latestTagGameAction(actor, actorPubkey, 'touch').then(() => true, () => false)).toBe(true);
-			const touchAction = await latestTagGameAction(actor, actorPubkey, 'touch');
-			await expect(actor.locator('[data-tag-game-touch-status]')).toHaveText('判定待ち・開催者未確認');
-			const parsedTouch = parseTagGameActionEvent(touchAction, CHANNEL_ID);
-			expect(parsedTouch?.action).toBe('touch');
-			expect(parsedTouch?.payload.actorProof).toMatchObject({ worldStateEventId: expect.any(String), positionEvidenceEventId: expect.any(String) });
-			expect(parsedTouch?.payload.targetProof).toMatchObject({ worldStateEventId: expect.any(String), positionEvidenceEventId: expect.any(String) });
-			await injectRealtime(hostPage, touchAction);
-			await expect.poll(async () => parseTagGameEvent(await latestGameEvent(hostPage, gameId), CHANNEL_ID)?.state.transferAt).toBeGreaterThan(running.transferAt ?? 0);
-			transferredEvent = await latestGameEvent(hostPage, gameId);
-			transferred = parseTagGameEvent(transferredEvent, CHANNEL_ID)!.state;
-			await Promise.all([participantPage, participantTwoPage].map((page) => injectRealtime(page, transferredEvent)));
-		}
+		await expect(actor.locator(`.participant[data-participant-id="${touchTargetPubkey}"]`)).toHaveAttribute('data-tag-game-touch-target', 'true');
+		await expect(actor.locator(`.participant[data-participant-id="${actorPubkey}"]`)).toHaveAttribute('data-position', `${actorEntry[1].position.x},${actorEntry[1].position.y}`);
+		await expect(actor.locator(`.participant[data-participant-id="${touchTargetPubkey}"]`)).toHaveAttribute('data-position', `${cells.get(touchTargetPubkey)!.position.x},${cells.get(touchTargetPubkey)!.position.y}`);
+		const dx = cells.get(touchTargetPubkey)!.position.x - actorEntry[1].position.x;
+		const dy = cells.get(touchTargetPubkey)!.position.y - actorEntry[1].position.y;
+		await expect(actor.locator('main')).toHaveAttribute('data-realtime-status', 'active');
+		const actionCountBeforeTouch = (await relayState(actor)).state.published.filter((event) => event.kind === 27070 && event.pubkey === actorPubkey).length;
+		await dragRelayJoystick(actor, { x: dx * 100, y: dy * 100 }, actorEntry[1].position);
+		await expect(actor.locator(`.participant[data-participant-id="${actorPubkey}"]`)).toHaveAttribute('data-tag-game-touch-attempt', /\d+/);
+		await expect.poll(async () => (await relayState(actor)).state.published.filter((event) => event.kind === 27070 && event.pubkey === actorPubkey).length).toBeGreaterThan(actionCountBeforeTouch);
+		await expect.poll(async () => latestTagGameAction(actor, actorPubkey, 'touch').then(() => true, () => false)).toBe(true);
+		const touchAction = await latestTagGameAction(actor, actorPubkey, 'touch');
+		await expect(actor.locator('[data-tag-game-touch-status]')).toHaveText('判定待ち・開催者未確認');
+		const parsedTouch = parseTagGameActionEvent(touchAction, CHANNEL_ID);
+		expect(parsedTouch?.action).toBe('touch');
+		expect(parsedTouch?.payload.actorProof).toMatchObject({ worldStateEventId: expect.any(String), positionEvidenceEventId: expect.any(String) });
+		expect(parsedTouch?.payload.targetProof).toMatchObject({ worldStateEventId: expect.any(String), positionEvidenceEventId: expect.any(String) });
+		await actor.clock.runFor(2_100);
+		await expect(actor.locator('[data-tag-game-touch-status]')).toHaveText('転移未確認');
+		await injectRealtime(hostPage, touchAction);
+		await expect.poll(async () => parseTagGameEvent(await latestGameEvent(hostPage, gameId), CHANNEL_ID)?.state.transferAt).toBeGreaterThan(touchState.transferAt ?? 0);
+		transferredEvent = await latestGameEvent(hostPage, gameId);
+		transferred = parseTagGameEvent(transferredEvent, CHANNEL_ID)!.state;
+		expect(transferredEvent.kind).toBe(TAG_GAME_KIND);
+		expect(transferredEvent.pubkey).toBe(hostPubkey);
+		expect(transferred.ownerPubkey).toBe(touchState.effect === 'benefit' ? actorPubkey : touchTargetPubkey);
+		await Promise.all([participantPage, participantTwoPage].map((page) => injectRealtime(page, transferredEvent)));
+		await expect(actor.locator('[data-tag-game-touch-status]')).toHaveText('所持者が更新されました');
+		await actor.clock.runFor(1_900);
+		await expect(actor.locator('[data-tag-game-touch-status]')).toHaveCount(0);
+		await expect(actor.locator('[data-tag-game-hud]')).toBeVisible();
 		const presenceAt = Math.max(transferredEvent.created_at, ...await Promise.all([hostPage, participantPage, participantTwoPage].map((page) => page.evaluate(() => Math.floor(Date.now() / 1_000))))) + 1;
 		await Promise.all([hostPage, participantPage, participantTwoPage].map((page) => page.clock.setSystemTime(presenceAt * 1_000)));
 		for (const [secret, position] of [[hostSecret, { x: 7, y: 5 }], [participantSecret, { x: 7, y: 6 }], [participantTwoSecret, { x: 8, y: 5 }]] as const) {
