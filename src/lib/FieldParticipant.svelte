@@ -65,7 +65,6 @@
 	{#if tagGameRole === 'holder'}
 		<span class={['tag-game-holder-label', { 'tag-game-holder-label-paused': !tagGameEffectActive }]} role="img" aria-label={`${tagGameEffect === 'benefit' ? '恩恵' : '災厄'}${tagGameEffectActive ? '' : '・効果停止中'}`}>
 			<strong>{tagGameEffect === 'benefit' ? '恩恵' : '災厄'}</strong>
-			<small>{tagGameEffectActive ? tagGameEffect === 'benefit' ? '+50pt/秒' : '寿命−1時間/秒' : '停止中'}</small>
 		</span>
 	{:else if tagGameRole === 'participant'}
 		<span class="tag-game-participant-mark" role="img" aria-label="鬼ごっこ参加者"></span>
@@ -141,15 +140,11 @@
 	[data-tag-game-role='holder'][data-tag-game-effect-active='false'] .participant-profile-trigger::after { border-style: dashed; opacity: .62; }
 	.tag-game-holder-label {
 		position: absolute;
-		top: 3px;
+		top: -25px;
 		left: 50%;
 		z-index: 2;
-		display: flex;
-		align-items: center;
-		gap: 1px 4px;
-		max-width: calc(var(--cell-size) - 8px);
-		flex-wrap: wrap;
-		justify-content: center;
+		display: block;
+		max-width: calc(var(--cell-size) - 4px);
 		padding: 2px 6px;
 		border: 1px solid rgba(255, 255, 255, .9);
 		border-radius: 999px;
@@ -160,10 +155,8 @@
 		pointer-events: none;
 	}
 	.tag-game-holder-label strong { color: #226b42; font-size: 10px; }
-	.tag-game-holder-label small { flex-basis: 100%; overflow: hidden; color: #274a35; text-align: center; text-overflow: ellipsis; font-size: 9px; line-height: 1.05; white-space: normal; }
 	[data-tag-game-effect='calamity'] .tag-game-holder-label { background: #f7e8e5; }
-	[data-tag-game-effect='calamity'] .tag-game-holder-label strong,
-	[data-tag-game-effect='calamity'] .tag-game-holder-label small { color: #85372e; }
+	[data-tag-game-effect='calamity'] .tag-game-holder-label strong { color: #85372e; }
 	.tag-game-holder-label-paused { opacity: .72; }
 	.tag-game-participant-mark {
 		position: absolute;
@@ -179,8 +172,7 @@
 		pointer-events: none;
 	}
 	@media (max-width: 700px) {
-		.tag-game-holder-label { top: 3px; max-width: calc(var(--cell-size) - 6px); padding: 2px 5px; }
-		.tag-game-holder-label small { display: none; }
+		.tag-game-holder-label { top: -24px; max-width: calc(var(--cell-size) - 2px); padding: 2px 5px; }
 		.tag-game-holder-label strong { font-size: 9px; }
 	}
 </style>

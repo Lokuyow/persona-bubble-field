@@ -4,16 +4,13 @@
 	import PrimaryButton from '$lib/PrimaryButton.svelte';
 	import { resolveCharacterFromPubkey } from '$lib/characterAssignment';
 	import { newlyConfirmedTagGameParticipants, tagGameCharacterName, tagGameConfirmedParticipants, tagGameParticipantLabel } from '$lib/tagGamePresentation';
-	import { createTagGameSchedule, tagGamePredictedRemainingLifespanMinutes, TAG_GAME_BENEFIT_POINTS_PER_SECOND, TAG_GAME_LIFESPAN_LOSS_MS_PER_SECOND, type TagGameState } from '$lib/tagGame';
+	import type { TagGameState } from '$lib/tagGame';
 	type Props = Readonly<{
 		open: boolean;
 		games: readonly TagGameState[];
 		selfPubkey: string | null;
 		selfRunNumber: number | null;
-		hudGameId: string | null;
 		watchedGameId: string | null;
-		effectiveLifespanMs: number | null;
-		realtimeStatus: 'inactive' | 'active' | 'degraded';
 		nowMs: number;
 		busy?: boolean;
 		reservedGameId?: string | null;
@@ -30,9 +27,8 @@
 		onStopWatching: () => void;
 		onClose: () => void;
 	}>;
-	let { open, games, selfPubkey, selfRunNumber, hudGameId, watchedGameId, effectiveLifespanMs, realtimeStatus, nowMs, busy = false, reservedGameId = null, reservedStatus = null, reservationExpiresAtMs = null, onCreate, onJoin, onLeave, onCancel, onPropose, onConsent, onExclude, onWatch, onStopWatching, onClose }: Props = $props();
+	let { open, games, selfPubkey, selfRunNumber, watchedGameId, nowMs, busy = false, reservedGameId = null, reservedStatus = null, reservationExpiresAtMs = null, onCreate, onJoin, onLeave, onCancel, onPropose, onConsent, onExclude, onWatch, onStopWatching, onClose }: Props = $props();
 	const labels = { lobby: '募集中', proposed: '開始確認中', countdown: '開始準備中', running: '開催中', settling: '最終精算中', ended: '終了', interrupted: '中断' } as const;
-	const activeGames = $derived(games.filter((game) => game.gameId === hudGameId && (game.phase === 'running' || game.phase === 'settling')));
 	const selfActiveGameId = $derived(games.find((game) => (game.phase === 'running' || game.phase === 'settling') && game.participant.some((member) => member.pubkey === selfPubkey && member.runNumber === selfRunNumber && (member.status === 'active' || member.status === 'temporarily-ineligible')))?.gameId ?? null);
 	const ownHostLobby = $derived(games.find((game) => game.hostPubkey === selfPubkey && (game.phase === 'lobby' || game.phase === 'proposed')) ?? null);
 	const reservationCurrent = $derived(Boolean(reservedGameId && !(reservationExpiresAtMs !== null && reservationExpiresAtMs <= nowMs)));
@@ -63,52 +59,7 @@
 		const sameName = games.filter((candidate) => candidate.hostPubkey !== selfPubkey && tagGameCharacterName(candidate.hostPubkey, selfPubkey) === name);
 		return sameName.length > 1 ? `開催者 ${name}（同名${sameName.findIndex((candidate) => candidate.gameId === game.gameId) + 1}）` : `開催者 ${name}`;
 	}
-	function pendingOwnEarnings(game: TagGameState): Readonly<{ points: number; lossMs: number }> {
-		if (game.phase !== 'running' || game.holderChallengeId || !game.startedAt || !game.seed || !game.effect) return { points: 0, lossMs: 0 };
-		const own = game.participant.find((member) => member.pubkey === selfPubkey && member.runNumber === selfRunNumber);
-		if (!own || own.pubkey !== game.ownerPubkey || own.status !== 'active') return { points: 0, lossMs: 0 };
-		const elapsed = Math.max(0, Math.min(nowMs, (game.endsAt ?? game.startedAt + 180) * 1000) - game.startedAt * 1000);
-		const intervals = createTagGameSchedule(game.seed);
-		let boundary = 0;
-		for (const interval of intervals) {
-			boundary += interval.durationMs;
-			if (elapsed < boundary) {
-				const cursor = Math.max(game.settledAtMs, game.startedAt * 1000 + boundary - interval.durationMs);
-				const duration = Math.max(0, Math.min(nowMs, game.startedAt * 1000 + boundary) - cursor);
-				return interval.effect === 'benefit'
-					? { points: Math.floor((own.benefitMs + duration) * TAG_GAME_BENEFIT_POINTS_PER_SECOND / 1000) - own.points, lossMs: 0 }
-					: { points: 0, lossMs: Math.floor((own.calamityMs + duration) * TAG_GAME_LIFESPAN_LOSS_MS_PER_SECOND / 1000) - own.lifespanLossMs };
-			}
-		}
-		return { points: 0, lossMs: 0 };
-	}
 </script>
-
-{#if activeGames.length > 0}
-	<aside class="field-hud" aria-label="鬼ごっこ進行状況" data-tag-game-hud data-tag-game-hud-id={hudGameId ?? undefined} data-realtime-status={realtimeStatus}>
-		{#each activeGames as game (game.gameId)}
-			{@const own = game.participant.find((member) => member.pubkey === selfPubkey && member.runNumber === selfRunNumber)}
-			{@const pending = pendingOwnEarnings(game)}
-			{@const cooldown = Math.max(0, 3 - Math.ceil((nowMs - (game.transferAt ?? nowMs)) / 1000))}
-			<strong>鬼ごっこ・残り{Math.max(0, Math.ceil(((game.endsAt ?? 0) * 1000 - nowMs) / 1000))}秒</strong>
-			<p>参加者: {game.participant.filter((member) => member.status === 'active').map((member) => `${tagGameParticipantLabel(game, member.pubkey, selfPubkey)}${member.pubkey === game.ownerPubkey ? '(所持者)' : ''}`).join('、')}</p>
-			{@const holder = game.participant.find((member) => member.pubkey === game.ownerPubkey)}
-			{@const effectActive = game.phase === 'running' && !game.holderChallengeId && holder?.status === 'active'}
-			<div class={['hud-holder', game.effect ?? 'calamity', { 'hud-effect-paused': !effectActive }]} data-tag-game-effect={game.effect} data-tag-game-effect-active={effectActive ? 'true' : 'false'}>
-				<span class="hud-holder-name">所持者・{game.ownerPubkey ? tagGameParticipantLabel(game, game.ownerPubkey, selfPubkey) : '未定'}</span>
-				{#if effectActive}<strong>{game.effect === 'benefit' ? '恩恵・+' + TAG_GAME_BENEFIT_POINTS_PER_SECOND + 'pt/秒' : '災厄・寿命−1時間/秒'}</strong>
-					<small>{game.effect === 'benefit' ? '所持者以外が追いかけて奪う' : '所持者がほかの参加者を追いかけて押し付ける'}</small>
-				{:else}<strong>{game.phase === 'settling' ? '最終精算中・効果停止' : game.holderChallengeId ? '応答確認中・効果停止' : '効果停止中'}</strong>{/if}
-			</div>
-			<p>転移後{cooldown}秒</p>
-			{#if own}<p>予測: {own.points + pending.points}pt・寿命残り約{tagGamePredictedRemainingLifespanMinutes(effectiveLifespanMs, pending.lossMs)}分</p>{/if}
-			{#if game.phase === 'running' && (own?.status === 'active' || own?.status === 'temporarily-ineligible')}
-				<PrimaryButton class="tag-game-leave" data-tag-game-leave={game.gameId} onclick={() => onLeave(game.gameId)} disabled={busy}>退出を申請</PrimaryButton>
-				<small>開催者が退出を確定すると精算されます</small>
-			{/if}
-		{/each}
-	</aside>
-{/if}
 
 {#if open}
 	<div class="backdrop">
@@ -193,13 +144,6 @@
 <style>
 	.backdrop { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 20px; background: rgba(20, 24, 30, .48); }
 	.panel { width: min(520px, 100%); max-height: min(80vh, 720px); overflow: auto; padding: 20px; border-radius: 16px; background: var(--surface, #fff); color: var(--text-primary, #20242a); box-shadow: 0 18px 60px rgba(0,0,0,.24); }
-	.field-hud { position: fixed; z-index: 55; top: max(62px, calc(env(safe-area-inset-top) + 60px)); right: 12px; width: min(330px, calc(100vw - 24px)); padding: 10px 12px; border: 1px solid var(--border-subtle, #d8dce0); border-radius: 12px; background: color-mix(in srgb, var(--surface, #fff) 94%, transparent); color: var(--text-primary, #20242a); box-shadow: 0 4px 18px rgba(0,0,0,.16); font-size: .84rem; pointer-events: auto; }
-	.field-hud p { margin: 4px 0 0; }
-	.hud-holder { display: grid; gap: 2px; margin-top: 5px; padding: 7px 9px; border-left: 4px solid #607080; border-radius: 5px; background: color-mix(in srgb, var(--surface, #fff) 86%, #607080); }
-	.hud-holder.benefit { border-color: #2e8b57; background: color-mix(in srgb, var(--surface, #fff) 88%, #2e8b57); }
-	.hud-holder.calamity { border-color: #b4483b; background: color-mix(in srgb, var(--surface, #fff) 88%, #b4483b); }
-	.hud-holder-name { font-weight: 800; }
-	.hud-holder small { line-height: 1.25; }
 	.host-identity { display: flex; align-items: center; gap: 8px; }
 	.host-identity .tag-game-avatar { position: static; width: 32px; height: 32px; object-fit: contain; flex: 0 0 auto; pointer-events: none; }
 	.reservation-state { margin: 0; font-weight: 600; }
@@ -212,7 +156,6 @@
 	.participant-slot-empty { display: grid; place-items: center; border-style: dashed; color: var(--text-secondary, #888); font-size: .72rem; }
 	.participant-slot-arrival { animation: participant-arrival 850ms ease-out 2; }
 	.tag-game-arrival { padding: 7px 10px; border-radius: 7px; background: var(--color-accent-soft, #edf2f6); color: var(--text-primary, #20242a); font-weight: 700; }
-	.field-hud small { display: block; margin-top: 4px; color: var(--text-secondary, #666); }
 	header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 	h2 { margin: 0; }
 	header button { width: 44px; height: 44px; border: 0; background: transparent; font-size: 24px; }

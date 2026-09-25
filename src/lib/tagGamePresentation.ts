@@ -22,3 +22,8 @@ export function newlyConfirmedTagGameParticipants(previous: TagGameState | null,
 	const previousPubkeys = new Set(tagGameConfirmedParticipants(previous).map((member) => member.pubkey));
 	return tagGameConfirmedParticipants(current).filter((member) => !previousPubkeys.has(member.pubkey)).map((member) => member.pubkey);
 }
+
+export function isOwnTagGameStartTransition(previous: TagGameState | null, current: TagGameState, selfPubkey: string | null, selfRunNumber: number | null): boolean {
+	if (!previous || previous.gameId !== current.gameId || previous.phase === 'running' || current.phase !== 'running' || !selfPubkey || selfRunNumber === null) return false;
+	return current.participant.some((member) => member.pubkey === selfPubkey && member.runNumber === selfRunNumber && member.status === 'active');
+}

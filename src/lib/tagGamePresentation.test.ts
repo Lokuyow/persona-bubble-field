@@ -1,7 +1,7 @@
 import { getPublicKey } from 'nostr-tools/pure';
 import { describe, expect, it } from 'vitest';
 import { resolveCharacterFromPubkey } from './characterAssignment';
-import { newlyConfirmedTagGameParticipants, tagGameCharacterName, tagGameParticipantLabel } from './tagGamePresentation';
+import { isOwnTagGameStartTransition, newlyConfirmedTagGameParticipants, tagGameCharacterName, tagGameParticipantLabel } from './tagGamePresentation';
 import type { TagGameState } from './tagGame';
 
 function secret(seed: number): Uint8Array { return new Uint8Array(32).fill(seed); }
@@ -70,5 +70,17 @@ describe('tag-game character presentation', () => {
 		expect(newlyConfirmedTagGameParticipants(previous, joined)).toEqual([joinedA, joinedB]);
 		const departed = { ...joined, participant: joined.participant.map((member) => member.pubkey === joinedA ? { ...member, status: 'left' as const } : member) };
 		expect(newlyConfirmedTagGameParticipants(departed, joined)).toEqual([joinedA]);
+	});
+
+	it('recognizes only an observed running transition for the exact local Run', () => {
+		const hostMember = game.participant[0];
+		const countdown: TagGameState = { ...game, phase: 'countdown', participant: [{ ...hostMember, status: 'active' }] };
+		const running: TagGameState = { ...countdown, phase: 'running', startedAt: 2, endsAt: 182, seed: 'seed', ownerPubkey: host, effect: 'benefit' };
+		expect(isOwnTagGameStartTransition(countdown, running, host, 1)).toBe(true);
+		expect(isOwnTagGameStartTransition(null, running, host, 1)).toBe(false);
+		expect(isOwnTagGameStartTransition(running, { ...running, revision: 1 }, host, 1)).toBe(false);
+		expect(isOwnTagGameStartTransition(countdown, running, host, 2)).toBe(false);
+		expect(isOwnTagGameStartTransition(countdown, { ...running, participant: [] }, host, 1)).toBe(false);
+		expect(isOwnTagGameStartTransition({ ...countdown, gameId: `${host}:2:${'b'.repeat(64)}` }, running, host, 1)).toBe(false);
 	});
 });

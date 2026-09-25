@@ -61,6 +61,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	import ProfileDialog from '$lib/ProfileDialog.svelte';
 	import IdentitySelectionDialog from '$lib/IdentitySelectionDialog.svelte';
 	import LifespanHud from '$lib/LifespanHud.svelte';
+	import TagGameHud from '$lib/TagGameHud.svelte';
 	import MendingDialog from '$lib/MendingDialog.svelte';
 	import AdjustmentDialog from '$lib/AdjustmentDialog.svelte';
 	import SelfProfileDialog from '$lib/SelfProfileDialog.svelte';
@@ -163,6 +164,8 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		tagGameHolderResponseState,
 		type TagGameState
 	} from '$lib/tagGame';
+	import { isOrganizerConfirmedTagGameEffectCurrent, projectTagGameHud } from '$lib/tagGameHud';
+	import { isOwnTagGameStartTransition } from '$lib/tagGamePresentation';
 	import {
 		prepareCharacterProfilePublication,
 		publishCharacterProfile,
@@ -323,6 +326,8 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 	let tagGameBusy = $state(false);
 	let tagGameWatchedGameId = $state<string | null>(null);
 	let tagGameStates = $state.raw<readonly TagGameState[]>([]);
+	let tagGameHudNowMs = $state(Date.now());
+	let tagGameHudLastSecond = Math.floor(Date.now() / 1000);
 	const tagGameEvents = new Map<string, { eventId: string; createdAt: number; state: TagGameState }>();
 	let latestTagGameWorldStates = $state.raw(new Map<string, ParsedWorldStateEvent>());
 	const appliedTagGameWorldStateIds = new Set<string>();
@@ -557,11 +562,31 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 	let tagGameWatchedGame = $derived(tagGameWatchedGameId ? tagGameStates.find((game) => game.gameId === tagGameWatchedGameId && (game.phase === 'running' || game.phase === 'settling')) ?? null : null);
 	let tagGameDisplayedGameId = $derived(tagGameSelfActiveGameId ?? tagGameWatchedGame?.gameId ?? null);
 	let tagGameLocalLock = $derived(Boolean(personaSnapshot && tagGameSelfActiveGameId));
+	let tagGameDisplayedGame = $derived(tagGameStates.find((candidate) => candidate.gameId === tagGameDisplayedGameId && (candidate.phase === 'running' || candidate.phase === 'settling')) ?? null);
+	let tagGameHudWorkProjection = $derived.by(() => tagGameSelfActiveGameId && personaSnapshot
+		? projectMending(personaSnapshot.gameState, tagGameHudNowMs, personaSnapshot.activeRun.rootBuild)
+		: null);
+	let tagGameHudProjection = $derived.by(() => {
+		if (!tagGameSelfActiveGameId || !personaSnapshot || !tagGameHudWorkProjection) return null;
+		const game = tagGameStates.find((candidate) => candidate.gameId === tagGameSelfActiveGameId) ?? null;
+		const lock = personaSnapshot.tagGame?.lock;
+		return projectTagGameHud({
+			game,
+			selfPubkey: personaSnapshot.signer.pubkey,
+			selfRunNumber: personaSnapshot.activeRun.runNumber,
+			localLockGameId: lock?.gameId ?? null,
+			localAppliedPoints: lock?.points ?? 0,
+			localAppliedLossMs: lock?.lifespanLossMs ?? 0,
+			savedPoints: personaSnapshot.gameState.points,
+			effectiveExpiresAtMs: tagGameHudWorkProjection.effectiveExpiresAtMs,
+			nowMs: tagGameHudNowMs
+		});
+	});
 	let tagGameDisplayedEffect = $derived.by(() => {
-		const game = tagGameStates.find((candidate) => candidate.gameId === tagGameDisplayedGameId);
+		const game = tagGameDisplayedGame;
 		if (!game) return null;
 		const holder = game.participant.find((member) => member.pubkey === game.ownerPubkey);
-		return { effect: game.effect ?? null, active: game.phase === 'running' && !game.holderChallengeId && holder?.status === 'active' };
+		return { effect: game.effect ?? null, active: isOrganizerConfirmedTagGameEffectCurrent(game, tagGameHudNowMs) && !game.holderChallengeId && holder?.status === 'active' };
 	});
 	let tagGameRoleByPubkey = $derived.by(() => {
 		const roles = new Map<string, 'participant' | 'holder'>();
@@ -1488,6 +1513,11 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 				}
 				const now = Date.now();
 				mendingNowMs = now;
+				const second = Math.floor(now / 1000);
+				if (tagGameDisplayedGameId && second !== tagGameHudLastSecond) {
+					tagGameHudLastSecond = second;
+					tagGameHudNowMs = now;
+				}
 				updateLifespanHud(now);
 				if (!devCooperationDefectionPlaygroundEnabled) reconcileCooperationDefectionSession(devCooperationDefectionFixtureEnabled ? initialCooperationDefectionNowMs : now);
 				if (!devWorldSandboxEnabled && cooperationDefectionEventEnabled) void worldSession?.startRealtime();
@@ -2210,6 +2240,14 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 			void releaseAndRefreshTagGameParticipation(personaSnapshot, state.gameId);
 		}
 		tagGameEvents.set(state.gameId, { eventId, createdAt, state });
+		const ownStartTransition = isOwnTagGameStartTransition(previous?.state ?? null, state, personaSnapshot?.signer.pubkey ?? null, personaSnapshot?.activeRun.runNumber ?? null);
+		if (ownStartTransition && tagGamePanelOpen) {
+			tagGamePanelOpen = false;
+		}
+		if (ownStartTransition || tagGameWatchedGameId === state.gameId) {
+			tagGameHudNowMs = Date.now();
+			tagGameHudLastSecond = Math.floor(tagGameHudNowMs / 1000);
+		}
 		if (tagGameWatchedGameId === state.gameId && state.phase !== 'running' && state.phase !== 'settling') tagGameWatchedGameId = null;
 		const nowSeconds = Math.floor(Date.now() / 1000);
 		const localMember = personaSnapshot && state.participant.find((member) => member.pubkey === personaSnapshot?.signer.pubkey && member.runNumber === personaSnapshot.activeRun.runNumber);
@@ -3002,6 +3040,16 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 		fieldActionMenu = { position: { ...position }, actions: resolution.actions };
 	}
 
+	function watchTagGame(gameId: string): void {
+		tagGameWatchedGameId = gameId;
+		tagGameHudNowMs = Date.now();
+		tagGameHudLastSecond = Math.floor(tagGameHudNowMs / 1000);
+	}
+
+	function stopWatchingTagGame(): void {
+		tagGameWatchedGameId = null;
+	}
+
 	function fieldActionLabel(action: FieldCellAction): string {
 		if (action.kind === 'mending-terminal') return '作業端末を使う';
 		if (action.kind === 'adjustment-terminal') return '能力強化端末を使う';
@@ -3633,9 +3681,12 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 				onReplyFootprintRemoved={removeTraceReplyFootprint}
 				registerReplyRemeasure={registerTraceReplyRemeasure}
 			/>
-			{#if lifespanHudNowMs !== null && personaSnapshot && !personaLifecycleTransition}
-				<LifespanHud expiresAtMs={mendingProjection?.effectiveExpiresAtMs ?? personaSnapshot.gameState.lifespanExpiresAtMs} nowMs={lifespanHudNowMs} points={personaSnapshot.gameState.points} hasJob={Boolean(personaSnapshot.gameState.mendingJob)} mendingProjection={mendingProjection} />
-			{/if}
+			<div class="field-status-huds" data-field-status-huds>
+				{#if lifespanHudNowMs !== null && personaSnapshot && !personaLifecycleTransition}
+					<LifespanHud expiresAtMs={tagGameHudWorkProjection?.effectiveExpiresAtMs ?? mendingProjection?.effectiveExpiresAtMs ?? personaSnapshot.gameState.lifespanExpiresAtMs} nowMs={tagGameHudProjection ? tagGameHudNowMs : lifespanHudNowMs} points={personaSnapshot.gameState.points} hasJob={Boolean(personaSnapshot.gameState.mendingJob)} mendingProjection={mendingProjection} tagGameProjection={tagGameHudProjection} />
+				{/if}
+				<TagGameHud game={tagGameDisplayedGame} selfPubkey={personaSnapshot?.signer.pubkey ?? null} selfRunNumber={personaSnapshot?.activeRun.runNumber ?? null} nowMs={tagGameHudNowMs} {realtimeStatus} busy={tagGameBusy} onLeave={(gameId) => { void leaveTagGame(gameId); }} />
+			</div>
 		{/snippet}
 	</FieldViewport>
 	<TagGamePanel
@@ -3643,10 +3694,7 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 		games={visibleTagGameStates}
 		selfPubkey={personaSnapshot?.signer.pubkey ?? null}
 		selfRunNumber={personaSnapshot?.activeRun.runNumber ?? null}
-		hudGameId={tagGameDisplayedGameId}
 		watchedGameId={tagGameWatchedGameId}
-		effectiveLifespanMs={personaSnapshot && mendingProjection ? Math.max(0, mendingProjection.effectiveExpiresAtMs - mendingNowMs) : null}
-		realtimeStatus={realtimeStatus}
 		nowMs={mendingNowMs}
 		busy={tagGameBusy}
 		reservedGameId={tagGameReservationGameId}
@@ -3659,8 +3707,8 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 		onPropose={(gameId) => { void proposeTagGameStart(gameId); }}
 		onConsent={(gameId, proposalId) => { void consentTagGameStart(gameId, proposalId); }}
 		onExclude={(gameId, pubkey) => { void excludeTagGameParticipant(gameId, pubkey); }}
-		onWatch={(gameId) => { tagGameWatchedGameId = gameId; }}
-		onStopWatching={() => { tagGameWatchedGameId = null; }}
+		onWatch={watchTagGame}
+		onStopWatching={stopWatchingTagGame}
 		onClose={() => { tagGamePanelOpen = false; }}
 	/>
 
@@ -3813,6 +3861,21 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 </main>
 
 <style>
+	.field-status-huds {
+		position: absolute;
+		top: max(108px, calc(env(safe-area-inset-top) + 108px));
+		right: max(12px, env(safe-area-inset-right));
+		z-index: 8;
+		display: grid;
+		width: min(300px, calc(100vw - 24px));
+		gap: 6px;
+		pointer-events: none;
+	}
+	.field-status-huds :global(.lifespan-hud) { pointer-events: none; }
+	@media (max-width: 700px) {
+		.field-status-huds { top: max(100px, calc(env(safe-area-inset-top) + 100px)); width: min(252px, calc(100vw - 24px)); gap: 4px; }
+	}
+
 	.app-shell {
 		--action-dock-padding-block: 8px;
 		--action-dock-border-width: 1px;
