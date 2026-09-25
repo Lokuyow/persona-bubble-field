@@ -1,6 +1,6 @@
 <script lang="ts">
 	import PrimaryButton from '$lib/PrimaryButton.svelte';
-	import { formatTagGameRemainingTime, isOrganizerConfirmedTagGameEffectCurrent } from '$lib/tagGameHud';
+	import { canLeaveTagGame, formatTagGameRemainingTime, isOrganizerConfirmedTagGameEffectCurrent, tagGameTransferStatus } from '$lib/tagGameHud';
 	import { tagGameParticipantLabel } from '$lib/tagGamePresentation';
 	import type { TagGameState } from '$lib/tagGame';
 
@@ -19,7 +19,6 @@
 	const holder = $derived(game?.participant.find((member) => member.pubkey === game.ownerPubkey) ?? null);
 	const endsAtMs = $derived((game?.endsAt ?? 0) * 1000);
 	const remaining = $derived(game ? formatTagGameRemainingTime(endsAtMs, nowMs) : '00:00');
-	const cooldown = $derived(game?.transferAt ? Math.max(0, Math.ceil((game.transferAt + 3_000 - nowMs) / 1000)) : 0);
 	const effectScheduleCurrent = $derived(Boolean(game && isOrganizerConfirmedTagGameEffectCurrent(game, nowMs)));
 	const effectActive = $derived(Boolean(game && effectScheduleCurrent && !game.holderChallengeId && holder?.status === 'active'));
 	const pausedLabel = $derived(game?.phase === 'settling' || (game?.phase === 'running' && nowMs >= endsAtMs)
@@ -30,8 +29,9 @@
 				: '効果停止中');
 	const effectName = $derived(game?.effect === 'benefit' ? '恩恵' : '災厄');
 	const holderName = $derived(game?.ownerPubkey && game ? tagGameParticipantLabel(game, game.ownerPubkey, selfPubkey) : '未定');
-	const effectAction = $derived(game?.effect === 'benefit' ? '追いかけて奪う' : '追いかけて押し付ける');
-	const canLeave = $derived(Boolean(game && game.phase === 'running' && (own?.status === 'active' || own?.status === 'temporarily-ineligible')));
+	const effectAction = $derived(game?.effect === 'benefit' ? '所持者以外が追いかけて奪う' : '所持者が追いかけて押し付ける');
+	const transferStatus = $derived(game ? tagGameTransferStatus(game, effectActive, nowMs) : '転移不可');
+	const canLeave = $derived(Boolean(game && canLeaveTagGame(game, own?.status, nowMs)));
 </script>
 
 {#if game}
@@ -42,7 +42,7 @@
 			<span>{effectActive ? effectAction : pausedLabel}</span>
 		</div>
 		<div class="game-hud-footer">
-			<span data-tag-game-cooldown>{cooldown > 0 ? `転移禁止 ${cooldown}秒` : '転移できます'}</span>
+			<span data-tag-game-cooldown>{transferStatus}</span>
 			{#if canLeave}<PrimaryButton class="tag-game-leave" data-tag-game-leave={game.gameId} onclick={() => onLeave(game.gameId)} disabled={busy}>退出</PrimaryButton>{/if}
 		</div>
 	</aside>

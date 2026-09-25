@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createTagGameSchedule, type TagGameState } from './tagGame';
-import { formatTagGameRemainingTime, isOrganizerConfirmedTagGameEffectCurrent, projectTagGameHud } from './tagGameHud';
+import { canLeaveTagGame, formatTagGameRemainingTime, isOrganizerConfirmedTagGameEffectCurrent, projectTagGameHud, tagGameTransferStatus } from './tagGameHud';
 import { createInitialPersonaGameState } from './personaGameState';
 import { createMendingJob, projectMending } from './mending';
 import type { RootBuild } from './rootProgression';
@@ -83,6 +83,28 @@ describe('tag-game HUD projection', () => {
 		expect(formatTagGameRemainingTime(180_000, 13_000)).toBe('02:47');
 		expect(formatTagGameRemainingTime(180_000, 180_000)).toBe('00:00');
 		expect(formatTagGameRemainingTime(180_000, 181_001)).toBe('00:00');
+	});
+
+	it('shows cooldown while it remains, then distinguishes available restrictions from stopped effects', () => {
+		const game = running('benefit');
+		expect(tagGameTransferStatus(game, true, 101_000)).toBe('転移禁止 2秒');
+		expect(tagGameTransferStatus(game, true, 103_000)).toBe('転移禁止なし');
+		expect(tagGameTransferStatus(game, false, 103_000)).toBe('効果停止中');
+	});
+
+	it('does not show transfer availability during organizer waits or final settlement and ends leaving at 180 seconds', () => {
+		const game = running('benefit');
+		const effectBoundary = 100_000 + createTagGameSchedule(game.seed!)[0].durationMs;
+		const organizerWait = { ...game, settledAtMs: effectBoundary - 1_000 };
+		expect(tagGameTransferStatus(organizerWait, false, effectBoundary + 1_000)).toBe('効果停止中');
+		expect(tagGameTransferStatus(game, false, game.endsAt! * 1_000)).toBe('最終精算中');
+		expect(tagGameTransferStatus({ ...game, transferAt: game.endsAt! * 1_000 - 1_000 }, false, game.endsAt! * 1_000)).toBe('転移禁止 2秒');
+		expect(tagGameTransferStatus({ ...game, phase: 'settling' }, false, 200_000)).toBe('最終精算中');
+		expect(canLeaveTagGame(game, 'active', game.endsAt! * 1_000 - 1)).toBe(true);
+		expect(canLeaveTagGame(game, 'active', game.endsAt! * 1_000)).toBe(false);
+		expect(canLeaveTagGame({ ...game, phase: 'settling' }, 'active', 200_000)).toBe(false);
+		// A stopped effect does not by itself prevent a member from leaving before game time ends.
+		expect(canLeaveTagGame(organizerWait, 'active', effectBoundary + 1_000)).toBe(true);
 	});
 
 	it('subtracts tag-game loss from the existing work-adjusted effective expiry', () => {

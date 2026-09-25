@@ -4,6 +4,7 @@ import {
 	TAG_GAME_LIFESPAN_LOSS_MS_PER_SECOND,
 	TAG_GAME_MAX_LIFESPAN_LOSS_MS,
 	TAG_GAME_MAX_POINTS,
+	type TagGameParticipant,
 	type TagGameState
 } from './tagGame';
 
@@ -112,4 +113,17 @@ export function formatTagGameRemainingTime(endsAtMs: number, nowMs: number): str
 	const seconds = Math.max(0, Math.ceil((endsAtMs - nowMs) / 1000));
 	const minutes = Math.floor(seconds / 60);
 	return `${String(minutes).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
+export function tagGameTransferStatus(game: TagGameState, effectActive: boolean, nowMs: number): string {
+	const cooldownSeconds = Math.max(0, Math.ceil(((game.transferAt ?? 0) + 3_000 - nowMs) / 1_000));
+	if (cooldownSeconds > 0) return `転移禁止 ${cooldownSeconds}秒`;
+	if (game.phase === 'settling' || (game.phase === 'running' && game.endsAt !== undefined && nowMs >= game.endsAt * 1_000)) return '最終精算中';
+	if (game.phase !== 'running') return '転移不可';
+	return effectActive ? '転移禁止なし' : '効果停止中';
+}
+
+export function canLeaveTagGame(game: TagGameState, memberStatus: TagGameParticipant['status'] | undefined, nowMs: number): boolean {
+	return game.phase === 'running' && game.endsAt !== undefined && nowMs < game.endsAt * 1_000 &&
+		(memberStatus === 'active' || memberStatus === 'temporarily-ineligible');
 }
