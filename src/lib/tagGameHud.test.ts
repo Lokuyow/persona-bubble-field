@@ -85,9 +85,10 @@ describe('tag-game HUD projection', () => {
 		expect(formatTagGameRemainingTime(180_000, 181_001)).toBe('00:00');
 	});
 
-	it('shows cooldown while it remains, then distinguishes available restrictions from stopped effects', () => {
+	it('shows cooldown only during active effects, then distinguishes available restrictions from stopped effects', () => {
 		const game = running('benefit');
 		expect(tagGameTransferStatus(game, true, 101_000)).toBe('転移禁止 2秒');
+		expect(tagGameTransferStatus(game, false, 101_000)).toBe('効果停止中');
 		expect(tagGameTransferStatus(game, true, 103_000)).toBe('転移禁止なし');
 		expect(tagGameTransferStatus(game, false, 103_000)).toBe('効果停止中');
 	});
@@ -98,7 +99,7 @@ describe('tag-game HUD projection', () => {
 		const organizerWait = { ...game, settledAtMs: effectBoundary - 1_000 };
 		expect(tagGameTransferStatus(organizerWait, false, effectBoundary + 1_000)).toBe('効果停止中');
 		expect(tagGameTransferStatus(game, false, game.endsAt! * 1_000)).toBe('最終精算中');
-		expect(tagGameTransferStatus({ ...game, transferAt: game.endsAt! * 1_000 - 1_000 }, false, game.endsAt! * 1_000)).toBe('転移禁止 2秒');
+		expect(tagGameTransferStatus({ ...game, transferAt: game.endsAt! * 1_000 - 1_000 }, true, game.endsAt! * 1_000)).toBe('最終精算中');
 		expect(tagGameTransferStatus({ ...game, phase: 'settling' }, false, 200_000)).toBe('最終精算中');
 		expect(canLeaveTagGame(game, 'active', game.endsAt! * 1_000 - 1)).toBe(true);
 		expect(canLeaveTagGame(game, 'active', game.endsAt! * 1_000)).toBe(false);

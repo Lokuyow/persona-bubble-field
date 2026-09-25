@@ -116,11 +116,11 @@ export function formatTagGameRemainingTime(endsAtMs: number, nowMs: number): str
 }
 
 export function tagGameTransferStatus(game: TagGameState, effectActive: boolean, nowMs: number): string {
-	const cooldownSeconds = Math.max(0, Math.ceil(((game.transferAt ?? 0) + 3_000 - nowMs) / 1_000));
-	if (cooldownSeconds > 0) return `転移禁止 ${cooldownSeconds}秒`;
 	if (game.phase === 'settling' || (game.phase === 'running' && game.endsAt !== undefined && nowMs >= game.endsAt * 1_000)) return '最終精算中';
 	if (game.phase !== 'running') return '転移不可';
-	return effectActive ? '転移禁止なし' : '効果停止中';
+	if (!effectActive) return '効果停止中';
+	const cooldownSeconds = Math.max(0, Math.ceil(((game.transferAt ?? 0) + 3_000 - nowMs) / 1_000));
+	return cooldownSeconds > 0 ? `転移禁止 ${cooldownSeconds}秒` : '転移禁止なし';
 }
 
 export function canLeaveTagGame(game: TagGameState, memberStatus: TagGameParticipant['status'] | undefined, nowMs: number): boolean {
