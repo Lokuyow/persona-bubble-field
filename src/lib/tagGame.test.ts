@@ -120,20 +120,31 @@ describe('player-hosted tag-game protocol and rules', () => {
 		expect(leaveTagGameParticipant(left!, second, 2, 106_000)).toBeNull();
 	});
 
-	it('reselects the holder when that participant leaves', () => {
+	it('reselects the holder when a non-organizer holder leaves', () => {
 		const second = getPublicKey(new Uint8Array(32).fill(35));
 		const third = getPublicKey(new Uint8Array(32).fill(36));
 		const state = runningGame([
 			{ pubkey: HOST_PUBKEY, runNumber: 1, registeredAt: 100, status: 'active', points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 },
 			{ pubkey: second, runNumber: 2, registeredAt: 100, status: 'active', points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 },
 			{ pubkey: third, runNumber: 3, registeredAt: 100, status: 'active', points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 }
-		], HOST_PUBKEY);
-		const left = leaveTagGameParticipant(state, HOST_PUBKEY, 1, 105_000);
+		], second);
+		const left = leaveTagGameParticipant(state, second, 2, 105_000);
 		expect(left?.phase).toBe('running');
-		expect(left?.participant.find((member) => member.pubkey === HOST_PUBKEY)?.status).toBe('left');
-		expect([second, third]).toContain(left?.ownerPubkey);
-		expect(left?.ownerPubkey).not.toBe(HOST_PUBKEY);
+		expect(left?.participant.find((member) => member.pubkey === second)?.status).toBe('left');
+		expect([HOST_PUBKEY, third]).toContain(left?.ownerPubkey);
+		expect(left?.ownerPubkey).not.toBe(second);
 		expect(left?.transferAt).toBe(105_000);
+	});
+
+	it('interrupts and preserves settled results when the organizer leaves', () => {
+		const second = getPublicKey(new Uint8Array(32).fill(37));
+		const state = runningGame([
+			{ pubkey: HOST_PUBKEY, runNumber: 1, registeredAt: 100, status: 'active', points: 250, lifespanLossMs: 60_000, benefitMs: 5_000, calamityMs: 60_000 },
+			{ pubkey: second, runNumber: 2, registeredAt: 100, status: 'active', points: 100, lifespanLossMs: 0, benefitMs: 2_000, calamityMs: 0 }
+		], second);
+		const interrupted = leaveTagGameParticipant(state, HOST_PUBKEY, 1, 105_000);
+		expect(interrupted).toMatchObject({ phase: 'interrupted', endReason: 'host-exit', ownerPubkey: second });
+		expect(interrupted?.participant.find((member) => member.pubkey === HOST_PUBKEY)).toMatchObject({ status: 'left', points: 250, lifespanLossMs: 60_000, benefitMs: 5_000, calamityMs: 60_000 });
 	});
 
 	it('interrupts a two-player game when either player leaves', () => {

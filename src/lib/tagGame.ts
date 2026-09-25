@@ -64,6 +64,10 @@ export function leaveTagGameParticipant(state: TagGameState, pubkey: string, run
 	if (!leaving) return null;
 	const participant = state.participant.map((member) => member === leaving ? { ...member, status: 'left' as const } : member);
 	const remaining = participant.filter((member) => member.status === 'active');
+	if (state.hostPubkey === pubkey) {
+		return { ...state, phase: 'interrupted', endReason: 'host-exit', participant,
+			holderChallengeId: undefined, holderChallengeStartedAtMs: undefined, revision: state.revision + 1 };
+	}
 	if (remaining.length <= 1) {
 		return { ...state, phase: 'interrupted', endReason: 'too-few-participants', participant,
 			holderChallengeId: undefined, holderChallengeStartedAtMs: undefined, revision: state.revision + 1 };

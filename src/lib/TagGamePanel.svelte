@@ -85,7 +85,7 @@
 						{#if game.phase === 'ended' || game.phase === 'interrupted'}
 							<div class="results" aria-label="鬼ごっこ結果">
 								{#each game.participant as player (player.pubkey)}
-									<span>{player.pubkey === selfPubkey ? 'あなた' : player.pubkey.slice(0, 8)}・{player.status === 'dead' ? '死亡' : player.status === 'left' ? '脱出' : player.status === 'temporarily-ineligible' ? '一時対象外' : '参加'}・{player.points}pt・寿命-{Math.ceil(player.lifespanLossMs / 60_000)}分・恩恵{Math.floor(player.benefitMs / 1000)}秒・災厄{Math.floor(player.calamityMs / 1000)}秒</span>
+								<span>{player.pubkey === selfPubkey ? 'あなた' : player.pubkey.slice(0, 8)}・{player.status === 'dead' ? '死亡' : player.status === 'left' ? '退出' : player.status === 'temporarily-ineligible' ? '一時対象外' : '参加'}・{player.points}pt・寿命-{Math.ceil(player.lifespanLossMs / 60_000)}分・恩恵{Math.floor(player.benefitMs / 1000)}秒・災厄{Math.floor(player.calamityMs / 1000)}秒</span>
 								{/each}
 							</div>
 						{/if}
@@ -115,7 +115,7 @@
 <style>
 	.backdrop { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 20px; background: rgba(20, 24, 30, .48); }
 	.panel { width: min(520px, 100%); max-height: min(80vh, 720px); overflow: auto; padding: 20px; border-radius: 16px; background: var(--surface, #fff); color: var(--text-primary, #20242a); box-shadow: 0 18px 60px rgba(0,0,0,.24); }
-	.field-hud { position: fixed; z-index: 55; top: 12px; right: 12px; width: min(330px, calc(100vw - 24px)); padding: 10px 12px; border: 1px solid var(--border-subtle, #d8dce0); border-radius: 12px; background: color-mix(in srgb, var(--surface, #fff) 94%, transparent); color: var(--text-primary, #20242a); box-shadow: 0 4px 18px rgba(0,0,0,.16); font-size: .84rem; pointer-events: auto; }
+	.field-hud { position: fixed; z-index: 55; top: max(62px, calc(env(safe-area-inset-top) + 60px)); right: 12px; width: min(330px, calc(100vw - 24px)); padding: 10px 12px; border: 1px solid var(--border-subtle, #d8dce0); border-radius: 12px; background: color-mix(in srgb, var(--surface, #fff) 94%, transparent); color: var(--text-primary, #20242a); box-shadow: 0 4px 18px rgba(0,0,0,.16); font-size: .84rem; pointer-events: auto; }
 	.field-hud p { margin: 4px 0 0; }
 	.field-hud small { display: block; margin-top: 4px; color: var(--text-secondary, #666); }
 	header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
