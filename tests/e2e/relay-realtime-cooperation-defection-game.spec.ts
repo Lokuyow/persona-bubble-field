@@ -92,7 +92,7 @@ test.describe('Relay startup', () => {
 			const pubkey = getPublicKey(player.secret);
 			await page.clock.install({ time: startTime });
 			await installHostOwnedStub(page);
-			await installDelayedRelay(page, { primaryEvents: testEvents(startTime), realtimeEvents, persistAcrossReload: true, realtimePublishOutcome: 'accepted' });
+			await installDelayedRelay(page, { primaryEvents: testEvents(startTime), realtimeEvents, realtimeTerminal: 'closed', persistAcrossReload: true, realtimePublishOutcome: 'accepted' });
 			await seedRelayAccount(page, player.secret, pubkey, startTime + 5 * 24 * 60 * 60 * 1_000);
 			await page.goto('/');
 			await expect(page.locator('[data-realtime-panel]')).toContainText('参加受付');
@@ -130,6 +130,16 @@ test.describe('Relay startup', () => {
 			await expect(defectDetails).toContainText('協力失敗');
 			await expect(defectDetails).toContainText('あなた: 寿命 −3日');
 			await expect(defectDetails).toContainText('抜け駆け:');
+			for (const page of [pageCooperate, pageDefect]) {
+				await expect(page.locator('[data-realtime-panel]')).toHaveAttribute('data-realtime-status', 'degraded');
+				await expect(page.locator('[data-cooperation-defection-communication-warning]')).toBeVisible();
+				await expect(page.locator('[data-cooperation-defection-round-result]')).toBeVisible();
+				await expect(page.getByRole('region', { name: 'ラウンド1の結果の詳細' })).toBeVisible();
+				await page.getByRole('button', { name: '結果の詳細を閉じる' }).click();
+				await expect(page.getByRole('region', { name: 'ラウンド1の結果の詳細' })).toHaveCount(0);
+				await page.getByRole('button', { name: '結果の詳細を見る' }).click();
+				await expect(page.getByRole('region', { name: 'ラウンド1の結果の詳細' })).toBeVisible();
+			}
 		} finally {
 			await Promise.all([pageCooperate.close(), pageDefect.close()]);
 		}

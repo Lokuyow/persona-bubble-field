@@ -206,4 +206,26 @@ test.describe('Relay startup', () => {
 		await page.clock.runFor(1_001);
 		await pressRelayKeyboardMovement(page, move);
 	});
+
+	test('shows the participant loading state and communication warning together when realtime degrades', async ({ page }) => {
+		const schedule = upcomingRegistrationSchedule();
+		const startTime = schedule.gameAtMs + 1_000;
+		await page.clock.install({ time: startTime });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { primaryEvents: testEvents(startTime), deferRealtimeEvents: true });
+		const secret = fixtureSecret(41);
+		await seedRelayAccount(page, secret, getPublicKey(secret));
+		await page.goto('/');
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
+			(request.filter.kinds as number[])[0] === 42)).toBe(true);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
+			(request.filter.kinds as number[])[0] === 7070)).toBe(true);
+		await expect(page.locator('[data-cooperation-defection-participants-loading]')).toBeVisible();
+
+		await expect(page.locator('[data-realtime-panel]')).toHaveAttribute('data-realtime-status', 'degraded');
+		await expect(page.locator('[data-cooperation-defection-participants-loading]')).toBeVisible();
+		await expect(page.locator('[data-cooperation-defection-communication-warning]')).toBeVisible();
+		await expect(page.locator('[data-cooperation-defection-round-progress]')).toHaveCount(0);
+	});
 });

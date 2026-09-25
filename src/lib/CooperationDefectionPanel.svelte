@@ -171,13 +171,15 @@
 		{/if}
 		{#if selfGroupCancelled}
 			<p class="cooperation-defection-cancelled" data-cooperation-defection-cancelled>参加人数が足りなかったため開催されませんでした</p>
-		{:else if schedule.phase === 'game' && !session?.participantSnapshot}
-			<p class="cooperation-defection-note" data-cooperation-defection-participants-loading>参加情報を取得中です。取得が完了するまでラウンド進行は表示されません。</p>
-		{:else if status === 'degraded'}
-			<p class="cooperation-defection-note">イベント通信が利用できません。通常の会話と移動は継続できます。</p>
-		{:else if schedule.phase === 'warning'}
-			<p class="cooperation-defection-note">20:55 JSTから、フィールド上の参加地点へ移動して参加できます。</p>
-		{:else if schedule.phase === 'registration'}
+		{:else}
+			{#if status === 'degraded'}
+				<p class="cooperation-defection-note" data-cooperation-defection-communication-warning>イベント通信が利用できません。通常の会話と移動は継続できます。</p>
+			{/if}
+			{#if schedule.phase === 'game' && !session?.participantSnapshot}
+				<p class="cooperation-defection-note" data-cooperation-defection-participants-loading>参加情報を取得中です。取得が完了するまでラウンド進行は表示されません。</p>
+			{:else if schedule.phase === 'warning' && status !== 'degraded'}
+				<p class="cooperation-defection-note">20:55 JSTから、フィールド上の参加地点へ移動して参加できます。</p>
+			{:else if schedule.phase === 'registration' && status !== 'degraded'}
 			{#if selfGroupId}<p class="cooperation-defection-note"><strong>参加済み</strong> · 開始まで待ってください。</p>
 			{:else}<p class="cooperation-defection-note">参加地点まで移動して操作してください。</p>{/if}
 			<details class="cooperation-defection-rules-disclosure">
@@ -190,8 +192,8 @@
 					<p><strong>結果</strong></p><ul><li>全員が協力 → <strong>全員 +1,000pt</strong></li><li>協力成功 → <strong>協力 +100pt / 抜け駆け +10,000pt</strong></li><li>協力失敗 → <strong>協力 0pt / 抜け駆け 寿命 −3日</strong></li></ul>
 				</div>
 			</details>
-		{:else if schedule.phase === 'game' && roundInfo}
-			<div class="cooperation-defection-details">
+			{:else if schedule.phase === 'game' && roundInfo}
+				<div class="cooperation-defection-details">
 				{#if selfGroupId}<span>{#if session?.participantSnapshot?.[selfGroupId]}参加中（{session.participantSnapshot[selfGroupId].length}人）{:else}参加中{/if}</span>{/if}
 				<span>残り: {formatRemaining(roundInfo.remainingMs)}</span>
 			</div>
@@ -201,14 +203,17 @@
 				<p class="cooperation-defection-note">確定した結果を発表しています。</p>
 			{/if}
 			{#if commitStatus}<p class="cooperation-defection-status" data-cooperation-defection-selection-status>{commitStatus}</p>{/if}
-			{#if lastRoundResult}
+			{/if}
+			{#if schedule.phase === 'game' && roundInfo && lastRoundResult}
 				{@const isPrevious = roundInfo.round > lastRoundResult.round}
 				<div class="cooperation-defection-result" data-cooperation-defection-round-result aria-label={`${isPrevious ? '前ラウンド' : 'ラウンド'}${lastRoundResult.round}の結果`}>
 					<strong>{isPrevious ? '前ラウンド' : '結果'} · {outcomeLabel(lastRoundResult)}</strong>
 					{#if ownOutcome(lastRoundResult)}<p>{ownOutcome(lastRoundResult)}</p>{/if}
 					<button bind:this={detailsTrigger} type="button" class="details-trigger" aria-expanded={detailsOpen} aria-controls="cooperation-defection-result-details" onclick={openDetails}>結果の詳細を見る</button>
 				</div>
-			{:else if message}<p class="cooperation-defection-result" data-cooperation-defection-round-result>{message}</p>{/if}
+			{:else if schedule.phase === 'game' && roundInfo && !lastRoundResult && message}
+				<p class="cooperation-defection-result" data-cooperation-defection-round-result>{message}</p>
+		{/if}
 		{/if}
 	</section>
 
