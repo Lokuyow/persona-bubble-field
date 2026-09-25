@@ -187,7 +187,7 @@ export type RealtimeSettlementResult =
 	| Readonly<{ kind: 'stale' }>
 	| CorruptLifecycleState;
 export type RealtimeDeathResult = Readonly<{ kind: 'transitioned'; exit?: CommittedTerminalExit }> | Readonly<{ kind: 'duplicate' | 'stale' }> | CorruptLifecycleState;
-export type RealtimeLifespanLossResult = Readonly<{ kind: 'survived'; persona: PersonaSnapshot }> | Readonly<{ kind: 'transitioned'; exit?: CommittedTerminalExit }> | Readonly<{ kind: 'duplicate' | 'stale' }> | CorruptLifecycleState;
+export type RealtimeLifespanLossResult = Readonly<{ kind: 'survived' | 'duplicate'; persona: PersonaSnapshot }> | Readonly<{ kind: 'transitioned'; exit?: CommittedTerminalExit }> | Readonly<{ kind: 'stale' }> | CorruptLifecycleState;
 
 type EncryptedRootEntropy = Readonly<{ version: 1; iv: Uint8Array; ciphertext: Uint8Array }>;
 type PreparedRoot = Readonly<{ entropy: Uint8Array; wrappingKey: CryptoKey; encryptedEntropy: EncryptedRootEntropy }>;
@@ -1007,22 +1007,34 @@ export async function applyRealtimeLifespanLoss(
 		return !observed ? { kind: 'corrupt', reason: 'partial-state' } : isCorruptLifecycle(observed) ? observed : { kind: 'corrupt', reason: 'partial-state' };
 	}
 	try {
-		if (observed.player.mode.kind !== 'running' || !samePersonaExpected(expected, observed.player.mode.activeRun)) return { kind: 'stale' };
+		const testHook = (globalThis as typeof globalThis & { __personaBubbleFieldTestHooks?: { beforeRealtimeLifespanLossMutation?: () => void | Promise<void> } }).__personaBubbleFieldTestHooks?.beforeRealtimeLifespanLossMutation;
+		if (testHook) await testHook();
+		const currentPersonaForSameRun = async (): Promise<PersonaSnapshot | null> => {
+			const latest = await loadOrCreateLifecycle();
+			return latest.kind === 'restored' && sameRealtimeRunScope(expected, latest.persona.activeRun) ? latest.persona : null;
+		};
+		if (observed.player.mode.kind !== 'running' || !sameRealtimeRunScope(expected, observed.player.mode.activeRun)) return { kind: 'stale' };
+		if (scopedRealtimeLedger(observed.player, observed.player.mode.activeRun).appliedOutcomeIds.includes(outcome.id)) {
+			const persona = await currentPersonaForSameRun();
+			return persona ? { kind: 'duplicate', persona } : { kind: 'stale' };
+		}
+		if (!samePersonaExpected(expected, observed.player.mode.activeRun)) return { kind: 'stale' };
 		const selection = await prepareDeathSelection(observed.entropy, observed.player);
-		const mutation = await withLifecycle(async (db): Promise<RealtimeLifespanLossResult> => {
+		const mutation = await withLifecycle(async (db): Promise<RealtimeLifespanLossResult | Readonly<{ kind: 'duplicate' }>> => {
 			const tx = db.transaction([PLAYER_LIFECYCLE_STORE_NAME, WORLD_WRITE_JOURNAL_STORE_NAME], 'readwrite');
 			try {
 				const store = tx.objectStore(PLAYER_LIFECYCLE_STORE_NAME);
 				const current = await store.get(PLAYER_STATE);
 				if (!isValidPlayerLifecycle(current)) { await tx.done; return { kind: 'corrupt', reason: 'player-state' }; }
+				if (current.mode.kind !== 'running' || !sameRealtimeRunScope(expected, current.mode.activeRun)) { await tx.done; return { kind: 'stale' }; }
+				const activeRun = current.mode.activeRun;
 				const previousLedger = current.realtimeSettlementLedger;
 				if (previousLedger && sameIdentityReference(previousLedger.identity, expected.activeRun.identity) &&
 					previousLedger.runNumber === expected.activeRun.runNumber && previousLedger.appliedOutcomeIds.includes(outcome.id)) {
 					await tx.done;
 					return { kind: 'duplicate' };
 				}
-				if (current.mode.kind !== 'running' || !samePersonaExpected(expected, current.mode.activeRun)) { await tx.done; return { kind: 'stale' }; }
-				const activeRun = current.mode.activeRun;
+				if (!samePersonaExpected(expected, activeRun)) { await tx.done; return { kind: 'stale' }; }
 				const ledger = scopedRealtimeLedger(current, activeRun);
 				const nowMs = Date.now();
 				if (!isSafeTimestamp(nowMs)) throw new Error('Invalid lifecycle timestamp.');
@@ -1062,6 +1074,10 @@ export async function applyRealtimeLifespanLoss(
 				return { kind: 'survived', persona: expected };
 			} catch (error) { try { tx.abort(); } catch { /* already aborted */ } await tx.done.catch(() => {}); throw error; }
 		});
+		if (mutation.kind === 'duplicate') {
+			const persona = await currentPersonaForSameRun();
+			return persona ? { kind: 'duplicate', persona } : { kind: 'stale' };
+		}
 		if (mutation.kind !== 'survived') return mutation;
 		const latest = await loadOrCreateLifecycle();
 		return latest.kind === 'restored' ? { kind: 'survived', persona: latest.persona } : { kind: 'corrupt', reason: 'identity-reference' };

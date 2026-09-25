@@ -305,13 +305,123 @@ describe('Root / Identity / Run lifecycle', () => {
 	it('subtracts exactly 72 hours from an idle Run and preserves the Run', async () => {
 		const persona = await selected();
 		const prepareExit = vi.fn(() => ({ channelId: 'a'.repeat(64), position: { x: 2, y: 3 }, lastPositiveCreatedAt: Math.floor(TIME / 1000) }));
-		const loss = await applyRealtimeLifespanLoss(persona, { id: 'lifespan-loss-idle', kind: 'lifespan-loss', lifespanLossMs: 72 * HOUR, instanceId: 'game-instance' }, prepareExit);
+		const instanceId = 'game-instance';
+		await trackRealtimeEventInstance(persona, instanceId);
+		const outcome = { id: 'lifespan-loss-idle', kind: 'lifespan-loss' as const, lifespanLossMs: 72 * HOUR, instanceId };
+		const loss = await applyRealtimeLifespanLoss(persona, outcome, prepareExit);
 		expect(loss.kind).toBe('survived');
 		expect(prepareExit).not.toHaveBeenCalled();
+		while (connections.length) connections.pop()!.close();
 		const latest = restored(await loadOrCreateLifecycle());
 		expect(latest.activeRun.runNumber).toBe(persona.activeRun.runNumber);
 		expect(latest.gameState.lifespanExpiresAtMs).toBe(persona.gameState.lifespanExpiresAtMs - 72 * HOUR);
 		expect((await getRealtimeSettlementLedger(latest))?.appliedOutcomeIds).toContain('lifespan-loss-idle');
+		const duplicate = await applyRealtimeLifespanLoss(persona, outcome, prepareExit);
+		expect(duplicate.kind).toBe('duplicate');
+		if (duplicate.kind !== 'duplicate') return;
+		expect(duplicate.persona.activeRun.runNumber).toBe(persona.activeRun.runNumber);
+		expect(duplicate.persona.gameState.lifespanExpiresAtMs).toBe(persona.gameState.lifespanExpiresAtMs - 72 * HOUR);
+		expect((await getRealtimeSettlementLedger(duplicate.persona))?.pendingInstanceIds).toContain(instanceId);
+		expect(await completeRealtimeEventInstance(duplicate.persona, instanceId)).toBe(true);
+		const completed = restored(await loadOrCreateLifecycle());
+		expect(completed.gameState.lifespanExpiresAtMs).toBe(persona.gameState.lifespanExpiresAtMs - 72 * HOUR);
+		expect((await getRealtimeSettlementLedger(completed))?.pendingInstanceIds).not.toContain(instanceId);
+	});
+
+	it('treats a same-Run duplicate as stale if the Run closes before its fresh Persona is read', async () => {
+		const persona = await selected();
+		const instanceId = 'lifespan-loss-stale-after-duplicate';
+		await trackRealtimeEventInstance(persona, instanceId);
+		const outcome = { id: 'lifespan-loss-stale-after-duplicate', kind: 'lifespan-loss' as const, lifespanLossMs: 72 * HOUR, instanceId };
+		expect((await applyRealtimeLifespanLoss(persona, outcome)).kind).toBe('survived');
+
+		let continueDuplicate!: () => void;
+		let duplicateRead!: () => void;
+		const duplicateReadStarted = new Promise<void>((resolve) => { duplicateRead = resolve; });
+		const duplicateMayContinue = new Promise<void>((resolve) => { continueDuplicate = resolve; });
+		vi.stubGlobal('__personaBubbleFieldTestHooks', {
+			beforeRealtimeLifespanLossMutation: async () => {
+				delete (globalThis as typeof globalThis & { __personaBubbleFieldTestHooks?: { beforeRealtimeLifespanLossMutation?: () => void | Promise<void> } }).__personaBubbleFieldTestHooks?.beforeRealtimeLifespanLossMutation;
+				duplicateRead();
+				await duplicateMayContinue;
+			}
+		});
+		const duplicatePromise = applyRealtimeLifespanLoss(persona, outcome);
+		await duplicateReadStarted;
+		const latest = restored(await loadOrCreateLifecycle());
+		expect((await transitionRealtimeDeath(latest, { id: 'close-run-before-duplicate-return', kind: 'death', instanceId })).kind).toBe('transitioned');
+		continueDuplicate();
+		const result = await duplicatePromise;
+		expect(result.kind).toBe('stale');
+		if ('persona' in result) expect(result.persona.activeRun.runNumber).not.toBe(persona.activeRun.runNumber);
+		const persisted = (await records(PLAYER_LIFECYCLE_STORE_NAME))['player-lifecycle'] as {
+			mode: { kind: string };
+			realtimeSettlementLedger?: { appliedOutcomeIds: string[] };
+		};
+		expect(persisted.mode.kind).toBe('selecting');
+		expect(persisted.realtimeSettlementLedger?.appliedOutcomeIds).toContain(outcome.id);
+	});
+
+	it('returns the latest same-Run Persona when another tab commits the loss after the initial read', async () => {
+		const persona = await selected();
+		const outcome = { id: 'lifespan-loss-concurrent-duplicate', kind: 'lifespan-loss' as const, lifespanLossMs: 72 * HOUR, instanceId: 'game-instance' };
+		let continueFirstAttempt!: () => void;
+		let firstAttemptRead!: () => void;
+		const firstReadStarted = new Promise<void>((resolve) => { firstAttemptRead = resolve; });
+		const firstAttemptMayContinue = new Promise<void>((resolve) => { continueFirstAttempt = resolve; });
+		vi.stubGlobal('__personaBubbleFieldTestHooks', {
+			beforeRealtimeLifespanLossMutation: async () => {
+				delete (globalThis as typeof globalThis & { __personaBubbleFieldTestHooks?: { beforeRealtimeLifespanLossMutation?: () => void | Promise<void> } }).__personaBubbleFieldTestHooks?.beforeRealtimeLifespanLossMutation;
+				firstAttemptRead();
+				await firstAttemptMayContinue;
+			}
+		});
+		const firstAttempt = applyRealtimeLifespanLoss(persona, outcome);
+		await firstReadStarted;
+		const competingTabResult = await applyRealtimeLifespanLoss(persona, outcome);
+		expect(competingTabResult.kind).toBe('survived');
+		continueFirstAttempt();
+		const racedDuplicate = await firstAttempt;
+		expect(racedDuplicate.kind).toBe('duplicate');
+		if (racedDuplicate.kind !== 'duplicate') return;
+		expect(racedDuplicate.persona.activeRun.identity).toEqual(persona.activeRun.identity);
+		expect(racedDuplicate.persona.activeRun.runNumber).toBe(persona.activeRun.runNumber);
+		expect(racedDuplicate.persona.gameState.lifespanExpiresAtMs).toBe(persona.gameState.lifespanExpiresAtMs - 72 * HOUR);
+		const ledger = await getRealtimeSettlementLedger(racedDuplicate.persona);
+		expect(ledger?.appliedOutcomeIds.filter((id) => id === outcome.id)).toHaveLength(1);
+		const latest = restored(await loadOrCreateLifecycle());
+		expect(latest.gameState.lifespanExpiresAtMs).toBe(persona.gameState.lifespanExpiresAtMs - 72 * HOUR);
+	});
+
+	it('does not return an old Run duplicate after another tab starts a different Identity', async () => {
+		const persona = await selected();
+		const outcome = { id: 'lifespan-loss-after-identity-change', kind: 'lifespan-loss' as const, lifespanLossMs: 72 * HOUR, instanceId: 'game-instance' };
+		expect((await applyRealtimeLifespanLoss(persona, outcome)).kind).toBe('survived');
+
+		let continueDuplicate!: () => void;
+		let duplicateRead!: () => void;
+		const duplicateReadStarted = new Promise<void>((resolve) => { duplicateRead = resolve; });
+		const duplicateMayContinue = new Promise<void>((resolve) => { continueDuplicate = resolve; });
+		vi.stubGlobal('__personaBubbleFieldTestHooks', {
+			beforeRealtimeLifespanLossMutation: async () => {
+				delete (globalThis as typeof globalThis & { __personaBubbleFieldTestHooks?: { beforeRealtimeLifespanLossMutation?: () => void | Promise<void> } }).__personaBubbleFieldTestHooks?.beforeRealtimeLifespanLossMutation;
+				duplicateRead();
+				await duplicateMayContinue;
+			}
+		});
+		const duplicatePromise = applyRealtimeLifespanLoss(persona, outcome);
+		await duplicateReadStarted;
+		const current = restored(await loadOrCreateLifecycle());
+		expect((await transitionRealtimeDeath(current, { id: 'close-before-new-run', kind: 'death', instanceId: 'new-run' })).kind).toBe('transitioned');
+		const selection = await loadOrCreateLifecycle();
+		if (selection.kind !== 'selecting') throw new Error('Expected identity selection after Run death.');
+		const next = await selectIdentity(selection.selection.generation, selection.selection.candidates[0], ZERO_BUILD);
+		if (next.kind !== 'selected') throw new Error('Expected a new active Run.');
+		continueDuplicate();
+		const result = await duplicatePromise;
+		expect(result.kind).toBe('stale');
+		if ('persona' in result) expect(result.persona.activeRun.identity).not.toEqual(persona.activeRun.identity);
+		expect(next.persona.activeRun.identity).not.toEqual(persona.activeRun.identity);
 	});
 
 	it('checkpoints active Mending before subtracting lifespan without collecting points or losing carry', async () => {
@@ -325,7 +435,8 @@ describe('Root / Identity / Run lifecycle', () => {
 		const nowMs = TIME + 90 * 60 * 1000;
 		vi.mocked(Date.now).mockReturnValue(nowMs);
 		const projection = projectMending(started.persona.gameState, nowMs, started.persona.activeRun.rootBuild);
-		const loss = await applyRealtimeLifespanLoss(started.persona, { id: 'lifespan-loss-mending', kind: 'lifespan-loss', lifespanLossMs: 72 * HOUR, instanceId: 'game-instance' });
+		const outcome = { id: 'lifespan-loss-mending', kind: 'lifespan-loss' as const, lifespanLossMs: 72 * HOUR, instanceId: 'game-instance' };
+		const loss = await applyRealtimeLifespanLoss(started.persona, outcome);
 		expect(loss.kind).toBe('survived');
 		const latest = restored(await loadOrCreateLifecycle());
 		expect(latest.gameState.points).toBe(started.persona.gameState.points);
@@ -337,6 +448,11 @@ describe('Root / Identity / Run lifecycle', () => {
 			processedDurationMs: projection.processedDurationMs,
 			unclaimedPoints: projection.points
 		});
+		const duplicate = await applyRealtimeLifespanLoss(started.persona, outcome);
+		expect(duplicate.kind).toBe('duplicate');
+		if (duplicate.kind !== 'duplicate') return;
+		expect(duplicate.persona.gameState.lifespanExpiresAtMs).toBe(projection.effectiveExpiresAtMs - 72 * HOUR);
+		expect(duplicate.persona.gameState.mendingJob).toEqual(latest.gameState.mendingJob);
 	});
 
 	it.each([3, 2] as const)('atomically closes the Run when a 72-hour loss leaves %s days of lifespan', async (daysRemaining) => {
