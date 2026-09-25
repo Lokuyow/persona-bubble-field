@@ -176,7 +176,7 @@ test.describe('Cooperation and Defection start sound', () => {
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
 			(request.filter.kinds as number[])[0] === 42)).toBe(true);
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
-		await expect(page.locator('[data-realtime-panel]')).toContainText('· 運営開催');
+		await expect(page.locator('[data-realtime-panel]')).toContainText('運営開催');
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
 			(request.filter.kinds as number[]).includes(7070) && realtimeInstanceIds(request).includes(manualInstanceId))).toBe(true);
 		await expect(page.locator('[data-realtime-panel]')).toHaveAttribute('data-realtime-status', 'active');

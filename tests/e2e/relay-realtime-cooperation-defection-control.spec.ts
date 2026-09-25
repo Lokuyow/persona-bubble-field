@@ -69,7 +69,7 @@ test.describe('Relay startup', () => {
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => (request.filter.kinds as number[])[0] === 42)).toBe(true);
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
 		await expect(page.locator('[data-realtime-panel]')).toContainText('参加受付');
-		await expect(page.locator('[data-realtime-panel]')).toContainText('· 運営開催');
+		await expect(page.locator('[data-realtime-panel]')).toContainText('運営開催');
 		await expect(page.locator('[data-cooperation-defection-registration-deadline]')).toHaveText(`受付締切: ${formatJstDeadline((createdAt + 5 * 60) * 1_000)}`);
 		await expect(page.locator('[data-cooperation-defection-registration-countdown]')).toContainText(/^残り時間: 04:\d{2}$/);
 		await expect.poll(async () => (await relayState(page)).state.requests.filter(isRealtimeRequest).some((request) => realtimeInstanceIds(request).includes(manualInstanceId))).toBe(true);
@@ -81,7 +81,7 @@ test.describe('Relay startup', () => {
 		await waitForRelayComposerReady(page);
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => (request.filter.kinds as number[])[0] === 42)).toBe(true);
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
-		await expect(page.locator('[data-realtime-panel]')).toContainText('· 運営開催');
+		await expect(page.locator('[data-realtime-panel]')).toContainText('運営開催');
 		await expect(page.locator('[data-cooperation-defection-registration-deadline]')).toHaveText(`受付締切: ${formatJstDeadline((createdAt + 5 * 60) * 1_000)}`);
 		await expect(page.locator('[data-cooperation-defection-registration-countdown]')).toContainText(/^残り時間: 03:\d{2}$/);
 	});

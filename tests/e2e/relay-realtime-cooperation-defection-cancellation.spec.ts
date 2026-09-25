@@ -138,7 +138,7 @@ test.describe('Cooperation and Defection underfilled group cancellation', () => 
 		await seedRelayAccount(page, secret, getPublicKey(secret), nowMs + 5 * 24 * 60 * 60 * 1_000);
 		await page.goto('/');
 		await releaseInitialSubscriptions(page);
-		await expect(page.locator('[data-realtime-panel]')).toContainText('· 運営開催');
+		await expect(page.locator('[data-realtime-panel]')).toContainText('運営開催');
 		await expect(page.locator('[data-cooperation-defection-cancelled]')).toHaveText(CANCELLATION_NOTICE);
 		await expect(page.locator('[data-cooperation-defection-choice]')).toHaveCount(0);
 		await expect.poll(async () => readRealtimePendingInstances(page)).toEqual([]);

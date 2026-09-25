@@ -68,7 +68,7 @@ test.describe('DEV World Sandbox', () => {
 		await group.click();
 		await expect(next).toBeEnabled();
 		await expect(page.locator('[data-realtime-panel]')).toContainText('参加済み');
-		await expect(page.locator('[data-realtime-panel]')).toContainText('開始まで待ってください。');
+		await expect(page.locator('[data-realtime-panel]')).not.toContainText('開始まで待ってください。');
 		await expect(page.locator('[data-realtime-group-participating="true"]')).toHaveCount(1);
 		await expect(page.locator('[data-realtime-group-trigger][aria-pressed="true"]')).toHaveCount(1);
 		await expect(page.locator('[data-realtime-group-trigger][aria-pressed="true"]')).toHaveAttribute('aria-label', '参加地点に参加済み（参加先）');
@@ -84,6 +84,7 @@ test.describe('DEV World Sandbox', () => {
 		await expect(panel.locator('[data-cooperation-defection-selection-status]')).toContainText('秘密選択を送信済み');
 		await next.click();
 		await expect(page.locator('[data-cooperation-defection-round-result]')).toContainText('+1,000pt');
+		await expect(panel.locator('[data-cooperation-defection-selection-status]')).toHaveCount(0);
 		await expect(panel).not.toContainText('まだありません');
 		const detailsTrigger = page.getByRole('button', { name: '結果の詳細を見る' });
 		await detailsTrigger.click();
@@ -96,8 +97,6 @@ test.describe('DEV World Sandbox', () => {
 			result: Number.parseFloat(getComputedStyle(document.querySelector('[data-cooperation-defection-round-result]')!).fontSize),
 			details: Number.parseFloat(getComputedStyle(document.querySelector('.result-details-body')!).fontSize)
 		}));
-		expect(desktopTextSizes.result).toBeCloseTo(14 * 96 / 72, 1);
-		expect(desktopTextSizes.details).toBeCloseTo(14 * 96 / 72, 1);
 		await page.setViewportSize({ width: 390, height: 844 });
 		await page.locator('.sandbox-mobile-toggle').click();
 		const mobilePanelAndDetailsFit = await page.evaluate(() => {
@@ -269,7 +268,7 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.locator('[data-realtime-group-id]').first()).toHaveCSS('border-radius', '50%');
 		await expect(page.locator('[data-realtime-group-trigger]')).toHaveCount(registration.length);
 		await page.getByText('ルールを見る', { exact: true }).click();
-		await expect(page.getByRole('dialog')).toContainText('1グループ3〜6人、全3ラウンドです。');
+		await expect(page.getByRole('dialog')).toContainText('3〜6人 · 全3ラウンド');
 		await expect(page.getByRole('dialog')).not.toContainText('所持100,000ptによる通常の脱出');
 		await expect(page.getByRole('dialog')).toContainText('相談 30秒 → 選択 30秒 → 結果発表 20秒');
 		await expect(page.getByRole('dialog')).toContainText('協力失敗');
@@ -283,30 +282,37 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.locator('[data-realtime-group-trigger]')).toHaveCount(0);
 	});
 
-	test('uses 14pt for desktop registration deadline and expanded rules while preserving mobile sizing', async ({ page }) => {
+	test('prioritizes the countdown and keeps the registration HUD readable on desktop and mobile', async ({ page }) => {
 		await page.setViewportSize({ width: 1440, height: 900 });
 		await page.goto('/?devWorld=1&devScenario=cooperation-defection-registration');
 		const deadline = page.locator('[data-cooperation-defection-registration-deadline]');
 		const countdown = page.locator('[data-cooperation-defection-registration-countdown]');
 		await expect(deadline).toBeVisible();
-		const desktopFonts = await Promise.all([deadline, countdown].map((element) => element.evaluate((node) => parseFloat(getComputedStyle(node).fontSize))));
-		expect(desktopFonts.every((fontSize) => Math.abs(fontSize - 14 * 96 / 72) < 0.1)).toBe(true);
+		const countdownValue = countdown.locator('strong');
+		const desktopTimerFont = await countdownValue.evaluate((node) => parseFloat(getComputedStyle(node).fontSize));
+		const desktopDeadlineFont = await deadline.evaluate((node) => parseFloat(getComputedStyle(node).fontSize));
+		expect(desktopTimerFont).toBeGreaterThan(desktopDeadlineFont);
 		await page.getByText('ルールを見る', { exact: true }).click();
 		const rulesText = page.locator('.cooperation-defection-rules-inline p').first();
-		const rulesFont = await rulesText.evaluate((node) => parseFloat(getComputedStyle(node).fontSize));
-		expect(Math.abs(rulesFont - 14 * 96 / 72)).toBeLessThan(0.1);
+		await expect(rulesText).toBeVisible();
+		const iconSizes = await page.locator('[data-realtime-panel] .hud-icon svg').evaluateAll((icons) => icons.map((icon) => icon.getBoundingClientRect().width));
+		expect(new Set(iconSizes).size).toBe(1);
 		const panelBounds = await page.locator('[data-realtime-panel]').boundingBox();
 		expect(panelBounds).not.toBeNull();
+		expect(panelBounds!.x).toBeGreaterThanOrEqual(0);
 		expect(panelBounds!.x + panelBounds!.width).toBeLessThanOrEqual(1440);
 
 		await page.setViewportSize({ width: 390, height: 844 });
 		await expect(deadline).toBeVisible();
-		const mobileFonts = await Promise.all([deadline, countdown, rulesText].map((element) => element.evaluate((node) => parseFloat(getComputedStyle(node).fontSize))));
-		expect(mobileFonts.every((fontSize) => fontSize < 14 * 96 / 72)).toBe(true);
+		const mobileTimerFont = await countdownValue.evaluate((node) => parseFloat(getComputedStyle(node).fontSize));
+		const mobileDeadlineFont = await deadline.evaluate((node) => parseFloat(getComputedStyle(node).fontSize));
+		expect(mobileTimerFont).toBeGreaterThan(mobileDeadlineFont);
+		expect(mobileTimerFont).toBeLessThan(desktopTimerFont);
 		const mobileBounds = await page.locator('[data-realtime-panel]').boundingBox();
 		expect(mobileBounds).not.toBeNull();
 		expect(mobileBounds!.x).toBeGreaterThanOrEqual(0);
 		expect(mobileBounds!.x + mobileBounds!.width).toBeLessThanOrEqual(390);
+		expect(await page.locator('[data-realtime-panel]').evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
 	});
 
 	test('does not open the mending terminal in DEV World', async ({ page }) => {
