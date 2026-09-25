@@ -136,10 +136,6 @@
 		return `${Math.ceil(value / 1000)}秒`;
 	}
 
-	function labels(pubkeys: readonly string[]): string {
-		return pubkeys.length ? pubkeys.map(participantName).join('、') : 'なし';
-	}
-
 	function groupOutcomeLabel(result: CooperationDefectionRoundResult): string {
 		if (result.kind === 'all-cooperate') return '全員協力';
 		if (result.kind === 'cooperation-success') return '協力成功';
@@ -157,11 +153,10 @@
 		return { label: cooperated ? '協力失敗' : '抜け駆け失敗', tone: 'failure' };
 	}
 
-	function outcomeSummary(result: CooperationDefectionRoundResult): string {
-		if (result.kind === 'all-cooperate') return '全員 +1,000pt';
-		if (result.kind === 'cooperation-success') return '協力者 +100pt · 抜け駆け者 +10,000pt';
-		if (result.kind === 'cooperation-failure') return '協力者 0pt · 抜け駆け者 寿命 −3日';
-		return '報酬・ペナルティなし';
+	function choiceOutcome(result: CooperationDefectionRoundResult, choice: CooperationDefectionChoice): string | null {
+		if (result.kind === 'insufficient') return null;
+		if (choice === 'cooperate') return result.kind === 'all-cooperate' ? '+1,000pt' : result.kind === 'cooperation-success' ? '+100pt' : '0pt';
+		return result.kind === 'cooperation-success' ? '+10,000pt' : '寿命 −3日';
 	}
 
 	function ownOutcome(result: CooperationDefectionRoundResult): string | null {
@@ -211,16 +206,6 @@
 			{:else if schedule.phase === 'registration' && status !== 'degraded'}
 			{#if selfGroupId}<p class="cooperation-defection-note hud-item"><span class="hud-icon" aria-hidden="true"><CircleCheck /></span><strong>参加済み</strong></p>
 			{:else}<p class="cooperation-defection-note hud-item"><span class="hud-icon" aria-hidden="true"><Users /></span>参加地点へ移動</p>{/if}
-			<details class="cooperation-defection-rules-disclosure">
-				<summary><span class="hud-icon" aria-hidden="true"><HelpCircle /></span>ルールを見る</summary>
-				<div class="cooperation-defection-rules-inline" role="dialog" aria-label="協力と抜け駆けのルール">
-					<p>3〜6人 · 全3ラウンド</p><p><strong>1ラウンドの流れ</strong></p>
-					<p>相談 30秒 → 選択 30秒 → 結果発表 20秒</p>
-					<p>協力する / 抜け駆けする</p><p>選択は結果発表まで秘密</p>
-					<p><strong>必要な協力人数</strong></p><ul><li>3人 → <strong>2人</strong></li><li>4人 → <strong>3人</strong></li><li>5人 → <strong>4人</strong></li><li>6人 → <strong>4人</strong></li></ul>
-					<p><strong>結果</strong></p><ul><li>全員が協力 → <strong>全員 +1,000pt</strong></li><li>協力成功 → <strong>協力 +100pt / 抜け駆け +10,000pt</strong></li><li>協力失敗 → <strong>協力 0pt / 抜け駆け 寿命 −3日</strong></li></ul>
-				</div>
-			</details>
 			{:else if schedule.phase === 'game' && roundInfo}
 				<div class="cooperation-defection-details">
 					{#if selfGroupId}<span class="hud-item"><span class="hud-icon" aria-hidden="true"><Users /></span>{#if session?.participantSnapshot?.[selfGroupId]}参加中（{session.participantSnapshot[selfGroupId].length}人）{:else}参加中{/if}</span>{/if}
@@ -230,6 +215,18 @@
 				<div bind:this={choiceReservation} class="choice-reservation" aria-hidden="true"></div>
 			{/if}
 			{#if commitStatus && (lastRoundResult?.round !== roundInfo.round || (selectionFailed && !latestResultConfirmsOwnChoice))}<p class="cooperation-defection-status" data-cooperation-defection-selection-status>{commitStatus}</p>{/if}
+			{/if}
+			{#if schedule.phase === 'registration' || (roundInfo && (roundInfo.phase === '相談' || roundInfo.phase === '選択'))}
+				<details class="cooperation-defection-rules-disclosure">
+					<summary><span class="hud-icon" aria-hidden="true"><HelpCircle /></span>ルールを見る</summary>
+					<div class="cooperation-defection-rules-inline" role="dialog" aria-label="協力と抜け駆けのルール">
+						<p>3〜6人 · 全3ラウンド</p><p><strong>1ラウンドの流れ</strong></p>
+						<p>相談 30秒 → 選択 30秒 → 結果発表 20秒</p>
+						<p>協力する / 抜け駆けする</p><p>選択は結果発表まで秘密</p>
+						<p><strong>必要な協力人数</strong></p><ul><li>3人 → <strong>2人</strong></li><li>4人 → <strong>3人</strong></li><li>5人 → <strong>4人</strong></li><li>6人 → <strong>4人</strong></li></ul>
+						<p><strong>結果</strong></p><ul><li>全員が協力 → <strong>全員 +1,000pt</strong></li><li>協力成功 → <strong>協力 +100pt / 抜け駆け +10,000pt</strong></li><li>協力失敗 → <strong>協力 0pt / 抜け駆け 寿命 −3日</strong></li></ul>
+					</div>
+				</details>
 			{/if}
 			{#if schedule.phase === 'game' && roundInfo && lastRoundResult}
 				{@const isPrevious = roundInfo.round > lastRoundResult.round}
@@ -258,15 +255,23 @@
 		{@const participantResult = participantResultPresentation(lastRoundResult)}
 		<div class="details-layer" aria-hidden="false">
 			<section class="result-details" id="cooperation-defection-result-details" aria-label={`ラウンド${lastRoundResult.round}の結果の詳細`} style={`left:${detailsPosition.left}px;top:${detailsPosition.top}px;width:${detailsPosition.width}px;max-height:${detailsPosition.maxHeight}px`}>
-				<header><h3 class="hud-item"><span class="hud-icon" aria-hidden="true">{#if participantResult.tone === 'unknown'}<HelpCircle />{:else if participantResult.tone === 'failure'}<AlertTriangle />{:else}<CircleCheck />{/if}</span>ラウンド {lastRoundResult.round} · {participantResult.label}</h3><button type="button" class="hud-item" aria-label="結果の詳細を閉じる" onclick={closeDetails}><span class="hud-icon" aria-hidden="true"><X /></span>閉じる</button></header>
+				<header><h3>ラウンド {lastRoundResult.round} · 結果</h3><button type="button" class="hud-item" aria-label="結果の詳細を閉じる" onclick={closeDetails}><span class="hud-icon" aria-hidden="true"><X /></span>閉じる</button></header>
 				<!-- svelte-ignore a11y_no_noninteractive_tabindex -- scrollable region remains keyboard focusable -->
 				<div class="result-details-body" role="region" aria-label="結果の詳細内容" tabindex="0">
-					<p><strong>有効な選択</strong></p>
-					<p>協力: {labels(lastRoundResult.cooperatePubkeys)}</p>
-					<p>抜け駆け: {labels(lastRoundResult.defectPubkeys)}</p>
-					<p><strong>グループ全体の判定</strong></p><p>{groupOutcomeLabel(lastRoundResult)}</p>
-					<p><strong>共通の報酬・ペナルティ</strong></p><p>{outcomeSummary(lastRoundResult)}</p>
-					{#if ownOutcome(lastRoundResult)}<p><strong>あなたの結果</strong></p><p>{ownOutcome(lastRoundResult)}</p>{/if}
+					<div class="personal-score" data-cooperation-defection-personal-score>
+						<div class="personal-score-main"><span class="hud-icon" aria-hidden="true">{#if participantResult.tone === 'unknown'}<HelpCircle />{:else if participantResult.tone === 'failure'}<AlertTriangle />{:else}<CircleCheck />{/if}</span><strong>{participantResult.label}</strong>
+							{#if ownOutcome(lastRoundResult)}<span class="personal-reward">{ownOutcome(lastRoundResult)?.replace('あなた: ', '')}</span>{/if}
+						</div>
+						<p class="group-verdict">グループ: {groupOutcomeLabel(lastRoundResult)}</p>
+					</div>
+					<div class="choice-breakdown" aria-label="参加者の内訳">
+						{#each [{ choice: 'cooperate' as const, label: '協力', pubkeys: lastRoundResult.cooperatePubkeys }, { choice: 'defect' as const, label: '抜け駆け', pubkeys: lastRoundResult.defectPubkeys }] as row}
+							<div class="breakdown-row" data-cooperation-defection-breakdown={row.choice}>
+								<div class="breakdown-heading"><span class="hud-item"><span class="hud-icon" aria-hidden="true">{#if row.choice === 'cooperate'}<CircleCheck />{:else}<PlayerPlay />{/if}</span><strong>{row.label} {row.pubkeys.length}人</strong></span>{#if row.pubkeys.length && choiceOutcome(lastRoundResult, row.choice)}<span class="breakdown-reward">{choiceOutcome(lastRoundResult, row.choice)}</span>{/if}</div>
+								{#if row.pubkeys.length}<div class="breakdown-names">{#each row.pubkeys as pubkey}<span class:self-participant={pubkey === selfPubkey}>{participantName(pubkey)}{#if pubkey === selfPubkey}<small>自分</small>{/if}</span>{/each}</div>{/if}
+							</div>
+						{/each}
+					</div>
 				</div>
 			</section>
 		</div>
@@ -323,8 +328,19 @@
 	.result-details h3 { margin: 0; font-size: 1.04em; }
 	.result-details header button { flex: 0 0 auto; }
 	.result-details-body { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 10px; font-size: .95em; line-height: 1.45; }
-	.result-details-body p { margin: 0 0 7px; font-size: inherit; }
-	.result-details-body p:last-child { margin-bottom: 0; }
+	.personal-score { padding: 8px 10px; border-radius: 9px; background: rgba(211, 159, 215, .18); }
+	.personal-score-main, .breakdown-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
+	.personal-score-main strong { color: #672e6e; font-size: 1.16em; }
+	.personal-reward { margin-left: auto; font-weight: 750; font-variant-numeric: tabular-nums; }
+	.group-verdict { margin-top: 2px; color: #67576b; font-size: .82em; }
+	.choice-breakdown { margin-top: 8px; }
+	.breakdown-row { padding: 7px 2px; border-top: 1px solid rgba(102, 28, 106, .16); }
+	.breakdown-heading { justify-content: space-between; }
+	.breakdown-reward { font-weight: 700; font-variant-numeric: tabular-nums; }
+	.breakdown-names { display: flex; flex-wrap: wrap; gap: 3px 6px; margin-top: 4px; overflow-wrap: anywhere; }
+	.breakdown-names > span { padding: 2px 5px; border-radius: 5px; background: rgba(102, 28, 106, .06); }
+	.breakdown-names > .self-participant { background: rgba(145, 73, 151, .22); font-weight: 700; }
+	.breakdown-names small { margin-left: 3px; font-size: .75em; }
 	@media (max-width: 700px) {
 		.cooperation-defection-panel { top: calc(64px + env(safe-area-inset-top)); max-height: calc(100% - 76px - env(safe-area-inset-top)); }
 	}

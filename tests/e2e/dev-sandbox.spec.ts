@@ -72,12 +72,24 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.locator('[data-realtime-group-participating="true"]')).toHaveCount(1);
 		await expect(page.locator('[data-realtime-group-trigger][aria-pressed="true"]')).toHaveCount(1);
 		await expect(page.locator('[data-realtime-group-trigger][aria-pressed="true"]')).toHaveAttribute('aria-label', '参加地点に参加済み（参加先）');
+		const rules = page.locator('.cooperation-defection-rules-disclosure');
+		await rules.locator('summary').click();
+		await expect(rules).toHaveAttribute('open', '');
+		await expect(panel.locator('[data-cooperation-defection-registration-countdown]')).toBeVisible();
+		await rules.locator('summary').click();
 		await next.click();
 		await expect(panel).toContainText('参加中（3人）');
+		await rules.locator('summary').click();
+		await expect(rules).toHaveAttribute('open', '');
+		await expect(panel.locator('.round-timer')).toBeVisible();
+		await rules.locator('summary').click();
 		await expect(panel.locator('[data-cooperation-defection-selection-status]')).toHaveCount(0);
 		await expect(panel).not.toContainText('既存のworld conversationで相談できます。');
 		await next.click();
 		await expect(page.getByRole('button', { name: '協力する' })).toBeEnabled();
+		await rules.locator('summary').click();
+		await expect(rules).toHaveAttribute('open', '');
+		await expect(panel.locator('.round-timer')).toBeVisible();
 		await expect(panel.locator('[data-cooperation-defection-selection-status]')).toHaveCount(0);
 		await page.getByRole('button', { name: '協力する' }).click();
 		await expect(page.getByRole('button', { name: '協力する' })).toHaveClass(/selected/);
@@ -89,10 +101,12 @@ test.describe('DEV World Sandbox', () => {
 		const detailsTrigger = page.getByRole('button', { name: '結果の詳細を見る' });
 		await detailsTrigger.click();
 		const resultDetails = page.getByRole('region', { name: 'ラウンド1の結果の詳細' });
-		await expect(resultDetails).toContainText('有効な選択');
-		await expect(resultDetails).toContainText('協力:');
-		await expect(resultDetails).toContainText('抜け駆け: なし');
-		await expect(resultDetails).toContainText('あなた: +1,000pt');
+		await expect(resultDetails.locator('h3')).toHaveText('ラウンド 1 · 結果');
+		await expect(resultDetails.locator('[data-cooperation-defection-personal-score]')).toContainText('全員協力');
+		await expect(resultDetails.locator('[data-cooperation-defection-personal-score]')).toContainText('+1,000pt');
+		await expect(resultDetails.locator('[data-cooperation-defection-breakdown="cooperate"]')).toContainText('協力 3人');
+		await expect(resultDetails.locator('[data-cooperation-defection-breakdown="cooperate"] .self-participant')).toContainText('自分');
+		await expect(resultDetails.locator('[data-cooperation-defection-breakdown="defect"]')).toContainText('抜け駆け 0人');
 		const desktopTextSizes = await page.evaluate(() => ({
 			result: Number.parseFloat(getComputedStyle(document.querySelector('[data-cooperation-defection-round-result]')!).fontSize),
 			details: Number.parseFloat(getComputedStyle(document.querySelector('.result-details-body')!).fontSize)
@@ -223,6 +237,11 @@ test.describe('DEV World Sandbox', () => {
 		await page.setViewportSize({ width: 390, height: 844 });
 		await page.goto('/?devWorld=1&devScenario=cooperation-defection-playground');
 		await page.locator('.sandbox-mobile-toggle').click();
+		const rules = page.locator('.cooperation-defection-rules-disclosure');
+		await rules.locator('summary').click();
+		await expect(rules).toHaveAttribute('open', '');
+		await expect(page.locator('[data-cooperation-defection-registration-countdown]')).toBeVisible();
+		await rules.locator('summary').click();
 		const group = page.locator('[data-realtime-group-trigger]').first();
 		const [groupX, groupY] = (await group.getAttribute('data-cell-position'))!.split(',').map(Number);
 		for (let index = 0; index < 8; index += 1) {
@@ -233,7 +252,14 @@ test.describe('DEV World Sandbox', () => {
 		await group.click();
 		const advance = page.getByRole('button', { name: 'Advance Cooperation and Defection Playground phase' });
 		await advance.click();
+		await rules.locator('summary').click();
+		await expect(rules).toHaveAttribute('open', '');
+		await expect(page.locator('.round-timer')).toBeVisible();
+		await rules.locator('summary').click();
 		await advance.click();
+		await rules.locator('summary').click();
+		await expect(rules).toHaveAttribute('open', '');
+		await expect(page.locator('.round-timer')).toBeVisible();
 		await page.locator('[data-cooperation-defection-choice="cooperate"]').click();
 		await advance.click();
 		await page.locator('.sandbox-mobile-toggle').click();
