@@ -266,5 +266,20 @@
 	.result-details h3 { margin: 0; font-size: 13px; } .result-details header button { flex: 0 0 auto; }
 	.result-details-body { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 10px; font-size: 12px; line-height: 1.45; }
 	.result-details-body p { margin: 0 0 7px; font-size: inherit; } .result-details-body p:last-child { margin-bottom: 0; }
-	@media (min-width: 701px) { .cooperation-defection-panel { padding-top: 6px; padding-bottom: 6px; } h2 { font-size: 17px; } }
+	@media (min-width: 701px) {
+		.cooperation-defection-panel { padding-top: 8px; padding-bottom: 8px; }
+		.cooperation-defection-heading h2 { font-size: 16pt; }
+		.cooperation-defection-heading h2 span, .cooperation-defection-heading p { font-size: 9pt; }
+		.cooperation-defection-heading strong { font-size: 12pt; }
+		.cooperation-defection-note, .cooperation-defection-cancelled, .cooperation-defection-result { font-size: 14pt; }
+		.cooperation-defection-result p { font-size: inherit; }
+		.cooperation-defection-details { font-size: 12pt; }
+		.choice-reservation { height: 42px; }
+		.cooperation-defection-choice-controls button { min-height: 40px; font-size: 12pt; }
+		.details-trigger, .result-details header button { font-size: 10pt; }
+		.cooperation-defection-rules-disclosure summary { font-size: 11pt; }
+		.cooperation-defection-rules-inline { font-size: 12pt; }
+		.result-details h3 { font-size: 16pt; }
+		.result-details-body { font-size: 14pt; }
+	}
 </style>

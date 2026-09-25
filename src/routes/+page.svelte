@@ -117,6 +117,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		parseManualCooperationDefectionInstanceId,
 		isRetiredRiftSettlementInstanceId,
 		COOPERATION_DEFECTION_EVENT_DEFINITION,
+		COOPERATION_DEFECTION_MIN_PARTICIPANTS,
 		COOPERATION_DEFECTION_CONSULTATION_MS,
 		COOPERATION_DEFECTION_MANUAL_CONTROL_LOOKBACK_SECONDS,
 		parseCooperationDefectionEvent,
@@ -398,6 +399,9 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	let cooperationDefectionRealtimeBootstrapComplete = $state(devCooperationDefectionFixtureEnabled);
 	let cooperationDefectionSchedule = $state(getCooperationDefectionSchedule(initialCooperationDefectionNowMs));
 	let cooperationDefectionNowMs = $state(initialCooperationDefectionNowMs);
+	let cooperationDefectionStartSoundPreviousSchedule: { instanceId: string; phase: string } | null = null;
+	let cooperationDefectionStartSoundEligibleInstanceId: string | null = null;
+	let cooperationDefectionStartSoundPlayedInstanceId: string | null = null;
 	const cooperationDefectionJstDateTimeFormatter = new Intl.DateTimeFormat('ja-JP', {
 		timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
 	});
@@ -2053,6 +2057,19 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			}
 		}
 		cooperationDefectionSchedule = resolveCurrentCooperationDefectionSchedule(nowMs);
+		const schedule = cooperationDefectionSchedule;
+		const previousSchedule = cooperationDefectionStartSoundPreviousSchedule;
+		if (previousSchedule && previousSchedule.instanceId !== schedule.instanceId) {
+			cooperationDefectionStartSoundEligibleInstanceId = null;
+			cooperationDefectionStartSoundPlayedInstanceId = null;
+		}
+		const actorPubkey = cooperationDefectionActorPubkey;
+		const selfGroupId = actorPubkey && cooperationDefectionSession
+			? getCooperationDefectionParticipantGroup(cooperationDefectionSession, schedule, actorPubkey)
+			: null;
+		if (schedule.phase === 'registration' && selfGroupId) cooperationDefectionStartSoundEligibleInstanceId = schedule.instanceId;
+		const enteredGameFromRegistration = previousSchedule?.instanceId === schedule.instanceId && previousSchedule.phase === 'registration' && schedule.phase === 'game';
+		cooperationDefectionStartSoundPreviousSchedule = { instanceId: schedule.instanceId, phase: schedule.phase };
 		if (!cooperationDefectionEventEnabled) {
 			cooperationDefectionSession = null;
 			recoveredCooperationDefectionSessions.clear();
@@ -2076,6 +2093,17 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			}
 		} else if (cooperationDefectionRealtimeBootstrapComplete) {
 			cooperationDefectionSession = settleCooperationDefectionSession(cooperationDefectionSession, cooperationDefectionSchedule, nowMs);
+		}
+		if (enteredGameFromRegistration && cooperationDefectionStartSoundEligibleInstanceId === schedule.instanceId &&
+			cooperationDefectionStartSoundPlayedInstanceId !== schedule.instanceId && !devWorldSandboxEnabled && actorPubkey && selfGroupId && cooperationDefectionRealtimeBootstrapComplete) {
+			const participants = cooperationDefectionSession?.participantSnapshot?.[selfGroupId];
+			const groupWasStarted = participants && participants.length >= COOPERATION_DEFECTION_MIN_PARTICIPANTS &&
+				participants.includes(actorPubkey) && !cooperationDefectionSession?.cancelledGroupIds.includes(selfGroupId);
+			if (groupWasStarted) {
+				cooperationDefectionStartSoundPlayedInstanceId = schedule.instanceId;
+				try { soundController?.play('cooperation-start'); }
+				catch { /* Optional audio must not interrupt event or settlement handling. */ }
+			}
 		}
 		void autoRevealCooperationDefectionChoice(nowMs);
 		const currentResultMessageDispatch = cooperationDefectionSession

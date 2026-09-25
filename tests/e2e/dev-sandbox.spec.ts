@@ -44,6 +44,7 @@ test.describe('DEV World Sandbox', () => {
 	});
 
 	test('runs a local Cooperation and Defection Playground flow with bot settlement and virtual phases', async ({ page }) => {
+		await page.setViewportSize({ width: 1440, height: 900 });
 		await page.goto('/?devWorld=1&devScenario=cooperation-defection-playground');
 		await expect(page.getByRole('heading', { name: '協力と抜け駆け experimental' })).toBeVisible();
 		const panel = page.locator('[data-realtime-panel]');
@@ -91,6 +92,32 @@ test.describe('DEV World Sandbox', () => {
 		await expect(resultDetails).toContainText('協力:');
 		await expect(resultDetails).toContainText('抜け駆け: なし');
 		await expect(resultDetails).toContainText('あなた: +1,000pt');
+		const desktopTextSizes = await page.evaluate(() => ({
+			result: Number.parseFloat(getComputedStyle(document.querySelector('[data-cooperation-defection-round-result]')!).fontSize),
+			details: Number.parseFloat(getComputedStyle(document.querySelector('.result-details-body')!).fontSize)
+		}));
+		expect(desktopTextSizes.result).toBeCloseTo(14 * 96 / 72, 1);
+		expect(desktopTextSizes.details).toBeCloseTo(14 * 96 / 72, 1);
+		await page.setViewportSize({ width: 390, height: 844 });
+		await page.locator('.sandbox-mobile-toggle').click();
+		const mobilePanelAndDetailsFit = await page.evaluate(() => {
+			const panelElement = document.querySelector<HTMLElement>('[data-realtime-panel]')!;
+			const panel = panelElement.getBoundingClientRect();
+			const details = document.querySelector('.result-details')!.getBoundingClientRect();
+			const body = document.querySelector<HTMLElement>('.result-details-body')!;
+			const mobileTextSizes = {
+				result: Number.parseFloat(getComputedStyle(document.querySelector('[data-cooperation-defection-round-result]')!).fontSize),
+				details: Number.parseFloat(getComputedStyle(body).fontSize)
+			};
+			const fits = panel.left >= 0 && panel.right <= innerWidth && details.left >= 0 && details.right <= innerWidth &&
+				details.top >= 0 && details.bottom <= innerHeight && panelElement.scrollWidth <= panelElement.clientWidth &&
+				body.scrollWidth <= body.clientWidth;
+			return { fits, ...mobileTextSizes };
+		});
+		expect(mobilePanelAndDetailsFit.fits).toBe(true);
+		expect(mobilePanelAndDetailsFit.result).toBeLessThan(desktopTextSizes.result);
+		expect(mobilePanelAndDetailsFit.details).toBeLessThan(desktopTextSizes.details);
+		await page.setViewportSize({ width: 1440, height: 900 });
 		await page.keyboard.press('Escape');
 		await expect(resultDetails).toHaveCount(0);
 		await expect(detailsTrigger).toBeFocused();
