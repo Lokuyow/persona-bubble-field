@@ -955,10 +955,10 @@ export async function installPromptApiStub(page: Page, availability: 'available'
 		}, { availability });
 }
 
-export async function seedRelayAccount(page: Page, secretKey: Uint8Array, pubkey: string, lifespanExpiresAtMs = Date.now() + 7 * 24 * 60 * 60 * 1000, points = 0, abilities = { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 }, rootPoints = 0): Promise<void> {
+export async function seedRelayAccount(page: Page, secretKey: Uint8Array, pubkey: string, lifespanExpiresAtMs = Date.now() + 7 * 24 * 60 * 60 * 1000, points = 0, abilities = { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 }, rootPoints = 0, rootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0 }): Promise<void> {
 	const fixtureAccountIndex = fixtureAccountIndexForSecret(secretKey);
 	await page.goto('/favicon.svg');
-	await page.evaluate(async ({ accountPubkey, accountIndex, expiresAtMs, points, abilities, characterId, rootPoints }) => {
+	await page.evaluate(async ({ accountPubkey, accountIndex, expiresAtMs, points, abilities, characterId, rootPoints, rootBuild }) => {
 		const database = await new Promise<IDBDatabase>((resolve, reject) => {
 			const request = indexedDB.open('persona-bubble-field-account', 8);
 			request.onupgradeneeded = () => {
@@ -984,7 +984,7 @@ export async function seedRelayAccount(page: Page, secretKey: Uint8Array, pubkey
 				status: 'alive', characterProfileRevision: 2, runHistory: [] }],
 			mode: { kind: 'running', activeRun: { runNumber: 1, revision: 0, startedAtMs: now,
 				identity: { generation: 1, accountIndex, pubkey: accountPubkey },
-				rootBuild: { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0 },
+				rootBuild,
 				gameState: {
 					version: 4, personaPubkey: accountPubkey, lifespanExpiresAtMs: expiresAtMs,
 					pointProgressTicks: 0, inferenceAccelerationUsedMs: 0,
@@ -997,7 +997,7 @@ export async function seedRelayAccount(page: Page, secretKey: Uint8Array, pubkey
 			transaction.onabort = () => reject(transaction.error);
 		});
 		database.close();
-	}, { accountPubkey: pubkey, accountIndex: fixtureAccountIndex, expiresAtMs: lifespanExpiresAtMs, points, abilities, rootPoints, characterId: requireCharacterFromPubkey(pubkey).characterId });
+	}, { accountPubkey: pubkey, accountIndex: fixtureAccountIndex, expiresAtMs: lifespanExpiresAtMs, points, abilities, rootPoints, rootBuild, characterId: requireCharacterFromPubkey(pubkey).characterId });
 }
 
 export async function readRelayGameState(page: Page): Promise<{

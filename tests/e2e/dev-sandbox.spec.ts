@@ -351,7 +351,7 @@ test.describe('DEV World Sandbox', () => {
 		await openDevWorld(page);
 		await page.getByRole('button', { name: '作業端末' }).click();
 		await expect(page.getByRole('dialog')).toHaveCount(0);
-		await expect(page.locator('.lifespan-hud')).toHaveCount(0);
+		await expect(page.locator('[data-unified-status-hud]')).toHaveCount(0);
 	});
 
 	test('does not paint the default-viewport field scene before measurement and keeps it visible after resize', async ({ page, browser, baseURL }) => {
