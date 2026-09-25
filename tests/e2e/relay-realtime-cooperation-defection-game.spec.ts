@@ -126,7 +126,7 @@ test.describe('Relay startup', () => {
 			await pageCooperate.getByRole('button', { name: '結果の詳細を見る' }).click();
 			const cooperateDetails = pageCooperate.getByRole('region', { name: 'ラウンド1の結果の詳細' });
 			await expect(cooperateDetails.locator('h3')).toHaveText('ラウンド 1 · 結果');
-			await expect(cooperateDetails.locator('[data-cooperation-defection-group-verdict]')).toContainText('協力成功');
+			await expect(cooperateDetails.locator('[data-cooperation-defection-group-verdict]')).toContainText('抜け駆け発生');
 			await expect(cooperateDetails).not.toContainText('本人の選択未確認');
 			await expect(cooperateDetails.locator('[data-cooperation-defection-breakdown="cooperate"]')).toContainText('協力 2人');
 			await expect(cooperateDetails.locator('[data-cooperation-defection-breakdown="cooperate"]')).toContainText('+100pt');
@@ -137,14 +137,14 @@ test.describe('Relay startup', () => {
 			await pageDefectFailure.getByRole('button', { name: '結果の詳細を見る' }).click();
 			const defectFailureDetails = pageDefectFailure.getByRole('region', { name: 'ラウンド1の結果の詳細' });
 			await expect(defectFailureDetails.locator('h3')).toHaveText('ラウンド 1 · 結果');
-			await expect(defectFailureDetails.locator('[data-cooperation-defection-group-verdict]')).toContainText('協力失敗');
+			await expect(defectFailureDetails.locator('[data-cooperation-defection-group-verdict]')).toContainText('失敗');
 			await expect(defectFailureDetails.locator('[data-cooperation-defection-breakdown="defect"]')).toContainText('抜け駆け 3人');
 			await expect(defectSuccessResult.locator('[data-cooperation-defection-own-result]')).toHaveText('抜け駆け成功');
 			await expect(defectSuccessResult).toContainText('あなた: +10,000pt');
 			await pageDefectSuccess.getByRole('button', { name: '結果の詳細を見る' }).click();
 			const defectSuccessDetails = pageDefectSuccess.getByRole('region', { name: 'ラウンド1の結果の詳細' });
 			await expect(defectSuccessDetails.locator('h3')).toHaveText('ラウンド 1 · 結果');
-			await expect(defectSuccessDetails.locator('[data-cooperation-defection-group-verdict]')).toContainText('協力成功');
+			await expect(defectSuccessDetails.locator('[data-cooperation-defection-group-verdict]')).toContainText('抜け駆け発生');
 			for (const page of [pageCooperate, pageDefectFailure, pageDefectSuccess]) {
 				await expect(page.locator('[data-realtime-panel]')).toHaveAttribute('data-realtime-status', 'degraded');
 				await expect(page.locator('[data-cooperation-defection-communication-warning]')).toBeVisible();
@@ -412,7 +412,7 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('[data-cooperation-defection-own-result]')).toHaveText('全員協力');
 		await expect(page.locator('[data-cooperation-defection-selection-status]')).toHaveCount(0);
 		await page.getByRole('button', { name: '結果の詳細を見る' }).click();
-		await expect(page.getByRole('region', { name: 'ラウンド1の結果の詳細' }).locator('[data-cooperation-defection-group-verdict]')).toContainText('全員協力');
+		await expect(page.getByRole('region', { name: 'ラウンド1の結果の詳細' }).locator('[data-cooperation-defection-group-verdict]')).toContainText('協力成功');
 		await page.getByRole('button', { name: '結果の詳細を閉じる' }).click();
 		const automaticSpeech = (await relayState(page)).state.published.find((event) => event.kind === 42 && event.pubkey === selfPubkey && event.content === '協力');
 		expect(automaticSpeech).toBeDefined();
@@ -516,11 +516,11 @@ test.describe('Relay startup', () => {
 		await page.getByRole('button', { name: '結果の詳細を見る' }).click();
 		const details = page.getByRole('region', { name: 'ラウンド1の結果の詳細' });
 		await expect(details.locator('h3')).toHaveText('ラウンド 1 · 結果');
-		await expect(details.locator('[data-cooperation-defection-group-verdict]')).toContainText('全員協力');
+		await expect(details.locator('[data-cooperation-defection-group-verdict]')).toContainText('協力成功');
 		await expect(details.locator('[data-cooperation-defection-own-choice-unconfirmed]')).toContainText('本人の選択未確認');
 		await expect(details.locator('[data-cooperation-defection-breakdown="cooperate"] .self-participant')).toHaveCount(0);
 		await expect(details.locator('.self-participant')).toHaveCount(0);
-		await expect(details).toContainText('全員協力');
+		await expect(details).not.toContainText('全員協力');
 		await expect(details).not.toContainText('あなた:');
 	});
 });

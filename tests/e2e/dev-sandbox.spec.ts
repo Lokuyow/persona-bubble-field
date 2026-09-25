@@ -102,7 +102,7 @@ test.describe('DEV World Sandbox', () => {
 		await detailsTrigger.click();
 		const resultDetails = page.getByRole('region', { name: 'ラウンド1の結果の詳細' });
 		await expect(resultDetails.locator('h3')).toHaveText('ラウンド 1 · 結果');
-		await expect(resultDetails.locator('[data-cooperation-defection-group-verdict]')).toContainText('全員協力');
+		await expect(resultDetails.locator('[data-cooperation-defection-group-verdict]')).toContainText('協力成功');
 		await expect(resultDetails.locator('[data-cooperation-defection-personal-score]')).toHaveCount(0);
 		await expect(resultDetails.locator('[data-cooperation-defection-breakdown="cooperate"]')).toContainText('+1,000pt');
 		await expect(resultDetails.locator('[data-cooperation-defection-breakdown="cooperate"]')).toContainText('協力 3人');
@@ -303,7 +303,7 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.getByRole('dialog')).toContainText('3〜6人 · 全3ラウンド');
 		await expect(page.getByRole('dialog')).not.toContainText('所持100,000ptによる通常の脱出');
 		await expect(page.getByRole('dialog')).toContainText('相談 30秒 → 選択 30秒 → 結果発表 20秒');
-		await expect(page.getByRole('dialog')).toContainText('協力失敗');
+		await expect(page.getByRole('dialog')).toContainText('失敗');
 		await page.getByText('ルールを見る', { exact: true }).click();
 
 		await page.goto('/?devWorld=1&devScenario=cooperation-defection-game');

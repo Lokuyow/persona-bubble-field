@@ -137,9 +137,9 @@
 	}
 
 	function groupOutcomeLabel(result: CooperationDefectionRoundResult): string {
-		if (result.kind === 'all-cooperate') return '全員協力';
-		if (result.kind === 'cooperation-success') return '協力成功';
-		if (result.kind === 'cooperation-failure') return '協力失敗';
+		if (result.kind === 'all-cooperate') return '協力成功';
+		if (result.kind === 'cooperation-success') return '抜け駆け発生';
+		if (result.kind === 'cooperation-failure') return '失敗';
 		return '不成立';
 	}
 
@@ -224,7 +224,7 @@
 						<p>相談 30秒 → 選択 30秒 → 結果発表 20秒</p>
 						<p>協力する / 抜け駆けする</p><p>選択は結果発表まで秘密</p>
 						<p><strong>必要な協力人数</strong></p><ul><li>3人 → <strong>2人</strong></li><li>4人 → <strong>3人</strong></li><li>5人 → <strong>4人</strong></li><li>6人 → <strong>4人</strong></li></ul>
-						<p><strong>結果</strong></p><ul><li>全員が協力 → <strong>全員 +1,000pt</strong></li><li>協力成功 → <strong>協力 +100pt / 抜け駆け +10,000pt</strong></li><li>協力失敗 → <strong>協力 0pt / 抜け駆け 寿命 −3日</strong></li></ul>
+						<p><strong>結果</strong></p><ul><li>協力成功 → <strong>全員 +1,000pt</strong></li><li>抜け駆け発生 → <strong>協力 +100pt / 抜け駆け +10,000pt</strong></li><li>失敗 → <strong>協力 0pt / 抜け駆け 寿命 −3日</strong></li></ul>
 					</div>
 				</details>
 			{/if}
