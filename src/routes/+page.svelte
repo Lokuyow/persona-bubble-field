@@ -127,6 +127,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		parseManualCooperationDefectionInstanceId,
 		isRetiredRiftSettlementInstanceId,
 		COOPERATION_DEFECTION_EVENT_DEFINITION,
+		COOPERATION_DEFECTION_MIN_PARTICIPANTS,
 		COOPERATION_DEFECTION_CONSULTATION_MS,
 		COOPERATION_DEFECTION_MANUAL_CONTROL_LOOKBACK_SECONDS,
 		parseCooperationDefectionEvent,
@@ -453,6 +454,10 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 	let cooperationDefectionRealtimeBootstrapComplete = $state(devCooperationDefectionFixtureEnabled);
 	let cooperationDefectionSchedule = $state(getCooperationDefectionSchedule(initialCooperationDefectionNowMs));
 	let cooperationDefectionNowMs = $state(initialCooperationDefectionNowMs);
+	let cooperationDefectionStartSoundPreviousSchedule: { instanceId: string; phase: string } | null = null;
+	let cooperationDefectionStartSoundEligibleInstanceId: string | null = null;
+	let cooperationDefectionStartSoundPendingInstanceId: string | null = null;
+	let cooperationDefectionStartSoundPlayedInstanceId: string | null = null;
 	const cooperationDefectionJstDateTimeFormatter = new Intl.DateTimeFormat('ja-JP', {
 		timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
 	});
@@ -713,7 +718,7 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 	let cooperationDefectionCommitStatus = $derived(devCooperationDefectionPlaygroundEnabled
 		? devCooperationDefectionPlaygroundState?.selfChoice ? '秘密選択を送信済み' : null
 		: cooperationDefectionSelection && cooperationDefectionSelection.round === cooperationDefectionRound
-			? cooperationDefectionSelection.revealStatus === 'published' ? '選択を自動公開済み' : cooperationDefectionSelection.revealStatus === 'sending' ? '選択を自動公開中' : cooperationDefectionSelection.revealStatus === 'failed' ? '選択の自動公開に失敗（未reveal）' : cooperationDefectionSelection.commitPublished ? '秘密選択を送信済み' : '未送信'
+			? cooperationDefectionSelection.revealStatus === 'published' ? '選択を自動公開済み' : cooperationDefectionSelection.revealStatus === 'sending' ? '選択を自動公開中' : cooperationDefectionSelection.revealStatus === 'failed' ? '自動公開エラー（結果未確認）' : cooperationDefectionSelection.commitPublished ? '秘密選択を送信済み' : '未送信'
 			: null);
 	function cooperationDefectionParticipantName(pubkey: string): string {
 		try { return requireCharacterFromPubkey(pubkey).name; }
@@ -2182,6 +2187,23 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 			}
 		}
 		cooperationDefectionSchedule = resolveCurrentCooperationDefectionSchedule(nowMs);
+		const schedule = cooperationDefectionSchedule;
+		const previousSchedule = cooperationDefectionStartSoundPreviousSchedule;
+		if (previousSchedule && previousSchedule.instanceId !== schedule.instanceId) {
+			cooperationDefectionStartSoundEligibleInstanceId = null;
+			cooperationDefectionStartSoundPendingInstanceId = null;
+			cooperationDefectionStartSoundPlayedInstanceId = null;
+		}
+		const actorPubkey = cooperationDefectionActorPubkey;
+		const selfGroupId = actorPubkey && cooperationDefectionSession
+			? getCooperationDefectionParticipantGroup(cooperationDefectionSession, schedule, actorPubkey)
+			: null;
+		if (schedule.phase === 'registration' && selfGroupId) cooperationDefectionStartSoundEligibleInstanceId = schedule.instanceId;
+		const enteredGameFromRegistration = previousSchedule?.instanceId === schedule.instanceId && previousSchedule.phase === 'registration' && schedule.phase === 'game';
+		if (enteredGameFromRegistration && cooperationDefectionStartSoundEligibleInstanceId === schedule.instanceId) {
+			cooperationDefectionStartSoundPendingInstanceId = schedule.instanceId;
+		}
+		cooperationDefectionStartSoundPreviousSchedule = { instanceId: schedule.instanceId, phase: schedule.phase };
 		if (!cooperationDefectionEventEnabled) {
 			cooperationDefectionSession = null;
 			recoveredCooperationDefectionSessions.clear();
@@ -2205,6 +2227,28 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 			}
 		} else if (cooperationDefectionRealtimeBootstrapComplete) {
 			cooperationDefectionSession = settleCooperationDefectionSession(cooperationDefectionSession, cooperationDefectionSchedule, nowMs);
+		}
+		const firstRound = schedule.phase === 'game' ? getCooperationDefectionRoundSchedule(schedule, 1) : null;
+		const awaitingFirstConsultationSnapshot = firstRound && nowMs < firstRound.selectionAtMs;
+		if (schedule.phase !== 'registration' && !awaitingFirstConsultationSnapshot) {
+			cooperationDefectionStartSoundPendingInstanceId = null;
+			cooperationDefectionStartSoundEligibleInstanceId = null;
+		} else if (cooperationDefectionStartSoundPendingInstanceId === schedule.instanceId &&
+			cooperationDefectionStartSoundEligibleInstanceId === schedule.instanceId && cooperationDefectionStartSoundPlayedInstanceId !== schedule.instanceId &&
+			!devWorldSandboxEnabled && actorPubkey && selfGroupId && cooperationDefectionRealtimeBootstrapComplete) {
+			const snapshot = cooperationDefectionSession?.participantSnapshot;
+			if (snapshot) {
+				const participants = snapshot[selfGroupId];
+				const groupWasStarted = participants && participants.length >= COOPERATION_DEFECTION_MIN_PARTICIPANTS &&
+					participants.includes(actorPubkey) && !cooperationDefectionSession?.cancelledGroupIds.includes(selfGroupId);
+				cooperationDefectionStartSoundPendingInstanceId = null;
+				cooperationDefectionStartSoundEligibleInstanceId = null;
+				if (groupWasStarted) {
+					cooperationDefectionStartSoundPlayedInstanceId = schedule.instanceId;
+					try { soundController?.play('cooperation-start'); }
+					catch { /* Optional audio must not interrupt event or settlement handling. */ }
+				}
+			}
 		}
 		void autoRevealCooperationDefectionChoice(nowMs);
 		const currentResultMessageDispatch = cooperationDefectionSession
@@ -3684,6 +3728,7 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 					participantName={cooperationDefectionParticipantName}
 					selectedChoice={cooperationDefectionSelectedChoice}
 					commitStatus={cooperationDefectionCommitStatus}
+					selectionFailed={Boolean(cooperationDefectionSelection && cooperationDefectionSelection.round === cooperationDefectionRound && cooperationDefectionSelection.revealStatus === 'failed')}
 					canChoose={cooperationDefectionCanChoose}
 					message={devCooperationDefectionPlaygroundState?.message ?? null}
 					{viewportElement}

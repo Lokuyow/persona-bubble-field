@@ -177,7 +177,7 @@ test.describe('Relay startup', () => {
 
 	test('keeps the World session active after a surviving lifespan penalty', async ({ page }) => {
 		const { schedule, selfPubkey, initialMainFrameNavigations, getMainFrameNavigations } = await prepareFailedCooperationScenario(page, 5);
-		await expect(page.locator('[data-cooperation-defection-round-result]')).toContainText('協力失敗');
+		await expect(page.locator('[data-cooperation-defection-own-result]')).toHaveText('抜け駆け失敗');
 		await expect(page.locator('[data-cooperation-defection-round-result]')).toContainText('あなた: 寿命 −3日');
 		await expect(page.locator('[data-death-presentation]')).toHaveCount(0);
 		const self = page.locator(`.participant[data-self="true"][data-participant-id="${selfPubkey}"]`);

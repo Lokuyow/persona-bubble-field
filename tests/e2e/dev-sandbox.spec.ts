@@ -44,6 +44,7 @@ test.describe('DEV World Sandbox', () => {
 	});
 
 	test('runs a local Cooperation and Defection Playground flow with bot settlement and virtual phases', async ({ page }) => {
+		await page.setViewportSize({ width: 1440, height: 900 });
 		await page.goto('/?devWorld=1&devScenario=cooperation-defection-playground');
 		await expect(page.getByRole('heading', { name: '協力と抜け駆け experimental' })).toBeVisible();
 		const panel = page.locator('[data-realtime-panel]');
@@ -67,30 +68,70 @@ test.describe('DEV World Sandbox', () => {
 		await group.click();
 		await expect(next).toBeEnabled();
 		await expect(page.locator('[data-realtime-panel]')).toContainText('参加済み');
-		await expect(page.locator('[data-realtime-panel]')).toContainText('開始まで待ってください。');
+		await expect(page.locator('[data-realtime-panel]')).not.toContainText('開始まで待ってください。');
 		await expect(page.locator('[data-realtime-group-participating="true"]')).toHaveCount(1);
 		await expect(page.locator('[data-realtime-group-trigger][aria-pressed="true"]')).toHaveCount(1);
 		await expect(page.locator('[data-realtime-group-trigger][aria-pressed="true"]')).toHaveAttribute('aria-label', '参加地点に参加済み（参加先）');
+		const rules = page.locator('.cooperation-defection-rules-disclosure');
+		await rules.locator('summary').click();
+		await expect(rules).toHaveAttribute('open', '');
+		await expect(panel.locator('[data-cooperation-defection-registration-countdown]')).toBeVisible();
+		await rules.locator('summary').click();
 		await next.click();
 		await expect(panel).toContainText('参加中（3人）');
+		await rules.locator('summary').click();
+		await expect(rules).toHaveAttribute('open', '');
+		await expect(panel.locator('.round-timer')).toBeVisible();
+		await rules.locator('summary').click();
 		await expect(panel.locator('[data-cooperation-defection-selection-status]')).toHaveCount(0);
 		await expect(panel).not.toContainText('既存のworld conversationで相談できます。');
 		await next.click();
 		await expect(page.getByRole('button', { name: '協力する' })).toBeEnabled();
+		await rules.locator('summary').click();
+		await expect(rules).toHaveAttribute('open', '');
+		await expect(panel.locator('.round-timer')).toBeVisible();
 		await expect(panel.locator('[data-cooperation-defection-selection-status]')).toHaveCount(0);
 		await page.getByRole('button', { name: '協力する' }).click();
 		await expect(page.getByRole('button', { name: '協力する' })).toHaveClass(/selected/);
 		await expect(panel.locator('[data-cooperation-defection-selection-status]')).toContainText('秘密選択を送信済み');
 		await next.click();
 		await expect(page.locator('[data-cooperation-defection-round-result]')).toContainText('+1,000pt');
+		await expect(panel.locator('[data-cooperation-defection-selection-status]')).toHaveCount(0);
 		await expect(panel).not.toContainText('まだありません');
 		const detailsTrigger = page.getByRole('button', { name: '結果の詳細を見る' });
 		await detailsTrigger.click();
 		const resultDetails = page.getByRole('region', { name: 'ラウンド1の結果の詳細' });
-		await expect(resultDetails).toContainText('有効な選択');
-		await expect(resultDetails).toContainText('協力:');
-		await expect(resultDetails).toContainText('抜け駆け: なし');
-		await expect(resultDetails).toContainText('あなた: +1,000pt');
+		await expect(resultDetails.locator('h3')).toHaveText('ラウンド 1 · 結果');
+		await expect(resultDetails.locator('[data-cooperation-defection-group-verdict]')).toContainText('協力成功');
+		await expect(resultDetails.locator('[data-cooperation-defection-personal-score]')).toHaveCount(0);
+		await expect(resultDetails.locator('[data-cooperation-defection-breakdown="cooperate"]')).toContainText('+1,000pt');
+		await expect(resultDetails.locator('[data-cooperation-defection-breakdown="cooperate"]')).toContainText('協力 3人');
+		await expect(resultDetails.locator('[data-cooperation-defection-breakdown="cooperate"] .self-participant')).toContainText('自分');
+		await expect(resultDetails.locator('[data-cooperation-defection-breakdown="defect"]')).toContainText('抜け駆け 0人');
+		const desktopTextSizes = await page.evaluate(() => ({
+			result: Number.parseFloat(getComputedStyle(document.querySelector('[data-cooperation-defection-round-result]')!).fontSize),
+			details: Number.parseFloat(getComputedStyle(document.querySelector('.result-details-body')!).fontSize)
+		}));
+		await page.setViewportSize({ width: 390, height: 844 });
+		await page.locator('.sandbox-mobile-toggle').click();
+		const mobilePanelAndDetailsFit = await page.evaluate(() => {
+			const panelElement = document.querySelector<HTMLElement>('[data-realtime-panel]')!;
+			const panel = panelElement.getBoundingClientRect();
+			const details = document.querySelector('.result-details')!.getBoundingClientRect();
+			const body = document.querySelector<HTMLElement>('.result-details-body')!;
+			const mobileTextSizes = {
+				result: Number.parseFloat(getComputedStyle(document.querySelector('[data-cooperation-defection-round-result]')!).fontSize),
+				details: Number.parseFloat(getComputedStyle(body).fontSize)
+			};
+			const fits = panel.left >= 0 && panel.right <= innerWidth && details.left >= 0 && details.right <= innerWidth &&
+				details.top >= 0 && details.bottom <= innerHeight && panelElement.scrollWidth <= panelElement.clientWidth &&
+				body.scrollWidth <= body.clientWidth;
+			return { fits, ...mobileTextSizes };
+		});
+		expect(mobilePanelAndDetailsFit.fits).toBe(true);
+		expect(mobilePanelAndDetailsFit.result).toBeLessThan(desktopTextSizes.result);
+		expect(mobilePanelAndDetailsFit.details).toBeLessThan(desktopTextSizes.details);
+		await page.setViewportSize({ width: 1440, height: 900 });
 		await page.keyboard.press('Escape');
 		await expect(resultDetails).toHaveCount(0);
 		await expect(detailsTrigger).toBeFocused();
@@ -197,6 +238,11 @@ test.describe('DEV World Sandbox', () => {
 		await page.setViewportSize({ width: 390, height: 844 });
 		await page.goto('/?devWorld=1&devScenario=cooperation-defection-playground');
 		await page.locator('.sandbox-mobile-toggle').click();
+		const rules = page.locator('.cooperation-defection-rules-disclosure');
+		await rules.locator('summary').click();
+		await expect(rules).toHaveAttribute('open', '');
+		await expect(page.locator('[data-cooperation-defection-registration-countdown]')).toBeVisible();
+		await rules.locator('summary').click();
 		const group = page.locator('[data-realtime-group-trigger]').first();
 		const [groupX, groupY] = (await group.getAttribute('data-cell-position'))!.split(',').map(Number);
 		for (let index = 0; index < 8; index += 1) {
@@ -207,7 +253,14 @@ test.describe('DEV World Sandbox', () => {
 		await group.click();
 		const advance = page.getByRole('button', { name: 'Advance Cooperation and Defection Playground phase' });
 		await advance.click();
+		await rules.locator('summary').click();
+		await expect(rules).toHaveAttribute('open', '');
+		await expect(page.locator('.round-timer')).toBeVisible();
+		await rules.locator('summary').click();
 		await advance.click();
+		await rules.locator('summary').click();
+		await expect(rules).toHaveAttribute('open', '');
+		await expect(page.locator('.round-timer')).toBeVisible();
 		await page.locator('[data-cooperation-defection-choice="cooperate"]').click();
 		await advance.click();
 		await page.locator('.sandbox-mobile-toggle').click();
@@ -217,6 +270,11 @@ test.describe('DEV World Sandbox', () => {
 		const details = page.getByRole('region', { name: 'ラウンド1の結果の詳細' });
 		const body = details.getByRole('region', { name: '結果の詳細内容' });
 		await expect(details).toBeVisible();
+		await details.locator('.self-participant').evaluate((element) => {
+			const name = element.firstChild;
+			if (name?.nodeType === Node.TEXT_NODE) name.textContent = 'very-long-unbroken-participant-name-that-must-wrap-within-the-scorecard';
+		});
+		await expect.poll(() => body.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
 		const scroll = await body.evaluate((element) => ({ client: element.clientHeight, total: element.scrollHeight }));
 		expect(scroll.total).toBeGreaterThan(scroll.client);
 		await body.focus();
@@ -242,10 +300,10 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.locator('[data-realtime-group-id]').first()).toHaveCSS('border-radius', '50%');
 		await expect(page.locator('[data-realtime-group-trigger]')).toHaveCount(registration.length);
 		await page.getByText('ルールを見る', { exact: true }).click();
-		await expect(page.getByRole('dialog')).toContainText('1グループ3〜6人、全3ラウンドです。');
+		await expect(page.getByRole('dialog')).toContainText('3〜6人 · 全3ラウンド');
 		await expect(page.getByRole('dialog')).not.toContainText('所持100,000ptによる通常の脱出');
 		await expect(page.getByRole('dialog')).toContainText('相談 30秒 → 選択 30秒 → 結果発表 20秒');
-		await expect(page.getByRole('dialog')).toContainText('協力失敗');
+		await expect(page.getByRole('dialog')).toContainText('失敗');
 		await page.getByText('ルールを見る', { exact: true }).click();
 
 		await page.goto('/?devWorld=1&devScenario=cooperation-defection-game');
@@ -254,6 +312,39 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.locator('[data-cooperation-defection-choice="cooperate"]')).toBeDisabled();
 		await expect(page.locator('[data-cooperation-defection-choice="defect"]')).toBeDisabled();
 		await expect(page.locator('[data-realtime-group-trigger]')).toHaveCount(0);
+	});
+
+	test('prioritizes the countdown and keeps the registration HUD readable on desktop and mobile', async ({ page }) => {
+		await page.setViewportSize({ width: 1440, height: 900 });
+		await page.goto('/?devWorld=1&devScenario=cooperation-defection-registration');
+		const deadline = page.locator('[data-cooperation-defection-registration-deadline]');
+		const countdown = page.locator('[data-cooperation-defection-registration-countdown]');
+		await expect(deadline).toBeVisible();
+		const countdownValue = countdown.locator('strong');
+		const desktopTimerFont = await countdownValue.evaluate((node) => parseFloat(getComputedStyle(node).fontSize));
+		const desktopDeadlineFont = await deadline.evaluate((node) => parseFloat(getComputedStyle(node).fontSize));
+		expect(desktopTimerFont).toBeGreaterThan(desktopDeadlineFont);
+		await page.getByText('ルールを見る', { exact: true }).click();
+		const rulesText = page.locator('.cooperation-defection-rules-inline p').first();
+		await expect(rulesText).toBeVisible();
+		const iconSizes = await page.locator('[data-realtime-panel] .hud-icon svg').evaluateAll((icons) => icons.map((icon) => icon.getBoundingClientRect().width));
+		expect(new Set(iconSizes).size).toBe(1);
+		const panelBounds = await page.locator('[data-realtime-panel]').boundingBox();
+		expect(panelBounds).not.toBeNull();
+		expect(panelBounds!.x).toBeGreaterThanOrEqual(0);
+		expect(panelBounds!.x + panelBounds!.width).toBeLessThanOrEqual(1440);
+
+		await page.setViewportSize({ width: 390, height: 844 });
+		await expect(deadline).toBeVisible();
+		const mobileTimerFont = await countdownValue.evaluate((node) => parseFloat(getComputedStyle(node).fontSize));
+		const mobileDeadlineFont = await deadline.evaluate((node) => parseFloat(getComputedStyle(node).fontSize));
+		expect(mobileTimerFont).toBeGreaterThan(mobileDeadlineFont);
+		expect(mobileTimerFont).toBeLessThan(desktopTimerFont);
+		const mobileBounds = await page.locator('[data-realtime-panel]').boundingBox();
+		expect(mobileBounds).not.toBeNull();
+		expect(mobileBounds!.x).toBeGreaterThanOrEqual(0);
+		expect(mobileBounds!.x + mobileBounds!.width).toBeLessThanOrEqual(390);
+		expect(await page.locator('[data-realtime-panel]').evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
 	});
 
 	test('does not open the mending terminal in DEV World', async ({ page }) => {
