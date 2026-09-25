@@ -154,6 +154,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		createTagGameSchedule,
 		finalizeTagGameState,
 		isFreshTagGameLobby,
+		leaveTagGameParticipant,
 		parseTagGameActionEvent,
 		parseTagGameEvent,
 		tagGameHolderResponseState,
@@ -317,6 +318,7 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 	let pendingRealtimeSettlement = $state(false);
 	let tagGamePanelOpen = $state(false);
 	let tagGameBusy = $state(false);
+	let tagGameWatchedGameId = $state<string | null>(null);
 	let tagGameStates = $state.raw<readonly TagGameState[]>([]);
 	const tagGameEvents = new Map<string, { eventId: string; createdAt: number; state: TagGameState }>();
 	let latestTagGameWorldStates = $state.raw(new Map<string, ParsedWorldStateEvent>());
@@ -546,16 +548,18 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 	let selfIsActive = $derived(selfPresence?.status === 'active');
 	let mendingProjection = $derived(personaSnapshot ? projectMending(personaSnapshot.gameState, mendingNowMs, personaSnapshot.activeRun.rootBuild) : null);
 	let canUseMendingTerminal = $derived(!devWorldSandboxEnabled && !personaLifecycleTransition && Boolean(worldSession && personaSnapshot && selfIsActive && selfLogicalPosition && isWithinFacilityInteractionRange(selfLogicalPosition)));
-	let tagGameLocalLock = $derived(Boolean(personaSnapshot && tagGameStates.some((game) => (game.phase === 'running' || game.phase === 'settling') && game.participant.some((member) => member.pubkey === personaSnapshot?.signer.pubkey && member.runNumber === personaSnapshot.activeRun.runNumber))));
+	let tagGameSelfActiveGameId = $derived(personaSnapshot ? tagGameStates.find((game) => (game.phase === 'running' || game.phase === 'settling') && game.participant.some((member) => member.pubkey === personaSnapshot?.signer.pubkey && member.runNumber === personaSnapshot.activeRun.runNumber && (member.status === 'active' || member.status === 'temporarily-ineligible')))?.gameId ?? null : null);
+	let tagGameWatchedGame = $derived(tagGameWatchedGameId ? tagGameStates.find((game) => game.gameId === tagGameWatchedGameId && (game.phase === 'running' || game.phase === 'settling')) ?? null : null);
+	let tagGameDisplayedGameId = $derived(tagGameSelfActiveGameId ?? tagGameWatchedGame?.gameId ?? null);
+	let tagGameLocalLock = $derived(Boolean(personaSnapshot && tagGameSelfActiveGameId));
 	let tagGameRoleByPubkey = $derived.by(() => {
 		const roles = new Map<string, 'participant' | 'holder'>();
-		for (const game of tagGameStates) {
-			if (game.phase !== 'running' && game.phase !== 'settling') continue;
-			for (const member of game.participant) {
-				const latest = latestTagGameWorldStates.get(member.pubkey);
-				if (member.status === 'active' && latest?.state === 'active' && latest.runNumber === member.runNumber) {
-					roles.set(member.pubkey, member.pubkey === game.ownerPubkey ? 'holder' : 'participant');
-				}
+		const game = tagGameStates.find((candidate) => candidate.gameId === tagGameDisplayedGameId);
+		if (!game) return roles;
+		for (const member of game.participant) {
+			const latest = latestTagGameWorldStates.get(member.pubkey);
+			if (member.status === 'active' && latest?.state === 'active' && latest.runNumber === member.runNumber) {
+				roles.set(member.pubkey, member.pubkey === game.ownerPubkey ? 'holder' : 'participant');
 			}
 		}
 		return roles;
@@ -2180,6 +2184,7 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 			void releaseTagGameParticipation(personaSnapshot, state.gameId);
 		}
 		tagGameEvents.set(state.gameId, { eventId, createdAt, state });
+		if (tagGameWatchedGameId === state.gameId && state.phase !== 'running' && state.phase !== 'settling') tagGameWatchedGameId = null;
 		if (personaSnapshot && state.participant.some((member) => member.pubkey === personaSnapshot?.signer.pubkey && member.runNumber === personaSnapshot.activeRun.runNumber)) {
 			void confirmTagGameParticipation(personaSnapshot, state.gameId);
 		}
@@ -2196,7 +2201,7 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 			return;
 		}
 		const gameId = game.gameId;
-		if (game.phase === 'running' || game.phase === 'settling') {
+		if ((game.phase === 'running' || game.phase === 'settling') && member.status !== 'left') {
 			await activateTagGameRun(self, gameId, game.startedAt * 1000, game.endsAt * 1000, game.endsAt * 1000 + TAG_GAME_FINAL_WAIT_MS);
 			const own = game.participant.find((candidate) => candidate.pubkey === self.signer.pubkey)!;
 			let preparedExit: ReturnType<NonNullable<typeof worldSession>['prepareTerminalExit']> | undefined;
@@ -2255,7 +2260,9 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 		const event = finalizeEvent(buildTagGameActionTemplate({ channelId: channel.channelId, gameId, action, runNumber: self.activeRun.runNumber, nonce: tagGameNonce(), createdAt, payload }), self.signer.secretKey);
 		try {
 			const result = await worldSession.publishRealtime(event);
-			return result.outcome !== 'unconfirmed';
+			const confirmed = result.outcome !== 'unconfirmed';
+			if (confirmed && action === 'leave' && tagGameEvents.get(gameId)?.state.hostPubkey === self.signer.pubkey) handleTagGameSupplementalEvent(event);
+			return confirmed;
 		} catch { return false; }
 	}
 
@@ -2326,7 +2333,12 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 		const self = personaSnapshot;
 		if (!self || tagGameBusy) return;
 		tagGameBusy = true;
-		try { await publishTagGameAction(gameId, 'leave'); await releaseTagGameParticipation(self, gameId); }
+		const game = tagGameEvents.get(gameId)?.state;
+		const duringGame = game?.phase === 'running' || game?.phase === 'settling';
+		try {
+			await publishTagGameAction(gameId, 'leave');
+			if (!duringGame) await releaseTagGameParticipation(self, gameId);
+		}
 		finally { tagGameBusy = false; }
 	}
 
@@ -2375,9 +2387,19 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 			void updateTagGameState(state.gameId, (current) => current.phase === 'lobby' && !current.participant.some((member) => member.pubkey === parsed.event.pubkey) && current.participant.length < 8
 				? { ...current, revision: current.revision + 1, participant: [...current.participant, member] } : null);
 		} else if (parsed.action === 'leave') {
-			void updateTagGameState(state.gameId, (current) => current.participant.some((member) => member.pubkey === parsed.event.pubkey && member.runNumber === parsed.runNumber) && (current.phase === 'lobby' || current.phase === 'proposed')
-				? { ...current, phase: 'lobby', proposalId: undefined, proposalDeadline: undefined, startAt: undefined, revision: current.revision + 1,
-					participant: current.participant.filter((member) => member.pubkey !== parsed.event.pubkey).map((member) => ({ ...member, consentProposalId: undefined, consented: false })) } : null);
+			void updateTagGameState(state.gameId, (current) => {
+				const member = current.participant.find((candidate) => candidate.pubkey === parsed.event.pubkey && candidate.runNumber === parsed.runNumber);
+				if (!member) return null;
+				if (current.phase === 'lobby' || current.phase === 'proposed') return {
+					...current, phase: 'lobby', proposalId: undefined, proposalDeadline: undefined, startAt: undefined, revision: current.revision + 1,
+					participant: current.participant.filter((candidate) => candidate.pubkey !== parsed.event.pubkey).map((candidate) => ({ ...candidate, consentProposalId: undefined, consented: false }))
+				};
+				if ((current.phase !== 'running' && current.phase !== 'settling') || (member.status !== 'active' && member.status !== 'temporarily-ineligible') || !current.endsAt) return null;
+				const confirmedAtMs = Date.now();
+				if (confirmedAtMs >= current.endsAt * 1000) return null;
+				const accrued = accrueTagGameState(current, confirmedAtMs);
+				return leaveTagGameParticipant(accrued, parsed.event.pubkey, parsed.runNumber, confirmedAtMs);
+			});
 		} else if (parsed.action === 'consent' && state.proposalId === parsed.payload.proposalId) {
 			void updateTagGameState(state.gameId, (current) => {
 				if (current.phase !== 'proposed' || !current.proposalDeadline || Date.now() >= current.proposalDeadline * 1000 || current.proposalId !== parsed.payload.proposalId ||
@@ -3544,6 +3566,8 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 		games={visibleTagGameStates}
 		selfPubkey={personaSnapshot?.signer.pubkey ?? null}
 		selfRunNumber={personaSnapshot?.activeRun.runNumber ?? null}
+		hudGameId={tagGameDisplayedGameId}
+		watchedGameId={tagGameWatchedGameId}
 		effectiveLifespanMs={personaSnapshot && mendingProjection ? Math.max(0, mendingProjection.effectiveExpiresAtMs - mendingNowMs) : null}
 		realtimeStatus={realtimeStatus}
 		nowMs={mendingNowMs}
@@ -3554,6 +3578,8 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 		onPropose={(gameId) => { void proposeTagGameStart(gameId); }}
 		onConsent={(gameId, proposalId) => { void consentTagGameStart(gameId, proposalId); }}
 		onExclude={(gameId, pubkey) => { void excludeTagGameParticipant(gameId, pubkey); }}
+		onWatch={(gameId) => { tagGameWatchedGameId = gameId; }}
+		onStopWatching={() => { tagGameWatchedGameId = null; }}
 		onClose={() => { tagGamePanelOpen = false; }}
 	/>
 

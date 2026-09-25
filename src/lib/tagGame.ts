@@ -57,6 +57,23 @@ export type TagGameState = Readonly<{
 	endReason?: 'normal' | 'host-exit' | 'host-unavailable' | 'conflict' | 'too-few-participants';
 }>;
 
+/** Applies an organizer-confirmed voluntary leave to the already-accrued game state. */
+export function leaveTagGameParticipant(state: TagGameState, pubkey: string, runNumber: number, confirmedAtMs: number): TagGameState | null {
+	if ((state.phase !== 'running' && state.phase !== 'settling') || !Number.isSafeInteger(confirmedAtMs)) return null;
+	const leaving = state.participant.find((member) => member.pubkey === pubkey && member.runNumber === runNumber && (member.status === 'active' || member.status === 'temporarily-ineligible'));
+	if (!leaving) return null;
+	const participant = state.participant.map((member) => member === leaving ? { ...member, status: 'left' as const } : member);
+	const remaining = participant.filter((member) => member.status === 'active');
+	if (remaining.length <= 1) {
+		return { ...state, phase: 'interrupted', endReason: 'too-few-participants', participant,
+			holderChallengeId: undefined, holderChallengeStartedAtMs: undefined, revision: state.revision + 1 };
+	}
+	if (state.ownerPubkey !== pubkey) return { ...state, participant, revision: state.revision + 1 };
+	const hash = [...(state.seed ?? '')].reduce((value, char) => (Math.imul(value ^ char.charCodeAt(0), 16777619) >>> 0), 2166136261);
+	return { ...state, participant, ownerPubkey: remaining[hash % remaining.length].pubkey, transferAt: confirmedAtMs,
+		holderChallengeId: undefined, holderChallengeStartedAtMs: undefined, revision: state.revision + 1 };
+}
+
 export type TagGameEnvelope = Readonly<{ event: VerifiedEvent; state: TagGameState }>;
 export type TagGameActionEnvelope = Readonly<{ event: VerifiedEvent; action: string; runNumber: number; payload: Readonly<Record<string, unknown>> }>;
 

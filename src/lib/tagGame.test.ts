@@ -13,6 +13,7 @@ import {
 	createTagGameSchedule,
 	finalizeTagGameState,
 	isFreshTagGameLobby,
+	leaveTagGameParticipant,
 	isValidTagGameState,
 	parseTagGameActionEvent,
 	parseTagGameEvent,
@@ -26,6 +27,7 @@ const HOST = new Uint8Array(32).fill(31);
 const JOINER = new Uint8Array(32).fill(32);
 const CHANNEL = 'c'.repeat(64);
 const HOST_PUBKEY = getPublicKey(HOST);
+const JOINER_PUBKEY = getPublicKey(JOINER);
 const GAME_ID = `${HOST_PUBKEY}:1:${'a'.repeat(64)}`;
 
 function lobby(): TagGameState {
@@ -38,6 +40,10 @@ function lobby(): TagGameState {
 		participant: [{ pubkey: HOST_PUBKEY, runNumber: 1, registeredAt: 100, status: 'registered', points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 }],
 		settledAtMs: 100_000
 	};
+}
+
+function runningGame(participant: TagGameState['participant'], ownerPubkey: string): TagGameState {
+	return { ...lobby(), phase: 'running', startedAt: 100, endsAt: 280, seed: 'b'.repeat(64), ownerPubkey, effect: 'benefit', transferAt: 100_000, participant, settledAtMs: 100_000 };
 }
 
 describe('player-hosted tag-game protocol and rules', () => {
@@ -97,6 +103,45 @@ describe('player-hosted tag-game protocol and rules', () => {
 		expect(tagGameHolderResponseState({ nowMs: 27_000, normalActivityAtMs: null, acknowledgedAtMs: 15_000, challengeStartedAtMs: 22_000 })).toBe('unresponsive');
 		expect(tagGameHolderResponseState({ nowMs: 26_000, normalActivityAtMs: null, acknowledgedAtMs: 25_500, challengeStartedAtMs: null })).toBe('active');
 		expect(tagGameHolderResponseState({ nowMs: 35_501, normalActivityAtMs: null, acknowledgedAtMs: 25_500, challengeStartedAtMs: null })).toBe('challenge');
+	});
+
+	it('confirms a normal participant leave without interrupting the remaining game', () => {
+		const second = getPublicKey(new Uint8Array(32).fill(33));
+		const third = getPublicKey(new Uint8Array(32).fill(34));
+		const state = runningGame([
+			{ pubkey: HOST_PUBKEY, runNumber: 1, registeredAt: 100, status: 'active', points: 100, lifespanLossMs: 0, benefitMs: 2_000, calamityMs: 0 },
+			{ pubkey: second, runNumber: 2, registeredAt: 100, status: 'active', points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 },
+			{ pubkey: third, runNumber: 3, registeredAt: 100, status: 'active', points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 }
+		], HOST_PUBKEY);
+		const left = leaveTagGameParticipant(state, second, 2, 105_000);
+		expect(left).toMatchObject({ phase: 'running', ownerPubkey: HOST_PUBKEY });
+		expect(left?.participant.find((member) => member.pubkey === second)?.status).toBe('left');
+		expect(left?.participant.filter((member) => member.status === 'active')).toHaveLength(2);
+		expect(leaveTagGameParticipant(left!, second, 2, 106_000)).toBeNull();
+	});
+
+	it('reselects the holder when that participant leaves', () => {
+		const second = getPublicKey(new Uint8Array(32).fill(35));
+		const third = getPublicKey(new Uint8Array(32).fill(36));
+		const state = runningGame([
+			{ pubkey: HOST_PUBKEY, runNumber: 1, registeredAt: 100, status: 'active', points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 },
+			{ pubkey: second, runNumber: 2, registeredAt: 100, status: 'active', points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 },
+			{ pubkey: third, runNumber: 3, registeredAt: 100, status: 'active', points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 }
+		], HOST_PUBKEY);
+		const left = leaveTagGameParticipant(state, HOST_PUBKEY, 1, 105_000);
+		expect(left?.phase).toBe('running');
+		expect(left?.participant.find((member) => member.pubkey === HOST_PUBKEY)?.status).toBe('left');
+		expect([second, third]).toContain(left?.ownerPubkey);
+		expect(left?.ownerPubkey).not.toBe(HOST_PUBKEY);
+		expect(left?.transferAt).toBe(105_000);
+	});
+
+	it('interrupts a two-player game when either player leaves', () => {
+		const state = runningGame([
+			{ pubkey: HOST_PUBKEY, runNumber: 1, registeredAt: 100, status: 'active', points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 },
+			{ pubkey: JOINER_PUBKEY, runNumber: 2, registeredAt: 100, status: 'active', points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 }
+		], HOST_PUBKEY);
+		expect(leaveTagGameParticipant(state, JOINER_PUBKEY, 2, 105_000)).toMatchObject({ phase: 'interrupted', endReason: 'too-few-participants' });
 	});
 
 	it('signs action Run data and rejects malformed action scope', () => {
