@@ -152,7 +152,7 @@ export type TerminalExitJournalRequest = Readonly<{
 	lastPositiveCreatedAt: number;
 }>;
 export type CommittedTerminalExit = Readonly<{ createdAt: number; position: Readonly<{ x: number; y: number }> }>;
-export type PersonaSnapshot = Readonly<{ rootPoints: number; signer: ActiveSignerSnapshot; identity: IdentityRecord; activeRun: ActiveRun; gameState: PersonaGameState }>;
+export type PersonaSnapshot = Readonly<{ rootPoints: number; signer: ActiveSignerSnapshot; identity: IdentityRecord; activeRun: ActiveRun; gameState: PersonaGameState; tagGame?: TagGameLifecycle }>;
 
 export type CorruptLifecycleState = Readonly<{
 	kind: 'corrupt';
@@ -618,7 +618,7 @@ async function hydrateLifecycle(entropy: Uint8Array, player: PlayerLifecycle): P
 		const identity = player.identities.find((candidate) => candidate.generation === activeRun.identity.generation && candidate.accountIndex === activeRun.identity.accountIndex && candidate.pubkey === activeRun.identity.pubkey);
 		if (!identity || identity.status !== 'alive') return { kind: 'corrupt', reason: 'identity-reference' };
 		const signer = await deriveSignerFromMaster(master, identity);
-		return { kind: 'restored', persona: { rootPoints: player.rootPoints, signer, identity, activeRun, gameState: activeRun.gameState } };
+		return { kind: 'restored', persona: { rootPoints: player.rootPoints, signer, identity, activeRun, gameState: activeRun.gameState, tagGame: player.tagGame } };
 	} catch (error) {
 		return { kind: 'corrupt', reason: error instanceof Error && error.message === 'Selection is unavailable.' ? 'selection-unavailable' : 'derivation-mismatch' };
 	} finally { master?.wipePrivateData(); entropy.fill(0); }
@@ -1010,7 +1010,9 @@ export async function reserveTagGameParticipation(expected: PersonaSnapshot, gam
 			const store = tx.objectStore(PLAYER_LIFECYCLE_STORE_NAME);
 			const current = await store.get(PLAYER_STATE);
 			if (!isValidPlayerLifecycle(current) || current.mode.kind !== 'running' || !sameRealtimeRunScope(expected, current.mode.activeRun)) { await tx.done; return false; }
-			if (current.tagGame?.lock || current.tagGame?.reservation && !sameTagGameScope(current.tagGame.reservation, expected, gameId)) { await tx.done; return false; }
+			const reservation = current.tagGame?.reservation;
+			const reservationExpired = reservation?.expiresAtMs !== undefined && reservation.expiresAtMs <= Date.now();
+			if (current.tagGame?.lock || reservation && !reservationExpired && !sameTagGameScope(reservation, expected, gameId)) { await tx.done; return false; }
 			const scope = { gameId, identity: expected.activeRun.identity, runNumber: expected.activeRun.runNumber, ...(provisional ? { expiresAtMs: Date.now() + 30_000 } : {}) };
 			await store.put({ ...current, tagGame: { ...current.tagGame, reservation: scope } }, PLAYER_STATE);
 			await tx.done;

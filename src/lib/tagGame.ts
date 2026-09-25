@@ -54,7 +54,7 @@ export type TagGameState = Readonly<{
 	participant: readonly TagGameParticipant[];
 	settledAtMs: number;
 	finalizedAt?: number;
-	endReason?: 'normal' | 'host-exit' | 'host-unavailable' | 'conflict' | 'too-few-participants';
+	endReason?: 'normal' | 'host-exit' | 'host-cancelled' | 'host-unavailable' | 'conflict' | 'too-few-participants';
 }>;
 
 /** Applies an organizer-confirmed voluntary leave to the already-accrued game state. */
@@ -171,6 +171,7 @@ export function isValidTagGameState(value: unknown): value is TagGameState {
 		participants.add(player.pubkey);
 	}
 	if (state.phase === 'running' && (!Number.isSafeInteger(state.startedAt) || !Number.isSafeInteger(state.endsAt) || !state.seed || !state.ownerPubkey || !state.effect)) return false;
+	if (state.endReason !== undefined && !['normal', 'host-exit', 'host-cancelled', 'host-unavailable', 'conflict', 'too-few-participants'].includes(state.endReason)) return false;
 	if (state.finalizedAt !== undefined && (!Number.isSafeInteger(state.finalizedAt) || state.finalizedAt < 0)) return false;
 	if (state.lastHolderResponseAtMs !== undefined && (!Number.isSafeInteger(state.lastHolderResponseAtMs) || state.lastHolderResponseAtMs < 0)) return false;
 	if (state.holderChallengeStartedAtMs !== undefined && (!Number.isSafeInteger(state.holderChallengeStartedAtMs) || state.holderChallengeStartedAtMs < 0)) return false;

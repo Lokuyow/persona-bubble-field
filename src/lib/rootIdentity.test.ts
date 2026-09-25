@@ -195,6 +195,17 @@ describe('Root / Identity / Run lifecycle', () => {
 		expect(await reserveTagGameParticipation(restored(await loadOrCreateLifecycle()), `${gameId}-other`)).toBe(false);
 	});
 
+	it('allows a new reservation to replace an expired pending reservation atomically', async () => {
+		const persona = await selected();
+		const oldGameId = `game-${'8'.repeat(64)}`;
+		const nextGameId = `game-${'7'.repeat(64)}`;
+		expect(await reserveTagGameParticipation(persona, oldGameId, true)).toBe(true);
+		vi.spyOn(Date, 'now').mockReturnValue(TIME + 30_001);
+		expect(await reserveTagGameParticipation(persona, nextGameId)).toBe(true);
+		const current = restored(await loadOrCreateLifecycle());
+		expect(current.tagGame?.reservation?.gameId).toBe(nextGameId);
+	});
+
 	it('preserves a valid v7 Root and active Player while adding the write journal', async () => {
 		const original = await selected();
 		const root = await records(ROOT_SECRET_STORE_NAME);
