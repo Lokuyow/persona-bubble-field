@@ -515,4 +515,27 @@ describe('field geometry', () => {
 			{ anchor: tracePlacement.anchor, size: { width: 100, height: 40 } }
 		)).toBe(false);
 	});
+
+	it('avoids fixed UI obstacles for normal and merged bubbles when a legal position exists', () => {
+		const bounds = { x: 0, y: 0, width: 520, height: 340 };
+		const panel = { id: 'panel', preferred: { x: 40, y: 0 }, anchor: { x: 40, y: 0 }, size: { width: 440, height: 90 } };
+		const items = [
+			{ id: 'normal', preferred: { x: 150, y: 20 }, size: { width: 170, height: 56 } },
+			{ id: 'merged', preferred: { x: 140, y: 20 }, size: { width: 210, height: 60 } }
+		];
+		const placements = placeBubbles(items, bounds, 56, undefined, bounds, [panel]);
+		for (const placement of placements) {
+			const item = items.find(({ id }) => id === placement.id)!;
+			expect(overlapsWithGap({ anchor: placement.anchor, size: item.size }, panel)).toBe(false);
+		}
+	});
+
+	it('chooses the least-overlapping bounded position when a UI obstacle makes avoidance impossible', () => {
+		const bounds = { x: 0, y: 0, width: 80, height: 40 };
+		const item = { id: 'normal', preferred: { x: 0, y: 0 }, size: { width: 80, height: 40 } };
+		const panel = { id: 'panel', preferred: { x: 0, y: 0 }, anchor: { x: 0, y: 0 }, size: { width: 80, height: 40 } };
+		const placement = placeBubbles([item], bounds, 56, undefined, bounds, [panel])[0];
+		expect(placement.anchor).toEqual(item.preferred);
+		expect(overlapsWithGap({ ...item, anchor: placement.anchor }, panel)).toBe(true);
+	});
 });

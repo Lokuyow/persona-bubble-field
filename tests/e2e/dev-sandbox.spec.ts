@@ -84,7 +84,23 @@ test.describe('DEV World Sandbox', () => {
 		await next.click();
 		await expect(page.locator('[data-cooperation-defection-round-result]')).toContainText('+1,000pt');
 		await expect(panel).not.toContainText('まだありません');
+		const detailsTrigger = page.getByRole('button', { name: '結果の詳細を見る' });
+		await detailsTrigger.click();
+		const resultDetails = page.getByRole('region', { name: 'ラウンド1の結果の詳細' });
+		await expect(resultDetails).toContainText('有効な選択');
+		await expect(resultDetails).toContainText('協力:');
+		await expect(resultDetails).toContainText('抜け駆け: なし');
+		await expect(resultDetails).toContainText('あなた: +1,000pt');
+		await page.keyboard.press('Escape');
+		await expect(resultDetails).toHaveCount(0);
+		await expect(detailsTrigger).toBeFocused();
+		await detailsTrigger.click();
 		await next.click();
+		await expect(resultDetails).toHaveCount(0);
+		await expect(page.locator('[data-cooperation-defection-round-result]')).toContainText('前ラウンド');
+		await page.getByRole('button', { name: '結果の詳細を見る' }).click();
+		await expect(page.getByRole('region', { name: 'ラウンド1の結果の詳細' })).toBeVisible();
+		await page.getByRole('button', { name: '結果の詳細を閉じる' }).click();
 		await next.click();
 		await page.getByRole('button', { name: '協力する' }).click();
 		await next.click();
@@ -119,6 +135,100 @@ test.describe('DEV World Sandbox', () => {
 			await expect(page.getByRole('button', { name: 'Advance Cooperation and Defection Playground phase' })).toBeVisible();
 		});
 	}
+
+	for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+		test(`keeps selection controls clickable over a bubble and preserves bubble text selection at ${viewport.width}px`, async ({ page }) => {
+			await page.setViewportSize(viewport);
+			await page.goto('/?devWorld=1&devScenario=cooperation-defection-playground');
+			if (viewport.width <= 700) await page.locator('.sandbox-mobile-toggle').click();
+			const group = page.locator('[data-realtime-group-trigger]').first();
+			const [groupX, groupY] = (await group.getAttribute('data-cell-position'))!.split(',').map(Number);
+			for (let index = 0; index < 8; index += 1) {
+				const current = (await page.locator('.participant[data-self="true"]').getAttribute('data-position'))!.split(',').map(Number);
+				if (Math.max(Math.abs(current[0] - groupX), Math.abs(current[1] - groupY)) <= 1) break;
+				await page.keyboard.press(current[0] > groupX ? 'ArrowLeft' : current[0] < groupX ? 'ArrowRight' : current[1] > groupY ? 'ArrowUp' : 'ArrowDown');
+			}
+			await group.click();
+			const advance = page.getByRole('button', { name: 'Advance Cooperation and Defection Playground phase' });
+			await advance.click();
+			await advance.click();
+			const cooperate = page.locator('[data-cooperation-defection-choice="cooperate"]');
+			await expect(cooperate).toBeVisible();
+			const bubble = await page.evaluateHandle(() => {
+				const element = document.createElement('div');
+				element.className = 'bubble bubble-normal';
+				element.dataset.layoutTestBubble = 'true';
+				element.style.cssText = 'position:absolute;width:160px;height:42px;z-index:auto;pointer-events:auto;';
+				const content = document.createElement('span');
+				content.className = 'bubble-content';
+				content.textContent = '選択操作と吹き出しの文字選択';
+				content.style.cssText = 'user-select:text;-webkit-user-select:text;';
+				element.append(content);
+				document.querySelector('.bubble-layer')!.append(element);
+				return element;
+			});
+			await bubble.evaluate((element) => {
+				const control = document.querySelector('[data-cooperation-defection-choice="cooperate"]')!.getBoundingClientRect();
+				const bubble = element.getBoundingClientRect();
+				(element as HTMLElement).style.transform = `translate3d(${control.left + (control.width - bubble.width) / 2}px, ${control.top + (control.height - bubble.height) / 2}px, 0)`;
+			});
+			const hitTarget = await cooperate.evaluate((element) => {
+				const rect = element.getBoundingClientRect();
+				return document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)?.closest('[data-cooperation-defection-choice]') === element;
+			});
+			expect(hitTarget).toBe(true);
+			await cooperate.click();
+			await expect(cooperate).toHaveClass(/selected/);
+			await bubble.evaluate((element) => {
+				(element as HTMLElement).style.transform = 'translate3d(20px, 200px, 0)';
+			});
+			const bubbleIsInteractive = await bubble.evaluate((element) => {
+				const rect = element.getBoundingClientRect();
+				return document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)?.closest('[data-layout-test-bubble]') === element;
+			});
+			expect(bubbleIsInteractive).toBe(true);
+			const bubbleText = page.locator('[data-layout-test-bubble] .bubble-content');
+			await bubbleText.selectText();
+			await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? '')).toContain('選択操作');
+		});
+	}
+
+	test('keeps result details keyboard-scrollable, closable, and nonmodal on mobile', async ({ page }) => {
+		await page.setViewportSize({ width: 390, height: 844 });
+		await page.goto('/?devWorld=1&devScenario=cooperation-defection-playground');
+		await page.locator('.sandbox-mobile-toggle').click();
+		const group = page.locator('[data-realtime-group-trigger]').first();
+		const [groupX, groupY] = (await group.getAttribute('data-cell-position'))!.split(',').map(Number);
+		for (let index = 0; index < 8; index += 1) {
+			const [x, y] = (await page.locator('.participant[data-self="true"]').getAttribute('data-position'))!.split(',').map(Number);
+			if (Math.max(Math.abs(x - groupX), Math.abs(y - groupY)) <= 1) break;
+			await page.keyboard.press(x > groupX ? 'ArrowLeft' : x < groupX ? 'ArrowRight' : y > groupY ? 'ArrowUp' : 'ArrowDown');
+		}
+		await group.click();
+		const advance = page.getByRole('button', { name: 'Advance Cooperation and Defection Playground phase' });
+		await advance.click();
+		await advance.click();
+		await page.locator('[data-cooperation-defection-choice="cooperate"]').click();
+		await advance.click();
+		await page.locator('.sandbox-mobile-toggle').click();
+		await page.setViewportSize({ width: 390, height: 320 });
+		const trigger = page.getByRole('button', { name: '結果の詳細を見る' });
+		await trigger.click();
+		const details = page.getByRole('region', { name: 'ラウンド1の結果の詳細' });
+		const body = details.getByRole('region', { name: '結果の詳細内容' });
+		await expect(details).toBeVisible();
+		const scroll = await body.evaluate((element) => ({ client: element.clientHeight, total: element.scrollHeight }));
+		expect(scroll.total).toBeGreaterThan(scroll.client);
+		await body.focus();
+		await body.press('End');
+		await expect.poll(() => body.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+		const [x] = (await page.locator('.participant[data-self="true"]').getAttribute('data-position'))!.split(',').map(Number);
+		await page.keyboard.press(x < 15 ? 'ArrowRight' : 'ArrowLeft');
+		await expect.poll(async () => (await page.locator('.participant[data-self="true"]').getAttribute('data-position'))!.split(',')[0]).not.toBe(String(x));
+		await page.getByRole('button', { name: '結果の詳細を閉じる' }).click();
+		await expect(details).toHaveCount(0);
+		await expect(trigger).toBeFocused();
+	});
 	test('renders the Cooperation and Defection registration and game fixtures without fixed-facility overlap', async ({ page }) => {
 		await page.setViewportSize({ width: 360, height: 640 });
 		await page.goto('/?devWorld=1&devScenario=cooperation-defection-registration');
@@ -140,7 +250,7 @@ test.describe('DEV World Sandbox', () => {
 
 		await page.goto('/?devWorld=1&devScenario=cooperation-defection-game');
 		await expect(page.locator('[data-realtime-panel]')).toBeVisible();
-		await expect(page.locator('[data-realtime-panel]')).toContainText('選択内容は結果発表まで秘密です');
+		await expect(page.locator('[data-cooperation-defection-round-progress]')).toContainText('ラウンド 1 · 選択');
 		await expect(page.locator('[data-cooperation-defection-choice="cooperate"]')).toBeDisabled();
 		await expect(page.locator('[data-cooperation-defection-choice="defect"]')).toBeDisabled();
 		await expect(page.locator('[data-realtime-group-trigger]')).toHaveCount(0);

@@ -228,6 +228,13 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	let presenceState = $state.raw<PresenceState>({ field: FIELD, participants: [] });
 	let viewportElement = $state<HTMLElement>();
 	let viewportSize = $state.raw<Size>(DEFAULT_VIEWPORT);
+	let cooperationDefectionPanelBounds = $state<Bounds | null>(null);
+	let cooperationDefectionPanelObstacle = $derived(cooperationDefectionPanelBounds ? [{
+		id: 'cooperation-defection-panel',
+		preferred: { x: cooperationDefectionPanelBounds.x, y: cooperationDefectionPanelBounds.y },
+		anchor: { x: cooperationDefectionPanelBounds.x, y: cooperationDefectionPanelBounds.y },
+		size: { width: cooperationDefectionPanelBounds.width, height: cooperationDefectionPanelBounds.height }
+	}] : []);
 	let initialFieldGeometryReady = $state(false);
 	let bubbleSizes = $state.raw<Record<string, Size>>({});
 	let bubbleOverflowById = $state.raw<Record<string, boolean>>({});
@@ -728,7 +735,8 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		bubbleSafeBounds,
 		cellSize,
 		undefined,
-		bubbleVisualRegion
+		bubbleVisualRegion,
+		cooperationDefectionPanelObstacle
 	));
 	let placedAnchorById = $derived(new Map(bubblePlacement.map((placement) => [placement.id, placement.anchor])));
 	$effect(() => {
@@ -804,6 +812,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		const input = {
 			projection: traceConversationProjection,
 			fixedBubbles: positionedVisibleBubbles,
+			fixedObstacles: cooperationDefectionPanelObstacle,
 			bubbleSizes,
 			traceReplyCardFootprints,
 			bubbleSafeBounds,
@@ -2938,6 +2947,27 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 				onOpenSelfProfile={selfProfileCharacter ? openSelfProfile : undefined}
 				traceMarkerWorldPosition={traceMarkerWorldPosition}
 			/>
+			{#if cooperationDefectionEventEnabled && (!devWorldSandboxEnabled || devCooperationDefectionFixtureEnabled)}
+				<CooperationDefectionPanel
+					schedule={cooperationDefectionSchedule}
+					nowMs={cooperationDefectionNowMs}
+					registrationDeadline={cooperationDefectionRegistrationDeadline?.deadline ?? null}
+					registrationCountdown={cooperationDefectionRegistrationDeadline?.remaining ?? null}
+					status={realtimeStatus}
+					session={cooperationDefectionSession}
+					selfGroupId={cooperationDefectionSelfGroupId}
+					cancelled={cooperationDefectionSelfGroupCancelled}
+					selfPubkey={cooperationDefectionActorPubkey}
+					participantName={cooperationDefectionParticipantName}
+					selectedChoice={cooperationDefectionSelectedChoice}
+					commitStatus={cooperationDefectionCommitStatus}
+					canChoose={cooperationDefectionCanChoose}
+					message={devCooperationDefectionPlaygroundState?.message ?? null}
+					{viewportElement}
+					onPanelBounds={(bounds) => { cooperationDefectionPanelBounds = bounds; }}
+					onChoice={(choice) => { void chooseCooperationDefectionChoice(choice); }}
+				/>
+			{/if}
 			<SpeechLayer
 				{viewportSize}
 				traceReady={tracePresentationReady}
@@ -2997,26 +3027,6 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 				{/if}
 			</section>
 		</div>
-	{/if}
-
-	{#if cooperationDefectionEventEnabled && (!devWorldSandboxEnabled || devCooperationDefectionFixtureEnabled)}
-		<CooperationDefectionPanel
-			schedule={cooperationDefectionSchedule}
-			nowMs={cooperationDefectionNowMs}
-			registrationDeadline={cooperationDefectionRegistrationDeadline?.deadline ?? null}
-			registrationCountdown={cooperationDefectionRegistrationDeadline?.remaining ?? null}
-			status={realtimeStatus}
-			session={cooperationDefectionSession}
-			selfGroupId={cooperationDefectionSelfGroupId}
-			cancelled={cooperationDefectionSelfGroupCancelled}
-			selfPubkey={selfSigner?.pubkey ?? null}
-			participantName={cooperationDefectionParticipantName}
-			selectedChoice={cooperationDefectionSelectedChoice}
-			commitStatus={cooperationDefectionCommitStatus}
-			canChoose={cooperationDefectionCanChoose}
-			message={devCooperationDefectionPlaygroundState?.message ?? null}
-			onChoice={(choice) => { void chooseCooperationDefectionChoice(choice); }}
-		/>
 	{/if}
 
 	<CooperationDefectionRulesDialog open={cooperationDefectionRulesDialogOpen} mode={cooperationDefectionRulesDialogMode}

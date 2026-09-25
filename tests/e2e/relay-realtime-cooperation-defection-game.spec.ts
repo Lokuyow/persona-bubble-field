@@ -92,7 +92,7 @@ test.describe('Relay startup', () => {
 			const pubkey = getPublicKey(player.secret);
 			await page.clock.install({ time: startTime });
 			await installHostOwnedStub(page);
-			await installDelayedRelay(page, { primaryEvents: testEvents(startTime), realtimeEvents, persistAcrossReload: true, realtimePublishOutcome: 'accepted' });
+			await installDelayedRelay(page, { primaryEvents: testEvents(startTime), realtimeEvents, realtimeTerminal: 'closed', persistAcrossReload: true, realtimePublishOutcome: 'accepted' });
 			await seedRelayAccount(page, player.secret, pubkey, startTime + 5 * 24 * 60 * 60 * 1_000);
 			await page.goto('/');
 			await expect(page.locator('[data-realtime-panel]')).toContainText('参加受付');
@@ -117,9 +117,29 @@ test.describe('Relay startup', () => {
 			await expect(cooperateResult).toContainText('全員協力');
 			await expect(cooperateResult).toContainText('あなた: +1,000pt');
 			await expect(cooperateResult).not.toContainText('協力失敗');
+			await pageCooperate.getByRole('button', { name: '結果の詳細を見る' }).click();
+			const cooperateDetails = pageCooperate.getByRole('region', { name: 'ラウンド1の結果の詳細' });
+			await expect(cooperateDetails).toContainText('共通の報酬・ペナルティ');
+			await expect(cooperateDetails).toContainText('あなた: +1,000pt');
+			await expect(cooperateDetails).toContainText('抜け駆け: なし');
 			await expect(defectResult).toContainText('協力失敗');
 			await expect(defectResult).toContainText('あなた: 寿命 −3日');
 			await expect(defectResult).not.toContainText('全員協力');
+			await pageDefect.getByRole('button', { name: '結果の詳細を見る' }).click();
+			const defectDetails = pageDefect.getByRole('region', { name: 'ラウンド1の結果の詳細' });
+			await expect(defectDetails).toContainText('協力失敗');
+			await expect(defectDetails).toContainText('あなた: 寿命 −3日');
+			await expect(defectDetails).toContainText('抜け駆け:');
+			for (const page of [pageCooperate, pageDefect]) {
+				await expect(page.locator('[data-realtime-panel]')).toHaveAttribute('data-realtime-status', 'degraded');
+				await expect(page.locator('[data-cooperation-defection-communication-warning]')).toBeVisible();
+				await expect(page.locator('[data-cooperation-defection-round-result]')).toBeVisible();
+				await expect(page.getByRole('region', { name: 'ラウンド1の結果の詳細' })).toBeVisible();
+				await page.getByRole('button', { name: '結果の詳細を閉じる' }).click();
+				await expect(page.getByRole('region', { name: 'ラウンド1の結果の詳細' })).toHaveCount(0);
+				await page.getByRole('button', { name: '結果の詳細を見る' }).click();
+				await expect(page.getByRole('region', { name: 'ラウンド1の結果の詳細' })).toBeVisible();
+			}
 		} finally {
 			await Promise.all([pageCooperate.close(), pageDefect.close()]);
 		}
@@ -296,7 +316,25 @@ test.describe('Relay startup', () => {
 		expect(verifyEvent(automaticSpeech as unknown as NostrEvent)).toBe(true);
 		expect(parseWorldMessage(automaticSpeech as unknown as NostrEvent, CHANNEL_ID)).toMatchObject({ content: '協力', speechType: 'normal' });
 		expect(automaticSpeech?.tags).toContainEqual(['l', 'chat', 'io.github.lokuyow.persona-bubble-field']);
-		await expect(page.locator(`.bubble[data-bubble-participant-id="${selfPubkey}"]`).filter({ hasText: '協力' })).toBeVisible();
+		const automaticBubble = page.locator(`.bubble[data-bubble-participant-id="${selfPubkey}"]`).filter({ hasText: '協力' });
+		await expect(automaticBubble).toBeVisible();
+		const compactPanel = page.locator('[data-realtime-panel]');
+		const naturallyPlacedRects = await Promise.all([automaticBubble.boundingBox(), compactPanel.boundingBox()]);
+		if (!naturallyPlacedRects[0] || !naturallyPlacedRects[1]) throw new Error('Expected measured result bubble and compact panel bounds.');
+		const [bubbleBox, panelBox] = naturallyPlacedRects;
+		expect(bubbleBox.x < panelBox.x + panelBox.width && bubbleBox.x + bubbleBox.width > panelBox.x && bubbleBox.y < panelBox.y + panelBox.height && bubbleBox.y + bubbleBox.height > panelBox.y).toBe(false);
+		const bubbleText = automaticBubble.locator('.bubble-content');
+		await bubbleText.selectText();
+		await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? '')).toContain('協力');
+		await page.evaluate(() => window.getSelection()?.removeAllRanges());
+		const frontmostDuringOverlap = await automaticBubble.evaluate((element) => {
+			const panel = document.querySelector('[data-realtime-panel]')!.getBoundingClientRect();
+			const rect = element.getBoundingClientRect();
+			(element as HTMLElement).style.transform = `translate3d(${panel.left + (panel.width - rect.width) / 2}px, ${panel.top + (panel.height - rect.height) / 2}px, 0)`;
+			const updated = element.getBoundingClientRect();
+			return document.elementFromPoint(updated.left + updated.width / 2, updated.top + updated.height / 2)?.closest('.bubble') === element;
+		});
+		expect(frontmostDuringOverlap).toBe(true);
 		await expect(page.locator(`.recent-message-timeline [data-timeline-pubkey="${selfPubkey}"] .timeline-content`).filter({ hasText: /^協力$/ })).toBeVisible();
 		await expect(page.locator('.speech-type-toggle')).toHaveAttribute('data-speech-type', 'shout');
 		await expect(page.locator('.participant[data-self="true"]')).toBeVisible();
