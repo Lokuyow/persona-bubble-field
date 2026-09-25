@@ -252,21 +252,16 @@
 	{/if}
 
 	{#if detailsOpen && lastRoundResult && detailsPosition}
-		{@const participantResult = participantResultPresentation(lastRoundResult)}
 		<div class="details-layer" aria-hidden="false">
 			<section class="result-details" id="cooperation-defection-result-details" aria-label={`ラウンド${lastRoundResult.round}の結果の詳細`} style={`left:${detailsPosition.left}px;top:${detailsPosition.top}px;width:${detailsPosition.width}px;max-height:${detailsPosition.maxHeight}px`}>
 				<header><h3>ラウンド {lastRoundResult.round} · 結果</h3><button type="button" class="hud-item" aria-label="結果の詳細を閉じる" onclick={closeDetails}><span class="hud-icon" aria-hidden="true"><X /></span>閉じる</button></header>
 				<!-- svelte-ignore a11y_no_noninteractive_tabindex -- scrollable region remains keyboard focusable -->
 				<div class="result-details-body" role="region" aria-label="結果の詳細内容" tabindex="0">
-					<div class="personal-score" data-cooperation-defection-personal-score>
-						<div class="personal-score-main"><span class="hud-icon" aria-hidden="true">{#if participantResult.tone === 'unknown'}<HelpCircle />{:else if participantResult.tone === 'failure'}<AlertTriangle />{:else}<CircleCheck />{/if}</span><strong>{participantResult.label}</strong>
-							{#if ownOutcome(lastRoundResult)}<span class="personal-reward">{ownOutcome(lastRoundResult)?.replace('あなた: ', '')}</span>{/if}
-						</div>
-						<p class="group-verdict">グループ: {groupOutcomeLabel(lastRoundResult)}</p>
-					</div>
+					<div class="group-verdict" data-cooperation-defection-group-verdict><span class="hud-icon" aria-hidden="true">{#if lastRoundResult.kind === 'insufficient'}<HelpCircle />{:else if lastRoundResult.kind === 'cooperation-failure'}<AlertTriangle />{:else}<CircleCheck />{/if}</span><strong>{groupOutcomeLabel(lastRoundResult)}</strong></div>
+					{#if selfPubkey && !lastRoundResult.validParticipantPubkeys.includes(selfPubkey)}<p class="own-choice-unconfirmed" data-cooperation-defection-own-choice-unconfirmed><HelpCircle />本人の選択未確認</p>{/if}
 					<div class="choice-breakdown" aria-label="参加者の内訳">
 						{#each [{ choice: 'cooperate' as const, label: '協力', pubkeys: lastRoundResult.cooperatePubkeys }, { choice: 'defect' as const, label: '抜け駆け', pubkeys: lastRoundResult.defectPubkeys }] as row}
-							<div class="breakdown-row" data-cooperation-defection-breakdown={row.choice}>
+							<div class="breakdown-row" class:own-choice={Boolean(selfPubkey && row.pubkeys.includes(selfPubkey))} data-cooperation-defection-breakdown={row.choice}>
 								<div class="breakdown-heading"><span class="hud-item"><span class="hud-icon" aria-hidden="true">{#if row.choice === 'cooperate'}<CircleCheck />{:else}<PlayerPlay />{/if}</span><strong>{row.label} {row.pubkeys.length}人</strong></span>{#if row.pubkeys.length && choiceOutcome(lastRoundResult, row.choice)}<span class="breakdown-reward">{choiceOutcome(lastRoundResult, row.choice)}</span>{/if}</div>
 								{#if row.pubkeys.length}<div class="breakdown-names">{#each row.pubkeys as pubkey}<span class:self-participant={pubkey === selfPubkey}>{participantName(pubkey)}{#if pubkey === selfPubkey}<small>自分</small>{/if}</span>{/each}</div>{/if}
 							</div>
@@ -328,17 +323,17 @@
 	.result-details h3 { margin: 0; font-size: 1.04em; }
 	.result-details header button { flex: 0 0 auto; }
 	.result-details-body { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 10px; font-size: .95em; line-height: 1.45; }
-	.personal-score { padding: 8px 10px; border-radius: 9px; background: rgba(211, 159, 215, .18); }
-	.personal-score-main, .breakdown-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
-	.personal-score-main strong { color: #672e6e; font-size: 1.16em; }
-	.personal-reward { margin-left: auto; font-weight: 750; font-variant-numeric: tabular-nums; }
-	.group-verdict { margin-top: 2px; color: #67576b; font-size: .82em; }
+	.group-verdict { display: flex; align-items: center; gap: 6px; padding: 2px 1px 7px; color: #672e6e; font-size: 1.08em; }
+	.own-choice-unconfirmed { display: flex; align-items: center; gap: 5px; margin: 0 0 5px; color: #69536d; font-size: .88em; }
+	.own-choice-unconfirmed :global(svg) { width: 1em; height: 1em; flex: 0 0 auto; }
+	.breakdown-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
 	.choice-breakdown { margin-top: 8px; }
-	.breakdown-row { padding: 7px 2px; border-top: 1px solid rgba(102, 28, 106, .16); }
+	.breakdown-row { padding: 7px 5px; border-top: 1px solid rgba(102, 28, 106, .16); border-radius: 6px; }
+	.breakdown-row.own-choice { background: rgba(145, 73, 151, .07); }
 	.breakdown-heading { justify-content: space-between; }
 	.breakdown-reward { font-weight: 700; font-variant-numeric: tabular-nums; }
 	.breakdown-names { display: flex; flex-wrap: wrap; gap: 3px 6px; margin-top: 4px; overflow-wrap: anywhere; }
-	.breakdown-names > span { padding: 2px 5px; border-radius: 5px; background: rgba(102, 28, 106, .06); }
+	.breakdown-names > span { box-sizing: border-box; max-width: 100%; padding: 2px 5px; border-radius: 5px; background: rgba(102, 28, 106, .06); overflow-wrap: anywhere; }
 	.breakdown-names > .self-participant { background: rgba(145, 73, 151, .22); font-weight: 700; }
 	.breakdown-names small { margin-left: 3px; font-size: .75em; }
 	@media (max-width: 700px) {

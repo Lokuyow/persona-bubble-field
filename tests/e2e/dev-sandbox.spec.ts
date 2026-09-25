@@ -102,8 +102,9 @@ test.describe('DEV World Sandbox', () => {
 		await detailsTrigger.click();
 		const resultDetails = page.getByRole('region', { name: 'ラウンド1の結果の詳細' });
 		await expect(resultDetails.locator('h3')).toHaveText('ラウンド 1 · 結果');
-		await expect(resultDetails.locator('[data-cooperation-defection-personal-score]')).toContainText('全員協力');
-		await expect(resultDetails.locator('[data-cooperation-defection-personal-score]')).toContainText('+1,000pt');
+		await expect(resultDetails.locator('[data-cooperation-defection-group-verdict]')).toContainText('全員協力');
+		await expect(resultDetails.locator('[data-cooperation-defection-personal-score]')).toHaveCount(0);
+		await expect(resultDetails.locator('[data-cooperation-defection-breakdown="cooperate"]')).toContainText('+1,000pt');
 		await expect(resultDetails.locator('[data-cooperation-defection-breakdown="cooperate"]')).toContainText('協力 3人');
 		await expect(resultDetails.locator('[data-cooperation-defection-breakdown="cooperate"] .self-participant')).toContainText('自分');
 		await expect(resultDetails.locator('[data-cooperation-defection-breakdown="defect"]')).toContainText('抜け駆け 0人');
@@ -269,6 +270,11 @@ test.describe('DEV World Sandbox', () => {
 		const details = page.getByRole('region', { name: 'ラウンド1の結果の詳細' });
 		const body = details.getByRole('region', { name: '結果の詳細内容' });
 		await expect(details).toBeVisible();
+		await details.locator('.self-participant').evaluate((element) => {
+			const name = element.firstChild;
+			if (name?.nodeType === Node.TEXT_NODE) name.textContent = 'very-long-unbroken-participant-name-that-must-wrap-within-the-scorecard';
+		});
+		await expect.poll(() => body.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
 		const scroll = await body.evaluate((element) => ({ client: element.clientHeight, total: element.scrollHeight }));
 		expect(scroll.total).toBeGreaterThan(scroll.client);
 		await body.focus();
