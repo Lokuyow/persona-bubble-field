@@ -71,14 +71,15 @@ describe('player-hosted tag-game protocol and rules', () => {
 		expect(first.filter((part) => part.effect === 'calamity').reduce((sum, part) => sum + part.durationMs, 0)).toBe(90_000);
 		expect(first.every((part) => part.durationMs >= 10_000 && part.durationMs <= 40_000)).toBe(true);
 		expect(first.every((part, index) => index === 0 || part.effect !== first[index - 1].effect)).toBe(true);
-		expect(TAG_GAME_BENEFIT_POINTS_PER_SECOND * 180).toBe(9_000);
+		expect(TAG_GAME_BENEFIT_POINTS_PER_SECOND * 90).toBe(4_500);
 	});
 
 	it('validates per-player cumulative caps before settlement', () => {
 		const state = lobby();
 		expect(cumulativeTagGameSettlement(state)).toEqual({ points: 0, lifespanLossMs: 0 });
-		expect(isValidTagGameState({ ...state, participant: [{ ...state.participant[0], points: 9_001 }] })).toBe(false);
-		expect(isValidTagGameState({ ...state, participant: [{ ...state.participant[0], lifespanLossMs: 648_000_001 }] })).toBe(false);
+		expect(isValidTagGameState({ ...state, participant: [{ ...state.participant[0], points: 4_501 }] })).toBe(false);
+		expect(isValidTagGameState({ ...state, participant: [{ ...state.participant[0], lifespanLossMs: 324_000_001 }] })).toBe(false);
+		expect(isValidTagGameState({ ...state, participant: [{ ...state.participant[0], benefitMs: 90_001 }] })).toBe(false);
 	});
 
 	it('uses normal World activity and tag-game acknowledgements, then challenges a holder again after silence', () => {

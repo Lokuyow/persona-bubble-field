@@ -17,6 +17,7 @@ import {
 } from './personaGameState';
 import { createMendingJob, settleMending, projectMending, type MendingJob } from './mending';
 import { isRootBuildAllocatable, isValidRootBuild, type RootBuild, rootBuildCost } from './rootProgression';
+import { TAG_GAME_MAX_POINTS, TAG_GAME_MAX_LIFESPAN_LOSS_MS } from './tagGame';
 
 export const DATABASE_NAME = 'persona-bubble-field-account';
 export const DATABASE_VERSION = 8;
@@ -93,9 +94,10 @@ export type RealtimeSettlementLedger = Readonly<{
 	runNumber: number;
 	pendingInstanceIds: readonly string[];
 	appliedOutcomeIds: readonly string[];
+	tagGameReceipt?: Readonly<{ gameId: string; points: number; lifespanLossMs: number }>;
 }>;
 
-export type TagGameRunScope = Readonly<{ gameId: string; identity: IdentityReference; runNumber: number }>;
+export type TagGameRunScope = Readonly<{ gameId: string; identity: IdentityReference; runNumber: number; expiresAtMs?: number }>;
 export type TagGameLifecycle = Readonly<{
 	reservation?: TagGameRunScope;
 	lock?: TagGameRunScope & Readonly<{
@@ -196,6 +198,7 @@ export type ClearResult =
 export type MarkCharacterProfilePublicationResult = Readonly<{ kind: 'recorded' | 'stale' }>;
 export type RealtimeSettlementResult =
 	| Readonly<{ kind: 'applied'; persona: PersonaSnapshot }>
+	| Readonly<{ kind: 'transitioned'; exit?: CommittedTerminalExit }>
 	| Readonly<{ kind: 'duplicate'; persona: PersonaSnapshot }>
 	| Readonly<{ kind: 'expired'; persona: PersonaSnapshot }>
 	| Readonly<{ kind: 'stale' }>
@@ -291,14 +294,23 @@ function isValidRealtimeSettlementLedger(value: unknown): value is RealtimeSettl
 	return candidate.schemaVersion === 1 && isValidIdentityReference(candidate.identity) && Number.isSafeInteger(candidate.runNumber) && (candidate.runNumber as number) > 0 &&
 		Array.isArray(candidate.pendingInstanceIds) && candidate.pendingInstanceIds.every((id) => typeof id === 'string' && id.length > 0 && id.length <= 160) &&
 		new Set(candidate.pendingInstanceIds).size === candidate.pendingInstanceIds.length && Array.isArray(candidate.appliedOutcomeIds) &&
-		candidate.appliedOutcomeIds.every((id) => typeof id === 'string' && id.length > 0 && id.length <= 240) && new Set(candidate.appliedOutcomeIds).size === candidate.appliedOutcomeIds.length;
+		candidate.appliedOutcomeIds.every((id) => typeof id === 'string' && id.length > 0 && id.length <= 240) && new Set(candidate.appliedOutcomeIds).size === candidate.appliedOutcomeIds.length &&
+		(candidate.tagGameReceipt === undefined || isValidTagGameReceipt(candidate.tagGameReceipt));
+}
+
+function isValidTagGameReceipt(value: unknown): value is Readonly<{ gameId: string; points: number; lifespanLossMs: number }> {
+	if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+	const receipt = value as Record<string, unknown>;
+	return typeof receipt.gameId === 'string' && receipt.gameId.length > 0 && receipt.gameId.length <= 160 &&
+		Number.isSafeInteger(receipt.points) && (receipt.points as number) >= 0 && (receipt.points as number) <= TAG_GAME_MAX_POINTS &&
+		Number.isSafeInteger(receipt.lifespanLossMs) && (receipt.lifespanLossMs as number) >= 0 && (receipt.lifespanLossMs as number) <= TAG_GAME_MAX_LIFESPAN_LOSS_MS;
 }
 
 function isValidTagGameScope(value: unknown): value is TagGameRunScope {
 	if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
 	const candidate = value as Record<string, unknown>;
 	return typeof candidate.gameId === 'string' && candidate.gameId.length > 0 && candidate.gameId.length <= 160 && isValidIdentityReference(candidate.identity) &&
-		Number.isSafeInteger(candidate.runNumber) && (candidate.runNumber as number) > 0;
+		Number.isSafeInteger(candidate.runNumber) && (candidate.runNumber as number) > 0 && (candidate.expiresAtMs === undefined || isSafeTimestamp(candidate.expiresAtMs));
 }
 
 function isValidTagGameLifecycle(value: unknown): value is TagGameLifecycle {
@@ -310,8 +322,8 @@ function isValidTagGameLifecycle(value: unknown): value is TagGameLifecycle {
 	const lock = candidate.lock as Record<string, unknown>;
 	return isSafeTimestamp(lock.startedAtMs) && isSafeTimestamp(lock.endsAtMs) && lock.endsAtMs > lock.startedAtMs &&
 		isSafeTimestamp(lock.finalDeadlineMs) && lock.finalDeadlineMs >= lock.endsAtMs &&
-		(lock.phase === 'running' || lock.phase === 'settling') && Number.isSafeInteger(lock.points) && (lock.points as number) >= 0 && (lock.points as number) <= 9_000 &&
-		Number.isSafeInteger(lock.lifespanLossMs) && (lock.lifespanLossMs as number) >= 0 && (lock.lifespanLossMs as number) <= 648_000_000;
+		(lock.phase === 'running' || lock.phase === 'settling') && Number.isSafeInteger(lock.points) && (lock.points as number) >= 0 && (lock.points as number) <= TAG_GAME_MAX_POINTS &&
+		Number.isSafeInteger(lock.lifespanLossMs) && (lock.lifespanLossMs as number) >= 0 && (lock.lifespanLossMs as number) <= TAG_GAME_MAX_LIFESPAN_LOSS_MS;
 }
 
 function isValidActiveRun(value: unknown): value is ActiveRun {
@@ -665,6 +677,21 @@ export async function loadOrCreateLifecycle(): Promise<LoadLifecycleResult> {
 			});
 			continue;
 		}
+		if (observed.player.tagGame?.reservation?.expiresAtMs !== undefined && observed.player.tagGame.reservation.expiresAtMs <= Date.now()) {
+			await withLifecycle(async (db) => {
+				const tx = db.transaction(PLAYER_LIFECYCLE_STORE_NAME, 'readwrite');
+				try {
+					const store = tx.objectStore(PLAYER_LIFECYCLE_STORE_NAME);
+					const current = await store.get(PLAYER_STATE);
+					if (isValidPlayerLifecycle(current) && current.tagGame?.reservation?.expiresAtMs !== undefined && current.tagGame.reservation.expiresAtMs <= Date.now()) {
+						const { reservation: _reservation, ...rest } = current.tagGame;
+						await store.put({ ...current, tagGame: rest.lock ? rest : undefined }, PLAYER_STATE);
+					}
+					await tx.done;
+				} catch (error) { try { tx.abort(); } catch { /* already aborted */ } await tx.done.catch(() => {}); throw error; }
+			});
+			continue;
+		}
 		return hydrateLifecycle(observed.entropy, observed.player);
 	}
 }
@@ -975,7 +1002,7 @@ function sameTagGameScope(scope: TagGameRunScope | undefined, expected: PersonaS
 }
 
 /** A reservation prevents joining a second game but deliberately does not block clear or upgrades. */
-export async function reserveTagGameParticipation(expected: PersonaSnapshot, gameId: string): Promise<boolean> {
+export async function reserveTagGameParticipation(expected: PersonaSnapshot, gameId: string, provisional = false): Promise<boolean> {
 	if (!gameId || gameId.length > 160) return false;
 	return withLifecycle(async (db) => {
 		const tx = db.transaction(PLAYER_LIFECYCLE_STORE_NAME, 'readwrite');
@@ -984,8 +1011,23 @@ export async function reserveTagGameParticipation(expected: PersonaSnapshot, gam
 			const current = await store.get(PLAYER_STATE);
 			if (!isValidPlayerLifecycle(current) || current.mode.kind !== 'running' || !sameRealtimeRunScope(expected, current.mode.activeRun)) { await tx.done; return false; }
 			if (current.tagGame?.lock || current.tagGame?.reservation && !sameTagGameScope(current.tagGame.reservation, expected, gameId)) { await tx.done; return false; }
-			const scope = { gameId, identity: expected.activeRun.identity, runNumber: expected.activeRun.runNumber };
+			const scope = { gameId, identity: expected.activeRun.identity, runNumber: expected.activeRun.runNumber, ...(provisional ? { expiresAtMs: Date.now() + 30_000 } : {}) };
 			await store.put({ ...current, tagGame: { ...current.tagGame, reservation: scope } }, PLAYER_STATE);
+			await tx.done;
+			return true;
+		} catch (error) { try { tx.abort(); } catch { /* already aborted */ } await tx.done.catch(() => {}); throw error; }
+	});
+}
+
+export async function confirmTagGameParticipation(expected: PersonaSnapshot, gameId: string): Promise<boolean> {
+	return withLifecycle(async (db) => {
+		const tx = db.transaction(PLAYER_LIFECYCLE_STORE_NAME, 'readwrite');
+		try {
+			const store = tx.objectStore(PLAYER_LIFECYCLE_STORE_NAME);
+			const current = await store.get(PLAYER_STATE);
+			if (!isValidPlayerLifecycle(current) || !sameTagGameScope(current.tagGame?.reservation, expected, gameId)) { await tx.done; return false; }
+			const { expiresAtMs: _expiresAtMs, ...reservation } = current.tagGame!.reservation!;
+			await store.put({ ...current, tagGame: { ...current.tagGame, reservation } }, PLAYER_STATE);
 			await tx.done;
 			return true;
 		} catch (error) { try { tx.abort(); } catch { /* already aborted */ } await tx.done.catch(() => {}); throw error; }
@@ -1027,36 +1069,56 @@ export async function activateTagGameRun(expected: PersonaSnapshot, gameId: stri
 }
 
 /** Applies only validated cumulative values; release and final receipt move in the same transaction. */
-export async function applyTagGameCumulative(expected: PersonaSnapshot, gameId: string, points: number, lifespanLossMs: number, final: boolean): Promise<RealtimeSettlementResult> {
-	if (!Number.isSafeInteger(points) || points < 0 || points > 9_000 || !Number.isSafeInteger(lifespanLossMs) || lifespanLossMs < 0 || lifespanLossMs > 648_000_000) return { kind: 'stale' };
-	return withLifecycle(async (db) => {
-		const tx = db.transaction(PLAYER_LIFECYCLE_STORE_NAME, 'readwrite');
-		try {
-			const store = tx.objectStore(PLAYER_LIFECYCLE_STORE_NAME);
-			const current = await store.get(PLAYER_STATE);
-			if (!isValidPlayerLifecycle(current) || current.mode.kind !== 'running' || !sameRealtimeRunScope(expected, current.mode.activeRun)) { await tx.done; return { kind: 'stale' }; }
-			const lock = current.tagGame?.lock;
-			if (!lock || !sameTagGameScope(lock, expected, gameId) || points < lock.points || lifespanLossMs < lock.lifespanLossMs) { await tx.done; return { kind: 'stale' }; }
-			const pointDelta = points - lock.points;
-			const lossDelta = lifespanLossMs - lock.lifespanLossMs;
-			const activeRun = current.mode.activeRun;
-			if (activeRun.gameState.points > Number.MAX_SAFE_INTEGER - pointDelta) { await tx.done; return { kind: 'stale' }; }
-			const gameState = {
-				...activeRun.gameState,
-				points: activeRun.gameState.points + pointDelta,
-				lifespanExpiresAtMs: activeRun.gameState.lifespanExpiresAtMs - lossDelta
-			};
-			const { reservation: _reservation, lock: _lock, ...rest } = current.tagGame ?? {};
-			const tagGame = final ? (Object.keys(rest).length ? rest : undefined) : {
-				...current.tagGame,
-				lock: { ...lock, phase: 'settling' as const, points, lifespanLossMs }
-			};
-			await store.put({ ...current, mode: { kind: 'running', activeRun: { ...activeRun, revision: activeRun.revision + 1, gameState } }, tagGame }, PLAYER_STATE);
-			await tx.done;
-			const latest = await loadOrCreateLifecycle();
-			return latest.kind === 'restored' ? { kind: 'applied', persona: latest.persona } : { kind: 'stale' };
-		} catch (error) { try { tx.abort(); } catch { /* already aborted */ } await tx.done.catch(() => {}); throw error; }
-	});
+export async function applyTagGameCumulative(expected: PersonaSnapshot, gameId: string, points: number, lifespanLossMs: number, final: boolean,
+	prepareTerminalExit?: () => TerminalExitJournalRequest | undefined): Promise<RealtimeSettlementResult> {
+	if (!Number.isSafeInteger(points) || points < 0 || points > TAG_GAME_MAX_POINTS || !Number.isSafeInteger(lifespanLossMs) || lifespanLossMs < 0 || lifespanLossMs > TAG_GAME_MAX_LIFESPAN_LOSS_MS) return { kind: 'stale' };
+	const observed = await withLifecycle((db) => readRootAndPlayer(db));
+	if (!observed || isCorruptLifecycle(observed) || ('kind' in observed && observed.kind === 'legacy-player-reset')) return !observed ? { kind: 'corrupt', reason: 'partial-state' } : isCorruptLifecycle(observed) ? observed : { kind: 'corrupt', reason: 'partial-state' };
+	try {
+		if (observed.player.mode.kind !== 'running' || !sameRealtimeRunScope(expected, observed.player.mode.activeRun)) return { kind: 'stale' };
+		const selection = await prepareDeathSelection(observed.entropy, observed.player);
+		const mutation = await withLifecycle(async (db): Promise<RealtimeSettlementResult> => {
+			const tx = db.transaction([PLAYER_LIFECYCLE_STORE_NAME, WORLD_WRITE_JOURNAL_STORE_NAME], 'readwrite');
+			try {
+				const store = tx.objectStore(PLAYER_LIFECYCLE_STORE_NAME);
+				const current = await store.get(PLAYER_STATE);
+				if (!isValidPlayerLifecycle(current) || current.mode.kind !== 'running' || !sameRealtimeRunScope(expected, current.mode.activeRun)) { await tx.done; return { kind: 'stale' }; }
+				const lock = current.tagGame?.lock;
+				if (!lock || !sameTagGameScope(lock, expected, gameId) || points < lock.points || lifespanLossMs < lock.lifespanLossMs) { await tx.done; return { kind: 'stale' }; }
+				const pointDelta = points - lock.points;
+				const lossDelta = lifespanLossMs - lock.lifespanLossMs;
+				const activeRun = current.mode.activeRun;
+				if (activeRun.gameState.points > Number.MAX_SAFE_INTEGER - pointDelta) { await tx.done; return { kind: 'stale' }; }
+				const nowMs = Date.now();
+				const effectiveExpiry = projectMending(activeRun.gameState, nowMs, activeRun.rootBuild).effectiveExpiresAtMs;
+				const reducedExpiry = effectiveExpiry - lossDelta;
+				if (!Number.isSafeInteger(reducedExpiry)) { await tx.done; return { kind: 'stale' }; }
+				const receipt = { ...scopedRealtimeLedger(current, activeRun), pendingInstanceIds: [], tagGameReceipt: { gameId, points, lifespanLossMs } };
+				if (nowMs >= reducedExpiry) {
+					const identity = current.identities.find((item) => sameIdentityReference(item, activeRun.identity));
+					if (!identity) { await tx.done; return { kind: 'corrupt', reason: 'identity-reference' }; }
+					const closedIdentity: IdentityRecord = { ...identity, status: 'dead', runHistory: [...identity.runHistory, { runNumber: activeRun.runNumber, startedAtMs: activeRun.startedAtMs, endedAtMs: nowMs, outcome: 'dead' }] };
+					const exitRequest = prepareTerminalExit?.();
+					const exit = await commitTerminalFence(tx.objectStore(WORLD_WRITE_JOURNAL_STORE_NAME), activeRun, exitRequest);
+					await store.put({ schemaVersion: PLAYER_SCHEMA_VERSION, rootPoints: current.rootPoints,
+						identities: current.identities.map((item) => item === identity ? closedIdentity : item),
+						mode: { kind: 'selecting', pendingSelection: selection }, realtimeSettlementLedger: receipt }, PLAYER_STATE);
+					await tx.done;
+					return { kind: 'transitioned', ...(exit ? { exit } : {}) };
+				}
+				const checkpoint = activeRun.gameState.mendingJob ? settleMending(activeRun.gameState, nowMs, activeRun.rootBuild, false) : null;
+				const gameState: PersonaGameState = { ...activeRun.gameState, ...(checkpoint ?? {}), points: activeRun.gameState.points + pointDelta, lifespanExpiresAtMs: reducedExpiry };
+				const { reservation: _reservation, lock: _lock, ...rest } = current.tagGame ?? {};
+				const tagGame = final ? (Object.keys(rest).length ? rest : undefined) : { ...current.tagGame, lock: { ...lock, phase: 'settling' as const, points, lifespanLossMs } };
+				await store.put({ ...current, mode: { kind: 'running', activeRun: { ...activeRun, revision: activeRun.revision + 1, gameState } }, tagGame, realtimeSettlementLedger: receipt }, PLAYER_STATE);
+				await tx.done;
+				return { kind: 'applied', persona: expected };
+			} catch (error) { try { tx.abort(); } catch { /* already aborted */ } await tx.done.catch(() => {}); throw error; }
+		});
+		if (mutation.kind !== 'applied') return mutation;
+		const latest = await loadOrCreateLifecycle();
+		return latest.kind === 'restored' ? { kind: 'applied', persona: latest.persona } : { kind: 'stale' };
+	} finally { observed.entropy.fill(0); }
 }
 
 function sameRealtimeRunScope(expected: PersonaSnapshot, activeRun: ActiveRun): boolean {

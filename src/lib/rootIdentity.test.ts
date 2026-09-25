@@ -27,6 +27,7 @@ import {
 	startMending,
 	trackRealtimeEventInstance,
 	reserveTagGameParticipation,
+	confirmTagGameParticipation,
 	transitionRealtimeDeath,
 	transitionExpiredPersona,
 	upgradePersonaAbility,
@@ -133,6 +134,33 @@ describe('Root / Identity / Run lifecycle', () => {
 		expect((await upgradePersonaAbility(recovered, 'inferenceEfficiency')).kind).toBe('upgraded');
 	});
 
+	it('settles against effective work lifespan and atomically records a tag-game death with its exit receipt', async () => {
+		const working = await selected(ZERO_BUILD, { initialLifespanMs: 2 * DAY });
+		const started = await startMending(working);
+		if (started.kind !== 'started') throw new Error('Expected mending to start.');
+		const gameId = `game-${'e'.repeat(64)}`;
+		expect(await reserveTagGameParticipation(started.persona, gameId)).toBe(true);
+		expect(await activateTagGameRun(started.persona, gameId, TIME, TIME + 180_000, TIME + 210_000)).toBe(true);
+		vi.spyOn(Date, 'now').mockReturnValue(TIME + 60_000);
+		const projection = projectMending(started.persona.gameState, TIME + 60_000, started.persona.activeRun.rootBuild);
+		const survived = await applyTagGameCumulative(started.persona, gameId, 0, 60_000, false);
+		expect(survived.kind).toBe('applied');
+		const afterWorkLoss = restored(await loadOrCreateLifecycle());
+		expect(afterWorkLoss.gameState.lifespanExpiresAtMs).toBe(projection.effectiveExpiresAtMs - 60_000);
+
+		const deathGameId = gameId;
+		const exit = { channelId: 'a'.repeat(64), position: { x: 4, y: 2 }, lastPositiveCreatedAt: Math.floor(TIME / 1000) };
+		const death = await applyTagGameCumulative(afterWorkLoss, deathGameId, 4_500, 324_000_000, true, () => exit);
+		expect(death.kind).toBe('transitioned');
+		const pending = await loadOrCreateLifecycle();
+		if (pending.kind !== 'selecting') throw new Error('Expected next-generation selection after tag-game death.');
+		const player = (await records(PLAYER_LIFECYCLE_STORE_NAME))['player-lifecycle'] as { identities: Array<{ pubkey: string; status: string }>; realtimeSettlementLedger: { tagGameReceipt?: { gameId: string; points: number; lifespanLossMs: number }; pendingInstanceIds: string[] } };
+		expect(player.identities.find((identity) => identity.pubkey === working.signer.pubkey)?.status).toBe('dead');
+		expect(player.realtimeSettlementLedger.tagGameReceipt).toEqual({ gameId: deathGameId, points: 4_500, lifespanLossMs: 324_000_000 });
+		expect(player.realtimeSettlementLedger.pendingInstanceIds).toEqual([]);
+		expect(Object.values(await records(WORLD_WRITE_JOURNAL_STORE_NAME))[0]).toMatchObject({ exitSecond: expect.any(Number) });
+	});
+
 	it('serializes Run close against game start so an old Run cannot enter after clear', async () => {
 		const persona = await selected(ZERO_BUILD, { initialPoints: 200_000 });
 		const gameId = `game-${'c'.repeat(64)}`;
@@ -146,6 +174,19 @@ describe('Root / Identity / Run lifecycle', () => {
 			expect(clearing).toEqual({ kind: 'blocked', reason: 'tag-game' });
 			expect(activation).toBe(true);
 		}
+	});
+
+	it('expires an unaccepted join reservation after reload but retains a reservation confirmed by the organizer', async () => {
+		const persona = await selected();
+		const gameId = `game-${'9'.repeat(64)}`;
+		expect(await reserveTagGameParticipation(persona, gameId, true)).toBe(true);
+		vi.spyOn(Date, 'now').mockReturnValue(TIME + 30_001);
+		expect((await loadOrCreateLifecycle()).kind).toBe('restored');
+		expect(await reserveTagGameParticipation(persona, gameId, true)).toBe(true);
+		expect(await confirmTagGameParticipation(persona, gameId)).toBe(true);
+		vi.spyOn(Date, 'now').mockReturnValue(TIME + 60_000);
+		expect((await loadOrCreateLifecycle()).kind).toBe('restored');
+		expect(await reserveTagGameParticipation(restored(await loadOrCreateLifecycle()), `${gameId}-other`)).toBe(false);
 	});
 
 	it('preserves a valid v7 Root and active Player while adding the write journal', async () => {

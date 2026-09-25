@@ -10,8 +10,9 @@ export const TAG_GAME_LOBBY_RENEW_MS = 30_000;
 export const TAG_GAME_LOBBY_MAX_AGE_SECONDS = 90;
 export const TAG_GAME_RESPONSE_TIMEOUT_MS = 5_000;
 export const TAG_GAME_NO_ACTIVITY_MS = 10_000;
-export const TAG_GAME_MAX_POINTS = 9_000;
-export const TAG_GAME_MAX_LIFESPAN_LOSS_MS = 648_000_000;
+export const TAG_GAME_MAX_POINTS = 4_500;
+export const TAG_GAME_MAX_LIFESPAN_LOSS_MS = 324_000_000;
+export const TAG_GAME_MAX_EFFECT_MS = 90_000;
 export const TAG_GAME_BENEFIT_POINTS_PER_SECOND = 50;
 export const TAG_GAME_LIFESPAN_LOSS_MS_PER_SECOND = 3_600_000;
 
@@ -139,8 +140,8 @@ export function isValidTagGameState(value: unknown): value is TagGameState {
 			!['registered', 'active', 'left', 'temporarily-ineligible', 'dead', 'cleared'].includes(player.status) ||
 			!Number.isSafeInteger(player.points) || player.points < 0 || player.points > TAG_GAME_MAX_POINTS ||
 			!Number.isSafeInteger(player.lifespanLossMs) || player.lifespanLossMs < 0 || player.lifespanLossMs > TAG_GAME_MAX_LIFESPAN_LOSS_MS ||
-			!Number.isSafeInteger(player.benefitMs) || player.benefitMs < 0 || player.benefitMs > TAG_GAME_GAME_MS ||
-			!Number.isSafeInteger(player.calamityMs) || player.calamityMs < 0 || player.calamityMs > TAG_GAME_GAME_MS ||
+			!Number.isSafeInteger(player.benefitMs) || player.benefitMs < 0 || player.benefitMs > TAG_GAME_MAX_EFFECT_MS ||
+			!Number.isSafeInteger(player.calamityMs) || player.calamityMs < 0 || player.calamityMs > TAG_GAME_MAX_EFFECT_MS ||
 			player.benefitMs + player.calamityMs > TAG_GAME_GAME_MS) return false;
 		participants.add(player.pubkey);
 	}
