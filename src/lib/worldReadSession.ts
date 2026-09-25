@@ -1240,19 +1240,8 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		void startTraceConversationWork(generation, root, config);
 	}
 
-	function activateDeathTraceConversation(root: ParsedWorldMessage, config: TraceConversationConfig): void {
-		const generation = ++traceConversationGeneration;
-		emitTraceConversationState(traceStateFor(root, config, [], 'settled'));
-		reconfigureTraceBackground(generation, () =>
-			traceConversationState.kind === 'open' &&
-			traceConversationState.root.id === root.id &&
-			traceConversationState.root.source === 'death'
-		);
-	}
-
 	function activateTraceRootConversation(root: ParsedWorldMessage, config: TraceConversationConfig): void {
-		if (root.source === 'death') activateDeathTraceConversation(root, config);
-		else activateTraceConversation(root, config);
+		activateTraceConversation(root, config);
 	}
 
 	function openTraceConversation(config: TraceConversationConfig): TraceConversationOpenResult {
@@ -1289,7 +1278,6 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		const pendingTraceInspection = pendingSelfOperation?.operation === 'trace-inspection';
 		if (pendingTraceReply || (pendingSelfOperation && !pendingTraceInspection)) return { kind: 'pending' };
 		const current = traceConversationState;
-		if (current.root.source === 'death') return targetId === current.root.id ? { kind: 'opened' } : { kind: 'blocked' };
 		const projection = resolveTraceConversationProjection(current);
 		const target = projection ? projection.current.event.id === targetId
 			? projection.current : adjacentTraceSpeech(projection, targetId) : null;
@@ -1397,7 +1385,6 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		if (pendingSelfOperation || pendingSelfMessage || pendingTraceReply) return { kind: 'pending' };
 		const accepted = resolveReplyTarget(input.rootId, input.targetId);
 		if (!accepted) return { kind: 'blocked' };
-		if (accepted.root.source === 'death') return { kind: 'blocked' };
 		const operation = { eventId: null as string | null };
 		pendingTraceReply = operation;
 		try {

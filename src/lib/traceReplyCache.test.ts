@@ -6,9 +6,11 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import {
 	buildTraceReplyTemplate,
 	buildTraceDirectReplyFilter,
+	buildDeathTraceEventTemplate,
 	buildWorldMessageTemplate,
 	finalizeWorldEvent,
 	parseTraceReplyCandidate,
+	parseTraceEvent,
 	parseWorldMessage,
 	validateTraceReplyCandidate,
 	type ChannelReference,
@@ -47,6 +49,15 @@ function makeRoot(channelId: string, content: string, createdAt = 100, position 
 		if (parsed) return { raw, parsed };
 	}
 	throw new Error('Could not create a trace root fixture.');
+}
+
+function makeDeathRoot(channelId: string, content: string, createdAt = 100, position = { x: 0, y: 0 }): RootFixture {
+	const raw = finalizeWorldEvent(buildDeathTraceEventTemplate({
+		channel: channel(channelId), content, createdAt, position
+	}), SECRET_KEY);
+	const parsed = parseTraceEvent(raw, channelId);
+	if (!parsed || parsed.source !== 'death') throw new Error('Could not create a death Trace root fixture.');
+	return { raw, parsed };
 }
 
 function makeReply(
@@ -134,6 +145,24 @@ afterEach(() => {
 });
 
 describe('trace reply cache reconciliation', () => {
+	it('validates cached reply trees and Composer previews against death Last Words roots', async () => {
+		const root = makeDeathRoot(CHANNEL_ID, 'Last Words root');
+		const direct = makeReply(root.parsed, root.parsed, 'direct Last Words reply', 101);
+		const nested = makeReply(root.parsed, direct.parsed, 'nested Last Words reply', 102);
+		await reconcileTraceRootCache({ channelId: CHANNEL_ID, field: { columns: 20, rows: 1 }, rawEvents: [root.raw] });
+		const replies = await reconcileTraceReplyCache({
+			channelId: CHANNEL_ID, effectiveRoots: [root.parsed], rawEvents: [nested.raw, direct.raw]
+		});
+		expect(replies.map((reply) => reply.id)).toEqual([direct.parsed.id, nested.parsed.id]);
+		expect(await touchTraceReplyTree({ channelId: CHANNEL_ID, rootId: root.parsed.id })).toBe(true);
+		expect(await loadTracePreviewEvent({
+			channelId: CHANNEL_ID, root: root.parsed, target: root.parsed, parent: root.parsed
+		})).toEqual(root.raw);
+		expect(await loadTracePreviewEvent({
+			channelId: CHANNEL_ID, root: root.parsed, target: nested.parsed, parent: direct.parsed
+		})).toEqual(nested.raw);
+	});
+
 	it('rejects a signed wrong-root candidate matching the direct query even when both roots are effective', async () => {
 		const root = capRoot;
 		const otherRoot = makeRoot(CHANNEL_ID, 'other-effective-root', 100, { x: 1, y: 0 });

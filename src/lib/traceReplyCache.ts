@@ -1,5 +1,5 @@
 import type { Event } from 'nostr-tools/pure';
-import { parseWorldMessage, parseTraceReplyCandidate, validateTraceReplyCandidate, type ParsedTraceReply, type ParsedWorldMessage } from './nostrProtocol';
+import { parseWorldMessage, parseTraceEvent, parseTraceReplyCandidate, validateTraceReplyCandidate, type ParsedTraceReply, type ParsedWorldMessage } from './nostrProtocol';
 import {
 	openTraceDatabase,
 	TRACE_DATABASE_STORES,
@@ -54,7 +54,7 @@ export async function loadTracePreviewEvent(input: Readonly<{
 		if (isReply && (!('rootId' in record) || record.rootId !== input.root.id)) return null;
 		const candidate = isReply ? parseTraceReplyCandidate(raw) : null;
 		const parsed = isReply ? candidate && validateTraceReplyCandidate(candidate, input.root, input.parent)
-			: parseWorldMessage(raw, input.channelId);
+			: parseWorldMessage(raw, input.channelId) ?? parseTraceEvent(raw, input.channelId);
 		return parsed?.id === input.target.id && parsed.pubkey === input.target.pubkey ? raw : null;
 	} catch {
 		return null;
@@ -106,7 +106,7 @@ function parsePersistedRoot(record: unknown, key: IDBValidKey): RootAuthority | 
 	const value = recordObject(record);
 	if (!value || value.channelId !== key[0] || value.eventId !== key[1] || value.rawEvent === undefined) return null;
 	try {
-		const root = parseWorldMessage(value.rawEvent as Event, key[0]);
+		const root = parseWorldMessage(value.rawEvent as Event, key[0]) ?? parseTraceEvent(value.rawEvent as Event, key[0]);
 		return root && root.id === key[1] ? { channelId: key[0], root } : null;
 	} catch {
 		return null;

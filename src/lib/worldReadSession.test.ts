@@ -610,25 +610,53 @@ describe('world read session', () => {
 		expect(publish.mock.calls.map(([event]) => event.kind)).toEqual([WORLD_STATE_KIND]);
 	});
 
-	it('rejects kind 1111 publication to a death root at the session domain boundary', async () => {
-		const root = deathRoot();
+	it('uses the normal reply subscription and publishes kind 1111 replies to death roots', async () => {
+		const root = deathRoot('d'.repeat(64));
 		mocked.reconcileTraceRootCache.mockResolvedValue([root]);
 		result = startResult([], [position('self-position', 700, selfPubkey, 0, { x: 1, y: 1 })]);
 		publish.mockResolvedValue([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
+		const configureTraceReplies = vi.fn().mockResolvedValue({
+			status: 'active', initialBatch: { events: [], relays: [] }
+		});
+		const startRealtime = vi.fn().mockResolvedValue({ status: 'active', events: [], relays: [] });
+		const stopRealtime = vi.fn();
+		mocked.createTransport.mockReturnValue({
+			start: vi.fn(async (nextInput) => { input = nextInput; return result; }),
+			bootstrapTraceRootCandidates: traceBootstrap(), configureTraceReplies, startRealtime, stopRealtime, dispose, publish
+		});
 		const session = createWorldReadSession({
 			field: { columns: 4, rows: 3 }, selfSigner: selfSigner(),
-			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn()
+			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn(),
+			realtime: {
+				registry: [{ eventType: 'fixture', protocolVersion: 1, protocolKey: protocolKeyFor('fixture', 1), parseAction: () => ({}) }],
+				controlSince: 0,
+				instanceFilters: [{ protocolKey: protocolKeyFor('fixture', 1), instanceIds: ['fixture-instance'], since: 0 }],
+				startImmediately: false,
+				onEvent: vi.fn()
+			}
 		});
-		await session.start(); session.completeBootstrap(); await vi.waitFor(() => expect(mocked.reconcileTraceRootCache).toHaveBeenCalled());
+		await session.start(); session.completeBootstrap(); await session.startRealtime();
+		await vi.waitFor(() => expect(mocked.reconcileTraceRootCache).toHaveBeenCalled());
 		await session.enterSelf();
 		vi.setSystemTime(701_000);
 		expect(session.openTraceConversation({ rootId: root.id, currentId: root.id })).toEqual({ kind: 'opened' });
-		await vi.waitFor(() => expect(publish).toHaveBeenCalledTimes(1));
-		const publicationCountBeforeReply = publish.mock.calls.length;
-		await expect(session.publishTraceReply({ rootId: root.id, targetId: root.id, content: 'no reply', speechType: 'normal' }))
-			.resolves.toEqual({ kind: 'blocked' });
-		expect(publish).toHaveBeenCalledTimes(publicationCountBeforeReply);
-		expect(publish.mock.calls.map(([event]) => event.kind)).not.toContain(1111);
+		await vi.waitFor(() => expect(configureTraceReplies).toHaveBeenCalledTimes(1));
+		expect(configureTraceReplies.mock.calls[0][0].conversation).toEqual({ rootId: root.id, currentId: root.id });
+		await vi.waitFor(() => expect(session.getTraceConversationState()).toMatchObject({ replyRefresh: 'settled' }));
+		expect(stopRealtime).toHaveBeenCalledOnce();
+		await vi.waitFor(() => expect(startRealtime).toHaveBeenCalledTimes(2));
+		const replyResult = await session.publishTraceReply({ rootId: root.id, targetId: root.id, content: 'reply to Last Words', speechType: 'normal' });
+		expect(replyResult.kind).toBe('succeeded');
+		const reply = publish.mock.calls.map(([event]) => event).find((event) => event.kind === 1111);
+		expect(reply).toBeDefined();
+		expect(reply?.tags).toEqual(expect.arrayContaining([
+			['E', root.id, '', root.pubkey], ['K', '42'], ['P', root.pubkey],
+			['e', root.id, '', root.pubkey], ['k', '42'], ['p', root.pubkey]
+		]));
+		session.closeTraceConversation();
+		await vi.waitFor(() => expect(configureTraceReplies).toHaveBeenCalledTimes(2));
+		expect(configureTraceReplies.mock.calls[1][0]).not.toHaveProperty('conversation');
+		await vi.waitFor(() => expect(startRealtime).toHaveBeenCalledTimes(3));
 	});
 
 	it('uses latest positive message activity when preparing an exit after clock regression', async () => {
@@ -2163,7 +2191,7 @@ describe('world read session', () => {
 		expect(session.getTraceConversationState()).toEqual(beforeBlockedSelection);
 	});
 
-	it('reconciles an open root to a death root without starting its reply conversation', async () => {
+	it('reconciles an open root to a death root and starts the same reply conversation', async () => {
 		const newest = { ...deathRoot('newest-death-root'), createdAt: 701, pubkey: 'b'.repeat(64), position: { x: 1, y: 1 } };
 		const older = { ...message('older-root', 700), pubkey: 'c'.repeat(64), position: { x: 1, y: 1 } };
 		mocked.reconcileTraceRootCache.mockResolvedValue([older]);
@@ -2198,9 +2226,7 @@ describe('world read session', () => {
 		expect(session.getTraceConversationState()).toEqual(expect.objectContaining({ replyRefresh: 'settled', replies: [] }));
 		expect(publish).not.toHaveBeenCalled();
 		await vi.waitFor(() => expect(configureTraceReplies).toHaveBeenCalledTimes(2));
-		expect(configureTraceReplies.mock.calls[1][0]).not.toHaveProperty('conversation');
-		expect(configureTraceReplies.mock.calls[1][0]).not.toHaveProperty('rootId');
-		expect(configureTraceReplies.mock.calls[1][0]).not.toHaveProperty('currentId');
+		expect(configureTraceReplies.mock.calls[1][0].conversation).toEqual({ rootId: newest.id, currentId: newest.id });
 		session.closeTraceConversation();
 		await vi.waitFor(() => expect(configureTraceReplies).toHaveBeenCalledTimes(3));
 		expect(configureTraceReplies.mock.calls[2][0]).not.toHaveProperty('conversation');
@@ -2212,9 +2238,10 @@ describe('world read session', () => {
 		mocked.reconcileTraceRootCache.mockResolvedValue([normal]);
 		result = startResult([], [position('self-position', 700, selfPubkey, 0, { x: 1, y: 1 })]);
 		const oldConversation = deferred<TraceReplyConfigurationResult>();
-		const deathConfiguration = deferred<TraceReplyConfigurationResult>();
 		const configureTraceReplies = vi.fn((configuration: TraceReplyConfiguration) =>
-			configuration.conversation ? oldConversation.promise : deathConfiguration.promise
+			configuration.conversation?.rootId === normal.id
+				? oldConversation.promise
+				: Promise.resolve({ status: 'active' as const, initialBatch: { events: [], relays: [] } })
 		);
 		const startRealtime = vi.fn().mockResolvedValue({ status: 'active', events: [], relays: [] });
 		const stopRealtime = vi.fn();
@@ -2253,15 +2280,14 @@ describe('world read session', () => {
 			root: death, replyRefresh: 'settled', replies: []
 		})));
 		await vi.waitFor(() => expect(configureTraceReplies).toHaveBeenCalledTimes(2));
-		expect(configureTraceReplies.mock.calls[1][0]).not.toHaveProperty('conversation');
+		expect(configureTraceReplies.mock.calls[1][0].conversation).toEqual({ rootId: death.id, currentId: death.id });
 		expect(configureTraceReplies.mock.calls.map(([configuration]) => configuration.conversation?.rootId))
-			.toEqual([normal.id, undefined]);
+			.toEqual([normal.id, death.id]);
 
 		oldConversation.resolve({ status: 'superseded', generation: 1 });
 		await Promise.resolve();
-		expect(startRealtime).toHaveBeenCalledOnce();
-		deathConfiguration.resolve({ status: 'active', generation: 2, initialBatch: { events: [], relays: [] } });
-		await vi.waitFor(() => expect(startRealtime).toHaveBeenCalledTimes(2));
+		expect(startRealtime).toHaveBeenCalledTimes(2);
+		await vi.waitFor(() => expect(session.getTraceConversationState()).toEqual(expect.objectContaining({ root: death, replyRefresh: 'settled' })));
 		expect(session.getTraceConversationState()).toEqual(expect.objectContaining({ root: death, replyRefresh: 'settled', replies: [] }));
 	});
 });
