@@ -81,6 +81,7 @@ async function installScheduledParticipant(page: Page, options: {
 	muted?: boolean;
 	playbackFails?: boolean;
 	persistAcrossReload?: boolean;
+	deferRealtimeEvents?: boolean;
 }): Promise<void> {
 	const startTime = options.schedule.registrationAtMs + 1_000;
 	const joinEvents = options.joins.map(({ secret, groupId, createdAtMs }) => signedCooperationDefectionAction(secret,
@@ -91,6 +92,7 @@ async function installScheduledParticipant(page: Page, options: {
 	await installDelayedRelay(page, {
 		primaryEvents: testEvents(startTime),
 		realtimeEvents: joinEvents,
+		deferRealtimeEvents: options.deferRealtimeEvents,
 		persistAcrossReload: options.persistAcrossReload,
 		realtimePublishOutcome: 'accepted'
 	});
@@ -103,7 +105,7 @@ async function installScheduledParticipant(page: Page, options: {
 	await expect(page.locator('[data-realtime-panel]')).toContainText('参加受付');
 	await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
 		(request.filter.kinds as number[]).includes(7070))).toBe(true);
-	await expect(page.locator('[data-realtime-panel]')).toHaveAttribute('data-realtime-status', 'active');
+	await expect(page.locator('[data-realtime-panel]')).toHaveAttribute('data-realtime-status', options.deferRealtimeEvents ? 'degraded' : 'active');
 }
 
 async function awaitScheduledGameStart(page: Page, schedule: CooperationDefectionSchedule): Promise<void> {
@@ -188,6 +190,32 @@ test.describe('Cooperation and Defection start sound', () => {
 		await page.clock.runFor(500);
 		await expect(page.locator('[data-cooperation-defection-round-progress]')).toContainText('ラウンド 1 · 相談');
 		await expect(page.locator('[data-realtime-panel]')).toContainText('参加中（3人）');
+		await expect.poll(() => recordedCooperationStartSounds(page)).toHaveLength(1);
+	});
+
+	test('plays once when the participant snapshot is confirmed during the first consultation phase', async ({ page }) => {
+		const schedule = upcomingRegistrationSchedule();
+		const group = deriveCooperationDefectionGroupPositions(schedule.instanceId, COOPERATION_FIELD_SIZE)[0];
+		if (!group) throw new Error('Expected a scheduled event group.');
+		const selfSecret = fixtureSecret(19);
+		const joins = [19, 20, 21].map((label, index) => signedCooperationDefectionAction(fixtureSecret(label), schedule,
+			{ action: 'join', groupId: group.id }, schedule.registrationAtMs + 1_000 + index));
+		await installScheduledParticipant(page, { schedule, selfSecret, joins: [], deferRealtimeEvents: true });
+		await page.evaluate((events) => {
+			const relay = (window as typeof window & { __relayStartupTest: { injectRealtimeEvent(event: object): void } }).__relayStartupTest;
+			for (const event of events) relay.injectRealtimeEvent(event);
+		}, joins);
+		await expect(page.locator('[data-realtime-group-trigger][aria-pressed="true"]')).toHaveCount(1);
+		await unlockSoundFromTheUI(page);
+		await awaitScheduledGameStart(page, schedule);
+		await expect(page.locator('[data-realtime-panel]')).toContainText('ゲーム中');
+		await expect.poll(() => recordedCooperationStartSounds(page)).toHaveLength(0);
+
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseRealtimeEvents(): void } }).__relayStartupTest.releaseRealtimeEvents());
+		await expect(page.locator('[data-cooperation-defection-round-progress]')).toContainText('ラウンド 1 · 相談');
+		await expect(page.locator('[data-realtime-panel]')).toContainText('参加中（3人）');
+		await expect.poll(() => recordedCooperationStartSounds(page)).toHaveLength(1);
+		await page.clock.runFor(2_000);
 		await expect.poll(() => recordedCooperationStartSounds(page)).toHaveLength(1);
 	});
 

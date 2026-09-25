@@ -283,6 +283,32 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.locator('[data-realtime-group-trigger]')).toHaveCount(0);
 	});
 
+	test('uses 14pt for desktop registration deadline and expanded rules while preserving mobile sizing', async ({ page }) => {
+		await page.setViewportSize({ width: 1440, height: 900 });
+		await page.goto('/?devWorld=1&devScenario=cooperation-defection-registration');
+		const deadline = page.locator('[data-cooperation-defection-registration-deadline]');
+		const countdown = page.locator('[data-cooperation-defection-registration-countdown]');
+		await expect(deadline).toBeVisible();
+		const desktopFonts = await Promise.all([deadline, countdown].map((element) => element.evaluate((node) => parseFloat(getComputedStyle(node).fontSize))));
+		expect(desktopFonts.every((fontSize) => Math.abs(fontSize - 14 * 96 / 72) < 0.1)).toBe(true);
+		await page.getByText('ルールを見る', { exact: true }).click();
+		const rulesText = page.locator('.cooperation-defection-rules-inline p').first();
+		const rulesFont = await rulesText.evaluate((node) => parseFloat(getComputedStyle(node).fontSize));
+		expect(Math.abs(rulesFont - 14 * 96 / 72)).toBeLessThan(0.1);
+		const panelBounds = await page.locator('[data-realtime-panel]').boundingBox();
+		expect(panelBounds).not.toBeNull();
+		expect(panelBounds!.x + panelBounds!.width).toBeLessThanOrEqual(1440);
+
+		await page.setViewportSize({ width: 390, height: 844 });
+		await expect(deadline).toBeVisible();
+		const mobileFonts = await Promise.all([deadline, countdown, rulesText].map((element) => element.evaluate((node) => parseFloat(getComputedStyle(node).fontSize))));
+		expect(mobileFonts.every((fontSize) => fontSize < 14 * 96 / 72)).toBe(true);
+		const mobileBounds = await page.locator('[data-realtime-panel]').boundingBox();
+		expect(mobileBounds).not.toBeNull();
+		expect(mobileBounds!.x).toBeGreaterThanOrEqual(0);
+		expect(mobileBounds!.x + mobileBounds!.width).toBeLessThanOrEqual(390);
+	});
+
 	test('does not open the mending terminal in DEV World', async ({ page }) => {
 		await openDevWorld(page);
 		await page.getByRole('button', { name: '作業端末' }).click();

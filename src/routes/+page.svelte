@@ -401,6 +401,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	let cooperationDefectionNowMs = $state(initialCooperationDefectionNowMs);
 	let cooperationDefectionStartSoundPreviousSchedule: { instanceId: string; phase: string } | null = null;
 	let cooperationDefectionStartSoundEligibleInstanceId: string | null = null;
+	let cooperationDefectionStartSoundPendingInstanceId: string | null = null;
 	let cooperationDefectionStartSoundPlayedInstanceId: string | null = null;
 	const cooperationDefectionJstDateTimeFormatter = new Intl.DateTimeFormat('ja-JP', {
 		timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
@@ -2061,6 +2062,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		const previousSchedule = cooperationDefectionStartSoundPreviousSchedule;
 		if (previousSchedule && previousSchedule.instanceId !== schedule.instanceId) {
 			cooperationDefectionStartSoundEligibleInstanceId = null;
+			cooperationDefectionStartSoundPendingInstanceId = null;
 			cooperationDefectionStartSoundPlayedInstanceId = null;
 		}
 		const actorPubkey = cooperationDefectionActorPubkey;
@@ -2069,6 +2071,9 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			: null;
 		if (schedule.phase === 'registration' && selfGroupId) cooperationDefectionStartSoundEligibleInstanceId = schedule.instanceId;
 		const enteredGameFromRegistration = previousSchedule?.instanceId === schedule.instanceId && previousSchedule.phase === 'registration' && schedule.phase === 'game';
+		if (enteredGameFromRegistration && cooperationDefectionStartSoundEligibleInstanceId === schedule.instanceId) {
+			cooperationDefectionStartSoundPendingInstanceId = schedule.instanceId;
+		}
 		cooperationDefectionStartSoundPreviousSchedule = { instanceId: schedule.instanceId, phase: schedule.phase };
 		if (!cooperationDefectionEventEnabled) {
 			cooperationDefectionSession = null;
@@ -2094,15 +2099,26 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		} else if (cooperationDefectionRealtimeBootstrapComplete) {
 			cooperationDefectionSession = settleCooperationDefectionSession(cooperationDefectionSession, cooperationDefectionSchedule, nowMs);
 		}
-		if (enteredGameFromRegistration && cooperationDefectionStartSoundEligibleInstanceId === schedule.instanceId &&
-			cooperationDefectionStartSoundPlayedInstanceId !== schedule.instanceId && !devWorldSandboxEnabled && actorPubkey && selfGroupId && cooperationDefectionRealtimeBootstrapComplete) {
-			const participants = cooperationDefectionSession?.participantSnapshot?.[selfGroupId];
-			const groupWasStarted = participants && participants.length >= COOPERATION_DEFECTION_MIN_PARTICIPANTS &&
-				participants.includes(actorPubkey) && !cooperationDefectionSession?.cancelledGroupIds.includes(selfGroupId);
-			if (groupWasStarted) {
-				cooperationDefectionStartSoundPlayedInstanceId = schedule.instanceId;
-				try { soundController?.play('cooperation-start'); }
-				catch { /* Optional audio must not interrupt event or settlement handling. */ }
+		const firstRound = schedule.phase === 'game' ? getCooperationDefectionRoundSchedule(schedule, 1) : null;
+		const awaitingFirstConsultationSnapshot = firstRound && nowMs < firstRound.selectionAtMs;
+		if (schedule.phase !== 'registration' && !awaitingFirstConsultationSnapshot) {
+			cooperationDefectionStartSoundPendingInstanceId = null;
+			cooperationDefectionStartSoundEligibleInstanceId = null;
+		} else if (cooperationDefectionStartSoundPendingInstanceId === schedule.instanceId &&
+			cooperationDefectionStartSoundEligibleInstanceId === schedule.instanceId && cooperationDefectionStartSoundPlayedInstanceId !== schedule.instanceId &&
+			!devWorldSandboxEnabled && actorPubkey && selfGroupId && cooperationDefectionRealtimeBootstrapComplete) {
+			const snapshot = cooperationDefectionSession?.participantSnapshot;
+			if (snapshot) {
+				const participants = snapshot[selfGroupId];
+				const groupWasStarted = participants && participants.length >= COOPERATION_DEFECTION_MIN_PARTICIPANTS &&
+					participants.includes(actorPubkey) && !cooperationDefectionSession?.cancelledGroupIds.includes(selfGroupId);
+				cooperationDefectionStartSoundPendingInstanceId = null;
+				cooperationDefectionStartSoundEligibleInstanceId = null;
+				if (groupWasStarted) {
+					cooperationDefectionStartSoundPlayedInstanceId = schedule.instanceId;
+					try { soundController?.play('cooperation-start'); }
+					catch { /* Optional audio must not interrupt event or settlement handling. */ }
+				}
 			}
 		}
 		void autoRevealCooperationDefectionChoice(nowMs);

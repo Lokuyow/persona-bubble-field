@@ -273,12 +273,13 @@
 		.cooperation-defection-heading strong { font-size: 12pt; }
 		.cooperation-defection-note, .cooperation-defection-cancelled, .cooperation-defection-result { font-size: 14pt; }
 		.cooperation-defection-result p { font-size: inherit; }
+		.cooperation-defection-registration-deadline, .cooperation-defection-registration-countdown { font-size: 14pt; }
 		.cooperation-defection-details { font-size: 12pt; }
 		.choice-reservation { height: 42px; }
 		.cooperation-defection-choice-controls button { min-height: 40px; font-size: 12pt; }
 		.details-trigger, .result-details header button { font-size: 10pt; }
 		.cooperation-defection-rules-disclosure summary { font-size: 11pt; }
-		.cooperation-defection-rules-inline { font-size: 12pt; }
+		.cooperation-defection-rules-inline, .cooperation-defection-rules-inline p, .cooperation-defection-rules-inline ul { font-size: 14pt; }
 		.result-details h3 { font-size: 16pt; }
 		.result-details-body { font-size: 14pt; }
 	}
