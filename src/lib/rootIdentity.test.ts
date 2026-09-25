@@ -12,6 +12,8 @@ import {
 	WORLD_WRITE_JOURNAL_STORE_NAME,
 	applyRealtimeOutcome,
 	applyRealtimeLifespanLoss,
+	activateTagGameRun,
+	applyTagGameCumulative,
 	completeRealtimeEventInstance,
 	clearPersona,
 	confirmWorldPosition,
@@ -24,6 +26,9 @@ import {
 	selectIdentity,
 	startMending,
 	trackRealtimeEventInstance,
+	reserveTagGameParticipation,
+	confirmTagGameParticipation,
+	beginTagGameReservationRecovery,
 	transitionRealtimeDeath,
 	transitionExpiredPersona,
 	upgradePersonaAbility,
@@ -84,6 +89,147 @@ afterEach(() => {
 });
 
 describe('Root / Identity / Run lifecycle', () => {
+	it('allows clear and ability upgrade during a tag-game reservation, then gates both during the Run lock and settles cumulatively once', async () => {
+		const initial = await selected(ZERO_BUILD, { initialPoints: 200_000 });
+		const gameId = `game-${'a'.repeat(64)}`;
+		expect(await reserveTagGameParticipation(initial, gameId)).toBe(true);
+		const upgraded = await upgradePersonaAbility(initial, 'inferenceEfficiency');
+		expect(upgraded.kind).toBe('upgraded');
+		if (upgraded.kind !== 'upgraded') return;
+		const afterUpgrade = upgraded.persona;
+		expect((await clearPersona(afterUpgrade)).kind).toBe('cleared');
+	});
+
+	it('allows only one simultaneous organizer reservation for the same Run', async () => {
+		const persona = await selected();
+		const [first, second] = await Promise.all([
+			reserveTagGameParticipation(persona, `game-${'a'.repeat(64)}`),
+			reserveTagGameParticipation(persona, `game-${'b'.repeat(64)}`)
+		]);
+		expect([first, second].filter(Boolean)).toHaveLength(1);
+	});
+
+	it('accepts a normal final settlement arriving after 180 seconds, applies its delta atomically, and releases the Run', async () => {
+		const persona = await selected(ZERO_BUILD, { initialPoints: 200_000 });
+		const gameId = `game-${'b'.repeat(64)}`;
+		expect(await reserveTagGameParticipation(persona, gameId)).toBe(true);
+		expect(await activateTagGameRun(persona, gameId, TIME, TIME + 180_000, TIME + 210_000)).toBe(true);
+		expect(await clearPersona(persona)).toEqual({ kind: 'blocked', reason: 'tag-game' });
+		expect((await upgradePersonaAbility(persona, 'inferenceEfficiency')).kind).toBe('blocked');
+		expect(await trackRealtimeEventInstance(persona, 'cooperation-defection:official-instance')).toBe(true);
+		const partial = await applyTagGameCumulative(persona, gameId, 250, HOUR, false);
+		expect(partial.kind).toBe('applied');
+		if (partial.kind !== 'applied') return;
+		expect(partial.persona.gameState.points).toBe(persona.gameState.points + 250);
+		expect(partial.persona.gameState.lifespanExpiresAtMs).toBe(persona.gameState.lifespanExpiresAtMs - HOUR);
+		expect((await getRealtimeSettlementLedger(partial.persona))?.pendingInstanceIds).toEqual(['cooperation-defection:official-instance']);
+		vi.spyOn(Date, 'now').mockReturnValue(TIME + 185_000);
+		const final = await applyTagGameCumulative(persona, gameId, 500, 2 * HOUR, true);
+		expect(final.kind).toBe('applied');
+		if (final.kind !== 'applied') return;
+		expect(final.persona.gameState.points).toBe(persona.gameState.points + 500);
+		expect(final.persona.gameState.lifespanExpiresAtMs).toBe(persona.gameState.lifespanExpiresAtMs - 2 * HOUR);
+		expect((await getRealtimeSettlementLedger(final.persona))?.pendingInstanceIds).toEqual(['cooperation-defection:official-instance']);
+		expect(await completeRealtimeEventInstance(final.persona, 'cooperation-defection:official-instance')).toBe(true);
+		expect((await getRealtimeSettlementLedger(final.persona))?.pendingInstanceIds).toEqual([]);
+		expect((await upgradePersonaAbility(final.persona, 'inferenceEfficiency')).kind).toBe('upgraded');
+	});
+
+	it('releases the last confirmed settlement after the finite final wait when reload cannot fetch a final event', async () => {
+		const persona = await selected();
+		const gameId = `game-${'d'.repeat(64)}`;
+		expect(await reserveTagGameParticipation(persona, gameId)).toBe(true);
+		expect(await activateTagGameRun(persona, gameId, TIME, TIME + 180_000, TIME + 210_000)).toBe(true);
+		const partial = await applyTagGameCumulative(persona, gameId, 300, HOUR, false);
+		expect(partial.kind).toBe('applied');
+		vi.spyOn(Date, 'now').mockReturnValue(TIME + 210_001);
+		const recovered = restored(await loadOrCreateLifecycle());
+		expect(recovered.gameState.points).toBe(persona.gameState.points + 300);
+		expect(recovered.gameState.lifespanExpiresAtMs).toBe(persona.gameState.lifespanExpiresAtMs - HOUR);
+		expect((await upgradePersonaAbility(recovered, 'inferenceEfficiency')).kind).toBe('upgraded');
+	});
+
+	it('settles against effective work lifespan and atomically records a tag-game death with its exit receipt', async () => {
+		const working = await selected(ZERO_BUILD, { initialLifespanMs: 2 * DAY });
+		const started = await startMending(working);
+		if (started.kind !== 'started') throw new Error('Expected mending to start.');
+		const gameId = `game-${'e'.repeat(64)}`;
+		expect(await reserveTagGameParticipation(started.persona, gameId)).toBe(true);
+		expect(await activateTagGameRun(started.persona, gameId, TIME, TIME + 180_000, TIME + 210_000)).toBe(true);
+		vi.spyOn(Date, 'now').mockReturnValue(TIME + 60_000);
+		const projection = projectMending(started.persona.gameState, TIME + 60_000, started.persona.activeRun.rootBuild);
+		const survived = await applyTagGameCumulative(started.persona, gameId, 0, 60_000, false);
+		expect(survived.kind).toBe('applied');
+		const afterWorkLoss = restored(await loadOrCreateLifecycle());
+		expect(afterWorkLoss.gameState.lifespanExpiresAtMs).toBe(projection.effectiveExpiresAtMs - 60_000);
+
+		const deathGameId = gameId;
+		expect(await trackRealtimeEventInstance(afterWorkLoss, 'cooperation-defection:death-instance')).toBe(true);
+		const exit = { channelId: 'a'.repeat(64), position: { x: 4, y: 2 }, lastPositiveCreatedAt: Math.floor(TIME / 1000) };
+		const death = await applyTagGameCumulative(afterWorkLoss, deathGameId, 4_500, 324_000_000, true, () => exit);
+		expect(death.kind).toBe('transitioned');
+		const pending = await loadOrCreateLifecycle();
+		if (pending.kind !== 'selecting') throw new Error('Expected next-generation selection after tag-game death.');
+		const player = (await records(PLAYER_LIFECYCLE_STORE_NAME))['player-lifecycle'] as { identities: Array<{ pubkey: string; status: string }>; realtimeSettlementLedger: { tagGameReceipt?: { gameId: string; points: number; lifespanLossMs: number }; pendingInstanceIds: string[] } };
+		expect(player.identities.find((identity) => identity.pubkey === working.signer.pubkey)?.status).toBe('dead');
+		expect(player.realtimeSettlementLedger.tagGameReceipt).toEqual({ gameId: deathGameId, points: 4_500, lifespanLossMs: 324_000_000 });
+		expect(player.realtimeSettlementLedger.pendingInstanceIds).toEqual([]);
+		expect(Object.values(await records(WORLD_WRITE_JOURNAL_STORE_NAME))[0]).toMatchObject({ exitSecond: expect.any(Number) });
+	});
+
+	it('serializes Run close against game start so an old Run cannot enter after clear', async () => {
+		const persona = await selected(ZERO_BUILD, { initialPoints: 200_000 });
+		const gameId = `game-${'c'.repeat(64)}`;
+		expect(await reserveTagGameParticipation(persona, gameId)).toBe(true);
+		const [activation, clearing] = await Promise.all([
+			activateTagGameRun(persona, gameId, TIME, TIME + 180_000, TIME + 210_000),
+			clearPersona(persona)
+		]);
+		if (clearing.kind === 'cleared') expect(activation).toBe(false);
+		else {
+			expect(clearing).toEqual({ kind: 'blocked', reason: 'tag-game' });
+			expect(activation).toBe(true);
+		}
+	});
+
+	it('expires an unaccepted join reservation after reload but retains a reservation confirmed by the organizer', async () => {
+		const persona = await selected();
+		const gameId = `game-${'9'.repeat(64)}`;
+		expect(await reserveTagGameParticipation(persona, gameId, true)).toBe(true);
+		vi.spyOn(Date, 'now').mockReturnValue(TIME + 30_001);
+		expect((await loadOrCreateLifecycle()).kind).toBe('restored');
+		expect(await reserveTagGameParticipation(persona, gameId, true)).toBe(true);
+		expect(await confirmTagGameParticipation(persona, gameId)).toBe(true);
+		vi.spyOn(Date, 'now').mockReturnValue(TIME + 60_000);
+		expect((await loadOrCreateLifecycle()).kind).toBe('restored');
+		expect(await reserveTagGameParticipation(restored(await loadOrCreateLifecycle()), `${gameId}-other`)).toBe(false);
+	});
+
+	it('persists one finite known-game recovery deadline and clears it after a valid organizer state', async () => {
+		const persona = await selected();
+		const gameId = `${'9'.repeat(64)}:1:${'8'.repeat(64)}`;
+		expect(await reserveTagGameParticipation(persona, gameId)).toBe(true);
+		const deadline = TIME + 30_000;
+		expect(await beginTagGameReservationRecovery(persona, gameId, deadline)).toBe(true);
+		expect(await beginTagGameReservationRecovery(persona, gameId, deadline + 30_000)).toBe(true);
+		let restoredPersona = restored(await loadOrCreateLifecycle());
+		expect(restoredPersona.tagGame?.reservation).toMatchObject({ gameId, recoveryDeadlineMs: deadline });
+		expect(await confirmTagGameParticipation(restoredPersona, gameId)).toBe(true);
+		restoredPersona = restored(await loadOrCreateLifecycle());
+		expect(restoredPersona.tagGame?.reservation).toEqual({ gameId, identity: persona.activeRun.identity, runNumber: persona.activeRun.runNumber });
+	});
+
+	it('allows a new reservation to replace an expired pending reservation atomically', async () => {
+		const persona = await selected();
+		const oldGameId = `game-${'8'.repeat(64)}`;
+		const nextGameId = `game-${'7'.repeat(64)}`;
+		expect(await reserveTagGameParticipation(persona, oldGameId, true)).toBe(true);
+		vi.spyOn(Date, 'now').mockReturnValue(TIME + 30_001);
+		expect(await reserveTagGameParticipation(persona, nextGameId)).toBe(true);
+		const current = restored(await loadOrCreateLifecycle());
+		expect(current.tagGame?.reservation?.gameId).toBe(nextGameId);
+	});
+
 	it('preserves a valid v7 Root and active Player while adding the write journal', async () => {
 		const original = await selected();
 		const root = await records(ROOT_SECRET_STORE_NAME);

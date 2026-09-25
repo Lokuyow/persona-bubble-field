@@ -48,6 +48,8 @@ export type WorldStateEventInput = {
 	position: GridPosition;
 	slot: WorldStateSlot | 'exit';
 	createdAt: number;
+	runNumber?: number;
+	exitReason?: 'death' | 'clear';
 };
 
 export type DeathTraceEventInput = {
@@ -114,6 +116,8 @@ export type ParsedWorldStateEvent = {
 	state: WorldStateState;
 	slot: WorldStateSlot | null;
 	position: GridPosition;
+	runNumber?: number | null;
+	exitReason?: 'death' | 'clear' | null;
 };
 
 export type ParsedTraceEvent = {
@@ -332,14 +336,19 @@ export function buildWorldStateEventTemplate(input: WorldStateEventInput): World
 	assertChannelReference(input.channel);
 	assertCreatedAt(input.createdAt);
 	assertWorldStateSlot(input.slot);
+	if (input.runNumber !== undefined && (!Number.isSafeInteger(input.runNumber) || input.runNumber < 1)) throw new TypeError('Invalid World State Run number.');
+	if (input.exitReason !== undefined && (input.slot !== 'exit' || input.runNumber === undefined)) throw new TypeError('Exit reason requires a Run-scoped terminal exit.');
+	const tags = [
+		['d', worldStateIdentifier(input.channel.channelId, input.slot)],
+		['e', input.channel.channelId, input.channel.relayHint],
+		...(input.runNumber === undefined ? [] : [['r', String(input.runNumber)]]),
+		...(input.exitReason === undefined ? [] : [['reason', input.exitReason]])
+	];
 
 	return {
 		kind: WORLD_STATE_KIND,
 		created_at: input.createdAt,
-		tags: [
-			['d', worldStateIdentifier(input.channel.channelId, input.slot)],
-			['e', input.channel.channelId, input.channel.relayHint]
-		],
+		tags,
 		content: formatCanonicalGridPosition(input.position)
 	};
 }
@@ -588,6 +597,13 @@ export function parseWorldStateEvent(event: Event, channelId: string): ParsedWor
 	const slot = parseWorldStateSlot(event, channelId);
 	const position = parseCanonicalGridPosition(event.content);
 	if (slot === null || !position) return null;
+	const runTags = event.tags.filter((tag) => tag[0] === 'r');
+	const reasonTags = event.tags.filter((tag) => tag[0] === 'reason');
+	if (runTags.length > 1 || reasonTags.length > 1) return null;
+	const runNumber = runTags.length ? Number(runTags[0][1]) : null;
+	if (runNumber !== null && (!Number.isSafeInteger(runNumber) || runNumber < 1)) return null;
+	const exitReason = reasonTags.length && (reasonTags[0][1] === 'death' || reasonTags[0][1] === 'clear') ? reasonTags[0][1] : null;
+	if (reasonTags.length && (!exitReason || slot !== 'exit' || runNumber === null)) return null;
 
 	return {
 		id: event.id,
@@ -595,7 +611,9 @@ export function parseWorldStateEvent(event: Event, channelId: string): ParsedWor
 		createdAt: event.created_at,
 		state: slot === 'exit' ? 'exit' : 'active',
 		slot: slot === 'exit' ? null : slot,
-		position
+		position,
+		runNumber,
+		exitReason
 	};
 }
 

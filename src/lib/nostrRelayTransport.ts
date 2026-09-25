@@ -182,6 +182,8 @@ export type RealtimeStartInput = Readonly<{
 	eventTypes: RealtimeEventRegistry;
 	controlSince: number;
 	instanceFilters: readonly RealtimeInstanceFilterConfiguration[];
+	supplementalFilters?: readonly Filter[];
+	onSupplementalEvent?: (event: Event) => void;
 	onBootstrapEvent: (event: Event) => void;
 	onLiveEvent: (event: Event) => void;
 	onBootstrapControl?: (control: RealtimeControlEnvelope) => void;
@@ -839,7 +841,7 @@ export function createNostrRelayTransport(
 		if (realtimeStarted) throw new Error('Realtime event startup is only allowed once.');
 		realtimeStarted = true;
 		const generation = ++realtimeGeneration;
-		if (input.eventTypes.length === 0) {
+		if (input.eventTypes.length === 0 && !(input.supplementalFilters?.length)) {
 			realtimeDiagnostics = { status: 'inactive', relays: [] };
 			return { status: 'inactive', events: [], controls: [], relays: [] };
 		}
@@ -850,7 +852,8 @@ export function createNostrRelayTransport(
 			return buildRealtimeInstanceFilter({ channelId: world.channelId, configuration });
 		});
 		const controlFilter = buildRealtimeControlFilter({ channelId: world.channelId, creatorPubkey: world.creatorPubkey, since: input.controlSince });
-		realtimeFilters = [controlFilter, ...instanceFilters];
+		const supplementalFilters = [...(input.supplementalFilters ?? [])];
+		realtimeFilters = [...(input.eventTypes.length ? [controlFilter, ...instanceFilters] : []), ...supplementalFilters];
 		const capableRelays = world.authoritativeRelays.filter(realtimeCapacityAllows);
 		const skipped = world.authoritativeRelays.filter((relayUrl) => !capableRelays.includes(relayUrl)).map((relayUrl) => ({ relayUrl, status: 'unavailable' as const, notice: 'Relay subscription capacity is reserved for primary world reads.' }));
 		if (capableRelays.length === 0) {
@@ -887,19 +890,22 @@ export function createNostrRelayTransport(
 			}));
 			resources.add(client.createAllEventObservable().subscribe((packet) => {
 				const relayUrl = canonicalRelay(packet.from);
-				if (generation !== realtimeGeneration || !relayUrl || realtimeSubIds.get(relayUrl) !== packet.subId || packet.event.kind !== REALTIME_EVENT_KIND) return;
-				const control = matchesRealtimeEventFilter(packet.event, controlFilter)
+				if (generation !== realtimeGeneration || !relayUrl || realtimeSubIds.get(relayUrl) !== packet.subId) return;
+				const control = packet.event.kind === REALTIME_EVENT_KIND && input.eventTypes.length > 0 && matchesRealtimeEventFilter(packet.event, controlFilter)
 					? parseRealtimeControlEnvelope(packet.event, world.channelId, world.creatorPubkey)
 					: null;
-				const isInstanceEvent = instanceFilters.some((filter) => matchesRealtimeEventFilter(packet.event, filter));
-				if (!control && !isInstanceEvent) return;
+				const isInstanceEvent = packet.event.kind === REALTIME_EVENT_KIND && instanceFilters.some((filter) => matchesRealtimeEventFilter(packet.event, filter));
+				const isSupplementalEvent = supplementalFilters.some((filter) => matchesRealtimeEventFilter(packet.event, filter));
+				if (!control && !isInstanceEvent && !isSupplementalEvent) return;
 				notifyRealtimeEcho(packet.event.id);
 				if (realtimeSeenIds.has(packet.event.id)) return;
 				realtimeSeenIds.add(packet.event.id);
 				if (!settled) {
 					if (control) { initialControls.push(control); input.onBootstrapControl?.(control); }
+					else if (isSupplementalEvent) input.onSupplementalEvent?.(packet.event);
 					else { initialEvents.push(packet.event); input.onBootstrapEvent(packet.event); }
 				} else if (control) input.onLiveControl?.(control);
+				else if (isSupplementalEvent) input.onSupplementalEvent?.(packet.event);
 				else input.onLiveEvent(packet.event);
 			}));
 			resources.add(client.createAllMessageObservable().subscribe((packet) => {

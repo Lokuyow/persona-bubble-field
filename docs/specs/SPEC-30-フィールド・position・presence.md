@@ -535,6 +535,8 @@ kind 1111は第3 logical subscriptionとする。第4の常時subscriptionは要
 
 リアルタイムイベントのkind 7070 subscriptionは、上記の2つのlogical primary world subscriptionへfilterを混在させず、別のsupplemental subscriptionとして扱う。既知のNIP-11 `max_subscriptions` がprimary 2本と必要なリアルタイムsubscriptionを同時に許容しないRelayでは、そのRelayのリアルタイム機能だけを利用不能とし、world messageとpositionの利用可能性を変更しない。共通envelopeとevent定義は [`SPEC-10-Nostr・アカウント.md`](./SPEC-10-Nostr・アカウント.md) を正とする。
 
+専用clientが発行するkind 30079 World Stateのpositionとexitには、任意の `r` tagでRun numberを付与できる。terminal exitでは `reason=death|clear` を付与し、reasonを付けるexitにはRun numberを必須とする。reasonのない旧形式exitから死亡・脱出理由を推定しない。参加者の署名済み鬼ごっこ登録RunとWorld StateのRunを照合し、より新しいRunのpositionが確認済みなら、以前のRunの遅延・再配信exitを現在Runの終了として扱わない。World Presenceの既存created_at/activity順序判定を維持し、新しいRunのactivityを古いexitで上書きしない。
+
 RelayごとのWebSocket接続自体をsubscriptionごとに別接続へ分ける必要はなく、同一Relay接続上で複数subscriptionを管理してよい。
 
 具体的なsubscription IDは製品仕様として固定しない。

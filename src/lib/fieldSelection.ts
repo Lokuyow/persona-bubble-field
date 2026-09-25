@@ -4,6 +4,7 @@ export type FieldCellAction =
 	| Readonly<{ kind: 'participant'; participantId: string }>
 	| Readonly<{ kind: 'mending-terminal' }>
 	| Readonly<{ kind: 'adjustment-terminal' }>
+	| Readonly<{ kind: 'tag-game-terminal' }>
 	| Readonly<{ kind: 'cooperation-defection-group'; groupId: string }>
 	| Readonly<{ kind: 'trace'; rootId: string; behavior: 'open-root' | 'select-current' }>;
 
@@ -32,6 +33,7 @@ export function buildFieldCellActions(input: Readonly<{
 	participantIds?: readonly string[];
 	mendingTerminal?: boolean;
 	adjustmentTerminal?: boolean;
+	tagGameTerminal?: boolean;
 	cooperationDefectionGroupId?: string;
 	trace?: Extract<FieldCellAction, { kind: 'trace' }> | null;
 }>): readonly FieldCellAction[] {
@@ -43,6 +45,7 @@ export function buildFieldCellActions(input: Readonly<{
 		})),
 		...(input.mendingTerminal ? [{ kind: 'mending-terminal' as const }] : []),
 		...(input.adjustmentTerminal ? [{ kind: 'adjustment-terminal' as const }] : []),
+		...(input.tagGameTerminal ? [{ kind: 'tag-game-terminal' as const }] : []),
 		...(input.cooperationDefectionGroupId ? [{ kind: 'cooperation-defection-group' as const, groupId: input.cooperationDefectionGroupId }] : []),
 		...(input.trace ? [input.trace] : [])
 	];

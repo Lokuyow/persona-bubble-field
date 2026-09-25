@@ -13,6 +13,7 @@ import {
 } from './nostrProtocol';
 import { buildRealtimeControlEventTemplate, buildRealtimeControlFilter, buildRealtimeEventFilter, buildRealtimeInstanceFilter, finalizeRealtimeEvent, type RealtimeEventRegistry } from './realtimeEvents';
 import { COOPERATION_DEFECTION_EVENT_DEFINITION, buildCooperationDefectionActionTemplate } from './cooperationDefection';
+import { TAG_GAME_ACTION_KIND, TAG_GAME_INDEX, TAG_GAME_KIND } from './tagGame';
 
 // Capture only the public client. Tests still use the installed package,
 // real RxReqs and mock WebSockets; no internal IDs or fields are inspected.
@@ -466,6 +467,31 @@ describe('supplemental realtime event lifecycle', () => {
 		onLiveEvent: vi.fn(),
 		onBootstrapControl: vi.fn(),
 		onLiveControl: vi.fn()
+	});
+
+	it('multiplexes 27070 and 37070 through the existing supplemental REQ without entering the 7070 parser', async () => {
+		const f = fixture(1);
+		const discoveryFilter = { kinds: [TAG_GAME_KIND], '#e': [f.channel.id], '#t': [TAG_GAME_INDEX], since: TIME - 90 };
+		const actionFilter = { kinds: [TAG_GAME_ACTION_KIND], '#e': [f.channel.id], since: TIME - 90 };
+		const discovery = finalizeEvent({ kind: TAG_GAME_KIND, created_at: TIME, tags: [['d', 'host:run:game'], ['e', f.channel.id], ['t', TAG_GAME_INDEX]], content: '{}' }, AUTHOR);
+		const action = finalizeEvent({ kind: TAG_GAME_ACTION_KIND, created_at: TIME, tags: [['d', 'host:run:game'], ['e', f.channel.id]], content: '{"action":"join"}' }, CREATOR);
+		f.authorities[0].onRequest = (socket, request) => {
+			if (filters(request).some((filter) => (filter.kinds as number[]).includes(TAG_GAME_KIND))) send(socket, 'EVENT', request[1], discovery);
+			if (filters(request).some((filter) => (filter.kinds as number[]).includes(TAG_GAME_ACTION_KIND))) send(socket, 'EVENT', request[1], action);
+			send(socket, 'EOSE', request[1]);
+		};
+		await f.start();
+		const onSupplementalEvent = vi.fn();
+		const pending = f.transport.startRealtime({ ...realtimeInput(), supplementalFilters: [discoveryFilter, actionFilter], onSupplementalEvent });
+		await vi.advanceTimersByTimeAsync(30);
+		const result = await pending;
+		const realtimeRequest = f.authorities[0].requests.find((request) => filters(request).some((filter) => (filter.kinds as number[]).includes(TAG_GAME_KIND)))!;
+		expect(filters(realtimeRequest)).toHaveLength(4);
+		expect(filters(realtimeRequest)).toContainEqual(discoveryFilter);
+		expect(filters(realtimeRequest)).toContainEqual(actionFilter);
+		expect(result.events).toEqual([]);
+		expect(onSupplementalEvent.mock.calls.map(([event]) => (event as Event).kind).sort()).toEqual([TAG_GAME_ACTION_KIND, TAG_GAME_KIND]);
+		expect(f.transport.getDiagnostics().primaryPairs).toHaveLength(2);
 	});
 
 	it('uses an independent kind-7070 subscription and preserves the two primary subscriptions', async () => {

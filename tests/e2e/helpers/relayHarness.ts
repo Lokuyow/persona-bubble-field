@@ -351,8 +351,12 @@ export async function installDelayedRelay(page: Page, options: {
 			published: Array<Record<string, unknown>>;
 			closedSubscriptions: Array<{ subId: string; url: string }>;
 		} : { published: [], closedSubscriptions: [] };
+		const queuedBootstrapEventsKey = 'relay-startup-queued-realtime-bootstrap-events';
+		const queuedBootstrapEvents = JSON.parse(sessionStorage.getItem(queuedBootstrapEventsKey) ?? '[]') as Array<Record<string, unknown>>;
+		sessionStorage.removeItem(queuedBootstrapEventsKey);
 		const realtimeHistory = [
 			...(realtimeEvents ?? []) as Array<Record<string, unknown>>,
+			...queuedBootstrapEvents,
 			...previous.published.filter((event) => event.kind === 7070)
 		];
 		const state = {
@@ -671,6 +675,12 @@ export async function installDelayedRelay(page: Page, options: {
 						const raw = event as Record<string, unknown>;
 						if (!realtimeHistory.some((known) => known.id === raw.id)) realtimeHistory.push(raw);
 						for (const request of activeRealtime) deliverRealtimeLive(request, raw);
+					},
+					queueRealtimeBootstrapEvent: (event: object) => {
+						const queued = JSON.parse(sessionStorage.getItem(queuedBootstrapEventsKey) ?? '[]') as Array<Record<string, unknown>>;
+						const raw = event as Record<string, unknown>;
+						if (!queued.some((known) => known.id === raw.id)) queued.push(raw);
+						sessionStorage.setItem(queuedBootstrapEventsKey, JSON.stringify(queued));
 					},
 					activeRealtimeCount: () => activeRealtime.length,
 				deferTraceReplies: () => { state.traceRepliesReleased = false; },
