@@ -571,7 +571,9 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 	});
 	let canUseAdjustmentTerminal = $derived(!devWorldSandboxEnabled && !personaLifecycleTransition && !tagGameLocalLock && Boolean(worldSession && personaSnapshot && selfIsActive && selfLogicalPosition && isWithinFacilityInteractionRange(selfLogicalPosition, ADJUSTMENT_TERMINAL)));
 	let canUseTagGameTerminal = $derived(!devWorldSandboxEnabled && !personaLifecycleTransition && Boolean(worldSession && selfIsActive && selfLogicalPosition && isWithinFacilityInteractionRange(selfLogicalPosition, TAG_GAME_TERMINAL)));
-	let visibleTagGameStates = $derived(tagGameStates.filter((game) => isFreshTagGameLobby(game, Math.floor(Date.now() / 1000)) || game.phase !== 'lobby'));
+	// Keep terminal states in tagGameEvents for recovery and delayed-action rejection,
+	// but a pre-start host cancellation is not a playable game or a result card.
+	let visibleTagGameStates = $derived(tagGameStates.filter((game) => game.endReason !== 'host-cancelled' && (isFreshTagGameLobby(game, Math.floor(Date.now() / 1000)) || game.phase !== 'lobby')));
 	let clearBlockedReason = $derived(!personaSnapshot ? 'Runがありません' : tagGameLocalLock ? '鬼ごっこ終了後の精算中です' : personaSnapshot.gameState.points < 100_000 ? '所持ポイントが100,000pt未満です' : isPersonaExpired(personaSnapshot.gameState, mendingNowMs, personaSnapshot.activeRun.rootBuild) ? '寿命が尽きています' : pendingRealtimeSettlement ? '協力と抜け駆けの精算が未完了です' : null);
 	let traceRootCells = $derived(groupTraceRoots(effectiveTraceRoots));
 	// Keep grouped roots intact for the Trace data flow, but let fixed facilities

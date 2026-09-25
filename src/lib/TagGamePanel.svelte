@@ -106,7 +106,7 @@
 							{:else if selfActiveGameId === null}<PrimaryButton data-tag-game-watch={game.gameId} onclick={() => onWatch(game.gameId)} disabled={busy}>観戦する</PrimaryButton>
 							{:else if selfActiveGameId === game.gameId}<span>参加中</span>{/if}
 						{/if}
-						{#if game.phase === 'ended' || game.phase === 'interrupted'}
+						{#if (game.phase === 'ended' || game.phase === 'interrupted') && game.startedAt}
 							<div class="results" aria-label="鬼ごっこ結果">
 								{#each game.participant as player (player.pubkey)}
 								<span>{tagGameParticipantLabel(game, player.pubkey, selfPubkey)}・{player.status === 'dead' ? '死亡' : player.status === 'left' ? '退出' : player.status === 'temporarily-ineligible' ? '一時対象外' : '参加'}・{player.points}pt・寿命-{Math.ceil(player.lifespanLossMs / 60_000)}分・恩恵{Math.floor(player.benefitMs / 1000)}秒・災厄{Math.floor(player.calamityMs / 1000)}秒</span>

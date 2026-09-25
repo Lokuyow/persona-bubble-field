@@ -100,6 +100,15 @@ describe('Root / Identity / Run lifecycle', () => {
 		expect((await clearPersona(afterUpgrade)).kind).toBe('cleared');
 	});
 
+	it('allows only one simultaneous organizer reservation for the same Run', async () => {
+		const persona = await selected();
+		const [first, second] = await Promise.all([
+			reserveTagGameParticipation(persona, `game-${'a'.repeat(64)}`),
+			reserveTagGameParticipation(persona, `game-${'b'.repeat(64)}`)
+		]);
+		expect([first, second].filter(Boolean)).toHaveLength(1);
+	});
+
 	it('accepts a normal final settlement arriving after 180 seconds, applies its delta atomically, and releases the Run', async () => {
 		const persona = await selected(ZERO_BUILD, { initialPoints: 200_000 });
 		const gameId = `game-${'b'.repeat(64)}`;

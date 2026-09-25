@@ -438,7 +438,7 @@ test('organizer cancellation terminates the lobby, clears pending reservations, 
 	const hostPubkey = getPublicKey(hostSecret);
 	const joinerPubkey = getPublicKey(joinerSecret);
 	try {
-		await Promise.all([preparePlayer(hostPage, hostSecret, nowMs), preparePlayer(joinerPage, joinerSecret, nowMs)]);
+		await Promise.all([preparePlayer(hostPage, hostSecret, nowMs, 0, true), preparePlayer(joinerPage, joinerSecret, nowMs)]);
 		await Promise.all([moveRelaySelfTo(hostPage, { x: 7, y: 6 }), moveRelaySelfTo(joinerPage, { x: 8, y: 5 })]);
 		await synchronizeBrowserClocks([hostPage, joinerPage]);
 		await openTagGameTerminal(hostPage);
@@ -464,6 +464,24 @@ test('organizer cancellation terminates the lobby, clears pending reservations, 
 		await hostPage.getByRole('button', { name: '募集を取り消す' }).click();
 		await expect.poll(async () => parseTagGameEvent(await latestGameEvent(hostPage, lobby.gameId), CHANNEL_ID)?.state.endReason).toBe('host-cancelled');
 		const cancelled = await latestGameEvent(hostPage, lobby.gameId);
+		await injectRealtime(hostPage, delayedJoin);
+		await expect.poll(async () => parseTagGameEvent(await latestGameEvent(hostPage, lobby.gameId), CHANNEL_ID)?.state.endReason).toBe('host-cancelled');
+		await expect(hostPage.getByText('あなたの開催').first()).toHaveCount(0);
+		await expect(hostPage.locator('.results')).toHaveCount(0);
+		await expect(hostPage.getByRole('button', { name: '鬼ごっこを開催' })).toBeVisible();
+		await hostPage.reload();
+		await moveRelaySelfTo(hostPage, { x: 7, y: 6 });
+		await expect(hostPage.locator('.participant[data-self="true"]')).toBeVisible();
+		await openTagGameTerminal(hostPage);
+		await injectRealtime(hostPage, cancelled);
+		await expect(hostPage.getByText('あなたの開催').first()).toHaveCount(0);
+		await expect(hostPage.locator('.results')).toHaveCount(0);
+		await expect(hostPage.getByRole('button', { name: '鬼ごっこを開催' })).toBeVisible();
+		await hostPage.getByRole('button', { name: '鬼ごっこを開催' }).click();
+		await expect.poll(async () => (await relayState(hostPage)).state.published.some((event) => event.kind === TAG_GAME_KIND)).toBe(true);
+		const replacement = parseTagGameEvent(await latestPublished(hostPage, TAG_GAME_KIND, hostPubkey), CHANNEL_ID)!.state;
+		expect(replacement.gameId).not.toBe(lobby.gameId);
+		await expect(hostPage.getByText('あなたの開催').first()).toBeVisible();
 		await joinerPage.evaluate((event) => (window as typeof window & { __relayStartupTest: { queueRealtimeBootstrapEvent(event: object): void } }).__relayStartupTest.queueRealtimeBootstrapEvent(event), cancelled);
 		await expect.poll(async () => (await tagGamePersistence(joinerPage)).reservation).not.toBeNull();
 		const activeRealtimeCountBeforeReload = await joinerPage.evaluate(() => (window as typeof window & { __relayStartupTest: { activeRealtimeCount(): number } }).__relayStartupTest.activeRealtimeCount());
@@ -483,9 +501,6 @@ test('organizer cancellation terminates the lobby, clears pending reservations, 
 		expect(discoverySince).toBeGreaterThan(cancelled.created_at);
 		expect(discoverySince).toBeLessThan(cancelled.created_at + 15);
 		await expect.poll(async () => joinerPage.evaluate(() => (window as typeof window & { __relayStartupTest: { activeRealtimeCount(): number } }).__relayStartupTest.activeRealtimeCount())).toBe(activeRealtimeCountBeforeReload);
-		await injectRealtime(hostPage, delayedJoin);
-		await expect.poll(async () => parseTagGameEvent(await latestGameEvent(hostPage, lobby.gameId), CHANNEL_ID)?.state.phase).toBe('interrupted');
-		await expect(hostPage.getByRole('button', { name: '鬼ごっこを開催' })).toBeVisible();
 		await expect(joinerPage.getByRole('button', { name: '鬼ごっこを開催' })).toBeVisible();
 	} finally {
 		await Promise.all([hostPage.close(), joinerPage.close()]);
