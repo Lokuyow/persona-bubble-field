@@ -311,6 +311,7 @@ test.describe('Relay startup', () => {
 		await page.clock.runFor(2_000);
 		await expect.poll(async () => (await readRelayGameState(page)).points).toBe(1_000);
 		await expect(page.locator('[data-cooperation-defection-round-result]')).toContainText('+1,000pt');
+		await expect(page.locator('[data-cooperation-defection-selection-status]')).toHaveCount(0);
 		const automaticSpeech = (await relayState(page)).state.published.find((event) => event.kind === 42 && event.pubkey === selfPubkey && event.content === '協力');
 		expect(automaticSpeech).toBeDefined();
 		expect(verifyEvent(automaticSpeech as unknown as NostrEvent)).toBe(true);
@@ -359,5 +360,55 @@ test.describe('Relay startup', () => {
 		await expect.poll(async () => page.evaluate(() => (window as typeof window & { __relayStartupTest: { activeRealtimeCount(): number } }).__relayStartupTest.activeRealtimeCount())).toBe(AUTHORITATIVE_RELAYS.length);
 		await expect(page.locator('[data-realtime-group-trigger]')).toHaveCount(0);
 		await expect.poll(async () => (await readRelayGameState(page)).points).toBe(1_000);
+	});
+
+	test('keeps automatic publication error visible when the confirmed result does not include the player', async ({ page }) => {
+		const schedule = upcomingRegistrationSchedule();
+		const group = deriveCooperationDefectionGroupPositions(schedule.instanceId, COOPERATION_DEFECTION_FIELD_SIZE)[0];
+		if (!group) throw new Error('Expected a CooperationDefection group.');
+		const round = getCooperationDefectionRoundSchedule(schedule, 1);
+		const otherPlayers = [
+			{ secret: fixtureSecret(41), nonce: '4'.repeat(64) },
+			{ secret: fixtureSecret(47), nonce: '5'.repeat(64) }
+		];
+		const otherJoins = otherPlayers.map(({ secret }) => signedCooperationDefectionAction(secret, schedule, { action: 'join', groupId: group.id }, schedule.registrationAtMs + 1_000));
+		const otherCommits = otherPlayers.map(({ secret, nonce }) => {
+			const pubkey = getPublicKey(secret);
+			const action = buildCooperationDefectionCommitAction({ instanceId: schedule.instanceId, groupId: group.id, round: 1, authorPubkey: pubkey, choice: 'cooperate', nonce });
+			return { secret, nonce, event: signedCooperationDefectionAction(secret, schedule, action, round.selectionAtMs + 1_000) };
+		});
+		const otherReveals = otherCommits.map(({ secret, nonce, event }) => signedCooperationDefectionAction(secret, schedule,
+			buildCooperationDefectionRevealAction({ groupId: group.id, round: 1, commitId: event.id, choice: 'cooperate', nonce }), round.resultAtMs + 1_000));
+		const startTime = schedule.registrationAtMs + 1_000;
+		const selfSecret = fixtureSecret(43);
+		const selfPubkey = getPublicKey(selfSecret);
+		await page.clock.install({ time: startTime });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, {
+			primaryEvents: testEvents(startTime),
+			realtimeEvents: [...otherJoins, ...otherCommits.map(({ event }) => event), ...otherReveals],
+			persistAcrossReload: true,
+			realtimePublishOutcome: 'accepted'
+		});
+		await seedRelayAccount(page, selfSecret, selfPubkey);
+		await page.goto('/');
+		await expect(page.locator('[data-realtime-panel]')).toContainText('参加受付');
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => (request.filter.kinds as number[])[0] === 42)).toBe(true);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => (request.filter.kinds as number[])[0] === 7070)).toBe(true);
+		const selfJoin = signedCooperationDefectionAction(selfSecret, schedule, { action: 'join', groupId: group.id }, schedule.registrationAtMs + 2_000);
+		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectRealtimeEvent(event: object): void } }).__relayStartupTest.injectRealtimeEvent(event), selfJoin);
+		await page.clock.setSystemTime(round.selectionAtMs + 1_000);
+		await page.clock.runFor(1_000);
+		await expect(page.locator('[data-realtime-panel]')).toContainText('参加中（3人）');
+		await page.locator('[data-cooperation-defection-choice="cooperate"]').click();
+		await expect.poll(async () => (await relayState(page)).state.published.some((event) => event.kind === 7070 && event.pubkey === selfPubkey && JSON.parse(event.content).action === 'commit')).toBe(true);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { setRealtimePublishOutcome(outcome: 'accepted' | 'rejected' | 'echo' | 'no-response'): void } }).__relayStartupTest.setRealtimePublishOutcome('no-response'));
+		await page.clock.setSystemTime(round.resultAtMs + 1_000);
+		await page.clock.runFor(10_500);
+		await expect(page.locator('[data-cooperation-defection-selection-status]')).toContainText('自動公開エラー（結果未確認）');
+		await expect(page.locator('[data-cooperation-defection-round-result]')).toContainText('不成立');
+		await expect(page.locator('[data-cooperation-defection-selection-status]')).toContainText('自動公開エラー（結果未確認）');
+		await expect(page.locator('[data-cooperation-defection-round-result]')).not.toContainText('あなた:');
 	});
 });

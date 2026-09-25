@@ -28,6 +28,7 @@
 		participantName: (pubkey: string) => string;
 		selectedChoice: CooperationDefectionChoice | null;
 		commitStatus: string | null;
+		selectionFailed: boolean;
 		canChoose: boolean;
 		message: string | null;
 		viewportElement: HTMLElement | undefined;
@@ -35,7 +36,7 @@
 		onChoice: (choice: CooperationDefectionChoice) => void;
 	}>;
 
-	let { schedule, nowMs, registrationDeadline, registrationCountdown, status, session, selfGroupId, cancelled, selfPubkey, participantName, selectedChoice, commitStatus, canChoose, message, viewportElement, onPanelBounds, onChoice }: Props = $props();
+	let { schedule, nowMs, registrationDeadline, registrationCountdown, status, session, selfGroupId, cancelled, selfPubkey, participantName, selectedChoice, commitStatus, selectionFailed, canChoose, message, viewportElement, onPanelBounds, onChoice }: Props = $props();
 	let panelElement = $state<HTMLElement>();
 	let choiceReservation = $state<HTMLElement>();
 	let panelBounds = $state<Bounds | null>(null);
@@ -61,6 +62,7 @@
 		}
 		return { round: 3 as const, phase: '終了', remainingMs: 0 };
 	});
+	let latestResultConfirmsOwnChoice = $derived(Boolean(lastRoundResult && roundInfo && lastRoundResult.round === roundInfo.round && selfPubkey && lastRoundResult.validParticipantPubkeys.includes(selfPubkey)));
 	let selectionPhase = $derived(roundInfo?.phase === '選択' && !selfGroupCancelled);
 	let detailsPosition = $derived.by(() => {
 		if (!panelBounds || !viewportElement) return null;
@@ -217,7 +219,7 @@
 			{#if roundInfo.phase === '選択'}
 				<div bind:this={choiceReservation} class="choice-reservation" aria-hidden="true"></div>
 			{/if}
-			{#if commitStatus && lastRoundResult?.round !== roundInfo.round}<p class="cooperation-defection-status" data-cooperation-defection-selection-status>{commitStatus}</p>{/if}
+			{#if commitStatus && (lastRoundResult?.round !== roundInfo.round || (selectionFailed && !latestResultConfirmsOwnChoice))}<p class="cooperation-defection-status" data-cooperation-defection-selection-status>{commitStatus}</p>{/if}
 			{/if}
 			{#if schedule.phase === 'game' && roundInfo && lastRoundResult}
 				{@const isPrevious = roundInfo.round > lastRoundResult.round}

@@ -614,7 +614,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	let cooperationDefectionCommitStatus = $derived(devCooperationDefectionPlaygroundEnabled
 		? devCooperationDefectionPlaygroundState?.selfChoice ? '秘密選択を送信済み' : null
 		: cooperationDefectionSelection && cooperationDefectionSelection.round === cooperationDefectionRound
-			? cooperationDefectionSelection.revealStatus === 'published' ? '選択を自動公開済み' : cooperationDefectionSelection.revealStatus === 'sending' ? '選択を自動公開中' : cooperationDefectionSelection.revealStatus === 'failed' ? '選択の自動公開に失敗（未reveal）' : cooperationDefectionSelection.commitPublished ? '秘密選択を送信済み' : '未送信'
+			? cooperationDefectionSelection.revealStatus === 'published' ? '選択を自動公開済み' : cooperationDefectionSelection.revealStatus === 'sending' ? '選択を自動公開中' : cooperationDefectionSelection.revealStatus === 'failed' ? '自動公開エラー（結果未確認）' : cooperationDefectionSelection.commitPublished ? '秘密選択を送信済み' : '未送信'
 			: null);
 	function cooperationDefectionParticipantName(pubkey: string): string {
 		try { return requireCharacterFromPubkey(pubkey).name; }
@@ -3005,6 +3005,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 					participantName={cooperationDefectionParticipantName}
 					selectedChoice={cooperationDefectionSelectedChoice}
 					commitStatus={cooperationDefectionCommitStatus}
+					selectionFailed={Boolean(cooperationDefectionSelection && cooperationDefectionSelection.round === cooperationDefectionRound && cooperationDefectionSelection.revealStatus === 'failed')}
 					canChoose={cooperationDefectionCanChoose}
 					message={devCooperationDefectionPlaygroundState?.message ?? null}
 					{viewportElement}
