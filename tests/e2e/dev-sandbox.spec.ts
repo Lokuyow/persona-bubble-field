@@ -152,6 +152,48 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.locator('[data-cooperation-defection-round-result]')).toContainText('+1,000pt');
 	});
 
+	test('keeps expanded Cooperation and Defection rules and choice controls reachable below the measured HUD on short mobile', async ({ page }) => {
+		await page.setViewportSize({ width: 390, height: 480 });
+		await page.goto('/?devWorld=1&devScenario=cooperation-defection-playground');
+		await page.locator('.sandbox-mobile-toggle').click();
+		const panel = page.locator('[data-realtime-panel]');
+		await expect(panel).toBeVisible();
+		// Model the bottom edge measured from the real top status HUD by the page owner.
+		await panel.evaluate((element) => element.style.setProperty('--cooperation-top-offset', '140px'));
+		const group = page.locator('[data-realtime-group-trigger]').first();
+		const [groupX, groupY] = (await group.getAttribute('data-cell-position'))!.split(',').map(Number);
+		for (let index = 0; index < 8; index += 1) {
+			const [x, y] = (await page.locator('.participant[data-self="true"]').getAttribute('data-position'))!.split(',').map(Number);
+			if (Math.max(Math.abs(x - groupX), Math.abs(y - groupY)) <= 1) break;
+			await page.keyboard.press(x > groupX ? 'ArrowLeft' : x < groupX ? 'ArrowRight' : y > groupY ? 'ArrowUp' : 'ArrowDown');
+		}
+		await group.click();
+		const advance = page.getByRole('button', { name: 'Advance Cooperation and Defection Playground phase' });
+		await advance.click();
+		await expect(panel).toContainText('参加中（3人）');
+		await advance.click();
+		const choice = page.getByRole('button', { name: '協力する' });
+		await expect(choice).toBeEnabled();
+		await page.locator('.sandbox-mobile-toggle').click();
+		const rules = panel.locator('.cooperation-defection-rules-disclosure');
+		await rules.locator('summary').click();
+		await expect(rules).toHaveAttribute('open', '');
+		const geometry = await panel.evaluate((element) => {
+			const rect = element.getBoundingClientRect();
+			return { top: rect.top, bottom: rect.bottom, scrollHeight: element.scrollHeight, clientHeight: element.clientHeight };
+		});
+		expect(geometry.top).toBeGreaterThanOrEqual(140);
+		expect(geometry.bottom).toBeLessThanOrEqual(480);
+		expect(geometry.scrollHeight).toBeGreaterThan(geometry.clientHeight);
+		await panel.hover();
+		await page.mouse.wheel(0, 1_000);
+		await expect.poll(() => panel.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+		await expect(choice).toBeVisible();
+		await choice.click();
+		await expect(choice).toHaveClass(/selected/);
+		await expect(panel.locator('[data-cooperation-defection-selection-status]')).toContainText('秘密選択を送信済み');
+	});
+
 	for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
 		test(`keeps Cooperation and Defection Playground controls and panel separate at ${viewport.width}px`, async ({ page }) => {
 			await page.setViewportSize(viewport);

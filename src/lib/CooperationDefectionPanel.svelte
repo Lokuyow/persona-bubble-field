@@ -277,7 +277,7 @@
 
 <style>
 	.cooperation-defection-panel, .result-details { font-size: clamp(.875rem, .8rem + .34vw, 1.0625rem); line-height: 1.4; color: #39293e; }
-	.cooperation-defection-panel { box-sizing: border-box; position: absolute; z-index: 2; top: var(--cooperation-top-offset, 12px); left: 50%; width: min(440px, calc(100% - 24px)); max-height: calc(100% - 24px); overflow-y: auto; min-width: 0; padding: 10px 12px; border: 1px solid rgba(102, 28, 106, .25); border-radius: 14px; background: rgba(255, 250, 255, .95); box-shadow: 0 8px 24px rgba(75, 44, 75, .12); pointer-events: none; transform: translateX(-50%); }
+	.cooperation-defection-panel { box-sizing: border-box; position: absolute; z-index: 2; top: var(--cooperation-top-offset, 12px); left: 50%; width: min(440px, calc(100% - 24px)); max-height: calc(100% - var(--cooperation-top-offset, 12px) - 12px); overflow-y: auto; min-width: 0; padding: 10px 12px; border: 1px solid rgba(102, 28, 106, .25); border-radius: 14px; background: rgba(255, 250, 255, .95); box-shadow: 0 8px 24px rgba(75, 44, 75, .12); pointer-events: none; transform: translateX(-50%); }
 	.cooperation-defection-heading { display: grid; gap: 5px; min-width: 0; }
 	h2 { margin: 0; font-size: 1.18em; line-height: 1.2; }
 	h2 span { display: inline-block; margin-left: .3em; color: #7b397f; font-size: .58em; letter-spacing: .08em; text-transform: uppercase; vertical-align: middle; }
@@ -339,6 +339,6 @@
 	.breakdown-names > .self-participant { background: rgba(145, 73, 151, .22); font-weight: 700; }
 	.breakdown-names small { margin-left: 3px; font-size: .75em; }
 	@media (max-width: 700px) {
-		.cooperation-defection-panel { top: var(--cooperation-top-offset, calc(64px + env(safe-area-inset-top))); max-height: calc(100% - 76px - env(safe-area-inset-top)); }
+		.cooperation-defection-panel { top: var(--cooperation-top-offset, calc(64px + env(safe-area-inset-top))); max-height: max(0px, calc(100% - var(--cooperation-top-offset, calc(64px + env(safe-area-inset-top))) - 12px - env(safe-area-inset-bottom))); }
 	}
 </style>
