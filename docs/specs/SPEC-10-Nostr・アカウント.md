@@ -152,7 +152,7 @@ kind 42には発言時の論理フィールド座標も保持する。
 
 rootは有効なtop-level kind 42なので `K=42` とする。root kind 42へのdirect replyでは、rootを `E/K/P` と `e/k/p` の双方で参照する。kind 1111へのreplyでは、`E/K/P` は同じrootを維持し、`e/k/p` はparent kind 1111とそのauthorを指す。
 
-project labelsはtarget-channel membershipまたは公式client証明ではない。受理する1111のuppercase `E` rootは、対象kind 40 worldに属する有効なtop-level kind 42でなければならない。immediate parentはroot自身または同じroot treeの有効な1111でなければならない。`K/P` と `k/p` は実際のroot/parentのkindとauthorに照合する。
+project labelsはtarget-channel membershipまたは公式client証明ではない。受理する1111のuppercase `E` rootは、対象kind 40 worldに属する有効なtop-level kind 42でなければならない。通常Traceとdeath Last Wordsはいずれもroot候補となる。immediate parentはroot自身または同じroot treeの有効な1111でなければならない。`K/P` と `k/p` は実際のroot/parentのkindとauthorに照合する。
 
 external/modified client製1111も、署名、project labels、root/parent relation、kind、author、character slot解決を全て検証できる場合だけ受理する。未割当slotのauthorによる1111は受理しない。これはofficial-client認証ではない。legacy signed replyに含まれる `w` はextra tagとして無視する。NIP-22の `p` は本文mentionにも使えるため、`p=self`だけで自分へのdirect replyや通知対象と判定してはならない。
 

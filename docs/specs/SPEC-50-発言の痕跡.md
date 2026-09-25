@@ -18,7 +18,7 @@ BigInt(`0x${event.id}`) % 5n === 0n
 
 ### death Last Words
 
-death Last WordsはNIP-28 kind 42のexplicit Traceであり、project `L`、`l=trace`、`l=trace:death`、canonical channel root `e`、canonical `w`、本文contentを持つ。`l=chat`、`speech:*`、`d` tagは持たない。これはpresence activityやactive slot plannerへは入力せず、`w`はTrace表示位置だけを表す。durableなdeath transitionとterminal exitの準備が成立した同一tabだけが、canonical last positionに1件だけbest-effortでpublishできる。bootstrapとlive受信の双方で通常Trace rootと同じ決定的cell projectionへ取り込むが、通常発言の20%抽選は適用しない。Last Wordsのrootはクリックして内容を表示できるが、通常のreply treeやreply publicationは持たない。死亡直後の送信失敗はlifecycleをrollbackせず、空入力・skipではeventをpublishしない。一般的なNIP-28 clientが通常channel messageとして表示する場合があることは許容する。
+death Last WordsはNIP-28 kind 42のexplicit Traceであり、project `L`、`l=trace`、`l=trace:death`、canonical channel root `e`、canonical `w`、本文contentを持つ。`l=chat`、`speech:*`、`d` tagは持たない。これはpresence activityやactive slot plannerへは入力せず、`w`はTrace表示位置だけを表す。durableなdeath transitionとterminal exitの準備が成立した同一tabだけが、canonical last positionに1件だけbest-effortでpublishできる。bootstrapとlive受信の双方で通常Trace rootと同じ決定的cell projectionへ取り込むが、通常発言の20%抽選は適用しない。Last Words rootを調査したときは、通常Traceと同じreply tree、reply publication、validation、cache、既読・未読、通知、距離制限を適用する。返信投稿者は現在の有効なIdentityでなければならず、死亡したIdentityによる通常投稿は許可しない。通知とreply read stateは返信先persona/pubkeyの既存scopeに従い、Identity間で引き継がない。死亡直後のLast Words送信失敗はlifecycleをrollbackせず、空入力・skipではeventをpublishしない。一般的なNIP-28 clientが通常channel messageとして表示する場合があることは許容する。
 
 ### root cache
 

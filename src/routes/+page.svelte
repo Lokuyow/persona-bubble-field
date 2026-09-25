@@ -3000,7 +3000,7 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 	function activateReplyTarget(rootId: string, targetId: string): void {
 		const accepted = traceConversationController?.getTraceConversationState();
 		const target = accepted && acceptedTraceReplyTarget(accepted, { rootId, targetId });
-		if (target && accepted?.kind === 'open' && accepted.root.source !== 'death') traceReplyMode = selectTraceReplyTarget(traceReplyMode, target);
+		if (target && accepted?.kind === 'open') traceReplyMode = selectTraceReplyTarget(traceReplyMode, target);
 	}
 
 	function selectTraceSpeech(targetId: string): void {

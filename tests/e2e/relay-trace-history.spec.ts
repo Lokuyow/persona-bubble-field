@@ -6,7 +6,9 @@ import {
 	buildTraceReplyTemplate,
 	buildWorldMessageTemplate,
 	parseTraceReplyCandidate,
-	parseWorldMessage
+	parseTraceEvent,
+	parseWorldMessage,
+	validateTraceReplyCandidate
 } from '../../src/lib/nostrProtocol';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { CHANNEL_ID, fixtureSecret, traceRuntimeEvents, installDelayedRelay, relayState, selectRelayTraceCell, clickRelayLogicalCell, installPromptApiStub, seedRelayAccount, readActionDockControlOrder } from './helpers/relayHarness';
@@ -256,6 +258,98 @@ test.describe('Relay startup', () => {
 		expect(await readActionDockControlOrder(page)).toEqual([
 			'profile-trigger', 'chatter-toggle', 'trace-unread-indicator', 'speech-type-toggle', 'suggestions-anchor'
 		]);
+	});
+
+	test('opens death Last Words with the regular reply tree, publication, and semantic validation', async ({ page }) => {
+		const now = Date.now();
+		const trace = traceRuntimeEvents();
+		const channel = { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' };
+		const deathSecret = fixtureSecret(37);
+		const deathRoot = finalizeEvent(buildDeathTraceEventTemplate({
+			channel, content: 'Last Words root', position: { x: 4, y: 2 }, createdAt: Math.floor(now / 1000)
+		}), deathSecret);
+		const parsedDeath = parseTraceEvent(deathRoot, CHANNEL_ID);
+		if (!parsedDeath || parsedDeath.source !== 'death') throw new Error('Death Trace fixture did not parse.');
+		const direct = finalizeEvent(buildTraceReplyTemplate({
+			root: parsedDeath, parent: parsedDeath, content: 'Last Words direct reply', speechType: 'normal', createdAt: Math.floor(now / 1000) + 1
+		}), fixtureSecret(31));
+		const parsedDirect = parseTraceReplyCandidate(direct);
+		if (!parsedDirect) throw new Error('Death Trace direct reply fixture did not parse.');
+		const validatedDirect = validateTraceReplyCandidate(parsedDirect, parsedDeath, parsedDeath);
+		if (!validatedDirect) throw new Error('Death Trace direct reply fixture did not validate.');
+		const nested = finalizeEvent(buildTraceReplyTemplate({
+			root: parsedDeath, parent: validatedDirect, content: 'Last Words nested reply', speechType: 'shout', createdAt: Math.floor(now / 1000) + 2
+		}), fixtureSecret(32));
+		const wrongRoot = finalizeEvent({
+			kind: nested.kind, created_at: nested.created_at, content: 'wrong death root',
+			tags: nested.tags.map((tag) => tag[0] === 'E' ? ['E', 'f'.repeat(64), '', parsedDeath.pubkey] : tag)
+		}, fixtureSecret(33));
+		const wrongParent = finalizeEvent({
+			kind: nested.kind, created_at: nested.created_at + 1, content: 'wrong death parent',
+			tags: nested.tags.map((tag) => tag[0] === 'e' ? ['e', 'e'.repeat(64), '', 'd'.repeat(64)] : tag)
+		}, fixtureSecret(34));
+		await page.clock.setFixedTime(now);
+		await page.emulateMedia({ reducedMotion: 'reduce' });
+		await page.setViewportSize({ width: 1100, height: 850 });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, {
+			primaryEvents: { message: trace.message, position: trace.selfPosition },
+			traceRoots: [deathRoot], traceReplies: [direct, nested], deferTraceRoots: true
+		});
+		await seedRelayAccount(page, trace.selfSecret, trace.selfPubkey);
+		await page.goto('/');
+		await expect(page.locator('.action-dock')).toBeVisible();
+		await expect(page.locator('main')).toHaveAttribute('data-trace-runtime', 'relay');
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
+			(request.filter.kinds as number[] | undefined)?.includes(42) && request.filter.limit === 1000
+		)).toBe(true);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseTraceRoots(): void } }).__relayStartupTest.releaseTraceRoots());
+		await expect(page.locator('[data-trace-marker-position="4,2"]')).toBeVisible();
+		await page.locator('.chatter-toggle').click();
+		await selectRelayTraceCell(page, '4,2');
+		const investigate = page.getByRole('button', { name: '痕跡を調べる', exact: true });
+		if (await investigate.isVisible()) await investigate.click();
+		await expect(page.locator(`[data-trace-root-id="${deathRoot.id}"]`)).toContainText('Last Words root');
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
+			request.filters.some((filter) => (filter['#E'] as string[] | undefined)?.includes(deathRoot.id)) &&
+			request.filters.some((filter) => (filter['#e'] as string[] | undefined)?.includes(deathRoot.id))
+		)).toBe(true);
+		await expect(page.locator(`[data-trace-reply-id="${direct.id}"]`)).toContainText(direct.content);
+		await page.locator(`[data-trace-reply-id="${direct.id}"] .trace-reply-content-button`).click();
+		await expect(page.locator(`[data-trace-reply-id="${nested.id}"]`)).toContainText(nested.content);
+
+		const editor = page.getByRole('textbox', { name: '投稿エディター' });
+		await page.clock.setFixedTime(now + 5_000);
+		await expect(page.getByLabel('Reply preview', { exact: true })).toHaveAttribute('data-reply-id', direct.id);
+		await editor.fill('new nested reply');
+		await editor.press('Enter');
+		await expect.poll(async () => (await relayState(page)).state.published.find((event) => event.kind === 1111 && event.content === 'new nested reply')).toBeTruthy();
+		const publishedNested = (await relayState(page)).state.published.find((event) => event.kind === 1111 && event.content === 'new nested reply')!;
+		expect(publishedNested.tags).toEqual(expect.arrayContaining([
+			['E', deathRoot.id, '', parsedDeath.pubkey], ['e', direct.id, '', direct.pubkey], ['k', '1111']
+		]));
+
+		await page.locator(`[data-trace-root-id="${deathRoot.id}"]`).click();
+		await expect(page.getByLabel('Reply preview', { exact: true })).toHaveAttribute('data-reply-id', deathRoot.id);
+		await editor.fill('new direct reply');
+		await editor.press('Enter');
+		await expect.poll(async () => (await relayState(page)).state.published.find((event) => event.kind === 1111 && event.content === 'new direct reply')).toBeTruthy();
+		const publishedDirect = (await relayState(page)).state.published.find((event) => event.kind === 1111 && event.content === 'new direct reply')!;
+		expect(publishedDirect.tags).toEqual(expect.arrayContaining([
+			['E', deathRoot.id, '', parsedDeath.pubkey], ['K', '42'], ['P', parsedDeath.pubkey],
+			['e', deathRoot.id, '', parsedDeath.pubkey], ['k', '42'], ['p', parsedDeath.pubkey]
+		]));
+		await expect(page.locator(`[data-trace-reply-id="${publishedDirect.id}"]`)).toContainText('new direct reply');
+		const currentBeforeInvalidReplies = await page.locator('[data-trace-current-id]').getAttribute('data-trace-current-id');
+
+		await page.evaluate((events) => {
+			const relay = (window as typeof window & { __relayStartupTest: { injectTraceReply(event: object): void } }).__relayStartupTest;
+			for (const event of events) relay.injectTraceReply(event);
+		}, [wrongRoot, wrongParent]);
+		await expect(page.locator(`[data-trace-reply-id="${wrongRoot.id}"]`)).toHaveCount(0);
+		await expect(page.locator(`[data-trace-reply-id="${wrongParent.id}"]`)).toHaveCount(0);
+		await expect(page.locator('[data-trace-current-id]')).toHaveAttribute('data-trace-current-id', currentBeforeInvalidReplies!);
 	});
 
 });

@@ -7,6 +7,10 @@ function root(id: string, createdAt: number, x = 1, y = 1): ParsedWorldMessage {
 	return { id, pubkey: id.padEnd(64, '0'), createdAt, content: id, speechType: 'normal', position: { x, y } };
 }
 
+function deathRoot(id: string, createdAt: number, x = 1, y = 1): ParsedWorldMessage {
+	return { ...root(id, createdAt, x, y), source: 'death' };
+}
+
 function reply(id: string, rootId: string, createdAt = 3, options: Readonly<{
 	parentId?: string;
 	parentKind?: 42 | 1111;
@@ -72,6 +76,21 @@ describe('DEV trace conversation runtime', () => {
 			parentKind: 1111, parentPubkey: parent.pubkey
 		});
 		expect(f.runtime.getTraceConversationState()).toMatchObject({ config: { currentId: parent.id }, replies: f.replies });
+	});
+
+	it('supports Last Words conversations and nested local replies', async () => {
+		const f = fixture();
+		const lastWords = deathRoot('last-words', 3);
+		const direct = reply('last-words-direct', lastWords.id);
+		f.roots = [lastWords];
+		f.replies = [direct];
+		expect(f.runtime.openTraceConversation({ rootId: lastWords.id, currentId: lastWords.id })).toEqual({ kind: 'opened' });
+		expect(f.runtime.getTraceConversationState()).toMatchObject({ root: { source: 'death' }, replies: [direct] });
+		expect(f.runtime.selectTraceConversationSpeech(direct.id)).toEqual({ kind: 'opened' });
+		await expect(f.runtime.publishTraceReply({
+			rootId: lastWords.id, targetId: direct.id, content: 'nested Last Words reply', speechType: 'normal'
+		})).resolves.toMatchObject({ kind: 'succeeded' });
+		expect(f.replies.at(-1)).toMatchObject({ rootId: lastWords.id, parentId: direct.id, parentKind: 1111 });
 	});
 
 	it('opens only effective roots with an empty settled reply snapshot', () => {
