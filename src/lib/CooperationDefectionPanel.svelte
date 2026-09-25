@@ -151,7 +151,8 @@
 		if (!selfPubkey || !result.validParticipantPubkeys.includes(selfPubkey)) return { label: '本人の選択未確認', tone: 'unknown' };
 		if (result.kind === 'insufficient') return { label: 'ラウンド不成立', tone: 'failure' };
 		const cooperated = result.cooperatePubkeys.includes(selfPubkey);
-		if (result.kind === 'all-cooperate' || (result.kind === 'cooperation-success' && cooperated)) return { label: '協力成功', tone: 'success' };
+		if (result.kind === 'all-cooperate') return { label: '全員協力', tone: 'success' };
+		if (result.kind === 'cooperation-success' && cooperated) return { label: '協力成功', tone: 'success' };
 		if (result.kind === 'cooperation-success') return { label: '抜け駆け成功', tone: 'success' };
 		return { label: cooperated ? '協力失敗' : '抜け駆け失敗', tone: 'failure' };
 	}

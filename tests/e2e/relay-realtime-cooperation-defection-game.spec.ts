@@ -369,7 +369,11 @@ test.describe('Relay startup', () => {
 		await page.clock.runFor(2_000);
 		await expect.poll(async () => (await readRelayGameState(page)).points).toBe(1_000);
 		await expect(page.locator('[data-cooperation-defection-round-result]')).toContainText('+1,000pt');
+		await expect(page.locator('[data-cooperation-defection-own-result]')).toHaveText('全員協力');
 		await expect(page.locator('[data-cooperation-defection-selection-status]')).toHaveCount(0);
+		await page.getByRole('button', { name: '結果の詳細を見る' }).click();
+		await expect(page.getByRole('region', { name: 'ラウンド1の結果の詳細' }).locator('h3')).toContainText('ラウンド 1 · 全員協力');
+		await page.getByRole('button', { name: '結果の詳細を閉じる' }).click();
 		const automaticSpeech = (await relayState(page)).state.published.find((event) => event.kind === 42 && event.pubkey === selfPubkey && event.content === '協力');
 		expect(automaticSpeech).toBeDefined();
 		expect(verifyEvent(automaticSpeech as unknown as NostrEvent)).toBe(true);
