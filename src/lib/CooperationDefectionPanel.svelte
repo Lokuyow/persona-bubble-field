@@ -140,11 +140,20 @@
 		return pubkeys.length ? pubkeys.map(participantName).join('、') : 'なし';
 	}
 
-	function outcomeLabel(result: CooperationDefectionRoundResult): string {
+	function groupOutcomeLabel(result: CooperationDefectionRoundResult): string {
 		if (result.kind === 'all-cooperate') return '全員協力';
 		if (result.kind === 'cooperation-success') return '協力成功';
 		if (result.kind === 'cooperation-failure') return '協力失敗';
 		return '不成立';
+	}
+
+	function participantResultPresentation(result: CooperationDefectionRoundResult): Readonly<{ label: string; tone: 'success' | 'failure' | 'unknown' }> {
+		if (!selfPubkey || !result.validParticipantPubkeys.includes(selfPubkey)) return { label: '本人の選択未確認', tone: 'unknown' };
+		if (result.kind === 'insufficient') return { label: 'ラウンド不成立', tone: 'failure' };
+		const cooperated = result.cooperatePubkeys.includes(selfPubkey);
+		if (result.kind === 'all-cooperate' || (result.kind === 'cooperation-success' && cooperated)) return { label: '協力成功', tone: 'success' };
+		if (result.kind === 'cooperation-success') return { label: '抜け駆け成功', tone: 'success' };
+		return { label: cooperated ? '協力失敗' : '抜け駆け失敗', tone: 'failure' };
 	}
 
 	function outcomeSummary(result: CooperationDefectionRoundResult): string {
@@ -223,10 +232,11 @@
 			{/if}
 			{#if schedule.phase === 'game' && roundInfo && lastRoundResult}
 				{@const isPrevious = roundInfo.round > lastRoundResult.round}
+				{@const participantResult = participantResultPresentation(lastRoundResult)}
 				{@const ownResult = ownOutcome(lastRoundResult)}
 				{@const ownPenalty = lastRoundResult.outcomes.some((outcome) => outcome.pubkey === selfPubkey && outcome.kind === 'lifespan-loss')}
 				<div class="cooperation-defection-result" data-cooperation-defection-round-result aria-label={`${isPrevious ? '前ラウンド' : 'ラウンド'}${lastRoundResult.round}の結果`}>
-					<div class="result-heading hud-item"><span class="hud-icon" aria-hidden="true">{#if lastRoundResult.kind === 'cooperation-failure' || lastRoundResult.kind === 'insufficient'}<AlertTriangle />{:else}<CircleCheck />{/if}</span><strong>{outcomeLabel(lastRoundResult)}</strong>{#if isPrevious}<span class="previous-label">前ラウンド</span>{/if}</div>
+					<div class="result-heading hud-item"><span class="hud-icon" aria-hidden="true">{#if participantResult.tone === 'unknown'}<HelpCircle />{:else if participantResult.tone === 'failure'}<AlertTriangle />{:else}<CircleCheck />{/if}</span><strong data-cooperation-defection-own-result>{participantResult.label}</strong>{#if isPrevious}<span class="previous-label">前ラウンド</span>{/if}</div>
 					{#if ownResult}<p class="own-outcome hud-item"><span class="hud-icon" aria-hidden="true">{#if ownPenalty}<HeartBroken />{:else}<Coins />{/if}</span><strong>{ownResult}</strong></p>{/if}
 					<button bind:this={detailsTrigger} type="button" class="details-trigger hud-item" aria-label="結果の詳細を見る" aria-expanded={detailsOpen} aria-controls="cooperation-defection-result-details" onclick={openDetails}><span class="hud-icon" aria-hidden="true"><ListDetails /></span>詳細を見る</button>
 				</div>
@@ -244,14 +254,16 @@
 	{/if}
 
 	{#if detailsOpen && lastRoundResult && detailsPosition}
+		{@const participantResult = participantResultPresentation(lastRoundResult)}
 		<div class="details-layer" aria-hidden="false">
 			<section class="result-details" id="cooperation-defection-result-details" aria-label={`ラウンド${lastRoundResult.round}の結果の詳細`} style={`left:${detailsPosition.left}px;top:${detailsPosition.top}px;width:${detailsPosition.width}px;max-height:${detailsPosition.maxHeight}px`}>
-				<header><h3 class="hud-item"><span class="hud-icon" aria-hidden="true">{#if lastRoundResult.kind === 'cooperation-failure' || lastRoundResult.kind === 'insufficient'}<AlertTriangle />{:else}<CircleCheck />{/if}</span>ラウンド {lastRoundResult.round} · {outcomeLabel(lastRoundResult)}</h3><button type="button" class="hud-item" aria-label="結果の詳細を閉じる" onclick={closeDetails}><span class="hud-icon" aria-hidden="true"><X /></span>閉じる</button></header>
+				<header><h3 class="hud-item"><span class="hud-icon" aria-hidden="true">{#if participantResult.tone === 'unknown'}<HelpCircle />{:else if participantResult.tone === 'failure'}<AlertTriangle />{:else}<CircleCheck />{/if}</span>ラウンド {lastRoundResult.round} · {participantResult.label}</h3><button type="button" class="hud-item" aria-label="結果の詳細を閉じる" onclick={closeDetails}><span class="hud-icon" aria-hidden="true"><X /></span>閉じる</button></header>
 				<!-- svelte-ignore a11y_no_noninteractive_tabindex -- scrollable region remains keyboard focusable -->
 				<div class="result-details-body" role="region" aria-label="結果の詳細内容" tabindex="0">
 					<p><strong>有効な選択</strong></p>
 					<p>協力: {labels(lastRoundResult.cooperatePubkeys)}</p>
 					<p>抜け駆け: {labels(lastRoundResult.defectPubkeys)}</p>
+					<p><strong>グループ全体の判定</strong></p><p>{groupOutcomeLabel(lastRoundResult)}</p>
 					<p><strong>共通の報酬・ペナルティ</strong></p><p>{outcomeSummary(lastRoundResult)}</p>
 					{#if ownOutcome(lastRoundResult)}<p><strong>あなたの結果</strong></p><p>{ownOutcome(lastRoundResult)}</p>{/if}
 				</div>

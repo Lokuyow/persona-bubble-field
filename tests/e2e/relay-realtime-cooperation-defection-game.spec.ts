@@ -62,17 +62,17 @@ test.describe('Relay startup', () => {
 	test('shows each participant the result for their own group', async ({ browser }) => {
 		const schedule = upcomingRegistrationSchedule();
 		const groups = deriveCooperationDefectionGroupPositions(schedule.instanceId, { columns: 16, rows: 8 }, 7);
-		const [cooperationGroup, defectionGroup] = groups;
-		if (!cooperationGroup || !defectionGroup) throw new Error('Expected two event groups.');
+		const [failureGroup, successGroup] = groups;
+		if (!failureGroup || !successGroup) throw new Error('Expected two event groups.');
 		const round = getCooperationDefectionRoundSchedule(schedule, 1);
 		const players = [
-			{ secret: fixtureSecret(31), groupId: cooperationGroup.id, choice: 'cooperate' as const, nonce: '1'.repeat(64) },
-			{ secret: fixtureSecret(32), groupId: defectionGroup.id, choice: 'defect' as const, nonce: '2'.repeat(64) },
-			{ secret: fixtureSecret(33), groupId: cooperationGroup.id, choice: 'cooperate' as const, nonce: '3'.repeat(64) },
-			{ secret: fixtureSecret(34), groupId: cooperationGroup.id, choice: 'cooperate' as const, nonce: '4'.repeat(64) },
-			{ secret: fixtureSecret(35), groupId: defectionGroup.id, choice: 'cooperate' as const, nonce: '5'.repeat(64) },
-			{ secret: fixtureSecret(36), groupId: defectionGroup.id, choice: 'defect' as const, nonce: '6'.repeat(64) },
-			{ secret: fixtureSecret(37), groupId: defectionGroup.id, choice: 'defect' as const, nonce: '7'.repeat(64) }
+			{ secret: fixtureSecret(31), groupId: successGroup.id, choice: 'cooperate' as const, nonce: '1'.repeat(64) },
+			{ secret: fixtureSecret(32), groupId: failureGroup.id, choice: 'defect' as const, nonce: '2'.repeat(64) },
+			{ secret: fixtureSecret(33), groupId: failureGroup.id, choice: 'cooperate' as const, nonce: '3'.repeat(64) },
+			{ secret: fixtureSecret(34), groupId: failureGroup.id, choice: 'defect' as const, nonce: '4'.repeat(64) },
+			{ secret: fixtureSecret(35), groupId: failureGroup.id, choice: 'defect' as const, nonce: '5'.repeat(64) },
+			{ secret: fixtureSecret(36), groupId: successGroup.id, choice: 'cooperate' as const, nonce: '6'.repeat(64) },
+			{ secret: fixtureSecret(37), groupId: successGroup.id, choice: 'defect' as const, nonce: '7'.repeat(64) }
 		];
 		const joins = players.map(({ secret, groupId }) => signedCooperationDefectionAction(secret, schedule, { action: 'join', groupId }, schedule.registrationAtMs + 1_000));
 		const commits = players.map(({ secret, groupId, choice, nonce }) => {
@@ -85,9 +85,11 @@ test.describe('Relay startup', () => {
 		const realtimeEvents = [...joins, ...commits.map(({ event }) => event), ...reveals];
 		const startTime = schedule.registrationAtMs + 1_000;
 		const pageCooperate = await browser.newPage();
-		const pageDefect = await browser.newPage();
+		const pageDefectFailure = await browser.newPage();
+		const pageDefectSuccess = await browser.newPage();
 		const selfCooperate = players[0]!;
-		const selfDefect = players[1]!;
+		const selfDefectFailure = players[1]!;
+		const selfDefectSuccess = players[6]!;
 		const prepareParticipant = async (page: Page, player: (typeof players)[number]) => {
 			const pubkey = getPublicKey(player.secret);
 			await page.clock.install({ time: startTime });
@@ -111,26 +113,40 @@ test.describe('Relay startup', () => {
 			await page.clock.runFor(1_000);
 		};
 		try {
-			await Promise.all([prepareParticipant(pageCooperate, selfCooperate), prepareParticipant(pageDefect, selfDefect)]);
+			await Promise.all([
+				prepareParticipant(pageCooperate, selfCooperate),
+				prepareParticipant(pageDefectFailure, selfDefectFailure),
+				prepareParticipant(pageDefectSuccess, selfDefectSuccess)
+			]);
 			const cooperateResult = pageCooperate.locator('[data-cooperation-defection-round-result]');
-			const defectResult = pageDefect.locator('[data-cooperation-defection-round-result]');
-			await expect(cooperateResult).toContainText('全員協力');
-			await expect(cooperateResult).toContainText('あなた: +1,000pt');
-			await expect(cooperateResult).not.toContainText('協力失敗');
+			const defectFailureResult = pageDefectFailure.locator('[data-cooperation-defection-round-result]');
+			const defectSuccessResult = pageDefectSuccess.locator('[data-cooperation-defection-round-result]');
+			await expect(cooperateResult.locator('[data-cooperation-defection-own-result]')).toHaveText('協力成功');
+			await expect(cooperateResult).toContainText('あなた: +100pt');
 			await pageCooperate.getByRole('button', { name: '結果の詳細を見る' }).click();
 			const cooperateDetails = pageCooperate.getByRole('region', { name: 'ラウンド1の結果の詳細' });
+			await expect(cooperateDetails.locator('h3')).toContainText('ラウンド 1 · 協力成功');
+			await expect(cooperateDetails).toContainText('グループ全体の判定');
+			await expect(cooperateDetails).toContainText('協力成功');
 			await expect(cooperateDetails).toContainText('共通の報酬・ペナルティ');
-			await expect(cooperateDetails).toContainText('あなた: +1,000pt');
-			await expect(cooperateDetails).toContainText('抜け駆け: なし');
-			await expect(defectResult).toContainText('協力失敗');
-			await expect(defectResult).toContainText('あなた: 寿命 −3日');
-			await expect(defectResult).not.toContainText('全員協力');
-			await pageDefect.getByRole('button', { name: '結果の詳細を見る' }).click();
-			const defectDetails = pageDefect.getByRole('region', { name: 'ラウンド1の結果の詳細' });
-			await expect(defectDetails).toContainText('協力失敗');
-			await expect(defectDetails).toContainText('あなた: 寿命 −3日');
-			await expect(defectDetails).toContainText('抜け駆け:');
-			for (const page of [pageCooperate, pageDefect]) {
+			await expect(cooperateDetails).toContainText('あなた: +100pt');
+			await expect(defectFailureResult.locator('[data-cooperation-defection-own-result]')).toHaveText('抜け駆け失敗');
+			await expect(defectFailureResult).toContainText('あなた: 寿命 −3日');
+			await pageDefectFailure.getByRole('button', { name: '結果の詳細を見る' }).click();
+			const defectFailureDetails = pageDefectFailure.getByRole('region', { name: 'ラウンド1の結果の詳細' });
+			await expect(defectFailureDetails.locator('h3')).toContainText('ラウンド 1 · 抜け駆け失敗');
+			await expect(defectFailureDetails).toContainText('グループ全体の判定');
+			await expect(defectFailureDetails).toContainText('協力失敗');
+			await expect(defectFailureDetails).toContainText('あなた: 寿命 −3日');
+			await expect(defectSuccessResult.locator('[data-cooperation-defection-own-result]')).toHaveText('抜け駆け成功');
+			await expect(defectSuccessResult).toContainText('あなた: +10,000pt');
+			await pageDefectSuccess.getByRole('button', { name: '結果の詳細を見る' }).click();
+			const defectSuccessDetails = pageDefectSuccess.getByRole('region', { name: 'ラウンド1の結果の詳細' });
+			await expect(defectSuccessDetails.locator('h3')).toContainText('ラウンド 1 · 抜け駆け成功');
+			await expect(defectSuccessDetails).toContainText('グループ全体の判定');
+			await expect(defectSuccessDetails).toContainText('協力成功');
+			await expect(defectSuccessDetails).toContainText('あなた: +10,000pt');
+			for (const page of [pageCooperate, pageDefectFailure, pageDefectSuccess]) {
 				await expect(page.locator('[data-realtime-panel]')).toHaveAttribute('data-realtime-status', 'degraded');
 				await expect(page.locator('[data-cooperation-defection-communication-warning]')).toBeVisible();
 				await expect(page.locator('[data-cooperation-defection-round-result]')).toBeVisible();
@@ -141,7 +157,7 @@ test.describe('Relay startup', () => {
 				await expect(page.getByRole('region', { name: 'ラウンド1の結果の詳細' })).toBeVisible();
 			}
 		} finally {
-			await Promise.all([pageCooperate.close(), pageDefect.close()]);
+			await Promise.all([pageCooperate.close(), pageDefectFailure.close(), pageDefectSuccess.close()]);
 		}
 	});
 
@@ -198,6 +214,48 @@ test.describe('Relay startup', () => {
 		await expect(page.getByRole('dialog')).toHaveCount(0);
 		expect((await relayState(page)).state.published.filter((event) => event.kind === 7070 && event.pubkey === selfPubkey)).toHaveLength(0);
 	});
+
+	for (const input of [
+		{ name: 'desktop pointer', viewport: { width: 1440, height: 900 }, isMobile: false, hasTouch: false },
+		{ name: 'mobile touch pointer', viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true }
+	]) {
+		test(`toggles Cooperation and Defection rules with a real ${input.name}`, async ({ browser }) => {
+			const page = await browser.newPage({ viewport: input.viewport, isMobile: input.isMobile, hasTouch: input.hasTouch });
+			try {
+				const schedule = upcomingRegistrationSchedule();
+				const startTime = schedule.registrationAtMs + 1_000;
+				await page.clock.install({ time: startTime });
+				await installHostOwnedStub(page);
+				await installDelayedRelay(page, { primaryEvents: testEvents(startTime), realtimeEvents: [] });
+				const secret = fixtureSecret(19);
+				await seedRelayAccount(page, secret, getPublicKey(secret));
+				await page.goto('/');
+				await expect(page.locator('[data-realtime-panel]')).toContainText('参加受付');
+				const summary = page.locator('.cooperation-defection-rules-disclosure summary');
+				const disclosure = page.locator('.cooperation-defection-rules-disclosure');
+				const rules = page.locator('.cooperation-defection-rules-inline');
+				const positionBefore = await page.locator('.participant[data-self="true"]').getAttribute('data-position');
+				const bounds = await summary.boundingBox();
+				if (!bounds) throw new Error('Expected visible rules disclosure control.');
+				const tapRules = async () => {
+					const x = bounds.x + bounds.width / 2;
+					const y = bounds.y + bounds.height / 2;
+					if (input.hasTouch) await page.touchscreen.tap(x, y);
+					else await page.mouse.click(x, y);
+				};
+				await tapRules();
+				await expect(disclosure).toHaveJSProperty('open', true);
+				await expect(rules).toBeVisible();
+				await tapRules();
+				await expect(disclosure).toHaveJSProperty('open', false);
+				await expect(rules).toBeHidden();
+				await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', positionBefore!);
+				await expect(page.locator('.pointer-joystick')).toHaveCount(0);
+			} finally {
+				await page.close();
+			}
+		});
+	}
 
 	test('completes CooperationDefection join, snapshot, commit, automatic reveal, settlement, and reload recovery', async ({ page }) => {
 		const { schedule, group } = scheduleWithDistantFirstGroup(upcomingRegistrationSchedule());
@@ -369,7 +427,8 @@ test.describe('Relay startup', () => {
 		const round = getCooperationDefectionRoundSchedule(schedule, 1);
 		const otherPlayers = [
 			{ secret: fixtureSecret(41), nonce: '4'.repeat(64) },
-			{ secret: fixtureSecret(47), nonce: '5'.repeat(64) }
+			{ secret: fixtureSecret(47), nonce: '5'.repeat(64) },
+			{ secret: fixtureSecret(51), nonce: '6'.repeat(64) }
 		];
 		const otherJoins = otherPlayers.map(({ secret }) => signedCooperationDefectionAction(secret, schedule, { action: 'join', groupId: group.id }, schedule.registrationAtMs + 1_000));
 		const otherCommits = otherPlayers.map(({ secret, nonce }) => {
@@ -400,15 +459,21 @@ test.describe('Relay startup', () => {
 		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectRealtimeEvent(event: object): void } }).__relayStartupTest.injectRealtimeEvent(event), selfJoin);
 		await page.clock.setSystemTime(round.selectionAtMs + 1_000);
 		await page.clock.runFor(1_000);
-		await expect(page.locator('[data-realtime-panel]')).toContainText('参加中（3人）');
+		await expect(page.locator('[data-realtime-panel]')).toContainText('参加中（4人）');
 		await page.locator('[data-cooperation-defection-choice="cooperate"]').click();
 		await expect.poll(async () => (await relayState(page)).state.published.some((event) => event.kind === 7070 && event.pubkey === selfPubkey && JSON.parse(event.content).action === 'commit')).toBe(true);
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { setRealtimePublishOutcome(outcome: 'accepted' | 'rejected' | 'echo' | 'no-response'): void } }).__relayStartupTest.setRealtimePublishOutcome('no-response'));
 		await page.clock.setSystemTime(round.resultAtMs + 1_000);
 		await page.clock.runFor(10_500);
 		await expect(page.locator('[data-cooperation-defection-selection-status]')).toContainText('自動公開エラー（結果未確認）');
-		await expect(page.locator('[data-cooperation-defection-round-result]')).toContainText('不成立');
+		const result = page.locator('[data-cooperation-defection-round-result]');
+		await expect(result.locator('[data-cooperation-defection-own-result]')).toHaveText('本人の選択未確認');
 		await expect(page.locator('[data-cooperation-defection-selection-status]')).toContainText('自動公開エラー（結果未確認）');
-		await expect(page.locator('[data-cooperation-defection-round-result]')).not.toContainText('あなた:');
+		await page.getByRole('button', { name: '結果の詳細を見る' }).click();
+		const details = page.getByRole('region', { name: 'ラウンド1の結果の詳細' });
+		await expect(details.locator('h3')).toContainText('ラウンド 1 · 本人の選択未確認');
+		await expect(details).toContainText('グループ全体の判定');
+		await expect(details).toContainText('全員協力');
+		await expect(details).not.toContainText('あなた:');
 	});
 });
