@@ -11,10 +11,11 @@
 		nowMs: number;
 		realtimeStatus: 'inactive' | 'active' | 'degraded';
 		busy: boolean;
+		touchStatus?: string | null;
 		onLeave: (gameId: string) => void;
 	}>;
 
-	let { game, selfPubkey, selfRunNumber, nowMs, realtimeStatus, busy, onLeave }: Props = $props();
+	let { game, selfPubkey, selfRunNumber, nowMs, realtimeStatus, busy, touchStatus = null, onLeave }: Props = $props();
 	const own = $derived(game?.participant.find((member) => member.pubkey === selfPubkey && member.runNumber === selfRunNumber) ?? null);
 	const holder = $derived(game?.participant.find((member) => member.pubkey === game.ownerPubkey) ?? null);
 	const endsAtMs = $derived((game?.endsAt ?? 0) * 1000);
@@ -45,6 +46,7 @@
 			<span data-tag-game-cooldown>{transferStatus}</span>
 			{#if canLeave}<PrimaryButton class="tag-game-leave" data-tag-game-leave={game.gameId} onclick={() => onLeave(game.gameId)} disabled={busy}>退出</PrimaryButton>{/if}
 		</div>
+		{#if touchStatus}<p class="touch-status" data-tag-game-touch-status aria-live="polite">{touchStatus}</p>{/if}
 	</aside>
 {/if}
 
@@ -59,6 +61,7 @@
 	.game-hud-effect span { color: rgba(226, 230, 255, .88); }
 	.game-hud-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 32px; margin-top: 3px; }
 	.game-hud-footer > span { font-weight: 650; }
+	.touch-status { margin: 3px 0 0; color: rgba(226, 230, 255, .78); font-size: .9em; }
 	.game-hud :global(.tag-game-leave) { min-height: 32px; padding: 4px 10px; pointer-events: auto; }
 	@media (max-width: 700px) {
 		.game-hud { width: min(252px, 100%); padding: 6px 8px; border-radius: 8px; font-size: 11px; }

@@ -70,6 +70,7 @@ import {
 	reconstructWorldPresenceState,
 	type WorldPresenceState
 } from './worldPresence';
+import type { ReducedPresenceParticipant } from './presenceEvidence';
 import {
 	groupTraceRoots,
 	isWithinTraceInvestigationRange,
@@ -164,6 +165,7 @@ export type WorldReadSessionOptions = Readonly<{
 	selfSigner?: ActiveSignerSnapshot | null;
 	selfRunNumber?: number;
 	onPresenceChanged: (presence: PresenceState) => void;
+	onPositionEvidenceChanged?: (participants: readonly ReducedPresenceParticipant[]) => void;
 	onWorldStateEvent?: (event: ParsedWorldStateEvent) => void;
 	onLiveMessage: (message: ParsedWorldMessage, presence: PresenceState) => void;
 	onTimelineMessage?: (message: ParsedWorldMessage) => void;
@@ -245,6 +247,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	let channel: ChannelReference | null = null;
 	let messageSince = 0;
 	let worldPresence: WorldPresenceState = reconstructWorldPresenceState(options.field, [], []);
+	let lastEmittedEvidenceState: WorldPresenceState | null = null;
 	let presence = projectWorldPresenceState(worldPresence, Date.now());
 	let status: WorldReadConnectionStatus = { kind: 'bootstrapping' };
 	let positionPublishState: PositionPublishState = createPositionPublishState();
@@ -495,6 +498,10 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 
 	function project(nowMs: number): PresenceState {
 		presence = projectWorldPresenceState(worldPresence, nowMs);
+		if (!disposed && lastEmittedEvidenceState !== worldPresence) {
+			lastEmittedEvidenceState = worldPresence;
+			options.onPositionEvidenceChanged?.(worldPresence.participants);
+		}
 		if (!disposed) options.onPresenceChanged(presence);
 		refreshSelfMessageAvailability();
 		return presence;
@@ -1096,7 +1103,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	}
 
 	/** Best-effort positive activity refresh for successful browser-local actions. */
-	async function refreshSelfActivity(): Promise<SelfPositionWriteResult> {
+	async function refreshSelfActivity(input: Readonly<{ forcePositionEvidence?: boolean }> = {}): Promise<SelfPositionWriteResult> {
 		if (disposed || terminal || !selfSigner || !transport || !channel) return { kind: 'unavailable' };
 		if ((!bootstrapComplete && !(journalScope && selfReadReady)) || !selfJoinedThisSession) return { kind: 'blocked' };
 		if (pendingSelfOperation || pendingSelfMessage || pendingTraceReply) return { kind: 'pending' };
@@ -1104,11 +1111,25 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		if (!participant || participant.status !== 'active') return { kind: 'blocked' };
 		const nowMs = Date.now();
 		const createdAt = Math.floor(nowMs / 1000);
-		const coalesced = selfPositionEvidence.some((event) =>
+		const coalesced = !input.forcePositionEvidence && selfPositionEvidence.some((event) =>
 			event.state === 'active' && event.createdAt === createdAt && event.position.x === participant.position.x && event.position.y === participant.position.y
 		);
 		if (coalesced) return { kind: 'not-needed' };
-		const candidate = positionCandidate(participant.position, nowMs);
+		let candidate = positionCandidate(participant.position, nowMs);
+		const refreshPlan = planPositionPublish(positionPublishState, createdAt);
+		if (!candidate && input.forcePositionEvidence && refreshPlan.kind === 'unavailable' && refreshPlan.reason === 'second-exhausted') {
+			if (!await waitForActualSecond(createdAt)) return { kind: 'unavailable' };
+			if (pendingSelfOperation || pendingTraceReply || pendingSelfMessage) return { kind: 'pending' };
+			const refreshedParticipant = getParticipant(currentPresence(), selfSigner.pubkey);
+			if (!refreshedParticipant || refreshedParticipant.status !== 'active') return { kind: 'blocked' };
+			const refreshedSecond = Math.floor(Date.now() / 1_000);
+			const movementAlreadyPublished = selfPositionEvidence.some((event) =>
+				event.state === 'active' && event.runNumber === selfRunNumber && event.createdAt >= refreshedSecond &&
+				event.position.x === refreshedParticipant.position.x && event.position.y === refreshedParticipant.position.y
+			);
+			if (movementAlreadyPublished) return { kind: 'not-needed' };
+			candidate = positionCandidate(refreshedParticipant.position, Date.now());
+		}
 		if (!candidate) return { kind: 'not-needed' };
 		return publishPreparedSelfPosition('game-action', candidate);
 	}

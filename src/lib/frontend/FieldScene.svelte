@@ -57,6 +57,9 @@
 		participatingCooperationDefectionGroupId: string | null;
 		participantViews: readonly FieldParticipantView[];
 		tagGameRoleByPubkey: ReadonlyMap<string, 'participant' | 'holder'>;
+		tagGameTouchTargetIds: ReadonlySet<string>;
+		tagGameTouchAttempt: Readonly<{ participantId: string; direction: Direction; id: number }> | null;
+		tagGameHolderTransfer: Readonly<{ participantId: string; id: number }> | null;
 		tagGameEffect: 'benefit' | 'calamity' | null;
 		tagGameEffectActive: boolean;
 		selfProjectionId: string;
@@ -93,6 +96,9 @@
 		participatingCooperationDefectionGroupId,
 		participantViews,
 		tagGameRoleByPubkey,
+		tagGameTouchTargetIds,
+		tagGameTouchAttempt,
+		tagGameHolderTransfer,
 		tagGameEffect,
 		tagGameEffectActive,
 		selfProjectionId,
@@ -110,6 +116,16 @@
 		onOpenSelfProfile,
 		traceMarkerWorldPosition,
 	}: Props = $props();
+
+	function directionVector(direction: Direction, distance: number): WorldPoint {
+		const unit: Record<Direction, WorldPoint> = {
+			up: { x: 0, y: -1 }, 'up-right': { x: 1, y: -1 }, right: { x: 1, y: 0 },
+			'down-right': { x: 1, y: 1 }, down: { x: 0, y: 1 }, 'down-left': { x: -1, y: 1 },
+			left: { x: -1, y: 0 }, 'up-left': { x: -1, y: -1 }
+		};
+		const vector = unit[direction];
+		return { x: vector.x * distance, y: vector.y * distance };
+	}
 
 </script>
 
@@ -242,6 +258,10 @@
 				world={participant.world}
 				movementAnimation={movingParticipantIds.has(participant.id)}
 				tagGameRole={tagGameRoleByPubkey.get(participant.id) ?? null}
+				tagGameTouchTarget={tagGameTouchTargetIds.has(participant.id)}
+				tagGameTouchAttemptId={tagGameTouchAttempt?.participantId === participant.id ? tagGameTouchAttempt.id : null}
+				tagGameTouchAttemptOffset={tagGameTouchAttempt?.participantId === participant.id ? directionVector(tagGameTouchAttempt.direction, cellSize * 0.48) : null}
+				tagGameHolderTransferId={tagGameHolderTransfer?.participantId === participant.id ? tagGameHolderTransfer.id : null}
 				{tagGameEffect}
 				{tagGameEffectActive}
 				onProfile={resolveFieldCellSelection}

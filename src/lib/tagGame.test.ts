@@ -13,6 +13,8 @@ import {
 	buildTagGameTemplate,
 	createTagGameSchedule,
 	finalizeTagGameState,
+	isFreshTagGameTouchAction,
+	isTagGameTouchPositionProof,
 	isFreshTagGameLobby,
 	leaveTagGameParticipant,
 	isValidTagGameState,
@@ -61,6 +63,20 @@ describe('player-hosted tag-game protocol and rules', () => {
 		expect(parseTagGameEvent({ ...event, pubkey: 'e'.repeat(64) }, CHANNEL)).toBeNull();
 		expect(parseTagGameEvent(event, 'f'.repeat(64))).toBeNull();
 		expect(parseTagGameEvent({ ...event, tags: [...event.tags, ['d', 'other']] }, CHANNEL)).toBeNull();
+	});
+
+	it('validates touch evidence references and applies coarse freshness at first receipt and queue commit', () => {
+		const proof = { worldStateEventId: '1'.repeat(64), positionEvidenceEventId: '2'.repeat(64) };
+		expect(isTagGameTouchPositionProof(proof)).toBe(true);
+		expect(isTagGameTouchPositionProof({ ...proof, positionEvidenceEventId: 'bad' })).toBe(false);
+		const nowMs = 20_000;
+		expect(isFreshTagGameTouchAction({ createdAtSeconds: 10, nowMs, elapsedSinceFirstReceiptMs: 0 })).toBe(true);
+		expect(isFreshTagGameTouchAction({ createdAtSeconds: 9, nowMs, elapsedSinceFirstReceiptMs: 0 })).toBe(false);
+		expect(isFreshTagGameTouchAction({ createdAtSeconds: 22, nowMs, elapsedSinceFirstReceiptMs: 0 })).toBe(true);
+		expect(isFreshTagGameTouchAction({ createdAtSeconds: 23, nowMs, elapsedSinceFirstReceiptMs: 0 })).toBe(false);
+		expect(isFreshTagGameTouchAction({ createdAtSeconds: 10, nowMs, elapsedSinceFirstReceiptMs: 3_000 })).toBe(true);
+		expect(isFreshTagGameTouchAction({ createdAtSeconds: 10, nowMs, elapsedSinceFirstReceiptMs: 3_001 })).toBe(false);
+		expect(isFreshTagGameTouchAction({ createdAtSeconds: 10, nowMs: 21_001, elapsedSinceFirstReceiptMs: 1_001 })).toBe(false);
 	});
 
 	it('renews unbounded lobbies and rejects expired ones using the event timestamp', () => {

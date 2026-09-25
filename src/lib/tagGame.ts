@@ -16,6 +16,38 @@ export const TAG_GAME_MAX_LIFESPAN_LOSS_MS = 324_000_000;
 export const TAG_GAME_MAX_EFFECT_MS = 90_000;
 export const TAG_GAME_BENEFIT_POINTS_PER_SECOND = 50;
 export const TAG_GAME_LIFESPAN_LOSS_MS_PER_SECOND = 3_600_000;
+export const TAG_GAME_TOUCH_RETRY_MS = 500;
+export const TAG_GAME_TOUCH_FEEDBACK_MS = 200;
+export const TAG_GAME_TOUCH_EVIDENCE_WAIT_MS = 1_000;
+export const TAG_GAME_TOUCH_MAX_AGE_SECONDS = 10;
+export const TAG_GAME_TOUCH_FUTURE_SKEW_SECONDS = 2;
+export const TAG_GAME_TOUCH_QUEUE_MAX_MS = 3_000;
+
+export type TagGameTouchPositionProof = Readonly<{
+	worldStateEventId: string;
+	positionEvidenceEventId: string;
+}>;
+
+export function isTagGameTouchPositionProof(value: unknown): value is TagGameTouchPositionProof {
+	if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+	const proof = value as Record<string, unknown>;
+	return typeof proof.worldStateEventId === 'string' && HEX_ID.test(proof.worldStateEventId) &&
+		typeof proof.positionEvidenceEventId === 'string' && HEX_ID.test(proof.positionEvidenceEventId);
+}
+
+/** created_at is checked only as coarse freshness; it never orders contact against movement. */
+export function isFreshTagGameTouchAction(input: Readonly<{
+	createdAtSeconds: number;
+	nowMs: number;
+	elapsedSinceFirstReceiptMs: number;
+}>): boolean {
+	if (!Number.isSafeInteger(input.createdAtSeconds) || input.createdAtSeconds < 0 ||
+		!Number.isSafeInteger(input.nowMs) || input.nowMs < 0 ||
+		!Number.isFinite(input.elapsedSinceFirstReceiptMs) || input.elapsedSinceFirstReceiptMs < 0 ||
+		input.elapsedSinceFirstReceiptMs > TAG_GAME_TOUCH_QUEUE_MAX_MS) return false;
+	const ageSeconds = Math.floor(input.nowMs / 1_000) - input.createdAtSeconds;
+	return ageSeconds <= TAG_GAME_TOUCH_MAX_AGE_SECONDS && ageSeconds >= -TAG_GAME_TOUCH_FUTURE_SKEW_SECONDS;
+}
 
 export function tagGamePredictedRemainingLifespanMinutes(effectiveRemainingMs: number | null, unAppliedLossMs: number): number {
 	return Math.max(0, Math.floor(((effectiveRemainingMs ?? 0) - unAppliedLossMs) / 60_000));

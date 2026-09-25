@@ -748,6 +748,26 @@ describe('world read session', () => {
 		expect(parseWorldStateEvent(publish.mock.calls[0][0], 'c'.repeat(64))?.slot).toBe(1);
 	});
 
+	it('refreshes tag-game position evidence through the planner when both current-second slots are used', async () => {
+		result = startResult([], [
+			position('self-slot-0', 700, selfPubkey, 0),
+			position('self-slot-1', 700, selfPubkey, 1)
+		]);
+		publish.mockResolvedValue([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 }, selfSigner: selfSigner(),
+			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn()
+		});
+		await session.start();
+		session.completeBootstrap();
+		await expect(session.enterSelf()).resolves.toEqual({ kind: 'not-needed' });
+		const refresh = session.refreshSelfActivity({ forcePositionEvidence: true });
+		await vi.advanceTimersByTimeAsync(1_000);
+		await expect(refresh).resolves.toMatchObject({ kind: 'succeeded', operation: 'game-action' });
+		const emitted = parseWorldStateEvent(publish.mock.calls[0][0], 'c'.repeat(64));
+		expect(emitted).toMatchObject({ createdAt: 701, slot: 0, state: 'active', position: { x: 2, y: 1 } });
+	});
+
 	it('reconstructs the bootstrap snapshot and uses the 11 minute window', async () => {
 		result = startResult([message('message', 700)], [position('position', 700)]);
 		const presences: number[] = [];
