@@ -557,13 +557,19 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 	let tagGameWatchedGame = $derived(tagGameWatchedGameId ? tagGameStates.find((game) => game.gameId === tagGameWatchedGameId && (game.phase === 'running' || game.phase === 'settling')) ?? null : null);
 	let tagGameDisplayedGameId = $derived(tagGameSelfActiveGameId ?? tagGameWatchedGame?.gameId ?? null);
 	let tagGameLocalLock = $derived(Boolean(personaSnapshot && tagGameSelfActiveGameId));
+	let tagGameDisplayedEffect = $derived.by(() => {
+		const game = tagGameStates.find((candidate) => candidate.gameId === tagGameDisplayedGameId);
+		if (!game) return null;
+		const holder = game.participant.find((member) => member.pubkey === game.ownerPubkey);
+		return { effect: game.effect ?? null, active: game.phase === 'running' && !game.holderChallengeId && holder?.status === 'active' };
+	});
 	let tagGameRoleByPubkey = $derived.by(() => {
 		const roles = new Map<string, 'participant' | 'holder'>();
 		const game = tagGameStates.find((candidate) => candidate.gameId === tagGameDisplayedGameId);
 		if (!game) return roles;
 		for (const member of game.participant) {
 			const latest = latestTagGameWorldStates.get(member.pubkey);
-			if (member.status === 'active' && latest?.state === 'active' && latest.runNumber === member.runNumber) {
+			if ((member.status === 'active' || member.status === 'temporarily-ineligible') && latest?.state === 'active' && latest.runNumber === member.runNumber) {
 				roles.set(member.pubkey, member.pubkey === game.ownerPubkey ? 'holder' : 'participant');
 			}
 		}
@@ -2401,7 +2407,7 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 		const proposalId = tagGameNonce();
 		await updateTagGameState(gameId, (current) => current.phase === 'lobby' && current.participant.length >= 2
 			? { ...current, phase: 'proposed', proposalId, proposalDeadline: Math.floor(Date.now() / 1000) + 30,
-				participant: current.participant.map((member) => ({ ...member, consentProposalId: undefined, consented: false })), revision: current.revision + 1 }
+				participant: current.participant.map((member) => ({ ...member, consentProposalId: member.pubkey === current.hostPubkey ? proposalId : undefined, consented: member.pubkey === current.hostPubkey })), revision: current.revision + 1 }
 			: null);
 	}
 
@@ -2445,6 +2451,7 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 			void updateTagGameState(state.gameId, (current) => {
 				const member = current.participant.find((candidate) => candidate.pubkey === parsed.event.pubkey && candidate.runNumber === parsed.runNumber);
 				if (!member) return null;
+				if ((current.phase === 'lobby' || current.phase === 'proposed') && current.hostPubkey === parsed.event.pubkey) return null;
 				if (current.phase === 'lobby' || current.phase === 'proposed') return {
 					...current, phase: 'lobby', proposalId: undefined, proposalDeadline: undefined, startAt: undefined, revision: current.revision + 1,
 					participant: current.participant.filter((candidate) => candidate.pubkey !== parsed.event.pubkey).map((candidate) => ({ ...candidate, consentProposalId: undefined, consented: false }))
@@ -2457,7 +2464,7 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 			});
 		} else if (parsed.action === 'consent' && state.proposalId === parsed.payload.proposalId) {
 			void updateTagGameState(state.gameId, (current) => {
-				if (current.phase !== 'proposed' || !current.proposalDeadline || Date.now() >= current.proposalDeadline * 1000 || current.proposalId !== parsed.payload.proposalId ||
+				if (current.phase !== 'proposed' || parsed.event.pubkey === current.hostPubkey || !current.proposalDeadline || Date.now() >= current.proposalDeadline * 1000 || current.proposalId !== parsed.payload.proposalId ||
 					!current.participant.some((member) => member.pubkey === parsed.event.pubkey && member.runNumber === parsed.runNumber)) return null;
 				const participants = current.participant.map((member) => member.pubkey === parsed.event.pubkey && member.runNumber === parsed.runNumber ? { ...member, consentProposalId: current.proposalId, consented: true } : member);
 				const allConsented = participants.every((member) => member.consentProposalId === current.proposalId && member.consented);
@@ -3589,6 +3596,8 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 				participatingCooperationDefectionGroupId={cooperationDefectionSchedule.phase === 'registration' ? cooperationDefectionSelfGroupId : null}
 				{participantViews}
 				{tagGameRoleByPubkey}
+				tagGameEffect={tagGameDisplayedEffect?.effect ?? null}
+				tagGameEffectActive={tagGameDisplayedEffect?.active ?? false}
 				{selfProjectionId}
 				{movingParticipantIds}
 				{selfIsActive}

@@ -13,6 +13,8 @@
 		world: WorldPoint;
 		movementAnimation: boolean;
 		tagGameRole?: 'participant' | 'holder' | null;
+		tagGameEffect?: 'benefit' | 'calamity' | null;
+		tagGameEffectActive?: boolean;
 		onProfile: (position: GridPosition, trigger: HTMLButtonElement) => void;
 		onSelfProfile?: (trigger: HTMLButtonElement) => void;
 	}>;
@@ -26,6 +28,8 @@
 		world,
 		movementAnimation,
 		tagGameRole = null,
+		tagGameEffect = null,
+		tagGameEffectActive = false,
 		onProfile,
 		onSelfProfile
 	}: Props = $props();
@@ -38,6 +42,8 @@
 	data-position={`${position.x},${position.y}`}
 	data-movement-animation={movementAnimation ? 'active' : undefined}
 	data-tag-game-role={tagGameRole ?? undefined}
+	data-tag-game-effect={tagGameRole === 'holder' ? tagGameEffect ?? undefined : undefined}
+	data-tag-game-effect-active={tagGameRole === 'holder' ? String(tagGameEffectActive) : undefined}
 	style={`left: ${world.x}px; top: ${world.y}px;`}
 >
 	<button
@@ -56,8 +62,13 @@
 		<CharacterAvatar class={`avatar avatar-${color}`} {character} />
 		<span class="participant-name" class:participant-name-self={self} aria-hidden="true">{character.name}</span>
 	</button>
-	{#if tagGameRole}
-		<span class="tag-game-marker" role="img" aria-label={tagGameRole === 'holder' ? '鬼ごっこ所持者' : '鬼ごっこ参加者'}>{tagGameRole === 'holder' ? '鬼' : '追'}</span>
+	{#if tagGameRole === 'holder'}
+		<span class={['tag-game-holder-label', { 'tag-game-holder-label-paused': !tagGameEffectActive }]} role="img" aria-label={`${tagGameEffect === 'benefit' ? '恩恵' : '災厄'}${tagGameEffectActive ? '' : '・効果停止中'}`}>
+			<strong>{tagGameEffect === 'benefit' ? '恩恵' : '災厄'}</strong>
+			<small>{tagGameEffectActive ? tagGameEffect === 'benefit' ? '+50pt/秒' : '寿命−1時間/秒' : '停止中'}</small>
+		</span>
+	{:else if tagGameRole === 'participant'}
+		<span class="tag-game-participant-mark" role="img" aria-label="鬼ごっこ参加者"></span>
 	{/if}
 </div>
 
@@ -117,24 +128,59 @@
 		font-weight: 800;
 	}
 
-	.tag-game-marker {
+	[data-tag-game-role='holder'] .participant-profile-trigger::after {
 		position: absolute;
-		top: 0;
-		right: 0;
-		z-index: 1;
-		display: grid;
-		min-width: 18px;
-		height: 18px;
-		place-items: center;
-		padding: 0 3px;
-		border: 1px solid #fff;
-		border-radius: 999px;
-		background: #426b9c;
-		color: #fff;
-		font-size: 10px;
-		font-weight: 800;
-		line-height: 1;
+		inset: 1px;
+		border: 3px solid #2e8b57;
+		border-radius: 50%;
+		box-shadow: 0 0 0 2px rgba(255, 255, 255, .9), 0 0 10px rgba(46, 139, 87, .68);
+		content: '';
 		pointer-events: none;
 	}
-	[data-tag-game-role='holder'] .tag-game-marker { background: #a94b36; }
+	[data-tag-game-role='holder'][data-tag-game-effect='calamity'] .participant-profile-trigger::after { border-color: #b4483b; box-shadow: 0 0 0 2px rgba(255, 255, 255, .9), 0 0 10px rgba(180, 72, 59, .68); }
+	[data-tag-game-role='holder'][data-tag-game-effect-active='false'] .participant-profile-trigger::after { border-style: dashed; opacity: .62; }
+	.tag-game-holder-label {
+		position: absolute;
+		top: 3px;
+		left: 50%;
+		z-index: 2;
+		display: flex;
+		align-items: center;
+		gap: 1px 4px;
+		max-width: calc(var(--cell-size) - 8px);
+		flex-wrap: wrap;
+		justify-content: center;
+		padding: 2px 6px;
+		border: 1px solid rgba(255, 255, 255, .9);
+		border-radius: 999px;
+		background: #e4f2e9;
+		box-shadow: 0 1px 5px rgba(0, 0, 0, .25);
+		transform: translateX(-50%);
+		white-space: nowrap;
+		pointer-events: none;
+	}
+	.tag-game-holder-label strong { color: #226b42; font-size: 10px; }
+	.tag-game-holder-label small { flex-basis: 100%; overflow: hidden; color: #274a35; text-align: center; text-overflow: ellipsis; font-size: 9px; line-height: 1.05; white-space: normal; }
+	[data-tag-game-effect='calamity'] .tag-game-holder-label { background: #f7e8e5; }
+	[data-tag-game-effect='calamity'] .tag-game-holder-label strong,
+	[data-tag-game-effect='calamity'] .tag-game-holder-label small { color: #85372e; }
+	.tag-game-holder-label-paused { opacity: .72; }
+	.tag-game-participant-mark {
+		position: absolute;
+		top: 2px;
+		right: 2px;
+		z-index: 1;
+		width: 9px;
+		height: 9px;
+		border: 2px solid #fff;
+		border-radius: 50%;
+		background: #58717d;
+		box-shadow: 0 0 0 1px rgba(47, 68, 78, .65);
+		pointer-events: none;
+	}
+	@media (max-width: 700px) {
+		.tag-game-holder-label { top: 3px; max-width: calc(var(--cell-size) - 6px); padding: 2px 5px; }
+		.tag-game-holder-label small { display: none; }
+		.tag-game-holder-label strong { font-size: 9px; }
+	}
 </style>

@@ -1,7 +1,7 @@
 import { getPublicKey } from 'nostr-tools/pure';
 import { describe, expect, it } from 'vitest';
 import { resolveCharacterFromPubkey } from './characterAssignment';
-import { tagGameCharacterName, tagGameParticipantLabel } from './tagGamePresentation';
+import { newlyConfirmedTagGameParticipants, tagGameCharacterName, tagGameParticipantLabel } from './tagGamePresentation';
 import type { TagGameState } from './tagGame';
 
 function secret(seed: number): Uint8Array { return new Uint8Array(32).fill(seed); }
@@ -59,5 +59,16 @@ describe('tag-game character presentation', () => {
 			sharedSlot.set(name, pubkey);
 		}
 		throw new Error('Expected deterministic test keys to include two pubkeys for one assigned character.');
+	});
+
+	it('finds all additions in one confirmed state and treats a departed participant who rejoins as new', () => {
+		const joinedA = getPublicKey(secret(54));
+		const joinedB = getPublicKey(secret(55));
+		const previous = { ...game, participant: [game.participant[0]] };
+		const joined = { ...game, participant: [...previous.participant, ...[joinedA, joinedB].map((pubkey) => ({ pubkey, runNumber: 1, registeredAt: 2, status: 'registered' as const, points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 }))] };
+		expect(newlyConfirmedTagGameParticipants(null, joined)).toEqual([]);
+		expect(newlyConfirmedTagGameParticipants(previous, joined)).toEqual([joinedA, joinedB]);
+		const departed = { ...joined, participant: joined.participant.map((member) => member.pubkey === joinedA ? { ...member, status: 'left' as const } : member) };
+		expect(newlyConfirmedTagGameParticipants(departed, joined)).toEqual([joinedA]);
 	});
 });

@@ -57,6 +57,8 @@
 		participatingCooperationDefectionGroupId: string | null;
 		participantViews: readonly FieldParticipantView[];
 		tagGameRoleByPubkey: ReadonlyMap<string, 'participant' | 'holder'>;
+		tagGameEffect: 'benefit' | 'calamity' | null;
+		tagGameEffectActive: boolean;
 		selfProjectionId: string;
 		movingParticipantIds: ReadonlySet<string>;
 		selfIsActive: boolean;
@@ -91,6 +93,8 @@
 		participatingCooperationDefectionGroupId,
 		participantViews,
 		tagGameRoleByPubkey,
+		tagGameEffect,
+		tagGameEffectActive,
 		selfProjectionId,
 		movingParticipantIds,
 		selfIsActive,
@@ -238,6 +242,8 @@
 				world={participant.world}
 				movementAnimation={movingParticipantIds.has(participant.id)}
 				tagGameRole={tagGameRoleByPubkey.get(participant.id) ?? null}
+				{tagGameEffect}
+				{tagGameEffectActive}
 				onProfile={resolveFieldCellSelection}
 				onSelfProfile={onOpenSelfProfile}
 			/>

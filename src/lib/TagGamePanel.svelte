@@ -1,8 +1,9 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import { asset } from '$app/paths';
 	import PrimaryButton from '$lib/PrimaryButton.svelte';
 	import { resolveCharacterFromPubkey } from '$lib/characterAssignment';
-	import { tagGameCharacterName, tagGameParticipantLabel } from '$lib/tagGamePresentation';
+	import { newlyConfirmedTagGameParticipants, tagGameCharacterName, tagGameConfirmedParticipants, tagGameParticipantLabel } from '$lib/tagGamePresentation';
 	import { createTagGameSchedule, tagGamePredictedRemainingLifespanMinutes, TAG_GAME_BENEFIT_POINTS_PER_SECOND, TAG_GAME_LIFESPAN_LOSS_MS_PER_SECOND, type TagGameState } from '$lib/tagGame';
 	type Props = Readonly<{
 		open: boolean;
@@ -36,6 +37,26 @@
 	const ownHostLobby = $derived(games.find((game) => game.hostPubkey === selfPubkey && (game.phase === 'lobby' || game.phase === 'proposed')) ?? null);
 	const reservationCurrent = $derived(Boolean(reservedGameId && !(reservationExpiresAtMs !== null && reservationExpiresAtMs <= nowMs)));
 	const createAllowed = $derived(Boolean(selfPubkey && !reservationCurrent && !ownHostLobby && !games.some((game) => game.participant.some((member) => member.pubkey === selfPubkey && ['registered', 'active', 'temporarily-ineligible'].includes(member.status)) && !['ended', 'interrupted'].includes(game.phase))));
+	const GAME_SLOTS = Array.from({ length: 8 }, (_, index) => index);
+	let knownGames = new Map<string, TagGameState>();
+	let arrivalMessage = $state('');
+	let highlightedPubkeys = $state<readonly string[]>([]);
+	let arrivalTimeout: ReturnType<typeof setTimeout> | undefined;
+	$effect(() => {
+		const additions: Array<{ game: TagGameState; pubkey: string }> = [];
+		for (const game of games) {
+			for (const pubkey of newlyConfirmedTagGameParticipants(knownGames.get(game.gameId) ?? null, game)) additions.push({ game, pubkey });
+			knownGames.set(game.gameId, game);
+		}
+		if (!open || additions.length === 0) return;
+		const names = additions.map(({ game, pubkey }) => tagGameParticipantLabel(game, pubkey, selfPubkey));
+		arrivalMessage = `${names.join('、')}が参加しました`;
+		highlightedPubkeys = additions.map(({ pubkey }) => pubkey);
+		if (arrivalTimeout) clearTimeout(arrivalTimeout);
+		arrivalTimeout = setTimeout(() => { arrivalMessage = ''; highlightedPubkeys = []; arrivalTimeout = undefined; }, 3_500);
+	});
+	onDestroy(() => { if (arrivalTimeout) clearTimeout(arrivalTimeout); });
+	function isHighlighted(pubkey: string): boolean { return highlightedPubkeys.includes(pubkey); }
 	function hostLabel(game: TagGameState): string {
 		if (game.hostPubkey === selfPubkey) return 'あなたの開催';
 		const name = tagGameCharacterName(game.hostPubkey, selfPubkey);
@@ -71,7 +92,15 @@
 			{@const cooldown = Math.max(0, 3 - Math.ceil((nowMs - (game.transferAt ?? nowMs)) / 1000))}
 			<strong>鬼ごっこ・残り{Math.max(0, Math.ceil(((game.endsAt ?? 0) * 1000 - nowMs) / 1000))}秒</strong>
 			<p>参加者: {game.participant.filter((member) => member.status === 'active').map((member) => `${tagGameParticipantLabel(game, member.pubkey, selfPubkey)}${member.pubkey === game.ownerPubkey ? '(所持者)' : ''}`).join('、')}</p>
-			<p>所持者: {game.ownerPubkey ? tagGameParticipantLabel(game, game.ownerPubkey, selfPubkey) : '未定'}・{game.effect === 'benefit' ? '恩恵' : '災厄'}・転移後{cooldown}秒</p>
+			{@const holder = game.participant.find((member) => member.pubkey === game.ownerPubkey)}
+			{@const effectActive = game.phase === 'running' && !game.holderChallengeId && holder?.status === 'active'}
+			<div class={['hud-holder', game.effect ?? 'calamity', { 'hud-effect-paused': !effectActive }]} data-tag-game-effect={game.effect} data-tag-game-effect-active={effectActive ? 'true' : 'false'}>
+				<span class="hud-holder-name">所持者・{game.ownerPubkey ? tagGameParticipantLabel(game, game.ownerPubkey, selfPubkey) : '未定'}</span>
+				{#if effectActive}<strong>{game.effect === 'benefit' ? '恩恵・+' + TAG_GAME_BENEFIT_POINTS_PER_SECOND + 'pt/秒' : '災厄・寿命−1時間/秒'}</strong>
+					<small>{game.effect === 'benefit' ? '所持者以外が追いかけて奪う' : '所持者がほかの参加者を追いかけて押し付ける'}</small>
+				{:else}<strong>{game.phase === 'settling' ? '最終精算中・効果停止' : game.holderChallengeId ? '応答確認中・効果停止' : '効果停止中'}</strong>{/if}
+			</div>
+			<p>転移後{cooldown}秒</p>
 			{#if own}<p>予測: {own.points + pending.points}pt・寿命残り約{tagGamePredictedRemainingLifespanMinutes(effectiveLifespanMs, pending.lossMs)}分</p>{/if}
 			{#if game.phase === 'running' && (own?.status === 'active' || own?.status === 'temporarily-ineligible')}
 				<PrimaryButton class="tag-game-leave" data-tag-game-leave={game.gameId} onclick={() => onLeave(game.gameId)} disabled={busy}>退出を申請</PrimaryButton>
@@ -87,7 +116,7 @@
 			<header><h2 id="tag-game-title">鬼ごっこ</h2><button type="button" aria-label="閉じる" onclick={onClose}>×</button></header>
 			<p>最大8人、3分間のプレイヤー主催イベントです。募集参加中も脱出と能力強化を行えます。</p>
 			{#if createAllowed}<PrimaryButton onclick={onCreate} disabled={busy}>鬼ごっこを開催</PrimaryButton>
-			{:else if ownHostLobby}<p class="reservation-state">あなたの開催</p>
+			{:else if ownHostLobby}<p class="reservation-state">募集を開催中</p>
 			{:else if reservationCurrent}<p class="reservation-state">{reservedStatus === 'pending' ? '参加申請済み（受理待ち）' : reservedStatus === 'active' ? '鬼ごっこに参加中' : '参加申請済み（参加登録済み）'}</p>
 			{:else}<p class="reservation-state">ほかの開催回に参加中</p>{/if}
 			{#if games.length === 0}<p>現在募集中の開催はありません。</p>{/if}
@@ -95,11 +124,32 @@
 				<p class="reservation-state">表示されていない開催への{reservedStatus === 'pending' ? '参加申請' : '参加登録'}があります。</p>
 				<PrimaryButton data-tag-game-cancel-reservation={reservedGameId} onclick={() => onLeave(reservedGameId)} disabled={busy}>参加予約を取り消す</PrimaryButton>
 			{/if}
+			{#if arrivalMessage}<p class="tag-game-arrival" role="status" aria-live="polite">{arrivalMessage}</p>{/if}
 			<ul>
 				{#each games as game (game.gameId)}
 					{@const hostCharacter = resolveCharacterFromPubkey(game.hostPubkey)}
+					{@const confirmedParticipants = tagGameConfirmedParticipants(game)}
 					<li>
-						<div class="host-identity">{#if hostCharacter}<img class="tag-game-avatar" src={asset(`/${hostCharacter.picture}`)} alt="" />{/if}<strong>{hostLabel(game)}</strong><span>{labels[game.phase]}・{game.participant.filter((player) => player.status === 'registered' || player.status === 'active').length}/8人</span></div>
+						<div class="host-identity">{#if hostCharacter}<img class="tag-game-avatar" src={asset(`/${hostCharacter.picture}`)} alt="" />{/if}<strong>{hostLabel(game)}</strong><span>{labels[game.phase]}</span></div>
+						<strong class="participant-count">参加者 {confirmedParticipants.length} / 8人</strong>
+						{#if game.phase === 'lobby' || game.phase === 'proposed' || game.phase === 'countdown'}
+							<ol class="participant-slots" aria-label="参加者枠">
+								{#each GAME_SLOTS as slot}
+									{@const player = confirmedParticipants[slot]}
+									{#if player}
+										{@const character = resolveCharacterFromPubkey(player.pubkey)}
+										<li class={['participant-slot', { 'participant-slot-arrival': isHighlighted(player.pubkey) }]} data-tag-game-participant-slot={player.pubkey}>
+											{#if character}<img src={asset(`/${character.picture}`)} alt="" />{/if}
+											<strong title={tagGameParticipantLabel(game, player.pubkey, selfPubkey)}>{tagGameParticipantLabel(game, player.pubkey, selfPubkey)}</strong>
+											{#if player.pubkey === game.hostPubkey}<small>開催者</small>
+											{:else if player.pubkey === selfPubkey}<small>あなた</small>
+											{:else if game.phase === 'proposed' && player.consentProposalId === game.proposalId && player.consented}<small>同意済み</small>
+											{:else if game.phase === 'proposed'}<small>同意待ち</small>{/if}
+										</li>
+									{:else}<li class="participant-slot participant-slot-empty" aria-label={`空き参加枠 ${slot + 1}`}>空き</li>{/if}
+								{/each}
+							</ol>
+						{/if}
 						{#if game.ownerPubkey}<p class="game-status">所持者 {tagGameParticipantLabel(game, game.ownerPubkey, selfPubkey)}・{game.effect === 'benefit' ? '恩恵' : '災厄'}{#if game.endsAt}・残り{Math.max(0, Math.ceil((game.endsAt * 1000 - nowMs) / 1000))}秒{/if}</p>{/if}
 						{#if game.phase === 'running' || game.phase === 'settling'}
 							{#if watchedGameId === game.gameId}<PrimaryButton onclick={onStopWatching} disabled={busy}>観戦を解除</PrimaryButton>
@@ -115,16 +165,17 @@
 						{/if}
 						{#if game.phase === 'lobby'}
 							{#if game.participant.some((player) => player.pubkey === selfPubkey)}
-								{#if game.hostPubkey === selfPubkey}<p class="reservation-state">あなたの開催</p><PrimaryButton onclick={() => onCancel(game.gameId)} disabled={busy}>募集を取り消す</PrimaryButton><PrimaryButton onclick={() => onPropose(game.gameId)} disabled={busy || game.participant.length < 2}>開始を提案</PrimaryButton>
+								{#if game.hostPubkey === selfPubkey}<PrimaryButton onclick={() => onCancel(game.gameId)} disabled={busy}>募集を取り消す</PrimaryButton><PrimaryButton onclick={() => onPropose(game.gameId)} disabled={busy || game.participant.length < 2}>開始を提案</PrimaryButton>
 								{:else}<p class="reservation-state">{game.participant.some((player) => player.pubkey === selfPubkey) ? '参加申請済み（参加登録済み）' : '参加申請済み（受理待ち）'}</p><PrimaryButton onclick={() => onLeave(game.gameId)} disabled={busy}>申請を取り消す</PrimaryButton>{/if}
 						{:else if reservationCurrent && reservedGameId === game.gameId}<p class="reservation-state">参加申請済み（受理待ち）</p><PrimaryButton onclick={() => onLeave(game.gameId)} disabled={busy}>申請を取り消す</PrimaryButton>
 							{:else}<PrimaryButton onclick={() => onJoin(game.gameId)} disabled={busy || !selfPubkey || reservationCurrent || game.participant.length >= 8}>参加申請</PrimaryButton>{/if}
 						{:else if game.phase === 'proposed' && game.proposalId && game.participant.some((player) => player.pubkey === selfPubkey)}
 							<p class="reservation-state">参加登録済み</p>
-							{#if game.participant.find((player) => player.pubkey === selfPubkey)?.consentProposalId === game.proposalId}
+							{#if game.hostPubkey === selfPubkey}<span>開催者は同意済み</span>
+							{:else if game.participant.find((player) => player.pubkey === selfPubkey)?.consentProposalId === game.proposalId}
 								<span>同意済み</span>
 							{:else}<PrimaryButton onclick={() => onConsent(game.gameId, game.proposalId!)} disabled={busy}>開始に同意</PrimaryButton>{/if}
-							<PrimaryButton onclick={() => onLeave(game.gameId)} disabled={busy}>今回は辞退</PrimaryButton>
+							{#if game.hostPubkey !== selfPubkey}<PrimaryButton onclick={() => onLeave(game.gameId)} disabled={busy}>今回は辞退</PrimaryButton>{/if}
 						{/if}
 						{#if game.phase === 'proposed' && game.hostPubkey === selfPubkey}<PrimaryButton onclick={() => onCancel(game.gameId)} disabled={busy}>募集を取り消す</PrimaryButton>{/if}
 						{#if game.phase === 'proposed' && game.hostPubkey === selfPubkey}
@@ -144,9 +195,23 @@
 	.panel { width: min(520px, 100%); max-height: min(80vh, 720px); overflow: auto; padding: 20px; border-radius: 16px; background: var(--surface, #fff); color: var(--text-primary, #20242a); box-shadow: 0 18px 60px rgba(0,0,0,.24); }
 	.field-hud { position: fixed; z-index: 55; top: max(62px, calc(env(safe-area-inset-top) + 60px)); right: 12px; width: min(330px, calc(100vw - 24px)); padding: 10px 12px; border: 1px solid var(--border-subtle, #d8dce0); border-radius: 12px; background: color-mix(in srgb, var(--surface, #fff) 94%, transparent); color: var(--text-primary, #20242a); box-shadow: 0 4px 18px rgba(0,0,0,.16); font-size: .84rem; pointer-events: auto; }
 	.field-hud p { margin: 4px 0 0; }
+	.hud-holder { display: grid; gap: 2px; margin-top: 5px; padding: 7px 9px; border-left: 4px solid #607080; border-radius: 5px; background: color-mix(in srgb, var(--surface, #fff) 86%, #607080); }
+	.hud-holder.benefit { border-color: #2e8b57; background: color-mix(in srgb, var(--surface, #fff) 88%, #2e8b57); }
+	.hud-holder.calamity { border-color: #b4483b; background: color-mix(in srgb, var(--surface, #fff) 88%, #b4483b); }
+	.hud-holder-name { font-weight: 800; }
+	.hud-holder small { line-height: 1.25; }
 	.host-identity { display: flex; align-items: center; gap: 8px; }
 	.host-identity .tag-game-avatar { position: static; width: 32px; height: 32px; object-fit: contain; flex: 0 0 auto; pointer-events: none; }
 	.reservation-state { margin: 0; font-weight: 600; }
+	.participant-count { width: 100%; }
+	.participant-slots { display: grid; width: 100%; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin: 0; padding: 0; list-style: none; }
+	.participant-slot { display: grid; min-width: 0; min-height: 54px; grid-template-columns: 28px minmax(0, 1fr); grid-template-rows: 1fr auto; align-items: center; column-gap: 5px; padding: 4px; overflow: hidden; border: 1px solid var(--border-subtle, #d8dce0); border-radius: 8px; background: color-mix(in srgb, var(--surface, #fff) 94%, transparent); }
+	.participant-slot img { width: 26px; height: 26px; grid-row: 1 / 3; object-fit: contain; }
+	.participant-slot strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .78rem; }
+	.participant-slot small { min-width: 0; overflow: hidden; color: var(--text-secondary, #666); text-overflow: ellipsis; white-space: nowrap; font-size: .65rem; }
+	.participant-slot-empty { display: grid; place-items: center; border-style: dashed; color: var(--text-secondary, #888); font-size: .72rem; }
+	.participant-slot-arrival { animation: participant-arrival 850ms ease-out 2; }
+	.tag-game-arrival { padding: 7px 10px; border-radius: 7px; background: var(--color-accent-soft, #edf2f6); color: var(--text-primary, #20242a); font-weight: 700; }
 	.field-hud small { display: block; margin-top: 4px; color: var(--text-secondary, #666); }
 	header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 	h2 { margin: 0; }
@@ -157,4 +222,6 @@
 	.game-status { width: 100%; margin: 0; }
 	.results { display: grid; width: 100%; gap: 3px; color: var(--text-secondary, #666); font-size: .88rem; }
 	li span { color: var(--text-secondary, #666); font-size: .9rem; }
+	@keyframes participant-arrival { 50% { border-color: var(--color-accent, #426b9c); background: color-mix(in srgb, var(--surface, #fff) 78%, var(--color-accent, #426b9c)); } }
+	@media (prefers-reduced-motion: reduce) { .participant-slot-arrival { animation: none; border-color: var(--color-accent, #426b9c); } }
 </style>

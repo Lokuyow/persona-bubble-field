@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { finalizeEvent, getPublicKey, type Event as NostrEvent } from 'nostr-tools/pure';
-import { finalizeTagGameState, parseTagGameActionEvent, parseTagGameEvent, TAG_GAME_KIND, type TagGameState } from '../../src/lib/tagGame';
+import { buildTagGameActionTemplate, finalizeTagGameState, parseTagGameActionEvent, parseTagGameEvent, TAG_GAME_KIND, type TagGameState } from '../../src/lib/tagGame';
 import { TAG_GAME_TERMINAL } from '../../src/lib/fieldFacilities';
 import { resolveCharacterFromPubkey } from '../../src/lib/characterAssignment';
 import { buildWorldStateEventTemplate, WORLD_STATE_KIND } from '../../src/lib/nostrProtocol';
@@ -145,6 +145,10 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 		const gameId = parsedLobby!.state.gameId;
 		await expect(hostPage.getByRole('button', { name: '鬼ごっこを開催' })).toHaveCount(0);
 		await expect(hostPage.getByText('あなたの開催').first()).toBeVisible();
+		const hostCard = hostPage.getByRole('dialog', { name: '鬼ごっこ' }).locator('li').filter({ hasText: 'あなたの開催' });
+		await expect(hostCard.getByText('参加者 1 / 8人')).toBeVisible();
+		await expect(hostCard.locator('[data-tag-game-participant-slot]')).toHaveCount(1);
+		await expect(hostCard.locator('.participant-slot-empty')).toHaveCount(7);
 		await Promise.all([injectRealtime(participantPage, firstState), injectRealtime(participantTwoPage, firstState)]);
 		await Promise.all([openTagGameTerminal(participantPage), openTagGameTerminal(participantTwoPage)]);
 		await Promise.all([expect(participantPage.locator('main')).toHaveAttribute('data-realtime-status', 'active'), expect(participantTwoPage.locator('main')).toHaveAttribute('data-realtime-status', 'active')]);
@@ -152,6 +156,7 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 		const hostCharacter = resolveCharacterFromPubkey(hostPubkey)!.name;
 		await expect(participantPage.getByText(`開催者 ${hostCharacter}`)).toBeVisible();
 		await Promise.all([expect(participantPage.getByRole('button', { name: '参加申請' })).toBeVisible(), expect(participantTwoPage.getByRole('button', { name: '参加申請' })).toBeVisible()]);
+		await expect(participantPage.locator('.tag-game-arrival')).toHaveCount(0);
 		await Promise.all([participantPage.getByRole('button', { name: '参加申請' }).click(), participantTwoPage.getByRole('button', { name: '参加申請' }).click()]);
 		await Promise.all([expect(participantPage.getByText('参加申請済み（受理待ち）').first()).toBeVisible(), expect(participantTwoPage.getByText('参加申請済み（受理待ち）').first()).toBeVisible()]);
 		await Promise.all([participantPage, participantTwoPage].map((participant) => expect.poll(async () => (await relayState(participant)).state.published.filter((event) => event.kind === 27070).length).toBeGreaterThan(0)));
@@ -161,18 +166,43 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 		const registeredEvent = await latestGameEvent(hostPage, gameId);
 		await Promise.all([injectRealtime(participantPage, registeredEvent), injectRealtime(participantTwoPage, registeredEvent)]);
 		await expect(participantPage.getByText('参加申請済み（参加登録済み）').first()).toBeVisible();
+		await expect(participantPage.locator('.tag-game-arrival')).toContainText('あなた');
+		await expect(participantPage.locator('.tag-game-arrival')).toContainText(resolveCharacterFromPubkey(participantTwoPubkey)!.name);
+		await expect(participantPage.locator('[data-tag-game-participant-slot]')).toHaveCount(3);
+		await expect(participantPage.locator('.participant-slot-empty')).toHaveCount(5);
+		const participantViewport = participantPage.viewportSize();
+		const participantCard = participantPage.getByRole('dialog', { name: '鬼ごっこ' }).locator('li').filter({ hasText: `開催者 ${hostCharacter}` });
+		const participantGrid = participantCard.locator('.participant-slots');
+		await participantPage.setViewportSize({ width: 390, height: 844 });
+		await expect.poll(async () => participantGrid.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(' ').length)).toBe(4);
+		const cancelApplication = participantCard.getByRole('button', { name: '申請を取り消す' });
+		await expect(cancelApplication).toBeVisible();
+		const [gridBox, cancelBox] = await Promise.all([participantGrid.boundingBox(), cancelApplication.boundingBox()]);
+		expect(gridBox && cancelBox).toBeTruthy();
+		if (gridBox && cancelBox) expect(cancelBox.y).toBeGreaterThanOrEqual(gridBox.y + gridBox.height);
+		if (participantViewport) await participantPage.setViewportSize(participantViewport);
+		await participantTwoPage.getByRole('button', { name: '閉じる', exact: true }).click();
+		await injectRealtime(participantTwoPage, registeredEvent);
+		await openTagGameTerminal(participantTwoPage);
+		await expect(participantTwoPage.locator('[data-tag-game-participant-slot]')).toHaveCount(3);
+		await expect(participantTwoPage.locator('.tag-game-arrival')).toHaveCount(0);
 
 		await hostPage.getByRole('button', { name: '開始を提案' }).click();
 		await expect.poll(async () => parseTagGameEvent(await latestGameEvent(hostPage, gameId), CHANNEL_ID)?.state.phase).toBe('proposed');
 		const proposal = await latestGameEvent(hostPage, gameId);
 		await Promise.all([injectRealtime(participantPage, proposal), injectRealtime(participantTwoPage, proposal)]);
 		await Promise.all([expect(participantPage.getByRole('button', { name: '開始に同意' })).toBeVisible(), expect(participantTwoPage.getByRole('button', { name: '開始に同意' })).toBeVisible()]);
-		await hostPage.getByRole('button', { name: '開始に同意' }).click();
+		await expect(hostCard.getByText('開催者は同意済み')).toBeVisible();
+		await expect(hostCard.getByRole('button', { name: '開始に同意' })).toHaveCount(0);
+		await expect(hostCard.getByRole('button', { name: '今回は辞退' })).toHaveCount(0);
+		const hostLeave = finalizeEvent(buildTagGameActionTemplate({ channelId: CHANNEL_ID, gameId, action: 'leave', runNumber: 1, nonce: 'a'.repeat(32), createdAt: Math.floor(await hostPage.evaluate(() => Date.now() / 1000)) }), hostSecret);
+		await injectRealtime(hostPage, hostLeave);
+		await expect.poll(async () => parseTagGameEvent(await latestGameEvent(hostPage, gameId), CHANNEL_ID)?.state.participant.length).toBe(3);
 		await Promise.all([participantPage.getByRole('button', { name: '開始に同意' }).click(), participantTwoPage.getByRole('button', { name: '開始に同意' }).click()]);
 		await Promise.all([participantPage, participantTwoPage].map((participant) => expect.poll(async () => (await relayState(participant)).state.published.filter((event) => event.kind === 27070).length).toBeGreaterThan(1)));
-		await expect.poll(async () => (await relayState(hostPage)).state.published.filter((event) => event.kind === 27070 && event.pubkey === hostPubkey).length).toBeGreaterThan(0);
-		const [consent, consentTwo, hostConsent] = await Promise.all([latestPublished(participantPage, 27070, participantPubkey), latestPublished(participantTwoPage, 27070, participantTwoPubkey), latestPublished(hostPage, 27070, hostPubkey)]);
-		await Promise.all([injectRealtime(hostPage, consent), injectRealtime(hostPage, consentTwo), injectRealtime(hostPage, hostConsent)]);
+		const [consent, consentTwo] = await Promise.all([latestPublished(participantPage, 27070, participantPubkey), latestPublished(participantTwoPage, 27070, participantTwoPubkey)]);
+		await Promise.all([injectRealtime(hostPage, consent), injectRealtime(hostPage, consentTwo)]);
+		expect((await relayState(hostPage)).state.published.filter((event) => event.kind === 27070 && parseTagGameActionEvent(event as unknown as NostrEvent, CHANNEL_ID)?.action === 'consent')).toHaveLength(0);
 		await expect.poll(async () => parseTagGameEvent(await latestGameEvent(hostPage, gameId), CHANNEL_ID)?.state.phase).toBe('countdown');
 		await Promise.all([injectRealtime(participantPage, await latestGameEvent(hostPage, gameId)), injectRealtime(participantTwoPage, await latestGameEvent(hostPage, gameId))]);
 		await hostPage.clock.runFor(6_000);
@@ -186,6 +216,7 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 		await expect(participantTwoPage.locator('[data-tag-game-hud]')).toBeVisible();
 		await expect(participantPage.locator('[data-tag-game-hud]')).toContainText(resolveCharacterFromPubkey(hostPubkey)!.name);
 		await expect(participantPage.locator('[data-tag-game-hud]')).toContainText('あなた');
+		await expect(participantPage.locator('[data-tag-game-hud] [data-tag-game-effect]')).toHaveAttribute('data-tag-game-effect', running.effect!);
 		await Promise.all([hostPage, participantPage, participantTwoPage].map(async (page) => {
 			await page.getByRole('button', { name: '閉じる', exact: true }).click();
 		}));
@@ -204,6 +235,28 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 		]);
 
 		const cells = new Map([[hostPubkey, { page: hostPage, position: { x: 7, y: 5 } }], [participantPubkey, { page: participantPage, position: { x: 7, y: 6 } }], [participantTwoPubkey, { page: participantTwoPage, position: { x: 8, y: 5 } }]]);
+		const holderPage = cells.get(running.ownerPubkey!)!.page;
+		const holderMarker = holderPage.locator(`.participant[data-participant-id="${running.ownerPubkey}"]`);
+		await expect(holderMarker).toHaveAttribute('data-tag-game-role', 'holder');
+		await expect(holderMarker).toHaveAttribute('data-tag-game-effect', running.effect!);
+		const displayedEffect = holderPage.locator('[data-tag-game-hud] [data-tag-game-effect]');
+		await expect(holderMarker).toHaveAttribute('data-tag-game-effect-active', await displayedEffect.getAttribute('data-tag-game-effect-active') ?? 'false');
+		const fieldEffectLabel = holderMarker.locator('.tag-game-holder-label');
+		await expect(fieldEffectLabel).toContainText(running.effect === 'benefit' ? '恩恵' : '災厄');
+		const labelBox = await fieldEffectLabel.boundingBox();
+		const holderBox = await holderMarker.boundingBox();
+		const holderNameBox = await holderMarker.locator('.participant-name').boundingBox();
+		expect(labelBox && holderBox && holderNameBox).toBeTruthy();
+		if (labelBox && holderBox && holderNameBox) {
+			expect(labelBox.x).toBeGreaterThanOrEqual(holderBox.x);
+			expect(labelBox.x + labelBox.width).toBeLessThanOrEqual(holderBox.x + holderBox.width);
+			expect(labelBox.y + labelBox.height).toBeLessThan(holderNameBox.y);
+		}
+		const holderViewport = holderPage.viewportSize();
+		await holderPage.setViewportSize({ width: 390, height: 844 });
+		await expect(fieldEffectLabel.locator('strong')).toBeVisible();
+		await expect(fieldEffectLabel.locator('small')).toBeHidden();
+		if (holderViewport) await holderPage.setViewportSize(holderViewport);
 		const holder = cells.get(running.ownerPubkey!)!;
 		const target = running.effect === 'benefit' ? [...cells.entries()].find(([pubkey, candidate]) => pubkey !== running.ownerPubkey && Math.abs(candidate.position.x - holder.position.x) + Math.abs(candidate.position.y - holder.position.y) === 1)! : [...cells.entries()].find(([pubkey, candidate]) => pubkey !== running.ownerPubkey && Math.abs(candidate.position.x - holder.position.x) + Math.abs(candidate.position.y - holder.position.y) === 1)!;
 		const actorEntry = running.effect === 'benefit' ? target : [running.ownerPubkey!, holder] as const;
@@ -229,6 +282,12 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 		expect(parseTagGameActionEvent(touchAction, CHANNEL_ID)?.action).toBe('touch');
 		await injectRealtime(hostPage, touchAction);
 		await expect.poll(async () => parseTagGameEvent(await latestGameEvent(hostPage, gameId), CHANNEL_ID)?.state.transferAt).toBeGreaterThan(running.transferAt ?? 0);
+		const transferredEvent = await latestGameEvent(hostPage, gameId);
+		const transferred = parseTagGameEvent(transferredEvent, CHANNEL_ID)!.state;
+		await Promise.all([participantPage, participantTwoPage].map((page) => injectRealtime(page, transferredEvent)));
+		const transferredHolderPage = cells.get(transferred.ownerPubkey!)!.page;
+		await expect(transferredHolderPage.locator(`.participant[data-participant-id="${transferred.ownerPubkey}"]`)).toHaveAttribute('data-tag-game-role', 'holder');
+		await expect(transferredHolderPage.locator(`[data-tag-game-hud] [data-tag-game-effect="${transferred.effect}"]`)).toBeVisible();
 
 		const endsAt = running.endsAt! * 1000;
 		const channel = { channelId: CHANNEL_ID, relayHint: latestHostPosition.tags.find((tag) => tag[0] === 'e')?.[2] ?? 'wss://relay.test/' };
@@ -273,20 +332,81 @@ test('host silence is detected only while the local Relay connection is active',
 	const gameId = `${remoteHostPubkey}:${startedAt}:${'d'.repeat(64)}`;
 	const active: TagGameState = {
 		gameId, hostPubkey: remoteHostPubkey, phase: 'running', revision: 0, updatedAt: startedAt,
-		startedAt, endsAt: startedAt + 180, seed: 'e'.repeat(64), ownerPubkey: remoteHostPubkey, effect: 'benefit', transferAt: startedAt * 1000,
+		startedAt, endsAt: startedAt + 180, seed: 'e'.repeat(64), ownerPubkey: remoteHostPubkey, effect: 'calamity', transferAt: startedAt * 1000,
 		participant: [remoteHostPubkey, joinerPubkey].map((pubkey) => ({ pubkey, runNumber: 1, registeredAt: startedAt, status: 'active' as const, points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 })),
 		settledAtMs: startedAt * 1000
 	};
 	const signed = finalizeTagGameState(active, CHANNEL_ID, startedAt, remoteHostSecret);
+	const channel = { channelId: CHANNEL_ID, relayHint: 'wss://relay.test/' };
+	const hostActivity = finalizeEvent(buildWorldStateEventTemplate({ channel, createdAt: startedAt, position: { x: 8, y: 5 }, slot: 1, runNumber: 1 }), remoteHostSecret);
+	await injectPosition(page, hostActivity);
 	const relayStateBeforeProbe = (await relayState(page)).state.requests.length;
 	await injectRealtime(page, signed);
-		await expect(page.locator('[data-tag-game-hud]')).toBeVisible();
-		await expect(page.locator('[data-tag-game-hud]')).toHaveAttribute('data-realtime-status', 'active');
+	await expect(page.locator('[data-tag-game-hud]')).toBeVisible();
+	await expect(page.locator('[data-tag-game-hud]')).toHaveAttribute('data-realtime-status', 'active');
+	const holder = page.locator(`.participant[data-participant-id="${remoteHostPubkey}"]`);
+	await expect(holder).toHaveAttribute('data-tag-game-effect', 'calamity');
+	await expect(holder).toHaveAttribute('data-tag-game-effect-active', 'true');
+	await expect(holder.locator('.tag-game-holder-label')).toContainText('災厄');
+	await expect(holder.locator('.tag-game-holder-label')).toContainText('寿命−1時間/秒');
+	await expect(page.locator('[data-tag-game-hud] [data-tag-game-effect]')).toContainText('寿命−1時間/秒');
+	await page.clock.runFor(10_000);
+	const benefit = { ...active, revision: 1, updatedAt: startedAt + 1, effect: 'benefit' as const };
+	await injectRealtime(page, finalizeTagGameState(benefit, CHANNEL_ID, startedAt + 1, remoteHostSecret));
+	await expect(holder).toHaveAttribute('data-tag-game-effect', 'benefit');
+	await expect(holder.locator('.tag-game-holder-label')).toContainText('+50pt/秒');
+	await expect(page.locator('[data-tag-game-hud] [data-tag-game-effect]')).toContainText('+50pt/秒');
+	const challenge = finalizeTagGameState({ ...benefit, revision: 2, updatedAt: startedAt + 10, holderChallengeId: 'f'.repeat(32), holderChallengeStartedAtMs: (startedAt + 10) * 1_000 }, CHANNEL_ID, startedAt + 10, remoteHostSecret);
+	await injectRealtime(page, challenge);
+	await expect(page.locator('[data-tag-game-hud]')).toContainText('応答確認中・効果停止');
+	await expect(holder).toHaveAttribute('data-tag-game-effect-active', 'false');
 	await page.clock.runFor(31_000);
 	await expect.poll(async () => (await relayState(page)).state.requests.length).toBeGreaterThan(relayStateBeforeProbe);
 	await page.clock.runFor(6_000);
 	await expect(page.getByText('中断')).toBeVisible();
 	await expect(page.locator('[data-tag-game-hud]')).toHaveCount(0);
+});
+
+test('organizer is auto-consented, and proposal expiry removes nonresponders before a fresh proposal', async ({ page }) => {
+	test.setTimeout(60_000);
+	const nowMs = Date.now();
+	const hostSecret = fixtureSecret(41);
+	const consentSecret = fixtureSecret(43);
+	const silentSecret = fixtureSecret(47);
+	const hostPubkey = getPublicKey(hostSecret);
+	const consentPubkey = getPublicKey(consentSecret);
+	const silentPubkey = getPublicKey(silentSecret);
+	await preparePlayer(page, hostSecret, nowMs);
+	await moveRelaySelfTo(page, { x: 7, y: 5 });
+	await openTagGameTerminal(page);
+	await page.getByRole('button', { name: '鬼ごっこを開催' }).click();
+	await expect.poll(async () => (await relayState(page)).state.published.some((event) => event.kind === TAG_GAME_KIND)).toBe(true);
+	const gameId = parseTagGameEvent(await latestPublished(page, TAG_GAME_KIND, hostPubkey), CHANNEL_ID)!.state.gameId;
+	const lobby = parseTagGameEvent(await latestGameEvent(page, gameId), CHANNEL_ID)!.state;
+	const createdAt = lobby.updatedAt + 1;
+	const populatedLobby: TagGameState = { ...lobby, updatedAt: createdAt, participant: [hostPubkey, consentPubkey, silentPubkey].map((pubkey) => ({ pubkey, runNumber: 1, registeredAt: createdAt, status: 'registered' as const, points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 })) };
+	await injectRealtime(page, finalizeTagGameState(populatedLobby, CHANNEL_ID, createdAt, hostSecret));
+	await page.clock.runFor(2_000);
+	await page.getByRole('button', { name: '開始を提案' }).click();
+	await expect.poll(async () => parseTagGameEvent(await latestGameEvent(page, gameId), CHANNEL_ID)?.state.phase).toBe('proposed');
+	const firstProposal = parseTagGameEvent(await latestGameEvent(page, gameId), CHANNEL_ID)!.state;
+	expect(firstProposal.participant.find((member) => member.pubkey === hostPubkey)).toMatchObject({ consentProposalId: firstProposal.proposalId, consented: true });
+	const consent = finalizeEvent(buildTagGameActionTemplate({ channelId: CHANNEL_ID, gameId, action: 'consent', runNumber: 1, nonce: 'c'.repeat(32), createdAt: createdAt + 1, payload: { proposalId: firstProposal.proposalId! } }), consentSecret);
+	await injectRealtime(page, consent);
+	await expect.poll(async () => parseTagGameEvent(await latestGameEvent(page, gameId), CHANNEL_ID)?.state.participant.find((member) => member.pubkey === consentPubkey)?.consented).toBe(true);
+	await page.clock.runFor(31_000);
+	await expect.poll(async () => parseTagGameEvent(await latestGameEvent(page, gameId), CHANNEL_ID)?.state.phase).toBe('lobby');
+	const returned = parseTagGameEvent(await latestGameEvent(page, gameId), CHANNEL_ID)!.state;
+	expect(returned.participant.map((member) => member.pubkey)).toEqual([hostPubkey, consentPubkey]);
+	await expect(page.getByRole('button', { name: '開始を提案' })).toBeVisible();
+	await page.getByRole('button', { name: '開始を提案' }).click();
+	await expect.poll(async () => parseTagGameEvent(await latestGameEvent(page, gameId), CHANNEL_ID)?.state.proposalId).not.toBe(firstProposal.proposalId);
+	const secondProposal = parseTagGameEvent(await latestGameEvent(page, gameId), CHANNEL_ID)!.state;
+	expect(secondProposal.participant.find((member) => member.pubkey === hostPubkey)).toMatchObject({ consentProposalId: secondProposal.proposalId, consented: true });
+	const resetConsent = secondProposal.participant.find((member) => member.pubkey === consentPubkey)!;
+	expect(resetConsent.consentProposalId).toBeUndefined();
+	expect(resetConsent.consented).toBe(false);
+	await expect(page.getByRole('dialog', { name: '鬼ごっこ' }).locator('li').getByText('開催者は同意済み')).toBeVisible();
 });
 
 test('same-second death exit ends a two-player game when the non-holder leaves', async ({ browser }) => {
@@ -373,11 +493,15 @@ test('organizer-confirmed leave settles the two-player game and releases the qui
 		const proposal = await latestGameEvent(hostPage, lobby.gameId);
 		await injectRealtime(participantPage, proposal);
 		await expect(participantPage.getByRole('button', { name: '開始に同意' })).toBeVisible();
-		await hostPage.getByRole('button', { name: '開始に同意' }).click();
+		const hostCard = hostPage.getByRole('dialog', { name: '鬼ごっこ' }).locator('li').filter({ hasText: 'あなたの開催' });
+		await expect(hostCard.getByText('開催者は同意済み')).toBeVisible();
+		await expect(hostCard.getByRole('button', { name: '開始に同意' })).toHaveCount(0);
+		await expect(hostCard.getByRole('button', { name: '今回は辞退' })).toHaveCount(0);
 		await participantPage.getByRole('button', { name: '開始に同意' }).click();
-		await Promise.all([hostPage, participantPage].map((page) => expect.poll(async () => (await relayState(page)).state.published.some((event) => event.kind === 27070 && parseTagGameActionEvent(event as unknown as NostrEvent, CHANNEL_ID)?.action === 'consent')).toBe(true)));
-		const [hostConsent, participantConsent] = await Promise.all([latestPublished(hostPage, 27070, hostPubkey), latestPublished(participantPage, 27070, participantPubkey)]);
-		await Promise.all([injectRealtime(hostPage, hostConsent), injectRealtime(hostPage, participantConsent)]);
+		await expect.poll(async () => (await relayState(participantPage)).state.published.some((event) => event.kind === 27070 && parseTagGameActionEvent(event as unknown as NostrEvent, CHANNEL_ID)?.action === 'consent')).toBe(true);
+		const participantConsent = await latestPublished(participantPage, 27070, participantPubkey);
+		await injectRealtime(hostPage, participantConsent);
+		expect((await relayState(hostPage)).state.published.filter((event) => event.kind === 27070 && parseTagGameActionEvent(event as unknown as NostrEvent, CHANNEL_ID)?.action === 'consent')).toHaveLength(0);
 		await expect.poll(async () => parseTagGameEvent(await latestGameEvent(hostPage, lobby.gameId), CHANNEL_ID)?.state.phase).toBe('countdown');
 		await injectRealtime(participantPage, await latestGameEvent(hostPage, lobby.gameId));
 		await hostPage.clock.runFor(6_000);
