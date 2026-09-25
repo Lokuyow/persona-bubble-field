@@ -17,6 +17,7 @@ import {
 	parseTagGameActionEvent,
 	parseTagGameEvent,
 	tagGameHolderResponseState,
+	tagGamePredictedRemainingLifespanMinutes,
 	cumulativeTagGameSettlement,
 	type TagGameState
 } from './tagGame';
@@ -80,6 +81,13 @@ describe('player-hosted tag-game protocol and rules', () => {
 		expect(isValidTagGameState({ ...state, participant: [{ ...state.participant[0], points: 4_501 }] })).toBe(false);
 		expect(isValidTagGameState({ ...state, participant: [{ ...state.participant[0], lifespanLossMs: 324_000_001 }] })).toBe(false);
 		expect(isValidTagGameState({ ...state, participant: [{ ...state.participant[0], benefitMs: 90_001 }] })).toBe(false);
+	});
+
+	it('predicts lifespan from the already-effective remainder and only un-applied tag-game loss', () => {
+		const effectiveRemainingMs = 90 * 60_000;
+		const unAppliedLossMs = 20 * 60_000;
+		expect(tagGamePredictedRemainingLifespanMinutes(effectiveRemainingMs, unAppliedLossMs)).toBe(70);
+		expect(tagGamePredictedRemainingLifespanMinutes(5 * 60_000, 10 * 60_000)).toBe(0);
 	});
 
 	it('uses normal World activity and tag-game acknowledgements, then challenges a holder again after silence', () => {

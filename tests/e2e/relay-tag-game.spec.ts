@@ -26,13 +26,14 @@ async function injectPosition(page: Page, event: NostrEvent): Promise<void> {
 }
 
 async function latestGameEvent(page: Page, gameId: string): Promise<NostrEvent> {
-	const event = await page.evaluate((id) => {
+	const events = await page.evaluate((id) => {
 		const published = (window as typeof window & { __relayStartupTest: { state: { published: Array<Record<string, unknown>> } } }).__relayStartupTest.state.published;
-		return published.filter((candidate) => candidate.kind === 37070 && candidate.tags && (candidate.tags as string[][]).some((tag) => tag[0] === 'd' && tag[1] === id))
-			.sort((first, second) => Number(second.created_at) - Number(first.created_at))[0] ?? null;
+		return published.filter((candidate) => candidate.kind === 37070 && candidate.tags && (candidate.tags as string[][]).some((tag) => tag[0] === 'd' && tag[1] === id));
 	}, gameId);
+	const event = (events as unknown as NostrEvent[]).sort((first, second) => Number(second.created_at) - Number(first.created_at) ||
+		(parseTagGameEvent(second, CHANNEL_ID)?.state.revision ?? -1) - (parseTagGameEvent(first, CHANNEL_ID)?.state.revision ?? -1))[0] ?? null;
 	if (!event) throw new Error(`No published tag-game state for ${gameId}.`);
-	return event as unknown as NostrEvent;
+	return event;
 }
 
 async function latestWorldState(page: Page, author: string): Promise<NostrEvent> {
@@ -42,8 +43,8 @@ async function latestWorldState(page: Page, author: string): Promise<NostrEvent>
 async function latestPublished(page: Page, kind: number, author?: string): Promise<NostrEvent> {
 	const result = await page.evaluate(({ eventKind, pubkey }) => {
 		const published = (window as typeof window & { __relayStartupTest: { state: { published: Array<Record<string, unknown>> } } }).__relayStartupTest.state.published;
-		const matches = published.filter((candidate) => candidate.kind === eventKind && (!pubkey || candidate.pubkey === pubkey))
-			.sort((first, second) => Number(second.created_at) - Number(first.created_at))[0] ?? null;
+		const matches = published.map((event, index) => ({ event, index })).filter(({ event }) => event.kind === eventKind && (!pubkey || event.pubkey === pubkey))
+			.sort((first, second) => Number(second.event.created_at) - Number(first.event.created_at) || second.index - first.index)[0]?.event ?? null;
 		return { event: matches, published: published.map((candidate) => ({ kind: candidate.kind, pubkey: candidate.pubkey })) };
 	}, { eventKind: kind, pubkey: author });
 	if (!result.event) throw new Error(`No published event of kind ${kind} by ${author ?? 'any author'}; saw ${JSON.stringify(result.published)}.`);
@@ -213,4 +214,48 @@ test('host silence is detected only while the local Relay connection is active',
 	await page.clock.runFor(6_000);
 	await expect(page.getByText('中断')).toBeVisible();
 	await expect(page.locator('[data-tag-game-hud]')).toHaveCount(0);
+});
+
+test('same-second death exit ends a two-player game when the non-holder leaves', async ({ browser }) => {
+	test.setTimeout(60_000);
+	const hostPage = await browser.newPage();
+	const participantPage = await browser.newPage();
+	const nowMs = Date.now();
+	const startedAt = Math.floor(nowMs / 1_000);
+	const hostSecret = fixtureSecret(53);
+	const participantSecret = fixtureSecret(59);
+	const hostPubkey = getPublicKey(hostSecret);
+	const participantPubkey = getPublicKey(participantSecret);
+	try {
+		await Promise.all([preparePlayer(hostPage, hostSecret, nowMs), preparePlayer(participantPage, participantSecret, nowMs)]);
+		await moveRelaySelfTo(hostPage, { x: 7, y: 5 });
+		await moveRelaySelfTo(participantPage, { x: 8, y: 5 });
+		const gameId = `${hostPubkey}:${startedAt}:${'f'.repeat(64)}`;
+		const state: TagGameState = {
+			gameId, hostPubkey, phase: 'running', revision: 0, updatedAt: startedAt,
+			startedAt, endsAt: startedAt + 180, seed: 'a'.repeat(64), ownerPubkey: hostPubkey, effect: 'benefit', transferAt: startedAt * 1_000,
+			participant: [{ pubkey: hostPubkey, runNumber: 1 }, { pubkey: participantPubkey, runNumber: 2 }].map(({ pubkey, runNumber }) => ({ pubkey, runNumber, registeredAt: startedAt, status: 'active' as const, points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 })),
+			settledAtMs: startedAt * 1_000
+		};
+		const running = finalizeTagGameState(state, CHANNEL_ID, startedAt, hostSecret);
+		const channel = { channelId: CHANNEL_ID, relayHint: 'wss://relay.test/' };
+		const worldSecond = startedAt + 1;
+		const delayedOldRunExit = finalizeEvent(buildWorldStateEventTemplate({ channel, createdAt: startedAt, position: { x: 8, y: 5 }, slot: 'exit', runNumber: 1, exitReason: 'death' }), participantSecret);
+		const activePosition = finalizeEvent(buildWorldStateEventTemplate({ channel, createdAt: worldSecond, position: { x: 8, y: 5 }, slot: 1, runNumber: 2 }), participantSecret);
+		const deathExit = finalizeEvent(buildWorldStateEventTemplate({ channel, createdAt: worldSecond, position: { x: 8, y: 5 }, slot: 'exit', runNumber: 2, exitReason: 'death' }), participantSecret);
+		await injectRealtime(hostPage, running);
+		await injectRealtime(participantPage, running);
+		await injectPosition(hostPage, delayedOldRunExit);
+		await expect(hostPage.locator('[data-tag-game-hud]')).toBeVisible();
+		await injectPosition(hostPage, activePosition);
+		await expect(hostPage.locator(`.participant[data-participant-id="${participantPubkey}"]`)).toHaveAttribute('data-tag-game-role', 'participant');
+		await expect(hostPage.locator(`.participant[data-participant-id="${hostPubkey}"]`)).toHaveAttribute('data-tag-game-role', 'holder');
+		await injectPosition(hostPage, deathExit);
+		await expect.poll(async () => parseTagGameEvent(await latestGameEvent(hostPage, gameId), CHANNEL_ID)?.state.phase).toBe('interrupted');
+		const final = parseTagGameEvent(await latestGameEvent(hostPage, gameId), CHANNEL_ID)?.state;
+		expect(final?.endReason).toBe('too-few-participants');
+		expect(final?.participant.find((member) => member.pubkey === participantPubkey)?.status).toBe('dead');
+	} finally {
+		await Promise.all([hostPage.close(), participantPage.close()]);
+	}
 });

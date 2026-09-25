@@ -56,6 +56,7 @@
 		realtimeGroupTriggers: readonly CooperationDefectionGroup[];
 		participatingCooperationDefectionGroupId: string | null;
 		participantViews: readonly FieldParticipantView[];
+		tagGameRoleByPubkey: ReadonlyMap<string, 'participant' | 'holder'>;
 		selfProjectionId: string;
 		movingParticipantIds: ReadonlySet<string>;
 		selfIsActive: boolean;
@@ -89,6 +90,7 @@
 		realtimeGroupTriggers,
 		participatingCooperationDefectionGroupId,
 		participantViews,
+		tagGameRoleByPubkey,
 		selfProjectionId,
 		movingParticipantIds,
 		selfIsActive,
@@ -235,6 +237,7 @@
 				position={participant.position}
 				world={participant.world}
 				movementAnimation={movingParticipantIds.has(participant.id)}
+				tagGameRole={tagGameRoleByPubkey.get(participant.id) ?? null}
 				onProfile={resolveFieldCellSelection}
 				onSelfProfile={onOpenSelfProfile}
 			/>

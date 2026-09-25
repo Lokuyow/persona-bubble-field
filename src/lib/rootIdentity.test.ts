@@ -106,17 +106,22 @@ describe('Root / Identity / Run lifecycle', () => {
 		expect(await activateTagGameRun(persona, gameId, TIME, TIME + 180_000, TIME + 210_000)).toBe(true);
 		expect(await clearPersona(persona)).toEqual({ kind: 'blocked', reason: 'tag-game' });
 		expect((await upgradePersonaAbility(persona, 'inferenceEfficiency')).kind).toBe('blocked');
+		expect(await trackRealtimeEventInstance(persona, 'cooperation-defection:official-instance')).toBe(true);
 		const partial = await applyTagGameCumulative(persona, gameId, 250, HOUR, false);
 		expect(partial.kind).toBe('applied');
 		if (partial.kind !== 'applied') return;
 		expect(partial.persona.gameState.points).toBe(persona.gameState.points + 250);
 		expect(partial.persona.gameState.lifespanExpiresAtMs).toBe(persona.gameState.lifespanExpiresAtMs - HOUR);
+		expect((await getRealtimeSettlementLedger(partial.persona))?.pendingInstanceIds).toEqual(['cooperation-defection:official-instance']);
 		vi.spyOn(Date, 'now').mockReturnValue(TIME + 185_000);
 		const final = await applyTagGameCumulative(persona, gameId, 500, 2 * HOUR, true);
 		expect(final.kind).toBe('applied');
 		if (final.kind !== 'applied') return;
 		expect(final.persona.gameState.points).toBe(persona.gameState.points + 500);
 		expect(final.persona.gameState.lifespanExpiresAtMs).toBe(persona.gameState.lifespanExpiresAtMs - 2 * HOUR);
+		expect((await getRealtimeSettlementLedger(final.persona))?.pendingInstanceIds).toEqual(['cooperation-defection:official-instance']);
+		expect(await completeRealtimeEventInstance(final.persona, 'cooperation-defection:official-instance')).toBe(true);
+		expect((await getRealtimeSettlementLedger(final.persona))?.pendingInstanceIds).toEqual([]);
 		expect((await upgradePersonaAbility(final.persona, 'inferenceEfficiency')).kind).toBe('upgraded');
 	});
 
@@ -149,6 +154,7 @@ describe('Root / Identity / Run lifecycle', () => {
 		expect(afterWorkLoss.gameState.lifespanExpiresAtMs).toBe(projection.effectiveExpiresAtMs - 60_000);
 
 		const deathGameId = gameId;
+		expect(await trackRealtimeEventInstance(afterWorkLoss, 'cooperation-defection:death-instance')).toBe(true);
 		const exit = { channelId: 'a'.repeat(64), position: { x: 4, y: 2 }, lastPositiveCreatedAt: Math.floor(TIME / 1000) };
 		const death = await applyTagGameCumulative(afterWorkLoss, deathGameId, 4_500, 324_000_000, true, () => exit);
 		expect(death.kind).toBe('transitioned');

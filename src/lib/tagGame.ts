@@ -16,6 +16,10 @@ export const TAG_GAME_MAX_EFFECT_MS = 90_000;
 export const TAG_GAME_BENEFIT_POINTS_PER_SECOND = 50;
 export const TAG_GAME_LIFESPAN_LOSS_MS_PER_SECOND = 3_600_000;
 
+export function tagGamePredictedRemainingLifespanMinutes(effectiveRemainingMs: number | null, unAppliedLossMs: number): number {
+	return Math.max(0, Math.floor(((effectiveRemainingMs ?? 0) - unAppliedLossMs) / 60_000));
+}
+
 export type TagGameParticipant = Readonly<{
 	pubkey: string;
 	runNumber: number;

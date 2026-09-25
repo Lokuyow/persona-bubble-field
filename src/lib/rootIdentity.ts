@@ -1093,7 +1093,8 @@ export async function applyTagGameCumulative(expected: PersonaSnapshot, gameId: 
 				const effectiveExpiry = projectMending(activeRun.gameState, nowMs, activeRun.rootBuild).effectiveExpiresAtMs;
 				const reducedExpiry = effectiveExpiry - lossDelta;
 				if (!Number.isSafeInteger(reducedExpiry)) { await tx.done; return { kind: 'stale' }; }
-				const receipt = { ...scopedRealtimeLedger(current, activeRun), pendingInstanceIds: [], tagGameReceipt: { gameId, points, lifespanLossMs } };
+				const ledger = scopedRealtimeLedger(current, activeRun);
+				const receipt = { ...ledger, tagGameReceipt: { gameId, points, lifespanLossMs } };
 				if (nowMs >= reducedExpiry) {
 					const identity = current.identities.find((item) => sameIdentityReference(item, activeRun.identity));
 					if (!identity) { await tx.done; return { kind: 'corrupt', reason: 'identity-reference' }; }
@@ -1102,7 +1103,7 @@ export async function applyTagGameCumulative(expected: PersonaSnapshot, gameId: 
 					const exit = await commitTerminalFence(tx.objectStore(WORLD_WRITE_JOURNAL_STORE_NAME), activeRun, exitRequest);
 					await store.put({ schemaVersion: PLAYER_SCHEMA_VERSION, rootPoints: current.rootPoints,
 						identities: current.identities.map((item) => item === identity ? closedIdentity : item),
-						mode: { kind: 'selecting', pendingSelection: selection }, realtimeSettlementLedger: receipt }, PLAYER_STATE);
+						mode: { kind: 'selecting', pendingSelection: selection }, realtimeSettlementLedger: { ...receipt, pendingInstanceIds: [] } }, PLAYER_STATE);
 					await tx.done;
 					return { kind: 'transitioned', ...(exit ? { exit } : {}) };
 				}

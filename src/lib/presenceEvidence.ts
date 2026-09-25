@@ -30,7 +30,7 @@ function isPositiveSource(source: PresenceEvidenceSource): boolean {
 	return source !== 'world-state-exit';
 }
 
-function comparePositionEvidence(first: PresenceEvidence, second: PresenceEvidence): number {
+export function comparePresenceEvidence(first: PresenceEvidence, second: PresenceEvidence): number {
 	if (first.createdAt !== second.createdAt) return first.createdAt - second.createdAt;
 	const rankDifference = sourceRank(first.source) - sourceRank(second.source);
 	if (rankDifference !== 0) return rankDifference;
@@ -87,7 +87,7 @@ export function applyPresenceEvidence(current: ReducedPresenceParticipant | unde
 		position: current.position,
 		source: current.positionEvidence.source
 	};
-	const nextEvidence = comparePositionEvidence(evidence, currentEvidence) > 0 ? copyEvidence(evidence) : currentEvidence;
+	const nextEvidence = comparePresenceEvidence(evidence, currentEvidence) > 0 ? copyEvidence(evidence) : currentEvidence;
 	const currentPositive = current.lastPositiveActivityCreatedAt;
 	const positive = isPositiveSource(evidence.source) ? Math.max(currentPositive ?? -1, evidence.createdAt) : currentPositive;
 	const exit = evidence.source === 'world-state-exit' ? Math.max(current.latestExitCreatedAt ?? -1, evidence.createdAt) : (current.latestExitCreatedAt ?? null);

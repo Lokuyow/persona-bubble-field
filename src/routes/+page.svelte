@@ -69,6 +69,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	import TagGamePanel from '$lib/TagGamePanel.svelte';
 	import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL, TAG_GAME_TERMINAL, isBlockedFacilityCell, isWithinFacilityInteractionRange, sameFieldCell } from '$lib/fieldFacilities';
 	import { projectMending } from '$lib/mending';
+	import { comparePresenceEvidence, presenceEvidenceFromWorldState } from '$lib/presenceEvidence';
 	import { getAbilityUpgrade, type PersonaAbilityKey } from '$lib/personaGameState';
 	import {
 		CURRENT_CHARACTER_PROFILE_REVISION,
@@ -318,7 +319,7 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 	let tagGameBusy = $state(false);
 	let tagGameStates = $state.raw<readonly TagGameState[]>([]);
 	const tagGameEvents = new Map<string, { eventId: string; createdAt: number; state: TagGameState }>();
-	const latestTagGameWorldStates = new Map<string, ParsedWorldStateEvent>();
+	let latestTagGameWorldStates = $state.raw(new Map<string, ParsedWorldStateEvent>());
 	const appliedTagGameWorldStateIds = new Set<string>();
 	const tagGameConflictSince = new Map<string, number>();
 	const tagGameHostProbeAtMs = new Map<string, number>();
@@ -546,6 +547,19 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 	let mendingProjection = $derived(personaSnapshot ? projectMending(personaSnapshot.gameState, mendingNowMs, personaSnapshot.activeRun.rootBuild) : null);
 	let canUseMendingTerminal = $derived(!devWorldSandboxEnabled && !personaLifecycleTransition && Boolean(worldSession && personaSnapshot && selfIsActive && selfLogicalPosition && isWithinFacilityInteractionRange(selfLogicalPosition)));
 	let tagGameLocalLock = $derived(Boolean(personaSnapshot && tagGameStates.some((game) => (game.phase === 'running' || game.phase === 'settling') && game.participant.some((member) => member.pubkey === personaSnapshot?.signer.pubkey && member.runNumber === personaSnapshot.activeRun.runNumber))));
+	let tagGameRoleByPubkey = $derived.by(() => {
+		const roles = new Map<string, 'participant' | 'holder'>();
+		for (const game of tagGameStates) {
+			if (game.phase !== 'running' && game.phase !== 'settling') continue;
+			for (const member of game.participant) {
+				const latest = latestTagGameWorldStates.get(member.pubkey);
+				if (member.status === 'active' && latest?.state === 'active' && latest.runNumber === member.runNumber) {
+					roles.set(member.pubkey, member.pubkey === game.ownerPubkey ? 'holder' : 'participant');
+				}
+			}
+		}
+		return roles;
+	});
 	let canUseAdjustmentTerminal = $derived(!devWorldSandboxEnabled && !personaLifecycleTransition && !tagGameLocalLock && Boolean(worldSession && personaSnapshot && selfIsActive && selfLogicalPosition && isWithinFacilityInteractionRange(selfLogicalPosition, ADJUSTMENT_TERMINAL)));
 	let canUseTagGameTerminal = $derived(!devWorldSandboxEnabled && !personaLifecycleTransition && Boolean(worldSession && selfIsActive && selfLogicalPosition && isWithinFacilityInteractionRange(selfLogicalPosition, TAG_GAME_TERMINAL)));
 	let visibleTagGameStates = $derived(tagGameStates.filter((game) => isFreshTagGameLobby(game, Math.floor(Date.now() / 1000)) || game.phase !== 'lobby'));
@@ -2420,9 +2434,8 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 		if (appliedTagGameWorldStateIds.has(event.id)) return;
 		appliedTagGameWorldStateIds.add(event.id);
 		const previous = latestTagGameWorldStates.get(event.pubkey);
-		if (previous && event.createdAt < previous.createdAt) return;
-		if (previous && event.createdAt === previous.createdAt && event.state !== previous.state) return;
-		latestTagGameWorldStates.set(event.pubkey, event);
+		if (previous && comparePresenceEvidence(presenceEvidenceFromWorldState(event), presenceEvidenceFromWorldState(previous)) <= 0) return;
+		latestTagGameWorldStates = new Map(latestTagGameWorldStates).set(event.pubkey, event);
 		if (event.state === 'exit' && event.exitReason && event.runNumber !== null) {
 			for (const game of tagGameStates) {
 			if (game.hostPubkey !== event.pubkey || !['lobby', 'proposed', 'countdown', 'running', 'settling'].includes(game.phase)) continue;
@@ -2452,10 +2465,10 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 				if (!member || !['running', 'settling'].includes(current.phase)) return null;
 				const accrued = accrueTagGameState(current, Date.now());
 				const participants = accrued.participant.map((candidate) => candidate.pubkey === event.pubkey && candidate.runNumber === event.runNumber ? { ...candidate, status } : candidate);
+				const remaining = participants.filter((candidate) => candidate.status === 'active');
+				if (remaining.length <= 1) return { ...accrued, phase: 'interrupted', endReason: 'too-few-participants', participant: participants, revision: current.revision + 1 };
 				let ownerPubkey = current.ownerPubkey;
 				if (ownerPubkey === event.pubkey) {
-					const remaining = participants.filter((candidate) => candidate.status === 'active');
-					if (remaining.length <= 1) return { ...accrued, phase: 'interrupted', endReason: 'too-few-participants', participant: participants, revision: current.revision + 1 };
 					const hash = [...(current.seed ?? '')].reduce((value, char) => (Math.imul(value ^ char.charCodeAt(0), 16777619) >>> 0), 2166136261);
 					ownerPubkey = remaining[hash % remaining.length].pubkey;
 				}
@@ -2574,6 +2587,14 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 				}
 			}
 			if (game.hostPubkey === selfPubkey && (game.phase === 'running' || game.phase === 'settling') && game.seed && game.startedAt && game.endsAt) {
+				if (nowMs >= game.endsAt * 1000) {
+					void updateTagGameState(game.gameId, (current) => {
+						if ((current.phase !== 'running' && current.phase !== 'settling') || !current.endsAt || nowMs < current.endsAt * 1000) return null;
+						const accrued = accrueTagGameState(current, current.endsAt * 1000);
+						return { ...accrued, phase: 'ended', finalizedAt: current.endsAt, endReason: 'normal', holderChallengeId: undefined, holderChallengeStartedAtMs: undefined, revision: current.revision + 1 };
+					});
+					continue;
+				}
 				const holderActivityAt = presenceState.participants.find((participant) => participant.id === game.ownerPubkey)?.lastActivityAt ?? game.startedAt * 1000;
 				const holderResponseState = tagGameHolderResponseState({ nowMs, normalActivityAtMs: holderActivityAt, acknowledgedAtMs: game.lastHolderResponseAtMs ?? null, challengeStartedAtMs: game.holderChallengeStartedAtMs ?? null });
 				if (game.phase === 'running' && holderResponseState === 'challenge' && !game.holderChallengeId) {
@@ -3471,12 +3492,13 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 				cameraAnimating={visualMotion !== null}
 				{traceMarkerCells}
 				{proximityFeedback}
-					{traceOnlyCellTriggers}
-					{facilityCellTriggers}
-					realtimeGroups={realtimeGroups}
-					realtimeGroupTriggers={realtimeGroupTriggers}
-					participatingCooperationDefectionGroupId={cooperationDefectionSchedule.phase === 'registration' ? cooperationDefectionSelfGroupId : null}
-					{participantViews}
+				{traceOnlyCellTriggers}
+				{facilityCellTriggers}
+				realtimeGroups={realtimeGroups}
+				realtimeGroupTriggers={realtimeGroupTriggers}
+				participatingCooperationDefectionGroupId={cooperationDefectionSchedule.phase === 'registration' ? cooperationDefectionSelfGroupId : null}
+				{participantViews}
+				{tagGameRoleByPubkey}
 				{selfProjectionId}
 				{movingParticipantIds}
 				{selfIsActive}

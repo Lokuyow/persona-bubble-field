@@ -1,6 +1,6 @@
 <script lang="ts">
 	import PrimaryButton from '$lib/PrimaryButton.svelte';
-	import { createTagGameSchedule, TAG_GAME_BENEFIT_POINTS_PER_SECOND, TAG_GAME_LIFESPAN_LOSS_MS_PER_SECOND, type TagGameState } from '$lib/tagGame';
+	import { createTagGameSchedule, tagGamePredictedRemainingLifespanMinutes, TAG_GAME_BENEFIT_POINTS_PER_SECOND, TAG_GAME_LIFESPAN_LOSS_MS_PER_SECOND, type TagGameState } from '$lib/tagGame';
 	type Props = Readonly<{
 		open: boolean;
 		games: readonly TagGameState[];
@@ -51,7 +51,7 @@
 			<strong>鬼ごっこ・残り{Math.max(0, Math.ceil(((game.endsAt ?? 0) * 1000 - nowMs) / 1000))}秒</strong>
 			<p>参加者: {game.participant.filter((member) => member.status === 'active').map((member) => member.pubkey === game.ownerPubkey ? (member.pubkey === selfPubkey ? 'あなた(所持者)' : `${member.pubkey.slice(0, 8)}(所持者)`) : (member.pubkey === selfPubkey ? 'あなた' : member.pubkey.slice(0, 8))).join('、')}</p>
 			<p>所持者: {game.participant.find((member) => member.pubkey === game.ownerPubkey)?.pubkey === selfPubkey ? 'あなた' : (game.ownerPubkey ?? '').slice(0, 8)}・{game.effect === 'benefit' ? '恩恵' : '災厄'}・転移後{cooldown}秒</p>
-			{#if own}<p>予測: {own.points + pending.points}pt・寿命残り約{Math.max(0, Math.floor(((effectiveLifespanMs ?? 0) - own.lifespanLossMs - pending.lossMs) / 60_000))}分</p>{/if}
+			{#if own}<p>予測: {own.points + pending.points}pt・寿命残り約{tagGamePredictedRemainingLifespanMinutes(effectiveLifespanMs, pending.lossMs)}分</p>{/if}
 		{/each}
 	</aside>
 {/if}

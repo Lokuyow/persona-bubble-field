@@ -130,6 +130,17 @@ describe('presence evidence reducer', () => {
 		));
 	});
 
+	it('gives a same-second World State exit precedence over active position updates', () => {
+		const active = position('active', 'a'.repeat(64), 100, 1, { x: 2, y: 2 });
+		const exit = { id: 'death-exit', pubkey: active.pubkey, createdAt: active.createdAt, state: 'exit' as const, slot: null, position: { x: 2, y: 2 } };
+		const [reduced] = reconstructPresenceEvidence([], [active, exit]);
+		const [reversed] = reconstructPresenceEvidence([], [exit, active]);
+		expect(reduced.positionEvidence.source).toBe('world-state-exit');
+		expect(reversed.positionEvidence.source).toBe('world-state-exit');
+		expect(reduced.latestExitCreatedAt).toBe(100);
+		expect(reduced.lastPositiveActivityCreatedAt).toBe(100);
+	});
+
 	it('uses the lowest event ID for same-rank ties independent of arrival order', () => {
 		const first = evidence('b-event', 'a'.repeat(64), 100, 'message', { x: 2, y: 2 });
 		const second = evidence('a-event', 'a'.repeat(64), 100, 'message', { x: 1, y: 1 });
