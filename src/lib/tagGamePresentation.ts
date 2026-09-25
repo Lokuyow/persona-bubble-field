@@ -3,7 +3,7 @@ import type { TagGameState } from './tagGame';
 
 export function tagGameCharacterName(pubkey: string, selfPubkey: string | null): string {
 	if (pubkey === selfPubkey) return 'あなた';
-	return resolveCharacterFromPubkey(pubkey)?.name ?? pubkey.slice(0, 8);
+	return resolveCharacterFromPubkey(pubkey)?.name ?? '不明なキャラクター';
 }
 
 export function tagGameParticipantLabel(game: TagGameState, pubkey: string, selfPubkey: string | null): string {

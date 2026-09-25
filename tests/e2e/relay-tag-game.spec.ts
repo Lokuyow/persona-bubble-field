@@ -7,15 +7,20 @@ import { buildWorldStateEventTemplate, WORLD_STATE_KIND } from '../../src/lib/no
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { CHANNEL_ID, fixtureSecret, installDelayedRelay, moveRelaySelfTo, relayState, seedRelayAccount, testEvents, clickRelayLogicalCell, dragRelayJoystick } from './helpers/relayHarness';
 
-async function preparePlayer(page: Page, secret: Uint8Array, nowMs: number, points = 0): Promise<void> {
+async function preparePlayer(page: Page, secret: Uint8Array, nowMs: number, points = 0, persistAcrossReload = false): Promise<void> {
 	await page.clock.install({ time: nowMs });
 	await installHostOwnedStub(page);
-	await installDelayedRelay(page, { primaryEvents: testEvents(nowMs), realtimeEvents: [], realtimePublishOutcome: 'echo' });
+	await installDelayedRelay(page, { primaryEvents: testEvents(nowMs), realtimeEvents: [], realtimePublishOutcome: 'echo', persistAcrossReload });
 	await seedRelayAccount(page, secret, getPublicKey(secret), nowMs + 14 * 24 * 60 * 60 * 1_000, points);
 	await page.goto('/');
 	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
 	await expect(page.locator(`.participant[data-self="true"][data-participant-id="${getPublicKey(secret)}"]`)).toBeVisible();
 	await expect.poll(async () => (await relayState(page)).state.requests.some((request) => request.filters.some((filter) => (filter.kinds as number[] | undefined)?.includes(7070)))).toBe(true);
+}
+
+async function synchronizeBrowserClocks(pages: readonly Page[]): Promise<void> {
+	const nowMs = Math.max(...await Promise.all(pages.map((page) => page.evaluate(() => Date.now()))));
+	await Promise.all(pages.map((page) => page.clock.setSystemTime(nowMs)));
 }
 
 async function injectRealtime(page: Page, event: NostrEvent): Promise<void> {
@@ -129,6 +134,7 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 		const participantPosition = await latestPublished(participantPage, WORLD_STATE_KIND, participantPubkey);
 		const participantTwoPosition = await latestPublished(participantTwoPage, WORLD_STATE_KIND, participantTwoPubkey);
 		await Promise.all([injectPosition(participantPage, hostPosition), injectPosition(participantTwoPage, hostPosition), injectPosition(hostPage, participantPosition), injectPosition(hostPage, participantTwoPosition)]);
+		await synchronizeBrowserClocks([hostPage, participantPage, participantTwoPage]);
 
 		await openTagGameTerminal(hostPage);
 		await hostPage.getByRole('button', { name: '鬼ごっこを開催' }).click();
@@ -434,6 +440,7 @@ test('organizer cancellation terminates the lobby, clears pending reservations, 
 	try {
 		await Promise.all([preparePlayer(hostPage, hostSecret, nowMs), preparePlayer(joinerPage, joinerSecret, nowMs)]);
 		await Promise.all([moveRelaySelfTo(hostPage, { x: 7, y: 6 }), moveRelaySelfTo(joinerPage, { x: 8, y: 5 })]);
+		await synchronizeBrowserClocks([hostPage, joinerPage]);
 		await openTagGameTerminal(hostPage);
 		await hostPage.getByRole('button', { name: '鬼ごっこを開催' }).click();
 		await expect.poll(async () => (await relayState(hostPage)).state.published.some((event) => event.kind === TAG_GAME_KIND)).toBe(true);
@@ -441,6 +448,8 @@ test('organizer cancellation terminates the lobby, clears pending reservations, 
 		const lobby = parseTagGameEvent(lobbyEvent, CHANNEL_ID)!.state;
 		await injectRealtime(joinerPage, lobbyEvent);
 		await openTagGameTerminal(joinerPage);
+		await expect(joinerPage.locator('main')).toHaveAttribute('data-realtime-status', 'active');
+		await injectRealtime(joinerPage, lobbyEvent);
 		await expect(joinerPage.getByRole('button', { name: '参加申請' })).toBeVisible();
 		await joinerPage.getByRole('button', { name: '参加申請' }).click();
 		await expect.poll(async () => (await tagGamePersistence(joinerPage)).reservation).toMatchObject({ gameId: lobby.gameId, expiresAtMs: expect.any(Number) });
@@ -449,18 +458,75 @@ test('organizer cancellation terminates the lobby, clears pending reservations, 
 		await injectRealtime(hostPage, delayedJoin);
 		await expect.poll(async () => parseTagGameEvent(await latestGameEvent(hostPage, lobby.gameId), CHANNEL_ID)?.state.participant.length).toBe(2);
 		await injectRealtime(joinerPage, await latestGameEvent(hostPage, lobby.gameId));
+		await expect.poll(async () => (await tagGamePersistence(joinerPage)).reservation).toEqual({ gameId: lobby.gameId,
+			identity: expect.any(Object), runNumber: 1 });
 		await expect(hostPage.getByRole('button', { name: '募集を取り消す' })).toBeVisible();
 		await hostPage.getByRole('button', { name: '募集を取り消す' }).click();
 		await expect.poll(async () => parseTagGameEvent(await latestGameEvent(hostPage, lobby.gameId), CHANNEL_ID)?.state.endReason).toBe('host-cancelled');
 		const cancelled = await latestGameEvent(hostPage, lobby.gameId);
-		await injectRealtime(joinerPage, cancelled);
+		await joinerPage.evaluate((event) => (window as typeof window & { __relayStartupTest: { queueRealtimeBootstrapEvent(event: object): void } }).__relayStartupTest.queueRealtimeBootstrapEvent(event), cancelled);
+		await expect.poll(async () => (await tagGamePersistence(joinerPage)).reservation).not.toBeNull();
+		const activeRealtimeCountBeforeReload = await joinerPage.evaluate(() => (window as typeof window & { __relayStartupTest: { activeRealtimeCount(): number } }).__relayStartupTest.activeRealtimeCount());
+		expect(await joinerPage.evaluate((id) => sessionStorage.getItem('relay-startup-queued-realtime-bootstrap-events')?.includes(id) ?? false, cancelled.id)).toBe(true);
+		await joinerPage.clock.setSystemTime(cancelled.created_at * 1_000 + 91_000);
+		await joinerPage.reload();
+		await expect.poll(async () => joinerPage.evaluate((id) => (window as typeof window & { __relayStartupTest: { state: { realtimeHistory: Array<{ id: string }> } } }).__relayStartupTest.state.realtimeHistory.some((event) => event.id === id), cancelled.id)).toBe(true);
+		await openTagGameTerminal(joinerPage);
+		await expect.poll(async () => (await relayState(joinerPage)).state.requests.some((request) => request.filters.some((filter) => (filter['#d'] as string[] | undefined)?.includes(lobby.gameId)))).toBe(true);
 		await expect.poll(async () => (await tagGamePersistence(joinerPage)).reservation).toBeNull();
+		const recoveryRequests = (await relayState(joinerPage)).state.requests.filter((request) => request.filters.some((filter) =>
+			(filter.kinds as number[] | undefined)?.includes(TAG_GAME_KIND)));
+		expect(recoveryRequests.length).toBeGreaterThan(0);
+		const recoveryRequest = recoveryRequests.find((request) => request.filters.some((filter) => (filter['#d'] as string[] | undefined)?.includes(lobby.gameId)));
+		expect(recoveryRequest).toBeDefined();
+		const discoverySince = recoveryRequest?.filters.find((filter) => (filter.kinds as number[] | undefined)?.includes(TAG_GAME_KIND) && !filter['#d'])?.since as number;
+		expect(discoverySince).toBeGreaterThan(cancelled.created_at);
+		expect(discoverySince).toBeLessThan(cancelled.created_at + 15);
+		await expect.poll(async () => joinerPage.evaluate(() => (window as typeof window & { __relayStartupTest: { activeRealtimeCount(): number } }).__relayStartupTest.activeRealtimeCount())).toBe(activeRealtimeCountBeforeReload);
 		await injectRealtime(hostPage, delayedJoin);
 		await expect.poll(async () => parseTagGameEvent(await latestGameEvent(hostPage, lobby.gameId), CHANNEL_ID)?.state.phase).toBe('interrupted');
 		await expect(hostPage.getByRole('button', { name: '鬼ごっこを開催' })).toBeVisible();
 		await expect(joinerPage.getByRole('button', { name: '鬼ごっこを開催' })).toBeVisible();
 	} finally {
 		await Promise.all([hostPage.close(), joinerPage.close()]);
+	}
+});
+
+test('releases an approved reservation after finite known-game recovery when Relay has no retained state', async ({ browser }) => {
+	test.setTimeout(60_000);
+	const nowMs = Date.now();
+	const page = await browser.newPage();
+	const selfSecret = fixtureSecret(53);
+	const gameId = `${getPublicKey(fixtureSecret(47))}:${Math.floor(nowMs / 1_000)}:${'c'.repeat(64)}`;
+	try {
+		await preparePlayer(page, selfSecret, nowMs, 0, true);
+		await moveRelaySelfTo(page, { x: 8, y: 5 });
+		await page.evaluate((reservationGameId) => new Promise<void>((resolve, reject) => {
+			const request = indexedDB.open('persona-bubble-field-account', 8);
+			request.onerror = () => reject(request.error);
+			request.onsuccess = () => {
+				const database = request.result;
+				const transaction = database.transaction('persona-bubble-field-player-state', 'readwrite');
+				const store = transaction.objectStore('persona-bubble-field-player-state');
+				const read = store.get('player-lifecycle');
+				read.onsuccess = () => {
+					const current = read.result;
+					const activeRun = current.mode.activeRun;
+					store.put({ ...current, tagGame: { reservation: { gameId: reservationGameId, identity: activeRun.identity, runNumber: activeRun.runNumber } } }, 'player-lifecycle');
+				};
+				transaction.oncomplete = () => { database.close(); resolve(); };
+				transaction.onerror = () => { database.close(); reject(transaction.error); };
+			};
+		}), gameId);
+		await page.clock.setSystemTime(nowMs + 91_000);
+		await page.reload();
+		await openTagGameTerminal(page);
+		await expect(page.locator(`[data-tag-game-cancel-reservation="${gameId}"]`)).toBeVisible();
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => request.filters.some((filter) => (filter['#d'] as string[] | undefined)?.includes(gameId)))).toBe(true);
+		await page.clock.fastForward(31_000);
+		await expect.poll(async () => (await tagGamePersistence(page)).reservation).toBeNull();
+	} finally {
+		await page.close();
 	}
 });
 

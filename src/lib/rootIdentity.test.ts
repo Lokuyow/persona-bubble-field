@@ -28,6 +28,7 @@ import {
 	trackRealtimeEventInstance,
 	reserveTagGameParticipation,
 	confirmTagGameParticipation,
+	beginTagGameReservationRecovery,
 	transitionRealtimeDeath,
 	transitionExpiredPersona,
 	upgradePersonaAbility,
@@ -193,6 +194,20 @@ describe('Root / Identity / Run lifecycle', () => {
 		vi.spyOn(Date, 'now').mockReturnValue(TIME + 60_000);
 		expect((await loadOrCreateLifecycle()).kind).toBe('restored');
 		expect(await reserveTagGameParticipation(restored(await loadOrCreateLifecycle()), `${gameId}-other`)).toBe(false);
+	});
+
+	it('persists one finite known-game recovery deadline and clears it after a valid organizer state', async () => {
+		const persona = await selected();
+		const gameId = `${'9'.repeat(64)}:1:${'8'.repeat(64)}`;
+		expect(await reserveTagGameParticipation(persona, gameId)).toBe(true);
+		const deadline = TIME + 30_000;
+		expect(await beginTagGameReservationRecovery(persona, gameId, deadline)).toBe(true);
+		expect(await beginTagGameReservationRecovery(persona, gameId, deadline + 30_000)).toBe(true);
+		let restoredPersona = restored(await loadOrCreateLifecycle());
+		expect(restoredPersona.tagGame?.reservation).toMatchObject({ gameId, recoveryDeadlineMs: deadline });
+		expect(await confirmTagGameParticipation(restoredPersona, gameId)).toBe(true);
+		restoredPersona = restored(await loadOrCreateLifecycle());
+		expect(restoredPersona.tagGame?.reservation).toEqual({ gameId, identity: persona.activeRun.identity, runNumber: persona.activeRun.runNumber });
 	});
 
 	it('allows a new reservation to replace an expired pending reservation atomically', async () => {

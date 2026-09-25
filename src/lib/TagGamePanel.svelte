@@ -91,6 +91,10 @@
 			{:else if reservationCurrent}<p class="reservation-state">{reservedStatus === 'pending' ? '参加申請済み（受理待ち）' : reservedStatus === 'active' ? '鬼ごっこに参加中' : '参加申請済み（参加登録済み）'}</p>
 			{:else}<p class="reservation-state">ほかの開催回に参加中</p>{/if}
 			{#if games.length === 0}<p>現在募集中の開催はありません。</p>{/if}
+			{#if reservationCurrent && reservedGameId && reservedStatus !== 'active' && !games.some((game) => game.gameId === reservedGameId)}
+				<p class="reservation-state">表示されていない開催への{reservedStatus === 'pending' ? '参加申請' : '参加登録'}があります。</p>
+				<PrimaryButton data-tag-game-cancel-reservation={reservedGameId} onclick={() => onLeave(reservedGameId)} disabled={busy}>参加予約を取り消す</PrimaryButton>
+			{/if}
 			<ul>
 				{#each games as game (game.gameId)}
 					{@const hostCharacter = resolveCharacterFromPubkey(game.hostPubkey)}

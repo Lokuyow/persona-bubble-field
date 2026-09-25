@@ -97,7 +97,7 @@ export type RealtimeSettlementLedger = Readonly<{
 	tagGameReceipt?: Readonly<{ gameId: string; points: number; lifespanLossMs: number }>;
 }>;
 
-export type TagGameRunScope = Readonly<{ gameId: string; identity: IdentityReference; runNumber: number; expiresAtMs?: number }>;
+export type TagGameRunScope = Readonly<{ gameId: string; identity: IdentityReference; runNumber: number; expiresAtMs?: number; recoveryDeadlineMs?: number }>;
 export type TagGameLifecycle = Readonly<{
 	reservation?: TagGameRunScope;
 	lock?: TagGameRunScope & Readonly<{
@@ -310,7 +310,8 @@ function isValidTagGameScope(value: unknown): value is TagGameRunScope {
 	if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
 	const candidate = value as Record<string, unknown>;
 	return typeof candidate.gameId === 'string' && candidate.gameId.length > 0 && candidate.gameId.length <= 160 && isValidIdentityReference(candidate.identity) &&
-		Number.isSafeInteger(candidate.runNumber) && (candidate.runNumber as number) > 0 && (candidate.expiresAtMs === undefined || isSafeTimestamp(candidate.expiresAtMs));
+		Number.isSafeInteger(candidate.runNumber) && (candidate.runNumber as number) > 0 && (candidate.expiresAtMs === undefined || isSafeTimestamp(candidate.expiresAtMs)) &&
+		(candidate.recoveryDeadlineMs === undefined || isSafeTimestamp(candidate.recoveryDeadlineMs));
 }
 
 function isValidTagGameLifecycle(value: unknown): value is TagGameLifecycle {
@@ -1028,8 +1029,27 @@ export async function confirmTagGameParticipation(expected: PersonaSnapshot, gam
 			const store = tx.objectStore(PLAYER_LIFECYCLE_STORE_NAME);
 			const current = await store.get(PLAYER_STATE);
 			if (!isValidPlayerLifecycle(current) || !sameTagGameScope(current.tagGame?.reservation, expected, gameId)) { await tx.done; return false; }
-			const { expiresAtMs: _expiresAtMs, ...reservation } = current.tagGame!.reservation!;
+			const { expiresAtMs: _expiresAtMs, recoveryDeadlineMs: _recoveryDeadlineMs, ...reservation } = current.tagGame!.reservation!;
 			await store.put({ ...current, tagGame: { ...current.tagGame, reservation } }, PLAYER_STATE);
+			await tx.done;
+			return true;
+		} catch (error) { try { tx.abort(); } catch { /* already aborted */ } await tx.done.catch(() => {}); throw error; }
+	});
+}
+
+/** Starts one finite recovery window without extending it on later reloads. */
+export async function beginTagGameReservationRecovery(expected: PersonaSnapshot, gameId: string, deadlineMs: number): Promise<boolean> {
+	if (!isSafeTimestamp(deadlineMs)) return false;
+	return withLifecycle(async (db) => {
+		const tx = db.transaction(PLAYER_LIFECYCLE_STORE_NAME, 'readwrite');
+		try {
+			const store = tx.objectStore(PLAYER_LIFECYCLE_STORE_NAME);
+			const current = await store.get(PLAYER_STATE);
+			if (!isValidPlayerLifecycle(current)) { await tx.done; return false; }
+			const reservation = current.tagGame?.reservation;
+			if (!reservation || !sameTagGameScope(reservation, expected, gameId) || reservation.expiresAtMs !== undefined || current.tagGame?.lock) { await tx.done; return false; }
+			if (reservation.recoveryDeadlineMs !== undefined) { await tx.done; return true; }
+			await store.put({ ...current, tagGame: { ...current.tagGame, reservation: { ...reservation, recoveryDeadlineMs: deadlineMs } } }, PLAYER_STATE);
 			await tx.done;
 			return true;
 		} catch (error) { try { tx.abort(); } catch { /* already aborted */ } await tx.done.catch(() => {}); throw error; }

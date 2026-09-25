@@ -9,6 +9,7 @@ import {
 	buildTagGameActionTemplate,
 	buildTagGameActionFilter,
 	buildTagGameFilter,
+	buildTagGameRecoveryFilter,
 	buildTagGameTemplate,
 	createTagGameSchedule,
 	finalizeTagGameState,
@@ -49,6 +50,7 @@ function runningGame(participant: TagGameState['participant'], ownerPubkey: stri
 describe('player-hosted tag-game protocol and rules', () => {
 	it('uses one discoverable kind-37070 filter and one action filter in the supplemental REQ', () => {
 		expect(buildTagGameFilter(CHANNEL, 10)).toEqual({ kinds: [TAG_GAME_KIND], '#e': [CHANNEL], '#t': [TAG_GAME_INDEX], since: 10 });
+		expect(buildTagGameRecoveryFilter(CHANNEL, `${'1'.repeat(64)}:10:${'2'.repeat(64)}`)).toEqual({ kinds: [TAG_GAME_KIND], '#e': [CHANNEL], '#d': [`${'1'.repeat(64)}:10:${'2'.repeat(64)}`] });
 		expect(buildTagGameActionFilter(CHANNEL, 10)).toEqual({ kinds: [TAG_GAME_ACTION_KIND], '#e': [CHANNEL], since: 10 });
 	});
 

@@ -8,6 +8,7 @@ export const TAG_GAME_GAME_MS = 180_000;
 export const TAG_GAME_FINAL_WAIT_MS = 30_000;
 export const TAG_GAME_LOBBY_RENEW_MS = 30_000;
 export const TAG_GAME_LOBBY_MAX_AGE_SECONDS = 90;
+export const TAG_GAME_RESERVATION_RECOVERY_MS = 30_000;
 export const TAG_GAME_RESPONSE_TIMEOUT_MS = 5_000;
 export const TAG_GAME_NO_ACTIVITY_MS = 10_000;
 export const TAG_GAME_MAX_POINTS = 4_500;
@@ -88,6 +89,12 @@ const TAG_GAME_ID = /^([0-9a-f]{64}):([0-9]{1,12}):([0-9a-f]{32,128})$/;
 export function buildTagGameFilter(channelId: string, since: number): Filter {
 	if (!HEX_ID.test(channelId) || !Number.isSafeInteger(since) || since < 0) throw new TypeError('Invalid tag-game filter scope.');
 	return { kinds: [TAG_GAME_KIND], '#e': [channelId], '#t': [TAG_GAME_INDEX], since };
+}
+
+/** Fetches the latest addressable state for a locally persisted reservation. */
+export function buildTagGameRecoveryFilter(channelId: string, gameId: string): Filter {
+	if (!HEX_ID.test(channelId) || !TAG_GAME_ID.test(gameId)) throw new TypeError('Invalid tag-game recovery scope.');
+	return { kinds: [TAG_GAME_KIND], '#e': [channelId], '#d': [gameId] };
 }
 
 export function buildTagGameActionFilter(channelId: string, since: number): Filter {

@@ -88,6 +88,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		trackRealtimeEventInstance,
 		reserveTagGameParticipation,
 		confirmTagGameParticipation,
+		beginTagGameReservationRecovery,
 		releaseTagGameParticipation,
 		activateTagGameRun,
 		applyTagGameCumulative,
@@ -143,11 +144,13 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		TAG_GAME_GAME_MS,
 		TAG_GAME_LOBBY_MAX_AGE_SECONDS,
 		TAG_GAME_LOBBY_RENEW_MS,
+		TAG_GAME_RESERVATION_RECOVERY_MS,
 		TAG_GAME_LIFESPAN_LOSS_MS_PER_SECOND,
 		TAG_GAME_KIND,
 		TAG_GAME_ACTION_KIND,
 		buildTagGameActionFilter,
 		buildTagGameFilter,
+		buildTagGameRecoveryFilter,
 		buildTagGameTemplate,
 		buildTagGameActionTemplate,
 		createTagGameId,
@@ -1126,7 +1129,12 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 			return {
 				controlSince: realtimeControlSince,
 				instanceFilters: instanceIds.length === 0 ? [] : [{ protocolKey: COOPERATION_DEFECTION_EVENT_DEFINITION.protocolKey, instanceIds, since }],
-				supplementalFilters: channelId ? [buildTagGameFilter(channelId, tagGameDiscoverySince), buildTagGameActionFilter(channelId, tagGameDiscoverySince)] : []
+				supplementalFilters: channelId ? [
+					buildTagGameFilter(channelId, tagGameDiscoverySince),
+					buildTagGameActionFilter(channelId, tagGameDiscoverySince),
+					...(personaSnapshot?.tagGame?.reservation?.expiresAtMs === undefined && personaSnapshot?.tagGame?.reservation
+						? [buildTagGameRecoveryFilter(channelId, personaSnapshot.tagGame.reservation.gameId)] : [])
+				] : []
 			};
 		}
 
@@ -1141,7 +1149,7 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 			authorizationRunNumber: number | null = signer ? personaSnapshot?.activeRun.runNumber ?? null : null,
 			realtimeStartImmediately: boolean | undefined = undefined
 		): Promise<void> => {
-		tagGameDiscoverySince = Math.max(0, Math.floor(Date.now() / 1000) - TAG_GAME_LOBBY_MAX_AGE_SECONDS);
+		tagGameDiscoverySince = 0;
 			const previousSession = worldReader;
 			worldReader = null;
 			pendingBootstrapMessages = null;
@@ -1270,7 +1278,8 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 		): Promise<void> => {
 			const anonymousSession = worldReader;
 			const anonymousStartup = currentSessionStartup;
-			if (anonymousSession && anonymousStartup?.session === anonymousSession && !worldSession) {
+			if (anonymousSession && anonymousStartup?.session === anonymousSession && !worldSession &&
+				(!persona.tagGame?.reservation || persona.tagGame.reservation.expiresAtMs !== undefined)) {
 				try {
 					await Promise.race([anonymousStartup.promise, anonymousSession.whenSelfReadReady()]);
 					if (restored && isPersonaExpired(persona.gameState, Date.now(), persona.activeRun.rootBuild)) {
@@ -1383,6 +1392,12 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 				} else {
 					runTransitionNotice = null;
 					personaSnapshot = personaResult.persona;
+					const reservation = personaSnapshot.tagGame?.reservation;
+					if (reservation && reservation.expiresAtMs === undefined && !personaSnapshot.tagGame?.lock) {
+						if (await beginTagGameReservationRecovery(personaSnapshot, reservation.gameId, Date.now() + TAG_GAME_RESERVATION_RECOVERY_MS)) {
+							await refreshTagGamePersona(personaSnapshot);
+						}
+					}
 					pendingRootPoints = personaResult.persona.rootPoints;
 					selfSigner = personaResult.persona.signer;
 					if (initialFieldGeometryReady) syncVisualToCanonical();
@@ -2188,7 +2203,14 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 		}
 		tagGameEvents.set(state.gameId, { eventId, createdAt, state });
 		if (tagGameWatchedGameId === state.gameId && state.phase !== 'running' && state.phase !== 'settling') tagGameWatchedGameId = null;
-		if (personaSnapshot && state.participant.some((member) => member.pubkey === personaSnapshot?.signer.pubkey && member.runNumber === personaSnapshot.activeRun.runNumber)) {
+		const nowSeconds = Math.floor(Date.now() / 1000);
+		const localMember = personaSnapshot && state.participant.find((member) => member.pubkey === personaSnapshot?.signer.pubkey && member.runNumber === personaSnapshot.activeRun.runNumber);
+		const freshStateEvent = nowSeconds - createdAt <= TAG_GAME_LOBBY_MAX_AGE_SECONDS && nowSeconds >= createdAt - 5;
+		const ongoingReservationState = freshStateEvent && (state.phase === 'lobby' ? isFreshTagGameLobby(state, nowSeconds) :
+			state.phase === 'proposed' ? Boolean(state.proposalDeadline && state.proposalDeadline >= nowSeconds && nowSeconds - state.updatedAt <= TAG_GAME_LOBBY_MAX_AGE_SECONDS) :
+			state.phase === 'countdown' ? Boolean(state.startAt && state.startAt >= nowSeconds - 5 && state.startAt <= nowSeconds + 30) :
+			(state.phase === 'running' || state.phase === 'settling') && Boolean(state.endsAt && nowSeconds <= state.endsAt + TAG_GAME_FINAL_WAIT_MS / 1000));
+		if (personaSnapshot && localMember && ongoingReservationState && ['registered', 'active', 'temporarily-ineligible'].includes(localMember.status)) {
 			void confirmAndRefreshTagGameParticipation(personaSnapshot, state.gameId);
 		}
 		refreshTagGameStateList();
@@ -2570,6 +2592,19 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 		try {
 		const nowSeconds = Math.floor(nowMs / 1000);
 		const selfPubkey = personaSnapshot?.signer.pubkey;
+		const reservation = personaSnapshot?.tagGame?.reservation;
+		if (reservation?.recoveryDeadlineMs !== undefined && nowMs >= reservation.recoveryDeadlineMs) {
+			const recovered = tagGameEvents.get(reservation.gameId)?.state;
+			const member = recovered?.participant.find((player) => player.pubkey === selfPubkey && player.runNumber === personaSnapshot?.activeRun.runNumber);
+			const stillValid = Boolean(recovered && member && !['ended', 'interrupted'].includes(recovered.phase) &&
+				(recovered.phase === 'lobby' ? isFreshTagGameLobby(recovered, nowSeconds) :
+					recovered.phase === 'proposed' ? Boolean(recovered.proposalDeadline && recovered.proposalDeadline >= nowSeconds) :
+					recovered.phase === 'countdown' ? Boolean(recovered.startAt && recovered.startAt >= nowSeconds - 5) :
+					(recovered.phase === 'running' || recovered.phase === 'settling') && Boolean(recovered.endsAt && nowSeconds <= recovered.endsAt + TAG_GAME_FINAL_WAIT_MS / 1000)));
+			if (stillValid) {
+				if (personaSnapshot && await confirmTagGameParticipation(personaSnapshot, reservation.gameId)) await refreshTagGamePersona(personaSnapshot);
+			} else if (personaSnapshot) await releaseAndRefreshTagGameParticipation(personaSnapshot, reservation.gameId);
+		}
 		for (const entry of [...tagGameEvents.values()]) {
 			let game = entry.state;
 			const hostFinalWaitDeadline = game.endsAt ? game.endsAt * 1000 + TAG_GAME_FINAL_WAIT_MS : Number.POSITIVE_INFINITY;

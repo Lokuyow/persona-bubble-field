@@ -31,8 +31,8 @@ describe('tag-game character presentation', () => {
 		for (let value = 1; value < 256; value++) {
 			let pubkey: string;
 			try { pubkey = getPublicKey(secret(value)); } catch { continue; }
-			if (tagGameCharacterName(pubkey, null) === pubkey.slice(0, 8)) {
-				expect(tagGameCharacterName(pubkey, null)).toBe(pubkey.slice(0, 8));
+			if (tagGameCharacterName(pubkey, null) === '不明なキャラクター') {
+				expect(tagGameCharacterName(pubkey, null)).not.toContain(pubkey.slice(0, 8));
 				return;
 			}
 		}
