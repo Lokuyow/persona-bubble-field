@@ -237,8 +237,20 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', `${nearPosition.x},${nearPosition.y}`);
 
 		const farPosition = { x: group.position.x > 2 ? group.position.x - 2 : group.position.x + 2, y: group.position.y };
+		const groupTrigger = page.locator('[data-realtime-group-trigger]');
+		await groupTrigger.click();
+		await page.getByRole('dialog').getByRole('button', { name: 'ルールを見る' }).click();
+		const rulesDialog = page.getByRole('dialog', { name: '協力と抜け駆けのルール' });
+		const outcomes = rulesDialog.locator('[data-cooperation-defection-rule-results]').getByRole('listitem');
+		await expect(outcomes).toHaveText([
+			'協力成功：全員が協力 → 全員 +1,000pt',
+			'抜け駆け発生：一部が抜け駆けし、必要な協力人数を達成 → 協力 +100pt / 抜け駆け +10,000pt',
+			'失敗：必要な協力人数に達しない → 協力 0pt / 抜け駆け 寿命 −3日',
+			'不成立：有効選択が3人未満'
+		]);
+		await rulesDialog.getByRole('button', { name: '閉じる' }).click();
+		await groupTrigger.click();
 		const farEvent = finalizeEvent(buildWorldStateEventTemplate({ channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: farPosition, slot: 0, createdAt: Math.floor((startTime + 3_000) / 1000) }), selfSecret);
-		await page.locator('[data-realtime-group-trigger]').click();
 		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), farEvent);
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', `${farPosition.x},${farPosition.y}`);
 		await page.getByRole('button', { name: '参加する' }).click();

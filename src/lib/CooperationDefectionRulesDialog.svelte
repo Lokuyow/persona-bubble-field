@@ -60,12 +60,13 @@
 								<li>6人 → <strong>4人</strong></li>
 							</ul>
 						</section>
-						<section>
+						<section data-cooperation-defection-rule-results>
 							<h3>結果</h3>
 							<ul>
-								<li>全員が協力 → <strong>全員 +1,000pt</strong></li>
-								<li>協力成功・一部が抜け駆け → <strong>協力 +100pt / 抜け駆け +10,000pt</strong></li>
-								<li>協力失敗 → <strong>協力 0pt / 抜け駆け 寿命 −3日</strong></li>
+								<li>協力成功：全員が協力 → <strong>全員 +1,000pt</strong></li>
+								<li>抜け駆け発生：一部が抜け駆けし、必要な協力人数を達成 → <strong>協力 +100pt / 抜け駆け +10,000pt</strong></li>
+								<li>失敗：必要な協力人数に達しない → <strong>協力 0pt / 抜け駆け 寿命 −3日</strong></li>
+								<li>不成立：有効選択が3人未満</li>
 							</ul>
 						</section>
 					</div>
