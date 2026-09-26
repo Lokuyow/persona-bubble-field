@@ -106,7 +106,7 @@
 					</ScrollArea.Viewport>
 					<ScrollArea.Scrollbar class="self-profile-scrollbar" orientation="vertical"><ScrollArea.Thumb class="self-profile-thumb" /></ScrollArea.Scrollbar>
 				</ScrollArea.Root>
-				<footer class="self-profile-footer"><Dialog.Close class="self-profile-close">閉じる</Dialog.Close></footer>
+				<footer class="self-profile-footer"><Dialog.Close class="action-button action-button-tertiary self-profile-close">閉じる</Dialog.Close></footer>
 			</Dialog.Content>
 		</Dialog.Portal>
 	{/if}
@@ -169,7 +169,7 @@
 	.clear-button { min-height: 46px; border: 1px solid rgba(156, 104, 87, .3); border-radius: 9px; background: #e5c7ba; color: #876e67; font: inherit; font-weight: 900; cursor: pointer; }
 	.clear-button:disabled { cursor: not-allowed; }
 	.self-profile-footer { display: flex; justify-content: flex-end; }
-	:global(.self-profile-close) { min-height: 42px; padding: 0 18px; border: 1px solid rgba(57, 67, 64, .20); border-radius: 999px; background: #d9edf0; color: #374345; font: inherit; font-size: 13px; font-weight: 900; }
+	:global(.self-profile-close) { min-height: 44px; padding: 0 18px; border-radius: 999px; font-size: 13px; font-weight: 900; }
 	:global(.self-profile-content button:focus-visible) { outline: 3px solid var(--color-focus-ring); outline-offset: 2px; }
 	:global(.self-profile-scrollbar) { display: flex; width: 10px; padding: 2px; border-radius: 999px; background: rgba(86, 105, 98, .12); }
 	:global(.self-profile-thumb) { flex: 1; border-radius: inherit; background: #8fa8a0; }

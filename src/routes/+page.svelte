@@ -57,6 +57,7 @@
 		DevCooperationDefectionPlayground
 	} from '$lib/dev/devCooperationDefectionPlayground';
 	import { CHARACTER_CATALOG, getCharacterById, type Character } from '$lib/character';
+	import ActionButton from '$lib/ActionButton.svelte';
 import { requireCharacterFromPubkey } from '$lib/characterAssignment';
 import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	import ProfileDialog from '$lib/ProfileDialog.svelte';
@@ -172,6 +173,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		finalizeTagGameState,
 		isFreshTagGameLobby,
 		isFreshTagGameTouchAction,
+		isTagGameTransferCooldownActive,
 		isValidTagGameHolderResponse,
 		isTagGameTouchProofSuperseded,
 		isTagGameTouchPositionProof,
@@ -2987,7 +2989,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			const elapsedSinceReceiptMs = performance.now() - receivedAtMonotonicMs;
 			if (!isFreshTagGameTouchAction({ createdAtSeconds: action.event.created_at, nowMs, elapsedSinceFirstReceiptMs: elapsedSinceReceiptMs }) ||
 				current.phase !== 'running' || current.holderChallengeId || nowMs >= (current.endsAt ?? 0) * 1_000 ||
-				nowMs - (current.transferAt ?? current.startedAt! * 1_000) < 3_000 ||
+				isTagGameTransferCooldownActive({ transferAtMs: current.transferAt, startedAtMs: current.startedAt! * 1_000, nowMs }) ||
 				!tagGameOrganizerEffectActive(current, nowMs) || tagGameConflictSince.has(current.gameId)) return null;
 			const currentEffect = tagGameScheduledEffectAt(current, nowMs);
 			if (!currentEffect) return null;
@@ -4466,8 +4468,8 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 						disabled={deathPresentationSubmitting}
 					></textarea>
 					<div class="death-presentation-actions">
-						<button type="button" onclick={() => { void finishDeathPresentation(false); }} disabled={deathPresentationSubmitting}>残さず進む</button>
-						<button type="button" class="primary" onclick={() => { void finishDeathPresentation(true); }} disabled={deathPresentationSubmitting}>残して進む</button>
+					<ActionButton variant="secondary" type="button" onclick={() => { void finishDeathPresentation(false); }} disabled={deathPresentationSubmitting}>残さず進む</ActionButton>
+					<ActionButton variant="secondary" type="button" onclick={() => { void finishDeathPresentation(true); }} disabled={deathPresentationSubmitting}>残して進む</ActionButton>
 					</div>
 				{/if}
 			</section>
@@ -4639,6 +4641,13 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 }
 
 	.death-presentation-card {
+		--action-secondary-background: rgb(255 255 255 / 8%);
+		--action-secondary-background-hover: rgb(255 255 255 / 15%);
+		--action-secondary-foreground: #fff;
+		--action-secondary-border: rgb(255 255 255 / 42%);
+		--action-disabled-background: #424858;
+		--action-disabled-border: #5a6170;
+		--action-disabled-foreground: #d2d6df;
 		width: min(100%, 460px);
 		padding: 24px;
 		border: 1px solid rgb(255 255 255 / 18%);
@@ -4703,21 +4712,8 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		margin-top: 16px;
 	}
 
-	.death-presentation-actions button {
-		min-height: 44px;
-		padding: 0 16px;
-		border: 1px solid rgb(255 255 255 / 22%);
-		border-radius: 10px;
-		background: transparent;
-		color: inherit;
-		font: inherit;
-		cursor: pointer;
-	}
-
-	.death-presentation-actions button.primary {
-		border-color: transparent;
-		background: var(--accent-primary, #e59b70);
-		color: #1b1110;
+	.death-presentation-actions :global(button) {
+		min-width: 148px;
 	}
 
 	@media (prefers-reduced-motion: reduce) {

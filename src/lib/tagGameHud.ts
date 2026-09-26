@@ -5,6 +5,8 @@ import {
 	TAG_GAME_LIFESPAN_LOSS_MS_PER_SECOND,
 	TAG_GAME_MAX_LIFESPAN_LOSS_MS,
 	TAG_GAME_MAX_POINTS,
+	TAG_GAME_TRANSFER_COOLDOWN_MS,
+	isTagGameTransferCooldownActive,
 	type TagGameParticipant,
 	type TagGameState
 } from './tagGame';
@@ -116,8 +118,15 @@ export function tagGameTransferStatus(game: TagGameState, effectActive: boolean,
 	if (game.phase === 'settling' || (game.phase === 'running' && game.endsAt !== undefined && nowMs >= game.endsAt * 1_000)) return '最終精算中';
 	if (game.phase !== 'running') return '転移不可';
 	if (!effectActive) return '効果停止中';
-	const cooldownSeconds = Math.max(0, Math.ceil(((game.transferAt ?? 0) + 3_000 - nowMs) / 1_000));
-	return cooldownSeconds > 0 ? `転移禁止 ${cooldownSeconds}秒` : '転移禁止なし';
+	return '';
+}
+
+export function tagGameCooldownRemainingMs(game: TagGameState, effectActive: boolean, nowMs: number): number {
+	if (game.phase !== 'running' || game.startedAt === undefined || !effectActive || game.endsAt === undefined || nowMs >= game.endsAt * 1_000) return 0;
+	const transferredAtMs = game.transferAt ?? game.startedAt * 1_000;
+	return isTagGameTransferCooldownActive({ transferAtMs: game.transferAt, startedAtMs: game.startedAt * 1_000, nowMs })
+		? Math.max(0, transferredAtMs + TAG_GAME_TRANSFER_COOLDOWN_MS - nowMs)
+		: 0;
 }
 
 export function canLeaveTagGame(game: TagGameState, memberStatus: TagGameParticipant['status'] | undefined, nowMs: number): boolean {

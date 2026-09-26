@@ -18,6 +18,7 @@ export const TAG_GAME_MAX_LIFESPAN_LOSS_MS = 324_000_000;
 export const TAG_GAME_MAX_EFFECT_MS = 90_000;
 export const TAG_GAME_BENEFIT_POINTS_PER_SECOND = 50;
 export const TAG_GAME_LIFESPAN_LOSS_MS_PER_SECOND = 3_600_000;
+export const TAG_GAME_TRANSFER_COOLDOWN_MS = 2_000;
 export const TAG_GAME_TOUCH_RETRY_MS = 500;
 export const TAG_GAME_TOUCH_FEEDBACK_MS = 200;
 export const TAG_GAME_TOUCH_EVIDENCE_WAIT_MS = 1_000;
@@ -26,6 +27,10 @@ export const TAG_GAME_TOUCH_FUTURE_SKEW_SECONDS = 2;
 export const TAG_GAME_TOUCH_QUEUE_MAX_MS = 3_000;
 export const TAG_GAME_POSITION_PROOF_REFRESH_RETRY_MS = 1_000;
 export const TAG_GAME_POSITION_PROOF_REFRESH_MAX_ATTEMPTS = 3;
+
+export function isTagGameTransferCooldownActive(input: Readonly<{ transferAtMs?: number; startedAtMs: number; nowMs: number }>): boolean {
+	return input.nowMs - (input.transferAtMs ?? input.startedAtMs) < TAG_GAME_TRANSFER_COOLDOWN_MS;
+}
 
 export function canRetryTagGamePositionProofRefresh(input: Readonly<{ attempts: number; lastAttemptAtMs: number; nowMs: number; inFlight: boolean }>): boolean {
 	return Number.isSafeInteger(input.attempts) && input.attempts >= 0 && Number.isSafeInteger(input.lastAttemptAtMs) && input.lastAttemptAtMs >= 0 &&

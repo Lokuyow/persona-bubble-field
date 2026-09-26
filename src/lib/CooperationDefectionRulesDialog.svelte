@@ -1,4 +1,5 @@
 <script lang="ts">
+	import ActionButton from '$lib/ActionButton.svelte';
 	type Props = Readonly<{
 		open: boolean;
 		mode: 'rules' | 'join-confirmation';
@@ -32,9 +33,9 @@
 						<span>協力人数が不足すると、抜け駆けした参加者は寿命を3日失います。残り寿命によっては死亡します。</span>
 					</div>
 					<div class="cooperation-defection-dialog-actions">
-						<button class="cooperation-defection-primary-action" type="button" onclick={onJoin}>参加する</button>
-						<button class="cooperation-defection-secondary-action" type="button" onclick={onViewRules}>ルールを見る</button>
-						<button class="cooperation-defection-secondary-action" type="button" onclick={onCancel}>キャンセル</button>
+						<ActionButton variant="primary" type="button" onclick={onJoin}>参加する</ActionButton>
+						<ActionButton variant="secondary" type="button" onclick={onViewRules}>ルールを見る</ActionButton>
+						<ActionButton variant="tertiary" type="button" onclick={onCancel}>キャンセル</ActionButton>
 					</div>
 				{:else}
 					<div class="cooperation-defection-rules-body">
@@ -71,7 +72,7 @@
 						</section>
 					</div>
 					<div class="cooperation-defection-dialog-actions">
-						<button class="cooperation-defection-primary-action" type="button" onclick={() => onOpenChange(false)}>閉じる</button>
+						<ActionButton variant="tertiary" type="button" onclick={() => onOpenChange(false)}>閉じる</ActionButton>
 					</div>
 				{/if}
 			</div>
@@ -90,14 +91,12 @@
 	.cooperation-defection-rules-body ul { padding-left: 1.2rem; }
 	.cooperation-defection-warning { display: grid; gap: 8px; padding: 14px; border: 1px solid #c46b75; border-radius: 10px; background: #fff0f1; color: #6f2430; line-height: 1.5; }
 	.cooperation-defection-dialog-actions { display: grid; gap: 9px; }
-	.cooperation-defection-dialog-actions button { min-height: 44px; padding: 9px 12px; border-radius: 9px; font: inherit; font-weight: 800; cursor: pointer; }
-	.cooperation-defection-primary-action { border: 1px solid #8d4692; background: #8d4692; color: white; }
-	.cooperation-defection-secondary-action { border: 1px solid rgba(102, 28, 106, .3); background: white; color: #4d3150; }
+	.cooperation-defection-dialog-actions :global(.action-button) { width: 100%; min-height: 44px; }
 	:global(.cooperation-defection-rules-content button:focus-visible) { outline: 3px solid var(--color-focus-ring); outline-offset: 3px; }
 	@media (min-width: 701px) {
 		:global(.cooperation-defection-rules-content) { font-size: 16px; }
 		:global(.cooperation-defection-rules-content h2) { font-size: 2rem; }
 		.cooperation-defection-rules-body h3 { font-size: 1.1rem; }
-		.cooperation-defection-dialog-actions button { font-size: 1rem; }
+		:global(.cooperation-defection-dialog-actions button) { font-size: 1rem; }
 	}
 </style>

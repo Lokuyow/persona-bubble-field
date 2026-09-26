@@ -6,9 +6,12 @@ applicable specifications remain the Source of Truth.
 
 ## Components and styling
 
-- New or changed ordinary primary actions use the shared `PrimaryButton` and
-  semantic accent tokens. Special or destructive actions may use distinct
-  semantic treatment when their meaning requires it.
+- Use the shared `ActionButton` for ordinary actions and explicitly set its
+  `variant` to `primary`, `secondary`, or `tertiary`. A single interaction
+  surface may have at most one primary action; choose its role from the whole
+  surface state rather than DOM order. Keep destructive or game-state styling
+  distinct when its meaning requires it, and ensure disabled buttons do not
+  retain a saturated primary fill.
 - Keep component-scoped CSS by default, avoid broad `:global(...)`, and do not
   add wrappers that change geometry, positioning, stacking, measurement, or SSR
   DOM contracts.

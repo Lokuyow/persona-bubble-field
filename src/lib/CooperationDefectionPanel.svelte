@@ -1,4 +1,5 @@
 <script lang="ts">
+	import ActionButton from '$lib/ActionButton.svelte';
 	import AlertTriangle from '~icons/tabler/alert-triangle';
 	import CalendarClock from '~icons/tabler/calendar-clock';
 	import CalendarEvent from '~icons/tabler/calendar-event';
@@ -248,15 +249,15 @@
 
 	{#if selectionPhase && choiceBounds}
 		<div class="cooperation-defection-choice-controls" data-cooperation-defection-choice-controls style={`left:${choiceBounds.x}px;top:${choiceBounds.y}px;width:${choiceBounds.width}px;height:${choiceBounds.height}px`} aria-label="秘密選択">
-			<button type="button" data-cooperation-defection-choice="cooperate" class:selected={selectedChoice === 'cooperate'} disabled={!canChoose} onclick={() => onChoice('cooperate')}>協力する</button>
-			<button type="button" data-cooperation-defection-choice="defect" class:selected={selectedChoice === 'defect'} disabled={!canChoose} onclick={() => onChoice('defect')}>抜け駆けする</button>
+			<ActionButton variant="secondary" class={selectedChoice === 'cooperate' ? 'cooperation-choice selected' : 'cooperation-choice'} type="button" data-cooperation-defection-choice="cooperate" disabled={!canChoose} onclick={() => onChoice('cooperate')}>協力する</ActionButton>
+			<ActionButton variant="secondary" class={selectedChoice === 'defect' ? 'cooperation-choice selected' : 'cooperation-choice'} type="button" data-cooperation-defection-choice="defect" disabled={!canChoose} onclick={() => onChoice('defect')}>抜け駆けする</ActionButton>
 		</div>
 	{/if}
 
 	{#if detailsOpen && lastRoundResult && detailsPosition}
 		<div class="details-layer" aria-hidden="false">
 			<section class="result-details" id="cooperation-defection-result-details" aria-label={`ラウンド${lastRoundResult.round}の結果の詳細`} style={`left:${detailsPosition.left}px;top:${detailsPosition.top}px;width:${detailsPosition.width}px;max-height:${detailsPosition.maxHeight}px`}>
-				<header><h3>ラウンド {lastRoundResult.round} · 結果</h3><button type="button" class="hud-item" aria-label="結果の詳細を閉じる" onclick={closeDetails}><span class="hud-icon" aria-hidden="true"><X /></span>閉じる</button></header>
+				<header><h3>ラウンド {lastRoundResult.round} · 結果</h3><ActionButton variant="tertiary" type="button" class="hud-item" aria-label="結果の詳細を閉じる" onclick={closeDetails}><span class="hud-icon" aria-hidden="true"><X /></span>閉じる</ActionButton></header>
 				<!-- svelte-ignore a11y_no_noninteractive_tabindex -- scrollable region remains keyboard focusable -->
 				<div class="result-details-body" role="region" aria-label="結果の詳細内容" tabindex="0">
 					<div class="group-verdict" data-cooperation-defection-group-verdict><span class="hud-icon" aria-hidden="true">{#if lastRoundResult.kind === 'insufficient'}<HelpCircle />{:else if lastRoundResult.kind === 'cooperation-failure'}<AlertTriangle />{:else}<CircleCheck />{/if}</span><strong>{groupOutcomeLabel(lastRoundResult)}</strong></div>
@@ -308,9 +309,8 @@
 	.own-outcome strong { font-variant-numeric: tabular-nums; }
 	.cooperation-defection-choice-controls { position: absolute; z-index: 5; box-sizing: border-box; display: flex; align-items: stretch; gap: 8px; padding: 0; pointer-events: none; }
 	button { min-width: 0; min-height: 38px; padding: 5px 9px; border: 1px solid rgba(102, 28, 106, .3); border-radius: 8px; background: #fff; color: #4d3150; font: inherit; font-size: .9em; font-weight: 700; cursor: pointer; pointer-events: auto; }
-	.cooperation-defection-choice-controls button { flex: 1; }
-	button.selected { background: #f0d9f3; border-color: #8d4692; }
-	button:disabled { cursor: not-allowed; opacity: .5; }
+	:global(.cooperation-choice) { flex: 1; min-width: 0; min-height: 38px; padding: 5px 9px; font-size: .9em; pointer-events: auto; }
+	:global(.cooperation-choice.selected) { border-color: #8d4692; background: #f0d9f3; color: #39293e; }
 	.details-trigger { justify-self: start; min-height: 30px; padding: 2px 7px; font-size: .8em; }
 	.cooperation-defection-rules-disclosure { margin-top: 7px; pointer-events: auto; }
 	.cooperation-defection-rules-disclosure summary { display: flex; align-items: center; justify-content: center; gap: .4em; min-height: 30px; box-sizing: border-box; padding: 4px 8px; border: 1px solid rgba(102, 28, 106, .3); border-radius: 8px; background: #fff; color: #4d3150; font-size: .82em; font-weight: 700; cursor: pointer; list-style: none; }
@@ -323,7 +323,7 @@
 	.result-details { position: absolute; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; border: 1px solid rgba(102, 28, 106, .3); border-radius: 12px; background: rgba(255, 250, 255, .98); box-shadow: 0 8px 24px rgba(75, 44, 75, .2); pointer-events: auto; }
 	.result-details header { position: sticky; z-index: 1; top: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border-bottom: 1px solid rgba(102, 28, 106, .16); background: rgba(255, 250, 255, .98); }
 	.result-details h3 { margin: 0; font-size: 1.04em; }
-	.result-details header button { flex: 0 0 auto; }
+	.result-details header :global(button) { flex: 0 0 auto; }
 	.result-details-body { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 10px; font-size: .95em; line-height: 1.45; }
 	.group-verdict { display: flex; align-items: center; gap: 6px; padding: 2px 1px 7px; color: #672e6e; font-size: 1.08em; }
 	.own-choice-unconfirmed { display: flex; align-items: center; gap: 5px; margin: 0 0 5px; color: #69536d; font-size: .88em; }
