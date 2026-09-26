@@ -340,6 +340,7 @@ export async function installDelayedRelay(page: Page, options: {
 		const activeRealtime: PendingRequest[] = [];
 		const closedTraceReplies: PendingRequest[] = [];
 		const pendingPublishes: Array<{ socket: FakeWebSocket; event: Record<string, unknown> }> = [];
+		const pendingRealtimePublishes: Array<{ socket: FakeWebSocket; event: Record<string, unknown>; outcome: 'accepted' | 'rejected' | 'echo' }> = [];
 		const timelineHistory = (historyMessages ?? []) as Array<Record<string, unknown>>;
 		const traceReplyHistory = traceReplies as Array<Record<string, unknown>>;
 		const persistedKey = 'relay-startup-persisted-state';
@@ -376,6 +377,7 @@ export async function installDelayedRelay(page: Page, options: {
 			realtimeEventsReleased: !deferRealtimeEvents,
 			realtimeTerminal: realtimeTerminal ?? 'eose' as 'eose' | 'closed' | 'timeout',
 			realtimePublishOutcome: realtimePublishOutcome ?? 'accepted' as 'accepted' | 'rejected' | 'echo' | 'no-response',
+			deferRealtimePublishes: false,
 			deferPositionPublishes: false,
 			rejectMessagePublishes: false,
 			rejectPositionPublishes: false,
@@ -498,6 +500,10 @@ export async function installDelayedRelay(page: Page, options: {
 			});
 		};
 		const respondRealtimePublish = (socket: FakeWebSocket, event: Record<string, unknown>) => {
+			if (state.deferRealtimePublishes && state.realtimePublishOutcome !== 'no-response') {
+				pendingRealtimePublishes.push({ socket, event, outcome: state.realtimePublishOutcome });
+				return;
+			}
 			if (state.realtimePublishOutcome === 'rejected') {
 				deliver(socket, ['OK', event.id, false, 'blocked: realtime test rejection']);
 				return;
@@ -671,6 +677,17 @@ export async function installDelayedRelay(page: Page, options: {
 					},
 					deferRealtimeEvents: () => { state.realtimeEventsReleased = false; },
 					setRealtimePublishOutcome: (outcome: 'accepted' | 'rejected' | 'echo' | 'no-response') => { state.realtimePublishOutcome = outcome; },
+					deferRealtimePublishes: () => { state.deferRealtimePublishes = true; },
+					releaseRealtimePublishes: () => {
+						state.deferRealtimePublishes = false;
+						for (const pending of pendingRealtimePublishes.splice(0)) {
+							if (pending.outcome === 'rejected') deliver(pending.socket, ['OK', pending.event.id, false, 'blocked: realtime test rejection']);
+							else if (pending.outcome === 'echo') {
+								if (!realtimeHistory.some((known) => known.id === pending.event.id)) realtimeHistory.push(pending.event);
+								for (const request of activeRealtime) deliverRealtimeLive(request, pending.event);
+							} else deliver(pending.socket, ['OK', pending.event.id, true, '']);
+						}
+					},
 					injectRealtimeEvent: (event: object) => {
 						const raw = event as Record<string, unknown>;
 						if (!realtimeHistory.some((known) => known.id === raw.id)) realtimeHistory.push(raw);

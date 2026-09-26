@@ -35,6 +35,14 @@ async function injectWorldMessage(page: Page, event: NostrEvent): Promise<void> 
 	await page.evaluate((next) => (window as typeof window & { __relayStartupTest: { injectMessage(event: object): void } }).__relayStartupTest.injectMessage(next), event);
 }
 
+async function setRealtimePublishDeferral(page: Page, deferred: boolean): Promise<void> {
+	await page.evaluate((shouldDefer) => {
+		const testRelay = (window as typeof window & { __relayStartupTest: { deferRealtimePublishes(): void; releaseRealtimePublishes(): void } }).__relayStartupTest;
+		if (shouldDefer) testRelay.deferRealtimePublishes();
+		else testRelay.releaseRealtimePublishes();
+	}, deferred);
+}
+
 async function latestGameEvent(page: Page, gameId: string): Promise<NostrEvent> {
 	const events = await page.evaluate((id) => {
 		const published = (window as typeof window & { __relayStartupTest: { state: { published: Array<Record<string, unknown>> } } }).__relayStartupTest.state.published;
@@ -424,6 +432,88 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 		await expect(participantPage.locator('.results')).toContainText('あなた');
 	} finally {
 		await Promise.all([hostPage.close(), participantPage.close(), participantTwoPage.close()]);
+	}
+});
+
+test('same-target long press keeps touch status stable while Relay acknowledgements are delayed', async ({ browser }) => {
+	test.setTimeout(60_000);
+	const hostPage = await browser.newPage();
+	const actorPage = await browser.newPage();
+	const nowMs = Date.now();
+	const hostSecret = fixtureSecret(53);
+	const actorSecret = fixtureSecret(59);
+	const hostPubkey = getPublicKey(hostSecret);
+	const actorPubkey = getPublicKey(actorSecret);
+	try {
+		await Promise.all([preparePlayer(hostPage, hostSecret, nowMs), preparePlayer(actorPage, actorSecret, nowMs)]);
+		await Promise.all([moveRelaySelfTo(hostPage, { x: 8, y: 5 }), moveRelaySelfTo(actorPage, { x: 7, y: 5 })]);
+		const [hostPosition, actorPosition] = await Promise.all([latestWorldState(hostPage, hostPubkey), latestWorldState(actorPage, actorPubkey)]);
+		await Promise.all([hostPage, actorPage].flatMap((page) => [injectPosition(page, hostPosition), injectPosition(page, actorPosition)]));
+		const channel = { channelId: CHANNEL_ID, relayHint: 'wss://relay.test/' };
+		const gameNowMs = Date.now();
+		await Promise.all([hostPage, actorPage].map((page) => page.clock.setSystemTime(gameNowMs)));
+		const nowSeconds = Math.floor(gameNowMs / 1_000);
+		const startedAt = nowSeconds - 4;
+		const seed = Array.from({ length: 1_000 }, (_, index) => `held-touch-${index}`).find((candidate) => createTagGameSchedule(candidate)[0].effect === 'benefit')!;
+		const gameId = `${hostPubkey}:${startedAt}:${'8'.repeat(64)}`;
+		const running: TagGameState = {
+			gameId, hostPubkey, phase: 'running', revision: 0, updatedAt: startedAt,
+			startedAt, endsAt: startedAt + 180, seed, ownerPubkey: hostPubkey, effect: 'benefit', transferAt: startedAt * 1_000,
+			participant: [hostPubkey, actorPubkey].map((pubkey) => ({ pubkey, runNumber: 1, registeredAt: startedAt, status: 'active' as const, points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 })),
+			settledAtMs: startedAt * 1_000, lastHolderResponseAtMs: startedAt * 1_000
+		};
+		const runningEvent = finalizeTagGameState(running, CHANNEL_ID, nowSeconds, hostSecret);
+		await Promise.all([injectRealtime(hostPage, runningEvent), injectRealtime(actorPage, runningEvent)]);
+		const activeMessage = finalizeEvent(buildWorldMessageTemplate({ channel, createdAt: nowSeconds, position: { x: 8, y: 5 }, content: 'holder active for held-touch test', speechType: 'normal' }), hostSecret);
+		const actorMessage = finalizeEvent(buildWorldMessageTemplate({ channel, createdAt: nowSeconds, position: { x: 7, y: 5 }, content: 'actor active for held-touch test', speechType: 'normal' }), actorSecret);
+		for (const page of [hostPage, actorPage]) await Promise.all([injectWorldMessage(page, activeMessage), injectWorldMessage(page, actorMessage)]);
+		await expect(actorPage.locator(`.participant[data-participant-id="${hostPubkey}"]`)).toHaveAttribute('data-tag-game-touch-target', 'true');
+		await actorPage.evaluate(() => (window as typeof window & { __relayStartupTest: { setRealtimePublishOutcome(outcome: string): void } }).__relayStartupTest.setRealtimePublishOutcome('accepted'));
+		await actorPage.keyboard.down('ArrowRight');
+		await expect.poll(async () => latestTagGameAction(actorPage, actorPubkey, 'touch').then(() => true, () => false)).toBe(true);
+		await expect(actorPage.locator('[data-tag-game-touch-status]')).toHaveText('判定待ち・開催者未確認');
+		await actorPage.evaluate(() => {
+			const hud = document.querySelector('[data-tag-game-hud]');
+			const status = document.querySelector('[data-tag-game-touch-status]');
+			if (!hud || !status) throw new Error('Expected the pending touch status before the long-press observation.');
+			const trace: Array<string | null> = [status.textContent?.trim() ?? null];
+			(window as typeof window & { __touchStatusTrace?: Array<string | null>; __touchStatusObserver?: MutationObserver }).__touchStatusTrace = trace;
+			const observer = new MutationObserver(() => trace.push(document.querySelector('[data-tag-game-touch-status]')?.textContent?.trim() ?? null));
+			observer.observe(hud, { childList: true, subtree: true, characterData: true });
+			(window as typeof window & { __touchStatusObserver?: MutationObserver }).__touchStatusObserver = observer;
+		});
+		await setRealtimePublishDeferral(actorPage, true);
+		await actorPage.clock.runFor(1_300);
+		await expect.poll(async () => (await relayState(actorPage)).state.published.filter((event) => event.kind === 27070 && event.pubkey === actorPubkey && parseTagGameActionEvent(event as unknown as NostrEvent, CHANNEL_ID)?.action === 'touch').length).toBeGreaterThanOrEqual(3);
+		await expect(actorPage.locator('[data-tag-game-touch-status]')).toHaveText('判定待ち・開催者未確認');
+		const traceDuringHold = await actorPage.evaluate(() => (window as typeof window & { __touchStatusTrace: Array<string | null> }).__touchStatusTrace);
+		expect(traceDuringHold).not.toContain(null);
+		expect(traceDuringHold.every((text) => text === '判定待ち・開催者未確認')).toBe(true);
+		await actorPage.evaluate(() => (window as typeof window & { __touchStatusObserver?: MutationObserver }).__touchStatusObserver?.disconnect());
+		await actorPage.keyboard.up('ArrowRight');
+		await actorPage.clock.runFor(2_100);
+		await expect(actorPage.locator('[data-tag-game-touch-status]')).toHaveText('転移未確認');
+		const firstTouch = await latestTagGameAction(actorPage, actorPubkey, 'touch');
+		// The host's controlled clock must advance so its signed 37070 is newer
+		// than the initial running event (same-second addressable conflicts are
+		// intentionally not selected by clients).
+		await hostPage.clock.runFor(1_000);
+		await injectRealtime(hostPage, firstTouch);
+		await expect.poll(async () => parseTagGameEvent(await latestGameEvent(hostPage, gameId), CHANNEL_ID)?.state.ownerPubkey).toBe(actorPubkey);
+		const confirmedState = await latestGameEvent(hostPage, gameId);
+		expect(confirmedState.kind).toBe(TAG_GAME_KIND);
+		expect(confirmedState.pubkey).toBe(hostPubkey);
+		await injectRealtime(actorPage, confirmedState);
+		await expect(actorPage.locator(`.participant[data-participant-id="${actorPubkey}"]`)).toHaveAttribute('data-tag-game-role', 'holder');
+		await expect(actorPage.locator('[data-tag-game-touch-status]')).toHaveText('所持者が更新されました');
+		await setRealtimePublishDeferral(actorPage, false);
+		await actorPage.clock.runFor(10);
+		await expect(actorPage.locator('[data-tag-game-touch-status]')).toHaveText('所持者が更新されました');
+		await actorPage.clock.runFor(1_900);
+		await expect(actorPage.locator('[data-tag-game-touch-status]')).toHaveCount(0);
+		await expect(actorPage.locator('[data-tag-game-hud]')).toBeVisible();
+	} finally {
+		await Promise.all([hostPage.close(), actorPage.close()]);
 	}
 });
 

@@ -361,7 +361,10 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	const tagGameTouchSeenEventIds = new Map<string, number>();
 	const tagGameTouchStatusTimers = new Map<string, number>();
 	const tagGameTouchStatusVersions = new Map<string, number>();
+	const tagGameTouchStatusTargets = new Map<string, string>();
 	let tagGameTouchStatusVersionSequence = 0;
+	const tagGameTouchRequestVersions = new Map<string, number>();
+	let tagGameTouchRequestVersionSequence = 0;
 	const tagGamePositionEvidenceIdsByPubkey = new Map<string, string[]>();
 	const tagGameWorldStateIdsByPubkey = new Map<string, string[]>();
 	let tagGameTouchStatuses = $state.raw(new Map<string, Readonly<{ targetPubkey: string; label: string }>>());
@@ -2678,6 +2681,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		if (expectedVersion !== undefined && currentVersion !== expectedVersion) return;
 		const version = expectedVersion ?? ++tagGameTouchStatusVersionSequence;
 		tagGameTouchStatusVersions.set(gameId, version);
+		tagGameTouchStatusTargets.set(gameId, targetPubkey);
 		const previousTimer = tagGameTouchStatusTimers.get(gameId);
 		if (previousTimer !== undefined) window.clearTimeout(previousTimer);
 		tagGameTouchStatuses = new Map(tagGameTouchStatuses).set(gameId, { targetPubkey, label });
@@ -2692,6 +2696,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			tagGameTouchStatuses.delete(gameId);
 			tagGameTouchStatusTimers.delete(gameId);
 			tagGameTouchStatusVersions.delete(gameId);
+			tagGameTouchStatusTargets.delete(gameId);
 		}, label === '判定待ち・開催者未確認' ? 2_000 : 1_800));
 	}
 
@@ -2851,13 +2856,25 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		window.setTimeout(() => { if (tagGameTouchAttempt?.id === attemptId) tagGameTouchAttempt = null; }, TAG_GAME_TOUCH_FEEDBACK_MS);
 		if (previousAttempt !== undefined && now - previousAttempt < TAG_GAME_TOUCH_RETRY_MS) return;
 		tagGameTouchAttempts.set(key, now);
-		const statusVersion = ++tagGameTouchStatusVersionSequence;
-		tagGameTouchStatusVersions.set(game.gameId, statusVersion);
-		const previousStatusTimer = tagGameTouchStatusTimers.get(game.gameId);
-		if (previousStatusTimer !== undefined) window.clearTimeout(previousStatusTimer);
-		tagGameTouchStatusTimers.delete(game.gameId);
-		tagGameTouchStatuses = new Map(tagGameTouchStatuses);
-		tagGameTouchStatuses.delete(game.gameId);
+		let statusVersion = tagGameTouchStatusVersions.get(game.gameId);
+		const currentStatus = tagGameTouchStatuses.get(game.gameId);
+		const confirmedStatusVisible = currentStatus?.label === '所持者が更新されました';
+		if (!confirmedStatusVisible && (!statusVersion || tagGameTouchStatusTargets.get(game.gameId) !== target.pubkey)) {
+			statusVersion = ++tagGameTouchStatusVersionSequence;
+			tagGameTouchStatusVersions.set(game.gameId, statusVersion);
+			tagGameTouchStatusTargets.set(game.gameId, target.pubkey);
+			const previousStatusTimer = tagGameTouchStatusTimers.get(game.gameId);
+			if (previousStatusTimer !== undefined) window.clearTimeout(previousStatusTimer);
+			tagGameTouchStatusTimers.delete(game.gameId);
+			tagGameTouchStatuses = new Map(tagGameTouchStatuses);
+			tagGameTouchStatuses.delete(game.gameId);
+		} else if (!confirmedStatusVisible && currentStatus?.targetPubkey === target.pubkey && currentStatus.label === '判定待ち・開催者未確認') {
+			// A valid held-key retry renews the one pending display without clearing or restating it.
+			setTagGameTouchStatus(game.gameId, target.pubkey, currentStatus.label, 'unconfirmed', statusVersion);
+		}
+		const requestKey = `${game.gameId}:${target.pubkey}`;
+		const requestVersion = ++tagGameTouchRequestVersionSequence;
+		tagGameTouchRequestVersions.set(requestKey, requestVersion);
 		const actorAnchor = latestTagGameWorldStates.get(self.signer.pubkey);
 		const targetAnchor = latestTagGameWorldStates.get(target.pubkey);
 		const proof = (pubkey: string, runNumber: number): Readonly<{ worldStateEventId: string; positionEvidenceEventId: string }> | undefined => {
@@ -2873,11 +2890,18 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		}
 		const transferAt = game.transferAt ?? 0;
 		void publishTagGameAction(game.gameId, 'touch', { targetPubkey: target.pubkey, ...(actorProof ? { actorProof } : {}), ...(targetProof ? { targetProof } : {}) }).then((sent) => {
-			if (tagGameTouchStatusVersions.get(game.gameId) !== statusVersion) return;
+			if (tagGameTouchStatusVersions.get(game.gameId) !== statusVersion || tagGameTouchStatusTargets.get(game.gameId) !== target.pubkey) return;
 			const current = tagGameEvents.get(game.gameId)?.state;
-			if (!sent) setTagGameTouchStatus(game.gameId, target.pubkey, '送信未確認', 'clear', statusVersion);
-			else if (current?.transferAt && current.transferAt > transferAt) setTagGameTouchStatus(game.gameId, target.pubkey, '所持者が更新されました', 'clear', statusVersion);
-			else setTagGameTouchStatus(game.gameId, target.pubkey, '判定待ち・開催者未確認', 'unconfirmed', statusVersion);
+			const visibleStatus = tagGameTouchStatuses.get(game.gameId);
+			if (visibleStatus?.label === '所持者が更新されました') return;
+			if (!sent) {
+				if (tagGameTouchRequestVersions.get(requestKey) !== requestVersion || visibleStatus?.label === '判定待ち・開催者未確認' || visibleStatus?.label === '転移未確認') return;
+				setTagGameTouchStatus(game.gameId, target.pubkey, '送信未確認', 'clear', statusVersion);
+			} else if (current?.transferAt && current.transferAt > transferAt) {
+				setTagGameTouchStatus(game.gameId, target.pubkey, '所持者が更新されました', 'clear', statusVersion);
+			} else if (tagGameTouchRequestVersions.get(requestKey) === requestVersion) {
+				setTagGameTouchStatus(game.gameId, target.pubkey, '判定待ち・開催者未確認', 'unconfirmed', statusVersion);
+			}
 		});
 	}
 
