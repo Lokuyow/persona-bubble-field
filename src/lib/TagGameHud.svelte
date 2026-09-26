@@ -12,23 +12,25 @@
 		nowMs: number;
 		realtimeStatus: 'inactive' | 'active' | 'degraded';
 		busy: boolean;
+		localEffectPaused?: boolean;
 		touchStatus?: string | null;
 		onLeave: (gameId: string) => void;
 	}>;
 
-	let { game, selfPubkey, selfRunNumber, nowMs, realtimeStatus, busy, touchStatus = null, onLeave }: Props = $props();
+	let { game, selfPubkey, selfRunNumber, nowMs, realtimeStatus, busy, localEffectPaused = false, touchStatus = null, onLeave }: Props = $props();
 	const own = $derived(game?.participant.find((member) => member.pubkey === selfPubkey && member.runNumber === selfRunNumber) ?? null);
 	const holder = $derived(game?.participant.find((member) => member.pubkey === game.ownerPubkey) ?? null);
 	const endsAtMs = $derived((game?.endsAt ?? 0) * 1000);
 	const remaining = $derived(game ? formatTagGameRemainingTime(endsAtMs, nowMs) : '00:00');
 	const scheduledEffect = $derived(game ? tagGameScheduledEffectAt(game, nowMs) : null);
 	const effectScheduleCurrent = $derived(Boolean(game && isTagGameScheduledEffectActive(game, nowMs)));
-	const effectActive = $derived(Boolean(game && effectScheduleCurrent && !game.holderChallengeId && holder?.status === 'active'));
+	const effectActive = $derived(Boolean(game && effectScheduleCurrent && !game.holderChallengeId && !localEffectPaused && holder?.status === 'active'));
 	const pausedLabel = $derived(game?.phase === 'settling' || (game?.phase === 'running' && nowMs >= endsAtMs)
 		? '最終精算中・効果停止'
 		: game?.holderChallengeId ? '応答確認中・効果停止'
 			: holder?.status === 'temporarily-ineligible' ? '所持者が一時対象外・効果停止'
-				: '効果停止中');
+				: localEffectPaused ? '安全停止中・効果停止'
+					: '効果停止中');
 	const currentEffect = $derived(scheduledEffect ?? game?.effect ?? null);
 	const effectName = $derived(currentEffect === 'benefit' ? '恩恵' : '災厄');
 	const holderName = $derived(game?.ownerPubkey && game ? tagGameParticipantLabel(game, game.ownerPubkey, selfPubkey) : '未定');

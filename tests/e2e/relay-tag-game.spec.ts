@@ -645,6 +645,65 @@ test('the 23-second cutoff survives reload and recovery excludes the stopped int
 	expect(resumed.participant.find((member) => member.pubkey === ownerPubkey)?.calamityMs).toBe(stoppedOwner.calamityMs);
 });
 
+test('organizer local safety stop hides touch targets and resumes presentation after activity returns', async ({ page }) => {
+	test.setTimeout(60_000);
+	const nowMs = Date.now();
+	const organizerSecret = fixtureSecret(47);
+	const targetSecret = fixtureSecret(51);
+	const organizerPubkey = getPublicKey(organizerSecret);
+	const targetPubkey = getPublicKey(targetSecret);
+	await preparePlayer(page, organizerSecret, nowMs, 0);
+	await moveRelaySelfTo(page, { x: 7, y: 5 });
+	const nowSeconds = Math.floor(await page.evaluate(() => Date.now() / 1_000));
+	const channel = { channelId: CHANNEL_ID, relayHint: 'wss://relay.test/' };
+	const targetPosition = finalizeEvent(buildWorldStateEventTemplate({ channel, createdAt: nowSeconds, position: { x: 8, y: 5 }, slot: 1, runNumber: 1 }), targetSecret);
+	const targetActivity = finalizeEvent(buildWorldMessageTemplate({ channel, createdAt: nowSeconds, position: { x: 8, y: 5 }, content: 'active target', speechType: 'normal' }), targetSecret);
+	await injectPosition(page, targetPosition);
+	await injectWorldMessage(page, targetActivity);
+	const seed = Array.from({ length: 10_000 }, (_, index) => `local-pause-${index}`).find((candidate) => {
+		const schedule = createTagGameSchedule(candidate);
+		return schedule[0].effect === 'calamity' && schedule[0].durationMs >= 30_000;
+	})!;
+	const gameId = `${organizerPubkey}:${nowSeconds}:${'7'.repeat(64)}`;
+	const running: TagGameState = {
+		gameId, hostPubkey: organizerPubkey, phase: 'running', revision: 0, updatedAt: nowSeconds,
+		startedAt: nowSeconds, endsAt: nowSeconds + 180, seed, ownerPubkey: organizerPubkey, effect: 'calamity', transferAt: nowSeconds * 1_000,
+		participant: [organizerPubkey, targetPubkey].map((pubkey) => ({ pubkey, runNumber: 1, registeredAt: nowSeconds, status: 'active' as const, points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 })),
+		settledAtMs: nowSeconds * 1_000, lastHolderResponseAtMs: nowSeconds * 1_000
+	};
+	await injectRealtime(page, finalizeTagGameState(running, CHANNEL_ID, nowSeconds, organizerSecret));
+	const target = page.locator(`.participant[data-participant-id="${targetPubkey}"]`);
+	const hud = page.locator('[data-tag-game-hud]');
+	await expect(target).toHaveAttribute('data-tag-game-touch-target', 'true');
+	await expect(hud.locator('[data-tag-game-effect]')).toHaveAttribute('data-tag-game-effect-active', 'true');
+	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { rejectTagGameStatePublishes(): void } }).__relayStartupTest.rejectTagGameStatePublishes());
+	await page.clock.runFor(23_500);
+	await expect.poll(async () => {
+		const event = await latestGameEvent(page, gameId);
+		return parseTagGameEvent(event, CHANNEL_ID)?.state.holderChallengeId ?? null;
+	}).toBeTruthy();
+	const locallyStoppedAttempt = parseTagGameEvent(await latestGameEvent(page, gameId), CHANNEL_ID)!.state;
+	expect(locallyStoppedAttempt.settledAtMs).toBe(nowSeconds * 1_000 + 23_000);
+	await expect(hud.locator('[data-tag-game-effect]')).toHaveAttribute('data-tag-game-effect-active', 'false');
+	await expect(hud.locator('[data-tag-game-effect] span')).toHaveText('安全停止中・効果停止');
+	await expect(hud.locator('[data-tag-game-cooldown]')).toHaveText('効果停止中');
+	await expect(target).not.toHaveAttribute('data-tag-game-touch-target', 'true');
+	const touchCountBefore = (await relayState(page)).state.published.filter((event) => event.kind === 27070 && parseTagGameActionEvent(event as unknown as NostrEvent, CHANNEL_ID)?.action === 'touch').length;
+	await page.keyboard.press('ArrowRight');
+	await expect(page.locator(`.participant[data-participant-id="${organizerPubkey}"]`)).toHaveAttribute('data-position', '7,5');
+	expect((await relayState(page)).state.published.filter((event) => event.kind === 27070 && parseTagGameActionEvent(event as unknown as NostrEvent, CHANNEL_ID)?.action === 'touch')).toHaveLength(touchCountBefore);
+
+	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { allowTagGameStatePublishes(): void } }).__relayStartupTest.allowTagGameStatePublishes());
+	const resumedAtMs = await page.evaluate(() => Date.now());
+	const resumedActivity = finalizeEvent(buildWorldMessageTemplate({ channel, createdAt: Math.floor(resumedAtMs / 1_000),
+		position: { x: 7, y: 5 }, content: 'organizer activity resumed', speechType: 'normal' }), organizerSecret);
+	await injectWorldMessage(page, resumedActivity);
+	await page.clock.runFor(500);
+	await expect(hud.locator('[data-tag-game-effect]')).toHaveAttribute('data-tag-game-effect-active', 'true');
+	await expect(hud.locator('[data-tag-game-effect] span')).toHaveText('所持者が追いかけて押し付ける');
+	await expect(target).toHaveAttribute('data-tag-game-touch-target', 'true');
+});
+
 test('keeps a valid precheck response as local activity when 37070 updates fail', async ({ page }) => {
 	test.setTimeout(60_000);
 	const nowMs = Date.now();

@@ -649,7 +649,11 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		const game = tagGameDisplayedGame;
 		if (!game) return null;
 		const holder = game.participant.find((member) => member.pubkey === game.ownerPubkey);
-		return { effect: tagGameScheduledEffectAt(game, tagGameHudNowMs), active: isTagGameScheduledEffectActive(game, tagGameHudNowMs) && !game.holderChallengeId && holder?.status === 'active' };
+		const self = personaSnapshot;
+		const localPause = self && game.hostPubkey === self.signer.pubkey ? tagGameEffectPauses.get(game.gameId) : null;
+		const locallyPaused = Boolean(localPause && localPause.ownerPubkey === game.ownerPubkey && localPause.runNumber === holder?.runNumber && tagGameHudNowMs >= localPause.pausedAtMs);
+		return { effect: tagGameScheduledEffectAt(game, tagGameHudNowMs), locallyPaused,
+			active: isTagGameScheduledEffectActive(game, tagGameHudNowMs) && !game.holderChallengeId && !locallyPaused && holder?.status === 'active' };
 	});
 	let tagGameRoleByPubkey = $derived.by(() => {
 		const roles = new Map<string, 'participant' | 'holder'>();
@@ -4408,7 +4412,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 				registerReplyRemeasure={registerTraceReplyRemeasure}
 			/>
 			<div class="field-status-huds" data-field-status-huds style={`--top-status-hud-bottom:${statusHudVisible ? topStatusHudBottom : 0}px`}>
-				<TagGameHud game={tagGameDisplayedGame} selfPubkey={personaSnapshot?.signer.pubkey ?? null} selfRunNumber={personaSnapshot?.activeRun.runNumber ?? null} nowMs={tagGameHudNowMs} {realtimeStatus} busy={tagGameBusy} touchStatus={tagGameDisplayedGame ? tagGameTouchStatuses.get(tagGameDisplayedGame.gameId)?.label ?? null : null} onLeave={(gameId) => { void leaveTagGame(gameId); }} />
+				<TagGameHud game={tagGameDisplayedGame} selfPubkey={personaSnapshot?.signer.pubkey ?? null} selfRunNumber={personaSnapshot?.activeRun.runNumber ?? null} nowMs={tagGameHudNowMs} {realtimeStatus} busy={tagGameBusy} localEffectPaused={tagGameDisplayedEffect?.locallyPaused ?? false} touchStatus={tagGameDisplayedGame ? tagGameTouchStatuses.get(tagGameDisplayedGame.gameId)?.label ?? null : null} onLeave={(gameId) => { void leaveTagGame(gameId); }} />
 			</div>
 		{/snippet}
 	</FieldViewport>
