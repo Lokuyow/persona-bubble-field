@@ -172,7 +172,7 @@ async function seedTagGameRunLock(page: Page, gameId: string, startedAtMs: numbe
 	}), { id: gameId, start: startedAtMs });
 }
 
-test('signals repeated effective point gains without flashing for the ordinary lifespan countdown', async ({ page }) => {
+test('keeps the tag-game benefit pulse in phase during repeated point gains and ignores ordinary lifespan countdown', async ({ page }) => {
 	const nowMs = Date.now();
 	const secret = fixtureSecret(53);
 	await preparePlayer(page, secret, nowMs);
@@ -191,16 +191,29 @@ test('signals repeated effective point gains without flashing for the ordinary l
 	await expect(hud).toHaveAttribute('data-tag-game-projection', 'true');
 	await expect(hud).toHaveAttribute('data-current-points', '0');
 	await expect(points).not.toHaveAttribute('data-value-change', /.+/);
+	await expect(points).toHaveAttribute('data-tag-game-flash', 'benefit');
+	await expect(points).toHaveCSS('animation-name', /tag-game-value-pulse$/);
+	await expect(points).toHaveCSS('animation-duration', '1.5s');
+	const pulseOffsets = await points.evaluate((element) => {
+		const animation = element.getAnimations().find((candidate) => 'animationName' in candidate && candidate.animationName.endsWith('tag-game-value-pulse'));
+		return animation?.effect?.getKeyframes().map((frame) => frame.computedOffset) ?? [];
+	});
+	expect(pulseOffsets).toHaveLength(4);
+	expect(pulseOffsets[1]).toBeCloseTo(0.2999, 3);
+	expect(pulseOffsets[2]).toBeCloseTo(0.3, 3);
 	await page.clock.runFor(1_000);
 	await expect(points).toHaveAttribute('data-value-change', 'increase');
 	const firstSequence = Number(await points.getAttribute('data-value-change-sequence'));
-	await expect(points).toHaveCSS('animation-name', /value-color-return$/);
+	const pulseStartTime = await points.evaluate((element) => element.getAnimations().find((animation) => 'animationName' in animation && animation.animationName.endsWith('tag-game-value-pulse'))?.startTime);
+	expect(pulseStartTime).not.toBeNull();
 	await expect(lifespan).not.toHaveAttribute('data-value-change', /.+/);
 	const meter = hud.locator('[data-points-meter]');
 	const firstMeterBox = await meter.boundingBox();
 	const firstRightEdge = await points.evaluate((element) => element.getBoundingClientRect().right);
 	await page.clock.runFor(1_000);
 	await expect.poll(async () => Number(await points.getAttribute('data-value-change-sequence'))).toBeGreaterThan(firstSequence);
+	await expect(points).toHaveAttribute('data-tag-game-flash', 'benefit');
+	expect(await points.evaluate((element) => element.getAnimations().find((animation) => 'animationName' in animation && animation.animationName.endsWith('tag-game-value-pulse'))?.startTime)).toBe(pulseStartTime);
 	const nextMeterBox = await meter.boundingBox();
 	const nextRightEdge = await points.evaluate((element) => element.getBoundingClientRect().right);
 	expect(nextMeterBox?.x).toBe(firstMeterBox?.x);
@@ -214,7 +227,6 @@ test('signals calamity lifespan loss while ignoring clock-only ticks', async ({ 
 	const secret = fixtureSecret(59);
 	await preparePlayer(page, secret, nowMs);
 	await expect(page.locator('main')).toHaveAttribute('data-realtime-status', 'active');
-	await page.emulateMedia({ reducedMotion: 'reduce' });
 	await moveRelaySelfTo(page, { x: 7, y: 5 });
 	const seed = Array.from({ length: 10_000 }, (_, index) => `hud-life-${index}`).find((candidate) => createTagGameSchedule(candidate)[0].effect === 'calamity')!;
 	await injectSelfOwnedProjection(page, secret, 'calamity', seed, nowMs);
@@ -224,10 +236,14 @@ test('signals calamity lifespan loss while ignoring clock-only ticks', async ({ 
 	const savedExpiry = Number(await hud.getAttribute('data-base-expires-at-ms'));
 	await page.clock.runFor(1_000);
 	await expect(lifespan).toHaveAttribute('data-value-change', 'decrease');
-	await expect(lifespan).toContainText('↓');
-	await expect(lifespan).toHaveCSS('animation-name', 'none');
+	await expect(lifespan).toHaveAttribute('data-tag-game-flash', 'calamity');
+	await expect(lifespan).toHaveCSS('animation-name', /tag-game-value-pulse$/);
+	await expect(lifespan).toHaveCSS('animation-duration', '1.5s');
 	await expect(lifespan).toHaveCSS('color', 'rgb(255, 104, 117)');
 	await expect(points).not.toHaveAttribute('data-value-change', /.+/);
+	await page.emulateMedia({ reducedMotion: 'reduce' });
+	await expect(lifespan).toHaveCSS('animation-name', 'none');
+	await expect(lifespan).toHaveCSS('color', 'rgb(255, 104, 117)');
 	const effectiveExpiry = Number(await hud.getAttribute('data-current-expires-at-ms'));
 	await expect(hud).toHaveAttribute('data-current-expires-at-ms', String(effectiveExpiry));
 	await expect(hud).toHaveAttribute('data-base-expires-at-ms', String(savedExpiry));
@@ -888,6 +904,7 @@ test('organizer local safety stop hides touch targets and resumes presentation a
 	await expect(hud.locator('[data-tag-game-cooldown]')).toHaveText('効果停止中');
 	await expect(target).not.toHaveAttribute('data-tag-game-touch-target', 'true');
 	const unifiedHud = page.locator('[data-unified-status-hud]');
+	await expect(unifiedHud.locator('[data-lifespan-value]')).not.toHaveAttribute('data-tag-game-flash', 'calamity');
 	const pausedExpiry = await unifiedHud.getAttribute('data-current-expires-at-ms');
 	const pausedPoints = await unifiedHud.getAttribute('data-current-points');
 	await page.clock.runFor(2_000);
@@ -906,6 +923,7 @@ test('organizer local safety stop hides touch targets and resumes presentation a
 	await page.clock.runFor(500);
 	await expect(hud.locator('[data-tag-game-effect]')).toHaveAttribute('data-tag-game-effect-active', 'true');
 	await expect(hud.locator('[data-tag-game-effect] span')).toHaveText('所持者が追いかけて押し付ける');
+	await expect(unifiedHud.locator('[data-lifespan-value]')).toHaveAttribute('data-tag-game-flash', 'calamity');
 	await expect(target).toHaveAttribute('data-tag-game-touch-target', 'true');
 });
 

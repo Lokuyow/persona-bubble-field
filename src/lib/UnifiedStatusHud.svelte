@@ -24,6 +24,8 @@
 	let { expiresAtMs, nowMs, maximumLifespanMs, points, hasJob, mendingProjection, tagGameProjection = null, animationScope }: Props = $props();
 	let currentPoints = $derived(tagGameProjection?.points ?? points);
 	let currentExpiresAtMs = $derived(tagGameProjection?.expiresAtMs ?? expiresAtMs);
+	let tagGameBenefitActive = $derived(tagGameProjection?.benefitRateActive ?? false);
+	let tagGameCalamityActive = $derived(tagGameProjection?.calamityRateActive ?? false);
 	let remainingMs = $derived(Math.max(0, currentExpiresAtMs - nowMs));
 	let meterValues = $derived(projectUnifiedStatusMeterValues(currentPoints, remainingMs, maximumLifespanMs));
 	let lifespanValue = $derived(meterValues.lifespan);
@@ -94,12 +96,11 @@
 		<div class="meter-row lifespan-row">
 			<div class="meter-heading">
 				<span class="meter-label"><Heart aria-hidden="true" />寿命</span>
-				{#key lifespanFeedback?.sequence ?? 0}
-					<strong class="lifespan-value {valueClass(lifespanFeedback)}" data-lifespan-value data-value-change={lifespanFeedback?.direction} data-value-change-sequence={lifespanFeedback?.sequence}>
-						{lifespanText}
-						{#if lifespanFeedback}<span class="value-change-indicator" aria-hidden="true">{lifespanFeedback.direction === 'increase' ? '↑' : '↓'}</span>{/if}
-					</strong>
-				{/key}
+				<strong class={['lifespan-value', valueClass(lifespanFeedback), { 'tag-game-calamity': tagGameCalamityActive }]}
+					data-lifespan-value data-value-change={lifespanFeedback?.direction} data-value-change-sequence={lifespanFeedback?.sequence}
+					data-tag-game-flash={tagGameCalamityActive ? 'calamity' : undefined}>
+					{lifespanText}
+				</strong>
 			</div>
 			<Meter.Root class="status-meter lifespan-meter" value={lifespanValue} min={0} max={maximumLifespanMs} aria-label="寿命" aria-valuetext={lifespanAriaValue} data-lifespan-meter data-meter-value={lifespanValue}>
 				<div class="meter-fill lifespan-fill" style={`width:${maximumLifespanMs > 0 ? lifespanValue / maximumLifespanMs * 100 : 0}%`}></div>
@@ -108,12 +109,11 @@
 		<div class="meter-row points-row">
 			<div class="meter-heading">
 				<span class="meter-label"><Wallet aria-hidden="true" />ポイント</span>
-				{#key pointsFeedback?.sequence ?? 0}
-					<strong class="points-value {valueClass(pointsFeedback)}" data-points-value data-value-change={pointsFeedback?.direction} data-value-change-sequence={pointsFeedback?.sequence}>
-						{formattedPoints}<span>pt</span>
-						{#if pointsFeedback}<span class="value-change-indicator" aria-hidden="true">{pointsFeedback.direction === 'increase' ? '↑' : '↓'}</span>{/if}
-					</strong>
-				{/key}
+				<strong class={['points-value', valueClass(pointsFeedback), { 'tag-game-benefit': tagGameBenefitActive }]}
+					data-points-value data-value-change={pointsFeedback?.direction} data-value-change-sequence={pointsFeedback?.sequence}
+					data-tag-game-flash={tagGameBenefitActive ? 'benefit' : undefined}>
+					{formattedPoints}<span>pt</span>
+				</strong>
 			</div>
 			<Meter.Root class="status-meter points-meter" value={pointValue} min={0} max={STATUS_HUD_POINTS_MAX} aria-label="ポイント" aria-valuetext={`${formattedPoints}pt、${STATUS_HUD_POINTS_MAX.toLocaleString('en-US')}ptまで`} data-points-meter data-meter-value={pointValue}>
 				<div class="meter-fill points-fill" style={`width:${pointValue / STATUS_HUD_POINTS_MAX * 100}%`}></div>
@@ -154,10 +154,11 @@
 		.lifespan-value, .points-value { position: relative; font-size: 1.05em; font-weight: 780; font-variant-numeric: tabular-nums; --normal-value-color: rgba(239, 241, 255, .94); --change-color: #57e68a; color: var(--normal-value-color); }
 		.points-value { --normal-value-color: #fff; }
 		.points-value span { margin-left: 3px; font-size: .9em; font-weight: 700; }
-		.value-changed { animation: value-color-return 750ms ease-out both; }
+		.value-changed { color: var(--change-color); }
 		.value-increase { --change-color: #57e68a; }
 		.value-decrease { --change-color: #ff6875; }
-		.value-change-indicator { position: absolute; top: -.35em; right: -.7em; margin: 0 !important; color: var(--change-color); font-size: .72em !important; font-weight: 800 !important; line-height: 1; }
+		.tag-game-benefit, .tag-game-calamity { --tag-game-color: #57e68a; animation: tag-game-value-pulse 1.5s linear infinite; }
+		.tag-game-calamity { --tag-game-color: #ff6875; }
 		:global(.status-meter) { box-sizing: border-box; display: block; position: relative; height: 14px; overflow: hidden; border: 1px solid rgba(236, 239, 255, .2); border-radius: 0; background: rgba(3, 7, 20, .58); }
 		.meter-fill { height: 100%; min-width: 0; border-radius: 0; transition: width 180ms linear; }
 		.lifespan-fill { background: linear-gradient(90deg, #e19b6b, #f2c47b); box-shadow: 0 0 10px rgba(241, 180, 114, .3); }
@@ -184,9 +185,12 @@
 			:global(.status-meter) { height: 12px; }
 		}
 	}
-	@keyframes value-color-return { from { color: var(--change-color); } to { color: var(--normal-value-color); } }
+	@keyframes tag-game-value-pulse {
+		0%, 29.99% { color: var(--tag-game-color); }
+		30%, 100% { color: var(--normal-value-color); }
+	}
 	@media (prefers-reduced-motion: reduce) {
 		.unified-status-hud .meter-fill { transition: none; }
-		.unified-status-hud .value-changed { animation: none; color: var(--change-color); }
+		.unified-status-hud .tag-game-benefit, .unified-status-hud .tag-game-calamity { animation: none; color: var(--tag-game-color); }
 	}
 </style>
