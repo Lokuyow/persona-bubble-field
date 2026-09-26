@@ -1,7 +1,8 @@
 import type { ConversationState, SpeechType } from './conversation';
 
 export type SoundPreference = Readonly<{ volume: number }>;
-export type SoundEffect = SpeechType | 'collect' | 'level-up' | 'startup' | 'cooperation-start' | 'death';
+export type TagGameSoundEffect = 'tag-game-benefit' | 'tag-game-calamity' | 'tag-game-transfer' | 'tag-game-switch' | 'tag-game-start' | 'tag-game-end';
+export type SoundEffect = SpeechType | 'collect' | 'level-up' | 'startup' | 'cooperation-start' | 'death' | TagGameSoundEffect;
 export type SpeechSoundEffect = SpeechType;
 
 export const DEFAULT_SOUND_PREFERENCE: SoundPreference = { volume: 0.5 };
@@ -35,7 +36,9 @@ export function newLiveBubbleEffects(previous: ConversationState, next: Conversa
 }
 
 export const SPEECH_SOUND_DURATIONS = { normal: 0.225, shout: 0.420, monologue: 0.715 } as const;
-export const UI_SOUND_DURATIONS = { collect: 0.19, 'level-up': 0.32, startup: 0.38, 'cooperation-start': 0.43 } as const;
+export const UI_SOUND_DURATIONS = { collect: 0.19, 'level-up': 0.32, startup: 0.38, 'cooperation-start': 0.43,
+	'tag-game-benefit': 0.075, 'tag-game-calamity': 0.11, 'tag-game-transfer': 0.34, 'tag-game-switch': 0.30,
+	'tag-game-start': 0.52, 'tag-game-end': 0.52 } as const;
 export const DEATH_SOUND_DURATION = 6.4;
 export const SOUND_EFFECT_GAINS: Readonly<Record<SoundEffect, number>> = {
 	normal: 1,
@@ -45,7 +48,13 @@ export const SOUND_EFFECT_GAINS: Readonly<Record<SoundEffect, number>> = {
 	'level-up': 0.75,
 	startup: 0.65,
 	'cooperation-start': 0.65,
-	death: 0.70
+	death: 0.70,
+	'tag-game-benefit': 0.22,
+	'tag-game-calamity': 0.24,
+	'tag-game-transfer': 0.52,
+	'tag-game-switch': 0.42,
+	'tag-game-start': 0.62,
+	'tag-game-end': 0.62
 };
 const TAU = Math.PI * 2;
 
@@ -254,6 +263,35 @@ function createDeathSamples(sampleRate: number): Float32Array {
 	return normalize(output);
 }
 
+function createTagGameSamples(effect: TagGameSoundEffect, sampleRate: number): Float32Array {
+	const duration = UI_SOUND_DURATIONS[effect];
+	const length = Math.ceil(sampleRate * duration);
+	const output = new Float32Array(length);
+	const notes: ReadonlyArray<Readonly<{ at: number; frequency: number; gain?: number; decay?: number }>> = effect === 'tag-game-benefit'
+		? [{ at: 0, frequency: 960, decay: 0.024 }]
+		: effect === 'tag-game-calamity'
+			? [{ at: 0, frequency: 230, gain: 0.78, decay: 0.052 }, { at: 0.022, frequency: 185, gain: 0.32, decay: 0.045 }]
+			: effect === 'tag-game-transfer'
+				? [{ at: 0, frequency: 440 }, { at: 0.105, frequency: 660 }, { at: 0.205, frequency: 880 }]
+				: effect === 'tag-game-switch'
+					? [{ at: 0, frequency: 740 }, { at: 0.14, frequency: 520 }]
+					: effect === 'tag-game-start'
+						? [{ at: 0, frequency: 330 }, { at: 0.12, frequency: 440 }, { at: 0.24, frequency: 587 }, { at: 0.36, frequency: 784 }]
+						: [{ at: 0, frequency: 784 }, { at: 0.16, frequency: 587 }, { at: 0.32, frequency: 392 }];
+	for (const note of notes) {
+		const decay = note.decay ?? (effect === 'tag-game-start' || effect === 'tag-game-end' ? 0.12 : 0.085);
+		for (let index = Math.ceil(note.at * sampleRate); index < length; index += 1) {
+			const local = index / sampleRate - note.at;
+			const attack = clamp01(local / 0.004);
+			const release = clamp01((duration - local) / 0.018);
+			const envelope = attack * Math.exp(-local / decay) * release;
+			const phase = TAU * note.frequency * local;
+			output[index] += (note.gain ?? 0.72) * (Math.sin(phase) + 0.12 * Math.sin(phase * 2)) * envelope;
+		}
+	}
+	return normalize(output);
+}
+
 export function createSoundSamples(effect: SoundEffect, sampleRate: number): Float32Array {
 	if (effect === 'death') {
 		if (!Number.isFinite(sampleRate) || sampleRate <= 0) return new Float32Array();
@@ -262,6 +300,11 @@ export function createSoundSamples(effect: SoundEffect, sampleRate: number): Flo
 	if (effect === 'collect' || effect === 'level-up' || effect === 'startup' || effect === 'cooperation-start') {
 		if (!Number.isFinite(sampleRate) || sampleRate <= 0) return new Float32Array();
 		return createChimeSamples(effect, sampleRate);
+	}
+	if (effect === 'tag-game-benefit' || effect === 'tag-game-calamity' || effect === 'tag-game-transfer' ||
+		effect === 'tag-game-switch' || effect === 'tag-game-start' || effect === 'tag-game-end') {
+		if (!Number.isFinite(sampleRate) || sampleRate <= 0) return new Float32Array();
+		return createTagGameSamples(effect, sampleRate);
 	}
 	return createSpeechSoundSamples(effect, sampleRate);
 }

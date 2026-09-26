@@ -401,6 +401,14 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	let tagGameTouchAttemptSequence = 0;
 	let tagGameHolderTransfer = $state.raw<Readonly<{ participantId: string; id: number }> | null>(null);
 	let tagGameHolderTransferSequence = 0;
+	type TagGameAudioCursor = Readonly<{ atMs: number; effect: 'benefit' | 'calamity' | null; active: boolean; ownerPubkey: string | undefined; phase: TagGameState['phase'] }>;
+	const tagGameAudioCursors = new Map<string, TagGameAudioCursor>();
+	const tagGameStartAudioKeys = new Set<string>();
+	const tagGameEndAudioKeys = new Set<string>();
+	const tagGameAudioPriorityUntilMs = new Map<string, { untilMs: number; priority: number }>();
+	let skipNextTagGamePulseSound = false;
+	const TAG_GAME_AUDIO_STATE_FRESH_MS = 5_000;
+	const TAG_GAME_AUDIO_PRIORITY_MS = 600;
 	let tagGamePositionEvidence = $state.raw(new Map<string, ReducedPresenceParticipant>());
 	const LIFESPAN_HUD_REFRESH_INTERVAL_MS = 30_000;
 	let selfPositionWriteState = $state.raw<SelfPositionWriteState>({ kind: 'unavailable' });
@@ -1637,6 +1645,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 				if (tagGameDisplayedGameId && second !== tagGameHudLastSecond) {
 					tagGameHudLastSecond = second;
 					tagGameHudNowMs = now;
+					reconcileTagGameAudioTimeline(now);
 				}
 				updateLifespanHud(now);
 				if (!devCooperationDefectionPlaygroundEnabled) reconcileCooperationDefectionSession(devCooperationDefectionFixtureEnabled ? initialCooperationDefectionNowMs : now);
@@ -2393,6 +2402,135 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		}
 	}
 
+	function tagGameAudioScope(game: TagGameState, pubkey: string, runNumber: number): string {
+		return `${game.gameId}:${pubkey}:${runNumber}`;
+	}
+
+	function tagGameAudioMember(game: TagGameState, pubkey: string, runNumber: number) {
+		return game.participant.find((member) => member.pubkey === pubkey && member.runNumber === runNumber && member.status === 'active');
+	}
+
+	function playTagGameAudio(game: TagGameState, pubkey: string, runNumber: number, effect: 'tag-game-benefit' | 'tag-game-calamity' | 'tag-game-transfer' | 'tag-game-switch' | 'tag-game-start' | 'tag-game-end'): void {
+		if (document.hidden || !tagGameAudioMember(game, pubkey, runNumber)) return;
+		const scope = tagGameAudioScope(game, pubkey, runNumber);
+		const nowMs = Date.now();
+		const priority = effect === 'tag-game-start' || effect === 'tag-game-end' ? 3 : effect === 'tag-game-transfer' ? 2 : effect === 'tag-game-switch' ? 1 : 0;
+		const currentPriority = tagGameAudioPriorityUntilMs.get(scope);
+		if (currentPriority && currentPriority.untilMs > nowMs && currentPriority.priority > priority) return;
+		if (priority > 0) tagGameAudioPriorityUntilMs.set(scope, { untilMs: nowMs + TAG_GAME_AUDIO_PRIORITY_MS, priority });
+		soundController?.play(effect);
+	}
+
+	function tagGameAudioEffectActiveAt(game: TagGameState, pubkey: string, atMs: number): boolean {
+		if (game.phase !== 'running' || !game.startedAt || !game.endsAt || atMs < game.startedAt * 1_000 || atMs >= game.endsAt * 1_000 || game.holderChallengeId) return false;
+		const holder = game.participant.find((member) => member.pubkey === game.ownerPubkey);
+		if (!holder || holder.status !== 'active' || !tagGameScheduledEffectAt(game, atMs)) return false;
+		const localPause = game.hostPubkey === personaSnapshot?.signer.pubkey ? tagGameEffectPauses.get(game.gameId) : null;
+		if (localPause && localPause.ownerPubkey === game.ownerPubkey && localPause.runNumber === holder.runNumber && atMs >= localPause.pausedAtMs) return false;
+		return game.hostPubkey !== personaSnapshot?.signer.pubkey || tagGameOrganizerEffectActive(game, atMs);
+	}
+
+	function crossedOneTagGameEffectBoundary(game: TagGameState, fromMs: number, toMs: number): boolean {
+		if (!game.seed || !game.startedAt || toMs <= fromMs) return false;
+		let boundaryMs = game.startedAt * 1_000;
+		let crossed = 0;
+		for (const interval of createTagGameSchedule(game.seed).slice(0, -1)) {
+			boundaryMs += interval.durationMs;
+			if (boundaryMs > fromMs && boundaryMs <= toMs) crossed += 1;
+			if (crossed > 1) return false;
+		}
+		return crossed === 1;
+	}
+
+	function tagGameEndAudioKey(game: TagGameState, pubkey: string, runNumber: number): string {
+		return tagGameAudioScope(game, pubkey, runNumber);
+	}
+
+	function playTagGameEndOnce(game: TagGameState, pubkey: string, runNumber: number): void {
+		const key = tagGameEndAudioKey(game, pubkey, runNumber);
+		if (tagGameEndAudioKeys.has(key)) return;
+		tagGameEndAudioKeys.add(key);
+		playTagGameAudio(game, pubkey, runNumber, 'tag-game-end');
+	}
+
+	function reconcileTagGameAudioTimeline(nowMs: number): void {
+		const self = personaSnapshot;
+		const gameId = tagGameSelfActiveGameId;
+		const game = gameId ? tagGameStates.find((candidate) => candidate.gameId === gameId) : null;
+		if (!self || !game || (game.phase !== 'running' && game.phase !== 'settling') || !game.startedAt || !game.endsAt) return;
+		const scope = tagGameAudioScope(game, self.signer.pubkey, self.activeRun.runNumber);
+		const member = tagGameAudioMember(game, self.signer.pubkey, self.activeRun.runNumber);
+		if (!member) {
+			const previous = tagGameAudioCursors.get(scope);
+			if (previous) tagGameAudioCursors.set(scope, { ...previous, atMs: nowMs, active: false, ownerPubkey: game.ownerPubkey, phase: game.phase });
+			return;
+		}
+		const currentEffect = game.phase === 'running' ? tagGameScheduledEffectAt(game, nowMs) : null;
+		const currentActive = game.phase === 'running' && tagGameAudioEffectActiveAt(game, self.signer.pubkey, nowMs);
+		const previous = tagGameAudioCursors.get(scope);
+		if (previous) {
+			const endedAtMs = game.endsAt * 1_000;
+			if ((previous.phase === 'running' || previous.phase === 'settling') && previous.atMs < endedAtMs && nowMs >= endedAtMs &&
+				nowMs - previous.atMs <= 1_500 && !document.hidden) {
+				playTagGameEndOnce(game, self.signer.pubkey, self.activeRun.runNumber);
+			}
+			if (previous.phase === 'running' && previous.active && currentActive && previous.ownerPubkey === game.ownerPubkey &&
+				previous.effect && currentEffect && previous.effect !== currentEffect && nowMs - previous.atMs <= 1_500 &&
+				crossedOneTagGameEffectBoundary(game, previous.atMs, nowMs) && !document.hidden) {
+				playTagGameAudio(game, self.signer.pubkey, self.activeRun.runNumber, 'tag-game-switch');
+			}
+		}
+		tagGameAudioCursors.set(scope, { atMs: nowMs, effect: currentEffect, active: currentActive, ownerPubkey: game.ownerPubkey, phase: game.phase });
+		while (tagGameAudioCursors.size > 24) tagGameAudioCursors.delete(tagGameAudioCursors.keys().next().value!);
+	}
+
+	function playCurrentTagGamePulse(effect: 'benefit' | 'calamity'): void {
+		if (document.hidden) {
+			skipNextTagGamePulseSound = true;
+			return;
+		}
+		if (skipNextTagGamePulseSound) {
+			skipNextTagGamePulseSound = false;
+			return;
+		}
+		const self = personaSnapshot;
+		const game = tagGameDisplayedGame;
+		if (!self || !game || tagGameSelfActiveGameId !== game.gameId || tagGameHudNowMs >= (game.endsAt ?? 0) * 1_000 ||
+			tagGameDisplayedEffect?.effect !== effect || !tagGameDisplayedEffect.active ||
+			!(effect === 'benefit' ? tagGameHudProjection?.benefitRateActive : tagGameHudProjection?.calamityRateActive)) return;
+		playTagGameAudio(game, self.signer.pubkey, self.activeRun.runNumber, effect === 'benefit' ? 'tag-game-benefit' : 'tag-game-calamity');
+	}
+
+	function notifyTagGameStateAudio(previous: { eventId: string; createdAt: number; state: TagGameState } | undefined, state: TagGameState, createdAt: number): void {
+		const self = personaSnapshot;
+		if (!self || document.hidden) return;
+		const pubkey = self.signer.pubkey;
+		const runNumber = self.activeRun.runNumber;
+		const member = tagGameAudioMember(state, pubkey, runNumber);
+		if (!member) return;
+		const nowMs = Date.now();
+		const eventAgeMs = nowMs - createdAt * 1_000;
+		const fresh = eventAgeMs >= -5_000 && eventAgeMs <= TAG_GAME_AUDIO_STATE_FRESH_MS;
+		if (fresh && isOwnTagGameStartTransition(previous?.state ?? null, state, pubkey, runNumber) && state.startedAt) {
+			const key = tagGameAudioScope(state, pubkey, runNumber);
+			if (!tagGameStartAudioKeys.has(key)) {
+				tagGameStartAudioKeys.add(key);
+				playTagGameAudio(state, pubkey, runNumber, 'tag-game-start');
+			}
+		}
+		if (!previous) return;
+		const before = previous.state;
+		if (fresh && before.phase === 'running' && state.phase === 'running' && before.ownerPubkey && state.ownerPubkey && before.ownerPubkey !== state.ownerPubkey) {
+			playTagGameAudio(state, pubkey, runNumber, 'tag-game-transfer');
+		}
+		if (!['running', 'settling'].includes(before.phase)) return;
+		if (state.phase === 'interrupted') {
+			if (fresh) playTagGameEndOnce(state, pubkey, runNumber);
+		} else if (fresh && state.phase === 'ended' && state.endReason === 'normal' && state.endsAt && state.finalizedAt === state.endsAt && createdAt >= state.endsAt) {
+			playTagGameEndOnce(state, pubkey, runNumber);
+		}
+	}
+
 	function refreshTagGameStateList(): void {
 		tagGameStates = [...tagGameEvents.values()].map((entry) => entry.state).sort((a, b) => b.updatedAt - a.updatedAt || a.gameId.localeCompare(b.gameId));
 	}
@@ -2439,6 +2577,15 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			return;
 		}
 		if (previous && createdAt > previous.createdAt) tagGameConflictSince.delete(state.gameId);
+		notifyTagGameStateAudio(previous, state, createdAt);
+		if (previous && previous.state.phase === 'running' && state.phase === 'running' &&
+			previous.state.holderChallengeId !== state.holderChallengeId) {
+			const self = personaSnapshot;
+			const cursorKey = self ? tagGameAudioScope(state, self.signer.pubkey, self.activeRun.runNumber) : null;
+			const cursor = cursorKey ? tagGameAudioCursors.get(cursorKey) : null;
+			if (cursor && cursorKey) tagGameAudioCursors.set(cursorKey, { ...cursor, atMs: Date.now(), active: false,
+				ownerPubkey: state.ownerPubkey, phase: state.phase });
+		}
 		if (previous?.state.ownerPubkey && state.ownerPubkey && previous.state.ownerPubkey !== state.ownerPubkey) {
 			tagGameHolderProbes.delete(state.gameId);
 			tagGameHolderLocalActivityAt.delete(state.gameId);
@@ -3971,8 +4118,13 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 
 	function handleDocumentVisibilityChange(): void {
 		movementInputController.handleVisibilityChange();
+		if (document.hidden) skipNextTagGamePulseSound = true;
 		if (!document.hidden) {
-			updateLifespanHud(Date.now(), true);
+			const nowMs = Date.now();
+			tagGameHudNowMs = nowMs;
+			tagGameHudLastSecond = Math.floor(nowMs / 1_000);
+			reconcileTagGameAudioTimeline(nowMs);
+			updateLifespanHud(nowMs, true);
 			void runRuntimeRefresh?.();
 		}
 	}
@@ -4427,6 +4579,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 						{mendingProjection}
 						tagGameProjection={tagGameHudProjection}
 						animationScope={`${personaSnapshot.signer.pubkey}:${personaSnapshot.activeRun.runNumber}`}
+					onTagGamePulse={playCurrentTagGamePulse}
 					/>
 					<div class="top-status-controls">
 						<SoundControl
