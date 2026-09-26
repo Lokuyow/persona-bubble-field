@@ -233,6 +233,7 @@ test.describe('Relay startup', () => {
 		await expect(dialog).not.toContainText('1.10');
 		await expect(dialog.locator('.current-row').first()).toContainText('1.00');
 		await expect(dialog.locator('.current-row').first()).toContainText('pt/分');
+		await expect(dialog.locator('.ability-card').nth(1).locator('.current-row strong')).toHaveText('5分');
 		await expect(dialog.locator('.delta-row').first()).toContainText('+0.10 pt/分');
 		await expect(dialog).toContainText('ポイント生成速度');
 		await expect(upgradeButton).toBeVisible();
@@ -327,7 +328,7 @@ test.describe('Relay startup', () => {
 		await page.clock.install({ time: startTime });
 		await installHostOwnedStub(page);
 		await installDelayedRelay(page, { primaryEvents: testEvents(startTime) });
-		await seedRelayAccount(page, secret, pubkey, startTime + 7 * 24 * 60 * 60 * 1000, 10, { inferenceEfficiency: 10, contextCapacity: 1, hallucinationSuppression: 1 });
+		await seedRelayAccount(page, secret, pubkey, startTime + 7 * 24 * 60 * 60 * 1000, 10, { inferenceEfficiency: 10, contextCapacity: 4, hallucinationSuppression: 1 });
 		await page.goto('/');
 		await page.evaluate(() => {
 			(window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary();
@@ -342,6 +343,9 @@ test.describe('Relay startup', () => {
 		await page.getByRole('button', { name: '能力強化端末' }).click();
 		const dialog = page.getByRole('dialog', { name: '能力強化' });
 		const inference = dialog.locator('.ability-card').first();
+		const contextCapacity = dialog.locator('.ability-card').nth(1);
+		await expect(contextCapacity.locator('.current-row strong')).toHaveText('50分');
+		await expect(contextCapacity.locator('.delta-row strong')).toHaveText('+15分');
 		await expect(inference).toContainText('1.90');
 		await expect(inference).toContainText('+0.10 pt/分');
 		await expect(inference.locator('.upgrade-button')).toHaveText('必要 2pt');
@@ -349,6 +353,11 @@ test.describe('Relay startup', () => {
 		await expect(inference).toContainText('2.00');
 		await expect(inference.locator('.upgrade-button')).toHaveText('必要 2pt');
 		await expect.poll(() => readRelayGameState(page)).toMatchObject({ points: 8, abilities: { inferenceEfficiency: 11 } });
+		await contextCapacity.getByRole('button', { name: 'コンテキスト容量をLv5へ強化（必要1pt）' }).click();
+		await expect(contextCapacity.locator('.current-row strong')).toHaveText('1時間5分');
+		await expect(contextCapacity.locator('.delta-row strong')).toHaveText('+15分');
+		await expect(contextCapacity).not.toContainText('分 分');
+		await expect.poll(() => readRelayGameState(page)).toMatchObject({ points: 7, abilities: { inferenceEfficiency: 11, contextCapacity: 5 } });
 	});
 
 	test('shows maxed abilities as unavailable at the adjustment terminal', async ({ page }) => {
@@ -375,6 +384,7 @@ test.describe('Relay startup', () => {
 		const dialog = page.getByRole('dialog', { name: '能力強化' });
 		await expect(dialog.locator('.delta-row')).toHaveCount(0);
 		await expect(dialog).not.toContainText('必要ポイント');
+		await expect(dialog.locator('.ability-card').nth(1).locator('.current-row strong')).toHaveText('24時間50分');
 		for (const label of ['推論効率', 'コンテキスト容量', 'ハルシネーション抑制']) {
 			const button = dialog.getByRole('button', { name: `${label}は最大Lvです` });
 			await expect(button).toBeDisabled();

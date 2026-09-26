@@ -6,6 +6,7 @@
 	import SquareChevronUp from '~icons/tabler/square-chevron-up';
 	import Stack2 from '~icons/tabler/stack-2';
 	import Wallet from '~icons/tabler/wallet';
+	import { formatContextCapacityMinutes } from '$lib/abilityDisplay';
 	import PrimaryButton from '$lib/PrimaryButton.svelte';
 	import {
 		getAbilityUpgrade,
@@ -47,7 +48,7 @@
 
 	function formatEffectValue(key: PersonaAbilityKey, level: number): string {
 		if (key === 'inferenceEfficiency') return (getInferenceRateHundredths(level) / 100).toFixed(2);
-		if (key === 'contextCapacity') return String(getContextCapacityMinutes(level));
+		if (key === 'contextCapacity') return formatContextCapacityMinutes(getContextCapacityMinutes(level));
 		return (getHallucinationExtensionHundredths(level) / 100).toFixed(2);
 	}
 
@@ -88,7 +89,7 @@
 							</div>
 							<p class="ability-type">{abilityTypes[key]}</p>
 							<div class="ability-values">
-								<div class="value-row current-row"><span>現在値</span><strong><span>{formatEffectValue(key, upgrade.level)}</span><span class="unit">{effectUnit(key)}</span></strong></div>
+								<div class="value-row current-row"><span>現在値</span><strong><span>{formatEffectValue(key, upgrade.level)}</span>{#if key !== 'contextCapacity'}<span class="unit">{effectUnit(key)}</span>{/if}</strong></div>
 								{#if !isMaxed}<div class="value-row delta-row"><span>増加量</span><strong>{formatDelta(key, upgrade.level)}</strong></div>{/if}
 							</div>
 							<PrimaryButton class={busy && !isMaxed ? 'upgrade-button processing' : isMaxed || canAfford ? 'upgrade-button' : 'upgrade-button insufficient-points'} type="button" aria-label={isMaxed ? `${abilityLabels[key]}は最大Lvです` : busy ? `${upgradeName}（必要${upgrade.cost}pt、強化処理中）` : !canAfford ? `${upgradeName}（必要${upgrade.cost}pt、ポイント不足）` : `${upgradeName}（必要${upgrade.cost}pt）`} disabled={busy || !canAfford || isMaxed} onclick={() => onUpgrade(key)}>
