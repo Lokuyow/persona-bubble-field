@@ -44,7 +44,7 @@
 	$effect(() => {
 		if (!game) return;
 		if (cooldownAnimation?.gameId === game.gameId && cooldownAnimation.transferAtMs === transferAtMs) return;
-		cooldownAnimation = { gameId: game.gameId, transferAtMs, delayMs: Math.max(-TAG_GAME_TRANSFER_COOLDOWN_MS, Math.min(TAG_GAME_TRANSFER_COOLDOWN_MS, Date.now() - transferAtMs)) };
+		cooldownAnimation = { gameId: game.gameId, transferAtMs, delayMs: Math.max(-TAG_GAME_TRANSFER_COOLDOWN_MS, transferAtMs - nowMs) };
 	});
 </script>
 
@@ -55,13 +55,15 @@
 			<strong>{effectName}・{holderName}</strong>
 			<span>{effectActive ? effectAction : pausedLabel}</span>
 		</div>
-		<div class="game-hud-footer">
-			<span data-tag-game-cooldown>{transferStatus}</span>
-			{#if canLeave}<ActionButton variant="tertiary" class="tag-game-leave" data-tag-game-leave={game.gameId} onclick={() => onLeave(game.gameId)} disabled={busy}>退出</ActionButton>{/if}
-		</div>
+		{#if transferStatus || canLeave}
+			<div class="game-hud-footer" data-tag-game-hud-footer>
+				{#if transferStatus}<span data-tag-game-cooldown>{transferStatus}</span>{/if}
+				{#if canLeave}<ActionButton variant="tertiary" class="tag-game-leave" data-tag-game-leave={game.gameId} onclick={() => onLeave(game.gameId)} disabled={busy}>退出</ActionButton>{/if}
+			</div>
+		{/if}
 		<div class="cooldown-slot">
 			{#if cooldownRemainingMs > 0}
-				<div class="cooldown-progress" role="progressbar" aria-label="転移禁止中" aria-valuemin="0" aria-valuemax={TAG_GAME_TRANSFER_COOLDOWN_MS} aria-valuenow={Math.min(TAG_GAME_TRANSFER_COOLDOWN_MS, cooldownRemainingMs)} data-tag-game-cooldown-line style={`--tag-game-transfer-cooldown:${TAG_GAME_TRANSFER_COOLDOWN_MS}ms;--cooldown-animation-delay:-${cooldownAnimationDelayMs}ms;--cooldown-progress:${Math.min(TAG_GAME_TRANSFER_COOLDOWN_MS, cooldownRemainingMs) / TAG_GAME_TRANSFER_COOLDOWN_MS}`}>
+				<div class="cooldown-progress" role="progressbar" aria-label="転移禁止中" aria-valuemin="0" aria-valuemax={TAG_GAME_TRANSFER_COOLDOWN_MS} aria-valuenow={Math.min(TAG_GAME_TRANSFER_COOLDOWN_MS, cooldownRemainingMs)} data-tag-game-cooldown-line style={`--tag-game-transfer-cooldown:${TAG_GAME_TRANSFER_COOLDOWN_MS}ms;--cooldown-animation-delay:${cooldownAnimationDelayMs}ms;--cooldown-progress:${Math.min(TAG_GAME_TRANSFER_COOLDOWN_MS, cooldownRemainingMs) / TAG_GAME_TRANSFER_COOLDOWN_MS}`}>
 					<span></span>
 				</div>
 			{/if}
@@ -81,7 +83,7 @@
 	.game-hud-effect span { color: rgba(226, 230, 255, .88); }
 	.game-hud-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 32px; margin-top: 3px; }
 	.game-hud-footer > span { font-weight: 650; }
-	.cooldown-slot { height: 5px; margin-top: 5px; }
+	.cooldown-slot { height: 3px; margin-top: 5px; }
 	.cooldown-progress { width: 60px; height: 3px; overflow: hidden; border-radius: 999px; background: rgba(223, 229, 236, .2); }
 	.cooldown-progress span { display: block; width: 100%; height: 100%; border-radius: inherit; background: rgba(223, 229, 236, .78); transform-origin: left center; animation: tag-game-cooldown-countdown var(--tag-game-transfer-cooldown, 2s) linear both; animation-delay: var(--cooldown-animation-delay); }
 	@keyframes tag-game-cooldown-countdown { to { transform: scaleX(0); } }

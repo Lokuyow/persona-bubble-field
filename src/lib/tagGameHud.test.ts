@@ -93,6 +93,7 @@ describe('tag-game HUD projection', () => {
 	it('uses the shared two-second cooldown projection only during active effects and keeps status text for other restrictions', () => {
 		const game = running('benefit');
 		expect(tagGameCooldownRemainingMs(game, true, 100_001)).toBe(1_999);
+		expect(tagGameCooldownRemainingMs({ ...game, transferAt: 100_500 }, true, 100_000)).toBe(2_500);
 		expect(tagGameCooldownRemainingMs(game, true, 101_000)).toBe(1_000);
 		expect(tagGameCooldownRemainingMs(game, true, 102_000)).toBe(0);
 		expect(tagGameCooldownRemainingMs(game, false, 101_000)).toBe(0);

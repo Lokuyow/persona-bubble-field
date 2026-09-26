@@ -307,11 +307,12 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 		const [latestHostPosition, latestParticipantPosition, latestParticipantTwoPosition] = await Promise.all([
 			latestWorldState(hostPage, hostPubkey), latestWorldState(participantPage, participantPubkey), latestWorldState(participantTwoPage, participantTwoPubkey)
 		]);
-		await Promise.all([
-			injectPosition(hostPage, latestParticipantPosition), injectPosition(hostPage, latestParticipantTwoPosition),
-			injectPosition(participantPage, latestHostPosition), injectPosition(participantPage, latestParticipantTwoPosition),
-			injectPosition(participantTwoPage, latestHostPosition), injectPosition(participantTwoPage, latestParticipantPosition)
-		]);
+		await injectPosition(hostPage, latestParticipantPosition);
+		await injectPosition(hostPage, latestParticipantTwoPosition);
+		await injectPosition(participantPage, latestHostPosition);
+		await injectPosition(participantPage, latestParticipantTwoPosition);
+		await injectPosition(participantTwoPage, latestHostPosition);
+		await injectPosition(participantTwoPage, latestParticipantPosition);
 
 		const cells = new Map([[hostPubkey, { page: hostPage, position: { x: 7, y: 5 } }], [participantPubkey, { page: participantPage, position: { x: 7, y: 6 } }], [participantTwoPubkey, { page: participantTwoPage, position: { x: 8, y: 5 } }]]);
 		const holderPage = cells.get(running.ownerPubkey!)!.page;
@@ -870,12 +871,12 @@ test('host silence is detected only while the local Relay connection is active',
 		await expect(holder).toHaveAttribute('data-tag-game-effect', 'benefit');
 		await expect(holder).toHaveAttribute('data-tag-game-effect-active', 'true');
 		await expect(page.locator('[data-tag-game-hud] [data-tag-game-effect]')).toContainText('所持者以外が追いかけて奪う');
-		await expect(page.locator('[data-tag-game-cooldown]')).toHaveText('');
+		await expect(page.locator('[data-tag-game-cooldown]')).toHaveCount(0);
 	const benefit = { ...active, revision: 1, updatedAt: startedAt + 1, effect: 'benefit' as const };
 	await injectRealtime(page, finalizeTagGameState(benefit, CHANNEL_ID, startedAt + 1, remoteHostSecret));
 	await expect(holder).toHaveAttribute('data-tag-game-effect', 'benefit');
 	await expect(holder.locator('.tag-game-holder-label')).not.toContainText('+50pt/秒');
-	await expect(page.locator('[data-tag-game-cooldown]')).toHaveText('');
+	await expect(page.locator('[data-tag-game-cooldown]')).toHaveCount(0);
 	await expect(page.locator('[data-tag-game-hud] [data-tag-game-effect]')).toContainText('所持者以外が追いかけて奪う');
 	const challenge = finalizeTagGameState({ ...benefit, revision: 2, updatedAt: startedAt + 10, holderChallengeId: 'f'.repeat(32), holderChallengeStartedAtMs: (startedAt + 10) * 1_000 }, CHANNEL_ID, startedAt + 10, remoteHostSecret);
 	await injectRealtime(page, challenge);
@@ -1297,6 +1298,9 @@ test('does not show unselected games and lets a spectator choose and clear one t
 		const event = finalizeEvent(buildWorldStateEventTemplate({ channel, createdAt: startedAt + 1, position: player.position, slot: 1, runNumber: 1 }), player.secret);
 		await injectPosition(page, event);
 	}
+	await page.clock.setSystemTime(startedAt * 1_000 + 250);
+	await page.clock.runFor(1_000);
+	const cooldownNowMs = await page.evaluate(() => Date.now());
 	const benefitSeed = Array.from({ length: 1_000 }, (_, index) => `watch-benefit-${index}`).find((candidate) => createTagGameSchedule(candidate)[0].effect === 'benefit')!;
 	function hostedGame(hostSecret: Uint8Array, otherSecret: Uint8Array, marker: string, phase: 'countdown' | 'running' = 'running'): NostrEvent {
 		const host = getPublicKey(hostSecret);
@@ -1304,14 +1308,16 @@ test('does not show unselected games and lets a spectator choose and clear one t
 		const state: TagGameState = {
 			gameId: `${host}:${startedAt}:${marker.repeat(64)}`, hostPubkey: host, phase, revision: 0, updatedAt: startedAt,
 			...(phase === 'countdown' ? { startAt: startedAt + 10 } : {}),
-			startedAt, endsAt: startedAt + 180, seed: benefitSeed, ownerPubkey: host, effect: 'benefit', transferAt: startedAt * 1_000,
+		startedAt, endsAt: startedAt + 180, seed: benefitSeed, ownerPubkey: host, effect: 'benefit', transferAt: startedAt * 1_000,
 			participant: [host, other].map((pubkey) => ({ pubkey, runNumber: 1, registeredAt: startedAt, status: 'active' as const, points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 })),
 			settledAtMs: startedAt * 1_000
 		};
 		return finalizeTagGameState(state, CHANNEL_ID, startedAt, hostSecret);
 	}
 	const gameA = hostedGame(ownerASecret, runnerASecret, 'a', 'countdown');
-	const gameB = hostedGame(ownerBSecret, runnerBSecret, 'b');
+	const initialGameB = parseTagGameEvent(hostedGame(ownerBSecret, runnerBSecret, 'b'), CHANNEL_ID)!.state;
+	const gameBUpdatedAt = Math.floor(cooldownNowMs / 1_000);
+	const gameB = finalizeTagGameState({ ...initialGameB, updatedAt: gameBUpdatedAt, transferAt: cooldownNowMs + 500 }, CHANNEL_ID, gameBUpdatedAt, ownerBSecret);
 	const gameAId = parseTagGameEvent(gameA, CHANNEL_ID)!.state.gameId;
 	const gameBId = parseTagGameEvent(gameB, CHANNEL_ID)!.state.gameId;
 	await Promise.all([injectRealtime(page, gameA), injectRealtime(page, gameB)]);
@@ -1323,6 +1329,31 @@ test('does not show unselected games and lets a spectator choose and clear one t
 	await expect(page.locator('[data-tag-game-hud]')).toHaveAttribute('data-tag-game-hud-id', gameBId);
 	await expect(page.locator('[data-tag-game-hud] [data-tag-game-effect]')).toContainText('所持者以外が追いかけて奪う');
 	const watchedGame = parseTagGameEvent(gameB, CHANNEL_ID)!.state;
+	const desktopHud = page.locator('[data-tag-game-hud]');
+	await expect(desktopHud.locator('[data-tag-game-hud-footer]')).toHaveCount(0);
+	const desktopHeight = await desktopHud.evaluate((element) => element.getBoundingClientRect().height);
+	const desktopLine = desktopHud.locator('[data-tag-game-cooldown-line]');
+	await expect(desktopLine).toBeVisible();
+	const desktopAnimationDelaySeconds = Number.parseFloat(await desktopLine.evaluate((element) => getComputedStyle(element.querySelector('span')!).animationDelay));
+	expect(desktopAnimationDelaySeconds).toBeGreaterThanOrEqual(0.35);
+	expect(desktopAnimationDelaySeconds).toBeLessThanOrEqual(0.5);
+	await page.clock.runFor(2_200);
+	await expect(desktopLine).toBeVisible();
+	await page.clock.runFor(400);
+	await expect(desktopLine).toHaveCount(0);
+	expect(await desktopHud.evaluate((element) => element.getBoundingClientRect().height)).toBe(desktopHeight);
+
+	await page.setViewportSize({ width: 390, height: 844 });
+	const mobileHeight = await desktopHud.evaluate((element) => element.getBoundingClientRect().height);
+	const mobileNowMs = await page.evaluate(() => Date.now());
+	const mobileTransfer = finalizeTagGameState({ ...watchedGame, revision: 1, updatedAt: Math.floor(mobileNowMs / 1_000), transferAt: mobileNowMs + 500 }, CHANNEL_ID, Math.floor(mobileNowMs / 1_000), ownerBSecret);
+	await injectRealtime(page, mobileTransfer);
+	await expect(desktopHud.locator('[data-tag-game-hud-footer]')).toHaveCount(0);
+	await expect(desktopHud.locator('[data-tag-game-cooldown-line]')).toBeVisible();
+	await page.clock.runFor(2_700);
+	await expect(desktopHud.locator('[data-tag-game-cooldown-line]')).toHaveCount(0);
+	expect(await desktopHud.evaluate((element) => element.getBoundingClientRect().height)).toBe(mobileHeight);
+
 	await page.clock.setSystemTime(watchedGame.endsAt! * 1_000 + 1_000);
 	await page.clock.runFor(1_100);
 	await expect(page.locator('[data-tag-game-remaining]')).toHaveText('00:00');

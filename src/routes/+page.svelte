@@ -4588,7 +4588,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		position: absolute;
 		top: max(max(108px, env(safe-area-inset-top) + 108px), calc(var(--top-status-hud-bottom, 0px) + 52px));
 		right: max(12px, env(safe-area-inset-right));
-		z-index: 8;
+		z-index: 10;
 		display: grid;
 		width: min(310px, calc(100vw - 24px));
 		gap: 6px;
