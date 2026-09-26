@@ -310,7 +310,8 @@
 	.suggestion-status {
 		position: absolute;
 		bottom: calc(100% + 8px);
-		left: 0;
+		left: auto;
+		right: 0;
 		width: max-content;
 		max-width: min(300px, calc(100vw - 32px));
 		margin: 0;
@@ -325,5 +326,6 @@
 	@media (max-width: 700px) {
 		.suggestions-anchor { position: static; }
 		.suggestion-panel { right: 16px; left: auto; }
+		.suggestion-status { right: 16px; left: auto; }
 	}
 </style>

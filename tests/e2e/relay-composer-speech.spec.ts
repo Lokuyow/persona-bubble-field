@@ -158,6 +158,30 @@ test.describe('Relay startup', () => {
 		}
 	});
 
+	test('keeps candidate generation status inside narrow desktop and mobile viewports', async ({ page }) => {
+		await installPromptApiStub(page, 'available', 'pending');
+		const selfSecret = fixtureSecret(19);
+		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret));
+		const editor = await openReadyRelayWorld(page, 1);
+		const candidateButton = page.getByRole('button', { name: 'AI発言候補を生成' });
+		await editor.fill('');
+		await candidateButton.click();
+		for (const viewport of [{ width: 720, height: 844 }, { width: 390, height: 844 }]) {
+			await page.setViewportSize(viewport);
+			const status = page.getByRole('status');
+			await expect(status).toHaveText('候補を生成中…');
+			const statusBox = await status.boundingBox();
+			expect(statusBox).not.toBeNull();
+			if (statusBox) {
+				expect(statusBox.x).toBeGreaterThanOrEqual(0);
+				expect(statusBox.y).toBeGreaterThanOrEqual(0);
+				expect(statusBox.x + statusBox.width).toBeLessThanOrEqual(viewport.width);
+				expect(statusBox.y + statusBox.height).toBeLessThanOrEqual(viewport.height);
+			}
+			await expect(candidateButton).toBeDisabled();
+		}
+	});
+
 	test('passes the Host-owned editor submit button option without enabling the keyboard button bar', async ({ page }) => {
 		await installHostOwnedStub(page);
 		await installDelayedRelay(page);
@@ -261,7 +285,7 @@ test.describe('Relay startup', () => {
 		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret));
 		const editor = await openReadyRelayWorld(page, 1);
 		const candidateButton = page.getByRole('button', { name: 'AI発言候補を生成' });
-		for (const viewport of [{ width: 1_200, height: 900 }, { width: 390, height: 844 }]) {
+		for (const viewport of [{ width: 720, height: 900 }, { width: 390, height: 844 }]) {
 			await page.setViewportSize(viewport);
 			await editor.fill('既存のdraft');
 			await expect(candidateButton).toBeDisabled();
@@ -303,7 +327,7 @@ test.describe('Relay startup', () => {
 		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret));
 		const editor = await openReadyRelayWorld(page, 1);
 		const candidateButton = page.getByRole('button', { name: 'AI発言候補を生成' });
-		for (const viewport of [{ width: 1_200, height: 900 }, { width: 390, height: 844 }]) {
+		for (const viewport of [{ width: 720, height: 900 }, { width: 390, height: 844 }]) {
 			await page.setViewportSize(viewport);
 			await candidateButton.click();
 			const panel = page.locator('.suggestion-panel');
@@ -375,6 +399,21 @@ test.describe('Relay startup', () => {
 		await primary.click();
 		await expect(page.getByRole('status')).toContainText('候補を送信できませんでした');
 		await expect(page.locator('.suggestion-panel')).toBeVisible();
+		for (const viewport of [{ width: 720, height: 844 }, { width: 390, height: 844 }]) {
+			await page.setViewportSize(viewport);
+			const status = page.locator('.suggestion-error');
+			const statusBox = await status.boundingBox();
+			const panelBox = await page.locator('.suggestion-panel').boundingBox();
+			expect(statusBox && panelBox).toBeTruthy();
+			if (statusBox && panelBox) {
+				for (const box of [statusBox, panelBox]) {
+					expect(box.x).toBeGreaterThanOrEqual(0);
+					expect(box.y).toBeGreaterThanOrEqual(0);
+					expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
+					expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
+				}
+			}
+		}
 		await page.evaluate(() => (window as unknown as { __relayStartupTest: { allowMessagePublishes(): void } }).__relayStartupTest.allowMessagePublishes());
 		await primary.click();
 		await expect.poll(async () => (await publishedMessages(page)).some((event) => event.kind === 42 && event.content === 'まずは自然な返答です。')).toBe(true);

@@ -112,9 +112,15 @@ async function exerciseTagGameControlsAtViewport(page: Page, gameId: string, vie
 	await expect(hud).toBeVisible();
 	await expect(speaker).toBeVisible();
 	await expect(leave).toBeVisible();
+	await expect(page.locator('.action-dock').getByRole('button', { name: /Open sound settings/ })).toBeVisible();
 	const [hudBox, speakerBox] = await Promise.all([hud.boundingBox(), speaker.boundingBox()]);
 	expect(hudBox && speakerBox).toBeTruthy();
-	if (hudBox && speakerBox) expect(hudBox.y).toBeGreaterThanOrEqual(speakerBox.y + speakerBox.height);
+	if (speakerBox) {
+		expect(speakerBox.x).toBeGreaterThanOrEqual(0);
+		expect(speakerBox.y).toBeGreaterThanOrEqual(0);
+		expect(speakerBox.x + speakerBox.width).toBeLessThanOrEqual(viewport.width);
+		expect(speakerBox.y + speakerBox.height).toBeLessThanOrEqual(viewport.height);
+	}
 	const effectText = hud.locator('.game-hud-effect span');
 	await expect(effectText).toBeVisible();
 	const effectTextBox = await effectText.boundingBox();
@@ -132,10 +138,15 @@ async function exerciseTagGameControlsAtViewport(page: Page, gameId: string, vie
 	await speaker.click();
 	const slider = page.getByRole('slider', { name: 'Sound volume' });
 	await expect(slider).toBeVisible();
-	const stackBox = await page.locator('[data-field-status-huds]').boundingBox();
 	const popoverBox = await page.getByRole('dialog', { name: 'Sound settings' }).boundingBox();
-	expect(stackBox && popoverBox).toBeTruthy();
-	if (stackBox && popoverBox) expect(stackBox.y).toBeGreaterThanOrEqual(popoverBox.y + popoverBox.height);
+	const currentSpeakerBox = await speaker.boundingBox();
+	expect(currentSpeakerBox && popoverBox).toBeTruthy();
+	if (currentSpeakerBox && popoverBox) {
+		expect(popoverBox.y + popoverBox.height).toBeLessThanOrEqual(currentSpeakerBox.y + 1);
+		expect(popoverBox.x).toBeGreaterThanOrEqual(0);
+		expect(popoverBox.x + popoverBox.width).toBeLessThanOrEqual(viewport.width);
+		expect(popoverBox.y).toBeGreaterThanOrEqual(0);
+	}
 	await slider.fill('35');
 	await expect(slider).toHaveValue('35');
 	await speaker.click();
