@@ -1,7 +1,7 @@
 import { Server, WebSocket, type Client } from 'mock-socket';
 import { finalizeEvent, getPublicKey, type Event, type VerifiedEvent } from 'nostr-tools/pure';
 import { matchFilter, type Filter } from 'nostr-tools/filter';
-import { map } from 'rxjs';
+import { map, throwError } from 'rxjs';
 import {
 	Nip11Registry, createRxNostr, createRxForwardReq, createRxOneshotReq,
 	type RxNostr, type IWebSocketConstructor
@@ -467,6 +467,110 @@ describe('supplemental realtime event lifecycle', () => {
 		onLiveEvent: vi.fn(),
 		onBootstrapControl: vi.fn(),
 		onLiveControl: vi.fn()
+	});
+	const tagGameAction = () => finalizeEvent({ kind: TAG_GAME_ACTION_KIND, created_at: TIME,
+		tags: [['e', 'c'.repeat(64)], ['d', 'host:run:game'], ['r', '1'], ['nonce', 'a'.repeat(32)]], content: '{"action":"join"}' }, AUTHOR) as import('nostr-tools/pure').VerifiedEvent;
+
+	it('settles a game publish at an absolute deadline after early success while retaining late relay outcomes', async () => {
+		const f = fixture(2);
+		f.authorities.forEach((relay) => { relay.onRequest = (socket, request) => send(socket, 'EOSE', request[1]); });
+		f.authorities[0].onPublish = (socket, event) => send(socket, 'OK', event.id, true, '');
+		f.authorities[1].onPublish = () => {};
+		await f.start();
+		const realtime = f.transport.startRealtime(realtimeInput());
+		await vi.advanceTimersByTimeAsync(30);
+		await realtime;
+		const handle = f.transport.publishRealtimeTracked(tagGameAction());
+		await vi.advanceTimersByTimeAsync(20);
+		expect(await handle.firstSuccess).toBe(true);
+		let settled = false;
+		void handle.settled.then(() => { settled = true; });
+		expect(settled).toBe(false);
+		expect(f.authorities.every((relay) => relay.messages.some((message) => message[0] === 'EVENT'))).toBe(true);
+		await vi.advanceTimersByTimeAsync(10_000);
+		const result = await handle.settled;
+		expect(result).toMatchObject({ outcome: 'accepted', terminalReason: 'absolute-timeout' });
+		expect(result.results).toEqual(expect.arrayContaining([
+			{ relayUrl: f.authorities[0].url, outcome: 'accepted' },
+			{ relayUrl: f.authorities[1].url, outcome: 'no-response' }
+		]));
+		const late = f.authorities[1].messages.find((message) => message[0] === 'EVENT')?.[1] as Event | undefined;
+		if (late) send(f.authorities[1].latestSocket(), 'OK', late.id, true, 'late');
+		await vi.advanceTimersByTimeAsync(1);
+		expect((await handle.settled).results.find((entry) => entry.relayUrl === f.authorities[1].url)?.outcome).toBe('no-response');
+
+		const noSuccess = fixture(1);
+		noSuccess.authorities[0].onRequest = (socket, request) => send(socket, 'EOSE', request[1]);
+		noSuccess.authorities[0].onPublish = () => {};
+		await noSuccess.start();
+		const noSuccessRealtime = noSuccess.transport.startRealtime(realtimeInput());
+		await vi.advanceTimersByTimeAsync(30);
+		await noSuccessRealtime;
+		const expired = noSuccess.transport.publishRealtimeTracked(tagGameAction());
+		await vi.advanceTimersByTimeAsync(10_000);
+		expect(await expired.firstSuccess).toBe(false);
+		await expect(expired.settled).resolves.toMatchObject({ outcome: 'unconfirmed', terminalReason: 'absolute-timeout', results: [{ outcome: 'no-response' }] });
+	});
+
+	it('completes tracked publish success normally and settles both promises on dispose or send error', async () => {
+		const normal = fixture(1);
+		normal.authorities[0].onRequest = (socket, request) => send(socket, 'EOSE', request[1]);
+		normal.authorities[0].onPublish = (socket, event) => send(socket, 'OK', event.id, true, '');
+		await normal.start();
+		const realtime = normal.transport.startRealtime(realtimeInput());
+		await vi.advanceTimersByTimeAsync(30);
+		await realtime;
+		const completed = normal.transport.publishRealtimeTracked(tagGameAction());
+		await vi.advanceTimersByTimeAsync(20);
+		expect(await completed.firstSuccess).toBe(true);
+		expect(await completed.settled).toMatchObject({ outcome: 'accepted', terminalReason: 'completed' });
+
+		const disposed = fixture(1);
+		disposed.authorities[0].onRequest = (socket, request) => send(socket, 'EOSE', request[1]);
+		disposed.authorities[0].onPublish = () => {};
+		await disposed.start();
+		const activeRealtime = disposed.transport.startRealtime(realtimeInput());
+		await vi.advanceTimersByTimeAsync(30);
+		await activeRealtime;
+		const cancelled = disposed.transport.publishRealtimeTracked(tagGameAction());
+		await vi.advanceTimersByTimeAsync(10);
+		cancelled.dispose();
+		expect(await cancelled.firstSuccess).toBe(false);
+		expect(await cancelled.settled).toMatchObject({ outcome: 'unconfirmed', terminalReason: 'disposed' });
+
+		const failed = fixture(1);
+		failed.authorities[0].onRequest = (socket, request) => send(socket, 'EOSE', request[1]);
+		await failed.start();
+		const failedRealtime = failed.transport.startRealtime(realtimeInput());
+		await vi.advanceTimersByTimeAsync(30);
+		await failedRealtime;
+		vi.spyOn(publicClient(), 'send').mockReturnValue(throwError(() => new Error('fake send failure')));
+		const errored = failed.transport.publishRealtimeTracked(tagGameAction());
+		await vi.advanceTimersByTimeAsync(1);
+		expect(await errored.firstSuccess).toBe(false);
+		expect(await errored.settled).toMatchObject({ outcome: 'unconfirmed', terminalReason: 'send-error' });
+	});
+
+	it('keeps observing per-Relay OK after rx-nostr okTimeout until all Relay results settle', async () => {
+		const f = fixture(2);
+		let releaseSlowAck!: () => void;
+		f.authorities.forEach((relay) => { relay.onRequest = (socket, request) => send(socket, 'EOSE', request[1]); });
+		f.authorities[0].onPublish = (socket, event) => send(socket, 'OK', event.id, true, '');
+		f.authorities[1].onPublish = (socket, event) => { releaseSlowAck = () => send(socket, 'OK', event.id, true, ''); };
+		await f.start();
+		const realtime = f.transport.startRealtime(realtimeInput());
+		await vi.advanceTimersByTimeAsync(30);
+		await realtime;
+		const handle = f.transport.publishRealtimeTracked(tagGameAction());
+		await vi.advanceTimersByTimeAsync(200);
+		expect(await handle.firstSuccess).toBe(true);
+		let settled = false;
+		void handle.settled.then(() => { settled = true; });
+		expect(settled).toBe(false);
+		releaseSlowAck();
+		await vi.advanceTimersByTimeAsync(1);
+		await expect(handle.settled).resolves.toMatchObject({ outcome: 'accepted', terminalReason: 'completed',
+			results: [{ outcome: 'accepted' }, { outcome: 'accepted' }] });
 	});
 
 	it('multiplexes 27070 and 37070 through the existing supplemental REQ without entering the 7070 parser', async () => {

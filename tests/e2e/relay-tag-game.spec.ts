@@ -413,8 +413,9 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 			const event = finalizeEvent(buildWorldStateEventTemplate({ channel, createdAt: finalActivityAt, position, slot: 1, runNumber: 1 }), secret);
 			await injectPosition(hostPage, event);
 		}
-		await hostPage.clock.setSystemTime(endsAt + 1_000);
-		await hostPage.clock.runFor(250);
+		const beforeFinal = await latestGameEvent(hostPage, gameId);
+	await hostPage.clock.setSystemTime(Math.max(endsAt + 1_000, (beforeFinal.created_at + 1) * 1_000));
+	await hostPage.clock.runFor(1_250);
 		await expect.poll(async () => parseTagGameEvent(await latestGameEvent(hostPage, gameId), CHANNEL_ID)?.state.phase).toBe('ended');
 		await expect(hostPage.locator('[data-tag-game-hud]')).toHaveCount(0);
 		const finalStateEvent = await latestGameEvent(hostPage, gameId);
@@ -516,6 +517,69 @@ test('same-target long press keeps touch status stable while Relay acknowledgeme
 	} finally {
 		await Promise.all([hostPage.close(), actorPage.close()]);
 	}
+});
+
+test('the 23-second cutoff survives reload and recovery excludes the stopped interval', async ({ page }) => {
+	test.setTimeout(60_000);
+	const nowMs = Date.now();
+	const hostSecret = fixtureSecret(61);
+	const ownerSecret = fixtureSecret(63);
+	const hostPubkey = getPublicKey(hostSecret);
+	const ownerPubkey = getPublicKey(ownerSecret);
+	await preparePlayer(page, hostSecret, nowMs, 0, true);
+	await moveRelaySelfTo(page, { x: 7, y: 5 });
+	const nowSeconds = Math.floor(await page.evaluate(() => Date.now() / 1_000));
+	const channel = { channelId: CHANNEL_ID, relayHint: 'wss://relay.test/' };
+	const ownerPosition = finalizeEvent(buildWorldStateEventTemplate({ channel, createdAt: nowSeconds, position: { x: 8, y: 5 }, slot: 1, runNumber: 1 }), ownerSecret);
+	await injectPosition(page, ownerPosition);
+	const seed = Array.from({ length: 10_000 }, (_, index) => `pause-recovery-${index}`).find((candidate) => {
+		const schedule = createTagGameSchedule(candidate);
+		return schedule[0].effect === 'calamity' && schedule[0].durationMs >= 30_000;
+	})!;
+	const gameId = `${hostPubkey}:${nowSeconds}:${'6'.repeat(64)}`;
+	const running: TagGameState = {
+		gameId, hostPubkey, phase: 'running', revision: 0, updatedAt: nowSeconds,
+		startedAt: nowSeconds, endsAt: nowSeconds + 180, seed, ownerPubkey, effect: 'calamity', transferAt: nowSeconds * 1_000,
+		participant: [hostPubkey, ownerPubkey].map((pubkey) => ({ pubkey, runNumber: 1, registeredAt: nowSeconds, status: 'active' as const, points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 })),
+		settledAtMs: nowSeconds * 1_000, lastHolderResponseAtMs: nowSeconds * 1_000
+	};
+	await injectRealtime(page, finalizeTagGameState(running, CHANNEL_ID, nowSeconds, hostSecret));
+	await expect(page.locator('[data-tag-game-hud]')).toBeVisible();
+	await page.clock.runFor(15_500);
+	const precheck = await latestTagGameAction(page, hostPubkey, 'response-challenge');
+	expect(parseTagGameActionEvent(precheck, CHANNEL_ID)?.payload).toMatchObject({ stage: 'precheck' });
+	await page.clock.runFor(8_000);
+	await expect.poll(async () => parseTagGameEvent(await latestGameEvent(page, gameId), CHANNEL_ID)?.state.holderChallengeId).toBeTruthy();
+	const stopped = parseTagGameEvent(await latestGameEvent(page, gameId), CHANNEL_ID)!.state;
+	const stoppedEvent = await latestGameEvent(page, gameId);
+	expect(stopped.settledAtMs).toBe(nowSeconds * 1_000 + 23_000);
+	const stoppedOwner = stopped.participant.find((member) => member.pubkey === ownerPubkey)!;
+	expect(stoppedOwner.calamityMs).toBe(23_000);
+
+	await page.reload();
+	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+	await expect(page.locator(`.participant[data-self="true"][data-participant-id="${hostPubkey}"]`)).toBeVisible();
+	await injectRealtime(page, stoppedEvent);
+	await expect(page.locator('[data-tag-game-hud]')).toBeVisible();
+	await page.clock.runFor(1_500);
+	const replayedStates = await page.evaluate((id) => (window as typeof window & { __relayStartupTest: { state: { realtimeHistory: Array<Record<string, unknown>> } } }).__relayStartupTest.state.realtimeHistory
+		.filter((event) => event.kind === 37070 && (event.tags as string[][]).some((tag) => tag[0] === 'd' && tag[1] === id)), gameId) as unknown as NostrEvent[];
+	const replayedStop = parseTagGameEvent(replayedStates.at(-1)!, CHANNEL_ID)!.state;
+	expect(replayedStop.holderChallengeId).toBeTruthy();
+	expect(replayedStop.settledAtMs).toBe(stopped.settledAtMs);
+	expect(replayedStop.participant.find((member) => member.pubkey === ownerPubkey)?.calamityMs).toBe(stoppedOwner.calamityMs);
+
+	const resumeAtMs = await page.evaluate(() => Date.now());
+	const resumeBoundaryMs = Math.floor(resumeAtMs / 1_000) * 1_000;
+	const resumedActivity = finalizeEvent(buildWorldMessageTemplate({ channel,
+		createdAt: Math.floor(resumeAtMs / 1_000), position: { x: 8, y: 5 }, content: 'holder resumed World activity', speechType: 'normal' }), ownerSecret);
+	await injectWorldMessage(page, resumedActivity);
+	await page.clock.runFor(500);
+	await expect.poll(async () => parseTagGameEvent(await latestGameEvent(page, gameId), CHANNEL_ID)?.state.holderChallengeId).toBeUndefined();
+	const resumed = parseTagGameEvent(await latestGameEvent(page, gameId), CHANNEL_ID)!.state;
+	expect(resumed.settledAtMs).toBeGreaterThanOrEqual(resumeBoundaryMs);
+	expect(resumed.lastHolderResponseAtMs).toBeGreaterThanOrEqual(resumeBoundaryMs);
+	expect(resumed.participant.find((member) => member.pubkey === ownerPubkey)?.calamityMs).toBe(stoppedOwner.calamityMs);
 });
 
 test('host silence is detected only while the local Relay connection is active', async ({ page }) => {
@@ -815,6 +879,7 @@ test('organizer cancellation terminates the lobby, clears pending reservations, 
 		await expect(hostPage.getByText('あなたの開催').first()).toHaveCount(0);
 		await expect(hostPage.locator('.results')).toHaveCount(0);
 		await expect(hostPage.getByRole('button', { name: '鬼ごっこを開催' })).toBeVisible();
+		await expect.poll(async () => (await tagGamePersistence(hostPage)).reservation).toBeNull();
 		await hostPage.getByRole('button', { name: '鬼ごっこを開催' }).click();
 		await expect.poll(async () => (await relayState(hostPage)).state.published.some((event) => event.kind === TAG_GAME_KIND)).toBe(true);
 		const replacement = parseTagGameEvent(await latestPublished(hostPage, TAG_GAME_KIND, hostPubkey), CHANNEL_ID)!.state;

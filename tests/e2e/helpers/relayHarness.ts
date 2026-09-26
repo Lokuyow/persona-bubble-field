@@ -358,7 +358,7 @@ export async function installDelayedRelay(page: Page, options: {
 		const realtimeHistory = [
 			...(realtimeEvents ?? []) as Array<Record<string, unknown>>,
 			...queuedBootstrapEvents,
-			...previous.published.filter((event) => event.kind === 7070)
+			...previous.published.filter((event) => event.kind === 7070 || event.kind === 37070)
 		];
 		const state = {
 			traceDeliveries: [] as string[],

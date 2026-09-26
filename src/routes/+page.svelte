@@ -147,6 +147,9 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		TAG_GAME_GAME_MS,
 		TAG_GAME_LOBBY_MAX_AGE_SECONDS,
 		TAG_GAME_LOBBY_RENEW_MS,
+		TAG_GAME_NO_ACTIVITY_MS,
+		TAG_GAME_PRECHECK_TIMEOUT_MS,
+		TAG_GAME_RESPONSE_TIMEOUT_MS,
 		TAG_GAME_RESERVATION_RECOVERY_MS,
 		TAG_GAME_TOUCH_EVIDENCE_WAIT_MS,
 		TAG_GAME_TOUCH_FEEDBACK_MS,
@@ -164,12 +167,13 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		finalizeTagGameState,
 		isFreshTagGameLobby,
 		isFreshTagGameTouchAction,
+		isValidTagGameHolderResponse,
 		isTagGameTouchProofSuperseded,
 		isTagGameTouchPositionProof,
 		leaveTagGameParticipant,
 		parseTagGameActionEvent,
 		parseTagGameEvent,
-		tagGameHolderResponseState,
+		tagGameEffectSafetyCutoffMs,
 		type TagGameState
 	} from '$lib/tagGame';
 	import { isOrganizerConfirmedTagGameEffectCurrent, projectTagGameHud } from '$lib/tagGameHud';
@@ -361,6 +365,10 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	let tagGameDiscoverySince = 0;
 	const tagGameLastLobbyRenewalMs = new Map<string, number>();
 	const tagGameLastPublishSeconds = new Map<string, number>();
+	const tagGameHolderProbes = new Map<string, { challengeId: string; ownerPubkey: string; runNumber: number; startedAtMs: number; requestAcknowledgedAtMs: number | null; responseAtMs: number | null; lastAttemptAtMs: number; requestPending: boolean }>();
+	const tagGameEffectPauses = new Map<string, { challengeId: string; ownerPubkey: string; runNumber: number; pausedAtMs: number; statePublishPending: boolean; formalRequestPending: boolean; formalLastAttemptAtMs: number }>();
+	const tagGameFormalChallengeAcks = new Map<string, number>();
+	const tagGameHolderResponsePending = new Set<string>();
 	let advancingTagGames = false;
 	const tagGamePublishQueues = new Map<string, Promise<unknown>>();
 	const tagGameTouchAttempts = new Map<string, number>();
@@ -2364,6 +2372,17 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			return;
 		}
 		if (previous && createdAt > previous.createdAt) tagGameConflictSince.delete(state.gameId);
+		if (previous?.state.ownerPubkey && state.ownerPubkey && previous.state.ownerPubkey !== state.ownerPubkey) {
+			tagGameHolderProbes.delete(state.gameId);
+			tagGameEffectPauses.delete(state.gameId);
+			for (const key of tagGameFormalChallengeAcks.keys()) if (key.startsWith(`${state.gameId}:`)) tagGameFormalChallengeAcks.delete(key);
+		}
+		const recoveredPause = tagGameEffectPauses.get(state.gameId);
+		if (recoveredPause && recoveredPause.ownerPubkey === state.ownerPubkey && !state.holderChallengeId && state.settledAtMs >= recoveredPause.pausedAtMs) {
+			tagGameEffectPauses.delete(state.gameId);
+			tagGameHolderProbes.delete(state.gameId);
+			tagGameFormalChallengeAcks.delete(`${state.gameId}:${recoveredPause.challengeId}`);
+		}
 		tagGameHostProbeAtMs.delete(state.gameId);
 		if ((state.phase === 'ended' || state.phase === 'interrupted') && personaSnapshot?.tagGame?.reservation?.gameId === state.gameId) void releaseAndRefreshTagGameParticipation(personaSnapshot, state.gameId);
 		if (previous && personaSnapshot && previous.state.participant.some((member) => member.pubkey === personaSnapshot?.signer.pubkey) && !state.participant.some((member) => member.pubkey === personaSnapshot?.signer.pubkey) && state.phase === 'lobby') {
@@ -2483,8 +2502,9 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		const createdAt = Math.floor(Date.now() / 1000);
 		const event = finalizeEvent(buildTagGameActionTemplate({ channelId: channel.channelId, gameId, action, runNumber: self.activeRun.runNumber, nonce: tagGameNonce(), createdAt, payload }), self.signer.secretKey);
 		try {
-			const result = await worldSession.publishRealtime(event);
-			const confirmed = result.outcome !== 'unconfirmed';
+			const handle = await worldSession.publishRealtimeTracked(event);
+			const confirmed = await handle.firstSuccess;
+			void handle.settled;
 			if (confirmed && action === 'leave' && tagGameEvents.get(gameId)?.state.hostPubkey === self.signer.pubkey) handleTagGameSupplementalEvent(event);
 			return confirmed;
 		} catch { return false; }
@@ -2513,11 +2533,15 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			const createdAt = Math.floor(Date.now() / 1000);
 			const state = { ...next, updatedAt: createdAt };
 			const event = finalizeTagGameState(state, channel.channelId, createdAt, self.signer.secretKey);
-			const result = await session.publishRealtime(event);
-			if (result.outcome === 'unconfirmed') return false;
+			const handle = await session.publishRealtimeTracked(event);
+			if (!await handle.firstSuccess) {
+				await handle.settled;
+				return false;
+			}
 			tagGameLastPublishSeconds.set(gameId, createdAt);
 			if (state.phase === 'lobby' && state.hostPubkey === self.signer.pubkey) tagGameLastLobbyRenewalMs.set(state.gameId, Date.now());
 			rememberTagGameEnvelope(event.id, createdAt, state);
+			void handle.settled;
 			return true;
 		};
 		const queue = tagGamePublishQueues.get(gameId) ?? Promise.resolve();
@@ -2714,6 +2738,89 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		for (const notify of tagGamePositionEvidenceWaiters) notify();
 	}
 
+	function isFreshHolderResponse(createdAtSeconds: number, receivedAtMs: number): boolean {
+		if (!Number.isSafeInteger(createdAtSeconds) || !Number.isSafeInteger(receivedAtMs)) return false;
+		const ageSeconds = Math.floor(receivedAtMs / 1_000) - createdAtSeconds;
+		return ageSeconds >= -2 && ageSeconds <= (TAG_GAME_NO_ACTIVITY_MS + TAG_GAME_PRECHECK_TIMEOUT_MS + TAG_GAME_RESPONSE_TIMEOUT_MS) / 1_000;
+	}
+
+	function acceptTagGameHolderResponse(state: TagGameState, action: NonNullable<ReturnType<typeof parseTagGameActionEvent>>): void {
+		const challengeId = action.payload.challengeId;
+		if (typeof challengeId !== 'string' || !isFreshHolderResponse(action.event.created_at, Date.now())) return;
+		const receivedAtMs = Date.now();
+		const member = state.participant.find((candidate) => candidate.pubkey === action.event.pubkey && candidate.runNumber === action.runNumber && candidate.status === 'active');
+		const signedStopMatches = isValidTagGameHolderResponse({ state, pubkey: action.event.pubkey, runNumber: action.runNumber,
+			challengeId, createdAtSeconds: action.event.created_at, receivedAtMs });
+		const probe = tagGameHolderProbes.get(state.gameId);
+		const precheckMatches = Boolean(member && probe && probe.challengeId === challengeId && probe.ownerPubkey === action.event.pubkey &&
+			probe.runNumber === action.runNumber && action.event.created_at * 1_000 >= probe.startedAtMs - 2_000);
+		if (!signedStopMatches && !precheckMatches) return;
+		const formalAckAt = tagGameFormalChallengeAcks.get(`${state.gameId}:${challengeId}`) ?? state.holderChallengeStartedAtMs;
+		if (formalAckAt !== undefined && receivedAtMs > formalAckAt + TAG_GAME_RESPONSE_TIMEOUT_MS) return;
+		if (probe && probe.challengeId === challengeId) probe.responseAtMs = receivedAtMs;
+		tagGameHolderResponsePending.add(state.gameId);
+		void updateTagGameState(state.gameId, (current) => {
+			if (current.phase !== 'running' || current.ownerPubkey !== action.event.pubkey ||
+				(current.holderChallengeId !== challengeId && !precheckMatches)) return null;
+			const currentMember = current.participant.find((candidate) => candidate.pubkey === action.event.pubkey && candidate.runNumber === action.runNumber && candidate.status === 'active');
+			if (!currentMember) return null;
+			const accrued = accrueTagGameState(current, receivedAtMs);
+			return { ...accrued, settledAtMs: Math.max(accrued.settledAtMs, receivedAtMs), lastHolderResponseAtMs: receivedAtMs,
+				holderChallengeId: undefined, holderChallengeStartedAtMs: undefined, revision: current.revision + 1 };
+		}).then((published) => {
+			if (published && tagGameHolderProbes.get(state.gameId)?.challengeId === challengeId) tagGameHolderProbes.delete(state.gameId);
+			if (published && tagGameEffectPauses.get(state.gameId)?.challengeId === challengeId) tagGameEffectPauses.delete(state.gameId);
+			if (published) tagGameFormalChallengeAcks.delete(`${state.gameId}:${challengeId}`);
+		}).catch(() => {}).finally(() => { tagGameHolderResponsePending.delete(state.gameId); });
+	}
+
+	function publishTagGameHolderPrecheck(game: TagGameState, probe: NonNullable<ReturnType<typeof tagGameHolderProbes.get>>): void {
+		if (probe.requestPending || Date.now() - probe.lastAttemptAtMs < TAG_GAME_PRECHECK_TIMEOUT_MS) return;
+		probe.requestPending = true;
+		probe.lastAttemptAtMs = Date.now();
+		void publishTagGameAction(game.gameId, 'response-challenge', { challengeId: probe.challengeId, stage: 'precheck' }).then((sent) => {
+			const current = tagGameHolderProbes.get(game.gameId);
+			if (current !== probe) return;
+			probe.requestPending = false;
+			if (sent) probe.requestAcknowledgedAtMs = Date.now();
+		});
+	}
+
+	function publishTagGameEffectStop(game: TagGameState, pause: NonNullable<ReturnType<typeof tagGameEffectPauses.get>>): void {
+		if (pause.statePublishPending) return;
+		pause.statePublishPending = true;
+		void (async () => {
+			try {
+				const alreadyStopped = tagGameEvents.get(game.gameId)?.state.holderChallengeId === pause.challengeId;
+				const stopped = alreadyStopped || await updateTagGameState(game.gameId, (current) => {
+					if (current.phase !== 'running' || current.ownerPubkey !== pause.ownerPubkey) return null;
+					if (current.holderChallengeId === pause.challengeId) return null;
+					if (current.holderChallengeId) return null;
+					const accrued = accrueTagGameState(current, pause.pausedAtMs);
+					return { ...accrued, settledAtMs: pause.pausedAtMs, holderChallengeId: pause.challengeId,
+						holderChallengeStartedAtMs: undefined, revision: current.revision + 1 };
+				});
+				if (!stopped) return;
+				const latest = tagGameEvents.get(game.gameId)?.state;
+				if (!latest || latest.holderChallengeId !== pause.challengeId || pause.formalRequestPending ||
+					Date.now() - pause.formalLastAttemptAtMs < TAG_GAME_PRECHECK_TIMEOUT_MS) return;
+				pause.formalRequestPending = true;
+				pause.formalLastAttemptAtMs = Date.now();
+				const requestSent = await publishTagGameAction(game.gameId, 'response-challenge', { challengeId: pause.challengeId, stage: 'formal' });
+				pause.formalRequestPending = false;
+				if (!requestSent || tagGameEffectPauses.get(game.gameId) !== pause) return;
+				const acknowledgedAtMs = Date.now();
+				tagGameFormalChallengeAcks.set(`${game.gameId}:${pause.challengeId}`, acknowledgedAtMs);
+				await updateTagGameState(game.gameId, (current) => current.phase === 'running' && current.ownerPubkey === pause.ownerPubkey && current.holderChallengeId === pause.challengeId
+					? { ...current, holderChallengeStartedAtMs: acknowledgedAtMs, revision: current.revision + 1 } : null);
+			} catch {
+				// The pause remains local and the next advancement retries publication.
+			} finally {
+				pause.statePublishPending = false;
+			}
+		})();
+	}
+
 	async function processTagGameTouch(
 		observed: TagGameState,
 		action: NonNullable<ReturnType<typeof parseTagGameActionEvent>>,
@@ -2729,7 +2836,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		const validRole = observed.effect === 'benefit'
 			? actor.pubkey !== observed.ownerPubkey && target.pubkey === observed.ownerPubkey
 			: observed.effect === 'calamity' && actor.pubkey === observed.ownerPubkey && target.pubkey !== observed.ownerPubkey;
-		if (!validRole || observed.holderChallengeId || !isOrganizerConfirmedTagGameEffectCurrent(observed, receivedAtMs)) return;
+		if (!validRole || !tagGameOrganizerEffectActive(observed, receivedAtMs)) return;
 		const actorProof = action.payload.actorProof;
 		const targetProof = action.payload.targetProof;
 		if (!isTagGameTouchPositionProof(actorProof) || !isTagGameTouchPositionProof(targetProof)) {
@@ -2750,7 +2857,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			if (!isFreshTagGameTouchAction({ createdAtSeconds: action.event.created_at, nowMs, elapsedSinceFirstReceiptMs: elapsedSinceReceiptMs }) ||
 				current.phase !== 'running' || current.holderChallengeId || nowMs >= (current.endsAt ?? 0) * 1_000 ||
 				nowMs - (current.transferAt ?? current.startedAt! * 1_000) < 3_000 ||
-				!isOrganizerConfirmedTagGameEffectCurrent(current, nowMs) || tagGameConflictSince.has(current.gameId)) return null;
+				!tagGameOrganizerEffectActive(current, nowMs) || tagGameConflictSince.has(current.gameId)) return null;
 			const currentActor = current.participant.find((member) => member.pubkey === action.event.pubkey && member.runNumber === action.runNumber && member.status === 'active');
 			const currentTarget = current.participant.find((member) => member.pubkey === targetPubkey && member.status === 'active');
 			if (!currentActor || !currentTarget ||
@@ -2764,7 +2871,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 				: current.effect === 'calamity' && currentActor.pubkey === current.ownerPubkey && currentTarget.pubkey !== current.ownerPubkey;
 			if (!shouldTransfer) return null;
 			const accrued = accrueTagGameState(current, nowMs);
-			return { ...accrued, ownerPubkey: accrued.effect === 'benefit' ? currentActor.pubkey : currentTarget.pubkey, transferAt: nowMs, revision: current.revision + 1 };
+			return { ...accrued, ownerPubkey: accrued.effect === 'benefit' ? currentActor.pubkey : currentTarget.pubkey, transferAt: nowMs, lastHolderResponseAtMs: nowMs, revision: current.revision + 1 };
 		});
 	}
 
@@ -2839,9 +2946,8 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 				const allConsented = participants.every((member) => member.consentProposalId === current.proposalId && member.consented);
 				return { ...current, revision: current.revision + 1, participant: participants, ...(allConsented ? { phase: 'countdown' as const, startAt: Math.floor(Date.now() / 1000) + 5 } : {}) };
 			});
-		} else if (parsed.action === 'response' && parsed.event.pubkey === state.ownerPubkey && currentMember && state.holderChallengeId === parsed.payload.challengeId && state.holderChallengeStartedAtMs !== undefined && Date.now() - state.holderChallengeStartedAtMs <= 5_000 && parsed.event.created_at * 1000 >= state.holderChallengeStartedAtMs - 999) {
-			void updateTagGameState(state.gameId, (current) => current.holderChallengeId === parsed.payload.challengeId && current.ownerPubkey === parsed.event.pubkey
-				? { ...current, revision: current.revision + 1, settledAtMs: Date.now(), lastHolderResponseAtMs: Date.now(), holderChallengeId: undefined, holderChallengeStartedAtMs: undefined } : null);
+		} else if (parsed.action === 'response' && parsed.event.pubkey === state.ownerPubkey && currentMember) {
+			acceptTagGameHolderResponse(state, parsed);
 		}
 	}
 
@@ -2958,14 +3064,46 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 					const hash = [...(current.seed ?? '')].reduce((value, char) => (Math.imul(value ^ char.charCodeAt(0), 16777619) >>> 0), 2166136261);
 					ownerPubkey = remaining[hash % remaining.length].pubkey;
 				}
-				return { ...accrued, participant: participants, ownerPubkey, transferAt: Date.now(), revision: current.revision + 1 };
+				const transferred = ownerPubkey !== current.ownerPubkey;
+				const transferAt = Date.now();
+				return { ...accrued, participant: participants, ownerPubkey, transferAt,
+					...(transferred ? { lastHolderResponseAtMs: transferAt } : {}), revision: current.revision + 1 };
 			});
 		}
 	}
 
+	function tagGameHolderMember(game: TagGameState) {
+		return game.participant.find((member) => member.pubkey === game.ownerPubkey && member.status === 'active');
+	}
+
+	function tagGameHolderActivityAt(game: TagGameState, nowMs = Date.now()): number {
+		const holder = tagGameHolderMember(game);
+		const normalActivityAtMs = presenceState.participants.find((participant) => participant.id === game.ownerPubkey)?.lastActivityAt ?? 0;
+		const probe = tagGameHolderProbes.get(game.gameId);
+		const probeResponseAtMs = probe && probe.ownerPubkey === game.ownerPubkey && probe.runNumber === holder?.runNumber ? probe.responseAtMs ?? 0 : 0;
+		return Math.min(nowMs, Math.max(game.startedAt ? game.startedAt * 1_000 : 0, game.transferAt ?? 0,
+			game.lastHolderResponseAtMs ?? 0, normalActivityAtMs, probeResponseAtMs));
+	}
+
+	function tagGameEffectCutoff(game: TagGameState): number {
+		if (!game.endsAt) return Number.POSITIVE_INFINITY;
+		return tagGameEffectSafetyCutoffMs(tagGameHolderActivityAt(game), game.endsAt * 1_000);
+	}
+
+	function tagGameOrganizerEffectActive(game: TagGameState, nowMs: number): boolean {
+		const holder = tagGameHolderMember(game);
+		const pause = tagGameEffectPauses.get(game.gameId);
+		return isOrganizerConfirmedTagGameEffectCurrent(game, nowMs) && !game.holderChallengeId &&
+			!(pause && pause.ownerPubkey === game.ownerPubkey && pause.runNumber === holder?.runNumber) && nowMs < tagGameEffectCutoff(game);
+	}
+
 	function accrueTagGameState(game: TagGameState, untilMs: number): TagGameState {
 		if (!game.startedAt || !game.seed) return game;
-		const cap = game.endsAt ? Math.min(untilMs, game.endsAt * 1000) : untilMs;
+		const holder = tagGameHolderMember(game);
+		const pause = tagGameEffectPauses.get(game.gameId);
+		const localPauseAt = pause && pause.ownerPubkey === game.ownerPubkey && pause.runNumber === holder?.runNumber ? pause.pausedAtMs : Number.POSITIVE_INFINITY;
+		const signedPauseAt = game.holderChallengeId ? game.settledAtMs : Number.POSITIVE_INFINITY;
+		const cap = Math.min(untilMs, game.endsAt ? game.endsAt * 1000 : untilMs, tagGameEffectCutoff(game), localPauseAt, signedPauseAt);
 		const end = Math.max(game.settledAtMs, cap);
 		const players = game.participant.map((member) => ({ ...member }));
 		const intervals = createTagGameSchedule(game.seed);
@@ -3080,7 +3218,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 						if (activeRoster.length < 2) return { ...current, phase: 'lobby', startAt: undefined, participant: current.participant.filter((member) => member.pubkey === current.hostPubkey), revision: current.revision + 1 };
 						const startedAt = current.startAt;
 						return { ...current, phase: 'running', revision: current.revision + 1, startedAt, endsAt: startedAt + TAG_GAME_GAME_MS / 1000,
-							seed, ownerPubkey: activeRoster[hash % activeRoster.length].pubkey, effect: schedule[0].effect, transferAt: startedAt * 1000,
+							seed, ownerPubkey: activeRoster[hash % activeRoster.length].pubkey, effect: schedule[0].effect, transferAt: startedAt * 1000, lastHolderResponseAtMs: startedAt * 1000,
 							participant: activeRoster.map((member) => ({ ...member, status: 'active', points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 })), settledAtMs: startedAt * 1000 };
 					});
 				}
@@ -3094,39 +3232,80 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 					});
 					continue;
 				}
-				const holderActivityAt = presenceState.participants.find((participant) => participant.id === game.ownerPubkey)?.lastActivityAt ?? game.startedAt * 1000;
-				const holderResponseState = tagGameHolderResponseState({ nowMs, normalActivityAtMs: holderActivityAt, acknowledgedAtMs: game.lastHolderResponseAtMs ?? null, challengeStartedAtMs: game.holderChallengeStartedAtMs ?? null });
-				if (game.phase === 'running' && holderResponseState === 'challenge' && !game.holderChallengeId) {
-					const challengeId = tagGameNonce();
-					void (async () => {
-						if (await updateTagGameState(game.gameId, (current) => current.phase === 'running' && !current.holderChallengeId && tagGameHolderResponseState({ nowMs,
-							normalActivityAtMs: holderActivityAt, acknowledgedAtMs: current.lastHolderResponseAtMs ?? null, challengeStartedAtMs: null }) === 'challenge'
-							? { ...accrueTagGameState(current, nowMs), holderChallengeId: challengeId, holderChallengeStartedAtMs: nowMs, settledAtMs: nowMs, revision: current.revision + 1 } : null)) {
-							await publishTagGameAction(game.gameId, 'response-challenge', { challengeId });
-						}
-					})();
-					continue;
+				const holder = tagGameHolderMember(game);
+				if (!holder) continue;
+				let probe = tagGameHolderProbes.get(game.gameId);
+				if (probe && (probe.ownerPubkey !== game.ownerPubkey || probe.runNumber !== holder.runNumber)) {
+					tagGameHolderProbes.delete(game.gameId);
+					probe = undefined;
 				}
-				if (game.holderChallengeId && holderResponseState === 'active') {
-					void updateTagGameState(game.gameId, (current) => current.holderChallengeId ? { ...current, holderChallengeId: undefined, holderChallengeStartedAtMs: undefined, settledAtMs: nowMs, revision: current.revision + 1 } : null);
-					continue;
+				let pause = tagGameEffectPauses.get(game.gameId);
+				if (game.holderChallengeId && (!pause || pause.challengeId !== game.holderChallengeId)) {
+					pause = { challengeId: game.holderChallengeId, ownerPubkey: game.ownerPubkey!, runNumber: holder.runNumber,
+						pausedAtMs: game.settledAtMs, statePublishPending: false, formalRequestPending: false, formalLastAttemptAtMs: 0 };
+					tagGameEffectPauses.set(game.gameId, pause);
 				}
-				if (game.holderChallengeId && holderResponseState === 'unresponsive') {
-					const eligible = game.participant.filter((member) => member.status === 'active' && member.pubkey !== game.ownerPubkey);
-					if (eligible.length <= 1) {
-						void updateTagGameState(game.gameId, (current) => current.holderChallengeId ? { ...current, phase: 'interrupted', endReason: 'too-few-participants', holderChallengeId: undefined, holderChallengeStartedAtMs: undefined, revision: current.revision + 1 } : null);
+				if (pause && (pause.ownerPubkey !== game.ownerPubkey || pause.runNumber !== holder.runNumber)) {
+					tagGameEffectPauses.delete(game.gameId);
+					pause = undefined;
+				}
+				const holderActivityAt = tagGameHolderActivityAt(game, nowMs);
+				if (pause) {
+					if (holderActivityAt > pause.pausedAtMs) {
+						const resumeAtMs = holderActivityAt;
+						void updateTagGameState(game.gameId, (current) => {
+							if (current.phase !== 'running' || current.ownerPubkey !== pause!.ownerPubkey ||
+								current.participant.find((member) => member.pubkey === current.ownerPubkey)?.runNumber !== pause!.runNumber) return null;
+							const accrued = accrueTagGameState(current, resumeAtMs);
+						return { ...accrued, settledAtMs: Math.max(accrued.settledAtMs, resumeAtMs),
+							lastHolderResponseAtMs: Math.max(current.lastHolderResponseAtMs ?? 0, probe?.responseAtMs ?? 0, resumeAtMs),
+							holderChallengeId: undefined, holderChallengeStartedAtMs: undefined, revision: current.revision + 1 };
+						}).then((published) => {
+							if (published && tagGameEffectPauses.get(game.gameId) === pause) tagGameEffectPauses.delete(game.gameId);
+							if (published && tagGameHolderProbes.get(game.gameId) === probe) tagGameHolderProbes.delete(game.gameId);
+						});
 						continue;
 					}
-					const owner = eligible[createTagGameSchedule(game.seed)[0].durationMs % eligible.length];
+					const challengeStartedAtMs = tagGameFormalChallengeAcks.get(`${game.gameId}:${pause.challengeId}`) ?? game.holderChallengeStartedAtMs ?? null;
+					if (challengeStartedAtMs === null) publishTagGameEffectStop(game, pause);
+					if (!tagGameHolderResponsePending.has(game.gameId) && challengeStartedAtMs !== null && nowMs - challengeStartedAtMs >= TAG_GAME_RESPONSE_TIMEOUT_MS) {
+					const eligible = game.participant.filter((member) => member.status === 'active' && member.pubkey !== game.ownerPubkey);
+					if (eligible.length <= 1) {
+						void updateTagGameState(game.gameId, (current) => current.holderChallengeId === pause!.challengeId ? { ...accrueTagGameState(current, pause!.pausedAtMs), phase: 'interrupted', endReason: 'too-few-participants', holderChallengeId: undefined, holderChallengeStartedAtMs: undefined, revision: current.revision + 1 } : null);
+						continue;
+					}
 					void updateTagGameState(game.gameId, (current) => {
 						const candidates = current.participant.filter((member) => member.status === 'active' && member.pubkey !== current.ownerPubkey);
-						if (!current.holderChallengeId || candidates.length <= 1) return current.holderChallengeId ? { ...current, phase: 'interrupted', endReason: 'too-few-participants', holderChallengeId: undefined, holderChallengeStartedAtMs: undefined, revision: current.revision + 1 } : null;
+						if (current.holderChallengeId !== pause!.challengeId || candidates.length <= 1) return current.holderChallengeId === pause!.challengeId ? { ...accrueTagGameState(current, pause!.pausedAtMs), phase: 'interrupted', endReason: 'too-few-participants', holderChallengeId: undefined, holderChallengeStartedAtMs: undefined, revision: current.revision + 1 } : null;
 						const selected = candidates[createTagGameSchedule(current.seed ?? '')[0].durationMs % candidates.length];
-						return { ...current, ownerPubkey: selected.pubkey, participant: current.participant.map((member) => member.pubkey === current.ownerPubkey ? { ...member, status: 'temporarily-ineligible' } : member), transferAt: nowMs, settledAtMs: nowMs, holderChallengeId: undefined, holderChallengeStartedAtMs: undefined, revision: current.revision + 1 };
+						return { ...accrueTagGameState(current, pause!.pausedAtMs), ownerPubkey: selected.pubkey, participant: current.participant.map((member) => member.pubkey === current.ownerPubkey ? { ...member, status: 'temporarily-ineligible' } : member), transferAt: nowMs, lastHolderResponseAtMs: nowMs, settledAtMs: nowMs, holderChallengeId: undefined, holderChallengeStartedAtMs: undefined, revision: current.revision + 1 };
 					});
-					continue;
+						continue;
+					}
+				} else {
+					if (probe && holderActivityAt > probe.startedAtMs) {
+						tagGameHolderProbes.delete(game.gameId);
+						probe = undefined;
+					}
+					if (!probe && nowMs - holderActivityAt >= TAG_GAME_NO_ACTIVITY_MS) {
+						probe = { challengeId: tagGameNonce(), ownerPubkey: game.ownerPubkey!, runNumber: holder.runNumber,
+							startedAtMs: nowMs, requestAcknowledgedAtMs: null, responseAtMs: null, lastAttemptAtMs: 0, requestPending: false };
+						tagGameHolderProbes.set(game.gameId, probe);
+					}
+					if (probe) publishTagGameHolderPrecheck(game, probe);
+					const cutoffAtMs = tagGameEffectCutoff(game);
+					if (nowMs >= cutoffAtMs) {
+						const stopProbe = probe ?? { challengeId: tagGameNonce(), ownerPubkey: game.ownerPubkey!, runNumber: holder.runNumber,
+							startedAtMs: cutoffAtMs - TAG_GAME_PRECHECK_TIMEOUT_MS, requestAcknowledgedAtMs: null, responseAtMs: null, lastAttemptAtMs: 0, requestPending: false };
+						if (!probe) tagGameHolderProbes.set(game.gameId, stopProbe);
+						pause = { challengeId: stopProbe.challengeId, ownerPubkey: game.ownerPubkey!, runNumber: holder.runNumber,
+							pausedAtMs: cutoffAtMs, statePublishPending: false, formalRequestPending: false, formalLastAttemptAtMs: 0 };
+						tagGameEffectPauses.set(game.gameId, pause);
+						publishTagGameEffectStop(game, pause);
+						continue;
+					}
 				}
-				if (game.holderChallengeId) continue;
+				if (game.holderChallengeId && pause) continue;
 				const endMs = game.endsAt * 1000;
 				const untilMs = Math.max(game.settledAtMs, Math.min(nowMs, endMs));
 				const accrued = accrueTagGameState(game, untilMs);

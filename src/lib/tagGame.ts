@@ -9,8 +9,10 @@ export const TAG_GAME_FINAL_WAIT_MS = 30_000;
 export const TAG_GAME_LOBBY_RENEW_MS = 30_000;
 export const TAG_GAME_LOBBY_MAX_AGE_SECONDS = 90;
 export const TAG_GAME_RESERVATION_RECOVERY_MS = 30_000;
-export const TAG_GAME_RESPONSE_TIMEOUT_MS = 5_000;
-export const TAG_GAME_NO_ACTIVITY_MS = 10_000;
+export const TAG_GAME_PRECHECK_TIMEOUT_MS = 8_000;
+export const TAG_GAME_RESPONSE_TIMEOUT_MS = 8_000;
+export const TAG_GAME_NO_ACTIVITY_MS = 15_000;
+export const TAG_GAME_MAX_UNCONFIRMED_EFFECT_MS = 23_000;
 export const TAG_GAME_MAX_POINTS = 4_500;
 export const TAG_GAME_MAX_LIFESPAN_LOSS_MS = 324_000_000;
 export const TAG_GAME_MAX_EFFECT_MS = 90_000;
@@ -122,7 +124,7 @@ export function leaveTagGameParticipant(state: TagGameState, pubkey: string, run
 	}
 	if (state.ownerPubkey !== pubkey) return { ...state, participant, revision: state.revision + 1 };
 	const hash = [...(state.seed ?? '')].reduce((value, char) => (Math.imul(value ^ char.charCodeAt(0), 16777619) >>> 0), 2166136261);
-	return { ...state, participant, ownerPubkey: remaining[hash % remaining.length].pubkey, transferAt: confirmedAtMs,
+	return { ...state, participant, ownerPubkey: remaining[hash % remaining.length].pubkey, transferAt: confirmedAtMs, lastHolderResponseAtMs: confirmedAtMs,
 		holderChallengeId: undefined, holderChallengeStartedAtMs: undefined, revision: state.revision + 1 };
 }
 
@@ -236,12 +238,37 @@ export function isFreshTagGameLobby(state: TagGameState, nowSeconds: number): bo
 	return state.phase === 'lobby' && nowSeconds - state.updatedAt <= TAG_GAME_LOBBY_MAX_AGE_SECONDS && nowSeconds >= state.updatedAt - 5;
 }
 
-export function tagGameHolderResponseState(input: Readonly<{ nowMs: number; normalActivityAtMs: number | null; acknowledgedAtMs: number | null; challengeStartedAtMs: number | null }>): 'active' | 'challenge' | 'unresponsive' {
-	if (![input.nowMs, ...(input.normalActivityAtMs === null ? [] : [input.normalActivityAtMs]), ...(input.acknowledgedAtMs === null ? [] : [input.acknowledgedAtMs]), ...(input.challengeStartedAtMs === null ? [] : [input.challengeStartedAtMs])].every((value) => Number.isSafeInteger(value) && value >= 0)) throw new TypeError('Invalid tag-game activity timestamp.');
+export function tagGameHolderResponseState(input: Readonly<{ nowMs: number; normalActivityAtMs: number | null; acknowledgedAtMs: number | null; precheckStartedAtMs?: number | null; challengeStartedAtMs: number | null }>): 'active' | 'precheck' | 'challenge' | 'unresponsive' {
+	if (![input.nowMs, ...(input.normalActivityAtMs === null ? [] : [input.normalActivityAtMs]), ...(input.acknowledgedAtMs === null ? [] : [input.acknowledgedAtMs]), ...(input.precheckStartedAtMs == null ? [] : [input.precheckStartedAtMs]), ...(input.challengeStartedAtMs === null ? [] : [input.challengeStartedAtMs])].every((value) => Number.isSafeInteger(value) && value >= 0)) throw new TypeError('Invalid tag-game activity timestamp.');
 	const lastActive = Math.max(input.normalActivityAtMs ?? 0, input.acknowledgedAtMs ?? 0);
 	if (input.challengeStartedAtMs !== null && lastActive >= input.challengeStartedAtMs) return 'active';
 	if (input.challengeStartedAtMs !== null && input.nowMs - input.challengeStartedAtMs >= TAG_GAME_RESPONSE_TIMEOUT_MS) return 'unresponsive';
-	return input.nowMs - lastActive >= TAG_GAME_NO_ACTIVITY_MS ? 'challenge' : 'active';
+	if (input.challengeStartedAtMs !== null) return 'challenge';
+	if (input.precheckStartedAtMs != null && lastActive >= input.precheckStartedAtMs) return 'active';
+	if (input.precheckStartedAtMs != null && input.nowMs - input.precheckStartedAtMs >= TAG_GAME_PRECHECK_TIMEOUT_MS) return 'challenge';
+	if (input.precheckStartedAtMs != null) return 'precheck';
+	return input.nowMs - lastActive >= TAG_GAME_NO_ACTIVITY_MS ? 'precheck' : 'active';
+}
+
+export function tagGameEffectSafetyCutoffMs(lastValidActivityAtMs: number, gameEndsAtMs: number): number {
+	if (![lastValidActivityAtMs, gameEndsAtMs].every((value) => Number.isSafeInteger(value) && value >= 0)) throw new TypeError('Invalid tag-game effect cutoff.');
+	return Math.min(lastValidActivityAtMs + TAG_GAME_MAX_UNCONFIRMED_EFFECT_MS, gameEndsAtMs);
+}
+
+/** Allows a signed holder response to win after the stop state but before its timestamp update is confirmed. */
+export function isValidTagGameHolderResponse(input: Readonly<{
+	state: TagGameState;
+	pubkey: string;
+	runNumber: number;
+	challengeId: string;
+	createdAtSeconds: number;
+	receivedAtMs: number;
+}>): boolean {
+	if (input.state.phase !== 'running' || input.state.holderChallengeId !== input.challengeId || input.state.ownerPubkey !== input.pubkey ||
+		!Number.isSafeInteger(input.runNumber) || !Number.isSafeInteger(input.createdAtSeconds) || !Number.isSafeInteger(input.receivedAtMs)) return false;
+	const holder = input.state.participant.find((member) => member.pubkey === input.pubkey && member.runNumber === input.runNumber && member.status === 'active');
+	const ageSeconds = Math.floor(input.receivedAtMs / 1_000) - input.createdAtSeconds;
+	return Boolean(holder && ageSeconds <= TAG_GAME_NO_ACTIVITY_MS / 1_000 + TAG_GAME_PRECHECK_TIMEOUT_MS / 1_000 + TAG_GAME_RESPONSE_TIMEOUT_MS / 1_000 && ageSeconds >= -2);
 }
 
 export function createTagGameSchedule(seed: string): readonly Readonly<{ durationMs: number; effect: 'benefit' | 'calamity' }>[] {

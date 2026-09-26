@@ -48,6 +48,7 @@ import {
 import { assertPrototypeWorldConfig, type PrototypeWorldConfig } from './prototypeWorld';
 
 const DEFAULT_OPERATION_TIMEOUT_MS = 10_000;
+const REALTIME_PUBLISH_ABSOLUTE_TIMEOUT_MS = 10_000;
 const EARLY_SELF_READ_DEADLINE_MS = 750;
 const TRACE_REPLY_RESUME_OVERLAP_SECONDS = 300;
 
@@ -200,6 +201,16 @@ export type RealtimeStartResult = Readonly<{
 export type RealtimePublishResult = Readonly<{
 	outcome: 'accepted' | 'echoed' | 'unconfirmed';
 	results: readonly PublishRelayResult[];
+}>;
+
+export type RealtimePublishSettlement = RealtimePublishResult & Readonly<{
+	terminalReason: 'completed' | 'absolute-timeout' | 'disposed' | 'send-error';
+}>;
+
+export type RealtimePublishHandle = Readonly<{
+	firstSuccess: Promise<boolean>;
+	settled: Promise<RealtimePublishSettlement>;
+	dispose: () => void;
 }>;
 
 export type PublishRelayResult = Readonly<{
@@ -441,6 +452,7 @@ export function createNostrRelayTransport(
 	const realtimeSeenIds = new Set<string>();
 	const realtimeReadableRelays = new Set<string>();
 	const realtimeEchoWaiters = new Map<string, Set<(echoed: boolean) => void>>();
+	const readableRealtimeEchoWaiters = new Map<string, Set<(echoed: boolean) => void>>();
 	const stableTraceCursors = new Map<string, Map<string, number>>();
 	function requireRxNostr(): RxNostr {
 		if (!rxNostr) throw new Error('Relay transport has not been initialized.');
@@ -828,8 +840,30 @@ export function createNostrRelayTransport(
 		return { promise, cancel: () => finish(false) };
 	}
 
-	function notifyRealtimeEcho(eventId: string): void {
-		for (const listener of realtimeEchoWaiters.get(eventId) ?? []) listener(true);
+	function notifyRealtimeEcho(event: Event, relayUrl: string): void {
+		for (const listener of realtimeEchoWaiters.get(event.id) ?? []) listener(true);
+		if (!realtimeReadableRelays.has(relayUrl) || !verifyEvent(event)) return;
+		for (const listener of readableRealtimeEchoWaiters.get(event.id) ?? []) listener(true);
+	}
+
+	function waitForReadableRealtimeEcho(eventId: string, waitMs: number): Readonly<{ promise: Promise<boolean>; cancel: () => void }> {
+		let timer: ReturnType<typeof setTimeout> | null = null;
+		let settled = false;
+		let resolvePromise!: (echoed: boolean) => void;
+		const promise = new Promise<boolean>((resolve) => { resolvePromise = resolve; });
+		const listeners = readableRealtimeEchoWaiters.get(eventId) ?? new Set<(echoed: boolean) => void>();
+		const finish = (echoed: boolean) => {
+			if (settled) return;
+			settled = true;
+			if (timer) clearTimeout(timer);
+			listeners.delete(finish);
+			if (listeners.size === 0) readableRealtimeEchoWaiters.delete(eventId);
+			resolvePromise(echoed);
+		};
+		listeners.add(finish);
+		readableRealtimeEchoWaiters.set(eventId, listeners);
+		timer = setTimeout(() => finish(false), waitMs);
+		return { promise, cancel: () => finish(false) };
 	}
 
 	/**
@@ -897,7 +931,7 @@ export function createNostrRelayTransport(
 				const isInstanceEvent = packet.event.kind === REALTIME_EVENT_KIND && instanceFilters.some((filter) => matchesRealtimeEventFilter(packet.event, filter));
 				const isSupplementalEvent = supplementalFilters.some((filter) => matchesRealtimeEventFilter(packet.event, filter));
 				if (!control && !isInstanceEvent && !isSupplementalEvent) return;
-				notifyRealtimeEcho(packet.event.id);
+				notifyRealtimeEcho(packet.event, relayUrl);
 				if (realtimeSeenIds.has(packet.event.id)) return;
 				realtimeSeenIds.add(packet.event.id);
 				if (!settled) {
@@ -959,6 +993,8 @@ export function createNostrRelayTransport(
 		realtimeReadableRelays.clear();
 		for (const listeners of realtimeEchoWaiters.values()) for (const listener of listeners) listener(false);
 		realtimeEchoWaiters.clear();
+		for (const listeners of readableRealtimeEchoWaiters.values()) for (const listener of listeners) listener(false);
+		readableRealtimeEchoWaiters.clear();
 		realtimeDiagnostics = { status: 'inactive', relays: [] };
 	}
 
@@ -1425,6 +1461,83 @@ export function createNostrRelayTransport(
 		return { outcome: 'unconfirmed', results };
 	}
 
+	function publishRealtimeEventTracked(event: VerifiedEvent): RealtimePublishHandle {
+		if (state !== 'started' || !realtimeStarted) throw new Error('Realtime event subscription is not active.');
+		const client = requireRxNostr();
+		const results = new Map<string, PublishRelayResult>(world.authoritativeRelays.map((relayUrl) => [relayUrl, {
+			relayUrl, outcome: 'no-response'
+		}]));
+		let resolveFirst!: (success: boolean) => void;
+		let firstResolved = false;
+		const firstSuccess = new Promise<boolean>((resolve) => { resolveFirst = resolve; });
+		const finishFirst = (success: boolean) => {
+			if (firstResolved) return;
+			firstResolved = true;
+			resolveFirst(success);
+		};
+		let resolveSettled!: (result: RealtimePublishSettlement) => void;
+		const settled = new Promise<RealtimePublishSettlement>((resolve) => { resolveSettled = resolve; });
+		let successOutcome: 'accepted' | 'echoed' | null = null;
+		let finished = false;
+		let deadline: ReturnType<typeof setTimeout> | null = null;
+		let sendSubscription: Subscription | null = null;
+		const resources = new Subscription();
+		const onParentDispose = () => { if (!finished) finish('disposed'); };
+		const echo = waitForReadableRealtimeEcho(event.id, REALTIME_PUBLISH_ABSOLUTE_TIMEOUT_MS);
+		const markSuccess = (outcome: 'accepted' | 'echoed') => {
+			if (finished || successOutcome !== null) return;
+			successOutcome = outcome;
+			finishFirst(true);
+		};
+		const finish = (terminalReason: RealtimePublishSettlement['terminalReason']) => {
+			if (finished) return;
+			finished = true;
+			if (deadline) clearTimeout(deadline);
+			echo.cancel();
+			sendSubscription?.unsubscribe();
+			resources.remove(onParentDispose);
+			subscriptions.remove(resources);
+			resources.unsubscribe();
+			finishFirst(false);
+			resolveSettled({ outcome: successOutcome ?? 'unconfirmed', results: [...results.values()], terminalReason });
+		};
+		const recordAck = (eventId: string, from: string, ok: boolean, notice?: string) => {
+			if (finished || eventId !== event.id) return;
+			const relayUrl = canonicalRelay(from);
+			if (!relayUrl || !results.has(relayUrl)) return;
+			const duplicate = notice?.startsWith('duplicate:') === true;
+			results.set(relayUrl, { relayUrl, outcome: ok || duplicate ? 'accepted' : 'rejected', ...(notice ? { notice } : {}) });
+			if ((ok || duplicate) && realtimeReadableRelays.has(relayUrl)) markSuccess('accepted');
+			if ([...results.values()].every((result) => result.outcome !== 'no-response')) finish('completed');
+		};
+		resources.add(onParentDispose);
+		subscriptions.add(resources);
+		// rx-nostr's per-activity okTimeout can close the send observable while a
+		// slower Relay is still outstanding. Keep the public message stream as the
+		// ACK monitor until this handle's independent absolute deadline.
+		resources.add(client.createAllMessageObservable().subscribe((packet) => {
+			if (packet.type === 'OK') recordAck(packet.eventId, packet.from, packet.ok, packet.notice);
+		}));
+		void echo.promise.then((echoed) => { if (echoed) markSuccess('echoed'); });
+		deadline = setTimeout(() => finish('absolute-timeout'), REALTIME_PUBLISH_ABSOLUTE_TIMEOUT_MS);
+		try {
+			sendSubscription = client.send(event).subscribe({
+				next: (packet) => {
+					recordAck(packet.eventId, packet.from, packet.ok, packet.notice);
+				},
+				complete: () => {
+					if ([...results.values()].every((result) => result.outcome !== 'no-response')) finish('completed');
+				},
+				error: () => finish('send-error')
+			});
+			if (finished) sendSubscription.unsubscribe();
+			else resources.add(sendSubscription);
+		} catch {
+			finish('send-error');
+		}
+		return { firstSuccess, settled, dispose: () => finish('disposed') };
+	}
+
 	return {
 		async start(input: PrimaryStartInput): Promise<PrimaryStartResult> {
 			if (state !== 'new') throw new Error('Relay transport start is only allowed once.');
@@ -1470,6 +1583,7 @@ export function createNostrRelayTransport(
 			return diagnostics();
 		},
 		publishSelf: publishSelfEvent,
+		publishRealtimeTracked: publishRealtimeEventTracked,
 
 		async bootstrapTraceRootCandidates(): Promise<TraceRootBootstrapResult> {
 			if (state !== 'started') {
