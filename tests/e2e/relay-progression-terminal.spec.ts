@@ -225,11 +225,37 @@ test.describe('Relay startup', () => {
 		await expect(dialog).toContainText('ハルシネーション抑制');
 		await expect(dialog).toContainText('Lv1');
 		await expect(dialog).toContainText('1.00');
-		await expect(dialog).toContainText('1.10');
+		await expect(dialog).not.toContainText('1.10');
+		await expect(dialog.locator('.current-row').first()).toContainText('1.00');
+		await expect(dialog.locator('.current-row').first()).toContainText('pt/分');
+		await expect(dialog.locator('.delta-row').first()).toContainText('+0.10 pt/分');
 		await expect(dialog).toContainText('ポイント生成速度');
 		await expect(dialog).toContainText('必要ポイント');
-		await expect(dialog.getByRole('button', { name: 'Lv2へ強化' }).first()).toBeVisible();
-		await expect(dialog.getByRole('button', { name: 'Lv2へ強化' }).first()).toHaveCSS('color', 'rgb(255, 255, 255)');
+		const upgradeButton = dialog.getByRole('button', { name: '推論効率をLv2へ強化' });
+		await expect(upgradeButton).toBeVisible();
+		await expect(upgradeButton).toHaveAttribute('aria-label', '推論効率をLv2へ強化');
+		await expect(upgradeButton.locator('svg')).toHaveCount(1);
+		await expect(upgradeButton).not.toContainText('強化');
+		for (const [width, columns] of [[1000, 3], [800, 2], [390, 1]] as const) {
+			await page.setViewportSize({ width, height: 800 });
+			const layout = await dialog.evaluate((element) => {
+				const content = element as HTMLElement;
+				const cards = [...content.querySelectorAll<HTMLElement>('.ability-card')];
+				const rects = cards.map((card) => card.getBoundingClientRect());
+				return {
+					columnCount: new Set(rects.map((rect) => Math.round(rect.left))).size,
+					horizontalOverflow: content.scrollWidth > content.clientWidth || document.documentElement.scrollWidth > document.documentElement.clientWidth,
+					cardsOverlap: rects.some((a, i) => rects.slice(i + 1).some((b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom)),
+					nameAndLevelOverlap: cards.some((card) => {
+						const name = card.querySelector('.ability-name')!.getBoundingClientRect();
+						const level = card.querySelector('.ability-level')!.getBoundingClientRect();
+						return name.right > level.left && name.left < level.right && name.bottom > level.top && name.top < level.bottom;
+					})
+				};
+			});
+			expect(layout).toEqual({ columnCount: columns, horizontalOverflow: false, cardsOverlap: false, nameAndLevelOverlap: false });
+		}
+		await page.setViewportSize({ width: 1280, height: 800 });
 		const beforeAbilityUpgrade = (await relayState(page)).state.published.filter((event) => event.kind === WORLD_STATE_KIND && event.pubkey === pubkey).length;
 		await page.clock.runFor(1_001);
 		const upgradedCard = dialog.locator('.ability-card').first();
@@ -242,7 +268,11 @@ test.describe('Relay startup', () => {
 		await expect(dialog).not.toContainText('強化後');
 		await expect(dialog).not.toContainText('normal clear');
 		await expect(dialog).not.toContainText('Root Point');
-		await dialog.getByRole('button', { name: 'Lv2へ強化' }).first().click();
+		await page.keyboard.press('Tab');
+		for (let index = 0; index < 12 && !(await upgradeButton.evaluate((button) => document.activeElement === button)); index++) await page.keyboard.press('Tab');
+		await expect(upgradeButton).toBeFocused();
+		await expect(upgradeButton).toHaveCSS('outline-style', 'solid');
+		await page.keyboard.press('Enter');
 		await expect(dialog).toContainText('9 pt');
 		await expect.poll(async () => (await relayState(page)).state.published.filter((event) => event.kind === WORLD_STATE_KIND && event.pubkey === pubkey).length).toBeGreaterThan(beforeAbilityUpgrade);
 		await expect(dialog.locator('.level-up-badge')).toHaveCount(1);
@@ -291,7 +321,7 @@ test.describe('Relay startup', () => {
 		await expect(inference).toContainText('1.90');
 		await expect(inference).toContainText('+0.10 pt/分');
 		await expect(inference.locator('.cost')).toContainText('2 pt');
-		await inference.getByRole('button', { name: 'Lv11へ強化' }).click();
+		await inference.getByRole('button', { name: '推論効率をLv11へ強化' }).click();
 		await expect(inference).toContainText('2.00');
 		await expect(inference.locator('.cost')).toContainText('2 pt');
 		await expect.poll(() => readRelayGameState(page)).toMatchObject({ points: 8, abilities: { inferenceEfficiency: 11 } });
@@ -319,8 +349,38 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '13,3');
 		await page.getByRole('button', { name: '能力強化端末' }).click();
 		const dialog = page.getByRole('dialog', { name: '能力強化' });
-		await expect(dialog.getByRole('button', { name: '最大Lv' })).toHaveCount(3);
-		for (const button of await dialog.getByRole('button', { name: '最大Lv' }).all()) await expect(button).toBeDisabled();
+		await expect(dialog.locator('.max-level-status')).toHaveCount(3);
+		await expect(dialog).not.toContainText('必要ポイント');
+		for (const label of ['推論効率', 'コンテキスト容量', 'ハルシネーション抑制']) {
+			const button = dialog.getByRole('button', { name: `${label}は最大レベルです` });
+			await expect(button).toBeDisabled();
+			await expect(button).toHaveAttribute('aria-label', `${label}は最大レベルです`);
+		}
+	});
+
+	test('disables ability upgrades when the required points are unavailable', async ({ page }) => {
+		const startTime = Date.now();
+		const secret = fixtureSecret(19);
+		const pubkey = getPublicKey(secret);
+		await page.clock.install({ time: startTime });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { primaryEvents: testEvents(startTime) });
+		await seedRelayAccount(page, secret, pubkey, startTime + 7 * 24 * 60 * 60 * 1000, 0);
+		await page.goto('/');
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
+		const nearby = finalizeEvent(buildWorldStateEventTemplate({
+			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 13, y: 3 }, slot: 1,
+			createdAt: Math.floor(await page.evaluate(() => Date.now()) / 1000)
+		}), secret);
+		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), nearby);
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '13,3');
+		await page.getByRole('button', { name: '能力強化端末' }).click();
+		const dialog = page.getByRole('dialog', { name: '能力強化' });
+		const inference = dialog.locator('.ability-card').first();
+		await expect(inference.locator('.cost')).toContainText('ポイント不足');
+		await expect(inference.locator('.cost')).toContainText('1 pt');
+		await expect(inference.getByRole('button', { name: '推論効率をLv2へ強化' })).toBeDisabled();
 	});
 
 	test('routes self around fixed terminals and active participants', async ({ page }) => {
