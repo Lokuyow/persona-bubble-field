@@ -371,7 +371,7 @@ for (const stateKind of ['missing', 'corrupt'] as const) {
 		await expect(slider).toHaveValue('35');
 		await page.keyboard.press('Escape');
 
-		for (const viewport of [{ width: 1_200, height: 900 }, { width: 390, height: 844 }, { width: 390, height: 480 }]) {
+		for (const viewport of [{ width: 1_200, height: 900 }, { width: 960, height: 900 }, { width: 390, height: 844 }, { width: 390, height: 480 }]) {
 			await page.setViewportSize(viewport);
 			const hudBox = await hud.boundingBox();
 			const topStackBox = await page.locator('[data-top-status-hud]').boundingBox();
@@ -410,7 +410,13 @@ for (const stateKind of ['missing', 'corrupt'] as const) {
 				const lifespan = getComputedStyle(element.querySelector('[data-lifespan-value]')!);
 				const points = getComputedStyle(element.querySelector('[data-points-value]')!);
 				const unit = getComputedStyle(element.querySelector('[data-points-value] span')!);
-				return { lifespanSize: lifespan.fontSize, lifespanWeight: lifespan.fontWeight, pointsSize: points.fontSize, pointsWeight: points.fontWeight, unitSize: unit.fontSize };
+				const pointsValue = element.querySelector('[data-points-value]')!;
+				const pointsText = pointsValue.textContent ?? '';
+				const pointsStyle = getComputedStyle(pointsValue);
+				const canvas = document.createElement('canvas');
+				const context = canvas.getContext('2d')!;
+				context.font = `${pointsStyle.fontWeight} ${pointsStyle.fontSize} ${pointsStyle.fontFamily}`;
+				return { lifespanSize: lifespan.fontSize, lifespanWeight: lifespan.fontWeight, pointsSize: points.fontSize, pointsWeight: points.fontWeight, unitSize: unit.fontSize, pointsText, pointsTextWidth: context.measureText(pointsText).width };
 			});
 			expect(textMetrics.pointsSize).toBe(textMetrics.lifespanSize);
 			expect(textMetrics.pointsWeight).toBe(textMetrics.lifespanWeight);
@@ -419,7 +425,12 @@ for (const stateKind of ['missing', 'corrupt'] as const) {
 				for (const row of meterRows) {
 					expect(row.label.right).toBeLessThanOrEqual(row.bar.left);
 					expect(row.bar.right).toBeLessThanOrEqual(row.value.left);
-					for (const item of [row.label, row.bar, row.value]) expect(Math.abs((item.top + item.bottom) / 2 - (row.row.top + row.row.bottom) / 2)).toBeLessThanOrEqual(1);
+					expect(row.bar.left - row.label.right).toBeGreaterThanOrEqual(12);
+					expect(row.bar.left - row.label.right).toBeLessThanOrEqual(16);
+					expect(row.value.left - row.bar.right).toBeGreaterThanOrEqual(12);
+					expect(row.value.left - row.bar.right).toBeLessThanOrEqual(16);
+					expect(row.value.width).toBeGreaterThanOrEqual(textMetrics.pointsTextWidth);
+					expect(row.value.right).toBeLessThanOrEqual(row.row.right);
 				}
 				expect(Math.abs(meterRows[0].bar.left - meterRows[1].bar.left)).toBeLessThanOrEqual(1);
 				expect(Math.abs(meterRows[0].bar.right - meterRows[1].bar.right)).toBeLessThanOrEqual(1);

@@ -34,23 +34,25 @@
 </script>
 
 <section class="unified-status-hud" aria-label="寿命とポイント" data-unified-status-hud data-saved-points={points} data-maximum-lifespan-ms={maximumLifespanMs} data-tag-game-projection={tagGameProjection ? 'true' : undefined}>
-	<div class="meter-row lifespan-row">
-		<div class="meter-heading">
-			<span class="meter-label"><Heart aria-hidden="true" />寿命</span>
-			<strong class="lifespan-value" data-lifespan-value>{lifespanText}</strong>
+	<div class="meter-grid">
+		<div class="meter-row lifespan-row">
+			<div class="meter-heading">
+				<span class="meter-label"><Heart aria-hidden="true" />寿命</span>
+				<strong class="lifespan-value" data-lifespan-value>{lifespanText}</strong>
+			</div>
+			<Meter.Root class="status-meter lifespan-meter" value={lifespanValue} min={0} max={maximumLifespanMs} aria-label="寿命" aria-valuetext={lifespanAriaValue} data-lifespan-meter data-meter-value={lifespanValue}>
+				<div class="meter-fill lifespan-fill" style={`width:${maximumLifespanMs > 0 ? lifespanValue / maximumLifespanMs * 100 : 0}%`}></div>
+			</Meter.Root>
 		</div>
-		<Meter.Root class="status-meter lifespan-meter" value={lifespanValue} min={0} max={maximumLifespanMs} aria-label="寿命" aria-valuetext={lifespanAriaValue} data-lifespan-meter data-meter-value={lifespanValue}>
-			<div class="meter-fill lifespan-fill" style={`width:${maximumLifespanMs > 0 ? lifespanValue / maximumLifespanMs * 100 : 0}%`}></div>
-		</Meter.Root>
-	</div>
-	<div class="meter-row points-row">
-		<div class="meter-heading">
-			<span class="meter-label"><Wallet aria-hidden="true" />ポイント</span>
-			<strong class="points-value" data-points-value>{formattedPoints}<span>pt</span></strong>
+		<div class="meter-row points-row">
+			<div class="meter-heading">
+				<span class="meter-label"><Wallet aria-hidden="true" />ポイント</span>
+				<strong class="points-value" data-points-value>{formattedPoints}<span>pt</span></strong>
+			</div>
+			<Meter.Root class="status-meter points-meter" value={pointValue} min={0} max={STATUS_HUD_POINTS_MAX} aria-label="ポイント" aria-valuetext={`${formattedPoints}pt、${STATUS_HUD_POINTS_MAX.toLocaleString('en-US')}ptまで`} data-points-meter data-meter-value={pointValue}>
+				<div class="meter-fill points-fill" style={`width:${pointValue / STATUS_HUD_POINTS_MAX * 100}%`}></div>
+			</Meter.Root>
 		</div>
-		<Meter.Root class="status-meter points-meter" value={pointValue} min={0} max={STATUS_HUD_POINTS_MAX} aria-label="ポイント" aria-valuetext={`${formattedPoints}pt、${STATUS_HUD_POINTS_MAX.toLocaleString('en-US')}ptまで`} data-points-meter data-meter-value={pointValue}>
-			<div class="meter-fill points-fill" style={`width:${pointValue / STATUS_HUD_POINTS_MAX * 100}%`}></div>
-		</Meter.Root>
 	</div>
 	{#if tagGameProjection && (tagGameProjection.confirmedLossNotSavedMs > 0 || tagGameProjection.predictedLossMs > 0 || tagGameProjection.calamityRateActive)}
 		<div class="projection-row lifespan-projection" data-tag-game-projection-row="lifespan">
@@ -93,6 +95,7 @@
 		gap: 6px;
 
 		.meter-row { min-width: 0; display: grid; gap: 4px; }
+		.meter-grid { display: grid; gap: 6px; min-width: 0; }
 		.meter-heading { min-width: 0; display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 		.meter-label { display: inline-flex; align-items: center; gap: 6px; color: rgba(226, 230, 255, .82); font-size: .9em; font-weight: 700; }
 		.meter-label :global(svg) { width: 15px; height: 15px; }
@@ -111,17 +114,19 @@
 		.mending-rate { min-width: 0; display: flex; justify-content: space-between; gap: 12px; color: rgba(226, 230, 255, .86); font-size: .82em; font-weight: 600; }
 
 		@media (min-width: 960px) {
-			.meter-row { grid-template-columns: 112px minmax(0, 1fr) 160px; align-items: center; column-gap: 14px; row-gap: 0; }
+			.meter-grid { grid-template-columns: max-content minmax(0, 1fr) max-content; }
+			.meter-row { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: center; column-gap: 14px; row-gap: 0; }
 			.meter-heading { display: contents; }
-			.meter-label { grid-column: 1; grid-row: 1; align-self: center; white-space: nowrap; }
-			.meter-row :global(.status-meter) { grid-column: 2; grid-row: 1; align-self: center; width: 100%; }
-			.lifespan-value, .points-value { grid-column: 3; grid-row: 1; align-self: center; text-align: right; white-space: nowrap; }
+			.meter-label { grid-column: 1; align-self: center; white-space: nowrap; }
+			.meter-row :global(.status-meter) { grid-column: 2; align-self: center; width: 100%; }
+			.lifespan-value, .points-value { grid-column: 3; align-self: center; text-align: right; white-space: nowrap; }
 		}
 
 		@media (max-width: 700px) {
 			padding: 7px 10px;
 			font-size: 11px;
 			gap: 5px;
+			.meter-grid { gap: 5px; }
 			:global(.status-meter) { height: 12px; }
 		}
 	}
