@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expectIconCloseButton } from './helpers/iconCloseButton';
 import { finalizeEvent, getPublicKey, type Event as NostrEvent } from 'nostr-tools/pure';
 import { buildTagGameActionTemplate, createTagGameSchedule, finalizeTagGameState, parseTagGameActionEvent, parseTagGameEvent, TAG_GAME_KIND, TAG_GAME_TRANSFER_COOLDOWN_MS, type TagGameState } from '../../src/lib/tagGame';
 import { MENDING_TERMINAL, TAG_GAME_TERMINAL } from '../../src/lib/fieldFacilities';
@@ -153,6 +154,7 @@ async function openTagGameTerminal(page: Page): Promise<void> {
 	if (await page.locator('[data-cell-action="tag-game-terminal"]').count()) await page.locator('[data-cell-action="tag-game-terminal"]').click();
 	if (await page.getByRole('dialog', { name: '鬼ごっこ' }).count() === 0) throw new Error(`Tag-game terminal did not open from self position ${position}.`);
 	await expect(page.getByRole('dialog', { name: '鬼ごっこ' })).toBeVisible();
+	await expectIconCloseButton(page.getByRole('dialog', { name: '鬼ごっこ' }).getByRole('button', { name: '閉じる' }), '閉じる');
 }
 
 test('three Fake Relay clients create, join, consent, start, touch, and settle through the field UI', async ({ browser }) => {
@@ -527,6 +529,7 @@ test('keeps join actions primary and equally emphasized when multiple tag-game l
 		expect(joinBackgrounds[0]).toBe(joinBackgrounds[1]);
 		for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
 			await joinerPage.setViewportSize(viewport);
+			await expectIconCloseButton(dialog.getByRole('button', { name: '閉じる' }), '閉じる');
 			await expectButtonShape(joinButtons.nth(0));
 			await expectButtonShape(joinButtons.nth(1));
 			await expect(joinButtons.nth(0)).toBeVisible();

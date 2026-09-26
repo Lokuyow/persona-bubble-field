@@ -1,5 +1,6 @@
 <script lang="ts">
 	import ActionButton from '$lib/ActionButton.svelte';
+	import X from '~icons/tabler/x';
 	type Props = Readonly<{
 		open: boolean;
 		mode: 'rules' | 'join-confirmation';
@@ -18,7 +19,10 @@
 	{#if open}
 		<div class="cooperation-defection-rules-overlay" role="presentation">
 			<div class="cooperation-defection-rules-content" role="dialog" aria-modal="true" aria-labelledby="cooperation-defection-rules-title" tabindex="-1">
-				<h2 id="cooperation-defection-rules-title">{isConfirmation ? '協力と抜け駆けに参加しますか？' : '協力と抜け駆けのルール'}</h2>
+				<header class="cooperation-defection-rules-header">
+					<h2 id="cooperation-defection-rules-title">{isConfirmation ? '協力と抜け駆けに参加しますか？' : '協力と抜け駆けのルール'}</h2>
+					{#if !isConfirmation}<ActionButton variant="tertiary" class="action-button-close" type="button" aria-label="閉じる" onclick={() => onOpenChange(false)}><X aria-hidden="true" /></ActionButton>{/if}
+				</header>
 				<p class="cooperation-defection-rules-description">
 					{isConfirmation ? '参加する前に、次のことを確認してください。' : '1グループ3〜6人、全3ラウンドです。'}
 				</p>
@@ -71,9 +75,6 @@
 							</ul>
 						</section>
 					</div>
-					<div class="cooperation-defection-dialog-actions">
-						<ActionButton variant="tertiary" type="button" onclick={() => onOpenChange(false)}>閉じる</ActionButton>
-					</div>
 				{/if}
 			</div>
 		</div>
@@ -81,8 +82,9 @@
 
 <style>
 	:global(.cooperation-defection-rules-overlay) { position: fixed; inset: 0; z-index: 100; background: rgba(20, 9, 24, .68); backdrop-filter: blur(2px); }
-	:global(.cooperation-defection-rules-content) { position: fixed; top: 50%; left: 50%; z-index: 101; display: grid; gap: 14px; width: min(calc(100vw - 28px), 560px); max-height: calc(100svh - 28px); overflow: auto; padding: clamp(18px, 4vw, 28px); border: 1px solid rgba(141, 70, 146, .55); border-radius: 16px; background: #fffaff; color: #3d3144; box-shadow: 0 16px 45px rgba(45, 20, 48, .28); transform: translate(-50%, -50%); }
-	:global(.cooperation-defection-rules-content h2) { margin: 0; font-size: clamp(1.3rem, 5vw, 1.8rem); }
+	:global(.cooperation-defection-rules-content) { position: fixed; top: 50%; left: 50%; z-index: 101; display: grid; align-content: start; gap: 14px; width: min(calc(100vw - 28px), 560px); max-height: calc(100svh - 28px); overflow: auto; padding: clamp(18px, 4vw, 28px); border: 1px solid rgba(141, 70, 146, .55); border-radius: 16px; background: #fffaff; color: #3d3144; box-shadow: 0 16px 45px rgba(45, 20, 48, .28); transform: translate(-50%, -50%); }
+	.cooperation-defection-rules-header { position: sticky; top: calc(0px - clamp(18px, 4vw, 28px)); z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: calc(0px - clamp(18px, 4vw, 28px)) calc(0px - clamp(18px, 4vw, 28px)) 0; padding: clamp(18px, 4vw, 28px); background: #fffaff; }
+	.cooperation-defection-rules-header h2 { margin: 0; font-size: clamp(1.3rem, 5vw, 1.8rem); }
 	.cooperation-defection-rules-description { margin: 0; color: #665b69; line-height: 1.5; }
 	.cooperation-defection-rules-body { display: grid; gap: 12px; line-height: 1.55; }
 	.cooperation-defection-rules-body p, .cooperation-defection-rules-body ul { margin: 0; }
@@ -92,10 +94,10 @@
 	.cooperation-defection-warning { display: grid; gap: 8px; padding: 14px; border: 1px solid #c46b75; border-radius: 10px; background: #fff0f1; color: #6f2430; line-height: 1.5; }
 	.cooperation-defection-dialog-actions { display: grid; gap: 9px; }
 	.cooperation-defection-dialog-actions :global(.action-button) { width: 100%; min-height: 44px; }
-	:global(.cooperation-defection-rules-content button:focus-visible) { outline: 3px solid var(--color-focus-ring); outline-offset: 3px; }
+	:global(.cooperation-defection-rules-content button:focus-visible:not(.action-button-close)) { outline: 3px solid var(--color-focus-ring); outline-offset: 3px; }
 	@media (min-width: 701px) {
 		:global(.cooperation-defection-rules-content) { font-size: 16px; }
-		:global(.cooperation-defection-rules-content h2) { font-size: 2rem; }
+		.cooperation-defection-rules-header h2 { font-size: 2rem; }
 		.cooperation-defection-rules-body h3 { font-size: 1.1rem; }
 		:global(.cooperation-defection-dialog-actions button) { font-size: 1rem; }
 	}

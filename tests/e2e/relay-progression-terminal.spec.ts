@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expectIconCloseButton } from './helpers/iconCloseButton';
 import { HDKey } from '@scure/bip32';
 import { entropyToMnemonic, mnemonicToSeedSync } from '@scure/bip39';
 import { wordlist as englishWordlist } from '@scure/bip39/wordlists/english.js';
@@ -106,7 +107,8 @@ test.describe('Relay startup', () => {
 		await expect(collectButton).toHaveAttribute('data-action-variant', 'primary');
 		await expect(activeDialog.locator('[data-action-variant="primary"]')).toHaveCount(1);
 		await expect(activeDialog.getByRole('button', { name: '詳細を見る' })).toHaveAttribute('data-action-variant', 'tertiary');
-		await expect(activeDialog.getByRole('button', { name: '閉じる', exact: true })).toHaveClass(/action-button-tertiary/);
+		const closeButton = activeDialog.getByRole('button', { name: '閉じる', exact: true });
+		await expectIconCloseButton(closeButton, '閉じる');
 		await expect(collectButton.locator('svg')).toHaveCount(1);
 		await expect(collectButton.locator('svg path')).toHaveAttribute('d', /^M4 20h16m-8-6V4/);
 		await expect(activeDialog.locator('.mending-success-feedback')).toHaveCount(0);
@@ -135,6 +137,7 @@ test.describe('Relay startup', () => {
 		const originalViewport = page.viewportSize() ?? { width: 1280, height: 720 };
 		for (const [width, height, expectedColumns] of [[1280, 800, 2], [390, 640, 1]] as const) {
 			await page.setViewportSize({ width, height });
+			if (width === 390) await expectIconCloseButton(closeButton, '閉じる');
 			const visibleButtonStyles = await activeDialog.evaluate((dialog) => {
 				const collect = getComputedStyle(dialog.querySelector('.collect-button')!);
 				const neutral = getComputedStyle(dialog.querySelector('.details-toggle')!);
@@ -151,13 +154,13 @@ test.describe('Relay startup', () => {
 				const status = dialog.querySelector('.status-group')!.getBoundingClientRect();
 				const button = dialog.querySelector('.collect-button')!.getBoundingClientRect();
 				const details = dialog.querySelector('.details-section')!.getBoundingClientRect();
-				const close = dialog.querySelector('.terminal-secondary-action')!.getBoundingClientRect();
+				const close = dialog.querySelector('.action-button-close')!.getBoundingClientRect();
 				return {
 					columns: new Set(cardRects.map((rect) => Math.round(rect.left))).size,
 					cardsOverlap: cardRects[0].right > cardRects[1].left && cardRects[0].left < cardRects[1].right && cardRects[0].bottom > cardRects[1].top && cardRects[0].top < cardRects[1].bottom,
 					cardsSameHeight: Math.abs(cardRects[0].height - cardRects[1].height) < 1,
 					horizontalOverflow: dialog.scrollWidth > dialog.clientWidth || document.documentElement.scrollWidth > document.documentElement.clientWidth,
-					dialogOrder: resultList.bottom <= status.top && status.bottom <= button.top && button.bottom <= details.top && details.bottom <= close.top,
+					dialogOrder: close.top <= resultList.top && resultList.bottom <= status.top && status.bottom <= button.top && button.bottom <= details.top,
 					buttonFillsRow: Math.abs(button.width - resultList.width) < 1,
 					buttonHeight: button.height,
 					buttonWithinViewport: button.left >= 0 && button.right <= innerWidth
@@ -189,8 +192,7 @@ test.describe('Relay startup', () => {
 		}));
 		expect(detailLayout.horizontalOverflow).toBe(false);
 		expect(detailLayout.verticalOverflow).toBe(true);
-		await activeDialog.getByRole('button', { name: '閉じる', exact: true }).scrollIntoViewIfNeeded();
-		await expect(activeDialog.getByRole('button', { name: '閉じる', exact: true })).toBeVisible();
+		await expect(closeButton).toBeInViewport({ ratio: 1 });
 		await page.setViewportSize(originalViewport);
 		await expect(page.locator('[data-unified-status-hud] [data-mending-status]')).toHaveAttribute('aria-label', '作業中');
 		await expect(page.locator('[data-unified-status-hud] [data-mending-status]')).toHaveAttribute('data-mending-icon', 'tool');
@@ -479,10 +481,16 @@ test.describe('Relay startup', () => {
 		await expect(dialog.locator('[data-action-variant="primary"]')).toHaveCount(3);
 		await expect(dialog.locator('.upgrade-button')).toHaveCount(3);
 		await expect(dialog.locator('.upgrade-button[data-action-variant="primary"]')).toHaveCount(3);
-		const enabledUpgradeColors = await dialog.locator('.upgrade-button').evaluateAll((buttons) => buttons.map((button) => getComputedStyle(button).backgroundColor));
-		expect(new Set(enabledUpgradeColors).size).toBe(1);
+		const viewportSize = page.viewportSize();
+		expect(viewportSize).not.toBeNull();
+		if (viewportSize) await page.mouse.move(viewportSize.width - 1, viewportSize.height - 1);
+		await expect.poll(async () => {
+			const colors = await dialog.locator('.upgrade-button').evaluateAll((buttons) => buttons.map((button) => getComputedStyle(button).backgroundColor));
+			return new Set(colors).size;
+		}).toBe(1);
 		for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
 			await page.setViewportSize(viewport);
+			await expectIconCloseButton(dialog.getByRole('button', { name: '閉じる' }), '閉じる');
 			for (const card of await dialog.locator('.ability-card').all()) {
 				const button = card.locator('.upgrade-button');
 				await expect(button).toBeEnabled();
@@ -586,6 +594,7 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '13,3');
 		await page.getByRole('button', { name: '能力強化端末' }).click();
 		const dialog = page.getByRole('dialog', { name: '能力強化' });
+		await expectIconCloseButton(dialog.getByRole('button', { name: '閉じる' }), '閉じる');
 		const upgrades = dialog.locator('.upgrade-button');
 		await expect(upgrades).toHaveCount(3);
 		await expect(dialog.locator('.upgrade-button[data-action-variant="primary"]')).toHaveCount(3);

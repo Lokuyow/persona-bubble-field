@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { Dialog, ScrollArea } from 'bits-ui';
+	import X from '~icons/tabler/x';
 	import { getCharacterById } from '$lib/character';
 	import CharacterAvatar from './CharacterAvatar.svelte';
 
@@ -24,6 +25,7 @@
 			<Dialog.Overlay class="profile-dialog-overlay" />
 			<Dialog.Content class="profile-dialog-content" preventScroll={false} {onCloseAutoFocus}>
 				<div class="profile-dialog-header">
+					<div class="profile-dialog-close-row"><Dialog.Close class="action-button action-button-tertiary action-button-close" aria-label="閉じる"><X aria-hidden="true" /></Dialog.Close></div>
 					<CharacterAvatar class="profile-dialog-avatar" {character} />
 					<div>
 						<Dialog.Title>{character.name}</Dialog.Title>
@@ -40,9 +42,6 @@
 					</ScrollArea.Scrollbar>
 				</ScrollArea.Root>
 
-				<footer class="profile-dialog-footer">
-					<Dialog.Close class="profile-dialog-close">閉じる</Dialog.Close>
-				</footer>
 			</Dialog.Content>
 		</Dialog.Portal>
 	</Dialog.Root>
@@ -88,6 +87,8 @@
 		flex: 0 0 auto;
 		text-align: center;
 	}
+
+	.profile-dialog-close-row { display: flex; width: 100%; justify-content: flex-end; }
 
 	.profile-dialog-header :global([data-dialog-title]) {
 		margin: 0;
@@ -160,30 +161,6 @@
 		background: #8fa8a0;
 	}
 
-	.profile-dialog-footer {
-		display: flex;
-		flex: 0 0 auto;
-		justify-content: flex-end;
-	}
-
-	:global(.profile-dialog-close) {
-		min-height: 42px;
-		padding: 0 18px;
-		border: 1px solid rgba(57, 67, 64, 0.2);
-		border-radius: 999px;
-		background: #d9edf0;
-		box-shadow: 0 4px 10px rgba(58, 70, 61, 0.14);
-		color: #374345;
-		font: inherit;
-		font-size: 13px;
-		font-weight: 900;
-		letter-spacing: 0.04em;
-	}
-
-	:global(.profile-dialog-close:focus-visible) {
-		outline: 3px solid var(--color-focus-ring);
-		outline-offset: 2px;
-	}
 
 	:global(.visually-hidden) {
 		position: absolute;
