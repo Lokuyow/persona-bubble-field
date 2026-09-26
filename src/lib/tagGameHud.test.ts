@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { createTagGameSchedule, type TagGameState } from './tagGame';
-import { canLeaveTagGame, formatTagGameRemainingTime, isOrganizerConfirmedTagGameEffectCurrent, projectTagGameHud, tagGameTransferStatus } from './tagGameHud';
+import { createTagGameSchedule, tagGameScheduledEffectAt, type TagGameState } from './tagGame';
+import { canLeaveTagGame, formatTagGameRemainingTime, isTagGameScheduledEffectActive, projectTagGameHud, tagGameTransferStatus } from './tagGameHud';
 import { createInitialPersonaGameState } from './personaGameState';
 import { createMendingJob, projectMending } from './mending';
 import type { RootBuild } from './rootProgression';
@@ -52,7 +52,7 @@ describe('tag-game HUD projection', () => {
 		expect(projected.calamityRateActive).toBe(true);
 	});
 
-	it('does not apply another game receipt, project another player, or advance through a stale scheduled effect', () => {
+	it('uses the seed schedule through an unconfirmed ordinary effect switch', () => {
 		const game = running('benefit');
 		const mismatchedLock = projectTagGameHud({ ...baseInput(game), localLockGameId: `${OTHER}:100:${'d'.repeat(64)}` });
 		expect(mismatchedLock.confirmedPointsNotSaved).toBe(100);
@@ -64,9 +64,14 @@ describe('tag-game HUD projection', () => {
 		const staleGame = { ...game, settledAtMs: boundaryMs - 1_000 };
 		const staleEffect = projectTagGameHud({ ...baseInput(game), nowMs: boundaryMs + 1_000, game: staleGame });
 		expect(staleEffect.predictedPoints).toBe(50);
+		expect(staleEffect.predictedLossMs).toBe(3_600_000);
 		expect(staleEffect.benefitRateActive).toBe(false);
-		expect(isOrganizerConfirmedTagGameEffectCurrent(staleGame, boundaryMs + 1_000)).toBe(false);
-		expect(isOrganizerConfirmedTagGameEffectCurrent({ ...staleGame, settledAtMs: boundaryMs }, boundaryMs + 1_000)).toBe(false);
+		expect(staleEffect.calamityRateActive).toBe(true);
+		expect(tagGameScheduledEffectAt(staleGame, boundaryMs + 1_000)).toBe('calamity');
+		expect(isTagGameScheduledEffectActive(staleGame, boundaryMs + 1_000)).toBe(true);
+		const settledAtSwitch = projectTagGameHud({ ...baseInput(game), game: { ...staleGame, settledAtMs: boundaryMs }, nowMs: boundaryMs + 1_000 });
+		expect(settledAtSwitch.predictedPoints).toBe(0);
+		expect(settledAtSwitch.predictedLossMs).toBe(3_600_000);
 	});
 
 	it('stops rate and unconfirmed accumulation during holder challenges and after game time reaches its limit', () => {

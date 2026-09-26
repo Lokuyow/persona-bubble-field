@@ -2,6 +2,8 @@ import { finalizeEvent, getPublicKey } from 'nostr-tools/pure';
 import { describe, expect, it } from 'vitest';
 import {
 	TAG_GAME_ACTION_KIND,
+	TAG_GAME_POSITION_PROOF_REFRESH_MAX_ATTEMPTS,
+	TAG_GAME_POSITION_PROOF_REFRESH_RETRY_MS,
 	TAG_GAME_BENEFIT_POINTS_PER_SECOND,
 	TAG_GAME_GAME_MS,
 	TAG_GAME_INDEX,
@@ -10,6 +12,7 @@ import {
 	TAG_GAME_PRECHECK_TIMEOUT_MS,
 	TAG_GAME_RESPONSE_TIMEOUT_MS,
 	buildTagGameActionTemplate,
+	canRetryTagGamePositionProofRefresh,
 	buildTagGameActionFilter,
 	buildTagGameFilter,
 	buildTagGameRecoveryFilter,
@@ -26,6 +29,7 @@ import {
 	parseTagGameEvent,
 	tagGameHolderResponseState,
 	tagGameEffectSafetyCutoffMs,
+	latestTagGameHolderActivityAt,
 	isValidTagGameHolderResponse,
 	tagGamePredictedRemainingLifespanMinutes,
 	cumulativeTagGameSettlement,
@@ -160,6 +164,21 @@ describe('player-hosted tag-game protocol and rules', () => {
 		expect(isValidTagGameHolderResponse({ state, pubkey: HOST_PUBKEY, runNumber: 7, challengeId: 'challenge-id', createdAtSeconds: 101, receivedAtMs: 101_100 })).toBe(true);
 		expect(isValidTagGameHolderResponse({ state, pubkey: HOST_PUBKEY, runNumber: 7, challengeId: 'old-challenge', createdAtSeconds: 101, receivedAtMs: 101_100 })).toBe(false);
 		expect(isValidTagGameHolderResponse({ state, pubkey: HOST_PUBKEY, runNumber: 6, challengeId: 'challenge-id', createdAtSeconds: 101, receivedAtMs: 101_100 })).toBe(false);
+	});
+
+	it('keeps a validated precheck response as the holder activity baseline independent of state publishing', () => {
+		const at = latestTagGameHolderActivityAt({ nowMs: 40_000, startedAtMs: 1_000, transferAtMs: 1_000,
+			persistedResponseAtMs: null, worldActivityAtMs: 0, precheckResponseAtMs: null, localResponseAtMs: 25_000 });
+		expect(at).toBe(25_000);
+		expect(tagGameEffectSafetyCutoffMs(at, 100_000)).toBe(48_000);
+	});
+
+	it('bounds proof-refresh retries and aggregates in-flight requests', () => {
+		expect(canRetryTagGamePositionProofRefresh({ attempts: 0, lastAttemptAtMs: 0, nowMs: 1_000, inFlight: false })).toBe(true);
+		expect(canRetryTagGamePositionProofRefresh({ attempts: 1, lastAttemptAtMs: 2_000, nowMs: 2_000 + TAG_GAME_POSITION_PROOF_REFRESH_RETRY_MS - 1, inFlight: false })).toBe(false);
+		expect(canRetryTagGamePositionProofRefresh({ attempts: 1, lastAttemptAtMs: 2_000, nowMs: 2_000 + TAG_GAME_POSITION_PROOF_REFRESH_RETRY_MS, inFlight: false })).toBe(true);
+		expect(canRetryTagGamePositionProofRefresh({ attempts: 1, lastAttemptAtMs: 0, nowMs: 10_000, inFlight: true })).toBe(false);
+		expect(canRetryTagGamePositionProofRefresh({ attempts: TAG_GAME_POSITION_PROOF_REFRESH_MAX_ATTEMPTS, lastAttemptAtMs: 0, nowMs: 10_000, inFlight: false })).toBe(false);
 	});
 
 	it('confirms a normal participant leave without interrupting the remaining game', () => {

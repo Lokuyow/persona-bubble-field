@@ -468,8 +468,66 @@ describe('supplemental realtime event lifecycle', () => {
 		onBootstrapControl: vi.fn(),
 		onLiveControl: vi.fn()
 	});
-	const tagGameAction = () => finalizeEvent({ kind: TAG_GAME_ACTION_KIND, created_at: TIME,
-		tags: [['e', 'c'.repeat(64)], ['d', 'host:run:game'], ['r', '1'], ['nonce', 'a'.repeat(32)]], content: '{"action":"join"}' }, AUTHOR) as import('nostr-tools/pure').VerifiedEvent;
+	const tagGameAction = (nonce = 'a'.repeat(32)) => finalizeEvent({ kind: TAG_GAME_ACTION_KIND, created_at: TIME,
+		tags: [['e', 'c'.repeat(64)], ['d', 'host:run:game'], ['r', '1'], ['nonce', nonce]], content: '{"action":"join"}' }, AUTHOR) as import('nostr-tools/pure').VerifiedEvent;
+
+	it('starts realtime when one Relay reaches EOSE and keeps the other Relay live', async () => {
+		const f = fixture(2);
+		f.authorities[0].onRequest = (socket, request) => send(socket, 'EOSE', request[1]);
+		f.authorities[1].onRequest = (socket, request) => { if (kind(request) !== 7070) send(socket, 'EOSE', request[1]); };
+		await f.start();
+		const onSupplementalEvent = vi.fn();
+		const pending = f.transport.startRealtime({ ...realtimeInput([]), supplementalFilters: [{ kinds: [TAG_GAME_ACTION_KIND], '#e': [f.channel.id] }], onSupplementalEvent });
+		await vi.advanceTimersByTimeAsync(30);
+		const started = await pending;
+		expect(started.status).toBe('active');
+		expect(started.relays.find((relay) => relay.relayUrl === f.authorities[1].url)?.status).toBe('pending');
+		const remainingRequest = f.authorities[1].requests.findLast((request) => filters(request).some((filter) => (filter.kinds as number[] | undefined)?.includes(TAG_GAME_ACTION_KIND)))!;
+		const action = tagGameAction();
+		send(f.authorities[1].latestSocket(), 'EVENT', remainingRequest[1], action);
+		expect(onSupplementalEvent).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: action.id }));
+		send(f.authorities[1].latestSocket(), 'EOSE', remainingRequest[1]);
+		expect(f.transport.getDiagnostics().realtime.relays.find((relay) => relay.relayUrl === f.authorities[1].url)?.status).toBe('eose');
+	});
+
+	it('does not reuse a disconnected Relay EOSE before the reconnect REQ reaches EOSE', async () => {
+		const f = fixture(1);
+		const relay = f.authorities[0];
+		relay.onRequest = (socket, request) => send(socket, 'EOSE', request[1]);
+		await f.start();
+		const initial = f.transport.startRealtime({ ...realtimeInput([]), supplementalFilters: [{ kinds: [TAG_GAME_ACTION_KIND], '#e': [f.channel.id] }] });
+		await vi.advanceTimersByTimeAsync(30);
+		await initial;
+		const hasTagGameFilter = (request: WireRequest) => filters(request).some((filter) => (filter.kinds as number[] | undefined)?.includes(TAG_GAME_ACTION_KIND));
+		expect(relay.requests.filter(hasTagGameFilter)).toHaveLength(1);
+		relay.onRequest = (socket, request) => { if (!hasTagGameFilter(request)) send(socket, 'EOSE', request[1]); };
+		relay.latestSocket().close({ code: 1001, reason: 'realtime reconnect', wasClean: true });
+		await vi.advanceTimersByTimeAsync(5_000);
+		const currentRealtimeRequest = relay.requests.filter(hasTagGameFilter).at(-1)!;
+		expect(relay.requests.filter(hasTagGameFilter)).toHaveLength(2);
+		expect(f.transport.getDiagnostics().realtime.relays[0].status).toBe('pending');
+		relay.onPublish = () => {};
+		const beforeEose = f.transport.publishRealtimeTracked(tagGameAction());
+		await vi.advanceTimersByTimeAsync(5);
+		let earlyResult: boolean | null = null;
+		void beforeEose.firstSuccess.then((result) => { earlyResult = result; });
+		send(relay.latestSocket(), 'OK', (relay.messages.findLast((message) => message[0] === 'EVENT' && (message[1] as Event).kind === TAG_GAME_ACTION_KIND)![1] as Event).id, true, '');
+		await vi.advanceTimersByTimeAsync(5);
+		expect(earlyResult).not.toBe(true);
+		send(relay.latestSocket(), 'EOSE', currentRealtimeRequest[1]);
+		expect(f.transport.getDiagnostics().realtime.relays[0].status).toBe('eose');
+		expect(earlyResult).not.toBe(true);
+		beforeEose.dispose();
+		expect(await beforeEose.firstSuccess).toBe(false);
+		await beforeEose.settled;
+		const afterEose = f.transport.publishRealtimeTracked(tagGameAction('b'.repeat(32)));
+		await vi.advanceTimersByTimeAsync(5);
+		const published = relay.messages.findLast((message) => message[0] === 'EVENT' && (message[1] as Event).kind === TAG_GAME_ACTION_KIND)![1] as Event;
+		send(relay.latestSocket(), 'OK', published.id, true, '');
+		await vi.advanceTimersByTimeAsync(5);
+		expect(await afterEose.firstSuccess).toBe(true);
+		afterEose.dispose();
+	});
 
 	it('settles a game publish at an absolute deadline after early success while retaining late relay outcomes', async () => {
 		const f = fixture(2);

@@ -24,6 +24,14 @@ export const TAG_GAME_TOUCH_EVIDENCE_WAIT_MS = 1_000;
 export const TAG_GAME_TOUCH_MAX_AGE_SECONDS = 10;
 export const TAG_GAME_TOUCH_FUTURE_SKEW_SECONDS = 2;
 export const TAG_GAME_TOUCH_QUEUE_MAX_MS = 3_000;
+export const TAG_GAME_POSITION_PROOF_REFRESH_RETRY_MS = 1_000;
+export const TAG_GAME_POSITION_PROOF_REFRESH_MAX_ATTEMPTS = 3;
+
+export function canRetryTagGamePositionProofRefresh(input: Readonly<{ attempts: number; lastAttemptAtMs: number; nowMs: number; inFlight: boolean }>): boolean {
+	return Number.isSafeInteger(input.attempts) && input.attempts >= 0 && Number.isSafeInteger(input.lastAttemptAtMs) && input.lastAttemptAtMs >= 0 &&
+		Number.isSafeInteger(input.nowMs) && input.nowMs >= 0 && !input.inFlight && input.attempts < TAG_GAME_POSITION_PROOF_REFRESH_MAX_ATTEMPTS &&
+		(input.attempts === 0 || input.nowMs - input.lastAttemptAtMs >= TAG_GAME_POSITION_PROOF_REFRESH_RETRY_MS);
+}
 
 export type TagGameTouchPositionProof = Readonly<{
 	worldStateEventId: string;
@@ -255,6 +263,25 @@ export function tagGameEffectSafetyCutoffMs(lastValidActivityAtMs: number, gameE
 	return Math.min(lastValidActivityAtMs + TAG_GAME_MAX_UNCONFIRMED_EFFECT_MS, gameEndsAtMs);
 }
 
+export function latestTagGameHolderActivityAt(input: Readonly<{
+	nowMs: number;
+	startedAtMs: number;
+	transferAtMs: number | null;
+	persistedResponseAtMs: number | null;
+	worldActivityAtMs: number;
+	precheckResponseAtMs: number | null;
+	localResponseAtMs: number | null;
+}>): number {
+	const values = [input.nowMs, input.startedAtMs, input.worldActivityAtMs,
+		...(input.transferAtMs === null ? [] : [input.transferAtMs]),
+		...(input.persistedResponseAtMs === null ? [] : [input.persistedResponseAtMs]),
+		...(input.precheckResponseAtMs === null ? [] : [input.precheckResponseAtMs]),
+		...(input.localResponseAtMs === null ? [] : [input.localResponseAtMs])];
+	if (!values.every((value) => Number.isSafeInteger(value) && value >= 0)) throw new TypeError('Invalid tag-game holder activity timestamp.');
+	return Math.min(input.nowMs, Math.max(input.startedAtMs, input.transferAtMs ?? 0, input.persistedResponseAtMs ?? 0,
+		input.worldActivityAtMs, input.precheckResponseAtMs ?? 0, input.localResponseAtMs ?? 0));
+}
+
 /** Allows a signed holder response to win after the stop state but before its timestamp update is confirmed. */
 export function isValidTagGameHolderResponse(input: Readonly<{
 	state: TagGameState;
@@ -300,6 +327,19 @@ export function createTagGameSchedule(seed: string): readonly Readonly<{ duratio
 			: (startWithBenefit ? calamities[(index - 1) / 2] : benefits[(index - 1) / 2])) * 1000,
 		effect: (index % 2 === 0 ? startWithBenefit : !startWithBenefit) ? 'benefit' : 'calamity'
 	}));
+}
+
+/** The running effect is derived from the signed start seed and time, not from a periodic state refresh. */
+export function tagGameScheduledEffectAt(state: TagGameState, atMs: number): 'benefit' | 'calamity' | null {
+	if (state.phase !== 'running' || !state.seed || state.seed.length > 256 || state.startedAt === undefined || state.endsAt === undefined ||
+		!Number.isSafeInteger(atMs) || atMs < state.startedAt * 1_000 || atMs >= state.endsAt * 1_000) return null;
+	const elapsed = atMs - state.startedAt * 1_000;
+	let boundary = 0;
+	for (const interval of createTagGameSchedule(state.seed)) {
+		boundary += interval.durationMs;
+		if (elapsed < boundary) return interval.effect;
+	}
+	return null;
 }
 
 export function cumulativeTagGameSettlement(state: TagGameState): Readonly<{ points: number; lifespanLossMs: number }> | null {

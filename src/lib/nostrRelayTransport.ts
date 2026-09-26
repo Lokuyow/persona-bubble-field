@@ -296,6 +296,10 @@ function isConnectionUnavailable(state: ConnectionState): boolean {
 	return state === 'error' || state === 'rejected';
 }
 
+function isRealtimeConnectionUnavailable(state: ConnectionState): boolean {
+	return isConnectionUnavailable(state) || state === 'waiting-for-retrying' || state === 'retrying';
+}
+
 function isInitialConnectionUnavailable(state: ConnectionState, requestSent: boolean): boolean {
 	return isConnectionUnavailable(state)
 		|| !requestSent && (state === 'waiting-for-retrying' || state === 'retrying');
@@ -450,7 +454,6 @@ export function createNostrRelayTransport(
 	let realtimeFilters: readonly Filter[] = [];
 	const realtimeSubIds = new Map<string, string>();
 	const realtimeSeenIds = new Set<string>();
-	const realtimeReadableRelays = new Set<string>();
 	const realtimeEchoWaiters = new Map<string, Set<(echoed: boolean) => void>>();
 	const readableRealtimeEchoWaiters = new Map<string, Set<(echoed: boolean) => void>>();
 	const stableTraceCursors = new Map<string, Map<string, number>>();
@@ -481,9 +484,13 @@ export function createNostrRelayTransport(
 				}
 			}
 		}
+		if (isRealtimeConnectionUnavailable(connectionState)) {
+			if (realtimeDiagnostics.relays.some((relay) => relay.relayUrl === canonical)) {
+				realtimeSubIds.delete(canonical);
+				updateRealtimeDiagnostic(canonical, { relayUrl: canonical, status: 'unavailable' });
+			}
+		}
 		if (!isConnectionUnavailable(connectionState)) return;
-		const realtimePair = realtimeDiagnostics.relays.find((relay) => relay.relayUrl === canonical);
-		if (realtimePair?.status === 'pending') updateRealtimeDiagnostic(canonical, { relayUrl: canonical, status: 'unavailable' });
 		const generation = traceGeneration;
 		const traceState = generation?.states.get(canonical);
 		if (!generation || !traceState) return;
@@ -816,8 +823,13 @@ export function createNostrRelayTransport(
 			...realtimeDiagnostics,
 			relays: realtimeDiagnostics.relays.map((relay) => relay.relayUrl === relayUrl ? { ...next } : relay)
 		};
-		if (next.status === 'eose') realtimeReadableRelays.add(relayUrl);
-		else realtimeReadableRelays.delete(relayUrl);
+		const hasReadableRelay = realtimeDiagnostics.relays.some((relay) => relay.status === 'eose' && realtimeSubIds.has(relay.relayUrl));
+		const hasPendingRelay = realtimeDiagnostics.relays.some((relay) => relay.status === 'pending');
+		realtimeDiagnostics = { ...realtimeDiagnostics, status: hasReadableRelay ? 'active' : hasPendingRelay ? 'initializing' : 'inactive' };
+	}
+
+	function realtimeRelayIsReadable(relayUrl: string): boolean {
+		return realtimeSubIds.has(relayUrl) && realtimeDiagnostics.relays.some((relay) => relay.relayUrl === relayUrl && relay.status === 'eose');
 	}
 
 	function waitForRealtimeEcho(eventId: string, waitMs: number): Readonly<{ promise: Promise<boolean>; cancel: () => void }> {
@@ -842,7 +854,7 @@ export function createNostrRelayTransport(
 
 	function notifyRealtimeEcho(event: Event, relayUrl: string): void {
 		for (const listener of realtimeEchoWaiters.get(event.id) ?? []) listener(true);
-		if (!realtimeReadableRelays.has(relayUrl) || !verifyEvent(event)) return;
+		if (!realtimeRelayIsReadable(relayUrl) || !verifyEvent(event)) return;
 		for (const listener of readableRealtimeEchoWaiters.get(event.id) ?? []) listener(true);
 	}
 
@@ -903,10 +915,12 @@ export function createNostrRelayTransport(
 		const resources = new Subscription();
 		realtimeResources = resources;
 		const finish = (resolve: (result: RealtimeStartResult) => void) => {
-			if (settled || realtimeDiagnostics.relays.some((relay) => relay.status === 'pending')) return;
+			const hasReadableRelay = realtimeDiagnostics.relays.some((relay) => relay.status === 'eose' && realtimeSubIds.has(relay.relayUrl));
+			const allRelaysResolved = !realtimeDiagnostics.relays.some((relay) => relay.status === 'pending');
+			if (settled || (!hasReadableRelay && !allRelaysResolved)) return;
 			settled = true;
 			if (deadline) clearTimeout(deadline);
-			realtimeDiagnostics = { ...realtimeDiagnostics, status: capableRelays.some((relayUrl) => realtimeDiagnostics.relays.find((relay) => relay.relayUrl === relayUrl)?.status === 'eose') ? 'active' : 'inactive' };
+			realtimeDiagnostics = { ...realtimeDiagnostics, status: hasReadableRelay ? 'active' : 'inactive' };
 			resolve({ status: realtimeDiagnostics.status === 'active' ? 'active' : 'inactive', events: [...initialEvents], controls: [...initialControls], relays: realtimeDiagnostics.relays.map((relay) => ({ ...relay })) });
 		};
 		return await new Promise<RealtimeStartResult>((resolve, reject) => {
@@ -921,6 +935,9 @@ export function createNostrRelayTransport(
 				const relayUrl = canonicalRelay(packet.to);
 				if (!request || !relayUrl || generation !== realtimeGeneration || !capableRelays.includes(relayUrl) || !matchesRealtimeFilterBundle(request.filters, realtimeFilters)) return;
 				realtimeSubIds.set(relayUrl, request.subId);
+				// A new wire REQ (including a reconnect resend) invalidates the previous
+				// EOSE boundary until this request receives its own EOSE.
+				updateRealtimeDiagnostic(relayUrl, { relayUrl, status: 'pending' });
 			}));
 			resources.add(client.createAllEventObservable().subscribe((packet) => {
 				const relayUrl = canonicalRelay(packet.from);
@@ -954,9 +971,9 @@ export function createNostrRelayTransport(
 			}));
 			resources.add(client.createConnectionStateObservable().subscribe((packet) => {
 				const relayUrl = canonicalRelay(packet.from);
-				if (!relayUrl || !capableRelays.includes(relayUrl) || !isConnectionUnavailable(packet.state)) return;
-				const current = realtimeDiagnostics.relays.find((relay) => relay.relayUrl === relayUrl);
-				if (current?.status === 'pending') {
+				if (!relayUrl || !capableRelays.includes(relayUrl) || !isRealtimeConnectionUnavailable(packet.state)) return;
+				if (realtimeDiagnostics.relays.some((relay) => relay.relayUrl === relayUrl)) {
+					realtimeSubIds.delete(relayUrl);
 					updateRealtimeDiagnostic(relayUrl, { relayUrl, status: 'unavailable' });
 					finish(resolve);
 				}
@@ -976,7 +993,7 @@ export function createNostrRelayTransport(
 			for (const request of requests) request.emit([...realtimeFilters] as Filter[]);
 			for (const relayUrl of capableRelays) {
 				const connection = client.getRelayStatus(relayUrl)?.connection;
-				if (connection && isConnectionUnavailable(connection)) updateRealtimeDiagnostic(relayUrl, { relayUrl, status: 'unavailable' });
+				if (connection && isRealtimeConnectionUnavailable(connection)) updateRealtimeDiagnostic(relayUrl, { relayUrl, status: 'unavailable' });
 			}
 			finish(resolve);
 		});
@@ -990,7 +1007,6 @@ export function createNostrRelayTransport(
 		realtimeResources = null;
 		realtimeSubIds.clear();
 		realtimeFilters = [];
-		realtimeReadableRelays.clear();
 		for (const listeners of realtimeEchoWaiters.values()) for (const listener of listeners) listener(false);
 		realtimeEchoWaiters.clear();
 		for (const listeners of readableRealtimeEchoWaiters.values()) for (const listener of listeners) listener(false);
@@ -1452,7 +1468,7 @@ export function createNostrRelayTransport(
 			echo.cancel();
 			throw error;
 		}
-		const acceptedByReadableRelay = results.some((result) => result.outcome === 'accepted' && realtimeReadableRelays.has(result.relayUrl));
+		const acceptedByReadableRelay = results.some((result) => result.outcome === 'accepted' && realtimeRelayIsReadable(result.relayUrl));
 		if (acceptedByReadableRelay) {
 			echo.cancel();
 			return { outcome: 'accepted', results };
@@ -1507,7 +1523,7 @@ export function createNostrRelayTransport(
 			if (!relayUrl || !results.has(relayUrl)) return;
 			const duplicate = notice?.startsWith('duplicate:') === true;
 			results.set(relayUrl, { relayUrl, outcome: ok || duplicate ? 'accepted' : 'rejected', ...(notice ? { notice } : {}) });
-			if ((ok || duplicate) && realtimeReadableRelays.has(relayUrl)) markSuccess('accepted');
+			if ((ok || duplicate) && realtimeRelayIsReadable(relayUrl)) markSuccess('accepted');
 			if ([...results.values()].every((result) => result.outcome !== 'no-response')) finish('completed');
 		};
 		resources.add(onParentDispose);

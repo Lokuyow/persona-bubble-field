@@ -328,6 +328,7 @@ export async function installDelayedRelay(page: Page, options: {
 	const events = options.primaryEvents ?? testEvents();
 	await page.addInitScript(({ authoritativeRelays, primaryEvents, historyMessages, realtimeEvents, deferPrimaryEvents, deferRealtimeEvents, primaryTerminal, realtimeTerminal, realtimePublishOutcome, rejectTracePublishes, traceRoots, traceReplies, deferTraceRoots, deferTraceReplies, persistAcrossReload, testWorldConfig, hiddenSubscriptionLimit }) => {
 		const WORLD_STATE_KIND = 30079;
+		const TAG_GAME_KIND = 37070;
 		type Listener = (event?: { type: string; data?: string; code?: number; reason?: string }) => void;
 		type PendingRequest = { socket: FakeWebSocket; subId: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] };
 		const authoritative = new Set<string>(authoritativeRelays);
@@ -365,6 +366,7 @@ export async function installDelayedRelay(page: Page, options: {
 			requests: [] as Array<{ url: string; subId: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] }>,
 			persistedPrimaryDeliveries: [] as Array<{ relayUrl: string; eventId: string }>,
 			published: [] as Array<Record<string, unknown>>,
+			rejectedPositionPublishIds: [] as string[],
 			closedSubscriptions: [] as Array<{ subId: string; url: string }>,
 			previousPublished: previous.published,
 			previousClosedSubscriptions: previous.closedSubscriptions,
@@ -381,6 +383,7 @@ export async function installDelayedRelay(page: Page, options: {
 			deferPositionPublishes: false,
 			rejectMessagePublishes: false,
 			rejectPositionPublishes: false,
+			rejectTagGameStatePublishes: false,
 			rejectTracePublishes: rejectTracePublishes ?? false,
 			deferReplyPublishes: false,
 			echoRepliesBeforeResult: false,
@@ -412,8 +415,9 @@ export async function installDelayedRelay(page: Page, options: {
 			const labels = (event.tags as string[][] | undefined) ?? [];
 			const isDeathTrace = event.kind === 42 && labels.some((tag) => tag[0] === 'l' && tag[1] === 'trace' && tag[2] === 'io.github.lokuyow.persona-bubble-field');
 			const isNormalMessage = event.kind === 42 && labels.some((tag) => tag[0] === 'l' && tag[1] === 'chat' && tag[2] === 'io.github.lokuyow.persona-bubble-field') && !isDeathTrace;
-			const reject = isNormalMessage && state.rejectMessagePublishes || event.kind === WORLD_STATE_KIND && state.rejectPositionPublishes || isDeathTrace && state.rejectTracePublishes ||
+			const reject = isNormalMessage && state.rejectMessagePublishes || event.kind === WORLD_STATE_KIND && state.rejectPositionPublishes || event.kind === TAG_GAME_KIND && state.rejectTagGameStatePublishes || isDeathTrace && state.rejectTracePublishes ||
 				event.kind === 1111 && state.replyOutcome !== 'accepted';
+			if (event.kind === WORLD_STATE_KIND && reject) state.rejectedPositionPublishIds.push(String(event.id));
 			const notice = event.kind === 1111 && state.replyOutcome === 'duplicate' ? 'duplicate: already stored' : reject ? 'blocked: test rejection' : '';
 			if (event.kind === 1111 && state.replyOutcome !== 'rejected' && !traceReplyHistory.some((known) => known.id === event.id)) traceReplyHistory.push(event);
 			deliver(socket, ['OK', event.id, !reject, notice]);
@@ -713,6 +717,8 @@ export async function installDelayedRelay(page: Page, options: {
 				rejectMessagePublishes: () => { state.rejectMessagePublishes = true; },
 				rejectPositionPublishes: () => { state.rejectPositionPublishes = true; },
 				allowPositionPublishes: () => { state.rejectPositionPublishes = false; },
+				rejectTagGameStatePublishes: () => { state.rejectTagGameStatePublishes = true; },
+				allowTagGameStatePublishes: () => { state.rejectTagGameStatePublishes = false; },
 				rejectTracePublishes: () => { state.rejectTracePublishes = true; },
 				allowTracePublishes: () => { state.rejectTracePublishes = false; },
 				allowMessagePublishes: () => { state.rejectMessagePublishes = false; },
@@ -765,7 +771,7 @@ export async function installDelayedRelay(page: Page, options: {
 
 export function relayState(page: Page) {
 	return page.evaluate(() => (window as typeof window & {
-		__relayStartupTest: { state: { requests: Array<{ url: string; subId: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] }>; persistedPrimaryDeliveries: Array<{ relayUrl: string; eventId: string }>; published: Array<{ id: string; kind: number; created_at: number; content: string; tags: string[][]; pubkey?: string }>; previousPublished: Array<{ id: string; kind: number; created_at: number; content: string; tags: string[][]; pubkey?: string }>; closedSubscriptions: Array<{ subId: string; url: string }> }; releasePublishes(kind: number): void; deferPositionPublishes(): void; releasePrimaryEvents(): void; releasePrimary(): void; releaseTraceRoots(): void; releaseTraceReplies(): void; deferTraceReplies(): void; injectTraceReply(event: object): void; injectClosedTraceReply(event: object): void; activeTraceReplyCount(): number; rejectMessagePublishes(): void; allowMessagePublishes(): void; rejectPositionPublishes(): void; allowPositionPublishes(): void; rejectTracePublishes(): void; allowTracePublishes(): void; injectPosition(event: object): void; injectPositionToRelay(event: object, relayUrl: string): void; injectMessage(event: object): void };
+		__relayStartupTest: { state: { requests: Array<{ url: string; subId: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] }>; persistedPrimaryDeliveries: Array<{ relayUrl: string; eventId: string }>; published: Array<{ id: string; kind: number; created_at: number; content: string; tags: string[][]; pubkey?: string }>; rejectedPositionPublishIds: string[]; previousPublished: Array<{ id: string; kind: number; created_at: number; content: string; tags: string[][]; pubkey?: string }>; closedSubscriptions: Array<{ subId: string; url: string }> }; releasePublishes(kind: number): void; deferPositionPublishes(): void; releasePrimaryEvents(): void; releasePrimary(): void; releaseTraceRoots(): void; releaseTraceReplies(): void; deferTraceReplies(): void; injectTraceReply(event: object): void; injectClosedTraceReply(event: object): void; activeTraceReplyCount(): number; rejectMessagePublishes(): void; allowMessagePublishes(): void; rejectPositionPublishes(): void; allowPositionPublishes(): void; rejectTracePublishes(): void; allowTracePublishes(): void; injectPosition(event: object): void; injectPositionToRelay(event: object, relayUrl: string): void; injectMessage(event: object): void };
 	}).__relayStartupTest);
 }
 
