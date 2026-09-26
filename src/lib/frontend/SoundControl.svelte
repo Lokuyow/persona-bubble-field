@@ -42,7 +42,7 @@
 	.speaker-icon :global(svg) { width: 24px; height: 24px; }
 	:global(.action-dock) .sound-control { --sound-control-background: var(--action-icon-background); --sound-control-background-hover: var(--action-icon-background-hover); --sound-control-background-active: var(--action-icon-background-active); --sound-control-border: var(--action-icon-border); --sound-control-foreground: var(--action-icon-foreground); }
 	:global(.action-dock) .sound-control :global(.speaker-button) { box-shadow: 0 5px 12px rgba(58, 70, 61, 0.1); }
-	:global(.action-dock) .sound-control :global(.speaker-button) { width: 54px; height: 44px; border-radius: 12px; }
+	:global(.action-dock) .sound-control :global(.speaker-button) { width: var(--action-dock-desktop-control-size, 54px); height: var(--action-dock-desktop-control-size, 54px); border-radius: 12px; }
 	@media (max-width: 700px) {
 		:global(.action-dock) .sound-control :global(.speaker-button) { width: 44px; height: 44px; }
 	}

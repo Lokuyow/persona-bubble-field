@@ -77,8 +77,16 @@ test.describe('Relay startup', () => {
 		expect(Math.abs(
 		(first.scene.y + first.scene.height / 2) - (first.area.y + first.area.height / 2)
 	)).toBeLessThan(0.5);
-		expect(first.viewport).toEqual({ x: 0, y: 0, width: 2560, height: 1373 });
-		expect(first.composer?.height).toBe(67);
+		// The initial Field viewport reserves the actual Dock region before Relay bootstrap.
+		// Keep the fixture viewport width fixed, but derive its available height from the Dock.
+		expect(first.viewport.x).toBe(0);
+		expect(first.viewport.y).toBe(0);
+		expect(first.viewport.width).toBe(2560);
+		expect(first.composer).not.toBeNull();
+		const initialDock = first.composer!;
+		expect(initialDock.height).toBeGreaterThanOrEqual(54);
+		expect(initialDock.y).toBe(first.viewport.y + first.viewport.height);
+		expect(initialDock.y + initialDock.height).toBe(1440);
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
 			AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) &&
 			(request.filter.kinds as number[])[0] === 42)).toBe(true);
@@ -88,6 +96,8 @@ test.describe('Relay startup', () => {
 		for (const frame of visible) {
 			expect(frame.scene.width).toBe(1216);
 			expect(frame.scene.height).toBe(608);
+			expect(Math.abs(frame.scene.x - first.scene.x)).toBeLessThan(0.5);
+			expect(Math.abs(frame.scene.y - first.scene.y)).toBeLessThan(0.5);
 			expect(frame.scene.x).toBeGreaterThanOrEqual(frame.area.x - frame.scene.width);
 			expect(frame.scene.x).toBeLessThanOrEqual(frame.area.x + frame.area.width);
 			expect(frame.scene.y).toBeGreaterThanOrEqual(frame.area.y - frame.scene.height);

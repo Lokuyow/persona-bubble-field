@@ -172,10 +172,16 @@ test.describe('Relay startup', () => {
 							.map((selector) => rect(selector))
 					};
 				});
+				for (const box of geometry.controls) {
+					expect(box.width).toBe(54);
+					expect(box.height).toBe(54);
+				}
 				expect(geometry.left.x + geometry.left.width).toBeLessThanOrEqual(geometry.editor.x);
 				expect(geometry.editor.x + geometry.editor.width).toBeLessThanOrEqual(geometry.right.x);
 				const centers = [geometry.left, geometry.editor, geometry.right].map((box) => box.y + box.height / 2);
 				expect(Math.max(...centers) - Math.min(...centers)).toBeLessThanOrEqual(1);
+				const controlCenters = geometry.controls.map((box) => box.y + box.height / 2);
+				expect(Math.max(...controlCenters) - Math.min(...controlCenters)).toBeLessThanOrEqual(1);
 				for (const box of [geometry.left, geometry.editor, geometry.right, ...geometry.controls]) {
 					expect(box.x).toBeGreaterThanOrEqual(geometry.dock.x);
 					expect(box.x + box.width).toBeLessThanOrEqual(geometry.dock.x + geometry.dock.width);

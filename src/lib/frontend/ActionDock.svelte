@@ -362,8 +362,10 @@
 		.composer-controls-right .speech-type-toggle, .composer-controls-right :global(.suggestions-anchor) { flex-basis: 46px; height: 46px; }
 	}
 	@media (min-width: 701px) {
-		.action-dock-content { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: minmax(54px, 1fr); }
+		.action-dock-content { --action-dock-desktop-control-size: 54px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: minmax(var(--action-dock-desktop-control-size), 1fr); }
 		.composer-controls-left, .composer-editor-slot, .composer-controls-right { grid-row: 1; }
 		.composer-controls-left, .composer-controls-right { align-self: center; }
+		.profile-trigger, .chatter-toggle, .speech-type-toggle, .composer-controls-right :global(.suggestions-anchor) { width: var(--action-dock-desktop-control-size); height: var(--action-dock-desktop-control-size); }
+		.profile-trigger, .chatter-toggle, .speech-type-toggle { flex-basis: var(--action-dock-desktop-control-size); }
 	}
 </style>
