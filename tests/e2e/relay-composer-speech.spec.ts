@@ -459,6 +459,40 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('.suggestion-panel')).toHaveCount(0);
 	});
 
+	test('keeps candidate operation errors with their panel and clears them on dismissal or draft change', async ({ page }) => {
+		await installPromptApiStub(page);
+		const selfSecret = fixtureSecret(19);
+		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret));
+		const editor = await openReadyRelayWorld(page, 1);
+		const candidateButton = page.getByRole('button', { name: 'AI発言候補を生成' });
+		const panel = page.locator('.suggestion-panel');
+		const anchor = page.locator('.suggestions-anchor');
+		const error = anchor.locator('.suggestion-error');
+
+		await candidateButton.click();
+		await expect(panel).toBeVisible();
+		await page.evaluate(() => (window as unknown as { __relayStartupTest: { rejectMessagePublishes(): void } }).__relayStartupTest.rejectMessagePublishes());
+		await panel.locator('.suggestion-primary').first().click();
+		await expect(error).toHaveText('候補を送信できませんでした。もう一度お試しください。');
+		await expect(panel.locator('.suggestion-primary').first()).toContainText('まずは自然な返答です。');
+		await expect(anchor.getByRole('status')).toHaveCount(1);
+
+		await page.getByRole('button', { name: '発言候補を閉じる' }).click();
+		await expect(panel).toHaveCount(0);
+		await expect(error).toHaveCount(0);
+		await expect(anchor.getByRole('status')).toHaveCount(0);
+
+		await candidateButton.click();
+		await expect(panel).toBeVisible();
+		await page.evaluate(() => (window as unknown as { __relayStartupTest: { rejectMessagePublishes(): void } }).__relayStartupTest.rejectMessagePublishes());
+		await panel.locator('.suggestion-primary').first().click();
+		await expect(error).toContainText('候補を送信できませんでした');
+		await editor.fill('候補を無効化する本文');
+		await expect(panel).toHaveCount(0);
+		await expect(error).toHaveCount(0);
+		await expect(anchor.locator('.suggestion-status')).toHaveCount(0);
+	});
+
 	test('keeps the normal Composer when Prompt API availability is unavailable', async ({ page }) => {
 		await installPromptApiStub(page, 'unavailable');
 		const selfSecret = fixtureSecret(19);
