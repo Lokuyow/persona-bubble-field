@@ -542,6 +542,24 @@ test('keeps join actions primary and equally emphasized when multiple tag-game l
 			expect(secondJoinHitArea.height).toBeGreaterThanOrEqual(44);
 			expect(secondJoinHitArea.insideViewport).toBe(true);
 		}
+		await joinerPage.setViewportSize({ width: 390, height: 640 });
+		const panelScroll = await dialog.evaluate((element) => {
+			const panel = element as HTMLElement;
+			panel.scrollTop = panel.scrollHeight;
+			return { top: panel.scrollTop, maximum: panel.scrollHeight - panel.clientHeight };
+		});
+		expect(panelScroll.maximum).toBeGreaterThan(0);
+		expect(panelScroll.top).toBe(panelScroll.maximum);
+		const closePoint = await dialog.getByRole('button', { name: '閉じる' }).evaluate((button) => {
+			const rect = button.getBoundingClientRect();
+			const panelRect = button.closest('.panel')!.getBoundingClientRect();
+			const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+			return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, inViewport: rect.top >= panelRect.top && rect.bottom <= panelRect.bottom, receivesPointer: Boolean(hit && button.contains(hit)) };
+		});
+		expect(closePoint.inViewport).toBe(true);
+		expect(closePoint.receivesPointer).toBe(true);
+		await joinerPage.mouse.click(closePoint.x, closePoint.y);
+		await expect(joinerPage.locator('.panel[role="dialog"]')).toHaveCount(0);
 	} finally {
 		await Promise.all([firstHostPage.close(), secondHostPage.close(), joinerPage.close()]);
 	}

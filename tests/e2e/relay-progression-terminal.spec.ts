@@ -239,6 +239,8 @@ test.describe('Relay startup', () => {
 		expect(enabledCollectStyle.background).not.toBe(disabledCollectStyle.background);
 		for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
 			await page.setViewportSize(viewport);
+			await page.mouse.move(viewport.width - 1, viewport.height - 1);
+			await expect.poll(() => enabledCollect.evaluate((button) => getComputedStyle(button).backgroundColor)).toBe(enabledCollectStyle.background);
 			await expect(enabledCollect).toBeVisible();
 			const enabledHitArea = await enabledCollect.evaluate((button) => {
 				const rect = button.getBoundingClientRect();
@@ -255,7 +257,25 @@ test.describe('Relay startup', () => {
 			return partialState.points === 1 && partialState.pointProgressTicks > 0 && partialState.pointProgressTicks < 60_000_000;
 		}).toBe(true);
 		await expect.poll(publishedWorldStateCount).toBeGreaterThan(beforeMendingReward);
-		await expect(page.locator('.mending-success-feedback')).toContainText('+1 pt');
+		const rewardFeedback = page.locator('.mending-success-feedback');
+		await expect(rewardFeedback).toContainText('+1 pt');
+		await expect(rewardFeedback).toContainText(/寿命 \+.+/);
+		const rewardFeedbackLayout = await rewardFeedback.evaluate((feedback) => {
+			const dialog = feedback.closest('.mending-dialog-content')!;
+			const header = dialog.querySelector('.terminal-dialog-header')!.getBoundingClientRect();
+			const points = dialog.querySelector('.owned-points')!.getBoundingClientRect();
+			const close = dialog.querySelector('.action-button-close')!.getBoundingClientRect();
+			const feedbackRect = feedback.getBoundingClientRect();
+			const overlaps = (first: DOMRect, second: DOMRect) => first.left < second.right && second.left < first.right && first.top < second.bottom && second.top < first.bottom;
+			return {
+				visible: getComputedStyle(feedback).visibility === 'visible' && feedbackRect.width > 0 && feedbackRect.height > 0,
+				insideViewport: feedbackRect.top >= 0 && feedbackRect.bottom <= innerHeight && feedbackRect.left >= 0 && feedbackRect.right <= innerWidth,
+				overlapsHeader: overlaps(feedbackRect, header),
+				overlapsPoints: overlaps(feedbackRect, points),
+				overlapsClose: overlaps(feedbackRect, close)
+			};
+		});
+		expect(rewardFeedbackLayout).toEqual({ visible: true, insideViewport: true, overlapsHeader: false, overlapsPoints: false, overlapsClose: false });
 
 		const secondAt = partialAt + 3 * 60 * 1000;
 		await page.clock.setSystemTime(secondAt);
@@ -332,7 +352,22 @@ test.describe('Relay startup', () => {
 		await adjustment.click();
 		const dialog = page.getByRole('dialog', { name: '能力強化' });
 		const upgradeButton = dialog.getByRole('button', { name: '推論効率をLv2へ強化（必要1pt）' });
-		await expect(upgradeButton).toBeFocused();
+		await expect(dialog.getByRole('heading', { name: '能力強化' })).toBeFocused();
+		const initialDialogScroll = await dialog.evaluate((element) => element.scrollTop);
+		expect(initialDialogScroll).toBe(0);
+		await expect(dialog.getByLabel('所持ポイント 10 pt')).toBeVisible();
+		const expectHeaderToStayReadable = async () => {
+			const overlaps = await dialog.evaluate((element) => {
+				const rect = (selector: string) => element.querySelector(selector)!.getBoundingClientRect();
+				const title = rect('.adjustment-dialog-title');
+				const points = rect('.points-display');
+				const close = rect('.action-button-close');
+				const intersects = (first: DOMRect, second: DOMRect) => first.left < second.right && second.left < first.right && first.top < second.bottom && second.top < first.bottom;
+				return { titlePoints: intersects(title, points), titleClose: intersects(title, close), pointsClose: intersects(points, close) };
+			});
+			expect(overlaps).toEqual({ titlePoints: false, titleClose: false, pointsClose: false });
+		};
+		await expectHeaderToStayReadable();
 		await expect(dialog.getByRole('tooltip')).toHaveCount(0);
 		await expect(dialog).toContainText('10 pt');
 		await expect(dialog).not.toContainText('POINT');
@@ -444,7 +479,30 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('[data-unified-status-hud] [data-points-value]')).toHaveText('9pt');
 		await expect(page.locator('[data-unified-status-hud] [data-points-meter]')).toHaveAttribute('aria-valuenow', '9');
 		await expect(dialog).toContainText('推論効率 Lv2');
-		await page.getByRole('button', { name: '閉じる', exact: true }).click();
+		await page.keyboard.press('Escape');
+		await expect(dialog).toHaveCount(0);
+		await expect(adjustment).toBeFocused();
+		await adjustment.click();
+		await expect(dialog.getByRole('heading', { name: '能力強化' })).toBeFocused();
+		await page.setViewportSize({ width: 390, height: 640 });
+		await expectHeaderToStayReadable();
+		const mobileAdjustmentScroll = await dialog.evaluate((element) => {
+			element.scrollTop = element.scrollHeight;
+			return { top: element.scrollTop, maximum: element.scrollHeight - element.clientHeight };
+		});
+		expect(mobileAdjustmentScroll.maximum).toBeGreaterThan(0);
+		expect(mobileAdjustmentScroll.top).toBe(mobileAdjustmentScroll.maximum);
+		const adjustmentClosePoint = await dialog.getByRole('button', { name: '閉じる', exact: true }).evaluate((button) => {
+			const rect = button.getBoundingClientRect();
+			const dialog = button.closest('.adjustment-dialog-content')!;
+			const dialogRect = dialog.getBoundingClientRect();
+			const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+			return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, inViewport: rect.top >= dialogRect.top && rect.bottom <= dialogRect.bottom && rect.left >= dialogRect.left && rect.right <= dialogRect.right, receivesPointer: Boolean(hit && button.contains(hit)) };
+		});
+		expect(adjustmentClosePoint.inViewport).toBe(true);
+		expect(adjustmentClosePoint.receivesPointer).toBe(true);
+		await page.mouse.click(adjustmentClosePoint.x, adjustmentClosePoint.y);
+		await expect(dialog).toHaveCount(0);
 		await expect(adjustment).toBeFocused();
 		await page.reload();
 		await expect.poll(() => readRelayGameState(page)).toMatchObject({ points: 9, abilities: { inferenceEfficiency: 2, contextCapacity: 1, hallucinationSuppression: 1 } });
