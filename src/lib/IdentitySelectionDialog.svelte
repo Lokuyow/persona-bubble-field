@@ -4,7 +4,7 @@
 	import ChevronDown from '~icons/tabler/chevron-down';
 	import HelpCircle from '~icons/tabler/help-circle';
 	import { getCharacterById } from '$lib/character';
-	import PrimaryButton from '$lib/PrimaryButton.svelte';
+	import ActionButton from '$lib/ActionButton.svelte';
 	import type { ClearedIdentityCandidate, IdentityCandidate, PendingSelection, SelectionCandidate } from '$lib/rootIdentity';
 	import type { RunTransitionNotice } from '$lib/runTransitionNotice';
 	import { isRootBuildAllocatable, rootBuildCost, usableRootPoints, type RootBuild } from '$lib/rootProgression';
@@ -202,7 +202,7 @@
 			</div>
 			<footer class="selection-footer">
 				<div class="selection-summary"><span>選択中</span><strong>{chosen ? character(chosen).name : '未選択'}</strong><span class="summary-divider" aria-hidden="true"></span><span>使用 {usedPoints} / {usablePoints} RP</span></div>
-				<PrimaryButton type="button" onclick={startRun} disabled={!chosen || !isRootBuildAllocatable(rootBuild, rootPoints)}>開始</PrimaryButton>
+				<ActionButton variant="primary" type="button" onclick={startRun} disabled={!chosen || !isRootBuildAllocatable(rootBuild, rootPoints)}>開始</ActionButton>
 			</footer>
 		</dialog>
 	</div>
@@ -302,7 +302,8 @@
 	.selection-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: rgb(255 255 255 / 62%); font-size: .82rem; }
 	.selection-summary strong { color: #fff; }
 	.summary-divider { width: 1px; height: 18px; background: rgb(255 255 255 / 20%); }
-	.selection-footer :global(.site-primary-button) { min-width: 210px; min-height: 50px; }
+	.selection-dialog { --action-secondary-background: rgba(255, 255, 255, .08); --action-secondary-background-hover: rgba(255, 255, 255, .15); --action-secondary-foreground: #f4f6ff; --action-secondary-border: rgba(255, 255, 255, .42); --action-tertiary-background-hover: rgba(255, 255, 255, .12); --action-tertiary-foreground: #f4f6ff; --action-disabled-background: #424858; --action-disabled-border: #5a6170; --action-disabled-foreground: #d2d6df; }
+	.selection-footer :global(.action-button) { min-width: 210px; min-height: 50px; }
 
 	@media (max-width: 700px) {
 		.selection-dialog { height: min(760px, calc(100dvh - 40px)); max-height: calc(100dvh - 40px); }
@@ -323,6 +324,6 @@
 		.ability-effect strong, .ability-effect small { overflow-wrap: anywhere; }
 		.root-build { padding-inline: 12px; }
 		.selection-footer { align-items: stretch; flex-direction: column; gap: 12px; padding: 14px 16px max(16px, env(safe-area-inset-bottom)); }
-		.selection-footer :global(.site-primary-button) { width: 100%; }
+		.selection-footer :global(.action-button) { width: 100%; }
 	}
 </style>

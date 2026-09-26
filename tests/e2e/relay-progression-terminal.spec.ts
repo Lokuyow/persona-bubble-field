@@ -103,6 +103,8 @@ test.describe('Relay startup', () => {
 		await expect(activeDialog.locator('.action-group')).toHaveCount(1);
 		const collectButton = activeDialog.getByRole('button', { name: '成果を受け取る' });
 		await expect(collectButton).toBeVisible();
+		await expect(collectButton).toHaveAttribute('data-action-variant', 'primary');
+		await expect(activeDialog.locator('[data-action-variant="primary"]')).toHaveCount(1);
 		await expect(collectButton.locator('svg')).toHaveCount(1);
 		await expect(collectButton.locator('svg path')).toHaveAttribute('d', /^M4 20h16m-8-6V4/);
 		await expect(activeDialog.locator('.mending-success-feedback')).toHaveCount(0);
@@ -420,6 +422,9 @@ test.describe('Relay startup', () => {
 		await expect(inference).toContainText('1.90');
 		await expect(inference).toContainText('+0.10 pt/分');
 		await expect(inference.locator('.upgrade-button')).toHaveText('必要 2pt');
+		await expect(dialog.locator('[data-action-variant="primary"]')).toHaveCount(0);
+		await expect(dialog.locator('.upgrade-button')).toHaveCount(3);
+		await expect(dialog.locator('.upgrade-button[data-action-variant="secondary"]')).toHaveCount(3);
 		await inference.getByRole('button', { name: '推論効率をLv11へ強化（必要2pt）' }).click();
 		await expect(inference).toContainText('2.00');
 		await expect(inference.locator('.upgrade-button')).toHaveText('必要 2pt');

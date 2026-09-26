@@ -3,15 +3,20 @@
 	--color-accent: #cf06fe;
 	--color-accent-soft: #fbe9ff;
 	--color-focus-ring: #6dabb9;
-	--color-primary-background: var(--color-accent);
-	--color-primary-background-hover: color-mix(in srgb, var(--color-accent) 86%, black);
-	--color-primary-background-active: color-mix(in srgb, var(--color-accent) 72%, black);
-	--color-primary-foreground: #fff;
-	--color-primary-border: color-mix(in srgb, var(--color-accent) 70%, white);
-	--color-primary-shadow: color-mix(in srgb, var(--color-accent) 24%, transparent);
-	--color-primary-disabled-background: color-mix(in srgb, var(--color-accent) 20%, #5b6168);
-	--color-primary-disabled-border: color-mix(in srgb, var(--color-accent) 24%, #81878d);
-	--color-primary-disabled-foreground: color-mix(in srgb, var(--color-accent) 16%, #e3e7ea);
+	--action-primary-background: color-mix(in srgb, var(--color-accent) 78%, #000 22%);
+	--action-primary-background-hover: color-mix(in srgb, var(--action-primary-background) 88%, #000 12%);
+	--action-primary-background-active: color-mix(in srgb, var(--action-primary-background) 76%, #000 24%);
+	--action-primary-foreground: #fff;
+	--action-primary-border: color-mix(in srgb, var(--action-primary-background) 82%, #000 18%);
+	--action-secondary-background: #fff;
+	--action-secondary-background-hover: #f0f2f3;
+	--action-secondary-foreground: #303639;
+	--action-secondary-border: #858e92;
+	--action-tertiary-background-hover: #edf0f2;
+	--action-tertiary-foreground: #454d51;
+	--action-disabled-background: #dfe3e5;
+	--action-disabled-border: #bdc4c8;
+	--action-disabled-foreground: #5d666a;
 }
 
 @supports (color: oklch(63.2% 0.306 317.3)) {
@@ -59,4 +64,62 @@ button {
 button:not(:where(.trace-root-bubble, .trace-reply-content-button, .timeline-name)) {
 	user-select: none;
 	-webkit-user-select: none;
+}
+
+.action-button {
+	box-sizing: border-box;
+	display: inline-flex;
+	min-height: 44px;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	padding: 8px 14px;
+	border: 1px solid transparent;
+	border-radius: 9px;
+	font: inherit;
+	font-weight: 750;
+	line-height: 1.2;
+	text-align: center;
+	cursor: pointer;
+	transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.action-button-primary {
+	border-color: var(--action-primary-border);
+	background: var(--action-primary-background);
+	color: var(--action-primary-foreground);
+}
+
+.action-button-primary:hover:not(:disabled) { background: var(--action-primary-background-hover); }
+.action-button-primary:active:not(:disabled) { background: var(--action-primary-background-active); }
+
+.action-button-secondary {
+	border-color: var(--action-secondary-border);
+	background: var(--action-secondary-background);
+	color: var(--action-secondary-foreground);
+}
+
+.action-button-secondary:hover:not(:disabled) { background: var(--action-secondary-background-hover); }
+.action-button-secondary:active:not(:disabled) { background: color-mix(in srgb, var(--action-secondary-background-hover) 75%, #000 25%); }
+
+.action-button-tertiary {
+	border-color: transparent;
+	background: transparent;
+	color: var(--action-tertiary-foreground);
+}
+
+.action-button-tertiary:hover:not(:disabled), .action-button-tertiary:active:not(:disabled) { background: var(--action-tertiary-background-hover); }
+
+.action-button:disabled {
+	border-color: var(--action-disabled-border);
+	background: var(--action-disabled-background);
+	box-shadow: none;
+	color: var(--action-disabled-foreground);
+	cursor: not-allowed;
+}
+
+.action-button:focus-visible { outline: 3px solid var(--color-focus-ring); outline-offset: 3px; }
+
+@media (prefers-reduced-motion: reduce) {
+	.action-button { transition-duration: 0.01ms; }
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createTagGameSchedule, tagGameScheduledEffectAt, type TagGameState } from './tagGame';
-import { canLeaveTagGame, formatTagGameRemainingTime, isTagGameScheduledEffectActive, projectTagGameHud, tagGameTransferStatus } from './tagGameHud';
+import { canLeaveTagGame, formatTagGameRemainingTime, isTagGameScheduledEffectActive, projectTagGameHud, tagGameCooldownRemainingMs, tagGameTransferStatus } from './tagGameHud';
 import { createInitialPersonaGameState } from './personaGameState';
 import { createMendingJob, projectMending } from './mending';
 import type { RootBuild } from './rootProgression';
@@ -90,12 +90,24 @@ describe('tag-game HUD projection', () => {
 		expect(formatTagGameRemainingTime(180_000, 181_001)).toBe('00:00');
 	});
 
-	it('shows cooldown only during active effects, then distinguishes available restrictions from stopped effects', () => {
+	it('uses the shared two-second cooldown projection only during active effects and keeps status text for other restrictions', () => {
 		const game = running('benefit');
-		expect(tagGameTransferStatus(game, true, 101_000)).toBe('転移禁止 2秒');
+		expect(tagGameCooldownRemainingMs(game, true, 100_001)).toBe(1_999);
+		expect(tagGameCooldownRemainingMs({ ...game, transferAt: 100_500 }, true, 100_000)).toBe(2_500);
+		expect(tagGameCooldownRemainingMs(game, true, 101_000)).toBe(1_000);
+		expect(tagGameCooldownRemainingMs(game, true, 102_000)).toBe(0);
+		expect(tagGameCooldownRemainingMs(game, false, 101_000)).toBe(0);
+		expect(tagGameTransferStatus(game, true, 101_000)).toBe('');
 		expect(tagGameTransferStatus(game, false, 101_000)).toBe('効果停止中');
-		expect(tagGameTransferStatus(game, true, 103_000)).toBe('転移禁止なし');
+		expect(tagGameTransferStatus(game, true, 103_000)).toBe('');
 		expect(tagGameTransferStatus(game, false, 103_000)).toBe('効果停止中');
+	});
+
+	it('uses the run start as the initial transfer block when no successful transfer timestamp is available', () => {
+		const game = { ...running('benefit'), transferAt: undefined };
+		expect(tagGameCooldownRemainingMs(game, true, 100_000)).toBe(2_000);
+		expect(tagGameCooldownRemainingMs(game, true, 101_999)).toBe(1);
+		expect(tagGameCooldownRemainingMs(game, true, 102_000)).toBe(0);
 	});
 
 	it('does not show transfer availability during organizer waits or final settlement and ends leaving at 180 seconds', () => {

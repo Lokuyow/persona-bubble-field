@@ -29,6 +29,8 @@ import {
 	parseTagGameEvent,
 	tagGameHolderResponseState,
 	tagGameEffectSafetyCutoffMs,
+	TAG_GAME_TRANSFER_COOLDOWN_MS,
+	isTagGameTransferCooldownActive,
 	latestTagGameHolderActivityAt,
 	isValidTagGameHolderResponse,
 	tagGamePredictedRemainingLifespanMinutes,
@@ -60,6 +62,14 @@ function runningGame(participant: TagGameState['participant'], ownerPubkey: stri
 }
 
 describe('player-hosted tag-game protocol and rules', () => {
+	it('blocks transfer for two seconds from the game start or last confirmed transfer', () => {
+		expect(TAG_GAME_TRANSFER_COOLDOWN_MS).toBe(2_000);
+		expect(isTagGameTransferCooldownActive({ startedAtMs: 10_000, nowMs: 11_999 })).toBe(true);
+		expect(isTagGameTransferCooldownActive({ startedAtMs: 10_000, nowMs: 12_000 })).toBe(false);
+		expect(isTagGameTransferCooldownActive({ startedAtMs: 10_000, transferAtMs: 20_000, nowMs: 21_999 })).toBe(true);
+		expect(isTagGameTransferCooldownActive({ startedAtMs: 10_000, transferAtMs: 20_000, nowMs: 22_000 })).toBe(false);
+	});
+
 	it('uses one discoverable kind-37070 filter and one action filter in the supplemental REQ', () => {
 		expect(buildTagGameFilter(CHANNEL, 10)).toEqual({ kinds: [TAG_GAME_KIND], '#e': [CHANNEL], '#t': [TAG_GAME_INDEX], since: 10 });
 		expect(buildTagGameRecoveryFilter(CHANNEL, `${'1'.repeat(64)}:10:${'2'.repeat(64)}`)).toEqual({ kinds: [TAG_GAME_KIND], '#e': [CHANNEL], '#d': [`${'1'.repeat(64)}:10:${'2'.repeat(64)}`] });

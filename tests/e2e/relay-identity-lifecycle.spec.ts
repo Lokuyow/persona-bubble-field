@@ -494,6 +494,8 @@ test.describe('Relay startup', () => {
 		await expect(dialog.locator('.candidate-check')).toHaveCount(0);
 		await expect(dialog).toContainText('選択中未選択');
 		await expect(runButton).toBeDisabled();
+		await expect(runButton).toHaveAttribute('data-action-variant', 'primary');
+		await expect(dialog.locator('[data-action-variant="primary"]')).toHaveCount(1);
 
 		await page.keyboard.press('Shift+Tab');
 		await expect(dialog.getByRole('button', { name: /Root build/ })).toBeFocused();

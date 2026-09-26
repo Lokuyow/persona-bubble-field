@@ -118,12 +118,16 @@ async function prepareFailedCooperationScenario(page: Page, remainingDays: numbe
 	await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), nearEvent);
 	await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', `${nearPosition.x},${nearPosition.y}`);
 	await page.locator('[data-realtime-group-trigger]').click();
+	const joinDialog = page.getByRole('dialog', { name: /協力と抜け駆けに参加/ });
+	await expect(joinDialog.getByRole('button', { name: '参加する' })).toHaveAttribute('data-action-variant', 'primary');
+	await expect(joinDialog.locator('[data-action-variant="primary"]')).toHaveCount(1);
 	await page.getByRole('button', { name: '参加する' }).click();
 	await expect(page.locator('[data-realtime-panel]')).toContainText('参加済み');
 
 	const round = getCooperationDefectionRoundSchedule(schedule, 1);
 	await page.clock.setSystemTime(round.selectionAtMs + 1_000);
 	await page.clock.runFor(1_000);
+	await expect(page.locator('[data-cooperation-defection-choice][data-action-variant="secondary"]')).toHaveCount(2);
 	await page.locator('[data-cooperation-defection-choice="defect"]').click();
 	await expect.poll(async () => (await relayState(page)).state.published.some((event) => event.kind === 7070 && event.pubkey === selfPubkey && JSON.parse(event.content).action === 'commit')).toBe(true);
 	await page.clock.setSystemTime(round.resultAtMs + 1_000);

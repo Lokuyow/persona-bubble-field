@@ -10,7 +10,7 @@
 	import Tool from '~icons/tabler/tool';
 	import ArrowBarToDown from '~icons/tabler/arrow-bar-to-down';
 	import Wallet from '~icons/tabler/wallet';
-	import PrimaryButton from '$lib/PrimaryButton.svelte';
+	import ActionButton from '$lib/ActionButton.svelte';
 	import type { MendingProjection } from '$lib/mending';
 	import { formatElapsedDuration, formatRemainingDuration } from '$lib/lifespanHud';
 
@@ -132,16 +132,16 @@
 						</div>
 					</section>
 					<section class="action-group" aria-label="成果回収">
-						<PrimaryButton class="collect-button" type="button" disabled={starting || (projection?.points ?? 0) < 1} onclick={onCollect}>
+						<ActionButton variant="primary" class="collect-button" type="button" disabled={starting || (projection?.points ?? 0) < 1} onclick={onCollect}>
 							<ArrowBarToDown aria-hidden="true" />成果を受け取る
-						</PrimaryButton>
+						</ActionButton>
 					</section>
 					<section class="utility-group" aria-label="作業の詳細と操作">
 						<section class="details-section" aria-label="作業の詳細">
-						<button class="details-toggle" type="button" aria-expanded={detailsOpen} onclick={() => detailsOpen = !detailsOpen}>
+						<ActionButton variant="tertiary" class="details-toggle" type="button" aria-expanded={detailsOpen} onclick={() => detailsOpen = !detailsOpen}>
 							<span>{detailsOpen ? '詳細を閉じる' : '詳細を見る'}</span>
 							{#if detailsOpen}<ChevronUp aria-hidden="true" />{:else}<ChevronDown aria-hidden="true" />{/if}
-						</button>
+						</ActionButton>
 						{#if detailsOpen}
 							<div class="details-content">
 								<p>現在のポイント速度 <strong>{pointRate} pt/分</strong></p>
@@ -152,7 +152,7 @@
 							</div>
 						{/if}
 						</section>
-						<Dialog.Close class="terminal-secondary-action">閉じる</Dialog.Close>
+						<Dialog.Close class="action-button action-button-tertiary terminal-secondary-action">閉じる</Dialog.Close>
 					</section>
 				{/if}
 			</Dialog.Content>
@@ -163,6 +163,7 @@
 <style>
 	:global(.mending-dialog-overlay) { position: fixed; inset: 0; z-index: 100; background: rgba(2, 8, 18, 0.72); backdrop-filter: blur(2px); }
 	:global(.mending-dialog-content) { position: fixed; top: 50%; left: 50%; z-index: 101; display: grid; gap: 0; width: min(720px, calc(100vw - 24px)); max-height: calc(100svh - 32px); overflow: auto; padding: 28px; border: 1px solid rgba(35, 220, 226, .78); border-radius: 18px; background: linear-gradient(180deg, rgba(4, 29, 43, .92), rgba(3, 20, 30, .94)); box-shadow: 0 0 0 1px rgba(53, 227, 232, .10) inset, 0 18px 60px rgba(0, 0, 0, .42), 0 0 30px rgba(26, 212, 220, .08); backdrop-filter: blur(14px); color: #ecfbff; transform: translate(-50%, -50%); }
+	:global(.mending-dialog-content) { --action-secondary-background: rgba(255, 255, 255, .08); --action-secondary-background-hover: rgba(255, 255, 255, .14); --action-secondary-foreground: #ecfbff; --action-secondary-border: rgba(207, 230, 239, .48); --action-tertiary-background-hover: rgba(255, 255, 255, .1); --action-tertiary-foreground: #ecfbff; --action-disabled-background: #34434a; --action-disabled-border: #506168; --action-disabled-foreground: #d3e0e3; }
 	.mending-success-feedback { position: absolute; top: 72px; right: 34px; z-index: 1; display: grid; gap: 2px; pointer-events: none; color: #64f5f0; text-align: right; animation: mending-success-float 420ms ease-out both; }
 	.mending-success-feedback strong { font-size: 18px; font-weight: 850; }
 	.mending-success-feedback span { color: #cfe7ee; font-size: 13px; font-weight: 700; }
@@ -185,7 +186,7 @@
 	:global(.mending-dialog-title svg) { flex: 0 0 auto; width: 22px; height: 22px; color: #35e3e8; }
 	:global(.mending-dialog-content .sr-only) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 	.owned-points { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 7px; color: #ecfbff; white-space: nowrap; }
-	.owned-points :global(svg), .details-toggle :global(svg) { width: 18px; height: 18px; }
+	.owned-points :global(svg), :global(.details-toggle svg) { width: 18px; height: 18px; }
 	.owned-points :global(svg) { color: #9bb4bf; }
 	.owned-points-value { color: #ecfbff; font-size: 16px; font-weight: 800; }
 	.status-group { margin-bottom: 14px; }
@@ -206,16 +207,16 @@
 	.next-point-hidden { visibility: hidden; }
 	.next-point :global(svg) { width: 15px; height: 15px; color: #35e3e8; }
 	.action-group { display: grid; gap: 10px; margin: 4px 0 6px; }
-	:global(.collect-button) { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; min-width: 0; min-height: 50px; height: 50px; padding: 0 14px; font-size: 16px; }
+	:global(.collect-button) { width: 100%; min-width: 0; min-height: 50px; height: 50px; padding: 0 14px; font-size: 16px; }
 	:global(.collect-button svg) { flex: 0 0 auto; width: 24px; height: 24px; }
-	.details-toggle { display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%; min-height: 44px; padding: 10px 0; border: 0; background: transparent; color: #9bb4bf; font: inherit; font-weight: 400; text-align: center; cursor: pointer; }
+	:global(.details-toggle) { width: 100%; min-height: 44px; padding: 10px 0; color: #9bb4bf; font-weight: 400; text-align: center; }
 	.utility-group { display: grid; gap: 6px; }
 	.details-section { border-top: 1px solid rgba(35, 220, 226, .16); border-bottom: 1px solid rgba(35, 220, 226, .16); }
-	.details-toggle :global(svg) { color: #9bb4bf; }
+	:global(.details-toggle svg) { color: #9bb4bf; }
 	.details-content { display: grid; gap: 8px; padding: 0 0 12px; color: rgba(208, 246, 248, 0.78); font-size: 0.92rem; line-height: 1.45; }
 	.details-content p { margin: 0; display: flex; justify-content: space-between; gap: 16px; }
 	.details-content strong { color: #f2ffff; font-weight: 700; text-align: right; }
-	:global(.terminal-secondary-action) { min-height: 50px; border: 1px solid #46599a; border-radius: 9px; background: #111a42; color: #dbe4f4; font: inherit; font-weight: 800; text-align: center; cursor: pointer; }
+	:global(.terminal-secondary-action) { min-height: 50px; }
 	:global(.mending-dialog-content button:focus-visible) { outline: 3px solid var(--color-focus-ring); outline-offset: 3px; }
 	@media (max-width: 700px) { :global(.mending-dialog-content) { width: min(calc(100vw - 16px), 720px); padding: 24px; } .result-list { grid-template-columns: 1fr; } }
 	@media (max-width: 560px) { :global(.mending-dialog-content) { padding: 22px 18px; border-radius: 14px; } .owned-points { padding-top: 0; } .details-content p { align-items: flex-start; flex-direction: column; gap: 2px; } .details-content strong { text-align: left; } }
