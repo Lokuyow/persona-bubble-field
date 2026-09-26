@@ -485,9 +485,56 @@ describe('supplemental realtime event lifecycle', () => {
 		const remainingRequest = f.authorities[1].requests.findLast((request) => filters(request).some((filter) => (filter.kinds as number[] | undefined)?.includes(TAG_GAME_ACTION_KIND)))!;
 		const action = tagGameAction();
 		send(f.authorities[1].latestSocket(), 'EVENT', remainingRequest[1], action);
-		expect(onSupplementalEvent).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: action.id }));
+		expect(onSupplementalEvent).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: action.id }), 'live');
 		send(f.authorities[1].latestSocket(), 'EOSE', remainingRequest[1]);
 		expect(f.transport.getDiagnostics().realtime.relays.find((relay) => relay.relayUrl === f.authorities[1].url)?.status).toBe('eose');
+	});
+
+	it('classifies each Relay history through its own initial and reconnect EOSE', async () => {
+		const f = fixture(2);
+		const hasTagGameFilter = (request: WireRequest) => filters(request).some((filter) => (filter.kinds as number[] | undefined)?.includes(TAG_GAME_KIND));
+		f.authorities.forEach((relay) => {
+			relay.onRequest = (socket, request) => { if (!hasTagGameFilter(request)) send(socket, 'EOSE', request[1]); };
+		});
+		await f.start();
+		const onSupplementalEvent = vi.fn();
+		const initial = f.transport.startRealtime({ ...realtimeInput([]), supplementalFilters: [{ kinds: [TAG_GAME_KIND], '#e': [f.channel.id] }], onSupplementalEvent });
+		await vi.advanceTimersByTimeAsync(30);
+		const initialRequests = f.authorities.map((relay) => relay.requests.findLast(hasTagGameFilter)!);
+		// Both Relay-specific initial REQs are outstanding before either terminal arrives.
+		expect(initialRequests.every(Boolean)).toBe(true);
+		send(f.authorities[0].latestSocket(), 'EOSE', initialRequests[0][1]);
+		await initial;
+
+		const historical = finalizeEvent({ kind: TAG_GAME_KIND, created_at: TIME,
+			tags: [['d', 'host:run:initial-history'], ['e', f.channel.id], ['t', 'tag-game']], content: '{}' }, AUTHOR);
+		send(f.authorities[1].latestSocket(), 'EVENT', initialRequests[1][1], historical);
+		expect(onSupplementalEvent).toHaveBeenLastCalledWith(historical, 'bootstrap');
+		send(f.authorities[1].latestSocket(), 'EOSE', initialRequests[1][1]);
+		const initialLive = finalizeEvent({ kind: TAG_GAME_KIND, created_at: TIME + 1,
+			tags: [['d', 'host:run:initial-live'], ['e', f.channel.id], ['t', 'tag-game']], content: '{}' }, AUTHOR);
+		send(f.authorities[1].latestSocket(), 'EVENT', initialRequests[1][1], initialLive);
+		expect(onSupplementalEvent).toHaveBeenLastCalledWith(initialLive, 'live');
+
+		let relayOneRealtimeReqCount = 0;
+		f.authorities[1].onRequest = (socket, request) => {
+			if (hasTagGameFilter(request)) { relayOneRealtimeReqCount += 1; return; }
+			send(socket, 'EOSE', request[1]);
+		};
+		f.authorities[1].latestSocket().close({ code: 1001, reason: 'per-relay realtime reconnect', wasClean: true });
+		await vi.advanceTimersByTimeAsync(5_000);
+		const reconnectRequest = f.authorities[1].requests.filter(hasTagGameFilter).at(-1)!;
+		expect(relayOneRealtimeReqCount).toBeGreaterThan(0);
+		expect(f.transport.getDiagnostics().realtime.relays.find((relay) => relay.relayUrl === f.authorities[1].url)?.status).toBe('pending');
+		const reconnectHistory = finalizeEvent({ kind: TAG_GAME_KIND, created_at: TIME + 2,
+			tags: [['d', 'host:run:reconnect-history'], ['e', f.channel.id], ['t', 'tag-game']], content: '{}' }, AUTHOR);
+		send(f.authorities[1].latestSocket(), 'EVENT', reconnectRequest[1], reconnectHistory);
+		expect(onSupplementalEvent).toHaveBeenLastCalledWith(reconnectHistory, 'bootstrap');
+		send(f.authorities[1].latestSocket(), 'EOSE', reconnectRequest[1]);
+		const reconnectLive = finalizeEvent({ kind: TAG_GAME_KIND, created_at: TIME + 3,
+			tags: [['d', 'host:run:reconnect-live'], ['e', f.channel.id], ['t', 'tag-game']], content: '{}' }, AUTHOR);
+		send(f.authorities[1].latestSocket(), 'EVENT', reconnectRequest[1], reconnectLive);
+		expect(onSupplementalEvent).toHaveBeenLastCalledWith(reconnectLive, 'live');
 	});
 
 	it('does not reuse a disconnected Relay EOSE before the reconnect REQ reaches EOSE', async () => {
@@ -653,7 +700,43 @@ describe('supplemental realtime event lifecycle', () => {
 		expect(filters(realtimeRequest)).toContainEqual(actionFilter);
 		expect(result.events).toEqual([]);
 		expect(onSupplementalEvent.mock.calls.map(([event]) => (event as Event).kind).sort()).toEqual([TAG_GAME_ACTION_KIND, TAG_GAME_KIND]);
+		expect(onSupplementalEvent.mock.calls.every(([, delivery]) => delivery === 'bootstrap')).toBe(true);
 		expect(f.transport.getDiagnostics().primaryPairs).toHaveLength(2);
+	});
+
+	it('classifies restored supplemental state during reconnect as bootstrap until the current REQ reaches EOSE', async () => {
+		const f = fixture(1);
+		const relay = f.authorities[0];
+		const hasTagGameFilter = (request: WireRequest) => filters(request).some((filter) => (filter.kinds as number[] | undefined)?.includes(TAG_GAME_KIND));
+		const restored = finalizeEvent({ kind: TAG_GAME_KIND, created_at: TIME - 1,
+			tags: [['d', 'host:run:game'], ['e', f.channel.id], ['t', 'tag-game']], content: '{}' }, AUTHOR);
+		let realtimeRequestCount = 0;
+		relay.onRequest = (socket, request) => {
+			if (hasTagGameFilter(request)) {
+				realtimeRequestCount += 1;
+				if (realtimeRequestCount > 1) send(socket, 'EVENT', request[1], restored);
+				else send(socket, 'EOSE', request[1]);
+				return;
+			}
+			send(socket, 'EOSE', request[1]);
+		};
+		await f.start();
+		const onSupplementalEvent = vi.fn();
+		const initial = f.transport.startRealtime({ ...realtimeInput([]), supplementalFilters: [{ kinds: [TAG_GAME_KIND], '#e': [f.channel.id] }], onSupplementalEvent });
+		await vi.advanceTimersByTimeAsync(30);
+		await initial;
+		relay.latestSocket().close({ code: 1001, reason: 'realtime state restore', wasClean: true });
+		await vi.advanceTimersByTimeAsync(5_000);
+		expect(onSupplementalEvent).toHaveBeenCalledExactlyOnceWith(restored, 'bootstrap');
+		const currentRequest = relay.requests.filter(hasTagGameFilter).at(-1)!;
+		expect(f.transport.getDiagnostics().realtime.relays[0].status).toBe('pending');
+		send(relay.latestSocket(), 'EOSE', currentRequest[1]);
+		expect(f.transport.getDiagnostics().realtime.relays[0].status).toBe('eose');
+		const live = finalizeEvent({ kind: TAG_GAME_KIND, created_at: TIME + 1,
+			tags: [['d', 'host:run:game'], ['e', f.channel.id], ['t', 'tag-game']], content: '{"revision":1}' }, AUTHOR);
+		send(relay.latestSocket(), 'EVENT', currentRequest[1], live);
+		expect(onSupplementalEvent).toHaveBeenCalledTimes(2);
+		expect(onSupplementalEvent).toHaveBeenLastCalledWith(live, 'live');
 	});
 
 	it('uses an independent kind-7070 subscription and preserves the two primary subscriptions', async () => {

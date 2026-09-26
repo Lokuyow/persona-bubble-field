@@ -5,10 +5,10 @@
 	import Tool from '~icons/tabler/tool';
 	import Wallet from '~icons/tabler/wallet';
 	import { Meter } from 'bits-ui';
-	import { formatMendingRate, formatRemainingDuration, formatRemainingLifespan } from '$lib/lifespanHud';
+	import { formatMendingRate, formatRemainingLifespan } from '$lib/lifespanHud';
 	import type { MendingProjection } from '$lib/mending';
 	import type { TagGameHudProjection } from '$lib/tagGameHud';
-	import { projectUnifiedStatusMeterValues, STATUS_HUD_POINTS_MAX } from '$lib/unifiedStatusHud';
+	import { getStatusValueChangeDirection, projectUnifiedStatusMeterValues, STATUS_HUD_POINTS_MAX, type StatusValueChangeDirection } from '$lib/unifiedStatusHud';
 
 	type Props = Readonly<{
 		expiresAtMs: number;
@@ -18,27 +18,98 @@
 		hasJob: boolean;
 		mendingProjection: MendingProjection | null;
 		tagGameProjection?: TagGameHudProjection | null;
+		animationScope: string;
+		onTagGamePulse?: (effect: 'benefit' | 'calamity') => void;
 	}>;
 
-	let { expiresAtMs, nowMs, maximumLifespanMs, points, hasJob, mendingProjection, tagGameProjection = null }: Props = $props();
-	let remainingMs = $derived(Math.max(0, expiresAtMs - nowMs));
-	let meterValues = $derived(projectUnifiedStatusMeterValues(points, remainingMs, maximumLifespanMs));
+	let { expiresAtMs, nowMs, maximumLifespanMs, points, hasJob, mendingProjection, tagGameProjection = null, animationScope, onTagGamePulse }: Props = $props();
+	let currentPoints = $derived(tagGameProjection?.points ?? points);
+	let currentExpiresAtMs = $derived(tagGameProjection?.expiresAtMs ?? expiresAtMs);
+	let tagGameBenefitActive = $derived(tagGameProjection?.benefitRateActive ?? false);
+	let tagGameCalamityActive = $derived(tagGameProjection?.calamityRateActive ?? false);
+	let remainingMs = $derived(Math.max(0, currentExpiresAtMs - nowMs));
+	let meterValues = $derived(projectUnifiedStatusMeterValues(currentPoints, remainingMs, maximumLifespanMs));
 	let lifespanValue = $derived(meterValues.lifespan);
-	let lifespanText = $derived(formatRemainingLifespan(expiresAtMs, nowMs).replace(/^寿命\s+/, ''));
+	let lifespanText = $derived(formatRemainingLifespan(currentExpiresAtMs, nowMs).replace(/^寿命\s+/, ''));
 	let pointValue = $derived(meterValues.points);
-	let formattedPoints = $derived(points.toLocaleString('en-US'));
+	let formattedPoints = $derived(currentPoints.toLocaleString('en-US'));
 	let mendingState = $derived(!hasJob || !mendingProjection ? null : !mendingProjection.completed ? '作業中' : mendingProjection.lifespanExtensionRateHundredthsPerHour > 0 ? '延命中' : '作業停止中');
 	let pointRate = $derived(hasJob && mendingProjection ? `${(mendingProjection.pointRateHundredthsPerMinute / 100).toFixed(2)} pt/分` : null);
 	let lifespanRate = $derived(hasJob && mendingProjection ? `+${formatMendingRate(mendingProjection.lifespanExtensionRateHundredthsPerHour, 100)}h/h` : null);
 	let lifespanAriaValue = $derived(`${lifespanText}、最大 ${maximumLifespanMs / (24 * 60 * 60 * 1_000)}日`);
+	type ChangeFeedback = Readonly<{ sequence: number; direction: StatusValueChangeDirection }>;
+	let lifespanFeedback = $state<ChangeFeedback | null>(null);
+	let pointsFeedback = $state<ChangeFeedback | null>(null);
+	let lastScope: string | null = null;
+	let lastPoints: number | null = null;
+	let lastEffectiveExpiresAtMs: number | null = null;
+	let feedbackSequence = 0;
+
+	$effect.pre(() => {
+		const scope = animationScope;
+		const nextPoints = currentPoints;
+		// The effective deadline changes when actual projected lifespan changes;
+		// the ordinary wall-clock countdown changes only `nowMs`.
+		const nextExpiresAtMs = currentExpiresAtMs;
+		if (lastScope !== scope) {
+			lastScope = scope;
+			lastPoints = nextPoints;
+			lastEffectiveExpiresAtMs = nextExpiresAtMs;
+			lifespanFeedback = null;
+			pointsFeedback = null;
+			return;
+		}
+		if (lastPoints !== null) {
+			const direction = getStatusValueChangeDirection(lastPoints, nextPoints);
+			if (direction) pointsFeedback = { sequence: ++feedbackSequence, direction };
+		}
+		if (lastEffectiveExpiresAtMs !== null) {
+			const direction = getStatusValueChangeDirection(lastEffectiveExpiresAtMs, nextExpiresAtMs);
+			if (direction) lifespanFeedback = { sequence: ++feedbackSequence, direction };
+		}
+		lastPoints = nextPoints;
+		lastEffectiveExpiresAtMs = nextExpiresAtMs;
+	});
+
+	$effect(() => {
+		const sequence = lifespanFeedback?.sequence;
+		if (sequence === undefined) return;
+		const timeout = window.setTimeout(() => {
+			if (lifespanFeedback?.sequence === sequence) lifespanFeedback = null;
+		}, 750);
+		return () => window.clearTimeout(timeout);
+	});
+	$effect(() => {
+		const sequence = pointsFeedback?.sequence;
+		if (sequence === undefined) return;
+		const timeout = window.setTimeout(() => {
+			if (pointsFeedback?.sequence === sequence) pointsFeedback = null;
+		}, 750);
+		return () => window.clearTimeout(timeout);
+	});
+	function valueClass(feedback: ChangeFeedback | null): string {
+		return feedback ? `value-changed value-${feedback.direction}` : '';
+	}
+	function handleTagGamePulse(event: AnimationEvent, effect: 'benefit' | 'calamity'): void {
+		if (event.target !== event.currentTarget || !event.animationName.endsWith('tag-game-value-pulse') ||
+			(effect === 'benefit' ? !tagGameBenefitActive : !tagGameCalamityActive) ||
+			window.matchMedia('(prefers-reduced-motion: reduce)').matches || document.hidden) return;
+		onTagGamePulse?.(effect);
+	}
 </script>
 
-<section class="unified-status-hud" aria-label="寿命とポイント" data-unified-status-hud data-saved-points={points} data-maximum-lifespan-ms={maximumLifespanMs} data-tag-game-projection={tagGameProjection ? 'true' : undefined}>
+<section class="unified-status-hud" aria-label="寿命とポイント" data-unified-status-hud data-saved-points={points} data-base-expires-at-ms={expiresAtMs} data-current-points={currentPoints} data-current-expires-at-ms={currentExpiresAtMs} data-current-remaining-ms={remainingMs} data-maximum-lifespan-ms={maximumLifespanMs} data-tag-game-projection={tagGameProjection ? 'true' : undefined}>
 	<div class="meter-grid">
 		<div class="meter-row lifespan-row">
 			<div class="meter-heading">
 				<span class="meter-label"><Heart aria-hidden="true" />寿命</span>
-				<strong class="lifespan-value" data-lifespan-value>{lifespanText}</strong>
+				<strong class={['lifespan-value', valueClass(lifespanFeedback), { 'tag-game-calamity': tagGameCalamityActive }]}
+					data-lifespan-value data-value-change={lifespanFeedback?.direction} data-value-change-sequence={lifespanFeedback?.sequence}
+					data-tag-game-flash={tagGameCalamityActive ? 'calamity' : undefined}
+					onanimationstart={(event) => handleTagGamePulse(event, 'calamity')}
+					onanimationiteration={(event) => handleTagGamePulse(event, 'calamity')}>
+					{lifespanText}
+				</strong>
 			</div>
 			<Meter.Root class="status-meter lifespan-meter" value={lifespanValue} min={0} max={maximumLifespanMs} aria-label="寿命" aria-valuetext={lifespanAriaValue} data-lifespan-meter data-meter-value={lifespanValue}>
 				<div class="meter-fill lifespan-fill" style={`width:${maximumLifespanMs > 0 ? lifespanValue / maximumLifespanMs * 100 : 0}%`}></div>
@@ -47,27 +118,19 @@
 		<div class="meter-row points-row">
 			<div class="meter-heading">
 				<span class="meter-label"><Wallet aria-hidden="true" />ポイント</span>
-				<strong class="points-value" data-points-value>{formattedPoints}<span>pt</span></strong>
+				<strong class={['points-value', valueClass(pointsFeedback), { 'tag-game-benefit': tagGameBenefitActive }]}
+					data-points-value data-value-change={pointsFeedback?.direction} data-value-change-sequence={pointsFeedback?.sequence}
+					data-tag-game-flash={tagGameBenefitActive ? 'benefit' : undefined}
+					onanimationstart={(event) => handleTagGamePulse(event, 'benefit')}
+					onanimationiteration={(event) => handleTagGamePulse(event, 'benefit')}>
+					{formattedPoints}<span>pt</span>
+				</strong>
 			</div>
 			<Meter.Root class="status-meter points-meter" value={pointValue} min={0} max={STATUS_HUD_POINTS_MAX} aria-label="ポイント" aria-valuetext={`${formattedPoints}pt、${STATUS_HUD_POINTS_MAX.toLocaleString('en-US')}ptまで`} data-points-meter data-meter-value={pointValue}>
 				<div class="meter-fill points-fill" style={`width:${pointValue / STATUS_HUD_POINTS_MAX * 100}%`}></div>
 			</Meter.Root>
 		</div>
 	</div>
-	{#if tagGameProjection && (tagGameProjection.confirmedLossNotSavedMs > 0 || tagGameProjection.predictedLossMs > 0 || tagGameProjection.calamityRateActive)}
-		<div class="projection-row lifespan-projection" data-tag-game-projection-row="lifespan">
-			{#if tagGameProjection.calamityRateActive}<strong>−1時間/秒・予測中</strong>{/if}
-			{#if tagGameProjection.confirmedLossNotSavedMs > 0}<span>鬼ごっこ確定分 −{formatRemainingDuration(tagGameProjection.confirmedLossNotSavedMs)}・保存待ち</span>{/if}
-			{#if tagGameProjection.predictedLossMs > 0}<span>未確定予測 −{formatRemainingDuration(tagGameProjection.predictedLossMs)}</span>{/if}
-		</div>
-	{/if}
-	{#if tagGameProjection && (tagGameProjection.confirmedPointsNotSaved > 0 || tagGameProjection.predictedPoints > 0 || tagGameProjection.benefitRateActive)}
-		<div class="projection-row points-projection" data-tag-game-projection-row="points">
-			{#if tagGameProjection.benefitRateActive}<strong>+50pt/秒・予測中</strong>{/if}
-			{#if tagGameProjection.confirmedPointsNotSaved > 0}<span>鬼ごっこ確定分 +{tagGameProjection.confirmedPointsNotSaved.toLocaleString('en-US')}pt・保存待ち</span>{/if}
-			{#if tagGameProjection.predictedPoints > 0}<span>未確定予測 +{tagGameProjection.predictedPoints.toLocaleString('en-US')}pt</span>{/if}
-		</div>
-	{/if}
 	{#if mendingState}
 		<div class="mending-row" data-mending-row>
 			<span class="mending-status" data-mending-status data-mending-icon={mendingState === '作業中' ? 'tool' : mendingState === '延命中' ? 'heart-plus' : 'player-pause'} role="img" aria-label={mendingState}>
@@ -99,15 +162,18 @@
 		.meter-heading { min-width: 0; display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 		.meter-label { display: inline-flex; align-items: center; gap: 6px; color: rgba(226, 230, 255, .82); font-size: .9em; font-weight: 700; }
 		.meter-label :global(svg) { width: 15px; height: 15px; }
-		.lifespan-value, .points-value { font-size: 1.05em; font-weight: 780; font-variant-numeric: tabular-nums; }
-		.points-value { color: #fff; }
+		.lifespan-value, .points-value { position: relative; font-size: 1.05em; font-weight: 780; font-variant-numeric: tabular-nums; --normal-value-color: rgba(239, 241, 255, .94); --change-color: #57e68a; color: var(--normal-value-color); }
+		.points-value { --normal-value-color: #fff; }
 		.points-value span { margin-left: 3px; font-size: .9em; font-weight: 700; }
+		.value-changed { color: var(--change-color); }
+		.value-increase { --change-color: #57e68a; }
+		.value-decrease { --change-color: #ff6875; }
+		.tag-game-benefit, .tag-game-calamity { --tag-game-color: #57e68a; animation: tag-game-value-pulse 1.5s linear infinite; }
+		.tag-game-calamity { --tag-game-color: #ff6875; }
 		:global(.status-meter) { box-sizing: border-box; display: block; position: relative; height: 14px; overflow: hidden; border: 1px solid rgba(236, 239, 255, .2); border-radius: 0; background: rgba(3, 7, 20, .58); }
 		.meter-fill { height: 100%; min-width: 0; border-radius: 0; transition: width 180ms linear; }
 		.lifespan-fill { background: linear-gradient(90deg, #e19b6b, #f2c47b); box-shadow: 0 0 10px rgba(241, 180, 114, .3); }
 		.points-fill { background: linear-gradient(90deg, #7b81ff, #b8adff); box-shadow: 0 0 10px rgba(135, 137, 255, .34); }
-		.projection-row { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 2px 12px; color: rgba(226, 230, 255, .86); font-size: .78em; }
-		.projection-row strong { color: #fff; font-weight: 750; }
 		.mending-row { display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: center; gap: 6px; }
 		.mending-status { display: grid; width: 16px; height: 16px; place-items: center; color: #b9b8ff; }
 		.mending-status :global(svg) { width: 16px; height: 16px; }
@@ -130,5 +196,12 @@
 			:global(.status-meter) { height: 12px; }
 		}
 	}
-	@media (prefers-reduced-motion: reduce) { .unified-status-hud .meter-fill { transition: none; } }
+	@keyframes tag-game-value-pulse {
+		0%, 29.99% { color: var(--tag-game-color); }
+		30%, 100% { color: var(--normal-value-color); }
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.unified-status-hud .meter-fill { transition: none; }
+		.unified-status-hud .tag-game-benefit, .unified-status-hud .tag-game-calamity { animation: none; color: var(--tag-game-color); }
+	}
 </style>

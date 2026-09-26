@@ -206,6 +206,18 @@ test.describe('Relay startup', () => {
 		expect(activeRowBoxes.rateLeft).toBeGreaterThanOrEqual(activeRowBoxes.statusRight);
 		expect(activeRowBoxes.lifespanLeft).toBeGreaterThan(activeRowBoxes.pointRight);
 		expect(Math.round(activeRowBoxes.lifespanRight)).toBe(Math.round(activeRowBoxes.rowRight));
+		await pauseAtCurrentBrowserTime(page);
+		const lifespanValue = page.locator('[data-unified-status-hud] [data-lifespan-value]');
+		const expiryBeforeWorkTick = Number(await page.locator('[data-unified-status-hud]').getAttribute('data-current-expires-at-ms'));
+		await page.clock.runFor(1_000);
+		await expect.poll(async () => Number(await page.locator('[data-unified-status-hud]').getAttribute('data-current-expires-at-ms'))).toBeGreaterThan(expiryBeforeWorkTick);
+		await expect(lifespanValue).toHaveAttribute('data-value-change', 'increase');
+		await expect(lifespanValue).toHaveCSS('color', 'rgb(87, 230, 138)');
+		await expect(lifespanValue).toHaveCSS('animation-name', 'none');
+		const firstWorkSequence = Number(await lifespanValue.getAttribute('data-value-change-sequence'));
+		await page.clock.runFor(1_000);
+		await expect.poll(async () => Number(await lifespanValue.getAttribute('data-value-change-sequence'))).toBeGreaterThan(firstWorkSequence);
+		await expect(lifespanValue).toHaveCSS('color', 'rgb(87, 230, 138)');
 		await page.getByRole('button', { name: '閉じる', exact: true }).click();
 		await expect(terminal).toBeFocused();
 
@@ -254,6 +266,15 @@ test.describe('Relay startup', () => {
 		}).toBe(true);
 		await expect.poll(publishedWorldStateCount).toBeGreaterThan(beforeMendingReward);
 		await expect(page.locator('.mending-success-feedback')).toContainText('+1 pt');
+		const hudPoints = page.locator('[data-unified-status-hud] [data-points-value]');
+		await expect(hudPoints).toHaveAttribute('data-value-change', 'increase');
+		await expect(hudPoints).toHaveCSS('color', 'rgb(87, 230, 138)');
+		await expect(hudPoints).toHaveCSS('animation-name', 'none');
+		await page.clock.runFor(500);
+		await expect(hudPoints).toHaveCSS('color', 'rgb(87, 230, 138)');
+		await page.clock.runFor(300);
+		await expect(hudPoints).not.toHaveAttribute('data-value-change', /.+/);
+		await expect(hudPoints).toHaveCSS('color', 'rgb(255, 255, 255)');
 
 		const secondAt = partialAt + 3 * 60 * 1000;
 		await page.clock.setSystemTime(secondAt);
@@ -421,9 +442,14 @@ test.describe('Relay startup', () => {
 		for (let index = 0; index < 12 && !(await upgradeButton.evaluate((button) => document.activeElement === button)); index++) await page.keyboard.press('Tab');
 		await expect(upgradeButton).toBeFocused();
 		await expect(upgradeButton).toHaveCSS('outline-style', 'solid');
+		await pauseAtCurrentBrowserTime(page);
 		await page.keyboard.press('Enter');
 		await page.keyboard.press('Enter');
 		await expect(dialog).toContainText('9 pt');
+		const hudPoints = page.locator('[data-unified-status-hud] [data-points-value]');
+		await expect(hudPoints).toHaveAttribute('data-value-change', 'decrease');
+		await expect(hudPoints).toHaveCSS('color', 'rgb(255, 104, 117)');
+		await expect(hudPoints).toHaveCSS('animation-name', 'none');
 		await expect.poll(async () => (await relayState(page)).state.published.filter((event) => event.kind === WORLD_STATE_KIND && event.pubkey === pubkey).length).toBeGreaterThan(beforeAbilityUpgrade);
 		await expect(dialog.locator('.level-up-badge')).toHaveCount(1);
 		const stableDuring = await upgradedCard.evaluate((card) => ({
@@ -432,6 +458,9 @@ test.describe('Relay startup', () => {
 			buttonY: card.querySelector('button')!.getBoundingClientRect().y
 		}));
 		expect(stableDuring).toEqual(stableBefore);
+		await page.clock.runFor(800);
+		await expect(hudPoints).not.toHaveAttribute('data-value-change', /.+/);
+		await expect(hudPoints).toHaveCSS('color', 'rgb(255, 255, 255)');
 		await expect(dialog.locator('.level-up-badge')).toHaveCount(0, { timeout: 1_500 });
 		const stableAfter = await upgradedCard.evaluate((card) => ({
 			typeY: card.querySelector('.ability-type')!.getBoundingClientRect().y,

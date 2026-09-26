@@ -74,14 +74,40 @@ describe('tag-game HUD projection', () => {
 		expect(settledAtSwitch.predictedLossMs).toBe(3_600_000);
 	});
 
-	it('stops rate and unconfirmed accumulation during holder challenges and after game time reaches its limit', () => {
+	it('freezes unconfirmed accumulation at game end and falls back to confirmed values at the final-wait deadline', () => {
 		const game = running('benefit');
 		const challenge = projectTagGameHud({ ...baseInput(game), game: { ...game, holderChallengeId: 'd'.repeat(32) } });
 		expect(challenge.predictedPoints).toBe(0);
 		expect(challenge.benefitRateActive).toBe(false);
-		const ended = projectTagGameHud({ ...baseInput(game), nowMs: 280_000 });
-		expect(ended.predictedPoints).toBe(0);
-		expect(ended.benefitRateActive).toBe(false);
+		const throughEnd = projectTagGameHud({ ...baseInput(game), holderActivityAtMs: 280_000, nowMs: 280_000 });
+		const afterEnd = projectTagGameHud({ ...baseInput(game), holderActivityAtMs: 280_000, nowMs: 290_000,
+			game: { ...game, phase: 'settling' } });
+		expect(throughEnd.predictedPoints).toBeGreaterThan(0);
+		expect(afterEnd.predictedPoints).toBe(throughEnd.predictedPoints);
+		expect(afterEnd.points).toBe(throughEnd.points);
+		expect(afterEnd.benefitRateActive).toBe(false);
+		const fallback = projectTagGameHud({ ...baseInput(game), holderActivityAtMs: 280_000, nowMs: 310_000 });
+		expect(fallback.predictedPoints).toBe(0);
+		expect(fallback.points).toBe(1_060);
+	});
+
+	it('stops the organizer display at its local safety-stop boundary', () => {
+		const game = running('benefit');
+		const beforeStop = projectTagGameHud({ ...baseInput(game), nowMs: 104_000, effectPausedAtMs: 103_000 });
+		expect(beforeStop.predictedPoints).toBe(150);
+		expect(beforeStop.points).toBe(1_210);
+		expect(beforeStop.benefitRateActive).toBe(false);
+		const resumed = projectTagGameHud({ ...baseInput(game), game: { ...game, settledAtMs: 106_000 }, nowMs: 107_000 });
+		expect(resumed.predictedPoints).toBe(50);
+		expect(resumed.points).toBe(1_110);
+	});
+
+	it('keeps the final confirmed cumulative value available without predicting after the game ends', () => {
+		const game = { ...running('benefit'), phase: 'ended' as const, participant: [{ ...running('benefit').participant[0], points: 250, benefitMs: 5_000 }] };
+		const final = projectTagGameHud({ ...baseInput(game), nowMs: 300_000 });
+		expect(final.points).toBe(1_210);
+		expect(final.predictedPoints).toBe(0);
+		expect(final.benefitRateActive).toBe(false);
 	});
 
 	it('formats a stable minute-second countdown and clamps at zero', () => {
