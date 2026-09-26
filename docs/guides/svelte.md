@@ -7,11 +7,17 @@ applicable specifications remain the Source of Truth.
 ## Components and styling
 
 - Use the shared `ActionButton` for ordinary actions and explicitly set its
-  `variant` to `primary`, `secondary`, or `tertiary`. A single interaction
-  surface may have at most one primary action; choose its role from the whole
-  surface state rather than DOM order. Keep destructive or game-state styling
-  distinct when its meaning requires it, and ensure disabled buttons do not
-  retain a saturated primary fill.
+  `variant` to `primary`, `secondary`, or `tertiary`. Use its `intent` to express
+  meaning independently: `cancel` for withdrawals, declines, and leaving an
+  activity; `danger` for genuinely irreversible or destructive actions. A
+  single interaction surface may have at most one primary action; choose its
+  role from the whole surface state rather than DOM order. Shared design tokens
+  define normal, hover, active, disabled, and focus-visible states. Every
+  enabled button must show its background or boundary in its normal state, and
+  a disabled primary must not retain a saturated fill. Preserve labels, icons,
+  keyboard behavior, and selected-state styling. Compact icon controls that
+  keep a specialized shape must use the shared icon-control tokens for their
+  colors and states.
 - Keep component-scoped CSS by default, avoid broad `:global(...)`, and do not
   add wrappers that change geometry, positioning, stacking, measurement, or SSR
   DOM contracts.

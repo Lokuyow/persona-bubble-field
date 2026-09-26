@@ -70,6 +70,15 @@ test.describe('Relay startup', () => {
 			await openReadyRelayWorld(page, 1);
 			const chatterToggle = page.locator('.chatter-toggle');
 			const suggestionsToggle = page.locator('.suggestions-toggle');
+			for (const control of [page.locator('.profile-trigger'), chatterToggle, page.locator('.speech-type-toggle'), suggestionsToggle]) {
+				const frame = await control.evaluate((element) => {
+					const style = getComputedStyle(element);
+					return { background: style.backgroundColor, border: style.borderStyle, width: style.borderWidth };
+				});
+				expect(frame.background).not.toBe('rgba(0, 0, 0, 0)');
+				expect(frame.border).toBe('solid');
+				expect(frame.width).toBe('1px');
+			}
 			await expect(page.getByRole('button', { name: 'AI発言候補を生成' })).toBeVisible();
 			await expect(suggestionsToggle.locator('svg')).toHaveCount(1);
 			await expect(suggestionsToggle).not.toContainText('候補');

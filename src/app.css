@@ -3,20 +3,47 @@
 	--color-accent: #cf06fe;
 	--color-accent-soft: #fbe9ff;
 	--color-focus-ring: #6dabb9;
-	--action-primary-background: color-mix(in srgb, var(--color-accent) 78%, #000 22%);
-	--action-primary-background-hover: color-mix(in srgb, var(--action-primary-background) 88%, #000 12%);
-	--action-primary-background-active: color-mix(in srgb, var(--action-primary-background) 76%, #000 24%);
+	--action-primary-background: color-mix(in srgb, var(--color-accent) 84%, #000 16%);
+	--action-primary-background-hover: color-mix(in srgb, var(--action-primary-background) 94%, #fff 6%);
+	--action-primary-background-active: color-mix(in srgb, var(--action-primary-background) 98%, #000 2%);
 	--action-primary-foreground: #fff;
 	--action-primary-border: color-mix(in srgb, var(--action-primary-background) 82%, #000 18%);
-	--action-secondary-background: #fff;
-	--action-secondary-background-hover: #f0f2f3;
-	--action-secondary-foreground: #303639;
-	--action-secondary-border: #858e92;
-	--action-tertiary-background-hover: #edf0f2;
-	--action-tertiary-foreground: #454d51;
+	--action-primary-disabled-background: #e6ddea;
+	--action-primary-disabled-border: #cfc1d6;
+	--action-secondary-background: #e8edf2;
+	--action-secondary-background-hover: #dce4eb;
+	--action-secondary-background-active: #cbd6e0;
+	--action-secondary-foreground: #29343d;
+	--action-secondary-border: #788895;
+	--action-tertiary-background: #f2f3f4;
+	--action-tertiary-background-hover: #e5e8ea;
+	--action-tertiary-background-active: #d7dcdf;
+	--action-tertiary-foreground: #3b4449;
+	--action-tertiary-border: #727c82;
+	--action-cancel-background: #f7e9ed;
+	--action-cancel-background-hover: #f0d9e0;
+	--action-cancel-background-active: #e8c7d1;
+	--action-cancel-foreground: #713746;
+	--action-cancel-border: #a6546b;
+	--action-danger-background: #fde9e7;
+	--action-danger-background-hover: #f8d7d3;
+	--action-danger-background-active: #efc0ba;
+	--action-danger-foreground: #8a251d;
+	--action-danger-border: #ae4a40;
 	--action-disabled-background: #dfe3e5;
-	--action-disabled-border: #bdc4c8;
+	--action-disabled-border: #858f94;
 	--action-disabled-foreground: #5d666a;
+	--action-focus-ring: #286f9b;
+	--action-icon-background: #f2f3f4;
+	--action-icon-background-hover: #e5e8ea;
+	--action-icon-background-active: #d7dcdf;
+	--action-icon-foreground: #3b4449;
+	--action-icon-border: #727c82;
+	--action-notification-background: #fff0e9;
+	--action-notification-background-hover: #fbe4d9;
+	--action-notification-background-active: #f2d4c6;
+	--action-notification-foreground: #803d31;
+	--action-notification-border: #975345;
 }
 
 @supports (color: oklch(63.2% 0.306 317.3)) {
@@ -74,7 +101,7 @@ button:not(:where(.trace-root-bubble, .trace-reply-content-button, .timeline-nam
 	justify-content: center;
 	gap: 8px;
 	padding: 8px 14px;
-	border: 1px solid transparent;
+	border: 1px solid var(--action-tertiary-border);
 	border-radius: 9px;
 	font: inherit;
 	font-weight: 750;
@@ -92,6 +119,7 @@ button:not(:where(.trace-root-bubble, .trace-reply-content-button, .timeline-nam
 
 .action-button-primary:hover:not(:disabled) { background: var(--action-primary-background-hover); }
 .action-button-primary:active:not(:disabled) { background: var(--action-primary-background-active); }
+.action-button-primary:disabled { background: var(--action-primary-disabled-background); border-color: var(--action-primary-disabled-border); }
 
 .action-button-secondary {
 	border-color: var(--action-secondary-border);
@@ -99,16 +127,56 @@ button:not(:where(.trace-root-bubble, .trace-reply-content-button, .timeline-nam
 	color: var(--action-secondary-foreground);
 }
 
+:where(.selection-dialog, .adjustment-dialog-content, .mending-dialog-content, .game-hud) {
+	--action-secondary-background: #30374a;
+	--action-secondary-background-hover: #3c4459;
+	--action-secondary-background-active: #485168;
+	--action-secondary-foreground: #f4f6ff;
+	--action-secondary-border: #8290a9;
+	--action-tertiary-background: #30374a;
+	--action-tertiary-background-hover: #3c4459;
+	--action-tertiary-background-active: #485168;
+	--action-tertiary-border: #8290a9;
+	--action-tertiary-foreground: #f4f6ff;
+	--action-disabled-background: #424858;
+	--action-disabled-border: #778096;
+	--action-disabled-foreground: #d2d6df;
+}
+
 .action-button-secondary:hover:not(:disabled) { background: var(--action-secondary-background-hover); }
-.action-button-secondary:active:not(:disabled) { background: color-mix(in srgb, var(--action-secondary-background-hover) 75%, #000 25%); }
+.action-button-secondary:active:not(:disabled) { background: var(--action-secondary-background-active); }
 
 .action-button-tertiary {
-	border-color: transparent;
-	background: transparent;
+	border-color: var(--action-tertiary-border);
+	background: var(--action-tertiary-background);
 	color: var(--action-tertiary-foreground);
 }
 
-.action-button-tertiary:hover:not(:disabled), .action-button-tertiary:active:not(:disabled) { background: var(--action-tertiary-background-hover); }
+.action-button-tertiary:hover:not(:disabled) { background: var(--action-tertiary-background-hover); }
+.action-button-tertiary:active:not(:disabled) { background: var(--action-tertiary-background-active); }
+
+.action-button-intent-cancel.action-button-primary,
+.action-button-intent-cancel.action-button-secondary,
+.action-button-intent-cancel.action-button-tertiary {
+	border-color: var(--action-cancel-border);
+	background: var(--action-cancel-background);
+	color: var(--action-cancel-foreground);
+}
+.action-button-intent-cancel:hover:not(:disabled) { background: var(--action-cancel-background-hover); }
+.action-button-intent-cancel:active:not(:disabled) { background: var(--action-cancel-background-active); }
+
+.action-button-intent-danger.action-button-primary,
+.action-button-intent-danger.action-button-secondary,
+.action-button-intent-danger.action-button-tertiary {
+	border-color: var(--action-danger-border);
+	background: var(--action-danger-background);
+	color: var(--action-danger-foreground);
+}
+.action-button-intent-danger.action-button-primary:not(:disabled) { border-color: #a93228; background: #b63d32; color: #fff; }
+.action-button-intent-danger:hover:not(:disabled) { background: var(--action-danger-background-hover); }
+.action-button-intent-danger:active:not(:disabled) { background: var(--action-danger-background-active); }
+.action-button-intent-danger.action-button-primary:hover:not(:disabled) { background: #a93228; }
+.action-button-intent-danger.action-button-primary:active:not(:disabled) { background: #91281f; }
 
 .action-button:disabled {
 	border-color: var(--action-disabled-border);
@@ -118,7 +186,7 @@ button:not(:where(.trace-root-bubble, .trace-reply-content-button, .timeline-nam
 	cursor: not-allowed;
 }
 
-.action-button:focus-visible { outline: 3px solid var(--color-focus-ring); outline-offset: 3px; }
+.action-button:focus-visible { outline: 3px solid var(--action-focus-ring); outline-offset: 3px; }
 
 @media (prefers-reduced-motion: reduce) {
 	.action-button { transition-duration: 0.01ms; }

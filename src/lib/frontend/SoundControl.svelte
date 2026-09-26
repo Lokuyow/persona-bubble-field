@@ -33,8 +33,10 @@
 </div>
 
 <style>
-	.sound-control { position: relative; z-index: 10; justify-self: end; margin-right: max(2px, env(safe-area-inset-right)); }
-	:global(.speaker-button) { width: 44px; height: 44px; padding: 0; border: 0; border-radius: 0; background: transparent; color: white; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+	.sound-control { --action-icon-background: #202a40; --action-icon-background-hover: #303e5a; --action-icon-background-active: #3b4c69; --action-icon-border: #9aa9c1; --action-icon-foreground: #fff; position: relative; z-index: 10; justify-self: end; margin-right: max(2px, env(safe-area-inset-right)); }
+	:global(.speaker-button) { width: 44px; height: 44px; padding: 0; border: 1px solid var(--action-icon-border); border-radius: 50%; background: var(--action-icon-background); color: var(--action-icon-foreground); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+	:global(.speaker-button:hover) { background: var(--action-icon-background-hover); }
+	:global(.speaker-button:active) { background: var(--action-icon-background-active); }
 	:global(.speaker-button:focus-visible) { outline: 3px solid var(--color-focus-ring); outline-offset: 2px; }
 	.speaker-icon { display: inline-flex; width: 24px; height: 24px; align-items: center; justify-content: center; }
 	.speaker-icon :global(svg) { width: 24px; height: 24px; }

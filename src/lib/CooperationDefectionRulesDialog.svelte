@@ -35,7 +35,7 @@
 					<div class="cooperation-defection-dialog-actions">
 						<ActionButton variant="primary" type="button" onclick={onJoin}>参加する</ActionButton>
 						<ActionButton variant="secondary" type="button" onclick={onViewRules}>ルールを見る</ActionButton>
-						<ActionButton variant="tertiary" type="button" onclick={onCancel}>キャンセル</ActionButton>
+						<ActionButton variant="tertiary" intent="cancel" type="button" onclick={onCancel}>キャンセル</ActionButton>
 					</div>
 				{:else}
 					<div class="cooperation-defection-rules-body">

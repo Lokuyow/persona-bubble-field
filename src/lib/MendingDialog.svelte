@@ -163,7 +163,6 @@
 <style>
 	:global(.mending-dialog-overlay) { position: fixed; inset: 0; z-index: 100; background: rgba(2, 8, 18, 0.72); backdrop-filter: blur(2px); }
 	:global(.mending-dialog-content) { position: fixed; top: 50%; left: 50%; z-index: 101; display: grid; gap: 0; width: min(720px, calc(100vw - 24px)); max-height: calc(100svh - 32px); overflow: auto; padding: 28px; border: 1px solid rgba(35, 220, 226, .78); border-radius: 18px; background: linear-gradient(180deg, rgba(4, 29, 43, .92), rgba(3, 20, 30, .94)); box-shadow: 0 0 0 1px rgba(53, 227, 232, .10) inset, 0 18px 60px rgba(0, 0, 0, .42), 0 0 30px rgba(26, 212, 220, .08); backdrop-filter: blur(14px); color: #ecfbff; transform: translate(-50%, -50%); }
-	:global(.mending-dialog-content) { --action-secondary-background: rgba(255, 255, 255, .08); --action-secondary-background-hover: rgba(255, 255, 255, .14); --action-secondary-foreground: #ecfbff; --action-secondary-border: rgba(207, 230, 239, .48); --action-tertiary-background-hover: rgba(255, 255, 255, .1); --action-tertiary-foreground: #ecfbff; --action-disabled-background: #34434a; --action-disabled-border: #506168; --action-disabled-foreground: #d3e0e3; }
 	.mending-success-feedback { position: absolute; top: 72px; right: 34px; z-index: 1; display: grid; gap: 2px; pointer-events: none; color: #64f5f0; text-align: right; animation: mending-success-float 420ms ease-out both; }
 	.mending-success-feedback strong { font-size: 18px; font-weight: 850; }
 	.mending-success-feedback span { color: #cfe7ee; font-size: 13px; font-weight: 700; }

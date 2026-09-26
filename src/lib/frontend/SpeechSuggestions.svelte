@@ -3,6 +3,7 @@
 	import Sparkles2 from '~icons/tabler/sparkles-2';
 	import { Tooltip } from 'bits-ui';
 	import { onMount } from 'svelte';
+	import ActionButton from '$lib/ActionButton.svelte';
 	import type { Character } from '$lib/character';
 	import type { SpeechType } from '$lib/conversation';
 	import {
@@ -162,13 +163,14 @@
 			<div class="suggestion-panel" aria-label="発言候補">
 				<div class="suggestion-header">
 					<p class="suggestion-heading">発言候補</p>
-					<button
+					<ActionButton
+						variant="tertiary"
 						class="suggestion-close"
 						type="button"
 						aria-label="発言候補を閉じる"
 						title="発言候補を閉じる"
 						onclick={() => { panelOpen = false; }}
-					><X aria-hidden="true" /></button>
+					><X aria-hidden="true" /></ActionButton>
 				</div>
 				{#each candidates as candidate, index}
 					<div class="suggestion-item">
@@ -183,14 +185,15 @@
 							<span class="suggestion-index" aria-hidden="true">{index + 1}</span>
 							<span class="suggestion-content">{candidate}</span>
 						</button>
-						<button
+						<ActionButton
+							variant="secondary"
 							class="suggestion-secondary"
 							type="button"
 							disabled={busy || editorIsEmpty !== true}
 							aria-label={`候補${index + 1}をコンポーザーに追加`}
 							title="コンポーザーに追加"
 							onclick={() => void addCandidate(candidate)}
-						>追加</button>
+						>追加</ActionButton>
 					</div>
 				{/each}
 			</div>
@@ -221,11 +224,11 @@
 		height: 100%;
 		min-height: 0;
 		padding: 0;
-		border: 1px solid rgba(57, 67, 64, 0.2);
+		border: 1px solid var(--action-icon-border);
 		border-radius: 12px;
-		background: rgba(255, 255, 255, 0.86);
+		background: var(--action-icon-background);
 		box-shadow: 0 5px 12px rgba(58, 70, 61, 0.1);
-		color: #3f4a47;
+		color: var(--action-icon-foreground);
 		font-size: 10px;
 		font-weight: 800;
 		line-height: 1.15;
@@ -233,8 +236,10 @@
 	.suggestions-tooltip-trigger { display: block; width: 100%; height: 100%; }
 	.suggestions-toggle-icon { display: inline-flex; width: 24px; height: 24px; align-items: center; justify-content: center; }
 	.suggestions-toggle-icon :global(svg) { width: 24px; height: 24px; }
+	.suggestions-toggle:hover:not(:disabled) { background: var(--action-icon-background-hover); }
+	.suggestions-toggle:active:not(:disabled) { background: var(--action-icon-background-active); }
 
-	.suggestions-toggle:disabled { cursor: wait; opacity: 0.58; }
+	.suggestions-toggle:disabled { border-color: var(--action-disabled-border); background: var(--action-disabled-background); color: var(--action-disabled-foreground); cursor: wait; }
 	.suggestions-toggle:focus-visible { outline: 3px solid var(--color-focus-ring); outline-offset: 2px; }
 
 	.suggestion-panel {
@@ -259,17 +264,11 @@
 		width: 44px;
 		height: 44px;
 		padding: 0;
-		border: 0;
-		border-radius: 0;
-		background: transparent;
-		color: #59635e;
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
 	}
 	.suggestion-close :global(svg) { width: 24px; height: 24px; }
-	.suggestion-close:hover { background: transparent; }
-	.suggestion-close:focus-visible { outline: 3px solid var(--color-focus-ring); outline-offset: 1px; }
 	.suggestion-item {
 		display: grid;
 		grid-template-columns: minmax(0, 1fr) auto;
@@ -301,15 +300,10 @@
 		align-self: stretch;
 		min-width: 48px;
 		padding: 6px 8px;
-		border: 1px solid rgba(57, 67, 64, 0.2);
-		border-radius: 8px;
-		background: rgba(245, 241, 233, 0.9);
-		color: #59635e;
 		font: inherit;
 		font-size: 11px;
 		font-weight: 800;
 	}
-	.suggestion-secondary:hover:not(:disabled) { background: #e9f0e7; }
 	.suggestion-content { min-width: 0; overflow-wrap: anywhere; }
 	.suggestion-index { flex: 0 0 18px; color: #728379; font-weight: 800; text-align: center; }
 	.suggestion-status {

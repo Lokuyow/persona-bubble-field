@@ -103,8 +103,8 @@ test.describe('DEV World Sandbox', () => {
 			const style = getComputedStyle(element);
 			return { border: style.border, background: style.backgroundColor, boxShadow: style.boxShadow, backdropFilter: style.backdropFilter };
 		});
-		expect(speakerChrome.border).toBe('0px none rgb(255, 255, 255)');
-		expect(speakerChrome.background).toBe('rgba(0, 0, 0, 0)');
+		expect(speakerChrome.border).toBe('1px solid rgb(154, 169, 193)');
+		expect(speakerChrome.background).toBe('rgb(32, 42, 64)');
 		expect(speakerChrome.boxShadow).toBe('none');
 		expect(speakerChrome.backdropFilter).toBe('none');
 		await expect(page.locator('[data-sound-icon="volume-2"]')).toBeVisible();

@@ -6,11 +6,12 @@
 		children?: Snippet;
 		class?: string;
 		variant: 'primary' | 'secondary' | 'tertiary';
+		intent?: 'normal' | 'cancel' | 'danger';
 	}>;
 
-	let { children, class: className, variant, ...buttonProps }: Props = $props();
+	let { children, class: className, variant, intent = 'normal', ...buttonProps }: Props = $props();
 </script>
 
-<button class={['action-button', `action-button-${variant}`, className]} data-action-variant={variant} {...buttonProps}>
+<button class={['action-button', `action-button-${variant}`, `action-button-intent-${intent}`, className]} data-action-variant={variant} data-action-intent={intent} {...buttonProps}>
 	{#if children}{@render children()}{/if}
 </button>

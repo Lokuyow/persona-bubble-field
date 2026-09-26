@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Dialog, Popover, ScrollArea } from 'bits-ui';
+	import ActionButton from '$lib/ActionButton.svelte';
 	import HelpCircle from '~icons/tabler/help-circle';
 	import Heart from '~icons/tabler/heart';
 	import Wallet from '~icons/tabler/wallet';
@@ -99,7 +100,7 @@
 							<div class="clear-progress" role="progressbar" aria-label="脱出に必要なポイント" aria-valuemin="0" aria-valuemax="100000" aria-valuenow={points}><span style={`width: ${clearProgress}%;`}></span></div>
 							<p>未回収の作業ポイントは含まれません。</p>
 							{#if clearBlockedReason && !pointBlocked}<p class="clear-reason">clear不可: {clearBlockedReason}</p>{/if}
-							<button class="clear-button" type="button" disabled={clearBlocked} onclick={onClear}>脱出</button>
+							<ActionButton variant="secondary" intent="danger" class="clear-button" type="button" disabled={clearBlocked} onclick={onClear}>脱出</ActionButton>
 							</div>
 						</section>
 						</div>
@@ -151,9 +152,10 @@
 	.clear-title-row h3 { margin: 0; color: #8c584b; font-size: 16px; font-weight: 900; }
 	.clear-title-row strong { color: #8c584b; font-size: 13px; }
 	.clear-section p { margin: 0; color: #765d58; font-size: 13px; line-height: 1.45; }
-	:global(.escape-info-trigger) { display: inline-flex; width: 32px; height: 32px; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: 999px; background: transparent; color: #8c665d; cursor: pointer; }
+	:global(.escape-info-trigger) { display: inline-flex; width: 32px; height: 32px; align-items: center; justify-content: center; padding: 0; border: 1px solid #c89a8a; border-radius: 999px; background: #fff8f4; color: #8c665d; cursor: pointer; }
 	:global(.escape-info-trigger svg) { width: 18px; height: 18px; }
-	:global(.escape-info-trigger:hover) { background: rgba(156, 104, 87, .1); }
+	:global(.escape-info-trigger:hover) { background: #f8e7df; }
+	:global(.escape-info-trigger:active) { background: #efd4c8; }
 	:global(.escape-info-trigger:focus-visible) { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
 	:global(.escape-info-popover) { z-index: 110; box-sizing: border-box; width: min(330px, calc(100vw - 32px)); max-height: min(420px, var(--bits-floating-available-height, calc(100dvh - 64px))); overflow-y: auto; padding: 14px; border: 1px solid #ddb9a8; border-radius: 12px; background: #fff1eb; box-shadow: 0 14px 32px rgba(32, 42, 38, .24); color: #765d58; }
 	:global(.escape-info-items) { display: grid; gap: 12px; }
@@ -166,8 +168,7 @@
 	.clear-progress { height: 9px; overflow: hidden; border: 1px solid #d8b3a5; border-radius: 999px; background: #f0dcd4; }
 	.clear-progress span { display: block; min-width: 2px; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #d98d76, #e6ad92); }
 	.clear-reason { color: #8c584b !important; font-weight: 800; }
-	.clear-button { min-height: 46px; border: 1px solid rgba(156, 104, 87, .3); border-radius: 9px; background: #e5c7ba; color: #876e67; font: inherit; font-weight: 900; cursor: pointer; }
-	.clear-button:disabled { cursor: not-allowed; }
+	:global(.clear-button) { min-height: 46px; border-radius: 9px; font-weight: 900; }
 	.self-profile-footer { display: flex; justify-content: flex-end; }
 	:global(.self-profile-close) { min-height: 44px; padding: 0 18px; border-radius: 999px; font-size: 13px; font-weight: 900; }
 	:global(.self-profile-content button:focus-visible) { outline: 3px solid var(--color-focus-ring); outline-offset: 2px; }

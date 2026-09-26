@@ -575,10 +575,10 @@
 	.field-action-menu button {
 		min-height: 38px;
 		padding: 7px 10px;
-		border: 0;
+		border: 1px solid var(--action-tertiary-border);
 		border-radius: 7px;
-		background: transparent;
-		color: #364541;
+		background: var(--action-tertiary-background);
+		color: var(--action-tertiary-foreground);
 		font: inherit;
 		font-size: 12px;
 		font-weight: 700;
@@ -586,9 +586,7 @@
 		cursor: pointer;
 	}
 
-	.field-action-menu button:hover,
-	.field-action-menu button:focus-visible {
-		background: rgba(122, 164, 148, 0.18);
-		outline: none;
-	}
+	.field-action-menu button:hover { background: var(--action-tertiary-background-hover); }
+	.field-action-menu button:active { background: var(--action-tertiary-background-active); }
+	.field-action-menu button:focus-visible { outline: 3px solid var(--action-focus-ring); outline-offset: 1px; }
 </style>

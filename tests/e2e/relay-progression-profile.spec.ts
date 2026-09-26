@@ -78,6 +78,7 @@ test.describe('Relay startup', () => {
 		await expect(dialog).toContainText('ハルシネーション抑制');
 		await expect(dialog).toContainText('Root Point');
 		await expect(dialog).toContainText('脱出');
+		await expect(dialog.getByRole('button', { name: '脱出', exact: true })).toHaveAttribute('data-action-intent', 'danger');
 		await expect(dialog).not.toContainText('Normal Clear');
 		const escapeTrigger = dialog.locator('.escape-info-trigger');
 		const escapeContent = page.locator('.escape-info-popover');
