@@ -617,7 +617,7 @@ describe('world read session', () => {
 		publish.mockResolvedValue([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
 		const traceConfiguration = deferred<TraceReplyConfigurationResult>();
 		const configureTraceReplies = vi.fn((_configuration: TraceReplyConfiguration) => traceConfiguration.promise);
-		let realtimeInput: ((event: import('nostr-tools/pure').Event) => void) | undefined;
+		let realtimeInput: ((event: import('nostr-tools/pure').Event, delivery: 'bootstrap' | 'live') => void) | undefined;
 		const supplemental = vi.fn();
 		const startRealtime = vi.fn(async (input) => {
 			realtimeInput = input.onSupplementalEvent;
@@ -652,8 +652,8 @@ describe('world read session', () => {
 		expect(stopRealtime).not.toHaveBeenCalled();
 		expect(startRealtime).toHaveBeenCalledOnce();
 		const supplementalEvent = { id: 'realtime-during-trace-reconfiguration' } as import('nostr-tools/pure').Event;
-		realtimeInput?.(supplementalEvent);
-		expect(supplemental).toHaveBeenCalledExactlyOnceWith(supplementalEvent);
+		realtimeInput?.(supplementalEvent, 'live');
+		expect(supplemental).toHaveBeenCalledExactlyOnceWith(supplementalEvent, 'live');
 		traceConfiguration.resolve({ status: 'active', generation: 1, initialBatch: { events: [], relays: [] } });
 		await vi.waitFor(() => expect(session.getTraceConversationState()).toMatchObject({ replyRefresh: 'settled' }));
 		const replyResult = await session.publishTraceReply({ rootId: root.id, targetId: root.id, content: 'reply to Last Words', speechType: 'normal' });

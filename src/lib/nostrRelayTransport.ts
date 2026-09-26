@@ -184,7 +184,7 @@ export type RealtimeStartInput = Readonly<{
 	controlSince: number;
 	instanceFilters: readonly RealtimeInstanceFilterConfiguration[];
 	supplementalFilters?: readonly Filter[];
-	onSupplementalEvent?: (event: Event) => void;
+	onSupplementalEvent?: (event: Event, delivery: 'bootstrap' | 'live') => void;
 	onBootstrapEvent: (event: Event) => void;
 	onLiveEvent: (event: Event) => void;
 	onBootstrapControl?: (control: RealtimeControlEnvelope) => void;
@@ -914,6 +914,7 @@ export function createNostrRelayTransport(
 		let deadline: ReturnType<typeof setTimeout> | null = null;
 		const resources = new Subscription();
 		realtimeResources = resources;
+		const realtimeCatchUpSubIds = new Map<string, string>();
 		const finish = (resolve: (result: RealtimeStartResult) => void) => {
 			const hasReadableRelay = realtimeDiagnostics.relays.some((relay) => relay.status === 'eose' && realtimeSubIds.has(relay.relayUrl));
 			const allRelaysResolved = !realtimeDiagnostics.relays.some((relay) => relay.status === 'pending');
@@ -935,6 +936,7 @@ export function createNostrRelayTransport(
 				const relayUrl = canonicalRelay(packet.to);
 				if (!request || !relayUrl || generation !== realtimeGeneration || !capableRelays.includes(relayUrl) || !matchesRealtimeFilterBundle(request.filters, realtimeFilters)) return;
 				realtimeSubIds.set(relayUrl, request.subId);
+				if (settled) realtimeCatchUpSubIds.set(relayUrl, request.subId);
 				// A new wire REQ (including a reconnect resend) invalidates the previous
 				// EOSE boundary until this request receives its own EOSE.
 				updateRealtimeDiagnostic(relayUrl, { relayUrl, status: 'pending' });
@@ -951,12 +953,13 @@ export function createNostrRelayTransport(
 				notifyRealtimeEcho(packet.event, relayUrl);
 				if (realtimeSeenIds.has(packet.event.id)) return;
 				realtimeSeenIds.add(packet.event.id);
+				const delivery = !settled || realtimeCatchUpSubIds.get(relayUrl) === packet.subId ? 'bootstrap' : 'live';
 				if (!settled) {
 					if (control) { initialControls.push(control); input.onBootstrapControl?.(control); }
-					else if (isSupplementalEvent) input.onSupplementalEvent?.(packet.event);
+					else if (isSupplementalEvent) input.onSupplementalEvent?.(packet.event, delivery);
 					else { initialEvents.push(packet.event); input.onBootstrapEvent(packet.event); }
 				} else if (control) input.onLiveControl?.(control);
-				else if (isSupplementalEvent) input.onSupplementalEvent?.(packet.event);
+				else if (isSupplementalEvent) input.onSupplementalEvent?.(packet.event, delivery);
 				else input.onLiveEvent(packet.event);
 			}));
 			resources.add(client.createAllMessageObservable().subscribe((packet) => {
@@ -966,6 +969,10 @@ export function createNostrRelayTransport(
 				const diagnostic: RealtimeRelayDiagnostic = packet.type === 'EOSE'
 					? { relayUrl, status: 'eose' }
 					: { relayUrl, status: 'closed', ...(packet.notice ? { notice: packet.notice } : {}) };
+				// This EOSE has already been matched to the current subId above, so it
+				// completes any catch-up marker for this relay even if rx-nostr reused
+				// a new opaque ID while resending the Forward REQ.
+				realtimeCatchUpSubIds.delete(relayUrl);
 				updateRealtimeDiagnostic(relayUrl, diagnostic);
 				if (!settled) finish(resolve);
 			}));
@@ -974,6 +981,7 @@ export function createNostrRelayTransport(
 				if (!relayUrl || !capableRelays.includes(relayUrl) || !isRealtimeConnectionUnavailable(packet.state)) return;
 				if (realtimeDiagnostics.relays.some((relay) => relay.relayUrl === relayUrl)) {
 					realtimeSubIds.delete(relayUrl);
+					realtimeCatchUpSubIds.delete(relayUrl);
 					updateRealtimeDiagnostic(relayUrl, { relayUrl, status: 'unavailable' });
 					finish(resolve);
 				}

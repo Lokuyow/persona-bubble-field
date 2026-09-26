@@ -485,7 +485,7 @@ describe('supplemental realtime event lifecycle', () => {
 		const remainingRequest = f.authorities[1].requests.findLast((request) => filters(request).some((filter) => (filter.kinds as number[] | undefined)?.includes(TAG_GAME_ACTION_KIND)))!;
 		const action = tagGameAction();
 		send(f.authorities[1].latestSocket(), 'EVENT', remainingRequest[1], action);
-		expect(onSupplementalEvent).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: action.id }));
+		expect(onSupplementalEvent).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: action.id }), 'live');
 		send(f.authorities[1].latestSocket(), 'EOSE', remainingRequest[1]);
 		expect(f.transport.getDiagnostics().realtime.relays.find((relay) => relay.relayUrl === f.authorities[1].url)?.status).toBe('eose');
 	});
@@ -653,7 +653,43 @@ describe('supplemental realtime event lifecycle', () => {
 		expect(filters(realtimeRequest)).toContainEqual(actionFilter);
 		expect(result.events).toEqual([]);
 		expect(onSupplementalEvent.mock.calls.map(([event]) => (event as Event).kind).sort()).toEqual([TAG_GAME_ACTION_KIND, TAG_GAME_KIND]);
+		expect(onSupplementalEvent.mock.calls.every(([, delivery]) => delivery === 'bootstrap')).toBe(true);
 		expect(f.transport.getDiagnostics().primaryPairs).toHaveLength(2);
+	});
+
+	it('classifies restored supplemental state during reconnect as bootstrap until the current REQ reaches EOSE', async () => {
+		const f = fixture(1);
+		const relay = f.authorities[0];
+		const hasTagGameFilter = (request: WireRequest) => filters(request).some((filter) => (filter.kinds as number[] | undefined)?.includes(TAG_GAME_KIND));
+		const restored = finalizeEvent({ kind: TAG_GAME_KIND, created_at: TIME - 1,
+			tags: [['d', 'host:run:game'], ['e', f.channel.id], ['t', 'tag-game']], content: '{}' }, AUTHOR);
+		let realtimeRequestCount = 0;
+		relay.onRequest = (socket, request) => {
+			if (hasTagGameFilter(request)) {
+				realtimeRequestCount += 1;
+				if (realtimeRequestCount > 1) send(socket, 'EVENT', request[1], restored);
+				else send(socket, 'EOSE', request[1]);
+				return;
+			}
+			send(socket, 'EOSE', request[1]);
+		};
+		await f.start();
+		const onSupplementalEvent = vi.fn();
+		const initial = f.transport.startRealtime({ ...realtimeInput([]), supplementalFilters: [{ kinds: [TAG_GAME_KIND], '#e': [f.channel.id] }], onSupplementalEvent });
+		await vi.advanceTimersByTimeAsync(30);
+		await initial;
+		relay.latestSocket().close({ code: 1001, reason: 'realtime state restore', wasClean: true });
+		await vi.advanceTimersByTimeAsync(5_000);
+		expect(onSupplementalEvent).toHaveBeenCalledExactlyOnceWith(restored, 'bootstrap');
+		const currentRequest = relay.requests.filter(hasTagGameFilter).at(-1)!;
+		expect(f.transport.getDiagnostics().realtime.relays[0].status).toBe('pending');
+		send(relay.latestSocket(), 'EOSE', currentRequest[1]);
+		expect(f.transport.getDiagnostics().realtime.relays[0].status).toBe('eose');
+		const live = finalizeEvent({ kind: TAG_GAME_KIND, created_at: TIME + 1,
+			tags: [['d', 'host:run:game'], ['e', f.channel.id], ['t', 'tag-game']], content: '{"revision":1}' }, AUTHOR);
+		send(relay.latestSocket(), 'EVENT', currentRequest[1], live);
+		expect(onSupplementalEvent).toHaveBeenCalledTimes(2);
+		expect(onSupplementalEvent).toHaveBeenLastCalledWith(live, 'live');
 	});
 
 	it('uses an independent kind-7070 subscription and preserves the two primary subscriptions', async () => {

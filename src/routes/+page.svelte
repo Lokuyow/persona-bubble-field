@@ -2407,6 +2407,11 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	}
 
 	function tagGameAudioMember(game: TagGameState, pubkey: string, runNumber: number) {
+		return game.participant.find((member) => member.pubkey === pubkey && member.runNumber === runNumber &&
+			(member.status === 'active' || member.status === 'temporarily-ineligible'));
+	}
+
+	function tagGameActiveAudioMember(game: TagGameState, pubkey: string, runNumber: number) {
 		return game.participant.find((member) => member.pubkey === pubkey && member.runNumber === runNumber && member.status === 'active');
 	}
 
@@ -2442,6 +2447,17 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		return crossed === 1;
 	}
 
+	function seedTagGameAudioCursor(game: TagGameState, atMs: number): void {
+		const self = personaSnapshot;
+		if (!self || !tagGameAudioMember(game, self.signer.pubkey, self.activeRun.runNumber) ||
+			(game.phase !== 'running' && game.phase !== 'settling') || !game.startedAt || !game.endsAt) return;
+		const effect = game.phase === 'running' ? tagGameScheduledEffectAt(game, atMs) : null;
+		tagGameAudioCursors.set(tagGameAudioScope(game, self.signer.pubkey, self.activeRun.runNumber), {
+			atMs, effect, active: game.phase === 'running' && tagGameAudioEffectActiveAt(game, self.signer.pubkey, atMs),
+			ownerPubkey: game.ownerPubkey, phase: game.phase
+		});
+	}
+
 	function tagGameEndAudioKey(game: TagGameState, pubkey: string, runNumber: number): string {
 		return tagGameAudioScope(game, pubkey, runNumber);
 	}
@@ -2474,7 +2490,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 				nowMs - previous.atMs <= 1_500 && !document.hidden) {
 				playTagGameEndOnce(game, self.signer.pubkey, self.activeRun.runNumber);
 			}
-			if (previous.phase === 'running' && previous.active && currentActive && previous.ownerPubkey === game.ownerPubkey &&
+			if (previous.phase === 'running' && previous.ownerPubkey === game.ownerPubkey &&
 				previous.effect && currentEffect && previous.effect !== currentEffect && nowMs - previous.atMs <= 1_500 &&
 				crossedOneTagGameEffectBoundary(game, previous.atMs, nowMs) && !document.hidden) {
 				playTagGameAudio(game, self.signer.pubkey, self.activeRun.runNumber, 'tag-game-switch');
@@ -2496,6 +2512,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		const self = personaSnapshot;
 		const game = tagGameDisplayedGame;
 		if (!self || !game || tagGameSelfActiveGameId !== game.gameId || tagGameHudNowMs >= (game.endsAt ?? 0) * 1_000 ||
+			!tagGameActiveAudioMember(game, self.signer.pubkey, self.activeRun.runNumber) ||
 			tagGameDisplayedEffect?.effect !== effect || !tagGameDisplayedEffect.active ||
 			!(effect === 'benefit' ? tagGameHudProjection?.benefitRateActive : tagGameHudProjection?.calamityRateActive)) return;
 		playTagGameAudio(game, self.signer.pubkey, self.activeRun.runNumber, effect === 'benefit' ? 'tag-game-benefit' : 'tag-game-calamity');
@@ -2564,7 +2581,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		respondToTagGameHolderChallenge(state, action, self);
 	}
 
-	function rememberTagGameEnvelope(eventId: string, createdAt: number, state: TagGameState): void {
+	function rememberTagGameEnvelope(eventId: string, createdAt: number, state: TagGameState, delivery: 'bootstrap' | 'live' = 'live'): void {
 		const previous = tagGameEvents.get(state.gameId);
 		if (previous && createdAt < previous.createdAt) return;
 		if (previous && createdAt === previous.createdAt && eventId === previous.eventId) return;
@@ -2577,7 +2594,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			return;
 		}
 		if (previous && createdAt > previous.createdAt) tagGameConflictSince.delete(state.gameId);
-		notifyTagGameStateAudio(previous, state, createdAt);
+		if (delivery === 'live' && !document.hidden) notifyTagGameStateAudio(previous, state, createdAt);
 		if (previous && previous.state.phase === 'running' && state.phase === 'running' &&
 			previous.state.holderChallengeId !== state.holderChallengeId) {
 			const self = personaSnapshot;
@@ -2605,6 +2622,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			void releaseAndRefreshTagGameParticipation(personaSnapshot, state.gameId);
 		}
 		tagGameEvents.set(state.gameId, { eventId, createdAt, state });
+		if (delivery === 'bootstrap' || document.hidden) seedTagGameAudioCursor(state, Date.now());
 		pruneTagGameProofRefreshes(state.gameId);
 		const activeHolder = state.phase === 'running' ? state.participant.find((member) => member.pubkey === state.ownerPubkey && member.status === 'active') : null;
 		const localHolderActivity = tagGameHolderLocalActivityAt.get(state.gameId);
@@ -3280,12 +3298,12 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		});
 	}
 
-	function handleTagGameSupplementalEvent(event: import('nostr-tools/pure').Event): void {
+	function handleTagGameSupplementalEvent(event: import('nostr-tools/pure').Event, delivery: 'bootstrap' | 'live' = 'live'): void {
 		const channelId = worldReader?.getChannel()?.channelId;
 		if (!channelId) return;
 		if (event.kind === TAG_GAME_KIND) {
 			const parsed = parseTagGameEvent(event, channelId);
-			if (parsed) rememberTagGameEnvelope(parsed.event.id, parsed.event.created_at, parsed.state);
+			if (parsed) rememberTagGameEnvelope(parsed.event.id, parsed.event.created_at, parsed.state, delivery);
 			return;
 		}
 		if (event.kind !== TAG_GAME_ACTION_KIND) return;
@@ -4123,6 +4141,10 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			const nowMs = Date.now();
 			tagGameHudNowMs = nowMs;
 			tagGameHudLastSecond = Math.floor(nowMs / 1_000);
+			const self = personaSnapshot;
+			const activeGame = self && tagGameSelfActiveGameId
+				? tagGameStates.find((game) => game.gameId === tagGameSelfActiveGameId) : null;
+			if (activeGame) seedTagGameAudioCursor(activeGame, nowMs);
 			reconcileTagGameAudioTimeline(nowMs);
 			updateLifespanHud(nowMs, true);
 			void runRuntimeRefresh?.();

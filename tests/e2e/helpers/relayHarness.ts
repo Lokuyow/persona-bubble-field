@@ -704,6 +704,9 @@ export async function installDelayedRelay(page: Page, options: {
 						sessionStorage.setItem(queuedBootstrapEventsKey, JSON.stringify(queued));
 					},
 					activeRealtimeCount: () => activeRealtime.length,
+					disconnectRealtime: () => {
+						for (const socket of new Set(activeRealtime.map((request) => request.socket))) socket.close(1001);
+					},
 				deferTraceReplies: () => { state.traceRepliesReleased = false; },
 				injectTraceReply: (event: object) => {
 					const raw = event as Record<string, unknown>;
