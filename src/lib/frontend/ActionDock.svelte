@@ -361,5 +361,9 @@
 		.composer-controls-left :global(.sound-control) { margin: 0; }
 		.composer-controls-right .speech-type-toggle, .composer-controls-right :global(.suggestions-anchor) { flex-basis: 46px; height: 46px; }
 	}
-	@media (min-width: 701px) { .action-dock-content { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: minmax(0, 1fr); } }
+	@media (min-width: 701px) {
+		.action-dock-content { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: minmax(54px, 1fr); }
+		.composer-controls-left, .composer-editor-slot, .composer-controls-right { grid-row: 1; }
+		.composer-controls-left, .composer-controls-right { align-self: center; }
+	}
 </style>

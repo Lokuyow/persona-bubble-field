@@ -66,7 +66,7 @@ test.describe('Relay startup', () => {
 	test('renders ActionDock controls in order on desktop and mobile without an unread slot', async ({ page }) => {
 		await installPromptApiStub(page);
 		let persistedChatterState: boolean | null = null;
-		for (const width of [1200, 390, 320]) {
+		for (const width of [1200, 838, 720, 701, 700, 390, 320]) {
 			await page.setViewportSize({ width, height: 844 });
 			await openReadyRelayWorld(page, 1);
 			const chatterToggle = page.locator('.chatter-toggle');
@@ -79,6 +79,30 @@ test.describe('Relay startup', () => {
 				expect(frame.background).not.toBe('rgba(0, 0, 0, 0)');
 				expect(frame.border).toBe('solid');
 				expect(frame.width).toBe('1px');
+			}
+			const soundButton = page.locator('.speaker-button');
+			const soundDesign = await soundButton.evaluate((element) => {
+				const style = getComputedStyle(element);
+				const rect = element.getBoundingClientRect();
+				return { background: style.backgroundColor, borderColor: style.borderColor, borderRadius: style.borderRadius, borderWidth: style.borderWidth, boxShadow: style.boxShadow, width: rect.width, height: rect.height };
+			});
+			const chatterDesign = await chatterToggle.evaluate((element) => {
+				const style = getComputedStyle(element);
+				const rect = element.getBoundingClientRect();
+				return { background: style.backgroundColor, borderColor: style.borderColor, borderRadius: style.borderRadius, borderWidth: style.borderWidth, boxShadow: style.boxShadow, width: rect.width, height: rect.height };
+			});
+			expect(soundDesign).toEqual(chatterDesign);
+			await soundButton.hover();
+			const soundHoverBackground = await soundButton.evaluate((element) => getComputedStyle(element).backgroundColor);
+			await chatterToggle.hover();
+			const chatterHoverBackground = await chatterToggle.evaluate((element) => getComputedStyle(element).backgroundColor);
+			expect(soundHoverBackground).toBe(chatterHoverBackground);
+			const soundIconBox = await soundButton.locator('svg').boundingBox();
+			const soundButtonRect = await soundButton.boundingBox();
+			expect(soundIconBox && soundButtonRect).toBeTruthy();
+			if (soundIconBox && soundButtonRect) {
+				expect(Math.abs(soundIconBox.x + soundIconBox.width / 2 - soundButtonRect.x - soundButtonRect.width / 2)).toBeLessThan(1);
+				expect(Math.abs(soundIconBox.y + soundIconBox.height / 2 - soundButtonRect.y - soundButtonRect.height / 2)).toBeLessThan(1);
 			}
 			await expect(page.getByRole('button', { name: 'AI発言候補を生成' })).toBeVisible();
 			await expect(suggestionsToggle.locator('svg')).toHaveCount(1);
@@ -137,13 +161,55 @@ test.describe('Relay startup', () => {
 					}
 				}
 			} else {
-				const leftBox = await page.locator('.composer-controls-left').boundingBox();
-				const editorBox = await page.locator('.composer-editor-slot').boundingBox();
-				const rightBox = await page.locator('.composer-controls-right').boundingBox();
-				expect(leftBox && editorBox && rightBox).toBeTruthy();
-				if (leftBox && editorBox && rightBox) {
-					expect(leftBox.x + leftBox.width).toBeLessThan(editorBox.x + 1);
-					expect(editorBox.x + editorBox.width).toBeLessThanOrEqual(rightBox.x);
+				const geometry = await page.evaluate(() => {
+					const rect = (selector: string) => document.querySelector<HTMLElement>(selector)!.getBoundingClientRect().toJSON();
+					return {
+						dock: rect('.action-dock'),
+						left: rect('.composer-controls-left'),
+						editor: rect('.composer-editor-slot'),
+						right: rect('.composer-controls-right'),
+						controls: ['.profile-trigger', '.chatter-toggle', '.speaker-button', '.speech-type-toggle', '.suggestions-toggle']
+							.map((selector) => rect(selector))
+					};
+				});
+				expect(geometry.left.x + geometry.left.width).toBeLessThanOrEqual(geometry.editor.x);
+				expect(geometry.editor.x + geometry.editor.width).toBeLessThanOrEqual(geometry.right.x);
+				const centers = [geometry.left, geometry.editor, geometry.right].map((box) => box.y + box.height / 2);
+				expect(Math.max(...centers) - Math.min(...centers)).toBeLessThanOrEqual(1);
+				for (const box of [geometry.left, geometry.editor, geometry.right, ...geometry.controls]) {
+					expect(box.x).toBeGreaterThanOrEqual(geometry.dock.x);
+					expect(box.x + box.width).toBeLessThanOrEqual(geometry.dock.x + geometry.dock.width);
+					expect(box.y).toBeGreaterThanOrEqual(geometry.dock.y);
+					expect(box.y + box.height).toBeLessThanOrEqual(geometry.dock.y + geometry.dock.height);
+				}
+				if (width === 838) {
+					const fieldBeforeGrow = await page.locator('.field-viewport').boundingBox();
+					const dockHeightBeforeGrow = geometry.dock.height;
+					await page.evaluate(() => (window as typeof window & { __ehagakiSetPreferredHeight(height: number): void }).__ehagakiSetPreferredHeight(200));
+					await expect.poll(() => page.evaluate(() => Number.parseFloat(getComputedStyle(document.querySelector('.app-shell')!).getPropertyValue('--composer-preferred-height'))))
+						.toBeGreaterThan(54);
+					await expect.poll(() => page.locator('.action-dock').evaluate((dock) => dock.getBoundingClientRect().height))
+						.toBeGreaterThan(dockHeightBeforeGrow);
+					const grown = await page.evaluate(() => {
+						const rect = (selector: string) => document.querySelector<HTMLElement>(selector)!.getBoundingClientRect().toJSON();
+						return { dock: rect('.action-dock'), left: rect('.composer-controls-left'), editor: rect('.composer-editor-slot'), right: rect('.composer-controls-right') };
+					});
+					const grownCenters = [grown.left, grown.editor, grown.right].map((box) => box.y + box.height / 2);
+					expect(Math.max(...grownCenters) - Math.min(...grownCenters)).toBeLessThanOrEqual(1);
+					for (const box of [grown.left, grown.editor, grown.right]) {
+						expect(box.y).toBeGreaterThanOrEqual(grown.dock.y);
+						expect(box.y + box.height).toBeLessThanOrEqual(grown.dock.y + grown.dock.height);
+					}
+					const fieldAfterGrow = await page.locator('.field-viewport').boundingBox();
+					expect(fieldBeforeGrow && fieldAfterGrow).toBeTruthy();
+					if (fieldBeforeGrow && fieldAfterGrow) {
+						expect(fieldAfterGrow.x).toBeCloseTo(fieldBeforeGrow.x, 1);
+						expect(fieldAfterGrow.y).toBeCloseTo(fieldBeforeGrow.y, 1);
+						expect(fieldAfterGrow.width).toBeCloseTo(fieldBeforeGrow.width, 1);
+						expect(fieldAfterGrow.height).toBeCloseTo(fieldBeforeGrow.height, 1);
+					}
+					await page.evaluate(() => (window as typeof window & { __ehagakiSetPreferredHeight(height: number): void }).__ehagakiSetPreferredHeight(50));
+					await expect.poll(() => page.evaluate(() => getComputedStyle(document.querySelector('.app-shell')!).getPropertyValue('--composer-preferred-height').trim())).toBe('50px');
 				}
 			}
 			await page.getByRole('button', { name: 'Open sound settings' }).click();

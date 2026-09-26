@@ -217,7 +217,7 @@ test.describe('Relay startup', () => {
 			});
 			expect(beforePreferredHeight.initialPreferredHeight).toBe('50px');
 			expect(beforePreferredHeight.preferredHeight).toBe('50px');
-			const expectedInitialDockHeight = viewport.name === 'mobile' ? 121 : 67;
+			const expectedInitialDockHeight = viewport.name === 'mobile' ? 121 : 71;
 			expect(beforePreferredHeight.dockHeight).toBeCloseTo(expectedInitialDockHeight, 1);
 			expect(beforePreferredHeight.fieldHeight + beforePreferredHeight.dockHeight)
 				.toBeCloseTo(beforePreferredHeight.viewportHeight, 1);
@@ -234,6 +234,27 @@ test.describe('Relay startup', () => {
 			}));
 			expect(Math.abs(afterPreferredHeight.dockHeight - beforePreferredHeight.dockHeight)).toBeLessThan(0.5);
 			expect(Math.abs(afterPreferredHeight.fieldHeight - beforePreferredHeight.fieldHeight)).toBeLessThan(0.5);
+			if (viewport.name === 'desktop') {
+				await page.evaluate(() => (window as typeof window & {
+					__ehagakiSetPreferredHeight(height: number): void;
+				}).__ehagakiSetPreferredHeight(200));
+				await expect.poll(() => page.locator('.action-dock').evaluate((dock) => dock.getBoundingClientRect().height))
+					.toBeGreaterThan(afterPreferredHeight.dockHeight);
+				const grown = await page.evaluate(() => {
+					const rect = (selector: string) => document.querySelector<HTMLElement>(selector)!.getBoundingClientRect().toJSON();
+					return { dock: rect('.action-dock'), left: rect('.composer-controls-left'), editor: rect('.composer-editor-slot'), right: rect('.composer-controls-right'), field: rect('.field-viewport') };
+				});
+				const grownCenters = [grown.left, grown.editor, grown.right].map((box) => box.y + box.height / 2);
+				expect(Math.max(...grownCenters) - Math.min(...grownCenters)).toBeLessThanOrEqual(1);
+				for (const box of [grown.left, grown.editor, grown.right]) {
+					expect(box.y).toBeGreaterThanOrEqual(grown.dock.y);
+					expect(box.y + box.height).toBeLessThanOrEqual(grown.dock.y + grown.dock.height);
+				}
+				expect(grown.field.height).toBeCloseTo(afterPreferredHeight.fieldHeight, 1);
+				await page.evaluate(() => (window as typeof window & {
+					__ehagakiSetPreferredHeight(height: number): void;
+				}).__ehagakiSetPreferredHeight(50));
+			}
 		});
 	}
 

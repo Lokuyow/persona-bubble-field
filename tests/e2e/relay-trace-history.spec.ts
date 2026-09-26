@@ -178,6 +178,31 @@ test.describe('Relay startup', () => {
 		expect(await readActionDockControlOrder(page)).toEqual([
 			'profile-trigger', 'chatter-toggle', 'trace-unread-indicator', 'sound-control', 'speech-type-toggle', 'suggestions-anchor'
 		]);
+		for (const width of [1200, 838, 701]) {
+			await page.setViewportSize({ width, height: 850 });
+			const geometry = await page.evaluate(() => {
+				const rect = (selector: string) => document.querySelector<HTMLElement>(selector)!.getBoundingClientRect().toJSON();
+				return {
+					dock: rect('.action-dock'),
+					left: rect('.composer-controls-left'),
+					editor: rect('.composer-editor-slot'),
+					right: rect('.composer-controls-right'),
+					unread: rect('.trace-unread-indicator'),
+					sound: rect('.speaker-button')
+				};
+			});
+			expect(geometry.left.right).toBeLessThanOrEqual(geometry.editor.left);
+			expect(geometry.editor.right).toBeLessThanOrEqual(geometry.right.left);
+			const centers = [geometry.left, geometry.editor, geometry.right].map((box) => box.y + box.height / 2);
+			expect(Math.max(...centers) - Math.min(...centers)).toBeLessThanOrEqual(1);
+			for (const box of [geometry.left, geometry.editor, geometry.right, geometry.unread, geometry.sound]) {
+				expect(box.x).toBeGreaterThanOrEqual(geometry.dock.x);
+				expect(box.right).toBeLessThanOrEqual(geometry.dock.right);
+				expect(box.y).toBeGreaterThanOrEqual(geometry.dock.y);
+				expect(box.bottom).toBeLessThanOrEqual(geometry.dock.bottom);
+			}
+		}
+		await page.setViewportSize({ width: 1100, height: 850 });
 		await page.locator('.trace-unread-indicator').click();
 		await expect(page.locator('.trace-unread-explanation')).toContainText('どこかにあなたへの返信の痕跡があります');
 		await expect(page.locator('[data-trace-root-id]')).toHaveCount(0);
