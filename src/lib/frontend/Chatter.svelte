@@ -15,9 +15,10 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		onOpenProfile: (characterId: string, trigger: HTMLButtonElement) => void;
 		isDevWorldSandbox: boolean;
 		open: boolean;
+		statusHudBottom?: number;
 		onInitialized: (width: number) => void;
 	};
-	let { messages, tones, selectedCharacterId, onOpenProfile, isDevWorldSandbox, open, onInitialized }: Props = $props();
+	let { messages, tones, selectedCharacterId, onOpenProfile, isDevWorldSandbox, open, statusHudBottom = 0, onInitialized }: Props = $props();
 	let timelineOverflowById = $state.raw<Record<string, boolean>>({});
 	let timelineEntryHeights = $state.raw<Record<string, number>>({});
 	let timelineAvailableHeight = $state(0);
@@ -124,7 +125,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 </script>
 
 {#if timelineInitialized && open}
-	<aside class={['recent-message-timeline', { 'timeline-has-messages': messages.length > 0 }]} aria-label="Chatter">
+	<aside class={['recent-message-timeline', { 'timeline-has-messages': messages.length > 0, 'timeline-after-status-hud': statusHudBottom > 0 }]} aria-label="Chatter" style={`--status-hud-bottom:${statusHudBottom}px`}>
 		<header class="timeline-header">
 			<h2>Chatter</h2>
 		</header>
@@ -192,9 +193,17 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		pointer-events: auto;
 	}
 
+	.recent-message-timeline.timeline-after-status-hud {
+		top: calc(var(--status-hud-bottom, 0px) + 8px);
+		max-height: min(380px, calc(100% - var(--status-hud-bottom, 0px) - 32px));
+	}
 	.recent-message-timeline.timeline-has-messages {
 		height: calc(100% - 24px);
 		max-height: calc(100% - 24px);
+	}
+	.recent-message-timeline.timeline-has-messages.timeline-after-status-hud {
+		height: calc(100% - var(--status-hud-bottom, 0px) - 32px);
+		max-height: calc(100% - var(--status-hud-bottom, 0px) - 32px);
 	}
 
 	.timeline-header {

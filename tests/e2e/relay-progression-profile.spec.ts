@@ -243,9 +243,9 @@ test.describe('Relay startup', () => {
 		await expect(dialog.getByRole('heading', { name: '延命中' })).toBeVisible();
 		await expect(dialog).toContainText('通常作業は上限');
 		await expect(dialog).toContainText('ポイント・寿命延長が継続中');
-		await expect(page.locator('.lifespan-hud [data-mending-status]')).toHaveAttribute('aria-label', '延命中');
-		await expect(page.locator('.lifespan-hud [data-mending-status]')).toHaveAttribute('data-mending-icon', 'heart-plus');
-		await expect(page.locator('.lifespan-hud [data-mending-rate]')).toHaveText('0.20 pt/分+0.02h/h');
+		await expect(page.locator('[data-unified-status-hud] [data-mending-status]')).toHaveAttribute('aria-label', '延命中');
+		await expect(page.locator('[data-unified-status-hud] [data-mending-status]')).toHaveAttribute('data-mending-icon', 'heart-plus');
+		await expect(page.locator('[data-unified-status-hud] [data-mending-rate]')).toHaveText('0.20 pt/分+0.02h/h');
 	});
 for (const stateKind of ['missing', 'corrupt'] as const) {
 		test(`keeps public world read available for ${stateKind} persona storage`, async ({ page }) => {
@@ -261,7 +261,7 @@ for (const stateKind of ['missing', 'corrupt'] as const) {
 			await page.evaluate(() => (window as unknown as { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
 			await expect(page.locator(`.participant[data-participant-id="${events.message.pubkey}"]`)).toBeVisible();
 			await expect(page.locator(`.bubble[data-bubble-id="${events.message.id}"]`)).toBeVisible();
-			await expect(page.locator('.lifespan-hud')).toHaveCount(0);
+			await expect(page.locator('[data-unified-status-hud]')).toHaveCount(0);
 			await expect(page.locator('.participant[data-self="true"]')).toHaveCount(0);
 
 			const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
@@ -287,7 +287,7 @@ for (const stateKind of ['missing', 'corrupt'] as const) {
 		});
 	}
 
-	test('shows and refreshes the current persona lifespan HUD', async ({ page }) => {
+	test('shows and refreshes the top lifespan and points meters for the current persona', async ({ page }) => {
 		const startTime = Date.now();
 		const hour = 60 * 60 * 1000;
 		const day = 24 * hour;
@@ -305,24 +305,18 @@ for (const stateKind of ['missing', 'corrupt'] as const) {
 			AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) &&
 			(request.filter.kinds as number[])[0] === 42)).toBe(true);
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
-		const hud = page.locator('.lifespan-hud');
-		await expect(hud.locator('[data-stat-icon="heart"] > svg')).toHaveCount(1);
-		await expect(hud.locator('[data-stat-icon="wallet"] > svg')).toHaveCount(1);
-		const hudIconLefts = await hud.locator('[data-stat-icon] > svg').evaluateAll((icons) => icons.map((icon) => Math.round(icon.getBoundingClientRect().left)));
-		expect(hudIconLefts).toEqual([hudIconLefts[0], hudIconLefts[0]]);
-		const hudStatBoxes = await hud.locator('[data-stat-icon]').evaluateAll((stats) => stats.map((stat) => {
-			const icon = stat.querySelector('svg')!.getBoundingClientRect();
-			const value = stat.querySelector('.stat-value')!.getBoundingClientRect();
-			return { iconLeft: Math.round(icon.left), iconRight: Math.round(icon.right), valueLeft: Math.round(value.left), valueRight: Math.round(value.right) };
-		}));
-		expect(hudStatBoxes[0]?.iconLeft).toBe(hudStatBoxes[1]?.iconLeft);
-		expect(hudStatBoxes[0]?.valueRight).toBe(hudStatBoxes[1]?.valueRight);
-		for (const stat of hudStatBoxes) expect(stat.valueLeft).toBeGreaterThan(stat.iconRight);
-		await expect(hud.locator('[data-stat-icon="heart"]')).toHaveText('2日 18時間');
-		await expect(hud.locator('[data-stat-icon="wallet"]')).toHaveText('0pt');
-		await expect(hud).not.toContainText('寿命');
-		await expect(hud).not.toContainText('ポイント');
-		await expect(hud).toHaveAttribute('aria-label', /寿命 .*ポイント 0pt/);
+		const hud = page.locator('[data-unified-status-hud]');
+		await expect(hud.locator('.meter-row')).toHaveCount(2);
+		await expect(hud.locator('.meter-row').nth(0)).toContainText('寿命');
+		await expect(hud.locator('.meter-row').nth(1)).toContainText('ポイント');
+		await expect(hud.locator('[data-lifespan-value]')).toHaveText('2日 18時間');
+		await expect(hud.locator('[data-points-value]')).toHaveText('0pt');
+		await expect(hud).toHaveAttribute('aria-label', '寿命とポイント');
+		await expect(hud.getByRole('meter', { name: '寿命' })).toHaveAttribute('aria-valuetext', /2日 18時間、最大 7日/);
+		await expect(hud.getByRole('meter', { name: 'ポイント' })).toHaveAttribute('aria-valuetext', '0pt、100,000ptまで');
+		const hudBounds = await hud.boundingBox();
+		expect(hudBounds).toBeTruthy();
+		if (hudBounds) expect(hudBounds.width).toBeGreaterThan(1_000);
 		await expect(hud.locator('[data-mending-status]')).toHaveCount(0);
 		await expect(hud.locator('[data-mending-rate]')).toHaveCount(0);
 		await expect(hud.locator('[data-mending-row]')).toHaveCount(0);
@@ -330,10 +324,135 @@ for (const stateKind of ['missing', 'corrupt'] as const) {
 		await pauseAtCurrentBrowserTime(page);
 		await page.clock.setSystemTime(expiresAtMs - 23 * hour - 59 * minute);
 		await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
-		await expect(hud.locator('[data-stat-icon="heart"]')).toHaveText('23時間 59分');
+		await expect(hud.locator('[data-lifespan-value]')).toHaveText('23時間 59分');
 
 		await page.clock.setSystemTime(expiresAtMs - 59 * minute - 59 * 1000);
 		await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
-		await expect(hud.locator('[data-stat-icon="heart"]')).toHaveText('59分');
+		await expect(hud.locator('[data-lifespan-value]')).toHaveText('59分');
+	});
+
+	test('keeps a rank-three seven-day Run inside its thirty-day lifespan meter and the top HUD operable on desktop and mobile', async ({ page }) => {
+		const startTime = Date.now();
+		const day = 24 * 60 * 60 * 1_000;
+		const secret = fixtureSecret(61);
+		const pubkey = getPublicKey(secret);
+		await page.setViewportSize({ width: 1_200, height: 900 });
+		await page.clock.install({ time: startTime });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { primaryEvents: testEvents(startTime) });
+		await seedRelayAccount(page, secret, pubkey, startTime + 7 * day, 125_000, undefined, 3, { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 3 });
+		await page.goto('/');
+		await expect(page.locator('.action-dock')).toBeVisible();
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
+			AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) &&
+			(request.filter.kinds as number[])[0] === 42)).toBe(true);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		const hud = page.locator('[data-unified-status-hud]');
+		const lifeMeter = hud.getByRole('meter', { name: '寿命' });
+		const pointsMeter = hud.getByRole('meter', { name: 'ポイント' });
+		await expect(lifeMeter).toHaveAttribute('aria-valuemin', '0');
+		await expect(lifeMeter).toHaveAttribute('aria-valuemax', String(30 * day));
+		const initialLifespanMeterValue = Number(await lifeMeter.getAttribute('aria-valuenow'));
+		expect(initialLifespanMeterValue).toBeLessThanOrEqual(7 * day);
+		expect(initialLifespanMeterValue).toBeGreaterThan(7 * day - 60_000);
+		await expect(pointsMeter).toHaveAttribute('aria-valuemax', '100000');
+		await expect(pointsMeter).toHaveAttribute('aria-valuenow', '100000');
+		await expect(hud.locator('[data-points-value]')).toHaveText('125,000pt');
+		await expect(hud).not.toContainText('脱出');
+
+		const chatter = page.locator('aside[aria-label="Chatter"]');
+		if (!(await chatter.isVisible())) await page.keyboard.press('c');
+		await expect(chatter).toBeVisible();
+		const sound = page.getByRole('button', { name: 'Open sound settings' });
+		await sound.click();
+		const slider = page.getByRole('slider', { name: 'Sound volume' });
+		await expect(slider).toBeVisible();
+		await slider.fill('35');
+		await expect(slider).toHaveValue('35');
+		await page.keyboard.press('Escape');
+
+		for (const viewport of [{ width: 1_200, height: 900 }, { width: 960, height: 900 }, { width: 390, height: 844 }, { width: 390, height: 480 }]) {
+			await page.setViewportSize(viewport);
+			const hudBox = await hud.boundingBox();
+			const topStackBox = await page.locator('[data-top-status-hud]').boundingBox();
+			const soundBox = await page.locator('[data-sound-control]').boundingBox();
+			expect(hudBox && topStackBox && soundBox).toBeTruthy();
+			if (hudBox && topStackBox && soundBox) {
+				expect(hudBox.y).toBeLessThan(50);
+				expect(soundBox.y).toBeGreaterThanOrEqual(hudBox.y + hudBox.height);
+				expect(soundBox.x + soundBox.width).toBeGreaterThanOrEqual(hudBox.x + hudBox.width - 2);
+				expect(topStackBox.height).toBeGreaterThan(hudBox.height);
+			}
+			const meterRows = await hud.locator('.meter-row').evaluateAll((rows) => rows.map((row) => {
+				const box = (element: Element) => {
+					const rect = element.getBoundingClientRect();
+					return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height };
+				};
+				const meter = row.querySelector('[role="meter"]')!;
+				const fill = meter.querySelector('.meter-fill')!;
+				return {
+					row: box(row),
+					label: box(row.querySelector('.meter-label')!),
+					bar: box(meter),
+					value: box(row.querySelector('strong')!),
+					centers: [row.querySelector('.meter-label')!, meter, row.querySelector('strong')!].map((element) => {
+						const rect = element.getBoundingClientRect();
+						return (rect.top + rect.bottom) / 2;
+					}),
+					barRadius: getComputedStyle(meter).borderTopLeftRadius,
+					fillRadius: getComputedStyle(fill).borderTopLeftRadius
+				};
+			}));
+			const expectedBarHeight = viewport.width >= 960 ? 14 : 12;
+			expect(meterRows).toHaveLength(2);
+			for (const row of meterRows) {
+				expect(row.bar.height).toBe(expectedBarHeight);
+				expect(row.barRadius).toBe('0px');
+				expect(row.fillRadius).toBe('0px');
+			}
+			const textMetrics = await hud.evaluate((element) => {
+				const lifespan = getComputedStyle(element.querySelector('[data-lifespan-value]')!);
+				const points = getComputedStyle(element.querySelector('[data-points-value]')!);
+				const unit = getComputedStyle(element.querySelector('[data-points-value] span')!);
+				const pointsValue = element.querySelector('[data-points-value]')!;
+				const pointsText = pointsValue.textContent ?? '';
+				const pointsStyle = getComputedStyle(pointsValue);
+				const canvas = document.createElement('canvas');
+				const context = canvas.getContext('2d')!;
+				context.font = `${pointsStyle.fontWeight} ${pointsStyle.fontSize} ${pointsStyle.fontFamily}`;
+				return { lifespanSize: lifespan.fontSize, lifespanWeight: lifespan.fontWeight, pointsSize: points.fontSize, pointsWeight: points.fontWeight, unitSize: unit.fontSize, pointsText, pointsTextWidth: context.measureText(pointsText).width };
+			});
+			expect(textMetrics.pointsSize).toBe(textMetrics.lifespanSize);
+			expect(textMetrics.pointsWeight).toBe(textMetrics.lifespanWeight);
+			expect(Number.parseFloat(textMetrics.unitSize)).toBeGreaterThan(Number.parseFloat(textMetrics.pointsSize) * .8);
+			if (viewport.width >= 960) {
+				for (const row of meterRows) {
+					for (const center of row.centers) expect(Math.abs(center - row.centers[0])).toBeLessThanOrEqual(1);
+					expect(row.label.right).toBeLessThanOrEqual(row.bar.left);
+					expect(row.bar.right).toBeLessThanOrEqual(row.value.left);
+					expect(row.bar.left - row.label.right).toBeGreaterThanOrEqual(12);
+					expect(row.bar.left - row.label.right).toBeLessThanOrEqual(16);
+					expect(row.value.left - row.bar.right).toBeGreaterThanOrEqual(12);
+					expect(row.value.left - row.bar.right).toBeLessThanOrEqual(16);
+					expect(row.value.width).toBeGreaterThanOrEqual(textMetrics.pointsTextWidth);
+					expect(row.value.right).toBeLessThanOrEqual(row.row.right);
+				}
+				expect(Math.abs(meterRows[0].bar.left - meterRows[1].bar.left)).toBeLessThanOrEqual(1);
+				expect(Math.abs(meterRows[0].bar.right - meterRows[1].bar.right)).toBeLessThanOrEqual(1);
+			} else {
+				for (const row of meterRows) {
+					expect(row.label.right).toBeLessThan(row.value.left);
+					expect(row.bar.top).toBeGreaterThanOrEqual(row.label.bottom);
+					expect(row.bar.top).toBeGreaterThanOrEqual(row.value.bottom);
+					expect(row.bar.width).toBeGreaterThanOrEqual(row.row.width - 1);
+				}
+			}
+			const chatterBox = await chatter.boundingBox();
+			expect(chatterBox).toBeTruthy();
+			if (topStackBox && chatterBox) {
+				expect(chatterBox.y).toBeGreaterThanOrEqual(topStackBox.y + topStackBox.height);
+				expect(chatterBox.y + chatterBox.height).toBeLessThanOrEqual(viewport.height + 1);
+			}
+		}
 	});
 });

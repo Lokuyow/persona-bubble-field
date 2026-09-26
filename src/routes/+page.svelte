@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, tick, untrack } from 'svelte';
+	import type { Attachment } from 'svelte/attachments';
 	import { pushState, replaceState } from '$app/navigation';
 	import { page } from '$app/state';
 	import { asset, base } from '$app/paths';
@@ -60,7 +61,7 @@ import { requireCharacterFromPubkey } from '$lib/characterAssignment';
 import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	import ProfileDialog from '$lib/ProfileDialog.svelte';
 	import IdentitySelectionDialog from '$lib/IdentitySelectionDialog.svelte';
-	import LifespanHud from '$lib/LifespanHud.svelte';
+	import UnifiedStatusHud from '$lib/UnifiedStatusHud.svelte';
 	import TagGameHud from '$lib/TagGameHud.svelte';
 	import MendingDialog from '$lib/MendingDialog.svelte';
 	import AdjustmentDialog from '$lib/AdjustmentDialog.svelte';
@@ -102,7 +103,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		type PendingSelection,
 		type SelectionCandidate
 	} from '$lib/rootIdentity';
-	import type { RootBuild } from '$lib/rootProgression';
+	import { rootMaximumLifespanMs, type RootBuild } from '$lib/rootProgression';
 	import { isPersonaExpired } from '$lib/personaGameState';
 	import { deathDevMode, DEATH_DEV_INITIAL_LIFESPAN_MS } from '$lib/deathDevMode';
 	import { clearDevMode, CLEAR_DEV_INITIAL_POINTS } from '$lib/clearDevMode';
@@ -321,6 +322,15 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	let personaLifecycleTransition = $state(false);
 	let lifespanHudNowMs = $state<number | null>(null);
 	let lifespanHudUpdatedAtMs = 0;
+	let topStatusHudBottom = $state(0);
+	let statusHudVisible = $derived(lifespanHudNowMs !== null && personaSnapshot !== null && !personaLifecycleTransition);
+	const observeTopStatusHud: Attachment<HTMLElement> = (node) => untrack(() => {
+		const update = () => untrack(() => { topStatusHudBottom = node.getBoundingClientRect().bottom; });
+		const observer = new ResizeObserver(update);
+		observer.observe(node);
+		update();
+		return () => untrack(() => { observer.disconnect(); topStatusHudBottom = 0; });
+	});
 	let mendingNowMs = $state(0);
 	let mendingDialogOpen = $state(false);
 	let mendingMutationInFlight = $state(false);
@@ -566,9 +576,9 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	});
 	let bubbleSafeBounds = $derived({
 		x: SPEECH_AREA.sidePadding,
-		y: SPEECH_AREA.top,
+		y: Math.max(SPEECH_AREA.top, topStatusHudBottom + 8),
 		width: Math.max(0, viewportSize.width - SPEECH_AREA.sidePadding * 2),
-		height: Math.max(0, actualFieldTop - SPEECH_AREA.top)
+		height: Math.max(0, actualFieldTop - Math.max(SPEECH_AREA.top, topStatusHudBottom + 8))
 	});
 	let bubbleVisualRegion = $derived({
 		x: 0,
@@ -3966,11 +3976,34 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		speechAreaVisualBounds={speechAreaVisualBounds}
 	>
 		{#snippet children()}
-			<SoundControl
-				volume={soundPreference.volume}
-				onOpen={() => soundController?.unlock()}
-				onVolume={updateSoundVolume}
-			/>
+			{#if statusHudVisible && personaSnapshot}
+				<div class="top-status-hud" data-top-status-hud {@attach observeTopStatusHud}>
+					<UnifiedStatusHud
+						expiresAtMs={tagGameHudWorkProjection?.effectiveExpiresAtMs ?? mendingProjection?.effectiveExpiresAtMs ?? personaSnapshot.gameState.lifespanExpiresAtMs}
+						nowMs={tagGameHudProjection ? tagGameHudNowMs : lifespanHudNowMs ?? mendingNowMs}
+						maximumLifespanMs={rootMaximumLifespanMs(personaSnapshot.activeRun.rootBuild.hallucinationResistance)}
+						points={personaSnapshot.gameState.points}
+						hasJob={Boolean(personaSnapshot.gameState.mendingJob)}
+						{mendingProjection}
+						tagGameProjection={tagGameHudProjection}
+					/>
+					<div class="top-status-controls">
+						<SoundControl
+							volume={soundPreference.volume}
+							onOpen={() => soundController?.unlock()}
+							onVolume={updateSoundVolume}
+						/>
+					</div>
+				</div>
+			{:else}
+				<div class="legacy-sound-control">
+					<SoundControl
+						volume={soundPreference.volume}
+						onOpen={() => soundController?.unlock()}
+						onVolume={updateSoundVolume}
+					/>
+				</div>
+			{/if}
 			<Chatter
 				bind:this={chatterComponent}
 				messages={recentMessageTimeline}
@@ -3978,6 +4011,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 				{selectedCharacterId}
 				isDevWorldSandbox={devWorldSandboxEnabled}
 				open={chatterOpen}
+				statusHudBottom={statusHudVisible ? topStatusHudBottom : 0}
 				onInitialized={initializeChatterVisibility}
 				onOpenProfile={openProfile}
 			/>
@@ -4035,6 +4069,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 					commitStatus={cooperationDefectionCommitStatus}
 					selectionFailed={Boolean(cooperationDefectionSelection && cooperationDefectionSelection.round === cooperationDefectionRound && cooperationDefectionSelection.revealStatus === 'failed')}
 					canChoose={cooperationDefectionCanChoose}
+					topOffset={statusHudVisible ? `calc(${topStatusHudBottom}px + 8px)` : null}
 					message={devCooperationDefectionPlaygroundState?.message ?? null}
 					{viewportElement}
 					onPanelBounds={(bounds) => { cooperationDefectionPanelBounds = bounds; }}
@@ -4061,10 +4096,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 				onReplyFootprintRemoved={removeTraceReplyFootprint}
 				registerReplyRemeasure={registerTraceReplyRemeasure}
 			/>
-			<div class="field-status-huds" data-field-status-huds>
-				{#if lifespanHudNowMs !== null && personaSnapshot && !personaLifecycleTransition}
-					<LifespanHud expiresAtMs={tagGameHudWorkProjection?.effectiveExpiresAtMs ?? mendingProjection?.effectiveExpiresAtMs ?? personaSnapshot.gameState.lifespanExpiresAtMs} nowMs={tagGameHudProjection ? tagGameHudNowMs : lifespanHudNowMs} points={personaSnapshot.gameState.points} hasJob={Boolean(personaSnapshot.gameState.mendingJob)} mendingProjection={mendingProjection} tagGameProjection={tagGameHudProjection} />
-				{/if}
+			<div class="field-status-huds" data-field-status-huds style={`--top-status-hud-bottom:${statusHudVisible ? topStatusHudBottom : 0}px`}>
 				<TagGameHud game={tagGameDisplayedGame} selfPubkey={personaSnapshot?.signer.pubkey ?? null} selfRunNumber={personaSnapshot?.activeRun.runNumber ?? null} nowMs={tagGameHudNowMs} {realtimeStatus} busy={tagGameBusy} touchStatus={tagGameDisplayedGame ? tagGameTouchStatuses.get(tagGameDisplayedGame.gameId)?.label ?? null : null} onLeave={(gameId) => { void leaveTagGame(gameId); }} />
 			</div>
 		{/snippet}
@@ -4221,19 +4253,32 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 </main>
 
 <style>
+	.top-status-hud {
+		position: absolute;
+		top: max(8px, env(safe-area-inset-top));
+		right: max(12px, env(safe-area-inset-right));
+		left: max(12px, env(safe-area-inset-left));
+		z-index: 12;
+		display: grid;
+		width: auto;
+		gap: 3px;
+		pointer-events: none;
+	}
+	.top-status-controls { display: grid; justify-items: end; }
+	.top-status-controls, .legacy-sound-control { pointer-events: auto; }
+	.legacy-sound-control { position: absolute; top: max(10px, env(safe-area-inset-top)); right: max(10px, env(safe-area-inset-right)); z-index: 10; }
 	.field-status-huds {
 		position: absolute;
-		top: max(108px, calc(env(safe-area-inset-top) + 108px));
+		top: max(max(108px, env(safe-area-inset-top) + 108px), calc(var(--top-status-hud-bottom, 0px) + 52px));
 		right: max(12px, env(safe-area-inset-right));
 		z-index: 8;
 		display: grid;
-		width: min(300px, calc(100vw - 24px));
+		width: min(310px, calc(100vw - 24px));
 		gap: 6px;
 		pointer-events: none;
 	}
-	.field-status-huds :global(.lifespan-hud) { pointer-events: none; }
 	@media (max-width: 700px) {
-		.field-status-huds { top: max(100px, calc(env(safe-area-inset-top) + 100px)); width: min(252px, calc(100vw - 24px)); gap: 4px; }
+		.field-status-huds { top: max(max(100px, env(safe-area-inset-top) + 100px), calc(var(--top-status-hud-bottom, 0px) + 52px)); width: min(252px, calc(100vw - 24px)); gap: 4px; }
 	}
 
 	.app-shell {

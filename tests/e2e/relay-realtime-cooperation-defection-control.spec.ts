@@ -43,6 +43,7 @@ const formatJstDeadline = (timeMs: number) => `${new Intl.DateTimeFormat('ja-JP'
 
 test.describe('Relay startup', () => {
 	test('accepts a creator-signed manual CooperationDefection control from a synthetic DEV channel', async ({ page }) => {
+		await page.setViewportSize({ width: 390, height: 480 });
 		const channel = syntheticChannelFixture();
 		const schedule = upcomingRegistrationSchedule();
 		const initialTime = schedule.warningAtMs - 30 * 60 * 1_000;
@@ -70,6 +71,15 @@ test.describe('Relay startup', () => {
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
 		await expect(page.locator('[data-realtime-panel]')).toContainText('参加受付');
 		await expect(page.locator('[data-realtime-panel]')).toContainText('運営開催');
+		const statusHud = page.locator('[data-top-status-hud]');
+		const eventPanel = page.locator('[data-realtime-panel]');
+		await expect(statusHud).toBeVisible();
+		const [statusHudBox, eventPanelBox] = await Promise.all([statusHud.boundingBox(), eventPanel.boundingBox()]);
+		expect(statusHudBox && eventPanelBox).toBeTruthy();
+		if (statusHudBox && eventPanelBox) {
+			expect(eventPanelBox.y).toBeGreaterThanOrEqual(statusHudBox.y + statusHudBox.height);
+			expect(eventPanelBox.y + eventPanelBox.height).toBeLessThanOrEqual(480);
+		}
 		await expect(page.locator('[data-cooperation-defection-registration-deadline]')).toHaveText(`受付締切: ${formatJstDeadline((createdAt + 5 * 60) * 1_000)}`);
 		await expect(page.locator('[data-cooperation-defection-registration-countdown]')).toContainText(/^残り時間: 04:\d{2}$/);
 		await expect.poll(async () => (await relayState(page)).state.requests.filter(isRealtimeRequest).some((request) => realtimeInstanceIds(request).includes(manualInstanceId))).toBe(true);

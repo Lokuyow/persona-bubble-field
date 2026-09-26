@@ -60,7 +60,7 @@ test.describe('Relay startup', () => {
 			relay.releasePrimary();
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
-		await expect(page.locator('.lifespan-hud')).toBeVisible();
+		await expect(page.locator('[data-unified-status-hud]')).toBeVisible();
 		const reopened = await readRelayGameState(page);
 		expect(reopened).toMatchObject({ personaPubkey: pubkey, lifespanExpiresAtMs: started.lifespanExpiresAtMs, mendingJob: expect.any(Object) });
 	});
