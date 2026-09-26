@@ -10,11 +10,16 @@ applicable specifications remain the Source of Truth.
   `variant` to `primary`, `secondary`, or `tertiary`. Use its `intent` to express
   meaning independently: `cancel` for withdrawals, declines, and leaving an
   activity; `danger` for genuinely irreversible or destructive actions. A
-  single interaction surface may have at most one primary action; choose its
-  role from the whole surface state rather than DOM order. Shared design tokens
-  define normal, hover, active, disabled, and focus-visible states. Every
-  enabled button must show its background or boundary in its normal state, and
-  a disabled primary must not retain a saturated fill. Preserve labels, icons,
+  primary action indicates priority within a decision unit, not a screen-wide
+  quota. Independent cards or repeated items may each have a primary action,
+  and parallel, equally important choices may share primary emphasis. Do not
+  make every action primary merely because it is on a separate card; distinguish
+  priorities within the same decision unit. Keep variant (priority), semantic
+  intent, and enabled/disabled state independent. Shared design tokens define
+  normal, hover, active, disabled, and focus-visible states. Every enabled
+  button must show its background or boundary in its normal state, and a disabled
+  primary must use subdued brand-color tokens so it stays distinct without
+  appearing active. Preserve labels, icons,
   keyboard behavior, and selected-state styling. Compact icon controls that
   keep a specialized shape must use the shared icon-control tokens for their
   colors and states.

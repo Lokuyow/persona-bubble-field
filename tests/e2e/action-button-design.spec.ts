@@ -42,6 +42,8 @@ test('shared action tokens expose every state on light and dark surfaces at desk
 				<button data-test-action="cancel" class="action-button action-button-tertiary action-button-intent-cancel">Cancel</button>
 				<button data-test-action="danger" class="action-button action-button-secondary action-button-intent-danger">Danger</button>
 				<button class="action-button action-button-primary action-button-intent-normal" disabled>Disabled primary</button>
+				<button class="action-button action-button-tertiary action-button-intent-cancel" disabled>Disabled cancel</button>
+				<button class="action-button action-button-secondary action-button-intent-danger" disabled>Disabled danger</button>
 				</div>
 				<div class="selection-dialog" data-test-surface="dark" style="display:flex;flex-wrap:wrap;gap:8px;max-width:calc(100vw - 56px);background:#131729;color:#fff;padding:8px">
 				<button data-test-action="primary" class="action-button action-button-primary action-button-intent-normal">Primary</button>
@@ -50,6 +52,8 @@ test('shared action tokens expose every state on light and dark surfaces at desk
 				<button data-test-action="cancel" class="action-button action-button-tertiary action-button-intent-cancel">Cancel</button>
 				<button data-test-action="danger" class="action-button action-button-secondary action-button-intent-danger">Danger</button>
 				<button class="action-button action-button-primary action-button-intent-normal" disabled>Disabled primary</button>
+				<button class="action-button action-button-tertiary action-button-intent-cancel" disabled>Disabled cancel</button>
+				<button class="action-button action-button-secondary action-button-intent-danger" disabled>Disabled danger</button>
 				</div>`;
 			document.body.append(fixture);
 		});
@@ -99,15 +103,50 @@ test('shared action tokens expose every state on light and dark surfaces at desk
 			const disabledPrimary = surface.getByRole('button', { name: 'Disabled primary' });
 			await expect(disabledPrimary).toBeDisabled();
 			const disabledStyle = await disabledPrimary.evaluate((element) => ({
-				background: getComputedStyle(element).backgroundColor,
-				border: getComputedStyle(element).borderColor,
-				foreground: getComputedStyle(element).color,
-				surface: getComputedStyle(element.parentElement!).backgroundColor
+				...(() => {
+					const style = getComputedStyle(element);
+					const probe = document.createElement('span');
+					probe.style.cssText = 'position:absolute;background:var(--action-primary-disabled-background);border:1px solid var(--action-primary-disabled-border);color:var(--action-primary-disabled-foreground)';
+					element.parentElement!.append(probe);
+					const primaryTokenStyle = getComputedStyle(probe);
+					const result = { background: style.backgroundColor, border: style.borderColor, foreground: style.color, surface: getComputedStyle(element.parentElement!).backgroundColor, tokenBackground: primaryTokenStyle.backgroundColor, tokenBorder: primaryTokenStyle.borderColor, tokenForeground: primaryTokenStyle.color };
+					probe.remove();
+					return result;
+				})()
 			}));
 			const primaryBackground = await surface.getByRole('button', { name: 'Primary', exact: true }).evaluate((element) => getComputedStyle(element).backgroundColor);
 			expect(disabledStyle.background).not.toBe(primaryBackground);
+			expect(disabledStyle.background).toBe(disabledStyle.tokenBackground);
+			expect(disabledStyle.border).toBe(disabledStyle.tokenBorder);
+			expect(disabledStyle.foreground).toBe(disabledStyle.tokenForeground);
+			const mutedPrimary = await disabledPrimary.evaluate((element) => getComputedStyle(element).backgroundColor);
+			const neutralDisabledBackground = await surface.getByRole('button', { name: 'Disabled cancel' }).evaluate((element) => getComputedStyle(element).backgroundColor);
+			expect(mutedPrimary).not.toBe(neutralDisabledBackground);
 			expect(contrast(disabledStyle.foreground, disabledStyle.background), `${surfaceName} disabled text contrast`).toBeGreaterThanOrEqual(4.5);
 			expect(Math.max(contrast(disabledStyle.border, disabledStyle.surface), contrast(disabledStyle.background, disabledStyle.surface)), `${surfaceName} disabled boundary contrast`).toBeGreaterThanOrEqual(3);
+			await disabledPrimary.hover();
+			expect(await disabledPrimary.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe(disabledStyle.background);
+			const documentNode = await cdp.send('DOM.getDocument');
+			const disabledNode = await cdp.send('DOM.querySelector', { nodeId: documentNode.root.nodeId, selector: `[data-test-surface="${surfaceName}"] button:disabled.action-button-primary` });
+			await cdp.send('CSS.forcePseudoState', { nodeId: disabledNode.nodeId, forcedPseudoClasses: ['active'] });
+			expect(await disabledPrimary.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe(disabledStyle.background);
+			await cdp.send('CSS.forcePseudoState', { nodeId: disabledNode.nodeId, forcedPseudoClasses: [] });
+			for (const intentButtonName of ['Disabled cancel', 'Disabled danger']) {
+				const intentDisabledStyle = await surface.getByRole('button', { name: intentButtonName }).evaluate((element) => {
+					const style = getComputedStyle(element);
+					const probe = document.createElement('span');
+					probe.style.cssText = 'position:absolute;background:var(--action-disabled-background);border:1px solid var(--action-disabled-border);color:var(--action-disabled-foreground)';
+					element.parentElement!.append(probe);
+					const genericDisabled = getComputedStyle(probe);
+					const result = { background: style.backgroundColor, border: style.borderColor, color: style.color, genericBackground: genericDisabled.backgroundColor, genericBorder: genericDisabled.borderColor, genericColor: genericDisabled.color };
+					probe.remove();
+					return result;
+				});
+				expect(intentDisabledStyle.background).toBe(intentDisabledStyle.genericBackground);
+				expect(intentDisabledStyle.border).toBe(intentDisabledStyle.genericBorder);
+				expect(intentDisabledStyle.color).toBe(intentDisabledStyle.genericColor);
+				expect(intentDisabledStyle.background).toBe(neutralDisabledBackground);
+			}
 		}
 	}
 });

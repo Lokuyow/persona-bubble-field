@@ -92,7 +92,7 @@
 								<div class="value-row current-row"><span>現在値</span><strong><span>{formatEffectValue(key, upgrade.level)}</span>{#if key !== 'contextCapacity'}<span class="unit">{effectUnit(key)}</span>{/if}</strong></div>
 								{#if !isMaxed}<div class="value-row delta-row"><span>増加量</span><strong>{formatDelta(key, upgrade.level)}</strong></div>{/if}
 							</div>
-							<ActionButton variant="secondary" class={busy && !isMaxed ? 'upgrade-button processing' : 'upgrade-button'} type="button" aria-label={isMaxed ? `${abilityLabels[key]}は最大Lvです` : busy ? `${upgradeName}（必要${upgrade.cost}pt、強化処理中）` : !canAfford ? `${upgradeName}（必要${upgrade.cost}pt、ポイント不足）` : `${upgradeName}（必要${upgrade.cost}pt）`} disabled={busy || !canAfford || isMaxed} onclick={() => onUpgrade(key)}>
+							<ActionButton variant="primary" class={busy && !isMaxed ? 'upgrade-button processing' : 'upgrade-button'} type="button" aria-label={isMaxed ? `${abilityLabels[key]}は最大Lvです` : busy ? `${upgradeName}（必要${upgrade.cost}pt、強化処理中）` : !canAfford ? `${upgradeName}（必要${upgrade.cost}pt、ポイント不足）` : `${upgradeName}（必要${upgrade.cost}pt）`} disabled={busy || !canAfford || isMaxed} onclick={() => onUpgrade(key)}>
 								{#if isMaxed}<span>最大Lv</span>{:else}<span class="upgrade-requirement"><span>必要</span>{' '}<strong>{upgrade.cost}pt</strong></span><SquareChevronUpFilled aria-hidden="true" />{/if}
 			</ActionButton>
 						</article>

@@ -164,7 +164,21 @@ test.describe('Relay startup', () => {
 		await expect(dialog).not.toContainText('100,000 ptで現在の一生を終えます。未回収の作業ポイントは含まれません。');
 		await expect(dialog).toContainText('100,000 pt');
 		await expect(dialog.locator('.clear-progress-head[data-stat-icon="wallet"] > span > svg')).toHaveCount(1);
-		await expect(dialog.getByRole('button', { name: '脱出', exact: true })).toBeDisabled();
+		const disabledEscape = dialog.getByRole('button', { name: '脱出', exact: true });
+		await expect(disabledEscape).toBeDisabled();
+		const disabledEscapeColors = await disabledEscape.evaluate((button) => {
+			const disabled = getComputedStyle(button);
+			const probe = document.createElement('span');
+			probe.style.cssText = 'position:absolute;color:var(--action-disabled-foreground);background:var(--action-disabled-background);border:1px solid var(--action-disabled-border)';
+			button.closest('.clear-section')!.append(probe);
+			const genericDisabled = getComputedStyle(probe);
+			const result = { background: disabled.backgroundColor, foreground: disabled.color, border: disabled.borderColor, genericBackground: genericDisabled.backgroundColor, genericForeground: genericDisabled.color, genericBorder: genericDisabled.borderColor };
+			probe.remove();
+			return result;
+		});
+		expect(disabledEscapeColors.background).toBe(disabledEscapeColors.genericBackground);
+		expect(disabledEscapeColors.foreground).toBe(disabledEscapeColors.genericForeground);
+		expect(disabledEscapeColors.border).toBe(disabledEscapeColors.genericBorder);
 		await expect(dialog.getByText('clear不可: 所持ポイントが100,000pt未満です')).toHaveCount(0);
 		await expect(dialog.getByRole('button', { name: /へ強化/ })).toHaveCount(0);
 

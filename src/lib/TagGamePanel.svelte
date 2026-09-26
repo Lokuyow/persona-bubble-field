@@ -120,7 +120,7 @@
 								{#if game.hostPubkey === selfPubkey}<ActionButton variant="tertiary" intent="cancel" onclick={() => onCancel(game.gameId)} disabled={busy}>募集を取り消す</ActionButton><ActionButton variant="primary" onclick={() => onPropose(game.gameId)} disabled={busy || game.participant.length < 2}>開始を提案</ActionButton>
 								{:else}<p class="reservation-state">{game.participant.some((player) => player.pubkey === selfPubkey) ? '参加申請済み（参加登録済み）' : '参加申請済み（受理待ち）'}</p><ActionButton variant="tertiary" intent="cancel" onclick={() => onLeave(game.gameId)} disabled={busy}>申請を取り消す</ActionButton>{/if}
 						{:else if reservationCurrent && reservedGameId === game.gameId}<p class="reservation-state">参加申請済み（受理待ち）</p><ActionButton variant="tertiary" intent="cancel" onclick={() => onLeave(game.gameId)} disabled={busy}>申請を取り消す</ActionButton>
-							{:else}<ActionButton variant={joinableGames.length === 1 && joinableGames[0]?.gameId === game.gameId ? 'primary' : 'secondary'} onclick={() => onJoin(game.gameId)} disabled={busy || !selfPubkey || reservationCurrent || game.participant.length >= 8}>参加申請</ActionButton>{/if}
+							{:else}<ActionButton variant="primary" onclick={() => onJoin(game.gameId)} disabled={busy || !selfPubkey || reservationCurrent || game.participant.length >= 8}>参加申請</ActionButton>{/if}
 						{:else if game.phase === 'proposed' && game.proposalId && game.participant.some((player) => player.pubkey === selfPubkey)}
 							<p class="reservation-state">参加登録済み</p>
 							{#if game.hostPubkey === selfPubkey}<span>開催者は同意済み</span>

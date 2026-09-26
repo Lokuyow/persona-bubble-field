@@ -476,7 +476,7 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 	}
 });
 
-test('keeps join actions secondary when multiple tag-game lobbies are available', async ({ browser }) => {
+test('keeps join actions primary and equally emphasized when multiple tag-game lobbies are available', async ({ browser }) => {
 	const firstHostPage = await browser.newPage();
 	const secondHostPage = await browser.newPage();
 	const joinerPage = await browser.newPage();
@@ -508,7 +508,7 @@ test('keeps join actions secondary when multiple tag-game lobbies are available'
 			latestPublished(firstHostPage, TAG_GAME_KIND, getPublicKey(firstHostSecret)),
 			latestPublished(secondHostPage, TAG_GAME_KIND, getPublicKey(secondHostSecret))
 		]);
-		await joinerPage.setViewportSize({ width: 390, height: 844 });
+		await joinerPage.setViewportSize({ width: 1280, height: 900 });
 		await openTagGameTerminal(joinerPage);
 		const dialog = joinerPage.getByRole('dialog', { name: '鬼ごっこ' });
 		for (const [index, event] of lobbies.entries()) {
@@ -519,10 +519,26 @@ test('keeps join actions secondary when multiple tag-game lobbies are available'
 		await expect(joinButtons).toHaveCount(2);
 		await expectButtonShape(joinButtons.nth(0));
 		await expectButtonShape(joinButtons.nth(1));
-		await expect(joinButtons.nth(0)).toHaveAttribute('data-action-variant', 'secondary');
-		await expect(joinButtons.nth(1)).toHaveAttribute('data-action-variant', 'secondary');
+		await expect(joinButtons.nth(0)).toHaveAttribute('data-action-variant', 'primary');
+		await expect(joinButtons.nth(1)).toHaveAttribute('data-action-variant', 'primary');
 		await expect(dialog.getByRole('button', { name: '鬼ごっこを開催' })).toHaveAttribute('data-action-variant', 'secondary');
-		await expect(dialog.locator('[data-action-variant="primary"]')).toHaveCount(0);
+		await expect(dialog.locator('[data-action-variant="primary"]')).toHaveCount(2);
+		const joinBackgrounds = await joinButtons.evaluateAll((buttons) => buttons.map((button) => getComputedStyle(button).backgroundColor));
+		expect(joinBackgrounds[0]).toBe(joinBackgrounds[1]);
+		for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
+			await joinerPage.setViewportSize(viewport);
+			await expectButtonShape(joinButtons.nth(0));
+			await expectButtonShape(joinButtons.nth(1));
+			await expect(joinButtons.nth(0)).toBeVisible();
+			await expect(joinButtons.nth(1)).toBeVisible();
+			await joinButtons.nth(1).scrollIntoViewIfNeeded();
+			const secondJoinHitArea = await joinButtons.nth(1).evaluate((button) => {
+				const rect = button.getBoundingClientRect();
+				return { height: rect.height, insideViewport: rect.top >= 0 && rect.bottom <= innerHeight };
+			});
+			expect(secondJoinHitArea.height).toBeGreaterThanOrEqual(44);
+			expect(secondJoinHitArea.insideViewport).toBe(true);
+		}
 	} finally {
 		await Promise.all([firstHostPage.close(), secondHostPage.close(), joinerPage.close()]);
 	}
