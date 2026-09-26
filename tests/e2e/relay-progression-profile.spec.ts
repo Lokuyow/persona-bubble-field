@@ -393,11 +393,18 @@ for (const stateKind of ['missing', 'corrupt'] as const) {
 				};
 				const meter = row.querySelector('[role="meter"]')!;
 				const fill = meter.querySelector('.meter-fill')!;
+				const value = row.querySelector('strong')!;
+				const textRange = document.createRange();
+				textRange.selectNodeContents(value);
+				const textRects = [...textRange.getClientRects()];
+				const textLeft = Math.min(...textRects.map((rect) => rect.left));
+				const textRight = Math.max(...textRects.map((rect) => rect.right));
 				return {
 					row: box(row),
 					label: box(row.querySelector('.meter-label')!),
 					bar: box(meter),
-					value: box(row.querySelector('strong')!),
+					value: box(value),
+					text: { left: textLeft, right: textRight, width: textRight - textLeft },
 					centers: [row.querySelector('.meter-label')!, meter, row.querySelector('strong')!].map((element) => {
 						const rect = element.getBoundingClientRect();
 						return (rect.top + rect.bottom) / 2;
@@ -417,13 +424,7 @@ for (const stateKind of ['missing', 'corrupt'] as const) {
 				const lifespan = getComputedStyle(element.querySelector('[data-lifespan-value]')!);
 				const points = getComputedStyle(element.querySelector('[data-points-value]')!);
 				const unit = getComputedStyle(element.querySelector('[data-points-value] span')!);
-				const pointsValue = element.querySelector('[data-points-value]')!;
-				const pointsText = pointsValue.textContent ?? '';
-				const pointsStyle = getComputedStyle(pointsValue);
-				const canvas = document.createElement('canvas');
-				const context = canvas.getContext('2d')!;
-				context.font = `${pointsStyle.fontWeight} ${pointsStyle.fontSize} ${pointsStyle.fontFamily}`;
-				return { lifespanSize: lifespan.fontSize, lifespanWeight: lifespan.fontWeight, pointsSize: points.fontSize, pointsWeight: points.fontWeight, unitSize: unit.fontSize, pointsText, pointsTextWidth: context.measureText(pointsText).width };
+				return { lifespanSize: lifespan.fontSize, lifespanWeight: lifespan.fontWeight, pointsSize: points.fontSize, pointsWeight: points.fontWeight, unitSize: unit.fontSize };
 			});
 			expect(textMetrics.pointsSize).toBe(textMetrics.lifespanSize);
 			expect(textMetrics.pointsWeight).toBe(textMetrics.lifespanWeight);
@@ -437,14 +438,19 @@ for (const stateKind of ['missing', 'corrupt'] as const) {
 					expect(row.bar.left - row.label.right).toBeLessThanOrEqual(16);
 					expect(row.value.left - row.bar.right).toBeGreaterThanOrEqual(12);
 					expect(row.value.left - row.bar.right).toBeLessThanOrEqual(16);
-					expect(row.value.width).toBeGreaterThanOrEqual(textMetrics.pointsTextWidth);
+					expect(row.text.left).toBeGreaterThanOrEqual(row.value.left - 1);
+					expect(row.text.right).toBeLessThanOrEqual(row.value.right + 1);
+					expect(row.value.width).toBeGreaterThanOrEqual(row.text.width - 1);
 					expect(row.value.right).toBeLessThanOrEqual(row.row.right);
 				}
 				expect(Math.abs(meterRows[0].bar.left - meterRows[1].bar.left)).toBeLessThanOrEqual(1);
 				expect(Math.abs(meterRows[0].bar.right - meterRows[1].bar.right)).toBeLessThanOrEqual(1);
 			} else {
 				for (const row of meterRows) {
-					expect(row.label.right).toBeLessThan(row.value.left);
+					expect(row.label.right).toBeLessThan(row.text.left);
+					expect(row.text.right).toBeLessThanOrEqual(row.row.right);
+					expect(row.text.left).toBeGreaterThanOrEqual(row.value.left - 1);
+					expect(row.text.right).toBeLessThanOrEqual(row.value.right + 1);
 					expect(row.bar.top).toBeGreaterThanOrEqual(row.label.bottom);
 					expect(row.bar.top).toBeGreaterThanOrEqual(row.value.bottom);
 					expect(row.bar.width).toBeGreaterThanOrEqual(row.row.width - 1);

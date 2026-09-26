@@ -2,6 +2,7 @@ import {
 	createTagGameSchedule,
 	tagGameScheduledEffectAt,
 	TAG_GAME_BENEFIT_POINTS_PER_SECOND,
+	TAG_GAME_FINAL_WAIT_MS,
 	TAG_GAME_LIFESPAN_LOSS_MS_PER_SECOND,
 	TAG_GAME_MAX_LIFESPAN_LOSS_MS,
 	TAG_GAME_MAX_POINTS,
@@ -19,6 +20,8 @@ export type TagGameHudProjectionInput = Readonly<{
 	localAppliedPoints: number;
 	localAppliedLossMs: number;
 	holderActivityAtMs?: number;
+	/** Organizer-local safety stop; never inferred by other participants. */
+	effectPausedAtMs?: number;
 	savedPoints: number;
 	effectiveExpiresAtMs: number;
 	nowMs: number;
@@ -63,12 +66,18 @@ export function projectTagGameHud(input: TagGameHudProjectionInput): TagGameHudP
 	let benefitRateActive = false;
 	let calamityRateActive = false;
 
-	if (game.phase === 'running' && game.seed && game.seed.length <= 256 && game.startedAt !== undefined && game.endsAt !== undefined &&
+	const endsAtMs = (game.endsAt ?? 0) * 1_000;
+	const finalWaitExpiresAtMs = endsAtMs + TAG_GAME_FINAL_WAIT_MS;
+	if ((game.phase === 'running' || game.phase === 'settling') && game.seed && game.seed.length <= 256 && game.startedAt !== undefined && game.endsAt !== undefined &&
 		!game.holderChallengeId && game.ownerPubkey === input.selfPubkey && own.status === 'active' &&
-		input.nowMs >= game.settledAtMs && input.nowMs < game.endsAt * 1000) {
+		input.nowMs >= game.settledAtMs && input.nowMs < finalWaitExpiresAtMs) {
 		const schedule = createTagGameSchedule(game.seed);
+		// Freeze the local display at the exact 180-second boundary until a final
+		// organizer state arrives or the existing 210-second fallback expires.
+		const projectionNowMs = Math.min(input.nowMs, endsAtMs);
 		const holderActivityAtMs = input.holderActivityAtMs ?? Math.max(game.startedAt * 1_000, game.transferAt ?? 0, game.lastHolderResponseAtMs ?? 0);
-		const until = Math.min(input.nowMs, game.endsAt * 1000, holderActivityAtMs + 23_000);
+		const until = Math.min(projectionNowMs, endsAtMs, holderActivityAtMs + 23_000,
+			input.effectPausedAtMs ?? Number.POSITIVE_INFINITY);
 		let cursor = Math.max(game.settledAtMs, game.startedAt * 1_000);
 		let boundary = 0;
 		let benefitDurationMs = 0;
@@ -91,9 +100,11 @@ export function projectTagGameHud(input: TagGameHudProjectionInput): TagGameHudP
 				Math.floor((own.calamityMs + calamityDurationMs) * TAG_GAME_LIFESPAN_LOSS_MS_PER_SECOND / 1000));
 			predictedLossMs = Math.max(0, projectedCumulative - own.lifespanLossMs);
 		}
-		const currentEffect = tagGameScheduledEffectAt(game, input.nowMs);
-		benefitRateActive = currentEffect === 'benefit' && input.nowMs < holderActivityAtMs + 23_000;
-		calamityRateActive = currentEffect === 'calamity' && input.nowMs < holderActivityAtMs + 23_000;
+		const currentEffect = tagGameScheduledEffectAt(game, projectionNowMs);
+		const beforeLocalStop = input.effectPausedAtMs === undefined || projectionNowMs < input.effectPausedAtMs;
+		const gameStillRunning = input.nowMs < endsAtMs;
+		benefitRateActive = gameStillRunning && currentEffect === 'benefit' && projectionNowMs < holderActivityAtMs + 23_000 && beforeLocalStop;
+		calamityRateActive = gameStillRunning && currentEffect === 'calamity' && projectionNowMs < holderActivityAtMs + 23_000 && beforeLocalStop;
 	}
 
 	return {

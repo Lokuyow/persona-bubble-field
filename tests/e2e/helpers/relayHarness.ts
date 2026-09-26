@@ -508,7 +508,7 @@ export async function installDelayedRelay(page: Page, options: {
 				pendingRealtimePublishes.push({ socket, event, outcome: state.realtimePublishOutcome });
 				return;
 			}
-			if (state.realtimePublishOutcome === 'rejected') {
+			if (state.realtimePublishOutcome === 'rejected' || event.kind === TAG_GAME_KIND && state.rejectTagGameStatePublishes) {
 				deliver(socket, ['OK', event.id, false, 'blocked: realtime test rejection']);
 				return;
 			}
