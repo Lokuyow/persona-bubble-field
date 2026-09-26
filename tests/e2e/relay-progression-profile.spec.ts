@@ -88,7 +88,7 @@ test.describe('Relay startup', () => {
 
 		const profileTrigger = page.getByRole('button', { name: '自分のプロフィールを開く' });
 		await expect(profileTrigger).toBeVisible();
-		await expect(page.locator('.composer-controls .profile-trigger')).toHaveCount(1);
+		await expect(page.locator('.action-dock').getByRole('button', { name: '自分のプロフィールを開く' })).toHaveCount(1);
 		const avatarColors = await page.evaluate(() => {
 			const field = document.querySelector<HTMLElement>('.participant[data-self="true"] .avatar');
 			const dock = document.querySelector<HTMLElement>('.profile-trigger-character-avatar');
@@ -262,21 +262,22 @@ test.describe('Relay startup', () => {
 		await openReadyRelayWorld(page);
 
 		const editor = page.locator('.composer-editor-slot');
-		const controls = page.locator('.composer-controls');
 		const profileTrigger = page.locator('.profile-trigger');
+		const soundButton = page.getByRole('button', { name: 'Open sound settings' });
 		const speechToggle = page.locator('.speech-type-toggle');
 		const editorBox = await editor.boundingBox();
-		const controlsBox = await controls.boundingBox();
 		const profileBox = await profileTrigger.boundingBox();
+		const soundBox = await soundButton.boundingBox();
 		const speechBox = await speechToggle.boundingBox();
 		expect(editorBox).not.toBeNull();
-		expect(controlsBox).not.toBeNull();
 		expect(profileBox).not.toBeNull();
+		expect(soundBox).not.toBeNull();
 		expect(speechBox).not.toBeNull();
-		expect(editorBox!.y + editorBox!.height).toBeLessThanOrEqual(controlsBox!.y + 1);
-		expect(profileBox!.y).toBeGreaterThanOrEqual(controlsBox!.y);
-		expect(speechBox!.y).toBeGreaterThanOrEqual(controlsBox!.y);
+		expect(editorBox!.y + editorBox!.height).toBeLessThanOrEqual(profileBox!.y + 1);
+		expect(editorBox!.y + editorBox!.height).toBeLessThanOrEqual(speechBox!.y + 1);
 		expect(Math.abs(profileBox!.y - speechBox!.y)).toBeLessThan(2);
+		expect(profileBox!.x + profileBox!.width).toBeLessThan(soundBox!.x);
+		expect(soundBox!.x + soundBox!.width).toBeLessThan(speechBox!.x);
 	});
 
 	test('shows overflow point and lifespan status after the Context cap', async ({ page }) => {
@@ -451,14 +452,14 @@ for (const stateKind of ['missing', 'corrupt'] as const) {
 		for (const viewport of [{ width: 1_200, height: 900 }, { width: 960, height: 900 }, { width: 390, height: 844 }, { width: 390, height: 480 }]) {
 			await page.setViewportSize(viewport);
 			const hudBox = await hud.boundingBox();
-			const topStackBox = await page.locator('[data-top-status-hud]').boundingBox();
-			const soundBox = await page.locator('[data-sound-control]').boundingBox();
-			expect(hudBox && topStackBox && soundBox).toBeTruthy();
-			if (hudBox && topStackBox && soundBox) {
+			const soundBox = await sound.boundingBox();
+			expect(hudBox && soundBox).toBeTruthy();
+			if (hudBox && soundBox) {
 				expect(hudBox.y).toBeLessThan(50);
-				expect(soundBox.y).toBeGreaterThanOrEqual(hudBox.y + hudBox.height);
-				expect(soundBox.x + soundBox.width).toBeGreaterThanOrEqual(hudBox.x + hudBox.width - 2);
-				expect(topStackBox.height).toBeGreaterThan(hudBox.height);
+				expect(soundBox.x).toBeGreaterThanOrEqual(0);
+				expect(soundBox.y).toBeGreaterThanOrEqual(0);
+				expect(soundBox.x + soundBox.width).toBeLessThanOrEqual(viewport.width);
+				expect(soundBox.y + soundBox.height).toBeLessThanOrEqual(viewport.height);
 			}
 			const meterRows = await hud.locator('.meter-row').evaluateAll((rows) => rows.map((row) => {
 				const box = (element: Element) => {
@@ -526,8 +527,10 @@ for (const stateKind of ['missing', 'corrupt'] as const) {
 			}
 			const chatterBox = await chatter.boundingBox();
 			expect(chatterBox).toBeTruthy();
-			if (topStackBox && chatterBox) {
-				expect(chatterBox.y).toBeGreaterThanOrEqual(topStackBox.y + topStackBox.height);
+			if (chatterBox) {
+				expect(chatterBox.x).toBeGreaterThanOrEqual(0);
+				expect(chatterBox.y).toBeGreaterThanOrEqual(0);
+				expect(chatterBox.x + chatterBox.width).toBeLessThanOrEqual(viewport.width);
 				expect(chatterBox.y + chatterBox.height).toBeLessThanOrEqual(viewport.height + 1);
 			}
 		}

@@ -77,8 +77,16 @@ test.describe('Relay startup', () => {
 		expect(Math.abs(
 		(first.scene.y + first.scene.height / 2) - (first.area.y + first.area.height / 2)
 	)).toBeLessThan(0.5);
-		expect(first.viewport).toEqual({ x: 0, y: 0, width: 2560, height: 1373 });
-		expect(first.composer?.height).toBe(67);
+		// The initial Field viewport reserves the actual Dock region before Relay bootstrap.
+		// Keep the fixture viewport width fixed, but derive its available height from the Dock.
+		expect(first.viewport.x).toBe(0);
+		expect(first.viewport.y).toBe(0);
+		expect(first.viewport.width).toBe(2560);
+		expect(first.composer).not.toBeNull();
+		const initialDock = first.composer!;
+		expect(initialDock.height).toBeGreaterThanOrEqual(54);
+		expect(initialDock.y).toBe(first.viewport.y + first.viewport.height);
+		expect(initialDock.y + initialDock.height).toBe(1440);
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
 			AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) &&
 			(request.filter.kinds as number[])[0] === 42)).toBe(true);
@@ -88,6 +96,8 @@ test.describe('Relay startup', () => {
 		for (const frame of visible) {
 			expect(frame.scene.width).toBe(1216);
 			expect(frame.scene.height).toBe(608);
+			expect(Math.abs(frame.scene.x - first.scene.x)).toBeLessThan(0.5);
+			expect(Math.abs(frame.scene.y - first.scene.y)).toBeLessThan(0.5);
 			expect(frame.scene.x).toBeGreaterThanOrEqual(frame.area.x - frame.scene.width);
 			expect(frame.scene.x).toBeLessThanOrEqual(frame.area.x + frame.area.width);
 			expect(frame.scene.y).toBeGreaterThanOrEqual(frame.area.y - frame.scene.height);
@@ -111,6 +121,10 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('.participant')).toHaveCount(1);
 		await expect(page.locator('.action-dock')).toHaveCount(0);
 		await expect(page.locator('ehagaki-composer')).toHaveCount(0);
+		const soundButton = page.getByRole('button', { name: 'Open sound settings' });
+		await expect(soundButton).toBeVisible();
+		await soundButton.click();
+		await expect(page.getByRole('dialog', { name: 'Sound settings' })).toBeVisible();
 		expect(hostOwned.requests()).toBe(0);
 		expect(consoleIssues).toEqual([]);
 	});
@@ -213,7 +227,7 @@ test.describe('Relay startup', () => {
 			});
 			expect(beforePreferredHeight.initialPreferredHeight).toBe('50px');
 			expect(beforePreferredHeight.preferredHeight).toBe('50px');
-			const expectedInitialDockHeight = viewport.name === 'mobile' ? 121 : 67;
+			const expectedInitialDockHeight = viewport.name === 'mobile' ? 121 : 71;
 			expect(beforePreferredHeight.dockHeight).toBeCloseTo(expectedInitialDockHeight, 1);
 			expect(beforePreferredHeight.fieldHeight + beforePreferredHeight.dockHeight)
 				.toBeCloseTo(beforePreferredHeight.viewportHeight, 1);
@@ -230,6 +244,27 @@ test.describe('Relay startup', () => {
 			}));
 			expect(Math.abs(afterPreferredHeight.dockHeight - beforePreferredHeight.dockHeight)).toBeLessThan(0.5);
 			expect(Math.abs(afterPreferredHeight.fieldHeight - beforePreferredHeight.fieldHeight)).toBeLessThan(0.5);
+			if (viewport.name === 'desktop') {
+				await page.evaluate(() => (window as typeof window & {
+					__ehagakiSetPreferredHeight(height: number): void;
+				}).__ehagakiSetPreferredHeight(200));
+				await expect.poll(() => page.locator('.action-dock').evaluate((dock) => dock.getBoundingClientRect().height))
+					.toBeGreaterThan(afterPreferredHeight.dockHeight);
+				const grown = await page.evaluate(() => {
+					const rect = (selector: string) => document.querySelector<HTMLElement>(selector)!.getBoundingClientRect().toJSON();
+					return { dock: rect('.action-dock'), left: rect('.composer-controls-left'), editor: rect('.composer-editor-slot'), right: rect('.composer-controls-right'), field: rect('.field-viewport') };
+				});
+				const grownCenters = [grown.left, grown.editor, grown.right].map((box) => box.y + box.height / 2);
+				expect(Math.max(...grownCenters) - Math.min(...grownCenters)).toBeLessThanOrEqual(1);
+				for (const box of [grown.left, grown.editor, grown.right]) {
+					expect(box.y).toBeGreaterThanOrEqual(grown.dock.y);
+					expect(box.y + box.height).toBeLessThanOrEqual(grown.dock.y + grown.dock.height);
+				}
+				expect(grown.field.height).toBeCloseTo(afterPreferredHeight.fieldHeight, 1);
+				await page.evaluate(() => (window as typeof window & {
+					__ehagakiSetPreferredHeight(height: number): void;
+				}).__ehagakiSetPreferredHeight(50));
+			}
 		});
 	}
 
@@ -268,14 +303,27 @@ test.describe('Relay startup', () => {
 			const dock = document.querySelector<HTMLElement>('.action-dock')!;
 			const field = document.querySelector<HTMLElement>('.field-viewport')!;
 			const self = document.querySelector<HTMLElement>('.participant[data-self="true"]')!;
+			const editor = document.querySelector<HTMLElement>('.composer-editor-slot')!;
+			const controlsLeft = document.querySelector<HTMLElement>('.composer-controls-left')!;
+			const controlsRight = document.querySelector<HTMLElement>('.composer-controls-right')!;
 			return {
 				dock: dock.getBoundingClientRect().toJSON(),
 				field: field.getBoundingClientRect().toJSON(),
 				participant: self.getBoundingClientRect().toJSON(),
+				editor: editor.getBoundingClientRect().toJSON(),
+				controlsLeft: controlsLeft.getBoundingClientRect().toJSON(),
+				controlsRight: controlsRight.getBoundingClientRect().toJSON(),
 				cameraTransform: getComputedStyle(document.querySelector<HTMLElement>('.field-scene')!).transform
 			};
 		});
 		expect(keyboardOpen.dock.bottom).toBeCloseTo(544, 1);
+		expect(keyboardOpen.editor.bottom).toBeLessThan(keyboardOpen.controlsLeft.top);
+		expect(keyboardOpen.controlsLeft.right).toBeLessThanOrEqual(keyboardOpen.controlsRight.left);
+		expect(keyboardOpen.controlsRight.right).toBeLessThanOrEqual(390);
+		expect(keyboardOpen.controlsRight.bottom).toBeLessThanOrEqual(keyboardOpen.dock.bottom);
+		const keyboardSendBox = await page.locator('ehagaki-composer').getByRole('button', { name: 'Send' }).boundingBox();
+		expect(keyboardSendBox).not.toBeNull();
+		if (keyboardSendBox) expect(keyboardSendBox.y + keyboardSendBox.height).toBeLessThanOrEqual(keyboardOpen.dock.bottom);
 		expect(keyboardOpen.field.height).toBeCloseTo(before.field.height, 1);
 		expect(keyboardOpen.participant).toEqual(before.participant);
 		expect(keyboardOpen.cameraTransform).toBe(before.cameraTransform);

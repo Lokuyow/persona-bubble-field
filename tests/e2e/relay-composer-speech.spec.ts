@@ -66,12 +66,13 @@ test.describe('Relay startup', () => {
 
 	test('renders ActionDock controls in order on desktop and mobile without an unread slot', async ({ page }) => {
 		await installPromptApiStub(page);
-		for (const width of [1200, 390]) {
+		let persistedChatterState: boolean | null = null;
+		for (const width of [1200, 838, 720, 701, 700, 390, 320]) {
 			await page.setViewportSize({ width, height: 844 });
 			await openReadyRelayWorld(page, 1);
 			const chatterToggle = page.locator('.chatter-toggle');
 			const suggestionsToggle = page.locator('.suggestions-toggle');
-			for (const control of [page.locator('.profile-trigger'), chatterToggle, page.locator('.speech-type-toggle'), suggestionsToggle]) {
+			for (const control of [page.locator('.profile-trigger'), chatterToggle, page.locator('.speaker-button'), page.locator('.speech-type-toggle'), suggestionsToggle]) {
 				const frame = await control.evaluate((element) => {
 					const style = getComputedStyle(element);
 					return { background: style.backgroundColor, border: style.borderStyle, width: style.borderWidth };
@@ -79,6 +80,30 @@ test.describe('Relay startup', () => {
 				expect(frame.background).not.toBe('rgba(0, 0, 0, 0)');
 				expect(frame.border).toBe('solid');
 				expect(frame.width).toBe('1px');
+			}
+			const soundButton = page.locator('.speaker-button');
+			const soundDesign = await soundButton.evaluate((element) => {
+				const style = getComputedStyle(element);
+				const rect = element.getBoundingClientRect();
+				return { background: style.backgroundColor, borderColor: style.borderColor, borderRadius: style.borderRadius, borderWidth: style.borderWidth, boxShadow: style.boxShadow, width: rect.width, height: rect.height };
+			});
+			const chatterDesign = await chatterToggle.evaluate((element) => {
+				const style = getComputedStyle(element);
+				const rect = element.getBoundingClientRect();
+				return { background: style.backgroundColor, borderColor: style.borderColor, borderRadius: style.borderRadius, borderWidth: style.borderWidth, boxShadow: style.boxShadow, width: rect.width, height: rect.height };
+			});
+			expect(soundDesign).toEqual(chatterDesign);
+			await soundButton.hover();
+			const soundHoverBackground = await soundButton.evaluate((element) => getComputedStyle(element).backgroundColor);
+			await chatterToggle.hover();
+			const chatterHoverBackground = await chatterToggle.evaluate((element) => getComputedStyle(element).backgroundColor);
+			expect(soundHoverBackground).toBe(chatterHoverBackground);
+			const soundIconBox = await soundButton.locator('svg').boundingBox();
+			const soundButtonRect = await soundButton.boundingBox();
+			expect(soundIconBox && soundButtonRect).toBeTruthy();
+			if (soundIconBox && soundButtonRect) {
+				expect(Math.abs(soundIconBox.x + soundIconBox.width / 2 - soundButtonRect.x - soundButtonRect.width / 2)).toBeLessThan(1);
+				expect(Math.abs(soundIconBox.y + soundIconBox.height / 2 - soundButtonRect.y - soundButtonRect.height / 2)).toBeLessThan(1);
 			}
 			await expect(page.getByRole('button', { name: 'AI発言候補を生成' })).toBeVisible();
 			await expect(suggestionsToggle.locator('svg')).toHaveCount(1);
@@ -102,7 +127,7 @@ test.describe('Relay startup', () => {
 				expect(Math.abs((iconBox.x + iconBox.width / 2) - (buttonBox.x + buttonBox.width / 2))).toBeLessThan(1);
 				expect(Math.abs((iconBox.y + iconBox.height / 2) - (buttonBox.y + buttonBox.height / 2))).toBeLessThan(1);
 			}
-			const initiallyOpen = width > 700;
+			const initiallyOpen: boolean = persistedChatterState ?? (width > 700);
 			await expect(chatterToggle).toHaveAttribute('aria-label', initiallyOpen ? 'Chatterを閉じる' : 'Chatterを開く');
 			await expect(chatterToggle).toHaveAttribute('aria-pressed', String(initiallyOpen));
 			const toggleBox = await chatterToggle.boundingBox();
@@ -111,11 +136,155 @@ test.describe('Relay startup', () => {
 			await chatterToggle.click();
 			await expect(chatterToggle).toHaveAttribute('aria-label', initiallyOpen ? 'Chatterを開く' : 'Chatterを閉じる');
 			await expect(chatterToggle).toHaveAttribute('aria-pressed', String(!initiallyOpen));
+			persistedChatterState = !initiallyOpen;
 			await expect(page.locator('.trace-unread-indicator')).toHaveCount(0);
+			await expect(page.locator('.sound-control')).toHaveCount(1);
+			await expect(page.getByRole('dialog', { name: 'Sound settings' })).toHaveCount(0);
 			expect(await readActionDockControlOrder(page)).toEqual([
-				'profile-trigger', 'chatter-toggle', 'speech-type-toggle', 'suggestions-anchor'
+				'profile-trigger', 'chatter-toggle', 'sound-control', 'speech-type-toggle', 'suggestions-anchor'
 			]);
+			if (width <= 700) {
+				const editorBox = await page.locator('.composer-editor-slot').boundingBox();
+				const leftBox = await page.locator('.composer-controls-left').boundingBox();
+				const rightBox = await page.locator('.composer-controls-right').boundingBox();
+				expect(editorBox && leftBox && rightBox).toBeTruthy();
+				if (editorBox && leftBox && rightBox) {
+					expect(editorBox.y + editorBox.height).toBeLessThan(leftBox.y);
+					expect(leftBox.x + leftBox.width).toBeLessThanOrEqual(rightBox.x);
+					expect(rightBox.x + rightBox.width).toBeLessThanOrEqual(width);
+					for (const control of [page.locator('.profile-trigger'), chatterToggle, page.locator('.trace-unread-indicator'), page.locator('.sound-control'), page.locator('.speech-type-toggle'), suggestionsToggle]) {
+						if (await control.isVisible()) {
+							const box = await control.boundingBox();
+							if (!box) throw new Error('Expected a visible mobile ActionDock control to have geometry.');
+							expect(box.x).toBeGreaterThanOrEqual(0);
+							expect(box.x + box.width).toBeLessThanOrEqual(width);
+						}
+					}
+				}
+			} else {
+				const geometry = await page.evaluate(() => {
+					const rect = (selector: string) => document.querySelector<HTMLElement>(selector)!.getBoundingClientRect().toJSON();
+					return {
+						dock: rect('.action-dock'),
+						left: rect('.composer-controls-left'),
+						editor: rect('.composer-editor-slot'),
+						right: rect('.composer-controls-right'),
+						controls: ['.profile-trigger', '.chatter-toggle', '.speaker-button', '.speech-type-toggle', '.suggestions-toggle']
+							.map((selector) => rect(selector))
+					};
+				});
+				for (const box of geometry.controls) {
+					expect(box.width).toBe(54);
+					expect(box.height).toBe(54);
+				}
+				expect(geometry.left.x + geometry.left.width).toBeLessThanOrEqual(geometry.editor.x);
+				expect(geometry.editor.x + geometry.editor.width).toBeLessThanOrEqual(geometry.right.x);
+				const centers = [geometry.left, geometry.editor, geometry.right].map((box) => box.y + box.height / 2);
+				expect(Math.max(...centers) - Math.min(...centers)).toBeLessThanOrEqual(1);
+				const controlCenters = geometry.controls.map((box) => box.y + box.height / 2);
+				expect(Math.max(...controlCenters) - Math.min(...controlCenters)).toBeLessThanOrEqual(1);
+				for (const box of [geometry.left, geometry.editor, geometry.right, ...geometry.controls]) {
+					expect(box.x).toBeGreaterThanOrEqual(geometry.dock.x);
+					expect(box.x + box.width).toBeLessThanOrEqual(geometry.dock.x + geometry.dock.width);
+					expect(box.y).toBeGreaterThanOrEqual(geometry.dock.y);
+					expect(box.y + box.height).toBeLessThanOrEqual(geometry.dock.y + geometry.dock.height);
+				}
+				if (width === 838) {
+					const fieldBeforeGrow = await page.locator('.field-viewport').boundingBox();
+					const dockHeightBeforeGrow = geometry.dock.height;
+					await page.evaluate(() => (window as typeof window & { __ehagakiSetPreferredHeight(height: number): void }).__ehagakiSetPreferredHeight(200));
+					await expect.poll(() => page.evaluate(() => Number.parseFloat(getComputedStyle(document.querySelector('.app-shell')!).getPropertyValue('--composer-preferred-height'))))
+						.toBeGreaterThan(54);
+					await expect.poll(() => page.locator('.action-dock').evaluate((dock) => dock.getBoundingClientRect().height))
+						.toBeGreaterThan(dockHeightBeforeGrow);
+					const grown = await page.evaluate(() => {
+						const rect = (selector: string) => document.querySelector<HTMLElement>(selector)!.getBoundingClientRect().toJSON();
+						return { dock: rect('.action-dock'), left: rect('.composer-controls-left'), editor: rect('.composer-editor-slot'), right: rect('.composer-controls-right') };
+					});
+					const grownCenters = [grown.left, grown.editor, grown.right].map((box) => box.y + box.height / 2);
+					expect(Math.max(...grownCenters) - Math.min(...grownCenters)).toBeLessThanOrEqual(1);
+					for (const box of [grown.left, grown.editor, grown.right]) {
+						expect(box.y).toBeGreaterThanOrEqual(grown.dock.y);
+						expect(box.y + box.height).toBeLessThanOrEqual(grown.dock.y + grown.dock.height);
+					}
+					const fieldAfterGrow = await page.locator('.field-viewport').boundingBox();
+					expect(fieldBeforeGrow && fieldAfterGrow).toBeTruthy();
+					if (fieldBeforeGrow && fieldAfterGrow) {
+						expect(fieldAfterGrow.x).toBeCloseTo(fieldBeforeGrow.x, 1);
+						expect(fieldAfterGrow.y).toBeCloseTo(fieldBeforeGrow.y, 1);
+						expect(fieldAfterGrow.width).toBeCloseTo(fieldBeforeGrow.width, 1);
+						expect(fieldAfterGrow.height).toBeCloseTo(fieldBeforeGrow.height, 1);
+					}
+					await page.evaluate(() => (window as typeof window & { __ehagakiSetPreferredHeight(height: number): void }).__ehagakiSetPreferredHeight(50));
+					await expect.poll(() => page.evaluate(() => getComputedStyle(document.querySelector('.app-shell')!).getPropertyValue('--composer-preferred-height').trim())).toBe('50px');
+				}
+			}
+			await page.getByRole('button', { name: 'Open sound settings' }).click();
+			const soundPanel = page.getByRole('dialog', { name: 'Sound settings' });
+			await expect(soundPanel).toBeVisible();
+			const soundBox = await soundPanel.boundingBox();
+			const soundButtonBox = await page.getByRole('button', { name: 'Open sound settings' }).boundingBox();
+			expect(soundBox && soundButtonBox).toBeTruthy();
+			if (soundBox && soundButtonBox) expect(soundBox.y + soundBox.height).toBeLessThanOrEqual(soundButtonBox.y + 1);
+			await soundPanel.getByRole('slider', { name: 'Sound volume' }).press('Home');
+			await page.keyboard.press('Escape');
 		}
+	});
+
+	test('keeps candidate generation status inside narrow desktop and mobile viewports', async ({ page }) => {
+		await installPromptApiStub(page, 'available', 'pending');
+		const selfSecret = fixtureSecret(19);
+		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret));
+		const editor = await openReadyRelayWorld(page, 1);
+		const candidateButton = page.getByRole('button', { name: 'AI発言候補を生成' });
+		await editor.fill('');
+		await candidateButton.click();
+		for (const viewport of [{ width: 720, height: 844 }, { width: 390, height: 844 }]) {
+			await page.setViewportSize(viewport);
+			const status = page.getByRole('status');
+			await expect(status).toHaveText('候補を生成中…');
+			const statusBox = await status.boundingBox();
+			expect(statusBox).not.toBeNull();
+			if (statusBox) {
+				expect(statusBox.x).toBeGreaterThanOrEqual(0);
+				expect(statusBox.y).toBeGreaterThanOrEqual(0);
+				expect(statusBox.x + statusBox.width).toBeLessThanOrEqual(viewport.width);
+				expect(statusBox.y + statusBox.height).toBeLessThanOrEqual(viewport.height);
+			}
+			await expect(candidateButton).toBeDisabled();
+		}
+	});
+
+	test('shows a generation error without the candidate panel and allows retry', async ({ page }) => {
+		await installPromptApiStub(page, 'available', 'reject-once');
+		const selfSecret = fixtureSecret(19);
+		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret));
+		const editor = await openReadyRelayWorld(page, 1);
+		await editor.fill('');
+		const candidateButton = page.getByRole('button', { name: 'AI発言候補を生成' });
+		await candidateButton.click();
+
+		const error = page.locator('.suggestion-error');
+		await expect(error).toHaveText('候補を生成できませんでした。もう一度お試しください。');
+		await expect(page.locator('.suggestion-panel')).toHaveCount(0);
+		for (const viewport of [{ width: 720, height: 844 }, { width: 390, height: 844 }]) {
+			await page.setViewportSize(viewport);
+			await expect(error).toBeVisible();
+			await expect(page.getByRole('status')).toHaveCount(1);
+			const errorBox = await error.boundingBox();
+			expect(errorBox).not.toBeNull();
+			if (errorBox) {
+				expect(errorBox.x).toBeGreaterThanOrEqual(0);
+				expect(errorBox.y).toBeGreaterThanOrEqual(0);
+				expect(errorBox.x + errorBox.width).toBeLessThanOrEqual(viewport.width);
+				expect(errorBox.y + errorBox.height).toBeLessThanOrEqual(viewport.height);
+			}
+		}
+
+		await candidateButton.click();
+		await expect(page.locator('.suggestion-panel')).toBeVisible();
+		await expect(page.locator('.suggestion-primary').first()).toBeVisible();
+		await expect(page.locator('.suggestion-error')).toHaveCount(0);
 	});
 
 	test('passes the Host-owned editor submit button option without enabling the keyboard button bar', async ({ page }) => {
@@ -221,7 +390,7 @@ test.describe('Relay startup', () => {
 		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret));
 		const editor = await openReadyRelayWorld(page, 1);
 		const candidateButton = page.getByRole('button', { name: 'AI発言候補を生成' });
-		for (const viewport of [{ width: 1_200, height: 900 }, { width: 390, height: 844 }]) {
+		for (const viewport of [{ width: 720, height: 900 }, { width: 390, height: 844 }]) {
 			await page.setViewportSize(viewport);
 			await editor.fill('既存のdraft');
 			await expect(candidateButton).toBeDisabled();
@@ -263,7 +432,7 @@ test.describe('Relay startup', () => {
 		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret));
 		const editor = await openReadyRelayWorld(page, 1);
 		const candidateButton = page.getByRole('button', { name: 'AI発言候補を生成' });
-		for (const viewport of [{ width: 1_200, height: 900 }, { width: 390, height: 844 }]) {
+		for (const viewport of [{ width: 720, height: 900 }, { width: 390, height: 844 }]) {
 			await page.setViewportSize(viewport);
 			await candidateButton.click();
 			const panel = page.locator('.suggestion-panel');
@@ -335,11 +504,67 @@ test.describe('Relay startup', () => {
 		await page.evaluate(() => (window as unknown as { __relayStartupTest: { rejectMessagePublishes(): void } }).__relayStartupTest.rejectMessagePublishes());
 		await primary.click();
 		await expect(page.getByRole('status')).toContainText('候補を送信できませんでした');
+		await expect(page.getByRole('status')).toHaveCount(1);
 		await expect(page.locator('.suggestion-panel')).toBeVisible();
+		for (const viewport of [{ width: 720, height: 844 }, { width: 390, height: 844 }]) {
+			await page.setViewportSize(viewport);
+			const status = page.locator('.suggestion-error');
+			await expect(status).toBeVisible();
+			const statusBox = await status.boundingBox();
+			const panelBox = await page.locator('.suggestion-panel').boundingBox();
+			const firstCandidateBox = await page.locator('.suggestion-primary').first().boundingBox();
+			expect(statusBox && panelBox && firstCandidateBox).toBeTruthy();
+			if (statusBox && panelBox && firstCandidateBox) {
+				expect(statusBox.x).toBeGreaterThanOrEqual(panelBox.x);
+				expect(statusBox.y).toBeGreaterThanOrEqual(panelBox.y);
+				expect(statusBox.x + statusBox.width).toBeLessThanOrEqual(panelBox.x + panelBox.width);
+				expect(statusBox.y + statusBox.height).toBeLessThanOrEqual(firstCandidateBox.y);
+				for (const box of [statusBox, panelBox]) {
+					expect(box.x).toBeGreaterThanOrEqual(0);
+					expect(box.y).toBeGreaterThanOrEqual(0);
+					expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
+					expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
+				}
+			}
+		}
 		await page.evaluate(() => (window as unknown as { __relayStartupTest: { allowMessagePublishes(): void } }).__relayStartupTest.allowMessagePublishes());
 		await primary.click();
 		await expect.poll(async () => (await publishedMessages(page)).some((event) => event.kind === 42 && event.content === 'まずは自然な返答です。')).toBe(true);
 		await expect(page.locator('.suggestion-panel')).toHaveCount(0);
+	});
+
+	test('keeps candidate operation errors with their panel and clears them on dismissal or draft change', async ({ page }) => {
+		await installPromptApiStub(page);
+		const selfSecret = fixtureSecret(19);
+		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret));
+		const editor = await openReadyRelayWorld(page, 1);
+		const candidateButton = page.getByRole('button', { name: 'AI発言候補を生成' });
+		const panel = page.locator('.suggestion-panel');
+		const anchor = page.locator('.suggestions-anchor');
+		const error = anchor.locator('.suggestion-error');
+
+		await candidateButton.click();
+		await expect(panel).toBeVisible();
+		await page.evaluate(() => (window as unknown as { __relayStartupTest: { rejectMessagePublishes(): void } }).__relayStartupTest.rejectMessagePublishes());
+		await panel.locator('.suggestion-primary').first().click();
+		await expect(error).toHaveText('候補を送信できませんでした。もう一度お試しください。');
+		await expect(panel.locator('.suggestion-primary').first()).toContainText('まずは自然な返答です。');
+		await expect(anchor.getByRole('status')).toHaveCount(1);
+
+		await page.getByRole('button', { name: '発言候補を閉じる' }).click();
+		await expect(panel).toHaveCount(0);
+		await expect(error).toHaveCount(0);
+		await expect(anchor.getByRole('status')).toHaveCount(0);
+
+		await candidateButton.click();
+		await expect(panel).toBeVisible();
+		await page.evaluate(() => (window as unknown as { __relayStartupTest: { rejectMessagePublishes(): void } }).__relayStartupTest.rejectMessagePublishes());
+		await panel.locator('.suggestion-primary').first().click();
+		await expect(error).toContainText('候補を送信できませんでした');
+		await editor.fill('候補を無効化する本文');
+		await expect(panel).toHaveCount(0);
+		await expect(error).toHaveCount(0);
+		await expect(anchor.locator('.suggestion-status')).toHaveCount(0);
 	});
 
 	test('keeps the normal Composer when Prompt API availability is unavailable', async ({ page }) => {
@@ -358,6 +583,13 @@ test.describe('Relay startup', () => {
 		const submitAndRead = async (content: string, submit: () => Promise<void>) => {
 			const before = (await publishedMessages(page)).length;
 			await editor.fill(content);
+			const sendBox = await send.boundingBox();
+			const viewport = page.viewportSize();
+			if (!sendBox || !viewport) throw new Error('Expected the Composer send control to have viewport geometry.');
+			expect(sendBox.x).toBeGreaterThanOrEqual(0);
+			expect(sendBox.y).toBeGreaterThanOrEqual(0);
+			expect(sendBox.x + sendBox.width).toBeLessThanOrEqual(viewport.width);
+			expect(sendBox.y + sendBox.height).toBeLessThanOrEqual(viewport.height);
 			await submit();
 			await waitForPublishedMessageCount(page, before + 1);
 			await expect(editor).toHaveValue('');

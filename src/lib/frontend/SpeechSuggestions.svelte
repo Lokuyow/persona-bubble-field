@@ -29,7 +29,7 @@
 	let progress = $state(0);
 	let generating = $state(false);
 	let panelOpen = $state(false);
-	let error = $state<string | null>(null);
+	let error = $state<Readonly<{ kind: 'generation' | 'operation'; message: string }> | null>(null);
 	let abortController: AbortController | null = null;
 	let directSubmitController: AbortController | null = null;
 	let sendingCandidate = $state<string | null>(null);
@@ -38,9 +38,12 @@
 	let busy = $derived(generating || submissionInProgress || sendingCandidate !== null || addingCandidate !== null);
 
 	$effect(() => {
-		if (editorIsEmpty !== true && candidates.length > 0) {
-			candidates = [];
-			panelOpen = false;
+		if (editorIsEmpty !== true) {
+			if (error?.kind === 'operation') error = null;
+			if (candidates.length > 0) {
+				candidates = [];
+				panelOpen = false;
+			}
 		}
 	});
 
@@ -72,7 +75,7 @@
 			panelOpen = true;
 		} catch (cause) {
 			if (!(cause instanceof DOMException && cause.name === 'AbortError')) {
-				error = '候補を生成できませんでした。もう一度お試しください。';
+				error = { kind: 'generation', message: '候補を生成できませんでした。もう一度お試しください。' };
 				const current = await service.availability().catch(() => 'unsupported' as const);
 				availability = current;
 			}
@@ -88,14 +91,14 @@
 		try {
 			const applied = await applyContentIfEmpty(candidate);
 			if (!applied) {
-				error = '本文が入力されているため候補を追加できません。';
+				error = { kind: 'operation', message: '本文が入力されているため候補を追加できません。' };
 				return;
 			}
 			candidates = [];
 			panelOpen = false;
 			error = null;
 		} catch {
-			error = '候補をコンポーザーに追加できませんでした。';
+			error = { kind: 'operation', message: '候補をコンポーザーに追加できませんでした。' };
 		} finally {
 			addingCandidate = null;
 		}
@@ -113,12 +116,17 @@
 			error = null;
 		} catch (cause) {
 			if (!(cause instanceof DOMException && cause.name === 'AbortError')) {
-				error = '候補を送信できませんでした。もう一度お試しください。';
+				error = { kind: 'operation', message: '候補を送信できませんでした。もう一度お試しください。' };
 			}
 		} finally {
 			sendingCandidate = null;
 			directSubmitController = null;
 		}
+	}
+
+	function closePanel(): void {
+		panelOpen = false;
+		if (error?.kind === 'operation') error = null;
 	}
 
 	onMount(() => {
@@ -169,9 +177,12 @@
 						type="button"
 						aria-label="発言候補を閉じる"
 						title="発言候補を閉じる"
-						onclick={() => { panelOpen = false; }}
+						onclick={closePanel}
 					><X aria-hidden="true" /></ActionButton>
 				</div>
+				{#if error?.kind === 'operation'}
+					<p class="suggestion-status suggestion-error" role="status">{error.message}</p>
+				{/if}
 				{#each candidates as candidate, index}
 					<div class="suggestion-item">
 						<button
@@ -202,8 +213,8 @@
 			<p class="suggestion-status" role="status">{availabilityLabel(availability)}</p>
 		{:else if generating}
 			<p class="suggestion-status" role="status">候補を生成中…</p>
-		{:else if error}
-			<p class="suggestion-status suggestion-error" role="status">{error}</p>
+		{:else if error?.kind === 'generation' && !(panelOpen && candidates.length > 0)}
+			<p class="suggestion-status suggestion-error" role="status">{error.message}</p>
 		{/if}
 	</div>
 {/if}
@@ -245,7 +256,8 @@
 	.suggestion-panel {
 		position: absolute;
 		bottom: calc(100% + 8px);
-		left: 0;
+		left: auto;
+		right: 0;
 		z-index: 2;
 		display: grid;
 		width: min(420px, calc(100vw - 32px));
@@ -304,7 +316,8 @@
 	.suggestion-status {
 		position: absolute;
 		bottom: calc(100% + 8px);
-		left: 0;
+		left: auto;
+		right: 0;
 		width: max-content;
 		max-width: min(300px, calc(100vw - 32px));
 		margin: 0;
@@ -315,9 +328,16 @@
 		font-size: 11px;
 		font-weight: 700;
 	}
-	.suggestion-error { background: rgba(141, 72, 58, 0.94); }
+	.suggestion-panel > .suggestion-error {
+		position: static;
+		width: auto;
+		max-width: 100%;
+		box-sizing: border-box;
+		background: rgba(141, 72, 58, 0.94);
+	}
 	@media (max-width: 700px) {
 		.suggestions-anchor { position: static; }
-		.suggestion-panel { right: auto; left: 16px; }
+		.suggestion-panel { right: 16px; left: auto; }
+		.suggestion-status { right: 16px; left: auto; }
 	}
 </style>

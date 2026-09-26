@@ -6,7 +6,7 @@ import { MENDING_TERMINAL, TAG_GAME_TERMINAL } from '../../src/lib/fieldFaciliti
 import { resolveCharacterFromPubkey } from '../../src/lib/characterAssignment';
 import { buildWorldMessageTemplate, buildWorldStateEventTemplate, WORLD_STATE_KIND } from '../../src/lib/nostrProtocol';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
-import { CHANNEL_ID, fixtureSecret, installDelayedRelay, moveRelaySelfTo, relayState, seedRelayAccount, testEvents, clickRelayLogicalCell, dragRelayJoystick } from './helpers/relayHarness';
+import { CHANNEL_ID, fixtureSecret, installDelayedRelay, moveRelaySelfTo, relayState, seedRelayAccount, testEvents, dragRelayJoystick } from './helpers/relayHarness';
 
 async function preparePlayer(page: Page, secret: Uint8Array, nowMs: number, points = 0, persistAcrossReload = false): Promise<void> {
 	await page.clock.install({ time: nowMs });
@@ -113,9 +113,15 @@ async function exerciseTagGameControlsAtViewport(page: Page, gameId: string, vie
 	await expect(hud).toBeVisible();
 	await expect(speaker).toBeVisible();
 	await expect(leave).toBeVisible();
+	await expect(page.locator('.action-dock').getByRole('button', { name: /Open sound settings/ })).toBeVisible();
 	const [hudBox, speakerBox] = await Promise.all([hud.boundingBox(), speaker.boundingBox()]);
 	expect(hudBox && speakerBox).toBeTruthy();
-	if (hudBox && speakerBox) expect(hudBox.y).toBeGreaterThanOrEqual(speakerBox.y + speakerBox.height);
+	if (speakerBox) {
+		expect(speakerBox.x).toBeGreaterThanOrEqual(0);
+		expect(speakerBox.y).toBeGreaterThanOrEqual(0);
+		expect(speakerBox.x + speakerBox.width).toBeLessThanOrEqual(viewport.width);
+		expect(speakerBox.y + speakerBox.height).toBeLessThanOrEqual(viewport.height);
+	}
 	const effectText = hud.locator('.game-hud-effect span');
 	await expect(effectText).toBeVisible();
 	const effectTextBox = await effectText.boundingBox();
@@ -133,10 +139,15 @@ async function exerciseTagGameControlsAtViewport(page: Page, gameId: string, vie
 	await speaker.click();
 	const slider = page.getByRole('slider', { name: 'Sound volume' });
 	await expect(slider).toBeVisible();
-	const stackBox = await page.locator('[data-field-status-huds]').boundingBox();
 	const popoverBox = await page.getByRole('dialog', { name: 'Sound settings' }).boundingBox();
-	expect(stackBox && popoverBox).toBeTruthy();
-	if (stackBox && popoverBox) expect(stackBox.y).toBeGreaterThanOrEqual(popoverBox.y + popoverBox.height);
+	const currentSpeakerBox = await speaker.boundingBox();
+	expect(currentSpeakerBox && popoverBox).toBeTruthy();
+	if (currentSpeakerBox && popoverBox) {
+		expect(popoverBox.y + popoverBox.height).toBeLessThanOrEqual(currentSpeakerBox.y + 1);
+		expect(popoverBox.x).toBeGreaterThanOrEqual(0);
+		expect(popoverBox.x + popoverBox.width).toBeLessThanOrEqual(viewport.width);
+		expect(popoverBox.y).toBeGreaterThanOrEqual(0);
+	}
 	await slider.fill('35');
 	await expect(slider).toHaveValue('35');
 	await speaker.click();
@@ -150,10 +161,12 @@ async function exerciseTagGameControlsAtViewport(page: Page, gameId: string, vie
 async function openTagGameTerminal(page: Page): Promise<void> {
 	const self = page.locator('.participant[data-self="true"]');
 	const position = await self.getAttribute('data-position');
-	await clickRelayLogicalCell(page, TAG_GAME_TERMINAL.position);
-	if (await page.locator('[data-cell-action="tag-game-terminal"]').count()) await page.locator('[data-cell-action="tag-game-terminal"]').click();
-	if (await page.getByRole('dialog', { name: '鬼ごっこ' }).count() === 0) throw new Error(`Tag-game terminal did not open from self position ${position}.`);
-	await expect(page.getByRole('dialog', { name: '鬼ごっこ' })).toBeVisible();
+	await page.getByRole('button', { name: '鬼ごっこ端末' }).click();
+	const dialog = page.getByRole('dialog', { name: '鬼ごっこ' });
+	const terminalAction = page.locator('[data-cell-action="tag-game-terminal"]');
+	await expect.poll(async () => (await dialog.isVisible()) || (await terminalAction.isVisible())).toBe(true);
+	if (await terminalAction.isVisible()) await terminalAction.click();
+	await expect(dialog, `Tag-game terminal did not open from self position ${position}.`).toBeVisible();
 	await expectIconCloseButton(page.getByRole('dialog', { name: '鬼ごっこ' }).getByRole('button', { name: '閉じる' }), '閉じる');
 }
 
@@ -513,6 +526,9 @@ test('keeps join actions primary and equally emphasized when multiple tag-game l
 		await joinerPage.setViewportSize({ width: 1280, height: 900 });
 		await openTagGameTerminal(joinerPage);
 		const dialog = joinerPage.getByRole('dialog', { name: '鬼ごっこ' });
+		await expect.poll(async () => (await relayState(joinerPage)).state.requests.some((request) => request.filters.some((filter) =>
+			(filter.kinds as number[] | undefined)?.includes(TAG_GAME_KIND) && !filter['#d']
+		))).toBe(true);
 		for (const [index, event] of lobbies.entries()) {
 			await injectRealtime(joinerPage, event);
 			await expect.poll(() => dialog.locator('ul > li').count()).toBe(index + 1);
@@ -613,7 +629,14 @@ test('organizer accepts a touch with the seed-derived role before the ordinary s
 	const touch = await latestTagGameAction(page, hostPubkey, 'touch');
 	expect(parseTagGameActionEvent(touch, CHANNEL_ID)?.payload.targetPubkey).toBe(holderPubkey);
 	await injectRealtime(page, touch);
-	await expect.poll(async () => parseTagGameEvent(await latestGameEvent(page, gameId), CHANNEL_ID)?.state.ownerPubkey).toBe(hostPubkey);
+	await expect.poll(async () => {
+		const matchingStates = (await relayState(page)).state.published
+			.filter((event) => event.kind === TAG_GAME_KIND && (event.tags as string[][]).some((tag) => tag[0] === 'd' && tag[1] === gameId))
+			.map((event) => parseTagGameEvent(event as unknown as NostrEvent, CHANNEL_ID)?.state)
+			.filter((state): state is TagGameState => Boolean(state))
+			.sort((first, second) => second.revision - first.revision);
+		return matchingStates[0]?.ownerPubkey ?? null;
+	}).toBe(hostPubkey);
 	const finalized = parseTagGameEvent(await latestGameEvent(page, gameId), CHANNEL_ID)!.state;
 	expect(finalized.effect).toBe('benefit');
 	expect(finalized.participant.find((member) => member.pubkey === holderPubkey)?.calamityMs).toBe(10_000);
