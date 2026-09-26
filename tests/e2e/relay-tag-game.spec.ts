@@ -101,7 +101,7 @@ async function exerciseTagGameControlsAtViewport(page: Page, gameId: string, vie
 		expect(effectTextBox.x).toBeGreaterThanOrEqual(hudBox.x);
 		expect(effectTextBox.x + effectTextBox.width).toBeLessThanOrEqual(hudBox.x + hudBox.width);
 	}
-	const normalHud = page.locator('.lifespan-hud');
+	const normalHud = page.locator('[data-unified-status-hud]');
 	if (await normalHud.count()) {
 		const [normalHudBox, gameHudBox] = await Promise.all([normalHud.boundingBox(), hud.boundingBox()]);
 		expect(normalHudBox && gameHudBox).toBeTruthy();
@@ -157,7 +157,7 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 		await participantTwoPage.getByRole('button', { name: '作業端末' }).click();
 		const mendingDialog = participantTwoPage.getByRole('dialog', { name: '作業中' });
 		await expect(mendingDialog).toBeVisible();
-		await expect(participantTwoPage.locator('.lifespan-hud [data-mending-row]')).toBeVisible();
+		await expect(participantTwoPage.locator('[data-unified-status-hud] [data-mending-row]')).toBeVisible();
 		await mendingDialog.getByRole('button', { name: '閉じる', exact: true }).click();
 		await moveRelaySelfTo(participantTwoPage, { x: 8, y: 5 });
 
@@ -253,9 +253,9 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 		}
 		const gamePages = new Map([[hostPubkey, hostPage], [participantPubkey, participantPage], [participantTwoPubkey, participantTwoPage]]);
 		const holderHudPage = gamePages.get(running.ownerPubkey!)!;
-		await expect(holderHudPage.locator('.lifespan-hud')).toHaveAttribute('data-tag-game-projection', 'true');
+		await expect(holderHudPage.locator('[data-unified-status-hud]')).toHaveAttribute('data-tag-game-projection', 'true');
 		if (await holderHudPage.locator('[data-tag-game-hud] [data-tag-game-effect-active]').getAttribute('data-tag-game-effect-active') === 'true') {
-			await expect(holderHudPage.locator(`[data-tag-game-projection-row="${running.effect === 'benefit' ? 'points' : 'lifespan'}"]`)).toContainText(running.effect === 'benefit' ? '+50pt/秒・予測' : '-1時間/秒・予測');
+			await expect(holderHudPage.locator(`[data-tag-game-projection-row="${running.effect === 'benefit' ? 'points' : 'lifespan'}"]`)).toContainText(running.effect === 'benefit' ? '+50pt/秒・予測中' : '−1時間/秒・予測中');
 		}
 		const firstRemaining = await hostPage.locator('[data-tag-game-remaining]').textContent();
 		await Promise.all([hostPage, participantPage, participantTwoPage].map((page) => page.clock.setSystemTime(running.startedAt! * 1_000 + 6_000)));
@@ -273,6 +273,7 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 		const participantTwoViewport = participantTwoPage.viewportSize();
 		await exerciseTagGameControlsAtViewport(participantTwoPage, gameId, { width: 1200, height: 900 });
 		await exerciseTagGameControlsAtViewport(participantTwoPage, gameId, { width: 390, height: 844 });
+		await exerciseTagGameControlsAtViewport(participantTwoPage, gameId, { width: 390, height: 480 });
 		if (participantTwoViewport) await participantTwoPage.setViewportSize(participantTwoViewport);
 		await Promise.all([moveRelaySelfTo(hostPage, { x: 7, y: 5 }), moveRelaySelfTo(participantPage, { x: 7, y: 6 }), moveRelaySelfTo(participantTwoPage, { x: 8, y: 5 })]);
 		const [latestHostPosition, latestParticipantPosition, latestParticipantTwoPosition] = await Promise.all([
@@ -378,8 +379,8 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 		const finalState = parseTagGameEvent(finalStateEvent, CHANNEL_ID)!.state;
 		const finalLocal = finalState.participant.find((member) => member.pubkey === participantPubkey)!;
 		await expect.poll(async () => (await tagGamePersistence(participantPage)).receipt).toMatchObject({ gameId, points: finalLocal.points, lifespanLossMs: finalLocal.lifespanLossMs });
-		await expect(participantPage.locator('.lifespan-hud')).toHaveAttribute('data-saved-points', String((await tagGamePersistence(participantPage)).savedPoints));
-		await expect(participantPage.locator('.lifespan-hud')).not.toHaveAttribute('data-tag-game-projection', 'true');
+		await expect(participantPage.locator('[data-unified-status-hud]')).toHaveAttribute('data-saved-points', String((await tagGamePersistence(participantPage)).savedPoints));
+		await expect(participantPage.locator('[data-unified-status-hud]')).not.toHaveAttribute('data-tag-game-projection', 'true');
 		await Promise.all([openTagGameTerminal(hostPage), openTagGameTerminal(participantPage), openTagGameTerminal(participantTwoPage)]);
 		await expect(hostPage.getByText(/恩恵\d+秒・災厄\d+秒/).first()).toBeVisible();
 		await expect(participantPage.getByText(/恩恵\d+秒・災厄\d+秒/).first()).toBeVisible();

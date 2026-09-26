@@ -105,10 +105,10 @@ test.describe('Relay startup', () => {
 		await activeDialog.getByRole('button', { name: '詳細を見る' }).click();
 		await expect(activeDialog).toContainText('現在のポイント速度');
 		await expect(activeDialog.getByRole('button', { name: '詳細を閉じる' })).toHaveAttribute('aria-expanded', 'true');
-		await expect(page.locator('.lifespan-hud [data-mending-status]')).toHaveAttribute('aria-label', '作業中');
-		await expect(page.locator('.lifespan-hud [data-mending-status]')).toHaveAttribute('data-mending-icon', 'tool');
-		await expect(page.locator('.lifespan-hud [data-mending-rate]')).toHaveText('1.00 pt/分+0.1h/h');
-		const activeMendingRow = page.locator('.lifespan-hud [data-mending-row]');
+		await expect(page.locator('[data-unified-status-hud] [data-mending-status]')).toHaveAttribute('aria-label', '作業中');
+		await expect(page.locator('[data-unified-status-hud] [data-mending-status]')).toHaveAttribute('data-mending-icon', 'tool');
+		await expect(page.locator('[data-unified-status-hud] [data-mending-rate]')).toHaveText('1.00 pt/分+0.1h/h');
+		const activeMendingRow = page.locator('[data-unified-status-hud] [data-mending-row]');
 		const activeRowBoxes = await activeMendingRow.evaluate((row) => {
 			const status = row.querySelector('[data-mending-status]')!.getBoundingClientRect();
 			const rate = row.querySelector('[data-mending-rate]')!.getBoundingClientRect();
@@ -166,9 +166,9 @@ test.describe('Relay startup', () => {
 		await terminal.click();
 		await expect(page.getByRole('dialog')).toContainText('上限に達しました');
 		await expect(page.getByRole('dialog').getByRole('heading', { name: '作業停止中' })).toBeVisible();
-		await expect(page.locator('.lifespan-hud [data-mending-status]')).toHaveAttribute('aria-label', '作業停止中');
-		await expect(page.locator('.lifespan-hud [data-mending-status]')).toHaveAttribute('data-mending-icon', 'player-pause');
-		await expect(page.locator('.lifespan-hud [data-mending-rate]')).toHaveText('0.00 pt/分+0.0h/h');
+		await expect(page.locator('[data-unified-status-hud] [data-mending-status]')).toHaveAttribute('aria-label', '作業停止中');
+		await expect(page.locator('[data-unified-status-hud] [data-mending-status]')).toHaveAttribute('data-mending-icon', 'player-pause');
+		await expect(page.locator('[data-unified-status-hud] [data-mending-rate]')).toHaveText('0.00 pt/分+0.0h/h');
 		await expect(page.getByRole('dialog')).not.toContainText('今受け取れる');
 		await expect(page.getByRole('dialog')).toContainText('+5 pt');
 		await expect(page.getByRole('dialog')).not.toContainText('次の1ptまで');
@@ -178,9 +178,9 @@ test.describe('Relay startup', () => {
 		await expect(page.getByRole('dialog')).toContainText('9 pt');
 		await expect(page.getByRole('dialog')).toContainText('上限まで あと5分');
 		await expect(page.getByRole('dialog')).toContainText('+0 pt');
-		await expect(page.locator('.lifespan-hud [data-mending-status]')).toHaveAttribute('aria-label', '作業中');
-		await expect(page.locator('.lifespan-hud [data-mending-status]')).toHaveAttribute('data-mending-icon', 'tool');
-		await expect(page.locator('.lifespan-hud [data-mending-rate]')).toHaveText('1.00 pt/分+0.1h/h');
+		await expect(page.locator('[data-unified-status-hud] [data-mending-status]')).toHaveAttribute('aria-label', '作業中');
+		await expect(page.locator('[data-unified-status-hud] [data-mending-status]')).toHaveAttribute('data-mending-icon', 'tool');
+		await expect(page.locator('[data-unified-status-hud] [data-mending-rate]')).toHaveText('1.00 pt/分+0.1h/h');
 		const collected = await readRelayGameState(page);
 		expect(collected.mendingJob).toEqual(expect.objectContaining({ startedAtMs: expect.any(Number) }));
 		expect(collected.points).toBe(9);
@@ -259,8 +259,8 @@ test.describe('Relay startup', () => {
 			buttonY: card.querySelector('button')!.getBoundingClientRect().y
 		}));
 		expect(stableAfter).toEqual(stableBefore);
-		await expect(page.locator('.lifespan-hud [data-stat-icon="wallet"]')).toHaveText('9pt');
-		await expect(page.locator('.lifespan-hud')).toHaveAttribute('aria-label', /ポイント 9pt/);
+		await expect(page.locator('[data-unified-status-hud] [data-points-value]')).toHaveText('9pt');
+		await expect(page.locator('[data-unified-status-hud] [data-points-meter]')).toHaveAttribute('aria-valuenow', '9');
 		await expect(dialog).toContainText('推論効率 Lv2');
 		await page.reload();
 		await expect.poll(() => readRelayGameState(page)).toMatchObject({ points: 9, abilities: { inferenceEfficiency: 2, contextCapacity: 1, hallucinationSuppression: 1 } });

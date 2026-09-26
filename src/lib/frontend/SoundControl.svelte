@@ -33,7 +33,7 @@
 </div>
 
 <style>
-	.sound-control { position: absolute; top: max(10px, env(safe-area-inset-top)); right: max(10px, env(safe-area-inset-right)); z-index: 10; }
+	.sound-control { position: relative; z-index: 10; justify-self: end; margin-right: max(2px, env(safe-area-inset-right)); }
 	:global(.speaker-button) { width: 44px; height: 44px; padding: 0; border: 0; border-radius: 0; background: transparent; color: white; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
 	:global(.speaker-button:focus-visible) { outline: 3px solid var(--color-focus-ring); outline-offset: 2px; }
 	.speaker-icon { display: inline-flex; width: 24px; height: 24px; align-items: center; justify-content: center; }

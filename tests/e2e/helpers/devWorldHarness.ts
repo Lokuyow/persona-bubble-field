@@ -16,7 +16,7 @@ export async function openDevWorld(page: Page): Promise<void> {
 	await page.goto('/?devWorld=1');
 	await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 	await expect(page.locator('.participant')).toHaveCount(1);
-	await expect(page.locator('.lifespan-hud')).toHaveCount(0);
+	await expect(page.locator('[data-unified-status-hud]')).toHaveCount(0);
 }
 
 export async function openDevTraceWorld(page: Page, scenario: 'trace-markers' | 'trace-replies' | 'trace-inactive-self'): Promise<void> {
