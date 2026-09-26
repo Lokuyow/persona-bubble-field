@@ -74,14 +74,21 @@ describe('tag-game HUD projection', () => {
 		expect(settledAtSwitch.predictedLossMs).toBe(3_600_000);
 	});
 
-	it('stops rate and unconfirmed accumulation during holder challenges and after game time reaches its limit', () => {
+	it('freezes unconfirmed accumulation at game end and falls back to confirmed values at the final-wait deadline', () => {
 		const game = running('benefit');
 		const challenge = projectTagGameHud({ ...baseInput(game), game: { ...game, holderChallengeId: 'd'.repeat(32) } });
 		expect(challenge.predictedPoints).toBe(0);
 		expect(challenge.benefitRateActive).toBe(false);
-		const ended = projectTagGameHud({ ...baseInput(game), nowMs: 280_000 });
-		expect(ended.predictedPoints).toBe(0);
-		expect(ended.benefitRateActive).toBe(false);
+		const throughEnd = projectTagGameHud({ ...baseInput(game), holderActivityAtMs: 280_000, nowMs: 280_000 });
+		const afterEnd = projectTagGameHud({ ...baseInput(game), holderActivityAtMs: 280_000, nowMs: 290_000,
+			game: { ...game, phase: 'settling' } });
+		expect(throughEnd.predictedPoints).toBeGreaterThan(0);
+		expect(afterEnd.predictedPoints).toBe(throughEnd.predictedPoints);
+		expect(afterEnd.points).toBe(throughEnd.points);
+		expect(afterEnd.benefitRateActive).toBe(false);
+		const fallback = projectTagGameHud({ ...baseInput(game), holderActivityAtMs: 280_000, nowMs: 310_000 });
+		expect(fallback.predictedPoints).toBe(0);
+		expect(fallback.points).toBe(1_060);
 	});
 
 	it('stops the organizer display at its local safety-stop boundary', () => {
