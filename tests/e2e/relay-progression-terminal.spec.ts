@@ -216,10 +216,15 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '13,3');
 		await adjustment.click();
 		const dialog = page.getByRole('dialog', { name: '能力強化' });
+		const abilityList = dialog.getByRole('region', { name: '能力' });
+		await expect(abilityList).toBeFocused();
+		await expect(page.getByRole('tooltip')).toHaveCount(0);
 		await expect(dialog).toContainText('10 pt');
 		await expect(dialog).not.toContainText('POINT');
 		await expect(dialog).not.toContainText('ポイントを使って、より効率よく活動できるようにします。');
 		await expect(dialog.locator('.ability-card')).toHaveCount(3);
+		await expect(dialog.locator('.adjustment-dialog-title svg')).toHaveCount(1);
+		await expect(dialog.locator('.ability-name svg')).toHaveCount(3);
 		await expect(dialog).toContainText('推論効率');
 		await expect(dialog).toContainText('コンテキスト容量');
 		await expect(dialog).toContainText('ハルシネーション抑制');
@@ -230,12 +235,25 @@ test.describe('Relay startup', () => {
 		await expect(dialog.locator('.current-row').first()).toContainText('pt/分');
 		await expect(dialog.locator('.delta-row').first()).toContainText('+0.10 pt/分');
 		await expect(dialog).toContainText('ポイント生成速度');
-		await expect(dialog).toContainText('必要ポイント');
-		const upgradeButton = dialog.getByRole('button', { name: '推論効率をLv2へ強化' });
+		const upgradeButton = dialog.getByRole('button', { name: '推論効率をLv2へ強化（1 pt）' });
 		await expect(upgradeButton).toBeVisible();
-		await expect(upgradeButton).toHaveAttribute('aria-label', '推論効率をLv2へ強化');
+		await expect(upgradeButton).toHaveAttribute('aria-label', '推論効率をLv2へ強化（1 pt）');
+		await expect(upgradeButton).toHaveText('1 pt');
 		await expect(upgradeButton.locator('svg')).toHaveCount(1);
 		await expect(upgradeButton).not.toContainText('強化');
+		await expect(dialog).not.toContainText('必要ポイント');
+		const effectTypography = await dialog.evaluate((element) => {
+			const current = getComputedStyle(element.querySelector('.current-row strong')!).fontSize;
+			const delta = getComputedStyle(element.querySelector('.delta-row strong')!).fontSize;
+			return { current, delta };
+		});
+		expect(effectTypography.current).toBe(effectTypography.delta);
+		expect(Number.parseFloat(effectTypography.current)).toBeGreaterThanOrEqual(18);
+		expect(Number.parseFloat(effectTypography.current)).toBeLessThanOrEqual(20);
+		await upgradeButton.hover();
+		await expect(page.getByRole('tooltip')).toHaveText('推論効率をLv2へ強化（1 pt）');
+		await page.mouse.move(0, 0);
+		await expect(page.getByRole('tooltip')).toHaveCount(0);
 		for (const [width, columns] of [[1000, 3], [800, 2], [390, 1]] as const) {
 			await page.setViewportSize({ width, height: 800 });
 			const layout = await dialog.evaluate((element) => {
@@ -246,6 +264,7 @@ test.describe('Relay startup', () => {
 					columnCount: new Set(rects.map((rect) => Math.round(rect.left))).size,
 					horizontalOverflow: content.scrollWidth > content.clientWidth || document.documentElement.scrollWidth > document.documentElement.clientWidth,
 					cardsOverlap: rects.some((a, i) => rects.slice(i + 1).some((b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom)),
+					valueOverflow: cards.some((card) => [...card.querySelectorAll<HTMLElement>('.value-row')].some((row) => row.scrollWidth > row.clientWidth)),
 					nameAndLevelOverlap: cards.some((card) => {
 						const name = card.querySelector('.ability-name')!.getBoundingClientRect();
 						const level = card.querySelector('.ability-level')!.getBoundingClientRect();
@@ -253,7 +272,7 @@ test.describe('Relay startup', () => {
 					})
 				};
 			});
-			expect(layout).toEqual({ columnCount: columns, horizontalOverflow: false, cardsOverlap: false, nameAndLevelOverlap: false });
+			expect(layout).toEqual({ columnCount: columns, horizontalOverflow: false, cardsOverlap: false, valueOverflow: false, nameAndLevelOverlap: false });
 		}
 		await page.setViewportSize({ width: 1280, height: 800 });
 		const beforeAbilityUpgrade = (await relayState(page)).state.published.filter((event) => event.kind === WORLD_STATE_KIND && event.pubkey === pubkey).length;
@@ -261,10 +280,12 @@ test.describe('Relay startup', () => {
 		const upgradedCard = dialog.locator('.ability-card').first();
 		const stableBefore = await upgradedCard.evaluate((card) => {
 			const type = card.querySelector('.ability-type')!.getBoundingClientRect();
-			const cost = card.querySelector('.cost')!.getBoundingClientRect();
 			const button = card.querySelector('button')!.getBoundingClientRect();
-			return { typeY: type.y, costY: cost.y, buttonY: button.y };
+			const values = card.querySelector('.ability-values')!.getBoundingClientRect();
+			return { typeY: type.y, valuesY: values.y, buttonY: button.y };
 		});
+		const ctaWidth = await upgradedCard.evaluate((card) => ({ button: card.querySelector('button')!.clientWidth, card: card.clientWidth }));
+		expect(ctaWidth.button).toBeGreaterThan(ctaWidth.card * 0.7);
 		await expect(dialog).not.toContainText('強化後');
 		await expect(dialog).not.toContainText('normal clear');
 		await expect(dialog).not.toContainText('Root Point');
@@ -272,20 +293,22 @@ test.describe('Relay startup', () => {
 		for (let index = 0; index < 12 && !(await upgradeButton.evaluate((button) => document.activeElement === button)); index++) await page.keyboard.press('Tab');
 		await expect(upgradeButton).toBeFocused();
 		await expect(upgradeButton).toHaveCSS('outline-style', 'solid');
+		await expect(page.getByRole('tooltip')).toHaveText('推論効率をLv2へ強化（1 pt）');
+		await page.keyboard.press('Enter');
 		await page.keyboard.press('Enter');
 		await expect(dialog).toContainText('9 pt');
 		await expect.poll(async () => (await relayState(page)).state.published.filter((event) => event.kind === WORLD_STATE_KIND && event.pubkey === pubkey).length).toBeGreaterThan(beforeAbilityUpgrade);
 		await expect(dialog.locator('.level-up-badge')).toHaveCount(1);
 		const stableDuring = await upgradedCard.evaluate((card) => ({
 			typeY: card.querySelector('.ability-type')!.getBoundingClientRect().y,
-			costY: card.querySelector('.cost')!.getBoundingClientRect().y,
+			valuesY: card.querySelector('.ability-values')!.getBoundingClientRect().y,
 			buttonY: card.querySelector('button')!.getBoundingClientRect().y
 		}));
 		expect(stableDuring).toEqual(stableBefore);
 		await expect(dialog.locator('.level-up-badge')).toHaveCount(0, { timeout: 1_500 });
 		const stableAfter = await upgradedCard.evaluate((card) => ({
 			typeY: card.querySelector('.ability-type')!.getBoundingClientRect().y,
-			costY: card.querySelector('.cost')!.getBoundingClientRect().y,
+			valuesY: card.querySelector('.ability-values')!.getBoundingClientRect().y,
 			buttonY: card.querySelector('button')!.getBoundingClientRect().y
 		}));
 		expect(stableAfter).toEqual(stableBefore);
@@ -320,10 +343,10 @@ test.describe('Relay startup', () => {
 		const inference = dialog.locator('.ability-card').first();
 		await expect(inference).toContainText('1.90');
 		await expect(inference).toContainText('+0.10 pt/分');
-		await expect(inference.locator('.cost')).toContainText('2 pt');
-		await inference.getByRole('button', { name: '推論効率をLv11へ強化' }).click();
+		await expect(inference.locator('.upgrade-button')).toHaveText('2 pt');
+		await inference.getByRole('button', { name: '推論効率をLv11へ強化（2 pt）' }).click();
 		await expect(inference).toContainText('2.00');
-		await expect(inference.locator('.cost')).toContainText('2 pt');
+		await expect(inference.locator('.upgrade-button')).toHaveText('2 pt');
 		await expect.poll(() => readRelayGameState(page)).toMatchObject({ points: 8, abilities: { inferenceEfficiency: 11 } });
 	});
 
@@ -349,12 +372,14 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '13,3');
 		await page.getByRole('button', { name: '能力強化端末' }).click();
 		const dialog = page.getByRole('dialog', { name: '能力強化' });
-		await expect(dialog.locator('.max-level-status')).toHaveCount(3);
+		await expect(dialog.locator('.delta-row')).toHaveCount(0);
 		await expect(dialog).not.toContainText('必要ポイント');
 		for (const label of ['推論効率', 'コンテキスト容量', 'ハルシネーション抑制']) {
-			const button = dialog.getByRole('button', { name: `${label}は最大レベルです` });
+			const button = dialog.getByRole('button', { name: `${label}は最大Lvです` });
 			await expect(button).toBeDisabled();
-			await expect(button).toHaveAttribute('aria-label', `${label}は最大レベルです`);
+			await expect(button).toHaveAttribute('aria-label', `${label}は最大Lvです`);
+			await expect(button).toHaveText('最大Lv');
+			await expect(button.locator('svg')).toHaveCount(0);
 		}
 	});
 
@@ -378,9 +403,11 @@ test.describe('Relay startup', () => {
 		await page.getByRole('button', { name: '能力強化端末' }).click();
 		const dialog = page.getByRole('dialog', { name: '能力強化' });
 		const inference = dialog.locator('.ability-card').first();
-		await expect(inference.locator('.cost')).toContainText('ポイント不足');
-		await expect(inference.locator('.cost')).toContainText('1 pt');
-		await expect(inference.getByRole('button', { name: '推論効率をLv2へ強化' })).toBeDisabled();
+		const upgradeButton = inference.getByRole('button', { name: '推論効率をLv2へ強化（1 pt、ポイント不足）' });
+		await expect(upgradeButton).toBeDisabled();
+		await expect(upgradeButton).toHaveAttribute('aria-describedby', 'upgrade-points-status-inferenceEfficiency');
+		await expect(page.locator('#upgrade-points-status-inferenceEfficiency')).toContainText('所持ポイントは0 pt、必要ポイントは1 pt');
+		await expect(upgradeButton).toHaveText('1 pt');
 	});
 
 	test('routes self around fixed terminals and active participants', async ({ page }) => {

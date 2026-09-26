@@ -27,6 +27,7 @@
 	}>;
 
 	let { open, points, abilities, busy, onOpenChange, onUpgrade, upgradeFeedback = null }: Props = $props();
+	let initialFocusTarget = $state<HTMLElement | null>(null);
 	const abilityLabels: Readonly<Record<PersonaAbilityKey, string>> = {
 		inferenceEfficiency: '推論効率',
 		contextCapacity: 'コンテキスト容量',
@@ -60,7 +61,7 @@
 	{#if open}
 		<Dialog.Portal>
 			<Dialog.Overlay class="adjustment-dialog-overlay" />
-			<Dialog.Content class="adjustment-dialog-content" preventScroll={false}>
+			<Dialog.Content class="adjustment-dialog-content" preventScroll={false} onOpenAutoFocus={(event) => { event.preventDefault(); initialFocusTarget?.focus(); }}>
 				<header class="adjustment-dialog-header">
 					<Dialog.Title class="adjustment-dialog-title"><Adjustments aria-hidden="true" />能力強化</Dialog.Title>
 					<Dialog.Description class="sr-only">能力を強化して作業の効果を高めます。</Dialog.Description>
@@ -70,7 +71,8 @@
 					</div>
 				</header>
 				<Tooltip.Provider delayDuration={400} skipDelayDuration={100} disableHoverableContent>
-					<section class="ability-list" aria-label="能力">
+					<section bind:this={initialFocusTarget} class="ability-list" aria-label="能力" tabindex="-1">
+						{#if busy}<span id="upgrade-busy-status" class="sr-only" role="status">強化処理中です。</span>{/if}
 						{#each abilityKeys as key}
 							{@const upgrade = getAbilityUpgrade(key, abilities)}
 							{@const canAfford = points >= upgrade.cost}
@@ -90,30 +92,21 @@
 								<p class="ability-type">{abilityTypes[key]}</p>
 								<div class="ability-values">
 									<div class="value-row current-row"><span>現在値</span><strong><span>{formatEffectValue(key, upgrade.level)}</span><span class="unit">{effectUnit(key)}</span></strong></div>
-									{#if !isMaxed}
-										<div class="value-row delta-row"><span>増加量</span><strong>{formatDelta(key, upgrade.level)}</strong></div>
-									{:else}
-										<div class="value-row max-level-status" role="status">最大レベルに到達</div>
-									{/if}
+									{#if !isMaxed}<div class="value-row delta-row"><span>増加量</span><strong>{formatDelta(key, upgrade.level)}</strong></div>{/if}
 								</div>
-								<div class="ability-action-row">
-									<div class="cost" class:insufficient={!isMaxed && !canAfford}>
-										<span role={busy ? 'status' : undefined}>{busy ? '強化処理中' : isMaxed ? '状態' : !canAfford ? 'ポイント不足' : '必要ポイント'}</span>
-										{#if !isMaxed}<strong>{upgrade.cost} pt</strong>{/if}
-									</div>
-									<Tooltip.Root>
-										<Tooltip.Trigger>
-											{#snippet child({ props })}
-												<PrimaryButton {...props} class="upgrade-button" type="button" aria-label={isMaxed ? `${abilityLabels[key]}は最大レベルです` : upgradeName} disabled={busy || !canAfford || isMaxed} onclick={() => onUpgrade(key)}>
-													<ArrowUp aria-hidden="true" />
-												</PrimaryButton>
-											{/snippet}
-										</Tooltip.Trigger>
-										<Tooltip.Portal>
-											<Tooltip.Content role="tooltip" class="upgrade-tooltip" side="top" sideOffset={8}>{busy ? '強化処理中' : isMaxed ? '最大レベルに到達' : canAfford ? upgradeName : `ポイント不足：${upgrade.cost} pt必要`}</Tooltip.Content>
-										</Tooltip.Portal>
-									</Tooltip.Root>
-								</div>
+								<Tooltip.Root>
+									<Tooltip.Trigger>
+										{#snippet child({ props })}
+											<PrimaryButton {...props} class={busy && !isMaxed ? 'upgrade-button processing' : isMaxed || canAfford ? 'upgrade-button' : 'upgrade-button insufficient-points'} type="button" aria-label={isMaxed ? `${abilityLabels[key]}は最大Lvです` : busy ? `${upgradeName}（${upgrade.cost} pt、強化処理中）` : !canAfford ? `${upgradeName}（${upgrade.cost} pt、ポイント不足）` : `${upgradeName}（${upgrade.cost} pt）`} aria-describedby={!isMaxed && !canAfford ? `upgrade-points-status-${key}` : busy && !isMaxed ? 'upgrade-busy-status' : undefined} disabled={busy || !canAfford || isMaxed} onclick={() => onUpgrade(key)}>
+												{#if isMaxed}<span>最大Lv</span>{:else}<span>{upgrade.cost} pt</span><ArrowUp aria-hidden="true" />{/if}
+											</PrimaryButton>
+										{/snippet}
+									</Tooltip.Trigger>
+									<Tooltip.Portal>
+										<Tooltip.Content role="tooltip" class="upgrade-tooltip" side="top" sideOffset={8}>{busy && !isMaxed ? '強化処理中' : isMaxed ? `${abilityLabels[key]}は最大Lvです` : !canAfford ? `ポイント不足：所持 ${points} pt / 必要 ${upgrade.cost} pt` : `${upgradeName}（${upgrade.cost} pt）`}</Tooltip.Content>
+									</Tooltip.Portal>
+								</Tooltip.Root>
+								{#if !isMaxed && !canAfford}<span id="upgrade-points-status-{key}" class="sr-only">所持ポイントは{points} pt、必要ポイントは{upgrade.cost} ptです。ポイント不足のため操作できません。</span>{/if}
 							</article>
 						{/each}
 					</section>
@@ -155,19 +148,15 @@
 	.ability-type { margin: 0; color: #aeb5d7; font-size: 13px; line-height: 1.4; }
 	.ability-values { align-self: end; display: grid; gap: 7px; padding: 12px 0 4px; border-top: 1px solid rgba(122, 135, 255, .28); }
 	.value-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; color: #aeb5d7; font-size: 12px; }
-	.value-row strong { color: #aeb6ff; font-size: 14px; font-weight: 800; font-variant-numeric: tabular-nums; text-align: right; }
-	.current-row strong { display: flex; align-items: baseline; gap: 5px; color: #f4f6ff; font-size: 25px; line-height: 1.1; }
-	.unit { color: #aeb5d7; font-size: 12px; font-weight: 700; }
+	.value-row strong { color: #aeb6ff; font-size: 19px; font-weight: 800; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+	.current-row strong { display: flex; align-items: baseline; gap: 5px; color: #f4f6ff; }
+	.unit { color: inherit; font-size: .82em; font-weight: 700; white-space: nowrap; }
 	.delta-row strong { color: #aeb6ff; }
-	.max-level-status { justify-content: flex-end; color: #aeb6ff; font-weight: 700; }
-	.ability-action-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
-	.cost { display: grid; gap: 2px; min-width: 0; color: #aeb5d7; font-size: 12px; }
-	.cost strong { color: #f4f6ff; font-size: 14px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-	.cost.insufficient span { color: #ffc780; }
-	:global(.upgrade-button) { display: inline-grid; flex: 0 0 48px; place-items: center; width: 48px; min-height: 48px; height: 48px; padding: 0; border-radius: 10px; }
+	:global(.upgrade-button) { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; min-width: 0; min-height: 50px; height: 50px; padding: 0 14px; border-radius: 10px; font-size: 18px; font-variant-numeric: tabular-nums; }
 	:global(.upgrade-button svg) { width: 24px; height: 24px; stroke-width: 2; }
+	:global(.upgrade-button.insufficient-points) { color: var(--color-primary-disabled-foreground); }
+	:global(.upgrade-button.processing:disabled) { border-color: var(--color-primary-border); background: var(--color-primary-background); box-shadow: 0 0 16px var(--color-primary-shadow); opacity: .72; }
 	:global(.upgrade-tooltip) { z-index: 120; max-width: min(280px, calc(100vw - 24px)); padding: 7px 10px; border: 1px solid rgba(150, 164, 230, .34); border-radius: 7px; background: #151b41; color: #f4f6ff; font-size: 12px; font-weight: 700; line-height: 1.3; }
-	:global(.adjustment-dialog-content .upgrade-button:focus-visible) { outline: 3px solid var(--color-focus-ring); outline-offset: 3px; }
 	.adjustment-dialog-footer { margin-top: 20px; }
 	:global(.terminal-secondary-action) { width: 100%; min-height: 48px; border: 1px solid rgba(150, 164, 230, .34); border-radius: 9px; background: #151b41; color: #dde1f7; font: inherit; font-weight: 800; text-align: center; cursor: pointer; }
 	:global(.adjustment-dialog-content button:focus-visible) { outline: 3px solid var(--color-focus-ring); outline-offset: 3px; }
