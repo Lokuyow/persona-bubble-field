@@ -375,7 +375,9 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	const tagGameLastPublishSeconds = new Map<string, number>();
 	const tagGameHolderProbes = new Map<string, { challengeId: string; ownerPubkey: string; runNumber: number; startedAtMs: number; requestAcknowledgedAtMs: number | null; responseAtMs: number | null; lastAttemptAtMs: number; requestPending: boolean }>();
 	const tagGameHolderLocalActivityAt = new Map<string, { ownerPubkey: string; runNumber: number; atMs: number }>();
+	const TAG_GAME_FORMAL_CHALLENGE_REORDER_WAIT_MS = 2_000;
 	const tagGameSelfChallengeResponses = new Map<string, { challengeId: string; stage: 'precheck' | 'formal'; ownerPubkey: string; runNumber: number; createdAtMs: number; status: 'pending' | 'sent' }>();
+	const tagGamePendingFormalChallenges = new Map<string, { action: NonNullable<ReturnType<typeof parseTagGameActionEvent>>; expiresAtMs: number; timerId: number }>();
 	const tagGameEffectPauses = new Map<string, { challengeId: string; ownerPubkey: string; runNumber: number; pausedAtMs: number; statePublishPending: boolean; formalRequestPending: boolean; formalLastAttemptAtMs: number }>();
 	const tagGameFormalChallengeAcks = new Map<string, number>();
 	const tagGameHolderResponsePending = new Set<string>();
@@ -2395,6 +2397,35 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		tagGameStates = [...tagGameEvents.values()].map((entry) => entry.state).sort((a, b) => b.updatedAt - a.updatedAt || a.gameId.localeCompare(b.gameId));
 	}
 
+	function discardPendingFormalTagGameChallenge(gameId: string): void {
+		const pending = tagGamePendingFormalChallenges.get(gameId);
+		if (!pending) return;
+		window.clearTimeout(pending.timerId);
+		tagGamePendingFormalChallenges.delete(gameId);
+	}
+
+	function replayPendingFormalTagGameChallenge(state: TagGameState): void {
+		const pending = tagGamePendingFormalChallenges.get(state.gameId);
+		if (!pending) return;
+		const action = pending.action;
+		const challengeId = action.payload.challengeId;
+		const actionGameId = action.event.tags.find((tag) => tag[0] === 'd')?.[1];
+		const self = personaSnapshot;
+		const holder = self && state.participant.find((member) => member.pubkey === self.signer.pubkey && member.runNumber === self.activeRun.runNumber && member.status === 'active');
+		const host = state.participant.find((member) => member.pubkey === state.hostPubkey && member.runNumber === action.runNumber &&
+			(member.status === 'active' || member.status === 'temporarily-ineligible'));
+		if (Date.now() >= pending.expiresAtMs || actionGameId !== state.gameId || action.payload.stage !== 'formal' ||
+			typeof challengeId !== 'string' || !/^[0-9a-f]{32}$/.test(challengeId) || !isFreshHolderResponse(action.event.created_at, Date.now()) ||
+			state.phase !== 'running' || !self || action.event.pubkey !== state.hostPubkey || !host || state.ownerPubkey !== self.signer.pubkey || !holder ||
+			state.holderChallengeId && state.holderChallengeId !== challengeId) {
+			discardPendingFormalTagGameChallenge(state.gameId);
+			return;
+		}
+		if (state.holderChallengeId !== challengeId) return;
+		discardPendingFormalTagGameChallenge(state.gameId);
+		respondToTagGameHolderChallenge(state, action, self);
+	}
+
 	function rememberTagGameEnvelope(eventId: string, createdAt: number, state: TagGameState): void {
 		const previous = tagGameEvents.get(state.gameId);
 		if (previous && createdAt < previous.createdAt) return;
@@ -2472,6 +2503,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		if (personaSnapshot && localMember && ongoingReservationState && ['registered', 'active', 'temporarily-ineligible'].includes(localMember.status)) {
 			void confirmAndRefreshTagGameParticipation(personaSnapshot, state.gameId);
 		}
+		replayPendingFormalTagGameChallenge(state);
 		refreshTagGameStateList();
 		if (state.phase === 'running' || state.phase === 'settling' || state.phase === 'ended' || state.phase === 'interrupted') void syncTagGameLifecycle(state);
 	}
@@ -2906,13 +2938,30 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		const challengeId = action.payload.challengeId;
 		const stage = action.payload.stage;
 		if (stage !== 'precheck' && stage !== 'formal') return;
+		const actionGameId = action.event.tags.find((tag) => tag[0] === 'd')?.[1];
 		const holder = state.participant.find((member) => member.pubkey === self.signer.pubkey && member.runNumber === self.activeRun.runNumber && member.status === 'active');
 		const host = state.participant.find((member) => member.pubkey === state.hostPubkey && member.runNumber === action.runNumber &&
 			(member.status === 'active' || member.status === 'temporarily-ineligible'));
-		const matchingStage = stage === 'precheck' ? !state.holderChallengeId : stage === 'formal' && state.holderChallengeId === challengeId;
-		if (state.phase !== 'running' || !matchingStage || state.ownerPubkey !== self.signer.pubkey || !holder || !host ||
+		if (state.phase !== 'running' || actionGameId !== state.gameId || state.ownerPubkey !== self.signer.pubkey || !holder || !host ||
 			action.event.pubkey !== state.hostPubkey || typeof challengeId !== 'string' || !/^[0-9a-f]{32}$/.test(challengeId) ||
 			!isFreshHolderResponse(action.event.created_at, Date.now())) return;
+		if (stage === 'formal' && !state.holderChallengeId) {
+			const previous = tagGamePendingFormalChallenges.get(state.gameId);
+			if (previous?.action.payload.challengeId === challengeId) return;
+			discardPendingFormalTagGameChallenge(state.gameId);
+			const pending = { action, expiresAtMs: Date.now() + TAG_GAME_FORMAL_CHALLENGE_REORDER_WAIT_MS, timerId: 0 };
+			pending.timerId = window.setTimeout(() => {
+				if (tagGamePendingFormalChallenges.get(state.gameId) === pending) discardPendingFormalTagGameChallenge(state.gameId);
+			}, TAG_GAME_FORMAL_CHALLENGE_REORDER_WAIT_MS);
+			tagGamePendingFormalChallenges.set(state.gameId, pending);
+			return;
+		}
+		if (stage === 'formal' && state.holderChallengeId !== challengeId) {
+			discardPendingFormalTagGameChallenge(state.gameId);
+			return;
+		}
+		if (stage === 'precheck' && state.holderChallengeId) return;
+		if (stage === 'formal') discardPendingFormalTagGameChallenge(state.gameId);
 		const existing = tagGameSelfChallengeResponses.get(state.gameId);
 		if (existing?.challengeId === challengeId && existing.stage === stage && existing.ownerPubkey === holder.pubkey && existing.runNumber === holder.runNumber) return;
 		const request: { challengeId: string; stage: 'precheck' | 'formal'; ownerPubkey: string; runNumber: number; createdAtMs: number; status: 'pending' } = {

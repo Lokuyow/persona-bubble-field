@@ -1114,11 +1114,15 @@ test('responds to a formal holder challenge after a missed precheck and resumes 
 			holderChallengeId: stoppedId, holderChallengeStartedAtMs: stoppedAtMs, participant };
 		const stoppedEvent = finalizeTagGameState(stopped, CHANNEL_ID, Math.floor(stoppedAtMs / 1_000) - 1, hostSecret);
 		await Promise.all([hostPage.clock.setSystemTime(stoppedAtMs), holderPage.clock.setSystemTime(stoppedAtMs)]);
-		await Promise.all([injectRealtime(hostPage, stoppedEvent), injectRealtime(holderPage, stoppedEvent)]);
 		await holderPage.evaluate(() => (window as typeof window & { __relayStartupTest: { setRealtimePublishOutcome(outcome: 'accepted'): void } }).__relayStartupTest.setRealtimePublishOutcome('accepted'));
 		const formal = finalizeEvent(buildTagGameActionTemplate({ channelId: CHANNEL_ID, gameId, action: 'response-challenge', runNumber: 1,
 			nonce: '4'.repeat(32), createdAt: await holderPage.evaluate(() => Math.floor(Date.now() / 1_000)), payload: { challengeId: stoppedId, stage: 'formal' } }), hostSecret);
 		await injectRealtime(holderPage, formal);
+		await holderPage.clock.runFor(100);
+		expect((await relayState(holderPage)).state.published.some((event) => event.kind === 27070 && event.pubkey === holderPubkey &&
+			parseTagGameActionEvent(event as unknown as NostrEvent, CHANNEL_ID)?.action === 'response' &&
+			parseTagGameActionEvent(event as unknown as NostrEvent, CHANNEL_ID)?.payload.challengeId === stoppedId)).toBe(false);
+		await Promise.all([injectRealtime(hostPage, stoppedEvent), injectRealtime(holderPage, stoppedEvent)]);
 		await expect.poll(async () => new Set((await relayState(holderPage)).state.published.filter((event) => event.kind === 27070 && event.pubkey === holderPubkey &&
 			parseTagGameActionEvent(event as unknown as NostrEvent, CHANNEL_ID)?.action === 'response' &&
 			parseTagGameActionEvent(event as unknown as NostrEvent, CHANNEL_ID)?.payload.challengeId === stoppedId).map((event) => event.id)).size).toBe(1);
@@ -1188,6 +1192,68 @@ test('rejects formal challenges with a wrong id, stale Run, or former holder', a
 	await publishChallenge({ ...base, revision, updatedAt: startedAt + 2, ownerPubkey: replacementPubkey,
 		participant: [...base.participant, { pubkey: replacementPubkey, runNumber: 1, registeredAt: startedAt, status: 'active' as const, points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 }],
 		holderChallengeId: 'd'.repeat(32) }, 'd'.repeat(32));
+	expect(await sentResponses()).toBe(0);
+});
+
+test('expires a reordered formal challenge unless its matching stop arrives for the current holder and Run', async ({ page }) => {
+	test.setTimeout(60_000);
+	const nowMs = Date.now();
+	const hostSecret = fixtureSecret(34);
+	const holderSecret = fixtureSecret(35);
+	const replacementSecret = fixtureSecret(36);
+	const hostPubkey = getPublicKey(hostSecret);
+	const holderPubkey = getPublicKey(holderSecret);
+	const replacementPubkey = getPublicKey(replacementSecret);
+	await preparePlayer(page, holderSecret, nowMs);
+	await expect(page.locator('main')).toHaveAttribute('data-realtime-status', 'active');
+	const startedAt = Math.floor(nowMs / 1_000) - 10;
+	let nonce = 40;
+	const makeState = (suffix: string, revision = 0): TagGameState => {
+		const gameId = `${hostPubkey}:${startedAt}:${suffix.repeat(64)}`;
+		return { gameId, hostPubkey, phase: 'running', revision, updatedAt: startedAt + revision, startedAt, endsAt: startedAt + 180,
+			seed: `held-formal-challenge-${suffix}`, ownerPubkey: holderPubkey, effect: 'benefit', transferAt: startedAt * 1_000,
+			participant: [hostPubkey, holderPubkey].map((pubkey) => ({ pubkey, runNumber: 1, registeredAt: startedAt, status: 'active' as const, points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 })),
+			settledAtMs: nowMs };
+	};
+	const injectState = async (state: TagGameState) => {
+		await injectRealtime(page, finalizeTagGameState(state, CHANNEL_ID, state.updatedAt, hostSecret));
+	};
+	const injectFormal = async (state: TagGameState, challengeId: string) => {
+		const request = finalizeEvent(buildTagGameActionTemplate({ channelId: CHANNEL_ID, gameId: state.gameId, action: 'response-challenge', runNumber: 1,
+			nonce: String(nonce++).padStart(32, '0'), createdAt: Math.floor(await page.evaluate(() => Date.now() / 1_000)),
+			payload: { challengeId, stage: 'formal' } }), hostSecret);
+		await injectRealtime(page, request);
+		await page.clock.runFor(100);
+	};
+	const sentResponses = async () => (await relayState(page)).state.published.filter((event) => event.kind === 27070 && event.pubkey === holderPubkey &&
+		parseTagGameActionEvent(event as unknown as NostrEvent, CHANNEL_ID)?.action === 'response').length;
+
+	const missingStop = makeState('e');
+	await injectState(missingStop);
+	await injectFormal(missingStop, '1'.repeat(32));
+	expect(await sentResponses()).toBe(0);
+	await page.clock.runFor(2_100);
+	expect(await sentResponses()).toBe(0);
+
+	const changedHolder = makeState('f');
+	await injectState(changedHolder);
+	await injectFormal(changedHolder, '2'.repeat(32));
+	await injectState({ ...changedHolder, revision: 1, updatedAt: changedHolder.updatedAt + 1, ownerPubkey: replacementPubkey,
+		participant: [...changedHolder.participant, { pubkey: replacementPubkey, runNumber: 1, registeredAt: startedAt, status: 'active', points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 }] });
+	expect(await sentResponses()).toBe(0);
+
+	const changedRun = makeState('a');
+	await injectState(changedRun);
+	await injectFormal(changedRun, '3'.repeat(32));
+	await injectState({ ...changedRun, revision: 1, updatedAt: changedRun.updatedAt + 1,
+		participant: changedRun.participant.map((member) => member.pubkey === holderPubkey ? { ...member, runNumber: 2 } : member) });
+	expect(await sentResponses()).toBe(0);
+
+	const changedChallenge = makeState('b');
+	await injectState(changedChallenge);
+	await injectFormal(changedChallenge, '4'.repeat(32));
+	await injectState({ ...changedChallenge, revision: 1, updatedAt: changedChallenge.updatedAt + 1,
+		holderChallengeId: '5'.repeat(32), holderChallengeStartedAtMs: nowMs });
 	expect(await sentResponses()).toBe(0);
 });
 
