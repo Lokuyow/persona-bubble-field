@@ -70,6 +70,15 @@ test.describe('Relay startup', () => {
 			await openReadyRelayWorld(page, 1);
 			const chatterToggle = page.locator('.chatter-toggle');
 			const suggestionsToggle = page.locator('.suggestions-toggle');
+			for (const control of [page.locator('.profile-trigger'), chatterToggle, page.locator('.speech-type-toggle'), suggestionsToggle]) {
+				const frame = await control.evaluate((element) => {
+					const style = getComputedStyle(element);
+					return { background: style.backgroundColor, border: style.borderStyle, width: style.borderWidth };
+				});
+				expect(frame.background).not.toBe('rgba(0, 0, 0, 0)');
+				expect(frame.border).toBe('solid');
+				expect(frame.width).toBe('1px');
+			}
 			await expect(page.getByRole('button', { name: 'AI発言候補を生成' })).toBeVisible();
 			await expect(suggestionsToggle.locator('svg')).toHaveCount(1);
 			await expect(suggestionsToggle).not.toContainText('候補');
@@ -211,16 +220,40 @@ test.describe('Relay startup', () => {
 		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret));
 		const editor = await openReadyRelayWorld(page, 1);
 		const candidateButton = page.getByRole('button', { name: 'AI発言候補を生成' });
-		await editor.fill('既存のdraft');
-		await expect(candidateButton).toBeDisabled();
-		await editor.fill('');
-		await candidateButton.click();
-		await expect(page.locator('.suggestion-primary').first()).toBeVisible();
-		const publishedBefore = (await publishedMessages(page)).length;
-		await page.getByRole('button', { name: '候補1をコンポーザーに追加' }).click();
-		await expect(editor).toHaveValue('まずは自然な返答です。');
-		expect((await publishedMessages(page)).length).toBe(publishedBefore);
-		await expect(page.locator('.suggestion-panel')).toHaveCount(0);
+		for (const viewport of [{ width: 1_200, height: 900 }, { width: 390, height: 844 }]) {
+			await page.setViewportSize(viewport);
+			await editor.fill('既存のdraft');
+			await expect(candidateButton).toBeDisabled();
+			await editor.fill('');
+			await candidateButton.click();
+			const panel = page.locator('.suggestion-panel');
+			await expect(panel).toBeVisible();
+			const panelBox = await panel.boundingBox();
+			expect(panelBox).not.toBeNull();
+			expect(panelBox!.x).toBeGreaterThanOrEqual(0);
+			expect(panelBox!.x + panelBox!.width).toBeLessThanOrEqual(viewport.width);
+			const primary = panel.locator('.suggestion-primary').first();
+			const add = page.getByRole('button', { name: '候補1をコンポーザーに追加' });
+			await expect(primary).toBeVisible();
+			const addStyle = await add.evaluate((element) => {
+				const style = getComputedStyle(element);
+				const box = element.getBoundingClientRect();
+				return { minWidth: style.minWidth, padding: style.padding, fontSize: style.fontSize, box: { x: box.x, y: box.y, width: box.width, height: box.height } };
+			});
+			const primaryBox = await primary.boundingBox();
+			expect(addStyle.minWidth).toBe('48px');
+			expect(addStyle.padding).toBe('6px 8px');
+			expect(addStyle.fontSize).toBe('11px');
+			expect(primaryBox).not.toBeNull();
+			expect(addStyle.box.x).toBeGreaterThanOrEqual(primaryBox!.x + primaryBox!.width);
+			expect(addStyle.box.x - (primaryBox!.x + primaryBox!.width)).toBeLessThanOrEqual(8);
+			expect(addStyle.box.height).toBeGreaterThanOrEqual(38);
+			const publishedBefore = (await publishedMessages(page)).length;
+			await add.click();
+			await expect(editor).toHaveValue('まずは自然な返答です。');
+			expect((await publishedMessages(page)).length).toBe(publishedBefore);
+			await expect(panel).toHaveCount(0);
+		}
 	});
 
 	test('closes the candidate panel from its explicit close button without side effects', async ({ page }) => {
@@ -229,26 +262,43 @@ test.describe('Relay startup', () => {
 		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret));
 		const editor = await openReadyRelayWorld(page, 1);
 		const candidateButton = page.getByRole('button', { name: 'AI発言候補を生成' });
-		await candidateButton.click();
-		await expect(page.locator('.suggestion-panel')).toBeVisible();
-		const publishedBefore = (await publishedMessages(page)).length;
-		const close = page.getByRole('button', { name: '発言候補を閉じる' });
-		const closeBox = await close.boundingBox();
-		const closeIconBox = await close.locator('svg').boundingBox();
-		expect(closeBox && closeIconBox).toBeTruthy();
-		if (closeBox && closeIconBox) {
-			expect(closeBox.width).toBeGreaterThanOrEqual(44);
-			expect(closeBox.height).toBeGreaterThanOrEqual(44);
-			expect(Math.abs((closeIconBox.x + closeIconBox.width / 2) - (closeBox.x + closeBox.width / 2))).toBeLessThan(1);
-			expect(Math.abs((closeIconBox.y + closeIconBox.height / 2) - (closeBox.y + closeBox.height / 2))).toBeLessThan(1);
+		for (const viewport of [{ width: 1_200, height: 900 }, { width: 390, height: 844 }]) {
+			await page.setViewportSize(viewport);
+			await candidateButton.click();
+			const panel = page.locator('.suggestion-panel');
+			await expect(panel).toBeVisible();
+			const publishedBefore = (await publishedMessages(page)).length;
+			const close = page.getByRole('button', { name: '発言候補を閉じる' });
+			const panelBox = await panel.boundingBox();
+			expect(panelBox).not.toBeNull();
+			expect(panelBox!.x).toBeGreaterThanOrEqual(0);
+			expect(panelBox!.x + panelBox!.width).toBeLessThanOrEqual(viewport.width);
+			const closeStyle = await close.evaluate((element) => {
+				const style = getComputedStyle(element);
+				const box = element.getBoundingClientRect();
+				const icon = element.querySelector('svg')!.getBoundingClientRect();
+				return {
+					width: box.width, height: box.height,
+					iconWidth: icon.width, iconHeight: icon.height,
+					iconCenterX: icon.x + icon.width / 2, iconCenterY: icon.y + icon.height / 2,
+					centerX: box.x + box.width / 2, centerY: box.y + box.height / 2,
+					background: style.backgroundColor, border: style.borderStyle
+				};
+			});
+			expect(closeStyle.width).toBe(44);
+			expect(closeStyle.height).toBe(44);
+			expect(closeStyle.iconWidth).toBe(24);
+			expect(closeStyle.iconHeight).toBe(24);
+			expect(Math.abs(closeStyle.iconCenterX - closeStyle.centerX)).toBeLessThan(1);
+			expect(Math.abs(closeStyle.iconCenterY - closeStyle.centerY)).toBeLessThan(1);
+			expect(closeStyle.background).not.toBe('rgba(0, 0, 0, 0)');
+			expect(closeStyle.border).toBe('solid');
+			await expect(close.locator('svg')).toBeVisible();
+			await close.click();
+			await expect(panel).toHaveCount(0);
+			expect((await publishedMessages(page)).length).toBe(publishedBefore);
+			await expect(editor).toHaveValue('');
 		}
-		await expect(close.locator('svg')).toBeVisible();
-
-		await close.click();
-
-		await expect(page.locator('.suggestion-panel')).toHaveCount(0);
-		expect((await publishedMessages(page)).length).toBe(publishedBefore);
-		await expect(editor).toHaveValue('');
 		await expect(page.getByRole('button', { name: /発言タイプ: 通常/ })).toBeVisible();
 	});
 

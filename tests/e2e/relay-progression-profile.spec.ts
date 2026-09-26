@@ -23,8 +23,63 @@ import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { installFieldFrameSampling, readFieldFrames, sampleRenderedField } from './helpers/fieldFrames';
 import { CHANNEL_ID, AUTHORITATIVE_RELAYS, fixtureSecret, testEvents, isDeathTraceEvent, installDelayedRelay, relayState, dragRelayJoystick, publishedMessages, waitForPublishedMessageCount, pauseAtCurrentBrowserTime, startSelectedRun, openReadyRelayWorld, openClearReadyWorld, installPromptApiStub, seedRelayAccount, readRelayGameState, overwriteRelayGameState, seedUnavailablePersona, installDeathTransitionFailure, armDeathTransitionFailure, moveRelaySelfTo } from './helpers/relayHarness';
 
+function rgbChannels(color: string): [number, number, number] {
+	const channels = color.match(/[\d.]+/g)?.map(Number);
+	if (!channels || channels.length < 3) throw new Error(`Unexpected CSS color: ${color}`);
+	return [channels[0]!, channels[1]!, channels[2]!];
+}
+
+function relativeLuminance(color: string): number {
+	const channels = rgbChannels(color).map((channel) => {
+		const normalized = channel / 255;
+		return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+	});
+	return 0.2126 * channels[0]! + 0.7152 * channels[1]! + 0.0722 * channels[2]!;
+}
+
+function contrastRatio(first: string, second: string): number {
+	const luminances = [relativeLuminance(first), relativeLuminance(second)].sort((left, right) => right - left);
+	return (luminances[0]! + 0.05) / (luminances[1]! + 0.05);
+}
+
+async function expectSharedProfileFocusRing(button: Locator): Promise<void> {
+	const focus = await button.evaluate((element) => {
+		const style = getComputedStyle(element);
+		const surface = getComputedStyle(element.closest('.clear-section')!).backgroundColor;
+		const tokenProbe = document.createElement('span');
+		tokenProbe.style.color = 'var(--action-focus-ring)';
+		document.body.append(tokenProbe);
+		const tokenColor = getComputedStyle(tokenProbe).color;
+		tokenProbe.remove();
+		return { matches: element.matches(':focus-visible'), outline: style.outlineStyle, width: style.outlineWidth, color: style.outlineColor, tokenColor, surface };
+	});
+	expect(focus.matches).toBe(true);
+	expect(focus.outline).toBe('solid');
+	expect(focus.width).toBe('3px');
+	expect(focus.color).toBe(focus.tokenColor);
+	expect(contrastRatio(focus.color, focus.surface)).toBeGreaterThanOrEqual(3);
+}
+
 
 test.describe('Relay startup', () => {
+	test('uses the shared focus ring on profile actions against their actual light surface', async ({ page }) => {
+		await page.setViewportSize({ width: 1_200, height: 900 });
+		await openClearReadyWorld(page);
+		const profileTrigger = page.getByRole('button', { name: '自分のプロフィールを開く' });
+		await profileTrigger.click();
+		const dialog = page.getByRole('dialog');
+		await expect(dialog.locator('[data-initial-focus]')).toBeFocused();
+
+		const info = dialog.getByRole('button', { name: '脱出するとどうなるかを見る' });
+		await page.keyboard.press('Tab');
+		await expect(info).toBeFocused();
+		await expectSharedProfileFocusRing(info);
+		const escape = dialog.getByRole('button', { name: '脱出', exact: true });
+		await expect(escape).toBeEnabled();
+		await page.keyboard.press('Tab');
+		await expect(escape).toBeFocused();
+		await expectSharedProfileFocusRing(escape);
+	});
 
 	test('opens the self profile from the ActionDock without adjustment-terminal proximity', async ({ page }) => {
 		await page.setViewportSize({ width: 1200, height: 900 });
@@ -78,6 +133,7 @@ test.describe('Relay startup', () => {
 		await expect(dialog).toContainText('ハルシネーション抑制');
 		await expect(dialog).toContainText('Root Point');
 		await expect(dialog).toContainText('脱出');
+		await expect(dialog.getByRole('button', { name: '脱出', exact: true })).toHaveAttribute('data-action-intent', 'danger');
 		await expect(dialog).not.toContainText('Normal Clear');
 		const escapeTrigger = dialog.locator('.escape-info-trigger');
 		const escapeContent = page.locator('.escape-info-popover');
@@ -108,7 +164,21 @@ test.describe('Relay startup', () => {
 		await expect(dialog).not.toContainText('100,000 ptで現在の一生を終えます。未回収の作業ポイントは含まれません。');
 		await expect(dialog).toContainText('100,000 pt');
 		await expect(dialog.locator('.clear-progress-head[data-stat-icon="wallet"] > span > svg')).toHaveCount(1);
-		await expect(dialog.getByRole('button', { name: '脱出', exact: true })).toBeDisabled();
+		const disabledEscape = dialog.getByRole('button', { name: '脱出', exact: true });
+		await expect(disabledEscape).toBeDisabled();
+		const disabledEscapeColors = await disabledEscape.evaluate((button) => {
+			const disabled = getComputedStyle(button);
+			const probe = document.createElement('span');
+			probe.style.cssText = 'position:absolute;color:var(--action-disabled-foreground);background:var(--action-disabled-background);border:1px solid var(--action-disabled-border)';
+			button.closest('.clear-section')!.append(probe);
+			const genericDisabled = getComputedStyle(probe);
+			const result = { background: disabled.backgroundColor, foreground: disabled.color, border: disabled.borderColor, genericBackground: genericDisabled.backgroundColor, genericForeground: genericDisabled.color, genericBorder: genericDisabled.borderColor };
+			probe.remove();
+			return result;
+		});
+		expect(disabledEscapeColors.background).toBe(disabledEscapeColors.genericBackground);
+		expect(disabledEscapeColors.foreground).toBe(disabledEscapeColors.genericForeground);
+		expect(disabledEscapeColors.border).toBe(disabledEscapeColors.genericBorder);
 		await expect(dialog.getByText('clear不可: 所持ポイントが100,000pt未満です')).toHaveCount(0);
 		await expect(dialog.getByRole('button', { name: /へ強化/ })).toHaveCount(0);
 

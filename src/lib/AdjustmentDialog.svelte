@@ -92,7 +92,7 @@
 								<div class="value-row current-row"><span>現在値</span><strong><span>{formatEffectValue(key, upgrade.level)}</span>{#if key !== 'contextCapacity'}<span class="unit">{effectUnit(key)}</span>{/if}</strong></div>
 								{#if !isMaxed}<div class="value-row delta-row"><span>増加量</span><strong>{formatDelta(key, upgrade.level)}</strong></div>{/if}
 							</div>
-							<ActionButton variant="secondary" class={busy && !isMaxed ? 'upgrade-button processing' : 'upgrade-button'} type="button" aria-label={isMaxed ? `${abilityLabels[key]}は最大Lvです` : busy ? `${upgradeName}（必要${upgrade.cost}pt、強化処理中）` : !canAfford ? `${upgradeName}（必要${upgrade.cost}pt、ポイント不足）` : `${upgradeName}（必要${upgrade.cost}pt）`} disabled={busy || !canAfford || isMaxed} onclick={() => onUpgrade(key)}>
+							<ActionButton variant="primary" class={busy && !isMaxed ? 'upgrade-button processing' : 'upgrade-button'} type="button" aria-label={isMaxed ? `${abilityLabels[key]}は最大Lvです` : busy ? `${upgradeName}（必要${upgrade.cost}pt、強化処理中）` : !canAfford ? `${upgradeName}（必要${upgrade.cost}pt、ポイント不足）` : `${upgradeName}（必要${upgrade.cost}pt）`} disabled={busy || !canAfford || isMaxed} onclick={() => onUpgrade(key)}>
 								{#if isMaxed}<span>最大Lv</span>{:else}<span class="upgrade-requirement"><span>必要</span>{' '}<strong>{upgrade.cost}pt</strong></span><SquareChevronUpFilled aria-hidden="true" />{/if}
 			</ActionButton>
 						</article>
@@ -109,7 +109,6 @@
 <style>
 	:global(.adjustment-dialog-overlay) { position: fixed; inset: 0; z-index: 100; background: rgba(4, 7, 18, .72); backdrop-filter: blur(2px); }
 	:global(.adjustment-dialog-content) { position: fixed; top: 50%; left: 50%; z-index: 101; display: grid; gap: 0; width: min(1080px, calc(100vw - 24px)); max-height: calc(100svh - 28px); overflow: auto; padding: 28px; border: 1px solid rgba(122, 135, 255, .74); border-radius: 18px; background: linear-gradient(180deg, rgba(12, 18, 46, .98), rgba(8, 12, 33, .98)); box-shadow: 0 20px 80px rgba(0, 0, 0, .48), 0 0 34px rgba(90, 103, 255, .13); color: #f4f6ff; transform: translate(-50%, -50%); }
-	:global(.adjustment-dialog-content) { --action-secondary-background: rgba(255, 255, 255, .08); --action-secondary-background-hover: rgba(255, 255, 255, .15); --action-secondary-foreground: #f4f6ff; --action-secondary-border: rgba(255, 255, 255, .42); --action-tertiary-background-hover: rgba(255, 255, 255, .12); --action-tertiary-foreground: #f4f6ff; --action-disabled-background: #424858; --action-disabled-border: #5a6170; --action-disabled-foreground: #d2d6df; }
 	.adjustment-dialog-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 22px; }
 	:global(.adjustment-dialog-title) { display: inline-flex; align-items: center; gap: 9px; margin: 0; color: #f4f6ff; font-size: 22px; line-height: 1; font-weight: 800; letter-spacing: .03em; }
 	:global(.adjustment-dialog-title svg) { width: 22px; height: 22px; color: #aeb6ff; stroke-width: 2; }

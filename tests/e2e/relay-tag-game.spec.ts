@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { finalizeEvent, getPublicKey, type Event as NostrEvent } from 'nostr-tools/pure';
 import { buildTagGameActionTemplate, createTagGameSchedule, finalizeTagGameState, parseTagGameActionEvent, parseTagGameEvent, TAG_GAME_KIND, TAG_GAME_TRANSFER_COOLDOWN_MS, type TagGameState } from '../../src/lib/tagGame';
 import { MENDING_TERMINAL, TAG_GAME_TERMINAL } from '../../src/lib/fieldFacilities';
@@ -16,6 +16,16 @@ async function preparePlayer(page: Page, secret: Uint8Array, nowMs: number, poin
 	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
 	await expect(page.locator(`.participant[data-self="true"][data-participant-id="${getPublicKey(secret)}"]`)).toBeVisible();
 	await expect.poll(async () => (await relayState(page)).state.requests.some((request) => request.filters.some((filter) => (filter.kinds as number[] | undefined)?.includes(7070)))).toBe(true);
+}
+
+async function expectButtonShape(button: Locator): Promise<void> {
+	const style = await button.evaluate((element) => {
+		const computed = getComputedStyle(element);
+		return { background: computed.backgroundColor, border: computed.borderStyle, width: computed.borderWidth };
+	});
+	expect(style.background).not.toBe('rgba(0, 0, 0, 0)');
+	expect(style.border).toBe('solid');
+	expect(style.width).toBe('1px');
 }
 
 async function synchronizeBrowserClocks(pages: readonly Page[]): Promise<void> {
@@ -218,6 +228,8 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 		await expect.poll(async () => participantGrid.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(' ').length)).toBe(4);
 		const cancelApplication = participantCard.getByRole('button', { name: '申請を取り消す' });
 		await expect(cancelApplication).toBeVisible();
+		await expect(cancelApplication).toHaveAttribute('data-action-intent', 'cancel');
+		await expectButtonShape(cancelApplication);
 		const [gridBox, cancelBox] = await Promise.all([participantGrid.boundingBox(), cancelApplication.boundingBox()]);
 		expect(gridBox && cancelBox).toBeTruthy();
 		if (gridBox && cancelBox) expect(cancelBox.y).toBeGreaterThanOrEqual(gridBox.y + gridBox.height);
@@ -230,6 +242,7 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 
 		await expect(hostPage.getByRole('button', { name: '開始を提案' })).toHaveAttribute('data-action-variant', 'primary');
 		await expect(hostCard.getByRole('button', { name: '募集を取り消す' })).toHaveAttribute('data-action-variant', 'tertiary');
+		await expect(hostCard.getByRole('button', { name: '募集を取り消す' })).toHaveAttribute('data-action-intent', 'cancel');
 		await hostPage.getByRole('button', { name: '開始を提案' }).click();
 		await expect.poll(async () => parseTagGameEvent(await latestGameEvent(hostPage, gameId), CHANNEL_ID)?.state.phase).toBe('proposed');
 		await Promise.all([hostPage, participantPage, participantTwoPage].map((page) => expect(page.getByRole('dialog', { name: '鬼ごっこ' })).toBeVisible()));
@@ -237,6 +250,7 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 		await Promise.all([injectRealtime(participantPage, proposal), injectRealtime(participantTwoPage, proposal)]);
 		await Promise.all([expect(participantPage.getByRole('button', { name: '開始に同意' })).toBeVisible(), expect(participantTwoPage.getByRole('button', { name: '開始に同意' })).toBeVisible()]);
 		await expect(participantPage.getByRole('button', { name: '開始に同意' })).toHaveAttribute('data-action-variant', 'primary');
+		await expect(participantPage.getByRole('button', { name: '今回は辞退' })).toHaveAttribute('data-action-intent', 'cancel');
 		await expect(participantPage.getByRole('dialog', { name: '鬼ごっこ' }).locator('[data-action-variant="primary"]')).toHaveCount(1);
 		await expect(hostCard.getByText('開催者は同意済み')).toBeVisible();
 		await expect(hostCard.getByRole('button', { name: '開始に同意' })).toHaveCount(0);
@@ -462,7 +476,7 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 	}
 });
 
-test('keeps join actions secondary when multiple tag-game lobbies are available', async ({ browser }) => {
+test('keeps join actions primary and equally emphasized when multiple tag-game lobbies are available', async ({ browser }) => {
 	const firstHostPage = await browser.newPage();
 	const secondHostPage = await browser.newPage();
 	const joinerPage = await browser.newPage();
@@ -494,7 +508,7 @@ test('keeps join actions secondary when multiple tag-game lobbies are available'
 			latestPublished(firstHostPage, TAG_GAME_KIND, getPublicKey(firstHostSecret)),
 			latestPublished(secondHostPage, TAG_GAME_KIND, getPublicKey(secondHostSecret))
 		]);
-		await joinerPage.setViewportSize({ width: 390, height: 844 });
+		await joinerPage.setViewportSize({ width: 1280, height: 900 });
 		await openTagGameTerminal(joinerPage);
 		const dialog = joinerPage.getByRole('dialog', { name: '鬼ごっこ' });
 		for (const [index, event] of lobbies.entries()) {
@@ -503,10 +517,28 @@ test('keeps join actions secondary when multiple tag-game lobbies are available'
 		}
 		const joinButtons = dialog.getByRole('button', { name: '参加申請' });
 		await expect(joinButtons).toHaveCount(2);
-		await expect(joinButtons.nth(0)).toHaveAttribute('data-action-variant', 'secondary');
-		await expect(joinButtons.nth(1)).toHaveAttribute('data-action-variant', 'secondary');
+		await expectButtonShape(joinButtons.nth(0));
+		await expectButtonShape(joinButtons.nth(1));
+		await expect(joinButtons.nth(0)).toHaveAttribute('data-action-variant', 'primary');
+		await expect(joinButtons.nth(1)).toHaveAttribute('data-action-variant', 'primary');
 		await expect(dialog.getByRole('button', { name: '鬼ごっこを開催' })).toHaveAttribute('data-action-variant', 'secondary');
-		await expect(dialog.locator('[data-action-variant="primary"]')).toHaveCount(0);
+		await expect(dialog.locator('[data-action-variant="primary"]')).toHaveCount(2);
+		const joinBackgrounds = await joinButtons.evaluateAll((buttons) => buttons.map((button) => getComputedStyle(button).backgroundColor));
+		expect(joinBackgrounds[0]).toBe(joinBackgrounds[1]);
+		for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
+			await joinerPage.setViewportSize(viewport);
+			await expectButtonShape(joinButtons.nth(0));
+			await expectButtonShape(joinButtons.nth(1));
+			await expect(joinButtons.nth(0)).toBeVisible();
+			await expect(joinButtons.nth(1)).toBeVisible();
+			await joinButtons.nth(1).scrollIntoViewIfNeeded();
+			const secondJoinHitArea = await joinButtons.nth(1).evaluate((button) => {
+				const rect = button.getBoundingClientRect();
+				return { height: rect.height, insideViewport: rect.top >= 0 && rect.bottom <= innerHeight };
+			});
+			expect(secondJoinHitArea.height).toBeGreaterThanOrEqual(44);
+			expect(secondJoinHitArea.insideViewport).toBe(true);
+		}
 	} finally {
 		await Promise.all([firstHostPage.close(), secondHostPage.close(), joinerPage.close()]);
 	}
@@ -1188,6 +1220,7 @@ test('releases an approved reservation after finite known-game recovery when Rel
 		await page.reload();
 		await openTagGameTerminal(page);
 		await expect(page.locator(`[data-tag-game-cancel-reservation="${gameId}"]`)).toBeVisible();
+		await expect(page.locator(`[data-tag-game-cancel-reservation="${gameId}"]`)).toHaveAttribute('data-action-intent', 'cancel');
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => request.filters.some((filter) => (filter['#d'] as string[] | undefined)?.includes(gameId)))).toBe(true);
 		await page.clock.fastForward(31_000);
 		await expect.poll(async () => (await tagGamePersistence(page)).reservation).toBeNull();

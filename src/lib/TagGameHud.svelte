@@ -58,7 +58,7 @@
 		{#if transferStatus || canLeave}
 			<div class="game-hud-footer" data-tag-game-hud-footer>
 				{#if transferStatus}<span data-tag-game-cooldown>{transferStatus}</span>{/if}
-				{#if canLeave}<ActionButton variant="tertiary" class="tag-game-leave" data-tag-game-leave={game.gameId} onclick={() => onLeave(game.gameId)} disabled={busy}>退出</ActionButton>{/if}
+				{#if canLeave}<ActionButton variant="tertiary" intent="cancel" class="tag-game-leave" data-tag-game-leave={game.gameId} onclick={() => onLeave(game.gameId)} disabled={busy}>退出</ActionButton>{/if}
 			</div>
 		{/if}
 		<div class="cooldown-slot">
@@ -73,7 +73,7 @@
 {/if}
 
 <style>
-	.game-hud { --action-tertiary-foreground: rgba(239, 241, 255, .88); --action-tertiary-background-hover: rgba(255, 255, 255, .12); --action-disabled-background: #424858; --action-disabled-border: #5a6170; --action-disabled-foreground: #d2d6df; width: min(310px, 100%); padding: 8px 11px; border: 1px solid rgba(170, 183, 195, .42); border-radius: 10px; background: linear-gradient(145deg, rgba(10, 17, 35, .84), rgba(15, 17, 42, .76)); box-shadow: 0 4px 16px rgba(0, 0, 0, .2), inset 0 0 12px rgba(100, 105, 220, .06); color: rgba(239, 241, 255, .94); font-size: 12px; line-height: 1.25; pointer-events: none; }
+	.game-hud { width: min(310px, 100%); padding: 8px 11px; border: 1px solid rgba(170, 183, 195, .42); border-radius: 10px; background: linear-gradient(145deg, rgba(10, 17, 35, .84), rgba(15, 17, 42, .76)); box-shadow: 0 4px 16px rgba(0, 0, 0, .2), inset 0 0 12px rgba(100, 105, 220, .06); color: rgba(239, 241, 255, .94); font-size: 12px; line-height: 1.25; pointer-events: none; }
 	.game-hud-time { display: flex; align-items: baseline; gap: 8px; }
 	.game-hud-time span { color: rgba(226, 230, 255, .82); font-weight: 700; }
 	.game-hud-time strong { font-size: 30px; font-weight: 850; line-height: 1; font-variant-numeric: tabular-nums; font-feature-settings: 'tnum'; letter-spacing: .015em; }

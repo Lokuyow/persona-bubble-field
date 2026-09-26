@@ -311,7 +311,9 @@
 	button { min-width: 0; min-height: 38px; padding: 5px 9px; border: 1px solid rgba(102, 28, 106, .3); border-radius: 8px; background: #fff; color: #4d3150; font: inherit; font-size: .9em; font-weight: 700; cursor: pointer; pointer-events: auto; }
 	:global(.cooperation-choice) { flex: 1; min-width: 0; min-height: 38px; padding: 5px 9px; font-size: .9em; pointer-events: auto; }
 	:global(.cooperation-choice.selected) { border-color: #8d4692; background: #f0d9f3; color: #39293e; }
-	.details-trigger { justify-self: start; min-height: 30px; padding: 2px 7px; font-size: .8em; }
+	.details-trigger { justify-self: start; min-height: 30px; padding: 2px 7px; border-color: var(--action-tertiary-border); background: var(--action-tertiary-background); color: var(--action-tertiary-foreground); font-size: .8em; }
+	.details-trigger:hover { background: var(--action-tertiary-background-hover); }
+	.details-trigger:active { background: var(--action-tertiary-background-active); }
 	.cooperation-defection-rules-disclosure { margin-top: 7px; pointer-events: auto; }
 	.cooperation-defection-rules-disclosure summary { display: flex; align-items: center; justify-content: center; gap: .4em; min-height: 30px; box-sizing: border-box; padding: 4px 8px; border: 1px solid rgba(102, 28, 106, .3); border-radius: 8px; background: #fff; color: #4d3150; font-size: .82em; font-weight: 700; cursor: pointer; list-style: none; }
 	.cooperation-defection-rules-disclosure summary::-webkit-details-marker { display: none; }
