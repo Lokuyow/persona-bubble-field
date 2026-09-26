@@ -156,7 +156,7 @@
 	:global(.escape-info-trigger svg) { width: 18px; height: 18px; }
 	:global(.escape-info-trigger:hover) { background: #f8e7df; }
 	:global(.escape-info-trigger:active) { background: #efd4c8; }
-	:global(.escape-info-trigger:focus-visible) { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
+	:global(.escape-info-trigger:focus-visible) { outline: 3px solid var(--action-focus-ring); outline-offset: 3px; }
 	:global(.escape-info-popover) { z-index: 110; box-sizing: border-box; width: min(330px, calc(100vw - 32px)); max-height: min(420px, var(--bits-floating-available-height, calc(100dvh - 64px))); overflow-y: auto; padding: 14px; border: 1px solid #ddb9a8; border-radius: 12px; background: #fff1eb; box-shadow: 0 14px 32px rgba(32, 42, 38, .24); color: #765d58; }
 	:global(.escape-info-items) { display: grid; gap: 12px; }
 	:global(.escape-info-items > div) { display: grid; gap: 2px; }
@@ -171,7 +171,6 @@
 	:global(.clear-button) { min-height: 46px; border-radius: 9px; font-weight: 900; }
 	.self-profile-footer { display: flex; justify-content: flex-end; }
 	:global(.self-profile-close) { min-height: 44px; padding: 0 18px; border-radius: 999px; font-size: 13px; font-weight: 900; }
-	:global(.self-profile-content button:focus-visible) { outline: 3px solid var(--color-focus-ring); outline-offset: 2px; }
 	:global(.self-profile-scrollbar) { display: flex; width: 10px; padding: 2px; border-radius: 999px; background: rgba(86, 105, 98, .12); }
 	:global(.self-profile-thumb) { flex: 1; border-radius: inherit; background: #8fa8a0; }
 	@media (max-width: 600px) { :global(.self-profile-content) { gap: 18px; width: min(560px, calc(100vw - 20px)); max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 16px); padding: 18px; } .self-profile-sections { gap: 24px; } .self-profile-head { grid-template-columns: 96px minmax(0, 1fr); } :global(.self-profile-avatar) { width: 96px; height: 96px; border-radius: 32% 68% 42% 58%; } :global(.self-profile-identity [data-dialog-title]) { font-size: 20px; } .summary-grid { grid-template-columns: 1fr; } }

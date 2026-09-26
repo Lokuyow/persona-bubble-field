@@ -259,7 +259,7 @@
 
 	.suggestion-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 	.suggestion-heading { margin: 0 2px 2px; color: #59635e; font-size: 11px; font-weight: 800; }
-	.suggestion-close {
+	.suggestion-panel :global(.suggestion-close) {
 		flex: 0 0 44px;
 		width: 44px;
 		height: 44px;
@@ -268,7 +268,7 @@
 		align-items: center;
 		justify-content: center;
 	}
-	.suggestion-close :global(svg) { width: 24px; height: 24px; }
+	.suggestion-panel :global(.suggestion-close) :global(svg) { width: 24px; height: 24px; }
 	.suggestion-item {
 		display: grid;
 		grid-template-columns: minmax(0, 1fr) auto;
@@ -296,7 +296,7 @@
 	.suggestion-secondary:disabled { cursor: not-allowed; opacity: 0.58; }
 	.suggestion-primary:focus-visible,
 	.suggestion-secondary:focus-visible { outline: 3px solid var(--color-focus-ring); outline-offset: 1px; }
-	.suggestion-secondary {
+	.suggestion-panel :global(.suggestion-secondary) {
 		align-self: stretch;
 		min-width: 48px;
 		padding: 6px 8px;
@@ -321,4 +321,8 @@
 		font-weight: 700;
 	}
 	.suggestion-error { background: rgba(141, 72, 58, 0.94); }
+	@media (max-width: 700px) {
+		.suggestions-anchor { position: static; }
+		.suggestion-panel { right: auto; left: 16px; }
+	}
 </style>

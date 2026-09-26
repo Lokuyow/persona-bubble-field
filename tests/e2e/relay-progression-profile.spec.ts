@@ -23,8 +23,63 @@ import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { installFieldFrameSampling, readFieldFrames, sampleRenderedField } from './helpers/fieldFrames';
 import { CHANNEL_ID, AUTHORITATIVE_RELAYS, fixtureSecret, testEvents, isDeathTraceEvent, installDelayedRelay, relayState, dragRelayJoystick, publishedMessages, waitForPublishedMessageCount, pauseAtCurrentBrowserTime, startSelectedRun, openReadyRelayWorld, openClearReadyWorld, installPromptApiStub, seedRelayAccount, readRelayGameState, overwriteRelayGameState, seedUnavailablePersona, installDeathTransitionFailure, armDeathTransitionFailure, moveRelaySelfTo } from './helpers/relayHarness';
 
+function rgbChannels(color: string): [number, number, number] {
+	const channels = color.match(/[\d.]+/g)?.map(Number);
+	if (!channels || channels.length < 3) throw new Error(`Unexpected CSS color: ${color}`);
+	return [channels[0]!, channels[1]!, channels[2]!];
+}
+
+function relativeLuminance(color: string): number {
+	const channels = rgbChannels(color).map((channel) => {
+		const normalized = channel / 255;
+		return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+	});
+	return 0.2126 * channels[0]! + 0.7152 * channels[1]! + 0.0722 * channels[2]!;
+}
+
+function contrastRatio(first: string, second: string): number {
+	const luminances = [relativeLuminance(first), relativeLuminance(second)].sort((left, right) => right - left);
+	return (luminances[0]! + 0.05) / (luminances[1]! + 0.05);
+}
+
+async function expectSharedProfileFocusRing(button: Locator): Promise<void> {
+	const focus = await button.evaluate((element) => {
+		const style = getComputedStyle(element);
+		const surface = getComputedStyle(element.closest('.clear-section')!).backgroundColor;
+		const tokenProbe = document.createElement('span');
+		tokenProbe.style.color = 'var(--action-focus-ring)';
+		document.body.append(tokenProbe);
+		const tokenColor = getComputedStyle(tokenProbe).color;
+		tokenProbe.remove();
+		return { matches: element.matches(':focus-visible'), outline: style.outlineStyle, width: style.outlineWidth, color: style.outlineColor, tokenColor, surface };
+	});
+	expect(focus.matches).toBe(true);
+	expect(focus.outline).toBe('solid');
+	expect(focus.width).toBe('3px');
+	expect(focus.color).toBe(focus.tokenColor);
+	expect(contrastRatio(focus.color, focus.surface)).toBeGreaterThanOrEqual(3);
+}
+
 
 test.describe('Relay startup', () => {
+	test('uses the shared focus ring on profile actions against their actual light surface', async ({ page }) => {
+		await page.setViewportSize({ width: 1_200, height: 900 });
+		await openClearReadyWorld(page);
+		const profileTrigger = page.getByRole('button', { name: '自分のプロフィールを開く' });
+		await profileTrigger.click();
+		const dialog = page.getByRole('dialog');
+		await expect(dialog.locator('[data-initial-focus]')).toBeFocused();
+
+		const info = dialog.getByRole('button', { name: '脱出するとどうなるかを見る' });
+		await page.keyboard.press('Tab');
+		await expect(info).toBeFocused();
+		await expectSharedProfileFocusRing(info);
+		const escape = dialog.getByRole('button', { name: '脱出', exact: true });
+		await expect(escape).toBeEnabled();
+		await page.keyboard.press('Tab');
+		await expect(escape).toBeFocused();
+		await expectSharedProfileFocusRing(escape);
+	});
 
 	test('opens the self profile from the ActionDock without adjustment-terminal proximity', async ({ page }) => {
 		await page.setViewportSize({ width: 1200, height: 900 });
