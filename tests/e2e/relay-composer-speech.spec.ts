@@ -430,6 +430,7 @@ test.describe('Relay startup', () => {
 		await page.evaluate(() => (window as unknown as { __relayStartupTest: { rejectMessagePublishes(): void } }).__relayStartupTest.rejectMessagePublishes());
 		await primary.click();
 		await expect(page.getByRole('status')).toContainText('候補を送信できませんでした');
+		await expect(page.getByRole('status')).toHaveCount(1);
 		await expect(page.locator('.suggestion-panel')).toBeVisible();
 		for (const viewport of [{ width: 720, height: 844 }, { width: 390, height: 844 }]) {
 			await page.setViewportSize(viewport);
