@@ -65,12 +65,13 @@ test.describe('Relay startup', () => {
 
 	test('renders ActionDock controls in order on desktop and mobile without an unread slot', async ({ page }) => {
 		await installPromptApiStub(page);
-		for (const width of [1200, 390]) {
+		let persistedChatterState: boolean | null = null;
+		for (const width of [1200, 390, 320]) {
 			await page.setViewportSize({ width, height: 844 });
 			await openReadyRelayWorld(page, 1);
 			const chatterToggle = page.locator('.chatter-toggle');
 			const suggestionsToggle = page.locator('.suggestions-toggle');
-			for (const control of [page.locator('.profile-trigger'), chatterToggle, page.locator('.speech-type-toggle'), suggestionsToggle]) {
+			for (const control of [page.locator('.profile-trigger'), chatterToggle, page.locator('.speaker-button'), page.locator('.speech-type-toggle'), suggestionsToggle]) {
 				const frame = await control.evaluate((element) => {
 					const style = getComputedStyle(element);
 					return { background: style.backgroundColor, border: style.borderStyle, width: style.borderWidth };
@@ -101,7 +102,7 @@ test.describe('Relay startup', () => {
 				expect(Math.abs((iconBox.x + iconBox.width / 2) - (buttonBox.x + buttonBox.width / 2))).toBeLessThan(1);
 				expect(Math.abs((iconBox.y + iconBox.height / 2) - (buttonBox.y + buttonBox.height / 2))).toBeLessThan(1);
 			}
-			const initiallyOpen = width > 700;
+			const initiallyOpen: boolean = persistedChatterState ?? (width > 700);
 			await expect(chatterToggle).toHaveAttribute('aria-label', initiallyOpen ? 'Chatterを閉じる' : 'Chatterを開く');
 			await expect(chatterToggle).toHaveAttribute('aria-pressed', String(initiallyOpen));
 			const toggleBox = await chatterToggle.boundingBox();
@@ -110,10 +111,50 @@ test.describe('Relay startup', () => {
 			await chatterToggle.click();
 			await expect(chatterToggle).toHaveAttribute('aria-label', initiallyOpen ? 'Chatterを開く' : 'Chatterを閉じる');
 			await expect(chatterToggle).toHaveAttribute('aria-pressed', String(!initiallyOpen));
+			persistedChatterState = !initiallyOpen;
 			await expect(page.locator('.trace-unread-indicator')).toHaveCount(0);
+			await expect(page.locator('.sound-control')).toHaveCount(1);
+			await expect(page.getByRole('dialog', { name: 'Sound settings' })).toHaveCount(0);
 			expect(await readActionDockControlOrder(page)).toEqual([
-				'profile-trigger', 'chatter-toggle', 'speech-type-toggle', 'suggestions-anchor'
+				'profile-trigger', 'chatter-toggle', 'sound-control', 'speech-type-toggle', 'suggestions-anchor'
 			]);
+			if (width <= 700) {
+				const editorBox = await page.locator('.composer-editor-slot').boundingBox();
+				const leftBox = await page.locator('.composer-controls-left').boundingBox();
+				const rightBox = await page.locator('.composer-controls-right').boundingBox();
+				expect(editorBox && leftBox && rightBox).toBeTruthy();
+				if (editorBox && leftBox && rightBox) {
+					expect(editorBox.y + editorBox.height).toBeLessThan(leftBox.y);
+					expect(leftBox.x + leftBox.width).toBeLessThanOrEqual(rightBox.x);
+					expect(rightBox.x + rightBox.width).toBeLessThanOrEqual(width);
+					for (const control of [page.locator('.profile-trigger'), chatterToggle, page.locator('.trace-unread-indicator'), page.locator('.sound-control'), page.locator('.speech-type-toggle'), suggestionsToggle]) {
+						if (await control.isVisible()) {
+							const box = await control.boundingBox();
+							if (!box) throw new Error('Expected a visible mobile ActionDock control to have geometry.');
+							expect(box.x).toBeGreaterThanOrEqual(0);
+							expect(box.x + box.width).toBeLessThanOrEqual(width);
+						}
+					}
+				}
+			} else {
+				const leftBox = await page.locator('.composer-controls-left').boundingBox();
+				const editorBox = await page.locator('.composer-editor-slot').boundingBox();
+				const rightBox = await page.locator('.composer-controls-right').boundingBox();
+				expect(leftBox && editorBox && rightBox).toBeTruthy();
+				if (leftBox && editorBox && rightBox) {
+					expect(leftBox.x + leftBox.width).toBeLessThan(editorBox.x + 1);
+					expect(editorBox.x + editorBox.width).toBeLessThanOrEqual(rightBox.x);
+				}
+			}
+			await page.getByRole('button', { name: 'Open sound settings' }).click();
+			const soundPanel = page.getByRole('dialog', { name: 'Sound settings' });
+			await expect(soundPanel).toBeVisible();
+			const soundBox = await soundPanel.boundingBox();
+			const soundButtonBox = await page.getByRole('button', { name: 'Open sound settings' }).boundingBox();
+			expect(soundBox && soundButtonBox).toBeTruthy();
+			if (soundBox && soundButtonBox) expect(soundBox.y + soundBox.height).toBeLessThanOrEqual(soundButtonBox.y + 1);
+			await soundPanel.getByRole('slider', { name: 'Sound volume' }).press('Home');
+			await page.keyboard.press('Escape');
 		}
 	});
 
@@ -356,6 +397,13 @@ test.describe('Relay startup', () => {
 		const submitAndRead = async (content: string, submit: () => Promise<void>) => {
 			const before = (await publishedMessages(page)).length;
 			await editor.fill(content);
+			const sendBox = await send.boundingBox();
+			const viewport = page.viewportSize();
+			if (!sendBox || !viewport) throw new Error('Expected the Composer send control to have viewport geometry.');
+			expect(sendBox.x).toBeGreaterThanOrEqual(0);
+			expect(sendBox.y).toBeGreaterThanOrEqual(0);
+			expect(sendBox.x + sendBox.width).toBeLessThanOrEqual(viewport.width);
+			expect(sendBox.y + sendBox.height).toBeLessThanOrEqual(viewport.height);
 			await submit();
 			await waitForPublishedMessageCount(page, before + 1);
 			await expect(editor).toHaveValue('');

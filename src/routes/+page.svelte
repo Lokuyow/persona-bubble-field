@@ -4304,22 +4304,22 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 						{mendingProjection}
 						tagGameProjection={tagGameHudProjection}
 					/>
-					<div class="top-status-controls">
+					{#if !actionDockAvailable}<div class="top-status-controls">
 						<SoundControl
 							volume={soundPreference.volume}
 							onOpen={() => soundController?.unlock()}
 							onVolume={updateSoundVolume}
 						/>
-					</div>
+					</div>{/if}
 				</div>
 			{:else}
-				<div class="legacy-sound-control">
+				{#if !actionDockAvailable}<div class="legacy-sound-control">
 					<SoundControl
 						volume={soundPreference.volume}
 						onOpen={() => soundController?.unlock()}
 						onVolume={updateSoundVolume}
 					/>
-				</div>
+				</div>{/if}
 			{/if}
 			<Chatter
 				bind:this={chatterComponent}
@@ -4548,6 +4548,9 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			bind:this={composerComponent}
 			{selectedSpeechType}
 			submissionInProgress={composerSubmissionInProgress}
+			volume={soundPreference.volume}
+			onSoundOpen={() => soundController?.unlock()}
+			onVolume={updateSoundVolume}
 			hasUnreadReplies={traceReadSnapshot.hasUnreadReplies}
 			chatterOpen={chatterOpen}
 			onToggleChatter={toggleChatter}

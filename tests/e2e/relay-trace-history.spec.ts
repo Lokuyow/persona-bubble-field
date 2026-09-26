@@ -176,7 +176,7 @@ test.describe('Relay startup', () => {
 		await expect(page.getByRole('tooltip')).toHaveText('未読の返信の痕跡');
 		await expect(page.getByRole('button', { name: 'AI発言候補を生成' })).toBeVisible();
 		expect(await readActionDockControlOrder(page)).toEqual([
-			'profile-trigger', 'chatter-toggle', 'trace-unread-indicator', 'speech-type-toggle', 'suggestions-anchor'
+			'profile-trigger', 'chatter-toggle', 'trace-unread-indicator', 'sound-control', 'speech-type-toggle', 'suggestions-anchor'
 		]);
 		await page.locator('.trace-unread-indicator').click();
 		await expect(page.locator('.trace-unread-explanation')).toContainText('どこかにあなたへの返信の痕跡があります');
@@ -256,7 +256,7 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('.trace-unread-indicator')).toBeVisible();
 		await expect(page.getByRole('button', { name: 'AI発言候補を生成' })).toBeVisible();
 		expect(await readActionDockControlOrder(page)).toEqual([
-			'profile-trigger', 'chatter-toggle', 'trace-unread-indicator', 'speech-type-toggle', 'suggestions-anchor'
+			'profile-trigger', 'chatter-toggle', 'trace-unread-indicator', 'sound-control', 'speech-type-toggle', 'suggestions-anchor'
 		]);
 	});
 

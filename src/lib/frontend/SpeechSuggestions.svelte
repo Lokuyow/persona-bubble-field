@@ -245,7 +245,8 @@
 	.suggestion-panel {
 		position: absolute;
 		bottom: calc(100% + 8px);
-		left: 0;
+		left: auto;
+		right: 0;
 		z-index: 2;
 		display: grid;
 		width: min(420px, calc(100vw - 32px));
@@ -323,6 +324,6 @@
 	.suggestion-error { background: rgba(141, 72, 58, 0.94); }
 	@media (max-width: 700px) {
 		.suggestions-anchor { position: static; }
-		.suggestion-panel { right: auto; left: 16px; }
+		.suggestion-panel { right: 16px; left: auto; }
 	}
 </style>

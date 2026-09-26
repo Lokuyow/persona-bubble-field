@@ -111,6 +111,10 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('.participant')).toHaveCount(1);
 		await expect(page.locator('.action-dock')).toHaveCount(0);
 		await expect(page.locator('ehagaki-composer')).toHaveCount(0);
+		const soundButton = page.getByRole('button', { name: 'Open sound settings' });
+		await expect(soundButton).toBeVisible();
+		await soundButton.click();
+		await expect(page.getByRole('dialog', { name: 'Sound settings' })).toBeVisible();
 		expect(hostOwned.requests()).toBe(0);
 		expect(consoleIssues).toEqual([]);
 	});
@@ -268,14 +272,27 @@ test.describe('Relay startup', () => {
 			const dock = document.querySelector<HTMLElement>('.action-dock')!;
 			const field = document.querySelector<HTMLElement>('.field-viewport')!;
 			const self = document.querySelector<HTMLElement>('.participant[data-self="true"]')!;
+			const editor = document.querySelector<HTMLElement>('.composer-editor-slot')!;
+			const controlsLeft = document.querySelector<HTMLElement>('.composer-controls-left')!;
+			const controlsRight = document.querySelector<HTMLElement>('.composer-controls-right')!;
 			return {
 				dock: dock.getBoundingClientRect().toJSON(),
 				field: field.getBoundingClientRect().toJSON(),
 				participant: self.getBoundingClientRect().toJSON(),
+				editor: editor.getBoundingClientRect().toJSON(),
+				controlsLeft: controlsLeft.getBoundingClientRect().toJSON(),
+				controlsRight: controlsRight.getBoundingClientRect().toJSON(),
 				cameraTransform: getComputedStyle(document.querySelector<HTMLElement>('.field-scene')!).transform
 			};
 		});
 		expect(keyboardOpen.dock.bottom).toBeCloseTo(544, 1);
+		expect(keyboardOpen.editor.bottom).toBeLessThan(keyboardOpen.controlsLeft.top);
+		expect(keyboardOpen.controlsLeft.right).toBeLessThanOrEqual(keyboardOpen.controlsRight.left);
+		expect(keyboardOpen.controlsRight.right).toBeLessThanOrEqual(390);
+		expect(keyboardOpen.controlsRight.bottom).toBeLessThanOrEqual(keyboardOpen.dock.bottom);
+		const keyboardSendBox = await page.locator('ehagaki-composer').getByRole('button', { name: 'Send' }).boundingBox();
+		expect(keyboardSendBox).not.toBeNull();
+		if (keyboardSendBox) expect(keyboardSendBox.y + keyboardSendBox.height).toBeLessThanOrEqual(keyboardOpen.dock.bottom);
 		expect(keyboardOpen.field.height).toBeCloseTo(before.field.height, 1);
 		expect(keyboardOpen.participant).toEqual(before.participant);
 		expect(keyboardOpen.cameraTransform).toBe(before.cameraTransform);

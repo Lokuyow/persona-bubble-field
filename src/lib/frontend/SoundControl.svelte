@@ -26,14 +26,14 @@
 				{/if}
 			</span>
 		</Popover.Trigger>
-		<Popover.Content class="sound-panel" side="bottom" align="end" sideOffset={6} role="dialog" aria-label="Sound settings" tabindex={-1} onpointerdown={(event) => event.stopPropagation()}>
+		<Popover.Content class="sound-panel" side="top" align="center" sideOffset={8} role="dialog" aria-label="Sound settings" tabindex={-1} onpointerdown={(event) => event.stopPropagation()}>
 			<label><input type="range" min="0" max="100" value={Math.round(volume * 100)} aria-label="Sound volume" oninput={(event) => onVolume(Number(event.currentTarget.value) / 100)} /></label>
 		</Popover.Content>
 	</Popover.Root>
 </div>
 
 <style>
-	.sound-control { --action-icon-background: #202a40; --action-icon-background-hover: #303e5a; --action-icon-background-active: #3b4c69; --action-icon-border: #9aa9c1; --action-icon-foreground: #fff; position: relative; z-index: 10; justify-self: end; margin-right: max(2px, env(safe-area-inset-right)); }
+	.sound-control { --action-icon-background: #202a40; --action-icon-background-hover: #303e5a; --action-icon-background-active: #3b4c69; --action-icon-border: #9aa9c1; --action-icon-foreground: #fff; position: relative; z-index: 10; justify-self: end; }
 	:global(.speaker-button) { width: 44px; height: 44px; padding: 0; border: 1px solid var(--action-icon-border); border-radius: 50%; background: var(--action-icon-background); color: var(--action-icon-foreground); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
 	:global(.speaker-button:hover) { background: var(--action-icon-background-hover); }
 	:global(.speaker-button:active) { background: var(--action-icon-background-active); }
