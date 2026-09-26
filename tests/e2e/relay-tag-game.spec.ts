@@ -633,7 +633,7 @@ test('organizer-confirmed leave settles the two-player game and releases the qui
 		await leaverPage.getByRole('button', { name: '能力強化端末' }).click();
 		const dialog = leaverPage.getByRole('dialog', { name: '能力強化' });
 		await expect(dialog).toBeVisible();
-		await dialog.getByRole('button', { name: 'Lv2へ強化' }).first().click();
+		await dialog.getByRole('button', { name: '推論効率をLv2へ強化（必要1pt）' }).click();
 		await expect(dialog).toContainText('推論効率 Lv2');
 	} finally {
 		await Promise.all([hostPage.close(), participantPage.close()]);
