@@ -178,12 +178,18 @@ test('signals repeated effective point gains without flashing for the ordinary l
 	await preparePlayer(page, secret, nowMs);
 	await expect(page.locator('main')).toHaveAttribute('data-realtime-status', 'active');
 	await moveRelaySelfTo(page, { x: 7, y: 5 });
+	// Movement advances the Playwright clock to respect the World position
+	// publish limit. Start the projection at the resulting, frozen time so the
+	// initial HUD baseline cannot accrue points while the test is setting up.
+	const projectionStartedAtMs = await page.evaluate(() => Math.ceil((Date.now() + 5_000) / 1_000) * 1_000);
+	await page.clock.pauseAt(projectionStartedAtMs);
 	const seed = Array.from({ length: 10_000 }, (_, index) => `hud-points-${index}`).find((candidate) => createTagGameSchedule(candidate)[0].effect === 'benefit')!;
-	await injectSelfOwnedProjection(page, secret, 'benefit', seed, nowMs);
+	await injectSelfOwnedProjection(page, secret, 'benefit', seed, projectionStartedAtMs);
 	const hud = page.locator('[data-unified-status-hud]');
 	const points = hud.locator('[data-points-value]');
 	const lifespan = hud.locator('[data-lifespan-value]');
 	await expect(hud).toHaveAttribute('data-tag-game-projection', 'true');
+	await expect(hud).toHaveAttribute('data-current-points', '0');
 	await expect(points).not.toHaveAttribute('data-value-change', /.+/);
 	await page.clock.runFor(1_000);
 	await expect(points).toHaveAttribute('data-value-change', 'increase');
