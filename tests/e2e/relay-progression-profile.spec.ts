@@ -388,16 +388,33 @@ for (const stateKind of ['missing', 'corrupt'] as const) {
 					const rect = element.getBoundingClientRect();
 					return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height };
 				};
+				const meter = row.querySelector('[role="meter"]')!;
+				const fill = meter.querySelector('.meter-fill')!;
 				return {
 					row: box(row),
 					label: box(row.querySelector('.meter-label')!),
-					bar: box(row.querySelector('[role="meter"]')!),
-					value: box(row.querySelector('strong')!)
+					bar: box(meter),
+					value: box(row.querySelector('strong')!),
+					barRadius: getComputedStyle(meter).borderTopLeftRadius,
+					fillRadius: getComputedStyle(fill).borderTopLeftRadius
 				};
 			}));
 			const expectedBarHeight = viewport.width >= 960 ? 14 : 12;
 			expect(meterRows).toHaveLength(2);
-			for (const row of meterRows) expect(row.bar.height).toBe(expectedBarHeight);
+			for (const row of meterRows) {
+				expect(row.bar.height).toBe(expectedBarHeight);
+				expect(row.barRadius).toBe('0px');
+				expect(row.fillRadius).toBe('0px');
+			}
+			const textMetrics = await hud.evaluate((element) => {
+				const lifespan = getComputedStyle(element.querySelector('[data-lifespan-value]')!);
+				const points = getComputedStyle(element.querySelector('[data-points-value]')!);
+				const unit = getComputedStyle(element.querySelector('[data-points-value] span')!);
+				return { lifespanSize: lifespan.fontSize, lifespanWeight: lifespan.fontWeight, pointsSize: points.fontSize, pointsWeight: points.fontWeight, unitSize: unit.fontSize };
+			});
+			expect(textMetrics.pointsSize).toBe(textMetrics.lifespanSize);
+			expect(textMetrics.pointsWeight).toBe(textMetrics.lifespanWeight);
+			expect(Number.parseFloat(textMetrics.unitSize)).toBeGreaterThan(Number.parseFloat(textMetrics.pointsSize) * .8);
 			if (viewport.width >= 960) {
 				for (const row of meterRows) {
 					expect(row.label.right).toBeLessThanOrEqual(row.bar.left);
