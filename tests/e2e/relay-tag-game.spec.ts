@@ -1355,6 +1355,7 @@ test('does not show unselected games and lets a spectator choose and clear one t
 	await page.clock.setSystemTime(startedAt * 1_000 + 250);
 	await page.clock.runFor(1_000);
 	const cooldownNowMs = await page.evaluate(() => Date.now());
+	await page.clock.pauseAt(cooldownNowMs);
 	const benefitSeed = Array.from({ length: 1_000 }, (_, index) => `watch-benefit-${index}`).find((candidate) => createTagGameSchedule(candidate)[0].effect === 'benefit')!;
 	function hostedGame(hostSecret: Uint8Array, otherSecret: Uint8Array, marker: string, phase: 'countdown' | 'running' = 'running'): NostrEvent {
 		const host = getPublicKey(hostSecret);
@@ -1389,11 +1390,31 @@ test('does not show unselected games and lets a spectator choose and clear one t
 	const desktopLine = desktopHud.locator('[data-tag-game-cooldown-line]');
 	await expect(desktopLine).toBeVisible();
 	const desktopAnimationDelaySeconds = Number.parseFloat(await desktopLine.evaluate((element) => getComputedStyle(element.querySelector('span')!).animationDelay));
-	expect(desktopAnimationDelaySeconds).toBeGreaterThanOrEqual(0.35);
-	expect(desktopAnimationDelaySeconds).toBeLessThanOrEqual(0.5);
+	expect(desktopAnimationDelaySeconds * 1_000).toBe(watchedGame.transferAt! - cooldownNowMs);
+	expect(desktopAnimationDelaySeconds).toBeGreaterThan(0);
+	const animationFrames = await desktopLine.evaluate((element) => {
+		const fill = element.querySelector('span')!;
+		const animation = fill.getAnimations()[0];
+		if (!animation?.effect) throw new Error('Expected the cooldown CSS animation to be active.');
+		const timing = animation.effect.getTiming();
+		animation.pause();
+		const progressAt = (currentTime: number) => {
+			animation.currentTime = currentTime;
+			return new DOMMatrixReadOnly(getComputedStyle(fill).transform).a;
+		};
+		const delay = Number(timing.delay);
+		const duration = Number(timing.duration);
+		return { delay, duration, start: progressAt(0), middle: progressAt(delay + duration / 2), end: progressAt(delay + duration) };
+	});
+	expect(animationFrames.delay).toBe(watchedGame.transferAt! - cooldownNowMs);
+	expect(animationFrames.duration).toBe(TAG_GAME_TRANSFER_COOLDOWN_MS);
+	expect(animationFrames.start).toBeGreaterThan(0.99);
+	expect(animationFrames.middle).toBeGreaterThan(0);
+	expect(animationFrames.middle).toBeLessThan(1);
+	expect(animationFrames.end).toBeLessThan(0.01);
 	await page.clock.runFor(2_200);
 	await expect(desktopLine).toBeVisible();
-	await page.clock.runFor(400);
+	await page.clock.runFor(1_000);
 	await expect(desktopLine).toHaveCount(0);
 	expect(await desktopHud.evaluate((element) => element.getBoundingClientRect().height)).toBe(desktopHeight);
 
@@ -1404,7 +1425,7 @@ test('does not show unselected games and lets a spectator choose and clear one t
 	await injectRealtime(page, mobileTransfer);
 	await expect(desktopHud.locator('[data-tag-game-hud-footer]')).toHaveCount(0);
 	await expect(desktopHud.locator('[data-tag-game-cooldown-line]')).toBeVisible();
-	await page.clock.runFor(2_700);
+	await page.clock.runFor(3_000);
 	await expect(desktopHud.locator('[data-tag-game-cooldown-line]')).toHaveCount(0);
 	expect(await desktopHud.evaluate((element) => element.getBoundingClientRect().height)).toBe(mobileHeight);
 
@@ -1428,4 +1449,31 @@ test('does not show unselected games and lets a spectator choose and clear one t
 	await page.getByRole('button', { name: '観戦を解除' }).click();
 	await expect(page.locator('[data-tag-game-hud]')).toHaveCount(0);
 	await expect(page.locator('.participant[data-tag-game-role]')).toHaveCount(0);
+});
+
+test('keeps the tag-game close button keyboard-focusable with a visible focus ring', async ({ page }) => {
+	const nowMs = Date.now();
+	const secret = fixtureSecret(31);
+	await preparePlayer(page, secret, nowMs);
+	await moveRelaySelfTo(page, { x: 7, y: 5 });
+	await openTagGameTerminal(page);
+	const close = page.getByRole('dialog', { name: '鬼ごっこ' }).getByRole('button', { name: '閉じる' });
+	await close.focus();
+	await page.keyboard.press('Tab');
+	await expect(close).not.toBeFocused();
+	await page.keyboard.press('Shift+Tab');
+	await expect(close).toBeFocused();
+	const focus = await close.evaluate((button) => {
+		const style = getComputedStyle(button);
+		const tokenProbe = document.createElement('span');
+		tokenProbe.style.cssText = 'position:fixed;visibility:hidden;outline:3px solid var(--action-focus-ring)';
+		button.insertAdjacentElement('afterend', tokenProbe);
+		const focusToken = getComputedStyle(tokenProbe).outlineColor;
+		tokenProbe.remove();
+		return { visible: button.matches(':focus-visible'), outlineStyle: style.outlineStyle, outlineWidth: style.outlineWidth, outlineColor: style.outlineColor, token: focusToken };
+	});
+	expect(focus.visible).toBe(true);
+	expect(focus.outlineStyle).toBe('solid');
+	expect(focus.outlineWidth).toBe('3px');
+	expect(focus.outlineColor).toBe(focus.token);
 });

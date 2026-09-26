@@ -34,28 +34,4 @@ export async function expectIconCloseButton(button: Locator, accessibleName: str
 	expect(appearance.borderWidth).toBe('1px');
 	expect(appearance.text).toBe('');
 	expect(appearance.icon).toEqual({ width: 24, height: 24, ariaHidden: 'true' });
-
-	await button.focus();
-	await button.page().keyboard.press('Tab');
-	await button.page().keyboard.press('Shift+Tab');
-	await expect(button).toBeFocused();
-	const focus = await button.evaluate((element) => {
-		const style = getComputedStyle(element);
-		const tokenProbe = document.createElement('span');
-		tokenProbe.style.cssText = 'position:fixed;visibility:hidden;outline:3px solid var(--action-focus-ring)';
-		element.insertAdjacentElement('afterend', tokenProbe);
-		const focusToken = getComputedStyle(tokenProbe).outlineColor;
-		tokenProbe.remove();
-		return {
-			visible: element.matches(':focus-visible'),
-			outlineStyle: style.outlineStyle,
-			outlineWidth: style.outlineWidth,
-			outlineColor: style.outlineColor,
-			token: focusToken
-		};
-	});
-	expect(focus.visible).toBe(true);
-	expect(focus.outlineStyle).toBe('solid');
-	expect(focus.outlineWidth).toBe('3px');
-	expect(focus.outlineColor).toBe(focus.token);
 }
