@@ -21,7 +21,7 @@ import { deriveBip85NostrEntropy } from '../../src/lib/bip85';
 import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL } from '../../src/lib/fieldFacilities';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { installFieldFrameSampling, readFieldFrames, sampleRenderedField } from './helpers/fieldFrames';
-import { CHANNEL_ID, AUTHORITATIVE_RELAYS, fixtureSecret, testEvents, isDeathTraceEvent, installDelayedRelay, relayState, dragRelayJoystick, publishedMessages, waitForPublishedMessageCount, pauseAtCurrentBrowserTime, startSelectedRun, openReadyRelayWorld, openClearReadyWorld, installPromptApiStub, seedRelayAccount, readRelayGameState, overwriteRelayGameState, overwriteRelayMendingBuild, seedUnavailablePersona, installDeathTransitionFailure, armDeathTransitionFailure, moveRelaySelfTo } from './helpers/relayHarness';
+import { CHANNEL_ID, AUTHORITATIVE_RELAYS, fixtureSecret, testEvents, isDeathTraceEvent, installDelayedRelay, relayState, dragRelayJoystick, publishedMessages, waitForPublishedMessageCount, pauseAtCurrentBrowserTime, startSelectedRun, openReadyRelayWorld, openClearReadyWorld, installPromptApiStub, seedRelayAccount, readRelayGameState, overwriteRelayGameState, seedUnavailablePersona, installDeathTransitionFailure, armDeathTransitionFailure, moveRelaySelfTo } from './helpers/relayHarness';
 
 
 test.describe('Relay startup', () => {
@@ -212,8 +212,7 @@ test.describe('Relay startup', () => {
 		await page.clock.install({ time: startTime });
 		await installHostOwnedStub(page);
 		await installDelayedRelay(page, { primaryEvents: testEvents(startTime) });
-		await seedRelayAccount(page, secret, pubkey, Date.now() + 7 * 24 * 60 * 60 * 1000, 0, { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 }, 1);
-		await overwriteRelayMendingBuild(page, { inferenceAcceleration: 0, contextCompression: 1, hallucinationResistance: 0 }, { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 });
+		await seedRelayAccount(page, secret, pubkey, Date.now() + 7 * 24 * 60 * 60 * 1000, 0, { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 }, 1, { inferenceAcceleration: 0, contextCompression: 1, hallucinationResistance: 0 });
 		await page.goto('/');
 		await page.evaluate(() => {
 			const relay = (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest;
@@ -241,6 +240,10 @@ test.describe('Relay startup', () => {
 		await page.getByRole('button', { name: '作業端末' }).click();
 		const dialog = page.getByRole('dialog');
 		await expect(dialog.getByRole('heading', { name: '延命中' })).toBeVisible();
+		await expect(dialog.locator('.mending-dialog-title [data-mending-icon="heart-plus"]')).toHaveCount(1);
+		await expect(dialog).toContainText('未回収ポイント');
+		await expect(dialog).toContainText('寿命延長');
+		await expect(dialog).toContainText('作業中に反映');
 		await expect(dialog).toContainText('通常作業は上限');
 		await expect(dialog).toContainText('ポイント・寿命延長が継続中');
 		await expect(page.locator('[data-unified-status-hud] [data-mending-status]')).toHaveAttribute('aria-label', '延命中');

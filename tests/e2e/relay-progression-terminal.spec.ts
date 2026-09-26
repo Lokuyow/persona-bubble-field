@@ -73,6 +73,7 @@ test.describe('Relay startup', () => {
 		expect(started).toMatchObject({ version: 4, points: 0, pointProgressTicks: 0, mendingJob: expect.objectContaining({ processedDurationMs: 0, unclaimedPoints: 0 }) });
 		const activeDialog = page.getByRole('dialog');
 		await expect(activeDialog.getByRole('heading', { name: '作業中' })).toBeVisible();
+		await expect(activeDialog.locator('.mending-dialog-title [data-mending-icon="tool"]')).toHaveCount(1);
 		await expect(activeDialog.locator('.mending-startup-feedback')).toContainText('作業を開始しました');
 		const startupScrollExtent = await activeDialog.evaluate((element) => ({
 			scrollWidth: element.scrollWidth,
@@ -91,20 +92,74 @@ test.describe('Relay startup', () => {
 		await expect(activeDialog).toContainText('上限まで あと5分');
 		await expect(activeDialog).not.toContainText('今受け取れる');
 		await expect(activeDialog).toContainText('+0 pt');
+		await expect(activeDialog).toContainText('未回収ポイント');
+		await expect(activeDialog).toContainText('寿命延長');
+		await expect(activeDialog).toContainText('作業中に反映');
+		await expect(activeDialog.getByRole('region', { name: '作業の成果' })).toBeVisible();
 		await expect(activeDialog.locator('[data-mending-icon="wallet"] svg')).toHaveCount(1);
 		await expect(activeDialog.locator('.result-card[data-mending-icon="coins"] > svg')).toHaveCount(1);
 		await expect(activeDialog.locator('.result-card[data-mending-icon="heart"] > svg')).toHaveCount(1);
 		await expect(activeDialog.locator('[data-mending-icon="coins"] .next-point')).toHaveCount(1);
-		await expect(activeDialog.locator('.reward-group .action-group')).toHaveCount(1);
-		await expect(activeDialog.getByRole('button', { name: '成果を受け取る' })).toBeVisible();
+		await expect(activeDialog.locator('.action-group')).toHaveCount(1);
+		const collectButton = activeDialog.getByRole('button', { name: '成果を受け取る' });
+		await expect(collectButton).toBeVisible();
+		await expect(collectButton.locator('svg')).toHaveCount(1);
+		await expect(collectButton.locator('svg path')).toHaveAttribute('d', /^M4 20h16m-8-6V4/);
 		await expect(activeDialog.locator('.mending-success-feedback')).toHaveCount(0);
 		await expect(activeDialog.getByRole('button', { name: '成果を受け取る' })).toBeDisabled();
 		const beforeZeroPointCollection = await publishedWorldStateCount();
 		await expect.poll(publishedWorldStateCount).toBe(beforeZeroPointCollection);
+		const originalViewport = page.viewportSize() ?? { width: 1280, height: 720 };
+		for (const [width, height, expectedColumns] of [[1280, 800, 2], [390, 640, 1]] as const) {
+			await page.setViewportSize({ width, height });
+			const layout = await activeDialog.evaluate((dialog) => {
+				const cards = [...dialog.querySelectorAll<HTMLElement>('.result-card')];
+				const cardRects = cards.map((card) => card.getBoundingClientRect());
+				const resultList = dialog.querySelector('.result-list')!.getBoundingClientRect();
+				const status = dialog.querySelector('.status-group')!.getBoundingClientRect();
+				const button = dialog.querySelector('.collect-button')!.getBoundingClientRect();
+				const details = dialog.querySelector('.details-section')!.getBoundingClientRect();
+				const close = dialog.querySelector('.terminal-secondary-action')!.getBoundingClientRect();
+				return {
+					columns: new Set(cardRects.map((rect) => Math.round(rect.left))).size,
+					cardsOverlap: cardRects[0].right > cardRects[1].left && cardRects[0].left < cardRects[1].right && cardRects[0].bottom > cardRects[1].top && cardRects[0].top < cardRects[1].bottom,
+					cardsSameHeight: Math.abs(cardRects[0].height - cardRects[1].height) < 1,
+					horizontalOverflow: dialog.scrollWidth > dialog.clientWidth || document.documentElement.scrollWidth > document.documentElement.clientWidth,
+					dialogOrder: resultList.bottom <= status.top && status.bottom <= button.top && button.bottom <= details.top && details.bottom <= close.top,
+					buttonFillsRow: Math.abs(button.width - resultList.width) < 1,
+					buttonHeight: button.height,
+					buttonWithinViewport: button.left >= 0 && button.right <= innerWidth
+				};
+			});
+			expect(layout.columns).toBe(expectedColumns);
+			expect(layout.cardsOverlap).toBe(false);
+			expect(layout.cardsSameHeight).toBe(true);
+			expect(layout.horizontalOverflow).toBe(false);
+			expect(layout.dialogOrder).toBe(true);
+			expect(layout.buttonFillsRow).toBe(true);
+			expect(layout.buttonHeight).toBeGreaterThanOrEqual(48);
+			expect(layout.buttonHeight).toBeLessThanOrEqual(52);
+			expect(layout.buttonWithinViewport).toBe(true);
+		}
+		await page.setViewportSize(originalViewport);
 		await expect(activeDialog.getByRole('button', { name: '詳細を見る' })).toHaveAttribute('aria-expanded', 'false');
 		await activeDialog.getByRole('button', { name: '詳細を見る' }).click();
 		await expect(activeDialog).toContainText('現在のポイント速度');
+		await expect(activeDialog).toContainText('最大蓄積');
+		await expect(activeDialog).toContainText('1時間の作業で寿命');
+		await expect(activeDialog).toContainText('推論加速');
+		await expect(activeDialog).toContainText('最大寿命');
 		await expect(activeDialog.getByRole('button', { name: '詳細を閉じる' })).toHaveAttribute('aria-expanded', 'true');
+		await page.setViewportSize({ width: 390, height: 520 });
+		const detailLayout = await activeDialog.evaluate((dialog) => ({
+			horizontalOverflow: dialog.scrollWidth > dialog.clientWidth || document.documentElement.scrollWidth > document.documentElement.clientWidth,
+			verticalOverflow: dialog.scrollHeight > dialog.clientHeight
+		}));
+		expect(detailLayout.horizontalOverflow).toBe(false);
+		expect(detailLayout.verticalOverflow).toBe(true);
+		await activeDialog.getByRole('button', { name: '閉じる', exact: true }).scrollIntoViewIfNeeded();
+		await expect(activeDialog.getByRole('button', { name: '閉じる', exact: true })).toBeVisible();
+		await page.setViewportSize(originalViewport);
 		await expect(page.locator('[data-unified-status-hud] [data-mending-status]')).toHaveAttribute('aria-label', '作業中');
 		await expect(page.locator('[data-unified-status-hud] [data-mending-status]')).toHaveAttribute('data-mending-icon', 'tool');
 		await expect(page.locator('[data-unified-status-hud] [data-mending-rate]')).toHaveText('1.00 pt/分+0.1h/h');
@@ -120,6 +175,7 @@ test.describe('Relay startup', () => {
 		expect(activeRowBoxes.lifespanLeft).toBeGreaterThan(activeRowBoxes.pointRight);
 		expect(Math.round(activeRowBoxes.lifespanRight)).toBe(Math.round(activeRowBoxes.rowRight));
 		await page.getByRole('button', { name: '閉じる', exact: true }).click();
+		await expect(terminal).toBeFocused();
 
 		const startedAt = (started.mendingJob as { startedAtMs: number }).startedAtMs;
 		const partialAt = startedAt + 1 * 60 * 1000 + 30 * 1000;
@@ -166,6 +222,7 @@ test.describe('Relay startup', () => {
 		await terminal.click();
 		await expect(page.getByRole('dialog')).toContainText('上限に達しました');
 		await expect(page.getByRole('dialog').getByRole('heading', { name: '作業停止中' })).toBeVisible();
+		await expect(page.getByRole('dialog').locator('.mending-dialog-title [data-mending-icon="player-pause"]')).toHaveCount(1);
 		await expect(page.locator('[data-unified-status-hud] [data-mending-status]')).toHaveAttribute('aria-label', '作業停止中');
 		await expect(page.locator('[data-unified-status-hud] [data-mending-status]')).toHaveAttribute('data-mending-icon', 'player-pause');
 		await expect(page.locator('[data-unified-status-hud] [data-mending-rate]')).toHaveText('0.00 pt/分+0.0h/h');
