@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expectIconCloseButton } from './helpers/iconCloseButton';
 import { HDKey } from '@scure/bip32';
 import { entropyToMnemonic, mnemonicToSeedSync } from '@scure/bip39';
 import { wordlist as englishWordlist } from '@scure/bip39/wordlists/english.js';
@@ -438,6 +439,7 @@ test.describe('Relay startup', () => {
 			await expect(panel).toBeVisible();
 			const publishedBefore = (await publishedMessages(page)).length;
 			const close = page.getByRole('button', { name: '発言候補を閉じる' });
+			await expectIconCloseButton(close, '発言候補を閉じる');
 			const panelBox = await panel.boundingBox();
 			expect(panelBox).not.toBeNull();
 			expect(panelBox!.x).toBeGreaterThanOrEqual(0);

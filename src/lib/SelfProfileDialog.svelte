@@ -4,6 +4,7 @@
 	import HelpCircle from '~icons/tabler/help-circle';
 	import Heart from '~icons/tabler/heart';
 	import Wallet from '~icons/tabler/wallet';
+	import X from '~icons/tabler/x';
 	import type { MendingProjection } from '$lib/mending';
 	import { formatRemainingLifespan } from '$lib/lifespanHud';
 	import { getAbilityUpgrade, type PersonaAbilityKey } from '$lib/personaGameState';
@@ -48,6 +49,9 @@
 		<Dialog.Portal>
 			<Dialog.Overlay class="self-profile-overlay" />
 			<Dialog.Content class="self-profile-content" preventScroll={false} {onCloseAutoFocus} onOpenAutoFocus={(event) => { event.preventDefault(); initialFocusTarget?.focus(); }}>
+				<header class="self-profile-dialog-header">
+					<Dialog.Close class="action-button action-button-tertiary action-button-close" aria-label="閉じる"><X aria-hidden="true" /></Dialog.Close>
+				</header>
 				<ScrollArea.Root class="self-profile-scroll" type="auto">
 					<ScrollArea.Viewport class="self-profile-viewport">
 						<div class="self-profile-sections">
@@ -107,7 +111,6 @@
 					</ScrollArea.Viewport>
 					<ScrollArea.Scrollbar class="self-profile-scrollbar" orientation="vertical"><ScrollArea.Thumb class="self-profile-thumb" /></ScrollArea.Scrollbar>
 				</ScrollArea.Root>
-				<footer class="self-profile-footer"><Dialog.Close class="action-button action-button-tertiary self-profile-close">閉じる</Dialog.Close></footer>
 			</Dialog.Content>
 		</Dialog.Portal>
 	{/if}
@@ -115,7 +118,8 @@
 
 <style>
 	:global(.self-profile-overlay) { position: fixed; inset: 0; z-index: 100; background: rgba(35, 44, 41, .48); backdrop-filter: blur(3px); }
-	:global(.self-profile-content) { position: fixed; top: 50%; left: 50%; z-index: 101; display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: 22px; box-sizing: border-box; width: min(560px, calc(100vw - 32px)); max-height: min(760px, calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 24px)); padding: 24px; overflow: hidden; border: 1px solid rgba(57, 67, 64, .26); border-radius: 24px; background: #f1f5f0; box-shadow: 0 22px 60px rgba(32, 42, 38, .28); color: #374345; font-family: 'Trebuchet MS', 'Avenir Next', system-ui, sans-serif; transform: translate(-50%, -50%); }
+	:global(.self-profile-content) { position: fixed; top: 50%; left: 50%; z-index: 101; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 12px; box-sizing: border-box; width: min(560px, calc(100vw - 32px)); max-height: min(760px, calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 24px)); padding: 24px; overflow: hidden; border: 1px solid rgba(57, 67, 64, .26); border-radius: 24px; background: #f1f5f0; box-shadow: 0 22px 60px rgba(32, 42, 38, .28); color: #374345; font-family: 'Trebuchet MS', 'Avenir Next', system-ui, sans-serif; transform: translate(-50%, -50%); }
+	.self-profile-dialog-header { display: flex; justify-content: flex-end; }
 	.self-profile-head { display: grid; grid-template-columns: 128px minmax(0, 1fr); gap: 18px; align-items: center; }
 	:global(.self-profile-avatar) { position: relative !important; inset: auto !important; display: grid; width: 128px; height: 128px; place-items: center; border: 2px solid rgba(255, 255, 255, .9); border-radius: 42% 58% 48% 52%; box-shadow: 0 5px 10px rgba(58, 70, 61, .14); transform: none !important; }
 	:global(.self-profile-avatar img) { width: 100%; height: 100%; object-fit: contain; }
@@ -169,9 +173,7 @@
 	.clear-progress span { display: block; min-width: 2px; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #d98d76, #e6ad92); }
 	.clear-reason { color: #8c584b !important; font-weight: 800; }
 	:global(.clear-button) { min-height: 46px; border-radius: 9px; font-weight: 900; }
-	.self-profile-footer { display: flex; justify-content: flex-end; }
-	:global(.self-profile-close) { min-height: 44px; padding: 0 18px; border-radius: 999px; font-size: 13px; font-weight: 900; }
 	:global(.self-profile-scrollbar) { display: flex; width: 10px; padding: 2px; border-radius: 999px; background: rgba(86, 105, 98, .12); }
 	:global(.self-profile-thumb) { flex: 1; border-radius: inherit; background: #8fa8a0; }
-	@media (max-width: 600px) { :global(.self-profile-content) { gap: 18px; width: min(560px, calc(100vw - 20px)); max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 16px); padding: 18px; } .self-profile-sections { gap: 24px; } .self-profile-head { grid-template-columns: 96px minmax(0, 1fr); } :global(.self-profile-avatar) { width: 96px; height: 96px; border-radius: 32% 68% 42% 58%; } :global(.self-profile-identity [data-dialog-title]) { font-size: 20px; } .summary-grid { grid-template-columns: 1fr; } }
+	@media (max-width: 600px) { :global(.self-profile-content) { gap: 10px; width: min(560px, calc(100vw - 20px)); max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 16px); padding: 18px; } .self-profile-sections { gap: 24px; } .self-profile-head { grid-template-columns: 96px minmax(0, 1fr); } :global(.self-profile-avatar) { width: 96px; height: 96px; border-radius: 32% 68% 42% 58%; } :global(.self-profile-identity [data-dialog-title]) { font-size: 20px; } .summary-grid { grid-template-columns: 1fr; } }
 </style>

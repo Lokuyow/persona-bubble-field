@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expectIconCloseButton } from './helpers/iconCloseButton';
 import { HDKey } from '@scure/bip32';
 import { entropyToMnemonic, mnemonicToSeedSync } from '@scure/bip39';
 import { wordlist as englishWordlist } from '@scure/bip39/wordlists/english.js';
@@ -182,7 +183,9 @@ test.describe('Relay startup', () => {
 		await expect(dialog.getByText('clear不可: 所持ポイントが100,000pt未満です')).toHaveCount(0);
 		await expect(dialog.getByRole('button', { name: /へ強化/ })).toHaveCount(0);
 
-		await dialog.getByRole('button', { name: '閉じる', exact: true }).click();
+		const closeButton = dialog.getByRole('button', { name: '閉じる', exact: true });
+		await expectIconCloseButton(closeButton, '閉じる');
+		await closeButton.click();
 		await expect(dialog).toBeHidden();
 		await expect(profileTrigger).toBeFocused();
 
@@ -251,6 +254,7 @@ test.describe('Relay startup', () => {
 		expect(expandedMetrics).toEqual(metrics);
 		await dialog.getByRole('button', { name: '脱出', exact: true }).scrollIntoViewIfNeeded();
 		await expect(dialog.getByRole('button', { name: '脱出', exact: true })).toBeVisible();
+		await expectIconCloseButton(dialog.getByRole('button', { name: '閉じる' }), '閉じる');
 	});
 
 	test('places the ActionDock controls below the editor on mobile', async ({ page }) => {

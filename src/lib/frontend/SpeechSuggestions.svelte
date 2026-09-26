@@ -173,7 +173,7 @@
 					<p class="suggestion-heading">発言候補</p>
 					<ActionButton
 						variant="tertiary"
-						class="suggestion-close"
+						class="suggestion-close action-button-close"
 						type="button"
 						aria-label="発言候補を閉じる"
 						title="発言候補を閉じる"
@@ -272,15 +272,10 @@
 	.suggestion-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 	.suggestion-heading { margin: 0 2px 2px; color: #59635e; font-size: 11px; font-weight: 800; }
 	.suggestion-panel :global(.suggestion-close) {
-		flex: 0 0 44px;
-		width: 44px;
-		height: 44px;
-		padding: 0;
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
 	}
-	.suggestion-panel :global(.suggestion-close) :global(svg) { width: 24px; height: 24px; }
 	.suggestion-item {
 		display: grid;
 		grid-template-columns: minmax(0, 1fr) auto;

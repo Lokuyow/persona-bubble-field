@@ -11,6 +11,7 @@ import {
 	validateTraceReplyCandidate
 } from '../../src/lib/nostrProtocol';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
+import { expectIconCloseButton } from './helpers/iconCloseButton';
 import { CHANNEL_ID, fixtureSecret, traceRuntimeEvents, installDelayedRelay, relayState, selectRelayTraceCell, clickRelayLogicalCell, installPromptApiStub, seedRelayAccount, readActionDockControlOrder } from './helpers/relayHarness';
 
 
@@ -266,7 +267,7 @@ test.describe('Relay startup', () => {
 		if (!parsedRoot) throw new Error('Mobile unread root fixture did not parse.');
 		const reply = finalizeEvent(buildTraceReplyTemplate({ root: parsedRoot, parent: parsedRoot, content: 'mobile unread reply', speechType: 'normal', createdAt: Math.floor(now / 1000) + 1 }), fixtureSecret(31));
 		await page.clock.setFixedTime(now);
-		await page.setViewportSize({ width: 390, height: 844 });
+		await page.setViewportSize({ width: 320, height: 844 });
 		await installHostOwnedStub(page);
 		await installPromptApiStub(page);
 		await installDelayedRelay(page, { primaryEvents: primary, traceRoots: [root], traceReplies: [reply] });
@@ -283,6 +284,77 @@ test.describe('Relay startup', () => {
 		expect(await readActionDockControlOrder(page)).toEqual([
 			'profile-trigger', 'chatter-toggle', 'trace-unread-indicator', 'sound-control', 'speech-type-toggle', 'suggestions-anchor'
 		]);
+		for (const width of [320, 390]) {
+			await page.setViewportSize({ width, height: 844 });
+			const geometry = await page.evaluate(() => {
+				const rect = (selector: string) => document.querySelector<HTMLElement>(selector)!.getBoundingClientRect().toJSON();
+				return {
+					dock: rect('.action-dock'),
+					content: rect('.action-dock-content'),
+					editor: rect('.composer-editor-slot'),
+					left: rect('.composer-controls-left'),
+					right: rect('.composer-controls-right'),
+					controls: ['.profile-trigger', '.chatter-toggle', '.trace-unread-indicator', '.speaker-button', '.speech-type-toggle', '.suggestions-toggle']
+						.map((selector) => rect(selector))
+				};
+			});
+			expect(geometry.editor.bottom).toBeLessThanOrEqual(geometry.left.top);
+			expect(geometry.left.right).toBeLessThanOrEqual(geometry.right.left);
+			expect(geometry.left.left).toBeGreaterThanOrEqual(geometry.content.left);
+			expect(geometry.right.right).toBeLessThanOrEqual(geometry.content.right);
+			for (const box of [geometry.editor, geometry.left, geometry.right, ...geometry.controls]) {
+				expect(box.left).toBeGreaterThanOrEqual(0);
+				expect(box.top).toBeGreaterThanOrEqual(0);
+				expect(box.right).toBeLessThanOrEqual(width);
+				expect(box.bottom).toBeLessThanOrEqual(geometry.dock.bottom);
+			}
+		}
+
+		await page.setViewportSize({ width: 320, height: 844 });
+		const chatter = page.locator('.chatter-toggle');
+		await chatter.click();
+		await expect(chatter).toHaveAttribute('aria-pressed', 'true');
+		await chatter.click();
+		await expect(chatter).toHaveAttribute('aria-pressed', 'false');
+
+		const profile = page.getByRole('button', { name: '自分のプロフィールを開く' });
+		await profile.click();
+		const profileDialog = page.getByRole('dialog');
+		await expect(profileDialog).toBeVisible();
+		const profileClose = profileDialog.getByRole('button', { name: '閉じる' });
+		await expectIconCloseButton(profileClose, '閉じる');
+		await profileClose.click();
+		await expect(profileDialog).toBeHidden();
+
+		const unread = page.locator('.trace-unread-indicator');
+		await unread.click();
+		await expect(page.locator('.trace-unread-explanation')).toContainText('どこかにあなたへの返信の痕跡があります');
+
+		const speaker = page.getByRole('button', { name: /Open sound settings/ });
+		await speaker.click();
+		const soundDialog = page.getByRole('dialog', { name: 'Sound settings' });
+		await expect(soundDialog.getByRole('slider', { name: 'Sound volume' })).toBeVisible();
+		await speaker.click();
+		await expect(soundDialog).toBeHidden();
+
+		const speechType = page.locator('.speech-type-toggle');
+		const initialSpeechType = await speechType.getAttribute('data-speech-type');
+		await speechType.click();
+		await expect.poll(() => speechType.getAttribute('data-speech-type')).not.toBe(initialSpeechType);
+		const nextSpeechType = await speechType.getAttribute('data-speech-type');
+		await speechType.click();
+		await expect.poll(() => speechType.getAttribute('data-speech-type')).not.toBe(nextSpeechType);
+		await speechType.click();
+		await expect(speechType).toHaveAttribute('data-speech-type', initialSpeechType!);
+
+		const suggestions = page.getByRole('button', { name: 'AI発言候補を生成' });
+		await suggestions.click();
+		const candidatePanel = page.locator('.suggestion-panel');
+		await expect(candidatePanel).toBeVisible();
+		const candidateClose = page.getByRole('button', { name: '発言候補を閉じる' });
+		await expectIconCloseButton(candidateClose, '発言候補を閉じる');
+		await candidateClose.click();
+		await expect(candidatePanel).toHaveCount(0);
 	});
 
 	test('opens death Last Words with the regular reply tree, publication, and semantic validation', async ({ page }) => {

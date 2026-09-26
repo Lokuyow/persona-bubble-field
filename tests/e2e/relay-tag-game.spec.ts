@@ -1,11 +1,12 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expectIconCloseButton } from './helpers/iconCloseButton';
 import { finalizeEvent, getPublicKey, type Event as NostrEvent } from 'nostr-tools/pure';
 import { buildTagGameActionTemplate, createTagGameSchedule, finalizeTagGameState, parseTagGameActionEvent, parseTagGameEvent, TAG_GAME_KIND, TAG_GAME_TRANSFER_COOLDOWN_MS, type TagGameState } from '../../src/lib/tagGame';
 import { MENDING_TERMINAL, TAG_GAME_TERMINAL } from '../../src/lib/fieldFacilities';
 import { resolveCharacterFromPubkey } from '../../src/lib/characterAssignment';
 import { buildWorldMessageTemplate, buildWorldStateEventTemplate, WORLD_STATE_KIND } from '../../src/lib/nostrProtocol';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
-import { CHANNEL_ID, fixtureSecret, installDelayedRelay, moveRelaySelfTo, relayState, seedRelayAccount, testEvents, clickRelayLogicalCell, dragRelayJoystick } from './helpers/relayHarness';
+import { CHANNEL_ID, fixtureSecret, installDelayedRelay, moveRelaySelfTo, relayState, seedRelayAccount, testEvents, dragRelayJoystick } from './helpers/relayHarness';
 
 async function preparePlayer(page: Page, secret: Uint8Array, nowMs: number, points = 0, persistAcrossReload = false): Promise<void> {
 	await page.clock.install({ time: nowMs });
@@ -160,12 +161,13 @@ async function exerciseTagGameControlsAtViewport(page: Page, gameId: string, vie
 async function openTagGameTerminal(page: Page): Promise<void> {
 	const self = page.locator('.participant[data-self="true"]');
 	const position = await self.getAttribute('data-position');
-	await clickRelayLogicalCell(page, TAG_GAME_TERMINAL.position);
+	await page.getByRole('button', { name: '鬼ごっこ端末' }).click();
 	const dialog = page.getByRole('dialog', { name: '鬼ごっこ' });
 	const terminalAction = page.locator('[data-cell-action="tag-game-terminal"]');
 	await expect.poll(async () => (await dialog.isVisible()) || (await terminalAction.isVisible())).toBe(true);
 	if (await terminalAction.isVisible()) await terminalAction.click();
 	await expect(dialog, `Tag-game terminal did not open from self position ${position}.`).toBeVisible();
+	await expectIconCloseButton(page.getByRole('dialog', { name: '鬼ごっこ' }).getByRole('button', { name: '閉じる' }), '閉じる');
 }
 
 test('three Fake Relay clients create, join, consent, start, touch, and settle through the field UI', async ({ browser }) => {
@@ -524,6 +526,9 @@ test('keeps join actions primary and equally emphasized when multiple tag-game l
 		await joinerPage.setViewportSize({ width: 1280, height: 900 });
 		await openTagGameTerminal(joinerPage);
 		const dialog = joinerPage.getByRole('dialog', { name: '鬼ごっこ' });
+		await expect.poll(async () => (await relayState(joinerPage)).state.requests.some((request) => request.filters.some((filter) =>
+			(filter.kinds as number[] | undefined)?.includes(TAG_GAME_KIND) && !filter['#d']
+		))).toBe(true);
 		for (const [index, event] of lobbies.entries()) {
 			await injectRealtime(joinerPage, event);
 			await expect.poll(() => dialog.locator('ul > li').count()).toBe(index + 1);
@@ -540,6 +545,7 @@ test('keeps join actions primary and equally emphasized when multiple tag-game l
 		expect(joinBackgrounds[0]).toBe(joinBackgrounds[1]);
 		for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
 			await joinerPage.setViewportSize(viewport);
+			await expectIconCloseButton(dialog.getByRole('button', { name: '閉じる' }), '閉じる');
 			await expectButtonShape(joinButtons.nth(0));
 			await expectButtonShape(joinButtons.nth(1));
 			await expect(joinButtons.nth(0)).toBeVisible();
@@ -552,6 +558,24 @@ test('keeps join actions primary and equally emphasized when multiple tag-game l
 			expect(secondJoinHitArea.height).toBeGreaterThanOrEqual(44);
 			expect(secondJoinHitArea.insideViewport).toBe(true);
 		}
+		await joinerPage.setViewportSize({ width: 390, height: 640 });
+		const panelScroll = await dialog.evaluate((element) => {
+			const panel = element as HTMLElement;
+			panel.scrollTop = panel.scrollHeight;
+			return { top: panel.scrollTop, maximum: panel.scrollHeight - panel.clientHeight };
+		});
+		expect(panelScroll.maximum).toBeGreaterThan(0);
+		expect(panelScroll.top).toBe(panelScroll.maximum);
+		const closePoint = await dialog.getByRole('button', { name: '閉じる' }).evaluate((button) => {
+			const rect = button.getBoundingClientRect();
+			const panelRect = button.closest('.panel')!.getBoundingClientRect();
+			const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+			return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, inViewport: rect.top >= panelRect.top && rect.bottom <= panelRect.bottom, receivesPointer: Boolean(hit && button.contains(hit)) };
+		});
+		expect(closePoint.inViewport).toBe(true);
+		expect(closePoint.receivesPointer).toBe(true);
+		await joinerPage.mouse.click(closePoint.x, closePoint.y);
+		await expect(joinerPage.locator('.panel[role="dialog"]')).toHaveCount(0);
 	} finally {
 		await Promise.all([firstHostPage.close(), secondHostPage.close(), joinerPage.close()]);
 	}
@@ -605,7 +629,14 @@ test('organizer accepts a touch with the seed-derived role before the ordinary s
 	const touch = await latestTagGameAction(page, hostPubkey, 'touch');
 	expect(parseTagGameActionEvent(touch, CHANNEL_ID)?.payload.targetPubkey).toBe(holderPubkey);
 	await injectRealtime(page, touch);
-	await expect.poll(async () => parseTagGameEvent(await latestGameEvent(page, gameId), CHANNEL_ID)?.state.ownerPubkey).toBe(hostPubkey);
+	await expect.poll(async () => {
+		const matchingStates = (await relayState(page)).state.published
+			.filter((event) => event.kind === TAG_GAME_KIND && (event.tags as string[][]).some((tag) => tag[0] === 'd' && tag[1] === gameId))
+			.map((event) => parseTagGameEvent(event as unknown as NostrEvent, CHANNEL_ID)?.state)
+			.filter((state): state is TagGameState => Boolean(state))
+			.sort((first, second) => second.revision - first.revision);
+		return matchingStates[0]?.ownerPubkey ?? null;
+	}).toBe(hostPubkey);
 	const finalized = parseTagGameEvent(await latestGameEvent(page, gameId), CHANNEL_ID)!.state;
 	expect(finalized.effect).toBe('benefit');
 	expect(finalized.participant.find((member) => member.pubkey === holderPubkey)?.calamityMs).toBe(10_000);
@@ -1347,6 +1378,7 @@ test('does not show unselected games and lets a spectator choose and clear one t
 	await page.clock.setSystemTime(startedAt * 1_000 + 250);
 	await page.clock.runFor(1_000);
 	const cooldownNowMs = await page.evaluate(() => Date.now());
+	await page.clock.pauseAt(cooldownNowMs);
 	const benefitSeed = Array.from({ length: 1_000 }, (_, index) => `watch-benefit-${index}`).find((candidate) => createTagGameSchedule(candidate)[0].effect === 'benefit')!;
 	function hostedGame(hostSecret: Uint8Array, otherSecret: Uint8Array, marker: string, phase: 'countdown' | 'running' = 'running'): NostrEvent {
 		const host = getPublicKey(hostSecret);
@@ -1381,11 +1413,31 @@ test('does not show unselected games and lets a spectator choose and clear one t
 	const desktopLine = desktopHud.locator('[data-tag-game-cooldown-line]');
 	await expect(desktopLine).toBeVisible();
 	const desktopAnimationDelaySeconds = Number.parseFloat(await desktopLine.evaluate((element) => getComputedStyle(element.querySelector('span')!).animationDelay));
-	expect(desktopAnimationDelaySeconds).toBeGreaterThanOrEqual(0.35);
-	expect(desktopAnimationDelaySeconds).toBeLessThanOrEqual(0.5);
+	expect(desktopAnimationDelaySeconds * 1_000).toBe(watchedGame.transferAt! - cooldownNowMs);
+	expect(desktopAnimationDelaySeconds).toBeGreaterThan(0);
+	const animationFrames = await desktopLine.evaluate((element) => {
+		const fill = element.querySelector('span')!;
+		const animation = fill.getAnimations()[0];
+		if (!animation?.effect) throw new Error('Expected the cooldown CSS animation to be active.');
+		const timing = animation.effect.getTiming();
+		animation.pause();
+		const progressAt = (currentTime: number) => {
+			animation.currentTime = currentTime;
+			return new DOMMatrixReadOnly(getComputedStyle(fill).transform).a;
+		};
+		const delay = Number(timing.delay);
+		const duration = Number(timing.duration);
+		return { delay, duration, start: progressAt(0), middle: progressAt(delay + duration / 2), end: progressAt(delay + duration) };
+	});
+	expect(animationFrames.delay).toBe(watchedGame.transferAt! - cooldownNowMs);
+	expect(animationFrames.duration).toBe(TAG_GAME_TRANSFER_COOLDOWN_MS);
+	expect(animationFrames.start).toBeGreaterThan(0.99);
+	expect(animationFrames.middle).toBeGreaterThan(0);
+	expect(animationFrames.middle).toBeLessThan(1);
+	expect(animationFrames.end).toBeLessThan(0.01);
 	await page.clock.runFor(2_200);
 	await expect(desktopLine).toBeVisible();
-	await page.clock.runFor(400);
+	await page.clock.runFor(1_000);
 	await expect(desktopLine).toHaveCount(0);
 	expect(await desktopHud.evaluate((element) => element.getBoundingClientRect().height)).toBe(desktopHeight);
 
@@ -1396,7 +1448,7 @@ test('does not show unselected games and lets a spectator choose and clear one t
 	await injectRealtime(page, mobileTransfer);
 	await expect(desktopHud.locator('[data-tag-game-hud-footer]')).toHaveCount(0);
 	await expect(desktopHud.locator('[data-tag-game-cooldown-line]')).toBeVisible();
-	await page.clock.runFor(2_700);
+	await page.clock.runFor(3_000);
 	await expect(desktopHud.locator('[data-tag-game-cooldown-line]')).toHaveCount(0);
 	expect(await desktopHud.evaluate((element) => element.getBoundingClientRect().height)).toBe(mobileHeight);
 
@@ -1420,4 +1472,31 @@ test('does not show unselected games and lets a spectator choose and clear one t
 	await page.getByRole('button', { name: '観戦を解除' }).click();
 	await expect(page.locator('[data-tag-game-hud]')).toHaveCount(0);
 	await expect(page.locator('.participant[data-tag-game-role]')).toHaveCount(0);
+});
+
+test('keeps the tag-game close button keyboard-focusable with a visible focus ring', async ({ page }) => {
+	const nowMs = Date.now();
+	const secret = fixtureSecret(31);
+	await preparePlayer(page, secret, nowMs);
+	await moveRelaySelfTo(page, { x: 7, y: 5 });
+	await openTagGameTerminal(page);
+	const close = page.getByRole('dialog', { name: '鬼ごっこ' }).getByRole('button', { name: '閉じる' });
+	await close.focus();
+	await page.keyboard.press('Tab');
+	await expect(close).not.toBeFocused();
+	await page.keyboard.press('Shift+Tab');
+	await expect(close).toBeFocused();
+	const focus = await close.evaluate((button) => {
+		const style = getComputedStyle(button);
+		const tokenProbe = document.createElement('span');
+		tokenProbe.style.cssText = 'position:fixed;visibility:hidden;outline:3px solid var(--action-focus-ring)';
+		button.insertAdjacentElement('afterend', tokenProbe);
+		const focusToken = getComputedStyle(tokenProbe).outlineColor;
+		tokenProbe.remove();
+		return { visible: button.matches(':focus-visible'), outlineStyle: style.outlineStyle, outlineWidth: style.outlineWidth, outlineColor: style.outlineColor, token: focusToken };
+	});
+	expect(focus.visible).toBe(true);
+	expect(focus.outlineStyle).toBe('solid');
+	expect(focus.outlineWidth).toBe('3px');
+	expect(focus.outlineColor).toBe(focus.token);
 });

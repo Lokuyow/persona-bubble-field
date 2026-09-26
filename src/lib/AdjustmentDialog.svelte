@@ -5,6 +5,7 @@
 	import ShieldCheck from '~icons/tabler/shield-check';
 	import SquareChevronUpFilled from '~icons/tabler/square-chevron-up-filled';
 	import Stack2 from '~icons/tabler/stack-2';
+	import X from '~icons/tabler/x';
 	import Wallet from '~icons/tabler/wallet';
 	import { formatContextCapacityMinutes } from '$lib/abilityDisplay';
 	import ActionButton from '$lib/ActionButton.svelte';
@@ -55,20 +56,26 @@
 	function effectUnit(key: PersonaAbilityKey): string {
 		return key === 'inferenceEfficiency' ? 'pt/分' : key === 'contextCapacity' ? '分' : 'h/h';
 	}
+
+	function focusFirstAvailableUpgrade(event: Event): void {
+		event.preventDefault();
+		document.querySelector<HTMLElement>('.adjustment-dialog-content .adjustment-dialog-title')?.focus({ preventScroll: true });
+	}
 </script>
 
 <Dialog.Root bind:open={() => open, onOpenChange}>
 	{#if open}
 		<Dialog.Portal>
 			<Dialog.Overlay class="adjustment-dialog-overlay" />
-			<Dialog.Content class="adjustment-dialog-content" preventScroll={false}>
+			<Dialog.Content class="adjustment-dialog-content" preventScroll={false} onOpenAutoFocus={focusFirstAvailableUpgrade}>
 				<header class="adjustment-dialog-header">
-					<Dialog.Title class="adjustment-dialog-title"><Adjustments aria-hidden="true" />能力強化</Dialog.Title>
+					<Dialog.Title class="adjustment-dialog-title" tabindex={-1}><Adjustments aria-hidden="true" />能力強化</Dialog.Title>
 					<Dialog.Description class="sr-only">能力を強化して作業の効果を高めます。</Dialog.Description>
 					<div class="points-display" aria-label={`所持ポイント ${points} pt`}>
 						<Wallet aria-hidden="true" />
 						<span>{points} pt</span>
 					</div>
+					<Dialog.Close class="action-button action-button-tertiary action-button-close" aria-label="閉じる"><X aria-hidden="true" /></Dialog.Close>
 				</header>
 				<section class="ability-list" aria-label="能力">
 					{#each abilityKeys as key}
@@ -98,9 +105,6 @@
 						</article>
 					{/each}
 				</section>
-				<footer class="adjustment-dialog-footer">
-					<Dialog.Close class="action-button action-button-tertiary terminal-secondary-action">閉じる</Dialog.Close>
-				</footer>
 			</Dialog.Content>
 		</Dialog.Portal>
 	{/if}
@@ -109,8 +113,10 @@
 <style>
 	:global(.adjustment-dialog-overlay) { position: fixed; inset: 0; z-index: 100; background: rgba(4, 7, 18, .72); backdrop-filter: blur(2px); }
 	:global(.adjustment-dialog-content) { position: fixed; top: 50%; left: 50%; z-index: 101; display: grid; gap: 0; width: min(1080px, calc(100vw - 24px)); max-height: calc(100svh - 28px); overflow: auto; padding: 28px; border: 1px solid rgba(122, 135, 255, .74); border-radius: 18px; background: linear-gradient(180deg, rgba(12, 18, 46, .98), rgba(8, 12, 33, .98)); box-shadow: 0 20px 80px rgba(0, 0, 0, .48), 0 0 34px rgba(90, 103, 255, .13); color: #f4f6ff; transform: translate(-50%, -50%); }
-	.adjustment-dialog-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 22px; }
+	.adjustment-dialog-header { position: sticky; top: -28px; z-index: 2; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 16px; margin: -28px -28px 22px; padding: 28px; background: linear-gradient(180deg, rgba(12, 18, 46, 1), rgba(8, 12, 33, 1)); }
 	:global(.adjustment-dialog-title) { display: inline-flex; align-items: center; gap: 9px; margin: 0; color: #f4f6ff; font-size: 22px; line-height: 1; font-weight: 800; letter-spacing: .03em; }
+	.points-display { grid-column: 2; }
+	.adjustment-dialog-header :global(.action-button-close) { grid-column: 3; }
 	:global(.adjustment-dialog-title svg) { width: 22px; height: 22px; color: #aeb6ff; stroke-width: 2; }
 	:global(.adjustment-dialog-content .sr-only) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 	.points-display { display: inline-flex; align-items: center; gap: 7px; color: #f4f6ff; font-size: 16px; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -144,9 +150,7 @@
 	.upgrade-requirement { display: inline-flex; align-items: baseline; gap: 5px; }
 	.upgrade-requirement > span { font-size: 14px; font-weight: 700; }
 	.upgrade-requirement > strong { font-size: 18px; font-weight: 850; }
-	.adjustment-dialog-footer { margin-top: 20px; }
-	:global(.terminal-secondary-action) { width: 100%; min-height: 48px; }
-	:global(.adjustment-dialog-content button:focus-visible) { outline: 3px solid var(--color-focus-ring); outline-offset: 3px; }
-	@media (max-width: 920px) { :global(.adjustment-dialog-content) { padding: 22px; } .ability-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } .ability-card { min-height: 238px; } }
-	@media (max-width: 560px) { :global(.adjustment-dialog-content) { padding: 18px; } .ability-list { grid-template-columns: minmax(0, 1fr); } .ability-card { min-height: 220px; } }
+	:global(.adjustment-dialog-content button:focus-visible:not(.action-button-close)) { outline: 3px solid var(--color-focus-ring); outline-offset: 3px; }
+	@media (max-width: 920px) { :global(.adjustment-dialog-content) { padding: 22px; } .adjustment-dialog-header { top: -22px; margin: -22px -22px 22px; padding: 22px; } .ability-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } .ability-card { min-height: 238px; } }
+	@media (max-width: 560px) { :global(.adjustment-dialog-content) { padding: 18px; } .adjustment-dialog-header { top: -18px; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; margin: -18px -18px 22px; padding: 18px; } :global(.adjustment-dialog-title) { grid-row: 1; grid-column: 1; } .points-display { grid-row: 2; grid-column: 1 / 3; } .adjustment-dialog-header :global(.action-button-close) { grid-row: 1; grid-column: 2; } .ability-list { grid-template-columns: minmax(0, 1fr); } .ability-card { min-height: 220px; } }
 </style>
