@@ -117,9 +117,9 @@
 			.meter-grid { grid-template-columns: max-content minmax(0, 1fr) max-content; }
 			.meter-row { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: center; column-gap: 14px; row-gap: 0; }
 			.meter-heading { display: contents; }
-			.meter-label { grid-column: 1; align-self: center; white-space: nowrap; }
-			.meter-row :global(.status-meter) { grid-column: 2; align-self: center; width: 100%; }
-			.lifespan-value, .points-value { grid-column: 3; align-self: center; text-align: right; white-space: nowrap; }
+			.meter-label { grid-column: 1; grid-row: 1; align-self: center; white-space: nowrap; }
+			.meter-row :global(.status-meter) { grid-column: 2; grid-row: 1; align-self: center; width: 100%; }
+			.lifespan-value, .points-value { grid-column: 3; grid-row: 1; align-self: center; text-align: right; white-space: nowrap; }
 		}
 
 		@media (max-width: 700px) {

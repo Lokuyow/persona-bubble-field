@@ -395,6 +395,10 @@ for (const stateKind of ['missing', 'corrupt'] as const) {
 					label: box(row.querySelector('.meter-label')!),
 					bar: box(meter),
 					value: box(row.querySelector('strong')!),
+					centers: [row.querySelector('.meter-label')!, meter, row.querySelector('strong')!].map((element) => {
+						const rect = element.getBoundingClientRect();
+						return (rect.top + rect.bottom) / 2;
+					}),
 					barRadius: getComputedStyle(meter).borderTopLeftRadius,
 					fillRadius: getComputedStyle(fill).borderTopLeftRadius
 				};
@@ -423,6 +427,7 @@ for (const stateKind of ['missing', 'corrupt'] as const) {
 			expect(Number.parseFloat(textMetrics.unitSize)).toBeGreaterThan(Number.parseFloat(textMetrics.pointsSize) * .8);
 			if (viewport.width >= 960) {
 				for (const row of meterRows) {
+					for (const center of row.centers) expect(Math.abs(center - row.centers[0])).toBeLessThanOrEqual(1);
 					expect(row.label.right).toBeLessThanOrEqual(row.bar.left);
 					expect(row.bar.right).toBeLessThanOrEqual(row.value.left);
 					expect(row.bar.left - row.label.right).toBeGreaterThanOrEqual(12);
