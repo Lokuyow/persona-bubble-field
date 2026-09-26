@@ -610,15 +610,19 @@ describe('world read session', () => {
 		expect(publish.mock.calls.map(([event]) => event.kind)).toEqual([WORLD_STATE_KIND]);
 	});
 
-	it('uses the normal reply subscription and publishes kind 1111 replies to death roots', async () => {
+	it('keeps Realtime live while a Trace filter bundle is being reconfigured', async () => {
 		const root = deathRoot('d'.repeat(64));
 		mocked.reconcileTraceRootCache.mockResolvedValue([root]);
 		result = startResult([], [position('self-position', 700, selfPubkey, 0, { x: 1, y: 1 })]);
 		publish.mockResolvedValue([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
-		const configureTraceReplies = vi.fn().mockResolvedValue({
-			status: 'active', initialBatch: { events: [], relays: [] }
+		const traceConfiguration = deferred<TraceReplyConfigurationResult>();
+		const configureTraceReplies = vi.fn((_configuration: TraceReplyConfiguration) => traceConfiguration.promise);
+		let realtimeInput: ((event: import('nostr-tools/pure').Event) => void) | undefined;
+		const supplemental = vi.fn();
+		const startRealtime = vi.fn(async (input) => {
+			realtimeInput = input.onSupplementalEvent;
+			return { status: 'active' as const, events: [], relays: [] };
 		});
-		const startRealtime = vi.fn().mockResolvedValue({ status: 'active', events: [], relays: [] });
 		const stopRealtime = vi.fn();
 		mocked.createTransport.mockReturnValue({
 			start: vi.fn(async (nextInput) => { input = nextInput; return result; }),
@@ -631,20 +635,27 @@ describe('world read session', () => {
 				registry: [{ eventType: 'fixture', protocolVersion: 1, protocolKey: protocolKeyFor('fixture', 1), parseAction: () => ({}) }],
 				controlSince: 0,
 				instanceFilters: [{ protocolKey: protocolKeyFor('fixture', 1), instanceIds: ['fixture-instance'], since: 0 }],
-				startImmediately: false,
+				startImmediately: true,
+				onSupplementalEvent: supplemental,
 				onEvent: vi.fn()
 			}
 		});
-		await session.start(); session.completeBootstrap(); await session.startRealtime();
+		await session.start(); session.completeBootstrap();
+		await vi.waitFor(() => expect(startRealtime).toHaveBeenCalledOnce());
 		await vi.waitFor(() => expect(mocked.reconcileTraceRootCache).toHaveBeenCalled());
 		await session.enterSelf();
 		vi.setSystemTime(701_000);
 		expect(session.openTraceConversation({ rootId: root.id, currentId: root.id })).toEqual({ kind: 'opened' });
 		await vi.waitFor(() => expect(configureTraceReplies).toHaveBeenCalledTimes(1));
 		expect(configureTraceReplies.mock.calls[0][0].conversation).toEqual({ rootId: root.id, currentId: root.id });
+		expect(session.getTraceConversationState()).toMatchObject({ replyRefresh: 'loading' });
+		expect(stopRealtime).not.toHaveBeenCalled();
+		expect(startRealtime).toHaveBeenCalledOnce();
+		const supplementalEvent = { id: 'realtime-during-trace-reconfiguration' } as import('nostr-tools/pure').Event;
+		realtimeInput?.(supplementalEvent);
+		expect(supplemental).toHaveBeenCalledExactlyOnceWith(supplementalEvent);
+		traceConfiguration.resolve({ status: 'active', generation: 1, initialBatch: { events: [], relays: [] } });
 		await vi.waitFor(() => expect(session.getTraceConversationState()).toMatchObject({ replyRefresh: 'settled' }));
-		expect(stopRealtime).toHaveBeenCalledOnce();
-		await vi.waitFor(() => expect(startRealtime).toHaveBeenCalledTimes(2));
 		const replyResult = await session.publishTraceReply({ rootId: root.id, targetId: root.id, content: 'reply to Last Words', speechType: 'normal' });
 		expect(replyResult.kind).toBe('succeeded');
 		const reply = publish.mock.calls.map(([event]) => event).find((event) => event.kind === 1111);
@@ -656,7 +667,8 @@ describe('world read session', () => {
 		session.closeTraceConversation();
 		await vi.waitFor(() => expect(configureTraceReplies).toHaveBeenCalledTimes(2));
 		expect(configureTraceReplies.mock.calls[1][0]).not.toHaveProperty('conversation');
-		await vi.waitFor(() => expect(startRealtime).toHaveBeenCalledTimes(3));
+		expect(stopRealtime).not.toHaveBeenCalled();
+		expect(startRealtime).toHaveBeenCalledOnce();
 	});
 
 	it('uses latest positive message activity when preparing an exit after clock regression', async () => {
@@ -748,6 +760,26 @@ describe('world read session', () => {
 		expect(parseWorldStateEvent(publish.mock.calls[0][0], 'c'.repeat(64))?.slot).toBe(1);
 	});
 
+	it('refreshes tag-game position evidence through the planner when both current-second slots are used', async () => {
+		result = startResult([], [
+			position('self-slot-0', 700, selfPubkey, 0),
+			position('self-slot-1', 700, selfPubkey, 1)
+		]);
+		publish.mockResolvedValue([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 }, selfSigner: selfSigner(),
+			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn()
+		});
+		await session.start();
+		session.completeBootstrap();
+		await expect(session.enterSelf()).resolves.toEqual({ kind: 'not-needed' });
+		const refresh = session.refreshSelfActivity({ forcePositionEvidence: true });
+		await vi.advanceTimersByTimeAsync(1_000);
+		await expect(refresh).resolves.toMatchObject({ kind: 'succeeded', operation: 'game-action' });
+		const emitted = parseWorldStateEvent(publish.mock.calls[0][0], 'c'.repeat(64));
+		expect(emitted).toMatchObject({ createdAt: 701, slot: 0, state: 'active', position: { x: 2, y: 1 } });
+	});
+
 	it('reconstructs the bootstrap snapshot and uses the 11 minute window', async () => {
 		result = startResult([message('message', 700)], [position('position', 700)]);
 		const presences: number[] = [];
@@ -785,7 +817,7 @@ describe('world read session', () => {
 			field: { columns: 4, rows: 3 }, onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn(),
 			realtime: {
 				registry: [{ eventType: 'fixture', protocolVersion: 1, protocolKey: protocolKeyFor('fixture', 1), parseAction: () => ({}) }],
-				controlSince: 0, instanceFilters: [], startImmediately: false, onEvent: vi.fn()
+				controlSince: 0, instanceFilters: [], startImmediately: true, onEvent: vi.fn()
 			}
 		});
 		await session.start();
@@ -818,17 +850,46 @@ describe('world read session', () => {
 			field: { columns: 4, rows: 3 }, onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn(),
 			realtime: {
 				registry: [{ eventType: 'fixture', protocolVersion: 1, protocolKey: protocolKeyFor('fixture', 1), parseAction: () => ({}) }],
-				controlSince: 0, instanceFilters: [], startImmediately: false, onEvent: vi.fn()
+				controlSince: 0, instanceFilters: [], startImmediately: true, onEvent: vi.fn()
 			}
 		});
 		await session.start();
 		session.completeBootstrap();
 		await expect(session.attachSelf({ signer: selfSigner(), authorizeSelfWrite: vi.fn().mockResolvedValue('authorized') })).resolves.toBeUndefined();
-		expect(startRealtime).not.toHaveBeenCalled();
+		expect(startRealtime).toHaveBeenCalledOnce();
 		await expect(session.enterSelf()).resolves.toMatchObject({ kind: 'not-needed' });
 
 		traceRoots.resolve({ rawEvents: [], relays: [] });
+		await vi.waitFor(() => expect(mocked.reconcileTraceRootCache).toHaveBeenCalled());
+	});
+
+	it('starts available Realtime alongside Trace bootstrap without waiting for Trace responses', async () => {
+		const realtimeEvents: import('nostr-tools/pure').Event[] = [];
+		const traceRoots = new Promise<never>(() => {});
+		const startRealtime = vi.fn(async (configuration) => {
+			configuration.onSupplementalEvent({ id: '27070-during-trace-bootstrap' } as import('nostr-tools/pure').Event);
+			return { status: 'active' as const, events: [], relays: [] };
+		});
+		result = startResult([], [position('self-position', 700, selfPubkey, 0)]);
+		mocked.createTransport.mockReturnValue({
+			start: vi.fn(async (nextInput) => { input = nextInput; return result; }),
+			startRealtime,
+			bootstrapTraceRootCandidates: vi.fn(() => traceRoots),
+			dispose,
+			publish
+		});
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 }, selfSigner: selfSigner(),
+			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn(),
+			realtime: {
+				registry: [{ eventType: 'fixture', protocolVersion: 1, protocolKey: protocolKeyFor('fixture', 1), parseAction: () => ({}) }],
+				controlSince: 0, instanceFilters: [], onSupplementalEvent: (event) => realtimeEvents.push(event), onEvent: vi.fn()
+			}
+		});
+		await session.start();
 		await vi.waitFor(() => expect(startRealtime).toHaveBeenCalledOnce());
+		expect(realtimeEvents.map((event) => event.id)).toEqual(['27070-during-trace-bootstrap']);
+		session.dispose();
 	});
 
 	it('retains anonymous position evidence for a full same-second pair before promotion', async () => {
@@ -2272,7 +2333,8 @@ describe('world read session', () => {
 		expect(startRealtime).toHaveBeenCalledOnce();
 		expect(session.openTraceConversation({ rootId: normal.id, currentId: normal.id })).toEqual({ kind: 'opened' });
 		await vi.waitFor(() => expect(configureTraceReplies).toHaveBeenCalledTimes(1));
-		expect(stopRealtime).toHaveBeenCalledOnce();
+		expect(stopRealtime).not.toHaveBeenCalled();
+		expect(startRealtime).toHaveBeenCalledOnce();
 
 		mocked.reconcileTraceRootCache.mockResolvedValue([death]);
 		input!.onLiveTrace({ id: death.id, source: 'death' }, raw(death));
@@ -2286,7 +2348,7 @@ describe('world read session', () => {
 
 		oldConversation.resolve({ status: 'superseded', generation: 1 });
 		await Promise.resolve();
-		expect(startRealtime).toHaveBeenCalledTimes(2);
+		expect(startRealtime).toHaveBeenCalledOnce();
 		await vi.waitFor(() => expect(session.getTraceConversationState()).toEqual(expect.objectContaining({ root: death, replyRefresh: 'settled' })));
 		expect(session.getTraceConversationState()).toEqual(expect.objectContaining({ root: death, replyRefresh: 'settled', replies: [] }));
 	});

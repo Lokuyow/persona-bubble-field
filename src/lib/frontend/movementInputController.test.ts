@@ -23,8 +23,10 @@ function keyboardEvent({ key, code, repeat = false }: KeyEventInput) {
 
 function createFixture() {
 	const requests: Direction[] = [];
+	const directionalActions: Direction[] = [];
 	const options: MovementInputControllerOptions = {
 		requestMovement: (direction) => requests.push(direction),
+		requestDirectionalAction: (direction) => directionalActions.push(direction),
 		canUseArrowForMovement: () => true,
 		canUseWASDForMovement: () => true,
 		isComposerEditorKeyboardEvent: () => false,
@@ -36,7 +38,8 @@ function createFixture() {
 
 	return {
 		controller: createMovementInputController(options),
-		requests
+		requests,
+		directionalActions
 	};
 }
 
@@ -70,6 +73,19 @@ describe('movement input controller', () => {
 		release(controller, { key: 'ArrowRight', code: 'ArrowRight' });
 		vi.advanceTimersByTime(500);
 		expect(requests).toEqual(['right', 'right']);
+		controller.destroy();
+	});
+
+	it('emits a directional action for a short key press even when released before chord delay', () => {
+		vi.useFakeTimers();
+		const { controller, requests, directionalActions } = createFixture();
+
+		press(controller, { key: 'ArrowRight', code: 'ArrowRight' });
+		vi.advanceTimersByTime(20);
+		release(controller, { key: 'ArrowRight', code: 'ArrowRight' });
+
+		expect(requests).toEqual(['right']);
+		expect(directionalActions).toEqual(['right']);
 		controller.destroy();
 	});
 
@@ -124,6 +140,19 @@ describe('movement input controller', () => {
 		vi.advanceTimersByTime(50);
 
 		expect(requests).toEqual([expected]);
+		controller.destroy();
+	});
+
+	it('emits a new directional action immediately when a joystick changes direction before the movement cadence', () => {
+		vi.useFakeTimers();
+		const { controller, requests, directionalActions } = createFixture();
+		controller.takeOverPointer(3, 'right');
+		vi.advanceTimersByTime(100);
+		controller.updatePointer(3, 'up');
+
+		expect(requests).toEqual(['right']);
+		expect(directionalActions).toEqual(['right', 'up']);
+		controller.stopPointer(3);
 		controller.destroy();
 	});
 

@@ -130,6 +130,20 @@ describe('presence evidence reducer', () => {
 		));
 	});
 
+	it('keeps a participant active from recent kind 42 activity when its Run-scoped position is old', () => {
+		const oldPosition = position('run-position', 'a'.repeat(64), 1_000, 1, { x: 2, y: 2 });
+		const recentSamePosition = message('recent-message-same-position', 'a'.repeat(64), 2_140, { x: 2, y: 2 });
+		const recentMovedPosition = message('recent-message-moved-position', 'a'.repeat(64), 2_140, { x: 3, y: 2 });
+		expect(reconstructPresenceEvidence([recentSamePosition], [oldPosition])[0]).toMatchObject({
+			position: { x: 2, y: 2 }, lastPositiveActivityCreatedAt: 2_140,
+			positionEvidence: { eventId: recentSamePosition.id, source: 'message' }
+		});
+		expect(reconstructPresenceEvidence([recentMovedPosition], [oldPosition])[0]).toMatchObject({
+			position: { x: 3, y: 2 }, lastPositiveActivityCreatedAt: 2_140,
+			positionEvidence: { eventId: recentMovedPosition.id, source: 'message' }
+		});
+	});
+
 	it('gives a same-second World State exit precedence over active position updates', () => {
 		const active = position('active', 'a'.repeat(64), 100, 1, { x: 2, y: 2 });
 		const exit = { id: 'death-exit', pubkey: active.pubkey, createdAt: active.createdAt, state: 'exit' as const, slot: null, position: { x: 2, y: 2 } };

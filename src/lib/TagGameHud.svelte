@@ -1,6 +1,7 @@
 <script lang="ts">
 	import PrimaryButton from '$lib/PrimaryButton.svelte';
-	import { canLeaveTagGame, formatTagGameRemainingTime, isOrganizerConfirmedTagGameEffectCurrent, tagGameTransferStatus } from '$lib/tagGameHud';
+	import { canLeaveTagGame, formatTagGameRemainingTime, isTagGameScheduledEffectActive, tagGameTransferStatus } from '$lib/tagGameHud';
+	import { tagGameScheduledEffectAt } from '$lib/tagGame';
 	import { tagGameParticipantLabel } from '$lib/tagGamePresentation';
 	import type { TagGameState } from '$lib/tagGame';
 
@@ -11,25 +12,29 @@
 		nowMs: number;
 		realtimeStatus: 'inactive' | 'active' | 'degraded';
 		busy: boolean;
+		localEffectPaused?: boolean;
+		touchStatus?: string | null;
 		onLeave: (gameId: string) => void;
 	}>;
 
-	let { game, selfPubkey, selfRunNumber, nowMs, realtimeStatus, busy, onLeave }: Props = $props();
+	let { game, selfPubkey, selfRunNumber, nowMs, realtimeStatus, busy, localEffectPaused = false, touchStatus = null, onLeave }: Props = $props();
 	const own = $derived(game?.participant.find((member) => member.pubkey === selfPubkey && member.runNumber === selfRunNumber) ?? null);
 	const holder = $derived(game?.participant.find((member) => member.pubkey === game.ownerPubkey) ?? null);
 	const endsAtMs = $derived((game?.endsAt ?? 0) * 1000);
 	const remaining = $derived(game ? formatTagGameRemainingTime(endsAtMs, nowMs) : '00:00');
-	const effectScheduleCurrent = $derived(Boolean(game && isOrganizerConfirmedTagGameEffectCurrent(game, nowMs)));
-	const effectActive = $derived(Boolean(game && effectScheduleCurrent && !game.holderChallengeId && holder?.status === 'active'));
+	const scheduledEffect = $derived(game ? tagGameScheduledEffectAt(game, nowMs) : null);
+	const effectScheduleCurrent = $derived(Boolean(game && isTagGameScheduledEffectActive(game, nowMs)));
+	const effectActive = $derived(Boolean(game && effectScheduleCurrent && !game.holderChallengeId && !localEffectPaused && holder?.status === 'active'));
 	const pausedLabel = $derived(game?.phase === 'settling' || (game?.phase === 'running' && nowMs >= endsAtMs)
 		? '最終精算中・効果停止'
 		: game?.holderChallengeId ? '応答確認中・効果停止'
-			: game?.phase === 'running' && nowMs < endsAtMs && !effectScheduleCurrent ? '開催者の状態更新待ち・効果停止'
 			: holder?.status === 'temporarily-ineligible' ? '所持者が一時対象外・効果停止'
-				: '効果停止中');
-	const effectName = $derived(game?.effect === 'benefit' ? '恩恵' : '災厄');
+				: localEffectPaused ? '安全停止中・効果停止'
+					: '効果停止中');
+	const currentEffect = $derived(scheduledEffect ?? game?.effect ?? null);
+	const effectName = $derived(currentEffect === 'benefit' ? '恩恵' : '災厄');
 	const holderName = $derived(game?.ownerPubkey && game ? tagGameParticipantLabel(game, game.ownerPubkey, selfPubkey) : '未定');
-	const effectAction = $derived(game?.effect === 'benefit' ? '所持者以外が追いかけて奪う' : '所持者が追いかけて押し付ける');
+	const effectAction = $derived(currentEffect === 'benefit' ? '所持者以外が追いかけて奪う' : '所持者が追いかけて押し付ける');
 	const transferStatus = $derived(game ? tagGameTransferStatus(game, effectActive, nowMs) : '転移不可');
 	const canLeave = $derived(Boolean(game && canLeaveTagGame(game, own?.status, nowMs)));
 </script>
@@ -37,7 +42,7 @@
 {#if game}
 	<aside class="game-hud" aria-label="鬼ごっこ進行状況" data-tag-game-hud data-tag-game-hud-id={game.gameId} data-realtime-status={realtimeStatus}>
 		<div class="game-hud-time" aria-label={`残り ${remaining}`}><span>残り</span><strong data-tag-game-remaining>{remaining}</strong></div>
-		<div class={['game-hud-effect', game.effect ?? 'calamity', { paused: !effectActive }]} data-tag-game-effect={game.effect} data-tag-game-effect-active={effectActive ? 'true' : 'false'}>
+		<div class={['game-hud-effect', currentEffect ?? 'calamity', { paused: !effectActive }]} data-tag-game-effect={currentEffect} data-tag-game-effect-active={effectActive ? 'true' : 'false'}>
 			<strong>{effectName}・{holderName}</strong>
 			<span>{effectActive ? effectAction : pausedLabel}</span>
 		</div>
@@ -45,6 +50,7 @@
 			<span data-tag-game-cooldown>{transferStatus}</span>
 			{#if canLeave}<PrimaryButton class="tag-game-leave" data-tag-game-leave={game.gameId} onclick={() => onLeave(game.gameId)} disabled={busy}>退出</PrimaryButton>{/if}
 		</div>
+		{#if touchStatus}<p class="touch-status" data-tag-game-touch-status aria-live="polite">{touchStatus}</p>{/if}
 	</aside>
 {/if}
 
@@ -59,6 +65,7 @@
 	.game-hud-effect span { color: rgba(226, 230, 255, .88); }
 	.game-hud-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 32px; margin-top: 3px; }
 	.game-hud-footer > span { font-weight: 650; }
+	.touch-status { margin: 3px 0 0; color: rgba(226, 230, 255, .78); font-size: .9em; }
 	.game-hud :global(.tag-game-leave) { min-height: 32px; padding: 4px 10px; pointer-events: auto; }
 	@media (max-width: 700px) {
 		.game-hud { width: min(252px, 100%); padding: 6px 8px; border-radius: 8px; font-size: 11px; }

@@ -2,23 +2,35 @@ import { finalizeEvent, getPublicKey } from 'nostr-tools/pure';
 import { describe, expect, it } from 'vitest';
 import {
 	TAG_GAME_ACTION_KIND,
+	TAG_GAME_POSITION_PROOF_REFRESH_MAX_ATTEMPTS,
+	TAG_GAME_POSITION_PROOF_REFRESH_RETRY_MS,
 	TAG_GAME_BENEFIT_POINTS_PER_SECOND,
 	TAG_GAME_GAME_MS,
 	TAG_GAME_INDEX,
 	TAG_GAME_KIND,
+	TAG_GAME_NO_ACTIVITY_MS,
+	TAG_GAME_PRECHECK_TIMEOUT_MS,
+	TAG_GAME_RESPONSE_TIMEOUT_MS,
 	buildTagGameActionTemplate,
+	canRetryTagGamePositionProofRefresh,
 	buildTagGameActionFilter,
 	buildTagGameFilter,
 	buildTagGameRecoveryFilter,
 	buildTagGameTemplate,
 	createTagGameSchedule,
 	finalizeTagGameState,
+	isFreshTagGameTouchAction,
+	isTagGameTouchProofSuperseded,
+	isTagGameTouchPositionProof,
 	isFreshTagGameLobby,
 	leaveTagGameParticipant,
 	isValidTagGameState,
 	parseTagGameActionEvent,
 	parseTagGameEvent,
 	tagGameHolderResponseState,
+	tagGameEffectSafetyCutoffMs,
+	latestTagGameHolderActivityAt,
+	isValidTagGameHolderResponse,
 	tagGamePredictedRemainingLifespanMinutes,
 	cumulativeTagGameSettlement,
 	type TagGameState
@@ -63,6 +75,41 @@ describe('player-hosted tag-game protocol and rules', () => {
 		expect(parseTagGameEvent({ ...event, tags: [...event.tags, ['d', 'other']] }, CHANNEL)).toBeNull();
 	});
 
+	it('validates touch evidence references and applies coarse freshness at first receipt and queue commit', () => {
+		const proof = { worldStateEventId: '1'.repeat(64), positionEvidenceEventId: '2'.repeat(64) };
+		expect(isTagGameTouchPositionProof(proof)).toBe(true);
+		expect(isTagGameTouchPositionProof({ ...proof, positionEvidenceEventId: 'bad' })).toBe(false);
+		const nowMs = 20_000;
+		expect(isFreshTagGameTouchAction({ createdAtSeconds: 10, nowMs, elapsedSinceFirstReceiptMs: 0 })).toBe(true);
+		expect(isFreshTagGameTouchAction({ createdAtSeconds: 9, nowMs, elapsedSinceFirstReceiptMs: 0 })).toBe(false);
+		expect(isFreshTagGameTouchAction({ createdAtSeconds: 22, nowMs, elapsedSinceFirstReceiptMs: 0 })).toBe(true);
+		expect(isFreshTagGameTouchAction({ createdAtSeconds: 23, nowMs, elapsedSinceFirstReceiptMs: 0 })).toBe(false);
+		expect(isFreshTagGameTouchAction({ createdAtSeconds: 10, nowMs, elapsedSinceFirstReceiptMs: 3_000 })).toBe(true);
+		expect(isFreshTagGameTouchAction({ createdAtSeconds: 10, nowMs, elapsedSinceFirstReceiptMs: 3_001 })).toBe(false);
+		expect(isFreshTagGameTouchAction({ createdAtSeconds: 10, nowMs: 21_001, elapsedSinceFirstReceiptMs: 1_001 })).toBe(false);
+	});
+
+	it('rejects a first-arriving touch action whose coarse created_at freshness has expired', () => {
+		expect(isFreshTagGameTouchAction({ createdAtSeconds: 100, nowMs: 111_000, elapsedSinceFirstReceiptMs: 0 })).toBe(false);
+	});
+
+	it('rejects a referenced position proof after newer evidence supersedes it', () => {
+		const proof = { worldStateEventId: '1'.repeat(64), positionEvidenceEventId: '2'.repeat(64) };
+		const current = {
+			proof,
+			currentWorldStateEventId: proof.worldStateEventId,
+			currentWorldState: 'active' as const,
+			currentRunNumber: 1,
+			memberRunNumber: 1,
+			currentPositionEvidenceEventId: '3'.repeat(64),
+			knownWorldStateEventIds: [proof.worldStateEventId],
+			knownPositionEvidenceEventIds: [proof.positionEvidenceEventId, '3'.repeat(64)]
+		};
+		expect(isTagGameTouchProofSuperseded(current)).toBe(true);
+		expect(isTagGameTouchProofSuperseded({ ...current, currentPositionEvidenceEventId: proof.positionEvidenceEventId })).toBe(false);
+		expect(isTagGameTouchProofSuperseded({ ...current, currentRunNumber: 2 })).toBe(true);
+	});
+
 	it('renews unbounded lobbies and rejects expired ones using the event timestamp', () => {
 		const state = lobby();
 		expect(isFreshTagGameLobby(state, 190)).toBe(true);
@@ -98,13 +145,40 @@ describe('player-hosted tag-game protocol and rules', () => {
 		expect(tagGamePredictedRemainingLifespanMinutes(5 * 60_000, 10 * 60_000)).toBe(0);
 	});
 
-	it('uses normal World activity and tag-game acknowledgements, then challenges a holder again after silence', () => {
+	it('uses the 15s precheck, 8s formal-response windows, and resets the holder epoch on activity', () => {
 		expect(tagGameHolderResponseState({ nowMs: 20_000, normalActivityAtMs: 15_000, acknowledgedAtMs: null, challengeStartedAtMs: null })).toBe('active');
 		expect(tagGameHolderResponseState({ nowMs: 20_000, normalActivityAtMs: null, acknowledgedAtMs: 15_000, challengeStartedAtMs: null })).toBe('active');
-		expect(tagGameHolderResponseState({ nowMs: 25_001, normalActivityAtMs: null, acknowledgedAtMs: 15_000, challengeStartedAtMs: null })).toBe('challenge');
-		expect(tagGameHolderResponseState({ nowMs: 27_000, normalActivityAtMs: null, acknowledgedAtMs: 15_000, challengeStartedAtMs: 22_000 })).toBe('unresponsive');
-		expect(tagGameHolderResponseState({ nowMs: 26_000, normalActivityAtMs: null, acknowledgedAtMs: 25_500, challengeStartedAtMs: null })).toBe('active');
-		expect(tagGameHolderResponseState({ nowMs: 35_501, normalActivityAtMs: null, acknowledgedAtMs: 25_500, challengeStartedAtMs: null })).toBe('challenge');
+		expect(tagGameHolderResponseState({ nowMs: TAG_GAME_NO_ACTIVITY_MS, normalActivityAtMs: 0, acknowledgedAtMs: null, challengeStartedAtMs: null })).toBe('precheck');
+		expect(tagGameHolderResponseState({ nowMs: 23_000, normalActivityAtMs: 0, acknowledgedAtMs: null, precheckStartedAtMs: 15_000, challengeStartedAtMs: null })).toBe('challenge');
+		expect(tagGameHolderResponseState({ nowMs: 29_999, normalActivityAtMs: 0, acknowledgedAtMs: null, challengeStartedAtMs: 22_000 })).toBe('challenge');
+		expect(tagGameHolderResponseState({ nowMs: 30_000, normalActivityAtMs: 0, acknowledgedAtMs: null, challengeStartedAtMs: 22_000 })).toBe('unresponsive');
+		expect(tagGameHolderResponseState({ nowMs: 26_000, normalActivityAtMs: 25_500, acknowledgedAtMs: null, challengeStartedAtMs: 22_000 })).toBe('active');
+		expect(TAG_GAME_PRECHECK_TIMEOUT_MS).toBe(8_000);
+		expect(TAG_GAME_RESPONSE_TIMEOUT_MS).toBe(8_000);
+	});
+
+	it('caps effect accounting at 23 seconds and does not require a timestamp update to accept a matching response', () => {
+		expect(tagGameEffectSafetyCutoffMs(1_000, 100_000)).toBe(24_000);
+		expect(tagGameEffectSafetyCutoffMs(90_000, 100_000)).toBe(100_000);
+		const state = { ...runningGame([{ pubkey: HOST_PUBKEY, runNumber: 7, registeredAt: 100, status: 'active' as const, points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 }], HOST_PUBKEY), holderChallengeId: 'challenge-id' };
+		expect(isValidTagGameHolderResponse({ state, pubkey: HOST_PUBKEY, runNumber: 7, challengeId: 'challenge-id', createdAtSeconds: 101, receivedAtMs: 101_100 })).toBe(true);
+		expect(isValidTagGameHolderResponse({ state, pubkey: HOST_PUBKEY, runNumber: 7, challengeId: 'old-challenge', createdAtSeconds: 101, receivedAtMs: 101_100 })).toBe(false);
+		expect(isValidTagGameHolderResponse({ state, pubkey: HOST_PUBKEY, runNumber: 6, challengeId: 'challenge-id', createdAtSeconds: 101, receivedAtMs: 101_100 })).toBe(false);
+	});
+
+	it('keeps a validated precheck response as the holder activity baseline independent of state publishing', () => {
+		const at = latestTagGameHolderActivityAt({ nowMs: 40_000, startedAtMs: 1_000, transferAtMs: 1_000,
+			persistedResponseAtMs: null, worldActivityAtMs: 0, precheckResponseAtMs: null, localResponseAtMs: 25_000 });
+		expect(at).toBe(25_000);
+		expect(tagGameEffectSafetyCutoffMs(at, 100_000)).toBe(48_000);
+	});
+
+	it('bounds proof-refresh retries and aggregates in-flight requests', () => {
+		expect(canRetryTagGamePositionProofRefresh({ attempts: 0, lastAttemptAtMs: 0, nowMs: 1_000, inFlight: false })).toBe(true);
+		expect(canRetryTagGamePositionProofRefresh({ attempts: 1, lastAttemptAtMs: 2_000, nowMs: 2_000 + TAG_GAME_POSITION_PROOF_REFRESH_RETRY_MS - 1, inFlight: false })).toBe(false);
+		expect(canRetryTagGamePositionProofRefresh({ attempts: 1, lastAttemptAtMs: 2_000, nowMs: 2_000 + TAG_GAME_POSITION_PROOF_REFRESH_RETRY_MS, inFlight: false })).toBe(true);
+		expect(canRetryTagGamePositionProofRefresh({ attempts: 1, lastAttemptAtMs: 0, nowMs: 10_000, inFlight: true })).toBe(false);
+		expect(canRetryTagGamePositionProofRefresh({ attempts: TAG_GAME_POSITION_PROOF_REFRESH_MAX_ATTEMPTS, lastAttemptAtMs: 0, nowMs: 10_000, inFlight: false })).toBe(false);
 	});
 
 	it('confirms a normal participant leave without interrupting the remaining game', () => {

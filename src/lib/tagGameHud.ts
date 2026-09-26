@@ -1,5 +1,6 @@
 import {
 	createTagGameSchedule,
+	tagGameScheduledEffectAt,
 	TAG_GAME_BENEFIT_POINTS_PER_SECOND,
 	TAG_GAME_LIFESPAN_LOSS_MS_PER_SECOND,
 	TAG_GAME_MAX_LIFESPAN_LOSS_MS,
@@ -15,6 +16,7 @@ export type TagGameHudProjectionInput = Readonly<{
 	localLockGameId: string | null;
 	localAppliedPoints: number;
 	localAppliedLossMs: number;
+	holderActivityAtMs?: number;
 	savedPoints: number;
 	effectiveExpiresAtMs: number;
 	nowMs: number;
@@ -31,16 +33,8 @@ export type TagGameHudProjection = Readonly<{
 	calamityRateActive: boolean;
 }>;
 
-export function isOrganizerConfirmedTagGameEffectCurrent(game: TagGameState, nowMs: number): boolean {
-	if (game.phase !== 'running' || !game.seed || game.seed.length > 256 || game.startedAt === undefined || game.endsAt === undefined ||
-		nowMs < game.startedAt * 1000 || nowMs >= game.endsAt * 1000) return false;
-	const elapsed = nowMs - game.startedAt * 1000;
-	let boundary = 0;
-	const interval = createTagGameSchedule(game.seed).find((entry) => {
-		boundary += entry.durationMs;
-		return elapsed < boundary;
-	});
-	return interval?.effect === game.effect;
+export function isTagGameScheduledEffectActive(game: TagGameState, nowMs: number): boolean {
+	return tagGameScheduledEffectAt(game, nowMs) !== null;
 }
 
 export function projectTagGameHud(input: TagGameHudProjectionInput): TagGameHudProjection {
@@ -71,30 +65,33 @@ export function projectTagGameHud(input: TagGameHudProjectionInput): TagGameHudP
 		!game.holderChallengeId && game.ownerPubkey === input.selfPubkey && own.status === 'active' &&
 		input.nowMs >= game.settledAtMs && input.nowMs < game.endsAt * 1000) {
 		const schedule = createTagGameSchedule(game.seed);
+		const holderActivityAtMs = input.holderActivityAtMs ?? Math.max(game.startedAt * 1_000, game.transferAt ?? 0, game.lastHolderResponseAtMs ?? 0);
+		const until = Math.min(input.nowMs, game.endsAt * 1000, holderActivityAtMs + 23_000);
+		let cursor = Math.max(game.settledAtMs, game.startedAt * 1_000);
 		let boundary = 0;
-		const elapsedAtCheckpoint = game.settledAtMs - game.startedAt * 1000;
-		const currentInterval = schedule.find((interval) => {
+		let benefitDurationMs = 0;
+		let calamityDurationMs = 0;
+		for (const interval of schedule) {
+			const intervalStart = game.startedAt * 1_000 + boundary;
 			boundary += interval.durationMs;
-			return elapsedAtCheckpoint < boundary;
-		});
-		// The signed effect is authoritative. If its scheduled switch has passed but
-		// the organizer has not confirmed the next state, stop projecting here.
-		if (currentInterval?.effect === game.effect) {
-			const intervalEnd = game.startedAt * 1000 + boundary;
-			const until = Math.min(input.nowMs, game.endsAt * 1000, intervalEnd);
-			const duration = Math.max(0, until - game.settledAtMs);
-			if (duration > 0 && game.effect === 'benefit') {
-				const projectedCumulative = Math.min(TAG_GAME_MAX_POINTS,
-					Math.floor((own.benefitMs + duration) * TAG_GAME_BENEFIT_POINTS_PER_SECOND / 1000));
-				predictedPoints = Math.max(0, projectedCumulative - own.points);
-				benefitRateActive = input.nowMs < intervalEnd;
-			} else if (duration > 0 && game.effect === 'calamity') {
-				const projectedCumulative = Math.min(TAG_GAME_MAX_LIFESPAN_LOSS_MS,
-					Math.floor((own.calamityMs + duration) * TAG_GAME_LIFESPAN_LOSS_MS_PER_SECOND / 1000));
-				predictedLossMs = Math.max(0, projectedCumulative - own.lifespanLossMs);
-				calamityRateActive = input.nowMs < intervalEnd;
-			}
+			const intervalEnd = game.startedAt * 1_000 + boundary;
+			const duration = Math.max(0, Math.min(until, intervalEnd) - Math.max(cursor, intervalStart));
+			if (interval.effect === 'benefit') benefitDurationMs += duration;
+			else calamityDurationMs += duration;
 		}
+		if (benefitDurationMs > 0) {
+			const projectedCumulative = Math.min(TAG_GAME_MAX_POINTS,
+				Math.floor((own.benefitMs + benefitDurationMs) * TAG_GAME_BENEFIT_POINTS_PER_SECOND / 1000));
+			predictedPoints = Math.max(0, projectedCumulative - own.points);
+		}
+		if (calamityDurationMs > 0) {
+			const projectedCumulative = Math.min(TAG_GAME_MAX_LIFESPAN_LOSS_MS,
+				Math.floor((own.calamityMs + calamityDurationMs) * TAG_GAME_LIFESPAN_LOSS_MS_PER_SECOND / 1000));
+			predictedLossMs = Math.max(0, projectedCumulative - own.lifespanLossMs);
+		}
+		const currentEffect = tagGameScheduledEffectAt(game, input.nowMs);
+		benefitRateActive = currentEffect === 'benefit' && input.nowMs < holderActivityAtMs + 23_000;
+		calamityRateActive = currentEffect === 'calamity' && input.nowMs < holderActivityAtMs + 23_000;
 	}
 
 	return {

@@ -5,6 +5,7 @@ type MovementHoldSource = 'page' | 'composer-editor';
 
 export type MovementInputControllerOptions = Readonly<{
 	requestMovement: (direction: Direction) => void;
+	requestDirectionalAction: (direction: Direction) => void;
 	canUseArrowForMovement: (event: KeyboardEvent) => boolean;
 	canUseWASDForMovement: (event: KeyboardEvent) => boolean;
 	isComposerEditorKeyboardEvent: (event: Event) => boolean;
@@ -61,6 +62,7 @@ export function createMovementInputController(
 	};
 
 	const requestMovement = (direction: Direction) => {
+		options.requestDirectionalAction(direction);
 		options.requestMovement(direction);
 	};
 
@@ -101,6 +103,7 @@ export function createMovementInputController(
 
 	const updatePointer = (pointerId: number, direction: Direction) => {
 		if (movementHoldOwner === 'pointer' && movementHoldPointerId === pointerId) {
+			if (movementHoldDirection !== direction) options.requestDirectionalAction(direction);
 			movementHoldDirection = direction;
 		}
 	};
@@ -174,6 +177,7 @@ export function createMovementInputController(
 			return;
 		}
 		movementHoldDirection = nextDirection;
+		if (nextDirection !== null) options.requestDirectionalAction(nextDirection);
 	};
 
 	const handleFocusIn = (event: FocusEvent) => {

@@ -147,7 +147,13 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		TAG_GAME_GAME_MS,
 		TAG_GAME_LOBBY_MAX_AGE_SECONDS,
 		TAG_GAME_LOBBY_RENEW_MS,
+		TAG_GAME_NO_ACTIVITY_MS,
+		TAG_GAME_PRECHECK_TIMEOUT_MS,
+		TAG_GAME_RESPONSE_TIMEOUT_MS,
 		TAG_GAME_RESERVATION_RECOVERY_MS,
+		TAG_GAME_TOUCH_EVIDENCE_WAIT_MS,
+		TAG_GAME_TOUCH_FEEDBACK_MS,
+		TAG_GAME_TOUCH_RETRY_MS,
 		TAG_GAME_LIFESPAN_LOSS_MS_PER_SECOND,
 		TAG_GAME_KIND,
 		TAG_GAME_ACTION_KIND,
@@ -158,15 +164,25 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		buildTagGameActionTemplate,
 		createTagGameId,
 		createTagGameSchedule,
+		tagGameScheduledEffectAt,
+		canRetryTagGamePositionProofRefresh,
+		latestTagGameHolderActivityAt,
+		TAG_GAME_POSITION_PROOF_REFRESH_MAX_ATTEMPTS,
+		TAG_GAME_POSITION_PROOF_REFRESH_RETRY_MS,
 		finalizeTagGameState,
 		isFreshTagGameLobby,
+		isFreshTagGameTouchAction,
+		isValidTagGameHolderResponse,
+		isTagGameTouchProofSuperseded,
+		isTagGameTouchPositionProof,
 		leaveTagGameParticipant,
 		parseTagGameActionEvent,
 		parseTagGameEvent,
-		tagGameHolderResponseState,
+		tagGameEffectSafetyCutoffMs,
+		type TagGameTouchPositionProof,
 		type TagGameState
 	} from '$lib/tagGame';
-	import { isOrganizerConfirmedTagGameEffectCurrent, projectTagGameHud } from '$lib/tagGameHud';
+	import { isTagGameScheduledEffectActive, projectTagGameHud } from '$lib/tagGameHud';
 	import { isOwnTagGameStartTransition } from '$lib/tagGamePresentation';
 	import {
 		prepareCharacterProfilePublication,
@@ -175,9 +191,10 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	} from '$lib/initialProfilePublication';
 	import { allocateParticipantColors, projectFrontendPresence, type Participant } from '$lib/frontend/presencePresentation';
 	import { advanceMergedAnchorHistory } from '$lib/frontend/mergedAnchorHistory';
-	import { debugTimeoutParticipant, type PresenceState } from '$lib/presence';
+	import { debugTimeoutParticipant, PRESENCE_TIMEOUT_MS, type PresenceState } from '$lib/presence';
 	import { addRecentMessage, createRecentMessageTimeline, type RecentMessageTimeline } from '$lib/recentMessageTimeline';
-import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from '$lib/nostrProtocol';
+	import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from '$lib/nostrProtocol';
+	import type { ReducedPresenceParticipant } from '$lib/presenceEvidence';
 	import {
 		groupTraceRoots,
 		isWithinTraceInvestigationRange
@@ -354,9 +371,32 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 	let tagGameDiscoverySince = 0;
 	const tagGameLastLobbyRenewalMs = new Map<string, number>();
 	const tagGameLastPublishSeconds = new Map<string, number>();
+	const tagGameHolderProbes = new Map<string, { challengeId: string; ownerPubkey: string; runNumber: number; startedAtMs: number; requestAcknowledgedAtMs: number | null; responseAtMs: number | null; lastAttemptAtMs: number; requestPending: boolean }>();
+	const tagGameHolderLocalActivityAt = new Map<string, { ownerPubkey: string; runNumber: number; atMs: number }>();
+	const tagGameEffectPauses = new Map<string, { challengeId: string; ownerPubkey: string; runNumber: number; pausedAtMs: number; statePublishPending: boolean; formalRequestPending: boolean; formalLastAttemptAtMs: number }>();
+	const tagGameFormalChallengeAcks = new Map<string, number>();
+	const tagGameHolderResponsePending = new Set<string>();
 	let advancingTagGames = false;
 	const tagGamePublishQueues = new Map<string, Promise<unknown>>();
 	const tagGameTouchAttempts = new Map<string, number>();
+	type TagGameProofRefreshAttempt = { gameId: string; pubkey: string; runNumber: number; mode: 'host-request' | 'local-refresh'; attempts: number; lastAttemptAtMs: number; inFlight: boolean; completed: boolean; baselineEvidenceId: string | null; requireNewEvidence: boolean; lastRequestEventId: string | null; restartAfterBatch: boolean; timer: number | null };
+	const tagGameProofRefreshAttempts = new Map<string, TagGameProofRefreshAttempt>();
+	const tagGamePositionEvidenceWaiters = new Set<() => void>();
+	const tagGameTouchSeenEventIds = new Map<string, number>();
+	const tagGameTouchStatusTimers = new Map<string, number>();
+	const tagGameTouchStatusVersions = new Map<string, number>();
+	const tagGameTouchStatusTargets = new Map<string, string>();
+	let tagGameTouchStatusVersionSequence = 0;
+	const tagGameTouchRequestVersions = new Map<string, number>();
+	let tagGameTouchRequestVersionSequence = 0;
+	const tagGamePositionEvidenceIdsByPubkey = new Map<string, string[]>();
+	const tagGameWorldStateIdsByPubkey = new Map<string, string[]>();
+	let tagGameTouchStatuses = $state.raw(new Map<string, Readonly<{ targetPubkey: string; label: string }>>());
+	let tagGameTouchAttempt = $state.raw<Readonly<{ participantId: string; direction: Direction; id: number }> | null>(null);
+	let tagGameTouchAttemptSequence = 0;
+	let tagGameHolderTransfer = $state.raw<Readonly<{ participantId: string; id: number }> | null>(null);
+	let tagGameHolderTransferSequence = 0;
+	let tagGamePositionEvidence = $state.raw(new Map<string, ReducedPresenceParticipant>());
 	const LIFESPAN_HUD_REFRESH_INTERVAL_MS = 30_000;
 	let selfPositionWriteState = $state.raw<SelfPositionWriteState>({ kind: 'unavailable' });
 	let selfMessageAvailability: SelfMessageAvailability = { kind: 'unavailable' };
@@ -496,9 +536,9 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 	let devCooperationDefectionPlayground = $state<DevCooperationDefectionPlayground | null>(null);
 	let devCooperationDefectionPlaygroundState = $state.raw<DevCooperationDefectionPlaygroundState | null>(null);
 	const movementInputController = createMovementInputController({
+		requestDirectionalAction: attemptTagGameTouch,
 		requestMovement: (direction) => {
 			closeFieldActionMenu();
-			attemptTagGameTouch(direction);
 			moveSelfFromCell(direction);
 		},
 		canUseArrowForMovement,
@@ -601,14 +641,19 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 			localAppliedLossMs: lock?.lifespanLossMs ?? 0,
 			savedPoints: personaSnapshot.gameState.points,
 			effectiveExpiresAtMs: tagGameHudWorkProjection.effectiveExpiresAtMs,
-			nowMs: tagGameHudNowMs
+			nowMs: tagGameHudNowMs,
+			holderActivityAtMs: game && game.ownerPubkey === personaSnapshot.signer.pubkey ? tagGameHolderActivityAt(game, tagGameHudNowMs) : undefined
 		});
 	});
 	let tagGameDisplayedEffect = $derived.by(() => {
 		const game = tagGameDisplayedGame;
 		if (!game) return null;
 		const holder = game.participant.find((member) => member.pubkey === game.ownerPubkey);
-		return { effect: game.effect ?? null, active: isOrganizerConfirmedTagGameEffectCurrent(game, tagGameHudNowMs) && !game.holderChallengeId && holder?.status === 'active' };
+		const self = personaSnapshot;
+		const localPause = self && game.hostPubkey === self.signer.pubkey ? tagGameEffectPauses.get(game.gameId) : null;
+		const locallyPaused = Boolean(localPause && localPause.ownerPubkey === game.ownerPubkey && localPause.runNumber === holder?.runNumber && tagGameHudNowMs >= localPause.pausedAtMs);
+		return { effect: tagGameScheduledEffectAt(game, tagGameHudNowMs), locallyPaused,
+			active: isTagGameScheduledEffectActive(game, tagGameHudNowMs) && !game.holderChallengeId && !locallyPaused && holder?.status === 'active' };
 	});
 	let tagGameRoleByPubkey = $derived.by(() => {
 		const roles = new Map<string, 'participant' | 'holder'>();
@@ -621,6 +666,35 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 			}
 		}
 		return roles;
+	});
+	let tagGameTouchTargetIds = $derived.by(() => {
+		const targets = new Set<string>();
+		const game = tagGameDisplayedGame;
+		const self = personaSnapshot;
+		if (!game || game.phase !== 'running' || !tagGameDisplayedEffect?.active || !self) return targets;
+		const own = game.participant.find((member) => member.pubkey === self.signer.pubkey && member.runNumber === self.activeRun.runNumber && member.status === 'active');
+		const ownPresence = tagGamePositionEvidence.get(self.signer.pubkey);
+		if (!own || !ownPresence || ownPresence.lastPositiveActivityCreatedAt === null ||
+			(ownPresence.latestExitCreatedAt !== null && ownPresence.lastPositiveActivityCreatedAt <= ownPresence.latestExitCreatedAt) ||
+			tagGameHudNowMs - ownPresence.lastPositiveActivityCreatedAt * 1_000 >= PRESENCE_TIMEOUT_MS) return targets;
+		const ownAnchor = latestTagGameWorldStates.get(self.signer.pubkey);
+		if (ownAnchor && (ownAnchor.state !== 'active' || ownAnchor.runNumber !== own.runNumber)) return targets;
+		const currentEffect = tagGameDisplayedEffect?.effect;
+		const shouldChaseHolder = currentEffect === 'benefit' ? self.signer.pubkey !== game.ownerPubkey : currentEffect === 'calamity' && self.signer.pubkey === game.ownerPubkey;
+		if (!shouldChaseHolder) return targets;
+		for (const member of game.participant) {
+			if (member.pubkey === self.signer.pubkey || member.status !== 'active') continue;
+			const targetAnchor = latestTagGameWorldStates.get(member.pubkey);
+			const targetPresence = tagGamePositionEvidence.get(member.pubkey);
+			const targetWorldPresence = presenceState.participants.find((participant) => participant.id === member.pubkey);
+			if ((targetAnchor && (targetAnchor.state !== 'active' || targetAnchor.runNumber !== member.runNumber)) || !targetPresence || !targetWorldPresence || targetWorldPresence.status !== 'active' ||
+				targetPresence.lastPositiveActivityCreatedAt === null || (targetPresence.latestExitCreatedAt !== null && targetPresence.lastPositiveActivityCreatedAt <= targetPresence.latestExitCreatedAt)) continue;
+			if (tagGameHudNowMs - targetPresence.lastPositiveActivityCreatedAt * 1_000 >= PRESENCE_TIMEOUT_MS) continue;
+			const isHolder = member.pubkey === game.ownerPubkey;
+			if ((currentEffect === 'benefit' && !isHolder) || (currentEffect === 'calamity' && isHolder)) continue;
+			if (Math.max(Math.abs(ownPresence.position.x - targetPresence.position.x), Math.abs(ownPresence.position.y - targetPresence.position.y)) === 1) targets.add(member.pubkey);
+		}
+		return targets;
 	});
 	let canUseAdjustmentTerminal = $derived(!devWorldSandboxEnabled && !personaLifecycleTransition && !tagGameLocalLock && Boolean(worldSession && personaSnapshot && selfIsActive && selfLogicalPosition && isWithinFacilityInteractionRange(selfLogicalPosition, ADJUSTMENT_TERMINAL)));
 	let canUseTagGameTerminal = $derived(!devWorldSandboxEnabled && !personaLifecycleTransition && Boolean(worldSession && selfIsActive && selfLogicalPosition && isWithinFacilityInteractionRange(selfLogicalPosition, TAG_GAME_TERMINAL)));
@@ -1251,6 +1325,7 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 					}
 				} : {}),
 				onPresenceChanged: acceptPresence,
+				onPositionEvidenceChanged: acceptTagGamePositionEvidence,
 				onWorldStateEvent: handleTagGameWorldState,
 				onLiveMessage: receiveLiveMessage,
 				onTimelineMessage: receiveSessionTimelineMessage,
@@ -1679,6 +1754,23 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 		const nextProjection = projectFrontendPresence({ presence: nextPresence,
 			selectedCharacterId: selectedId, selfProjectionId: projectionId, geometry, colors: nextColors });
 		animatePresenceTransition(previousProjection, nextProjection, projectionId);
+	}
+
+	function rememberTagGameEvidenceId(byPubkey: Map<string, string[]>, pubkey: string, eventId: string): void {
+		const ids = byPubkey.get(pubkey) ?? [];
+		if (ids.includes(eventId)) return;
+		byPubkey.set(pubkey, [...ids, eventId].slice(-4));
+	}
+
+	function acceptTagGamePositionEvidence(evidence: readonly ReducedPresenceParticipant[]): void {
+		tagGamePositionEvidence = new Map(evidence.map((participant) => [participant.pubkey, participant]));
+		for (const participant of evidence) {
+			rememberTagGameEvidenceId(tagGamePositionEvidenceIdsByPubkey, participant.pubkey, participant.positionEvidence.eventId);
+			for (const attempt of tagGameProofRefreshAttempts.values()) {
+				if (attempt.pubkey === participant.pubkey) completeTagGameProofRefreshIfResolved(attempt);
+			}
+		}
+		for (const notify of tagGamePositionEvidenceWaiters) notify();
 	}
 
 	function setEffectiveTraceRoots(roots: readonly ParsedWorldMessage[]): void {
@@ -2297,22 +2389,46 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 			return;
 		}
 		if (previous && createdAt > previous.createdAt) tagGameConflictSince.delete(state.gameId);
+		if (previous?.state.ownerPubkey && state.ownerPubkey && previous.state.ownerPubkey !== state.ownerPubkey) {
+			tagGameHolderProbes.delete(state.gameId);
+			tagGameHolderLocalActivityAt.delete(state.gameId);
+			tagGameEffectPauses.delete(state.gameId);
+			for (const key of tagGameFormalChallengeAcks.keys()) if (key.startsWith(`${state.gameId}:`)) tagGameFormalChallengeAcks.delete(key);
+		}
+		const recoveredPause = tagGameEffectPauses.get(state.gameId);
+		if (recoveredPause && recoveredPause.ownerPubkey === state.ownerPubkey && !state.holderChallengeId && state.settledAtMs >= recoveredPause.pausedAtMs) {
+			tagGameEffectPauses.delete(state.gameId);
+			tagGameHolderProbes.delete(state.gameId);
+			tagGameFormalChallengeAcks.delete(`${state.gameId}:${recoveredPause.challengeId}`);
+		}
 		tagGameHostProbeAtMs.delete(state.gameId);
 		if ((state.phase === 'ended' || state.phase === 'interrupted') && personaSnapshot?.tagGame?.reservation?.gameId === state.gameId) void releaseAndRefreshTagGameParticipation(personaSnapshot, state.gameId);
 		if (previous && personaSnapshot && previous.state.participant.some((member) => member.pubkey === personaSnapshot?.signer.pubkey) && !state.participant.some((member) => member.pubkey === personaSnapshot?.signer.pubkey) && state.phase === 'lobby') {
 			void releaseAndRefreshTagGameParticipation(personaSnapshot, state.gameId);
 		}
 		tagGameEvents.set(state.gameId, { eventId, createdAt, state });
+		pruneTagGameProofRefreshes(state.gameId);
+		if (state.phase === 'ended' || state.phase === 'interrupted') tagGameHolderLocalActivityAt.delete(state.gameId);
+		if (previous && previous.state.ownerPubkey && state.ownerPubkey && previous.state.ownerPubkey !== state.ownerPubkey && state.phase === 'running') {
+			tagGameHolderTransfer = { participantId: state.ownerPubkey, id: ++tagGameHolderTransferSequence };
+			window.setTimeout(() => {
+				if (tagGameHolderTransfer?.id === tagGameHolderTransferSequence) tagGameHolderTransfer = null;
+			}, 800);
+			const touchStatus = tagGameTouchStatuses.get(state.gameId);
+			if (touchStatus) setTagGameTouchStatus(state.gameId, touchStatus.targetPubkey, '所持者が更新されました', 'clear');
+		}
 		const ownStartTransition = isOwnTagGameStartTransition(previous?.state ?? null, state, personaSnapshot?.signer.pubkey ?? null, personaSnapshot?.activeRun.runNumber ?? null);
 		if (ownStartTransition && tagGamePanelOpen) {
 			tagGamePanelOpen = false;
 		}
-		if (ownStartTransition || tagGameWatchedGameId === state.gameId) {
+		const ownActiveRun = personaSnapshot && state.participant.some((member) => member.pubkey === personaSnapshot?.signer.pubkey && member.runNumber === personaSnapshot.activeRun.runNumber && member.status === 'active');
+		if (ownStartTransition || tagGameWatchedGameId === state.gameId || state.phase === 'running' && ownActiveRun) {
 			tagGameHudNowMs = Date.now();
 			tagGameHudLastSecond = Math.floor(tagGameHudNowMs / 1000);
 		}
 		if (tagGameWatchedGameId === state.gameId && state.phase !== 'running' && state.phase !== 'settling') tagGameWatchedGameId = null;
 		const nowSeconds = Math.floor(Date.now() / 1000);
+		if (state.phase === 'running') refreshOwnTagGamePositionProof(state);
 		const localMember = personaSnapshot && state.participant.find((member) => member.pubkey === personaSnapshot?.signer.pubkey && member.runNumber === personaSnapshot.activeRun.runNumber);
 		const freshStateEvent = nowSeconds - createdAt <= TAG_GAME_LOBBY_MAX_AGE_SECONDS && nowSeconds >= createdAt - 5;
 		const ongoingReservationState = freshStateEvent && (state.phase === 'lobby' ? isFreshTagGameLobby(state, nowSeconds) :
@@ -2407,8 +2523,9 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 		const createdAt = Math.floor(Date.now() / 1000);
 		const event = finalizeEvent(buildTagGameActionTemplate({ channelId: channel.channelId, gameId, action, runNumber: self.activeRun.runNumber, nonce: tagGameNonce(), createdAt, payload }), self.signer.secretKey);
 		try {
-			const result = await worldSession.publishRealtime(event);
-			const confirmed = result.outcome !== 'unconfirmed';
+			const handle = await worldSession.publishRealtimeTracked(event);
+			const confirmed = await handle.firstSuccess;
+			void handle.settled;
 			if (confirmed && action === 'leave' && tagGameEvents.get(gameId)?.state.hostPubkey === self.signer.pubkey) handleTagGameSupplementalEvent(event);
 			return confirmed;
 		} catch { return false; }
@@ -2437,11 +2554,15 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 			const createdAt = Math.floor(Date.now() / 1000);
 			const state = { ...next, updatedAt: createdAt };
 			const event = finalizeTagGameState(state, channel.channelId, createdAt, self.signer.secretKey);
-			const result = await session.publishRealtime(event);
-			if (result.outcome === 'unconfirmed') return false;
+			const handle = await session.publishRealtimeTracked(event);
+			if (!await handle.firstSuccess) {
+				await handle.settled;
+				return false;
+			}
 			tagGameLastPublishSeconds.set(gameId, createdAt);
 			if (state.phase === 'lobby' && state.hostPubkey === self.signer.pubkey) tagGameLastLobbyRenewalMs.set(state.gameId, Date.now());
 			rememberTagGameEnvelope(event.id, createdAt, state);
+			void handle.settled;
 			return true;
 		};
 		const queue = tagGamePublishQueues.get(gameId) ?? Promise.resolve();
@@ -2523,6 +2644,370 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 		await publishTagGameAction(gameId, 'consent', { proposalId });
 	}
 
+	type TagGameTouchProofState = 'ready' | 'stale' | 'missing';
+
+	function tagGameTouchProofState(pubkey: string, memberRunNumber: number, proof: unknown): TagGameTouchProofState {
+		if (!isTagGameTouchPositionProof(proof)) return 'missing';
+		const anchor = latestTagGameWorldStates.get(pubkey);
+		const position = tagGamePositionEvidence.get(pubkey);
+		const anchorHistory = tagGameWorldStateIdsByPubkey.get(pubkey) ?? [];
+		const positionHistory = tagGamePositionEvidenceIdsByPubkey.get(pubkey) ?? [];
+		if (!anchor || !position) return 'missing';
+		if (isTagGameTouchProofSuperseded({
+			proof,
+			currentWorldStateEventId: anchor.id,
+			currentWorldState: anchor.state,
+			currentRunNumber: anchor.runNumber ?? null,
+			memberRunNumber,
+			currentPositionEvidenceEventId: position.positionEvidence.eventId,
+			knownWorldStateEventIds: anchorHistory,
+			knownPositionEvidenceEventIds: positionHistory
+		})) return 'stale';
+		if (anchor.id !== proof.worldStateEventId) return 'missing';
+		if (position.positionEvidence.eventId !== proof.positionEvidenceEventId && positionHistory.includes(proof.positionEvidenceEventId)) return 'stale';
+		if (position.positionEvidence.eventId !== proof.positionEvidenceEventId) return 'missing';
+		const positiveAt = position.lastPositiveActivityCreatedAt;
+		const nowSeconds = Math.floor(Date.now() / 1_000);
+		const worldParticipant = presenceState.participants.find((participant) => participant.id === pubkey);
+		if (positiveAt === null || position.positionEvidence.source === 'world-state-exit' || !worldParticipant || worldParticipant.status !== 'active' ||
+			(position.latestExitCreatedAt !== null && positiveAt <= position.latestExitCreatedAt) ||
+			nowSeconds - positiveAt >= PRESENCE_TIMEOUT_MS / 1_000) return 'stale';
+		return 'ready';
+	}
+
+	function waitForTagGameTouchEvidence(game: TagGameState, actorPubkey: string, targetPubkey: string, actorProof: unknown, targetProof: unknown): Promise<TagGameTouchProofState> {
+		const actor = game.participant.find((member) => member.pubkey === actorPubkey && member.status === 'active');
+		const target = game.participant.find((member) => member.pubkey === targetPubkey && member.status === 'active');
+		if (!actor || !target) return Promise.resolve('stale');
+		const status = () => {
+			const actorStatus = tagGameTouchProofState(actorPubkey, actor.runNumber, actorProof);
+			const targetStatus = tagGameTouchProofState(targetPubkey, target.runNumber, targetProof);
+			return actorStatus === 'stale' || targetStatus === 'stale' ? 'stale' : actorStatus === 'ready' && targetStatus === 'ready' ? 'ready' : 'missing';
+		};
+		const initial = status();
+		if (initial !== 'missing') return Promise.resolve(initial);
+		return new Promise((resolve) => {
+			let finished = false;
+			let timeout = 0;
+			const finish = (result: TagGameTouchProofState) => {
+				if (finished) return;
+				finished = true;
+				window.clearTimeout(timeout);
+				tagGamePositionEvidenceWaiters.delete(check);
+				resolve(result);
+			};
+			const check = () => {
+				const current = status();
+				if (current !== 'missing') finish(current);
+			};
+			tagGamePositionEvidenceWaiters.add(check);
+			timeout = window.setTimeout(() => finish(status() === 'stale' ? 'stale' : 'missing'), TAG_GAME_TOUCH_EVIDENCE_WAIT_MS);
+		});
+	}
+
+	function tagGameProofRefreshKey(gameId: string, pubkey: string, runNumber: number): string {
+		return `${gameId}:${pubkey}:${runNumber}`;
+	}
+
+	function currentTagGameTouchProof(pubkey: string, runNumber: number): TagGameTouchPositionProof | undefined {
+		const anchor = latestTagGameWorldStates.get(pubkey);
+		const position = tagGamePositionEvidence.get(pubkey);
+		if (!anchor || anchor.state !== 'active' || anchor.runNumber !== runNumber || !position || position.positionEvidence.source === 'world-state-exit') return undefined;
+		return { worldStateEventId: anchor.id, positionEvidenceEventId: position.positionEvidence.eventId };
+	}
+
+	function stopTagGameProofRefresh(attempt: TagGameProofRefreshAttempt, remove = false): void {
+		if (attempt.timer !== null) window.clearTimeout(attempt.timer);
+		attempt.timer = null;
+		attempt.completed = true;
+		if (remove) tagGameProofRefreshAttempts.delete(tagGameProofRefreshKey(attempt.gameId, attempt.pubkey, attempt.runNumber));
+	}
+
+	function pruneTagGameProofRefreshes(gameId: string): void {
+		const game = tagGameEvents.get(gameId)?.state;
+		for (const attempt of tagGameProofRefreshAttempts.values()) {
+			if (attempt.gameId !== gameId) continue;
+			const member = game?.participant.find((candidate) => candidate.pubkey === attempt.pubkey);
+			if (!game || game.phase !== 'running' || !member || member.runNumber !== attempt.runNumber || member.status !== 'active' ||
+				(attempt.pubkey === personaSnapshot?.signer.pubkey && personaSnapshot.activeRun.runNumber !== attempt.runNumber)) {
+				stopTagGameProofRefresh(attempt, true);
+			}
+		}
+	}
+
+	function completeTagGameProofRefreshIfResolved(attempt: TagGameProofRefreshAttempt): boolean {
+		const proof = currentTagGameTouchProof(attempt.pubkey, attempt.runNumber);
+		const proofState = tagGameTouchProofState(attempt.pubkey, attempt.runNumber, proof);
+		const resolved = proofState !== 'missing' && (!attempt.requireNewEvidence || proof?.positionEvidenceEventId !== attempt.baselineEvidenceId);
+		if (resolved) stopTagGameProofRefresh(attempt);
+		return resolved;
+	}
+
+	function scheduleTagGameProofRefresh(attempt: TagGameProofRefreshAttempt, delayMs: number): void {
+		if (attempt.completed || attempt.timer !== null || attempt.attempts >= TAG_GAME_POSITION_PROOF_REFRESH_MAX_ATTEMPTS) return;
+		attempt.timer = window.setTimeout(() => {
+			attempt.timer = null;
+			void attemptTagGameProofRefresh(attempt);
+		}, delayMs);
+	}
+
+	async function attemptTagGameProofRefresh(attempt: TagGameProofRefreshAttempt): Promise<void> {
+		if (attempt.completed || attempt.inFlight) return;
+		const game = tagGameEvents.get(attempt.gameId)?.state;
+		const self = personaSnapshot;
+		const member = game?.participant.find((candidate) => candidate.pubkey === attempt.pubkey && candidate.runNumber === attempt.runNumber && candidate.status === 'active');
+		if (!game || game.phase !== 'running' || !member ||
+			(attempt.mode === 'host-request' && game.hostPubkey !== self?.signer.pubkey) ||
+			(attempt.mode === 'local-refresh' && (attempt.pubkey !== self?.signer.pubkey || self.activeRun.runNumber !== attempt.runNumber))) {
+			stopTagGameProofRefresh(attempt, true);
+			return;
+		}
+		if (attempt.mode === 'host-request' && tagGameTouchProofState(attempt.pubkey, attempt.runNumber, undefined) !== 'missing') {
+			stopTagGameProofRefresh(attempt);
+			return;
+		}
+		const nowMs = Date.now();
+		if (!canRetryTagGamePositionProofRefresh({ attempts: attempt.attempts, lastAttemptAtMs: attempt.lastAttemptAtMs, nowMs, inFlight: attempt.inFlight })) return;
+		attempt.inFlight = true;
+		attempt.attempts += 1;
+		attempt.lastAttemptAtMs = nowMs;
+		try {
+			if (attempt.mode === 'local-refresh' || attempt.pubkey === self?.signer.pubkey) {
+				await worldSession?.refreshSelfActivity({ forcePositionEvidence: true });
+			} else {
+				await publishTagGameAction(attempt.gameId, 'position-refresh-request', { targetPubkey: attempt.pubkey, targetRunNumber: attempt.runNumber });
+			}
+		} catch {
+			// Failed requests consume one bounded attempt and may retry after the interval.
+		} finally {
+			attempt.inFlight = false;
+		}
+		if (completeTagGameProofRefreshIfResolved(attempt)) return;
+		if (attempt.attempts < TAG_GAME_POSITION_PROOF_REFRESH_MAX_ATTEMPTS) scheduleTagGameProofRefresh(attempt, TAG_GAME_POSITION_PROOF_REFRESH_RETRY_MS);
+		else if (attempt.restartAfterBatch) {
+			attempt.restartAfterBatch = false;
+			attempt.attempts = 0;
+			attempt.lastAttemptAtMs = 0;
+			scheduleTagGameProofRefresh(attempt, TAG_GAME_POSITION_PROOF_REFRESH_RETRY_MS);
+		}
+	}
+
+	function requestTagGamePositionProofRefresh(gameId: string, pubkey: string, runNumber: number, mode: 'host-request' | 'local-refresh', requestEventId?: string): void {
+		const self = personaSnapshot;
+		const game = tagGameEvents.get(gameId)?.state;
+		if (!self || !game || game.phase !== 'running' || (mode === 'host-request' && game.hostPubkey !== self.signer.pubkey) ||
+			!game.participant.some((member) => member.pubkey === pubkey && member.runNumber === runNumber && member.status === 'active')) return;
+		if (mode === 'local-refresh' && (pubkey !== self.signer.pubkey || self.activeRun.runNumber !== runNumber)) return;
+		const key = tagGameProofRefreshKey(gameId, pubkey, runNumber);
+		let attempt = tagGameProofRefreshAttempts.get(key);
+		const currentEvidenceId = tagGamePositionEvidence.get(pubkey)?.positionEvidence.eventId ?? null;
+		if (!attempt || attempt.completed && attempt.baselineEvidenceId !== currentEvidenceId) {
+			attempt = { gameId, pubkey, runNumber, mode, attempts: 0, lastAttemptAtMs: 0, inFlight: false, completed: false,
+				baselineEvidenceId: currentEvidenceId, requireNewEvidence: false, lastRequestEventId: null, restartAfterBatch: false, timer: null };
+			tagGameProofRefreshAttempts.set(key, attempt);
+		}
+		if (requestEventId && attempt.lastRequestEventId !== requestEventId) {
+			attempt.lastRequestEventId = requestEventId;
+			// A distinct, fresh touch/request may start a new bounded retry batch
+			// after an earlier batch was exhausted. Duplicate deliveries retain
+			// the same event ID and therefore remain coalesced.
+			if (!attempt.inFlight && attempt.timer === null && (attempt.completed || attempt.attempts >= TAG_GAME_POSITION_PROOF_REFRESH_MAX_ATTEMPTS)) {
+				attempt.attempts = 0;
+				attempt.lastAttemptAtMs = 0;
+				attempt.completed = false;
+				attempt.baselineEvidenceId = currentEvidenceId;
+			} else if (attempt.inFlight || attempt.timer !== null) attempt.restartAfterBatch = true;
+			attempt.requireNewEvidence = true;
+		}
+		if (attempt.completed || attempt.inFlight || attempt.timer !== null) return;
+		if (Date.now() - attempt.lastAttemptAtMs < TAG_GAME_POSITION_PROOF_REFRESH_RETRY_MS) {
+			scheduleTagGameProofRefresh(attempt, TAG_GAME_POSITION_PROOF_REFRESH_RETRY_MS - (Date.now() - attempt.lastAttemptAtMs));
+			return;
+		}
+		void attemptTagGameProofRefresh(attempt);
+	}
+
+	function refreshOwnTagGamePositionProof(game: TagGameState): void {
+		const self = personaSnapshot;
+		const member = self && game.participant.find((candidate) => candidate.pubkey === self.signer.pubkey && candidate.runNumber === self.activeRun.runNumber && candidate.status === 'active');
+		if (!self || !member || game.phase !== 'running') return;
+		requestTagGamePositionProofRefresh(game.gameId, self.signer.pubkey, member.runNumber, 'local-refresh');
+	}
+
+	function setTagGameTouchStatus(gameId: string, targetPubkey: string, label: string, expiry: 'unconfirmed' | 'clear', expectedVersion?: number): void {
+		const currentVersion = tagGameTouchStatusVersions.get(gameId) ?? 0;
+		if (expectedVersion !== undefined && currentVersion !== expectedVersion) return;
+		const version = expectedVersion ?? ++tagGameTouchStatusVersionSequence;
+		tagGameTouchStatusVersions.set(gameId, version);
+		tagGameTouchStatusTargets.set(gameId, targetPubkey);
+		const previousTimer = tagGameTouchStatusTimers.get(gameId);
+		if (previousTimer !== undefined) window.clearTimeout(previousTimer);
+		tagGameTouchStatuses = new Map(tagGameTouchStatuses).set(gameId, { targetPubkey, label });
+		tagGameTouchStatusTimers.set(gameId, window.setTimeout(() => {
+			const current = tagGameTouchStatuses.get(gameId);
+			if (tagGameTouchStatusVersions.get(gameId) !== version || current?.targetPubkey !== targetPubkey || current.label !== label) return;
+			if (expiry === 'unconfirmed') {
+				setTagGameTouchStatus(gameId, targetPubkey, '転移未確認', 'clear', version);
+				return;
+			}
+			tagGameTouchStatuses = new Map(tagGameTouchStatuses);
+			tagGameTouchStatuses.delete(gameId);
+			tagGameTouchStatusTimers.delete(gameId);
+			tagGameTouchStatusVersions.delete(gameId);
+			tagGameTouchStatusTargets.delete(gameId);
+		}, label === '判定待ち・開催者未確認' ? 2_000 : 1_800));
+	}
+
+	function notifyTagGameTouchEvidenceWaiters(): void {
+		for (const notify of tagGamePositionEvidenceWaiters) notify();
+	}
+
+	function isFreshHolderResponse(createdAtSeconds: number, receivedAtMs: number): boolean {
+		if (!Number.isSafeInteger(createdAtSeconds) || !Number.isSafeInteger(receivedAtMs)) return false;
+		const ageSeconds = Math.floor(receivedAtMs / 1_000) - createdAtSeconds;
+		return ageSeconds >= -2 && ageSeconds <= (TAG_GAME_NO_ACTIVITY_MS + TAG_GAME_PRECHECK_TIMEOUT_MS + TAG_GAME_RESPONSE_TIMEOUT_MS) / 1_000;
+	}
+
+	function acceptTagGameHolderResponse(state: TagGameState, action: NonNullable<ReturnType<typeof parseTagGameActionEvent>>): void {
+		const challengeId = action.payload.challengeId;
+		if (typeof challengeId !== 'string' || !isFreshHolderResponse(action.event.created_at, Date.now())) return;
+		const receivedAtMs = Date.now();
+		const member = state.participant.find((candidate) => candidate.pubkey === action.event.pubkey && candidate.runNumber === action.runNumber && candidate.status === 'active');
+		const signedStopMatches = isValidTagGameHolderResponse({ state, pubkey: action.event.pubkey, runNumber: action.runNumber,
+			challengeId, createdAtSeconds: action.event.created_at, receivedAtMs });
+		const probe = tagGameHolderProbes.get(state.gameId);
+		const precheckMatches = Boolean(member && probe && probe.challengeId === challengeId && probe.ownerPubkey === action.event.pubkey &&
+			probe.runNumber === action.runNumber && action.event.created_at * 1_000 >= probe.startedAtMs - 2_000);
+		if (!signedStopMatches && !precheckMatches) return;
+		const formalAckAt = tagGameFormalChallengeAcks.get(`${state.gameId}:${challengeId}`) ?? state.holderChallengeStartedAtMs;
+		if (formalAckAt !== undefined && receivedAtMs > formalAckAt + TAG_GAME_RESPONSE_TIMEOUT_MS) return;
+		tagGameHolderLocalActivityAt.set(state.gameId, { ownerPubkey: action.event.pubkey, runNumber: action.runNumber, atMs: receivedAtMs });
+		if (probe && probe.challengeId === challengeId) probe.responseAtMs = receivedAtMs;
+		if (!signedStopMatches) {
+			// Precheck is host-local activity evidence; it must not depend on a 37070 publish.
+			tagGameHolderProbes.delete(state.gameId);
+			return;
+		}
+		tagGameHolderResponsePending.add(state.gameId);
+		void updateTagGameState(state.gameId, (current) => {
+			if (current.phase !== 'running' || current.ownerPubkey !== action.event.pubkey ||
+				(current.holderChallengeId !== challengeId && !precheckMatches)) return null;
+			const currentMember = current.participant.find((candidate) => candidate.pubkey === action.event.pubkey && candidate.runNumber === action.runNumber && candidate.status === 'active');
+			if (!currentMember) return null;
+			const accrued = accrueTagGameState(current, receivedAtMs);
+			return { ...accrued, settledAtMs: Math.max(accrued.settledAtMs, receivedAtMs), lastHolderResponseAtMs: receivedAtMs,
+				holderChallengeId: undefined, holderChallengeStartedAtMs: undefined, revision: current.revision + 1 };
+		}).then((published) => {
+			if (published && tagGameHolderProbes.get(state.gameId)?.challengeId === challengeId) tagGameHolderProbes.delete(state.gameId);
+			if (published && tagGameEffectPauses.get(state.gameId)?.challengeId === challengeId) tagGameEffectPauses.delete(state.gameId);
+			if (published) tagGameFormalChallengeAcks.delete(`${state.gameId}:${challengeId}`);
+		}).catch(() => {}).finally(() => { tagGameHolderResponsePending.delete(state.gameId); });
+	}
+
+	function publishTagGameHolderPrecheck(game: TagGameState, probe: NonNullable<ReturnType<typeof tagGameHolderProbes.get>>): void {
+		if (probe.requestPending || Date.now() - probe.lastAttemptAtMs < TAG_GAME_PRECHECK_TIMEOUT_MS) return;
+		probe.requestPending = true;
+		probe.lastAttemptAtMs = Date.now();
+		void publishTagGameAction(game.gameId, 'response-challenge', { challengeId: probe.challengeId, stage: 'precheck' }).then((sent) => {
+			const current = tagGameHolderProbes.get(game.gameId);
+			if (current !== probe) return;
+			probe.requestPending = false;
+			if (sent) probe.requestAcknowledgedAtMs = Date.now();
+		});
+	}
+
+	function publishTagGameEffectStop(game: TagGameState, pause: NonNullable<ReturnType<typeof tagGameEffectPauses.get>>): void {
+		if (pause.statePublishPending) return;
+		pause.statePublishPending = true;
+		void (async () => {
+			try {
+				const alreadyStopped = tagGameEvents.get(game.gameId)?.state.holderChallengeId === pause.challengeId;
+				const stopped = alreadyStopped || await updateTagGameState(game.gameId, (current) => {
+					if (current.phase !== 'running' || current.ownerPubkey !== pause.ownerPubkey) return null;
+					if (current.holderChallengeId === pause.challengeId) return null;
+					if (current.holderChallengeId) return null;
+					const accrued = accrueTagGameState(current, pause.pausedAtMs);
+					return { ...accrued, settledAtMs: pause.pausedAtMs, holderChallengeId: pause.challengeId,
+						holderChallengeStartedAtMs: undefined, revision: current.revision + 1 };
+				});
+				if (!stopped) return;
+				const latest = tagGameEvents.get(game.gameId)?.state;
+				if (!latest || latest.holderChallengeId !== pause.challengeId || pause.formalRequestPending ||
+					Date.now() - pause.formalLastAttemptAtMs < TAG_GAME_PRECHECK_TIMEOUT_MS) return;
+				pause.formalRequestPending = true;
+				pause.formalLastAttemptAtMs = Date.now();
+				const requestSent = await publishTagGameAction(game.gameId, 'response-challenge', { challengeId: pause.challengeId, stage: 'formal' });
+				pause.formalRequestPending = false;
+				if (!requestSent || tagGameEffectPauses.get(game.gameId) !== pause) return;
+				const acknowledgedAtMs = Date.now();
+				tagGameFormalChallengeAcks.set(`${game.gameId}:${pause.challengeId}`, acknowledgedAtMs);
+				await updateTagGameState(game.gameId, (current) => current.phase === 'running' && current.ownerPubkey === pause.ownerPubkey && current.holderChallengeId === pause.challengeId
+					? { ...current, holderChallengeStartedAtMs: acknowledgedAtMs, revision: current.revision + 1 } : null);
+			} catch {
+				// The pause remains local and the next advancement retries publication.
+			} finally {
+				pause.statePublishPending = false;
+			}
+		})();
+	}
+
+	async function processTagGameTouch(
+		observed: TagGameState,
+		action: NonNullable<ReturnType<typeof parseTagGameActionEvent>>,
+		receivedAtMs: number,
+		receivedAtMonotonicMs: number
+	): Promise<void> {
+		if (!action || !personaSnapshot || personaSnapshot.signer.pubkey !== observed.hostPubkey || observed.phase !== 'running' || tagGameConflictSince.has(observed.gameId)) return;
+		const targetPubkey = action.payload.targetPubkey;
+		if (typeof targetPubkey !== 'string') return;
+		const actor = observed.participant.find((member) => member.pubkey === action.event.pubkey && member.runNumber === action.runNumber && member.status === 'active');
+		const target = observed.participant.find((member) => member.pubkey === targetPubkey && member.status === 'active');
+		if (!actor || !target || actor.pubkey === target.pubkey) return;
+		const observedEffect = tagGameScheduledEffectAt(observed, receivedAtMs);
+		const validRole = observedEffect === 'benefit'
+			? actor.pubkey !== observed.ownerPubkey && target.pubkey === observed.ownerPubkey
+			: observedEffect === 'calamity' && actor.pubkey === observed.ownerPubkey && target.pubkey !== observed.ownerPubkey;
+		if (!validRole || !tagGameOrganizerEffectActive(observed, receivedAtMs)) return;
+		const actorProof = action.payload.actorProof;
+		const targetProof = action.payload.targetProof;
+		if (!isTagGameTouchPositionProof(actorProof) || !isTagGameTouchPositionProof(targetProof)) {
+			requestTagGamePositionProofRefresh(observed.gameId, actor.pubkey, actor.runNumber, 'host-request', action.event.id);
+			requestTagGamePositionProofRefresh(observed.gameId, target.pubkey, target.runNumber, 'host-request', action.event.id);
+			return;
+		}
+		const evidenceStatus = await waitForTagGameTouchEvidence(observed, actor.pubkey, target.pubkey, actorProof, targetProof);
+		if (evidenceStatus === 'missing') {
+			if (tagGameTouchProofState(actor.pubkey, actor.runNumber, actorProof) === 'missing') requestTagGamePositionProofRefresh(observed.gameId, actor.pubkey, actor.runNumber, 'host-request', action.event.id);
+			if (tagGameTouchProofState(target.pubkey, target.runNumber, targetProof) === 'missing') requestTagGamePositionProofRefresh(observed.gameId, target.pubkey, target.runNumber, 'host-request', action.event.id);
+			return;
+		}
+		if (evidenceStatus !== 'ready') return;
+		await updateTagGameState(observed.gameId, (current) => {
+			const nowMs = Date.now();
+			const elapsedSinceReceiptMs = performance.now() - receivedAtMonotonicMs;
+			if (!isFreshTagGameTouchAction({ createdAtSeconds: action.event.created_at, nowMs, elapsedSinceFirstReceiptMs: elapsedSinceReceiptMs }) ||
+				current.phase !== 'running' || current.holderChallengeId || nowMs >= (current.endsAt ?? 0) * 1_000 ||
+				nowMs - (current.transferAt ?? current.startedAt! * 1_000) < 3_000 ||
+				!tagGameOrganizerEffectActive(current, nowMs) || tagGameConflictSince.has(current.gameId)) return null;
+			const currentEffect = tagGameScheduledEffectAt(current, nowMs);
+			if (!currentEffect) return null;
+			const currentActor = current.participant.find((member) => member.pubkey === action.event.pubkey && member.runNumber === action.runNumber && member.status === 'active');
+			const currentTarget = current.participant.find((member) => member.pubkey === targetPubkey && member.status === 'active');
+			if (!currentActor || !currentTarget ||
+				tagGameTouchProofState(currentActor.pubkey, currentActor.runNumber, actorProof) !== 'ready' ||
+				tagGameTouchProofState(currentTarget.pubkey, currentTarget.runNumber, targetProof) !== 'ready') return null;
+			const actorPosition = tagGamePositionEvidence.get(currentActor.pubkey)?.position;
+			const targetPosition = tagGamePositionEvidence.get(currentTarget.pubkey)?.position;
+			if (!actorPosition || !targetPosition || Math.max(Math.abs(actorPosition.x - targetPosition.x), Math.abs(actorPosition.y - targetPosition.y)) !== 1) return null;
+			const shouldTransfer = currentEffect === 'benefit'
+				? currentActor.pubkey !== current.ownerPubkey && currentTarget.pubkey === current.ownerPubkey
+				: currentEffect === 'calamity' && currentActor.pubkey === current.ownerPubkey && currentTarget.pubkey !== current.ownerPubkey;
+			if (!shouldTransfer) return null;
+			const accrued = accrueTagGameState(current, nowMs);
+			return { ...accrued, ownerPubkey: accrued.effect === 'benefit' ? currentActor.pubkey : currentTarget.pubkey, transferAt: nowMs, lastHolderResponseAtMs: nowMs, revision: current.revision + 1 };
+		});
+	}
+
 	function handleTagGameSupplementalEvent(event: import('nostr-tools/pure').Event): void {
 		const channelId = worldReader?.getChannel()?.channelId;
 		if (!channelId) return;
@@ -2538,8 +3023,27 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 		const state = gameId ? tagGameEvents.get(gameId)?.state : null;
 		const self = personaSnapshot;
 		if (!state) return;
+		if (parsed.action === 'touch') {
+			const receivedAtMs = Date.now();
+			const receivedAtMonotonicMs = performance.now();
+			if (tagGameTouchSeenEventIds.has(parsed.event.id)) return;
+			for (const [eventId, seenAt] of tagGameTouchSeenEventIds) if (receivedAtMs - seenAt > 60_000) tagGameTouchSeenEventIds.delete(eventId);
+			tagGameTouchSeenEventIds.set(parsed.event.id, receivedAtMs);
+			if (!isFreshTagGameTouchAction({ createdAtSeconds: parsed.event.created_at, nowMs: receivedAtMs, elapsedSinceFirstReceiptMs: 0 })) return;
+			void processTagGameTouch(state, parsed, receivedAtMs, receivedAtMonotonicMs);
+			return;
+		}
 		if (parsed.action === 'response-challenge' && parsed.payload.challengeId && parsed.event.pubkey === state.hostPubkey && state.ownerPubkey === self?.signer.pubkey) {
 			void publishTagGameAction(state.gameId, 'response', { challengeId: parsed.payload.challengeId });
+			return;
+		}
+		if (parsed.action === 'position-refresh-request') {
+			const targetPubkey = parsed.payload.targetPubkey;
+			const targetRunNumber = parsed.payload.targetRunNumber;
+			const ownMember = self && state.participant.find((member) => member.pubkey === self.signer.pubkey && member.runNumber === self.activeRun.runNumber && member.status === 'active');
+			if (self && state.phase === 'running' && parsed.event.pubkey === state.hostPubkey && targetPubkey === self.signer.pubkey && targetRunNumber === ownMember?.runNumber && ownMember) {
+				requestTagGamePositionProofRefresh(state.gameId, self.signer.pubkey, ownMember.runNumber, 'local-refresh', parsed.event.id);
+			}
 			return;
 		}
 		if (!self || state.hostPubkey !== self.signer.pubkey) return;
@@ -2571,27 +3075,8 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 				const allConsented = participants.every((member) => member.consentProposalId === current.proposalId && member.consented);
 				return { ...current, revision: current.revision + 1, participant: participants, ...(allConsented ? { phase: 'countdown' as const, startAt: Math.floor(Date.now() / 1000) + 5 } : {}) };
 			});
-		} else if (parsed.action === 'response' && parsed.event.pubkey === state.ownerPubkey && currentMember && state.holderChallengeId === parsed.payload.challengeId && state.holderChallengeStartedAtMs !== undefined && Date.now() - state.holderChallengeStartedAtMs <= 5_000 && parsed.event.created_at * 1000 >= state.holderChallengeStartedAtMs - 999) {
-			void updateTagGameState(state.gameId, (current) => current.holderChallengeId === parsed.payload.challengeId && current.ownerPubkey === parsed.event.pubkey
-				? { ...current, revision: current.revision + 1, settledAtMs: Date.now(), lastHolderResponseAtMs: Date.now(), holderChallengeId: undefined, holderChallengeStartedAtMs: undefined } : null);
-		} else if (parsed.action === 'touch' && state.phase === 'running' && currentMember?.status === 'active' && typeof parsed.payload.targetPubkey === 'string') {
-			const targetPubkey = parsed.payload.targetPubkey;
-			const target = state.participant.find((member) => member.pubkey === targetPubkey && member.status === 'active');
-			if (!target) return;
-			const actorWorld = latestTagGameWorldStates.get(parsed.event.pubkey);
-			const targetWorld = latestTagGameWorldStates.get(targetPubkey);
-			const adjacent = actorWorld?.state === 'active' && targetWorld?.state === 'active' &&
-				(actorWorld.runNumber === null || actorWorld.runNumber === currentMember.runNumber) && (targetWorld.runNumber === null || targetWorld.runNumber === target.runNumber) &&
-				Math.max(Math.abs(actorWorld.position.x - targetWorld.position.x), Math.abs(actorWorld.position.y - targetWorld.position.y)) === 1;
-			if (!adjacent || tagGameConflictSince.has(state.gameId)) return;
-			void updateTagGameState(state.gameId, (current) => {
-				if (current.phase !== 'running' || Date.now() >= (current.endsAt ?? 0) * 1000 || parsed.event.created_at * 1000 < (current.transferAt ?? 0) || Date.now() - (current.transferAt ?? 0) < 3_000) return null;
-				const accrued = accrueTagGameState(current, Date.now());
-				const shouldTransfer = accrued.effect === 'benefit'
-					? parsed.event.pubkey !== current.ownerPubkey && targetPubkey === current.ownerPubkey
-					: parsed.event.pubkey === current.ownerPubkey && targetPubkey !== current.ownerPubkey;
-				return shouldTransfer ? { ...accrued, ownerPubkey: accrued.effect === 'benefit' ? parsed.event.pubkey : targetPubkey, transferAt: Date.now(), revision: current.revision + 1 } : null;
-			});
+		} else if (parsed.action === 'response' && parsed.event.pubkey === state.ownerPubkey && currentMember) {
+			acceptTagGameHolderResponse(state, parsed);
 		}
 	}
 
@@ -2600,27 +3085,81 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 		if (!self || !selfLogicalPosition || !selfIsActive) return;
 		const targetPosition = moveOneCell(selfLogicalPosition, direction, FIELD);
 		if (!targetPosition) return;
-		for (const game of tagGameStates) {
-			if (game.phase !== 'running' || !game.participant.some((member) => member.pubkey === self.signer.pubkey && member.runNumber === self.activeRun.runNumber && member.status === 'active')) continue;
-			const targetPosition = moveOneCell(selfLogicalPosition, direction, FIELD);
-			const other = game.participant.find((member) => member.pubkey !== self.signer.pubkey && member.status === 'active' &&
-				latestTagGameWorldStates.get(member.pubkey)?.state === 'active' && targetPosition && sameFieldCell(latestTagGameWorldStates.get(member.pubkey)!.position, targetPosition));
-			if (!other) continue;
-			const key = `${game.gameId}:${other.pubkey}`;
-			const now = Date.now();
-			if (now - (tagGameTouchAttempts.get(key) ?? 0) < 3_000) return;
-			tagGameTouchAttempts.set(key, now);
-			void publishTagGameAction(game.gameId, 'touch', { targetPubkey: other.pubkey });
-			return;
+		const game = tagGameDisplayedGame;
+		if (!game || game.phase !== 'running' || !tagGameTouchTargetIds.size ||
+			!game.participant.some((member) => member.pubkey === self.signer.pubkey && member.runNumber === self.activeRun.runNumber && member.status === 'active')) return;
+		const ownEvidence = tagGamePositionEvidence.get(self.signer.pubkey);
+		if (!ownEvidence || !sameFieldCell(ownEvidence.position, selfLogicalPosition)) return;
+		const target = game.participant.find((member) => member.pubkey !== self.signer.pubkey && tagGameTouchTargetIds.has(member.pubkey) &&
+			member.status === 'active' && tagGamePositionEvidence.get(member.pubkey) && sameFieldCell(tagGamePositionEvidence.get(member.pubkey)!.position, targetPosition));
+		if (!target) return;
+		const now = Date.now();
+		const key = `${game.gameId}:${target.pubkey}`;
+		const previousAttempt = tagGameTouchAttempts.get(key);
+		const attemptId = ++tagGameTouchAttemptSequence;
+		tagGameTouchAttempt = { participantId: self.signer.pubkey, direction, id: attemptId };
+		window.setTimeout(() => { if (tagGameTouchAttempt?.id === attemptId) tagGameTouchAttempt = null; }, TAG_GAME_TOUCH_FEEDBACK_MS);
+		if (previousAttempt !== undefined && now - previousAttempt < TAG_GAME_TOUCH_RETRY_MS) return;
+		tagGameTouchAttempts.set(key, now);
+		let statusVersion = tagGameTouchStatusVersions.get(game.gameId);
+		const currentStatus = tagGameTouchStatuses.get(game.gameId);
+		const confirmedStatusVisible = currentStatus?.label === '所持者が更新されました';
+		if (!confirmedStatusVisible && (!statusVersion || tagGameTouchStatusTargets.get(game.gameId) !== target.pubkey)) {
+			statusVersion = ++tagGameTouchStatusVersionSequence;
+			tagGameTouchStatusVersions.set(game.gameId, statusVersion);
+			tagGameTouchStatusTargets.set(game.gameId, target.pubkey);
+			const previousStatusTimer = tagGameTouchStatusTimers.get(game.gameId);
+			if (previousStatusTimer !== undefined) window.clearTimeout(previousStatusTimer);
+			tagGameTouchStatusTimers.delete(game.gameId);
+			tagGameTouchStatuses = new Map(tagGameTouchStatuses);
+			tagGameTouchStatuses.delete(game.gameId);
+		} else if (!confirmedStatusVisible && currentStatus?.targetPubkey === target.pubkey && currentStatus.label === '判定待ち・開催者未確認') {
+			// A valid held-key retry renews the one pending display without clearing or restating it.
+			setTagGameTouchStatus(game.gameId, target.pubkey, currentStatus.label, 'unconfirmed', statusVersion);
 		}
+		const requestKey = `${game.gameId}:${target.pubkey}`;
+		const requestVersion = ++tagGameTouchRequestVersionSequence;
+		tagGameTouchRequestVersions.set(requestKey, requestVersion);
+		const actorAnchor = latestTagGameWorldStates.get(self.signer.pubkey);
+		const targetAnchor = latestTagGameWorldStates.get(target.pubkey);
+		const proof = (pubkey: string, runNumber: number): Readonly<{ worldStateEventId: string; positionEvidenceEventId: string }> | undefined => {
+			const anchor = latestTagGameWorldStates.get(pubkey);
+			const position = tagGamePositionEvidence.get(pubkey);
+			if (!anchor || anchor.state !== 'active' || anchor.runNumber !== runNumber || !position || position.positionEvidence.source === 'world-state-exit') return undefined;
+			return { worldStateEventId: anchor.id, positionEvidenceEventId: position.positionEvidence.eventId };
+		};
+		const actorProof = proof(self.signer.pubkey, self.activeRun.runNumber);
+		const targetProof = proof(target.pubkey, target.runNumber);
+		if (!actorProof) {
+			refreshOwnTagGamePositionProof(game);
+		}
+		const transferAt = game.transferAt ?? 0;
+		void publishTagGameAction(game.gameId, 'touch', { targetPubkey: target.pubkey, ...(actorProof ? { actorProof } : {}), ...(targetProof ? { targetProof } : {}) }).then((sent) => {
+			if (tagGameTouchStatusVersions.get(game.gameId) !== statusVersion || tagGameTouchStatusTargets.get(game.gameId) !== target.pubkey) return;
+			const current = tagGameEvents.get(game.gameId)?.state;
+			const visibleStatus = tagGameTouchStatuses.get(game.gameId);
+			if (visibleStatus?.label === '所持者が更新されました') return;
+			if (!sent) {
+				if (tagGameTouchRequestVersions.get(requestKey) !== requestVersion || visibleStatus?.label === '判定待ち・開催者未確認' || visibleStatus?.label === '転移未確認') return;
+				setTagGameTouchStatus(game.gameId, target.pubkey, '送信未確認', 'clear', statusVersion);
+			} else if (current?.transferAt && current.transferAt > transferAt) {
+				setTagGameTouchStatus(game.gameId, target.pubkey, '所持者が更新されました', 'clear', statusVersion);
+			} else if (tagGameTouchRequestVersions.get(requestKey) === requestVersion) {
+				setTagGameTouchStatus(game.gameId, target.pubkey, '判定待ち・開催者未確認', 'unconfirmed', statusVersion);
+			}
+		});
 	}
 
 	function handleTagGameWorldState(event: ParsedWorldStateEvent): void {
+		rememberTagGameEvidenceId(tagGameWorldStateIdsByPubkey, event.pubkey, event.id);
 		if (appliedTagGameWorldStateIds.has(event.id)) return;
 		appliedTagGameWorldStateIds.add(event.id);
 		const previous = latestTagGameWorldStates.get(event.pubkey);
 		if (previous && comparePresenceEvidence(presenceEvidenceFromWorldState(event), presenceEvidenceFromWorldState(previous)) <= 0) return;
 		latestTagGameWorldStates = new Map(latestTagGameWorldStates).set(event.pubkey, event);
+		for (const attempt of tagGameProofRefreshAttempts.values()) {
+			if (attempt.pubkey === event.pubkey) completeTagGameProofRefreshIfResolved(attempt);
+		}
 		if (event.state === 'exit' && event.exitReason && event.runNumber !== null) {
 			for (const game of tagGameStates) {
 			if (game.hostPubkey !== event.pubkey || !['lobby', 'proposed', 'countdown', 'running', 'settling'].includes(game.phase)) continue;
@@ -2657,14 +3196,50 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 					const hash = [...(current.seed ?? '')].reduce((value, char) => (Math.imul(value ^ char.charCodeAt(0), 16777619) >>> 0), 2166136261);
 					ownerPubkey = remaining[hash % remaining.length].pubkey;
 				}
-				return { ...accrued, participant: participants, ownerPubkey, transferAt: Date.now(), revision: current.revision + 1 };
+				const transferred = ownerPubkey !== current.ownerPubkey;
+				const transferAt = Date.now();
+				return { ...accrued, participant: participants, ownerPubkey, transferAt,
+					...(transferred ? { lastHolderResponseAtMs: transferAt } : {}), revision: current.revision + 1 };
 			});
 		}
 	}
 
+	function tagGameHolderMember(game: TagGameState) {
+		return game.participant.find((member) => member.pubkey === game.ownerPubkey && member.status === 'active');
+	}
+
+	function tagGameHolderActivityAt(game: TagGameState, nowMs = Date.now()): number {
+		const holder = tagGameHolderMember(game);
+		const normalActivityAtMs = presenceState.participants.find((participant) => participant.id === game.ownerPubkey)?.lastActivityAt ?? 0;
+		const probe = tagGameHolderProbes.get(game.gameId);
+		const probeResponseAtMs = probe && probe.ownerPubkey === game.ownerPubkey && probe.runNumber === holder?.runNumber ? probe.responseAtMs ?? 0 : 0;
+		const localResponse = tagGameHolderLocalActivityAt.get(game.gameId);
+		const localResponseAtMs = localResponse && localResponse.ownerPubkey === game.ownerPubkey && localResponse.runNumber === holder?.runNumber ? localResponse.atMs : 0;
+		return latestTagGameHolderActivityAt({ nowMs, startedAtMs: (game.startedAt ?? 0) * 1_000,
+			transferAtMs: game.transferAt ?? null, persistedResponseAtMs: game.lastHolderResponseAtMs ?? null,
+			worldActivityAtMs: normalActivityAtMs, precheckResponseAtMs: probeResponseAtMs || null,
+			localResponseAtMs: localResponseAtMs || null });
+	}
+
+	function tagGameEffectCutoff(game: TagGameState): number {
+		if (!game.endsAt) return Number.POSITIVE_INFINITY;
+		return tagGameEffectSafetyCutoffMs(tagGameHolderActivityAt(game), game.endsAt * 1_000);
+	}
+
+	function tagGameOrganizerEffectActive(game: TagGameState, nowMs: number): boolean {
+		const holder = tagGameHolderMember(game);
+		const pause = tagGameEffectPauses.get(game.gameId);
+		return isTagGameScheduledEffectActive(game, nowMs) && !game.holderChallengeId &&
+			!(pause && pause.ownerPubkey === game.ownerPubkey && pause.runNumber === holder?.runNumber) && nowMs < tagGameEffectCutoff(game);
+	}
+
 	function accrueTagGameState(game: TagGameState, untilMs: number): TagGameState {
 		if (!game.startedAt || !game.seed) return game;
-		const cap = game.endsAt ? Math.min(untilMs, game.endsAt * 1000) : untilMs;
+		const holder = tagGameHolderMember(game);
+		const pause = tagGameEffectPauses.get(game.gameId);
+		const localPauseAt = pause && pause.ownerPubkey === game.ownerPubkey && pause.runNumber === holder?.runNumber ? pause.pausedAtMs : Number.POSITIVE_INFINITY;
+		const signedPauseAt = game.holderChallengeId ? game.settledAtMs : Number.POSITIVE_INFINITY;
+		const cap = Math.min(untilMs, game.endsAt ? game.endsAt * 1000 : untilMs, tagGameEffectCutoff(game), localPauseAt, signedPauseAt);
 		const end = Math.max(game.settledAtMs, cap);
 		const players = game.participant.map((member) => ({ ...member }));
 		const intervals = createTagGameSchedule(game.seed);
@@ -2779,7 +3354,7 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 						if (activeRoster.length < 2) return { ...current, phase: 'lobby', startAt: undefined, participant: current.participant.filter((member) => member.pubkey === current.hostPubkey), revision: current.revision + 1 };
 						const startedAt = current.startAt;
 						return { ...current, phase: 'running', revision: current.revision + 1, startedAt, endsAt: startedAt + TAG_GAME_GAME_MS / 1000,
-							seed, ownerPubkey: activeRoster[hash % activeRoster.length].pubkey, effect: schedule[0].effect, transferAt: startedAt * 1000,
+							seed, ownerPubkey: activeRoster[hash % activeRoster.length].pubkey, effect: schedule[0].effect, transferAt: startedAt * 1000, lastHolderResponseAtMs: startedAt * 1000,
 							participant: activeRoster.map((member) => ({ ...member, status: 'active', points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 })), settledAtMs: startedAt * 1000 };
 					});
 				}
@@ -2793,51 +3368,92 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 					});
 					continue;
 				}
-				const holderActivityAt = presenceState.participants.find((participant) => participant.id === game.ownerPubkey)?.lastActivityAt ?? game.startedAt * 1000;
-				const holderResponseState = tagGameHolderResponseState({ nowMs, normalActivityAtMs: holderActivityAt, acknowledgedAtMs: game.lastHolderResponseAtMs ?? null, challengeStartedAtMs: game.holderChallengeStartedAtMs ?? null });
-				if (game.phase === 'running' && holderResponseState === 'challenge' && !game.holderChallengeId) {
-					const challengeId = tagGameNonce();
-					void (async () => {
-						if (await updateTagGameState(game.gameId, (current) => current.phase === 'running' && !current.holderChallengeId && tagGameHolderResponseState({ nowMs,
-							normalActivityAtMs: holderActivityAt, acknowledgedAtMs: current.lastHolderResponseAtMs ?? null, challengeStartedAtMs: null }) === 'challenge'
-							? { ...accrueTagGameState(current, nowMs), holderChallengeId: challengeId, holderChallengeStartedAtMs: nowMs, settledAtMs: nowMs, revision: current.revision + 1 } : null)) {
-							await publishTagGameAction(game.gameId, 'response-challenge', { challengeId });
-						}
-					})();
-					continue;
+				const holder = tagGameHolderMember(game);
+				if (!holder) continue;
+				let probe = tagGameHolderProbes.get(game.gameId);
+				if (probe && (probe.ownerPubkey !== game.ownerPubkey || probe.runNumber !== holder.runNumber)) {
+					tagGameHolderProbes.delete(game.gameId);
+					probe = undefined;
 				}
-				if (game.holderChallengeId && holderResponseState === 'active') {
-					void updateTagGameState(game.gameId, (current) => current.holderChallengeId ? { ...current, holderChallengeId: undefined, holderChallengeStartedAtMs: undefined, settledAtMs: nowMs, revision: current.revision + 1 } : null);
-					continue;
+				let pause = tagGameEffectPauses.get(game.gameId);
+				if (game.holderChallengeId && (!pause || pause.challengeId !== game.holderChallengeId)) {
+					pause = { challengeId: game.holderChallengeId, ownerPubkey: game.ownerPubkey!, runNumber: holder.runNumber,
+						pausedAtMs: game.settledAtMs, statePublishPending: false, formalRequestPending: false, formalLastAttemptAtMs: 0 };
+					tagGameEffectPauses.set(game.gameId, pause);
 				}
-				if (game.holderChallengeId && holderResponseState === 'unresponsive') {
-					const eligible = game.participant.filter((member) => member.status === 'active' && member.pubkey !== game.ownerPubkey);
-					if (eligible.length <= 1) {
-						void updateTagGameState(game.gameId, (current) => current.holderChallengeId ? { ...current, phase: 'interrupted', endReason: 'too-few-participants', holderChallengeId: undefined, holderChallengeStartedAtMs: undefined, revision: current.revision + 1 } : null);
+				if (pause && (pause.ownerPubkey !== game.ownerPubkey || pause.runNumber !== holder.runNumber)) {
+					tagGameEffectPauses.delete(game.gameId);
+					pause = undefined;
+				}
+				const holderActivityAt = tagGameHolderActivityAt(game, nowMs);
+				if (pause) {
+					if (holderActivityAt > pause.pausedAtMs) {
+						const resumeAtMs = holderActivityAt;
+						void updateTagGameState(game.gameId, (current) => {
+							if (current.phase !== 'running' || current.ownerPubkey !== pause!.ownerPubkey ||
+								current.participant.find((member) => member.pubkey === current.ownerPubkey)?.runNumber !== pause!.runNumber) return null;
+							const accrued = accrueTagGameState(current, resumeAtMs);
+						return { ...accrued, settledAtMs: Math.max(accrued.settledAtMs, resumeAtMs),
+							lastHolderResponseAtMs: Math.max(current.lastHolderResponseAtMs ?? 0, probe?.responseAtMs ?? 0, resumeAtMs),
+							holderChallengeId: undefined, holderChallengeStartedAtMs: undefined, revision: current.revision + 1 };
+						}).then((published) => {
+							if (published && tagGameEffectPauses.get(game.gameId) === pause) tagGameEffectPauses.delete(game.gameId);
+							if (published && tagGameHolderProbes.get(game.gameId) === probe) tagGameHolderProbes.delete(game.gameId);
+						});
 						continue;
 					}
-					const owner = eligible[createTagGameSchedule(game.seed)[0].durationMs % eligible.length];
+					const challengeStartedAtMs = tagGameFormalChallengeAcks.get(`${game.gameId}:${pause.challengeId}`) ?? game.holderChallengeStartedAtMs ?? null;
+					if (challengeStartedAtMs === null) publishTagGameEffectStop(game, pause);
+					if (!tagGameHolderResponsePending.has(game.gameId) && challengeStartedAtMs !== null && nowMs - challengeStartedAtMs >= TAG_GAME_RESPONSE_TIMEOUT_MS) {
+					const eligible = game.participant.filter((member) => member.status === 'active' && member.pubkey !== game.ownerPubkey);
+					if (eligible.length <= 1) {
+						void updateTagGameState(game.gameId, (current) => current.holderChallengeId === pause!.challengeId ? { ...accrueTagGameState(current, pause!.pausedAtMs), phase: 'interrupted', endReason: 'too-few-participants', holderChallengeId: undefined, holderChallengeStartedAtMs: undefined, revision: current.revision + 1 } : null);
+						continue;
+					}
 					void updateTagGameState(game.gameId, (current) => {
 						const candidates = current.participant.filter((member) => member.status === 'active' && member.pubkey !== current.ownerPubkey);
-						if (!current.holderChallengeId || candidates.length <= 1) return current.holderChallengeId ? { ...current, phase: 'interrupted', endReason: 'too-few-participants', holderChallengeId: undefined, holderChallengeStartedAtMs: undefined, revision: current.revision + 1 } : null;
+						if (current.holderChallengeId !== pause!.challengeId || candidates.length <= 1) return current.holderChallengeId === pause!.challengeId ? { ...accrueTagGameState(current, pause!.pausedAtMs), phase: 'interrupted', endReason: 'too-few-participants', holderChallengeId: undefined, holderChallengeStartedAtMs: undefined, revision: current.revision + 1 } : null;
 						const selected = candidates[createTagGameSchedule(current.seed ?? '')[0].durationMs % candidates.length];
-						return { ...current, ownerPubkey: selected.pubkey, participant: current.participant.map((member) => member.pubkey === current.ownerPubkey ? { ...member, status: 'temporarily-ineligible' } : member), transferAt: nowMs, settledAtMs: nowMs, holderChallengeId: undefined, holderChallengeStartedAtMs: undefined, revision: current.revision + 1 };
+						return { ...accrueTagGameState(current, pause!.pausedAtMs), ownerPubkey: selected.pubkey, participant: current.participant.map((member) => member.pubkey === current.ownerPubkey ? { ...member, status: 'temporarily-ineligible' } : member), transferAt: nowMs, lastHolderResponseAtMs: nowMs, settledAtMs: nowMs, holderChallengeId: undefined, holderChallengeStartedAtMs: undefined, revision: current.revision + 1 };
 					});
-					continue;
+						continue;
+					}
+				} else {
+					if (probe && holderActivityAt > probe.startedAtMs) {
+						tagGameHolderProbes.delete(game.gameId);
+						probe = undefined;
+					}
+					if (!probe && nowMs - holderActivityAt >= TAG_GAME_NO_ACTIVITY_MS) {
+						probe = { challengeId: tagGameNonce(), ownerPubkey: game.ownerPubkey!, runNumber: holder.runNumber,
+							startedAtMs: nowMs, requestAcknowledgedAtMs: null, responseAtMs: null, lastAttemptAtMs: 0, requestPending: false };
+						tagGameHolderProbes.set(game.gameId, probe);
+					}
+					if (probe) publishTagGameHolderPrecheck(game, probe);
+					const cutoffAtMs = tagGameEffectCutoff(game);
+					if (nowMs >= cutoffAtMs) {
+						const stopProbe = probe ?? { challengeId: tagGameNonce(), ownerPubkey: game.ownerPubkey!, runNumber: holder.runNumber,
+							startedAtMs: cutoffAtMs - TAG_GAME_PRECHECK_TIMEOUT_MS, requestAcknowledgedAtMs: null, responseAtMs: null, lastAttemptAtMs: 0, requestPending: false };
+						if (!probe) tagGameHolderProbes.set(game.gameId, stopProbe);
+						pause = { challengeId: stopProbe.challengeId, ownerPubkey: game.ownerPubkey!, runNumber: holder.runNumber,
+							pausedAtMs: cutoffAtMs, statePublishPending: false, formalRequestPending: false, formalLastAttemptAtMs: 0 };
+						tagGameEffectPauses.set(game.gameId, pause);
+						publishTagGameEffectStop(game, pause);
+						continue;
+					}
 				}
-				if (game.holderChallengeId) continue;
+				if (game.holderChallengeId && pause) continue;
 				const endMs = game.endsAt * 1000;
 				const untilMs = Math.max(game.settledAtMs, Math.min(nowMs, endMs));
 				const accrued = accrueTagGameState(game, untilMs);
 				const finished = nowMs >= endMs;
 				if (finished) game = { ...accrued, phase: 'settling', revision: game.revision + 1 };
-				else if (untilMs - game.settledAtMs >= 10_000 || accrued.effect !== game.effect) game = { ...accrued, revision: game.revision + 1 };
+				else if (untilMs - game.settledAtMs >= 10_000) game = { ...accrued, revision: game.revision + 1 };
 				if (game !== entry.state) void updateTagGameState(game.gameId, (current) => {
 					if (current.phase !== 'running' && current.phase !== 'settling') return null;
 					const currentUntil = Math.max(current.settledAtMs, Math.min(nowMs, (current.endsAt ?? 0) * 1000));
 					const currentAccrued = accrueTagGameState(current, currentUntil);
 					if (current.endsAt && nowMs >= current.endsAt * 1000) return { ...currentAccrued, phase: 'ended', finalizedAt: nowSeconds, endReason: 'normal', revision: current.revision + 1 };
-					return currentUntil - current.settledAtMs >= 10_000 || currentAccrued.effect !== current.effect ? { ...currentAccrued, revision: current.revision + 1 } : null;
+					return currentUntil - current.settledAtMs >= 10_000 ? { ...currentAccrued, revision: current.revision + 1 } : null;
 				});
 			}
 			if (game.endsAt && (game.phase === 'running' || game.phase === 'settling') && nowMs >= game.endsAt * 1000 + TAG_GAME_FINAL_WAIT_MS) {
@@ -3539,6 +4155,7 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 	}
 
 	function receiveLiveMessage(message: ParsedWorldMessage, nextPresence: PresenceState): void {
+		rememberTagGameEvidenceId(tagGamePositionEvidenceIdsByPubkey, message.pubkey, message.id);
 		const nowMs = Date.now();
 		if (naturalExpiresAt(message) <= nowMs) return;
 		const conversationMessage = toConversationMessage(message);
@@ -3731,6 +4348,9 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 				participatingCooperationDefectionGroupId={cooperationDefectionSchedule.phase === 'registration' ? cooperationDefectionSelfGroupId : null}
 				{participantViews}
 				{tagGameRoleByPubkey}
+				tagGameTouchTargetIds={tagGameTouchTargetIds}
+				{tagGameTouchAttempt}
+				{tagGameHolderTransfer}
 				tagGameEffect={tagGameDisplayedEffect?.effect ?? null}
 				tagGameEffectActive={tagGameDisplayedEffect?.active ?? false}
 				{selfProjectionId}
@@ -3792,7 +4412,7 @@ import type { ParsedTraceReply, ParsedWorldMessage, ParsedWorldStateEvent } from
 				registerReplyRemeasure={registerTraceReplyRemeasure}
 			/>
 			<div class="field-status-huds" data-field-status-huds style={`--top-status-hud-bottom:${statusHudVisible ? topStatusHudBottom : 0}px`}>
-				<TagGameHud game={tagGameDisplayedGame} selfPubkey={personaSnapshot?.signer.pubkey ?? null} selfRunNumber={personaSnapshot?.activeRun.runNumber ?? null} nowMs={tagGameHudNowMs} {realtimeStatus} busy={tagGameBusy} onLeave={(gameId) => { void leaveTagGame(gameId); }} />
+				<TagGameHud game={tagGameDisplayedGame} selfPubkey={personaSnapshot?.signer.pubkey ?? null} selfRunNumber={personaSnapshot?.activeRun.runNumber ?? null} nowMs={tagGameHudNowMs} {realtimeStatus} busy={tagGameBusy} localEffectPaused={tagGameDisplayedEffect?.locallyPaused ?? false} touchStatus={tagGameDisplayedGame ? tagGameTouchStatuses.get(tagGameDisplayedGame.gameId)?.label ?? null : null} onLeave={(gameId) => { void leaveTagGame(gameId); }} />
 			</div>
 		{/snippet}
 	</FieldViewport>
