@@ -228,12 +228,21 @@ test('signals calamity lifespan loss while ignoring clock-only ticks', async ({ 
 });
 
 async function openTagGameTerminal(page: Page): Promise<void> {
+	const chatter = page.locator('aside[aria-label="Chatter"]');
+	if (await chatter.isVisible()) {
+		await page.keyboard.press('c');
+		await expect(chatter).toBeHidden();
+	}
 	const self = page.locator('.participant[data-self="true"]');
 	const position = await self.getAttribute('data-position');
-	await clickRelayLogicalCell(page, TAG_GAME_TERMINAL.position);
-	if (await page.locator('[data-cell-action="tag-game-terminal"]').count()) await page.locator('[data-cell-action="tag-game-terminal"]').click();
-	if (await page.getByRole('dialog', { name: '鬼ごっこ' }).count() === 0) throw new Error(`Tag-game terminal did not open from self position ${position}.`);
-	await expect(page.getByRole('dialog', { name: '鬼ごっこ' })).toBeVisible();
+	const action = page.locator('[data-cell-action="tag-game-terminal"]');
+	const dialog = page.getByRole('dialog', { name: '鬼ごっこ' });
+	await expect.poll(async () => {
+		if (await dialog.isVisible()) return true;
+		await clickRelayLogicalCell(page, TAG_GAME_TERMINAL.position);
+		if (await action.isVisible()) await action.click();
+		return dialog.isVisible();
+	}, { timeout: 10_000, message: `Expected the tag-game terminal to open from self position ${position}.` }).toBe(true);
 }
 
 test('three Fake Relay clients create, join, consent, start, touch, and settle through the field UI', async ({ browser }) => {
