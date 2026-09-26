@@ -957,13 +957,14 @@ export async function openClearReadyWorld(page: Page): Promise<{ secret: Uint8Ar
 export async function installPromptApiStub(
 	page: Page,
 	availability: 'available' | 'unavailable' = 'available',
-	promptBehavior: 'resolve' | 'pending' = 'resolve'
+	promptBehavior: 'resolve' | 'pending' | 'reject-once' = 'resolve'
 ): Promise<void> {
 	await page.addInitScript(({ availability, promptBehavior }) => {
 		const state = { prompts: [] as string[], published: false };
 		const createClone = () => ({
 			prompt: async (input: string, options?: { signal?: AbortSignal }) => {
 				state.prompts.push(input);
+				if (promptBehavior === 'reject-once' && state.prompts.length === 1) throw new Error('Prompt failed.');
 				if (promptBehavior === 'pending') {
 					return await new Promise<string>((_resolve, reject) => {
 						options?.signal?.addEventListener('abort', () => reject(new DOMException('Prompt aborted.', 'AbortError')), { once: true });

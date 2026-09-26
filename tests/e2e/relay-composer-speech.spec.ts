@@ -182,6 +182,38 @@ test.describe('Relay startup', () => {
 		}
 	});
 
+	test('shows a generation error without the candidate panel and allows retry', async ({ page }) => {
+		await installPromptApiStub(page, 'available', 'reject-once');
+		const selfSecret = fixtureSecret(19);
+		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret));
+		const editor = await openReadyRelayWorld(page, 1);
+		await editor.fill('');
+		const candidateButton = page.getByRole('button', { name: 'AI発言候補を生成' });
+		await candidateButton.click();
+
+		const error = page.locator('.suggestion-error');
+		await expect(error).toHaveText('候補を生成できませんでした。もう一度お試しください。');
+		await expect(page.locator('.suggestion-panel')).toHaveCount(0);
+		for (const viewport of [{ width: 720, height: 844 }, { width: 390, height: 844 }]) {
+			await page.setViewportSize(viewport);
+			await expect(error).toBeVisible();
+			await expect(page.getByRole('status')).toHaveCount(1);
+			const errorBox = await error.boundingBox();
+			expect(errorBox).not.toBeNull();
+			if (errorBox) {
+				expect(errorBox.x).toBeGreaterThanOrEqual(0);
+				expect(errorBox.y).toBeGreaterThanOrEqual(0);
+				expect(errorBox.x + errorBox.width).toBeLessThanOrEqual(viewport.width);
+				expect(errorBox.y + errorBox.height).toBeLessThanOrEqual(viewport.height);
+			}
+		}
+
+		await candidateButton.click();
+		await expect(page.locator('.suggestion-panel')).toBeVisible();
+		await expect(page.locator('.suggestion-primary').first()).toBeVisible();
+		await expect(page.locator('.suggestion-error')).toHaveCount(0);
+	});
+
 	test('passes the Host-owned editor submit button option without enabling the keyboard button bar', async ({ page }) => {
 		await installHostOwnedStub(page);
 		await installDelayedRelay(page);
