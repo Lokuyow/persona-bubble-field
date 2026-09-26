@@ -936,7 +936,10 @@ export function createNostrRelayTransport(
 				const relayUrl = canonicalRelay(packet.to);
 				if (!request || !relayUrl || generation !== realtimeGeneration || !capableRelays.includes(relayUrl) || !matchesRealtimeFilterBundle(request.filters, realtimeFilters)) return;
 				realtimeSubIds.set(relayUrl, request.subId);
-				if (settled) realtimeCatchUpSubIds.set(relayUrl, request.subId);
+				// Delivery phase belongs to this Relay's current REQ, not the global
+				// startup promise. Other Relays can still be streaming their initial
+				// history after the first Relay has made realtime usable.
+				realtimeCatchUpSubIds.set(relayUrl, request.subId);
 				// A new wire REQ (including a reconnect resend) invalidates the previous
 				// EOSE boundary until this request receives its own EOSE.
 				updateRealtimeDiagnostic(relayUrl, { relayUrl, status: 'pending' });
