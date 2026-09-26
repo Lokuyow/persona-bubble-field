@@ -402,10 +402,16 @@ test.describe('Relay startup', () => {
 		for (const viewport of [{ width: 720, height: 844 }, { width: 390, height: 844 }]) {
 			await page.setViewportSize(viewport);
 			const status = page.locator('.suggestion-error');
+			await expect(status).toBeVisible();
 			const statusBox = await status.boundingBox();
 			const panelBox = await page.locator('.suggestion-panel').boundingBox();
-			expect(statusBox && panelBox).toBeTruthy();
-			if (statusBox && panelBox) {
+			const firstCandidateBox = await page.locator('.suggestion-primary').first().boundingBox();
+			expect(statusBox && panelBox && firstCandidateBox).toBeTruthy();
+			if (statusBox && panelBox && firstCandidateBox) {
+				expect(statusBox.x).toBeGreaterThanOrEqual(panelBox.x);
+				expect(statusBox.y).toBeGreaterThanOrEqual(panelBox.y);
+				expect(statusBox.x + statusBox.width).toBeLessThanOrEqual(panelBox.x + panelBox.width);
+				expect(statusBox.y + statusBox.height).toBeLessThanOrEqual(firstCandidateBox.y);
 				for (const box of [statusBox, panelBox]) {
 					expect(box.x).toBeGreaterThanOrEqual(0);
 					expect(box.y).toBeGreaterThanOrEqual(0);

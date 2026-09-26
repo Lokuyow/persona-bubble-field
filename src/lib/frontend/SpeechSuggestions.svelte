@@ -172,6 +172,9 @@
 						onclick={() => { panelOpen = false; }}
 					><X aria-hidden="true" /></ActionButton>
 				</div>
+				{#if error}
+					<p class="suggestion-status suggestion-error" role="status">{error}</p>
+				{/if}
 				{#each candidates as candidate, index}
 					<div class="suggestion-item">
 						<button
@@ -202,8 +205,6 @@
 			<p class="suggestion-status" role="status">{availabilityLabel(availability)}</p>
 		{:else if generating}
 			<p class="suggestion-status" role="status">候補を生成中…</p>
-		{:else if error}
-			<p class="suggestion-status suggestion-error" role="status">{error}</p>
 		{/if}
 	</div>
 {/if}
@@ -322,7 +323,13 @@
 		font-size: 11px;
 		font-weight: 700;
 	}
-	.suggestion-error { background: rgba(141, 72, 58, 0.94); }
+	.suggestion-error {
+		position: static;
+		width: auto;
+		max-width: 100%;
+		box-sizing: border-box;
+		background: rgba(141, 72, 58, 0.94);
+	}
 	@media (max-width: 700px) {
 		.suggestions-anchor { position: static; }
 		.suggestion-panel { right: 16px; left: auto; }
