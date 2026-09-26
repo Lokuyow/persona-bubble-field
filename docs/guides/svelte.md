@@ -23,6 +23,11 @@ applicable specifications remain the Source of Truth.
   keyboard behavior, and selected-state styling. Compact icon controls that
   keep a specialized shape must use the shared icon-control tokens for their
   colors and states.
+- Use a Tabler X icon-only `ActionButton` with the shared `action-button-close`
+  sizing for dialog or panel close controls: a 24×24 icon in a 44×44 target,
+  an accessible name, and placement at the header's trailing edge. Keep the
+  control outside a scrolling content region when needed so it remains reachable;
+  do not replace semantically different cancel actions with a close control.
 - Keep component-scoped CSS by default, avoid broad `:global(...)`, and do not
   add wrappers that change geometry, positioning, stacking, measurement, or SSR
   DOM contracts.

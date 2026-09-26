@@ -126,6 +126,23 @@ button:not(:where(.trace-root-bubble, .trace-reply-content-button, .timeline-nam
 	color: var(--action-secondary-foreground);
 }
 
+.action-button-close {
+	flex: 0 0 44px;
+	width: 44px;
+	min-width: 44px;
+	height: 44px;
+	min-height: 44px;
+	gap: 0;
+	padding: 0;
+}
+
+.action-button-close > svg {
+	display: block;
+	flex: 0 0 24px;
+	width: 24px;
+	height: 24px;
+}
+
 :where(.selection-dialog, .adjustment-dialog-content, .mending-dialog-content, .game-hud) {
 	--action-secondary-background: #30374a;
 	--action-secondary-background-hover: #3c4459;

@@ -257,7 +257,7 @@
 	{#if detailsOpen && lastRoundResult && detailsPosition}
 		<div class="details-layer" aria-hidden="false">
 			<section class="result-details" id="cooperation-defection-result-details" aria-label={`ラウンド${lastRoundResult.round}の結果の詳細`} style={`left:${detailsPosition.left}px;top:${detailsPosition.top}px;width:${detailsPosition.width}px;max-height:${detailsPosition.maxHeight}px`}>
-				<header><h3>ラウンド {lastRoundResult.round} · 結果</h3><ActionButton variant="tertiary" type="button" class="hud-item" aria-label="結果の詳細を閉じる" onclick={closeDetails}><span class="hud-icon" aria-hidden="true"><X /></span>閉じる</ActionButton></header>
+				<header><h3>ラウンド {lastRoundResult.round} · 結果</h3><ActionButton variant="tertiary" type="button" class="action-button-close" aria-label="結果の詳細を閉じる" onclick={closeDetails}><X aria-hidden="true" /></ActionButton></header>
 				<!-- svelte-ignore a11y_no_noninteractive_tabindex -- scrollable region remains keyboard focusable -->
 				<div class="result-details-body" role="region" aria-label="結果の詳細内容" tabindex="0">
 					<div class="group-verdict" data-cooperation-defection-group-verdict><span class="hud-icon" aria-hidden="true">{#if lastRoundResult.kind === 'insufficient'}<HelpCircle />{:else if lastRoundResult.kind === 'cooperation-failure'}<AlertTriangle />{:else}<CircleCheck />{/if}</span><strong>{groupOutcomeLabel(lastRoundResult)}</strong></div>

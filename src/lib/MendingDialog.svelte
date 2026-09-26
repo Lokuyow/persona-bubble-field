@@ -8,6 +8,7 @@
 	import HeartPlus from '~icons/tabler/heart-plus';
 	import PlayerPause from '~icons/tabler/player-pause';
 	import Tool from '~icons/tabler/tool';
+	import X from '~icons/tabler/x';
 	import ArrowBarToDown from '~icons/tabler/arrow-bar-to-down';
 	import Wallet from '~icons/tabler/wallet';
 	import ActionButton from '$lib/ActionButton.svelte';
@@ -61,13 +62,22 @@
 	$effect(() => {
 		if (!open) detailsOpen = false;
 	});
+
+	function focusFirstAction(event: Event): void {
+		const content = event.currentTarget;
+		if (!(content instanceof HTMLElement)) return;
+		const action = content.querySelector<HTMLButtonElement>('.collect-button:not(:disabled), .details-toggle:not(:disabled)');
+		if (!action) return;
+		event.preventDefault();
+		action.focus();
+	}
 </script>
 
 <Dialog.Root bind:open={() => open, onOpenChange}>
 	{#if open}
 		<Dialog.Portal>
 			<Dialog.Overlay class="mending-dialog-overlay" />
-			<Dialog.Content class="mending-dialog-content" preventScroll={false}>
+			<Dialog.Content class="mending-dialog-content" preventScroll={false} onOpenAutoFocus={focusFirstAction}>
 				<div class="terminal-dialog-header">
 					<div>
 						<Dialog.Title class="mending-dialog-title">
@@ -80,6 +90,7 @@
 						<Wallet aria-hidden="true" />
 						<span class="owned-points-value">{ownedPoints} pt</span>
 					</div>
+					<Dialog.Close class="action-button action-button-tertiary action-button-close" aria-label="閉じる"><X aria-hidden="true" /></Dialog.Close>
 				</div>
 				{#if collectFeedback}
 					{#key collectFeedback.id}
@@ -152,7 +163,6 @@
 							</div>
 						{/if}
 						</section>
-						<Dialog.Close class="action-button action-button-tertiary terminal-secondary-action">閉じる</Dialog.Close>
 					</section>
 				{/if}
 			</Dialog.Content>
@@ -163,7 +173,7 @@
 <style>
 	:global(.mending-dialog-overlay) { position: fixed; inset: 0; z-index: 100; background: rgba(2, 8, 18, 0.72); backdrop-filter: blur(2px); }
 	:global(.mending-dialog-content) { position: fixed; top: 50%; left: 50%; z-index: 101; display: grid; gap: 0; width: min(720px, calc(100vw - 24px)); max-height: calc(100svh - 32px); overflow: auto; padding: 28px; border: 1px solid rgba(35, 220, 226, .78); border-radius: 18px; background: linear-gradient(180deg, rgba(4, 29, 43, .92), rgba(3, 20, 30, .94)); box-shadow: 0 0 0 1px rgba(53, 227, 232, .10) inset, 0 18px 60px rgba(0, 0, 0, .42), 0 0 30px rgba(26, 212, 220, .08); backdrop-filter: blur(14px); color: #ecfbff; transform: translate(-50%, -50%); }
-	.mending-success-feedback { position: absolute; top: 72px; right: 34px; z-index: 1; display: grid; gap: 2px; pointer-events: none; color: #64f5f0; text-align: right; animation: mending-success-float 420ms ease-out both; }
+	.mending-success-feedback { position: relative; justify-self: end; z-index: 1; display: grid; gap: 2px; margin: 16px 0 12px; pointer-events: none; color: #64f5f0; text-align: right; animation: mending-success-float 420ms ease-out both; }
 	.mending-success-feedback strong { font-size: 18px; font-weight: 850; }
 	.mending-success-feedback span { color: #cfe7ee; font-size: 13px; font-weight: 700; }
 	.mending-startup-feedback { position: absolute; inset: 0; z-index: 2; display: grid; place-items: center; overflow: hidden; pointer-events: none; border: 1px solid rgba(53, 227, 232, .86); border-radius: inherit; color: #64f5f0; font-size: 16px; font-weight: 800; letter-spacing: .04em; text-shadow: 0 0 18px rgba(53, 227, 232, .7); animation: mending-startup-scan 3000ms ease-out both; box-shadow: 0 0 24px rgba(53, 227, 232, .18) inset; }
@@ -180,11 +190,12 @@
 	@keyframes mending-startup-fade { 0% { opacity: 0; } 8% { opacity: 1; } 78% { opacity: 1; } 100% { opacity: 0; } }
 	@keyframes mending-card-highlight { 0%, 100% { box-shadow: none; } 35% { box-shadow: 0 0 0 2px rgba(53, 227, 232, .4); } }
 	@keyframes mending-points-color { 0%, 100% { color: #ecfbff; } 35% { color: #64f5f0; } }
-	.terminal-dialog-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 22px; }
+	.terminal-dialog-header { position: sticky; top: -24px; z-index: 2; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 12px; margin: -24px -24px 22px; padding: 24px; background: linear-gradient(180deg, rgba(4, 29, 43, .98), rgba(3, 20, 30, .98)); }
 	:global(.mending-dialog-content .mending-dialog-title) { display: inline-flex; align-items: center; min-width: 0; gap: 8px; margin: 0; color: #ecfbff; font-size: clamp(18px, 4vw, 22px); line-height: 1.15; font-weight: 800; letter-spacing: .03em; }
 	:global(.mending-dialog-title svg) { flex: 0 0 auto; width: 22px; height: 22px; color: #35e3e8; }
 	:global(.mending-dialog-content .sr-only) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 	.owned-points { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 7px; color: #ecfbff; white-space: nowrap; }
+	.terminal-dialog-header > :global(.action-button-close) { grid-column: 3; }
 	.owned-points :global(svg), :global(.details-toggle svg) { width: 18px; height: 18px; }
 	.owned-points :global(svg) { color: #9bb4bf; }
 	.owned-points-value { color: #ecfbff; font-size: 16px; font-weight: 800; }
@@ -215,8 +226,7 @@
 	.details-content { display: grid; gap: 8px; padding: 0 0 12px; color: rgba(208, 246, 248, 0.78); font-size: 0.92rem; line-height: 1.45; }
 	.details-content p { margin: 0; display: flex; justify-content: space-between; gap: 16px; }
 	.details-content strong { color: #f2ffff; font-weight: 700; text-align: right; }
-	:global(.terminal-secondary-action) { min-height: 50px; }
-	:global(.mending-dialog-content button:focus-visible) { outline: 3px solid var(--color-focus-ring); outline-offset: 3px; }
+	:global(.mending-dialog-content button:focus-visible:not(.action-button-close)) { outline: 3px solid var(--color-focus-ring); outline-offset: 3px; }
 	@media (max-width: 700px) { :global(.mending-dialog-content) { width: min(calc(100vw - 16px), 720px); padding: 24px; } .result-list { grid-template-columns: 1fr; } }
-	@media (max-width: 560px) { :global(.mending-dialog-content) { padding: 22px 18px; border-radius: 14px; } .owned-points { padding-top: 0; } .details-content p { align-items: flex-start; flex-direction: column; gap: 2px; } .details-content strong { text-align: left; } }
+	@media (max-width: 560px) { :global(.mending-dialog-content) { padding: 22px 18px; border-radius: 14px; } .terminal-dialog-header { grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin: -22px -18px 22px; padding: 22px 18px; } .owned-points { grid-row: 2; grid-column: 1 / 3; padding-top: 0; } .terminal-dialog-header > :global(.action-button-close) { grid-row: 1; grid-column: 2; } .details-content p { align-items: flex-start; flex-direction: column; gap: 2px; } .details-content strong { text-align: left; } }
 </style>

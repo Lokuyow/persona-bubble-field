@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
 	import { asset } from '$app/paths';
+	import X from '~icons/tabler/x';
 	import ActionButton from '$lib/ActionButton.svelte';
 	import { resolveCharacterFromPubkey } from '$lib/characterAssignment';
 	import { newlyConfirmedTagGameParticipants, tagGameCharacterName, tagGameConfirmedParticipants, tagGameParticipantLabel } from '$lib/tagGamePresentation';
@@ -65,7 +66,7 @@
 {#if open}
 	<div class="backdrop">
 		<div class="panel" role="dialog" aria-modal="true" aria-labelledby="tag-game-title">
-			<header><h2 id="tag-game-title">鬼ごっこ</h2><ActionButton variant="tertiary" class="tag-game-dialog-close" type="button" aria-label="閉じる" onclick={onClose}>×</ActionButton></header>
+			<header><h2 id="tag-game-title">鬼ごっこ</h2><ActionButton variant="tertiary" class="action-button-close" type="button" aria-label="閉じる" onclick={onClose}><X aria-hidden="true" /></ActionButton></header>
 			<p>最大8人、3分間のプレイヤー主催イベントです。募集参加中も脱出と能力強化を行えます。</p>
 			{#if createAllowed}<ActionButton variant={joinableGames.length === 0 ? 'primary' : 'secondary'} onclick={onCreate} disabled={busy}>鬼ごっこを開催</ActionButton>
 			{:else if ownHostLobby}<p class="reservation-state">募集を開催中</p>
@@ -157,9 +158,8 @@
 	.participant-slot-empty { display: grid; place-items: center; border-style: dashed; color: var(--text-secondary, #888); font-size: .72rem; }
 	.participant-slot-arrival { animation: participant-arrival 850ms ease-out 2; }
 	.tag-game-arrival { padding: 7px 10px; border-radius: 7px; background: var(--color-accent-soft, #edf2f6); color: var(--text-primary, #20242a); font-weight: 700; }
-	header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+	header { position: sticky; top: -20px; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: -20px -20px 0; padding: 20px; background: var(--surface, #fff); }
 	h2 { margin: 0; }
-	:global(.tag-game-dialog-close) { width: 44px; height: 44px; padding: 0; border-radius: 50%; font-size: 24px; }
 	ul { display: grid; gap: 10px; margin: 16px 0 0; padding: 0; list-style: none; }
 	li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; justify-content: space-between; padding: 12px; border: 1px solid var(--border-subtle, #d8dce0); border-radius: 10px; }
 	li div { display: grid; gap: 3px; }
