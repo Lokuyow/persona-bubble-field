@@ -195,8 +195,10 @@ test('keeps the tag-game benefit pulse in phase during repeated point gains and 
 	await expect(points).toHaveCSS('animation-name', /tag-game-value-pulse$/);
 	await expect(points).toHaveCSS('animation-duration', '1.5s');
 	const pulseOffsets = await points.evaluate((element) => {
-		const animation = element.getAnimations().find((candidate) => 'animationName' in candidate && candidate.animationName.endsWith('tag-game-value-pulse'));
-		return animation?.effect?.getKeyframes().map((frame) => frame.computedOffset) ?? [];
+		const animation = element.getAnimations().find((candidate): candidate is CSSAnimation =>
+			candidate instanceof CSSAnimation && candidate.animationName.endsWith('tag-game-value-pulse'));
+		const effect = animation?.effect;
+		return effect instanceof KeyframeEffect ? effect.getKeyframes().map((frame) => frame.computedOffset) : [];
 	});
 	expect(pulseOffsets).toHaveLength(4);
 	expect(pulseOffsets[1]).toBeCloseTo(0.2999, 3);
@@ -204,7 +206,8 @@ test('keeps the tag-game benefit pulse in phase during repeated point gains and 
 	await page.clock.runFor(1_000);
 	await expect(points).toHaveAttribute('data-value-change', 'increase');
 	const firstSequence = Number(await points.getAttribute('data-value-change-sequence'));
-	const pulseStartTime = await points.evaluate((element) => element.getAnimations().find((animation) => 'animationName' in animation && animation.animationName.endsWith('tag-game-value-pulse'))?.startTime);
+	const pulseStartTime = await points.evaluate((element) => element.getAnimations().find((animation): animation is CSSAnimation =>
+		animation instanceof CSSAnimation && animation.animationName.endsWith('tag-game-value-pulse'))?.startTime ?? null);
 	expect(pulseStartTime).not.toBeNull();
 	await expect(lifespan).not.toHaveAttribute('data-value-change', /.+/);
 	const meter = hud.locator('[data-points-meter]');
@@ -213,7 +216,8 @@ test('keeps the tag-game benefit pulse in phase during repeated point gains and 
 	await page.clock.runFor(1_000);
 	await expect.poll(async () => Number(await points.getAttribute('data-value-change-sequence'))).toBeGreaterThan(firstSequence);
 	await expect(points).toHaveAttribute('data-tag-game-flash', 'benefit');
-	expect(await points.evaluate((element) => element.getAnimations().find((animation) => 'animationName' in animation && animation.animationName.endsWith('tag-game-value-pulse'))?.startTime)).toBe(pulseStartTime);
+	expect(await points.evaluate((element) => element.getAnimations().find((animation): animation is CSSAnimation =>
+		animation instanceof CSSAnimation && animation.animationName.endsWith('tag-game-value-pulse'))?.startTime ?? null)).toBe(pulseStartTime);
 	const nextMeterBox = await meter.boundingBox();
 	const nextRightEdge = await points.evaluate((element) => element.getBoundingClientRect().right);
 	expect(nextMeterBox?.x).toBe(firstMeterBox?.x);
