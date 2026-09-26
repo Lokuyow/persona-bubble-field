@@ -627,13 +627,28 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	let tagGameDisplayedGameId = $derived(tagGameSelfActiveGameId ?? tagGameWatchedGame?.gameId ?? null);
 	let tagGameLocalLock = $derived(Boolean(personaSnapshot && tagGameSelfActiveGameId));
 	let tagGameDisplayedGame = $derived(tagGameStates.find((candidate) => candidate.gameId === tagGameDisplayedGameId && (candidate.phase === 'running' || candidate.phase === 'settling')) ?? null);
-	let tagGameHudWorkProjection = $derived.by(() => tagGameSelfActiveGameId && personaSnapshot
+	// Keep the received final cumulative value visible while its lifecycle receipt is being applied.
+	let tagGameHudGameId = $derived.by(() => {
+		if (tagGameSelfActiveGameId) return tagGameSelfActiveGameId;
+		const self = personaSnapshot;
+		const lock = self?.tagGame?.lock;
+		if (!lock || !self) return null;
+		return tagGameStates.some((game) => game.gameId === lock.gameId &&
+			(game.phase === 'ended' || game.phase === 'interrupted') &&
+			game.participant.some((member) => member.pubkey === self.signer.pubkey && member.runNumber === self.activeRun.runNumber)) ? lock.gameId : null;
+	});
+	let tagGameHudWorkProjection = $derived.by(() => tagGameHudGameId && personaSnapshot
 		? projectMending(personaSnapshot.gameState, tagGameHudNowMs, personaSnapshot.activeRun.rootBuild)
 		: null);
 	let tagGameHudProjection = $derived.by(() => {
-		if (!tagGameSelfActiveGameId || !personaSnapshot || !tagGameHudWorkProjection) return null;
-		const game = tagGameStates.find((candidate) => candidate.gameId === tagGameSelfActiveGameId) ?? null;
+		if (!tagGameHudGameId || !personaSnapshot || !tagGameHudWorkProjection) return null;
+		const game = tagGameStates.find((candidate) => candidate.gameId === tagGameHudGameId) ?? null;
 		const lock = personaSnapshot.tagGame?.lock;
+		const holder = game?.participant.find((member) => member.pubkey === game.ownerPubkey);
+		const localPause = game?.hostPubkey === personaSnapshot.signer.pubkey ? tagGameEffectPauses.get(game.gameId) : null;
+		const effectPausedAtMs = localPause && localPause.ownerPubkey === game?.ownerPubkey && localPause.runNumber === holder?.runNumber
+			? localPause.pausedAtMs
+			: undefined;
 		return projectTagGameHud({
 			game,
 			selfPubkey: personaSnapshot.signer.pubkey,
@@ -641,6 +656,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			localLockGameId: lock?.gameId ?? null,
 			localAppliedPoints: lock?.points ?? 0,
 			localAppliedLossMs: lock?.lifespanLossMs ?? 0,
+			effectPausedAtMs,
 			savedPoints: personaSnapshot.gameState.points,
 			effectiveExpiresAtMs: tagGameHudWorkProjection.effectiveExpiresAtMs,
 			nowMs: tagGameHudNowMs,

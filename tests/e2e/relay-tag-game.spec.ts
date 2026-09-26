@@ -281,9 +281,35 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 		}
 		const gamePages = new Map([[hostPubkey, hostPage], [participantPubkey, participantPage], [participantTwoPubkey, participantTwoPage]]);
 		const holderHudPage = gamePages.get(running.ownerPubkey!)!;
-		await expect(holderHudPage.locator('[data-unified-status-hud]')).toHaveAttribute('data-tag-game-projection', 'true');
+		const holderUnifiedHud = holderHudPage.locator('[data-unified-status-hud]');
+		await expect(holderUnifiedHud).toHaveAttribute('data-tag-game-projection', 'true');
+		await expect(holderUnifiedHud.locator('[data-tag-game-projection-row]')).toHaveCount(0);
+		await expect(holderUnifiedHud).not.toContainText(/予測中|未確定予測|確定分・保存待ち/);
+		await expect.poll(async () => {
+			const data = await holderUnifiedHud.evaluate((element) => {
+				const hud = element as HTMLElement;
+				return {
+					points: hud.dataset.currentPoints,
+					pointMeter: hud.querySelector<HTMLElement>('[data-points-meter]')?.dataset.meterValue,
+					remaining: hud.dataset.currentRemainingMs,
+					lifespanMeter: hud.querySelector<HTMLElement>('[data-lifespan-meter]')?.dataset.meterValue,
+					lifespanMaximum: hud.dataset.maximumLifespanMs
+				};
+			});
+			return data.points === data.pointMeter && data.lifespanMeter === String(Math.min(Number(data.lifespanMaximum), Number(data.remaining)));
+		}).toBe(true);
 		if (await holderHudPage.locator('[data-tag-game-hud] [data-tag-game-effect-active]').getAttribute('data-tag-game-effect-active') === 'true') {
-			await expect(holderHudPage.locator(`[data-tag-game-projection-row="${running.effect === 'benefit' ? 'points' : 'lifespan'}"]`)).toContainText(running.effect === 'benefit' ? '+50pt/秒・予測中' : '−1時間/秒・予測中');
+			if (running.effect === 'benefit') {
+				await expect.poll(async () => Number(await holderUnifiedHud.getAttribute('data-current-points'))).toBeGreaterThan(Number(await holderUnifiedHud.getAttribute('data-saved-points')));
+			} else {
+				await expect.poll(async () => Number(await holderUnifiedHud.getAttribute('data-current-expires-at-ms'))).toBeLessThan(Number(await holderUnifiedHud.getAttribute('data-base-expires-at-ms')));
+			}
+		}
+		for (const [pubkey, page] of gamePages) {
+			if (pubkey === running.ownerPubkey) continue;
+			const hud = page.locator('[data-unified-status-hud]');
+			await expect(hud.locator('[data-tag-game-projection-row]')).toHaveCount(0);
+			await expect(hud).toHaveAttribute('data-current-points', await hud.getAttribute('data-saved-points') ?? '');
 		}
 		const firstRemaining = await hostPage.locator('[data-tag-game-remaining]').textContent();
 		await Promise.all([hostPage, participantPage, participantTwoPage].map((page) => page.clock.setSystemTime(running.startedAt! * 1_000 + 6_000)));
@@ -755,6 +781,12 @@ test('organizer local safety stop hides touch targets and resumes presentation a
 	await expect(hud.locator('[data-tag-game-effect] span')).toHaveText('安全停止中・効果停止');
 	await expect(hud.locator('[data-tag-game-cooldown]')).toHaveText('効果停止中');
 	await expect(target).not.toHaveAttribute('data-tag-game-touch-target', 'true');
+	const unifiedHud = page.locator('[data-unified-status-hud]');
+	const pausedExpiry = await unifiedHud.getAttribute('data-current-expires-at-ms');
+	const pausedPoints = await unifiedHud.getAttribute('data-current-points');
+	await page.clock.runFor(2_000);
+	await expect(unifiedHud).toHaveAttribute('data-current-expires-at-ms', pausedExpiry ?? '');
+	await expect(unifiedHud).toHaveAttribute('data-current-points', pausedPoints ?? '');
 	const touchCountBefore = (await relayState(page)).state.published.filter((event) => event.kind === 27070 && parseTagGameActionEvent(event as unknown as NostrEvent, CHANNEL_ID)?.action === 'touch').length;
 	await page.keyboard.press('ArrowRight');
 	await expect(page.locator(`.participant[data-participant-id="${organizerPubkey}"]`)).toHaveAttribute('data-position', '7,5');

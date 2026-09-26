@@ -84,6 +84,25 @@ describe('tag-game HUD projection', () => {
 		expect(ended.benefitRateActive).toBe(false);
 	});
 
+	it('stops the organizer display at its local safety-stop boundary', () => {
+		const game = running('benefit');
+		const beforeStop = projectTagGameHud({ ...baseInput(game), nowMs: 104_000, effectPausedAtMs: 103_000 });
+		expect(beforeStop.predictedPoints).toBe(150);
+		expect(beforeStop.points).toBe(1_210);
+		expect(beforeStop.benefitRateActive).toBe(false);
+		const resumed = projectTagGameHud({ ...baseInput(game), game: { ...game, settledAtMs: 106_000 }, nowMs: 107_000 });
+		expect(resumed.predictedPoints).toBe(50);
+		expect(resumed.points).toBe(1_110);
+	});
+
+	it('keeps the final confirmed cumulative value available without predicting after the game ends', () => {
+		const game = { ...running('benefit'), phase: 'ended' as const, participant: [{ ...running('benefit').participant[0], points: 250, benefitMs: 5_000 }] };
+		const final = projectTagGameHud({ ...baseInput(game), nowMs: 300_000 });
+		expect(final.points).toBe(1_210);
+		expect(final.predictedPoints).toBe(0);
+		expect(final.benefitRateActive).toBe(false);
+	});
+
 	it('formats a stable minute-second countdown and clamps at zero', () => {
 		expect(formatTagGameRemainingTime(180_000, 13_000)).toBe('02:47');
 		expect(formatTagGameRemainingTime(180_000, 180_000)).toBe('00:00');

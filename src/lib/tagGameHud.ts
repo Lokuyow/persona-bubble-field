@@ -19,6 +19,8 @@ export type TagGameHudProjectionInput = Readonly<{
 	localAppliedPoints: number;
 	localAppliedLossMs: number;
 	holderActivityAtMs?: number;
+	/** Organizer-local safety stop; never inferred by other participants. */
+	effectPausedAtMs?: number;
 	savedPoints: number;
 	effectiveExpiresAtMs: number;
 	nowMs: number;
@@ -68,7 +70,8 @@ export function projectTagGameHud(input: TagGameHudProjectionInput): TagGameHudP
 		input.nowMs >= game.settledAtMs && input.nowMs < game.endsAt * 1000) {
 		const schedule = createTagGameSchedule(game.seed);
 		const holderActivityAtMs = input.holderActivityAtMs ?? Math.max(game.startedAt * 1_000, game.transferAt ?? 0, game.lastHolderResponseAtMs ?? 0);
-		const until = Math.min(input.nowMs, game.endsAt * 1000, holderActivityAtMs + 23_000);
+		const until = Math.min(input.nowMs, game.endsAt * 1000, holderActivityAtMs + 23_000,
+			input.effectPausedAtMs ?? Number.POSITIVE_INFINITY);
 		let cursor = Math.max(game.settledAtMs, game.startedAt * 1_000);
 		let boundary = 0;
 		let benefitDurationMs = 0;
@@ -92,8 +95,9 @@ export function projectTagGameHud(input: TagGameHudProjectionInput): TagGameHudP
 			predictedLossMs = Math.max(0, projectedCumulative - own.lifespanLossMs);
 		}
 		const currentEffect = tagGameScheduledEffectAt(game, input.nowMs);
-		benefitRateActive = currentEffect === 'benefit' && input.nowMs < holderActivityAtMs + 23_000;
-		calamityRateActive = currentEffect === 'calamity' && input.nowMs < holderActivityAtMs + 23_000;
+		const beforeLocalStop = input.effectPausedAtMs === undefined || input.nowMs < input.effectPausedAtMs;
+		benefitRateActive = currentEffect === 'benefit' && input.nowMs < holderActivityAtMs + 23_000 && beforeLocalStop;
+		calamityRateActive = currentEffect === 'calamity' && input.nowMs < holderActivityAtMs + 23_000 && beforeLocalStop;
 	}
 
 	return {
