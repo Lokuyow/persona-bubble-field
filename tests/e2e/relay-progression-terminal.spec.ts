@@ -242,9 +242,23 @@ test.describe('Relay startup', () => {
 		const upgradeIcon = upgradeButton.locator('svg');
 		await expect(upgradeIcon).toHaveCount(1);
 		const upgradeIconPaths = upgradeIcon.locator('path');
-		await expect(upgradeIconPaths).toHaveCount(2);
-		await expect(upgradeIconPaths.nth(0)).toHaveAttribute('d', /^M3 5a2/);
-		await expect(upgradeIconPaths.nth(1)).toHaveAttribute('d', 'm9 13l3-3l3 3');
+		await expect(upgradeIconPaths).toHaveCount(1);
+		await expect(upgradeIconPaths).toHaveAttribute('fill', 'currentColor');
+		await expect(upgradeIconPaths).toHaveAttribute('d', /^M19 2a3 3 0 0 1 3 3v14/);
+		const buttonComposition = await upgradeButton.evaluate((button) => {
+			const buttonRect = button.getBoundingClientRect();
+			const textRect = button.querySelector('.upgrade-requirement')!.getBoundingClientRect();
+			const iconRect = button.querySelector('svg')!.getBoundingClientRect();
+			return {
+				buttonHeight: buttonRect.height,
+				iconWidth: iconRect.width,
+				iconHeight: iconRect.height,
+				iconFits: iconRect.left >= buttonRect.left && iconRect.right <= buttonRect.right && iconRect.top >= buttonRect.top && iconRect.bottom <= buttonRect.bottom,
+				textBeforeIcon: textRect.right <= iconRect.left,
+				contentCentered: Math.abs((textRect.left + iconRect.right) / 2 - (buttonRect.left + buttonRect.right) / 2) < 1
+			};
+		});
+		expect(buttonComposition).toEqual({ buttonHeight: 50, iconWidth: 28, iconHeight: 28, iconFits: true, textBeforeIcon: true, contentCentered: true });
 		await expect(upgradeButton).not.toContainText('強化');
 		await expect(dialog).not.toContainText('必要ポイント');
 		const effectTypography = await dialog.evaluate((element) => {

@@ -3,7 +3,7 @@
 	import Adjustments from '~icons/tabler/adjustments';
 	import Brain from '~icons/tabler/brain';
 	import ShieldCheck from '~icons/tabler/shield-check';
-	import SquareChevronUp from '~icons/tabler/square-chevron-up';
+	import SquareChevronUpFilled from '~icons/tabler/square-chevron-up-filled';
 	import Stack2 from '~icons/tabler/stack-2';
 	import Wallet from '~icons/tabler/wallet';
 	import { formatContextCapacityMinutes } from '$lib/abilityDisplay';
@@ -93,7 +93,7 @@
 								{#if !isMaxed}<div class="value-row delta-row"><span>増加量</span><strong>{formatDelta(key, upgrade.level)}</strong></div>{/if}
 							</div>
 							<PrimaryButton class={busy && !isMaxed ? 'upgrade-button processing' : isMaxed || canAfford ? 'upgrade-button' : 'upgrade-button insufficient-points'} type="button" aria-label={isMaxed ? `${abilityLabels[key]}は最大Lvです` : busy ? `${upgradeName}（必要${upgrade.cost}pt、強化処理中）` : !canAfford ? `${upgradeName}（必要${upgrade.cost}pt、ポイント不足）` : `${upgradeName}（必要${upgrade.cost}pt）`} disabled={busy || !canAfford || isMaxed} onclick={() => onUpgrade(key)}>
-								{#if isMaxed}<span>最大Lv</span>{:else}<span class="upgrade-requirement"><span>必要</span>{' '}<strong>{upgrade.cost}pt</strong></span><SquareChevronUp aria-hidden="true" />{/if}
+								{#if isMaxed}<span>最大Lv</span>{:else}<span class="upgrade-requirement"><span>必要</span>{' '}<strong>{upgrade.cost}pt</strong></span><SquareChevronUpFilled aria-hidden="true" />{/if}
 							</PrimaryButton>
 						</article>
 					{/each}
@@ -140,7 +140,7 @@
 	.unit { color: inherit; font-size: .82em; font-weight: 700; white-space: nowrap; }
 	.delta-row strong { color: #aeb6ff; }
 	:global(.upgrade-button) { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; min-width: 0; min-height: 50px; height: 50px; padding: 0 14px; border-radius: 10px; font-size: 18px; font-variant-numeric: tabular-nums; }
-	:global(.upgrade-button svg) { width: 24px; height: 24px; stroke-width: 2; }
+	:global(.upgrade-button svg) { width: 28px; height: 28px; stroke-width: 2; }
 	.upgrade-requirement { display: inline-flex; align-items: baseline; gap: 5px; }
 	.upgrade-requirement > span { font-size: 14px; font-weight: 700; }
 	.upgrade-requirement > strong { font-size: 18px; font-weight: 850; }
