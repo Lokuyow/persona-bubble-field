@@ -927,15 +927,14 @@ export async function waitForRelayComposerReady(page: Page): Promise<Locator> {
 }
 
 export async function readActionDockControlOrder(page: Page): Promise<string[]> {
-	return page.locator('.composer-controls > *').evaluateAll((elements) => elements
+	return page.locator('.composer-controls-left > *, .composer-controls-right > *').evaluateAll((elements) => elements
 		.map((element) => {
 			const rect = element.getBoundingClientRect();
-			const className = ['profile-trigger', 'chatter-toggle', 'trace-unread-indicator', 'speech-type-toggle', 'suggestions-anchor']
+			const className = ['profile-trigger', 'chatter-toggle', 'trace-unread-indicator', 'sound-control', 'speech-type-toggle', 'suggestions-anchor']
 				.find((name) => element.classList.contains(name));
 			return className && rect.width > 0 && rect.height > 0 ? { className, left: rect.left, top: rect.top } : null;
 		})
 		.filter((item): item is { className: string; left: number; top: number } => item !== null)
-		.sort((left, right) => left.top - right.top || left.left - right.left)
 		.map((item) => item.className));
 }
 
@@ -955,12 +954,22 @@ export async function openClearReadyWorld(page: Page): Promise<{ secret: Uint8Ar
 	return { secret, pubkey };
 }
 
-export async function installPromptApiStub(page: Page, availability: 'available' | 'unavailable' = 'available'): Promise<void> {
-	await page.addInitScript(({ availability }) => {
+export async function installPromptApiStub(
+	page: Page,
+	availability: 'available' | 'unavailable' = 'available',
+	promptBehavior: 'resolve' | 'pending' | 'reject-once' = 'resolve'
+): Promise<void> {
+	await page.addInitScript(({ availability, promptBehavior }) => {
 		const state = { prompts: [] as string[], published: false };
 		const createClone = () => ({
-			prompt: async (input: string) => {
+			prompt: async (input: string, options?: { signal?: AbortSignal }) => {
 				state.prompts.push(input);
+				if (promptBehavior === 'reject-once' && state.prompts.length === 1) throw new Error('Prompt failed.');
+				if (promptBehavior === 'pending') {
+					return await new Promise<string>((_resolve, reject) => {
+						options?.signal?.addEventListener('abort', () => reject(new DOMException('Prompt aborted.', 'AbortError')), { once: true });
+					});
+				}
 				return JSON.stringify({ candidates: ['まずは自然な返答です。', '少しだけキャラクターらしい返答です。', 'ちょっと変化球の返答です。'] });
 			},
 			destroy: () => {}
@@ -975,7 +984,7 @@ export async function installPromptApiStub(page: Page, availability: 'available'
 				})
 			}
 		});
-		}, { availability });
+		}, { availability, promptBehavior });
 }
 
 export async function seedRelayAccount(page: Page, secretKey: Uint8Array, pubkey: string, lifespanExpiresAtMs = Date.now() + 7 * 24 * 60 * 60 * 1000, points = 0, abilities = { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 }, rootPoints = 0, rootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0 }): Promise<void> {
