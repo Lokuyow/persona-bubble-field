@@ -132,6 +132,24 @@ test.describe('Relay startup', () => {
 		await expect(dialog).toContainText('推論効率');
 		await expect(dialog).toContainText('コンテキスト容量');
 		await expect(dialog).toContainText('ハルシネーション抑制');
+		const abilityIcons = ['inferenceEfficiency', 'contextCapacity', 'hallucinationSuppression'];
+		const abilityIconGeometry = await dialog.locator('.ability-row').evaluateAll((rows) => rows.map((row) => {
+			const icon = row.querySelector<HTMLElement>('.ability-icon')!;
+			const label = row.querySelector<HTMLElement>('.ability-copy')!;
+			const level = row.querySelector<HTMLElement>('.ability-values')!;
+			const box = (element: HTMLElement) => element.getBoundingClientRect();
+			const iconBox = box(icon), labelBox = box(label), levelBox = box(level);
+			return { key: row.getAttribute('data-ability-key'), iconName: icon.getAttribute('data-ability-icon'), iconCount: icon.querySelectorAll('svg').length, iconLeft: iconBox.left, labelLeft: labelBox.left, iconRight: iconBox.right, labelRight: labelBox.right, labelLevelOverlap: labelBox.right > levelBox.left };
+		}));
+		expect(abilityIconGeometry.map(({ key }) => key)).toEqual(abilityIcons);
+		expect(abilityIconGeometry.map(({ iconName }) => iconName)).toEqual(['brain', 'stack-2', 'shield-check']);
+		for (const [index, row] of abilityIconGeometry.entries()) {
+			expect(row.iconCount).toBe(1);
+			expect(row.labelLeft).toBeGreaterThanOrEqual(row.iconRight);
+			expect(row.labelLevelOverlap).toBe(false);
+			await expect(dialog.locator('.ability-row').nth(index).locator('.ability-copy strong')).toHaveText(['推論効率', 'コンテキスト容量', 'ハルシネーション抑制'][index]);
+		}
+		for (const [index, level] of ['Lv1', 'Lv1', 'Lv1'].entries()) await expect(dialog.locator('.ability-row').nth(index).locator('.ability-values strong')).toHaveText(level);
 		await expect(dialog).toContainText('Root Point');
 		await expect(dialog).toContainText('脱出');
 		await expect(dialog.getByRole('button', { name: '脱出', exact: true })).toHaveAttribute('data-action-intent', 'danger');
@@ -218,6 +236,16 @@ test.describe('Relay startup', () => {
 		await expect.poll(() => scrollViewport.evaluate((element) => element.scrollTop)).toBe(0);
 		await expect(dialog.locator('.escape-info-trigger')).not.toBeFocused();
 		await expect(dialog.locator('[data-initial-focus]')).toBeFocused();
+		const abilityGeometry = await dialog.locator('.ability-row').evaluateAll((rows) => rows.map((row) => {
+			const icon = row.querySelector<HTMLElement>('.ability-icon')!.getBoundingClientRect();
+			const label = row.querySelector<HTMLElement>('.ability-copy')!.getBoundingClientRect();
+			const values = row.querySelector<HTMLElement>('.ability-values')!.getBoundingClientRect();
+			return { iconRight: icon.right, labelLeft: label.left, labelRight: label.right, valuesLeft: values.left };
+		}));
+		for (const row of abilityGeometry) {
+			expect(row.labelLeft).toBeGreaterThanOrEqual(row.iconRight);
+			expect(row.labelRight).toBeLessThanOrEqual(row.valuesLeft);
+		}
 		const dialogBox = await dialog.boundingBox();
 		const viewportBox = await scrollViewport.boundingBox();
 		const metrics = await scrollViewport.evaluate((element) => ({ clientHeight: element.clientHeight, scrollHeight: element.scrollHeight }));
@@ -321,6 +349,7 @@ test.describe('Relay startup', () => {
 		await expect(dialog).toContainText('作業中に反映');
 		await expect(dialog).toContainText('通常作業は上限');
 		await expect(dialog).toContainText('ポイント・寿命延長が継続中');
+		await expect(dialog.getByRole('progressbar', { name: '作業の蓄積進捗' })).toHaveAttribute('aria-valuenow', '100');
 		await expect(page.locator('[data-unified-status-hud] [data-mending-status]')).toHaveAttribute('aria-label', '延命中');
 		await expect(page.locator('[data-unified-status-hud] [data-mending-status]')).toHaveAttribute('data-mending-icon', 'heart-plus');
 		await expect(page.locator('[data-unified-status-hud] [data-mending-rate]')).toHaveText('0.20 pt/分+0.02h/h');

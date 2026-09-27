@@ -205,7 +205,7 @@
 	.progress-heading.overflow-lifespan-status { display: grid; gap: 2px; }
 	.progress-heading.overflow-lifespan-status span { display: block; }
 	.progress-duration { color: #35e3e8; font-weight: 800; }
-	.progress-track { width: 100%; height: 11px; overflow: hidden; border: 1px solid rgba(53, 227, 232, .72); border-radius: 999px; background: #06303d; box-shadow: 0 0 0 1px rgba(53, 227, 232, .03) inset; }
+	.progress-track { width: 100%; height: 17px; overflow: hidden; border: 1px solid rgba(53, 227, 232, .72); border-radius: 999px; background: #06303d; box-shadow: 0 0 0 1px rgba(53, 227, 232, .03) inset; }
 	.progress-value { height: 100%; min-width: 2px; background: linear-gradient(90deg, #2ee3df, #64f5f0); border-radius: inherit; }
 	.result-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; gap: 12px; margin-bottom: 14px; }
 	.result-card { display: flex; align-items: center; gap: 14px; min-width: 0; min-height: 106px; padding: 14px 16px; border: 1px solid rgba(35, 220, 226, .32); border-radius: 12px; background: rgba(9, 40, 52, .62); }
