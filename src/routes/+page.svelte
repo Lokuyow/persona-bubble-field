@@ -687,7 +687,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	let tagGameRoleByPubkey = $derived.by(() => {
 		const roles = new Map<string, 'participant' | 'holder'>();
 		const game = tagGameStates.find((candidate) => candidate.gameId === tagGameDisplayedGameId);
-		if (!game) return roles;
+		if (!game || game.phase !== 'running') return roles;
 		for (const member of game.participant) {
 			const latest = latestTagGameWorldStates.get(member.pubkey);
 			if ((member.status === 'active' || member.status === 'temporarily-ineligible') && latest?.state === 'active' && latest.runNumber === member.runNumber) {

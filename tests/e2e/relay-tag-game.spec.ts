@@ -29,37 +29,62 @@ async function expectButtonShape(button: Locator): Promise<void> {
 	expect(style.width).toBe('1px');
 }
 
-type BlessingStarPosition = Readonly<{ x: number; y: number; running: boolean }>;
-type BlessingStarPositions = Readonly<Record<'one' | 'two' | 'three' | 'four', BlessingStarPosition>>;
+type Box = Readonly<{ x: number; y: number; width: number; height: number }>;
 
-async function readBlessingStarPositions(effectVisuals: Locator): Promise<BlessingStarPositions> {
-	return effectVisuals.locator('svg').evaluate((svg) => {
-		const bounds = svg.getBoundingClientRect();
-		return Object.fromEntries([...svg.querySelectorAll<SVGGraphicsElement>('.blessing-star')].map((star) => {
-			const classes = [...star.classList];
-			const name = classes.find((className) => /^blessing-star-(one|two|three|four)$/.test(className))?.replace('blessing-star-', '');
-			const box = star.getBoundingClientRect();
-			return [name ?? 'unknown', {
-				x: (box.left + box.width / 2 - bounds.left) / bounds.width,
-				y: (box.top + box.height / 2 - bounds.top) / bounds.height,
-				running: star.getAnimations().some((animation) => animation.playState === 'running')
-			}];
-		})) as BlessingStarPositions;
+async function readEffectSymbolLayout(holder: Locator): Promise<Readonly<{
+	cell: Box;
+	avatar: Box;
+	name: Box;
+	leftHorn: Box | null;
+	rightHorn: Box | null;
+	mallet: Box | null;
+	visualZ: number;
+	buttonZ: number;
+	pointerEvents: string;
+}>> {
+	return holder.evaluate((element) => {
+		const box = (target: Element | null): Box | null => {
+			if (!target) return null;
+			const rect = target.getBoundingClientRect();
+			return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+		};
+		const visual = element.querySelector<HTMLElement>('.tag-game-effect-visuals');
+		const button = element.querySelector<HTMLElement>('.participant-profile-trigger');
+		const path = (selector: string) => box(element.querySelector(selector));
+		return {
+			cell: box(element)!,
+			avatar: box(element.querySelector('.participant-profile-trigger .avatar'))!,
+			name: box(element.querySelector('.participant-name'))!,
+			leftHorn: path('.oni-horn:nth-of-type(1)'),
+			rightHorn: path('.oni-horn:nth-of-type(2)'),
+			mallet: path('[data-fuku-mallet]'),
+			visualZ: Number.parseInt(getComputedStyle(visual!).zIndex, 10),
+			buttonZ: Number.parseInt(getComputedStyle(button!).zIndex, 10),
+			pointerEvents: getComputedStyle(visual!).pointerEvents
+		};
 	});
 }
 
-function expectBlessingStarDirections(stars: BlessingStarPositions): void {
-	const horizontalCentre = (position: BlessingStarPosition) => Math.abs(position.x - 0.5);
-	const verticalCentre = (position: BlessingStarPosition) => Math.abs(position.y - 0.5);
-	// Ratios keep this about the four cardinal placements rather than design pixels.
-	expect(stars.one.y).toBeLessThan(0.25);
-	expect(horizontalCentre(stars.one)).toBeLessThan(0.2);
-	expect(stars.two.x).toBeGreaterThan(0.75);
-	expect(verticalCentre(stars.two)).toBeLessThan(0.2);
-	expect(stars.three.y).toBeGreaterThan(0.75);
-	expect(horizontalCentre(stars.three)).toBeLessThan(0.2);
-	expect(stars.four.x).toBeLessThan(0.25);
-	expect(verticalCentre(stars.four)).toBeLessThan(0.2);
+function expectIconAboveAvatarAndClearOfName(layout: Awaited<ReturnType<typeof readEffectSymbolLayout>>, symbol: 'horns' | 'mallet'): void {
+	const iconBoxes = symbol === 'horns' ? [layout.leftHorn, layout.rightHorn] : [layout.mallet];
+	expect(iconBoxes.every((box) => box !== null && box.width > 0 && box.height > 0)).toBe(true);
+	const boxes = iconBoxes.filter((box): box is Box => box !== null);
+	const cellCentre = layout.cell.x + layout.cell.width / 2;
+	const avatarTopHalf = layout.avatar.y + layout.avatar.height * 0.48;
+	for (const box of boxes) {
+		expect(box.y).toBeLessThan(layout.cell.y + layout.cell.height * 0.25);
+		expect(box.y + box.height).toBeLessThan(avatarTopHalf);
+		expect(box.y + box.height <= layout.name.y || box.y >= layout.name.y + layout.name.height).toBe(true);
+	}
+	if (symbol === 'horns') {
+		expect(boxes[0].x + boxes[0].width / 2).toBeLessThan(cellCentre);
+		expect(boxes[1].x + boxes[1].width / 2).toBeGreaterThan(cellCentre);
+	} else {
+		const malletCentre = boxes[0].x + boxes[0].width / 2;
+		expect(Math.abs(malletCentre - cellCentre)).toBeLessThan(layout.cell.width * 0.22);
+	}
+	expect(layout.visualZ).toBeGreaterThan(layout.buttonZ);
+	expect(layout.pointerEvents).toBe('none');
 }
 
 async function synchronizeBrowserClocks(pages: readonly Page[]): Promise<void> {
@@ -327,7 +352,7 @@ test('keeps the tag-game benefit pulse in phase during repeated point gains and 
 	await expect(points).not.toHaveAttribute('data-value-change', /.+/);
 	await expect(points).toHaveAttribute('data-tag-game-flash', 'benefit');
 	await expect(points).toHaveCSS('animation-name', /tag-game-value-pulse$/);
-	await expect.poll(async () => (await recordedTagGameSounds(page)).filter((duration) => Math.abs(duration - 0.18) < 0.001)).toHaveLength(1);
+	await expect.poll(async () => (await recordedTagGameSounds(page)).filter((duration) => Math.abs(duration - 0.26) < 0.001)).toHaveLength(1);
 	expect((await recordedTagGameSounds(page)).filter((duration) => Math.abs(duration - 0.52) < 0.001)).toHaveLength(0);
 	await page.evaluate(() => {
 		(window as typeof window & { __tagGamePulseIterations?: number }).__tagGamePulseIterations = 0;
@@ -340,7 +365,7 @@ test('keeps the tag-game benefit pulse in phase during repeated point gains and 
 	});
 	await page.waitForFunction(() => (window as typeof window & { __tagGamePulseIterations?: number }).__tagGamePulseIterations === 1,
 		undefined, { polling: 'raf', timeout: 3_000 });
-	await expect.poll(async () => (await recordedTagGameSounds(page)).filter((duration) => Math.abs(duration - 0.18) < 0.001)).toHaveLength(2);
+	await expect.poll(async () => (await recordedTagGameSounds(page)).filter((duration) => Math.abs(duration - 0.26) < 0.001)).toHaveLength(2);
 	await expect(points).toHaveCSS('animation-duration', '1.5s');
 	const pulseOffsets = await points.evaluate((element) => {
 		const animation = element.getAnimations().find((candidate): candidate is CSSAnimation =>
@@ -382,8 +407,10 @@ test('signals calamity lifespan loss while ignoring clock-only ticks', async ({ 
 	await expect(page.locator('main')).toHaveAttribute('data-realtime-status', 'active');
 	await moveRelaySelfTo(page, { x: 7, y: 5 });
 	await unlockSoundFromTheUI(page);
+	const projectionStartedAtMs = await page.evaluate(() => Math.ceil((Date.now() + 5_000) / 1_000) * 1_000);
+	await page.clock.pauseAt(projectionStartedAtMs);
 	const seed = Array.from({ length: 10_000 }, (_, index) => `hud-life-${index}`).find((candidate) => createTagGameSchedule(candidate)[0].effect === 'calamity')!;
-	await injectSelfOwnedProjection(page, secret, 'calamity', seed, nowMs);
+	await injectSelfOwnedProjection(page, secret, 'calamity', seed, projectionStartedAtMs);
 	const hud = page.locator('[data-unified-status-hud]');
 	const lifespan = hud.locator('[data-lifespan-value]');
 	const points = hud.locator('[data-points-value]');
@@ -818,7 +845,7 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 		const displayedEffect = holderPage.locator('[data-tag-game-hud] [data-tag-game-effect]');
 		await expect(holderMarker).toHaveAttribute('data-tag-game-effect-active', await displayedEffect.getAttribute('data-tag-game-effect-active') ?? 'false');
 		const fieldEffectVisuals = holderMarker.locator('.tag-game-effect-visuals');
-		const effectName = running.effect === 'benefit' ? '祝福' : '呪い';
+		const effectName = running.effect === 'benefit' ? '福' : '鬼';
 		await expect(holderMarker.locator('.tag-game-holder-label')).toHaveCount(0);
 		await expect(fieldEffectVisuals).toHaveCount(1);
 		await expect(fieldEffectVisuals).toHaveAttribute('aria-label', `${effectName}${await displayedEffect.getAttribute('data-tag-game-effect-active') === 'true' ? '' : '・効果停止中'}`);
@@ -837,12 +864,18 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 		}
 		expect(await fieldEffectVisuals.evaluate((element) => getComputedStyle(element).pointerEvents)).toBe('none');
 		expect(await holderMarker.locator('.participant-profile-trigger').evaluate((element) => getComputedStyle(element).pointerEvents)).toBe('auto');
+		const desktopSymbolLayout = await readEffectSymbolLayout(holderMarker);
+		if (running.effect === 'calamity') expectIconAboveAvatarAndClearOfName(desktopSymbolLayout, 'horns');
+		else expectIconAboveAvatarAndClearOfName(desktopSymbolLayout, 'mallet');
 		const holderViewport = holderPage.viewportSize();
 		await holderPage.setViewportSize({ width: 390, height: 844 });
 		await expect(fieldEffectVisuals.locator('svg')).toBeVisible();
 		expect(await holderMarker.evaluate((element) => Number.parseFloat(getComputedStyle(element).width))).toBe(50);
 		await expect(holderMarker.locator('.participant-profile-trigger')).toBeVisible();
 		await expect(holderMarker.locator('.participant-name')).toBeVisible();
+		const mobileSymbolLayout = await readEffectSymbolLayout(holderMarker);
+		if (running.effect === 'calamity') expectIconAboveAvatarAndClearOfName(mobileSymbolLayout, 'horns');
+		else expectIconAboveAvatarAndClearOfName(mobileSymbolLayout, 'mallet');
 		await holderPage.emulateMedia({ reducedMotion: 'reduce' });
 		await expect(fieldEffectVisuals.locator('svg')).toBeVisible();
 		const reducedMotionAnimations = await fieldEffectVisuals.evaluate((element) => [...element.querySelectorAll<SVGElement>('*')]
@@ -934,6 +967,12 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 		const transferredHolderPage = cells.get(transferred.ownerPubkey!)!.page;
 		await expect(transferredHolderPage.locator(`.participant[data-participant-id="${transferred.ownerPubkey}"]`)).toHaveAttribute('data-tag-game-role', 'holder');
 		await expect(transferredHolderPage.locator('[data-tag-game-hud] [data-tag-game-effect]')).toBeVisible();
+		await Promise.all([hostPage, participantPage, participantTwoPage].map(async (page) => {
+			const currentOwner = page.locator(`.participant[data-participant-id="${transferred.ownerPubkey}"]`);
+			await expect(currentOwner.locator('.tag-game-effect-visuals')).toHaveAttribute('aria-label', transferred.effect === 'benefit' ? '福' : '鬼');
+			const previousOwner = page.locator(`.participant[data-participant-id="${touchState.ownerPubkey}"]`);
+			if (touchState.ownerPubkey !== transferred.ownerPubkey) await expect(previousOwner.locator('.tag-game-effect-aura, .tag-game-effect-visuals')).toHaveCount(0);
+		}));
 
 		const endsAt = running.endsAt! * 1000;
 		const channel = { channelId: CHANNEL_ID, relayHint: latestHostPosition.tags.find((tag) => tag[0] === 'e')?.[2] ?? 'wss://relay.test/' };
@@ -955,15 +994,16 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 		const finalStateEvent = await latestGameEvent(hostPage, gameId);
 		await injectRealtime(participantPage, finalStateEvent);
 		await injectRealtime(participantTwoPage, finalStateEvent);
+		await Promise.all([hostPage, participantPage, participantTwoPage].map((page) => expect(page.locator('.tag-game-effect-aura, .tag-game-effect-visuals')).toHaveCount(0)));
 		const finalState = parseTagGameEvent(finalStateEvent, CHANNEL_ID)!.state;
 		const finalLocal = finalState.participant.find((member) => member.pubkey === participantPubkey)!;
 		await expect.poll(async () => (await tagGamePersistence(participantPage)).receipt).toMatchObject({ gameId, points: finalLocal.points, lifespanLossMs: finalLocal.lifespanLossMs });
 		await expect(participantPage.locator('[data-unified-status-hud]')).toHaveAttribute('data-saved-points', String((await tagGamePersistence(participantPage)).savedPoints));
 		await expect(participantPage.locator('[data-unified-status-hud]')).not.toHaveAttribute('data-tag-game-projection', 'true');
 		await Promise.all([openTagGameTerminal(hostPage), openTagGameTerminal(participantPage), openTagGameTerminal(participantTwoPage)]);
-		await expect(hostPage.getByText(/祝福\d+秒・呪い\d+秒/).first()).toBeVisible();
-		await expect(participantPage.getByText(/祝福\d+秒・呪い\d+秒/).first()).toBeVisible();
-		await expect(participantTwoPage.getByText(/祝福\d+秒・呪い\d+秒/).first()).toBeVisible();
+		await expect(hostPage.getByText(/福\d+秒・鬼\d+秒/).first()).toBeVisible();
+		await expect(participantPage.getByText(/福\d+秒・鬼\d+秒/).first()).toBeVisible();
+		await expect(participantTwoPage.getByText(/福\d+秒・鬼\d+秒/).first()).toBeVisible();
 		await expect(participantPage.locator('.results')).toContainText(resolveCharacterFromPubkey(hostPubkey)!.name);
 		await expect(participantPage.locator('.results')).toContainText('あなた');
 	} finally {
@@ -1749,12 +1789,15 @@ test('host silence is detected only while the local Relay connection is active',
 	await expect(holder).toHaveAttribute('data-tag-game-effect', 'calamity');
 	await expect(holder).toHaveAttribute('data-tag-game-effect-active', 'true');
 	const effectVisuals = holder.locator('.tag-game-effect-visuals');
-	await expect(effectVisuals).toHaveAttribute('aria-label', '呪い');
+	await expect(effectVisuals).toHaveAttribute('aria-label', '鬼');
+	await expect(effectVisuals).toHaveText('');
 	await expect(holder.locator('.tag-game-holder-label')).toHaveCount(0);
-	await expect(effectVisuals.locator('.curse-outline')).toHaveCount(1);
-	await expect(effectVisuals.locator('.curse-shadow')).toHaveCount(1);
-	await expect(effectVisuals.locator('.curse-shard')).toHaveCount(4);
-	await expect(effectVisuals.locator('.blessing-halo')).toHaveCount(0);
+	await expect(effectVisuals.locator('.oni-horn')).toHaveCount(2);
+	await expect(holder.locator('.tag-game-effect-aura .oni-aura-outline')).toHaveCount(1);
+	await expect(holder.locator('.tag-game-effect-aura .oni-aura-shadow')).toHaveCount(1);
+	await expect(holder.locator('.tag-game-effect-aura .oni-aura-shard')).toHaveCount(4);
+	const initialOniLayout = await readEffectSymbolLayout(holder);
+	expectIconAboveAvatarAndClearOfName(initialOniLayout, 'horns');
 	const cooldownLine = page.locator('[data-tag-game-cooldown-line]');
 	await expect(cooldownLine).toBeVisible();
 	const cooldownInitialWidth = await cooldownLine.locator('span').evaluate((element) => element.getBoundingClientRect().width);
@@ -1772,18 +1815,21 @@ test('host silence is detected only while the local Relay connection is active',
 	const benefit = { ...active, revision: 1, updatedAt: startedAt + 1, effect: 'benefit' as const };
 	await injectRealtime(page, finalizeTagGameState(benefit, CHANNEL_ID, startedAt + 1, remoteHostSecret));
 	await expect(holder).toHaveAttribute('data-tag-game-effect', 'benefit');
-	await expect(effectVisuals).toHaveAttribute('aria-label', '祝福');
-	await expect(effectVisuals.locator('.blessing-halo')).toHaveCount(1);
-	await expect(effectVisuals.locator('.blessing-orbit')).toHaveCount(1);
-	await expect(effectVisuals.locator('.blessing-star')).toHaveCount(4);
-	await expect(effectVisuals.locator('.curse-outline')).toHaveCount(0);
-	await expect.poll(async () => Object.values(await readBlessingStarPositions(effectVisuals)).every((star) => star.running)).toBe(true);
-	const animatedBlessingStars = await readBlessingStarPositions(effectVisuals);
-	expectBlessingStarDirections(animatedBlessingStars);
+	await expect(effectVisuals).toHaveAttribute('aria-label', '福');
+	await expect(holder.locator('.tag-game-effect-aura .fuku-aura-glow')).toHaveCount(1);
+	await expect(holder.locator('.tag-game-effect-aura .fuku-aura-ring')).toHaveCount(1);
+	await expect(effectVisuals.locator('[data-fuku-mallet]')).toHaveCount(1);
+	await expect(holder.locator('.tag-game-effect-aura .oni-aura-outline')).toHaveCount(0);
+	const desktopFukuLayout = await readEffectSymbolLayout(holder);
+	expectIconAboveAvatarAndClearOfName(desktopFukuLayout, 'mallet');
+	const mobileFukuLayout = await readEffectSymbolLayout(holder);
+	expectIconAboveAvatarAndClearOfName(mobileFukuLayout, 'mallet');
 	await page.emulateMedia({ reducedMotion: 'reduce' });
-	const reducedMotionBlessingStars = await readBlessingStarPositions(effectVisuals);
-	expect(Object.values(reducedMotionBlessingStars).every((star) => !star.running)).toBe(true);
-	expectBlessingStarDirections(reducedMotionBlessingStars);
+	const reducedMotionAnimations = await holder.evaluate((element) => [...element.querySelectorAll<SVGElement>('*')]
+		.map((child) => getComputedStyle(child).animationName).filter((name) => name !== 'none'));
+	expect(reducedMotionAnimations).toEqual([]);
+	const reducedMotionFukuLayout = await readEffectSymbolLayout(holder);
+	expectIconAboveAvatarAndClearOfName(reducedMotionFukuLayout, 'mallet');
 	await page.emulateMedia({ reducedMotion: 'no-preference' });
 	await expect(page.locator('[data-tag-game-cooldown]')).toHaveCount(0);
 	await expect(page.locator('[data-tag-game-hud] [data-tag-game-effect]')).toContainText('所持者以外が追いかけて奪う');
@@ -1793,9 +1839,9 @@ test('host silence is detected only while the local Relay connection is active',
 	await expect(page.locator('[data-tag-game-cooldown]')).toHaveText('効果停止中');
 	await expect(page.locator('[data-tag-game-leave]')).toBeVisible();
 	await expect(holder).toHaveAttribute('data-tag-game-effect-active', 'false');
-	const pausedEffectName = await holder.getAttribute('data-tag-game-effect') === 'benefit' ? '祝福' : '呪い';
+	const pausedEffectName = await holder.getAttribute('data-tag-game-effect') === 'benefit' ? '福' : '鬼';
 	await expect(effectVisuals).toHaveAttribute('aria-label', `${pausedEffectName}・効果停止中`);
-	const pausedVisualAnimations = await effectVisuals.evaluate((element) => [...element.querySelectorAll<SVGElement>('*')]
+	const pausedVisualAnimations = await holder.evaluate((element) => [...element.querySelectorAll<SVGElement>('*')]
 		.map((child) => getComputedStyle(child).animationName).filter((name) => name !== 'none'));
 	expect(pausedVisualAnimations).toEqual([]);
 	await page.clock.runFor(31_000);
@@ -1803,6 +1849,7 @@ test('host silence is detected only while the local Relay connection is active',
 	await page.clock.runFor(6_000);
 	await expect(page.getByText('中断')).toBeVisible();
 	await expect(page.locator('[data-tag-game-hud]')).toHaveCount(0);
+	await expect(holder.locator('.tag-game-effect-aura, .tag-game-effect-visuals')).toHaveCount(0);
 });
 
 test('organizer is auto-consented, and proposal expiry removes nonresponders before a fresh proposal', async ({ page }) => {
