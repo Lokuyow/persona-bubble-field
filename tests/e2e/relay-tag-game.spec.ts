@@ -35,12 +35,27 @@ async function readEffectSymbolLayout(holder: Locator): Promise<Readonly<{
 	cell: Box;
 	avatar: Box;
 	name: Box;
-	aura: Box | null;
+	auraLeft: Box | null;
+	auraRight: Box | null;
+	auraLeftFillOpacity: number;
+	auraRightFillOpacity: number;
+	auraStrokeOpacity: number;
+	auraStrokeWidth: number;
 	leftHorn: Box | null;
 	rightHorn: Box | null;
 	mallet: Box | null;
+	malletGeometry: Readonly<{
+		shaft: Readonly<{ tagName: string; x: number; y: number; width: number; height: number; rx: number }>;
+		head: Readonly<{ tagName: string; x: number; y: number; width: number; height: number; rx: number }>;
+		groupTransform: string | null;
+		shaftTransform: string | null;
+		headTransform: string | null;
+		shaftSharesParentWithHead: boolean;
+	}> | null;
+	auraZ: number;
 	visualZ: number;
 	buttonZ: number;
+	visualAnimationName: string;
 	pointerEvents: string;
 }>> {
 	return holder.evaluate((element) => {
@@ -50,32 +65,68 @@ async function readEffectSymbolLayout(holder: Locator): Promise<Readonly<{
 			return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
 		};
 		const visual = element.querySelector<HTMLElement>('.tag-game-effect-visuals');
+		const aura = element.querySelector<HTMLElement>('.tag-game-effect-aura');
 		const button = element.querySelector<HTMLElement>('.participant-profile-trigger');
 		const path = (selector: string) => box(element.querySelector(selector));
-		const auraSelector = element.getAttribute('data-tag-game-effect') === 'benefit' ? '.fuku-aura-ring' : '.oni-aura-outline';
+		const isFuku = element.getAttribute('data-tag-game-effect') === 'benefit';
+		const auraLeftSelector = isFuku ? '.fuku-smoke-left > path' : '.oni-smoke-left > path';
+		const auraRightSelector = isFuku ? '.fuku-smoke-right > path' : '.oni-smoke-right > path';
+		const auraLeftElement = element.querySelector<SVGGraphicsElement>(auraLeftSelector);
+		const auraRightElement = element.querySelector<SVGGraphicsElement>(auraRightSelector);
+		const malletShaft = element.querySelector<SVGRectElement>('[data-fuku-mallet-handle]');
+		const malletHead = element.querySelector<SVGRectElement>('[data-fuku-mallet-head]');
+		const rectGeometry = (rect: SVGRectElement) => ({
+			tagName: rect.tagName.toLowerCase(),
+			x: Number(rect.getAttribute('x')),
+			y: Number(rect.getAttribute('y')),
+			width: Number(rect.getAttribute('width')),
+			height: Number(rect.getAttribute('height')),
+			rx: Number(rect.getAttribute('rx'))
+		});
 		return {
 			cell: box(element)!,
 			avatar: box(element.querySelector('.participant-profile-trigger .avatar'))!,
 			name: box(element.querySelector('.participant-name'))!,
-			aura: path(auraSelector),
+			auraLeft: box(auraLeftElement),
+			auraRight: box(auraRightElement),
+			auraLeftFillOpacity: Number.parseFloat(getComputedStyle(auraLeftElement!).fillOpacity),
+			auraRightFillOpacity: Number.parseFloat(getComputedStyle(auraRightElement!).fillOpacity),
+			auraStrokeOpacity: Number.parseFloat(getComputedStyle(auraLeftElement!).strokeOpacity),
+			auraStrokeWidth: Number.parseFloat(getComputedStyle(auraLeftElement!).strokeWidth),
 			leftHorn: path('.oni-horn:nth-of-type(1)'),
 			rightHorn: path('.oni-horn:nth-of-type(2)'),
 			mallet: path('[data-fuku-mallet]'),
+			malletGeometry: malletShaft && malletHead ? {
+				shaft: rectGeometry(malletShaft),
+				head: rectGeometry(malletHead),
+				groupTransform: element.querySelector('[data-fuku-mallet]')?.getAttribute('transform') ?? null,
+				shaftTransform: malletShaft.getAttribute('transform'),
+				headTransform: malletHead.getAttribute('transform'),
+				shaftSharesParentWithHead: malletShaft.parentElement === malletHead.parentElement
+			} : null,
+			auraZ: Number.parseInt(getComputedStyle(aura!).zIndex, 10),
 			visualZ: Number.parseInt(getComputedStyle(visual!).zIndex, 10),
 			buttonZ: Number.parseInt(getComputedStyle(button!).zIndex, 10),
+			visualAnimationName: getComputedStyle(visual!).animationName,
 			pointerEvents: getComputedStyle(visual!).pointerEvents
 		};
 	});
 }
 
 function expectAuraVisibleOutsideAvatar(layout: Awaited<ReturnType<typeof readEffectSymbolLayout>>): void {
-	expect(layout.aura).not.toBeNull();
-	const aura = layout.aura!;
+	expect(layout.auraLeft).not.toBeNull();
+	expect(layout.auraRight).not.toBeNull();
+	const auraLeft = layout.auraLeft!;
+	const auraRight = layout.auraRight!;
 	const minVisibleOverflow = layout.cell.width * 0.04;
-	expect(layout.avatar.x - aura.x).toBeGreaterThan(minVisibleOverflow);
-	expect(aura.x + aura.width - (layout.avatar.x + layout.avatar.width)).toBeGreaterThan(minVisibleOverflow);
-	expect(layout.avatar.y - aura.y).toBeGreaterThan(minVisibleOverflow);
-	expect(aura.y + aura.height - (layout.avatar.y + layout.avatar.height)).toBeGreaterThan(minVisibleOverflow);
+	expect(layout.avatar.x - auraLeft.x).toBeGreaterThan(minVisibleOverflow);
+	expect(auraRight.x + auraRight.width - (layout.avatar.x + layout.avatar.width)).toBeGreaterThan(minVisibleOverflow);
+	expect(layout.auraLeftFillOpacity).toBeGreaterThan(0.15);
+	expect(layout.auraLeftFillOpacity).toBeLessThan(0.4);
+	expect(layout.auraRightFillOpacity).toBeGreaterThan(0.15);
+	expect(layout.auraRightFillOpacity).toBeLessThan(0.4);
+	expect(layout.auraStrokeOpacity).toBeLessThan(0.5);
+	expect(layout.auraStrokeWidth).toBeLessThan(2);
 }
 
 function expectIconAboveAvatarAndClearOfName(layout: Awaited<ReturnType<typeof readEffectSymbolLayout>>, symbol: 'horns' | 'mallet'): void {
@@ -98,7 +149,27 @@ function expectIconAboveAvatarAndClearOfName(layout: Awaited<ReturnType<typeof r
 		expect(malletCentre - cellCentre).toBeLessThan(layout.cell.width * 0.32);
 	}
 	expect(layout.visualZ).toBeGreaterThan(layout.buttonZ);
+	expect(layout.auraZ).toBeLessThan(layout.buttonZ);
+	expect(layout.visualAnimationName).toBe('none');
 	expect(layout.pointerEvents).toBe('none');
+}
+
+function expectMalletHeadAndShaftToMeet(layout: Awaited<ReturnType<typeof readEffectSymbolLayout>>): void {
+	expect(layout.malletGeometry).not.toBeNull();
+	const { shaft, head, groupTransform, shaftTransform, headTransform, shaftSharesParentWithHead } = layout.malletGeometry!;
+	expect(shaft.tagName).toBe('rect');
+	expect(head.tagName).toBe('rect');
+	expect(shaft.width).toBeLessThan(head.width);
+	expect(shaft.height).toBeGreaterThan(head.height);
+	expect(shaft.rx).toBeGreaterThan(0);
+	expect(head.rx).toBeGreaterThan(0);
+	expect(shaft.x + shaft.width / 2).toBe(head.x + head.width / 2);
+	expect(shaft.y).toBeLessThan(head.y + head.height);
+	expect(shaft.y + shaft.height).toBeGreaterThan(head.y + head.height);
+	expect(shaftSharesParentWithHead).toBe(true);
+	expect(groupTransform).toMatch(/rotate\(/);
+	expect(shaftTransform).toBeNull();
+	expect(headTransform).toBeNull();
 }
 
 async function synchronizeBrowserClocks(pages: readonly Page[]): Promise<void> {
@@ -1807,9 +1878,9 @@ test('host silence is detected only while the local Relay connection is active',
 	await expect(effectVisuals).toHaveText('');
 	await expect(holder.locator('.tag-game-holder-label')).toHaveCount(0);
 	await expect(effectVisuals.locator('.oni-horn')).toHaveCount(2);
-	await expect(holder.locator('.tag-game-effect-aura .oni-aura-outline')).toHaveCount(1);
-	await expect(holder.locator('.tag-game-effect-aura .oni-aura-shadow')).toHaveCount(1);
-	await expect(holder.locator('.tag-game-effect-aura .oni-aura-shard')).toHaveCount(4);
+	await expect(holder.locator('.tag-game-effect-aura .oni-smoke-left, .tag-game-effect-aura .oni-smoke-right')).toHaveCount(2);
+	await expect(holder.locator('.tag-game-effect-aura .oni-smoke-trail')).toHaveCount(1);
+	await expect(holder.locator('.tag-game-effect-aura .oni-smoke-particle')).toHaveCount(1);
 	const oniViewport = page.viewportSize();
 	if (!oniViewport) throw new Error('Expected a fixed viewport for Oni symbol layout checks');
 	await expect.poll(() => holder.evaluate((element) => element.getBoundingClientRect().width)).toBe(76);
@@ -1841,8 +1912,9 @@ test('host silence is detected only while the local Relay connection is active',
 	await injectRealtime(page, finalizeTagGameState(benefit, CHANNEL_ID, startedAt + 1, remoteHostSecret));
 	await expect(holder).toHaveAttribute('data-tag-game-effect', 'benefit');
 	await expect(effectVisuals).toHaveAttribute('aria-label', '福');
-	await expect(holder.locator('.tag-game-effect-aura .fuku-aura-glow')).toHaveCount(1);
-	await expect(holder.locator('.tag-game-effect-aura .fuku-aura-ring')).toHaveCount(1);
+	await expect(holder.locator('.tag-game-effect-aura .fuku-smoke-left, .tag-game-effect-aura .fuku-smoke-right')).toHaveCount(2);
+	await expect(holder.locator('.tag-game-effect-aura .fuku-smoke-trail')).toHaveCount(1);
+	await expect(holder.locator('.tag-game-effect-aura .fuku-smoke-particle')).toHaveCount(1);
 	await expect(effectVisuals.locator('[data-fuku-mallet]')).toHaveCount(1);
 	await expect(holder.locator('.tag-game-effect-aura .oni-aura-outline')).toHaveCount(0);
 	const fukuViewport = page.viewportSize();
@@ -1851,11 +1923,13 @@ test('host silence is detected only while the local Relay connection is active',
 	await expect.poll(() => holder.evaluate((element) => element.getBoundingClientRect().width)).toBe(76);
 	const desktopFukuLayout = await readEffectSymbolLayout(holder);
 	expectIconAboveAvatarAndClearOfName(desktopFukuLayout, 'mallet');
+	expectMalletHeadAndShaftToMeet(desktopFukuLayout);
 	expectAuraVisibleOutsideAvatar(desktopFukuLayout);
 	await page.setViewportSize({ width: 390, height: 844 });
 	await expect.poll(() => holder.evaluate((element) => element.getBoundingClientRect().width)).toBe(50);
 	const mobileFukuLayout = await readEffectSymbolLayout(holder);
 	expectIconAboveAvatarAndClearOfName(mobileFukuLayout, 'mallet');
+	expectMalletHeadAndShaftToMeet(mobileFukuLayout);
 	expectAuraVisibleOutsideAvatar(mobileFukuLayout);
 	await page.setViewportSize(fukuViewport);
 	await expect.poll(() => holder.evaluate((element) => element.getBoundingClientRect().width)).toBe(76);
@@ -1865,6 +1939,8 @@ test('host silence is detected only while the local Relay connection is active',
 	expect(reducedMotionAnimations).toEqual([]);
 	const reducedMotionFukuLayout = await readEffectSymbolLayout(holder);
 	expectIconAboveAvatarAndClearOfName(reducedMotionFukuLayout, 'mallet');
+	expectMalletHeadAndShaftToMeet(reducedMotionFukuLayout);
+	expectAuraVisibleOutsideAvatar(reducedMotionFukuLayout);
 	await page.emulateMedia({ reducedMotion: 'no-preference' });
 	await expect(page.locator('[data-tag-game-cooldown]')).toHaveCount(0);
 	await expect(page.locator('[data-tag-game-hud] [data-tag-game-effect]')).toContainText('所持者以外が追いかけて奪う');
