@@ -803,7 +803,6 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			return { kind: result?.kind === 'out-of-range' ? 'out-of-range' : 'failed' };
 		},
 		onSucceeded: (context) => {
-			selectedSpeechType = 'normal';
 			traceReplyMode = completeTraceReplySubmission(traceReplyMode, context.generation);
 		},
 		onOutOfRange: (context) => {

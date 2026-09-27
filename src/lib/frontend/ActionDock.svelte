@@ -3,7 +3,8 @@
 	import SpeechMonologue from '~icons/hako/speech-monologue';
 	import SpeechNormal from '~icons/hako/speech-normal';
 	import SpeechShout from '~icons/hako/speech-shout';
-	import ListDetails from '~icons/tabler/list-details';
+	import LayoutSidebarLeftCollapse from '~icons/tabler/layout-sidebar-left-collapse';
+	import LayoutSidebarLeftExpand from '~icons/tabler/layout-sidebar-left-expand';
 	import HostOwnedComposerLite from '$lib/HostOwnedComposerLite.svelte';
 	import CharacterAvatar from '$lib/CharacterAvatar.svelte';
 	import SpeechSuggestions from '$lib/frontend/SpeechSuggestions.svelte';
@@ -12,7 +13,8 @@
 	import type { Character } from '$lib/character';
 	import type { BubbleTone } from '$lib/bubblePresentation';
 	import type { SpeechSuggestionConversationEntry } from '$lib/speechSuggestions';
-	import { Tooltip } from 'bits-ui';
+	import { Popover, Tooltip } from 'bits-ui';
+	import { onMount } from 'svelte';
 
 	type Props = ComponentProps<typeof HostOwnedComposerLite> & {
 		selectedSpeechType: SpeechType;
@@ -37,6 +39,27 @@
 	let composerComponent: { focusEditor(): boolean; blurEditor(): boolean; applyContentIfEmpty(content: string): Promise<boolean> } | null = null;
 	let editorIsEmpty = $state<boolean | null>(null);
 	let explanationVisible = $state(false);
+	let tooltipsDisabled = $state(true);
+
+	function handleUnreadPopoverOutside(event: PointerEvent): void {
+		if (!explanationVisible) return;
+		const interactedWithPopover = event.composedPath().some((target) =>
+			target instanceof Element && Boolean(target.closest('.trace-unread-indicator, .trace-unread-explanation'))
+		);
+		if (!interactedWithPopover) explanationVisible = false;
+	}
+
+	onMount(() => {
+		const hoverCapability = window.matchMedia('(hover: hover) and (pointer: fine)');
+		const updateTooltipAvailability = (): void => { tooltipsDisabled = !hoverCapability.matches; };
+		updateTooltipAvailability();
+		hoverCapability.addEventListener('change', updateTooltipAvailability);
+		document.addEventListener('pointerdown', handleUnreadPopoverOutside, true);
+		return () => {
+			hoverCapability.removeEventListener('change', updateTooltipAvailability);
+			document.removeEventListener('pointerdown', handleUnreadPopoverOutside, true);
+		};
+	});
 
 	$effect(() => {
 		if (!hasUnreadReplies) explanationVisible = false;
@@ -74,7 +97,7 @@
 
 	<div class="action-dock" aria-label="主要操作">
 	<div class="action-dock-content">
-		<Tooltip.Provider delayDuration={400} skipDelayDuration={100} disableHoverableContent>
+		<Tooltip.Provider disabled={tooltipsDisabled} delayDuration={400} skipDelayDuration={100} disableHoverableContent>
 		<div class="composer-controls-left">
 		{#if canOpenSelfProfile}
 		<Tooltip.Root>
@@ -102,7 +125,9 @@
 						aria-keyshortcuts="C"
 						onclick={onToggleChatter}
 					>
-						<span class="chatter-toggle-icon" aria-hidden="true"><ListDetails /></span>
+						<span class="chatter-toggle-icon" data-chatter-icon={chatterOpen ? 'layout-sidebar-left-collapse' : 'layout-sidebar-left-expand'} aria-hidden="true">
+							{#if chatterOpen}<LayoutSidebarLeftCollapse />{:else}<LayoutSidebarLeftExpand />{/if}
+						</span>
 					</button>
 				{/snippet}
 			</Tooltip.Trigger>
@@ -111,28 +136,33 @@
 			</Tooltip.Portal>
 		</Tooltip.Root>
 		{#if hasUnreadReplies}
-			<Tooltip.Root>
-				<Tooltip.Trigger>
+			<Popover.Root bind:open={explanationVisible}>
+				<Popover.Trigger>
 					{#snippet child({ props })}
-						<button
-							{...props}
-							class="trace-unread-indicator"
-							class:explanation-visible={explanationVisible}
-							type="button"
-							aria-label="あなたへの返信の痕跡があります"
-							onclick={() => { explanationVisible = !explanationVisible; }}
-						>
+						<button {...props} class="trace-unread-indicator" type="button" aria-label="あなたへの返信の痕跡があります">
 							<span aria-hidden="true">●</span>
-							{#if explanationVisible}
-								<span class="trace-unread-explanation" role="status">どこかにあなたへの返信の痕跡があります</span>
-							{/if}
 						</button>
 					{/snippet}
-				</Tooltip.Trigger>
-				<Tooltip.Portal>
-					<Tooltip.Content role="tooltip" class="action-dock-tooltip" side="top" sideOffset={8}>未読の返信の痕跡</Tooltip.Content>
-				</Tooltip.Portal>
-			</Tooltip.Root>
+				</Popover.Trigger>
+				<Popover.Portal>
+					<Popover.Content
+						side="top"
+						align="center"
+						sideOffset={8}
+						avoidCollisions
+						collisionPadding={{ top: 16, right: 16, bottom: 16, left: 16 }}
+						onInteractOutside={() => { explanationVisible = false; }}
+					>
+						{#snippet child({ wrapperProps, props })}
+							<div {...wrapperProps}>
+								<div {...props} class="trace-unread-explanation" role="status">
+									どこかにあなたへの返信の痕跡があります
+								</div>
+							</div>
+						{/snippet}
+					</Popover.Content>
+				</Popover.Portal>
+			</Popover.Root>
 		{/if}
 		<SoundControl {volume} onOpen={onSoundOpen} onVolume={onVolume} />
 		</div>
@@ -211,10 +241,10 @@
 
 	.action-dock-content {
 		display: flex;
-		width: min(720px, 100%);
+		width: min(1120px, 100%);
 		height: 100%;
 		align-items: stretch;
-		gap: 12px;
+		gap: 8px;
 		margin: 0 auto;
 		min-width: 0;
 	}
@@ -246,6 +276,13 @@
 		font-weight: 800;
 		cursor: pointer;
 	}
+	.chatter-toggle[aria-pressed='true'] {
+		border-color: var(--action-primary-border);
+		background: var(--action-primary-background);
+		color: var(--action-primary-foreground);
+	}
+	.chatter-toggle[aria-pressed='true']:hover { background: var(--action-primary-background-hover); }
+	.chatter-toggle[aria-pressed='true']:active { background: var(--action-primary-background-active); }
 	.profile-trigger:hover, .chatter-toggle:hover, .speech-type-toggle:hover:not(:disabled) { background: var(--action-icon-background-hover); }
 	.profile-trigger:active, .chatter-toggle:active, .speech-type-toggle:active:not(:disabled) { background: var(--action-icon-background-active); }
 	.chatter-toggle-icon { display: inline-flex; width: 24px; height: 24px; align-items: center; justify-content: center; }
@@ -286,9 +323,12 @@
 
 	.trace-unread-indicator {
 		position: relative;
-		flex: 0 0 34px;
-		min-width: 0;
-		min-height: 0;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		flex: 0 0 54px;
+		min-width: 44px;
+		min-height: 44px;
 		padding: 0;
 		border: 1px solid var(--action-notification-border);
 		border-radius: 10px;
@@ -301,20 +341,18 @@
 	.trace-unread-indicator:active { background: var(--action-notification-background-active); }
 
 	.trace-unread-explanation {
-		position: absolute;
-		left: 50%;
-		bottom: calc(100% + 8px);
+		z-index: 40;
 		width: max-content;
-		max-width: 230px;
+		max-width: min(360px, calc(100vw - 32px - env(safe-area-inset-left) - env(safe-area-inset-right)));
 		padding: 6px 8px;
-		border: 1px solid rgba(82, 77, 68, 0.18);
+		border: 1px solid rgba(82, 77, 68, 0.24);
 		border-radius: 8px;
 		background: rgba(50, 56, 52, 0.94);
 		color: #fffdf2;
-		font-size: 11px;
+		font-size: 12px;
 		font-weight: 700;
 		line-height: 1.3;
-		pointer-events: none;
+		overflow-wrap: anywhere;
 	}
 
 	.speech-type-toggle:hover:not(:disabled) {
@@ -352,14 +390,13 @@
 	@media (max-width: 700px) {
 		.action-dock-content { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 46px; column-gap: 0; row-gap: 8px; }
 		.composer-editor-slot { grid-column: 1 / -1; grid-row: 1; }
-		.composer-controls-left, .composer-controls-right { grid-row: 2; gap: 6px; }
+		.composer-controls-left, .composer-controls-right { grid-row: 2; gap: 4px; }
 		.composer-controls-left { grid-column: 1; justify-self: start; }
 		.composer-controls-right { grid-column: 2; justify-self: end; }
-		.composer-controls-left .profile-trigger { flex-basis: 40px; width: 40px; height: 42px; }
-		.composer-controls-left .chatter-toggle { flex-basis: 40px; }
-		.composer-controls-left .trace-unread-indicator { flex-basis: 38px; }
+		.composer-controls-left .profile-trigger { flex-basis: 44px; width: 44px; height: 44px; }
+		.composer-controls-left .chatter-toggle, .composer-controls-left .trace-unread-indicator { flex-basis: 44px; width: 44px; height: 44px; }
 		.composer-controls-left :global(.sound-control) { margin: 0; }
-		.composer-controls-right .speech-type-toggle, .composer-controls-right :global(.suggestions-anchor) { flex-basis: 46px; height: 46px; }
+		.composer-controls-right .speech-type-toggle, .composer-controls-right :global(.suggestions-anchor) { flex-basis: 44px; width: 44px; height: 44px; }
 	}
 	@media (min-width: 701px) {
 		.action-dock-content { --action-dock-desktop-control-size: 54px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: minmax(var(--action-dock-desktop-control-size), 1fr); }

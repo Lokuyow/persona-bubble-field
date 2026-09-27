@@ -24,7 +24,7 @@ function fixture() {
 }
 
 describe('speech publication core', () => {
-	it('shares the same publish path for speech type resolution and success reset', async () => {
+	it('shares the same publish path for speech type resolution on success', async () => {
 		const f = fixture();
 		await expect(f.core.publish('candidate', topLevel, { signal: new AbortController().signal })).resolves.toEqual({ eventId: 'event-id' });
 		expect(f.publish).toHaveBeenCalledWith({ content: 'candidate', speechType: 'shout' }, topLevel, expect.any(AbortSignal));
