@@ -77,6 +77,9 @@ test.describe('Relay startup', () => {
 		await expect(page.getByLabel('Reply preview', { exact: true })).toContainText('Relay direct reply');
 		const candidateButton = page.getByRole('button', { name: 'AI発言候補を生成' });
 		await expect(candidateButton).toBeVisible();
+		const speechType = page.locator('.speech-type-toggle');
+		await speechType.click();
+		await expect(speechType).toHaveAttribute('data-speech-type', 'shout');
 		await candidateButton.click();
 		const primary = page.locator('.suggestion-primary').first();
 		await expect(primary).toBeVisible();
@@ -92,6 +95,8 @@ test.describe('Relay startup', () => {
 			['E', trace.root.id, '', trace.root.pubkey], ['e', trace.direct.id, '', trace.direct.pubkey], ['k', '1111']
 		]));
 		expect(reply.tags.some((tag) => tag[0] === 'w')).toBe(false);
+		expect(reply.tags).toContainEqual(['l', 'speech:shout', 'io.github.lokuyow.persona-bubble-field']);
+		await expect(speechType).toHaveAttribute('data-speech-type', 'shout');
 		await expect(page.getByRole('textbox', { name: '投稿エディター' })).toHaveValue('');
 		await expect(page.locator('.suggestion-panel')).toHaveCount(0);
 	});
@@ -163,8 +168,12 @@ test.describe('Relay startup', () => {
 			await page.locator('[data-cell-position="4,2"]').click();
 			const preview = page.getByLabel('Reply preview', { exact: true });
 			const editor = page.getByRole('textbox', { name: '投稿エディター' });
+			const speechType = page.locator('.speech-type-toggle');
 			await expect(preview).toContainText('Relay trace root');
 			await expect(editor).not.toBeFocused();
+			await speechType.click();
+			await speechType.click();
+			await expect(speechType).toHaveAttribute('data-speech-type', 'monologue');
 			await page.clock.setFixedTime(time + 1000);
 			await page.evaluate((outcome) => Object.assign((window as unknown as {
 				__relayStartupTest: { state: Record<string, unknown> }
@@ -202,6 +211,9 @@ test.describe('Relay startup', () => {
 				await expect(page.locator(`[data-trace-reply-ghost-id="${raw.id}"]`)).toHaveCount(0);
 			}
 			if (outcome === 'rejected') await page.getByRole('button', { name: 'Clear reply', exact: true }).click();
+			await expect(speechType).toHaveAttribute('data-speech-type', 'monologue');
+			await speechType.click();
+			await expect(speechType).toHaveAttribute('data-speech-type', 'normal');
 			await editor.fill('normal kind 42 after reply mode');
 			await editor.press('Enter');
 			await expect.poll(async () => (await relayState(page)).state.published.some((event) => event.kind === 42 && event.content === 'normal kind 42 after reply mode')).toBe(true);

@@ -174,7 +174,7 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveCSS('color', 'rgb(207, 6, 254)');
 		await expect(page.locator('.trace-unread-indicator')).toBeVisible();
 		await page.locator('.trace-unread-indicator').hover();
-		await expect(page.getByRole('tooltip')).toHaveText('未読の返信の痕跡');
+		await expect(page.getByRole('tooltip')).toHaveCount(0);
 		await expect(page.getByRole('button', { name: 'AI発言候補を生成' })).toBeVisible();
 		expect(await readActionDockControlOrder(page)).toEqual([
 			'profile-trigger', 'chatter-toggle', 'trace-unread-indicator', 'sound-control', 'speech-type-toggle', 'suggestions-anchor'
@@ -204,8 +204,22 @@ test.describe('Relay startup', () => {
 			}
 		}
 		await page.setViewportSize({ width: 1100, height: 850 });
+		const dockBeforeExplanation = await page.locator('.action-dock').boundingBox();
 		await page.locator('.trace-unread-indicator').click();
-		await expect(page.locator('.trace-unread-explanation')).toContainText('どこかにあなたへの返信の痕跡があります');
+		const explanation = page.locator('.trace-unread-explanation');
+		await expect(explanation).toHaveText('どこかにあなたへの返信の痕跡があります');
+		const explanationBox = await explanation.boundingBox();
+		const dockWithExplanation = await page.locator('.action-dock').boundingBox();
+		expect(explanationBox && dockBeforeExplanation && dockWithExplanation).toBeTruthy();
+		if (explanationBox && dockBeforeExplanation && dockWithExplanation) {
+			expect(explanationBox.x).toBeGreaterThanOrEqual(16);
+			expect(explanationBox.x + explanationBox.width).toBeLessThanOrEqual(1100 - 16);
+			expect(dockWithExplanation.height).toBe(dockBeforeExplanation.height);
+		}
+		await page.keyboard.press('Escape');
+		await expect(explanation).toHaveCount(0);
+		await page.locator('.trace-unread-indicator').click();
+		await expect(explanation).toBeVisible();
 		await expect(page.locator('[data-trace-root-id]')).toHaveCount(0);
 		await page.locator('.chatter-toggle').click();
 		await selectRelayTraceCell(page, '4,2');
@@ -214,6 +228,7 @@ test.describe('Relay startup', () => {
 		await expect(page.locator(`[data-trace-ghost-root-id="${root.id}"]`)).toBeVisible();
 		await expect(page.locator(`[data-trace-reply-id="${reply.id}"]`)).toContainText(reply.content);
 		await expect(page.locator('.trace-unread-indicator')).toHaveCount(0);
+		await expect(explanation).toHaveCount(0);
 		await clickRelayLogicalCell(page, { x: 0, y: 0 });
 		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveAttribute('data-trace-root-read', 'true');
 		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveCSS('mask-image', /trace-icon\.svg/);
@@ -327,8 +342,26 @@ test.describe('Relay startup', () => {
 		await expect(profileDialog).toBeHidden();
 
 		const unread = page.locator('.trace-unread-indicator');
+		const dockBeforeExplanation = await page.locator('.action-dock').boundingBox();
 		await unread.click();
-		await expect(page.locator('.trace-unread-explanation')).toContainText('どこかにあなたへの返信の痕跡があります');
+		const explanation = page.locator('.trace-unread-explanation');
+		await expect(explanation).toHaveText('どこかにあなたへの返信の痕跡があります');
+		const explanationBox = await explanation.boundingBox();
+		const dockWithExplanation = await page.locator('.action-dock').boundingBox();
+		expect(explanationBox && dockBeforeExplanation && dockWithExplanation).toBeTruthy();
+		if (explanationBox && dockBeforeExplanation && dockWithExplanation) {
+			expect(explanationBox.x).toBeGreaterThanOrEqual(16);
+			expect(explanationBox.x + explanationBox.width).toBeLessThanOrEqual(320 - 16);
+			expect(explanationBox.y).toBeGreaterThanOrEqual(16);
+			expect(explanationBox.y + explanationBox.height).toBeLessThanOrEqual(844 - 16);
+			expect(dockWithExplanation.height).toBe(dockBeforeExplanation.height);
+		}
+		await unread.click();
+		await expect(explanation).toHaveCount(0);
+		await unread.click();
+		await expect(explanation).toBeVisible();
+		await page.locator('body').click({ position: { x: 10, y: 10 } });
+		await expect(explanation).toHaveCount(0);
 
 		const speaker = page.getByRole('button', { name: /Open sound settings/ });
 		await speaker.click();

@@ -99,8 +99,10 @@ width > 700で初期表示をON、width <= 700でOFFとする。ブラウザ単�
 保存し、設定がある場合は画面幅にかかわらず初期表示へ復元する。localStorageが使用できない
 場合は現在のページ内で通常どおり操作できる。この初期判定はページ初期化時に一度だけ行い、
 表示後のresize・端末回転でユーザーのshow/hide状態を上書きしない。Chatterの可視toggleは
-ActionDock内の`list-details` iconによる単一buttonとし、visible textは持たず、accessible nameで
-open/closed semanticsを提供する。timeline内容はlocalStorage、IndexedDB等へ保存しない。
+ActionDock内の単一buttonとし、visible textは持たない。closedではTabler
+`layout-sidebar-left-expand`、openでは`layout-sidebar-left-collapse`を表示し、open状態は既存の
+アクセント色で選択表示する。accessible nameと`aria-pressed`でopen/closed semanticsを提供する。
+timeline内容はlocalStorage、IndexedDB等へ保存しない。
 SSR/hydration中はclosedとして扱う。timelineの更新・表示はbubbleの寿命判定および
 `ConversationState`から独立させる。
 
@@ -113,6 +115,10 @@ desktop初期ON/mobile初期OFFを使用する。
 ### ActionDockの操作配置
 
 ActionDockでは、PC・スマートフォン共通で左側の操作群を「自分のプロフィール、Chatter、未読返信通知（未読がある場合のみ）、音量」の順にする。音量ポップオーバーはボタンより上へ開き、音量調整・ミュート・保存・効果音の挙動を維持する。ActionDock表示中は画面右上へ音量操作を重複表示しない。ActionDockがない画面では既存の音量操作を維持する。
+
+PCの広いviewportではActionDockを中央配置し、Composerへ十分な幅を割り当てる。幅が狭いPCでも操作群とComposerを重ねない。PC・スマートフォンとも操作群の順序とグループを維持し、ボタン間隔を整理してもスマートフォンの操作領域は各ボタン44px程度を確保する。未読通知の説明はBits UI Popoverで表示し、viewportの上下左右の安全領域へ衝突回避し、本文を折り返す。Popoverは再操作、外側操作、Escapeで閉じ、未読が解消された場合も閉じる。説明表示はActionDockの寸法を変えず、内容は未読の存在だけとする。
+
+ActionDock内のBits UI Tooltipは、`(hover: hover) and (pointer: fine)`に一致する入力環境で使用する。タッチ主体でホバーできない環境ではTooltipを無効化し、hover/pointer条件の変化に追従する。SSR時にbrowser APIを読まず、hydrationの初期表示を一致させる。ActionDock内の発言候補生成buttonにも同じTooltip設定を適用する。PopoverはTooltip設定によって無効化しない。
 
 PCではコンポーザーを中央に置き、発言タイプ切り替えとオンデバイス発言候補生成をコンポーザーの右側に並べる。スマートフォンではコンポーザーを上段に置き、下段左へ左側操作群、右へ発言タイプ切り替えと発言候補生成を右揃えで置く。未読通知がない場合も左右のグループ位置を維持し、通知のための空き領域を設けない。
 
@@ -314,15 +320,15 @@ range、max widthの製品ルール、merge巨大化ルール、animationを変�
 
 ### 発言タイプの選択
 
-発言タイプは1投稿ごとのexplicit choiceとし、通常をdefaultとする。ユーザーは以下の3方法で
-選択できる。
+発言タイプはUI選択を継続して使用し、通常を初期値とする。ユーザーは以下の3方法で
+投稿タイプを指定できる。
 
 1. ActionDockの発言タイプ切り替えbutton
 2. Composer本文先頭のslash command
 3. modified Enter shortcut
 
-切り替えbuttonは通常 → 叫び → モノローグ → 通常の順に循環するone-shot選択で、投稿成功後は
-通常へ戻り、投稿失敗時は選択を維持する。選択状態は永続化しない。
+切り替えbuttonは通常 → 叫び → モノローグ → 通常の順に循環する。投稿成功・失敗にかかわらず
+UIの選択状態を維持し、ブラウザ再読み込み時は通常へ初期化する。選択状態は永続化しない。
 
 slash commandは本文の絶対先頭でtokenが完全一致する場合だけ認識し、認識したprefixと最初の
 ASCII spaceだけをNostr contentから除去する。long commandとshort aliasは同じ意味とする。
@@ -333,7 +339,7 @@ ASCII spaceだけをNostr contentから除去する。long commandとshort alias
 `/something`、`/me`等をprefix matchとして扱わず、case-sensitiveとする。commandの後に本文が
 ない投稿は送信しない。
 
-shortcutの優先順位は、
+shortcutとslash commandは当該投稿だけの一時指定であり、UI選択状態を書き換えない。優先順位は、
 
 `keyboard shortcut > slash command > UI切り替え > normal`
 

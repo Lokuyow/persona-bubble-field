@@ -90,14 +90,15 @@ test.describe('Relay startup', () => {
 			const chatterDesign = await chatterToggle.evaluate((element) => {
 				const style = getComputedStyle(element);
 				const rect = element.getBoundingClientRect();
-				return { background: style.backgroundColor, borderColor: style.borderColor, borderRadius: style.borderRadius, borderWidth: style.borderWidth, boxShadow: style.boxShadow, width: rect.width, height: rect.height };
+				return { borderRadius: style.borderRadius, borderWidth: style.borderWidth, boxShadow: style.boxShadow, width: rect.width, height: rect.height };
 			});
-			expect(soundDesign).toEqual(chatterDesign);
+			expect(chatterDesign).toMatchObject({ borderRadius: '12px', borderWidth: '1px', width: width > 700 ? 54 : 44, height: width > 700 ? 54 : 44 });
 			await soundButton.hover();
 			const soundHoverBackground = await soundButton.evaluate((element) => getComputedStyle(element).backgroundColor);
 			await chatterToggle.hover();
 			const chatterHoverBackground = await chatterToggle.evaluate((element) => getComputedStyle(element).backgroundColor);
-			expect(soundHoverBackground).toBe(chatterHoverBackground);
+			if (await chatterToggle.getAttribute('aria-pressed') === 'true') expect(soundHoverBackground).not.toBe(chatterHoverBackground);
+			else expect(soundHoverBackground).toBe(chatterHoverBackground);
 			const soundIconBox = await soundButton.locator('svg').boundingBox();
 			const soundButtonRect = await soundButton.boundingBox();
 			expect(soundIconBox && soundButtonRect).toBeTruthy();
@@ -130,12 +131,17 @@ test.describe('Relay startup', () => {
 			const initiallyOpen: boolean = persistedChatterState ?? (width > 700);
 			await expect(chatterToggle).toHaveAttribute('aria-label', initiallyOpen ? 'Chatterを閉じる' : 'Chatterを開く');
 			await expect(chatterToggle).toHaveAttribute('aria-pressed', String(initiallyOpen));
+			await expect(chatterToggle.locator('.chatter-toggle-icon')).toHaveAttribute('data-chatter-icon', initiallyOpen ? 'layout-sidebar-left-collapse' : 'layout-sidebar-left-expand');
+			const closedColor = await chatterToggle.evaluate((element) => getComputedStyle(element).backgroundColor);
 			const toggleBox = await chatterToggle.boundingBox();
 			expect(toggleBox?.width ?? 0).toBeGreaterThanOrEqual(44);
 			expect(toggleBox?.height ?? 0).toBeGreaterThanOrEqual(44);
 			await chatterToggle.click();
 			await expect(chatterToggle).toHaveAttribute('aria-label', initiallyOpen ? 'Chatterを開く' : 'Chatterを閉じる');
 			await expect(chatterToggle).toHaveAttribute('aria-pressed', String(!initiallyOpen));
+			await expect(chatterToggle.locator('.chatter-toggle-icon')).toHaveAttribute('data-chatter-icon', initiallyOpen ? 'layout-sidebar-left-expand' : 'layout-sidebar-left-collapse');
+			const toggledColor = await chatterToggle.evaluate((element) => getComputedStyle(element).backgroundColor);
+			expect(toggledColor).not.toBe(closedColor);
 			persistedChatterState = !initiallyOpen;
 			await expect(page.locator('.trace-unread-indicator')).toHaveCount(0);
 			await expect(page.locator('.sound-control')).toHaveCount(1);
@@ -158,6 +164,8 @@ test.describe('Relay startup', () => {
 							if (!box) throw new Error('Expected a visible mobile ActionDock control to have geometry.');
 							expect(box.x).toBeGreaterThanOrEqual(0);
 							expect(box.x + box.width).toBeLessThanOrEqual(width);
+							expect(box.width).toBeGreaterThanOrEqual(44);
+							expect(box.height).toBeGreaterThanOrEqual(44);
 						}
 					}
 				}
@@ -179,6 +187,7 @@ test.describe('Relay startup', () => {
 				}
 				expect(geometry.left.x + geometry.left.width).toBeLessThanOrEqual(geometry.editor.x);
 				expect(geometry.editor.x + geometry.editor.width).toBeLessThanOrEqual(geometry.right.x);
+				if (width === 1200) expect(geometry.editor.width).toBeGreaterThan(geometry.left.width + geometry.right.width);
 				const centers = [geometry.left, geometry.editor, geometry.right].map((box) => box.y + box.height / 2);
 				expect(Math.max(...centers) - Math.min(...centers)).toBeLessThanOrEqual(1);
 				const controlCenters = geometry.controls.map((box) => box.y + box.height / 2);
@@ -647,7 +656,7 @@ test.describe('Relay startup', () => {
 		expect(validCommandEvent.tags).toContainEqual(['l', 'speech:shout', 'io.github.lokuyow.persona-bubble-field']);
 	});
 
-		test('cycles the one-shot speech selector and only resets it after a successful submit', async ({ page }) => {
+	test('keeps the UI speech selection after submit and applies shortcut and slash overrides per post', async ({ page }) => {
 		const editor = await openReadyRelayWorld(page);
 		const send = page.locator('ehagaki-composer').getByRole('button', { name: 'Send' });
 		const selector = page.locator('.speech-type-toggle');
@@ -681,6 +690,42 @@ test.describe('Relay startup', () => {
 		await editor.fill('successful monologue');
 		await send.click();
 		await waitForPublishedMessageCount(page, 2);
+		await expect(selector).toHaveAttribute('data-speech-type', 'monologue');
+
+		await editor.fill('shortcut override');
+		await editor.press('Control+Enter');
+		await waitForPublishedMessageCount(page, 3);
+		expect((await publishedMessages(page))[2].tags).toContainEqual(['l', 'speech:shout', 'io.github.lokuyow.persona-bubble-field']);
+		await expect(selector).toHaveAttribute('data-speech-type', 'monologue');
+
+		await editor.fill('/s slash override');
+		await send.click();
+		await waitForPublishedMessageCount(page, 4);
+		expect((await publishedMessages(page))[3]).toMatchObject({ content: 'slash override' });
+		expect((await publishedMessages(page))[3].tags).toContainEqual(['l', 'speech:shout', 'io.github.lokuyow.persona-bubble-field']);
+		await expect(selector).toHaveAttribute('data-speech-type', 'monologue');
+
+		await page.reload();
 		await expect(selector).toHaveAttribute('data-speech-type', 'normal');
+	});
+
+	test('does not show ActionDock tooltips in a touch-first browser context', async ({ browser }) => {
+		const context = await browser.newContext({ isMobile: true, hasTouch: true, viewport: { width: 390, height: 844 } });
+		try {
+			const touchPage = await context.newPage();
+			await installPromptApiStub(touchPage);
+			await openReadyRelayWorld(touchPage, 1);
+			expect(await touchPage.evaluate(() => matchMedia('(hover: hover) and (pointer: fine)').matches)).toBe(false);
+			await touchPage.locator('.chatter-toggle').hover();
+			await expect(touchPage.getByRole('tooltip')).toHaveCount(0);
+			await touchPage.getByRole('button', { name: 'AI発言候補を生成' }).hover();
+			await expect(touchPage.getByRole('tooltip')).toHaveCount(0);
+			const chatter = touchPage.locator('.chatter-toggle');
+			const openBeforeTap = await chatter.getAttribute('aria-pressed');
+			await chatter.tap();
+			await expect(chatter).not.toHaveAttribute('aria-pressed', openBeforeTap!);
+		} finally {
+			await context.close();
+		}
 	});
 });
