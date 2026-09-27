@@ -1,8 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { projectUnifiedStatusMeterValues, STATUS_HUD_POINTS_MAX } from './unifiedStatusHud';
+import { getStatusValueChangeDirection, projectUnifiedStatusMeterValues, STATUS_HUD_POINTS_MAX } from './unifiedStatusHud';
 import { rootMaximumLifespanMs } from './rootProgression';
 
 describe('unified status meter values', () => {
+	it('classifies displayed effective value changes without treating the clock itself as a change', () => {
+		expect(getStatusValueChangeDirection(10, 11)).toBe('increase');
+		expect(getStatusValueChangeDirection(11, 10)).toBe('decrease');
+		expect(getStatusValueChangeDirection(10, 10)).toBeNull();
+	});
+
 	it.each([[0, 7], [1, 14], [2, 21], [3, 30]])('uses Root Rank %i maximum %i-day lifespan without changing a fresh Run\'s seven day fill', (rank, days) => {
 		const maximum = rootMaximumLifespanMs(rank);
 		const initial = rootMaximumLifespanMs(0);
