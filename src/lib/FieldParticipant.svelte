@@ -110,7 +110,7 @@
 			role="img" aria-label={`${tagGameEffect === 'benefit' ? '福' : '鬼'}${tagGameEffectActive ? '' : '・効果停止中'}`}>
 			<svg viewBox="0 0 76 76" aria-hidden="true" focusable="false">
 				{#if tagGameEffect === 'benefit'}
-					<g class="fuku-mallet" data-fuku-mallet transform="translate(58 1) rotate(-28)">
+					<g class="fuku-mallet" data-fuku-mallet transform="translate(69 11) rotate(-28)">
 						<rect class="fuku-mallet-handle" data-fuku-mallet-handle x="-3" y="-11" width="6" height="30" rx="1.8" fill="#ffe3ab" stroke="white" stroke-width="2" />
 						<rect class="fuku-mallet-head" data-fuku-mallet-head x="-15" y="-25" width="30" height="16" rx="5.8" fill="#e23c2c" stroke="white" stroke-width="2.4" />
 						<path class="fuku-mallet-endcap" d="M-9.5 -22V-12M9.5 -22V-12" stroke="#ffdc83" stroke-width="3.5" stroke-linecap="round" />

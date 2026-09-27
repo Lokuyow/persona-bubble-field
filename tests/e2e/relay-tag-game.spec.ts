@@ -194,7 +194,7 @@ function expectIconAboveAvatarAndClearOfName(layout: Awaited<ReturnType<typeof r
 	} else {
 		const malletCentre = boxes[0].x + boxes[0].width / 2;
 		expect(malletCentre - cellCentre).toBeGreaterThan(layout.cell.width * 0.08);
-		expect(malletCentre - cellCentre).toBeLessThan(layout.cell.width * 0.32);
+		expect(malletCentre).toBeLessThan(layout.cell.x + layout.cell.width);
 	}
 	expect(layout.visualZ).toBeGreaterThan(layout.buttonZ);
 	expect(layout.auraZ).toBeLessThan(layout.buttonZ);
