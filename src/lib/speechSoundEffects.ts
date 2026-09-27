@@ -37,7 +37,7 @@ export function newLiveBubbleEffects(previous: ConversationState, next: Conversa
 
 export const SPEECH_SOUND_DURATIONS = { normal: 0.225, shout: 0.420, monologue: 0.715 } as const;
 export const UI_SOUND_DURATIONS = { collect: 0.19, 'level-up': 0.32, startup: 0.38, 'cooperation-start': 0.43,
-	'tag-game-benefit': 0.18, 'tag-game-calamity': 0.11, 'tag-game-transfer': 0.34, 'tag-game-switch': 0.30,
+	'tag-game-benefit': 0.26, 'tag-game-calamity': 0.11, 'tag-game-transfer': 0.34, 'tag-game-switch': 0.30,
 	'tag-game-start': 0.52, 'tag-game-end': 0.52 } as const;
 export const DEATH_SOUND_DURATION = 6.4;
 export const SOUND_EFFECT_GAINS: Readonly<Record<SoundEffect, number>> = {
@@ -49,7 +49,7 @@ export const SOUND_EFFECT_GAINS: Readonly<Record<SoundEffect, number>> = {
 	startup: 0.65,
 	'cooperation-start': 0.65,
 	death: 0.70,
-	'tag-game-benefit': 0.22,
+	'tag-game-benefit': 0.28,
 	'tag-game-calamity': 0.24,
 	'tag-game-transfer': 0.52,
 	'tag-game-switch': 0.42,
@@ -268,7 +268,7 @@ function createTagGameSamples(effect: TagGameSoundEffect, sampleRate: number): F
 	const length = Math.ceil(sampleRate * duration);
 	const output = new Float32Array(length);
 	const notes: ReadonlyArray<Readonly<{ at: number; frequency: number; gain?: number; decay?: number }>> = effect === 'tag-game-benefit'
-		? [{ at: 0, frequency: 659, gain: 0.68, decay: 0.078 }, { at: 0.068, frequency: 880, gain: 0.58, decay: 0.092 }]
+		? [{ at: 0, frequency: 587, gain: 0.68, decay: 0.075 }, { at: 0.07, frequency: 740, gain: 0.62, decay: 0.082 }, { at: 0.14, frequency: 880, gain: 0.56, decay: 0.088 }]
 		: effect === 'tag-game-calamity'
 			? [{ at: 0, frequency: 230, gain: 0.78, decay: 0.052 }, { at: 0.022, frequency: 185, gain: 0.32, decay: 0.045 }]
 			: effect === 'tag-game-transfer'
@@ -287,7 +287,8 @@ function createTagGameSamples(effect: TagGameSoundEffect, sampleRate: number): F
 			const release = clamp01((noteDuration - local) / 0.018);
 			const envelope = attack * Math.exp(-local / decay) * release;
 			const phase = TAU * note.frequency * local;
-			output[index] += (note.gain ?? 0.72) * (Math.sin(phase) + 0.12 * Math.sin(phase * 2)) * envelope;
+			const bellTone = Math.sin(phase) + (effect === 'tag-game-benefit' ? 0.22 * Math.sin(phase * 2 + 0.08) + 0.06 * Math.sin(phase * 3 + 0.16) : 0.12 * Math.sin(phase * 2));
+			output[index] += (note.gain ?? 0.72) * bellTone * envelope;
 		}
 	}
 	return normalize(output);

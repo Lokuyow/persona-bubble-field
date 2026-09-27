@@ -57,13 +57,32 @@
 	data-tag-game-holder-transfer={tagGameRole === 'holder' && tagGameHolderTransferId !== null ? tagGameHolderTransferId : undefined}
 	style={`left: ${world.x}px; top: ${world.y}px; --tag-game-touch-x: ${tagGameTouchAttemptOffset?.x ?? 0}px; --tag-game-touch-y: ${tagGameTouchAttemptOffset?.y ?? 0}px;`}
 >
+	{#if tagGameRole === 'holder' && tagGameEffect}
+		<span class={['tag-game-effect-aura', `tag-game-effect-aura-${tagGameEffect}`, { 'tag-game-effect-aura-paused': !tagGameEffectActive }]} aria-hidden="true">
+			<svg viewBox="0 0 76 76" focusable="false">
+				{#if tagGameEffect === 'benefit'}
+					<circle class="fuku-aura-glow" cx="38" cy="38" r="34.5" />
+					<circle class="fuku-aura-ring" cx="38" cy="38" r="35.5" />
+					<path class="fuku-aura-flare fuku-aura-flare-one" d="M17 7L21 11L17 15L13 11Z" />
+					<path class="fuku-aura-flare fuku-aura-flare-two" d="M60 57L63 60L60 63L57 60Z" />
+				{:else}
+					<path class="oni-aura-shadow" d="M35 2L42 4L47 2L51 9L60 10L59 17L68 20L64 27L74 34L68 39L73 47L64 51L66 58L57 60L52 72L44 68L38 74L32 68L23 72L20 63L11 60L15 53L3 48L10 42L2 34L9 29L5 21L14 18L17 9L27 11Z" />
+					<path class="oni-aura-outline" d="M35 2L42 4L47 2L51 9L60 10L59 17L68 20L64 27M74 34L68 39L73 47L64 51M66 58L57 60L52 72L44 68M38 74L32 68L23 72M20 63L11 60L15 53L3 48M2 34L9 29L5 21L14 18L17 9L27 11" />
+					<path class="oni-aura-shard oni-aura-shard-one" d="M29 10L34 1L39 12Z" />
+					<path class="oni-aura-shard oni-aura-shard-two" d="M67 29L76 35L65 40Z" />
+					<path class="oni-aura-shard oni-aura-shard-three" d="M45 66L40 76L33 66Z" />
+					<path class="oni-aura-shard oni-aura-shard-four" d="M9 45L0 40L11 33Z" />
+				{/if}
+			</svg>
+		</span>
+	{/if}
 	<button
 		class="participant-profile-trigger"
 		data-field-gesture-origin="selectable"
 		type="button"
 		ondragstart={(event) => event.preventDefault()}
 		aria-label={`${character.name} のプロフィールを開く`}
-		 onclick={(event) => {
+		onclick={(event) => {
 			event.stopPropagation();
 			const trigger = event.currentTarget as HTMLButtonElement;
 			if (self && onSelfProfile) onSelfProfile(trigger);
@@ -78,20 +97,22 @@
 			role="img" aria-label={`${tagGameEffect === 'benefit' ? '福' : '鬼'}${tagGameEffectActive ? '' : '・効果停止中'}`}>
 			<svg viewBox="0 0 76 76" aria-hidden="true" focusable="false">
 				{#if tagGameEffect === 'benefit'}
-					<circle class="blessing-halo" cx="38" cy="38" r="34.5" />
-					<circle class="blessing-orbit" cx="38" cy="38" r="36" />
-					<g transform="translate(38 2)"><path class="blessing-star blessing-star-one" d="M0 -5L1.4 -1.4L5 0L1.4 1.4L0 5L-1.4 1.4L-5 0L-1.4 -1.4Z" /></g>
-					<g transform="translate(74 38) scale(.8)"><path class="blessing-star blessing-star-two" d="M0 -5L1.4 -1.4L5 0L1.4 1.4L0 5L-1.4 1.4L-5 0L-1.4 -1.4Z" /></g>
-					<g transform="translate(38 74) scale(.72)"><path class="blessing-star blessing-star-three" d="M0 -5L1.4 -1.4L5 0L1.4 1.4L0 5L-1.4 1.4L-5 0L-1.4 -1.4Z" /></g>
-					<g transform="translate(2 38) scale(.86)"><path class="blessing-star blessing-star-four" d="M0 -5L1.4 -1.4L5 0L1.4 1.4L0 5L-1.4 1.4L-5 0L-1.4 -1.4Z" /></g>
+					<g class="fuku-mallet" data-fuku-mallet>
+						<path class="fuku-mallet-handle-outline" d="M51 2L71 20" />
+						<path class="fuku-mallet-handle" d="M51 2L71 20" />
+						<rect class="fuku-mallet-head" x="34" y="-13" width="34" height="18" rx="9" />
+						<path class="fuku-mallet-head-highlight" d="M39 -10H60" />
+						<path class="fuku-mallet-endcap" d="M38 -12V4M64 -12V4" />
+						<rect class="fuku-mallet-white-band" x="48" y="-9" width="8" height="10" rx="3" />
+					</g>
 				{:else}
-					<path class="curse-shadow" d="M35 2L42 4L47 2L51 9L60 10L59 17L68 20L64 27L74 34L68 39L73 47L64 51L66 58L57 60L52 72L44 68L38 74L32 68L23 72L20 63L11 60L15 53L3 48L10 42L2 34L9 29L5 21L14 18L17 9L27 11Z" />
-					<path class="curse-outline" d="M35 2L42 4L47 2L51 9L60 10L59 17L68 20L64 27M74 34L68 39L73 47L64 51M66 58L57 60L52 72L44 68M38 74L32 68L23 72M20 63L11 60L15 53L3 48M2 34L9 29L5 21L14 18L17 9L27 11" />
-					<path class="curse-shard curse-shard-one" d="M31 8L37 1L40 11Z" />
-					<path class="curse-shard curse-shard-two" d="M67 31L75 37L65 41Z" />
-					<path class="curse-shard curse-shard-three" d="M42 67L37 75L33 66Z" />
-					<path class="curse-shard curse-shard-four" d="M9 42L1 37L11 33Z" />
-					<path class="curse-crack" d="M25 17L30 25L27 31M52 49L46 46L43 53" />
+					<g class="oni-horns" data-oni-horns>
+						<ellipse class="oni-horn-root" cx="17" cy="18" rx="9" ry="5" />
+						<ellipse class="oni-horn-root" cx="59" cy="18" rx="9" ry="5" />
+						<path class="oni-horn" d="M12 24C6 19 4 11 7 3C9-3 14-8 19-11C17-3 19 3 23 8C26 13 26 19 23 24Z" />
+						<path class="oni-horn" d="M64 24C70 19 72 11 69 3C67-3 62-8 57-11C59-3 57 3 53 8C50 13 50 19 53 24Z" />
+						<path class="oni-horn-ridge" d="M10 10C11 3 15-2 18-5M66 10C65 3 61-2 58-5" />
+					</g>
 				{/if}
 			</svg>
 		</span>
@@ -187,40 +208,52 @@
 		24% { opacity: 1; transform: scale(1.06); }
 		100% { opacity: 0; transform: scale(1.14); }
 	}
+	.tag-game-effect-aura,
 	.tag-game-effect-visuals {
 		position: absolute;
 		inset: 0;
-		z-index: 0;
 		display: block;
 		pointer-events: none;
 	}
+	.tag-game-effect-aura { z-index: 0; }
+	.tag-game-effect-visuals { z-index: 2; }
+	.tag-game-effect-aura svg,
 	.tag-game-effect-visuals svg { display: block; width: 100%; height: 100%; overflow: visible; }
-	.tag-game-effect-visuals-paused { opacity: .76; }
-	.tag-game-effect-visuals-paused .blessing-orbit { stroke-dasharray: 2 4; }
-	.tag-game-effect-visuals-paused .blessing-orbit,
-	.tag-game-effect-visuals-paused .blessing-star { animation: none; }
-	.blessing-halo { fill: none; stroke: rgba(255, 249, 222, .76); stroke-width: 5; filter: drop-shadow(0 0 3px rgba(255, 233, 164, .88)); }
-	.blessing-orbit { fill: none; stroke: rgba(229, 201, 126, .86); stroke-width: 1.6; stroke-dasharray: 13 6 3 7; transform-box: fill-box; transform-origin: center; animation: blessing-orbit 8s linear infinite; }
-	.blessing-star { fill: #fff9df; stroke: #e7c875; stroke-width: .7; transform-box: fill-box; transform-origin: center; filter: drop-shadow(0 0 2px rgba(255, 229, 151, .95)); }
-	.blessing-star-one { animation: blessing-sparkle 2.7s ease-in-out infinite; }
-	.blessing-star-two { animation: blessing-sparkle 3.1s ease-in-out -1.2s infinite; }
-	.blessing-star-three { animation: blessing-sparkle 3.5s ease-in-out -.7s infinite; }
-	.blessing-star-four { animation: blessing-sparkle 2.9s ease-in-out -2s infinite; }
-	.curse-shadow { fill: rgba(37, 22, 65, .24); stroke: rgba(54, 31, 91, .48); stroke-width: 4; filter: drop-shadow(0 0 3px rgba(48, 24, 77, .62)); }
-	.curse-outline { fill: none; stroke: #a35cb0; stroke-width: 3.8; stroke-linecap: square; stroke-linejoin: bevel; filter: drop-shadow(0 0 3px rgba(214, 72, 170, .96)); transform-box: fill-box; transform-origin: center; animation: curse-waver 3.8s ease-in-out infinite alternate; }
-	.curse-shard { fill: #d45ca8; stroke: #4e286d; stroke-width: 1.1; transform-box: fill-box; transform-origin: center; }
-	.curse-shard-one { animation: curse-shard 3.3s ease-in-out infinite alternate; }
-	.curse-shard-two { fill: #8e47a7; animation: curse-shard 4s ease-in-out -1.5s infinite alternate-reverse; }
-	.curse-shard-three { fill: #b34791; animation: curse-shard 3.7s ease-in-out -.8s infinite alternate; }
-	.curse-shard-four { fill: #a747a2; animation: curse-shard 3.5s ease-in-out -1.9s infinite alternate-reverse; }
-	.curse-crack { fill: none; stroke: #b04b98; stroke-width: 1.4; stroke-linecap: square; opacity: .86; }
-	.tag-game-effect-visuals-paused .curse-outline,
-	.tag-game-effect-visuals-paused .curse-shard { animation: none; }
-	.tag-game-effect-visuals-paused .curse-outline { stroke-dasharray: 5 3; }
-	@keyframes blessing-orbit { to { transform: rotate(360deg); } }
-	@keyframes blessing-sparkle { 0%, 22%, 100% { opacity: .34; transform: scale(.72); } 48% { opacity: 1; transform: scale(1.18); } }
-	@keyframes curse-waver { from { transform: rotate(-1.5deg) translateY(0); opacity: .82; } to { transform: rotate(1.5deg) translateY(1px); opacity: 1; } }
-	@keyframes curse-shard { from { opacity: .52; transform: translateY(1px) rotate(-2deg); } to { opacity: 1; transform: translateY(-1px) rotate(3deg); } }
+	.tag-game-effect-aura-paused { opacity: .76; }
+	.tag-game-effect-visuals-paused { opacity: .92; }
+
+	.fuku-aura-glow { fill: none; stroke: rgba(255, 244, 225, .76); stroke-width: 5; filter: drop-shadow(0 0 3px rgba(255, 168, 118, .8)); }
+	.fuku-aura-ring { fill: none; stroke: rgba(221, 65, 47, .9); stroke-width: 1.9; stroke-dasharray: 12 5 2 8; transform-box: fill-box; transform-origin: center; animation: fuku-aura-turn 9s linear infinite; }
+	.fuku-aura-flare { fill: #ffe8a8; stroke: #d94a39; stroke-width: 1; transform-box: fill-box; transform-origin: center; }
+	.fuku-aura-flare-one { animation: fuku-aura-flicker 3.8s ease-in-out infinite; }
+	.fuku-aura-flare-two { animation: fuku-aura-flicker 4.6s ease-in-out -2s infinite; }
+	.tag-game-effect-aura-paused .fuku-aura-ring { stroke-dasharray: 3 4; }
+	.tag-game-effect-aura-paused .fuku-aura-ring,
+	.tag-game-effect-aura-paused .fuku-aura-flare { animation: none; }
+
+	.oni-aura-shadow { fill: rgba(9, 7, 18, .2); stroke: rgba(18, 13, 31, .9); stroke-width: 4; filter: drop-shadow(0 0 4px rgba(18, 12, 35, .92)); }
+	.oni-aura-outline { fill: none; stroke: #78678f; stroke-width: 3; stroke-linecap: square; stroke-linejoin: bevel; filter: drop-shadow(0 0 3px rgba(61, 45, 91, .95)); transform-box: fill-box; transform-origin: center; animation: oni-aura-waver 4.6s ease-in-out infinite alternate; }
+	.oni-aura-shard { fill: #252034; stroke: #82729c; stroke-width: 1.2; stroke-linejoin: bevel; transform-box: fill-box; transform-origin: center; }
+	.oni-aura-shard-one { animation: oni-aura-shard 3.9s ease-in-out infinite alternate; }
+	.oni-aura-shard-two { fill: #342747; animation: oni-aura-shard 4.4s ease-in-out -1.5s infinite alternate-reverse; }
+	.oni-aura-shard-three { fill: #1c1927; animation: oni-aura-shard 4.1s ease-in-out -.8s infinite alternate; }
+	.oni-aura-shard-four { fill: #30243b; animation: oni-aura-shard 4.3s ease-in-out -1.9s infinite alternate-reverse; }
+	.tag-game-effect-aura-paused .oni-aura-outline,
+	.tag-game-effect-aura-paused .oni-aura-shard { animation: none; }
+	.tag-game-effect-aura-paused .oni-aura-outline { stroke-dasharray: 5 3; }
+
+	.fuku-mallet { stroke-linecap: round; stroke-linejoin: round; }
+	.fuku-mallet-handle-outline { fill: none; stroke: #a82e2d; stroke-width: 10; }
+	.fuku-mallet-handle { fill: none; stroke: #fff4e6; stroke-width: 6; }
+	.fuku-mallet-head { fill: #dc4938; stroke: #fff5e9; stroke-width: 2; }
+	.fuku-mallet-head-highlight { fill: none; stroke: #ffb99a; stroke-width: 1.5; }
+	.fuku-mallet-endcap { fill: none; stroke: #f0cc76; stroke-width: 2.2; }
+	.fuku-mallet-white-band { fill: #fff7ed; stroke: #b63831; stroke-width: .8; }
+
+	.oni-horn-root { fill: #171323; stroke: #88779f; stroke-width: 1.5; }
+	.oni-horn { fill: #201a2b; stroke: #9a8aaf; stroke-width: 2.2; stroke-linejoin: round; }
+	.oni-horn-ridge { fill: none; stroke: #c2b5cf; stroke-width: 1.7; stroke-linecap: round; opacity: .82; }
+
 	.tag-game-participant-mark {
 		position: absolute;
 		top: 2px;
@@ -234,9 +267,16 @@
 		box-shadow: 0 0 0 1px rgba(47, 68, 78, .65);
 		pointer-events: none;
 	}
+	@keyframes fuku-aura-turn { to { transform: rotate(360deg); } }
+	@keyframes fuku-aura-flicker { 0%, 22%, 100% { opacity: .4; transform: scale(.8); } 48% { opacity: 1; transform: scale(1.16); } }
+	@keyframes oni-aura-waver { from { transform: rotate(-1.2deg) translateY(0); opacity: .78; } to { transform: rotate(1.2deg) translateY(1px); opacity: 1; } }
+	@keyframes oni-aura-shard { from { opacity: .5; transform: translateY(1px) rotate(-2deg); } to { opacity: .95; transform: translateY(-1px) rotate(3deg); } }
+
 	@media (prefers-reduced-motion: reduce) {
 		.tag-game-touch-attempt, [data-tag-game-holder-transfer] .participant-profile-trigger::after { animation: none; }
-		.tag-game-effect-visuals * { animation: none !important; }
+		.tag-game-effect-aura * { animation: none !important; }
+		.tag-game-effect-aura-paused,
+		.tag-game-effect-visuals-paused { opacity: .84; }
 		.tag-game-touch-attempt .participant-profile-trigger { outline: 3px solid rgba(244, 214, 106, .92); outline-offset: 3px; }
 		[data-tag-game-holder-transfer] .participant-profile-trigger::after { opacity: 1; transform: scale(1.08); }
 	}
