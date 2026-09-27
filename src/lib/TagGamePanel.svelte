@@ -40,9 +40,8 @@
 	const joinableGames = $derived(selfPubkey && !reservationCurrent && !ownHostLobby ? games.filter((game) => game.phase === 'lobby' && game.hostPubkey !== selfPubkey && game.participant.length < 8) : []);
 	const GAME_SLOTS = Array.from({ length: 8 }, (_, index) => index);
 	let knownGames = new Map<string, TagGameState>();
-	let arrivalMessage = $state('');
 	let highlightedPubkeys = $state<readonly string[]>([]);
-	let arrivalTimeout: ReturnType<typeof setTimeout> | undefined;
+	let highlightTimeout: ReturnType<typeof setTimeout> | undefined;
 	$effect(() => {
 		const additions: Array<{ game: TagGameState; pubkey: string }> = [];
 		for (const game of games) {
@@ -50,13 +49,11 @@
 			knownGames.set(game.gameId, game);
 		}
 		if (!open || additions.length === 0) return;
-		const names = additions.map(({ game, pubkey }) => tagGameParticipantLabel(game, pubkey, selfPubkey));
-		arrivalMessage = `${names.join('、')}が参加しました`;
 		highlightedPubkeys = additions.map(({ pubkey }) => pubkey);
-		if (arrivalTimeout) clearTimeout(arrivalTimeout);
-		arrivalTimeout = setTimeout(() => { arrivalMessage = ''; highlightedPubkeys = []; arrivalTimeout = undefined; }, 3_500);
+		if (highlightTimeout) clearTimeout(highlightTimeout);
+		highlightTimeout = setTimeout(() => { highlightedPubkeys = []; highlightTimeout = undefined; }, 3_500);
 	});
-	onDestroy(() => { if (arrivalTimeout) clearTimeout(arrivalTimeout); });
+	onDestroy(() => { if (highlightTimeout) clearTimeout(highlightTimeout); });
 	function isHighlighted(pubkey: string): boolean { return highlightedPubkeys.includes(pubkey); }
 	function hostLabel(game: TagGameState): string {
 		if (game.hostPubkey === selfPubkey) return 'あなたの開催';
@@ -95,7 +92,6 @@
 					<p class="reservation-state">表示されていない開催への{reservedStatus === 'pending' ? '参加申請' : '参加登録'}があります。</p>
 					<ActionButton variant="tertiary" intent="cancel" data-tag-game-cancel-reservation={reservedGameId} onclick={() => onLeave(reservedGameId)} disabled={busy}>参加予約を取り消す</ActionButton>
 				{/if}
-				{#if arrivalMessage}<p class="tag-game-arrival" role="status" aria-live="polite">{arrivalMessage}</p>{/if}
 				<ul>
 					{#each games as game (game.gameId)}
 						{@const hostCharacter = resolveCharacterFromPubkey(game.hostPubkey)}
@@ -204,7 +200,6 @@
 	.participant-slot small { min-width: 0; overflow: hidden; color: var(--text-secondary, #666); text-overflow: ellipsis; white-space: nowrap; font-size: .65rem; }
 	.participant-slot-empty { display: grid; place-items: center; border-style: dashed; color: var(--text-secondary, #888); font-size: .72rem; }
 	.participant-slot-arrival { animation: participant-arrival 850ms ease-out 2; }
-	.tag-game-arrival { padding: 7px 10px; border-radius: 7px; background: var(--color-accent-soft, #edf2f6); color: var(--text-primary, #20242a); font-weight: 700; }
 	header { position: sticky; top: -20px; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: -20px -20px 0; padding: 20px; background: var(--surface, #fff); }
 	:global(.tag-game-title) { margin: 0; }
 	ul { display: grid; gap: 10px; margin: 16px 0 0; padding: 0; list-style: none; }
