@@ -2180,6 +2180,11 @@ test('does not show unselected games and lets a spectator choose and clear one t
 	await page.locator(`[data-tag-game-watch="${gameBId}"]`).click();
 	await expect(page.locator('[data-tag-game-hud]')).toHaveAttribute('data-tag-game-hud-id', gameBId);
 	await expect(page.locator('[data-tag-game-hud] [data-tag-game-effect]')).toContainText('所持者以外が追いかけて奪う');
+	await page.getByRole('dialog', { name: '鬼ごっこ' }).getByRole('button', { name: '閉じる' }).click();
+	await expect(page.getByRole('dialog', { name: '鬼ごっこ' })).toHaveCount(0);
+	await expect(page.locator('[data-tag-game-hud]')).toHaveAttribute('data-tag-game-hud-id', gameBId);
+	await openTagGameTerminal(page);
+	await expect(page.getByRole('dialog', { name: '鬼ごっこ' }).getByRole('button', { name: '観戦を解除' })).toBeVisible();
 	const watchedGame = parseTagGameEvent(gameB, CHANNEL_ID)!.state;
 	const desktopHud = page.locator('[data-tag-game-hud]');
 	await expect(desktopHud.locator('[data-tag-game-hud-footer]')).toHaveCount(0);
@@ -2273,4 +2278,32 @@ test('keeps the tag-game close button keyboard-focusable with a visible focus ri
 	expect(focus.outlineStyle).toBe('solid');
 	expect(focus.outlineWidth).toBe('3px');
 	expect(focus.outlineColor).toBe(focus.token);
+});
+
+test('dismisses the tag-game dialog with Escape, outside click, and Close without losing terminal access', async ({ page }) => {
+	const nowMs = Date.now();
+	const secret = fixtureSecret(32);
+	await preparePlayer(page, secret, nowMs);
+	await moveRelaySelfTo(page, { x: 7, y: 5 });
+	await openTagGameTerminal(page);
+	const dialog = page.getByRole('dialog', { name: '鬼ごっこ' });
+	const close = dialog.getByRole('button', { name: '閉じる' });
+
+	await dialog.getByRole('heading', { name: '鬼ごっこ' }).click();
+	await dialog.hover();
+	await page.mouse.wheel(0, 120);
+	await expect(dialog).toBeVisible();
+
+	await page.keyboard.press('Escape');
+	await expect(dialog).toHaveCount(0);
+
+	await openTagGameTerminal(page);
+	await page.locator('.tag-game-dialog-overlay').click({ position: { x: 8, y: 8 } });
+	await expect(dialog).toHaveCount(0);
+
+	await openTagGameTerminal(page);
+	await close.click();
+	await expect(dialog).toHaveCount(0);
+	await openTagGameTerminal(page);
+	await expect(dialog).toBeVisible();
 });

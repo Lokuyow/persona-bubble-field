@@ -4737,7 +4737,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		onExclude={(gameId, pubkey) => { void excludeTagGameParticipant(gameId, pubkey); }}
 		onWatch={watchTagGame}
 		onStopWatching={stopWatchingTagGame}
-		onClose={() => { tagGamePanelOpen = false; }}
+		onOpenChange={(open) => { tagGamePanelOpen = open; }}
 	/>
 
 	{#if deathPresentation}
