@@ -100,8 +100,8 @@ width > 700で初期表示をON、width <= 700でOFFとする。ブラウザ単�
 場合は現在のページ内で通常どおり操作できる。この初期判定はページ初期化時に一度だけ行い、
 表示後のresize・端末回転でユーザーのshow/hide状態を上書きしない。Chatterの可視toggleは
 ActionDock内の単一buttonとし、visible textは持たない。closedではTabler
-`layout-sidebar-left-expand`、openでは`layout-sidebar-left-collapse`を表示し、open状態は既存の
-アクセント色で選択表示する。accessible nameと`aria-pressed`でopen/closed semanticsを提供する。
+`layout-sidebar-left-expand`、openでは`layout-sidebar-left-collapse`を表示し、open状態は操作優先度とは独立した
+共通Selectedカラーで選択表示する。accessible nameと`aria-pressed`でopen/closed semanticsを提供する。
 timeline内容はlocalStorage、IndexedDB等へ保存しない。
 SSR/hydration中はclosedとして扱う。timelineの更新・表示はbubbleの寿命判定および
 `ConversationState`から独立させる。

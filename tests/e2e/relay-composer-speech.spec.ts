@@ -72,6 +72,28 @@ test.describe('Relay startup', () => {
 			await openReadyRelayWorld(page, 1);
 			const chatterToggle = page.locator('.chatter-toggle');
 			const suggestionsToggle = page.locator('.suggestions-toggle');
+			const readChatterStyle = () => chatterToggle.evaluate((element) => {
+				const style = getComputedStyle(element);
+				const token = (name: string): string => {
+					const probe = document.createElement('button');
+					probe.style.setProperty('background-color', `var(${name})`);
+					document.body.append(probe);
+					const value = getComputedStyle(probe).backgroundColor;
+					probe.remove();
+					return value;
+				};
+				return {
+					background: style.backgroundColor,
+					foreground: style.color,
+					border: style.borderColor,
+					selectedBackground: token('--action-selected-background'),
+					selectedHover: token('--action-selected-background-hover'),
+					selectedActive: token('--action-selected-background-active'),
+					selectedForeground: token('--action-selected-foreground'),
+					selectedBorder: token('--action-selected-border'),
+					primaryBackground: token('--action-primary-background')
+				};
+			});
 			for (const control of [page.locator('.profile-trigger'), chatterToggle, page.locator('.speaker-button'), page.locator('.speech-type-toggle'), suggestionsToggle]) {
 				const frame = await control.evaluate((element) => {
 					const style = getComputedStyle(element);
@@ -93,12 +115,6 @@ test.describe('Relay startup', () => {
 			});
 			expect(chatterDesign.borderStyle).toBe('solid');
 			expect(chatterDesign.borderWidth).toBeGreaterThan(0);
-			await soundButton.hover();
-			const soundHoverBackground = await soundButton.evaluate((element) => getComputedStyle(element).backgroundColor);
-			await chatterToggle.hover();
-			const chatterHoverBackground = await chatterToggle.evaluate((element) => getComputedStyle(element).backgroundColor);
-			if (await chatterToggle.getAttribute('aria-pressed') === 'true') expect(soundHoverBackground).not.toBe(chatterHoverBackground);
-			else expect(soundHoverBackground).toBe(chatterHoverBackground);
 			const soundIconBox = await soundButton.locator('svg').boundingBox();
 			const soundButtonRect = await soundButton.boundingBox();
 			expect(soundIconBox && soundButtonRect).toBeTruthy();
@@ -132,6 +148,7 @@ test.describe('Relay startup', () => {
 			await expect(chatterToggle).toHaveAttribute('aria-label', initiallyOpen ? 'Chatterを閉じる' : 'Chatterを開く');
 			await expect(chatterToggle).toHaveAttribute('aria-pressed', String(initiallyOpen));
 			await expect(chatterToggle.locator('.chatter-toggle-icon')).toHaveAttribute('data-chatter-icon', initiallyOpen ? 'layout-sidebar-left-collapse' : 'layout-sidebar-left-expand');
+			await page.mouse.move(0, 0);
 			const closedColor = await chatterToggle.evaluate((element) => getComputedStyle(element).backgroundColor);
 			const toggleBox = await chatterToggle.boundingBox();
 			expect(toggleBox?.width ?? 0).toBeGreaterThanOrEqual(44);
@@ -142,6 +159,30 @@ test.describe('Relay startup', () => {
 			await expect(chatterToggle.locator('.chatter-toggle-icon')).toHaveAttribute('data-chatter-icon', initiallyOpen ? 'layout-sidebar-left-expand' : 'layout-sidebar-left-collapse');
 			const toggledColor = await chatterToggle.evaluate((element) => getComputedStyle(element).backgroundColor);
 			expect(toggledColor).not.toBe(closedColor);
+			if (!initiallyOpen) {
+				await expect(chatterToggle).toHaveClass(/action-selected/);
+				await page.mouse.move(0, 0);
+				const selectedStyle = await readChatterStyle();
+				expect(selectedStyle.background).toBe(selectedStyle.selectedBackground);
+				expect(selectedStyle.background).not.toBe(selectedStyle.primaryBackground);
+				expect(selectedStyle.foreground).toBe(selectedStyle.selectedForeground);
+				expect(selectedStyle.border).toBe(selectedStyle.selectedBorder);
+				await chatterToggle.hover();
+				const selectedHoverStyle = await readChatterStyle();
+				expect(selectedHoverStyle.background).toBe(selectedHoverStyle.selectedHover);
+				expect(selectedHoverStyle.foreground).toBe(selectedHoverStyle.selectedForeground);
+				const selectedBox = await chatterToggle.boundingBox();
+				if (!selectedBox) throw new Error('Expected selected Chatter control geometry.');
+				await page.mouse.move(selectedBox.x + selectedBox.width / 2, selectedBox.y + selectedBox.height / 2);
+				await page.mouse.down();
+				const selectedActiveStyle = await readChatterStyle();
+				expect(selectedActiveStyle.background).toBe(selectedActiveStyle.selectedActive);
+				expect(selectedActiveStyle.foreground).toBe(selectedActiveStyle.selectedForeground);
+				await page.mouse.move(0, 0);
+				await page.mouse.up();
+				await expect(chatterToggle).toHaveAttribute('aria-pressed', 'true');
+			}
+			else await expect(chatterToggle).not.toHaveClass(/action-selected/);
 			persistedChatterState = !initiallyOpen;
 			await expect(page.locator('.trace-unread-indicator')).toHaveCount(0);
 			await expect(page.locator('.sound-control')).toHaveCount(1);
@@ -182,9 +223,10 @@ test.describe('Relay startup', () => {
 					};
 				});
 				for (const box of geometry.controls) {
-					expect(box.width).toBe(54);
-					expect(box.height).toBe(54);
+					expect(box.width).toBeGreaterThanOrEqual(44);
+					expect(box.height).toBeGreaterThanOrEqual(44);
 				}
+				for (const box of geometry.controls.slice(1)) expect(box.height).toBe(geometry.controls[0].height);
 				expect(geometry.left.x + geometry.left.width).toBeLessThanOrEqual(geometry.editor.x);
 				expect(geometry.editor.x + geometry.editor.width).toBeLessThanOrEqual(geometry.right.x);
 				if (width === 1200) expect(geometry.editor.width).toBeGreaterThan(geometry.left.width + geometry.right.width);

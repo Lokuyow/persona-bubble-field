@@ -40,6 +40,11 @@
 	--action-icon-background-active: #d7dcdf;
 	--action-icon-foreground: #3b4449;
 	--action-icon-border: #727c82;
+	--action-selected-background: #cbd6e0;
+	--action-selected-background-hover: #bdcbd7;
+	--action-selected-background-active: #adbdcb;
+	--action-selected-foreground: #253540;
+	--action-selected-border: #5d7282;
 	--action-notification-background: #fff0e9;
 	--action-notification-background-hover: #fbe4d9;
 	--action-notification-background-active: #f2d4c6;
@@ -173,6 +178,14 @@ button:not(:where(.trace-root-bubble, .trace-reply-content-button, .timeline-nam
 
 .action-button-tertiary:hover:not(:disabled) { background: var(--action-tertiary-background-hover); }
 .action-button-tertiary:active:not(:disabled) { background: var(--action-tertiary-background-active); }
+
+button.action-selected[aria-pressed='true']:not(:disabled) {
+	border-color: var(--action-selected-border);
+	background: var(--action-selected-background);
+	color: var(--action-selected-foreground);
+}
+button.action-selected[aria-pressed='true']:hover:not(:disabled) { background: var(--action-selected-background-hover); }
+button.action-selected[aria-pressed='true']:active:not(:disabled) { background: var(--action-selected-background-active); }
 
 .action-button-intent-cancel.action-button-primary,
 .action-button-intent-cancel.action-button-secondary,
