@@ -276,6 +276,8 @@
 		font-weight: 800;
 		cursor: pointer;
 	}
+	.chatter-toggle[aria-pressed='false']:hover:not(:disabled) { background: var(--action-icon-background-hover); }
+	.chatter-toggle[aria-pressed='false']:active:not(:disabled) { background: var(--action-icon-background-active); }
 	.profile-trigger:hover, .speech-type-toggle:hover:not(:disabled) { background: var(--action-icon-background-hover); }
 	.profile-trigger:active, .speech-type-toggle:active:not(:disabled) { background: var(--action-icon-background-active); }
 	.chatter-toggle-icon { display: inline-flex; width: 24px; height: 24px; align-items: center; justify-content: center; }

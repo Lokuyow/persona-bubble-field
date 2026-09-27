@@ -91,9 +91,36 @@ test.describe('Relay startup', () => {
 					selectedActive: token('--action-selected-background-active'),
 					selectedForeground: token('--action-selected-foreground'),
 					selectedBorder: token('--action-selected-border'),
-					primaryBackground: token('--action-primary-background')
+					primaryBackground: token('--action-primary-background'),
+					iconBackground: token('--action-icon-background'),
+					iconHover: token('--action-icon-background-hover'),
+					iconActive: token('--action-icon-background-active')
 				};
 			});
+			const expectUnselectedFeedback = async (): Promise<void> => {
+				if (await chatterToggle.getAttribute('aria-pressed') === 'true') await chatterToggle.click();
+				await page.mouse.move(0, 0);
+				const normal = await readChatterStyle();
+				expect(normal.background).toBe(normal.iconBackground);
+				await chatterToggle.hover();
+				const hover = await readChatterStyle();
+				expect(hover.background).toBe(hover.iconHover);
+				expect(hover.background).not.toBe(normal.background);
+				expect(hover.foreground).toBe(normal.foreground);
+				expect(hover.border).toBe(normal.border);
+				const box = await chatterToggle.boundingBox();
+				if (!box) throw new Error('Expected unselected Chatter control geometry.');
+				await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+				await page.mouse.down();
+				const active = await readChatterStyle();
+				expect(active.background).toBe(active.iconActive);
+				expect(active.background).not.toBe(hover.background);
+				expect(active.foreground).toBe(normal.foreground);
+				expect(active.border).toBe(normal.border);
+				await page.mouse.move(0, 0);
+				await page.mouse.up();
+				await expect(chatterToggle).toHaveAttribute('aria-pressed', 'false');
+			};
 			for (const control of [page.locator('.profile-trigger'), chatterToggle, page.locator('.speaker-button'), page.locator('.speech-type-toggle'), suggestionsToggle]) {
 				const frame = await control.evaluate((element) => {
 					const style = getComputedStyle(element);
@@ -148,6 +175,11 @@ test.describe('Relay startup', () => {
 			await expect(chatterToggle).toHaveAttribute('aria-label', initiallyOpen ? 'Chatterを閉じる' : 'Chatterを開く');
 			await expect(chatterToggle).toHaveAttribute('aria-pressed', String(initiallyOpen));
 			await expect(chatterToggle.locator('.chatter-toggle-icon')).toHaveAttribute('data-chatter-icon', initiallyOpen ? 'layout-sidebar-left-collapse' : 'layout-sidebar-left-expand');
+			await expectUnselectedFeedback();
+			if (initiallyOpen) {
+				await chatterToggle.click();
+				await expect(chatterToggle).toHaveAttribute('aria-pressed', 'true');
+			}
 			await page.mouse.move(0, 0);
 			const closedColor = await chatterToggle.evaluate((element) => getComputedStyle(element).backgroundColor);
 			const toggleBox = await chatterToggle.boundingBox();
