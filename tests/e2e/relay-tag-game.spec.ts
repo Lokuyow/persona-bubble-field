@@ -41,6 +41,12 @@ async function readEffectSymbolLayout(holder: Locator): Promise<Readonly<{
 	auraRightFillOpacity: number;
 	auraStrokeOpacity: number;
 	auraStrokeWidth: number;
+	fukuHaloRays: readonly Box[];
+	fukuHaloRayCounts: Readonly<{ warm: number; light: number }>;
+	fukuHaloRayColors: Readonly<{ warmFill: string; lightFill: string; lightStroke: string }>;
+	fukuHaloRayOpacities: Readonly<{ warm: number; light: number }>;
+	fukuHaloRingCount: number;
+	fukuHaloLightRing: Box | null;
 	leftHorn: Box | null;
 	rightHorn: Box | null;
 	mallet: Box | null;
@@ -68,11 +74,13 @@ async function readEffectSymbolLayout(holder: Locator): Promise<Readonly<{
 		const aura = element.querySelector<HTMLElement>('.tag-game-effect-aura');
 		const button = element.querySelector<HTMLElement>('.participant-profile-trigger');
 		const path = (selector: string) => box(element.querySelector(selector));
-		const isFuku = element.getAttribute('data-tag-game-effect') === 'benefit';
-		const auraLeftSelector = isFuku ? '.fuku-smoke-left > path' : '.oni-smoke-left > path';
-		const auraRightSelector = isFuku ? '.fuku-smoke-right > path' : '.oni-smoke-right > path';
+		const auraLeftSelector = '.oni-smoke-left > path';
+		const auraRightSelector = '.oni-smoke-right > path';
 		const auraLeftElement = element.querySelector<SVGGraphicsElement>(auraLeftSelector);
 		const auraRightElement = element.querySelector<SVGGraphicsElement>(auraRightSelector);
+		const warmRays = element.querySelector<SVGGElement>('.fuku-halo-rays-warm');
+		const lightRays = element.querySelector<SVGGElement>('.fuku-halo-rays-light');
+		const rayBoxes = [...element.querySelectorAll<SVGGraphicsElement>('.fuku-halo-rays path')].map((ray) => box(ray)!);
 		const malletShaft = element.querySelector<SVGRectElement>('[data-fuku-mallet-handle]');
 		const malletHead = element.querySelector<SVGRectElement>('[data-fuku-mallet-head]');
 		const rectGeometry = (rect: SVGRectElement) => ({
@@ -89,10 +97,16 @@ async function readEffectSymbolLayout(holder: Locator): Promise<Readonly<{
 			name: box(element.querySelector('.participant-name'))!,
 			auraLeft: box(auraLeftElement),
 			auraRight: box(auraRightElement),
-			auraLeftFillOpacity: Number.parseFloat(getComputedStyle(auraLeftElement!).fillOpacity),
-			auraRightFillOpacity: Number.parseFloat(getComputedStyle(auraRightElement!).fillOpacity),
-			auraStrokeOpacity: Number.parseFloat(getComputedStyle(auraLeftElement!).strokeOpacity),
-			auraStrokeWidth: Number.parseFloat(getComputedStyle(auraLeftElement!).strokeWidth),
+			auraLeftFillOpacity: auraLeftElement ? Number.parseFloat(getComputedStyle(auraLeftElement).fillOpacity) : 0,
+			auraRightFillOpacity: auraRightElement ? Number.parseFloat(getComputedStyle(auraRightElement).fillOpacity) : 0,
+			auraStrokeOpacity: auraLeftElement ? Number.parseFloat(getComputedStyle(auraLeftElement).strokeOpacity) : 0,
+			auraStrokeWidth: auraLeftElement ? Number.parseFloat(getComputedStyle(auraLeftElement).strokeWidth) : 0,
+			fukuHaloRays: rayBoxes,
+			fukuHaloRayCounts: { warm: warmRays?.querySelectorAll('path').length ?? 0, light: lightRays?.querySelectorAll('path').length ?? 0 },
+			fukuHaloRayColors: { warmFill: warmRays ? getComputedStyle(warmRays).fill : '', lightFill: lightRays ? getComputedStyle(lightRays).fill : '', lightStroke: lightRays ? getComputedStyle(lightRays).stroke : '' },
+			fukuHaloRayOpacities: { warm: Number.parseFloat(warmRays ? getComputedStyle(warmRays).opacity : '0'), light: Number.parseFloat(lightRays ? getComputedStyle(lightRays).opacity : '0') },
+			fukuHaloRingCount: element.querySelectorAll('.fuku-halo > circle').length,
+			fukuHaloLightRing: box(element.querySelector('.fuku-halo-light-ring')),
 			leftHorn: path('.oni-horn:nth-of-type(1)'),
 			rightHorn: path('.oni-horn:nth-of-type(2)'),
 			mallet: path('[data-fuku-mallet]'),
@@ -127,6 +141,40 @@ function expectAuraVisibleOutsideAvatar(layout: Awaited<ReturnType<typeof readEf
 	expect(layout.auraRightFillOpacity).toBeLessThan(0.4);
 	expect(layout.auraStrokeOpacity).toBeLessThan(0.5);
 	expect(layout.auraStrokeWidth).toBeLessThan(2);
+}
+
+function expectFukuHaloVisibleAroundAvatar(layout: Awaited<ReturnType<typeof readEffectSymbolLayout>>): void {
+	expect(layout.fukuHaloRingCount).toBe(2);
+	expect(layout.fukuHaloRayCounts).toEqual({ warm: 4, light: 5 });
+	expect(layout.fukuHaloRays).toHaveLength(9);
+	const rgb = (value: string) => value.match(/\d+/g)?.slice(0, 3).map(Number) ?? [];
+	const warm = rgb(layout.fukuHaloRayColors.warmFill);
+	const light = rgb(layout.fukuHaloRayColors.lightFill);
+	const lightOutline = rgb(layout.fukuHaloRayColors.lightStroke);
+	expect(warm).toHaveLength(3);
+	expect(warm[0]).toBeGreaterThan(warm[1]);
+	expect(warm[0]).toBeGreaterThan(warm[2]);
+	expect(light).toHaveLength(3);
+	expect(Math.min(...light)).toBeGreaterThan(220);
+	expect(lightOutline[0]).toBeGreaterThan(lightOutline[1]);
+	expect(lightOutline[0]).toBeGreaterThan(lightOutline[2]);
+	expect(layout.fukuHaloRayOpacities.warm).toBeGreaterThan(0.5);
+	expect(layout.fukuHaloRayOpacities.warm).toBeLessThan(0.9);
+	expect(layout.fukuHaloRayOpacities.light).toBeGreaterThan(0.5);
+	expect(layout.fukuHaloRayOpacities.light).toBeLessThan(0.9);
+	const minX = Math.min(...layout.fukuHaloRays.map((ray) => ray.x));
+	const minY = Math.min(...layout.fukuHaloRays.map((ray) => ray.y));
+	const maxX = Math.max(...layout.fukuHaloRays.map((ray) => ray.x + ray.width));
+	const lightRing = layout.fukuHaloLightRing!;
+	const minVisibleOverflow = layout.cell.width * 0.04;
+	expect(layout.avatar.x - minX).toBeGreaterThan(minVisibleOverflow);
+	expect(maxX - (layout.avatar.x + layout.avatar.width)).toBeGreaterThan(minVisibleOverflow);
+	expect(layout.avatar.y - minY).toBeGreaterThan(minVisibleOverflow);
+	expect(layout.fukuHaloLightRing).not.toBeNull();
+	expect(layout.avatar.x - lightRing.x).toBeGreaterThan(minVisibleOverflow);
+	expect(lightRing.x + lightRing.width - (layout.avatar.x + layout.avatar.width)).toBeGreaterThan(minVisibleOverflow);
+	expect(layout.avatar.y - lightRing.y).toBeGreaterThan(minVisibleOverflow);
+	expect(lightRing.y + lightRing.height - (layout.avatar.y + layout.avatar.height)).toBeGreaterThan(minVisibleOverflow);
 }
 
 function expectIconAboveAvatarAndClearOfName(layout: Awaited<ReturnType<typeof readEffectSymbolLayout>>, symbol: 'horns' | 'mallet'): void {
@@ -2015,9 +2063,10 @@ test('host silence is detected only while the local Relay connection is active',
 	await injectRealtime(page, finalizeTagGameState(benefit, CHANNEL_ID, startedAt + 1, remoteHostSecret));
 	await expect(holder).toHaveAttribute('data-tag-game-effect', 'benefit');
 	await expect(effectVisuals).toHaveAttribute('aria-label', '福');
-	await expect(holder.locator('.tag-game-effect-aura .fuku-smoke-left, .tag-game-effect-aura .fuku-smoke-right')).toHaveCount(2);
-	await expect(holder.locator('.tag-game-effect-aura .fuku-smoke-trail')).toHaveCount(1);
-	await expect(holder.locator('.tag-game-effect-aura .fuku-smoke-particle')).toHaveCount(1);
+	await expect(holder.locator('.tag-game-effect-aura .fuku-smoke, .tag-game-effect-aura .fuku-smoke-trail, .tag-game-effect-aura .fuku-smoke-particle')).toHaveCount(0);
+	await expect(holder.locator('.tag-game-effect-aura .fuku-halo-soft-ring, .tag-game-effect-aura .fuku-halo-light-ring')).toHaveCount(2);
+	await expect(holder.locator('.tag-game-effect-aura .fuku-halo-rays-warm path')).toHaveCount(4);
+	await expect(holder.locator('.tag-game-effect-aura .fuku-halo-rays-light path')).toHaveCount(5);
 	await expect(effectVisuals.locator('[data-fuku-mallet]')).toHaveCount(1);
 	await expect(holder.locator('.tag-game-effect-aura .oni-aura-outline')).toHaveCount(0);
 	const fukuViewport = page.viewportSize();
@@ -2027,13 +2076,13 @@ test('host silence is detected only while the local Relay connection is active',
 	const desktopFukuLayout = await readEffectSymbolLayout(holder);
 	expectIconAboveAvatarAndClearOfName(desktopFukuLayout, 'mallet');
 	expectMalletHeadAndShaftToMeet(desktopFukuLayout);
-	expectAuraVisibleOutsideAvatar(desktopFukuLayout);
+	expectFukuHaloVisibleAroundAvatar(desktopFukuLayout);
 	await page.setViewportSize({ width: 390, height: 844 });
 	await expect.poll(() => holder.evaluate((element) => element.getBoundingClientRect().width)).toBe(50);
 	const mobileFukuLayout = await readEffectSymbolLayout(holder);
 	expectIconAboveAvatarAndClearOfName(mobileFukuLayout, 'mallet');
 	expectMalletHeadAndShaftToMeet(mobileFukuLayout);
-	expectAuraVisibleOutsideAvatar(mobileFukuLayout);
+	expectFukuHaloVisibleAroundAvatar(mobileFukuLayout);
 	await page.setViewportSize(fukuViewport);
 	await expect.poll(() => holder.evaluate((element) => element.getBoundingClientRect().width)).toBe(76);
 	await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -2043,7 +2092,7 @@ test('host silence is detected only while the local Relay connection is active',
 	const reducedMotionFukuLayout = await readEffectSymbolLayout(holder);
 	expectIconAboveAvatarAndClearOfName(reducedMotionFukuLayout, 'mallet');
 	expectMalletHeadAndShaftToMeet(reducedMotionFukuLayout);
-	expectAuraVisibleOutsideAvatar(reducedMotionFukuLayout);
+	expectFukuHaloVisibleAroundAvatar(reducedMotionFukuLayout);
 	await page.emulateMedia({ reducedMotion: 'no-preference' });
 	await expect(page.locator('[data-tag-game-cooldown]')).toHaveCount(0);
 	await expect(page.locator('[data-tag-game-hud] [data-tag-game-effect]')).toContainText('所持者以外が追いかけて奪う');

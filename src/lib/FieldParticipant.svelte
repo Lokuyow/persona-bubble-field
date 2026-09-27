@@ -61,10 +61,25 @@
 		<span class={['tag-game-effect-aura', `tag-game-effect-aura-${tagGameEffect}`, { 'tag-game-effect-aura-paused': !tagGameEffectActive }]} aria-hidden="true">
 			<svg viewBox="0 0 76 76" focusable="false">
 				{#if tagGameEffect === 'benefit'}
-					<g class="fuku-smoke fuku-smoke-left"><path d="M23 4C11 -1 5 7 7 14C-5 16 -10 27 -4 34C-12 41 -7 50 1 52C-3 62 10 69 19 71C15 62 18 57 20 51C13 43 13 38 21 31C14 22 17 15 23 4Z" fill="#eb694a" fill-opacity=".23" stroke="#ffe6c0" stroke-opacity=".42" stroke-width="1.5" /></g>
-					<g class="fuku-smoke fuku-smoke-right"><path d="M60 29C74 23 80 34 76 40C87 45 85 52 75 55C79 65 68 71 55 69C59 62 60 57 56 52C64 46 65 37 60 29Z" fill="#f2a16c" fill-opacity=".24" stroke="#ffcfac" stroke-opacity=".44" stroke-width="1.4" /></g>
-					<path class="fuku-smoke-trail" d="M17 54C6 56 11 67 19 70C25 76 32 77 36 77M54 69Q63 76 71 66" fill="none" stroke="#fff7ed" stroke-opacity=".31" stroke-width="3.2" stroke-linecap="round" />
-					<path class="fuku-smoke-particle" d="M3 29L6 32L3 35L0 32ZM80 49L83 52L80 55L77 52ZM23 74L26 77L23 80L20 77Z" fill="#f8ad73" fill-opacity=".3" />
+					<g class="fuku-halo" fill="none" pointer-events="none">
+						<circle class="fuku-halo-soft-ring" cx="38" cy="38" r="37.4" stroke="#d94a36" stroke-width="5" opacity=".28" />
+						<circle class="fuku-halo-light-ring" cx="38" cy="38" r="39.2" stroke="#fff9f1" stroke-width="1.7" opacity=".66" />
+						<g class="fuku-halo-rays" transform="translate(38 38)">
+							<g class="fuku-halo-rays-warm" fill="#df4c36" stroke="#fff6ed" stroke-width=".9" opacity=".69">
+								<path d="M-1.5-35 L-2.9-44.5 L2.9-44.5 L1.5-35Z" transform="rotate(-121)" />
+								<path d="M-1.5-35 L-2.9-44.5 L2.9-44.5 L1.5-35Z" transform="rotate(-72)" />
+								<path d="M-1.5-35 L-2.9-44.5 L2.9-44.5 L1.5-35Z" transform="rotate(-25)" />
+								<path d="M-1.5-35 L-2.9-44.5 L2.9-44.5 L1.5-35Z" transform="rotate(99)" />
+							</g>
+							<g class="fuku-halo-rays-light" fill="#fffdfa" stroke="#dd5a44" stroke-width=".95" opacity=".76">
+								<path d="M-1.4-35 L-2.6-43 L2.6-43 L1.4-35Z" transform="rotate(-143)" />
+								<path d="M-1.4-35 L-2.6-43 L2.6-43 L1.4-35Z" transform="rotate(-96)" />
+								<path d="M-1.4-35 L-2.6-43 L2.6-43 L1.4-35Z" transform="rotate(-48)" />
+								<path d="M-1.4-35 L-2.6-43 L2.6-43 L1.4-35Z" transform="rotate(0)" />
+								<path d="M-1.4-35 L-2.6-43 L2.6-43 L1.4-35Z" transform="rotate(123)" />
+							</g>
+						</g>
+					</g>
 				{:else}
 					<g class="oni-smoke oni-smoke-left"><path d="M20 4C12 -2 5 7 7 13C-5 15 -10 28 -4 34C-13 41 -9 52 1 54C-1 64 10 70 22 70C16 61 18 55 22 49C15 42 15 37 22 31C14 23 16 15 20 4Z" fill="#68458e" fill-opacity=".27" stroke="#b19bd1" stroke-opacity=".4" stroke-width="1.35" /></g>
 					<g class="oni-smoke oni-smoke-right"><path d="M57 16C69 8 78 18 75 27C86 31 87 39 78 45C89 55 77 65 65 64C64 69 58 71 52 72C58 63 57 58 53 52C63 45 64 36 57 29Z" fill="#392948" fill-opacity=".29" stroke="#a68bc5" stroke-opacity=".44" stroke-width="1.4" /></g>
@@ -217,17 +232,11 @@
 	.tag-game-effect-aura-paused { opacity: .76; }
 	.tag-game-effect-visuals-paused { opacity: .92; }
 
-	.fuku-smoke,
 	.oni-smoke { transform-box: fill-box; transform-origin: center; }
-	.fuku-smoke-left { animation: fuku-smoke-drift 8.5s ease-in-out infinite alternate; }
-	.fuku-smoke-right { animation: fuku-smoke-drift 9.5s ease-in-out -4.2s infinite alternate-reverse; }
-	.fuku-smoke-trail,
-	.fuku-smoke-particle { pointer-events: none; }
 	.oni-smoke-left { animation: oni-smoke-drift 9s ease-in-out infinite alternate; }
 	.oni-smoke-right { animation: oni-smoke-drift 10s ease-in-out -5s infinite alternate-reverse; }
 	.oni-smoke-trail,
 	.oni-smoke-particle { pointer-events: none; }
-	.tag-game-effect-aura-paused .fuku-smoke,
 	.tag-game-effect-aura-paused .oni-smoke { animation: none; }
 
 	.fuku-mallet { stroke-linecap: round; stroke-linejoin: round; }
@@ -249,7 +258,6 @@
 		box-shadow: 0 0 0 1px rgba(47, 68, 78, .65);
 		pointer-events: none;
 	}
-	@keyframes fuku-smoke-drift { from { transform: translate(-.7px, .3px) scale(.985); opacity: .82; } to { transform: translate(.8px, -.4px) scale(1.015); opacity: 1; } }
 	@keyframes oni-smoke-drift { from { transform: translate(.6px, .3px) scale(.985); opacity: .8; } to { transform: translate(-.8px, -.4px) scale(1.015); opacity: 1; } }
 
 	@media (prefers-reduced-motion: reduce) {
