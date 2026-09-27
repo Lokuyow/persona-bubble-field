@@ -29,6 +29,39 @@ async function expectButtonShape(button: Locator): Promise<void> {
 	expect(style.width).toBe('1px');
 }
 
+type BlessingStarPosition = Readonly<{ x: number; y: number; running: boolean }>;
+type BlessingStarPositions = Readonly<Record<'one' | 'two' | 'three' | 'four', BlessingStarPosition>>;
+
+async function readBlessingStarPositions(effectVisuals: Locator): Promise<BlessingStarPositions> {
+	return effectVisuals.locator('svg').evaluate((svg) => {
+		const bounds = svg.getBoundingClientRect();
+		return Object.fromEntries([...svg.querySelectorAll<SVGGraphicsElement>('.blessing-star')].map((star) => {
+			const classes = [...star.classList];
+			const name = classes.find((className) => /^blessing-star-(one|two|three|four)$/.test(className))?.replace('blessing-star-', '');
+			const box = star.getBoundingClientRect();
+			return [name ?? 'unknown', {
+				x: (box.left + box.width / 2 - bounds.left) / bounds.width,
+				y: (box.top + box.height / 2 - bounds.top) / bounds.height,
+				running: star.getAnimations().some((animation) => animation.playState === 'running')
+			}];
+		})) as BlessingStarPositions;
+	});
+}
+
+function expectBlessingStarDirections(stars: BlessingStarPositions): void {
+	const horizontalCentre = (position: BlessingStarPosition) => Math.abs(position.x - 0.5);
+	const verticalCentre = (position: BlessingStarPosition) => Math.abs(position.y - 0.5);
+	// Ratios keep this about the four cardinal placements rather than design pixels.
+	expect(stars.one.y).toBeLessThan(0.25);
+	expect(horizontalCentre(stars.one)).toBeLessThan(0.2);
+	expect(stars.two.x).toBeGreaterThan(0.75);
+	expect(verticalCentre(stars.two)).toBeLessThan(0.2);
+	expect(stars.three.y).toBeGreaterThan(0.75);
+	expect(horizontalCentre(stars.three)).toBeLessThan(0.2);
+	expect(stars.four.x).toBeLessThan(0.25);
+	expect(verticalCentre(stars.four)).toBeLessThan(0.2);
+}
+
 async function synchronizeBrowserClocks(pages: readonly Page[]): Promise<void> {
 	const nowMs = Math.max(...await Promise.all(pages.map((page) => page.evaluate(() => Date.now()))));
 	await Promise.all(pages.map((page) => page.clock.setSystemTime(nowMs)));
@@ -1744,6 +1777,14 @@ test('host silence is detected only while the local Relay connection is active',
 	await expect(effectVisuals.locator('.blessing-orbit')).toHaveCount(1);
 	await expect(effectVisuals.locator('.blessing-star')).toHaveCount(4);
 	await expect(effectVisuals.locator('.curse-outline')).toHaveCount(0);
+	await expect.poll(async () => Object.values(await readBlessingStarPositions(effectVisuals)).every((star) => star.running)).toBe(true);
+	const animatedBlessingStars = await readBlessingStarPositions(effectVisuals);
+	expectBlessingStarDirections(animatedBlessingStars);
+	await page.emulateMedia({ reducedMotion: 'reduce' });
+	const reducedMotionBlessingStars = await readBlessingStarPositions(effectVisuals);
+	expect(Object.values(reducedMotionBlessingStars).every((star) => !star.running)).toBe(true);
+	expectBlessingStarDirections(reducedMotionBlessingStars);
+	await page.emulateMedia({ reducedMotion: 'no-preference' });
 	await expect(page.locator('[data-tag-game-cooldown]')).toHaveCount(0);
 	await expect(page.locator('[data-tag-game-hud] [data-tag-game-effect]')).toContainText('所持者以外が追いかけて奪う');
 	const challenge = finalizeTagGameState({ ...benefit, revision: 2, updatedAt: startedAt + 10, holderChallengeId: 'f'.repeat(32), holderChallengeStartedAtMs: (startedAt + 10) * 1_000 }, CHANNEL_ID, startedAt + 10, remoteHostSecret);

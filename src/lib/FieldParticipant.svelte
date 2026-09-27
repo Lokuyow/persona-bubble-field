@@ -80,10 +80,10 @@
 				{#if tagGameEffect === 'benefit'}
 					<circle class="blessing-halo" cx="38" cy="38" r="34.5" />
 					<circle class="blessing-orbit" cx="38" cy="38" r="36" />
-					<path class="blessing-star blessing-star-one" d="M0 -5L1.4 -1.4L5 0L1.4 1.4L0 5L-1.4 1.4L-5 0L-1.4 -1.4Z" transform="translate(38 2)" />
-					<path class="blessing-star blessing-star-two" d="M0 -5L1.4 -1.4L5 0L1.4 1.4L0 5L-1.4 1.4L-5 0L-1.4 -1.4Z" transform="translate(74 38) scale(.8)" />
-					<path class="blessing-star blessing-star-three" d="M0 -5L1.4 -1.4L5 0L1.4 1.4L0 5L-1.4 1.4L-5 0L-1.4 -1.4Z" transform="translate(38 74) scale(.72)" />
-					<path class="blessing-star blessing-star-four" d="M0 -5L1.4 -1.4L5 0L1.4 1.4L0 5L-1.4 1.4L-5 0L-1.4 -1.4Z" transform="translate(2 38) scale(.86)" />
+					<g transform="translate(38 2)"><path class="blessing-star blessing-star-one" d="M0 -5L1.4 -1.4L5 0L1.4 1.4L0 5L-1.4 1.4L-5 0L-1.4 -1.4Z" /></g>
+					<g transform="translate(74 38) scale(.8)"><path class="blessing-star blessing-star-two" d="M0 -5L1.4 -1.4L5 0L1.4 1.4L0 5L-1.4 1.4L-5 0L-1.4 -1.4Z" /></g>
+					<g transform="translate(38 74) scale(.72)"><path class="blessing-star blessing-star-three" d="M0 -5L1.4 -1.4L5 0L1.4 1.4L0 5L-1.4 1.4L-5 0L-1.4 -1.4Z" /></g>
+					<g transform="translate(2 38) scale(.86)"><path class="blessing-star blessing-star-four" d="M0 -5L1.4 -1.4L5 0L1.4 1.4L0 5L-1.4 1.4L-5 0L-1.4 -1.4Z" /></g>
 				{:else}
 					<path class="curse-shadow" d="M35 2L42 4L47 2L51 9L60 10L59 17L68 20L64 27L74 34L68 39L73 47L64 51L66 58L57 60L52 72L44 68L38 74L32 68L23 72L20 63L11 60L15 53L3 48L10 42L2 34L9 29L5 21L14 18L17 9L27 11Z" />
 					<path class="curse-outline" d="M35 2L42 4L47 2L51 9L60 10L59 17L68 20L64 27M74 34L68 39L73 47L64 51M66 58L57 60L52 72L44 68M38 74L32 68L23 72M20 63L11 60L15 53L3 48M2 34L9 29L5 21L14 18L17 9L27 11" />
