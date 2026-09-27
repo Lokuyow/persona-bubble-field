@@ -382,6 +382,7 @@
 		place-items: center; border: 0; border-radius: 0; background: none; box-shadow: none;
 		transform: translate(-50%, -50%); pointer-events: none;
 	}
+	.field-tag-game-terminal { width: calc(var(--cell-size) * 0.96); height: calc(var(--cell-size) * 0.96); }
 	.field-facility img { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
 	.realtime-group-layer { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
 	.realtime-group {

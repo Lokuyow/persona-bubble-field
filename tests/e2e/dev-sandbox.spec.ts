@@ -11,7 +11,6 @@ test.describe('DEV World Sandbox', () => {
 
 	test('lists categorized scenarios and keeps the selected character across scenario reset', async ({ page }) => {
 		await page.goto('/?devWorld=1&devCharacter=020');
-		await expect(page.locator('[data-field-facility="tag-game-terminal"] img')).toHaveAttribute('src', /field\/objects\/tag-game-terminal\.webp$/);
 		await expect(page.getByLabel('Select DEV scenario')).toHaveValue('default');
 		await expect(page.locator('optgroup[label="Speech"]')).toHaveCount(1);
 		await expect(page.getByText('Plain DEV World with no seeded fixture.')).toBeVisible();
@@ -26,6 +25,18 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page).toHaveURL(/devScenario=trace-replies/);
 		await expect(page.getByLabel('Select sandbox character')).toHaveValue('020');
 		await expect(page.locator('.trace-marker')).toHaveCount(3);
+	});
+
+	test('renders the tag-game terminal larger than the neighboring facility artwork', async ({ page }) => {
+		await page.goto('/?devWorld=1&devCharacter=020');
+		const tagGameTerminal = page.locator('[data-field-facility="tag-game-terminal"]');
+		await expect(tagGameTerminal.locator('img')).toHaveAttribute('src', /field\/objects\/tag-game-terminal\.webp$/);
+		const [tagGameBounds, adjustmentBounds] = await Promise.all([
+			tagGameTerminal.boundingBox(),
+			page.locator('[data-field-facility="adjustment-terminal"]').boundingBox()
+		]);
+		if (!tagGameBounds || !adjustmentBounds) throw new Error('Expected rendered terminal bounds.');
+		expect(tagGameBounds.width).toBeGreaterThan(adjustmentBounds.width);
 	});
 
 	test('keeps desktop Trace DEV controls and Chatter actions independently operable', async ({ page }) => {
