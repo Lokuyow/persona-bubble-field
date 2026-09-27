@@ -75,7 +75,7 @@
 	</button>
 	{#if tagGameRole === 'holder' && tagGameEffect}
 		<span class={['tag-game-effect-visuals', `tag-game-effect-visuals-${tagGameEffect}`, { 'tag-game-effect-visuals-paused': !tagGameEffectActive }]}
-			role="img" aria-label={`${tagGameEffect === 'benefit' ? '祝福' : '呪い'}${tagGameEffectActive ? '' : '・効果停止中'}`}>
+			role="img" aria-label={`${tagGameEffect === 'benefit' ? '福' : '鬼'}${tagGameEffectActive ? '' : '・効果停止中'}`}>
 			<svg viewBox="0 0 76 76" aria-hidden="true" focusable="false">
 				{#if tagGameEffect === 'benefit'}
 					<circle class="blessing-halo" cx="38" cy="38" r="34.5" />

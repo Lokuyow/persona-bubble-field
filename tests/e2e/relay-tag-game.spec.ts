@@ -611,6 +611,50 @@ async function openTagGameTerminal(page: Page): Promise<void> {
 	await expectIconCloseButton(page.getByRole('dialog', { name: '鬼ごっこ' }).getByRole('button', { name: '閉じる' }), '閉じる');
 }
 
+test('tag game rules stay usable across desktop and mobile terminal states', async ({ page }) => {
+	const secret = fixtureSecret(53);
+	const nowMs = Date.now();
+	await page.setViewportSize({ width: 1280, height: 800 });
+	await preparePlayer(page, secret, nowMs);
+	await moveRelaySelfTo(page, { x: TAG_GAME_TERMINAL.position.x - 1, y: TAG_GAME_TERMINAL.position.y });
+	await openTagGameTerminal(page);
+	const dialog = page.getByRole('dialog', { name: '鬼ごっこ' });
+	const rules = dialog.locator('.tag-game-rules');
+	await expect(dialog.getByText('2〜8人 · 2分')).toBeVisible();
+	await expect(dialog.getByText(/鬼の効果中は毎秒1時間の寿命を失います/)).toBeVisible();
+	await expect(rules).not.toHaveAttribute('open', '');
+	const summary = rules.locator('summary');
+	await summary.focus();
+	await page.keyboard.press('Enter');
+	await expect(rules).toHaveAttribute('open', '');
+	await expect(summary).toContainText('ルールを閉じる');
+	await expect(rules.getByText('福を持っていない人が所持者を追いかけ、タッチして福を奪います。')).toBeVisible();
+	await expect(rules.getByText('鬼の所持者が他の参加者を追いかけ、タッチして鬼を押し付けます。')).toBeVisible();
+	const [benefitBox, calamityBox] = await Promise.all([
+		rules.locator('.tag-game-effect-benefit').boundingBox(),
+		rules.locator('.tag-game-effect-calamity').boundingBox()
+	]);
+	expect(benefitBox && calamityBox && calamityBox.y >= benefitBox.y + benefitBox.height).toBe(true);
+	await expect(dialog.getByRole('button', { name: '鬼ごっこを開催' })).toHaveAttribute('data-action-variant', 'primary');
+	await dialog.getByRole('button', { name: '鬼ごっこを開催' }).click();
+	await expect(dialog.getByText('あなたの開催')).toBeVisible();
+	await expect(rules).toHaveAttribute('open', '');
+
+	await page.setViewportSize({ width: 390, height: 640 });
+	const [mobileBenefitBox, mobileCalamityBox] = await Promise.all([
+		rules.locator('.tag-game-effect-benefit').boundingBox(),
+		rules.locator('.tag-game-effect-calamity').boundingBox()
+	]);
+	expect(mobileBenefitBox && mobileCalamityBox && mobileCalamityBox.y >= mobileBenefitBox.y + mobileBenefitBox.height).toBe(true);
+	await dialog.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+	await expect(dialog.getByRole('button', { name: '閉じる' })).toBeVisible();
+	await expect(dialog.getByRole('button', { name: '開始を提案' })).toBeVisible();
+	await dialog.getByRole('button', { name: '閉じる' }).click();
+	await expect(dialog).toHaveCount(0);
+	await openTagGameTerminal(page);
+	await expect(page.getByRole('dialog', { name: '鬼ごっこ' }).locator('.tag-game-rules')).not.toHaveAttribute('open', '');
+});
+
 test('three Fake Relay clients create, join, consent, start, touch, and settle through the field UI', async ({ browser }) => {
 	test.setTimeout(90_000);
 	const hostPage = await browser.newPage();
@@ -818,7 +862,7 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 		const displayedEffect = holderPage.locator('[data-tag-game-hud] [data-tag-game-effect]');
 		await expect(holderMarker).toHaveAttribute('data-tag-game-effect-active', await displayedEffect.getAttribute('data-tag-game-effect-active') ?? 'false');
 		const fieldEffectVisuals = holderMarker.locator('.tag-game-effect-visuals');
-		const effectName = running.effect === 'benefit' ? '祝福' : '呪い';
+		const effectName = running.effect === 'benefit' ? '福' : '鬼';
 		await expect(holderMarker.locator('.tag-game-holder-label')).toHaveCount(0);
 		await expect(fieldEffectVisuals).toHaveCount(1);
 		await expect(fieldEffectVisuals).toHaveAttribute('aria-label', `${effectName}${await displayedEffect.getAttribute('data-tag-game-effect-active') === 'true' ? '' : '・効果停止中'}`);
@@ -961,9 +1005,9 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 		await expect(participantPage.locator('[data-unified-status-hud]')).toHaveAttribute('data-saved-points', String((await tagGamePersistence(participantPage)).savedPoints));
 		await expect(participantPage.locator('[data-unified-status-hud]')).not.toHaveAttribute('data-tag-game-projection', 'true');
 		await Promise.all([openTagGameTerminal(hostPage), openTagGameTerminal(participantPage), openTagGameTerminal(participantTwoPage)]);
-		await expect(hostPage.getByText(/祝福\d+秒・呪い\d+秒/).first()).toBeVisible();
-		await expect(participantPage.getByText(/祝福\d+秒・呪い\d+秒/).first()).toBeVisible();
-		await expect(participantTwoPage.getByText(/祝福\d+秒・呪い\d+秒/).first()).toBeVisible();
+		await expect(hostPage.getByText(/福\d+秒・鬼\d+秒/).first()).toBeVisible();
+		await expect(participantPage.getByText(/福\d+秒・鬼\d+秒/).first()).toBeVisible();
+		await expect(participantTwoPage.getByText(/福\d+秒・鬼\d+秒/).first()).toBeVisible();
 		await expect(participantPage.locator('.results')).toContainText(resolveCharacterFromPubkey(hostPubkey)!.name);
 		await expect(participantPage.locator('.results')).toContainText('あなた');
 	} finally {
@@ -1749,7 +1793,7 @@ test('host silence is detected only while the local Relay connection is active',
 	await expect(holder).toHaveAttribute('data-tag-game-effect', 'calamity');
 	await expect(holder).toHaveAttribute('data-tag-game-effect-active', 'true');
 	const effectVisuals = holder.locator('.tag-game-effect-visuals');
-	await expect(effectVisuals).toHaveAttribute('aria-label', '呪い');
+	await expect(effectVisuals).toHaveAttribute('aria-label', '鬼');
 	await expect(holder.locator('.tag-game-holder-label')).toHaveCount(0);
 	await expect(effectVisuals.locator('.curse-outline')).toHaveCount(1);
 	await expect(effectVisuals.locator('.curse-shadow')).toHaveCount(1);
@@ -1772,7 +1816,7 @@ test('host silence is detected only while the local Relay connection is active',
 	const benefit = { ...active, revision: 1, updatedAt: startedAt + 1, effect: 'benefit' as const };
 	await injectRealtime(page, finalizeTagGameState(benefit, CHANNEL_ID, startedAt + 1, remoteHostSecret));
 	await expect(holder).toHaveAttribute('data-tag-game-effect', 'benefit');
-	await expect(effectVisuals).toHaveAttribute('aria-label', '祝福');
+	await expect(effectVisuals).toHaveAttribute('aria-label', '福');
 	await expect(effectVisuals.locator('.blessing-halo')).toHaveCount(1);
 	await expect(effectVisuals.locator('.blessing-orbit')).toHaveCount(1);
 	await expect(effectVisuals.locator('.blessing-star')).toHaveCount(4);
@@ -1793,7 +1837,7 @@ test('host silence is detected only while the local Relay connection is active',
 	await expect(page.locator('[data-tag-game-cooldown]')).toHaveText('効果停止中');
 	await expect(page.locator('[data-tag-game-leave]')).toBeVisible();
 	await expect(holder).toHaveAttribute('data-tag-game-effect-active', 'false');
-	const pausedEffectName = await holder.getAttribute('data-tag-game-effect') === 'benefit' ? '祝福' : '呪い';
+	const pausedEffectName = await holder.getAttribute('data-tag-game-effect') === 'benefit' ? '福' : '鬼';
 	await expect(effectVisuals).toHaveAttribute('aria-label', `${pausedEffectName}・効果停止中`);
 	const pausedVisualAnimations = await effectVisuals.evaluate((element) => [...element.querySelectorAll<SVGElement>('*')]
 		.map((child) => getComputedStyle(child).animationName).filter((name) => name !== 'none'));
