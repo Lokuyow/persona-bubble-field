@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expectIconCloseButton } from './helpers/iconCloseButton';
 import { HDKey } from '@scure/bip32';
 import { entropyToMnemonic, mnemonicToSeedSync } from '@scure/bip39';
 import { wordlist as englishWordlist } from '@scure/bip39/wordlists/english.js';
@@ -150,7 +151,9 @@ test.describe('Relay startup', () => {
 				await expect(page.locator('[data-cooperation-defection-communication-warning]')).toBeVisible();
 				await expect(page.locator('[data-cooperation-defection-round-result]')).toBeVisible();
 				await expect(page.getByRole('region', { name: 'ラウンド1の結果の詳細' })).toBeVisible();
-				await page.getByRole('button', { name: '結果の詳細を閉じる' }).click();
+				const closeButton = page.getByRole('button', { name: '結果の詳細を閉じる' });
+				await expectIconCloseButton(closeButton, '結果の詳細を閉じる');
+				await closeButton.click();
 				await expect(page.getByRole('region', { name: 'ラウンド1の結果の詳細' })).toHaveCount(0);
 				await page.getByRole('button', { name: '結果の詳細を見る' }).click();
 				await expect(page.getByRole('region', { name: 'ラウンド1の結果の詳細' })).toBeVisible();
@@ -248,7 +251,9 @@ test.describe('Relay startup', () => {
 			'失敗：必要な協力人数に達しない → 協力 0pt / 抜け駆け 寿命 −3日',
 			'不成立：有効選択が3人未満'
 		]);
-		await rulesDialog.getByRole('button', { name: '閉じる' }).click();
+		const closeButton = rulesDialog.getByRole('button', { name: '閉じる' });
+		await expectIconCloseButton(closeButton, '閉じる');
+		await closeButton.click();
 		await groupTrigger.click();
 		const farEvent = finalizeEvent(buildWorldStateEventTemplate({ channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: farPosition, slot: 0, createdAt: Math.floor((startTime + 3_000) / 1000) }), selfSecret);
 		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), farEvent);

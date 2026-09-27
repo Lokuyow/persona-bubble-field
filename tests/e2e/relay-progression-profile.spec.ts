@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expectIconCloseButton } from './helpers/iconCloseButton';
 import { HDKey } from '@scure/bip32';
 import { entropyToMnemonic, mnemonicToSeedSync } from '@scure/bip39';
 import { wordlist as englishWordlist } from '@scure/bip39/wordlists/english.js';
@@ -23,8 +24,63 @@ import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { installFieldFrameSampling, readFieldFrames, sampleRenderedField } from './helpers/fieldFrames';
 import { CHANNEL_ID, AUTHORITATIVE_RELAYS, fixtureSecret, testEvents, isDeathTraceEvent, installDelayedRelay, relayState, dragRelayJoystick, publishedMessages, waitForPublishedMessageCount, pauseAtCurrentBrowserTime, startSelectedRun, openReadyRelayWorld, openClearReadyWorld, installPromptApiStub, seedRelayAccount, readRelayGameState, overwriteRelayGameState, seedUnavailablePersona, installDeathTransitionFailure, armDeathTransitionFailure, moveRelaySelfTo } from './helpers/relayHarness';
 
+function rgbChannels(color: string): [number, number, number] {
+	const channels = color.match(/[\d.]+/g)?.map(Number);
+	if (!channels || channels.length < 3) throw new Error(`Unexpected CSS color: ${color}`);
+	return [channels[0]!, channels[1]!, channels[2]!];
+}
+
+function relativeLuminance(color: string): number {
+	const channels = rgbChannels(color).map((channel) => {
+		const normalized = channel / 255;
+		return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+	});
+	return 0.2126 * channels[0]! + 0.7152 * channels[1]! + 0.0722 * channels[2]!;
+}
+
+function contrastRatio(first: string, second: string): number {
+	const luminances = [relativeLuminance(first), relativeLuminance(second)].sort((left, right) => right - left);
+	return (luminances[0]! + 0.05) / (luminances[1]! + 0.05);
+}
+
+async function expectSharedProfileFocusRing(button: Locator): Promise<void> {
+	const focus = await button.evaluate((element) => {
+		const style = getComputedStyle(element);
+		const surface = getComputedStyle(element.closest('.clear-section')!).backgroundColor;
+		const tokenProbe = document.createElement('span');
+		tokenProbe.style.color = 'var(--action-focus-ring)';
+		document.body.append(tokenProbe);
+		const tokenColor = getComputedStyle(tokenProbe).color;
+		tokenProbe.remove();
+		return { matches: element.matches(':focus-visible'), outline: style.outlineStyle, width: style.outlineWidth, color: style.outlineColor, tokenColor, surface };
+	});
+	expect(focus.matches).toBe(true);
+	expect(focus.outline).toBe('solid');
+	expect(focus.width).toBe('3px');
+	expect(focus.color).toBe(focus.tokenColor);
+	expect(contrastRatio(focus.color, focus.surface)).toBeGreaterThanOrEqual(3);
+}
+
 
 test.describe('Relay startup', () => {
+	test('uses the shared focus ring on profile actions against their actual light surface', async ({ page }) => {
+		await page.setViewportSize({ width: 1_200, height: 900 });
+		await openClearReadyWorld(page);
+		const profileTrigger = page.getByRole('button', { name: '自分のプロフィールを開く' });
+		await profileTrigger.click();
+		const dialog = page.getByRole('dialog');
+		await expect(dialog.locator('[data-initial-focus]')).toBeFocused();
+
+		const info = dialog.getByRole('button', { name: '脱出するとどうなるかを見る' });
+		await page.keyboard.press('Tab');
+		await expect(info).toBeFocused();
+		await expectSharedProfileFocusRing(info);
+		const escape = dialog.getByRole('button', { name: '脱出', exact: true });
+		await expect(escape).toBeEnabled();
+		await page.keyboard.press('Tab');
+		await expect(escape).toBeFocused();
+		await expectSharedProfileFocusRing(escape);
+	});
 
 	test('opens the self profile from the ActionDock without adjustment-terminal proximity', async ({ page }) => {
 		await page.setViewportSize({ width: 1200, height: 900 });
@@ -32,7 +88,7 @@ test.describe('Relay startup', () => {
 
 		const profileTrigger = page.getByRole('button', { name: '自分のプロフィールを開く' });
 		await expect(profileTrigger).toBeVisible();
-		await expect(page.locator('.composer-controls .profile-trigger')).toHaveCount(1);
+		await expect(page.locator('.action-dock').getByRole('button', { name: '自分のプロフィールを開く' })).toHaveCount(1);
 		const avatarColors = await page.evaluate(() => {
 			const field = document.querySelector<HTMLElement>('.participant[data-self="true"] .avatar');
 			const dock = document.querySelector<HTMLElement>('.profile-trigger-character-avatar');
@@ -78,6 +134,7 @@ test.describe('Relay startup', () => {
 		await expect(dialog).toContainText('ハルシネーション抑制');
 		await expect(dialog).toContainText('Root Point');
 		await expect(dialog).toContainText('脱出');
+		await expect(dialog.getByRole('button', { name: '脱出', exact: true })).toHaveAttribute('data-action-intent', 'danger');
 		await expect(dialog).not.toContainText('Normal Clear');
 		const escapeTrigger = dialog.locator('.escape-info-trigger');
 		const escapeContent = page.locator('.escape-info-popover');
@@ -108,11 +165,27 @@ test.describe('Relay startup', () => {
 		await expect(dialog).not.toContainText('100,000 ptで現在の一生を終えます。未回収の作業ポイントは含まれません。');
 		await expect(dialog).toContainText('100,000 pt');
 		await expect(dialog.locator('.clear-progress-head[data-stat-icon="wallet"] > span > svg')).toHaveCount(1);
-		await expect(dialog.getByRole('button', { name: '脱出', exact: true })).toBeDisabled();
+		const disabledEscape = dialog.getByRole('button', { name: '脱出', exact: true });
+		await expect(disabledEscape).toBeDisabled();
+		const disabledEscapeColors = await disabledEscape.evaluate((button) => {
+			const disabled = getComputedStyle(button);
+			const probe = document.createElement('span');
+			probe.style.cssText = 'position:absolute;color:var(--action-disabled-foreground);background:var(--action-disabled-background);border:1px solid var(--action-disabled-border)';
+			button.closest('.clear-section')!.append(probe);
+			const genericDisabled = getComputedStyle(probe);
+			const result = { background: disabled.backgroundColor, foreground: disabled.color, border: disabled.borderColor, genericBackground: genericDisabled.backgroundColor, genericForeground: genericDisabled.color, genericBorder: genericDisabled.borderColor };
+			probe.remove();
+			return result;
+		});
+		expect(disabledEscapeColors.background).toBe(disabledEscapeColors.genericBackground);
+		expect(disabledEscapeColors.foreground).toBe(disabledEscapeColors.genericForeground);
+		expect(disabledEscapeColors.border).toBe(disabledEscapeColors.genericBorder);
 		await expect(dialog.getByText('clear不可: 所持ポイントが100,000pt未満です')).toHaveCount(0);
 		await expect(dialog.getByRole('button', { name: /へ強化/ })).toHaveCount(0);
 
-		await dialog.getByRole('button', { name: '閉じる', exact: true }).click();
+		const closeButton = dialog.getByRole('button', { name: '閉じる', exact: true });
+		await expectIconCloseButton(closeButton, '閉じる');
+		await closeButton.click();
 		await expect(dialog).toBeHidden();
 		await expect(profileTrigger).toBeFocused();
 
@@ -181,6 +254,7 @@ test.describe('Relay startup', () => {
 		expect(expandedMetrics).toEqual(metrics);
 		await dialog.getByRole('button', { name: '脱出', exact: true }).scrollIntoViewIfNeeded();
 		await expect(dialog.getByRole('button', { name: '脱出', exact: true })).toBeVisible();
+		await expectIconCloseButton(dialog.getByRole('button', { name: '閉じる' }), '閉じる');
 	});
 
 	test('places the ActionDock controls below the editor on mobile', async ({ page }) => {
@@ -188,21 +262,22 @@ test.describe('Relay startup', () => {
 		await openReadyRelayWorld(page);
 
 		const editor = page.locator('.composer-editor-slot');
-		const controls = page.locator('.composer-controls');
 		const profileTrigger = page.locator('.profile-trigger');
+		const soundButton = page.getByRole('button', { name: 'Open sound settings' });
 		const speechToggle = page.locator('.speech-type-toggle');
 		const editorBox = await editor.boundingBox();
-		const controlsBox = await controls.boundingBox();
 		const profileBox = await profileTrigger.boundingBox();
+		const soundBox = await soundButton.boundingBox();
 		const speechBox = await speechToggle.boundingBox();
 		expect(editorBox).not.toBeNull();
-		expect(controlsBox).not.toBeNull();
 		expect(profileBox).not.toBeNull();
+		expect(soundBox).not.toBeNull();
 		expect(speechBox).not.toBeNull();
-		expect(editorBox!.y + editorBox!.height).toBeLessThanOrEqual(controlsBox!.y + 1);
-		expect(profileBox!.y).toBeGreaterThanOrEqual(controlsBox!.y);
-		expect(speechBox!.y).toBeGreaterThanOrEqual(controlsBox!.y);
+		expect(editorBox!.y + editorBox!.height).toBeLessThanOrEqual(profileBox!.y + 1);
+		expect(editorBox!.y + editorBox!.height).toBeLessThanOrEqual(speechBox!.y + 1);
 		expect(Math.abs(profileBox!.y - speechBox!.y)).toBeLessThan(2);
+		expect(profileBox!.x + profileBox!.width).toBeLessThan(soundBox!.x);
+		expect(soundBox!.x + soundBox!.width).toBeLessThan(speechBox!.x);
 	});
 
 	test('shows overflow point and lifespan status after the Context cap', async ({ page }) => {
@@ -377,14 +452,14 @@ for (const stateKind of ['missing', 'corrupt'] as const) {
 		for (const viewport of [{ width: 1_200, height: 900 }, { width: 960, height: 900 }, { width: 390, height: 844 }, { width: 390, height: 480 }]) {
 			await page.setViewportSize(viewport);
 			const hudBox = await hud.boundingBox();
-			const topStackBox = await page.locator('[data-top-status-hud]').boundingBox();
-			const soundBox = await page.locator('[data-sound-control]').boundingBox();
-			expect(hudBox && topStackBox && soundBox).toBeTruthy();
-			if (hudBox && topStackBox && soundBox) {
+			const soundBox = await sound.boundingBox();
+			expect(hudBox && soundBox).toBeTruthy();
+			if (hudBox && soundBox) {
 				expect(hudBox.y).toBeLessThan(50);
-				expect(soundBox.y).toBeGreaterThanOrEqual(hudBox.y + hudBox.height);
-				expect(soundBox.x + soundBox.width).toBeGreaterThanOrEqual(hudBox.x + hudBox.width - 2);
-				expect(topStackBox.height).toBeGreaterThan(hudBox.height);
+				expect(soundBox.x).toBeGreaterThanOrEqual(0);
+				expect(soundBox.y).toBeGreaterThanOrEqual(0);
+				expect(soundBox.x + soundBox.width).toBeLessThanOrEqual(viewport.width);
+				expect(soundBox.y + soundBox.height).toBeLessThanOrEqual(viewport.height);
 			}
 			const meterRows = await hud.locator('.meter-row').evaluateAll((rows) => rows.map((row) => {
 				const box = (element: Element) => {
@@ -458,8 +533,10 @@ for (const stateKind of ['missing', 'corrupt'] as const) {
 			}
 			const chatterBox = await chatter.boundingBox();
 			expect(chatterBox).toBeTruthy();
-			if (topStackBox && chatterBox) {
-				expect(chatterBox.y).toBeGreaterThanOrEqual(topStackBox.y + topStackBox.height);
+			if (chatterBox) {
+				expect(chatterBox.x).toBeGreaterThanOrEqual(0);
+				expect(chatterBox.y).toBeGreaterThanOrEqual(0);
+				expect(chatterBox.x + chatterBox.width).toBeLessThanOrEqual(viewport.width);
 				expect(chatterBox.y + chatterBox.height).toBeLessThanOrEqual(viewport.height + 1);
 			}
 		}

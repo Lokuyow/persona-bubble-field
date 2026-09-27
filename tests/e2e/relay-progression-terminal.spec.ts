@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expectIconCloseButton } from './helpers/iconCloseButton';
 import { HDKey } from '@scure/bip32';
 import { entropyToMnemonic, mnemonicToSeedSync } from '@scure/bip39';
 import { wordlist as englishWordlist } from '@scure/bip39/wordlists/english.js';
@@ -105,15 +106,47 @@ test.describe('Relay startup', () => {
 		await expect(collectButton).toBeVisible();
 		await expect(collectButton).toHaveAttribute('data-action-variant', 'primary');
 		await expect(activeDialog.locator('[data-action-variant="primary"]')).toHaveCount(1);
+		await expect(activeDialog.getByRole('button', { name: '詳細を見る' })).toHaveAttribute('data-action-variant', 'tertiary');
+		const closeButton = activeDialog.getByRole('button', { name: '閉じる', exact: true });
+		await expectIconCloseButton(closeButton, '閉じる');
 		await expect(collectButton.locator('svg')).toHaveCount(1);
 		await expect(collectButton.locator('svg path')).toHaveAttribute('d', /^M4 20h16m-8-6V4/);
 		await expect(activeDialog.locator('.mending-success-feedback')).toHaveCount(0);
 		await expect(activeDialog.getByRole('button', { name: '成果を受け取る' })).toBeDisabled();
+		const disabledCollectStyle = await collectButton.evaluate((button) => ({
+			...(() => {
+				const style = getComputedStyle(button);
+				const dialog = button.closest('.mending-dialog-content')!;
+				const probe = document.createElement('span');
+				probe.style.cssText = 'position:absolute;background:var(--action-primary-disabled-background);border:1px solid var(--action-primary-disabled-border);color:var(--action-primary-disabled-foreground)';
+				dialog.append(probe);
+				const tokenStyle = getComputedStyle(probe);
+				const details = getComputedStyle(dialog.querySelector('.details-toggle')!);
+				const result = { background: style.backgroundColor, border: style.borderColor, foreground: style.color, tokenBackground: tokenStyle.backgroundColor, tokenBorder: tokenStyle.borderColor, tokenForeground: tokenStyle.color, tertiaryBackground: details.backgroundColor, tertiaryForeground: details.color };
+				probe.remove();
+				return result;
+			})()
+		}));
+		expect(disabledCollectStyle.background).toBe(disabledCollectStyle.tokenBackground);
+		expect(disabledCollectStyle.border).toBe(disabledCollectStyle.tokenBorder);
+		expect(disabledCollectStyle.foreground).toBe(disabledCollectStyle.tokenForeground);
+		expect(disabledCollectStyle.background).not.toBe(disabledCollectStyle.tertiaryBackground);
+		expect(disabledCollectStyle.foreground).not.toBe(disabledCollectStyle.tertiaryForeground);
 		const beforeZeroPointCollection = await publishedWorldStateCount();
 		await expect.poll(publishedWorldStateCount).toBe(beforeZeroPointCollection);
 		const originalViewport = page.viewportSize() ?? { width: 1280, height: 720 };
 		for (const [width, height, expectedColumns] of [[1280, 800, 2], [390, 640, 1]] as const) {
 			await page.setViewportSize({ width, height });
+			if (width === 390) await expectIconCloseButton(closeButton, '閉じる');
+			const visibleButtonStyles = await activeDialog.evaluate((dialog) => {
+				const collect = getComputedStyle(dialog.querySelector('.collect-button')!);
+				const neutral = getComputedStyle(dialog.querySelector('.details-toggle')!);
+				return { collectBackground: collect.backgroundColor, collectBorder: collect.borderColor, collectForeground: collect.color, neutralBackground: neutral.backgroundColor };
+			});
+			expect(visibleButtonStyles.collectBackground).toBe(disabledCollectStyle.background);
+			expect(visibleButtonStyles.collectBorder).toBe(disabledCollectStyle.border);
+			expect(visibleButtonStyles.collectForeground).toBe(disabledCollectStyle.foreground);
+			expect(visibleButtonStyles.collectBackground).not.toBe(visibleButtonStyles.neutralBackground);
 			const layout = await activeDialog.evaluate((dialog) => {
 				const cards = [...dialog.querySelectorAll<HTMLElement>('.result-card')];
 				const cardRects = cards.map((card) => card.getBoundingClientRect());
@@ -121,13 +154,13 @@ test.describe('Relay startup', () => {
 				const status = dialog.querySelector('.status-group')!.getBoundingClientRect();
 				const button = dialog.querySelector('.collect-button')!.getBoundingClientRect();
 				const details = dialog.querySelector('.details-section')!.getBoundingClientRect();
-				const close = dialog.querySelector('.terminal-secondary-action')!.getBoundingClientRect();
+				const close = dialog.querySelector('.action-button-close')!.getBoundingClientRect();
 				return {
 					columns: new Set(cardRects.map((rect) => Math.round(rect.left))).size,
 					cardsOverlap: cardRects[0].right > cardRects[1].left && cardRects[0].left < cardRects[1].right && cardRects[0].bottom > cardRects[1].top && cardRects[0].top < cardRects[1].bottom,
 					cardsSameHeight: Math.abs(cardRects[0].height - cardRects[1].height) < 1,
 					horizontalOverflow: dialog.scrollWidth > dialog.clientWidth || document.documentElement.scrollWidth > document.documentElement.clientWidth,
-					dialogOrder: resultList.bottom <= status.top && status.bottom <= button.top && button.bottom <= details.top && details.bottom <= close.top,
+					dialogOrder: close.top <= resultList.top && resultList.bottom <= status.top && status.bottom <= button.top && button.bottom <= details.top,
 					buttonFillsRow: Math.abs(button.width - resultList.width) < 1,
 					buttonHeight: button.height,
 					buttonWithinViewport: button.left >= 0 && button.right <= innerWidth
@@ -159,8 +192,7 @@ test.describe('Relay startup', () => {
 		}));
 		expect(detailLayout.horizontalOverflow).toBe(false);
 		expect(detailLayout.verticalOverflow).toBe(true);
-		await activeDialog.getByRole('button', { name: '閉じる', exact: true }).scrollIntoViewIfNeeded();
-		await expect(activeDialog.getByRole('button', { name: '閉じる', exact: true })).toBeVisible();
+		await expect(closeButton).toBeInViewport({ ratio: 1 });
 		await page.setViewportSize(originalViewport);
 		await expect(page.locator('[data-unified-status-hud] [data-mending-status]')).toHaveAttribute('aria-label', '作業中');
 		await expect(page.locator('[data-unified-status-hud] [data-mending-status]')).toHaveAttribute('data-mending-icon', 'tool');
@@ -203,7 +235,33 @@ test.describe('Relay startup', () => {
 		await expect(partialDialog.locator('.next-point[data-mending-icon="clock"] > svg')).toHaveCount(1);
 		await expect(partialDialog.locator('[data-mending-icon="coins"] .next-point')).toHaveCount(1);
 		await expect(partialDialog).toContainText('+1 pt');
-		await expect(partialDialog.getByRole('button', { name: '成果を受け取る' })).toBeEnabled();
+		const enabledCollect = partialDialog.getByRole('button', { name: '成果を受け取る' });
+		await expect(enabledCollect).toBeEnabled();
+		await expect(enabledCollect).toHaveAttribute('data-action-variant', 'primary');
+		const enabledCollectStyle = await enabledCollect.evaluate((button) => {
+			const dialog = button.closest('.mending-dialog-content')!;
+			const probe = document.createElement('span');
+			probe.style.cssText = 'position:absolute;background:var(--action-primary-background)';
+			dialog.append(probe);
+			const result = { background: getComputedStyle(button).backgroundColor, primaryBackground: getComputedStyle(probe).backgroundColor };
+			probe.remove();
+			return result;
+		});
+		expect(enabledCollectStyle.background).toBe(enabledCollectStyle.primaryBackground);
+		expect(enabledCollectStyle.background).not.toBe(disabledCollectStyle.background);
+		for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
+			await page.setViewportSize(viewport);
+			await page.mouse.move(viewport.width - 1, viewport.height - 1);
+			await expect.poll(() => enabledCollect.evaluate((button) => getComputedStyle(button).backgroundColor)).toBe(enabledCollectStyle.background);
+			await expect(enabledCollect).toBeVisible();
+			const enabledHitArea = await enabledCollect.evaluate((button) => {
+				const rect = button.getBoundingClientRect();
+				return { height: rect.height, background: getComputedStyle(button).backgroundColor };
+			});
+			expect(enabledHitArea.height).toBeGreaterThanOrEqual(44);
+			expect(enabledHitArea.background).toBe(enabledCollectStyle.background);
+		}
+		await page.setViewportSize({ width: 1280, height: 800 });
 		const beforeMendingReward = await publishedWorldStateCount();
 		await partialDialog.getByRole('button', { name: '成果を受け取る' }).click();
 		await expect.poll(async () => {
@@ -211,7 +269,25 @@ test.describe('Relay startup', () => {
 			return partialState.points === 1 && partialState.pointProgressTicks > 0 && partialState.pointProgressTicks < 60_000_000;
 		}).toBe(true);
 		await expect.poll(publishedWorldStateCount).toBeGreaterThan(beforeMendingReward);
-		await expect(page.locator('.mending-success-feedback')).toContainText('+1 pt');
+		const rewardFeedback = page.locator('.mending-success-feedback');
+		await expect(rewardFeedback).toContainText('+1 pt');
+		await expect(rewardFeedback).toContainText(/寿命 \+.+/);
+		const rewardFeedbackLayout = await rewardFeedback.evaluate((feedback) => {
+			const dialog = feedback.closest('.mending-dialog-content')!;
+			const header = dialog.querySelector('.terminal-dialog-header')!.getBoundingClientRect();
+			const points = dialog.querySelector('.owned-points')!.getBoundingClientRect();
+			const close = dialog.querySelector('.action-button-close')!.getBoundingClientRect();
+			const feedbackRect = feedback.getBoundingClientRect();
+			const overlaps = (first: DOMRect, second: DOMRect) => first.left < second.right && second.left < first.right && first.top < second.bottom && second.top < first.bottom;
+			return {
+				visible: getComputedStyle(feedback).visibility === 'visible' && feedbackRect.width > 0 && feedbackRect.height > 0,
+				insideViewport: feedbackRect.top >= 0 && feedbackRect.bottom <= innerHeight && feedbackRect.left >= 0 && feedbackRect.right <= innerWidth,
+				overlapsHeader: overlaps(feedbackRect, header),
+				overlapsPoints: overlaps(feedbackRect, points),
+				overlapsClose: overlaps(feedbackRect, close)
+			};
+		});
+		expect(rewardFeedbackLayout).toEqual({ visible: true, insideViewport: true, overlapsHeader: false, overlapsPoints: false, overlapsClose: false });
 		const hudPoints = page.locator('[data-unified-status-hud] [data-points-value]');
 		await expect(hudPoints).toHaveAttribute('data-value-change', 'increase');
 		await expect(hudPoints).toHaveCSS('color', 'rgb(87, 230, 138)');
@@ -297,7 +373,22 @@ test.describe('Relay startup', () => {
 		await adjustment.click();
 		const dialog = page.getByRole('dialog', { name: '能力強化' });
 		const upgradeButton = dialog.getByRole('button', { name: '推論効率をLv2へ強化（必要1pt）' });
-		await expect(upgradeButton).toBeFocused();
+		await expect(dialog.getByRole('heading', { name: '能力強化' })).toBeFocused();
+		const initialDialogScroll = await dialog.evaluate((element) => element.scrollTop);
+		expect(initialDialogScroll).toBe(0);
+		await expect(dialog.getByLabel('所持ポイント 10 pt')).toBeVisible();
+		const expectHeaderToStayReadable = async () => {
+			const overlaps = await dialog.evaluate((element) => {
+				const rect = (selector: string) => element.querySelector(selector)!.getBoundingClientRect();
+				const title = rect('.adjustment-dialog-title');
+				const points = rect('.points-display');
+				const close = rect('.action-button-close');
+				const intersects = (first: DOMRect, second: DOMRect) => first.left < second.right && second.left < first.right && first.top < second.bottom && second.top < first.bottom;
+				return { titlePoints: intersects(title, points), titleClose: intersects(title, close), pointsClose: intersects(points, close) };
+			});
+			expect(overlaps).toEqual({ titlePoints: false, titleClose: false, pointsClose: false });
+		};
+		await expectHeaderToStayReadable();
 		await expect(dialog.getByRole('tooltip')).toHaveCount(0);
 		await expect(dialog).toContainText('10 pt');
 		await expect(dialog).not.toContainText('POINT');
@@ -417,7 +508,30 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('[data-unified-status-hud] [data-points-value]')).toHaveText('9pt');
 		await expect(page.locator('[data-unified-status-hud] [data-points-meter]')).toHaveAttribute('aria-valuenow', '9');
 		await expect(dialog).toContainText('推論効率 Lv2');
-		await page.getByRole('button', { name: '閉じる', exact: true }).click();
+		await page.keyboard.press('Escape');
+		await expect(dialog).toHaveCount(0);
+		await expect(adjustment).toBeFocused();
+		await adjustment.click();
+		await expect(dialog.getByRole('heading', { name: '能力強化' })).toBeFocused();
+		await page.setViewportSize({ width: 390, height: 640 });
+		await expectHeaderToStayReadable();
+		const mobileAdjustmentScroll = await dialog.evaluate((element) => {
+			element.scrollTop = element.scrollHeight;
+			return { top: element.scrollTop, maximum: element.scrollHeight - element.clientHeight };
+		});
+		expect(mobileAdjustmentScroll.maximum).toBeGreaterThan(0);
+		expect(mobileAdjustmentScroll.top).toBe(mobileAdjustmentScroll.maximum);
+		const adjustmentClosePoint = await dialog.getByRole('button', { name: '閉じる', exact: true }).evaluate((button) => {
+			const rect = button.getBoundingClientRect();
+			const dialog = button.closest('.adjustment-dialog-content')!;
+			const dialogRect = dialog.getBoundingClientRect();
+			const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+			return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, inViewport: rect.top >= dialogRect.top && rect.bottom <= dialogRect.bottom && rect.left >= dialogRect.left && rect.right <= dialogRect.right, receivesPointer: Boolean(hit && button.contains(hit)) };
+		});
+		expect(adjustmentClosePoint.inViewport).toBe(true);
+		expect(adjustmentClosePoint.receivesPointer).toBe(true);
+		await page.mouse.click(adjustmentClosePoint.x, adjustmentClosePoint.y);
+		await expect(dialog).toHaveCount(0);
 		await expect(adjustment).toBeFocused();
 		await page.reload();
 		await expect.poll(() => readRelayGameState(page)).toMatchObject({ points: 9, abilities: { inferenceEfficiency: 2, contextCapacity: 1, hallucinationSuppression: 1 } });
@@ -451,9 +565,26 @@ test.describe('Relay startup', () => {
 		await expect(inference).toContainText('1.90');
 		await expect(inference).toContainText('+0.10 pt/分');
 		await expect(inference.locator('.upgrade-button')).toHaveText('必要 2pt');
-		await expect(dialog.locator('[data-action-variant="primary"]')).toHaveCount(0);
+		await expect(dialog.locator('[data-action-variant="primary"]')).toHaveCount(3);
 		await expect(dialog.locator('.upgrade-button')).toHaveCount(3);
-		await expect(dialog.locator('.upgrade-button[data-action-variant="secondary"]')).toHaveCount(3);
+		await expect(dialog.locator('.upgrade-button[data-action-variant="primary"]')).toHaveCount(3);
+		const viewportSize = page.viewportSize();
+		expect(viewportSize).not.toBeNull();
+		if (viewportSize) await page.mouse.move(viewportSize.width - 1, viewportSize.height - 1);
+		await expect.poll(async () => {
+			const colors = await dialog.locator('.upgrade-button').evaluateAll((buttons) => buttons.map((button) => getComputedStyle(button).backgroundColor));
+			return new Set(colors).size;
+		}).toBe(1);
+		for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
+			await page.setViewportSize(viewport);
+			await expectIconCloseButton(dialog.getByRole('button', { name: '閉じる' }), '閉じる');
+			for (const card of await dialog.locator('.ability-card').all()) {
+				const button = card.locator('.upgrade-button');
+				await expect(button).toBeEnabled();
+				await expect(button).toBeVisible();
+			}
+		}
+		await page.setViewportSize({ width: 1280, height: 800 });
 		await inference.getByRole('button', { name: '推論効率をLv11へ強化（必要2pt）' }).click();
 		await expect(inference).toContainText('2.00');
 		await expect(inference.locator('.upgrade-button')).toHaveText('必要 2pt');
@@ -463,6 +594,8 @@ test.describe('Relay startup', () => {
 		await expect(contextCapacity.locator('.delta-row strong')).toHaveText('+15分');
 		await expect(contextCapacity).not.toContainText('分 分');
 		await expect.poll(() => readRelayGameState(page)).toMatchObject({ points: 7, abilities: { inferenceEfficiency: 11, contextCapacity: 5 } });
+		await dialog.locator('.ability-card').nth(2).getByRole('button', { name: 'ハルシネーション抑制をLv2へ強化（必要1pt）' }).click();
+		await expect.poll(() => readRelayGameState(page)).toMatchObject({ points: 6, abilities: { inferenceEfficiency: 11, contextCapacity: 5, hallucinationSuppression: 2 } });
 	});
 
 	test('shows maxed abilities as unavailable at the adjustment terminal', async ({ page }) => {
@@ -493,10 +626,12 @@ test.describe('Relay startup', () => {
 		for (const label of ['推論効率', 'コンテキスト容量', 'ハルシネーション抑制']) {
 			const button = dialog.getByRole('button', { name: `${label}は最大Lvです` });
 			await expect(button).toBeDisabled();
+			await expect(button).toHaveAttribute('data-action-variant', 'primary');
 			await expect(button).toHaveAttribute('aria-label', `${label}は最大Lvです`);
 			await expect(button).toHaveText('最大Lv');
 			await expect(button.locator('svg')).toHaveCount(0);
 		}
+		await expect(dialog.locator('.upgrade-button[data-action-variant="primary"]')).toHaveCount(3);
 	});
 
 	test('disables ability upgrades when the required points are unavailable', async ({ page }) => {
@@ -521,9 +656,56 @@ test.describe('Relay startup', () => {
 		const inference = dialog.locator('.ability-card').first();
 		const upgradeButton = inference.getByRole('button', { name: '推論効率をLv2へ強化（必要1pt、ポイント不足）' });
 		await expect(upgradeButton).toBeDisabled();
+		await expect(upgradeButton).toHaveAttribute('data-action-variant', 'primary');
 		expect(await upgradeButton.getAttribute('aria-describedby')).toBeNull();
 		await expect(upgradeButton).toHaveText('必要 1pt');
 		await expect(upgradeButton.locator('svg')).toHaveCount(1);
+	});
+
+	test('keeps ability choices primary as availability changes and disables them during an upgrade', async ({ page }) => {
+		const startTime = Date.now();
+		const secret = fixtureSecret(19);
+		const pubkey = getPublicKey(secret);
+		await page.clock.install({ time: startTime });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { primaryEvents: testEvents(startTime) });
+		await seedRelayAccount(page, secret, pubkey, startTime + 7 * 24 * 60 * 60 * 1000, 1, { inferenceEfficiency: 10, contextCapacity: 1, hallucinationSuppression: 1 });
+		await page.goto('/');
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
+		const nearby = finalizeEvent(buildWorldStateEventTemplate({
+			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 13, y: 3 }, slot: 1,
+			createdAt: Math.floor(await page.evaluate(() => Date.now()) / 1000)
+		}), secret);
+		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), nearby);
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '13,3');
+		await page.getByRole('button', { name: '能力強化端末' }).click();
+		const dialog = page.getByRole('dialog', { name: '能力強化' });
+		await expectIconCloseButton(dialog.getByRole('button', { name: '閉じる' }), '閉じる');
+		const upgrades = dialog.locator('.upgrade-button');
+		await expect(upgrades).toHaveCount(3);
+		await expect(dialog.locator('.upgrade-button[data-action-variant="primary"]')).toHaveCount(3);
+		await expect(dialog.getByRole('button', { name: '推論効率をLv11へ強化（必要2pt、ポイント不足）' })).toBeDisabled();
+		const contextUpgrade = dialog.getByRole('button', { name: 'コンテキスト容量をLv2へ強化（必要1pt）' });
+		const halluUpgrade = dialog.getByRole('button', { name: 'ハルシネーション抑制をLv2へ強化（必要1pt）' });
+		await expect(contextUpgrade).toBeEnabled();
+		await expect(halluUpgrade).toBeEnabled();
+		for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
+			await page.setViewportSize(viewport);
+			await expect(upgrades).toHaveCount(3);
+			for (const button of await upgrades.all()) await expect(button).toBeVisible();
+		}
+		await page.setViewportSize({ width: 1280, height: 800 });
+		await contextUpgrade.click();
+		await expect(dialog.getByRole('button', { name: /強化処理中/ })).toHaveCount(3);
+		for (const button of await upgrades.all()) {
+			await expect(button).toBeDisabled();
+			await expect(button).toHaveAttribute('data-action-variant', 'primary');
+		}
+		await expect.poll(() => readRelayGameState(page)).toMatchObject({ points: 0, abilities: { contextCapacity: 2 } });
+		await expect(dialog.getByRole('button', { name: '推論効率をLv11へ強化（必要2pt、ポイント不足）' })).toBeDisabled();
+		await expect(dialog.getByRole('button', { name: 'コンテキスト容量をLv3へ強化（必要1pt、ポイント不足）' })).toBeDisabled();
+		await expect(dialog.getByRole('button', { name: 'ハルシネーション抑制をLv2へ強化（必要1pt、ポイント不足）' })).toBeDisabled();
 	});
 
 	test('routes self around fixed terminals and active participants', async ({ page }) => {

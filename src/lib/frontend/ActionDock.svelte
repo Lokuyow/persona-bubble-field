@@ -7,6 +7,7 @@
 	import HostOwnedComposerLite from '$lib/HostOwnedComposerLite.svelte';
 	import CharacterAvatar from '$lib/CharacterAvatar.svelte';
 	import SpeechSuggestions from '$lib/frontend/SpeechSuggestions.svelte';
+	import SoundControl from '$lib/frontend/SoundControl.svelte';
 	import type { SpeechType } from '$lib/conversation';
 	import type { Character } from '$lib/character';
 	import type { BubbleTone } from '$lib/bubblePresentation';
@@ -16,6 +17,9 @@
 	type Props = ComponentProps<typeof HostOwnedComposerLite> & {
 		selectedSpeechType: SpeechType;
 		submissionInProgress: boolean;
+		volume: number;
+		onSoundOpen: () => void;
+		onVolume: (volume: number) => void;
 		hasUnreadReplies: boolean;
 		character: Character;
 		avatarTone: BubbleTone;
@@ -27,7 +31,7 @@
 		onOpenSelfProfile: (trigger: HTMLButtonElement) => void;
 		submitCandidate: (content: string, signal: AbortSignal) => Promise<Readonly<{ eventId: string }>>;
 	};
-	let { selectedSpeechType, submissionInProgress, onSpeechTypeChange, onOpenSelfProfile, submitContent, submitCandidate,
+	let { selectedSpeechType, submissionInProgress, volume, onSoundOpen, onVolume, onSpeechTypeChange, onOpenSelfProfile, submitContent, submitCandidate,
 		desiredContext, loadPreview, onPreviewClear, onEditorEmptyChange, onPreferredHeightChange,
 		 hasUnreadReplies, character, avatarTone, suggestionConversation, canOpenSelfProfile, chatterOpen, onToggleChatter }: Props = $props();
 	let composerComponent: { focusEditor(): boolean; blurEditor(): boolean; applyContentIfEmpty(content: string): Promise<boolean> } | null = null;
@@ -71,7 +75,7 @@
 	<div class="action-dock" aria-label="主要操作">
 	<div class="action-dock-content">
 		<Tooltip.Provider delayDuration={400} skipDelayDuration={100} disableHoverableContent>
-		<div class="composer-controls">
+		<div class="composer-controls-left">
 		{#if canOpenSelfProfile}
 		<Tooltip.Root>
 			<Tooltip.Trigger>
@@ -130,6 +134,9 @@
 				</Tooltip.Portal>
 			</Tooltip.Root>
 		{/if}
+		<SoundControl {volume} onOpen={onSoundOpen} onVolume={onVolume} />
+		</div>
+		<div class="composer-controls-right">
 		<Tooltip.Root>
 			<Tooltip.Trigger>
 				{#snippet child({ props })}
@@ -207,18 +214,22 @@
 		width: min(720px, 100%);
 		height: 100%;
 		align-items: stretch;
-		gap: 4px;
+		gap: 12px;
 		margin: 0 auto;
 		min-width: 0;
 	}
 
-	.profile-trigger { flex: 0 0 54px; width: 54px; min-width: 44px; min-height: 44px; height: 54px; padding: 3px; border: 1px solid rgba(57, 67, 64, 0.2); border-radius: 12px; background: rgba(255, 255, 255, 0.86); box-shadow: 0 5px 12px rgba(58, 70, 61, 0.1); cursor: pointer; overflow: hidden; }
+	.profile-trigger { flex: 0 0 54px; width: 54px; min-width: 44px; min-height: 44px; height: 54px; padding: 3px; border: 1px solid var(--action-icon-border); border-radius: 12px; background: var(--action-icon-background); box-shadow: 0 5px 12px rgba(58, 70, 61, 0.1); cursor: pointer; overflow: hidden; }
 	.profile-trigger-avatar { display: block; position: relative; width: 100%; height: 100%; overflow: hidden; border-radius: 8px; background: transparent; }
 	:global(.profile-trigger-character-avatar) { position: absolute; inset: 0; width: 100%; height: 100%; border: 2px solid rgba(255, 255, 255, 0.88); border-radius: 42% 58% 48% 52%; box-shadow: 0 5px 10px rgba(58, 70, 61, 0.16); transform: none; }
 	:global(.profile-trigger-character-avatar img) { display: block; width: 100%; height: 100%; object-fit: contain; object-position: center; transform: scale(1.12); transform-origin: center; }
 	:global(.action-dock-tooltip) { z-index: 30; padding: 5px 8px; border: 1px solid rgba(82, 77, 68, 0.24); border-radius: 6px; background: rgba(50, 56, 52, 0.96); color: #fffdf2; font-size: 11px; font-weight: 700; line-height: 1.2; white-space: nowrap; }
 	.profile-trigger:focus-visible { outline: 3px solid var(--color-focus-ring); outline-offset: 2px; }
-	.composer-controls { display: contents; }
+	.composer-controls-left, .composer-controls-right { display: flex; align-items: center; gap: 8px; min-width: 0; }
+	.composer-controls-left { grid-column: 1; }
+	.composer-controls-right { grid-column: 3; }
+	.composer-editor-slot { grid-column: 2; }
+	.composer-controls-right :global(.suggestions-anchor) { height: 54px; }
 	.chatter-toggle {
 		display: inline-flex;
 		align-items: center;
@@ -227,14 +238,16 @@
 		min-width: 44px;
 		min-height: 44px;
 		padding: 0;
-		border: 1px solid rgba(57, 67, 64, 0.2);
+		border: 1px solid var(--action-icon-border);
 		border-radius: 12px;
-		background: rgba(255, 255, 255, 0.86);
+		background: var(--action-icon-background);
 		box-shadow: 0 5px 12px rgba(58, 70, 61, 0.1);
-		color: #3f4a47;
+		color: var(--action-icon-foreground);
 		font-weight: 800;
 		cursor: pointer;
 	}
+	.profile-trigger:hover, .chatter-toggle:hover, .speech-type-toggle:hover:not(:disabled) { background: var(--action-icon-background-hover); }
+	.profile-trigger:active, .chatter-toggle:active, .speech-type-toggle:active:not(:disabled) { background: var(--action-icon-background-active); }
 	.chatter-toggle-icon { display: inline-flex; width: 24px; height: 24px; align-items: center; justify-content: center; }
 	.chatter-toggle-icon :global(svg) { width: 24px; height: 24px; }
 	.chatter-toggle:focus-visible { outline: 3px solid var(--color-focus-ring); outline-offset: 2px; }
@@ -247,11 +260,11 @@
 		align-items: center;
 		justify-content: center;
 		padding: 0 4px;
-		border: 1px solid rgba(57, 67, 64, 0.2);
+		border: 1px solid var(--action-icon-border);
 		border-radius: 12px;
-		background: rgba(255, 255, 255, 0.86);
+		background: var(--action-icon-background);
 		box-shadow: 0 5px 12px rgba(58, 70, 61, 0.1);
-		color: #3f4a47;
+		color: var(--action-icon-foreground);
 		font-size: 10px;
 		font-weight: 800;
 		line-height: 1.15;
@@ -277,13 +290,15 @@
 		min-width: 0;
 		min-height: 0;
 		padding: 0;
-		border: 1px solid rgba(169, 93, 73, 0.46);
+		border: 1px solid var(--action-notification-border);
 		border-radius: 10px;
-		background: rgba(255, 244, 232, 0.94);
-		color: #b45c48;
+		background: var(--action-notification-background);
+		color: var(--action-notification-foreground);
 		font-size: 14px;
 		cursor: pointer;
 	}
+	.trace-unread-indicator:hover { background: var(--action-notification-background-hover); }
+	.trace-unread-indicator:active { background: var(--action-notification-background-active); }
 
 	.trace-unread-explanation {
 		position: absolute;
@@ -303,12 +318,18 @@
 	}
 
 	.speech-type-toggle:hover:not(:disabled) {
-		background: rgba(255, 255, 255, 0.98);
+		background: var(--action-icon-background-hover);
+	}
+
+	.speech-type-toggle:active:not(:disabled) {
+		background: var(--action-icon-background-active);
 	}
 
 	.speech-type-toggle:disabled {
 		cursor: wait;
-		opacity: 0.58;
+		border-color: var(--action-disabled-border);
+		background: var(--action-disabled-background);
+		color: var(--action-disabled-foreground);
 	}
 
 	.speech-type-toggle:focus-visible {
@@ -329,13 +350,22 @@
 	}
 
 	@media (max-width: 700px) {
-		.action-dock-content { display: grid; grid-template-rows: minmax(0, 1fr) 46px; gap: 8px; }
-		.composer-editor-slot { grid-row: 1; }
-		.composer-controls { display: flex; grid-row: 2; gap: 8px; align-items: stretch; min-width: 0; }
-		.composer-controls .profile-trigger { order: 1; flex-basis: 46px; width: 46px; height: 46px; }
-		.composer-controls .chatter-toggle { order: 2; flex-basis: 46px; }
-		.composer-controls .trace-unread-indicator { order: 3; flex-basis: 38px; }
-		.composer-controls .speech-type-toggle { order: 4; flex-basis: 46px; }
-		.composer-controls :global(.suggestions-anchor) { order: 5; flex-basis: 46px; }
+		.action-dock-content { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 46px; column-gap: 0; row-gap: 8px; }
+		.composer-editor-slot { grid-column: 1 / -1; grid-row: 1; }
+		.composer-controls-left, .composer-controls-right { grid-row: 2; gap: 6px; }
+		.composer-controls-left { grid-column: 1; justify-self: start; }
+		.composer-controls-right { grid-column: 2; justify-self: end; }
+		.composer-controls-left .profile-trigger { flex-basis: 40px; width: 40px; height: 42px; }
+		.composer-controls-left .chatter-toggle { flex-basis: 40px; }
+		.composer-controls-left .trace-unread-indicator { flex-basis: 38px; }
+		.composer-controls-left :global(.sound-control) { margin: 0; }
+		.composer-controls-right .speech-type-toggle, .composer-controls-right :global(.suggestions-anchor) { flex-basis: 46px; height: 46px; }
+	}
+	@media (min-width: 701px) {
+		.action-dock-content { --action-dock-desktop-control-size: 54px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: minmax(var(--action-dock-desktop-control-size), 1fr); }
+		.composer-controls-left, .composer-editor-slot, .composer-controls-right { grid-row: 1; }
+		.composer-controls-left, .composer-controls-right { align-self: center; }
+		.profile-trigger, .chatter-toggle, .speech-type-toggle, .composer-controls-right :global(.suggestions-anchor) { width: var(--action-dock-desktop-control-size); height: var(--action-dock-desktop-control-size); }
+		.profile-trigger, .chatter-toggle, .speech-type-toggle { flex-basis: var(--action-dock-desktop-control-size); }
 	}
 </style>

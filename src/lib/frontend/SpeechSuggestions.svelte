@@ -3,6 +3,7 @@
 	import Sparkles2 from '~icons/tabler/sparkles-2';
 	import { Tooltip } from 'bits-ui';
 	import { onMount } from 'svelte';
+	import ActionButton from '$lib/ActionButton.svelte';
 	import type { Character } from '$lib/character';
 	import type { SpeechType } from '$lib/conversation';
 	import {
@@ -28,7 +29,7 @@
 	let progress = $state(0);
 	let generating = $state(false);
 	let panelOpen = $state(false);
-	let error = $state<string | null>(null);
+	let error = $state<Readonly<{ kind: 'generation' | 'operation'; message: string }> | null>(null);
 	let abortController: AbortController | null = null;
 	let directSubmitController: AbortController | null = null;
 	let sendingCandidate = $state<string | null>(null);
@@ -37,9 +38,12 @@
 	let busy = $derived(generating || submissionInProgress || sendingCandidate !== null || addingCandidate !== null);
 
 	$effect(() => {
-		if (editorIsEmpty !== true && candidates.length > 0) {
-			candidates = [];
-			panelOpen = false;
+		if (editorIsEmpty !== true) {
+			if (error?.kind === 'operation') error = null;
+			if (candidates.length > 0) {
+				candidates = [];
+				panelOpen = false;
+			}
 		}
 	});
 
@@ -71,7 +75,7 @@
 			panelOpen = true;
 		} catch (cause) {
 			if (!(cause instanceof DOMException && cause.name === 'AbortError')) {
-				error = '候補を生成できませんでした。もう一度お試しください。';
+				error = { kind: 'generation', message: '候補を生成できませんでした。もう一度お試しください。' };
 				const current = await service.availability().catch(() => 'unsupported' as const);
 				availability = current;
 			}
@@ -87,14 +91,14 @@
 		try {
 			const applied = await applyContentIfEmpty(candidate);
 			if (!applied) {
-				error = '本文が入力されているため候補を追加できません。';
+				error = { kind: 'operation', message: '本文が入力されているため候補を追加できません。' };
 				return;
 			}
 			candidates = [];
 			panelOpen = false;
 			error = null;
 		} catch {
-			error = '候補をコンポーザーに追加できませんでした。';
+			error = { kind: 'operation', message: '候補をコンポーザーに追加できませんでした。' };
 		} finally {
 			addingCandidate = null;
 		}
@@ -112,12 +116,17 @@
 			error = null;
 		} catch (cause) {
 			if (!(cause instanceof DOMException && cause.name === 'AbortError')) {
-				error = '候補を送信できませんでした。もう一度お試しください。';
+				error = { kind: 'operation', message: '候補を送信できませんでした。もう一度お試しください。' };
 			}
 		} finally {
 			sendingCandidate = null;
 			directSubmitController = null;
 		}
+	}
+
+	function closePanel(): void {
+		panelOpen = false;
+		if (error?.kind === 'operation') error = null;
 	}
 
 	onMount(() => {
@@ -162,14 +171,18 @@
 			<div class="suggestion-panel" aria-label="発言候補">
 				<div class="suggestion-header">
 					<p class="suggestion-heading">発言候補</p>
-					<button
-						class="suggestion-close"
+					<ActionButton
+						variant="tertiary"
+						class="suggestion-close action-button-close"
 						type="button"
 						aria-label="発言候補を閉じる"
 						title="発言候補を閉じる"
-						onclick={() => { panelOpen = false; }}
-					><X aria-hidden="true" /></button>
+						onclick={closePanel}
+					><X aria-hidden="true" /></ActionButton>
 				</div>
+				{#if error?.kind === 'operation'}
+					<p class="suggestion-status suggestion-error" role="status">{error.message}</p>
+				{/if}
 				{#each candidates as candidate, index}
 					<div class="suggestion-item">
 						<button
@@ -183,14 +196,15 @@
 							<span class="suggestion-index" aria-hidden="true">{index + 1}</span>
 							<span class="suggestion-content">{candidate}</span>
 						</button>
-						<button
+						<ActionButton
+							variant="secondary"
 							class="suggestion-secondary"
 							type="button"
 							disabled={busy || editorIsEmpty !== true}
 							aria-label={`候補${index + 1}をコンポーザーに追加`}
 							title="コンポーザーに追加"
 							onclick={() => void addCandidate(candidate)}
-						>追加</button>
+						>追加</ActionButton>
 					</div>
 				{/each}
 			</div>
@@ -199,8 +213,8 @@
 			<p class="suggestion-status" role="status">{availabilityLabel(availability)}</p>
 		{:else if generating}
 			<p class="suggestion-status" role="status">候補を生成中…</p>
-		{:else if error}
-			<p class="suggestion-status suggestion-error" role="status">{error}</p>
+		{:else if error?.kind === 'generation' && !(panelOpen && candidates.length > 0)}
+			<p class="suggestion-status suggestion-error" role="status">{error.message}</p>
 		{/if}
 	</div>
 {/if}
@@ -221,11 +235,11 @@
 		height: 100%;
 		min-height: 0;
 		padding: 0;
-		border: 1px solid rgba(57, 67, 64, 0.2);
+		border: 1px solid var(--action-icon-border);
 		border-radius: 12px;
-		background: rgba(255, 255, 255, 0.86);
+		background: var(--action-icon-background);
 		box-shadow: 0 5px 12px rgba(58, 70, 61, 0.1);
-		color: #3f4a47;
+		color: var(--action-icon-foreground);
 		font-size: 10px;
 		font-weight: 800;
 		line-height: 1.15;
@@ -233,14 +247,17 @@
 	.suggestions-tooltip-trigger { display: block; width: 100%; height: 100%; }
 	.suggestions-toggle-icon { display: inline-flex; width: 24px; height: 24px; align-items: center; justify-content: center; }
 	.suggestions-toggle-icon :global(svg) { width: 24px; height: 24px; }
+	.suggestions-toggle:hover:not(:disabled) { background: var(--action-icon-background-hover); }
+	.suggestions-toggle:active:not(:disabled) { background: var(--action-icon-background-active); }
 
-	.suggestions-toggle:disabled { cursor: wait; opacity: 0.58; }
+	.suggestions-toggle:disabled { border-color: var(--action-disabled-border); background: var(--action-disabled-background); color: var(--action-disabled-foreground); cursor: wait; }
 	.suggestions-toggle:focus-visible { outline: 3px solid var(--color-focus-ring); outline-offset: 2px; }
 
 	.suggestion-panel {
 		position: absolute;
 		bottom: calc(100% + 8px);
-		left: 0;
+		left: auto;
+		right: 0;
 		z-index: 2;
 		display: grid;
 		width: min(420px, calc(100vw - 32px));
@@ -254,22 +271,11 @@
 
 	.suggestion-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 	.suggestion-heading { margin: 0 2px 2px; color: #59635e; font-size: 11px; font-weight: 800; }
-	.suggestion-close {
-		flex: 0 0 44px;
-		width: 44px;
-		height: 44px;
-		padding: 0;
-		border: 0;
-		border-radius: 0;
-		background: transparent;
-		color: #59635e;
+	.suggestion-panel :global(.suggestion-close) {
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
 	}
-	.suggestion-close :global(svg) { width: 24px; height: 24px; }
-	.suggestion-close:hover { background: transparent; }
-	.suggestion-close:focus-visible { outline: 3px solid var(--color-focus-ring); outline-offset: 1px; }
 	.suggestion-item {
 		display: grid;
 		grid-template-columns: minmax(0, 1fr) auto;
@@ -297,25 +303,21 @@
 	.suggestion-secondary:disabled { cursor: not-allowed; opacity: 0.58; }
 	.suggestion-primary:focus-visible,
 	.suggestion-secondary:focus-visible { outline: 3px solid var(--color-focus-ring); outline-offset: 1px; }
-	.suggestion-secondary {
+	.suggestion-panel :global(.suggestion-secondary) {
 		align-self: stretch;
 		min-width: 48px;
 		padding: 6px 8px;
-		border: 1px solid rgba(57, 67, 64, 0.2);
-		border-radius: 8px;
-		background: rgba(245, 241, 233, 0.9);
-		color: #59635e;
 		font: inherit;
 		font-size: 11px;
 		font-weight: 800;
 	}
-	.suggestion-secondary:hover:not(:disabled) { background: #e9f0e7; }
 	.suggestion-content { min-width: 0; overflow-wrap: anywhere; }
 	.suggestion-index { flex: 0 0 18px; color: #728379; font-weight: 800; text-align: center; }
 	.suggestion-status {
 		position: absolute;
 		bottom: calc(100% + 8px);
-		left: 0;
+		left: auto;
+		right: 0;
 		width: max-content;
 		max-width: min(300px, calc(100vw - 32px));
 		margin: 0;
@@ -326,5 +328,16 @@
 		font-size: 11px;
 		font-weight: 700;
 	}
-	.suggestion-error { background: rgba(141, 72, 58, 0.94); }
+	.suggestion-panel > .suggestion-error {
+		position: static;
+		width: auto;
+		max-width: 100%;
+		box-sizing: border-box;
+		background: rgba(141, 72, 58, 0.94);
+	}
+	@media (max-width: 700px) {
+		.suggestions-anchor { position: static; }
+		.suggestion-panel { right: 16px; left: auto; }
+		.suggestion-status { right: 16px; left: auto; }
+	}
 </style>

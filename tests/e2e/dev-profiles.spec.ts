@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expectIconCloseButton } from './helpers/iconCloseButton';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { installFieldFrameSampling, sampleRenderedField } from './helpers/fieldFrames';
 import { openDevWorld, openClockedDevWorld, profileTrigger, profileDialog, expectProfile, openProfile, profileTriggerCenter } from './helpers/devWorldHarness';
@@ -84,7 +85,9 @@ test.describe('DEV World Sandbox', () => {
 			await openProfile(page, '女の子');
 
 			if (closePath === 'close button') {
-				await profileDialog(page).getByRole('button', { name: '閉じる' }).click();
+				const closeButton = profileDialog(page).getByRole('button', { name: '閉じる' });
+				await expectIconCloseButton(closeButton, '閉じる');
+				await closeButton.click();
 			} else if (closePath === 'Escape') {
 				await page.keyboard.press('Escape');
 			} else {
@@ -145,6 +148,7 @@ test.describe('DEV World Sandbox', () => {
 		expect(await viewport.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
 
 		const closeButton = dialog.getByRole('button', { name: '閉じる' });
+		await expectIconCloseButton(closeButton, '閉じる');
 		await expect(closeButton).toBeInViewport({ ratio: 1 });
 		const closeBox = await closeButton.boundingBox();
 		const viewportSize = page.viewportSize();
