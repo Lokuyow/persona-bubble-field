@@ -216,7 +216,7 @@ function createAudioTestGame(selfPubkey: string, hostPubkey: string, startAt: nu
 	const countdown: TagGameState = { gameId, hostPubkey, phase: 'countdown', revision: 0, updatedAt: startAt - 1, proposalId,
 		startAt, participant, settledAtMs: (startAt - 1) * 1_000 };
 	const running: TagGameState = { ...countdown, phase: 'running', revision: 1, updatedAt: startAt, startedAt: startAt,
-		endsAt: startAt + 180, seed, ownerPubkey: selfPubkey, effect: 'benefit', transferAt: startAt * 1_000,
+		endsAt: startAt + 120, seed, ownerPubkey: selfPubkey, effect: 'benefit', transferAt: startAt * 1_000,
 		lastHolderResponseAtMs: startAt * 1_000, participant: participant.map((member) => ({ ...member, status: 'active' as const })),
 		settledAtMs: startAt * 1_000 };
 	return { gameId, participant, countdown, running };
@@ -240,7 +240,7 @@ async function injectSelfOwnedProjection(page: Page, secret: Uint8Array, effect:
 	const startedAt = Math.floor(nowMs / 1_000);
 	const gameId = `${pubkey}:${startedAt}:${effect === 'benefit' ? 'a'.repeat(64) : 'b'.repeat(64)}`;
 	const state: TagGameState = {
-		gameId, hostPubkey: pubkey, phase: 'running', revision: 0, updatedAt: startedAt, startedAt, endsAt: startedAt + 180,
+		gameId, hostPubkey: pubkey, phase: 'running', revision: 0, updatedAt: startedAt, startedAt, endsAt: startedAt + 120,
 		seed, ownerPubkey: pubkey, effect, transferAt: nowMs, lastHolderResponseAtMs: nowMs,
 		participant: [{ pubkey, runNumber: 1, registeredAt: startedAt, status: 'active', points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 }],
 		settledAtMs: nowMs
@@ -262,7 +262,7 @@ async function seedTagGameRunLock(page: Page, gameId: string, startedAtMs: numbe
 				const player = request.result;
 				const run = player.mode.activeRun;
 				const scope = { gameId: id, identity: run.identity, runNumber: run.runNumber };
-				const endsAtMs = start + 180_000;
+				const endsAtMs = start + 120_000;
 				store.put({ ...player, tagGame: { reservation: scope, lock: { ...scope, startedAtMs: start, endsAtMs, finalDeadlineMs: endsAtMs + 30_000, phase: 'running', points: 0, lifespanLossMs: 0 } } }, 'player-lifecycle');
 			};
 			transaction.oncomplete = () => { database.close(); resolve(); };
@@ -397,7 +397,7 @@ test('plays tag-game start, scheduled switch, confirmed transfer, and end cues f
 		startAt, participant, settledAtMs: (startAt - 1) * 1_000 };
 	await injectRealtime(page, finalizeTagGameState(countdown, CHANNEL_ID, startAt - 1, hostSecret));
 	await page.clock.setSystemTime(startAt * 1_000);
-	const running: TagGameState = { ...countdown, phase: 'running', revision: 1, updatedAt: startAt, startedAt: startAt, endsAt: startAt + 180,
+	const running: TagGameState = { ...countdown, phase: 'running', revision: 1, updatedAt: startAt, startedAt: startAt, endsAt: startAt + 120,
 		seed, ownerPubkey: selfPubkey, effect: 'benefit', transferAt: startAt * 1_000, lastHolderResponseAtMs: startAt * 1_000,
 		participant: participant.map((member) => ({ ...member, status: 'active' as const })), settledAtMs: startAt * 1_000 };
 	await injectRealtime(page, finalizeTagGameState(running, CHANNEL_ID, startAt, hostSecret));
@@ -433,7 +433,7 @@ test('plays tag-game start, scheduled switch, confirmed transfer, and end cues f
 	const restoredGameId = `${hostPubkey}:${restoredStartAt}:${'f'.repeat(64)}`;
 	await page.clock.setSystemTime(restoredStartAt * 1_000);
 	const restoredRunning: TagGameState = { ...running, gameId: restoredGameId, revision: 0, updatedAt: restoredStartAt,
-		startedAt: restoredStartAt, endsAt: restoredStartAt + 180, transferAt: restoredStartAt * 1_000,
+		startedAt: restoredStartAt, endsAt: restoredStartAt + 120, transferAt: restoredStartAt * 1_000,
 		lastHolderResponseAtMs: restoredStartAt * 1_000, settledAtMs: restoredStartAt * 1_000 };
 	await injectRealtime(page, finalizeTagGameState(restoredRunning, CHANNEL_ID, restoredStartAt, hostSecret));
 	await expect.poll(async () => (await recordedTagGameSounds(page)).filter((duration) => Math.abs(duration - 0.52) < 0.001)).toHaveLength(2);
@@ -710,7 +710,7 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 		const participantHudHolder = running.ownerPubkey === participantPubkey ? 'あなた' : resolveCharacterFromPubkey(running.ownerPubkey!)!.name;
 		await expect(participantPage.locator('[data-tag-game-hud]')).toContainText(participantHudHolder);
 		await expect(participantPage.locator('[data-tag-game-hud] [data-tag-game-effect]')).toHaveAttribute('data-tag-game-effect', running.effect!);
-		await expect(hostPage.locator('[data-tag-game-remaining]')).toHaveText(/02:5\d/);
+		await expect(hostPage.locator('[data-tag-game-remaining]')).toHaveText(/01:5\d/);
 		if (await hostPage.locator('[data-tag-game-hud] [data-tag-game-effect]').getAttribute('data-tag-game-effect-active') === 'true') {
 			await expect(hostPage.locator('[data-tag-game-hud]')).toContainText(running.effect === 'benefit' ? '所持者以外が追いかけて奪う' : '所持者が追いかけて押し付ける');
 		} else {
@@ -752,7 +752,7 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 		await Promise.all([hostPage, participantPage, participantTwoPage].map((page) => page.clock.setSystemTime(running.startedAt! * 1_000 + 6_000)));
 		await Promise.all([hostPage, participantPage, participantTwoPage].map((page) => page.clock.runFor(250)));
 		await expect(hostPage.locator('[data-tag-game-remaining]')).not.toHaveText(firstRemaining ?? '');
-		await expect(hostPage.locator('[data-tag-game-remaining]')).toHaveText(/02:5\d/);
+		await expect(hostPage.locator('[data-tag-game-remaining]')).toHaveText(/01:5\d/);
 		await Promise.all([openTagGameTerminal(hostPage), openTagGameTerminal(participantPage)]);
 		const refreshedAt = Math.floor(await hostPage.evaluate(() => Date.now() / 1_000)) + 1;
 		const sameGameRunning = finalizeTagGameState({ ...running, revision: running.revision + 1, updatedAt: refreshedAt }, CHANNEL_ID, refreshedAt, hostSecret);
@@ -784,25 +784,38 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 		await expect(holderMarker).toHaveAttribute('data-tag-game-effect', running.effect!);
 		const displayedEffect = holderPage.locator('[data-tag-game-hud] [data-tag-game-effect]');
 		await expect(holderMarker).toHaveAttribute('data-tag-game-effect-active', await displayedEffect.getAttribute('data-tag-game-effect-active') ?? 'false');
-		const fieldEffectLabel = holderMarker.locator('.tag-game-holder-label');
-		await expect(fieldEffectLabel).toContainText(running.effect === 'benefit' ? '恩恵' : '災厄');
-		await expect(fieldEffectLabel).not.toContainText(/pt\/秒|時間\/秒|停止中/);
-		await expect(fieldEffectLabel.locator('small')).toHaveCount(0);
-		const labelBox = await fieldEffectLabel.boundingBox();
+		const fieldEffectVisuals = holderMarker.locator('.tag-game-effect-visuals');
+		const effectName = running.effect === 'benefit' ? '祝福' : '呪い';
+		await expect(holderMarker.locator('.tag-game-holder-label')).toHaveCount(0);
+		await expect(fieldEffectVisuals).toHaveCount(1);
+		await expect(fieldEffectVisuals).toHaveAttribute('aria-label', `${effectName}${await displayedEffect.getAttribute('data-tag-game-effect-active') === 'true' ? '' : '・効果停止中'}`);
+		await expect(fieldEffectVisuals.locator('svg[aria-hidden="true"]')).toHaveCount(1);
+		const visualsBox = await fieldEffectVisuals.boundingBox();
 		const holderBox = await holderMarker.boundingBox();
 		const holderNameBox = await holderMarker.locator('.participant-name').boundingBox();
 		const avatarBox = await holderMarker.locator('.participant-profile-trigger .avatar').boundingBox();
-		expect(labelBox && holderBox && holderNameBox && avatarBox).toBeTruthy();
-		if (labelBox && holderBox && holderNameBox && avatarBox) {
-			expect(labelBox.x).toBeGreaterThanOrEqual(holderBox.x);
-			expect(labelBox.x + labelBox.width).toBeLessThanOrEqual(holderBox.x + holderBox.width);
-			expect(labelBox.y + labelBox.height).toBeLessThanOrEqual(avatarBox.y);
-			expect(labelBox.y + labelBox.height).toBeLessThan(holderNameBox.y);
+		expect(visualsBox && holderBox && holderNameBox && avatarBox).toBeTruthy();
+		if (visualsBox && holderBox && holderNameBox && avatarBox) {
+			expect(visualsBox.x).toBeGreaterThanOrEqual(holderBox.x - 1);
+			expect(visualsBox.x + visualsBox.width).toBeLessThanOrEqual(holderBox.x + holderBox.width + 1);
+			expect(holderBox.width).toBe(76);
+			expect(avatarBox.width).toBeGreaterThan(0);
+			expect(holderNameBox.width).toBeGreaterThan(0);
 		}
+		expect(await fieldEffectVisuals.evaluate((element) => getComputedStyle(element).pointerEvents)).toBe('none');
+		expect(await holderMarker.locator('.participant-profile-trigger').evaluate((element) => getComputedStyle(element).pointerEvents)).toBe('auto');
 		const holderViewport = holderPage.viewportSize();
 		await holderPage.setViewportSize({ width: 390, height: 844 });
-		await expect(fieldEffectLabel.locator('strong')).toBeVisible();
-		await expect(fieldEffectLabel.locator('small')).toHaveCount(0);
+		await expect(fieldEffectVisuals.locator('svg')).toBeVisible();
+		expect(await holderMarker.evaluate((element) => Number.parseFloat(getComputedStyle(element).width))).toBe(50);
+		await expect(holderMarker.locator('.participant-profile-trigger')).toBeVisible();
+		await expect(holderMarker.locator('.participant-name')).toBeVisible();
+		await holderPage.emulateMedia({ reducedMotion: 'reduce' });
+		await expect(fieldEffectVisuals.locator('svg')).toBeVisible();
+		const reducedMotionAnimations = await fieldEffectVisuals.evaluate((element) => [...element.querySelectorAll<SVGElement>('*')]
+			.map((child) => getComputedStyle(child).animationName).filter((name) => name !== 'none'));
+		expect(reducedMotionAnimations).toEqual([]);
+		await holderPage.emulateMedia({ reducedMotion: 'no-preference' });
 		if (holderViewport) await holderPage.setViewportSize(holderViewport);
 		const currentTouchState = parseTagGameEvent(await latestGameEvent(hostPage, gameId), CHANNEL_ID)!.state;
 		await Promise.all([hostPage, participantPage, participantTwoPage].map(async (page) => {
@@ -915,9 +928,9 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 		await expect(participantPage.locator('[data-unified-status-hud]')).toHaveAttribute('data-saved-points', String((await tagGamePersistence(participantPage)).savedPoints));
 		await expect(participantPage.locator('[data-unified-status-hud]')).not.toHaveAttribute('data-tag-game-projection', 'true');
 		await Promise.all([openTagGameTerminal(hostPage), openTagGameTerminal(participantPage), openTagGameTerminal(participantTwoPage)]);
-		await expect(hostPage.getByText(/恩恵\d+秒・災厄\d+秒/).first()).toBeVisible();
-		await expect(participantPage.getByText(/恩恵\d+秒・災厄\d+秒/).first()).toBeVisible();
-		await expect(participantTwoPage.getByText(/恩恵\d+秒・災厄\d+秒/).first()).toBeVisible();
+		await expect(hostPage.getByText(/祝福\d+秒・呪い\d+秒/).first()).toBeVisible();
+		await expect(participantPage.getByText(/祝福\d+秒・呪い\d+秒/).first()).toBeVisible();
+		await expect(participantTwoPage.getByText(/祝福\d+秒・呪い\d+秒/).first()).toBeVisible();
 		await expect(participantPage.locator('.results')).toContainText(resolveCharacterFromPubkey(hostPubkey)!.name);
 		await expect(participantPage.locator('.results')).toContainText('あなた');
 	} finally {
@@ -1036,7 +1049,7 @@ test('organizer accepts a touch with the seed-derived role before the ordinary s
 	const gameId = `${hostPubkey}:${startedAt}:${'e'.repeat(64)}`;
 	const running: TagGameState = {
 		gameId, hostPubkey, phase: 'running', revision: 0, updatedAt: nowSeconds,
-		startedAt, endsAt: startedAt + 180, seed: seed!, ownerPubkey: holderPubkey, effect: 'calamity', transferAt: startedAt * 1_000,
+		startedAt, endsAt: startedAt + 120, seed: seed!, ownerPubkey: holderPubkey, effect: 'calamity', transferAt: startedAt * 1_000,
 		lastHolderResponseAtMs: nowSeconds * 1_000,
 		participant: [
 			{ pubkey: hostPubkey, runNumber: 1, registeredAt: startedAt, status: 'active', points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 },
@@ -1096,7 +1109,7 @@ test('same-target long press keeps touch status stable while Relay acknowledgeme
 		const gameId = `${hostPubkey}:${startedAt}:${'8'.repeat(64)}`;
 		const running: TagGameState = {
 			gameId, hostPubkey, phase: 'running', revision: 0, updatedAt: startedAt,
-			startedAt, endsAt: startedAt + 180, seed, ownerPubkey: hostPubkey, effect: 'benefit', transferAt: startedAt * 1_000,
+			startedAt, endsAt: startedAt + 120, seed, ownerPubkey: hostPubkey, effect: 'benefit', transferAt: startedAt * 1_000,
 			participant: [hostPubkey, actorPubkey].map((pubkey) => ({ pubkey, runNumber: 1, registeredAt: startedAt, status: 'active' as const, points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 })),
 			settledAtMs: startedAt * 1_000, lastHolderResponseAtMs: startedAt * 1_000
 		};
@@ -1194,7 +1207,7 @@ test('the 23-second cutoff survives reload and recovery excludes the stopped int
 	const gameId = `${hostPubkey}:${nowSeconds}:${'6'.repeat(64)}`;
 	const running: TagGameState = {
 		gameId, hostPubkey, phase: 'running', revision: 0, updatedAt: nowSeconds,
-		startedAt: nowSeconds, endsAt: nowSeconds + 180, seed, ownerPubkey, effect: 'calamity', transferAt: nowSeconds * 1_000,
+		startedAt: nowSeconds, endsAt: nowSeconds + 120, seed, ownerPubkey, effect: 'calamity', transferAt: nowSeconds * 1_000,
 		participant: [hostPubkey, ownerPubkey].map((pubkey) => ({ pubkey, runNumber: 1, registeredAt: nowSeconds, status: 'active' as const, points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 })),
 		settledAtMs: nowSeconds * 1_000, lastHolderResponseAtMs: nowSeconds * 1_000
 	};
@@ -1260,7 +1273,7 @@ test('organizer local safety stop hides touch targets and resumes presentation a
 	const gameId = `${organizerPubkey}:${nowSeconds}:${'7'.repeat(64)}`;
 	const running: TagGameState = {
 		gameId, hostPubkey: organizerPubkey, phase: 'running', revision: 0, updatedAt: nowSeconds,
-		startedAt: nowSeconds, endsAt: nowSeconds + 180, seed, ownerPubkey: organizerPubkey, effect: 'calamity', transferAt: safetyStartedAtMs,
+		startedAt: nowSeconds, endsAt: nowSeconds + 120, seed, ownerPubkey: organizerPubkey, effect: 'calamity', transferAt: safetyStartedAtMs,
 		participant: [organizerPubkey, targetPubkey].map((pubkey) => ({ pubkey, runNumber: 1, registeredAt: nowSeconds, status: 'active' as const, points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 })),
 		settledAtMs: safetyStartedAtMs, lastHolderResponseAtMs: safetyStartedAtMs
 	};
@@ -1305,58 +1318,57 @@ test('organizer local safety stop hides touch targets and resumes presentation a
 	await expect(target).toHaveAttribute('data-tag-game-touch-target', 'true');
 });
 
-test('freezes integrated HUD at 180 seconds until a delayed final state corrects it', async ({ browser }) => {
+test('freezes integrated HUD at 120 seconds until a delayed final state corrects it', async ({ browser }) => {
 	const page = await browser.newPage();
 	const nowMs = Date.now();
 	const hostSecret = fixtureSecret(41);
 	const otherSecret = fixtureSecret(43);
 	const hostPubkey = getPublicKey(hostSecret);
 	const otherPubkey = getPublicKey(otherSecret);
-	const startedAt = Math.floor(nowMs / 1_000) - 179;
+	const startedAt = Math.floor(nowMs / 1_000) - 119;
 	const gameId = `${hostPubkey}:${startedAt}:${'e'.repeat(64)}`;
 	try {
 		await preparePlayer(page, hostSecret, nowMs, 0);
 		await expect(page.locator('main')).toHaveAttribute('data-realtime-status', 'active');
 		await moveRelaySelfTo(page, { x: 7, y: 5 });
-		await page.clock.setSystemTime((startedAt + 179) * 1_000);
+		await page.clock.setSystemTime((startedAt + 119) * 1_000);
 		await seedTagGameRunLock(page, gameId, startedAt * 1_000);
-		const seed = Array.from({ length: 10_000 }, (_, index) => `end-freeze-${index}`).find((candidate) => createTagGameSchedule(candidate)[7].effect === 'calamity')!;
-		const at179Ms = (startedAt + 179) * 1_000;
+		const seed = Array.from({ length: 10_000 }, (_, index) => `end-freeze-${index}`).find((candidate) => createTagGameSchedule(candidate)[5].effect === 'calamity')!;
+		const at119Ms = (startedAt + 119) * 1_000;
 		const participants = [hostPubkey, otherPubkey].map((pubkey) => ({ pubkey, runNumber: 1, registeredAt: startedAt, status: 'active' as const,
 			points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 }));
-		const running: TagGameState = { gameId, hostPubkey, phase: 'running', revision: 0, updatedAt: startedAt + 179, startedAt, endsAt: startedAt + 180,
-			seed, ownerPubkey: hostPubkey, effect: createTagGameSchedule(seed)[7].effect, transferAt: startedAt * 1_000, lastHolderResponseAtMs: at179Ms,
+		const running: TagGameState = { gameId, hostPubkey, phase: 'running', revision: 0, updatedAt: startedAt + 119, startedAt, endsAt: startedAt + 120,
+			seed, ownerPubkey: hostPubkey, effect: createTagGameSchedule(seed)[5].effect, transferAt: startedAt * 1_000, lastHolderResponseAtMs: at119Ms,
 			settledAtMs: startedAt * 1_000, participant: participants };
-		await injectRealtime(page, finalizeTagGameState(running, CHANNEL_ID, startedAt + 179, hostSecret));
+		await injectRealtime(page, finalizeTagGameState(running, CHANNEL_ID, startedAt + 119, hostSecret));
 		const hud = page.locator('[data-unified-status-hud]');
 		await expect(hud).toHaveAttribute('data-tag-game-projection', 'true');
-		const pointsAt179 = Number(await hud.getAttribute('data-current-points'));
-		const expiryAt179 = Number(await hud.getAttribute('data-current-expires-at-ms'));
+		const pointsAt119 = Number(await hud.getAttribute('data-current-points'));
+		const expiryAt119 = Number(await hud.getAttribute('data-current-expires-at-ms'));
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { rejectTagGameStatePublishes(): void } }).__relayStartupTest.rejectTagGameStatePublishes());
 		await page.clock.runFor(1_000);
-		await expect.poll(async () => Number(await hud.getAttribute('data-current-points'))).toBeGreaterThanOrEqual(pointsAt179);
+		await expect.poll(async () => Number(await hud.getAttribute('data-current-points'))).toBeGreaterThanOrEqual(pointsAt119);
 		await page.clock.runFor(1_000);
-		const pointsAt180 = Number(await hud.getAttribute('data-current-points'));
-		const expiryAt180 = Number(await hud.getAttribute('data-current-expires-at-ms'));
-		expect(pointsAt180).toBeGreaterThanOrEqual(pointsAt179);
-		expect(expiryAt180).toBeLessThanOrEqual(expiryAt179);
+		const pointsAt120 = Number(await hud.getAttribute('data-current-points'));
+		const expiryAt120 = Number(await hud.getAttribute('data-current-expires-at-ms'));
+		expect(pointsAt120).toBeGreaterThanOrEqual(pointsAt119);
+		expect(expiryAt120).toBeLessThanOrEqual(expiryAt119);
 		await page.clock.runFor(5_000);
-		await expect(hud).toHaveAttribute('data-current-points', String(pointsAt180));
-		await expect(hud).toHaveAttribute('data-current-expires-at-ms', String(expiryAt180));
+		await expect(hud).toHaveAttribute('data-current-points', String(pointsAt120));
+		await expect(hud).toHaveAttribute('data-current-expires-at-ms', String(expiryAt120));
 
-		const finalAt = startedAt + 180;
+		const finalAt = startedAt + 120;
 		const finalState: TagGameState = {
 			...running, phase: 'ended', revision: 1, updatedAt: finalAt, finalizedAt: finalAt, endReason: 'normal', settledAtMs: finalAt * 1_000,
-			participant: participants.map((member) => ({ ...member, points: member.pubkey === hostPubkey ? 4_000 : 0,
-				lifespanLossMs: member.pubkey === hostPubkey ? 300_000_000 : 0, benefitMs: member.pubkey === hostPubkey ? 80_000 : 0, calamityMs: member.pubkey === hostPubkey ? 80_000 : 0 }))
+			participant: participants.map((member) => ({ ...member, points: member.pubkey === hostPubkey ? 3_000 : 0,
+				lifespanLossMs: member.pubkey === hostPubkey ? 216_000_000 : 0, benefitMs: member.pubkey === hostPubkey ? 60_000 : 0, calamityMs: member.pubkey === hostPubkey ? 60_000 : 0 }))
 		};
 		await injectRealtime(page, finalizeTagGameState(finalState, CHANNEL_ID, finalAt, hostSecret));
-		await expect.poll(async () => Number(await hud.getAttribute('data-current-points'))).toBe(4_000);
-		await expect(hud.locator('[data-points-value]')).toHaveAttribute('data-value-change', pointsAt180 <= 4_000 ? 'increase' : 'decrease');
+		await expect.poll(async () => Number(await hud.getAttribute('data-current-points'))).toBe(3_000);
 		await page.clock.runFor(800);
 		await expect(hud.locator('[data-points-value]')).not.toHaveAttribute('data-value-change', /.+/);
 		await expect.poll(async () => await hud.getAttribute('data-current-expires-at-ms') === await hud.getAttribute('data-base-expires-at-ms')).toBe(true);
-		await expect(hud.locator('[data-points-meter]')).toHaveAttribute('data-meter-value', '4000');
+		await expect(hud.locator('[data-points-meter]')).toHaveAttribute('data-meter-value', '3000');
 	} finally { await page.close(); }
 });
 
@@ -1385,7 +1397,7 @@ test('a still holder updates its integrated HUD from successful precheck respons
 		})!;
 		const gameId = `${hostPubkey}:${startedAt}:${'8'.repeat(64)}`;
 		const running: TagGameState = {
-			gameId, hostPubkey, phase: 'running', revision: 0, updatedAt: startedAt, startedAt, endsAt: startedAt + 180, seed,
+			gameId, hostPubkey, phase: 'running', revision: 0, updatedAt: startedAt, startedAt, endsAt: startedAt + 120, seed,
 			ownerPubkey: holderPubkey, effect: 'benefit', transferAt: startedAt * 1_000, lastHolderResponseAtMs: startedAt * 1_000,
 			participant: [hostPubkey, holderPubkey].map((pubkey) => ({ pubkey, runNumber: 1, registeredAt: startedAt, status: 'active' as const, points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 })),
 			settledAtMs: startedAt * 1_000
@@ -1449,7 +1461,7 @@ test('keeps a valid precheck response as local activity when 37070 updates fail'
 	const gameId = `${hostPubkey}:${startedAt}:${'e'.repeat(64)}`;
 	const running: TagGameState = {
 		gameId, hostPubkey, phase: 'running', revision: 0, updatedAt: startedAt,
-		startedAt, endsAt: startedAt + 180, seed, ownerPubkey: holderPubkey, effect: 'benefit', transferAt: startedAt * 1_000,
+		startedAt, endsAt: startedAt + 120, seed, ownerPubkey: holderPubkey, effect: 'benefit', transferAt: startedAt * 1_000,
 		participant: [hostPubkey, holderPubkey].map((pubkey) => ({ pubkey, runNumber: 1, registeredAt: startedAt, status: 'active' as const, points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 })),
 		settledAtMs: startedAt * 1_000, lastHolderResponseAtMs: startedAt * 1_000
 	};
@@ -1503,7 +1515,7 @@ test('responds to a formal holder challenge after a missed precheck and resumes 
 			{ pubkey: holderPubkey, runNumber: 1, registeredAt: startedAt, status: 'active' as const, points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 }
 		];
 		const running: TagGameState = {
-			gameId, hostPubkey, phase: 'running', revision: 0, updatedAt: startedAt, startedAt, endsAt: startedAt + 180,
+			gameId, hostPubkey, phase: 'running', revision: 0, updatedAt: startedAt, startedAt, endsAt: startedAt + 120,
 			seed, ownerPubkey: holderPubkey, effect: 'benefit', transferAt: startedAt * 1_000,
 			participant, settledAtMs: setupNowMs, lastHolderResponseAtMs: setupNowMs
 		};
@@ -1588,7 +1600,7 @@ test('rejects formal challenges with a wrong id, stale Run, or former holder', a
 	const sentResponses = async () => (await relayState(page)).state.published.filter((event) => event.kind === 27070 && event.pubkey === holderPubkey &&
 		parseTagGameActionEvent(event as unknown as NostrEvent, CHANNEL_ID)?.action === 'response').length;
 	const base: TagGameState = {
-		gameId, hostPubkey, phase: 'running', revision, updatedAt: startedAt, startedAt, endsAt: startedAt + 180,
+		gameId, hostPubkey, phase: 'running', revision, updatedAt: startedAt, startedAt, endsAt: startedAt + 120,
 		seed: 'reject-stale-formal-challenges', ownerPubkey: holderPubkey, effect: 'benefit', transferAt: startedAt * 1_000,
 		participant: [hostPubkey, holderPubkey].map((pubkey) => ({ pubkey, runNumber: 1, registeredAt: startedAt, status: 'active' as const, points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 })),
 		settledAtMs: nowMs, holderChallengeId: challengeId, holderChallengeStartedAtMs: nowMs
@@ -1621,7 +1633,7 @@ test('expires a reordered formal challenge unless its matching stop arrives for 
 	let nonce = 40;
 	const makeState = (suffix: string, revision = 0): TagGameState => {
 		const gameId = `${hostPubkey}:${startedAt}:${suffix.repeat(64)}`;
-		return { gameId, hostPubkey, phase: 'running', revision, updatedAt: startedAt + revision, startedAt, endsAt: startedAt + 180,
+		return { gameId, hostPubkey, phase: 'running', revision, updatedAt: startedAt + revision, startedAt, endsAt: startedAt + 120,
 			seed: `held-formal-challenge-${suffix}`, ownerPubkey: holderPubkey, effect: 'benefit', transferAt: startedAt * 1_000,
 			participant: [hostPubkey, holderPubkey].map((pubkey) => ({ pubkey, runNumber: 1, registeredAt: startedAt, status: 'active' as const, points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 })),
 			settledAtMs: nowMs };
@@ -1688,7 +1700,7 @@ test('host silence is detected only while the local Relay connection is active',
 	const gameId = `${remoteHostPubkey}:${startedAt}:${'d'.repeat(64)}`;
 	const active: TagGameState = {
 		gameId, hostPubkey: remoteHostPubkey, phase: 'running', revision: 0, updatedAt: startedAt,
-		startedAt, endsAt: startedAt + 180, seed: transitionSeed!, ownerPubkey: remoteHostPubkey, effect: 'calamity', transferAt: startedAtMs,
+		startedAt, endsAt: startedAt + 120, seed: transitionSeed!, ownerPubkey: remoteHostPubkey, effect: 'calamity', transferAt: startedAtMs,
 		participant: [remoteHostPubkey, joinerPubkey].map((pubkey) => ({ pubkey, runNumber: 1, registeredAt: startedAt, status: 'active' as const, points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 })),
 		settledAtMs: startedAtMs
 	};
@@ -1703,12 +1715,17 @@ test('host silence is detected only while the local Relay connection is active',
 	const holder = page.locator(`.participant[data-participant-id="${remoteHostPubkey}"]`);
 	await expect(holder).toHaveAttribute('data-tag-game-effect', 'calamity');
 	await expect(holder).toHaveAttribute('data-tag-game-effect-active', 'true');
-	await expect(holder.locator('.tag-game-holder-label')).toContainText('災厄');
-	await expect(holder.locator('.tag-game-holder-label')).not.toContainText('寿命−1時間/秒');
+	const effectVisuals = holder.locator('.tag-game-effect-visuals');
+	await expect(effectVisuals).toHaveAttribute('aria-label', '呪い');
+	await expect(holder.locator('.tag-game-holder-label')).toHaveCount(0);
+	await expect(effectVisuals.locator('.curse-outline')).toHaveCount(1);
+	await expect(effectVisuals.locator('.curse-shadow')).toHaveCount(1);
+	await expect(effectVisuals.locator('.curse-shard')).toHaveCount(4);
+	await expect(effectVisuals.locator('.blessing-halo')).toHaveCount(0);
 	const cooldownLine = page.locator('[data-tag-game-cooldown-line]');
 	await expect(cooldownLine).toBeVisible();
 	const cooldownInitialWidth = await cooldownLine.locator('span').evaluate((element) => element.getBoundingClientRect().width);
-	await page.clock.runFor(700);
+	await page.clock.runFor(1_100);
 	const cooldownShortenedWidth = await cooldownLine.locator('span').evaluate((element) => element.getBoundingClientRect().width);
 	expect(cooldownShortenedWidth).toBeLessThan(cooldownInitialWidth);
 	await page.clock.runFor(1_500);
@@ -1722,7 +1739,11 @@ test('host silence is detected only while the local Relay connection is active',
 	const benefit = { ...active, revision: 1, updatedAt: startedAt + 1, effect: 'benefit' as const };
 	await injectRealtime(page, finalizeTagGameState(benefit, CHANNEL_ID, startedAt + 1, remoteHostSecret));
 	await expect(holder).toHaveAttribute('data-tag-game-effect', 'benefit');
-	await expect(holder.locator('.tag-game-holder-label')).not.toContainText('+50pt/秒');
+	await expect(effectVisuals).toHaveAttribute('aria-label', '祝福');
+	await expect(effectVisuals.locator('.blessing-halo')).toHaveCount(1);
+	await expect(effectVisuals.locator('.blessing-orbit')).toHaveCount(1);
+	await expect(effectVisuals.locator('.blessing-star')).toHaveCount(4);
+	await expect(effectVisuals.locator('.curse-outline')).toHaveCount(0);
 	await expect(page.locator('[data-tag-game-cooldown]')).toHaveCount(0);
 	await expect(page.locator('[data-tag-game-hud] [data-tag-game-effect]')).toContainText('所持者以外が追いかけて奪う');
 	const challenge = finalizeTagGameState({ ...benefit, revision: 2, updatedAt: startedAt + 10, holderChallengeId: 'f'.repeat(32), holderChallengeStartedAtMs: (startedAt + 10) * 1_000 }, CHANNEL_ID, startedAt + 10, remoteHostSecret);
@@ -1731,6 +1752,11 @@ test('host silence is detected only while the local Relay connection is active',
 	await expect(page.locator('[data-tag-game-cooldown]')).toHaveText('効果停止中');
 	await expect(page.locator('[data-tag-game-leave]')).toBeVisible();
 	await expect(holder).toHaveAttribute('data-tag-game-effect-active', 'false');
+	const pausedEffectName = await holder.getAttribute('data-tag-game-effect') === 'benefit' ? '祝福' : '呪い';
+	await expect(effectVisuals).toHaveAttribute('aria-label', `${pausedEffectName}・効果停止中`);
+	const pausedVisualAnimations = await effectVisuals.evaluate((element) => [...element.querySelectorAll<SVGElement>('*')]
+		.map((child) => getComputedStyle(child).animationName).filter((name) => name !== 'none'));
+	expect(pausedVisualAnimations).toEqual([]);
 	await page.clock.runFor(31_000);
 	await expect.poll(async () => (await relayState(page)).state.requests.length).toBeGreaterThan(relayStateBeforeProbe);
 	await page.clock.runFor(6_000);
@@ -1800,7 +1826,7 @@ test('same-second death exit ends a two-player game when the non-holder leaves',
 		const gameId = `${hostPubkey}:${startedAt}:${'f'.repeat(64)}`;
 		const state: TagGameState = {
 			gameId, hostPubkey, phase: 'running', revision: 0, updatedAt: startedAt,
-			startedAt, endsAt: startedAt + 180, seed: 'a'.repeat(64), ownerPubkey: hostPubkey, effect: 'benefit', transferAt: startedAt * 1_000,
+			startedAt, endsAt: startedAt + 120, seed: 'a'.repeat(64), ownerPubkey: hostPubkey, effect: 'benefit', transferAt: startedAt * 1_000,
 			participant: [{ pubkey: hostPubkey, runNumber: 1 }, { pubkey: participantPubkey, runNumber: 2 }].map(({ pubkey, runNumber }) => ({ pubkey, runNumber, registeredAt: startedAt, status: 'active' as const, points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 })),
 			settledAtMs: startedAt * 1_000
 		};
@@ -2052,7 +2078,6 @@ test('requests a missing remote Run position proof and accepts the next input af
 	const hostPage = await browser.newPage();
 	const participantPage = await browser.newPage();
 	const nowMs = Date.now();
-	const nowSeconds = Math.floor(nowMs / 1_000);
 	const hostSecret = fixtureSecret(61);
 	const participantSecret = fixtureSecret(63);
 	const hostPubkey = getPublicKey(hostSecret);
@@ -2060,25 +2085,31 @@ test('requests a missing remote Run position proof and accepts the next input af
 	try {
 		await Promise.all([preparePlayer(hostPage, hostSecret, nowMs, 200_000), preparePlayer(participantPage, participantSecret, nowMs, 200_000)]);
 		await Promise.all([moveRelaySelfTo(hostPage, { x: 7, y: 5 }), moveRelaySelfTo(participantPage, { x: 8, y: 5 })]);
-		const hostPosition = await latestWorldState(hostPage, hostPubkey);
-		await injectPosition(participantPage, hostPosition);
+		const startedAt = Math.floor(await hostPage.evaluate(() => Date.now() / 1_000));
+		const nowSeconds = startedAt;
+		const freshHostPosition = finalizeEvent(buildWorldStateEventTemplate({ channel: { channelId: CHANNEL_ID, relayHint: 'wss://relay.test/' }, createdAt: startedAt, position: { x: 7, y: 5 }, slot: 1, runNumber: 1 }), hostSecret);
+		const freshParticipantPosition = finalizeEvent(buildWorldStateEventTemplate({ channel: { channelId: CHANNEL_ID, relayHint: 'wss://relay.test/' }, createdAt: startedAt, position: { x: 8, y: 5 }, slot: 1, runNumber: 1 }), participantSecret);
+		await injectPosition(participantPage, freshHostPosition);
+		await injectPosition(participantPage, freshParticipantPosition);
 		const activeMessage = finalizeEvent(buildWorldMessageTemplate({
-			channel: { channelId: CHANNEL_ID, relayHint: 'wss://relay.test/' }, createdAt: nowSeconds,
+			channel: { channelId: CHANNEL_ID, relayHint: 'wss://relay.test/' }, createdAt: startedAt,
 			position: { x: 8, y: 5 }, content: 'fresh World activity', speechType: 'normal'
 		}), participantSecret);
 		await hostPage.evaluate((next) => (window as typeof window & { __relayStartupTest: { injectMessage(event: object): void } }).__relayStartupTest.injectMessage(next), activeMessage);
 		await participantPage.evaluate((next) => (window as typeof window & { __relayStartupTest: { injectMessage(event: object): void } }).__relayStartupTest.injectMessage(next), activeMessage);
 
-		const startedAt = nowSeconds - 5;
-		const seed = Array.from({ length: 10_000 }, (_, index) => `missing-proof-${index}`).find((candidate) => createTagGameSchedule(candidate)[0].effect === 'calamity')!;
+		const seed = Array.from({ length: 10_000 }, (_, index) => `missing-proof-${index}`).find((candidate) => {
+			const first = createTagGameSchedule(candidate)[0];
+			return first.effect === 'calamity' && first.durationMs === 40_000;
+		})!;
 		const gameId = `${hostPubkey}:${startedAt}:${'9'.repeat(64)}`;
 		const running: TagGameState = {
 			gameId, hostPubkey, phase: 'running', revision: 0, updatedAt: startedAt,
-			startedAt, endsAt: startedAt + 180, seed, ownerPubkey: hostPubkey, effect: 'calamity', transferAt: startedAt * 1_000,
+			startedAt, endsAt: startedAt + 120, seed, ownerPubkey: hostPubkey, effect: 'calamity', transferAt: startedAt * 1_000,
 			participant: [hostPubkey, participantPubkey].map((pubkey) => ({ pubkey, runNumber: 1, registeredAt: startedAt, status: 'active' as const, points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 })),
 			settledAtMs: startedAt * 1_000
 		};
-		const runningEvent = finalizeTagGameState(running, CHANNEL_ID, nowSeconds, hostSecret);
+		const runningEvent = finalizeTagGameState(running, CHANNEL_ID, startedAt, hostSecret);
 		// The participant's one-time Run proof refresh starts when its own
 		// signed running state arrives. Block it before that transition so this
 		// scenario exercises recovery after the initial publication fails.
@@ -2100,13 +2131,14 @@ test('requests a missing remote Run position proof and accepts the next input af
 		const duplicateRefreshRequest = finalizeEvent(buildTagGameActionTemplate({ channelId: CHANNEL_ID, gameId, action: 'position-refresh-request', runNumber: 1,
 			nonce: 'b'.repeat(32), createdAt: nowSeconds, payload: { targetPubkey: participantPubkey, targetRunNumber: 1 } }), hostSecret);
 		await Promise.all([injectRealtime(participantPage, refreshRequest), injectRealtime(participantPage, duplicateRefreshRequest)]);
-		await participantPage.clock.runFor(1_100);
+		await participantPage.clock.runFor(2_500);
 		const rejectedPositionIds = await participantPage.evaluate(() => [...new Set((window as typeof window & { __relayStartupTest: { state: { rejectedPositionPublishIds: string[] } } }).__relayStartupTest.state.rejectedPositionPublishIds)]);
 		expect(rejectedPositionIds.length).toBeGreaterThan(0);
 		await participantPage.evaluate(() => (window as typeof window & { __relayStartupTest: { allowPositionPublishes(): void } }).__relayStartupTest.allowPositionPublishes());
 		// Retry timing and the existing 30079 per-second slot planner are
 		// independent bounds; allow both to advance after the Relay recovers.
 		await participantPage.clock.runFor(2_200);
+		await synchronizeBrowserClocks([hostPage, participantPage]);
 		await expect.poll(async () => {
 			const latest = await latestWorldState(participantPage, participantPubkey);
 			return !rejectedPositionIds.includes(latest.id) && latest.tags.some((tag) => tag[0] === 'r' && tag[1] === '1');
@@ -2160,7 +2192,7 @@ test('does not show unselected games and lets a spectator choose and clear one t
 		const state: TagGameState = {
 			gameId: `${host}:${startedAt}:${marker.repeat(64)}`, hostPubkey: host, phase, revision: 0, updatedAt: startedAt,
 			...(phase === 'countdown' ? { startAt: startedAt + 10 } : {}),
-		startedAt, endsAt: startedAt + 180, seed: benefitSeed, ownerPubkey: host, effect: 'benefit', transferAt: startedAt * 1_000,
+		startedAt, endsAt: startedAt + 120, seed: benefitSeed, ownerPubkey: host, effect: 'benefit', transferAt: startedAt * 1_000,
 			participant: [host, other].map((pubkey) => ({ pubkey, runNumber: 1, registeredAt: startedAt, status: 'active' as const, points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 })),
 			settledAtMs: startedAt * 1_000
 		};
@@ -2240,7 +2272,7 @@ test('does not show unselected games and lets a spectator choose and clear one t
 	await expect(page.getByRole('dialog', { name: '鬼ごっこ' })).toBeVisible();
 	const startAAt = Math.max(Math.floor(Date.now() / 1_000), startedAt + 1);
 	const countdownA = parseTagGameEvent(gameA, CHANNEL_ID)!.state;
-	const runningA = finalizeTagGameState({ ...countdownA, phase: 'running', revision: 1, updatedAt: startAAt, startedAt: startAAt, endsAt: startAAt + 180, settledAtMs: startAAt * 1_000 }, CHANNEL_ID, startAAt, ownerASecret);
+	const runningA = finalizeTagGameState({ ...countdownA, phase: 'running', revision: 1, updatedAt: startAAt, startedAt: startAAt, endsAt: startAAt + 120, settledAtMs: startAAt * 1_000 }, CHANNEL_ID, startAAt, ownerASecret);
 	await injectRealtime(page, runningA);
 	await expect(page.getByRole('dialog', { name: '鬼ごっこ' })).toBeVisible();
 	await expect(page.locator('[data-tag-game-hud]')).toHaveAttribute('data-tag-game-hud-id', gameBId);

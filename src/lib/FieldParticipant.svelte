@@ -73,9 +73,27 @@
 		<CharacterAvatar class={`avatar avatar-${color}`} {character} />
 		<span class="participant-name" class:participant-name-self={self} aria-hidden="true">{character.name}</span>
 	</button>
-	{#if tagGameRole === 'holder'}
-		<span class={['tag-game-holder-label', { 'tag-game-holder-label-paused': !tagGameEffectActive }]} role="img" aria-label={`${tagGameEffect === 'benefit' ? '恩恵' : '災厄'}${tagGameEffectActive ? '' : '・効果停止中'}`}>
-			<strong>{tagGameEffect === 'benefit' ? '恩恵' : '災厄'}</strong>
+	{#if tagGameRole === 'holder' && tagGameEffect}
+		<span class={['tag-game-effect-visuals', `tag-game-effect-visuals-${tagGameEffect}`, { 'tag-game-effect-visuals-paused': !tagGameEffectActive }]}
+			role="img" aria-label={`${tagGameEffect === 'benefit' ? '祝福' : '呪い'}${tagGameEffectActive ? '' : '・効果停止中'}`}>
+			<svg viewBox="0 0 76 76" aria-hidden="true" focusable="false">
+				{#if tagGameEffect === 'benefit'}
+					<circle class="blessing-halo" cx="38" cy="38" r="34.5" />
+					<circle class="blessing-orbit" cx="38" cy="38" r="36" />
+					<path class="blessing-star blessing-star-one" d="M0 -5L1.4 -1.4L5 0L1.4 1.4L0 5L-1.4 1.4L-5 0L-1.4 -1.4Z" transform="translate(38 2)" />
+					<path class="blessing-star blessing-star-two" d="M0 -5L1.4 -1.4L5 0L1.4 1.4L0 5L-1.4 1.4L-5 0L-1.4 -1.4Z" transform="translate(74 38) scale(.8)" />
+					<path class="blessing-star blessing-star-three" d="M0 -5L1.4 -1.4L5 0L1.4 1.4L0 5L-1.4 1.4L-5 0L-1.4 -1.4Z" transform="translate(38 74) scale(.72)" />
+					<path class="blessing-star blessing-star-four" d="M0 -5L1.4 -1.4L5 0L1.4 1.4L0 5L-1.4 1.4L-5 0L-1.4 -1.4Z" transform="translate(2 38) scale(.86)" />
+				{:else}
+					<path class="curse-shadow" d="M35 2L42 4L47 2L51 9L60 10L59 17L68 20L64 27L74 34L68 39L73 47L64 51L66 58L57 60L52 72L44 68L38 74L32 68L23 72L20 63L11 60L15 53L3 48L10 42L2 34L9 29L5 21L14 18L17 9L27 11Z" />
+					<path class="curse-outline" d="M35 2L42 4L47 2L51 9L60 10L59 17L68 20L64 27M74 34L68 39L73 47L64 51M66 58L57 60L52 72L44 68M38 74L32 68L23 72M20 63L11 60L15 53L3 48M2 34L9 29L5 21L14 18L17 9L27 11" />
+					<path class="curse-shard curse-shard-one" d="M31 8L37 1L40 11Z" />
+					<path class="curse-shard curse-shard-two" d="M67 31L75 37L65 41Z" />
+					<path class="curse-shard curse-shard-three" d="M42 67L37 75L33 66Z" />
+					<path class="curse-shard curse-shard-four" d="M9 42L1 37L11 33Z" />
+					<path class="curse-crack" d="M25 17L30 25L27 31M52 49L46 46L43 53" />
+				{/if}
+			</svg>
 		</span>
 	{:else if tagGameRole === 'participant'}
 		<span class="tag-game-participant-mark" role="img" aria-label="鬼ごっこ参加者"></span>
@@ -94,6 +112,7 @@
 
 	.participant-profile-trigger {
 		position: relative;
+		z-index: 1;
 		display: block;
 		width: 100%;
 		height: 100%;
@@ -138,12 +157,12 @@
 		font-weight: 800;
 	}
 
-	[data-tag-game-role='holder'] .participant-profile-trigger::after {
+	[data-tag-game-holder-transfer] .participant-profile-trigger::after {
 		position: absolute;
-		inset: 1px;
-		border: 3px solid #2e8b57;
+		inset: -2px;
+		border: 2px solid rgba(255, 236, 130, .94);
 		border-radius: 50%;
-		box-shadow: 0 0 0 2px rgba(255, 255, 255, .9), 0 0 10px rgba(46, 139, 87, .68);
+		box-shadow: 0 0 0 2px rgba(255, 255, 255, .86), 0 0 12px rgba(255, 236, 130, .8);
 		content: '';
 		pointer-events: none;
 	}
@@ -158,37 +177,50 @@
 		pointer-events: none;
 	}
 	.tag-game-touch-attempt { animation: tag-game-lunge 200ms ease-out; }
-	[data-tag-game-holder-transfer] .participant-profile-trigger::after { animation: tag-game-holder-transfer 600ms ease-out; }
+	[data-tag-game-holder-transfer] .participant-profile-trigger::after { animation: tag-game-holder-transfer 600ms ease-out both; }
 	@keyframes tag-game-lunge {
 		0%, 100% { translate: 0 0; }
 		34% { translate: var(--tag-game-touch-x) var(--tag-game-touch-y); }
 	}
 	@keyframes tag-game-holder-transfer {
-		0% { box-shadow: 0 0 0 2px rgba(255, 255, 255, .9), 0 0 3px 2px rgba(255, 236, 130, .9); }
-		100% { box-shadow: 0 0 0 2px rgba(255, 255, 255, .9), 0 0 10px rgba(46, 139, 87, .68); }
+		0% { opacity: 0; transform: scale(.88); }
+		24% { opacity: 1; transform: scale(1.06); }
+		100% { opacity: 0; transform: scale(1.14); }
 	}
-	[data-tag-game-role='holder'][data-tag-game-effect='calamity'] .participant-profile-trigger::after { border-color: #b4483b; box-shadow: 0 0 0 2px rgba(255, 255, 255, .9), 0 0 10px rgba(180, 72, 59, .68); }
-	[data-tag-game-role='holder'][data-tag-game-effect-active='false'] .participant-profile-trigger::after { border-style: dashed; opacity: .62; }
-	.tag-game-holder-label {
+	.tag-game-effect-visuals {
 		position: absolute;
-		top: -25px;
-		left: 50%;
-		z-index: 2;
+		inset: 0;
+		z-index: 0;
 		display: block;
-		max-width: calc(var(--cell-size) - 4px);
-		padding: 2px 6px;
-		border: 1px solid rgba(255, 255, 255, .9);
-		border-radius: 999px;
-		background: #e4f2e9;
-		box-shadow: 0 1px 5px rgba(0, 0, 0, .25);
-		transform: translateX(-50%);
-		white-space: nowrap;
 		pointer-events: none;
 	}
-	.tag-game-holder-label strong { color: #226b42; font-size: 10px; }
-	[data-tag-game-effect='calamity'] .tag-game-holder-label { background: #f7e8e5; }
-	[data-tag-game-effect='calamity'] .tag-game-holder-label strong { color: #85372e; }
-	.tag-game-holder-label-paused { opacity: .72; }
+	.tag-game-effect-visuals svg { display: block; width: 100%; height: 100%; overflow: visible; }
+	.tag-game-effect-visuals-paused { opacity: .76; }
+	.tag-game-effect-visuals-paused .blessing-orbit { stroke-dasharray: 2 4; }
+	.tag-game-effect-visuals-paused .blessing-orbit,
+	.tag-game-effect-visuals-paused .blessing-star { animation: none; }
+	.blessing-halo { fill: none; stroke: rgba(255, 249, 222, .76); stroke-width: 5; filter: drop-shadow(0 0 3px rgba(255, 233, 164, .88)); }
+	.blessing-orbit { fill: none; stroke: rgba(229, 201, 126, .86); stroke-width: 1.6; stroke-dasharray: 13 6 3 7; transform-box: fill-box; transform-origin: center; animation: blessing-orbit 8s linear infinite; }
+	.blessing-star { fill: #fff9df; stroke: #e7c875; stroke-width: .7; transform-box: fill-box; transform-origin: center; filter: drop-shadow(0 0 2px rgba(255, 229, 151, .95)); }
+	.blessing-star-one { animation: blessing-sparkle 2.7s ease-in-out infinite; }
+	.blessing-star-two { animation: blessing-sparkle 3.1s ease-in-out -1.2s infinite; }
+	.blessing-star-three { animation: blessing-sparkle 3.5s ease-in-out -.7s infinite; }
+	.blessing-star-four { animation: blessing-sparkle 2.9s ease-in-out -2s infinite; }
+	.curse-shadow { fill: rgba(37, 22, 65, .24); stroke: rgba(54, 31, 91, .48); stroke-width: 4; filter: drop-shadow(0 0 3px rgba(48, 24, 77, .62)); }
+	.curse-outline { fill: none; stroke: #a35cb0; stroke-width: 3.8; stroke-linecap: square; stroke-linejoin: bevel; filter: drop-shadow(0 0 3px rgba(214, 72, 170, .96)); transform-box: fill-box; transform-origin: center; animation: curse-waver 3.8s ease-in-out infinite alternate; }
+	.curse-shard { fill: #d45ca8; stroke: #4e286d; stroke-width: 1.1; transform-box: fill-box; transform-origin: center; }
+	.curse-shard-one { animation: curse-shard 3.3s ease-in-out infinite alternate; }
+	.curse-shard-two { fill: #8e47a7; animation: curse-shard 4s ease-in-out -1.5s infinite alternate-reverse; }
+	.curse-shard-three { fill: #b34791; animation: curse-shard 3.7s ease-in-out -.8s infinite alternate; }
+	.curse-shard-four { fill: #a747a2; animation: curse-shard 3.5s ease-in-out -1.9s infinite alternate-reverse; }
+	.curse-crack { fill: none; stroke: #b04b98; stroke-width: 1.4; stroke-linecap: square; opacity: .86; }
+	.tag-game-effect-visuals-paused .curse-outline,
+	.tag-game-effect-visuals-paused .curse-shard { animation: none; }
+	.tag-game-effect-visuals-paused .curse-outline { stroke-dasharray: 5 3; }
+	@keyframes blessing-orbit { to { transform: rotate(360deg); } }
+	@keyframes blessing-sparkle { 0%, 22%, 100% { opacity: .34; transform: scale(.72); } 48% { opacity: 1; transform: scale(1.18); } }
+	@keyframes curse-waver { from { transform: rotate(-1.5deg) translateY(0); opacity: .82; } to { transform: rotate(1.5deg) translateY(1px); opacity: 1; } }
+	@keyframes curse-shard { from { opacity: .52; transform: translateY(1px) rotate(-2deg); } to { opacity: 1; transform: translateY(-1px) rotate(3deg); } }
 	.tag-game-participant-mark {
 		position: absolute;
 		top: 2px;
@@ -202,13 +234,10 @@
 		box-shadow: 0 0 0 1px rgba(47, 68, 78, .65);
 		pointer-events: none;
 	}
-	@media (max-width: 700px) {
-		.tag-game-holder-label { top: -24px; max-width: calc(var(--cell-size) - 2px); padding: 2px 5px; }
-		.tag-game-holder-label strong { font-size: 9px; }
-	}
 	@media (prefers-reduced-motion: reduce) {
 		.tag-game-touch-attempt, [data-tag-game-holder-transfer] .participant-profile-trigger::after { animation: none; }
+		.tag-game-effect-visuals * { animation: none !important; }
 		.tag-game-touch-attempt .participant-profile-trigger { outline: 3px solid rgba(244, 214, 106, .92); outline-offset: 3px; }
-		[data-tag-game-holder-transfer] .participant-profile-trigger::after { box-shadow: 0 0 0 3px rgba(255, 236, 130, .9), 0 0 12px rgba(255, 236, 130, .8); }
+		[data-tag-game-holder-transfer] .participant-profile-trigger::after { opacity: 1; transform: scale(1.08); }
 	}
 </style>

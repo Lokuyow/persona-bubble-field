@@ -70,7 +70,7 @@
 			<Dialog.Overlay class="tag-game-dialog-overlay" />
 			<Dialog.Content class="tag-game-dialog-content" preventScroll={false}>
 				<header><Dialog.Title class="tag-game-title">鬼ごっこ</Dialog.Title><Dialog.Close class="action-button action-button-tertiary action-button-close" aria-label="閉じる"><X aria-hidden="true" /></Dialog.Close></header>
-				<p>最大8人、3分間のプレイヤー主催イベントです。募集参加中も脱出と能力強化を行えます。</p>
+				<p>最大8人、2分間のプレイヤー主催イベントです。募集参加中も脱出と能力強化を行えます。</p>
 				{#if createAllowed}<ActionButton variant={joinableGames.length === 0 ? 'primary' : 'secondary'} onclick={onCreate} disabled={busy}>鬼ごっこを開催</ActionButton>
 				{:else if ownHostLobby}<p class="reservation-state">募集を開催中</p>
 				{:else if reservationCurrent}<p class="reservation-state">{reservedStatus === 'pending' ? '参加申請済み（受理待ち）' : reservedStatus === 'active' ? '鬼ごっこに参加中' : '参加申請済み（参加登録済み）'}</p>
@@ -106,7 +106,7 @@
 									{/each}
 								</ol>
 							{/if}
-							{#if game.ownerPubkey}<p class="game-status">所持者 {tagGameParticipantLabel(game, game.ownerPubkey, selfPubkey)}・{game.effect === 'benefit' ? '恩恵' : '災厄'}{#if game.endsAt}・残り{Math.max(0, Math.ceil((game.endsAt * 1000 - nowMs) / 1000))}秒{/if}</p>{/if}
+							{#if game.ownerPubkey}<p class="game-status">所持者 {tagGameParticipantLabel(game, game.ownerPubkey, selfPubkey)}・{game.effect === 'benefit' ? '祝福' : '呪い'}{#if game.endsAt}・残り{Math.max(0, Math.ceil((game.endsAt * 1000 - nowMs) / 1000))}秒{/if}</p>{/if}
 							{#if game.phase === 'running' || game.phase === 'settling'}
 								{#if watchedGameId === game.gameId}<ActionButton variant="tertiary" onclick={onStopWatching} disabled={busy}>観戦を解除</ActionButton>
 								{:else if selfActiveGameId === null}<ActionButton variant="tertiary" data-tag-game-watch={game.gameId} onclick={() => onWatch(game.gameId)} disabled={busy}>観戦する</ActionButton>
@@ -115,7 +115,7 @@
 							{#if (game.phase === 'ended' || game.phase === 'interrupted') && game.startedAt}
 								<div class="results" aria-label="鬼ごっこ結果">
 									{#each game.participant as player (player.pubkey)}
-									<span>{tagGameParticipantLabel(game, player.pubkey, selfPubkey)}・{player.status === 'dead' ? '死亡' : player.status === 'left' ? '退出' : player.status === 'temporarily-ineligible' ? '一時対象外' : '参加'}・{player.points}pt・寿命-{Math.ceil(player.lifespanLossMs / 60_000)}分・恩恵{Math.floor(player.benefitMs / 1000)}秒・災厄{Math.floor(player.calamityMs / 1000)}秒</span>
+									<span>{tagGameParticipantLabel(game, player.pubkey, selfPubkey)}・{player.status === 'dead' ? '死亡' : player.status === 'left' ? '退出' : player.status === 'temporarily-ineligible' ? '一時対象外' : '参加'}・{player.points}pt・寿命-{Math.ceil(player.lifespanLossMs / 60_000)}分・祝福{Math.floor(player.benefitMs / 1000)}秒・呪い{Math.floor(player.calamityMs / 1000)}秒</span>
 									{/each}
 								</div>
 							{/if}
