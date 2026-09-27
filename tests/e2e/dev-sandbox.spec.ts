@@ -11,6 +11,7 @@ test.describe('DEV World Sandbox', () => {
 
 	test('lists categorized scenarios and keeps the selected character across scenario reset', async ({ page }) => {
 		await page.goto('/?devWorld=1&devCharacter=020');
+		await expect(page.locator('[data-field-facility="tag-game-terminal"] img')).toHaveAttribute('src', /field\/objects\/tag-game-terminal\.webp$/);
 		await expect(page.getByLabel('Select DEV scenario')).toHaveValue('default');
 		await expect(page.locator('optgroup[label="Speech"]')).toHaveCount(1);
 		await expect(page.getByText('Plain DEV World with no seeded fixture.')).toBeVisible();
