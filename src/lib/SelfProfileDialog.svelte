@@ -3,6 +3,9 @@
 	import ActionButton from '$lib/ActionButton.svelte';
 	import HelpCircle from '~icons/tabler/help-circle';
 	import Heart from '~icons/tabler/heart';
+	import Brain from '~icons/tabler/brain';
+	import Stack2 from '~icons/tabler/stack-2';
+	import ShieldCheck from '~icons/tabler/shield-check';
 	import Wallet from '~icons/tabler/wallet';
 	import X from '~icons/tabler/x';
 	import type { MendingProjection } from '$lib/mending';
@@ -76,7 +79,7 @@
 							<div class="ability-list">
 								{#each abilityKeys as key}
 									{@const upgrade = getAbilityUpgrade(key, persona.gameState.abilities)}
-									<div class="ability-row"><div><strong>{abilityLabels[key]}</strong><span>{abilityType(key)}</span></div><div><strong>Lv{upgrade.level}</strong><span>{upgrade.currentEffect}</span></div></div>
+									<div class="ability-row" data-ability-key={key}><div class="ability-info"><span class="ability-icon" aria-hidden="true" data-ability-icon={key === 'inferenceEfficiency' ? 'brain' : key === 'contextCapacity' ? 'stack-2' : 'shield-check'}>{#if key === 'inferenceEfficiency'}<Brain />{:else if key === 'contextCapacity'}<Stack2 />{:else}<ShieldCheck />{/if}</span><div class="ability-copy"><strong>{abilityLabels[key]}</strong><span>{abilityType(key)}</span></div></div><div class="ability-values"><strong>Lv{upgrade.level}</strong><span>{upgrade.currentEffect}</span></div></div>
 								{/each}
 							</div>
 						</section>
@@ -143,8 +146,11 @@
 	:global(.self-profile-content [data-initial-focus]:focus) { outline: none; }
 	.ability-list { display: grid; gap: 8px; }
 	.ability-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 11px 12px; }
-	.ability-row > div { display: grid; gap: 2px; }
-	.ability-row > div:last-child { text-align: right; }
+	.ability-info { display: flex; align-items: center; gap: 9px; min-width: 0; }
+	.ability-copy { display: grid; gap: 2px; min-width: 0; }
+	.ability-icon { display: grid !important; width: 22px; height: 22px; flex: 0 0 22px; place-items: center; margin: 0 !important; color: #5663d1 !important; }
+	.ability-icon :global(svg) { width: 20px; height: 20px; }
+	.ability-values { display: grid; gap: 2px; text-align: right; }
 	.ability-row strong { font-size: 14px; font-weight: 900; }
 	.ability-row span { color: #75817d; font-size: 12px; }
 	.ability-row > div:last-child strong { color: #5663d1; font-variant-numeric: tabular-nums; }

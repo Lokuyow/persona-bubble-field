@@ -66,11 +66,13 @@ test.describe('Relay startup', () => {
 		const publishedWorldStateCount = async () => (await relayState(page)).state.published.filter((event) => event.kind === WORLD_STATE_KIND && event.pubkey === pubkey).length;
 		const beforeMendingStart = await publishedWorldStateCount();
 		await page.clock.runFor(1_001);
+		await page.clock.setFixedTime(await page.evaluate(() => Date.now()));
 		await terminal.click();
 		await expect(page.getByRole('dialog')).toBeVisible();
 		await expect.poll(() => readRelayGameState(page)).toMatchObject({ mendingJob: expect.any(Object) });
 		await expect.poll(publishedWorldStateCount).toBeGreaterThan(beforeMendingStart);
 		const started = await readRelayGameState(page);
+		const mendingStartedAt = (started.mendingJob as { startedAtMs: number }).startedAtMs;
 		expect(started).toMatchObject({ version: 4, points: 0, pointProgressTicks: 0, mendingJob: expect.objectContaining({ processedDurationMs: 0, unclaimedPoints: 0 }) });
 		const activeDialog = page.getByRole('dialog');
 		await expect(activeDialog.getByRole('heading', { name: '作業中' })).toBeVisible();
@@ -113,6 +115,17 @@ test.describe('Relay startup', () => {
 		await expect(collectButton.locator('svg path')).toHaveAttribute('d', /^M4 20h16m-8-6V4/);
 		await expect(activeDialog.locator('.mending-success-feedback')).toHaveCount(0);
 		await expect(activeDialog.getByRole('button', { name: '成果を受け取る' })).toBeDisabled();
+		const workMeter = activeDialog.getByRole('progressbar', { name: '作業の蓄積進捗' });
+		await expect(workMeter).toHaveAttribute('aria-valuenow', '0');
+		const workMeterMetrics = await workMeter.evaluate((meter) => {
+			const rect = meter.getBoundingClientRect();
+			const dialogRect = meter.closest('[role="dialog"]')!.getBoundingClientRect();
+			return { height: rect.height, left: rect.left, right: rect.right, dialogLeft: dialogRect.left, dialogRight: dialogRect.right };
+		});
+		expect(workMeterMetrics.height).toBeGreaterThan(11);
+		expect(workMeterMetrics.left).toBeGreaterThanOrEqual(workMeterMetrics.dialogLeft);
+		expect(workMeterMetrics.right).toBeLessThanOrEqual(workMeterMetrics.dialogRight);
+		await page.clock.setSystemTime(mendingStartedAt);
 		const disabledCollectStyle = await collectButton.evaluate((button) => ({
 			...(() => {
 				const style = getComputedStyle(button);
@@ -137,6 +150,14 @@ test.describe('Relay startup', () => {
 		const originalViewport = page.viewportSize() ?? { width: 1280, height: 720 };
 		for (const [width, height, expectedColumns] of [[1280, 800, 2], [390, 640, 1]] as const) {
 			await page.setViewportSize({ width, height });
+			const meterLayout = await activeDialog.getByRole('progressbar', { name: '作業の蓄積進捗' }).evaluate((meter) => {
+				const meterRect = meter.getBoundingClientRect();
+				const dialogRect = meter.closest('[role="dialog"]')!.getBoundingClientRect();
+				return { left: meterRect.left, right: meterRect.right, dialogLeft: dialogRect.left, dialogRight: dialogRect.right, viewportWidth: innerWidth };
+			});
+			expect(meterLayout.left).toBeGreaterThanOrEqual(meterLayout.dialogLeft);
+			expect(meterLayout.right).toBeLessThanOrEqual(meterLayout.dialogRight);
+			expect(meterLayout.right).toBeLessThanOrEqual(meterLayout.viewportWidth);
 			if (width === 390) await expectIconCloseButton(closeButton, '閉じる');
 			const visibleButtonStyles = await activeDialog.evaluate((dialog) => {
 				const collect = getComputedStyle(dialog.querySelector('.collect-button')!);
@@ -230,6 +251,10 @@ test.describe('Relay startup', () => {
 		await terminal.click();
 		const partialDialog = page.getByRole('dialog');
 		await expect(partialDialog.locator('.mending-startup-feedback')).toHaveCount(0);
+		const partialMeter = partialDialog.getByRole('progressbar', { name: '作業の蓄積進捗' });
+		const partialMeterValue = Number(await partialMeter.getAttribute('aria-valuenow'));
+		expect(partialMeterValue).toBeGreaterThan(0);
+		expect(partialMeterValue).toBeLessThan(100);
 		await expect(partialDialog).toContainText('上限まで あと4分');
 		await expect(partialDialog).toContainText(/次の1ptまで [1-9][0-9]?秒/);
 		await expect(partialDialog.locator('.next-point[data-mending-icon="clock"] > svg')).toHaveCount(1);
