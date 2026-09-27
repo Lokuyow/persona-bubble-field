@@ -17,6 +17,85 @@ import { CHANNEL_ID, fixtureSecret, traceRuntimeEvents, installDelayedRelay, rel
 
 
 
+async function expectUnreadPopoverPresentation(page: Page, viewportWidth: number, viewportHeight: number): Promise<void> {
+	const presentation = await page.evaluate(() => {
+		const unread = document.querySelector<HTMLElement>('.trace-unread-indicator');
+		const explanation = document.querySelector<HTMLElement>('.trace-unread-explanation');
+		if (!unread || !explanation) throw new Error('Expected unread trigger and explanation to be rendered.');
+		const tokenValue = (property: string, token: string): string => {
+			const probe = document.createElement('div');
+			probe.style.setProperty(property, `var(${token})`);
+			document.body.append(probe);
+			const value = getComputedStyle(probe).getPropertyValue(property);
+			probe.remove();
+			return value;
+		};
+		const unreadStyle = getComputedStyle(unread);
+		const explanationStyle = getComputedStyle(explanation);
+		const rect = explanation.getBoundingClientRect();
+		return {
+			unread: {
+				width: unread.getBoundingClientRect().width,
+				height: unread.getBoundingClientRect().height,
+				background: unreadStyle.backgroundColor,
+				backgroundTokens: [
+					tokenValue('background-color', '--action-notification-background'),
+					tokenValue('background-color', '--action-notification-background-hover'),
+					tokenValue('background-color', '--action-notification-background-active')
+				],
+				borderStyle: unreadStyle.borderStyle,
+				borderWidth: Number.parseFloat(unreadStyle.borderWidth),
+				borderColor: unreadStyle.borderColor,
+				borderColorToken: tokenValue('border-color', '--action-notification-border'),
+				color: unreadStyle.color,
+				colorToken: tokenValue('color', '--action-notification-foreground')
+			},
+			explanation: {
+				text: explanation.textContent?.trim(),
+				left: rect.left,
+				right: rect.right,
+				top: rect.top,
+				bottom: rect.bottom,
+				background: explanationStyle.backgroundColor,
+				color: explanationStyle.color,
+				paddingTop: Number.parseFloat(explanationStyle.paddingTop),
+				paddingRight: Number.parseFloat(explanationStyle.paddingRight),
+				paddingBottom: Number.parseFloat(explanationStyle.paddingBottom),
+				paddingLeft: Number.parseFloat(explanationStyle.paddingLeft),
+				maxWidth: Number.parseFloat(explanationStyle.maxWidth),
+				overflowWrap: explanationStyle.overflowWrap,
+				clientWidth: explanation.clientWidth,
+				scrollWidth: explanation.scrollWidth,
+				clientHeight: explanation.clientHeight,
+				scrollHeight: explanation.scrollHeight
+			}
+		};
+	});
+	expect(presentation.unread.width).toBeGreaterThanOrEqual(44);
+	expect(presentation.unread.height).toBeGreaterThanOrEqual(44);
+	expect(presentation.unread.backgroundTokens).toContain(presentation.unread.background);
+	expect(presentation.unread.borderStyle).toBe('solid');
+	expect(presentation.unread.borderWidth).toBeGreaterThan(0);
+	expect(presentation.unread.borderColor).toBe(presentation.unread.borderColorToken);
+	expect(presentation.unread.color).toBe(presentation.unread.colorToken);
+	expect(presentation.explanation.text).toBe('どこかにあなたへの返信の痕跡があります');
+	expect(presentation.explanation.background).not.toBe('rgba(0, 0, 0, 0)');
+	expect(presentation.explanation.color).not.toBe('rgb(0, 0, 0)');
+	expect(presentation.explanation.paddingTop).toBeGreaterThan(0);
+	expect(presentation.explanation.paddingRight).toBeGreaterThan(0);
+	expect(presentation.explanation.paddingBottom).toBeGreaterThan(0);
+	expect(presentation.explanation.paddingLeft).toBeGreaterThan(0);
+	expect(presentation.explanation.maxWidth).toBeGreaterThan(0);
+	expect(presentation.explanation.maxWidth).toBeLessThan(viewportWidth);
+	expect(presentation.explanation.overflowWrap).toBe('anywhere');
+	expect(presentation.explanation.scrollWidth).toBeLessThanOrEqual(presentation.explanation.clientWidth + 1);
+	expect(presentation.explanation.scrollHeight).toBeLessThanOrEqual(presentation.explanation.clientHeight + 1);
+	expect(presentation.explanation.left).toBeGreaterThanOrEqual(16);
+	expect(presentation.explanation.right).toBeLessThanOrEqual(viewportWidth - 16);
+	expect(presentation.explanation.top).toBeGreaterThanOrEqual(16);
+	expect(presentation.explanation.bottom).toBeLessThanOrEqual(viewportHeight - 16);
+}
+
 test.describe('Relay startup', () => {
 	test('shows published Trace replies to a fresh client through Relay history and live delivery', async ({ page: sender, browser }) => {
 		const time = Date.now();
@@ -208,6 +287,7 @@ test.describe('Relay startup', () => {
 		await page.locator('.trace-unread-indicator').click();
 		const explanation = page.locator('.trace-unread-explanation');
 		await expect(explanation).toHaveText('どこかにあなたへの返信の痕跡があります');
+		await expectUnreadPopoverPresentation(page, 1100, 850);
 		const explanationBox = await explanation.boundingBox();
 		const dockWithExplanation = await page.locator('.action-dock').boundingBox();
 		expect(explanationBox && dockBeforeExplanation && dockWithExplanation).toBeTruthy();
@@ -346,6 +426,7 @@ test.describe('Relay startup', () => {
 		await unread.click();
 		const explanation = page.locator('.trace-unread-explanation');
 		await expect(explanation).toHaveText('どこかにあなたへの返信の痕跡があります');
+		await expectUnreadPopoverPresentation(page, 320, 844);
 		const explanationBox = await explanation.boundingBox();
 		const dockWithExplanation = await page.locator('.action-dock').boundingBox();
 		expect(explanationBox && dockBeforeExplanation && dockWithExplanation).toBeTruthy();

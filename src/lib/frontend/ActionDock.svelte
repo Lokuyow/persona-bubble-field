@@ -137,13 +137,15 @@
 		</Tooltip.Root>
 		{#if hasUnreadReplies}
 			<Popover.Root bind:open={explanationVisible}>
-				<Popover.Trigger class="trace-unread-indicator" aria-label="あなたへの返信の痕跡があります">
-					<span aria-hidden="true">●</span>
+				<Popover.Trigger>
+					{#snippet child({ props })}
+						<button {...props} class="trace-unread-indicator" type="button" aria-label="あなたへの返信の痕跡があります">
+							<span aria-hidden="true">●</span>
+						</button>
+					{/snippet}
 				</Popover.Trigger>
 				<Popover.Portal>
 					<Popover.Content
-						role="status"
-						class="trace-unread-explanation"
 						side="top"
 						align="center"
 						sideOffset={8}
@@ -151,7 +153,13 @@
 						collisionPadding={{ top: 16, right: 16, bottom: 16, left: 16 }}
 						onInteractOutside={() => { explanationVisible = false; }}
 					>
-						どこかにあなたへの返信の痕跡があります
+						{#snippet child({ wrapperProps, props })}
+							<div {...wrapperProps}>
+								<div {...props} class="trace-unread-explanation" role="status">
+									どこかにあなたへの返信の痕跡があります
+								</div>
+							</div>
+						{/snippet}
 					</Popover.Content>
 				</Popover.Portal>
 			</Popover.Root>
