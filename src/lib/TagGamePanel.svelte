@@ -75,16 +75,14 @@
 				<section class="tag-game-intro" aria-label="鬼ごっこの概要">
 					<p class="tag-game-meta">2〜8人 · 2分</p>
 					<p class="tag-game-intro-line">福を奪い、鬼を押し付ける。</p>
-					<p class="tag-game-risk">鬼の効果中は毎秒1時間の寿命を失います。確定した寿命損失によって寿命が尽きると死亡します。</p>
+					<p class="tag-game-risk">鬼になった者は、毎秒1時間の寿命を失います。寿命が尽きれば死亡します。</p>
 					<details class="tag-game-rules">
 						<summary><span class="tag-game-rules-label"><HelpCircle aria-hidden="true" /> <span class="tag-game-rules-closed">ルールを見る</span><span class="tag-game-rules-open">ルールを閉じる</span></span><span class="tag-game-rules-chevron" aria-hidden="true"><ChevronDown /></span></summary>
 						<div class="tag-game-rules-content">
-							<div class="tag-game-effect-card tag-game-effect-benefit"><div class="tag-game-effect-heading"><strong>福</strong><strong>+50pt / 秒</strong></div><p>福を持っていない人が所持者を追いかけ、タッチして福を奪います。</p></div>
-							<div class="tag-game-effect-card tag-game-effect-calamity"><div class="tag-game-effect-heading"><strong>鬼</strong><strong>寿命 −1時間 / 秒</strong></div><p>鬼の所持者が他の参加者を追いかけ、タッチして鬼を押し付けます。</p></div>
-							<section class="tag-game-rule-item"><h3>切り替え</h3><p>福と鬼は6区間で交互に切り替わります。それぞれ3区間、予定時間は合計60秒。1区間は10〜40秒です。どちらから始まるかは開催回によって異なります。</p></section>
-							<section class="tag-game-rule-item"><h3>タッチ</h3><p>相手と隣接するとタッチできます。開始直後と移転成立後の2秒間は移転できません。効果停止中も移転できません。</p></section>
-							<section class="tag-game-rule-item"><h3>参加と開始</h3><p>開催者が参加者を募集します。開催者が開始を提案すると、その他の参加者には30秒の同意期限があります。開催者を含む有効な同意者が2人以上になると、5秒のカウントダウン後に開始します。</p></section>
-							<section class="tag-game-rule-item"><h3>ゲーム中</h3><p>開始後は脱出と能力強化ができません。通常作業は継続できます。ゲーム終了後、ポイントと寿命損失は正式な精算によって確定します。</p></section>
+							<div class="tag-game-effect-card tag-game-effect-benefit"><div class="tag-game-effect-heading"><strong>福</strong><strong>+50pt / 秒</strong></div><p>福を持たない者は、所持者にタッチして福を奪えます。</p></div>
+							<div class="tag-game-effect-card tag-game-effect-calamity"><div class="tag-game-effect-heading"><strong>鬼</strong><strong>寿命 −1時間 / 秒</strong></div><p>鬼は他の参加者にタッチして、鬼を押し付けられます。</p></div>
+							<section class="tag-game-rule-item"><h3>切り替え</h3><p>福と鬼は交互に切り替わります。</p></section>
+							<section class="tag-game-rule-item"><h3>タッチ</h3><p>隣接した相手にのみタッチできます。</p></section>
 						</div>
 					</details>
 				</section>

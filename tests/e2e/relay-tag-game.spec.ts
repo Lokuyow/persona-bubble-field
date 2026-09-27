@@ -648,15 +648,19 @@ test('tag game rules stay usable across desktop and mobile terminal states', asy
 	const dialog = page.getByRole('dialog', { name: '鬼ごっこ' });
 	const rules = dialog.locator('.tag-game-rules');
 	await expect(dialog.getByText('2〜8人 · 2分')).toBeVisible();
-	await expect(dialog.getByText(/鬼の効果中は毎秒1時間の寿命を失います/)).toBeVisible();
+	await expect(dialog.getByText('鬼になった者は、毎秒1時間の寿命を失います。寿命が尽きれば死亡します。')).toBeVisible();
 	await expect(rules).not.toHaveAttribute('open', '');
 	const summary = rules.locator('summary');
 	await summary.focus();
 	await page.keyboard.press('Enter');
 	await expect(rules).toHaveAttribute('open', '');
 	await expect(summary).toContainText('ルールを閉じる');
-	await expect(rules.getByText('福を持っていない人が所持者を追いかけ、タッチして福を奪います。')).toBeVisible();
-	await expect(rules.getByText('鬼の所持者が他の参加者を追いかけ、タッチして鬼を押し付けます。')).toBeVisible();
+	await expect(rules.getByText('福を持たない者は、所持者にタッチして福を奪えます。')).toBeVisible();
+	await expect(rules.getByText('鬼は他の参加者にタッチして、鬼を押し付けられます。')).toBeVisible();
+	await expect(rules.getByText('福と鬼は交互に切り替わります。')).toBeVisible();
+	await expect(rules.getByText('隣接した相手にのみタッチできます。')).toBeVisible();
+	await expect(rules.getByRole('heading', { name: '参加と開始' })).toHaveCount(0);
+	await expect(rules.getByRole('heading', { name: 'ゲーム中' })).toHaveCount(0);
 	const [benefitBox, calamityBox] = await Promise.all([
 		rules.locator('.tag-game-effect-benefit').boundingBox(),
 		rules.locator('.tag-game-effect-calamity').boundingBox()
@@ -675,6 +679,13 @@ test('tag game rules stay usable across desktop and mobile terminal states', asy
 	await expect(rules).toHaveAttribute('open', '');
 
 	await page.setViewportSize({ width: 390, height: 640 });
+	await dialog.evaluate((element) => { element.scrollTop = 0; });
+	await summary.focus();
+	await page.keyboard.press('Enter');
+	await expect(rules).not.toHaveAttribute('open', '');
+	await summary.focus();
+	await page.keyboard.press('Enter');
+	await expect(rules).toHaveAttribute('open', '');
 	await dialog.evaluate((element) => { element.scrollTop = 0; });
 	const [mobileBenefitBox, mobileCalamityBox] = await Promise.all([
 		rules.locator('.tag-game-effect-benefit').boundingBox(),
