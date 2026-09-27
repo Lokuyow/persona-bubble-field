@@ -1410,8 +1410,9 @@ export function createNostrRelayTransport(
 	}
 
 	function publishSelfEvent(event: VerifiedEvent, selfPubkey: string): SelfPublishHandle {
-		if ((state !== 'started' && !(state === 'starting' && earlySelfReadReady)) ||
-			event.pubkey !== selfPubkey || (event.kind !== CHANNEL_MESSAGE_KIND && event.kind !== WORLD_STATE_KIND)) {
+		const isTraceReply = event.kind === 1111;
+		if ((isTraceReply ? state !== 'started' : state !== 'started' && !(state === 'starting' && earlySelfReadReady)) ||
+			event.pubkey !== selfPubkey || (!isTraceReply && event.kind !== CHANNEL_MESSAGE_KIND && event.kind !== WORLD_STATE_KIND)) {
 			throw new Error('Self publication is unavailable before the bounded primary read boundary.');
 		}
 		const client = requireRxNostr();
@@ -1446,7 +1447,8 @@ export function createNostrRelayTransport(
 					if (!relayUrl) return;
 					results.set(relayUrl, { relayUrl, outcome: packet.ok ? 'accepted' : 'rejected',
 						...(packet.notice ? { notice: packet.notice } : {}) });
-					if (packet.ok || packet.notice?.startsWith('duplicate:')) finishFirst(true);
+					if ((packet.ok || packet.notice?.startsWith('duplicate:')) &&
+						(!isTraceReply || world.authoritativeRelays.includes(relayUrl))) finishFirst(true);
 				},
 				complete: () => {
 					finished = true;

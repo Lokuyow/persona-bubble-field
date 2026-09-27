@@ -12,12 +12,47 @@ import {
 } from '../../src/lib/nostrProtocol';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { expectIconCloseButton } from './helpers/iconCloseButton';
-import { CHANNEL_ID, fixtureSecret, traceRuntimeEvents, installDelayedRelay, relayState, selectRelayTraceCell, clickRelayLogicalCell, installPromptApiStub, seedRelayAccount, readActionDockControlOrder } from './helpers/relayHarness';
+import { AUTHORITATIVE_RELAYS, CHANNEL_ID, fixtureSecret, traceRuntimeEvents, installDelayedRelay, relayState, selectRelayTraceCell, clickRelayLogicalCell, installPromptApiStub, seedRelayAccount, readActionDockControlOrder } from './helpers/relayHarness';
 
 
 
 
 test.describe('Relay startup', () => {
+	test('returns Trace reply success with silent authoritative Relays still pending and reconciles a later echo once', async ({ page }) => {
+		const now = Date.now();
+		const trace = traceRuntimeEvents();
+		await page.clock.setFixedTime(now);
+		await page.emulateMedia({ reducedMotion: 'reduce' });
+		await page.setViewportSize({ width: 1100, height: 850 });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, {
+			primaryEvents: { message: trace.message, position: trace.selfPosition }, traceRoots: [trace.root],
+			silentReplyRelays: AUTHORITATIVE_RELAYS.filter((url) => url !== 'wss://nos.lol/')
+		});
+		await seedRelayAccount(page, trace.selfSecret, trace.selfPubkey);
+		await page.goto('/');
+		await expect(page.locator('.action-dock')).toBeVisible();
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		await expect(page.locator('[data-trace-marker-position="4,2"]')).toBeVisible();
+		await page.locator('.chatter-toggle').click();
+		await selectRelayTraceCell(page, '4,2');
+		await expect(page.locator(`[data-trace-root-id="${trace.root.id}"]`)).toContainText(trace.root.content);
+		const editor = page.getByRole('textbox', { name: '投稿エディター' });
+		await expect(page.getByLabel('Reply preview', { exact: true })).toHaveAttribute('data-reply-id', trace.root.id);
+		await editor.fill('reply before silent Relay timeouts');
+		await editor.press('Enter');
+		await expect(editor).toHaveValue('');
+		const published = await page.evaluate(() => (window as typeof window & {
+			__relayStartupTest: { state: { published: Array<{ id: string; kind: number; content: string }> } }
+		}).__relayStartupTest.state.published.filter((event) => event.kind === 1111 && event.content === 'reply before silent Relay timeouts'));
+		expect(published).toHaveLength(AUTHORITATIVE_RELAYS.length);
+		const eventId = published[0].id;
+		await expect(page.locator(`[data-trace-reply-id="${eventId}"]`)).toContainText('reply before silent Relay timeouts');
+		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectTraceReply(event: object): void } })
+			.__relayStartupTest.injectTraceReply(event), (await relayState(page)).state.published.find((event) => event.id === eventId)!);
+		await expect(page.locator(`[data-trace-reply-id="${eventId}"]`)).toHaveCount(1);
+	});
+
 	test('shows published Trace replies to a fresh client through Relay history and live delivery', async ({ page: sender, browser }) => {
 		const time = Date.now();
 		const trace = traceRuntimeEvents();

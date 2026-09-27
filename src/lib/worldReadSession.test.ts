@@ -43,6 +43,14 @@ describe('Trace reply publication ownership', () => {
 		let callbacks!: TraceReplyConfiguration;
 		let primary!: { onLiveWorldState: (event: ParsedWorldStateEvent) => void };
 		const publish = vi.fn(async (_event: VerifiedEvent) => accepted as import('./nostrRelayTransport').PublishRelayResult[]);
+		const publishSelf = vi.fn((event: VerifiedEvent, _pubkey: string) => {
+			const settled = publish(event);
+			return {
+				firstSuccess: settled.then((results) => results.some((result) => result.outcome === 'accepted' ||
+					result.notice?.startsWith('duplicate:'))),
+				settled
+			};
+		});
 		const configureTraceReplies = vi.fn(async (input: TraceReplyConfiguration) => {
 			callbacks = input;
 			return { status: 'active', initialBatch: { events: [], relays: [] } };
@@ -60,7 +68,7 @@ describe('Trace reply publication ownership', () => {
 		});
 		mocked.createTransport.mockReset().mockReturnValue({
 			start: vi.fn(async (input) => { primary = input; return startResult([], [position('self', 700, selfPubkey)]); }),
-			bootstrapTraceRootCandidates: traceBootstrap(), configureTraceReplies, publish, dispose: vi.fn()
+			bootstrapTraceRootCandidates: traceBootstrap(), configureTraceReplies, publish, publishSelf, dispose: vi.fn()
 		});
 		const onLiveMessage = vi.fn();
 		const session = createWorldReadSession({ field: { columns: 4, rows: 3 }, selfSigner: selfSigner(),
@@ -68,7 +76,7 @@ describe('Trace reply publication ownership', () => {
 		await session.start(); session.completeBootstrap(); await session.enterSelf(); await settle();
 		expect(session.openTraceConversation({ rootId: root.id, currentId: root.id }).kind).toBe('opened');
 		await settle();
-		return { session, root, child, publish, configureTraceReplies, primary, onLiveMessage,
+		return { session, root, child, publish, publishSelf, configureTraceReplies, primary, onLiveMessage,
 			callbacks: () => callbacks,
 			submit: (speechType: 'normal' | 'shout' | 'monologue' = 'normal') => session.publishTraceReply({
 				rootId: root.id, targetId: nested ? child.id : root.id, content: 'reply draft', speechType
@@ -107,6 +115,44 @@ describe('Trace reply publication ownership', () => {
 		const rawEvent = f.publish.mock.calls[0][0];
 		expect(rawEvent.tags).toEqual(expect.arrayContaining([['E', f.root.id, '', f.root.pubkey],
 			['e', f.child.id, '', f.child.pubkey], ['k', '1111'], ['p', f.child.pubkey]]));
+	});
+
+	it('returns after the first accepted Relay while settlement and later own echoes remain harmless', async () => {
+		const f = await fixture();
+		const slowRelay = deferred<import('./nostrRelayTransport').PublishRelayResult[]>();
+		f.publishSelf.mockImplementationOnce(() => ({ firstSuccess: Promise.resolve(true), settled: slowRelay.promise }));
+
+		await expect(f.submit()).resolves.toMatchObject({ kind: 'succeeded', eventId: expect.any(String) });
+		const event = f.publishSelf.mock.calls[0][0];
+		expect(event.kind).toBe(1111);
+		expect(f.session.getTraceConversationState()).toMatchObject({ replies: [{ id: event.id }] });
+		f.callbacks().onLiveEvent(event);
+		f.callbacks().onBatch({ events: [event], relays: [] });
+		await settle();
+		expect(f.session.getTraceConversationState()).toMatchObject({ replies: [{ id: event.id }] });
+		slowRelay.resolve(accepted);
+	});
+
+	it('keeps Composer success behind cache reconciliation after recording the earlier Relay confirmation', async () => {
+		const f = await fixture();
+		const confirmation = deferred<boolean>();
+		const cache = deferred<readonly ParsedTraceReply[]>();
+		mocked.reconcileTraceReplyCache.mockImplementationOnce(() => cache.promise);
+		f.publishSelf.mockImplementationOnce(() => ({ firstSuccess: confirmation.promise, settled: new Promise(() => {}) }));
+		const startedAt = Date.now();
+		let returned = false;
+		const submission = f.submit().then((result) => { returned = true; return result; });
+		await settle();
+		vi.setSystemTime(startedAt + 25);
+		confirmation.resolve(true);
+		await settle();
+		expect(returned).toBe(false);
+		const firstConfirmationMs = Date.now() - startedAt;
+		vi.setSystemTime(startedAt + 75);
+		cache.resolve([]);
+		await expect(submission).resolves.toMatchObject({ kind: 'succeeded' });
+		expect(Date.now() - startedAt).toBe(75);
+		expect(firstConfirmationMs).toBe(25);
 	});
 
 	it('rejects a foreign target before any planner or publication work', async () => {
