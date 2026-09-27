@@ -294,7 +294,7 @@ test('keeps the tag-game benefit pulse in phase during repeated point gains and 
 	await expect(points).not.toHaveAttribute('data-value-change', /.+/);
 	await expect(points).toHaveAttribute('data-tag-game-flash', 'benefit');
 	await expect(points).toHaveCSS('animation-name', /tag-game-value-pulse$/);
-	await expect.poll(async () => (await recordedTagGameSounds(page)).filter((duration) => Math.abs(duration - 0.075) < 0.001)).toHaveLength(1);
+	await expect.poll(async () => (await recordedTagGameSounds(page)).filter((duration) => Math.abs(duration - 0.18) < 0.001)).toHaveLength(1);
 	expect((await recordedTagGameSounds(page)).filter((duration) => Math.abs(duration - 0.52) < 0.001)).toHaveLength(0);
 	await page.evaluate(() => {
 		(window as typeof window & { __tagGamePulseIterations?: number }).__tagGamePulseIterations = 0;
@@ -307,7 +307,7 @@ test('keeps the tag-game benefit pulse in phase during repeated point gains and 
 	});
 	await page.waitForFunction(() => (window as typeof window & { __tagGamePulseIterations?: number }).__tagGamePulseIterations === 1,
 		undefined, { polling: 'raf', timeout: 3_000 });
-	await expect.poll(async () => (await recordedTagGameSounds(page)).filter((duration) => Math.abs(duration - 0.075) < 0.001)).toHaveLength(2);
+	await expect.poll(async () => (await recordedTagGameSounds(page)).filter((duration) => Math.abs(duration - 0.18) < 0.001)).toHaveLength(2);
 	await expect(points).toHaveCSS('animation-duration', '1.5s');
 	const pulseOffsets = await points.evaluate((element) => {
 		const animation = element.getAnimations().find((candidate): candidate is CSSAnimation =>
@@ -1246,7 +1246,8 @@ test('organizer local safety stop hides touch targets and resumes presentation a
 	const targetPubkey = getPublicKey(targetSecret);
 	await preparePlayer(page, organizerSecret, nowMs, 0);
 	await moveRelaySelfTo(page, { x: 7, y: 5 });
-	const nowSeconds = Math.floor(await page.evaluate(() => Date.now() / 1_000));
+	const safetyStartedAtMs = await page.evaluate(() => Date.now());
+	const nowSeconds = Math.floor(safetyStartedAtMs / 1_000);
 	const channel = { channelId: CHANNEL_ID, relayHint: 'wss://relay.test/' };
 	const targetPosition = finalizeEvent(buildWorldStateEventTemplate({ channel, createdAt: nowSeconds, position: { x: 8, y: 5 }, slot: 1, runNumber: 1 }), targetSecret);
 	const targetActivity = finalizeEvent(buildWorldMessageTemplate({ channel, createdAt: nowSeconds, position: { x: 8, y: 5 }, content: 'active target', speechType: 'normal' }), targetSecret);
@@ -1259,9 +1260,9 @@ test('organizer local safety stop hides touch targets and resumes presentation a
 	const gameId = `${organizerPubkey}:${nowSeconds}:${'7'.repeat(64)}`;
 	const running: TagGameState = {
 		gameId, hostPubkey: organizerPubkey, phase: 'running', revision: 0, updatedAt: nowSeconds,
-		startedAt: nowSeconds, endsAt: nowSeconds + 180, seed, ownerPubkey: organizerPubkey, effect: 'calamity', transferAt: nowSeconds * 1_000,
+		startedAt: nowSeconds, endsAt: nowSeconds + 180, seed, ownerPubkey: organizerPubkey, effect: 'calamity', transferAt: safetyStartedAtMs,
 		participant: [organizerPubkey, targetPubkey].map((pubkey) => ({ pubkey, runNumber: 1, registeredAt: nowSeconds, status: 'active' as const, points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 })),
-		settledAtMs: nowSeconds * 1_000, lastHolderResponseAtMs: nowSeconds * 1_000
+		settledAtMs: safetyStartedAtMs, lastHolderResponseAtMs: safetyStartedAtMs
 	};
 	await injectRealtime(page, finalizeTagGameState(running, CHANNEL_ID, nowSeconds, organizerSecret));
 	const target = page.locator(`.participant[data-participant-id="${targetPubkey}"]`);
@@ -1275,7 +1276,7 @@ test('organizer local safety stop hides touch targets and resumes presentation a
 		return parseTagGameEvent(event, CHANNEL_ID)?.state.holderChallengeId ?? null;
 	}).toBeTruthy();
 	const locallyStoppedAttempt = parseTagGameEvent(await latestGameEvent(page, gameId), CHANNEL_ID)!.state;
-	expect(locallyStoppedAttempt.settledAtMs).toBe(nowSeconds * 1_000 + 23_000);
+	expect(locallyStoppedAttempt.settledAtMs).toBe(safetyStartedAtMs + 23_000);
 	await expect(hud.locator('[data-tag-game-effect]')).toHaveAttribute('data-tag-game-effect-active', 'false');
 	await expect(hud.locator('[data-tag-game-effect] span')).toHaveText('安全停止中・効果停止');
 	await expect(hud.locator('[data-tag-game-cooldown]')).toHaveText('効果停止中');

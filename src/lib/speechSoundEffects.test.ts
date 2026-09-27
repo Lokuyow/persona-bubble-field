@@ -51,6 +51,16 @@ describe('speech sound effects', () => {
 			for (let other = index + 1; other < samples.length; other += 1) expect(samples[index]).not.toEqual(samples[other]);
 		}
 	});
+	it('gives the benefit cue a short rising two-note major chime', () => {
+		const sampleRate = 10_000;
+		const benefit = createSoundSamples('tag-game-benefit', sampleRate);
+		expect(benefit.length).toBe(Math.ceil(0.18 * sampleRate));
+		const firstNote = benefit.slice(0, 650);
+		const risingNote = benefit.slice(800, 1_700);
+		expect(spectralEnergy(firstNote, sampleRate, 659)).toBeGreaterThan(spectralEnergy(firstNote, sampleRate, 880));
+		expect(spectralEnergy(risingNote, sampleRate, 880)).toBeGreaterThan(spectralEnergy(risingNote, sampleRate, 659));
+		expect(Math.abs(benefit.at(-1) ?? 1)).toBeLessThan(0.001);
+	});
 	it('keeps speech gain at unity and attenuates only UI success sounds', () => {
 		expect(SOUND_EFFECT_GAINS.normal).toBe(1);
 		expect(SOUND_EFFECT_GAINS.shout).toBe(1);
