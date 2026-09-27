@@ -61,10 +61,11 @@
 		<span class={['tag-game-effect-aura', `tag-game-effect-aura-${tagGameEffect}`, { 'tag-game-effect-aura-paused': !tagGameEffectActive }]} aria-hidden="true">
 			<svg viewBox="0 0 76 76" focusable="false">
 				{#if tagGameEffect === 'benefit'}
-					<circle class="fuku-aura-glow" cx="38" cy="38" r="34.5" />
-					<circle class="fuku-aura-ring" cx="38" cy="38" r="35.5" />
-					<path class="fuku-aura-flare fuku-aura-flare-one" d="M17 7L21 11L17 15L13 11Z" />
-					<path class="fuku-aura-flare fuku-aura-flare-two" d="M60 57L63 60L60 63L57 60Z" />
+					<path class="fuku-aura-glow" d="M18 8Q22 12 27 7L32 4L35 9L41 5L45 11Q51 8 55 14M68 23L64 28L70 33L66 38M68 51L62 54L65 60L58 62M50 69L45 65L39 71L34 66M25 68L23 62L16 61L18 54M8 47L13 42L7 37L12 32M9 23L16 21L15 14" />
+					<path class="fuku-aura-ring" d="M18 8L23 12L27 7L32 4L35 9L41 5L45 11L51 8L55 14M68 23L64 28L70 33L66 38M68 51L62 54L65 60L58 62M50 69L45 65L39 71L34 66M25 68L23 62L16 61L18 54M8 47L13 42L7 37L12 32M9 23L16 21L15 14" />
+					<path class="fuku-aura-flare fuku-aura-flare-one" d="M15 5L19 10L16 14L11 12Z" />
+					<path class="fuku-aura-flare fuku-aura-flare-two" d="M61 55L66 58L63 64L58 61Z" />
+					<path class="fuku-aura-flare fuku-aura-flare-three" d="M65 17L69 20L66 25L62 22Z" />
 				{:else}
 					<path class="oni-aura-shadow" d="M35 2L42 4L47 2L51 9L60 10L59 17L68 20L64 27L74 34L68 39L73 47L64 51L66 58L57 60L52 72L44 68L38 74L32 68L23 72L20 63L11 60L15 53L3 48L10 42L2 34L9 29L5 21L14 18L17 9L27 11Z" />
 					<path class="oni-aura-outline" d="M35 2L42 4L47 2L51 9L60 10L59 17L68 20L64 27M74 34L68 39L73 47L64 51M66 58L57 60L52 72L44 68M38 74L32 68L23 72M20 63L11 60L15 53L3 48M2 34L9 29L5 21L14 18L17 9L27 11" />
@@ -222,12 +223,13 @@
 	.tag-game-effect-aura-paused { opacity: .76; }
 	.tag-game-effect-visuals-paused { opacity: .92; }
 
-	.fuku-aura-glow { fill: none; stroke: rgba(255, 244, 225, .76); stroke-width: 5; filter: drop-shadow(0 0 3px rgba(255, 168, 118, .8)); }
-	.fuku-aura-ring { fill: none; stroke: rgba(221, 65, 47, .9); stroke-width: 1.9; stroke-dasharray: 12 5 2 8; transform-box: fill-box; transform-origin: center; animation: fuku-aura-turn 9s linear infinite; }
-	.fuku-aura-flare { fill: #ffe8a8; stroke: #d94a39; stroke-width: 1; transform-box: fill-box; transform-origin: center; }
+	.fuku-aura-glow { fill: none; stroke: rgba(255, 244, 225, .66); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 0 3px rgba(255, 168, 118, .8)); }
+	.fuku-aura-ring { fill: none; stroke: rgba(221, 65, 47, .94); stroke-width: 2.2; stroke-dasharray: 22 7 5 12 2 9; stroke-linecap: square; stroke-linejoin: bevel; transform-box: fill-box; transform-origin: center; animation: fuku-aura-waver 5.7s ease-in-out infinite alternate; }
+	.fuku-aura-flare { fill: #fff1c9; stroke: #d94a39; stroke-width: 1.2; stroke-linejoin: bevel; transform-box: fill-box; transform-origin: center; }
 	.fuku-aura-flare-one { animation: fuku-aura-flicker 3.8s ease-in-out infinite; }
-	.fuku-aura-flare-two { animation: fuku-aura-flicker 4.6s ease-in-out -2s infinite; }
-	.tag-game-effect-aura-paused .fuku-aura-ring { stroke-dasharray: 3 4; }
+	.fuku-aura-flare-two { fill: #e95b42; stroke: #ffe4a4; animation: fuku-aura-flicker 4.6s ease-in-out -2s infinite; }
+	.fuku-aura-flare-three { fill: #ffd789; stroke: #fff4df; animation: fuku-aura-flicker 5.2s ease-in-out -3.1s infinite; }
+	.tag-game-effect-aura-paused .fuku-aura-ring { stroke-dasharray: 5 4 2 7; }
 	.tag-game-effect-aura-paused .fuku-aura-ring,
 	.tag-game-effect-aura-paused .fuku-aura-flare { animation: none; }
 
@@ -267,8 +269,8 @@
 		box-shadow: 0 0 0 1px rgba(47, 68, 78, .65);
 		pointer-events: none;
 	}
-	@keyframes fuku-aura-turn { to { transform: rotate(360deg); } }
-	@keyframes fuku-aura-flicker { 0%, 22%, 100% { opacity: .4; transform: scale(.8); } 48% { opacity: 1; transform: scale(1.16); } }
+	@keyframes fuku-aura-waver { from { transform: rotate(-1.2deg) translateY(0); opacity: .68; } to { transform: rotate(1.1deg) translateY(1px); opacity: 1; } }
+	@keyframes fuku-aura-flicker { 0%, 22%, 100% { opacity: .48; transform: scale(.84) rotate(-3deg); } 48% { opacity: 1; transform: scale(1.12) rotate(4deg); } }
 	@keyframes oni-aura-waver { from { transform: rotate(-1.2deg) translateY(0); opacity: .78; } to { transform: rotate(1.2deg) translateY(1px); opacity: 1; } }
 	@keyframes oni-aura-shard { from { opacity: .5; transform: translateY(1px) rotate(-2deg); } to { opacity: .95; transform: translateY(-1px) rotate(3deg); } }
 

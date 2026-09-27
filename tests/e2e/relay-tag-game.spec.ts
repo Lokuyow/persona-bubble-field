@@ -1820,10 +1820,18 @@ test('host silence is detected only while the local Relay connection is active',
 	await expect(holder.locator('.tag-game-effect-aura .fuku-aura-ring')).toHaveCount(1);
 	await expect(effectVisuals.locator('[data-fuku-mallet]')).toHaveCount(1);
 	await expect(holder.locator('.tag-game-effect-aura .oni-aura-outline')).toHaveCount(0);
+	const fukuViewport = page.viewportSize();
+	if (!fukuViewport) throw new Error('Expected a fixed viewport for Fuku symbol layout checks');
+	await page.setViewportSize({ width: 1280, height: 800 });
+	await expect.poll(() => holder.evaluate((element) => element.getBoundingClientRect().width)).toBe(76);
 	const desktopFukuLayout = await readEffectSymbolLayout(holder);
 	expectIconAboveAvatarAndClearOfName(desktopFukuLayout, 'mallet');
+	await page.setViewportSize({ width: 390, height: 844 });
+	await expect.poll(() => holder.evaluate((element) => element.getBoundingClientRect().width)).toBe(50);
 	const mobileFukuLayout = await readEffectSymbolLayout(holder);
 	expectIconAboveAvatarAndClearOfName(mobileFukuLayout, 'mallet');
+	await page.setViewportSize(fukuViewport);
+	await expect.poll(() => holder.evaluate((element) => element.getBoundingClientRect().width)).toBe(76);
 	await page.emulateMedia({ reducedMotion: 'reduce' });
 	const reducedMotionAnimations = await holder.evaluate((element) => [...element.querySelectorAll<SVGElement>('*')]
 		.map((child) => getComputedStyle(child).animationName).filter((name) => name !== 'none'));
