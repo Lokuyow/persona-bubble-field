@@ -993,23 +993,23 @@ test('keeps join actions primary and equally emphasized when multiple tag-game l
 			expect(secondJoinHitArea.insideViewport).toBe(true);
 		}
 		await joinerPage.setViewportSize({ width: 390, height: 640 });
-		const panelScroll = await dialog.evaluate((element) => {
-			const panel = element as HTMLElement;
-			panel.scrollTop = panel.scrollHeight;
-			return { top: panel.scrollTop, maximum: panel.scrollHeight - panel.clientHeight };
+		const dialogScroll = await dialog.evaluate((element) => {
+			const dialogElement = element as HTMLElement;
+			dialogElement.scrollTop = dialogElement.scrollHeight;
+			return { top: dialogElement.scrollTop, maximum: dialogElement.scrollHeight - dialogElement.clientHeight };
 		});
-		expect(panelScroll.maximum).toBeGreaterThan(0);
-		expect(panelScroll.top).toBe(panelScroll.maximum);
+		expect(dialogScroll.maximum).toBeGreaterThan(0);
+		expect(dialogScroll.top).toBe(dialogScroll.maximum);
 		const closePoint = await dialog.getByRole('button', { name: '閉じる' }).evaluate((button) => {
 			const rect = button.getBoundingClientRect();
-			const panelRect = button.closest('.panel')!.getBoundingClientRect();
+			const dialogRect = button.closest('[role="dialog"]')!.getBoundingClientRect();
 			const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
-			return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, inViewport: rect.top >= panelRect.top && rect.bottom <= panelRect.bottom, receivesPointer: Boolean(hit && button.contains(hit)) };
+			return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, inViewport: rect.top >= dialogRect.top && rect.bottom <= dialogRect.bottom, receivesPointer: Boolean(hit && button.contains(hit)) };
 		});
 		expect(closePoint.inViewport).toBe(true);
 		expect(closePoint.receivesPointer).toBe(true);
 		await joinerPage.mouse.click(closePoint.x, closePoint.y);
-		await expect(joinerPage.locator('.panel[role="dialog"]')).toHaveCount(0);
+		await expect(dialog).toHaveCount(0);
 	} finally {
 		await Promise.all([firstHostPage.close(), secondHostPage.close(), joinerPage.close()]);
 	}
@@ -2180,6 +2180,11 @@ test('does not show unselected games and lets a spectator choose and clear one t
 	await page.locator(`[data-tag-game-watch="${gameBId}"]`).click();
 	await expect(page.locator('[data-tag-game-hud]')).toHaveAttribute('data-tag-game-hud-id', gameBId);
 	await expect(page.locator('[data-tag-game-hud] [data-tag-game-effect]')).toContainText('所持者以外が追いかけて奪う');
+	await page.getByRole('dialog', { name: '鬼ごっこ' }).getByRole('button', { name: '閉じる' }).click();
+	await expect(page.getByRole('dialog', { name: '鬼ごっこ' })).toHaveCount(0);
+	await expect(page.locator('[data-tag-game-hud]')).toHaveAttribute('data-tag-game-hud-id', gameBId);
+	await openTagGameTerminal(page);
+	await expect(page.getByRole('dialog', { name: '鬼ごっこ' }).getByRole('button', { name: '観戦を解除' })).toBeVisible();
 	const watchedGame = parseTagGameEvent(gameB, CHANNEL_ID)!.state;
 	const desktopHud = page.locator('[data-tag-game-hud]');
 	await expect(desktopHud.locator('[data-tag-game-hud-footer]')).toHaveCount(0);
@@ -2273,4 +2278,32 @@ test('keeps the tag-game close button keyboard-focusable with a visible focus ri
 	expect(focus.outlineStyle).toBe('solid');
 	expect(focus.outlineWidth).toBe('3px');
 	expect(focus.outlineColor).toBe(focus.token);
+});
+
+test('dismisses the tag-game dialog with Escape, outside click, and Close without losing terminal access', async ({ page }) => {
+	const nowMs = Date.now();
+	const secret = fixtureSecret(32);
+	await preparePlayer(page, secret, nowMs);
+	await moveRelaySelfTo(page, { x: 7, y: 5 });
+	await openTagGameTerminal(page);
+	const dialog = page.getByRole('dialog', { name: '鬼ごっこ' });
+	const close = dialog.getByRole('button', { name: '閉じる' });
+
+	await dialog.getByRole('heading', { name: '鬼ごっこ' }).click();
+	await dialog.hover();
+	await page.mouse.wheel(0, 120);
+	await expect(dialog).toBeVisible();
+
+	await page.keyboard.press('Escape');
+	await expect(dialog).toHaveCount(0);
+
+	await openTagGameTerminal(page);
+	await page.locator('.tag-game-dialog-overlay').click({ position: { x: 8, y: 8 } });
+	await expect(dialog).toHaveCount(0);
+
+	await openTagGameTerminal(page);
+	await close.click();
+	await expect(dialog).toHaveCount(0);
+	await openTagGameTerminal(page);
+	await expect(dialog).toBeVisible();
 });
