@@ -25,3 +25,8 @@ name = "開発サーバー: lun"
 icon = "run"
 command = "npm run dev -- --host"
 platform = "win32"
+
+[[actions]]
+name = "てすと"
+icon = "tool"
+command = "pwsh -NoProfile -File \"$HOME\\.codex\\preview-pr.ps1\""
