@@ -52,6 +52,7 @@ async function readEffectSymbolLayout(holder: Locator): Promise<Readonly<{
 	mallet: Box | null;
 	malletHead: Box | null;
 	malletShaft: Box | null;
+	malletNamePaintOverlap: boolean;
 	malletGeometry: Readonly<{
 		shaft: Readonly<{ tagName: string; x: number; y: number; width: number; height: number; rx: number }>;
 		head: Readonly<{ tagName: string; x: number; y: number; width: number; height: number; rx: number }>;
@@ -85,6 +86,26 @@ async function readEffectSymbolLayout(holder: Locator): Promise<Readonly<{
 		const rayBoxes = [...element.querySelectorAll<SVGGraphicsElement>('.fuku-halo-rays path')].map((ray) => box(ray)!);
 		const malletShaft = element.querySelector<SVGRectElement>('[data-fuku-mallet-handle]');
 		const malletHead = element.querySelector<SVGRectElement>('[data-fuku-mallet-head]');
+		const nameElement = element.querySelector('.participant-name');
+		const malletNamePaintOverlap = Boolean(nameElement && [malletHead, malletShaft].some((shape) => {
+			if (!shape) return false;
+			const bounds = shape.getBoundingClientRect();
+			const nameBounds = nameElement.getBoundingClientRect();
+			const left = Math.max(bounds.left, nameBounds.left);
+			const right = Math.min(bounds.right, nameBounds.right);
+			const top = Math.max(bounds.top, nameBounds.top);
+			const bottom = Math.min(bounds.bottom, nameBounds.bottom);
+			if (left >= right || top >= bottom) return false;
+			const inverse = shape.getScreenCTM()?.inverse();
+			if (!inverse) return true;
+			for (let y = top + 0.125; y < bottom; y += 0.25) {
+				for (let x = left + 0.125; x < right; x += 0.25) {
+					const point = new DOMPoint(x, y).matrixTransform(inverse);
+					if (shape.isPointInFill(point) || shape.isPointInStroke(point)) return true;
+				}
+			}
+			return false;
+		}));
 		const rectGeometry = (rect: SVGRectElement) => ({
 			tagName: rect.tagName.toLowerCase(),
 			x: Number(rect.getAttribute('x')),
@@ -114,6 +135,7 @@ async function readEffectSymbolLayout(holder: Locator): Promise<Readonly<{
 			mallet: path('[data-fuku-mallet]'),
 			malletHead: path('[data-fuku-mallet-head]'),
 			malletShaft: path('[data-fuku-mallet-handle]'),
+			malletNamePaintOverlap,
 			malletGeometry: malletShaft && malletHead ? {
 				shaft: rectGeometry(malletShaft),
 				head: rectGeometry(malletHead),
@@ -222,7 +244,7 @@ function expectMalletBottomRightOfAvatarAndClearOfName(layout: Awaited<ReturnTyp
 	};
 	// The mallet may sit beside the avatar edge, but must stay out of the central face area.
 	expect(overlaps(head!, faceSafeZone)).toBe(false);
-	expect(overlaps(mallet!, layout.name)).toBe(false);
+	expect(layout.malletNamePaintOverlap).toBe(false);
 	const shaftCentreX = shaft!.x + shaft!.width / 2;
 	const shaftCentreY = shaft!.y + shaft!.height / 2;
 	expect(shaftCentreX).toBeGreaterThan(headCentreX);
