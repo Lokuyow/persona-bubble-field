@@ -303,9 +303,14 @@ test.describe('Relay startup', () => {
 					editor: rect('.composer-editor-slot'),
 					right: rect('.composer-controls-right'),
 					unread: rect('.trace-unread-indicator'),
+					chatter: rect('.chatter-toggle'),
+					profile: rect('.profile-trigger'),
 					sound: rect('.speaker-button')
 				};
 			});
+			expect(geometry.unread.height).toBe(geometry.chatter.height);
+			expect(geometry.unread.height).toBe(geometry.profile.height);
+			expect(geometry.unread.height).toBe(geometry.sound.height);
 			expect(geometry.left.right).toBeLessThanOrEqual(geometry.editor.left);
 			expect(geometry.editor.right).toBeLessThanOrEqual(geometry.right.left);
 			const centers = [geometry.left, geometry.editor, geometry.right].map((box) => box.y + box.height / 2);
@@ -342,7 +347,9 @@ test.describe('Relay startup', () => {
 		await expect(page.locator(`[data-trace-root-id="${root.id}"]`)).toHaveAttribute('data-trace-current-kind', 'root');
 		await expect(page.locator(`[data-trace-ghost-root-id="${root.id}"]`)).toBeVisible();
 		await expect(page.locator(`[data-trace-reply-id="${reply.id}"]`)).toContainText(reply.content);
+		const dockHeightBeforeUnreadClear = (await page.locator('.action-dock').boundingBox())?.height;
 		await expect(page.locator('.trace-unread-indicator')).toHaveCount(0);
+		expect((await page.locator('.action-dock').boundingBox())?.height).toBe(dockHeightBeforeUnreadClear);
 		await expect(explanation).toHaveCount(0);
 		await clickRelayLogicalCell(page, { x: 0, y: 0 });
 		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveAttribute('data-trace-root-read', 'true');

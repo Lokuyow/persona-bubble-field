@@ -118,7 +118,7 @@
 				{#snippet child({ props })}
 					<button
 						{...props}
-						class="chatter-toggle"
+						class={['chatter-toggle', { 'action-selected': chatterOpen }]}
 						type="button"
 						aria-label={chatterOpen ? 'Chatterを閉じる' : 'Chatterを開く'}
 						aria-pressed={chatterOpen}
@@ -276,15 +276,10 @@
 		font-weight: 800;
 		cursor: pointer;
 	}
-	.chatter-toggle[aria-pressed='true'] {
-		border-color: var(--action-primary-border);
-		background: var(--action-primary-background);
-		color: var(--action-primary-foreground);
-	}
-	.chatter-toggle[aria-pressed='true']:hover { background: var(--action-primary-background-hover); }
-	.chatter-toggle[aria-pressed='true']:active { background: var(--action-primary-background-active); }
-	.profile-trigger:hover, .chatter-toggle:hover, .speech-type-toggle:hover:not(:disabled) { background: var(--action-icon-background-hover); }
-	.profile-trigger:active, .chatter-toggle:active, .speech-type-toggle:active:not(:disabled) { background: var(--action-icon-background-active); }
+	.chatter-toggle[aria-pressed='false']:hover:not(:disabled) { background: var(--action-icon-background-hover); }
+	.chatter-toggle[aria-pressed='false']:active:not(:disabled) { background: var(--action-icon-background-active); }
+	.profile-trigger:hover, .speech-type-toggle:hover:not(:disabled) { background: var(--action-icon-background-hover); }
+	.profile-trigger:active, .speech-type-toggle:active:not(:disabled) { background: var(--action-icon-background-active); }
 	.chatter-toggle-icon { display: inline-flex; width: 24px; height: 24px; align-items: center; justify-content: center; }
 	.chatter-toggle-icon :global(svg) { width: 24px; height: 24px; }
 	.chatter-toggle:focus-visible { outline: 3px solid var(--color-focus-ring); outline-offset: 2px; }
@@ -402,7 +397,7 @@
 		.action-dock-content { --action-dock-desktop-control-size: 54px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: minmax(var(--action-dock-desktop-control-size), 1fr); }
 		.composer-controls-left, .composer-editor-slot, .composer-controls-right { grid-row: 1; }
 		.composer-controls-left, .composer-controls-right { align-self: center; }
-		.profile-trigger, .chatter-toggle, .speech-type-toggle, .composer-controls-right :global(.suggestions-anchor) { width: var(--action-dock-desktop-control-size); height: var(--action-dock-desktop-control-size); }
-		.profile-trigger, .chatter-toggle, .speech-type-toggle { flex-basis: var(--action-dock-desktop-control-size); }
+		.profile-trigger, .chatter-toggle, .trace-unread-indicator, .speech-type-toggle, .composer-controls-right :global(.suggestions-anchor) { width: var(--action-dock-desktop-control-size); height: var(--action-dock-desktop-control-size); }
+		.profile-trigger, .chatter-toggle, .trace-unread-indicator, .speech-type-toggle { flex-basis: var(--action-dock-desktop-control-size); }
 	}
 </style>
