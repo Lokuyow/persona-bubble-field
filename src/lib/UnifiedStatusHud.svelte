@@ -19,9 +19,10 @@
 		mendingProjection: MendingProjection | null;
 		tagGameProjection?: TagGameHudProjection | null;
 		animationScope: string;
+		onTagGamePulse?: (effect: 'benefit' | 'calamity') => void;
 	}>;
 
-	let { expiresAtMs, nowMs, maximumLifespanMs, points, hasJob, mendingProjection, tagGameProjection = null, animationScope }: Props = $props();
+	let { expiresAtMs, nowMs, maximumLifespanMs, points, hasJob, mendingProjection, tagGameProjection = null, animationScope, onTagGamePulse }: Props = $props();
 	let currentPoints = $derived(tagGameProjection?.points ?? points);
 	let currentExpiresAtMs = $derived(tagGameProjection?.expiresAtMs ?? expiresAtMs);
 	let tagGameBenefitActive = $derived(tagGameProjection?.benefitRateActive ?? false);
@@ -89,6 +90,12 @@
 	function valueClass(feedback: ChangeFeedback | null): string {
 		return feedback ? `value-changed value-${feedback.direction}` : '';
 	}
+	function handleTagGamePulse(event: AnimationEvent, effect: 'benefit' | 'calamity'): void {
+		if (event.target !== event.currentTarget || !event.animationName.endsWith('tag-game-value-pulse') ||
+			(effect === 'benefit' ? !tagGameBenefitActive : !tagGameCalamityActive) ||
+			window.matchMedia('(prefers-reduced-motion: reduce)').matches || document.hidden) return;
+		onTagGamePulse?.(effect);
+	}
 </script>
 
 <section class="unified-status-hud" aria-label="寿命とポイント" data-unified-status-hud data-saved-points={points} data-base-expires-at-ms={expiresAtMs} data-current-points={currentPoints} data-current-expires-at-ms={currentExpiresAtMs} data-current-remaining-ms={remainingMs} data-maximum-lifespan-ms={maximumLifespanMs} data-tag-game-projection={tagGameProjection ? 'true' : undefined}>
@@ -98,7 +105,9 @@
 				<span class="meter-label"><Heart aria-hidden="true" />寿命</span>
 				<strong class={['lifespan-value', valueClass(lifespanFeedback), { 'tag-game-calamity': tagGameCalamityActive }]}
 					data-lifespan-value data-value-change={lifespanFeedback?.direction} data-value-change-sequence={lifespanFeedback?.sequence}
-					data-tag-game-flash={tagGameCalamityActive ? 'calamity' : undefined}>
+					data-tag-game-flash={tagGameCalamityActive ? 'calamity' : undefined}
+					onanimationstart={(event) => handleTagGamePulse(event, 'calamity')}
+					onanimationiteration={(event) => handleTagGamePulse(event, 'calamity')}>
 					{lifespanText}
 				</strong>
 			</div>
@@ -111,7 +120,9 @@
 				<span class="meter-label"><Wallet aria-hidden="true" />ポイント</span>
 				<strong class={['points-value', valueClass(pointsFeedback), { 'tag-game-benefit': tagGameBenefitActive }]}
 					data-points-value data-value-change={pointsFeedback?.direction} data-value-change-sequence={pointsFeedback?.sequence}
-					data-tag-game-flash={tagGameBenefitActive ? 'benefit' : undefined}>
+					data-tag-game-flash={tagGameBenefitActive ? 'benefit' : undefined}
+					onanimationstart={(event) => handleTagGamePulse(event, 'benefit')}
+					onanimationiteration={(event) => handleTagGamePulse(event, 'benefit')}>
 					{formattedPoints}<span>pt</span>
 				</strong>
 			</div>

@@ -222,6 +222,8 @@ channel creator authorityが署名したkind 7070のversioned controlで、任�
 
 ゲーム開始前は募集画面の脱出・能力強化を許可し、同一Runの参加予約だけを重複拒否する。ゲーム中の操作禁止はUIだけに依存せずPlayer lifecycle更新transactionで検証する。複数タブ・開始とRun closeの競合で古いRunが開始対象にならないよう、開始確定時に保存済みRunを再検証する。ゲーム結果を保存してlockを解除する更新は原子的に行い、重複イベント・再読込で累積値を二重適用しない。
 
+鬼ごっこは既存のWeb Audio効果音設定を使い、恩恵・災厄の点滅、所持者変更、スケジュール上の恩恵・災厄切替、開催者署名済み状態で確定した開始、正常終了または開始後の中断を短い合成音で知らせる。点滅音は自分に効果が発生している間だけHUDのCSSアニメーション開始・反復へ同期し、数値更新や独立タイマーで周期をリセットしない。効果停止・切替・終了、非表示タブ、reduced-motionでは周期音を止める。単発音は署名済み状態遷移または確定済みスケジュールを根拠とし、初期取得・再読込・再接続・重複状態から過去の音を再生しない。開始前の取消と観戦者・退出者は終了通知の対象外とし、最大210秒の最終精算待ちはゲーム終了を遅らせない。開始・終了、所持者変更、効果切替、点滅の順に重なりを抑制し、ミュート・音声再生許可・共通音量を尊重する。音声出力の失敗はゲーム進行に影響しない。
+
 ## 7. IdentityとRunのライフサイクル
 
 Player lifecycleはRoot secret storeと分離したbrowser-local aggregateとして管理する。aggregateはschema version、Root Point、selected Identity history、current modeを持ち、modeは `selecting(pendingSelection)` または `running(activeRun)` のどちらかである。Rootだけ、またはPlayer stateだけのpartial stateは修復せずread-only fail-closeする。

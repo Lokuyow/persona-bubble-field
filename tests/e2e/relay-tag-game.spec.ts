@@ -170,6 +170,71 @@ async function exerciseTagGameControlsAtViewport(page: Page, gameId: string, vie
 	await expect(leave).toBeVisible();
 }
 
+async function installTagGameAudioRecorder(page: Page): Promise<void> {
+	await page.addInitScript(() => {
+		const key = 'tag-game-audio-recording';
+	const record = (duration: number) => {
+		const values = JSON.parse(sessionStorage.getItem(key) ?? '[]') as number[];
+		values.push(duration);
+		sessionStorage.setItem(key, JSON.stringify(values));
+	};
+		class TestAudioContext {
+			state: AudioContextState = 'suspended';
+			currentTime = 0;
+			sampleRate = 10_000;
+			destination = {} as AudioDestinationNode;
+			createGain() { return { gain: { value: 1, cancelScheduledValues() {}, setTargetAtTime() {} }, connect() {} } as unknown as GainNode; }
+			createBuffer(_channels: number, length: number, sampleRate: number) {
+				const channel = new Float32Array(length);
+				return { duration: length / sampleRate, getChannelData: () => channel } as unknown as AudioBuffer;
+			}
+			createBufferSource() {
+				let buffer: AudioBuffer | null = null;
+				return {
+					set buffer(value: AudioBuffer | null) { buffer = value; },
+					get buffer() { return buffer; },
+					connect() {},
+					start() { if (buffer) record(buffer.duration); }
+				} as unknown as AudioBufferSourceNode;
+			}
+			resume() { this.state = 'running'; return Promise.resolve(); }
+			close() { this.state = 'closed'; return Promise.resolve(); }
+		}
+		Object.defineProperty(window, 'AudioContext', { configurable: true, value: TestAudioContext });
+	});
+}
+
+async function recordedTagGameSounds(page: Page): Promise<number[]> {
+	return page.evaluate(() => JSON.parse(sessionStorage.getItem('tag-game-audio-recording') ?? '[]') as number[]);
+}
+
+function createAudioTestGame(selfPubkey: string, hostPubkey: string, startAt: number, seed: string, suffix: string) {
+	const proposalId = 'd'.repeat(32);
+	const gameId = `${hostPubkey}:${startAt - 1}:${suffix.repeat(64)}`;
+	const participant = [selfPubkey, hostPubkey].map((pubkey) => ({ pubkey, runNumber: 1, registeredAt: startAt - 10,
+		consentProposalId: proposalId, consented: true, status: 'registered' as const, points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 }));
+	const countdown: TagGameState = { gameId, hostPubkey, phase: 'countdown', revision: 0, updatedAt: startAt - 1, proposalId,
+		startAt, participant, settledAtMs: (startAt - 1) * 1_000 };
+	const running: TagGameState = { ...countdown, phase: 'running', revision: 1, updatedAt: startAt, startedAt: startAt,
+		endsAt: startAt + 180, seed, ownerPubkey: selfPubkey, effect: 'benefit', transferAt: startAt * 1_000,
+		lastHolderResponseAtMs: startAt * 1_000, participant: participant.map((member) => ({ ...member, status: 'active' as const })),
+		settledAtMs: startAt * 1_000 };
+	return { gameId, participant, countdown, running };
+}
+
+async function setFakeDocumentHidden(page: Page, hidden: boolean): Promise<void> {
+	await page.evaluate((nextHidden) => {
+		Object.defineProperty(document, 'hidden', { configurable: true, value: nextHidden });
+		document.dispatchEvent(new Event('visibilitychange'));
+	}, hidden);
+}
+
+async function unlockSoundFromTheUI(page: Page): Promise<void> {
+	await page.getByRole('button', { name: /Open sound settings/ }).click();
+	await expect(page.getByRole('dialog', { name: 'Sound settings' })).toBeVisible();
+	await page.keyboard.press('Escape');
+}
+
 async function injectSelfOwnedProjection(page: Page, secret: Uint8Array, effect: 'benefit' | 'calamity', seed: string, nowMs: number): Promise<void> {
 	const pubkey = getPublicKey(secret);
 	const startedAt = Math.floor(nowMs / 1_000);
@@ -209,9 +274,11 @@ async function seedTagGameRunLock(page: Page, gameId: string, startedAtMs: numbe
 test('keeps the tag-game benefit pulse in phase during repeated point gains and ignores ordinary lifespan countdown', async ({ page }) => {
 	const nowMs = Date.now();
 	const secret = fixtureSecret(53);
+	await installTagGameAudioRecorder(page);
 	await preparePlayer(page, secret, nowMs);
 	await expect(page.locator('main')).toHaveAttribute('data-realtime-status', 'active');
 	await moveRelaySelfTo(page, { x: 7, y: 5 });
+	await unlockSoundFromTheUI(page);
 	// Movement advances the Playwright clock to respect the World position
 	// publish limit. Start the projection at the resulting, frozen time so the
 	// initial HUD baseline cannot accrue points while the test is setting up.
@@ -227,6 +294,20 @@ test('keeps the tag-game benefit pulse in phase during repeated point gains and 
 	await expect(points).not.toHaveAttribute('data-value-change', /.+/);
 	await expect(points).toHaveAttribute('data-tag-game-flash', 'benefit');
 	await expect(points).toHaveCSS('animation-name', /tag-game-value-pulse$/);
+	await expect.poll(async () => (await recordedTagGameSounds(page)).filter((duration) => Math.abs(duration - 0.18) < 0.001)).toHaveLength(1);
+	expect((await recordedTagGameSounds(page)).filter((duration) => Math.abs(duration - 0.52) < 0.001)).toHaveLength(0);
+	await page.evaluate(() => {
+		(window as typeof window & { __tagGamePulseIterations?: number }).__tagGamePulseIterations = 0;
+		document.addEventListener('animationiteration', (event) => {
+			if (event.target instanceof HTMLElement && event.target.matches('[data-points-value]') && event.animationName.endsWith('tag-game-value-pulse')) {
+				const target = window as typeof window & { __tagGamePulseIterations?: number };
+				target.__tagGamePulseIterations = (target.__tagGamePulseIterations ?? 0) + 1;
+			}
+		});
+	});
+	await page.waitForFunction(() => (window as typeof window & { __tagGamePulseIterations?: number }).__tagGamePulseIterations === 1,
+		undefined, { polling: 'raf', timeout: 3_000 });
+	await expect.poll(async () => (await recordedTagGameSounds(page)).filter((duration) => Math.abs(duration - 0.18) < 0.001)).toHaveLength(2);
 	await expect(points).toHaveCSS('animation-duration', '1.5s');
 	const pulseOffsets = await points.evaluate((element) => {
 		const animation = element.getAnimations().find((candidate): candidate is CSSAnimation =>
@@ -263,9 +344,11 @@ test('keeps the tag-game benefit pulse in phase during repeated point gains and 
 test('signals calamity lifespan loss while ignoring clock-only ticks', async ({ page }) => {
 	const nowMs = Date.now();
 	const secret = fixtureSecret(59);
+	await installTagGameAudioRecorder(page);
 	await preparePlayer(page, secret, nowMs);
 	await expect(page.locator('main')).toHaveAttribute('data-realtime-status', 'active');
 	await moveRelaySelfTo(page, { x: 7, y: 5 });
+	await unlockSoundFromTheUI(page);
 	const seed = Array.from({ length: 10_000 }, (_, index) => `hud-life-${index}`).find((candidate) => createTagGameSchedule(candidate)[0].effect === 'calamity')!;
 	await injectSelfOwnedProjection(page, secret, 'calamity', seed, nowMs);
 	const hud = page.locator('[data-unified-status-hud]');
@@ -282,9 +365,198 @@ test('signals calamity lifespan loss while ignoring clock-only ticks', async ({ 
 	await page.emulateMedia({ reducedMotion: 'reduce' });
 	await expect(lifespan).toHaveCSS('animation-name', 'none');
 	await expect(lifespan).toHaveCSS('color', 'rgb(255, 104, 117)');
+	const calamitySoundCount = (await recordedTagGameSounds(page)).filter((duration) => Math.abs(duration - 0.11) < 0.001).length;
+	expect(calamitySoundCount).toBeGreaterThan(0);
+	await page.clock.runFor(2_000);
+	await expect.poll(async () => (await recordedTagGameSounds(page)).filter((duration) => Math.abs(duration - 0.11) < 0.001)).toHaveLength(calamitySoundCount);
 	const effectiveExpiry = Number(await hud.getAttribute('data-current-expires-at-ms'));
 	await expect(hud).toHaveAttribute('data-current-expires-at-ms', String(effectiveExpiry));
 	await expect(hud).toHaveAttribute('data-base-expires-at-ms', String(savedExpiry));
+});
+
+test('plays tag-game start, scheduled switch, confirmed transfer, and end cues from current signed state', async ({ page }) => {
+	const nowMs = Date.now();
+	const selfSecret = fixtureSecret(61);
+	const hostSecret = fixtureSecret(63);
+	await installTagGameAudioRecorder(page);
+	await preparePlayer(page, selfSecret, nowMs);
+	await unlockSoundFromTheUI(page);
+	const selfPubkey = getPublicKey(selfSecret);
+	const hostPubkey = getPublicKey(hostSecret);
+	const startAt = Math.floor(nowMs / 1_000) + 4;
+	const seed = Array.from({ length: 10_000 }, (_, index) => `tag-audio-${index}`).find((candidate) => {
+		const schedule = createTagGameSchedule(candidate);
+		return schedule[0].effect === 'benefit' && schedule[0].durationMs <= 20_000;
+	});
+	if (!seed) throw new Error('Expected a short opening benefit interval.');
+	const proposalId = 'd'.repeat(32);
+	const gameId = `${hostPubkey}:${startAt - 1}:${'e'.repeat(64)}`;
+	const participant = [selfPubkey, hostPubkey].map((pubkey) => ({ pubkey, runNumber: 1, registeredAt: startAt - 10,
+		consentProposalId: proposalId, consented: true, status: 'registered' as const, points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 }));
+	const countdown: TagGameState = { gameId, hostPubkey, phase: 'countdown', revision: 0, updatedAt: startAt - 1, proposalId,
+		startAt, participant, settledAtMs: (startAt - 1) * 1_000 };
+	await injectRealtime(page, finalizeTagGameState(countdown, CHANNEL_ID, startAt - 1, hostSecret));
+	await page.clock.setSystemTime(startAt * 1_000);
+	const running: TagGameState = { ...countdown, phase: 'running', revision: 1, updatedAt: startAt, startedAt: startAt, endsAt: startAt + 180,
+		seed, ownerPubkey: selfPubkey, effect: 'benefit', transferAt: startAt * 1_000, lastHolderResponseAtMs: startAt * 1_000,
+		participant: participant.map((member) => ({ ...member, status: 'active' as const })), settledAtMs: startAt * 1_000 };
+	await injectRealtime(page, finalizeTagGameState(running, CHANNEL_ID, startAt, hostSecret));
+	await injectRealtime(page, finalizeTagGameState(running, CHANNEL_ID, startAt, hostSecret));
+	await expect(page.locator('[data-tag-game-hud]')).toBeVisible();
+	await expect.poll(async () => (await recordedTagGameSounds(page)).filter((duration) => Math.abs(duration - 0.52) < 0.001)).toHaveLength(1);
+
+	await page.clock.runFor(1_000);
+	const pauseAt = startAt + 2;
+	await page.clock.setSystemTime(pauseAt * 1_000);
+	const stoppedTemporarilyIneligible: TagGameState = { ...running, revision: 2, updatedAt: pauseAt,
+		holderChallengeId: 'a'.repeat(32), holderChallengeStartedAtMs: pauseAt * 1_000,
+		participant: participant.map((member) => ({ ...member, status: member.pubkey === selfPubkey ? 'temporarily-ineligible' as const : 'active' as const })) };
+	await injectRealtime(page, finalizeTagGameState(stoppedTemporarilyIneligible, CHANNEL_ID, pauseAt, hostSecret));
+	const firstInterval = createTagGameSchedule(seed)[0].durationMs;
+	await page.clock.runFor(firstInterval - 1_000);
+	await expect.poll(async () => (await recordedTagGameSounds(page)).filter((duration) => Math.abs(duration - 0.30) < 0.001)).toHaveLength(1);
+
+	const transferAt = Math.floor((await page.evaluate(() => Date.now())) / 1_000) + 1;
+	await page.clock.setSystemTime(transferAt * 1_000);
+	const transferred: TagGameState = { ...stoppedTemporarilyIneligible, revision: 3, updatedAt: transferAt, ownerPubkey: hostPubkey,
+		holderChallengeId: undefined, holderChallengeStartedAtMs: undefined, transferAt: transferAt * 1_000, settledAtMs: transferAt * 1_000 };
+	await injectRealtime(page, finalizeTagGameState(transferred, CHANNEL_ID, transferAt, hostSecret));
+	await expect.poll(async () => (await recordedTagGameSounds(page)).filter((duration) => Math.abs(duration - 0.34) < 0.001)).toHaveLength(1);
+
+	const endsAt = transferred.endsAt!;
+	await page.clock.setSystemTime(endsAt * 1_000 + 200);
+	const ended: TagGameState = { ...transferred, phase: 'ended', revision: 4, updatedAt: endsAt, finalizedAt: endsAt, endReason: 'normal' };
+	await injectRealtime(page, finalizeTagGameState(ended, CHANNEL_ID, endsAt, hostSecret));
+	await expect.poll(async () => (await recordedTagGameSounds(page)).filter((duration) => Math.abs(duration - 0.52) < 0.001)).toHaveLength(2);
+
+	const restoredStartAt = Math.floor((await page.evaluate(() => Date.now())) / 1_000) + 1;
+	const restoredGameId = `${hostPubkey}:${restoredStartAt}:${'f'.repeat(64)}`;
+	await page.clock.setSystemTime(restoredStartAt * 1_000);
+	const restoredRunning: TagGameState = { ...running, gameId: restoredGameId, revision: 0, updatedAt: restoredStartAt,
+		startedAt: restoredStartAt, endsAt: restoredStartAt + 180, transferAt: restoredStartAt * 1_000,
+		lastHolderResponseAtMs: restoredStartAt * 1_000, settledAtMs: restoredStartAt * 1_000 };
+	await injectRealtime(page, finalizeTagGameState(restoredRunning, CHANNEL_ID, restoredStartAt, hostSecret));
+	await expect.poll(async () => (await recordedTagGameSounds(page)).filter((duration) => Math.abs(duration - 0.52) < 0.001)).toHaveLength(2);
+	const interruptionAt = restoredStartAt + 1;
+	await page.clock.setSystemTime(interruptionAt * 1_000);
+	const interrupted: TagGameState = { ...restoredRunning, phase: 'interrupted', revision: 1, updatedAt: interruptionAt,
+		endReason: 'host-unavailable' };
+	await injectRealtime(page, finalizeTagGameState(interrupted, CHANNEL_ID, interruptionAt, hostSecret));
+	await expect.poll(async () => (await recordedTagGameSounds(page)).filter((duration) => Math.abs(duration - 0.52) < 0.001)).toHaveLength(3);
+});
+
+test('does not replay restored start and transfer cues during initial Realtime bootstrap', async ({ page }) => {
+	const nowMs = Date.now();
+	const selfSecret = fixtureSecret(33);
+	const hostSecret = fixtureSecret(37);
+	const selfPubkey = getPublicKey(selfSecret);
+	const hostPubkey = getPublicKey(hostSecret);
+	const startAt = Math.floor(nowMs / 1_000);
+	const seed = Array.from({ length: 10_000 }, (_, index) => `tag-audio-bootstrap-${index}`).find((candidate) => createTagGameSchedule(candidate)[0].effect === 'benefit')!;
+	const game = createAudioTestGame(selfPubkey, hostPubkey, startAt, seed, 'a');
+	const countdownEvent = finalizeTagGameState(game.countdown, CHANNEL_ID, startAt - 1, hostSecret);
+	const runningEvent = finalizeTagGameState(game.running, CHANNEL_ID, startAt, hostSecret);
+	await page.clock.install({ time: nowMs });
+	await installTagGameAudioRecorder(page);
+	await installHostOwnedStub(page);
+	await installDelayedRelay(page, { primaryEvents: testEvents(nowMs), realtimeEvents: [countdownEvent, runningEvent], deferRealtimeEvents: true });
+	await seedRelayAccount(page, selfSecret, selfPubkey, nowMs + 14 * 24 * 60 * 60 * 1_000);
+	await page.goto('/');
+	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+	await expect(page.locator(`.participant[data-self="true"][data-participant-id="${selfPubkey}"]`)).toBeVisible();
+	await unlockSoundFromTheUI(page);
+	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseRealtimeEvents(): void } }).__relayStartupTest.releaseRealtimeEvents());
+	await expect(page.locator('main')).toHaveAttribute('data-realtime-status', 'active');
+	await expect(page.locator('[data-tag-game-hud]')).toBeVisible();
+	const restoredSounds = await recordedTagGameSounds(page);
+	for (const oneShotDuration of [0.30, 0.34, 0.52]) {
+		expect(restoredSounds.filter((duration) => Math.abs(duration - oneShotDuration) < 0.001)).toHaveLength(0);
+	}
+
+	const liveAt = startAt + 2;
+	await page.clock.setSystemTime(liveAt * 1_000);
+	const liveTransfer: TagGameState = { ...game.running, revision: 2, updatedAt: liveAt, ownerPubkey: hostPubkey,
+		transferAt: liveAt * 1_000, settledAtMs: liveAt * 1_000 };
+	await injectRealtime(page, finalizeTagGameState(liveTransfer, CHANNEL_ID, liveAt, hostSecret));
+	await expect.poll(async () => (await recordedTagGameSounds(page)).filter((duration) => Math.abs(duration - 0.34) < 0.001)).toHaveLength(1);
+});
+
+test('does not replay a restored owner transfer during a Realtime reconnect', async ({ page }) => {
+	const nowMs = Date.now();
+	const selfSecret = fixtureSecret(39);
+	const hostSecret = fixtureSecret(41);
+	await installTagGameAudioRecorder(page);
+	await preparePlayer(page, selfSecret, nowMs);
+	await unlockSoundFromTheUI(page);
+	const selfPubkey = getPublicKey(selfSecret);
+	const hostPubkey = getPublicKey(hostSecret);
+	const startAt = Math.floor(nowMs / 1_000) + 1;
+	const seed = Array.from({ length: 10_000 }, (_, index) => `tag-audio-reconnect-${index}`).find((candidate) => createTagGameSchedule(candidate)[0].effect === 'benefit')!;
+	const game = createAudioTestGame(selfPubkey, hostPubkey, startAt, seed, 'b');
+	await page.clock.setSystemTime((startAt - 1) * 1_000);
+	await injectRealtime(page, finalizeTagGameState(game.countdown, CHANNEL_ID, startAt - 1, hostSecret));
+	await page.clock.setSystemTime(startAt * 1_000);
+	await injectRealtime(page, finalizeTagGameState(game.running, CHANNEL_ID, startAt, hostSecret));
+	await expect.poll(async () => (await recordedTagGameSounds(page)).filter((duration) => Math.abs(duration - 0.52) < 0.001)).toHaveLength(1);
+
+	const restoredAt = startAt + 6;
+	const restoredTransfer: TagGameState = { ...game.running, revision: 2, updatedAt: restoredAt, ownerPubkey: hostPubkey,
+		transferAt: restoredAt * 1_000, settledAtMs: restoredAt * 1_000 };
+	const restoredEvent = finalizeTagGameState(restoredTransfer, CHANNEL_ID, restoredAt, hostSecret);
+	await page.clock.setSystemTime((startAt + 1) * 1_000);
+	await page.evaluate((event) => {
+		const state = (window as typeof window & { __relayStartupTest: { state: { realtimeHistory: Array<Record<string, unknown>> }; disconnectRealtime(): void } }).__relayStartupTest;
+		state.state.realtimeHistory.push(event as unknown as Record<string, unknown>);
+		state.disconnectRealtime();
+	}, restoredEvent);
+	await page.clock.runFor(5_000);
+	await expect.poll(async () => (await relayState(page)).state.requests.filter((request) => request.filters.some((filter) => (filter.kinds as number[] | undefined)?.includes(TAG_GAME_KIND))).length).toBeGreaterThan(1);
+	await expect(page.locator(`.participant[data-self="true"][data-participant-id="${selfPubkey}"]`)).toHaveAttribute('data-tag-game-role', 'participant');
+	expect((await recordedTagGameSounds(page)).filter((duration) => Math.abs(duration - 0.34) < 0.001)).toHaveLength(0);
+});
+
+test('rebases hidden-tab game audio cues on resume and keeps the resumed pulse audio in sync', async ({ page }) => {
+	const nowMs = Date.now();
+	const selfSecret = fixtureSecret(43);
+	const hostSecret = fixtureSecret(47);
+	await installTagGameAudioRecorder(page);
+	await preparePlayer(page, selfSecret, nowMs);
+	await unlockSoundFromTheUI(page);
+	const selfPubkey = getPublicKey(selfSecret);
+	const hostPubkey = getPublicKey(hostSecret);
+	const startAt = Math.floor(nowMs / 1_000) + 1;
+	const seed = Array.from({ length: 10_000 }, (_, index) => `tag-audio-hidden-${index}`).find((candidate) => {
+		const first = createTagGameSchedule(candidate)[0];
+		return first.effect === 'benefit' && first.durationMs <= 11_000;
+	})!;
+	const game = createAudioTestGame(selfPubkey, hostPubkey, startAt, seed, 'c');
+	await page.clock.setSystemTime((startAt - 1) * 1_000);
+	await injectRealtime(page, finalizeTagGameState(game.countdown, CHANNEL_ID, startAt - 1, hostSecret));
+	await page.clock.setSystemTime(startAt * 1_000);
+	await injectRealtime(page, finalizeTagGameState(game.running, CHANNEL_ID, startAt, hostSecret));
+	await expect.poll(async () => (await recordedTagGameSounds(page)).filter((duration) => Math.abs(duration - 0.52) < 0.001)).toHaveLength(1);
+	await page.clock.runFor(1_000);
+	const firstInterval = createTagGameSchedule(seed)[0].durationMs;
+	await page.clock.pauseAt(startAt * 1_000 + Math.floor(firstInterval / 2));
+	await setFakeDocumentHidden(page, true);
+	const resumedAt = startAt * 1_000 + firstInterval + 100;
+	await page.clock.setSystemTime(resumedAt);
+	await setFakeDocumentHidden(page, false);
+	const hud = page.locator('[data-tag-game-hud]');
+	await expect(hud.locator('.game-hud-effect')).toHaveAttribute('data-tag-game-effect', 'calamity');
+	await expect(page.locator('[data-unified-status-hud] [data-lifespan-value]')).toHaveCSS('animation-name', /tag-game-value-pulse$/);
+	expect((await recordedTagGameSounds(page)).filter((duration) => Math.abs(duration - 0.30) < 0.001)).toHaveLength(0);
+	await expect.poll(async () => (await recordedTagGameSounds(page)).filter((duration) => Math.abs(duration - 0.11) < 0.001), { timeout: 4_000 }).toHaveLength(1);
+
+	await setFakeDocumentHidden(page, true);
+	const endsAt = game.running.endsAt!;
+	await page.clock.setSystemTime((endsAt + 1) * 1_000);
+	const ended: TagGameState = { ...game.running, revision: 2, phase: 'ended', updatedAt: endsAt, finalizedAt: endsAt, endReason: 'normal' };
+	await injectRealtime(page, finalizeTagGameState(ended, CHANNEL_ID, endsAt, hostSecret));
+	const endSoundCount = (await recordedTagGameSounds(page)).filter((duration) => Math.abs(duration - 0.52) < 0.001).length;
+	await setFakeDocumentHidden(page, false);
+	await page.clock.runFor(500);
+	expect((await recordedTagGameSounds(page)).filter((duration) => Math.abs(duration - 0.52) < 0.001)).toHaveLength(endSoundCount);
 });
 
 async function openTagGameTerminal(page: Page): Promise<void> {
@@ -974,7 +1246,8 @@ test('organizer local safety stop hides touch targets and resumes presentation a
 	const targetPubkey = getPublicKey(targetSecret);
 	await preparePlayer(page, organizerSecret, nowMs, 0);
 	await moveRelaySelfTo(page, { x: 7, y: 5 });
-	const nowSeconds = Math.floor(await page.evaluate(() => Date.now() / 1_000));
+	const safetyStartedAtMs = await page.evaluate(() => Date.now());
+	const nowSeconds = Math.floor(safetyStartedAtMs / 1_000);
 	const channel = { channelId: CHANNEL_ID, relayHint: 'wss://relay.test/' };
 	const targetPosition = finalizeEvent(buildWorldStateEventTemplate({ channel, createdAt: nowSeconds, position: { x: 8, y: 5 }, slot: 1, runNumber: 1 }), targetSecret);
 	const targetActivity = finalizeEvent(buildWorldMessageTemplate({ channel, createdAt: nowSeconds, position: { x: 8, y: 5 }, content: 'active target', speechType: 'normal' }), targetSecret);
@@ -987,9 +1260,9 @@ test('organizer local safety stop hides touch targets and resumes presentation a
 	const gameId = `${organizerPubkey}:${nowSeconds}:${'7'.repeat(64)}`;
 	const running: TagGameState = {
 		gameId, hostPubkey: organizerPubkey, phase: 'running', revision: 0, updatedAt: nowSeconds,
-		startedAt: nowSeconds, endsAt: nowSeconds + 180, seed, ownerPubkey: organizerPubkey, effect: 'calamity', transferAt: nowSeconds * 1_000,
+		startedAt: nowSeconds, endsAt: nowSeconds + 180, seed, ownerPubkey: organizerPubkey, effect: 'calamity', transferAt: safetyStartedAtMs,
 		participant: [organizerPubkey, targetPubkey].map((pubkey) => ({ pubkey, runNumber: 1, registeredAt: nowSeconds, status: 'active' as const, points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 })),
-		settledAtMs: nowSeconds * 1_000, lastHolderResponseAtMs: nowSeconds * 1_000
+		settledAtMs: safetyStartedAtMs, lastHolderResponseAtMs: safetyStartedAtMs
 	};
 	await injectRealtime(page, finalizeTagGameState(running, CHANNEL_ID, nowSeconds, organizerSecret));
 	const target = page.locator(`.participant[data-participant-id="${targetPubkey}"]`);
@@ -1003,7 +1276,7 @@ test('organizer local safety stop hides touch targets and resumes presentation a
 		return parseTagGameEvent(event, CHANNEL_ID)?.state.holderChallengeId ?? null;
 	}).toBeTruthy();
 	const locallyStoppedAttempt = parseTagGameEvent(await latestGameEvent(page, gameId), CHANNEL_ID)!.state;
-	expect(locallyStoppedAttempt.settledAtMs).toBe(nowSeconds * 1_000 + 23_000);
+	expect(locallyStoppedAttempt.settledAtMs).toBe(safetyStartedAtMs + 23_000);
 	await expect(hud.locator('[data-tag-game-effect]')).toHaveAttribute('data-tag-game-effect-active', 'false');
 	await expect(hud.locator('[data-tag-game-effect] span')).toHaveText('安全停止中・効果停止');
 	await expect(hud.locator('[data-tag-game-cooldown]')).toHaveText('効果停止中');

@@ -37,6 +37,30 @@ describe('speech sound effects', () => {
 			expect(samples).toEqual(createSoundSamples(effect, 10_000));
 		}
 	});
+	it('creates six distinct, finite, non-clipping tag-game cues at their intended lengths', () => {
+		const effects = ['tag-game-benefit', 'tag-game-calamity', 'tag-game-transfer', 'tag-game-switch', 'tag-game-start', 'tag-game-end'] as const;
+		const samples = effects.map((effect) => createSoundSamples(effect, 10_000));
+		expect(samples.map((buffer, index) => buffer.length)).toEqual(effects.map((effect) => Math.ceil(UI_SOUND_DURATIONS[effect] * 10_000)));
+		for (const buffer of samples) {
+			expect([...buffer].every(Number.isFinite)).toBe(true);
+			expect(Math.max(...buffer.map(Math.abs))).toBeLessThanOrEqual(0.920001);
+			expect(buffer.some((sample) => Math.abs(sample) > 0.001)).toBe(true);
+		}
+		for (let index = 0; index < samples.length; index += 1) {
+			expect(samples[index]).toEqual(createSoundSamples(effects[index], 10_000));
+			for (let other = index + 1; other < samples.length; other += 1) expect(samples[index]).not.toEqual(samples[other]);
+		}
+	});
+	it('gives the benefit cue a short rising two-note major chime', () => {
+		const sampleRate = 10_000;
+		const benefit = createSoundSamples('tag-game-benefit', sampleRate);
+		expect(benefit.length).toBe(Math.ceil(0.18 * sampleRate));
+		const firstNote = benefit.slice(0, 650);
+		const risingNote = benefit.slice(800, 1_700);
+		expect(spectralEnergy(firstNote, sampleRate, 659)).toBeGreaterThan(spectralEnergy(firstNote, sampleRate, 880));
+		expect(spectralEnergy(risingNote, sampleRate, 880)).toBeGreaterThan(spectralEnergy(risingNote, sampleRate, 659));
+		expect(Math.abs(benefit.at(-1) ?? 1)).toBeLessThan(0.001);
+	});
 	it('keeps speech gain at unity and attenuates only UI success sounds', () => {
 		expect(SOUND_EFFECT_GAINS.normal).toBe(1);
 		expect(SOUND_EFFECT_GAINS.shout).toBe(1);
@@ -46,6 +70,9 @@ describe('speech sound effects', () => {
 		expect(SOUND_EFFECT_GAINS.startup).toBeCloseTo(0.65);
 		expect(SOUND_EFFECT_GAINS['cooperation-start']).toBeCloseTo(0.65);
 		expect(SOUND_EFFECT_GAINS.death).toBeCloseTo(0.70);
+		expect(SOUND_EFFECT_GAINS['tag-game-benefit']).toBeLessThan(SOUND_EFFECT_GAINS['tag-game-transfer']);
+		expect(SOUND_EFFECT_GAINS['tag-game-calamity']).toBeLessThan(SOUND_EFFECT_GAINS['tag-game-start']);
+		expect(SOUND_EFFECT_GAINS['tag-game-transfer']).toBeLessThan(SOUND_EFFECT_GAINS['tag-game-start']);
 	});
 	it('creates a deterministic death soundscape with a decaying tail', () => {
 		const sampleRate = 10_000;

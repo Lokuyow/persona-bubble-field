@@ -116,7 +116,7 @@ export type RealtimeSessionOptions = Readonly<{
 	prepareStartConfiguration?: (configuration: RealtimeStartConfiguration, nowMs: number) => RealtimeStartConfiguration;
 	startImmediately?: boolean;
 	onEvent: (event: RealtimeEnvelope) => void;
-	onSupplementalEvent?: (event: NostrEvent) => void;
+	onSupplementalEvent?: (event: NostrEvent, delivery: 'bootstrap' | 'live') => void;
 	onControl?: (control: RealtimeControlEnvelope) => void;
 	onBootstrapComplete?: (configuration: RealtimeStartConfiguration) => void;
 	onStatusChanged?: (status: 'inactive' | 'active' | 'degraded') => void;
@@ -325,9 +325,9 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		options.realtime?.onControl?.(control);
 	}
 
-	function receiveSupplementalEvent(event: NostrEvent): void {
+	function receiveSupplementalEvent(event: NostrEvent, delivery: 'bootstrap' | 'live'): void {
 		if (disposed || !options.realtime) return;
-		options.realtime.onSupplementalEvent?.(event);
+		options.realtime.onSupplementalEvent?.(event, delivery);
 	}
 
 	function sameRealtimeConfiguration(first: RealtimeStartConfiguration, second: RealtimeStartConfiguration): boolean {
