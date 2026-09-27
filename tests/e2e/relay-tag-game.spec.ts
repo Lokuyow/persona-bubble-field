@@ -723,6 +723,76 @@ async function openTagGameTerminal(page: Page): Promise<void> {
 	await expectIconCloseButton(page.getByRole('dialog', { name: '鬼ごっこ' }).getByRole('button', { name: '閉じる' }), '閉じる');
 }
 
+test('tag game rules stay usable across desktop and mobile terminal states', async ({ page }) => {
+	const secret = fixtureSecret(53);
+	const nowMs = Date.now();
+	await page.setViewportSize({ width: 1280, height: 800 });
+	await preparePlayer(page, secret, nowMs);
+	await moveRelaySelfTo(page, { x: TAG_GAME_TERMINAL.position.x - 1, y: TAG_GAME_TERMINAL.position.y });
+	await openTagGameTerminal(page);
+	const dialog = page.getByRole('dialog', { name: '鬼ごっこ' });
+	const rules = dialog.locator('.tag-game-rules');
+	await expect(dialog.getByText('2〜8人 · 2分')).toBeVisible();
+	await expect(dialog.getByText('鬼になった者は、毎秒1時間の寿命を失います。寿命が尽きれば死亡します。')).toBeVisible();
+	await expect(rules).not.toHaveAttribute('open', '');
+	const summary = rules.locator('summary');
+	await summary.focus();
+	await page.keyboard.press('Enter');
+	await expect(rules).toHaveAttribute('open', '');
+	await expect(summary).toContainText('ルールを閉じる');
+	await expect(rules.getByText('福を持たない者は、所持者にタッチして福を奪えます。')).toBeVisible();
+	await expect(rules.getByText('鬼は他の参加者にタッチして、鬼を押し付けられます。')).toBeVisible();
+	await expect(rules.getByText('福と鬼は交互に切り替わります。')).toBeVisible();
+	await expect(rules.getByText('隣接した相手にのみタッチできます。')).toBeVisible();
+	await expect(rules.getByRole('heading', { name: '参加と開始' })).toHaveCount(0);
+	await expect(rules.getByRole('heading', { name: 'ゲーム中' })).toHaveCount(0);
+	const [benefitBox, calamityBox] = await Promise.all([
+		rules.locator('.tag-game-effect-benefit').boundingBox(),
+		rules.locator('.tag-game-effect-calamity').boundingBox()
+	]);
+	expect(benefitBox && calamityBox && calamityBox.y >= benefitBox.y + benefitBox.height).toBe(true);
+	await expect(dialog.getByRole('button', { name: '鬼ごっこを開催' })).toHaveAttribute('data-action-variant', 'primary');
+	await summary.focus();
+	await page.keyboard.press('Enter');
+	await expect(rules).not.toHaveAttribute('open', '');
+	await expect(rules.locator('.tag-game-rules-content')).toBeHidden();
+	await summary.focus();
+	await page.keyboard.press('Enter');
+	await expect(rules).toHaveAttribute('open', '');
+	await dialog.getByRole('button', { name: '鬼ごっこを開催' }).click();
+	await expect(dialog.getByText('あなたの開催')).toBeVisible();
+	await expect(rules).toHaveAttribute('open', '');
+
+	await page.setViewportSize({ width: 390, height: 640 });
+	await dialog.evaluate((element) => { element.scrollTop = 0; });
+	await summary.focus();
+	await page.keyboard.press('Enter');
+	await expect(rules).not.toHaveAttribute('open', '');
+	await summary.focus();
+	await page.keyboard.press('Enter');
+	await expect(rules).toHaveAttribute('open', '');
+	await dialog.evaluate((element) => { element.scrollTop = 0; });
+	const [mobileBenefitBox, mobileCalamityBox] = await Promise.all([
+		rules.locator('.tag-game-effect-benefit').boundingBox(),
+		rules.locator('.tag-game-effect-calamity').boundingBox()
+	]);
+	expect(mobileBenefitBox && mobileCalamityBox && mobileCalamityBox.y >= mobileBenefitBox.y + mobileBenefitBox.height).toBe(true);
+	await summary.focus();
+	await page.keyboard.press('Enter');
+	await expect(rules).not.toHaveAttribute('open', '');
+	await expect(rules.locator('.tag-game-rules-content')).toBeHidden();
+	await summary.focus();
+	await page.keyboard.press('Enter');
+	await expect(rules).toHaveAttribute('open', '');
+	await dialog.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+	await expect(dialog.getByRole('button', { name: '閉じる' })).toBeVisible();
+	await expect(dialog.getByRole('button', { name: '開始を提案' })).toBeVisible();
+	await dialog.getByRole('button', { name: '閉じる' }).click();
+	await expect(dialog).toHaveCount(0);
+	await openTagGameTerminal(page);
+	await expect(page.getByRole('dialog', { name: '鬼ごっこ' }).locator('.tag-game-rules')).not.toHaveAttribute('open', '');
+});
+
 test('three Fake Relay clients create, join, consent, start, touch, and settle through the field UI', async ({ browser }) => {
 	test.setTimeout(90_000);
 	const hostPage = await browser.newPage();
@@ -775,25 +845,61 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 		await expect(participantPage.getByRole('button', { name: '参加申請' })).toHaveAttribute('data-action-variant', 'primary');
 		await expect(participantPage.getByRole('dialog', { name: '鬼ごっこ' }).locator('[data-action-variant="primary"]')).toHaveCount(1);
 		await expect(hostPage.getByRole('button', { name: '鬼ごっこを開催' })).toHaveCount(0);
-		await expect(participantPage.locator('.tag-game-arrival')).toHaveCount(0);
+		const participantCard = participantPage.getByRole('dialog', { name: '鬼ごっこ' }).locator('li').filter({ hasText: `開催者 ${hostCharacter}` });
+		const participantGrid = participantCard.locator('.participant-slots');
+		const participantTwoCard = participantTwoPage.getByRole('dialog', { name: '鬼ごっこ' }).locator('li').filter({ hasText: `開催者 ${hostCharacter}` });
+		const participantTwoGrid = participantTwoCard.locator('.participant-slots');
+		const hostGrid = hostCard.locator('.participant-slots');
+		const hostViewport = hostPage.viewportSize();
+		const hostGridBeforeFirstJoin = await hostGrid.boundingBox();
+		expect(hostGridBeforeFirstJoin).toBeTruthy();
 		await Promise.all([participantPage.getByRole('button', { name: '参加申請' }).click(), participantTwoPage.getByRole('button', { name: '参加申請' }).click()]);
 		await Promise.all([expect(participantPage.getByText('参加申請済み（受理待ち）').first()).toBeVisible(), expect(participantTwoPage.getByText('参加申請済み（受理待ち）').first()).toBeVisible()]);
 		await Promise.all([participantPage, participantTwoPage].map((participant) => expect.poll(async () => (await relayState(participant)).state.published.filter((event) => event.kind === 27070).length).toBeGreaterThan(0)));
 		const [joinAction, joinActionTwo] = await Promise.all([latestPublished(participantPage, 27070, participantPubkey), latestPublished(participantTwoPage, 27070, participantTwoPubkey)]);
-		await Promise.all([injectRealtime(hostPage, joinAction), injectRealtime(hostPage, joinActionTwo)]);
+		await injectRealtime(hostPage, joinAction);
+		await expect.poll(async () => latestTagGameStateValue(hostPage, gameId, (state) => state.participant.length)).toBe(2);
+		const firstRegisteredEvent = await latestGameEvent(hostPage, gameId);
+		await Promise.all([injectRealtime(participantPage, firstRegisteredEvent), injectRealtime(participantTwoPage, firstRegisteredEvent)]);
+		await expect(participantPage.getByText('参加申請済み（参加登録済み）').first()).toBeVisible();
+		await expect(participantPage.locator('.tag-game-arrival')).toHaveCount(0);
+		await expect(participantTwoPage.locator('.tag-game-arrival')).toHaveCount(0);
+		await expect(participantTwoGrid.locator('.participant-slot-arrival')).toHaveCount(1);
+		await expect(participantTwoGrid.locator(`[data-tag-game-participant-slot="${participantPubkey}"].participant-slot-arrival`)).toHaveCount(1);
+		const hostGridAfterFirstJoin = await hostGrid.boundingBox();
+		expect(hostGridAfterFirstJoin && hostGridBeforeFirstJoin).toBeTruthy();
+		if (hostGridAfterFirstJoin && hostGridBeforeFirstJoin) expect(hostGridAfterFirstJoin.y).toBe(hostGridBeforeFirstJoin.y);
+		const participantViewport = participantPage.viewportSize();
+		await participantPage.setViewportSize({ width: 390, height: 844 });
+		const participantGridBeforeOtherJoin = await participantGrid.boundingBox();
+		expect(participantGridBeforeOtherJoin).toBeTruthy();
+		await hostPage.setViewportSize({ width: 390, height: 844 });
+		const hostGridBeforeSecondJoin = await hostGrid.boundingBox();
+		expect(hostGridBeforeSecondJoin).toBeTruthy();
+		await injectRealtime(hostPage, joinActionTwo);
 		await expect.poll(async () => latestTagGameStateValue(hostPage, gameId, (state) => state.participant.length)).toBe(3);
 		const registeredEvent = await latestGameEvent(hostPage, gameId);
 		await Promise.all([injectRealtime(participantPage, registeredEvent), injectRealtime(participantTwoPage, registeredEvent)]);
 		await expect(participantPage.getByText('参加申請済み（参加登録済み）').first()).toBeVisible();
-		await expect(participantPage.locator('.tag-game-arrival')).toContainText('あなた');
-		await expect(participantPage.locator('.tag-game-arrival')).toContainText(resolveCharacterFromPubkey(participantTwoPubkey)!.name);
+		await expect(participantPage.locator('.tag-game-arrival')).toHaveCount(0);
+		await expect(participantTwoPage.locator('.tag-game-arrival')).toHaveCount(0);
+		await expect(participantPage.getByText(/参加しました/)).toHaveCount(0);
+		await expect(participantTwoPage.getByText(/参加しました/)).toHaveCount(0);
+		await expect(hostPage.locator('.tag-game-arrival')).toHaveCount(0);
 		await expect(participantPage.locator('[data-tag-game-participant-slot]')).toHaveCount(3);
 		await expect(participantPage.locator('.participant-slot-empty')).toHaveCount(5);
-		const participantViewport = participantPage.viewportSize();
-		const participantCard = participantPage.getByRole('dialog', { name: '鬼ごっこ' }).locator('li').filter({ hasText: `開催者 ${hostCharacter}` });
-		const participantGrid = participantCard.locator('.participant-slots');
-		await participantPage.setViewportSize({ width: 390, height: 844 });
 		await expect.poll(async () => participantGrid.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(' ').length)).toBe(4);
+		await expect(participantGrid.locator('.participant-slot-arrival')).toHaveCount(1);
+		await expect(participantGrid.locator(`[data-tag-game-participant-slot="${participantTwoPubkey}"].participant-slot-arrival`)).toHaveCount(1);
+		await expect(participantTwoGrid.locator(`[data-tag-game-participant-slot="${participantTwoPubkey}"].participant-slot-arrival`)).toHaveCount(1);
+		const participantGridAfterOtherJoin = await participantGrid.boundingBox();
+		expect(participantGridAfterOtherJoin && participantGridBeforeOtherJoin).toBeTruthy();
+		if (participantGridAfterOtherJoin && participantGridBeforeOtherJoin) expect(participantGridAfterOtherJoin.y).toBe(participantGridBeforeOtherJoin.y);
+		const hostGridAfterSecondJoin = await hostGrid.boundingBox();
+		expect(hostGridAfterSecondJoin && hostGridBeforeSecondJoin).toBeTruthy();
+		if (hostGridAfterSecondJoin && hostGridBeforeSecondJoin) expect(hostGridAfterSecondJoin.y).toBe(hostGridBeforeSecondJoin.y);
+		await Promise.all([hostPage, participantPage, participantTwoPage].map((page) => page.clock.runFor(3_500)));
+		await Promise.all([hostGrid, participantGrid, participantTwoGrid].map((grid) => expect(grid.locator('.participant-slot-arrival')).toHaveCount(0)));
 		const cancelApplication = participantCard.getByRole('button', { name: '申請を取り消す' });
 		await expect(cancelApplication).toBeVisible();
 		await expect(cancelApplication).toHaveAttribute('data-action-intent', 'cancel');
@@ -801,12 +907,9 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 		const [gridBox, cancelBox] = await Promise.all([participantGrid.boundingBox(), cancelApplication.boundingBox()]);
 		expect(gridBox && cancelBox).toBeTruthy();
 		if (gridBox && cancelBox) expect(cancelBox.y).toBeGreaterThanOrEqual(gridBox.y + gridBox.height);
-		if (participantViewport) await participantPage.setViewportSize(participantViewport);
-		await participantTwoPage.getByRole('button', { name: '閉じる', exact: true }).click();
-		await injectRealtime(participantTwoPage, registeredEvent);
-		await openTagGameTerminal(participantTwoPage);
 		await expect(participantTwoPage.locator('[data-tag-game-participant-slot]')).toHaveCount(3);
-		await expect(participantTwoPage.locator('.tag-game-arrival')).toHaveCount(0);
+		if (participantViewport) await participantPage.setViewportSize(participantViewport);
+		if (hostViewport) await hostPage.setViewportSize(hostViewport);
 
 		await expect(hostPage.getByRole('button', { name: '開始を提案' })).toHaveAttribute('data-action-variant', 'primary');
 		await expect(hostCard.getByRole('button', { name: '募集を取り消す' })).toHaveAttribute('data-action-variant', 'tertiary');
@@ -955,7 +1058,7 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 		const holderViewport = holderPage.viewportSize();
 		await holderPage.setViewportSize({ width: 390, height: 844 });
 		await expect(fieldEffectVisuals.locator('svg')).toBeVisible();
-		expect(await holderMarker.evaluate((element) => Number.parseFloat(getComputedStyle(element).width))).toBe(50);
+		await expect.poll(async () => holderMarker.evaluate((element) => Number.parseFloat(getComputedStyle(element).width))).toBe(50);
 		await expect(holderMarker.locator('.participant-profile-trigger')).toBeVisible();
 		await expect(holderMarker.locator('.participant-name')).toBeVisible();
 		const mobileSymbolLayout = await readEffectSymbolLayout(holderMarker);
