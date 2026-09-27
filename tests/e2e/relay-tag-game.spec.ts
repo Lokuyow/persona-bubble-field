@@ -35,6 +35,7 @@ async function readEffectSymbolLayout(holder: Locator): Promise<Readonly<{
 	cell: Box;
 	avatar: Box;
 	name: Box;
+	aura: Box | null;
 	leftHorn: Box | null;
 	rightHorn: Box | null;
 	mallet: Box | null;
@@ -51,10 +52,12 @@ async function readEffectSymbolLayout(holder: Locator): Promise<Readonly<{
 		const visual = element.querySelector<HTMLElement>('.tag-game-effect-visuals');
 		const button = element.querySelector<HTMLElement>('.participant-profile-trigger');
 		const path = (selector: string) => box(element.querySelector(selector));
+		const auraSelector = element.getAttribute('data-tag-game-effect') === 'benefit' ? '.fuku-aura-ring' : '.oni-aura-outline';
 		return {
 			cell: box(element)!,
 			avatar: box(element.querySelector('.participant-profile-trigger .avatar'))!,
 			name: box(element.querySelector('.participant-name'))!,
+			aura: path(auraSelector),
 			leftHorn: path('.oni-horn:nth-of-type(1)'),
 			rightHorn: path('.oni-horn:nth-of-type(2)'),
 			mallet: path('[data-fuku-mallet]'),
@@ -63,6 +66,16 @@ async function readEffectSymbolLayout(holder: Locator): Promise<Readonly<{
 			pointerEvents: getComputedStyle(visual!).pointerEvents
 		};
 	});
+}
+
+function expectAuraVisibleOutsideAvatar(layout: Awaited<ReturnType<typeof readEffectSymbolLayout>>): void {
+	expect(layout.aura).not.toBeNull();
+	const aura = layout.aura!;
+	const minVisibleOverflow = layout.cell.width * 0.04;
+	expect(layout.avatar.x - aura.x).toBeGreaterThan(minVisibleOverflow);
+	expect(aura.x + aura.width - (layout.avatar.x + layout.avatar.width)).toBeGreaterThan(minVisibleOverflow);
+	expect(layout.avatar.y - aura.y).toBeGreaterThan(minVisibleOverflow);
+	expect(aura.y + aura.height - (layout.avatar.y + layout.avatar.height)).toBeGreaterThan(minVisibleOverflow);
 }
 
 function expectIconAboveAvatarAndClearOfName(layout: Awaited<ReturnType<typeof readEffectSymbolLayout>>, symbol: 'horns' | 'mallet'): void {
@@ -81,7 +94,8 @@ function expectIconAboveAvatarAndClearOfName(layout: Awaited<ReturnType<typeof r
 		expect(boxes[1].x + boxes[1].width / 2).toBeGreaterThan(cellCentre);
 	} else {
 		const malletCentre = boxes[0].x + boxes[0].width / 2;
-		expect(Math.abs(malletCentre - cellCentre)).toBeLessThan(layout.cell.width * 0.22);
+		expect(malletCentre - cellCentre).toBeGreaterThan(layout.cell.width * 0.08);
+		expect(malletCentre - cellCentre).toBeLessThan(layout.cell.width * 0.32);
 	}
 	expect(layout.visualZ).toBeGreaterThan(layout.buttonZ);
 	expect(layout.pointerEvents).toBe('none');
@@ -1796,8 +1810,12 @@ test('host silence is detected only while the local Relay connection is active',
 	await expect(holder.locator('.tag-game-effect-aura .oni-aura-outline')).toHaveCount(1);
 	await expect(holder.locator('.tag-game-effect-aura .oni-aura-shadow')).toHaveCount(1);
 	await expect(holder.locator('.tag-game-effect-aura .oni-aura-shard')).toHaveCount(4);
+	const oniViewport = page.viewportSize();
+	if (!oniViewport) throw new Error('Expected a fixed viewport for Oni symbol layout checks');
+	await expect.poll(() => holder.evaluate((element) => element.getBoundingClientRect().width)).toBe(76);
 	const initialOniLayout = await readEffectSymbolLayout(holder);
 	expectIconAboveAvatarAndClearOfName(initialOniLayout, 'horns');
+	expectAuraVisibleOutsideAvatar(initialOniLayout);
 	const cooldownLine = page.locator('[data-tag-game-cooldown-line]');
 	await expect(cooldownLine).toBeVisible();
 	const cooldownInitialWidth = await cooldownLine.locator('span').evaluate((element) => element.getBoundingClientRect().width);
@@ -1807,6 +1825,13 @@ test('host silence is detected only while the local Relay connection is active',
 	await page.clock.runFor(1_500);
 	await expect(cooldownLine).toHaveCount(0);
 	await expect(page.locator('[data-tag-game-hud] [data-tag-game-effect]')).toContainText('所持者が追いかけて押し付ける');
+	await page.setViewportSize({ width: 390, height: 844 });
+	await expect.poll(() => holder.evaluate((element) => element.getBoundingClientRect().width)).toBe(50);
+	const mobileOniLayout = await readEffectSymbolLayout(holder);
+	expectIconAboveAvatarAndClearOfName(mobileOniLayout, 'horns');
+	expectAuraVisibleOutsideAvatar(mobileOniLayout);
+	await page.setViewportSize(oniViewport);
+	await expect.poll(() => holder.evaluate((element) => element.getBoundingClientRect().width)).toBe(76);
 		await page.clock.runFor(10_000);
 		await expect(holder).toHaveAttribute('data-tag-game-effect', 'benefit');
 		await expect(holder).toHaveAttribute('data-tag-game-effect-active', 'true');
@@ -1826,10 +1851,12 @@ test('host silence is detected only while the local Relay connection is active',
 	await expect.poll(() => holder.evaluate((element) => element.getBoundingClientRect().width)).toBe(76);
 	const desktopFukuLayout = await readEffectSymbolLayout(holder);
 	expectIconAboveAvatarAndClearOfName(desktopFukuLayout, 'mallet');
+	expectAuraVisibleOutsideAvatar(desktopFukuLayout);
 	await page.setViewportSize({ width: 390, height: 844 });
 	await expect.poll(() => holder.evaluate((element) => element.getBoundingClientRect().width)).toBe(50);
 	const mobileFukuLayout = await readEffectSymbolLayout(holder);
 	expectIconAboveAvatarAndClearOfName(mobileFukuLayout, 'mallet');
+	expectAuraVisibleOutsideAvatar(mobileFukuLayout);
 	await page.setViewportSize(fukuViewport);
 	await expect.poll(() => holder.evaluate((element) => element.getBoundingClientRect().width)).toBe(76);
 	await page.emulateMedia({ reducedMotion: 'reduce' });

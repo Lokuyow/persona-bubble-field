@@ -61,18 +61,18 @@
 		<span class={['tag-game-effect-aura', `tag-game-effect-aura-${tagGameEffect}`, { 'tag-game-effect-aura-paused': !tagGameEffectActive }]} aria-hidden="true">
 			<svg viewBox="0 0 76 76" focusable="false">
 				{#if tagGameEffect === 'benefit'}
-					<path class="fuku-aura-glow" d="M18 8Q22 12 27 7L32 4L35 9L41 5L45 11Q51 8 55 14M68 23L64 28L70 33L66 38M68 51L62 54L65 60L58 62M50 69L45 65L39 71L34 66M25 68L23 62L16 61L18 54M8 47L13 42L7 37L12 32M9 23L16 21L15 14" />
-					<path class="fuku-aura-ring" d="M18 8L23 12L27 7L32 4L35 9L41 5L45 11L51 8L55 14M68 23L64 28L70 33L66 38M68 51L62 54L65 60L58 62M50 69L45 65L39 71L34 66M25 68L23 62L16 61L18 54M8 47L13 42L7 37L12 32M9 23L16 21L15 14" />
-					<path class="fuku-aura-flare fuku-aura-flare-one" d="M15 5L19 10L16 14L11 12Z" />
-					<path class="fuku-aura-flare fuku-aura-flare-two" d="M61 55L66 58L63 64L58 61Z" />
-					<path class="fuku-aura-flare fuku-aura-flare-three" d="M65 17L69 20L66 25L62 22Z" />
+					<path class="fuku-aura-glow" d="M17 -3Q24 2 29 -7L34 -4L38 -10L43 -3L50 -7L56 2Q61 -2 65 1M79 15L73 23L84 28L79 34M83 50L75 56L81 63L72 66M57 80L50 75L43 85L37 79M22 83L20 74L11 78L8 70M-7 55L1 49L-8 42L-3 37M-9 23L1 20L-4 12L5 10" />
+					<path class="fuku-aura-ring" d="M17 -3L23 2L29 -7L34 -4L38 -10L43 -3L50 -7L56 2L65 1M79 15L73 23L84 28L79 34M83 50L75 56L81 63L72 66M57 80L50 75L43 85L37 79M22 83L20 74L11 78L8 70M-7 55L1 49L-8 42L-3 37M-9 23L1 20L-4 12L5 10" />
+					<path class="fuku-aura-flare fuku-aura-flare-one" d="M13 -6L20 0L16 8L8 5Z" />
+					<path class="fuku-aura-flare fuku-aura-flare-two" d="M75 47L84 51L79 61L71 57Z" />
+					<path class="fuku-aura-flare fuku-aura-flare-three" d="M-7 35L-12 27L-3 24L2 31Z" />
 				{:else}
-					<path class="oni-aura-shadow" d="M35 2L42 4L47 2L51 9L60 10L59 17L68 20L64 27L74 34L68 39L73 47L64 51L66 58L57 60L52 72L44 68L38 74L32 68L23 72L20 63L11 60L15 53L3 48L10 42L2 34L9 29L5 21L14 18L17 9L27 11Z" />
-					<path class="oni-aura-outline" d="M35 2L42 4L47 2L51 9L60 10L59 17L68 20L64 27M74 34L68 39L73 47L64 51M66 58L57 60L52 72L44 68M38 74L32 68L23 72M20 63L11 60L15 53L3 48M2 34L9 29L5 21L14 18L17 9L27 11" />
-					<path class="oni-aura-shard oni-aura-shard-one" d="M29 10L34 1L39 12Z" />
-					<path class="oni-aura-shard oni-aura-shard-two" d="M67 29L76 35L65 40Z" />
-					<path class="oni-aura-shard oni-aura-shard-three" d="M45 66L40 76L33 66Z" />
-					<path class="oni-aura-shard oni-aura-shard-four" d="M9 45L0 40L11 33Z" />
+					<path class="oni-aura-shadow" d="M35 -10L42 -6L48 -10L52 -2L62 -5L63 4L74 5L70 15L83 18L77 27L86 34L78 40L84 48L74 53L78 62L66 64L63 77L53 72L46 84L39 77L31 86L26 76L15 81L13 69L2 67L6 57L-8 52L-1 43L-10 36L-1 29L-7 18L4 13L2 3L15 6L20 -5L29 0Z" />
+					<path class="oni-aura-outline" d="M35 -10L42 -6L48 -10L52 -2L62 -5L63 4L74 5L70 15L83 18L77 27M86 34L78 40L84 48L74 53M78 62L66 64L63 77L53 72M46 84L39 77L31 86L26 76L15 81M13 69L2 67L6 57L-8 52M-10 36L-1 29L-7 18L4 13L2 3L15 6L20 -5L29 0" />
+					<path class="oni-aura-shard oni-aura-shard-one" d="M26 0L32 -10L39 2Z" />
+					<path class="oni-aura-shard oni-aura-shard-two" d="M78 23L88 30L77 36Z" />
+					<path class="oni-aura-shard oni-aura-shard-three" d="M53 75L49 87L42 77Z" />
+					<path class="oni-aura-shard oni-aura-shard-four" d="M-8 44L-13 35L0 32Z" />
 				{/if}
 			</svg>
 		</span>
@@ -99,20 +99,20 @@
 			<svg viewBox="0 0 76 76" aria-hidden="true" focusable="false">
 				{#if tagGameEffect === 'benefit'}
 					<g class="fuku-mallet" data-fuku-mallet>
-						<path class="fuku-mallet-handle-outline" d="M51 2L71 20" />
-						<path class="fuku-mallet-handle" d="M51 2L71 20" />
-						<rect class="fuku-mallet-head" x="34" y="-13" width="34" height="18" rx="9" />
-						<path class="fuku-mallet-head-highlight" d="M39 -10H60" />
-						<path class="fuku-mallet-endcap" d="M38 -12V4M64 -12V4" />
-						<rect class="fuku-mallet-white-band" x="48" y="-9" width="8" height="10" rx="3" />
+						<path class="fuku-mallet-handle-outline" d="M62 -1L74 16" />
+						<path class="fuku-mallet-handle" d="M62 -1L74 16" />
+						<rect class="fuku-mallet-head" x="36" y="-20" width="34" height="19" rx="9.5" />
+						<path class="fuku-mallet-head-highlight" d="M42 -16H64" />
+						<path class="fuku-mallet-endcap" d="M39 -17V-5M67 -17V-5" />
+						<rect class="fuku-mallet-white-band" x="51" y="-18" width="7" height="15" rx="3" />
 					</g>
 				{:else}
 					<g class="oni-horns" data-oni-horns>
-						<ellipse class="oni-horn-root" cx="17" cy="18" rx="9" ry="5" />
-						<ellipse class="oni-horn-root" cx="59" cy="18" rx="9" ry="5" />
-						<path class="oni-horn" d="M12 24C6 19 4 11 7 3C9-3 14-8 19-11C17-3 19 3 23 8C26 13 26 19 23 24Z" />
-						<path class="oni-horn" d="M64 24C70 19 72 11 69 3C67-3 62-8 57-11C59-3 57 3 53 8C50 13 50 19 53 24Z" />
-						<path class="oni-horn-ridge" d="M10 10C11 3 15-2 18-5M66 10C65 3 61-2 58-5" />
+						<ellipse class="oni-horn-root" cx="18" cy="20" rx="8" ry="5.5" />
+						<ellipse class="oni-horn-root" cx="58" cy="20" rx="8" ry="5.5" />
+						<path class="oni-horn" d="M10 24Q8 21 10 17L16 -10Q18 -16 22 -11L28 17Q29 22 25 24Q18 27 10 24Z" />
+						<path class="oni-horn" d="M66 24Q68 21 66 17L60 -10Q58 -16 54 -11L48 17Q47 22 51 24Q58 27 66 24Z" />
+						<path class="oni-horn-ridge" d="M12 16L18 -9M64 16L58 -9" />
 					</g>
 				{/if}
 			</svg>
@@ -223,8 +223,8 @@
 	.tag-game-effect-aura-paused { opacity: .76; }
 	.tag-game-effect-visuals-paused { opacity: .92; }
 
-	.fuku-aura-glow { fill: none; stroke: rgba(255, 244, 225, .66); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 0 3px rgba(255, 168, 118, .8)); }
-	.fuku-aura-ring { fill: none; stroke: rgba(221, 65, 47, .94); stroke-width: 2.2; stroke-dasharray: 22 7 5 12 2 9; stroke-linecap: square; stroke-linejoin: bevel; transform-box: fill-box; transform-origin: center; animation: fuku-aura-waver 5.7s ease-in-out infinite alternate; }
+	.fuku-aura-glow { fill: none; stroke: rgba(255, 244, 225, .9); stroke-width: 7; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 0 4px rgba(255, 143, 102, .95)); }
+	.fuku-aura-ring { fill: none; stroke: rgba(221, 65, 47, .98); stroke-width: 3.4; stroke-dasharray: 22 7 5 12 2 9; stroke-linecap: square; stroke-linejoin: bevel; transform-box: fill-box; transform-origin: center; animation: fuku-aura-waver 5.7s ease-in-out infinite alternate; }
 	.fuku-aura-flare { fill: #fff1c9; stroke: #d94a39; stroke-width: 1.2; stroke-linejoin: bevel; transform-box: fill-box; transform-origin: center; }
 	.fuku-aura-flare-one { animation: fuku-aura-flicker 3.8s ease-in-out infinite; }
 	.fuku-aura-flare-two { fill: #e95b42; stroke: #ffe4a4; animation: fuku-aura-flicker 4.6s ease-in-out -2s infinite; }
@@ -233,9 +233,9 @@
 	.tag-game-effect-aura-paused .fuku-aura-ring,
 	.tag-game-effect-aura-paused .fuku-aura-flare { animation: none; }
 
-	.oni-aura-shadow { fill: rgba(9, 7, 18, .2); stroke: rgba(18, 13, 31, .9); stroke-width: 4; filter: drop-shadow(0 0 4px rgba(18, 12, 35, .92)); }
-	.oni-aura-outline { fill: none; stroke: #78678f; stroke-width: 3; stroke-linecap: square; stroke-linejoin: bevel; filter: drop-shadow(0 0 3px rgba(61, 45, 91, .95)); transform-box: fill-box; transform-origin: center; animation: oni-aura-waver 4.6s ease-in-out infinite alternate; }
-	.oni-aura-shard { fill: #252034; stroke: #82729c; stroke-width: 1.2; stroke-linejoin: bevel; transform-box: fill-box; transform-origin: center; }
+	.oni-aura-shadow { fill: rgba(9, 7, 18, .34); stroke: rgba(18, 13, 31, .98); stroke-width: 5; filter: drop-shadow(0 0 5px rgba(18, 12, 35, .98)); }
+	.oni-aura-outline { fill: none; stroke: #a493bc; stroke-width: 4.2; stroke-linecap: square; stroke-linejoin: bevel; filter: drop-shadow(0 0 4px rgba(61, 45, 91, 1)); transform-box: fill-box; transform-origin: center; animation: oni-aura-waver 4.6s ease-in-out infinite alternate; }
+	.oni-aura-shard { fill: #252034; stroke: #aa98c4; stroke-width: 1.8; stroke-linejoin: bevel; transform-box: fill-box; transform-origin: center; }
 	.oni-aura-shard-one { animation: oni-aura-shard 3.9s ease-in-out infinite alternate; }
 	.oni-aura-shard-two { fill: #342747; animation: oni-aura-shard 4.4s ease-in-out -1.5s infinite alternate-reverse; }
 	.oni-aura-shard-three { fill: #1c1927; animation: oni-aura-shard 4.1s ease-in-out -.8s infinite alternate; }
@@ -245,16 +245,16 @@
 	.tag-game-effect-aura-paused .oni-aura-outline { stroke-dasharray: 5 3; }
 
 	.fuku-mallet { stroke-linecap: round; stroke-linejoin: round; }
-	.fuku-mallet-handle-outline { fill: none; stroke: #a82e2d; stroke-width: 10; }
-	.fuku-mallet-handle { fill: none; stroke: #fff4e6; stroke-width: 6; }
+	.fuku-mallet-handle-outline { fill: none; stroke: #a82e2d; stroke-width: 9; }
+	.fuku-mallet-handle { fill: none; stroke: #fff4e6; stroke-width: 5; }
 	.fuku-mallet-head { fill: #dc4938; stroke: #fff5e9; stroke-width: 2; }
 	.fuku-mallet-head-highlight { fill: none; stroke: #ffb99a; stroke-width: 1.5; }
 	.fuku-mallet-endcap { fill: none; stroke: #f0cc76; stroke-width: 2.2; }
 	.fuku-mallet-white-band { fill: #fff7ed; stroke: #b63831; stroke-width: .8; }
 
-	.oni-horn-root { fill: #171323; stroke: #88779f; stroke-width: 1.5; }
-	.oni-horn { fill: #201a2b; stroke: #9a8aaf; stroke-width: 2.2; stroke-linejoin: round; }
-	.oni-horn-ridge { fill: none; stroke: #c2b5cf; stroke-width: 1.7; stroke-linecap: round; opacity: .82; }
+	.oni-horn-root { fill: #110e1c; stroke: #a493bc; stroke-width: 2; }
+	.oni-horn { fill: #201a2b; stroke: #b0a0c5; stroke-width: 2.8; stroke-linejoin: round; }
+	.oni-horn-ridge { fill: none; stroke: #c2b5cf; stroke-width: 2; stroke-linecap: round; opacity: .9; }
 
 	.tag-game-participant-mark {
 		position: absolute;
