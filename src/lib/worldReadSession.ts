@@ -1421,9 +1421,20 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			}), selfSigner.secretKey);
 			if (!await authorizeSelfWrite() || terminal) return { kind: 'unavailable' };
 			operation.eventId = event.id;
-			const results = await transport.publish(event);
+			const selfPublication = transport.publishSelf?.(event, selfSigner.pubkey);
+			let published: boolean;
+			if (selfPublication) {
+				// The remaining authoritative relays keep publishing in the background;
+				// their settlement is diagnostic only after the first confirmed success.
+				void selfPublication.settled.catch(() => {});
+				published = await selfPublication.firstSuccess;
+				if (!published) await selfPublication.settled.catch(() => []);
+			} else {
+				const results = await transport.publish(event);
+				published = reachedAuthoritativeRelay(results);
+			}
 			if (disposed) return { kind: 'unavailable' };
-			if (!reachedAuthoritativeRelay(results)) return { kind: 'reply-failed' };
+			if (!published) return { kind: 'reply-failed' };
 			// Use the current generation only for the same open root. Cache semantics decide retention.
 			const generation = traceConversationState.kind === 'open' && traceConversationState.root.id === accepted.root.id
 				? traceConversationGeneration : -1;

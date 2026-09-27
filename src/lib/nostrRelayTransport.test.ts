@@ -181,6 +181,145 @@ afterEach(async () => {
 });
 
 describe('primary lifecycle', () => {
+	it('allows started-session kind 1111 self publication and returns on authoritative success before every Relay settles', async () => {
+		const f = fixture(3, socketConstructor, 10_000);
+		f.authorities.forEach((relay) => { relay.onRequest = (socket, request) => send(socket, 'EOSE', request[1]); });
+		f.authorities[0].onPublish = (socket, event) => send(socket, 'OK', event.id, true, '');
+		f.authorities[1].onPublish = () => {};
+		f.authorities[2].onPublish = () => {};
+		await f.start();
+		const event = finalizeEvent({ kind: 1111, created_at: TIME, tags: [], content: 'trace reply' }, AUTHOR);
+		const handle = f.transport.publishSelf(event, event.pubkey);
+		await vi.advanceTimersByTimeAsync(20);
+		expect(await handle.firstSuccess).toBe(true);
+		expect(f.authorities.every((relay) => relay.messages.some((message) => message[0] === 'EVENT' &&
+			(message[1] as Event).id === event.id))).toBe(true);
+		let settled = false;
+		void handle.settled.then(() => { settled = true; });
+		expect(settled).toBe(false);
+		f.authorities.slice(1).forEach((relay) => send(relay.latestSocket(), 'OK', event.id, true, 'late success'));
+		await vi.advanceTimersByTimeAsync(1);
+		await expect(handle.settled).resolves.toMatchObject([
+			{ relayUrl: f.authorities[0].url, outcome: 'accepted' },
+			{ relayUrl: f.authorities[1].url, outcome: 'accepted' },
+			{ relayUrl: f.authorities[2].url, outcome: 'accepted' }
+		]);
+	});
+
+	it('waits for a later authoritative Relay after an earlier rejection and accepts only proper duplicate notices', async () => {
+		const rejectedFirst = fixture(2);
+		rejectedFirst.authorities.forEach((relay) => { relay.onRequest = (socket, request) => send(socket, 'EOSE', request[1]); });
+		rejectedFirst.authorities[0].onPublish = (socket, event) => send(socket, 'OK', event.id, false, 'blocked: policy');
+		rejectedFirst.authorities[1].onPublish = (socket, event) => send(socket, 'OK', event.id, true, '');
+		await rejectedFirst.start();
+		const acceptedLaterEvent = finalizeEvent({ kind: 1111, created_at: TIME, tags: [], content: 'reply' }, AUTHOR);
+		const acceptedLater = rejectedFirst.transport.publishSelf(acceptedLaterEvent, acceptedLaterEvent.pubkey);
+		await vi.advanceTimersByTimeAsync(20);
+		expect(await acceptedLater.firstSuccess).toBe(true);
+		await acceptedLater.settled;
+
+		const duplicate = fixture(1);
+		duplicate.authorities[0].onRequest = (socket, request) => send(socket, 'EOSE', request[1]);
+		duplicate.authorities[0].onPublish = (socket, event) => send(socket, 'OK', event.id, false, 'duplicate: already stored');
+		await duplicate.start();
+		const duplicateEvent = finalizeEvent({ kind: 1111, created_at: TIME, tags: [], content: 'reply' }, AUTHOR);
+		const duplicateHandle = duplicate.transport.publishSelf(duplicateEvent, duplicateEvent.pubkey);
+		await vi.advanceTimersByTimeAsync(20);
+		expect(await duplicateHandle.firstSuccess).toBe(true);
+		expect(await duplicateHandle.settled).toMatchObject([{ outcome: 'rejected', notice: 'duplicate: already stored' }]);
+	});
+
+	it('does not treat duplicate-like rejection text or a complete no-success fanout as success', async () => {
+		const f = fixture(2);
+		f.authorities.forEach((relay, index) => {
+			relay.onRequest = (socket, request) => send(socket, 'EOSE', request[1]);
+			relay.onPublish = (socket, event) => send(socket, 'OK', event.id, false,
+				index === 0 ? 'duplicate already stored' : 'blocked: duplicate: not an acceptance');
+		});
+		await f.start();
+		const event = finalizeEvent({ kind: 1111, created_at: TIME, tags: [], content: 'reply' }, AUTHOR);
+		const handle = f.transport.publishSelf(event, event.pubkey);
+		await vi.advanceTimersByTimeAsync(20);
+		expect(await handle.firstSuccess).toBe(false);
+		await expect(handle.settled).resolves.toMatchObject([{ outcome: 'rejected' }, { outcome: 'rejected' }]);
+
+		const silent = fixture(2, socketConstructor, 100);
+		silent.authorities.forEach((relay) => { relay.onRequest = (socket, request) => send(socket, 'EOSE', request[1]); relay.onPublish = () => {}; });
+		await silent.start();
+		const silentEvent = finalizeEvent({ kind: 1111, created_at: TIME, tags: [], content: 'reply' }, AUTHOR);
+		const noResponse = silent.transport.publishSelf(silentEvent, silentEvent.pubkey);
+		await vi.advanceTimersByTimeAsync(120);
+		expect(await noResponse.firstSuccess).toBe(false);
+		await expect(noResponse.settled).resolves.toMatchObject([{ outcome: 'no-response' }, { outcome: 'no-response' }]);
+	});
+
+	it('limits kind 1111 self publication to a started transport and a matching signer', async () => {
+		const f = fixture(1);
+		const event = finalizeEvent({ kind: 1111, created_at: TIME, tags: [], content: 'reply' }, AUTHOR);
+		expect(() => f.transport.publishSelf(event, event.pubkey)).toThrow();
+		await f.start();
+		expect(() => f.transport.publishSelf(event, 'f'.repeat(64))).toThrow();
+	});
+
+	it('compares old full-fanout latency with early success across position and fast-Relay scenarios', async () => {
+		const measure = async (fastPath: boolean, delays: readonly number[], positionRequired: boolean) => {
+			const timeoutMs = delays.some((delay) => delay > 100) ? 300 : 10_000;
+			const f = fixture(delays.length, socketConstructor, timeoutMs);
+			f.authorities.forEach((relay, index) => {
+				relay.onRequest = (socket, request) => send(socket, 'EOSE', request[1]);
+				relay.onPublish = (socket, event) => setTimeout(() => send(socket, 'OK', event.id, true, ''), delays[index]);
+			});
+			await f.start();
+			const elapsed = async (promise: Promise<unknown>) => {
+				let finished = false;
+				void promise.then(() => { finished = true; }, () => { finished = true; });
+				let ms = 0;
+				while (!finished && ms < 2_000) { await vi.advanceTimersByTimeAsync(5); ms += 5; }
+				expect(finished).toBe(true);
+				return ms;
+			};
+			let positionMs = 0;
+			if (positionRequired) {
+				const position = f.position();
+				const handle = f.transport.publishSelf(position, position.pubkey);
+				void handle.settled.catch(() => {});
+				positionMs = await elapsed(handle.firstSuccess);
+			}
+			const reply = finalizeEvent({ kind: 1111, created_at: TIME, tags: [], content: 'reply' }, AUTHOR);
+			if (fastPath) {
+				const handle = f.transport.publishSelf(reply, reply.pubkey);
+				void handle.settled.catch(() => {});
+				return { positionMs, replyMs: await elapsed(handle.firstSuccess) };
+			}
+			return { positionMs, replyMs: await elapsed(f.transport.publish(reply)) };
+		};
+
+		const mixed = [20, 1_000, 1_000];
+		const withoutPositionBefore = await measure(false, mixed, false);
+		const withoutPositionAfter = await measure(true, mixed, false);
+		const withPositionBefore = await measure(false, mixed, true);
+		const withPositionAfter = await measure(true, mixed, true);
+		const allFastBefore = await measure(false, [20, 20, 20], false);
+		const allFastAfter = await measure(true, [20, 20, 20], false);
+		// These are deterministic simulated milliseconds; local/network latency is not measured here.
+		expect(withoutPositionBefore.replyMs).toBeGreaterThanOrEqual(325);
+		expect(withoutPositionBefore.replyMs).toBeLessThanOrEqual(330);
+		expect(withoutPositionAfter.replyMs).toBeGreaterThanOrEqual(25);
+		expect(withoutPositionAfter.replyMs).toBeLessThanOrEqual(30);
+		expect(withPositionBefore.positionMs).toBeGreaterThanOrEqual(25);
+		expect(withPositionBefore.positionMs).toBeLessThanOrEqual(30);
+		expect(withPositionBefore.replyMs).toBeGreaterThanOrEqual(325);
+		expect(withPositionBefore.replyMs).toBeLessThanOrEqual(330);
+		expect(withPositionAfter.positionMs).toBeGreaterThanOrEqual(25);
+		expect(withPositionAfter.positionMs).toBeLessThanOrEqual(30);
+		expect(withPositionAfter.replyMs).toBeGreaterThanOrEqual(25);
+		expect(withPositionAfter.replyMs).toBeLessThanOrEqual(30);
+		expect(allFastBefore.replyMs).toBeGreaterThanOrEqual(25);
+		expect(allFastBefore.replyMs).toBeLessThanOrEqual(30);
+		expect(allFastAfter.replyMs).toBeGreaterThanOrEqual(25);
+		expect(allFastAfter.replyMs).toBeLessThanOrEqual(30);
+	});
+
 	it('opens self publication at three paired EOSEs while the other primaries and publication remain live', async () => {
 		const f = fixture(5, socketConstructor, 2_000);
 		const published = f.position();

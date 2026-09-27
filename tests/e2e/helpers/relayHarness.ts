@@ -321,17 +321,19 @@ export async function installDelayedRelay(page: Page, options: {
 	traceReplies?: readonly object[];
 	deferTraceRoots?: boolean;
 	deferTraceReplies?: boolean;
+	silentReplyRelays?: readonly string[];
 	persistAcrossReload?: boolean;
 	testWorldConfig?: PrototypeWorldConfig;
 	hiddenSubscriptionLimit?: number;
 } = {}): Promise<void> {
 	const events = options.primaryEvents ?? testEvents();
-	await page.addInitScript(({ authoritativeRelays, primaryEvents, historyMessages, realtimeEvents, deferPrimaryEvents, deferRealtimeEvents, primaryTerminal, realtimeTerminal, realtimePublishOutcome, rejectTracePublishes, traceRoots, traceReplies, deferTraceRoots, deferTraceReplies, persistAcrossReload, testWorldConfig, hiddenSubscriptionLimit }) => {
+	await page.addInitScript(({ authoritativeRelays, primaryEvents, historyMessages, realtimeEvents, deferPrimaryEvents, deferRealtimeEvents, primaryTerminal, realtimeTerminal, realtimePublishOutcome, rejectTracePublishes, traceRoots, traceReplies, deferTraceRoots, deferTraceReplies, silentReplyRelays, persistAcrossReload, testWorldConfig, hiddenSubscriptionLimit }) => {
 		const WORLD_STATE_KIND = 30079;
 		const TAG_GAME_KIND = 37070;
 		type Listener = (event?: { type: string; data?: string; code?: number; reason?: string }) => void;
 		type PendingRequest = { socket: FakeWebSocket; subId: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] };
 		const authoritative = new Set<string>(authoritativeRelays);
+		const silentReplyRelaySet = new Set(silentReplyRelays ?? []);
 		const pendingPrimary: PendingRequest[] = [];
 		const pendingTraceRoots: PendingRequest[] = [];
 		const pendingTraceReplies: PendingRequest[] = [];
@@ -565,6 +567,8 @@ export async function installDelayedRelay(page: Page, options: {
 					}
 					if (event.kind === 7070) {
 						respondRealtimePublish(this, event);
+					} else if (event.kind === 1111 && silentReplyRelaySet.has(new URL(this.url).toString())) {
+						// Keep this Relay's publication pending to verify the early-success path.
 					} else if (event.kind === 1111 && state.deferReplyPublishes || event.kind === WORLD_STATE_KIND && state.deferPositionPublishes) {
 						pendingPublishes.push({ socket: this, event });
 					} else respondPublish(this, event);
@@ -675,6 +679,7 @@ export async function installDelayedRelay(page: Page, options: {
 					pendingTraceReplies.splice(0).forEach(respondTraceReplies);
 					},
 					deferPositionPublishes: () => { state.deferPositionPublishes = true; },
+					silenceReplyRelays: (urls: string[]) => urls.forEach((url) => silentReplyRelaySet.add(url)),
 					releaseRealtimeEvents: () => {
 						state.realtimeEventsReleased = true;
 						pendingRealtime.splice(0).forEach(respondRealtime);
@@ -762,6 +767,7 @@ export async function installDelayedRelay(page: Page, options: {
 		realtimeEvents: options.realtimeEvents ?? [],
 		deferTraceRoots: options.deferTraceRoots ?? false,
 		deferTraceReplies: options.deferTraceReplies ?? false,
+		silentReplyRelays: options.silentReplyRelays ?? [],
 		deferRealtimeEvents: options.deferRealtimeEvents ?? false,
 		realtimeTerminal: options.realtimeTerminal ?? 'eose',
 		realtimePublishOutcome: options.realtimePublishOutcome ?? 'accepted',

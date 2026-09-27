@@ -156,6 +156,8 @@ project labelsはtarget-channel membershipまたは公式client証明ではな�
 
 external/modified client製1111も、署名、project labels、root/parent relation、kind、author、character slot解決を全て検証できる場合だけ受理する。未割当slotのauthorによる1111は受理しない。これはofficial-client認証ではない。legacy signed replyに含まれる `w` はextra tagとして無視する。NIP-22の `p` は本文mentionにも使えるため、`p=self`だけで自分へのdirect replyや通知対象と判定してはならない。
 
+公式clientのTrace reply送信は、開始済みの正規World sessionで現在の署名者とevent authorが一致する場合に限る。必要なposition publicationの成功確認後にreplyを送信する。固定されたauthoritative Relayのいずれかが当該eventの受理を確認した時点で送信成功とし、正しい `duplicate:` 応答も受理として扱う。非authoritative Relayの応答では成功を確定しない。最初の受理確認後も残りのauthoritative Relayへの送信と結果収集を継続する。全Relayで受理確認が得られない場合は成功としない。成功後のlocal reply cache reconciliation完了を待ってComposerへ成功を返す。
+
 `K/k/P/p`等のsemantic correctnessは受信後に検証する。REQを過度に狭めるための `#K` filterは必須としない。trace conversationの取得意味論は [`SPEC-50-発言の痕跡.md`](./SPEC-50-発言の痕跡.md) を正とする。
 
 ### NIP-09
