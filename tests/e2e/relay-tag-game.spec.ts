@@ -560,6 +560,9 @@ test('rebases hidden-tab game audio cues on resume and keeps the resumed pulse a
 });
 
 async function openTagGameTerminal(page: Page): Promise<void> {
+	const facility = page.locator('[data-field-facility="tag-game-terminal"]');
+	await expect(facility.locator('img')).toHaveAttribute('src', /field\/objects\/tag-game-terminal\.webp$/);
+	await expect(facility).not.toContainText('鬼');
 	const chatter = page.locator('aside[aria-label="Chatter"]');
 	if (await chatter.isVisible()) {
 		await page.keyboard.press('c');

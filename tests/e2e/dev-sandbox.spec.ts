@@ -27,6 +27,18 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.locator('.trace-marker')).toHaveCount(3);
 	});
 
+	test('renders the tag-game terminal larger than the neighboring facility artwork', async ({ page }) => {
+		await page.goto('/?devWorld=1&devCharacter=020');
+		const tagGameTerminal = page.locator('[data-field-facility="tag-game-terminal"]');
+		await expect(tagGameTerminal.locator('img')).toHaveAttribute('src', /field\/objects\/tag-game-terminal\.webp$/);
+		const [tagGameBounds, adjustmentBounds] = await Promise.all([
+			tagGameTerminal.boundingBox(),
+			page.locator('[data-field-facility="adjustment-terminal"]').boundingBox()
+		]);
+		if (!tagGameBounds || !adjustmentBounds) throw new Error('Expected rendered terminal bounds.');
+		expect(tagGameBounds.width).toBeGreaterThan(adjustmentBounds.width);
+	});
+
 	test('keeps desktop Trace DEV controls and Chatter actions independently operable', async ({ page }) => {
 		await page.setViewportSize({ width: 900, height: 720 });
 		await openDevTraceWorld(page, 'trace-replies');

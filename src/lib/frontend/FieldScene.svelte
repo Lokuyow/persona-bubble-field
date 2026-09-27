@@ -18,6 +18,7 @@
 	const TRACE_DEATH_ICON_ASSET = '/trace/trace-death-icon.svg';
 	const MENDING_TERMINAL_ASSET = '/field/objects/mending-terminal.webp';
 	const ADJUSTMENT_TERMINAL_ASSET = '/field/objects/adjustment-terminal.webp';
+	const TAG_GAME_TERMINAL_ASSET = '/field/objects/tag-game-terminal.webp';
 
 	export type FieldParticipantView = ProjectedParticipant<Participant>;
 	export type TraceMarkerCell = TraceRootCell & Readonly<{
@@ -185,7 +186,7 @@
 		<div class="field-facility-layer" aria-hidden="true">
 			{#each FIXED_FIELD_FACILITIES as facility (facility.kind)}
 				<span class={['field-facility', `field-${facility.kind}`]} data-field-facility={facility.kind}
-					style={`left: ${(facility.position.x + 0.5) * cellSize}px; top: ${(facility.position.y + 0.5) * cellSize}px;`}>{#if facility.kind === 'mending-terminal'}<img src={asset(MENDING_TERMINAL_ASSET)} alt="" />{:else if facility.kind === 'adjustment-terminal'}<img src={asset(ADJUSTMENT_TERMINAL_ASSET)} alt="" />{:else}<span aria-hidden="true">鬼</span>{/if}</span>
+					style={`left: ${(facility.position.x + 0.5) * cellSize}px; top: ${(facility.position.y + 0.5) * cellSize}px;`}>{#if facility.kind === 'mending-terminal'}<img src={asset(MENDING_TERMINAL_ASSET)} alt="" />{:else if facility.kind === 'adjustment-terminal'}<img src={asset(ADJUSTMENT_TERMINAL_ASSET)} alt="" />{:else}<img src={asset(TAG_GAME_TERMINAL_ASSET)} alt="" />{/if}</span>
 			{/each}
 		</div>
 		<div class="realtime-group-layer" aria-label="協力と抜け駆けの参加地点">
@@ -381,8 +382,8 @@
 		place-items: center; border: 0; border-radius: 0; background: none; box-shadow: none;
 		transform: translate(-50%, -50%); pointer-events: none;
 	}
+	.field-tag-game-terminal { width: calc(var(--cell-size) * 0.86); height: calc(var(--cell-size) * 0.86); }
 	.field-facility img { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
-	.field-tag-game-terminal span { display: grid; width: 64%; height: 64%; place-items: center; border: 2px solid #765432; border-radius: 50%; background: #f4e5bd; color: #765432; font-size: calc(var(--cell-size) * .34); font-weight: 800; }
 	.realtime-group-layer { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
 	.realtime-group {
 		position: absolute; display: grid; width: calc(var(--cell-size) * 0.84); height: calc(var(--cell-size) * 0.84);
