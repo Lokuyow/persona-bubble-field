@@ -1,7 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { expectIconCloseButton } from './helpers/iconCloseButton';
 import { finalizeEvent, getPublicKey, type Event as NostrEvent } from 'nostr-tools/pure';
-import { buildTagGameActionTemplate, createTagGameSchedule, finalizeTagGameState, isFreshTagGameTouchAction, parseTagGameActionEvent, parseTagGameEvent, TAG_GAME_KIND, TAG_GAME_TRANSFER_COOLDOWN_MS, type TagGameState } from '../../src/lib/tagGame';
+import { buildTagGameActionTemplate, createTagGameSchedule, finalizeTagGameState, isFreshTagGameTouchAction, parseTagGameActionEvent, parseTagGameEvent, tagGameScheduledEffectAt, TAG_GAME_KIND, TAG_GAME_TRANSFER_COOLDOWN_MS, type TagGameState } from '../../src/lib/tagGame';
 import { MENDING_TERMINAL, TAG_GAME_TERMINAL } from '../../src/lib/fieldFacilities';
 import { resolveCharacterFromPubkey } from '../../src/lib/characterAssignment';
 import { buildWorldMessageTemplate, buildWorldStateEventTemplate, WORLD_STATE_KIND } from '../../src/lib/nostrProtocol';
@@ -50,6 +50,8 @@ async function readEffectSymbolLayout(holder: Locator): Promise<Readonly<{
 	leftHorn: Box | null;
 	rightHorn: Box | null;
 	mallet: Box | null;
+	malletHead: Box | null;
+	malletShaft: Box | null;
 	malletGeometry: Readonly<{
 		shaft: Readonly<{ tagName: string; x: number; y: number; width: number; height: number; rx: number }>;
 		head: Readonly<{ tagName: string; x: number; y: number; width: number; height: number; rx: number }>;
@@ -110,6 +112,8 @@ async function readEffectSymbolLayout(holder: Locator): Promise<Readonly<{
 			leftHorn: path('.oni-horn:nth-of-type(1)'),
 			rightHorn: path('.oni-horn:nth-of-type(2)'),
 			mallet: path('[data-fuku-mallet]'),
+			malletHead: path('[data-fuku-mallet-head]'),
+			malletShaft: path('[data-fuku-mallet-handle]'),
 			malletGeometry: malletShaft && malletHead ? {
 				shaft: rectGeometry(malletShaft),
 				head: rectGeometry(malletHead),
@@ -177,8 +181,8 @@ function expectFukuHaloVisibleAroundAvatar(layout: Awaited<ReturnType<typeof rea
 	expect(lightRing.y + lightRing.height - (layout.avatar.y + layout.avatar.height)).toBeGreaterThan(minVisibleOverflow);
 }
 
-function expectIconAboveAvatarAndClearOfName(layout: Awaited<ReturnType<typeof readEffectSymbolLayout>>, symbol: 'horns' | 'mallet'): void {
-	const iconBoxes = symbol === 'horns' ? [layout.leftHorn, layout.rightHorn] : [layout.mallet];
+function expectHornsAboveAvatarAndClearOfName(layout: Awaited<ReturnType<typeof readEffectSymbolLayout>>): void {
+	const iconBoxes = [layout.leftHorn, layout.rightHorn];
 	expect(iconBoxes.every((box) => box !== null && box.width > 0 && box.height > 0)).toBe(true);
 	const boxes = iconBoxes.filter((box): box is Box => box !== null);
 	const cellCentre = layout.cell.x + layout.cell.width / 2;
@@ -188,14 +192,41 @@ function expectIconAboveAvatarAndClearOfName(layout: Awaited<ReturnType<typeof r
 		expect(box.y + box.height).toBeLessThan(avatarTopHalf);
 		expect(box.y + box.height <= layout.name.y || box.y >= layout.name.y + layout.name.height).toBe(true);
 	}
-	if (symbol === 'horns') {
-		expect(boxes[0].x + boxes[0].width / 2).toBeLessThan(cellCentre);
-		expect(boxes[1].x + boxes[1].width / 2).toBeGreaterThan(cellCentre);
-	} else {
-		const malletCentre = boxes[0].x + boxes[0].width / 2;
-		expect(malletCentre - cellCentre).toBeGreaterThan(layout.cell.width * 0.08);
-		expect(malletCentre).toBeLessThan(layout.cell.x + layout.cell.width);
-	}
+	expect(boxes[0].x + boxes[0].width / 2).toBeLessThan(cellCentre);
+	expect(boxes[1].x + boxes[1].width / 2).toBeGreaterThan(cellCentre);
+	expect(layout.visualZ).toBeGreaterThan(layout.buttonZ);
+	expect(layout.auraZ).toBeLessThan(layout.buttonZ);
+	expect(layout.visualAnimationName).toBe('none');
+	expect(layout.pointerEvents).toBe('none');
+}
+
+function expectMalletBottomRightOfAvatarAndClearOfName(layout: Awaited<ReturnType<typeof readEffectSymbolLayout>>): void {
+	const mallet = layout.mallet;
+	const head = layout.malletHead;
+	const shaft = layout.malletShaft;
+	expect(mallet && mallet.width > 0 && mallet.height > 0).toBeTruthy();
+	expect(head && head.width > 0 && head.height > 0).toBeTruthy();
+	expect(shaft && shaft.width > 0 && shaft.height > 0).toBeTruthy();
+	const headCentreX = head!.x + head!.width / 2;
+	const headCentreY = head!.y + head!.height / 2;
+	const avatarCentreX = layout.avatar.x + layout.avatar.width / 2;
+	const avatarCentreY = layout.avatar.y + layout.avatar.height / 2;
+	expect(headCentreX).toBeGreaterThan(avatarCentreX);
+	expect(headCentreY).toBeGreaterThan(avatarCentreY);
+	const overlaps = (first: Box, second: Box) => first.x < second.x + second.width && first.x + first.width > second.x && first.y < second.y + second.height && first.y + first.height > second.y;
+	const faceSafeZone: Box = {
+		x: layout.avatar.x + layout.avatar.width * 0.15,
+		y: layout.avatar.y + layout.avatar.height * 0.15,
+		width: layout.avatar.width * 0.7,
+		height: layout.avatar.height * 0.7
+	};
+	// The mallet may sit beside the avatar edge, but must stay out of the central face area.
+	expect(overlaps(head!, faceSafeZone)).toBe(false);
+	expect(overlaps(mallet!, layout.name)).toBe(false);
+	const shaftCentreX = shaft!.x + shaft!.width / 2;
+	const shaftCentreY = shaft!.y + shaft!.height / 2;
+	expect(shaftCentreX).toBeGreaterThan(headCentreX);
+	expect(shaftCentreY).toBeGreaterThan(headCentreY);
 	expect(layout.visualZ).toBeGreaterThan(layout.buttonZ);
 	expect(layout.auraZ).toBeLessThan(layout.buttonZ);
 	expect(layout.visualAnimationName).toBe('none');
@@ -1101,8 +1132,8 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 		expect(await fieldEffectVisuals.evaluate((element) => getComputedStyle(element).pointerEvents)).toBe('none');
 		expect(await holderMarker.locator('.participant-profile-trigger').evaluate((element) => getComputedStyle(element).pointerEvents)).toBe('auto');
 		const desktopSymbolLayout = await readEffectSymbolLayout(holderMarker);
-		if (running.effect === 'calamity') expectIconAboveAvatarAndClearOfName(desktopSymbolLayout, 'horns');
-		else expectIconAboveAvatarAndClearOfName(desktopSymbolLayout, 'mallet');
+		if (running.effect === 'calamity') expectHornsAboveAvatarAndClearOfName(desktopSymbolLayout);
+		else expectMalletBottomRightOfAvatarAndClearOfName(desktopSymbolLayout);
 		const holderViewport = holderPage.viewportSize();
 		await holderPage.setViewportSize({ width: 390, height: 844 });
 		await expect(fieldEffectVisuals.locator('svg')).toBeVisible();
@@ -1110,8 +1141,8 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 		await expect(holderMarker.locator('.participant-profile-trigger')).toBeVisible();
 		await expect(holderMarker.locator('.participant-name')).toBeVisible();
 		const mobileSymbolLayout = await readEffectSymbolLayout(holderMarker);
-		if (running.effect === 'calamity') expectIconAboveAvatarAndClearOfName(mobileSymbolLayout, 'horns');
-		else expectIconAboveAvatarAndClearOfName(mobileSymbolLayout, 'mallet');
+		if (running.effect === 'calamity') expectHornsAboveAvatarAndClearOfName(mobileSymbolLayout);
+		else expectMalletBottomRightOfAvatarAndClearOfName(mobileSymbolLayout);
 		await holderPage.emulateMedia({ reducedMotion: 'reduce' });
 		await expect(fieldEffectVisuals.locator('svg')).toBeVisible();
 		const reducedMotionAnimations = await fieldEffectVisuals.evaluate((element) => [...element.querySelectorAll<SVGElement>('*')]
@@ -1203,9 +1234,14 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 		const transferredHolderPage = cells.get(transferred.ownerPubkey!)!.page;
 		await expect(transferredHolderPage.locator(`.participant[data-participant-id="${transferred.ownerPubkey}"]`)).toHaveAttribute('data-tag-game-role', 'holder');
 		await expect(transferredHolderPage.locator('[data-tag-game-hud] [data-tag-game-effect]')).toBeVisible();
+		const effectAtDisplayTime = tagGameScheduledEffectAt(transferred, presenceAt * 1_000);
+		expect(effectAtDisplayTime).not.toBeNull();
+		const scheduledDisplayEffect = effectAtDisplayTime!;
 		await Promise.all([hostPage, participantPage, participantTwoPage].map(async (page) => {
 			const currentOwner = page.locator(`.participant[data-participant-id="${transferred.ownerPubkey}"]`);
-			await expect(currentOwner.locator('.tag-game-effect-visuals')).toHaveAttribute('aria-label', transferred.effect === 'benefit' ? '福' : '鬼');
+			const expectedName = scheduledDisplayEffect === 'benefit' ? '福' : '鬼';
+			await expect(currentOwner).toHaveAttribute('data-tag-game-effect', scheduledDisplayEffect);
+			await expect(currentOwner.locator('.tag-game-effect-visuals')).toHaveAttribute('aria-label', expectedName);
 			const previousOwner = page.locator(`.participant[data-participant-id="${touchState.ownerPubkey}"]`);
 			if (touchState.ownerPubkey !== transferred.ownerPubkey) await expect(previousOwner.locator('.tag-game-effect-aura, .tag-game-effect-visuals')).toHaveCount(0);
 		}));
@@ -2036,7 +2072,7 @@ test('host silence is detected only while the local Relay connection is active',
 	if (!oniViewport) throw new Error('Expected a fixed viewport for Oni symbol layout checks');
 	await expect.poll(() => holder.evaluate((element) => element.getBoundingClientRect().width)).toBe(76);
 	const initialOniLayout = await readEffectSymbolLayout(holder);
-	expectIconAboveAvatarAndClearOfName(initialOniLayout, 'horns');
+	expectHornsAboveAvatarAndClearOfName(initialOniLayout);
 	expectAuraVisibleOutsideAvatar(initialOniLayout);
 	const cooldownLine = page.locator('[data-tag-game-cooldown-line]');
 	await expect(cooldownLine).toBeVisible();
@@ -2050,7 +2086,7 @@ test('host silence is detected only while the local Relay connection is active',
 	await page.setViewportSize({ width: 390, height: 844 });
 	await expect.poll(() => holder.evaluate((element) => element.getBoundingClientRect().width)).toBe(50);
 	const mobileOniLayout = await readEffectSymbolLayout(holder);
-	expectIconAboveAvatarAndClearOfName(mobileOniLayout, 'horns');
+	expectHornsAboveAvatarAndClearOfName(mobileOniLayout);
 	expectAuraVisibleOutsideAvatar(mobileOniLayout);
 	await page.setViewportSize(oniViewport);
 	await expect.poll(() => holder.evaluate((element) => element.getBoundingClientRect().width)).toBe(76);
@@ -2074,13 +2110,13 @@ test('host silence is detected only while the local Relay connection is active',
 	await page.setViewportSize({ width: 1280, height: 800 });
 	await expect.poll(() => holder.evaluate((element) => element.getBoundingClientRect().width)).toBe(76);
 	const desktopFukuLayout = await readEffectSymbolLayout(holder);
-	expectIconAboveAvatarAndClearOfName(desktopFukuLayout, 'mallet');
-	expectMalletHeadAndShaftToMeet(desktopFukuLayout);
-	expectFukuHaloVisibleAroundAvatar(desktopFukuLayout);
 	await page.setViewportSize({ width: 390, height: 844 });
 	await expect.poll(() => holder.evaluate((element) => element.getBoundingClientRect().width)).toBe(50);
 	const mobileFukuLayout = await readEffectSymbolLayout(holder);
-	expectIconAboveAvatarAndClearOfName(mobileFukuLayout, 'mallet');
+	expectMalletBottomRightOfAvatarAndClearOfName(desktopFukuLayout);
+	expectMalletHeadAndShaftToMeet(desktopFukuLayout);
+	expectFukuHaloVisibleAroundAvatar(desktopFukuLayout);
+	expectMalletBottomRightOfAvatarAndClearOfName(mobileFukuLayout);
 	expectMalletHeadAndShaftToMeet(mobileFukuLayout);
 	expectFukuHaloVisibleAroundAvatar(mobileFukuLayout);
 	await page.setViewportSize(fukuViewport);
@@ -2090,7 +2126,7 @@ test('host silence is detected only while the local Relay connection is active',
 		.map((child) => getComputedStyle(child).animationName).filter((name) => name !== 'none'));
 	expect(reducedMotionAnimations).toEqual([]);
 	const reducedMotionFukuLayout = await readEffectSymbolLayout(holder);
-	expectIconAboveAvatarAndClearOfName(reducedMotionFukuLayout, 'mallet');
+	expectMalletBottomRightOfAvatarAndClearOfName(reducedMotionFukuLayout);
 	expectMalletHeadAndShaftToMeet(reducedMotionFukuLayout);
 	expectFukuHaloVisibleAroundAvatar(reducedMotionFukuLayout);
 	await page.emulateMedia({ reducedMotion: 'no-preference' });
