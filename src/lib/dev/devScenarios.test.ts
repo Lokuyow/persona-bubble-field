@@ -11,6 +11,7 @@ describe('DEV Scenario registry', () => {
 	it('resolves missing and valid scenario IDs', () => {
 		expect(resolveDevScenario(new URLSearchParams()).id).toBe('default');
 		expect(resolveDevScenario(new URLSearchParams('devScenario=trace-replies')).fixture.kind).toBe('trace');
+		expect(resolveDevScenario(new URLSearchParams('devScenario=tag-game-playground'))).toMatchObject({ category: 'Realtime', fixture: { kind: 'tag-game-playground' } });
 	});
 
 	it('does not silently fall back for an unknown ID', () => {
