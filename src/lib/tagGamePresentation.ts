@@ -27,3 +27,15 @@ export function isOwnTagGameStartTransition(previous: TagGameState | null, curre
 	if (!previous || previous.gameId !== current.gameId || previous.phase === 'running' || current.phase !== 'running' || !selfPubkey || selfRunNumber === null) return false;
 	return current.participant.some((member) => member.pubkey === selfPubkey && member.runNumber === selfRunNumber && member.status === 'active');
 }
+
+export function isOwnTagGameCountdown(game: TagGameState, selfPubkey: string | null, selfRunNumber: number | null): boolean {
+	if (game.phase !== 'countdown' || !game.startAt || !selfPubkey || selfRunNumber === null) return false;
+	return game.participant.some((member) => member.pubkey === selfPubkey && member.runNumber === selfRunNumber &&
+		(member.status === 'registered' || member.status === 'active' || member.status === 'temporarily-ineligible'));
+}
+
+export function tagGameCountdownSeconds(startAt: number, nowMs: number): number | null {
+	const remainingMs = startAt * 1_000 - nowMs;
+	if (remainingMs <= 0 || remainingMs > 5_000) return null;
+	return Math.ceil(remainingMs / 1_000);
+}

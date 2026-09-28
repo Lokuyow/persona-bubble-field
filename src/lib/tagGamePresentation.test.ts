@@ -1,7 +1,7 @@
 import { getPublicKey } from 'nostr-tools/pure';
 import { describe, expect, it } from 'vitest';
 import { resolveCharacterFromPubkey } from './characterAssignment';
-import { isOwnTagGameStartTransition, newlyConfirmedTagGameParticipants, tagGameCharacterName, tagGameParticipantLabel } from './tagGamePresentation';
+import { isOwnTagGameCountdown, isOwnTagGameStartTransition, newlyConfirmedTagGameParticipants, tagGameCharacterName, tagGameCountdownSeconds, tagGameParticipantLabel } from './tagGamePresentation';
 import type { TagGameState } from './tagGame';
 
 function secret(seed: number): Uint8Array { return new Uint8Array(32).fill(seed); }
@@ -82,5 +82,23 @@ describe('tag-game character presentation', () => {
 		expect(isOwnTagGameStartTransition(countdown, running, host, 2)).toBe(false);
 		expect(isOwnTagGameStartTransition(countdown, { ...running, participant: [] }, host, 1)).toBe(false);
 		expect(isOwnTagGameStartTransition({ ...countdown, gameId: `${host}:2:${'b'.repeat(64)}` }, running, host, 1)).toBe(false);
+	});
+
+	it('identifies only the signed countdown for the exact local participant Run', () => {
+		const countdown: TagGameState = { ...game, phase: 'countdown', startAt: 10,
+			participant: [{ ...game.participant[0], status: 'registered' }] };
+		expect(isOwnTagGameCountdown(countdown, host, 1)).toBe(true);
+		expect(isOwnTagGameCountdown(countdown, host, 2)).toBe(false);
+		expect(isOwnTagGameCountdown(countdown, duplicateA, 1)).toBe(false);
+		expect(isOwnTagGameCountdown({ ...countdown, phase: 'lobby' }, host, 1)).toBe(false);
+	});
+
+	it('derives only current countdown seconds from the host start time', () => {
+		expect(tagGameCountdownSeconds(10, 5_000)).toBe(5);
+		expect(tagGameCountdownSeconds(10, 5_001)).toBe(5);
+		expect(tagGameCountdownSeconds(10, 6_000)).toBe(4);
+		expect(tagGameCountdownSeconds(10, 9_999)).toBe(1);
+		expect(tagGameCountdownSeconds(10, 10_000)).toBeNull();
+		expect(tagGameCountdownSeconds(10, 0)).toBeNull();
 	});
 });

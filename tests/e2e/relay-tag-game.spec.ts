@@ -636,22 +636,38 @@ test('plays tag-game start, scheduled switch, confirmed transfer, and end cues f
 	await installTagGameAudioRecorder(page);
 	await preparePlayer(page, selfSecret, nowMs);
 	await unlockSoundFromTheUI(page);
+	await moveRelaySelfTo(page, { x: TAG_GAME_TERMINAL.position.x - 1, y: TAG_GAME_TERMINAL.position.y });
+	await openTagGameTerminal(page);
 	const selfPubkey = getPublicKey(selfSecret);
 	const hostPubkey = getPublicKey(hostSecret);
-	const startAt = Math.floor(nowMs / 1_000) + 4;
+	const startAt = Math.ceil((await page.evaluate(() => Date.now()) + 5_000) / 1_000);
+	await page.clock.pauseAt((startAt - 5) * 1_000);
 	const seed = Array.from({ length: 10_000 }, (_, index) => `tag-audio-${index}`).find((candidate) => {
 		const schedule = createTagGameSchedule(candidate);
 		return schedule[0].effect === 'benefit' && schedule[0].durationMs <= 20_000;
 	});
 	if (!seed) throw new Error('Expected a short opening benefit interval.');
 	const proposalId = 'd'.repeat(32);
-	const gameId = `${hostPubkey}:${startAt - 1}:${'e'.repeat(64)}`;
+	const gameId = `${hostPubkey}:${startAt - 5}:${'e'.repeat(64)}`;
 	const participant = [selfPubkey, hostPubkey].map((pubkey) => ({ pubkey, runNumber: 1, registeredAt: startAt - 10,
 		consentProposalId: proposalId, consented: true, status: 'registered' as const, points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 }));
-	const countdown: TagGameState = { gameId, hostPubkey, phase: 'countdown', revision: 0, updatedAt: startAt - 1, proposalId,
-		startAt, participant, settledAtMs: (startAt - 1) * 1_000 };
-	await injectRealtime(page, finalizeTagGameState(countdown, CHANNEL_ID, startAt - 1, hostSecret));
+	const countdown: TagGameState = { gameId, hostPubkey, phase: 'countdown', revision: 0, updatedAt: startAt - 5, proposalId,
+		startAt, participant, settledAtMs: (startAt - 5) * 1_000 };
+	await page.setViewportSize({ width: 390, height: 844 });
+	await injectRealtime(page, finalizeTagGameState(countdown, CHANNEL_ID, startAt - 5, hostSecret));
+	await expect(page.getByRole('dialog', { name: '鬼ごっこ' })).toBeHidden();
+	await expect(page.locator('[data-tag-game-countdown]')).toBeVisible();
+	await expect(page.locator('[data-tag-game-countdown]')).toHaveAttribute('data-countdown-seconds', /[1-5]/);
+	const mobileOverlay = await page.locator('[data-tag-game-countdown]').boundingBox();
+	expect(mobileOverlay).toEqual({ x: 0, y: 0, width: 390, height: 844 });
+	await page.emulateMedia({ reducedMotion: 'reduce' });
+	await expect(page.locator('[data-tag-game-countdown] strong')).toBeVisible();
+	await page.setViewportSize({ width: 1280, height: 800 });
+	const desktopOverlay = await page.locator('[data-tag-game-countdown]').boundingBox();
+	expect(desktopOverlay).toEqual({ x: 0, y: 0, width: 1280, height: 800 });
 	await page.clock.setSystemTime(startAt * 1_000);
+	await page.clock.runFor(250);
+	await expect(page.locator('[data-tag-game-countdown]')).toHaveCount(0);
 	const running: TagGameState = { ...countdown, phase: 'running', revision: 1, updatedAt: startAt, startedAt: startAt, endsAt: startAt + 120,
 		seed, ownerPubkey: selfPubkey, effect: 'benefit', transferAt: startAt * 1_000, lastHolderResponseAtMs: startAt * 1_000,
 		participant: participant.map((member) => ({ ...member, status: 'active' as const })), settledAtMs: startAt * 1_000 };
@@ -1066,8 +1082,19 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 		await Promise.all([injectRealtime(hostPage, consent), injectRealtime(hostPage, consentTwo)]);
 		expect((await relayState(hostPage)).state.published.filter((event) => event.kind === 27070 && parseTagGameActionEvent(event as unknown as NostrEvent, CHANNEL_ID)?.action === 'consent')).toHaveLength(0);
 		await expect.poll(async () => latestTagGameStateValue(hostPage, gameId, (state) => state.phase)).toBe('countdown');
-		await Promise.all([injectRealtime(participantPage, await latestGameEvent(hostPage, gameId)), injectRealtime(participantTwoPage, await latestGameEvent(hostPage, gameId))]);
-		await Promise.all([hostPage, participantPage, participantTwoPage].map((page) => expect(page.getByRole('dialog', { name: '鬼ごっこ' })).toBeVisible()));
+		const countdownEvent = await latestGameEvent(hostPage, gameId);
+		const countdownState = parseTagGameEvent(countdownEvent, CHANNEL_ID)!.state;
+		await Promise.all([injectRealtime(participantPage, countdownEvent), injectRealtime(participantTwoPage, countdownEvent)]);
+		await Promise.all([hostPage, participantPage, participantTwoPage].map(async (page) => {
+			await expect(page.getByRole('dialog', { name: '鬼ごっこ' })).toBeHidden();
+			const remainingMs = countdownState.startAt! * 1_000 - await page.evaluate(() => Date.now());
+			if (remainingMs > 0 && remainingMs <= 5_000) {
+				await expect(page.locator('[data-tag-game-countdown]')).toBeVisible();
+				await expect(page.locator('[data-tag-game-countdown]')).toHaveAttribute('data-countdown-seconds', String(Math.ceil(remainingMs / 1_000)));
+			} else {
+				await expect(page.locator('[data-tag-game-countdown]')).toHaveCount(0);
+			}
+		}));
 		await hostPage.clock.runFor(6_000);
 		await expect.poll(async () => latestTagGameStateValue(hostPage, gameId, (state) => state.phase)).toBe('running');
 		const runningEvent = await latestGameEvent(hostPage, gameId);
