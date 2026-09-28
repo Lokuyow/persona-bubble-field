@@ -65,6 +65,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	import IdentitySelectionDialog from '$lib/IdentitySelectionDialog.svelte';
 	import UnifiedStatusHud from '$lib/UnifiedStatusHud.svelte';
 	import TagGameHud from '$lib/TagGameHud.svelte';
+	import TagGameCountdown from '$lib/TagGameCountdown.svelte';
 	import MendingDialog from '$lib/MendingDialog.svelte';
 	import AdjustmentDialog from '$lib/AdjustmentDialog.svelte';
 	import SelfProfileDialog from '$lib/SelfProfileDialog.svelte';
@@ -186,7 +187,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		type TagGameState
 	} from '$lib/tagGame';
 	import { isTagGameScheduledEffectActive, projectTagGameHud } from '$lib/tagGameHud';
-	import { isOwnTagGameStartTransition } from '$lib/tagGamePresentation';
+import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSeconds } from '$lib/tagGamePresentation';
 	import {
 		prepareCharacterProfilePublication,
 		publishCharacterProfile,
@@ -648,6 +649,13 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		? (devTagGamePlaygroundState?.game && ['running', 'settling'].includes(devTagGamePlaygroundState.game.phase) ? devTagGamePlaygroundState.game : null)
 		: tagGameStates.find((candidate) => candidate.gameId === tagGameDisplayedGameId && (candidate.phase === 'running' || candidate.phase === 'settling')) ?? null);
 	let tagGameUiNowMs = $derived(devTagGamePlaygroundEnabled ? devTagGamePlaygroundState?.nowMs ?? tagGameHudNowMs : tagGameHudNowMs);
+	let tagGameCountdownStartAt = $derived.by(() => {
+		const self = personaSnapshot;
+		if (!self) return null;
+		const game = tagGameStates.find((candidate) => isOwnTagGameCountdown(candidate, self.signer.pubkey, self.activeRun.runNumber) &&
+			tagGameCountdownSeconds(candidate.startAt!, mendingNowMs) !== null);
+		return game?.startAt ?? null;
+	});
 	// Keep the received final cumulative value visible while its lifecycle receipt is being applied.
 	let tagGameHudGameId = $derived.by(() => {
 		if (tagGameSelfActiveGameId) return tagGameSelfActiveGameId;
@@ -2689,7 +2697,8 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			if (touchStatus) setTagGameTouchStatus(state.gameId, touchStatus.targetPubkey, '所持者が更新されました', 'clear');
 		}
 		const ownStartTransition = isOwnTagGameStartTransition(previous?.state ?? null, state, personaSnapshot?.signer.pubkey ?? null, personaSnapshot?.activeRun.runNumber ?? null);
-		if (ownStartTransition && tagGamePanelOpen) {
+		const ownCountdown = isOwnTagGameCountdown(state, personaSnapshot?.signer.pubkey ?? null, personaSnapshot?.activeRun.runNumber ?? null);
+		if ((ownCountdown || ownStartTransition) && tagGamePanelOpen) {
 			tagGamePanelOpen = false;
 		}
 		const ownActiveRun = personaSnapshot && state.participant.some((member) => member.pubkey === personaSnapshot?.signer.pubkey && member.runNumber === personaSnapshot.activeRun.runNumber && member.status === 'active');
@@ -4897,6 +4906,9 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			</div>
 		{/snippet}
 	</FieldViewport>
+	{#if tagGameCountdownStartAt !== null}
+		<TagGameCountdown startAt={tagGameCountdownStartAt} nowMs={mendingNowMs} />
+	{/if}
 	<TagGamePanel
 		open={tagGamePanelOpen}
 		games={visibleTagGameStates}
