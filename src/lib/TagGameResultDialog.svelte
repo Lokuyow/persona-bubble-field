@@ -5,7 +5,7 @@
 	import TagGameEffectSymbol from './TagGameEffectSymbol.svelte';
 	import { asset } from '$app/paths';
 	import { resolveCharacterFromPubkey } from './characterAssignment';
-	import { tagGameParticipantLabel, tagGameResultLifespanHours, tagGameResultParticipants, tagGameResultTime } from './tagGamePresentation';
+	import { tagGameParticipantLabel, tagGameResultLifespan, tagGameResultParticipants, tagGameResultTime } from './tagGamePresentation';
 	import type { TagGameState } from './tagGame';
 
 	type Props = {
@@ -48,7 +48,7 @@
 							</div>
 							<div class="result-values">
 								<span class="effect calamity"><svg viewBox="0 0 32 32" aria-hidden="true"><TagGameEffectSymbol effect="calamity" presentation="rule" /></svg>鬼 {tagGameResultTime(player.calamityMs)}秒</span>
-								<span class="lifespan">寿命 −{tagGameResultLifespanHours(player.lifespanLossMs)}時間</span>
+								<span class="lifespan">寿命 −{tagGameResultLifespan(player.lifespanLossMs)}</span>
 							</div>
 						</li>
 					{/each}

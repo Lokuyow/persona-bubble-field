@@ -49,11 +49,20 @@ export function tagGameResultParticipants(game: TagGameState, selfPubkey: string
 }
 
 export function tagGameResultTime(valueMs: number): string {
-	const seconds = Math.max(0, valueMs) / 1_000;
-	return Number.isInteger(seconds) ? `${seconds}` : seconds.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
+	const tenths = Math.round(Math.max(0, valueMs) / 100);
+	return formatTenths(tenths);
 }
 
-export function tagGameResultLifespanHours(valueMs: number): string {
-	const hours = Math.max(0, valueMs) / 3_600_000;
-	return Number.isInteger(hours) ? `${hours}` : hours.toFixed(7).replace(/0+$/, '').replace(/\.$/, '');
+export function tagGameResultLifespan(valueMs: number): string {
+	const tenthsOfHours = Math.round(Math.max(0, valueMs) / 360_000);
+	if (tenthsOfHours < 240) return `${formatTenths(tenthsOfHours)}時間`;
+	const days = Math.floor(tenthsOfHours / 240);
+	const remainingTenthsOfHours = tenthsOfHours % 240;
+	return `${days}日${remainingTenthsOfHours === 0 ? '' : `${formatTenths(remainingTenthsOfHours)}時間`}`;
+}
+
+function formatTenths(value: number): string {
+	const whole = Math.floor(value / 10);
+	const tenths = value % 10;
+	return tenths === 0 ? `${whole}` : `${whole}.${tenths}`;
 }

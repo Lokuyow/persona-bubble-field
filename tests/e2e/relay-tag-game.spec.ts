@@ -1351,12 +1351,35 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 		await expect.poll(async () => (await tagGamePersistence(participantPage)).receipt).toMatchObject({ gameId, points: finalLocal.points, lifespanLossMs: finalLocal.lifespanLossMs });
 		await expect(participantPage.locator('[data-unified-status-hud]')).toHaveAttribute('data-saved-points', String((await tagGamePersistence(participantPage)).savedPoints));
 		await expect(participantPage.locator('[data-unified-status-hud]')).not.toHaveAttribute('data-tag-game-projection', 'true');
-		await Promise.all([openTagGameTerminal(hostPage), openTagGameTerminal(participantPage), openTagGameTerminal(participantTwoPage)]);
-		await expect(hostPage.getByText(/福\d+秒・鬼\d+秒/).first()).toBeVisible();
-		await expect(participantPage.getByText(/福\d+秒・鬼\d+秒/).first()).toBeVisible();
-		await expect(participantTwoPage.getByText(/福\d+秒・鬼\d+秒/).first()).toBeVisible();
-		await expect(participantPage.locator('.results')).toContainText(resolveCharacterFromPubkey(hostPubkey)!.name);
-		await expect(participantPage.locator('.results')).toContainText('あなた');
+		const results = await Promise.all([hostPage, participantPage, participantTwoPage].map(async (page) => {
+			const dialog = page.getByRole('dialog', { name: '鬼ごっこ終了' });
+			await expect(dialog).toHaveAttribute('data-tag-game-result-game', gameId);
+			const rows = dialog.locator('[data-tag-game-result-participant]');
+			await expect(rows).toHaveCount(3);
+			for (const member of finalState.participant) {
+				const row = dialog.locator(`[data-tag-game-result-participant="${member.pubkey}"]`);
+				await expect(row).toBeVisible();
+				await expect(row.locator('.result-values')).toHaveCount(2);
+				await expect(row).toContainText(`ポイント +${member.points}pt`);
+			}
+			return { dialog };
+		}));
+		const hostResultRow = results[1]!.dialog.locator(`[data-tag-game-result-participant="${hostPubkey}"]`);
+		await expect(hostResultRow).toContainText(resolveCharacterFromPubkey(hostPubkey)!.name);
+		const localResultRow = results[1]!.dialog.locator(`[data-tag-game-result-participant="${participantPubkey}"]`);
+		await expect(localResultRow).toHaveAttribute('data-tag-game-result-self', 'true');
+		await expect(localResultRow).toContainText('あなた');
+		await Promise.all(results.map(({ dialog }) => dialog.getByRole('button', { name: '閉じる' }).click()));
+		await openTagGameTerminal(participantPage);
+		const history = participantPage.locator('[data-tag-game-history-section] details');
+		await history.locator('summary').click();
+		const historicalGame = history.locator(`[data-tag-game-history="${gameId}"]`);
+		await historicalGame.getByRole('button', { name: '結果を見る' }).click();
+		const reopenedResult = participantPage.getByRole('dialog', { name: '鬼ごっこ終了' });
+		await expect(reopenedResult).toHaveAttribute('data-tag-game-result-game', gameId);
+		await expect(reopenedResult.locator('[data-tag-game-result-participant]')).toHaveCount(3);
+		await expect(reopenedResult.locator(`[data-tag-game-result-participant="${participantPubkey}"]`)).toHaveAttribute('data-tag-game-result-self', 'true');
+		await reopenedResult.getByRole('button', { name: '閉じる' }).click();
 	} finally {
 		await Promise.all([hostPage.close(), participantPage.close(), participantTwoPage.close()]);
 	}
@@ -1402,7 +1425,8 @@ test('keeps join actions primary and equally emphasized when multiple tag-game l
 		))).toBe(true);
 		for (const [index, event] of lobbies.entries()) {
 			await injectRealtime(joinerPage, event);
-			await expect.poll(() => dialog.locator('ul > li').count()).toBe(index + 1);
+			await expect.poll(async () => joinerPage.evaluate((id) => (window as typeof window & { __relayStartupTest: { state: { realtimeHistory: Array<{ id: string }> } } }).__relayStartupTest.state.realtimeHistory.some((received) => received.id === id), event.id)).toBe(true);
+			await expect.poll(() => dialog.locator('[data-tag-game-current-section] .current-game-list > li[data-tag-game-current]').count()).toBe(index + 1);
 		}
 		const joinButtons = dialog.getByRole('button', { name: '参加申請' });
 		await expect(joinButtons).toHaveCount(2);
@@ -1799,7 +1823,7 @@ test('freezes integrated HUD at 120 seconds until a delayed final state corrects
 		await expect(resultRows.first()).toContainText('福 60秒');
 		await expect(resultRows.first()).toContainText('ポイント +3000pt');
 		await expect(resultRows.first()).toContainText('鬼 60秒');
-		await expect(resultRows.first()).toContainText('寿命 −60時間');
+		await expect(resultRows.first()).toContainText('寿命 −2日12時間');
 		const secondStartedAt = Math.floor(await page.evaluate(() => Date.now() / 1_000));
 		const secondGameId = `${hostPubkey}:${secondStartedAt}:${'f'.repeat(64)}`;
 		await seedTagGameRunLock(page, secondGameId, secondStartedAt * 1_000);
@@ -2820,7 +2844,7 @@ test('organizer cancellation terminates the lobby, clears pending reservations, 
 		await injectRealtime(hostPage, delayedJoin);
 		await expect.poll(async () => latestTagGameStateValue(hostPage, lobby.gameId, (state) => state.endReason)).toBe('host-cancelled');
 		await expect(hostPage.getByText('あなたの開催').first()).toHaveCount(0);
-		await expect(hostPage.locator('.results')).toHaveCount(0);
+		await expect(hostPage.getByRole('dialog', { name: /鬼ごっこ(終了|中断)/ })).toHaveCount(0);
 		await expect(hostPage.getByRole('button', { name: '鬼ごっこを開催' })).toBeVisible();
 		await hostPage.reload();
 		await moveRelaySelfTo(hostPage, { x: 7, y: 6 });
@@ -2828,7 +2852,7 @@ test('organizer cancellation terminates the lobby, clears pending reservations, 
 		await openTagGameTerminal(hostPage);
 		await injectRealtime(hostPage, cancelled);
 		await expect(hostPage.getByText('あなたの開催').first()).toHaveCount(0);
-		await expect(hostPage.locator('.results')).toHaveCount(0);
+		await expect(hostPage.getByRole('dialog', { name: /鬼ごっこ(終了|中断)/ })).toHaveCount(0);
 		await expect(hostPage.getByRole('button', { name: '鬼ごっこを開催' })).toBeVisible();
 		await expect.poll(async () => (await tagGamePersistence(hostPage)).reservation).toBeNull();
 		await hostPage.getByRole('button', { name: '鬼ごっこを開催' }).click();

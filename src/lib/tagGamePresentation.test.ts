@@ -1,7 +1,7 @@
 import { getPublicKey } from 'nostr-tools/pure';
 import { describe, expect, it } from 'vitest';
 import { resolveCharacterFromPubkey } from './characterAssignment';
-import { isOwnTagGameCountdown, isOwnTagGameStartTransition, newlyConfirmedTagGameParticipants, tagGameCharacterName, tagGameCountdownSeconds, tagGameParticipantLabel, tagGameResultLifespanHours, tagGameResultParticipants, tagGameResultTime } from './tagGamePresentation';
+import { isOwnTagGameCountdown, isOwnTagGameStartTransition, newlyConfirmedTagGameParticipants, tagGameCharacterName, tagGameCountdownSeconds, tagGameParticipantLabel, tagGameResultLifespan, tagGameResultParticipants, tagGameResultTime } from './tagGamePresentation';
 import type { TagGameState } from './tagGame';
 
 function secret(seed: number): Uint8Array { return new Uint8Array(32).fill(seed); }
@@ -114,10 +114,22 @@ describe('tag-game character presentation', () => {
 		expect(tagGameResultParticipants(resultGame, later).map((member) => member.pubkey)).toEqual([later, earlier, host]);
 	});
 
-	it('formats cumulative effect time and lifespan without rounding away short holds', () => {
-		expect(tagGameResultTime(1_234)).toBe('1.234');
-		expect(tagGameResultTime(2_000)).toBe('2');
-		expect(tagGameResultLifespanHours(3_600_000)).toBe('1');
-		expect(tagGameResultLifespanHours(1_000)).toBe('0.0002778');
+	it('rounds effect hold time to tenths of seconds and omits a zero decimal', () => {
+		expect(tagGameResultTime(35_521)).toBe('35.5');
+		expect(tagGameResultTime(57_501)).toBe('57.5');
+		expect(tagGameResultTime(24_479)).toBe('24.5');
+		expect(tagGameResultTime(10_000)).toBe('10');
+	});
+
+	it('formats lifespan loss as rounded hours or days and carries rounded hours into days', () => {
+		const hour = 3_600_000;
+		expect(tagGameResultLifespan(2.499 * hour)).toBe('2.5時間');
+		expect(tagGameResultLifespan(23.94 * hour)).toBe('23.9時間');
+		expect(tagGameResultLifespan(23.96 * hour)).toBe('1日');
+		expect(tagGameResultLifespan(24 * hour)).toBe('1日');
+		expect(tagGameResultLifespan(27.56 * hour)).toBe('1日3.6時間');
+		expect(tagGameResultLifespan(48 * hour)).toBe('2日');
+		expect(tagGameResultLifespan(57.501 * hour)).toBe('2日9.5時間');
+		expect(tagGameResultLifespan(47.96 * hour)).toBe('2日');
 	});
 });
