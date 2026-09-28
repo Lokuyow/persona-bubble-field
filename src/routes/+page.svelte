@@ -378,6 +378,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	const tagGameLifecycleInFlight = new Set<string>();
 	const tagGameResultSnapshots = new Map<string, TagGameState>();
 	const tagGameSelfSettledGames = new Set<string>();
+	const tagGameSelfSettledBeforeGameEnd = new Set<string>();
 	const tagGameUsedLastConfirmedFinalization = new Set<string>();
 	const pendingTagGameResults: Array<{ game: TagGameState; note: string | null }> = [];
 	let latestTagGameWorldStates = $state.raw(new Map<string, ParsedWorldStateEvent>());
@@ -2613,18 +2614,23 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		tagGameStates = [...tagGameEvents.values()].map((entry) => entry.state).sort((a, b) => b.updatedAt - a.updatedAt || a.gameId.localeCompare(b.gameId));
 	}
 
-	function tagGameSelfSettlementSnapshot(game: TagGameState, points: number, lifespanLossMs: number): TagGameState {
+	function tagGameSelfSettlementSnapshot(game: TagGameState): TagGameState {
 		const self = personaSnapshot;
 		if (!self) return game;
-		return { ...game, participant: game.participant.map((member) => member.pubkey === self?.signer.pubkey && member.runNumber === self.activeRun.runNumber
-			? { ...member, points, lifespanLossMs } : { ...member }) };
+		return { ...game, participant: game.participant.map((member) => ({ ...member })) };
 	}
 
 	function tagGameSettlementNote(game: TagGameState): string | null {
 		const hostFinalConfirmed = game.phase === 'ended' && game.endReason === 'normal' && game.endsAt !== undefined && game.finalizedAt === game.endsAt;
 		const localFallback = tagGameUsedLastConfirmedFinalization.has(game.gameId) || (game.phase === 'ended' && game.endReason === 'normal' && game.endsAt !== undefined && game.finalizedAt !== game.endsAt);
+		if (tagGameSelfSettledBeforeGameEnd.has(game.gameId)) return 'あなたの成績はゲーム途中の死亡時に確定した値です。ほかの参加者は開催回の最終状態を表示しています。';
+		if (tagGameSelfSettledGames.has(game.gameId) && localFallback) {
+			return hostFinalConfirmed
+				? '開催者の最終状態は受信しました。あなたの成績は通信障害時に最後に確認した値で確定済みのため、その値を表示しています。ほかの参加者は開催者の最終状態を表示しています。'
+				: '開催者の最終状態を受信できなかったため、あなたの成績は最後に確認済みの値で確定しています。ほかの参加者も最後に確認した状態を表示しています。';
+		}
 		if (hostFinalConfirmed || !localFallback) return null;
-		return '開催者の最終状態を受信できなかったため、あなたの成績は最後に確認済みの値で確定しています。ほかの参加者の成績も最後に確認した状態を表示しています。';
+		return '開催者の最終状態を受信できなかったため、最後に確認した開催状態を表示しています。';
 	}
 
 	function tagGameDisplaySnapshot(game: TagGameState): TagGameState {
@@ -2634,7 +2640,8 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		const settledSelf = frozen.participant.find((member) => member.pubkey === self.signer.pubkey && member.runNumber === self.activeRun.runNumber);
 		if (!settledSelf) return game;
 		return { ...game, participant: game.participant.map((member) => member.pubkey === settledSelf.pubkey && member.runNumber === settledSelf.runNumber
-			? { ...member, points: settledSelf.points, lifespanLossMs: settledSelf.lifespanLossMs } : member) };
+			? { ...member, points: settledSelf.points, lifespanLossMs: settledSelf.lifespanLossMs,
+				benefitMs: settledSelf.benefitMs, calamityMs: settledSelf.calamityMs } : member) };
 	}
 
 	function showTagGameResult(gameId: string): void {
@@ -2708,9 +2715,15 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			return;
 		}
 		if (previous && createdAt > previous.createdAt) tagGameConflictSince.delete(state.gameId);
-		if (delivery === 'live' && (state.phase === 'running' || state.phase === 'settling') && personaSnapshot &&
-			state.participant.some((member) => member.pubkey === personaSnapshot?.signer.pubkey && member.runNumber === personaSnapshot.activeRun.runNumber && member.status !== 'registered')) {
-			tagGameAutoEligible.add(state.gameId);
+		if ((state.phase === 'running' || state.phase === 'settling') && personaSnapshot) {
+			const ownMember = state.participant.find((member) => member.pubkey === personaSnapshot?.signer.pubkey && member.runNumber === personaSnapshot.activeRun.runNumber);
+			const currentRunLock = personaSnapshot.tagGame?.lock;
+			const currentRunReservation = personaSnapshot.tagGame?.reservation;
+			const matchesCurrentRun = [currentRunLock, currentRunReservation].some((scope) => scope?.gameId === state.gameId &&
+				scope.runNumber === personaSnapshot?.activeRun.runNumber && scope.identity.pubkey === personaSnapshot?.signer.pubkey);
+			const liveParticipation = delivery === 'live' && ownMember && ownMember.status !== 'registered';
+			const restoredParticipation = delivery === 'bootstrap' && ownMember && (ownMember.status === 'active' || ownMember.status === 'temporarily-ineligible') && matchesCurrentRun;
+			if (liveParticipation || restoredParticipation) tagGameAutoEligible.add(state.gameId);
 		}
 		if (delivery === 'live' && !document.hidden) notifyTagGameStateAudio(previous, state, createdAt);
 		if (previous && previous.state.phase === 'running' && state.phase === 'running' &&
@@ -2804,6 +2817,10 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			return;
 		}
 		const gameId = game.gameId;
+		if (tagGameSelfSettledGames.has(gameId)) {
+			if (game.phase === 'ended' || game.phase === 'interrupted') presentSettledTagGameResult(game);
+			return;
+		}
 		if ((game.phase === 'running' || game.phase === 'settling') && member.status !== 'left') {
 			await activateTagGameRun(self, gameId, game.startedAt * 1000, game.endsAt * 1000, game.endsAt * 1000 + TAG_GAME_FINAL_WAIT_MS);
 			const own = game.participant.find((candidate) => candidate.pubkey === self.signer.pubkey)!;
@@ -2813,7 +2830,12 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 				return terminalExitRequest(preparedExit, worldSession);
 			});
 			if (result.kind === 'applied') personaSnapshot = result.persona;
-			else if (result.kind === 'transitioned') completeTagGameDeathTransition(worldSession, result.exit, preparedExit);
+			else if (result.kind === 'transitioned') {
+				tagGameResultSnapshots.set(gameId, tagGameSelfSettlementSnapshot(game));
+				tagGameSelfSettledGames.add(gameId);
+				tagGameSelfSettledBeforeGameEnd.add(gameId);
+				completeTagGameDeathTransition(worldSession, result.exit, preparedExit);
+			}
 		} else {
 			await activateTagGameRun(self, gameId, game.startedAt * 1000, game.endsAt * 1000, game.endsAt * 1000 + TAG_GAME_FINAL_WAIT_MS);
 			const own = game.participant.find((candidate) => candidate.pubkey === self.signer.pubkey)!;
@@ -2826,7 +2848,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			else if (result.kind === 'transitioned') completeTagGameDeathTransition(worldSession, result.exit, preparedExit);
 			else await releaseAndRefreshTagGameParticipation(self, gameId);
 			if (result.kind === 'applied' || result.kind === 'transitioned') {
-				tagGameResultSnapshots.set(gameId, tagGameSelfSettlementSnapshot(game, own.points, own.lifespanLossMs));
+				tagGameResultSnapshots.set(gameId, tagGameSelfSettlementSnapshot(game));
 				tagGameSelfSettledGames.add(gameId);
 			}
 		}

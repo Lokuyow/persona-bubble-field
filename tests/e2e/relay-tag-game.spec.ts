@@ -1828,6 +1828,140 @@ test('freezes integrated HUD at 120 seconds until a delayed final state corrects
 	} finally { await page.close(); }
 });
 
+test('shows the game result after a midgame death presentation without settling the Run twice', async ({ page }) => {
+	const nowMs = Date.now();
+	const selfSecret = fixtureSecret(37);
+	const otherSecret = fixtureSecret(39);
+	const selfPubkey = getPublicKey(selfSecret);
+	const otherPubkey = getPublicKey(otherSecret);
+	const hostPubkey = selfPubkey;
+	const startedAt = Math.floor(nowMs / 1_000) - 10;
+	const gameId = `${hostPubkey}:${startedAt}:${'a'.repeat(64)}`;
+	await preparePlayer(page, selfSecret, nowMs);
+	await moveRelaySelfTo(page, { x: 7, y: 5 });
+	await seedTagGameRunLock(page, gameId, startedAt * 1_000);
+	await page.evaluate(() => new Promise<void>((resolve, reject) => {
+		const request = indexedDB.open('persona-bubble-field-account', 8);
+		request.onerror = () => reject(request.error);
+		request.onsuccess = () => {
+			const database = request.result;
+			const transaction = database.transaction('persona-bubble-field-player-state', 'readwrite');
+			const store = transaction.objectStore('persona-bubble-field-player-state');
+			const read = store.get('player-lifecycle');
+			read.onsuccess = () => {
+				const current = read.result;
+				const run = current.mode.activeRun;
+				store.put({ ...current, mode: { ...current.mode, activeRun: { ...run, gameState: { ...run.gameState, lifespanExpiresAtMs: Date.now() + 1_000 } } } }, 'player-lifecycle');
+			};
+			transaction.oncomplete = () => { database.close(); resolve(); };
+			transaction.onerror = () => reject(transaction.error);
+		};
+	}), undefined);
+	const running: TagGameState = { gameId, hostPubkey, phase: 'running', revision: 0, updatedAt: startedAt, startedAt, endsAt: startedAt + 120,
+		seed: 'midgame-death', ownerPubkey: hostPubkey, effect: 'benefit', transferAt: startedAt * 1_000, settledAtMs: startedAt * 1_000,
+		participant: [{ pubkey: selfPubkey, runNumber: 1, registeredAt: startedAt, status: 'active', points: 700, lifespanLossMs: 3_600_000, benefitMs: 30_000, calamityMs: 0 },
+			{ pubkey: otherPubkey, runNumber: 1, registeredAt: startedAt + 1, status: 'active', points: 200, lifespanLossMs: 0, benefitMs: 10_000, calamityMs: 0 }] };
+	await injectRealtime(page, finalizeTagGameState(running, CHANNEL_ID, startedAt, selfSecret));
+	const death = page.locator('[data-death-presentation]');
+	await expect(death).toBeVisible();
+	await expect.poll(async () => (await tagGamePersistence(page)).receipt).toEqual({ gameId, points: 700, lifespanLossMs: 3_600_000 });
+	const endAt = startedAt + 120;
+	const ended: TagGameState = { ...running, phase: 'ended', revision: 1, updatedAt: endAt, finalizedAt: endAt, endReason: 'normal', settledAtMs: endAt * 1_000,
+		participant: running.participant.map((member) => member.pubkey === selfPubkey
+			? { ...member, status: 'dead', points: 2_900, lifespanLossMs: 7_200_000, benefitMs: 60_000, calamityMs: 60_000 }
+			: { ...member, points: 600, benefitMs: 20_000 }) };
+	await injectRealtime(page, finalizeTagGameState(ended, CHANNEL_ID, endAt, selfSecret));
+	await expect(page.getByRole('dialog', { name: '鬼ごっこ終了' })).toHaveCount(0);
+	await expect(death.locator('textarea')).toBeVisible();
+	await death.locator('textarea').fill('鬼ごっこの結果を確認しました');
+	await death.getByRole('button', { name: '残して進む' }).click();
+	const result = page.getByRole('dialog', { name: '鬼ごっこ終了' });
+	await expect(result).toBeVisible();
+	const selfRow = result.locator(`[data-tag-game-result-participant="${selfPubkey}"]`);
+	await expect(selfRow).toHaveAttribute('data-tag-game-result-self', 'true');
+	await expect(selfRow).toContainText('ポイント +700pt');
+	await expect(selfRow).toContainText('福 30秒');
+	await expect(selfRow).toContainText('鬼 0秒');
+	await expect(selfRow).toContainText('寿命 −1時間');
+	await expect(selfRow).toContainText('死亡');
+	await expect(result.locator(`[data-tag-game-result-participant="${otherPubkey}"]`)).toContainText('ポイント +600pt');
+	await expect(result.locator('.settlement-note')).toContainText('ゲーム途中の死亡時に確定');
+	const savedReceipt = await tagGamePersistence(page);
+	expect(savedReceipt.receipt).toEqual({ gameId, points: 700, lifespanLossMs: 3_600_000 });
+	const published = await page.evaluate(() => {
+		const state = (window as typeof window & { __relayStartupTest: { state: { published: Array<{ kind: number; pubkey?: string; content: string; tags: string[][] }> } } }).__relayStartupTest.state;
+		return state.published;
+	});
+	expect(published.some((event) => event.kind === 30079 && event.pubkey === selfPubkey && event.tags.some((tag) => tag[0] === 'd' && tag[1]?.endsWith(':exit')))).toBe(true);
+	expect(published.some((event) => event.kind === 42 && event.pubkey === selfPubkey && event.content === '鬼ごっこの結果を確認しました')).toBe(true);
+});
+
+test('restores auto-result eligibility from the active Run lock after bootstrap, but not for terminal history', async ({ browser }) => {
+	const page = await browser.newPage();
+	const nowMs = Date.now();
+	const selfSecret = fixtureSecret(35);
+	const otherSecret = fixtureSecret(36);
+	const hostSecret = fixtureSecret(32);
+	const selfPubkey = getPublicKey(selfSecret);
+	const otherPubkey = getPublicKey(otherSecret);
+	const hostPubkey = getPublicKey(hostSecret);
+	const startedAt = Math.floor(nowMs / 1_000) - 119;
+	const gameId = `${hostPubkey}:${startedAt}:${'b'.repeat(64)}`;
+	try {
+		await preparePlayer(page, selfSecret, nowMs, 0, true);
+		await moveRelaySelfTo(page, { x: 7, y: 5 });
+		await seedTagGameRunLock(page, gameId, startedAt * 1_000);
+		const running: TagGameState = { gameId, hostPubkey, phase: 'running', revision: 0, updatedAt: startedAt, startedAt, endsAt: startedAt + 120,
+			seed: 'reload-current-run', ownerPubkey: hostPubkey, effect: 'benefit', transferAt: startedAt * 1_000, settledAtMs: startedAt * 1_000,
+			participant: [{ pubkey: hostPubkey, runNumber: 1, registeredAt: startedAt, status: 'active', points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 },
+				{ pubkey: selfPubkey, runNumber: 1, registeredAt: startedAt + 1, status: 'active', points: 300, lifespanLossMs: 0, benefitMs: 6_000, calamityMs: 0 },
+				{ pubkey: otherPubkey, runNumber: 1, registeredAt: startedAt + 1, status: 'active', points: 50, lifespanLossMs: 0, benefitMs: 1_000, calamityMs: 0 }] };
+		const bootstrapRunning = finalizeTagGameState(running, CHANNEL_ID, startedAt, hostSecret);
+		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { queueRealtimeBootstrapEvent(event: object): void } }).__relayStartupTest.queueRealtimeBootstrapEvent(event), bootstrapRunning);
+		await page.reload();
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${selfPubkey}"]`)).toBeVisible();
+		await expect.poll(async () => page.evaluate((id) => (window as typeof window & { __relayStartupTest: { state: { realtimeHistory: Array<{ id: string }> } } }).__relayStartupTest.state.realtimeHistory.some((event) => event.id === id), bootstrapRunning.id)).toBe(true);
+		await expect(page.locator('main')).toHaveAttribute('data-realtime-status', 'active');
+		await openTagGameTerminal(page);
+		await expect(page.locator(`[data-tag-game-current="${gameId}"]`)).toBeVisible();
+		await expect.poll(async () => (await tagGamePersistence(page)).lock).toMatchObject({ gameId, runNumber: 1 });
+		const finalAt = startedAt + 120;
+		const ended: TagGameState = { ...running, phase: 'ended', revision: 1, updatedAt: finalAt, finalizedAt: finalAt, endReason: 'normal', settledAtMs: finalAt * 1_000,
+			participant: running.participant.map((member) => member.pubkey === selfPubkey
+				? { ...member, points: 3_000, lifespanLossMs: 216_000_000, benefitMs: 60_000, calamityMs: 60_000 }
+				: { ...member, points: member.pubkey === hostPubkey ? 0 : 50 }) };
+		const finalEvent = finalizeTagGameState(ended, CHANNEL_ID, finalAt, hostSecret);
+		await injectRealtime(page, finalEvent);
+		await expect.poll(async () => page.evaluate((id) => (window as typeof window & { __relayStartupTest: { state: { realtimeHistory: Array<{ id: string }> } } }).__relayStartupTest.state.realtimeHistory.some((event) => event.id === id), finalEvent.id)).toBe(true);
+		await expect.poll(async () => (await tagGamePersistence(page)).receipt).toEqual({ gameId, points: 3_000, lifespanLossMs: 216_000_000 });
+		const result = page.getByRole('dialog', { name: '鬼ごっこ終了' });
+		await expect(result).toBeVisible();
+		await expect(result.locator(`[data-tag-game-result-participant="${selfPubkey}"]`)).toHaveAttribute('data-tag-game-result-self', 'true');
+		await result.getByRole('button', { name: '閉じる' }).click();
+		await injectRealtime(page, finalizeTagGameState({ ...ended, revision: 2, updatedAt: finalAt + 1 }, CHANNEL_ID, finalAt + 1, hostSecret));
+		await expect(result).toHaveCount(0);
+	} finally { await page.close(); }
+
+	const historyPage = await browser.newPage();
+	try {
+		const oldHostSecret = fixtureSecret(33);
+		const oldHostPubkey = getPublicKey(oldHostSecret);
+		const historyAt = Math.floor(nowMs / 1_000) - 120;
+		const historyId = `${oldHostPubkey}:${historyAt}:${'c'.repeat(64)}`;
+		await preparePlayer(historyPage, selfSecret, nowMs, 0, true);
+		const historical: TagGameState = { gameId: historyId, hostPubkey: oldHostPubkey, phase: 'ended', revision: 1, updatedAt: historyAt + 120, startedAt: historyAt, endsAt: historyAt + 120,
+			finalizedAt: historyAt + 120, endReason: 'normal', seed: 'old-finished-game', ownerPubkey: oldHostPubkey, effect: 'benefit', transferAt: historyAt * 1_000,
+			settledAtMs: (historyAt + 120) * 1_000, participant: [{ pubkey: selfPubkey, runNumber: 1, registeredAt: historyAt, status: 'active', points: 100, lifespanLossMs: 0, benefitMs: 2_000, calamityMs: 0 }] };
+		await historyPage.evaluate((event) => (window as typeof window & { __relayStartupTest: { queueRealtimeBootstrapEvent(event: object): void } }).__relayStartupTest.queueRealtimeBootstrapEvent(event), finalizeTagGameState(historical, CHANNEL_ID, historyAt + 120, oldHostSecret));
+		await historyPage.reload();
+		await historyPage.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		await expect(historyPage.locator(`.participant[data-self="true"][data-participant-id="${selfPubkey}"]`)).toBeVisible();
+		await expect.poll(async () => historyPage.evaluate((kind) => (window as typeof window & { __relayStartupTest: { state: { realtimeHistory: Array<{ kind: number }> } } }).__relayStartupTest.state.realtimeHistory.some((event) => event.kind === kind), TAG_GAME_KIND)).toBe(true);
+		await expect(historyPage.getByRole('dialog', { name: '鬼ごっこ終了' })).toHaveCount(0);
+	} finally { await historyPage.close(); }
+});
+
 test('shows all eight historical results within a mobile result dialog', async ({ page }) => {
 	await page.setViewportSize({ width: 390, height: 844 });
 	const nowMs = Date.now();
@@ -2335,6 +2469,29 @@ test('host silence is detected only while the local Relay connection is active',
 	await expect(result).toBeVisible();
 	await expect(result.locator('.settlement-note')).toContainText('最後に確認済みの値で確定');
 	await expect(result.locator(`[data-tag-game-result-participant="${joinerPubkey}"]`)).toHaveAttribute('data-tag-game-result-self', 'true');
+	const fallbackSelfRow = result.locator(`[data-tag-game-result-participant="${joinerPubkey}"]`);
+	const fallbackSelfText = await fallbackSelfRow.innerText();
+	const delayedOfficialFinal: TagGameState = {
+		...active, phase: 'ended', revision: 3, updatedAt: active.endsAt!, finalizedAt: active.endsAt, endReason: 'normal',
+		settledAtMs: active.endsAt! * 1_000,
+		participant: active.participant.map((member) => member.pubkey === joinerPubkey
+			? { ...member, points: 2_500, lifespanLossMs: 10_800_000, benefitMs: 45_000, calamityMs: 45_000 }
+			: { ...member, points: 2_000, lifespanLossMs: 3_600_000, benefitMs: 15_000, calamityMs: 15_000 })
+	};
+	await injectRealtime(page, finalizeTagGameState(delayedOfficialFinal, CHANNEL_ID, active.endsAt!, remoteHostSecret));
+	await result.getByRole('button', { name: '閉じる' }).click();
+	await openTagGameTerminal(page);
+	const history = page.locator(`[data-tag-game-history="${gameId}"]`);
+	await page.locator('[data-tag-game-history-section] summary').click();
+	await history.getByRole('button', { name: '結果を見る' }).click();
+	const reviewedResult = page.getByRole('dialog', { name: '鬼ごっこ終了' });
+	await expect(reviewedResult).toBeVisible();
+	const reviewedSelfRow = reviewedResult.locator(`[data-tag-game-result-participant="${joinerPubkey}"]`);
+	await expect(reviewedSelfRow).toHaveText(fallbackSelfText);
+	await expect(reviewedSelfRow).toContainText('福');
+	await expect(reviewedSelfRow).toContainText('鬼');
+	await expect(reviewedResult.locator(`[data-tag-game-result-participant="${remoteHostPubkey}"]`)).toContainText('ポイント +2000pt');
+	await expect(reviewedResult.locator('.settlement-note')).toContainText('ほかの参加者は開催者の最終状態');
 });
 
 test('organizer is auto-consented, and proposal expiry removes nonresponders before a fresh proposal', async ({ page }) => {
