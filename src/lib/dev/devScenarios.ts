@@ -6,7 +6,8 @@ export type DevScenarioFixture =
 	| Readonly<{ kind: 'chatter-timeline' }>
 	| Readonly<{ kind: 'trace'; replies: boolean; inactiveSelf?: boolean }>
 	| Readonly<{ kind: 'cooperation-defection-static'; phase: 'warning' | 'registration' | 'game' | 'ended' }>
-	| Readonly<{ kind: 'cooperation-defection-playground' }>;
+	| Readonly<{ kind: 'cooperation-defection-playground' }>
+	| Readonly<{ kind: 'tag-game-playground' }>;
 
 export type DevScenario = Readonly<{
 	id: string;
@@ -44,7 +45,8 @@ export const DEV_SCENARIOS: readonly DevScenario[] = [
 	{ id: 'cooperation-defection-registration', category: 'Realtime', label: 'Cooperation and Defection registration', description: 'Static registration phase for 協力と抜け駆け.', fixture: { kind: 'cooperation-defection-static', phase: 'registration' } },
 	{ id: 'cooperation-defection-game', category: 'Realtime', label: 'Cooperation and Defection game', description: 'Static game phase for 協力と抜け駆け.', fixture: { kind: 'cooperation-defection-static', phase: 'game' } },
 	{ id: 'cooperation-defection-ended', category: 'Realtime', label: 'Cooperation and Defection ended', description: 'Static ended phase for 協力と抜け駆け.', fixture: { kind: 'cooperation-defection-static', phase: 'ended' } },
-	{ id: 'cooperation-defection-playground', category: 'Realtime', label: 'Cooperation and Defection Playground', description: 'Local simulation using the production game rules.', fixture: { kind: 'cooperation-defection-playground' } }
+	{ id: 'cooperation-defection-playground', category: 'Realtime', label: 'Cooperation and Defection Playground', description: 'Local simulation using the production game rules.', fixture: { kind: 'cooperation-defection-playground' } },
+	{ id: 'tag-game-playground', category: 'Realtime', label: 'Tag Game Playground', description: 'Local tag-game simulation using the production schedule, field movement, HUD, and touch rules.', fixture: { kind: 'tag-game-playground' } }
 ];
 
 const SCENARIO_BY_ID = new Map(DEV_SCENARIOS.map((scenario) => [scenario.id, scenario]));

@@ -6,7 +6,8 @@
 	import ActionButton from '$lib/ActionButton.svelte';
 	import { resolveCharacterFromPubkey } from '$lib/characterAssignment';
 	import { newlyConfirmedTagGameParticipants, tagGameCharacterName, tagGameConfirmedParticipants, tagGameParticipantLabel } from '$lib/tagGamePresentation';
-	import type { TagGameState } from '$lib/tagGame';
+	import { TAG_GAME_GAME_MS, type TagGameState } from '$lib/tagGame';
+	import { getCharacterById } from '$lib/character';
 	type Props = Readonly<{
 		open: boolean;
 		games: readonly TagGameState[];
@@ -28,8 +29,12 @@
 		onWatch: (gameId: string) => void;
 		onStopWatching: () => void;
 		onOpenChange: (open: boolean) => void;
+		devPlayground?: boolean;
+		devSelfCharacterId?: string;
+		onDevAddBots?: (gameId: string) => void;
+		onDevBotConsent?: (gameId: string) => void;
 	}>;
-	let { open, games, selfPubkey, selfRunNumber, watchedGameId, nowMs, busy = false, reservedGameId = null, reservedStatus = null, reservationExpiresAtMs = null, onCreate, onJoin, onLeave, onCancel, onPropose, onConsent, onExclude, onWatch, onStopWatching, onOpenChange }: Props = $props();
+	let { open, games, selfPubkey, selfRunNumber, watchedGameId, nowMs, busy = false, reservedGameId = null, reservedStatus = null, reservationExpiresAtMs = null, onCreate, onJoin, onLeave, onCancel, onPropose, onConsent, onExclude, onWatch, onStopWatching, onOpenChange, devPlayground = false, devSelfCharacterId, onDevAddBots, onDevBotConsent }: Props = $props();
 	const labels = { lobby: '募集中', proposed: '開始確認中', countdown: '開始準備中', running: '開催中', settling: '最終精算中', ended: '終了', interrupted: '中断' } as const;
 	const selfActiveGameId = $derived(games.find((game) => (game.phase === 'running' || game.phase === 'settling') && game.participant.some((member) => member.pubkey === selfPubkey && member.runNumber === selfRunNumber && (member.status === 'active' || member.status === 'temporarily-ineligible')))?.gameId ?? null);
 	const ownHostLobby = $derived(games.find((game) => game.hostPubkey === selfPubkey && (game.phase === 'lobby' || game.phase === 'proposed')) ?? null);
@@ -56,6 +61,11 @@
 	});
 	onDestroy(() => { if (arrivalTimeout) clearTimeout(arrivalTimeout); });
 	function isHighlighted(pubkey: string): boolean { return highlightedPubkeys.includes(pubkey); }
+	function participantCharacter(pubkey: string) {
+		return devPlayground && pubkey === selfPubkey && devSelfCharacterId
+			? getCharacterById(devSelfCharacterId) ?? resolveCharacterFromPubkey(pubkey)
+			: resolveCharacterFromPubkey(pubkey);
+	}
 	function hostLabel(game: TagGameState): string {
 		if (game.hostPubkey === selfPubkey) return 'あなたの開催';
 		const name = tagGameCharacterName(game.hostPubkey, selfPubkey);
@@ -70,7 +80,7 @@
 			<Dialog.Overlay class="tag-game-dialog-overlay" />
 			<Dialog.Content class="tag-game-dialog-content" preventScroll={false}>
 				<header><Dialog.Title class="tag-game-title">鬼ごっこ</Dialog.Title><Dialog.Close class="action-button action-button-tertiary action-button-close" aria-label="閉じる"><X aria-hidden="true" /></Dialog.Close></header>
-				<p>最大8人、3分間のプレイヤー主催イベントです。募集参加中も脱出と能力強化を行えます。</p>
+				<p>最大8人、{Math.ceil(TAG_GAME_GAME_MS / 60_000)}分間のプレイヤー主催イベントです。募集参加中も脱出と能力強化を行えます。</p>
 				{#if createAllowed}<ActionButton variant={joinableGames.length === 0 ? 'primary' : 'secondary'} onclick={onCreate} disabled={busy}>鬼ごっこを開催</ActionButton>
 				{:else if ownHostLobby}<p class="reservation-state">募集を開催中</p>
 				{:else if reservationCurrent}<p class="reservation-state">{reservedStatus === 'pending' ? '参加申請済み（受理待ち）' : reservedStatus === 'active' ? '鬼ごっこに参加中' : '参加申請済み（参加登録済み）'}</p>
@@ -83,7 +93,7 @@
 				{#if arrivalMessage}<p class="tag-game-arrival" role="status" aria-live="polite">{arrivalMessage}</p>{/if}
 				<ul>
 					{#each games as game (game.gameId)}
-						{@const hostCharacter = resolveCharacterFromPubkey(game.hostPubkey)}
+						{@const hostCharacter = participantCharacter(game.hostPubkey)}
 						{@const confirmedParticipants = tagGameConfirmedParticipants(game)}
 						<li>
 							<div class="host-identity">{#if hostCharacter}<img class="tag-game-avatar" src={asset(`/${hostCharacter.picture}`)} alt="" />{/if}<strong>{hostLabel(game)}</strong><span>{labels[game.phase]}</span></div>
@@ -93,7 +103,7 @@
 									{#each GAME_SLOTS as slot}
 										{@const player = confirmedParticipants[slot]}
 										{#if player}
-											{@const character = resolveCharacterFromPubkey(player.pubkey)}
+										{@const character = participantCharacter(player.pubkey)}
 											<li class={['participant-slot', { 'participant-slot-arrival': isHighlighted(player.pubkey) }]} data-tag-game-participant-slot={player.pubkey}>
 												{#if character}<img src={asset(`/${character.picture}`)} alt="" />{/if}
 												<strong title={tagGameParticipantLabel(game, player.pubkey, selfPubkey)}>{tagGameParticipantLabel(game, player.pubkey, selfPubkey)}</strong>
@@ -121,13 +131,15 @@
 							{/if}
 							{#if game.phase === 'lobby'}
 								{#if game.participant.some((player) => player.pubkey === selfPubkey)}
-									{#if game.hostPubkey === selfPubkey}<ActionButton variant="tertiary" intent="cancel" onclick={() => onCancel(game.gameId)} disabled={busy}>募集を取り消す</ActionButton><ActionButton variant="primary" onclick={() => onPropose(game.gameId)} disabled={busy || game.participant.length < 2}>開始を提案</ActionButton>
+									{#if game.hostPubkey === selfPubkey}
+										{#if devPlayground && game.participant.length === 1}<ActionButton variant="secondary" data-tag-game-dev-add-bots={game.gameId} onclick={() => onDevAddBots?.(game.gameId)} disabled={busy}>BOTを参加させる</ActionButton>{/if}
+										<ActionButton variant="tertiary" intent="cancel" onclick={() => onCancel(game.gameId)} disabled={busy}>募集を取り消す</ActionButton><ActionButton variant="primary" onclick={() => onPropose(game.gameId)} disabled={busy || game.participant.length < 2}>開始を提案</ActionButton>
 									{:else}<p class="reservation-state">{game.participant.some((player) => player.pubkey === selfPubkey) ? '参加申請済み（参加登録済み）' : '参加申請済み（受理待ち）'}</p><ActionButton variant="tertiary" intent="cancel" onclick={() => onLeave(game.gameId)} disabled={busy}>申請を取り消す</ActionButton>{/if}
 							{:else if reservationCurrent && reservedGameId === game.gameId}<p class="reservation-state">参加申請済み（受理待ち）</p><ActionButton variant="tertiary" intent="cancel" onclick={() => onLeave(game.gameId)} disabled={busy}>申請を取り消す</ActionButton>
 								{:else}<ActionButton variant="primary" onclick={() => onJoin(game.gameId)} disabled={busy || !selfPubkey || reservationCurrent || game.participant.length >= 8}>参加申請</ActionButton>{/if}
 							{:else if game.phase === 'proposed' && game.proposalId && game.participant.some((player) => player.pubkey === selfPubkey)}
 								<p class="reservation-state">参加登録済み</p>
-								{#if game.hostPubkey === selfPubkey}<span>開催者は同意済み</span>
+								{#if game.hostPubkey === selfPubkey}<span>開催者は同意済み</span>{#if devPlayground && game.participant.some((player) => player.pubkey !== selfPubkey && !player.consented)}<ActionButton variant="primary" data-tag-game-dev-bot-consent={game.gameId} onclick={() => onDevBotConsent?.(game.gameId)} disabled={busy}>BOTが開始に同意</ActionButton>{/if}
 								{:else if game.participant.find((player) => player.pubkey === selfPubkey)?.consentProposalId === game.proposalId}
 									<span>同意済み</span>
 								{:else}<ActionButton variant="primary" onclick={() => onConsent(game.gameId, game.proposalId!)} disabled={busy}>開始に同意</ActionButton>{/if}

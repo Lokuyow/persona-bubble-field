@@ -56,6 +56,7 @@
 		type DevCooperationDefectionPlaygroundState,
 		DevCooperationDefectionPlayground
 	} from '$lib/dev/devCooperationDefectionPlayground';
+	import { createDevTagGamePlayground, DEV_TAG_GAME_BOT_A_PUBKEY, DEV_TAG_GAME_BOT_B_PUBKEY, DEV_TAG_GAME_SELF_ID, DEV_TAG_GAME_SELF_PUBKEY, type DevTagGamePlayground, type DevTagGamePlaygroundSnapshot } from '$lib/dev/devTagGamePlayground';
 	import { CHARACTER_CATALOG, getCharacterById, type Character } from '$lib/character';
 	import ActionButton from '$lib/ActionButton.svelte';
 import { requireCharacterFromPubkey } from '$lib/characterAssignment';
@@ -423,6 +424,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	const devWorldSandboxEnabled = initialDevWorldSandboxEnabled;
 	const devCooperationDefectionStaticPhase = devScenario?.fixture.kind === 'cooperation-defection-static' ? devScenario.fixture.phase : null;
 	const devCooperationDefectionPlaygroundEnabled = devScenario?.fixture.kind === 'cooperation-defection-playground';
+	const devTagGamePlaygroundEnabled = devScenario?.fixture.kind === 'tag-game-playground';
 	const devCooperationDefectionFixtureEnabled = devCooperationDefectionStaticPhase !== null || devCooperationDefectionPlaygroundEnabled;
 	function devCooperationDefectionFixtureNowMs(): number {
 		const schedule = getCooperationDefectionSchedule(Date.now());
@@ -548,6 +550,9 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	const recoveredCooperationDefectionSessions = new Map<string, CooperationDefectionSessionState>();
 	let devCooperationDefectionPlayground = $state<DevCooperationDefectionPlayground | null>(null);
 	let devCooperationDefectionPlaygroundState = $state.raw<DevCooperationDefectionPlaygroundState | null>(null);
+	let devTagGamePlayground = $state.raw<DevTagGamePlayground | null>(null);
+	let devTagGamePlaygroundState = $state.raw<DevTagGamePlaygroundSnapshot | null>(null);
+	let devTagGamePlayedSoundSequence = 0;
 	const movementInputController = createMovementInputController({
 		requestDirectionalAction: attemptTagGameTouch,
 		requestMovement: (direction) => {
@@ -631,13 +636,17 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	let selfIsActive = $derived(selfPresence?.status === 'active');
 	let mendingProjection = $derived(personaSnapshot ? projectMending(personaSnapshot.gameState, mendingNowMs, personaSnapshot.activeRun.rootBuild) : null);
 	let canUseMendingTerminal = $derived(!devWorldSandboxEnabled && !personaLifecycleTransition && Boolean(worldSession && personaSnapshot && selfIsActive && selfLogicalPosition && isWithinFacilityInteractionRange(selfLogicalPosition)));
-	let tagGameSelfActiveGameId = $derived(personaSnapshot ? tagGameStates.find((game) => (game.phase === 'running' || game.phase === 'settling') && game.participant.some((member) => member.pubkey === personaSnapshot?.signer.pubkey && member.runNumber === personaSnapshot.activeRun.runNumber && (member.status === 'active' || member.status === 'temporarily-ineligible')))?.gameId ?? null : null);
+	let tagGameSelfActiveGameId = $derived(devTagGamePlaygroundEnabled
+		? (devTagGamePlaygroundState?.game?.phase === 'running' || devTagGamePlaygroundState?.game?.phase === 'settling' ? devTagGamePlaygroundState.game.gameId : null)
+		: personaSnapshot ? tagGameStates.find((game) => (game.phase === 'running' || game.phase === 'settling') && game.participant.some((member) => member.pubkey === personaSnapshot?.signer.pubkey && member.runNumber === personaSnapshot.activeRun.runNumber && (member.status === 'active' || member.status === 'temporarily-ineligible')))?.gameId ?? null : null);
 	let tagGameReservationGameId = $derived(personaSnapshot?.tagGame?.lock?.gameId ?? (personaSnapshot?.tagGame?.reservation?.expiresAtMs !== undefined && personaSnapshot.tagGame.reservation.expiresAtMs <= mendingNowMs ? null : personaSnapshot?.tagGame?.reservation?.gameId) ?? null);
 	let tagGameReservationStatus = $derived(personaSnapshot?.tagGame?.lock ? 'active' as const : tagGameStates.some((game) => game.gameId === tagGameReservationGameId && game.participant.some((member) => member.pubkey === personaSnapshot?.signer.pubkey && member.runNumber === personaSnapshot.activeRun.runNumber)) ? 'registered' as const : personaSnapshot?.tagGame?.reservation?.expiresAtMs !== undefined ? 'pending' as const : 'registered' as const);
 	let tagGameWatchedGame = $derived(tagGameWatchedGameId ? tagGameStates.find((game) => game.gameId === tagGameWatchedGameId && (game.phase === 'running' || game.phase === 'settling')) ?? null : null);
 	let tagGameDisplayedGameId = $derived(tagGameSelfActiveGameId ?? tagGameWatchedGame?.gameId ?? null);
 	let tagGameLocalLock = $derived(Boolean(personaSnapshot && tagGameSelfActiveGameId));
-	let tagGameDisplayedGame = $derived(tagGameStates.find((candidate) => candidate.gameId === tagGameDisplayedGameId && (candidate.phase === 'running' || candidate.phase === 'settling')) ?? null);
+	let tagGameDisplayedGame = $derived(devTagGamePlaygroundEnabled
+		? (devTagGamePlaygroundState?.game && ['running', 'settling'].includes(devTagGamePlaygroundState.game.phase) ? devTagGamePlaygroundState.game : null)
+		: tagGameStates.find((candidate) => candidate.gameId === tagGameDisplayedGameId && (candidate.phase === 'running' || candidate.phase === 'settling')) ?? null);
 	// Keep the received final cumulative value visible while its lifecycle receipt is being applied.
 	let tagGameHudGameId = $derived.by(() => {
 		if (tagGameSelfActiveGameId) return tagGameSelfActiveGameId;
@@ -688,6 +697,14 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		const roles = new Map<string, 'participant' | 'holder'>();
 		const game = tagGameStates.find((candidate) => candidate.gameId === tagGameDisplayedGameId);
 		if (!game) return roles;
+		if (devTagGamePlaygroundEnabled) {
+			for (const member of game.participant) {
+				if (member.status !== 'active') continue;
+				const id = member.pubkey === DEV_TAG_GAME_SELF_PUBKEY ? DEV_TAG_GAME_SELF_ID : member.pubkey;
+				roles.set(id, member.pubkey === game.ownerPubkey ? 'holder' : 'participant');
+			}
+			return roles;
+		}
 		for (const member of game.participant) {
 			const latest = latestTagGameWorldStates.get(member.pubkey);
 			if ((member.status === 'active' || member.status === 'temporarily-ineligible') && latest?.state === 'active' && latest.runNumber === member.runNumber) {
@@ -699,6 +716,22 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	let tagGameTouchTargetIds = $derived.by(() => {
 		const targets = new Set<string>();
 		const game = tagGameDisplayedGame;
+		if (devTagGamePlaygroundEnabled && game && game.phase === 'running' && tagGameDisplayedEffect?.active && game.ownerPubkey) {
+			const chasingHolder = tagGameDisplayedEffect.effect === 'benefit';
+			for (const member of game.participant) {
+				if (member.pubkey === game.ownerPubkey || member.status !== 'active') continue;
+				if (chasingHolder) {
+					const self = presenceState.participants.find((participant) => participant.id === DEV_TAG_GAME_SELF_ID);
+					const holder = presenceState.participants.find((participant) => participant.id === (game.ownerPubkey === DEV_TAG_GAME_SELF_PUBKEY ? DEV_TAG_GAME_SELF_ID : game.ownerPubkey));
+					if (self && holder && Math.max(Math.abs(self.position.x - holder.position.x), Math.abs(self.position.y - holder.position.y)) === 1 && member.pubkey === DEV_TAG_GAME_SELF_PUBKEY) targets.add(game.ownerPubkey);
+				} else if (game.ownerPubkey === DEV_TAG_GAME_SELF_PUBKEY) {
+					const self = presenceState.participants.find((participant) => participant.id === DEV_TAG_GAME_SELF_ID);
+					const other = presenceState.participants.find((participant) => participant.id === member.pubkey);
+					if (self && other && Math.max(Math.abs(self.position.x - other.position.x), Math.abs(self.position.y - other.position.y)) === 1) targets.add(member.pubkey);
+				}
+			}
+			return targets;
+		}
 		const self = personaSnapshot;
 		if (!game || game.phase !== 'running' || !tagGameDisplayedEffect?.active || !self) return targets;
 		const own = game.participant.find((member) => member.pubkey === self.signer.pubkey && member.runNumber === self.activeRun.runNumber && member.status === 'active');
@@ -1234,6 +1267,12 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 				cooperationDefectionSession = devCooperationDefectionPlaygroundState.session;
 			}
 			resetSandbox();
+			if (devTagGamePlaygroundEnabled) {
+				devTagGamePlayground = createDevTagGamePlayground(FIELD, Date.now());
+				devTagGamePlaygroundState = devTagGamePlayground.snapshot;
+				tagGameHudNowMs = devTagGamePlaygroundState.nowMs;
+				acceptPresence(devTagGamePlaygroundState.presence);
+			}
 			if (import.meta.env.DEV) {
 				if (devScenario) applyDevPageFixtures(devScenario, {
 					field: FIELD,
@@ -1646,6 +1685,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 					tagGameHudNowMs = now;
 					reconcileTagGameAudioTimeline(now);
 				}
+				if (devTagGamePlaygroundEnabled && devTagGamePlayground) setDevTagGamePlaygroundState(devTagGamePlayground.advanceTo(now));
 				updateLifespanHud(now);
 				if (!devCooperationDefectionPlaygroundEnabled) reconcileCooperationDefectionSession(devCooperationDefectionFixtureEnabled ? initialCooperationDefectionNowMs : now);
 				if (!devWorldSandboxEnabled && cooperationDefectionEventEnabled) void worldSession?.startRealtime();
@@ -3370,6 +3410,10 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	}
 
 	function attemptTagGameTouch(direction: Direction): void {
+		if (devTagGamePlaygroundEnabled) {
+			tryDevTagGameTouch(direction);
+			return;
+		}
 		const self = personaSnapshot;
 		if (!self || !selfLogicalPosition || !selfIsActive) return;
 		const targetPosition = moveOneCell(selfLogicalPosition, direction, FIELD);
@@ -4164,6 +4208,10 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 
 	function moveSandboxSelf(direction: Direction): void {
 		if (!devWorldSandboxEnabled) return;
+		if (devTagGamePlaygroundEnabled && devTagGamePlayground) {
+			setDevTagGamePlaygroundState(devTagGamePlayground.moveSelf(direction, Date.now()));
+			return;
+		}
 		const result = moveDevWorldSelf(presenceState, direction, Date.now());
 		if (result.moved) acceptPresence(result.state);
 	}
@@ -4387,6 +4435,135 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		cooperationDefectionSchedule = devCooperationDefectionPlaygroundState.schedule;
 		cooperationDefectionNowMs = devCooperationDefectionPlaygroundState.nowMs;
 		cooperationDefectionSession = devCooperationDefectionPlaygroundState.session;
+	}
+
+	function setDevTagGamePlaygroundState(next: DevTagGamePlaygroundSnapshot): void {
+		const previousPresence = devTagGamePlaygroundState?.presence;
+		devTagGamePlaygroundState = next;
+		tagGameStates = next.game ? [next.game] : [];
+		tagGameHudNowMs = next.nowMs;
+		if (next.presence !== previousPresence) acceptPresence(next.presence);
+		if (next.sound && next.sound.sequence > devTagGamePlayedSoundSequence) {
+			devTagGamePlayedSoundSequence = next.sound.sequence;
+			soundController?.play(next.sound.effect);
+		}
+	}
+
+	function devTagGameNowMs(): number {
+		return Math.max(Date.now(), devTagGamePlaygroundState?.nowMs ?? 0);
+	}
+
+	function createDevTagGame(): void {
+		if (!devTagGamePlaygroundEnabled || !devTagGamePlayground) return;
+		tagGamePanelOpen = true;
+		setDevTagGamePlaygroundState(devTagGamePlayground.create(devTagGameNowMs()));
+	}
+
+	function addDevTagGameBots(): void {
+		if (!devTagGamePlayground || !devTagGamePlaygroundEnabled) return;
+		setDevTagGamePlaygroundState(devTagGamePlayground.addBots(devTagGameNowMs()));
+	}
+
+	function proposeDevTagGameStart(): void {
+		if (!devTagGamePlayground || !devTagGamePlaygroundEnabled) return;
+		setDevTagGamePlaygroundState(devTagGamePlayground.propose(devTagGameNowMs()));
+	}
+
+	function consentDevTagGameBots(): void {
+		if (!devTagGamePlayground || !devTagGamePlaygroundEnabled) return;
+		setDevTagGamePlaygroundState(devTagGamePlayground.botConsent(devTagGameNowMs()));
+	}
+
+	function advanceDevTagGameShort(): void {
+		if (!devTagGamePlayground || !devTagGamePlaygroundEnabled) return;
+		setDevTagGamePlaygroundState(devTagGamePlayground.advanceTo(devTagGameNowMs() + 5_000));
+	}
+
+	function advanceDevTagGameToNextEffect(): void {
+		const game = devTagGamePlaygroundState?.game;
+		if (!devTagGamePlayground || !game || game.phase !== 'running' || !game.startedAt || !game.seed) return;
+		let boundary = game.startedAt * 1_000;
+		for (const interval of createTagGameSchedule(game.seed)) {
+			boundary += interval.durationMs;
+			if (boundary > devTagGameNowMs()) {
+				setDevTagGamePlaygroundState(devTagGamePlayground.advanceTo(boundary));
+				return;
+			}
+		}
+		setDevTagGamePlaygroundState(devTagGamePlayground.advanceTo(game.endsAt! * 1_000));
+	}
+
+	function advanceDevTagGameToEnd(): void {
+		const game = devTagGamePlaygroundState?.game;
+		if (!devTagGamePlayground || !game || game.phase !== 'running' || !game.endsAt) return;
+		setDevTagGamePlaygroundState(devTagGamePlayground.advanceTo(Math.max(devTagGameNowMs(), game.endsAt * 1_000)));
+	}
+
+	function placeDevTagGameBot(pubkey: string, position: GridPosition): void {
+		if (!devTagGamePlayground || !devTagGamePlaygroundEnabled) return;
+		setDevTagGamePlaygroundState(devTagGamePlayground.placeBot(pubkey, position, devTagGameNowMs()));
+	}
+
+	function tryDevTagGameTouch(direction: Direction): boolean {
+		if (!devTagGamePlaygroundEnabled || !devTagGamePlayground || !selfLogicalPosition) return false;
+		const game = devTagGamePlaygroundState?.game;
+		if (!game || game.phase !== 'running' || !game.ownerPubkey) return false;
+		const targetPosition = moveOneCell(selfLogicalPosition, direction, FIELD);
+		if (!targetPosition) return false;
+		const nowMs = devTagGameNowMs();
+		const effect = tagGameScheduledEffectAt(game, nowMs);
+		const targetPubkey = effect === 'benefit' && game.ownerPubkey !== DEV_TAG_GAME_SELF_PUBKEY
+			? game.ownerPubkey
+			: effect === 'calamity' && game.ownerPubkey === DEV_TAG_GAME_SELF_PUBKEY
+				? [DEV_TAG_GAME_BOT_A_PUBKEY, DEV_TAG_GAME_BOT_B_PUBKEY].find((pubkey) => {
+					const position = devTagGamePlaygroundState?.presence.participants.find((entry) => entry.id === pubkey)?.position;
+					return Boolean(position && sameFieldCell(position, targetPosition));
+				})
+				: undefined;
+		if (!targetPubkey) return false;
+		const beforeOwner = game.ownerPubkey;
+		const next = devTagGamePlayground.touch(DEV_TAG_GAME_SELF_PUBKEY, targetPubkey, nowMs);
+		setDevTagGamePlaygroundState(next);
+		if (next.game?.ownerPubkey !== beforeOwner) {
+			const attemptId = ++tagGameTouchAttemptSequence;
+			tagGameTouchAttempt = { participantId: DEV_TAG_GAME_SELF_ID, direction, id: attemptId };
+			window.setTimeout(() => { if (tagGameTouchAttempt?.id === attemptId) tagGameTouchAttempt = null; }, TAG_GAME_TOUCH_FEEDBACK_MS);
+		}
+		return next.game?.ownerPubkey !== beforeOwner;
+	}
+
+	function tryDevTagGameBotTouch(direction: Direction): void {
+		const game = devTagGamePlaygroundState?.game;
+		if (!devTagGamePlaygroundEnabled || !devTagGamePlayground || game?.phase !== 'running' || !game.ownerPubkey) return;
+		const nowMs = devTagGameNowMs();
+		const effect = tagGameScheduledEffectAt(game, nowMs);
+		const presence = devTagGamePlaygroundState?.presence;
+		const selfPosition = presence?.participants.find((entry) => entry.id === DEV_TAG_GAME_SELF_ID)?.position;
+		if (!presence || !selfPosition || !effect) return;
+		const holderPosition = presence.participants.find((entry) => entry.id === (game.ownerPubkey === DEV_TAG_GAME_SELF_PUBKEY ? DEV_TAG_GAME_SELF_ID : game.ownerPubkey))?.position;
+		if (!holderPosition) return;
+		const actor = effect === 'calamity'
+			? game.ownerPubkey !== DEV_TAG_GAME_SELF_PUBKEY ? game.ownerPubkey : undefined
+			: [DEV_TAG_GAME_BOT_A_PUBKEY, DEV_TAG_GAME_BOT_B_PUBKEY].find((pubkey) => {
+				if (pubkey === game.ownerPubkey) return false;
+				const position = presence.participants.find((entry) => entry.id === pubkey)?.position;
+				const next = position ? moveOneCell(position, direction, FIELD) : null;
+				return Boolean(next && sameFieldCell(next, holderPosition));
+			});
+		if (!actor) return;
+		const actorPosition = presence.participants.find((entry) => entry.id === actor)?.position;
+		const actorNext = actorPosition ? moveOneCell(actorPosition, direction, FIELD) : null;
+		const target = effect === 'benefit'
+			? game.ownerPubkey
+			: actorNext && sameFieldCell(actorNext, selfPosition) ? DEV_TAG_GAME_SELF_PUBKEY : undefined;
+		if (!target) return;
+		const beforeOwner = game.ownerPubkey;
+		setDevTagGamePlaygroundState(devTagGamePlayground.touch(actor, target, nowMs));
+		if (devTagGamePlaygroundState?.game?.ownerPubkey !== beforeOwner) {
+			const attemptId = ++tagGameTouchAttemptSequence;
+			tagGameHolderTransfer = { participantId: DEV_TAG_GAME_SELF_ID, id: attemptId };
+			window.setTimeout(() => { if (tagGameHolderTransfer?.id === attemptId) tagGameHolderTransfer = null; }, TAG_GAME_TOUCH_FEEDBACK_MS);
+		}
 	}
 
 	function traceMarkerWorldPosition(position: { x: number; y: number }): WorldPoint {
@@ -4712,31 +4889,35 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 				registerReplyRemeasure={registerTraceReplyRemeasure}
 			/>
 			<div class="field-status-huds" data-field-status-huds style={`--top-status-hud-bottom:${statusHudVisible ? topStatusHudBottom : 0}px`}>
-				<TagGameHud game={tagGameDisplayedGame} selfPubkey={personaSnapshot?.signer.pubkey ?? null} selfRunNumber={personaSnapshot?.activeRun.runNumber ?? null} nowMs={tagGameHudNowMs} {realtimeStatus} busy={tagGameBusy} localEffectPaused={tagGameDisplayedEffect?.locallyPaused ?? false} touchStatus={tagGameDisplayedGame ? tagGameTouchStatuses.get(tagGameDisplayedGame.gameId)?.label ?? null : null} onLeave={(gameId) => { void leaveTagGame(gameId); }} />
+				<TagGameHud game={tagGameDisplayedGame} selfPubkey={devTagGamePlaygroundEnabled ? DEV_TAG_GAME_SELF_PUBKEY : personaSnapshot?.signer.pubkey ?? null} selfRunNumber={devTagGamePlaygroundEnabled ? 1 : personaSnapshot?.activeRun.runNumber ?? null} nowMs={tagGameHudNowMs} realtimeStatus={devTagGamePlaygroundEnabled ? 'active' : realtimeStatus} busy={devTagGamePlaygroundEnabled ? false : tagGameBusy} localEffectPaused={tagGameDisplayedEffect?.locallyPaused ?? false} touchStatus={tagGameDisplayedGame ? (devTagGamePlaygroundEnabled ? devTagGamePlaygroundState?.message : tagGameTouchStatuses.get(tagGameDisplayedGame.gameId)?.label) ?? null : null} onLeave={(gameId) => { if (!devTagGamePlaygroundEnabled) void leaveTagGame(gameId); }} />
 			</div>
 		{/snippet}
 	</FieldViewport>
 	<TagGamePanel
 		open={tagGamePanelOpen}
 		games={visibleTagGameStates}
-		selfPubkey={personaSnapshot?.signer.pubkey ?? null}
-		selfRunNumber={personaSnapshot?.activeRun.runNumber ?? null}
+		selfPubkey={devTagGamePlaygroundEnabled ? DEV_TAG_GAME_SELF_PUBKEY : personaSnapshot?.signer.pubkey ?? null}
+		selfRunNumber={personaSnapshot?.activeRun.runNumber ?? (devTagGamePlaygroundEnabled ? 1 : null)}
 		watchedGameId={tagGameWatchedGameId}
 		nowMs={mendingNowMs}
 		busy={tagGameBusy}
 		reservedGameId={tagGameReservationGameId}
 		reservedStatus={tagGameReservationStatus}
 		reservationExpiresAtMs={personaSnapshot?.tagGame?.reservation?.expiresAtMs ?? null}
-		onCreate={() => { void createTagGame(); }}
+		onCreate={() => { if (devTagGamePlaygroundEnabled) createDevTagGame(); else void createTagGame(); }}
 		onJoin={(gameId) => { void joinTagGame(gameId); }}
 		onLeave={(gameId) => { void leaveTagGame(gameId); }}
-		onCancel={(gameId) => { void cancelTagGame(gameId); }}
-		onPropose={(gameId) => { void proposeTagGameStart(gameId); }}
+		onCancel={(gameId) => { if (devTagGamePlaygroundEnabled && devTagGamePlayground) setDevTagGamePlaygroundState(devTagGamePlayground.reset()); else void cancelTagGame(gameId); }}
+		onPropose={(gameId) => { if (devTagGamePlaygroundEnabled) proposeDevTagGameStart(); else void proposeTagGameStart(gameId); }}
 		onConsent={(gameId, proposalId) => { void consentTagGameStart(gameId, proposalId); }}
 		onExclude={(gameId, pubkey) => { void excludeTagGameParticipant(gameId, pubkey); }}
 		onWatch={watchTagGame}
 		onStopWatching={stopWatchingTagGame}
 		onOpenChange={(open) => { tagGamePanelOpen = open; }}
+		devPlayground={devTagGamePlaygroundEnabled}
+		devSelfCharacterId={selectedCharacterId}
+		onDevAddBots={() => addDevTagGameBots()}
+		onDevBotConsent={() => consentDevTagGameBots()}
 	/>
 
 	{#if deathPresentation}
@@ -4830,12 +5011,20 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			cooperationDefectionPlaygroundEnabled={devCooperationDefectionPlaygroundEnabled}
 			botPreset={devCooperationDefectionPlaygroundState?.preset ?? 'cooperative'}
 			canAdvanceCooperationDefection={Boolean(devCooperationDefectionPlaygroundState && devCooperationDefectionPlayground?.canAdvance())}
+			tagGamePlaygroundEnabled={devTagGamePlaygroundEnabled}
+			tagGamePlayground={devTagGamePlaygroundState}
 			onCharacterChange={selectSandboxCharacter}
 			onReset={resetDevScenario}
 			onAddLiveReply={injectDevTraceLiveReply}
 			onInjectLiveSpeech={injectDevLiveSpeech}
 			onBotPresetChange={changeDevCooperationDefectionPreset}
 			onAdvanceCooperationDefection={advanceDevCooperationDefectionPhase}
+			onTagGameAdvanceShort={advanceDevTagGameShort}
+			onTagGameAdvanceEffect={advanceDevTagGameToNextEffect}
+			onTagGameAdvanceEnd={advanceDevTagGameToEnd}
+			onTagGameBotTouch={tryDevTagGameBotTouch}
+			onTagGameBotPosition={placeDevTagGameBot}
+			onOpenTagGamePanel={() => { tagGamePanelOpen = true; }}
 		/>
 	{:else if selfPositionWriteState.kind === 'retryable' && !isWorldSelfActive}
 		<WorldEntryControls onRetry={retryWorldEntry} />
