@@ -905,8 +905,8 @@ export async function claimManualTraceOutbox(scope: WorldWriteJournalScope, atte
 }
 
 /** Reserves 100pt and persists the signed event before any Relay send can start. */
-export async function reserveManualTraceOutbox(scope: WorldWriteJournalScope, event: VerifiedEvent, attemptId: string, nowMs = Date.now()): Promise<ManualTraceOutboxResult> {
-	if (!attemptId || attemptId.length > 100 || !Number.isSafeInteger(nowMs) || nowMs < 0 || event.pubkey !== scope.identity.pubkey || !verifyEvent(event)) return { kind: 'corrupt' };
+export async function reserveManualTraceOutbox(scope: WorldWriteJournalScope, prepareEvent: () => VerifiedEvent, attemptId: string, nowMs = Date.now()): Promise<ManualTraceOutboxResult> {
+	if (!attemptId || attemptId.length > 100 || !Number.isSafeInteger(nowMs) || nowMs < 0) return { kind: 'corrupt' };
 	return withLifecycle(async (db) => {
 		const tx = db.transaction([PLAYER_LIFECYCLE_STORE_NAME, WORLD_WRITE_JOURNAL_STORE_NAME], 'readwrite');
 		try {
@@ -920,14 +920,14 @@ export async function reserveManualTraceOutbox(scope: WorldWriteJournalScope, ev
 			const record = (raw ?? emptyJournal(scope)) as WorldWriteJournalRecord;
 			const pending = record.runNumber === scope.runNumber ? record.pendingManualTrace : undefined;
 			if (pending && pending.runNumber === scope.runNumber && pending.status !== 'confirmed' && pending.status !== 'terminal') {
-				if (pending.status === 'dispatching' && pending.leaseUntilMs > nowMs && pending.attemptId !== attemptId) { await tx.done; return { kind: 'pending' } as const; }
-				const claimed: ManualTraceOutbox = { ...pending, status: 'dispatching', attemptId, leaseUntilMs: nowMs + MANUAL_TRACE_SEND_LEASE_MS };
-				await store.put({ ...record, pendingManualTrace: claimed }, key);
-				await tx.done;
-				return { kind: 'existing', outbox: claimed, points: player.mode.activeRun.gameState.points, revision: player.mode.activeRun.revision } as const;
+				// User initiated submissions never claim or resend an older operation.
+				// The recovery owner claims it separately, preserving its signed event ID.
+				await tx.done; return { kind: 'pending' } as const;
 			}
 			const activeRun = player.mode.activeRun;
 			if (activeRun.gameState.points < 100) { await tx.done; return { kind: 'insufficient-points' } as const; }
+			const event = prepareEvent();
+			if (event.pubkey !== scope.identity.pubkey || !verifyEvent(event)) { await tx.done; return { kind: 'corrupt' } as const; }
 			const outbox: ManualTraceOutbox = { runNumber: scope.runNumber, event, status: 'dispatching', attemptId, leaseUntilMs: nowMs + MANUAL_TRACE_SEND_LEASE_MS };
 			const gameState = { ...activeRun.gameState, points: activeRun.gameState.points - 100 };
 			const nextRun = { ...activeRun, revision: activeRun.revision + 1, gameState };

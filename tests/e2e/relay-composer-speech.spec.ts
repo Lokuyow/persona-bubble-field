@@ -436,9 +436,10 @@ test.describe('Relay startup', () => {
 
 	test('generates on-device candidates and directly sends the primary action once', async ({ page }) => {
 		await installPromptApiStub(page);
-		const selfSecret = fixtureSecret(19);
-		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret));
-		const editor = await openReadyRelayWorld(page, 1);
+		const editor = await openReadyRelayWorld(page, 1, 100);
+		const manualTrace = page.locator('.manual-trace-toggle');
+		await manualTrace.click();
+		await expect(manualTrace).toHaveAttribute('aria-pressed', 'true');
 		await page.getByRole('button', { name: /発言タイプ: 通常/ }).click();
 		const candidateButton = page.getByRole('button', { name: 'AI発言候補を生成' });
 		await expect(candidateButton).toBeVisible();
@@ -455,13 +456,31 @@ test.describe('Relay startup', () => {
 		}).__promptApiState.prompts.at(-1));
 		expect(prompt).toContain('名前:');
 		expect(prompt).toContain('直近の会話本文');
+		await expect(manualTrace).toHaveAttribute('aria-pressed', 'true');
 		await primary.dblclick();
 		await expect.poll(async () => (await publishedMessages(page)).filter((event) => event.content === 'まずは自然な返答です。')).toHaveLength(1);
 		await expect(editor).toHaveValue('');
 		const published = (await publishedMessages(page)).filter((event) => event.content === 'まずは自然な返答です。');
 		expect(published).toHaveLength(1);
 		expect(published[0].kind).toBe(42);
-		expect(published[0].tags).toEqual(expect.arrayContaining([['l', 'speech:shout', expect.any(String)]]));
+		expect(published[0].tags).toEqual(expect.arrayContaining([['l', 'trace:manual', expect.any(String)]]));
+		expect(published[0].tags.some((tag) => tag[0] === 'l' && tag[1]?.startsWith('speech:'))).toBe(false);
+		const persistedPoints = await page.evaluate(async () => {
+			const database = await new Promise<IDBDatabase>((resolve, reject) => {
+				const request = indexedDB.open('persona-bubble-field-account');
+				request.onsuccess = () => resolve(request.result);
+				request.onerror = () => reject(request.error);
+			});
+			try {
+				const transaction = database.transaction('persona-bubble-field-player-state');
+				const request = transaction.objectStore('persona-bubble-field-player-state').get('player-lifecycle');
+				return await new Promise<number>((resolve, reject) => {
+					request.onsuccess = () => resolve((request.result as { mode: { activeRun: { gameState: { points: number } } } }).mode.activeRun.gameState.points);
+					request.onerror = () => reject(request.error);
+				});
+			} finally { database.close(); }
+		});
+		expect(persistedPoints).toBe(0);
 		expect((await publishedMessages(page)).length).toBe(publishedBefore + 1);
 		expect((await composerContextCalls(page)).filter((call) => Object.hasOwn(call, 'content'))).toEqual([]);
 		await expect(page.locator('.suggestion-panel')).toHaveCount(0);

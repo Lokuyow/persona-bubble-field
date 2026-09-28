@@ -296,12 +296,32 @@ test.describe('Relay startup', () => {
 			rejectTracePublishes: true,
 			persistAcrossReload: true
 		});
+		await restarted.clock.install({ time: Date.now() });
 		await restarted.goto('/');
 		await restarted.evaluate(() => (window as unknown as { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
 		const recoveredPublishes = async () => (await relayState(restarted)).state.published.filter((event) => event.kind === 42 && event.tags.some((tag) => tag[0] === 'l' && tag[1] === 'trace:manual'));
 		await expect.poll(recoveredPublishes).toHaveLength(AUTHORITATIVE_RELAYS.length);
 		expect([...new Set((await recoveredPublishes()).map((event) => event.id))]).toEqual([originalEventId]);
 		await expect(restarted.locator('.manual-trace-toggle')).toHaveAttribute('data-manual-trace-status', 'unknown');
+		const retryEditor = restarted.getByRole('textbox', { name: '投稿エディター' });
+		const manualMode = restarted.locator('.manual-trace-toggle');
+		const terminalCountBeforeNewDraft = await restarted.evaluate(() => (window as unknown as { __ehagakiTerminalCount?: number }).__ehagakiTerminalCount ?? 0);
+		await retryEditor.fill('a changed body must remain a separate draft');
+		await manualMode.click();
+		await retryEditor.press('Enter');
+		await expect.poll(() => restarted.evaluate(() => (window as unknown as { __ehagakiTerminalCount: number }).__ehagakiTerminalCount)).toBe(terminalCountBeforeNewDraft + 1);
+		await expect(retryEditor).toHaveValue('a changed body must remain a separate draft');
+		const eventsAfterNewDraftAttempt = await recoveredPublishes();
+		expect([...new Set(eventsAfterNewDraftAttempt.map((event) => event.id))]).toEqual([originalEventId]);
+		expect(eventsAfterNewDraftAttempt.some((event) => event.content === 'a changed body must remain a separate draft')).toBe(false);
+		await restarted.evaluate(() => (window as unknown as { __relayStartupTest: { allowTracePublishes(): void } }).__relayStartupTest.allowTracePublishes());
+		await restarted.clock.runFor(20_001);
+		await expect(restarted.locator('.manual-trace-toggle')).toHaveAttribute('data-manual-trace-status', 'confirmed');
+		await expect(retryEditor).toHaveValue('a changed body must remain a separate draft');
+		const successfulRecoveryPublishes = await recoveredPublishes();
+		expect(successfulRecoveryPublishes).toHaveLength(AUTHORITATIVE_RELAYS.length * 2);
+		expect([...new Set(successfulRecoveryPublishes.map((event) => event.id))]).toEqual([originalEventId]);
+		expect(successfulRecoveryPublishes.every((event) => event.content === 'survive a closed browser tab')).toBe(true);
 		await expect(restarted.getByRole('button', { name: '自分のプロフィールを開く' })).toBeEnabled();
 		await restarted.getByRole('button', { name: '自分のプロフィールを開く' }).click();
 		const profile = restarted.getByRole('dialog');
@@ -312,7 +332,7 @@ test.describe('Relay startup', () => {
 			const state = (window as unknown as { __relayStartupTest: { state: { previousPublished: Array<{ id: string; kind: number; tags: string[][] }>; published: Array<{ id: string; kind: number; tags: string[][] }> } } }).__relayStartupTest.state;
 			return [...state.previousPublished, ...state.published].filter((event) => event.kind === 42 && event.tags.some((tag) => tag[0] === 'l' && tag[1] === 'trace:manual'));
 		});
-		expect(traceEventsAfterClear).toHaveLength(AUTHORITATIVE_RELAYS.length);
+		expect(traceEventsAfterClear).toHaveLength(AUTHORITATIVE_RELAYS.length * 2);
 		expect([...new Set(traceEventsAfterClear.map((event) => event.id))]).toEqual([originalEventId]);
 		const terminalOutbox = await restarted.evaluate(async ({ channelId, pubkey }) => {
 			const database = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -329,7 +349,14 @@ test.describe('Relay startup', () => {
 				});
 			} finally { database.close(); }
 		}, { channelId: CHANNEL_ID, pubkey: trace.selfPubkey });
-		expect(terminalOutbox?.pendingManualTrace).toMatchObject({ event: { id: originalEventId }, status: 'terminal' });
+		expect(terminalOutbox?.pendingManualTrace).toMatchObject({ event: { id: originalEventId }, status: 'confirmed' });
+		await restarted.clock.runFor(40_001);
+		const eventsAfterTerminalRetryWindow = await restarted.evaluate(() => {
+			const state = (window as unknown as { __relayStartupTest: { state: { previousPublished: Array<{ id: string; kind: number; tags: string[][] }>; published: Array<{ id: string; kind: number; tags: string[][] }> } } }).__relayStartupTest.state;
+			return [...state.previousPublished, ...state.published].filter((event) => event.kind === 42 && event.tags.some((tag) => tag[0] === 'l' && tag[1] === 'trace:manual'));
+		});
+		expect(eventsAfterTerminalRetryWindow).toHaveLength(traceEventsAfterClear.length);
+		expect([...new Set(eventsAfterTerminalRetryWindow.map((event) => event.id))]).toEqual([originalEventId]);
 	});
 
 	test('shows a confirmed manual Trace on its author field without waiting for the Relay root bootstrap', async ({ page }) => {

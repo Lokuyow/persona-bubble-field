@@ -38,6 +38,7 @@ import {
 	type LoadLifecycleResult,
 	type PendingSelection,
 	type PersonaSnapshot,
+	type PlayerLifecycle,
 	type SelectIdentityOptions
 } from './rootIdentity';
 import type { RootBuild } from './rootProgression';
@@ -708,16 +709,28 @@ describe('Root / Identity / Run lifecycle', () => {
 	it('recovers the same signed manual trace after a crashed send and lets clear finish after an unknown result', async () => {
 		const persona = await selected(ZERO_BUILD, { initialPoints: 101_000, initialLifespanMs: 500 * DAY });
 		const storedRootBefore = await records(ROOT_SECRET_STORE_NAME);
-		const storedPlayerBefore = (await records(PLAYER_LIFECYCLE_STORE_NAME))['player-lifecycle'] as { identities: unknown[] };
+		const storedPlayerBefore = (await records(PLAYER_LIFECYCLE_STORE_NAME))['player-lifecycle'] as PlayerLifecycle;
 		const scope = { identity: persona.activeRun.identity, runNumber: persona.activeRun.runNumber, channelId: 'a'.repeat(64) };
 		const event = finalizeEvent(buildManualTraceEventTemplate({
 			channel: { channelId: scope.channelId, relayHint: 'wss://nos.lol/' }, content: 'a trace', position: { x: 3, y: 4 }, createdAt: TIME / 1000
 		}), persona.signer.secretKey);
-		const reserved = await reserveManualTraceOutbox(scope, event, 'first-attempt');
+		const reserved = await reserveManualTraceOutbox(scope, () => event, 'first-attempt');
 		expect(reserved).toMatchObject({ kind: 'reserved', outbox: { event: { id: event.id }, status: 'dispatching' }, points: 100_900 });
 		expect(DATABASE_VERSION).toBe(8);
 		expect(await records(ROOT_SECRET_STORE_NAME)).toEqual(storedRootBefore);
-		expect((await records(PLAYER_LIFECYCLE_STORE_NAME))['player-lifecycle']).toMatchObject({ identities: storedPlayerBefore.identities });
+		if (storedPlayerBefore.mode.kind !== 'running') throw new Error('Expected a running lifecycle before reservation.');
+		const storedPlayerAfter = (await records(PLAYER_LIFECYCLE_STORE_NAME))['player-lifecycle'] as PlayerLifecycle;
+		expect(storedPlayerAfter).toEqual({
+			...storedPlayerBefore,
+			mode: {
+				...storedPlayerBefore.mode,
+				activeRun: {
+					...storedPlayerBefore.mode.activeRun,
+					revision: storedPlayerBefore.mode.activeRun.revision + 1,
+					gameState: { ...storedPlayerBefore.mode.activeRun.gameState, points: storedPlayerBefore.mode.activeRun.gameState.points - 100 }
+				}
+			}
+		});
 		if (reserved.kind !== 'reserved') throw new Error('Expected a durable reservation.');
 		expect(await clearPersona(restored(await loadOrCreateLifecycle()))).toEqual({ kind: 'blocked', reason: 'manual-trace-sending' });
 
@@ -731,9 +744,12 @@ describe('Root / Identity / Run lifecycle', () => {
 		const differentSignature = finalizeEvent(buildManualTraceEventTemplate({
 			channel: { channelId: scope.channelId, relayHint: 'wss://nos.lol/' }, content: 'a different retry signature', position: { x: 3, y: 4 }, createdAt: TIME / 1000 + 1
 		}), persona.signer.secretKey);
-		const retry = await reserveManualTraceOutbox(scope, differentSignature, 'same-operation-retry', TIME + 22_000);
-		expect(retry).toMatchObject({ kind: 'existing', outbox: { event: { id: event.id }, status: 'dispatching' }, points: 100_900 });
-		expect(retry.kind === 'existing' || retry.kind === 'reserved' ? retry.outbox.event.id : '').not.toBe(differentSignature.id);
+		const prepareDifferentSubmission = vi.fn(() => differentSignature);
+		const retry = await reserveManualTraceOutbox(scope, prepareDifferentSubmission, 'same-operation-retry', TIME + 22_000);
+		expect(retry).toEqual({ kind: 'pending' });
+		expect(prepareDifferentSubmission).not.toHaveBeenCalled();
+		const unchangedJournal = (await records(WORLD_WRITE_JOURNAL_STORE_NAME))[`${scope.channelId}\u0000${persona.signer.pubkey}`] as { pendingManualTrace: { event: { id: string }; status: string; attemptId: string } };
+		expect(unchangedJournal.pendingManualTrace).toMatchObject({ event: { id: event.id }, status: 'unknown', attemptId: null });
 
 		// Unknown is durable but does not create an indefinite lifecycle lock.
 		vi.mocked(Date.now).mockReturnValue(TIME + 365 * DAY);
@@ -750,7 +766,7 @@ describe('Root / Identity / Run lifecycle', () => {
 		const event = finalizeEvent(buildManualTraceEventTemplate({
 			channel: { channelId, relayHint: 'wss://nos.lol/' }, content: 'unknown at death', position: { x: 3, y: 4 }, createdAt: TIME / 1000
 		}), persona.signer.secretKey);
-		const reserved = await reserveManualTraceOutbox(scope, event, 'death-attempt');
+		const reserved = await reserveManualTraceOutbox(scope, () => event, 'death-attempt');
 		expect(reserved).toMatchObject({ kind: 'reserved', points: 400 });
 		vi.mocked(Date.now).mockReturnValue(TIME + 1_001);
 		const dying = restored(await loadOrCreateLifecycle());

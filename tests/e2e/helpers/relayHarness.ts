@@ -910,11 +910,11 @@ export async function installVisualAnimationRafMetrics(page: Page): Promise<void
 	});
 }
 
-export async function openReadyRelayWorld(page: Page, expectedParticipantCount = 2): Promise<Locator> {
+export async function openReadyRelayWorld(page: Page, expectedParticipantCount = 2, points = 0): Promise<Locator> {
 	await installHostOwnedStub(page);
 	await installDelayedRelay(page, { deferPrimaryEvents: true });
 	const secret = fixtureSecret(expectedParticipantCount === 1 ? 19 : 41);
-	await seedRelayAccount(page, secret, getPublicKey(secret));
+	await seedRelayAccount(page, secret, getPublicKey(secret), Date.now() + 7 * 24 * 60 * 60 * 1000, points);
 	await page.goto('/');
 	await expect(page.locator('.action-dock')).toBeVisible();
 	const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });

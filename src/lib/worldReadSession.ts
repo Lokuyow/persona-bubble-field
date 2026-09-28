@@ -1476,18 +1476,17 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		const trimmed = content.trim();
 		if (!trimmed) return { kind: 'blocked' };
 		const attemptId = nextManualTraceAttemptId();
-		const existing = await claimManualTraceOutbox(journalScope, attemptId).catch(() => ({ kind: 'corrupt' as const }));
-		if (existing.kind === 'pending') return { kind: 'pending' };
-		if (existing.kind === 'existing') return sendManualTraceOutbox(existing.outbox, existing.points, attemptId);
-		if (existing.kind !== 'empty') return { kind: 'unavailable' };
 		if (!await authorizeSelfWrite() || terminal) return { kind: 'unavailable' };
-		const self = getParticipant(currentPresence(), selfSigner.pubkey);
+		const activeChannel = channel;
+		const signer = selfSigner;
+		const self = getParticipant(currentPresence(), signer.pubkey);
 		if (!self || self.status !== 'active') return { kind: 'blocked' };
-		const event = finalizeWorldEvent(buildManualTraceEventTemplate({ channel, content: trimmed, position: self.position, createdAt: Math.floor(Date.now() / 1000) }), selfSigner.secretKey);
-		const reservation = await reserveManualTraceOutbox(journalScope, event, attemptId).catch(() => ({ kind: 'corrupt' as const }));
+		const reservation = await reserveManualTraceOutbox(journalScope, () => finalizeWorldEvent(
+			buildManualTraceEventTemplate({ channel: activeChannel, content: trimmed, position: self.position, createdAt: Math.floor(Date.now() / 1000) }), signer.secretKey
+		), attemptId).catch(() => ({ kind: 'corrupt' as const }));
 		if (reservation.kind === 'insufficient-points') return { kind: 'blocked' };
 		if (reservation.kind === 'pending') return { kind: 'pending' };
-		if (reservation.kind !== 'reserved' && reservation.kind !== 'existing') return { kind: 'unavailable' };
+		if (reservation.kind !== 'reserved') return { kind: 'unavailable' };
 		return sendManualTraceOutbox(reservation.outbox, reservation.points, attemptId);
 	}
 
