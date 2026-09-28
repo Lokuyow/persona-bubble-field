@@ -34,6 +34,29 @@ describe('DEV Tag Game Playground', () => {
 		expect(playground.botConsent(10_000).game?.participant.every((participant) => participant.consented)).toBe(true);
 	});
 
+	it('announces each crossed effect boundary once across movement and BOT placement at the same virtual time', () => {
+		const { playground, game, nowMs } = startGame(290_321);
+		const firstBoundaryMs = nowMs + createTagGameSchedule(game.seed!)[0].durationMs;
+		const beforeBoundary = playground.advanceTo(firstBoundaryMs - 1);
+		expect(beforeBoundary.sound?.effect).toBe('tag-game-start');
+
+		const crossedBoundary = playground.advanceTo(firstBoundaryMs);
+		expect(crossedBoundary.sound?.effect).toBe('tag-game-switch');
+		const switchSequence = crossedBoundary.sound!.sequence;
+
+		const movedSelf = playground.moveSelf('left', firstBoundaryMs - 20);
+		expect(movedSelf.nowMs).toBe(firstBoundaryMs);
+		expect(movedSelf.sound?.sequence).toBe(switchSequence);
+		const placedBot = playground.placeBot(DEV_TAG_GAME_BOT_A_PUBKEY, { x: 12, y: 6 }, firstBoundaryMs - 10);
+		expect(placedBot.nowMs).toBe(firstBoundaryMs);
+		expect(placedBot.sound?.sequence).toBe(switchSequence);
+		expect(playground.advanceTo(firstBoundaryMs - 1).sound?.sequence).toBe(switchSequence);
+
+		const afterWallClockCatchUp = playground.advanceTo(firstBoundaryMs + 1);
+		expect(afterWallClockCatchUp.sound?.effect).toBe('tag-game-switch');
+		expect(afterWallClockCatchUp.sound?.sequence).toBe(switchSequence);
+	});
+
 	it('keeps virtual time and the settlement cursor monotonic across fast-forward, stale movement, and wall-clock catch-up', () => {
 		const { playground, game, nowMs } = startGame(310_321);
 		const fastForwarded = playground.advanceTo(nowMs + 55_000);

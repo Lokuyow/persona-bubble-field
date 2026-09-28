@@ -46,6 +46,8 @@ test.describe('DEV Tag Game Playground', () => {
 		await expect(panel.locator(`[data-tag-game-participant-slot="${DEV_TAG_GAME_BOT_A_PUBKEY}"] img`)).toHaveAttribute('src', botAAvatarSrc!);
 		await panel.getByRole('button', { name: '開始を提案' }).click();
 		await expect(panel).toContainText('開始確認中');
+		await expect(panel.getByRole('button', { name: '未応答者を除外して再提案' })).toHaveCount(0);
+		await expect(panel.getByRole('button', { name: 'BOTが開始に同意' })).toBeVisible();
 		await panel.getByRole('button', { name: 'BOTが開始に同意' }).click();
 		await expect(panel).toContainText('開始準備中');
 		await panel.getByRole('button', { name: '閉じる' }).click();

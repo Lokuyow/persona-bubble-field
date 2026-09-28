@@ -159,7 +159,7 @@
 								{#if game.hostPubkey !== selfPubkey}<ActionButton variant="tertiary" intent="cancel" onclick={() => onLeave(game.gameId)} disabled={busy}>今回は辞退</ActionButton>{/if}
 							{/if}
 							{#if game.phase === 'proposed' && game.hostPubkey === selfPubkey}<ActionButton variant="tertiary" intent="cancel" onclick={() => onCancel(game.gameId)} disabled={busy}>募集を取り消す</ActionButton>{/if}
-							{#if game.phase === 'proposed' && game.hostPubkey === selfPubkey}
+							{#if !devPlayground && game.phase === 'proposed' && game.hostPubkey === selfPubkey}
 								{#each game.participant.filter((player) => player.pubkey !== selfPubkey && player.consentProposalId !== game.proposalId) as player (player.pubkey)}
 									<ActionButton variant="tertiary" onclick={() => onExclude(game.gameId, player.pubkey)} disabled={busy}>未応答者を除外して再提案</ActionButton>
 								{/each}

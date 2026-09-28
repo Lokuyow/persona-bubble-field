@@ -145,7 +145,7 @@ export class DevTagGamePlayground {
 	advanceTo(targetMs: number): DevTagGamePlaygroundSnapshot {
 		if (!Number.isSafeInteger(targetMs) || targetMs < this.state.nowMs) return this.state;
 		let game = this.state.game;
-		const previousEffect = game?.phase === 'running' ? tagGameScheduledEffectAt(game, Math.max(game.startedAt! * 1_000, this.state.nowMs - 1)) : null;
+		const previousEffect = game?.phase === 'running' ? tagGameScheduledEffectAt(game, this.state.nowMs) : null;
 		if (game?.phase === 'countdown' && targetMs >= (game.startAt ?? 0) * 1_000) {
 			game = this.running(game, game.startAt!);
 			this.lastAccruedAtMs = game.startedAt! * 1_000;
