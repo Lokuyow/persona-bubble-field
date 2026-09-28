@@ -72,6 +72,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	import CooperationDefectionPanel from '$lib/CooperationDefectionPanel.svelte';
 	import CooperationDefectionRulesDialog from '$lib/CooperationDefectionRulesDialog.svelte';
 	import TagGamePanel from '$lib/TagGamePanel.svelte';
+	import TagGameResultDialog from '$lib/TagGameResultDialog.svelte';
 	import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL, TAG_GAME_TERMINAL, isBlockedFacilityCell, isWithinFacilityInteractionRange, sameFieldCell } from '$lib/fieldFacilities';
 	import { projectMending } from '$lib/mending';
 	import { comparePresenceEvidence, presenceEvidenceFromWorldState } from '$lib/presenceEvidence';
@@ -362,12 +363,23 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	let clearMutationInFlight = $state(false);
 	let pendingRealtimeSettlement = $state(false);
 	let tagGamePanelOpen = $state(false);
+	let tagGameResultOpen = $state(false);
+	let tagGameResultState = $state.raw<TagGameState | null>(null);
+	let tagGameResultSettlementNote = $state<string | null>(null);
+	let tagGameResultReloadAfterClose = false;
 	let tagGameBusy = $state(false);
 	let tagGameWatchedGameId = $state<string | null>(null);
 	let tagGameStates = $state.raw<readonly TagGameState[]>([]);
 	let tagGameHudNowMs = $state(Date.now());
 	let tagGameHudLastSecond = Math.floor(Date.now() / 1000);
 	const tagGameEvents = new Map<string, { eventId: string; createdAt: number; state: TagGameState }>();
+	const tagGameAutoEligible = new Set<string>();
+	const tagGameAutoResultHandled = new Set<string>();
+	const tagGameLifecycleInFlight = new Set<string>();
+	const tagGameResultSnapshots = new Map<string, TagGameState>();
+	const tagGameSelfSettledGames = new Set<string>();
+	const tagGameUsedLastConfirmedFinalization = new Set<string>();
+	const pendingTagGameResults: Array<{ game: TagGameState; note: string | null }> = [];
 	let latestTagGameWorldStates = $state.raw(new Map<string, ParsedWorldStateEvent>());
 	const appliedTagGameWorldStateIds = new Set<string>();
 	const tagGameConflictSince = new Map<string, number>();
@@ -2601,6 +2613,59 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		tagGameStates = [...tagGameEvents.values()].map((entry) => entry.state).sort((a, b) => b.updatedAt - a.updatedAt || a.gameId.localeCompare(b.gameId));
 	}
 
+	function tagGameSelfSettlementSnapshot(game: TagGameState, points: number, lifespanLossMs: number): TagGameState {
+		const self = personaSnapshot;
+		if (!self) return game;
+		return { ...game, participant: game.participant.map((member) => member.pubkey === self?.signer.pubkey && member.runNumber === self.activeRun.runNumber
+			? { ...member, points, lifespanLossMs } : { ...member }) };
+	}
+
+	function tagGameSettlementNote(game: TagGameState): string | null {
+		const hostFinalConfirmed = game.phase === 'ended' && game.endReason === 'normal' && game.endsAt !== undefined && game.finalizedAt === game.endsAt;
+		const localFallback = tagGameUsedLastConfirmedFinalization.has(game.gameId) || (game.phase === 'ended' && game.endReason === 'normal' && game.endsAt !== undefined && game.finalizedAt !== game.endsAt);
+		if (hostFinalConfirmed || !localFallback) return null;
+		return '開催者の最終状態を受信できなかったため、あなたの成績は最後に確認済みの値で確定しています。ほかの参加者の成績も最後に確認した状態を表示しています。';
+	}
+
+	function tagGameDisplaySnapshot(game: TagGameState): TagGameState {
+		const frozen = tagGameResultSnapshots.get(game.gameId);
+		const self = personaSnapshot;
+		if (!frozen || !self) return game;
+		const settledSelf = frozen.participant.find((member) => member.pubkey === self.signer.pubkey && member.runNumber === self.activeRun.runNumber);
+		if (!settledSelf) return game;
+		return { ...game, participant: game.participant.map((member) => member.pubkey === settledSelf.pubkey && member.runNumber === settledSelf.runNumber
+			? { ...member, points: settledSelf.points, lifespanLossMs: settledSelf.lifespanLossMs } : member) };
+	}
+
+	function showTagGameResult(gameId: string): void {
+		const current = tagGameEvents.get(gameId)?.state ?? tagGameStates.find((candidate) => candidate.gameId === gameId);
+		const state = current && tagGameDisplaySnapshot(current);
+		if (!state || !state.startedAt || (state.phase !== 'ended' && state.phase !== 'interrupted')) return;
+		tagGameResultState = state;
+		tagGameResultSettlementNote = tagGameSettlementNote(state);
+		tagGameResultOpen = true;
+	}
+
+	function presentSettledTagGameResult(game: TagGameState): void {
+		if (tagGameAutoResultHandled.has(game.gameId) || !tagGameAutoEligible.has(game.gameId)) return;
+		tagGameAutoResultHandled.add(game.gameId);
+		const snapshot = tagGameDisplaySnapshot(game);
+		const note = tagGameSettlementNote(game);
+		tagGamePanelOpen = false;
+		if (deathPresentation || tagGameResultOpen) { pendingTagGameResults.push({ game: snapshot, note }); return; }
+		tagGameResultState = snapshot;
+		tagGameResultSettlementNote = note;
+		tagGameResultOpen = true;
+	}
+
+	function showPendingTagGameResultAfterDeath(): void {
+		if (deathPresentation || tagGameResultOpen || pendingTagGameResults.length === 0) return;
+		const next = pendingTagGameResults.shift()!;
+		tagGameResultState = next.game;
+		tagGameResultSettlementNote = next.note;
+		tagGameResultOpen = true;
+	}
+
 	function discardPendingFormalTagGameChallenge(gameId: string): void {
 		const pending = tagGamePendingFormalChallenges.get(gameId);
 		if (!pending) return;
@@ -2643,6 +2708,10 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			return;
 		}
 		if (previous && createdAt > previous.createdAt) tagGameConflictSince.delete(state.gameId);
+		if (delivery === 'live' && (state.phase === 'running' || state.phase === 'settling') && personaSnapshot &&
+			state.participant.some((member) => member.pubkey === personaSnapshot?.signer.pubkey && member.runNumber === personaSnapshot.activeRun.runNumber && member.status !== 'registered')) {
+			tagGameAutoEligible.add(state.gameId);
+		}
 		if (delivery === 'live' && !document.hidden) notifyTagGameStateAudio(previous, state, createdAt);
 		if (previous && previous.state.phase === 'running' && state.phase === 'running' &&
 			previous.state.holderChallengeId !== state.holderChallengeId) {
@@ -2727,6 +2796,9 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		const self = personaSnapshot;
 		const member = self && game.participant.find((player) => player.pubkey === self.signer.pubkey && player.runNumber === self.activeRun.runNumber);
 		if (!self || !member) return;
+		if (tagGameLifecycleInFlight.has(game.gameId)) return;
+		tagGameLifecycleInFlight.add(game.gameId);
+		try {
 		if (!game.startedAt || !game.endsAt) {
 			if (game.phase === 'ended' || game.phase === 'interrupted') await releaseAndRefreshTagGameParticipation(self, game.gameId);
 			return;
@@ -2753,6 +2825,16 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			if (result.kind === 'applied') personaSnapshot = result.persona;
 			else if (result.kind === 'transitioned') completeTagGameDeathTransition(worldSession, result.exit, preparedExit);
 			else await releaseAndRefreshTagGameParticipation(self, gameId);
+			if (result.kind === 'applied' || result.kind === 'transitioned') {
+				tagGameResultSnapshots.set(gameId, tagGameSelfSettlementSnapshot(game, own.points, own.lifespanLossMs));
+				tagGameSelfSettledGames.add(gameId);
+			}
+		}
+		if ((game.phase === 'ended' || game.phase === 'interrupted') && tagGameSelfSettledGames.has(gameId)) presentSettledTagGameResult(game);
+		} finally {
+			tagGameLifecycleInFlight.delete(game.gameId);
+			const latest = tagGameEvents.get(game.gameId)?.state;
+			if (latest && (latest.phase === 'ended' || latest.phase === 'interrupted') && latest.revision !== game.revision) void syncTagGameLifecycle(latest);
 		}
 	}
 
@@ -3510,6 +3592,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 				const host = game.participant.find((member) => member.pubkey === event.pubkey && member.runNumber === event.runNumber);
 				if (!host) continue;
 				const interrupted: TagGameState = { ...game, phase: 'interrupted', endReason: 'host-exit', revision: game.revision + 1 };
+				tagGameUsedLastConfirmedFinalization.add(game.gameId);
 				tagGameEvents.set(game.gameId, { eventId: `exit:${event.id}`, createdAt: event.createdAt, state: interrupted });
 				void syncTagGameLifecycle(interrupted);
 			}
@@ -3650,6 +3733,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 				} else if (nowMs >= Math.max(probingAt + 5_000, game.endsAt && ['running', 'settling'].includes(game.phase) && nowMs >= game.endsAt * 1000 ? hostFinalWaitDeadline : 0) && realtimeStatus === 'active') {
 					tagGameHostProbeAtMs.delete(game.gameId);
 					const interrupted = { ...game, phase: 'interrupted' as const, endReason: 'host-unavailable' as const, revision: game.revision + 1 };
+					tagGameUsedLastConfirmedFinalization.add(game.gameId);
 					tagGameEvents.set(game.gameId, { ...entry, state: interrupted });
 					await syncTagGameLifecycle(interrupted);
 					refreshTagGameStateList();
@@ -3660,6 +3744,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			if (conflictSince !== undefined) {
 				if (nowMs - conflictSince >= 30_000) {
 					const interrupted: TagGameState = { ...game, phase: 'interrupted', endReason: 'conflict', revision: game.revision + 1 };
+					tagGameUsedLastConfirmedFinalization.add(game.gameId);
 					tagGameConflictSince.delete(game.gameId);
 					tagGameEvents.set(game.gameId, { ...entry, state: interrupted });
 					void syncTagGameLifecycle(interrupted);
@@ -3802,6 +3887,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			}
 			if (game.endsAt && (game.phase === 'running' || game.phase === 'settling') && nowMs >= game.endsAt * 1000 + TAG_GAME_FINAL_WAIT_MS) {
 				const timedOut = { ...game, phase: 'ended' as const, finalizedAt: game.endsAt + TAG_GAME_FINAL_WAIT_MS / 1000, endReason: 'normal' as const };
+				tagGameUsedLastConfirmedFinalization.add(game.gameId);
 				tagGameEvents.set(game.gameId, { ...entry, state: timedOut });
 				await syncTagGameLifecycle(timedOut);
 				refreshTagGameStateList();
@@ -4327,6 +4413,11 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		deathPresentationContent = '';
 		deathPresentationSubmitting = false;
 		disposePersonaWriter(currentSession);
+		if (pendingTagGameResults.length > 0) {
+			tagGameResultReloadAfterClose = true;
+			showPendingTagGameResultAfterDeath();
+			return;
+		}
 		window.location.reload();
 	}
 
@@ -4930,10 +5021,22 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		onWatch={watchTagGame}
 		onStopWatching={stopWatchingTagGame}
 		onOpenChange={(open) => { tagGamePanelOpen = open; }}
+		onShowResult={showTagGameResult}
 		devPlayground={devTagGamePlaygroundEnabled}
 		devSelfCharacterId={selectedCharacterId}
 		onDevAddBots={() => addDevTagGameBots()}
 		onDevBotConsent={() => consentDevTagGameBots()}
+	/>
+	<TagGameResultDialog
+		open={tagGameResultOpen}
+		game={tagGameResultState}
+		selfPubkey={devTagGamePlaygroundEnabled ? DEV_TAG_GAME_SELF_PUBKEY : personaSnapshot?.signer.pubkey ?? null}
+		settlementNote={tagGameResultSettlementNote}
+		onOpenChange={(open) => {
+			tagGameResultOpen = open;
+			if (!open && tagGameResultReloadAfterClose) { tagGameResultReloadAfterClose = false; window.location.reload(); }
+			else if (!open) showPendingTagGameResultAfterDeath();
+		}}
 	/>
 
 	{#if deathPresentation}

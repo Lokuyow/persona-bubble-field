@@ -39,3 +39,21 @@ export function tagGameCountdownSeconds(startAt: number, nowMs: number): number 
 	if (remainingMs <= 0 || remainingMs > 5_000) return null;
 	return Math.ceil(remainingMs / 1_000);
 }
+
+export function tagGameResultParticipants(game: TagGameState, selfPubkey: string | null): TagGameState['participant'][number][] {
+	const participants = [...game.participant].sort((a, b) => a.registeredAt - b.registeredAt || a.pubkey.localeCompare(b.pubkey));
+	if (!selfPubkey) return participants;
+	const selfIndex = participants.findIndex((member) => member.pubkey === selfPubkey);
+	if (selfIndex <= 0) return participants;
+	return [participants[selfIndex], ...participants.slice(0, selfIndex), ...participants.slice(selfIndex + 1)];
+}
+
+export function tagGameResultTime(valueMs: number): string {
+	const seconds = Math.max(0, valueMs) / 1_000;
+	return Number.isInteger(seconds) ? `${seconds}` : seconds.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
+}
+
+export function tagGameResultLifespanHours(valueMs: number): string {
+	const hours = Math.max(0, valueMs) / 3_600_000;
+	return Number.isInteger(hours) ? `${hours}` : hours.toFixed(7).replace(/0+$/, '').replace(/\.$/, '');
+}

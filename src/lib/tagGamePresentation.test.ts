@@ -1,7 +1,7 @@
 import { getPublicKey } from 'nostr-tools/pure';
 import { describe, expect, it } from 'vitest';
 import { resolveCharacterFromPubkey } from './characterAssignment';
-import { isOwnTagGameCountdown, isOwnTagGameStartTransition, newlyConfirmedTagGameParticipants, tagGameCharacterName, tagGameCountdownSeconds, tagGameParticipantLabel } from './tagGamePresentation';
+import { isOwnTagGameCountdown, isOwnTagGameStartTransition, newlyConfirmedTagGameParticipants, tagGameCharacterName, tagGameCountdownSeconds, tagGameParticipantLabel, tagGameResultLifespanHours, tagGameResultParticipants, tagGameResultTime } from './tagGamePresentation';
 import type { TagGameState } from './tagGame';
 
 function secret(seed: number): Uint8Array { return new Uint8Array(32).fill(seed); }
@@ -100,5 +100,24 @@ describe('tag-game character presentation', () => {
 		expect(tagGameCountdownSeconds(10, 9_999)).toBe(1);
 		expect(tagGameCountdownSeconds(10, 10_000)).toBeNull();
 		expect(tagGameCountdownSeconds(10, 0)).toBeNull();
+	});
+
+	it('orders result participants by registration and moves only the local player to the front', () => {
+		const later = getPublicKey(secret(56));
+		const earlier = getPublicKey(secret(57));
+		const resultGame = { ...game, participant: [
+			{ ...game.participant[0], registeredAt: 30 },
+			{ ...game.participant[1], pubkey: later, registeredAt: 20 },
+			{ ...game.participant[2], pubkey: earlier, registeredAt: 10 },
+		] };
+		expect(tagGameResultParticipants(resultGame, null).map((member) => member.pubkey)).toEqual([earlier, later, host]);
+		expect(tagGameResultParticipants(resultGame, later).map((member) => member.pubkey)).toEqual([later, earlier, host]);
+	});
+
+	it('formats cumulative effect time and lifespan without rounding away short holds', () => {
+		expect(tagGameResultTime(1_234)).toBe('1.234');
+		expect(tagGameResultTime(2_000)).toBe('2');
+		expect(tagGameResultLifespanHours(3_600_000)).toBe('1');
+		expect(tagGameResultLifespanHours(1_000)).toBe('0.0002778');
 	});
 });
