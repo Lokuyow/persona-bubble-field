@@ -66,17 +66,17 @@
 						<circle class="fuku-halo-light-ring" cx="38" cy="38" r="39.2" stroke="#fff9f1" stroke-width="1.7" opacity=".66" />
 						<g class="fuku-halo-rays" transform="translate(38 38)">
 							<g class="fuku-halo-rays-warm" fill="#df4c36" stroke="#fff6ed" stroke-width=".9" opacity=".69">
-								<path d="M-1.5-35 L-2.9-44.5 L2.9-44.5 L1.5-35Z" transform="rotate(-121)" />
-								<path d="M-1.5-35 L-2.9-44.5 L2.9-44.5 L1.5-35Z" transform="rotate(-72)" />
-								<path d="M-1.5-35 L-2.9-44.5 L2.9-44.5 L1.5-35Z" transform="rotate(-25)" />
-								<path d="M-1.5-35 L-2.9-44.5 L2.9-44.5 L1.5-35Z" transform="rotate(99)" />
+								<path d="M-1.5-35 L-2.9-47 L2.9-47 L1.5-35Z" transform="rotate(-121)" />
+								<path d="M-1.5-35 L-2.9-47 L2.9-47 L1.5-35Z" transform="rotate(-72)" />
+								<path d="M-1.5-35 L-2.9-47 L2.9-47 L1.5-35Z" transform="rotate(-25)" />
+								<path d="M-1.5-35 L-2.9-47 L2.9-47 L1.5-35Z" transform="rotate(99)" />
 							</g>
 							<g class="fuku-halo-rays-light" fill="#fffdfa" stroke="#dd5a44" stroke-width=".95" opacity=".76">
-								<path d="M-1.4-35 L-2.6-43 L2.6-43 L1.4-35Z" transform="rotate(-143)" />
-								<path d="M-1.4-35 L-2.6-43 L2.6-43 L1.4-35Z" transform="rotate(-96)" />
-								<path d="M-1.4-35 L-2.6-43 L2.6-43 L1.4-35Z" transform="rotate(-48)" />
-								<path d="M-1.4-35 L-2.6-43 L2.6-43 L1.4-35Z" transform="rotate(0)" />
-								<path d="M-1.4-35 L-2.6-43 L2.6-43 L1.4-35Z" transform="rotate(123)" />
+								<path d="M-1.4-35 L-2.6-45.5 L2.6-45.5 L1.4-35Z" transform="rotate(-143)" />
+								<path d="M-1.4-35 L-2.6-45.5 L2.6-45.5 L1.4-35Z" transform="rotate(-96)" />
+								<path d="M-1.4-35 L-2.6-45.5 L2.6-45.5 L1.4-35Z" transform="rotate(-48)" />
+								<path d="M-1.4-35 L-2.6-45.5 L2.6-45.5 L1.4-35Z" transform="rotate(0)" />
+								<path d="M-1.4-35 L-2.6-45.5 L2.6-45.5 L1.4-35Z" transform="rotate(123)" />
 							</g>
 						</g>
 					</g>
@@ -110,7 +110,7 @@
 			role="img" aria-label={`${tagGameEffect === 'benefit' ? '福' : '鬼'}${tagGameEffectActive ? '' : '・効果停止中'}`}>
 			<svg viewBox="0 0 76 76" aria-hidden="true" focusable="false">
 				{#if tagGameEffect === 'benefit'}
-					<g class="fuku-mallet" data-fuku-mallet transform="translate(94 65) rotate(-10)">
+					<g class="fuku-mallet" data-fuku-mallet transform="translate(87 65) rotate(-10)">
 						<rect class="fuku-mallet-handle" data-fuku-mallet-handle x="-3" y="-11" width="6" height="30" rx="1.8" fill="#ffe3ab" stroke="white" stroke-width="2" />
 						<rect class="fuku-mallet-head" data-fuku-mallet-head x="-15" y="-25" width="30" height="16" rx="5.8" fill="#e23c2c" stroke="white" stroke-width="2.4" />
 						<path class="fuku-mallet-endcap" d="M-9.5 -22V-12M9.5 -22V-12" stroke="#ffdc83" stroke-width="3.5" stroke-linecap="round" />

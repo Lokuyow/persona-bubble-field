@@ -90,7 +90,16 @@ async function readEffectSymbolLayout(holder: Locator): Promise<Readonly<{
 		const malletNamePaintOverlap = Boolean(nameElement && [malletHead, malletShaft].some((shape) => {
 			if (!shape) return false;
 			const bounds = shape.getBoundingClientRect();
-			const nameBounds = nameElement.getBoundingClientRect();
+			const labelBounds = nameElement.getBoundingClientRect();
+			const textRange = document.createRange();
+			textRange.selectNodeContents(nameElement);
+			const textBounds = textRange.getBoundingClientRect();
+			const nameBounds = {
+				left: Math.max(labelBounds.left, textBounds.left),
+				right: Math.min(labelBounds.right, textBounds.right),
+				top: Math.max(labelBounds.top, textBounds.top),
+				bottom: Math.min(labelBounds.bottom, textBounds.bottom)
+			};
 			const left = Math.max(bounds.left, nameBounds.left);
 			const right = Math.min(bounds.right, nameBounds.right);
 			const top = Math.max(bounds.top, nameBounds.top);
