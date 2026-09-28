@@ -6,6 +6,7 @@
 	import HelpCircle from '~icons/tabler/help-circle';
 	import ChevronDown from '~icons/tabler/chevron-down';
 	import ActionButton from '$lib/ActionButton.svelte';
+	import TagGameEffectSymbol from '$lib/TagGameEffectSymbol.svelte';
 	import { resolveCharacterFromPubkey } from '$lib/characterAssignment';
 	import { newlyConfirmedTagGameParticipants, tagGameCharacterName, tagGameConfirmedParticipants, tagGameParticipantLabel } from '$lib/tagGamePresentation';
 	import type { TagGameState } from '$lib/tagGame';
@@ -76,8 +77,8 @@
 					<details class="tag-game-rules">
 						<summary><span class="tag-game-rules-label"><HelpCircle aria-hidden="true" /> <span class="tag-game-rules-closed">ルールを見る</span><span class="tag-game-rules-open">ルールを閉じる</span></span><span class="tag-game-rules-chevron" aria-hidden="true"><ChevronDown /></span></summary>
 						<div class="tag-game-rules-content">
-							<div class="tag-game-effect-card tag-game-effect-benefit"><div class="tag-game-effect-heading"><strong>福</strong><strong>+50pt / 秒</strong></div><p>福を持たない者は、所持者にタッチして福を奪えます。</p></div>
-							<div class="tag-game-effect-card tag-game-effect-calamity"><div class="tag-game-effect-heading"><strong>鬼</strong><strong>寿命 −1時間 / 秒</strong></div><p>鬼は他の参加者にタッチして、鬼を押し付けられます。</p></div>
+							<div class="tag-game-effect-card tag-game-effect-benefit"><div class="tag-game-effect-heading"><span class="tag-game-effect-title"><svg class="tag-game-effect-symbol-icon" viewBox="0 0 32 32" aria-hidden="true" focusable="false"><TagGameEffectSymbol effect="benefit" presentation="rule" /></svg><strong>福</strong></span><strong>+50pt / 秒</strong></div><p>福を持たない者は、所持者にタッチして福を奪えます。</p></div>
+							<div class="tag-game-effect-card tag-game-effect-calamity"><div class="tag-game-effect-heading"><span class="tag-game-effect-title"><svg class="tag-game-effect-symbol-icon" viewBox="0 0 32 32" aria-hidden="true" focusable="false"><TagGameEffectSymbol effect="calamity" presentation="rule" /></svg><strong>鬼</strong></span><strong>寿命 −1時間 / 秒</strong></div><p>鬼は他の参加者にタッチして、鬼を押し付けられます。</p></div>
 							<section class="tag-game-rule-item"><h3>切り替え</h3><p>福と鬼は交互に切り替わります。</p></section>
 							<section class="tag-game-rule-item"><h3>タッチ</h3><p>隣接した相手にのみタッチできます。</p></section>
 						</div>
@@ -185,7 +186,9 @@
 	.tag-game-effect-card { padding: 12px; border: 1px solid color-mix(in srgb, var(--tag-game-effect-accent) 38%, var(--border-subtle, #d8dce0)); border-left: 3px solid var(--tag-game-effect-accent); border-radius: 8px; background: color-mix(in srgb, var(--tag-game-effect-accent) 8%, var(--surface, #fff)); color: var(--text-primary, #20242a); }
 	.tag-game-effect-benefit { --tag-game-effect-accent: #b38a2e; }
 	.tag-game-effect-calamity { --tag-game-effect-accent: #8065ad; }
-	.tag-game-effect-heading { display: flex; justify-content: space-between; gap: 12px; }
+	.tag-game-effect-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+	.tag-game-effect-title { display: inline-flex; align-items: center; gap: 6px; }
+	.tag-game-effect-symbol-icon { display: block; width: 28px; height: 28px; flex: 0 0 auto; overflow: visible; }
 	.tag-game-effect-heading strong:last-child { text-align: right; }
 	.tag-game-effect-card p, .tag-game-rule-item p { margin: 6px 0 0; font-size: .92rem; line-height: 1.5; }
 	.tag-game-rule-item h3 { margin: 0; font-size: .95rem; }

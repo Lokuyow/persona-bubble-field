@@ -854,6 +854,24 @@ test('tag game rules stay usable across desktop and mobile terminal states', asy
 	await expect(rules.getByText('鬼は他の参加者にタッチして、鬼を押し付けられます。')).toBeVisible();
 	await expect(rules.getByText('福と鬼は交互に切り替わります。')).toBeVisible();
 	await expect(rules.getByText('隣接した相手にのみタッチできます。')).toBeVisible();
+	const fukuRuleIcon = rules.locator('.tag-game-effect-benefit .tag-game-effect-symbol-icon');
+	const oniRuleIcon = rules.locator('.tag-game-effect-calamity .tag-game-effect-symbol-icon');
+	await expect(fukuRuleIcon).toHaveAttribute('aria-hidden', 'true');
+	await expect(oniRuleIcon).toHaveAttribute('aria-hidden', 'true');
+	await expect(fukuRuleIcon.locator('[data-tag-game-effect-symbol="benefit"] [data-fuku-mallet-head]')).toHaveCount(1);
+	await expect(fukuRuleIcon.locator('[data-fuku-mallet-handle]')).toHaveCount(1);
+	await expect(oniRuleIcon.locator('[data-tag-game-effect-symbol="calamity"] .oni-horn')).toHaveCount(2);
+	await expect(rules.locator('.tag-game-effect-symbol-icon .fuku-halo, .tag-game-effect-symbol-icon .oni-smoke')).toHaveCount(0);
+	for (const icon of [fukuRuleIcon, oniRuleIcon]) {
+		const iconBounds = await icon.boundingBox();
+		const symbolBounds = await icon.locator('[data-tag-game-effect-symbol]').boundingBox();
+		expect(iconBounds && symbolBounds && symbolBounds.width > 0 && symbolBounds.height > 0).toBe(true);
+		const strokeOverflowTolerance = 1.25;
+		expect(symbolBounds!.x).toBeGreaterThanOrEqual(iconBounds!.x - strokeOverflowTolerance);
+		expect(symbolBounds!.y).toBeGreaterThanOrEqual(iconBounds!.y - strokeOverflowTolerance);
+		expect(symbolBounds!.x + symbolBounds!.width).toBeLessThanOrEqual(iconBounds!.x + iconBounds!.width + strokeOverflowTolerance);
+		expect(symbolBounds!.y + symbolBounds!.height).toBeLessThanOrEqual(iconBounds!.y + iconBounds!.height + strokeOverflowTolerance);
+	}
 	await expect(rules.getByRole('heading', { name: '参加と開始' })).toHaveCount(0);
 	await expect(rules.getByRole('heading', { name: 'ゲーム中' })).toHaveCount(0);
 	const [benefitBox, calamityBox] = await Promise.all([
@@ -2095,6 +2113,7 @@ test('host silence is detected only while the local Relay connection is active',
 	await expect(effectVisuals).toHaveAttribute('aria-label', '鬼');
 	await expect(effectVisuals).toHaveText('');
 	await expect(holder.locator('.tag-game-holder-label')).toHaveCount(0);
+	await expect(effectVisuals.locator('[data-tag-game-effect-symbol="calamity"]')).toHaveCount(1);
 	await expect(effectVisuals.locator('.oni-horn')).toHaveCount(2);
 	await expect(holder.locator('.tag-game-effect-aura .oni-smoke-left, .tag-game-effect-aura .oni-smoke-right')).toHaveCount(2);
 	await expect(holder.locator('.tag-game-effect-aura .oni-smoke-trail')).toHaveCount(1);
@@ -2135,6 +2154,7 @@ test('host silence is detected only while the local Relay connection is active',
 	await expect(holder.locator('.tag-game-effect-aura .fuku-halo-rays-warm path')).toHaveCount(4);
 	await expect(holder.locator('.tag-game-effect-aura .fuku-halo-rays-light path')).toHaveCount(5);
 	await expect(effectVisuals.locator('[data-fuku-mallet]')).toHaveCount(1);
+	await expect(effectVisuals.locator('[data-tag-game-effect-symbol="benefit"]')).toHaveCount(1);
 	await expect(holder.locator('.tag-game-effect-aura .oni-aura-outline')).toHaveCount(0);
 	const fukuViewport = page.viewportSize();
 	if (!fukuViewport) throw new Error('Expected a fixed viewport for Fuku symbol layout checks');
