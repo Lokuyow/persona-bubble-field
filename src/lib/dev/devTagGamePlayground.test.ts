@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { resolveCharacterFromPubkey } from '../characterAssignment';
 import { TAG_GAME_BENEFIT_POINTS_PER_SECOND, TAG_GAME_GAME_MS, TAG_GAME_LIFESPAN_LOSS_MS_PER_SECOND, TAG_GAME_MAX_LIFESPAN_LOSS_MS, TAG_GAME_MAX_POINTS, TAG_GAME_TRANSFER_COOLDOWN_MS, createTagGameSchedule, isValidTagGameState, tagGameScheduledEffectAt } from '../tagGame';
-import { createDevTagGamePlayground, DEV_TAG_GAME_BOT_A_PUBKEY, DEV_TAG_GAME_SELF_ID, DEV_TAG_GAME_SELF_PUBKEY } from './devTagGamePlayground';
+import { createDevTagGamePlayground, DEV_TAG_GAME_BOT_A_PUBKEY, DEV_TAG_GAME_BOT_B_PUBKEY, DEV_TAG_GAME_SELF_ID, DEV_TAG_GAME_SELF_PUBKEY } from './devTagGamePlayground';
 
 const FIELD = { columns: 16, rows: 8 };
 
@@ -21,14 +22,61 @@ describe('DEV Tag Game Playground', () => {
 	it('keeps a deterministic self/BOT fixture, requires participation before proposal, and uses valid TagGameState identity', () => {
 		const playground = createDevTagGamePlayground(FIELD, 10_000);
 		const initial = playground.snapshot;
-		expect(initial.presence.participants.map((participant) => participant.id)).toEqual([DEV_TAG_GAME_SELF_ID, 'b'.repeat(64), 'c'.repeat(64)]);
+		expect(initial.presence.participants.map((participant) => participant.id)).toEqual([DEV_TAG_GAME_SELF_ID, DEV_TAG_GAME_BOT_A_PUBKEY, DEV_TAG_GAME_BOT_B_PUBKEY]);
 		expect(playground.propose(10_000).message).toMatch(/2人以上/);
 		playground.create(10_000);
 		const lobby = playground.addBots(10_000).game!;
-		expect(lobby.participant.map((participant) => participant.pubkey)).toEqual([DEV_TAG_GAME_SELF_PUBKEY, DEV_TAG_GAME_BOT_A_PUBKEY, 'c'.repeat(64)]);
+		expect(lobby.participant.map((participant) => participant.pubkey)).toEqual([DEV_TAG_GAME_SELF_PUBKEY, DEV_TAG_GAME_BOT_A_PUBKEY, DEV_TAG_GAME_BOT_B_PUBKEY]);
+		expect(resolveCharacterFromPubkey(DEV_TAG_GAME_BOT_A_PUBKEY)).toBeTruthy();
+		expect(resolveCharacterFromPubkey(DEV_TAG_GAME_BOT_B_PUBKEY)).toBeTruthy();
 		expect(isValidTagGameState(lobby)).toBe(true);
 		expect(playground.propose(10_000).game?.phase).toBe('proposed');
 		expect(playground.botConsent(10_000).game?.participant.every((participant) => participant.consented)).toBe(true);
+	});
+
+	it('keeps virtual time and the settlement cursor monotonic across fast-forward, stale movement, and wall-clock catch-up', () => {
+		const { playground, game, nowMs } = startGame(310_321);
+		const fastForwarded = playground.advanceTo(nowMs + 55_000);
+		const fastForwardedTotals = fastForwarded.game!.participant.map(({ points, lifespanLossMs, benefitMs, calamityMs }) => ({ points, lifespanLossMs, benefitMs, calamityMs }));
+		const moved = playground.moveSelf('right', nowMs + 5_000);
+		expect(moved.nowMs).toBe(nowMs + 55_000);
+		expect(moved.game?.settledAtMs).toBe(nowMs + 55_000);
+		const botMoved = playground.moveBot(DEV_TAG_GAME_BOT_A_PUBKEY, 'left', nowMs + 10_000);
+		expect(botMoved.nowMs).toBe(nowMs + 55_000);
+		const whileBehind = playground.advanceTo(nowMs + 20_000);
+		expect(whileBehind.nowMs).toBe(nowMs + 55_000);
+		expect(whileBehind.game?.settledAtMs).toBe(nowMs + 55_000);
+		expect(whileBehind.game?.participant.map(({ points, lifespanLossMs, benefitMs, calamityMs }) => ({ points, lifespanLossMs, benefitMs, calamityMs }))).toEqual(fastForwardedTotals);
+
+		const caughtUp = playground.advanceTo(nowMs + 70_000);
+		const straightThrough = startGame(310_321).playground.advanceTo(nowMs + 70_000);
+		expect(caughtUp.nowMs).toBe(nowMs + 70_000);
+		expect(caughtUp.game?.settledAtMs).toBe(nowMs + 70_000);
+		expect(caughtUp.game?.participant).toEqual(straightThrough.game?.participant);
+		expect(caughtUp.game?.participant.some((member) => member.points > 0 || member.lifespanLossMs > 0)).toBe(true);
+	});
+
+	it('requires the self touch direction to point at the adjacent BOT holder during benefit', () => {
+		const { playground, game, nowMs } = startGame(410_543);
+		const schedule = createTagGameSchedule(game.seed!);
+		let benefitOffset = 0;
+		for (const interval of schedule) {
+			if (interval.effect === 'benefit') break;
+			benefitOffset += interval.durationMs;
+		}
+		const firstTouchAt = nowMs + benefitOffset + TAG_GAME_TRANSFER_COOLDOWN_MS;
+		playground.advanceTo(firstTouchAt);
+		const self = playground.snapshot.presence.participants.find((entry) => entry.id === DEV_TAG_GAME_SELF_ID)!.position;
+		const botPosition = { x: self.x + 1, y: self.y };
+		playground.placeBot(DEV_TAG_GAME_BOT_A_PUBKEY, botPosition, firstTouchAt);
+		const botTouch = playground.touch(DEV_TAG_GAME_BOT_A_PUBKEY, DEV_TAG_GAME_SELF_PUBKEY, firstTouchAt, 'left');
+		expect(botTouch.game?.ownerPubkey).toBe(DEV_TAG_GAME_BOT_A_PUBKEY);
+
+		const wrongDirection = playground.touch(DEV_TAG_GAME_SELF_PUBKEY, DEV_TAG_GAME_BOT_A_PUBKEY, firstTouchAt + TAG_GAME_TRANSFER_COOLDOWN_MS, 'up');
+		expect(wrongDirection.game?.ownerPubkey).toBe(DEV_TAG_GAME_BOT_A_PUBKEY);
+		expect(wrongDirection.message).toMatch(/その方向/);
+		const correctDirection = playground.touch(DEV_TAG_GAME_SELF_PUBKEY, DEV_TAG_GAME_BOT_A_PUBKEY, firstTouchAt + TAG_GAME_TRANSFER_COOLDOWN_MS + 1, 'right');
+		expect(correctDirection.game?.ownerPubkey).toBe(DEV_TAG_GAME_SELF_PUBKEY);
 	});
 
 	it('accepts valid self and BOT touches, transfers the holder, and enforces the production cooldown', () => {

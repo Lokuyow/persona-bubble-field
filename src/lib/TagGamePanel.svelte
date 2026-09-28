@@ -9,7 +9,7 @@
 	import TagGameEffectSymbol from '$lib/TagGameEffectSymbol.svelte';
 	import { resolveCharacterFromPubkey } from '$lib/characterAssignment';
 	import { newlyConfirmedTagGameParticipants, tagGameCharacterName, tagGameConfirmedParticipants, tagGameParticipantLabel } from '$lib/tagGamePresentation';
-	import { TAG_GAME_GAME_MS, type TagGameState } from '$lib/tagGame';
+	import { TAG_GAME_GAME_MS, tagGameScheduledEffectAt, type TagGameState } from '$lib/tagGame';
 	import { getCharacterById } from '$lib/character';
 	type Props = Readonly<{
 		open: boolean;
@@ -107,6 +107,7 @@
 					{#each games as game (game.gameId)}
 						{@const hostCharacter = participantCharacter(game.hostPubkey)}
 						{@const confirmedParticipants = tagGameConfirmedParticipants(game)}
+						{@const displayedEffect = devPlayground && game.phase === 'running' ? tagGameScheduledEffectAt(game, nowMs) ?? game.effect : game.effect}
 						<li>
 							<div class="host-identity">{#if hostCharacter}<img class="tag-game-avatar" src={asset(`/${hostCharacter.picture}`)} alt="" />{/if}<strong>{hostLabel(game)}</strong><span>{labels[game.phase]}</span></div>
 							<strong class="participant-count">参加者 {confirmedParticipants.length} / 8人</strong>
@@ -128,7 +129,7 @@
 									{/each}
 								</ol>
 							{/if}
-							{#if game.ownerPubkey}<p class="game-status">所持者 {tagGameParticipantLabel(game, game.ownerPubkey, selfPubkey)}・{game.effect === 'benefit' ? '福' : '鬼'}{#if game.endsAt}・残り{Math.max(0, Math.ceil((game.endsAt * 1000 - nowMs) / 1000))}秒{/if}</p>{/if}
+							{#if game.ownerPubkey}<p class="game-status">所持者 {tagGameParticipantLabel(game, game.ownerPubkey, selfPubkey)}・{displayedEffect === 'benefit' ? '福' : '鬼'}{#if game.endsAt}・残り{Math.max(0, Math.ceil((game.endsAt * 1000 - nowMs) / 1000))}秒{/if}</p>{/if}
 							{#if game.phase === 'running' || game.phase === 'settling'}
 								{#if watchedGameId === game.gameId}<ActionButton variant="tertiary" onclick={onStopWatching} disabled={busy}>観戦を解除</ActionButton>
 								{:else if selfActiveGameId === null}<ActionButton variant="tertiary" data-tag-game-watch={game.gameId} onclick={() => onWatch(game.gameId)} disabled={busy}>観戦する</ActionButton>

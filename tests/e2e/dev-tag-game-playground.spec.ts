@@ -1,4 +1,6 @@
 import { expect, test } from '@playwright/test';
+import { resolveCharacterFromPubkey } from '../../src/lib/characterAssignment';
+import { DEV_TAG_GAME_BOT_A_PUBKEY } from '../../src/lib/dev/devTagGamePlayground';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { dragJoystick } from './helpers/devWorldHarness';
 
@@ -36,6 +38,12 @@ test.describe('DEV Tag Game Playground', () => {
 		await expect(panel.getByRole('button', { name: '開始を提案' })).toBeDisabled();
 		await panel.getByRole('button', { name: 'BOTを参加させる' }).click();
 		await expect(panel).toContainText('参加者 3 / 8人');
+		const botACharacter = resolveCharacterFromPubkey(DEV_TAG_GAME_BOT_A_PUBKEY);
+		expect(botACharacter).toBeTruthy();
+		const botAField = page.locator(`.participant[data-participant-id="${DEV_TAG_GAME_BOT_A_PUBKEY}"]`);
+		const botAAvatarSrc = await botAField.locator('.avatar img').getAttribute('src');
+		expect(botAAvatarSrc).toContain(botACharacter!.picture);
+		await expect(panel.locator(`[data-tag-game-participant-slot="${DEV_TAG_GAME_BOT_A_PUBKEY}"] img`)).toHaveAttribute('src', botAAvatarSrc!);
 		await panel.getByRole('button', { name: '開始を提案' }).click();
 		await expect(panel).toContainText('開始確認中');
 		await panel.getByRole('button', { name: 'BOTが開始に同意' }).click();
@@ -45,10 +53,16 @@ test.describe('DEV Tag Game Playground', () => {
 		const hud = page.locator('[data-tag-game-hud]');
 		await expect(hud).toBeVisible();
 		await expect(hud.locator('[data-tag-game-remaining]')).toBeVisible();
+		await expect(hud.getByRole('button', { name: '退出' })).toHaveCount(0);
 		const effectDisplay = hud.locator('[data-tag-game-effect]');
 		const effectBefore = await effectDisplay.getAttribute('data-tag-game-effect');
 		await page.getByRole('button', { name: 'Advance to next tag-game effect' }).click();
 		await expect(effectDisplay).not.toHaveAttribute('data-tag-game-effect', effectBefore ?? '');
+		const remainingBeforePointerMove = await hud.locator('[data-tag-game-remaining]').innerText();
+		const positionBeforePointerMove = await self.getAttribute('data-position');
+		await dragJoystick(page, { x: -24, y: 0 });
+		await expect(self).not.toHaveAttribute('data-position', positionBeforePointerMove ?? '');
+		await expect(hud.locator('[data-tag-game-remaining]')).toHaveText(remainingBeforePointerMove);
 
 		const selfPosition = (await self.getAttribute('data-position'))!.split(',').map(Number);
 		const botASelect = page.getByLabel('Set BOT A position');
@@ -67,10 +81,26 @@ test.describe('DEV Tag Game Playground', () => {
 		if (effect === 'benefit') await botTouch.click();
 		else await page.keyboard.press(adjacent.self);
 		await expect.poll(() => holderDisplay.innerText()).not.toBe(initialHolder);
+		await expect(holderDisplay).toContainText(botACharacter!.name);
+		if (effect === 'benefit') {
+			await expect(botAField).toHaveAttribute('data-tag-game-holder-transfer', /\d+/);
+		}
 		const firstNewHolder = await holderDisplay.innerText();
 		await page.getByRole('button', { name: 'Advance tag-game time 5 seconds' }).click();
-		if (effect === 'benefit') await page.keyboard.press(adjacent.self);
-		else await botTouch.click();
+		await page.getByRole('button', { name: 'Open DEV tag-game panel' }).click();
+		const runningPanel = page.getByRole('dialog', { name: '鬼ごっこ' });
+		const hudTime = (await hud.locator('[data-tag-game-remaining]').innerText()).split(':').map(Number);
+		const panelSeconds = Number((await runningPanel.locator('.game-status').innerText()).match(/残り(\d+)秒/)?.[1]);
+		expect(panelSeconds).toBe(hudTime[0] * 60 + hudTime[1]);
+		await runningPanel.getByRole('button', { name: '閉じる' }).click();
+		if (effect === 'benefit') {
+			const wrongDirection = `Arrow${adjacent.bot[0].toUpperCase()}${adjacent.bot.slice(1)}`;
+			await page.keyboard.press(wrongDirection);
+			await expect(holderDisplay).toHaveText(firstNewHolder);
+			const afterWrongDirection = (await self.getAttribute('data-position'))!.split(',').map(Number);
+			await botASelect.selectOption(`${afterWrongDirection[0] + adjacent.dx},${afterWrongDirection[1] + adjacent.dy}`);
+			await page.keyboard.press(adjacent.self);
+		} else await botTouch.click();
 		await expect.poll(() => holderDisplay.innerText()).not.toBe(firstNewHolder);
 
 		await page.getByRole('button', { name: 'Advance to tag-game end' }).click();

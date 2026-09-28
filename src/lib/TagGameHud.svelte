@@ -12,12 +12,13 @@
 		nowMs: number;
 		realtimeStatus: 'inactive' | 'active' | 'degraded';
 		busy: boolean;
+		showLeave?: boolean;
 		localEffectPaused?: boolean;
 		touchStatus?: string | null;
 		onLeave: (gameId: string) => void;
 	}>;
 
-	let { game, selfPubkey, selfRunNumber, nowMs, realtimeStatus, busy, localEffectPaused = false, touchStatus = null, onLeave }: Props = $props();
+	let { game, selfPubkey, selfRunNumber, nowMs, realtimeStatus, busy, showLeave = true, localEffectPaused = false, touchStatus = null, onLeave }: Props = $props();
 	let cooldownAnimation = $state<{ gameId: string; transferAtMs: number; delayMs: number } | null>(null);
 	const own = $derived(game?.participant.find((member) => member.pubkey === selfPubkey && member.runNumber === selfRunNumber) ?? null);
 	const holder = $derived(game?.participant.find((member) => member.pubkey === game.ownerPubkey) ?? null);
@@ -37,7 +38,7 @@
 	const holderName = $derived(game?.ownerPubkey && game ? tagGameParticipantLabel(game, game.ownerPubkey, selfPubkey) : '未定');
 	const effectAction = $derived(currentEffect === 'benefit' ? '所持者以外が追いかけて奪う' : '所持者が追いかけて押し付ける');
 	const transferStatus = $derived(game ? tagGameTransferStatus(game, effectActive, nowMs) : '転移不可');
-	const canLeave = $derived(Boolean(game && canLeaveTagGame(game, own?.status, nowMs)));
+	const canLeave = $derived(Boolean(showLeave && game && canLeaveTagGame(game, own?.status, nowMs)));
 	const transferAtMs = $derived(game?.startedAt !== undefined ? game.transferAt ?? game.startedAt * 1_000 : 0);
 	const cooldownRemainingMs = $derived(game ? tagGameCooldownRemainingMs(game, effectActive, nowMs) : 0);
 	const cooldownAnimationDelayMs = $derived(cooldownAnimation && cooldownAnimation.gameId === game?.gameId && cooldownAnimation.transferAtMs === transferAtMs ? cooldownAnimation.delayMs : 0);

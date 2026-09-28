@@ -1,12 +1,16 @@
 import { debugSetParticipantPosition, moveParticipant, type PresenceField, type PresenceState } from '../presence';
 import { isBlockedFacilityCell } from '../fieldFacilities';
 import { DEV_WORLD_SELF_ID } from '../devWorldSandbox';
+import { CHARACTER_CATALOG } from '../character';
 import { TAG_GAME_BENEFIT_POINTS_PER_SECOND, TAG_GAME_GAME_MS, TAG_GAME_LIFESPAN_LOSS_MS_PER_SECOND, TAG_GAME_MAX_EFFECT_MS, TAG_GAME_MAX_LIFESPAN_LOSS_MS, TAG_GAME_MAX_POINTS, TAG_GAME_TRANSFER_COOLDOWN_MS, createTagGameSchedule, isTagGameTransferCooldownActive, tagGameScheduledEffectAt, type TagGameParticipant, type TagGameState } from '../tagGame';
-import type { Direction, GridPosition } from '../geometry';
+import { moveOneCell, type Direction, type GridPosition } from '../geometry';
 
 export const DEV_TAG_GAME_SELF_PUBKEY = 'f'.repeat(64);
-export const DEV_TAG_GAME_BOT_A_PUBKEY = 'b'.repeat(64);
-export const DEV_TAG_GAME_BOT_B_PUBKEY = 'c'.repeat(64);
+const [BOT_A_CHARACTER, BOT_B_CHARACTER] = CHARACTER_CATALOG;
+if (!BOT_A_CHARACTER || !BOT_B_CHARACTER) throw new Error('The DEV tag-game playground requires two assigned characters.');
+const pubkeyForCharacterSlot = (slot: number) => slot.toString(16).padStart(64, '0');
+export const DEV_TAG_GAME_BOT_A_PUBKEY = pubkeyForCharacterSlot(BOT_A_CHARACTER.slot);
+export const DEV_TAG_GAME_BOT_B_PUBKEY = pubkeyForCharacterSlot(BOT_B_CHARACTER.slot);
 // The synthetic game identity is projected onto DEV World's selectable `you` participant.
 export const DEV_TAG_GAME_SELF_ID = DEV_WORLD_SELF_ID;
 export const DEV_TAG_GAME_BOT_A_ID = DEV_TAG_GAME_BOT_A_PUBKEY;
@@ -54,23 +58,29 @@ export class DevTagGamePlayground {
 
 	get snapshot(): DevTagGamePlaygroundSnapshot { return this.state; }
 
+	private monotonicNow(targetMs: number): number {
+		return Number.isSafeInteger(targetMs) ? Math.max(targetMs, this.state.nowMs) : this.state.nowMs;
+	}
+
 	private emit(effect: DevTagGameSound): void {
 		this.state = { ...this.state, sound: { sequence: ++this.soundSequence, effect } };
 	}
 
 	private save(game: TagGameState | null, nowMs = this.state.nowMs, message: string | null = this.state.message): DevTagGamePlaygroundSnapshot {
-		this.state = { ...this.state, game, nowMs, message };
+		this.state = { ...this.state, game, nowMs: this.monotonicNow(nowMs), message };
 		return this.state;
 	}
 
 	create(nowMs: number): DevTagGamePlaygroundSnapshot {
 		if (this.state.game && this.state.game.phase !== 'ended' && this.state.game.phase !== 'interrupted') return this.state;
+		nowMs = this.monotonicNow(nowMs);
 		this.lastAccruedAtMs = null;
 		const second = Math.floor(nowMs / 1_000);
 		return this.save({ gameId: `${DEV_TAG_GAME_SELF_PUBKEY}:${second}:${'e'.repeat(32)}`, hostPubkey: DEV_TAG_GAME_SELF_PUBKEY, phase: 'lobby', revision: 0, updatedAt: second, participant: [participant(DEV_TAG_GAME_SELF_PUBKEY, second)], settledAtMs: nowMs }, nowMs, 'ローカル募集を作成しました。');
 	}
 
 	addBots(nowMs: number): DevTagGamePlaygroundSnapshot {
+		nowMs = this.monotonicNow(nowMs);
 		const game = this.state.game;
 		if (!game || game.phase !== 'lobby') return this.state;
 		const current = new Set(game.participant.map((member) => member.pubkey));
@@ -79,6 +89,7 @@ export class DevTagGamePlayground {
 	}
 
 	propose(nowMs: number): DevTagGamePlaygroundSnapshot {
+		nowMs = this.monotonicNow(nowMs);
 		const game = this.state.game;
 		if (!game || game.phase !== 'lobby' || game.hostPubkey !== DEV_TAG_GAME_SELF_PUBKEY || game.participant.length < 2) return this.save(game, nowMs, '参加者が2人以上になるまで開始を提案できません。');
 		const proposed = { ...game, phase: 'proposed' as const, proposalId: PROPOSAL_ID, proposalDeadline: Math.floor((nowMs + 30_000) / 1_000), revision: game.revision + 1, updatedAt: Math.floor(nowMs / 1_000), participant: game.participant.map((member) => member.pubkey === game.hostPubkey ? { ...member, consentProposalId: PROPOSAL_ID, consented: true } : { ...member, consented: false }) };
@@ -86,6 +97,7 @@ export class DevTagGamePlayground {
 	}
 
 	botConsent(nowMs: number): DevTagGamePlaygroundSnapshot {
+		nowMs = this.monotonicNow(nowMs);
 		const game = this.state.game;
 		if (!game || game.phase !== 'proposed' || game.participant.length < 2) return this.state;
 		const countdownAt = Math.floor((nowMs + 5_000) / 1_000);
@@ -156,26 +168,30 @@ export class DevTagGamePlayground {
 
 	moveBot(botPubkey: string, direction: Direction, nowMs: number): DevTagGamePlaygroundSnapshot {
 		if (botPubkey !== DEV_TAG_GAME_BOT_A_ID && botPubkey !== DEV_TAG_GAME_BOT_B_ID) return this.state;
+		const advanced = this.advanceTo(this.monotonicNow(nowMs));
 		const id = botPubkey;
-		const moved = moveParticipant(this.state.presence, id, direction, nowMs);
-		this.state = { ...this.state, presence: moved.state, nowMs };
+		const moved = moveParticipant(advanced.presence, id, direction, advanced.nowMs);
+		this.state = { ...advanced, presence: moved.state };
 		return this.state;
 	}
 
 	placeBot(botPubkey: string, position: GridPosition, nowMs: number): DevTagGamePlaygroundSnapshot {
 		if (botPubkey !== DEV_TAG_GAME_BOT_A_ID && botPubkey !== DEV_TAG_GAME_BOT_B_ID) return this.state;
-		this.state = { ...this.state, presence: debugSetParticipantPosition(this.state.presence, botPubkey, position), nowMs };
+		const advanced = this.advanceTo(this.monotonicNow(nowMs));
+		this.state = { ...advanced, presence: debugSetParticipantPosition(advanced.presence, botPubkey, position) };
 		return this.state;
 	}
 
 	moveSelf(direction: Direction, nowMs: number): DevTagGamePlaygroundSnapshot {
-		const moved = moveParticipant(this.state.presence, DEV_TAG_GAME_SELF_ID, direction, nowMs);
-		this.state = { ...this.state, presence: moved.state, nowMs };
+		const advanced = this.advanceTo(this.monotonicNow(nowMs));
+		const moved = moveParticipant(advanced.presence, DEV_TAG_GAME_SELF_ID, direction, advanced.nowMs);
+		this.state = { ...advanced, presence: moved.state };
 		return this.state;
 	}
 
-	touch(actorPubkey: string, targetPubkey: string, nowMs: number): DevTagGamePlaygroundSnapshot {
-		const advanced = this.advanceTo(nowMs);
+	touch(actorPubkey: string, targetPubkey: string, nowMs: number, direction?: Direction): DevTagGamePlaygroundSnapshot {
+		const advanced = this.advanceTo(this.monotonicNow(nowMs));
+		nowMs = advanced.nowMs;
 		const game = advanced.game;
 		if (!game || game.phase !== 'running' || !game.ownerPubkey || !game.startedAt || !game.seed) return this.save(game, nowMs, '試合中のみタッチできます。');
 		const effect = tagGameScheduledEffectAt(game, nowMs);
@@ -186,6 +202,10 @@ export class DevTagGamePlayground {
 		const actor = this.state.presence.participants.find((entry) => entry.id === (actorPubkey === DEV_TAG_GAME_SELF_PUBKEY ? DEV_TAG_GAME_SELF_ID : actorPubkey));
 		const target = this.state.presence.participants.find((entry) => entry.id === (targetPubkey === DEV_TAG_GAME_SELF_PUBKEY ? DEV_TAG_GAME_SELF_ID : targetPubkey));
 		if (!actor || !target || Math.max(Math.abs(actor.position.x - target.position.x), Math.abs(actor.position.y - target.position.y)) !== 1) return this.save(game, nowMs, 'タッチできる距離ではありません。');
+		if (direction) {
+			const destination = moveOneCell(actor.position, direction, this.state.presence.field);
+			if (!destination || destination.x !== target.position.x || destination.y !== target.position.y) return this.save(game, nowMs, 'その方向にはタッチできる相手がいません。');
+		}
 		const next = { ...game, revision: game.revision + 1, updatedAt: Math.floor(nowMs / 1_000), ownerPubkey: effect === 'benefit' ? actorPubkey : targetPubkey, transferAt: nowMs, lastHolderResponseAtMs: nowMs, effect };
 		this.emit('tag-game-transfer');
 		return this.save(next, nowMs, '所持者が更新されました。転移クールダウンが始まりました。');

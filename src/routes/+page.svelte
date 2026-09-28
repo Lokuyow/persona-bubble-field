@@ -647,6 +647,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	let tagGameDisplayedGame = $derived(devTagGamePlaygroundEnabled
 		? (devTagGamePlaygroundState?.game && ['running', 'settling'].includes(devTagGamePlaygroundState.game.phase) ? devTagGamePlaygroundState.game : null)
 		: tagGameStates.find((candidate) => candidate.gameId === tagGameDisplayedGameId && (candidate.phase === 'running' || candidate.phase === 'settling')) ?? null);
+	let tagGameUiNowMs = $derived(devTagGamePlaygroundEnabled ? devTagGamePlaygroundState?.nowMs ?? tagGameHudNowMs : tagGameHudNowMs);
 	// Keep the received final cumulative value visible while its lifecycle receipt is being applied.
 	let tagGameHudGameId = $derived.by(() => {
 		if (tagGameSelfActiveGameId) return tagGameSelfActiveGameId;
@@ -690,8 +691,8 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		const self = personaSnapshot;
 		const localPause = self && game.hostPubkey === self.signer.pubkey ? tagGameEffectPauses.get(game.gameId) : null;
 		const locallyPaused = Boolean(localPause && localPause.ownerPubkey === game.ownerPubkey && localPause.runNumber === holder?.runNumber && tagGameHudNowMs >= localPause.pausedAtMs);
-		return { effect: tagGameScheduledEffectAt(game, tagGameHudNowMs), locallyPaused,
-			active: isTagGameScheduledEffectActive(game, tagGameHudNowMs) && !game.holderChallengeId && !locallyPaused && holder?.status === 'active' };
+		return { effect: tagGameScheduledEffectAt(game, tagGameUiNowMs), locallyPaused,
+			active: isTagGameScheduledEffectActive(game, tagGameUiNowMs) && !game.holderChallengeId && !locallyPaused && holder?.status === 'active' };
 	});
 	let tagGameRoleByPubkey = $derived.by(() => {
 		const roles = new Map<string, 'participant' | 'holder'>();
@@ -4210,7 +4211,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	function moveSandboxSelf(direction: Direction): void {
 		if (!devWorldSandboxEnabled) return;
 		if (devTagGamePlaygroundEnabled && devTagGamePlayground) {
-			setDevTagGamePlaygroundState(devTagGamePlayground.moveSelf(direction, Date.now()));
+			setDevTagGamePlaygroundState(devTagGamePlayground.moveSelf(direction, devTagGameNowMs()));
 			return;
 		}
 		const result = moveDevWorldSelf(presenceState, direction, Date.now());
@@ -4523,7 +4524,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 				: undefined;
 		if (!targetPubkey) return false;
 		const beforeOwner = game.ownerPubkey;
-		const next = devTagGamePlayground.touch(DEV_TAG_GAME_SELF_PUBKEY, targetPubkey, nowMs);
+		const next = devTagGamePlayground.touch(DEV_TAG_GAME_SELF_PUBKEY, targetPubkey, nowMs, direction);
 		setDevTagGamePlaygroundState(next);
 		if (next.game?.ownerPubkey !== beforeOwner) {
 			const attemptId = ++tagGameTouchAttemptSequence;
@@ -4559,10 +4560,12 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			: actorNext && sameFieldCell(actorNext, selfPosition) ? DEV_TAG_GAME_SELF_PUBKEY : undefined;
 		if (!target) return;
 		const beforeOwner = game.ownerPubkey;
-		setDevTagGamePlaygroundState(devTagGamePlayground.touch(actor, target, nowMs));
-		if (devTagGamePlaygroundState?.game?.ownerPubkey !== beforeOwner) {
+		const next = devTagGamePlayground.touch(actor, target, nowMs);
+		setDevTagGamePlaygroundState(next);
+		if (next.game?.ownerPubkey !== beforeOwner && next.game?.ownerPubkey) {
 			const attemptId = ++tagGameTouchAttemptSequence;
-			tagGameHolderTransfer = { participantId: DEV_TAG_GAME_SELF_ID, id: attemptId };
+			const newHolderId = next.game.ownerPubkey === DEV_TAG_GAME_SELF_PUBKEY ? DEV_TAG_GAME_SELF_ID : next.game.ownerPubkey;
+			tagGameHolderTransfer = { participantId: newHolderId, id: attemptId };
 			window.setTimeout(() => { if (tagGameHolderTransfer?.id === attemptId) tagGameHolderTransfer = null; }, TAG_GAME_TOUCH_FEEDBACK_MS);
 		}
 	}
@@ -4890,7 +4893,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 				registerReplyRemeasure={registerTraceReplyRemeasure}
 			/>
 			<div class="field-status-huds" data-field-status-huds style={`--top-status-hud-bottom:${statusHudVisible ? topStatusHudBottom : 0}px`}>
-				<TagGameHud game={tagGameDisplayedGame} selfPubkey={devTagGamePlaygroundEnabled ? DEV_TAG_GAME_SELF_PUBKEY : personaSnapshot?.signer.pubkey ?? null} selfRunNumber={devTagGamePlaygroundEnabled ? 1 : personaSnapshot?.activeRun.runNumber ?? null} nowMs={tagGameHudNowMs} realtimeStatus={devTagGamePlaygroundEnabled ? 'active' : realtimeStatus} busy={devTagGamePlaygroundEnabled ? false : tagGameBusy} localEffectPaused={tagGameDisplayedEffect?.locallyPaused ?? false} touchStatus={tagGameDisplayedGame ? (devTagGamePlaygroundEnabled ? devTagGamePlaygroundState?.message : tagGameTouchStatuses.get(tagGameDisplayedGame.gameId)?.label) ?? null : null} onLeave={(gameId) => { if (!devTagGamePlaygroundEnabled) void leaveTagGame(gameId); }} />
+				<TagGameHud game={tagGameDisplayedGame} selfPubkey={devTagGamePlaygroundEnabled ? DEV_TAG_GAME_SELF_PUBKEY : personaSnapshot?.signer.pubkey ?? null} selfRunNumber={devTagGamePlaygroundEnabled ? 1 : personaSnapshot?.activeRun.runNumber ?? null} nowMs={tagGameUiNowMs} realtimeStatus={devTagGamePlaygroundEnabled ? 'active' : realtimeStatus} busy={devTagGamePlaygroundEnabled ? false : tagGameBusy} showLeave={!devTagGamePlaygroundEnabled} localEffectPaused={tagGameDisplayedEffect?.locallyPaused ?? false} touchStatus={tagGameDisplayedGame ? (devTagGamePlaygroundEnabled ? devTagGamePlaygroundState?.message : tagGameTouchStatuses.get(tagGameDisplayedGame.gameId)?.label) ?? null : null} onLeave={(gameId) => { if (!devTagGamePlaygroundEnabled) void leaveTagGame(gameId); }} />
 			</div>
 		{/snippet}
 	</FieldViewport>
@@ -4900,7 +4903,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		selfPubkey={devTagGamePlaygroundEnabled ? DEV_TAG_GAME_SELF_PUBKEY : personaSnapshot?.signer.pubkey ?? null}
 		selfRunNumber={personaSnapshot?.activeRun.runNumber ?? (devTagGamePlaygroundEnabled ? 1 : null)}
 		watchedGameId={tagGameWatchedGameId}
-		nowMs={mendingNowMs}
+		nowMs={devTagGamePlaygroundEnabled ? tagGameUiNowMs : mendingNowMs}
 		busy={tagGameBusy}
 		reservedGameId={tagGameReservationGameId}
 		reservedStatus={tagGameReservationStatus}
