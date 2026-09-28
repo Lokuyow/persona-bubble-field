@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import sharp from 'sharp';
 import { expectIconCloseButton } from './helpers/iconCloseButton';
 import { finalizeEvent, getPublicKey, type Event as NostrEvent } from 'nostr-tools/pure';
 import { buildTagGameActionTemplate, createTagGameSchedule, finalizeTagGameState, isFreshTagGameTouchAction, parseTagGameActionEvent, parseTagGameEvent, tagGameScheduledEffectAt, TAG_GAME_KIND, TAG_GAME_TRANSFER_COOLDOWN_MS, type TagGameState } from '../../src/lib/tagGame';
@@ -52,7 +53,6 @@ async function readEffectSymbolLayout(holder: Locator): Promise<Readonly<{
 	mallet: Box | null;
 	malletHead: Box | null;
 	malletShaft: Box | null;
-	malletNamePaintOverlap: boolean;
 	malletGeometry: Readonly<{
 		shaft: Readonly<{ tagName: string; x: number; y: number; width: number; height: number; rx: number }>;
 		head: Readonly<{ tagName: string; x: number; y: number; width: number; height: number; rx: number }>;
@@ -86,35 +86,6 @@ async function readEffectSymbolLayout(holder: Locator): Promise<Readonly<{
 		const rayBoxes = [...element.querySelectorAll<SVGGraphicsElement>('.fuku-halo-rays path')].map((ray) => box(ray)!);
 		const malletShaft = element.querySelector<SVGRectElement>('[data-fuku-mallet-handle]');
 		const malletHead = element.querySelector<SVGRectElement>('[data-fuku-mallet-head]');
-		const nameElement = element.querySelector('.participant-name');
-		const malletNamePaintOverlap = Boolean(nameElement && [malletHead, malletShaft].some((shape) => {
-			if (!shape) return false;
-			const bounds = shape.getBoundingClientRect();
-			const labelBounds = nameElement.getBoundingClientRect();
-			const textRange = document.createRange();
-			textRange.selectNodeContents(nameElement);
-			const textBounds = textRange.getBoundingClientRect();
-			const nameBounds = {
-				left: Math.max(labelBounds.left, textBounds.left),
-				right: Math.min(labelBounds.right, textBounds.right),
-				top: Math.max(labelBounds.top, textBounds.top),
-				bottom: Math.min(labelBounds.bottom, textBounds.bottom)
-			};
-			const left = Math.max(bounds.left, nameBounds.left);
-			const right = Math.min(bounds.right, nameBounds.right);
-			const top = Math.max(bounds.top, nameBounds.top);
-			const bottom = Math.min(bounds.bottom, nameBounds.bottom);
-			if (left >= right || top >= bottom) return false;
-			const inverse = shape.getScreenCTM()?.inverse();
-			if (!inverse) return true;
-			for (let y = top + 0.125; y < bottom; y += 0.25) {
-				for (let x = left + 0.125; x < right; x += 0.25) {
-					const point = new DOMPoint(x, y).matrixTransform(inverse);
-					if (shape.isPointInFill(point) || shape.isPointInStroke(point)) return true;
-				}
-			}
-			return false;
-		}));
 		const rectGeometry = (rect: SVGRectElement) => ({
 			tagName: rect.tagName.toLowerCase(),
 			x: Number(rect.getAttribute('x')),
@@ -144,7 +115,6 @@ async function readEffectSymbolLayout(holder: Locator): Promise<Readonly<{
 			mallet: path('[data-fuku-mallet]'),
 			malletHead: path('[data-fuku-mallet-head]'),
 			malletShaft: path('[data-fuku-mallet-handle]'),
-			malletNamePaintOverlap,
 			malletGeometry: malletShaft && malletHead ? {
 				shaft: rectGeometry(malletShaft),
 				head: rectGeometry(malletHead),
@@ -231,7 +201,7 @@ function expectHornsAboveAvatarAndClearOfName(layout: Awaited<ReturnType<typeof 
 	expect(layout.pointerEvents).toBe('none');
 }
 
-function expectMalletBottomRightOfAvatarAndClearOfName(layout: Awaited<ReturnType<typeof readEffectSymbolLayout>>): void {
+function expectMalletBottomRightOfAvatarAndOutsideFace(layout: Awaited<ReturnType<typeof readEffectSymbolLayout>>): void {
 	const mallet = layout.mallet;
 	const head = layout.malletHead;
 	const shaft = layout.malletShaft;
@@ -253,7 +223,6 @@ function expectMalletBottomRightOfAvatarAndClearOfName(layout: Awaited<ReturnTyp
 	};
 	// The mallet may sit beside the avatar edge, but must stay out of the central face area.
 	expect(overlaps(head!, faceSafeZone)).toBe(false);
-	expect(layout.malletNamePaintOverlap).toBe(false);
 	const shaftCentreX = shaft!.x + shaft!.width / 2;
 	const shaftCentreY = shaft!.y + shaft!.height / 2;
 	expect(shaftCentreX).toBeGreaterThan(headCentreX);
@@ -262,6 +231,42 @@ function expectMalletBottomRightOfAvatarAndClearOfName(layout: Awaited<ReturnTyp
 	expect(layout.auraZ).toBeLessThan(layout.buttonZ);
 	expect(layout.visualAnimationName).toBe('none');
 	expect(layout.pointerEvents).toBe('none');
+}
+
+async function expectMalletDoesNotCoverVisibleNameText(holder: Locator): Promise<void> {
+	const name = holder.locator('.participant-name');
+	const mallet = holder.locator('[data-fuku-mallet]');
+	const textColor = await name.evaluate((element) => getComputedStyle(element).color);
+	const rgb = textColor.match(/\d+(?:\.\d+)?/g)?.slice(0, 3).map(Number);
+	expect(rgb).toHaveLength(3);
+	const actual = await name.screenshot({ animations: 'disabled' });
+	const previousVisibility = await mallet.getAttribute('visibility');
+	let unobscured: Buffer;
+	try {
+		await mallet.evaluate((element) => element.setAttribute('visibility', 'hidden'));
+		unobscured = await name.screenshot({ animations: 'disabled' });
+	} finally {
+		await mallet.evaluate((element, visibility) => {
+			if (visibility === null) element.removeAttribute('visibility');
+			else element.setAttribute('visibility', visibility);
+		}, previousVisibility);
+	}
+	const [actualImage, unobscuredImage] = await Promise.all([actual, unobscured!].map((image) => sharp(image).ensureAlpha().raw().toBuffer({ resolveWithObject: true })));
+	expect(actualImage.info.width).toBe(unobscuredImage.info.width);
+	expect(actualImage.info.height).toBe(unobscuredImage.info.height);
+	let visibleTextPixels = 0;
+	let coveredTextPixels = 0;
+	// Use captured pixels so CSS ellipsis clipping and the actual painted glyphs
+	// are respected; DOM Range boxes include hidden text beyond the label edge.
+	// Matching the text color's core pixels also excludes the badge border/background.
+	for (let index = 0; index < unobscuredImage.data.length; index += 4) {
+		const matchesText = rgb!.every((channel, component) => Math.abs(unobscuredImage.data[index + component] - channel) <= 40);
+		if (!matchesText) continue;
+		visibleTextPixels++;
+		if (rgb!.some((channel, component) => Math.abs(actualImage.data[index + component] - unobscuredImage.data[index + component]) > 24)) coveredTextPixels++;
+	}
+	expect(visibleTextPixels).toBeGreaterThan(0);
+	expect(coveredTextPixels).toBe(0);
 }
 
 function expectMalletHeadAndShaftToMeet(layout: Awaited<ReturnType<typeof readEffectSymbolLayout>>): void {
@@ -1212,7 +1217,10 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 		expect(await holderMarker.locator('.participant-profile-trigger').evaluate((element) => getComputedStyle(element).pointerEvents)).toBe('auto');
 		const desktopSymbolLayout = await readEffectSymbolLayout(holderMarker);
 		if (running.effect === 'calamity') expectHornsAboveAvatarAndClearOfName(desktopSymbolLayout);
-		else expectMalletBottomRightOfAvatarAndClearOfName(desktopSymbolLayout);
+		else {
+			expectMalletBottomRightOfAvatarAndOutsideFace(desktopSymbolLayout);
+			await expectMalletDoesNotCoverVisibleNameText(holderMarker);
+		}
 		const holderViewport = holderPage.viewportSize();
 		await holderPage.setViewportSize({ width: 390, height: 844 });
 		await expect(fieldEffectVisuals.locator('svg')).toBeVisible();
@@ -1221,7 +1229,10 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 		await expect(holderMarker.locator('.participant-name')).toBeVisible();
 		const mobileSymbolLayout = await readEffectSymbolLayout(holderMarker);
 		if (running.effect === 'calamity') expectHornsAboveAvatarAndClearOfName(mobileSymbolLayout);
-		else expectMalletBottomRightOfAvatarAndClearOfName(mobileSymbolLayout);
+		else {
+			expectMalletBottomRightOfAvatarAndOutsideFace(mobileSymbolLayout);
+			await expectMalletDoesNotCoverVisibleNameText(holderMarker);
+		}
 		await holderPage.emulateMedia({ reducedMotion: 'reduce' });
 		await expect(fieldEffectVisuals.locator('svg')).toBeVisible();
 		const reducedMotionAnimations = await fieldEffectVisuals.evaluate((element) => [...element.querySelectorAll<SVGElement>('*')]
@@ -2454,7 +2465,7 @@ test('host silence is detected only while the local Relay connection is active',
 	await preparePlayer(page, selfSecret, nowMs);
 	await moveRelaySelfTo(page, { x: 7, y: 5 });
 	await openTagGameTerminal(page);
-	const remoteHostSecret = fixtureSecret(51);
+	const remoteHostSecret = fixtureSecret(20);
 	const remoteHostPubkey = getPublicKey(remoteHostSecret);
 	const joinerPubkey = getPublicKey(selfSecret);
 	const transitionSeed = Array.from({ length: 10_000 }, (_, index) => `host-silence-${index}`).find((candidate) => {
@@ -2532,26 +2543,31 @@ test('host silence is detected only while the local Relay connection is active',
 	await expect(holder.locator('.tag-game-effect-aura .oni-aura-outline')).toHaveCount(0);
 	const fukuViewport = page.viewportSize();
 	if (!fukuViewport) throw new Error('Expected a fixed viewport for Fuku symbol layout checks');
+	await page.getByRole('dialog', { name: '鬼ごっこ' }).getByRole('button', { name: '閉じる' }).click();
+	await expect(page.getByRole('dialog', { name: '鬼ごっこ' })).toBeHidden();
 	await page.setViewportSize({ width: 1280, height: 800 });
 	await expect.poll(() => holder.evaluate((element) => element.getBoundingClientRect().width)).toBe(76);
 	const desktopFukuLayout = await readEffectSymbolLayout(holder);
+	expectMalletBottomRightOfAvatarAndOutsideFace(desktopFukuLayout);
+	await expectMalletDoesNotCoverVisibleNameText(holder);
 	await page.setViewportSize({ width: 390, height: 844 });
 	await expect.poll(() => holder.evaluate((element) => element.getBoundingClientRect().width)).toBe(50);
 	const mobileFukuLayout = await readEffectSymbolLayout(holder);
-	expectMalletBottomRightOfAvatarAndClearOfName(desktopFukuLayout);
 	expectMalletHeadAndShaftToMeet(desktopFukuLayout);
 	expectFukuHaloVisibleAroundAvatar(desktopFukuLayout);
-	expectMalletBottomRightOfAvatarAndClearOfName(mobileFukuLayout);
+	expectMalletBottomRightOfAvatarAndOutsideFace(mobileFukuLayout);
+	await expectMalletDoesNotCoverVisibleNameText(holder);
 	expectMalletHeadAndShaftToMeet(mobileFukuLayout);
 	expectFukuHaloVisibleAroundAvatar(mobileFukuLayout);
 	await page.setViewportSize(fukuViewport);
 	await expect.poll(() => holder.evaluate((element) => element.getBoundingClientRect().width)).toBe(76);
+	await openTagGameTerminal(page);
 	await page.emulateMedia({ reducedMotion: 'reduce' });
 	const reducedMotionAnimations = await holder.evaluate((element) => [...element.querySelectorAll<SVGElement>('*')]
 		.map((child) => getComputedStyle(child).animationName).filter((name) => name !== 'none'));
 	expect(reducedMotionAnimations).toEqual([]);
 	const reducedMotionFukuLayout = await readEffectSymbolLayout(holder);
-	expectMalletBottomRightOfAvatarAndClearOfName(reducedMotionFukuLayout);
+	expectMalletBottomRightOfAvatarAndOutsideFace(reducedMotionFukuLayout);
 	expectMalletHeadAndShaftToMeet(reducedMotionFukuLayout);
 	expectFukuHaloVisibleAroundAvatar(reducedMotionFukuLayout);
 	await page.emulateMedia({ reducedMotion: 'no-preference' });

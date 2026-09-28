@@ -1,7 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-	<circle cx="32" cy="32" r="29" fill="#f0a488" stroke="#394044" stroke-width="3" />
-	<path d="M18 25c0-5 4-9 9-9h10c5 0 9 4 9 9v8c0 5-4 9-9 9h-4l-7 7v-7h-1c-4 0-7-4-7-9z" fill="#fff9ed" />
-	<circle cx="28" cy="29" r="2.5" fill="#394044" />
-	<circle cx="36" cy="29" r="2.5" fill="#394044" />
-	<circle cx="44" cy="29" r="2.5" fill="#394044" />
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="377" height="329" viewBox="0 0 377 329"
+     role="img" aria-label="ハコ過去 アイコン">
+  <style>
+    :root { color: #111111; }
+    @media (prefers-color-scheme: dark) {
+      :root { color: #ffffff; }
+    }
+  </style>
+  <rect x="0" y="0" width="51" height="329" fill="currentColor"/>
+  <rect x="88" y="0" width="51" height="329" fill="currentColor"/>
+  <path d="M326 131H377V329H177V273H326Z" fill="currentColor"/>
+  <!-- 「コ」の上半分ちょうどまでアクセントカラーを適用 -->
+  <path d="M177 0H377V165H326V56H177Z" fill="#CF06FE"/>
 </svg>
