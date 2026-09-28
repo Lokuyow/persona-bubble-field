@@ -5,12 +5,15 @@ import {
 	TAG_GAME_POSITION_PROOF_REFRESH_MAX_ATTEMPTS,
 	TAG_GAME_POSITION_PROOF_REFRESH_RETRY_MS,
 	TAG_GAME_BENEFIT_POINTS_PER_SECOND,
+	TAG_GAME_FINAL_WAIT_MS,
 	TAG_GAME_GAME_MS,
 	TAG_GAME_INDEX,
 	TAG_GAME_KIND,
 	TAG_GAME_NO_ACTIVITY_MS,
 	TAG_GAME_PRECHECK_TIMEOUT_MS,
 	TAG_GAME_RESPONSE_TIMEOUT_MS,
+	TAG_GAME_MAX_POINTS,
+	TAG_GAME_MAX_LIFESPAN_LOSS_MS,
 	buildTagGameActionTemplate,
 	canRetryTagGamePositionProofRefresh,
 	buildTagGameActionFilter,
@@ -58,7 +61,7 @@ function lobby(): TagGameState {
 }
 
 function runningGame(participant: TagGameState['participant'], ownerPubkey: string): TagGameState {
-	return { ...lobby(), phase: 'running', startedAt: 100, endsAt: 280, seed: 'b'.repeat(64), ownerPubkey, effect: 'benefit', transferAt: 100_000, participant, settledAtMs: 100_000 };
+	return { ...lobby(), phase: 'running', startedAt: 100, endsAt: 220, seed: 'b'.repeat(64), ownerPubkey, effect: 'benefit', transferAt: 100_000, participant, settledAtMs: 100_000 };
 }
 
 describe('player-hosted tag-game protocol and rules', () => {
@@ -127,25 +130,33 @@ describe('player-hosted tag-game protocol and rules', () => {
 		expect(isFreshTagGameLobby({ ...state, phase: 'ended' }, 100)).toBe(false);
 	});
 
-	it('creates seven deterministic reversals over exactly 180 seconds with 90 seconds per effect', () => {
+	it('creates five deterministic reversals over exactly 120 seconds with 60 seconds per effect', () => {
 		const first = createTagGameSchedule('public-seed');
 		const second = createTagGameSchedule('public-seed');
 		expect(first).toEqual(second);
-		expect(first).toHaveLength(8);
+		expect(first).toHaveLength(6);
 		expect(first.reduce((sum, part) => sum + part.durationMs, 0)).toBe(TAG_GAME_GAME_MS);
-		expect(first.filter((part) => part.effect === 'benefit').reduce((sum, part) => sum + part.durationMs, 0)).toBe(90_000);
-		expect(first.filter((part) => part.effect === 'calamity').reduce((sum, part) => sum + part.durationMs, 0)).toBe(90_000);
+		expect(first.filter((part) => part.effect === 'benefit')).toHaveLength(3);
+		expect(first.filter((part) => part.effect === 'calamity')).toHaveLength(3);
+		expect(first.filter((part) => part.effect === 'benefit').reduce((sum, part) => sum + part.durationMs, 0)).toBe(60_000);
+		expect(first.filter((part) => part.effect === 'calamity').reduce((sum, part) => sum + part.durationMs, 0)).toBe(60_000);
 		expect(first.every((part) => part.durationMs >= 10_000 && part.durationMs <= 40_000)).toBe(true);
 		expect(first.every((part, index) => index === 0 || part.effect !== first[index - 1].effect)).toBe(true);
-		expect(TAG_GAME_BENEFIT_POINTS_PER_SECOND * 90).toBe(4_500);
+		expect(TAG_GAME_BENEFIT_POINTS_PER_SECOND * 60).toBe(3_000);
+		expect(TAG_GAME_GAME_MS).toBe(120_000);
+		expect(TAG_GAME_FINAL_WAIT_MS).toBe(30_000);
+		expect(TAG_GAME_MAX_POINTS).toBe(3_000);
+		expect(TAG_GAME_MAX_LIFESPAN_LOSS_MS).toBe(216_000_000);
 	});
 
 	it('validates per-player cumulative caps before settlement', () => {
 		const state = lobby();
 		expect(cumulativeTagGameSettlement(state)).toEqual({ points: 0, lifespanLossMs: 0 });
-		expect(isValidTagGameState({ ...state, participant: [{ ...state.participant[0], points: 4_501 }] })).toBe(false);
-		expect(isValidTagGameState({ ...state, participant: [{ ...state.participant[0], lifespanLossMs: 324_000_001 }] })).toBe(false);
-		expect(isValidTagGameState({ ...state, participant: [{ ...state.participant[0], benefitMs: 90_001 }] })).toBe(false);
+		expect(TAG_GAME_MAX_POINTS).toBe(3_000);
+		expect(TAG_GAME_MAX_LIFESPAN_LOSS_MS).toBe(216_000_000);
+		expect(isValidTagGameState({ ...state, participant: [{ ...state.participant[0], points: 3_001 }] })).toBe(false);
+		expect(isValidTagGameState({ ...state, participant: [{ ...state.participant[0], lifespanLossMs: 216_000_001 }] })).toBe(false);
+		expect(isValidTagGameState({ ...state, participant: [{ ...state.participant[0], benefitMs: 60_001 }] })).toBe(false);
 	});
 
 	it('predicts lifespan from the already-effective remainder and only un-applied tag-game loss', () => {

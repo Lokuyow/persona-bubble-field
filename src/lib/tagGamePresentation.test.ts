@@ -75,7 +75,7 @@ describe('tag-game character presentation', () => {
 	it('recognizes only an observed running transition for the exact local Run', () => {
 		const hostMember = game.participant[0];
 		const countdown: TagGameState = { ...game, phase: 'countdown', participant: [{ ...hostMember, status: 'active' }] };
-		const running: TagGameState = { ...countdown, phase: 'running', startedAt: 2, endsAt: 182, seed: 'seed', ownerPubkey: host, effect: 'benefit' };
+		const running: TagGameState = { ...countdown, phase: 'running', startedAt: 2, endsAt: 122, seed: 'seed', ownerPubkey: host, effect: 'benefit' };
 		expect(isOwnTagGameStartTransition(countdown, running, host, 1)).toBe(true);
 		expect(isOwnTagGameStartTransition(null, running, host, 1)).toBe(false);
 		expect(isOwnTagGameStartTransition(running, { ...running, revision: 1 }, host, 1)).toBe(false);

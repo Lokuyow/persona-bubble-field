@@ -109,11 +109,13 @@ describe('Root / Identity / Run lifecycle', () => {
 		expect([first, second].filter(Boolean)).toHaveLength(1);
 	});
 
-	it('accepts a normal final settlement arriving after 180 seconds, applies its delta atomically, and releases the Run', async () => {
+	it('accepts a normal final settlement within 150 seconds from start, applies its delta atomically, and releases the Run', async () => {
 		const persona = await selected(ZERO_BUILD, { initialPoints: 200_000 });
 		const gameId = `game-${'b'.repeat(64)}`;
 		expect(await reserveTagGameParticipation(persona, gameId)).toBe(true);
-		expect(await activateTagGameRun(persona, gameId, TIME, TIME + 180_000, TIME + 210_000)).toBe(true);
+		expect(await activateTagGameRun(persona, gameId, TIME, TIME + 120_000, TIME + 150_001)).toBe(false);
+		expect(await activateTagGameRun(persona, gameId, TIME, TIME + 180_000, TIME + 210_000)).toBe(false);
+		expect(await activateTagGameRun(persona, gameId, TIME, TIME + 120_000, TIME + 150_000)).toBe(true);
 		expect(await clearPersona(persona)).toEqual({ kind: 'blocked', reason: 'tag-game' });
 		expect((await upgradePersonaAbility(persona, 'inferenceEfficiency')).kind).toBe('blocked');
 		expect(await trackRealtimeEventInstance(persona, 'cooperation-defection:official-instance')).toBe(true);
@@ -123,7 +125,7 @@ describe('Root / Identity / Run lifecycle', () => {
 		expect(partial.persona.gameState.points).toBe(persona.gameState.points + 250);
 		expect(partial.persona.gameState.lifespanExpiresAtMs).toBe(persona.gameState.lifespanExpiresAtMs - HOUR);
 		expect((await getRealtimeSettlementLedger(partial.persona))?.pendingInstanceIds).toEqual(['cooperation-defection:official-instance']);
-		vi.spyOn(Date, 'now').mockReturnValue(TIME + 185_000);
+		vi.spyOn(Date, 'now').mockReturnValue(TIME + 125_000);
 		const final = await applyTagGameCumulative(persona, gameId, 500, 2 * HOUR, true);
 		expect(final.kind).toBe('applied');
 		if (final.kind !== 'applied') return;
@@ -139,10 +141,10 @@ describe('Root / Identity / Run lifecycle', () => {
 		const persona = await selected();
 		const gameId = `game-${'d'.repeat(64)}`;
 		expect(await reserveTagGameParticipation(persona, gameId)).toBe(true);
-		expect(await activateTagGameRun(persona, gameId, TIME, TIME + 180_000, TIME + 210_000)).toBe(true);
+		expect(await activateTagGameRun(persona, gameId, TIME, TIME + 120_000, TIME + 150_000)).toBe(true);
 		const partial = await applyTagGameCumulative(persona, gameId, 300, HOUR, false);
 		expect(partial.kind).toBe('applied');
-		vi.spyOn(Date, 'now').mockReturnValue(TIME + 210_001);
+		vi.spyOn(Date, 'now').mockReturnValue(TIME + 150_001);
 		const recovered = restored(await loadOrCreateLifecycle());
 		expect(recovered.gameState.points).toBe(persona.gameState.points + 300);
 		expect(recovered.gameState.lifespanExpiresAtMs).toBe(persona.gameState.lifespanExpiresAtMs - HOUR);
@@ -155,7 +157,7 @@ describe('Root / Identity / Run lifecycle', () => {
 		if (started.kind !== 'started') throw new Error('Expected mending to start.');
 		const gameId = `game-${'e'.repeat(64)}`;
 		expect(await reserveTagGameParticipation(started.persona, gameId)).toBe(true);
-		expect(await activateTagGameRun(started.persona, gameId, TIME, TIME + 180_000, TIME + 210_000)).toBe(true);
+		expect(await activateTagGameRun(started.persona, gameId, TIME, TIME + 120_000, TIME + 150_000)).toBe(true);
 		vi.spyOn(Date, 'now').mockReturnValue(TIME + 60_000);
 		const projection = projectMending(started.persona.gameState, TIME + 60_000, started.persona.activeRun.rootBuild);
 		const survived = await applyTagGameCumulative(started.persona, gameId, 0, 60_000, false);
@@ -166,13 +168,13 @@ describe('Root / Identity / Run lifecycle', () => {
 		const deathGameId = gameId;
 		expect(await trackRealtimeEventInstance(afterWorkLoss, 'cooperation-defection:death-instance')).toBe(true);
 		const exit = { channelId: 'a'.repeat(64), position: { x: 4, y: 2 }, lastPositiveCreatedAt: Math.floor(TIME / 1000) };
-		const death = await applyTagGameCumulative(afterWorkLoss, deathGameId, 4_500, 324_000_000, true, () => exit);
+		const death = await applyTagGameCumulative(afterWorkLoss, deathGameId, 3_000, 216_000_000, true, () => exit);
 		expect(death.kind).toBe('transitioned');
 		const pending = await loadOrCreateLifecycle();
 		if (pending.kind !== 'selecting') throw new Error('Expected next-generation selection after tag-game death.');
 		const player = (await records(PLAYER_LIFECYCLE_STORE_NAME))['player-lifecycle'] as { identities: Array<{ pubkey: string; status: string }>; realtimeSettlementLedger: { tagGameReceipt?: { gameId: string; points: number; lifespanLossMs: number }; pendingInstanceIds: string[] } };
 		expect(player.identities.find((identity) => identity.pubkey === working.signer.pubkey)?.status).toBe('dead');
-		expect(player.realtimeSettlementLedger.tagGameReceipt).toEqual({ gameId: deathGameId, points: 4_500, lifespanLossMs: 324_000_000 });
+		expect(player.realtimeSettlementLedger.tagGameReceipt).toEqual({ gameId: deathGameId, points: 3_000, lifespanLossMs: 216_000_000 });
 		expect(player.realtimeSettlementLedger.pendingInstanceIds).toEqual([]);
 		expect(Object.values(await records(WORLD_WRITE_JOURNAL_STORE_NAME))[0]).toMatchObject({ exitSecond: expect.any(Number) });
 	});
@@ -182,7 +184,7 @@ describe('Root / Identity / Run lifecycle', () => {
 		const gameId = `game-${'c'.repeat(64)}`;
 		expect(await reserveTagGameParticipation(persona, gameId)).toBe(true);
 		const [activation, clearing] = await Promise.all([
-			activateTagGameRun(persona, gameId, TIME, TIME + 180_000, TIME + 210_000),
+			activateTagGameRun(persona, gameId, TIME, TIME + 120_000, TIME + 150_000),
 			clearPersona(persona)
 		]);
 		if (clearing.kind === 'cleared') expect(activation).toBe(false);

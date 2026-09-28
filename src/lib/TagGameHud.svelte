@@ -33,7 +33,7 @@
 				: localEffectPaused ? '安全停止中・効果停止'
 					: '効果停止中');
 	const currentEffect = $derived(scheduledEffect ?? game?.effect ?? null);
-	const effectName = $derived(currentEffect === 'benefit' ? '恩恵' : '災厄');
+	const effectName = $derived(currentEffect === 'benefit' ? '福' : '鬼');
 	const holderName = $derived(game?.ownerPubkey && game ? tagGameParticipantLabel(game, game.ownerPubkey, selfPubkey) : '未定');
 	const effectAction = $derived(currentEffect === 'benefit' ? '所持者以外が追いかけて奪う' : '所持者が追いかけて押し付ける');
 	const transferStatus = $derived(game ? tagGameTransferStatus(game, effectActive, nowMs) : '転移不可');

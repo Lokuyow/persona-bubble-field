@@ -4,7 +4,7 @@ import type { Filter } from 'nostr-tools/filter';
 export const TAG_GAME_KIND = 37070;
 export const TAG_GAME_ACTION_KIND = 27070;
 export const TAG_GAME_INDEX = 'tag-game';
-export const TAG_GAME_GAME_MS = 180_000;
+export const TAG_GAME_GAME_MS = 120_000;
 export const TAG_GAME_FINAL_WAIT_MS = 30_000;
 export const TAG_GAME_LOBBY_RENEW_MS = 30_000;
 export const TAG_GAME_LOBBY_MAX_AGE_SECONDS = 90;
@@ -13,9 +13,9 @@ export const TAG_GAME_PRECHECK_TIMEOUT_MS = 8_000;
 export const TAG_GAME_RESPONSE_TIMEOUT_MS = 8_000;
 export const TAG_GAME_NO_ACTIVITY_MS = 15_000;
 export const TAG_GAME_MAX_UNCONFIRMED_EFFECT_MS = 23_000;
-export const TAG_GAME_MAX_POINTS = 4_500;
-export const TAG_GAME_MAX_LIFESPAN_LOSS_MS = 324_000_000;
-export const TAG_GAME_MAX_EFFECT_MS = 90_000;
+export const TAG_GAME_MAX_POINTS = 3_000;
+export const TAG_GAME_MAX_LIFESPAN_LOSS_MS = 216_000_000;
+export const TAG_GAME_MAX_EFFECT_MS = 60_000;
 export const TAG_GAME_BENEFIT_POINTS_PER_SECOND = 50;
 export const TAG_GAME_LIFESPAN_LOSS_MS_PER_SECOND = 3_600_000;
 export const TAG_GAME_TRANSFER_COOLDOWN_MS = 2_000;
@@ -309,13 +309,13 @@ export function createTagGameSchedule(seed: string): readonly Readonly<{ duratio
 	for (const char of seed) { hash ^= char.charCodeAt(0); hash = Math.imul(hash, 16777619); }
 	let random = hash >>> 0;
 	const next = () => { random = (Math.imul(random, 1664525) + 1013904223) >>> 0; return random / 0x1_0000_0000; };
-	const composeNinety = (): number[] => {
+	const composeSixty = (): number[] => {
 		const values: number[] = [];
-		let remaining = 90;
-		for (let index = 0; index < 3; index++) {
-			const left = 3 - index;
-			const minimum = Math.max(10, remaining - 40 * left);
-			const maximum = Math.min(40, remaining - 10 * left);
+		let remaining = 60;
+		for (let index = 0; index < 2; index++) {
+			const intervalsAfter = 2 - index;
+			const minimum = Math.max(10, remaining - 40 * intervalsAfter);
+			const maximum = Math.min(40, remaining - 10 * intervalsAfter);
 			const seconds = minimum + Math.floor(next() * (maximum - minimum + 1));
 			values.push(seconds);
 			remaining -= seconds;
@@ -323,10 +323,13 @@ export function createTagGameSchedule(seed: string): readonly Readonly<{ duratio
 		values.push(remaining);
 		return values;
 	};
-	const benefits = composeNinety();
-	const calamities = composeNinety();
+	const benefits = composeSixty();
+	const calamities = composeSixty();
+	// Keep the existing seed-derived starting effect decision while using three intervals per effect.
+	next();
+	next();
 	const startWithBenefit = next() < 0.5;
-	return Array.from({ length: 8 }, (_, index) => ({
+	return Array.from({ length: 6 }, (_, index) => ({
 		durationMs: (index % 2 === 0
 			? (startWithBenefit ? benefits[index / 2] : calamities[index / 2])
 			: (startWithBenefit ? calamities[(index - 1) / 2] : benefits[(index - 1) / 2])) * 1000,

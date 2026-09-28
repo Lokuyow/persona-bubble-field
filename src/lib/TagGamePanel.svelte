@@ -3,7 +3,10 @@
 	import { Dialog } from 'bits-ui';
 	import { asset } from '$app/paths';
 	import X from '~icons/tabler/x';
+	import HelpCircle from '~icons/tabler/help-circle';
+	import ChevronDown from '~icons/tabler/chevron-down';
 	import ActionButton from '$lib/ActionButton.svelte';
+	import TagGameEffectSymbol from '$lib/TagGameEffectSymbol.svelte';
 	import { resolveCharacterFromPubkey } from '$lib/characterAssignment';
 	import { newlyConfirmedTagGameParticipants, tagGameCharacterName, tagGameConfirmedParticipants, tagGameParticipantLabel } from '$lib/tagGamePresentation';
 	import type { TagGameState } from '$lib/tagGame';
@@ -38,9 +41,8 @@
 	const joinableGames = $derived(selfPubkey && !reservationCurrent && !ownHostLobby ? games.filter((game) => game.phase === 'lobby' && game.hostPubkey !== selfPubkey && game.participant.length < 8) : []);
 	const GAME_SLOTS = Array.from({ length: 8 }, (_, index) => index);
 	let knownGames = new Map<string, TagGameState>();
-	let arrivalMessage = $state('');
 	let highlightedPubkeys = $state<readonly string[]>([]);
-	let arrivalTimeout: ReturnType<typeof setTimeout> | undefined;
+	let highlightTimeout: ReturnType<typeof setTimeout> | undefined;
 	$effect(() => {
 		const additions: Array<{ game: TagGameState; pubkey: string }> = [];
 		for (const game of games) {
@@ -48,13 +50,11 @@
 			knownGames.set(game.gameId, game);
 		}
 		if (!open || additions.length === 0) return;
-		const names = additions.map(({ game, pubkey }) => tagGameParticipantLabel(game, pubkey, selfPubkey));
-		arrivalMessage = `${names.join('、')}が参加しました`;
 		highlightedPubkeys = additions.map(({ pubkey }) => pubkey);
-		if (arrivalTimeout) clearTimeout(arrivalTimeout);
-		arrivalTimeout = setTimeout(() => { arrivalMessage = ''; highlightedPubkeys = []; arrivalTimeout = undefined; }, 3_500);
+		if (highlightTimeout) clearTimeout(highlightTimeout);
+		highlightTimeout = setTimeout(() => { highlightedPubkeys = []; highlightTimeout = undefined; }, 3_500);
 	});
-	onDestroy(() => { if (arrivalTimeout) clearTimeout(arrivalTimeout); });
+	onDestroy(() => { if (highlightTimeout) clearTimeout(highlightTimeout); });
 	function isHighlighted(pubkey: string): boolean { return highlightedPubkeys.includes(pubkey); }
 	function hostLabel(game: TagGameState): string {
 		if (game.hostPubkey === selfPubkey) return 'あなたの開催';
@@ -70,7 +70,20 @@
 			<Dialog.Overlay class="tag-game-dialog-overlay" />
 			<Dialog.Content class="tag-game-dialog-content" preventScroll={false}>
 				<header><Dialog.Title class="tag-game-title">鬼ごっこ</Dialog.Title><Dialog.Close class="action-button action-button-tertiary action-button-close" aria-label="閉じる"><X aria-hidden="true" /></Dialog.Close></header>
-				<p>最大8人、3分間のプレイヤー主催イベントです。募集参加中も脱出と能力強化を行えます。</p>
+				<section class="tag-game-intro" aria-label="鬼ごっこの概要">
+					<p class="tag-game-meta">2〜8人 · 2分</p>
+					<p class="tag-game-intro-line">福を奪い、鬼を押し付ける。</p>
+					<p class="tag-game-risk">鬼になった者は、毎秒1時間の寿命を失います。寿命が尽きれば死亡します。</p>
+					<details class="tag-game-rules">
+						<summary><span class="tag-game-rules-label"><HelpCircle aria-hidden="true" /> <span class="tag-game-rules-closed">ルールを見る</span><span class="tag-game-rules-open">ルールを閉じる</span></span><span class="tag-game-rules-chevron" aria-hidden="true"><ChevronDown /></span></summary>
+						<div class="tag-game-rules-content">
+							<div class="tag-game-effect-card tag-game-effect-benefit"><div class="tag-game-effect-heading"><span class="tag-game-effect-title"><svg class="tag-game-effect-symbol-icon" viewBox="0 0 32 32" aria-hidden="true" focusable="false"><TagGameEffectSymbol effect="benefit" presentation="rule" /></svg><strong>福</strong></span><strong>+50pt / 秒</strong></div><p>福を持たない者は、所持者にタッチして福を奪えます。</p></div>
+							<div class="tag-game-effect-card tag-game-effect-calamity"><div class="tag-game-effect-heading"><span class="tag-game-effect-title"><svg class="tag-game-effect-symbol-icon" viewBox="0 0 32 32" aria-hidden="true" focusable="false"><TagGameEffectSymbol effect="calamity" presentation="rule" /></svg><strong>鬼</strong></span><strong>寿命 −1時間 / 秒</strong></div><p>鬼は他の参加者にタッチして、鬼を押し付けられます。</p></div>
+							<section class="tag-game-rule-item"><h3>切り替え</h3><p>福と鬼は交互に切り替わります。</p></section>
+							<section class="tag-game-rule-item"><h3>タッチ</h3><p>隣接した相手にのみタッチできます。</p></section>
+						</div>
+					</details>
+				</section>
 				{#if createAllowed}<ActionButton variant={joinableGames.length === 0 ? 'primary' : 'secondary'} onclick={onCreate} disabled={busy}>鬼ごっこを開催</ActionButton>
 				{:else if ownHostLobby}<p class="reservation-state">募集を開催中</p>
 				{:else if reservationCurrent}<p class="reservation-state">{reservedStatus === 'pending' ? '参加申請済み（受理待ち）' : reservedStatus === 'active' ? '鬼ごっこに参加中' : '参加申請済み（参加登録済み）'}</p>
@@ -80,7 +93,6 @@
 					<p class="reservation-state">表示されていない開催への{reservedStatus === 'pending' ? '参加申請' : '参加登録'}があります。</p>
 					<ActionButton variant="tertiary" intent="cancel" data-tag-game-cancel-reservation={reservedGameId} onclick={() => onLeave(reservedGameId)} disabled={busy}>参加予約を取り消す</ActionButton>
 				{/if}
-				{#if arrivalMessage}<p class="tag-game-arrival" role="status" aria-live="polite">{arrivalMessage}</p>{/if}
 				<ul>
 					{#each games as game (game.gameId)}
 						{@const hostCharacter = resolveCharacterFromPubkey(game.hostPubkey)}
@@ -106,7 +118,7 @@
 									{/each}
 								</ol>
 							{/if}
-							{#if game.ownerPubkey}<p class="game-status">所持者 {tagGameParticipantLabel(game, game.ownerPubkey, selfPubkey)}・{game.effect === 'benefit' ? '恩恵' : '災厄'}{#if game.endsAt}・残り{Math.max(0, Math.ceil((game.endsAt * 1000 - nowMs) / 1000))}秒{/if}</p>{/if}
+							{#if game.ownerPubkey}<p class="game-status">所持者 {tagGameParticipantLabel(game, game.ownerPubkey, selfPubkey)}・{game.effect === 'benefit' ? '福' : '鬼'}{#if game.endsAt}・残り{Math.max(0, Math.ceil((game.endsAt * 1000 - nowMs) / 1000))}秒{/if}</p>{/if}
 							{#if game.phase === 'running' || game.phase === 'settling'}
 								{#if watchedGameId === game.gameId}<ActionButton variant="tertiary" onclick={onStopWatching} disabled={busy}>観戦を解除</ActionButton>
 								{:else if selfActiveGameId === null}<ActionButton variant="tertiary" data-tag-game-watch={game.gameId} onclick={() => onWatch(game.gameId)} disabled={busy}>観戦する</ActionButton>
@@ -115,7 +127,7 @@
 							{#if (game.phase === 'ended' || game.phase === 'interrupted') && game.startedAt}
 								<div class="results" aria-label="鬼ごっこ結果">
 									{#each game.participant as player (player.pubkey)}
-									<span>{tagGameParticipantLabel(game, player.pubkey, selfPubkey)}・{player.status === 'dead' ? '死亡' : player.status === 'left' ? '退出' : player.status === 'temporarily-ineligible' ? '一時対象外' : '参加'}・{player.points}pt・寿命-{Math.ceil(player.lifespanLossMs / 60_000)}分・恩恵{Math.floor(player.benefitMs / 1000)}秒・災厄{Math.floor(player.calamityMs / 1000)}秒</span>
+									<span>{tagGameParticipantLabel(game, player.pubkey, selfPubkey)}・{player.status === 'dead' ? '死亡' : player.status === 'left' ? '退出' : player.status === 'temporarily-ineligible' ? '一時対象外' : '参加'}・{player.points}pt・寿命-{Math.ceil(player.lifespanLossMs / 60_000)}分・福{Math.floor(player.benefitMs / 1000)}秒・鬼{Math.floor(player.calamityMs / 1000)}秒</span>
 									{/each}
 								</div>
 							{/if}
@@ -153,6 +165,36 @@
 	.host-identity { display: flex; align-items: center; gap: 8px; }
 	.host-identity .tag-game-avatar { position: static; width: 32px; height: 32px; object-fit: contain; flex: 0 0 auto; pointer-events: none; }
 	.reservation-state { margin: 0; font-weight: 600; }
+	.tag-game-intro { display: grid; gap: 8px; margin: 12px 0; }
+	.tag-game-intro p { margin: 0; }
+	.tag-game-meta { color: var(--text-secondary, #666); font-size: .9rem; }
+	.tag-game-intro-line { font-weight: 650; }
+	.tag-game-risk { padding: 9px 11px; border: 1px solid color-mix(in srgb, #b85d54 28%, var(--border-subtle, #d8dce0)); border-radius: 8px; background: color-mix(in srgb, #b85d54 8%, var(--surface, #fff)); color: color-mix(in srgb, #8f3932 78%, var(--text-primary, #20242a)); font-size: .9rem; line-height: 1.5; }
+	.tag-game-rules { border: 1px solid var(--action-tertiary-border, #727c82); border-radius: 10px; background: var(--action-tertiary-background, #f2f3f4); }
+	.tag-game-rules summary { display: flex; min-height: 44px; align-items: center; justify-content: space-between; gap: 12px; padding: 0 12px; border-radius: inherit; cursor: pointer; font-weight: 700; list-style: none; }
+	.tag-game-rules summary::-webkit-details-marker { display: none; }
+	.tag-game-rules summary:focus-visible { outline: 3px solid var(--color-focus-ring, #6dabb9); outline-offset: 2px; }
+	.tag-game-rules-label { display: inline-flex; align-items: center; gap: 8px; }
+	.tag-game-rules-label :global(svg), .tag-game-rules-chevron { width: 20px; height: 20px; }
+	.tag-game-rules-open { display: none; }
+	.tag-game-rules[open] { border-color: var(--action-tertiary-border, #727c82); }
+	.tag-game-rules[open] summary { border-radius: 10px 10px 0 0; }
+	.tag-game-rules[open] .tag-game-rules-closed { display: none; }
+	.tag-game-rules[open] .tag-game-rules-open { display: inline; }
+	.tag-game-rules[open] .tag-game-rules-chevron { transform: rotate(180deg); }
+	.tag-game-rules-content { display: grid; gap: 12px; padding: 12px; border-top: 1px solid var(--action-tertiary-border, #727c82); line-height: 1.5; }
+	.tag-game-effect-card { padding: 12px; border: 1px solid color-mix(in srgb, var(--tag-game-effect-accent) 38%, var(--border-subtle, #d8dce0)); border-left: 3px solid var(--tag-game-effect-accent); border-radius: 8px; background: color-mix(in srgb, var(--tag-game-effect-accent) 8%, var(--surface, #fff)); color: var(--text-primary, #20242a); }
+	.tag-game-effect-benefit { --tag-game-effect-accent: #b38a2e; }
+	.tag-game-effect-calamity { --tag-game-effect-accent: #8065ad; }
+	.tag-game-effect-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+	.tag-game-effect-title { display: inline-flex; align-items: center; gap: 6px; }
+	.tag-game-effect-symbol-icon { display: block; width: 28px; height: 28px; flex: 0 0 auto; overflow: visible; }
+	.tag-game-effect-heading strong:last-child { text-align: right; }
+	.tag-game-effect-card p, .tag-game-rule-item p { margin: 6px 0 0; font-size: .92rem; line-height: 1.5; }
+	.tag-game-rule-item h3 { margin: 0; font-size: .95rem; }
+	.tag-game-rules-content > .tag-game-rule-item { display: block; }
+	@media (prefers-reduced-motion: no-preference) { .tag-game-rules-chevron { transition: transform 140ms ease; } }
+	@media (prefers-reduced-motion: reduce) { .tag-game-rules-chevron { transition: none; } }
 	.participant-count { width: 100%; }
 	.participant-slots { display: grid; width: 100%; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin: 0; padding: 0; list-style: none; }
 	.participant-slot { display: grid; min-width: 0; min-height: 54px; grid-template-columns: 28px minmax(0, 1fr); grid-template-rows: 1fr auto; align-items: center; column-gap: 5px; padding: 4px; overflow: hidden; border: 1px solid var(--border-subtle, #d8dce0); border-radius: 8px; background: color-mix(in srgb, var(--surface, #fff) 94%, transparent); }
@@ -161,7 +203,6 @@
 	.participant-slot small { min-width: 0; overflow: hidden; color: var(--text-secondary, #666); text-overflow: ellipsis; white-space: nowrap; font-size: .65rem; }
 	.participant-slot-empty { display: grid; place-items: center; border-style: dashed; color: var(--text-secondary, #888); font-size: .72rem; }
 	.participant-slot-arrival { animation: participant-arrival 850ms ease-out 2; }
-	.tag-game-arrival { padding: 7px 10px; border-radius: 7px; background: var(--color-accent-soft, #edf2f6); color: var(--text-primary, #20242a); font-weight: 700; }
 	header { position: sticky; top: -20px; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: -20px -20px 0; padding: 20px; background: var(--surface, #fff); }
 	:global(.tag-game-title) { margin: 0; }
 	ul { display: grid; gap: 10px; margin: 16px 0 0; padding: 0; list-style: none; }
