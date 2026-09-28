@@ -380,6 +380,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	const tagGameSelfSettledGames = new Set<string>();
 	const tagGameSelfSettledBeforeGameEnd = new Set<string>();
 	const tagGameUsedLastConfirmedFinalization = new Set<string>();
+	const tagGameOrganizerFinalStates = new Set<string>();
 	const pendingTagGameResults: Array<{ game: TagGameState; note: string | null }> = [];
 	let latestTagGameWorldStates = $state.raw(new Map<string, ParsedWorldStateEvent>());
 	const appliedTagGameWorldStateIds = new Set<string>();
@@ -2622,10 +2623,15 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 
 	function tagGameSettlementNote(game: TagGameState): string | null {
 		const hostFinalConfirmed = game.phase === 'ended' && game.endReason === 'normal' && game.endsAt !== undefined && game.finalizedAt === game.endsAt;
+		const organizerFinalConfirmed = tagGameOrganizerFinalStates.has(game.gameId) && (hostFinalConfirmed || game.phase === 'interrupted');
 		const localFallback = tagGameUsedLastConfirmedFinalization.has(game.gameId) || (game.phase === 'ended' && game.endReason === 'normal' && game.endsAt !== undefined && game.finalizedAt !== game.endsAt);
-		if (tagGameSelfSettledBeforeGameEnd.has(game.gameId)) return 'あなたの成績はゲーム途中の死亡時に確定した値です。ほかの参加者は開催回の最終状態を表示しています。';
+		if (tagGameSelfSettledBeforeGameEnd.has(game.gameId)) {
+			return organizerFinalConfirmed
+				? 'あなたの成績はゲーム途中の死亡時に確定した値です。ほかの参加者の成績は開催者が確定した最終状態に基づいています。'
+				: 'あなたの成績はゲーム途中の死亡時に確定した値です。開催者の正式な最終状態を取得できなかったため、ほかの参加者の成績は最後に確認した開催状態に基づいています。';
+		}
 		if (tagGameSelfSettledGames.has(game.gameId) && localFallback) {
-			return hostFinalConfirmed
+			return organizerFinalConfirmed
 				? '開催者の最終状態は受信しました。あなたの成績は通信障害時に最後に確認した値で確定済みのため、その値を表示しています。ほかの参加者は開催者の最終状態を表示しています。'
 				: '開催者の最終状態を受信できなかったため、あなたの成績は最後に確認済みの値で確定しています。ほかの参加者も最後に確認した状態を表示しています。';
 		}
@@ -2715,16 +2721,23 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			return;
 		}
 		if (previous && createdAt > previous.createdAt) tagGameConflictSince.delete(state.gameId);
-		if ((state.phase === 'running' || state.phase === 'settling') && personaSnapshot) {
+		if (personaSnapshot) {
 			const ownMember = state.participant.find((member) => member.pubkey === personaSnapshot?.signer.pubkey && member.runNumber === personaSnapshot.activeRun.runNumber);
 			const currentRunLock = personaSnapshot.tagGame?.lock;
 			const currentRunReservation = personaSnapshot.tagGame?.reservation;
 			const matchesCurrentRun = [currentRunLock, currentRunReservation].some((scope) => scope?.gameId === state.gameId &&
 				scope.runNumber === personaSnapshot?.activeRun.runNumber && scope.identity.pubkey === personaSnapshot?.signer.pubkey);
-			const liveParticipation = delivery === 'live' && ownMember && ownMember.status !== 'registered';
-			const restoredParticipation = delivery === 'bootstrap' && ownMember && (ownMember.status === 'active' || ownMember.status === 'temporarily-ineligible') && matchesCurrentRun;
-			if (liveParticipation || restoredParticipation) tagGameAutoEligible.add(state.gameId);
+			const currentPhase = state.phase === 'running' || state.phase === 'settling';
+			const terminalPhase = state.phase === 'ended' || state.phase === 'interrupted';
+			const liveParticipation = delivery === 'live' && currentPhase && ownMember && ownMember.status !== 'registered';
+			const restoredParticipation = delivery === 'bootstrap' && currentPhase && ownMember &&
+				(ownMember.status === 'active' || ownMember.status === 'temporarily-ineligible') && matchesCurrentRun;
+			const unsettledTerminalRun = delivery === 'bootstrap' && terminalPhase && ownMember && ownMember.status !== 'registered' &&
+				currentRunLock?.gameId === state.gameId && currentRunLock.runNumber === personaSnapshot.activeRun.runNumber &&
+				currentRunLock.identity.pubkey === personaSnapshot.signer.pubkey;
+			if (liveParticipation || restoredParticipation || unsettledTerminalRun) tagGameAutoEligible.add(state.gameId);
 		}
+		if (state.phase === 'ended' || state.phase === 'interrupted') tagGameOrganizerFinalStates.add(state.gameId);
 		if (delivery === 'live' && !document.hidden) notifyTagGameStateAudio(previous, state, createdAt);
 		if (previous && previous.state.phase === 'running' && state.phase === 'running' &&
 			previous.state.holderChallengeId !== state.holderChallengeId) {
