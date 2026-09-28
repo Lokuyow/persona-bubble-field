@@ -317,6 +317,7 @@ export async function installDelayedRelay(page: Page, options: {
 	realtimeTerminal?: 'eose' | 'closed' | 'timeout';
 	realtimePublishOutcome?: 'accepted' | 'rejected' | 'echo' | 'no-response';
 	rejectTracePublishes?: boolean;
+	deferTracePublishes?: boolean;
 	traceRoots?: readonly object[];
 	traceReplies?: readonly object[];
 	deferTraceRoots?: boolean;
@@ -327,7 +328,7 @@ export async function installDelayedRelay(page: Page, options: {
 	hiddenSubscriptionLimit?: number;
 } = {}): Promise<void> {
 	const events = options.primaryEvents ?? testEvents();
-	await page.addInitScript(({ authoritativeRelays, primaryEvents, historyMessages, realtimeEvents, deferPrimaryEvents, deferRealtimeEvents, primaryTerminal, realtimeTerminal, realtimePublishOutcome, rejectTracePublishes, traceRoots, traceReplies, deferTraceRoots, deferTraceReplies, silentReplyRelays, persistAcrossReload, testWorldConfig, hiddenSubscriptionLimit }) => {
+	await page.addInitScript(({ authoritativeRelays, primaryEvents, historyMessages, realtimeEvents, deferPrimaryEvents, deferRealtimeEvents, primaryTerminal, realtimeTerminal, realtimePublishOutcome, rejectTracePublishes, deferTracePublishes, traceRoots, traceReplies, deferTraceRoots, deferTraceReplies, silentReplyRelays, persistAcrossReload, testWorldConfig, hiddenSubscriptionLimit }) => {
 		const WORLD_STATE_KIND = 30079;
 		const TAG_GAME_KIND = 37070;
 		type Listener = (event?: { type: string; data?: string; code?: number; reason?: string }) => void;
@@ -388,6 +389,7 @@ export async function installDelayedRelay(page: Page, options: {
 			rejectTagGameStatePublishes: false,
 			rejectTracePublishes: rejectTracePublishes ?? false,
 			deferReplyPublishes: false,
+			deferTracePublishes: deferTracePublishes ?? false,
 			echoRepliesBeforeResult: false,
 			replyOutcome: 'accepted' as 'accepted' | 'rejected' | 'duplicate'
 		};
@@ -415,9 +417,9 @@ export async function installDelayedRelay(page: Page, options: {
 		};
 		const respondPublish = (socket: FakeWebSocket, event: Record<string, unknown>) => {
 			const labels = (event.tags as string[][] | undefined) ?? [];
-			const isDeathTrace = event.kind === 42 && labels.some((tag) => tag[0] === 'l' && tag[1] === 'trace' && tag[2] === 'io.github.lokuyow.persona-bubble-field');
-			const isNormalMessage = event.kind === 42 && labels.some((tag) => tag[0] === 'l' && tag[1] === 'chat' && tag[2] === 'io.github.lokuyow.persona-bubble-field') && !isDeathTrace;
-			const reject = isNormalMessage && state.rejectMessagePublishes || event.kind === WORLD_STATE_KIND && state.rejectPositionPublishes || event.kind === TAG_GAME_KIND && state.rejectTagGameStatePublishes || isDeathTrace && state.rejectTracePublishes ||
+			const isTrace = event.kind === 42 && labels.some((tag) => tag[0] === 'l' && ['trace', 'trace:manual', 'trace:death'].includes(tag[1]) && tag[2] === 'io.github.lokuyow.persona-bubble-field');
+			const isNormalMessage = event.kind === 42 && labels.some((tag) => tag[0] === 'l' && tag[1] === 'chat' && tag[2] === 'io.github.lokuyow.persona-bubble-field');
+			const reject = isNormalMessage && state.rejectMessagePublishes || event.kind === WORLD_STATE_KIND && state.rejectPositionPublishes || event.kind === TAG_GAME_KIND && state.rejectTagGameStatePublishes || isTrace && state.rejectTracePublishes ||
 				event.kind === 1111 && state.replyOutcome !== 'accepted';
 			if (event.kind === WORLD_STATE_KIND && reject) state.rejectedPositionPublishIds.push(String(event.id));
 			const notice = event.kind === 1111 && state.replyOutcome === 'duplicate' ? 'duplicate: already stored' : reject ? 'blocked: test rejection' : '';
@@ -569,7 +571,7 @@ export async function installDelayedRelay(page: Page, options: {
 						respondRealtimePublish(this, event);
 					} else if (event.kind === 1111 && silentReplyRelaySet.has(new URL(this.url).toString())) {
 						// Keep this Relay's publication pending to verify the early-success path.
-					} else if (event.kind === 1111 && state.deferReplyPublishes || event.kind === WORLD_STATE_KIND && state.deferPositionPublishes) {
+					} else if (event.kind === 1111 && state.deferReplyPublishes || event.kind === WORLD_STATE_KIND && state.deferPositionPublishes || event.kind === 42 && state.deferTracePublishes && (event.tags as string[][]).some((tag) => tag[0] === 'l' && ['trace:manual', 'trace:death'].includes(tag[1]))) {
 						pendingPublishes.push({ socket: this, event });
 					} else respondPublish(this, event);
 					return;
@@ -648,6 +650,7 @@ export async function installDelayedRelay(page: Page, options: {
 				releasePublishes: (kind: number) => {
 					if (kind === 1111) state.deferReplyPublishes = false;
 					if (kind === WORLD_STATE_KIND) state.deferPositionPublishes = false;
+					if (kind === 42) state.deferTracePublishes = false;
 					for (let index = pendingPublishes.length - 1; index >= 0; index--) {
 						if (pendingPublishes[index].event.kind !== kind) continue;
 						const pending = pendingPublishes.splice(index, 1)[0];
@@ -756,7 +759,7 @@ export async function installDelayedRelay(page: Page, options: {
 				}
 			}
 		});
-	}, {
+		}, {
 		authoritativeRelays: AUTHORITATIVE_RELAYS,
 		primaryEvents: events,
 		historyMessages: options.historyMessages ?? [],
@@ -772,6 +775,7 @@ export async function installDelayedRelay(page: Page, options: {
 		realtimeTerminal: options.realtimeTerminal ?? 'eose',
 		realtimePublishOutcome: options.realtimePublishOutcome ?? 'accepted',
 		rejectTracePublishes: options.rejectTracePublishes ?? false,
+		deferTracePublishes: options.deferTracePublishes ?? false,
 		persistAcrossReload: options.persistAcrossReload ?? false,
 		testWorldConfig: options.testWorldConfig,
 		hiddenSubscriptionLimit: options.hiddenSubscriptionLimit

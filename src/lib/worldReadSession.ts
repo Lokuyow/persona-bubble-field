@@ -17,11 +17,13 @@ import {
 import {
 	buildWorldStateEventTemplate,
 	buildDeathTraceEventTemplate,
+	buildManualTraceEventTemplate,
 	buildTraceReplyTemplate,
 	buildWorldMessageTemplate,
 	finalizeWorldEvent,
 	parseWorldStateEvent,
 	parseWorldMessage,
+	parseTraceEvent,
 	type ChannelReference,
 	type ParsedWorldStateEvent,
 	type ParsedTraceReply,
@@ -43,8 +45,12 @@ import type { Event as NostrEvent, VerifiedEvent } from 'nostr-tools/pure';
 import type { Filter } from 'nostr-tools/filter';
 import {
 	confirmWorldPosition,
+	claimManualTraceOutbox,
 	loadWorldWriteJournal,
 	reserveWorldPositive,
+	reserveManualTraceOutbox,
+	settleManualTraceOutbox,
+	type ManualTraceOutbox,
 	type ActiveSignerSnapshot,
 	type CommittedTerminalExit,
 	type SelfWriteAuthorizationResult,
@@ -148,6 +154,10 @@ export type SelfMessagePublishResult =
 	| Readonly<{ kind: 'succeeded'; eventId: string }>
 	| Readonly<{ kind: 'blocked' | 'duplicate' | 'pending' | 'retryable' | 'unavailable' }>;
 
+export type ManualTracePublishResult =
+	| Readonly<{ kind: 'succeeded'; eventId: string; points: number }>
+	| Readonly<{ kind: 'retryable' | 'pending' | 'blocked' | 'unavailable'; points?: number }>;
+
 export type TerminalExitPreparation =
 	| Readonly<{ kind: 'prepared'; event: VerifiedEvent; parsed: ParsedWorldStateEvent }>
 	| Readonly<{ kind: 'unavailable'; reason: 'disposed' | 'not-ready' | 'missing-self' | 'missing-position' | 'identity-mismatch' }>;
@@ -175,6 +185,7 @@ export type WorldReadSessionOptions = Readonly<{
 	onStatusChanged: (status: WorldReadConnectionStatus) => void;
 	onSelfPositionWriteStateChanged?: (state: SelfPositionWriteState) => void;
 	onSelfMessageAvailabilityChanged?: (state: SelfMessageAvailability) => void;
+	onManualTraceStatusChanged?: (status: 'idle' | 'sending' | 'unknown' | 'confirmed') => void;
 	authorizeSelfWrite?: () => Promise<SelfWriteAuthorizationResult>;
 	onSelfWriteAuthorizationLost?: () => void;
 	realtime?: RealtimeSessionOptions;
@@ -284,6 +295,8 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	let terminalExitAttempted = false;
 	let deathTraceEnabled = false;
 	let deathTraceAttempted = false;
+	let manualTraceRetryTimer: ReturnType<typeof setTimeout> | null = null;
+	let manualTraceAttemptSequence = 0;
 
 	function emitStatus(next: WorldReadConnectionStatus): void {
 		status = next;
@@ -391,6 +404,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	function prepareTerminalExit(expectedPubkey?: string, exitReason?: 'death' | 'clear'): TerminalExitPreparation {
 		if (disposed) return { kind: 'unavailable', reason: 'disposed' };
 		terminal = true;
+		if (manualTraceRetryTimer !== null) { clearTimeout(manualTraceRetryTimer); manualTraceRetryTimer = null; }
 		if (!selfSigner || !channel) return { kind: 'unavailable', reason: 'missing-self' };
 		if (expectedPubkey !== undefined && expectedPubkey !== selfSigner.pubkey) return { kind: 'unavailable', reason: 'identity-mismatch' };
 		if (!started || !selfReadReady || !transport) return { kind: 'unavailable', reason: 'not-ready' };
@@ -1379,7 +1393,102 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		}
 		if (event.kind === 'message') applyLiveMessage(event.event, event.rawEvent, Date.now());
 		else if (event.kind === 'world-state') applyLivePosition(event.event, Date.now());
-		else void reconcileTraceRoots([event.rawEvent]);
+		else {
+			void reconcileTraceRoots([event.rawEvent]);
+			if (event.event.source === 'manual' && activeManualTrace?.event.id === event.event.id && journalScope) {
+				const attempt = activeManualTrace;
+				void settleManualTraceOutbox(journalScope, event.event.id, attempt.attemptId, 'confirmed').catch(() => {});
+				activeManualTrace = null;
+			}
+		}
+	}
+
+	let activeManualTrace: { event: VerifiedEvent; attemptId: string } | null = null;
+
+	function nextManualTraceAttemptId(): string {
+		manualTraceAttemptSequence += 1;
+		return `${Date.now().toString(36)}-${manualTraceAttemptSequence.toString(36)}`;
+	}
+
+	function scheduleManualTraceRecovery(delayMs = 20_000): void {
+		if (disposed || terminal || !journalScope || manualTraceRetryTimer !== null) return;
+		manualTraceRetryTimer = setTimeout(() => {
+			manualTraceRetryTimer = null;
+			void recoverManualTraceOutbox();
+		}, delayMs);
+	}
+
+	async function sendManualTraceOutbox(outbox: ManualTraceOutbox, points: number, attemptId: string): Promise<ManualTracePublishResult> {
+		if (disposed || terminal || !transport || !channel || !selfSigner || !journalScope) return { kind: 'unavailable', points };
+		const parsed = parseTraceEvent(outbox.event, channel.channelId);
+		if (!parsed || parsed.source !== 'manual' || parsed.pubkey !== selfSigner.pubkey) return { kind: 'unavailable', points };
+		options.onManualTraceStatusChanged?.('sending');
+		if (!await authorizeSelfWrite() || disposed || terminal) {
+			await settleManualTraceOutbox(journalScope, outbox.event.id, attemptId, 'unknown').catch(() => false);
+			options.onManualTraceStatusChanged?.('unknown');
+			return { kind: 'unavailable', points };
+		}
+		activeManualTrace = { event: outbox.event, attemptId };
+		try {
+			const handle = transport.publishSelf?.(outbox.event, selfSigner.pubkey);
+			let published: boolean;
+			if (handle) {
+				void handle.settled.catch(() => []);
+				published = await handle.firstSuccess;
+				if (!published) await handle.settled.catch(() => []);
+			} else {
+				published = reachedAuthoritativeRelay(await transport.publish(outbox.event));
+			}
+			if (disposed || terminal) return { kind: 'unavailable', points };
+			if (!published && activeManualTrace?.event.id === outbox.event.id) {
+				activeManualTrace = null;
+				await settleManualTraceOutbox(journalScope, outbox.event.id, attemptId, 'unknown').catch(() => false);
+				options.onManualTraceStatusChanged?.('unknown');
+				scheduleManualTraceRecovery();
+				return { kind: 'retryable', points };
+			}
+			await settleManualTraceOutbox(journalScope, outbox.event.id, attemptId, 'confirmed').catch(() => false);
+			if (activeManualTrace?.event.id === outbox.event.id) activeManualTrace = null;
+			await reconcileTraceRoots([outbox.event]);
+			options.onManualTraceStatusChanged?.('confirmed');
+			return { kind: 'succeeded', eventId: outbox.event.id, points };
+		} catch {
+			if (activeManualTrace?.event.id === outbox.event.id) activeManualTrace = null;
+			await settleManualTraceOutbox(journalScope, outbox.event.id, attemptId, 'unknown').catch(() => false);
+			options.onManualTraceStatusChanged?.('unknown');
+			scheduleManualTraceRecovery();
+			return { kind: 'retryable', points };
+		}
+	}
+
+	async function recoverManualTraceOutbox(): Promise<ManualTracePublishResult | null> {
+		if (disposed || terminal || !journalScope) return null;
+		const attemptId = nextManualTraceAttemptId();
+		const claimed = await claimManualTraceOutbox(journalScope, attemptId).catch(() => ({ kind: 'corrupt' as const }));
+		if (claimed.kind === 'pending') { options.onManualTraceStatusChanged?.('sending'); scheduleManualTraceRecovery(); return { kind: 'pending' }; }
+		if (claimed.kind !== 'existing' && claimed.kind !== 'reserved') { options.onManualTraceStatusChanged?.('idle'); return null; }
+		return sendManualTraceOutbox(claimed.outbox, claimed.points, attemptId);
+	}
+
+	async function publishManualTrace(content: string): Promise<ManualTracePublishResult> {
+		if (disposed || terminal || !selfSigner || !transport || !channel || !journalScope || !bootstrapComplete || !selfJoinedThisSession) return { kind: 'unavailable' };
+		if (pendingSelfMessage || pendingTraceReply || activeManualTrace) return { kind: 'pending' };
+		const trimmed = content.trim();
+		if (!trimmed) return { kind: 'blocked' };
+		const attemptId = nextManualTraceAttemptId();
+		const existing = await claimManualTraceOutbox(journalScope, attemptId).catch(() => ({ kind: 'corrupt' as const }));
+		if (existing.kind === 'pending') return { kind: 'pending' };
+		if (existing.kind === 'existing') return sendManualTraceOutbox(existing.outbox, existing.points, attemptId);
+		if (existing.kind !== 'empty') return { kind: 'unavailable' };
+		if (!await authorizeSelfWrite() || terminal) return { kind: 'unavailable' };
+		const self = getParticipant(currentPresence(), selfSigner.pubkey);
+		if (!self || self.status !== 'active') return { kind: 'blocked' };
+		const event = finalizeWorldEvent(buildManualTraceEventTemplate({ channel, content: trimmed, position: self.position, createdAt: Math.floor(Date.now() / 1000) }), selfSigner.secretKey);
+		const reservation = await reserveManualTraceOutbox(journalScope, event, attemptId).catch(() => ({ kind: 'corrupt' as const }));
+		if (reservation.kind === 'insufficient-points') return { kind: 'blocked' };
+		if (reservation.kind === 'pending') return { kind: 'pending' };
+		if (reservation.kind !== 'reserved' && reservation.kind !== 'existing') return { kind: 'unavailable' };
+		return sendManualTraceOutbox(reservation.outbox, reservation.points, attemptId);
 	}
 
 	function resolveReplyTarget(rootId: string, targetId: string) {
@@ -1546,6 +1655,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			emitSelfPositionWriteState({ kind: 'ready' });
 			refreshSelfMessageAvailability();
 			refreshTraceReadSnapshot();
+			void recoverManualTraceOutbox();
 			if (bootstrapComplete) {
 				traceStartupReadiness = startTraceNotification();
 				if (options.realtime?.registry.length && options.realtime.startImmediately !== false) void startRealtimeSubscription();
@@ -1604,6 +1714,8 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		publishMessage(content: string, speechType: SpeechType, messageDedupeId?: string, onDispatched?: () => void): Promise<SelfMessagePublishResult> {
 			return publishMessage(content, speechType, messageDedupeId, onDispatched);
 		},
+
+		publishManualTrace,
 
 		refreshSelfActivity,
 
@@ -1674,6 +1786,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		dispose(): void {
 			if (disposed) return;
 			disposed = true;
+			if (manualTraceRetryTimer !== null) { clearTimeout(manualTraceRetryTimer); manualTraceRetryTimer = null; }
 			traceConversationGeneration += 1;
 			pendingLiveEvents.splice(0);
 			transport?.dispose();

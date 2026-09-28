@@ -17,12 +17,15 @@ import {
 	completeRealtimeEventInstance,
 	clearPersona,
 	confirmWorldPosition,
+	claimManualTraceOutbox,
 	collectMending,
 	exportClearedIdentityNsec,
 	getRealtimeSettlementLedger,
 	loadOrCreateLifecycle,
 	loadWorldWriteJournal,
 	reserveWorldPositive,
+	reserveManualTraceOutbox,
+	settleManualTraceOutbox,
 	selectIdentity,
 	startMending,
 	trackRealtimeEventInstance,
@@ -38,7 +41,7 @@ import {
 	type SelectIdentityOptions
 } from './rootIdentity';
 import type { RootBuild } from './rootProgression';
-import { buildWorldStateEventTemplate } from './nostrProtocol';
+import { buildManualTraceEventTemplate, buildWorldStateEventTemplate } from './nostrProtocol';
 import { projectMending } from './mending';
 
 const TIME = 1_700_000_000_000;
@@ -700,6 +703,67 @@ describe('Root / Identity / Run lifecycle', () => {
 		expect(results.filter((result) => result.kind === 'cleared')).toHaveLength(1);
 		const lifecycle = (await records(PLAYER_LIFECYCLE_STORE_NAME))['player-lifecycle'] as { rootPoints: number; mode: { kind: string } };
 		expect(lifecycle).toMatchObject({ rootPoints: 1, mode: { kind: 'selecting' } });
+	});
+
+	it('recovers the same signed manual trace after a crashed send and lets clear finish after an unknown result', async () => {
+		const persona = await selected(ZERO_BUILD, { initialPoints: 101_000, initialLifespanMs: 500 * DAY });
+		const storedRootBefore = await records(ROOT_SECRET_STORE_NAME);
+		const storedPlayerBefore = (await records(PLAYER_LIFECYCLE_STORE_NAME))['player-lifecycle'] as { identities: unknown[] };
+		const scope = { identity: persona.activeRun.identity, runNumber: persona.activeRun.runNumber, channelId: 'a'.repeat(64) };
+		const event = finalizeEvent(buildManualTraceEventTemplate({
+			channel: { channelId: scope.channelId, relayHint: 'wss://nos.lol/' }, content: 'a trace', position: { x: 3, y: 4 }, createdAt: TIME / 1000
+		}), persona.signer.secretKey);
+		const reserved = await reserveManualTraceOutbox(scope, event, 'first-attempt');
+		expect(reserved).toMatchObject({ kind: 'reserved', outbox: { event: { id: event.id }, status: 'dispatching' }, points: 100_900 });
+		expect(DATABASE_VERSION).toBe(8);
+		expect(await records(ROOT_SECRET_STORE_NAME)).toEqual(storedRootBefore);
+		expect((await records(PLAYER_LIFECYCLE_STORE_NAME))['player-lifecycle']).toMatchObject({ identities: storedPlayerBefore.identities });
+		if (reserved.kind !== 'reserved') throw new Error('Expected a durable reservation.');
+		expect(await clearPersona(restored(await loadOrCreateLifecycle()))).toEqual({ kind: 'blocked', reason: 'manual-trace-sending' });
+
+		// A fresh browser claims the expired lease and must reuse the durable signature and ID.
+		vi.mocked(Date.now).mockReturnValue(TIME + 21_000);
+		const recovered = await claimManualTraceOutbox(scope, 'restart-attempt');
+		expect(recovered).toMatchObject({ kind: 'existing', outbox: { event: { id: event.id }, status: 'dispatching', attemptId: 'restart-attempt' }, points: 100_900 });
+		expect(await settleManualTraceOutbox(scope, event.id, 'restart-attempt', 'unknown')).toBe(true);
+		const journal = (await records(WORLD_WRITE_JOURNAL_STORE_NAME))[`${scope.channelId}\u0000${persona.signer.pubkey}`] as { pendingManualTrace: { event: { id: string }; status: string } };
+		expect(journal.pendingManualTrace).toMatchObject({ event: { id: event.id }, status: 'unknown' });
+		const differentSignature = finalizeEvent(buildManualTraceEventTemplate({
+			channel: { channelId: scope.channelId, relayHint: 'wss://nos.lol/' }, content: 'a different retry signature', position: { x: 3, y: 4 }, createdAt: TIME / 1000 + 1
+		}), persona.signer.secretKey);
+		const retry = await reserveManualTraceOutbox(scope, differentSignature, 'same-operation-retry', TIME + 22_000);
+		expect(retry).toMatchObject({ kind: 'existing', outbox: { event: { id: event.id }, status: 'dispatching' }, points: 100_900 });
+		expect(retry.kind === 'existing' || retry.kind === 'reserved' ? retry.outbox.event.id : '').not.toBe(differentSignature.id);
+
+		// Unknown is durable but does not create an indefinite lifecycle lock.
+		vi.mocked(Date.now).mockReturnValue(TIME + 365 * DAY);
+		const clearable = restored(await loadOrCreateLifecycle());
+		expect((await clearPersona(clearable)).kind).toBe('cleared');
+		const terminalJournal = (await records(WORLD_WRITE_JOURNAL_STORE_NAME))[`${scope.channelId}\u0000${persona.signer.pubkey}`] as { pendingManualTrace: { status: string } };
+		expect(terminalJournal.pendingManualTrace.status).toBe('terminal');
+	});
+
+	it('retires an unresolved outbox on death when no terminal exit can be prepared and carries no points into the next Run', async () => {
+		const persona = await selected(ZERO_BUILD, { initialPoints: 500, initialLifespanMs: 1_000 });
+		const channelId = 'b'.repeat(64);
+		const scope = { identity: persona.activeRun.identity, runNumber: persona.activeRun.runNumber, channelId };
+		const event = finalizeEvent(buildManualTraceEventTemplate({
+			channel: { channelId, relayHint: 'wss://nos.lol/' }, content: 'unknown at death', position: { x: 3, y: 4 }, createdAt: TIME / 1000
+		}), persona.signer.secretKey);
+		const reserved = await reserveManualTraceOutbox(scope, event, 'death-attempt');
+		expect(reserved).toMatchObject({ kind: 'reserved', points: 400 });
+		vi.mocked(Date.now).mockReturnValue(TIME + 1_001);
+		const dying = restored(await loadOrCreateLifecycle());
+		expect(await transitionExpiredPersona(dying)).toMatchObject({ kind: 'transitioned' });
+		const oldJournal = (await records(WORLD_WRITE_JOURNAL_STORE_NAME))[`${channelId}\u0000${persona.signer.pubkey}`] as { pendingManualTrace: { event: { id: string }; status: string } };
+		expect(oldJournal.pendingManualTrace).toMatchObject({ event: { id: event.id }, status: 'terminal' });
+		const nextSelection = await loadOrCreateLifecycle();
+		if (nextSelection.kind !== 'selecting') throw new Error('Expected selection after death.');
+		const next = await selectIdentity(nextSelection.selection.generation, nextSelection.selection.candidates[0], ZERO_BUILD);
+		if (next.kind !== 'selected') throw new Error('Expected a new Run.');
+		expect(next.persona.gameState.points).toBe(0);
+		const nextScope = { identity: next.persona.activeRun.identity, runNumber: next.persona.activeRun.runNumber, channelId };
+		expect(await claimManualTraceOutbox(nextScope, 'new-run-attempt')).toEqual({ kind: 'empty' });
 	});
 
 	it('reuses a cleared Identity for a fresh Run and permits nsec only after clear', async () => {

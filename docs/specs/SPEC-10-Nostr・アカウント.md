@@ -97,9 +97,9 @@ NIP-32のnamespaceは公開された語彙であり、認証・所有権・ア�
 kind 42はproject namespaceのself-labelによって、専用client内では次のsemantic classへ排他的に分類する。
 
 - 通常chat: `l=chat` が1つあり、`l=trace` / `l=trace:*` がない
-- explicit Trace: `l=trace` と、対応するsource label `l=trace:death` がそれぞれ1つあり、`l=chat` がない
+- explicit Trace: `l=trace` と、対応するsource label `l=trace:manual` または `l=trace:death` がそれぞれ1つあり、`l=chat` がない
 
-通常chatには必要な場合だけ `speech:shout` または `speech:monologue` を追加する。death Last Wordsはexplicit Traceであり、`l=chat`、`speech:*`、`d` tagを持たない。通常chatとTraceの両方に解釈できる、またはsource labelが重複・矛盾するkind 42はfail closedとする。
+通常chatには必要な場合だけ `speech:shout` または `speech:monologue` を追加する。任意Traceとdeath Last Wordsはexplicit Traceであり、`l=chat`、`speech:*`、`d` tagを持たない。任意Traceは現在のcanonical `w` positionを持つ。通常chatとTraceの両方に解釈できる、namespaceが不一致、またはsource labelが欠落・重複・矛盾するkind 42はfail closedとする。
 
 ### 発言タイプのラベル
 

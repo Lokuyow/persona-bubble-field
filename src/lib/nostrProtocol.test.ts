@@ -9,6 +9,7 @@ import {
 	TRACE_REPLY_KIND,
 	buildWorldStateEventTemplate,
 	buildDeathTraceEventTemplate,
+	buildManualTraceEventTemplate,
 	buildCharacterProfileTemplate,
 	buildWorldStateFilter,
 	buildTraceDirectReplyFilter,
@@ -92,6 +93,15 @@ function signedDeathTrace(content = 'I was here'): VerifiedEvent {
 		content,
 		position: { x: 7, y: 3 },
 		createdAt: 1_700_000_001
+	}), TEST_SECRET_KEY);
+}
+
+function signedManualTrace(content = 'I chose to leave this trace'): VerifiedEvent {
+	return finalizeWorldEvent(buildManualTraceEventTemplate({
+		channel,
+		content,
+		position: { x: 7, y: 3 },
+		createdAt: 1_700_000_002
 	}), TEST_SECRET_KEY);
 }
 
@@ -693,7 +703,7 @@ describe('Nostr protocol foundation', () => {
 			kinds: [42],
 			'#e': [CHANNEL_ID],
 			'#L': [PROTOTYPE_NAMESPACE],
-			'#l': ['chat', 'trace'],
+			'#l': ['chat', 'trace', 'trace:manual', 'trace:death'],
 			since: 1_700_000_000
 		});
 		expect(buildWorldMessageFilters({ channelId: CHANNEL_ID, since: 1_700_000_000 })).toEqual([
@@ -701,7 +711,7 @@ describe('Nostr protocol foundation', () => {
 				kinds: [42],
 				'#e': [CHANNEL_ID],
 				'#L': [PROTOTYPE_NAMESPACE],
-				'#l': ['chat', 'trace'],
+				'#l': ['chat', 'trace', 'trace:manual', 'trace:death'],
 				since: 1_700_000_000
 			},
 			{
@@ -730,7 +740,10 @@ describe('Nostr protocol foundation', () => {
 				kinds: [42], '#e': [CHANNEL_ID], '#L': [PROTOTYPE_NAMESPACE], '#l': ['chat'], limit: 1000
 			},
 			{
-				kinds: [42], '#e': [CHANNEL_ID], '#L': [PROTOTYPE_NAMESPACE], '#l': ['trace'], limit: 1000
+				kinds: [42], '#e': [CHANNEL_ID], '#L': [PROTOTYPE_NAMESPACE], '#l': ['trace:manual'], limit: 1000
+			},
+			{
+				kinds: [42], '#e': [CHANNEL_ID], '#L': [PROTOTYPE_NAMESPACE], '#l': ['trace:death'], limit: 1000
 			}
 		]);
 		expect(buildTraceReplyFilter({ rootId: CHANNEL_ID })).toEqual({
@@ -799,6 +812,27 @@ describe('Nostr protocol foundation', () => {
 		const event = signedDeathTrace();
 		expect(parseWorldMessage(event, CHANNEL_ID)).toBeNull();
 		expect(parseTraceEvent(event, CHANNEL_ID)).not.toBeNull();
+	});
+
+	it('builds and parses manual traces as explicit, speech-neutral kind 42 events', () => {
+		const event = signedManualTrace();
+		expect(event.kind).toBe(CHANNEL_MESSAGE_KIND);
+		expect(event.tags).toContainEqual(['l', 'trace', PROTOTYPE_NAMESPACE]);
+		expect(event.tags).toContainEqual(['l', 'trace:manual', PROTOTYPE_NAMESPACE]);
+		expect(event.tags.some((tag) => tag[0] === 'l' && tag[1] === 'chat')).toBe(false);
+		expect(event.tags.some((tag) => tag[0] === 'l' && tag[1]?.startsWith('speech:'))).toBe(false);
+		expect(parseWorldMessage(event, CHANNEL_ID)).toBeNull();
+		expect(parseTraceEvent(event, CHANNEL_ID)).toMatchObject({ source: 'manual', content: 'I chose to leave this trace', position: { x: 7, y: 3 } });
+		for (const mutate of [
+			(candidate: VerifiedEvent) => { candidate.tags.push(['l', 'chat', PROTOTYPE_NAMESPACE]); },
+			(candidate: VerifiedEvent) => { candidate.tags.push(['l', 'trace:death', PROTOTYPE_NAMESPACE]); },
+			(candidate: VerifiedEvent) => { candidate.tags[4][2] = 'another-namespace'; },
+			(candidate: VerifiedEvent) => { candidate.tags.push(['L', 'other-namespace']); }
+		]) {
+			const invalid = signedManualTrace();
+			mutate(invalid);
+			expect(parseTraceEvent(resign(invalid), CHANNEL_ID)).toBeNull();
+		}
 	});
 
 	it('fails closed for ambiguous kind 42 chat and trace labels', () => {
