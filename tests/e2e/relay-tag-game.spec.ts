@@ -2122,7 +2122,7 @@ test('host silence is detected only while the local Relay connection is active',
 	await preparePlayer(page, selfSecret, nowMs);
 	await moveRelaySelfTo(page, { x: 7, y: 5 });
 	await openTagGameTerminal(page);
-	const remoteHostSecret = fixtureSecret(51);
+	const remoteHostSecret = fixtureSecret(20);
 	const remoteHostPubkey = getPublicKey(remoteHostSecret);
 	const joinerPubkey = getPublicKey(selfSecret);
 	const transitionSeed = Array.from({ length: 10_000 }, (_, index) => `host-silence-${index}`).find((candidate) => {
@@ -2199,20 +2199,25 @@ test('host silence is detected only while the local Relay connection is active',
 	await expect(holder.locator('.tag-game-effect-aura .oni-aura-outline')).toHaveCount(0);
 	const fukuViewport = page.viewportSize();
 	if (!fukuViewport) throw new Error('Expected a fixed viewport for Fuku symbol layout checks');
+	await page.getByRole('dialog', { name: '鬼ごっこ' }).getByRole('button', { name: '閉じる' }).click();
+	await expect(page.getByRole('dialog', { name: '鬼ごっこ' })).toBeHidden();
 	await page.setViewportSize({ width: 1280, height: 800 });
 	await expect.poll(() => holder.evaluate((element) => element.getBoundingClientRect().width)).toBe(76);
 	const desktopFukuLayout = await readEffectSymbolLayout(holder);
+	expectMalletBottomRightOfAvatarAndOutsideFace(desktopFukuLayout);
+	await expectMalletDoesNotCoverVisibleNameText(holder);
 	await page.setViewportSize({ width: 390, height: 844 });
 	await expect.poll(() => holder.evaluate((element) => element.getBoundingClientRect().width)).toBe(50);
 	const mobileFukuLayout = await readEffectSymbolLayout(holder);
-	expectMalletBottomRightOfAvatarAndOutsideFace(desktopFukuLayout);
 	expectMalletHeadAndShaftToMeet(desktopFukuLayout);
 	expectFukuHaloVisibleAroundAvatar(desktopFukuLayout);
 	expectMalletBottomRightOfAvatarAndOutsideFace(mobileFukuLayout);
+	await expectMalletDoesNotCoverVisibleNameText(holder);
 	expectMalletHeadAndShaftToMeet(mobileFukuLayout);
 	expectFukuHaloVisibleAroundAvatar(mobileFukuLayout);
 	await page.setViewportSize(fukuViewport);
 	await expect.poll(() => holder.evaluate((element) => element.getBoundingClientRect().width)).toBe(76);
+	await openTagGameTerminal(page);
 	await page.emulateMedia({ reducedMotion: 'reduce' });
 	const reducedMotionAnimations = await holder.evaluate((element) => [...element.querySelectorAll<SVGElement>('*')]
 		.map((child) => getComputedStyle(child).animationName).filter((name) => name !== 'none'));
