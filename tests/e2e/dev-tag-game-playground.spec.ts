@@ -16,6 +16,8 @@ test.describe('DEV Tag Game Playground', () => {
 		await expect(page.locator('.participant')).toHaveCount(3);
 		await expect(page.locator('[data-unified-status-hud]')).toHaveCount(0);
 		await expect(page.getByLabel('Select sandbox character')).toHaveValue('020');
+		const selectedCharacterSrc = await page.locator('.participant[data-self="true"] .avatar img').getAttribute('src');
+		expect(selectedCharacterSrc).toBeTruthy();
 
 		const self = page.locator('.participant[data-self="true"]');
 		const beforeKeyboard = await self.getAttribute('data-position');
@@ -30,6 +32,7 @@ test.describe('DEV Tag Game Playground', () => {
 		await expect(panel).toBeVisible();
 		await panel.getByRole('button', { name: '鬼ごっこを開催' }).click();
 		await expect(panel).toContainText('参加者 1 / 8人');
+		await expect(panel.locator('.host-identity img')).toHaveAttribute('src', selectedCharacterSrc!);
 		await expect(panel.getByRole('button', { name: '開始を提案' })).toBeDisabled();
 		await panel.getByRole('button', { name: 'BOTを参加させる' }).click();
 		await expect(panel).toContainText('参加者 3 / 8人');

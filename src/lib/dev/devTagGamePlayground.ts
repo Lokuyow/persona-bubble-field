@@ -1,12 +1,14 @@
 import { debugSetParticipantPosition, moveParticipant, type PresenceField, type PresenceState } from '../presence';
 import { isBlockedFacilityCell } from '../fieldFacilities';
+import { DEV_WORLD_SELF_ID } from '../devWorldSandbox';
 import { TAG_GAME_BENEFIT_POINTS_PER_SECOND, TAG_GAME_GAME_MS, TAG_GAME_LIFESPAN_LOSS_MS_PER_SECOND, TAG_GAME_MAX_EFFECT_MS, TAG_GAME_MAX_LIFESPAN_LOSS_MS, TAG_GAME_MAX_POINTS, TAG_GAME_TRANSFER_COOLDOWN_MS, createTagGameSchedule, isTagGameTransferCooldownActive, tagGameScheduledEffectAt, type TagGameParticipant, type TagGameState } from '../tagGame';
 import type { Direction, GridPosition } from '../geometry';
 
 export const DEV_TAG_GAME_SELF_PUBKEY = 'f'.repeat(64);
 export const DEV_TAG_GAME_BOT_A_PUBKEY = 'b'.repeat(64);
 export const DEV_TAG_GAME_BOT_B_PUBKEY = 'c'.repeat(64);
-export const DEV_TAG_GAME_SELF_ID = 'you';
+// The synthetic game identity is projected onto DEV World's selectable `you` participant.
+export const DEV_TAG_GAME_SELF_ID = DEV_WORLD_SELF_ID;
 export const DEV_TAG_GAME_BOT_A_ID = DEV_TAG_GAME_BOT_A_PUBKEY;
 export const DEV_TAG_GAME_BOT_B_ID = DEV_TAG_GAME_BOT_B_PUBKEY;
 export const DEV_TAG_GAME_ACTORS = [DEV_TAG_GAME_SELF_PUBKEY, DEV_TAG_GAME_BOT_A_PUBKEY, DEV_TAG_GAME_BOT_B_PUBKEY] as const;
@@ -79,7 +81,7 @@ export class DevTagGamePlayground {
 	propose(nowMs: number): DevTagGamePlaygroundSnapshot {
 		const game = this.state.game;
 		if (!game || game.phase !== 'lobby' || game.hostPubkey !== DEV_TAG_GAME_SELF_PUBKEY || game.participant.length < 2) return this.save(game, nowMs, '参加者が2人以上になるまで開始を提案できません。');
-		const proposed = { ...game, phase: 'proposed' as const, proposalId: PROPOSAL_ID, proposalDeadline: Math.floor((nowMs + 60_000) / 1_000), revision: game.revision + 1, updatedAt: Math.floor(nowMs / 1_000), participant: game.participant.map((member) => member.pubkey === game.hostPubkey ? { ...member, consentProposalId: PROPOSAL_ID, consented: true } : { ...member, consented: false }) };
+		const proposed = { ...game, phase: 'proposed' as const, proposalId: PROPOSAL_ID, proposalDeadline: Math.floor((nowMs + 30_000) / 1_000), revision: game.revision + 1, updatedAt: Math.floor(nowMs / 1_000), participant: game.participant.map((member) => member.pubkey === game.hostPubkey ? { ...member, consentProposalId: PROPOSAL_ID, consented: true } : { ...member, consented: false }) };
 		return this.save(proposed, nowMs, '開始を提案しました。BOTの同意を待っています。');
 	}
 
@@ -179,7 +181,7 @@ export class DevTagGamePlayground {
 		const effect = tagGameScheduledEffectAt(game, nowMs);
 		const actorAllowed = effect === 'benefit' ? actorPubkey !== game.ownerPubkey : actorPubkey === game.ownerPubkey;
 		const targetAllowed = effect === 'benefit' ? targetPubkey === game.ownerPubkey : targetPubkey !== game.ownerPubkey;
-		if (!effect || !actorAllowed || !targetAllowed) return this.save(game, nowMs, effect === 'benefit' ? '恩恵中は所持者以外が所持者を追いかけます。' : '災厄中は所持者がほかの参加者を追いかけます。');
+		if (!effect || !actorAllowed || !targetAllowed) return this.save(game, nowMs, effect === 'benefit' ? '福のときは所持者以外が所持者を追いかけます。' : '鬼のときは所持者がほかの参加者を追いかけます。');
 		if (isTagGameTransferCooldownActive({ transferAtMs: game.transferAt, startedAtMs: game.startedAt * 1_000, nowMs })) return this.save(game, nowMs, '転移クールダウン中です。');
 		const actor = this.state.presence.participants.find((entry) => entry.id === (actorPubkey === DEV_TAG_GAME_SELF_PUBKEY ? DEV_TAG_GAME_SELF_ID : actorPubkey));
 		const target = this.state.presence.participants.find((entry) => entry.id === (targetPubkey === DEV_TAG_GAME_SELF_PUBKEY ? DEV_TAG_GAME_SELF_ID : targetPubkey));

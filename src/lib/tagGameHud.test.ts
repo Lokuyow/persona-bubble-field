@@ -16,7 +16,7 @@ function running(effect: 'benefit' | 'calamity' = 'benefit'): TagGameState {
 	const player = { pubkey: SELF, runNumber: 4, registeredAt: 99, status: 'active' as const, points: 100, lifespanLossMs: 7_200_000, benefitMs: 2_000, calamityMs: 2_000 };
 	const seed = effect === 'benefit' ? benefitSeed : calamitySeed;
 	return {
-		gameId: GAME_ID, hostPubkey: OTHER, phase: 'running', revision: 1, updatedAt: 100, startedAt: 100, endsAt: 280,
+		gameId: GAME_ID, hostPubkey: OTHER, phase: 'running', revision: 1, updatedAt: 100, startedAt: 100, endsAt: 220,
 		seed, ownerPubkey: SELF, effect, transferAt: 100_000, participant: [player], settledAtMs: 100_000
 	};
 }
@@ -79,14 +79,14 @@ describe('tag-game HUD projection', () => {
 		const challenge = projectTagGameHud({ ...baseInput(game), game: { ...game, holderChallengeId: 'd'.repeat(32) } });
 		expect(challenge.predictedPoints).toBe(0);
 		expect(challenge.benefitRateActive).toBe(false);
-		const throughEnd = projectTagGameHud({ ...baseInput(game), holderActivityAtMs: 280_000, nowMs: 280_000 });
-		const afterEnd = projectTagGameHud({ ...baseInput(game), holderActivityAtMs: 280_000, nowMs: 290_000,
+		const throughEnd = projectTagGameHud({ ...baseInput(game), holderActivityAtMs: 220_000, nowMs: 220_000 });
+		const afterEnd = projectTagGameHud({ ...baseInput(game), holderActivityAtMs: 220_000, nowMs: 230_000,
 			game: { ...game, phase: 'settling' } });
 		expect(throughEnd.predictedPoints).toBeGreaterThan(0);
 		expect(afterEnd.predictedPoints).toBe(throughEnd.predictedPoints);
 		expect(afterEnd.points).toBe(throughEnd.points);
 		expect(afterEnd.benefitRateActive).toBe(false);
-		const fallback = projectTagGameHud({ ...baseInput(game), holderActivityAtMs: 280_000, nowMs: 310_000 });
+		const fallback = projectTagGameHud({ ...baseInput(game), holderActivityAtMs: 220_000, nowMs: 250_000 });
 		expect(fallback.predictedPoints).toBe(0);
 		expect(fallback.points).toBe(1_060);
 	});
@@ -104,16 +104,16 @@ describe('tag-game HUD projection', () => {
 
 	it('keeps the final confirmed cumulative value available without predicting after the game ends', () => {
 		const game = { ...running('benefit'), phase: 'ended' as const, participant: [{ ...running('benefit').participant[0], points: 250, benefitMs: 5_000 }] };
-		const final = projectTagGameHud({ ...baseInput(game), nowMs: 300_000 });
+		const final = projectTagGameHud({ ...baseInput(game), nowMs: 250_000 });
 		expect(final.points).toBe(1_210);
 		expect(final.predictedPoints).toBe(0);
 		expect(final.benefitRateActive).toBe(false);
 	});
 
 	it('formats a stable minute-second countdown and clamps at zero', () => {
-		expect(formatTagGameRemainingTime(180_000, 13_000)).toBe('02:47');
-		expect(formatTagGameRemainingTime(180_000, 180_000)).toBe('00:00');
-		expect(formatTagGameRemainingTime(180_000, 181_001)).toBe('00:00');
+		expect(formatTagGameRemainingTime(120_000, 13_000)).toBe('01:47');
+		expect(formatTagGameRemainingTime(120_000, 120_000)).toBe('00:00');
+		expect(formatTagGameRemainingTime(120_000, 121_001)).toBe('00:00');
 	});
 
 	it('uses the shared two-second cooldown projection only during active effects and keeps status text for other restrictions', () => {
@@ -136,7 +136,7 @@ describe('tag-game HUD projection', () => {
 		expect(tagGameCooldownRemainingMs(game, true, 102_000)).toBe(0);
 	});
 
-	it('does not show transfer availability during organizer waits or final settlement and ends leaving at 180 seconds', () => {
+	it('does not show transfer availability during organizer waits or final settlement and ends leaving at 120 seconds', () => {
 		const game = running('benefit');
 		const effectBoundary = 100_000 + createTagGameSchedule(game.seed!)[0].durationMs;
 		const organizerWait = { ...game, settledAtMs: effectBoundary - 1_000 };

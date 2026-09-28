@@ -6,7 +6,7 @@
 	import { isBlockedFacilityCell } from '$lib/fieldFacilities';
 	import type { GridPosition } from '$lib/geometry';
 	import type { Direction } from '$lib/geometry';
-	import { DEV_TAG_GAME_BOT_A_PUBKEY, DEV_TAG_GAME_BOT_B_PUBKEY, type DevTagGamePlaygroundSnapshot } from './devTagGamePlayground';
+	import { DEV_TAG_GAME_BOT_A_PUBKEY, DEV_TAG_GAME_BOT_B_PUBKEY, DEV_TAG_GAME_SELF_PUBKEY, type DevTagGamePlaygroundSnapshot } from './devTagGamePlayground';
 	type Props = {
 		scenario: DevScenario;
 		selectedCharacterId: string;
@@ -129,7 +129,7 @@
 			</div>
 			<div class="tag-game-local-totals" aria-label="Local tag-game totals">
 				{#each tagGamePlayground.game?.participant ?? [] as player (player.pubkey)}
-					<span>{player.pubkey === 'f'.repeat(64) ? '自分' : player.pubkey === botA ? 'BOT A' : 'BOT B'}: {player.points}pt・寿命-{Math.ceil(player.lifespanLossMs / 60_000)}分・恩恵{Math.floor(player.benefitMs / 1000)}秒・災厄{Math.floor(player.calamityMs / 1000)}秒</span>
+					<span>{player.pubkey === DEV_TAG_GAME_SELF_PUBKEY ? '自分' : player.pubkey === botA ? 'BOT A' : 'BOT B'}: {player.points}pt・寿命-{Math.ceil(player.lifespanLossMs / 60_000)}分・福{Math.floor(player.benefitMs / 1000)}秒・鬼{Math.floor(player.calamityMs / 1000)}秒</span>
 				{/each}
 			</div>
 			{#if tagGamePlayground.message}<p role="status">{tagGamePlayground.message}</p>{/if}

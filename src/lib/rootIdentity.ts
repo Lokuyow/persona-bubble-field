@@ -17,7 +17,7 @@ import {
 } from './personaGameState';
 import { createMendingJob, settleMending, projectMending, type MendingJob } from './mending';
 import { isRootBuildAllocatable, isValidRootBuild, type RootBuild, rootBuildCost } from './rootProgression';
-import { TAG_GAME_MAX_POINTS, TAG_GAME_MAX_LIFESPAN_LOSS_MS } from './tagGame';
+import { TAG_GAME_FINAL_WAIT_MS, TAG_GAME_GAME_MS, TAG_GAME_MAX_POINTS, TAG_GAME_MAX_LIFESPAN_LOSS_MS } from './tagGame';
 
 export const DATABASE_NAME = 'persona-bubble-field-account';
 export const DATABASE_VERSION = 8;
@@ -1073,7 +1073,7 @@ export async function releaseTagGameParticipation(expected: PersonaSnapshot, gam
 
 /** Atomically races the game start against Run close and establishes the lifecycle operation gate. */
 export async function activateTagGameRun(expected: PersonaSnapshot, gameId: string, startedAtMs: number, endsAtMs: number, finalDeadlineMs: number): Promise<boolean> {
-	if (!Number.isSafeInteger(startedAtMs) || !Number.isSafeInteger(endsAtMs) || !Number.isSafeInteger(finalDeadlineMs) || endsAtMs - startedAtMs !== 180_000 || finalDeadlineMs - endsAtMs !== 30_000) return false;
+	if (!Number.isSafeInteger(startedAtMs) || !Number.isSafeInteger(endsAtMs) || !Number.isSafeInteger(finalDeadlineMs) || endsAtMs - startedAtMs !== TAG_GAME_GAME_MS || finalDeadlineMs - endsAtMs !== TAG_GAME_FINAL_WAIT_MS) return false;
 	return withLifecycle(async (db) => {
 		const tx = db.transaction(PLAYER_LIFECYCLE_STORE_NAME, 'readwrite');
 		try {

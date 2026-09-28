@@ -705,6 +705,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 			}
 			return roles;
 		}
+		if (game.phase !== 'running') return roles;
 		for (const member of game.participant) {
 			const latest = latestTagGameWorldStates.get(member.pubkey);
 			if ((member.status === 'active' || member.status === 'temporarily-ineligible') && latest?.state === 'active' && latest.runNumber === member.runNumber) {

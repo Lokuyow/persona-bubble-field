@@ -3,6 +3,7 @@
 	import type { BubbleTone } from './bubblePresentation';
 	import type { GridPosition, WorldPoint } from './geometry';
 	import CharacterAvatar from './CharacterAvatar.svelte';
+	import TagGameEffectSymbol from './TagGameEffectSymbol.svelte';
 
 	type Props = Readonly<{
 		id: string;
@@ -57,13 +58,45 @@
 	data-tag-game-holder-transfer={tagGameRole === 'holder' && tagGameHolderTransferId !== null ? tagGameHolderTransferId : undefined}
 	style={`left: ${world.x}px; top: ${world.y}px; --tag-game-touch-x: ${tagGameTouchAttemptOffset?.x ?? 0}px; --tag-game-touch-y: ${tagGameTouchAttemptOffset?.y ?? 0}px;`}
 >
+	{#if tagGameRole === 'holder' && tagGameEffect}
+		<span class={['tag-game-effect-aura', `tag-game-effect-aura-${tagGameEffect}`, { 'tag-game-effect-aura-paused': !tagGameEffectActive }]} aria-hidden="true">
+			<svg viewBox="0 0 76 76" focusable="false">
+				{#if tagGameEffect === 'benefit'}
+					<g class="fuku-halo" fill="none" pointer-events="none">
+						<circle class="fuku-halo-soft-ring" cx="38" cy="38" r="37.4" stroke="#d94a36" stroke-width="5" opacity=".28" />
+						<circle class="fuku-halo-light-ring" cx="38" cy="38" r="39.2" stroke="#fff9f1" stroke-width="1.7" opacity=".66" />
+						<g class="fuku-halo-rays" transform="translate(38 38)">
+							<g class="fuku-halo-rays-warm" fill="#df4c36" stroke="#fff6ed" stroke-width=".9" opacity=".69">
+								<path d="M-1.5-35 L-2.9-47 L2.9-47 L1.5-35Z" transform="rotate(-121)" />
+								<path d="M-1.5-35 L-2.9-47 L2.9-47 L1.5-35Z" transform="rotate(-72)" />
+								<path d="M-1.5-35 L-2.9-47 L2.9-47 L1.5-35Z" transform="rotate(-25)" />
+								<path d="M-1.5-35 L-2.9-47 L2.9-47 L1.5-35Z" transform="rotate(99)" />
+							</g>
+							<g class="fuku-halo-rays-light" fill="#fffdfa" stroke="#dd5a44" stroke-width=".95" opacity=".76">
+								<path d="M-1.4-35 L-2.6-45.5 L2.6-45.5 L1.4-35Z" transform="rotate(-143)" />
+								<path d="M-1.4-35 L-2.6-45.5 L2.6-45.5 L1.4-35Z" transform="rotate(-96)" />
+								<path d="M-1.4-35 L-2.6-45.5 L2.6-45.5 L1.4-35Z" transform="rotate(-48)" />
+								<path d="M-1.4-35 L-2.6-45.5 L2.6-45.5 L1.4-35Z" transform="rotate(0)" />
+								<path d="M-1.4-35 L-2.6-45.5 L2.6-45.5 L1.4-35Z" transform="rotate(123)" />
+							</g>
+						</g>
+					</g>
+				{:else}
+					<g class="oni-smoke oni-smoke-left"><path d="M20 4C12 -2 5 7 7 13C-5 15 -10 28 -4 34C-13 41 -9 52 1 54C-1 64 10 70 22 70C16 61 18 55 22 49C15 42 15 37 22 31C14 23 16 15 20 4Z" fill="#68458e" fill-opacity=".27" stroke="#b19bd1" stroke-opacity=".4" stroke-width="1.35" /></g>
+					<g class="oni-smoke oni-smoke-right"><path d="M57 16C69 8 78 18 75 27C86 31 87 39 78 45C89 55 77 65 65 64C64 69 58 71 52 72C58 63 57 58 53 52C63 45 64 36 57 29Z" fill="#392948" fill-opacity=".29" stroke="#a68bc5" stroke-opacity=".44" stroke-width="1.4" /></g>
+					<path class="oni-smoke-trail" d="M17 51C6 54 6 65 19 70C27 72 30 77 38 77C46 77 54 74 58 67" fill="none" stroke="#8a69b1" stroke-opacity=".25" stroke-width="3.2" stroke-linecap="round" />
+					<path class="oni-smoke-particle" d="M3 27L6 30L3 33L0 30ZM80 40L84 44L80 48L76 44ZM65 70L68 73L65 76L62 73Z" fill="#76539a" fill-opacity=".3" />
+				{/if}
+			</svg>
+		</span>
+	{/if}
 	<button
 		class="participant-profile-trigger"
 		data-field-gesture-origin="selectable"
 		type="button"
 		ondragstart={(event) => event.preventDefault()}
 		aria-label={`${character.name} のプロフィールを開く`}
-		 onclick={(event) => {
+		onclick={(event) => {
 			event.stopPropagation();
 			const trigger = event.currentTarget as HTMLButtonElement;
 			if (self && onSelfProfile) onSelfProfile(trigger);
@@ -73,9 +106,12 @@
 		<CharacterAvatar class={`avatar avatar-${color}`} {character} />
 		<span class="participant-name" class:participant-name-self={self} aria-hidden="true">{character.name}</span>
 	</button>
-	{#if tagGameRole === 'holder'}
-		<span class={['tag-game-holder-label', { 'tag-game-holder-label-paused': !tagGameEffectActive }]} role="img" aria-label={`${tagGameEffect === 'benefit' ? '恩恵' : '災厄'}${tagGameEffectActive ? '' : '・効果停止中'}`}>
-			<strong>{tagGameEffect === 'benefit' ? '恩恵' : '災厄'}</strong>
+	{#if tagGameRole === 'holder' && tagGameEffect}
+		<span class={['tag-game-effect-visuals', `tag-game-effect-visuals-${tagGameEffect}`, { 'tag-game-effect-visuals-paused': !tagGameEffectActive }]}
+			role="img" aria-label={`${tagGameEffect === 'benefit' ? '福' : '鬼'}${tagGameEffectActive ? '' : '・効果停止中'}`}>
+			<svg viewBox="0 0 76 76" aria-hidden="true" focusable="false">
+				<TagGameEffectSymbol effect={tagGameEffect} />
+			</svg>
 		</span>
 	{:else if tagGameRole === 'participant'}
 		<span class="tag-game-participant-mark" role="img" aria-label="鬼ごっこ参加者"></span>
@@ -94,6 +130,7 @@
 
 	.participant-profile-trigger {
 		position: relative;
+		z-index: 1;
 		display: block;
 		width: 100%;
 		height: 100%;
@@ -138,12 +175,12 @@
 		font-weight: 800;
 	}
 
-	[data-tag-game-role='holder'] .participant-profile-trigger::after {
+	[data-tag-game-holder-transfer] .participant-profile-trigger::after {
 		position: absolute;
-		inset: 1px;
-		border: 3px solid #2e8b57;
+		inset: -2px;
+		border: 2px solid rgba(255, 236, 130, .94);
 		border-radius: 50%;
-		box-shadow: 0 0 0 2px rgba(255, 255, 255, .9), 0 0 10px rgba(46, 139, 87, .68);
+		box-shadow: 0 0 0 2px rgba(255, 255, 255, .86), 0 0 12px rgba(255, 236, 130, .8);
 		content: '';
 		pointer-events: none;
 	}
@@ -158,37 +195,37 @@
 		pointer-events: none;
 	}
 	.tag-game-touch-attempt { animation: tag-game-lunge 200ms ease-out; }
-	[data-tag-game-holder-transfer] .participant-profile-trigger::after { animation: tag-game-holder-transfer 600ms ease-out; }
+	[data-tag-game-holder-transfer] .participant-profile-trigger::after { animation: tag-game-holder-transfer 600ms ease-out both; }
 	@keyframes tag-game-lunge {
 		0%, 100% { translate: 0 0; }
 		34% { translate: var(--tag-game-touch-x) var(--tag-game-touch-y); }
 	}
 	@keyframes tag-game-holder-transfer {
-		0% { box-shadow: 0 0 0 2px rgba(255, 255, 255, .9), 0 0 3px 2px rgba(255, 236, 130, .9); }
-		100% { box-shadow: 0 0 0 2px rgba(255, 255, 255, .9), 0 0 10px rgba(46, 139, 87, .68); }
+		0% { opacity: 0; transform: scale(.88); }
+		24% { opacity: 1; transform: scale(1.06); }
+		100% { opacity: 0; transform: scale(1.14); }
 	}
-	[data-tag-game-role='holder'][data-tag-game-effect='calamity'] .participant-profile-trigger::after { border-color: #b4483b; box-shadow: 0 0 0 2px rgba(255, 255, 255, .9), 0 0 10px rgba(180, 72, 59, .68); }
-	[data-tag-game-role='holder'][data-tag-game-effect-active='false'] .participant-profile-trigger::after { border-style: dashed; opacity: .62; }
-	.tag-game-holder-label {
+	.tag-game-effect-aura,
+	.tag-game-effect-visuals {
 		position: absolute;
-		top: -25px;
-		left: 50%;
-		z-index: 2;
+		inset: 0;
 		display: block;
-		max-width: calc(var(--cell-size) - 4px);
-		padding: 2px 6px;
-		border: 1px solid rgba(255, 255, 255, .9);
-		border-radius: 999px;
-		background: #e4f2e9;
-		box-shadow: 0 1px 5px rgba(0, 0, 0, .25);
-		transform: translateX(-50%);
-		white-space: nowrap;
 		pointer-events: none;
 	}
-	.tag-game-holder-label strong { color: #226b42; font-size: 10px; }
-	[data-tag-game-effect='calamity'] .tag-game-holder-label { background: #f7e8e5; }
-	[data-tag-game-effect='calamity'] .tag-game-holder-label strong { color: #85372e; }
-	.tag-game-holder-label-paused { opacity: .72; }
+	.tag-game-effect-aura { z-index: 0; }
+	.tag-game-effect-visuals { z-index: 2; }
+	.tag-game-effect-aura svg,
+	.tag-game-effect-visuals svg { display: block; width: 100%; height: 100%; overflow: visible; }
+	.tag-game-effect-aura-paused { opacity: .76; }
+	.tag-game-effect-visuals-paused { opacity: .92; }
+
+	.oni-smoke { transform-box: fill-box; transform-origin: center; }
+	.oni-smoke-left { animation: oni-smoke-drift 9s ease-in-out infinite alternate; }
+	.oni-smoke-right { animation: oni-smoke-drift 10s ease-in-out -5s infinite alternate-reverse; }
+	.oni-smoke-trail,
+	.oni-smoke-particle { pointer-events: none; }
+	.tag-game-effect-aura-paused .oni-smoke { animation: none; }
+
 	.tag-game-participant-mark {
 		position: absolute;
 		top: 2px;
@@ -202,13 +239,14 @@
 		box-shadow: 0 0 0 1px rgba(47, 68, 78, .65);
 		pointer-events: none;
 	}
-	@media (max-width: 700px) {
-		.tag-game-holder-label { top: -24px; max-width: calc(var(--cell-size) - 2px); padding: 2px 5px; }
-		.tag-game-holder-label strong { font-size: 9px; }
-	}
+	@keyframes oni-smoke-drift { from { transform: translate(.6px, .3px) scale(.985); opacity: .8; } to { transform: translate(-.8px, -.4px) scale(1.015); opacity: 1; } }
+
 	@media (prefers-reduced-motion: reduce) {
 		.tag-game-touch-attempt, [data-tag-game-holder-transfer] .participant-profile-trigger::after { animation: none; }
+		.tag-game-effect-aura * { animation: none !important; }
+		.tag-game-effect-aura-paused,
+		.tag-game-effect-visuals-paused { opacity: .84; }
 		.tag-game-touch-attempt .participant-profile-trigger { outline: 3px solid rgba(244, 214, 106, .92); outline-offset: 3px; }
-		[data-tag-game-holder-transfer] .participant-profile-trigger::after { box-shadow: 0 0 0 3px rgba(255, 236, 130, .9), 0 0 12px rgba(255, 236, 130, .8); }
+		[data-tag-game-holder-transfer] .participant-profile-trigger::after { opacity: 1; transform: scale(1.08); }
 	}
 </style>
