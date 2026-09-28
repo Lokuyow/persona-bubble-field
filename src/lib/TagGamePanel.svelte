@@ -32,13 +32,16 @@
 		onWatch: (gameId: string) => void;
 		onStopWatching: () => void;
 		onOpenChange: (open: boolean) => void;
+		onShowResult: (gameId: string) => void;
 		devPlayground?: boolean;
 		devSelfCharacterId?: string;
 		onDevAddBots?: (gameId: string) => void;
 		onDevBotConsent?: (gameId: string) => void;
 	}>;
-	let { open, games, selfPubkey, selfRunNumber, watchedGameId, nowMs, busy = false, reservedGameId = null, reservedStatus = null, reservationExpiresAtMs = null, onCreate, onJoin, onLeave, onCancel, onPropose, onConsent, onExclude, onWatch, onStopWatching, onOpenChange, devPlayground = false, devSelfCharacterId, onDevAddBots, onDevBotConsent }: Props = $props();
+	let { open, games, selfPubkey, selfRunNumber, watchedGameId, nowMs, busy = false, reservedGameId = null, reservedStatus = null, reservationExpiresAtMs = null, onCreate, onJoin, onLeave, onCancel, onPropose, onConsent, onExclude, onWatch, onStopWatching, onOpenChange, onShowResult, devPlayground = false, devSelfCharacterId, onDevAddBots, onDevBotConsent }: Props = $props();
 	const labels = { lobby: '募集中', proposed: '開始確認中', countdown: '開始準備中', running: '開催中', settling: '最終精算中', ended: '終了', interrupted: '中断' } as const;
+	const currentGames = $derived(games.filter((game) => ['lobby', 'proposed', 'countdown', 'running', 'settling'].includes(game.phase)));
+	const pastGames = $derived(games.filter((game) => (game.phase === 'ended' || game.phase === 'interrupted') && Boolean(game.startedAt)));
 	const selfActiveGameId = $derived(games.find((game) => (game.phase === 'running' || game.phase === 'settling') && game.participant.some((member) => member.pubkey === selfPubkey && member.runNumber === selfRunNumber && (member.status === 'active' || member.status === 'temporarily-ineligible')))?.gameId ?? null);
 	const ownHostLobby = $derived(games.find((game) => game.hostPubkey === selfPubkey && (game.phase === 'lobby' || game.phase === 'proposed')) ?? null);
 	const reservationCurrent = $derived(Boolean(reservedGameId && !(reservationExpiresAtMs !== null && reservationExpiresAtMs <= nowMs)));
@@ -72,6 +75,9 @@
 		const sameName = games.filter((candidate) => candidate.hostPubkey !== selfPubkey && tagGameCharacterName(candidate.hostPubkey, selfPubkey) === name);
 		return sameName.length > 1 ? `開催者 ${name}（同名${sameName.findIndex((candidate) => candidate.gameId === game.gameId) + 1}）` : `開催者 ${name}`;
 	}
+	function startedLabel(game: TagGameState): string {
+		return game.startedAt ? new Date(game.startedAt * 1000).toLocaleString('ja-JP', { dateStyle: 'medium', timeStyle: 'short' }) : '開催時刻不明';
+	}
 </script>
 
 <Dialog.Root bind:open={() => open, onOpenChange}>
@@ -98,17 +104,19 @@
 				{:else if ownHostLobby}<p class="reservation-state">募集を開催中</p>
 				{:else if reservationCurrent}<p class="reservation-state">{reservedStatus === 'pending' ? '参加申請済み（受理待ち）' : reservedStatus === 'active' ? '鬼ごっこに参加中' : '参加申請済み（参加登録済み）'}</p>
 				{:else}<p class="reservation-state">ほかの開催回に参加中</p>{/if}
-				{#if games.length === 0}<p>現在募集中の開催はありません。</p>{/if}
+				<section class="current-games" aria-labelledby="tag-game-current-heading" data-tag-game-current-section>
+					<h2 id="tag-game-current-heading">現在のゲーム</h2>
+					{#if currentGames.length === 0}<p class="empty-current">現在のゲームはありません。</p>{/if}
 				{#if reservationCurrent && reservedGameId && reservedStatus !== 'active' && !games.some((game) => game.gameId === reservedGameId)}
 					<p class="reservation-state">表示されていない開催への{reservedStatus === 'pending' ? '参加申請' : '参加登録'}があります。</p>
 					<ActionButton variant="tertiary" intent="cancel" data-tag-game-cancel-reservation={reservedGameId} onclick={() => onLeave(reservedGameId)} disabled={busy}>参加予約を取り消す</ActionButton>
 				{/if}
-				<ul>
-					{#each games as game (game.gameId)}
+				<ul class="current-game-list">
+					{#each currentGames as game (game.gameId)}
 						{@const hostCharacter = participantCharacter(game.hostPubkey)}
 						{@const confirmedParticipants = tagGameConfirmedParticipants(game)}
 						{@const displayedEffect = devPlayground && game.phase === 'running' ? tagGameScheduledEffectAt(game, nowMs) ?? game.effect : game.effect}
-						<li>
+						<li class={['current-game-card', { 'current-game-lobby': game.phase === 'lobby', 'current-game-active': game.phase === 'running' || game.phase === 'settling' }]} data-tag-game-current={game.gameId}>
 							<div class="host-identity">{#if hostCharacter}<img class="tag-game-avatar" src={asset(`/${hostCharacter.picture}`)} alt="" />{/if}<strong>{hostLabel(game)}</strong><span>{labels[game.phase]}</span></div>
 							<strong class="participant-count">参加者 {confirmedParticipants.length} / 8人</strong>
 							{#if game.phase === 'lobby' || game.phase === 'proposed' || game.phase === 'countdown'}
@@ -135,13 +143,6 @@
 								{:else if selfActiveGameId === null}<ActionButton variant="tertiary" data-tag-game-watch={game.gameId} onclick={() => onWatch(game.gameId)} disabled={busy}>観戦する</ActionButton>
 								{:else if selfActiveGameId === game.gameId}<span>参加中</span>{/if}
 							{/if}
-							{#if (game.phase === 'ended' || game.phase === 'interrupted') && game.startedAt}
-								<div class="results" aria-label="鬼ごっこ結果">
-									{#each game.participant as player (player.pubkey)}
-									<span>{tagGameParticipantLabel(game, player.pubkey, selfPubkey)}・{player.status === 'dead' ? '死亡' : player.status === 'left' ? '退出' : player.status === 'temporarily-ineligible' ? '一時対象外' : '参加'}・{player.points}pt・寿命-{Math.ceil(player.lifespanLossMs / 60_000)}分・福{Math.floor(player.benefitMs / 1000)}秒・鬼{Math.floor(player.calamityMs / 1000)}秒</span>
-									{/each}
-								</div>
-							{/if}
 							{#if game.phase === 'lobby'}
 								{#if game.participant.some((player) => player.pubkey === selfPubkey)}
 									{#if game.hostPubkey === selfPubkey}
@@ -167,6 +168,22 @@
 						</li>
 					{/each}
 				</ul>
+				</section>
+				<section class="past-games" aria-label="過去の鬼ごっこ" data-tag-game-history-section>
+					<details>
+						<summary><strong>過去の鬼ごっこ</strong><span>{pastGames.length}件</span></summary>
+						{#if pastGames.length === 0}<p class="empty-history">開始した鬼ごっこはまだありません。</p>
+						{:else}<ul class="past-game-list">
+							{#each pastGames as game (game.gameId)}
+								{@const hostCharacter = participantCharacter(game.hostPubkey)}
+								<li class="past-game-card" data-tag-game-history={game.gameId}>
+									<div class="past-game-host">{#if hostCharacter}<img src={asset(`/${hostCharacter.picture}`)} alt="" />{/if}<span><strong>{hostLabel(game)}</strong><small>{startedLabel(game)}・{game.phase === 'ended' ? '終了' : '中断'}・参加者 {game.participant.length}人</small></span></div>
+									<ActionButton variant="tertiary" onclick={() => onShowResult(game.gameId)}>結果を見る</ActionButton>
+								</li>
+							{/each}
+						</ul>{/if}
+					</details>
+				</section>
 			</Dialog.Content>
 		</Dialog.Portal>
 {/if}
@@ -209,6 +226,13 @@
 	@media (prefers-reduced-motion: no-preference) { .tag-game-rules-chevron { transition: transform 140ms ease; } }
 	@media (prefers-reduced-motion: reduce) { .tag-game-rules-chevron { transition: none; } }
 	.participant-count { width: 100%; }
+	.current-games { display: grid; gap: 8px; margin-top: 16px; }
+	.current-games h2 { margin: 0; font-size: 1.05rem; }
+	.empty-current, .empty-history { margin: 0; color: var(--text-secondary, #666); font-size: .9rem; }
+	.current-game-list { margin-top: 0; }
+	.current-game-card { border-color: color-mix(in srgb, var(--color-accent, #426b9c) 30%, var(--border-subtle, #d8dce0)); background: color-mix(in srgb, var(--color-accent, #426b9c) 4%, var(--surface, #fff)); }
+	.current-game-lobby { border-inline-start: 4px solid #b38a2e; background: color-mix(in srgb, #b38a2e 7%, var(--surface, #fff)); }
+	.current-game-active { border-inline-start: 4px solid var(--color-accent, #426b9c); }
 	.participant-slots { display: grid; width: 100%; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin: 0; padding: 0; list-style: none; }
 	.participant-slot { display: grid; min-width: 0; min-height: 54px; grid-template-columns: 28px minmax(0, 1fr); grid-template-rows: 1fr auto; align-items: center; column-gap: 5px; padding: 4px; overflow: hidden; border: 1px solid var(--border-subtle, #d8dce0); border-radius: 8px; background: color-mix(in srgb, var(--surface, #fff) 94%, transparent); }
 	.participant-slot img { width: 26px; height: 26px; grid-row: 1 / 3; object-fit: contain; }
@@ -222,7 +246,18 @@
 	li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; justify-content: space-between; padding: 12px; border: 1px solid var(--border-subtle, #d8dce0); border-radius: 10px; }
 	li div { display: grid; gap: 3px; }
 	.game-status { width: 100%; margin: 0; }
-	.results { display: grid; width: 100%; gap: 3px; color: var(--text-secondary, #666); font-size: .88rem; }
+	.past-games { margin-top: 16px; border-top: 1px solid var(--border-subtle, #d8dce0); padding-top: 10px; }
+	.past-games details > summary { display: flex; min-height: 44px; align-items: center; justify-content: space-between; gap: 12px; color: var(--text-secondary, #666); cursor: pointer; list-style: none; }
+	.past-games details > summary::-webkit-details-marker { display: none; }
+	.past-games details > summary:focus-visible { outline: 3px solid var(--color-focus-ring, #6dabb9); outline-offset: 2px; }
+	.past-games details > summary span { font-size: .85rem; }
+	.past-game-list { gap: 6px; margin-top: 8px; }
+	.past-game-card { padding: 8px 10px; border-color: color-mix(in srgb, var(--border-subtle, #d8dce0) 80%, transparent); background: color-mix(in srgb, var(--surface, #fff) 94%, var(--text-secondary, #666)); }
+	.past-game-host { display: flex !important; min-width: 0; flex: 1 1 180px; flex-direction: row !important; align-items: center; gap: 8px !important; }
+	.past-game-host img { width: 28px; height: 28px; flex: 0 0 auto; object-fit: contain; }
+	.past-game-host span { display: grid; min-width: 0; gap: 2px; }
+	.past-game-host strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary, #666); font-size: .88rem; }
+	.past-game-host small { color: var(--text-secondary, #666); font-size: .75rem; }
 	li span { color: var(--text-secondary, #666); font-size: .9rem; }
 	@keyframes participant-arrival { 50% { border-color: var(--color-accent, #426b9c); background: color-mix(in srgb, var(--surface, #fff) 78%, var(--color-accent, #426b9c)); } }
 	@media (prefers-reduced-motion: reduce) { .participant-slot-arrival { animation: none; border-color: var(--color-accent, #426b9c); } }

@@ -39,3 +39,30 @@ export function tagGameCountdownSeconds(startAt: number, nowMs: number): number 
 	if (remainingMs <= 0 || remainingMs > 5_000) return null;
 	return Math.ceil(remainingMs / 1_000);
 }
+
+export function tagGameResultParticipants(game: TagGameState, selfPubkey: string | null): TagGameState['participant'][number][] {
+	const participants = [...game.participant].sort((a, b) => a.registeredAt - b.registeredAt || a.pubkey.localeCompare(b.pubkey));
+	if (!selfPubkey) return participants;
+	const selfIndex = participants.findIndex((member) => member.pubkey === selfPubkey);
+	if (selfIndex <= 0) return participants;
+	return [participants[selfIndex], ...participants.slice(0, selfIndex), ...participants.slice(selfIndex + 1)];
+}
+
+export function tagGameResultTime(valueMs: number): string {
+	const tenths = Math.round(Math.max(0, valueMs) / 100);
+	return formatTenths(tenths);
+}
+
+export function tagGameResultLifespan(valueMs: number): string {
+	const tenthsOfHours = Math.round(Math.max(0, valueMs) / 360_000);
+	if (tenthsOfHours < 240) return `${formatTenths(tenthsOfHours)}時間`;
+	const days = Math.floor(tenthsOfHours / 240);
+	const remainingTenthsOfHours = tenthsOfHours % 240;
+	return `${days}日${remainingTenthsOfHours === 0 ? '' : `${formatTenths(remainingTenthsOfHours)}時間`}`;
+}
+
+function formatTenths(value: number): string {
+	const whole = Math.floor(value / 10);
+	const tenths = value % 10;
+	return tenths === 0 ? `${whole}` : `${whole}.${tenths}`;
+}
