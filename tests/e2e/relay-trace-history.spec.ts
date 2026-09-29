@@ -305,30 +305,44 @@ test.describe('Relay startup', () => {
 				await page.evaluate(() => (window as unknown as { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
 				await expect(page.locator('[data-trace-marker-position="4,2"]')).toBeVisible();
 			}
+			await expect(page.locator('[data-trace-indicator-position]')).toHaveCount(0);
 			const geometry = await page.evaluate(() => {
-				const marker = document.querySelector<HTMLElement>('[data-trace-marker-position="4,2"]')!;
-				const icon = marker.querySelector<SVGElement>('.trace-marker-history-icon')!;
+				const grid = document.querySelector<HTMLElement>('.field-grid')!;
 				const scene = document.querySelector<HTMLElement>('.field-scene')!;
-				const rect = (element: Element) => {
-					const { x, y, width, height } = element.getBoundingClientRect();
-					return { x, y, width, height, centerX: x + width / 2, centerY: y + height / 2 };
-				};
-				const style = getComputedStyle(icon);
+				const gridRect = grid.getBoundingClientRect();
 				const cellSize = Number.parseFloat(getComputedStyle(scene).getPropertyValue('--cell-size'));
-				const sceneRect = scene.getBoundingClientRect();
-				const cellCenter = { x: sceneRect.left + 4.5 * cellSize, y: sceneRect.top + 2.5 * cellSize };
-				return { cellSize, cellCenter, marker: rect(marker), icon: rect(icon), iconStyle: { width: style.width, height: style.height, display: style.display } };
+				const roots = [...document.querySelectorAll<HTMLElement>('.trace-marker-field-root')].map((marker) => {
+					const [x, y] = marker.dataset.traceMarkerPosition!.split(',').map(Number);
+					const rect = marker.getBoundingClientRect();
+					const icon = marker.querySelector<SVGElement>('.trace-marker-history-icon');
+					const iconRect = icon?.getBoundingClientRect();
+					return {
+						kind: marker.dataset.traceMarkerKind,
+						x, y,
+						left: rect.left - gridRect.left,
+						top: rect.top - gridRect.top,
+						right: rect.right - gridRect.left,
+						width: rect.width,
+						height: rect.height,
+						icon: iconRect ? { width: iconRect.width, height: iconRect.height } : null
+					};
+				});
+				return { cellSize, roots };
 			});
 			expect(geometry.cellSize).toBe(viewport.cellSize);
-			expect(geometry.marker.centerX).toBeCloseTo(geometry.cellCenter.x, 1);
-			expect(geometry.marker.centerY).toBeCloseTo(geometry.cellCenter.y, 1);
-			expect(geometry.icon.centerX).toBeCloseTo(geometry.cellCenter.x, 1);
-			expect(geometry.icon.centerY).toBeCloseTo(geometry.cellCenter.y, 1);
-			expect(geometry.icon.width).toBeCloseTo(geometry.marker.width, 1);
-			expect(geometry.icon.height).toBeCloseTo(geometry.marker.height, 1);
-			expect(Number.parseFloat(geometry.iconStyle.width)).toBeCloseTo(geometry.marker.width, 1);
-			expect(Number.parseFloat(geometry.iconStyle.height)).toBeCloseTo(geometry.marker.height, 1);
-			expect(geometry.iconStyle.display).toBe('block');
+			expect(geometry.roots.map((root) => root.kind).sort()).toEqual(['death', 'manual', 'random', 'random']);
+			for (const root of geometry.roots) {
+				const expectedSize = Math.max(10, Math.min(18, geometry.cellSize * 0.24));
+				const expectedInset = Math.max(3, geometry.cellSize * 0.06);
+				expect(root.width).toBeCloseTo(expectedSize, 2);
+				expect(root.height).toBeCloseTo(expectedSize, 2);
+				expect(root.left).toBeGreaterThanOrEqual(root.x * geometry.cellSize);
+				expect(root.top).toBeCloseTo(root.y * geometry.cellSize + expectedInset, 1);
+				expect(root.right).toBeCloseTo((root.x + 1) * geometry.cellSize - expectedInset, 1);
+				expect(root.right).toBeLessThanOrEqual((root.x + 1) * geometry.cellSize);
+				expect(root.top + root.height).toBeLessThanOrEqual((root.y + 1) * geometry.cellSize);
+				if (root.kind === 'random') expect(root.icon).toEqual({ width: root.width, height: root.height });
+			}
 		}
 		await page.setViewportSize({ width: 1100, height: 850 });
 		await page.reload();

@@ -477,50 +477,64 @@ test.describe('DEV World Sandbox', () => {
 		}).__traceExternalCalls);
 
 		const markers = page.locator('.trace-marker');
-		await expect(markers).toHaveCount(3);
+		await expect(markers).toHaveCount(4);
 		await expect(page.locator('[data-trace-marker-position="2,2"]')).toHaveCount(1);
-		await expect(page.locator('[data-trace-marker-position="7,3"]')).toHaveCount(0);
+		await expect(page.locator('[data-trace-marker-position="7,3"]')).toHaveCount(1);
 		await expect(page.locator('[data-trace-marker-position="8,4"]')).toHaveCount(1);
 		await expect(page.locator('[data-trace-marker-position="8,3"]')).toHaveCount(1);
-		await expect(page.locator('[data-trace-indicator-position="2,2"]')).toHaveCount(0);
-		await expect(page.locator('.trace-investigation-indicator')).toHaveCount(3);
+		await expect(page.locator('[data-trace-indicator-position]')).toHaveCount(0);
+		await expect(page.locator('.trace-investigation-indicator')).toHaveCount(0);
 		const presentation = await markers.evaluateAll((elements) => elements.map((element) => ({
 			text: element.textContent,
 			pointerEvents: getComputedStyle(element).pointerEvents
 		})));
-		expect(presentation).toEqual(Array.from({ length: 3 }, () => ({ text: '', pointerEvents: 'none' })));
+		expect(presentation).toEqual(Array.from({ length: 4 }, () => ({ text: '', pointerEvents: 'none' })));
 
 		const geometry = await page.evaluate(() => {
 			const grid = document.querySelector<HTMLElement>('.field-grid');
 			const scene = document.querySelector<HTMLElement>('.field-scene');
-			const empty = document.querySelector<HTMLElement>('[data-trace-marker-position="8,4"]');
-			const emptyIndicator = document.querySelector<HTMLElement>('[data-trace-indicator-position="8,4"]');
-			const occupiedIndicator = document.querySelector<HTMLElement>('[data-trace-indicator-position="7,3"]');
-			if (!grid || !scene || !empty || !emptyIndicator || !occupiedIndicator) throw new Error('Expected trace marker geometry.');
+			if (!grid || !scene) throw new Error('Expected trace marker geometry.');
 			const gridRect = grid.getBoundingClientRect();
-			const emptyRect = empty.getBoundingClientRect();
-			const emptyIndicatorRect = emptyIndicator.getBoundingClientRect();
-			const occupiedIndicatorRect = occupiedIndicator.getBoundingClientRect();
 			const cellSize = Number.parseFloat(getComputedStyle(scene).getPropertyValue('--cell-size'));
 			return {
 				cellSize,
-				empty: { x: emptyRect.left + emptyRect.width / 2 - gridRect.left, y: emptyRect.top + emptyRect.height / 2 - gridRect.top },
-				emptyIndicator: { x: emptyIndicatorRect.left + emptyIndicatorRect.width / 2 - gridRect.left, y: emptyIndicatorRect.top + emptyIndicatorRect.height / 2 - gridRect.top },
-				occupiedIndicator: { x: occupiedIndicatorRect.left + occupiedIndicatorRect.width / 2 - gridRect.left, y: occupiedIndicatorRect.top + occupiedIndicatorRect.height / 2 - gridRect.top }
+				markers: [...document.querySelectorAll<HTMLElement>('.trace-marker-field-root')].map((marker) => {
+					const [x, y] = marker.dataset.traceMarkerPosition!.split(',').map(Number);
+					const rect = marker.getBoundingClientRect();
+					return {
+						position: marker.dataset.traceMarkerPosition,
+						width: rect.width,
+						height: rect.height,
+						left: rect.left - gridRect.left,
+						top: rect.top - gridRect.top,
+						right: rect.right - gridRect.left,
+						expectedWidth: Math.max(10, Math.min(18, cellSize * 0.24)),
+						expectedInset: Math.max(3, cellSize * 0.06),
+						x,
+						y
+					};
+				})
 			};
 		});
-		expect(geometry.empty.x).toBeCloseTo(8.5 * geometry.cellSize, 1);
-		expect(geometry.empty.y).toBeCloseTo(4.5 * geometry.cellSize, 1);
-		expect(geometry.emptyIndicator.x).toBeCloseTo(9 * geometry.cellSize - 10, 0);
-		expect(geometry.emptyIndicator.y).toBeCloseTo(4 * geometry.cellSize + 10, 0);
-		expect(geometry.occupiedIndicator.x).toBeCloseTo(8 * geometry.cellSize - 10, 0);
-		expect(geometry.occupiedIndicator.y).toBeCloseTo(3 * geometry.cellSize + 10, 0);
-		expect(geometry.occupiedIndicator.x - geometry.emptyIndicator.x).toBeCloseTo(-geometry.cellSize, 0);
-		expect(geometry.occupiedIndicator.y - geometry.emptyIndicator.y).toBeCloseTo(-geometry.cellSize, 0);
+		expect(geometry.markers).toHaveLength(4);
+		for (const marker of geometry.markers) {
+			expect(marker.width).toBeCloseTo(marker.expectedWidth, 2);
+			expect(marker.height).toBeCloseTo(marker.expectedWidth, 2);
+			expect(marker.left).toBeGreaterThanOrEqual(marker.x * geometry.cellSize);
+			expect(marker.top).toBeCloseTo(marker.y * geometry.cellSize + marker.expectedInset, 1);
+			expect(marker.right).toBeCloseTo((marker.x + 1) * geometry.cellSize - marker.expectedInset, 1);
+			expect(marker.right).toBeLessThanOrEqual((marker.x + 1) * geometry.cellSize);
+			expect(marker.top + marker.height).toBeLessThanOrEqual((marker.y + 1) * geometry.cellSize);
+		}
 
 		const before = await page.evaluate(() => ({
 			gridLeft: document.querySelector<HTMLElement>('.field-grid')!.getBoundingClientRect().left,
-			markerLeft: document.querySelector<HTMLElement>('[data-trace-marker-position="2,2"]')!.getBoundingClientRect().left
+			markerLeft: document.querySelector<HTMLElement>('[data-trace-marker-position="2,2"]')!.getBoundingClientRect().left,
+			occupiedMarker: (() => {
+				const rect = document.querySelector<HTMLElement>('[data-trace-marker-position="7,3"]')!.getBoundingClientRect();
+				const grid = document.querySelector<HTMLElement>('.field-grid')!.getBoundingClientRect();
+				return { left: rect.left - grid.left, top: rect.top - grid.top, width: rect.width, height: rect.height };
+			})()
 		}));
 		await page.locator('[data-cell-position="8,4"]').click();
 		await expect(page.locator('[data-trace-root-id="' + '2'.repeat(64) + '"]')).toContainText('trace-only root near the viewer');
@@ -533,14 +547,21 @@ test.describe('DEV World Sandbox', () => {
 		await page.mouse.up();
 		await expect(self).toHaveAttribute('data-position', '8,3');
 		await expect(page.locator('[data-trace-marker-position="7,3"]')).toHaveCount(1);
+		await expect(page.locator('[data-trace-marker-position="8,3"]')).toHaveCount(1);
 		const actionMenu = page.getByRole('menu', { name: 'Cell actions' });
 		await expect(actionMenu).toHaveCount(0);
 		const after = await page.evaluate(() => ({
 			gridLeft: document.querySelector<HTMLElement>('.field-grid')!.getBoundingClientRect().left,
-			markerLeft: document.querySelector<HTMLElement>('[data-trace-marker-position="2,2"]')!.getBoundingClientRect().left
+			markerLeft: document.querySelector<HTMLElement>('[data-trace-marker-position="2,2"]')!.getBoundingClientRect().left,
+			occupiedMarker: (() => {
+				const rect = document.querySelector<HTMLElement>('[data-trace-marker-position="7,3"]')!.getBoundingClientRect();
+				const grid = document.querySelector<HTMLElement>('.field-grid')!.getBoundingClientRect();
+				return { left: rect.left - grid.left, top: rect.top - grid.top, width: rect.width, height: rect.height };
+			})()
 		}));
 		expect(after.gridLeft).not.toBe(before.gridLeft);
 		expect(after.markerLeft - before.markerLeft).toBeCloseTo(after.gridLeft - before.gridLeft, 3);
+		expect(after.occupiedMarker).toEqual(before.occupiedMarker);
 		expect(await page.evaluate(() => (window as never as {
 			__traceExternalCalls: { webSocketUrls: string[]; indexedDbOpen: number }
 		}).__traceExternalCalls)).toEqual(externalCallBaseline);
@@ -565,7 +586,7 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.locator('[data-trace-root-id="' + '2'.repeat(64) + '"]')).toContainText('trace-only root near the viewer');
 		await expect(page.locator('[data-trace-ghost-root-id="' + '2'.repeat(64) + '"]')).toBeVisible();
 		await expect(page.locator('[data-trace-marker-position="8,4"]')).toHaveCount(0);
-		await expect(markers).toHaveCount(2);
+		await expect(markers).toHaveCount(3);
 		await expect(page.locator('.trace-reply-status')).toHaveCount(0);
 		await expect.poll(() => page.locator('[data-bubble-id="dev-trace-live-message"]').evaluate((element) => getComputedStyle(element).transform)).toBe(liveAnchor);
 

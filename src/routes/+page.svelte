@@ -799,9 +799,6 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		.filter((cell) => traceConversationState.kind !== 'open' || !sameCell(cell.position, traceConversationState.root.position))
 		.map((cell) => ({
 			...cell,
-			occupied: participantViews.some((participant) =>
-				participant.position.x === cell.position.x && participant.position.y === cell.position.y
-			),
 			inInvestigationRange: selfIsActive && selfLogicalPosition !== null &&
 				isWithinTraceInvestigationRange(selfLogicalPosition, cell.position),
 			read: traceReadSnapshot.readRootIds.includes(cell.roots[0].id),

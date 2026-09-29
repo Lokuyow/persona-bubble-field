@@ -94,6 +94,15 @@ test.describe('DEV World Sandbox', () => {
 		await page.mouse.move(start.x + 24, start.y);
 		await page.mouse.up();
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '8,3');
+		const colocatedMarker = page.locator('[data-trace-marker-position="8,3"]');
+		await expect(colocatedMarker).toBeVisible();
+		const stacking = await page.evaluate(() => ({
+			markerLayer: Number.parseInt(getComputedStyle(document.querySelector('.trace-marker-layer')!).zIndex, 10),
+			participant: Number.parseInt(getComputedStyle(document.querySelector('.participant[data-self="true"]')!).zIndex, 10),
+			markerPointerEvents: getComputedStyle(document.querySelector('[data-trace-marker-position="8,3"]')!).pointerEvents
+		}));
+		expect(stacking.markerLayer).toBeGreaterThan(stacking.participant);
+		expect(stacking.markerPointerEvents).toBe('none');
 
 		await profileTrigger(page, '女の子').click();
 		const menu = page.getByRole('menu', { name: 'Cell actions' });
@@ -101,6 +110,13 @@ test.describe('DEV World Sandbox', () => {
 		await expect(menu.locator('[data-cell-action="movement"]')).toHaveCount(0);
 		await expect(menu.locator('[data-cell-action="participant"]')).toHaveCount(1);
 		await expect(menu.locator('[data-cell-action="trace"]')).toHaveCount(1);
+		await menu.locator('[data-cell-action="participant"]').click();
+		await expect(profileDialog(page)).toBeVisible();
+		await page.keyboard.press('Escape');
+		await expect(profileDialog(page)).toBeHidden();
+		await profileTrigger(page, '女の子').click();
+		await page.getByRole('menu', { name: 'Cell actions' }).locator('[data-cell-action="trace"]').click();
+		await expect(page.locator('[data-trace-root-id="' + '4'.repeat(64) + '"]')).toContainText('newest root');
 	});
 
 	test('does not render a field-external cell at the field edge', async ({ page }) => {
