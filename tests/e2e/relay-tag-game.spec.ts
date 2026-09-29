@@ -2,17 +2,17 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import sharp from 'sharp';
 import { expectIconCloseButton } from './helpers/iconCloseButton';
 import { finalizeEvent, getPublicKey, type Event as NostrEvent } from 'nostr-tools/pure';
-import { buildTagGameActionTemplate, createTagGameSchedule, finalizeTagGameState, isFreshTagGameTouchAction, parseTagGameActionEvent, parseTagGameEvent, tagGameScheduledEffectAt, TAG_GAME_KIND, TAG_GAME_TRANSFER_COOLDOWN_MS, type TagGameState } from '../../src/lib/tagGame';
+import { buildTagGameActionTemplate, createTagGameSchedule, finalizeTagGameState, isFreshTagGameTouchAction, parseTagGameActionEvent, parseTagGameEvent, tagGameScheduledEffectAt, TAG_GAME_KIND, TAG_GAME_RESERVATION_RECOVERY_MS, TAG_GAME_TRANSFER_COOLDOWN_MS, type TagGameState } from '../../src/lib/tagGame';
 import { MENDING_TERMINAL, TAG_GAME_TERMINAL } from '../../src/lib/fieldFacilities';
 import { resolveCharacterFromPubkey } from '../../src/lib/characterAssignment';
 import { buildWorldMessageTemplate, buildWorldStateEventTemplate, WORLD_STATE_KIND } from '../../src/lib/nostrProtocol';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
-import { CHANNEL_ID, clickRelayLogicalCell, fixtureSecret, installDelayedRelay, moveRelaySelfTo, relayState, seedRelayAccount, testEvents, dragRelayJoystick } from './helpers/relayHarness';
+import { AUTHORITATIVE_RELAYS, CHANNEL_ID, clickRelayLogicalCell, fixtureSecret, installDelayedRelay, moveRelaySelfTo, relayState, seedRelayAccount, testEvents, dragRelayJoystick } from './helpers/relayHarness';
 
-async function preparePlayer(page: Page, secret: Uint8Array, nowMs: number, points = 0, persistAcrossReload = false): Promise<void> {
+async function preparePlayer(page: Page, secret: Uint8Array, nowMs: number, points = 0, persistAcrossReload = false, observeWebSocketLifecycle = false): Promise<void> {
 	await page.clock.install({ time: nowMs });
 	await installHostOwnedStub(page);
-	await installDelayedRelay(page, { primaryEvents: testEvents(nowMs), realtimeEvents: [], realtimePublishOutcome: 'echo', persistAcrossReload });
+	await installDelayedRelay(page, { primaryEvents: testEvents(nowMs), realtimeEvents: [], realtimePublishOutcome: 'echo', persistAcrossReload, observeWebSocketLifecycle });
 	await seedRelayAccount(page, secret, getPublicKey(secret), nowMs + 14 * 24 * 60 * 60 * 1_000, points);
 	await page.goto('/');
 	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
@@ -2901,14 +2901,119 @@ test('organizer cancellation terminates the lobby, clears pending reservations, 
 	}
 });
 
+test('reuses the anonymous Relay session for restored reservation states without closing connecting sockets', async ({ browser }) => {
+	test.setTimeout(90_000);
+	const cases = ['none', 'confirmed', 'provisional', 'locked'] as const;
+	const observations: Array<{ reservation: typeof cases[number]; relayConnections: number; connectingAppCloses: number; pagehideRelayCloses: number; connectingPagehideCloses: number }> = [];
+	for (const reservationCase of cases) {
+		const page = await browser.newPage();
+		const nowMs = Date.now();
+		const nowSeconds = Math.floor(nowMs / 1_000);
+		const selfSecret = fixtureSecret(reservationCase === 'none' ? 19 : reservationCase === 'confirmed' ? 20 : reservationCase === 'provisional' ? 21 : 23);
+		const selfPubkey = getPublicKey(selfSecret);
+		const hostSecret = fixtureSecret(47);
+		const hostPubkey = getPublicKey(hostSecret);
+		const validGameId = `${hostPubkey}:${nowSeconds}:${(reservationCase === 'locked' ? 'd' : 'c').repeat(64)}`;
+		const runningGame: TagGameState = {
+			gameId: validGameId, hostPubkey, phase: 'running', revision: 0, updatedAt: nowSeconds,
+			startedAt: nowSeconds - 1, endsAt: nowSeconds + 119, seed: 'a'.repeat(64), ownerPubkey: hostPubkey,
+			effect: 'benefit', transferAt: nowMs - 1_000, settledAtMs: nowMs,
+			participant: [hostPubkey, selfPubkey].map((pubkey) => ({ pubkey, runNumber: 1, registeredAt: nowSeconds - 1,
+				status: 'active' as const, points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 }))
+		};
+		const lobbyGame: TagGameState = {
+			gameId: validGameId, hostPubkey, phase: 'lobby', revision: 0, updatedAt: nowSeconds,
+			settledAtMs: nowMs,
+			participant: [hostPubkey, selfPubkey].map((pubkey) => ({ pubkey, runNumber: 1, registeredAt: nowSeconds,
+				status: 'registered' as const, points: 0, lifespanLossMs: 0, benefitMs: 0, calamityMs: 0 }))
+		};
+		const recoveredGame = reservationCase === 'locked' ? runningGame : lobbyGame;
+		const recoveredEvent = finalizeTagGameState(recoveredGame, CHANNEL_ID, nowSeconds, hostSecret);
+		try {
+			await page.clock.install({ time: nowMs });
+			await installHostOwnedStub(page);
+			await installDelayedRelay(page, {
+				primaryEvents: testEvents(nowMs), realtimeEvents: [], realtimePublishOutcome: 'echo',
+				persistAcrossReload: true, observeWebSocketLifecycle: true
+			});
+			await seedRelayAccount(page, selfSecret, selfPubkey, nowMs + 14 * 24 * 60 * 60 * 1_000);
+			await page.goto('/');
+			await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+			await expect(page.locator(`.participant[data-self="true"][data-participant-id="${selfPubkey}"]`)).toBeVisible();
+			await expect.poll(async () => (await relayState(page)).state.requests.some((request) => request.filters.some((filter) => (filter.kinds as number[] | undefined)?.includes(7070)))).toBe(true);
+			if (reservationCase !== 'none') {
+				await page.evaluate(({ reservationCase, gameId, nowMs }) => new Promise<void>((resolve, reject) => {
+					const request = indexedDB.open('persona-bubble-field-account', 8);
+					request.onerror = () => reject(request.error);
+					request.onsuccess = () => {
+						const database = request.result;
+						const transaction = database.transaction('persona-bubble-field-player-state', 'readwrite');
+						const store = transaction.objectStore('persona-bubble-field-player-state');
+						const read = store.get('player-lifecycle');
+						read.onsuccess = () => {
+							const current = read.result;
+							const scope = { gameId, identity: current.mode.activeRun.identity, runNumber: current.mode.activeRun.runNumber };
+							const reservation = { ...scope, ...(reservationCase === 'provisional' ? { expiresAtMs: nowMs + 60_000 } : {}) };
+							const lock = reservationCase === 'locked' ? {
+								...scope, startedAtMs: nowMs - 1_000, endsAtMs: nowMs + 119_000, finalDeadlineMs: nowMs + 149_000,
+								phase: 'running', points: 0, lifespanLossMs: 0
+							} : undefined;
+							store.put({ ...current, tagGame: { reservation, ...(lock ? { lock } : {}) } }, 'player-lifecycle');
+						};
+						transaction.oncomplete = () => { database.close(); resolve(); };
+						transaction.onerror = () => { database.close(); reject(transaction.error); };
+					};
+				}), { reservationCase, gameId: validGameId, nowMs });
+			}
+			await page.evaluate((event) => {
+				if (event) (window as typeof window & { __relayStartupTest: { queueRealtimeBootstrapEvent(event: object): void } }).__relayStartupTest.queueRealtimeBootstrapEvent(event);
+			}, reservationCase === 'confirmed' || reservationCase === 'locked' ? recoveredEvent : null);
+			await page.evaluate(() => (window as typeof window & { __relayStartupTest: { deferNextWebSocketOpen(): void } }).__relayStartupTest.deferNextWebSocketOpen());
+			await page.reload();
+			await expect(page.locator('[data-unified-status-hud]')).toBeVisible();
+			if (reservationCase === 'confirmed') {
+				await expect.poll(async () => (await tagGamePersistence(page)).reservation).toMatchObject({ recoveryDeadlineMs: expect.any(Number) });
+			}
+			const startupState = await relayState(page);
+			const currentGeneration = Math.max(...startupState.state.webSocketConnections.map((connection) => connection.generation));
+		const authoritativeRelayHosts = new Set(AUTHORITATIVE_RELAYS.map((url) => new URL(url).host));
+		const relayConnections = startupState.state.webSocketConnections.filter((connection) => connection.generation === currentGeneration && authoritativeRelayHosts.has(new URL(connection.url).host)).length;
+		const connectingAppCloses = startupState.state.webSocketCloses.filter((close) => close.generation === currentGeneration && close.origin === 'application' && close.readyState === 0 && authoritativeRelayHosts.has(new URL(close.url).host)).length;
+			const pagehideRelayCloses = startupState.state.previousWebSocketCloses.filter((close) => close.origin === 'pagehide' && authoritativeRelayHosts.has(new URL(close.url).host)).length;
+			const connectingPagehideCloses = startupState.state.previousWebSocketCloses.filter((close) => close.origin === 'pagehide' && close.readyState === 0 && authoritativeRelayHosts.has(new URL(close.url).host)).length;
+			observations.push({ reservation: reservationCase, relayConnections, connectingAppCloses, pagehideRelayCloses, connectingPagehideCloses });
+			await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseWebSocketOpens(): void } }).__relayStartupTest.releaseWebSocketOpens());
+			await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+			await expect(page.locator(`.participant[data-self="true"][data-participant-id="${selfPubkey}"]`)).toBeVisible();
+			await expect(page.locator('main')).toHaveAttribute('data-realtime-status', 'active');
+			if (reservationCase === 'confirmed') {
+				const request = (await relayState(page)).state.requests.find((candidate) => candidate.filters.some((filter) => (filter['#d'] as string[] | undefined)?.includes(validGameId)));
+				expect(request).toBeDefined();
+				await expect.poll(async () => (await tagGamePersistence(page)).reservation).toMatchObject({ gameId: validGameId, identity: expect.any(Object), runNumber: 1 });
+			} else if (reservationCase === 'provisional') {
+				await expect.poll(async () => (await tagGamePersistence(page)).reservation).toMatchObject({ gameId: validGameId, expiresAtMs: nowMs + 60_000 });
+			} else if (reservationCase === 'locked') {
+				const request = (await relayState(page)).state.requests.find((candidate) => candidate.filters.some((filter) => (filter['#d'] as string[] | undefined)?.includes(validGameId)));
+				expect(request).toBeDefined();
+				await expect(page.locator(`[data-tag-game-hud-id="${validGameId}"]`)).toBeVisible();
+				await expect.poll(async () => (await tagGamePersistence(page)).lock).toMatchObject({ gameId: validGameId });
+				expect(['running', 'settling']).toContain(((await tagGamePersistence(page)).lock as { phase: string }).phase);
+			}
+		} finally {
+			await page.close();
+		}
+	}
+	expect(observations).toEqual(cases.map((reservation) => ({ reservation, relayConnections: 5, connectingAppCloses: 0, pagehideRelayCloses: 5, connectingPagehideCloses: 0 })));
+});
+
 test('releases an approved reservation after finite known-game recovery when Relay has no retained state', async ({ browser }) => {
 	test.setTimeout(60_000);
 	const nowMs = Date.now();
 	const page = await browser.newPage();
 	const selfSecret = fixtureSecret(53);
-	const gameId = `${getPublicKey(fixtureSecret(47))}:${Math.floor(nowMs / 1_000)}:${'c'.repeat(64)}`;
+		const gameId = `${getPublicKey(fixtureSecret(47))}:${Math.floor(nowMs / 1_000)}:${'c'.repeat(64)}`;
 	try {
-		await preparePlayer(page, selfSecret, nowMs, 0, true);
+		await preparePlayer(page, selfSecret, nowMs, 0, true, true);
 		await moveRelaySelfTo(page, { x: 8, y: 5 });
 		await page.evaluate((reservationGameId) => new Promise<void>((resolve, reject) => {
 			const request = indexedDB.open('persona-bubble-field-account', 8);
@@ -2927,13 +3032,35 @@ test('releases an approved reservation after finite known-game recovery when Rel
 				transaction.onerror = () => { database.close(); reject(transaction.error); };
 			};
 		}), gameId);
-		await page.clock.setSystemTime(nowMs + 91_000);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { deferNextWebSocketOpen(): void } }).__relayStartupTest.deferNextWebSocketOpen());
+		const recoveryStartedAtMs = nowMs + 91_000;
+		await page.clock.setFixedTime(recoveryStartedAtMs);
 		await page.reload();
+		await expect(page.locator('[data-unified-status-hud]')).toBeVisible();
+		const startupState = await relayState(page);
+		const currentGeneration = Math.max(...startupState.state.webSocketConnections.map((connection) => connection.generation));
+		const authoritativeRelayHosts = new Set(AUTHORITATIVE_RELAYS.map((url) => new URL(url).host));
+		expect(startupState.state.webSocketConnections.filter((connection) => connection.generation === currentGeneration && authoritativeRelayHosts.has(new URL(connection.url).host))).toHaveLength(5);
+		expect(startupState.state.webSocketCloses.filter((close) => close.generation === currentGeneration && close.origin === 'application' && close.readyState === 0 && authoritativeRelayHosts.has(new URL(close.url).host))).toEqual([]);
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseWebSocketOpens(): void } }).__relayStartupTest.releaseWebSocketOpens());
 		await openTagGameTerminal(page);
 		await expect(page.locator(`[data-tag-game-cancel-reservation="${gameId}"]`)).toBeVisible();
 		await expect(page.locator(`[data-tag-game-cancel-reservation="${gameId}"]`)).toHaveAttribute('data-action-intent', 'cancel');
+		let observedReservation: { recoveryDeadlineMs?: number } | null = null;
+		await expect.poll(async () => {
+			observedReservation = (await tagGamePersistence(page)).reservation as { recoveryDeadlineMs?: number } | null;
+			return observedReservation?.recoveryDeadlineMs ?? null;
+		}).not.toBeNull();
+		const firstDeadline = observedReservation!.recoveryDeadlineMs!;
+		expect(firstDeadline).toBe(recoveryStartedAtMs + TAG_GAME_RESERVATION_RECOVERY_MS);
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => request.filters.some((filter) => (filter['#d'] as string[] | undefined)?.includes(gameId)))).toBe(true);
-		await page.clock.fastForward(31_000);
+		await page.reload();
+		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${getPublicKey(selfSecret)}"]`)).toBeVisible();
+		await expect.poll(async () => (await tagGamePersistence(page)).reservation).toMatchObject({ recoveryDeadlineMs: firstDeadline });
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => request.filters.some((filter) => (filter['#d'] as string[] | undefined)?.includes(gameId)))).toBe(true);
+		await page.clock.setFixedTime(firstDeadline + 1);
+		await page.clock.runFor(2_000);
 		await expect.poll(async () => (await tagGamePersistence(page)).reservation).toBeNull();
 	} finally {
 		await page.close();

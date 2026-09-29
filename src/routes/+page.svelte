@@ -1515,8 +1515,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		): Promise<void> => {
 			const anonymousSession = worldReader;
 			const anonymousStartup = currentSessionStartup;
-			if (anonymousSession && anonymousStartup?.session === anonymousSession && !worldSession &&
-				(!persona.tagGame?.reservation || persona.tagGame.reservation.expiresAtMs !== undefined)) {
+			if (anonymousSession && anonymousStartup?.session === anonymousSession && !worldSession) {
 				try {
 					await Promise.race([anonymousStartup.promise, anonymousSession.whenSelfReadReady()]);
 					if (restored && isPersonaExpired(persona.gameState, Date.now(), persona.activeRun.rootBuild)) {
