@@ -21,8 +21,15 @@ const mocked = vi.hoisted(() => ({
 	createTransport: vi.fn(),
 	reconcileTraceRootCache: vi.fn(),
 	reconcileTraceReplyCache: vi.fn(),
-	touchTraceReplyTree: vi.fn()
+	touchTraceReplyTree: vi.fn(),
+	loadWorldWriteJournal: vi.fn(),
+	applyInteractionReward: vi.fn()
 }));
+
+vi.mock('./rootIdentity', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('./rootIdentity')>();
+	return { ...actual, loadWorldWriteJournal: mocked.loadWorldWriteJournal, applyInteractionReward: mocked.applyInteractionReward };
+});
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -35,7 +42,7 @@ describe('Trace reply publication ownership', () => {
 	const settle = async () => { for (let i = 0; i < 40; i++) await Promise.resolve(); };
 	const accepted = [{ relayUrl: 'wss://relay.test/', outcome: 'accepted' as const }];
 
-	async function fixture(nested = false) {
+	async function fixture(nested = false, runNumber?: number) {
 		vi.useFakeTimers(); vi.setSystemTime(700_000);
 		const root = message('a'.repeat(64), 699);
 		const child = traceReply('b'.repeat(64), root, 699);
@@ -71,7 +78,7 @@ describe('Trace reply publication ownership', () => {
 			bootstrapTraceRootCandidates: traceBootstrap(), configureTraceReplies, publish, publishSelf, dispose: vi.fn()
 		});
 		const onLiveMessage = vi.fn();
-		const session = createWorldReadSession({ field: { columns: 4, rows: 3 }, selfSigner: selfSigner(),
+		const session = createWorldReadSession({ field: { columns: 4, rows: 3 }, selfSigner: selfSigner(), selfRunNumber: runNumber,
 			onPresenceChanged: vi.fn(), onLiveMessage, onStatusChanged: vi.fn() });
 		await session.start(); session.completeBootstrap(); await session.enterSelf(); await settle();
 		expect(session.openTraceConversation({ rootId: root.id, currentId: root.id }).kind).toBe('opened');
@@ -97,6 +104,14 @@ describe('Trace reply publication ownership', () => {
 		expect(parseTraceReplyCandidate(rawEvent)?.speechType).toBe(speechType);
 		expect(f.session.getTraceConversationState()).toMatchObject({ config: { currentId: f.root.id }, replies: [{ id: rawEvent.id }] });
 		expect(f.onLiveMessage).not.toHaveBeenCalled();
+	});
+
+	it('keeps a confirmed reply successful when local interaction reward storage fails', async () => {
+		const f = await fixture(false, 1);
+		mocked.applyInteractionReward.mockRejectedValueOnce(new Error('storage unavailable'));
+		await expect(f.submit()).resolves.toMatchObject({ kind: 'succeeded' });
+		expect(mocked.applyInteractionReward).toHaveBeenCalledOnce();
+		expect(f.publish).toHaveBeenCalledOnce();
 	});
 
 	it('stops position, message, and Trace writers after its owner is disposed', async () => {
@@ -420,6 +435,8 @@ describe('world read session', () => {
 		mocked.reconcileTraceRootCache.mockReset().mockResolvedValue([]);
 		mocked.reconcileTraceReplyCache.mockReset().mockResolvedValue([]);
 		mocked.touchTraceReplyTree.mockReset().mockResolvedValue(true);
+		mocked.loadWorldWriteJournal.mockReset().mockResolvedValue(null);
+		mocked.applyInteractionReward.mockReset().mockResolvedValue({ kind: 'applied' });
 		mocked.createTransport.mockReturnValue({
 			start: vi.fn(async (nextInput) => {
 				input = nextInput;
@@ -602,7 +619,7 @@ describe('world read session', () => {
 		expect(mocked.reconcileTraceRootCache).toHaveBeenCalledWith(expect.objectContaining({ rawEvents: [rawEvent] }));
 	});
 
-	it('publishes one dedicated death Last Words trace after terminal exit without using the presence writer', async () => {
+	it('publishes one dedicated death 遺言 trace after terminal exit without using the presence writer', async () => {
 		const selfMessage = { ...message('self-message', 110), pubkey: selfPubkey, position: { x: 2, y: 1 } };
 		result = startResult([selfMessage], [position('self-slot-0', 100, selfPubkey, 0, { x: 2, y: 1 })]);
 		publish.mockResolvedValue([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
@@ -620,13 +637,13 @@ describe('world read session', () => {
 		expect(session.enableDeathLastWords()).toBe(true);
 		const publishedExit = publish.mock.calls[0][0] as VerifiedEvent;
 		expect(publishedExit.created_at).toBe(110);
-		const first = await session.publishDeathLastWords('  last words  ');
+		const first = await session.publishDeathLastWords('  遺言  ');
 		expect(first).toMatchObject({ kind: 'published' });
 		expect(publish).toHaveBeenCalledTimes(2);
 		const publishedTrace = publish.mock.calls[1][0] as VerifiedEvent;
 		expect(publishedTrace.kind).toBe(42);
 		expect(publishedTrace.created_at).toBeGreaterThanOrEqual(publishedExit.created_at);
-		expect(parseTraceEvent(publishedTrace, 'c'.repeat(64))).toMatchObject({ content: 'last words', position: { x: 2, y: 1 }, source: 'death' });
+		expect(parseTraceEvent(publishedTrace, 'c'.repeat(64))).toMatchObject({ content: '遺言', position: { x: 2, y: 1 }, source: 'death' });
 		expect(publishedTrace.tags.find((tag) => tag[0] === 'w')?.[1]).toBe(publishedExit.content);
 		expect(await session.publishDeathLastWords('duplicate')).toEqual({ kind: 'unavailable' });
 	});
@@ -702,7 +719,7 @@ describe('world read session', () => {
 		expect(supplemental).toHaveBeenCalledExactlyOnceWith(supplementalEvent, 'live');
 		traceConfiguration.resolve({ status: 'active', generation: 1, initialBatch: { events: [], relays: [] } });
 		await vi.waitFor(() => expect(session.getTraceConversationState()).toMatchObject({ replyRefresh: 'settled' }));
-		const replyResult = await session.publishTraceReply({ rootId: root.id, targetId: root.id, content: 'reply to Last Words', speechType: 'normal' });
+		const replyResult = await session.publishTraceReply({ rootId: root.id, targetId: root.id, content: 'reply to 遺言', speechType: 'normal' });
 		expect(replyResult.kind).toBe('succeeded');
 		const reply = publish.mock.calls.map(([event]) => event).find((event) => event.kind === 1111);
 		expect(reply).toBeDefined();

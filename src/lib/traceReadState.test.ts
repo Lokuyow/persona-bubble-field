@@ -4,7 +4,7 @@ import { openDB } from 'idb';
 import { getPublicKey } from 'nostr-tools/pure';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildTraceReplyTemplate, buildWorldMessageTemplate, finalizeWorldEvent, parseWorldMessage, type ChannelReference } from './nostrProtocol';
-import { openTraceDatabase, TRACE_DATABASE_NAME, TRACE_REPLY_READ_STORE, TRACE_REPLY_STORE, TRACE_ROOT_READ_STORE, TRACE_ROOT_STORE } from './traceDatabase';
+import { openTraceDatabase, TRACE_DATABASE_NAME, TRACE_DATABASE_VERSION, TRACE_REPLY_READ_STORE, TRACE_REPLY_STORE, TRACE_ROOT_READ_STORE, TRACE_ROOT_STORE, TRACE_REWARD_OUTBOX_STORE } from './traceDatabase';
 import { reconcileTraceReplyCache } from './traceReplyCache';
 import { reconcileTraceRootCache } from './traceRootCache';
 import { loadTraceReadSnapshot, markTraceReplyRead, markTraceRootRead, setTraceReplyReadState } from './traceReadState';
@@ -54,12 +54,21 @@ describe('Trace read state', () => {
 		await v2.put('trace-reply-lru', { channelId: CHANNEL_ID, rootId: 'b'.repeat(64), accessOrder: 1 });
 		v2.close();
 		const upgraded = await openTraceDatabase();
-		expect(upgraded.version).toBe(3);
+		expect(upgraded.version).toBe(TRACE_DATABASE_VERSION);
 		expect(await upgraded.get(TRACE_ROOT_STORE, [CHANNEL_ID, 'b'.repeat(64)])).toBeTruthy();
 		expect(await upgraded.get(TRACE_REPLY_STORE, [CHANNEL_ID, 'b'.repeat(64), 'c'.repeat(64)])).toBeTruthy();
 		expect(await upgraded.get('trace-reply-lru', [CHANNEL_ID, 'b'.repeat(64)])).toBeTruthy();
-		expect([...upgraded.objectStoreNames]).toEqual(expect.arrayContaining([TRACE_ROOT_READ_STORE, TRACE_REPLY_READ_STORE]));
+		expect([...upgraded.objectStoreNames]).toEqual(expect.arrayContaining([TRACE_ROOT_READ_STORE, TRACE_REPLY_READ_STORE, TRACE_REWARD_OUTBOX_STORE]));
 		upgraded.close();
+	});
+
+	it('creates every Trace store, including the reward outbox, for a new database', async () => {
+		const db = await openTraceDatabase();
+		expect(db.version).toBe(TRACE_DATABASE_VERSION);
+		expect([...db.objectStoreNames]).toEqual(expect.arrayContaining([
+			TRACE_ROOT_STORE, TRACE_REPLY_STORE, TRACE_REPLY_READ_STORE, TRACE_ROOT_READ_STORE, TRACE_REWARD_OUTBOX_STORE
+		]));
+		db.close();
 	});
 
 	it('keeps root reads browser-person scoped while separating reply state by persona', async () => {
@@ -104,5 +113,21 @@ describe('Trace read state', () => {
 		await reconcileTraceRootCache({ channelId: CHANNEL_ID, field: { columns: 10, rows: 1 }, rawEvents: [second] });
 		expect((await loadTraceReadSnapshot({ channelId: CHANNEL_ID, personaPubkey: PERSONA })).readRootIds).not.toContain(firstParsed.id);
 		expect((await loadTraceReadSnapshot({ channelId: CHANNEL_ID, personaPubkey: PERSONA })).unreadReplyRootIds).not.toContain(firstParsed.id);
+	});
+
+	it('removes unread notifications when an unread root without a root-read record is evicted, preserving reward records', async () => {
+		const { root, reply } = await rootAndReply();
+		const db = await openTraceDatabase();
+		const outbox = { key: 'preserve-unsettled', kind: 'trace-reply-read', channelId: CHANNEL_ID, eventId: reply.id,
+			identity: { generation: 1, accountIndex: 0, pubkey: PERSONA }, runNumber: 1, status: 'pending' } as const;
+		await db.put(TRACE_REWARD_OUTBOX_STORE, outbox);
+		expect(await db.get(TRACE_ROOT_READ_STORE, [CHANNEL_ID, root.id])).toBeUndefined();
+		expect((await loadTraceReadSnapshot({ channelId: CHANNEL_ID, personaPubkey: PERSONA })).unreadReplyRootIds).toContain(root.id);
+		const replacement = traceRoot(PERSONA_SECRET, 102);
+		await reconcileTraceRootCache({ channelId: CHANNEL_ID, field: { columns: 10, rows: 1 }, rawEvents: [replacement] });
+		expect((await loadTraceReadSnapshot({ channelId: CHANNEL_ID, personaPubkey: PERSONA })).unreadReplyRootIds).not.toContain(root.id);
+		expect(await db.get(TRACE_REPLY_READ_STORE, [CHANNEL_ID, PERSONA, root.id, reply.id])).toBeUndefined();
+		expect(await db.get(TRACE_REWARD_OUTBOX_STORE, outbox.key)).toEqual(outbox);
+		db.close();
 	});
 });

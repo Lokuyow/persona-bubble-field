@@ -26,6 +26,31 @@ import { fixtureSecret, installDelayedRelay, publishedMessages, waitForPublished
 
 
 test.describe('Relay startup', () => {
+	test('publishes all selected speech types on manual Trace kind 42 events', async ({ page }) => {
+		await installPromptApiStub(page);
+		const editor = await openReadyRelayWorld(page, 1, 300);
+		const traceToggle = page.locator('.manual-trace-toggle');
+		const speechType = page.locator('.speech-type-toggle');
+		const manualEvents = async () => (await publishedMessages(page)).filter((event) =>
+			event.tags.some((tag) => tag[0] === 'l' && tag[1] === 'trace:manual')
+		);
+		const expected = [
+			{ type: 'shout', label: ['l', 'speech:shout', 'io.github.lokuyow.persona-bubble-field'] },
+			{ type: 'monologue', label: ['l', 'speech:monologue', 'io.github.lokuyow.persona-bubble-field'] },
+			{ type: 'normal', label: null }
+		] as const;
+		for (const [index, item] of expected.entries()) {
+			while (await speechType.getAttribute('data-speech-type') !== item.type) await speechType.click();
+			await traceToggle.click();
+			await editor.fill(`manual ${item.type}`);
+			await editor.press('Enter');
+			await expect.poll(manualEvents).toHaveLength(index + 1);
+			const event = (await manualEvents())[index];
+			if (item.label) expect(event?.tags).toContainEqual(item.label);
+			else expect(event?.tags.some((tag) => tag[0] === 'l' && tag[1]?.startsWith('speech:'))).toBe(false);
+		}
+	});
+
 	test('shows ActionDock tooltips for the current control meanings', async ({ page }) => {
 		await installPromptApiStub(page);
 		const editor = await openReadyRelayWorld(page, 1, 300);
@@ -476,7 +501,7 @@ test.describe('Relay startup', () => {
 		expect(published).toHaveLength(1);
 		expect(published[0].kind).toBe(42);
 		expect(published[0].tags).toEqual(expect.arrayContaining([['l', 'trace:manual', expect.any(String)]]));
-		expect(published[0].tags.some((tag) => tag[0] === 'l' && tag[1]?.startsWith('speech:'))).toBe(false);
+		expect(published[0].tags).toContainEqual(['l', 'speech:shout', 'io.github.lokuyow.persona-bubble-field']);
 		const persistedPoints = await page.evaluate(async () => {
 			const database = await new Promise<IDBDatabase>((resolve, reject) => {
 				const request = indexedDB.open('persona-bubble-field-account');

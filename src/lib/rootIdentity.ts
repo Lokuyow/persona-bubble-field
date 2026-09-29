@@ -20,10 +20,11 @@ import { isRootBuildAllocatable, isValidRootBuild, type RootBuild, rootBuildCost
 import { TAG_GAME_FINAL_WAIT_MS, TAG_GAME_GAME_MS, TAG_GAME_MAX_POINTS, TAG_GAME_MAX_LIFESPAN_LOSS_MS } from './tagGame';
 
 export const DATABASE_NAME = 'persona-bubble-field-account';
-export const DATABASE_VERSION = 8;
+export const DATABASE_VERSION = 9;
 export const ROOT_SECRET_STORE_NAME = 'persona-bubble-field-root-secret';
 export const PLAYER_LIFECYCLE_STORE_NAME = 'persona-bubble-field-player-state';
 export const WORLD_WRITE_JOURNAL_STORE_NAME = 'persona-bubble-field-world-write-journal';
+export const INTERACTION_REWARD_STORE_NAME = 'persona-bubble-field-interaction-rewards';
 export const LIFECYCLE_UPGRADE_BLOCKED_MESSAGE = 'Close other open Hako tabs, then reload to finish account storage upgrade.';
 export const CURRENT_CHARACTER_PROFILE_REVISION = 2;
 
@@ -42,7 +43,19 @@ interface LifecycleDatabase extends DBSchema {
 	[ROOT_SECRET_STORE_NAME]: { key: string; value: unknown };
 	[PLAYER_LIFECYCLE_STORE_NAME]: { key: string; value: unknown };
 	[WORLD_WRITE_JOURNAL_STORE_NAME]: { key: string; value: unknown };
+	[INTERACTION_REWARD_STORE_NAME]: { key: string; value: unknown };
 }
+
+export type InteractionRewardKind = 'trace-root-read' | 'trace-reply-read' | 'trace-reply-post';
+export type InteractionRewardInput = Readonly<{
+	kind: InteractionRewardKind;
+	channelId: string;
+	eventId: string;
+	identity: IdentityReference;
+	runNumber: number;
+	parentId?: string;
+}>;
+export type InteractionRewardResult = Readonly<{ kind: 'applied' | 'duplicate' | 'stale' }>;
 
 export type IdentityReference = Readonly<{ generation: number; accountIndex: number; pubkey: string }>;
 
@@ -424,13 +437,24 @@ function openLifecycleDatabase(): Promise<IDBPDatabase<LifecycleDatabase>> {
 			async upgrade(db, oldVersion, _newVersion, transaction) {
 				const hasRootStore = db.objectStoreNames.contains(ROOT_SECRET_STORE_NAME);
 				const hasPlayerStore = db.objectStoreNames.contains(PLAYER_LIFECYCLE_STORE_NAME);
-				// v7 is the current lifecycle format. Preserve it when adding the journal.
+				const ensureRewardStore = () => {
+					if (!db.objectStoreNames.contains(INTERACTION_REWARD_STORE_NAME)) db.createObjectStore(INTERACTION_REWARD_STORE_NAME, { keyPath: 'key' });
+				};
+				// v8 is the current lifecycle format. Preserve its records while adding the independent reward ledger.
+				if (oldVersion === 8 && hasRootStore && hasPlayerStore) {
+					if (!db.objectStoreNames.contains(WORLD_WRITE_JOURNAL_STORE_NAME)) db.createObjectStore(WORLD_WRITE_JOURNAL_STORE_NAME);
+					ensureRewardStore();
+					return;
+				}
+				// Preserve the v7 lifecycle records while adding stores introduced later.
 				if (oldVersion === 7 && hasRootStore && hasPlayerStore) {
-					db.createObjectStore(WORLD_WRITE_JOURNAL_STORE_NAME);
+					if (!db.objectStoreNames.contains(WORLD_WRITE_JOURNAL_STORE_NAME)) db.createObjectStore(WORLD_WRITE_JOURNAL_STORE_NAME);
+					ensureRewardStore();
 					return;
 				}
 				if (oldVersion >= 6 && hasRootStore && hasPlayerStore) {
 					if (!db.objectStoreNames.contains(WORLD_WRITE_JOURNAL_STORE_NAME)) db.createObjectStore(WORLD_WRITE_JOURNAL_STORE_NAME);
+					ensureRewardStore();
 					const rootStore = transaction.objectStore(ROOT_SECRET_STORE_NAME);
 					const playerStore = transaction.objectStore(PLAYER_LIFECYCLE_STORE_NAME);
 					const [rootKeys, rootWrappingKey, encryptedEntropy, playerKeys] = await Promise.all([
@@ -447,11 +471,26 @@ function openLifecycleDatabase(): Promise<IDBPDatabase<LifecycleDatabase>> {
 					}
 					return;
 				}
-				if (oldVersion >= 6 && hasRootStore !== hasPlayerStore) return;
+				if (oldVersion >= 6 && hasRootStore !== hasPlayerStore) {
+					if (!hasRootStore) db.createObjectStore(ROOT_SECRET_STORE_NAME);
+					if (!hasPlayerStore) {
+						const playerStore = db.createObjectStore(PLAYER_LIFECYCLE_STORE_NAME);
+						playerStore.put({ kind: 'partial-state-upgrade' }, PLAYER_STATE);
+					} else if (!hasRootStore) {
+						const playerStore = transaction.objectStore(PLAYER_LIFECYCLE_STORE_NAME);
+						if ((await playerStore.getAllKeys()).length === 0) {
+							playerStore.put({ kind: 'partial-state-upgrade' }, PLAYER_STATE);
+						}
+					}
+					if (!db.objectStoreNames.contains(WORLD_WRITE_JOURNAL_STORE_NAME)) db.createObjectStore(WORLD_WRITE_JOURNAL_STORE_NAME);
+					ensureRewardStore();
+					return;
+				}
 				for (const name of Array.from(db.objectStoreNames)) db.deleteObjectStore(name);
 				db.createObjectStore(ROOT_SECRET_STORE_NAME);
 				db.createObjectStore(PLAYER_LIFECYCLE_STORE_NAME);
 				db.createObjectStore(WORLD_WRITE_JOURNAL_STORE_NAME);
+				ensureRewardStore();
 			}
 			}).then((db) => {
 				if (blocked) db.close();
@@ -936,6 +975,59 @@ export async function reserveManualTraceOutbox(scope: WorldWriteJournalScope, pr
 			await tx.done;
 			return { kind: 'reserved', outbox, points: gameState.points, revision: nextRun.revision } as const;
 		} catch (error) { try { tx.abort(); } catch { /* already aborted */ } await tx.done.catch(() => {}); throw error; }
+	});
+}
+
+/** Awards one interaction reward only while the exact Identity and Run remain current. */
+export async function applyInteractionReward(input: InteractionRewardInput): Promise<InteractionRewardResult> {
+	const eventIdPattern = /^[0-9a-f]{64}$/;
+	if (!eventIdPattern.test(input.channelId) || !eventIdPattern.test(input.eventId) ||
+		!eventIdPattern.test(input.identity.pubkey) || !Number.isSafeInteger(input.identity.generation) || input.identity.generation < 0 ||
+		!Number.isSafeInteger(input.identity.accountIndex) || input.identity.accountIndex < 0 ||
+		!Number.isSafeInteger(input.runNumber) || input.runNumber < 1 ||
+		(input.kind === 'trace-reply-post' && (!input.parentId || !eventIdPattern.test(input.parentId)))) {
+		throw new TypeError('Invalid interaction reward scope.');
+	}
+	const identityKey = `${input.identity.generation}:${input.identity.accountIndex}:${input.identity.pubkey}`;
+	const key = input.kind === 'trace-root-read'
+		? `${input.kind}\u0000${input.channelId}\u0000${input.eventId}`
+		: input.kind === 'trace-reply-read'
+			? `${input.kind}\u0000${input.identity.pubkey}\u0000${input.eventId}`
+			: `${input.kind}\u0000${identityKey}\u0000${input.runNumber}\u0000${input.channelId}\u0000${input.parentId}`;
+	const points = input.kind === 'trace-root-read' ? 5 : 10;
+	return withLifecycle(async (db) => {
+		const tx = db.transaction([PLAYER_LIFECYCLE_STORE_NAME, INTERACTION_REWARD_STORE_NAME], 'readwrite');
+		try {
+			const playerStore = tx.objectStore(PLAYER_LIFECYCLE_STORE_NAME);
+			const player = await playerStore.get(PLAYER_STATE);
+			if (!journalScopeIsActive(player, { identity: input.identity, runNumber: input.runNumber, channelId: input.channelId })) {
+				await tx.done;
+				return { kind: 'stale' } as const;
+			}
+			if (player.mode.kind !== 'running') {
+				await tx.done;
+				return { kind: 'stale' } as const;
+			}
+			const rewardStore = tx.objectStore(INTERACTION_REWARD_STORE_NAME);
+			const existing = await rewardStore.get(key);
+			if (existing !== undefined) {
+				if (typeof existing !== 'object' || existing === null || Array.isArray(existing) || (existing as Record<string, unknown>).key !== key) throw new Error('Account operation failed.');
+				await tx.done;
+				return { kind: 'duplicate' } as const;
+			}
+			const activeRun = player.mode.activeRun;
+			const gameState = { ...activeRun.gameState, points: activeRun.gameState.points + points };
+			const nextRun = { ...activeRun, revision: activeRun.revision + 1, gameState };
+			await rewardStore.put({ key, kind: input.kind, channelId: input.channelId, eventId: input.eventId,
+				identity: input.identity, runNumber: input.runNumber, parentId: input.parentId, points });
+			await playerStore.put({ ...player, mode: { kind: 'running', activeRun: nextRun } }, PLAYER_STATE);
+			await tx.done;
+			return { kind: 'applied' } as const;
+		} catch (error) {
+			try { tx.abort(); } catch { /* already aborted */ }
+			await tx.done.catch(() => {});
+			throw error;
+		}
 	});
 }
 

@@ -38,7 +38,7 @@ async function waitForDeathLastWords(page: Page, canonicalPosition?: string | nu
 	if (canonicalPosition) await expect(tombstone).toHaveAttribute('data-death-presentation-tombstone-position', canonicalPosition);
 	await page.clock.runFor(2_500);
 	await expect(presentation).toHaveAttribute('data-death-phase', 'last-words');
-	await expect(presentation.getByText('一生が終わりました。最後に、世界にひとこと残せます。', { exact: true })).toBeVisible();
+	await expect(presentation.getByText('一生が終わりました。最後に、遺言を残せます。', { exact: true })).toBeVisible();
 	await expect(presentation.locator('textarea')).toBeVisible();
 	await expect(presentation.locator('.death-presentation-card')).toBeFocused();
 }
@@ -294,7 +294,7 @@ test.describe('Relay startup', () => {
 		await advanceToRuntimeDeath(page, startTime + 30_000);
 		await waitForDeathLastWords(page, canonicalPosition);
 		expect(await publishedDeathTraceCount(page, pubkey)).toBe(0);
-		await page.locator('[data-death-presentation]').getByRole('button', { name: '残さず進む' }).click();
+		await page.locator('[data-death-presentation]').getByRole('button', { name: '遺言を残さず進む' }).click();
 		await expect(page.getByRole('dialog')).toBeVisible();
 		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
 		expect(await publishedDeathTraceCount(page, pubkey)).toBe(0);
@@ -364,7 +364,7 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('[data-death-presentation-tombstone]')).toHaveCount(1);
 		await expect(presentation.locator('textarea')).toBeVisible();
 		await expect(presentation.locator('.death-presentation-card')).toBeFocused();
-		await presentation.getByRole('button', { name: '残さず進む' }).click();
+		await presentation.getByRole('button', { name: '遺言を残さず進む' }).click();
 		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
 		await page.getByRole('button', { name: /を選ぶ$/ }).first().click();
 		await startSelectedRun(page);
@@ -407,8 +407,8 @@ test.describe('Relay startup', () => {
 		await page.clock.runFor(2_500);
 		await expect(presentation).toHaveAttribute('data-death-phase', 'last-words');
 		await presentation.locator('textarea').fill('delayed terminal exit');
-		await presentation.getByRole('button', { name: '残して進む' }).click();
-		await expect(presentation.getByRole('button', { name: '残して進む' })).toBeDisabled();
+		await presentation.getByRole('button', { name: '遺言を残して進む' }).click();
+		await expect(presentation.getByRole('button', { name: '遺言を残して進む' })).toBeDisabled();
 		await expect(page.locator('.selection-dialog')).toHaveCount(0);
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePublishes(kind: number): void } }).__relayStartupTest.releasePublishes(30079));
 		await expect(page.getByRole('dialog')).toBeVisible();
@@ -436,7 +436,7 @@ test.describe('Relay startup', () => {
 		await waitForDeathLastWords(page);
 		expect(await publishedDeathTraceCount(page, pubkey)).toBe(0);
 		await page.locator('[data-death-presentation] textarea').fill('A last word from this Run');
-		await page.locator('[data-death-presentation]').getByRole('button', { name: '残して進む' }).click();
+		await page.locator('[data-death-presentation]').getByRole('button', { name: '遺言を残して進む' }).click();
 		await expect(page.getByRole('dialog')).toBeVisible();
 		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
 		await expect(page.getByText('一生を終えました', { exact: true })).toBeVisible();
@@ -487,7 +487,7 @@ test.describe('Relay startup', () => {
 		await advanceToRuntimeDeath(page, startTime + 30_000);
 		await waitForDeathLastWords(page);
 		await page.locator('[data-death-presentation] textarea').fill('trace publication is best effort');
-		await page.locator('[data-death-presentation]').getByRole('button', { name: '残して進む' }).click();
+		await page.locator('[data-death-presentation]').getByRole('button', { name: '遺言を残して進む' }).click();
 		await expect(page.getByRole('dialog')).toBeVisible();
 		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
 		await expect.poll(() => page.evaluate((expectedPubkey) => {

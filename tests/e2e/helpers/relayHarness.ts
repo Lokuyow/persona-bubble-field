@@ -463,7 +463,7 @@ export async function installDelayedRelay(page: Page, options: {
 			const key = channelId && event.pubkey ? `${channelId}\u0000${event.pubkey}` : null;
 			const slotTag = event.tags?.find((tag) => tag[0] === 'd')?.[1] ?? '';
 			if (!key || !Number.isSafeInteger(event.created_at) || slotTag.endsWith(':exit')) { resolve(); return; }
-			const database = indexedDB.open('persona-bubble-field-account', 8);
+			const database = indexedDB.open('persona-bubble-field-account', 9);
 			database.onerror = () => reject(database.error);
 			database.onsuccess = () => {
 				const db = database.result;
@@ -844,7 +844,7 @@ export async function relayFieldCellCenter(page: Page, cell: { x: number; y: num
 }
 
 export async function selectRelayTraceCell(page: Page, position: string): Promise<void> {
-	const cell = page.locator(`[data-cell-position="${position}"]`);
+	const cell = page.locator(`[data-cell-position="${position}"]:not(.realtime-group-trigger)`);
 	const box = await cell.boundingBox();
 	if (!box) throw new Error(`Expected visible logical cell ${position}.`);
 	await cell.click({ position: { x: box.width - 2, y: box.height - 2 } });
@@ -1046,12 +1046,13 @@ export async function seedRelayAccount(page: Page, secretKey: Uint8Array, pubkey
 	await page.goto('/favicon.svg');
 	await page.evaluate(async ({ accountPubkey, accountIndex, expiresAtMs, points, abilities, characterId, rootPoints, rootBuild }) => {
 		const database = await new Promise<IDBDatabase>((resolve, reject) => {
-			const request = indexedDB.open('persona-bubble-field-account', 8);
+			const request = indexedDB.open('persona-bubble-field-account', 9);
 			request.onupgradeneeded = () => {
 				for (const name of Array.from(request.result.objectStoreNames)) request.result.deleteObjectStore(name);
 				request.result.createObjectStore('persona-bubble-field-root-secret');
 				request.result.createObjectStore('persona-bubble-field-player-state');
 				request.result.createObjectStore('persona-bubble-field-world-write-journal');
+				request.result.createObjectStore('persona-bubble-field-interaction-rewards', { keyPath: 'key' });
 			};
 			request.onsuccess = () => resolve(request.result);
 			request.onerror = () => reject(request.error);
@@ -1240,12 +1241,13 @@ export async function overwriteRelayMendingBuild(page: Page, rootBuild: { infere
 export async function seedUnavailablePersona(page: Page, kind: 'missing' | 'corrupt'): Promise<void> {
 	await page.goto('/favicon.svg');
 	await page.evaluate((stateKind) => new Promise<void>((resolve, reject) => {
-		const request = indexedDB.open('persona-bubble-field-account', 8);
+		const request = indexedDB.open('persona-bubble-field-account', 9);
 		request.onupgradeneeded = () => {
 			for (const name of Array.from(request.result.objectStoreNames)) request.result.deleteObjectStore(name);
 			request.result.createObjectStore('persona-bubble-field-root-secret');
 			request.result.createObjectStore('persona-bubble-field-player-state');
 			request.result.createObjectStore('persona-bubble-field-world-write-journal');
+			request.result.createObjectStore('persona-bubble-field-interaction-rewards', { keyPath: 'key' });
 		};
 		request.onerror = () => reject(request.error);
 		request.onsuccess = () => {

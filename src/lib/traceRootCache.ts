@@ -68,10 +68,15 @@ async function removeEvictedRootState(
 	channelId: string,
 	survivorIds: ReadonlySet<string>
 ): Promise<void> {
+	const removedRootIds = new Set<string>();
+	for (const key of await tx.objectStore(TRACE_ROOT_STORE).getAllKeys()) {
+		if (Array.isArray(key) && key.length === 2 && key[0] === channelId && typeof key[1] === 'string' && !survivorIds.has(key[1])) removedRootIds.add(key[1]);
+	}
 	const replyStore = tx.objectStore(TRACE_REPLY_STORE);
 	for (const key of await replyStore.getAllKeys()) {
 		if (!Array.isArray(key) || key.length !== 3 || key[0] !== channelId) continue;
 		if (typeof key[1] !== 'string' || !survivorIds.has(key[1])) {
+			if (typeof key[1] === 'string') removedRootIds.add(key[1]);
 			await replyStore.delete(key as [string, string, string]);
 		}
 	}
@@ -79,10 +84,9 @@ async function removeEvictedRootState(
 	const rootReadStore = tx.objectStore(TRACE_ROOT_READ_STORE);
 	for (const key of await rootReadStore.getAllKeys()) {
 		if (!Array.isArray(key) || key.length !== 2 || key[0] !== channelId) continue;
-		if (typeof key[1] !== 'string' || !survivorIds.has(key[1])) {
-			await deleteTraceRootReadState(tx, channelId, key[1] as string);
-		}
+		if (typeof key[1] === 'string' && !survivorIds.has(key[1])) removedRootIds.add(key[1]);
 	}
+	for (const rootId of removedRootIds) await deleteTraceRootReadState(tx, channelId, rootId);
 
 	const lruStore = tx.objectStore(TRACE_REPLY_LRU_STORE);
 	for (const key of await lruStore.getAllKeys()) {

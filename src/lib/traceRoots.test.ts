@@ -52,7 +52,7 @@ function deathTrace(content = 'last words', createdAt = 200, position = { x: 4, 
 }
 
 function manualTrace(content: string, createdAt: number, position: { x: number; y: number }) {
-	return finalizeWorldEvent(buildManualTraceEventTemplate({ channel, content, createdAt, position }), SECRET_KEY);
+	return finalizeWorldEvent(buildManualTraceEventTemplate({ channel, content, createdAt, position, speechType: 'normal' }), SECRET_KEY);
 }
 
 describe('trace root selection', () => {

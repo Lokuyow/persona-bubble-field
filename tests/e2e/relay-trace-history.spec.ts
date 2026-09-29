@@ -13,7 +13,7 @@ import {
 } from '../../src/lib/nostrProtocol';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { expectIconCloseButton } from './helpers/iconCloseButton';
-import { AUTHORITATIVE_RELAYS, CHANNEL_ID, fixtureSecret, traceRuntimeEvents, installDelayedRelay, relayState, selectRelayTraceCell, clickRelayLogicalCell, installPromptApiStub, seedRelayAccount, readActionDockControlOrder } from './helpers/relayHarness';
+import { AUTHORITATIVE_RELAYS, CHANNEL_ID, fixtureSecret, traceRuntimeEvents, installDelayedRelay, relayState, selectRelayTraceCell, clickRelayLogicalCell, installPromptApiStub, seedRelayAccount, readActionDockControlOrder, moveRelaySelfTo } from './helpers/relayHarness';
 
 
 
@@ -233,6 +233,54 @@ test.describe('Relay startup', () => {
 		} finally { await readerContext.close(); }
 	});
 
+	test('awards first visible unread Trace and own-target reply rewards in the points HUD', async ({ page }) => {
+		const now = Date.now();
+		const createdAt = Math.floor(now / 1000);
+		const selfSecret = fixtureSecret(23);
+		const selfPubkey = getPublicKey(selfSecret);
+		const channel = { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' };
+		const primary = {
+			message: finalizeEvent(buildWorldMessageTemplate({ channel, content: 'reward participant', speechType: 'normal', position: { x: 3, y: 2 }, createdAt }), selfSecret),
+			position: finalizeEvent(buildWorldStateEventTemplate({ channel, position: { x: 3, y: 2 }, slot: 0, createdAt }), selfSecret)
+		};
+		const makeTraceRoot = (secret: Uint8Array, content: string, x: number) => {
+			for (let attempt = 0; attempt < 100; attempt += 1) {
+				const event = finalizeEvent(buildWorldMessageTemplate({ channel, content: `${content} ${attempt}`, speechType: 'normal', position: { x, y: 2 }, createdAt }), secret);
+				if (BigInt(`0x${event.id}`) % 5n === 0n) return event;
+			}
+			throw new Error('Could not create an eligible Trace root.');
+		};
+		const unreadRoot = makeTraceRoot(fixtureSecret(30), 'reward other root', 4);
+		const selfRoot = makeTraceRoot(selfSecret, 'reward self root', 5);
+		const parsedSelfRoot = parseWorldMessage(selfRoot, CHANNEL_ID);
+		if (!parsedSelfRoot) throw new Error('Reward self root did not parse.');
+		const unreadReply = finalizeEvent(buildTraceReplyTemplate({ root: parsedSelfRoot, parent: parsedSelfRoot,
+			content: 'reward reply to current Identity', speechType: 'normal', createdAt: createdAt + 1 }), fixtureSecret(31));
+		await page.clock.setFixedTime(now);
+		await page.emulateMedia({ reducedMotion: 'reduce' });
+		await page.setViewportSize({ width: 1100, height: 850 });
+		await installHostOwnedStub(page);
+		await installPromptApiStub(page);
+		await installDelayedRelay(page, { primaryEvents: primary, traceRoots: [unreadRoot, selfRoot], traceReplies: [unreadReply] });
+		await seedRelayAccount(page, selfSecret, selfPubkey, now + 7 * 24 * 60 * 60 * 1000, 300);
+		await page.goto('/');
+		await expect(page.locator('.action-dock')).toBeVisible();
+		await page.evaluate(() => (window as unknown as { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		await expect(page.locator('[data-points-value]')).toHaveText('300pt');
+		await selectRelayTraceCell(page, '4,2');
+		const investigateOther = page.getByRole('button', { name: '痕跡を調べる', exact: true });
+		if (await investigateOther.isVisible()) await investigateOther.click();
+		await expect(page.locator(`[data-trace-root-id="${unreadRoot.id}"]`)).toBeVisible();
+		await expect(page.locator('[data-points-value]')).toHaveText('305pt');
+		await moveRelaySelfTo(page, { x: 4, y: 2 });
+		await selectRelayTraceCell(page, '5,2');
+		const investigateSelf = page.getByRole('button', { name: '痕跡を調べる', exact: true });
+		if (await investigateSelf.isVisible()) await investigateSelf.click();
+		await expect(page.locator(`[data-trace-root-id="${selfRoot.id}"]`)).toBeVisible();
+		await expect(page.locator(`[data-trace-reply-id="${unreadReply.id}"]`)).toBeVisible();
+		await expect(page.locator('[data-points-value]')).toHaveText('315pt');
+	});
+
 	test('persists Trace root and reply read state and keeps notification generic', async ({ page }) => {
 		const now = Date.now();
 		const selfSecret = fixtureSecret(23);
@@ -256,6 +304,7 @@ test.describe('Relay startup', () => {
 			channel,
 			content: 'read-state manual trace',
 			position: { x: 7, y: 2 },
+			speechType: 'normal',
 			createdAt: Math.floor(now / 1000)
 		}), selfSecret);
 		const deathRoot = finalizeEvent(buildDeathTraceEventTemplate({
@@ -600,25 +649,25 @@ test.describe('Relay startup', () => {
 		await expect(candidatePanel).toHaveCount(0);
 	});
 
-	test('opens death Last Words with the regular reply tree, publication, and semantic validation', async ({ page }) => {
+	test('opens death 遺言 with the regular reply tree, publication, and semantic validation', async ({ page }) => {
 		const now = Date.now();
 		const trace = traceRuntimeEvents();
 		const channel = { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' };
 		const deathSecret = fixtureSecret(37);
 		const deathRoot = finalizeEvent(buildDeathTraceEventTemplate({
-			channel, content: 'Last Words root', position: { x: 4, y: 2 }, createdAt: Math.floor(now / 1000)
+			channel, content: '遺言 root', position: { x: 4, y: 2 }, createdAt: Math.floor(now / 1000)
 		}), deathSecret);
 		const parsedDeath = parseTraceEvent(deathRoot, CHANNEL_ID);
 		if (!parsedDeath || parsedDeath.source !== 'death') throw new Error('Death Trace fixture did not parse.');
 		const direct = finalizeEvent(buildTraceReplyTemplate({
-			root: parsedDeath, parent: parsedDeath, content: 'Last Words direct reply', speechType: 'normal', createdAt: Math.floor(now / 1000) + 1
+			root: parsedDeath, parent: parsedDeath, content: '遺言 direct reply', speechType: 'normal', createdAt: Math.floor(now / 1000) + 1
 		}), fixtureSecret(31));
 		const parsedDirect = parseTraceReplyCandidate(direct);
 		if (!parsedDirect) throw new Error('Death Trace direct reply fixture did not parse.');
 		const validatedDirect = validateTraceReplyCandidate(parsedDirect, parsedDeath, parsedDeath);
 		if (!validatedDirect) throw new Error('Death Trace direct reply fixture did not validate.');
 		const nested = finalizeEvent(buildTraceReplyTemplate({
-			root: parsedDeath, parent: validatedDirect, content: 'Last Words nested reply', speechType: 'shout', createdAt: Math.floor(now / 1000) + 2
+			root: parsedDeath, parent: validatedDirect, content: '遺言 nested reply', speechType: 'shout', createdAt: Math.floor(now / 1000) + 2
 		}), fixtureSecret(32));
 		const wrongRoot = finalizeEvent({
 			kind: nested.kind, created_at: nested.created_at, content: 'wrong death root',
@@ -650,7 +699,7 @@ test.describe('Relay startup', () => {
 		await selectRelayTraceCell(page, '4,2');
 		const investigate = page.getByRole('button', { name: '痕跡を調べる', exact: true });
 		if (await investigate.isVisible()) await investigate.click();
-		await expect(page.locator(`[data-trace-root-id="${deathRoot.id}"]`)).toContainText('Last Words root');
+		await expect(page.locator(`[data-trace-root-id="${deathRoot.id}"]`)).toContainText('遺言 root');
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
 			request.filters.some((filter) => (filter['#E'] as string[] | undefined)?.includes(deathRoot.id)) &&
 			request.filters.some((filter) => (filter['#e'] as string[] | undefined)?.includes(deathRoot.id))

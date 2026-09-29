@@ -107,6 +107,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		type PendingSelection,
 		type SelectionCandidate
 	} from '$lib/rootIdentity';
+	import { settlePendingTraceRewards } from '$lib/traceRewards';
 	import { rootMaximumLifespanMs, type RootBuild } from '$lib/rootProgression';
 	import { isPersonaExpired } from '$lib/personaGameState';
 	import { deathDevMode, DEATH_DEV_INITIAL_LIFESPAN_MS } from '$lib/deathDevMode';
@@ -853,7 +854,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		publish: async (submission, context): Promise<SpeechPublicationOutcome> => {
 			if (personaLifecycleTransition) return { kind: 'blocked' };
 			const result = context.manualTrace
-				? await worldSession?.publishManualTrace(submission.content)
+				? await worldSession?.publishManualTrace(submission.content, submission.speechType)
 				: context.target
 				? await (devWorldSandboxEnabled ? devTraceConversationRuntime : worldSession)?.publishTraceReply({
 					rootId: context.target.rootId, targetId: context.target.targetId, ...submission
@@ -1432,6 +1433,10 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 				onTimelineMessage: receiveSessionTimelineMessage,
 				onEffectiveTraceRootsChanged: setEffectiveTraceRoots,
 				onTraceReadSnapshotChanged: (snapshot) => { traceReadSnapshot = snapshot; },
+				onPersonaSnapshotChanged: (persona) => {
+					if (personaSnapshot && samePersonaIdentity(personaSnapshot, persona) &&
+						persona.activeRun.revision >= personaSnapshot.activeRun.revision) personaSnapshot = persona;
+				},
 				onTraceConversationChanged: setTraceConversation,
 				onStatusChanged: (status) => {
 					if (!mounted || worldReader !== nextSession) return;
@@ -1627,26 +1632,35 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 					setComposerTerminalError(new Error('Persona is unavailable for publishing.'));
 				} else {
 					runTransitionNotice = null;
-					personaSnapshot = personaResult.persona;
+					await settlePendingTraceRewards().catch(() => {});
+					let activePersona = personaResult.persona;
+					const afterRewardRecovery = await loadOrCreateLifecycle().catch(() => null);
+					if (afterRewardRecovery?.kind === 'restored' &&
+						afterRewardRecovery.persona.signer.pubkey === activePersona.signer.pubkey &&
+						afterRewardRecovery.persona.activeRun.runNumber === activePersona.activeRun.runNumber &&
+						afterRewardRecovery.persona.activeRun.revision >= activePersona.activeRun.revision) {
+						activePersona = afterRewardRecovery.persona;
+					}
+					personaSnapshot = activePersona;
 					const reservation = personaSnapshot.tagGame?.reservation;
 					if (reservation && reservation.expiresAtMs === undefined && !personaSnapshot.tagGame?.lock) {
 						if (await beginTagGameReservationRecovery(personaSnapshot, reservation.gameId, Date.now() + TAG_GAME_RESERVATION_RECOVERY_MS)) {
 							await refreshTagGamePersona(personaSnapshot);
 						}
 					}
-					pendingRootPoints = personaResult.persona.rootPoints;
-					selfSigner = personaResult.persona.signer;
+					pendingRootPoints = activePersona.rootPoints;
+					selfSigner = activePersona.signer;
 					if (initialFieldGeometryReady) syncVisualToCanonical();
-					const pendingInstanceIds = (await loadPendingCooperationDefectionInstances(personaResult.persona))
+					const pendingInstanceIds = (await loadPendingCooperationDefectionInstances(activePersona))
 						.filter((instanceId) => getCooperationDefectionScheduleForInstance(instanceId, Date.now()) !== null);
 					realtimeRecoveryInstanceIds.clear();
 					pendingRealtimeSettlement = pendingInstanceIds.length > 0;
 					for (const instanceId of pendingInstanceIds) realtimeRecoveryInstanceIds.add(instanceId);
 					mendingNowMs = Date.now();
 					updateLifespanHud(Date.now(), true);
-					if (isPersonaExpired(personaResult.persona.gameState, Date.now(), personaResult.persona.activeRun.rootBuild)) {
+					if (isPersonaExpired(activePersona.gameState, Date.now(), activePersona.activeRun.rootBuild)) {
 						personaLifecycleTransition = false;
-						const result = await beginDeathTransition(personaResult.persona, null, false);
+						const result = await beginDeathTransition(activePersona, null, false);
 						if (result === 'reloaded' || result === 'failed') return;
 					}
 					if (selfSigner.characterProfileRevision !== CURRENT_CHARACTER_PROFILE_REVISION) {
@@ -4480,7 +4494,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		deathPresentationSubmitting = true;
 		if (terminalExitPublication) await terminalExitPublication;
 		if (publish && deathPresentationContent.trim()) {
-			try { await currentSession?.publishDeathLastWords(deathPresentationContent); } catch { /* Last Words is best effort. */ }
+			try { await currentSession?.publishDeathLastWords(deathPresentationContent); } catch { /* 遺言 is best effort. */ }
 		}
 		clearDeathPresentationTimer();
 		deathPresentation = null;
@@ -5139,17 +5153,17 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 				{#if deathPresentation.phase === 'intro'}
 					<p>一生が終わりました。</p>
 				{:else}
-					<p>一生が終わりました。最後に、世界にひとこと残せます。</p>
+					<p>一生が終わりました。最後に、遺言を残せます。</p>
 					<textarea
-						aria-label="Last Words"
+						aria-label="遺言"
 						bind:value={deathPresentationContent}
 						maxlength="280"
-						placeholder="残したい言葉（任意）"
+						placeholder="遺言（任意）"
 						disabled={deathPresentationSubmitting}
 					></textarea>
 					<div class="death-presentation-actions">
-					<ActionButton variant="secondary" type="button" onclick={() => { void finishDeathPresentation(false); }} disabled={deathPresentationSubmitting}>残さず進む</ActionButton>
-					<ActionButton variant="secondary" type="button" onclick={() => { void finishDeathPresentation(true); }} disabled={deathPresentationSubmitting}>残して進む</ActionButton>
+					<ActionButton variant="secondary" type="button" onclick={() => { void finishDeathPresentation(false); }} disabled={deathPresentationSubmitting}>遺言を残さず進む</ActionButton>
+					<ActionButton variant="secondary" type="button" onclick={() => { void finishDeathPresentation(true); }} disabled={deathPresentationSubmitting}>遺言を残して進む</ActionButton>
 					</div>
 				{/if}
 			</section>

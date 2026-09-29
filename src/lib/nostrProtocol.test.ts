@@ -101,6 +101,7 @@ function signedManualTrace(content = 'I chose to leave this trace'): VerifiedEve
 		channel,
 		content,
 		position: { x: 7, y: 3 },
+		speechType: 'normal',
 		createdAt: 1_700_000_002
 	}), TEST_SECRET_KEY);
 }
@@ -814,7 +815,7 @@ describe('Nostr protocol foundation', () => {
 		expect(parseTraceEvent(event, CHANNEL_ID)).not.toBeNull();
 	});
 
-	it('builds and parses manual traces as explicit, speech-neutral kind 42 events', () => {
+	it('builds and parses manual traces with all speech types while death traces remain normal', () => {
 		const event = signedManualTrace();
 		expect(event.kind).toBe(CHANNEL_MESSAGE_KIND);
 		expect(event.tags).toContainEqual(['l', 'trace', PROTOTYPE_NAMESPACE]);
@@ -823,9 +824,15 @@ describe('Nostr protocol foundation', () => {
 		expect(event.tags.some((tag) => tag[0] === 'l' && tag[1]?.startsWith('speech:'))).toBe(false);
 		expect(parseWorldMessage(event, CHANNEL_ID)).toBeNull();
 		expect(parseTraceEvent(event, CHANNEL_ID)).toMatchObject({ source: 'manual', content: 'I chose to leave this trace', position: { x: 7, y: 3 } });
+		for (const [speechType, label] of [['shout', 'speech:shout'], ['monologue', 'speech:monologue']] as const) {
+			const typed = finalizeWorldEvent(buildManualTraceEventTemplate({ channel, content: 'typed note', position: { x: 7, y: 3 }, speechType, createdAt: 1_700_000_003 }), TEST_SECRET_KEY);
+			expect(typed.tags).toContainEqual(['l', label, PROTOTYPE_NAMESPACE]);
+			expect(parseTraceEvent(typed, CHANNEL_ID)).toMatchObject({ source: 'manual', speechType });
+		}
 		for (const mutate of [
 			(candidate: VerifiedEvent) => { candidate.tags.push(['l', 'chat', PROTOTYPE_NAMESPACE]); },
 			(candidate: VerifiedEvent) => { candidate.tags.push(['l', 'trace:death', PROTOTYPE_NAMESPACE]); },
+			(candidate: VerifiedEvent) => { candidate.tags.push(['l', 'speech:shout', PROTOTYPE_NAMESPACE]); candidate.tags.push(['l', 'speech:monologue', PROTOTYPE_NAMESPACE]); },
 			(candidate: VerifiedEvent) => { candidate.tags[4][2] = 'another-namespace'; },
 			(candidate: VerifiedEvent) => { candidate.tags.push(['L', 'other-namespace']); }
 		]) {
