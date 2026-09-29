@@ -1,6 +1,21 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { openDevWorld, openClockedDevWorld, openDevTraceWorld, fieldOwnedBlankPoint, profileTrigger, profileDialog } from './helpers/devWorldHarness';
+
+async function visibleFieldCenterCell(page: Page): Promise<{ x: number; y: number }> {
+	return page.locator('.field-grid').evaluate((grid) => {
+		const area = document.querySelector<HTMLElement>('.field-area');
+		const scene = document.querySelector<HTMLElement>('.field-scene');
+		if (!area || !scene) throw new Error('Expected the visible field surface to be rendered.');
+		const areaRect = area.getBoundingClientRect();
+		const gridRect = grid.getBoundingClientRect();
+		const cellSize = Number.parseFloat(getComputedStyle(scene).getPropertyValue('--cell-size'));
+		return {
+			x: Math.floor((areaRect.left + areaRect.width / 2 - gridRect.left) / cellSize),
+			y: Math.floor((areaRect.top + areaRect.height / 2 - gridRect.top) / cellSize)
+		};
+	});
+}
 
 test.describe('DEV World Sandbox', () => {
 	test.beforeEach(async ({ page }) => {
@@ -90,7 +105,7 @@ test.describe('DEV World Sandbox', () => {
 			await page.locator('[data-cell-position="8,4"]').click();
 			await expect(page.getByRole('menu', { name: 'Cell actions' })).toHaveCount(0);
 
-			const start = await fieldOwnedBlankPoint(page, { x: 5, y: 5 });
+			const start = await fieldOwnedBlankPoint(page, await visibleFieldCenterCell(page));
 			await page.mouse.move(start.x, start.y);
 			await page.mouse.down();
 			await page.mouse.move(start.x + 24, start.y);
@@ -123,27 +138,14 @@ test.describe('DEV World Sandbox', () => {
 				expect(traceBox.width).toBeCloseTo(menuBox.width, 1);
 				expect(Math.abs(traceBox.y - participantBox.y - participantBox.height)).toBeLessThan(1);
 			}
-			const participantActionEdge = await participantAction.evaluate((button) => {
-				const buttonRect = button.getBoundingClientRect();
-				const fieldRect = button.closest('.field-area')?.getBoundingClientRect();
-				if (!fieldRect) throw new Error('Expected the participant action to be inside the field area.');
-				const left = Math.max(buttonRect.left, fieldRect.left, 0);
-				const right = Math.min(buttonRect.right, fieldRect.right, innerWidth);
-				const top = Math.max(buttonRect.top, fieldRect.top, 0);
-				const bottom = Math.min(buttonRect.bottom, fieldRect.bottom, innerHeight);
-				if (right <= left || bottom <= top) throw new Error('Expected a visible part of the participant action.');
-				const point = { x: right - Math.min(3, (right - left) / 2), y: (top + bottom) / 2 };
-				if (!button.contains(document.elementFromPoint(point.x, point.y))) throw new Error('Expected the visible edge point to target the participant action.');
-				return point;
-			});
-			await page.mouse.click(participantActionEdge.x, participantActionEdge.y);
+			await participantAction.click();
 			await expect(profileDialog(page)).toBeVisible();
 			await page.keyboard.press('Escape');
 			await expect(profileDialog(page)).toBeHidden();
 			await profileTrigger(page, '女の子').click();
 			const outsideMenu = page.getByRole('menu', { name: 'Cell actions' });
 			await expect(outsideMenu).toBeVisible();
-			const outside = await fieldOwnedBlankPoint(page, { x: 5, y: 5 });
+			const outside = await fieldOwnedBlankPoint(page, await visibleFieldCenterCell(page));
 			await page.mouse.click(outside.x, outside.y);
 			await expect(outsideMenu).toBeHidden();
 			await profileTrigger(page, '女の子').click();
