@@ -24,7 +24,7 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('.participant')).toHaveCount(2);
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '3,2');
 		await page.locator('.chatter-toggle').click();
-		await page.locator('[data-cell-position="4,2"]').click();
+		await page.locator('[data-cell-position="4,2"]:not(.realtime-group-trigger)').click();
 		await expect(page.getByLabel('Reply preview', { exact: true })).toContainText('Relay trace root');
 
 		const rootCharacter = requireCharacterFromPubkey(trace.root.pubkey);
@@ -71,7 +71,7 @@ test.describe('Relay startup', () => {
 		});
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '3,2');
 		await page.locator('.chatter-toggle').click();
-		await page.locator('[data-cell-position="4,2"]').click();
+		await page.locator('[data-cell-position="4,2"]:not(.realtime-group-trigger)').click();
 		await expect(page.getByLabel('Reply preview', { exact: true })).toContainText('Relay trace root');
 		await page.locator(`[data-trace-reply-id="${trace.direct.id}"] .trace-reply-content-button`).click();
 		await expect(page.getByLabel('Reply preview', { exact: true })).toContainText('Relay direct reply');
@@ -116,7 +116,7 @@ test.describe('Relay startup', () => {
 		});
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '3,2');
 		await page.locator('.chatter-toggle').click();
-		await page.locator('[data-cell-position="4,2"]').click();
+		await page.locator('[data-cell-position="4,2"]:not(.realtime-group-trigger)').click();
 		const editor = page.getByRole('textbox', { name: '投稿エディター' });
 		const preview = page.getByLabel('Reply preview', { exact: true });
 		await expect(preview).toContainText('Relay trace root');
@@ -165,12 +165,14 @@ test.describe('Relay startup', () => {
 			});
 			await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '3,2');
 			await page.locator('.chatter-toggle').click();
-			await page.locator('[data-cell-position="4,2"]').click();
+			await page.locator('[data-cell-position="4,2"]:not(.realtime-group-trigger)').click();
 			const preview = page.getByLabel('Reply preview', { exact: true });
 			const editor = page.getByRole('textbox', { name: '投稿エディター' });
 			const speechType = page.locator('.speech-type-toggle');
 			await expect(preview).toContainText('Relay trace root');
 			await expect(editor).not.toBeFocused();
+			await expect(page.locator('[data-points-value]')).toHaveText('5pt');
+			const pointsBeforeReply = 5;
 			await speechType.click();
 			await speechType.click();
 			await expect(speechType).toHaveAttribute('data-speech-type', 'monologue');
@@ -195,6 +197,7 @@ test.describe('Relay startup', () => {
 			await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '3,2');
 			expect((await relayState(page)).state.published.filter((event) => event.kind === WORLD_STATE_KIND)).toHaveLength(positionsBefore);
 			await page.evaluate(() => (window as unknown as { __relayStartupTest: { releasePublishes(kind: number): void } }).__relayStartupTest.releasePublishes(1111));
+			if (outcome !== 'rejected') await expect(page.locator('[data-interaction-reward-feedback]')).toHaveText(['+5pt', '+10pt']);
 			await expect.poll(() => page.evaluate(() => (window as unknown as { __ehagakiTerminalCount: number }).__ehagakiTerminalCount)).toBe(1);
 			if (outcome === 'rejected') {
 				await expect(editor).toHaveValue('own Trace shout');
@@ -209,6 +212,9 @@ test.describe('Relay startup', () => {
 				await expect(bubble).toHaveAttribute('data-speech-type', 'shout');
 				await expect(page.locator('[data-trace-current-id]')).toHaveAttribute('data-trace-current-id', trace.root.id);
 				await expect(page.locator(`[data-trace-reply-ghost-id="${raw.id}"]`)).toHaveCount(0);
+				await expect(page.locator('[data-points-value]')).toHaveText(`${pointsBeforeReply + 10}pt`);
+			} else {
+				await expect(page.locator('[data-points-value]')).toHaveText(`${pointsBeforeReply}pt`);
 			}
 			if (outcome === 'rejected') await page.getByRole('button', { name: 'Clear reply', exact: true }).click();
 			await expect(speechType).toHaveAttribute('data-speech-type', 'monologue');
@@ -232,7 +238,7 @@ test.describe('Relay startup', () => {
 		await page.goto('/');
 		await page.evaluate(() => (window as unknown as { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '3,2');
-		const traceButton = page.getByRole('button', { name: /任意の痕跡を投稿/ });
+		const traceButton = page.getByRole('button', { name: /書置きを投稿/ });
 		await expect(traceButton).toHaveText('100pt');
 		await expect(traceButton).toHaveAttribute('aria-pressed', 'false');
 		await traceButton.click();
@@ -381,7 +387,7 @@ test.describe('Relay startup', () => {
 		await page.goto('/');
 		await page.evaluate(() => (window as unknown as { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '3,2');
-		const manualTrace = page.getByRole('button', { name: /任意の痕跡を投稿/ });
+		const manualTrace = page.getByRole('button', { name: /書置きを投稿/ });
 		await expect(manualTrace).toHaveText('100pt');
 		await manualTrace.click();
 		await expect(manualTrace).toHaveAttribute('aria-pressed', 'true');

@@ -78,7 +78,7 @@ describe('DEV trace conversation runtime', () => {
 		expect(f.runtime.getTraceConversationState()).toMatchObject({ config: { currentId: parent.id }, replies: f.replies });
 	});
 
-	it('supports Last Words conversations and nested local replies', async () => {
+	it('supports 遺言 conversations and nested local replies', async () => {
 		const f = fixture();
 		const lastWords = deathRoot('last-words', 3);
 		const direct = reply('last-words-direct', lastWords.id);
@@ -88,7 +88,7 @@ describe('DEV trace conversation runtime', () => {
 		expect(f.runtime.getTraceConversationState()).toMatchObject({ root: { source: 'death' }, replies: [direct] });
 		expect(f.runtime.selectTraceConversationSpeech(direct.id)).toEqual({ kind: 'opened' });
 		await expect(f.runtime.publishTraceReply({
-			rootId: lastWords.id, targetId: direct.id, content: 'nested Last Words reply', speechType: 'normal'
+			rootId: lastWords.id, targetId: direct.id, content: 'nested 遺言 reply', speechType: 'normal'
 		})).resolves.toMatchObject({ kind: 'succeeded' });
 		expect(f.replies.at(-1)).toMatchObject({ rootId: lastWords.id, parentId: direct.id, parentKind: 1111 });
 	});

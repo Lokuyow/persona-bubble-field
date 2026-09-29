@@ -145,10 +145,10 @@ afterEach(() => {
 });
 
 describe('trace reply cache reconciliation', () => {
-	it('validates cached reply trees and Composer previews against death Last Words roots', async () => {
-		const root = makeDeathRoot(CHANNEL_ID, 'Last Words root');
-		const direct = makeReply(root.parsed, root.parsed, 'direct Last Words reply', 101);
-		const nested = makeReply(root.parsed, direct.parsed, 'nested Last Words reply', 102);
+	it('validates cached reply trees and Composer previews against death 遺言 roots', async () => {
+		const root = makeDeathRoot(CHANNEL_ID, '遺言 root');
+		const direct = makeReply(root.parsed, root.parsed, 'direct 遺言 reply', 101);
+		const nested = makeReply(root.parsed, direct.parsed, 'nested 遺言 reply', 102);
 		await reconcileTraceRootCache({ channelId: CHANNEL_ID, field: { columns: 20, rows: 1 }, rawEvents: [root.raw] });
 		const replies = await reconcileTraceReplyCache({
 			channelId: CHANNEL_ID, effectiveRoots: [root.parsed], rawEvents: [nested.raw, direct.raw]

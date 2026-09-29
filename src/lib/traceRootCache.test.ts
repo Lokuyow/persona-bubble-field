@@ -53,7 +53,7 @@ function lotteryRoot(options: Parameters<typeof root>[0] = {}, wins = true) {
 }
 
 function manualRoot(createdAt: number, position: { x: number; y: number }, nonce: string) {
-	return finalizeWorldEvent(buildManualTraceEventTemplate({ channel: channel(), content: nonce, createdAt, position }), SECRET_KEY);
+	return finalizeWorldEvent(buildManualTraceEventTemplate({ channel: channel(), content: nonce, createdAt, position, speechType: 'normal' }), SECRET_KEY);
 }
 
 async function database(): Promise<IDBPDatabase<TraceDatabase>> {
@@ -91,7 +91,7 @@ afterEach(() => {
 });
 
 describe('trace root cache reconciliation', () => {
-	it('preserves version 1 roots while upgrading the shared database to version 3', async () => {
+	it('preserves version 1 roots while upgrading the shared database to the current version', async () => {
 		const event = lotteryRoot({ nonce: 'legacy-v1' });
 		const legacy = await openDB(TRACE_DATABASE_NAME, 1, {
 			upgrade(db) { db.createObjectStore(TRACE_ROOT_STORE, { keyPath: ['channelId', 'eventId'] }); }
@@ -103,9 +103,9 @@ describe('trace root cache reconciliation', () => {
 			channelId: CHANNEL_ID, field: { columns: 20, rows: 1 }, rawEvents: []
 		})).map((root) => root.id)).toEqual([event.id]);
 		const upgraded = await database();
-		expect(upgraded.version).toBe(3);
+		expect(upgraded.version).toBe(4);
 		expect([...upgraded.objectStoreNames]).toEqual([
-			'trace-replies', 'trace-reply-lru', 'trace-reply-read', 'trace-root-read', 'trace-roots'
+			'trace-replies', 'trace-reply-lru', 'trace-reply-read', 'trace-reward-outbox', 'trace-root-read', 'trace-roots'
 		]);
 	});
 

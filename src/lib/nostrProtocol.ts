@@ -59,7 +59,7 @@ export type DeathTraceEventInput = {
 	createdAt: number;
 };
 
-export type ManualTraceEventInput = DeathTraceEventInput;
+export type ManualTraceEventInput = DeathTraceEventInput & Readonly<{ speechType: SpeechType }>;
 
 
 export type TraceReplyInput = {
@@ -127,7 +127,7 @@ export type ParsedTraceEvent = {
 	pubkey: string;
 	createdAt: number;
 	content: string;
-	speechType: 'normal';
+	speechType: SpeechType;
 	position: GridPosition;
 	source: 'manual' | 'death';
 };
@@ -375,6 +375,7 @@ export function buildDeathTraceEventTemplate(input: DeathTraceEventInput): Death
 export function buildManualTraceEventTemplate(input: ManualTraceEventInput): DeathTraceEventTemplate {
 	assertChannelReference(input.channel);
 	assertCreatedAt(input.createdAt);
+	const label = speechLabel(input.speechType);
 	return {
 		kind: CHANNEL_MESSAGE_KIND,
 		created_at: input.createdAt,
@@ -383,7 +384,8 @@ export function buildManualTraceEventTemplate(input: ManualTraceEventInput): Dea
 			['w', formatCanonicalGridPosition(input.position)],
 			['L', PROTOTYPE_NAMESPACE],
 			['l', 'trace', PROTOTYPE_NAMESPACE],
-			['l', 'trace:manual', PROTOTYPE_NAMESPACE]
+			['l', 'trace:manual', PROTOTYPE_NAMESPACE],
+			...(label ? [label] : [])
 		],
 		content: input.content
 	};
@@ -432,19 +434,13 @@ function hasProjectTraceLabel(event: Event): boolean {
 	);
 }
 
-function hasProjectSpeechLabel(event: Event): boolean {
-	return event.tags.some((tag) => tag[0] === 'l' && tag[2] === PROTOTYPE_NAMESPACE && tag[1]?.startsWith('speech:'));
-}
-
 function parseSpeechType(event: Event): SpeechType | null {
 	const labels = event.tags.filter((tag) => tag[0] === 'l' && tag[2] === PROTOTYPE_NAMESPACE);
 	const speechLabels = labels.filter((tag) => tag[1]?.startsWith('speech:'));
 	if (speechLabels.some((tag) => tag[1] !== 'speech:shout' && tag[1] !== 'speech:monologue')) return null;
-
-	const values = new Set(speechLabels.map((tag) => tag[1]));
-	if (values.size === 0) return 'normal';
-	if (values.size !== 1) return null;
-	return values.has('speech:shout') ? 'shout' : 'monologue';
+	if (speechLabels.length === 0) return 'normal';
+	if (speechLabels.length !== 1) return null;
+	return speechLabels[0][1] === 'speech:shout' ? 'shout' : 'monologue';
 }
 
 function parseUnambiguousWorldPosition(event: Event): GridPosition | null {
@@ -648,10 +644,12 @@ export function parseTraceEvent(event: Event, channelId: string): ParsedTraceEve
 	if (event.tags.some((tag) => tag[0] === 'l' && tag[1] === 'chat') || traceLabels.length !== 2 || traceLabels.filter((tag) => tag[1] === 'trace' && tag[2] === PROTOTYPE_NAMESPACE).length !== 1) return null;
 	const sourceTags = traceLabels.filter((tag) => tag[1]?.startsWith('trace:'));
 	if (sourceTags.length !== 1 || traceLabels.some((tag) => tag[2] !== PROTOTYPE_NAMESPACE) ||
-		(sourceTags[0][1] !== 'trace:death' && sourceTags[0][1] !== 'trace:manual') || hasProjectSpeechLabel(event)) return null;
+		(sourceTags[0][1] !== 'trace:death' && sourceTags[0][1] !== 'trace:manual')) return null;
+	const speechType = parseSpeechType(event);
+	if (!speechType || sourceTags[0][1] === 'trace:death' && speechType !== 'normal') return null;
 	const position = parseUnambiguousWorldPosition(event);
 	if (!position) return null;
-	return { id: event.id, pubkey: event.pubkey, createdAt: event.created_at, content: event.content, speechType: 'normal', position, source: sourceTags[0][1] === 'trace:manual' ? 'manual' : 'death' };
+	return { id: event.id, pubkey: event.pubkey, createdAt: event.created_at, content: event.content, speechType, position, source: sourceTags[0][1] === 'trace:manual' ? 'manual' : 'death' };
 }
 
 export function buildWorldMessageFilter(options: LiveFilterOptions): Filter {

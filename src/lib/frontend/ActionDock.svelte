@@ -208,7 +208,7 @@
 						{...props}
 						class={['manual-trace-toggle', { 'action-selected': manualTraceSelected }]}
 						type="button"
-						aria-label={`任意の痕跡を投稿（100pt消費${manualTraceStatus === 'unknown' ? '・結果未確認' : manualTraceStatus === 'sending' ? '・送信中' : ''}）`}
+						aria-label={`書置きを投稿（100pt消費${manualTraceStatus === 'unknown' ? '・結果未確認' : manualTraceStatus === 'sending' ? '・送信中' : ''}）`}
 						aria-pressed={manualTraceSelected}
 						data-manual-trace-status={manualTraceStatus}
 						disabled={!manualTraceEnabled || submissionInProgress}
@@ -220,7 +220,7 @@
 				{/snippet}
 			</Tooltip.Trigger>
 			<Tooltip.Portal>
-				<Tooltip.Content role="tooltip" class="action-dock-tooltip" side="top" sideOffset={8}>任意の痕跡（投稿時に100pt消費）{manualTraceStatus === 'sending' ? '・送信中' : manualTraceStatus === 'unknown' ? '・結果未確認のため同じイベントを自動再試行します' : ''}</Tooltip.Content>
+				<Tooltip.Content role="tooltip" class="action-dock-tooltip" side="top" sideOffset={8}>書置き（投稿時に100pt消費）{manualTraceStatus === 'sending' ? '・送信中' : manualTraceStatus === 'unknown' ? '・結果未確認のため同じイベントを自動再試行します' : ''}</Tooltip.Content>
 			</Tooltip.Portal>
 		</Tooltip.Root>
 		<SpeechSuggestions

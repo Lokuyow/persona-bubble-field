@@ -67,7 +67,7 @@ async function waitForDeathLastWords(page: Page): Promise<void> {
 	await expect(page.locator('[data-death-presentation-tombstone]')).toHaveCount(1);
 	await page.clock.runFor(2_500);
 	await expect(presentation).toHaveAttribute('data-death-phase', 'last-words');
-	await expect(presentation.getByText('一生が終わりました。最後に、世界にひとこと残せます。', { exact: true })).toBeVisible();
+	await expect(presentation.getByText('一生が終わりました。最後に、遺言を残せます。', { exact: true })).toBeVisible();
 	await expect(presentation.locator('textarea')).toBeVisible();
 	await expect(presentation.locator('.death-presentation-card')).toBeFocused();
 }
@@ -149,7 +149,7 @@ test.describe('Relay startup', () => {
 		await waitForDeathLastWords(page);
 		expect(await publishedDeathTraceCount(page, selfPubkey)).toBe(0);
 		await page.locator('[data-death-presentation] textarea').fill('A last word from this Run');
-		await page.locator('[data-death-presentation]').getByRole('button', { name: '残して進む' }).click();
+		await page.locator('[data-death-presentation]').getByRole('button', { name: '遺言を残して進む' }).click();
 		await expect(page.getByRole('dialog')).toBeVisible();
 		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
 		const exits = await page.evaluate((expectedPubkey) => {

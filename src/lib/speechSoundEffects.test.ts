@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createConversationState, receiveMessage, type SpeechType } from './conversation';
-import { createSoundSamples, createSpeechSoundSamples, DEFAULT_SOUND_PREFERENCE, DEATH_SOUND_DURATION, loadSoundPreference, newLiveBubbleEffects, SOUND_EFFECT_GAINS, SPEECH_SOUND_DURATIONS, SPEECH_SOUND_PREFERENCE_KEY, UI_SOUND_DURATIONS } from './speechSoundEffects';
+import { createSoundController, createSoundSamples, createSpeechSoundSamples, DEFAULT_SOUND_PREFERENCE, DEATH_SOUND_DURATION, loadSoundPreference, newLiveBubbleEffects, SOUND_EFFECT_GAINS, SPEECH_SOUND_DURATIONS, SPEECH_SOUND_PREFERENCE_KEY, UI_SOUND_DURATIONS } from './speechSoundEffects';
 
 const options = { isSpeakerVisible: true, duration: 100, now: 0 };
 const message = (id: string, pubkey: string, content: string, speechType: SpeechType = 'normal') => ({ id, pubkey, content, speechType, createdAt: 0 });
@@ -28,6 +28,34 @@ function rms(samples: Float32Array): number {
 }
 
 describe('speech sound effects', () => {
+	it('reuses collect while honoring unlock, volume, and document visibility constraints', () => {
+		const starts: number[] = [];
+		let hidden = false;
+		const context = {
+			state: 'running', sampleRate: 10_000, currentTime: 0, destination: {},
+			createGain: () => ({ gain: { value: 1, cancelScheduledValues: () => {}, setTargetAtTime: () => {} }, connect: () => {} }),
+			createBuffer: (_channels: number, length: number) => ({ getChannelData: () => new Float32Array(length) }),
+			createBufferSource: () => ({ buffer: null, connect: () => {}, start: (when: number) => starts.push(when) }),
+			close: async () => {}, resume: async () => {}
+		} as unknown as AudioContext;
+		const controller = createSoundController({ audioContextFactory: () => context, document: { get hidden() { return hidden; } } });
+		controller.play('collect');
+		expect(starts).toEqual([]);
+		controller.unlock();
+		controller.play('collect');
+		expect(starts).toHaveLength(1);
+		hidden = true;
+		controller.play('collect');
+		expect(starts).toHaveLength(1);
+		hidden = false;
+		controller.setVolume(0);
+		controller.play('collect');
+		expect(starts).toHaveLength(1);
+		controller.setVolume(0.5);
+		controller.play('collect');
+		expect(starts).toHaveLength(2);
+		controller.dispose();
+	});
 	it('creates deterministic UI chimes with effect-specific gains', () => {
 		for (const effect of ['collect', 'level-up', 'startup', 'cooperation-start'] as const) {
 			const samples = createSoundSamples(effect, 10_000);

@@ -99,11 +99,11 @@ kind 42はproject namespaceのself-labelによって、専用client内では次�
 - 通常chat: `l=chat` が1つあり、`l=trace` / `l=trace:*` がない
 - explicit Trace: `l=trace` と、対応するsource label `l=trace:manual` または `l=trace:death` がそれぞれ1つあり、`l=chat` がない
 
-通常chatには必要な場合だけ `speech:shout` または `speech:monologue` を追加する。任意Traceとdeath Last Wordsはexplicit Traceであり、`l=chat`、`speech:*`、`d` tagを持たない。任意Traceは現在のcanonical `w` positionを持つ。通常chatとTraceの両方に解釈できる、namespaceが不一致、またはsource labelが欠落・重複・矛盾するkind 42はfail closedとする。
+通常chatには必要な場合だけ `speech:shout` または `speech:monologue` を追加する。書置きはexplicit Traceであり、`l=chat`、`d` tagを持たず、現在のcanonical `w` positionと、通常以外ではspeech type labelを持つ。遺言はexplicit Traceで、`l=chat`、`speech:*`、`d` tagを持たない。通常chatとTraceの両方に解釈できる、namespaceが不一致、またはsource labelが欠落・重複・矛盾するkind 42はfail closedとする。
 
 ### 発言タイプのラベル
 
-発言タイプのうち、通常発言はデフォルトとして扱い、発言タイプ専用の `l` tagを追加しない。
+発言タイプのうち、通常発言はデフォルトとして扱い、発言タイプ専用の `l` tagを追加しない。通常chat、kind 1111 reply、書置きに発言タイプを適用できる。遺言は通常タイプ固定とする。
 
 叫びでは以下を追加する。
 
@@ -152,7 +152,7 @@ kind 42には発言時の論理フィールド座標も保持する。
 
 rootは有効なtop-level kind 42なので `K=42` とする。root kind 42へのdirect replyでは、rootを `E/K/P` と `e/k/p` の双方で参照する。kind 1111へのreplyでは、`E/K/P` は同じrootを維持し、`e/k/p` はparent kind 1111とそのauthorを指す。
 
-project labelsはtarget-channel membershipまたは公式client証明ではない。受理する1111のuppercase `E` rootは、対象kind 40 worldに属する有効なtop-level kind 42でなければならない。通常Traceとdeath Last Wordsはいずれもroot候補となる。immediate parentはroot自身または同じroot treeの有効な1111でなければならない。`K/P` と `k/p` は実際のroot/parentのkindとauthorに照合する。
+project labelsはtarget-channel membershipまたは公式client証明ではない。受理する1111のuppercase `E` rootは、対象kind 40 worldに属する有効なtop-level kind 42でなければならない。通常痕跡と遺言はいずれもroot候補となる。immediate parentはroot自身または同じroot treeの有効な1111でなければならない。`K/P` と `k/p` は実際のroot/parentのkindとauthorに照合する。
 
 external/modified client製1111も、署名、project labels、root/parent relation、kind、author、character slot解決を全て検証できる場合だけ受理する。未割当slotのauthorによる1111は受理しない。これはofficial-client認証ではない。legacy signed replyに含まれる `w` はextra tagとして無視する。NIP-22の `p` は本文mentionにも使えるため、`p=self`だけで自分へのdirect replyや通知対象と判定してはならない。
 

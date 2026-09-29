@@ -44,12 +44,15 @@ import { isBlockedFacilityCell } from './fieldFacilities';
 import type { Event as NostrEvent, VerifiedEvent } from 'nostr-tools/pure';
 import type { Filter } from 'nostr-tools/filter';
 import {
+	applyInteractionReward,
 	confirmWorldPosition,
 	claimManualTraceOutbox,
 	loadWorldWriteJournal,
+	loadOrCreateLifecycle,
 	reserveWorldPositive,
 	reserveManualTraceOutbox,
 	settleManualTraceOutbox,
+	type PersonaSnapshot,
 	type ManualTraceOutbox,
 	type ActiveSignerSnapshot,
 	type CommittedTerminalExit,
@@ -58,6 +61,7 @@ import {
 	type WorldWriteJournalSnapshot,
 	type WorldWriteReservation
 } from './rootIdentity';
+import { settlePendingTraceRewards, type AppliedTraceReadReward } from './traceRewards';
 import type { SpeechType } from './conversation';
 import { reachedAuthoritativeRelay } from './initialProfilePublication';
 import {
@@ -181,6 +185,8 @@ export type WorldReadSessionOptions = Readonly<{
 	onTimelineMessage?: (message: ParsedWorldMessage) => void;
 	onEffectiveTraceRootsChanged?: (roots: readonly ParsedWorldMessage[]) => void;
 	onTraceReadSnapshotChanged?: (snapshot: TraceReadSnapshot) => void;
+	onPersonaSnapshotChanged?: (persona: PersonaSnapshot) => void;
+	onInteractionRewardApplied?: (reward: AppliedTraceReadReward) => void;
 	onTraceConversationChanged?: (state: TraceConversationState) => void;
 	onStatusChanged: (status: WorldReadConnectionStatus) => void;
 	onSelfPositionWriteStateChanged?: (state: SelfPositionWriteState) => void;
@@ -270,6 +276,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	let pendingSelfMessage: SelfMessageOperation | null = null;
 	// Owns the entire reply pipeline, including coalesced position and post-position publication.
 	let pendingTraceReply: { eventId: string | null } | null = null;
+	let traceReadRewardQueue: Promise<void> = Promise.resolve();
 	let effectiveTraceRoots: readonly ParsedWorldMessage[] = [];
 	let traceReadSnapshot: TraceReadSnapshot = { readRootIds: [], unreadReplyRootIds: [], hasUnreadReplies: false };
 	let traceRootBootstrapReadiness: Promise<'ready' | 'failed'> | null = null;
@@ -530,6 +537,28 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			traceReadSnapshot = snapshot;
 			options.onTraceReadSnapshotChanged?.(snapshot);
 		}).catch(() => {});
+	}
+
+	async function refreshPersonaAfterReward(): Promise<void> {
+		if (!selfSigner || selfRunNumber === undefined || disposed) return;
+		const expectedIdentity = selfSigner.identity;
+		const expectedRunNumber = selfRunNumber;
+		const latest = await loadOrCreateLifecycle().catch(() => null);
+		if (!latest || latest.kind !== 'restored' || latest.persona.activeRun.runNumber !== expectedRunNumber ||
+			latest.persona.activeRun.identity.generation !== expectedIdentity.generation ||
+			latest.persona.activeRun.identity.accountIndex !== expectedIdentity.accountIndex ||
+			latest.persona.activeRun.identity.pubkey !== expectedIdentity.pubkey || disposed) return;
+		options.onPersonaSnapshotChanged?.(latest.persona);
+	}
+
+	function notifyInteractionRewardApplied(reward: AppliedTraceReadReward): void {
+		try { options.onInteractionRewardApplied?.(reward); } catch { /* Feedback must not affect reward or post persistence. */ }
+	}
+
+	function queueTraceReadReward<T>(operation: () => Promise<T>): Promise<T> {
+		const result = traceReadRewardQueue.then(operation, operation);
+		traceReadRewardQueue = result.then(() => undefined, () => undefined);
+		return result;
 	}
 
 	function reconcileTraceRoots(rawEvents: readonly NostrEvent[]): Promise<void> {
@@ -1470,7 +1499,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		return sendManualTraceOutbox(claimed.outbox, claimed.points, attemptId);
 	}
 
-	async function publishManualTrace(content: string): Promise<ManualTracePublishResult> {
+	async function publishManualTrace(content: string, speechType: SpeechType): Promise<ManualTracePublishResult> {
 		if (disposed || terminal || !selfSigner || !transport || !channel || !journalScope || !bootstrapComplete || !selfJoinedThisSession) return { kind: 'unavailable' };
 		if (pendingSelfMessage || pendingTraceReply || activeManualTrace) return { kind: 'pending' };
 		const trimmed = content.trim();
@@ -1482,7 +1511,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		const self = getParticipant(currentPresence(), signer.pubkey);
 		if (!self || self.status !== 'active') return { kind: 'blocked' };
 		const reservation = await reserveManualTraceOutbox(journalScope, () => finalizeWorldEvent(
-			buildManualTraceEventTemplate({ channel: activeChannel, content: trimmed, position: self.position, createdAt: Math.floor(Date.now() / 1000) }), signer.secretKey
+			buildManualTraceEventTemplate({ channel: activeChannel, content: trimmed, position: self.position, speechType, createdAt: Math.floor(Date.now() / 1000) }), signer.secretKey
 		), attemptId).catch(() => ({ kind: 'corrupt' as const }));
 		if (reservation.kind === 'insufficient-points') return { kind: 'blocked' };
 		if (reservation.kind === 'pending') return { kind: 'pending' };
@@ -1543,6 +1572,18 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			}
 			if (disposed) return { kind: 'unavailable' };
 			if (!published) return { kind: 'reply-failed' };
+			if (journalScope && accepted.target.pubkey !== selfSigner.pubkey) {
+				try {
+					const reward = await applyInteractionReward({ kind: 'trace-reply-post', channelId: journalScope.channelId,
+						eventId: event.id, parentId: accepted.target.id, identity: journalScope.identity, runNumber: journalScope.runNumber });
+					if (reward.kind === 'applied') {
+						notifyInteractionRewardApplied({ points: 10 });
+						await refreshPersonaAfterReward();
+					}
+				} catch {
+					// A confirmed Nostr reply stays successful even if local reward persistence fails.
+				}
+			}
 			// Use the current generation only for the same open root. Cache semantics decide retention.
 			const generation = traceConversationState.kind === 'open' && traceConversationState.root.id === accepted.root.id
 				? traceConversationGeneration : -1;
@@ -1809,20 +1850,43 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 
 		markTraceRootRead(rootId: string): Promise<boolean> {
 			if (disposed || !channel || !selfSigner) return Promise.resolve(false);
-			return markTraceRootRead({ channelId: channel.channelId, personaPubkey: selfSigner.pubkey, rootId })
-				.then((changed) => {
-					if (changed) refreshTraceReadSnapshot();
+			const channelId = channel.channelId;
+			const signer = selfSigner;
+			const rewardTarget = selfRunNumber === undefined ? undefined : { identity: signer.identity, runNumber: selfRunNumber };
+			return queueTraceReadReward(() => markTraceRootRead({ channelId, personaPubkey: signer.pubkey, rootId, rewardTarget })
+				.then(async (changed) => {
+					if (!changed) {
+						await settlePendingTraceRewards({ kind: 'trace-root-read', channelId, eventId: rootId });
+						return false;
+					}
+					refreshTraceReadSnapshot();
+					const rewards = await settlePendingTraceRewards({ kind: 'trace-root-read', channelId, eventId: rootId });
+					for (const reward of rewards) notifyInteractionRewardApplied(reward);
+					if (rewards.length) await refreshPersonaAfterReward();
 					return changed;
-				}).catch(() => false);
+				}).catch(() => false));
 		},
 
 		markTraceReplyRead(rootId: string, replyId: string): Promise<boolean> {
 			if (disposed || !channel || !selfSigner) return Promise.resolve(false);
-			return markTraceReplyRead({ channelId: channel.channelId, personaPubkey: selfSigner.pubkey, rootId, replyId })
-				.then((changed) => {
-					if (changed) refreshTraceReadSnapshot();
+			const channelId = channel.channelId;
+			const signer = selfSigner;
+			const rewardTarget = selfRunNumber === undefined ? undefined : { identity: signer.identity, runNumber: selfRunNumber };
+			const reply = traceConversationState.kind === 'open' && traceConversationState.root.id === rootId
+				? traceConversationState.replies.find((candidate) => candidate.id === replyId) : undefined;
+			const rewardEvidence = reply ? { id: reply.id, pubkey: reply.pubkey, parentPubkey: reply.parentPubkey } : undefined;
+			return queueTraceReadReward(() => markTraceReplyRead({ channelId, personaPubkey: signer.pubkey, rootId, replyId, rewardTarget, rewardEvidence })
+				.then(async (changed) => {
+					if (!changed) {
+						await settlePendingTraceRewards({ kind: 'trace-reply-read', channelId, eventId: replyId });
+						return false;
+					}
+					refreshTraceReadSnapshot();
+					const rewards = await settlePendingTraceRewards({ kind: 'trace-reply-read', channelId, eventId: replyId });
+					for (const reward of rewards) notifyInteractionRewardApplied(reward);
+					if (rewards.length) await refreshPersonaAfterReward();
 					return changed;
-				}).catch(() => false);
+				}).catch(() => false));
 		},
 
 		getTraceReadSnapshot(): TraceReadSnapshot {

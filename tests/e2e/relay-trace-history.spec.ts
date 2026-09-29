@@ -13,7 +13,7 @@ import {
 } from '../../src/lib/nostrProtocol';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { expectIconCloseButton } from './helpers/iconCloseButton';
-import { AUTHORITATIVE_RELAYS, CHANNEL_ID, fixtureSecret, traceRuntimeEvents, installDelayedRelay, relayState, selectRelayTraceCell, clickRelayLogicalCell, installPromptApiStub, seedRelayAccount, readActionDockControlOrder } from './helpers/relayHarness';
+import { AUTHORITATIVE_RELAYS, CHANNEL_ID, fixtureSecret, traceRuntimeEvents, installDelayedRelay, relayState, selectRelayTraceCell, clickRelayLogicalCell, installPromptApiStub, seedRelayAccount, readActionDockControlOrder, moveRelaySelfTo } from './helpers/relayHarness';
 
 
 
@@ -103,7 +103,7 @@ test.describe('Relay startup', () => {
 		const trace = traceRuntimeEvents();
 		await page.clock.setFixedTime(now);
 		await page.emulateMedia({ reducedMotion: 'reduce' });
-		await page.setViewportSize({ width: 1100, height: 850 });
+		await page.setViewportSize({ width: 390, height: 844 });
 		await installHostOwnedStub(page);
 		await installDelayedRelay(page, {
 			primaryEvents: { message: trace.message, position: trace.selfPosition }, traceRoots: [trace.root],
@@ -114,7 +114,6 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('.action-dock')).toBeVisible();
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
 		await expect(page.locator('[data-trace-marker-position="4,2"]')).toBeVisible();
-		await page.locator('.chatter-toggle').click();
 		await selectRelayTraceCell(page, '4,2');
 		await expect(page.locator(`[data-trace-root-id="${trace.root.id}"]`)).toContainText(trace.root.content);
 		const editor = page.getByRole('textbox', { name: '投稿エディター' });
@@ -233,6 +232,116 @@ test.describe('Relay startup', () => {
 		} finally { await readerContext.close(); }
 	});
 
+	test('awards first visible unread Trace and own-target reply rewards in the points HUD', async ({ page }) => {
+		const now = Date.now();
+		const createdAt = Math.floor(now / 1000);
+		const selfSecret = fixtureSecret(23);
+		const selfPubkey = getPublicKey(selfSecret);
+		const channel = { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' };
+		const primary = {
+			message: finalizeEvent(buildWorldMessageTemplate({ channel, content: 'reward participant', speechType: 'normal', position: { x: 3, y: 2 }, createdAt }), selfSecret),
+			position: finalizeEvent(buildWorldStateEventTemplate({ channel, position: { x: 3, y: 2 }, slot: 0, createdAt }), selfSecret)
+		};
+		const makeTraceRoot = (secret: Uint8Array, content: string, x: number) => {
+			for (let attempt = 0; attempt < 100; attempt += 1) {
+				const event = finalizeEvent(buildWorldMessageTemplate({ channel, content: `${content} ${attempt}`, speechType: 'normal', position: { x, y: 2 }, createdAt }), secret);
+				if (BigInt(`0x${event.id}`) % 5n === 0n) return event;
+			}
+			throw new Error('Could not create an eligible Trace root.');
+		};
+		const unreadRoot = makeTraceRoot(fixtureSecret(30), 'reward other root', 4);
+		const selfRoot = makeTraceRoot(selfSecret, 'reward self root', 5);
+		const parsedSelfRoot = parseWorldMessage(selfRoot, CHANNEL_ID);
+		if (!parsedSelfRoot) throw new Error('Reward self root did not parse.');
+		const unreadReply = finalizeEvent(buildTraceReplyTemplate({ root: parsedSelfRoot, parent: parsedSelfRoot,
+			content: 'reward reply to current Identity', speechType: 'normal', createdAt: createdAt + 1 }), fixtureSecret(31));
+		await page.clock.setFixedTime(now);
+		await page.emulateMedia({ reducedMotion: 'reduce' });
+		await page.setViewportSize({ width: 390, height: 844 });
+		await installHostOwnedStub(page);
+		await installPromptApiStub(page);
+		await installDelayedRelay(page, { primaryEvents: primary, traceRoots: [unreadRoot, selfRoot], traceReplies: [unreadReply] });
+		await seedRelayAccount(page, selfSecret, selfPubkey, now + 7 * 24 * 60 * 60 * 1000, 300);
+		await page.goto('/');
+		await expect(page.locator('.action-dock')).toBeVisible();
+		await page.evaluate(() => (window as unknown as { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		await page.evaluate(() => {
+			const target = window as unknown as { __rewardFeedbackSeen: { text: string; animationName: string; pointerEvents: string; left: number; right: number; viewportWidth: number; cueTop: number; cueBottom: number; actorLeft: number; actorRight: number; actorTop: number; actorPosition: string; samples: { actorPosition: string; horizontalDelta: number; verticalGap: number; cameraTransform: string; insideViewport: boolean }[] }[] };
+			target.__rewardFeedbackSeen = [];
+			new MutationObserver((records) => records.flatMap((record) => [...record.addedNodes]).forEach((node) => {
+				if (!(node instanceof Element)) return;
+				const cues = [node, ...node.querySelectorAll('[data-interaction-reward-feedback]')]
+					.filter((element) => element.matches('[data-interaction-reward-feedback]'));
+				for (const cue of cues) {
+					const style = getComputedStyle(cue);
+					const rect = cue.getBoundingClientRect();
+					const actor = document.querySelector<HTMLElement>('.participant[data-self="true"]');
+					if (!actor) continue;
+					const actorRect = actor.getBoundingClientRect();
+					const result = { text: cue.textContent?.trim() ?? '', animationName: style.animationName, pointerEvents: style.pointerEvents,
+						left: rect.left, right: rect.right, viewportWidth: window.innerWidth, cueTop: rect.top, cueBottom: rect.bottom,
+						actorLeft: actorRect.left, actorRight: actorRect.right, actorTop: actorRect.top,
+						actorPosition: actor.dataset.position ?? '', samples: [] as { actorPosition: string; horizontalDelta: number; verticalGap: number; cameraTransform: string; insideViewport: boolean }[] };
+					target.__rewardFeedbackSeen.push(result);
+					const sample = () => {
+						if (!cue.isConnected || result.samples.length > 90) return;
+						const nextActor = document.querySelector<HTMLElement>('.participant[data-self="true"]');
+						if (!nextActor) return;
+						const cueRect = cue.getBoundingClientRect();
+						const nextActorRect = nextActor.getBoundingClientRect();
+						const sceneTransform = getComputedStyle(document.querySelector('.field-scene')!).transform;
+						result.samples.push({ actorPosition: nextActor.dataset.position ?? '',
+							horizontalDelta: Math.abs((cueRect.left + cueRect.right) / 2 - (nextActorRect.left + nextActorRect.right) / 2),
+							verticalGap: nextActorRect.top - cueRect.bottom, cameraTransform: sceneTransform,
+							insideViewport: cueRect.left >= 0 && cueRect.right <= window.innerWidth });
+						requestAnimationFrame(sample);
+					};
+					requestAnimationFrame(sample);
+				}
+			})).observe(document.body, { childList: true, subtree: true });
+		});
+		await expect(page.locator('[data-points-value]')).toHaveText('300pt');
+		await selectRelayTraceCell(page, '4,2');
+		const investigateOther = page.getByRole('button', { name: '痕跡を調べる', exact: true });
+		if (await investigateOther.isVisible()) await investigateOther.click();
+		await expect(page.locator(`[data-trace-root-id="${unreadRoot.id}"]`)).toBeVisible();
+		await expect(page.locator('[data-points-value]')).toHaveText('305pt');
+		await expect.poll(() => page.evaluate(() => (window as unknown as { __rewardFeedbackSeen: { text: string }[] }).__rewardFeedbackSeen)).toContainEqual(expect.objectContaining({ text: '+5pt' }));
+		await expect.poll(() => page.evaluate(() => (window as unknown as { __rewardFeedbackSeen: { text: string; animationName: string; pointerEvents: string }[] }).__rewardFeedbackSeen
+			.some((cue) => cue.text === '+5pt' && cue.animationName.endsWith('interaction-reward-fade') && cue.pointerEvents === 'none'))).toBe(true);
+		await expect.poll(() => page.evaluate(() => (window as unknown as { __rewardFeedbackSeen: { text: string; left: number; right: number; viewportWidth: number }[] }).__rewardFeedbackSeen
+			.some((cue) => cue.text === '+5pt' && cue.left >= 0 && cue.right <= cue.viewportWidth))).toBe(true);
+		await expect(page.locator('[data-points-value] [data-interaction-reward-feedback]')).toHaveCount(0);
+		await expect.poll(() => page.evaluate(() => (window as unknown as { __rewardFeedbackSeen: { text: string; left: number; right: number; cueBottom: number; actorLeft: number; actorRight: number; actorTop: number }[] }).__rewardFeedbackSeen
+			.some((cue) => cue.text === '+5pt' && Math.abs((cue.left + cue.right) / 2 - (cue.actorLeft + cue.actorRight) / 2) < 50 &&
+				cue.actorTop >= cue.cueBottom && cue.actorTop - cue.cueBottom < 25)))
+			.toBe(true);
+		await moveRelaySelfTo(page, { x: 4, y: 2 });
+		await selectRelayTraceCell(page, '5,2');
+		const investigateSelf = page.getByRole('button', { name: '痕跡を調べる', exact: true });
+		if (await investigateSelf.isVisible()) await investigateSelf.click();
+		await expect(page.locator(`[data-trace-root-id="${selfRoot.id}"]`)).toBeVisible();
+		await expect(page.locator(`[data-trace-reply-id="${unreadReply.id}"]`)).toBeVisible();
+		await expect(page.locator('[data-points-value]')).toHaveText('315pt');
+		await expect.poll(() => page.evaluate(() => (window as unknown as { __rewardFeedbackSeen: { text: string }[] }).__rewardFeedbackSeen))
+			.toContainEqual(expect.objectContaining({ text: '+10pt' }));
+		const movedSelfPosition = finalizeEvent(buildWorldStateEventTemplate({ channel, position: { x: 6, y: 2 }, slot: 0, createdAt: createdAt + 1 }), selfSecret);
+		await page.evaluate((event) => (window as unknown as { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), movedSelfPosition);
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '6,2');
+		await expect.poll(() => page.evaluate(() => (window as unknown as { __rewardFeedbackSeen: { text: string; samples: { actorPosition: string; horizontalDelta: number; verticalGap: number; cameraTransform: string }[] }[] }).__rewardFeedbackSeen
+			.some((cue) => cue.text === '+10pt' && cue.samples.some((sample) => sample.actorPosition === '6,2' && sample.horizontalDelta < 50 && sample.verticalGap >= 0 && sample.verticalGap < 25))))
+			.toBe(true);
+		await expect.poll(() => page.evaluate(() => (window as unknown as { __rewardFeedbackSeen: { text: string; samples: { actorPosition: string; cameraTransform: string }[] }[] }).__rewardFeedbackSeen
+			.some((cue) => cue.text === '+10pt' && new Set(cue.samples.filter((sample) => sample.actorPosition === '4,2' || sample.actorPosition === '6,2').map((sample) => sample.cameraTransform)).size > 1)))
+			.toBe(true);
+		const edgeSelfPosition = finalizeEvent(buildWorldStateEventTemplate({ channel, position: { x: 0, y: 2 }, slot: 0, createdAt: createdAt + 2 }), selfSecret);
+		await page.evaluate((event) => (window as unknown as { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), edgeSelfPosition);
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '0,2');
+		await expect.poll(() => page.evaluate(() => (window as unknown as { __rewardFeedbackSeen: { text: string; samples: { actorPosition: string; insideViewport: boolean; horizontalDelta: number; verticalGap: number }[] }[] }).__rewardFeedbackSeen
+			.some((cue) => cue.text === '+10pt' && cue.samples.some((sample) => sample.actorPosition === '0,2' && sample.insideViewport && sample.horizontalDelta < 50 && sample.verticalGap >= 0 && sample.verticalGap < 25))))
+			.toBe(true);
+	});
+
 	test('persists Trace root and reply read state and keeps notification generic', async ({ page }) => {
 		const now = Date.now();
 		const selfSecret = fixtureSecret(23);
@@ -256,6 +365,7 @@ test.describe('Relay startup', () => {
 			channel,
 			content: 'read-state manual trace',
 			position: { x: 7, y: 2 },
+			speechType: 'normal',
 			createdAt: Math.floor(now / 1000)
 		}), selfSecret);
 		const deathRoot = finalizeEvent(buildDeathTraceEventTemplate({
@@ -600,25 +710,25 @@ test.describe('Relay startup', () => {
 		await expect(candidatePanel).toHaveCount(0);
 	});
 
-	test('opens death Last Words with the regular reply tree, publication, and semantic validation', async ({ page }) => {
+	test('opens death 遺言 with the regular reply tree, publication, and semantic validation', async ({ page }) => {
 		const now = Date.now();
 		const trace = traceRuntimeEvents();
 		const channel = { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' };
 		const deathSecret = fixtureSecret(37);
 		const deathRoot = finalizeEvent(buildDeathTraceEventTemplate({
-			channel, content: 'Last Words root', position: { x: 4, y: 2 }, createdAt: Math.floor(now / 1000)
+			channel, content: '遺言 root', position: { x: 4, y: 2 }, createdAt: Math.floor(now / 1000)
 		}), deathSecret);
 		const parsedDeath = parseTraceEvent(deathRoot, CHANNEL_ID);
 		if (!parsedDeath || parsedDeath.source !== 'death') throw new Error('Death Trace fixture did not parse.');
 		const direct = finalizeEvent(buildTraceReplyTemplate({
-			root: parsedDeath, parent: parsedDeath, content: 'Last Words direct reply', speechType: 'normal', createdAt: Math.floor(now / 1000) + 1
+			root: parsedDeath, parent: parsedDeath, content: '遺言 direct reply', speechType: 'normal', createdAt: Math.floor(now / 1000) + 1
 		}), fixtureSecret(31));
 		const parsedDirect = parseTraceReplyCandidate(direct);
 		if (!parsedDirect) throw new Error('Death Trace direct reply fixture did not parse.');
 		const validatedDirect = validateTraceReplyCandidate(parsedDirect, parsedDeath, parsedDeath);
 		if (!validatedDirect) throw new Error('Death Trace direct reply fixture did not validate.');
 		const nested = finalizeEvent(buildTraceReplyTemplate({
-			root: parsedDeath, parent: validatedDirect, content: 'Last Words nested reply', speechType: 'shout', createdAt: Math.floor(now / 1000) + 2
+			root: parsedDeath, parent: validatedDirect, content: '遺言 nested reply', speechType: 'shout', createdAt: Math.floor(now / 1000) + 2
 		}), fixtureSecret(32));
 		const wrongRoot = finalizeEvent({
 			kind: nested.kind, created_at: nested.created_at, content: 'wrong death root',
@@ -650,7 +760,7 @@ test.describe('Relay startup', () => {
 		await selectRelayTraceCell(page, '4,2');
 		const investigate = page.getByRole('button', { name: '痕跡を調べる', exact: true });
 		if (await investigate.isVisible()) await investigate.click();
-		await expect(page.locator(`[data-trace-root-id="${deathRoot.id}"]`)).toContainText('Last Words root');
+		await expect(page.locator(`[data-trace-root-id="${deathRoot.id}"]`)).toContainText('遺言 root');
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
 			request.filters.some((filter) => (filter['#E'] as string[] | undefined)?.includes(deathRoot.id)) &&
 			request.filters.some((filter) => (filter['#e'] as string[] | undefined)?.includes(deathRoot.id))
@@ -669,6 +779,7 @@ test.describe('Relay startup', () => {
 		expect(publishedNested.tags).toEqual(expect.arrayContaining([
 			['E', deathRoot.id, '', parsedDeath.pubkey], ['e', direct.id, '', direct.pubkey], ['k', '1111']
 		]));
+		await expect(page.getByLabel('Reply preview', { exact: true })).toHaveCount(0);
 
 		await page.locator(`[data-trace-root-id="${deathRoot.id}"]`).click();
 		await expect(page.getByLabel('Reply preview', { exact: true })).toHaveAttribute('data-reply-id', deathRoot.id);

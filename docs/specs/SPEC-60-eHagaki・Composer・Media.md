@@ -68,7 +68,7 @@ synchronizationのidleを確認して既存draftを保護する。AI候補のPri
 同じ発言タイプresolver、Relay readiness、submission gate、reply target再確認、kind 42 / kind 1111の
 構築・署名・publish・成功後処理を利用する。
 
-ActionDock右側は発言タイプ、100ptを消費する任意Trace mode、AI候補の順に置く。任意Trace modeは通常ComposerとAI候補の共通送信経路で現在のcanonical positionへkind 42 explicit Traceを投稿し、通常の発言タイプを適用しない。返信先選択と任意Trace modeは排他的にし、切替え時は本文を維持する。投稿成功で通常modeへ戻り、失敗または結果不明では本文を維持する。再読み込み後は通常modeで開始する。
+ActionDock右側は発言タイプ、100ptを消費する書置きmode、AI候補の順に置く。書置きmodeは通常ComposerとAI候補の共通送信経路で現在のcanonical positionへkind 42 explicit Traceを投稿し、通常・叫び・モノローグの発言タイプを適用する。返信先選択と書置きmodeは排他的にし、切替え時は本文を維持する。投稿成功で通常modeへ戻り、失敗または結果不明では本文を維持する。再読み込み後は通常modeで開始する。
 
 persona-bubble-fieldはHost-owned Liteの汎用`submitShortcuts` APIを利用する。eHagakiはEnterと
 modifierの判定およびHost-owned submit lifecycleを担当し、opaqueな`shortcutId`を親へ返すだけと
@@ -76,7 +76,7 @@ modifierの判定およびHost-owned submit lifecycleを担当し、opaqueな`sh
 selectorはpersona-bubble-field側の責務とする。eHagakiへpersona固有のspeech semanticsを持ち込まず、
 eHagaki自身がslash commandを解釈しない。
 
-trace conversationのreply modeでは、Last Wordsをrootとするconversationを含め、Host-owned Liteの既存 `setContext()` reply context、preview、`×` clearを利用する。reply preview hydrationにevent dataが必要な場合、親clientはすでに取得・semantic validationしたtarget eventを `preloadedEvents` として渡し、target eventのpubkeyから既存の決定的character assignmentで導出したname / pictureを表示補助の `preloadedProfiles` として同じcontext patchで渡す。これらはpreview/context補助であり、profile hintはauthor identity、最終NIP-22 event構築、event/tag、Composer Outputのauthorityではない。eHagaki自身はこのhintのためのRelay profile readを開始しない。
+trace conversationのreply modeでは、遺言をrootとするconversationを含め、Host-owned Liteの既存 `setContext()` reply context、preview、`×` clearを利用する。reply preview hydrationにevent dataが必要な場合、親clientはすでに取得・semantic validationしたtarget eventを `preloadedEvents` として渡し、target eventのpubkeyから既存の決定的character assignmentで導出したname / pictureを表示補助の `preloadedProfiles` として同じcontext patchで渡す。これらはpreview/context補助であり、profile hintはauthor identity、最終NIP-22 event構築、event/tag、Composer Outputのauthorityではない。eHagaki自身はこのhintのためのRelay profile readを開始しない。
 
 親clientはreply target、NIP-22 `E/K/P`・`e/k/p`、speech type、最終event、sign、publishを所有する。kind 1111 replyは `w` を持たない。Composer Outputの `tags` と `context` は最終event構築のauthorityにしない。eHagaki自身にRelay read、trace cache、NIP-22 tree取得、validation、notification、position、publish責務を追加しない。
 

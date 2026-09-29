@@ -1,19 +1,33 @@
 import { openDB, type DBSchema, type IDBPTransaction } from 'idb';
 
 export const TRACE_DATABASE_NAME = 'persona-bubble-field-trace';
-export const TRACE_DATABASE_VERSION = 3;
+export const TRACE_DATABASE_VERSION = 4;
 export const TRACE_ROOT_STORE = 'trace-roots';
 export const TRACE_REPLY_STORE = 'trace-replies';
 export const TRACE_REPLY_LRU_STORE = 'trace-reply-lru';
 export const TRACE_ROOT_READ_STORE = 'trace-root-read';
 export const TRACE_REPLY_READ_STORE = 'trace-reply-read';
+export const TRACE_REWARD_OUTBOX_STORE = 'trace-reward-outbox';
 export const TRACE_DATABASE_STORES = [
 	TRACE_ROOT_STORE,
 	TRACE_REPLY_STORE,
 	TRACE_REPLY_LRU_STORE,
 	TRACE_ROOT_READ_STORE,
-	TRACE_REPLY_READ_STORE
+	TRACE_REPLY_READ_STORE,
+	TRACE_REWARD_OUTBOX_STORE
 ] as const;
+
+export type TraceRewardIdentity = Readonly<{ generation: number; accountIndex: number; pubkey: string }>;
+export type TraceRewardKind = 'trace-root-read' | 'trace-reply-read';
+export type TraceRewardOutboxRecord = Readonly<{
+	key: string;
+	kind: TraceRewardKind;
+	channelId: string;
+	eventId: string;
+	identity: TraceRewardIdentity;
+	runNumber: number;
+	status: 'pending' | 'processed' | 'stale';
+}>;
 
 export type TraceRootRecord = Readonly<{
 	channelId: string;
@@ -72,6 +86,10 @@ export interface TraceDatabase extends DBSchema {
 		key: [string, string, string, string];
 		value: TraceReplyReadRecord;
 	};
+	[TRACE_REWARD_OUTBOX_STORE]: {
+		key: string;
+		value: TraceRewardOutboxRecord;
+	};
 }
 
 export type TraceReadwriteTransaction = IDBPTransaction<
@@ -97,6 +115,9 @@ export async function openTraceDatabase() {
 			}
 			if (!db.objectStoreNames.contains(TRACE_REPLY_READ_STORE)) {
 				db.createObjectStore(TRACE_REPLY_READ_STORE, { keyPath: ['channelId', 'personaPubkey', 'rootId', 'replyId'] });
+			}
+			if (!db.objectStoreNames.contains(TRACE_REWARD_OUTBOX_STORE)) {
+				db.createObjectStore(TRACE_REWARD_OUTBOX_STORE, { keyPath: 'key' });
 			}
 		}
 	});

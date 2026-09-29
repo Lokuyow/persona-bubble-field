@@ -5,10 +5,15 @@ import {
 	TRACE_REPLY_STORE,
 	TRACE_ROOT_READ_STORE,
 	TRACE_ROOT_STORE,
+	TRACE_REWARD_OUTBOX_STORE,
+	type TraceRewardIdentity,
+	type TraceRewardOutboxRecord,
 	type TraceReadwriteTransaction,
 	type TraceReplyReadRecord,
 	type TraceRootReadRecord
 } from './traceDatabase';
+import type { Event } from 'nostr-tools/pure';
+import { parseTraceEvent, parseWorldMessage } from './nostrProtocol';
 
 const EVENT_ID = /^[0-9a-f]{64}$/;
 
@@ -21,7 +26,10 @@ export type TraceReadSnapshot = Readonly<{
 export type TraceReadScope = Readonly<{
 	channelId: string;
 	personaPubkey: string;
+	rewardTarget?: Readonly<{ identity: TraceRewardIdentity; runNumber: number }>;
 }>;
+
+export type TraceReplyRewardEvidence = Readonly<{ id: string; pubkey: string; parentPubkey: string }>;
 
 function assertEventId(value: string, name: string): void {
 	if (!EVENT_ID.test(value)) throw new TypeError(`${name} must be a lowercase Nostr event ID.`);
@@ -48,6 +56,37 @@ function validReplyRead(value: unknown): value is TraceReplyReadRecord {
 		typeof record.rootId === 'string' && typeof record.replyId === 'string' &&
 		EVENT_ID.test(record.personaPubkey) && EVENT_ID.test(record.rootId) && EVENT_ID.test(record.replyId) &&
 		(record.state === 'read' || record.state === 'unread'));
+}
+
+function validTraceRewardOutbox(value: unknown): value is TraceRewardOutboxRecord {
+	const record = recordObject(value);
+	const identity = recordObject(record?.identity);
+	return Boolean(record && typeof record.key === 'string' &&
+		(record.kind === 'trace-root-read' || record.kind === 'trace-reply-read') &&
+		typeof record.channelId === 'string' && EVENT_ID.test(record.channelId) &&
+		typeof record.eventId === 'string' && EVENT_ID.test(record.eventId) &&
+		identity && Number.isSafeInteger(identity.generation) && Number.isSafeInteger(identity.accountIndex) &&
+		typeof identity.pubkey === 'string' && EVENT_ID.test(identity.pubkey) &&
+		Number.isSafeInteger(record.runNumber) && (record.runNumber as number) > 0 &&
+		(record.status === 'pending' || record.status === 'processed' || record.status === 'stale'));
+}
+
+function queueTraceReward(
+	tx: TraceReadwriteTransaction,
+	input: TraceReadScope & Readonly<{ rootId: string; eventId: string; kind: TraceRewardOutboxRecord['kind'] }>
+): Promise<void> {
+	if (!input.rewardTarget || !Number.isSafeInteger(input.rewardTarget.runNumber) || input.rewardTarget.runNumber < 1) return Promise.resolve();
+	const key = `${input.kind}\u0000${input.channelId}\u0000${input.eventId}`;
+	return tx.objectStore(TRACE_REWARD_OUTBOX_STORE).get(key).then(async (existing) => {
+		if (existing !== undefined) {
+			if (!validTraceRewardOutbox(existing)) throw new Error('Trace reward outbox is corrupt.');
+			return;
+		}
+		await tx.objectStore(TRACE_REWARD_OUTBOX_STORE).put({
+			key, kind: input.kind, channelId: input.channelId, eventId: input.eventId,
+			identity: input.rewardTarget!.identity, runNumber: input.rewardTarget!.runNumber, status: 'pending'
+		});
+	});
 }
 
 function uniqueSorted(values: Iterable<string>): string[] {
@@ -92,7 +131,12 @@ export async function markTraceRootRead(input: TraceReadScope & Readonly<{ rootI
 		if (!root) { await tx.done; return false; }
 		const store = tx.objectStore(TRACE_ROOT_READ_STORE);
 		if (await store.get([input.channelId, input.rootId])) { await tx.done; return false; }
+		const rawEvent = root.rawEvent as Event;
+		const parsedRoot = parseWorldMessage(rawEvent, input.channelId) ?? parseTraceEvent(rawEvent, input.channelId);
 		await store.put({ channelId: input.channelId, eventId: input.rootId, read: true });
+		if (parsedRoot && parsedRoot.pubkey !== input.personaPubkey) {
+			await queueTraceReward(tx, { ...input, rootId: input.rootId, eventId: input.rootId, kind: 'trace-root-read' });
+		}
 		await tx.done;
 		return true;
 	} finally {
@@ -101,7 +145,7 @@ export async function markTraceRootRead(input: TraceReadScope & Readonly<{ rootI
 	}
 }
 
-export async function markTraceReplyRead(input: TraceReadScope & Readonly<{ rootId: string; replyId: string }>): Promise<boolean> {
+export async function markTraceReplyRead(input: TraceReadScope & Readonly<{ rootId: string; replyId: string; rewardEvidence?: TraceReplyRewardEvidence }>): Promise<boolean> {
 	assertEventId(input.channelId, 'Channel ID');
 	assertPubkey(input.personaPubkey, 'Persona pubkey');
 	assertEventId(input.rootId, 'Root ID');
@@ -109,7 +153,7 @@ export async function markTraceReplyRead(input: TraceReadScope & Readonly<{ root
 	return setTraceReplyReadState({ ...input, state: 'read' });
 }
 
-export async function setTraceReplyReadState(input: TraceReadScope & Readonly<{ rootId: string; replyId: string; state: 'read' | 'unread' }>): Promise<boolean> {
+export async function setTraceReplyReadState(input: TraceReadScope & Readonly<{ rootId: string; replyId: string; state: 'read' | 'unread'; rewardEvidence?: TraceReplyRewardEvidence }>): Promise<boolean> {
 	assertEventId(input.channelId, 'Channel ID');
 	assertPubkey(input.personaPubkey, 'Persona pubkey');
 	assertEventId(input.rootId, 'Root ID');
@@ -126,6 +170,36 @@ export async function setTraceReplyReadState(input: TraceReadScope & Readonly<{ 
 		const existing = await store.get(key);
 		if (validReplyRead(existing) && existing.state === input.state) { await tx.done; return false; }
 		await store.put({ ...keyRecord(input), state: input.state });
+		if (input.state === 'read' && validReplyRead(existing) && existing.state === 'unread' &&
+			input.rewardTarget && input.rewardEvidence?.id === input.replyId &&
+			input.rewardEvidence.parentPubkey === input.personaPubkey && input.rewardEvidence.pubkey !== input.personaPubkey) {
+			await queueTraceReward(tx, { ...input, eventId: input.replyId, kind: 'trace-reply-read' });
+		}
+		await tx.done;
+		return true;
+	} finally {
+		if (tx) await tx.done.catch(() => {});
+		db.close();
+	}
+}
+
+export async function loadPendingTraceRewardOutbox(): Promise<readonly TraceRewardOutboxRecord[]> {
+	const db = await openTraceDatabase();
+	try {
+		return (await db.getAll(TRACE_REWARD_OUTBOX_STORE)).filter((record) => validTraceRewardOutbox(record) && record.status === 'pending');
+	} finally { db.close(); }
+}
+
+export async function settleTraceRewardOutbox(key: string, status: 'processed' | 'stale'): Promise<boolean> {
+	const db = await openTraceDatabase();
+	let tx: TraceReadwriteTransaction | undefined;
+	try {
+		tx = db.transaction(TRACE_DATABASE_STORES, 'readwrite');
+		void tx.done.catch(() => {});
+		const store = tx.objectStore(TRACE_REWARD_OUTBOX_STORE);
+		const current = await store.get(key);
+		if (!validTraceRewardOutbox(current) || current.status !== 'pending') { await tx.done; return false; }
+		await store.put({ ...current, status });
 		await tx.done;
 		return true;
 	} finally {

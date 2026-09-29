@@ -6,12 +6,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	DATABASE_NAME,
 	DATABASE_VERSION,
+	INTERACTION_REWARD_STORE_NAME,
 	LIFECYCLE_UPGRADE_BLOCKED_MESSAGE,
 	PLAYER_LIFECYCLE_STORE_NAME,
 	ROOT_SECRET_STORE_NAME,
 	WORLD_WRITE_JOURNAL_STORE_NAME,
 	applyRealtimeOutcome,
 	applyRealtimeLifespanLoss,
+	applyInteractionReward,
 	activateTagGameRun,
 	applyTagGameCumulative,
 	completeRealtimeEventInstance,
@@ -93,6 +95,47 @@ afterEach(() => {
 });
 
 describe('Root / Identity / Run lifecycle', () => {
+	it('creates the independent reward ledger in a brand-new Account database', async () => {
+		await selected();
+		const db = await openDB(DATABASE_NAME, DATABASE_VERSION);
+		connections.push(db);
+		expect([...db.objectStoreNames]).toEqual(expect.arrayContaining([
+			ROOT_SECRET_STORE_NAME, PLAYER_LIFECYCLE_STORE_NAME, WORLD_WRITE_JOURNAL_STORE_NAME, INTERACTION_REWARD_STORE_NAME
+		]));
+	});
+
+	it('preserves the complete current v8 Account data while adding the reward ledger', async () => {
+		const v8 = await openDB(DATABASE_NAME, 8, { upgrade(db) {
+			db.createObjectStore(ROOT_SECRET_STORE_NAME);
+			db.createObjectStore(PLAYER_LIFECYCLE_STORE_NAME);
+			db.createObjectStore(WORLD_WRITE_JOURNAL_STORE_NAME);
+		} });
+		await v8.put(ROOT_SECRET_STORE_NAME, { key: 'root-preserved' }, 'root-record');
+		await v8.put(PLAYER_LIFECYCLE_STORE_NAME, { key: 'player-preserved' }, 'player-lifecycle');
+		await v8.put(WORLD_WRITE_JOURNAL_STORE_NAME, { key: 'journal-preserved' }, 'journal-record');
+		v8.close();
+		await loadOrCreateLifecycle();
+		const upgraded = await openDB(DATABASE_NAME, DATABASE_VERSION);
+		connections.push(upgraded);
+		expect([...upgraded.objectStoreNames]).toContain(INTERACTION_REWARD_STORE_NAME);
+		expect(await upgraded.get(ROOT_SECRET_STORE_NAME, 'root-record')).toEqual({ key: 'root-preserved' });
+		expect(await upgraded.get(PLAYER_LIFECYCLE_STORE_NAME, 'player-lifecycle')).toEqual({ key: 'player-preserved' });
+		expect(await upgraded.get(WORLD_WRITE_JOURNAL_STORE_NAME, 'journal-record')).toEqual({ key: 'journal-preserved' });
+	});
+
+	it('applies concurrent interaction rewards once with a Run revision update', async () => {
+		const persona = await selected();
+		const input = { kind: 'trace-root-read' as const, channelId: 'a'.repeat(64), eventId: 'b'.repeat(64),
+			identity: persona.activeRun.identity, runNumber: persona.activeRun.runNumber };
+		const results = await Promise.all([applyInteractionReward(input), applyInteractionReward(input)]);
+		expect(results.map((result) => result.kind).sort()).toEqual(['applied', 'duplicate']);
+		const current = restored(await loadOrCreateLifecycle());
+		expect(current.gameState.points).toBe(persona.gameState.points + 5);
+		expect(current.activeRun.revision).toBe(persona.activeRun.revision + 1);
+		const ledger = await records(INTERACTION_REWARD_STORE_NAME);
+		expect(Object.keys(ledger)).toHaveLength(1);
+	});
+
 	it('allows clear and ability upgrade during a tag-game reservation, then gates both during the Run lock and settles cumulatively once', async () => {
 		const initial = await selected(ZERO_BUILD, { initialPoints: 200_000 });
 		const gameId = `game-${'a'.repeat(64)}`;
@@ -403,6 +446,11 @@ describe('Root / Identity / Run lifecycle', () => {
 		const old = await openDB(DATABASE_NAME, 6, { upgrade(db) { db.createObjectStore(ROOT_SECRET_STORE_NAME); } });
 		await old.close();
 		expect(await loadOrCreateLifecycle()).toEqual({ kind: 'corrupt', reason: 'partial-state' });
+		const upgraded = await openDB(DATABASE_NAME, DATABASE_VERSION);
+		connections.push(upgraded);
+		expect([...upgraded.objectStoreNames]).toEqual(expect.arrayContaining([
+			ROOT_SECRET_STORE_NAME, PLAYER_LIFECYCLE_STORE_NAME, WORLD_WRITE_JOURNAL_STORE_NAME, INTERACTION_REWARD_STORE_NAME
+		]));
 	});
 
 	it('fails closed for a v6 Player-only partial state', async () => {
@@ -712,11 +760,11 @@ describe('Root / Identity / Run lifecycle', () => {
 		const storedPlayerBefore = (await records(PLAYER_LIFECYCLE_STORE_NAME))['player-lifecycle'] as PlayerLifecycle;
 		const scope = { identity: persona.activeRun.identity, runNumber: persona.activeRun.runNumber, channelId: 'a'.repeat(64) };
 		const event = finalizeEvent(buildManualTraceEventTemplate({
-			channel: { channelId: scope.channelId, relayHint: 'wss://nos.lol/' }, content: 'a trace', position: { x: 3, y: 4 }, createdAt: TIME / 1000
+			channel: { channelId: scope.channelId, relayHint: 'wss://nos.lol/' }, content: 'a trace', position: { x: 3, y: 4 }, speechType: 'normal', createdAt: TIME / 1000
 		}), persona.signer.secretKey);
 		const reserved = await reserveManualTraceOutbox(scope, () => event, 'first-attempt');
 		expect(reserved).toMatchObject({ kind: 'reserved', outbox: { event: { id: event.id }, status: 'dispatching' }, points: 100_900 });
-		expect(DATABASE_VERSION).toBe(8);
+		expect(DATABASE_VERSION).toBe(9);
 		expect(await records(ROOT_SECRET_STORE_NAME)).toEqual(storedRootBefore);
 		if (storedPlayerBefore.mode.kind !== 'running') throw new Error('Expected a running lifecycle before reservation.');
 		const storedPlayerAfter = (await records(PLAYER_LIFECYCLE_STORE_NAME))['player-lifecycle'] as PlayerLifecycle;
@@ -742,7 +790,7 @@ describe('Root / Identity / Run lifecycle', () => {
 		const journal = (await records(WORLD_WRITE_JOURNAL_STORE_NAME))[`${scope.channelId}\u0000${persona.signer.pubkey}`] as { pendingManualTrace: { event: { id: string }; status: string } };
 		expect(journal.pendingManualTrace).toMatchObject({ event: { id: event.id }, status: 'unknown' });
 		const differentSignature = finalizeEvent(buildManualTraceEventTemplate({
-			channel: { channelId: scope.channelId, relayHint: 'wss://nos.lol/' }, content: 'a different retry signature', position: { x: 3, y: 4 }, createdAt: TIME / 1000 + 1
+			channel: { channelId: scope.channelId, relayHint: 'wss://nos.lol/' }, content: 'a different retry signature', position: { x: 3, y: 4 }, speechType: 'normal', createdAt: TIME / 1000 + 1
 		}), persona.signer.secretKey);
 		const prepareDifferentSubmission = vi.fn(() => differentSignature);
 		const retry = await reserveManualTraceOutbox(scope, prepareDifferentSubmission, 'same-operation-retry', TIME + 22_000);
@@ -764,7 +812,7 @@ describe('Root / Identity / Run lifecycle', () => {
 		const channelId = 'b'.repeat(64);
 		const scope = { identity: persona.activeRun.identity, runNumber: persona.activeRun.runNumber, channelId };
 		const event = finalizeEvent(buildManualTraceEventTemplate({
-			channel: { channelId, relayHint: 'wss://nos.lol/' }, content: 'unknown at death', position: { x: 3, y: 4 }, createdAt: TIME / 1000
+			channel: { channelId, relayHint: 'wss://nos.lol/' }, content: 'unknown at death', position: { x: 3, y: 4 }, speechType: 'normal', createdAt: TIME / 1000
 		}), persona.signer.secretKey);
 		const reserved = await reserveManualTraceOutbox(scope, () => event, 'death-attempt');
 		expect(reserved).toMatchObject({ kind: 'reserved', points: 400 });

@@ -107,6 +107,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		type PendingSelection,
 		type SelectionCandidate
 	} from '$lib/rootIdentity';
+	import { settlePendingTraceRewards } from '$lib/traceRewards';
 	import { rootMaximumLifespanMs, type RootBuild } from '$lib/rootProgression';
 	import { isPersonaExpired } from '$lib/personaGameState';
 	import { deathDevMode, DEATH_DEV_INITIAL_LIFESPAN_MS } from '$lib/deathDevMode';
@@ -352,6 +353,8 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	let mendingMutationInFlight = $state(false);
 	let collectFeedback = $state<Readonly<{ id: number; points: number; lifespanMs: number }> | null>(null);
 	let collectFeedbackTimer: number | null = null;
+	let interactionRewardFeedback = $state<readonly Readonly<{ id: number; points: 5 | 10 }>[]>([]);
+	const interactionRewardFeedbackTimers = new Map<number, number>();
 	let mendingStartupFeedback = $state<Readonly<{ id: number; phase: 'starting' | 'started' }> | null>(null);
 	let mendingStartupFeedbackTimer: number | null = null;
 	let adjustmentDialogOpen = $state(false);
@@ -361,6 +364,17 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	let upgradeFeedback = $state<Readonly<{ id: number; key: PersonaAbilityKey; level: number }> | null>(null);
 	let upgradeFeedbackTimer: number | null = null;
 	let feedbackSequence = 0;
+	function showInteractionRewardFeedback(reward: Readonly<{ points: 5 | 10 }>): void {
+		const id = ++feedbackSequence;
+		try {
+			interactionRewardFeedback = [...interactionRewardFeedback, { id, points: reward.points }];
+			interactionRewardFeedbackTimers.set(id, window.setTimeout(() => {
+				interactionRewardFeedback = interactionRewardFeedback.filter((item) => item.id !== id);
+				interactionRewardFeedbackTimers.delete(id);
+			}, 1_100));
+		} catch { /* Visual feedback is independent from reward persistence. */ }
+		try { soundController?.play('collect'); } catch { /* Audio feedback is best-effort. */ }
+	}
 	let clearMutationInFlight = $state(false);
 	let pendingRealtimeSettlement = $state(false);
 	let tagGamePanelOpen = $state(false);
@@ -647,6 +661,25 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 				screen: fieldLocalToViewport(worldToScreen(world, camera), fieldAreaBounds)
 			};
 		}));
+	let interactionRewardCuePlacements = $derived.by(() => {
+		const self = participantViews.find((participant) => participant.id === selfProjectionId);
+		if (!initialFieldGeometryReady || !self) return [];
+		const halfCell = cellSize / 2;
+		const fieldRight = fieldAreaBounds.x + fieldAreaBounds.width;
+		const fieldBottom = fieldAreaBounds.y + fieldAreaBounds.height;
+		const selfVisible = self.screen.x + halfCell > fieldAreaBounds.x && self.screen.x - halfCell < fieldRight &&
+			self.screen.y + halfCell > actualFieldTop && self.screen.y - halfCell < fieldBottom;
+		if (!selfVisible) return [];
+		const sidePadding = 48;
+		const minX = Math.min(sidePadding, viewportSize.width / 2);
+		const maxX = Math.max(minX, viewportSize.width - sidePadding);
+		const left = Math.min(maxX, Math.max(minX, self.screen.x));
+		return interactionRewardFeedback.map((reward, index) => {
+			const desiredBottom = self.screen.y - halfCell - 5 - index * 20;
+			const bottom = Math.min(Math.max(24 + index * 20, desiredBottom), viewportSize.height - 8);
+			return { ...reward, left, bottom };
+		});
+	});
 
 	let participantById = $derived(new Map(participantViews.map((participant) => [participant.id, participant])));
 	let selfPresence = $derived(presenceState.participants.find((participant) => participant.id === selfProjectionId) ?? null);
@@ -853,7 +886,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		publish: async (submission, context): Promise<SpeechPublicationOutcome> => {
 			if (personaLifecycleTransition) return { kind: 'blocked' };
 			const result = context.manualTrace
-				? await worldSession?.publishManualTrace(submission.content)
+				? await worldSession?.publishManualTrace(submission.content, submission.speechType)
 				: context.target
 				? await (devWorldSandboxEnabled ? devTraceConversationRuntime : worldSession)?.publishTraceReply({
 					rootId: context.target.rootId, targetId: context.target.targetId, ...submission
@@ -1432,6 +1465,11 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 				onTimelineMessage: receiveSessionTimelineMessage,
 				onEffectiveTraceRootsChanged: setEffectiveTraceRoots,
 				onTraceReadSnapshotChanged: (snapshot) => { traceReadSnapshot = snapshot; },
+				onInteractionRewardApplied: showInteractionRewardFeedback,
+				onPersonaSnapshotChanged: (persona) => {
+					if (personaSnapshot && samePersonaIdentity(personaSnapshot, persona) &&
+						persona.activeRun.revision >= personaSnapshot.activeRun.revision) personaSnapshot = persona;
+				},
 				onTraceConversationChanged: setTraceConversation,
 				onStatusChanged: (status) => {
 					if (!mounted || worldReader !== nextSession) return;
@@ -1627,26 +1665,35 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 					setComposerTerminalError(new Error('Persona is unavailable for publishing.'));
 				} else {
 					runTransitionNotice = null;
-					personaSnapshot = personaResult.persona;
+					await settlePendingTraceRewards().catch(() => {});
+					let activePersona = personaResult.persona;
+					const afterRewardRecovery = await loadOrCreateLifecycle().catch(() => null);
+					if (afterRewardRecovery?.kind === 'restored' &&
+						afterRewardRecovery.persona.signer.pubkey === activePersona.signer.pubkey &&
+						afterRewardRecovery.persona.activeRun.runNumber === activePersona.activeRun.runNumber &&
+						afterRewardRecovery.persona.activeRun.revision >= activePersona.activeRun.revision) {
+						activePersona = afterRewardRecovery.persona;
+					}
+					personaSnapshot = activePersona;
 					const reservation = personaSnapshot.tagGame?.reservation;
 					if (reservation && reservation.expiresAtMs === undefined && !personaSnapshot.tagGame?.lock) {
 						if (await beginTagGameReservationRecovery(personaSnapshot, reservation.gameId, Date.now() + TAG_GAME_RESERVATION_RECOVERY_MS)) {
 							await refreshTagGamePersona(personaSnapshot);
 						}
 					}
-					pendingRootPoints = personaResult.persona.rootPoints;
-					selfSigner = personaResult.persona.signer;
+					pendingRootPoints = activePersona.rootPoints;
+					selfSigner = activePersona.signer;
 					if (initialFieldGeometryReady) syncVisualToCanonical();
-					const pendingInstanceIds = (await loadPendingCooperationDefectionInstances(personaResult.persona))
+					const pendingInstanceIds = (await loadPendingCooperationDefectionInstances(activePersona))
 						.filter((instanceId) => getCooperationDefectionScheduleForInstance(instanceId, Date.now()) !== null);
 					realtimeRecoveryInstanceIds.clear();
 					pendingRealtimeSettlement = pendingInstanceIds.length > 0;
 					for (const instanceId of pendingInstanceIds) realtimeRecoveryInstanceIds.add(instanceId);
 					mendingNowMs = Date.now();
 					updateLifespanHud(Date.now(), true);
-					if (isPersonaExpired(personaResult.persona.gameState, Date.now(), personaResult.persona.activeRun.rootBuild)) {
+					if (isPersonaExpired(activePersona.gameState, Date.now(), activePersona.activeRun.rootBuild)) {
 						personaLifecycleTransition = false;
-						const result = await beginDeathTransition(personaResult.persona, null, false);
+						const result = await beginDeathTransition(activePersona, null, false);
 						if (result === 'reloaded' || result === 'failed') return;
 					}
 					if (selfSigner.characterProfileRevision !== CURRENT_CHARACTER_PROFILE_REVISION) {
@@ -1749,6 +1796,8 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			appSoundController.dispose();
 			soundController = null;
 			if (collectFeedbackTimer !== null) window.clearTimeout(collectFeedbackTimer);
+			for (const timer of interactionRewardFeedbackTimers.values()) window.clearTimeout(timer);
+			interactionRewardFeedbackTimers.clear();
 			if (mendingStartupFeedbackTimer !== null) window.clearTimeout(mendingStartupFeedbackTimer);
 			if (upgradeFeedbackTimer !== null) window.clearTimeout(upgradeFeedbackTimer);
 			if (proximityFeedbackTimer !== null) window.clearTimeout(proximityFeedbackTimer);
@@ -4480,7 +4529,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		deathPresentationSubmitting = true;
 		if (terminalExitPublication) await terminalExitPublication;
 		if (publish && deathPresentationContent.trim()) {
-			try { await currentSession?.publishDeathLastWords(deathPresentationContent); } catch { /* Last Words is best effort. */ }
+			try { await currentSession?.publishDeathLastWords(deathPresentationContent); } catch { /* 遺言 is best effort. */ }
 		}
 		clearDeathPresentationTimer();
 		deathPresentation = null;
@@ -4963,7 +5012,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 						{mendingProjection}
 						tagGameProjection={tagGameHudProjection}
 						animationScope={`${personaSnapshot.signer.pubkey}:${personaSnapshot.activeRun.runNumber}`}
-					onTagGamePulse={playCurrentTagGamePulse}
+						onTagGamePulse={playCurrentTagGamePulse}
 					/>
 					{#if !actionDockAvailable}<div class="top-status-controls">
 						<SoundControl
@@ -5031,6 +5080,15 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 				onOpenSelfProfile={selfProfileCharacter ? resolveSelfProfileSelection : undefined}
 				traceMarkerWorldPosition={traceMarkerWorldPosition}
 			/>
+			{#if interactionRewardCuePlacements.length > 0}
+				<div class="interaction-reward-cue-layer" data-interaction-reward-layer aria-hidden="true">
+					{#each interactionRewardCuePlacements as reward (reward.id)}
+						<span class="interaction-reward-cue-anchor" style={`left:${reward.left}px;bottom:${viewportSize.height - reward.bottom}px`}>
+							<span class="interaction-reward-cue" data-interaction-reward-feedback data-reward-id={reward.id}>+{reward.points}pt</span>
+						</span>
+					{/each}
+				</div>
+			{/if}
 			{#if cooperationDefectionEventEnabled && (!devWorldSandboxEnabled || devCooperationDefectionFixtureEnabled)}
 				<CooperationDefectionPanel
 					schedule={cooperationDefectionSchedule}
@@ -5139,17 +5197,17 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 				{#if deathPresentation.phase === 'intro'}
 					<p>一生が終わりました。</p>
 				{:else}
-					<p>一生が終わりました。最後に、世界にひとこと残せます。</p>
+					<p>一生が終わりました。最後に、遺言を残せます。</p>
 					<textarea
-						aria-label="Last Words"
+						aria-label="遺言"
 						bind:value={deathPresentationContent}
 						maxlength="280"
-						placeholder="残したい言葉（任意）"
+						placeholder="遺言（任意）"
 						disabled={deathPresentationSubmitting}
 					></textarea>
 					<div class="death-presentation-actions">
-					<ActionButton variant="secondary" type="button" onclick={() => { void finishDeathPresentation(false); }} disabled={deathPresentationSubmitting}>残さず進む</ActionButton>
-					<ActionButton variant="secondary" type="button" onclick={() => { void finishDeathPresentation(true); }} disabled={deathPresentationSubmitting}>残して進む</ActionButton>
+					<ActionButton variant="secondary" type="button" onclick={() => { void finishDeathPresentation(false); }} disabled={deathPresentationSubmitting}>遺言を残さず進む</ActionButton>
+					<ActionButton variant="secondary" type="button" onclick={() => { void finishDeathPresentation(true); }} disabled={deathPresentationSubmitting}>遺言を残して進む</ActionButton>
 					</div>
 				{/if}
 			</section>
@@ -5265,6 +5323,44 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 </main>
 
 <style>
+	.interaction-reward-cue-layer {
+		position: absolute;
+		inset: 0;
+		z-index: 4;
+		overflow: visible;
+		pointer-events: none;
+	}
+	.interaction-reward-cue-anchor {
+		position: absolute;
+		width: max-content;
+		transform: translateX(-50%);
+		pointer-events: none;
+	}
+	.interaction-reward-cue {
+		display: block;
+		color: #8cffb4;
+		font-size: 13px;
+		font-weight: 800;
+		line-height: 1.1;
+		text-shadow: 0 1px 5px rgba(0, 0, 0, .9), 0 0 8px rgba(87, 230, 138, .65);
+		white-space: nowrap;
+		animation: interaction-reward-float 1.05s ease-out both;
+		pointer-events: none;
+	}
+	@keyframes interaction-reward-float {
+		0% { opacity: 0; transform: translateY(5px); }
+		18% { opacity: 1; }
+		75% { opacity: 1; }
+		100% { opacity: 0; transform: translateY(-13px); }
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.interaction-reward-cue { animation: interaction-reward-fade .7s linear both; }
+	}
+	@keyframes interaction-reward-fade {
+		0%, 15% { opacity: 0; }
+		35%, 75% { opacity: 1; }
+		100% { opacity: 0; }
+	}
 	.top-status-hud {
 		position: absolute;
 		top: max(8px, env(safe-area-inset-top));

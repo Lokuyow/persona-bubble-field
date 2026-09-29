@@ -4,7 +4,7 @@
 
 ## 24. 発言の痕跡
 
-通常の発言は揮発し、Twitter型の過去ログとして時系列に蓄積表示しない。そのうえで、過去の通常chat kind 42の一部だけを、元の発言位置に残る**発言の痕跡**として扱う。痕跡は過去ログや履歴ビューではなく、空間に残った一部の発言の記憶である。投稿日時、経過時間、「さっき」「今日」「数日前」等の古さはroot/replyのいずれにも表示しない。プレイヤーは通常Composerから100ptを消費して現在位置へ任意Traceを投稿できる。任意Traceは通常発言の20%抽選を通さず、通常のlive speech / Chatter / presence activityには流さない。死亡時のLast Wordsもkind 42のexplicit Traceとして同じ空間投影へ加わる。
+通常の発言は揮発し、Twitter型の過去ログとして時系列に蓄積表示しない。そのうえで、過去の通常chat kind 42の一部だけを、元の発言位置に残る**発言の痕跡**として扱う。痕跡は過去ログや履歴ビューではなく、空間に残った一部の発言の記憶である。投稿日時、経過時間、「さっき」「今日」「数日前」等の古さはroot/replyのいずれにも表示しない。プレイヤーは通常Composerから100ptを消費して現在位置へ書置きを投稿できる。書置きは通常発言の20%抽選を通さず、通常のlive speech / Chatter / presence activityには流さない。死亡時の遺言もkind 42のexplicit Traceとして同じ空間投影へ加わる。
 
 ### rootの選択と上限
 
@@ -14,23 +14,23 @@
 BigInt(`0x${event.id}`) % 5n === 0n
 ```
 
-上の決定的20%抽選にsparse-world boost、密度補正、時間expiryは設けない。effective rootは1 logical cellあたり最大1件とし、同一cellに複数のeligible root candidateがある場合は任意Trace・death Last Wordsを通常chatより優先し、explicit Trace同士ではnewest rootを選ぶ。`createdAt` が同じ場合は既存の決定的event ID orderingで1件を決める。フィールドの総logical cell数をNとしたとき、全体上限は `floor(N × 0.30)`、通常chat・任意Trace・death Last Wordsそれぞれの予約枠は `floor(N × 0.10)` とする。端数と未使用の予約枠は種類共用とする。per-cell survivorを確定した後に各種類の予約枠を確保し、残りは種類を問わず新しい候補から採用する。候補が増えた場合は他種類へ貸した予約枠を返却する。予約枠は候補数を保証せず、同じcellへの集中で予約枠未満になることを許容する。上限はrootだけを数え、kind 1111 replyは数えない。
+上の決定的20%抽選にsparse-world boost、密度補正、時間expiryは設けない。effective rootは1 logical cellあたり最大1件とし、同一cellに複数のeligible root candidateがある場合は書置き・遺言を通常chatより優先し、explicit Trace同士ではnewest rootを選ぶ。`createdAt` が同じ場合は既存の決定的event ID orderingで1件を決める。フィールドの総logical cell数をNとしたとき、全体上限は `floor(N × 0.30)`、通常chat・書置き・遺言それぞれの予約枠は `floor(N × 0.10)` とする。端数と未使用の予約枠は種類共用とする。per-cell survivorを確定した後に各種類の予約枠を確保し、残りは種類を問わず新しい候補から採用する。候補が増えた場合は他種類へ貸した予約枠を返却する。予約枠は候補数を保証せず、同じcellへの集中で予約枠未満になることを許容する。上限はrootだけを数え、kind 1111 replyは数えない。
 
-### death Last Words
+### 遺言
 
-death Last WordsはNIP-28 kind 42のexplicit Traceであり、project `L`、`l=trace`、`l=trace:death`、canonical channel root `e`、canonical `w`、本文contentを持つ。`l=chat`、`speech:*`、`d` tagは持たない。これはpresence activityやactive slot plannerへは入力せず、`w`はTrace表示位置だけを表す。durableなdeath transitionとterminal exitの準備が成立した同一tabだけが、canonical last positionに1件だけbest-effortでpublishできる。bootstrapとlive受信の双方で通常Trace rootと同じ決定的cell projectionへ取り込むが、通常発言の20%抽選は適用しない。Last Words rootを調査したときは、通常Traceと同じreply tree、reply publication、validation、cache、既読・未読、通知、距離制限を適用する。返信投稿者は現在の有効なIdentityでなければならず、死亡したIdentityによる通常投稿は許可しない。通知とreply read stateは返信先persona/pubkeyの既存scopeに従い、Identity間で引き継がない。死亡直後のLast Words送信失敗はlifecycleをrollbackせず、空入力・skipではeventをpublishしない。一般的なNIP-28 clientが通常channel messageとして表示する場合があることは許容する。
+遺言はNIP-28 kind 42のexplicit Traceであり、project `L`、`l=trace`、`l=trace:death`、canonical channel root `e`、canonical `w`、本文contentを持つ。`l=chat`、`speech:*`、`d` tagは持たない。これはpresence activityやactive slot plannerへは入力せず、`w`はTrace表示位置だけを表す。durableなdeath transitionとterminal exitの準備が成立した同一tabだけが、canonical last positionに1件だけbest-effortでpublishできる。bootstrapとlive受信の双方で通常痕跡rootと同じ決定的cell projectionへ取り込むが、通常発言の20%抽選は適用しない。遺言rootを調査したときは、通常痕跡と同じreply tree、reply publication、validation、cache、既読・未読、通知、距離制限を適用する。返信投稿者は現在の有効なIdentityでなければならず、死亡したIdentityによる通常投稿は許可しない。通知とreply read stateは返信先persona/pubkeyの既存scopeに従い、Identity間で引き継がない。死亡直後の遺言送信失敗はlifecycleをrollbackせず、空入力・skipではeventをpublishしない。一般的なNIP-28 clientが通常channel messageとして表示する場合があることは許容する。
 
-### 任意Traceの投稿と復旧
+### 書置きの投稿と復旧
 
-任意Traceはproject `L`、`l=trace`、`l=trace:manual`、canonical channel root `e`、現在のcanonical `w`、本文contentを持つ。`l=chat`、`speech:*`、`d` tagは持たない。通常ComposerとAI候補の共通publish coreから送るが、speech type、presence activity、通常bubbleには適用しない。ActionDockの選択中にTrace返信先を選ぶ場合は返信モードへ切替え、入力本文を保持する。任意モード中のComposer・shortcut・slash command・AI候補は同じ任意Trace送信経路を通す。
+書置きはproject `L`、`l=trace`、`l=trace:manual`、canonical channel root `e`、現在のcanonical `w`、本文contentを持つ。`l=chat`、`d` tagは持たない。通常・叫び・モノローグの発言タイプに対応し、通常では発言タイプ専用の追加speech labelを付けず、叫び・モノローグでは[SPEC-10](./SPEC-10-Nostr・アカウント.md)所定の対応labelを付ける。書置きはexplicit Traceとして扱い、通常chatのlive speech、Chatter、presence activity、通常bubbleには流さない。通常ComposerとAI候補の共通publish coreから送る。ActionDockの選択中にTrace返信先を選ぶ場合は返信モードへ切替え、入力本文を保持する。書置きmode中のComposer・shortcut・slash command・AI候補は同じ書置き送信経路を通す。
 
-ActionDockの任意Trace buttonは状態にかかわらず費用表示を`100pt`とする。Relay送信中と結果不明はTooltipおよびaccessible nameで伝え、費用表示を置き換えない。Relayで送信成功を確認した後は任意モードの選択を解除し、通常発言モードへ戻す。確認済みeventはボタンの使用済み状態として表示せず、任意Traceは再選択して繰り返し投稿できる。
+ActionDockの書置きbuttonは状態にかかわらず費用表示を`100pt`とする。Relay送信中と結果不明はTooltipおよびaccessible nameで伝え、費用表示を置き換えない。Relayで送信成功を確認した後は書置きmodeの選択を解除し、通常発言モードへ戻す。確認済みeventはボタンの使用済み状態として表示せず、書置きは再選択して繰り返し投稿できる。
 
 費用100ptはPlayer lifecycleの現在所持ポイントから、署名済みeventと同じIndexedDB transactionで予約・減算し、既存World write journalにeventをoutboxとして永続化してからRelay送信する。未回収作業pointや未確定realtime報酬は使わない。event IDを含む同一署名済みeventを再確認・再送し、結果不明を理由に返金または別event IDによる再投稿を行わない。送信中だけRun終了との短い競合を防止し、結果不明が永続化された後はclearを無期限に止めない。Run終了transactionはterminal exitを準備できない場合も旧Runのoutboxをterminal化する。新Runへの予約移転・返金・再送はしない。終了前にRelayへ送信開始したeventは取り消せない。成功後は表示上限内ならRelay bootstrapを待たず同じeventをlocal root cacheへreconcileする。
 
 ### root cache
 
-browser-local cacheは種類ごと・logical cellごとの最新valid候補を保持し、全体capで非表示の候補も上限 `3 × N` 件以内で再配分用に保持する。effective rootは引き続きbrowser-localに永続保持し、latest bootstrap範囲から外れてもcandidate pool evictionまで保持する。受信順序によらず同じ候補集合から同じeffective root集合を選ぶ。candidate evictionでrootがeffectiveでなくなった場合、そのroot、root read state、reply tree、reply read/unread state、reply notificationを完全に忘れる。世界識別と種類ごとのRelay候補取得上限はSPEC-30を正とする。
+browser-local cacheは種類ごと・logical cellごとの最新valid候補を保持し、全体capで非表示の候補も上限 `3 × N` 件以内で再配分用に保持する。effective rootは引き続きbrowser-localに永続保持し、latest bootstrap範囲から外れてもcandidate pool evictionまで保持する。受信順序によらず同じ候補集合から同じeffective root集合を選ぶ。candidate evictionでrootがeffectiveでなくなった場合、そのroot、root read state、reply tree、reply read/unread state、reply notificationを完全に忘れる。ただし報酬獲得履歴とTrace側未精算報酬記録は保持し、cache evictionやroot削除では消去しない。世界識別と種類ごとのRelay候補取得上限はSPEC-30を正とする。
 
 ### reply cache
 
@@ -44,9 +44,9 @@ reply-tree LRU evictionではrootとroot read stateを残し、そのtreeのrepl
 
 ### root iconとauthor ghost
 
-通常時、trace cellにはroot traceが所有する小さな痕跡アイコンを表示し、author ghostや件数は表示しない。ランダム痕跡にはTabler IconsのHistory、任意痕跡には従来の吹き出し、death Last Wordsには従来の墓標を表示する。ランダム痕跡の通常未読・既読opacityはそれぞれ0.62、0.56とし、任意痕跡は従来の吹き出しアイコンとopacity（未読0.72、既読0.66）を維持する。replyが未読の場合は種類やroot read状態に優先して従来のreply未読アイコン色・opacityを表示する。replyは独立した通常fieldアイコンを生成しない。
+通常時、trace cellにはroot traceが所有する小さな痕跡アイコンを表示し、author ghostや件数は表示しない。ランダム痕跡にはTabler IconsのHistory、書置きには従来の吹き出し、遺言には従来の墓標を表示する。ランダム痕跡の通常未読・既読opacityはそれぞれ0.62、0.56とし、書置きは従来の吹き出しアイコンとopacity（未読0.72、既読0.66）を維持する。replyが未読の場合は種類やroot read状態に優先して従来のreply未読アイコン色・opacityを表示する。replyは独立した通常fieldアイコンを生成しない。
 
-rootアイコンはcellの右上内側に、cell sizeに応じた余白・小さなサイズで表示する。random、manual、death Last Wordsは同じ配置を使い、アイコンを新たなhit targetにはしない。調査可能性を示す虫眼鏡などの補助アイコンは表示しない。調査可否は既存のlogical-cell selectionで判定する。
+rootアイコンはcellの右上内側に、cell sizeに応じた余白・小さなサイズで表示する。random、manual、遺言は同じ配置を使い、アイコンを新たなhit targetにはしない。調査可能性を示す虫眼鏡などの補助アイコンは表示しない。調査可否は既存のlogical-cell selectionで判定する。
 
 rootを調査するとroot author ghostを表示する。authorはpubkeyから既存の決定的character割当で導出し、character catalogのimage / name / aboutだけを使用する。kind 0の取得、raw pubkey、npubの表示は行わない。reply authorはbubbleの兄弟native Profile buttonからProfile Dialogを開ける。
 
@@ -121,7 +121,7 @@ traceを調査またはreplyを選択すると、そのeventをreply targetと�
 
 ## 26. read / unread
 
-root readおよびreply read/unreadはbrowser-local persistent stateとし、Nostr eventとして発行せず、cross-device同期しない。
+root readおよびreply read/unreadはbrowser-local persistent stateとし、Nostr eventとして発行せず、cross-device同期しない。既存root既読条件で実表示が成立し、未読から既読へ遷移した同じTrace DB transactionに未精算報酬を記録する。
 
 root readはbrowser-person scopeで保持し、Identity transition後も維持する。reply read/unreadとnotificationはpersona/pubkey scopeで保持し、旧Identity宛notificationをIdentity transition後のIdentityへ引き継がない。
 
@@ -131,6 +131,17 @@ root readは、root ghostと実際のroot本文bubbleの**両方**が実表示�
 
 - root read/unreadはrootアイコンの状態画像へ反映する。reply unreadの有無もreply未読用アイコンとして表示する。
 - reply unreadが存在する場合はroot既読よりpresentation上優先し、rootが既読でもreply未読用アイコンを表示する。既存のread/unread意味論は変更しない。
+
+### 交流報酬の既読条件と精算
+
+自己投稿以外の未読rootを初回閲覧したとき5pt、自分宛ての有効な未読返信が実表示によって既読になったとき10ptを対象にする。アップデート前から既読だったイベントには遡及付与しない。アップデート前に投稿されたイベントも、まだ未読なら初回閲覧報酬の対象とし、投稿日時による追加制限を設けない。root報酬はevent単位でbrowser内1回、通知既読報酬はIdentityとreply eventの組み合わせでRunを跨いで1回とする。返信通知対象は既存のimmediate parent検証で確定した返信先が自分であることを使う。
+
+他者の発言への返信投稿が既存のauthoritative Relay基準で成功した場合は10pt。同一Runでは同じimmediate parentへの初回成功だけを報酬対象とし、新Runでは再度対象にできる。自己投稿への返信、失敗、結果不明は対象外とする。
+
+Account側で報酬が新規確定した場合（`applied`）だけ、確定額（+5ptまたは+10pt）を表示し、既存の`collect`効果音を再生する。金額表示は表示中の自分のキャラクター頭上付近に置き、キャラクター移動とカメラに追従させる。viewport端で文字が切れないよう位置を調整し、複数報酬はそれぞれ表示する。自分のキャラクターが表示されていない場合は代替位置へ表示しない。演出は約1秒で軽く上昇・フェードし、レイアウトを変えず操作を遮らない。reduced-motionでは移動せず短いフェード表示にする。既読状態の変化だけ、ポイント表示の更新だけ、重複・stale精算、起動時復旧、他tabによる更新では演出しない。HUDの既存ポイント更新・ハイライトは維持する。音声・表示の失敗は報酬確定や投稿成功へ影響させない。効果音は既存の音量・ミュート・再生許可・document visibility制約に従う。
+
+所持ポイントはAccount DBのPlayer lifecycleに保持し、報酬獲得履歴はそこから独立したstoreに保持する。ポイント加算と履歴確定は同じAccount transactionで行う。Account DBはv8からv9へ更新し、Trace DBはv3からv4へ更新する。両DBの新規作成時も全storeを作成し、既存のAccount root、Identity、Run、所持ポイント、write journalを維持する。旧バージョン全般への追加migrationや互換経路は設けない。既読報酬はTrace DBの未精算outboxから起動時に現在Identity・Runを照合して復旧し、Account確定後にTrace側を処理済みにする。Account履歴キーによる重複排除で再試行・複数tabでも二重加算しない。旧IdentityまたはRunの未精算記録は新しいRunへ適用せず終端化する。root削除時は返信cacheと既読・通知情報を整理するが、Account報酬履歴とTrace未精算記録は保持する。
+
 - global unread indicatorはActionDockに置き、Chatterとは別UIとする。操作時は「どこかにあなたへの返信の痕跡があります」のように未読存在だけをPopoverで説明する。viewport衝突を避けて安全領域内に表示し、外側操作またはEscapeでも閉じる。本文、author、場所、方向、距離、件数を表示せず、auto-navigationもしない。
 
 ## 27. trace bubbleの視覚的優先順位

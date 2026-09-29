@@ -471,7 +471,12 @@ for (const stateKind of ['missing', 'corrupt'] as const) {
 					});
 				} finally { database.close(); }
 			});
-			expect(persistedKeys).toEqual(['persona-bubble-field-player-state', 'persona-bubble-field-root-secret', 'persona-bubble-field-world-write-journal']);
+			expect(persistedKeys).toEqual([
+				'persona-bubble-field-interaction-rewards',
+				'persona-bubble-field-player-state',
+				'persona-bubble-field-root-secret',
+				'persona-bubble-field-world-write-journal'
+			]);
 		});
 	}
 
