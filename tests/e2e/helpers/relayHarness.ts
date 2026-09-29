@@ -324,16 +324,19 @@ export async function installDelayedRelay(page: Page, options: {
 	deferTraceReplies?: boolean;
 	silentReplyRelays?: readonly string[];
 	persistAcrossReload?: boolean;
+	observeWebSocketLifecycle?: boolean;
 	testWorldConfig?: PrototypeWorldConfig;
 	hiddenSubscriptionLimit?: number;
 } = {}): Promise<void> {
 	const events = options.primaryEvents ?? testEvents();
-	await page.addInitScript(({ authoritativeRelays, primaryEvents, historyMessages, realtimeEvents, deferPrimaryEvents, deferRealtimeEvents, primaryTerminal, realtimeTerminal, realtimePublishOutcome, rejectTracePublishes, deferTracePublishes, traceRoots, traceReplies, deferTraceRoots, deferTraceReplies, silentReplyRelays, persistAcrossReload, testWorldConfig, hiddenSubscriptionLimit }) => {
+	await page.addInitScript(({ authoritativeRelays, primaryEvents, historyMessages, realtimeEvents, deferPrimaryEvents, deferRealtimeEvents, primaryTerminal, realtimeTerminal, realtimePublishOutcome, rejectTracePublishes, deferTracePublishes, traceRoots, traceReplies, deferTraceRoots, deferTraceReplies, silentReplyRelays, persistAcrossReload, observeWebSocketLifecycle, testWorldConfig, hiddenSubscriptionLimit }) => {
 		const WORLD_STATE_KIND = 30079;
 		const TAG_GAME_KIND = 37070;
 		type Listener = (event?: { type: string; data?: string; code?: number; reason?: string }) => void;
 		type PendingRequest = { socket: FakeWebSocket; subId: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] };
 		const authoritative = new Set<string>(authoritativeRelays);
+		const authoritativeHosts = new Set(authoritativeRelays.map((url) => new URL(url).host));
+		const isAuthoritativeRelayUrl = (url: string) => authoritativeHosts.has(new URL(url).host);
 		const silentReplyRelaySet = new Set(silentReplyRelays ?? []);
 		const pendingPrimary: PendingRequest[] = [];
 		const pendingTraceRoots: PendingRequest[] = [];
@@ -349,13 +352,21 @@ export async function installDelayedRelay(page: Page, options: {
 		const traceReplyHistory = traceReplies as Array<Record<string, unknown>>;
 		const persistedKey = 'relay-startup-persisted-state';
 		const persistedLatePositionKey = 'relay-startup-persisted-late-position';
+		const deferNextWebSocketOpenKey = 'relay-startup-defer-next-websocket-open';
+		const deferWebSocketOpen = observeWebSocketLifecycle && sessionStorage.getItem(deferNextWebSocketOpenKey) === 'true';
+		if (deferWebSocketOpen) sessionStorage.removeItem(deferNextWebSocketOpenKey);
+		const pageGenerationKey = 'relay-startup-websocket-page-generation';
+		const pageGeneration = observeWebSocketLifecycle ? Number(sessionStorage.getItem(pageGenerationKey) ?? 0) + 1 : 0;
+		if (observeWebSocketLifecycle) sessionStorage.setItem(pageGenerationKey, String(pageGeneration));
 		const persistedLatePosition = persistAcrossReload
 			? JSON.parse(sessionStorage.getItem(persistedLatePositionKey) ?? 'null') as { relayUrl: string; event: Record<string, unknown> } | null
 			: null;
 		const previous = persistAcrossReload ? JSON.parse(sessionStorage.getItem(persistedKey) ?? '{"published":[],"closedSubscriptions":[]}') as {
 			published: Array<Record<string, unknown>>;
 			closedSubscriptions: Array<{ subId: string; url: string }>;
-		} : { published: [], closedSubscriptions: [] };
+			webSocketCloses?: Array<{ socketId: number; generation: number; url: string; readyState: number; origin: 'application' | 'pagehide' }>;
+		} : { published: [], closedSubscriptions: [], webSocketCloses: [] };
+		const lifecycleSockets: Array<{ readyState: number; close(code?: number): void }> = [];
 		const queuedBootstrapEventsKey = 'relay-startup-queued-realtime-bootstrap-events';
 		const queuedBootstrapEvents = JSON.parse(sessionStorage.getItem(queuedBootstrapEventsKey) ?? '[]') as Array<Record<string, unknown>>;
 		sessionStorage.removeItem(queuedBootstrapEventsKey);
@@ -365,6 +376,11 @@ export async function installDelayedRelay(page: Page, options: {
 			...previous.published.filter((event) => event.kind === 7070 || event.kind === 37070)
 		];
 		const state = {
+			webSocketConnections: [] as Array<{ socketId: number; generation: number; url: string; readyState: number }>,
+			webSocketCloses: [] as Array<{ socketId: number; generation: number; url: string; readyState: number; origin: 'application' | 'pagehide' }>,
+			previousWebSocketCloses: previous.webSocketCloses ?? [],
+			pendingWebSocketOpens: [] as Array<() => void>,
+			pageHiding: false,
 			traceDeliveries: [] as string[],
 			requests: [] as Array<{ url: string; subId: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] }>,
 			persistedPrimaryDeliveries: [] as Array<{ relayUrl: string; eventId: string }>,
@@ -531,12 +547,22 @@ export async function installDelayedRelay(page: Page, options: {
 			static CLOSING = 2;
 			static CLOSED = 3;
 			readyState = FakeWebSocket.CONNECTING;
+			connectionRecord: { socketId: number; generation: number; url: string; readyState: number } | null = null;
 			listeners = new Map<string, Set<Listener>>();
 			constructor(readonly url: string) {
-				queueMicrotask(() => {
+				const finishOpen = () => {
+					if (observeWebSocketLifecycle && this.readyState !== FakeWebSocket.CONNECTING) return;
 					this.readyState = FakeWebSocket.OPEN;
+					if (this.connectionRecord) this.connectionRecord.readyState = FakeWebSocket.OPEN;
 					this.dispatch('open', { type: 'open' });
-				});
+				};
+				if (observeWebSocketLifecycle) {
+					this.connectionRecord = { socketId: state.webSocketConnections.length + 1, generation: pageGeneration, url, readyState: FakeWebSocket.CONNECTING };
+					state.webSocketConnections.push(this.connectionRecord);
+					lifecycleSockets.push(this);
+				}
+				if (deferWebSocketOpen) state.pendingWebSocketOpens.push(finishOpen);
+				else queueMicrotask(finishOpen);
 			}
 			addEventListener(type: string, listener: Listener) {
 				const listeners = this.listeners.get(type) ?? new Set<Listener>();
@@ -630,23 +656,37 @@ export async function installDelayedRelay(page: Page, options: {
 				}
 			}
 			close(code = 1000) {
+				if (observeWebSocketLifecycle && this.connectionRecord) {
+					state.webSocketCloses.push({ ...this.connectionRecord, readyState: this.readyState, origin: state.pageHiding ? 'pagehide' : 'application' });
+				}
 				this.readyState = FakeWebSocket.CLOSED;
+				if (this.connectionRecord) this.connectionRecord.readyState = FakeWebSocket.CLOSED;
 				this.dispatch('close', { type: 'close', code, reason: '' });
 			}
 		}
 
 		Object.defineProperty(window, 'WebSocket', { configurable: true, value: FakeWebSocket });
 		if (testWorldConfig) Object.assign(window, { __personaBubbleFieldTestWorldConfig: testWorldConfig });
+		if (observeWebSocketLifecycle) window.addEventListener('pagehide', () => {
+			state.pageHiding = true;
+			for (const socket of lifecycleSockets) {
+				if (isAuthoritativeRelayUrl((socket as FakeWebSocket).url) &&
+					(socket.readyState === FakeWebSocket.CONNECTING || socket.readyState === FakeWebSocket.OPEN)) socket.close(1001);
+			}
+		});
 		if (persistAcrossReload) window.addEventListener('pagehide', () => {
 			sessionStorage.setItem(persistedKey, JSON.stringify({
 				published: [...state.previousPublished, ...state.published],
-				closedSubscriptions: [...state.previousClosedSubscriptions, ...state.closedSubscriptions]
+				closedSubscriptions: [...state.previousClosedSubscriptions, ...state.closedSubscriptions],
+				webSocketCloses: [...state.previousWebSocketCloses, ...state.webSocketCloses]
 			}));
 		});
 		window.fetch = async () => new Response('{}', { status: 200, headers: { 'content-type': 'application/nostr+json' } });
 		Object.assign(window, {
 			__relayStartupTest: {
 				state,
+				deferNextWebSocketOpen: () => sessionStorage.setItem(deferNextWebSocketOpenKey, 'true'),
+				releaseWebSocketOpens: () => state.pendingWebSocketOpens.splice(0).forEach((open) => queueMicrotask(open)),
 				releasePublishes: (kind: number) => {
 					if (kind === 1111) state.deferReplyPublishes = false;
 					if (kind === WORLD_STATE_KIND) state.deferPositionPublishes = false;
@@ -777,6 +817,7 @@ export async function installDelayedRelay(page: Page, options: {
 		rejectTracePublishes: options.rejectTracePublishes ?? false,
 		deferTracePublishes: options.deferTracePublishes ?? false,
 		persistAcrossReload: options.persistAcrossReload ?? false,
+		observeWebSocketLifecycle: options.observeWebSocketLifecycle ?? false,
 		testWorldConfig: options.testWorldConfig,
 		hiddenSubscriptionLimit: options.hiddenSubscriptionLimit
 	});
@@ -784,7 +825,7 @@ export async function installDelayedRelay(page: Page, options: {
 
 export function relayState(page: Page) {
 	return page.evaluate(() => (window as typeof window & {
-		__relayStartupTest: { state: { requests: Array<{ url: string; subId: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] }>; persistedPrimaryDeliveries: Array<{ relayUrl: string; eventId: string }>; published: Array<{ id: string; kind: number; created_at: number; content: string; tags: string[][]; pubkey?: string }>; rejectedPositionPublishIds: string[]; previousPublished: Array<{ id: string; kind: number; created_at: number; content: string; tags: string[][]; pubkey?: string }>; closedSubscriptions: Array<{ subId: string; url: string }> }; releasePublishes(kind: number): void; deferPositionPublishes(): void; releasePrimaryEvents(): void; releasePrimary(): void; releaseTraceRoots(): void; releaseTraceReplies(): void; deferTraceReplies(): void; injectTraceReply(event: object): void; injectClosedTraceReply(event: object): void; activeTraceReplyCount(): number; rejectMessagePublishes(): void; allowMessagePublishes(): void; rejectPositionPublishes(): void; allowPositionPublishes(): void; rejectTracePublishes(): void; allowTracePublishes(): void; injectPosition(event: object): void; injectPositionToRelay(event: object, relayUrl: string): void; injectMessage(event: object): void };
+		__relayStartupTest: { state: { requests: Array<{ url: string; subId: string; filter: Record<string, unknown>; filters: Record<string, unknown>[] }>; persistedPrimaryDeliveries: Array<{ relayUrl: string; eventId: string }>; published: Array<{ id: string; kind: number; created_at: number; content: string; tags: string[][]; pubkey?: string }>; rejectedPositionPublishIds: string[]; previousPublished: Array<{ id: string; kind: number; created_at: number; content: string; tags: string[][]; pubkey?: string }>; closedSubscriptions: Array<{ subId: string; url: string }>; webSocketConnections: Array<{ socketId: number; generation: number; url: string; readyState: number }>; webSocketCloses: Array<{ socketId: number; generation: number; url: string; readyState: number; origin: 'application' | 'pagehide' }>; previousWebSocketCloses: Array<{ socketId: number; generation: number; url: string; readyState: number; origin: 'application' | 'pagehide' }> }; deferNextWebSocketOpen(): void; releaseWebSocketOpens(): void; releasePublishes(kind: number): void; deferPositionPublishes(): void; releasePrimaryEvents(): void; releasePrimary(): void; releaseTraceRoots(): void; releaseTraceReplies(): void; deferTraceReplies(): void; injectTraceReply(event: object): void; injectClosedTraceReply(event: object): void; activeTraceReplyCount(): number; rejectMessagePublishes(): void; allowMessagePublishes(): void; rejectPositionPublishes(): void; allowPositionPublishes(): void; rejectTracePublishes(): void; allowTracePublishes(): void; injectPosition(event: object): void; injectPositionToRelay(event: object, relayUrl: string): void; injectMessage(event: object): void };
 	}).__relayStartupTest);
 }
 
