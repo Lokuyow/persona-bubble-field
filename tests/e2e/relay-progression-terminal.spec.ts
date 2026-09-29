@@ -113,7 +113,7 @@ test.describe('Relay startup', () => {
 		await expectIconCloseButton(closeButton, '閉じる');
 		await expect(collectButton.locator('svg')).toHaveCount(1);
 		await expect(collectButton.locator('svg path')).toHaveAttribute('d', /^M4 20h16m-8-6V4/);
-		await expect(activeDialog.locator('.mending-success-feedback')).toHaveCount(0);
+		await expect(activeDialog.locator('.result-card-feedback')).toHaveCount(0);
 		await expect(activeDialog.getByRole('button', { name: '成果を受け取る' })).toBeDisabled();
 		const workMeter = activeDialog.getByRole('progressbar', { name: '作業の蓄積進捗' });
 		await expect(workMeter).toHaveAttribute('aria-valuenow', '0');
@@ -288,31 +288,69 @@ test.describe('Relay startup', () => {
 		}
 		await page.setViewportSize({ width: 1280, height: 800 });
 		const beforeMendingReward = await publishedWorldStateCount();
-		await partialDialog.getByRole('button', { name: '成果を受け取る' }).click();
+		const assertCollectionLayout = async (viewport: { width: number; height: number }, expectedPoints: string, waitForDismissal = true) => {
+			await page.setViewportSize(viewport);
+			const dialog = page.getByRole('dialog');
+			const collect = dialog.getByRole('button', { name: '成果を受け取る' });
+			const readLayout = () => dialog.evaluate((element) => {
+				const rect = (selector: string) => {
+					const box = element.querySelector<HTMLElement>(selector)!.getBoundingClientRect();
+					return [box.left, box.top, box.right, box.bottom, box.width, box.height];
+				};
+				return {
+					dialog: (() => { const box = element.getBoundingClientRect(); return [box.left, box.top, box.right, box.bottom, box.width, box.height]; })(), cards: [...element.querySelectorAll<HTMLElement>('.result-card')].map((card) => {
+						const box = card.getBoundingClientRect();
+						return [box.left, box.top, box.right, box.bottom, box.width, box.height];
+					}),
+					progress: rect('.progress-track'), button: rect('.collect-button'),
+					extent: [element.scrollWidth, element.scrollHeight, element.clientWidth, element.clientHeight]
+				};
+			});
+			const before = await readLayout();
+			await collect.click();
+			await expect.poll(async () => {
+				const current = await readRelayGameState(page);
+				return current.points;
+			}).toBe(expectedPoints === '+1 pt' ? 1 : 4);
+			const pointNotice = dialog.locator('[data-mending-icon="coins"] .result-card-feedback');
+			const lifespanNotice = dialog.locator('[data-mending-icon="heart"] .result-card-feedback');
+			await expect(pointNotice).toHaveText(expectedPoints);
+			await expect(lifespanNotice).toContainText(/^寿命 \+.+/);
+			await expect(pointNotice).toBeVisible();
+			await expect(lifespanNotice).toBeVisible();
+			expect(await readLayout()).toEqual(before);
+			const noticeLayout = await dialog.evaluate((element) => {
+				const notices = [...element.querySelectorAll<HTMLElement>('.result-card-feedback')];
+				const cards = [...element.querySelectorAll<HTMLElement>('.result-card')];
+				const button = element.querySelector<HTMLElement>('.collect-button')!.getBoundingClientRect();
+				const overlaps = (a: DOMRect, b: DOMRect) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+				return {
+					horizontalOverflow: element.scrollWidth > element.clientWidth || document.documentElement.scrollWidth > innerWidth,
+					noticesFitCards: notices.every((notice, index) => {
+						const noticeRect = notice.getBoundingClientRect();
+						const cardRect = cards[index].getBoundingClientRect();
+						return noticeRect.left >= cardRect.left && noticeRect.right <= cardRect.right && noticeRect.top >= cardRect.top && noticeRect.bottom <= cardRect.bottom;
+					}),
+					noticesAvoidButton: notices.every((notice) => !overlaps(notice.getBoundingClientRect(), button)),
+					pointerEvents: notices.map((notice) => getComputedStyle(notice).pointerEvents)
+				};
+			});
+			expect(noticeLayout).toEqual({ horizontalOverflow: false, noticesFitCards: true, noticesAvoidButton: true, pointerEvents: ['none', 'none'] });
+			await expect(collect).toBeDisabled();
+			await dialog.getByRole('button', { name: '詳細を見る' }).click({ trial: true });
+			if (waitForDismissal) {
+				await page.clock.runFor(500);
+				await expect(pointNotice).toHaveCount(0);
+				await expect(lifespanNotice).toHaveCount(0);
+				expect(await readLayout()).toEqual(before);
+			}
+		};
+		await assertCollectionLayout({ width: 1280, height: 800 }, '+1 pt', false);
 		await expect.poll(async () => {
 			const partialState = await readRelayGameState(page);
 			return partialState.points === 1 && partialState.pointProgressTicks > 0 && partialState.pointProgressTicks < 60_000_000;
 		}).toBe(true);
 		await expect.poll(publishedWorldStateCount).toBeGreaterThan(beforeMendingReward);
-		const rewardFeedback = page.locator('.mending-success-feedback');
-		await expect(rewardFeedback).toContainText('+1 pt');
-		await expect(rewardFeedback).toContainText(/寿命 \+.+/);
-		const rewardFeedbackLayout = await rewardFeedback.evaluate((feedback) => {
-			const dialog = feedback.closest('.mending-dialog-content')!;
-			const header = dialog.querySelector('.terminal-dialog-header')!.getBoundingClientRect();
-			const points = dialog.querySelector('.owned-points')!.getBoundingClientRect();
-			const close = dialog.querySelector('.action-button-close')!.getBoundingClientRect();
-			const feedbackRect = feedback.getBoundingClientRect();
-			const overlaps = (first: DOMRect, second: DOMRect) => first.left < second.right && second.left < first.right && first.top < second.bottom && second.top < first.bottom;
-			return {
-				visible: getComputedStyle(feedback).visibility === 'visible' && feedbackRect.width > 0 && feedbackRect.height > 0,
-				insideViewport: feedbackRect.top >= 0 && feedbackRect.bottom <= innerHeight && feedbackRect.left >= 0 && feedbackRect.right <= innerWidth,
-				overlapsHeader: overlaps(feedbackRect, header),
-				overlapsPoints: overlaps(feedbackRect, points),
-				overlapsClose: overlaps(feedbackRect, close)
-			};
-		});
-		expect(rewardFeedbackLayout).toEqual({ visible: true, insideViewport: true, overlapsHeader: false, overlapsPoints: false, overlapsClose: false });
 		const hudPoints = page.locator('[data-unified-status-hud] [data-points-value]');
 		await expect(hudPoints).toHaveAttribute('data-value-change', 'increase');
 		await expect(hudPoints).toHaveCSS('color', 'rgb(87, 230, 138)');
@@ -322,6 +360,7 @@ test.describe('Relay startup', () => {
 		await page.clock.runFor(300);
 		await expect(hudPoints).not.toHaveAttribute('data-value-change', /.+/);
 		await expect(hudPoints).toHaveCSS('color', 'rgb(255, 255, 255)');
+		await expect(page.locator('.result-card-feedback')).toHaveCount(0);
 
 		const secondAt = partialAt + 3 * 60 * 1000;
 		await page.clock.setSystemTime(secondAt);
@@ -329,7 +368,8 @@ test.describe('Relay startup', () => {
 		if (await page.getByRole('dialog').count() > 0) await page.getByRole('button', { name: '閉じる', exact: true }).click();
 		await terminal.click();
 		await expect(page.getByRole('dialog')).toContainText('+3 pt');
-		await page.getByRole('button', { name: '成果を受け取る' }).click();
+		await assertCollectionLayout({ width: 390, height: 844 }, '+3 pt');
+		await page.setViewportSize(originalViewport);
 		await expect.poll(async () => (await readRelayGameState(page)).points).toBe(4);
 
 		if (await page.getByRole('dialog').count() > 0) await page.getByRole('button', { name: '閉じる', exact: true }).click();

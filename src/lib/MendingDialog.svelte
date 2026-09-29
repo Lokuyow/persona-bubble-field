@@ -92,14 +92,6 @@
 					</div>
 					<Dialog.Close class="action-button action-button-tertiary action-button-close" aria-label="閉じる"><X aria-hidden="true" /></Dialog.Close>
 				</div>
-				{#if collectFeedback}
-					{#key collectFeedback.id}
-						<div class="mending-success-feedback" aria-live="polite" aria-atomic="true">
-							<strong>+{collectFeedback.points} pt</strong>
-							<span>寿命 +{formatElapsedDuration(collectFeedback.lifespanMs)}</span>
-						</div>
-					{/key}
-				{/if}
 				{#if startupFeedback}
 					{#key startupFeedback.id}
 						<div class="mending-startup-feedback" aria-live="polite" aria-atomic="true">
@@ -111,21 +103,31 @@
 					<section class="result-list" aria-label="作業の成果">
 						<div class:success-flash={collectFeedback} class="result-card" data-mending-icon="coins">
 							<Coins aria-hidden="true" />
-							<div class="result-copy">
+							<div class:result-copy-hidden={collectFeedback} class="result-copy">
 								<span class="result-label">未回収ポイント</span>
 								<strong>+{unclaimedPoints} pt</strong>
 								<span class:next-point-hidden={nextPointSeconds === null} class="next-point" data-mending-icon="clock" aria-hidden={nextPointSeconds === null}>
 									{#if nextPointSeconds !== null}<Clock aria-hidden="true" />次の1ptまで {nextPointSeconds}秒{/if}
 								</span>
 							</div>
+							{#if collectFeedback}
+								{#key collectFeedback.id}
+									<div class="result-card-feedback" aria-live="polite" aria-atomic="true"><strong>+{collectFeedback.points} pt</strong></div>
+								{/key}
+							{/if}
 						</div>
 						<div class:success-flash={collectFeedback} class="result-card" data-mending-icon="heart">
 							<Heart aria-hidden="true" />
-							<div class="result-copy">
+							<div class:result-copy-hidden={collectFeedback} class="result-copy">
 								<span class="result-label">寿命延長</span>
 								<strong>+{lifespanDuration}</strong>
 								<span class="result-support">作業中に反映</span>
 							</div>
+							{#if collectFeedback}
+								{#key collectFeedback.id}
+									<div class="result-card-feedback" aria-live="polite" aria-atomic="true"><strong>寿命 +{formatElapsedDuration(collectFeedback.lifespanMs)}</strong></div>
+								{/key}
+							{/if}
 						</div>
 					</section>
 					<section class="status-group" aria-label="作業の蓄積状況">
@@ -173,18 +175,17 @@
 <style>
 	:global(.mending-dialog-overlay) { position: fixed; inset: 0; z-index: 100; background: rgba(2, 8, 18, 0.72); backdrop-filter: blur(2px); }
 	:global(.mending-dialog-content) { position: fixed; top: 50%; left: 50%; z-index: 101; display: grid; gap: 0; width: min(720px, calc(100vw - 24px)); max-height: calc(100svh - 32px); overflow: auto; padding: 28px; border: 1px solid rgba(35, 220, 226, .78); border-radius: 18px; background: linear-gradient(180deg, rgba(4, 29, 43, .92), rgba(3, 20, 30, .94)); box-shadow: 0 0 0 1px rgba(53, 227, 232, .10) inset, 0 18px 60px rgba(0, 0, 0, .42), 0 0 30px rgba(26, 212, 220, .08); backdrop-filter: blur(14px); color: #ecfbff; transform: translate(-50%, -50%); }
-	.mending-success-feedback { position: relative; justify-self: end; z-index: 1; display: grid; gap: 2px; margin: 16px 0 12px; pointer-events: none; color: #64f5f0; text-align: right; animation: mending-success-float 420ms ease-out both; }
-	.mending-success-feedback strong { font-size: 18px; font-weight: 850; }
-	.mending-success-feedback span { color: #cfe7ee; font-size: 13px; font-weight: 700; }
+	.result-card { position: relative; }
+	.result-copy-hidden { visibility: hidden; }
+	.result-card-feedback { position: absolute; inset: 0; z-index: 1; display: grid; place-items: center; padding: 12px; pointer-events: none; color: #64f5f0; text-align: center; overflow-wrap: anywhere; }
+	.result-card-feedback strong { font-size: clamp(16px, 3.2vw, 20px); font-weight: 850; line-height: 1.2; }
 	.mending-startup-feedback { position: absolute; inset: 0; z-index: 2; display: grid; place-items: center; overflow: hidden; pointer-events: none; border: 1px solid rgba(53, 227, 232, .86); border-radius: inherit; color: #64f5f0; font-size: 16px; font-weight: 800; letter-spacing: .04em; text-shadow: 0 0 18px rgba(53, 227, 232, .7); animation: mending-startup-scan 3000ms ease-out both; box-shadow: 0 0 24px rgba(53, 227, 232, .18) inset; }
 	.mending-startup-feedback::after { position: absolute; inset: 0; content: ''; background: linear-gradient(180deg, transparent 0%, rgba(53, 227, 232, .22) 48%, transparent 54%); animation: mending-startup-sweep 1000ms ease-out both; }
 	.points-highlight { animation: mending-points-highlight 420ms ease-out; }
 	.success-flash { animation: mending-card-flash 420ms ease-out; }
-	@keyframes mending-success-float { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(-8px); } }
 	@keyframes mending-card-flash { 0%, 100% { box-shadow: none; } 35% { box-shadow: 0 0 0 2px rgba(53, 227, 232, .4), 0 0 24px rgba(53, 227, 232, .34); } }
 	@keyframes mending-points-highlight { 0%, 100% { color: #ecfbff; } 35% { color: #64f5f0; transform: scale(1.04); } }
-	@media (prefers-reduced-motion: reduce) { .mending-success-feedback { animation-name: mending-success-fade; } .mending-startup-feedback { animation-name: mending-startup-fade; } .mending-startup-feedback::after { animation: none; } .success-flash { animation-name: mending-card-highlight; } .points-highlight { animation-name: mending-points-color; } }
-	@keyframes mending-success-fade { from { opacity: 0; } to { opacity: 1; } }
+	@media (prefers-reduced-motion: reduce) { .mending-startup-feedback { animation-name: mending-startup-fade; } .mending-startup-feedback::after { animation: none; } .success-flash { animation-name: mending-card-highlight; } .points-highlight { animation-name: mending-points-color; } }
 	@keyframes mending-startup-scan { 0% { opacity: 0; } 8% { opacity: 1; } 78% { opacity: 1; } 100% { opacity: 0; } }
 	@keyframes mending-startup-sweep { from { opacity: 0; transform: translateY(-45%); } 45% { opacity: 1; } to { opacity: 0; transform: translateY(45%); } }
 	@keyframes mending-startup-fade { 0% { opacity: 0; } 8% { opacity: 1; } 78% { opacity: 1; } 100% { opacity: 0; } }
