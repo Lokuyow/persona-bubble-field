@@ -806,7 +806,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 				isWithinTraceInvestigationRange(selfLogicalPosition, cell.position),
 			read: traceReadSnapshot.readRootIds.includes(cell.roots[0].id),
 			unreadReply: traceReadSnapshot.unreadReplyRootIds.includes(cell.roots[0].id),
-			kind: cell.roots[0].source === 'death' ? 'death' : 'normal'
+			kind: cell.roots[0].source === 'death' ? 'death' : cell.roots[0].source === 'manual' ? 'manual' : 'random'
 		})));
 	let traceConversationProjection = $derived(resolveTraceConversationProjection(traceConversationState));
 	let speechSuggestionCharacter = $derived(
