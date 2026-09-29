@@ -22,7 +22,7 @@ BigInt(`0x${event.id}`) % 5n === 0n
 
 ### 書置きの投稿と復旧
 
-書置きはproject `L`、`l=trace`、`l=trace:manual`、canonical channel root `e`、現在のcanonical `w`、本文contentを持つ。`l=chat`、`speech:*`、`d` tagは持たない。通常ComposerとAI候補の共通publish coreから送るが、speech type、presence activity、通常bubbleには適用しない。ActionDockの選択中にTrace返信先を選ぶ場合は返信モードへ切替え、入力本文を保持する。書置きmode中のComposer・shortcut・slash command・AI候補は同じ書置き送信経路を通す。
+書置きはproject `L`、`l=trace`、`l=trace:manual`、canonical channel root `e`、現在のcanonical `w`、本文contentを持つ。`l=chat`、`d` tagは持たない。通常・叫び・モノローグの発言タイプに対応し、通常では発言タイプ専用の追加speech labelを付けず、叫び・モノローグでは[SPEC-10](./SPEC-10-Nostr・アカウント.md)所定の対応labelを付ける。書置きはexplicit Traceとして扱い、通常chatのlive speech、Chatter、presence activity、通常bubbleには流さない。通常ComposerとAI候補の共通publish coreから送る。ActionDockの選択中にTrace返信先を選ぶ場合は返信モードへ切替え、入力本文を保持する。書置きmode中のComposer・shortcut・slash command・AI候補は同じ書置き送信経路を通す。
 
 ActionDockの書置きbuttonは状態にかかわらず費用表示を`100pt`とする。Relay送信中と結果不明はTooltipおよびaccessible nameで伝え、費用表示を置き換えない。Relayで送信成功を確認した後は書置きmodeの選択を解除し、通常発言モードへ戻す。確認済みeventはボタンの使用済み状態として表示せず、書置きは再選択して繰り返し投稿できる。
 
