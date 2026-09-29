@@ -4141,6 +4141,9 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		position: { x: number; y: number },
 		trigger?: HTMLButtonElement
 	): void {
+		const selfProfileTrigger = action.kind === 'participant' && action.participantId === selfProjectionId
+			? fieldActionMenu?.focusReturnTrigger ?? trigger
+			: undefined;
 		closeFieldActionMenu();
 		if (action.kind === 'mending-terminal') {
 			openMendingTerminal();
@@ -4168,7 +4171,12 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			return;
 		}
 		const participant = participantViews.find((candidate) => candidate.id === action.participantId);
-		if (participant && trigger) openProfile(participant.character.characterId, trigger);
+		if (!participant || !trigger) return;
+		if (participant.id === selfProjectionId && selfProfileCharacter && selfProfileTrigger) {
+			openSelfProfile(selfProfileTrigger);
+			return;
+		}
+		openProfile(participant.character.characterId, trigger);
 	}
 
 	function resolveFieldCellSelection(position: { x: number; y: number }, trigger?: HTMLButtonElement): void {
@@ -4198,7 +4206,21 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			executeFieldCellAction(resolution.action, position, trigger);
 			return;
 		}
-		fieldActionMenu = { position: { ...position }, actions: resolution.actions };
+		fieldActionMenu = {
+			position: { ...position },
+			actions: resolution.actions,
+			...(trigger ? { focusReturnTrigger: trigger } : {})
+		};
+	}
+
+	function resolveSelfProfileSelection(position: { x: number; y: number }, trigger: HTMLButtonElement): void {
+		const actions = actionsForCell(position);
+		const resolution = resolveFieldCellActions(actions);
+		if (resolution.kind === 'menu' && resolution.actions.some((action) => action.kind === 'trace')) {
+			fieldActionMenu = { position: { ...position }, actions: resolution.actions, focusReturnTrigger: trigger };
+			return;
+		}
+		openSelfProfile(trigger);
 	}
 
 	function watchTagGame(gameId: string): void {
@@ -4218,6 +4240,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		if (action.kind === 'cooperation-defection-group') return '参加地点から参加';
 		if (action.kind === 'trace') return '痕跡を調べる';
 		const participant = participantViews.find((candidate) => candidate.id === action.participantId);
+		if (participant?.id === selfProjectionId && selfProfileCharacter) return '自分のプロフィールを開く';
 		return participant ? `${participant.character.name} のプロフィールを開く` : 'プロフィールを開く';
 	}
 
@@ -5006,7 +5029,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 				fieldActionLabel={fieldActionLabel}
 				closeFieldActionMenu={closeFieldActionMenu}
 				onOpenProfile={openProfile}
-				onOpenSelfProfile={selfProfileCharacter ? openSelfProfile : undefined}
+				onOpenSelfProfile={selfProfileCharacter ? resolveSelfProfileSelection : undefined}
 				traceMarkerWorldPosition={traceMarkerWorldPosition}
 			/>
 			{#if cooperationDefectionEventEnabled && (!devWorldSandboxEnabled || devCooperationDefectionFixtureEnabled)}
