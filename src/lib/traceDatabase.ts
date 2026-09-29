@@ -19,6 +19,7 @@ export type TraceRootRecord = Readonly<{
 	channelId: string;
 	eventId: string;
 	rawEvent: unknown;
+	effective?: boolean;
 }>;
 
 export type TraceReplyRecord = Readonly<{

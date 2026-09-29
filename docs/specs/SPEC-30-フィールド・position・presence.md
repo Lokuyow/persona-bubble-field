@@ -641,20 +641,21 @@ Relay接続が切れてsubscriptionを再作成する場合も、catch-up取得�
 
 ## 21. trace root bootstrapとconversation transport
 
-旧`#w`位置別on-demand REQを撤回する。trace root bootstrapでは、起動時に各authoritative Relayへ次の2つのworld識別用history filterを同じREQで要求する。
+旧`#w`位置別on-demand REQを撤回する。trace root bootstrapでは、起動時に各authoritative Relayへ次の3つのworld識別用history filterを同じREQで要求する。
 
 - `kinds=[42]`
 - `#e=[対象kind40 event ID]`
 - `#L=[project namespace]`
 - normal candidate: `#l=["chat"]`
-- explicit trace candidate: `#l=["trace"]`
+- manual Trace candidate: `#l=["trace:manual"]`
+- death Trace candidate: `#l=["trace:death"]`
 - `limit=1000`
 
 これはworld識別用Relay prefilterを維持し、旧`#w`位置filterだけを撤去する形である。他channelまたはproject外の全kind 42を取得して母集団へ含めない。
 
-RelayのNIP-11 max limit等により1000未満になることは許容する。1000件を埋めるための追加paginationは保証しない。各RelayのEOSE / CLOSED / timeout後に結果を統合し、event IDでdedupeする。semantic validation後、normal chat candidateとexplicit trace candidateを独立してそれぞれ最大1000件へcapし、各class内およびcap後unionを`created_at`とevent IDで決定的に並べる。Trace candidateは通常chatのquotaを消費しない。
+RelayのNIP-11 max limit等により1000未満になることは許容する。1000件を埋めるための追加paginationは保証しない。各RelayのEOSE / CLOSED / timeout後に結果を統合し、event IDでdedupeする。semantic validation後、normal chat、manual Trace、death Trace candidateを独立してそれぞれ最大1000件へcapし、各class内およびcap後unionを`created_at`とevent IDで決定的に並べる。各Trace classは通常chatの取得枠を消費しない。
 
-ここでrawとは上記Relay prefilterを通過したkind 42を意味する。Relay filterはcandidate narrowingでありauthorityではないため、最終的なnamespace marker、semantic class、canonical relation、署名、`w`はparserで検証する。normal chatには20%抽選を適用し、explicit Traceは抽選をbypassする。その後にcell/global root capを適用し、network受信途中にglobal capが埋まったことを理由にmulti-Relay bootstrapを早期終了しない。
+ここでrawとは上記Relay prefilterを通過したkind 42を意味する。Relay filterはcandidate narrowingでありauthorityではないため、最終的なnamespace marker、semantic class、canonical relation、署名、`w`はparserで検証する。normal chatには20%抽選を適用し、manual / death Traceは抽選をbypassする。その後SPEC-50の種類別予約枠とcell/global root capを適用し、network受信途中にglobal capが埋まったことを理由にmulti-Relay bootstrapを早期終了しない。
 
 第3 logical subscriptionでは、`SPEC-50`で定義するNIP-22 filter bundleをForward subscriptionとして扱う。filter bundle変更、per-Relay EOSE / CLOSED / timeout、reconnect、multi-Relay event ID dedupe、不要なhistory再取得の抑制はtransportの責務とする。cursor / since等のrx-nostr内部詳細は製品仕様として固定しない。
 

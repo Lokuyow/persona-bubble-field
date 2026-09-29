@@ -51,11 +51,13 @@ Last WordsはSPEC-50で定めるNIP-28 kind 42のexplicit Traceとしてcanonica
 
 能力強化に使用したポイントは所持ポイントから減少する。現在所持ポイントが100,000pt未満になればnormal clear条件を満たさなくなり、再び100,000pt以上を所持すれば満たす。過去の累積獲得量や一度到達した事実は条件を永久解放しない。「能力へ投資する」か「100,000pt以上を保持してclearする」かの選択が成立する。通常死亡・fresh Run開始時には現在所持ポイントをすべて失う。
 
+通常Composerからの任意Trace投稿は確定所持ポイントを100pt消費する。未回収作業pointsおよび未確定realtime報酬を使用しない。費用は投稿用の一度限りの予約として現在Runの所持ポイントから差し引き、clear thresholdにも反映する。投稿のRun scope確認、所持ポイント減算、署名済みkind 42 eventのoutbox永続化は同一IndexedDB transactionで成立し、Relay送信はtransaction commit後に開始する。
+
 ## 3. 100,000pt到達とnormal clear
 
 normal clear working thresholdは現在所持ポイント100,000ptとする。100,000pt以上である間だけclear選択を利用でき、過去の到達だけで永久unlock flagにはしない。100,000ptを所持しているだけで自動clearにはしない。未回収作業pointsはthresholdへ含めない。effective lifespanが尽きている場合、またはcurrent Runに未解決のrealtime settlementがある場合もclearできない。clearはactive Runを`cleared`として閉じ、Root Pointを1つ加算し、blockingなRun選択状態へ移行する。clear後はcurrent Identityのnsec取得と同じIdentityのfresh Runを可能にする。
 
-clearはbrowser-local lifecycleへdurably commitして成立し、commit成功後にlive World sessionがあれば旧RunのPublic World State terminal `exit`をbest-effortで通知する。Relay failureやexit publication failureはclearをrollbackしない。同じcleared Identityをfresh Runで再利用する場合は、新しいworld entryとして再参加し、exitより新しいpositive activityでpresenceへ戻る。wire上のexitとpresence timestampの詳細は [`SPEC-30-フィールド・position・presence.md`](./SPEC-30-フィールド・position・presence.md) を正とする。
+clearはbrowser-local lifecycleへdurably commitして成立し、commit成功後にlive World sessionがあれば旧RunのPublic World State terminal `exit`をbest-effortで通知する。短時間の投稿送信中だけ同じRunのclearを待たせる。結果不明のoutboxはpoint予約を利用可能所持pointから差し引いたまま保持するが、clearを無期限に禁止しない。送信前にdurableなoutboxと予約が成立していないeventはRelayへ送らない。Runを閉じるtransactionはterminal exitを準備できない場合も旧Runの未確定outboxをterminal化する。終了後は旧Runから再送を開始せず、予約の新Runへの移転・返金もしない。clear成立前に送信開始したNostr eventは取り消せない。Relay failureやexit publication failureはclearをrollbackしない。同じcleared Identityをfresh Runで再利用する場合は、新しいworld entryとして再参加し、exitより新しいpositive activityでpresenceへ戻る。wire上のexitとpresence timestampの詳細は [`SPEC-30-フィールド・position・presence.md`](./SPEC-30-フィールド・position・presence.md) を正とする。
 
 ### 脱出前の秘密鍵保護
 

@@ -14,7 +14,7 @@ import {
 	assertTraceRootChannelId,
 	assertTraceRootField,
 	capTraceRootCandidates,
-	selectTraceRootCandidates,
+	selectTraceRootCandidatePool,
 	type TraceRootCandidate,
 	type TraceRootField
 } from './traceRoots';
@@ -48,7 +48,8 @@ async function replaceCurrentChannel(
 	tx: TraceReadwriteTransaction,
 	keys: readonly IDBValidKey[],
 	channelId: string,
-	candidates: readonly TraceRootCandidate[]
+	candidates: readonly TraceRootCandidate[],
+	effectiveIds: ReadonlySet<string>
 ): Promise<void> {
 	const store = tx.objectStore(TRACE_ROOT_STORE);
 	for (const key of keys) await store.delete(key as [string, string]);
@@ -56,7 +57,8 @@ async function replaceCurrentChannel(
 		await store.put({
 			channelId,
 			eventId: candidate.root.id,
-			rawEvent: candidate.rawEvent
+			rawEvent: candidate.rawEvent,
+			effective: effectiveIds.has(candidate.root.id)
 		});
 	}
 }
@@ -102,7 +104,7 @@ export async function reconcileTraceRootCache(
 	// These are caller-input validation errors, never storage-operation errors.
 	assertTraceRootChannelId(input.channelId);
 	assertTraceRootField(input.field);
-	const selectedNewRoots = selectTraceRootCandidates(input.rawEvents, input.channelId, input.field);
+	const selectedNewRoots = selectTraceRootCandidatePool(input.rawEvents, input.channelId, input.field);
 
 	const db = await openRootDatabase();
 	let tx: TraceReadwriteTransaction | undefined;
@@ -122,15 +124,18 @@ export async function reconcileTraceRootCache(
 			currentKeys.push(key);
 			currentRecords.push(allRecords[index]);
 		}
-		const selectedStoredRoots = selectTraceRootCandidates(
+		const selectedStoredRoots = selectTraceRootCandidatePool(
 			storedRawEvents(currentRecords), input.channelId, input.field
 		);
-		const survivors = capTraceRootCandidates([...selectedStoredRoots, ...selectedNewRoots], input.field);
-		const survivorIds = new Set(survivors.map((candidate) => candidate.root.id));
-		await replaceCurrentChannel(tx, currentKeys, input.channelId, survivors);
-		await removeEvictedRootState(tx, input.channelId, survivorIds);
+		const candidatePool = selectTraceRootCandidatePool(
+			[...selectedStoredRoots, ...selectedNewRoots].map((candidate) => candidate.rawEvent), input.channelId, input.field
+		);
+		const effectiveRoots = capTraceRootCandidates(candidatePool, input.field);
+		const effectiveIds = new Set(effectiveRoots.map((candidate) => candidate.root.id));
+		await replaceCurrentChannel(tx, currentKeys, input.channelId, candidatePool, effectiveIds);
+		await removeEvictedRootState(tx, input.channelId, effectiveIds);
 		await tx.done;
-		return survivors.map((candidate) => candidate.root);
+		return effectiveRoots.map((candidate) => candidate.root);
 	} catch {
 		if (tx) {
 			try {

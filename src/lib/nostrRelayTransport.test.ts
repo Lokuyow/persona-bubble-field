@@ -392,7 +392,7 @@ describe('primary lifecycle', () => {
 			const messageRequests = relay.primaryRequests().filter((request) => kind(request) === 42);
 			expect(messageRequests).toHaveLength(1);
 			expect(messageRequests[0]).toHaveLength(4);
-			expect(messageRequests[0][2]).toMatchObject({ kinds: [42], '#l': ['chat', 'trace'], since: f.input.messageSince });
+			expect(messageRequests[0][2]).toMatchObject({ kinds: [42], '#l': ['chat', 'trace', 'trace:manual', 'trace:death'], since: f.input.messageSince });
 			expect(messageRequests[0][3]).toMatchObject({ kinds: [42], '#l': ['chat'], limit: 50 });
 			expect(messageRequests[0][3].since).toBeUndefined();
 		}
@@ -1208,14 +1208,15 @@ describe('trace root bootstrap', () => {
 		for (const relay of f.authorities) {
 			expect(relay.rootRequests().map((request) => request.slice(2))).toEqual([[
 				expect.objectContaining(expectedFilter),
-				expect.objectContaining({ kinds: [42], '#l': ['trace'], limit: 1000 })
+				expect.objectContaining({ kinds: [42], '#l': ['trace:manual'], limit: 1000 }),
+				expect.objectContaining({ kinds: [42], '#l': ['trace:death'], limit: 1000 })
 			]]);
 		}
 		expect(f.authorities.every((relay) => relay.rootRequests().length >= 0)).toBe(true);
 		expect(result.relays.map((diagnostic) => diagnostic.status)).toEqual(['eose', 'eose']);
 	});
 
-	it('keeps death trace history in a separate bounded filter from kind 42 roots', async () => {
+	it('keeps manual and death trace history in separate bounded filters from kind 42 roots', async () => {
 		const f = fixture(1);
 		await f.start();
 		f.authorities[0].onRequest = (socket, request) => {
@@ -1228,7 +1229,8 @@ describe('trace root bootstrap', () => {
 		const rootRequest = f.authorities[0].rootRequests()[0];
 		expect(rootRequest.slice(2)).toEqual([
 			expect.objectContaining({ kinds: [42], '#l': ['chat'], limit: 1000 }),
-			expect.objectContaining({ kinds: [42], '#l': ['trace'], limit: 1000 })
+			expect.objectContaining({ kinds: [42], '#l': ['trace:manual'], limit: 1000 }),
+			expect.objectContaining({ kinds: [42], '#l': ['trace:death'], limit: 1000 })
 		]);
 	});
 

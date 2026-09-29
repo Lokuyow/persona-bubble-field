@@ -5,6 +5,7 @@ import type { TraceReplyIdentity } from './traceReplyMode';
 export type SpeechPublicationContext = Readonly<{
 	generation: number;
 	target: TraceReplyIdentity | null;
+	manualTrace?: boolean;
 }>;
 
 export type SpeechPublicationOutcome =

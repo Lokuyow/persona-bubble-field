@@ -4,7 +4,7 @@
 
 ## 24. 発言の痕跡
 
-通常の発言は揮発し、Twitter型の過去ログとして時系列に蓄積表示しない。そのうえで、過去の通常chat kind 42の一部だけを、元の発言位置に残る**発言の痕跡**として扱う。痕跡は過去ログや履歴ビューではなく、空間に残った一部の発言の記憶である。投稿日時、経過時間、「さっき」「今日」「数日前」等の古さはroot/replyのいずれにも表示しない。死亡時のLast Wordsもkind 42のexplicit Traceとして同じ空間投影へ加わる。
+通常の発言は揮発し、Twitter型の過去ログとして時系列に蓄積表示しない。そのうえで、過去の通常chat kind 42の一部だけを、元の発言位置に残る**発言の痕跡**として扱う。痕跡は過去ログや履歴ビューではなく、空間に残った一部の発言の記憶である。投稿日時、経過時間、「さっき」「今日」「数日前」等の古さはroot/replyのいずれにも表示しない。プレイヤーは通常Composerから100ptを消費して現在位置へ任意Traceを投稿できる。任意Traceは通常発言の20%抽選を通さず、通常のlive speech / Chatter / presence activityには流さない。死亡時のLast Wordsもkind 42のexplicit Traceとして同じ空間投影へ加わる。
 
 ### rootの選択と上限
 
@@ -14,15 +14,21 @@
 BigInt(`0x${event.id}`) % 5n === 0n
 ```
 
-上の決定的20%抽選にsparse-world boost、密度補正、時間expiryは設けない。effective rootは1 logical cellあたり最大1件とし、同一cellに複数のeligible root candidateがある場合はnewest rootだけを残す。`createdAt` が同じ場合は既存の決定的event ID orderingで1件を決める。global root上限は `floor(total logical cell count / 10)` とする。per-cell survivorを決めた後にglobal capを適用し、上限はrootだけを数え、kind 1111 replyは数えない。
+上の決定的20%抽選にsparse-world boost、密度補正、時間expiryは設けない。effective rootは1 logical cellあたり最大1件とし、同一cellに複数のeligible root candidateがある場合は任意Trace・death Last Wordsを通常chatより優先し、explicit Trace同士ではnewest rootを選ぶ。`createdAt` が同じ場合は既存の決定的event ID orderingで1件を決める。フィールドの総logical cell数をNとしたとき、全体上限は `floor(N × 0.30)`、通常chat・任意Trace・death Last Wordsそれぞれの予約枠は `floor(N × 0.10)` とする。端数と未使用の予約枠は種類共用とする。per-cell survivorを確定した後に各種類の予約枠を確保し、残りは種類を問わず新しい候補から採用する。候補が増えた場合は他種類へ貸した予約枠を返却する。予約枠は候補数を保証せず、同じcellへの集中で予約枠未満になることを許容する。上限はrootだけを数え、kind 1111 replyは数えない。
 
 ### death Last Words
 
 death Last WordsはNIP-28 kind 42のexplicit Traceであり、project `L`、`l=trace`、`l=trace:death`、canonical channel root `e`、canonical `w`、本文contentを持つ。`l=chat`、`speech:*`、`d` tagは持たない。これはpresence activityやactive slot plannerへは入力せず、`w`はTrace表示位置だけを表す。durableなdeath transitionとterminal exitの準備が成立した同一tabだけが、canonical last positionに1件だけbest-effortでpublishできる。bootstrapとlive受信の双方で通常Trace rootと同じ決定的cell projectionへ取り込むが、通常発言の20%抽選は適用しない。Last Words rootを調査したときは、通常Traceと同じreply tree、reply publication、validation、cache、既読・未読、通知、距離制限を適用する。返信投稿者は現在の有効なIdentityでなければならず、死亡したIdentityによる通常投稿は許可しない。通知とreply read stateは返信先persona/pubkeyの既存scopeに従い、Identity間で引き継がない。死亡直後のLast Words送信失敗はlifecycleをrollbackせず、空入力・skipではeventをpublishしない。一般的なNIP-28 clientが通常channel messageとして表示する場合があることは許容する。
 
+### 任意Traceの投稿と復旧
+
+任意Traceはproject `L`、`l=trace`、`l=trace:manual`、canonical channel root `e`、現在のcanonical `w`、本文contentを持つ。`l=chat`、`speech:*`、`d` tagは持たない。通常ComposerとAI候補の共通publish coreから送るが、speech type、presence activity、通常bubbleには適用しない。ActionDockの選択中にTrace返信先を選ぶ場合は返信モードへ切替え、入力本文を保持する。任意モード中のComposer・shortcut・slash command・AI候補は同じ任意Trace送信経路を通す。
+
+費用100ptはPlayer lifecycleの現在所持ポイントから、署名済みeventと同じIndexedDB transactionで予約・減算し、既存World write journalにeventをoutboxとして永続化してからRelay送信する。未回収作業pointや未確定realtime報酬は使わない。event IDを含む同一署名済みeventを再確認・再送し、結果不明を理由に返金または別event IDによる再投稿を行わない。送信中だけRun終了との短い競合を防止し、結果不明が永続化された後はclearを無期限に止めない。Run終了transactionはterminal exitを準備できない場合も旧Runのoutboxをterminal化する。新Runへの予約移転・返金・再送はしない。終了前にRelayへ送信開始したeventは取り消せない。成功後は表示上限内ならRelay bootstrapを待たず同じeventをlocal root cacheへreconcileする。
+
 ### root cache
 
-browserが取得したeffective rootはbrowser-localに永続保持する。latest bootstrap範囲から外れてもroot evictionまで保持し、browserごとに保持する古いtrace集合が異なってよい。root evictionでは、root、root read state、reply tree、reply read/unread state、reply notificationを完全に忘れる。
+browser-local cacheは種類ごと・logical cellごとの最新valid候補を保持し、全体capで非表示の候補も上限 `3 × N` 件以内で再配分用に保持する。effective rootは引き続きbrowser-localに永続保持し、latest bootstrap範囲から外れてもcandidate pool evictionまで保持する。受信順序によらず同じ候補集合から同じeffective root集合を選ぶ。candidate evictionでrootがeffectiveでなくなった場合、そのroot、root read state、reply tree、reply read/unread state、reply notificationを完全に忘れる。世界識別と種類ごとのRelay候補取得上限はSPEC-30を正とする。
 
 ### reply cache
 

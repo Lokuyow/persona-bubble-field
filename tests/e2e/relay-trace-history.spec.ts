@@ -408,7 +408,7 @@ test.describe('Relay startup', () => {
 		await installHostOwnedStub(page);
 		await installPromptApiStub(page);
 		await installDelayedRelay(page, { primaryEvents: primary, traceRoots: [root], traceReplies: [reply] });
-		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret));
+		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret), Date.now() + 7 * 24 * 60 * 60 * 1000, 500);
 		await page.goto('/');
 		await expect(page.locator('.action-dock')).toBeVisible();
 		await page.evaluate(() => {
@@ -421,6 +421,8 @@ test.describe('Relay startup', () => {
 		expect(await readActionDockControlOrder(page)).toEqual([
 			'profile-trigger', 'chatter-toggle', 'trace-unread-indicator', 'sound-control', 'speech-type-toggle', 'suggestions-anchor'
 		]);
+		const fieldGeometryBeforeToggle = await page.locator('.field-grid').boundingBox();
+		const fieldCellSizeBeforeToggle = await page.locator('.field-scene').evaluate((element) => getComputedStyle(element).getPropertyValue('--cell-size'));
 		for (const width of [320, 390]) {
 			await page.setViewportSize({ width, height: 844 });
 			const geometry = await page.evaluate(() => {
@@ -435,19 +437,37 @@ test.describe('Relay startup', () => {
 						.map((selector) => rect(selector))
 				};
 			});
-			expect(geometry.editor.bottom).toBeLessThanOrEqual(geometry.left.top);
-			expect(geometry.left.right).toBeLessThanOrEqual(geometry.right.left);
+			if (width <= 360) expect(geometry.left.bottom).toBeLessThanOrEqual(geometry.right.top);
+			else expect(geometry.left.right).toBeLessThanOrEqual(geometry.right.left);
 			expect(geometry.left.left).toBeGreaterThanOrEqual(geometry.content.left);
 			expect(geometry.right.right).toBeLessThanOrEqual(geometry.content.right);
-			for (const box of [geometry.editor, geometry.left, geometry.right, ...geometry.controls]) {
+			for (const box of [geometry.editor, ...geometry.controls]) {
 				expect(box.left).toBeGreaterThanOrEqual(0);
 				expect(box.top).toBeGreaterThanOrEqual(0);
 				expect(box.right).toBeLessThanOrEqual(width);
 				expect(box.bottom).toBeLessThanOrEqual(geometry.dock.bottom);
 			}
+			for (const control of geometry.controls) {
+				expect(control.width).toBeGreaterThanOrEqual(44);
+				expect(control.height).toBeGreaterThanOrEqual(44);
+			}
+			for (let first = 0; first < geometry.controls.length; first += 1) {
+				for (let second = first + 1; second < geometry.controls.length; second += 1) {
+					const a = geometry.controls[first];
+					const b = geometry.controls[second];
+					expect(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top).toBe(true);
+				}
+			}
 		}
 
 		await page.setViewportSize({ width: 320, height: 844 });
+		const manualTrace = page.locator('.manual-trace-toggle');
+		await manualTrace.click();
+		await expect(manualTrace).toHaveAttribute('aria-pressed', 'true');
+		expect(await page.locator('.field-grid').boundingBox()).toEqual(fieldGeometryBeforeToggle);
+		expect(await page.locator('.field-scene').evaluate((element) => getComputedStyle(element).getPropertyValue('--cell-size'))).toBe(fieldCellSizeBeforeToggle);
+		await manualTrace.click();
+		await expect(manualTrace).toHaveAttribute('aria-pressed', 'false');
 		const chatter = page.locator('.chatter-toggle');
 		await chatter.click();
 		await expect(chatter).toHaveAttribute('aria-pressed', 'true');

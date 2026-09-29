@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	buildWorldMessageTemplate,
 	buildDeathTraceEventTemplate,
+	buildManualTraceEventTemplate,
 	finalizeWorldEvent,
 	type ChannelReference
 } from './nostrProtocol';
@@ -37,17 +38,21 @@ function lotteryRoot(options: Parameters<typeof root>[0] = {}, wins = true) {
 	throw new Error('Could not make a deterministic lottery fixture.');
 }
 
-function deathTrace(content = 'last words') {
+function deathTrace(content = 'last words', createdAt = 200, position = { x: 4, y: 2 }) {
 	for (let attempt = 0; attempt < 10_000; attempt += 1) {
 		const event = finalizeWorldEvent(buildDeathTraceEventTemplate({
 			channel,
 			content: `${content}-${attempt}`,
-			createdAt: 200,
-			position: { x: 4, y: 2 }
+			createdAt,
+			position
 		}), SECRET_KEY);
 		if (BigInt(`0x${event.id}`) % 5n !== 0n) return event;
 	}
 	throw new Error('Could not make a deterministic death trace fixture.');
+}
+
+function manualTrace(content: string, createdAt: number, position: { x: number; y: number }) {
+	return finalizeWorldEvent(buildManualTraceEventTemplate({ channel, content, createdAt, position }), SECRET_KEY);
 }
 
 describe('trace root selection', () => {
@@ -78,6 +83,26 @@ describe('trace root selection', () => {
 		const [root] = roots;
 		expect(root).toMatchObject({ id: event.id, content: expect.stringContaining('last words'), source: 'death', speechType: 'normal' });
 		expect(roots).toHaveLength(1);
+	});
+
+	it('admits manual traces without the normal lottery and reserves ten percent for each source', () => {
+		const candidates = [
+			...Array.from({ length: 12 }, (_, index) => lotteryRoot({ createdAt: index + 10, position: { x: index % 10, y: Math.floor(index / 10) }, nonce: `quota-normal-${index}` }, true)),
+			...Array.from({ length: 12 }, (_, index) => manualTrace(`quota-manual-${index}`, index + 30, { x: (index + 12) % 10, y: Math.floor((index + 12) / 10) })),
+			...Array.from({ length: 12 }, (_, index) => deathTrace(`quota-death-${index}`, index + 50, { x: (index + 24) % 10, y: Math.floor((index + 24) / 10) }))
+		];
+		const roots = selectEffectiveTraceRoots(candidates, CHANNEL_ID, { columns: 10, rows: 10 });
+		expect(roots).toHaveLength(30);
+		expect(roots.filter((root) => !root.source)).toHaveLength(10);
+		expect(roots.filter((root) => root.source === 'manual')).toHaveLength(10);
+		expect(roots.filter((root) => root.source === 'death')).toHaveLength(10);
+	});
+
+	it('prefers explicit roots in a cell and the newer explicit kind when manual and death compete', () => {
+		const normal = lotteryRoot({ createdAt: 300, position: { x: 0, y: 0 }, nonce: 'cell-normal' }, true);
+		const manual = manualTrace('cell-manual', 100, { x: 0, y: 0 });
+		const death = finalizeWorldEvent(buildDeathTraceEventTemplate({ channel, content: 'cell-death', createdAt: 101, position: { x: 0, y: 0 } }), SECRET_KEY);
+		expect(selectEffectiveTraceRoots([normal, manual, death], CHANNEL_ID, { columns: 10, rows: 10 }).map((root) => root.id)).toEqual([death.id]);
 	});
 
 	it('rejects out-of-bounds roots and retains roots regardless of age', () => {
@@ -128,12 +153,12 @@ describe('trace root selection', () => {
 			.toEqual(expected);
 	});
 
-	it('limits 13 candidates to 12 roots on a 16 by 8 field using existing ordering', () => {
+	it('keeps all 13 candidates under the 30 percent cap on a 16 by 8 field', () => {
 		const roots = Array.from({ length: 13 }, (_, index) =>
 			lotteryRoot({ createdAt: 50 + index, position: { x: index, y: 0 }, nonce: `cap-${index}` })
 		);
 		const expected = [...roots].sort((first, second) => second.created_at - first.created_at ||
-			(first.id < second.id ? -1 : first.id > second.id ? 1 : 0)).slice(0, 12).map((event) => event.id);
+			(first.id < second.id ? -1 : first.id > second.id ? 1 : 0)).map((event) => event.id);
 		expect(selectEffectiveTraceRoots(roots, CHANNEL_ID, { columns: 16, rows: 8 }).map((root) => root.id))
 			.toEqual(expected);
 	});

@@ -313,6 +313,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	let effectiveTraceRoots = $state.raw<readonly ParsedWorldMessage[]>([]);
 	let traceConversationState = $state.raw<TraceConversationState>({ kind: 'closed' });
 	let traceReplyMode = $state.raw(createTraceReplyMode());
+	let manualTraceMode = $state(false);
 	let composerDesiredContext = $derived({
 		generation: traceReplyMode.generation,
 		targetId: traceReplyMode.target?.targetId ?? null,
@@ -428,7 +429,9 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	let tagGamePositionEvidence = $state.raw(new Map<string, ReducedPresenceParticipant>());
 	const LIFESPAN_HUD_REFRESH_INTERVAL_MS = 30_000;
 	let selfPositionWriteState = $state.raw<SelfPositionWriteState>({ kind: 'unavailable' });
-	let selfMessageAvailability: SelfMessageAvailability = { kind: 'unavailable' };
+	let selfMessageAvailability = $state<SelfMessageAvailability>({ kind: 'unavailable' });
+	let manualTraceStatus = $state<'idle' | 'sending' | 'unknown' | 'confirmed'>('idle');
+	let manualTraceEnabled = $derived(Boolean((manualTraceMode || personaSnapshot && personaSnapshot.gameState.points >= 100) && selfMessageAvailability.kind === 'ready' && !personaLifecycleTransition));
 	let traceReadSnapshot = $state<TraceReadSnapshot>({ readRootIds: [], unreadReplyRootIds: [], hasUnreadReplies: false });
 	let composerPreferredHeight = $state<number | null>(null);
 	let composerKeyboardInset = $state(0);
@@ -838,6 +841,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	function isCurrentSpeechPublicationContext(context: SpeechPublicationContext): boolean {
 		const currentTarget = traceReplyMode.target;
 		return traceReplyMode.generation === context.generation &&
+			(context.manualTrace ?? false) === manualTraceMode &&
 			(currentTarget?.rootId ?? null) === (context.target?.rootId ?? null) &&
 			(currentTarget?.targetId ?? null) === (context.target?.targetId ?? null);
 	}
@@ -851,16 +855,25 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		isCurrentContext: isCurrentSpeechPublicationContext,
 		publish: async (submission, context): Promise<SpeechPublicationOutcome> => {
 			if (personaLifecycleTransition) return { kind: 'blocked' };
-			const result = context.target
+			const result = context.manualTrace
+				? await worldSession?.publishManualTrace(submission.content)
+				: context.target
 				? await (devWorldSandboxEnabled ? devTraceConversationRuntime : worldSession)?.publishTraceReply({
 					rootId: context.target.rootId, targetId: context.target.targetId, ...submission
 				})
 				: !devWorldSandboxEnabled ? await worldSession?.publishMessage(submission.content, submission.speechType) : undefined;
+			if (context.manualTrace && personaSnapshot) {
+				const expectedPubkey = personaSnapshot.signer.pubkey;
+				const expectedRun = personaSnapshot.activeRun.runNumber;
+				const latest = await loadOrCreateLifecycle();
+				if (latest.kind === 'restored' && latest.persona.signer.pubkey === expectedPubkey && latest.persona.activeRun.runNumber === expectedRun) personaSnapshot = latest.persona;
+			}
 			if (result?.kind === 'succeeded') return result;
 			return { kind: result?.kind === 'out-of-range' ? 'out-of-range' : 'failed' };
 		},
 		onSucceeded: (context) => {
 			traceReplyMode = completeTraceReplySubmission(traceReplyMode, context.generation);
+			if (context.manualTrace) manualTraceMode = false;
 		},
 		onOutOfRange: (context) => {
 			if (traceReplyMode.generation === context.generation) traceReplyMode = clearTraceReplyMode(traceReplyMode, true);
@@ -1442,6 +1455,10 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 					if (!mounted || worldReader !== nextSession) return;
 					selfMessageAvailability = state;
 					if (state.kind === 'ready' && worldSession === nextSession) resolvePendingComposerSubmission();
+				},
+				onManualTraceStatusChanged: (status) => {
+					if (!mounted || worldReader !== nextSession) return;
+					manualTraceStatus = status;
 				}
 			});
 			worldReader = nextSession;
@@ -4091,7 +4108,10 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	function activateReplyTarget(rootId: string, targetId: string): void {
 		const accepted = traceConversationController?.getTraceConversationState();
 		const target = accepted && acceptedTraceReplyTarget(accepted, { rootId, targetId });
-		if (target && accepted?.kind === 'open') traceReplyMode = selectTraceReplyTarget(traceReplyMode, target);
+		if (target && accepted?.kind === 'open') {
+			manualTraceMode = false;
+			traceReplyMode = selectTraceReplyTarget(traceReplyMode, target);
+		}
 	}
 
 	function selectTraceSpeech(targetId: string): void {
@@ -4513,15 +4533,23 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		if (!matchesComposerSubmit(envelope, desired())) throw new Error('Composer reply context is not synchronized.');
 		return speechPublicationCore.publish(envelope.output.content, {
 			generation: envelope.generation,
-			target: traceReplyMode.target
+			target: traceReplyMode.target,
+			manualTrace: manualTraceMode
 		}, options);
 	}
 
 	function submitSpeechCandidate(content: string, signal: AbortSignal): Promise<Readonly<{ eventId: string }>> {
 		return speechPublicationCore.publish(content, {
 			generation: traceReplyMode.generation,
-			target: traceReplyMode.target
+			target: traceReplyMode.target,
+			manualTrace: manualTraceMode
 		}, { signal });
+	}
+
+	function toggleManualTraceMode(): void {
+		if (!manualTraceEnabled || composerSubmissionInProgress) return;
+		traceReplyMode = clearTraceReplyMode(traceReplyMode);
+		manualTraceMode = !manualTraceMode;
 	}
 
 	function setComposerPreferredHeight(height: number): void {
@@ -5201,6 +5229,10 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			onOpenSelfProfile={openSelfProfile}
 			suggestionConversation={speechSuggestionConversation}
 			onSpeechTypeChange={(next) => { selectedSpeechType = next; }}
+				manualTraceSelected={manualTraceMode}
+				{manualTraceEnabled}
+				{manualTraceStatus}
+				onToggleManualTrace={toggleManualTraceMode}
 			submitContent={submitComposerContent}
 			submitCandidate={submitSpeechCandidate}
 			desiredContext={composerDesiredContext}
@@ -5368,6 +5400,12 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		.app-shell {
 			--action-dock-height: calc(var(--composer-preferred-height) + 8px + 46px + 8px + var(--action-dock-padding-block) + var(--action-dock-border-width) + env(safe-area-inset-bottom));
 			--action-reserved-height: calc(var(--composer-initial-preferred-height) + 8px + 46px + 8px + var(--action-dock-padding-block) + var(--action-dock-border-width) + env(safe-area-inset-bottom));
+		}
+	}
+	@media (max-width: 360px) {
+		.app-shell {
+			--action-dock-height: calc(var(--composer-preferred-height) + 8px + 46px + 8px + 46px + 8px + var(--action-dock-padding-block) + var(--action-dock-border-width) + env(safe-area-inset-bottom));
+			--action-reserved-height: calc(var(--composer-initial-preferred-height) + 8px + 46px + 8px + 46px + 8px + var(--action-dock-padding-block) + var(--action-dock-border-width) + env(safe-area-inset-bottom));
 		}
 	}
 

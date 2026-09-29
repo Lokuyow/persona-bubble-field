@@ -68,6 +68,8 @@ synchronizationのidleを確認して既存draftを保護する。AI候補のPri
 同じ発言タイプresolver、Relay readiness、submission gate、reply target再確認、kind 42 / kind 1111の
 構築・署名・publish・成功後処理を利用する。
 
+ActionDock右側は発言タイプ、100ptを消費する任意Trace mode、AI候補の順に置く。任意Trace modeは通常ComposerとAI候補の共通送信経路で現在のcanonical positionへkind 42 explicit Traceを投稿し、通常の発言タイプを適用しない。返信先選択と任意Trace modeは排他的にし、切替え時は本文を維持する。投稿成功で通常modeへ戻り、失敗または結果不明では本文を維持する。再読み込み後は通常modeで開始する。
+
 persona-bubble-fieldはHost-owned Liteの汎用`submitShortcuts` APIを利用する。eHagakiはEnterと
 modifierの判定およびHost-owned submit lifecycleを担当し、opaqueな`shortcutId`を親へ返すだけと
 する。shortcut IDから叫び・モノローグへ意味付けするresolver、slash command parser、発言タイプ

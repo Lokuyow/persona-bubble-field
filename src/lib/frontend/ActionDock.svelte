@@ -5,6 +5,7 @@
 	import SpeechShout from '~icons/hako/speech-shout';
 	import LayoutSidebarLeftCollapse from '~icons/tabler/layout-sidebar-left-collapse';
 	import LayoutSidebarLeftExpand from '~icons/tabler/layout-sidebar-left-expand';
+	import BookmarkPlus from '~icons/tabler/bookmark-plus';
 	import HostOwnedComposerLite from '$lib/HostOwnedComposerLite.svelte';
 	import CharacterAvatar from '$lib/CharacterAvatar.svelte';
 	import SpeechSuggestions from '$lib/frontend/SpeechSuggestions.svelte';
@@ -30,12 +31,17 @@
 		chatterOpen: boolean;
 		onToggleChatter: () => void;
 		onSpeechTypeChange: (next: SpeechType) => void;
+		manualTraceSelected: boolean;
+		manualTraceEnabled: boolean;
+		manualTraceStatus: 'idle' | 'sending' | 'unknown' | 'confirmed';
+		onToggleManualTrace: () => void;
 		onOpenSelfProfile: (trigger: HTMLButtonElement) => void;
 		submitCandidate: (content: string, signal: AbortSignal) => Promise<Readonly<{ eventId: string }>>;
 	};
 	let { selectedSpeechType, submissionInProgress, volume, onSoundOpen, onVolume, onSpeechTypeChange, onOpenSelfProfile, submitContent, submitCandidate,
 		desiredContext, loadPreview, onPreviewClear, onEditorEmptyChange, onPreferredHeightChange,
-		 hasUnreadReplies, character, avatarTone, suggestionConversation, canOpenSelfProfile, chatterOpen, onToggleChatter }: Props = $props();
+	 hasUnreadReplies, character, avatarTone, suggestionConversation, canOpenSelfProfile, chatterOpen, onToggleChatter,
+	 manualTraceSelected, manualTraceEnabled, manualTraceStatus, onToggleManualTrace }: Props = $props();
 	let composerComponent: { focusEditor(): boolean; blurEditor(): boolean; applyContentIfEmpty(content: string): Promise<boolean> } | null = null;
 	let editorIsEmpty = $state<boolean | null>(null);
 	let explanationVisible = $state(false);
@@ -195,6 +201,28 @@
 				<Tooltip.Content role="tooltip" class="action-dock-tooltip" side="top" sideOffset={8}>発言タイプ：{SPEECH_TYPE_LABELS[selectedSpeechType]}</Tooltip.Content>
 			</Tooltip.Portal>
 		</Tooltip.Root>
+		<Tooltip.Root>
+			<Tooltip.Trigger>
+				{#snippet child({ props })}
+					<button
+						{...props}
+						class={['manual-trace-toggle', { 'action-selected': manualTraceSelected }]}
+						type="button"
+						aria-label={`任意の痕跡を投稿（100pt消費${manualTraceStatus === 'unknown' ? '・結果未確認' : manualTraceStatus === 'sending' ? '・送信中' : manualTraceStatus === 'confirmed' ? '・投稿済み' : ''}）`}
+						aria-pressed={manualTraceSelected}
+						data-manual-trace-status={manualTraceStatus}
+						disabled={!manualTraceEnabled || submissionInProgress}
+						onclick={onToggleManualTrace}
+					>
+						<span class="manual-trace-icon" aria-hidden="true"><BookmarkPlus /></span>
+						<span class="manual-trace-cost" aria-hidden="true">{manualTraceStatus === 'sending' ? '送信中' : manualTraceStatus === 'unknown' ? '未確認' : manualTraceStatus === 'confirmed' ? '投稿済' : '100pt'}</span>
+					</button>
+				{/snippet}
+			</Tooltip.Trigger>
+			<Tooltip.Portal>
+				<Tooltip.Content role="tooltip" class="action-dock-tooltip" side="top" sideOffset={8}>任意の痕跡（投稿時に100pt消費）{manualTraceStatus === 'unknown' ? '・結果未確認のため同じイベントを自動再試行します' : ''}</Tooltip.Content>
+			</Tooltip.Portal>
+		</Tooltip.Root>
 		<SpeechSuggestions
 			{character}
 			speechType={selectedSpeechType}
@@ -278,8 +306,8 @@
 	}
 	.chatter-toggle[aria-pressed='false']:hover:not(:disabled) { background: var(--action-icon-background-hover); }
 	.chatter-toggle[aria-pressed='false']:active:not(:disabled) { background: var(--action-icon-background-active); }
-	.profile-trigger:hover, .speech-type-toggle:hover:not(:disabled) { background: var(--action-icon-background-hover); }
-	.profile-trigger:active, .speech-type-toggle:active:not(:disabled) { background: var(--action-icon-background-active); }
+	.profile-trigger:hover, .speech-type-toggle:hover:not(:disabled), .manual-trace-toggle:hover:not(:disabled) { background: var(--action-icon-background-hover); }
+	.profile-trigger:active, .speech-type-toggle:active:not(:disabled), .manual-trace-toggle:active:not(:disabled) { background: var(--action-icon-background-active); }
 	.chatter-toggle-icon { display: inline-flex; width: 24px; height: 24px; align-items: center; justify-content: center; }
 	.chatter-toggle-icon :global(svg) { width: 24px; height: 24px; }
 	.chatter-toggle:focus-visible { outline: 3px solid var(--color-focus-ring); outline-offset: 2px; }
@@ -302,6 +330,27 @@
 		line-height: 1.15;
 		white-space: normal;
 	}
+	.manual-trace-toggle {
+		flex: 0 0 54px;
+		min-width: 44px;
+		min-height: 44px;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0 4px;
+		border: 1px solid var(--action-icon-border);
+		border-radius: 12px;
+		background: var(--action-icon-background);
+		box-shadow: 0 5px 12px rgba(58, 70, 61, 0.1);
+		color: var(--action-icon-foreground);
+		cursor: pointer;
+	}
+	.manual-trace-toggle.action-selected { border-color: var(--color-focus-ring); background: var(--action-icon-background-active); }
+	.manual-trace-toggle:disabled { cursor: not-allowed; border-color: var(--action-disabled-border); background: var(--action-disabled-background); color: var(--action-disabled-foreground); }
+	.manual-trace-toggle:focus-visible { outline: 3px solid var(--color-focus-ring); outline-offset: 2px; }
+	.manual-trace-icon, .manual-trace-icon :global(svg) { display: inline-flex; width: 24px; height: 24px; align-items: center; justify-content: center; }
+	.manual-trace-toggle { flex-direction: column; gap: 0; }
+	.manual-trace-cost { font-size: 9px; font-weight: 800; line-height: 1; }
 
 	.speech-type-icon {
 		display: inline-flex;
@@ -391,13 +440,19 @@
 		.composer-controls-left .profile-trigger { flex-basis: 44px; width: 44px; height: 44px; }
 		.composer-controls-left .chatter-toggle, .composer-controls-left .trace-unread-indicator { flex-basis: 44px; width: 44px; height: 44px; }
 		.composer-controls-left :global(.sound-control) { margin: 0; }
-		.composer-controls-right .speech-type-toggle, .composer-controls-right :global(.suggestions-anchor) { flex-basis: 44px; width: 44px; height: 44px; }
+		.composer-controls-right .speech-type-toggle, .composer-controls-right .manual-trace-toggle, .composer-controls-right :global(.suggestions-anchor) { flex-basis: 44px; width: 44px; height: 44px; }
+	}
+	@media (max-width: 360px) {
+		.action-dock-content { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 46px 46px; }
+		.composer-controls-left, .composer-controls-right { grid-column: 1; }
+		.composer-controls-left { grid-row: 2; justify-self: start; }
+		.composer-controls-right { grid-row: 3; justify-self: end; }
 	}
 	@media (min-width: 701px) {
 		.action-dock-content { --action-dock-desktop-control-size: 54px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: minmax(var(--action-dock-desktop-control-size), 1fr); }
 		.composer-controls-left, .composer-editor-slot, .composer-controls-right { grid-row: 1; }
 		.composer-controls-left, .composer-controls-right { align-self: center; }
-		.profile-trigger, .chatter-toggle, .trace-unread-indicator, .speech-type-toggle, .composer-controls-right :global(.suggestions-anchor) { width: var(--action-dock-desktop-control-size); height: var(--action-dock-desktop-control-size); }
-		.profile-trigger, .chatter-toggle, .trace-unread-indicator, .speech-type-toggle { flex-basis: var(--action-dock-desktop-control-size); }
+		.profile-trigger, .chatter-toggle, .trace-unread-indicator, .speech-type-toggle, .manual-trace-toggle, .composer-controls-right :global(.suggestions-anchor) { width: var(--action-dock-desktop-control-size); height: var(--action-dock-desktop-control-size); }
+		.profile-trigger, .chatter-toggle, .trace-unread-indicator, .speech-type-toggle, .manual-trace-toggle { flex-basis: var(--action-dock-desktop-control-size); }
 	}
 </style>

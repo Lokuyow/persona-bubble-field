@@ -2,7 +2,7 @@ import { HDKey } from '@scure/bip32';
 import { entropyToMnemonic, mnemonicToSeedSync } from '@scure/bip39';
 import { wordlist as englishWordlist } from '@scure/bip39/wordlists/english.js';
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
-import { getPublicKey, type VerifiedEvent } from 'nostr-tools/pure';
+import { getPublicKey, verifyEvent, type VerifiedEvent } from 'nostr-tools/pure';
 import { nip19 } from 'nostr-tools';
 import { CHARACTER_CATALOG } from './character';
 import { requireCharacterFromPubkey, resolveCharacterFromPubkey } from './characterAssignment';
@@ -141,6 +141,16 @@ export type WorldWriteJournalSnapshot = Readonly<{
 	exitSecond: number | null;
 	confirmedPosition: VerifiedEvent | null;
 }>;
+export type ManualTraceOutbox = Readonly<{
+	runNumber: number;
+	event: VerifiedEvent;
+	status: 'dispatching' | 'unknown' | 'confirmed' | 'terminal';
+	attemptId: string | null;
+	leaseUntilMs: number;
+}>;
+export type ManualTraceOutboxResult =
+	| Readonly<{ kind: 'reserved' | 'existing'; outbox: ManualTraceOutbox; points: number; revision: number }>
+	| Readonly<{ kind: 'pending' | 'stale' | 'insufficient-points' | 'corrupt' }>;
 export type WorldWriteReservation = Readonly<{ token: number; createdAt: number; slot: 0 | 1 | null }>;
 export type WorldWriteReservationResult =
 	| Readonly<{ kind: 'reserved'; reservation: WorldWriteReservation }>
@@ -191,7 +201,7 @@ export type DeathTransitionResult =
 
 export type ClearResult =
 	| Readonly<{ kind: 'cleared'; exit?: CommittedTerminalExit }>
-	| Readonly<{ kind: 'blocked'; reason: 'points' | 'expired' | 'pending-realtime' | 'tag-game' }>
+	| Readonly<{ kind: 'blocked'; reason: 'points' | 'expired' | 'pending-realtime' | 'tag-game' | 'manual-trace-sending' }>
 	| Readonly<{ kind: 'superseded'; lifecycle: LoadLifecycleResult }>
 	| CorruptLifecycleState;
 
@@ -720,6 +730,7 @@ type WorldWriteJournalRecord = Readonly<{
 	nextToken: number;
 	confirmedPosition: VerifiedEvent | null;
 	messageDedupeIds?: readonly string[];
+	pendingManualTrace?: ManualTraceOutbox;
 }>;
 
 function journalKey(channelId: string, pubkey: string): string {
@@ -736,7 +747,19 @@ function validJournal(value: unknown, channelId: string, pubkey: string): value 
 		(record.consumedSlots === 0 || record.consumedSlots === 1 || record.consumedSlots === 2) &&
 		Number.isSafeInteger(record.nextToken) && (record.nextToken as number) >= 0 &&
 		(record.messageDedupeIds === undefined || Array.isArray(record.messageDedupeIds) && record.messageDedupeIds.every((id) => typeof id === 'string' && /^[0-9a-f]{64}$/.test(id)) && new Set(record.messageDedupeIds).size === record.messageDedupeIds.length) &&
-		(record.confirmedPosition === null || typeof record.confirmedPosition === 'object' && !Array.isArray(record.confirmedPosition));
+		(record.confirmedPosition === null || typeof record.confirmedPosition === 'object' && !Array.isArray(record.confirmedPosition)) &&
+		(record.pendingManualTrace === undefined || validManualTraceOutbox(record.pendingManualTrace, pubkey));
+}
+
+function validManualTraceOutbox(value: unknown, pubkey: string): value is ManualTraceOutbox {
+	if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+	const outbox = value as Record<string, unknown>;
+	return Number.isSafeInteger(outbox.runNumber) && (outbox.runNumber as number) > 0 &&
+		(outbox.status === 'dispatching' || outbox.status === 'unknown' || outbox.status === 'confirmed' || outbox.status === 'terminal') &&
+		(outbox.attemptId === null || typeof outbox.attemptId === 'string' && outbox.attemptId.length > 0 && outbox.attemptId.length <= 100) &&
+		Number.isSafeInteger(outbox.leaseUntilMs) && (outbox.leaseUntilMs as number) >= 0 &&
+		typeof outbox.event === 'object' && outbox.event !== null && !Array.isArray(outbox.event) &&
+		(outbox.event as VerifiedEvent).pubkey === pubkey && verifyEvent(outbox.event as VerifiedEvent);
 }
 
 function emptyJournal(scope: WorldWriteJournalScope): WorldWriteJournalRecord {
@@ -783,7 +806,7 @@ export async function reserveWorldPositive(input: Readonly<{
 		const tx = db.transaction([PLAYER_LIFECYCLE_STORE_NAME, WORLD_WRITE_JOURNAL_STORE_NAME], 'readwrite');
 		try {
 			const player = await tx.objectStore(PLAYER_LIFECYCLE_STORE_NAME).get(PLAYER_STATE);
-			if (!journalScopeIsActive(player, scope)) { await tx.done; return { kind: 'stale' } as const; }
+			if (!journalScopeIsActive(player, scope) || player.mode.kind !== 'running') { await tx.done; return { kind: 'stale' } as const; }
 			const store = tx.objectStore(WORLD_WRITE_JOURNAL_STORE_NAME);
 			const key = journalKey(scope.channelId, scope.identity.pubkey);
 			const raw = await store.get(key);
@@ -846,6 +869,88 @@ export async function confirmWorldPosition(scope: WorldWriteJournalScope, reserv
 			if (!previous || event.created_at > previous.created_at || event.created_at === previous.created_at && nextSlot >= previousSlot) {
 				await store.put({ ...raw, confirmedPosition: event }, key);
 			}
+			await tx.done;
+			return true;
+		} catch (error) { try { tx.abort(); } catch { /* already aborted */ } await tx.done.catch(() => {}); throw error; }
+	});
+}
+
+const MANUAL_TRACE_SEND_LEASE_MS = 20_000;
+
+/**
+ * Returns the current Run's unresolved signed event, or atomically claims it for
+ * one bounded send attempt. An expired lease is recoverable after a tab crash.
+ */
+export async function claimManualTraceOutbox(scope: WorldWriteJournalScope, attemptId: string, nowMs = Date.now()): Promise<ManualTraceOutboxResult | Readonly<{ kind: 'empty' }>> {
+	if (!attemptId || attemptId.length > 100 || !Number.isSafeInteger(nowMs) || nowMs < 0) return { kind: 'corrupt' };
+	return withLifecycle(async (db) => {
+		const tx = db.transaction([PLAYER_LIFECYCLE_STORE_NAME, WORLD_WRITE_JOURNAL_STORE_NAME], 'readwrite');
+		try {
+			const player = await tx.objectStore(PLAYER_LIFECYCLE_STORE_NAME).get(PLAYER_STATE);
+			if (!journalScopeIsActive(player, scope) || player.mode.kind !== 'running') { await tx.done; return { kind: 'stale' } as const; }
+			const store = tx.objectStore(WORLD_WRITE_JOURNAL_STORE_NAME);
+			const key = journalKey(scope.channelId, scope.identity.pubkey);
+			const raw = await store.get(key);
+			if (raw === undefined) { await tx.done; return { kind: 'empty' } as const; }
+			if (!validJournal(raw, scope.channelId, scope.identity.pubkey)) { await tx.done; return { kind: 'corrupt' } as const; }
+			const outbox = raw.pendingManualTrace;
+			if (!outbox || outbox.runNumber !== scope.runNumber || outbox.status === 'confirmed' || outbox.status === 'terminal') { await tx.done; return { kind: 'empty' } as const; }
+			if (outbox.status === 'dispatching' && outbox.leaseUntilMs > nowMs && outbox.attemptId !== attemptId) { await tx.done; return { kind: 'pending' } as const; }
+			const claimed: ManualTraceOutbox = { ...outbox, status: 'dispatching', attemptId, leaseUntilMs: nowMs + MANUAL_TRACE_SEND_LEASE_MS };
+			await store.put({ ...raw, pendingManualTrace: claimed }, key);
+			await tx.done;
+			return { kind: 'existing', outbox: claimed, points: player.mode.activeRun.gameState.points, revision: player.mode.activeRun.revision } as const;
+		} catch (error) { try { tx.abort(); } catch { /* already aborted */ } await tx.done.catch(() => {}); throw error; }
+	});
+}
+
+/** Reserves 100pt and persists the signed event before any Relay send can start. */
+export async function reserveManualTraceOutbox(scope: WorldWriteJournalScope, prepareEvent: () => VerifiedEvent, attemptId: string, nowMs = Date.now()): Promise<ManualTraceOutboxResult> {
+	if (!attemptId || attemptId.length > 100 || !Number.isSafeInteger(nowMs) || nowMs < 0) return { kind: 'corrupt' };
+	return withLifecycle(async (db) => {
+		const tx = db.transaction([PLAYER_LIFECYCLE_STORE_NAME, WORLD_WRITE_JOURNAL_STORE_NAME], 'readwrite');
+		try {
+			const playerStore = tx.objectStore(PLAYER_LIFECYCLE_STORE_NAME);
+			const player = await playerStore.get(PLAYER_STATE);
+			if (!journalScopeIsActive(player, scope) || player.mode.kind !== 'running') { await tx.done; return { kind: 'stale' } as const; }
+			const store = tx.objectStore(WORLD_WRITE_JOURNAL_STORE_NAME);
+			const key = journalKey(scope.channelId, scope.identity.pubkey);
+			const raw = await store.get(key);
+			if (raw !== undefined && !validJournal(raw, scope.channelId, scope.identity.pubkey)) { await tx.done; return { kind: 'corrupt' } as const; }
+			const record = (raw ?? emptyJournal(scope)) as WorldWriteJournalRecord;
+			const pending = record.runNumber === scope.runNumber ? record.pendingManualTrace : undefined;
+			if (pending && pending.runNumber === scope.runNumber && pending.status !== 'confirmed' && pending.status !== 'terminal') {
+				// User initiated submissions never claim or resend an older operation.
+				// The recovery owner claims it separately, preserving its signed event ID.
+				await tx.done; return { kind: 'pending' } as const;
+			}
+			const activeRun = player.mode.activeRun;
+			if (activeRun.gameState.points < 100) { await tx.done; return { kind: 'insufficient-points' } as const; }
+			const event = prepareEvent();
+			if (event.pubkey !== scope.identity.pubkey || !verifyEvent(event)) { await tx.done; return { kind: 'corrupt' } as const; }
+			const outbox: ManualTraceOutbox = { runNumber: scope.runNumber, event, status: 'dispatching', attemptId, leaseUntilMs: nowMs + MANUAL_TRACE_SEND_LEASE_MS };
+			const gameState = { ...activeRun.gameState, points: activeRun.gameState.points - 100 };
+			const nextRun = { ...activeRun, revision: activeRun.revision + 1, gameState };
+			await playerStore.put({ ...player, mode: { kind: 'running', activeRun: nextRun } }, PLAYER_STATE);
+			await store.put({ ...record, runNumber: scope.runNumber, pendingManualTrace: outbox }, key);
+			await tx.done;
+			return { kind: 'reserved', outbox, points: gameState.points, revision: nextRun.revision } as const;
+		} catch (error) { try { tx.abort(); } catch { /* already aborted */ } await tx.done.catch(() => {}); throw error; }
+	});
+}
+
+export async function settleManualTraceOutbox(scope: WorldWriteJournalScope, eventId: string, attemptId: string, outcome: 'unknown' | 'confirmed'): Promise<boolean> {
+	return withLifecycle(async (db) => {
+		const tx = db.transaction([PLAYER_LIFECYCLE_STORE_NAME, WORLD_WRITE_JOURNAL_STORE_NAME], 'readwrite');
+		try {
+			const player = await tx.objectStore(PLAYER_LIFECYCLE_STORE_NAME).get(PLAYER_STATE);
+			const store = tx.objectStore(WORLD_WRITE_JOURNAL_STORE_NAME);
+			const key = journalKey(scope.channelId, scope.identity.pubkey);
+			const raw = await store.get(key);
+			if (!journalScopeIsActive(player, scope) || !validJournal(raw, scope.channelId, scope.identity.pubkey)) { await tx.done; return false; }
+			const pending = raw.pendingManualTrace;
+			if (!pending || pending.runNumber !== scope.runNumber || pending.event.id !== eventId || pending.attemptId !== attemptId || pending.status !== 'dispatching') { await tx.done; return false; }
+			await store.put({ ...raw, pendingManualTrace: { ...pending, status: outcome, attemptId: null, leaseUntilMs: 0 } }, key);
 			await tx.done;
 			return true;
 		} catch (error) { try { tx.abort(); } catch { /* already aborted */ } await tx.done.catch(() => {}); throw error; }
@@ -1320,10 +1425,11 @@ async function prepareClearSelection(entropy: Uint8Array, player: PlayerLifecycl
 }
 
 async function commitTerminalFence(
-	store: { get(key: string): Promise<unknown>; put(value: unknown, key: string): Promise<unknown> },
+	store: { get(key: string): Promise<unknown>; getAllKeys(): Promise<IDBValidKey[]>; put(value: unknown, key: string): Promise<unknown> },
 	activeRun: ActiveRun,
 	request: TerminalExitJournalRequest | undefined
 ): Promise<CommittedTerminalExit | undefined> {
+	await retireRunManualTraceOutboxes(store, activeRun);
 	if (!request) return undefined;
 	if (!Number.isSafeInteger(request.lastPositiveCreatedAt) || request.lastPositiveCreatedAt < 0) throw new Error('Invalid terminal exit timestamp.');
 	const scope = { identity: activeRun.identity, runNumber: activeRun.runNumber, channelId: request.channelId };
@@ -1335,6 +1441,41 @@ async function commitTerminalFence(
 		record.lastPositiveSecond ?? 0, record.exitSecond ?? 0);
 	await store.put({ ...record, runNumber: activeRun.runNumber, exitSecond: createdAt }, key);
 	return { createdAt, position: { ...request.position } };
+}
+
+async function retireRunManualTraceOutboxes(
+	store: { get(key: string): Promise<unknown>; getAllKeys(): Promise<IDBValidKey[]>; put(value: unknown, key: string): Promise<unknown> },
+	activeRun: ActiveRun
+): Promise<void> {
+	for (const candidate of await store.getAllKeys()) {
+		if (typeof candidate !== 'string') continue;
+		const raw = await store.get(candidate);
+		if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) continue;
+		const record = raw as Record<string, unknown>;
+		if (record.pubkey !== activeRun.identity.pubkey || !Number.isSafeInteger(record.runNumber) ||
+			typeof record.channelId !== 'string' || !validJournal(raw, record.channelId, activeRun.identity.pubkey)) continue;
+		const pending = record.pendingManualTrace as ManualTraceOutbox | undefined;
+		if (!pending || pending.runNumber !== activeRun.runNumber || pending.status === 'terminal' || pending.status === 'confirmed') continue;
+		await store.put({ ...record, pendingManualTrace: { ...pending, status: 'terminal', attemptId: null, leaseUntilMs: 0 } }, candidate);
+	}
+}
+
+async function hasLiveManualTraceAttempt(
+	store: { get(key: string): Promise<unknown>; getAllKeys(): Promise<IDBValidKey[]> },
+	activeRun: ActiveRun,
+	nowMs: number
+): Promise<boolean> {
+	for (const candidate of await store.getAllKeys()) {
+		if (typeof candidate !== 'string') continue;
+		const raw = await store.get(candidate);
+		if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) continue;
+		const record = raw as Record<string, unknown>;
+		if (record.pubkey !== activeRun.identity.pubkey || typeof record.channelId !== 'string' ||
+			!validJournal(raw, record.channelId, activeRun.identity.pubkey)) continue;
+		const outbox = record.pendingManualTrace as ManualTraceOutbox | undefined;
+		if (outbox?.runNumber === activeRun.runNumber && outbox.status === 'dispatching' && outbox.leaseUntilMs > nowMs) return true;
+	}
+	return false;
 }
 
 export async function transitionRealtimeDeath(expected: PersonaSnapshot, outcome: RealtimeOutcome, terminalExit?: TerminalExitJournalRequest): Promise<RealtimeDeathResult> {
@@ -1421,6 +1562,7 @@ export async function clearPersona(expected: PersonaSnapshot, terminalExit?: Ter
 				if (current.tagGame?.lock) { await tx.done; return { kind: 'blocked', reason: 'tag-game' }; }
 				const currentRun = current.mode.activeRun;
 				const currentLedger = scopedRealtimeLedger(current, currentRun);
+				if (await hasLiveManualTraceAttempt(tx.objectStore(WORLD_WRITE_JOURNAL_STORE_NAME), currentRun, Date.now())) { await tx.done; return { kind: 'blocked', reason: 'manual-trace-sending' }; }
 				if (currentRun.gameState.points < NORMAL_CLEAR_THRESHOLD) { await tx.done; return { kind: 'blocked', reason: 'points' }; }
 				if (isPersonaExpired(currentRun.gameState, Date.now(), currentRun.rootBuild)) { await tx.done; return { kind: 'blocked', reason: 'expired' }; }
 				if (currentLedger.pendingInstanceIds.length > 0) { await tx.done; return { kind: 'blocked', reason: 'pending-realtime' }; }

@@ -331,7 +331,7 @@ function classifyPrimaryFilter(
 			!hasExactly(filter.kinds, [CHANNEL_MESSAGE_KIND]) ||
 			!hasExactly(filter['#e'], [channelId]) ||
 			!hasExactly(filter['#L'], [PROTOTYPE_NAMESPACE]) ||
-			!hasExactly(filter['#l'], kind === 'recent' ? ['chat', 'trace'] : ['chat'])) return false;
+			!hasExactly(filter['#l'], kind === 'recent' ? ['chat', 'trace', 'trace:manual', 'trace:death'] : ['chat'])) return false;
 		if (kind === 'recent') return Number.isSafeInteger(filter.since) && (filter.since as number) >= 0;
 		return filter.limit === RECENT_MESSAGE_TIMELINE_LIMIT;
 	};
@@ -1641,10 +1641,12 @@ export function createNostrRelayTransport(
 			const rawEvents = uniqueEvents
 				.sort((first, second) => second.created_at - first.created_at || compareEventIds(first, second));
 			const normalCandidates = rawEvents.filter((event) => parseWorldMessage(event, world.channelId));
-			const traceCandidates = rawEvents.filter((event) => parseTraceEvent(event, world.channelId));
+			const manualTraceCandidates = rawEvents.filter((event) => parseTraceEvent(event, world.channelId)?.source === 'manual');
+			const deathTraceCandidates = rawEvents.filter((event) => parseTraceEvent(event, world.channelId)?.source === 'death');
 			const boundedEvents = [
 				...normalCandidates.slice(0, bootstrapLimit),
-				...traceCandidates.slice(0, bootstrapLimit)
+				...manualTraceCandidates.slice(0, bootstrapLimit),
+				...deathTraceCandidates.slice(0, bootstrapLimit)
 			].sort((first, second) => second.created_at - first.created_at || compareEventIds(first, second));
 			const result = { rawEvents: boundedEvents, relays: diagnostics };
 			traceRootBootstrapComplete = true;

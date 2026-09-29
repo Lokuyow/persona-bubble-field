@@ -47,7 +47,7 @@ function parseCandidate(event: Event, channelId: string, field: TraceRootField):
 		const message = parseWorldMessage(event, channelId);
 		const trace = parseTraceEvent(event, channelId);
 		const root = message ?? trace;
-		if (!root || !isWithinField(root, field) || root.source !== 'death' && !winsTraceRootLottery(root.id)) return null;
+		if (!root || !isWithinField(root, field) || (root.source !== 'death' && root.source !== 'manual' && !winsTraceRootLottery(root.id))) return null;
 		return { rawEvent: event, root };
 	} catch {
 		// IndexedDB is untrusted and malformed values must never become effective roots.
@@ -69,17 +69,51 @@ export function capTraceRootCandidates(
 		if (!unique.has(candidate.root.id)) unique.set(candidate.root.id, candidate);
 	}
 
-	const perCell = new Map<string, number>();
-	const perCellSurvivors: TraceRootCandidate[] = [];
+	const perCell = new Map<string, TraceRootCandidate[]>();
 	for (const candidate of unique.values()) {
 		const cell = `${candidate.root.position.x}:${candidate.root.position.y}`;
-		const count = perCell.get(cell) ?? 0;
-		if (count >= 1) continue;
-		perCell.set(cell, count + 1);
-		perCellSurvivors.push(candidate);
+		const cellCandidates = perCell.get(cell) ?? [];
+		cellCandidates.push(candidate);
+		perCell.set(cell, cellCandidates);
 	}
 
-	return perCellSurvivors.slice(0, Math.floor(field.columns * field.rows / 10));
+	const perCellSurvivors = [...perCell.values()].map((cellCandidates) => {
+		const explicit = cellCandidates.filter(({ root }) => root.source === 'manual' || root.source === 'death');
+		return (explicit.length ? explicit : cellCandidates).sort(compareRoots)[0];
+	});
+	const cellCount = BigInt(field.columns) * BigInt(field.rows);
+	const quota = Number(cellCount / 10n);
+	const totalLimit = Number(cellCount * 3n / 10n);
+	const selected = new Map<string, TraceRootCandidate>();
+	for (const source of ['message', 'manual', 'death'] as const) {
+		const reserved = perCellSurvivors.filter(({ root }) => (root.source ?? 'message') === source).sort(compareRoots).slice(0, quota);
+		for (const candidate of reserved) selected.set(candidate.root.id, candidate);
+	}
+	for (const candidate of perCellSurvivors.sort(compareRoots)) {
+		if (selected.size >= totalLimit) break;
+		selected.set(candidate.root.id, candidate);
+	}
+	return [...selected.values()].sort(compareRoots);
+}
+
+/** Keeps only the newest candidate for each source and logical cell. */
+export function selectTraceRootCandidatePool(
+	rawEvents: readonly Event[],
+	channelId: string,
+	field: TraceRootField
+): readonly TraceRootCandidate[] {
+	assertTraceRootChannelId(channelId);
+	assertTraceRootField(field);
+	const bySourceAndCell = new Map<string, TraceRootCandidate>();
+	for (const event of rawEvents) {
+		const candidate = parseCandidate(event, channelId, field);
+		if (!candidate) continue;
+		const source = candidate.root.source ?? 'message';
+		const key = `${source}:${candidate.root.position.x}:${candidate.root.position.y}`;
+		const previous = bySourceAndCell.get(key);
+		if (!previous || compareRoots(candidate, previous) < 0) bySourceAndCell.set(key, candidate);
+	}
+	return [...bySourceAndCell.values()].sort(compareRoots);
 }
 
 /**
@@ -93,13 +127,7 @@ export function selectTraceRootCandidates(
 ): readonly TraceRootCandidate[] {
 	assertTraceRootChannelId(channelId);
 	assertTraceRootField(field);
-	return capTraceRootCandidates(
-		rawEvents.flatMap((event) => {
-			const candidate = parseCandidate(event, channelId, field);
-			return candidate ? [candidate] : [];
-		}),
-		field
-	);
+	return capTraceRootCandidates(selectTraceRootCandidatePool(rawEvents, channelId, field), field);
 }
 
 /** Public parsed snapshot for callers that do not need raw persistence records. */

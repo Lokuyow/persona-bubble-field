@@ -4,6 +4,7 @@ import { openDB, type IDBPDatabase } from 'idb';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	buildWorldMessageTemplate,
+	buildManualTraceEventTemplate,
 	finalizeWorldEvent,
 	type ChannelReference
 } from './nostrProtocol';
@@ -49,6 +50,10 @@ function lotteryRoot(options: Parameters<typeof root>[0] = {}, wins = true) {
 		if ((BigInt(`0x${event.id}`) % 5n === 0n) === wins) return event;
 	}
 	throw new Error('Could not make a deterministic lottery fixture.');
+}
+
+function manualRoot(createdAt: number, position: { x: number; y: number }, nonce: string) {
+	return finalizeWorldEvent(buildManualTraceEventTemplate({ channel: channel(), content: nonce, createdAt, position }), SECRET_KEY);
 }
 
 async function database(): Promise<IDBPDatabase<TraceDatabase>> {
@@ -175,7 +180,27 @@ describe('trace root cache reconciliation', () => {
 		const field = { columns: 20, rows: 1 };
 		await reconcileTraceRootCache({ channelId: CHANNEL_ID, field, rawEvents: roots.slice(0, 2) });
 		expect((await reconcileTraceRootCache({ channelId: CHANNEL_ID, field, rawEvents: [roots[2]] }))
-			.map((root) => root.id)).toEqual([roots[2].id, roots[1].id]);
+			.map((root) => root.id)).toEqual([roots[2].id, roots[1].id, roots[0].id]);
+	});
+
+	it('retains non-effective candidates so a reserved quota can be reclaimed from borrowed slots', async () => {
+		const field = { columns: 10, rows: 10 };
+		const normal = Array.from({ length: 35 }, (_, index) => lotteryRoot({
+			createdAt: index + 1, position: { x: index % 10, y: Math.floor(index / 10) }, nonce: `loan-normal-${index}`
+		}, true));
+		const firstManual = Array.from({ length: 5 }, (_, index) => manualRoot(index + 100, { x: index + 5, y: 4 }, `loan-manual-first-${index}`));
+		const first = await reconcileTraceRootCache({ channelId: CHANNEL_ID, field, rawEvents: [...normal, ...firstManual] });
+		expect(first).toHaveLength(30);
+		expect(first.filter((candidate) => candidate.source === 'manual')).toHaveLength(5);
+		const savedPool = await records();
+		expect(savedPool).toHaveLength(40);
+		expect(savedPool.filter((record) => (record as { effective?: boolean }).effective === false).length).toBe(10);
+
+		const additionalManual = Array.from({ length: 5 }, (_, index) => manualRoot(index + 200, { x: index, y: 4 }, `loan-manual-return-${index}`));
+		const second = await reconcileTraceRootCache({ channelId: CHANNEL_ID, field, rawEvents: additionalManual });
+		expect(second).toHaveLength(30);
+		expect(second.filter((candidate) => candidate.source === 'manual')).toHaveLength(10);
+		expect(second.filter((candidate) => !candidate.source)).toHaveLength(20);
 	});
 
 	it('does not modify another channel partition', async () => {
