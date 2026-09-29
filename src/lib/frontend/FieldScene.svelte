@@ -173,7 +173,7 @@
 						class:trace-marker-read={cell.read}
 						class:trace-marker-unread-reply={cell.unreadReply}
 						style={`left: ${world.x}px; top: ${world.y}px; --trace-icon-image: url("${asset(cell.kind === 'death' ? TRACE_DEATH_ICON_ASSET : TRACE_ICON_ASSET)}");`}
-					>{#if cell.kind === 'random'}<History class="trace-marker-history-icon" aria-hidden="true" />{/if}</span>
+					>{#if cell.kind === 'random'}<History class="trace-marker-history-icon" style="display: block; width: 100%; height: 100%; overflow: visible;" aria-hidden="true" />{/if}</span>
 				{/if}
 				{#if cell.inInvestigationRange}
 					<span
@@ -424,7 +424,6 @@
 	.trace-marker-random:not(.trace-marker-unread-reply) { opacity: 0.62; }
 	.trace-marker-random.trace-marker-read:not(.trace-marker-unread-reply) { opacity: 0.56; }
 	.trace-marker-random { background: none; mask-image: none; }
-	.trace-marker-history-icon { display: block; width: 100%; height: 100%; overflow: visible; }
 
 	.trace-marker-unread-reply {
 		color: #cf06fe;

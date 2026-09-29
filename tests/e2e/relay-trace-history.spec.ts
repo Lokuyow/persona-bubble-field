@@ -297,6 +297,44 @@ test.describe('Relay startup', () => {
 		await expect(replyUnreadMarker).toHaveAttribute('data-trace-root-unread-reply', 'true');
 		await expect(replyUnreadMarker).toHaveCSS('color', 'rgb(207, 6, 254)');
 		await expect(replyUnreadMarker).toHaveCSS('opacity', '0.72');
+		for (const viewport of [{ width: 1100, cellSize: 76 }, { width: 390, cellSize: 50 }]) {
+			await page.setViewportSize({ width: viewport.width, height: 850 });
+			if (viewport.width !== 1100) {
+				await page.reload();
+				await expect(page.locator('.action-dock')).toBeVisible();
+				await page.evaluate(() => (window as unknown as { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+				await expect(page.locator('[data-trace-marker-position="4,2"]')).toBeVisible();
+			}
+			const geometry = await page.evaluate(() => {
+				const marker = document.querySelector<HTMLElement>('[data-trace-marker-position="4,2"]')!;
+				const icon = marker.querySelector<SVGElement>('.trace-marker-history-icon')!;
+				const scene = document.querySelector<HTMLElement>('.field-scene')!;
+				const rect = (element: Element) => {
+					const { x, y, width, height } = element.getBoundingClientRect();
+					return { x, y, width, height, centerX: x + width / 2, centerY: y + height / 2 };
+				};
+				const style = getComputedStyle(icon);
+				const cellSize = Number.parseFloat(getComputedStyle(scene).getPropertyValue('--cell-size'));
+				const sceneRect = scene.getBoundingClientRect();
+				const cellCenter = { x: sceneRect.left + 4.5 * cellSize, y: sceneRect.top + 2.5 * cellSize };
+				return { cellSize, cellCenter, marker: rect(marker), icon: rect(icon), iconStyle: { width: style.width, height: style.height, display: style.display } };
+			});
+			expect(geometry.cellSize).toBe(viewport.cellSize);
+			expect(geometry.marker.centerX).toBeCloseTo(geometry.cellCenter.x, 1);
+			expect(geometry.marker.centerY).toBeCloseTo(geometry.cellCenter.y, 1);
+			expect(geometry.icon.centerX).toBeCloseTo(geometry.cellCenter.x, 1);
+			expect(geometry.icon.centerY).toBeCloseTo(geometry.cellCenter.y, 1);
+			expect(geometry.icon.width).toBeCloseTo(geometry.marker.width, 1);
+			expect(geometry.icon.height).toBeCloseTo(geometry.marker.height, 1);
+			expect(Number.parseFloat(geometry.iconStyle.width)).toBeCloseTo(geometry.marker.width, 1);
+			expect(Number.parseFloat(geometry.iconStyle.height)).toBeCloseTo(geometry.marker.height, 1);
+			expect(geometry.iconStyle.display).toBe('block');
+		}
+		await page.setViewportSize({ width: 1100, height: 850 });
+		await page.reload();
+		await expect(page.locator('.action-dock')).toBeVisible();
+		await page.evaluate(() => (window as unknown as { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		await expect(page.locator('[data-trace-marker-position="4,2"]')).toBeVisible();
 		const manualMarker = page.locator('[data-trace-marker-position="7,2"]');
 		await expect(manualMarker).toHaveAttribute('data-trace-marker-kind', 'manual');
 		await expect(manualMarker).toHaveCSS('mask-image', /trace-icon\.svg/);
