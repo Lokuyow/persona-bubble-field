@@ -718,6 +718,7 @@ test.describe('Relay startup', () => {
 		expect(publishedNested.tags).toEqual(expect.arrayContaining([
 			['E', deathRoot.id, '', parsedDeath.pubkey], ['e', direct.id, '', direct.pubkey], ['k', '1111']
 		]));
+		await expect(page.getByLabel('Reply preview', { exact: true })).toHaveCount(0);
 
 		await page.locator(`[data-trace-root-id="${deathRoot.id}"]`).click();
 		await expect(page.getByLabel('Reply preview', { exact: true })).toHaveAttribute('data-reply-id', deathRoot.id);
