@@ -288,7 +288,7 @@ test.describe('Relay startup', () => {
 		}
 		await page.setViewportSize({ width: 1280, height: 800 });
 		const beforeMendingReward = await publishedWorldStateCount();
-		const assertCollectionLayout = async (viewport: { width: number; height: number }, expectedPoints: string, waitForDismissal = true) => {
+		const assertCollectionLayout = async (viewport: { width: number; height: number }, expectedPoints: number) => {
 			await page.setViewportSize(viewport);
 			const dialog = page.getByRole('dialog');
 			const collect = dialog.getByRole('button', { name: '成果を受け取る' });
@@ -311,41 +311,23 @@ test.describe('Relay startup', () => {
 			await expect.poll(async () => {
 				const current = await readRelayGameState(page);
 				return current.points;
-			}).toBe(expectedPoints === '+1 pt' ? 1 : 4);
-			const pointNotice = dialog.locator('[data-mending-icon="coins"] .result-card-feedback');
-			const lifespanNotice = dialog.locator('[data-mending-icon="heart"] .result-card-feedback');
-			await expect(pointNotice).toHaveText(expectedPoints);
-			await expect(lifespanNotice).toContainText(/^寿命 \+.+/);
-			await expect(pointNotice).toBeVisible();
-			await expect(lifespanNotice).toBeVisible();
+			}).toBe(expectedPoints);
+			const pointsCard = dialog.locator('.result-card[data-mending-icon="coins"]');
+			const lifespanCard = dialog.locator('.result-card[data-mending-icon="heart"]');
+			await expect(pointsCard.locator('.result-label')).toHaveText('未回収ポイント');
+			await expect(pointsCard.locator('.result-copy')).toBeVisible();
+			await expect(lifespanCard.locator('.result-label')).toHaveText('寿命延長');
+			await expect(lifespanCard.locator('.result-support')).toHaveText('作業中に反映');
+			await expect(pointsCard).toHaveClass(/success-flash/);
+			await expect(lifespanCard).toHaveClass(/success-flash/);
 			expect(await readLayout()).toEqual(before);
-			const noticeLayout = await dialog.evaluate((element) => {
-				const notices = [...element.querySelectorAll<HTMLElement>('.result-card-feedback')];
-				const cards = [...element.querySelectorAll<HTMLElement>('.result-card')];
-				const button = element.querySelector<HTMLElement>('.collect-button')!.getBoundingClientRect();
-				const overlaps = (a: DOMRect, b: DOMRect) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
-				return {
-					horizontalOverflow: element.scrollWidth > element.clientWidth || document.documentElement.scrollWidth > innerWidth,
-					noticesFitCards: notices.every((notice, index) => {
-						const noticeRect = notice.getBoundingClientRect();
-						const cardRect = cards[index].getBoundingClientRect();
-						return noticeRect.left >= cardRect.left && noticeRect.right <= cardRect.right && noticeRect.top >= cardRect.top && noticeRect.bottom <= cardRect.bottom;
-					}),
-					noticesAvoidButton: notices.every((notice) => !overlaps(notice.getBoundingClientRect(), button)),
-					pointerEvents: notices.map((notice) => getComputedStyle(notice).pointerEvents)
-				};
-			});
-			expect(noticeLayout).toEqual({ horizontalOverflow: false, noticesFitCards: true, noticesAvoidButton: true, pointerEvents: ['none', 'none'] });
+			const horizontalOverflow = await dialog.evaluate((element) => element.scrollWidth > element.clientWidth || document.documentElement.scrollWidth > innerWidth);
+			expect(horizontalOverflow).toBe(false);
 			await expect(collect).toBeDisabled();
 			await dialog.getByRole('button', { name: '詳細を見る' }).click({ trial: true });
-			if (waitForDismissal) {
-				await page.clock.runFor(500);
-				await expect(pointNotice).toHaveCount(0);
-				await expect(lifespanNotice).toHaveCount(0);
-				expect(await readLayout()).toEqual(before);
-			}
+			expect(await readLayout()).toEqual(before);
 		};
-		await assertCollectionLayout({ width: 1280, height: 800 }, '+1 pt', false);
+		await assertCollectionLayout({ width: 1280, height: 800 }, 1);
 		await expect.poll(async () => {
 			const partialState = await readRelayGameState(page);
 			return partialState.points === 1 && partialState.pointProgressTicks > 0 && partialState.pointProgressTicks < 60_000_000;
@@ -360,7 +342,6 @@ test.describe('Relay startup', () => {
 		await page.clock.runFor(300);
 		await expect(hudPoints).not.toHaveAttribute('data-value-change', /.+/);
 		await expect(hudPoints).toHaveCSS('color', 'rgb(255, 255, 255)');
-		await expect(page.locator('.result-card-feedback')).toHaveCount(0);
 
 		const secondAt = partialAt + 3 * 60 * 1000;
 		await page.clock.setSystemTime(secondAt);
@@ -368,7 +349,7 @@ test.describe('Relay startup', () => {
 		if (await page.getByRole('dialog').count() > 0) await page.getByRole('button', { name: '閉じる', exact: true }).click();
 		await terminal.click();
 		await expect(page.getByRole('dialog')).toContainText('+3 pt');
-		await assertCollectionLayout({ width: 390, height: 844 }, '+3 pt');
+		await assertCollectionLayout({ width: 390, height: 844 }, 4);
 		await page.setViewportSize(originalViewport);
 		await expect.poll(async () => (await readRelayGameState(page)).points).toBe(4);
 

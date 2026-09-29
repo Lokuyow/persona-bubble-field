@@ -103,31 +103,21 @@
 					<section class="result-list" aria-label="作業の成果">
 						<div class:success-flash={collectFeedback} class="result-card" data-mending-icon="coins">
 							<Coins aria-hidden="true" />
-							<div class:result-copy-hidden={collectFeedback} class="result-copy">
+							<div class="result-copy">
 								<span class="result-label">未回収ポイント</span>
 								<strong>+{unclaimedPoints} pt</strong>
 								<span class:next-point-hidden={nextPointSeconds === null} class="next-point" data-mending-icon="clock" aria-hidden={nextPointSeconds === null}>
 									{#if nextPointSeconds !== null}<Clock aria-hidden="true" />次の1ptまで {nextPointSeconds}秒{/if}
 								</span>
 							</div>
-							{#if collectFeedback}
-								{#key collectFeedback.id}
-									<div class="result-card-feedback" aria-live="polite" aria-atomic="true"><strong>+{collectFeedback.points} pt</strong></div>
-								{/key}
-							{/if}
 						</div>
 						<div class:success-flash={collectFeedback} class="result-card" data-mending-icon="heart">
 							<Heart aria-hidden="true" />
-							<div class:result-copy-hidden={collectFeedback} class="result-copy">
+							<div class="result-copy">
 								<span class="result-label">寿命延長</span>
 								<strong>+{lifespanDuration}</strong>
 								<span class="result-support">作業中に反映</span>
 							</div>
-							{#if collectFeedback}
-								{#key collectFeedback.id}
-									<div class="result-card-feedback" aria-live="polite" aria-atomic="true"><strong>寿命 +{formatElapsedDuration(collectFeedback.lifespanMs)}</strong></div>
-								{/key}
-							{/if}
 						</div>
 					</section>
 					<section class="status-group" aria-label="作業の蓄積状況">
@@ -176,9 +166,6 @@
 	:global(.mending-dialog-overlay) { position: fixed; inset: 0; z-index: 100; background: rgba(2, 8, 18, 0.72); backdrop-filter: blur(2px); }
 	:global(.mending-dialog-content) { position: fixed; top: 50%; left: 50%; z-index: 101; display: grid; gap: 0; width: min(720px, calc(100vw - 24px)); max-height: calc(100svh - 32px); overflow: auto; padding: 28px; border: 1px solid rgba(35, 220, 226, .78); border-radius: 18px; background: linear-gradient(180deg, rgba(4, 29, 43, .92), rgba(3, 20, 30, .94)); box-shadow: 0 0 0 1px rgba(53, 227, 232, .10) inset, 0 18px 60px rgba(0, 0, 0, .42), 0 0 30px rgba(26, 212, 220, .08); backdrop-filter: blur(14px); color: #ecfbff; transform: translate(-50%, -50%); }
 	.result-card { position: relative; }
-	.result-copy-hidden { visibility: hidden; }
-	.result-card-feedback { position: absolute; inset: 0; z-index: 1; display: grid; place-items: center; padding: 12px; pointer-events: none; color: #64f5f0; text-align: center; overflow-wrap: anywhere; }
-	.result-card-feedback strong { font-size: clamp(16px, 3.2vw, 20px); font-weight: 850; line-height: 1.2; }
 	.mending-startup-feedback { position: absolute; inset: 0; z-index: 2; display: grid; place-items: center; overflow: hidden; pointer-events: none; border: 1px solid rgba(53, 227, 232, .86); border-radius: inherit; color: #64f5f0; font-size: 16px; font-weight: 800; letter-spacing: .04em; text-shadow: 0 0 18px rgba(53, 227, 232, .7); animation: mending-startup-scan 3000ms ease-out both; box-shadow: 0 0 24px rgba(53, 227, 232, .18) inset; }
 	.mending-startup-feedback::after { position: absolute; inset: 0; content: ''; background: linear-gradient(180deg, transparent 0%, rgba(53, 227, 232, .22) 48%, transparent 54%); animation: mending-startup-sweep 1000ms ease-out both; }
 	.points-highlight { animation: mending-points-highlight 420ms ease-out; }
