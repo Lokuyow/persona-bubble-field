@@ -114,7 +114,6 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('.action-dock')).toBeVisible();
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
 		await expect(page.locator('[data-trace-marker-position="4,2"]')).toBeVisible();
-		await page.locator('.chatter-toggle').click();
 		await selectRelayTraceCell(page, '4,2');
 		await expect(page.locator(`[data-trace-root-id="${trace.root.id}"]`)).toContainText(trace.root.content);
 		const editor = page.getByRole('textbox', { name: '投稿エディター' });
