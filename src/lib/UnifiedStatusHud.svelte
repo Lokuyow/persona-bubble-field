@@ -20,10 +20,9 @@
 		tagGameProjection?: TagGameHudProjection | null;
 		animationScope: string;
 		onTagGamePulse?: (effect: 'benefit' | 'calamity') => void;
-		interactionRewardFeedback?: readonly Readonly<{ id: number; points: 5 | 10 }>[];
 	}>;
 
-	let { expiresAtMs, nowMs, maximumLifespanMs, points, hasJob, mendingProjection, tagGameProjection = null, animationScope, onTagGamePulse, interactionRewardFeedback = [] }: Props = $props();
+	let { expiresAtMs, nowMs, maximumLifespanMs, points, hasJob, mendingProjection, tagGameProjection = null, animationScope, onTagGamePulse }: Props = $props();
 	let currentPoints = $derived(tagGameProjection?.points ?? points);
 	let currentExpiresAtMs = $derived(tagGameProjection?.expiresAtMs ?? expiresAtMs);
 	let tagGameBenefitActive = $derived(tagGameProjection?.benefitRateActive ?? false);
@@ -125,11 +124,6 @@
 					onanimationstart={(event) => handleTagGamePulse(event, 'benefit')}
 					onanimationiteration={(event) => handleTagGamePulse(event, 'benefit')}>
 					{formattedPoints}<span>pt</span>
-					<span class="interaction-reward-feedback-stack" aria-hidden="true">
-						{#each interactionRewardFeedback as reward (reward.id)}
-							<span class="interaction-reward-feedback" data-interaction-reward-feedback data-reward-id={reward.id}>+{reward.points}pt</span>
-						{/each}
-					</span>
 				</strong>
 			</div>
 			<Meter.Root class="status-meter points-meter" value={pointValue} min={0} max={STATUS_HUD_POINTS_MAX} aria-label="ポイント" aria-valuetext={`${formattedPoints}pt、${STATUS_HUD_POINTS_MAX.toLocaleString('en-US')}ptまで`} data-points-meter data-meter-value={pointValue}>
@@ -171,8 +165,6 @@
 		.lifespan-value, .points-value { position: relative; font-size: 1.05em; font-weight: 780; font-variant-numeric: tabular-nums; --normal-value-color: rgba(239, 241, 255, .94); --change-color: #57e68a; color: var(--normal-value-color); }
 		.points-value { --normal-value-color: #fff; }
 		.points-value span { margin-left: 3px; font-size: .9em; font-weight: 700; }
-		.interaction-reward-feedback-stack { position: absolute; right: 0; bottom: calc(100% + 3px); z-index: 2; display: grid; justify-items: end; gap: 1px; width: max-content; pointer-events: none; }
-		.interaction-reward-feedback { display: block; margin: 0 !important; color: #8cffb4; font-size: 12px !important; font-weight: 800 !important; line-height: 1.1; text-shadow: 0 1px 5px rgba(0, 0, 0, .9), 0 0 8px rgba(87, 230, 138, .65); white-space: nowrap; animation: interaction-reward-float 1.05s ease-out both; }
 		.value-changed { color: var(--change-color); }
 		.value-increase { --change-color: #57e68a; }
 		.value-decrease { --change-color: #ff6875; }
@@ -208,16 +200,8 @@
 		0%, 29.99% { color: var(--tag-game-color); }
 		30%, 100% { color: var(--normal-value-color); }
 	}
-	@keyframes interaction-reward-float {
-		0% { opacity: 0; transform: translateY(5px); }
-		18% { opacity: 1; }
-		75% { opacity: 1; }
-		100% { opacity: 0; transform: translateY(-13px); }
-	}
 	@media (prefers-reduced-motion: reduce) {
 		.unified-status-hud .meter-fill { transition: none; }
 		.unified-status-hud .tag-game-benefit, .unified-status-hud .tag-game-calamity { animation: none; color: var(--tag-game-color); }
-		.unified-status-hud .interaction-reward-feedback { animation: interaction-reward-fade .7s linear both; }
 	}
-	@keyframes interaction-reward-fade { 0%, 15% { opacity: 0; } 35%, 75% { opacity: 1; } 100% { opacity: 0; } }
 </style>

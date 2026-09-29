@@ -661,6 +661,25 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 				screen: fieldLocalToViewport(worldToScreen(world, camera), fieldAreaBounds)
 			};
 		}));
+	let interactionRewardCuePlacements = $derived.by(() => {
+		const self = participantViews.find((participant) => participant.id === selfProjectionId);
+		if (!initialFieldGeometryReady || !self) return [];
+		const halfCell = cellSize / 2;
+		const fieldRight = fieldAreaBounds.x + fieldAreaBounds.width;
+		const fieldBottom = fieldAreaBounds.y + fieldAreaBounds.height;
+		const selfVisible = self.screen.x + halfCell > fieldAreaBounds.x && self.screen.x - halfCell < fieldRight &&
+			self.screen.y + halfCell > actualFieldTop && self.screen.y - halfCell < fieldBottom;
+		if (!selfVisible) return [];
+		const sidePadding = 48;
+		const minX = Math.min(sidePadding, viewportSize.width / 2);
+		const maxX = Math.max(minX, viewportSize.width - sidePadding);
+		const left = Math.min(maxX, Math.max(minX, self.screen.x));
+		return interactionRewardFeedback.map((reward, index) => {
+			const desiredBottom = self.screen.y - halfCell - 5 - index * 20;
+			const bottom = Math.min(Math.max(24 + index * 20, desiredBottom), viewportSize.height - 8);
+			return { ...reward, left, bottom };
+		});
+	});
 
 	let participantById = $derived(new Map(participantViews.map((participant) => [participant.id, participant])));
 	let selfPresence = $derived(presenceState.participants.find((participant) => participant.id === selfProjectionId) ?? null);
@@ -4993,7 +5012,6 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 						{mendingProjection}
 						tagGameProjection={tagGameHudProjection}
 						animationScope={`${personaSnapshot.signer.pubkey}:${personaSnapshot.activeRun.runNumber}`}
-						interactionRewardFeedback={interactionRewardFeedback}
 						onTagGamePulse={playCurrentTagGamePulse}
 					/>
 					{#if !actionDockAvailable}<div class="top-status-controls">
@@ -5062,6 +5080,15 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 				onOpenSelfProfile={selfProfileCharacter ? resolveSelfProfileSelection : undefined}
 				traceMarkerWorldPosition={traceMarkerWorldPosition}
 			/>
+			{#if interactionRewardCuePlacements.length > 0}
+				<div class="interaction-reward-cue-layer" data-interaction-reward-layer aria-hidden="true">
+					{#each interactionRewardCuePlacements as reward (reward.id)}
+						<span class="interaction-reward-cue-anchor" style={`left:${reward.left}px;bottom:${viewportSize.height - reward.bottom}px`}>
+							<span class="interaction-reward-cue" data-interaction-reward-feedback data-reward-id={reward.id}>+{reward.points}pt</span>
+						</span>
+					{/each}
+				</div>
+			{/if}
 			{#if cooperationDefectionEventEnabled && (!devWorldSandboxEnabled || devCooperationDefectionFixtureEnabled)}
 				<CooperationDefectionPanel
 					schedule={cooperationDefectionSchedule}
@@ -5296,6 +5323,44 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 </main>
 
 <style>
+	.interaction-reward-cue-layer {
+		position: absolute;
+		inset: 0;
+		z-index: 4;
+		overflow: visible;
+		pointer-events: none;
+	}
+	.interaction-reward-cue-anchor {
+		position: absolute;
+		width: max-content;
+		transform: translateX(-50%);
+		pointer-events: none;
+	}
+	.interaction-reward-cue {
+		display: block;
+		color: #8cffb4;
+		font-size: 13px;
+		font-weight: 800;
+		line-height: 1.1;
+		text-shadow: 0 1px 5px rgba(0, 0, 0, .9), 0 0 8px rgba(87, 230, 138, .65);
+		white-space: nowrap;
+		animation: interaction-reward-float 1.05s ease-out both;
+		pointer-events: none;
+	}
+	@keyframes interaction-reward-float {
+		0% { opacity: 0; transform: translateY(5px); }
+		18% { opacity: 1; }
+		75% { opacity: 1; }
+		100% { opacity: 0; transform: translateY(-13px); }
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.interaction-reward-cue { animation: interaction-reward-fade .7s linear both; }
+	}
+	@keyframes interaction-reward-fade {
+		0%, 15% { opacity: 0; }
+		35%, 75% { opacity: 1; }
+		100% { opacity: 0; }
+	}
 	.top-status-hud {
 		position: absolute;
 		top: max(8px, env(safe-area-inset-top));

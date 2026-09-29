@@ -267,7 +267,7 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('.action-dock')).toBeVisible();
 		await page.evaluate(() => (window as unknown as { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
 		await page.evaluate(() => {
-			const target = window as unknown as { __rewardFeedbackSeen: { text: string; animationName: string; pointerEvents: string; left: number; right: number; viewportWidth: number }[] };
+			const target = window as unknown as { __rewardFeedbackSeen: { text: string; animationName: string; pointerEvents: string; left: number; right: number; viewportWidth: number; cueTop: number; cueBottom: number; actorLeft: number; actorRight: number; actorTop: number; actorPosition: string; samples: { actorPosition: string; horizontalDelta: number; verticalGap: number; cameraTransform: string; insideViewport: boolean }[] }[] };
 			target.__rewardFeedbackSeen = [];
 			new MutationObserver((records) => records.flatMap((record) => [...record.addedNodes]).forEach((node) => {
 				if (!(node instanceof Element)) return;
@@ -276,8 +276,28 @@ test.describe('Relay startup', () => {
 				for (const cue of cues) {
 					const style = getComputedStyle(cue);
 					const rect = cue.getBoundingClientRect();
-					target.__rewardFeedbackSeen.push({ text: cue.textContent?.trim() ?? '', animationName: style.animationName,
-						pointerEvents: style.pointerEvents, left: rect.left, right: rect.right, viewportWidth: window.innerWidth });
+					const actor = document.querySelector<HTMLElement>('.participant[data-self="true"]');
+					if (!actor) continue;
+					const actorRect = actor.getBoundingClientRect();
+					const result = { text: cue.textContent?.trim() ?? '', animationName: style.animationName, pointerEvents: style.pointerEvents,
+						left: rect.left, right: rect.right, viewportWidth: window.innerWidth, cueTop: rect.top, cueBottom: rect.bottom,
+						actorLeft: actorRect.left, actorRight: actorRect.right, actorTop: actorRect.top,
+						actorPosition: actor.dataset.position ?? '', samples: [] as { actorPosition: string; horizontalDelta: number; verticalGap: number; cameraTransform: string; insideViewport: boolean }[] };
+					target.__rewardFeedbackSeen.push(result);
+					const sample = () => {
+						if (!cue.isConnected || result.samples.length > 90) return;
+						const nextActor = document.querySelector<HTMLElement>('.participant[data-self="true"]');
+						if (!nextActor) return;
+						const cueRect = cue.getBoundingClientRect();
+						const nextActorRect = nextActor.getBoundingClientRect();
+						const sceneTransform = getComputedStyle(document.querySelector('.field-scene')!).transform;
+						result.samples.push({ actorPosition: nextActor.dataset.position ?? '',
+							horizontalDelta: Math.abs((cueRect.left + cueRect.right) / 2 - (nextActorRect.left + nextActorRect.right) / 2),
+							verticalGap: nextActorRect.top - cueRect.bottom, cameraTransform: sceneTransform,
+							insideViewport: cueRect.left >= 0 && cueRect.right <= window.innerWidth });
+						requestAnimationFrame(sample);
+					};
+					requestAnimationFrame(sample);
 				}
 			})).observe(document.body, { childList: true, subtree: true });
 		});
@@ -292,6 +312,11 @@ test.describe('Relay startup', () => {
 			.some((cue) => cue.text === '+5pt' && cue.animationName.endsWith('interaction-reward-fade') && cue.pointerEvents === 'none'))).toBe(true);
 		await expect.poll(() => page.evaluate(() => (window as unknown as { __rewardFeedbackSeen: { text: string; left: number; right: number; viewportWidth: number }[] }).__rewardFeedbackSeen
 			.some((cue) => cue.text === '+5pt' && cue.left >= 0 && cue.right <= cue.viewportWidth))).toBe(true);
+		await expect(page.locator('[data-points-value] [data-interaction-reward-feedback]')).toHaveCount(0);
+		await expect.poll(() => page.evaluate(() => (window as unknown as { __rewardFeedbackSeen: { text: string; left: number; right: number; cueBottom: number; actorLeft: number; actorRight: number; actorTop: number }[] }).__rewardFeedbackSeen
+			.some((cue) => cue.text === '+5pt' && Math.abs((cue.left + cue.right) / 2 - (cue.actorLeft + cue.actorRight) / 2) < 50 &&
+				cue.actorTop >= cue.cueBottom && cue.actorTop - cue.cueBottom < 25)))
+			.toBe(true);
 		await moveRelaySelfTo(page, { x: 4, y: 2 });
 		await selectRelayTraceCell(page, '5,2');
 		const investigateSelf = page.getByRole('button', { name: '痕跡を調べる', exact: true });
@@ -301,6 +326,21 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('[data-points-value]')).toHaveText('315pt');
 		await expect.poll(() => page.evaluate(() => (window as unknown as { __rewardFeedbackSeen: { text: string }[] }).__rewardFeedbackSeen))
 			.toContainEqual(expect.objectContaining({ text: '+10pt' }));
+		const movedSelfPosition = finalizeEvent(buildWorldStateEventTemplate({ channel, position: { x: 6, y: 2 }, slot: 0, createdAt: createdAt + 1 }), selfSecret);
+		await page.evaluate((event) => (window as unknown as { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), movedSelfPosition);
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '6,2');
+		await expect.poll(() => page.evaluate(() => (window as unknown as { __rewardFeedbackSeen: { text: string; samples: { actorPosition: string; horizontalDelta: number; verticalGap: number; cameraTransform: string }[] }[] }).__rewardFeedbackSeen
+			.some((cue) => cue.text === '+10pt' && cue.samples.some((sample) => sample.actorPosition === '6,2' && sample.horizontalDelta < 50 && sample.verticalGap >= 0 && sample.verticalGap < 25))))
+			.toBe(true);
+		await expect.poll(() => page.evaluate(() => (window as unknown as { __rewardFeedbackSeen: { text: string; samples: { actorPosition: string; cameraTransform: string }[] }[] }).__rewardFeedbackSeen
+			.some((cue) => cue.text === '+10pt' && new Set(cue.samples.filter((sample) => sample.actorPosition === '4,2' || sample.actorPosition === '6,2').map((sample) => sample.cameraTransform)).size > 1)))
+			.toBe(true);
+		const edgeSelfPosition = finalizeEvent(buildWorldStateEventTemplate({ channel, position: { x: 0, y: 2 }, slot: 0, createdAt: createdAt + 2 }), selfSecret);
+		await page.evaluate((event) => (window as unknown as { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), edgeSelfPosition);
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '0,2');
+		await expect.poll(() => page.evaluate(() => (window as unknown as { __rewardFeedbackSeen: { text: string; samples: { actorPosition: string; insideViewport: boolean; horizontalDelta: number; verticalGap: number }[] }[] }).__rewardFeedbackSeen
+			.some((cue) => cue.text === '+10pt' && cue.samples.some((sample) => sample.actorPosition === '0,2' && sample.insideViewport && sample.horizontalDelta < 50 && sample.verticalGap >= 0 && sample.verticalGap < 25))))
+			.toBe(true);
 	});
 
 	test('persists Trace root and reply read state and keeps notification generic', async ({ page }) => {

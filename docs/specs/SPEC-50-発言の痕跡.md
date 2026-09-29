@@ -138,7 +138,7 @@ root readは、root ghostと実際のroot本文bubbleの**両方**が実表示�
 
 他者の発言への返信投稿が既存のauthoritative Relay基準で成功した場合は10pt。同一Runでは同じimmediate parentへの初回成功だけを報酬対象とし、新Runでは再度対象にできる。自己投稿への返信、失敗、結果不明は対象外とする。
 
-Account側で報酬が新規確定した場合（`applied`）だけ、ポイントHUD付近に確定額（+5ptまたは+10pt）を約1秒表示し、既存の`collect`効果音を再生する。既読状態の変化だけ、ポイント表示の更新だけ、重複・stale精算、起動時復旧、他tabによる更新では演出しない。HUDの既存ポイント更新・ハイライトは維持し、獲得表示はレイアウトを変えず操作を遮らない。reduced-motionでは移動せず短いフェード表示にする。音声・表示の失敗は報酬確定や投稿成功へ影響させない。効果音は既存の音量・ミュート・再生許可・document visibility制約に従う。
+Account側で報酬が新規確定した場合（`applied`）だけ、確定額（+5ptまたは+10pt）を表示し、既存の`collect`効果音を再生する。金額表示は表示中の自分のキャラクター頭上付近に置き、キャラクター移動とカメラに追従させる。viewport端で文字が切れないよう位置を調整し、複数報酬はそれぞれ表示する。自分のキャラクターが表示されていない場合は代替位置へ表示しない。演出は約1秒で軽く上昇・フェードし、レイアウトを変えず操作を遮らない。reduced-motionでは移動せず短いフェード表示にする。既読状態の変化だけ、ポイント表示の更新だけ、重複・stale精算、起動時復旧、他tabによる更新では演出しない。HUDの既存ポイント更新・ハイライトは維持する。音声・表示の失敗は報酬確定や投稿成功へ影響させない。効果音は既存の音量・ミュート・再生許可・document visibility制約に従う。
 
 所持ポイントはAccount DBのPlayer lifecycleに保持し、報酬獲得履歴はそこから独立したstoreに保持する。ポイント加算と履歴確定は同じAccount transactionで行う。Account DBはv8からv9へ更新し、Trace DBはv3からv4へ更新する。両DBの新規作成時も全storeを作成し、既存のAccount root、Identity、Run、所持ポイント、write journalを維持する。旧バージョン全般への追加migrationや互換経路は設けない。既読報酬はTrace DBの未精算outboxから起動時に現在Identity・Runを照合して復旧し、Account確定後にTrace側を処理済みにする。Account履歴キーによる重複排除で再試行・複数tabでも二重加算しない。旧IdentityまたはRunの未精算記録は新しいRunへ適用せず終端化する。root削除時は返信cacheと既読・通知情報を整理するが、Account報酬履歴とTrace未精算記録は保持する。
 
