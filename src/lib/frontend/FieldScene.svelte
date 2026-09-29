@@ -3,6 +3,7 @@
 	import type { Character } from '$lib/character';
 	import CharacterAvatar from '$lib/CharacterAvatar.svelte';
 	import FieldParticipant from '$lib/FieldParticipant.svelte';
+	import History from '~icons/tabler/history';
 	import type { BubbleTone } from '$lib/bubblePresentation';
 	import type { FieldCellAction } from '$lib/fieldSelection';
 	import type { Bounds, Direction, FieldSize, GridPosition, Size, WorldPoint } from '$lib/geometry';
@@ -22,11 +23,10 @@
 
 	export type FieldParticipantView = ProjectedParticipant<Participant>;
 	export type TraceMarkerCell = TraceRootCell & Readonly<{
-		occupied: boolean;
 		inInvestigationRange: boolean;
 		read: boolean;
 		unreadReply: boolean;
-		kind: 'normal' | 'death';
+		kind: 'random' | 'manual' | 'death';
 	}>;
 	export type TraceRootGhost = Readonly<{
 		event: Pick<ParsedWorldMessage, 'id'>;
@@ -38,6 +38,7 @@
 	export type FieldActionMenu = Readonly<{
 		position: GridPosition;
 		actions: readonly FieldCellAction[];
+		focusReturnTrigger?: HTMLButtonElement;
 	}>;
 
 	type Props = Readonly<{
@@ -75,7 +76,7 @@
 		fieldActionLabel: (action: FieldCellAction) => string;
 		closeFieldActionMenu: () => void;
 		onOpenProfile: (characterId: string, trigger: HTMLButtonElement) => void;
-		onOpenSelfProfile?: (trigger: HTMLButtonElement) => void;
+		onOpenSelfProfile?: (position: GridPosition, trigger: HTMLButtonElement) => void;
 		traceMarkerWorldPosition: (position: GridPosition) => WorldPoint;
 	}>;
 
@@ -160,27 +161,18 @@
 				></span>
 			{/if}
 			{#each traceMarkerCells as cell (`${cell.position.x},${cell.position.y}`)}
-				{#if !cell.occupied}
-					{const world = traceMarkerWorldPosition(cell.position)}
-					<span
-						class="trace-marker"
-						data-trace-marker-position={`${cell.position.x},${cell.position.y}`}
-						data-trace-marker-kind={cell.kind}
-						data-trace-root-read={cell.read ? 'true' : 'false'}
-						data-trace-root-unread-reply={cell.unreadReply ? 'true' : undefined}
-						class:trace-marker-read={cell.read}
-						class:trace-marker-unread-reply={cell.unreadReply}
-						style={`left: ${world.x}px; top: ${world.y}px; --trace-icon-image: url("${asset(cell.kind === 'death' ? TRACE_DEATH_ICON_ASSET : TRACE_ICON_ASSET)}");`}
-					></span>
-				{/if}
-				{#if cell.inInvestigationRange}
-					<span
-						class="trace-investigation-indicator"
-						data-trace-indicator-position={`${cell.position.x},${cell.position.y}`}
-						aria-hidden="true"
-						style={`left: ${(cell.position.x + 1) * cellSize - 10}px; top: ${cell.position.y * cellSize + 10}px;`}
-					>⌕</span>
-				{/if}
+				{const inset = Math.max(3, cellSize * 0.06)}
+				<span
+					class="trace-marker trace-marker-field-root"
+					data-trace-marker-position={`${cell.position.x},${cell.position.y}`}
+					data-trace-marker-kind={cell.kind}
+					data-trace-root-read={cell.read ? 'true' : 'false'}
+					data-trace-root-unread-reply={cell.unreadReply ? 'true' : undefined}
+					class:trace-marker-random={cell.kind === 'random'}
+					class:trace-marker-read={cell.read}
+					class:trace-marker-unread-reply={cell.unreadReply}
+					style={`left: ${(cell.position.x + 1) * cellSize - inset}px; top: ${cell.position.y * cellSize + inset}px; --trace-icon-image: url("${asset(cell.kind === 'death' ? TRACE_DEATH_ICON_ASSET : TRACE_ICON_ASSET)}");`}
+				>{#if cell.kind === 'random'}<History class="trace-marker-history-icon" style="display: block; width: 100%; height: 100%; overflow: visible;" aria-hidden="true" />{/if}</span>
 			{/each}
 		</div>
 		<div class="field-facility-layer" aria-hidden="true">
@@ -414,10 +406,21 @@
 		transform: translate(-50%, -50%);
 	}
 
+	.trace-marker-field-root {
+		z-index: 1;
+		width: max(10px, min(18px, calc(var(--cell-size) * 0.24)));
+		height: max(10px, min(18px, calc(var(--cell-size) * 0.24)));
+		transform: translate(-100%, 0);
+	}
+
 	.trace-marker-read:not(.trace-marker-unread-reply) {
 		opacity: 0.66;
 		filter: grayscale(1) brightness(1.12);
 	}
+
+	.trace-marker-random:not(.trace-marker-unread-reply) { opacity: 0.62; }
+	.trace-marker-random.trace-marker-read:not(.trace-marker-unread-reply) { opacity: 0.56; }
+	.trace-marker-random { background: none; mask-image: none; }
 
 	.trace-marker-unread-reply {
 		color: #cf06fe;
@@ -431,20 +434,6 @@
 		color: #a9b5c5;
 		opacity: 0.96;
 		filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.5));
-	}
-
-	.trace-investigation-indicator {
-		position: absolute;
-		width: max(12px, calc(var(--cell-size) * 0.24));
-		height: max(12px, calc(var(--cell-size) * 0.24));
-		color: rgba(255, 250, 205, 0.92);
-		font-size: max(12px, calc(var(--cell-size) * 0.24));
-		font-weight: 900;
-		line-height: 1;
-		text-align: center;
-		text-shadow: 0 0 4px rgba(84, 67, 26, 0.55);
-		transform: translate(-50%, -50%);
-		pointer-events: none;
 	}
 
 	.trace-proximity-feedback {

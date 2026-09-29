@@ -3,6 +3,7 @@ import { finalizeEvent, getPublicKey, verifyEvent, type Event as NostrEvent } fr
 import {
 	buildWorldStateEventTemplate,
 	buildDeathTraceEventTemplate,
+	buildManualTraceEventTemplate,
 	buildTraceReplyTemplate,
 	buildWorldMessageTemplate,
 	parseTraceReplyCandidate,
@@ -251,6 +252,12 @@ test.describe('Relay startup', () => {
 		for (let attempt = 1; BigInt(`0x${unreadRoot.id}`) % 5n !== 0n; attempt += 1) {
 			unreadRoot = finalizeEvent(buildWorldMessageTemplate({ channel, content: `read-state unread root ${attempt}`, speechType: 'normal', position: { x: 5, y: 2 }, createdAt: Math.floor(now / 1000) }), selfSecret);
 		}
+		const manualRoot = finalizeEvent(buildManualTraceEventTemplate({
+			channel,
+			content: 'read-state manual trace',
+			position: { x: 7, y: 2 },
+			createdAt: Math.floor(now / 1000)
+		}), selfSecret);
 		const deathRoot = finalizeEvent(buildDeathTraceEventTemplate({
 			channel,
 			content: 'read-state death trace',
@@ -264,7 +271,7 @@ test.describe('Relay startup', () => {
 		await page.setViewportSize({ width: 1100, height: 850 });
 		await installHostOwnedStub(page);
 		await installPromptApiStub(page);
-		await installDelayedRelay(page, { primaryEvents: primary, traceRoots: [root, unreadRoot, deathRoot], traceReplies: [reply] });
+		await installDelayedRelay(page, { primaryEvents: primary, traceRoots: [root, unreadRoot, manualRoot, deathRoot], traceReplies: [reply] });
 		await seedRelayAccount(page, selfSecret, selfPubkey);
 		await page.goto('/');
 		await expect(page.locator('.action-dock')).toBeVisible();
@@ -279,13 +286,73 @@ test.describe('Relay startup', () => {
 		await expect(deathMarker).toHaveAttribute('data-trace-marker-kind', 'death');
 		await expect(deathMarker).toHaveCSS('mask-image', /trace-death-icon\.svg/);
 		await expect(deathMarker).toHaveCSS('color', 'rgb(82, 104, 134)');
-		await expect(unreadMarker).toHaveAttribute('data-trace-marker-kind', 'normal');
-		await expect(unreadMarker).toHaveCSS('mask-image', /trace-icon\.svg/);
+		await expect(unreadMarker).toHaveAttribute('data-trace-marker-kind', 'random');
+		await expect(unreadMarker.locator('.trace-marker-history-icon')).toBeVisible();
+		await expect(unreadMarker.locator('.trace-marker-history-icon path').first()).toHaveAttribute('d', 'M12 8v4l2 2');
 		await expect(unreadMarker).toHaveCSS('color', 'rgb(82, 104, 134)');
-		await expect(unreadMarker).toHaveCSS('opacity', '0.72');
-		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveCSS('mask-image', /trace-icon\.svg/);
-		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveAttribute('data-trace-marker-kind', 'normal');
-		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveCSS('color', 'rgb(207, 6, 254)');
+		await expect(unreadMarker).toHaveCSS('opacity', '0.62');
+		const replyUnreadMarker = page.locator('[data-trace-marker-position="4,2"]');
+		await expect(replyUnreadMarker.locator('.trace-marker-history-icon')).toBeVisible();
+		await expect(replyUnreadMarker).toHaveAttribute('data-trace-marker-kind', 'random');
+		await expect(replyUnreadMarker).toHaveAttribute('data-trace-root-unread-reply', 'true');
+		await expect(replyUnreadMarker).toHaveCSS('color', 'rgb(207, 6, 254)');
+		await expect(replyUnreadMarker).toHaveCSS('opacity', '0.72');
+		for (const viewport of [{ width: 1100, cellSize: 76 }, { width: 390, cellSize: 50 }]) {
+			await page.setViewportSize({ width: viewport.width, height: 850 });
+			if (viewport.width !== 1100) {
+				await page.reload();
+				await expect(page.locator('.action-dock')).toBeVisible();
+				await page.evaluate(() => (window as unknown as { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+				await expect(page.locator('[data-trace-marker-position="4,2"]')).toBeVisible();
+			}
+			await expect(page.locator('[data-trace-indicator-position]')).toHaveCount(0);
+			const geometry = await page.evaluate(() => {
+				const grid = document.querySelector<HTMLElement>('.field-grid')!;
+				const scene = document.querySelector<HTMLElement>('.field-scene')!;
+				const gridRect = grid.getBoundingClientRect();
+				const cellSize = Number.parseFloat(getComputedStyle(scene).getPropertyValue('--cell-size'));
+				const roots = [...document.querySelectorAll<HTMLElement>('.trace-marker-field-root')].map((marker) => {
+					const [x, y] = marker.dataset.traceMarkerPosition!.split(',').map(Number);
+					const rect = marker.getBoundingClientRect();
+					const icon = marker.querySelector<SVGElement>('.trace-marker-history-icon');
+					const iconRect = icon?.getBoundingClientRect();
+					return {
+						kind: marker.dataset.traceMarkerKind,
+						x, y,
+						left: rect.left - gridRect.left,
+						top: rect.top - gridRect.top,
+						right: rect.right - gridRect.left,
+						width: rect.width,
+						height: rect.height,
+						icon: iconRect ? { width: iconRect.width, height: iconRect.height } : null
+					};
+				});
+				return { cellSize, roots };
+			});
+			expect(geometry.cellSize).toBe(viewport.cellSize);
+			expect(geometry.roots.map((root) => root.kind).sort()).toEqual(['death', 'manual', 'random', 'random']);
+			for (const root of geometry.roots) {
+				const expectedSize = Math.max(10, Math.min(18, geometry.cellSize * 0.24));
+				const expectedInset = Math.max(3, geometry.cellSize * 0.06);
+				expect(root.width).toBeCloseTo(expectedSize, 2);
+				expect(root.height).toBeCloseTo(expectedSize, 2);
+				expect(root.left).toBeGreaterThanOrEqual(root.x * geometry.cellSize);
+				expect(root.top).toBeCloseTo(root.y * geometry.cellSize + expectedInset, 1);
+				expect(root.right).toBeCloseTo((root.x + 1) * geometry.cellSize - expectedInset, 1);
+				expect(root.right).toBeLessThanOrEqual((root.x + 1) * geometry.cellSize);
+				expect(root.top + root.height).toBeLessThanOrEqual((root.y + 1) * geometry.cellSize);
+				if (root.kind === 'random') expect(root.icon).toEqual({ width: root.width, height: root.height });
+			}
+		}
+		await page.setViewportSize({ width: 1100, height: 850 });
+		await page.reload();
+		await expect(page.locator('.action-dock')).toBeVisible();
+		await page.evaluate(() => (window as unknown as { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		await expect(page.locator('[data-trace-marker-position="4,2"]')).toBeVisible();
+		const manualMarker = page.locator('[data-trace-marker-position="7,2"]');
+		await expect(manualMarker).toHaveAttribute('data-trace-marker-kind', 'manual');
+		await expect(manualMarker).toHaveCSS('mask-image', /trace-icon\.svg/);
+		await expect(manualMarker).toHaveCSS('opacity', '0.72');
 		await expect(page.locator('.trace-unread-indicator')).toBeVisible();
 		await page.locator('.trace-unread-indicator').hover();
 		await expect(page.getByRole('tooltip')).toHaveCount(0);
@@ -352,11 +419,11 @@ test.describe('Relay startup', () => {
 		expect((await page.locator('.action-dock').boundingBox())?.height).toBe(dockHeightBeforeUnreadClear);
 		await expect(explanation).toHaveCount(0);
 		await clickRelayLogicalCell(page, { x: 0, y: 0 });
-		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveAttribute('data-trace-root-read', 'true');
-		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveCSS('mask-image', /trace-icon\.svg/);
-		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveCSS('color', 'rgb(82, 104, 134)');
-		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveCSS('opacity', '0.66');
-		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveCSS('filter', 'grayscale(1) brightness(1.12)');
+		await expect(replyUnreadMarker).toHaveAttribute('data-trace-root-read', 'true');
+		await expect(replyUnreadMarker.locator('.trace-marker-history-icon')).toBeVisible();
+		await expect(replyUnreadMarker).toHaveCSS('color', 'rgb(82, 104, 134)');
+		await expect(replyUnreadMarker).toHaveCSS('opacity', '0.56');
+		await expect(replyUnreadMarker).toHaveCSS('filter', 'grayscale(1) brightness(1.12)');
 		await expect(deathMarker).toHaveCSS('opacity', '0.72');
 		await page.reload();
 		await page.evaluate(() => {
@@ -370,7 +437,7 @@ test.describe('Relay startup', () => {
 		const marker = page.locator('[data-trace-marker-position="4,2"]');
 		await expect(marker).toHaveAttribute('data-trace-root-read', 'true');
 		await expect(marker).toHaveAttribute('data-trace-root-unread-reply', 'true');
-		await expect(marker).toHaveCSS('mask-image', /trace-icon\.svg/);
+		await expect(marker.locator('.trace-marker-history-icon')).toBeVisible();
 		await expect(marker).toHaveCSS('color', 'rgb(207, 6, 254)');
 		await expect(marker).toHaveCSS('opacity', '0.72');
 		await expect(marker).toHaveCSS('filter', 'none');
@@ -382,9 +449,9 @@ test.describe('Relay startup', () => {
 		await clickRelayLogicalCell(page, { x: 0, y: 0 });
 		await expect(marker).toHaveAttribute('data-trace-root-read', 'true');
 		await expect(marker).not.toHaveAttribute('data-trace-root-unread-reply');
-		await expect(marker).toHaveCSS('mask-image', /trace-icon\.svg/);
+		await expect(marker.locator('.trace-marker-history-icon')).toBeVisible();
 		await expect(marker).toHaveCSS('color', 'rgb(82, 104, 134)');
-		await expect(marker).toHaveCSS('opacity', '0.66');
+		await expect(marker).toHaveCSS('opacity', '0.56');
 		await expect(marker).toHaveCSS('filter', 'grayscale(1) brightness(1.12)');
 	});
 

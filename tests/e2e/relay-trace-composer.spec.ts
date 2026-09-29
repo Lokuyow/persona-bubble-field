@@ -379,9 +379,17 @@ test.describe('Relay startup', () => {
 		await page.clock.install({ time: await page.evaluate(() => Date.now()) });
 		await moveRelaySelfTo(page, { x: 4, y: 2 });
 		await expect(page.locator('[data-trace-marker-position="3,2"]')).toBeVisible();
+		const manualMarker = page.locator('[data-trace-marker-position="3,2"]');
+		await expect(manualMarker).toHaveAttribute('data-trace-marker-kind', 'manual');
+		await expect(manualMarker).toHaveCSS('mask-image', /trace-icon\.svg/);
 		await page.locator('[data-cell-position="3,2"]').click();
 		await expect(page.locator(`[data-trace-root-id="${manualEvent.id}"]`)).toBeVisible();
 		await expect(page.locator(`[data-trace-root-id="${manualEvent.id}"]`)).toContainText('visible on my own field immediately');
+		await page.reload();
+		await expect(page.locator('.action-dock')).toBeVisible();
+		await page.evaluate(() => (window as unknown as { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		await expect(page.locator('[data-trace-marker-position="3,2"]')).toHaveAttribute('data-trace-marker-kind', 'manual');
+		await expect(page.locator('[data-trace-marker-position="3,2"]')).toHaveCSS('mask-image', /trace-icon\.svg/);
 	});
 
 });

@@ -224,6 +224,87 @@ test.describe('Relay startup', () => {
 		await expect(fieldTrigger).toBeFocused();
 	});
 
+	test('opens the field self profile directly when the cell has no Trace on desktop and mobile', async ({ page }) => {
+		for (const viewport of [{ width: 1200, height: 900 }, { width: 390, height: 844 }]) {
+			const now = Date.now();
+			const secret = fixtureSecret(19);
+			const pubkey = getPublicKey(secret);
+			await page.setViewportSize(viewport);
+			await installHostOwnedStub(page);
+			await installDelayedRelay(page, { primaryEvents: testEvents(now) });
+			await seedRelayAccount(page, secret, pubkey, now + 7 * 24 * 60 * 60 * 1000);
+			await page.goto('/');
+			await expect(page.locator('.action-dock')).toBeVisible();
+			await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+			const fieldTrigger = page.locator('.participant[data-self="true"] .participant-profile-trigger');
+			await expect(fieldTrigger).toBeVisible();
+			await fieldTrigger.click();
+			await expect(page.locator('.self-profile-content')).toBeVisible();
+			await expect(page.locator('.field-action-menu')).toHaveCount(0);
+			await expect(page.locator('.self-profile-content [data-initial-focus]')).toBeFocused();
+			await page.locator('.self-profile-content').getByRole('button', { name: '閉じる', exact: true }).click();
+			await expect(page.locator('.self-profile-content')).toHaveCount(0);
+			await expect(fieldTrigger).toBeFocused();
+		}
+	});
+
+	test('offers self profile and Trace actions for their shared cell on desktop and mobile', async ({ page }) => {
+		for (const viewport of [{ width: 1200, height: 900 }, { width: 390, height: 844 }]) {
+			const now = Date.now();
+			const secret = fixtureSecret(19);
+			const pubkey = getPublicKey(secret);
+			const channel = { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' };
+			let root = finalizeEvent(buildWorldMessageTemplate({
+				channel,
+				content: 'Trace sharing the self cell',
+				speechType: 'normal',
+				position: { x: 3, y: 2 },
+				createdAt: Math.floor(now / 1000)
+			}), fixtureSecret(31));
+			for (let attempt = 1; BigInt(`0x${root.id}`) % 5n !== 0n; attempt += 1) {
+				root = finalizeEvent(buildWorldMessageTemplate({
+					channel,
+					content: `Trace sharing the self cell ${attempt}`,
+					speechType: 'normal',
+					position: { x: 3, y: 2 },
+					createdAt: Math.floor(now / 1000)
+				}), fixtureSecret(31));
+			}
+			await page.setViewportSize(viewport);
+			await page.clock.setFixedTime(now);
+			await installHostOwnedStub(page);
+			await installDelayedRelay(page, { primaryEvents: testEvents(now), traceRoots: [root] });
+			await seedRelayAccount(page, secret, pubkey, now + 7 * 24 * 60 * 60 * 1000);
+			await page.goto('/');
+			await expect(page.locator('.action-dock')).toBeVisible();
+			await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+			const fieldTrigger = page.locator('.participant[data-self="true"] .participant-profile-trigger');
+			await expect(fieldTrigger).toHaveAttribute('aria-label', / のプロフィールを開く$/);
+			await expect(page.locator(`[data-trace-marker-position="3,2"]`)).toBeVisible();
+			await fieldTrigger.click();
+			const menu = page.getByRole('menu', { name: 'Cell actions' });
+			const selfAction = menu.locator('[data-cell-action="participant"]');
+			const traceAction = menu.locator('[data-cell-action="trace"]');
+			await expect(menu.getByRole('menuitem')).toHaveCount(2);
+			await expect(selfAction).toHaveText('自分のプロフィールを開く');
+			await expect(traceAction).toHaveText('痕跡を調べる');
+			await selfAction.click();
+			const selfDialog = page.locator('.self-profile-content');
+			await expect(selfDialog).toBeVisible();
+			await expect(page.locator('.profile-dialog-content')).toHaveCount(0);
+			await expect(selfDialog.locator('[data-initial-focus]')).toBeFocused();
+			await selfDialog.getByRole('button', { name: '閉じる', exact: true }).click();
+			await expect(selfDialog).toHaveCount(0);
+			await expect(fieldTrigger).toBeFocused();
+
+			await fieldTrigger.click();
+			await expect(menu).toBeVisible();
+			await menu.locator('[data-cell-action="trace"]').click();
+			await expect(page.locator(`[data-trace-root-id="${root.id}"]`)).toContainText('Trace sharing the self cell');
+			await expect(page.locator('[data-trace-marker-position="3,2"]')).toHaveCount(0);
+		}
+	});
+
 	test('keeps the self profile dialog inside a short mobile viewport and scrolls its content', async ({ page }) => {
 		await page.setViewportSize({ width: 420, height: 420 });
 		const viewportSize = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));

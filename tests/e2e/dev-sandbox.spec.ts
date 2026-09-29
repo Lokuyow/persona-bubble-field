@@ -24,7 +24,7 @@ test.describe('DEV World Sandbox', () => {
 		await page.getByRole('button', { name: 'Reset scenario' }).click();
 		await expect(page).toHaveURL(/devScenario=trace-replies/);
 		await expect(page.getByLabel('Select sandbox character')).toHaveValue('020');
-		await expect(page.locator('.trace-marker')).toHaveCount(3);
+		await expect(page.locator('.trace-marker')).toHaveCount(4);
 	});
 
 	test('renders the tag-game terminal larger than the neighboring facility artwork', async ({ page }) => {

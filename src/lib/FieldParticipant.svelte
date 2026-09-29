@@ -21,7 +21,7 @@
 		tagGameTouchAttemptOffset?: WorldPoint | null;
 		tagGameHolderTransferId?: number | null;
 		onProfile: (position: GridPosition, trigger: HTMLButtonElement) => void;
-		onSelfProfile?: (trigger: HTMLButtonElement) => void;
+		onSelfProfile?: (position: GridPosition, trigger: HTMLButtonElement) => void;
 	}>;
 
 	let {
@@ -99,7 +99,7 @@
 		onclick={(event) => {
 			event.stopPropagation();
 			const trigger = event.currentTarget as HTMLButtonElement;
-			if (self && onSelfProfile) onSelfProfile(trigger);
+			if (self && onSelfProfile) onSelfProfile(position, trigger);
 			else onProfile(position, trigger);
 		}}
 	>
