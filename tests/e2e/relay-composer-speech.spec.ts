@@ -28,7 +28,7 @@ import { fixtureSecret, installDelayedRelay, publishedMessages, waitForPublished
 test.describe('Relay startup', () => {
 	test('shows ActionDock tooltips for the current control meanings', async ({ page }) => {
 		await installPromptApiStub(page);
-		const editor = await openReadyRelayWorld(page, 1);
+		const editor = await openReadyRelayWorld(page, 1, 300);
 		const tooltip = page.getByRole('tooltip');
 		const moveAway = async (): Promise<void> => { await page.mouse.move(1, 1); };
 		const expectTooltip = async (trigger: Locator, text: string): Promise<void> => {
@@ -46,6 +46,18 @@ test.describe('Relay startup', () => {
 		await expect(chatter).not.toHaveAttribute('title');
 		await expect(speechType).not.toHaveAttribute('title');
 		await expect(page.locator('.suggestions-toggle')).not.toHaveAttribute('title');
+		const dockBorders = await page.locator('.action-dock').evaluate((dock) => {
+			const token = getComputedStyle(dock).getPropertyValue('--action-icon-border').trim();
+			const selectors = ['.profile-trigger', '.chatter-toggle', '.speech-type-toggle', '.manual-trace-toggle', '.speaker-button', '.suggestions-toggle'];
+			return {
+				token,
+				borders: selectors.map((selector) => getComputedStyle(dock.querySelector(selector)!).borderColor)
+			};
+		});
+		expect(dockBorders.token).toBe('#c4cbd0');
+		expect(new Set([dockBorders.borders[0], ...dockBorders.borders.slice(2)]).size).toBe(1);
+		expect(dockBorders.borders[0]).toBe('rgb(196, 203, 208)');
+		expect(dockBorders.borders[1]).not.toBe(dockBorders.borders[0]);
 
 		await expectTooltip(profile, '自分のプロフィール');
 		await expectTooltip(chatter, 'Chatterを閉じる');

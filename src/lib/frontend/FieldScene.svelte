@@ -553,21 +553,22 @@
 		z-index: 8;
 		display: grid;
 		min-width: 170px;
-		padding: 5px;
-		border: 1px solid rgba(66, 82, 76, 0.28);
 		border-radius: 10px;
 		background: rgba(250, 250, 244, 0.97);
 		box-shadow: 0 10px 28px rgba(44, 54, 50, 0.24);
 		transform: translate(-50%, calc(-100% - 8px));
 		pointer-events: auto;
+		overflow: hidden;
 	}
 
 	.field-action-menu button {
+		box-sizing: border-box;
+		width: 100%;
 		min-height: 38px;
 		padding: 7px 10px;
-		border: 1px solid var(--action-tertiary-border);
-		border-radius: 7px;
-		background: var(--action-tertiary-background);
+		border: 0;
+		border-radius: 0;
+		background: transparent;
 		color: var(--action-tertiary-foreground);
 		font: inherit;
 		font-size: 12px;
@@ -578,5 +579,5 @@
 
 	.field-action-menu button:hover { background: var(--action-tertiary-background-hover); }
 	.field-action-menu button:active { background: var(--action-tertiary-background-active); }
-	.field-action-menu button:focus-visible { outline: 3px solid var(--action-focus-ring); outline-offset: 1px; }
+	.field-action-menu button:focus-visible { outline: 3px solid var(--action-focus-ring); outline-offset: -3px; }
 </style>

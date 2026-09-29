@@ -110,12 +110,29 @@ test.describe('DEV World Sandbox', () => {
 			const menu = page.getByRole('menu', { name: 'Cell actions' });
 			await expect(menu.getByRole('menuitem')).toHaveCount(2);
 			await expect(menu.locator('[data-cell-action="movement"]')).toHaveCount(0);
-			await expect(menu.locator('[data-cell-action="participant"]')).toHaveCount(1);
-			await expect(menu.locator('[data-cell-action="trace"]')).toHaveCount(1);
-			await menu.locator('[data-cell-action="participant"]').click();
+			const participantAction = menu.locator('[data-cell-action="participant"]');
+			const traceAction = menu.locator('[data-cell-action="trace"]');
+			await expect(participantAction).toHaveCount(1);
+			await expect(traceAction).toHaveCount(1);
+			const menuBox = await menu.boundingBox();
+			const participantBox = await participantAction.boundingBox();
+			const traceBox = await traceAction.boundingBox();
+			expect(menuBox && participantBox && traceBox).toBeTruthy();
+			if (menuBox && participantBox && traceBox) {
+				expect(participantBox.width).toBeCloseTo(menuBox.width, 1);
+				expect(traceBox.width).toBeCloseTo(menuBox.width, 1);
+				expect(Math.abs(traceBox.y - participantBox.y - participantBox.height)).toBeLessThan(1);
+			}
+			await page.mouse.click(participantBox!.x + participantBox!.width - 3, participantBox!.y + participantBox!.height / 2);
 			await expect(profileDialog(page)).toBeVisible();
 			await page.keyboard.press('Escape');
 			await expect(profileDialog(page)).toBeHidden();
+			await profileTrigger(page, '女の子').click();
+			const outsideMenu = page.getByRole('menu', { name: 'Cell actions' });
+			await expect(outsideMenu).toBeVisible();
+			const outside = await fieldOwnedBlankPoint(page, { x: 5, y: 5 });
+			await page.mouse.click(outside.x, outside.y);
+			await expect(outsideMenu).toBeHidden();
 			await profileTrigger(page, '女の子').click();
 			await page.getByRole('menu', { name: 'Cell actions' }).locator('[data-cell-action="trace"]').click();
 			await expect(page.locator('[data-trace-root-id="' + '4'.repeat(64) + '"]')).toContainText('newest root');

@@ -24,6 +24,8 @@ death Last WordsはNIP-28 kind 42のexplicit Traceであり、project `L`、`l=t
 
 任意Traceはproject `L`、`l=trace`、`l=trace:manual`、canonical channel root `e`、現在のcanonical `w`、本文contentを持つ。`l=chat`、`speech:*`、`d` tagは持たない。通常ComposerとAI候補の共通publish coreから送るが、speech type、presence activity、通常bubbleには適用しない。ActionDockの選択中にTrace返信先を選ぶ場合は返信モードへ切替え、入力本文を保持する。任意モード中のComposer・shortcut・slash command・AI候補は同じ任意Trace送信経路を通す。
 
+ActionDockの任意Trace buttonは状態にかかわらず費用表示を`100pt`とする。Relay送信中と結果不明はTooltipおよびaccessible nameで伝え、費用表示を置き換えない。Relayで送信成功を確認した後は任意モードの選択を解除し、通常発言モードへ戻す。確認済みeventはボタンの使用済み状態として表示せず、任意Traceは再選択して繰り返し投稿できる。
+
 費用100ptはPlayer lifecycleの現在所持ポイントから、署名済みeventと同じIndexedDB transactionで予約・減算し、既存World write journalにeventをoutboxとして永続化してからRelay送信する。未回収作業pointや未確定realtime報酬は使わない。event IDを含む同一署名済みeventを再確認・再送し、結果不明を理由に返金または別event IDによる再投稿を行わない。送信中だけRun終了との短い競合を防止し、結果不明が永続化された後はclearを無期限に止めない。Run終了transactionはterminal exitを準備できない場合も旧Runのoutboxをterminal化する。新Runへの予約移転・返金・再送はしない。終了前にRelayへ送信開始したeventは取り消せない。成功後は表示上限内ならRelay bootstrapを待たず同じeventをlocal root cacheへreconcileする。
 
 ### root cache
