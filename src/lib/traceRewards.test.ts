@@ -58,7 +58,10 @@ describe('Trace interaction reward settlement', () => {
 			replyId: reply.id, rewardTarget, rewardEvidence: { id: reply.id, pubkey: reply.pubkey, parentPubkey: reply.parentPubkey } })).resolves.toBe(true);
 		expect(await loadPendingTraceRewardOutbox()).toHaveLength(2);
 
-		await settlePendingTraceRewards();
+		expect(await settlePendingTraceRewards({ kind: 'trace-root-read', channelId: CHANNEL_ID, eventId: rootForReward.id })).toEqual([{ points: 5 }]);
+		expect(await settlePendingTraceRewards({ kind: 'trace-reply-read', channelId: CHANNEL_ID, eventId: reply.id })).toEqual([{ points: 10 }]);
+		// Background reconciliation remains silent when there is no new settlement.
+		expect(await settlePendingTraceRewards()).toEqual([]);
 		const rewarded = await loadOrCreateLifecycle();
 		expect(rewarded.kind).toBe('restored');
 		if (rewarded.kind !== 'restored') return;

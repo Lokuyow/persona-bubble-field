@@ -103,7 +103,7 @@ test.describe('Relay startup', () => {
 		const trace = traceRuntimeEvents();
 		await page.clock.setFixedTime(now);
 		await page.emulateMedia({ reducedMotion: 'reduce' });
-		await page.setViewportSize({ width: 1100, height: 850 });
+		await page.setViewportSize({ width: 390, height: 844 });
 		await installHostOwnedStub(page);
 		await installDelayedRelay(page, {
 			primaryEvents: { message: trace.message, position: trace.selfPosition }, traceRoots: [trace.root],
@@ -258,7 +258,7 @@ test.describe('Relay startup', () => {
 			content: 'reward reply to current Identity', speechType: 'normal', createdAt: createdAt + 1 }), fixtureSecret(31));
 		await page.clock.setFixedTime(now);
 		await page.emulateMedia({ reducedMotion: 'reduce' });
-		await page.setViewportSize({ width: 1100, height: 850 });
+		await page.setViewportSize({ width: 390, height: 844 });
 		await installHostOwnedStub(page);
 		await installPromptApiStub(page);
 		await installDelayedRelay(page, { primaryEvents: primary, traceRoots: [unreadRoot, selfRoot], traceReplies: [unreadReply] });
@@ -266,12 +266,32 @@ test.describe('Relay startup', () => {
 		await page.goto('/');
 		await expect(page.locator('.action-dock')).toBeVisible();
 		await page.evaluate(() => (window as unknown as { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+		await page.evaluate(() => {
+			const target = window as unknown as { __rewardFeedbackSeen: { text: string; animationName: string; pointerEvents: string; left: number; right: number; viewportWidth: number }[] };
+			target.__rewardFeedbackSeen = [];
+			new MutationObserver((records) => records.flatMap((record) => [...record.addedNodes]).forEach((node) => {
+				if (!(node instanceof Element)) return;
+				const cues = [node, ...node.querySelectorAll('[data-interaction-reward-feedback]')]
+					.filter((element) => element.matches('[data-interaction-reward-feedback]'));
+				for (const cue of cues) {
+					const style = getComputedStyle(cue);
+					const rect = cue.getBoundingClientRect();
+					target.__rewardFeedbackSeen.push({ text: cue.textContent?.trim() ?? '', animationName: style.animationName,
+						pointerEvents: style.pointerEvents, left: rect.left, right: rect.right, viewportWidth: window.innerWidth });
+				}
+			})).observe(document.body, { childList: true, subtree: true });
+		});
 		await expect(page.locator('[data-points-value]')).toHaveText('300pt');
 		await selectRelayTraceCell(page, '4,2');
 		const investigateOther = page.getByRole('button', { name: '痕跡を調べる', exact: true });
 		if (await investigateOther.isVisible()) await investigateOther.click();
 		await expect(page.locator(`[data-trace-root-id="${unreadRoot.id}"]`)).toBeVisible();
 		await expect(page.locator('[data-points-value]')).toHaveText('305pt');
+		await expect.poll(() => page.evaluate(() => (window as unknown as { __rewardFeedbackSeen: { text: string }[] }).__rewardFeedbackSeen)).toContainEqual(expect.objectContaining({ text: '+5pt' }));
+		await expect.poll(() => page.evaluate(() => (window as unknown as { __rewardFeedbackSeen: { text: string; animationName: string; pointerEvents: string }[] }).__rewardFeedbackSeen
+			.some((cue) => cue.text === '+5pt' && cue.animationName.endsWith('interaction-reward-fade') && cue.pointerEvents === 'none'))).toBe(true);
+		await expect.poll(() => page.evaluate(() => (window as unknown as { __rewardFeedbackSeen: { text: string; left: number; right: number; viewportWidth: number }[] }).__rewardFeedbackSeen
+			.some((cue) => cue.text === '+5pt' && cue.left >= 0 && cue.right <= cue.viewportWidth))).toBe(true);
 		await moveRelaySelfTo(page, { x: 4, y: 2 });
 		await selectRelayTraceCell(page, '5,2');
 		const investigateSelf = page.getByRole('button', { name: '痕跡を調べる', exact: true });
@@ -279,6 +299,8 @@ test.describe('Relay startup', () => {
 		await expect(page.locator(`[data-trace-root-id="${selfRoot.id}"]`)).toBeVisible();
 		await expect(page.locator(`[data-trace-reply-id="${unreadReply.id}"]`)).toBeVisible();
 		await expect(page.locator('[data-points-value]')).toHaveText('315pt');
+		await expect.poll(() => page.evaluate(() => (window as unknown as { __rewardFeedbackSeen: { text: string }[] }).__rewardFeedbackSeen))
+			.toContainEqual(expect.objectContaining({ text: '+10pt' }));
 	});
 
 	test('persists Trace root and reply read state and keeps notification generic', async ({ page }) => {

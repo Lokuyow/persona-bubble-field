@@ -78,12 +78,13 @@ describe('Trace reply publication ownership', () => {
 			bootstrapTraceRootCandidates: traceBootstrap(), configureTraceReplies, publish, publishSelf, dispose: vi.fn()
 		});
 		const onLiveMessage = vi.fn();
+		const onInteractionRewardApplied = vi.fn();
 		const session = createWorldReadSession({ field: { columns: 4, rows: 3 }, selfSigner: selfSigner(), selfRunNumber: runNumber,
-			onPresenceChanged: vi.fn(), onLiveMessage, onStatusChanged: vi.fn() });
+			onPresenceChanged: vi.fn(), onLiveMessage, onInteractionRewardApplied, onStatusChanged: vi.fn() });
 		await session.start(); session.completeBootstrap(); await session.enterSelf(); await settle();
 		expect(session.openTraceConversation({ rootId: root.id, currentId: root.id }).kind).toBe('opened');
 		await settle();
-		return { session, root, child, publish, publishSelf, configureTraceReplies, primary, onLiveMessage,
+		return { session, root, child, publish, publishSelf, configureTraceReplies, primary, onLiveMessage, onInteractionRewardApplied,
 			callbacks: () => callbacks,
 			submit: (speechType: 'normal' | 'shout' | 'monologue' = 'normal') => session.publishTraceReply({
 				rootId: root.id, targetId: nested ? child.id : root.id, content: 'reply draft', speechType
@@ -112,6 +113,15 @@ describe('Trace reply publication ownership', () => {
 		await expect(f.submit()).resolves.toMatchObject({ kind: 'succeeded' });
 		expect(mocked.applyInteractionReward).toHaveBeenCalledOnce();
 		expect(f.publish).toHaveBeenCalledOnce();
+		expect(f.onInteractionRewardApplied).not.toHaveBeenCalled();
+	});
+
+	it.each(['applied', 'duplicate', 'stale'] as const)('notifies only for a newly applied reply-post reward (%s)', async (kind) => {
+		const f = await fixture(false, 1);
+		mocked.applyInteractionReward.mockResolvedValueOnce({ kind });
+		await expect(f.submit()).resolves.toMatchObject({ kind: 'succeeded' });
+		if (kind === 'applied') expect(f.onInteractionRewardApplied).toHaveBeenCalledWith({ points: 10 });
+		else expect(f.onInteractionRewardApplied).not.toHaveBeenCalled();
 	});
 
 	it('stops position, message, and Trace writers after its owner is disposed', async () => {

@@ -197,6 +197,7 @@ test.describe('Relay startup', () => {
 			await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '3,2');
 			expect((await relayState(page)).state.published.filter((event) => event.kind === WORLD_STATE_KIND)).toHaveLength(positionsBefore);
 			await page.evaluate(() => (window as unknown as { __relayStartupTest: { releasePublishes(kind: number): void } }).__relayStartupTest.releasePublishes(1111));
+			if (outcome !== 'rejected') await expect(page.locator('[data-interaction-reward-feedback]')).toHaveText('+10pt');
 			await expect.poll(() => page.evaluate(() => (window as unknown as { __ehagakiTerminalCount: number }).__ehagakiTerminalCount)).toBe(1);
 			if (outcome === 'rejected') {
 				await expect(editor).toHaveValue('own Trace shout');

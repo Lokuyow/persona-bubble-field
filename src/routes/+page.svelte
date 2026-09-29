@@ -353,6 +353,8 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	let mendingMutationInFlight = $state(false);
 	let collectFeedback = $state<Readonly<{ id: number; points: number; lifespanMs: number }> | null>(null);
 	let collectFeedbackTimer: number | null = null;
+	let interactionRewardFeedback = $state<readonly Readonly<{ id: number; points: 5 | 10 }>[]>([]);
+	const interactionRewardFeedbackTimers = new Map<number, number>();
 	let mendingStartupFeedback = $state<Readonly<{ id: number; phase: 'starting' | 'started' }> | null>(null);
 	let mendingStartupFeedbackTimer: number | null = null;
 	let adjustmentDialogOpen = $state(false);
@@ -362,6 +364,17 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	let upgradeFeedback = $state<Readonly<{ id: number; key: PersonaAbilityKey; level: number }> | null>(null);
 	let upgradeFeedbackTimer: number | null = null;
 	let feedbackSequence = 0;
+	function showInteractionRewardFeedback(reward: Readonly<{ points: 5 | 10 }>): void {
+		const id = ++feedbackSequence;
+		try {
+			interactionRewardFeedback = [...interactionRewardFeedback, { id, points: reward.points }];
+			interactionRewardFeedbackTimers.set(id, window.setTimeout(() => {
+				interactionRewardFeedback = interactionRewardFeedback.filter((item) => item.id !== id);
+				interactionRewardFeedbackTimers.delete(id);
+			}, 1_100));
+		} catch { /* Visual feedback is independent from reward persistence. */ }
+		try { soundController?.play('collect'); } catch { /* Audio feedback is best-effort. */ }
+	}
 	let clearMutationInFlight = $state(false);
 	let pendingRealtimeSettlement = $state(false);
 	let tagGamePanelOpen = $state(false);
@@ -1433,6 +1446,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 				onTimelineMessage: receiveSessionTimelineMessage,
 				onEffectiveTraceRootsChanged: setEffectiveTraceRoots,
 				onTraceReadSnapshotChanged: (snapshot) => { traceReadSnapshot = snapshot; },
+				onInteractionRewardApplied: showInteractionRewardFeedback,
 				onPersonaSnapshotChanged: (persona) => {
 					if (personaSnapshot && samePersonaIdentity(personaSnapshot, persona) &&
 						persona.activeRun.revision >= personaSnapshot.activeRun.revision) personaSnapshot = persona;
@@ -1763,6 +1777,8 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			appSoundController.dispose();
 			soundController = null;
 			if (collectFeedbackTimer !== null) window.clearTimeout(collectFeedbackTimer);
+			for (const timer of interactionRewardFeedbackTimers.values()) window.clearTimeout(timer);
+			interactionRewardFeedbackTimers.clear();
 			if (mendingStartupFeedbackTimer !== null) window.clearTimeout(mendingStartupFeedbackTimer);
 			if (upgradeFeedbackTimer !== null) window.clearTimeout(upgradeFeedbackTimer);
 			if (proximityFeedbackTimer !== null) window.clearTimeout(proximityFeedbackTimer);
@@ -4977,7 +4993,8 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 						{mendingProjection}
 						tagGameProjection={tagGameHudProjection}
 						animationScope={`${personaSnapshot.signer.pubkey}:${personaSnapshot.activeRun.runNumber}`}
-					onTagGamePulse={playCurrentTagGamePulse}
+						interactionRewardFeedback={interactionRewardFeedback}
+						onTagGamePulse={playCurrentTagGamePulse}
 					/>
 					{#if !actionDockAvailable}<div class="top-status-controls">
 						<SoundControl
