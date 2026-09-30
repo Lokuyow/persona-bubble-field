@@ -14,18 +14,59 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  validate:
-    name: Check and build
+  classify:
+    name: Classify changes
     runs-on: ubuntu-latest
+    outputs:
+      run_application_validation: ${{ steps.classify.outputs.run_application_validation }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
-      - name: Check PR diff whitespace
-        if: github.event_name == 'pull_request'
-        run: git diff --check "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"
+      - name: Classify PR changes and check whitespace
+        id: classify
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          run_application_validation=true
+
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            git diff --check "$BASE_SHA" "$HEAD_SHA"
+            if git diff --name-only --no-renames -z "$BASE_SHA" "$HEAD_SHA" > "$RUNNER_TEMP/changed-paths.bin"; then
+              mapfile -d '' -t changed_paths < "$RUNNER_TEMP/changed-paths.bin"
+
+              if ((${#changed_paths[@]} > 0)); then
+                run_application_validation=false
+                for path in "${changed_paths[@]}"; do
+                  case "$path" in
+                    README.md|AGENTS.md|CONTRIBUTING.md|docs/*.md) ;;
+                    *) run_application_validation=true; break ;;
+                  esac
+                done
+              else
+                echo "::warning::Unable to classify an empty PR diff; running application validation."
+              fi
+            else
+              echo "::warning::Unable to enumerate PR paths; running application validation."
+            fi
+          fi
+
+          echo "run_application_validation=$run_application_validation" >> "$GITHUB_OUTPUT"
+
+  validate:
+    name: Validate application
+    needs: classify
+    if: needs.classify.outputs.run_application_validation == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -39,8 +80,75 @@ jobs:
       - name: Validate
         run: npm run validate
 
+  e2e:
+    name: E2E shard ${{ matrix.shard }}/2
+    needs:
+      - classify
+      - validate
+    if: needs.classify.outputs.run_application_validation == 'true' && needs.validate.result == 'success'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.19.0
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit
+
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
 
-      - name: Run E2E
-        run: npm run test:e2e -- --workers=3
+      - name: Run E2E shard
+        run: npm run test:e2e -- --workers=3 --shard=${{ matrix.shard }}/2
+
+  required:
+    name: Check and build
+    needs:
+      - classify
+      - validate
+      - e2e
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require the expected verification path to succeed
+        env:
+          CLASSIFY_RESULT: ${{ needs.classify.result }}
+          RUN_APPLICATION_VALIDATION: ${{ needs.classify.outputs.run_application_validation }}
+          VALIDATE_RESULT: ${{ needs.validate.result }}
+          E2E_RESULT: ${{ needs.e2e.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "$CLASSIFY_RESULT" != "success" ]]; then
+            echo "Change classification or PR whitespace validation did not succeed."
+            exit 1
+          fi
+
+          case "$RUN_APPLICATION_VALIDATION" in
+            true)
+              if [[ "$VALIDATE_RESULT" != "success" || "$E2E_RESULT" != "success" ]]; then
+                echo "Application validation and both E2E shards must succeed for code changes."
+                exit 1
+              fi
+              ;;
+            false)
+              if [[ "$VALIDATE_RESULT" != "skipped" || "$E2E_RESULT" != "skipped" ]]; then
+                echo "Documentation-only changes require the lightweight path, with application jobs skipped."
+                exit 1
+              fi
+              ;;
+            *)
+              echo "Change classification did not produce a recognized result."
+              exit 1
+              ;;
+          esac

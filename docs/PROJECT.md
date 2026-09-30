@@ -300,12 +300,11 @@ PR CIの基準は以下。
 - Workflow名: `Pull Request CI`
 - required status checkとして使用するjob名: `Check and build`
 - Node.js `24.19.0`
-- checkoutではPRのbaseからheadまでの差分を検証できる履歴を取得する
-- `pull_request` 時はbase SHAからhead SHAまでのPR全体に対して `git diff --check` を実行する
-- clean runner上で `npm ci` を実行する
-- 続けて `npm run validate` を実行する
-- `npm run validate` 成功後に `npx playwright install --with-deps chromium` を実行する
-- 続けて `npm run test:e2e` を実行する
+- `pull_request` 時はPR全体の変更パスを保守的に分類し、base SHAからhead SHAまでのPR全体に対して `git diff --check` を実行する
+- 変更パスが明示した文書ファイルだけの場合、required checkと分類・whitespace検証を実行し、アプリケーション検証とE2Eを省略する。不明な変更、分類失敗、`workflow_dispatch` は通常検証へ回す
+- 通常検証ではclean runner上で `npm ci` と `npm run validate` を実行する
+- `npm run validate` 成功後、2つのE2E shard jobを実行する。各jobはclean runner上で `npm ci` と `npx playwright install --with-deps chromium` を実行し、`npm run test:e2e -- --workers=3 --shard=<index>/2` で全E2Eを分割実行する
+- job名 `Check and build` の集約jobは常に依存jobの結果を評価する。通常検証では基礎検証と全shardの成功を要求し、文書のみの変更では分類と軽量検証の成功を要求する
 
 `npm run validate` にはVitest、Svelte / TypeScript check、GitHub Pages用production build、working treeの `git diff --check` が含まれる。
 `npm run validate` は従来どおり基礎検証であり、Playwright E2Eを含めない。
