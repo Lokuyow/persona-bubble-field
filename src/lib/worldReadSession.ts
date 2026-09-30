@@ -598,7 +598,6 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	}
 
 	function startTraceBackground(): void {
-		void reconcileTraceRoots([]);
 		if (!transport) return;
 		traceRootBootstrapReadiness = transport.bootstrapTraceRootCandidates().then(async (result) => {
 			await reconcileTraceRoots(result.rawEvents);
@@ -659,8 +658,8 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	}
 
 	// Bootstrap evidence is already parser/signature-verified by the transport.
-	// It can safely improve the visible field before final EOSE, but it must not
-	// produce conversation or make self writes available before canonical handoff.
+	// It can update presence and Chatter before final EOSE, but it must not
+	// produce live bubbles or make self writes available before canonical handoff.
 	function applyBootstrapMessage(message: ParsedWorldMessage, nowMs: number): void {
 		if (journalScope && pendingSelfMessage?.id === message.id) {
 			void authorizeSelfWrite().then((authorized) => {
@@ -668,6 +667,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			}).catch(() => {});
 			return;
 		}
+		if (!disposed) options.onTimelineMessage?.(message);
 		if (message.createdAt < messageSince) return;
 		worldPresence = applyWorldPresenceMessage(worldPresence, message);
 		project(nowMs);
@@ -1603,6 +1603,8 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			const world = resolvePrototypeWorldConfig();
 			channel = { channelId: world.channelId, relayHint: world.preferredRelayHint };
 			transport = createNostrRelayTransport(world);
+			// Restore viewer-local roots independently of the primary network sync.
+			void reconcileTraceRoots([]);
 			emitStatus({ kind: 'bootstrapping' });
 			const nowMs = Date.now();
 			startupSecond = Math.floor(nowMs / 1000);

@@ -1049,26 +1049,69 @@ describe('world read session', () => {
 		 expect(session.refresh(700_000).participants.map((participant) => participant.id)).toEqual([alice]);
 	});
 
-	it('does not await trace restore or an unresolved trace bootstrap during primary start', async () => {
+	it('restores cached Trace roots before primary completion without starting network Trace early', async () => {
+		const cached = message('cached-root', 700);
 		let resolveRestore!: (roots: readonly ParsedWorldMessage[]) => void;
 		mocked.reconcileTraceRootCache.mockImplementationOnce(() => new Promise((resolve) => { resolveRestore = resolve; }));
 		const bootstrapTraceRootCandidates = vi.fn(() => new Promise<never>(() => {}));
+		let resolvePrimary!: (bootstrap: ReturnType<typeof startResult>) => void;
+		const startPrimary = vi.fn((nextInput) => {
+			input = nextInput;
+			return new Promise<ReturnType<typeof startResult>>((resolve) => { resolvePrimary = resolve; });
+		});
 		mocked.createTransport.mockReturnValue({
-			start: vi.fn(async (nextInput) => {
-				input = nextInput;
-				return startResult();
-			}),
+			start: startPrimary,
 			bootstrapTraceRootCandidates,
 			dispose,
 			publish
 		});
+		const onEffectiveTraceRootsChanged = vi.fn();
 		const session = createWorldReadSession({
-			field: { columns: 4, rows: 3 }, onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn()
+			field: { columns: 4, rows: 3 }, onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn(),
+			onEffectiveTraceRootsChanged
 		});
 
-		await expect(session.start()).resolves.toEqual(expect.objectContaining({ status: { kind: 'available' } }));
+		const startup = session.start();
+		expect(startPrimary).toHaveBeenCalledOnce();
+		expect(bootstrapTraceRootCandidates).not.toHaveBeenCalled();
+		resolveRestore([cached]);
+		await vi.waitFor(() => expect(onEffectiveTraceRootsChanged).toHaveBeenCalledWith([cached]));
+		expect(bootstrapTraceRootCandidates).not.toHaveBeenCalled();
+		resolvePrimary(startResult());
+		await expect(startup).resolves.toEqual(expect.objectContaining({ status: { kind: 'available' } }));
 		expect(bootstrapTraceRootCandidates).toHaveBeenCalledOnce();
-		resolveRestore([]);
+		session.dispose();
+	});
+
+	it('forwards verified bootstrap messages to the timeline before primary completion', async () => {
+		const bootstrapMessage = message('progressive-message', 700);
+		let resolvePrimary!: (bootstrap: ReturnType<typeof startResult>) => void;
+		mocked.createTransport.mockReturnValue({
+			start: vi.fn((nextInput) => {
+				input = nextInput;
+				return new Promise<ReturnType<typeof startResult>>((resolve) => { resolvePrimary = resolve; });
+			}),
+			bootstrapTraceRootCandidates: traceBootstrap(),
+			dispose,
+			publish
+		});
+		const timeline = vi.fn();
+		const live = vi.fn();
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 }, onPresenceChanged: vi.fn(), onLiveMessage: live,
+			onTimelineMessage: timeline, onStatusChanged: vi.fn()
+		});
+
+		const startup = session.start();
+		input!.onBootstrapMessage(bootstrapMessage);
+		expect(timeline).toHaveBeenCalledExactlyOnceWith(bootstrapMessage);
+		expect(live).not.toHaveBeenCalled();
+		resolvePrimary(startResult([bootstrapMessage]));
+		await startup;
+		session.completeBootstrap();
+		expect(timeline).toHaveBeenCalledExactlyOnceWith(bootstrapMessage);
+		expect(live).not.toHaveBeenCalled();
+		session.dispose();
 	});
 
 	it('reconciles cache restore and a partial trace bootstrap as supplemental snapshots', async () => {
