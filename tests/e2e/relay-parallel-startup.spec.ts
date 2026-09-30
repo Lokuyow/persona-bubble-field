@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { finalizeEvent, getPublicKey } from 'nostr-tools/pure';
-import { buildWorldStateEventTemplate, WORLD_STATE_KIND } from '../../src/lib/nostrProtocol';
+import { buildManualTraceEventTemplate, buildWorldStateEventTemplate, WORLD_STATE_KIND } from '../../src/lib/nostrProtocol';
 import {
 	AUTHORITATIVE_RELAYS, CHANNEL_ID, fixtureSecret, installDelayedRelay, isRealtimeRequest, relayState,
 	requestKind, seedRelayAccount, testEvents
@@ -92,6 +92,64 @@ test('writes restored self after three paired EOSEs and keeps late primaries for
 		__relayStartupTest: { releaseTraceRoots(): void }
 	}).__relayStartupTest.releaseTraceRoots());
 	await expect.poll(async () => (await relayState(page)).state.requests.filter(isRealtimeRequest).length).toBeGreaterThan(0);
+});
+
+test('shows validated Chatter messages while primary subscriptions are still pending', async ({ page }) => {
+	const secret = fixtureSecret(23);
+	const events = testEvents();
+	await installHostOwnedStub(page);
+	await installDelayedRelay(page, { primaryEvents: events, deferPrimaryEvents: true });
+	await seedRelayAccount(page, secret, getPublicKey(secret));
+	await page.goto('/');
+	await waitForPrimary(page);
+	const chatter = page.locator('aside.recent-message-timeline');
+	if (!(await chatter.isVisible())) await page.locator('.chatter-toggle').click();
+	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimaryEvents(): void } }).__relayStartupTest.releasePrimaryEvents());
+	const timelineMessage = page.locator(`[data-timeline-event-id="${events.message.id}"]`);
+	await expect(timelineMessage).toBeVisible();
+	await expect(timelineMessage).toHaveCount(1);
+	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+	await expect(timelineMessage).toHaveCount(1);
+});
+
+test('presents cached Trace roots before primary and network Trace bootstrap completion', async ({ page }) => {
+	const now = Date.now();
+	const secret = fixtureSecret(23);
+	const selfPubkey = getPublicKey(secret);
+	const events = testEvents(now);
+	const root = finalizeEvent(buildManualTraceEventTemplate({
+		channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' },
+		content: 'cached startup trace',
+		position: { x: 6, y: 2 },
+		speechType: 'normal',
+		createdAt: Math.floor(now / 1000)
+	}), fixtureSecret(31));
+	await installHostOwnedStub(page);
+	await installDelayedRelay(page, {
+		primaryEvents: events,
+		deferPrimaryEvents: true,
+		traceRoots: [root],
+		deferTraceRoots: true,
+		persistAcrossReload: true
+	});
+	await seedRelayAccount(page, secret, selfPubkey);
+	await page.goto('/');
+	await waitForPrimary(page);
+	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimaryEvents(): void; releasePrimary(): void; releaseTraceRoots(): void } }).__relayStartupTest.releasePrimaryEvents());
+	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseTraceRoots(): void } }).__relayStartupTest.releaseTraceRoots());
+	await expect(page.locator('[data-trace-marker-position="6,2"]')).toBeVisible();
+
+	await page.reload({ waitUntil: 'domcontentloaded' });
+	await waitForPrimary(page);
+	await expect(page.locator('[data-trace-marker-position="6,2"]')).toBeVisible();
+	const relay = await relayState(page);
+	expect(relay.state.requests.some((request) => request.filter.limit === 1000)).toBe(false);
+	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+	await expect.poll(async () => (await relayState(page)).state.requests.some((request) => request.filter.limit === 1000)).toBe(true);
+	await expect(page.locator('[data-trace-marker-position="6,2"]')).toBeVisible();
+	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releaseTraceRoots(): void } }).__relayStartupTest.releaseTraceRoots());
+	await expect(page.locator('[data-trace-marker-position="6,2"]')).toBeVisible();
 });
 
 test('accepts an early self echo before OK and ignores its later acknowledgements', async ({ page }) => {
