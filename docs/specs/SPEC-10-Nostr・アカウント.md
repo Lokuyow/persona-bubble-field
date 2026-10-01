@@ -164,7 +164,7 @@ external/modified client製1111も、署名、project labels、root/parent relat
 
 NIP-09 / kind 5はMVP完全非対応とする。kind 5を発行、購読、検索せず、外部clientのdeletion requestをUI/cacheへ反映しない。tombstoneやdeleted-reply placeholderは導入しない。browserがすでに取得・cacheしたroot/replyをkind 5を理由に削除しない。Relayが物理削除したeventを未取得browserが取得できないことまでは制御しない。
 
-### Experimental kind 30079 Public World State
+### Experimental kind 30079 Hako Public State
 
 Hakoのprototypeでは、Public World Stateをpublic application-specific dataとして扱うため、正式なNIPまたはkind registryへの割当がないexperimental / unregistered addressable kind `30079`を使用する。これはNIP-79準拠を意味せず、relayへNIP-79固有の処理やNIP-42 AUTHを要求するものでもない。
 
@@ -172,14 +172,15 @@ position同期等に使用するアプリ固有イベントについては、kin
 
 各イベントのkind、`d` tag、channel参照等によって用途を十分に識別できる場合は、NIP-32 labelを重複して付与しない。
 
-kind 30079はposition専用ではなく、positionとexplicit presence stateを同じ公開application-specific
-World State wire contractで表現する。具体仕様は [`SPEC-30-フィールド・position・presence.md`](./SPEC-30-フィールド・position・presence.md) を正とする。
+kind 30079はposition専用ではなく、`d` namespaceごとに独立したschemaを持つHako Public State共通kindとする。既存の`world-state` address群はpositionとexplicit presence stateだけを表し、別の`profile-state` addressは公開プロフィール状態だけを表す。どちらのschemaも互いのpayloadやsemanticsへ混在させない。詳細は [`SPEC-30-フィールド・position・presence.md`](./SPEC-30-フィールド・position・presence.md) を正とする。
 
 専用clientは、kind 30079についてもauthor pubkeyが現在のcharacter slotへ解決できる場合だけ、専用世界の有効なWorld State evidenceとして受理する。未割当slotのeventは署名やtagが正しくても専用世界では利用しない。これはofficial-client認証ではなく、使用中slotに対応する外部・改造clientを拒否するものではない。
 
 ### 交換可能なリアルタイムイベント
 
 リアルタイムイベントは、通常のworld read/write subscriptionから独立した補助subscription 1本で取得する。最大構成はprimary world 2本、Trace補助subscription最大1本、リアルタイムイベント補助subscription 1本であり、control専用の5本目は作らない。リアルタイムイベントの障害・切断・購読拒否は、通常のworld状態やTrace状態を失敗扱いにせず、リアルタイムイベント機能だけをinactive/degradedとして扱う。realtimeはTraceより低優先で、Traceのroot bootstrapおよび必要なlong-lived configurationの確保またはterminal結果を待ってから試行する。後からTraceが必要になった場合はrealtimeだけをCLOSEしてTraceを先に構成し、その後にrealtimeを再試行する。Relayの既知の `max_subscriptions` が4未満の場合、そのRelayではリアルタイムイベント補助subscriptionを開始しない。値が不明な場合は試行してよい。
+
+他ユーザーのProfileを開いている間は、選択されたpubkeyのprofile-state用補助subscriptionを追加できる。通常最大4本とこのProfile用1本により、現在のtransportは最大5 active subscriptionを使用しうる。Profile用subscriptionは既知のNIP-11 `max_subscriptions < 5` のRelayでは開始せず、値が未広告の場合は試行する。Profile用に別のsubscription priority schedulerは設けない。
 
 realtimeの1本のREQには、channel creatorをauthorとして指定するbounded control filterと、enabled playable protocol keyごとのconcrete instance filterを含める。control filterは `kind=7070`、`#e` channel、control protocolの`#d`、creator `authors`、15分のbounded `since`を持ち、`#i`を持たない。各instance filterは`kind=7070`、`#e` channel、1つのplayable protocol keyの`#d`、そのprotocol keyに属するactive/recovery instanceの`#i`、および必要な`since`を持つ。過去の全gameplay historyを取得せず、protocol key、instance IDs、sinceの対応関係を跨いで混在させない。
 

@@ -17,17 +17,20 @@ import type { Filter } from 'nostr-tools/filter';
 import { verifyEvent, type Event, type VerifiedEvent } from 'nostr-tools/pure';
 import {
 	buildWorldStateFilter,
+	buildPublicProfileStateFilter,
 	buildTraceDirectReplyFilter,
 	buildTraceNotificationFilter,
 	buildTraceReplyFilter,
 	buildTraceRootBootstrapFilters,
 	buildWorldMessageFilters,
 	parseWorldStateEvent,
+	parsePublicProfileState,
 	parseWorldMessage,
 	parseTraceEvent,
 	CHANNEL_MESSAGE_KIND,
 	WORLD_STATE_KIND,
 	type ParsedWorldStateEvent,
+	type PublicProfileState,
 	type ParsedWorldMessage,
 	type ParsedTraceEvent,
 	worldStateIdentifiers,
@@ -223,6 +226,8 @@ export type NostrRelayTransportOptions = Readonly<{
 	operationTimeoutMs?: number;
 	websocketCtor?: IWebSocketConstructor;
 }>;
+
+export type ProfileStateSubscription = Readonly<{ close: () => void }>;
 
 type TransportState = 'new' | 'starting' | 'started' | 'failed' | 'disposed';
 type PrimaryPairKey = `${string}\u0000${LogicalPrimarySubscription}`;
@@ -816,6 +821,38 @@ export function createNostrRelayTransport(
 		// Reserve room for the two primary subscriptions and the existing Trace
 		// supplemental subscription before opening realtime events.
 		return typeof maxSubscriptions !== 'number' || maxSubscriptions >= 4;
+	}
+
+	function subscribeProfileState(pubkey: string, onState: (state: PublicProfileState) => void): ProfileStateSubscription {
+		if (state !== 'started' || !/^[0-9a-f]{64}$/.test(pubkey)) throw new Error('Profile subscription is unavailable.');
+		const client = requireRxNostr();
+		const resource = new Subscription();
+		let closed = false;
+		const eligibleRelays = world.authoritativeRelays.filter((relayUrl) => {
+			const limit = Nip11Registry.get(relayUrl)?.limitation?.max_subscriptions;
+			return typeof limit !== 'number' || limit >= 5;
+		});
+		const filter = buildPublicProfileStateFilter({ channelId: world.channelId, pubkey, since: 0 });
+		const seenIds = new Set<string>();
+		for (const relayUrl of eligibleRelays) {
+			const request = createRxForwardReq();
+			resource.add(client.use(request, { on: { relays: [relayUrl] } }).subscribe());
+			request.emit(filter);
+		}
+		resource.add(client.createAllEventObservable().subscribe((packet) => {
+			if (closed || !eligibleRelays.includes(canonicalRelay(packet.from) ?? '') || seenIds.has(packet.event.id)) return;
+			const parsed = parsePublicProfileState(packet.event, world.channelId, pubkey);
+			if (!parsed) return;
+			seenIds.add(packet.event.id);
+			onState(parsed);
+		}));
+		subscriptions.add(resource);
+		return { close: () => {
+			if (closed) return;
+			closed = true;
+			subscriptions.remove(resource);
+			resource.unsubscribe();
+		} };
 	}
 
 	function updateRealtimeDiagnostic(relayUrl: string, next: RealtimeRelayDiagnostic): void {
@@ -1612,6 +1649,7 @@ export function createNostrRelayTransport(
 			return diagnostics();
 		},
 		publishSelf: publishSelfEvent,
+		subscribeProfileState,
 		publishRealtimeTracked: publishRealtimeEventTracked,
 
 		async bootstrapTraceRootCandidates(): Promise<TraceRootBootstrapResult> {

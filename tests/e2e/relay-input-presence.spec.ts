@@ -88,7 +88,7 @@ test.describe('Relay startup', () => {
 		const editor = await openReadyRelayWorld(page);
 		const self = page.locator('.participant[data-self="true"]');
 		const before = await self.getAttribute('data-position');
-		const move = await chooseHorizontalMove(page);
+		const move = await chooseAvailableRelayMove(page);
 		await editor.focus();
 		await page.keyboard.press(move.key);
 		await expect(self).toHaveAttribute('data-position', before ?? '');

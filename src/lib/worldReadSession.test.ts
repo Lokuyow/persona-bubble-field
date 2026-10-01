@@ -14,6 +14,8 @@ import {
 import type { TraceReplyConfiguration, TraceReplyConfigurationResult } from './nostrRelayTransport';
 import { PRESENCE_TIMEOUT_MS, type PresenceState } from './presence';
 import { planPositionPublish, reconstructPositionPublishState } from './positionPublish';
+import { createInitialPersonaGameState } from './personaGameState';
+import type { PersonaSnapshot } from './rootIdentity';
 import { protocolKeyFor } from './realtimeEvents';
 import { createWorldReadSession, type RealtimeStartConfiguration, type WorldReadConnectionStatus } from './worldReadSession';
 
@@ -456,6 +458,34 @@ describe('world read session', () => {
 			dispose,
 			publish
 		});
+	});
+
+	it('coalesces profile updates within a Unix second and keeps local state when publication fails', async () => {
+		const signer = selfSigner();
+		const publishSelf = vi.fn((event: VerifiedEvent) => ({ firstSuccess: Promise.resolve(true), settled: Promise.resolve([]) }));
+		mocked.createTransport.mockReturnValue({
+			start: vi.fn(async (nextInput) => { input = nextInput; return startResult(); }),
+			bootstrapTraceRootCandidates: traceBootstrap(), publishSelf, dispose
+		});
+		const session = createWorldReadSession({ field: { columns: 4, rows: 3 }, selfSigner: signer, selfRunNumber: 1,
+			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn() });
+		await session.start();
+		const rootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0 } as const;
+		const snapshot = (rootPoints: number) => ({ signer, identity: signer.identity, rootPoints,
+			activeRun: { runNumber: 1, rootBuild }, gameState: createInitialPersonaGameState(signer.pubkey, 700_000) }) as unknown as PersonaSnapshot;
+		session.reconcilePublicProfileState(snapshot(1));
+		session.reconcilePublicProfileState(snapshot(2));
+		await vi.advanceTimersByTimeAsync(1_001);
+		expect(publishSelf).toHaveBeenCalledOnce();
+		expect(JSON.parse(publishSelf.mock.calls[0][0].content).rootPoints).toBe(2);
+
+		publishSelf.mockImplementationOnce(() => ({ firstSuccess: Promise.resolve(false), settled: Promise.resolve([]) }));
+		const unchangedLocalSnapshot = snapshot(3);
+		session.reconcilePublicProfileState(unchangedLocalSnapshot);
+		await vi.advanceTimersByTimeAsync(1_001);
+		expect(publishSelf).toHaveBeenCalledTimes(2);
+		expect(unchangedLocalSnapshot.gameState.points).toBe(0);
+		session.dispose();
 	});
 
 	it('can defer realtime startup until its event window without delaying primary bootstrap', async () => {

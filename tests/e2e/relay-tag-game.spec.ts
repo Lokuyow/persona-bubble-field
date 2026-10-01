@@ -779,6 +779,7 @@ test('does not replay a restored owner transfer during a Realtime reconnect', as
 	const restoredTransfer: TagGameState = { ...game.running, revision: 2, updatedAt: restoredAt, ownerPubkey: hostPubkey,
 		transferAt: restoredAt * 1_000, settledAtMs: restoredAt * 1_000 };
 	const restoredEvent = finalizeTagGameState(restoredTransfer, CHANNEL_ID, restoredAt, hostSecret);
+	const initialTagGameRequestCount = (await relayState(page)).state.requests.filter((request) => request.filters.some((filter) => (filter.kinds as number[] | undefined)?.includes(TAG_GAME_KIND))).length;
 	await page.clock.setSystemTime((startAt + 1) * 1_000);
 	await page.evaluate((event) => {
 		const state = (window as typeof window & { __relayStartupTest: { state: { realtimeHistory: Array<Record<string, unknown>> }; disconnectRealtime(): void } }).__relayStartupTest;
@@ -786,7 +787,7 @@ test('does not replay a restored owner transfer during a Realtime reconnect', as
 		state.disconnectRealtime();
 	}, restoredEvent);
 	await page.clock.runFor(5_000);
-	await expect.poll(async () => (await relayState(page)).state.requests.filter((request) => request.filters.some((filter) => (filter.kinds as number[] | undefined)?.includes(TAG_GAME_KIND))).length).toBeGreaterThan(1);
+	await expect.poll(async () => (await relayState(page)).state.requests.filter((request) => request.filters.some((filter) => (filter.kinds as number[] | undefined)?.includes(TAG_GAME_KIND))).length).toBeGreaterThan(initialTagGameRequestCount);
 	await expect(page.locator(`.participant[data-self="true"][data-participant-id="${selfPubkey}"]`)).toHaveAttribute('data-tag-game-role', 'participant');
 	expect((await recordedTagGameSounds(page)).filter((duration) => Math.abs(duration - 0.34) < 0.001)).toHaveLength(0);
 });
@@ -2722,6 +2723,7 @@ test('organizer-confirmed leave settles the two-player game and releases the qui
 			preparePlayer(hostPage, hostSecret, nowMs, 200_000), preparePlayer(participantPage, participantSecret, nowMs, 200_000)
 		]);
 		await Promise.all([moveRelaySelfTo(hostPage, { x: 7, y: 5 }), moveRelaySelfTo(participantPage, { x: 7, y: 6 })]);
+		await synchronizeBrowserClocks([hostPage, participantPage]);
 		const hostPosition = await latestWorldState(hostPage, hostPubkey);
 		const participantPosition = await latestWorldState(participantPage, participantPubkey);
 		await Promise.all([injectPosition(hostPage, participantPosition), injectPosition(participantPage, hostPosition)]);
@@ -3079,6 +3081,7 @@ test('requests a missing remote Run position proof and accepts the next input af
 	try {
 		await Promise.all([preparePlayer(hostPage, hostSecret, nowMs, 200_000), preparePlayer(participantPage, participantSecret, nowMs, 200_000)]);
 		await Promise.all([moveRelaySelfTo(hostPage, { x: 7, y: 5 }), moveRelaySelfTo(participantPage, { x: 8, y: 5 })]);
+		await synchronizeBrowserClocks([hostPage, participantPage]);
 		const startedAt = Math.floor(await hostPage.evaluate(() => Date.now() / 1_000));
 		const nowSeconds = startedAt;
 		const freshHostPosition = finalizeEvent(buildWorldStateEventTemplate({ channel: { channelId: CHANNEL_ID, relayHint: 'wss://relay.test/' }, createdAt: startedAt, position: { x: 7, y: 5 }, slot: 1, runNumber: 1 }), hostSecret);

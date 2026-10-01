@@ -16,12 +16,14 @@ import {
 } from './traceReadState';
 import {
 	buildWorldStateEventTemplate,
+	buildPublicProfileStateTemplate,
 	buildDeathTraceEventTemplate,
 	buildManualTraceEventTemplate,
 	buildTraceReplyTemplate,
 	buildWorldMessageTemplate,
 	finalizeWorldEvent,
 	parseWorldStateEvent,
+	type PublicProfileState,
 	parseWorldMessage,
 	parseTraceEvent,
 	type ChannelReference,
@@ -73,6 +75,7 @@ import {
 	type PositionPublishState
 } from './positionPublish';
 import { resolvePrototypeWorldConfig } from './prototypeWorld';
+import { publicLifespanProjection } from './publicProfile';
 import {
 	applyWorldPresenceMessage,
 	applyWorldPresenceWorldState,
@@ -304,10 +307,65 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	let deathTraceAttempted = false;
 	let manualTraceRetryTimer: ReturnType<typeof setTimeout> | null = null;
 	let manualTraceAttemptSequence = 0;
+	let pendingPublicProfilePersona: PersonaSnapshot | null = null;
+	let publicProfileTimer: ReturnType<typeof setTimeout> | null = null;
+	let publicProfilePublishing = false;
+	let publishedProfileFingerprint: string | null = null;
+	let lastProfilePublishSecond = -1;
 
 	function emitStatus(next: WorldReadConnectionStatus): void {
 		status = next;
 		if (!disposed) options.onStatusChanged(status);
+	}
+
+	function publicProfileFingerprint(persona: PersonaSnapshot): string {
+		return JSON.stringify([persona.signer.pubkey, persona.activeRun.runNumber, persona.rootPoints,
+			persona.activeRun.rootBuild, persona.gameState]);
+	}
+
+	function schedulePublicProfilePublish(delayMs?: number): void {
+		if (disposed || publicProfileTimer !== null || !pendingPublicProfilePersona) return;
+		const now = Date.now();
+		const wait = delayMs ?? (1001 - now % 1000);
+		publicProfileTimer = setTimeout(() => {
+			publicProfileTimer = null;
+			void flushPublicProfilePublish();
+		}, wait);
+	}
+
+	async function flushPublicProfilePublish(): Promise<void> {
+		if (disposed || publicProfilePublishing || !pendingPublicProfilePersona || !transport || !channel || !selfSigner) return;
+		const persona = pendingPublicProfilePersona;
+		const fingerprint = publicProfileFingerprint(persona);
+		if (fingerprint === publishedProfileFingerprint) { pendingPublicProfilePersona = null; return; }
+		if (terminal || journalScope && (persona.signer.pubkey !== journalScope.identity.pubkey || persona.activeRun.runNumber !== journalScope.runNumber) || !await authorizeSelfWrite()) {
+			pendingPublicProfilePersona = null;
+			return;
+		}
+		if (disposed || terminal || !transport || !channel || !selfSigner) return;
+		const currentSecond = Math.floor(Date.now() / 1000);
+		if (currentSecond <= lastProfilePublishSecond) { schedulePublicProfilePublish(1000 - Date.now() % 1000 + 1); return; }
+		publicProfilePublishing = true;
+		lastProfilePublishSecond = currentSecond;
+		try {
+			const createdAt = Math.floor(Date.now() / 1000);
+			const event = finalizeWorldEvent(buildPublicProfileStateTemplate({
+				channel, createdAt, runNumber: persona.activeRun.runNumber,
+				points: persona.gameState.points, abilities: persona.gameState.abilities, rootPoints: persona.rootPoints,
+				lifespan: publicLifespanProjection(persona, Date.now())
+			}), selfSigner.secretKey);
+			const handle = transport.publishSelf(event, selfSigner.pubkey);
+			void handle.settled.catch(() => {});
+			if (await handle.firstSuccess) {
+				publishedProfileFingerprint = fingerprint;
+				if (pendingPublicProfilePersona && publicProfileFingerprint(pendingPublicProfilePersona) === fingerprint) pendingPublicProfilePersona = null;
+			}
+		} catch {
+			// Profile publication is best-effort; local lifecycle state remains authoritative.
+		} finally {
+			publicProfilePublishing = false;
+			if (pendingPublicProfilePersona) schedulePublicProfilePublish(5000);
+		}
 	}
 
 	function emitSelfPositionWriteState(next: SelfPositionWriteState): void {
@@ -1597,6 +1655,19 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	}
 
 	return {
+		reconcilePublicProfileState(persona: PersonaSnapshot): void {
+			if (disposed || !selfSigner || persona.signer.pubkey !== selfSigner.pubkey) return;
+			if (publicProfileFingerprint(persona) === publishedProfileFingerprint && !pendingPublicProfilePersona) return;
+			pendingPublicProfilePersona = persona;
+			schedulePublicProfilePublish();
+		},
+
+		openProfileState(pubkey: string, onState: (state: PublicProfileState) => void): Readonly<{ close: () => void }> {
+			if (disposed || !transport || !started) return { close: () => {} };
+			try { return transport.subscribeProfileState(pubkey, onState); }
+			catch { return { close: () => {} }; }
+		},
+
 		async start(): Promise<WorldReadBootstrap> {
 			if (started) throw new Error('World read session start is only allowed once.');
 			started = true;
@@ -1828,6 +1899,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		dispose(): void {
 			if (disposed) return;
 			disposed = true;
+			if (publicProfileTimer !== null) { clearTimeout(publicProfileTimer); publicProfileTimer = null; }
 			if (manualTraceRetryTimer !== null) { clearTimeout(manualTraceRetryTimer); manualTraceRetryTimer = null; }
 			traceConversationGeneration += 1;
 			pendingLiveEvents.splice(0);

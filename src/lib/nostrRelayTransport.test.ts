@@ -9,7 +9,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createNostrRelayTransport } from './nostrRelayTransport';
 import {
-	buildDeathTraceEventTemplate, buildTraceRootBootstrapFilter, buildWorldMessageTemplate, buildWorldStateEventTemplate, buildWorldMessageFilter, WORLD_STATE_KIND
+	buildDeathTraceEventTemplate, buildTraceRootBootstrapFilter, buildWorldMessageTemplate, buildWorldStateEventTemplate, buildWorldMessageFilter, buildPublicProfileStateTemplate, WORLD_STATE_KIND
 } from './nostrProtocol';
 import { buildRealtimeControlEventTemplate, buildRealtimeControlFilter, buildRealtimeEventFilter, buildRealtimeInstanceFilter, finalizeRealtimeEvent, type RealtimeEventRegistry } from './realtimeEvents';
 import { COOPERATION_DEFECTION_EVENT_DEFINITION, buildCooperationDefectionActionTemplate } from './cooperationDefection';
@@ -1365,6 +1365,37 @@ describe('trace root bootstrap', () => {
 		expect((await pending).relays[0].status).toBe('eose');
 		expect(f.authorities[0].messages.filter((message) => message[0] === 'CLOSE' && message[1] === rootSubId)).toHaveLength(1);
 		expect(f.authorities[0].primaryRequests()).toHaveLength(2);
+	});
+
+	it('opens one target-scoped live profile REQ only on relays that allow five subscriptions and closes it with the dialog', async () => {
+		const f = fixture(2);
+		Nip11Registry.set(f.authorities[0].url, { limitation: { max_subscriptions: 4 } });
+		Nip11Registry.set(f.authorities[1].url, { limitation: { max_subscriptions: 5 } });
+		await f.start();
+		const targetPubkey = getPublicKey(AUTHOR);
+		const received = vi.fn();
+		const profileSubscription = f.transport.subscribeProfileState(targetPubkey, received);
+		await vi.advanceTimersByTimeAsync(10);
+		const targetRequests = (relay: ReturnType<typeof mockRelay>) => relay.requests.filter((request) => {
+			const filter = filters(request)[0] as { authors?: string[] };
+			return kind(request) === WORLD_STATE_KIND && filter.authors?.[0] === targetPubkey;
+		});
+		expect(targetRequests(f.authorities[0])).toHaveLength(0);
+		expect(targetRequests(f.authorities[1])).toHaveLength(1);
+		expect(filters(targetRequests(f.authorities[1])[0])[0]).toMatchObject({
+			kinds: [WORLD_STATE_KIND], authors: [targetPubkey], '#d': [`io.github.lokuyow.persona-bubble-field:profile-state:${f.channel.id}`]
+		});
+		const event = finalizeEvent(buildPublicProfileStateTemplate({ channel: { channelId: f.channel.id, relayHint: f.authorities[1].url },
+			createdAt: TIME, runNumber: 2, points: 10, abilities: { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 }, rootPoints: 3,
+			lifespan: { active: false, projectedAtMs: TIME * 1_000, expiresAtMs: TIME * 1_000 + 604_800_000,
+				regularRemainingMs: 0, overflowRewardPercent: 0, maximumLifespanMs: 604_800_000 } }), AUTHOR);
+		const subscriptionId = targetRequests(f.authorities[1])[0][1];
+		send(f.authorities[1].latestSocket(), 'EVENT', subscriptionId, event);
+		await vi.advanceTimersByTimeAsync(10);
+		expect(received).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ pubkey: targetPubkey, runNumber: 2 }));
+		profileSubscription.close();
+		await vi.advanceTimersByTimeAsync(100);
+		expect(f.authorities[1].messages).toContainEqual(['CLOSE', subscriptionId]);
 	});
 
 	it('times out only bootstrap at capacity two and keeps both primaries live', async () => {

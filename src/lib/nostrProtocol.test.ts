@@ -8,10 +8,12 @@ import {
 	RECENT_MESSAGE_TIMELINE_LIMIT,
 	TRACE_REPLY_KIND,
 	buildWorldStateEventTemplate,
+	buildPublicProfileStateTemplate,
 	buildDeathTraceEventTemplate,
 	buildManualTraceEventTemplate,
 	buildCharacterProfileTemplate,
 	buildWorldStateFilter,
+	buildPublicProfileStateFilter,
 	buildTraceDirectReplyFilter,
 	buildTraceNotificationFilter,
 	buildTraceReplyFilter,
@@ -24,6 +26,7 @@ import {
 	finalizeWorldEvent,
 	finalizeCharacterProfileEvent,
 	parseWorldStateEvent,
+	parsePublicProfileState,
 	parseTraceEvent,
 	parseTraceReplyCandidate,
 	parseWorldMessage,
@@ -34,7 +37,8 @@ import {
 	type WorldEventTemplate,
 	type WorldMessageTemplate,
 	worldStateIdentifier,
-	worldStateIdentifiers
+	worldStateIdentifiers,
+	profileStateIdentifier
 } from './nostrProtocol';
 import { CHARACTER_CATALOG } from './character';
 
@@ -160,6 +164,29 @@ function signedTraceReply(
 }
 
 describe('Nostr protocol foundation', () => {
+	it('uses an independent fixed-address kind 30079 profile-state schema with strict validation', () => {
+		const template = buildPublicProfileStateTemplate({
+			channel, createdAt: 1_700_000_010, runNumber: 4, points: 123, rootPoints: 7,
+			abilities: { inferenceEfficiency: 2, contextCapacity: 3, hallucinationSuppression: 4 },
+			lifespan: { active: true, projectedAtMs: 1_700_000_010_000, expiresAtMs: 1_700_086_410_000,
+				regularRemainingMs: 120_000, overflowRewardPercent: 50, maximumLifespanMs: 604_800_000 }
+		});
+		expect(template).toEqual({ kind: 30079, created_at: 1_700_000_010, tags: [
+			['d', `${PROTOTYPE_NAMESPACE}:profile-state:${CHANNEL_ID}`], ['e', CHANNEL_ID, channel.relayHint], ['r', '4']
+		], content: JSON.stringify({ version: 1, points: 123, abilities: { inferenceEfficiency: 2, contextCapacity: 3, hallucinationSuppression: 4 }, rootPoints: 7,
+			lifespan: { active: true, projectedAtMs: 1_700_000_010_000, expiresAtMs: 1_700_086_410_000,
+				regularRemainingMs: 120_000, overflowRewardPercent: 50, maximumLifespanMs: 604_800_000 } }) });
+		expect(profileStateIdentifier(CHANNEL_ID)).toBe(`${PROTOTYPE_NAMESPACE}:profile-state:${CHANNEL_ID}`);
+		const event = finalizeWorldEvent(template, TEST_SECRET_KEY);
+		expect(parsePublicProfileState(event, CHANNEL_ID)).toMatchObject({ pubkey: event.pubkey, runNumber: 4, points: 123, rootPoints: 7, version: 1 });
+		expect(parsePublicProfileState(event, CHANNEL_ID, 'f'.repeat(64))).toBeNull();
+		expect(parseWorldStateEvent(event, CHANNEL_ID)).toBeNull();
+		const extraTag = { ...event, tags: [...event.tags, ['client', 'extra']] };
+		expect(parsePublicProfileState(resign(extraTag), CHANNEL_ID)).toBeNull();
+		const malformedContent = { ...event, content: JSON.stringify({ ...JSON.parse(event.content), privateField: true }) };
+		expect(parsePublicProfileState(resign(malformedContent), CHANNEL_ID)).toBeNull();
+	});
+
 	it('builds and signs the initial character kind 0 profile', () => {
 		const character = CHARACTER_CATALOG[0];
 		const template = buildCharacterProfileTemplate({
@@ -728,6 +755,9 @@ describe('Nostr protocol foundation', () => {
 			'#d': [...worldStateIdentifiers(CHANNEL_ID)],
 			'#e': [CHANNEL_ID],
 			since: 1_700_000_100
+		});
+		expect(buildPublicProfileStateFilter({ channelId: CHANNEL_ID, pubkey: 'c'.repeat(64), since: 0 })).toEqual({
+			kinds: [30079], authors: ['c'.repeat(64)], '#d': [profileStateIdentifier(CHANNEL_ID)], '#e': [CHANNEL_ID], since: 0
 		});
 		expect(buildTraceRootBootstrapFilter({ channelId: CHANNEL_ID })).toEqual({
 			kinds: [42],

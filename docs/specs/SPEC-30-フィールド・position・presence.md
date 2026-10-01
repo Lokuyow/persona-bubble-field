@@ -20,6 +20,49 @@
 
 操作すると、そのキャラクターの画像、名前、`about` をプロフィールDialogで表示する。プロフィールは、専用クライアント内のキャラクター表示と同じcharacter catalogを正とし、プロフィールのために追加のNostr通信を行わない。
 
+character image / name / aboutはauthor pubkeyから既存のdeterministic world-character resolverで導出する。kind 0を取得せず、kind 0はソトの一般Nostrプロフィールとして維持する。他ユーザーのProfile Dialogは、現在フィールド上にactive participantとして存在し、そのpubkeyのactive World Stateに含まれるRun numberを確認でき、取得したprofile-stateの`r`と一致する場合だけ公開人生情報を追加表示する。Run evidenceを確認できない場合、Runが異なる場合、Relayが利用できない場合は人生情報を表示しない。Trace root / replyなど、現在フィールド上にactive participantとして存在しないauthorは、キャラクター情報だけを表示する。
+
+Profileのcanonical targetはpubkeyとし、Field participant、Chatter author、Trace root / reply authorからpubkeyを保持して開く。実pubkeyを持たないDEV World fixtureは従来どおりcharacter IDによる表示を維持し、Nostr購読を要求しない。
+
+### profile-state
+
+`kind 30079` Hako Public Stateには、既存のposition用`world-state` addressとは独立した次の固定addressを使う。
+
+`io.github.lokuyow.persona-bubble-field:profile-state:<channel-id>`
+
+同一author・同一channelのaddressは固定とし、schema version更新で`d`を変更しない。event tagsは`d`に上記address、`e`にchannel event IDとRelay hint、`r`に正のRun numberを1つずつ含む。contentは追加keyを許可しないversion 1 JSON objectとする。
+
+```json
+{
+  "version": 1,
+  "points": 0,
+  "abilities": {
+    "inferenceEfficiency": 1,
+    "contextCapacity": 1,
+    "hallucinationSuppression": 1
+  },
+  "rootPoints": 0,
+  "lifespan": {
+    "active": false,
+    "projectedAtMs": 0,
+    "expiresAtMs": 0,
+    "regularRemainingMs": 0,
+    "overflowRewardPercent": 0,
+    "maximumLifespanMs": 604800000
+  }
+}
+```
+
+受信時は署名済み`kind 30079`、完全一致する`d` / channel参照、`r`、version、厳密なkey集合、safe integer、非負のpoints / Root Point / timestamp / duration、1–100の各ability level、寿命projectionの境界値を検証する。`points`はpersist済みのowned pointsのみで、未回収Mending pointsを含めない。能力の文言とeffectは保存せず、levelから既存domain ruleで導出する。character data、Mending内部job/carry、Root build rankはcontentへ複製しない。
+
+`lifespan`はpresentation-only projectionであり、内部Mending persistence schemaではない。`projectedAtMs`時点の`expiresAtMs`を基準とし、Mendingがactiveなら`regularRemainingMs`、公開済みability levelから既存domain ruleで導く延長率、既存Root context補正による`overflowRewardPercent`、寿命上限`maximumLifespanMs`を使ってviewer時刻へ投影する。activeでないときはwall-clock elapsedだけで期限を動かさない。これはSelfProfileと同じ現在残り寿命表示を再現する最小公開表示契約であり、内部rank/job/carryを開示しない。
+
+このeventはauthorが公開したpresentation stateでありgame authorityではない。受信値を報酬、参加資格、能力判定、寿命settlement、clear判定その他のgame logicへ使用しない。remote eventをlocal `PersonaSnapshot`やauthoritative lifecycle型へ変換しない。
+
+Profile stateのpublishはlocal authoritative PersonaSnapshotの意味的変更後にreconcileし、Run開始、Mending開始/回収/settlement、能力強化、owned points確定変更、Root Point変更などを反映する。単なるwall-clock経過ではpublishしない。publication failureや結果不明でlocal mutationをrollbackしない。同一`kind + pubkey + d`はUnix秒内に複数回publishせず、同秒のmutationは最新snapshotにcoalesceして次のUnix秒以降に発行する。
+
+読取は選択中の他ユーザーProfileだけを対象に、author pubkeyと`d` / channelを指定した単一のforward REQで履歴queryとopen中live subscriptionを行う。Dialogを閉じたらsubscriptionを解放し、再openに使える小さなmemory cacheのみ許容する。全participant購読や新規IndexedDB cacheは設けない。現在のactive participantのRun evidenceが未確認なら購読済みイベントも表示しない。
+
 プロフィールDialogは、下端の閉じる操作、Dialog外の操作、Escape、ブラウザまたは端末のBack操作で閉じられる。Back操作では、ページを離れるより先に開いているプロフィールDialogを閉じる。
 
 ### 座標表現
@@ -542,6 +585,8 @@ network上のTrace root bootstrapは、従来どおりprimary Worldの初期同�
 専用clientが発行するkind 30079 World Stateのpositionとexitには、任意の `r` tagでRun numberを付与できる。terminal exitでは `reason=death|clear` を付与し、reasonを付けるexitにはRun numberを必須とする。reasonのない旧形式exitから死亡・脱出理由を推定しない。参加者の署名済み鬼ごっこ登録RunとWorld StateのRunを照合し、より新しいRunのpositionが確認済みなら、以前のRunの遅延・再配信exitを現在Runの終了として扱わない。World Presenceの既存created_at/activity順序判定を維持し、新しいRunのactivityを古いexitで上書きしない。
 
 RelayごとのWebSocket接続自体をsubscriptionごとに別接続へ分ける必要はなく、同一Relay接続上で複数subscriptionを管理してよい。
+
+通常最大はprimary World 2本、Trace補助1本、Realtime補助1本の計4 active subscriptionである。Profile open中だけprofile-state補助1本を加え、最大5本を使いうる。NIP-11 `limitation.max_subscriptions`が既知で5未満のRelayではProfile subscriptionを開始しない。未広告値は既存方針どおり試行する。その他のNIP-11 limitation値をProfileのcompatibility gateにしない。2026-10-01時点のauthoritative Relay 5本の直接確認値と可変性は [`docs/PROJECT.md`](../PROJECT.md) を参照する。
 
 具体的なsubscription IDは製品仕様として固定しない。
 

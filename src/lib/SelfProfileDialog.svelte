@@ -2,15 +2,11 @@
 	import { Dialog, Popover, ScrollArea } from 'bits-ui';
 	import ActionButton from '$lib/ActionButton.svelte';
 	import HelpCircle from '~icons/tabler/help-circle';
-	import Heart from '~icons/tabler/heart';
-	import Brain from '~icons/tabler/brain';
-	import Stack2 from '~icons/tabler/stack-2';
-	import ShieldCheck from '~icons/tabler/shield-check';
-	import Wallet from '~icons/tabler/wallet';
 	import X from '~icons/tabler/x';
+	import Wallet from '~icons/tabler/wallet';
+	import ProfileLifeStats from './ProfileLifeStats.svelte';
+	import ProfileRootPoints from './ProfileRootPoints.svelte';
 	import type { MendingProjection } from '$lib/mending';
-	import { formatRemainingLifespan } from '$lib/lifespanHud';
-	import { getAbilityUpgrade, type PersonaAbilityKey } from '$lib/personaGameState';
 	import type { PersonaSnapshot } from '$lib/rootIdentity';
 	import type { BubbleTone } from '$lib/bubblePresentation';
 	import CharacterAvatar from './CharacterAvatar.svelte';
@@ -30,10 +26,6 @@
 	}>;
 
 	let { open, persona, mendingProjection, nowMs, clearBlockedReason, clearBusy, avatarTone, onOpenChange, onCloseAutoFocus, onClear }: Props = $props();
-	const abilityKeys: readonly PersonaAbilityKey[] = ['inferenceEfficiency', 'contextCapacity', 'hallucinationSuppression'];
-	const abilityLabels: Readonly<Record<PersonaAbilityKey, string>> = {
-		inferenceEfficiency: '推論効率', contextCapacity: 'コンテキスト容量', hallucinationSuppression: 'ハルシネーション抑制'
-	};
 	let character = $derived(persona ? getCharacterById(persona.identity.characterId) ?? null : null);
 	let initialFocusTarget = $state<HTMLElement | null>(null);
 	let effectiveExpiry = $derived(mendingProjection?.effectiveExpiresAtMs ?? persona?.gameState.lifespanExpiresAtMs ?? nowMs);
@@ -42,9 +34,6 @@
 	let pointBlocked = $derived(points < 100_000);
 	let clearBlocked = $derived(pointBlocked || clearBusy || clearBlockedReason !== null);
 
-	function abilityType(key: PersonaAbilityKey): string {
-		return key === 'inferenceEfficiency' ? 'ポイント生成速度' : key === 'contextCapacity' ? '最大蓄積時間' : '寿命延長量 / 作業1時間';
-	}
 </script>
 
 <Dialog.Root bind:open={() => open, onOpenChange}>
@@ -72,20 +61,11 @@
 						</section>
 						<section class="profile-section" aria-labelledby="self-profile-run">
 							<h2 id="self-profile-run">人生</h2>
-							<div class="summary-grid" aria-label="現在状態">
-								<div class="summary-card" data-stat-icon="heart"><span><Heart aria-hidden="true" />残り寿命</span><strong>{formatRemainingLifespan(effectiveExpiry, nowMs)}</strong></div>
-								<div class="summary-card" data-stat-icon="wallet"><span><Wallet aria-hidden="true" />所持ポイント</span><strong>{points} pt</strong></div>
-							</div>
-							<div class="ability-list">
-								{#each abilityKeys as key}
-									{@const upgrade = getAbilityUpgrade(key, persona.gameState.abilities)}
-									<div class="ability-row" data-ability-key={key}><div class="ability-info"><span class="ability-icon" aria-hidden="true" data-ability-icon={key === 'inferenceEfficiency' ? 'brain' : key === 'contextCapacity' ? 'stack-2' : 'shield-check'}>{#if key === 'inferenceEfficiency'}<Brain />{:else if key === 'contextCapacity'}<Stack2 />{:else}<ShieldCheck />{/if}</span><div class="ability-copy"><strong>{abilityLabels[key]}</strong><span>{abilityType(key)}</span></div></div><div class="ability-values"><strong>Lv{upgrade.level}</strong><span>{upgrade.currentEffect}</span></div></div>
-								{/each}
-							</div>
+			<ProfileLifeStats expiresAtMs={effectiveExpiry} {nowMs} points={persona.gameState.points} abilities={persona.gameState.abilities} />
 						</section>
 						<section class="profile-section" aria-labelledby="self-profile-root">
 							<h2 id="self-profile-root">Root</h2>
-							<div class="root-row"><span>Root Point</span><strong>{persona.rootPoints} RP</strong></div>
+			<ProfileRootPoints points={persona.rootPoints} />
 							<div class="clear-section" aria-labelledby="self-profile-clear">
 							<div class="clear-title-row"><div class="clear-title-group"><h3 id="self-profile-clear">脱出</h3><Popover.Root>
 								<Popover.Trigger class="escape-info-trigger" aria-label="脱出するとどうなるかを見る">
@@ -134,28 +114,10 @@
 	:global(.self-profile-viewport) { min-height: 0; max-height: 100%; overflow-y: auto; padding-right: 8px; }
 	.self-profile-sections { display: grid; gap: 32px; }
 	.self-profile-about { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; color: #56625e; font-size: 14px; font-weight: 700; line-height: 1.65; }
-	.summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-	.summary-card, .ability-row, .root-row { border: 1px solid rgba(57, 67, 64, .14); border-radius: 12px; background: rgba(255, 255, 255, .68); }
-	.summary-card { padding: 14px 15px; }
-	.summary-card span { display: block; margin-bottom: 5px; color: #75817d; font-size: 12px; font-weight: 800; }
-	.summary-card span :global(svg) { vertical-align: -3px; margin-right: 5px; }
-	.summary-card span :global(svg), .clear-progress-head span :global(svg) { width: 15px; height: 15px; flex: 0 0 auto; }
-	.summary-card strong { font-size: 20px; font-weight: 900; font-variant-numeric: tabular-nums; }
+	.clear-progress-head span :global(svg) { width: 15px; height: 15px; flex: 0 0 auto; }
 	.profile-section { display: grid; gap: 10px; }
 	.profile-section h2 { margin: 0; color: #56625e; font-size: 14px; font-weight: 900; letter-spacing: .04em; }
 	:global(.self-profile-content [data-initial-focus]:focus) { outline: none; }
-	.ability-list { display: grid; gap: 8px; }
-	.ability-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 11px 12px; }
-	.ability-info { display: flex; align-items: center; gap: 9px; min-width: 0; }
-	.ability-copy { display: grid; gap: 2px; min-width: 0; }
-	.ability-icon { display: grid !important; width: 22px; height: 22px; flex: 0 0 22px; place-items: center; margin: 0 !important; color: #5663d1 !important; }
-	.ability-icon :global(svg) { width: 20px; height: 20px; }
-	.ability-values { display: grid; gap: 2px; text-align: right; }
-	.ability-row strong { font-size: 14px; font-weight: 900; }
-	.ability-row span { color: #75817d; font-size: 12px; }
-	.ability-row > div:last-child strong { color: #5663d1; font-variant-numeric: tabular-nums; }
-	.root-row { display: flex; justify-content: space-between; gap: 12px; padding: 12px 14px; font-size: 14px; }
-	.root-row strong { font-variant-numeric: tabular-nums; }
 	.clear-section { display: grid; gap: 12px; padding: 16px; border: 1px solid #ddb9a8; border-radius: 14px; background: #fff1eb; }
 	.clear-title-row { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
 	.clear-title-group { display: inline-flex; align-items: center; gap: 2px; min-width: 0; }
@@ -181,5 +143,5 @@
 	:global(.clear-button) { min-height: 46px; border-radius: 9px; font-weight: 900; }
 	:global(.self-profile-scrollbar) { display: flex; width: 10px; padding: 2px; border-radius: 999px; background: rgba(86, 105, 98, .12); }
 	:global(.self-profile-thumb) { flex: 1; border-radius: inherit; background: #8fa8a0; }
-	@media (max-width: 600px) { :global(.self-profile-content) { gap: 10px; width: min(560px, calc(100vw - 20px)); max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 16px); padding: 18px; } .self-profile-sections { gap: 24px; } .self-profile-head { grid-template-columns: 96px minmax(0, 1fr); } :global(.self-profile-avatar) { width: 96px; height: 96px; border-radius: 32% 68% 42% 58%; } :global(.self-profile-identity [data-dialog-title]) { font-size: 20px; } .summary-grid { grid-template-columns: 1fr; } }
+	@media (max-width: 600px) { :global(.self-profile-content) { gap: 10px; width: min(560px, calc(100vw - 20px)); max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 16px); padding: 18px; } .self-profile-sections { gap: 24px; } .self-profile-head { grid-template-columns: 96px minmax(0, 1fr); } :global(.self-profile-avatar) { width: 96px; height: 96px; border-radius: 32% 68% 42% 58%; } :global(.self-profile-identity [data-dialog-title]) { font-size: 20px; } }
 </style>

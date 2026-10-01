@@ -3,7 +3,7 @@ import { finalizeEvent, getPublicKey } from 'nostr-tools/pure';
 import { buildManualTraceEventTemplate, buildWorldStateEventTemplate, WORLD_STATE_KIND } from '../../src/lib/nostrProtocol';
 import {
 	AUTHORITATIVE_RELAYS, CHANNEL_ID, fixtureSecret, installDelayedRelay, isRealtimeRequest, relayState,
-	requestKind, seedRelayAccount, testEvents
+	requestKind, seedRelayAccount, testEvents, isWorldPositionEvent
 } from './helpers/relayHarness';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 
@@ -172,9 +172,10 @@ test('accepts an early self echo before OK and ignores its later acknowledgement
 		event.kind === WORLD_STATE_KIND && event.pubkey === selfPubkey)).toBeTruthy();
 	await page.evaluate((pubkey) => {
 		const relay = (window as typeof window & { __relayStartupTest: {
-			state: { published: Array<{ kind: number; pubkey?: string }> }; injectPosition(event: object): void
+			state: { published: Array<{ kind: number; pubkey?: string; tags: string[][] }> }; injectPosition(event: object): void
 		} }).__relayStartupTest;
-		relay.injectPosition(relay.state.published.find((event) => event.kind === 30079 && event.pubkey === pubkey)!);
+		relay.injectPosition(relay.state.published.find((event) => event.kind === 30079 && event.pubkey === pubkey &&
+			event.tags.some((tag) => tag[0] === 'd' && tag[1]?.startsWith('io.github.lokuyow.persona-bubble-field:world-state:1:')))!);
 	}, selfPubkey);
 	await expect(page.locator(`.participant[data-self="true"][data-participant-id="${selfPubkey}"]`)).toHaveCount(1);
 	await page.evaluate(() => (window as typeof window & {
@@ -299,7 +300,7 @@ test('keeps the early writer for old, own, and journal-reserved other-tab self e
 	await expect.poll(async () => (await relayState(page)).state.published.some((event) =>
 		event.kind === WORLD_STATE_KIND && event.pubkey === selfPubkey)).toBe(true);
 	const ownPosition = (await relayState(page)).state.published.find((event) =>
-		event.kind === WORLD_STATE_KIND && event.pubkey === selfPubkey)!;
+		isWorldPositionEvent(event) && event.pubkey === selfPubkey)!;
 	await page.reload({ waitUntil: 'domcontentloaded' });
 	await waitForPrimary(page);
 	await page.evaluate((urls) => (window as typeof window & {

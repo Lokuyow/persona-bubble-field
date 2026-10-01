@@ -13,6 +13,7 @@ export const PROTOTYPE_NAMESPACE = 'io.github.lokuyow.persona-bubble-field';
 export const CHANNEL_MESSAGE_KIND = 42;
 export const TRACE_REPLY_KIND = 1111;
 export const WORLD_STATE_KIND = 30079;
+export const PROFILE_STATE_KIND = WORLD_STATE_KIND;
 export const PROFILE_KIND = 0;
 export const RECENT_MESSAGE_TIMELINE_LIMIT = 50;
 export const WORLD_STATE_SLOT_SUFFIXES = ['0', '1', 'exit'] as const;
@@ -26,6 +27,12 @@ export function worldStateIdentifier(channelId: string, slot: WorldStateSlot | '
 
 export function worldStateIdentifiers(channelId: string): readonly string[] {
 	return WORLD_STATE_SLOT_SUFFIXES.map((slot) => worldStateIdentifier(channelId, slot === 'exit' ? 'exit' : Number(slot) as WorldStateSlot));
+}
+
+/** Fixed profile address, independent from the content schema version. */
+export function profileStateIdentifier(channelId: string): string {
+	assertChannelId(channelId);
+	return `${PROTOTYPE_NAMESPACE}:profile-state:${channelId}`;
 }
 
 export type ChannelReference = {
@@ -51,6 +58,25 @@ export type WorldStateEventInput = {
 	runNumber?: number;
 	exitReason?: 'death' | 'clear';
 };
+
+export type PublicLifespanProjection = Readonly<{
+	active: boolean;
+	projectedAtMs: number;
+	expiresAtMs: number;
+	regularRemainingMs: number;
+	overflowRewardPercent: number;
+	maximumLifespanMs: number;
+}>;
+
+export type PublicProfileStateInput = Readonly<{
+	channel: ChannelReference;
+	createdAt: number;
+	runNumber: number;
+	points: number;
+	abilities: Readonly<{ inferenceEfficiency: number; contextCapacity: number; hallucinationSuppression: number }>;
+	rootPoints: number;
+	lifespan: PublicLifespanProjection;
+}>;
 
 export type DeathTraceEventInput = {
 	channel: ChannelReference;
@@ -121,6 +147,18 @@ export type ParsedWorldStateEvent = {
 	runNumber?: number | null;
 	exitReason?: 'death' | 'clear' | null;
 };
+
+export type PublicProfileState = Readonly<{
+	id: string;
+	pubkey: string;
+	createdAt: number;
+	runNumber: number;
+	version: 1;
+	points: number;
+	abilities: Readonly<{ inferenceEfficiency: number; contextCapacity: number; hallucinationSuppression: number }>;
+	rootPoints: number;
+	lifespan: PublicLifespanProjection;
+}>;
 
 export type ParsedTraceEvent = {
 	id: string;
@@ -353,6 +391,38 @@ export function buildWorldStateEventTemplate(input: WorldStateEventInput): World
 		tags,
 		content: formatCanonicalGridPosition(input.position)
 	};
+}
+
+export function buildPublicProfileStateTemplate(input: PublicProfileStateInput): EventTemplate & { kind: typeof PROFILE_STATE_KIND } {
+	assertChannelReference(input.channel);
+	assertCreatedAt(input.createdAt);
+	assertPublicProfileNumbers(input.runNumber, input.points, input.rootPoints, input.abilities, input.lifespan);
+	return {
+		kind: PROFILE_STATE_KIND,
+		created_at: input.createdAt,
+		tags: [
+			['d', profileStateIdentifier(input.channel.channelId)],
+			['e', input.channel.channelId, input.channel.relayHint],
+			['r', String(input.runNumber)]
+		],
+		content: JSON.stringify({ version: 1, points: input.points, abilities: input.abilities, rootPoints: input.rootPoints, lifespan: input.lifespan })
+	};
+}
+
+function assertPublicProfileNumbers(
+	runNumber: number, points: number, rootPoints: number,
+	abilities: PublicProfileStateInput['abilities'], lifespan: PublicLifespanProjection
+): void {
+	const integer = (value: unknown, minimum = 0) => typeof value === 'number' && Number.isSafeInteger(value) && value >= minimum;
+	if (!integer(runNumber, 1) || !integer(points) || !integer(rootPoints) ||
+		!integer(abilities?.inferenceEfficiency, 1) || abilities.inferenceEfficiency > 100 ||
+		!integer(abilities?.contextCapacity, 1) || abilities.contextCapacity > 100 ||
+		!integer(abilities?.hallucinationSuppression, 1) || abilities.hallucinationSuppression > 100 ||
+		typeof lifespan?.active !== 'boolean' || !integer(lifespan?.projectedAtMs) || !integer(lifespan?.expiresAtMs) ||
+		!integer(lifespan?.regularRemainingMs) ||
+		!integer(lifespan?.overflowRewardPercent) || ![0, 20, 35, 50].includes(lifespan.overflowRewardPercent) ||
+		![604_800_000, 1_209_600_000, 1_814_400_000, 2_592_000_000].includes(lifespan?.maximumLifespanMs) ||
+		!lifespan.active && lifespan.regularRemainingMs !== 0) throw new TypeError('Invalid public profile state.');
 }
 
 export function buildDeathTraceEventTemplate(input: DeathTraceEventInput): DeathTraceEventTemplate {
@@ -632,6 +702,49 @@ export function parseWorldStateEvent(event: Event, channelId: string): ParsedWor
 	};
 }
 
+/** Strict parser for the profile-state address under the shared experimental kind. */
+export function parsePublicProfileState(event: Event, channelId: string, expectedPubkey?: string): PublicProfileState | null {
+	assertChannelId(channelId);
+	if (!isVerifiedEvent(event) || event.kind !== PROFILE_STATE_KIND || !Number.isSafeInteger(event.created_at) || event.created_at < 0 ||
+		(expectedPubkey !== undefined && event.pubkey !== expectedPubkey)) return null;
+	if (event.tags.length !== 3) return null;
+	const [d, e, r] = event.tags;
+	if (d.length !== 2 || d[0] !== 'd' || d[1] !== profileStateIdentifier(channelId) ||
+		e.length !== 3 || e[0] !== 'e' || e[1] !== channelId ||
+		r.length !== 2 || r[0] !== 'r' || !/^[1-9][0-9]*$/.test(r[1] ?? '')) return null;
+	const runNumber = Number(r[1]);
+	if (!Number.isSafeInteger(runNumber) || runNumber < 1) return null;
+	let content: unknown;
+	try { content = JSON.parse(event.content); } catch { return null; }
+	if (typeof content !== 'object' || content === null || Array.isArray(content)) return null;
+	const value = content as Record<string, unknown>;
+	if (!hasExactKeys(value, ['version', 'points', 'abilities', 'rootPoints', 'lifespan']) || value.version !== 1 ||
+		typeof value.abilities !== 'object' || value.abilities === null || Array.isArray(value.abilities) ||
+		typeof value.lifespan !== 'object' || value.lifespan === null || Array.isArray(value.lifespan)) return null;
+	const abilities = value.abilities as Record<string, unknown>;
+	const lifespan = value.lifespan as Record<string, unknown>;
+	if (!hasExactKeys(abilities, ['inferenceEfficiency', 'contextCapacity', 'hallucinationSuppression']) ||
+		!hasExactKeys(lifespan, ['active', 'projectedAtMs', 'expiresAtMs', 'regularRemainingMs', 'overflowRewardPercent', 'maximumLifespanMs'])) return null;
+	try {
+		assertPublicProfileNumbers(runNumber, value.points as number, value.rootPoints as number,
+			abilities as unknown as PublicProfileStateInput['abilities'], lifespan as unknown as PublicLifespanProjection);
+	} catch { return null; }
+	return {
+		id: event.id, pubkey: event.pubkey, createdAt: event.created_at, runNumber, version: 1,
+		points: value.points as number,
+		abilities: { inferenceEfficiency: abilities.inferenceEfficiency as number, contextCapacity: abilities.contextCapacity as number, hallucinationSuppression: abilities.hallucinationSuppression as number },
+		rootPoints: value.rootPoints as number,
+		lifespan: { active: lifespan.active as boolean, projectedAtMs: lifespan.projectedAtMs as number, expiresAtMs: lifespan.expiresAtMs as number,
+			regularRemainingMs: lifespan.regularRemainingMs as number,
+			overflowRewardPercent: lifespan.overflowRewardPercent as number, maximumLifespanMs: lifespan.maximumLifespanMs as number }
+	};
+}
+
+function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
+	const actual = Object.keys(value);
+	return actual.length === expected.length && expected.every((key) => Object.hasOwn(value, key));
+}
+
 export function parseTraceEvent(event: Event, channelId: string): ParsedTraceEvent | null {
 	assertChannelId(channelId);
 	if (!isVerifiedEvent(event) || event.kind !== CHANNEL_MESSAGE_KIND || !hasAssignedCharacter(event)) return null;
@@ -688,6 +801,13 @@ export function buildWorldStateFilter(options: LiveFilterOptions): Filter {
 		'#e': [options.channelId],
 		since: options.since
 	};
+}
+
+export function buildPublicProfileStateFilter(options: LiveFilterOptions & Readonly<{ pubkey: string }>): Filter {
+	assertChannelId(options.channelId);
+	assertCreatedAt(options.since);
+	if (!/^[0-9a-f]{64}$/.test(options.pubkey)) throw new TypeError('Invalid profile pubkey.');
+	return { kinds: [PROFILE_STATE_KIND], authors: [options.pubkey], '#d': [profileStateIdentifier(options.channelId)], '#e': [options.channelId], since: options.since };
 }
 
 export function buildTraceRootBootstrapFilter(options: TraceRootBootstrapFilterOptions): Filter {

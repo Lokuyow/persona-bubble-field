@@ -4,6 +4,8 @@
 
 アカウント、秘密鍵、Nostr identityそのもの、および一般Nostrへの持ち出しは [`SPEC-10-Nostr・アカウント.md`](./SPEC-10-Nostr・アカウント.md) を正とする。本資料はそれらのゲーム進行上の扱いだけを定め、Nostr eventのkind、tag、schema、transport方式は定めない。
 
+他ユーザー向けPublic Profileに表示するpoints、ability、Root Point、残り寿命はauthorが公開するpresentation projectionであり、受信側のゲーム進行、報酬、参加資格、settlement、寿命判定、脱出判定の入力にはしない。wire contractと寿命のviewer-side projectionは [`SPEC-30-フィールド・position・presence.md`](./SPEC-30-フィールド・position・presence.md) を正とする。
+
 ## 1. 基本進行
 
 新しいRunには、Root buildに関係なく出生時に現実時間7日の寿命を与える。Rootのハルシネーション耐性Rankにより、作業で延長できる最大寿命だけが7日、14日、21日、30日に変わる。寿命は現実時間とともに減少し、0になると死亡する。

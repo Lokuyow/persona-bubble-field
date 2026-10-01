@@ -12,7 +12,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		messages: RecentMessageTimeline;
 		tones: Readonly<Record<string, BubbleTone>>;
 		selectedCharacterId: string;
-		onOpenProfile: (characterId: string, trigger: HTMLButtonElement) => void;
+		onOpenProfile: (characterId: string, pubkey: string, trigger: HTMLButtonElement) => void;
 		isDevWorldSandbox: boolean;
 		open: boolean;
 		statusHudBottom?: number;
@@ -146,7 +146,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 								class={`timeline-name${tone ? ` tone-${tone}` : ''}`}
 								type="button"
 								aria-label={`${character.name} のプロフィールを開く`}
-								onclick={(event) => onOpenProfile(character.characterId, event.currentTarget as HTMLButtonElement)}
+								onclick={(event) => onOpenProfile(character.characterId, message.pubkey, event.currentTarget as HTMLButtonElement)}
 							>{character.name}</button>
 							<span class="timeline-content">{message.content}</span>
 						</div>

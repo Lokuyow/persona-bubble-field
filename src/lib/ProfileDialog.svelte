@@ -4,18 +4,56 @@
 	import X from '~icons/tabler/x';
 	import { getCharacterById } from '$lib/character';
 	import CharacterAvatar from './CharacterAvatar.svelte';
+	import ProfileLifeStats from './ProfileLifeStats.svelte';
+	import ProfileRootPoints from './ProfileRootPoints.svelte';
+	import { projectPublicLifespan } from '$lib/publicProfile';
+	import type { PublicProfileState } from '$lib/nostrProtocol';
+	import type { createWorldReadSession } from '$lib/worldReadSession';
 
 	let {
 		onOpenChange,
-		onCloseAutoFocus
+		onCloseAutoFocus,
+		session,
+		currentRunNumber
 	}: {
 		onOpenChange: (open: boolean) => void;
 		onCloseAutoFocus: (event: Event) => void;
+		session: ReturnType<typeof createWorldReadSession> | null;
+		currentRunNumber: number | null;
 	} = $props();
 
 	const profileCharacterId = $derived(page.state.profileCharacterId);
 	const character = $derived(profileCharacterId ? getCharacterById(profileCharacterId) ?? null : null);
 	const open = $derived(character !== null);
+	let publicState = $state.raw<PublicProfileState | null>(null);
+	let viewerNowMs = $state(Date.now());
+	const publicStateCache = new Map<string, PublicProfileState>();
+	let projectedExpiry = $derived(publicState ? projectPublicLifespan(publicState, viewerNowMs) : null);
+
+	$effect(() => {
+		const pubkey = page.state.profilePubkey;
+		const runNumber = currentRunNumber;
+		const activeSession = session;
+		publicState = null;
+		if (!open || !pubkey || !runNumber || !activeSession) return;
+		const key = `${pubkey}:${runNumber}`;
+		const cached = publicStateCache.get(key);
+		if (cached) publicState = cached;
+		const subscription = activeSession.openProfileState(pubkey, (candidate) => {
+			if (candidate.runNumber !== runNumber) return;
+			const previous = publicStateCache.get(key);
+			if (previous && (candidate.createdAt < previous.createdAt || candidate.createdAt === previous.createdAt && candidate.id <= previous.id)) return;
+			publicStateCache.set(key, candidate);
+			publicState = candidate;
+		});
+		return () => subscription.close();
+	});
+
+	$effect(() => {
+		if (!open || !publicState) return;
+		const timer = window.setInterval(() => { viewerNowMs = Date.now(); }, 1_000);
+		return () => window.clearInterval(timer);
+	});
 </script>
 
 
@@ -30,12 +68,19 @@
 					<div>
 						<Dialog.Title>{character.name}</Dialog.Title>
 						<Dialog.Description class="visually-hidden">キャラクターのプロフィール</Dialog.Description>
+						{#if publicState}<span class="profile-run-number">人生 #{publicState.runNumber}</span>{/if}
 					</div>
 				</div>
 
 				<ScrollArea.Root class="profile-dialog-scroll-area" type="auto">
 					<ScrollArea.Viewport class="profile-dialog-scroll-viewport">
-						<p class="profile-dialog-about">{character.about}</p>
+						<div class="profile-dialog-sections">
+							<section class="profile-section"><h2>プロフィール</h2><p class="profile-dialog-about">{character.about}</p></section>
+							{#if publicState && projectedExpiry !== null}
+								<section class="profile-section"><h2>人生</h2><ProfileLifeStats expiresAtMs={projectedExpiry} nowMs={viewerNowMs} points={publicState.points} abilities={publicState.abilities} /></section>
+								<section class="profile-section"><h2>Root</h2><ProfileRootPoints points={publicState.rootPoints} /></section>
+							{/if}
+						</div>
 					</ScrollArea.Viewport>
 					<ScrollArea.Scrollbar class="profile-dialog-scrollbar" orientation="vertical">
 						<ScrollArea.Thumb class="profile-dialog-scroll-thumb" />
@@ -146,6 +191,11 @@
 		letter-spacing: 0.02em;
 		line-height: 1.7;
 	}
+
+	.profile-dialog-sections { display: grid; gap: 18px; }
+	.profile-section { display: grid; gap: 10px; }
+	.profile-section h2 { margin: 0; color: #52615c; font-size: 16px; font-weight: 900; }
+	.profile-run-number { display: block; margin-top: 5px; color: #75817d; font-size: 13px; font-weight: 800; }
 
 	:global(.profile-dialog-scrollbar) {
 		display: flex;

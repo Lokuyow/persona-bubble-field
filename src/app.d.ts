@@ -9,6 +9,7 @@ declare global {
 		// interface PageData {}
 		interface PageState {
 			profileCharacterId?: string;
+			profilePubkey?: string;
 		}
 		// interface Platform {}
 	}

@@ -5,6 +5,7 @@ import { wordlist as englishWordlist } from '@scure/bip39/wordlists/english.js';
 import { finalizeEvent, getPublicKey, verifyEvent, type Event as NostrEvent } from 'nostr-tools/pure';
 import {
 	buildWorldStateEventTemplate,
+	PROTOTYPE_NAMESPACE,
 	WORLD_STATE_KIND,
 	buildTraceReplyTemplate,
 	buildWorldMessageTemplate,
@@ -311,6 +312,7 @@ export async function installDelayedRelay(page: Page, options: {
 	deferPrimaryEvents?: boolean;
 	historyMessages?: readonly object[];
 	primaryEvents?: Readonly<{ message: object; position: object }>;
+	profileStateEvents?: readonly object[];
 	primaryTerminal?: 'eose' | 'closed';
 	realtimeEvents?: readonly object[];
 	deferRealtimeEvents?: boolean;
@@ -329,7 +331,7 @@ export async function installDelayedRelay(page: Page, options: {
 	hiddenSubscriptionLimit?: number;
 } = {}): Promise<void> {
 	const events = options.primaryEvents ?? testEvents();
-	await page.addInitScript(({ authoritativeRelays, primaryEvents, historyMessages, realtimeEvents, deferPrimaryEvents, deferRealtimeEvents, primaryTerminal, realtimeTerminal, realtimePublishOutcome, rejectTracePublishes, deferTracePublishes, traceRoots, traceReplies, deferTraceRoots, deferTraceReplies, silentReplyRelays, persistAcrossReload, observeWebSocketLifecycle, testWorldConfig, hiddenSubscriptionLimit }) => {
+	await page.addInitScript(({ authoritativeRelays, primaryEvents, profileStateEvents, historyMessages, realtimeEvents, deferPrimaryEvents, deferRealtimeEvents, primaryTerminal, realtimeTerminal, realtimePublishOutcome, rejectTracePublishes, deferTracePublishes, traceRoots, traceReplies, deferTraceRoots, deferTraceReplies, silentReplyRelays, persistAcrossReload, observeWebSocketLifecycle, testWorldConfig, hiddenSubscriptionLimit }) => {
 		const WORLD_STATE_KIND = 30079;
 		const TAG_GAME_KIND = 37070;
 		type Listener = (event?: { type: string; data?: string; code?: number; reason?: string }) => void;
@@ -349,6 +351,7 @@ export async function installDelayedRelay(page: Page, options: {
 		const pendingPublishes: Array<{ socket: FakeWebSocket; event: Record<string, unknown> }> = [];
 		const pendingRealtimePublishes: Array<{ socket: FakeWebSocket; event: Record<string, unknown>; outcome: 'accepted' | 'rejected' | 'echo' }> = [];
 		const timelineHistory = (historyMessages ?? []) as Array<Record<string, unknown>>;
+		const publicProfileHistory = (profileStateEvents ?? []) as Array<Record<string, unknown>>;
 		const traceReplyHistory = traceReplies as Array<Record<string, unknown>>;
 		const persistedKey = 'relay-startup-persisted-state';
 		const persistedLatePositionKey = 'relay-startup-persisted-late-position';
@@ -415,6 +418,7 @@ export async function installDelayedRelay(page: Page, options: {
 		};
 		const matchesTraceFilter = (event: Record<string, unknown>, filter: Record<string, unknown>) =>
 			(!filter.kinds || (filter.kinds as number[]).includes(event.kind as number)) &&
+			(!filter.authors || (filter.authors as string[]).includes(event.pubkey as string)) &&
 			(filter.since === undefined || (event.created_at as number) >= (filter.since as number)) &&
 			(filter.until === undefined || (event.created_at as number) <= (filter.until as number)) &&
 			Object.entries(filter).filter(([key]) => /^#[A-Za-z]$/.test(key)).every(([key, values]) =>
@@ -455,6 +459,9 @@ export async function installDelayedRelay(page: Page, options: {
 			}
 			if (request.filters.some((filter) => filter.limit === 50)) {
 				for (const event of timelineHistory) deliver(request.socket, ['EVENT', request.subId, event]);
+			}
+			for (const event of publicProfileHistory) {
+				if (request.filters.some((filter) => matchesTraceFilter(event, filter))) deliver(request.socket, ['EVENT', request.subId, event]);
 			}
 		};
 		const recordInjectedPositionReservation = (rawEvent: object) => new Promise<void>((resolve, reject) => {
@@ -802,6 +809,7 @@ export async function installDelayedRelay(page: Page, options: {
 		}, {
 		authoritativeRelays: AUTHORITATIVE_RELAYS,
 		primaryEvents: events,
+		profileStateEvents: options.profileStateEvents ?? [],
 		historyMessages: options.historyMessages ?? [],
 		deferPrimaryEvents: options.deferPrimaryEvents ?? false,
 		primaryTerminal: options.primaryTerminal ?? 'eose',
@@ -831,6 +839,11 @@ export function relayState(page: Page) {
 
 export function requestKind(request: { filter: Record<string, unknown> }): number | undefined {
 	return Array.isArray(request.filter.kinds) && typeof request.filter.kinds[0] === 'number' ? request.filter.kinds[0] : undefined;
+}
+
+export function isWorldPositionEvent(event: { kind?: number; tags?: readonly (readonly string[])[] }): boolean {
+	return event.kind === WORLD_STATE_KIND && Boolean(event.tags?.some((tag) =>
+		tag[0] === 'd' && tag[1]?.startsWith(`${PROTOTYPE_NAMESPACE}:world-state:1:`)));
 }
 
 export async function relayFieldCellCenter(page: Page, cell: { x: number; y: number }): Promise<{ x: number; y: number }> {

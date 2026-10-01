@@ -18,7 +18,7 @@
 		traceRootTailTarget: WorldPoint | null;
 		bubbleOverflowById: Readonly<Record<string, boolean>>;
 		onSelectSpeech: (id: string) => void;
-		onOpenProfile: (characterId: string, trigger: HTMLButtonElement) => void;
+		onOpenProfile: (characterId: string, pubkey: string, trigger: HTMLButtonElement) => void;
 		onBubbleMeasurement: (id: string, measurement: BubbleMeasurement) => void;
 		onBubbleMeasurementRemoved: (id: string) => void;
 		registerBubbleRemeasure: (id: string, measure: () => void) => () => void;
@@ -117,7 +117,7 @@
 			{#if bubble.reply.speechType !== 'normal' && bubble.shape}
 				<BubbleSurface bubbleId={bubble.id} shape={bubble.shape} variant="trace" speechType={bubble.reply.speechType} selected={showCurrentSelection && currentSpeechId === bubble.reply.id} />
 			{/if}
-			<button class="trace-reply-author-profile" data-trace-author-block type="button" aria-label={`${bubble.character.name} のプロフィールを開く`} onclick={(event) => { event.stopPropagation(); onOpenProfile(bubble.character.characterId, event.currentTarget); }}>
+			<button class="trace-reply-author-profile" data-trace-author-block type="button" aria-label={`${bubble.character.name} のプロフィールを開く`} onclick={(event) => { event.stopPropagation(); onOpenProfile(bubble.character.characterId, bubble.reply.pubkey, event.currentTarget); }}>
 				<span class="trace-reply-author-avatar"><CharacterAvatar class={`avatar avatar-${bubble.tone}`} character={bubble.character} /></span>
 				<span class="trace-reply-author-name">{bubble.character.name}</span>
 			</button>

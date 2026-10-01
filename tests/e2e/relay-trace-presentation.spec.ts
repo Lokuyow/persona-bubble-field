@@ -3,7 +3,7 @@ import {
 	WORLD_STATE_KIND
 } from '../../src/lib/nostrProtocol';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
-import { AUTHORITATIVE_RELAYS, traceRuntimeEvents, installDelayedRelay, relayState, relayFieldCellCenter, pauseAtCurrentBrowserTime, seedRelayAccount } from './helpers/relayHarness';
+import { AUTHORITATIVE_RELAYS, traceRuntimeEvents, installDelayedRelay, relayState, relayFieldCellCenter, pauseAtCurrentBrowserTime, seedRelayAccount, isWorldPositionEvent } from './helpers/relayHarness';
 
 
 
@@ -61,7 +61,7 @@ test.describe('Relay startup', () => {
 		await expect(page.locator(`[data-trace-reply-ghost-id="${trace.selfDirect.id}"]`)).toHaveCount(0);
 		await expect(page.locator(`[data-trace-tail-reply-id]`)).toHaveCount(0);
 		const publishedPositionIds = async () => new Set(
-			(await relayState(page)).state.published.filter((event) => event.kind === WORLD_STATE_KIND).map((event) => event.id)
+			(await relayState(page)).state.published.filter(isWorldPositionEvent).map((event) => event.id)
 		).size;
 		const positionsBeforeCurrentSwitch = await publishedPositionIds();
 		await page.clock.install({ time: Date.now() });

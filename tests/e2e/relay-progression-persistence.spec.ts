@@ -21,7 +21,7 @@ import { deriveBip85NostrEntropy } from '../../src/lib/bip85';
 import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL } from '../../src/lib/fieldFacilities';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { installFieldFrameSampling, readFieldFrames, sampleRenderedField } from './helpers/fieldFrames';
-import { CHANNEL_ID, AUTHORITATIVE_RELAYS, fixtureSecret, testEvents, isDeathTraceEvent, installDelayedRelay, relayState, dragRelayJoystick, publishedMessages, waitForPublishedMessageCount, pauseAtCurrentBrowserTime, startSelectedRun, openReadyRelayWorld, openClearReadyWorld, installPromptApiStub, seedRelayAccount, readRelayGameState, overwriteRelayGameState, overwriteRelayMendingBuild, seedUnavailablePersona, installDeathTransitionFailure, armDeathTransitionFailure, moveRelaySelfTo } from './helpers/relayHarness';
+import { CHANNEL_ID, AUTHORITATIVE_RELAYS, fixtureSecret, testEvents, isDeathTraceEvent, isWorldPositionEvent, installDelayedRelay, relayState, dragRelayJoystick, publishedMessages, waitForPublishedMessageCount, pauseAtCurrentBrowserTime, startSelectedRun, openReadyRelayWorld, openClearReadyWorld, installPromptApiStub, seedRelayAccount, readRelayGameState, overwriteRelayGameState, overwriteRelayMendingBuild, seedUnavailablePersona, installDeathTransitionFailure, armDeathTransitionFailure, moveRelaySelfTo } from './helpers/relayHarness';
 
 
 test.describe('Relay startup', () => {
@@ -244,14 +244,16 @@ test.describe('Relay startup', () => {
 			await page.locator('ehagaki-composer').getByRole('button', { name: 'Send' }).click();
 			await expect.poll(async () => (await relayState(page)).state.published.some((event) => event.kind === 42 && event.pubkey === newPubkey)).toBe(true);
 			const observed = await page.evaluate(() => {
-				const state = (window as typeof window & { __relayStartupTest: { state: { previousPublished: Array<{ kind: number; pubkey: string }>; published: Array<{ kind: number; pubkey: string }>; previousClosedSubscriptions: unknown[] } } }).__relayStartupTest.state;
+				const state = (window as typeof window & { __relayStartupTest: { state: { previousPublished: Array<{ kind: number; pubkey: string; tags: string[][] }>; published: Array<{ kind: number; pubkey: string; tags: string[][] }>; previousClosedSubscriptions: unknown[] } } }).__relayStartupTest.state;
 				return { published: [...state.previousPublished, ...state.published], closed: state.previousClosedSubscriptions };
 			});
 			expect(observed.closed.length).toBeGreaterThan(0);
 			const postSupersession = observed.published.slice(oldPublishedCount);
-			expect(postSupersession.filter((event) => [WORLD_STATE_KIND, 42, 1111].includes(event.kind))).not.toContainEqual(expect.objectContaining({ pubkey: oldPubkey }));
+			// Position evidence, messages and replies remain lifecycle fenced. A queued
+			// presentation-only snapshot may be logged during supersession but cannot prove the new Run.
+			expect(postSupersession.filter((event) => isWorldPositionEvent(event) || [42, 1111].includes(event.kind))).not.toContainEqual(expect.objectContaining({ pubkey: oldPubkey }));
 			// The new Run's confirmed position is restored from its journal; this tab need not re-enter.
-			expect(postSupersession.filter((event) => event.kind === WORLD_STATE_KIND && event.pubkey === newPubkey)).toHaveLength(0);
+			expect(postSupersession.filter((event) => isWorldPositionEvent(event) && event.pubkey === newPubkey)).toHaveLength(0);
 			expect(postSupersession).toContainEqual(expect.objectContaining({ kind: 42, pubkey: newPubkey }));
 		} finally {
 			await reincarnator.close();

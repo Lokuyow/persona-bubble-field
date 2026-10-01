@@ -481,7 +481,21 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	let profileDialogOpen = $derived(Boolean(
 		page.state.profileCharacterId && getCharacterById(page.state.profileCharacterId)
 	));
+	let profileTargetPubkey = $derived(page.state.profilePubkey);
+	let profileRunEvidence = $derived(profileTargetPubkey ? latestTagGameWorldStates.get(profileTargetPubkey) ?? null : null);
+	let profileParticipant = $derived(profileTargetPubkey ? presenceState.participants.find((participant) => participant.id === profileTargetPubkey) ?? null : null);
+	let profileRunNumber = $derived((profileRunEvidence?.state === 'active' && profileRunEvidence.runNumber !== null &&
+		profileParticipant?.status === 'active' && profileParticipant.lastActivityAt !== null &&
+		profileRunEvidence.createdAt * 1_000 <= profileParticipant.lastActivityAt &&
+		profileParticipant.lastActivityAt - profileRunEvidence.createdAt * 1_000 < PRESENCE_TIMEOUT_MS
+		? profileRunEvidence.runNumber : null) ?? null);
 	let lastProfileTrigger: HTMLButtonElement | null = null;
+
+	$effect(() => {
+		const session = worldSession;
+		const persona = personaSnapshot;
+		if (!personaLifecycleTransition && session && persona) session.reconcilePublicProfileState(persona);
+	});
 	let composerEditorIsEmpty: boolean | null = null;
 	let chatterComponent: { initialize(width: number): void; isInitialized(): boolean; resetMeasurements(): void };
 	let chatterOpen = $state(false);
@@ -3169,6 +3183,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		return `${gameId}:${pubkey}:${runNumber}`;
 	}
 
+
 	function currentTagGameTouchProof(pubkey: string, runNumber: number): TagGameTouchPositionProof | undefined {
 		const anchor = latestTagGameWorldStates.get(pubkey);
 		const position = tagGamePositionEvidence.get(pubkey);
@@ -4224,7 +4239,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			openSelfProfile(selfProfileTrigger);
 			return;
 		}
-		openProfile(participant.character.characterId, trigger);
+		openProfile(participant.character.characterId, participant.id, trigger);
 	}
 
 	function resolveFieldCellSelection(position: { x: number; y: number }, trigger?: HTMLButtonElement): void {
@@ -4813,9 +4828,9 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		setDevTraceReplies([...devTraceReplies, createDevTraceLiveReply(Date.now())]);
 	}
 
-	function openProfile(characterId: string, trigger: HTMLButtonElement): void {
+	function openProfile(characterId: string, pubkey: string | undefined, trigger: HTMLButtonElement): void {
 		lastProfileTrigger = trigger;
-		pushState('', { ...page.state, profileCharacterId: characterId });
+		pushState('', { ...page.state, profileCharacterId: characterId, ...(pubkey ? { profilePubkey: pubkey } : { profilePubkey: undefined }) });
 	}
 
 	function openSelfProfile(trigger: HTMLButtonElement): void {
@@ -5226,6 +5241,8 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	<ProfileDialog
 		onOpenChange={handleProfileOpenChange}
 		onCloseAutoFocus={restoreProfileTriggerFocus}
+		session={worldSession}
+		currentRunNumber={profileRunNumber}
 	/>
 	<IdentitySelectionDialog selection={pendingIdentitySelection} rootPoints={pendingRootPoints} transitionNotice={runTransitionNotice} onSelect={(candidate, rootBuild) => { void chooseIdentity(candidate, rootBuild); }} onExportNsec={(candidate) => { void exportIdentityNsec(candidate); }} />
 	<MendingDialog

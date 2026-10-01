@@ -742,8 +742,24 @@ test.describe('Relay startup', () => {
 			for (const button of await upgrades.all()) await expect(button).toBeVisible();
 		}
 		await page.setViewportSize({ width: 1280, height: 800 });
+		await page.evaluate(() => {
+			const dialog = document.querySelector('.adjustment-dialog-content');
+			if (!dialog) throw new Error('Expected the ability upgrade dialog.');
+			const state = window as typeof window & { __upgradeBusyEvidence?: Promise<{ count: number; allDisabled: boolean; allPrimary: boolean }> };
+			state.__upgradeBusyEvidence = new Promise((resolve) => {
+				const observer = new MutationObserver(() => {
+					const buttons = Array.from(dialog.querySelectorAll<HTMLButtonElement>('.upgrade-button'));
+					if (buttons.length === 3 && buttons.every((button) => button.getAttribute('aria-label')?.includes('強化処理中'))) {
+						observer.disconnect();
+						resolve({ count: buttons.length, allDisabled: buttons.every((button) => button.disabled), allPrimary: buttons.every((button) => button.getAttribute('data-action-variant') === 'primary') });
+					}
+				});
+				observer.observe(dialog, { subtree: true, attributes: true, attributeFilter: ['aria-label', 'disabled'] });
+			});
+		});
 		await contextUpgrade.click();
-		await expect(dialog.getByRole('button', { name: /強化処理中/ })).toHaveCount(3);
+		const busyEvidence = await page.evaluate(() => (window as typeof window & { __upgradeBusyEvidence: Promise<{ count: number; allDisabled: boolean; allPrimary: boolean }> }).__upgradeBusyEvidence);
+		expect(busyEvidence).toEqual({ count: 3, allDisabled: true, allPrimary: true });
 		for (const button of await upgrades.all()) {
 			await expect(button).toBeDisabled();
 			await expect(button).toHaveAttribute('data-action-variant', 'primary');

@@ -6,6 +6,7 @@ import { wordlist as englishWordlist } from '@scure/bip39/wordlists/english.js';
 import { finalizeEvent, getPublicKey, verifyEvent, type Event as NostrEvent } from 'nostr-tools/pure';
 import {
 	buildWorldStateEventTemplate,
+	buildPublicProfileStateTemplate,
 	WORLD_STATE_KIND,
 	buildDeathTraceEventTemplate,
 	buildTraceReplyTemplate,
@@ -656,4 +657,56 @@ for (const stateKind of ['missing', 'corrupt'] as const) {
 			}
 		}
 	});
+});
+
+test('opens an active field participant profile by pubkey and renders only matching Run evidence', async ({ page }) => {
+	const startTime = Date.now();
+	const selfSecret = fixtureSecret(19);
+	const otherSecret = fixtureSecret(23);
+	const otherPubkey = getPublicKey(otherSecret);
+	const createdAt = Math.floor(startTime / 1_000);
+	const channel = { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' };
+	const otherEvents = {
+		message: finalizeEvent(buildWorldMessageTemplate({ channel, content: 'Public profile target', speechType: 'normal', position: { x: 5, y: 4 }, createdAt }), otherSecret),
+		position: finalizeEvent(buildWorldStateEventTemplate({ channel, position: { x: 5, y: 4 }, slot: 0, createdAt, runNumber: 2 }), otherSecret)
+	};
+	const profileState = finalizeEvent(buildPublicProfileStateTemplate({
+		channel, createdAt, runNumber: 2, points: 12_345,
+		abilities: { inferenceEfficiency: 1, contextCapacity: 2, hallucinationSuppression: 3 }, rootPoints: 678,
+		lifespan: { active: false, projectedAtMs: startTime, expiresAtMs: startTime + 5 * 24 * 60 * 60 * 1_000,
+			regularRemainingMs: 0, overflowRewardPercent: 0, maximumLifespanMs: 30 * 24 * 60 * 60 * 1_000 }
+	}), otherSecret);
+	await page.clock.install({ time: startTime });
+	await installHostOwnedStub(page);
+	await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret), startTime + 7 * 24 * 60 * 60 * 1_000);
+	await installDelayedRelay(page, { primaryEvents: otherEvents, profileStateEvents: [profileState] });
+	await page.goto('/');
+	await expect(page.locator('.action-dock')).toBeVisible();
+	await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
+		AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) && (request.filter.kinds as number[])[0] === 42)).toBe(true);
+	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+	const participant = page.locator(`.participant[data-participant-id="${otherPubkey}"]`);
+	await expect(participant).toBeVisible();
+	const chatter = page.getByLabel('Chatter', { exact: true });
+	if (await chatter.isVisible()) await page.locator('.chatter-toggle').click();
+	const fieldProfileTrigger = participant.getByRole('button', { name: /プロフィールを開く/ });
+	await fieldProfileTrigger.focus();
+	await fieldProfileTrigger.press('Enter');
+	const dialog = page.locator('.profile-dialog-content');
+	await expect(dialog).toBeVisible();
+	await expect(dialog).toContainText('人生 #2');
+	await expect(dialog).toContainText('12345 pt');
+	await expect(dialog).toContainText('678 RP');
+	await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
+		request.filters.some((filter) => (filter.authors as string[] | undefined)?.[0] === otherPubkey &&
+			(filter['#d'] as string[] | undefined)?.includes(`io.github.lokuyow.persona-bubble-field:profile-state:${CHANNEL_ID}`)))).toBe(true);
+	const profileReqs = (await relayState(page)).state.requests.filter((request) => request.filters.some((filter) =>
+		(filter.authors as string[] | undefined)?.[0] === otherPubkey && (filter['#d'] as string[] | undefined)?.includes(`io.github.lokuyow.persona-bubble-field:profile-state:${CHANNEL_ID}`)));
+	expect(profileReqs.length).toBeGreaterThan(0);
+	await dialog.getByRole('button', { name: '閉じる', exact: true }).click();
+	await expect(dialog).toHaveCount(0);
+	await expect.poll(async () => {
+		const state = await relayState(page);
+		return profileReqs.every((request) => state.state.closedSubscriptions.some((closed) => closed.subId === request.subId));
+	}).toBe(true);
 });
