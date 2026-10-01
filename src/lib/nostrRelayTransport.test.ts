@@ -1387,8 +1387,7 @@ describe('trace root bootstrap', () => {
 		});
 		const event = finalizeEvent(buildPublicProfileStateTemplate({ channel: { channelId: f.channel.id, relayHint: f.authorities[1].url },
 			createdAt: TIME, runNumber: 2, points: 10, abilities: { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 }, rootPoints: 3,
-			lifespan: { active: false, projectedAtMs: TIME * 1_000, expiresAtMs: TIME * 1_000 + 604_800_000,
-				regularRemainingMs: 0, overflowRewardPercent: 0, maximumLifespanMs: 604_800_000 } }), AUTHOR);
+			lifespan: { baseExpiresAtMs: TIME * 1_000 + 604_800_000, extension: null } }), AUTHOR);
 		const subscriptionId = targetRequests(f.authorities[1])[0][1];
 		send(f.authorities[1].latestSocket(), 'EVENT', subscriptionId, event);
 		await vi.advanceTimersByTimeAsync(10);

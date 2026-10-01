@@ -42,7 +42,7 @@
 		const subscription = activeSession.openProfileState(pubkey, (candidate) => {
 			if (candidate.runNumber !== runNumber) return;
 			const previous = publicStateCache.get(key);
-			if (previous && (candidate.createdAt < previous.createdAt || candidate.createdAt === previous.createdAt && candidate.id <= previous.id)) return;
+			if (previous && (candidate.createdAt < previous.createdAt || candidate.createdAt === previous.createdAt && candidate.id >= previous.id)) return;
 			publicStateCache.set(key, candidate);
 			publicState = candidate;
 		});

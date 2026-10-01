@@ -25,6 +25,7 @@ import {
 	getRealtimeSettlementLedger,
 	loadOrCreateLifecycle,
 	loadWorldWriteJournal,
+	reservePublicProfilePublication,
 	reserveWorldPositive,
 	reserveManualTraceOutbox,
 	settleManualTraceOutbox,
@@ -319,6 +320,34 @@ describe('Root / Identity / Run lifecycle', () => {
 		expect(await reserveWorldPositive(input)).toEqual({ kind: 'wait', untilSecond: TIME / 1000 + 1 });
 		expect(await reserveWorldPositive({ ...input, nowSecond: TIME / 1000 + 1 })).toMatchObject({ kind: 'reserved', reservation: { slot: 0 } });
 		expect(await loadWorldWriteJournal(scope)).toMatchObject({ lastReservedSecond: TIME / 1000 + 1, consumedSlots: 1 });
+	});
+
+	it('persists an independent profile timestamp fence across tabs, reload boundaries, Run changes, and clock rollback', async () => {
+		const first = await selected(ZERO_BUILD, { initialPoints: 100_000 });
+		const channelId = 'd'.repeat(64);
+		const scope = { identity: first.signer.identity, runNumber: first.activeRun.runNumber, channelId };
+		const reservation = await reservePublicProfilePublication({ scope, nowSecond: TIME / 1_000 });
+		expect(reservation.kind).toBe('reserved');
+		expect(await reservePublicProfilePublication({ scope, nowSecond: TIME / 1_000 })).toEqual({ kind: 'wait', untilSecond: TIME / 1_000 + 1 });
+		expect(await reservePublicProfilePublication({ scope, nowSecond: TIME / 1_000 - 10 })).toEqual({ kind: 'wait', untilSecond: TIME / 1_000 + 1 });
+		expect(await loadWorldWriteJournal(scope)).toMatchObject({ profileLastReservedSecond: TIME / 1_000, lastReservedSecond: null, consumedSlots: 0, lastPositiveSecond: null, exitSecond: null });
+		const cleared = await clearPersona(first);
+		expect(cleared.kind).toBe('cleared');
+		const selecting = await loadOrCreateLifecycle();
+		if (selecting.kind !== 'selecting') throw new Error('Expected reusable identity selection.');
+		const reusable = selecting.selection.reusableIdentities.find((identity) => identity.pubkey === first.signer.pubkey);
+		if (!reusable) throw new Error('Expected the same Identity to be reusable.');
+		const next = await selectIdentity(selecting.selection.generation, reusable, { inferenceAcceleration: 1, contextCompression: 0, hallucinationResistance: 0 });
+		if (next.kind !== 'selected') throw new Error(`Expected new Run, got ${next.kind}.`);
+		const nextScope = { identity: next.persona.signer.identity, runNumber: next.persona.activeRun.runNumber, channelId };
+		expect(nextScope.runNumber).not.toBe(scope.runNumber);
+		expect(await reservePublicProfilePublication({ scope: nextScope, nowSecond: TIME / 1_000 })).toEqual({ kind: 'wait', untilSecond: TIME / 1_000 + 1 });
+		const twoTabs = await Promise.all([
+			reservePublicProfilePublication({ scope: nextScope, nowSecond: TIME / 1_000 + 1 }),
+			reservePublicProfilePublication({ scope: nextScope, nowSecond: TIME / 1_000 + 1 })
+		]);
+		expect(twoTabs.filter((result) => result.kind === 'reserved')).toHaveLength(1);
+		expect(twoTabs.filter((result) => result.kind === 'wait')).toEqual([{ kind: 'wait', untilSecond: TIME / 1_000 + 2 }]);
 	});
 
 	it('commits the terminal fence with death and rejects an old Run reservation', async () => {

@@ -168,21 +168,34 @@ describe('Nostr protocol foundation', () => {
 		const template = buildPublicProfileStateTemplate({
 			channel, createdAt: 1_700_000_010, runNumber: 4, points: 123, rootPoints: 7,
 			abilities: { inferenceEfficiency: 2, contextCapacity: 3, hallucinationSuppression: 4 },
-			lifespan: { active: true, projectedAtMs: 1_700_000_010_000, expiresAtMs: 1_700_086_410_000,
-				regularRemainingMs: 120_000, overflowRewardPercent: 50, maximumLifespanMs: 604_800_000 }
+			lifespan: { baseExpiresAtMs: 1_700_000_010_000, extension: { anchorAtMs: 1_700_000_000_000,
+				regularUntilMs: 1_700_000_120_000, roundingBoundaryAtMs: 1_700_000_060_000, overflowPercent: 50, maximumLifespanMs: 604_800_000 } }
 		});
 		expect(template).toEqual({ kind: 30079, created_at: 1_700_000_010, tags: [
 			['d', `${PROTOTYPE_NAMESPACE}:profile-state:${CHANNEL_ID}`], ['e', CHANNEL_ID, channel.relayHint], ['r', '4']
 		], content: JSON.stringify({ version: 1, points: 123, abilities: { inferenceEfficiency: 2, contextCapacity: 3, hallucinationSuppression: 4 }, rootPoints: 7,
-			lifespan: { active: true, projectedAtMs: 1_700_000_010_000, expiresAtMs: 1_700_086_410_000,
-				regularRemainingMs: 120_000, overflowRewardPercent: 50, maximumLifespanMs: 604_800_000 } }) });
+			lifespan: { baseExpiresAtMs: 1_700_000_010_000, extension: { anchorAtMs: 1_700_000_000_000,
+				regularUntilMs: 1_700_000_120_000, roundingBoundaryAtMs: 1_700_000_060_000, overflowPercent: 50, maximumLifespanMs: 604_800_000 } } }) });
 		expect(profileStateIdentifier(CHANNEL_ID)).toBe(`${PROTOTYPE_NAMESPACE}:profile-state:${CHANNEL_ID}`);
 		const event = finalizeWorldEvent(template, TEST_SECRET_KEY);
 		expect(parsePublicProfileState(event, CHANNEL_ID)).toMatchObject({ pubkey: event.pubkey, runNumber: 4, points: 123, rootPoints: 7, version: 1 });
 		expect(parsePublicProfileState(event, CHANNEL_ID, 'f'.repeat(64))).toBeNull();
 		expect(parseWorldStateEvent(event, CHANNEL_ID)).toBeNull();
 		const extraTag = { ...event, tags: [...event.tags, ['client', 'extra']] };
-		expect(parsePublicProfileState(resign(extraTag), CHANNEL_ID)).toBeNull();
+		expect(parsePublicProfileState(resign(extraTag), CHANNEL_ID)).not.toBeNull();
+		expect(parsePublicProfileState(resign({ ...event, tags: [...event.tags, ['d', 'duplicate']] }), CHANNEL_ID)).toBeNull();
+		for (const tags of [
+			event.tags.filter((tag) => tag[0] !== 'd'),
+			[...event.tags, ['e', CHANNEL_ID, channel.relayHint]],
+			[...event.tags, ['r', '4']],
+			event.tags.map((tag) => tag[0] === 'e' ? ['e', CHANNEL_ID] : tag),
+			event.tags.map((tag) => tag[0] === 'r' ? ['r', '4', 'extra'] : tag)
+		]) expect(parsePublicProfileState(resign({ ...event, tags }), CHANNEL_ID)).toBeNull();
+		const extraNestedField = { ...event, content: JSON.stringify({ ...JSON.parse(event.content), lifespan: {
+			...JSON.parse(event.content).lifespan, privateField: true
+		} }) };
+		expect(parsePublicProfileState(resign(extraNestedField), CHANNEL_ID)).toBeNull();
+		expect(parsePublicProfileState(finalizeWorldEvent(template, UNMAPPED_SECRET_KEY), CHANNEL_ID)).toBeNull();
 		const malformedContent = { ...event, content: JSON.stringify({ ...JSON.parse(event.content), privateField: true }) };
 		expect(parsePublicProfileState(resign(malformedContent), CHANNEL_ID)).toBeNull();
 	});

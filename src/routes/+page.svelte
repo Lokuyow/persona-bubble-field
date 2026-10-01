@@ -76,6 +76,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL, TAG_GAME_TERMINAL, isBlockedFacilityCell, isWithinFacilityInteractionRange, sameFieldCell } from '$lib/fieldFacilities';
 	import { projectMending } from '$lib/mending';
 	import { comparePresenceEvidence, presenceEvidenceFromWorldState } from '$lib/presenceEvidence';
+	import { createProfileRunEvidenceStore } from '$lib/profileRunEvidence';
 	import { getAbilityUpgrade, type PersonaAbilityKey } from '$lib/personaGameState';
 	import {
 		CURRENT_CHARACTER_PROFILE_REVISION,
@@ -398,6 +399,8 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	const tagGameOrganizerFinalStates = new Set<string>();
 	const pendingTagGameResults: Array<{ game: TagGameState; note: string | null }> = [];
 	let latestTagGameWorldStates = $state.raw(new Map<string, ParsedWorldStateEvent>());
+	let latestProfileWorldStates = $state.raw(new Map<string, ParsedWorldStateEvent>());
+	const profileRunEvidenceStore = createProfileRunEvidenceStore();
 	const appliedTagGameWorldStateIds = new Set<string>();
 	const tagGameConflictSince = new Map<string, number>();
 	const tagGameHostProbeAtMs = new Map<string, number>();
@@ -482,7 +485,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		page.state.profileCharacterId && getCharacterById(page.state.profileCharacterId)
 	));
 	let profileTargetPubkey = $derived(page.state.profilePubkey);
-	let profileRunEvidence = $derived(profileTargetPubkey ? latestTagGameWorldStates.get(profileTargetPubkey) ?? null : null);
+	let profileRunEvidence = $derived(profileTargetPubkey ? latestProfileWorldStates.get(profileTargetPubkey) ?? null : null);
 	let profileParticipant = $derived(profileTargetPubkey ? presenceState.participants.find((participant) => participant.id === profileTargetPubkey) ?? null : null);
 	let profileRunNumber = $derived((profileRunEvidence?.state === 'active' && profileRunEvidence.runNumber !== null &&
 		profileParticipant?.status === 'active' && profileParticipant.lastActivityAt !== null &&
@@ -1429,6 +1432,8 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			realtimeStartImmediately: boolean | undefined = undefined
 		): Promise<void> => {
 		tagGameDiscoverySince = 0;
+			const profileEvidenceSession = profileRunEvidenceStore.beginSession();
+			latestProfileWorldStates = new Map();
 			const previousSession = worldReader;
 			worldReader = null;
 			pendingBootstrapMessages = null;
@@ -1474,7 +1479,11 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 				} : {}),
 				onPresenceChanged: acceptPresence,
 				onPositionEvidenceChanged: acceptTagGamePositionEvidence,
-				onWorldStateEvent: handleTagGameWorldState,
+				onWorldStateEvent: (event) => {
+					if (!mounted || worldReader !== nextSession) return;
+					if (profileRunEvidenceStore.accept(profileEvidenceSession, event)) latestProfileWorldStates = new Map(profileRunEvidenceStore.snapshot());
+					handleTagGameWorldState(event);
+				},
 				onLiveMessage: receiveLiveMessage,
 				onTimelineMessage: receiveSessionTimelineMessage,
 				onEffectiveTraceRootsChanged: setEffectiveTraceRoots,

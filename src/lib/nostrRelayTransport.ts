@@ -225,6 +225,7 @@ export type PublishRelayResult = Readonly<{
 export type NostrRelayTransportOptions = Readonly<{
 	operationTimeoutMs?: number;
 	websocketCtor?: IWebSocketConstructor;
+	onRelayReconnected?: () => void;
 }>;
 
 export type ProfileStateSubscription = Readonly<{ close: () => void }>;
@@ -479,7 +480,11 @@ export function createNostrRelayTransport(
 	function updateConnection(relayUrl: string, connectionState: ConnectionState): void {
 		const canonical = canonicalRelay(relayUrl);
 		if (!canonical) return;
+		const previousConnection = connections.get(canonical)?.state;
 		connections.set(canonical, { relayUrl: canonical, state: connectionState });
+		if (previousConnection !== undefined && isRealtimeConnectionUnavailable(previousConnection) && !isRealtimeConnectionUnavailable(connectionState)) {
+			options.onRelayReconnected?.();
+		}
 		if (initialPhase) {
 			for (const subscription of ['world-messages', 'world-state'] as const) {
 				const key = pairKey(canonical, subscription);

@@ -670,16 +670,17 @@ test('opens an active field participant profile by pubkey and renders only match
 		message: finalizeEvent(buildWorldMessageTemplate({ channel, content: 'Public profile target', speechType: 'normal', position: { x: 5, y: 4 }, createdAt }), otherSecret),
 		position: finalizeEvent(buildWorldStateEventTemplate({ channel, position: { x: 5, y: 4 }, slot: 0, createdAt, runNumber: 2 }), otherSecret)
 	};
-	const profileState = finalizeEvent(buildPublicProfileStateTemplate({
-		channel, createdAt, runNumber: 2, points: 12_345,
+	const profileCandidates = [12_345, 54_321].map((points) => finalizeEvent(buildPublicProfileStateTemplate({
+		channel, createdAt, runNumber: 2, points,
 		abilities: { inferenceEfficiency: 1, contextCapacity: 2, hallucinationSuppression: 3 }, rootPoints: 678,
-		lifespan: { active: false, projectedAtMs: startTime, expiresAtMs: startTime + 5 * 24 * 60 * 60 * 1_000,
-			regularRemainingMs: 0, overflowRewardPercent: 0, maximumLifespanMs: 30 * 24 * 60 * 60 * 1_000 }
-	}), otherSecret);
+		lifespan: { baseExpiresAtMs: startTime + 5 * 24 * 60 * 60 * 1_000, extension: null }
+	}), otherSecret)).sort((left, right) => left.id.localeCompare(right.id));
+	const profileState = profileCandidates[0]!;
+	const expectedProfilePoints = (JSON.parse(profileState.content) as { points: number }).points;
 	await page.clock.install({ time: startTime });
 	await installHostOwnedStub(page);
 	await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret), startTime + 7 * 24 * 60 * 60 * 1_000);
-	await installDelayedRelay(page, { primaryEvents: otherEvents, profileStateEvents: [profileState] });
+	await installDelayedRelay(page, { primaryEvents: otherEvents, profileStateEvents: [profileCandidates[1]!, profileCandidates[0]!] });
 	await page.goto('/');
 	await expect(page.locator('.action-dock')).toBeVisible();
 	await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
@@ -695,7 +696,7 @@ test('opens an active field participant profile by pubkey and renders only match
 	const dialog = page.locator('.profile-dialog-content');
 	await expect(dialog).toBeVisible();
 	await expect(dialog).toContainText('人生 #2');
-	await expect(dialog).toContainText('12345 pt');
+	await expect(dialog).toContainText(`${expectedProfilePoints} pt`);
 	await expect(dialog).toContainText('678 RP');
 	await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
 		request.filters.some((filter) => (filter.authors as string[] | undefined)?.[0] === otherPubkey &&

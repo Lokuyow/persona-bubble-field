@@ -149,6 +149,7 @@ export type SelfWriteAuthorizationResult = 'authorized' | 'superseded' | 'corrup
 export type WorldWriteJournalScope = ActiveRunAuthorization & Readonly<{ channelId: string }>;
 export type WorldWriteJournalSnapshot = Readonly<{
 	lastReservedSecond: number | null;
+	profileLastReservedSecond: number | null;
 	consumedSlots: 0 | 1 | 2;
 	lastPositiveSecond: number | null;
 	exitSecond: number | null;
@@ -169,6 +170,10 @@ export type WorldWriteReservationResult =
 	| Readonly<{ kind: 'reserved'; reservation: WorldWriteReservation }>
 	| Readonly<{ kind: 'wait'; untilSecond: number }>
 	| Readonly<{ kind: 'duplicate' | 'stale' | 'corrupt' | 'clock-regressed' }>;
+export type PublicProfilePublicationReservationResult =
+	| Readonly<{ kind: 'reserved'; createdAt: number; persona: PersonaSnapshot }>
+	| Readonly<{ kind: 'wait'; untilSecond: number }>
+	| Readonly<{ kind: 'stale' | 'corrupt' }>;
 export type TerminalExitJournalRequest = Readonly<{
 	channelId: string;
 	position: Readonly<{ x: number; y: number }>;
@@ -763,6 +768,7 @@ type WorldWriteJournalRecord = Readonly<{
 	pubkey: string;
 	runNumber: number;
 	lastReservedSecond: number | null;
+	profileLastReservedSecond?: number | null;
 	consumedSlots: 0 | 1 | 2;
 	lastPositiveSecond: number | null;
 	exitSecond: number | null;
@@ -783,6 +789,7 @@ function validJournal(value: unknown, channelId: string, pubkey: string): value 
 	return record.version === 1 && record.channelId === channelId && record.pubkey === pubkey &&
 		Number.isSafeInteger(record.runNumber) && (record.runNumber as number) > 0 &&
 		second(record.lastReservedSecond) && second(record.lastPositiveSecond) && second(record.exitSecond) &&
+		(record.profileLastReservedSecond === undefined || second(record.profileLastReservedSecond)) &&
 		(record.consumedSlots === 0 || record.consumedSlots === 1 || record.consumedSlots === 2) &&
 		Number.isSafeInteger(record.nextToken) && (record.nextToken as number) >= 0 &&
 		(record.messageDedupeIds === undefined || Array.isArray(record.messageDedupeIds) && record.messageDedupeIds.every((id) => typeof id === 'string' && /^[0-9a-f]{64}$/.test(id)) && new Set(record.messageDedupeIds).size === record.messageDedupeIds.length) &&
@@ -803,7 +810,7 @@ function validManualTraceOutbox(value: unknown, pubkey: string): value is Manual
 
 function emptyJournal(scope: WorldWriteJournalScope): WorldWriteJournalRecord {
 	return { version: 1, channelId: scope.channelId, pubkey: scope.identity.pubkey, runNumber: scope.runNumber,
-		lastReservedSecond: null, consumedSlots: 0, lastPositiveSecond: null, exitSecond: null,
+		lastReservedSecond: null, profileLastReservedSecond: null, consumedSlots: 0, lastPositiveSecond: null, exitSecond: null,
 		nextToken: 0, confirmedPosition: null, messageDedupeIds: [] };
 }
 
@@ -821,9 +828,71 @@ export async function loadWorldWriteJournal(scope: WorldWriteJournalScope): Prom
 		if (!journalScopeIsActive(player, scope)) throw new Error('Account operation failed.');
 		if (raw === undefined) return null;
 		if (!validJournal(raw, scope.channelId, scope.identity.pubkey)) throw new Error('Account operation failed.');
-		return { lastReservedSecond: raw.lastReservedSecond, consumedSlots: raw.consumedSlots,
+		return { lastReservedSecond: raw.lastReservedSecond, profileLastReservedSecond: raw.profileLastReservedSecond ?? null, consumedSlots: raw.consumedSlots,
 			lastPositiveSecond: raw.lastPositiveSecond, exitSecond: raw.exitSecond,
 			confirmedPosition: raw.runNumber === scope.runNumber ? raw.confirmedPosition : null };
+	});
+}
+
+/** Atomically reads the current Player aggregate and reserves its profile timestamp. */
+export async function reservePublicProfilePublication(input: Readonly<{
+	scope: WorldWriteJournalScope;
+	nowSecond: number;
+}>): Promise<PublicProfilePublicationReservationResult> {
+	const { scope } = input;
+	if (!Number.isSafeInteger(input.nowSecond) || input.nowSecond < 0 || !/^[0-9a-f]{64}$/.test(scope.channelId) ||
+		!isValidIdentityReference(scope.identity) || !Number.isSafeInteger(scope.runNumber) || scope.runNumber < 1) return { kind: 'corrupt' };
+	return withLifecycle(async (db) => {
+		const observed = await readRootAndPlayer(db);
+		if (observed === null || 'kind' in observed && observed.kind === 'legacy-player-reset') return { kind: 'stale' };
+		if (isCorruptLifecycle(observed)) return { kind: 'corrupt' };
+		try {
+			const tx = db.transaction([PLAYER_LIFECYCLE_STORE_NAME, WORLD_WRITE_JOURNAL_STORE_NAME], 'readwrite');
+			try {
+				const playerStore = tx.objectStore(PLAYER_LIFECYCLE_STORE_NAME);
+				const journalStore = tx.objectStore(WORLD_WRITE_JOURNAL_STORE_NAME);
+				const [player, raw] = await Promise.all([
+					playerStore.get(PLAYER_STATE),
+					journalStore.get(journalKey(scope.channelId, scope.identity.pubkey))
+				]);
+				if (!journalScopeIsActive(player, scope)) { await tx.done; return { kind: 'stale' } as const; }
+				if (raw !== undefined && !validJournal(raw, scope.channelId, scope.identity.pubkey)) { await tx.done; return { kind: 'corrupt' } as const; }
+				const record = (raw ?? emptyJournal(scope)) as WorldWriteJournalRecord;
+				const lastReservedSecond = record.profileLastReservedSecond ?? null;
+				if (lastReservedSecond !== null && input.nowSecond <= lastReservedSecond) {
+					await tx.done;
+					return { kind: 'wait', untilSecond: lastReservedSecond + 1 } as const;
+				}
+				await journalStore.put({ ...record, profileLastReservedSecond: input.nowSecond }, journalKey(scope.channelId, scope.identity.pubkey));
+				await tx.done;
+				const latest = await hydrateLifecycle(observed.entropy, player);
+				if (latest.kind !== 'restored' || !sameIdentityReference(latest.persona.activeRun.identity, scope.identity) || latest.persona.activeRun.runNumber !== scope.runNumber) return { kind: 'stale' } as const;
+				return { kind: 'reserved', createdAt: input.nowSecond, persona: latest.persona } as const;
+			} catch (error) {
+				try { tx.abort(); } catch { /* already aborted */ }
+				await tx.done.catch(() => {});
+				throw error;
+			}
+		} finally {
+			observed.entropy.fill(0);
+		}
+	});
+}
+
+/** Reads the current Player aggregate for retry reconciliation without reserving another timestamp. */
+export async function readCurrentPublicProfilePersona(scope: WorldWriteJournalScope): Promise<PersonaSnapshot | null> {
+	if (!/^[0-9a-f]{64}$/.test(scope.channelId) || !isValidIdentityReference(scope.identity) ||
+		!Number.isSafeInteger(scope.runNumber) || scope.runNumber < 1) return null;
+	return withLifecycle(async (db) => {
+		const observed = await readRootAndPlayer(db);
+		if (observed === null || 'kind' in observed && observed.kind === 'legacy-player-reset') return null;
+		if (isCorruptLifecycle(observed)) return null;
+		try {
+			if (!journalScopeIsActive(observed.player, scope)) return null;
+			const latest = await hydrateLifecycle(observed.entropy, observed.player);
+			return latest.kind === 'restored' && sameIdentityReference(latest.persona.activeRun.identity, scope.identity) &&
+				latest.persona.activeRun.runNumber === scope.runNumber ? latest.persona : null;
+		} finally { observed.entropy.fill(0); }
 	});
 }
 

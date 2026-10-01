@@ -60,12 +60,14 @@ export type WorldStateEventInput = {
 };
 
 export type PublicLifespanProjection = Readonly<{
-	active: boolean;
-	projectedAtMs: number;
-	expiresAtMs: number;
-	regularRemainingMs: number;
-	overflowRewardPercent: number;
-	maximumLifespanMs: number;
+	baseExpiresAtMs: number;
+	extension: null | Readonly<{
+		anchorAtMs: number;
+		regularUntilMs: number;
+		roundingBoundaryAtMs: number;
+		overflowPercent: number;
+		maximumLifespanMs: number;
+	}>;
 }>;
 
 export type PublicProfileStateInput = Readonly<{
@@ -418,11 +420,15 @@ function assertPublicProfileNumbers(
 		!integer(abilities?.inferenceEfficiency, 1) || abilities.inferenceEfficiency > 100 ||
 		!integer(abilities?.contextCapacity, 1) || abilities.contextCapacity > 100 ||
 		!integer(abilities?.hallucinationSuppression, 1) || abilities.hallucinationSuppression > 100 ||
-		typeof lifespan?.active !== 'boolean' || !integer(lifespan?.projectedAtMs) || !integer(lifespan?.expiresAtMs) ||
-		!integer(lifespan?.regularRemainingMs) ||
-		!integer(lifespan?.overflowRewardPercent) || ![0, 20, 35, 50].includes(lifespan.overflowRewardPercent) ||
-		![604_800_000, 1_209_600_000, 1_814_400_000, 2_592_000_000].includes(lifespan?.maximumLifespanMs) ||
-		!lifespan.active && lifespan.regularRemainingMs !== 0) throw new TypeError('Invalid public profile state.');
+		!integer(lifespan?.baseExpiresAtMs) || (lifespan.extension !== null && (
+			typeof lifespan.extension !== 'object' || !integer(lifespan.extension.anchorAtMs) ||
+			!integer(lifespan.extension.regularUntilMs) || !integer(lifespan.extension.roundingBoundaryAtMs) ||
+			lifespan.extension.regularUntilMs < lifespan.extension.anchorAtMs ||
+			lifespan.extension.roundingBoundaryAtMs < lifespan.extension.anchorAtMs ||
+			lifespan.extension.roundingBoundaryAtMs > lifespan.extension.regularUntilMs ||
+			!integer(lifespan.extension.overflowPercent) || ![0, 20, 35, 50].includes(lifespan.extension.overflowPercent) ||
+			![604_800_000, 1_209_600_000, 1_814_400_000, 2_592_000_000].includes(lifespan.extension.maximumLifespanMs)
+		))) throw new TypeError('Invalid public profile state.');
 }
 
 export function buildDeathTraceEventTemplate(input: DeathTraceEventInput): DeathTraceEventTemplate {
@@ -707,11 +713,18 @@ export function parsePublicProfileState(event: Event, channelId: string, expecte
 	assertChannelId(channelId);
 	if (!isVerifiedEvent(event) || event.kind !== PROFILE_STATE_KIND || !Number.isSafeInteger(event.created_at) || event.created_at < 0 ||
 		(expectedPubkey !== undefined && event.pubkey !== expectedPubkey)) return null;
-	if (event.tags.length !== 3) return null;
-	const [d, e, r] = event.tags;
-	if (d.length !== 2 || d[0] !== 'd' || d[1] !== profileStateIdentifier(channelId) ||
-		e.length !== 3 || e[0] !== 'e' || e[1] !== channelId ||
-		r.length !== 2 || r[0] !== 'r' || !/^[1-9][0-9]*$/.test(r[1] ?? '')) return null;
+	if (!resolveWorldCharacterFromPubkey(event.pubkey)) return null;
+	const dTags = event.tags.filter((tag) => tag[0] === 'd');
+	const eTags = event.tags.filter((tag) => tag[0] === 'e');
+	const rTags = event.tags.filter((tag) => tag[0] === 'r');
+	if (dTags.length !== 1 || eTags.length !== 1 || rTags.length !== 1) return null;
+	const [d] = dTags;
+	const [e] = eTags;
+	const [r] = rTags;
+	if (d.length !== 2 || d[1] !== profileStateIdentifier(channelId) ||
+		e.length !== 3 || e[1] !== channelId ||
+		r.length !== 2 || !/^[1-9][0-9]*$/.test(r[1] ?? '')) return null;
+	try { assertRelayHint(e[2]); } catch { return null; }
 	const runNumber = Number(r[1]);
 	if (!Number.isSafeInteger(runNumber) || runNumber < 1) return null;
 	let content: unknown;
@@ -724,7 +737,9 @@ export function parsePublicProfileState(event: Event, channelId: string, expecte
 	const abilities = value.abilities as Record<string, unknown>;
 	const lifespan = value.lifespan as Record<string, unknown>;
 	if (!hasExactKeys(abilities, ['inferenceEfficiency', 'contextCapacity', 'hallucinationSuppression']) ||
-		!hasExactKeys(lifespan, ['active', 'projectedAtMs', 'expiresAtMs', 'regularRemainingMs', 'overflowRewardPercent', 'maximumLifespanMs'])) return null;
+		!hasExactKeys(lifespan, ['baseExpiresAtMs', 'extension']) ||
+		lifespan.extension !== null && (typeof lifespan.extension !== 'object' || Array.isArray(lifespan.extension))) return null;
+	if (lifespan.extension !== null && !hasExactKeys(lifespan.extension as Record<string, unknown>, ['anchorAtMs', 'regularUntilMs', 'roundingBoundaryAtMs', 'overflowPercent', 'maximumLifespanMs'])) return null;
 	try {
 		assertPublicProfileNumbers(runNumber, value.points as number, value.rootPoints as number,
 			abilities as unknown as PublicProfileStateInput['abilities'], lifespan as unknown as PublicLifespanProjection);
@@ -734,9 +749,14 @@ export function parsePublicProfileState(event: Event, channelId: string, expecte
 		points: value.points as number,
 		abilities: { inferenceEfficiency: abilities.inferenceEfficiency as number, contextCapacity: abilities.contextCapacity as number, hallucinationSuppression: abilities.hallucinationSuppression as number },
 		rootPoints: value.rootPoints as number,
-		lifespan: { active: lifespan.active as boolean, projectedAtMs: lifespan.projectedAtMs as number, expiresAtMs: lifespan.expiresAtMs as number,
-			regularRemainingMs: lifespan.regularRemainingMs as number,
-			overflowRewardPercent: lifespan.overflowRewardPercent as number, maximumLifespanMs: lifespan.maximumLifespanMs as number }
+		lifespan: { baseExpiresAtMs: lifespan.baseExpiresAtMs as number,
+			extension: lifespan.extension === null ? null : {
+				anchorAtMs: (lifespan.extension as Record<string, number>).anchorAtMs,
+				regularUntilMs: (lifespan.extension as Record<string, number>).regularUntilMs,
+				roundingBoundaryAtMs: (lifespan.extension as Record<string, number>).roundingBoundaryAtMs,
+				overflowPercent: (lifespan.extension as Record<string, number>).overflowPercent,
+				maximumLifespanMs: (lifespan.extension as Record<string, number>).maximumLifespanMs
+			} }
 	};
 }
 
