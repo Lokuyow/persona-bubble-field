@@ -76,7 +76,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL, TAG_GAME_TERMINAL, isBlockedFacilityCell, isWithinFacilityInteractionRange, sameFieldCell } from '$lib/fieldFacilities';
 	import { projectMending } from '$lib/mending';
 	import { comparePresenceEvidence, presenceEvidenceFromWorldState } from '$lib/presenceEvidence';
-	import { createProfileRunEvidenceStore } from '$lib/profileRunEvidence';
+	import { createProfileRunEvidenceStore, profileRunNumberForActiveParticipant } from '$lib/profileRunEvidence';
 	import { getAbilityUpgrade, type PersonaAbilityKey } from '$lib/personaGameState';
 	import {
 		CURRENT_CHARACTER_PROFILE_REVISION,
@@ -481,17 +481,11 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	let entryRetryable = false;
 	let selectedCharacterId = $state('001');
 	let selectedSpeechType = $state<SpeechType>('normal');
-	let profileDialogOpen = $derived(Boolean(
-		page.state.profileCharacterId && getCharacterById(page.state.profileCharacterId)
-	));
-	let profileTargetPubkey = $derived(page.state.profilePubkey);
+	let profileTargetPubkey = $derived(page.state.profileTarget?.kind === 'pubkey' ? page.state.profileTarget.pubkey : null);
+	let profileDialogOpen = $derived(Boolean(page.state.profileTarget));
 	let profileRunEvidence = $derived(profileTargetPubkey ? latestProfileWorldStates.get(profileTargetPubkey) ?? null : null);
 	let profileParticipant = $derived(profileTargetPubkey ? presenceState.participants.find((participant) => participant.id === profileTargetPubkey) ?? null : null);
-	let profileRunNumber = $derived((profileRunEvidence?.state === 'active' && profileRunEvidence.runNumber !== null &&
-		profileParticipant?.status === 'active' && profileParticipant.lastActivityAt !== null &&
-		profileRunEvidence.createdAt * 1_000 <= profileParticipant.lastActivityAt &&
-		profileParticipant.lastActivityAt - profileRunEvidence.createdAt * 1_000 < PRESENCE_TIMEOUT_MS
-		? profileRunEvidence.runNumber : null) ?? null);
+	let profileRunNumber = $derived(profileRunNumberForActiveParticipant(profileRunEvidence, profileParticipant, PRESENCE_TIMEOUT_MS));
 	let lastProfileTrigger: HTMLButtonElement | null = null;
 
 	$effect(() => {
@@ -4839,7 +4833,10 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 
 	function openProfile(characterId: string, pubkey: string | undefined, trigger: HTMLButtonElement): void {
 		lastProfileTrigger = trigger;
-		pushState('', { ...page.state, profileCharacterId: characterId, ...(pubkey ? { profilePubkey: pubkey } : { profilePubkey: undefined }) });
+		const profileTarget = runtimeMode === 'relay' && pubkey
+			? { kind: 'pubkey' as const, pubkey }
+			: { kind: 'dev-character' as const, characterId };
+		pushState('', { ...page.state, profileTarget });
 	}
 
 	function openSelfProfile(trigger: HTMLButtonElement): void {
@@ -5252,6 +5249,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		onCloseAutoFocus={restoreProfileTriggerFocus}
 		session={worldSession}
 		currentRunNumber={profileRunNumber}
+		avatarTone={profileTargetPubkey ? colorByPubkey[profileTargetPubkey] ?? 'sky' : 'sky'}
 	/>
 	<IdentitySelectionDialog selection={pendingIdentitySelection} rootPoints={pendingRootPoints} transitionNotice={runTransitionNotice} onSelect={(candidate, rootBuild) => { void chooseIdentity(candidate, rootBuild); }} onExportNsec={(candidate) => { void exportIdentityNsec(candidate); }} />
 	<MendingDialog

@@ -25,12 +25,15 @@ import {
 	buildWorldMessageFilters,
 	parseWorldStateEvent,
 	parsePublicProfileState,
+	parsePublicProfileEnvelope,
+	isNewerPublicProfileEnvelope,
 	parseWorldMessage,
 	parseTraceEvent,
 	CHANNEL_MESSAGE_KIND,
 	WORLD_STATE_KIND,
 	type ParsedWorldStateEvent,
 	type PublicProfileState,
+	type PublicProfileEnvelope,
 	type ParsedWorldMessage,
 	type ParsedTraceEvent,
 	worldStateIdentifiers,
@@ -228,6 +231,8 @@ export type NostrRelayTransportOptions = Readonly<{
 	onRelayReconnected?: () => void;
 }>;
 
+export type ProfileStateUpdate = Readonly<{ envelope: PublicProfileEnvelope; state: PublicProfileState | null }>;
+export type ProfileReadStatus = 'loading' | 'eose' | 'closed' | 'timeout' | 'unavailable' | 'error';
 export type ProfileStateSubscription = Readonly<{ close: () => void }>;
 
 type TransportState = 'new' | 'starting' | 'started' | 'failed' | 'disposed';
@@ -828,7 +833,7 @@ export function createNostrRelayTransport(
 		return typeof maxSubscriptions !== 'number' || maxSubscriptions >= 4;
 	}
 
-	function subscribeProfileState(pubkey: string, onState: (state: PublicProfileState) => void): ProfileStateSubscription {
+	function subscribeProfileState(pubkey: string, onState: (update: ProfileStateUpdate) => void, onStatus: (status: ProfileReadStatus) => void = () => {}): ProfileStateSubscription {
 		if (state !== 'started' || !/^[0-9a-f]{64}$/.test(pubkey)) throw new Error('Profile subscription is unavailable.');
 		const client = requireRxNostr();
 		const resource = new Subscription();
@@ -837,24 +842,56 @@ export function createNostrRelayTransport(
 			const limit = Nip11Registry.get(relayUrl)?.limitation?.max_subscriptions;
 			return typeof limit !== 'number' || limit >= 5;
 		});
-		const filter = buildPublicProfileStateFilter({ channelId: world.channelId, pubkey, since: 0 });
-		const seenIds = new Set<string>();
+		const filter = buildPublicProfileStateFilter({ channelId: world.channelId, pubkey, limit: 1 });
+		const subIds = new Map<string, string>();
+		const relayStatus = new Map<string, ProfileReadStatus>();
+		let canonical: PublicProfileEnvelope | null = null;
+		let timeout: ReturnType<typeof setTimeout> | null = null;
+		const finishStatus = (relayUrl: string, next: ProfileReadStatus) => {
+			relayStatus.set(relayUrl, next);
+			if ([...relayStatus.values()].some((status) => status === 'eose')) onStatus('eose');
+			else if (relayStatus.size > 0 && [...relayStatus.values()].every((status) => status !== 'loading')) onStatus(next);
+		};
+		resource.add(client.createOutgoingMessageObservable().subscribe((packet) => {
+			const relayUrl = canonicalRelay(packet.to);
+			if (!relayUrl || !eligibleRelays.includes(relayUrl) || packet.message[0] !== 'REQ') return;
+			if (matchesFilterBundle(packet.message.slice(2), [filter])) subIds.set(relayUrl, packet.message[1]);
+		}));
 		for (const relayUrl of eligibleRelays) {
 			const request = createRxForwardReq();
 			resource.add(client.use(request, { on: { relays: [relayUrl] } }).subscribe());
 			request.emit(filter);
+			relayStatus.set(relayUrl, 'loading');
 		}
+		onStatus(eligibleRelays.length ? 'loading' : 'unavailable');
 		resource.add(client.createAllEventObservable().subscribe((packet) => {
-			if (closed || !eligibleRelays.includes(canonicalRelay(packet.from) ?? '') || seenIds.has(packet.event.id)) return;
-			const parsed = parsePublicProfileState(packet.event, world.channelId, pubkey);
-			if (!parsed) return;
-			seenIds.add(packet.event.id);
-			onState(parsed);
+			const relayUrl = canonicalRelay(packet.from);
+			if (closed || !relayUrl || subIds.get(relayUrl) !== packet.subId) return;
+			const envelope = parsePublicProfileEnvelope(packet.event, world.channelId, pubkey);
+			if (!envelope || canonical && !isNewerPublicProfileEnvelope(envelope, canonical)) return;
+			canonical = envelope;
+			onState({ envelope, state: parsePublicProfileState(packet.event, world.channelId, pubkey) });
 		}));
+		resource.add(client.createAllMessageObservable().subscribe((packet) => {
+			if (closed || (packet.type !== 'EOSE' && packet.type !== 'CLOSED')) return;
+			const relayUrl = canonicalRelay(packet.from);
+			if (!relayUrl || subIds.get(relayUrl) !== packet.subId) return;
+			finishStatus(relayUrl, packet.type === 'EOSE' ? 'eose' : 'closed');
+		}));
+		resource.add(client.createAllErrorObservable().subscribe((packet) => {
+			const relayUrl = canonicalRelay(packet.from);
+			if (closed || !relayUrl || !subIds.has(relayUrl)) return;
+			finishStatus(relayUrl, 'error');
+		}));
+		if (eligibleRelays.length) timeout = setTimeout(() => {
+			if (closed || [...relayStatus.values()].some((status) => status === 'eose')) return;
+			for (const [relayUrl, status] of relayStatus) if (status === 'loading') finishStatus(relayUrl, 'timeout');
+		}, timeoutMs);
 		subscriptions.add(resource);
 		return { close: () => {
 			if (closed) return;
 			closed = true;
+			if (timeout) clearTimeout(timeout);
 			subscriptions.remove(resource);
 			resource.unsubscribe();
 		} };
@@ -1487,7 +1524,7 @@ export function createNostrRelayTransport(
 				next: (packet) => {
 					const relayUrl = canonicalRelay(packet.from);
 					if (!relayUrl) return;
-					results.set(relayUrl, { relayUrl, outcome: packet.ok ? 'accepted' : 'rejected',
+					results.set(relayUrl, { relayUrl, outcome: packet.ok || packet.notice?.startsWith('duplicate:') ? 'accepted' : 'rejected',
 						...(packet.notice ? { notice: packet.notice } : {}) });
 					if ((packet.ok || packet.notice?.startsWith('duplicate:')) &&
 						(!isTraceReply || world.authoritativeRelays.includes(relayUrl))) finishFirst(true);

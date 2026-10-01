@@ -1,15 +1,14 @@
 <script lang="ts">
-	import { Dialog, Popover, ScrollArea } from 'bits-ui';
+	import DialogPresentation from './ProfilePresentation.svelte';
+	import { Popover } from 'bits-ui';
 	import ActionButton from '$lib/ActionButton.svelte';
 	import HelpCircle from '~icons/tabler/help-circle';
-	import X from '~icons/tabler/x';
 	import Wallet from '~icons/tabler/wallet';
 	import ProfileLifeStats from './ProfileLifeStats.svelte';
 	import ProfileRootPoints from './ProfileRootPoints.svelte';
 	import type { MendingProjection } from '$lib/mending';
 	import type { PersonaSnapshot } from '$lib/rootIdentity';
 	import type { BubbleTone } from '$lib/bubblePresentation';
-	import CharacterAvatar from './CharacterAvatar.svelte';
 	import { getCharacterById } from './character';
 
 	type Props = Readonly<{
@@ -27,97 +26,50 @@
 
 	let { open, persona, mendingProjection, nowMs, clearBlockedReason, clearBusy, avatarTone, onOpenChange, onCloseAutoFocus, onClear }: Props = $props();
 	let character = $derived(persona ? getCharacterById(persona.identity.characterId) ?? null : null);
-	let initialFocusTarget = $state<HTMLElement | null>(null);
 	let effectiveExpiry = $derived(mendingProjection?.effectiveExpiresAtMs ?? persona?.gameState.lifespanExpiresAtMs ?? nowMs);
 	let points = $derived(persona?.gameState.points ?? 0);
 	let clearProgress = $derived(Math.min(100, points / 100_000 * 100));
 	let pointBlocked = $derived(points < 100_000);
 	let clearBlocked = $derived(pointBlocked || clearBusy || clearBlockedReason !== null);
-
 </script>
 
-<Dialog.Root bind:open={() => open, onOpenChange}>
-	{#if open && persona && character}
-		<Dialog.Portal>
-			<Dialog.Overlay class="self-profile-overlay" />
-			<Dialog.Content class="self-profile-content" preventScroll={false} {onCloseAutoFocus} onOpenAutoFocus={(event) => { event.preventDefault(); initialFocusTarget?.focus(); }}>
-				<header class="self-profile-dialog-header">
-					<Dialog.Close class="action-button action-button-tertiary action-button-close" aria-label="閉じる"><X aria-hidden="true" /></Dialog.Close>
-				</header>
-				<ScrollArea.Root class="self-profile-scroll" type="auto">
-					<ScrollArea.Viewport class="self-profile-viewport">
-						<div class="self-profile-sections">
-						<section class="profile-section" aria-labelledby="self-profile-profile">
-							<h2 bind:this={initialFocusTarget} id="self-profile-profile" tabindex="-1" data-initial-focus>プロフィール</h2>
-							<header class="self-profile-head">
-								<CharacterAvatar class={`avatar avatar-${avatarTone} self-profile-avatar`} {character} />
-								<div class="self-profile-identity">
-									<Dialog.Title>{character.name}</Dialog.Title>
-									<Dialog.Description class="sr-only">自分のプロフィールと現在の人生情報</Dialog.Description>
-									<span>人生 #{persona.activeRun.runNumber}</span>
-								</div>
-							</header>
-							<p class="self-profile-about">{character.about}</p>
-						</section>
-						<section class="profile-section" aria-labelledby="self-profile-run">
-							<h2 id="self-profile-run">人生</h2>
+{#if persona && character}
+	<DialogPresentation {open} {character} runLabel={`人生 #${persona.activeRun.runNumber}`} description="自分のプロフィールと現在の人生情報"
+		dialogClass="" avatarClass={`avatar-${avatarTone}`} {onOpenChange} {onCloseAutoFocus}>
+		<section class="profile-section" aria-labelledby="self-profile-run">
+			<h2 id="self-profile-run">人生</h2>
 			<ProfileLifeStats expiresAtMs={effectiveExpiry} {nowMs} points={persona.gameState.points} abilities={persona.gameState.abilities} />
-						</section>
-						<section class="profile-section" aria-labelledby="self-profile-root">
-							<h2 id="self-profile-root">Root</h2>
+		</section>
+		<section class="profile-section" aria-labelledby="self-profile-root">
+			<h2 id="self-profile-root">Root</h2>
 			<ProfileRootPoints points={persona.rootPoints} />
-							<div class="clear-section" aria-labelledby="self-profile-clear">
-							<div class="clear-title-row"><div class="clear-title-group"><h3 id="self-profile-clear">脱出</h3><Popover.Root>
-								<Popover.Trigger class="escape-info-trigger" aria-label="脱出するとどうなるかを見る">
-									<HelpCircle aria-hidden="true" />
-								</Popover.Trigger>
-								<Popover.Portal>
-																				<Popover.Content class="escape-info-popover" trapFocus={false} side="bottom" align="start" sideOffset={8} avoidCollisions={true} collisionPadding={16}>
-										<div class="escape-info-items">
-											<div><strong>現在の一生を終える</strong><span>ポイント・能力・作業状態など、この人生の状態は次の人生へ引き継がれません。</span></div>
-											<div><strong>Root Point +1</strong><span>獲得したRoot Pointは、次の人生や別の人格でも残ります。</span></div>
-											<div><strong>次の人格を選択</strong><span>同じ人格で新しい人生を始めることも、別の人格を選ぶこともできます。</span></div>
-											<div><strong>秘密鍵を取得可能</strong><span>脱出した人格のnsecを取得できるようになります。</span></div>
-										</div>
-									</Popover.Content>
-								</Popover.Portal>
-							</Popover.Root></div><strong>+1 RP</strong></div>
-							<p>100,000 ptで現在の一生を終えます。</p>
-							<div class="clear-progress-head" data-stat-icon="wallet"><span><Wallet aria-hidden="true" />所持ポイント</span><strong>{points.toLocaleString()} / 100,000 pt</strong></div>
-							<div class="clear-progress" role="progressbar" aria-label="脱出に必要なポイント" aria-valuemin="0" aria-valuemax="100000" aria-valuenow={points}><span style={`width: ${clearProgress}%;`}></span></div>
-							<p>未回収の作業ポイントは含まれません。</p>
-							{#if clearBlockedReason && !pointBlocked}<p class="clear-reason">clear不可: {clearBlockedReason}</p>{/if}
-							<ActionButton variant="secondary" intent="danger" class="clear-button" type="button" disabled={clearBlocked} onclick={onClear}>脱出</ActionButton>
-							</div>
-						</section>
+			<div class="clear-section" aria-labelledby="self-profile-clear">
+				<div class="clear-title-row"><div class="clear-title-group"><h3 id="self-profile-clear">脱出</h3><Popover.Root>
+					<Popover.Trigger class="escape-info-trigger" aria-label="脱出するとどうなるかを見る"><HelpCircle aria-hidden="true" /></Popover.Trigger>
+					<Popover.Portal><Popover.Content class="escape-info-popover" trapFocus={false} side="bottom" align="start" sideOffset={8} avoidCollisions={true} collisionPadding={16}>
+						<div class="escape-info-items">
+							<div><strong>現在の一生を終える</strong><span>ポイント・能力・作業状態など、この人生の状態は次の人生へ引き継がれません。</span></div>
+							<div><strong>Root Point +1</strong><span>獲得したRoot Pointは、次の人生や別の人格でも残ります。</span></div>
+							<div><strong>次の人格を選択</strong><span>同じ人格で新しい人生を始めることも、別の人格を選ぶこともできます。</span></div>
+							<div><strong>秘密鍵を取得可能</strong><span>脱出した人格のnsecを取得できるようになります。</span></div>
 						</div>
-					</ScrollArea.Viewport>
-					<ScrollArea.Scrollbar class="self-profile-scrollbar" orientation="vertical"><ScrollArea.Thumb class="self-profile-thumb" /></ScrollArea.Scrollbar>
-				</ScrollArea.Root>
-			</Dialog.Content>
-		</Dialog.Portal>
-	{/if}
-</Dialog.Root>
+					</Popover.Content></Popover.Portal>
+				</Popover.Root></div><strong>+1 RP</strong></div>
+				<p>100,000 ptで現在の一生を終えます。</p>
+				<div class="clear-progress-head" data-stat-icon="wallet"><span><Wallet aria-hidden="true" />所持ポイント</span><strong>{points.toLocaleString()} / 100,000 pt</strong></div>
+				<div class="clear-progress" role="progressbar" aria-label="脱出に必要なポイント" aria-valuemin="0" aria-valuemax="100000" aria-valuenow={points}><span style={`width: ${clearProgress}%;`}></span></div>
+				<p>未回収の作業ポイントは含まれません。</p>
+				{#if clearBlockedReason && !pointBlocked}<p class="clear-reason">clear不可: {clearBlockedReason}</p>{/if}
+				<ActionButton variant="secondary" intent="danger" class="clear-button" type="button" disabled={clearBlocked} onclick={onClear}>脱出</ActionButton>
+			</div>
+		</section>
+	</DialogPresentation>
+{/if}
 
 <style>
-	:global(.self-profile-overlay) { position: fixed; inset: 0; z-index: 100; background: rgba(35, 44, 41, .48); backdrop-filter: blur(3px); }
-	:global(.self-profile-content) { position: fixed; top: 50%; left: 50%; z-index: 101; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 12px; box-sizing: border-box; width: min(560px, calc(100vw - 32px)); max-height: min(760px, calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 24px)); padding: 24px; overflow: hidden; border: 1px solid rgba(57, 67, 64, .26); border-radius: 24px; background: #f1f5f0; box-shadow: 0 22px 60px rgba(32, 42, 38, .28); color: #374345; font-family: 'Trebuchet MS', 'Avenir Next', system-ui, sans-serif; transform: translate(-50%, -50%); }
-	.self-profile-dialog-header { display: flex; justify-content: flex-end; }
-	.self-profile-head { display: grid; grid-template-columns: 128px minmax(0, 1fr); gap: 18px; align-items: center; }
-	:global(.self-profile-avatar) { position: relative !important; inset: auto !important; display: grid; width: 128px; height: 128px; place-items: center; border: 2px solid rgba(255, 255, 255, .9); border-radius: 42% 58% 48% 52%; box-shadow: 0 5px 10px rgba(58, 70, 61, .14); transform: none !important; }
-	:global(.self-profile-avatar img) { width: 100%; height: 100%; object-fit: contain; }
-	.self-profile-identity { display: grid; gap: 5px; }
-	:global(.self-profile-identity [data-dialog-title]) { margin: 0; font-size: 24px; font-weight: 900; }
-	.self-profile-identity span { color: #75817d; font-size: 13px; font-weight: 900; letter-spacing: .04em; }
-	:global(.self-profile-content .sr-only) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-	:global(.self-profile-scroll) { min-height: 0; overflow: hidden; }
-	:global(.self-profile-viewport) { min-height: 0; max-height: 100%; overflow-y: auto; padding-right: 8px; }
-	.self-profile-sections { display: grid; gap: 32px; }
-	.self-profile-about { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; color: #56625e; font-size: 14px; font-weight: 700; line-height: 1.65; }
-	.clear-progress-head span :global(svg) { width: 15px; height: 15px; flex: 0 0 auto; }
 	.profile-section { display: grid; gap: 10px; }
 	.profile-section h2 { margin: 0; color: #56625e; font-size: 14px; font-weight: 900; letter-spacing: .04em; }
-	:global(.self-profile-content [data-initial-focus]:focus) { outline: none; }
+	.clear-progress-head span :global(svg) { width: 15px; height: 15px; flex: 0 0 auto; }
 	.clear-section { display: grid; gap: 12px; padding: 16px; border: 1px solid #ddb9a8; border-radius: 14px; background: #fff1eb; }
 	.clear-title-row { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
 	.clear-title-group { display: inline-flex; align-items: center; gap: 2px; min-width: 0; }
@@ -141,7 +93,4 @@
 	.clear-progress span { display: block; min-width: 2px; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #d98d76, #e6ad92); }
 	.clear-reason { color: #8c584b !important; font-weight: 800; }
 	:global(.clear-button) { min-height: 46px; border-radius: 9px; font-weight: 900; }
-	:global(.self-profile-scrollbar) { display: flex; width: 10px; padding: 2px; border-radius: 999px; background: rgba(86, 105, 98, .12); }
-	:global(.self-profile-thumb) { flex: 1; border-radius: inherit; background: #8fa8a0; }
-	@media (max-width: 600px) { :global(.self-profile-content) { gap: 10px; width: min(560px, calc(100vw - 20px)); max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 16px); padding: 18px; } .self-profile-sections { gap: 24px; } .self-profile-head { grid-template-columns: 96px minmax(0, 1fr); } :global(.self-profile-avatar) { width: 96px; height: 96px; border-radius: 32% 68% 42% 58%; } :global(.self-profile-identity [data-dialog-title]) { font-size: 20px; } }
 </style>

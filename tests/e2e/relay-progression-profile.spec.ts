@@ -704,6 +704,25 @@ test('opens an active field participant profile by pubkey and renders only match
 	const profileReqs = (await relayState(page)).state.requests.filter((request) => request.filters.some((filter) =>
 		(filter.authors as string[] | undefined)?.[0] === otherPubkey && (filter['#d'] as string[] | undefined)?.includes(`io.github.lokuyow.persona-bubble-field:profile-state:${CHANNEL_ID}`)));
 	expect(profileReqs.length).toBeGreaterThan(0);
+	for (const request of profileReqs) for (const filter of request.filters) {
+		if ((filter.authors as string[] | undefined)?.[0] !== otherPubkey) continue;
+		expect(filter.limit).toBe(1);
+		expect(filter.since).toBeUndefined();
+		expect(filter['#r']).toBeUndefined();
+	}
+	await page.setViewportSize({ width: 390, height: 640 });
+	await expect(dialog).toHaveClass(/self-profile-content/);
+	await expect(dialog.locator('.profile-dialog-identity')).toBeVisible();
+	await expect(dialog.locator('.profile-dialog-scroll-viewport')).toBeVisible();
+	const dialogGeometry = await dialog.boundingBox();
+	const viewportSize = page.viewportSize();
+	expect(dialogGeometry).not.toBeNull();
+	expect(viewportSize).not.toBeNull();
+	expect(dialogGeometry!.x).toBeGreaterThanOrEqual(0);
+	expect(dialogGeometry!.y).toBeGreaterThanOrEqual(0);
+	expect(dialogGeometry!.x + dialogGeometry!.width).toBeLessThanOrEqual(viewportSize!.width);
+	expect(dialogGeometry!.y + dialogGeometry!.height).toBeLessThanOrEqual(viewportSize!.height);
+	expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 	await dialog.getByRole('button', { name: '閉じる', exact: true }).click();
 	await expect(dialog).toHaveCount(0);
 	await expect.poll(async () => {

@@ -23,7 +23,6 @@ import {
 	buildWorldMessageTemplate,
 	finalizeWorldEvent,
 	parseWorldStateEvent,
-	type PublicProfileState,
 	parseWorldMessage,
 	parseTraceEvent,
 	type ChannelReference,
@@ -393,16 +392,19 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			}
 			if (!latest || !retry || disposed || terminal || !transport || !selfSigner) return;
 			const handle = transport.publishSelf(retry.event, selfSigner.pubkey);
-			let results;
-			try { results = await handle.settled; } catch { results = []; }
-			const success = results.some((result) => result.outcome === 'accepted');
-			const permanentRejection = results.length > 0 && results.every((result) => result.outcome === 'rejected');
-			if (success) {
+			void handle.settled.catch(() => {});
+			let firstSuccess = false;
+			try { firstSuccess = await handle.firstSuccess; } catch { /* settled below decides whether retry is possible */ }
+			if (firstSuccess) {
 				publishedProfileFingerprint = retry.fingerprint;
 				signedProfileRetry = null;
 				return;
 			}
-			if (permanentRejection) { signedProfileRetry = null; return; }
+			let results;
+			try { results = await handle.settled; } catch { results = []; }
+			const explicitImpossibleRejection = results.length > 0 && results.every((result) => result.outcome === 'rejected' &&
+				/^(invalid: (event id|signature|pubkey) (mismatch|invalid)|blocked: (invalid|bad) (event|signature|pubkey))/i.test(result.notice ?? ''));
+			if (explicitImpossibleRejection) { signedProfileRetry = null; return; }
 			if (retry.retries < 3) {
 				retry.retries += 1;
 				if (pendingPublicProfilePersona) { signedProfileRetry = null; return; }
@@ -1717,10 +1719,11 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			schedulePublicProfilePublish();
 		},
 
-		openProfileState(pubkey: string, onState: (state: PublicProfileState) => void): Readonly<{ close: () => void }> {
-			if (disposed || !transport || !started) return { close: () => {} };
-			try { return transport.subscribeProfileState(pubkey, onState); }
-			catch { return { close: () => {} }; }
+		openProfileState(pubkey: string, onState: (update: import('./nostrRelayTransport').ProfileStateUpdate) => void,
+			onStatus?: (status: import('./nostrRelayTransport').ProfileReadStatus) => void): Readonly<{ close: () => void }> {
+			if (disposed || !transport || !started) { onStatus?.('unavailable'); return { close: () => {} }; }
+			try { return transport.subscribeProfileState(pubkey, onState, onStatus); }
+			catch { onStatus?.('error'); return { close: () => {} }; }
 		},
 
 		async start(): Promise<WorldReadBootstrap> {

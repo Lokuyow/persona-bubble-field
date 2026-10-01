@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createProfileRunEvidenceStore } from './profileRunEvidence';
+import { createProfileRunEvidenceStore, profileRunNumberForActiveParticipant } from './profileRunEvidence';
 import type { ParsedWorldStateEvent } from './nostrProtocol';
 
 const pubkey = 'a'.repeat(64);
@@ -19,6 +19,8 @@ describe('Profile Run evidence session ownership', () => {
 		const newSessionMessagesAndPresenceArrived = true;
 		expect(newSessionMessagesAndPresenceArrived).toBe(true);
 		expect(store.snapshot().has(pubkey)).toBe(false);
+		const newSessionPresence = { id: pubkey, status: 'active', lastActivityAt: 2_000 };
+		expect(profileRunNumberForActiveParticipant(store.snapshot().get(pubkey) ?? null, newSessionPresence, 600_000)).toBeNull();
 		expect(store.accept(oldSession, runEvidence(1, 'late-old-session-run'))).toBe(false);
 		expect(store.snapshot().has(pubkey)).toBe(false);
 		expect(store.accept(currentSession, runEvidence(2, 'new-run'))).toBe(true);

@@ -31,7 +31,7 @@ describe('public lifespan projection', () => {
 						const source = persona(rootBuild, { inferenceEfficiency: 1, contextCapacity: level, hallucinationSuppression: level }, usedMs);
 						const profile = publicState(source);
 						const capacityMs = profile.lifespan.extension!.regularUntilMs - 1_000;
-						const boundaryMs = profile.lifespan.extension!.roundingBoundaryAtMs - 1_000;
+						const boundaryMs = profile.lifespan.extension!.roundingBoundaryAtMs === null ? 0 : profile.lifespan.extension!.roundingBoundaryAtMs - 1_000;
 						for (const elapsed of [0, 1, 9, 10, Math.max(0, boundaryMs - 1), boundaryMs,
 							Math.max(0, capacityMs - 1), capacityMs, capacityMs + 1, capacityMs + HOUR]) {
 							const viewerAt = 1_000 + elapsed;
@@ -47,11 +47,12 @@ describe('public lifespan projection', () => {
 		const rootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0 };
 		const source = persona(rootBuild, { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 });
 		const profile = publicState(source);
-		const checkpoint = projectPublicLifespan(profile, 1_000);
 		const checkpointPlusOne = projectPublicLifespan(profile, 1_001);
-		expect(checkpointPlusOne).toBe(checkpoint);
-		expect(projectPublicLifespan(profile, 1_010)).toBe(projectMending(source.gameState, 1_010, rootBuild).effectiveExpiresAtMs);
-		expect(projectPublicLifespan(profile, 1_010)).toBeGreaterThan(checkpointPlusOne);
+		const nineMoreMs = projectPublicLifespan(profile, 1_010);
+		const extensionIfRoundedFromSnapshot = Math.floor(9 * 10 / 100);
+		expect(nineMoreMs).toBe(projectMending(source.gameState, 1_010, rootBuild).effectiveExpiresAtMs);
+		expect(nineMoreMs).toBe(checkpointPlusOne + 1);
+		expect(checkpointPlusOne + extensionIfRoundedFromSnapshot).toBeLessThan(nineMoreMs);
 	});
 
 	it('keeps a non-mending lifespan fixed as wall time passes', () => {
@@ -61,5 +62,14 @@ describe('public lifespan projection', () => {
 		const projection = publicLifespanProjection(source);
 		expect(projection.extension).toBeNull();
 		expect(projectPublicLifespan(publicState(source), 10_000 + HOUR)).toBe(source.gameState.lifespanExpiresAtMs);
+	});
+
+	it('uses a null rounding boundary when acceleration starts at the anchor or ends with the regular segment', () => {
+		const rootBuild = { inferenceAcceleration: 2, contextCompression: 0, hallucinationResistance: 0 };
+		const abilities = { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 };
+		const noAcceleration = publicLifespanProjection(persona(rootBuild, abilities, INFERENCE_ACCELERATION_BUDGET_MS));
+		const allRegularTimeAccelerated = publicLifespanProjection(persona(rootBuild, abilities, 0));
+		expect(noAcceleration.extension?.roundingBoundaryAtMs).toBeNull();
+		expect(allRegularTimeAccelerated.extension?.roundingBoundaryAtMs).toBeNull();
 	});
 });

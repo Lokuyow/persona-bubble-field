@@ -520,9 +520,43 @@ describe('world read session', () => {
 		session.dispose();
 	});
 
+	it('retries rate-limited rejection and lets a newer mutation supersede the signed retry', async () => {
+		const signer = selfSigner();
+		const published: VerifiedEvent[] = [];
+		const publishSelf = vi.fn((event: VerifiedEvent) => {
+			published.push(event);
+			return published.length === 1
+				? { firstSuccess: Promise.resolve(false), settled: Promise.resolve([{ relayUrl: 'wss://relay.test/', outcome: 'rejected' as const, notice: 'rate-limited: slow down' }]) }
+				: { firstSuccess: Promise.resolve(true), settled: Promise.resolve([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' as const }]) };
+		});
+		mocked.createTransport.mockReturnValue({ start: vi.fn(async (nextInput) => { input = nextInput; return startResult(); }),
+			bootstrapTraceRootCandidates: traceBootstrap(), publishSelf, dispose });
+		const session = createWorldReadSession({ field: { columns: 4, rows: 3 }, selfSigner: signer, selfRunNumber: 1,
+			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn() });
+		await session.start();
+		const rootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0 } as const;
+		const snapshot = (points: number) => ({ signer, identity: signer.identity, rootPoints: 2,
+			activeRun: { runNumber: 1, rootBuild }, gameState: { ...createInitialPersonaGameState(signer.pubkey, 700_000), points } }) as unknown as PersonaSnapshot;
+		mocked.reservePublicProfilePublication
+			.mockResolvedValueOnce({ kind: 'reserved', createdAt: 701, persona: snapshot(10) })
+			.mockResolvedValueOnce({ kind: 'reserved', createdAt: 702, persona: snapshot(20) });
+		session.reconcilePublicProfileState(snapshot(10));
+		await vi.advanceTimersByTimeAsync(1_001);
+		expect(published).toHaveLength(1);
+		const staleId = published[0]!.id;
+		session.reconcilePublicProfileState(snapshot(20));
+		await vi.advanceTimersByTimeAsync(1_001);
+		expect(published).toHaveLength(2);
+		expect(published[1]!.id).not.toBe(staleId);
+		expect(JSON.parse(published[1]!.content).points).toBe(20);
+		await vi.advanceTimersByTimeAsync(5_000);
+		expect(published).toHaveLength(2);
+		session.dispose();
+	});
+
 	it('does not timer-retry a permanent rejection', async () => {
 		const signer = selfSigner();
-		const publishSelf = vi.fn(() => ({ firstSuccess: Promise.resolve(false), settled: Promise.resolve([{ relayUrl: 'wss://relay.test/', outcome: 'rejected' as const }]) }));
+		const publishSelf = vi.fn(() => ({ firstSuccess: Promise.resolve(false), settled: Promise.resolve([{ relayUrl: 'wss://relay.test/', outcome: 'rejected' as const, notice: 'invalid: signature invalid' }]) }));
 		mocked.createTransport.mockReturnValue({ start: vi.fn(async (nextInput) => { input = nextInput; return startResult(); }),
 			bootstrapTraceRootCandidates: traceBootstrap(), publishSelf, dispose });
 		const session = createWorldReadSession({ field: { columns: 4, rows: 3 }, selfSigner: signer, selfRunNumber: 1,

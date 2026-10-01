@@ -3,6 +3,8 @@ import type { Filter } from 'nostr-tools/filter';
 import type { SpeechType } from './conversation';
 import type { Character } from './character';
 import { resolveWorldCharacterFromPubkey } from './worldCharacterAssignment';
+import { getContextCapacityMinutes } from './personaGameState';
+import { rootContextCompressionMultiplierTenths, INFERENCE_ACCELERATION_BUDGET_MS } from './rootProgression';
 import {
 	formatCanonicalGridPosition,
 	parseCanonicalGridPosition,
@@ -64,7 +66,7 @@ export type PublicLifespanProjection = Readonly<{
 	extension: null | Readonly<{
 		anchorAtMs: number;
 		regularUntilMs: number;
-		roundingBoundaryAtMs: number;
+		roundingBoundaryAtMs: number | null;
 		overflowPercent: number;
 		maximumLifespanMs: number;
 	}>;
@@ -160,6 +162,15 @@ export type PublicProfileState = Readonly<{
 	abilities: Readonly<{ inferenceEfficiency: number; contextCapacity: number; hallucinationSuppression: number }>;
 	rootPoints: number;
 	lifespan: PublicLifespanProjection;
+}>;
+
+/** Signed address/run envelope, independent of whether its content version is understood. */
+export type PublicProfileEnvelope = Readonly<{
+	event: Event;
+	id: string;
+	pubkey: string;
+	createdAt: number;
+	runNumber: number;
 }>;
 
 export type ParsedTraceEvent = {
@@ -422,10 +433,12 @@ function assertPublicProfileNumbers(
 		!integer(abilities?.hallucinationSuppression, 1) || abilities.hallucinationSuppression > 100 ||
 		!integer(lifespan?.baseExpiresAtMs) || (lifespan.extension !== null && (
 			typeof lifespan.extension !== 'object' || !integer(lifespan.extension.anchorAtMs) ||
-			!integer(lifespan.extension.regularUntilMs) || !integer(lifespan.extension.roundingBoundaryAtMs) ||
+			!integer(lifespan.extension.regularUntilMs) || !(lifespan.extension.roundingBoundaryAtMs === null || integer(lifespan.extension.roundingBoundaryAtMs)) ||
 			lifespan.extension.regularUntilMs < lifespan.extension.anchorAtMs ||
-			lifespan.extension.roundingBoundaryAtMs < lifespan.extension.anchorAtMs ||
-			lifespan.extension.roundingBoundaryAtMs > lifespan.extension.regularUntilMs ||
+			lifespan.extension.regularUntilMs - lifespan.extension.anchorAtMs > getContextCapacityMinutes(100) * 60_000 * rootContextCompressionMultiplierTenths(3) / 10 ||
+			(lifespan.extension.roundingBoundaryAtMs !== null && (lifespan.extension.roundingBoundaryAtMs <= lifespan.extension.anchorAtMs ||
+			lifespan.extension.roundingBoundaryAtMs >= lifespan.extension.regularUntilMs ||
+			lifespan.extension.roundingBoundaryAtMs - lifespan.extension.anchorAtMs > INFERENCE_ACCELERATION_BUDGET_MS)) ||
 			!integer(lifespan.extension.overflowPercent) || ![0, 20, 35, 50].includes(lifespan.extension.overflowPercent) ||
 			![604_800_000, 1_209_600_000, 1_814_400_000, 2_592_000_000].includes(lifespan.extension.maximumLifespanMs)
 		))) throw new TypeError('Invalid public profile state.');
@@ -710,23 +723,12 @@ export function parseWorldStateEvent(event: Event, channelId: string): ParsedWor
 
 /** Strict parser for the profile-state address under the shared experimental kind. */
 export function parsePublicProfileState(event: Event, channelId: string, expectedPubkey?: string): PublicProfileState | null {
-	assertChannelId(channelId);
-	if (!isVerifiedEvent(event) || event.kind !== PROFILE_STATE_KIND || !Number.isSafeInteger(event.created_at) || event.created_at < 0 ||
-		(expectedPubkey !== undefined && event.pubkey !== expectedPubkey)) return null;
-	if (!resolveWorldCharacterFromPubkey(event.pubkey)) return null;
+	const envelope = parsePublicProfileEnvelope(event, channelId, expectedPubkey);
+	if (!envelope) return null;
 	const dTags = event.tags.filter((tag) => tag[0] === 'd');
 	const eTags = event.tags.filter((tag) => tag[0] === 'e');
 	const rTags = event.tags.filter((tag) => tag[0] === 'r');
-	if (dTags.length !== 1 || eTags.length !== 1 || rTags.length !== 1) return null;
-	const [d] = dTags;
-	const [e] = eTags;
-	const [r] = rTags;
-	if (d.length !== 2 || d[1] !== profileStateIdentifier(channelId) ||
-		e.length !== 3 || e[1] !== channelId ||
-		r.length !== 2 || !/^[1-9][0-9]*$/.test(r[1] ?? '')) return null;
-	try { assertRelayHint(e[2]); } catch { return null; }
-	const runNumber = Number(r[1]);
-	if (!Number.isSafeInteger(runNumber) || runNumber < 1) return null;
+	const runNumber = envelope.runNumber;
 	let content: unknown;
 	try { content = JSON.parse(event.content); } catch { return null; }
 	if (typeof content !== 'object' || content === null || Array.isArray(content)) return null;
@@ -745,7 +747,7 @@ export function parsePublicProfileState(event: Event, channelId: string, expecte
 			abilities as unknown as PublicProfileStateInput['abilities'], lifespan as unknown as PublicLifespanProjection);
 	} catch { return null; }
 	return {
-		id: event.id, pubkey: event.pubkey, createdAt: event.created_at, runNumber, version: 1,
+		id: envelope.id, pubkey: envelope.pubkey, createdAt: envelope.createdAt, runNumber, version: 1,
 		points: value.points as number,
 		abilities: { inferenceEfficiency: abilities.inferenceEfficiency as number, contextCapacity: abilities.contextCapacity as number, hallucinationSuppression: abilities.hallucinationSuppression as number },
 		rootPoints: value.rootPoints as number,
@@ -758,6 +760,33 @@ export function parsePublicProfileState(event: Event, channelId: string, expecte
 				maximumLifespanMs: (lifespan.extension as Record<string, number>).maximumLifespanMs
 			} }
 	};
+}
+
+/** Validates only the signed addressable envelope, so an unknown/invalid newer payload can hide older data. */
+export function parsePublicProfileEnvelope(event: Event, channelId: string, expectedPubkey?: string): PublicProfileEnvelope | null {
+	assertChannelId(channelId);
+	if (!isVerifiedEvent(event) || event.kind !== PROFILE_STATE_KIND || !Number.isSafeInteger(event.created_at) || event.created_at < 0 ||
+		(expectedPubkey !== undefined && event.pubkey !== expectedPubkey) || !resolveWorldCharacterFromPubkey(event.pubkey)) return null;
+	const dTags = event.tags.filter((tag) => tag[0] === 'd');
+	const eTags = event.tags.filter((tag) => tag[0] === 'e');
+	const rTags = event.tags.filter((tag) => tag[0] === 'r');
+	if (dTags.length !== 1 || eTags.length !== 1 || rTags.length !== 1) return null;
+	const [d] = dTags;
+	const [e] = eTags;
+	const [r] = rTags;
+	if (d.length !== 2 || d[1] !== profileStateIdentifier(channelId) ||
+		(e.length !== 2 && e.length !== 3) || e[1] !== channelId ||
+		r.length !== 2 || !/^[1-9][0-9]*$/.test(r[1] ?? '')) return null;
+	if (e.length === 3) {
+		try { assertRelayHint(e[2]); } catch { return null; }
+	}
+	const runNumber = Number(r[1]);
+	if (!Number.isSafeInteger(runNumber) || runNumber < 1) return null;
+	return { event, id: event.id, pubkey: event.pubkey, createdAt: event.created_at, runNumber };
+}
+
+export function isNewerPublicProfileEnvelope(candidate: PublicProfileEnvelope, current: PublicProfileEnvelope): boolean {
+	return candidate.createdAt > current.createdAt || candidate.createdAt === current.createdAt && candidate.id < current.id;
 }
 
 function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
@@ -823,11 +852,12 @@ export function buildWorldStateFilter(options: LiveFilterOptions): Filter {
 	};
 }
 
-export function buildPublicProfileStateFilter(options: LiveFilterOptions & Readonly<{ pubkey: string }>): Filter {
+export function buildPublicProfileStateFilter(options: Partial<Pick<LiveFilterOptions, 'since'>> & Pick<LiveFilterOptions, 'channelId'> & Readonly<{ pubkey: string; limit?: number }>): Filter {
 	assertChannelId(options.channelId);
-	assertCreatedAt(options.since);
+	if (options.since !== undefined) assertCreatedAt(options.since);
+	if (options.limit !== undefined) assertCreatedAt(options.limit);
 	if (!/^[0-9a-f]{64}$/.test(options.pubkey)) throw new TypeError('Invalid profile pubkey.');
-	return { kinds: [PROFILE_STATE_KIND], authors: [options.pubkey], '#d': [profileStateIdentifier(options.channelId)], '#e': [options.channelId], since: options.since };
+	return { kinds: [PROFILE_STATE_KIND], authors: [options.pubkey], '#d': [profileStateIdentifier(options.channelId)], '#e': [options.channelId], ...(options.since === undefined ? {} : { since: options.since }), ...(options.limit === undefined ? {} : { limit: options.limit }) };
 }
 
 export function buildTraceRootBootstrapFilter(options: TraceRootBootstrapFilterOptions): Filter {

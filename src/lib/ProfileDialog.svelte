@@ -1,51 +1,67 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { Dialog, ScrollArea } from 'bits-ui';
-	import X from '~icons/tabler/x';
-	import { getCharacterById } from '$lib/character';
-	import CharacterAvatar from './CharacterAvatar.svelte';
+	import ProfilePresentation from './ProfilePresentation.svelte';
 	import ProfileLifeStats from './ProfileLifeStats.svelte';
 	import ProfileRootPoints from './ProfileRootPoints.svelte';
 	import { projectPublicLifespan } from '$lib/publicProfile';
-	import type { PublicProfileState } from '$lib/nostrProtocol';
+	import { isNewerPublicProfileEnvelope, type PublicProfileEnvelope, type PublicProfileState } from '$lib/nostrProtocol';
+	import type { ProfileReadStatus, ProfileStateUpdate } from '$lib/nostrRelayTransport';
+	import { resolveWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
+	import { getCharacterById } from '$lib/character';
 	import type { createWorldReadSession } from '$lib/worldReadSession';
 
-	let {
-		onOpenChange,
-		onCloseAutoFocus,
-		session,
-		currentRunNumber
-	}: {
+	let { onOpenChange, onCloseAutoFocus, session, currentRunNumber, avatarTone }: {
 		onOpenChange: (open: boolean) => void;
 		onCloseAutoFocus: (event: Event) => void;
 		session: ReturnType<typeof createWorldReadSession> | null;
 		currentRunNumber: number | null;
+		avatarTone: string;
 	} = $props();
 
-	const profileCharacterId = $derived(page.state.profileCharacterId);
-	const character = $derived(profileCharacterId ? getCharacterById(profileCharacterId) ?? null : null);
-	const open = $derived(character !== null);
+	const target = $derived(page.state.profileTarget);
+	const pubkey = $derived(target?.kind === 'pubkey' ? target.pubkey : null);
+	const character = $derived(target?.kind === 'pubkey' ? resolveWorldCharacterFromPubkey(target.pubkey) ?? null : target?.kind === 'dev-character' ? getCharacterById(target.characterId) ?? null : null);
+	const open = $derived(Boolean(target && (target.kind === 'dev-character' || character)));
 	let publicState = $state.raw<PublicProfileState | null>(null);
+	let readStatus = $state<ProfileReadStatus | 'idle'>('idle');
 	let viewerNowMs = $state(Date.now());
-	const publicStateCache = new Map<string, PublicProfileState>();
-	let projectedExpiry = $derived(publicState ? projectPublicLifespan(publicState, viewerNowMs) : null);
+	let generation = 0;
+	const publicStateCache = new Map<string, Readonly<{ envelope: PublicProfileEnvelope; state: PublicProfileState | null }>>();
+	const projectedExpiry = $derived(publicState ? projectPublicLifespan(publicState, viewerNowMs) : null);
 
 	$effect(() => {
-		const pubkey = page.state.profilePubkey;
+		const currentSession = session;
+		publicStateCache.clear();
+		publicState = null;
+		readStatus = 'idle';
+		return () => { void currentSession; publicStateCache.clear(); };
+	});
+
+	$effect(() => {
+		const currentTarget = target;
+		const currentPubkey = currentTarget?.kind === 'pubkey' ? currentTarget.pubkey : null;
 		const runNumber = currentRunNumber;
 		const activeSession = session;
+		const currentGeneration = ++generation;
 		publicState = null;
-		if (!open || !pubkey || !runNumber || !activeSession) return;
-		const key = `${pubkey}:${runNumber}`;
-		const cached = publicStateCache.get(key);
-		if (cached) publicState = cached;
-		const subscription = activeSession.openProfileState(pubkey, (candidate) => {
-			if (candidate.runNumber !== runNumber) return;
-			const previous = publicStateCache.get(key);
-			if (previous && (candidate.createdAt < previous.createdAt || candidate.createdAt === previous.createdAt && candidate.id >= previous.id)) return;
-			publicStateCache.set(key, candidate);
-			publicState = candidate;
-		});
+		readStatus = 'idle';
+		if (!open || !currentPubkey || !runNumber || !activeSession) return;
+		const cached = publicStateCache.get(currentPubkey);
+		if (cached) {
+			publicStateCache.delete(currentPubkey);
+			publicStateCache.set(currentPubkey, cached);
+			publicState = cached.state?.runNumber === runNumber ? cached.state : null;
+			readStatus = 'loading';
+		}
+		const subscription = activeSession.openProfileState(currentPubkey, (candidate: ProfileStateUpdate) => {
+			if (currentGeneration !== generation) return;
+			const previous = publicStateCache.get(currentPubkey);
+			if (previous && !isNewerPublicProfileEnvelope(candidate.envelope, previous.envelope)) return;
+			publicStateCache.delete(currentPubkey);
+			publicStateCache.set(currentPubkey, candidate);
+			while (publicStateCache.size > 32) publicStateCache.delete(publicStateCache.keys().next().value!);
+			publicState = candidate.state?.runNumber === runNumber ? candidate.state : null;
+		}, (status) => { if (currentGeneration === generation) readStatus = status; });
 		return () => subscription.close();
 	});
 
@@ -56,192 +72,20 @@
 	});
 </script>
 
-
 {#if character}
-	<Dialog.Root bind:open={() => open, onOpenChange}>
-		<Dialog.Portal>
-			<Dialog.Overlay class="profile-dialog-overlay" />
-			<Dialog.Content class="profile-dialog-content" preventScroll={false} {onCloseAutoFocus}>
-				<div class="profile-dialog-header">
-					<div class="profile-dialog-close-row"><Dialog.Close class="action-button action-button-tertiary action-button-close" aria-label="閉じる"><X aria-hidden="true" /></Dialog.Close></div>
-					<CharacterAvatar class="profile-dialog-avatar" {character} />
-					<div>
-						<Dialog.Title>{character.name}</Dialog.Title>
-						<Dialog.Description class="visually-hidden">キャラクターのプロフィール</Dialog.Description>
-						{#if publicState}<span class="profile-run-number">人生 #{publicState.runNumber}</span>{/if}
-					</div>
-				</div>
-
-				<ScrollArea.Root class="profile-dialog-scroll-area" type="auto">
-					<ScrollArea.Viewport class="profile-dialog-scroll-viewport">
-						<div class="profile-dialog-sections">
-							<section class="profile-section"><h2>プロフィール</h2><p class="profile-dialog-about">{character.about}</p></section>
-							{#if publicState && projectedExpiry !== null}
-								<section class="profile-section"><h2>人生</h2><ProfileLifeStats expiresAtMs={projectedExpiry} nowMs={viewerNowMs} points={publicState.points} abilities={publicState.abilities} /></section>
-								<section class="profile-section"><h2>Root</h2><ProfileRootPoints points={publicState.rootPoints} /></section>
-							{/if}
-						</div>
-					</ScrollArea.Viewport>
-					<ScrollArea.Scrollbar class="profile-dialog-scrollbar" orientation="vertical">
-						<ScrollArea.Thumb class="profile-dialog-scroll-thumb" />
-					</ScrollArea.Scrollbar>
-				</ScrollArea.Root>
-
-			</Dialog.Content>
-		</Dialog.Portal>
-	</Dialog.Root>
+	<ProfilePresentation {open} {character} runLabel={publicState ? `人生 #${publicState.runNumber}` : null}
+		description="キャラクターのプロフィールと確認できた公開人生情報" avatarClass={`avatar-${avatarTone}`} onOpenChange={onOpenChange} {onCloseAutoFocus}>
+		{#if pubkey && readStatus === 'loading'}<p class="profile-state-status" aria-live="polite">{publicState ? '人生情報を更新中です。' : '人生情報を確認中です。'}</p>
+		{:else if pubkey && readStatus !== 'idle' && readStatus !== 'eose'}<p class="profile-state-status" aria-live="polite">{publicState ? '人生情報の更新を確認できませんでした。表示中の情報は前回確認した内容です。' : '人生情報を確認できませんでした。'}</p>{/if}
+		{#if publicState && projectedExpiry !== null}
+			<section class="profile-section"><h2>人生</h2><ProfileLifeStats expiresAtMs={projectedExpiry} nowMs={viewerNowMs} points={publicState.points} abilities={publicState.abilities} /></section>
+			<section class="profile-section"><h2>Root</h2><ProfileRootPoints points={publicState.rootPoints} /></section>
+		{/if}
+	</ProfilePresentation>
 {/if}
 
 <style>
-	:global(.profile-dialog-overlay) {
-		position: fixed;
-		inset: 0;
-		z-index: 100;
-		background: rgba(35, 44, 41, 0.48);
-		backdrop-filter: blur(3px);
-	}
-
-	:global(.profile-dialog-content) {
-		position: fixed;
-		top: 50%;
-		left: 50%;
-		z-index: 101;
-		display: flex;
-		width: min(calc(100vw - 32px), 480px);
-		height: min(520px, calc(100dvh - 32px));
-		max-height: calc(100dvh - 32px);
-		box-sizing: border-box;
-		flex-direction: column;
-		gap: 18px;
-		padding: 24px;
-		border: 1px solid rgba(57, 67, 64, 0.2);
-		border-radius: 24px;
-		background: #f7f7ef;
-		box-shadow: 0 22px 60px rgba(32, 42, 38, 0.32);
-		color: #374345;
-		font-family: 'Trebuchet MS', 'Avenir Next', system-ui, sans-serif;
-		outline: none;
-		transform: translate(-50%, -50%);
-	}
-
-	.profile-dialog-header {
-		display: flex;
-		align-items: center;
-		flex-direction: column;
-		gap: 16px;
-		flex: 0 0 auto;
-		text-align: center;
-	}
-
-	.profile-dialog-close-row { display: flex; width: 100%; justify-content: flex-end; }
-
-	.profile-dialog-header :global([data-dialog-title]) {
-		margin: 0;
-		font-size: 22px;
-		font-weight: 900;
-		letter-spacing: 0.03em;
-	}
-
-	:global(.profile-dialog-avatar) {
-		display: grid;
-		width: 256px;
-		height: 256px;
-		flex: 0 0 auto;
-		place-items: center;
-		border: 2px solid rgba(255, 255, 255, 0.88);
-		border-radius: 42% 58% 48% 52%;
-		background: #9bc6d5;
-		box-shadow: 0 5px 10px rgba(58, 70, 61, 0.16);
-		color: #374345;
-		font-size: 20px;
-		font-weight: 900;
-	}
-
-	:global(.profile-dialog-avatar img) {
-		display: block;
-		width: 100%;
-		height: 100%;
-		object-fit: contain;
-		object-position: center;
-	}
-
-	:global(.profile-dialog-scroll-area) {
-		position: relative;
-		min-height: 0;
-		flex: 1 1 auto;
-		overflow: hidden;
-		border: 1px solid rgba(57, 67, 64, 0.12);
-		border-radius: 14px;
-		background: rgba(255, 255, 255, 0.66);
-	}
-
-:global(.profile-dialog-scroll-viewport) {
-		position: absolute;
-		inset: 0;
-		padding: 16px 22px 16px 16px;
-		box-sizing: border-box;
-	}
-
-	.profile-dialog-about {
-		margin: 0;
-		overflow-wrap: anywhere;
-		white-space: pre-wrap;
-		font-size: 15px;
-		font-weight: 700;
-		letter-spacing: 0.02em;
-		line-height: 1.7;
-	}
-
-	.profile-dialog-sections { display: grid; gap: 18px; }
+	.profile-state-status { margin: 0; color: #75817d; font-size: 13px; line-height: 1.5; }
 	.profile-section { display: grid; gap: 10px; }
-	.profile-section h2 { margin: 0; color: #52615c; font-size: 16px; font-weight: 900; }
-	.profile-run-number { display: block; margin-top: 5px; color: #75817d; font-size: 13px; font-weight: 800; }
-
-	:global(.profile-dialog-scrollbar) {
-		display: flex;
-		width: 10px;
-		padding: 2px;
-		border-radius: 999px;
-		background: rgba(86, 105, 98, 0.12);
-	}
-
-	:global(.profile-dialog-scroll-thumb) {
-		flex: 1;
-		border-radius: inherit;
-		background: #8fa8a0;
-	}
-
-
-	:global(.visually-hidden) {
-		position: absolute;
-		width: 1px;
-		height: 1px;
-		overflow: hidden;
-		clip: rect(0 0 0 0);
-		white-space: nowrap;
-	}
-
-	@media (max-width: 700px) {
-		:global(.profile-dialog-content) {
-			gap: 14px;
-			padding: 20px;
-		}
-
-		.profile-dialog-header :global([data-dialog-title]) { font-size: 19px; }
-		.profile-dialog-about { font-size: 14px; }
-	}
-
-	@media (max-height: 480px) {
-		:global(.profile-dialog-content) {
-			gap: 8px;
-			padding: 12px;
-		}
-
-		.profile-dialog-header { gap: 8px; }
-
-		:global(.profile-dialog-avatar) {
-			width: clamp(128px, calc(100dvh - 184px), 256px);
-			height: clamp(128px, calc(100dvh - 184px), 256px);
-		}
-	}
+	.profile-section h2 { margin: 0; color: #56625e; font-size: 14px; font-weight: 900; letter-spacing: .04em; }
 </style>

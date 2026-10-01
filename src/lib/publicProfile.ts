@@ -14,7 +14,8 @@ export function publicLifespanProjection(persona: PersonaSnapshot): PublicLifesp
 	const anchorAtMs = job.checkpointAtMs;
 	const regularUntilMs = addSafe(anchorAtMs, Math.max(0, contextCapacityMs - job.processedDurationMs));
 	const accelerationRemainingMs = Math.max(0, INFERENCE_ACCELERATION_BUDGET_MS - Math.min(INFERENCE_ACCELERATION_BUDGET_MS, persona.gameState.inferenceAccelerationUsedMs));
-	const roundingBoundaryAtMs = Math.min(regularUntilMs, addSafe(anchorAtMs, accelerationRemainingMs));
+	const calculatedBoundary = Math.min(regularUntilMs, addSafe(anchorAtMs, accelerationRemainingMs));
+	const roundingBoundaryAtMs = calculatedBoundary === anchorAtMs || calculatedBoundary === regularUntilMs ? null : calculatedBoundary;
 	return {
 		baseExpiresAtMs,
 		extension: {
@@ -34,16 +35,20 @@ export function projectPublicLifespan(state: PublicProfileState, nowMs: number):
 	if (!extension || nowMs <= extension.anchorAtMs) return baseExpiresAtMs;
 	const rate = getHallucinationExtensionHundredths(state.abilities.hallucinationSuppression);
 	let expiry = baseExpiresAtMs;
-	const acceleratedEnd = Math.min(nowMs, extension.roundingBoundaryAtMs, extension.regularUntilMs);
-	if (acceleratedEnd > extension.anchorAtMs) {
-		expiry = applySegment(expiry, extension.anchorAtMs, acceleratedEnd - extension.anchorAtMs,
-			rate, 100, extension.maximumLifespanMs);
-	}
-	const normalStart = Math.max(extension.anchorAtMs, extension.roundingBoundaryAtMs);
 	const regularEnd = Math.min(nowMs, extension.regularUntilMs);
-	if (regularEnd > normalStart) {
-		expiry = applySegment(expiry, normalStart, regularEnd - normalStart,
-			rate, 100, extension.maximumLifespanMs);
+	if (extension.roundingBoundaryAtMs === null) {
+		if (regularEnd > extension.anchorAtMs) expiry = applySegment(expiry, extension.anchorAtMs,
+			regularEnd - extension.anchorAtMs, rate, 100, extension.maximumLifespanMs);
+	} else {
+		const acceleratedEnd = Math.min(nowMs, extension.roundingBoundaryAtMs, extension.regularUntilMs);
+		if (acceleratedEnd > extension.anchorAtMs) {
+			expiry = applySegment(expiry, extension.anchorAtMs, acceleratedEnd - extension.anchorAtMs,
+				rate, 100, extension.maximumLifespanMs);
+		}
+		if (regularEnd > extension.roundingBoundaryAtMs) {
+			expiry = applySegment(expiry, extension.roundingBoundaryAtMs, regularEnd - extension.roundingBoundaryAtMs,
+				rate, 100, extension.maximumLifespanMs);
+		}
 	}
 	const overflowStart = Math.max(extension.anchorAtMs, extension.regularUntilMs);
 	if (nowMs > overflowStart) {

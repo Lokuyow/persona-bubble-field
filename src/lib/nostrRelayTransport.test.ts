@@ -226,7 +226,7 @@ describe('primary lifecycle', () => {
 		const duplicateHandle = duplicate.transport.publishSelf(duplicateEvent, duplicateEvent.pubkey);
 		await vi.advanceTimersByTimeAsync(20);
 		expect(await duplicateHandle.firstSuccess).toBe(true);
-		expect(await duplicateHandle.settled).toMatchObject([{ outcome: 'rejected', notice: 'duplicate: already stored' }]);
+		expect(await duplicateHandle.settled).toMatchObject([{ outcome: 'accepted', notice: 'duplicate: already stored' }]);
 	});
 
 	it('does not treat duplicate-like rejection text or a complete no-success fanout as success', async () => {
@@ -1383,18 +1383,66 @@ describe('trace root bootstrap', () => {
 		expect(targetRequests(f.authorities[0])).toHaveLength(0);
 		expect(targetRequests(f.authorities[1])).toHaveLength(1);
 		expect(filters(targetRequests(f.authorities[1])[0])[0]).toMatchObject({
-			kinds: [WORLD_STATE_KIND], authors: [targetPubkey], '#d': [`io.github.lokuyow.persona-bubble-field:profile-state:${f.channel.id}`]
+			kinds: [WORLD_STATE_KIND], authors: [targetPubkey], '#d': [`io.github.lokuyow.persona-bubble-field:profile-state:${f.channel.id}`], '#e': [f.channel.id], limit: 1
 		});
+		expect(filters(targetRequests(f.authorities[1])[0])[0]).not.toHaveProperty('since');
 		const event = finalizeEvent(buildPublicProfileStateTemplate({ channel: { channelId: f.channel.id, relayHint: f.authorities[1].url },
 			createdAt: TIME, runNumber: 2, points: 10, abilities: { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 }, rootPoints: 3,
 			lifespan: { baseExpiresAtMs: TIME * 1_000 + 604_800_000, extension: null } }), AUTHOR);
 		const subscriptionId = targetRequests(f.authorities[1])[0][1];
 		send(f.authorities[1].latestSocket(), 'EVENT', subscriptionId, event);
 		await vi.advanceTimersByTimeAsync(10);
-		expect(received).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ pubkey: targetPubkey, runNumber: 2 }));
+		expect(received).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ state: expect.objectContaining({ pubkey: targetPubkey, runNumber: 2 }) }));
 		profileSubscription.close();
 		await vi.advanceTimersByTimeAsync(100);
 		expect(f.authorities[1].messages).toContainEqual(['CLOSE', subscriptionId]);
+	});
+
+	it('keeps the newest addressable envelope when a newer invalid payload arrives before older valid history', async () => {
+		const f = fixture(1);
+		await f.start();
+		const targetPubkey = getPublicKey(AUTHOR);
+		const received = vi.fn();
+		const statuses = vi.fn();
+		const subscription = f.transport.subscribeProfileState(targetPubkey, received, statuses);
+		await vi.advanceTimersByTimeAsync(10);
+		const request = f.authorities[0].requests.find((candidate) => {
+			const filter = filters(candidate)[0] as { authors?: string[] };
+			return kind(candidate) === WORLD_STATE_KIND && filter.authors?.[0] === targetPubkey;
+		})!;
+		const tags = [['d', `io.github.lokuyow.persona-bubble-field:profile-state:${f.channel.id}`], ['e', f.channel.id], ['r', '2']];
+		const older = finalizeEvent({ kind: WORLD_STATE_KIND, created_at: TIME, tags, content: JSON.stringify({
+			version: 1, points: 12, abilities: { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 }, rootPoints: 0,
+			lifespan: { baseExpiresAtMs: TIME * 1_000 + 604_800_000, extension: null }
+		}) }, AUTHOR);
+		const newerInvalid = finalizeEvent({ kind: WORLD_STATE_KIND, created_at: TIME + 1, tags, content: JSON.stringify({ version: 2 }) }, AUTHOR);
+		send(f.authorities[0].latestSocket(), 'EVENT', request[1], newerInvalid);
+		send(f.authorities[0].latestSocket(), 'EVENT', request[1], older);
+		send(f.authorities[0].latestSocket(), 'EOSE', request[1]);
+		await vi.advanceTimersByTimeAsync(10);
+		expect(received).toHaveBeenCalledTimes(1);
+		expect(received.mock.calls[0]![0]).toMatchObject({ envelope: { createdAt: TIME + 1 }, state: null });
+		expect(statuses).toHaveBeenCalledWith('eose');
+		subscription.close();
+	});
+
+	it('reports profile read timeout and ignores late EOSE after the target subscription closes', async () => {
+		const f = fixture(1);
+		await f.start();
+		f.authorities[0].onRequest = () => {};
+		const statuses = vi.fn();
+		const subscription = f.transport.subscribeProfileState(getPublicKey(AUTHOR), vi.fn(), statuses);
+		await vi.advanceTimersByTimeAsync(TIMEOUT + 10);
+		expect(statuses).toHaveBeenCalledWith('timeout');
+		subscription.close();
+		const beforeLateControl = statuses.mock.calls.length;
+		const profileReq = f.authorities[0].requests.find((request) => {
+			const filter = filters(request)[0] as { authors?: string[] };
+			return kind(request) === WORLD_STATE_KIND && filter.authors?.[0] === getPublicKey(AUTHOR);
+		});
+		if (profileReq) send(f.authorities[0].latestSocket(), 'EOSE', profileReq[1]);
+		await vi.advanceTimersByTimeAsync(1);
+		expect(statuses).toHaveBeenCalledTimes(beforeLateControl);
 	});
 
 	it('times out only bootstrap at capacity two and keeps both primaries live', async () => {
