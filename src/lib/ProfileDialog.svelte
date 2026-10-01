@@ -78,8 +78,8 @@
 		{#if pubkey && readStatus === 'loading'}<p class="profile-state-status" aria-live="polite">{publicState ? '人生情報を更新中です。' : '人生情報を確認中です。'}</p>
 		{:else if pubkey && readStatus !== 'idle' && readStatus !== 'eose'}<p class="profile-state-status" aria-live="polite">{publicState ? '人生情報の更新を確認できませんでした。表示中の情報は前回確認した内容です。' : '人生情報を確認できませんでした。'}</p>{/if}
 		{#if publicState && projectedExpiry !== null}
-			<section class="profile-section"><h2>人生</h2><ProfileLifeStats expiresAtMs={projectedExpiry} nowMs={viewerNowMs} points={publicState.points} abilities={publicState.abilities} /></section>
-			<section class="profile-section"><h2>Root</h2><ProfileRootPoints points={publicState.rootPoints} /></section>
+			<div class="profile-section"><ProfileLifeStats expiresAtMs={projectedExpiry} nowMs={viewerNowMs} points={publicState.points} abilities={publicState.abilities} /></div>
+			<div class="profile-section"><ProfileRootPoints points={publicState.rootPoints} /></div>
 		{/if}
 	</ProfilePresentation>
 {/if}
@@ -87,5 +87,4 @@
 <style>
 	.profile-state-status { margin: 0; color: #75817d; font-size: 13px; line-height: 1.5; }
 	.profile-section { display: grid; gap: 10px; }
-	.profile-section h2 { margin: 0; color: #56625e; font-size: 14px; font-weight: 900; letter-spacing: .04em; }
 </style>

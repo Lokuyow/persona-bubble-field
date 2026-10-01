@@ -36,14 +36,12 @@
 {#if persona && character}
 	<DialogPresentation {open} {character} runLabel={`人生 #${persona.activeRun.runNumber}`} description="自分のプロフィールと現在の人生情報"
 		dialogClass="" avatarClass={`avatar-${avatarTone}`} {onOpenChange} {onCloseAutoFocus}>
-		<section class="profile-section" aria-labelledby="self-profile-run">
-			<h2 id="self-profile-run">人生</h2>
+		<div class="profile-section">
 			<ProfileLifeStats expiresAtMs={effectiveExpiry} {nowMs} points={persona.gameState.points} abilities={persona.gameState.abilities} />
-		</section>
-		<section class="profile-section" aria-labelledby="self-profile-root">
-			<h2 id="self-profile-root">Root</h2>
+		</div>
+		<div class="profile-section">
 			<ProfileRootPoints points={persona.rootPoints} />
-			<div class="clear-section" aria-labelledby="self-profile-clear">
+			<section class="clear-section" aria-labelledby="self-profile-clear">
 				<div class="clear-title-row"><div class="clear-title-group"><h3 id="self-profile-clear">脱出</h3><Popover.Root>
 					<Popover.Trigger class="escape-info-trigger" aria-label="脱出するとどうなるかを見る"><HelpCircle aria-hidden="true" /></Popover.Trigger>
 					<Popover.Portal><Popover.Content class="escape-info-popover" trapFocus={false} side="bottom" align="start" sideOffset={8} avoidCollisions={true} collisionPadding={16}>
@@ -61,14 +59,13 @@
 				<p>未回収の作業ポイントは含まれません。</p>
 				{#if clearBlockedReason && !pointBlocked}<p class="clear-reason">clear不可: {clearBlockedReason}</p>{/if}
 				<ActionButton variant="secondary" intent="danger" class="clear-button" type="button" disabled={clearBlocked} onclick={onClear}>脱出</ActionButton>
-			</div>
-		</section>
+			</section>
+		</div>
 	</DialogPresentation>
 {/if}
 
 <style>
 	.profile-section { display: grid; gap: 10px; }
-	.profile-section h2 { margin: 0; color: #56625e; font-size: 14px; font-weight: 900; letter-spacing: .04em; }
 	.clear-progress-head span :global(svg) { width: 15px; height: 15px; flex: 0 0 auto; }
 	.clear-section { display: grid; gap: 12px; padding: 16px; border: 1px solid #ddb9a8; border-radius: 14px; background: #fff1eb; }
 	.clear-title-row { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }

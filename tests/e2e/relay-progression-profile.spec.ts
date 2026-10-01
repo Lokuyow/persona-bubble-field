@@ -116,6 +116,9 @@ test.describe('Relay startup', () => {
 
 		const dialog = page.getByRole('dialog');
 		await expect(dialog).toBeVisible();
+		await expect(dialog.getByRole('heading', { name: 'プロフィール', exact: true })).toBeVisible();
+		await expect(dialog.getByRole('heading', { name: '人生', exact: true })).toHaveCount(0);
+		await expect(dialog.getByRole('heading', { name: 'Root', exact: true })).toHaveCount(0);
 		const viewportSize = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
 		await expect(dialog).toContainText('人生 #1');
 		await expect(dialog).toContainText('残り寿命');
@@ -331,7 +334,10 @@ test.describe('Relay startup', () => {
 		const dialogBox = await dialog.boundingBox();
 		const viewportBox = await scrollViewport.boundingBox();
 		const metrics = await scrollViewport.evaluate((element) => ({ clientHeight: element.clientHeight, scrollHeight: element.scrollHeight }));
-		await expect(dialog.locator('.self-profile-sections > section')).toHaveCount(3);
+		await expect(dialog.locator('.self-profile-sections > section')).toHaveCount(1);
+		await expect(dialog.locator('[aria-labelledby="self-profile-run"], [aria-labelledby="self-profile-root"]')).toHaveCount(0);
+		await expect(dialog.getByRole('heading', { name: '人生', exact: true })).toHaveCount(0);
+		await expect(dialog.getByRole('heading', { name: 'Root', exact: true })).toHaveCount(0);
 		for (const statIcon of ['heart', 'wallet']) {
 			const card = dialog.locator(`.summary-card[data-stat-icon="${statIcon}"]`);
 			const labelBox = await card.locator('span').boundingBox();
@@ -664,6 +670,7 @@ test('opens an active field participant profile by pubkey and renders only match
 	const selfSecret = fixtureSecret(19);
 	const otherSecret = fixtureSecret(23);
 	const otherPubkey = getPublicKey(otherSecret);
+	const otherCharacter = requireCharacterFromPubkey(otherPubkey);
 	const createdAt = Math.floor(startTime / 1_000);
 	const channel = { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' };
 	const otherEvents = {
@@ -695,9 +702,21 @@ test('opens an active field participant profile by pubkey and renders only match
 	await fieldProfileTrigger.press('Enter');
 	const dialog = page.locator('.profile-dialog-content');
 	await expect(dialog).toBeVisible();
+	await expect(dialog.getByRole('heading', { name: 'プロフィール', exact: true })).toBeVisible();
+	await expect(dialog.getByRole('heading', { name: '人生', exact: true })).toHaveCount(0);
+	await expect(dialog.getByRole('heading', { name: 'Root', exact: true })).toHaveCount(0);
+	await expect(dialog.locator('.profile-dialog-avatar')).toBeVisible();
+	await expect(dialog.locator('[data-dialog-title]')).toHaveText(otherCharacter.name);
+	await expect(dialog.locator('.profile-dialog-about')).toHaveText(otherCharacter.about);
 	await expect(dialog).toContainText('人生 #2');
+	await expect(dialog).toContainText('残り寿命');
+	await expect(dialog).toContainText('所持ポイント');
+	await expect(dialog).toContainText('推論効率');
+	await expect(dialog).toContainText('コンテキスト容量');
+	await expect(dialog).toContainText('ハルシネーション抑制');
 	await expect(dialog).toContainText(`${expectedProfilePoints} pt`);
 	await expect(dialog).toContainText('678 RP');
+	await expect(dialog.getByRole('button', { name: '脱出', exact: true })).toHaveCount(0);
 	await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
 		request.filters.some((filter) => (filter.authors as string[] | undefined)?.[0] === otherPubkey &&
 			(filter['#d'] as string[] | undefined)?.includes(`io.github.lokuyow.persona-bubble-field:profile-state:${CHANNEL_ID}`)))).toBe(true);
