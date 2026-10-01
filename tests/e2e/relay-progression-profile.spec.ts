@@ -708,6 +708,7 @@ test('opens an active field participant profile by pubkey and renders only match
 	await expect(dialog.locator('.profile-dialog-avatar')).toBeVisible();
 	await expect(dialog.locator('[data-dialog-title]')).toHaveText(otherCharacter.name);
 	await expect(dialog.locator('.profile-dialog-about')).toHaveText(otherCharacter.about);
+	await expect(dialog.locator('.profile-state-status')).toHaveCount(0);
 	await expect(dialog).toContainText('人生 #2');
 	await expect(dialog).toContainText('残り寿命');
 	await expect(dialog).toContainText('所持ポイント');
@@ -716,6 +717,7 @@ test('opens an active field participant profile by pubkey and renders only match
 	await expect(dialog).toContainText('ハルシネーション抑制');
 	await expect(dialog).toContainText(`${expectedProfilePoints} pt`);
 	await expect(dialog).toContainText('678 RP');
+	await expect(dialog.locator('.profile-state-status')).toHaveCount(0);
 	await expect(dialog.getByRole('button', { name: '脱出', exact: true })).toHaveCount(0);
 	await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
 		request.filters.some((filter) => (filter.authors as string[] | undefined)?.[0] === otherPubkey &&

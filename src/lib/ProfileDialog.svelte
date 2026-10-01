@@ -75,8 +75,7 @@
 {#if character}
 	<ProfilePresentation {open} {character} runLabel={publicState ? `人生 #${publicState.runNumber}` : null}
 		description="キャラクターのプロフィールと確認できた公開人生情報" avatarClass={`avatar-${avatarTone}`} onOpenChange={onOpenChange} {onCloseAutoFocus}>
-		{#if pubkey && readStatus === 'loading'}<p class="profile-state-status" aria-live="polite">{publicState ? '人生情報を更新中です。' : '人生情報を確認中です。'}</p>
-		{:else if pubkey && readStatus !== 'idle' && readStatus !== 'eose'}<p class="profile-state-status" aria-live="polite">{publicState ? '人生情報の更新を確認できませんでした。表示中の情報は前回確認した内容です。' : '人生情報を確認できませんでした。'}</p>{/if}
+		{#if pubkey && readStatus !== 'loading' && readStatus !== 'idle' && readStatus !== 'eose'}<p class="profile-state-status" aria-live="polite">{publicState ? '人生情報の更新を確認できませんでした。表示中の情報は前回確認した内容です。' : '人生情報を確認できませんでした。'}</p>{/if}
 		{#if publicState && projectedExpiry !== null}
 			<div class="profile-section"><ProfileLifeStats expiresAtMs={projectedExpiry} nowMs={viewerNowMs} points={publicState.points} abilities={publicState.abilities} /></div>
 			<div class="profile-section"><ProfileRootPoints points={publicState.rootPoints} /></div>
