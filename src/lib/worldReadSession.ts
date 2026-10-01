@@ -16,6 +16,7 @@ import {
 } from './traceReadState';
 import {
 	buildWorldStateEventTemplate,
+	buildPublicProfileStateTemplate,
 	buildDeathTraceEventTemplate,
 	buildManualTraceEventTemplate,
 	buildTraceReplyTemplate,
@@ -48,6 +49,8 @@ import {
 	confirmWorldPosition,
 	claimManualTraceOutbox,
 	loadWorldWriteJournal,
+	reservePublicProfilePublication,
+	readCurrentPublicProfilePersona,
 	loadOrCreateLifecycle,
 	reserveWorldPositive,
 	reserveManualTraceOutbox,
@@ -73,6 +76,7 @@ import {
 	type PositionPublishState
 } from './positionPublish';
 import { resolvePrototypeWorldConfig } from './prototypeWorld';
+import { publicLifespanProjection } from './publicProfile';
 import {
 	applyWorldPresenceMessage,
 	applyWorldPresenceWorldState,
@@ -304,10 +308,118 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	let deathTraceAttempted = false;
 	let manualTraceRetryTimer: ReturnType<typeof setTimeout> | null = null;
 	let manualTraceAttemptSequence = 0;
+	let pendingPublicProfilePersona: PersonaSnapshot | null = null;
+	let publicProfileTimer: ReturnType<typeof setTimeout> | null = null;
+	let publicProfilePublishing = false;
+	let publishedProfileFingerprint: string | null = null;
+	let signedProfileRetry: { event: VerifiedEvent; fingerprint: string; retries: number } | null = null;
+	let profileReconnectCheck = false;
 
 	function emitStatus(next: WorldReadConnectionStatus): void {
 		status = next;
 		if (!disposed) options.onStatusChanged(status);
+	}
+
+	function publicProfileFingerprint(persona: PersonaSnapshot): string {
+		return JSON.stringify([persona.signer.pubkey, persona.activeRun.runNumber, persona.rootPoints,
+			persona.gameState.points, persona.gameState.abilities, publicLifespanProjection(persona)]);
+	}
+
+	function schedulePublicProfilePublish(delayMs?: number): void {
+		if (disposed || publicProfileTimer !== null || (!pendingPublicProfilePersona && !signedProfileRetry)) return;
+		const now = Date.now();
+		const wait = delayMs ?? (1001 - now % 1000);
+		publicProfileTimer = setTimeout(() => {
+			publicProfileTimer = null;
+			void flushPublicProfilePublish();
+		}, wait);
+	}
+
+	async function reconcilePublicProfileAfterReconnect(): Promise<void> {
+		if (disposed || terminal || profileReconnectCheck || !journalScope) return;
+		profileReconnectCheck = true;
+		try {
+			const latest = await readCurrentPublicProfilePersona(journalScope);
+			if (!latest || disposed || terminal) return;
+			if (publicProfileTimer !== null) { clearTimeout(publicProfileTimer); publicProfileTimer = null; }
+			signedProfileRetry = null;
+			if (publicProfileFingerprint(latest) === publishedProfileFingerprint) return;
+			pendingPublicProfilePersona = latest;
+			schedulePublicProfilePublish();
+		} catch {
+			// Reconnect reconciliation is best-effort; later mutation/session edges retry it.
+		} finally { profileReconnectCheck = false; }
+	}
+
+	async function flushPublicProfilePublish(): Promise<void> {
+		if (disposed || publicProfilePublishing || (!pendingPublicProfilePersona && !signedProfileRetry) || !transport || !channel || !selfSigner || !journalScope) return;
+		const requested = pendingPublicProfilePersona;
+		pendingPublicProfilePersona = null;
+		if (requested && publicProfileFingerprint(requested) === publishedProfileFingerprint) return;
+		if (terminal || requested && (requested.signer.pubkey !== journalScope.identity.pubkey || requested.activeRun.runNumber !== journalScope.runNumber) || !await authorizeSelfWrite()) return;
+		if (disposed || terminal || !transport || !channel || !selfSigner) return;
+		publicProfilePublishing = true;
+		try {
+			let retry = signedProfileRetry;
+			let latest: PersonaSnapshot | null;
+			if (retry) {
+				latest = await readCurrentPublicProfilePersona(journalScope);
+				if (!latest || publicProfileFingerprint(latest) !== retry.fingerprint) {
+					signedProfileRetry = null;
+					if (latest) pendingPublicProfilePersona = latest;
+					return;
+				}
+			} else {
+				if (!requested) return;
+				const reservation = await reservePublicProfilePublication({ scope: journalScope, nowSecond: Math.floor(Date.now() / 1000) });
+				if (reservation.kind === 'wait') {
+					pendingPublicProfilePersona = requested;
+					const delay = Math.max(1, reservation.untilSecond * 1000 - Date.now());
+					schedulePublicProfilePublish(delay);
+					return;
+				}
+				if (reservation.kind !== 'reserved') return;
+				latest = reservation.persona;
+				const latestFingerprint = publicProfileFingerprint(latest);
+				if (latestFingerprint === publishedProfileFingerprint) return;
+				const event = finalizeWorldEvent(buildPublicProfileStateTemplate({
+					channel, createdAt: reservation.createdAt, runNumber: latest.activeRun.runNumber,
+					points: latest.gameState.points, abilities: latest.gameState.abilities, rootPoints: latest.rootPoints,
+					lifespan: publicLifespanProjection(latest)
+				}), selfSigner.secretKey);
+				retry = { event, fingerprint: latestFingerprint, retries: 0 };
+				signedProfileRetry = retry;
+			}
+			if (!latest || !retry || disposed || terminal || !transport || !selfSigner) return;
+			const handle = transport.publishSelf(retry.event, selfSigner.pubkey);
+			void handle.settled.catch(() => {});
+			let firstSuccess = false;
+			try { firstSuccess = await handle.firstSuccess; } catch { /* settled below decides whether retry is possible */ }
+			if (firstSuccess) {
+				publishedProfileFingerprint = retry.fingerprint;
+				signedProfileRetry = null;
+				return;
+			}
+			let results;
+			try { results = await handle.settled; } catch { results = []; }
+			const explicitImpossibleRejection = results.length > 0 && results.every((result) => result.outcome === 'rejected' &&
+				/^(invalid: (event id|signature|pubkey) (mismatch|invalid)|blocked: (invalid|bad) (event|signature|pubkey))/i.test(result.notice ?? ''));
+			if (explicitImpossibleRejection) { signedProfileRetry = null; return; }
+			if (retry.retries < 3) {
+				retry.retries += 1;
+				if (pendingPublicProfilePersona) { signedProfileRetry = null; return; }
+				signedProfileRetry = retry;
+				schedulePublicProfilePublish([1_000, 2_000, 4_000][retry.retries - 1]);
+			} else signedProfileRetry = null;
+		} catch {
+			if (signedProfileRetry && signedProfileRetry.retries < 3 && !pendingPublicProfilePersona) {
+				signedProfileRetry.retries += 1;
+				schedulePublicProfilePublish([1_000, 2_000, 4_000][signedProfileRetry.retries - 1]);
+			}
+		} finally {
+			publicProfilePublishing = false;
+			if (pendingPublicProfilePersona) schedulePublicProfilePublish();
+		}
 	}
 
 	function emitSelfPositionWriteState(next: SelfPositionWriteState): void {
@@ -1057,6 +1169,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			}
 			reservation = reserved.reservation;
 			journalSnapshot = { lastReservedSecond: parsed.createdAt, consumedSlots: parsed.slot === 0 ? 1 : 2,
+				profileLastReservedSecond: journalSnapshot?.profileLastReservedSecond ?? null,
 				lastPositiveSecond: parsed.createdAt, exitSecond: journalSnapshot?.exitSecond ?? null,
 				confirmedPosition: journalSnapshot?.confirmedPosition ?? null };
 		}
@@ -1597,12 +1710,28 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	}
 
 	return {
+		reconcilePublicProfileState(persona: PersonaSnapshot): void {
+			if (disposed || !selfSigner || persona.signer.pubkey !== selfSigner.pubkey) return;
+			if (publicProfileTimer !== null) { clearTimeout(publicProfileTimer); publicProfileTimer = null; }
+			if (publicProfileFingerprint(persona) === publishedProfileFingerprint && !pendingPublicProfilePersona) { signedProfileRetry = null; return; }
+			signedProfileRetry = null;
+			pendingPublicProfilePersona = persona;
+			schedulePublicProfilePublish();
+		},
+
+		openProfileState(pubkey: string, onState: (update: import('./nostrRelayTransport').ProfileStateUpdate) => void,
+			onStatus?: (status: import('./nostrRelayTransport').ProfileReadStatus) => void): Readonly<{ close: () => void }> {
+			if (disposed || !transport || !started) { onStatus?.('unavailable'); return { close: () => {} }; }
+			try { return transport.subscribeProfileState(pubkey, onState, onStatus); }
+			catch { onStatus?.('error'); return { close: () => {} }; }
+		},
+
 		async start(): Promise<WorldReadBootstrap> {
 			if (started) throw new Error('World read session start is only allowed once.');
 			started = true;
 			const world = resolvePrototypeWorldConfig();
 			channel = { channelId: world.channelId, relayHint: world.preferredRelayHint };
-			transport = createNostrRelayTransport(world);
+			transport = createNostrRelayTransport(world, { onRelayReconnected: () => { void reconcilePublicProfileAfterReconnect(); } });
 			// Restore viewer-local roots independently of the primary network sync.
 			void reconcileTraceRoots([]);
 			emitStatus({ kind: 'bootstrapping' });
@@ -1828,6 +1957,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		dispose(): void {
 			if (disposed) return;
 			disposed = true;
+			if (publicProfileTimer !== null) { clearTimeout(publicProfileTimer); publicProfileTimer = null; }
 			if (manualTraceRetryTimer !== null) { clearTimeout(manualTraceRetryTimer); manualTraceRetryTimer = null; }
 			traceConversationGeneration += 1;
 			pendingLiveEvents.splice(0);

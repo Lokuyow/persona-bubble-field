@@ -9,7 +9,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createNostrRelayTransport } from './nostrRelayTransport';
 import {
-	buildDeathTraceEventTemplate, buildTraceRootBootstrapFilter, buildWorldMessageTemplate, buildWorldStateEventTemplate, buildWorldMessageFilter, WORLD_STATE_KIND
+	buildDeathTraceEventTemplate, buildTraceRootBootstrapFilter, buildWorldMessageTemplate, buildWorldStateEventTemplate, buildWorldMessageFilter, buildPublicProfileStateTemplate, profileStateIdentifier, WORLD_STATE_KIND
 } from './nostrProtocol';
 import { buildRealtimeControlEventTemplate, buildRealtimeControlFilter, buildRealtimeEventFilter, buildRealtimeInstanceFilter, finalizeRealtimeEvent, type RealtimeEventRegistry } from './realtimeEvents';
 import { COOPERATION_DEFECTION_EVENT_DEFINITION, buildCooperationDefectionActionTemplate } from './cooperationDefection';
@@ -226,7 +226,7 @@ describe('primary lifecycle', () => {
 		const duplicateHandle = duplicate.transport.publishSelf(duplicateEvent, duplicateEvent.pubkey);
 		await vi.advanceTimersByTimeAsync(20);
 		expect(await duplicateHandle.firstSuccess).toBe(true);
-		expect(await duplicateHandle.settled).toMatchObject([{ outcome: 'rejected', notice: 'duplicate: already stored' }]);
+		expect(await duplicateHandle.settled).toMatchObject([{ outcome: 'accepted', notice: 'duplicate: already stored' }]);
 	});
 
 	it('does not treat duplicate-like rejection text or a complete no-success fanout as success', async () => {
@@ -1365,6 +1365,194 @@ describe('trace root bootstrap', () => {
 		expect((await pending).relays[0].status).toBe('eose');
 		expect(f.authorities[0].messages.filter((message) => message[0] === 'CLOSE' && message[1] === rootSubId)).toHaveLength(1);
 		expect(f.authorities[0].primaryRequests()).toHaveLength(2);
+	});
+
+	it('opens one target-scoped live profile REQ only on relays that allow five subscriptions and closes it with the dialog', async () => {
+		const f = fixture(2);
+		Nip11Registry.set(f.authorities[0].url, { limitation: { max_subscriptions: 4 } });
+		Nip11Registry.set(f.authorities[1].url, { limitation: { max_subscriptions: 5 } });
+		await f.start();
+		const targetPubkey = getPublicKey(AUTHOR);
+		const received = vi.fn();
+		const profileSubscription = f.transport.subscribeProfileState(targetPubkey, received);
+		await vi.advanceTimersByTimeAsync(10);
+		const targetRequests = (relay: ReturnType<typeof mockRelay>) => relay.requests.filter((request) => {
+			const filter = filters(request)[0] as { authors?: string[] };
+			return kind(request) === WORLD_STATE_KIND && filter.authors?.[0] === targetPubkey;
+		});
+		expect(targetRequests(f.authorities[0])).toHaveLength(0);
+		expect(targetRequests(f.authorities[1])).toHaveLength(1);
+		expect(filters(targetRequests(f.authorities[1])[0])[0]).toMatchObject({
+			kinds: [WORLD_STATE_KIND], authors: [targetPubkey], '#d': [`io.github.lokuyow.persona-bubble-field:profile-state:${f.channel.id}`], '#e': [f.channel.id], limit: 1
+		});
+		expect(filters(targetRequests(f.authorities[1])[0])[0]).not.toHaveProperty('since');
+		const event = finalizeEvent(buildPublicProfileStateTemplate({ channel: { channelId: f.channel.id, relayHint: f.authorities[1].url },
+			createdAt: TIME, runNumber: 2, points: 10, abilities: { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 }, rootPoints: 3,
+			lifespan: { baseExpiresAtMs: TIME * 1_000 + 604_800_000, extension: null } }), AUTHOR);
+		const subscriptionId = targetRequests(f.authorities[1])[0][1];
+		send(f.authorities[1].latestSocket(), 'EVENT', subscriptionId, event);
+		await vi.advanceTimersByTimeAsync(10);
+		expect(received).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ state: expect.objectContaining({ pubkey: targetPubkey, runNumber: 2 }) }));
+		profileSubscription.close();
+		await vi.advanceTimersByTimeAsync(100);
+		expect(f.authorities[1].messages).toContainEqual(['CLOSE', subscriptionId]);
+	});
+
+	const invalidProfileTagCases: ReadonlyArray<readonly [string, (tags: string[][]) => string[][]]> = [
+		['missing r', (tags: string[][]) => tags.filter((tag) => tag[0] !== 'r')],
+		['malformed r', (tags: string[][]) => tags.map((tag) => tag[0] === 'r' ? ['r', '2x'] : tag)],
+		['duplicate r', (tags: string[][]) => [...tags, ['r', '3']]],
+		['invalid optional relay hint', (tags: string[][]) => tags.map((tag) => tag[0] === 'e' ? ['e', tag[1], 'https://invalid-hint.test'] : tag)]
+	];
+	it.each(invalidProfileTagCases.flatMap(([label, invalidateTags]) => [
+		[label, invalidateTags, 'newer first'] as const,
+		[label, invalidateTags, 'older first'] as const
+	]))(
+		'keeps a newer signed candidate canonical after %s with %s arrival', async (_label, invalidateTags, arrivalOrder) => {
+			const f = fixture(1);
+			await f.start();
+			const targetPubkey = getPublicKey(AUTHOR);
+			const received = vi.fn();
+			const statuses = vi.fn();
+			const subscription = f.transport.subscribeProfileState(targetPubkey, received, statuses);
+			await vi.advanceTimersByTimeAsync(10);
+			const request = f.authorities[0].requests.find((candidate) => {
+				const filter = filters(candidate)[0] as { authors?: string[] };
+				return kind(candidate) === WORLD_STATE_KIND && filter.authors?.[0] === targetPubkey;
+			})!;
+			const tags: string[][] = [['d', profileStateIdentifier(f.channel.id)], ['e', f.channel.id], ['r', '2']];
+			const older = finalizeEvent({ kind: WORLD_STATE_KIND, created_at: TIME, tags, content: JSON.stringify({
+				version: 1, points: 12, abilities: { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 }, rootPoints: 0,
+				lifespan: { baseExpiresAtMs: TIME * 1_000 + 604_800_000, extension: null }
+			}) }, AUTHOR);
+			const newerInvalid = finalizeEvent({ kind: WORLD_STATE_KIND, created_at: TIME + 1, tags: invalidateTags(tags), content: JSON.stringify({
+				version: 1, points: 13, abilities: { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 }, rootPoints: 0,
+				lifespan: { baseExpiresAtMs: TIME * 1_000 + 604_800_000, extension: null }
+			}) }, AUTHOR);
+			if (arrivalOrder === 'older first') {
+				send(f.authorities[0].latestSocket(), 'EVENT', request[1], older);
+				send(f.authorities[0].latestSocket(), 'EVENT', request[1], newerInvalid);
+			} else {
+				send(f.authorities[0].latestSocket(), 'EVENT', request[1], newerInvalid);
+				send(f.authorities[0].latestSocket(), 'EVENT', request[1], older);
+			}
+			send(f.authorities[0].latestSocket(), 'EOSE', request[1]);
+			await vi.advanceTimersByTimeAsync(10);
+			expect(received.mock.calls.at(-1)![0]).toMatchObject({ envelope: { createdAt: TIME + 1 }, state: null });
+			if (arrivalOrder === 'older first') expect(received).toHaveBeenCalledTimes(2);
+			else expect(received).toHaveBeenCalledTimes(1);
+			expect(statuses).toHaveBeenCalledWith('eose');
+			subscription.close();
+		}
+	);
+
+	it('keeps a newer unknown-version candidate canonical instead of restoring older valid content', async () => {
+		const f = fixture(1);
+		await f.start();
+		const received = vi.fn();
+		const subscription = f.transport.subscribeProfileState(getPublicKey(AUTHOR), received);
+		await vi.advanceTimersByTimeAsync(10);
+		const request = f.authorities[0].requests.find((candidate) => kind(candidate) === WORLD_STATE_KIND &&
+			(filters(candidate)[0] as { authors?: string[] }).authors?.[0] === getPublicKey(AUTHOR))!;
+		const tags = [['d', profileStateIdentifier(f.channel.id)], ['e', f.channel.id], ['r', '2']];
+		const older = finalizeEvent({ kind: WORLD_STATE_KIND, created_at: TIME, tags, content: JSON.stringify({
+			version: 1, points: 12, abilities: { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 }, rootPoints: 0,
+			lifespan: { baseExpiresAtMs: TIME * 1_000 + 604_800_000, extension: null }
+		}) }, AUTHOR);
+		const newer = finalizeEvent({ kind: WORLD_STATE_KIND, created_at: TIME + 1, tags, content: JSON.stringify({ version: 2 }) }, AUTHOR);
+		send(f.authorities[0].latestSocket(), 'EVENT', request[1], older);
+		send(f.authorities[0].latestSocket(), 'EVENT', request[1], newer);
+		await vi.advanceTimersByTimeAsync(10);
+		expect(received.mock.calls.map(([update]) => update.state?.points ?? null)).toEqual([12, null]);
+		subscription.close();
+	});
+
+	it('keeps profile read loading until every eligible Relay returns EOSE', async () => {
+		const f = fixture(2);
+		await f.start();
+		f.authorities[0].onRequest = (socket, request) => send(socket, 'EOSE', request[1]);
+		f.authorities[1].onRequest = () => {};
+		const statuses = vi.fn();
+		const subscription = f.transport.subscribeProfileState(getPublicKey(AUTHOR), vi.fn(), statuses);
+		await vi.advanceTimersByTimeAsync(10);
+		const requests = f.authorities.map((relay) => relay.requests.find((request) => kind(request) === WORLD_STATE_KIND &&
+			(filters(request)[0] as { authors?: string[] }).authors?.[0] === getPublicKey(AUTHOR))!);
+		send(f.authorities[0].latestSocket(), 'EOSE', requests[0]![1]);
+		await vi.advanceTimersByTimeAsync(1);
+		expect(statuses.mock.calls.at(-1)?.[0]).toBe('loading');
+		expect(statuses).not.toHaveBeenCalledWith('eose');
+		subscription.close();
+	});
+
+	it('times out a still-loading profile Relay after another Relay has returned EOSE', async () => {
+		const f = fixture(2);
+		await f.start();
+		f.authorities[0].onRequest = (socket, request) => send(socket, 'EOSE', request[1]);
+		f.authorities[1].onRequest = () => {};
+		const statuses = vi.fn();
+		const subscription = f.transport.subscribeProfileState(getPublicKey(AUTHOR), vi.fn(), statuses);
+		await vi.advanceTimersByTimeAsync(10);
+		const requests = f.authorities.map((relay) => relay.requests.find((request) => kind(request) === WORLD_STATE_KIND &&
+			(filters(request)[0] as { authors?: string[] }).authors?.[0] === getPublicKey(AUTHOR))!);
+		send(f.authorities[0].latestSocket(), 'EOSE', requests[0]![1]);
+		await vi.advanceTimersByTimeAsync(TIMEOUT + 1);
+		expect(statuses.mock.calls.at(-1)?.[0]).toBe('timeout');
+		expect(statuses).not.toHaveBeenCalledWith('eose');
+		subscription.close();
+	});
+
+	it('keeps profile read unconfirmed when one Relay EOSEs and another closes', async () => {
+		const f = fixture(2);
+		await f.start();
+		f.authorities.forEach((relay) => { relay.onRequest = () => {}; });
+		const statuses = vi.fn();
+		const subscription = f.transport.subscribeProfileState(getPublicKey(AUTHOR), vi.fn(), statuses);
+		await vi.advanceTimersByTimeAsync(10);
+		const requests = f.authorities.map((relay) => relay.requests.find((request) => kind(request) === WORLD_STATE_KIND &&
+			(filters(request)[0] as { authors?: string[] }).authors?.[0] === getPublicKey(AUTHOR))!);
+		send(f.authorities[0].latestSocket(), 'EOSE', requests[0]![1]);
+		send(f.authorities[1].latestSocket(), 'CLOSED', requests[1]![1], 'relay closed');
+		await vi.advanceTimersByTimeAsync(1);
+		expect(statuses.mock.calls.at(-1)?.[0]).toBe('closed');
+		expect(statuses).not.toHaveBeenCalledWith('eose');
+		subscription.close();
+	});
+
+	it('confirms profile read only after all eligible Relays return EOSE', async () => {
+		const f = fixture(2);
+		await f.start();
+		f.authorities.forEach((relay) => { relay.onRequest = () => {}; });
+		const statuses = vi.fn();
+		const subscription = f.transport.subscribeProfileState(getPublicKey(AUTHOR), vi.fn(), statuses);
+		await vi.advanceTimersByTimeAsync(10);
+		const requests = f.authorities.map((relay) => relay.requests.find((request) => kind(request) === WORLD_STATE_KIND &&
+			(filters(request)[0] as { authors?: string[] }).authors?.[0] === getPublicKey(AUTHOR))!);
+		send(f.authorities[0].latestSocket(), 'EOSE', requests[0]![1]);
+		await vi.advanceTimersByTimeAsync(1);
+		expect(statuses.mock.calls.at(-1)?.[0]).toBe('loading');
+		send(f.authorities[1].latestSocket(), 'EOSE', requests[1]![1]);
+		await vi.advanceTimersByTimeAsync(1);
+		expect(statuses.mock.calls.at(-1)?.[0]).toBe('eose');
+		subscription.close();
+	});
+
+	it('reports profile read timeout and ignores late EOSE after the target subscription closes', async () => {
+		const f = fixture(1);
+		await f.start();
+		f.authorities[0].onRequest = () => {};
+		const statuses = vi.fn();
+		const subscription = f.transport.subscribeProfileState(getPublicKey(AUTHOR), vi.fn(), statuses);
+		await vi.advanceTimersByTimeAsync(TIMEOUT + 10);
+		expect(statuses).toHaveBeenCalledWith('timeout');
+		subscription.close();
+		const beforeLateControl = statuses.mock.calls.length;
+		const profileReq = f.authorities[0].requests.find((request) => {
+			const filter = filters(request)[0] as { authors?: string[] };
+			return kind(request) === WORLD_STATE_KIND && filter.authors?.[0] === getPublicKey(AUTHOR);
+		});
+		if (profileReq) send(f.authorities[0].latestSocket(), 'EOSE', profileReq[1]);
+		await vi.advanceTimersByTimeAsync(1);
+		expect(statuses).toHaveBeenCalledTimes(beforeLateControl);
 	});
 
 	it('times out only bootstrap at capacity two and keeps both primaries live', async () => {

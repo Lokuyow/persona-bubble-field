@@ -29,7 +29,7 @@
 		kind: 'random' | 'manual' | 'death';
 	}>;
 	export type TraceRootGhost = Readonly<{
-		event: Pick<ParsedWorldMessage, 'id'>;
+		event: Pick<ParsedWorldMessage, 'id' | 'pubkey'>;
 		character: Character;
 		tone: BubbleTone;
 		world: WorldPoint;
@@ -75,7 +75,7 @@
 		executeFieldCellAction: (action: FieldCellAction, position: GridPosition, trigger?: HTMLButtonElement) => void;
 		fieldActionLabel: (action: FieldCellAction) => string;
 		closeFieldActionMenu: () => void;
-		onOpenProfile: (characterId: string, trigger: HTMLButtonElement) => void;
+		onOpenProfile: (characterId: string, pubkey: string, trigger: HTMLButtonElement) => void;
 		onOpenSelfProfile?: (position: GridPosition, trigger: HTMLButtonElement) => void;
 		traceMarkerWorldPosition: (position: GridPosition) => WorldPoint;
 	}>;
@@ -275,7 +275,7 @@
 					aria-label={`${traceRootGhost.character.name} のプロフィールを開く`}
 					onclick={(event) => {
 						event.stopPropagation();
-						onOpenProfile(traceRootGhost.character.characterId, event.currentTarget as HTMLButtonElement);
+						onOpenProfile(traceRootGhost.character.characterId, traceRootGhost.event.pubkey, event.currentTarget as HTMLButtonElement);
 					}}
 				>
 					<CharacterAvatar class={`avatar avatar-${traceRootGhost.tone}`} character={traceRootGhost.character} />

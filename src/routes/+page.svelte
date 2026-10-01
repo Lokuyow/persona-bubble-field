@@ -76,6 +76,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL, TAG_GAME_TERMINAL, isBlockedFacilityCell, isWithinFacilityInteractionRange, sameFieldCell } from '$lib/fieldFacilities';
 	import { projectMending } from '$lib/mending';
 	import { comparePresenceEvidence, presenceEvidenceFromWorldState } from '$lib/presenceEvidence';
+	import { createProfileRunEvidenceStore, profileRunNumberForActiveParticipant } from '$lib/profileRunEvidence';
 	import { getAbilityUpgrade, type PersonaAbilityKey } from '$lib/personaGameState';
 	import {
 		CURRENT_CHARACTER_PROFILE_REVISION,
@@ -398,6 +399,8 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	const tagGameOrganizerFinalStates = new Set<string>();
 	const pendingTagGameResults: Array<{ game: TagGameState; note: string | null }> = [];
 	let latestTagGameWorldStates = $state.raw(new Map<string, ParsedWorldStateEvent>());
+	let latestProfileWorldStates = $state.raw(new Map<string, ParsedWorldStateEvent>());
+	const profileRunEvidenceStore = createProfileRunEvidenceStore();
 	const appliedTagGameWorldStateIds = new Set<string>();
 	const tagGameConflictSince = new Map<string, number>();
 	const tagGameHostProbeAtMs = new Map<string, number>();
@@ -478,10 +481,18 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	let entryRetryable = false;
 	let selectedCharacterId = $state('001');
 	let selectedSpeechType = $state<SpeechType>('normal');
-	let profileDialogOpen = $derived(Boolean(
-		page.state.profileCharacterId && getCharacterById(page.state.profileCharacterId)
-	));
+	let profileTargetPubkey = $derived(page.state.profileTarget?.kind === 'pubkey' ? page.state.profileTarget.pubkey : null);
+	let profileDialogOpen = $derived(Boolean(page.state.profileTarget));
+	let profileRunEvidence = $derived(profileTargetPubkey ? latestProfileWorldStates.get(profileTargetPubkey) ?? null : null);
+	let profileParticipant = $derived(profileTargetPubkey ? presenceState.participants.find((participant) => participant.id === profileTargetPubkey) ?? null : null);
+	let profileRunNumber = $derived(profileRunNumberForActiveParticipant(profileRunEvidence, profileParticipant, PRESENCE_TIMEOUT_MS));
 	let lastProfileTrigger: HTMLButtonElement | null = null;
+
+	$effect(() => {
+		const session = worldSession;
+		const persona = personaSnapshot;
+		if (!personaLifecycleTransition && session && persona) session.reconcilePublicProfileState(persona);
+	});
 	let composerEditorIsEmpty: boolean | null = null;
 	let chatterComponent: { initialize(width: number): void; isInitialized(): boolean; resetMeasurements(): void };
 	let chatterOpen = $state(false);
@@ -1415,6 +1426,8 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			realtimeStartImmediately: boolean | undefined = undefined
 		): Promise<void> => {
 		tagGameDiscoverySince = 0;
+			const profileEvidenceSession = profileRunEvidenceStore.beginSession();
+			latestProfileWorldStates = new Map();
 			const previousSession = worldReader;
 			worldReader = null;
 			pendingBootstrapMessages = null;
@@ -1460,7 +1473,11 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 				} : {}),
 				onPresenceChanged: acceptPresence,
 				onPositionEvidenceChanged: acceptTagGamePositionEvidence,
-				onWorldStateEvent: handleTagGameWorldState,
+				onWorldStateEvent: (event) => {
+					if (!mounted || worldReader !== nextSession) return;
+					if (profileRunEvidenceStore.accept(profileEvidenceSession, event)) latestProfileWorldStates = new Map(profileRunEvidenceStore.snapshot());
+					handleTagGameWorldState(event);
+				},
 				onLiveMessage: receiveLiveMessage,
 				onTimelineMessage: receiveSessionTimelineMessage,
 				onEffectiveTraceRootsChanged: setEffectiveTraceRoots,
@@ -3169,6 +3186,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		return `${gameId}:${pubkey}:${runNumber}`;
 	}
 
+
 	function currentTagGameTouchProof(pubkey: string, runNumber: number): TagGameTouchPositionProof | undefined {
 		const anchor = latestTagGameWorldStates.get(pubkey);
 		const position = tagGamePositionEvidence.get(pubkey);
@@ -4224,7 +4242,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			openSelfProfile(selfProfileTrigger);
 			return;
 		}
-		openProfile(participant.character.characterId, trigger);
+		openProfile(participant.character.characterId, participant.id, trigger);
 	}
 
 	function resolveFieldCellSelection(position: { x: number; y: number }, trigger?: HTMLButtonElement): void {
@@ -4813,9 +4831,12 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		setDevTraceReplies([...devTraceReplies, createDevTraceLiveReply(Date.now())]);
 	}
 
-	function openProfile(characterId: string, trigger: HTMLButtonElement): void {
+	function openProfile(characterId: string, pubkey: string | undefined, trigger: HTMLButtonElement): void {
 		lastProfileTrigger = trigger;
-		pushState('', { ...page.state, profileCharacterId: characterId });
+		const profileTarget = runtimeMode === 'relay' && pubkey
+			? { kind: 'pubkey' as const, pubkey }
+			: { kind: 'dev-character' as const, characterId };
+		pushState('', { ...page.state, profileTarget });
 	}
 
 	function openSelfProfile(trigger: HTMLButtonElement): void {
@@ -5226,6 +5247,9 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	<ProfileDialog
 		onOpenChange={handleProfileOpenChange}
 		onCloseAutoFocus={restoreProfileTriggerFocus}
+		session={worldSession}
+		currentRunNumber={profileRunNumber}
+		avatarTone={profileTargetPubkey ? colorByPubkey[profileTargetPubkey] ?? 'sky' : 'sky'}
 	/>
 	<IdentitySelectionDialog selection={pendingIdentitySelection} rootPoints={pendingRootPoints} transitionNotice={runTransitionNotice} onSelect={(candidate, rootBuild) => { void chooseIdentity(candidate, rootBuild); }} onExportNsec={(candidate) => { void exportIdentityNsec(candidate); }} />
 	<MendingDialog

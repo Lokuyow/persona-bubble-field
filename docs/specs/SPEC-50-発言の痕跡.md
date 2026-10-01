@@ -48,7 +48,7 @@ reply-tree LRU evictionではrootとroot read stateを残し、そのtreeのrepl
 
 rootアイコンはcellの右上内側に、cell sizeに応じた余白・小さなサイズで表示する。random、manual、遺言は同じ配置を使い、アイコンを新たなhit targetにはしない。調査可能性を示す虫眼鏡などの補助アイコンは表示しない。調査可否は既存のlogical-cell selectionで判定する。
 
-rootを調査するとroot author ghostを表示する。authorはpubkeyから既存の決定的character割当で導出し、character catalogのimage / name / aboutだけを使用する。kind 0の取得、raw pubkey、npubの表示は行わない。reply authorはbubbleの兄弟native Profile buttonからProfile Dialogを開ける。
+rootを調査するとroot author ghostを表示する。authorはpubkeyから既存の決定的character割当で導出し、character catalogのimage / name / aboutを使用する。kind 0の取得、raw pubkey、npubの表示は行わない。root ghostおよびreply authorはProfile Dialogを開ける。選択authorが現在field上のactive participantであり、current World State Run evidenceを確認できる場合に限ってSPEC-30のpubkey-targeted profile-stateを追加表示する。field上にいない過去Trace authorにはcharacter情報だけを表示する。
 
 cellにcurrent participantがいなければghostはparticipant相当位置に置く。いる場合はcurrentを優先してghostをcell edgeへ小さく半透明で置く。ghostはpresence、collision、occupancyに影響しない。current participantがrootと同cellにいる場合もrootアイコンを表示し、characterより前面に重ねる。participantの有無や移動でrootアイコンの位置・サイズを変えない。rootアイコンは独立したpixel hit targetではなく、cellのlogical selection規則を使う。rootを調査してそのroot conversationが開いている間は、対象rootが属するcellのrootアイコンを非表示にする。conversationを閉じれば再表示する。
 

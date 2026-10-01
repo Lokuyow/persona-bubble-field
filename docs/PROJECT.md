@@ -263,6 +263,20 @@ eHagaki側の変更が必要な場合は、少なくとも次を区別する。
 
 SvelteKit、adapter、依存ライブラリ等の具体的なバージョンは、必要な互換性条件を除き本資料で固定せず、実装時点の対象環境と公式仕様を確認する。
 
+### 現在のauthoritative RelayとNIP-11確認記録
+
+2026-10-01に、現在のprototype authoritative Relay 5本へNIP-11 HTTP metadata requestを直接行い、`limitation.max_subscriptions`を確認した。
+
+| Relay | 2026-10-01直接確認値 |
+| --- | ---: |
+| `wss://yabu.me/` | 50 |
+| `wss://relay-jp.nostr.wirednet.jp/` | 8 |
+| `wss://r.kojira.io/` | 100 |
+| `wss://relay.nostrfy.org/` | 20 |
+| `wss://nos.lol/` | 20 |
+
+これは確認日現在のRelay設定の検証記録であり、製品定数または将来の互換性保証ではない。authoritative Relay構成または各Relay設定が変更されれば、広告値も変わりうるため再確認する。現在のtransportは通常最大4本のactive subscriptionに加えてProfile表示中だけ補助subscription 1本を使用しうる。Profile購読は、既知のNIP-11 `max_subscriptions` が5未満のRelayでは開始せず、値が未広告の場合は既存方針どおり試行する。その他のNIP-11 limitation値はProfile機能の新しいcompatibility gateにしない。
+
 ## Node.js・開発環境
 
 - 対応Node.js majorはNode 24とする

@@ -39,7 +39,7 @@
 		currentSpeechId: string | null;
 		replyRefresh: 'loading' | 'unavailable' | 'settled' | null;
 		onSelectSpeech: (id: string) => void;
-		onOpenProfile: (characterId: string, trigger: HTMLButtonElement) => void;
+		onOpenProfile: (characterId: string, pubkey: string, trigger: HTMLButtonElement) => void;
 		onBubbleMeasurement: (id: string, measurement: BubbleMeasurement) => void;
 		onBubbleMeasurementRemoved: (id: string) => void;
 		registerBubbleRemeasure: (id: string, measure: () => void) => () => void;

@@ -8,7 +8,7 @@ declare global {
 		// interface Locals {}
 		// interface PageData {}
 		interface PageState {
-			profileCharacterId?: string;
+			profileTarget?: { kind: 'pubkey'; pubkey: string } | { kind: 'dev-character'; characterId: string };
 		}
 		// interface Platform {}
 	}

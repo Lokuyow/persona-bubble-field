@@ -20,6 +20,55 @@
 
 操作すると、そのキャラクターの画像、名前、`about` をプロフィールDialogで表示する。プロフィールは、専用クライアント内のキャラクター表示と同じcharacter catalogを正とし、プロフィールのために追加のNostr通信を行わない。
 
+character image / name / aboutはauthor pubkeyから既存のdeterministic world-character resolverで導出する。kind 0を取得せず、kind 0はソトの一般Nostrプロフィールとして維持する。他ユーザーのProfile Dialogは、現在フィールド上にactive participantとして存在し、そのpubkeyのactive World Stateに含まれるRun numberを確認でき、取得したprofile-stateの`r`と一致する場合だけ公開人生情報を追加表示する。Run evidenceを確認できない場合、Runが異なる場合、Relayが利用できない場合は人生情報を表示しない。Trace root / replyなど、現在フィールド上にactive participantとして存在しないauthorは、キャラクター情報だけを表示する。
+
+Profileのcanonical targetは明示的なunion `{ kind: 'pubkey'; pubkey } | { kind: 'dev-character'; characterId }` とする。productionではField participant、Chatter author、Trace root / reply authorのpubkeyを保持し、character metadataはpubkeyから導出する。実pubkeyを持たないDEV World fixtureはcharacter IDによる表示を維持し、Nostr購読を要求しない。画面にraw pubkey / npubを表示しない。
+
+### profile-state
+
+`kind 30079` Hako Public Stateには、既存のposition用`world-state` addressとは独立した次の固定addressを使う。
+
+`io.github.lokuyow.persona-bubble-field:profile-state:<channel-id>`
+
+同一author・同一channelのaddressは固定とし、schema version更新で`d`を変更しない。event tagsは`d`に上記address、`e`にchannel event ID（任意で有効なRelay hint）、`r`に正のRun numberを1つずつ含む。contentは追加keyを許可しないversion 1 JSON objectとする。
+
+```json
+{
+  "version": 1,
+  "points": 0,
+  "abilities": {
+    "inferenceEfficiency": 1,
+    "contextCapacity": 1,
+    "hallucinationSuppression": 1
+  },
+  "rootPoints": 0,
+  "lifespan": {
+    "baseExpiresAtMs": 0,
+    "extension": null
+  }
+}
+```
+
+`extension`がある場合のversion 1 schemaは`anchorAtMs`、`regularUntilMs`、`roundingBoundaryAtMs`、`overflowPercent`、`maximumLifespanMs`を含む。`roundingBoundaryAtMs`はsafe integerまたは`null`で、計算境界がanchorまたはregular endに一致して不要な分割がない場合は`null`とする。これらはmending checkpointからの固定境界であり、publish時点へ計算起点を移さない。
+
+受信時は署名済み`kind 30079`、world characterへ解決可能なauthor、profile-state addressとchannelに属するcandidateをcanonical選択した後、完全一致する`d` / channel参照、`r`、version、厳密なkey集合、safe integer、非負のpoints / Root Point / timestamp / duration、1–100の各ability level、寿命projectionの境界値を検証する。`d/e/r`は必要なmultiplicityとshapeを検証し、無関係な追加Nostr tagは拒否理由にしない。contentとnested objectの追加keyは拒否する。寿命のregular duration上限は公開された`contextCapacity` levelの通常capacityと取り得る最大Root context圧縮倍率から導出し、rounding boundaryはanchorから24時間以内かつregular interval内のstrict interiorに限る。`points`はpersist済みのowned pointsのみで、未回収Mending pointsを含めない。能力の文言とeffectは保存せず、levelから既存domain ruleで導出する。character data、Mending内部job/carry、Root build rankはcontentへ複製しない。
+
+`lifespan`はpresentation-only projectionであり、内部Mending persistence schemaではない。`baseExpiresAtMs`を基準に、`anchorAtMs`からviewer時刻までを加速通常区間、通常区間、overflow区間へ分割し、各区間でlocal `projectMending`と同じfloor/cap順序を適用する。`roundingBoundaryAtMs`は推論加速budgetの境界、`regularUntilMs`はcontext容量境界であり、snapshot時刻を丸め起点にしない。extensionがnullならwall-clock elapsedだけで期限を動かさない。これはSelfProfileと同じ寿命表示を再現し、内部rank/job/carryを開示しない。
+
+このeventはauthorが公開したpresentation stateでありgame authorityではない。受信値を報酬、参加資格、能力判定、寿命settlement、clear判定その他のgame logicへ使用しない。remote eventをlocal `PersonaSnapshot`やauthoritative lifecycle型へ変換しない。
+
+Profile stateのpublishはlocal authoritative PersonaSnapshotの意味的変更後にreconcileし、Run開始、Mending開始/回収/settlement、能力強化、owned points確定変更、Root Point変更などを反映する。単なるwall-clock経過ではpublishしない。publication failureや結果不明でlocal mutationをrollbackしない。同一`kind + pubkey + d`はUnix秒内に複数回publishせず、同秒のmutationは最新snapshotにcoalesceして次のUnix秒以降に発行する。
+
+Profile publication timestamp fenceは既存world-write-journalにchannel/pubkey単位で永続化し、World Stateのslot、positive activity、exit fenceと独立して保持する。Run変更でresetしない。dispatch直前に現在のPlayer aggregateを読み直し、そのIdentity・Run・公開値を署名する。結果不明または一時失敗時は同じ署名済みeventを1秒、2秒、4秒後に最大3回再送する。明確な恒久拒否はtimer retryせず、次のmutation、session開始、reconnectで最新値を再評価する。新しいmutationは古いsnapshot retryに優先する。
+
+読取は選択中の他ユーザーProfileだけを対象に、author pubkeyと`d` / channelを指定し、`limit: 1`の履歴取得とopen中live subscriptionを同じ補助subscriptionで行う。candidate filterに`since`または`r`を指定しない。署名済みaddress envelopeのlatest選択（最大`created_at`、同秒なら辞書順最小event ID）をpayload schema / current Run検証より先に行う。最新envelopeのcontentが不正、未知version、または別Runなら古い人生情報へfallbackせず表示を消す。Dialogを閉じたらsubscriptionを解放し、session-localな最大32 addressのLRU memory cacheのみ許容する。target/sessionごとのgenerationで古いEVENT、EOSE、CLOSED、timeout、errorを無効化する。loading、失敗、前回確認済みstale表示を区別し、late resultでDialog位置・focus・scrollを変更しない。全participant購読や新規IndexedDB cacheは設けない。現在のactive participantのRun evidenceが未確認なら購読済みイベントも表示しない。
+
+Self / Other Profileは同じpresentation componentとDialog geometry、header、close操作、scroll領域、プロフィール・人生・Root sectionを使う。Selfだけがlocal authoritative snapshotとEscape actionを持つ。OtherのRemote profile stateは表示modelのためだけに使い、PersonaSnapshot / authoritative lifecycleへ変換しない。DEV character-only targetではpublic profile-stateを購読しない。
+
+現在のtransportは通常最大4 active subscriptionsに加えてProfile open中の補助subscription 1本を使う場合があるため、最大5 active subscriptionsを使用しうる。既知のNIP-11 `limitation.max_subscriptions`が5以上のRelayを互換条件とし、既知値が5未満のRelayではProfile購読を行わない。値が未広告なら既存の試行方針に従う。Profile専用priority schedulerは設けない。2026-10-01時点で現在のauthoritative Relay 5本からNIP-11を直接取得した検証記録は`docs/PROJECT.md`にあり、実測値は設定変更で将来変わりうる。その他のNIP-11 limitation値はProfileのcompatibility gateにしない。
+
+ProfileのRun evidenceはTag Game固有stateと独立した共通責務で保持し、world session置換時に破棄する。旧sessionのevidenceを新sessionのmessage/presenceと組み合わせない。同じ`created_at`のaddressable eventはNIP-01に従い辞書順で最小のevent IDをlatestとして保持する。`d`、`e`、`r` tagは必要なmultiplicityとshapeを検証するが、無関係な追加Nostr tagは拒否理由にしない。authorはworld characterへ解決できなければならず、contentとnested objectは厳密なkey集合を維持する。
+
 プロフィールDialogは、下端の閉じる操作、Dialog外の操作、Escape、ブラウザまたは端末のBack操作で閉じられる。Back操作では、ページを離れるより先に開いているプロフィールDialogを閉じる。
 
 ### 座標表現
@@ -542,6 +591,8 @@ network上のTrace root bootstrapは、従来どおりprimary Worldの初期同�
 専用clientが発行するkind 30079 World Stateのpositionとexitには、任意の `r` tagでRun numberを付与できる。terminal exitでは `reason=death|clear` を付与し、reasonを付けるexitにはRun numberを必須とする。reasonのない旧形式exitから死亡・脱出理由を推定しない。参加者の署名済み鬼ごっこ登録RunとWorld StateのRunを照合し、より新しいRunのpositionが確認済みなら、以前のRunの遅延・再配信exitを現在Runの終了として扱わない。World Presenceの既存created_at/activity順序判定を維持し、新しいRunのactivityを古いexitで上書きしない。
 
 RelayごとのWebSocket接続自体をsubscriptionごとに別接続へ分ける必要はなく、同一Relay接続上で複数subscriptionを管理してよい。
+
+通常最大はprimary World 2本、Trace補助1本、Realtime補助1本の計4 active subscriptionである。Profile open中だけprofile-state補助1本を加え、最大5本を使いうる。NIP-11 `limitation.max_subscriptions`が既知で5未満のRelayではProfile subscriptionを開始しない。未広告値は既存方針どおり試行する。その他のNIP-11 limitation値をProfileのcompatibility gateにしない。2026-10-01時点のauthoritative Relay 5本の直接確認値と可変性は [`docs/PROJECT.md`](../PROJECT.md) を参照する。
 
 具体的なsubscription IDは製品仕様として固定しない。
 

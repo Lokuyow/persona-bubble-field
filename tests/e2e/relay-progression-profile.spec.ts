@@ -6,6 +6,7 @@ import { wordlist as englishWordlist } from '@scure/bip39/wordlists/english.js';
 import { finalizeEvent, getPublicKey, verifyEvent, type Event as NostrEvent } from 'nostr-tools/pure';
 import {
 	buildWorldStateEventTemplate,
+	buildPublicProfileStateTemplate,
 	WORLD_STATE_KIND,
 	buildDeathTraceEventTemplate,
 	buildTraceReplyTemplate,
@@ -36,6 +37,32 @@ function relativeLuminance(color: string): number {
 		return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
 	});
 	return 0.2126 * channels[0]! + 0.7152 * channels[1]! + 0.0722 * channels[2]!;
+}
+
+async function expectProfileScrollbarLayout(dialog: Locator): Promise<void> {
+	const scrollViewport = dialog.locator('.profile-dialog-scroll-viewport');
+	const scrollbar = dialog.locator('.profile-dialog-scrollbar');
+	await expect.poll(() => scrollViewport.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+	const dialogBox = await dialog.boundingBox();
+	const scrollbarBox = await scrollbar.boundingBox();
+	const contentBox = await dialog.locator('.profile-life-stats, .summary-card').first().boundingBox();
+	const paddingRight = await dialog.evaluate((element) => Number.parseFloat(getComputedStyle(element).paddingRight));
+	expect(dialogBox).not.toBeNull();
+	expect(scrollbarBox).not.toBeNull();
+	expect(contentBox).not.toBeNull();
+	const outerInset = dialogBox!.x + dialogBox!.width - (scrollbarBox!.x + scrollbarBox!.width);
+	const contentRight = contentBox!.x + contentBox!.width;
+	const contentGap = scrollbarBox!.x - contentRight;
+	expect(outerInset).toBeGreaterThan(0);
+	expect(outerInset).toBeLessThanOrEqual(paddingRight / 2);
+	expect(contentGap).toBeGreaterThan(outerInset);
+	expect(scrollbarBox!.x).toBeGreaterThan(contentRight);
+	expect(scrollbarBox!.x + scrollbarBox!.width).toBeLessThanOrEqual(dialogBox!.x + dialogBox!.width);
+	const previousTop = await scrollViewport.evaluate((element) => element.scrollTop);
+	await scrollViewport.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+	await expect.poll(() => scrollViewport.evaluate((element) => element.scrollTop)).toBeGreaterThan(previousTop);
+	await scrollViewport.evaluate((element) => { element.scrollTop = 0; });
+	expect(await dialog.evaluate((element) => element.ownerDocument.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 }
 
 function contrastRatio(first: string, second: string): number {
@@ -115,6 +142,9 @@ test.describe('Relay startup', () => {
 
 		const dialog = page.getByRole('dialog');
 		await expect(dialog).toBeVisible();
+		await expect(dialog.getByRole('heading', { name: 'プロフィール', exact: true })).toBeVisible();
+		await expect(dialog.getByRole('heading', { name: '人生', exact: true })).toHaveCount(0);
+		await expect(dialog.getByRole('heading', { name: 'Root', exact: true })).toHaveCount(0);
 		const viewportSize = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
 		await expect(dialog).toContainText('人生 #1');
 		await expect(dialog).toContainText('残り寿命');
@@ -330,7 +360,11 @@ test.describe('Relay startup', () => {
 		const dialogBox = await dialog.boundingBox();
 		const viewportBox = await scrollViewport.boundingBox();
 		const metrics = await scrollViewport.evaluate((element) => ({ clientHeight: element.clientHeight, scrollHeight: element.scrollHeight }));
-		await expect(dialog.locator('.self-profile-sections > section')).toHaveCount(3);
+		await expectProfileScrollbarLayout(dialog);
+		await expect(dialog.locator('.self-profile-sections > section')).toHaveCount(1);
+		await expect(dialog.locator('[aria-labelledby="self-profile-run"], [aria-labelledby="self-profile-root"]')).toHaveCount(0);
+		await expect(dialog.getByRole('heading', { name: '人生', exact: true })).toHaveCount(0);
+		await expect(dialog.getByRole('heading', { name: 'Root', exact: true })).toHaveCount(0);
 		for (const statIcon of ['heart', 'wallet']) {
 			const card = dialog.locator(`.summary-card[data-stat-icon="${statIcon}"]`);
 			const labelBox = await card.locator('span').boundingBox();
@@ -656,4 +690,95 @@ for (const stateKind of ['missing', 'corrupt'] as const) {
 			}
 		}
 	});
+});
+
+test('opens an active field participant profile by pubkey and renders only matching Run evidence', async ({ page }) => {
+	const startTime = Date.now();
+	const selfSecret = fixtureSecret(19);
+	const otherSecret = fixtureSecret(23);
+	const otherPubkey = getPublicKey(otherSecret);
+	const otherCharacter = requireCharacterFromPubkey(otherPubkey);
+	const createdAt = Math.floor(startTime / 1_000);
+	const channel = { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' };
+	const otherEvents = {
+		message: finalizeEvent(buildWorldMessageTemplate({ channel, content: 'Public profile target', speechType: 'normal', position: { x: 5, y: 4 }, createdAt }), otherSecret),
+		position: finalizeEvent(buildWorldStateEventTemplate({ channel, position: { x: 5, y: 4 }, slot: 0, createdAt, runNumber: 2 }), otherSecret)
+	};
+	const profileCandidates = [12_345, 54_321].map((points) => finalizeEvent(buildPublicProfileStateTemplate({
+		channel, createdAt, runNumber: 2, points,
+		abilities: { inferenceEfficiency: 1, contextCapacity: 2, hallucinationSuppression: 3 }, rootPoints: 678,
+		lifespan: { baseExpiresAtMs: startTime + 5 * 24 * 60 * 60 * 1_000, extension: null }
+	}), otherSecret)).sort((left, right) => left.id.localeCompare(right.id));
+	const profileState = profileCandidates[0]!;
+	const expectedProfilePoints = (JSON.parse(profileState.content) as { points: number }).points;
+	await page.clock.install({ time: startTime });
+	await installHostOwnedStub(page);
+	await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret), startTime + 7 * 24 * 60 * 60 * 1_000);
+	await installDelayedRelay(page, { primaryEvents: otherEvents, profileStateEvents: [profileCandidates[1]!, profileCandidates[0]!] });
+	await page.goto('/');
+	await expect(page.locator('.action-dock')).toBeVisible();
+	await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
+		AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) && (request.filter.kinds as number[])[0] === 42)).toBe(true);
+	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+	const participant = page.locator(`.participant[data-participant-id="${otherPubkey}"]`);
+	await expect(participant).toBeVisible();
+	const chatter = page.getByLabel('Chatter', { exact: true });
+	if (await chatter.isVisible()) await page.locator('.chatter-toggle').click();
+	const fieldProfileTrigger = participant.getByRole('button', { name: /プロフィールを開く/ });
+	await fieldProfileTrigger.focus();
+	await fieldProfileTrigger.press('Enter');
+	const dialog = page.locator('.profile-dialog-content');
+	await expect(dialog).toBeVisible();
+	await expect(dialog.getByRole('heading', { name: 'プロフィール', exact: true })).toBeVisible();
+	await expect(dialog.getByRole('heading', { name: '人生', exact: true })).toHaveCount(0);
+	await expect(dialog.getByRole('heading', { name: 'Root', exact: true })).toHaveCount(0);
+	await expect(dialog.locator('.profile-dialog-avatar')).toBeVisible();
+	await expect(dialog.locator('[data-dialog-title]')).toHaveText(otherCharacter.name);
+	await expect(dialog.locator('.profile-dialog-about')).toHaveText(otherCharacter.about);
+	await expect(dialog.locator('.profile-state-status')).toHaveCount(0);
+	await expect(dialog).toContainText('人生 #2');
+	await expect(dialog).toContainText('残り寿命');
+	await expect(dialog).toContainText('所持ポイント');
+	await expect(dialog).toContainText('推論効率');
+	await expect(dialog).toContainText('コンテキスト容量');
+	await expect(dialog).toContainText('ハルシネーション抑制');
+	await expect(dialog).toContainText(`${expectedProfilePoints} pt`);
+	await expect(dialog).toContainText('678 RP');
+	await expect(dialog.locator('.profile-state-status')).toHaveCount(0);
+	await expect(dialog.getByRole('button', { name: '脱出', exact: true })).toHaveCount(0);
+	await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>
+		request.filters.some((filter) => (filter.authors as string[] | undefined)?.[0] === otherPubkey &&
+			(filter['#d'] as string[] | undefined)?.includes(`io.github.lokuyow.persona-bubble-field:profile-state:${CHANNEL_ID}`)))).toBe(true);
+	const profileReqs = (await relayState(page)).state.requests.filter((request) => request.filters.some((filter) =>
+		(filter.authors as string[] | undefined)?.[0] === otherPubkey && (filter['#d'] as string[] | undefined)?.includes(`io.github.lokuyow.persona-bubble-field:profile-state:${CHANNEL_ID}`)));
+	expect(profileReqs.length).toBeGreaterThan(0);
+	for (const request of profileReqs) for (const filter of request.filters) {
+		if ((filter.authors as string[] | undefined)?.[0] !== otherPubkey) continue;
+		expect(filter.limit).toBe(1);
+		expect(filter.since).toBeUndefined();
+		expect(filter['#r']).toBeUndefined();
+	}
+	for (const size of [{ width: 1280, height: 420 }, { width: 390, height: 420 }]) {
+		await page.setViewportSize(size);
+		await expectProfileScrollbarLayout(dialog);
+	}
+	await page.setViewportSize({ width: 390, height: 640 });
+	await expect(dialog).toHaveClass(/self-profile-content/);
+	await expect(dialog.locator('.profile-dialog-identity')).toBeVisible();
+	await expect(dialog.locator('.profile-dialog-scroll-viewport')).toBeVisible();
+	const dialogGeometry = await dialog.boundingBox();
+	const viewportSize = page.viewportSize();
+	expect(dialogGeometry).not.toBeNull();
+	expect(viewportSize).not.toBeNull();
+	expect(dialogGeometry!.x).toBeGreaterThanOrEqual(0);
+	expect(dialogGeometry!.y).toBeGreaterThanOrEqual(0);
+	expect(dialogGeometry!.x + dialogGeometry!.width).toBeLessThanOrEqual(viewportSize!.width);
+	expect(dialogGeometry!.y + dialogGeometry!.height).toBeLessThanOrEqual(viewportSize!.height);
+	expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+	await dialog.getByRole('button', { name: '閉じる', exact: true }).click();
+	await expect(dialog).toHaveCount(0);
+	await expect.poll(async () => {
+		const state = await relayState(page);
+		return profileReqs.every((request) => state.state.closedSubscriptions.some((closed) => closed.subId === request.subId));
+	}).toBe(true);
 });

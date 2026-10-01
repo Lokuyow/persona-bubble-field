@@ -14,6 +14,8 @@ import {
 import type { TraceReplyConfiguration, TraceReplyConfigurationResult } from './nostrRelayTransport';
 import { PRESENCE_TIMEOUT_MS, type PresenceState } from './presence';
 import { planPositionPublish, reconstructPositionPublishState } from './positionPublish';
+import { createInitialPersonaGameState } from './personaGameState';
+import type { PersonaSnapshot } from './rootIdentity';
 import { protocolKeyFor } from './realtimeEvents';
 import { createWorldReadSession, type RealtimeStartConfiguration, type WorldReadConnectionStatus } from './worldReadSession';
 
@@ -23,12 +25,17 @@ const mocked = vi.hoisted(() => ({
 	reconcileTraceReplyCache: vi.fn(),
 	touchTraceReplyTree: vi.fn(),
 	loadWorldWriteJournal: vi.fn(),
+	reservePublicProfilePublication: vi.fn(),
+	readCurrentPublicProfilePersona: vi.fn(),
 	applyInteractionReward: vi.fn()
 }));
 
 vi.mock('./rootIdentity', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('./rootIdentity')>();
-	return { ...actual, loadWorldWriteJournal: mocked.loadWorldWriteJournal, applyInteractionReward: mocked.applyInteractionReward };
+	return { ...actual, loadWorldWriteJournal: mocked.loadWorldWriteJournal,
+		reservePublicProfilePublication: mocked.reservePublicProfilePublication,
+		readCurrentPublicProfilePersona: mocked.readCurrentPublicProfilePersona,
+		applyInteractionReward: mocked.applyInteractionReward };
 });
 
 function deferred<T>() {
@@ -446,6 +453,8 @@ describe('world read session', () => {
 		mocked.reconcileTraceReplyCache.mockReset().mockResolvedValue([]);
 		mocked.touchTraceReplyTree.mockReset().mockResolvedValue(true);
 		mocked.loadWorldWriteJournal.mockReset().mockResolvedValue(null);
+		mocked.reservePublicProfilePublication.mockReset();
+		mocked.readCurrentPublicProfilePersona.mockReset();
 		mocked.applyInteractionReward.mockReset().mockResolvedValue({ kind: 'applied' });
 		mocked.createTransport.mockReturnValue({
 			start: vi.fn(async (nextInput) => {
@@ -456,6 +465,138 @@ describe('world read session', () => {
 			dispose,
 			publish
 		});
+	});
+
+	it('dispatches the latest Player aggregate instead of a stale tab snapshot', async () => {
+		const signer = selfSigner();
+		const publishSelf = vi.fn((event: VerifiedEvent) => ({ firstSuccess: Promise.resolve(true), settled: Promise.resolve([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' as const }]) }));
+		mocked.createTransport.mockReturnValue({
+			start: vi.fn(async (nextInput) => { input = nextInput; return startResult(); }),
+			bootstrapTraceRootCandidates: traceBootstrap(), publishSelf, dispose
+		});
+		const session = createWorldReadSession({ field: { columns: 4, rows: 3 }, selfSigner: signer, selfRunNumber: 1,
+			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn() });
+		await session.start();
+		const rootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0 } as const;
+		const snapshot = (rootPoints: number) => ({ signer, identity: signer.identity, rootPoints,
+			activeRun: { runNumber: 1, rootBuild }, gameState: createInitialPersonaGameState(signer.pubkey, 700_000) }) as unknown as PersonaSnapshot;
+		mocked.reservePublicProfilePublication.mockResolvedValue({ kind: 'reserved', createdAt: 701, persona: snapshot(2) });
+		session.reconcilePublicProfileState(snapshot(1));
+		await vi.advanceTimersByTimeAsync(1_001);
+		expect(publishSelf).toHaveBeenCalledOnce();
+		expect(JSON.parse(publishSelf.mock.calls[0][0].content).rootPoints).toBe(2);
+		expect(mocked.reservePublicProfilePublication).toHaveBeenCalledOnce();
+		session.dispose();
+	});
+
+	it('retries the same signed event after an uncertain result', async () => {
+		const signer = selfSigner();
+		const published: VerifiedEvent[] = [];
+		const publishSelf = vi.fn((event: VerifiedEvent) => {
+			published.push(event);
+			return { firstSuccess: Promise.resolve(false), settled: Promise.resolve([{ relayUrl: 'wss://relay.test/', outcome: 'no-response' as const }]) };
+		});
+		mocked.createTransport.mockReturnValue({ start: vi.fn(async (nextInput) => { input = nextInput; return startResult(); }),
+			bootstrapTraceRootCandidates: traceBootstrap(), publishSelf, dispose });
+		const session = createWorldReadSession({ field: { columns: 4, rows: 3 }, selfSigner: signer, selfRunNumber: 1,
+			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn() });
+		await session.start();
+		const rootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0 } as const;
+		const persona = { signer, identity: signer.identity, rootPoints: 2, activeRun: { runNumber: 1, rootBuild },
+			gameState: createInitialPersonaGameState(signer.pubkey, 700_000) } as unknown as PersonaSnapshot;
+		mocked.reservePublicProfilePublication.mockResolvedValue({ kind: 'reserved', createdAt: 701, persona });
+		mocked.readCurrentPublicProfilePersona.mockResolvedValue(persona);
+		session.reconcilePublicProfileState(persona);
+		await vi.advanceTimersByTimeAsync(1_001);
+		expect(published).toHaveLength(1);
+		for (const [delay, expectedCount] of [[1_000, 2], [2_000, 3], [4_000, 4]] as const) {
+			await vi.advanceTimersByTimeAsync(delay);
+			expect(published).toHaveLength(expectedCount);
+			expect(published.at(-1)!.id).toBe(published[0]!.id);
+			expect(published.at(-1)!.created_at).toBe(published[0]!.created_at);
+		}
+		await vi.advanceTimersByTimeAsync(10_000);
+		expect(published).toHaveLength(4);
+		session.dispose();
+	});
+
+	it('retries rate-limited rejection and lets a newer mutation supersede the signed retry', async () => {
+		const signer = selfSigner();
+		const published: VerifiedEvent[] = [];
+		const publishSelf = vi.fn((event: VerifiedEvent) => {
+			published.push(event);
+			return published.length === 1
+				? { firstSuccess: Promise.resolve(false), settled: Promise.resolve([{ relayUrl: 'wss://relay.test/', outcome: 'rejected' as const, notice: 'rate-limited: slow down' }]) }
+				: { firstSuccess: Promise.resolve(true), settled: Promise.resolve([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' as const }]) };
+		});
+		mocked.createTransport.mockReturnValue({ start: vi.fn(async (nextInput) => { input = nextInput; return startResult(); }),
+			bootstrapTraceRootCandidates: traceBootstrap(), publishSelf, dispose });
+		const session = createWorldReadSession({ field: { columns: 4, rows: 3 }, selfSigner: signer, selfRunNumber: 1,
+			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn() });
+		await session.start();
+		const rootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0 } as const;
+		const snapshot = (points: number) => ({ signer, identity: signer.identity, rootPoints: 2,
+			activeRun: { runNumber: 1, rootBuild }, gameState: { ...createInitialPersonaGameState(signer.pubkey, 700_000), points } }) as unknown as PersonaSnapshot;
+		mocked.reservePublicProfilePublication
+			.mockResolvedValueOnce({ kind: 'reserved', createdAt: 701, persona: snapshot(10) })
+			.mockResolvedValueOnce({ kind: 'reserved', createdAt: 702, persona: snapshot(20) });
+		session.reconcilePublicProfileState(snapshot(10));
+		await vi.advanceTimersByTimeAsync(1_001);
+		expect(published).toHaveLength(1);
+		const staleId = published[0]!.id;
+		session.reconcilePublicProfileState(snapshot(20));
+		await vi.advanceTimersByTimeAsync(1_001);
+		expect(published).toHaveLength(2);
+		expect(published[1]!.id).not.toBe(staleId);
+		expect(JSON.parse(published[1]!.content).points).toBe(20);
+		await vi.advanceTimersByTimeAsync(5_000);
+		expect(published).toHaveLength(2);
+		session.dispose();
+	});
+
+	it('does not timer-retry a permanent rejection', async () => {
+		const signer = selfSigner();
+		const publishSelf = vi.fn(() => ({ firstSuccess: Promise.resolve(false), settled: Promise.resolve([{ relayUrl: 'wss://relay.test/', outcome: 'rejected' as const, notice: 'invalid: signature invalid' }]) }));
+		mocked.createTransport.mockReturnValue({ start: vi.fn(async (nextInput) => { input = nextInput; return startResult(); }),
+			bootstrapTraceRootCandidates: traceBootstrap(), publishSelf, dispose });
+		const session = createWorldReadSession({ field: { columns: 4, rows: 3 }, selfSigner: signer, selfRunNumber: 1,
+			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn() });
+		await session.start();
+		const rootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0 } as const;
+		const persona = { signer, identity: signer.identity, rootPoints: 2, activeRun: { runNumber: 1, rootBuild },
+			gameState: createInitialPersonaGameState(signer.pubkey, 700_000) } as unknown as PersonaSnapshot;
+		mocked.reservePublicProfilePublication.mockResolvedValue({ kind: 'reserved', createdAt: 701, persona });
+		session.reconcilePublicProfileState(persona);
+		await vi.advanceTimersByTimeAsync(1_001);
+		expect(publishSelf).toHaveBeenCalledOnce();
+		await vi.advanceTimersByTimeAsync(10_000);
+		expect(publishSelf).toHaveBeenCalledOnce();
+		session.dispose();
+	});
+
+	it('waits for the next wall-clock Unix second after a durable profile fence', async () => {
+		const signer = selfSigner();
+		const publishSelf = vi.fn((event: VerifiedEvent) => ({ firstSuccess: Promise.resolve(true), settled: Promise.resolve([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' as const }]) }));
+		mocked.createTransport.mockReturnValue({ start: vi.fn(async (nextInput) => { input = nextInput; return startResult(); }),
+			bootstrapTraceRootCandidates: traceBootstrap(), publishSelf, dispose });
+		const session = createWorldReadSession({ field: { columns: 4, rows: 3 }, selfSigner: signer, selfRunNumber: 1,
+			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn() });
+		await session.start();
+		const rootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0 } as const;
+		const persona = { signer, identity: signer.identity, rootPoints: 2, activeRun: { runNumber: 1, rootBuild },
+			gameState: createInitialPersonaGameState(signer.pubkey, 700_000) } as unknown as PersonaSnapshot;
+		mocked.reservePublicProfilePublication
+			.mockResolvedValueOnce({ kind: 'wait', untilSecond: 702 })
+			.mockResolvedValueOnce({ kind: 'reserved', createdAt: 702, persona });
+		session.reconcilePublicProfileState(persona);
+		await vi.advanceTimersByTimeAsync(1_001);
+		expect(publishSelf).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(999);
+		expect(publishSelf).toHaveBeenCalledOnce();
+		const event = publishSelf.mock.calls[0]![0];
+		expect(event.created_at).toBe(702);
+		expect(event.created_at).toBe(Math.floor(Date.now() / 1_000));
+		session.dispose();
 	});
 
 	it('can defer realtime startup until its event window without delaying primary bootstrap', async () => {

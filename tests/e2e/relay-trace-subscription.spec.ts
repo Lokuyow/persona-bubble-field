@@ -3,7 +3,7 @@ import {
 	WORLD_STATE_KIND
 } from '../../src/lib/nostrProtocol';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
-import { AUTHORITATIVE_RELAYS, traceRuntimeEvents, installDelayedRelay, relayState, dragRelayJoystick, seedRelayAccount } from './helpers/relayHarness';
+import { AUTHORITATIVE_RELAYS, traceRuntimeEvents, installDelayedRelay, relayState, dragRelayJoystick, seedRelayAccount, isWorldPositionEvent } from './helpers/relayHarness';
 
 test.describe('Relay startup', () => {
 	test('opens a Relay trace root and settles the explicit conversation reply subscription', async ({ page }) => {
@@ -50,7 +50,7 @@ test.describe('Relay startup', () => {
 			(window as typeof window & { __relayStartupTest: { state: { published: unknown[] } } }).__relayStartupTest.state.published.length = 0;
 		});
 		const publishedPositionIds = async () => new Set(
-			(await relayState(page)).state.published.filter((event) => event.kind === WORLD_STATE_KIND).map((event) => event.id)
+			(await relayState(page)).state.published.filter(isWorldPositionEvent).map((event) => event.id)
 		).size;
 		const positionsBefore = await publishedPositionIds();
 		await dragRelayJoystick(page, { x: 24, y: -24 });
