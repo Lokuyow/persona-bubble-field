@@ -39,6 +39,32 @@ function relativeLuminance(color: string): number {
 	return 0.2126 * channels[0]! + 0.7152 * channels[1]! + 0.0722 * channels[2]!;
 }
 
+async function expectProfileScrollbarLayout(dialog: Locator): Promise<void> {
+	const scrollViewport = dialog.locator('.profile-dialog-scroll-viewport');
+	const scrollbar = dialog.locator('.profile-dialog-scrollbar');
+	await expect.poll(() => scrollViewport.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+	const dialogBox = await dialog.boundingBox();
+	const scrollbarBox = await scrollbar.boundingBox();
+	const contentBox = await dialog.locator('.profile-life-stats, .summary-card').first().boundingBox();
+	const paddingRight = await dialog.evaluate((element) => Number.parseFloat(getComputedStyle(element).paddingRight));
+	expect(dialogBox).not.toBeNull();
+	expect(scrollbarBox).not.toBeNull();
+	expect(contentBox).not.toBeNull();
+	const outerInset = dialogBox!.x + dialogBox!.width - (scrollbarBox!.x + scrollbarBox!.width);
+	const contentRight = contentBox!.x + contentBox!.width;
+	const contentGap = scrollbarBox!.x - contentRight;
+	expect(outerInset).toBeGreaterThan(0);
+	expect(outerInset).toBeLessThanOrEqual(paddingRight / 2);
+	expect(contentGap).toBeGreaterThan(outerInset);
+	expect(scrollbarBox!.x).toBeGreaterThan(contentRight);
+	expect(scrollbarBox!.x + scrollbarBox!.width).toBeLessThanOrEqual(dialogBox!.x + dialogBox!.width);
+	const previousTop = await scrollViewport.evaluate((element) => element.scrollTop);
+	await scrollViewport.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+	await expect.poll(() => scrollViewport.evaluate((element) => element.scrollTop)).toBeGreaterThan(previousTop);
+	await scrollViewport.evaluate((element) => { element.scrollTop = 0; });
+	expect(await dialog.evaluate((element) => element.ownerDocument.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+}
+
 function contrastRatio(first: string, second: string): number {
 	const luminances = [relativeLuminance(first), relativeLuminance(second)].sort((left, right) => right - left);
 	return (luminances[0]! + 0.05) / (luminances[1]! + 0.05);
@@ -334,6 +360,7 @@ test.describe('Relay startup', () => {
 		const dialogBox = await dialog.boundingBox();
 		const viewportBox = await scrollViewport.boundingBox();
 		const metrics = await scrollViewport.evaluate((element) => ({ clientHeight: element.clientHeight, scrollHeight: element.scrollHeight }));
+		await expectProfileScrollbarLayout(dialog);
 		await expect(dialog.locator('.self-profile-sections > section')).toHaveCount(1);
 		await expect(dialog.locator('[aria-labelledby="self-profile-run"], [aria-labelledby="self-profile-root"]')).toHaveCount(0);
 		await expect(dialog.getByRole('heading', { name: '人生', exact: true })).toHaveCount(0);
@@ -730,6 +757,10 @@ test('opens an active field participant profile by pubkey and renders only match
 		expect(filter.limit).toBe(1);
 		expect(filter.since).toBeUndefined();
 		expect(filter['#r']).toBeUndefined();
+	}
+	for (const size of [{ width: 1280, height: 420 }, { width: 390, height: 420 }]) {
+		await page.setViewportSize(size);
+		await expectProfileScrollbarLayout(dialog);
 	}
 	await page.setViewportSize({ width: 390, height: 640 });
 	await expect(dialog).toHaveClass(/self-profile-content/);
