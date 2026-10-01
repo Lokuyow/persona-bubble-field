@@ -170,7 +170,6 @@ export type PublicProfileEnvelope = Readonly<{
 	id: string;
 	pubkey: string;
 	createdAt: number;
-	runNumber: number;
 }>;
 
 export type ParsedTraceEvent = {
@@ -435,7 +434,7 @@ function assertPublicProfileNumbers(
 			typeof lifespan.extension !== 'object' || !integer(lifespan.extension.anchorAtMs) ||
 			!integer(lifespan.extension.regularUntilMs) || !(lifespan.extension.roundingBoundaryAtMs === null || integer(lifespan.extension.roundingBoundaryAtMs)) ||
 			lifespan.extension.regularUntilMs < lifespan.extension.anchorAtMs ||
-			lifespan.extension.regularUntilMs - lifespan.extension.anchorAtMs > getContextCapacityMinutes(100) * 60_000 * rootContextCompressionMultiplierTenths(3) / 10 ||
+			lifespan.extension.regularUntilMs - lifespan.extension.anchorAtMs > getContextCapacityMinutes(abilities.contextCapacity) * 60_000 * rootContextCompressionMultiplierTenths(3) / 10 ||
 			(lifespan.extension.roundingBoundaryAtMs !== null && (lifespan.extension.roundingBoundaryAtMs <= lifespan.extension.anchorAtMs ||
 			lifespan.extension.roundingBoundaryAtMs >= lifespan.extension.regularUntilMs ||
 			lifespan.extension.roundingBoundaryAtMs - lifespan.extension.anchorAtMs > INFERENCE_ACCELERATION_BUDGET_MS)) ||
@@ -728,7 +727,18 @@ export function parsePublicProfileState(event: Event, channelId: string, expecte
 	const dTags = event.tags.filter((tag) => tag[0] === 'd');
 	const eTags = event.tags.filter((tag) => tag[0] === 'e');
 	const rTags = event.tags.filter((tag) => tag[0] === 'r');
-	const runNumber = envelope.runNumber;
+	if (dTags.length !== 1 || eTags.length !== 1 || rTags.length !== 1) return null;
+	const [d] = dTags;
+	const [e] = eTags;
+	const [r] = rTags;
+	if (d.length !== 2 || d[1] !== profileStateIdentifier(channelId) ||
+		(e.length !== 2 && e.length !== 3) || e[1] !== channelId ||
+		r.length !== 2 || !/^[1-9][0-9]*$/.test(r[1] ?? '')) return null;
+	if (e.length === 3) {
+		try { assertRelayHint(e[2]); } catch { return null; }
+	}
+	const runNumber = Number(r[1]);
+	if (!Number.isSafeInteger(runNumber) || runNumber < 1) return null;
 	let content: unknown;
 	try { content = JSON.parse(event.content); } catch { return null; }
 	if (typeof content !== 'object' || content === null || Array.isArray(content)) return null;
@@ -762,27 +772,16 @@ export function parsePublicProfileState(event: Event, channelId: string, expecte
 	};
 }
 
-/** Validates only the signed addressable envelope, so an unknown/invalid newer payload can hide older data. */
+/** Validates the signed candidate identity only, so strict schema failures cannot expose older data. */
 export function parsePublicProfileEnvelope(event: Event, channelId: string, expectedPubkey?: string): PublicProfileEnvelope | null {
 	assertChannelId(channelId);
 	if (!isVerifiedEvent(event) || event.kind !== PROFILE_STATE_KIND || !Number.isSafeInteger(event.created_at) || event.created_at < 0 ||
 		(expectedPubkey !== undefined && event.pubkey !== expectedPubkey) || !resolveWorldCharacterFromPubkey(event.pubkey)) return null;
-	const dTags = event.tags.filter((tag) => tag[0] === 'd');
-	const eTags = event.tags.filter((tag) => tag[0] === 'e');
-	const rTags = event.tags.filter((tag) => tag[0] === 'r');
-	if (dTags.length !== 1 || eTags.length !== 1 || rTags.length !== 1) return null;
-	const [d] = dTags;
-	const [e] = eTags;
-	const [r] = rTags;
-	if (d.length !== 2 || d[1] !== profileStateIdentifier(channelId) ||
-		(e.length !== 2 && e.length !== 3) || e[1] !== channelId ||
-		r.length !== 2 || !/^[1-9][0-9]*$/.test(r[1] ?? '')) return null;
-	if (e.length === 3) {
-		try { assertRelayHint(e[2]); } catch { return null; }
-	}
-	const runNumber = Number(r[1]);
-	if (!Number.isSafeInteger(runNumber) || runNumber < 1) return null;
-	return { event, id: event.id, pubkey: event.pubkey, createdAt: event.created_at, runNumber };
+	// Relay filters are advisory: require the target address and channel on the
+	// signed event, while leaving tag multiplicity and shape to strict parsing.
+	if (!event.tags.some((tag) => tag[0] === 'd' && tag[1] === profileStateIdentifier(channelId)) ||
+		!event.tags.some((tag) => tag[0] === 'e' && tag[1] === channelId)) return null;
+	return { event, id: event.id, pubkey: event.pubkey, createdAt: event.created_at };
 }
 
 export function isNewerPublicProfileEnvelope(candidate: PublicProfileEnvelope, current: PublicProfileEnvelope): boolean {

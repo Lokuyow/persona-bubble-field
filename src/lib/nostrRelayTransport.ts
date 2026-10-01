@@ -849,8 +849,10 @@ export function createNostrRelayTransport(
 		let timeout: ReturnType<typeof setTimeout> | null = null;
 		const finishStatus = (relayUrl: string, next: ProfileReadStatus) => {
 			relayStatus.set(relayUrl, next);
-			if ([...relayStatus.values()].some((status) => status === 'eose')) onStatus('eose');
-			else if (relayStatus.size > 0 && [...relayStatus.values()].every((status) => status !== 'loading')) onStatus(next);
+			const statuses = eligibleRelays.map((url) => relayStatus.get(url) ?? 'loading');
+			if (statuses.some((status) => status === 'loading')) onStatus('loading');
+			else if (statuses.length > 0 && statuses.every((status) => status === 'eose')) onStatus('eose');
+			else onStatus(statuses.find((status) => status !== 'eose' && status !== 'loading') ?? 'error');
 		};
 		resource.add(client.createOutgoingMessageObservable().subscribe((packet) => {
 			const relayUrl = canonicalRelay(packet.to);
@@ -884,7 +886,7 @@ export function createNostrRelayTransport(
 			finishStatus(relayUrl, 'error');
 		}));
 		if (eligibleRelays.length) timeout = setTimeout(() => {
-			if (closed || [...relayStatus.values()].some((status) => status === 'eose')) return;
+			if (closed) return;
 			for (const [relayUrl, status] of relayStatus) if (status === 'loading') finishStatus(relayUrl, 'timeout');
 		}, timeoutMs);
 		subscriptions.add(resource);

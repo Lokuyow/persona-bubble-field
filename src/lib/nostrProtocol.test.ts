@@ -220,6 +220,20 @@ describe('Nostr protocol foundation', () => {
 		expect(isNewerPublicProfileEnvelope(tiedLargestId, tiedSmallestId)).toBe(false);
 	});
 
+	it('limits regular duration from the published context-capacity level', () => {
+		const anchorAtMs = 1_700_000_000_000;
+		const contextCapacityLevelOne = { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 };
+		const maxRegularMs = 5 * 60_000 * 4;
+		const template = (durationMs: number) => buildPublicProfileStateTemplate({
+			channel, createdAt: 1_700_000_010, runNumber: 1, points: 0, rootPoints: 0,
+			abilities: contextCapacityLevelOne,
+			lifespan: { baseExpiresAtMs: anchorAtMs, extension: { anchorAtMs, regularUntilMs: anchorAtMs + durationMs,
+				roundingBoundaryAtMs: null, overflowPercent: 0, maximumLifespanMs: 604_800_000 } }
+		});
+		expect(() => template(maxRegularMs)).not.toThrow();
+		expect(() => template(maxRegularMs + 1)).toThrow(TypeError);
+	});
+
 	it('queries one addressable profile history candidate without a since or Run filter', () => {
 		expect(buildPublicProfileStateFilter({ channelId: CHANNEL_ID, pubkey: 'c'.repeat(64), limit: 1 })).toEqual({
 			kinds: [WORLD_STATE_KIND], authors: ['c'.repeat(64)], '#d': [`${PROTOTYPE_NAMESPACE}:profile-state:${CHANNEL_ID}`], '#e': [CHANNEL_ID], limit: 1
