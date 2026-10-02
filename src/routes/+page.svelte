@@ -833,6 +833,9 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	});
 	let canUseAdjustmentTerminal = $derived(!devWorldSandboxEnabled && !personaLifecycleTransition && !tagGameLocalLock && Boolean(worldSession && personaSnapshot && selfIsActive && selfLogicalPosition && isWithinFacilityInteractionRange(selfLogicalPosition, ADJUSTMENT_TERMINAL)));
 	let canUseRankingTerminal = $derived(!devWorldSandboxEnabled && !personaLifecycleTransition && Boolean(worldSession && personaSnapshot && selfIsActive && selfLogicalPosition && isWithinFacilityInteractionRange(selfLogicalPosition, RANKING_TERMINAL)));
+	$effect(() => {
+		if (rankingDialogOpen && !canUseRankingTerminal) rankingDialogOpen = false;
+	});
 	let canUseTagGameTerminal = $derived(!devWorldSandboxEnabled && !personaLifecycleTransition && Boolean(worldSession && selfIsActive && selfLogicalPosition && isWithinFacilityInteractionRange(selfLogicalPosition, TAG_GAME_TERMINAL)));
 	// Keep terminal states in tagGameEvents for recovery and delayed-action rejection,
 	// but a pre-start host cancellation is not a playable game or a result card.

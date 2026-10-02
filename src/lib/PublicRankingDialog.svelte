@@ -68,6 +68,13 @@
 	function rowStatus(row: PublicRankingRow): string | null {
 		return row.terminalState === 'death' ? '死亡' : row.terminalState === 'clear' ? '脱出' : null;
 	}
+
+	function rowValue(row: PublicRankingRow): string {
+		if (selectedRanking === 'points') return `${row.points} pt`;
+		if (row.terminalState === 'death') return '死亡';
+		if (row.terminalState === 'clear') return '脱出';
+		return formatRemainingDuration(row.remainingLifespanMs);
+	}
 </script>
 
 <Dialog.Root bind:open={() => open, onOpenChange}>
@@ -83,11 +90,11 @@
 					</div>
 					<Dialog.Close class="action-button action-button-tertiary action-button-close" aria-label="閉じる"><X aria-hidden="true" /></Dialog.Close>
 				</header>
-				<div class="ranking-tabs" role="tablist" aria-label="ランキングの種類">
-					<button type="button" role="tab" class:tab-selected={selectedRanking === 'points'} aria-selected={selectedRanking === 'points'} data-ranking-tab="points" onclick={() => { selectedRanking = 'points'; }}>
+				<div class="ranking-tabs" role="group" aria-label="ランキングの種類">
+					<button type="button" class="action-selected" aria-pressed={selectedRanking === 'points'} data-ranking-tab="points" onclick={() => { selectedRanking = 'points'; }}>
 						<ChartBar aria-hidden="true" /><span>ポイント</span>
 					</button>
-					<button type="button" role="tab" class:tab-selected={selectedRanking === 'lifespan'} aria-selected={selectedRanking === 'lifespan'} data-ranking-tab="lifespan" onclick={() => { selectedRanking = 'lifespan'; }}>
+					<button type="button" class="action-selected" aria-pressed={selectedRanking === 'lifespan'} data-ranking-tab="lifespan" onclick={() => { selectedRanking = 'lifespan'; }}>
 						<Clock aria-hidden="true" /><span>寿命</span>
 					</button>
 				</div>
@@ -103,15 +110,15 @@
 					{:else}
 						<ol class="ranking-rows" data-ranking-rows>
 							{#each visibleRows as row, index (row.key)}
-								{@const status = rowStatus(row)}
+								{@const status = selectedRanking === 'points' ? rowStatus(row) : null}
 								<li class="ranking-row" data-ranking-row data-ranking-state={row.terminalState ?? 'alive'}>
 									<span class="ranking-place">{index + 1}</span>
-								<CharacterAvatar character={row.character} class="avatar ranking-avatar" />
+									<CharacterAvatar character={row.character} class="avatar ranking-avatar" />
 									<span class="ranking-name-group">
 										<strong class="ranking-name">{row.character.name}</strong>
 										<span class="ranking-badges">{#if status}<span class="ranking-state">{status}</span>{/if}{#if row.isSelf}<span class="ranking-self">自分</span>{/if}</span>
 									</span>
-									<strong class="ranking-value">{selectedRanking === 'points' ? `${row.points} pt` : formatRemainingDuration(row.remainingLifespanMs)}</strong>
+									<strong class="ranking-value">{rowValue(row)}</strong>
 								</li>
 							{/each}
 						</ol>
@@ -133,7 +140,6 @@
 	:global(.ranking-dialog-content .sr-only) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 	.ranking-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
 	.ranking-tabs button { display: inline-flex; justify-content: center; align-items: center; gap: 8px; min-height: 44px; border: 1px solid rgba(174, 182, 255, .42); border-radius: 9px; background: rgba(19, 26, 61, .78); color: #d8dcf5; font: inherit; font-weight: 700; cursor: pointer; }
-	.ranking-tabs button.tab-selected { border-color: #aeb6ff; background: rgba(71, 81, 153, .52); color: #fff; }
 	.ranking-tabs button:focus-visible { outline: 3px solid var(--action-focus-ring); outline-offset: 2px; }
 	.ranking-tabs button :global(svg) { width: 18px; height: 18px; }
 	.ranking-list { min-height: 180px; }
