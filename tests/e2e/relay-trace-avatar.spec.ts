@@ -89,12 +89,14 @@ test('switches Trace root avatars only after that image loads and keeps failures
 	await selectRelayTraceCell(page, '4,2');
 	const firstGhost = page.locator(`[data-trace-ghost-root-id="${trace.root.id}"]`);
 	const firstAvatar = firstGhost.locator('.avatar');
+	const firstTrigger = firstGhost.locator('.trace-ghost-profile-trigger');
 	await expect(firstGhost.locator('.trace-ghost-name')).toHaveText(firstCharacter.name);
 	await expect(firstAvatar).toHaveAttribute('data-status', 'loaded');
 	await expect.poll(
-		() => firstAvatar.locator('img').evaluate((image) => getComputedStyle(image).animationName),
+		() => firstTrigger.evaluate((trigger) => getComputedStyle(trigger).animationName),
 		{ timeout: 3_000 }
 	).not.toBe('none');
+	await expect(firstAvatar.locator('img')).toHaveCSS('animation-name', 'none');
 	await expect.poll(() => firstAvatar.locator('img').evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
 
 	await selectRelayTraceCell(page, '4,3');
@@ -102,19 +104,27 @@ test('switches Trace root avatars only after that image loads and keeps failures
 	const secondGhost = page.locator(`[data-trace-ghost-root-id="${secondRoot.id}"]`);
 	const secondAvatar = secondGhost.locator('.avatar');
 	const secondImage = secondAvatar.locator('img');
-	await expect(secondGhost.locator('.trace-ghost-name')).toHaveText(secondCharacter.name);
+	const secondTrigger = secondGhost.locator('.trace-ghost-profile-trigger');
+	const secondName = secondGhost.locator('.trace-ghost-name');
+	await expect(secondName).toHaveText(secondCharacter.name);
 	await expect(page.locator(`[data-trace-ghost-root-id="${trace.root.id}"]`)).toHaveCount(0);
 	await expect(secondAvatar).toHaveAttribute('data-status', 'loading');
 	await expect.poll(() => secondImage.getAttribute('src')).toContain(secondCharacter.picture);
 	await expect(secondImage).toHaveCSS('display', 'none');
 	await expect(secondAvatar.locator('[data-avatar-fallback]')).toHaveText('');
 	await expect(secondImage).toHaveJSProperty('naturalWidth', 0);
+	await expect(secondTrigger).toHaveCSS('visibility', 'hidden');
+	await expect(secondAvatar).toHaveCSS('visibility', 'hidden');
+	await expect(secondName).toHaveCSS('visibility', 'hidden');
 
 	failSecondImage = true;
 	releaseSecondImage();
 	await expect(secondAvatar).toHaveAttribute('data-status', 'error');
 	await expect(secondImage).toHaveCSS('display', 'none');
 	await expect(secondAvatar.locator('[data-avatar-fallback]')).toHaveText('');
+	await expect(secondTrigger).toHaveCSS('visibility', 'visible');
+	await expect(secondName).toHaveCSS('visibility', 'visible');
+	await expect.poll(() => secondTrigger.evaluate((trigger) => getComputedStyle(trigger).animationName)).not.toBe('none');
 
 	failSecondImage = false;
 	await selectRelayTraceCell(page, '4,2');
@@ -123,7 +133,10 @@ test('switches Trace root avatars only after that image loads and keeps failures
 	await selectRelayTraceCell(page, '4,3');
 	await expect(secondAvatar).toHaveAttribute('data-status', 'loaded');
 	await expect.poll(() => secondImage.evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
-	await expect.poll(() => secondImage.evaluate((image) => getComputedStyle(image).animationName)).toBe('none');
+	await expect(secondTrigger).toHaveCSS('visibility', 'visible');
+	await expect(secondName).toHaveCSS('visibility', 'visible');
+	await expect(secondImage).toHaveCSS('animation-name', 'none');
+	await expect(secondTrigger).toHaveCSS('animation-name', 'none');
 
 	await selectRelayTraceCell(page, '4,2');
 	await selectRelayTraceCell(page, '4,3');
