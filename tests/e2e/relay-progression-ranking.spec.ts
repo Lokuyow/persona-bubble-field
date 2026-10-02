@@ -59,7 +59,8 @@ test.describe('public profile rankings', () => {
 		expect((await relayState(page)).state.requests.filter(isRankingRequest)).toHaveLength(requestCount);
 
 		await page.clock.runFor(3_001);
-		await expect(dialog.getByText('ランキング情報がありません')).toBeVisible();
+		await expect(dialog.getByText('ランキングを取得中…')).toBeVisible();
+		await expect(dialog.locator('[data-ranking-empty]')).toHaveCount(0);
 		const activeRankingReads = await page.evaluate((event) => (window as typeof window & {
 			__relayStartupTest: { injectRankingEvent(event: object): number }
 		}).__relayStartupTest.injectRankingEvent(event), profile);
@@ -124,5 +125,29 @@ test.describe('public profile rankings', () => {
 			const closedIds = (await relayState(page)).state.closedSubscriptions.map((closed) => closed.subId);
 			return rankingSubIds.map((subId) => closedIds.includes(subId));
 		}).toEqual(rankingSubIds.map(() => true));
+	});
+
+	test('shows empty only after the deferred finite ranking batch completes without valid rows', async ({ page }) => {
+		await page.clock.install({ time: Date.now() });
+		await openReadyRelayWorld(page, 1);
+		await page.evaluate(() => (window as typeof window & {
+			__relayStartupTest: { deferRankingEvents(): void }
+		}).__relayStartupTest.deferRankingEvents());
+		await moveRelaySelfTo(page, { x: 7, y: 0 });
+		await clickRelayLogicalCell(page, { x: 8, y: 0 });
+
+		const dialog = page.getByRole('dialog', { name: 'ランキング' });
+		await expect(dialog).toBeVisible();
+		await expect.poll(async () => (await relayState(page)).state.requests.filter((request) => request.filters.length === 2 &&
+			request.filters.some((filter) => ((filter['#d'] as string[] | undefined) ?? []).some((value) => value.includes(':profile-state:')))).length).toBeGreaterThan(0);
+		await page.clock.runFor(3_001);
+		await expect(dialog.getByText('ランキングを取得中…')).toBeVisible();
+		await expect(dialog.locator('[data-ranking-empty]')).toHaveCount(0);
+
+		await page.evaluate(() => (window as typeof window & {
+			__relayStartupTest: { releaseRankingEvents(): void }
+		}).__relayStartupTest.releaseRankingEvents());
+		await expect(dialog.getByText('ランキング情報がありません')).toBeVisible();
+		await expect(dialog.locator('[data-ranking-loading]')).toHaveCount(0);
 	});
 });

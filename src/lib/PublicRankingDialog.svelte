@@ -23,6 +23,8 @@
 	let rankingEvents = $state.raw<readonly NostrEvent[]>([]);
 	let viewerNowMs = $state(Date.now());
 	let skeletonFinished = $state(false);
+	let readCompleted = $state(false);
+	let hasDisplayedRows = $state(false);
 	let generation = 0;
 	const projection = $derived(channelId
 		? projectPublicRankings({ events: rankingEvents, channelId, viewerNowMs, selfPubkey })
@@ -39,6 +41,8 @@
 		viewerNowMs = Date.now();
 		selectedRanking = 'points';
 		skeletonFinished = false;
+		readCompleted = false;
+		hasDisplayedRows = false;
 		const skeletonTimer = window.setTimeout(() => {
 			if (currentGeneration === generation) skeletonFinished = true;
 		}, 3_000);
@@ -48,10 +52,15 @@
 			channelId = currentChannelId;
 			rankingEvents = [...eventsById.values()];
 			viewerNowMs = Date.now();
-			if (!skeletonFinished) {
-				const next = projectPublicRankings({ events: rankingEvents, channelId: currentChannelId, viewerNowMs, selfPubkey });
-				if (next.points.length > 0) skeletonFinished = true;
+			const next = projectPublicRankings({ events: rankingEvents, channelId: currentChannelId, viewerNowMs, selfPubkey });
+			if (next.points.length > 0) {
+				hasDisplayedRows = true;
+				skeletonFinished = true;
 			}
+		}, () => {
+			if (currentGeneration !== generation) return;
+			readCompleted = true;
+			if (!hasDisplayedRows) skeletonFinished = true;
 		});
 		return () => {
 			generation++;
@@ -98,16 +107,14 @@
 						<Clock aria-hidden="true" /><span>寿命</span>
 					</button>
 				</div>
-				<section class="ranking-list" aria-label={`${selectedRanking === 'points' ? 'ポイント' : '寿命'}ランキング`} aria-busy={!skeletonFinished}>
+				<section class="ranking-list" aria-label={`${selectedRanking === 'points' ? 'ポイント' : '寿命'}ランキング`} aria-busy={!readCompleted}>
 					{#if !skeletonFinished}
 						<div class="ranking-skeleton" data-ranking-skeleton aria-hidden="true">
 							{#each [0, 1, 2, 3, 4] as row (row)}
 								<div class="ranking-skeleton-row"><span></span><span></span><span></span></div>
 							{/each}
 						</div>
-					{:else if visibleRows.length === 0}
-						<p class="ranking-empty" data-ranking-empty>ランキング情報がありません</p>
-					{:else}
+					{:else if visibleRows.length > 0 || hasDisplayedRows}
 						<ol class="ranking-rows" data-ranking-rows>
 							{#each visibleRows as row, index (row.key)}
 								{@const status = selectedRanking === 'points' ? rowStatus(row) : null}
@@ -122,6 +129,10 @@
 								</li>
 							{/each}
 						</ol>
+					{:else if readCompleted}
+						<p class="ranking-empty" data-ranking-empty>ランキング情報がありません</p>
+					{:else}
+						<p class="ranking-loading" data-ranking-loading>ランキングを取得中…</p>
 					{/if}
 				</section>
 			</Dialog.Content>
