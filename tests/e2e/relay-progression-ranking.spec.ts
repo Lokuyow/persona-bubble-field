@@ -109,6 +109,14 @@ test.describe('public profile rankings', () => {
 		});
 		const expectAvatarLayout = async (targetRow: typeof row) => expect.poll(avatarLayout(targetRow)).toEqual({ hasArea: true, isSquare: true, contained: true });
 		await expectAvatarLayout(row);
+		await page.setViewportSize({ width: 688, height: 844 });
+		await expect(dialog.locator('[data-ranking-tab="points"]')).toBeHidden();
+		await expect(dialog.locator('[data-ranking-tab="lifespan"]')).toBeHidden();
+		await expect(pointsColumn).toBeVisible();
+		await expect(lifespanColumn).toBeVisible();
+		await expect.poll(() => dialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+		await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+		expect((await relayState(page)).state.requests.filter(isRankingRequest)).toHaveLength(requestCount);
 		await page.setViewportSize({ width: 390, height: 844 });
 		const pointsTab = dialog.getByRole('button', { name: 'ポイント' });
 		const lifespanTab = dialog.getByRole('button', { name: '寿命' });

@@ -194,11 +194,11 @@
 	@keyframes ranking-shimmer { to { background-position: -200% 0; } }
 	@media (prefers-reduced-motion: reduce) { :global(.ranking-dialog-overlay), :global(.ranking-dialog-content) { animation: none; } .ranking-skeleton-row span { animation: none; } }
 	@media (max-width: 540px) { :global(.ranking-dialog-content) { padding: 16px; } .ranking-dialog-header { top: -16px; margin: -16px -16px 14px; padding: 15px 16px 12px; } .ranking-row { grid-template-columns: 24px 34px minmax(0, 1fr) auto; gap: 7px; padding: 9px 8px; } .ranking-row :global(.ranking-avatar.avatar) { width: 34px; height: 34px; } .ranking-value { max-width: 82px; font-size: 12px; white-space: normal; } }
-	@media (min-width: 860px) {
+	@media (min-width: 640px) {
 		:global(.ranking-dialog-content) { grid-template-rows: auto minmax(0, 1fr); width: min(920px, calc(100vw - 48px)); }
 		.ranking-tabs { display: none; }
 		.ranking-columns { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
 		.ranking-column-heading { display: flex; }
 	}
-	@media (max-width: 859px) { .ranking-column:not([data-selected="true"]) { display: none; } }
+	@media (max-width: 639px) { .ranking-column:not([data-selected="true"]) { display: none; } }
 </style>
