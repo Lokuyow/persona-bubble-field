@@ -313,6 +313,8 @@ export async function installDelayedRelay(page: Page, options: {
 	historyMessages?: readonly object[];
 	primaryEvents?: Readonly<{ message: object; position: object }>;
 	profileStateEvents?: readonly object[];
+	rankingEvents?: readonly object[];
+	deferRankingEvents?: boolean;
 	primaryTerminal?: 'eose' | 'closed';
 	realtimeEvents?: readonly object[];
 	deferRealtimeEvents?: boolean;
@@ -331,7 +333,7 @@ export async function installDelayedRelay(page: Page, options: {
 	hiddenSubscriptionLimit?: number;
 } = {}): Promise<void> {
 	const events = options.primaryEvents ?? testEvents();
-	await page.addInitScript(({ authoritativeRelays, primaryEvents, profileStateEvents, historyMessages, realtimeEvents, deferPrimaryEvents, deferRealtimeEvents, primaryTerminal, realtimeTerminal, realtimePublishOutcome, rejectTracePublishes, deferTracePublishes, traceRoots, traceReplies, deferTraceRoots, deferTraceReplies, silentReplyRelays, persistAcrossReload, observeWebSocketLifecycle, testWorldConfig, hiddenSubscriptionLimit }) => {
+	await page.addInitScript(({ authoritativeRelays, primaryEvents, profileStateEvents, rankingEvents, deferRankingEvents, historyMessages, realtimeEvents, deferPrimaryEvents, deferRealtimeEvents, primaryTerminal, realtimeTerminal, realtimePublishOutcome, rejectTracePublishes, deferTracePublishes, traceRoots, traceReplies, deferTraceRoots, deferTraceReplies, silentReplyRelays, persistAcrossReload, observeWebSocketLifecycle, testWorldConfig, hiddenSubscriptionLimit }) => {
 		const WORLD_STATE_KIND = 30079;
 		const TAG_GAME_KIND = 37070;
 		type Listener = (event?: { type: string; data?: string; code?: number; reason?: string }) => void;
@@ -344,14 +346,17 @@ export async function installDelayedRelay(page: Page, options: {
 		const pendingTraceRoots: PendingRequest[] = [];
 		const pendingTraceReplies: PendingRequest[] = [];
 		const pendingRealtime: PendingRequest[] = [];
+		const pendingRanking: PendingRequest[] = [];
 		const activePrimary: PendingRequest[] = [];
 		const activeTraceReplies: PendingRequest[] = [];
 		const activeRealtime: PendingRequest[] = [];
+		const activeRanking: PendingRequest[] = [];
 		const closedTraceReplies: PendingRequest[] = [];
 		const pendingPublishes: Array<{ socket: FakeWebSocket; event: Record<string, unknown> }> = [];
 		const pendingRealtimePublishes: Array<{ socket: FakeWebSocket; event: Record<string, unknown>; outcome: 'accepted' | 'rejected' | 'echo' }> = [];
 		const timelineHistory = (historyMessages ?? []) as Array<Record<string, unknown>>;
 		const publicProfileHistory = (profileStateEvents ?? []) as Array<Record<string, unknown>>;
+		const rankingHistory = (rankingEvents ?? []) as Array<Record<string, unknown>>;
 		const traceReplyHistory = traceReplies as Array<Record<string, unknown>>;
 		const persistedKey = 'relay-startup-persisted-state';
 		const persistedLatePositionKey = 'relay-startup-persisted-late-position';
@@ -394,6 +399,7 @@ export async function installDelayedRelay(page: Page, options: {
 			previousClosedSubscriptions: previous.closedSubscriptions,
 			realtimeHistory,
 			primaryEventsReleased: !deferPrimaryEvents,
+			rankingEventsReleased: !deferRankingEvents,
 			primaryReleased: false,
 			primaryTerminal: primaryTerminal ?? 'eose',
 			traceRootsReleased: !deferTraceRoots,
@@ -507,6 +513,12 @@ export async function installDelayedRelay(page: Page, options: {
 			if (state.primaryEventsReleased) respondPrimaryEvent(request);
 			if (state.primaryReleased) deliver(request.socket, ['EOSE', request.subId]);
 		};
+		const respondRanking = (request: PendingRequest) => {
+			for (const event of rankingHistory) {
+				if (request.filters.some((filter) => matchesTraceFilter(event, filter))) deliver(request.socket, ['EVENT', request.subId, event]);
+			}
+			deliver(request.socket, ['EOSE', request.subId]);
+		};
 		const respondTraceRoots = (request: PendingRequest) => {
 			for (const event of [...traceRoots, ...previous.published.filter((candidate) => candidate.kind === 42 && (candidate.tags as string[][]).some((tag) => tag[0] === 'l' && tag[1] === 'trace'))]) deliver(request.socket, ['EVENT', request.subId, event]);
 			deliver(request.socket, ['EOSE', request.subId]);
@@ -585,7 +597,7 @@ export async function installDelayedRelay(page: Page, options: {
 				if (packet[0] === 'CLOSE') {
 					const subId = packet[1] as string;
 					state.closedSubscriptions.push({ subId, url: this.url });
-					for (const requests of [activePrimary, activeTraceReplies, activeRealtime]) {
+					for (const requests of [activePrimary, activeTraceReplies, activeRealtime, activeRanking]) {
 						const index = requests.findIndex((request) => request.subId === subId && request.socket === this);
 						if (index >= 0) {
 							const [closed] = requests.splice(index, 1);
@@ -621,6 +633,7 @@ export async function installDelayedRelay(page: Page, options: {
 					return;
 				}
 				const isRealtime = filters.some((filter) => (filter.kinds as number[] | undefined)?.includes(7070));
+				const isRanking = filters.length === 2 && filters.some((filter) => (filter['#d'] as string[] | undefined)?.some((value) => value.endsWith(':profile-state:' + (filter['#e'] as string[] | undefined)?.[0]))) && filters.some((filter) => (filter['#d'] as string[] | undefined)?.some((value) => value.endsWith(':exit')));
 				if (isRealtime && authoritative.has(relayUrl)) {
 					const socketSubscriptions = [...activePrimary, ...activeTraceReplies, ...activeRealtime]
 						.filter((candidate) => candidate.socket.url === request.socket.url).length;
@@ -633,6 +646,12 @@ export async function installDelayedRelay(page: Page, options: {
 					else activeRealtime.push(request);
 					if (state.realtimeEventsReleased) respondRealtime(request);
 					else pendingRealtime.push(request);
+					return;
+				}
+				if (isRanking && authoritative.has(relayUrl)) {
+					activeRanking.push(request);
+					if (state.rankingEventsReleased) respondRanking(request);
+					else pendingRanking.push(request);
 					return;
 				}
 				if (authoritative.has(relayUrl)) {
@@ -707,6 +726,19 @@ export async function installDelayedRelay(page: Page, options: {
 				releasePrimaryEvents: () => {
 					state.primaryEventsReleased = true;
 					pendingPrimary.forEach(respondPrimaryEvent);
+				},
+				releaseRankingEvents: () => {
+					state.rankingEventsReleased = true;
+					pendingRanking.splice(0).forEach(respondRanking);
+				},
+				deferRankingEvents: () => { state.rankingEventsReleased = false; },
+				injectRankingEvent: (event: object) => {
+					const raw = event as Record<string, unknown>;
+					if (!rankingHistory.some((known) => known.id === raw.id)) rankingHistory.push(raw);
+					for (const request of activeRanking) {
+						if (request.filters.some((filter) => matchesTraceFilter(raw, filter))) deliver(request.socket, ['EVENT', request.subId, raw]);
+					}
+					return activeRanking.length;
 				},
 				releasePrimary: () => {
 					state.primaryReleased = true;
@@ -810,6 +842,8 @@ export async function installDelayedRelay(page: Page, options: {
 		authoritativeRelays: AUTHORITATIVE_RELAYS,
 		primaryEvents: events,
 		profileStateEvents: options.profileStateEvents ?? [],
+		rankingEvents: options.rankingEvents ?? [],
+		deferRankingEvents: options.deferRankingEvents ?? false,
 		historyMessages: options.historyMessages ?? [],
 		deferPrimaryEvents: options.deferPrimaryEvents ?? false,
 		primaryTerminal: options.primaryTerminal ?? 'eose',

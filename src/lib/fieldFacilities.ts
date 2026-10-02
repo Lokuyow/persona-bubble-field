@@ -1,7 +1,7 @@
 import type { GridPosition } from './geometry';
 
 export type FixedFieldFacility = Readonly<{
-	kind: 'mending-terminal' | 'adjustment-terminal' | 'tag-game-terminal';
+	kind: 'mending-terminal' | 'adjustment-terminal' | 'tag-game-terminal' | 'ranking-terminal';
 	position: GridPosition;
 }>;
 
@@ -9,8 +9,9 @@ export type FixedFieldFacility = Readonly<{
 export const MENDING_TERMINAL: FixedFieldFacility = { kind: 'mending-terminal', position: { x: 12, y: 3 } };
 export const ADJUSTMENT_TERMINAL: FixedFieldFacility = { kind: 'adjustment-terminal', position: { x: 14, y: 3 } };
 export const TAG_GAME_TERMINAL: FixedFieldFacility = { kind: 'tag-game-terminal', position: { x: 8, y: 6 } };
+export const RANKING_TERMINAL: FixedFieldFacility = { kind: 'ranking-terminal', position: { x: 8, y: 0 } };
 
-export const FIXED_FIELD_FACILITIES: readonly FixedFieldFacility[] = [MENDING_TERMINAL, ADJUSTMENT_TERMINAL, TAG_GAME_TERMINAL];
+export const FIXED_FIELD_FACILITIES: readonly FixedFieldFacility[] = [MENDING_TERMINAL, ADJUSTMENT_TERMINAL, TAG_GAME_TERMINAL, RANKING_TERMINAL];
 
 export function sameFieldCell(first: GridPosition, second: GridPosition): boolean {
 	return first.x === second.x && first.y === second.y;

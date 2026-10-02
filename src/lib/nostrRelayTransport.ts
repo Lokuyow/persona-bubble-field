@@ -17,6 +17,7 @@ import type { Filter } from 'nostr-tools/filter';
 import { verifyEvent, type Event, type VerifiedEvent } from 'nostr-tools/pure';
 import {
 	buildWorldStateFilter,
+	buildPublicRankingFilters,
 	buildPublicProfileStateFilter,
 	buildTraceDirectReplyFilter,
 	buildTraceNotificationFilter,
@@ -234,6 +235,8 @@ export type NostrRelayTransportOptions = Readonly<{
 export type ProfileStateUpdate = Readonly<{ envelope: PublicProfileEnvelope; state: PublicProfileState | null }>;
 export type ProfileReadStatus = 'loading' | 'eose' | 'closed' | 'timeout' | 'unavailable' | 'error';
 export type ProfileStateSubscription = Readonly<{ close: () => void }>;
+export type PublicRankingReadHandle = Readonly<{ close: () => void }>;
+type PublicRankingRelayReadStatus = 'loading' | 'eose' | 'closed' | 'error' | 'unavailable' | 'timeout';
 
 type TransportState = 'new' | 'starting' | 'started' | 'failed' | 'disposed';
 type PrimaryPairKey = `${string}\u0000${LogicalPrimarySubscription}`;
@@ -831,6 +834,94 @@ export function createNostrRelayTransport(
 		// Reserve room for the two primary subscriptions and the existing Trace
 		// supplemental subscription before opening realtime events.
 		return typeof maxSubscriptions !== 'number' || maxSubscriptions >= 4;
+	}
+
+	function subscribePublicRankingRead(onEvent: (event: Event) => void, onComplete: () => void = () => {}): PublicRankingReadHandle {
+		if (state !== 'started') {
+			onComplete();
+			return { close: () => {} };
+		}
+		const client = requireRxNostr();
+		const filters = buildPublicRankingFilters({ channelId: world.channelId });
+		const eligibleRelays = world.authoritativeRelays.filter((relayUrl) => {
+			const limit = Nip11Registry.get(relayUrl)?.limitation?.max_subscriptions;
+			return typeof limit !== 'number' || limit >= 5;
+		});
+		const resources = new Subscription();
+		const subIds = new Map<string, string>();
+		const requestsSent = new Set<string>();
+		const relayRequests = new Map<string, Subscription>();
+		const relayStatuses = new Map<string, PublicRankingRelayReadStatus>();
+		let closed = false;
+		let completed = false;
+		let timeout: ReturnType<typeof setTimeout> | null = null;
+		const finish = () => {
+			if (closed || completed || [...relayStatuses.values()].some((status) => status === 'loading')) return;
+			completed = true;
+			if (timeout) clearTimeout(timeout);
+			subscriptions.remove(resources);
+			resources.unsubscribe();
+			onComplete();
+		};
+		const finishRelay = (relayUrl: string, status: Exclude<PublicRankingRelayReadStatus, 'loading'>) => {
+			if (relayStatuses.get(relayUrl) !== 'loading') return;
+			relayStatuses.set(relayUrl, status);
+			relayRequests.get(relayUrl)?.unsubscribe();
+			finish();
+		};
+		resources.add(() => { closed = true; if (timeout) clearTimeout(timeout); });
+		subscriptions.add(resources);
+		for (const relayUrl of eligibleRelays) relayStatuses.set(relayUrl, 'loading');
+		resources.add(client.createOutgoingMessageObservable().subscribe((packet) => {
+			const request = reqFromOutgoing(packet);
+			const relayUrl = canonicalRelay(packet.to);
+			if (!request || !relayUrl || relayStatuses.get(relayUrl) !== 'loading' ||
+				!matchesFilterBundle(request.filters, filters)) return;
+			subIds.set(relayUrl, request.subId);
+			requestsSent.add(relayUrl);
+		}));
+		resources.add(client.createAllEventObservable().subscribe((packet) => {
+			const relayUrl = canonicalRelay(packet.from);
+			if (!closed && relayUrl && relayStatuses.get(relayUrl) === 'loading' && subIds.get(relayUrl) === packet.subId) onEvent(packet.event);
+		}));
+		resources.add(client.createAllMessageObservable().subscribe((packet) => {
+			if (packet.type !== 'EOSE' && packet.type !== 'CLOSED') return;
+			const relayUrl = canonicalRelay(packet.from);
+			if (!relayUrl || subIds.get(relayUrl) !== packet.subId) return;
+			finishRelay(relayUrl, packet.type === 'EOSE' ? 'eose' : 'closed');
+		}));
+		resources.add(client.createAllErrorObservable().subscribe((packet) => {
+			const relayUrl = canonicalRelay(packet.from);
+			if (relayUrl && subIds.has(relayUrl)) finishRelay(relayUrl, 'error');
+		}));
+		resources.add(client.createConnectionStateObservable().subscribe((packet) => {
+			const relayUrl = canonicalRelay(packet.from);
+			if (!relayUrl || !relayStatuses.has(relayUrl)) return;
+			if (isInitialConnectionUnavailable(packet.state, requestsSent.has(relayUrl))) finishRelay(relayUrl, 'unavailable');
+		}));
+		if (eligibleRelays.length) timeout = setTimeout(() => {
+			for (const [relayUrl, status] of relayStatuses) if (status === 'loading') finishRelay(relayUrl, 'timeout');
+		}, timeoutMs);
+		for (const relayUrl of eligibleRelays) {
+			const request = createRxForwardReq();
+			const requestSubscription = client.use(request, { on: { relays: [relayUrl] } }).subscribe();
+			relayRequests.set(relayUrl, requestSubscription);
+			resources.add(requestSubscription);
+			request.emit([...filters]);
+			const connection = client.getRelayStatus(relayUrl)?.connection;
+			if (connection) {
+				updateConnection(relayUrl, connection);
+				if (isInitialConnectionUnavailable(connection, requestsSent.has(relayUrl))) finishRelay(relayUrl, 'unavailable');
+			}
+		}
+		finish();
+		return { close: () => {
+			if (closed || completed) return;
+			closed = true;
+			if (timeout) clearTimeout(timeout);
+			subscriptions.remove(resources);
+			resources.unsubscribe();
+		} };
 	}
 
 	function subscribeProfileState(pubkey: string, onState: (update: ProfileStateUpdate) => void, onStatus: (status: ProfileReadStatus) => void = () => {}): ProfileStateSubscription {
@@ -1694,6 +1785,7 @@ export function createNostrRelayTransport(
 		},
 		publishSelf: publishSelfEvent,
 		subscribeProfileState,
+		subscribePublicRankingRead,
 		publishRealtimeTracked: publishRealtimeEventTracked,
 
 		async bootstrapTraceRootCandidates(): Promise<TraceRootBootstrapResult> {

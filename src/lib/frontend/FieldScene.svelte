@@ -11,7 +11,7 @@
 	import type { Participant } from '$lib/frontend/presencePresentation';
 	import { isWithinTraceInvestigationRange, type TraceRootCell } from '$lib/traceInvestigation';
 	import type { ParsedWorldMessage } from '$lib/nostrProtocol';
-	import { ADJUSTMENT_TERMINAL, FIXED_FIELD_FACILITIES, TAG_GAME_TERMINAL } from '$lib/fieldFacilities';
+	import { ADJUSTMENT_TERMINAL, FIXED_FIELD_FACILITIES, RANKING_TERMINAL, TAG_GAME_TERMINAL } from '$lib/fieldFacilities';
 	import type { CooperationDefectionGroup } from '$lib/cooperationDefection';
 
 	const FIELD_BACKGROUND_ASSET = '/field/prototype-danchi-courtyard.webp';
@@ -20,6 +20,7 @@
 	const MENDING_TERMINAL_ASSET = '/field/objects/mending-terminal.webp';
 	const ADJUSTMENT_TERMINAL_ASSET = '/field/objects/adjustment-terminal.webp';
 	const TAG_GAME_TERMINAL_ASSET = '/field/objects/tag-game-terminal.webp';
+	const RANKING_TERMINAL_ASSET = '/field/objects/ranking-terminal.webp';
 
 	export type FieldParticipantView = ProjectedParticipant<Participant>;
 	export type TraceMarkerCell = TraceRootCell & Readonly<{
@@ -178,7 +179,7 @@
 		<div class="field-facility-layer" aria-hidden="true">
 			{#each FIXED_FIELD_FACILITIES as facility (facility.kind)}
 				<span class={['field-facility', `field-${facility.kind}`]} data-field-facility={facility.kind}
-					style={`left: ${(facility.position.x + 0.5) * cellSize}px; top: ${(facility.position.y + 0.5) * cellSize}px;`}>{#if facility.kind === 'mending-terminal'}<img src={asset(MENDING_TERMINAL_ASSET)} alt="" />{:else if facility.kind === 'adjustment-terminal'}<img src={asset(ADJUSTMENT_TERMINAL_ASSET)} alt="" />{:else}<img src={asset(TAG_GAME_TERMINAL_ASSET)} alt="" />{/if}</span>
+					style={`left: ${(facility.position.x + 0.5) * cellSize}px; top: ${(facility.position.y + 0.5) * cellSize}px;`}>{#if facility.kind === 'mending-terminal'}<img src={asset(MENDING_TERMINAL_ASSET)} alt="" />{:else if facility.kind === 'adjustment-terminal'}<img src={asset(ADJUSTMENT_TERMINAL_ASSET)} alt="" />{:else if facility.kind === 'tag-game-terminal'}<img src={asset(TAG_GAME_TERMINAL_ASSET)} alt="" />{:else}<img src={asset(RANKING_TERMINAL_ASSET)} alt="" />{/if}</span>
 			{/each}
 		</div>
 		<div class="realtime-group-layer" aria-label="協力と抜け駆けの参加地点">
@@ -218,7 +219,7 @@
 					type="button"
 					ondragstart={(event) => event.preventDefault()}
 					data-cell-position={`${position.x},${position.y}`}
-					aria-label={position.x === TAG_GAME_TERMINAL.position.x && position.y === TAG_GAME_TERMINAL.position.y ? '鬼ごっこ端末' : position.x === ADJUSTMENT_TERMINAL.position.x && position.y === ADJUSTMENT_TERMINAL.position.y ? '能力強化端末' : '作業端末'}
+					aria-label={position.x === TAG_GAME_TERMINAL.position.x && position.y === TAG_GAME_TERMINAL.position.y ? '鬼ごっこ端末' : position.x === ADJUSTMENT_TERMINAL.position.x && position.y === ADJUSTMENT_TERMINAL.position.y ? '能力強化端末' : position.x === RANKING_TERMINAL.position.x && position.y === RANKING_TERMINAL.position.y ? 'ランキング端末' : '作業端末'}
 					style={`left: ${position.x * cellSize}px; top: ${position.y * cellSize}px;`}
 					onclick={(event) => { event.stopPropagation(); resolveFieldCellSelection(position, event.currentTarget as HTMLButtonElement); }}
 				></button>

@@ -166,6 +166,14 @@ Run開始前にRoot PointをRoot buildへ配分し、active Run中は変更し�
 
 作業計算は0.01pt/分の整数fixed-pointとし、point progressは60,000,000 ticksを1ptとしてBigInt等で正確に計算する。persistするowned pointsとfractional carryは整数である。work projection・checkpoint・collection・寿命死亡判定はいずれもeffective lifespanを使用し、extensionが実際に生成されないoverflow時間だけでmaximum lifespanのcapを未来へ無料で移動させない。
 
+## 公開プロフィールランキング
+
+フィールド上のランキング端末から、同一channelの公開Profile Stateを使ったポイントランキングと残り寿命ランキングを閲覧できる。端末の位置、collision、隣接時の利用、遠距離時のfeedbackとfield actionはSPEC-30の既存terminal規則に従う。ランキング対象はfinite batch readで取得できた同一channelのPublic Profile State authorとする。current presenceや10分間のpresence populationはmembership条件にしない。ランキングは受信側の進行状態や報酬には影響しない。
+
+Dialogにはポイントと残り寿命のtabを設ける。各行は順位、character、公開pointsまたは残り寿命を表示し、死亡・脱出済みのRunは状態を示す。pubkeyや能力値などのProfile詳細は表示しない。結果は非interactiveで、行からProfile Dialogを開かない。読み込み中は最大3秒skeletonを表示する。3秒経過時点でvalid rowがなくてもfinite batchが未完了なら「ランキングを取得中…」等のloading表示を続け、emptyとは判定しない。batch完了時にvalid rowが0件の場合に限り「ランキング情報がありません」と表示する。読み込み中にvalid rowが到着したらすぐランキングへ切り替え、一度表示した後は残りRelayの完了待ちを理由にloading / emptyへ戻さない。後から届いた結果は同じDialog内で反映する。
+
+各participantの公開profile-state addressで最新となる有効な同一Run Profileを用い、現在のviewer時刻で残り寿命を算出する。pointsは降順、寿命は死亡、残り時間昇順、脱出の順で並べ、同値はpubkey辞書順で安定化する。terminal exitはpubkey単位で`created_at`最大、同秒ならevent ID辞書順最小を先にcanonical選択し、ProfileのRunと一致する場合だけ反映する。全行の残り寿命は同一のviewer時刻を使う。取得filter、有限Relay readの終了、Relay容量条件、best-effort動作はSPEC-30に従い、network上の結果をlocal lifecycleの代替・更新に使わない。
+
 ## 6. 交換可能なリアルタイムイベント
 
 リアルタイムイベントは、寿命・ポイント・死亡などのsettlementを持ち得る、交換可能なexperimental event枠である。イベント固有の状態は `PersonaGameState` に混在させず、イベントinstanceとaction、participant、round、resultとして独立管理する。実験を終了するときは、その定義をenabled registryから外し、購読・受理・表示・settlementを停止する。旧payloadや旧kindを救済するlegacy path、隠れた自動移行、恒久採用を前提にした互換層は設けない。
