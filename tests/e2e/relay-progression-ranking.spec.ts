@@ -1,7 +1,8 @@
 import { expect, test } from '@playwright/test';
-import { finalizeEvent } from 'nostr-tools/pure';
+import { finalizeEvent, getPublicKey } from 'nostr-tools/pure';
 import { buildPublicProfileStateTemplate, buildWorldStateEventTemplate } from '../../src/lib/nostrProtocol';
-import { CHANNEL_ID, fixtureSecret, openReadyRelayWorld, relayState, moveRelaySelfTo, clickRelayLogicalCell } from './helpers/relayHarness';
+import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
+import { AUTHORITATIVE_RELAYS, CHANNEL_ID, fixtureSecret, installDelayedRelay, openReadyRelayWorld, relayState, moveRelaySelfTo, clickRelayLogicalCell, seedRelayAccount, testEvents } from './helpers/relayHarness';
 
 function publicProfile(secret: Uint8Array, now: number, points: number) {
 	return finalizeEvent(buildPublicProfileStateTemplate({
@@ -34,6 +35,65 @@ function terminalExit(secret: Uint8Array, createdAt: number, reason: 'death' | '
 }
 
 test.describe('public profile rankings', () => {
+	test('waits through immediate post-refresh primary startup and starts the ranking read in the same open dialog', async ({ page }) => {
+		const secret = fixtureSecret(19);
+		const now = Date.now();
+		await page.clock.install({ time: now });
+		await installHostOwnedStub(page);
+		const primaryEvents = testEvents(now);
+		await installDelayedRelay(page, {
+			deferPrimaryEvents: true,
+			deferRankingEvents: true,
+			primaryEvents: {
+				...primaryEvents,
+				position: finalizeEvent(buildWorldStateEventTemplate({
+					channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' },
+					position: { x: 7, y: 0 },
+					slot: 0,
+					createdAt: Math.floor(now / 1_000)
+				}), secret)
+			}
+		});
+		await seedRelayAccount(page, secret, getPublicKey(secret), now + 7 * 24 * 60 * 60 * 1_000);
+		await page.goto('/');
+		await expect(page.locator('.action-dock')).toBeVisible();
+		await expect(page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' })).toBeVisible();
+		await expect.poll(async () => {
+			const requests = (await relayState(page)).state.requests;
+			return AUTHORITATIVE_RELAYS.every((url) =>
+				requests.some((request) => request.url === url && (request.filter.kinds as number[] | undefined)?.[0] === 42) &&
+				requests.some((request) => request.url === url && (request.filter.kinds as number[] | undefined)?.[0] === 30_079));
+		}).toBe(true);
+		await page.evaluate((authoritativeRelays) => {
+			const relay = (window as typeof window & { __relayStartupTest: { releasePrimaryEvents(): void; releasePrimaryRelays(urls: string[]): void } }).__relayStartupTest;
+			relay.releasePrimaryEvents();
+			relay.releasePrimaryRelays(authoritativeRelays.slice(0, 3));
+		}, AUTHORITATIVE_RELAYS);
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '7,0');
+		await clickRelayLogicalCell(page, { x: 8, y: 0 });
+		await clickRelayLogicalCell(page, { x: 8, y: 0 });
+
+		const dialog = page.getByRole('dialog', { name: 'ランキング' });
+		await expect(dialog).toBeVisible();
+		await expect(dialog.locator('[data-ranking-skeleton]')).toBeVisible();
+		const isRankingRequest = (request: { filters: Record<string, unknown>[] }) => request.filters.length === 2 &&
+			request.filters.some((filter) => ((filter['#d'] as string[] | undefined) ?? []).some((value) => value.includes(':profile-state:')));
+		expect((await relayState(page)).state.requests.filter(isRankingRequest)).toHaveLength(0);
+		await page.clock.runFor(3_001);
+		await expect(dialog.getByText('ランキングを取得中…')).toBeVisible();
+		await expect(dialog.locator('[data-ranking-empty]')).toHaveCount(0);
+
+		await page.evaluate((authoritativeRelays) => (window as typeof window & { __relayStartupTest: { releasePrimaryRelays(urls: string[]): void } }).__relayStartupTest.releasePrimaryRelays(authoritativeRelays.slice(3)), AUTHORITATIVE_RELAYS);
+		await expect.poll(async () => (await relayState(page)).state.requests.filter(isRankingRequest).length).toBeGreaterThan(0);
+		const profile = publicProfile(secret, now, 900);
+		const activeRankingReads = await page.evaluate((event) => (window as typeof window & {
+			__relayStartupTest: { injectRankingEvent(event: object): number }
+		}).__relayStartupTest.injectRankingEvent(event), profile);
+		expect(activeRankingReads).toBeGreaterThan(0);
+		await expect(dialog.locator('[data-ranking-column="points"] [data-ranking-row]')).toHaveCount(1);
+		await expect(dialog.getByText('900 pt')).toBeVisible();
+	});
+
 	test('opens from the field terminal, keeps one batch read across tabs, shows late results, and closes outstanding Relay reads', async ({ page }) => {
 		const secret = fixtureSecret(19);
 		const now = Date.now();
