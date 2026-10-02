@@ -4,7 +4,6 @@
 	import CharacterAvatar from '$lib/CharacterAvatar.svelte';
 	import FieldParticipant from '$lib/FieldParticipant.svelte';
 	import History from '~icons/tabler/history';
-	import Trophy from '~icons/tabler/trophy';
 	import type { BubbleTone } from '$lib/bubblePresentation';
 	import type { FieldCellAction } from '$lib/fieldSelection';
 	import type { Bounds, Direction, FieldSize, GridPosition, Size, WorldPoint } from '$lib/geometry';
@@ -21,6 +20,7 @@
 	const MENDING_TERMINAL_ASSET = '/field/objects/mending-terminal.webp';
 	const ADJUSTMENT_TERMINAL_ASSET = '/field/objects/adjustment-terminal.webp';
 	const TAG_GAME_TERMINAL_ASSET = '/field/objects/tag-game-terminal.webp';
+	const RANKING_TERMINAL_ASSET = '/field/objects/ranking-terminal.webp';
 
 	export type FieldParticipantView = ProjectedParticipant<Participant>;
 	export type TraceMarkerCell = TraceRootCell & Readonly<{
@@ -179,7 +179,7 @@
 		<div class="field-facility-layer" aria-hidden="true">
 			{#each FIXED_FIELD_FACILITIES as facility (facility.kind)}
 				<span class={['field-facility', `field-${facility.kind}`]} data-field-facility={facility.kind}
-					style={`left: ${(facility.position.x + 0.5) * cellSize}px; top: ${(facility.position.y + 0.5) * cellSize}px;`}>{#if facility.kind === 'mending-terminal'}<img src={asset(MENDING_TERMINAL_ASSET)} alt="" />{:else if facility.kind === 'adjustment-terminal'}<img src={asset(ADJUSTMENT_TERMINAL_ASSET)} alt="" />{:else if facility.kind === 'tag-game-terminal'}<img src={asset(TAG_GAME_TERMINAL_ASSET)} alt="" />{:else}<Trophy class="ranking-terminal-mark" aria-hidden="true" />{/if}</span>
+					style={`left: ${(facility.position.x + 0.5) * cellSize}px; top: ${(facility.position.y + 0.5) * cellSize}px;`}>{#if facility.kind === 'mending-terminal'}<img src={asset(MENDING_TERMINAL_ASSET)} alt="" />{:else if facility.kind === 'adjustment-terminal'}<img src={asset(ADJUSTMENT_TERMINAL_ASSET)} alt="" />{:else if facility.kind === 'tag-game-terminal'}<img src={asset(TAG_GAME_TERMINAL_ASSET)} alt="" />{:else}<img src={asset(RANKING_TERMINAL_ASSET)} alt="" />{/if}</span>
 			{/each}
 		</div>
 		<div class="realtime-group-layer" aria-label="協力と抜け駆けの参加地点">
@@ -377,7 +377,6 @@
 	}
 	.field-tag-game-terminal { width: calc(var(--cell-size) * 0.86); height: calc(var(--cell-size) * 0.86); }
 	.field-facility img { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
-	.ranking-terminal-mark { width: 56%; height: 56%; padding: 18%; border: 2px solid rgba(174, 182, 255, .78); border-radius: 10px; background: rgba(19, 26, 61, .82); color: #e4e7ff; stroke-width: 2; }
 	.realtime-group-layer { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
 	.realtime-group {
 		position: absolute; display: grid; width: calc(var(--cell-size) * 0.84); height: calc(var(--cell-size) * 0.84);

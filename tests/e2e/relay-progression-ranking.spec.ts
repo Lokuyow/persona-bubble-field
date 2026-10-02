@@ -40,6 +40,14 @@ test.describe('public profile rankings', () => {
 		await page.clock.install({ time: now });
 		const profile = publicProfile(secret, now, 900);
 		await openReadyRelayWorld(page, 1);
+		const rankingTerminal = page.locator('[data-field-facility="ranking-terminal"]');
+		const rankingTerminalImage = rankingTerminal.locator('img');
+		await expect(rankingTerminalImage).toHaveAttribute('src', /field\/objects\/ranking-terminal\.webp$/);
+		await expect.poll(() => rankingTerminalImage.evaluate((image) => {
+			const element = image as HTMLImageElement;
+			const rect = element.getBoundingClientRect();
+			return element.complete && element.naturalWidth > 0 && element.naturalHeight > 0 && rect.width > 0 && rect.height > 0;
+		})).toBe(true);
 		await page.evaluate(() => (window as typeof window & {
 			__relayStartupTest: { deferRankingEvents(): void }
 		}).__relayStartupTest.deferRankingEvents());
