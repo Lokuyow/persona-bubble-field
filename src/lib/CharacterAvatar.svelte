@@ -57,7 +57,7 @@
 	}
 
 	:global(.avatar[data-status='loaded'] img) {
-		animation: character-avatar-fade-in 160ms ease-out both;
+		animation: character-avatar-fade-in 50ms ease-out both;
 	}
 
 	@keyframes character-avatar-fade-in {
