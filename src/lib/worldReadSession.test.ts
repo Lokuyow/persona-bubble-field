@@ -467,6 +467,81 @@ describe('world read session', () => {
 		});
 	});
 
+	it('defers public ranking reads until primary transport startup completes', async () => {
+		let resolveStart!: (value: ReturnType<typeof startResult>) => void;
+		const start = vi.fn((nextInput) => {
+			input = nextInput;
+			return new Promise<ReturnType<typeof startResult>>((resolve) => { resolveStart = resolve; });
+		});
+		const close = vi.fn();
+		const subscribePublicRankingRead = vi.fn((_onEvent: (event: never) => void, _onComplete: () => void) => ({ close }));
+		mocked.createTransport.mockReturnValue({ start, subscribePublicRankingRead, bootstrapTraceRootCandidates: traceBootstrap(), dispose, publish });
+		const session = createWorldReadSession({ field: { columns: 4, rows: 3 }, onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn() });
+		const startup = session.start();
+		const onEvent = vi.fn();
+		const onComplete = vi.fn();
+		const read = session.openPublicRankingRead(onEvent, onComplete);
+		expect(subscribePublicRankingRead).not.toHaveBeenCalled();
+		expect(onComplete).not.toHaveBeenCalled();
+
+		resolveStart(startResult());
+		await startup;
+		expect(subscribePublicRankingRead).toHaveBeenCalledOnce();
+		expect(onComplete).not.toHaveBeenCalled();
+		read.close();
+		expect(close).toHaveBeenCalledOnce();
+		session.dispose();
+	});
+
+	it('cancels a pending public ranking read without delivering callbacks after startup', async () => {
+		let resolveStart!: (value: ReturnType<typeof startResult>) => void;
+		const start = vi.fn((nextInput) => {
+			input = nextInput;
+			return new Promise<ReturnType<typeof startResult>>((resolve) => { resolveStart = resolve; });
+		});
+		const subscribePublicRankingRead = vi.fn(() => ({ close: vi.fn() }));
+		mocked.createTransport.mockReturnValue({ start, subscribePublicRankingRead, bootstrapTraceRootCandidates: traceBootstrap(), dispose, publish });
+		const session = createWorldReadSession({ field: { columns: 4, rows: 3 }, onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn() });
+		const startup = session.start();
+		const onEvent = vi.fn();
+		const onComplete = vi.fn();
+		const read = session.openPublicRankingRead(onEvent, onComplete);
+		read.close();
+		resolveStart(startResult());
+		await startup;
+		expect(subscribePublicRankingRead).not.toHaveBeenCalled();
+		expect(onEvent).not.toHaveBeenCalled();
+		expect(onComplete).not.toHaveBeenCalled();
+		session.dispose();
+	});
+
+	it.each(['startup failure', 'session disposal'] as const)('completes pending public ranking reads on %s', async (reason) => {
+		let resolveStart!: (value: ReturnType<typeof startResult>) => void;
+		let rejectStart!: (error: Error) => void;
+		const start = vi.fn((nextInput) => {
+			input = nextInput;
+			return new Promise<ReturnType<typeof startResult>>((resolve, reject) => { resolveStart = resolve; rejectStart = reject; });
+		});
+		const subscribePublicRankingRead = vi.fn(() => ({ close: vi.fn() }));
+		const transportDispose = vi.fn(() => rejectStart(new Error('transport disposed')));
+		mocked.createTransport.mockReturnValue({ start, subscribePublicRankingRead, bootstrapTraceRootCandidates: traceBootstrap(), dispose: transportDispose, publish });
+		const session = createWorldReadSession({ field: { columns: 4, rows: 3 }, onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn() });
+		const startup = session.start();
+		const onComplete = vi.fn();
+		session.openPublicRankingRead(vi.fn(), onComplete);
+
+		if (reason === 'startup failure') {
+			rejectStart(new Error('primary startup failed'));
+			await expect(startup).rejects.toThrow('primary startup failed');
+		} else {
+			session.dispose();
+			await expect(startup).rejects.toThrow('transport disposed');
+		}
+		expect(onComplete).toHaveBeenCalledOnce();
+		expect(subscribePublicRankingRead).not.toHaveBeenCalled();
+		if (reason === 'startup failure') session.dispose();
+	});
+
 	it('dispatches the latest Player aggregate instead of a stale tab snapshot', async () => {
 		const signer = selfSigner();
 		const publishSelf = vi.fn((event: VerifiedEvent) => ({ firstSuccess: Promise.resolve(true), settled: Promise.resolve([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' as const }]) }));

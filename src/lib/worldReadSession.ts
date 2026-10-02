@@ -249,6 +249,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	let disposed = false;
 	let terminal = false;
 	let started = false;
+	let primaryTransportReady = false;
 	let bootstrapComplete = false;
 	let selfReadReady = false;
 	let resolveSelfReadReady!: () => void;
@@ -266,6 +267,13 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	const locallyConfirmedMessages: ParsedWorldMessage[] = [];
 	let transport: ReturnType<typeof createNostrRelayTransport> | null = null;
 	let channel: ChannelReference | null = null;
+	type PendingPublicRankingRead = {
+		active: boolean;
+		onEvent: (event: NostrEvent, channelId: string) => void;
+		onComplete: () => void;
+		closeTransport?: () => void;
+	};
+	const pendingPublicRankingReads = new Set<PendingPublicRankingRead>();
 	let messageSince = 0;
 	let worldPresence: WorldPresenceState = reconstructWorldPresenceState(options.field, [], []);
 	let lastEmittedEvidenceState: WorldPresenceState | null = null;
@@ -441,6 +449,42 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		if (next.kind === selfMessageAvailability.kind) return;
 		selfMessageAvailability = next;
 		if (!disposed) options.onSelfMessageAvailabilityChanged?.(next);
+	}
+
+	function completePendingPublicRankingReads(): void {
+		for (const read of pendingPublicRankingReads) {
+			pendingPublicRankingReads.delete(read);
+			if (!read.active) continue;
+			read.active = false;
+			try { read.onComplete(); } catch { /* A consumer completion callback cannot interrupt session teardown. */ }
+		}
+	}
+
+	function startPublicRankingRead(read: PendingPublicRankingRead): void {
+		if (!read.active || disposed || !transport || !channel) return;
+		const readChannelId = channel.channelId;
+		try {
+			const handle = transport.subscribePublicRankingRead((event) => {
+				if (read.active && !disposed) read.onEvent(event, readChannelId);
+			}, () => {
+				if (!read.active) return;
+				read.active = false;
+				read.closeTransport = undefined;
+				read.onComplete();
+			});
+			read.closeTransport = () => handle.close();
+		} catch {
+			if (!read.active) return;
+			read.active = false;
+			read.onComplete();
+		}
+	}
+
+	function startPendingPublicRankingReads(): void {
+		for (const read of pendingPublicRankingReads) {
+			pendingPublicRankingReads.delete(read);
+			startPublicRankingRead(read);
+		}
 	}
 
 	function receiveRealtimeEvent(rawEvent: NostrEvent): void {
@@ -1732,8 +1776,17 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 				onComplete();
 				return { close: () => {} };
 			}
-			try { return transport.subscribePublicRankingRead((event) => onEvent(event, channel!.channelId), onComplete); }
-			catch { onComplete(); return { close: () => {} }; }
+			const read: PendingPublicRankingRead = { active: true, onEvent, onComplete };
+			if (primaryTransportReady) startPublicRankingRead(read);
+			else pendingPublicRankingReads.add(read);
+			return { close: () => {
+				if (!read.active) return;
+				read.active = false;
+				pendingPublicRankingReads.delete(read);
+				const closeTransport = read.closeTransport;
+				read.closeTransport = undefined;
+				closeTransport?.();
+			} };
 		},
 
 		async start(): Promise<WorldReadBootstrap> {
@@ -1789,6 +1842,8 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 				const nextPresence = project(Date.now());
 				const issueCount = hasRelayIssue(result);
 				emitStatus(issueCount === 0 ? { kind: 'available' } : { kind: 'degraded', issueCount });
+				primaryTransportReady = true;
+				startPendingPublicRankingReads();
 				startTraceBackground();
 				if (options.realtime?.registry.length && options.realtime.startImmediately !== false) void startRealtimeSubscription();
 				return {
@@ -1801,6 +1856,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 					realtimeStatus
 				};
 			} catch (error) {
+				completePendingPublicRankingReads();
 				rejectSelfReadReady(error instanceof Error ? error : new Error('Relay startup failed.'));
 				if (!disposed) {
 					const message = error instanceof Error ? error.message : 'Relay startup failed.';
@@ -1967,6 +2023,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		dispose(): void {
 			if (disposed) return;
 			disposed = true;
+			completePendingPublicRankingReads();
 			if (publicProfileTimer !== null) { clearTimeout(publicProfileTimer); publicProfileTimer = null; }
 			if (manualTraceRetryTimer !== null) { clearTimeout(manualTraceRetryTimer); manualTraceRetryTimer = null; }
 			traceConversationGeneration += 1;
