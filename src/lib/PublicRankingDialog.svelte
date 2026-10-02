@@ -28,7 +28,6 @@
 	const projection = $derived(channelId
 		? projectPublicRankings({ events: rankingEvents, channelId, viewerNowMs, selfPubkey })
 		: { points: [], lifespan: [] });
-	const visibleRows = $derived(selectedRanking === 'points' ? projection.points : projection.lifespan);
 
 	$effect(() => {
 		const activeSession = session;
@@ -75,13 +74,30 @@
 		return row.terminalState === 'death' ? '死亡' : row.terminalState === 'clear' ? '脱出' : null;
 	}
 
-	function rowValue(row: PublicRankingRow): string {
-		if (selectedRanking === 'points') return `${row.points} pt`;
+	function rowValue(row: PublicRankingRow, ranking: 'points' | 'lifespan'): string {
+		if (ranking === 'points') return `${row.points} pt`;
 		if (row.terminalState === 'death') return '死亡';
 		if (row.terminalState === 'clear') return '脱出';
 		return formatRemainingDuration(row.remainingLifespanMs);
 	}
 </script>
+
+{#snippet rankingRows(rows: readonly PublicRankingRow[], ranking: 'points' | 'lifespan')}
+	<ol class="ranking-rows" data-ranking-rows={ranking}>
+		{#each rows as row, index (row.key)}
+			{@const status = ranking === 'points' ? rowStatus(row) : null}
+			<li class="ranking-row" data-ranking-row data-ranking-state={row.terminalState ?? 'alive'}>
+				<span class="ranking-place">{index + 1}</span>
+				<CharacterAvatar character={row.character} class="avatar ranking-avatar" />
+				<span class="ranking-name-group">
+					<strong class="ranking-name">{row.character.name}</strong>
+					<span class="ranking-badges">{#if status}<span class="ranking-state">{status}</span>{/if}{#if row.isSelf}<span class="ranking-self">自分</span>{/if}</span>
+				</span>
+				<strong class="ranking-value">{rowValue(row, ranking)}</strong>
+			</li>
+		{/each}
+	</ol>
+{/snippet}
 
 <Dialog.Root bind:open={() => open, onOpenChange}>
 	{#if open}
@@ -104,34 +120,35 @@
 						<Clock aria-hidden="true" /><span>寿命</span>
 					</button>
 				</div>
-				<section class="ranking-list" aria-label={`${selectedRanking === 'points' ? 'ポイント' : '寿命'}ランキング`} aria-busy={!readCompleted}>
+				<div class="ranking-columns">
+					<section class="ranking-column" data-ranking-column="points" data-selected={selectedRanking === 'points'} aria-label="ポイントランキング" aria-busy={!readCompleted}>
+						<h2 class="ranking-column-heading"><ChartBar aria-hidden="true" />ポイント</h2>
+						{#if skeletonFinished && projection.points.length > 0}
+							{@render rankingRows(projection.points, 'points')}
+						{/if}
+					</section>
+					<section class="ranking-column" data-ranking-column="lifespan" data-selected={selectedRanking === 'lifespan'} aria-label="寿命ランキング" aria-busy={!readCompleted}>
+						<h2 class="ranking-column-heading"><Clock aria-hidden="true" />寿命</h2>
+						{#if skeletonFinished && projection.lifespan.length > 0}
+							{@render rankingRows(projection.lifespan, 'lifespan')}
+						{/if}
+					</section>
 					{#if !skeletonFinished}
-						<div class="ranking-skeleton" data-ranking-skeleton aria-hidden="true">
-							{#each [0, 1, 2, 3, 4] as row (row)}
-								<div class="ranking-skeleton-row"><span></span><span></span><span></span></div>
-							{/each}
+						<div class="ranking-shared-state" data-ranking-skeleton aria-hidden="true">
+							<div class="ranking-skeleton">
+								{#each [0, 1, 2, 3, 4] as row (row)}
+									<div class="ranking-skeleton-row"><span></span><span></span><span></span></div>
+								{/each}
+							</div>
 						</div>
-					{:else if visibleRows.length > 0}
-						<ol class="ranking-rows" data-ranking-rows>
-							{#each visibleRows as row, index (row.key)}
-								{@const status = selectedRanking === 'points' ? rowStatus(row) : null}
-								<li class="ranking-row" data-ranking-row data-ranking-state={row.terminalState ?? 'alive'}>
-									<span class="ranking-place">{index + 1}</span>
-									<CharacterAvatar character={row.character} class="avatar ranking-avatar" />
-									<span class="ranking-name-group">
-										<strong class="ranking-name">{row.character.name}</strong>
-										<span class="ranking-badges">{#if status}<span class="ranking-state">{status}</span>{/if}{#if row.isSelf}<span class="ranking-self">自分</span>{/if}</span>
-									</span>
-									<strong class="ranking-value">{rowValue(row)}</strong>
-								</li>
-							{/each}
-						</ol>
-					{:else if readCompleted}
-						<p class="ranking-empty" data-ranking-empty>ランキング情報がありません</p>
-					{:else}
-						<p class="ranking-loading" data-ranking-loading>ランキングを取得中…</p>
+					{:else if projection.points.length === 0 && projection.lifespan.length === 0}
+						{#if readCompleted}
+							<p class="ranking-empty ranking-shared-state" data-ranking-empty>ランキング情報がありません</p>
+						{:else}
+							<p class="ranking-loading ranking-shared-state" data-ranking-loading>ランキングを取得中…</p>
+						{/if}
 					{/if}
-				</section>
+				</div>
 			</Dialog.Content>
 		</Dialog.Portal>
 	{/if}
@@ -150,7 +167,11 @@
 	.ranking-tabs button { display: inline-flex; justify-content: center; align-items: center; gap: 8px; min-height: 44px; border: 1px solid rgba(174, 182, 255, .42); border-radius: 9px; background: rgba(19, 26, 61, .78); color: #d8dcf5; font: inherit; font-weight: 700; cursor: pointer; }
 	.ranking-tabs button:focus-visible { outline: 3px solid var(--action-focus-ring); outline-offset: 2px; }
 	.ranking-tabs button :global(svg) { width: 18px; height: 18px; }
-	.ranking-list { min-height: 180px; }
+	.ranking-columns { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; min-width: 0; }
+	.ranking-shared-state { grid-column: 1 / -1; }
+	.ranking-column { min-width: 0; }
+	.ranking-column-heading { display: none; align-items: center; gap: 7px; margin: 0 0 12px; color: #d8dcf5; font-size: 16px; }
+	.ranking-column-heading :global(svg) { width: 18px; height: 18px; color: #aeb6ff; }
 	.ranking-rows { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 	.ranking-row { display: grid; grid-template-columns: 30px 38px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-width: 0; padding: 10px 12px; border: 1px solid rgba(174, 182, 255, .22); border-radius: 11px; background: rgba(19, 26, 61, .62); }
 	.ranking-place { color: #aeb6ff; font-size: 14px; font-weight: 800; font-variant-numeric: tabular-nums; text-align: center; }
@@ -173,4 +194,11 @@
 	@keyframes ranking-shimmer { to { background-position: -200% 0; } }
 	@media (prefers-reduced-motion: reduce) { :global(.ranking-dialog-overlay), :global(.ranking-dialog-content) { animation: none; } .ranking-skeleton-row span { animation: none; } }
 	@media (max-width: 540px) { :global(.ranking-dialog-content) { padding: 16px; } .ranking-dialog-header { top: -16px; margin: -16px -16px 14px; padding: 15px 16px 12px; } .ranking-row { grid-template-columns: 24px 34px minmax(0, 1fr) auto; gap: 7px; padding: 9px 8px; } .ranking-row :global(.ranking-avatar.avatar) { width: 34px; height: 34px; } .ranking-value { max-width: 82px; font-size: 12px; white-space: normal; } }
+	@media (min-width: 860px) {
+		:global(.ranking-dialog-content) { grid-template-rows: auto minmax(0, 1fr); width: min(920px, calc(100vw - 48px)); }
+		.ranking-tabs { display: none; }
+		.ranking-columns { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+		.ranking-column-heading { display: flex; }
+	}
+	@media (max-width: 859px) { .ranking-column:not([data-selected="true"]) { display: none; } }
 </style>

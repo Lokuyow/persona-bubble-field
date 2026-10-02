@@ -37,6 +37,7 @@ test.describe('public profile rankings', () => {
 	test('opens from the field terminal, keeps one batch read across tabs, shows late results, and closes outstanding Relay reads', async ({ page }) => {
 		const secret = fixtureSecret(19);
 		const now = Date.now();
+		await page.setViewportSize({ width: 1280, height: 800 });
 		await page.clock.install({ time: now });
 		const profile = publicProfile(secret, now, 900);
 		await openReadyRelayWorld(page, 1);
@@ -59,7 +60,11 @@ test.describe('public profile rankings', () => {
 
 		const dialog = page.getByRole('dialog', { name: 'ランキング' });
 		await expect(dialog).toBeVisible();
+		await expect(dialog.locator('[data-ranking-tab="points"]')).toBeHidden();
+		await expect(dialog.locator('[data-ranking-tab="lifespan"]')).toBeHidden();
 		await expect(dialog.locator('[data-ranking-skeleton]')).toBeVisible();
+		await expect(dialog.getByRole('region', { name: 'ポイントランキング' })).toBeVisible();
+		await expect(dialog.getByRole('region', { name: '寿命ランキング' })).toBeVisible();
 		await expect.poll(async () => {
 			const requests = (await relayState(page)).state.requests;
 			return requests.filter((request) => request.filters.length === 2 &&
@@ -67,10 +72,11 @@ test.describe('public profile rankings', () => {
 		}).toBeGreaterThan(0);
 		const isRankingRequest = (request: { filters: Record<string, unknown>[] }) => request.filters.length === 2 &&
 			request.filters.some((filter) => ((filter['#d'] as string[] | undefined) ?? []).some((value) => value.includes(':profile-state:')));
-		const requestCount = (await relayState(page)).state.requests.filter(isRankingRequest).length;
-		await dialog.getByRole('button', { name: '寿命' }).click();
-		await expect(dialog.getByRole('button', { name: '寿命' })).toHaveAttribute('aria-pressed', 'true');
-		await expect(dialog.getByRole('button', { name: 'ポイント' })).toHaveAttribute('aria-pressed', 'false');
+		const rankingRequests = (await relayState(page)).state.requests.filter(isRankingRequest);
+		const requestCount = rankingRequests.length;
+		const requestsByRelay = new Map<string, number>();
+		for (const request of rankingRequests) requestsByRelay.set(request.url, (requestsByRelay.get(request.url) ?? 0) + 1);
+		expect([...requestsByRelay.values()].every((count) => count === 1)).toBe(true);
 		expect((await relayState(page)).state.requests.filter(isRankingRequest)).toHaveLength(requestCount);
 
 		await page.clock.runFor(3_001);
@@ -80,13 +86,16 @@ test.describe('public profile rankings', () => {
 			__relayStartupTest: { injectRankingEvent(event: object): number }
 		}).__relayStartupTest.injectRankingEvent(event), profile);
 		expect(activeRankingReads).toBeGreaterThan(0);
-		await dialog.getByRole('button', { name: 'ポイント' }).click();
-		await expect(dialog.getByRole('button', { name: 'ポイント' })).toHaveAttribute('aria-pressed', 'true');
-		await expect(dialog.getByText('900 pt')).toBeVisible();
-		const row = dialog.locator('[data-ranking-row]');
-		await expect(row).toHaveCount(1);
+		const pointsColumn = dialog.getByRole('region', { name: 'ポイントランキング' });
+		const lifespanColumn = dialog.getByRole('region', { name: '寿命ランキング' });
+		await expect(pointsColumn).toBeVisible();
+		await expect(lifespanColumn).toBeVisible();
+		await expect(pointsColumn.locator('[data-ranking-row]')).toHaveCount(1);
+		await expect(lifespanColumn.locator('[data-ranking-row]')).toHaveCount(1);
+		await expect(pointsColumn.getByText('900 pt')).toBeVisible();
+		const row = pointsColumn.locator('[data-ranking-row]');
 		await expect(row.locator('.ranking-self')).toHaveText('自分');
-		const avatarLayout = async () => row.evaluate((rowElement) => {
+		const avatarLayout = (targetRow: typeof row) => () => targetRow.evaluate((rowElement) => {
 			const avatar = rowElement.querySelector<HTMLElement>('.ranking-avatar.avatar');
 			if (!avatar) return { hasArea: false, isSquare: false, contained: false };
 			const rowRect = rowElement.getBoundingClientRect();
@@ -98,10 +107,18 @@ test.describe('public profile rankings', () => {
 					avatarRect.right <= rowRect.right && avatarRect.bottom <= rowRect.bottom
 			};
 		});
-		const expectAvatarLayout = async () => expect.poll(avatarLayout).toEqual({ hasArea: true, isSquare: true, contained: true });
-		await expectAvatarLayout();
+		const expectAvatarLayout = async (targetRow: typeof row) => expect.poll(avatarLayout(targetRow)).toEqual({ hasArea: true, isSquare: true, contained: true });
+		await expectAvatarLayout(row);
 		await page.setViewportSize({ width: 390, height: 844 });
-		await expectAvatarLayout();
+		const pointsTab = dialog.getByRole('button', { name: 'ポイント' });
+		const lifespanTab = dialog.getByRole('button', { name: '寿命' });
+		await expect(pointsTab).toBeVisible();
+		await expect(lifespanTab).toBeVisible();
+		await expect(pointsTab).toHaveAttribute('aria-pressed', 'true');
+		await expect(lifespanTab).toHaveAttribute('aria-pressed', 'false');
+		await expect(pointsColumn).toBeVisible();
+		await expect(lifespanColumn).toBeHidden();
+		await expectAvatarLayout(row);
 
 		const deathSecret = fixtureSecret(41);
 		const clearSecret = fixtureSecret(53);
@@ -112,15 +129,20 @@ test.describe('public profile rankings', () => {
 				__relayStartupTest: { injectRankingEvent(event: object): number }
 			}).__relayStartupTest.injectRankingEvent(rankingEvent), event);
 		}
-		await expect(dialog.locator('[data-ranking-row]')).toHaveCount(3);
-		await expect(dialog.locator('[data-ranking-state="death"] .ranking-value')).toHaveText('300 pt');
-		await expect(dialog.locator('[data-ranking-state="death"] .ranking-state')).toHaveText('死亡');
-		await expect(dialog.locator('[data-ranking-state="clear"] .ranking-value')).toHaveText('100 pt');
-		await expect(dialog.locator('[data-ranking-state="clear"] .ranking-state')).toHaveText('脱出');
-		await dialog.getByRole('button', { name: '寿命' }).click();
-		await expect(dialog.locator('[data-ranking-state="death"] .ranking-value')).toHaveText('死亡');
-		await expect(dialog.locator('[data-ranking-state="clear"] .ranking-value')).toHaveText('脱出');
-		await expect(dialog.locator('[data-ranking-state="alive"] .ranking-value')).not.toBeEmpty();
+		await expect(pointsColumn.locator('[data-ranking-row]')).toHaveCount(3);
+		await expect(pointsColumn.locator('[data-ranking-state="death"] .ranking-value')).toHaveText('300 pt');
+		await expect(pointsColumn.locator('[data-ranking-state="death"] .ranking-state')).toHaveText('死亡');
+		await expect(pointsColumn.locator('[data-ranking-state="clear"] .ranking-value')).toHaveText('100 pt');
+		await expect(pointsColumn.locator('[data-ranking-state="clear"] .ranking-state')).toHaveText('脱出');
+		await lifespanTab.click();
+		await expect(lifespanTab).toHaveAttribute('aria-pressed', 'true');
+		await expect(pointsTab).toHaveAttribute('aria-pressed', 'false');
+		await expect(pointsColumn).toBeHidden();
+		await expect(lifespanColumn).toBeVisible();
+		await expect(lifespanColumn.locator('[data-ranking-row]')).toHaveCount(3);
+		await expect(lifespanColumn.locator('[data-ranking-state="death"] .ranking-value')).toHaveText('死亡');
+		await expect(lifespanColumn.locator('[data-ranking-state="clear"] .ranking-value')).toHaveText('脱出');
+		await expect(lifespanColumn.locator('[data-ranking-state="alive"] .ranking-value')).not.toBeEmpty();
 		expect((await relayState(page)).state.requests.filter(isRankingRequest)).toHaveLength(requestCount);
 
 		const rankingSubIds = (await relayState(page)).state.requests.filter(isRankingRequest).map((request) => request.subId);
@@ -179,19 +201,20 @@ test.describe('public profile rankings', () => {
 		await clickRelayLogicalCell(page, { x: 8, y: 0 });
 
 		const dialog = page.getByRole('dialog', { name: 'ランキング' });
+		const pointsColumn = dialog.locator('[data-ranking-column="points"]');
 		await expect(dialog).toBeVisible();
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => request.filters.length === 2 &&
 			request.filters.some((filter) => ((filter['#d'] as string[] | undefined) ?? []).some((value) => value.includes(':profile-state:'))))).toBe(true);
 		await page.evaluate((event) => (window as typeof window & {
 			__relayStartupTest: { injectRankingEvent(event: object): number }
 		}).__relayStartupTest.injectRankingEvent(event), validProfile);
-		await expect(dialog.locator('[data-ranking-row]')).toHaveCount(1);
+		await expect(pointsColumn.locator('[data-ranking-row]')).toHaveCount(1);
 
 		const invalidLatest = strictInvalidPublicProfile(secret, validProfile.created_at + 1, 900);
 		await page.evaluate((event) => (window as typeof window & {
 			__relayStartupTest: { injectRankingEvent(event: object): number }
 		}).__relayStartupTest.injectRankingEvent(event), invalidLatest);
-		await expect(dialog.locator('[data-ranking-row]')).toHaveCount(0);
+		await expect(pointsColumn.locator('[data-ranking-row]')).toHaveCount(0);
 		await expect(dialog.getByText('ランキングを取得中…')).toBeVisible();
 		await expect(dialog.locator('[data-ranking-empty]')).toHaveCount(0);
 
