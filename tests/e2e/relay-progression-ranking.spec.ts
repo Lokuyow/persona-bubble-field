@@ -15,6 +15,13 @@ function publicProfile(secret: Uint8Array, now: number, points: number) {
 	}), secret);
 }
 
+function strictInvalidPublicProfile(secret: Uint8Array, createdAt: number, points: number) {
+	const profile = publicProfile(secret, createdAt * 1_000, points);
+	const content = JSON.parse(profile.content) as Record<string, unknown>;
+	content.version = 2;
+	return finalizeEvent({ ...profile, content: JSON.stringify(content), created_at: createdAt }, secret);
+}
+
 function terminalExit(secret: Uint8Array, createdAt: number, reason: 'death' | 'clear') {
 	return finalizeEvent(buildWorldStateEventTemplate({
 		channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' },
@@ -141,6 +148,42 @@ test.describe('public profile rankings', () => {
 		await expect.poll(async () => (await relayState(page)).state.requests.filter((request) => request.filters.length === 2 &&
 			request.filters.some((filter) => ((filter['#d'] as string[] | undefined) ?? []).some((value) => value.includes(':profile-state:')))).length).toBeGreaterThan(0);
 		await page.clock.runFor(3_001);
+		await expect(dialog.getByText('ランキングを取得中…')).toBeVisible();
+		await expect(dialog.locator('[data-ranking-empty]')).toHaveCount(0);
+
+		await page.evaluate(() => (window as typeof window & {
+			__relayStartupTest: { releaseRankingEvents(): void }
+		}).__relayStartupTest.releaseRankingEvents());
+		await expect(dialog.getByText('ランキング情報がありません')).toBeVisible();
+		await expect(dialog.locator('[data-ranking-loading]')).toHaveCount(0);
+	});
+
+	test('returns to loading and then empty when a newer strict-invalid canonical profile removes the last row', async ({ page }) => {
+		const secret = fixtureSecret(63);
+		const now = Date.now();
+		await page.clock.install({ time: now });
+		const validProfile = publicProfile(secret, now, 500);
+		await openReadyRelayWorld(page, 1);
+		await page.evaluate(() => (window as typeof window & {
+			__relayStartupTest: { deferRankingEvents(): void }
+		}).__relayStartupTest.deferRankingEvents());
+		await moveRelaySelfTo(page, { x: 7, y: 0 });
+		await clickRelayLogicalCell(page, { x: 8, y: 0 });
+
+		const dialog = page.getByRole('dialog', { name: 'ランキング' });
+		await expect(dialog).toBeVisible();
+		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => request.filters.length === 2 &&
+			request.filters.some((filter) => ((filter['#d'] as string[] | undefined) ?? []).some((value) => value.includes(':profile-state:'))))).toBe(true);
+		await page.evaluate((event) => (window as typeof window & {
+			__relayStartupTest: { injectRankingEvent(event: object): number }
+		}).__relayStartupTest.injectRankingEvent(event), validProfile);
+		await expect(dialog.locator('[data-ranking-row]')).toHaveCount(1);
+
+		const invalidLatest = strictInvalidPublicProfile(secret, validProfile.created_at + 1, 900);
+		await page.evaluate((event) => (window as typeof window & {
+			__relayStartupTest: { injectRankingEvent(event: object): number }
+		}).__relayStartupTest.injectRankingEvent(event), invalidLatest);
+		await expect(dialog.locator('[data-ranking-row]')).toHaveCount(0);
 		await expect(dialog.getByText('ランキングを取得中…')).toBeVisible();
 		await expect(dialog.locator('[data-ranking-empty]')).toHaveCount(0);
 

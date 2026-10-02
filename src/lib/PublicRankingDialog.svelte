@@ -24,7 +24,6 @@
 	let viewerNowMs = $state(Date.now());
 	let skeletonFinished = $state(false);
 	let readCompleted = $state(false);
-	let hasDisplayedRows = $state(false);
 	let generation = 0;
 	const projection = $derived(channelId
 		? projectPublicRankings({ events: rankingEvents, channelId, viewerNowMs, selfPubkey })
@@ -42,7 +41,6 @@
 		selectedRanking = 'points';
 		skeletonFinished = false;
 		readCompleted = false;
-		hasDisplayedRows = false;
 		const skeletonTimer = window.setTimeout(() => {
 			if (currentGeneration === generation) skeletonFinished = true;
 		}, 3_000);
@@ -54,13 +52,12 @@
 			viewerNowMs = Date.now();
 			const next = projectPublicRankings({ events: rankingEvents, channelId: currentChannelId, viewerNowMs, selfPubkey });
 			if (next.points.length > 0) {
-				hasDisplayedRows = true;
 				skeletonFinished = true;
 			}
 		}, () => {
 			if (currentGeneration !== generation) return;
 			readCompleted = true;
-			if (!hasDisplayedRows) skeletonFinished = true;
+			skeletonFinished = true;
 		});
 		return () => {
 			generation++;
@@ -114,7 +111,7 @@
 								<div class="ranking-skeleton-row"><span></span><span></span><span></span></div>
 							{/each}
 						</div>
-					{:else if visibleRows.length > 0 || hasDisplayedRows}
+					{:else if visibleRows.length > 0}
 						<ol class="ranking-rows" data-ranking-rows>
 							{#each visibleRows as row, index (row.key)}
 								{@const status = selectedRanking === 'points' ? rowStatus(row) : null}
@@ -165,7 +162,7 @@
 	.ranking-state { background: rgba(214, 126, 145, .2); color: #f2b2c0; }
 	.ranking-self { background: rgba(174, 182, 255, .13); color: #b8bfdc; }
 	.ranking-value { color: #f4f6ff; font-size: 14px; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
-	.ranking-empty { display: grid; min-height: 180px; place-items: center; margin: 0; color: #b8bfdc; text-align: center; }
+	.ranking-empty, .ranking-loading { display: grid; min-height: 180px; place-items: center; margin: 0; color: #b8bfdc; text-align: center; }
 	.ranking-skeleton { display: grid; gap: 8px; }
 	.ranking-skeleton-row { display: grid; grid-template-columns: 30px 38px minmax(0, 1fr); align-items: center; gap: 10px; height: 59px; padding: 10px 12px; border: 1px solid rgba(174, 182, 255, .12); border-radius: 11px; background: rgba(19, 26, 61, .45); }
 	.ranking-skeleton-row span { height: 13px; border-radius: 7px; background: linear-gradient(90deg, rgba(174, 182, 255, .1), rgba(174, 182, 255, .25), rgba(174, 182, 255, .1)); background-size: 200% 100%; animation: ranking-shimmer 1.2s ease-in-out infinite; }
