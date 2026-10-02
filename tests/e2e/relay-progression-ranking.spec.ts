@@ -50,8 +50,19 @@ test.describe('public profile rankings', () => {
 		expect(activeRankingReads).toBeGreaterThan(0);
 		await dialog.getByRole('tab', { name: 'ポイント' }).click();
 		await expect(dialog.getByText('900 pt')).toBeVisible();
-		await expect(dialog.locator('[data-ranking-row]')).toHaveCount(1);
-		await expect(dialog.locator('[data-ranking-row] .ranking-self')).toHaveText('自分');
+		const row = dialog.locator('[data-ranking-row]');
+		await expect(row).toHaveCount(1);
+		await expect(row.locator('.ranking-self')).toHaveText('自分');
+		const avatar = row.locator('.ranking-avatar.avatar');
+		const renderedSize = async () => avatar.evaluate((element) => {
+			const rect = element.getBoundingClientRect();
+			return { width: rect.width, height: rect.height };
+		});
+		await expect.poll(renderedSize).toEqual({ width: 38, height: 38 });
+		await expect.poll(async () => row.evaluate((element) => element.getBoundingClientRect().height)).toBeLessThan(66);
+		await page.setViewportSize({ width: 390, height: 844 });
+		await expect.poll(renderedSize).toEqual({ width: 34, height: 34 });
+		await expect.poll(async () => row.evaluate((element) => element.getBoundingClientRect().height)).toBeLessThan(66);
 		await dialog.getByRole('button', { name: '閉じる' }).click();
 		await expect(dialog).toHaveCount(0);
 		const rankingSubIds = (await relayState(page)).state.requests.filter(isRankingRequest).map((request) => request.subId);

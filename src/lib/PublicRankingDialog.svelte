@@ -106,7 +106,7 @@
 								{@const status = rowStatus(row)}
 								<li class="ranking-row" data-ranking-row data-ranking-state={row.terminalState ?? 'alive'}>
 									<span class="ranking-place">{index + 1}</span>
-									<CharacterAvatar character={row.character} class="ranking-avatar" />
+								<CharacterAvatar character={row.character} class="avatar ranking-avatar" />
 									<span class="ranking-name-group">
 										<strong class="ranking-name">{row.character.name}</strong>
 										<span class="ranking-badges">{#if status}<span class="ranking-state">{status}</span>{/if}{#if row.isSelf}<span class="ranking-self">自分</span>{/if}</span>
