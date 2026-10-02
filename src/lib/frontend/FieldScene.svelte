@@ -513,6 +513,33 @@
 		cursor: pointer;
 		pointer-events: auto;
 		transform: translate(-50%, -50%);
+		visibility: hidden;
+	}
+
+	.trace-ghost-profile-trigger:has(:global(.avatar[data-status='loaded'])),
+	.trace-ghost-profile-trigger:has(:global(.avatar[data-status='error'])) {
+		visibility: visible;
+		animation: trace-ghost-presentation-fade-in 80ms ease-out both;
+	}
+
+	.trace-ghost-profile-trigger :global(.avatar[data-status='loaded'] img) {
+		animation: none;
+	}
+
+	.trace-ghost-profile-trigger:has(:global(.avatar[data-status='error'])) :global(.avatar) {
+		background: #d7ddda;
+	}
+
+	@keyframes trace-ghost-presentation-fade-in {
+		from { opacity: 0; }
+		to { opacity: 1; }
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.trace-ghost-profile-trigger:has(:global(.avatar[data-status='loaded'])),
+		.trace-ghost-profile-trigger:has(:global(.avatar[data-status='error'])) {
+			animation: none;
+		}
 	}
 
 	.trace-ghost-profile-trigger :global(.avatar) {

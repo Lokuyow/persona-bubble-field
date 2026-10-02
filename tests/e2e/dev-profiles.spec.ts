@@ -119,14 +119,18 @@ test.describe('DEV World Sandbox', () => {
 		});
 	}
 
-	test('uses an Avatar fallback when a character image fails to load', async ({ page }) => {
+	test('keeps the Avatar placeholder neutral when a character image fails to load', async ({ page }) => {
 		await page.route('**/characters/001.webp', (route) => route.fulfill({ status: 404 }));
 		await openDevWorld(page);
 
 		const trigger = profileTrigger(page, '女の子');
-		await expect(trigger.locator('.avatar')).toHaveText('女');
+		const avatar = trigger.locator('.avatar');
+		await expect(avatar).toHaveAttribute('data-status', 'error');
+		await expect(avatar.locator('[data-avatar-fallback]')).toHaveText('');
 		await trigger.click();
-		await expect(profileDialog(page).locator('.profile-dialog-avatar')).toHaveText('女');
+		const profileAvatar = profileDialog(page).locator('.profile-dialog-avatar');
+		await expect(profileAvatar).toHaveAttribute('data-status', 'error');
+		await expect(profileAvatar.locator('[data-avatar-fallback]')).toHaveText('');
 	});
 
 	test('keeps a long profile usable on a mobile viewport', async ({ page }) => {
