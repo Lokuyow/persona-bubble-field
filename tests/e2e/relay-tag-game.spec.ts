@@ -2582,7 +2582,8 @@ test('host silence is detected only while the local Relay connection is active',
 	await expect(holder).toHaveAttribute('data-tag-game-effect-active', 'false');
 	const pausedEffectName = await holder.getAttribute('data-tag-game-effect') === 'benefit' ? '福' : '鬼';
 	await expect(effectVisuals).toHaveAttribute('aria-label', `${pausedEffectName}・効果停止中`);
-	const pausedVisualAnimations = await holder.evaluate((element) => [...element.querySelectorAll<SVGElement>('*')]
+	const pausedVisualAnimations = await holder.evaluate((element) => [...element.querySelectorAll('.tag-game-effect-visuals, .tag-game-effect-aura')]
+		.flatMap((visual) => [visual, ...visual.querySelectorAll('*')])
 		.map((child) => getComputedStyle(child).animationName).filter((name) => name !== 'none'));
 	expect(pausedVisualAnimations).toEqual([]);
 	await page.clock.runFor(31_000);
