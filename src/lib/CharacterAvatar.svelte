@@ -9,12 +9,15 @@
 	}>;
 
 	let { character, class: className }: Props = $props();
+	let imageSrc = $derived(asset(`/${character.picture}`));
 </script>
 
-<Avatar.Root class={className}>
-	<Avatar.Image src={asset(`/${character.picture}`)} alt="" />
-	<Avatar.Fallback>{character.name.slice(0, 1)}</Avatar.Fallback>
-</Avatar.Root>
+{#key imageSrc}
+	<Avatar.Root class={className} delayMs={0}>
+		<Avatar.Image src={imageSrc} alt="" />
+		<Avatar.Fallback aria-hidden="true"></Avatar.Fallback>
+	</Avatar.Root>
+{/key}
 
 <style>
 	:global(.avatar) {
@@ -51,5 +54,18 @@
 		height: 100%;
 		object-fit: contain;
 		object-position: center;
+	}
+
+	:global(.avatar[data-status='loaded'] img) {
+		animation: character-avatar-fade-in 160ms ease-out both;
+	}
+
+	@keyframes character-avatar-fade-in {
+		from { opacity: 0; }
+		to { opacity: 1; }
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		:global(.avatar[data-status='loaded'] img) { animation: none; }
 	}
 </style>
