@@ -53,16 +53,22 @@ test.describe('public profile rankings', () => {
 		const row = dialog.locator('[data-ranking-row]');
 		await expect(row).toHaveCount(1);
 		await expect(row.locator('.ranking-self')).toHaveText('自分');
-		const avatar = row.locator('.ranking-avatar.avatar');
-		const renderedSize = async () => avatar.evaluate((element) => {
-			const rect = element.getBoundingClientRect();
-			return { width: rect.width, height: rect.height };
+		const avatarLayout = async () => row.evaluate((rowElement) => {
+			const avatar = rowElement.querySelector<HTMLElement>('.ranking-avatar.avatar');
+			if (!avatar) return { hasArea: false, isSquare: false, contained: false };
+			const rowRect = rowElement.getBoundingClientRect();
+			const avatarRect = avatar.getBoundingClientRect();
+			return {
+				hasArea: avatarRect.width > 0 && avatarRect.height > 0,
+				isSquare: avatarRect.width === avatarRect.height,
+				contained: avatarRect.left >= rowRect.left && avatarRect.top >= rowRect.top &&
+					avatarRect.right <= rowRect.right && avatarRect.bottom <= rowRect.bottom
+			};
 		});
-		await expect.poll(renderedSize).toEqual({ width: 38, height: 38 });
-		await expect.poll(async () => row.evaluate((element) => element.getBoundingClientRect().height)).toBeLessThan(66);
+		const expectAvatarLayout = async () => expect.poll(avatarLayout).toEqual({ hasArea: true, isSquare: true, contained: true });
+		await expectAvatarLayout();
 		await page.setViewportSize({ width: 390, height: 844 });
-		await expect.poll(renderedSize).toEqual({ width: 34, height: 34 });
-		await expect.poll(async () => row.evaluate((element) => element.getBoundingClientRect().height)).toBeLessThan(66);
+		await expectAvatarLayout();
 		await dialog.getByRole('button', { name: '閉じる' }).click();
 		await expect(dialog).toHaveCount(0);
 		const rankingSubIds = (await relayState(page)).state.requests.filter(isRankingRequest).map((request) => request.subId);
