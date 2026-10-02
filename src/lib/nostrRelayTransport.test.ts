@@ -1398,6 +1398,59 @@ describe('trace root bootstrap', () => {
 		expect(f.authorities[1].messages).toContainEqual(['CLOSE', subscriptionId]);
 	});
 
+	it('reads both public ranking addresses in one finite REQ, streams events, respects Relay capacity, and closes outstanding reads', async () => {
+		const f = fixture(2);
+		Nip11Registry.set(f.authorities[0].url, { limitation: { max_subscriptions: 4 } });
+		Nip11Registry.set(f.authorities[1].url, { limitation: { max_subscriptions: 5 } });
+		await f.start();
+		f.authorities[1].onRequest = () => {};
+		const received = vi.fn();
+		const completed = vi.fn();
+		const read = f.transport.subscribePublicRankingRead(received, completed);
+		await vi.advanceTimersByTimeAsync(10);
+		const rankingRequests = (relay: ReturnType<typeof mockRelay>) => relay.requests.filter((request) =>
+			filters(request).length === 2 && filters(request).every((filter) => (filter.kinds as number[] | undefined)?.[0] === WORLD_STATE_KIND));
+		expect(rankingRequests(f.authorities[0])).toHaveLength(0);
+		expect(rankingRequests(f.authorities[1])).toHaveLength(1);
+		const request = rankingRequests(f.authorities[1])[0]!;
+		const requestFilters = filters(request);
+		expect(requestFilters.map((filter) => filter['#d'])).toEqual([
+			[`io.github.lokuyow.persona-bubble-field:profile-state:${f.channel.id}`],
+			[`io.github.lokuyow.persona-bubble-field:world-state:1:${f.channel.id}:exit`]
+		]);
+		for (const filter of requestFilters) {
+			expect(filter).toMatchObject({ kinds: [WORLD_STATE_KIND], '#e': [f.channel.id] });
+			expect(filter).not.toHaveProperty('authors');
+			expect(filter).not.toHaveProperty('since');
+			expect(filter).not.toHaveProperty('limit');
+		}
+		const event = finalizeEvent(buildPublicProfileStateTemplate({ channel: { channelId: f.channel.id, relayHint: f.authorities[1].url },
+			createdAt: TIME, runNumber: 2, points: 10, abilities: { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 }, rootPoints: 3,
+			lifespan: { baseExpiresAtMs: TIME * 1_000 + 604_800_000, extension: null }
+		}), AUTHOR);
+		send(f.authorities[1].latestSocket(), 'EVENT', request[1], event);
+		await vi.advanceTimersByTimeAsync(10);
+		expect(received).toHaveBeenCalledExactlyOnceWith(event);
+		read.close();
+		await vi.advanceTimersByTimeAsync(10);
+		expect(f.authorities[1].messages).toContainEqual(['CLOSE', request[1]]);
+		expect(completed).not.toHaveBeenCalled();
+	});
+
+	it('terminates a ranking read at the existing finite operation timeout', async () => {
+		const f = fixture(1);
+		await f.start();
+		f.authorities[0].onRequest = () => {};
+		const completed = vi.fn();
+		f.transport.subscribePublicRankingRead(() => {}, completed);
+		await vi.advanceTimersByTimeAsync(TIMEOUT + 10);
+		expect(completed).toHaveBeenCalledExactlyOnceWith();
+		const rankingRequest = f.authorities[0].requests.find((request) => filters(request).length === 2 &&
+			(filters(request)[0]?.kinds as number[] | undefined)?.[0] === WORLD_STATE_KIND &&
+			((filters(request)[0]?.['#d'] as string[] | undefined) ?? []).some((identifier) => identifier.includes(':profile-state:')))!;
+		expect(f.authorities[0].messages).toContainEqual(['CLOSE', rankingRequest[1]]);
+	});
+
 	const invalidProfileTagCases: ReadonlyArray<readonly [string, (tags: string[][]) => string[][]]> = [
 		['missing r', (tags: string[][]) => tags.filter((tag) => tag[0] !== 'r')],
 		['malformed r', (tags: string[][]) => tags.map((tag) => tag[0] === 'r' ? ['r', '2x'] : tag)],

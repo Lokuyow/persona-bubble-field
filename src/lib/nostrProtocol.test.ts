@@ -13,6 +13,7 @@ import {
 	buildManualTraceEventTemplate,
 	buildCharacterProfileTemplate,
 	buildWorldStateFilter,
+	buildPublicRankingFilters,
 	buildPublicProfileStateFilter,
 	buildTraceDirectReplyFilter,
 	buildTraceNotificationFilter,
@@ -26,6 +27,7 @@ import {
 	finalizeWorldEvent,
 	finalizeCharacterProfileEvent,
 	parseWorldStateEvent,
+	parseWorldStateExitEnvelope,
 	parsePublicProfileState,
 	parsePublicProfileEnvelope,
 	isNewerPublicProfileEnvelope,
@@ -238,6 +240,16 @@ describe('Nostr protocol foundation', () => {
 		expect(buildPublicProfileStateFilter({ channelId: CHANNEL_ID, pubkey: 'c'.repeat(64), limit: 1 })).toEqual({
 			kinds: [WORLD_STATE_KIND], authors: ['c'.repeat(64)], '#d': [`${PROTOTYPE_NAMESPACE}:profile-state:${CHANNEL_ID}`], '#e': [CHANNEL_ID], limit: 1
 		});
+	});
+
+	it('uses one OR filter bundle for unbounded profile and terminal exit ranking reads', () => {
+		expect(buildPublicRankingFilters({ channelId: CHANNEL_ID })).toEqual([
+			{ kinds: [WORLD_STATE_KIND], '#d': [profileStateIdentifier(CHANNEL_ID)], '#e': [CHANNEL_ID] },
+			{ kinds: [WORLD_STATE_KIND], '#d': [worldStateIdentifier(CHANNEL_ID, 'exit')], '#e': [CHANNEL_ID] }
+		]);
+		const exit = finalizeWorldEvent(buildWorldStateEventTemplate({ channel, position: { x: 8, y: 0 }, slot: 'exit', runNumber: 2, exitReason: 'clear', createdAt: 10 }), TEST_SECRET_KEY);
+		expect(parseWorldStateExitEnvelope(exit, CHANNEL_ID)).toMatchObject({ id: exit.id, pubkey: exit.pubkey, createdAt: 10 });
+		expect(parseWorldStateExitEnvelope(signedPosition(0), CHANNEL_ID)).toBeNull();
 	});
 
 	it('builds and signs the initial character kind 0 profile', () => {

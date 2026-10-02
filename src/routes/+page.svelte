@@ -68,12 +68,13 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	import TagGameCountdown from '$lib/TagGameCountdown.svelte';
 	import MendingDialog from '$lib/MendingDialog.svelte';
 	import AdjustmentDialog from '$lib/AdjustmentDialog.svelte';
+	import PublicRankingDialog from '$lib/PublicRankingDialog.svelte';
 	import SelfProfileDialog from '$lib/SelfProfileDialog.svelte';
 	import CooperationDefectionPanel from '$lib/CooperationDefectionPanel.svelte';
 	import CooperationDefectionRulesDialog from '$lib/CooperationDefectionRulesDialog.svelte';
 	import TagGamePanel from '$lib/TagGamePanel.svelte';
 	import TagGameResultDialog from '$lib/TagGameResultDialog.svelte';
-	import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL, TAG_GAME_TERMINAL, isBlockedFacilityCell, isWithinFacilityInteractionRange, sameFieldCell } from '$lib/fieldFacilities';
+	import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL, RANKING_TERMINAL, TAG_GAME_TERMINAL, isBlockedFacilityCell, isWithinFacilityInteractionRange, sameFieldCell } from '$lib/fieldFacilities';
 	import { projectMending } from '$lib/mending';
 	import { comparePresenceEvidence, presenceEvidenceFromWorldState } from '$lib/presenceEvidence';
 	import { createProfileRunEvidenceStore, profileRunNumberForActiveParticipant } from '$lib/profileRunEvidence';
@@ -359,6 +360,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	let mendingStartupFeedback = $state<Readonly<{ id: number; phase: 'starting' | 'started' }> | null>(null);
 	let mendingStartupFeedbackTimer: number | null = null;
 	let adjustmentDialogOpen = $state(false);
+	let rankingDialogOpen = $state(false);
 	let selfProfileDialogOpen = $state(false);
 	let lastSelfProfileTrigger: HTMLButtonElement | null = null;
 	let abilityMutationInFlight = $state(false);
@@ -830,6 +832,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		return targets;
 	});
 	let canUseAdjustmentTerminal = $derived(!devWorldSandboxEnabled && !personaLifecycleTransition && !tagGameLocalLock && Boolean(worldSession && personaSnapshot && selfIsActive && selfLogicalPosition && isWithinFacilityInteractionRange(selfLogicalPosition, ADJUSTMENT_TERMINAL)));
+	let canUseRankingTerminal = $derived(!devWorldSandboxEnabled && !personaLifecycleTransition && Boolean(worldSession && personaSnapshot && selfIsActive && selfLogicalPosition && isWithinFacilityInteractionRange(selfLogicalPosition, RANKING_TERMINAL)));
 	let canUseTagGameTerminal = $derived(!devWorldSandboxEnabled && !personaLifecycleTransition && Boolean(worldSession && selfIsActive && selfLogicalPosition && isWithinFacilityInteractionRange(selfLogicalPosition, TAG_GAME_TERMINAL)));
 	// Keep terminal states in tagGameEvents for recovery and delayed-action rejection,
 	// but a pre-start host cancellation is not a playable game or a result card.
@@ -924,7 +927,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		!participantViews.some((participant) => sameCell(participant.position, position)) &&
 		traceMarkerCells.some((cell) => sameCell(cell.position, position))
 	));
-	let facilityCellTriggers = $derived([MENDING_TERMINAL.position, ADJUSTMENT_TERMINAL.position, TAG_GAME_TERMINAL.position]);
+	let facilityCellTriggers = $derived([MENDING_TERMINAL.position, ADJUSTMENT_TERMINAL.position, TAG_GAME_TERMINAL.position, RANKING_TERMINAL.position]);
 	let realtimeGroups = $derived(!cooperationDefectionEventEnabled || cooperationDefectionSchedule.phase === 'dormant' || cooperationDefectionSchedule.phase === 'ended' ? [] : (cooperationDefectionSession?.groups ?? createCooperationDefectionSession({ instanceId: cooperationDefectionSchedule.instanceId, field }).groups));
 	let realtimeGroupTriggers = $derived(cooperationDefectionSchedule.phase === 'registration' ? realtimeGroups : []);
 	let cooperationDefectionActorPubkey = $derived(devCooperationDefectionPlaygroundEnabled ? DEV_COOPERATION_DEFECTION_PLAYGROUND_SELF_PUBKEY : selfSigner?.pubkey ?? null);
@@ -1996,6 +1999,13 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 
 	function closeAdjustmentTerminal(): void {
 		adjustmentDialogOpen = false;
+	}
+
+	function openRankingTerminal(): void {
+		if (!canUseRankingTerminal) return;
+		movementInputController.cancelMovementHold();
+		fieldViewportComponent?.cancelPointerGesture();
+		rankingDialogOpen = true;
 	}
 
 	async function chooseIdentity(candidate: SelectionCandidate, rootBuild: RootBuild): Promise<void> {
@@ -4158,6 +4168,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			mendingTerminal: canUseMendingTerminal && sameFieldCell(position, MENDING_TERMINAL.position),
 			adjustmentTerminal: canUseAdjustmentTerminal && sameFieldCell(position, ADJUSTMENT_TERMINAL.position),
 			tagGameTerminal: canUseTagGameTerminal && sameFieldCell(position, TAG_GAME_TERMINAL.position),
+			rankingTerminal: canUseRankingTerminal && sameFieldCell(position, RANKING_TERMINAL.position),
 			cooperationDefectionGroupId: cooperationDefectionGroup?.id,
 			trace
 		});
@@ -4223,6 +4234,10 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			tagGamePanelOpen = true;
 			return;
 		}
+		if (action.kind === 'ranking-terminal') {
+			openRankingTerminal();
+			return;
+		}
 		if (action.kind === 'cooperation-defection-group') {
 			const group = realtimeGroups.find((candidate) => candidate.id === action.groupId);
 			if (group) void joinCooperationDefectionGroup(group.id, group.position);
@@ -4258,6 +4273,10 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			}
 			if (sameFieldCell(position, TAG_GAME_TERMINAL.position) && selfIsActive) {
 				showTraceProximityFeedback(position, '近づくと端末を使える');
+				return;
+			}
+			if (sameFieldCell(position, RANKING_TERMINAL.position) && selfIsActive) {
+				showTraceProximityFeedback(position, '近づくとランキングを見られる');
 				return;
 			}
 			const visibleOutOfRangeTrace = selfIsActive && traceMarkerCells.some((cell) => sameCell(cell.position, position) && !cell.inInvestigationRange);
@@ -4303,6 +4322,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		if (action.kind === 'mending-terminal') return '作業端末を使う';
 		if (action.kind === 'adjustment-terminal') return '能力強化端末を使う';
 		if (action.kind === 'tag-game-terminal') return '鬼ごっこ端末を使う';
+		if (action.kind === 'ranking-terminal') return 'ランキングを見る';
 		if (action.kind === 'cooperation-defection-group') return '参加地点から参加';
 		if (action.kind === 'trace') return '痕跡を調べる';
 		const participant = participantViews.find((candidate) => candidate.id === action.participantId);
@@ -5271,6 +5291,12 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		onOpenChange={(open) => { adjustmentDialogOpen = open; }}
 		onUpgrade={(key) => { void mutateAbility(key); }}
 		upgradeFeedback={upgradeFeedback}
+	/>
+	<PublicRankingDialog
+		open={rankingDialogOpen}
+		session={worldSession}
+		selfPubkey={personaSnapshot?.signer.pubkey ?? null}
+		onOpenChange={(open) => { rankingDialogOpen = open; }}
 	/>
 	<SelfProfileDialog
 		open={selfProfileDialogOpen}

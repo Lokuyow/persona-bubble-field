@@ -172,6 +172,13 @@ export type PublicProfileEnvelope = Readonly<{
 	createdAt: number;
 }>;
 
+export type WorldStateExitEnvelope = Readonly<{
+	event: Event;
+	id: string;
+	pubkey: string;
+	createdAt: number;
+}>;
+
 export type ParsedTraceEvent = {
 	id: string;
 	pubkey: string;
@@ -720,6 +727,16 @@ export function parseWorldStateEvent(event: Event, channelId: string): ParsedWor
 	};
 }
 
+/** Validates only the signed address envelope so canonical exit selection precedes Run matching. */
+export function parseWorldStateExitEnvelope(event: Event, channelId: string): WorldStateExitEnvelope | null {
+	assertChannelId(channelId);
+	if (!isVerifiedEvent(event) || event.kind !== WORLD_STATE_KIND || !hasAssignedCharacter(event) ||
+		!Number.isSafeInteger(event.created_at) || event.created_at < 0) return null;
+	if (!event.tags.some((tag) => tag[0] === 'd' && tag[1] === worldStateIdentifier(channelId, 'exit')) ||
+		!event.tags.some((tag) => tag[0] === 'e' && tag[1] === channelId)) return null;
+	return { event, id: event.id, pubkey: event.pubkey, createdAt: event.created_at };
+}
+
 /** Strict parser for the profile-state address under the shared experimental kind. */
 export function parsePublicProfileState(event: Event, channelId: string, expectedPubkey?: string): PublicProfileState | null {
 	const envelope = parsePublicProfileEnvelope(event, channelId, expectedPubkey);
@@ -849,6 +866,15 @@ export function buildWorldStateFilter(options: LiveFilterOptions): Filter {
 		'#e': [options.channelId],
 		since: options.since
 	};
+}
+
+/** One OR-filter batch for the read-only public ranking view; deliberately unbounded by author or limit. */
+export function buildPublicRankingFilters(options: Pick<LiveFilterOptions, 'channelId'>): [Filter, Filter] {
+	assertChannelId(options.channelId);
+	return [
+		{ kinds: [PROFILE_STATE_KIND], '#d': [profileStateIdentifier(options.channelId)], '#e': [options.channelId] },
+		{ kinds: [WORLD_STATE_KIND], '#d': [worldStateIdentifier(options.channelId, 'exit')], '#e': [options.channelId] }
+	];
 }
 
 export function buildPublicProfileStateFilter(options: Partial<Pick<LiveFilterOptions, 'since'>> & Pick<LiveFilterOptions, 'channelId'> & Readonly<{ pubkey: string; limit?: number }>): Filter {

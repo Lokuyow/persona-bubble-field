@@ -1726,6 +1726,16 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			catch { onStatus?.('error'); return { close: () => {} }; }
 		},
 
+		openPublicRankingRead(onEvent: (event: NostrEvent, channelId: string) => void,
+			onComplete: () => void = () => {}): Readonly<{ close: () => void }> {
+			if (disposed || !transport || !started || !channel) {
+				onComplete();
+				return { close: () => {} };
+			}
+			try { return transport.subscribePublicRankingRead((event) => onEvent(event, channel!.channelId), onComplete); }
+			catch { onComplete(); return { close: () => {} }; }
+		},
+
 		async start(): Promise<WorldReadBootstrap> {
 			if (started) throw new Error('World read session start is only allowed once.');
 			started = true;

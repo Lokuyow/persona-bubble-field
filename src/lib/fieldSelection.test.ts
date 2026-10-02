@@ -24,10 +24,12 @@ describe('field logical-cell selection', () => {
 	it('builds deterministic cell actions and collapses every trace root into one action', () => {
 		expect(buildFieldCellActions({
 			participantIds: ['z', 'a', 'a'],
+			rankingTerminal: true,
 			trace: { kind: 'trace', rootId: 'root', behavior: 'open-root' },
 		})).toEqual([
 			{ kind: 'participant', participantId: 'a' },
 			{ kind: 'participant', participantId: 'z' },
+			{ kind: 'ranking-terminal' },
 			{ kind: 'trace', rootId: 'root', behavior: 'open-root' }
 		]);
 	});

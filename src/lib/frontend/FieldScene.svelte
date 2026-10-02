@@ -4,6 +4,7 @@
 	import CharacterAvatar from '$lib/CharacterAvatar.svelte';
 	import FieldParticipant from '$lib/FieldParticipant.svelte';
 	import History from '~icons/tabler/history';
+	import Trophy from '~icons/tabler/trophy';
 	import type { BubbleTone } from '$lib/bubblePresentation';
 	import type { FieldCellAction } from '$lib/fieldSelection';
 	import type { Bounds, Direction, FieldSize, GridPosition, Size, WorldPoint } from '$lib/geometry';
@@ -11,7 +12,7 @@
 	import type { Participant } from '$lib/frontend/presencePresentation';
 	import { isWithinTraceInvestigationRange, type TraceRootCell } from '$lib/traceInvestigation';
 	import type { ParsedWorldMessage } from '$lib/nostrProtocol';
-	import { ADJUSTMENT_TERMINAL, FIXED_FIELD_FACILITIES, TAG_GAME_TERMINAL } from '$lib/fieldFacilities';
+	import { ADJUSTMENT_TERMINAL, FIXED_FIELD_FACILITIES, RANKING_TERMINAL, TAG_GAME_TERMINAL } from '$lib/fieldFacilities';
 	import type { CooperationDefectionGroup } from '$lib/cooperationDefection';
 
 	const FIELD_BACKGROUND_ASSET = '/field/prototype-danchi-courtyard.webp';
@@ -178,7 +179,7 @@
 		<div class="field-facility-layer" aria-hidden="true">
 			{#each FIXED_FIELD_FACILITIES as facility (facility.kind)}
 				<span class={['field-facility', `field-${facility.kind}`]} data-field-facility={facility.kind}
-					style={`left: ${(facility.position.x + 0.5) * cellSize}px; top: ${(facility.position.y + 0.5) * cellSize}px;`}>{#if facility.kind === 'mending-terminal'}<img src={asset(MENDING_TERMINAL_ASSET)} alt="" />{:else if facility.kind === 'adjustment-terminal'}<img src={asset(ADJUSTMENT_TERMINAL_ASSET)} alt="" />{:else}<img src={asset(TAG_GAME_TERMINAL_ASSET)} alt="" />{/if}</span>
+					style={`left: ${(facility.position.x + 0.5) * cellSize}px; top: ${(facility.position.y + 0.5) * cellSize}px;`}>{#if facility.kind === 'mending-terminal'}<img src={asset(MENDING_TERMINAL_ASSET)} alt="" />{:else if facility.kind === 'adjustment-terminal'}<img src={asset(ADJUSTMENT_TERMINAL_ASSET)} alt="" />{:else if facility.kind === 'tag-game-terminal'}<img src={asset(TAG_GAME_TERMINAL_ASSET)} alt="" />{:else}<Trophy class="ranking-terminal-mark" aria-hidden="true" />{/if}</span>
 			{/each}
 		</div>
 		<div class="realtime-group-layer" aria-label="協力と抜け駆けの参加地点">
@@ -218,7 +219,7 @@
 					type="button"
 					ondragstart={(event) => event.preventDefault()}
 					data-cell-position={`${position.x},${position.y}`}
-					aria-label={position.x === TAG_GAME_TERMINAL.position.x && position.y === TAG_GAME_TERMINAL.position.y ? '鬼ごっこ端末' : position.x === ADJUSTMENT_TERMINAL.position.x && position.y === ADJUSTMENT_TERMINAL.position.y ? '能力強化端末' : '作業端末'}
+					aria-label={position.x === TAG_GAME_TERMINAL.position.x && position.y === TAG_GAME_TERMINAL.position.y ? '鬼ごっこ端末' : position.x === ADJUSTMENT_TERMINAL.position.x && position.y === ADJUSTMENT_TERMINAL.position.y ? '能力強化端末' : position.x === RANKING_TERMINAL.position.x && position.y === RANKING_TERMINAL.position.y ? 'ランキング端末' : '作業端末'}
 					style={`left: ${position.x * cellSize}px; top: ${position.y * cellSize}px;`}
 					onclick={(event) => { event.stopPropagation(); resolveFieldCellSelection(position, event.currentTarget as HTMLButtonElement); }}
 				></button>
@@ -376,6 +377,7 @@
 	}
 	.field-tag-game-terminal { width: calc(var(--cell-size) * 0.86); height: calc(var(--cell-size) * 0.86); }
 	.field-facility img { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+	.ranking-terminal-mark { width: 56%; height: 56%; padding: 18%; border: 2px solid rgba(174, 182, 255, .78); border-radius: 10px; background: rgba(19, 26, 61, .82); color: #e4e7ff; stroke-width: 2; }
 	.realtime-group-layer { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
 	.realtime-group {
 		position: absolute; display: grid; width: calc(var(--cell-size) * 0.84); height: calc(var(--cell-size) * 0.84);
