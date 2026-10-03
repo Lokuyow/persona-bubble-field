@@ -80,7 +80,7 @@ trace conversationのreply modeでは、遺言をrootとするconversationを含
 
 親clientはreply target、NIP-22 `E/K/P`・`e/k/p`、speech type、最終event、sign、publishを所有する。kind 1111 replyは `w` を持たない。Composer Outputの `tags` と `context` は最終event構築のauthorityにしない。eHagaki自身にRelay read、trace cache、NIP-22 tree取得、validation、notification、position、publish責務を追加しない。
 
-Host-owned Composer Liteの表示高さはeHagakiの`preferredHeight`に追従する。一方、親クライアントがFieldに予約するComposer領域は空・1行状態を基準に固定し、本文のauto-growによる増加分はField上へoverlayする。したがって、Composer本文の増減だけではField viewport、Field scene、map/background、participant、speech/bubble、Trace表示のgeometryを変更しない。VirtualKeyboard / VisualViewport表示時も、ActionDockだけをキーボード直上へ移動し、Field geometryはresizeしない。
+Host-owned Composer Liteの表示高さはeHagakiの`preferredHeight`に追従する。一方、親クライアントがFieldに予約するComposer領域は空・1行状態を基準に固定し、本文のauto-growによる増加分はField上へoverlayする。したがって、Composer本文の増減だけではField viewport、Field scene、map/background、participantのgeometryを変更しない。liveフキダシとTraceは実測したActionDockを避けるために必要な再配置を行う。VirtualKeyboard / VisualViewport表示時も、ActionDockだけをキーボード直上へ移動し、Field geometryはresizeしない。
 
 Host-owned Composer Liteの公開component APIには、親クライアントがComposer
 editorへフォーカスを移すための `focusEditor()` と、editorからフォーカスを外す
@@ -138,7 +138,7 @@ MVPでは画像・動画を投稿しない。
 - media handoff
 - フキダシ内での表示方法
 - 表示時間
-- 発言領域への影響
+- liveフキダシのscreen-space配置への影響
 - mediaを含む発言を痕跡化するか
 - 痕跡化したmediaの寿命・可用性・表示方法
 

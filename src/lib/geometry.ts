@@ -123,8 +123,8 @@ export function getFieldWorldSize(field: FieldSize): Size {
 	};
 }
 
-export function getFieldAreaBounds(viewport: Size, speechArea: Pick<Bounds, 'y' | 'height'>): Bounds {
-	const y = speechArea.y + speechArea.height;
+export function getFieldAreaBounds(viewport: Size): Bounds {
+	const y = 0;
 	const sideMargin = viewport.width <= MOBILE_FIELD_BREAKPOINT
 		? MOBILE_FIELD_SIDE_MARGIN
 		: DESKTOP_FIELD_SIDE_MARGIN;
@@ -204,50 +204,27 @@ export function moveOneCell(
 	return next;
 }
 
-export function logicalFieldYToSpeechY(
-	logicalY: number,
-	rowCount: number,
-	bubble: Size,
-	speechArea: Bounds
-): number {
-	const minY = speechArea.y;
-	const maxY = Math.max(minY, speechArea.y + speechArea.height - bubble.height);
-	const normalizedY = rowCount <= 1 ? 0.5 : Math.min(Math.max(logicalY / (rowCount - 1), 0), 1);
-
-	return minY + (maxY - minY) * normalizedY;
+/** Normal character presentation, excluding effects and animation overflow. */
+export function characterFootprint(screen: WorldPoint, cellSize: number): Bounds {
+	return { x: screen.x - cellSize / 2, y: screen.y - cellSize / 2, width: cellSize, height: cellSize };
 }
 
-export function normalBubblePreferredAnchor(
-	speakerX: number,
-	logicalY: number,
-	rowCount: number,
-	bubble: Size,
-	speechArea: Bounds
-): WorldPoint {
+export function normalBubblePreferredAnchor(speaker: Bounds, bubble: Size): WorldPoint {
 	return {
-		x: speakerX - bubble.width / 2,
-		y: logicalFieldYToSpeechY(logicalY, rowCount, bubble, speechArea)
+		x: speaker.x + speaker.width / 2 - bubble.width / 2,
+		y: speaker.y - 40 - bubble.height
 	};
 }
 
-export function mergedBubblePreferredAnchor(
-	members: readonly WorldPoint[],
-	rowCount: number,
-	bubble: Size,
-	speechArea: Bounds
-): WorldPoint {
-	if (members.length === 0) {
-		return { x: 0, y: 0 };
-	}
-
-	const centerX = members.reduce((sum, member) => sum + member.x, 0) / members.length;
-	const averageY = members.reduce((sum, member) => sum + member.y, 0) / members.length;
-
-	return {
-		x: centerX - bubble.width / 2,
-		y: logicalFieldYToSpeechY(averageY, rowCount, bubble, speechArea)
-	};
+export function mergedBubblePreferredAnchor(members: readonly Bounds[], bubble: Size): WorldPoint {
+	const centerX = members.reduce((sum, member) => sum + member.x + member.width / 2, 0) / members.length;
+	return normalBubblePreferredAnchor({ x: centerX, y: Math.min(...members.map((member) => member.y)), width: 0, height: 0 }, bubble);
 }
+
+export type LivePlacementConstraints = Readonly<{
+	uiObstacles: readonly Bounds[];
+	characterObstacles: readonly Bounds[];
+}>;
 
 export function clampToBounds(anchor: WorldPoint, bubble: Size, bounds: Bounds, margin = 0): WorldPoint {
 	const minX = bounds.x + margin;
@@ -310,6 +287,70 @@ function gapOverlapArea(first: Bounds, second: Bounds, gap: number): number {
 	return Math.max(0, overlapWidth) * Math.max(0, overlapHeight);
 }
 
+function hardOverlap(item: BubblePlacementInput, anchor: WorldPoint, constraints: LivePlacementConstraints): readonly [number, number] {
+	const rect = bubbleRect(anchor, item);
+	const overlap = (obstacles: readonly Bounds[]) => obstacles.reduce(
+		(total, obstacle) => total + gapOverlapArea(rect, obstacle, 0), 0
+	);
+	return [overlap(constraints.uiObstacles), overlap(constraints.characterObstacles)];
+}
+
+function compareHard(first: readonly number[], second: readonly number[]): number {
+	return first[0] - second[0] || first[1] - second[1];
+}
+
+/**
+ * The nearest point of a rectangular free anchor space lies at the preferred
+ * coordinate or a forbidden-rectangle edge. Enumerate edges, never pixels, so
+ * a narrow legal opening cannot be lost to the soft candidate budget.
+ */
+export function correctBubbleAnchor(item: BubblePlacementInput, bounds: Bounds, visualRegion: Bounds, constraints: LivePlacementConstraints): WorldPoint {
+	const preferred = clampPlacementAnchor(item.preferred, item, bounds, visualRegion);
+	let best = preferred;
+	let bestHard = hardOverlap(item, best, constraints);
+	if (bestHard.every((value) => value === 0)) return best;
+	let bestDistance = Math.hypot(best.x - item.preferred.x, best.y - item.preferred.y);
+	const footprint = item.visualBounds ?? { x: 0, y: 0, ...item.size };
+	const min = clampPlacementAnchor({ x: -Infinity, y: -Infinity }, item, bounds, visualRegion);
+	const max = clampPlacementAnchor({ x: Infinity, y: Infinity }, item, bounds, visualRegion);
+	const xs = new Set([preferred.x, min.x, max.x]);
+	const ys = new Set([preferred.y, min.y, max.y]);
+	for (const obstacle of [...constraints.uiObstacles, ...constraints.characterObstacles]) {
+		const left = obstacle.x - footprint.x - footprint.width;
+		const right = obstacle.x + obstacle.width - footprint.x;
+		const top = obstacle.y - footprint.y - footprint.height;
+		const bottom = obstacle.y + obstacle.height - footprint.y;
+		if (right < min.x || left > max.x || bottom < min.y || top > max.y) continue;
+		xs.add(Math.max(min.x, Math.min(max.x, left)));
+		xs.add(Math.max(min.x, Math.min(max.x, right)));
+		ys.add(Math.max(min.y, Math.min(max.y, top)));
+		ys.add(Math.max(min.y, Math.min(max.y, bottom)));
+	}
+	for (const x of [...xs].sort((a, b) => a - b)) {
+		for (const y of [...ys].sort((a, b) => a - b)) {
+			const anchor = { x, y };
+			const hard = hardOverlap(item, anchor, constraints);
+			const order = compareHard(hard, bestHard);
+			const distance = Math.hypot(x - item.preferred.x, y - item.preferred.y);
+			if (order < 0 || (order === 0 && distance < bestDistance)) {
+				best = anchor; bestHard = hard; bestDistance = distance;
+			}
+		}
+	}
+	return best;
+}
+
+function liveScore(item: PlacedBubble, others: readonly PlacedBubble[], cellSize: number, gap: number): number {
+	const overlap = others.reduce((total, previous) => previous.id === item.id ? total :
+		total + gapOverlapArea(bubbleRect(item.anchor, item), bubbleRect(previous.anchor, previous), gap), 0);
+	return Math.hypot(item.anchor.x - item.preferred.x, item.anchor.y - item.preferred.y) / cellSize +
+		Math.min(2, overlap / Math.max(1, item.size.width * item.size.height));
+}
+
+function groupLiveScore(group: readonly PlacedBubble[], fixed: readonly PlacedBubble[], cellSize: number, gap: number): number {
+	return group.reduce((total, item) => total + liveScore(item, [...group, ...fixed], cellSize, gap), 0);
+}
+
 function candidateOffsets(item: BubblePlacementInput, cellSize: number, gap: number): readonly WorldPoint[] {
 	const visualSize = item.visualBounds ?? { x: 0, y: 0, ...item.size };
 	const verticalStep = visualSize.height + gap;
@@ -353,11 +394,14 @@ function getCandidates(
 	visualRegion: Bounds,
 	cellSize: number,
 	gap: number,
-	references: readonly PlacedBubble[] = []
+	references: readonly PlacedBubble[] = [],
+	constraints?: LivePlacementConstraints
 ): WorldPoint[] {
 	const preferred = clampPlacementAnchor(item.preferred, item, bounds, visualRegion);
 	const seen = new Set<string>();
 	const candidates: WorldPoint[] = [];
+	const safe = constraints ? correctBubbleAnchor(item, bounds, visualRegion, constraints) : null;
+	if (safe) addCandidate(candidates, seen, safe);
 
 	for (const offset of candidateOffsets(item, cellSize, gap)) {
 		addCandidate(candidates, seen, clampPlacementAnchor(
@@ -390,15 +434,28 @@ function getCandidates(
 		}
 	}
 
-	return candidates;
+	if (!constraints || !safe) return candidates;
+	const bestHard = hardOverlap(item, safe, constraints);
+	return candidates.filter((candidate) => compareHard(hardOverlap(item, candidate, constraints), bestHard) === 0);
 }
 
 function chooseCandidate(
 	item: BubblePlacementInput,
 	candidates: readonly WorldPoint[],
 	placed: readonly PlacedBubble[],
-	gap: number
+	gap: number,
+	cellSize: number,
+	constraints?: LivePlacementConstraints
 ): { anchor: WorldPoint; overlap: number } {
+	if (constraints) {
+		let anchor = candidates[0];
+		let score = Infinity;
+		for (const candidate of candidates) {
+			const next = liveScore({ ...item, anchor: candidate }, placed, cellSize, gap);
+			if (next < score) { anchor = candidate; score = next; }
+		}
+		return { anchor, overlap: placed.reduce((total, previous) => total + gapOverlapArea(bubbleRect(anchor, item), bubbleRect(previous.anchor, previous), gap), 0) };
+	}
 	let bestCandidate = candidates[0] ?? item.preferred;
 	let bestOverlap = Number.POSITIVE_INFINITY;
 	let bestDistance = Number.POSITIVE_INFINITY;
@@ -477,22 +534,24 @@ function findLocalRepair(
 	bounds: Bounds,
 	visualRegion: Bounds,
 	cellSize: number,
-	gap: number
-): { group: PlacedBubble[]; overlap: number } | null {
+	gap: number,
+	constraints?: LivePlacementConstraints
+): { group: PlacedBubble[]; overlap: number; score: number } | null {
 	const groupItems = [...related, current];
-	let best: { group: PlacedBubble[]; overlap: number; distance: number } | null = null;
+	let best: { group: PlacedBubble[]; overlap: number; distance: number; score: number } | null = null;
 
 	const search = (index: number, assigned: PlacedBubble[]) => {
 		if (index === groupItems.length) {
 			const overlap = totalOverlap(assigned, fixed, gap);
 			const distance = totalDistance(assigned);
+			const score = constraints ? groupLiveScore(assigned, fixed, cellSize, gap) : overlap;
 
 			if (
 				!best ||
-				overlap < best.overlap ||
-				(overlap === best.overlap && distance < best.distance)
+				score < best.score ||
+				(score === best.score && distance < best.distance)
 			) {
-				best = { group: assigned.map((item) => ({ ...item, anchor: { ...item.anchor } })), overlap, distance };
+				best = { group: assigned.map((item) => ({ ...item, anchor: { ...item.anchor } })), overlap, distance, score };
 			}
 			return;
 		}
@@ -500,7 +559,7 @@ function findLocalRepair(
 		const item = groupItems[index];
 		const unassigned = groupItems.slice(index + 1).map((candidate) => ({ ...candidate, anchor: clampPlacementAnchor(candidate.preferred, candidate, bounds, visualRegion) }));
 		const localReferences = [...assigned, ...unassigned];
-		const candidates = getCandidates(item, bounds, visualRegion, cellSize, gap, localReferences);
+		const candidates = getCandidates(item, bounds, visualRegion, cellSize, gap, localReferences, constraints);
 
 		for (const anchor of candidates) {
 			search(index + 1, [...assigned, { ...item, anchor }]);
@@ -509,16 +568,16 @@ function findLocalRepair(
 
 	search(0, []);
 	if (!best) return null;
-	const repaired = best as { group: PlacedBubble[]; overlap: number; distance: number };
+	const repaired = best as { group: PlacedBubble[]; overlap: number; distance: number; score: number };
 
-	return { group: repaired.group, overlap: repaired.overlap };
+	return { group: repaired.group, overlap: repaired.overlap, score: repaired.score };
 }
 
 /**
  * Places bubbles in a stable order using a bounded set of candidates around
- * their already-clamped preferred anchors. It intentionally makes no attempt
- * at global packing: a candidate that cannot avoid earlier bubbles is chosen
- * by minimum gap-aware overlap area.
+ * their preferred anchors. Live constraints first select the best hard tier,
+ * then trade bounded overlap improvement against speaker distance. Trace keeps
+ * its existing minimum-overlap policy. Neither policy performs global packing.
  */
 export function placeBubbles(
 	items: readonly BubblePlacementInput[],
@@ -526,7 +585,8 @@ export function placeBubbles(
 	cellSize: number,
 	gap = BUBBLE_PLACEMENT_GAP,
 	visualRegion: Bounds = bounds,
-	fixedPlacements: readonly FixedBubblePlacement[] = []
+	fixedPlacements: readonly FixedBubblePlacement[] = [],
+	constraints?: LivePlacementConstraints
 ): BubblePlacement[] {
 	const orderedItems = [...items].sort((first, second) =>
 		first.preferred.y - second.preferred.y ||
@@ -538,8 +598,8 @@ export function placeBubbles(
 	const anchorsById = new Map<string, WorldPoint>();
 
 	for (const item of orderedItems) {
-		const candidates = getCandidates(item, bounds, visualRegion, cellSize, gap, placed);
-		const choice = chooseCandidate(item, candidates, placed, gap);
+		const candidates = getCandidates(item, bounds, visualRegion, cellSize, gap, placed, constraints);
+		const choice = chooseCandidate(item, candidates, placed, gap, cellSize, constraints);
 		let anchor = choice.anchor;
 
 		if (choice.overlap > 0 && placed.length > 0) {
@@ -550,10 +610,10 @@ export function placeBubbles(
 				))
 				.slice(-2);
 			const fixed = placed.filter((previous) => !related.includes(previous));
-			const repair = findLocalRepair(item, related, fixed, bounds, visualRegion, cellSize, gap);
+			const repair = findLocalRepair(item, related, fixed, bounds, visualRegion, cellSize, gap, constraints);
 			const greedyGroup = [...related, { ...item, anchor }];
 
-			if (repair && repair.overlap < totalOverlap(greedyGroup, fixed, gap)) {
+			if (repair && repair.score < (constraints ? groupLiveScore(greedyGroup, fixed, cellSize, gap) : totalOverlap(greedyGroup, fixed, gap))) {
 				for (const repaired of repair.group) {
 					const existing = placed.find((previous) => previous.id === repaired.id);
 					if (existing) existing.anchor = repaired.anchor;

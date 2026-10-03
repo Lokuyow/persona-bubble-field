@@ -14,10 +14,11 @@
 	} from '$lib/conversation';
 	import { replayBootstrapConversation } from '$lib/bootstrapConversation';
 	import {
-		clampToBounds,
 		fieldLocalToViewport,
 		getActualFieldTop,
 		getFieldAreaBounds,
+		characterFootprint,
+		correctBubbleAnchor,
 		getFieldWorldSize,
 		moveOneCell,
 		getResponsiveCellSize,
@@ -220,11 +221,8 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	import {
 		bubbleToneStyle,
 		createPresentationBubbleShape,
-		mergedTailStart,
-		specialTailExtension,
-		tailGeometry,
+		liveTailConnections,
 		tailOutlineOpeningPoints,
-		tailStart,
 		traceTone,
 		type BubbleTone
 	} from '$lib/bubblePresentation';
@@ -275,11 +273,6 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	const DEFAULT_VIEWPORT = { width: 1100, height: 680 };
 	const FIELD_ARTWORK_SCALE = 1.75;
 	const SITE_BACKGROUND_ASSET = '/backgrounds/site-background.webp';
-	const SPEECH_AREA = {
-		top: 84,
-		height: 176,
-		sidePadding: 16
-	} as const;
 	const DEFAULT_BUBBLE_SIZES = {
 		normal: { width: 184, height: 54 },
 		merged: { width: 218, height: 58 }
@@ -341,14 +334,40 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	let personaLifecycleTransition = $state(false);
 	let lifespanHudNowMs = $state<number | null>(null);
 	let lifespanHudUpdatedAtMs = 0;
-	let topStatusHudBottom = $state(0);
+	let topStatusHudBounds = $state.raw<Bounds | null>(null);
+	let gameHudBounds = $state.raw<Bounds | null>(null);
+	let actionDockBounds = $state.raw<Bounds | null>(null);
+	let topStatusHudBottom = $derived(topStatusHudBounds ? topStatusHudBounds.y + topStatusHudBounds.height : 0);
 	let statusHudVisible = $derived(lifespanHudNowMs !== null && personaSnapshot !== null && !personaLifecycleTransition);
-	const observeTopStatusHud: Attachment<HTMLElement> = (node) => untrack(() => {
-		const update = () => untrack(() => { topStatusHudBottom = node.getBoundingClientRect().bottom; });
-		const observer = new ResizeObserver(update);
-		observer.observe(node);
-		update();
-		return () => untrack(() => { observer.disconnect(); topStatusHudBottom = 0; });
+	const presentationRemeasures = new Set<() => void>();
+	function sameBounds(first: Bounds | null, second: Bounds | null): boolean {
+		return first === second || Boolean(first && second && first.x === second.x && first.y === second.y && first.width === second.width && first.height === second.height);
+	}
+	function viewportRelativeBounds(rect: Bounds): Bounds {
+		const view = viewportElement!.getBoundingClientRect();
+		return { ...rect, x: rect.x - view.left, y: rect.y - view.top };
+	}
+	function observeHud(report: (bounds: Bounds | null) => void): Attachment<HTMLElement> {
+		return (node) => untrack(() => {
+			const update = () => untrack(() => {
+				if (!viewportElement) return;
+				const rect = node.getBoundingClientRect();
+				report(rect.width > 0 && rect.height > 0 ? viewportRelativeBounds({ x: rect.left, y: rect.top, width: rect.width, height: rect.height }) : null);
+			});
+			const observer = new ResizeObserver(update);
+			observer.observe(node); presentationRemeasures.add(update); update();
+			return () => untrack(() => { observer.disconnect(); presentationRemeasures.delete(update); report(null); });
+		});
+	}
+	const observeTopStatusHud = observeHud((bounds) => { if (!sameBounds(topStatusHudBounds, bounds)) topStatusHudBounds = bounds; });
+	const observeGameHud = observeHud((bounds) => { if (!sameBounds(gameHudBounds, bounds)) gameHudBounds = bounds; });
+	function reportActionDockBounds(rect: Bounds | null): void {
+		const bounds = rect && viewportElement ? viewportRelativeBounds(rect) : null;
+		if (!sameBounds(actionDockBounds, bounds)) actionDockBounds = bounds;
+	}
+	$effect(() => {
+		void viewportSize; void topStatusHudBottom; void composerPreferredHeight; void composerKeyboardInset;
+		void tick().then(() => { for (const measure of presentationRemeasures) measure(); });
 	});
 	let mendingNowMs = $state(0);
 	let mendingDialogOpen = $state(false);
@@ -630,13 +649,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		width: fieldWorldSize.width * FIELD_ARTWORK_SCALE,
 		height: fieldWorldSize.height * FIELD_ARTWORK_SCALE
 	});
-	let speechAreaBounds = $derived({
-		x: SPEECH_AREA.sidePadding,
-		y: SPEECH_AREA.top,
-		width: Math.max(0, viewportSize.width - SPEECH_AREA.sidePadding * 2),
-		height: SPEECH_AREA.height
-	});
-	let fieldAreaBounds = $derived(getFieldAreaBounds(viewportSize, speechAreaBounds));
+	let fieldAreaBounds = $derived(getFieldAreaBounds(viewportSize));
 	let selfProjectionId = $derived(devWorldSandboxEnabled ? DEV_WORLD_SELF_ID : selfSigner?.pubkey ?? 'you');
 	let presenceProjection = $derived(projectFrontendPresence({ presence: presenceState, selectedCharacterId, selfProjectionId,
 		geometry: { cellSize, fieldAreaBounds, cameraWorldBounds: fieldArtworkBounds }, colors: colorByPubkey }));
@@ -645,24 +658,16 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	)));
 	let camera = $derived(visualCamera ?? presenceProjection.camera);
 	let actualFieldTop = $derived(getActualFieldTop(fieldAreaBounds, camera));
-	let speechAreaVisualBounds = $derived({
-		x: 0,
-		y: 0,
-		width: viewportSize.width,
-		height: actualFieldTop
+	let livePlacementBounds = $derived({ x: 16, y: 8, width: Math.max(0, viewportSize.width - 32), height: Math.max(0, viewportSize.height - 16) });
+	let liveVisualRegion = $derived({ x: 0, y: 0, ...viewportSize });
+	let liveUiObstacles = $derived([topStatusHudBounds, gameHudBounds, actionDockBounds, cooperationDefectionPanelBounds].filter((bounds): bounds is Bounds => bounds !== null));
+	let traceSafeBounds = $derived.by(() => {
+		const top = Math.max(8, ...[topStatusHudBounds, gameHudBounds].filter((bounds): bounds is Bounds => bounds !== null).map((bounds) => bounds.y + bounds.height + 8));
+		const bottom = Math.min(viewportSize.height - 8, actionDockBounds ? actionDockBounds.y - 8 : viewportSize.height - 8);
+		return { x: 16, y: top, width: Math.max(0, viewportSize.width - 32), height: Math.max(0, bottom - top) };
 	});
-	let bubbleSafeBounds = $derived({
-		x: SPEECH_AREA.sidePadding,
-		y: Math.max(SPEECH_AREA.top, topStatusHudBottom + 8),
-		width: Math.max(0, viewportSize.width - SPEECH_AREA.sidePadding * 2),
-		height: Math.max(0, actualFieldTop - Math.max(SPEECH_AREA.top, topStatusHudBottom + 8))
-	});
-	let bubbleVisualRegion = $derived({
-		x: 0,
-		y: bubbleSafeBounds.y,
-		width: viewportSize.width,
-		height: Math.max(bubbleSafeBounds.height, ...Object.values(bubbleSizes).map((size) => size.height))
-	});
+	let traceVisualRegion = $derived({ x: 0, y: traceSafeBounds.y, width: viewportSize.width,
+		height: Math.max(traceSafeBounds.height, ...Object.values(bubbleSizes).map((size) => size.height)) });
 
 	let participantViews: FieldParticipantView[] = $derived(presenceProjection.participants
 		.filter((participant) => !(deathPresentation && participant.id === selfProjectionId))
@@ -674,6 +679,10 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 				screen: fieldLocalToViewport(worldToScreen(world, camera), fieldAreaBounds)
 			};
 		}));
+	let liveConstraints = $derived({ uiObstacles: liveUiObstacles, characterObstacles: participantViews
+		.map((participant) => characterFootprint(participant.screen, cellSize))
+		.filter((rect) => rect.x < fieldAreaBounds.x + fieldAreaBounds.width && rect.x + rect.width > fieldAreaBounds.x &&
+			rect.y < fieldAreaBounds.y + fieldAreaBounds.height && rect.y + rect.height > fieldAreaBounds.y) });
 	let interactionRewardCuePlacements = $derived.by(() => {
 		const self = participantViews.find((participant) => participant.id === selfProjectionId);
 		if (!initialFieldGeometryReady || !self) return [];
@@ -997,19 +1006,13 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			const speaker = participantById.get(bubble.pubkey);
 			if (!speaker || !isInsideFieldArea(speaker.screen)) return null;
 			const size = bubbleSizes[bubble.id] ?? DEFAULT_BUBBLE_SIZES.normal;
-			const shape = createPresentationBubbleShape(bubble.speechType, bubble.id, size, viewportSize.width, bubbleSafeBounds);
-			const preferred = normalBubblePreferredAnchor(
-				speaker.screen.x,
-				speaker.world.y / cellSize - 0.5,
-				field.rows,
-				size,
-				bubbleSafeBounds
-			);
+			const shape = createPresentationBubbleShape(bubble.speechType, bubble.id, size, viewportSize.width, livePlacementBounds);
+			const preferred = normalBubblePreferredAnchor(characterFootprint(speaker.screen, cellSize), size);
 			return {
 				...bubble,
 				text: bubble.content,
 				tone: participantTone(speaker),
-				anchor: clampToBounds(preferred, size, bubbleSafeBounds),
+				anchor: preferred,
 				size,
 				shape,
 				speaker
@@ -1026,7 +1029,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 				.filter((member) => isInsideFieldArea(member.screen))
 				.sort((left, right) => left.screen.x - right.screen.x || left.id.localeCompare(right.id));
 			const size = bubbleSizes[bubble.id] ?? DEFAULT_BUBBLE_SIZES.merged;
-			const shape = createPresentationBubbleShape(bubble.speechType, bubble.id, size, viewportSize.width, bubbleSafeBounds);
+			const shape = createPresentationBubbleShape(bubble.speechType, bubble.id, size, viewportSize.width, livePlacementBounds);
 			if (visibleMembers.length === 0) {
 				const lastAnchor = lastPlacedAnchorById[bubble.id];
 				if (!lastAnchor) return null;
@@ -1034,24 +1037,19 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 					...bubble,
 					text: bubble.content,
 					tone: mergedBubbleTone(members),
-					anchor: lastAnchor,
+					anchor: correctBubbleAnchor({ id: bubble.id, preferred: lastAnchor, size, visualBounds: bubble.speechType === 'shout' ? undefined : shape?.bounds }, livePlacementBounds, liveVisualRegion, liveConstraints),
 					size,
 					shape,
 					members: []
 				};
 			}
 
-			const preferred = mergedBubblePreferredAnchor(
-				visibleMembers.map((member) => ({ x: member.screen.x, y: member.world.y / cellSize - 0.5 })),
-				field.rows,
-				size,
-				bubbleSafeBounds
-			);
+			const preferred = mergedBubblePreferredAnchor(visibleMembers.map((member) => characterFootprint(member.screen, cellSize)), size);
 			return {
 				...bubble,
 				text: bubble.content,
 				tone: mergedBubbleTone(members),
-				anchor: clampToBounds(preferred, size, bubbleSafeBounds),
+				anchor: preferred,
 				size,
 				shape,
 				members: visibleMembers
@@ -1070,11 +1068,15 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			size: bubble.size,
 			visualBounds: bubble.speechType === 'shout' ? undefined : bubble.shape?.bounds
 		})),
-		bubbleSafeBounds,
+		livePlacementBounds,
 		cellSize,
 		undefined,
-		bubbleVisualRegion,
-		cooperationDefectionPanelObstacle
+		liveVisualRegion,
+		visibleMergedBubbles.filter((bubble) => bubble.members.length === 0).map((bubble) => ({
+			id: bubble.id, preferred: bubble.anchor, anchor: bubble.anchor, size: bubble.size,
+			visualBounds: bubble.speechType === 'shout' ? undefined : bubble.shape?.bounds
+		})),
+		liveConstraints
 	));
 	let placedAnchorById = $derived(new Map(bubblePlacement.map((placement) => [placement.id, placement.anchor])));
 	$effect(() => {
@@ -1082,7 +1084,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		const anchors = new Map<string, WorldPoint>();
 		for (const bubble of visibleMergedBubbles) {
 			const anchor = placedAnchorById.get(bubble.id);
-			if (bubble.members.length > 0 && anchor) anchors.set(bubble.id, anchor);
+			anchors.set(bubble.id, anchor ?? bubble.anchor);
 		}
 		untrack(() => {
 			const next = advanceMergedAnchorHistory(lastPlacedAnchorById, activeIds, anchors);
@@ -1099,49 +1101,22 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	})));
 	let positionedVisibleBubbles = $derived([...positionedNormalBubbles, ...positionedMergedBubbles]);
 	let liveBubblePresentations = $derived(positionedVisibleBubbles.map((bubble): LiveBubblePresentation => {
-		if (bubble.kind === 'normal') {
-			const tail = tailGeometry(tailStart(bubble.anchor, bubble.size), tailTarget(bubble.speaker), 11, 2, specialTailExtension(bubble.speechType));
-			return {
-				id: bubble.id,
-				kind: 'normal',
-				tone: bubble.tone as BubbleTone,
-				speechType: bubble.speechType,
-				text: bubble.text,
-				anchor: bubble.anchor,
-				size: bubble.size,
-				shape: bubble.shape,
-				participantId: bubble.speaker.id,
-				tailSeamOffset: tail.seamOffsetX,
-			outlineOpenings: bubble.speechType === 'normal' ? [] : [{ id: bubble.speaker.id, points: tailOutlineOpeningPoints(tail, bubble.anchor) }]
-			};
-		}
-		const connections = bubble.members.map((member, index) => {
-			const tail = tailGeometry(mergedTailStart(bubble.anchor, bubble.size, index, bubble.members.length), tailTarget(member), 9, 2, specialTailExtension(bubble.speechType));
-			return { participantId: member.id, seamOffset: tail.seamOffsetX, opening: tailOutlineOpeningPoints(tail, bubble.anchor) };
-		});
-		return {
-			id: bubble.id,
-			kind: 'merged',
-			tone: bubble.tone as BubbleTone,
-			speechType: bubble.speechType,
-			text: bubble.text,
-			anchor: bubble.anchor,
-			size: bubble.size,
-			shape: bubble.shape,
-			memberCount: bubble.memberPubkeys.length,
-			tailSeamOffset: 0,
-			mergedTailConnections: connections.map(({ participantId, seamOffset }) => ({ participantId, seamOffset })),
-			outlineOpenings: bubble.speechType === 'normal' ? [] : connections.map(({ participantId, opening }) => ({ id: participantId, points: opening }))
-		};
+		const members = bubble.kind === 'normal' ? [bubble.speaker] : bubble.members;
+		const connections = liveTailConnections(bubble.anchor, bubble.size,
+			members.map((member) => ({ id: member.id, bounds: characterFootprint(member.screen, cellSize) })), bubble.speechType, bubble.kind === 'merged');
+		return { id: bubble.id, kind: bubble.kind, tone: bubble.tone as BubbleTone, speechType: bubble.speechType,
+			text: bubble.text, anchor: bubble.anchor, size: bubble.size, shape: bubble.shape,
+			participantId: bubble.kind === 'normal' ? bubble.speaker.id : undefined,
+			memberCount: bubble.kind === 'merged' ? bubble.memberPubkeys.length : undefined,
+			tailConnections: connections,
+			outlineOpenings: bubble.speechType === 'normal' ? [] : connections.map((connection) => ({ id: connection.participantId, points: tailOutlineOpeningPoints(connection.tail, bubble.anchor) })) };
 	}));
-	let normalTailModels = $derived(positionedNormalBubbles.map((bubble) => ({
-		id: bubble.speaker.id, tone: bubble.tone as BubbleTone, speechType: bubble.speechType,
-		anchor: bubble.anchor, size: bubble.size, shape: bubble.shape, target: tailTarget(bubble.speaker)
+	let normalTailModels = $derived(liveBubblePresentations.filter((bubble) => bubble.kind === 'normal').map((bubble) => ({
+		id: bubble.participantId!, tone: bubble.tone, speechType: bubble.speechType, anchor: bubble.anchor, size: bubble.size, shape: bubble.shape, connection: bubble.tailConnections[0]
 	})));
-	let mergedTailModels = $derived(positionedMergedBubbles.map((bubble) => ({
-		id: bubble.id, tone: bubble.tone as BubbleTone, speechType: bubble.speechType,
-		anchor: bubble.anchor, size: bubble.size, shape: bubble.shape,
-		members: bubble.members.map((member) => ({ id: member.id, target: tailTarget(member) }))
+	let mergedTailModels = $derived(liveBubblePresentations.filter((bubble) => bubble.kind === 'merged').map((bubble) => ({
+		id: bubble.id, tone: bubble.tone, speechType: bubble.speechType, anchor: bubble.anchor, size: bubble.size, shape: bubble.shape,
+		members: bubble.tailConnections.map((connection) => ({ id: connection.participantId, connection }))
 	})));
 	let traceTreeLayout = $state.raw<ReturnType<typeof layoutTraceBubblePresentation>>(null);
 	$effect.pre(() => {
@@ -1153,8 +1128,8 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			fixedObstacles: cooperationDefectionPanelObstacle,
 			bubbleSizes,
 			traceReplyCardFootprints,
-			bubbleSafeBounds,
-			bubbleVisualRegion,
+			traceSafeBounds,
+			traceVisualRegion,
 			cellSize,
 			camera,
 			fieldAreaBounds,
@@ -4948,13 +4923,6 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		soundPreference = soundController?.preference ?? { ...soundPreference, volume };
 	}
 
-	function tailTarget(participant: (typeof participantViews)[number]): WorldPoint {
-		return {
-			x: participant.screen.x,
-			y: fieldAreaBounds.y + participant.world.y - cellSize / 2 - camera.y - 4
-		};
-	}
-
 	function remeasureMountedTraceReplyCards(): void {
 		for (const measure of mountedTraceReplyRemeasures.values()) measure();
 	}
@@ -5042,7 +5010,6 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		onPointerMovementTakeover={movementInputController.takeOverPointer}
 		onPointerMovementUpdate={movementInputController.updatePointer}
 		onPointerMovementStop={movementInputController.stopPointer}
-		speechAreaVisualBounds={speechAreaVisualBounds}
 	>
 		{#snippet children()}
 			{#if statusHudVisible && personaSnapshot}
@@ -5176,7 +5143,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 				onReplyFootprintRemoved={removeTraceReplyFootprint}
 				registerReplyRemeasure={registerTraceReplyRemeasure}
 			/>
-			<div class="field-status-huds" data-field-status-huds style={`--top-status-hud-bottom:${statusHudVisible ? topStatusHudBottom : 0}px`}>
+			<div class="field-status-huds" {@attach observeGameHud} data-field-status-huds style={`--top-status-hud-bottom:${statusHudVisible ? topStatusHudBottom : 0}px`}>
 				<TagGameHud game={tagGameDisplayedGame} selfPubkey={devTagGamePlaygroundEnabled ? DEV_TAG_GAME_SELF_PUBKEY : personaSnapshot?.signer.pubkey ?? null} selfRunNumber={devTagGamePlaygroundEnabled ? 1 : personaSnapshot?.activeRun.runNumber ?? null} nowMs={tagGameUiNowMs} realtimeStatus={devTagGamePlaygroundEnabled ? 'active' : realtimeStatus} busy={devTagGamePlaygroundEnabled ? false : tagGameBusy} showLeave={!devTagGamePlaygroundEnabled} localEffectPaused={tagGameDisplayedEffect?.locallyPaused ?? false} touchStatus={tagGameDisplayedGame ? (devTagGamePlaygroundEnabled ? devTagGamePlaygroundState?.message : tagGameTouchStatuses.get(tagGameDisplayedGame.gameId)?.label) ?? null : null} onLeave={(gameId) => { if (!devTagGamePlaygroundEnabled) void leaveTagGame(gameId); }} />
 			</div>
 		{/snippet}
@@ -5344,6 +5311,8 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 
 	{#if runtimeMode === 'relay' || devTraceReplyFixtureEnabled}
 		<ActionDock
+			onBoundsChange={reportActionDockBounds}
+			boundsRevision={`${viewportSize.width}:${viewportSize.height}:${composerKeyboardInset}`}
 			bind:this={composerComponent}
 			{selectedSpeechType}
 			submissionInProgress={composerSubmissionInProgress}

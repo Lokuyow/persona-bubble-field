@@ -18,7 +18,6 @@
 		onPointerMovementTakeover: (pointerId: number, direction: Direction) => void;
 		onPointerMovementUpdate: (pointerId: number, direction: Direction) => void;
 		onPointerMovementStop: (pointerId: number) => void;
-		speechAreaVisualBounds: Readonly<{ x: number; y: number; width: number; height: number }>;
 		children: Snippet;
 	}>;
 
@@ -37,7 +36,6 @@
 		onPointerMovementTakeover,
 		onPointerMovementUpdate,
 		onPointerMovementStop,
-		speechAreaVisualBounds,
 		children
 	}: Props = $props();
 
@@ -123,11 +121,6 @@
 	aria-label="Conversation field"
 	{@attach pointerGesture}
 >
-	<div
-		class="speech-area"
-		style={`top: ${speechAreaVisualBounds.y}px; height: ${speechAreaVisualBounds.height}px; left: ${speechAreaVisualBounds.x}px; width: ${speechAreaVisualBounds.width}px;`}
-		aria-hidden="true"
-	></div>
 	{@render children()}
 	<div class="viewport-vignette" aria-hidden="true"></div>
 </section>
@@ -172,12 +165,6 @@
 		z-index: -1;
 		background: transparent;
 		content: '';
-	}
-
-	.speech-area {
-		position: absolute;
-		z-index: 1;
-		pointer-events: none;
 	}
 
 	.viewport-vignette {

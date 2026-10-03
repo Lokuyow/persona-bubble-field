@@ -1681,6 +1681,8 @@ export async function transitionExpiredPersona(expected: PersonaSnapshot, termin
 		if (observed.player.mode.kind !== 'running' || !samePersonaExpected(expected, observed.player.mode.activeRun)) return { kind: 'superseded' };
 		if (!isPersonaExpired(observed.player.mode.activeRun.gameState, Date.now(), observed.player.mode.activeRun.rootBuild)) return { kind: 'not-expired', persona: { ...expected, activeRun: observed.player.mode.activeRun, gameState: observed.player.mode.activeRun.gameState } };
 		const selection = await prepareDeathSelection(observed.entropy, observed.player);
+		const testHook = (globalThis as typeof globalThis & { __personaBubbleFieldTestHooks?: { beforeDeathTransitionCompareAndSwap?: () => void | Promise<void> } }).__personaBubbleFieldTestHooks?.beforeDeathTransitionCompareAndSwap;
+		if (testHook) await testHook();
 		return withLifecycle(async (db) => {
 			const tx = db.transaction([PLAYER_LIFECYCLE_STORE_NAME, WORLD_WRITE_JOURNAL_STORE_NAME], 'readwrite');
 			try {

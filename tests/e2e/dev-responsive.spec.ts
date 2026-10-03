@@ -38,7 +38,7 @@ test.describe('DEV World Sandbox', () => {
 					expect(Math.abs(geometry.participantCenter.x - geometry.gridCellCenter.x)).toBeLessThan(0.01);
 					expect(Math.abs(geometry.participantCenter.y - geometry.gridCellCenter.y)).toBeLessThan(0.01);
 					await expect(page.locator('.participant-name')).toBeVisible();
-					await expect(fieldArea).toHaveCSS('overflow', 'hidden');
+					await expect(fieldArea).toHaveCSS('overflow', 'clip');
 					await expect(page.locator('.participant')).not.toHaveAttribute('data-movement-animation', 'active');
 				});
 			});

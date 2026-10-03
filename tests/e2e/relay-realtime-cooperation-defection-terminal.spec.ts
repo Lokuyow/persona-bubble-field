@@ -35,7 +35,7 @@ import { deriveBip85NostrEntropy } from '../../src/lib/bip85';
 import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL } from '../../src/lib/fieldFacilities';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { installFieldFrameSampling, readFieldFrames, sampleRenderedField } from './helpers/fieldFrames';
-import { CHANNEL_ID, AUTHORITATIVE_RELAYS, fixtureSecret, testEvents, upcomingRegistrationSchedule, nextScheduledCooperationDefectionSchedule, signedCooperationDefectionAction, syntheticChannelFixture, installDelayedRelay, relayState, seedRelayAccount, readRelayGameState, realtimeInstanceIds, isRealtimeRequest, isDeathTraceEvent, readRealtimePendingInstances, seedRealtimePendingInstance, chooseHorizontalMove, pressRelayKeyboardMovement } from './helpers/relayHarness';
+import { CHANNEL_ID, AUTHORITATIVE_RELAYS, cooperationDefectionInteractionCell, fixtureSecret, testEvents, upcomingRegistrationSchedule, nextScheduledCooperationDefectionSchedule, signedCooperationDefectionAction, syntheticChannelFixture, installDelayedRelay, relayState, seedRelayAccount, readRelayGameState, realtimeInstanceIds, isRealtimeRequest, isDeathTraceEvent, readRealtimePendingInstances, seedRealtimePendingInstance, chooseHorizontalMove, pressRelayKeyboardMovement, moveRelaySelfTo } from './helpers/relayHarness';
 
 const COOPERATION_DEFECTION_SELF_POSITION = { x: 3, y: 2 } as const;
 const COOPERATION_DEFECTION_FIELD_SIZE = { columns: 16, rows: 8 } as const;
@@ -113,10 +113,10 @@ async function prepareFailedCooperationScenario(page: Page, remainingDays: numbe
 
 	await page.locator('[data-realtime-group-trigger]').click();
 	await page.clock.runFor(50);
-	const nearPosition = group.position.y > 0 ? { x: group.position.x, y: group.position.y - 1 } : { x: group.position.x, y: group.position.y + 1 };
-	const nearEvent = finalizeEvent(buildWorldStateEventTemplate({ channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: nearPosition, slot: 0, createdAt: Math.floor((startTime + 2_000) / 1000) }), selfSecret);
-	await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), nearEvent);
-	await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', `${nearPosition.x},${nearPosition.y}`);
+	const nearPosition = cooperationDefectionInteractionCell(group.position);
+	// Keyboard checks after settlement need the durable self position, not a
+	// remotely injected self projection that leaves the movement journal behind.
+	await moveRelaySelfTo(page, nearPosition);
 	await page.locator('[data-realtime-group-trigger]').click();
 	const joinDialog = page.getByRole('dialog', { name: /協力と抜け駆けに参加/ });
 	await expect(joinDialog.getByRole('button', { name: '参加する' })).toHaveAttribute('data-action-variant', 'primary');
@@ -143,6 +143,8 @@ async function prepareFailedCooperationScenario(page: Page, remainingDays: numbe
 
 
 test.describe('Relay startup', () => {
+	// Keep any daily group position actionable without scrolling the projected field.
+	test.use({ viewport: { width: 2400, height: 1000 } });
 	test('publishes a World State exit after a realtime death outcome commits locally', async ({ page }) => {
 		const { schedule, group, selfPubkey } = await prepareFailedCooperationScenario(page, 2);
 
@@ -243,7 +245,7 @@ test.describe('Relay startup', () => {
 		const initialMainFrameNavigations = mainFrameNavigations;
 		await page.locator('[data-realtime-group-trigger]').click();
 		await page.clock.runFor(50);
-		const nearPosition = group.position.y > 0 ? { x: group.position.x, y: group.position.y - 1 } : { x: group.position.x, y: group.position.y + 1 };
+		const nearPosition = cooperationDefectionInteractionCell(group.position);
 		const nearEvent = finalizeEvent(buildWorldStateEventTemplate({ channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: nearPosition, slot: 0, createdAt: Math.floor((startTime + 2_000) / 1000) }), selfSecret);
 		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), nearEvent);
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', `${nearPosition.x},${nearPosition.y}`);

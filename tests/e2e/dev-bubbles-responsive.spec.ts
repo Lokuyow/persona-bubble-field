@@ -242,14 +242,15 @@ test.describe('DEV World Sandbox', () => {
 			expect(geometry.tailStartXs).toHaveLength(fixture.count);
 			expect(geometry.connectionMasks).toHaveLength(fixture.count);
 			expect(geometry.tailOutlineCount).toBe(fixture.count + 1);
-			expect(geometry.connectionMasks.every((mask) => mask.width === 9 && mask.height === 3)).toBe(true);
+			expect(geometry.connectionMasks.every((mask) => (mask.width === 9 && mask.height === 3) || (mask.width === 3 && mask.height === 9))).toBe(true);
 			expect(geometry.connectionMasks.every((mask) => mask.background === geometry.background)).toBe(true);
 			expect(geometry.connectionMasks.map((mask) => mask.participantId).sort()).toEqual(fixture.members.map((prefix) => prefix.repeat(64)).sort());
-			for (const [index, startX] of geometry.tailStartXs.entries()) {
-				expect(Math.abs(startX - geometry.connectionMasks[index].centerX)).toBeLessThan(1);
+			for (const [index, start] of geometry.tailStarts.entries()) {
+				const mask = geometry.connectionMasks[index];
+				expect(Math.hypot(start.x - mask.centerX, start.y - mask.centerY)).toBeLessThan(1);
 			}
-			expect(new Set(geometry.tailStartXs.map((x) => x.toFixed(3))).size).toBe(fixture.count);
-			expect(Math.max(...geometry.tailStartXs) - Math.min(...geometry.tailStartXs)).toBeGreaterThan(40);
+			expect(new Set(geometry.tailStarts.map((point) => `${point.x.toFixed(3)}:${point.y.toFixed(3)}`)).size).toBe(fixture.count);
+			expect(Math.max(...geometry.tailStarts.flatMap((first) => geometry.tailStarts.map((second) => Math.hypot(first.x - second.x, first.y - second.y))))).toBeGreaterThan(40);
 			geometries.push(geometry);
 		}
 

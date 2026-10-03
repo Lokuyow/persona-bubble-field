@@ -30,6 +30,7 @@ export function applyDevPageFixtures(scenario: DevScenario, ports: FixturePorts)
 			const mergedSpeechType = fixtureId.includes('shout') ? 'shout' : fixtureId.includes('monologue') ? 'monologue' : 'normal';
 			seedDevSpeechMergedFixture(mergedMemberCount, mergedContent, mergedSpeechType);
 		}
+		if (fixtureId === 'obstacles') seedDevSpeechObstacleFixture();
 		if (fixtureId === 'types') seedDevSpeechTypeFixture();
 		if (fixtureId === 'normal-sizes') seedDevSpeechNormalSizeFixture();
 		if (fixtureId === 'comparison') seedDevSpeechComparisonFixture();
@@ -156,6 +157,23 @@ export function applyDevPageFixtures(scenario: DevScenario, ports: FixturePorts)
 				parentId: 'd'.repeat(64), parentKind: 1111, parentPubkey: 'd'.repeat(64)
 			})
 		]);
+	}
+
+	function seedDevSpeechObstacleFixture(): void {
+		const now = Date.now();
+		const positions = [{ x: 4, y: 2 }, { x: 10, y: 2 }, { x: 4, y: 3 },
+			...Array.from({ length: ports.field.columns }, (_, x) => ({ x, y: 0 })),
+			...Array.from({ length: ports.field.columns }, (_, x) => ({ x, y: 1 }))];
+		const ids = positions.map((_, index) => index.toString(16).padStart(2, '0').repeat(32));
+		ports.setPresence(createPresenceState(ports.field, now, [
+			{ id: DEV_WORLD_SELF_ID, position: { x: 7, y: 3 } },
+			...positions.map((position, index) => ({ id: ids[index], position }))
+		]));
+		for (const [index, content] of ['side', 'lower placement fixture'].entries()) {
+			ports.setConversation(receiveMessage(ports.getConversation(), {
+				id: `dev-obstacle-message-${index}`, pubkey: ids[index], content, speechType: 'normal', createdAt: now
+			}, { isSpeakerVisible: true, duration: 60_000, now }));
+		}
 	}
 
 	function seedDevSpeechNormalFixture(): void {

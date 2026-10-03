@@ -69,6 +69,10 @@ movement rulesは[SPEC-30](./SPEC-30-フィールド・position・presence.md)�
 
 ## 25. trace conversation
 
+Traceのlayout boundsはlive placementと分離する。viewport端、表示中HUDの実下端、ActionDockの実上端から
+screen-spaceの安全矩形を求め、field boundsへ拘束しない。これはfieldに予約する領域ではない。
+rootのlogical-row対応付け、reply slot、footprint、collision、continuityの既存規則は維持する。
+
 trace conversationはroot調査からだけ入る。一度にexploreできるroot conversationは1つだけとする。通常live speechへのreply UIは持たない。
 
 rootを調査したら、NIP-22 reply historyを待たずにroot ghostと実際のroot本文bubbleを即表示する。reply history取得中はloading indicatorを表示しない。
@@ -76,7 +80,7 @@ rootを調査したら、NIP-22 reply historyを待たずにroot ghostと実際�
 表示対象はroot、current、immediate parent、currentの全direct repliesだけである。rootは常にfield position由来で表示し、rootがcurrentまたはimmediate parentでない深いcurrentでは1行ellipsisのcompact contextとする。reply depthに上限は設けない。
 
 - current=rootまたはimmediate parent=rootではroot bubbleをtree anchorとする。
-- 深いcurrentではhidden ancestorのUI node、仮想slot、connectorを生成せず、immediate parentを`bubbleSafeBounds`中央へreply card footprintで中央揃えしたvisible local cluster anchorとする。currentとdirect childrenは親のplaced cardから既定slotへ配置する。
+- 深いcurrentではhidden ancestorのUI node、仮想slot、connectorを生成せず、immediate parentをTrace専用の`traceSafeBounds`中央へreply card footprintで中央揃えしたvisible local cluster anchorとする。currentとdirect childrenは親のplaced cardから既定slotへ配置する。
 - direct child slotはcreatedAt昇順、event ID昇順で右下、左下、右上、左上、以後同順の外側ringとする。slot、clamp、collisionはauthor icon/nameを含むreply card footprintを使用し、同一anchorへ潰れる場合はranked slot/edge fallbackを選ぶ。
 - currentの変更やdirect replyの追加で再配置が必要になっても、同じpresentation coordinate contextで、表示中のTrace nodeのサイズとfootprintが変わらず、safe bounds内で維持できる場合は、そのnodeのanchorを維持する。rootのcontinuity contextにはroot ID/position、camera、cellSize、field area、safe/visual bounds、fieldRows、viewportWidthを含め、これらが変わった場合は古いroot anchorを固定せず、現在のfield positionから導出したplacementを優先する。fixed live bubbleの出現・消失やcollision contextの変更、新規node、サイズ変更、safe bounds外となるnodeは既存のslot/clamp/collision規則で再配置する。
 - compact rootとdeep immediate parentの間にはconnectorを描かない。connectorは表示中の実在する親子関係だけをcontinuous tapered relationとそのhaloで描く。root tailとrelationは、visible Trace surfaceの内側へ描画しない。

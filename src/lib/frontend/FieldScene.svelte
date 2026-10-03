@@ -1,5 +1,8 @@
 <script lang="ts">
 	import { asset } from '$app/paths';
+	import { untrack } from 'svelte';
+	import type { Attachment } from 'svelte/attachments';
+	import { clampToBounds } from '$lib/geometry';
 	import type { Character } from '$lib/character';
 	import CharacterAvatar from '$lib/CharacterAvatar.svelte';
 	import FieldParticipant from '$lib/FieldParticipant.svelte';
@@ -129,6 +132,22 @@
 		const vector = unit[direction];
 		return { x: vector.x * distance, y: vector.y * distance };
 	}
+
+	let menuSize = $state<Size>({ width: 0, height: 0 });
+	const measureMenu: Attachment<HTMLElement> = (node) => untrack(() => {
+		const measure = () => untrack(() => {
+			const rect = node.getBoundingClientRect();
+			if (menuSize.width !== rect.width || menuSize.height !== rect.height) menuSize = { width: rect.width, height: rect.height };
+		});
+		const observer = new ResizeObserver(measure);
+		observer.observe(node);
+		measure();
+		return () => observer.disconnect();
+	});
+	let menuAnchor = $derived(clampToBounds({
+		x: fieldAreaBounds.x + ((fieldActionMenu?.position.x ?? 0) + 0.5) * cellSize - camera.x - menuSize.width / 2,
+		y: fieldAreaBounds.y + ((fieldActionMenu?.position.y ?? 0) + 0.5) * cellSize - camera.y - menuSize.height - 8
+	}, menuSize, fieldAreaBounds, 8));
 
 </script>
 
@@ -284,34 +303,38 @@
 				</button>
 			</div>
 		{/if}
-		{#if fieldActionMenu}
-			<div
-				class="field-action-menu"
-				role="menu"
-				tabindex="-1"
-				aria-label="Cell actions"
-				style={`left: ${(fieldActionMenu.position.x + 0.5) * cellSize}px; top: ${(fieldActionMenu.position.y + 0.5) * cellSize}px;`}
-			>
-				{#each fieldActionMenu.actions as action, index (`${action.kind}-${action.kind === 'participant' ? action.participantId : action.kind === 'trace' ? action.rootId : 'terminal'}-${index}`)}
-					<button
-						type="button"
-						role="menuitem"
-						data-cell-action={action.kind}
-						onclick={(event) => {
-							event.stopPropagation();
-							executeFieldCellAction(action, fieldActionMenu!.position, event.currentTarget as HTMLButtonElement);
-						}}
-					>{fieldActionLabel(action)}</button>
-				{/each}
-			</div>
-		{/if}
+
 	</div>
 </div>
+{#if fieldActionMenu}
+	<div
+		class="field-action-menu"
+		role="menu"
+		tabindex="-1"
+		aria-label="Cell actions"
+		{@attach measureMenu}
+		style={`left: ${menuAnchor.x}px; top: ${menuAnchor.y}px;`}
+	>
+		{#each fieldActionMenu.actions as action, index (`${action.kind}-${action.kind === 'participant' ? action.participantId : action.kind === 'trace' ? action.rootId : 'terminal'}-${index}`)}
+			<button
+				type="button"
+				role="menuitem"
+				data-cell-action={action.kind}
+				onclick={(event) => {
+					event.stopPropagation();
+					executeFieldCellAction(action, fieldActionMenu!.position, event.currentTarget as HTMLButtonElement);
+				}}
+			>{fieldActionLabel(action)}</button>
+		{/each}
+	</div>
+{/if}
+
 <style>
 	.field-area {
 		position: absolute;
 		z-index: 2;
-		overflow: hidden;
+		/* Camera owns projection; focusing a clipped cell must not scroll it. */
+		overflow: clip;
 		background: transparent;
 		touch-action: pinch-zoom;
 		user-select: none;
@@ -578,13 +601,12 @@
 
 	.field-action-menu {
 		position: absolute;
-		z-index: 8;
+		z-index: 12;
 		display: grid;
 		min-width: 170px;
 		border-radius: 10px;
 		background: rgba(250, 250, 244, 0.97);
 		box-shadow: 0 10px 28px rgba(44, 54, 50, 0.24);
-		transform: translate(-50%, calc(-100% - 8px));
 		pointer-events: auto;
 		overflow: hidden;
 	}

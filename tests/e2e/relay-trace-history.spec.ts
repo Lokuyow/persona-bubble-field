@@ -328,6 +328,7 @@ test.describe('Relay startup', () => {
 		const movedSelfPosition = finalizeEvent(buildWorldStateEventTemplate({ channel, position: { x: 6, y: 2 }, slot: 0, createdAt: createdAt + 1 }), selfSecret);
 		await page.evaluate((event) => (window as unknown as { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), movedSelfPosition);
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '6,2');
+		expect(await page.locator('.field-area').evaluate((area) => ({ x: area.scrollLeft, y: area.scrollTop }))).toEqual({ x: 0, y: 0 });
 		await expect.poll(() => page.evaluate(() => (window as unknown as { __rewardFeedbackSeen: { text: string; samples: { actorPosition: string; horizontalDelta: number; verticalGap: number; cameraTransform: string }[] }[] }).__rewardFeedbackSeen
 			.some((cue) => cue.text === '+10pt' && cue.samples.some((sample) => sample.actorPosition === '6,2' && sample.horizontalDelta < 50 && sample.verticalGap >= 0 && sample.verticalGap < 25))))
 			.toBe(true);

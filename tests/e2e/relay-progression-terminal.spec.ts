@@ -47,7 +47,9 @@ test.describe('Relay startup', () => {
 		await expect(mendingFacility).not.toContainText('作業');
 		await expect(page.locator('[data-field-facility="adjustment-terminal"] img')).toHaveAttribute('src', /field\/objects\/adjustment-terminal\.webp$/);
 		await expect(page.locator('[data-field-facility="adjustment-terminal"]')).not.toContainText('能力強化');
-		await terminal.click();
+		// The distant terminal is clipped; keyboard activation must preserve the camera.
+		await terminal.focus();
+		await terminal.press('Enter');
 		await expect(page.getByRole('status')).toContainText('近づくと端末を使える');
 
 		const atTerminal = finalizeEvent(buildWorldStateEventTemplate({
@@ -407,7 +409,8 @@ test.describe('Relay startup', () => {
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '3,2');
-		await adjustment.click();
+		await adjustment.focus();
+		await adjustment.press('Enter');
 		await expect(page.locator('.trace-proximity-feedback[role="status"]')).toContainText('近づくと端末を使える');
 
 		const nearby = finalizeEvent(buildWorldStateEventTemplate({

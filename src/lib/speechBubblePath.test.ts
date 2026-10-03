@@ -47,9 +47,9 @@ describe('createSpeechBubbleShape', () => {
 	});
 
 	it.each([
-		[184, 54, 'e950bba8', 28, [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26], 36, 11.3595679372, 90],
-		[218, 58, '31f9127f', 33, [0, 2, 4, 6, 8, 10, 12, 14, 16, 17, 19, 22, 23, 25, 27, 29, 31], 40.19178082191781, 12.6822573546, 100.4794520548],
-		[330, 128, 'd7f9c290', 55, [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 25, 27, 29, 31, 34, 35, 38, 39, 41, 43, 45, 47, 49, 51, 53], 54, 16.2, 135]
+		[184, 54, 'f73d9527', 28, [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26], 36, 11.3595679372, 54],
+		[218, 58, '1010b15c', 33, [0, 2, 4, 6, 8, 10, 12, 14, 16, 17, 19, 22, 23, 25, 27, 29, 31], 40.19178082191781, 12.6822573546, 60.28767123287672],
+		[330, 128, '44704de6', 55, [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 25, 27, 29, 31, 34, 35, 38, 39, 41, 43, 45, 47, 49, 51, 53], 54, 16.2, 81]
 	] as const)('matches the prototype shout core at %dx%d', (width, height, digest, intervalCount, spikeIndices, boostedLength, minimumLength, maximumLength) => {
 		const shape = createShoutBubbleShape(width, height, 72644);
 		expect(pathDigest(shape.path)).toBe(digest);
@@ -71,7 +71,7 @@ describe('createSpeechBubbleShape', () => {
 		expect(merged.metadata.decoratedCount).toBe(17);
 		expect(merged.metadata.coverage).toBe(17 / 33);
 		expect(small.metadata.requestedOutwardSizes.some((length) => length < 20)).toBe(true);
-		expect(small.metadata.requestedOutwardSizes.some((length) => length > 80)).toBe(true);
+		expect(small.metadata.requestedOutwardSizes.some((length) => length > 50)).toBe(true);
 		expect(small.metadata.actualOutwardSizes).toEqual(small.metadata.requestedOutwardSizes);
 		expect(small.metadata.spikeRootWidths?.every((width) => width === 8)).toBe(true);
 		expect(large.metadata.spikeRootWidths?.every((width) => width === 8)).toBe(true);

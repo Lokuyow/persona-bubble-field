@@ -179,7 +179,10 @@ test.describe('DEV World Sandbox', () => {
 			if (Math.max(Math.abs(x - groupX), Math.abs(y - groupY)) <= 1) break;
 			await page.keyboard.press(x > groupX ? 'ArrowLeft' : x < groupX ? 'ArrowRight' : y > groupY ? 'ArrowUp' : 'ArrowDown');
 		}
-		await group.click();
+		// DEV controls cover this upper cell on a short screen; join by keyboard
+		// before testing the panel's pointer controls and scroll reachability.
+		await group.focus();
+		await group.press('Enter');
 		const advance = page.getByRole('button', { name: 'Advance Cooperation and Defection Playground phase' });
 		await advance.click();
 		await expect(panel).toContainText('参加中（3人）');
