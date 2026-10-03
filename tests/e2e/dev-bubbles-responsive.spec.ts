@@ -344,13 +344,13 @@ test.describe('DEV World Sandbox', () => {
 			const replyStyle = getComputedStyle(replyCard);
 			return {
 				root: { fontSize: style.fontSize, maxWidth: Number.parseFloat(style.maxWidth.match(/[\d.]+px/)?.[0] ?? 'NaN'), padding: style.padding },
-				reply: { fontSize: replyStyle.fontSize, maxWidth: Number.parseFloat(replyStyle.maxWidth.match(/[\d.]+px/)?.[0] ?? 'NaN'), minWidth: replyStyle.minWidth, padding: replyStyle.padding, columnGap: replyStyle.columnGap },
+				reply: { fontSize: replyStyle.fontSize, maxWidth: Number.parseFloat(replyStyle.maxWidth.match(/[\d.]+px/)?.[0] ?? 'NaN'), minWidth: replyStyle.minWidth },
 				author: { fontSize: getComputedStyle(author).fontSize, avatar: getComputedStyle(avatar).width, nameMaxWidth: getComputedStyle(name).maxWidth }
 			};
 		});
 		expect(await readTraceStyles()).toEqual({
 			root: { fontSize: '13px', maxWidth: 180, padding: '8px 10px' },
-			reply: { fontSize: '13px', maxWidth: 180, minWidth: '112px', padding: '8px 10px', columnGap: '4px' },
+			reply: { fontSize: '13px', maxWidth: 180, minWidth: '112px' },
 			author: { fontSize: '10px', avatar: '28px', nameMaxWidth: '48px' }
 		});
 		await expect(root).toBeVisible();
@@ -359,13 +359,13 @@ test.describe('DEV World Sandbox', () => {
 		await page.setViewportSize({ width: 701, height: 844 });
 		await expect.poll(readTraceStyles).toEqual({
 			root: { fontSize: '16px', maxWidth: 240, padding: '12px 15px' },
-			reply: { fontSize: '16px', maxWidth: 240, minWidth: '144px', padding: '12px 15px', columnGap: '6px' },
+			reply: { fontSize: '16px', maxWidth: 240, minWidth: '144px' },
 			author: { fontSize: '12px', avatar: '36px', nameMaxWidth: '60px' }
 		});
 		await page.setViewportSize({ width: 700, height: 844 });
 		await expect.poll(readTraceStyles).toEqual({
 			root: { fontSize: '13px', maxWidth: 180, padding: '8px 10px' },
-			reply: { fontSize: '13px', maxWidth: 180, minWidth: '112px', padding: '8px 10px', columnGap: '4px' },
+			reply: { fontSize: '13px', maxWidth: 180, minWidth: '112px' },
 			author: { fontSize: '10px', avatar: '28px', nameMaxWidth: '48px' }
 		});
 	});
