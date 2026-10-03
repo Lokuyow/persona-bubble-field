@@ -228,9 +228,24 @@ test.describe('DEV World Sandbox', () => {
 			await expect(profileDialog(page)).toBeHidden();
 		}
 
-		const contentEdge = await content.boundingBox();
-		if (!contentEdge) throw new Error('Expected the reply content interaction region.');
-		await page.mouse.click(contentEdge.x + contentEdge.width - 1, contentEdge.y + contentEdge.height / 2);
+		await content.evaluate((button) => {
+			button.addEventListener('click', () => {
+				button.dataset.hitAreaClickCount = String(Number(button.dataset.hitAreaClickCount ?? 0) + 1);
+			});
+		});
+		for (const edge of ['top', 'bottom', 'left', 'right'] as const) {
+			const box = await content.boundingBox();
+			if (!box) throw new Error('Expected the reply content interaction region.');
+			const point = edge === 'top'
+				? { x: box.x + box.width / 2, y: box.y + 1 }
+				: edge === 'bottom'
+					? { x: box.x + box.width / 2, y: box.y + box.height - 1 }
+					: edge === 'left'
+						? { x: box.x + 1, y: box.y + box.height / 2 }
+						: { x: box.x + box.width - 1, y: box.y + box.height / 2 };
+			await page.mouse.click(point.x, point.y);
+			await expect(content).toHaveAttribute('data-hit-area-click-count', String(['top', 'bottom', 'left', 'right'].indexOf(edge) + 1));
+		}
 		await expect(card).toHaveAttribute('data-trace-selection', 'current');
 		});
 	}
