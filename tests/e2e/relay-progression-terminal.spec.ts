@@ -20,6 +20,7 @@ import { characterPicturePath } from '../../src/lib/character';
 import { requireCharacterFromPubkey, resolveCharacterFromPubkey } from '../../src/lib/characterAssignment';
 import { deriveBip85NostrEntropy } from '../../src/lib/bip85';
 import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL } from '../../src/lib/fieldFacilities';
+import { INFERENCE_ACCELERATION_BUDGET_MS } from '../../src/lib/rootProgression';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { installFieldFrameSampling, readFieldFrames, sampleRenderedField } from './helpers/fieldFrames';
 import { CHANNEL_ID, AUTHORITATIVE_RELAYS, fixtureSecret, testEvents, isDeathTraceEvent, installDelayedRelay, relayState, dragRelayJoystick, publishedMessages, waitForPublishedMessageCount, pauseAtCurrentBrowserTime, startSelectedRun, openReadyRelayWorld, openClearReadyWorld, installPromptApiStub, seedRelayAccount, readRelayGameState, overwriteRelayGameState, overwriteRelayMendingBuild, seedUnavailablePersona, installDeathTransitionFailure, armDeathTransitionFailure, chooseMoveToward, moveRelaySelfTo } from './helpers/relayHarness';
@@ -71,7 +72,30 @@ test.describe('Relay startup', () => {
 		const activeWorkProfile = page.getByRole('dialog');
 		const activeWorkDetails = activeWorkProfile.getByRole('region', { name: '作業情報' });
 		await expect(activeWorkDetails).toContainText('×2.00');
+		await expect(activeWorkDetails).toContainText('有効作業 残り');
 		await expect(activeWorkDetails).toContainText('2.00 pt/分');
+	});
+
+	test('shows spent acceleration budget without affecting a Root-accelerated multiplier', async ({ page }) => {
+		const startTime = Date.now();
+		const secret = fixtureSecret(30);
+		const pubkey = getPublicKey(secret);
+		await page.clock.install({ time: startTime });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { primaryEvents: testEvents(startTime) });
+		await seedRelayAccount(page, secret, pubkey, startTime + 7 * 24 * 60 * 60 * 1_000, 0,
+			{ inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 }, 1,
+			{ inferenceAcceleration: 1, contextCompression: 0, hallucinationResistance: 0 }, INFERENCE_ACCELERATION_BUDGET_MS);
+		await page.goto('/');
+		await expect(page.locator('.action-dock')).toBeVisible();
+		await page.evaluate(() => {
+			const relay = (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest;
+			relay.releasePrimary();
+		});
+		await page.getByRole('button', { name: '自分のプロフィールを開く' }).click();
+		const workDetails = page.getByRole('dialog').getByRole('region', { name: '作業情報' });
+		await expect(workDetails).toContainText('1.00 pt/分');
+		await expect(workDetails).toContainText('×2.00（有効作業 残り0分）');
 	});
 
 	test('runs and collects a mending job only from the adjacent terminal cells', async ({ page }) => {
@@ -266,7 +290,8 @@ test.describe('Relay startup', () => {
 		await expect(workDetails).toContainText('1時間の作業で寿命');
 		await expect(workDetails).toContainText('+6分');
 		await expect(workDetails).toContainText('推論加速');
-		await expect(workDetails).toContainText('×1.00（有効作業 残り23時間59分）');
+		await expect(workDetails).toContainText('×1.00');
+		await expect(workDetails).not.toContainText('有効作業 残り');
 		await expect(workDetails).toContainText('最大寿命');
 		await expect(workDetails).toContainText('7日');
 		await expect(selfProfile).toContainText('Root Point');

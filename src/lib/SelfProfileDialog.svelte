@@ -71,7 +71,7 @@
 					<div><dt>現在のポイント速度</dt><dd>{(workPointRate / 100).toFixed(2)} pt/分</dd></div>
 					<div><dt>最大蓄積</dt><dd>{formatElapsedDuration(workCapacityMs)}</dd></div>
 					<div><dt>1時間の作業で寿命</dt><dd>+{formatLifespanRate(workLifespanRate)}分</dd></div>
-					<div><dt>推論加速</dt><dd>×{accelerationMultiplier}（有効作業 残り{formatElapsedDuration(accelerationRemaining)}）</dd></div>
+					<div><dt>推論加速</dt><dd>×{accelerationMultiplier}{#if persona.activeRun.rootBuild.inferenceAcceleration > 0}（有効作業 残り{formatElapsedDuration(accelerationRemaining)}）{/if}</dd></div>
 					<div><dt>最大寿命</dt><dd>{maximumLifespan}</dd></div>
 				</dl>
 			</section>
