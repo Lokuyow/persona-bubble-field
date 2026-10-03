@@ -529,6 +529,7 @@ function totalDistance(group: readonly PlacedBubble[]): number {
 
 function findLocalRepair(
 	current: BubblePlacementInput,
+	currentAnchor: WorldPoint,
 	related: readonly PlacedBubble[],
 	fixed: readonly PlacedBubble[],
 	bounds: Bounds,
@@ -539,8 +540,18 @@ function findLocalRepair(
 ): { group: PlacedBubble[]; overlap: number; score: number } | null {
 	const groupItems = [...related, current];
 	let best: { group: PlacedBubble[]; overlap: number; distance: number; score: number } | null = null;
+	if (constraints) {
+		const greedy = [...related, { ...current, anchor: currentAnchor }];
+		best = { group: greedy, overlap: totalOverlap(greedy, fixed, gap), distance: totalDistance(greedy),
+			score: groupLiveScore(greedy, fixed, cellSize, gap) };
+	}
 
 	const search = (index: number, assigned: PlacedBubble[]) => {
+		// Adding remaining bubbles can only increase each assigned bubble's live
+		// score: distance is fixed and overlap is nonnegative, even with its cap.
+		// Skip branches that cannot improve the incumbent without dropping any
+		// candidate or changing hard tiers, traversal order, or equal-score ties.
+		if (constraints && best && groupLiveScore(assigned, fixed, cellSize, gap) > best.score) return;
 		if (index === groupItems.length) {
 			const overlap = totalOverlap(assigned, fixed, gap);
 			const distance = totalDistance(assigned);
@@ -610,7 +621,7 @@ export function placeBubbles(
 				))
 				.slice(-2);
 			const fixed = placed.filter((previous) => !related.includes(previous));
-			const repair = findLocalRepair(item, related, fixed, bounds, visualRegion, cellSize, gap, constraints);
+			const repair = findLocalRepair(item, anchor, related, fixed, bounds, visualRegion, cellSize, gap, constraints);
 			const greedyGroup = [...related, { ...item, anchor }];
 
 			if (repair && repair.score < (constraints ? groupLiveScore(greedyGroup, fixed, cellSize, gap) : totalOverlap(greedyGroup, fixed, gap))) {

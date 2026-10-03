@@ -121,9 +121,16 @@ test.describe('DEV World Sandbox', () => {
 	});
 
 	test('renders the full speech showcase with eight colors and a merged bubble', async ({ page }) => {
+		// Prepare startup modules before stressing dense placement on constrained
+		// CI workers. Keep the existing initial-render assertions below.
+		await page.goto('/?devWorld=1');
+		await expect(page.locator('.participant')).toHaveCount(1);
+		const cdp = await page.context().newCDPSession(page);
+		await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
 		await page.goto('/?devWorld=1&devScenario=speech-showcase');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 		await expect(page.locator('.participant')).toHaveCount(8);
+		await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
 		await expect(page.locator('.bubble-normal')).toHaveCount(8);
 		const mergedBubble = page.locator('.bubble-merged');
 		await expect(mergedBubble).toHaveCount(1);

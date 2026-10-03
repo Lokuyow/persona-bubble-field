@@ -652,7 +652,9 @@ test('plays tag-game start, scheduled switch, confirmed transfer, and end cues f
 	const selfPubkey = getPublicKey(selfSecret);
 	const hostPubkey = getPublicKey(hostSecret);
 	const startAt = Math.ceil((await page.evaluate(() => Date.now()) + 5_000) / 1_000);
-	await page.clock.pauseAt((startAt - 5) * 1_000);
+	// Freeze inside the countdown window: its last runtime tick can still be
+	// before the window if the browser stops exactly at the five-second edge.
+	await page.clock.pauseAt((startAt - 4) * 1_000);
 	const seed = Array.from({ length: 10_000 }, (_, index) => `tag-audio-${index}`).find((candidate) => {
 		const schedule = createTagGameSchedule(candidate);
 		return schedule[0].effect === 'benefit' && schedule[0].durationMs <= 20_000;
