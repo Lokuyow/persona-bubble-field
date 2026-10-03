@@ -110,7 +110,8 @@ test.describe('Relay startup', () => {
 		await expect(collectButton).toBeVisible();
 		await expect(collectButton).toHaveAttribute('data-action-variant', 'primary');
 		await expect(activeDialog.locator('[data-action-variant="primary"]')).toHaveCount(1);
-		await expect(activeDialog.getByRole('button', { name: '詳細を見る' })).toHaveAttribute('data-action-variant', 'tertiary');
+		await expect(activeDialog.getByRole('button', { name: /詳細を見る|詳細を閉じる/ })).toHaveCount(0);
+		await expect(activeDialog.locator('.details-content')).toHaveCount(0);
 		const closeButton = activeDialog.getByRole('button', { name: '閉じる', exact: true });
 		await expectIconCloseButton(closeButton, '閉じる');
 		await expect(collectButton.locator('svg')).toHaveCount(1);
@@ -136,8 +137,7 @@ test.describe('Relay startup', () => {
 				probe.style.cssText = 'position:absolute;background:var(--action-primary-disabled-background);border:1px solid var(--action-primary-disabled-border);color:var(--action-primary-disabled-foreground)';
 				dialog.append(probe);
 				const tokenStyle = getComputedStyle(probe);
-				const details = getComputedStyle(dialog.querySelector('.details-toggle')!);
-				const result = { background: style.backgroundColor, border: style.borderColor, foreground: style.color, tokenBackground: tokenStyle.backgroundColor, tokenBorder: tokenStyle.borderColor, tokenForeground: tokenStyle.color, tertiaryBackground: details.backgroundColor, tertiaryForeground: details.color };
+				const result = { background: style.backgroundColor, border: style.borderColor, foreground: style.color, tokenBackground: tokenStyle.backgroundColor, tokenBorder: tokenStyle.borderColor, tokenForeground: tokenStyle.color };
 				probe.remove();
 				return result;
 			})()
@@ -145,8 +145,6 @@ test.describe('Relay startup', () => {
 		expect(disabledCollectStyle.background).toBe(disabledCollectStyle.tokenBackground);
 		expect(disabledCollectStyle.border).toBe(disabledCollectStyle.tokenBorder);
 		expect(disabledCollectStyle.foreground).toBe(disabledCollectStyle.tokenForeground);
-		expect(disabledCollectStyle.background).not.toBe(disabledCollectStyle.tertiaryBackground);
-		expect(disabledCollectStyle.foreground).not.toBe(disabledCollectStyle.tertiaryForeground);
 		const beforeZeroPointCollection = await publishedWorldStateCount();
 		await expect.poll(publishedWorldStateCount).toBe(beforeZeroPointCollection);
 		const originalViewport = page.viewportSize() ?? { width: 1280, height: 720 };
@@ -163,27 +161,24 @@ test.describe('Relay startup', () => {
 			if (width === 390) await expectIconCloseButton(closeButton, '閉じる');
 			const visibleButtonStyles = await activeDialog.evaluate((dialog) => {
 				const collect = getComputedStyle(dialog.querySelector('.collect-button')!);
-				const neutral = getComputedStyle(dialog.querySelector('.details-toggle')!);
-				return { collectBackground: collect.backgroundColor, collectBorder: collect.borderColor, collectForeground: collect.color, neutralBackground: neutral.backgroundColor };
+				return { collectBackground: collect.backgroundColor, collectBorder: collect.borderColor, collectForeground: collect.color };
 			});
 			expect(visibleButtonStyles.collectBackground).toBe(disabledCollectStyle.background);
 			expect(visibleButtonStyles.collectBorder).toBe(disabledCollectStyle.border);
 			expect(visibleButtonStyles.collectForeground).toBe(disabledCollectStyle.foreground);
-			expect(visibleButtonStyles.collectBackground).not.toBe(visibleButtonStyles.neutralBackground);
 			const layout = await activeDialog.evaluate((dialog) => {
 				const cards = [...dialog.querySelectorAll<HTMLElement>('.result-card')];
 				const cardRects = cards.map((card) => card.getBoundingClientRect());
 				const resultList = dialog.querySelector('.result-list')!.getBoundingClientRect();
 				const status = dialog.querySelector('.status-group')!.getBoundingClientRect();
 				const button = dialog.querySelector('.collect-button')!.getBoundingClientRect();
-				const details = dialog.querySelector('.details-section')!.getBoundingClientRect();
 				const close = dialog.querySelector('.action-button-close')!.getBoundingClientRect();
 				return {
 					columns: new Set(cardRects.map((rect) => Math.round(rect.left))).size,
 					cardsOverlap: cardRects[0].right > cardRects[1].left && cardRects[0].left < cardRects[1].right && cardRects[0].bottom > cardRects[1].top && cardRects[0].top < cardRects[1].bottom,
 					cardsSameHeight: Math.abs(cardRects[0].height - cardRects[1].height) < 1,
 					horizontalOverflow: dialog.scrollWidth > dialog.clientWidth || document.documentElement.scrollWidth > document.documentElement.clientWidth,
-					dialogOrder: close.top <= resultList.top && resultList.bottom <= status.top && status.bottom <= button.top && button.bottom <= details.top,
+					dialogOrder: close.top <= resultList.top && resultList.bottom <= status.top && status.bottom <= button.top,
 					buttonFillsRow: Math.abs(button.width - resultList.width) < 1,
 					buttonHeight: button.height,
 					buttonWithinViewport: button.left >= 0 && button.right <= innerWidth
@@ -200,23 +195,38 @@ test.describe('Relay startup', () => {
 			expect(layout.buttonWithinViewport).toBe(true);
 		}
 		await page.setViewportSize(originalViewport);
-		await expect(activeDialog.getByRole('button', { name: '詳細を見る' })).toHaveAttribute('aria-expanded', 'false');
-		await activeDialog.getByRole('button', { name: '詳細を見る' }).click();
-		await expect(activeDialog).toContainText('現在のポイント速度');
-		await expect(activeDialog).toContainText('最大蓄積');
-		await expect(activeDialog).toContainText('1時間の作業で寿命');
-		await expect(activeDialog).toContainText('推論加速');
-		await expect(activeDialog).toContainText('最大寿命');
-		await expect(activeDialog.getByRole('button', { name: '詳細を閉じる' })).toHaveAttribute('aria-expanded', 'true');
+		await expect(activeDialog.getByRole('button', { name: /詳細を見る|詳細を閉じる/ })).toHaveCount(0);
+		for (const detail of ['現在のポイント速度', '最大蓄積', '1時間の作業で寿命', '推論加速', '最大寿命']) await expect(activeDialog).not.toContainText(detail);
 		await page.setViewportSize({ width: 390, height: 520 });
-		const detailLayout = await activeDialog.evaluate((dialog) => ({
+		const dialogLayout = await activeDialog.evaluate((dialog) => ({
 			horizontalOverflow: dialog.scrollWidth > dialog.clientWidth || document.documentElement.scrollWidth > document.documentElement.clientWidth,
 			verticalOverflow: dialog.scrollHeight > dialog.clientHeight
 		}));
-		expect(detailLayout.horizontalOverflow).toBe(false);
-		expect(detailLayout.verticalOverflow).toBe(true);
+		expect(dialogLayout.horizontalOverflow).toBe(false);
+		expect(dialogLayout.verticalOverflow).toBe(true);
 		await expect(closeButton).toBeInViewport({ ratio: 1 });
 		await page.setViewportSize(originalViewport);
+		await closeButton.click();
+		await page.getByRole('button', { name: '自分のプロフィールを開く' }).click();
+		const selfProfile = page.getByRole('dialog');
+		const workDetails = selfProfile.getByRole('region', { name: '作業情報' });
+		await expect(workDetails).toBeVisible();
+		await expect(workDetails).toContainText('現在のポイント速度');
+		await expect(workDetails).toContainText('1.00 pt/分');
+		await expect(workDetails).toContainText('最大蓄積');
+		await expect(workDetails).toContainText('5分');
+		await expect(workDetails).toContainText('1時間の作業で寿命');
+		await expect(workDetails).toContainText('+6分');
+		await expect(workDetails).toContainText('推論加速');
+		await expect(workDetails).toContainText('×1.00（有効作業 残り23時間59分）');
+		await expect(workDetails).toContainText('最大寿命');
+		await expect(workDetails).toContainText('7日');
+		await expect(selfProfile).toContainText('Root Point');
+		await expect(selfProfile).toContainText('脱出');
+		await expect(selfProfile.locator('.ability-row')).toHaveCount(3);
+		await selfProfile.getByRole('button', { name: '閉じる' }).click();
+		await terminal.click();
+		await expect(page.getByRole('dialog')).toBeVisible();
 		await expect(page.locator('[data-unified-status-hud] [data-mending-status]')).toHaveAttribute('aria-label', '作業中');
 		await expect(page.locator('[data-unified-status-hud] [data-mending-status]')).toHaveAttribute('data-mending-icon', 'tool');
 		await expect(page.locator('[data-unified-status-hud] [data-mending-rate]')).toHaveText('1.00 pt/分+0.1h/h');
@@ -326,7 +336,6 @@ test.describe('Relay startup', () => {
 			const horizontalOverflow = await dialog.evaluate((element) => element.scrollWidth > element.clientWidth || document.documentElement.scrollWidth > innerWidth);
 			expect(horizontalOverflow).toBe(false);
 			await expect(collect).toBeDisabled();
-			await dialog.getByRole('button', { name: '詳細を見る' }).click({ trial: true });
 			expect(await readLayout()).toEqual(before);
 		};
 		await assertCollectionLayout({ width: 1280, height: 800 }, 1);

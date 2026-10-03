@@ -742,6 +742,8 @@ test('opens an active field participant profile by pubkey and renders only match
 	await expect(dialog).toContainText('推論効率');
 	await expect(dialog).toContainText('コンテキスト容量');
 	await expect(dialog).toContainText('ハルシネーション抑制');
+	await expect(dialog.locator('.work-details')).toHaveCount(0);
+	await expect(dialog.getByRole('heading', { name: '作業情報' })).toHaveCount(0);
 	await expect(dialog).toContainText(`${expectedProfilePoints} pt`);
 	await expect(dialog).toContainText('678 RP');
 	await expect(dialog.locator('.profile-state-status')).toHaveCount(0);
