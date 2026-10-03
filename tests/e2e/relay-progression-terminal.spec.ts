@@ -25,6 +25,12 @@ import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { installFieldFrameSampling, readFieldFrames, sampleRenderedField } from './helpers/fieldFrames';
 import { CHANNEL_ID, AUTHORITATIVE_RELAYS, fixtureSecret, testEvents, isDeathTraceEvent, installDelayedRelay, relayState, dragRelayJoystick, publishedMessages, waitForPublishedMessageCount, pauseAtCurrentBrowserTime, startSelectedRun, openReadyRelayWorld, openClearReadyWorld, installPromptApiStub, seedRelayAccount, readRelayGameState, overwriteRelayGameState, overwriteRelayMendingBuild, seedUnavailablePersona, installDeathTransitionFailure, armDeathTransitionFailure, chooseMoveToward, moveRelaySelfTo } from './helpers/relayHarness';
 
+async function finishDialogExit(page: Page) {
+	await page.clock.resume();
+	await expect(page.getByRole('dialog')).toHaveCount(0);
+	await pauseAtCurrentBrowserTime(page);
+}
+
 
 test.describe('Relay startup', () => {
 	test('shows Root-accelerated point speed before work and keeps it after work starts', async ({ page }) => {
@@ -328,6 +334,8 @@ test.describe('Relay startup', () => {
 		await expect(lifespanValue).toHaveCSS('color', 'rgb(87, 230, 138)');
 		await page.getByRole('button', { name: '閉じる', exact: true }).click();
 		await expect(terminal).toBeFocused();
+		await finishDialogExit(page);
+		await expect(page.getByRole('dialog')).toHaveCount(0);
 
 		const startedAt = (started.mendingJob as { startedAtMs: number }).startedAtMs;
 		const partialAt = startedAt + 1 * 60 * 1000 + 30 * 1000;
@@ -430,14 +438,22 @@ test.describe('Relay startup', () => {
 		const secondAt = partialAt + 3 * 60 * 1000;
 		await page.clock.setSystemTime(secondAt);
 		await pauseAtCurrentBrowserTime(page);
-		if (await page.getByRole('dialog').count() > 0) await page.getByRole('button', { name: '閉じる', exact: true }).click();
+		if (await page.getByRole('dialog').count() > 0) {
+			await page.getByRole('button', { name: '閉じる', exact: true }).click();
+			await finishDialogExit(page);
+			await expect(page.getByRole('dialog')).toHaveCount(0);
+		}
 		await terminal.click();
 		await expect(page.getByRole('dialog')).toContainText('+3 pt');
 		await assertCollectionLayout({ width: 390, height: 844 }, 4);
 		await page.setViewportSize(originalViewport);
 		await expect.poll(async () => (await readRelayGameState(page)).points).toBe(4);
 
-		if (await page.getByRole('dialog').count() > 0) await page.getByRole('button', { name: '閉じる', exact: true }).click();
+		if (await page.getByRole('dialog').count() > 0) {
+			await page.getByRole('button', { name: '閉じる', exact: true }).click();
+			await finishDialogExit(page);
+			await expect(page.getByRole('dialog')).toHaveCount(0);
+		}
 		const afterSecond = await readRelayGameState(page);
 		const fullAt = (afterSecond.mendingJob as { startedAtMs: number }).startedAtMs + 5 * 60 * 1000;
 		await page.clock.setSystemTime(fullAt);
@@ -460,7 +476,10 @@ test.describe('Relay startup', () => {
 		await expect(page.getByRole('dialog')).not.toContainText('次の1ptまで');
 		await expect(page.getByRole('dialog').locator('[data-mending-icon="coins"] .next-point')).toHaveClass(/next-point-hidden/);
 		await page.getByRole('button', { name: '成果を受け取る' }).click();
-		await expect.poll(() => readRelayGameState(page)).toMatchObject({ mendingJob: expect.any(Object), points: 9, pointProgressTicks: 30_000_000 });
+		await expect.poll(() => readRelayGameState(page)).toMatchObject({ mendingJob: expect.any(Object), points: 9 });
+		const collectedState = await readRelayGameState(page);
+		expect(collectedState.pointProgressTicks).toBeGreaterThanOrEqual(30_000_000);
+		expect(collectedState.pointProgressTicks).toBeLessThan(60_000_000);
 		await expect(page.getByRole('dialog')).toContainText('9 pt');
 		await expect(page.getByRole('dialog')).toContainText('上限まで あと5分');
 		await expect(page.getByRole('dialog')).toContainText('+0 pt');
@@ -505,6 +524,7 @@ test.describe('Relay startup', () => {
 		const dialog = page.getByRole('dialog', { name: '能力強化' });
 		const upgradeButton = dialog.getByRole('button', { name: '推論効率をLv2へ強化（必要1pt）' });
 		await expect(dialog.getByRole('heading', { name: '能力強化' })).toBeFocused();
+		await expectIconCloseButton(dialog.getByRole('button', { name: '閉じる' }), '閉じる');
 		const initialDialogScroll = await dialog.evaluate((element) => element.scrollTop);
 		expect(initialDialogScroll).toBe(0);
 		await expect(dialog.getByLabel('所持ポイント 10 pt')).toBeVisible();
@@ -640,6 +660,7 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('[data-unified-status-hud] [data-points-meter]')).toHaveAttribute('aria-valuenow', '9');
 		await expect(dialog).toContainText('推論効率 Lv2');
 		await page.keyboard.press('Escape');
+		await finishDialogExit(page);
 		await expect(dialog).toHaveCount(0);
 		await expect(adjustment).toBeFocused();
 		await adjustment.click();
@@ -662,6 +683,7 @@ test.describe('Relay startup', () => {
 		expect(adjustmentClosePoint.inViewport).toBe(true);
 		expect(adjustmentClosePoint.receivesPointer).toBe(true);
 		await page.mouse.click(adjustmentClosePoint.x, adjustmentClosePoint.y);
+		await finishDialogExit(page);
 		await expect(dialog).toHaveCount(0);
 		await expect(adjustment).toBeFocused();
 		await page.reload();

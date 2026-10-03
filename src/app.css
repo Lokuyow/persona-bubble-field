@@ -1,5 +1,10 @@
 :root {
 	--app-background: #161921;
+	--motion-duration-interaction: 100ms;
+	--motion-duration-dialog-enter: 140ms;
+	--motion-duration-dialog-exit: 80ms;
+	--motion-easing-standard: cubic-bezier(.2, .7, .2, 1);
+	--motion-easing-exit: ease-in;
 	--color-accent: #cf06fe;
 	--color-accent-soft: #fbe9ff;
 	--color-focus-ring: #6dabb9;
@@ -114,7 +119,48 @@ button:not(:where(.trace-root-bubble, .trace-reply-content-button, .timeline-nam
 	line-height: 1.2;
 	text-align: center;
 	cursor: pointer;
-	transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+	transition: background-color var(--motion-duration-interaction) var(--motion-easing-standard), border-color var(--motion-duration-interaction) var(--motion-easing-standard), color var(--motion-duration-interaction) var(--motion-easing-standard), scale var(--motion-duration-interaction) var(--motion-easing-standard);
+}
+
+.action-button:active:not(:disabled) { scale: .98; }
+
+[data-dialog-overlay] {
+	transition: opacity var(--motion-duration-dialog-enter) var(--motion-easing-standard);
+}
+
+[data-dialog-overlay][data-starting-style],
+[data-dialog-overlay][data-ending-style] { opacity: 0; }
+
+@starting-style {
+	[data-dialog-overlay][data-state='open'] { opacity: 0; }
+}
+
+[data-dialog-overlay][data-ending-style] {
+	transition-duration: var(--motion-duration-dialog-exit);
+	transition-timing-function: var(--motion-easing-exit);
+}
+
+[data-dialog-content] {
+	scale: 1;
+	transition: opacity var(--motion-duration-dialog-enter) var(--motion-easing-standard), scale var(--motion-duration-dialog-enter) var(--motion-easing-standard);
+}
+
+[data-dialog-content][data-starting-style] {
+	opacity: 0;
+	scale: .985;
+}
+
+@starting-style {
+	[data-dialog-content][data-state='open'] {
+		opacity: 0;
+		scale: .985;
+	}
+}
+
+[data-dialog-content][data-ending-style] {
+	opacity: 0;
+	transition-duration: var(--motion-duration-dialog-exit);
+	transition-timing-function: var(--motion-easing-exit);
 }
 
 .action-button-primary {
@@ -228,4 +274,14 @@ button.action-selected[aria-pressed='true']:active:not(:disabled) { background: 
 
 @media (prefers-reduced-motion: reduce) {
 	.action-button { transition-duration: 0.01ms; }
+	.action-button:active:not(:disabled) { scale: none; }
+	[data-dialog-overlay] { transition-duration: var(--motion-duration-dialog-exit); }
+	[data-dialog-content] {
+		scale: none;
+		transition-property: opacity;
+		transition-duration: var(--motion-duration-dialog-exit);
+	}
+	@starting-style {
+		[data-dialog-content][data-state='open'] { opacity: 0; scale: none; }
+	}
 }

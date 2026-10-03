@@ -150,3 +150,52 @@ test('shared action tokens expose every state on light and dark surfaces at desk
 		}
 	}
 });
+
+test('shared action buttons respond during pointer press and return to rest on release', async ({ page }) => {
+	await page.goto('/');
+	await page.emulateMedia({ reducedMotion: 'no-preference' });
+	await page.evaluate(() => {
+		const fixture = document.createElement('div');
+		fixture.dataset.motionButtonFixture = 'true';
+		fixture.style.cssText = 'position:fixed;z-index:9999;inset:16px auto auto 16px;display:flex;gap:12px';
+		fixture.innerHTML = '<button class="action-button action-button-primary">Enabled</button><button class="action-button action-button-primary" disabled>Disabled</button>';
+		document.body.append(fixture);
+	});
+
+	const enabled = page.locator('[data-motion-button-fixture] button').first();
+	const disabled = page.locator('[data-motion-button-fixture] button').nth(1);
+	const restBounds = await enabled.boundingBox();
+	const disabledBounds = await disabled.boundingBox();
+	expect(restBounds).not.toBeNull();
+	expect(disabledBounds).not.toBeNull();
+	await page.mouse.move(restBounds!.x + restBounds!.width / 2, restBounds!.y + restBounds!.height / 2);
+	await page.mouse.down();
+	await expect.poll(async () => (await enabled.boundingBox())?.width ?? 0).toBeLessThan(restBounds!.width);
+	await page.mouse.up();
+	await expect.poll(async () => (await enabled.boundingBox())?.width ?? 0).toBe(restBounds!.width);
+
+	await disabled.hover();
+	await page.mouse.down();
+	await page.mouse.up();
+	expect(await disabled.boundingBox()).toEqual(disabledBounds);
+});
+
+test('reduced motion suppresses shared ActionButton press scaling', async ({ page }) => {
+	await page.goto('/');
+	await page.emulateMedia({ reducedMotion: 'reduce' });
+	await page.evaluate(() => {
+		const button = document.createElement('button');
+		button.className = 'action-button action-button-primary';
+		button.dataset.motionButton = 'true';
+		button.textContent = 'Press';
+		button.style.cssText = 'position:fixed;z-index:9999;top:16px;left:16px';
+		document.body.append(button);
+	});
+	const button = page.locator('[data-motion-button]');
+	const restBounds = await button.boundingBox();
+	expect(restBounds).not.toBeNull();
+	await page.mouse.move(restBounds!.x + restBounds!.width / 2, restBounds!.y + restBounds!.height / 2);
+	await page.mouse.down();
+	expect(await button.boundingBox()).toEqual(restBounds);
+	await page.mouse.up();
+});

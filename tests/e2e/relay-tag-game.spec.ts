@@ -668,6 +668,7 @@ test('plays tag-game start, scheduled switch, confirmed transfer, and end cues f
 		startAt, participant, settledAtMs: (startAt - 5) * 1_000 };
 	await page.setViewportSize({ width: 390, height: 844 });
 	await injectRealtime(page, finalizeTagGameState(countdown, CHANNEL_ID, startAt - 5, hostSecret));
+	await page.clock.runFor(250);
 	await expect(page.getByRole('dialog', { name: '鬼ごっこ' })).toBeHidden();
 	await expect(page.locator('[data-tag-game-countdown]')).toBeVisible();
 	await expect(page.locator('[data-tag-game-countdown]')).toHaveAttribute('data-countdown-seconds', /[1-5]/);
@@ -857,12 +858,18 @@ async function openTagGameTerminal(page: Page): Promise<void> {
 	const position = await self.getAttribute('data-position');
 	const action = page.locator('[data-cell-action="tag-game-terminal"]');
 	const dialog = page.getByRole('dialog', { name: '鬼ごっこ' });
+	if (await dialog.count() && await dialog.getAttribute('data-state') === 'closed') {
+		await expect(dialog).toHaveCount(0);
+	}
 	await expect.poll(async () => {
 		if (await dialog.isVisible()) return true;
 		await clickRelayLogicalCell(page, TAG_GAME_TERMINAL.position);
 		if (await action.isVisible()) await action.click();
 		return dialog.isVisible();
 	}, { timeout: 10_000, message: `Expected the tag-game terminal to open from self position ${position}.` }).toBe(true);
+	const timeBeforeGeometry = await page.evaluate(() => Date.now());
+	await page.clock.runFor(16);
+	await page.clock.setSystemTime(timeBeforeGeometry);
 	await expectIconCloseButton(page.getByRole('dialog', { name: '鬼ごっこ' }).getByRole('button', { name: '閉じる' }), '閉じる');
 }
 
@@ -2848,7 +2855,7 @@ test('organizer-confirmed leave settles the two-player game and releases the qui
 		const historicalResult = leaverPage.getByRole('dialog', { name: '鬼ごっこ中断' });
 		await expect(historicalResult.locator(`[data-tag-game-result-participant="${leaverPubkey}"]`)).toContainText('退出');
 		await historicalResult.getByRole('button', { name: '閉じる', exact: true }).click();
-		await leaverPage.getByRole('dialog', { name: '鬼ごっこ' }).getByRole('button', { name: '閉じる', exact: true }).click();
+		await leaverPage.getByRole('dialog', { name: '鬼ごっこ', exact: true }).getByRole('button', { name: '閉じる', exact: true }).click();
 
 		await leaverPage.clock.setSystemTime(running.startedAt! * 1_000 + 10_000);
 		await moveRelaySelfTo(leaverPage, { x: 13, y: 3 });
@@ -3249,6 +3256,9 @@ test('does not show unselected games and lets a spectator choose and clear one t
 	await expect(page.locator('[data-tag-game-hud]')).toHaveAttribute('data-tag-game-hud-id', gameBId);
 	await expect(page.locator('[data-tag-game-hud] [data-tag-game-effect]')).toContainText('所持者以外が追いかけて奪う');
 	await page.getByRole('dialog', { name: '鬼ごっこ' }).getByRole('button', { name: '閉じる' }).click();
+	const timeBeforeExit = await page.evaluate(() => Date.now());
+	await page.clock.runFor(100);
+	await page.clock.setSystemTime(timeBeforeExit);
 	await expect(page.getByRole('dialog', { name: '鬼ごっこ' })).toHaveCount(0);
 	await expect(page.locator('[data-tag-game-hud]')).toHaveAttribute('data-tag-game-hud-id', gameBId);
 	await openTagGameTerminal(page);
