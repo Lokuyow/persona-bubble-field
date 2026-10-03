@@ -55,7 +55,7 @@ test.describe('Relay startup', () => {
 		const profileTrigger = page.getByRole('button', { name: '自分のプロフィールを開く' });
 		await profileTrigger.click();
 		const beforeWorkProfile = page.getByRole('dialog');
-		const beforeWorkDetails = beforeWorkProfile.getByRole('region', { name: '作業情報' });
+		const beforeWorkDetails = beforeWorkProfile.getByRole('region', { name: '詳細' });
 		await expect(beforeWorkDetails).toContainText('現在のポイント速度');
 		await expect(beforeWorkDetails).toContainText('2.00 pt/分');
 		await expect(beforeWorkDetails).toContainText('推論加速');
@@ -70,7 +70,7 @@ test.describe('Relay startup', () => {
 		await page.getByRole('dialog').getByRole('button', { name: '閉じる', exact: true }).click();
 		await profileTrigger.click();
 		const activeWorkProfile = page.getByRole('dialog');
-		const activeWorkDetails = activeWorkProfile.getByRole('region', { name: '作業情報' });
+		const activeWorkDetails = activeWorkProfile.getByRole('region', { name: '詳細' });
 		await expect(activeWorkDetails).toContainText('×2.00');
 		await expect(activeWorkDetails).toContainText('有効作業 残り');
 		await expect(activeWorkDetails).toContainText('2.00 pt/分');
@@ -93,7 +93,7 @@ test.describe('Relay startup', () => {
 			relay.releasePrimary();
 		});
 		await page.getByRole('button', { name: '自分のプロフィールを開く' }).click();
-		const workDetails = page.getByRole('dialog').getByRole('region', { name: '作業情報' });
+		const workDetails = page.getByRole('dialog').getByRole('region', { name: '詳細' });
 		await expect(workDetails).toContainText('1.00 pt/分');
 		await expect(workDetails).toContainText('×2.00（有効作業 残り0分）');
 	});
@@ -281,7 +281,7 @@ test.describe('Relay startup', () => {
 		await closeButton.click();
 		await page.getByRole('button', { name: '自分のプロフィールを開く' }).click();
 		const selfProfile = page.getByRole('dialog');
-		const workDetails = selfProfile.getByRole('region', { name: '作業情報' });
+		const workDetails = selfProfile.getByRole('region', { name: '詳細' });
 		await expect(workDetails).toBeVisible();
 		await expect(workDetails).toContainText('現在のポイント速度');
 		await expect(workDetails).toContainText('1.00 pt/分');

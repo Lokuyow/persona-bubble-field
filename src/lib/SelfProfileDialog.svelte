@@ -66,7 +66,7 @@
 		</div>
 		<div class="profile-section">
 			<section class="work-details" aria-labelledby="self-profile-work-details">
-				<h3 id="self-profile-work-details">作業情報</h3>
+				<h3 id="self-profile-work-details">詳細</h3>
 				<dl>
 					<div><dt>現在のポイント速度</dt><dd>{(workPointRate / 100).toFixed(2)} pt/分</dd></div>
 					<div><dt>最大蓄積</dt><dd>{formatElapsedDuration(workCapacityMs)}</dd></div>
