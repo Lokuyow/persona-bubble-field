@@ -218,6 +218,7 @@ test.describe('DEV World Sandbox', () => {
 		await page.mouse.move(profileBox.x + profileBox.width / 2, profileBox.y + profileBox.height / 2);
 		const profileHoverBackground = await profile.evaluate((button) => getComputedStyle(button).backgroundColor);
 		expect(profileHoverBackground).not.toBe(layout.profileBackground);
+		expect(profileHoverBackground).toBe(contentHoverBackground);
 		await profile.focus();
 		await expect(profile).toBeFocused();
 		expect(await profile.evaluate((button) => getComputedStyle(button).outlineWidth)).toBe('3px');
@@ -306,9 +307,48 @@ test.describe('DEV World Sandbox', () => {
 			expect(shape.boundaryGap).toBeLessThan(0.5);
 			expect(shape.sharedVerticalExtent).toBe(true);
 			await profile.hover();
-			expect(await profile.evaluate((button) => getComputedStyle(button).backgroundColor)).toBe('rgba(0, 0, 0, 0)');
+			const profileHover = await card.evaluate((element) => {
+				const svg = element.querySelector<SVGSVGElement>('.bubble-surface')!;
+				const profileFill = svg.querySelector<SVGUseElement>('.trace-profile-hit-area-hover')!;
+				const contentFill = svg.querySelector<SVGUseElement>('.trace-content-hit-area-hover')!;
+				const profileClip = svg.querySelector<SVGRectElement>('[data-reply-hit-area="profile"]')!;
+				const contentClip = svg.querySelector<SVGRectElement>('[data-reply-hit-area="content"]')!;
+				const profileBox = element.querySelector<HTMLElement>('.trace-reply-author-profile')!.getBoundingClientRect();
+				const svgBox = svg.getBoundingClientRect();
+				const viewBox = svg.viewBox.baseVal;
+				const expectedSplit = viewBox.x + ((profileBox.right - svgBox.left) / svgBox.width) * viewBox.width;
+				return {
+					profileOpacity: Number(getComputedStyle(profileFill).opacity),
+					contentOpacity: Number(getComputedStyle(contentFill).opacity),
+					profileClipX: Number(profileClip.getAttribute('x')),
+					profileClipWidth: Number(profileClip.getAttribute('width')),
+					contentClipX: Number(contentClip.getAttribute('x')),
+					contentClipWidth: Number(contentClip.getAttribute('width')),
+					expectedSplit,
+					profileShape: profileFill.getAttribute('href') === contentFill.getAttribute('href'),
+					profileBackground: getComputedStyle(element.querySelector<HTMLElement>('.trace-reply-author-profile')!).backgroundColor
+				};
+			});
+			expect(profileHover.profileOpacity).toBeGreaterThan(0);
+			expect(profileHover.contentOpacity).toBe(0);
+			expect(profileHover.profileClipWidth).toBeGreaterThan(0);
+			expect(profileHover.contentClipWidth).toBeGreaterThan(0);
+			expect(Math.abs(profileHover.profileClipX + profileHover.profileClipWidth - profileHover.contentClipX)).toBeLessThan(0.5);
+			expect(Math.abs(profileHover.contentClipX - profileHover.expectedSplit)).toBeLessThan(0.5);
+			expect(profileHover.profileShape).toBe(true);
+			expect(profileHover.profileBackground).toBe('rgba(0, 0, 0, 0)');
 			await content.hover();
-			expect(await content.evaluate((button) => getComputedStyle(button).backgroundColor)).toBe('rgba(0, 0, 0, 0)');
+			const contentHover = await card.evaluate((element) => {
+				const svg = element.querySelector<SVGSVGElement>('.bubble-surface')!;
+				return {
+					profileOpacity: Number(getComputedStyle(svg.querySelector<SVGUseElement>('.trace-profile-hit-area-hover')!).opacity),
+					contentOpacity: Number(getComputedStyle(svg.querySelector<SVGUseElement>('.trace-content-hit-area-hover')!).opacity),
+					contentBackground: getComputedStyle(element.querySelector<HTMLElement>('.trace-reply-content-button')!).backgroundColor
+				};
+			});
+			expect(contentHover.profileOpacity).toBe(0);
+			expect(contentHover.contentOpacity).toBeGreaterThan(0);
+			expect(contentHover.contentBackground).toBe('rgba(0, 0, 0, 0)');
 		}
 	});
 

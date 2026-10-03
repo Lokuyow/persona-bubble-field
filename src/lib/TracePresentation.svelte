@@ -48,6 +48,12 @@
 		? tailOutlineOpeningPoints(traceRootTailConnection.tail, layout.root.anchor)
 		: null);
 	let showCurrentSelection = $derived(Boolean(layout && layout.cards.length > 0 && currentSpeechId));
+	type ReplyHitAreaState = { pointer: 'profile' | 'content' | null; focus: 'profile' | 'content' | null };
+	let replyHitAreaStateById = $state<Record<string, ReplyHitAreaState>>({});
+	function setReplyHitArea(id: string, source: 'pointer' | 'focus', hitArea: 'profile' | 'content', active: boolean): void {
+		const state = replyHitAreaStateById[id] ?? { pointer: null, focus: null };
+		replyHitAreaStateById = { ...replyHitAreaStateById, [id]: { ...state, [source]: active ? hitArea : state[source] === hitArea ? null : state[source] } };
+	}
 
 	function bodyMeasurement(node: HTMLElement): BubbleMeasurement {
 		const content = node.querySelector<HTMLElement>('.bubble-content');
@@ -81,16 +87,36 @@
 			const body = bodyMeasurement(node);
 			onBubbleMeasurement(id, body);
 			onReplyFootprint(id, body.size);
+			const surface = node.querySelector<SVGSVGElement>('.bubble-surface');
+			const profile = node.querySelector<HTMLElement>('.trace-reply-author-profile');
+			const profileClip = surface?.querySelector<SVGRectElement>('[data-reply-hit-area="profile"]');
+			const contentClip = surface?.querySelector<SVGRectElement>('[data-reply-hit-area="content"]');
+			if (surface && profile && profileClip && contentClip) {
+				const viewBox = surface.viewBox.baseVal;
+				const svgBox = surface.getBoundingClientRect();
+				const profileBox = profile.getBoundingClientRect();
+				const split = viewBox.x + ((profileBox.right - svgBox.left) / svgBox.width) * viewBox.width;
+				profileClip.setAttribute('width', String(Math.max(0, split - viewBox.x)));
+				contentClip.setAttribute('x', String(Math.min(viewBox.x + viewBox.width, split)));
+				contentClip.setAttribute('width', String(Math.max(0, viewBox.x + viewBox.width - split)));
+			}
 		});
 		const observer = new ResizeObserver(report);
 		observer.observe(node);
 		const content = node.querySelector<HTMLElement>('.bubble-content');
 		if (content) observer.observe(content);
+		const profile = node.querySelector<HTMLElement>('.trace-reply-author-profile');
+		if (profile) observer.observe(profile);
+		const surface = node.querySelector<SVGSVGElement>('.bubble-surface');
+		if (surface) observer.observe(surface);
 		const unregister = registerReplyRemeasure(id, report);
 		report();
 		return () => untrack(() => {
 			unregister();
 			observer.disconnect();
+			const nextHitAreaState = { ...replyHitAreaStateById };
+			delete nextHitAreaState[id];
+			replyHitAreaStateById = nextHitAreaState;
 			onBubbleMeasurementRemoved(id);
 			onReplyFootprintRemoved(id);
 		});
@@ -115,13 +141,13 @@
 			style={`${bubbleToneStyle(bubble.tone, true)}; transform: translate3d(${bubble.anchor.x}px, ${bubble.anchor.y}px, 0);`}
 		>
 			{#if bubble.reply.speechType !== 'normal' && bubble.shape}
-				<BubbleSurface bubbleId={bubble.id} shape={bubble.shape} variant="trace" speechType={bubble.reply.speechType} selected={showCurrentSelection && currentSpeechId === bubble.reply.id} />
+				<BubbleSurface bubbleId={bubble.id} shape={bubble.shape} variant="trace" speechType={bubble.reply.speechType} selected={showCurrentSelection && currentSpeechId === bubble.reply.id} replyHitAreaHover hoveredReplyHitArea={replyHitAreaStateById[bubble.id]?.pointer ?? replyHitAreaStateById[bubble.id]?.focus ?? null} />
 			{/if}
-			<button class="trace-reply-author-profile" data-trace-author-block type="button" aria-label={`${bubble.character.name} のプロフィールを開く`} onclick={(event) => { event.stopPropagation(); onOpenProfile(bubble.character.characterId, bubble.reply.pubkey, event.currentTarget); }}>
+			<button class="trace-reply-author-profile" data-trace-author-block type="button" aria-label={`${bubble.character.name} のプロフィールを開く`} onpointerenter={() => setReplyHitArea(bubble.id, 'pointer', 'profile', true)} onpointerleave={() => setReplyHitArea(bubble.id, 'pointer', 'profile', false)} onfocus={() => setReplyHitArea(bubble.id, 'focus', 'profile', true)} onblur={() => setReplyHitArea(bubble.id, 'focus', 'profile', false)} onclick={(event) => { event.stopPropagation(); onOpenProfile(bubble.character.characterId, bubble.reply.pubkey, event.currentTarget); }}>
 				<span class="trace-reply-author-avatar"><CharacterAvatar class={`avatar avatar-${bubble.tone}`} character={bubble.character} /></span>
 				<span class="trace-reply-author-name">{bubble.character.name}</span>
 			</button>
-			<button class="trace-reply-content-button" type="button" onclick={(event) => { event.stopPropagation(); onSelectSpeech(bubble.reply.id); }}>
+			<button class="trace-reply-content-button" type="button" onpointerenter={() => setReplyHitArea(bubble.id, 'pointer', 'content', true)} onpointerleave={() => setReplyHitArea(bubble.id, 'pointer', 'content', false)} onfocus={() => setReplyHitArea(bubble.id, 'focus', 'content', true)} onblur={() => setReplyHitArea(bubble.id, 'focus', 'content', false)} onclick={(event) => { event.stopPropagation(); onSelectSpeech(bubble.reply.id); }}>
 				<span class="bubble-content">{bubble.reply.content}</span>
 				{#if bubbleOverflowById[bubble.id]}<span class="bubble-ellipsis" aria-hidden="true">…</span>{/if}
 			</button>
@@ -186,7 +212,7 @@
 	.trace-reply-author-avatar :global(.avatar) { width: 36px; height: 36px; }
 	.trace-reply-author-name { display: block; max-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.trace-reply-content-button { position: relative; z-index: 1; grid-column: 2; grid-row: 1; align-self: stretch; justify-self: stretch; min-width: 0; padding: 12px 15px 12px 7px; border: 0; border-radius: 0 17px 17px 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; transition: background-color 120ms ease; user-select: text; -webkit-user-select: text; }
-	.trace-reply-author-profile:hover { background: color-mix(in srgb, var(--tone-outline) 30%, var(--trace-surface)); }
+	.trace-reply-author-profile:hover { background: color-mix(in srgb, var(--tone-outline) 12%, var(--trace-surface)); }
 	.trace-reply-content-button:hover { background: color-mix(in srgb, var(--tone-outline) 12%, var(--trace-surface)); }
 	.trace-reply-author-profile:focus-visible,
 	.trace-reply-content-button:focus-visible,
