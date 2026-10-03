@@ -1,7 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { installFieldFrameSampling, sampleRenderedField } from './helpers/fieldFrames';
-import { openDevTraceWorld, openDevWorld, fieldOwnedBlankPoint, installTraceGeometryFrameSampling, sampleTraceGeometryFrames, profileTrigger, profileDialog } from './helpers/devWorldHarness';
+import { openDevTraceWorld, openDevWorld, fieldOwnedBlankPoint, installTraceGeometryFrameSampling, sampleTraceGeometryFrames, profileTrigger, profileDialog, blankCellPoint } from './helpers/devWorldHarness';
 
 
 test.describe('DEV World Sandbox', () => {
@@ -76,10 +76,8 @@ test.describe('DEV World Sandbox', () => {
 		const preview = page.getByLabel('Reply preview', { exact: true });
 		const selectCell = async (position: string) => {
 			const cell = page.locator(`[data-cell-position="${position}"]`);
-			const box = await cell.boundingBox();
-			if (!box) throw new Error('Expected a visible Trace cell');
-			// The root and its compact same-cell reply occupy the center and lower-right corner.
-			await cell.click({ position: { x: 2, y: 2 } });
+			await cell.focus();
+			await page.keyboard.press('Enter');
 		};
 		await editor.fill('top-level draft');
 		await selectCell('8,4');
@@ -90,14 +88,18 @@ test.describe('DEV World Sandbox', () => {
 		await page.getByRole('button', { name: 'Clear reply', exact: true }).click();
 		await expect(preview).toHaveCount(0);
 		await expect(editor).toHaveValue('preserved A');
-		await page.locator('.field-area').click({ position: { x: 8, y: 8 } });
+		const blank = await fieldOwnedBlankPoint(page, { x: 5, y: 5 });
+		await page.mouse.click(blank.x, blank.y);
 		await expect(page.locator('[data-trace-marker-position="8,4"]')).toHaveCount(1);
 		await selectCell('8,4');
 		const menu = page.getByRole('menu');
 		if (await menu.isVisible()) await page.getByRole('menuitem', { name: '痕跡を調べる', exact: true }).click();
 		await expect(preview).toHaveAttribute('data-reply-id', '2'.repeat(64));
 		await expect(editor).toHaveValue('preserved A');
-		await page.locator('.field-area').click({ position: { x: 8, y: 8 } });
+		{
+			const blank = await fieldOwnedBlankPoint(page, { x: 5, y: 5 });
+			await page.mouse.click(blank.x, blank.y);
+		}
 		await expect(preview).toHaveCount(0);
 		await expect(editor).toHaveValue('preserved A');
 		await selectCell('8,4');
@@ -691,7 +693,10 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '6,3');
 		await expect(page.locator('[data-trace-root-id="' + '3'.repeat(64) + '"]')).toBeVisible();
 
-		await page.locator('.field-area').click({ position: { x: 8, y: 8 } });
+		{
+			const blank = await fieldOwnedBlankPoint(page, { x: 5, y: 5 });
+			await page.mouse.click(blank.x, blank.y);
+		}
 		await expect(page.locator('.trace-root-bubble')).toHaveCount(0);
 		await expect(page.locator('[data-trace-marker-position="8,4"]')).toHaveCount(1);
 		await expect(markers).toHaveCount(4);
@@ -708,14 +713,8 @@ test.describe('DEV World Sandbox', () => {
 		await expect(page.locator('[data-trace-marker-position="8,4"]')).toHaveCount(0);
 		await expect(page.locator('[data-trace-indicator-position="8,4"]')).toHaveCount(0);
 		await expect(page.locator('[data-cell-position="8,4"]')).toHaveCount(0);
-		const cell = await page.locator('.field-grid').evaluate((grid) => {
-			const scene = document.querySelector<HTMLElement>('.field-scene');
-			if (!scene) throw new Error('Expected the field scene.');
-			return Number.parseFloat(getComputedStyle(scene).getPropertyValue('--cell-size'));
-		});
-		const grid = await page.locator('.field-grid').boundingBox();
-		if (!grid) throw new Error('Expected the field grid.');
-		await page.mouse.click(grid.x + 8 * cell + 2, grid.y + 4 * cell + 2);
+		const point = await blankCellPoint(page, { x: 8, y: 4 });
+		await page.mouse.click(point.x, point.y);
 		await expect(page.locator('.trace-root-bubble')).toHaveCount(0);
 	});
 

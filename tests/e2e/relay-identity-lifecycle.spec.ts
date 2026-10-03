@@ -30,7 +30,9 @@ test.describe('Relay startup', () => {
 		const secret = fixtureSecret(57);
 		const pubkey = getPublicKey(secret);
 		await page.clock.install({ time: startTime });
-		await installDeathTransitionClockRollback(page, startTime);
+		// World-write regression is measured in seconds, not milliseconds.
+		const rollbackTime = startTime - 2_000;
+		await installDeathTransitionClockRollback(page, rollbackTime);
 		await installHostOwnedStub(page);
 		await installDelayedRelay(page);
 		const expiresAtMs = startTime + 60_000;
@@ -41,6 +43,8 @@ test.describe('Relay startup', () => {
 			relay.releasePrimary();
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
+		const initialPosition = (await relayState(page)).state.published.find((event) => event.kind === WORLD_STATE_KIND && event.pubkey === pubkey && event.tags.some((tag) => tag[0] === 'd' && /:[01]$/.test(tag[1] ?? '')));
+		expect(initialPosition?.created_at).toBeGreaterThan(Math.floor(rollbackTime / 1_000));
 		await armDeathTransitionClockRollback(page);
 		const reloaded = page.waitForEvent('framenavigated', (frame) => frame === page.mainFrame());
 		await page.clock.setSystemTime(expiresAtMs + 1);
@@ -56,7 +60,8 @@ test.describe('Relay startup', () => {
 		// The confirmed self position is restored from the durable journal; a
 		// redundant entry on this valid Run is no longer required.
 		const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
-		await editor.fill('valid run remains publishable after rollback reconciliation');
+		expect(await page.evaluate(() => Date.now())).toBe(rollbackTime);
+		await editor.fill('regressed write clock must not publish after rollback reconciliation');
 		await page.locator('ehagaki-composer').getByRole('button', { name: 'Send' }).click();
 		expect((await relayState(page)).state.published.some((event) => event.kind === 42 && event.pubkey === pubkey)).toBe(false);
 	});
@@ -115,9 +120,20 @@ test.describe('Relay startup', () => {
 		});
 		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${oldPubkey}"]`)).toBeVisible();
 		await moveRelaySelfTo(page, { x: 11, y: 3 });
+		// Hold the automatic start so death wins the lifecycle CAS deterministically.
+		await page.evaluate(() => {
+			let release: (() => void) | null = null;
+			let started = false;
+			(window as typeof window & { __personaBubbleFieldTestHooks: { started: () => boolean; release: () => void; beforeMendingMutation: () => Promise<void> } }).__personaBubbleFieldTestHooks = {
+				started: () => started,
+				release: () => { release?.(); release = null; },
+				beforeMendingMutation: async () => { started = true; await new Promise<void>((resolve) => { release = resolve; }); }
+			};
+		});
 		await page.getByRole('button', { name: '作業端末' }).click();
 		await expect(page.getByRole('dialog')).toBeVisible();
 		await expect(page.getByRole('button', { name: '作業を開始' })).toHaveCount(0);
+		await expect.poll(() => page.evaluate(() => (window as typeof window & { __personaBubbleFieldTestHooks: { started: () => boolean } }).__personaBubbleFieldTestHooks.started())).toBe(true);
 
 		const deathTab = await page.context().newPage();
 		try {
@@ -129,8 +145,10 @@ test.describe('Relay startup', () => {
 			await deathTab.reload({ waitUntil: 'domcontentloaded' });
 			await expect(deathTab.getByRole('dialog')).toBeVisible();
 
-			await page.getByRole('dialog').getByRole('button', { name: '閉じる', exact: true }).click();
-			await page.reload({ waitUntil: 'domcontentloaded' });
+			await expect(deathTab.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
+			const reloaded = page.waitForEvent('framenavigated', (frame) => frame === page.mainFrame());
+			await page.evaluate(() => (window as typeof window & { __personaBubbleFieldTestHooks: { release: () => void } }).__personaBubbleFieldTestHooks.release());
+			await reloaded;
 			await expect(page.getByRole('dialog')).toBeVisible();
 			await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
 		} finally {

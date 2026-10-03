@@ -108,14 +108,6 @@ export function mergedTailFraction(index: number, count: number): number {
 	return edgeInset + (1 - edgeInset * 2) * (index / (count - 1));
 }
 
-export function mergedTailStart(anchor: WorldPoint, size: Size, index: number, count: number): WorldPoint {
-	return { x: anchor.x + size.width * mergedTailFraction(index, count), y: anchor.y + size.height };
-}
-
-export function mergedTailConnectionStyle(index: number, count: number): string {
-	return `left: ${mergedTailFraction(index, count) * 100}%;`;
-}
-
 export function mergedBubbleStyle(memberCount: number): string {
 	const level = Math.min(Math.max(memberCount, 2), 4) - 2;
 	return [
@@ -156,6 +148,47 @@ export function tailGeometry(start: WorldPoint, target: WorldPoint, width = 11, 
 		target,
 		seamOffsetX: seamCenterX - start.x
 	};
+}
+
+export type LiveTailConnection = Readonly<{
+	participantId: string;
+	edge: 'top' | 'right' | 'bottom' | 'left';
+	seam: WorldPoint;
+	tail: ReturnType<typeof tailGeometry>;
+}>;
+
+/** Select and distribute live seams on the edge facing each current character. */
+export function liveTailConnections(anchor: WorldPoint, size: Size, members: readonly Readonly<{ id: string; bounds: Bounds }>[], speechType: SpeechType, merged: boolean): LiveTailConnection[] {
+	const center = bubbleCenter(anchor, size);
+	const facing = members.map((member) => {
+		const targetCenter = { x: member.bounds.x + member.bounds.width / 2, y: member.bounds.y + member.bounds.height / 2 };
+		const dx = targetCenter.x - center.x, dy = targetCenter.y - center.y;
+		const edge: LiveTailConnection['edge'] = Math.abs(dx) / size.width > Math.abs(dy) / size.height
+			? dx > 0 ? 'right' : 'left' : dy > 0 ? 'bottom' : 'top';
+		return { ...member, edge };
+	});
+	return facing.map((member) => {
+		const peers = facing.filter((candidate) => candidate.edge === member.edge);
+		const fraction = merged ? mergedTailFraction(peers.indexOf(member), peers.length) : 0.5;
+		const horizontal = member.edge === 'top' || member.edge === 'bottom';
+		const start = horizontal
+			? { x: anchor.x + size.width * fraction, y: anchor.y + (member.edge === 'bottom' ? size.height : 0) }
+			: { x: anchor.x + (member.edge === 'right' ? size.width : 0), y: anchor.y + size.height * fraction };
+		const b = member.bounds;
+		const target = horizontal
+			? { x: b.x + b.width / 2, y: member.edge === 'bottom' ? b.y - 4 : b.y + b.height + 4 }
+			: { x: member.edge === 'right' ? b.x - 4 : b.x + b.width + 4, y: b.y + b.height / 2 };
+		const tail = tailGeometry(start, target, merged ? 9 : 11, 2, specialTailExtension(speechType));
+		const base = { x: (tail.rootLeft.x + tail.rootRight.x) / 2, y: (tail.rootLeft.y + tail.rootRight.y) / 2 };
+		const progress = horizontal ? (start.y - base.y) / (target.y - base.y || 1) : (start.x - base.x) / (target.x - base.x || 1);
+		return { participantId: member.id, edge: member.edge,
+			seam: { x: base.x + (target.x - base.x) * progress - anchor.x, y: base.y + (target.y - base.y) * progress - anchor.y }, tail };
+	});
+}
+
+export function liveTailSeamStyle(connection: LiveTailConnection, merged: boolean): string {
+	const horizontal = connection.edge === 'top' || connection.edge === 'bottom';
+	return `--tail-seam-x: ${connection.seam.x}px; --tail-seam-y: ${connection.seam.y}px; --tail-seam-width: ${horizontal ? merged ? 9 : 11 : 3}px; --tail-seam-height: ${horizontal ? 3 : merged ? 9 : 11}px;`;
 }
 
 export function specialTailExtension(speechType: SpeechType): number {

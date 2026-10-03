@@ -5,9 +5,9 @@ import { finalizeEvent, getPublicKey, type Event as NostrEvent } from 'nostr-too
 import { buildTagGameActionTemplate, createTagGameSchedule, finalizeTagGameState, isFreshTagGameTouchAction, parseTagGameActionEvent, parseTagGameEvent, tagGameScheduledEffectAt, TAG_GAME_KIND, TAG_GAME_RESERVATION_RECOVERY_MS, TAG_GAME_TRANSFER_COOLDOWN_MS, type TagGameState } from '../../src/lib/tagGame';
 import { MENDING_TERMINAL, TAG_GAME_TERMINAL } from '../../src/lib/fieldFacilities';
 import { resolveCharacterFromPubkey } from '../../src/lib/characterAssignment';
-import { buildWorldMessageTemplate, buildWorldStateEventTemplate, WORLD_STATE_KIND } from '../../src/lib/nostrProtocol';
+import { buildWorldMessageTemplate, buildWorldStateEventTemplate, parseWorldStateEvent, WORLD_STATE_KIND } from '../../src/lib/nostrProtocol';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
-import { AUTHORITATIVE_RELAYS, CHANNEL_ID, clickRelayLogicalCell, fixtureSecret, installDelayedRelay, moveRelaySelfTo, relayState, seedRelayAccount, testEvents, dragRelayJoystick } from './helpers/relayHarness';
+import { AUTHORITATIVE_RELAYS, CHANNEL_ID, clickRelayLogicalCell, fixtureSecret, installDelayedRelay, moveRelaySelfTo, pauseAtCurrentBrowserTime, relayState, seedRelayAccount, testEvents, dragRelayJoystick } from './helpers/relayHarness';
 
 async function preparePlayer(page: Page, secret: Uint8Array, nowMs: number, points = 0, persistAcrossReload = false, observeWebSocketLifecycle = false): Promise<void> {
 	await page.clock.install({ time: nowMs });
@@ -336,7 +336,13 @@ async function latestTagGameStateValue<T>(page: Page, gameId: string, select: (s
 }
 
 async function latestWorldState(page: Page, author: string): Promise<NostrEvent> {
-	return latestPublished(page, WORLD_STATE_KIND, author);
+	// Profile State shares kind 30079; only parsed position evidence can prove a Run.
+	const positions = (await relayState(page)).state.published
+		.filter((event) => event.pubkey === author && parseWorldStateEvent(event as unknown as NostrEvent, CHANNEL_ID)?.state === 'active')
+		.map((event) => ({ event: event as unknown as NostrEvent, position: parseWorldStateEvent(event as unknown as NostrEvent, CHANNEL_ID)! }))
+		.sort((first, second) => second.position.createdAt - first.position.createdAt || (second.position.slot ?? -1) - (first.position.slot ?? -1) || first.position.id.localeCompare(second.position.id));
+	if (!positions[0]) throw new Error(`No published active position by ${author}.`);
+	return positions[0].event;
 }
 
 async function latestPublished(page: Page, kind: number, author?: string): Promise<NostrEvent> {
@@ -646,7 +652,9 @@ test('plays tag-game start, scheduled switch, confirmed transfer, and end cues f
 	const selfPubkey = getPublicKey(selfSecret);
 	const hostPubkey = getPublicKey(hostSecret);
 	const startAt = Math.ceil((await page.evaluate(() => Date.now()) + 5_000) / 1_000);
-	await page.clock.pauseAt((startAt - 5) * 1_000);
+	// Freeze inside the countdown window: its last runtime tick can still be
+	// before the window if the browser stops exactly at the five-second edge.
+	await page.clock.pauseAt((startAt - 4) * 1_000);
 	const seed = Array.from({ length: 10_000 }, (_, index) => `tag-audio-${index}`).find((candidate) => {
 		const schedule = createTagGameSchedule(candidate);
 		return schedule[0].effect === 'benefit' && schedule[0].durationMs <= 20_000;
@@ -961,9 +969,9 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 	try {
 		await Promise.all([preparePlayer(hostPage, hostSecret, nowMs), preparePlayer(participantPage, participantSecret, nowMs), preparePlayer(participantTwoPage, participantTwoSecret, nowMs)]);
 		await Promise.all([moveRelaySelfTo(hostPage, { x: 7, y: 5 }), moveRelaySelfTo(participantPage, { x: 7, y: 6 }), moveRelaySelfTo(participantTwoPage, { x: 8, y: 5 })]);
-		const hostPosition = await latestPublished(hostPage, WORLD_STATE_KIND, hostPubkey);
-		const participantPosition = await latestPublished(participantPage, WORLD_STATE_KIND, participantPubkey);
-		const participantTwoPosition = await latestPublished(participantTwoPage, WORLD_STATE_KIND, participantTwoPubkey);
+		const hostPosition = await latestWorldState(hostPage, hostPubkey);
+		const participantPosition = await latestWorldState(participantPage, participantPubkey);
+		const participantTwoPosition = await latestWorldState(participantTwoPage, participantTwoPubkey);
 		await Promise.all([injectPosition(participantPage, hostPosition), injectPosition(participantTwoPage, hostPosition), injectPosition(hostPage, participantPosition), injectPosition(hostPage, participantTwoPosition)]);
 		await synchronizeBrowserClocks([hostPage, participantPage, participantTwoPage]);
 		await moveRelaySelfTo(participantTwoPage, { x: MENDING_TERMINAL.position.x - 1, y: MENDING_TERMINAL.position.y });
@@ -1259,6 +1267,14 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 		touchState = parseTagGameEvent(touchStateEvent, CHANNEL_ID)!.state;
 		await Promise.all([participantPage, participantTwoPage].map((page) => injectRealtime(page, touchStateEvent)));
 		await Promise.all([hostPage, participantPage, participantTwoPage].map((page) => expect(page.locator(`.participant[data-participant-id="${touchState.ownerPubkey}"]`)).toHaveAttribute('data-tag-game-role', 'holder')));
+		// Independent Fake Relays do not forward member proof refreshes automatically.
+		// Share a current signed anchor for every member before exercising touch.
+		const proofSecond = Math.max(...await Promise.all([hostPage, participantPage, participantTwoPage].map((page) => page.evaluate(() => Math.floor(Date.now() / 1_000))))) + 1;
+		for (const [secret, position] of [[hostSecret, { x: 7, y: 5 }], [participantSecret, { x: 7, y: 6 }], [participantTwoSecret, { x: 8, y: 5 }]] as const) {
+			const proof = finalizeEvent(buildWorldStateEventTemplate({ channel: { channelId: CHANNEL_ID, relayHint: 'wss://relay.test/' }, createdAt: proofSecond, position, slot: 1, runNumber: 1 }), secret);
+			await Promise.all([hostPage, participantPage, participantTwoPage].map((page) => injectPosition(page, proof)));
+		}
+		await Promise.all([hostPage, participantPage, participantTwoPage].map((page) => page.clock.setSystemTime(proofSecond * 1_000)));
 		const holder = cells.get(touchState.ownerPubkey!)!;
 		const target = [...cells.entries()].find(([pubkey, candidate]) => pubkey !== touchState.ownerPubkey && Math.abs(candidate.position.x - holder.position.x) + Math.abs(candidate.position.y - holder.position.y) === 1)!;
 		const actorEntry = touchState.effect === 'benefit' ? target : [touchState.ownerPubkey!, holder] as const;
@@ -1305,12 +1321,13 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 			await actor.clock.runFor(1_900);
 			await expect(actor.locator('[data-tag-game-touch-status]')).toHaveCount(0);
 		}
-		const receivedAtMs = await actor.evaluate(() => Date.now());
+		const cooldownSample = await actor.evaluate(() => ({ nowMs: Date.now(), displayedMs: Number(document.querySelector('[data-tag-game-cooldown-line]')?.getAttribute('aria-valuenow')) }));
+		const receivedAtMs = cooldownSample.nowMs;
 		const officialCooldownRemainingMs = Math.max(0, (transferred.transferAt ?? transferred.startedAt! * 1_000) + TAG_GAME_TRANSFER_COOLDOWN_MS - receivedAtMs);
 		const cooldownLine = actor.locator('[data-tag-game-cooldown-line]');
 		if (officialCooldownRemainingMs === 0) await expect(cooldownLine).toHaveCount(0);
 		else {
-			const displayedCooldownMs = Number(await cooldownLine.getAttribute('aria-valuenow'));
+			const displayedCooldownMs = cooldownSample.displayedMs;
 			expect(Math.abs(displayedCooldownMs - officialCooldownRemainingMs)).toBeLessThanOrEqual(250);
 		}
 		await expect(actor.locator('[data-tag-game-hud]')).toBeVisible();
@@ -1558,7 +1575,11 @@ test('same-target long press keeps touch status stable while Relay acknowledgeme
 		const [hostPosition, actorPosition] = await Promise.all([latestWorldState(hostPage, hostPubkey), latestWorldState(actorPage, actorPubkey)]);
 		await Promise.all([hostPage, actorPage].flatMap((page) => [injectPosition(page, hostPosition), injectPosition(page, actorPosition)]));
 		const channel = { channelId: CHANNEL_ID, relayHint: 'wss://relay.test/' };
-		const gameNowMs = Date.now();
+		// Fixture construction must not rewind movement evidence or advance the
+		// organizer's timer queue while only the sender's hold is being exercised.
+		await Promise.all([hostPage, actorPage].map(pauseAtCurrentBrowserTime));
+		const browserTimes = await Promise.all([hostPage, actorPage].map((page) => page.evaluate(() => Date.now())));
+		const gameNowMs = Math.max(...browserTimes, hostPosition.created_at * 1_000, actorPosition.created_at * 1_000) + 1_000;
 		await Promise.all([hostPage, actorPage].map((page) => page.clock.setSystemTime(gameNowMs)));
 		const nowSeconds = Math.floor(gameNowMs / 1_000);
 		const startedAt = nowSeconds - 4;
@@ -1578,6 +1599,13 @@ test('same-target long press keeps touch status stable while Relay acknowledgeme
 		const activeMessage = finalizeEvent(buildWorldMessageTemplate({ channel, createdAt: nowSeconds, position: { x: 8, y: 5 }, content: 'holder active for held-touch test', speechType: 'normal' }), hostSecret);
 		const actorMessage = finalizeEvent(buildWorldMessageTemplate({ channel, createdAt: nowSeconds, position: { x: 7, y: 5 }, content: 'actor active for held-touch test', speechType: 'normal' }), actorSecret);
 		for (const page of [hostPage, actorPage]) await Promise.all([injectWorldMessage(page, activeMessage), injectWorldMessage(page, actorMessage)]);
+		// Starting a game refreshes each member's signed Run-position proof.
+		// The independent Fake Relays must share those refreshed anchors before touch.
+		for (const [page, pubkey] of [[hostPage, hostPubkey], [actorPage, actorPubkey]] as const) {
+			await expect.poll(async () => (await latestWorldState(page, pubkey)).created_at).toBeGreaterThanOrEqual(nowSeconds);
+		}
+		const refreshedPositions = await Promise.all([latestWorldState(hostPage, hostPubkey), latestWorldState(actorPage, actorPubkey)]);
+		await Promise.all([hostPage, actorPage].flatMap((page) => refreshedPositions.map((position) => injectPosition(page, position))));
 		await expect(hostPage.locator(`.participant[data-participant-id="${hostPubkey}"]`)).toHaveAttribute('data-tag-game-role', 'holder');
 		await expect(hostPage.locator(`.participant[data-participant-id="${actorPubkey}"]`)).toHaveAttribute('data-tag-game-role', 'participant');
 		await expect(hostPage.locator(`.participant[data-participant-id="${hostPubkey}"]`)).toHaveAttribute('data-position', '8,5');
@@ -1585,6 +1613,7 @@ test('same-target long press keeps touch status stable while Relay acknowledgeme
 		await expect(actorPage.locator(`.participant[data-participant-id="${hostPubkey}"]`)).toHaveAttribute('data-tag-game-touch-target', 'true');
 		await actorPage.evaluate(() => (window as typeof window & { __relayStartupTest: { setRealtimePublishOutcome(outcome: string): void } }).__relayStartupTest.setRealtimePublishOutcome('accepted'));
 		await actorPage.keyboard.down('ArrowRight');
+		await actorPage.clock.runFor(51);
 		await expect.poll(async () => latestTagGameAction(actorPage, actorPubkey, 'touch').then(() => true, () => false)).toBe(true);
 		await expect(actorPage.locator('[data-tag-game-touch-status]')).toHaveText('判定待ち・開催者未確認');
 		await actorPage.evaluate(() => {
@@ -1615,7 +1644,8 @@ test('same-target long press keeps touch status stable while Relay acknowledgeme
 		const actorCurrentPosition = await latestWorldState(actorPage, actorPubkey);
 		expect(parsedTouch?.payload.actorProof).toMatchObject({ worldStateEventId: actorCurrentPosition.id, positionEvidenceEventId: actorCurrentPosition.id });
 		// Each browser has an independent Fake Relay. Forward the exact signed
-		// Run-position proof referenced by the touch before delivering the action.
+		// Run-position anchor referenced by the touch before delivering the action.
+		// The touch refreshes the sender's signed position anchor during the hold.
 		await injectPosition(hostPage, actorCurrentPosition);
 		const actorCell = await actorPage.locator(`.participant[data-participant-id="${actorPubkey}"]`).getAttribute('data-position');
 		await expect(hostPage.locator(`.participant[data-participant-id="${actorPubkey}"]`)).toHaveAttribute('data-position', actorCell!);
@@ -1628,6 +1658,8 @@ test('same-target long press keeps touch status stable while Relay acknowledgeme
 		await hostPage.clock.setSystemTime(hostReceiveSlotMs);
 		const hostReceiveAtMs = await hostPage.evaluate(() => Date.now());
 		expect(isFreshTagGameTouchAction({ createdAtSeconds: firstTouch.created_at, nowMs: hostReceiveAtMs, elapsedSinceFirstReceiptMs: 0 })).toBe(true);
+		// Resume transport and publisher timers for the organizer's receipt phase.
+		await hostPage.clock.resume();
 		await injectRealtime(hostPage, firstTouch);
 		await expect.poll(async () => latestTagGameStateValue(hostPage, gameId, (state) => state.ownerPubkey)).toBe(actorPubkey);
 		const confirmedState = await latestGameEvent(hostPage, gameId);
@@ -2165,7 +2197,7 @@ test('a still holder updates its integrated HUD from successful precheck respons
 		await expect(hostPage.locator('main')).toHaveAttribute('data-realtime-status', 'active');
 		await expect(holderPage.locator('main')).toHaveAttribute('data-realtime-status', 'active');
 		await Promise.all([moveRelaySelfTo(hostPage, { x: 7, y: 5 }), moveRelaySelfTo(holderPage, { x: 8, y: 5 })]);
-		await injectPosition(hostPage, await latestPublished(holderPage, WORLD_STATE_KIND, holderPubkey));
+		await injectPosition(hostPage, await latestWorldState(holderPage, holderPubkey));
 		const startedAt = Math.floor(await holderPage.evaluate(() => Date.now() / 1_000));
 		const channel = { channelId: CHANNEL_ID, relayHint: 'wss://relay.test/' };
 		const holderActivity = finalizeEvent(buildWorldMessageTemplate({ channel, createdAt: startedAt, position: { x: 8, y: 5 }, content: 'holder active at start', speechType: 'normal' }), holderSecret);
@@ -3181,8 +3213,8 @@ test('does not show unselected games and lets a spectator choose and clear one t
 	}
 	await page.clock.setSystemTime(startedAt * 1_000 + 250);
 	await page.clock.runFor(1_000);
+	await pauseAtCurrentBrowserTime(page);
 	const cooldownNowMs = await page.evaluate(() => Date.now());
-	await page.clock.pauseAt(cooldownNowMs);
 	const benefitSeed = Array.from({ length: 1_000 }, (_, index) => `watch-benefit-${index}`).find((candidate) => createTagGameSchedule(candidate)[0].effect === 'benefit')!;
 	function hostedGame(hostSecret: Uint8Array, otherSecret: Uint8Array, marker: string, phase: 'countdown' | 'running' = 'running'): NostrEvent {
 		const host = getPublicKey(hostSecret);

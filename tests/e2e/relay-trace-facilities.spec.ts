@@ -33,7 +33,10 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('[data-cell-position="12,3"][aria-label="作業端末"]')).toHaveCount(1);
 		await expect(page.locator('[data-cell-position="14,3"][aria-label="能力強化端末"]')).toHaveCount(1);
 
-		await page.locator('[data-cell-position="12,3"][aria-label="作業端末"]').click();
+		const terminal = page.locator('[data-cell-position="12,3"][aria-label="作業端末"]');
+		// Exercise proximity denial without scrolling a clipped field cell into view.
+		await terminal.focus();
+		await terminal.press('Enter');
 		await expect(page.locator('.trace-proximity-feedback')).toContainText('近づくと端末を使える');
 		await expect(page.locator('[data-field-action-menu]')).toHaveCount(0);
 	});

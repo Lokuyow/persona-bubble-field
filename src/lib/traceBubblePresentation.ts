@@ -4,7 +4,6 @@ import {
 	clampToBounds,
 	fieldLocalToViewport,
 	gridToWorld,
-	normalBubblePreferredAnchor,
 	placeBubblesWithFixed,
 	type Bounds,
 	type FixedBubblePlacement,
@@ -63,8 +62,8 @@ export type TraceBubblePresentationInput = Readonly<{
 	fixedObstacles: readonly FixedBubblePlacement[];
 	bubbleSizes: Readonly<Record<string, Size>>;
 	traceReplyCardFootprints: Readonly<Record<string, Size>>;
-	bubbleSafeBounds: Bounds;
-	bubbleVisualRegion: Bounds;
+	traceSafeBounds: Bounds;
+	traceVisualRegion: Bounds;
 	cellSize: number;
 	camera: WorldPoint;
 	fieldAreaBounds: Bounds;
@@ -76,6 +75,12 @@ export type TraceBubblePresentationInput = Readonly<{
 	previousLayout?: TraceBubblePresentationLayout | null;
 }>;
 
+/** Trace keeps its existing logical-row correspondence, independently of live speakers. */
+export function traceRootPreferredAnchor(speakerX: number, logicalY: number, rowCount: number, bubble: Size, bounds: Bounds): WorldPoint {
+	const normalizedY = rowCount <= 1 ? 0.5 : Math.min(Math.max(logicalY / (rowCount - 1), 0), 1);
+	return { x: speakerX - bubble.width / 2, y: bounds.y + Math.max(0, bounds.height - bubble.height) * normalizedY };
+}
+
 function defaultTraceReplyCardFootprint(surface: Size): Size { return surface; }
 
 function tracePresentationContext(input: TraceBubblePresentationInput): string {
@@ -84,8 +89,8 @@ function tracePresentationContext(input: TraceBubblePresentationInput): string {
 		camera: input.camera,
 		cellSize: input.cellSize,
 		fieldAreaBounds: input.fieldAreaBounds,
-		bubbleSafeBounds: input.bubbleSafeBounds,
-		bubbleVisualRegion: input.bubbleVisualRegion,
+		traceSafeBounds: input.traceSafeBounds,
+		traceVisualRegion: input.traceVisualRegion,
 		fixedObstacles: input.fixedObstacles,
 		fieldRows: input.fieldRows,
 		viewportWidth: input.viewportWidth
@@ -157,22 +162,22 @@ export function layoutTraceBubblePresentation(input: TraceBubblePresentationInpu
 	];
 	const rootId = `trace-root-${projection.root.id}`;
 	const rootSize = input.bubbleSizes[rootId] ?? input.defaultBubbleSize;
-	const rootShape = createPresentationBubbleShape(projection.root.speechType, rootId, rootSize, input.viewportWidth, input.bubbleSafeBounds);
+	const rootShape = createPresentationBubbleShape(projection.root.speechType, rootId, rootSize, input.viewportWidth, input.traceSafeBounds);
 	const rootScreen = fieldLocalToViewport(
 		worldToScreen(gridToWorld(projection.root.position, input.cellSize), input.camera), input.fieldAreaBounds
 	);
-	const rootPreferred = clampToBounds(normalBubblePreferredAnchor(
-		rootScreen.x, projection.root.position.y, input.fieldRows, rootSize, input.bubbleSafeBounds
-	), rootSize, input.bubbleSafeBounds);
+	const rootPreferred = clampToBounds(traceRootPreferredAnchor(
+		rootScreen.x, projection.root.position.y, input.fieldRows, rootSize, input.traceSafeBounds
+	), rootSize, input.traceSafeBounds);
 	const previousRoot = input.previousLayout?.root.event.id === projection.root.id ? input.previousLayout : null;
 	const replyContinuityLayout = input.previousLayout &&
 		(input.previousLayout.replyContext === replyContext || (previousRoot && samePoint(previousRoot.rootPreferred, rootPreferred)))
 		? input.previousLayout : null;
-	const rootContinuity = continuityAnchor(rootContinuityLayout, projection.root.id, rootSize, rootSize, input.bubbleSafeBounds);
+	const rootContinuity = continuityAnchor(rootContinuityLayout, projection.root.id, rootSize, rootSize, input.traceSafeBounds);
 	const [rootPlacement] = placeBubblesWithFixed([{
 		id: rootId, preferred: rootContinuity ?? rootPreferred, size: rootSize,
 		visualBounds: projection.root.speechType === 'shout' ? undefined : rootShape?.bounds
-	}], fixed, input.bubbleSafeBounds, input.cellSize, undefined, input.bubbleVisualRegion);
+	}], fixed, input.traceSafeBounds, input.cellSize, undefined, input.traceVisualRegion);
 	const root: TraceRootPresentation = {
 		id: rootId, event: projection.root, anchor: rootPlacement?.anchor ?? rootPreferred, size: rootSize,
 		footprint: rootSize, shape: rootShape, tone: input.toneFor(projection.root.pubkey),
@@ -187,20 +192,20 @@ export function layoutTraceBubblePresentation(input: TraceBubblePresentationInpu
 		const card: TraceReplyPresentation = {
 			id, reply, role, anchor: preferred, size,
 			footprint: input.traceReplyCardFootprints[id] ?? defaultTraceReplyCardFootprint(size),
-			shape: createPresentationBubbleShape(reply.speechType, id, size, input.viewportWidth, input.bubbleSafeBounds),
+			shape: createPresentationBubbleShape(reply.speechType, id, size, input.viewportWidth, input.traceSafeBounds),
 			character: input.characterFor(reply.pubkey), tone: input.toneFor(reply.pubkey),
 			hasContinuation: projection.continuationReplyIds.includes(reply.id)
 		};
-		const preserved = continuityAnchor(replyContinuityLayout, reply.id, card.size, card.footprint, input.bubbleSafeBounds);
+		const preserved = continuityAnchor(replyContinuityLayout, reply.id, card.size, card.footprint, input.traceSafeBounds);
 		const preservePlacement = Boolean(preserved && input.previousLayout?.fixedContext === fixedContext &&
 			samePoint(input.previousLayout.root.anchor, root.anchor));
 		const [placement] = preservePlacement
 			? [{ id: card.id, anchor: preserved! }]
 			: placeBubblesWithFixed([{ id: card.id, preferred: preserved ?? preferred, size: card.footprint }], placed,
-				input.bubbleSafeBounds, input.cellSize, undefined, input.bubbleVisualRegion);
+				input.traceSafeBounds, input.cellSize, undefined, input.traceVisualRegion);
 		const anchored = {
 			...card,
-			anchor: distinctTraceAnchor(placement?.anchor ?? preferred, card.footprint, input.bubbleSafeBounds,
+			anchor: distinctTraceAnchor(placement?.anchor ?? preferred, card.footprint, input.traceSafeBounds,
 				placed.map((candidate) => candidate.anchor), cards.length)
 		};
 		cards.push(anchored);
@@ -217,8 +222,8 @@ export function layoutTraceBubblePresentation(input: TraceBubblePresentationInpu
 			const parentBody = input.bubbleSizes[`trace-reply-${parent.id}`] ?? input.defaultBubbleSize;
 			const parentFootprint = input.traceReplyCardFootprints[`trace-reply-${parent.id}`] ?? defaultTraceReplyCardFootprint(parentBody);
 			const parentPreferred = {
-				x: input.bubbleSafeBounds.x + Math.max(0, (input.bubbleSafeBounds.width - parentFootprint.width) / 2),
-				y: input.bubbleSafeBounds.y + Math.max(0, (input.bubbleSafeBounds.height - parentFootprint.height) / 2)
+				x: input.traceSafeBounds.x + Math.max(0, (input.traceSafeBounds.width - parentFootprint.width) / 2),
+				y: input.traceSafeBounds.y + Math.max(0, (input.traceSafeBounds.height - parentFootprint.height) / 2)
 			};
 			const parentCard = placeCard(parent, 'parent', parentPreferred);
 			currentAnchor = placeCard(projection.current.event, 'current', traceChildPreferred(parentCard, defaultTraceReplyCardFootprint(

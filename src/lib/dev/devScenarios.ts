@@ -2,7 +2,7 @@ export type DevScenarioCategory = 'World' | 'Speech' | 'Chatter' | 'Trace' | 'Re
 
 export type DevScenarioFixture =
 	| Readonly<{ kind: 'default' }>
-	| Readonly<{ kind: 'speech'; fixture: 'showcase' | 'types' | 'normal-sizes' | 'merged2' | 'merged2-long' | 'merged3' | 'merged3-long' | 'merged4' | 'merged4-long' | 'merged2-shout-long' | 'merged2-monologue-long' | 'long' | 'linebreak' | 'linebreak-five' | 'linebreak-overflow' | 'comparison' }>
+	| Readonly<{ kind: 'speech'; fixture: 'obstacles' | 'showcase' | 'types' | 'normal-sizes' | 'merged2' | 'merged2-long' | 'merged3' | 'merged3-long' | 'merged4' | 'merged4-long' | 'merged2-shout-long' | 'merged2-monologue-long' | 'long' | 'linebreak' | 'linebreak-five' | 'linebreak-overflow' | 'comparison' }>
 	| Readonly<{ kind: 'chatter-timeline' }>
 	| Readonly<{ kind: 'trace'; replies: boolean; inactiveSelf?: boolean }>
 	| Readonly<{ kind: 'cooperation-defection-static'; phase: 'warning' | 'registration' | 'game' | 'ended' }>
@@ -22,6 +22,7 @@ const speech = (id: string, label: string, description: string, fixture: Exclude
 export const DEV_SCENARIOS: readonly DevScenario[] = [
 	{ id: 'default', category: 'World', label: 'Default', description: 'Plain DEV World with no seeded fixture.', fixture: { kind: 'default' } },
 	speech('speech-showcase', 'Speech showcase', 'Normal and merged speech presentation.', { kind: 'speech', fixture: 'showcase' }),
+	speech('speech-obstacles', 'Speech obstacles', 'Character obstacles force side and lower live placement.', { kind: 'speech', fixture: 'obstacles' }),
 	speech('speech-types', 'Speech types', 'Normal, shout, and monologue speech.', { kind: 'speech', fixture: 'types' }),
 	speech('speech-normal-sizes', 'Normal sizes', 'Normal bubbles at representative sizes.', { kind: 'speech', fixture: 'normal-sizes' }),
 	speech('speech-merged-2', 'Merged 2', 'Two-member merged speech.', { kind: 'speech', fixture: 'merged2' }),

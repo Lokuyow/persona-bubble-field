@@ -286,7 +286,13 @@ test.describe('DEV World Sandbox', () => {
 				a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
 			const shoutBubbles = bubbles.filter((bubble) => bubble.dataset.speechType === 'shout');
 			const opponents = bubbles.filter((bubble) => bubble.dataset.speechType !== 'shout');
-			return {
+			// Test stacking with explicit contact rather than relying on spike length.
+			const monologue = opponents.find((bubble) => bubble.dataset.speechType === 'monologue')!;
+			const originalStyle = monologue.getAttribute('style');
+			monologue.style.left = getComputedStyle(shoutBubbles[0]).left;
+			monologue.style.top = getComputedStyle(shoutBubbles[0]).top;
+			monologue.style.transform = getComputedStyle(shoutBubbles[0]).transform;
+			const result = {
 				shoutZIndexes: shoutBubbles.map((bubble) => getComputedStyle(bubble).zIndex),
 				normalZIndexes: opponents.filter((bubble) => bubble.dataset.speechType === 'normal').map((bubble) => getComputedStyle(bubble).zIndex),
 				monologueZIndexes: opponents.filter((bubble) => bubble.dataset.speechType === 'monologue').map((bubble) => getComputedStyle(bubble).zIndex),
@@ -297,6 +303,9 @@ test.describe('DEV World Sandbox', () => {
 					return opponents.filter((opponent) => rectsOverlap(surfaceRect, opponent.getBoundingClientRect())).map((opponent) => opponent.dataset.speechType);
 				})
 			};
+			if (originalStyle === null) monologue.removeAttribute('style');
+			else monologue.setAttribute('style', originalStyle);
+			return result;
 		});
 		expect(stacking.shoutZIndexes.every((zIndex) => zIndex === '3')).toBe(true);
 		expect(stacking.normalZIndexes.every((zIndex) => zIndex === 'auto')).toBe(true);
@@ -441,9 +450,11 @@ test.describe('DEV World Sandbox', () => {
 
 		const normalSeam = await page.locator('.bubble[data-speech-type="normal"]').evaluate((bubble) => {
 			const style = getComputedStyle(bubble, '::after');
-			return { height: style.height, bottom: style.bottom };
+			return { width: style.width, height: style.height, x: style.getPropertyValue('--tail-seam-x'), y: style.getPropertyValue('--tail-seam-y') };
 		});
-		expect(normalSeam).toEqual({ height: '3px', bottom: '-1px' });
+		expect([normalSeam.width, normalSeam.height]).toContain('3px');
+		expect(normalSeam.x.trim()).not.toBe('');
+		expect(normalSeam.y.trim()).not.toBe('');
 	});
 
 	test('keeps long merged shout body placement independent from decorative overflow', async ({ page }) => {

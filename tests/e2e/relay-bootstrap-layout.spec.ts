@@ -35,7 +35,7 @@ test.describe('Relay startup', () => {
 			await expect(chatterToggle).toHaveAttribute('aria-pressed', String(width > 700));
 			await expect(page.locator('.timeline-hide-control, .timeline-show-control')).toHaveCount(0);
 			const geometry = () => page.evaluate(() => ({
-				rects: ['.field-viewport', '.field-area', '.field-scene', '.speech-area', '.action-dock', '.participant']
+				rects: ['.field-viewport', '.field-area', '.field-scene', '.action-dock', '.participant']
 					.map((selector) => [...document.querySelectorAll(selector)].map((node) => node.getBoundingClientRect().toJSON())),
 				camera: getComputedStyle(document.querySelector('.field-scene')!).transform
 			}));
@@ -371,7 +371,6 @@ test.describe('Relay startup', () => {
 					viewport: rect('.field-viewport'),
 					area: rect('.field-area'),
 					scene: rect('.field-scene'),
-					speech: rect('.speech-area'),
 					participant: rect('.participant[data-self="true"]'),
 					bubble: rect('.bubble'),
 					transform: getComputedStyle(document.querySelector('.field-scene')!).transform
@@ -389,9 +388,8 @@ test.describe('Relay startup', () => {
 			expect(grown.viewport).toEqual(before.viewport);
 			expect(grown.area).toEqual(before.area);
 			expect(grown.scene).toEqual(before.scene);
-			expect(grown.speech).toEqual(before.speech);
 			expect(grown.participant).toEqual(before.participant);
-			expect(grown.bubble).toEqual(before.bubble);
+			expect(grown.bubble!.y + grown.bubble!.height).toBeLessThanOrEqual(grown.dock!.y);
 			expect(grown.transform).toBe(before.transform);
 
 			await page.evaluate(() => (window as typeof window & {
@@ -402,7 +400,6 @@ test.describe('Relay startup', () => {
 			expect(restored.viewport).toEqual(before.viewport);
 			expect(restored.area).toEqual(before.area);
 			expect(restored.scene).toEqual(before.scene);
-			expect(restored.speech).toEqual(before.speech);
 			expect(restored.participant).toEqual(before.participant);
 			expect(restored.bubble).toEqual(before.bubble);
 			expect(restored.transform).toBe(before.transform);

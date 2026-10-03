@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { tailGeometry, taperedBandGeometry } from './bubblePresentation';
+import { tailGeometry, taperedBandGeometry, liveTailConnections } from './bubblePresentation';
 
 describe('tapered bubble geometry', () => {
 	it('keeps both band midpoints, width ordering, and finite zero-length output', () => {
@@ -38,5 +38,25 @@ describe('tapered bubble geometry', () => {
 			outlinePath: 'M 114.5 78 L 120 180 L 125.5 78',
 			rootLeft: { x: 114.5, y: 78 }, rootRight: { x: 125.5, y: 78 }, target: { x: 120, y: 180 }, seamOffsetX: 0
 		});
+	});
+});
+
+
+describe('live directional tails', () => {
+	for (const speechType of ['normal', 'shout', 'monologue'] as const) {
+		for (const [edge, screen] of [['bottom', { x: 200, y: 350 }], ['top', { x: 200, y: 50 }], ['right', { x: 400, y: 200 }], ['left', { x: 0, y: 200 }]] as const) {
+			it(`connects the ${edge} ${speechType} edge to the facing character edge`, () => {
+				const [connection] = liveTailConnections({ x: 140, y: 170 }, { width: 120, height: 60 }, [{ id: 'speaker', bounds: { x: screen.x - 25, y: screen.y - 25, width: 50, height: 50 } }], speechType, false);
+				expect(connection.edge).toBe(edge);
+				expect(Number.isFinite(connection.seam.x) && Number.isFinite(connection.seam.y)).toBe(true);
+				if (edge === 'top' || edge === 'bottom') expect(connection.seam.y).toBe(edge === 'top' ? 0 : 60);
+				else expect(connection.seam.x).toBe(edge === 'left' ? 0 : 120);
+			});
+		}
+	}
+	it('distributes merged roots on each occupied edge', () => {
+		const connections = liveTailConnections({ x: 100, y: 100 }, { width: 180, height: 60 }, [120, 250].map((x, index) => ({ id: String(index), bounds: { x, y: 250, width: 50, height: 50 } })), 'normal', true);
+		expect(connections.map((connection) => connection.edge)).toEqual(['bottom', 'bottom']);
+		expect(new Set(connections.map((connection) => connection.seam.x)).size).toBe(2);
 	});
 });

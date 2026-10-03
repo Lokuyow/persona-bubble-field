@@ -46,7 +46,7 @@ export function distinctTraceAnchor(preferred: WorldPoint, footprint: Size, boun
 	const candidate = candidates.find(isDistinct);
 	if (candidate) return candidate;
 
-	// A narrow mobile speech area can clamp every ranked slot and edge to an
+	// Narrow mobile Trace bounds can clamp every ranked slot and edge to an
 	// occupied point. Search its legal pixels before conceding that no unique
 	// anchor exists; cards remain inside the same safe bounds.
 	for (let y = bounds.y; y <= maxY; y += 1) {

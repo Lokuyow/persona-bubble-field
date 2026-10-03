@@ -121,9 +121,16 @@ test.describe('DEV World Sandbox', () => {
 	});
 
 	test('renders the full speech showcase with eight colors and a merged bubble', async ({ page }) => {
+		// Prepare startup modules before stressing dense placement on constrained
+		// CI workers. Keep the existing initial-render assertions below.
+		await page.goto('/?devWorld=1');
+		await expect(page.locator('.participant')).toHaveCount(1);
+		const cdp = await page.context().newCDPSession(page);
+		await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
 		await page.goto('/?devWorld=1&devScenario=speech-showcase');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 		await expect(page.locator('.participant')).toHaveCount(8);
+		await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
 		await expect(page.locator('.bubble-normal')).toHaveCount(8);
 		const mergedBubble = page.locator('.bubble-merged');
 		await expect(mergedBubble).toHaveCount(1);
@@ -242,14 +249,15 @@ test.describe('DEV World Sandbox', () => {
 			expect(geometry.tailStartXs).toHaveLength(fixture.count);
 			expect(geometry.connectionMasks).toHaveLength(fixture.count);
 			expect(geometry.tailOutlineCount).toBe(fixture.count + 1);
-			expect(geometry.connectionMasks.every((mask) => mask.width === 9 && mask.height === 3)).toBe(true);
+			expect(geometry.connectionMasks.every((mask) => (mask.width === 9 && mask.height === 3) || (mask.width === 3 && mask.height === 9))).toBe(true);
 			expect(geometry.connectionMasks.every((mask) => mask.background === geometry.background)).toBe(true);
 			expect(geometry.connectionMasks.map((mask) => mask.participantId).sort()).toEqual(fixture.members.map((prefix) => prefix.repeat(64)).sort());
-			for (const [index, startX] of geometry.tailStartXs.entries()) {
-				expect(Math.abs(startX - geometry.connectionMasks[index].centerX)).toBeLessThan(1);
+			for (const [index, start] of geometry.tailStarts.entries()) {
+				const mask = geometry.connectionMasks[index];
+				expect(Math.hypot(start.x - mask.centerX, start.y - mask.centerY)).toBeLessThan(1);
 			}
-			expect(new Set(geometry.tailStartXs.map((x) => x.toFixed(3))).size).toBe(fixture.count);
-			expect(Math.max(...geometry.tailStartXs) - Math.min(...geometry.tailStartXs)).toBeGreaterThan(40);
+			expect(new Set(geometry.tailStarts.map((point) => `${point.x.toFixed(3)}:${point.y.toFixed(3)}`)).size).toBe(fixture.count);
+			expect(Math.max(...geometry.tailStarts.flatMap((first) => geometry.tailStarts.map((second) => Math.hypot(first.x - second.x, first.y - second.y))))).toBeGreaterThan(40);
 			geometries.push(geometry);
 		}
 

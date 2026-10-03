@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
-import { openDevWorld, openClockedDevWorld, openDevTraceWorld, fieldOwnedBlankPoint, profileTrigger, profileDialog } from './helpers/devWorldHarness';
+import { openDevWorld, openClockedDevWorld, openDevTraceWorld, fieldOwnedBlankPoint, profileTrigger, profileDialog, uncoveredTargetPoint } from './helpers/devWorldHarness';
 
 async function visibleFieldCenterCell(page: Page): Promise<{ x: number; y: number }> {
 	return page.locator('.field-grid').evaluate((grid) => {
@@ -69,11 +69,10 @@ test.describe('DEV World Sandbox', () => {
 		await traceCell.click();
 		const ghost = page.locator('.trace-ghost-profile-trigger');
 		await expect(ghost).toBeVisible();
-		const box = await ghost.boundingBox();
-		if (!box) throw new Error('Expected the trace ghost profile trigger to be visible.');
-		await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+		const point = await uncoveredTargetPoint(ghost);
+		await page.mouse.move(point.x, point.y);
 		await page.mouse.down();
-		await page.mouse.move(box.x + box.width / 2 + 24, box.y + box.height / 2);
+		await page.mouse.move(point.x + 24, point.y);
 		await expect(page.locator('[data-pointer-joystick="right"]')).toBeVisible();
 		await page.mouse.up();
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '8,3');

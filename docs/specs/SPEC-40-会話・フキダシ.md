@@ -51,21 +51,21 @@ kind 42の `w` は発言時点の不変な座標であり、その後発言者�
 
 ---
 
-## 18. 発言領域
+## 18. liveフキダシの描画と配置
 
-画面上部に**発言領域**を設ける。
+「発言領域」という専用配置領域は設けない。liveフキダシはscreen-space overlayとして描画する。
+画面上部などにbubble専用の固定的・予約的な領域を確保せず、フキダシのためにfield viewportを縮小しない。
 
-発言領域は過去ログやタイムラインではない。
+placement boundaryは現在のviewportであり、field boundsではない。HUD、ActionDock等のUI obstacleを
+除く画面内の利用可能な空間を候補とし、field内外の境界を越えること自体へペナルティを与えない。
+UI obstacleは実際のscreen boundsを基準とする。
 
-現在表示中の発言だけを一時的なフキダシとして表示する領域とする。
-
-フキダシは一定時間後に消え、古い発言が上方向へ蓄積し続ける構造にはしない。
-
-発言の痕跡は発言領域へ蓄積表示せず、フィールド上の空間オブジェクトとして扱う。
+現在表示中の発言だけを一時的なフキダシとして表示する。フキダシは一定時間後に消え、古い発言が
+上方向へ蓄積し続ける構造にはしない。発言の痕跡はフィールド上の空間オブジェクトとして扱う。
 
 ### Chatter（補助タイムラインoverlay）
 
-発言領域とは別に、現在の会話状況を把握するための補助UIとして、フィールドviewportの
+liveフキダシとは独立して、現在の会話状況を把握するための補助UIとして、フィールドviewportの
 左側へ直近発言タイムラインをoverlay表示する。これは空間型チャットを置き換えるSNS型の
 主画面ではなく、無制限の過去ログやfeedでもない。
 
@@ -92,7 +92,7 @@ kind 1111はChatterへ一切表示しない。authorのpubkeyから既存の決�
 開いてもtimelineは閉じない。close時は既存のfocus restoration経路を使う。
 
 timelineは真のoverlayであり、表示状態によってfield viewportのgeometry、field width、camera、
-cell、participant座標、speech area、bubble placement bounds、Composer領域を変更しない。
+cell、participant座標、bubble placement条件、Composer領域を変更しない。
 panel内はscrollせず、表示領域へ完全に収まる新しいentryから順に表示する。内部stateは最新50件を
 保持する。既存の`MOBILE_FIELD_BREAKPOINT = 700`を使い、保存済みの開閉設定がない場合は
 width > 700で初期表示をON、width <= 700でOFFとする。ブラウザ単位の開閉設定をlocalStorageへ
@@ -124,9 +124,14 @@ PCではコンポーザーを中央に置き、発言タイプ切り替えとオ
 
 ### 通常フキダシの配置
 
-フキダシは、発言元ユーザーの横方向位置に対応する発言領域内の位置を基本とする。
+通常liveフキダシは、発言者キャラクターの現在のscreen位置のすぐ上を第一候補とする。
+character本体とbodyが重ならず、tailが自然につながる近傍位置とし、logical field Yを別の配置領域へ対応付けない。
+通常時はbodyの接続点からspeaker character footprint外周まで約40pxをpreferred lengthとして確保する。
+固定長やminimumではなく、viewport、HUD / ActionDock、character、他bubbleとの都合では短くしてよく、
+collision回避でbodyが遠ざかる場合は長くしてよい。全方向・合体bubbleでも同じ原則とし、Trace tailは変更しない。
 
-原則として発言元ユーザーの上部へ配置する。
+第一候補が衝突する場合は、上左右、左右、下左右、下、必要に応じて外側を含む周囲の2次元空間へ
+動的に退避できる。縦stackや専用上部領域からfieldへのfallbackにはしない。探索順序やpixel offsetは内部実装とする。
 
 フキダシから発言者のキャラクターアイコンまでしっぽを伸ばす。
 
@@ -170,9 +175,16 @@ presence切れしたユーザーの色は再利用可能とする。
 
 優先順位は以下とする。
 
-1. 発言元ユーザーとの空間的な対応を維持する
-2. フキダシ同士の重なりを可能な範囲で減らす
-3. 完全な非重複
+1. viewport内へbodyを収める
+2. HUD、ActionDock等のUI obstacleへbodyを重ねない
+3. visible characterへbodyを重ねない
+4. 発言元ユーザーとの空間的な対応を強く維持する
+5. フキダシ同士の重なりを可能な範囲で減らす
+
+UIおよびvisible characterとの重複を回避できる有効な候補がある場合は、それらに重なる候補を選ばない。
+character obstacleには発言者自身と他のvisible participantを含め、通常のcharacter presentationを基準とする。
+aura、game effect、decorative overflow、animation中の一時的なvisual overflowは含めない。
+tailはcollision obstacleには含めない。
 
 重なり回避のために、フキダシを発言者から極端に離れた位置へ移動させない。
 
@@ -180,7 +192,7 @@ presence切れしたユーザーの色は再利用可能とする。
 
 重なり回避の判定対象は、フキダシの本文bodyとする。叫びのspikeは本文bodyの外側にある
 decorative overflowとして扱い、bodyの配置・collision・overlap avoidanceの判定には含めない。
-そのため、叫びのspikeは発言領域からはみ出したり、他のフキダシやそのしっぽと視覚的に
+そのため、叫びのspikeは本文bodyからはみ出したり、他のフキダシやそのしっぽと視覚的に
 重なったりしてよい。spikeの重なりを避けるためにbodyを移動したり、spikeを短縮したりしない。
 viewportの外側へ出たspikeはviewportのclipで隠れてよい。
 叫びのspikeが通常またはモノローグのフキダシと視覚的に重なった場合、叫びを前面に描画する。
@@ -189,7 +201,7 @@ viewportの外側へ出たspikeはviewportのclipで隠れてよい。
 
 通常フキダシ表示中に発言者が移動した場合、フキダシも発言者を追従する。
 
-発言領域内で配置を再計算し、しっぽも現在のアイコン位置へ追従する。
+現在のscreen位置を基準にviewport内で配置を再計算し、しっぽも現在のアイコン位置へ追従する。
 
 必要に応じて重なり回避も再計算する。
 
@@ -209,7 +221,7 @@ kind 42の `w` は発言時positionを保持するため、フキダシの現在
 
 は未決定とする。
 
-長文ほど読む時間を確保できるようにする一方、長文が発言領域を長時間占有し続けないよう上限を設ける方向とする。
+長文ほど読む時間を確保できるようにする一方、長文のフキダシが画面を長時間占有し続けないよう上限を設ける方向とする。
 
 通常フキダシの表示時間と、発言の痕跡として残る寿命は別の概念として扱う。
 
@@ -229,9 +241,9 @@ kind 42の `w` は発言時positionを保持するため、フキダシの現在
 
 通常フキダシ・合体フキダシとも、本文量に応じて横幅・縦幅が可変となる。短い本文は最大幅まで不要に広げず、本文が増えると横方向へ自然に拡大し、横幅上限に達した後は自動折り返しによって縦方向へ拡大する。
 
-通常フキダシの最大横幅は、width > 700pxでは240px、width <= 700pxでは180pxとする。viewportまたは発言領域の安全幅がこれらの最大幅より狭い場合は、安全幅を優先する。mobile breakpointでは、通常フキダシのfont-size、padding、minimum width等をcompactにできる。これは端末幅に応じたresponsive ruleであり、通常・叫び・モノローグという発言タイプ自体を理由にfont、size、paddingを変えるものではない。
+通常フキダシの最大横幅は、width > 700pxでは240px、width <= 700pxでは180pxとする。viewportの安全幅がこれらの最大幅より狭い場合は、安全幅を優先する。mobile breakpointでは、通常フキダシのfont-size、padding、minimum width等をcompactにできる。これは端末幅に応じたresponsive ruleであり、通常・叫び・モノローグという発言タイプ自体を理由にfont、size、paddingを変えるものではない。
 
-合体フキダシは文字サイズが通常フキダシより大きくなるため、通常フキダシより大きな最大横幅を持ち、合体人数の増加に応じて最大横幅も拡大する。viewportまたは発言領域の安全幅がこれらの最大幅より狭い場合は、安全幅を優先する。mobile breakpointでは、合体フキダシも人数増加に応じた強調の意味論を維持したままcompactにできる。
+合体フキダシは文字サイズが通常フキダシより大きくなるため、通常フキダシより大きな最大横幅を持ち、合体人数の増加に応じて最大横幅も拡大する。viewportの安全幅がこれらの最大幅より狭い場合は、安全幅を優先する。mobile breakpointでは、合体フキダシも人数増加に応じた強調の意味論を維持したままcompactにできる。
 
 合体フキダシは複数の発言者へしっぽを接続するため、人数に応じた最低幅を持ってよい。ただし、短い本文でも固定幅に近い大きさへ広げることを目的としない。
 
@@ -245,7 +257,7 @@ kind 42の `w` は発言時positionを保持するため、フキダシの現在
 
 以下を確認できるUI試作後に決定する。
 
-- 発言領域の実サイズ
+- viewport内の利用可能な空間
 - フキダシの表示サイズ
 - スマートフォンでの表示
 - eHagaki Host-owned Composer Lite版での入力体験
@@ -310,7 +322,8 @@ message subscription、position subscription、`EOSE`、再接続等の詳細な
 - モノローグ：visible silhouetteの全周を大小のある丸いcloud lobeで形成し、通常のrounded contourをvisible final outlineとして残さないfluffy / cloud / scalloped形状。小さい房を主体とし、ときどき大きい房を混ぜる
 
 fillは現在のbubble tone background、outlineは現在のspeaker tone outlineを使用する。
-3種類とも現在のtail geometryを共有し、type別のtailは追加しない。合体フキダシも元の
+3種類とも共通のtail geometryを使い、type別のtailは追加しない。liveでは配置されたbodyとcharacterの
+位置関係に応じて接続辺を選び、左右・下側への配置でも自然につなぐ。合体では各visible memberへ接続する。合体フキダシも元の
 発言タイプのbody silhouetteを維持する。
 叫び・モノローグでもbodyとtailはfillとoutlineを連続した一つのフキダシとして見せ、tail rootに
 body outlineの横切り、gap、二重線を残さない。
@@ -456,7 +469,9 @@ ActionDockがある画面ではActionDock内の音量ボタンで、ない画面
 
 ### 合体フキダシの位置
 
-合体フキダシは、現在画面内にいる合体メンバーの横方向位置の中央付近を基本位置とする。
+合体フキダシは、現在画面内にいる合体メンバーのscreen位置から代表位置を求め、member群の近傍、
+可能なら上側を第一候補とする。collision時は上下左右を含む周囲へ退避し、field boundsへ拘束しない。
+viewport、UI obstacle、visible character、bubble同士の重複について通常liveフキダシと同じ配置優先順位を使う。
 
 そこから画面内にいる各発言者のアイコンへしっぽを伸ばす。
 
@@ -481,7 +496,10 @@ spikeの視覚的な重なりは、この判定対象に含めない。
 
 合体メンバー全員が画面外へ出た場合も、合体フキダシは表示期限まで残す。
 
-その場合、フキダシは最後の配置位置に残し、しっぽは表示しない。
+その場合、しっぽは表示せず、基本的には最後のanchorを保持する。ただしresize、HUD / ActionDock等の
+geometry変更、visible characterの移動等で安全条件が崩れた場合は、最後のanchorを基準に必要最小限だけ補正する。
+新しいspeaker-relative配置は行わない。優先順位はviewport内、HUD / ActionDock非重複、visible character非重複、
+最後のanchorへの近さとする。bubble同士の重なり軽減だけを理由に保持位置を動かさない。
 
 ### 新しいメンバーの合流
 
@@ -550,7 +568,7 @@ MVPでは、**テキストメッセージによる現在の会話**を中心と�
 NIP-28 kind 42による有効なtop-level messageを使用する。
 
 現在の会話は通常フキダシとして一時表示し、Twitter型タイムラインとして主画面へ蓄積しない。
-フィールドviewport上の補助タイムラインoverlayは、上記の「発言領域」とは別の有限なUIとして扱う。
+フィールドviewport上の補助タイムラインoverlayは、liveフキダシとは独立した有限なUIとして扱う。
 
 ただし、過去のkind 42の一部は「発言の痕跡」として空間上に残り、後から探索・調査できる。
 

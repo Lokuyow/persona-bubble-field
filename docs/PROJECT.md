@@ -23,7 +23,7 @@ repository-trackedな本資料と、以下に列挙する `docs/specs/` 配下�
 - [`SPEC-30-フィールド・position・presence.md`](specs/SPEC-30-フィールド・position・presence.md)
   - フィールド、移動、position、presence、Relay transport/subscription lifecycle
 - [`SPEC-40-会話・フキダシ.md`](specs/SPEC-40-会話・フキダシ.md)
-  - 発言表示範囲、発言領域、フキダシ、発言タイプ、合体表示、コミュニケーション機能
+  - 発言表示範囲、screen-space overlay、フキダシ、発言タイプ、合体表示、コミュニケーション機能
 - [`SPEC-50-発言の痕跡.md`](specs/SPEC-50-発言の痕跡.md)
   - 発言の痕跡、root、trace conversation取得、cache、read/unread、調査
 - [`SPEC-60-eHagaki・Composer・Media.md`](specs/SPEC-60-eHagaki・Composer・Media.md)

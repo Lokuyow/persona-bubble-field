@@ -15,9 +15,13 @@
 	import type { BubbleTone } from '$lib/bubblePresentation';
 	import type { SpeechSuggestionConversationEntry } from '$lib/speechSuggestions';
 	import { Popover, Tooltip } from 'bits-ui';
-	import { onMount } from 'svelte';
+	import { onMount, tick, untrack } from 'svelte';
+	import type { Attachment } from 'svelte/attachments';
+	import type { Bounds } from '$lib/geometry';
 
 	type Props = ComponentProps<typeof HostOwnedComposerLite> & {
+		onBoundsChange: (bounds: Bounds | null) => void;
+		boundsRevision: string;
 		selectedSpeechType: SpeechType;
 		submissionInProgress: boolean;
 		volume: number;
@@ -38,10 +42,21 @@
 		onOpenSelfProfile: (trigger: HTMLButtonElement) => void;
 		submitCandidate: (content: string, signal: AbortSignal) => Promise<Readonly<{ eventId: string }>>;
 	};
-	let { selectedSpeechType, submissionInProgress, volume, onSoundOpen, onVolume, onSpeechTypeChange, onOpenSelfProfile, submitContent, submitCandidate,
+	let { onBoundsChange, boundsRevision, selectedSpeechType, submissionInProgress, volume, onSoundOpen, onVolume, onSpeechTypeChange, onOpenSelfProfile, submitContent, submitCandidate,
 		desiredContext, loadPreview, onPreviewClear, onEditorEmptyChange, onPreferredHeightChange,
 	 hasUnreadReplies, character, avatarTone, suggestionConversation, canOpenSelfProfile, chatterOpen, onToggleChatter,
 	 manualTraceSelected, manualTraceEnabled, manualTraceStatus, onToggleManualTrace }: Props = $props();
+	let remeasureBounds = () => {};
+	const observeBounds: Attachment<HTMLElement> = (node) => untrack(() => {
+		const measure = () => untrack(() => {
+			const rect = node.getBoundingClientRect();
+			onBoundsChange({ x: rect.left, y: rect.top, width: rect.width, height: rect.height });
+		});
+		const observer = new ResizeObserver(measure);
+		observer.observe(node); remeasureBounds = measure; measure();
+		return () => untrack(() => { observer.disconnect(); remeasureBounds = () => {}; onBoundsChange(null); });
+	});
+	$effect(() => { void boundsRevision; void tick().then(() => remeasureBounds()); });
 	let composerComponent: { focusEditor(): boolean; blurEditor(): boolean; applyContentIfEmpty(content: string): Promise<boolean> } | null = null;
 	let editorIsEmpty = $state<boolean | null>(null);
 	let explanationVisible = $state(false);
@@ -101,7 +116,7 @@
 
 </script>
 
-	<div class="action-dock" aria-label="主要操作">
+	<div class="action-dock" {@attach observeBounds} aria-label="主要操作">
 	<div class="action-dock-content">
 		<Tooltip.Provider disabled={tooltipsDisabled} delayDuration={400} skipDelayDuration={100} disableHoverableContent>
 		<div class="composer-controls-left">

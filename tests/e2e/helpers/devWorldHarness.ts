@@ -39,7 +39,7 @@ export async function readMergedBubbleGeometry(page: Page, memberPrefixes: reado
 		const style = getComputedStyle(bubble);
 		const polygons = [...document.querySelectorAll<SVGPolygonElement>('.tail-layer polygon')]
 			.filter((polygon) => mergedMemberIds.has(polygon.dataset.tailParticipantId ?? ''));
-		const tailStartXs = polygons.map((polygon) => {
+		const tailStarts = polygons.map((polygon) => {
 			const first = polygon.points.getItem(0);
 			const second = polygon.points.getItem(1);
 			const target = polygon.points.getItem(polygon.points.numberOfItems - 1);
@@ -47,7 +47,7 @@ export async function readMergedBubbleGeometry(page: Page, memberPrefixes: reado
 			const dx = target.x - base.x;
 			const dy = target.y - base.y;
 			const length = Math.hypot(dx, dy) || 1;
-			return base.x + (dx / length) * 2;
+			return { x: base.x + (dx / length) * 2, y: base.y + (dy / length) * 2 };
 		});
 		const connectionMasks = [...bubble.querySelectorAll<HTMLElement>('.bubble-tail-connection')].map((mask) => {
 			const maskRect = mask.getBoundingClientRect();
@@ -55,6 +55,7 @@ export async function readMergedBubbleGeometry(page: Page, memberPrefixes: reado
 			return {
 				participantId: mask.dataset.tailParticipantId,
 				centerX: maskRect.left + maskRect.width / 2,
+				centerY: maskRect.top + maskRect.height / 2,
 				width: maskRect.width,
 				height: maskRect.height,
 				background: maskStyle.backgroundColor
@@ -67,7 +68,8 @@ export async function readMergedBubbleGeometry(page: Page, memberPrefixes: reado
 			height: rect.height,
 			fontSize: Number.parseFloat(style.fontSize),
 			paddingLeft: Number.parseFloat(style.paddingLeft),
-			tailStartXs,
+			tailStarts,
+			tailStartXs: tailStarts.map((point) => point.x),
 			connectionMasks,
 			tailOutlineCount: document.querySelectorAll('.tail-layer path[data-tail-participant-id]').length,
 			borderRadius: style.borderRadius,
@@ -135,6 +137,7 @@ export async function fieldOwnedBlankPoint(page: Page, preferred: { x: number; y
 			const hit = document.elementFromPoint(point.x, point.y);
 			if (!hit || !fieldArea.contains(hit)) continue;
 			if (hit.closest('.participant, [data-field-gesture-origin="selectable"], .field-action-menu, .sandbox-controls, .action-dock, [role="dialog"]')) continue;
+			if (document.querySelector(`[data-trace-marker-position="${cell.x},${cell.y}"], [data-trace-ghost-position="${cell.x},${cell.y}"]`)) continue;
 			return point;
 		}
 		const rect = (element: Element) => {
@@ -145,15 +148,42 @@ export async function fieldOwnedBlankPoint(page: Page, preferred: { x: number; y
 	}, preferred);
 }
 
+/** A visible hit point on the actual target, including partially covered ghosts. */
+export async function uncoveredTargetPoint(target: Locator): Promise<{ x: number; y: number }> {
+	return target.evaluate((element) => {
+		const rect = element.getBoundingClientRect();
+		for (const y of [0.5, 0.98, 0.02]) for (const x of [0.5, 0.98, 0.02]) {
+			const point = { x: rect.left + rect.width * x, y: rect.top + rect.height * y };
+			const hit = document.elementFromPoint(point.x, point.y);
+			if (hit && element.contains(hit)) return point;
+		}
+		throw new Error('The target has no uncovered hit point.');
+	});
+}
+
+/** Sample the requested cell itself, rather than a now-obstructed fixed corner. */
+export async function blankCellPoint(page: Page, position: { x: number; y: number }): Promise<{ x: number; y: number }> {
+	return page.locator('.field-grid').evaluate((grid, cell) => {
+		const rect = grid.getBoundingClientRect();
+		const cellSize = Number.parseFloat(getComputedStyle(document.querySelector('.field-scene')!).getPropertyValue('--cell-size'));
+		for (const y of [0.98, 0.02, 0.5]) for (const x of [0.98, 0.02, 0.5]) {
+			const point = { x: rect.left + (cell.x + x) * cellSize, y: rect.top + (cell.y + y) * cellSize };
+			const hit = document.elementFromPoint(point.x, point.y);
+			if (hit?.closest('.field-area') && !hit.closest('button, .participant, .trace-ghost, .field-action-menu')) return point;
+		}
+		throw new Error('The requested cell has no blank hit point.');
+	}, position);
+}
+
 export async function viewportExternalPoint(page: Page): Promise<{ x: number; y: number }> {
 	return page.locator('.field-viewport').evaluate((viewport) => {
 		const viewportRect = viewport.getBoundingClientRect();
 		const fieldRect = document.querySelector<HTMLElement>('.field-area')!.getBoundingClientRect();
 		const composerRect = document.querySelector<HTMLElement>('.action-dock')?.getBoundingClientRect() ?? null;
 		const candidates = [
-			{ x: viewportRect.left + viewportRect.width / 2, y: viewportRect.top + 20 },
-			{ x: viewportRect.left + 20, y: viewportRect.top + viewportRect.height / 2 },
-			{ x: viewportRect.right - 20, y: viewportRect.top + viewportRect.height / 2 }
+			{ x: viewportRect.left + viewportRect.width / 2, y: (viewportRect.top + fieldRect.top) / 2 },
+			{ x: (viewportRect.left + fieldRect.left) / 2, y: viewportRect.top + viewportRect.height / 2 },
+			{ x: (viewportRect.right + fieldRect.right) / 2, y: viewportRect.top + viewportRect.height / 2 }
 		];
 		const inside = (rect: DOMRect, point: { x: number; y: number }) => point.x >= rect.left && point.x <= rect.right && point.y >= rect.top && point.y <= rect.bottom;
 		const point = candidates.find((candidate) => inside(viewportRect, candidate) && !inside(fieldRect, candidate) && (!composerRect || !inside(composerRect, candidate)));

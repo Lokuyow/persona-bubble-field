@@ -86,12 +86,12 @@ test.describe('DEV World Sandbox', () => {
 		const normalAfter = await normalBubble.evaluate((element) => {
 			const rect = element.getBoundingClientRect();
 			const seam = getComputedStyle(element, '::after');
-			return { width: rect.width, height: rect.height, seamHeight: seam.height, seamBottom: seam.bottom };
+			return { width: rect.width, height: rect.height, seamHeight: seam.height, seamY: Number.parseFloat(getComputedStyle(element).getPropertyValue('--tail-seam-y')) };
 		});
 		expect(normalAfter.width).toBeCloseTo(normalBefore.width, 1);
 		expect(normalAfter.height).toBeCloseTo(normalBefore.height, 1);
 		expect(normalAfter.seamHeight).toBe('3px');
-		expect(normalAfter.seamBottom).toBe('-1px');
+		expect(normalAfter.seamY).toBeCloseTo(normalAfter.height, 5);
 	});
 
 	for (const speechType of ['shout', 'monologue'] as const) {
@@ -137,10 +137,10 @@ test.describe('DEV World Sandbox', () => {
 			if (speechType === 'monologue') {
 				expect(state.surfaceLeft).toBeGreaterThanOrEqual(0);
 				expect(state.surfaceRight).toBeLessThanOrEqual(320);
-				expect(state.surfaceTop).toBeGreaterThanOrEqual(84);
-				expect(state.surfaceBottom).toBeLessThanOrEqual(466);
+				expect(state.surfaceTop).toBeGreaterThanOrEqual(0);
+				expect(state.surfaceBottom).toBeLessThanOrEqual(844);
 			} else {
-				expect(state.surfaceLeft < 0 || state.surfaceRight > 320 || state.surfaceTop < 84 || state.surfaceBottom > 466).toBe(true);
+				expect(state.surfaceRight - state.surfaceLeft).toBeGreaterThan(state.width);
 			}
 			expect(state.ellipsisVisible).toBe(true);
 		});

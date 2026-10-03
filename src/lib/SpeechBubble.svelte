@@ -8,7 +8,8 @@
 	import {
 		bubbleToneStyle,
 		mergedBubbleStyle,
-		mergedTailConnectionStyle,
+		liveTailSeamStyle,
+		type LiveTailConnection,
 		type BubbleTone
 	} from './bubblePresentation';
 
@@ -24,8 +25,7 @@
 		shape: SpeechBubbleShape | null;
 		participantId?: string;
 		memberCount?: number;
-		tailSeamOffset: number;
-		mergedTailConnections?: readonly Readonly<{ participantId: string; seamOffset: number }>[];
+		tailConnections: readonly LiveTailConnection[];
 		outlineOpenings?: readonly Readonly<{ id: string; points: string }>[];
 	}>;
 
@@ -67,7 +67,7 @@
 	let rootStyle = $derived([
 		bubbleToneStyle(bubble.tone),
 		bubble.kind === 'merged' ? mergedBubbleStyle(bubble.memberCount ?? 0) : '',
-		`--tail-seam-offset-x: ${bubble.tailSeamOffset}px`,
+		bubble.kind === 'normal' && bubble.tailConnections[0] ? liveTailSeamStyle(bubble.tailConnections[0], false) : '',
 		`transform: translate3d(${bubble.anchor.x}px, ${bubble.anchor.y}px, 0)`
 	].filter(Boolean).join('; '));
 </script>
@@ -89,11 +89,11 @@
 		<span class="bubble-ellipsis" aria-hidden="true">…</span>
 	{/if}
 	{#if bubble.kind === 'merged' && bubble.speechType === 'normal'}
-		{#each bubble.mergedTailConnections ?? [] as connection, index (connection.participantId)}
+		{#each bubble.tailConnections as connection (connection.participantId)}
 			<span
 				class="bubble-tail-connection"
 				data-tail-participant-id={connection.participantId}
-				style={`${mergedTailConnectionStyle(index, bubble.mergedTailConnections?.length ?? 0)} --tail-seam-offset-x: ${connection.seamOffset}px;`}
+				style={liveTailSeamStyle(connection, true)}
 				aria-hidden="true"
 			></span>
 		{/each}
@@ -108,9 +108,9 @@
 	.bubble-content { position: relative; z-index: 1; min-width: 0; max-width: 100%; overflow: hidden; white-space: pre-line; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 5; line-clamp: 5; text-align: left; user-select: text; -webkit-user-select: text; }
 	.bubble-ellipsis { position: absolute; right: 8px; bottom: 5px; z-index: 2; padding-left: 0.5em; background: var(--tone-background); line-height: 1; pointer-events: none; }
 	.bubble-normal { width: fit-content; min-width: 72px; max-width: min(240px, calc(100% - 32px)); padding: 12px 15px; }
-	.bubble-normal::after { content: ''; position: absolute; left: calc(50% + var(--tail-seam-offset-x, 0px)); bottom: -1px; width: 11px; height: 3px; transform: translateX(-50%); background: var(--tone-background); pointer-events: none; z-index: 1; }
+	.bubble-normal::after { content: ''; position: absolute; left: calc(var(--tail-seam-x) - 1px); top: calc(var(--tail-seam-y) - 1px); width: var(--tail-seam-width); height: var(--tail-seam-height); transform: translate(-50%, -50%); background: var(--tone-background); pointer-events: none; z-index: 1; }
 	.bubble-merged { width: fit-content; max-width: min(var(--merged-bubble-max-width, 330px), calc(100% - 32px)); min-width: var(--merged-bubble-min-width, 100px); padding: var(--merged-bubble-padding-y, 12px) var(--merged-bubble-padding-x, 16px); font-size: var(--merged-bubble-font-size, 13px); }
-	.bubble-tail-connection { position: absolute; bottom: -1px; width: 9px; height: 3px; transform: translateX(calc(-50% + var(--tail-seam-offset-x, 0px))); background: var(--tone-background); pointer-events: none; z-index: 1; }
+	.bubble-tail-connection { position: absolute; left: calc(var(--tail-seam-x) - 1px); top: calc(var(--tail-seam-y) - 1px); width: var(--tail-seam-width); height: var(--tail-seam-height); transform: translate(-50%, -50%); background: var(--tone-background); pointer-events: none; z-index: 1; }
 	@media (max-width: 700px) {
 		.bubble { font-size: 13px; }
 		.bubble-normal { min-width: 60px; max-width: min(180px, calc(100% - 32px)); padding: 8px 10px; }

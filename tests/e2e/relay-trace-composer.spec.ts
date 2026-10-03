@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
-import { WORLD_STATE_KIND } from '../../src/lib/nostrProtocol';
+import { parseWorldStateEvent, WORLD_STATE_KIND } from '../../src/lib/nostrProtocol';
+import type { Event as NostrEvent } from 'nostr-tools/pure';
 import { characterPicturePath } from '../../src/lib/character';
 import { requireCharacterFromPubkey } from '../../src/lib/characterAssignment';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
@@ -191,11 +192,11 @@ test.describe('Relay startup', () => {
 			const bubble = page.locator(`[data-trace-reply-id="${raw.id}"]`);
 			await expect(bubble).toHaveCount(0);
 			await expect(editor).toHaveValue('own Trace shout');
-			const positionsBefore = (await relayState(page)).state.published.filter((event) => event.kind === WORLD_STATE_KIND).length;
+			const positionsBefore = (await relayState(page)).state.published.filter((event) => parseWorldStateEvent(event as NostrEvent, CHANNEL_ID)?.state === 'active').length;
 			await editor.press('Escape');
 			await page.keyboard.press('ArrowRight');
 			await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '3,2');
-			expect((await relayState(page)).state.published.filter((event) => event.kind === WORLD_STATE_KIND)).toHaveLength(positionsBefore);
+			expect((await relayState(page)).state.published.filter((event) => parseWorldStateEvent(event as NostrEvent, CHANNEL_ID)?.state === 'active')).toHaveLength(positionsBefore);
 			await page.evaluate(() => (window as unknown as { __relayStartupTest: { releasePublishes(kind: number): void } }).__relayStartupTest.releasePublishes(1111));
 			if (outcome !== 'rejected') await expect(page.locator('[data-interaction-reward-feedback]')).toHaveText(['+5pt', '+10pt']);
 			await expect.poll(() => page.evaluate(() => (window as unknown as { __ehagakiTerminalCount: number }).__ehagakiTerminalCount)).toBe(1);

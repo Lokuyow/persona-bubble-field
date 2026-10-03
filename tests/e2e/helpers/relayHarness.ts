@@ -27,6 +27,7 @@ import { isBlockedFacilityCell } from '../../../src/lib/fieldFacilities';
 import { moveOneCell, type Direction, type GridPosition } from '../../../src/lib/geometry';
 import { PROTOTYPE_AUTHORITATIVE_RELAYS, PROTOTYPE_CHANNEL_ID, PROTOTYPE_WORLD_CONFIG, type PrototypeWorldConfig } from '../../../src/lib/prototypeWorldConfig';
 import { installHostOwnedStub } from './hostOwnedComposerStub';
+import { uncoveredTargetPoint } from './devWorldHarness';
 import { installFieldFrameSampling, readFieldFrames, sampleRenderedField } from './fieldFrames';
 
 export const CHANNEL_ID = PROTOTYPE_CHANNEL_ID;
@@ -894,7 +895,8 @@ export async function selectRelayTraceCell(page: Page, position: string): Promis
 	const cell = page.locator(`[data-cell-position="${position}"]:not(.realtime-group-trigger)`);
 	const box = await cell.boundingBox();
 	if (!box) throw new Error(`Expected visible logical cell ${position}.`);
-	await cell.click({ position: { x: box.width - 2, y: box.height - 2 } });
+	const point = await uncoveredTargetPoint(cell);
+	await cell.click({ position: { x: point.x - box.x, y: point.y - box.y } });
 }
 
 export async function clickRelayLogicalCell(page: Page, cell: { x: number; y: number }): Promise<void> {
@@ -1351,15 +1353,16 @@ export async function installDeathTransitionClockRollback(page: Page, rollbackAt
 		let rolledBack = sessionStorage.getItem(rollbackKey) === '1';
 		let armed = false;
 		Date.now = () => rolledBack ? rollbackTime : originalNow();
-		const originalGet = IDBObjectStore.prototype.get;
-		IDBObjectStore.prototype.get = function (key: IDBValidKey | IDBKeyRange) {
-			if (armed && this.name === 'persona-bubble-field-player-state' && key === 'player-lifecycle') {
-				armed = false;
-				rolledBack = true;
-				sessionStorage.setItem(rollbackKey, '1');
+		Object.assign(window, {
+			__personaBubbleFieldTestHooks: {
+				beforeDeathTransitionCompareAndSwap: () => {
+					if (!armed) return;
+					armed = false;
+					rolledBack = true;
+					sessionStorage.setItem(rollbackKey, '1');
+				}
 			}
-			return originalGet.call(this, key);
-		};
+		});
 		Object.assign(window, {
 			__personaLifecycleClockRollback: { arm: () => { armed = true; } }
 		});
@@ -1408,6 +1411,15 @@ export type AvailableMove = {
 };
 
 const RELAY_FIELD = { columns: 16, rows: 8 } as const;
+
+export function cooperationDefectionInteractionCell(position: GridPosition): GridPosition {
+	const candidates = [{ x: position.x, y: position.y - 1 }, { x: position.x, y: position.y + 1 },
+		{ x: position.x - 1, y: position.y }, { x: position.x + 1, y: position.y }];
+	const cell = candidates.find((candidate) => candidate.x >= 0 && candidate.x < RELAY_FIELD.columns &&
+		candidate.y >= 0 && candidate.y < RELAY_FIELD.rows && !isBlockedFacilityCell(candidate));
+	if (!cell) throw new Error('Expected an unblocked interaction cell beside the CooperationDefection group.');
+	return cell;
+}
 
 const CARDINAL_RELAY_MOVES = [
 	{ key: 'ArrowUp', direction: 'up' },

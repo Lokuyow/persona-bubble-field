@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { LiveTailConnection } from '$lib/bubblePresentation';
 	import type { SpeechType } from './conversation';
 	import type { Size, WorldPoint } from './geometry';
 	import type { SpeechBubbleShape } from './speechBubblePath';
@@ -8,7 +9,6 @@
 	import {
 		bubbleCenter,
 		bubbleToneStyle,
-		mergedTailStart,
 		NORMAL_TRACE_ROOT_RADIUS,
 		specialTailExtension,
 		tailGeometry,
@@ -28,8 +28,8 @@
 	const TRACE_CONTINUATION_HALO_PARENT_WIDTH = 17;
 	const TRACE_CONTINUATION_HALO_CHILD_WIDTH = 1.2;
 
-	type NormalTail = Readonly<{ id: string; tone: BubbleTone; speechType: SpeechType; anchor: WorldPoint; size: Size; target: WorldPoint; shape: SpeechBubbleShape | null }>;
-	type MergedTail = Readonly<{ id: string; tone: BubbleTone; speechType: SpeechType; anchor: WorldPoint; size: Size; shape: SpeechBubbleShape | null; members: readonly Readonly<{ id: string; target: WorldPoint }>[] }>;
+	type NormalTail = Readonly<{ id: string; tone: BubbleTone; speechType: SpeechType; anchor: WorldPoint; size: Size; connection: LiveTailConnection; shape: SpeechBubbleShape | null }>;
+	type MergedTail = Readonly<{ id: string; tone: BubbleTone; speechType: SpeechType; anchor: WorldPoint; size: Size; shape: SpeechBubbleShape | null; members: readonly Readonly<{ id: string; connection: LiveTailConnection }>[] }>;
 	type Props = Readonly<{
 		viewportSize: Size;
 		traceReady: boolean;
@@ -62,13 +62,13 @@
 		</defs>
 		<g data-live-surface-occlusion="true" mask={`url(#${occlusionMask})`}>
 			{#each specialNormalTails as bubble (bubble.id)}
-				{@const tail = tailGeometry(tailStart(bubble.anchor, bubble.size), bubble.target, 11, 2, specialTailExtension(bubble.speechType))}
+				{@const tail = bubble.connection.tail}
 				<polygon class={`tail tail-${bubble.tone} tone-${bubble.tone}`} data-tail-participant-id={bubble.id} points={tail.points} style={bubbleToneStyle(bubble.tone)} />
 				<path class={`tail-outline tone-${bubble.tone}`} data-tail-participant-id={bubble.id} d={tail.outlinePath} style={bubbleToneStyle(bubble.tone)} />
 			{/each}
 			{#each specialMergedTails as bubble (bubble.id)}
-				{#each bubble.members as member, index (member.id)}
-					{@const tail = tailGeometry(mergedTailStart(bubble.anchor, bubble.size, index, bubble.members.length), member.target, 9, 2, specialTailExtension(bubble.speechType))}
+				{#each bubble.members as member (member.id)}
+					{@const tail = member.connection.tail}
 					<polygon class={`tail tail-${bubble.tone} tone-${bubble.tone}`} data-tail-participant-id={member.id} points={tail.points} style={bubbleToneStyle(bubble.tone)} />
 					<path class={`tail-outline tone-${bubble.tone}`} data-tail-participant-id={member.id} d={tail.outlinePath} style={bubbleToneStyle(bubble.tone)} />
 				{/each}
@@ -125,13 +125,13 @@
 		</g>
 	{/if}
 	{#each normalTails.filter((bubble) => bubble.speechType === 'normal') as bubble (bubble.id)}
-		{@const tail = tailGeometry(tailStart(bubble.anchor, bubble.size), bubble.target, 11, 2, specialTailExtension(bubble.speechType))}
+		{@const tail = bubble.connection.tail}
 		<polygon class={`tail tail-${bubble.tone} tone-${bubble.tone}`} data-tail-participant-id={bubble.id} points={tail.points} style={bubbleToneStyle(bubble.tone)} />
 		<path class={`tail-outline tone-${bubble.tone}`} data-tail-participant-id={bubble.id} d={tail.outlinePath} style={bubbleToneStyle(bubble.tone)} />
 	{/each}
 	{#each mergedTails.filter((bubble) => bubble.speechType === 'normal') as bubble (bubble.id)}
-		{#each bubble.members as member, index (member.id)}
-			{@const tail = tailGeometry(mergedTailStart(bubble.anchor, bubble.size, index, bubble.members.length), member.target, 9, 2, specialTailExtension(bubble.speechType))}
+		{#each bubble.members as member (member.id)}
+			{@const tail = member.connection.tail}
 			<polygon class={`tail tail-${bubble.tone} tone-${bubble.tone}`} data-tail-participant-id={member.id} points={tail.points} style={bubbleToneStyle(bubble.tone)} />
 			<path class={`tail-outline tone-${bubble.tone}`} data-tail-participant-id={member.id} d={tail.outlinePath} style={bubbleToneStyle(bubble.tone)} />
 		{/each}

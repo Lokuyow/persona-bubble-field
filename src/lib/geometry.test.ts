@@ -11,7 +11,8 @@ import {
 	getFieldWorldSize,
 	getResponsiveCellSize,
 	gridToWorld,
-	logicalFieldYToSpeechY,
+	characterFootprint,
+	correctBubbleAnchor,
 	MOBILE_CELL_SIZE,
 	mergedBubblePreferredAnchor,
 	moveOneCell,
@@ -86,10 +87,9 @@ describe('field geometry', () => {
 		expect(worldToScreen(player, camera).x).toBe(180);
 	});
 
-	it('separates field area from speech area and clamps the mobile world to it', () => {
+	it('uses the viewport height without a bubble reservation', () => {
 		const viewport = { width: 360, height: 740 };
-		const speechArea = { x: 16, y: 84, width: 328, height: 176 };
-		const fieldArea = getFieldAreaBounds(viewport, speechArea);
+		const fieldArea = getFieldAreaBounds(viewport);
 		const cellSize = getResponsiveCellSize(viewport.width);
 		const fieldWorld = getFieldWorldSize({ columns: 16, rows: 8, cellSize });
 		const player = gridToWorld({ x: 7, y: 4 }, cellSize);
@@ -99,16 +99,16 @@ describe('field geometry', () => {
 			fieldArea
 		);
 
-		expect(fieldArea.y).toBe(speechArea.y + speechArea.height);
+		expect(fieldArea.y).toBe(0);
 		expect(fieldArea.x).toBe(8);
 		expect(fieldArea.width).toBe(viewport.width - 16);
 		expect(fieldArea.height).toBe(viewport.height - fieldArea.y);
-		expect(camera.y).toBe(-40);
-		expect(topRow.y).toBe(fieldArea.y + MOBILE_CELL_SIZE / 2 + 40);
+		expect(camera.y).toBe((fieldWorld.height - viewport.height) / 2);
+		expect(topRow.y).toBe(fieldArea.y + MOBILE_CELL_SIZE / 2 - camera.y);
 		expect(getActualFieldTop(fieldArea, camera)).toBe(fieldArea.y - camera.y);
 	});
 
-	it('extends the effective speech area to the actual centered field top', () => {
+	it('reports the actual centered field top independently of bubbles', () => {
 		const fieldArea = { x: 0, y: 260, width: 360, height: 480 };
 
 		expect(getActualFieldTop(fieldArea, { x: 0, y: -16 })).toBe(276);
@@ -192,49 +192,23 @@ describe('field geometry', () => {
 		])).toEqual({ x: 2, y: 1 });
 	});
 
-	it('maps logical field Y into the speech area while keeping the bubble inside', () => {
-		const speechArea = { x: 16, y: 84, width: 288, height: 160 };
-		const bubble = { width: 120, height: 44 };
-
-		const top = logicalFieldYToSpeechY(0, 8, bubble, speechArea);
-		const bottom = logicalFieldYToSpeechY(7, 8, bubble, speechArea);
-
-		expect(top).toBeLessThan(bottom);
-		expect(top).toBeGreaterThanOrEqual(speechArea.y);
-		expect(bottom + bubble.height).toBeLessThanOrEqual(speechArea.y + speechArea.height);
+	it('prefers a 40px body-to-character gap above the current screen character', () => {
+		const speaker = characterFootprint({ x: 200, y: 260 }, 76);
+		const size = { width: 120, height: 44 };
+		const anchor = normalBubblePreferredAnchor(speaker, size);
+		expect(anchor.x + size.width / 2).toBe(speaker.x + speaker.width / 2);
+		expect(anchor.y + size.height).toBeLessThan(speaker.y);
+		expect(speaker.y - anchor.y - size.height).toBe(40);
+		const moved = normalBubblePreferredAnchor({ ...speaker, y: speaker.y + 50 }, size);
+		expect(moved.y - anchor.y).toBe(50);
 	});
 
-	it('keeps normal bubble X tied to the speaker while logical Y changes only bubble Y', () => {
-		const speechArea = { x: 16, y: 84, width: 288, height: 160 };
-		const bubble = { width: 120, height: 44 };
-		const top = normalBubblePreferredAnchor(200, 0, 8, bubble, speechArea);
-		const bottom = normalBubblePreferredAnchor(200, 7, 8, bubble, speechArea);
-
-		expect(top.x).toBe(bottom.x);
-		expect(top.y).toBeLessThan(bottom.y);
-	});
-
-	it('centers a merged bubble horizontally from its members', () => {
-		expect(
-			mergedBubblePreferredAnchor(
-				[
-					{ x: 120, y: 240 },
-					{ x: 200, y: 200 },
-					{ x: 280, y: 240 }
-				],
-				8,
-				{ width: 160, height: 48 },
-				{ x: 16, y: 84, width: 288, height: 160 }
-			)
-		).toMatchObject({ x: 120 });
-		expect(
-			mergedBubblePreferredAnchor(
-				[{ x: 120, y: 2 }, { x: 200, y: 2 }, { x: 280, y: 2 }],
-				8,
-				{ width: 160, height: 48 },
-				{ x: 16, y: 84, width: 288, height: 160 }
-			).y
-		).toBe(logicalFieldYToSpeechY(2, 8, { width: 160, height: 48 }, { x: 16, y: 84, width: 288, height: 160 }));
+	it('places a merged body above only the supplied visible member group', () => {
+		const members = [{ x: 100, y: 200 }, { x: 260, y: 250 }].map((screen) => characterFootprint(screen, 50));
+		const size = { width: 160, height: 48 };
+		const anchor = mergedBubblePreferredAnchor(members, size);
+		expect(anchor.x + size.width / 2).toBe(180);
+		expect(Math.min(...members.map((member) => member.y)) - anchor.y - size.height).toBe(40);
 	});
 
 	it('keeps bubble anchors inside the viewport', () => {
@@ -244,7 +218,7 @@ describe('field geometry', () => {
 		});
 	});
 
-	it('keeps a bubble inside the explicit speech area bounds', () => {
+	it('keeps a bubble inside the explicit placement bounds', () => {
 		expect(
 			clampToBounds(
 				{ x: 220, y: 20 },
@@ -253,44 +227,6 @@ describe('field geometry', () => {
 				8
 			)
 		).toEqual({ x: 176, y: 92 });
-	});
-
-	it('calculates a merged anchor from only the members it receives', () => {
-		const visibleMembers = [{ x: 120, y: 2 }, { x: 200, y: 4 }];
-		const offscreenMember = { x: 900, y: 0 };
-
-		expect(
-			mergedBubblePreferredAnchor(visibleMembers, 8, { width: 160, height: 48 }, { x: 16, y: 84, width: 288, height: 160 })
-		).toMatchObject({ x: 80 });
-		expect(
-			mergedBubblePreferredAnchor(visibleMembers, 8, { width: 160, height: 48 }, { x: 16, y: 84, width: 288, height: 160 }).y
-		).toBe(logicalFieldYToSpeechY((2 + 4) / 2, 8, { width: 160, height: 48 }, { x: 16, y: 84, width: 288, height: 160 }));
-		expect(
-			mergedBubblePreferredAnchor(
-				[...visibleMembers, offscreenMember],
-				8,
-				{ width: 160, height: 48 },
-				{ x: 16, y: 84, width: 288, height: 160 }
-			)
-		).not.toMatchObject({ x: 80 });
-	});
-
-	it('uses the visible members logical Y average for a merged bubble', () => {
-		const bubble = { width: 160, height: 48 };
-		const speechArea = { x: 16, y: 84, width: 288, height: 160 };
-		const anchor = mergedBubblePreferredAnchor([{ x: 120, y: 0 }, { x: 200, y: 6 }], 8, bubble, speechArea);
-
-		expect(anchor.y).toBe(logicalFieldYToSpeechY(3, 8, bubble, speechArea));
-	});
-
-	it('keeps logical bubble ordering independent of camera Y', () => {
-		const speechArea = { x: 16, y: 84, width: 288, height: 160 };
-		const bubble = { width: 120, height: 44 };
-		const first = normalBubblePreferredAnchor(200, 2, 8, bubble, speechArea);
-		const second = normalBubblePreferredAnchor(200, 5, 8, bubble, speechArea);
-
-		expect(first.x).toBe(second.x);
-		expect(first.y).toBeLessThan(second.y);
 	});
 
 	it('keeps an isolated bubble at its preferred anchor', () => {
@@ -537,5 +473,77 @@ describe('field geometry', () => {
 		const placement = placeBubbles([item], bounds, 56, undefined, bounds, [panel])[0];
 		expect(placement.anchor).toEqual(item.preferred);
 		expect(overlapsWithGap({ ...item, anchor: placement.anchor }, panel)).toBe(true);
+	});
+});
+
+
+describe('live screen-space constraints', () => {
+	const bounds = { x: 0, y: 0, width: 600, height: 600 };
+	const item = { id: 'live', preferred: { x: 240, y: 200 }, size: { width: 120, height: 50 } };
+	const rect = (anchor: { x: number; y: number }) => ({ anchor, size: item.size });
+	const obstacle = (bounds: { x: number; y: number; width: number; height: number }) => ({ anchor: bounds, size: bounds });
+	it('allows a shorter preferred tail to keep the body inside the viewport', () => {
+		const speaker = { x: 262, y: 70, width: 76, height: 76 };
+		const input = { ...item, preferred: normalBubblePreferredAnchor(speaker, item.size) };
+		const [placed] = placeBubbles([input], bounds, 76, undefined, bounds, [], { uiObstacles: [], characterObstacles: [speaker] });
+		const gap = speaker.y - placed.anchor.y - item.size.height;
+		expect(placed.anchor.y).toBeGreaterThanOrEqual(bounds.y);
+		expect(gap).toBeGreaterThanOrEqual(0);
+		expect(gap).toBeLessThan(40);
+	});
+	it('allows a longer preferred tail when a HUD separates the body from the speaker', () => {
+		const speaker = { x: 262, y: 300, width: 76, height: 76 };
+		const hud = { x: 0, y: 240, width: 600, height: 30 };
+		const input = { ...item, preferred: normalBubblePreferredAnchor(speaker, item.size) };
+		const [placed] = placeBubbles([input], bounds, 76, undefined, bounds, [], { uiObstacles: [hud], characterObstacles: [speaker] });
+		expect(overlapsWithGap(rect(placed.anchor), obstacle(hud), 0)).toBe(false);
+		expect(speaker.y - placed.anchor.y - item.size.height).toBeGreaterThan(40);
+	});
+	it('uses side or lower screen space when the upper space is blocked', () => {
+		const ui = { x: 0, y: 0, width: 600, height: 280 };
+		const speaker = characterFootprint({ x: 300, y: 325 }, 76);
+		const constraints = { uiObstacles: [ui], characterObstacles: [speaker] };
+		const [placed] = placeBubbles([item], bounds, 76, undefined, bounds, [], constraints);
+		expect(overlapsWithGap(rect(placed.anchor), obstacle(ui), 0)).toBe(false);
+		expect(overlapsWithGap(rect(placed.anchor), obstacle(speaker), 0)).toBe(false);
+		expect(placed.anchor.y).toBeGreaterThanOrEqual(280);
+	});
+	it('finds a narrow distant legal opening before applying the soft candidate cap', () => {
+		const uiObstacles = [{ x: 0, y: 0, width: 420, height: 600 }, { x: 420, y: 0, width: 180, height: 470 }];
+		const constraints = { uiObstacles, characterObstacles: [] };
+		const [placed] = placeBubbles([item], bounds, 76, undefined, bounds, [], constraints);
+		for (const ui of uiObstacles) expect(overlapsWithGap(rect(placed.anchor), obstacle(ui), 0)).toBe(false);
+		expect(placed.anchor.x).toBeGreaterThanOrEqual(420);
+		expect(placed.anchor.y).toBeGreaterThanOrEqual(470);
+	});
+	it('never sacrifices a safe character candidate to avoid fixed bubble overlap', () => {
+		const character = { x: 240, y: 200, width: 120, height: 50 };
+		const fixed = { id: 'fixed', preferred: { x: 0, y: 0 }, anchor: { x: 0, y: 0 }, size: bounds };
+		const constraints = { uiObstacles: [], characterObstacles: [character] };
+		const [placed] = placeBubbles([item], bounds, 76, undefined, bounds, [fixed], constraints);
+		expect(overlapsWithGap(rect(placed.anchor), obstacle(character), 0)).toBe(false);
+	});
+	it('preserves an offscreen merged anchor until a hard obstacle requires the nearest correction', () => {
+		const empty = { uiObstacles: [], characterObstacles: [] };
+		expect(correctBubbleAnchor(item, bounds, bounds, empty)).toEqual(item.preferred);
+		const character = { x: 240, y: 200, width: 120, height: 50 };
+		const corrected = correctBubbleAnchor(item, bounds, bounds, { ...empty, characterObstacles: [character] });
+		expect(overlapsWithGap(rect(corrected), obstacle(character), 0)).toBe(false);
+		expect(Math.hypot(corrected.x - item.preferred.x, corrected.y - item.preferred.y)).toBe(50);
+	});
+	it('keeps unavoidable UI collisions above character and soft bubble priorities', () => {
+		const small = { x: 0, y: 0, width: 200, height: 100 };
+		const ui = { x: 0, y: 0, width: 140, height: 100 };
+		const input = { ...item, preferred: { x: 0, y: 0 } };
+		const anchor = correctBubbleAnchor(input, small, small, { uiObstacles: [ui], characterObstacles: [{ x: 140, y: 0, width: 60, height: 100 }] });
+		expect(anchor.x).toBe(80);
+	});
+	it('keeps soft overlap improvement near the speaker and is independent of input order', () => {
+		const items = [item, { ...item, id: 'other' }];
+		const constraints = { uiObstacles: [], characterObstacles: [] };
+		const first = placeBubbles(items, bounds, 76, undefined, bounds, [], constraints);
+		const reversed = placeBubbles([...items].reverse(), bounds, 76, undefined, bounds, [], constraints);
+		expect([...first].sort((a,b) => a.id.localeCompare(b.id))).toEqual([...reversed].sort((a,b) => a.id.localeCompare(b.id)));
+		for (const placed of first) expect(Math.hypot(placed.anchor.x - item.preferred.x, placed.anchor.y - item.preferred.y)).toBeLessThanOrEqual(152);
 	});
 });

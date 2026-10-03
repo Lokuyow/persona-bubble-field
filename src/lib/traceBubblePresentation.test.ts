@@ -31,8 +31,8 @@ function layout(projection: TraceConversationProjection, bubbleSizes: Record<str
 		fixedObstacles: [],
 		bubbleSizes,
 		traceReplyCardFootprints: footprints,
-		bubbleSafeBounds: { x: 0, y: 0, width: 1000, height: 700 },
-		bubbleVisualRegion: { x: 0, y: 0, width: 1000, height: 700 },
+		traceSafeBounds: { x: 0, y: 0, width: 1000, height: 700 },
+		traceVisualRegion: { x: 0, y: 0, width: 1000, height: 700 },
 		cellSize: 100,
 		camera: { x: 0, y: 0 },
 		fieldAreaBounds: { x: 0, y: 0, width: 1000, height: 700 },
@@ -171,8 +171,8 @@ describe('trace bubble presentation', () => {
 		const unchanged = layout(projection, sizes, {}, first)!;
 		const moved = layout(projection, sizes, {}, first, { camera: { x: 50, y: 0 } })!;
 		const resized = layout(projection, sizes, {}, first, {
-			bubbleSafeBounds: { x: 0, y: 0, width: 1000, height: 500 },
-			bubbleVisualRegion: { x: 0, y: 0, width: 1000, height: 500 }
+			traceSafeBounds: { x: 0, y: 0, width: 1000, height: 500 },
+			traceVisualRegion: { x: 0, y: 0, width: 1000, height: 500 }
 		})!;
 		expect(unchanged.root.anchor).toEqual(first.root.anchor);
 		expect(moved.root.anchor).not.toEqual(first.root.anchor);
