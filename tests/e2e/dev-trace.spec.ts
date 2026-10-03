@@ -190,7 +190,11 @@ test.describe('DEV World Sandbox', () => {
 				profile: { left: profileBox.left, right: profileBox.right, top: profileBox.top, bottom: profileBox.bottom },
 				content: { left: contentBox.left, right: contentBox.right, top: contentBox.top, bottom: contentBox.bottom },
 				profileBackground: getComputedStyle(profile).backgroundColor,
-				contentBackground: getComputedStyle(content).backgroundColor
+				contentBackground: getComputedStyle(content).backgroundColor,
+				separator: (() => {
+					const style = getComputedStyle(profile, '::after');
+					return { content: style.content, width: Number.parseFloat(style.width), height: Number.parseFloat(style.height), background: style.backgroundColor, pointerEvents: style.pointerEvents };
+				})()
 			};
 		});
 		expect(Math.abs(layout.profile.right - layout.content.left)).toBeLessThan(0.5);
@@ -198,7 +202,12 @@ test.describe('DEV World Sandbox', () => {
 		expect(Math.abs(layout.profile.bottom - layout.content.bottom)).toBeLessThan(0.5);
 		expect(layout.profile.left).toBeLessThanOrEqual(layout.card.left + 1);
 		expect(layout.content.right).toBeGreaterThanOrEqual(layout.card.right - 1);
-		expect(layout.profileBackground).not.toBe(layout.contentBackground);
+		expect(layout.profileBackground).toBe(layout.contentBackground);
+		expect(layout.separator.content).not.toBe('none');
+		expect(layout.separator.width).toBeGreaterThan(0);
+		expect(layout.separator.height).toBeGreaterThan(0);
+		expect(layout.separator.background).not.toBe('rgba(0, 0, 0, 0)');
+		expect(layout.separator.pointerEvents).toBe('none');
 
 		const profileBox = await profile.boundingBox();
 		const contentBox = await content.boundingBox();
@@ -282,6 +291,7 @@ test.describe('DEV World Sandbox', () => {
 					contentBackground: getComputedStyle(content).backgroundColor,
 					profileBorderRadius: getComputedStyle(profile).borderRadius,
 					contentBorderRadius: getComputedStyle(content).borderRadius,
+					separatorContent: getComputedStyle(profile, '::after').content,
 					boundaryGap: Math.abs(profileBox.right - contentBox.left),
 					sharedVerticalExtent: Math.abs(profileBox.top - contentBox.top) < 0.5 && Math.abs(profileBox.bottom - contentBox.bottom) < 0.5
 				};
@@ -292,6 +302,7 @@ test.describe('DEV World Sandbox', () => {
 			expect(shape.contentBackground).toBe('rgba(0, 0, 0, 0)');
 			expect(shape.profileBorderRadius).toBe('0px');
 			expect(shape.contentBorderRadius).toBe('0px');
+			expect(shape.separatorContent).toBe('none');
 			expect(shape.boundaryGap).toBeLessThan(0.5);
 			expect(shape.sharedVerticalExtent).toBe(true);
 			await profile.hover();

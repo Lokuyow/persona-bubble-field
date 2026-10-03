@@ -180,11 +180,12 @@
 	.trace-root-bubble:not(.speech-bubble-special) { background: transparent; border-color: transparent; }
 	.trace-reply-card { z-index: 2; display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 0; align-items: stretch; min-width: 144px; padding: 0; }
 	.trace-reply-card.trace-current-selected:not(.speech-bubble-special)::before { content: ''; position: absolute; inset: 0; z-index: 2; border: 2px solid var(--color-accent); border-radius: inherit; pointer-events: none; box-sizing: border-box; }
-	.trace-reply-author-profile { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; justify-self: stretch; padding: 12px 3px 12px 15px; gap: 3px; border: 0; border-radius: 17px 0 0 17px; background: color-mix(in srgb, var(--tone-outline) 18%, var(--trace-surface)); color: #40504b; font-size: 12px; font-weight: 800; line-height: 1.1; text-align: center; cursor: pointer; transition: background-color 120ms ease; }
+	.trace-reply-author-profile { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; justify-self: stretch; padding: 12px 7px 12px 15px; gap: 3px; border: 0; border-radius: 17px 0 0 17px; background: transparent; color: #40504b; font-size: 12px; font-weight: 800; line-height: 1.1; text-align: center; cursor: pointer; transition: background-color 120ms ease; }
+	.trace-reply-card:not(.speech-bubble-special) .trace-reply-author-profile::after { content: ''; position: absolute; top: 10%; right: 0; bottom: 10%; width: 1px; background: color-mix(in srgb, var(--tone-outline) 24%, var(--trace-surface)); opacity: 0.65; pointer-events: none; }
 	.trace-reply-author-avatar { position: relative; display: block; order: -1; width: 36px; height: 36px; flex: 0 0 auto; }
 	.trace-reply-author-avatar :global(.avatar) { width: 36px; height: 36px; }
 	.trace-reply-author-name { display: block; max-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-	.trace-reply-content-button { position: relative; z-index: 1; grid-column: 2; grid-row: 1; align-self: stretch; justify-self: stretch; min-width: 0; padding: 12px 15px 12px 3px; border: 0; border-radius: 0 17px 17px 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; transition: background-color 120ms ease; user-select: text; -webkit-user-select: text; }
+	.trace-reply-content-button { position: relative; z-index: 1; grid-column: 2; grid-row: 1; align-self: stretch; justify-self: stretch; min-width: 0; padding: 12px 15px 12px 7px; border: 0; border-radius: 0 17px 17px 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; transition: background-color 120ms ease; user-select: text; -webkit-user-select: text; }
 	.trace-reply-author-profile:hover { background: color-mix(in srgb, var(--tone-outline) 30%, var(--trace-surface)); }
 	.trace-reply-content-button:hover { background: color-mix(in srgb, var(--tone-outline) 12%, var(--trace-surface)); }
 	.trace-reply-author-profile:focus-visible,
@@ -207,8 +208,8 @@
 		.trace-reply-card { min-width: 60px; max-width: min(180px, calc(100% - 32px)); padding: 8px 10px; }
 		.trace-reply-card { min-width: 112px; padding: 0; }
 		.trace-reply-author-profile { font-size: 10px; }
-		.trace-reply-author-profile { padding: 8px 2px 8px 10px; }
-		.trace-reply-content-button { padding: 8px 10px 8px 2px; }
+		.trace-reply-author-profile { padding: 8px 5px 8px 10px; }
+		.trace-reply-content-button { padding: 8px 10px 8px 5px; }
 		.trace-reply-author-avatar,
 		.trace-reply-author-avatar :global(.avatar) { width: 28px; height: 28px; }
 		.trace-reply-author-name { max-width: 48px; }
