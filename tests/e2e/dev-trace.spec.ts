@@ -171,6 +171,71 @@ test.describe('DEV World Sandbox', () => {
 	});
 
 	for (const viewport of [{ name: 'desktop', width: 1100, height: 850 }, { name: 'mobile', width: 390, height: 844 }]) {
+		test(`fills Trace reply surfaces with adjacent profile and speech hit areas on ${viewport.name}`, async ({ page }) => {
+		await page.setViewportSize({ width: viewport.width, height: viewport.height });
+		await openDevTraceWorld(page, 'trace-replies');
+		await page.locator('[data-cell-position="8,4"]').click();
+		const card = page.locator(`[data-trace-reply-id="${'7'.repeat(64)}"]`);
+		const profile = card.locator('.trace-reply-author-profile');
+		const content = card.locator('.trace-reply-content-button');
+		await expect(card).toBeVisible();
+		const layout = await card.evaluate((element) => {
+			const profile = element.querySelector<HTMLElement>('.trace-reply-author-profile')!;
+			const content = element.querySelector<HTMLElement>('.trace-reply-content-button')!;
+			const cardBox = element.getBoundingClientRect();
+			const profileBox = profile.getBoundingClientRect();
+			const contentBox = content.getBoundingClientRect();
+			return {
+				card: { left: cardBox.left, right: cardBox.right, top: cardBox.top, bottom: cardBox.bottom },
+				profile: { left: profileBox.left, right: profileBox.right, top: profileBox.top, bottom: profileBox.bottom },
+				content: { left: contentBox.left, right: contentBox.right, top: contentBox.top, bottom: contentBox.bottom },
+				profileBackground: getComputedStyle(profile).backgroundColor,
+				contentBackground: getComputedStyle(content).backgroundColor
+			};
+		});
+		expect(Math.abs(layout.profile.right - layout.content.left)).toBeLessThan(0.5);
+		expect(Math.abs(layout.profile.top - layout.content.top)).toBeLessThan(0.5);
+		expect(Math.abs(layout.profile.bottom - layout.content.bottom)).toBeLessThan(0.5);
+		expect(layout.profile.left).toBeLessThanOrEqual(layout.card.left + 1);
+		expect(layout.content.right).toBeGreaterThanOrEqual(layout.card.right - 1);
+		expect(layout.profileBackground).not.toBe('rgba(0, 0, 0, 0)');
+
+		const profileBox = await profile.boundingBox();
+		const contentBox = await content.boundingBox();
+		if (!profileBox || !contentBox) throw new Error('Expected full reply interaction regions.');
+		await page.mouse.move(contentBox.x + contentBox.width / 2, contentBox.y + 1);
+		const contentHoverBackground = await content.evaluate((button) => getComputedStyle(button).backgroundColor);
+		expect(contentHoverBackground).not.toBe(layout.contentBackground);
+		await page.mouse.move(profileBox.x + profileBox.width / 2, profileBox.y + profileBox.height / 2);
+		const profileHoverBackground = await profile.evaluate((button) => getComputedStyle(button).backgroundColor);
+		expect(profileHoverBackground).not.toBe(layout.profileBackground);
+		await profile.focus();
+		await expect(profile).toBeFocused();
+		expect(await profile.evaluate((button) => getComputedStyle(button).outlineWidth)).toBe('3px');
+		await page.keyboard.press('Tab');
+		await expect(content).toBeFocused();
+		expect(await content.evaluate((button) => getComputedStyle(button).outlineWidth)).toBe('3px');
+
+		for (const point of [
+			{ x: profileBox.x + profileBox.width / 2, y: profileBox.y + 1 },
+			{ x: profileBox.x + profileBox.width / 2, y: profileBox.y + profileBox.height - 1 },
+			{ x: profileBox.x + 1, y: profileBox.y + profileBox.height / 2 },
+			{ x: profileBox.x + profileBox.width - 1, y: profileBox.y + profileBox.height / 2 }
+		]) {
+			await page.mouse.click(point.x, point.y);
+			await expect(profileDialog(page)).toBeVisible();
+			await page.keyboard.press('Escape');
+			await expect(profileDialog(page)).toBeHidden();
+		}
+
+		const contentEdge = await content.boundingBox();
+		if (!contentEdge) throw new Error('Expected the reply content interaction region.');
+		await page.mouse.click(contentEdge.x + contentEdge.width - 1, contentEdge.y + contentEdge.height / 2);
+		await expect(card).toHaveAttribute('data-trace-selection', 'current');
+		});
+	}
+
+	for (const viewport of [{ name: 'desktop', width: 1100, height: 850 }, { name: 'mobile', width: 390, height: 844 }]) {
 		test(`keeps a deep tree-only cluster interactive on ${viewport.name}`, async ({ page }) => {
 			await page.setViewportSize(viewport);
 			await openDevTraceWorld(page, 'trace-replies');
