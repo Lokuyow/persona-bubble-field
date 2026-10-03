@@ -16,7 +16,7 @@ import {
 	MOBILE_CELL_SIZE,
 	mergedBubblePreferredAnchor,
 	moveOneCell,
-	normalBubblePreferredAnchor,
+	sourceAboveBubblePreferredAnchor,
 	parseCanonicalGridPosition,
 	placeBubbles,
 	placeBubblesWithFixed,
@@ -195,11 +195,11 @@ describe('field geometry', () => {
 	it('prefers a 40px body-to-character gap above the current screen character', () => {
 		const speaker = characterFootprint({ x: 200, y: 260 }, 76);
 		const size = { width: 120, height: 44 };
-		const anchor = normalBubblePreferredAnchor(speaker, size);
+		const anchor = sourceAboveBubblePreferredAnchor(speaker, size);
 		expect(anchor.x + size.width / 2).toBe(speaker.x + speaker.width / 2);
 		expect(anchor.y + size.height).toBeLessThan(speaker.y);
 		expect(speaker.y - anchor.y - size.height).toBe(40);
-		const moved = normalBubblePreferredAnchor({ ...speaker, y: speaker.y + 50 }, size);
+		const moved = sourceAboveBubblePreferredAnchor({ ...speaker, y: speaker.y + 50 }, size);
 		expect(moved.y - anchor.y).toBe(50);
 	});
 
@@ -484,7 +484,7 @@ describe('live screen-space constraints', () => {
 	const obstacle = (bounds: { x: number; y: number; width: number; height: number }) => ({ anchor: bounds, size: bounds });
 	it('allows a shorter preferred tail to keep the body inside the viewport', () => {
 		const speaker = { x: 262, y: 70, width: 76, height: 76 };
-		const input = { ...item, preferred: normalBubblePreferredAnchor(speaker, item.size) };
+		const input = { ...item, preferred: sourceAboveBubblePreferredAnchor(speaker, item.size) };
 		const [placed] = placeBubbles([input], bounds, 76, undefined, bounds, [], { uiObstacles: [], characterObstacles: [speaker] });
 		const gap = speaker.y - placed.anchor.y - item.size.height;
 		expect(placed.anchor.y).toBeGreaterThanOrEqual(bounds.y);
@@ -494,7 +494,7 @@ describe('live screen-space constraints', () => {
 	it('allows a longer preferred tail when a HUD separates the body from the speaker', () => {
 		const speaker = { x: 262, y: 300, width: 76, height: 76 };
 		const hud = { x: 0, y: 240, width: 600, height: 30 };
-		const input = { ...item, preferred: normalBubblePreferredAnchor(speaker, item.size) };
+		const input = { ...item, preferred: sourceAboveBubblePreferredAnchor(speaker, item.size) };
 		const [placed] = placeBubbles([input], bounds, 76, undefined, bounds, [], { uiObstacles: [hud], characterObstacles: [speaker] });
 		expect(overlapsWithGap(rect(placed.anchor), obstacle(hud), 0)).toBe(false);
 		expect(speaker.y - placed.anchor.y - item.size.height).toBeGreaterThan(40);

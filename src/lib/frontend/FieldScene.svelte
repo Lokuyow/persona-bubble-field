@@ -37,6 +37,7 @@
 		character: Character;
 		tone: BubbleTone;
 		world: WorldPoint;
+		size: Size;
 		compact: boolean;
 	}>;
 	export type FieldActionMenu = Readonly<{
@@ -285,7 +286,7 @@
 			<div
 				class={['trace-ghost', { 'trace-ghost-compact': traceRootGhost.compact }]}
 				data-trace-ghost-root-id={traceRootGhost.event.id}
-				style={`left: ${traceRootGhost.world.x}px; top: ${traceRootGhost.world.y}px;`}
+				style={`left: ${traceRootGhost.world.x}px; top: ${traceRootGhost.world.y}px; width: ${traceRootGhost.size.width}px; height: ${traceRootGhost.size.height}px;`}
 			>
 				<button
 					class="trace-ghost-profile-trigger"
@@ -505,17 +506,10 @@
 	.trace-ghost {
 		position: absolute;
 		z-index: 4;
-		width: var(--cell-size);
-		height: var(--cell-size);
 		transform: translate(-50%, -50%);
 		opacity: 0.58;
 		filter: saturate(0.72);
 		pointer-events: none;
-	}
-
-	.trace-ghost-compact {
-		width: calc(var(--cell-size) * 0.58);
-		height: calc(var(--cell-size) * 0.58);
 	}
 
 	.trace-ghost-compact :global(.avatar) {

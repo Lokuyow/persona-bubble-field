@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest';
 import type { Character } from './character';
 import type { ParsedTraceReply, ParsedWorldMessage } from './nostrProtocol';
 import type { TraceConversationProjection } from './traceReplyPresentation';
-import { createPresentationBubbleShape, type BubbleTone } from './bubblePresentation';
+import { createPresentationBubbleShape, bubbleSourceTailConnection, type BubbleTone } from './bubblePresentation';
 import { continuationBranchGeometry } from './traceContinuationGeometry';
-import { layoutTraceBubblePresentation, type TraceBubblePresentationInput } from './traceBubblePresentation';
+import { layoutTraceBubblePresentation, traceRootGhostGeometry, type TraceBubblePresentationInput } from './traceBubblePresentation';
+import { characterFootprint, gridToWorld, worldToScreen, fieldLocalToViewport } from './geometry';
 
 const character: Character = { characterId: '001', slot: 0, name: 'Test', about: 'Test character', picture: 'characters/001.webp' };
 const id = (character: string) => character.repeat(64);
@@ -25,6 +26,8 @@ const child: ParsedTraceReply = {
 };
 
 function layout(projection: TraceConversationProjection, bubbleSizes: Record<string, { width: number; height: number }>, footprints: Record<string, { width: number; height: number }> = {}, previousLayout?: ReturnType<typeof layoutTraceBubblePresentation>, overrides: Partial<TraceBubblePresentationInput> = {}) {
+	const cellSize = overrides.cellSize ?? 100;
+	const screen = fieldLocalToViewport(worldToScreen(gridToWorld(projection.root.position, cellSize), overrides.camera ?? { x: 0, y: 0 }), overrides.fieldAreaBounds ?? { x: 0, y: 0 });
 		return layoutTraceBubblePresentation({
 		projection,
 		fixedBubbles: [],
@@ -36,6 +39,7 @@ function layout(projection: TraceConversationProjection, bubbleSizes: Record<str
 		cellSize: 100,
 		camera: { x: 0, y: 0 },
 		fieldAreaBounds: { x: 0, y: 0, width: 1000, height: 700 },
+		rootSourceBounds: characterFootprint(screen, cellSize),
 		fieldRows: 8,
 		viewportWidth: 1000,
 		defaultBubbleSize: { width: 80, height: 40 },
@@ -47,6 +51,67 @@ function layout(projection: TraceConversationProjection, bubbleSizes: Record<str
 }
 
 describe('trace bubble presentation', () => {
+	const rootProjection: TraceConversationProjection = { root, current: { kind: 'root', event: root }, parent: null, directReplies: [], continuationReplyIds: [] };
+	it.each([undefined, 'manual', 'death'] as const)('uses the shared 40px preferred connection for root source %s', (source) => {
+		const event = { ...root, ...(source ? { source } : {}) };
+		const footprint = { x: 420, y: 200, width: 100, height: 100 };
+		const result = layout({ ...rootProjection, root: event, current: { kind: 'root', event } }, {}, {}, undefined, { rootSourceBounds: footprint })!;
+		expect(result.root.anchor).toEqual(result.rootPreferred);
+		expect(footprint.y - result.root.anchor.y - result.root.size.height).toBe(40);
+	});
+	it('places the root centered above its source without restricting it to field bounds', () => {
+		const source = { x: 420, y: 200, width: 100, height: 100 };
+		const result = layout(rootProjection, {}, {}, undefined, { rootSourceBounds: source, fieldAreaBounds: { x: 0, y: 200, width: 1000, height: 500 } })!;
+		expect(result.root.anchor.x + result.root.size.width / 2).toBe(source.x + source.width / 2);
+		expect(result.root.anchor.y + result.root.size.height).toBeLessThan(source.y);
+		expect(result.root.anchor.y).toBeLessThan(200);
+	});
+	it.each([41, 45])('shortens the gap to stay above when the source top is %ipx', (y) => {
+		const source = { x: 420, y, width: 100, height: 100 };
+		const result = layout(rootProjection, {}, {}, undefined, { rootSourceBounds: source })!;
+		expect(result.root.anchor.y).toBe(0);
+		expect(result.root.anchor.y + result.root.size.height).toBeLessThanOrEqual(y);
+		const connection = bubbleSourceTailConnection(result.root.anchor, result.root.size, source, root.speechType, root.id);
+		expect(connection.edge).toBe('bottom');
+		expect(connection.tail.target.y).toBe(y);
+		expect(connection.tail.target.y).toBeGreaterThan(result.root.anchor.y + result.root.size.height);
+	});
+	it('falls back without crossing the source when the body cannot fit above', () => {
+		const source = { x: 420, y: 20, width: 100, height: 100 };
+		const result = layout(rootProjection, {}, {}, undefined, { rootSourceBounds: source })!;
+		expect(result.root.anchor.y + result.root.size.height > source.y).toBe(true);
+		const rect = { ...result.root.anchor, ...result.root.size };
+		expect(rect.x + rect.width <= source.x || rect.x >= source.x + source.width || rect.y >= source.y + source.height).toBe(true);
+	});
+	it.each(['ui', 'live'] as const)('falls back around the %s obstacle blocking the upper region', (kind) => {
+		const obstacle = { id: 'upper', anchor: { x: 0, y: 0 }, size: { width: 1000, height: 200 } };
+		const result = layout(rootProjection, {}, {}, undefined, {
+			rootSourceBounds: { x: 420, y: 200, width: 100, height: 100 },
+			...(kind === 'ui' ? { fixedObstacles: [{ ...obstacle, preferred: obstacle.anchor }] } : { fixedBubbles: [{ ...obstacle, speechType: 'normal', shape: null }] })
+		})!;
+		expect(result.root.anchor.y).toBeGreaterThanOrEqual(200);
+		expect(result.root.anchor.x + result.root.size.width <= 420 || result.root.anchor.x >= 520 || result.root.anchor.y >= 300).toBe(true);
+	});
+	it('returns from a fixed-live fallback to the source-above preferred anchor when the live bubble disappears', () => {
+		const source = { x: 420, y: 200, width: 100, height: 100 };
+		const blocked = layout(rootProjection, {}, {}, undefined, {
+			rootSourceBounds: source,
+			fixedBubbles: [{ id: 'live-upper', anchor: { x: 0, y: 0 }, size: { width: 1000, height: 200 }, speechType: 'normal', shape: null }]
+		})!;
+		expect(blocked.root.anchor.y).toBeGreaterThanOrEqual(source.y);
+		expect(blocked.root.anchor.x + blocked.root.size.width <= source.x || blocked.root.anchor.x >= source.x + source.width || blocked.root.anchor.y >= source.y + source.height).toBe(true);
+		const cleared = layout(rootProjection, {}, {}, blocked, { rootSourceBounds: source, fixedBubbles: [] })!;
+		expect(cleared.context).toBe(blocked.context);
+		expect(cleared.fixedContext).not.toBe(blocked.fixedContext);
+		expect(cleared.root.anchor).not.toEqual(blocked.root.anchor);
+		expect(cleared.root.anchor).toEqual(cleared.rootPreferred);
+		expect(cleared.root.anchor.x + cleared.root.size.width / 2).toBe(source.x + source.width / 2);
+		expect(source.y - cleared.root.anchor.y - cleared.root.size.height).toBe(40);
+	});
+	it('shares normal and compact ghost footprints with the rendering geometry', () => {
+		expect(traceRootGhostGeometry({ x: 1, y: 1 }, 100, false)).toEqual({ world: { x: 150, y: 150 }, size: { width: 100, height: 100 }, compact: false });
+		expect(traceRootGhostGeometry({ x: 1, y: 1 }, 100, true)).toEqual({ world: { x: 121, y: 177 }, size: { width: 100 * 0.58, height: 100 * 0.58 }, compact: true });
+	});
 	it('keeps oldest-first siblings in clockwise slots when a newer sibling arrives', () => {
 		const siblings = ['d', 'e', 'f', 'g'].map((letter, index) => ({
 			...child,
@@ -144,6 +209,16 @@ describe('trace bubble presentation', () => {
 		expect(withContinuation.cards[0].anchor).toEqual(without.cards[0].anchor);
 		expect(withContinuation.cards[0].hasContinuation).toBe(true);
 	});
+	it('keeps preserved reply anchors clear when the root compacts during deep navigation', () => {
+		const source = { x: 220, y: 367.046875, width: 50, height: 50 };
+		const sizes = { [`trace-root-${root.id}`]: { width: 180, height: 53.09375 }, [`trace-reply-${parent.id}`]: { width: 180, height: 60 }, [`trace-reply-${current.id}`]: { width: 177.96875, height: 60 } };
+		const first = layout({ root, current: { kind: 'reply', event: parent }, parent: { kind: 'root', event: root }, directReplies: [current], continuationReplyIds: [] }, sizes, {}, undefined, { rootSourceBounds: source })!;
+		const previous = { ...first, root: { ...first.root, anchor: { x: 155, y: 179.765625 } }, cards: first.cards.map((card) => ({ ...card, anchor: card.reply.id === parent.id ? { x: 16, y: 111.765625 } : { x: 196.03125, y: 319.5 } })) };
+		const next = layout({ root, current: { kind: 'reply', event: current }, parent: { kind: 'reply', event: parent }, directReplies: [child], continuationReplyIds: [] }, { ...sizes, [`trace-root-${root.id}`]: { width: 180, height: 35.546875 } }, {}, previous, { rootSourceBounds: source })!;
+		for (const card of previous.cards) expect(next.cards.find((candidate) => candidate.reply.id === card.reply.id)?.anchor).toEqual(card.anchor);
+		const keptCurrent = next.cards.find((card) => card.reply.id === current.id)!;
+		expect(next.root.anchor.y + next.root.size.height).toBeLessThanOrEqual(keptCurrent.anchor.y);
+	});
 
 	it('uses an interior center-based continuation origin for normal and special surfaces', () => {
 		const normal = continuationBranchGeometry({ anchor: { x: 100, y: 100 }, size: { width: 120, height: 60 }, shape: null });
@@ -171,7 +246,7 @@ describe('trace bubble presentation', () => {
 		const unchanged = layout(projection, sizes, {}, first)!;
 		const moved = layout(projection, sizes, {}, first, { camera: { x: 50, y: 0 } })!;
 		const resized = layout(projection, sizes, {}, first, {
-			traceSafeBounds: { x: 0, y: 0, width: 1000, height: 500 },
+			traceSafeBounds: { x: 0, y: 80, width: 1000, height: 420 },
 			traceVisualRegion: { x: 0, y: 0, width: 1000, height: 500 }
 		})!;
 		expect(unchanged.root.anchor).toEqual(first.root.anchor);

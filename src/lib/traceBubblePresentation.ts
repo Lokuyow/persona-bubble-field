@@ -2,14 +2,17 @@ import type { Character } from './character';
 import type { SpeechType } from './conversation';
 import {
 	clampToBounds,
-	fieldLocalToViewport,
+	sourceAboveBubblePreferredAnchor,
+	BUBBLE_PLACEMENT_GAP,
+	correctBubbleAnchor,
 	gridToWorld,
 	placeBubblesWithFixed,
 	type Bounds,
 	type FixedBubblePlacement,
 	type Size,
 	type WorldPoint,
-	worldToScreen
+	type GridPosition,
+	type BubblePlacementInput
 } from './geometry';
 import type { ParsedTraceReply, ParsedWorldMessage } from './nostrProtocol';
 import type { TraceConversationProjection } from './traceReplyPresentation';
@@ -67,6 +70,7 @@ export type TraceBubblePresentationInput = Readonly<{
 	cellSize: number;
 	camera: WorldPoint;
 	fieldAreaBounds: Bounds;
+	rootSourceBounds: Bounds;
 	fieldRows: number;
 	viewportWidth: number;
 	defaultBubbleSize: Size;
@@ -75,10 +79,37 @@ export type TraceBubblePresentationInput = Readonly<{
 	previousLayout?: TraceBubblePresentationLayout | null;
 }>;
 
-/** Trace keeps its existing logical-row correspondence, independently of live speakers. */
-export function traceRootPreferredAnchor(speakerX: number, logicalY: number, rowCount: number, bubble: Size, bounds: Bounds): WorldPoint {
-	const normalizedY = rowCount <= 1 ? 0.5 : Math.min(Math.max(logicalY / (rowCount - 1), 0), 1);
-	return { x: speakerX - bubble.width / 2, y: bounds.y + Math.max(0, bounds.height - bubble.height) * normalizedY };
+/** The same footprint drives ghost rendering, root placement, and facing tails. */
+export function traceRootGhostGeometry(position: GridPosition, cellSize: number, occupied: boolean) {
+	const center = gridToWorld(position, cellSize);
+	return {
+		world: { x: center.x - (occupied ? cellSize * 0.29 : 0), y: center.y + (occupied ? cellSize * 0.27 : 0) },
+		size: { width: cellSize * (occupied ? 0.58 : 1), height: cellSize * (occupied ? 0.58 : 1) },
+		compact: occupied
+	};
+}
+
+function placeTraceRoot(item: BubblePlacementInput, source: Bounds, fixed: readonly FixedBubblePlacement[], bounds: Bounds, visualRegion: Bounds): WorldPoint {
+	const uiObstacles = fixed.map((obstacle) => {
+		const footprint = obstacle.visualBounds ?? { x: 0, y: 0, ...obstacle.size };
+		return { x: obstacle.anchor.x + footprint.x - BUBBLE_PLACEMENT_GAP, y: obstacle.anchor.y + footprint.y - BUBBLE_PLACEMENT_GAP,
+			width: footprint.width + BUBBLE_PLACEMENT_GAP * 2, height: footprint.height + BUBBLE_PLACEMENT_GAP * 2 };
+	});
+	const constraints = { uiObstacles, characterObstacles: [source] };
+	const visual = item.visualBounds ?? { x: 0, y: 0, ...item.size };
+	const valid = (anchor: WorldPoint) => {
+		const rect = { x: anchor.x + visual.x, y: anchor.y + visual.y, width: visual.width, height: visual.height };
+		return [...uiObstacles, source].every((other) => rect.x >= other.x + other.width || rect.x + rect.width <= other.x || rect.y >= other.y + other.height || rect.y + rect.height <= other.y);
+	};
+	// Shorten the connection before abandoning the space above the source.
+	const above = { ...bounds, height: Math.min(bounds.y + bounds.height, source.y) - bounds.y };
+	const minimumY = Math.max(above.y, visualRegion.y - visual.y);
+	const maximumY = Math.min(above.y + above.height - item.size.height, visualRegion.y + visualRegion.height - visual.y - visual.height);
+	if (minimumY <= maximumY) {
+		const anchor = correctBubbleAnchor(item, above, visualRegion, constraints);
+		if (valid(anchor)) return anchor;
+	}
+	return correctBubbleAnchor(item, bounds, visualRegion, constraints);
 }
 
 function defaultTraceReplyCardFootprint(surface: Size): Size { return surface; }
@@ -91,8 +122,8 @@ function tracePresentationContext(input: TraceBubblePresentationInput): string {
 		fieldAreaBounds: input.fieldAreaBounds,
 		traceSafeBounds: input.traceSafeBounds,
 		traceVisualRegion: input.traceVisualRegion,
+		rootSourceBounds: input.rootSourceBounds,
 		fixedObstacles: input.fixedObstacles,
-		fieldRows: input.fieldRows,
 		viewportWidth: input.viewportWidth
 	});
 }
@@ -152,7 +183,8 @@ export function layoutTraceBubblePresentation(input: TraceBubblePresentationInpu
 	const context = tracePresentationContext(input);
 	const replyContext = traceReplyContinuityContext(input);
 	const fixedContext = traceFixedContext(input);
-	const rootContinuityLayout = input.previousLayout?.context === context ? input.previousLayout : null;
+	const rootContinuityLayout = input.previousLayout?.context === context && input.previousLayout.fixedContext === fixedContext
+		? input.previousLayout : null;
 	const fixed = [
 		...input.fixedBubbles.map((bubble) => ({
 		id: bubble.id, preferred: bubble.anchor, anchor: bubble.anchor, size: bubble.size,
@@ -163,23 +195,31 @@ export function layoutTraceBubblePresentation(input: TraceBubblePresentationInpu
 	const rootId = `trace-root-${projection.root.id}`;
 	const rootSize = input.bubbleSizes[rootId] ?? input.defaultBubbleSize;
 	const rootShape = createPresentationBubbleShape(projection.root.speechType, rootId, rootSize, input.viewportWidth, input.traceSafeBounds);
-	const rootScreen = fieldLocalToViewport(
-		worldToScreen(gridToWorld(projection.root.position, input.cellSize), input.camera), input.fieldAreaBounds
-	);
-	const rootPreferred = clampToBounds(traceRootPreferredAnchor(
-		rootScreen.x, projection.root.position.y, input.fieldRows, rootSize, input.traceSafeBounds
-	), rootSize, input.traceSafeBounds);
+	const rootPreferred = sourceAboveBubblePreferredAnchor(input.rootSourceBounds, rootSize);
 	const previousRoot = input.previousLayout?.root.event.id === projection.root.id ? input.previousLayout : null;
 	const replyContinuityLayout = input.previousLayout &&
 		(input.previousLayout.replyContext === replyContext || (previousRoot && samePoint(previousRoot.rootPreferred, rootPreferred)))
 		? input.previousLayout : null;
 	const rootContinuity = continuityAnchor(rootContinuityLayout, projection.root.id, rootSize, rootSize, input.traceSafeBounds);
-	const [rootPlacement] = placeBubblesWithFixed([{
+	const visibleReplyIds = new Set([
+		...(projection.current.kind === 'reply' ? [projection.current.event.id] : []),
+		...(projection.parent?.kind === 'reply' ? [projection.parent.event.id] : []),
+		...projection.directReplies.map((reply) => reply.id)
+	]);
+	// Root compaction must not push a reply out of its preserved local-tree anchor.
+	const preservedReplies = input.previousLayout?.fixedContext === fixedContext
+		? (replyContinuityLayout?.cards ?? []).flatMap((card) => {
+			const size = input.bubbleSizes[card.id] ?? input.defaultBubbleSize;
+			const footprint = input.traceReplyCardFootprints[card.id] ?? defaultTraceReplyCardFootprint(size);
+			const anchor = visibleReplyIds.has(card.reply.id) ? continuityAnchor(replyContinuityLayout, card.reply.id, size, footprint, input.traceSafeBounds) : null;
+			return anchor ? [{ id: card.id, preferred: anchor, anchor, size: footprint }] : [];
+		}) : [];
+	const rootAnchor = placeTraceRoot({
 		id: rootId, preferred: rootContinuity ?? rootPreferred, size: rootSize,
 		visualBounds: projection.root.speechType === 'shout' ? undefined : rootShape?.bounds
-	}], fixed, input.traceSafeBounds, input.cellSize, undefined, input.traceVisualRegion);
+	}, input.rootSourceBounds, [...fixed, ...preservedReplies], input.traceSafeBounds, input.traceVisualRegion);
 	const root: TraceRootPresentation = {
-		id: rootId, event: projection.root, anchor: rootPlacement?.anchor ?? rootPreferred, size: rootSize,
+		id: rootId, event: projection.root, anchor: rootAnchor, size: rootSize,
 		footprint: rootSize, shape: rootShape, tone: input.toneFor(projection.root.pubkey),
 		character: input.characterFor(projection.root.pubkey),
 		compact: projection.current.kind === 'reply' && projection.parent?.kind === 'reply'

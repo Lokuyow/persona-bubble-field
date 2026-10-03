@@ -1321,6 +1321,11 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 			await actor.clock.runFor(1_900);
 			await expect(actor.locator('[data-tag-game-touch-status]')).toHaveCount(0);
 		}
+		// HUD time advances on a new second, sampled by the 250ms runtime tick.
+		// Stop wall-clock drift and observe that scheduled sample before comparing.
+		await pauseAtCurrentBrowserTime(actor);
+		const cooldownClockMs = await actor.evaluate(() => Date.now());
+		await actor.clock.runFor(1_000 - cooldownClockMs % 1_000 + 250);
 		const cooldownSample = await actor.evaluate(() => ({ nowMs: Date.now(), displayedMs: Number(document.querySelector('[data-tag-game-cooldown-line]')?.getAttribute('aria-valuenow')) }));
 		const receivedAtMs = cooldownSample.nowMs;
 		const officialCooldownRemainingMs = Math.max(0, (transferred.transferAt ?? transferred.startedAt! * 1_000) + TAG_GAME_TRANSFER_COOLDOWN_MS - receivedAtMs);
@@ -1330,6 +1335,7 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 			const displayedCooldownMs = cooldownSample.displayedMs;
 			expect(Math.abs(displayedCooldownMs - officialCooldownRemainingMs)).toBeLessThanOrEqual(250);
 		}
+		await actor.clock.resume();
 		await expect(actor.locator('[data-tag-game-hud]')).toBeVisible();
 		const presenceAt = Math.max(transferredEvent.created_at, ...await Promise.all([hostPage, participantPage, participantTwoPage].map((page) => page.evaluate(() => Math.floor(Date.now() / 1_000))))) + 1;
 		await Promise.all([hostPage, participantPage, participantTwoPage].map((page) => page.clock.setSystemTime(presenceAt * 1_000)));

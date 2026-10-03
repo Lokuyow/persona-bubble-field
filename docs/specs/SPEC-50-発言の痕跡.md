@@ -71,7 +71,10 @@ movement rulesは[SPEC-30](./SPEC-30-フィールド・position・presence.md)�
 
 Traceのlayout boundsはlive placementと分離する。viewport端、表示中HUDの実下端、ActionDockの実上端から
 screen-spaceの安全矩形を求め、field boundsへ拘束しない。これはfieldに予約する領域ではない。
-rootのlogical-row対応付け、reply slot、footprint、collision、continuityの既存規則は維持する。
+rootのlogical rowによる縦位置mappingは行わず、root author ghost / source characterの通常presentation footprint直上を第一候補とする。
+horizontal centerをsourceへ合わせ、bodyとsource footprintを重ねない。通常痕跡・書置き・遺言はlive normal / mergedと共通の40px preferred connection distanceを使う。これはbody接続点からsource footprint外周までのpreferred距離であり、minimumや固定長ではない。上側にbodyが収まる場合は必要に応じて接続距離を短縮し、上配置を優先する。
+viewport / Trace safe bounds、UI obstacle、fixed live bubbleで上側に置けない場合は左右・下へ2次元fallbackする。
+reply slot、footprint、collision、continuityの既存規則は維持する。
 
 trace conversationはroot調査からだけ入る。一度にexploreできるroot conversationは1つだけとする。通常live speechへのreply UIは持たない。
 
@@ -82,7 +85,7 @@ rootを調査したら、NIP-22 reply historyを待たずにroot ghostと実際�
 - current=rootまたはimmediate parent=rootではroot bubbleをtree anchorとする。
 - 深いcurrentではhidden ancestorのUI node、仮想slot、connectorを生成せず、immediate parentをTrace専用の`traceSafeBounds`中央へreply card footprintで中央揃えしたvisible local cluster anchorとする。currentとdirect childrenは親のplaced cardから既定slotへ配置する。
 - direct child slotはcreatedAt昇順、event ID昇順で右下、左下、右上、左上、以後同順の外側ringとする。slot、clamp、collisionはauthor icon/nameを含むreply card footprintを使用し、同一anchorへ潰れる場合はranked slot/edge fallbackを選ぶ。
-- currentの変更やdirect replyの追加で再配置が必要になっても、同じpresentation coordinate contextで、表示中のTrace nodeのサイズとfootprintが変わらず、safe bounds内で維持できる場合は、そのnodeのanchorを維持する。rootのcontinuity contextにはroot ID/position、camera、cellSize、field area、safe/visual bounds、fieldRows、viewportWidthを含め、これらが変わった場合は古いroot anchorを固定せず、現在のfield positionから導出したplacementを優先する。fixed live bubbleの出現・消失やcollision contextの変更、新規node、サイズ変更、safe bounds外となるnodeは既存のslot/clamp/collision規則で再配置する。
+- currentの変更やdirect replyの追加で再配置が必要になっても、同じpresentation coordinate contextで、表示中のTrace nodeのサイズとfootprintが変わらず、safe bounds内で維持できる場合は、そのnodeのanchorを維持する。rootのcontinuity contextにはroot ID/position、camera、cellSize、field area、source footprint、safe/visual bounds、viewportWidthを含め、これらが変わった場合は古いroot anchorを固定せず、現在のsource直上を第一候補として再配置する。fixed live bubbleの出現・消失やcollision contextの変更、新規node、サイズ変更、safe bounds外となるnodeは現在の配置制約に応じて再配置する。replyのslot/clamp/collision規則は維持する。
 - compact rootとdeep immediate parentの間にはconnectorを描かない。connectorは表示中の実在する親子関係だけをcontinuous tapered relationとそのhaloで描く。root tailとrelationは、visible Trace surfaceの内側へ描画しない。
 - currentのdirect replyについて、現在browserが保持するvalidated tree内にそのreplyへのdirect childが確認できる場合は、childの内容を表示せず短いcontinuation branch indicatorを表示する。childが複数存在しても存在indicatorは1本でよく、hidden child nodeや実parent-child connectorではなく、操作targetにもならない。branchのexact pixel geometryは実装詳細とする。
 - speech bodyはnative button、author icon/nameはsiblingのnative Profile buttonとする。Profile操作はselection、target、draftを変更しない。overflow / ellipsis / special shape用のpresentation measurementとplacement用のwrapper footprintは責務およびstate/reporting pathとして分離する。exact DOM measurement targetは実装詳細とし、現行presentationでは挙動、special surface geometry、tree placementを維持するため、両経路が同じreply card root矩形を使用してよい。
@@ -121,7 +124,7 @@ traceを調査またはreplyを選択すると、そのeventをreply targetと�
 - blank field tapによる明示conversation closeはconversation/reply modeを解除し、draftを維持する。
 - successful reply publish後はreply modeを解除するが、current speechを投稿replyへ自動移動しない。
 - replyはnormal / shout / monologueを許可し、trace styleで元speech shapeを維持する。
-- root bubbleはfield上のroot author ghostへ既存のtailを維持する。reply bubbleはfield ghostまたはselfへ向かうtailを持たない。Profile操作はconversation、target、draftを変更しない。
+- root bubbleのtailは最終配置とroot author ghost / source character footprintの相対位置から双方のfacing edgeを接続する。bubbleが上なら下辺からsource上辺、下なら上辺からsource下辺、左なら右辺からsource左辺、右なら左辺からsource右辺へ接続し、斜め配置ではlive tailと同じ幾何原則で辺を選ぶ。source側は中心でなく通常presentation footprintの外周付近とし、compact ghostは実際のcompact footprintを使う。tail polygon、tail outline、bubble surfaceのoutline openingは同じconnection geometryを共有し、bubble / source bodyを横断しない。reply bubbleはfield ghostまたはselfへ向かうtailを持たない。Profile操作はconversation、target、draftを変更しない。
 
 ## 26. read / unread
 

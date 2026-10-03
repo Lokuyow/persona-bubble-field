@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { LiveTailConnection } from '$lib/bubblePresentation';
+	import type { BubbleTailConnection } from '$lib/bubblePresentation';
 	import type { SpeechType } from './conversation';
 	import type { Size, WorldPoint } from './geometry';
 	import type { SpeechBubbleShape } from './speechBubblePath';
@@ -10,9 +10,6 @@
 		bubbleCenter,
 		bubbleToneStyle,
 		NORMAL_TRACE_ROOT_RADIUS,
-		specialTailExtension,
-		tailGeometry,
-		tailStart,
 		taperedBandGeometry,
 		liveSurfaceOcclusionMaskId,
 		traceSurfaceOcclusionMaskId,
@@ -28,18 +25,18 @@
 	const TRACE_CONTINUATION_HALO_PARENT_WIDTH = 17;
 	const TRACE_CONTINUATION_HALO_CHILD_WIDTH = 1.2;
 
-	type NormalTail = Readonly<{ id: string; tone: BubbleTone; speechType: SpeechType; anchor: WorldPoint; size: Size; connection: LiveTailConnection; shape: SpeechBubbleShape | null }>;
-	type MergedTail = Readonly<{ id: string; tone: BubbleTone; speechType: SpeechType; anchor: WorldPoint; size: Size; shape: SpeechBubbleShape | null; members: readonly Readonly<{ id: string; connection: LiveTailConnection }>[] }>;
+	type NormalTail = Readonly<{ id: string; tone: BubbleTone; speechType: SpeechType; anchor: WorldPoint; size: Size; connection: BubbleTailConnection; shape: SpeechBubbleShape | null }>;
+	type MergedTail = Readonly<{ id: string; tone: BubbleTone; speechType: SpeechType; anchor: WorldPoint; size: Size; shape: SpeechBubbleShape | null; members: readonly Readonly<{ id: string; connection: BubbleTailConnection }>[] }>;
 	type Props = Readonly<{
 		viewportSize: Size;
 		traceReady: boolean;
 		traceLayout: TraceBubblePresentationLayout | null;
-		traceRootTailTarget: WorldPoint | null;
+		traceRootTailConnection: BubbleTailConnection | null;
 		normalTails: readonly NormalTail[];
 		mergedTails: readonly MergedTail[];
 	}>;
 
-	let { viewportSize, traceReady, traceLayout, traceRootTailTarget, normalTails, mergedTails }: Props = $props();
+	let { viewportSize, traceReady, traceLayout, traceRootTailConnection, normalTails, mergedTails }: Props = $props();
 	let specialNormalTails = $derived(normalTails.filter((bubble) => bubble.speechType !== 'normal' && bubble.shape));
 	let specialMergedTails = $derived(mergedTails.filter((bubble) => bubble.speechType !== 'normal' && bubble.shape));
 	let hasLiveSurfaceOcclusion = $derived(specialNormalTails.length > 0 || specialMergedTails.length > 0);
@@ -96,9 +93,9 @@
 			</mask>
 		</defs>
 		<g data-trace-surface-occlusion-root-id={traceRoot.event.id} mask={`url(#${occlusionMask})`}>
-			{#if traceRootTailTarget}
-				{@const rootTail = tailGeometry(tailStart(traceRoot.anchor, traceRoot.size), traceRootTailTarget, 11, 2, specialTailExtension(traceRoot.event.speechType))}
-				<polygon class={`tail trace-tail tail-${traceRoot.tone} tone-${traceRoot.tone}`} data-trace-tail-root-id={traceRoot.event.id} data-trace-tail-target={`${traceRootTailTarget.x},${traceRootTailTarget.y}`} points={rootTail.points} style={bubbleToneStyle(traceRoot.tone, true)} />
+			{#if traceRootTailConnection}
+				{@const rootTail = traceRootTailConnection.tail}
+				<polygon class={`tail trace-tail tail-${traceRoot.tone} tone-${traceRoot.tone}`} data-trace-tail-root-id={traceRoot.event.id} data-trace-tail-edge={traceRootTailConnection.edge} data-trace-tail-target={`${rootTail.target.x},${rootTail.target.y}`} points={rootTail.points} style={bubbleToneStyle(traceRoot.tone, true)} />
 				<path class={`tail-outline trace-tail-outline tone-${traceRoot.tone}`} data-trace-tail-root-id={traceRoot.event.id} d={rootTail.outlinePath} style={bubbleToneStyle(traceRoot.tone, true)} />
 			{/if}
 			{#each traceLayout.cards as bubble (bubble.id)}

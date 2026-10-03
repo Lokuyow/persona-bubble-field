@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { tailGeometry, taperedBandGeometry, liveTailConnections } from './bubblePresentation';
+import { tailGeometry, taperedBandGeometry, liveTailConnections, bubbleSourceTailConnection, tailOutlineOpeningPoints } from './bubblePresentation';
 
 describe('tapered bubble geometry', () => {
 	it('keeps both band midpoints, width ordering, and finite zero-length output', () => {
@@ -43,14 +43,45 @@ describe('tapered bubble geometry', () => {
 
 
 describe('live directional tails', () => {
+	it('shortens source clearance in a narrow live gap without crossing the bubble', () => {
+		const connection = liveTailConnections({ x: 100, y: 100 }, { width: 80, height: 40 }, [{ id: 'speaker', bounds: { x: 120, y: 142, width: 40, height: 40 } }], 'normal', false)[0];
+		expect(connection.tail.target).toEqual({ x: 140, y: 141 });
+		expect(connection.seam).toEqual({ x: 40, y: 40 });
+	});
+	it.each(['normal', 'shout', 'monologue'] as const)('does not cross either body after a diagonal Trace-root side fallback (%s)', (speechType) => {
+		const anchor = { x: 340, y: 0 }, size = { width: 80, height: 40 };
+		const source = { x: 420, y: 20, width: 100, height: 100 };
+		const connection = bubbleSourceTailConnection(anchor, size, source, speechType, 'root');
+		const seam = { x: anchor.x + connection.seam.x, y: anchor.y + connection.seam.y };
+		for (const progress of [0.01, 0.25, 0.5, 0.75, 0.99]) {
+			const point = { x: seam.x + (connection.tail.target.x - seam.x) * progress, y: seam.y + (connection.tail.target.y - seam.y) * progress };
+			expect(point.x > anchor.x && point.x < anchor.x + size.width && point.y > anchor.y && point.y < anchor.y + size.height).toBe(false);
+			expect(point.x > source.x && point.x < source.x + source.width && point.y > source.y && point.y < source.y + source.height).toBe(false);
+		}
+	});
 	for (const speechType of ['normal', 'shout', 'monologue'] as const) {
 		for (const [edge, screen] of [['bottom', { x: 200, y: 350 }], ['top', { x: 200, y: 50 }], ['right', { x: 400, y: 200 }], ['left', { x: 0, y: 200 }]] as const) {
-			it(`connects the ${edge} ${speechType} edge to the facing character edge`, () => {
-				const [connection] = liveTailConnections({ x: 140, y: 170 }, { width: 120, height: 60 }, [{ id: 'speaker', bounds: { x: screen.x - 25, y: screen.y - 25, width: 50, height: 50 } }], speechType, false);
-				expect(connection.edge).toBe(edge);
-				expect(Number.isFinite(connection.seam.x) && Number.isFinite(connection.seam.y)).toBe(true);
-				if (edge === 'top' || edge === 'bottom') expect(connection.seam.y).toBe(edge === 'top' ? 0 : 60);
-				else expect(connection.seam.x).toBe(edge === 'left' ? 0 : 120);
+			it(`connects live and Trace-root ${edge} ${speechType} tails to the facing character edge`, () => {
+				for (const clearance of [4, 0]) {
+					const anchor = { x: 140, y: 170 }, size = { width: 120, height: 60 };
+					const bounds = { x: screen.x - 25, y: screen.y - 25, width: 50, height: 50 };
+					const connection = clearance === 0 ? bubbleSourceTailConnection(anchor, size, bounds, speechType, 'speaker')
+						: liveTailConnections(anchor, size, [{ id: 'speaker', bounds }], speechType, false)[0];
+					expect(connection.edge).toBe(edge);
+					expect(Number.isFinite(connection.seam.x) && Number.isFinite(connection.seam.y)).toBe(true);
+					if (edge === 'top' || edge === 'bottom') expect(connection.seam.y).toBe(edge === 'top' ? 0 : 60);
+					else expect(connection.seam.x).toBe(edge === 'left' ? 0 : 120);
+					expect(connection.tail.target).toEqual(edge === 'bottom' ? { x: screen.x, y: screen.y - 25 - clearance }
+						: edge === 'top' ? { x: screen.x, y: screen.y + 25 + clearance }
+						: edge === 'right' ? { x: screen.x - 25 - clearance, y: screen.y } : { x: screen.x + 25 + clearance, y: screen.y });
+					const seam = { x: connection.seam.x + 140, y: connection.seam.y + 170 };
+					for (const progress of [0.01, 0.25, 0.5, 0.75, 1]) {
+						const point = { x: seam.x + (connection.tail.target.x - seam.x) * progress, y: seam.y + (connection.tail.target.y - seam.y) * progress };
+						expect(point.x > 140 && point.x < 260 && point.y > 170 && point.y < 230).toBe(false);
+						expect(point.x > screen.x - 25 && point.x < screen.x + 25 && point.y > screen.y - 25 && point.y < screen.y + 25).toBe(false);
+					}
+					expect(tailOutlineOpeningPoints(connection.tail, { x: 140, y: 170 })).toBe([connection.tail.rootLeft, connection.tail.rootRight, connection.tail.target].map((point) => `${point.x - 140},${point.y - 170}`).join(' '));
+				}
 			});
 		}
 	}

@@ -3,7 +3,7 @@
 	import SpeechBubble, { type BubbleMeasurement, type LiveBubblePresentation } from '$lib/SpeechBubble.svelte';
 	import TracePresentation from '$lib/TracePresentation.svelte';
 	import type { BubbleTone } from '$lib/bubblePresentation';
-	import type { LiveTailConnection } from '$lib/bubblePresentation';
+	import type { BubbleTailConnection } from '$lib/bubblePresentation';
 	import type { SpeechType } from '$lib/conversation';
 	import type { Size, WorldPoint } from '$lib/geometry';
 	import type { SpeechBubbleShape } from '$lib/speechBubblePath';
@@ -15,7 +15,7 @@
 		speechType: SpeechType;
 		anchor: WorldPoint;
 		size: Size;
-		connection: LiveTailConnection;
+		connection: BubbleTailConnection;
 		shape: SpeechBubbleShape | null;
 	}>;
 	type MergedTail = Readonly<{
@@ -25,14 +25,14 @@
 		anchor: WorldPoint;
 		size: Size;
 		shape: SpeechBubbleShape | null;
-		members: readonly Readonly<{ id: string; connection: LiveTailConnection }>[];
+		members: readonly Readonly<{ id: string; connection: BubbleTailConnection }>[];
 	}>;
 
 	type Props = Readonly<{
 		viewportSize: Size;
 		traceReady: boolean;
 		traceLayout: TraceBubblePresentationLayout | null;
-		traceRootTailTarget: WorldPoint | null;
+		traceRootTailConnection: BubbleTailConnection | null;
 		normalTails: readonly NormalTail[];
 		mergedTails: readonly MergedTail[];
 		liveBubblePresentations: readonly LiveBubblePresentation[];
@@ -53,7 +53,7 @@
 		viewportSize,
 		traceReady,
 		traceLayout,
-		traceRootTailTarget,
+		traceRootTailConnection,
 		normalTails,
 		mergedTails,
 		liveBubblePresentations,
@@ -75,7 +75,7 @@
 	{viewportSize}
 	traceReady={traceReady}
 	traceLayout={traceLayout}
-	{traceRootTailTarget}
+	{traceRootTailConnection}
 	{normalTails}
 	{mergedTails}
 />
@@ -95,7 +95,7 @@
 		ready={traceReady}
 		{currentSpeechId}
 		{replyRefresh}
-		{traceRootTailTarget}
+		{traceRootTailConnection}
 		{bubbleOverflowById}
 		onSelectSpeech={onSelectSpeech}
 		onOpenProfile={onOpenProfile}
