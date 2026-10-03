@@ -10,6 +10,10 @@
 	import type { PersonaSnapshot } from '$lib/rootIdentity';
 	import type { BubbleTone } from '$lib/bubblePresentation';
 	import { getCharacterById } from './character';
+	import { formatElapsedDuration } from '$lib/lifespanHud';
+	import { getContextCapacityMinutes, getHallucinationExtensionHundredths, getInferenceRateHundredths } from '$lib/personaGameState';
+	import { INFERENCE_ACCELERATION_BUDGET_MS, rootContextCompressionMultiplierTenths, rootInferenceAccelerationMultiplierTenths, rootMaximumLifespanMs } from '$lib/rootProgression';
+	import { MENDING_MINUTE_MS } from '$lib/mending';
 
 	type Props = Readonly<{
 		open: boolean;
@@ -31,6 +35,27 @@
 	let clearProgress = $derived(Math.min(100, points / 100_000 * 100));
 	let pointBlocked = $derived(points < 100_000);
 	let clearBlocked = $derived(pointBlocked || clearBusy || clearBlockedReason !== null);
+	let workPointRate = $derived(persona?.gameState.mendingJob
+		? mendingProjection?.pointRateHundredthsPerMinute ?? getInferenceRateHundredths(persona.gameState.abilities.inferenceEfficiency)
+		: persona
+			? getInferenceRateHundredths(persona.gameState.abilities.inferenceEfficiency) * (persona.gameState.inferenceAccelerationUsedMs < INFERENCE_ACCELERATION_BUDGET_MS ? rootInferenceAccelerationMultiplierTenths(persona.activeRun.rootBuild.inferenceAcceleration) : 10) / 10
+			: mendingProjection?.pointRateHundredthsPerMinute ?? 0);
+	let workCapacityMs = $derived(mendingProjection?.contextCapacityMs || (persona ? getContextCapacityMinutes(persona.gameState.abilities.contextCapacity) * MENDING_MINUTE_MS * rootContextCompressionMultiplierTenths(persona.activeRun.rootBuild.contextCompression) / 10 : 0));
+	let workLifespanRate = $derived(mendingProjection?.lifespanExtensionRateHundredthsPerHour ?? (persona ? getHallucinationExtensionHundredths(persona.gameState.abilities.hallucinationSuppression) : 0));
+	let accelerationMultiplier = $derived(((persona?.gameState.mendingJob ? mendingProjection?.accelerationMultiplierTenths ?? 10 : persona ? rootInferenceAccelerationMultiplierTenths(persona.activeRun.rootBuild.inferenceAcceleration) : 10) / 10).toFixed(2));
+	let accelerationRemaining = $derived(persona?.gameState.mendingJob ? mendingProjection?.accelerationRemainingMs ?? 0 : Math.max(0, INFERENCE_ACCELERATION_BUDGET_MS - (persona?.gameState.inferenceAccelerationUsedMs ?? 0)));
+	let maximumLifespan = $derived(formatMaximumLifespan(mendingProjection?.maximumLifespanMs ?? (persona ? rootMaximumLifespanMs(persona.activeRun.rootBuild.hallucinationResistance) : 0)));
+
+	function formatLifespanRate(rateHundredthsPerHour: number): string {
+		const minutes = rateHundredthsPerHour * 0.6;
+		return Number.isInteger(minutes) ? String(minutes) : minutes.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+	}
+
+	function formatMaximumLifespan(durationMs: number): string {
+		const dayMs = 24 * 60 * 60 * 1000;
+		if (durationMs >= dayMs && durationMs % dayMs === 0) return `${durationMs / dayMs}日`;
+		return formatElapsedDuration(durationMs);
+	}
 </script>
 
 {#if persona && character}
@@ -38,6 +63,18 @@
 		dialogClass="" avatarClass={`avatar-${avatarTone}`} {onOpenChange} {onCloseAutoFocus}>
 		<div class="profile-section">
 			<ProfileLifeStats expiresAtMs={effectiveExpiry} {nowMs} points={persona.gameState.points} abilities={persona.gameState.abilities} />
+		</div>
+		<div class="profile-section">
+			<section class="work-details" aria-labelledby="self-profile-work-details">
+				<h3 id="self-profile-work-details">詳細</h3>
+				<dl>
+					<div><dt>現在のポイント速度</dt><dd>{(workPointRate / 100).toFixed(2)} pt/分</dd></div>
+					<div><dt>最大蓄積</dt><dd>{formatElapsedDuration(workCapacityMs)}</dd></div>
+					<div><dt>1時間の作業で寿命</dt><dd>+{formatLifespanRate(workLifespanRate)}分</dd></div>
+					<div><dt>推論加速</dt><dd>×{accelerationMultiplier}{#if persona.activeRun.rootBuild.inferenceAcceleration > 0}（有効作業 残り{formatElapsedDuration(accelerationRemaining)}）{/if}</dd></div>
+					<div><dt>最大寿命</dt><dd>{maximumLifespan}</dd></div>
+				</dl>
+			</section>
 		</div>
 		<div class="profile-section">
 			<ProfileRootPoints points={persona.rootPoints} />
@@ -66,6 +103,13 @@
 
 <style>
 	.profile-section { display: grid; gap: 10px; }
+	.work-details { display: grid; gap: 10px; padding: 14px 16px; border: 1px solid rgba(57, 67, 64, .14); border-radius: 12px; background: rgba(255, 255, 255, .68); }
+	.work-details h3 { margin: 0; color: #3d4b47; font-size: 14px; font-weight: 900; }
+	.work-details dl { display: grid; gap: 8px; margin: 0; }
+	.work-details dl > div { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+	.work-details dt { color: #75817d; font-size: 12px; font-weight: 800; }
+	.work-details dd { margin: 0; color: #3d4b47; font-size: 13px; font-weight: 850; font-variant-numeric: tabular-nums; text-align: right; }
+	@media (max-width: 420px) { .work-details dl > div { align-items: flex-start; flex-direction: column; gap: 2px; } .work-details dd { text-align: left; } }
 	.clear-progress-head span :global(svg) { width: 15px; height: 15px; flex: 0 0 auto; }
 	.clear-section { display: grid; gap: 12px; padding: 16px; border: 1px solid #ddb9a8; border-radius: 14px; background: #fff1eb; }
 	.clear-title-row { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }

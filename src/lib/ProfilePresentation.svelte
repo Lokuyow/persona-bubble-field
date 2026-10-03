@@ -38,7 +38,7 @@
 					<ScrollArea.Viewport class="profile-dialog-scroll-viewport self-profile-viewport">
 						<div class="profile-dialog-sections self-profile-sections">
 							<section class="profile-section" aria-labelledby="profile-presentation-heading">
-								<h2 bind:this={initialFocusTarget} id="profile-presentation-heading" class="profile-section-heading" tabindex="-1" data-initial-focus>プロフィール</h2>
+								<h2 bind:this={initialFocusTarget} id="profile-presentation-heading" class="profile-section-heading visually-hidden" tabindex="-1" data-initial-focus>プロフィール</h2>
 								<header class="profile-dialog-identity self-profile-head">
 									<CharacterAvatar class={`profile-dialog-avatar self-profile-avatar ${avatarClass}`} {character} />
 									<div class="profile-dialog-identity-text self-profile-identity">
@@ -75,7 +75,7 @@
 	.profile-dialog-sections { display: grid; gap: 24px; }
 	.profile-section { display: grid; gap: 10px; }
 	.profile-section-heading { margin: 0; color: #56625e; font-size: 14px; font-weight: 900; letter-spacing: .04em; }
-	.profile-dialog-about { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; color: #56625e; font-size: 14px; font-weight: 700; line-height: 1.65; }
+	.profile-dialog-about { margin: 8px 0; overflow-wrap: anywhere; white-space: pre-wrap; color: #56625e; font-size: 16px; font-weight: 700; line-height: 1.65; }
 	:global(.profile-dialog-scrollbar) { display: flex; width: 10px; padding: 2px; border-radius: 999px; background: rgba(86, 105, 98, .12); }
 	:global(.profile-dialog-scroll-thumb) { flex: 1; border-radius: inherit; background: #8fa8a0; }
 	@media (max-width: 600px) { :global(.profile-dialog-content), :global(.self-profile-content) { gap: 10px; width: min(560px, calc(100vw - 20px)); max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 16px); padding: 18px; } :global(.profile-dialog-scroll-area) { margin-right: -10px; } :global(.profile-dialog-scroll-viewport) { padding-right: 24px; } .profile-dialog-sections { gap: 18px; } .profile-dialog-identity { grid-template-columns: 96px minmax(0, 1fr); } :global(.profile-dialog-avatar) { width: 96px; height: 96px; border-radius: 32% 68% 42% 58%; } :global(.profile-dialog-identity-text [data-dialog-title]) { font-size: 20px; } }

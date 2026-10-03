@@ -2,8 +2,6 @@
 	import { Dialog } from 'bits-ui';
 	import Coins from '~icons/tabler/coins';
 	import Clock from '~icons/tabler/clock';
-	import ChevronDown from '~icons/tabler/chevron-down';
-	import ChevronUp from '~icons/tabler/chevron-up';
 	import Heart from '~icons/tabler/heart';
 	import HeartPlus from '~icons/tabler/heart-plus';
 	import PlayerPause from '~icons/tabler/player-pause';
@@ -28,7 +26,6 @@
 	}>;
 
 	let { open, projection, hasJob, starting = false, points: ownedPointsValue, onOpenChange, onCollect, collectFeedback = null, startupFeedback = null }: Props = $props();
-	let detailsOpen = $state(false);
 	let remainingDuration = $derived(formatRemainingDuration(projection?.remainingDurationMs ?? 0));
 	let lifespanDuration = $derived(formatElapsedDuration(projection?.lifespanExtensionMs ?? 0));
 	let unclaimedPoints = $derived(String(projection?.points ?? 0));
@@ -38,35 +35,15 @@
 		: Math.min(60, Math.max(1, Math.ceil(projection.nextPointRemainingMs / 1000))));
 	let totalDurationMs = $derived((projection?.processedDurationMs ?? 0) + (projection?.remainingDurationMs ?? 0));
 	let progressPercent = $derived(Math.min(100, totalDurationMs > 0 ? (projection?.processedDurationMs ?? 0) / totalDurationMs * 100 : 0));
-	let pointRate = $derived(((projection?.pointRateHundredthsPerMinute ?? 0) / 100).toFixed(2));
-	let lifespanRateMinutes = $derived(formatRateMinutes(projection?.lifespanExtensionRateHundredthsPerHour ?? 0));
-	let accelerationMultiplier = $derived(((projection?.accelerationMultiplierTenths ?? 10) / 10).toFixed(2));
-	let maximumLifespan = $derived(formatDaysOrDuration(projection?.maximumLifespanMs ?? 0));
-	let accelerationRemaining = $derived(`有効作業 残り${formatElapsedDuration(projection?.accelerationRemainingMs ?? 0)}`);
 	let overflowPointAvailable = $derived(Boolean(projection?.completed && (projection?.pointRateHundredthsPerMinute ?? 0) > 0));
 	let overflowLifespanAvailable = $derived(Boolean(projection?.completed && (projection?.lifespanExtensionRateHundredthsPerHour ?? 0) > 0));
 	let overflowRewardAvailable = $derived(overflowPointAvailable || overflowLifespanAvailable);
 	let workStatusTitle = $derived(!projection?.completed ? '作業中' : overflowRewardAvailable ? '延命中' : '作業停止中');
 
-	function formatRateMinutes(rateHundredthsPerHour: number): string {
-		const minutes = rateHundredthsPerHour * 0.6;
-		return Number.isInteger(minutes) ? String(minutes) : minutes.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
-	}
-
-	function formatDaysOrDuration(durationMs: number): string {
-		const dayMs = 24 * 60 * 60 * 1000;
-		if (durationMs >= dayMs && durationMs % dayMs === 0) return `${durationMs / dayMs}日`;
-		return formatElapsedDuration(durationMs);
-	}
-
-	$effect(() => {
-		if (!open) detailsOpen = false;
-	});
-
 	function focusFirstAction(event: Event): void {
 		const content = event.currentTarget;
 		if (!(content instanceof HTMLElement)) return;
-		const action = content.querySelector<HTMLButtonElement>('.collect-button:not(:disabled), .details-toggle:not(:disabled)');
+		const action = content.querySelector<HTMLButtonElement>('.collect-button:not(:disabled)');
 		if (!action) return;
 		event.preventDefault();
 		action.focus();
@@ -139,23 +116,6 @@
 							<ArrowBarToDown aria-hidden="true" />成果を受け取る
 						</ActionButton>
 					</section>
-					<section class="utility-group" aria-label="作業の詳細と操作">
-						<section class="details-section" aria-label="作業の詳細">
-						<ActionButton variant="tertiary" class="details-toggle" type="button" aria-expanded={detailsOpen} onclick={() => detailsOpen = !detailsOpen}>
-							<span>{detailsOpen ? '詳細を閉じる' : '詳細を見る'}</span>
-							{#if detailsOpen}<ChevronUp aria-hidden="true" />{:else}<ChevronDown aria-hidden="true" />{/if}
-						</ActionButton>
-						{#if detailsOpen}
-							<div class="details-content">
-								<p>現在のポイント速度 <strong>{pointRate} pt/分</strong></p>
-								<p>最大蓄積 <strong>{formatElapsedDuration(projection?.contextCapacityMs ?? 0)}</strong></p>
-								<p>1時間の作業で寿命 <strong>+{lifespanRateMinutes}分</strong></p>
-								<p>推論加速 <strong>×{accelerationMultiplier}</strong>（{accelerationRemaining}）</p>
-								<p>最大寿命 <strong>{maximumLifespan}</strong></p>
-							</div>
-						{/if}
-						</section>
-					</section>
 				{/if}
 			</Dialog.Content>
 		</Dialog.Portal>
@@ -184,7 +144,7 @@
 	:global(.mending-dialog-content .sr-only) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 	.owned-points { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 7px; color: #ecfbff; white-space: nowrap; }
 	.terminal-dialog-header > :global(.action-button-close) { grid-column: 3; }
-	.owned-points :global(svg), :global(.details-toggle svg) { width: 18px; height: 18px; }
+	.owned-points :global(svg) { width: 18px; height: 18px; }
 	.owned-points :global(svg) { color: #9bb4bf; }
 	.owned-points-value { color: #ecfbff; font-size: 16px; font-weight: 800; }
 	.status-group { margin-bottom: 14px; }
@@ -207,14 +167,7 @@
 	.action-group { display: grid; gap: 10px; margin: 4px 0 6px; }
 	:global(.collect-button) { width: 100%; min-width: 0; min-height: 50px; height: 50px; padding: 0 14px; font-size: 16px; }
 	:global(.collect-button svg) { flex: 0 0 auto; width: 24px; height: 24px; }
-	:global(.details-toggle) { width: 100%; min-height: 44px; padding: 10px 0; color: #9bb4bf; font-weight: 400; text-align: center; }
-	.utility-group { display: grid; gap: 6px; }
-	.details-section { border-top: 1px solid rgba(35, 220, 226, .16); border-bottom: 1px solid rgba(35, 220, 226, .16); }
-	:global(.details-toggle svg) { color: #9bb4bf; }
-	.details-content { display: grid; gap: 8px; padding: 0 0 12px; color: rgba(208, 246, 248, 0.78); font-size: 0.92rem; line-height: 1.45; }
-	.details-content p { margin: 0; display: flex; justify-content: space-between; gap: 16px; }
-	.details-content strong { color: #f2ffff; font-weight: 700; text-align: right; }
 	:global(.mending-dialog-content button:focus-visible:not(.action-button-close)) { outline: 3px solid var(--color-focus-ring); outline-offset: 3px; }
 	@media (max-width: 700px) { :global(.mending-dialog-content) { width: min(calc(100vw - 16px), 720px); padding: 24px; } .result-list { grid-template-columns: 1fr; } }
-	@media (max-width: 560px) { :global(.mending-dialog-content) { padding: 22px 18px; border-radius: 14px; } .terminal-dialog-header { grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin: -22px -18px 22px; padding: 22px 18px; } .owned-points { grid-row: 2; grid-column: 1 / 3; padding-top: 0; } .terminal-dialog-header > :global(.action-button-close) { grid-row: 1; grid-column: 2; } .details-content p { align-items: flex-start; flex-direction: column; gap: 2px; } .details-content strong { text-align: left; } }
+	@media (max-width: 560px) { :global(.mending-dialog-content) { padding: 22px 18px; border-radius: 14px; } .terminal-dialog-header { grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin: -22px -18px 22px; padding: 22px 18px; } .owned-points { grid-row: 2; grid-column: 1 / 3; padding-top: 0; } .terminal-dialog-header > :global(.action-button-close) { grid-row: 1; grid-column: 2; } }
 </style>
