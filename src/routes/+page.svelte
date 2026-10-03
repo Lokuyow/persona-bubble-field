@@ -25,7 +25,7 @@
 		MOBILE_FIELD_BREAKPOINT,
 		gridToWorld,
 		mergedBubblePreferredAnchor,
-		normalBubblePreferredAnchor,
+		sourceAboveBubblePreferredAnchor,
 		placeBubbles,
 		placeBubblesWithFixed,
 		type Bounds,
@@ -222,13 +222,15 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		bubbleToneStyle,
 		createPresentationBubbleShape,
 		liveTailConnections,
+		bubbleSourceTailConnection,
 		tailOutlineOpeningPoints,
 		traceTone,
 		type BubbleTone
 	} from '$lib/bubblePresentation';
 	import {
 		isTracePresentationMeasured,
-		layoutTraceBubblePresentation
+		layoutTraceBubblePresentation,
+		traceRootGhostGeometry
 	} from '$lib/traceBubblePresentation';
 	import ActionDock from '$lib/frontend/ActionDock.svelte';
 	import Chatter from '$lib/frontend/Chatter.svelte';
@@ -1007,7 +1009,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			if (!speaker || !isInsideFieldArea(speaker.screen)) return null;
 			const size = bubbleSizes[bubble.id] ?? DEFAULT_BUBBLE_SIZES.normal;
 			const shape = createPresentationBubbleShape(bubble.speechType, bubble.id, size, viewportSize.width, livePlacementBounds);
-			const preferred = normalBubblePreferredAnchor(characterFootprint(speaker.screen, cellSize), size);
+			const preferred = sourceAboveBubblePreferredAnchor(characterFootprint(speaker.screen, cellSize), size);
 			return {
 				...bubble,
 				text: bubble.content,
@@ -1119,6 +1121,14 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		members: bubble.tailConnections.map((connection) => ({ id: connection.participantId, connection }))
 	})));
 	let traceTreeLayout = $state.raw<ReturnType<typeof layoutTraceBubblePresentation>>(null);
+	let traceRootSource = $derived(traceConversationProjection ? traceRootGhostGeometry(
+		traceConversationProjection.root.position, cellSize,
+		participantViews.some((participant) => sameCell(participant.position, traceConversationProjection!.root.position))
+	) : null);
+	let traceRootSourceBounds = $derived(traceRootSource ? (() => {
+		const screen = fieldLocalToViewport(worldToScreen(traceRootSource.world, camera), fieldAreaBounds);
+		return { x: screen.x - traceRootSource.size.width / 2, y: screen.y - traceRootSource.size.height / 2, ...traceRootSource.size };
+	})() : null);
 	$effect.pre(() => {
 		const isDev = devWorldSandboxEnabled;
 		const selectedId = selectedCharacterId;
@@ -1133,6 +1143,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			cellSize,
 			camera,
 			fieldAreaBounds,
+			rootSourceBounds: traceRootSourceBounds!,
 			fieldRows: field.rows,
 			viewportWidth: viewportSize.width,
 			defaultBubbleSize: DEFAULT_BUBBLE_SIZES.normal,
@@ -1148,16 +1159,10 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	});
 	let traceBubble = $derived(traceTreeLayout?.root ?? null);
 	let tracePresentationReady = $derived(isTracePresentationMeasured(initialFieldGeometryReady, traceTreeLayout, bubbleSizes, traceReplyCardFootprints));
-	let traceRootGhost: TraceRootGhost | null = $derived(traceBubble ? (() => {
-		const occupied = participantViews.some((participant) => sameCell(participant.position, traceBubble.event.position));
-		const offset = occupied ? { x: -cellSize * 0.29, y: cellSize * 0.27 } : { x: 0, y: 0 };
-		const center = gridToWorld(traceBubble.event.position, cellSize);
-		return { ...traceBubble, world: { x: center.x + offset.x, y: center.y + offset.y }, compact: occupied };
-	})() : null);
-	let traceRootTailTarget = $derived(traceRootGhost ? (() => {
-		const screen = fieldLocalToViewport(worldToScreen(traceRootGhost.world, camera), fieldAreaBounds);
-		return { x: screen.x, y: screen.y - cellSize * (traceRootGhost.compact ? 0.29 : 0.5) - 4 };
-	})() : null);
+	let traceRootGhost: TraceRootGhost | null = $derived(traceBubble && traceRootSource ? { ...traceBubble, ...traceRootSource } : null);
+	let traceRootTailConnection = $derived(traceBubble && traceRootSourceBounds ? bubbleSourceTailConnection(
+		traceBubble.anchor, traceBubble.size, traceRootSourceBounds, traceBubble.event.speechType, traceBubble.event.id
+	) : null);
 	let movingParticipantIds = $derived(visualMotion ? new Set(visualMotion.participants.keys()) : new Set<string>());
 
 	function lerp(first: number, second: number, progress: number): number {
@@ -5127,7 +5132,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 				{viewportSize}
 				traceReady={tracePresentationReady}
 				traceLayout={traceTreeLayout}
-				{traceRootTailTarget}
+				{traceRootTailConnection}
 				normalTails={normalTailModels}
 				mergedTails={mergedTailModels}
 				{liveBubblePresentations}

@@ -9,7 +9,7 @@
 		bubbleToneStyle,
 		mergedBubbleStyle,
 		liveTailSeamStyle,
-		type LiveTailConnection,
+		type BubbleTailConnection,
 		type BubbleTone
 	} from './bubblePresentation';
 
@@ -25,7 +25,7 @@
 		shape: SpeechBubbleShape | null;
 		participantId?: string;
 		memberCount?: number;
-		tailConnections: readonly LiveTailConnection[];
+		tailConnections: readonly BubbleTailConnection[];
 		outlineOpenings?: readonly Readonly<{ id: string; points: string }>[];
 	}>;
 

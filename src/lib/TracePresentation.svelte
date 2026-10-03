@@ -5,17 +5,17 @@
 	import CharacterAvatar from './CharacterAvatar.svelte';
 	import NormalTraceRootSurface from './NormalTraceRootSurface.svelte';
 	import type { Size } from './geometry';
-	import type { WorldPoint } from './geometry';
+	import type { BubbleTailConnection } from './bubblePresentation';
 	import type { TraceBubblePresentationLayout } from './traceBubblePresentation';
 	import type { BubbleMeasurement } from './SpeechBubble.svelte';
-	import { bubbleToneStyle, specialTailExtension, tailGeometry, tailOutlineOpeningPoints, tailStart } from './bubblePresentation';
+	import { bubbleToneStyle, tailOutlineOpeningPoints } from './bubblePresentation';
 
 	type Props = Readonly<{
 		layout: TraceBubblePresentationLayout | null;
 		ready: boolean;
 		currentSpeechId: string | null;
 		replyRefresh: 'loading' | 'unavailable' | 'settled' | null;
-		traceRootTailTarget: WorldPoint | null;
+		traceRootTailConnection: BubbleTailConnection | null;
 		bubbleOverflowById: Readonly<Record<string, boolean>>;
 		onSelectSpeech: (id: string) => void;
 		onOpenProfile: (characterId: string, pubkey: string, trigger: HTMLButtonElement) => void;
@@ -32,7 +32,7 @@
 		ready,
 		currentSpeechId,
 		replyRefresh,
-		traceRootTailTarget,
+		traceRootTailConnection,
 		bubbleOverflowById,
 		onSelectSpeech,
 		onOpenProfile,
@@ -44,8 +44,8 @@
 		registerReplyRemeasure
 	}: Props = $props();
 
-	let rootOpening = $derived.by(() => layout && traceRootTailTarget
-		? tailOutlineOpeningPoints(tailGeometry(tailStart(layout.root.anchor, layout.root.size), traceRootTailTarget, 11, 2, specialTailExtension(layout.root.event.speechType)), layout.root.anchor)
+	let rootOpening = $derived.by(() => layout && traceRootTailConnection
+		? tailOutlineOpeningPoints(traceRootTailConnection.tail, layout.root.anchor)
 		: null);
 	let showCurrentSelection = $derived(Boolean(layout && layout.cards.length > 0 && currentSpeechId));
 

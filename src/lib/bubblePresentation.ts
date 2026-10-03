@@ -54,10 +54,6 @@ export function bubbleSurfaceStyle(shape: SpeechBubbleShape): string {
 	return `inset: auto; left: ${shape.bounds.x - 1}px; top: ${shape.bounds.y - 1}px; width: ${shape.bounds.width}px; height: ${shape.bounds.height}px;`;
 }
 
-export function tailStart(anchor: WorldPoint, size: Size): WorldPoint {
-	return { x: anchor.x + size.width / 2, y: anchor.y + size.height };
-}
-
 export function bubbleCenter(anchor: WorldPoint, size: Size): WorldPoint {
 	return { x: anchor.x + size.width / 2, y: anchor.y + size.height / 2 };
 }
@@ -150,43 +146,65 @@ export function tailGeometry(start: WorldPoint, target: WorldPoint, width = 11, 
 	};
 }
 
-export type LiveTailConnection = Readonly<{
+export type BubbleTailConnection = Readonly<{
 	participantId: string;
 	edge: 'top' | 'right' | 'bottom' | 'left';
 	seam: WorldPoint;
 	tail: ReturnType<typeof tailGeometry>;
 }>;
 
-/** Select and distribute live seams on the edge facing each current character. */
-export function liveTailConnections(anchor: WorldPoint, size: Size, members: readonly Readonly<{ id: string; bounds: Bounds }>[], speechType: SpeechType, merged: boolean): LiveTailConnection[] {
-	const center = bubbleCenter(anchor, size);
-	const facing = members.map((member) => {
-		const targetCenter = { x: member.bounds.x + member.bounds.width / 2, y: member.bounds.y + member.bounds.height / 2 };
-		const dx = targetCenter.x - center.x, dy = targetCenter.y - center.y;
-		const edge: LiveTailConnection['edge'] = Math.abs(dx) / size.width > Math.abs(dy) / size.height
-			? dx > 0 ? 'right' : 'left' : dy > 0 ? 'bottom' : 'top';
-		return { ...member, edge };
-	});
+function facingEdge(size: Size, dx: number, dy: number): BubbleTailConnection['edge'] {
+	return Math.abs(dx) / size.width > Math.abs(dy) / size.height
+		? dx > 0 ? 'right' : 'left' : dy > 0 ? 'bottom' : 'top';
+}
+
+/** Prefer the separating axis when footprints overlap on the other axis. */
+function connectionEdges(anchor: WorldPoint, size: Size, source: Bounds) {
+	const center = bubbleCenter(anchor, size), target = bubbleCenter(source, source);
+	const dx = target.x - center.x, dy = target.y - center.y;
+	const overlapsX = anchor.x < source.x + source.width && anchor.x + size.width > source.x;
+	const overlapsY = anchor.y < source.y + source.height && anchor.y + size.height > source.y;
+	if (overlapsX && anchor.y + size.height <= source.y) return { edge: 'bottom', sourceEdge: 'top' } as const;
+	if (overlapsX && anchor.y >= source.y + source.height) return { edge: 'top', sourceEdge: 'bottom' } as const;
+	if (overlapsY && anchor.x + size.width <= source.x) return { edge: 'right', sourceEdge: 'left' } as const;
+	if (overlapsY && anchor.x >= source.x + source.width) return { edge: 'left', sourceEdge: 'right' } as const;
+	const edge = facingEdge(size, dx, dy);
+	const opposite = { top: 'bottom', bottom: 'top', left: 'right', right: 'left' } as const;
+	return { edge, sourceEdge: opposite[edge] };
+}
+
+function edgePoint(bounds: Bounds, edge: BubbleTailConnection['edge'], fraction: number, clearance = 0): WorldPoint {
+	if (edge === 'top' || edge === 'bottom') return { x: bounds.x + bounds.width * fraction, y: edge === 'top' ? bounds.y - clearance : bounds.y + bounds.height + clearance };
+	return { x: edge === 'left' ? bounds.x - clearance : bounds.x + bounds.width + clearance, y: bounds.y + bounds.height * fraction };
+}
+
+/** Shared body/source facing geometry; seam distribution remains a caller policy. */
+export function bubbleSourceTailConnection(anchor: WorldPoint, size: Size, source: Bounds, speechType: SpeechType, id: string, fraction = 0.5, width = 11, sourceClearance = 0): BubbleTailConnection {
+	const { edge, sourceEdge } = connectionEdges(anchor, size, source);
+	const start = edgePoint({ ...anchor, ...size }, edge, fraction);
+	// Short gaps must not put the source endpoint back inside the bubble.
+	const gap = sourceEdge === 'top' ? source.y - anchor.y - size.height
+		: sourceEdge === 'bottom' ? anchor.y - source.y - source.height
+		: sourceEdge === 'left' ? source.x - anchor.x - size.width : anchor.x - source.x - source.width;
+	const target = edgePoint(source, sourceEdge, 0.5, Math.min(sourceClearance, Math.max(0, gap) / 2));
+	const tail = tailGeometry(start, target, width, 2, specialTailExtension(speechType));
+	const base = { x: (tail.rootLeft.x + tail.rootRight.x) / 2, y: (tail.rootLeft.y + tail.rootRight.y) / 2 };
+	const horizontal = edge === 'top' || edge === 'bottom';
+	const progress = horizontal ? (start.y - base.y) / (target.y - base.y || 1) : (start.x - base.x) / (target.x - base.x || 1);
+	return { participantId: id, edge, seam: { x: base.x + (target.x - base.x) * progress - anchor.x, y: base.y + (target.y - base.y) * progress - anchor.y }, tail };
+}
+
+/** Select and distribute merged seams without changing placement policy. */
+export function liveTailConnections(anchor: WorldPoint, size: Size, members: readonly Readonly<{ id: string; bounds: Bounds }>[], speechType: SpeechType, merged: boolean): BubbleTailConnection[] {
+	const facing = members.map((member) => ({ ...member, edge: connectionEdges(anchor, size, member.bounds).edge }));
 	return facing.map((member) => {
 		const peers = facing.filter((candidate) => candidate.edge === member.edge);
 		const fraction = merged ? mergedTailFraction(peers.indexOf(member), peers.length) : 0.5;
-		const horizontal = member.edge === 'top' || member.edge === 'bottom';
-		const start = horizontal
-			? { x: anchor.x + size.width * fraction, y: anchor.y + (member.edge === 'bottom' ? size.height : 0) }
-			: { x: anchor.x + (member.edge === 'right' ? size.width : 0), y: anchor.y + size.height * fraction };
-		const b = member.bounds;
-		const target = horizontal
-			? { x: b.x + b.width / 2, y: member.edge === 'bottom' ? b.y - 4 : b.y + b.height + 4 }
-			: { x: member.edge === 'right' ? b.x - 4 : b.x + b.width + 4, y: b.y + b.height / 2 };
-		const tail = tailGeometry(start, target, merged ? 9 : 11, 2, specialTailExtension(speechType));
-		const base = { x: (tail.rootLeft.x + tail.rootRight.x) / 2, y: (tail.rootLeft.y + tail.rootRight.y) / 2 };
-		const progress = horizontal ? (start.y - base.y) / (target.y - base.y || 1) : (start.x - base.x) / (target.x - base.x || 1);
-		return { participantId: member.id, edge: member.edge,
-			seam: { x: base.x + (target.x - base.x) * progress - anchor.x, y: base.y + (target.y - base.y) * progress - anchor.y }, tail };
+		return bubbleSourceTailConnection(anchor, size, member.bounds, speechType, member.id, fraction, merged ? 9 : 11, 4);
 	});
 }
 
-export function liveTailSeamStyle(connection: LiveTailConnection, merged: boolean): string {
+export function liveTailSeamStyle(connection: BubbleTailConnection, merged: boolean): string {
 	const horizontal = connection.edge === 'top' || connection.edge === 'bottom';
 	return `--tail-seam-x: ${connection.seam.x}px; --tail-seam-y: ${connection.seam.y}px; --tail-seam-width: ${horizontal ? merged ? 9 : 11 : 3}px; --tail-seam-height: ${horizontal ? 3 : merged ? 9 : 11}px;`;
 }

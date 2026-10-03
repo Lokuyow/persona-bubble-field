@@ -209,16 +209,18 @@ export function characterFootprint(screen: WorldPoint, cellSize: number): Bounds
 	return { x: screen.x - cellSize / 2, y: screen.y - cellSize / 2, width: cellSize, height: cellSize };
 }
 
-export function normalBubblePreferredAnchor(speaker: Bounds, bubble: Size): WorldPoint {
+export const PREFERRED_BUBBLE_CONNECTION_DISTANCE = 40;
+
+export function sourceAboveBubblePreferredAnchor(speaker: Bounds, bubble: Size): WorldPoint {
 	return {
 		x: speaker.x + speaker.width / 2 - bubble.width / 2,
-		y: speaker.y - 40 - bubble.height
+		y: speaker.y - PREFERRED_BUBBLE_CONNECTION_DISTANCE - bubble.height
 	};
 }
 
 export function mergedBubblePreferredAnchor(members: readonly Bounds[], bubble: Size): WorldPoint {
 	const centerX = members.reduce((sum, member) => sum + member.x + member.width / 2, 0) / members.length;
-	return normalBubblePreferredAnchor({ x: centerX, y: Math.min(...members.map((member) => member.y)), width: 0, height: 0 }, bubble);
+	return sourceAboveBubblePreferredAnchor({ x: centerX, y: Math.min(...members.map((member) => member.y)), width: 0, height: 0 }, bubble);
 }
 
 export type LivePlacementConstraints = Readonly<{
@@ -242,7 +244,7 @@ export function clampToViewport(anchor: WorldPoint, bubble: Size, viewport: Size
 	return clampToBounds(anchor, bubble, { x: 0, y: 0, ...viewport }, margin);
 }
 
-const BUBBLE_PLACEMENT_GAP = 8;
+export const BUBBLE_PLACEMENT_GAP = 8;
 const MAX_PLACEMENT_CANDIDATES = 32;
 
 function bubbleRect(anchor: WorldPoint, item: Pick<BubblePlacementInput, 'size' | 'visualBounds'>): Bounds {
