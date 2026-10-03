@@ -51,8 +51,7 @@
 </script>
 
 <Dialog.Root bind:open={() => open, onOpenChange}>
-	{#if open}
-		<Dialog.Portal>
+	<Dialog.Portal>
 			<Dialog.Overlay class="mending-dialog-overlay" />
 			<Dialog.Content class="mending-dialog-content" preventScroll={false} onOpenAutoFocus={focusFirstAction}>
 				<div class="terminal-dialog-header">
@@ -118,8 +117,7 @@
 					</section>
 				{/if}
 			</Dialog.Content>
-		</Dialog.Portal>
-	{/if}
+	</Dialog.Portal>
 </Dialog.Root>
 
 <style>

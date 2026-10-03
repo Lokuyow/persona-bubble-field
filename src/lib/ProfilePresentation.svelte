@@ -6,17 +6,18 @@
 	import CharacterAvatar from './CharacterAvatar.svelte';
 
 	let {
-		open, character, runLabel, description, avatarClass = '', dialogClass = 'profile-dialog-content', onOpenChange, onCloseAutoFocus,
+		open, character, runLabel, description, avatarClass = '', dialogClass = 'profile-dialog-content', onOpenChange, onCloseAutoFocus, onOpenChangeComplete,
 		children
 	}: {
 		open: boolean;
-		character: Character;
+		character: Character | null;
 		runLabel: string | null;
 		description: string;
 		avatarClass?: string;
 		dialogClass?: string;
 		onOpenChange: (open: boolean) => void;
 		onCloseAutoFocus: (event: Event) => void;
+		onOpenChangeComplete?: (open: boolean) => void;
 		children: Snippet;
 	} = $props();
 	let initialFocusTarget: HTMLElement | null = $state(null);
@@ -24,10 +25,15 @@
 		event.preventDefault();
 		initialFocusTarget?.focus();
 	}
+	function handleOpenChange(nextOpen: boolean): void {
+		onOpenChange(nextOpen);
+		if (nextOpen && initialFocusTarget) queueMicrotask(() => initialFocusTarget?.focus());
+	}
 </script>
 
-<Dialog.Root bind:open={() => open, onOpenChange}>
-	{#if open}
+
+<Dialog.Root bind:open={() => open, handleOpenChange} {onOpenChangeComplete}>
+	{#if character}
 		<Dialog.Portal>
 			<Dialog.Overlay class="profile-dialog-overlay" />
 			<Dialog.Content class={`${dialogClass} self-profile-content`} preventScroll={false} {onCloseAutoFocus} onOpenAutoFocus={focusInitialSection}>

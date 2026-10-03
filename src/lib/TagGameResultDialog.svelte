@@ -20,7 +20,7 @@
 </script>
 
 <Dialog.Root bind:open={() => open, onOpenChange}>
-	{#if open && game}
+	{#if game}
 		<Dialog.Portal>
 			<Dialog.Overlay class="tag-game-result-overlay" />
 			<Dialog.Content class="tag-game-result-dialog" data-tag-game-result-game={game.gameId} preventScroll={false}>

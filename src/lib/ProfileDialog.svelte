@@ -22,6 +22,14 @@
 	const pubkey = $derived(target?.kind === 'pubkey' ? target.pubkey : null);
 	const character = $derived(target?.kind === 'pubkey' ? resolveWorldCharacterFromPubkey(target.pubkey) ?? null : target?.kind === 'dev-character' ? getCharacterById(target.characterId) ?? null : null);
 	const open = $derived(Boolean(target && (target.kind === 'dev-character' || character)));
+	let lastCharacter = $state<typeof character>(null);
+	$effect(() => {
+		if (character) lastCharacter = character;
+	});
+	const presentationCharacter = $derived(character ?? lastCharacter);
+	function handleOpenChangeComplete(isOpen: boolean): void {
+		if (!isOpen && !character) lastCharacter = null;
+	}
 	let publicState = $state.raw<PublicProfileState | null>(null);
 	let readStatus = $state<ProfileReadStatus | 'idle'>('idle');
 	let viewerNowMs = $state(Date.now());
@@ -72,16 +80,14 @@
 	});
 </script>
 
-{#if character}
-	<ProfilePresentation {open} {character} runLabel={publicState ? `人生 #${publicState.runNumber}` : null}
-		description="キャラクターのプロフィールと確認できた公開人生情報" avatarClass={`avatar-${avatarTone}`} onOpenChange={onOpenChange} {onCloseAutoFocus}>
+<ProfilePresentation {open} character={presentationCharacter} runLabel={publicState ? `人生 #${publicState.runNumber}` : null}
+	description="キャラクターのプロフィールと確認できた公開人生情報" avatarClass={`avatar-${avatarTone}`} onOpenChange={onOpenChange} {onCloseAutoFocus} onOpenChangeComplete={handleOpenChangeComplete}>
 		{#if pubkey && readStatus !== 'loading' && readStatus !== 'idle' && readStatus !== 'eose'}<p class="profile-state-status" aria-live="polite">{publicState ? '人生情報の更新を確認できませんでした。表示中の情報は前回確認した内容です。' : '人生情報を確認できませんでした。'}</p>{/if}
 		{#if publicState && projectedExpiry !== null}
 			<div class="profile-section"><ProfileLifeStats expiresAtMs={projectedExpiry} nowMs={viewerNowMs} points={publicState.points} abilities={publicState.abilities} /></div>
 			<div class="profile-section"><ProfileRootPoints points={publicState.rootPoints} /></div>
 		{/if}
 	</ProfilePresentation>
-{/if}
 
 <style>
 	.profile-state-status { margin: 0; color: #75817d; font-size: 13px; line-height: 1.5; }

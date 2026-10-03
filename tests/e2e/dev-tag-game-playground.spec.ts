@@ -124,6 +124,7 @@ test.describe('DEV Tag Game Playground', () => {
 		await expect(resultRows.first()).toContainText('鬼');
 		await expect(resultRows.first()).toContainText('寿命 −');
 		await result.getByRole('button', { name: '閉じる' }).click();
+		await expect(result).toHaveCount(0);
 		await resultsPanel.getByRole('button', { name: '閉じる' }).click();
 		const totalsBefore = await page.locator('[data-dev-tag-game-controls] .tag-game-local-totals').innerText();
 		await page.getByRole('button', { name: 'Advance tag-game time 5 seconds' }).click();

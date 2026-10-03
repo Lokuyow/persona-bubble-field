@@ -70,6 +70,58 @@ test.describe('DEV World Sandbox', () => {
 		await expect(profileDialog(page)).toBeVisible();
 	});
 
+	test('uses the shared dialog entrance and fade exit while keeping the opening dialog actionable', async ({ page }) => {
+		await openDevWorld(page);
+		await page.evaluate(() => {
+			const transitions: string[] = [];
+			(document as Document & { __dialogTransitions?: string[] }).__dialogTransitions = transitions;
+			document.addEventListener('transitionrun', (event) => {
+				if (event.target instanceof HTMLElement && event.target.matches('[data-dialog-content]')) transitions.push((event as TransitionEvent).propertyName);
+			});
+		});
+
+		await profileTrigger(page, '女の子').click();
+		const dialog = profileDialog(page);
+		await expect(dialog).toBeVisible();
+		await expect.poll(() => page.evaluate(() => (document as Document & { __dialogTransitions?: string[] }).__dialogTransitions ?? [])).toContain('opacity');
+		await expect.poll(() => page.evaluate(() => (document as Document & { __dialogTransitions?: string[] }).__dialogTransitions ?? [])).toContain('scale');
+
+		await page.evaluate(() => { (document as Document & { __dialogTransitions?: string[] }).__dialogTransitions!.length = 0; });
+		const close = dialog.getByRole('button', { name: '閉じる' });
+		const closeBox = await close.boundingBox();
+		expect(closeBox).not.toBeNull();
+		await page.mouse.click(closeBox!.x + closeBox!.width / 2, closeBox!.y + closeBox!.height / 2);
+		await expect.poll(() => page.evaluate(() => (document as Document & { __dialogTransitions?: string[] }).__dialogTransitions ?? [])).toContain('opacity');
+		await expect.poll(() => page.evaluate(() => (document as Document & { __dialogTransitions?: string[] }).__dialogTransitions ?? [])).not.toContain('scale');
+		await expect(dialog).toBeHidden();
+		await expect(profileTrigger(page, '女の子')).toBeFocused();
+	});
+
+	test('can reopen the profile immediately after close starts', async ({ page }) => {
+		await openDevWorld(page);
+		const trigger = profileTrigger(page, '女の子');
+		await trigger.click();
+		const dialog = profileDialog(page);
+		await expect(dialog).toBeVisible();
+		await page.keyboard.press('Escape');
+		await expect(trigger).toBeFocused();
+		await trigger.press('Enter');
+		await expect(dialog).toBeVisible();
+		await expect(dialog.locator('[data-initial-focus]')).toBeFocused();
+	});
+
+	test('keeps profile dialog operation and focus restoration under reduced motion', async ({ page }) => {
+		await page.emulateMedia({ reducedMotion: 'reduce' });
+		await openDevWorld(page);
+		await profileTrigger(page, '女の子').click();
+		const dialog = profileDialog(page);
+		await expect(dialog).toBeVisible();
+		expect(await dialog.evaluate((element) => getComputedStyle(element).scale)).toBe('none');
+		await dialog.getByRole('button', { name: '閉じる' }).click();
+		await expect(dialog).toBeHidden();
+		await expect(profileTrigger(page, '女の子')).toBeFocused();
+	});
+
 	test('does not add a body pointer lock while a profile is open', async ({ page }) => {
 		await openDevWorld(page);
 		await openProfile(page, '女の子');

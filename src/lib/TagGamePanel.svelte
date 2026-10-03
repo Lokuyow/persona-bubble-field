@@ -81,8 +81,7 @@
 </script>
 
 <Dialog.Root bind:open={() => open, onOpenChange}>
-	{#if open}
-		<Dialog.Portal>
+	<Dialog.Portal>
 			<Dialog.Overlay class="tag-game-dialog-overlay" />
 			<Dialog.Content class="tag-game-dialog-content" preventScroll={false}>
 				<header><Dialog.Title class="tag-game-title">鬼ごっこ</Dialog.Title><Dialog.Close class="action-button action-button-tertiary action-button-close" aria-label="閉じる"><X aria-hidden="true" /></Dialog.Close></header>
@@ -185,8 +184,7 @@
 					</details>
 				</section>
 			</Dialog.Content>
-		</Dialog.Portal>
-{/if}
+	</Dialog.Portal>
 	</Dialog.Root>
 
 <style>

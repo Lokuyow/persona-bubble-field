@@ -2,6 +2,16 @@ import { expect, type Locator } from '@playwright/test';
 
 export async function expectIconCloseButton(button: Locator, accessibleName: string): Promise<void> {
 	await expect(button).toBeVisible();
+	const content = button.locator('xpath=ancestor::*[@data-dialog-content][1]');
+	await expect(content).not.toHaveAttribute('data-starting-style');
+	await button.evaluate(async (element) => {
+		const content = element.closest<HTMLElement>('[data-dialog-content]');
+		if (!content) return;
+		for (const animation of content.getAnimations()) {
+			if (animation.playState !== 'finished') animation.finish();
+		}
+		await Promise.all(content.getAnimations().map((animation) => animation.finished.catch(() => undefined)));
+	});
 	await expect(button).toHaveAttribute('aria-label', accessibleName);
 	await expect(button).toHaveClass(/\baction-button\b/);
 	await expect(button).toHaveClass(/\baction-button-tertiary\b/);
