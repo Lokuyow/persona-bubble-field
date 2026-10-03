@@ -207,7 +207,11 @@ test.describe('Relay startup', () => {
 		await expect(escapeContent).toBeVisible();
 		await escapeTrigger.click();
 		await expect(escapeContent).toBeHidden();
-		await expect(dialog).toContainText(character.about);
+		const about = dialog.locator('.profile-dialog-about');
+		await expect(about).toHaveText(character.about);
+		await expect(about).toHaveCSS('font-size', '16px');
+		await expect(about).toHaveCSS('margin-top', '8px');
+		await expect(about).toHaveCSS('margin-bottom', '8px');
 		const headerAvatarBox = await dialog.locator('.self-profile-avatar').boundingBox();
 		expect(headerAvatarBox).not.toBeNull();
 		expect(headerAvatarBox!.width).toBeGreaterThan(96);
@@ -747,7 +751,11 @@ test('opens an active field participant profile by pubkey and renders only match
 	await expect(dialog.getByRole('heading', { name: 'Root', exact: true })).toHaveCount(0);
 	await expect(dialog.locator('.profile-dialog-avatar')).toBeVisible();
 	await expect(dialog.locator('[data-dialog-title]')).toHaveText(otherCharacter.name);
-	await expect(dialog.locator('.profile-dialog-about')).toHaveText(otherCharacter.about);
+	const about = dialog.locator('.profile-dialog-about');
+	await expect(about).toHaveText(otherCharacter.about);
+	await expect(about).toHaveCSS('font-size', '16px');
+	await expect(about).toHaveCSS('margin-top', '8px');
+	await expect(about).toHaveCSS('margin-bottom', '8px');
 	await expect(dialog.locator('.profile-state-status')).toHaveCount(0);
 	await expect(dialog).toContainText('人生 #2');
 	await expect(dialog).toContainText('残り寿命');
