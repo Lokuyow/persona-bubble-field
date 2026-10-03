@@ -198,7 +198,7 @@ test.describe('DEV World Sandbox', () => {
 		expect(Math.abs(layout.profile.bottom - layout.content.bottom)).toBeLessThan(0.5);
 		expect(layout.profile.left).toBeLessThanOrEqual(layout.card.left + 1);
 		expect(layout.content.right).toBeGreaterThanOrEqual(layout.card.right - 1);
-		expect(layout.profileBackground).not.toBe('rgba(0, 0, 0, 0)');
+		expect(layout.profileBackground).not.toBe(layout.contentBackground);
 
 		const profileBox = await profile.boundingBox();
 		const contentBox = await content.boundingBox();
@@ -249,6 +249,57 @@ test.describe('DEV World Sandbox', () => {
 		await expect(card).toHaveAttribute('data-trace-selection', 'current');
 		});
 	}
+
+	test('keeps shout and monologue Trace reply artwork free of rectangular button fills', async ({ page }) => {
+		await page.setViewportSize({ width: 1100, height: 850 });
+		await openDevTraceWorld(page, 'trace-replies');
+		await page.locator('[data-cell-position="8,4"]').click();
+		const reply = (id: string) => page.locator(`[data-trace-reply-id="${id.repeat(64)}"]`);
+		await reply('7').locator('.trace-reply-content-button').click();
+		await reply('b').locator('.trace-reply-content-button').click();
+		const shout = reply('d');
+		await shout.locator('.trace-reply-content-button').click();
+		const monologue = reply('f');
+		await expect(shout).toBeVisible();
+		await expect(monologue).toBeVisible();
+
+		for (const [card, speechType] of [[shout, 'shout'], [monologue, 'monologue']] as const) {
+			const profile = card.locator('.trace-reply-author-profile');
+			const content = card.locator('.trace-reply-content-button');
+			const shape = await card.evaluate((element) => {
+				const surface = element.querySelector<SVGSVGElement>('.bubble-surface');
+				const fill = surface?.querySelector<SVGPathElement>('.bubble-surface-fill');
+				const outline = surface?.querySelector<SVGPathElement>('.bubble-surface-outline');
+				const profile = element.querySelector<HTMLElement>('.trace-reply-author-profile');
+				const content = element.querySelector<HTMLElement>('.trace-reply-content-button');
+				if (!surface || !fill || !outline || !profile || !content) throw new Error('Expected a special Trace surface and both hit areas.');
+				const profileBox = profile.getBoundingClientRect();
+				const contentBox = content.getBoundingClientRect();
+				return {
+					speechType: surface.dataset.speechSurface,
+					shapePreserved: fill.getAttribute('d') === outline.getAttribute('d'),
+					profileBackground: getComputedStyle(profile).backgroundColor,
+					contentBackground: getComputedStyle(content).backgroundColor,
+					profileBorderRadius: getComputedStyle(profile).borderRadius,
+					contentBorderRadius: getComputedStyle(content).borderRadius,
+					boundaryGap: Math.abs(profileBox.right - contentBox.left),
+					sharedVerticalExtent: Math.abs(profileBox.top - contentBox.top) < 0.5 && Math.abs(profileBox.bottom - contentBox.bottom) < 0.5
+				};
+			});
+			expect(shape.speechType).toBe(speechType);
+			expect(shape.shapePreserved).toBe(true);
+			expect(shape.profileBackground).toBe('rgba(0, 0, 0, 0)');
+			expect(shape.contentBackground).toBe('rgba(0, 0, 0, 0)');
+			expect(shape.profileBorderRadius).toBe('0px');
+			expect(shape.contentBorderRadius).toBe('0px');
+			expect(shape.boundaryGap).toBeLessThan(0.5);
+			expect(shape.sharedVerticalExtent).toBe(true);
+			await profile.hover();
+			expect(await profile.evaluate((button) => getComputedStyle(button).backgroundColor)).toBe('rgba(0, 0, 0, 0)');
+			await content.hover();
+			expect(await content.evaluate((button) => getComputedStyle(button).backgroundColor)).toBe('rgba(0, 0, 0, 0)');
+		}
+	});
 
 	for (const viewport of [{ name: 'desktop', width: 1100, height: 850 }, { name: 'mobile', width: 390, height: 844 }]) {
 		test(`keeps a deep tree-only cluster interactive on ${viewport.name}`, async ({ page }) => {
