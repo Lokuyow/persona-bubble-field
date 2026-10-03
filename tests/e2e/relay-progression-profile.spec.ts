@@ -142,7 +142,11 @@ test.describe('Relay startup', () => {
 
 		const dialog = page.getByRole('dialog');
 		await expect(dialog).toBeVisible();
-		await expect(dialog.getByRole('heading', { name: 'プロフィール', exact: true })).toBeVisible();
+		const profileHeading = dialog.getByRole('heading', { name: 'プロフィール', exact: true });
+		await expect(profileHeading).toHaveClass(/visually-hidden/);
+		await expect(dialog.locator('[data-initial-focus]')).toBeFocused();
+		await expect(dialog).toHaveAccessibleName(character.name);
+		await expect(dialog).toHaveAccessibleDescription('自分のプロフィールと現在の人生情報');
 		await expect(dialog.getByRole('heading', { name: '人生', exact: true })).toHaveCount(0);
 		await expect(dialog.getByRole('heading', { name: 'Root', exact: true })).toHaveCount(0);
 		const viewportSize = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
@@ -272,6 +276,9 @@ test.describe('Relay startup', () => {
 			await expect(page.locator('.self-profile-content')).toBeVisible();
 			await expect(page.locator('.field-action-menu')).toHaveCount(0);
 			await expect(page.locator('.self-profile-content [data-initial-focus]')).toBeFocused();
+			const scrollViewport = page.locator('.self-profile-viewport');
+			await expect.poll(() => scrollViewport.evaluate((element) => element.scrollTop)).toBe(0);
+			await expect(page.locator('.self-profile-content [data-initial-focus]')).toHaveClass(/visually-hidden/);
 			await page.locator('.self-profile-content').getByRole('button', { name: '閉じる', exact: true }).click();
 			await expect(page.locator('.self-profile-content')).toHaveCount(0);
 			await expect(fieldTrigger).toBeFocused();
@@ -729,7 +736,13 @@ test('opens an active field participant profile by pubkey and renders only match
 	await fieldProfileTrigger.press('Enter');
 	const dialog = page.locator('.profile-dialog-content');
 	await expect(dialog).toBeVisible();
-	await expect(dialog.getByRole('heading', { name: 'プロフィール', exact: true })).toBeVisible();
+	const profileHeading = dialog.getByRole('heading', { name: 'プロフィール', exact: true });
+	await expect(profileHeading).toHaveClass(/visually-hidden/);
+	await expect(dialog.locator('[data-initial-focus]')).toBeFocused();
+	await expect(dialog).toHaveAccessibleName(otherCharacter.name);
+	await expect(dialog).toHaveAccessibleDescription('キャラクターのプロフィールと確認できた公開人生情報');
+	const profileViewport = dialog.locator('.profile-dialog-scroll-viewport');
+	await expect.poll(() => profileViewport.evaluate((element) => element.scrollTop)).toBe(0);
 	await expect(dialog.getByRole('heading', { name: '人生', exact: true })).toHaveCount(0);
 	await expect(dialog.getByRole('heading', { name: 'Root', exact: true })).toHaveCount(0);
 	await expect(dialog.locator('.profile-dialog-avatar')).toBeVisible();

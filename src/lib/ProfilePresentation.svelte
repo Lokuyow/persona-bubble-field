@@ -38,7 +38,7 @@
 					<ScrollArea.Viewport class="profile-dialog-scroll-viewport self-profile-viewport">
 						<div class="profile-dialog-sections self-profile-sections">
 							<section class="profile-section" aria-labelledby="profile-presentation-heading">
-								<h2 bind:this={initialFocusTarget} id="profile-presentation-heading" class="profile-section-heading" tabindex="-1" data-initial-focus>プロフィール</h2>
+								<h2 bind:this={initialFocusTarget} id="profile-presentation-heading" class="profile-section-heading visually-hidden" tabindex="-1" data-initial-focus>プロフィール</h2>
 								<header class="profile-dialog-identity self-profile-head">
 									<CharacterAvatar class={`profile-dialog-avatar self-profile-avatar ${avatarClass}`} {character} />
 									<div class="profile-dialog-identity-text self-profile-identity">
