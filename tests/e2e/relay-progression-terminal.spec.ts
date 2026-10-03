@@ -26,6 +26,54 @@ import { CHANNEL_ID, AUTHORITATIVE_RELAYS, fixtureSecret, testEvents, isDeathTra
 
 
 test.describe('Relay startup', () => {
+	test('shows Root-accelerated point speed before work and keeps it after work starts', async ({ page }) => {
+		const startTime = Date.now();
+		const secret = fixtureSecret(29);
+		const pubkey = getPublicKey(secret);
+		await page.clock.install({ time: startTime });
+		await installHostOwnedStub(page);
+		await installDelayedRelay(page, { primaryEvents: testEvents(startTime) });
+		await seedRelayAccount(page, secret, pubkey, startTime + 7 * 24 * 60 * 60 * 1_000, 0,
+			{ inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 }, 1,
+			{ inferenceAcceleration: 1, contextCompression: 0, hallucinationResistance: 0 });
+		await page.goto('/');
+		await expect(page.locator('.action-dock')).toBeVisible();
+		await page.evaluate(() => {
+			const relay = (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest;
+			relay.releasePrimary();
+		});
+		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
+		const initialPosition = finalizeEvent(buildWorldStateEventTemplate({
+			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 13, y: 3 }, slot: 1,
+			createdAt: Math.floor(await page.evaluate(() => Date.now()) / 1_000)
+		}), secret);
+		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), initialPosition);
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '13,3');
+		await moveRelaySelfTo(page, { x: 11, y: 3 });
+
+		const profileTrigger = page.getByRole('button', { name: '自分のプロフィールを開く' });
+		await profileTrigger.click();
+		const beforeWorkProfile = page.getByRole('dialog');
+		const beforeWorkDetails = beforeWorkProfile.getByRole('region', { name: '作業情報' });
+		await expect(beforeWorkDetails).toContainText('現在のポイント速度');
+		await expect(beforeWorkDetails).toContainText('2.00 pt/分');
+		await expect(beforeWorkDetails).toContainText('推論加速');
+		await expect(beforeWorkDetails).toContainText('×2.00');
+		await expect(beforeWorkDetails).toContainText('有効作業 残り24時間');
+		await beforeWorkProfile.getByRole('button', { name: '閉じる' }).click();
+
+		const terminal = page.getByRole('button', { name: '作業端末' });
+		await terminal.click();
+		await expect(page.getByRole('dialog').getByRole('heading', { name: '作業中' })).toBeVisible();
+		await expect(page.locator('[data-unified-status-hud] [data-mending-rate]')).toHaveText('2.00 pt/分+0.1h/h');
+		await page.getByRole('dialog').getByRole('button', { name: '閉じる', exact: true }).click();
+		await profileTrigger.click();
+		const activeWorkProfile = page.getByRole('dialog');
+		const activeWorkDetails = activeWorkProfile.getByRole('region', { name: '作業情報' });
+		await expect(activeWorkDetails).toContainText('×2.00');
+		await expect(activeWorkDetails).toContainText('2.00 pt/分');
+	});
+
 	test('runs and collects a mending job only from the adjacent terminal cells', async ({ page }) => {
 		const startTime = Date.now();
 		const secret = fixtureSecret(19);

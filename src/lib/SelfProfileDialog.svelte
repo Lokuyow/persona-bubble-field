@@ -35,7 +35,11 @@
 	let clearProgress = $derived(Math.min(100, points / 100_000 * 100));
 	let pointBlocked = $derived(points < 100_000);
 	let clearBlocked = $derived(pointBlocked || clearBusy || clearBlockedReason !== null);
-	let workPointRate = $derived(mendingProjection?.pointRateHundredthsPerMinute ?? (persona ? getInferenceRateHundredths(persona.gameState.abilities.inferenceEfficiency) : 0));
+	let workPointRate = $derived(persona?.gameState.mendingJob
+		? mendingProjection?.pointRateHundredthsPerMinute ?? getInferenceRateHundredths(persona.gameState.abilities.inferenceEfficiency)
+		: persona
+			? getInferenceRateHundredths(persona.gameState.abilities.inferenceEfficiency) * (persona.gameState.inferenceAccelerationUsedMs < INFERENCE_ACCELERATION_BUDGET_MS ? rootInferenceAccelerationMultiplierTenths(persona.activeRun.rootBuild.inferenceAcceleration) : 10) / 10
+			: mendingProjection?.pointRateHundredthsPerMinute ?? 0);
 	let workCapacityMs = $derived(mendingProjection?.contextCapacityMs || (persona ? getContextCapacityMinutes(persona.gameState.abilities.contextCapacity) * MENDING_MINUTE_MS * rootContextCompressionMultiplierTenths(persona.activeRun.rootBuild.contextCompression) / 10 : 0));
 	let workLifespanRate = $derived(mendingProjection?.lifespanExtensionRateHundredthsPerHour ?? (persona ? getHallucinationExtensionHundredths(persona.gameState.abilities.hallucinationSuppression) : 0));
 	let accelerationMultiplier = $derived(((persona?.gameState.mendingJob ? mendingProjection?.accelerationMultiplierTenths ?? 10 : persona ? rootInferenceAccelerationMultiplierTenths(persona.activeRun.rootBuild.inferenceAcceleration) : 10) / 10).toFixed(2));
