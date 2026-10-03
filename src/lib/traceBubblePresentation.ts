@@ -183,7 +183,8 @@ export function layoutTraceBubblePresentation(input: TraceBubblePresentationInpu
 	const context = tracePresentationContext(input);
 	const replyContext = traceReplyContinuityContext(input);
 	const fixedContext = traceFixedContext(input);
-	const rootContinuityLayout = input.previousLayout?.context === context ? input.previousLayout : null;
+	const rootContinuityLayout = input.previousLayout?.context === context && input.previousLayout.fixedContext === fixedContext
+		? input.previousLayout : null;
 	const fixed = [
 		...input.fixedBubbles.map((bubble) => ({
 		id: bubble.id, preferred: bubble.anchor, anchor: bubble.anchor, size: bubble.size,

@@ -92,6 +92,22 @@ describe('trace bubble presentation', () => {
 		expect(result.root.anchor.y).toBeGreaterThanOrEqual(200);
 		expect(result.root.anchor.x + result.root.size.width <= 420 || result.root.anchor.x >= 520 || result.root.anchor.y >= 300).toBe(true);
 	});
+	it('returns from a fixed-live fallback to the source-above preferred anchor when the live bubble disappears', () => {
+		const source = { x: 420, y: 200, width: 100, height: 100 };
+		const blocked = layout(rootProjection, {}, {}, undefined, {
+			rootSourceBounds: source,
+			fixedBubbles: [{ id: 'live-upper', anchor: { x: 0, y: 0 }, size: { width: 1000, height: 200 }, speechType: 'normal', shape: null }]
+		})!;
+		expect(blocked.root.anchor.y).toBeGreaterThanOrEqual(source.y);
+		expect(blocked.root.anchor.x + blocked.root.size.width <= source.x || blocked.root.anchor.x >= source.x + source.width || blocked.root.anchor.y >= source.y + source.height).toBe(true);
+		const cleared = layout(rootProjection, {}, {}, blocked, { rootSourceBounds: source, fixedBubbles: [] })!;
+		expect(cleared.context).toBe(blocked.context);
+		expect(cleared.fixedContext).not.toBe(blocked.fixedContext);
+		expect(cleared.root.anchor).not.toEqual(blocked.root.anchor);
+		expect(cleared.root.anchor).toEqual(cleared.rootPreferred);
+		expect(cleared.root.anchor.x + cleared.root.size.width / 2).toBe(source.x + source.width / 2);
+		expect(source.y - cleared.root.anchor.y - cleared.root.size.height).toBe(40);
+	});
 	it('shares normal and compact ghost footprints with the rendering geometry', () => {
 		expect(traceRootGhostGeometry({ x: 1, y: 1 }, 100, false)).toEqual({ world: { x: 150, y: 150 }, size: { width: 100, height: 100 }, compact: false });
 		expect(traceRootGhostGeometry({ x: 1, y: 1 }, 100, true)).toEqual({ world: { x: 121, y: 177 }, size: { width: 100 * 0.58, height: 100 * 0.58 }, compact: true });
