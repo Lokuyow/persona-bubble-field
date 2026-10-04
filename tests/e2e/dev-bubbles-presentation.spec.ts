@@ -2,10 +2,56 @@ import { expect, test } from '@playwright/test';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { openDevWorld, readCharacterGeometry, expectNoConsoleProblems, expectProfile, openProfile } from './helpers/devWorldHarness';
 
+async function waitForInitialFieldGeometry(page: import('@playwright/test').Page): Promise<void> {
+	await expect(page.locator('.field-viewport')).toHaveClass(/initial-field-geometry-ready/);
+}
+
 
 test.describe('DEV World Sandbox', () => {
 	test.beforeEach(async ({ page }) => {
 		await installHostOwnedStub(page);
+	});
+
+	test('plays type-specific live bubble arrival without changing the placement host', async ({ page }) => {
+		for (const viewport of [{ width: 390, height: 844 }, { width: 1200, height: 900 }]) {
+			await page.setViewportSize(viewport);
+			await page.goto('/?devWorld=1');
+			await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
+			await waitForInitialFieldGeometry(page);
+			if (viewport.width <= 700) await page.locator('.sandbox-mobile-toggle').click();
+			await expect(page.getByLabel('DEV speech sound injector')).toBeVisible();
+			await page.evaluate(() => {
+				(window as typeof window & { __bubbleArrivalLog?: string[] }).__bubbleArrivalLog = [];
+				document.addEventListener('animationstart', (event) => {
+					const surface = event.target instanceof Element ? event.target.closest<HTMLElement>('.bubble-visual') : null;
+					if (surface?.dataset.arrivalType) (window as typeof window & { __bubbleArrivalLog?: string[] }).__bubbleArrivalLog?.push(surface.dataset.arrivalType);
+				}, true);
+			});
+			for (const [index, type] of (['normal', 'shout', 'monologue'] as const).entries()) {
+				await page.locator('.sandbox-speech-injector button').nth(index).click();
+				const bubble = page.locator(`.bubble[data-speech-type="${type}"]`).last();
+				await expect(bubble).toBeVisible();
+				await expect.poll(() => page.evaluate(() => (window as typeof window & { __bubbleArrivalLog?: string[] }).__bubbleArrivalLog ?? [])).toContain(type);
+				const hostAndSurface = await bubble.evaluate((element) => {
+					const host = element.getBoundingClientRect();
+					const surface = element.querySelector<HTMLElement>('.bubble-visual')?.getBoundingClientRect();
+					return { host: host.toJSON(), surface: surface?.toJSON() ?? null, animation: element.querySelector<HTMLElement>('.bubble-visual')?.getAnimations().length ?? 0 };
+				});
+				expect(hostAndSurface.surface).not.toBeNull();
+				expect(hostAndSurface.animation).toBeGreaterThan(0);
+				expect(hostAndSurface.host.width).toBeGreaterThan(0);
+			}
+		}
+		await page.emulateMedia({ reducedMotion: 'reduce' });
+		await page.locator('.sandbox-speech-injector button').nth(1).click();
+		const reducedBubble = page.locator('.bubble[data-speech-type="shout"]').last();
+		await expect(reducedBubble).toBeVisible();
+		await expect.poll(() => reducedBubble.locator('.bubble-visual').evaluate((element) => element.getAnimations().length)).toBeGreaterThan(0);
+		const reducedKeyframes = await reducedBubble.locator('.bubble-visual').evaluate((element) => {
+			const effect = element.getAnimations().at(-1)?.effect;
+			return effect instanceof KeyframeEffect ? effect.getKeyframes() : [];
+		});
+		expect(reducedKeyframes.every((frame) => !('scale' in frame))).toBe(true);
 	});
 
 	test('uses the prototype courtyard background beneath the field grid', async ({ page }) => {
@@ -164,7 +210,7 @@ test.describe('DEV World Sandbox', () => {
 					const tone = [...polygon.classList].find((className) => className.startsWith('tail-'))?.slice(5);
 					const bubble = bubbles.find((candidate) => candidate.classList.contains(`bubble-${tone}`));
 					if (!bubble) throw new Error(`Missing bubble for tone ${tone ?? 'unknown'}`);
-					const bubbleStyle = getComputedStyle(bubble);
+					const bubbleStyle = getComputedStyle(bubble.querySelector<HTMLElement>('.bubble-visual')!);
 					return {
 						fill: getComputedStyle(polygon).fill,
 						background: bubbleStyle.backgroundColor,
@@ -221,8 +267,8 @@ test.describe('DEV World Sandbox', () => {
 			{ fill: 'none', strokeDasharray: 'none', opacity: '1' },
 			{ fill: 'none', strokeDasharray: 'none', opacity: '1' }
 		]);
-		expect(await page.locator('.bubble-normal').evaluate((bubble) => getComputedStyle(bubble).borderRadius)).toBe('18px');
-		expect(await page.locator('.bubble-merged').evaluate((bubble) => getComputedStyle(bubble).borderRadius)).toBe('18px');
+		expect(await page.locator('.bubble-normal .bubble-visual').evaluate((bubble) => getComputedStyle(bubble).borderRadius)).toBe('18px');
+		expect(await page.locator('.bubble-merged .bubble-visual').evaluate((bubble) => getComputedStyle(bubble).borderRadius)).toBe('18px');
 	});
 
 	test('renders burst and cloud surfaces with outline-continuous special tails', async ({ page }) => {

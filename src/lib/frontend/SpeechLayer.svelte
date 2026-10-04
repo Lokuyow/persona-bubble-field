@@ -36,12 +36,14 @@
 		normalTails: readonly NormalTail[];
 		mergedTails: readonly MergedTail[];
 		liveBubblePresentations: readonly LiveBubblePresentation[];
+		arrivalBubbleIds: ReadonlySet<string>;
 		bubbleOverflowById: Readonly<Record<string, boolean>>;
 		currentSpeechId: string | null;
 		replyRefresh: 'loading' | 'unavailable' | 'settled' | null;
 		onSelectSpeech: (id: string) => void;
 		onOpenProfile: (characterId: string, pubkey: string, trigger: HTMLButtonElement) => void;
 		onBubbleMeasurement: (id: string, measurement: BubbleMeasurement) => void;
+		onBubbleArrivalConsumed: (id: string) => void;
 		onBubbleMeasurementRemoved: (id: string) => void;
 		registerBubbleRemeasure: (id: string, measure: () => void) => () => void;
 		onReplyFootprint: (id: string, size: Size) => void;
@@ -57,12 +59,14 @@
 		normalTails,
 		mergedTails,
 		liveBubblePresentations,
+		arrivalBubbleIds,
 		bubbleOverflowById,
 		currentSpeechId,
 		replyRefresh,
 		onSelectSpeech,
 		onOpenProfile,
 		onBubbleMeasurement,
+		onBubbleArrivalConsumed,
 		onBubbleMeasurementRemoved,
 		registerBubbleRemeasure,
 		onReplyFootprint,
@@ -85,6 +89,8 @@
 		<SpeechBubble
 			{bubble}
 			overflow={bubbleOverflowById[bubble.id] ?? false}
+			arrivalEligible={arrivalBubbleIds.has(bubble.id)}
+			onArrivalConsumed={onBubbleArrivalConsumed}
 			onMeasurement={onBubbleMeasurement}
 			onMeasurementRemoved={onBubbleMeasurementRemoved}
 			registerRemeasure={registerBubbleRemeasure}

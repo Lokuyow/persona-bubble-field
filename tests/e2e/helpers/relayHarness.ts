@@ -801,6 +801,21 @@ export async function installDelayedRelay(page: Page, options: {
 					if (!traceReplyHistory.some((known) => known.id === raw.id)) traceReplyHistory.push(raw);
 					for (const request of activeTraceReplies) deliverTraceLive(request, raw);
 				},
+				// Flush the notification scope's current fake cycle so catch-up events are delivered before the test continues.
+				injectTraceNotificationReply: (event: object) => {
+					const raw = event as Record<string, unknown>;
+					if (!traceReplyHistory.some((known) => known.id === raw.id)) traceReplyHistory.push(raw);
+					let deliveries = 0;
+					for (const request of activeTraceReplies) {
+						if (request.filters.some((filter) => (filter.kinds as number[] | undefined)?.includes(1111) &&
+							Array.isArray(filter['#p']) && !filter['#E'] && !filter['#e'] && matchesTraceFilter(raw, filter))) {
+							deliver(request.socket, ['EVENT', request.subId, raw]);
+							deliver(request.socket, ['EOSE', request.subId]);
+							deliveries += 1;
+						}
+					}
+					return deliveries;
+				},
 				injectClosedTraceReply: (event: object) => {
 					for (const request of closedTraceReplies) deliver(request.socket, ['EVENT', request.subId, event]);
 				},

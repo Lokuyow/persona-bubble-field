@@ -150,6 +150,7 @@ Account側で報酬が新規確定した場合（`applied`）だけ、確定額�
 所持ポイントはAccount DBのPlayer lifecycleに保持し、報酬獲得履歴はそこから独立したstoreに保持する。ポイント加算と履歴確定は同じAccount transactionで行う。Account DBはv8からv9へ更新し、Trace DBはv3からv4へ更新する。両DBの新規作成時も全storeを作成し、既存のAccount root、Identity、Run、所持ポイント、write journalを維持する。旧バージョン全般への追加migrationや互換経路は設けない。既読報酬はTrace DBの未精算outboxから起動時に現在Identity・Runを照合して復旧し、Account確定後にTrace側を処理済みにする。Account履歴キーによる重複排除で再試行・複数tabでも二重加算しない。旧IdentityまたはRunの未精算記録は新しいRunへ適用せず終端化する。root削除時は返信cacheと既読・通知情報を整理するが、Account報酬履歴とTrace未精算記録は保持する。
 
 - global unread indicatorはActionDockに置き、Chatterとは別UIとする。操作時は「どこかにあなたへの返信の痕跡があります」のように未読存在だけをPopoverで説明する。viewport衝突を避けて安全領域内に表示し、外側操作またはEscapeでも閉じる。本文、author、場所、方向、距離、件数を表示せず、auto-navigationもしない。
+- Trace notification startup baselineの確定後にglobal unreadが`false → true`へ変化した場合だけ、indicator周辺に短いone-shot visual feedbackを表示する。初期snapshotやstartup中のnotification batchで成立した未読はbaselineに含め、新着feedbackを行わない。`true`継続では繰り返さず、未読解消後に同じsessionで再び`false → true`となった場合は再度表示してよい。Popoverを自動表示せず、追加情報や音を加えない。Reduced Motionではringの拡大・外向きmovementを抑制し、未読indicator自体は維持する。
 
 ## 27. trace bubbleの視覚的優先順位
 

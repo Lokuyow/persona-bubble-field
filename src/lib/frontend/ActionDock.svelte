@@ -28,6 +28,7 @@
 		onSoundOpen: () => void;
 		onVolume: (volume: number) => void;
 		hasUnreadReplies: boolean;
+		unreadBaselineSnapshot: import('$lib/traceReadState').TraceReadSnapshot | null;
 		character: Character;
 		avatarTone: BubbleTone;
 		canOpenSelfProfile: boolean;
@@ -44,7 +45,7 @@
 	};
 	let { onBoundsChange, boundsRevision, selectedSpeechType, submissionInProgress, volume, onSoundOpen, onVolume, onSpeechTypeChange, onOpenSelfProfile, submitContent, submitCandidate,
 		desiredContext, loadPreview, onPreviewClear, onEditorEmptyChange, onPreferredHeightChange,
-	 hasUnreadReplies, character, avatarTone, suggestionConversation, canOpenSelfProfile, chatterOpen, onToggleChatter,
+	 hasUnreadReplies, unreadBaselineSnapshot, character, avatarTone, suggestionConversation, canOpenSelfProfile, chatterOpen, onToggleChatter,
 	 manualTraceSelected, manualTraceEnabled, manualTraceStatus, onToggleManualTrace }: Props = $props();
 	let remeasureBounds = () => {};
 	const observeBounds: Attachment<HTMLElement> = (node) => untrack(() => {
@@ -61,6 +62,29 @@
 	let editorIsEmpty = $state<boolean | null>(null);
 	let explanationVisible = $state(false);
 	let tooltipsDisabled = $state(true);
+	let unreadBaselineInitialized = false;
+	let previousUnreadState = false;
+	let unreadArrivalFeedback = $state(false);
+
+	$effect(() => {
+		const baseline = unreadBaselineSnapshot;
+		const unread = hasUnreadReplies;
+		if (!baseline) {
+			unreadBaselineInitialized = false;
+			unreadArrivalFeedback = false;
+			previousUnreadState = unread;
+			return;
+		}
+		if (!unreadBaselineInitialized) {
+			unreadBaselineInitialized = true;
+			previousUnreadState = baseline.hasUnreadReplies;
+		}
+		if (!previousUnreadState && unread) {
+			unreadArrivalFeedback = false;
+			requestAnimationFrame(() => { unreadArrivalFeedback = true; });
+		}
+		previousUnreadState = unread;
+	});
 
 	function handleUnreadPopoverOutside(event: PointerEvent): void {
 		if (!explanationVisible) return;
@@ -161,6 +185,7 @@
 				<Popover.Trigger>
 					{#snippet child({ props })}
 						<button {...props} class="trace-unread-indicator" type="button" aria-label="あなたへの返信の痕跡があります">
+							<span class={['trace-unread-arrival-ring', { active: unreadArrivalFeedback }]} aria-hidden="true" onanimationend={() => { unreadArrivalFeedback = false; }}></span>
 							<span aria-hidden="true">●</span>
 						</button>
 					{/snippet}
@@ -399,6 +424,22 @@
 	}
 	.trace-unread-indicator:hover { background: var(--action-notification-background-hover); }
 	.trace-unread-indicator:active { background: var(--action-notification-background-active); }
+	.trace-unread-arrival-ring {
+		position: absolute;
+		inset: 2px;
+		border: 2px solid currentColor;
+		border-radius: inherit;
+		pointer-events: none;
+		opacity: 0;
+	}
+	.trace-unread-arrival-ring.active {
+		animation: trace-unread-arrival var(--motion-duration-interaction) var(--motion-easing-standard) both;
+	}
+	@keyframes trace-unread-arrival { from { opacity: .8; scale: .8; } to { opacity: 0; scale: 1.35; } }
+	@media (prefers-reduced-motion: reduce) {
+		.trace-unread-arrival-ring.active { animation-name: trace-unread-arrival-reduced; }
+		@keyframes trace-unread-arrival-reduced { from { opacity: .8; } to { opacity: 0; } }
+	}
 
 	.trace-unread-explanation {
 		z-index: 40;

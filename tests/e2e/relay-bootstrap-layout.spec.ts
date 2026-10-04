@@ -25,6 +25,58 @@ import { CHANNEL_ID, AUTHORITATIVE_RELAYS, fixtureSecret, installVirtualKeyboard
 
 
 test.describe('Relay startup', () => {
+	test('keeps bubbles restored from the primary bootstrap static', async ({ page }) => {
+		await page.setViewportSize({ width: 2560, height: 1440 });
+		await openReadyRelayWorld(page);
+		const restoredBubble = page.locator('.bubble').first();
+		await expect(restoredBubble).toBeVisible();
+		await expect.poll(() => restoredBubble.locator('.bubble-visual').evaluate((element) => element.getAnimations().length)).toBe(0);
+		await expect(restoredBubble.locator('.bubble-visual')).not.toHaveAttribute('data-arrival-type', /.+/);
+	});
+
+	test('animates a newly formed merged bubble once but not when another member joins', async ({ page }) => {
+		await page.setViewportSize({ width: 2560, height: 1440 });
+		await openReadyRelayWorld(page);
+		await page.evaluate(() => {
+			(window as typeof window & { __liveBubbleArrivals?: number }).__liveBubbleArrivals = 0;
+			document.addEventListener('animationstart', (event) => {
+				const surface = event.target instanceof Element ? event.target.closest<HTMLElement>('.bubble-visual') : null;
+				if (surface?.dataset.arrivalType) {
+					const target = window as typeof window & { __liveBubbleArrivals?: number };
+					target.__liveBubbleArrivals = (target.__liveBubbleArrivals ?? 0) + 1;
+				}
+			}, true);
+		});
+		const selfPosition = await page.locator('.participant[data-self="true"]').getAttribute('data-position');
+		if (!selfPosition) throw new Error('Expected the Relay self participant position.');
+		const [x, y] = selfPosition.split(',').map(Number);
+		const createdAt = Math.floor(Date.now() / 1000) + 1;
+		const channel = { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' };
+		const messages = [21, 23, 29].map((fixture) => finalizeEvent(buildWorldMessageTemplate({
+			channel,
+			content: 'same live merged speech',
+			speechType: 'normal',
+			position: { x, y },
+			createdAt
+		}), fixtureSecret(fixture)));
+		const relay = () => page.evaluate((event) => (window as typeof window & {
+			__relayStartupTest: { injectMessage(event: object): void };
+		}).__relayStartupTest.injectMessage(event), messages[0]);
+		await relay();
+		await expect(page.locator(`.bubble[data-bubble-id="${messages[0].id}"]`)).toBeVisible();
+		await expect.poll(() => page.evaluate(() => (window as typeof window & { __liveBubbleArrivals?: number }).__liveBubbleArrivals)).toBe(1);
+		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectMessage(event: object): void } }).__relayStartupTest.injectMessage(event), messages[1]);
+		const mergedBubble = page.locator('.bubble-merged[data-speech-type="normal"]');
+		await expect(mergedBubble).toHaveAttribute('data-merged-members', '2');
+		await expect.poll(() => page.evaluate(() => (window as typeof window & { __liveBubbleArrivals?: number }).__liveBubbleArrivals)).toBe(2);
+		const mergedId = await mergedBubble.getAttribute('data-bubble-id');
+		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectMessage(event: object): void } }).__relayStartupTest.injectMessage(event), messages[2]);
+		await expect(mergedBubble).toHaveAttribute('data-merged-members', '3');
+		await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+		expect(await mergedBubble.getAttribute('data-bubble-id')).toBe(mergedId);
+		expect(await page.evaluate(() => (window as typeof window & { __liveBubbleArrivals?: number }).__liveBubbleArrivals)).toBe(2);
+	});
+
 	for (const width of [700, 701]) {
 		test(`keeps Chatter initialization and overlay geometry at width ${width}`, async ({ page }) => {
 			await page.setViewportSize({ width, height: 900 });

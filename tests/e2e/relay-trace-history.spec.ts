@@ -345,6 +345,15 @@ test.describe('Relay startup', () => {
 	});
 
 	test('persists Trace root and reply read state and keeps notification generic', async ({ page }) => {
+		await page.addInitScript(() => {
+			(window as typeof window & { __unreadArrivalCount?: number }).__unreadArrivalCount = 0;
+		document.addEventListener('animationstart', (event) => {
+			if (event.target instanceof Element && event.target.matches('.trace-unread-arrival-ring')) {
+				const target = window as typeof window & { __unreadArrivalCount?: number };
+				target.__unreadArrivalCount = (target.__unreadArrivalCount ?? 0) + 1;
+			}
+		}, true);
+		});
 		const now = Date.now();
 		const selfSecret = fixtureSecret(23);
 		const selfPubkey = getPublicKey(selfSecret);
@@ -378,6 +387,8 @@ test.describe('Relay startup', () => {
 		}), fixtureSecret(37));
 		const reply = finalizeEvent(buildTraceReplyTemplate({ root: parsedRoot, parent: parsedRoot, content: 'private reply detail', speechType: 'normal', createdAt: Math.floor(now / 1000) + 1 }), fixtureSecret(31));
 		const replyAfterRootRead = finalizeEvent(buildTraceReplyTemplate({ root: parsedRoot, parent: parsedRoot, content: 'private reply after root read', speechType: 'normal', createdAt: Math.floor(now / 1000) + 2 }), fixtureSecret(32));
+		const replyWhileAlreadyUnread = finalizeEvent(buildTraceReplyTemplate({ root: parsedRoot, parent: parsedRoot, content: 'another private reply while unread', speechType: 'normal', createdAt: Math.floor(now / 1000) + 3 }), fixtureSecret(33));
+		const replyAfterSecondRead = finalizeEvent(buildTraceReplyTemplate({ root: parsedRoot, parent: parsedRoot, content: 'reply after second read', speechType: 'normal', createdAt: Math.floor(now / 1000) + 4 }), fixtureSecret(34));
 		await page.clock.setFixedTime(now);
 		await page.emulateMedia({ reducedMotion: 'reduce' });
 		await page.setViewportSize({ width: 1100, height: 850 });
@@ -466,6 +477,8 @@ test.describe('Relay startup', () => {
 		await expect(manualMarker).toHaveCSS('mask-image', /trace-icon\.svg/);
 		await expect(manualMarker).toHaveCSS('opacity', '0.72');
 		await expect(page.locator('.trace-unread-indicator')).toBeVisible();
+		expect(await page.evaluate(() => (window as typeof window & { __unreadArrivalCount?: number }).__unreadArrivalCount)).toBe(0);
+		await expect(page.locator('.trace-unread-explanation')).toHaveCount(0);
 		await page.locator('.trace-unread-indicator').hover();
 		await expect(page.getByRole('tooltip')).toHaveCount(0);
 		await expect(page.getByRole('button', { name: 'AI発言候補を生成' })).toBeVisible();
@@ -554,10 +567,19 @@ test.describe('Relay startup', () => {
 		await expect(marker).toHaveCSS('opacity', '0.72');
 		await expect(marker).toHaveCSS('filter', 'none');
 		await expect(page.locator('.trace-unread-indicator')).toBeVisible();
+		await expect.poll(() => page.evaluate(() => (window as typeof window & { __unreadArrivalCount?: number }).__unreadArrivalCount)).toBe(1);
+		await expect(page.locator('.trace-unread-explanation')).toHaveCount(0);
+		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectTraceReply(event: object): void } }).__relayStartupTest.injectTraceReply(event), replyWhileAlreadyUnread);
 		await selectRelayTraceCell(page, '4,2');
 		await expect(page.locator(`[data-trace-reply-id="${replyAfterRootRead.id}"]`)).toContainText(replyAfterRootRead.content);
+		await expect(page.locator(`[data-trace-reply-id="${replyWhileAlreadyUnread.id}"]`)).toContainText(replyWhileAlreadyUnread.content);
+		expect(await page.evaluate(() => (window as typeof window & { __unreadArrivalCount?: number }).__unreadArrivalCount)).toBe(1);
 		const hideTimeline = page.locator('.chatter-toggle');
 		if (await hideTimeline.isVisible()) await hideTimeline.click();
+		const requestsBeforeTraceClose = (await relayState(page)).state.requests.length;
+		const knownReplyDeliveriesBeforeClose = await page.evaluate((replyId) =>
+			(window as typeof window & { __relayStartupTest: { state: { traceDeliveries: string[] } } }).__relayStartupTest.state.traceDeliveries
+				.filter((id) => id === replyId).length, replyAfterRootRead.id);
 		await clickRelayLogicalCell(page, { x: 0, y: 0 });
 		await expect(marker).toHaveAttribute('data-trace-root-read', 'true');
 		await expect(marker).not.toHaveAttribute('data-trace-root-unread-reply');
@@ -565,6 +587,29 @@ test.describe('Relay startup', () => {
 		await expect(marker).toHaveCSS('color', 'rgb(82, 104, 134)');
 		await expect(marker).toHaveCSS('opacity', '0.56');
 		await expect(marker).toHaveCSS('filter', 'grayscale(1) brightness(1.12)');
+		await expect.poll(async () => {
+			const state = await relayState(page);
+			const notificationRequests = state.state.requests.slice(requestsBeforeTraceClose).filter((request) =>
+				request.filters.length === 1 && request.filters.some((filter) =>
+					(filter.kinds as number[] | undefined)?.includes(1111) &&
+					(filter['#p'] as string[] | undefined)?.includes(selfPubkey) &&
+					!filter['#E'] && !filter['#e']));
+			const knownReplyDeliveries = await page.evaluate((replyId) =>
+				(window as typeof window & { __relayStartupTest: { state: { traceDeliveries: string[] } } }).__relayStartupTest.state.traceDeliveries
+					.filter((id) => id === replyId).length, replyAfterRootRead.id);
+			return notificationRequests.length >= AUTHORITATIVE_RELAYS.length &&
+				knownReplyDeliveries >= knownReplyDeliveriesBeforeClose + AUTHORITATIVE_RELAYS.length;
+		}).toBe(true);
+		const secondReplyCandidate = parseTraceReplyCandidate(replyAfterSecondRead);
+		expect(secondReplyCandidate).not.toBeNull();
+		expect(validateTraceReplyCandidate(secondReplyCandidate!, parsedRoot, parsedRoot)).not.toBeNull();
+		const notificationDeliveries = await page.evaluate((event) => (window as typeof window & {
+			__relayStartupTest: { injectTraceNotificationReply(event: object): number }
+		}).__relayStartupTest.injectTraceNotificationReply(event), replyAfterSecondRead);
+		expect(notificationDeliveries).toBe(AUTHORITATIVE_RELAYS.length);
+		await expect(marker).toHaveAttribute('data-trace-root-unread-reply', 'true');
+		await expect(page.locator('.trace-unread-indicator')).toBeVisible();
+		await expect.poll(() => page.evaluate(() => (window as typeof window & { __unreadArrivalCount?: number }).__unreadArrivalCount)).toBe(2);
 	});
 
 	test('keeps the unread ActionDock order on mobile', async ({ page }) => {
