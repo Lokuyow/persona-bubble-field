@@ -13,6 +13,7 @@ import {
 } from '../../src/lib/nostrProtocol';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { expectIconCloseButton } from './helpers/iconCloseButton';
+import { expectDialogIconCloseButton } from './helpers/dialogMotion';
 import { AUTHORITATIVE_RELAYS, CHANNEL_ID, fixtureSecret, traceRuntimeEvents, installDelayedRelay, relayState, selectRelayTraceCell, clickRelayLogicalCell, installPromptApiStub, seedRelayAccount, readActionDockControlOrder, moveRelaySelfTo } from './helpers/relayHarness';
 
 
@@ -657,7 +658,7 @@ test.describe('Relay startup', () => {
 		const profileDialog = page.getByRole('dialog');
 		await expect(profileDialog).toBeVisible();
 		const profileClose = profileDialog.getByRole('button', { name: '閉じる' });
-		await expectIconCloseButton(profileClose, '閉じる');
+		await expectDialogIconCloseButton(profileDialog, profileClose, '閉じる');
 		await profileClose.click();
 		await expect(profileDialog).toBeHidden();
 

@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { expectIconCloseButton } from './helpers/iconCloseButton';
+import { expectDialogIconCloseButton } from './helpers/dialogMotion';
 import { HDKey } from '@scure/bip32';
 import { entropyToMnemonic, mnemonicToSeedSync } from '@scure/bip39';
 import { wordlist as englishWordlist } from '@scure/bip39/wordlists/english.js';
@@ -254,7 +255,7 @@ test.describe('Relay startup', () => {
 			'不成立：有効選択が3人未満'
 		]);
 		const closeButton = rulesDialog.getByRole('button', { name: '閉じる' });
-		await expectIconCloseButton(closeButton, '閉じる');
+		await expectDialogIconCloseButton(rulesDialog, closeButton, '閉じる');
 		await closeButton.click();
 		await groupTrigger.click();
 		const farEvent = finalizeEvent(buildWorldStateEventTemplate({ channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: farPosition, slot: 0, createdAt: Math.floor((startTime + 3_000) / 1000) }), selfSecret);

@@ -867,7 +867,7 @@ async function openTagGameTerminal(page: Page): Promise<void> {
 		if (await action.isVisible()) await action.click();
 		return dialog.isVisible();
 	}, { timeout: 10_000, message: `Expected the tag-game terminal to open from self position ${position}.` }).toBe(true);
-	await finishDialogEntrance(page, dialog);
+	await finishDialogEntrance(dialog);
 	await expectDialogIconCloseButton(dialog, dialog.getByRole('button', { name: '閉じる' }), '閉じる');
 }
 
@@ -954,7 +954,7 @@ test('tag game rules stay usable across desktop and mobile terminal states', asy
 	await expect(dialog.getByRole('button', { name: '閉じる' })).toBeVisible();
 	await expect(dialog.getByRole('button', { name: '開始を提案' })).toBeVisible();
 	await dialog.getByRole('button', { name: '閉じる' }).click();
-	await finishDialogExit(dialog);
+	await finishDialogExit(dialog, false);
 	await openTagGameTerminal(page);
 	await expect(page.getByRole('dialog', { name: '鬼ごっこ' }).locator('.tag-game-rules')).not.toHaveAttribute('open', '');
 });
@@ -1314,6 +1314,8 @@ test('three Fake Relay clients create, join, consent, start, touch, and settle t
 		// submitters need the temporary unconfirmed status while that state is held.
 		if (actorPubkey !== hostPubkey) await expect(actor.locator('[data-tag-game-touch-status]')).toHaveText('転移未確認');
 		await setRealtimePublishDeferral(hostPage, false);
+		// Resume the organizer's publication scheduler after the timed hold; this does not synchronize Dialog motion.
+		await hostPage.clock.resume();
 		await expect.poll(async () => latestTagGameStateValue(hostPage, gameId, (state) => state.transferAt)).toBeGreaterThan(touchState.transferAt ?? 0);
 		transferredEvent = await latestGameEvent(hostPage, gameId);
 		transferred = parseTagGameEvent(transferredEvent, CHANNEL_ID)!.state;
@@ -1510,7 +1512,7 @@ test('keeps join actions primary and equally emphasized when multiple tag-game l
 		expect(closePoint.inViewport).toBe(true);
 		expect(closePoint.receivesPointer).toBe(true);
 		await joinerPage.mouse.click(closePoint.x, closePoint.y);
-		await expect(dialog).toHaveCount(0);
+		await finishDialogExit(dialog, false);
 	} finally {
 		await Promise.all([firstHostPage.close(), secondHostPage.close(), joinerPage.close()]);
 	}
@@ -2075,6 +2077,7 @@ test('restores auto-result eligibility from the active Run lock after bootstrap,
 		await expect(result).toBeVisible();
 		await expect(result.locator(`[data-tag-game-result-participant="${selfPubkey}"]`)).toHaveAttribute('data-tag-game-result-self', 'true');
 		await result.getByRole('button', { name: '閉じる' }).click();
+		await finishDialogExit(result, false);
 		await injectRealtime(page, finalizeTagGameState({ ...ended, revision: 2, updatedAt: finalAt + 1 }, CHANNEL_ID, finalAt + 1, hostSecret));
 		await expect(result).toHaveCount(0);
 	} finally { await page.close(); }
@@ -2190,7 +2193,7 @@ test('shows all eight historical results within a mobile result dialog', async (
 		await expect(row.locator('.result-values')).toHaveCount(2);
 	}
 	await page.keyboard.press('Escape');
-	await expect(result).toHaveCount(0);
+	await finishDialogExit(result, false);
 	await expect.poll(() => showResult.evaluate((element) => element === document.activeElement)).toBe(true);
 });
 
@@ -2587,8 +2590,9 @@ test('host silence is detected only while the local Relay connection is active',
 	await expect(holder.locator('.tag-game-effect-aura .oni-aura-outline')).toHaveCount(0);
 	const fukuViewport = page.viewportSize();
 	if (!fukuViewport) throw new Error('Expected a fixed viewport for Fuku symbol layout checks');
-	await page.getByRole('dialog', { name: '鬼ごっこ' }).getByRole('button', { name: '閉じる' }).click();
-	await expect(page.getByRole('dialog', { name: '鬼ごっこ' })).toBeHidden();
+	const dialog = page.getByRole('dialog', { name: '鬼ごっこ' });
+	await dialog.getByRole('button', { name: '閉じる' }).click();
+	await finishDialogExit(dialog, false);
 	await page.setViewportSize({ width: 1280, height: 800 });
 	await expect.poll(() => holder.evaluate((element) => element.getBoundingClientRect().width)).toBe(76);
 	const desktopFukuLayout = await readEffectSymbolLayout(holder);
@@ -3368,15 +3372,15 @@ test('dismisses the tag-game dialog with Escape, outside click, and Close withou
 	await expect(dialog).toBeVisible();
 
 	await page.keyboard.press('Escape');
-	await expect(dialog).toHaveCount(0);
+	await finishDialogExit(dialog, false);
 
 	await openTagGameTerminal(page);
 	await page.locator('.tag-game-dialog-overlay').click({ position: { x: 8, y: 8 } });
-	await expect(dialog).toHaveCount(0);
+	await finishDialogExit(dialog, false);
 
 	await openTagGameTerminal(page);
 	await close.click();
-	await expect(dialog).toHaveCount(0);
+	await finishDialogExit(dialog, false);
 	await openTagGameTerminal(page);
 	await expect(dialog).toBeVisible();
 });

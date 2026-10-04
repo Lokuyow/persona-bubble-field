@@ -1,4 +1,4 @@
-import { expect, type Locator, type Page } from '@playwright/test';
+import { expect, type Locator } from '@playwright/test';
 import { expectIconCloseButton } from './iconCloseButton';
 
 /** Finish only Web Animations owned by one mounted Bits UI Dialog. */
@@ -18,8 +18,13 @@ export async function expectDialogIconCloseButton(dialog: Locator, button: Locat
 }
 
 /** Let Bits UI process its exit frame while keeping a fake game's Date fixed. */
-export async function finishDialogExit(dialog: Locator): Promise<void> {
+export async function finishDialogExit(dialog: Locator, clockIsPaused = true): Promise<void> {
 	const page = dialog.page();
+	if (!clockIsPaused) {
+		await finishDialogAnimations(dialog);
+		await expect(dialog).toHaveCount(0);
+		return;
+	}
 	const fixedNow = await page.evaluate(() => Date.now());
 	await page.clock.setFixedTime(fixedNow);
 	await page.clock.resume();
@@ -30,12 +35,8 @@ export async function finishDialogExit(dialog: Locator): Promise<void> {
 	await page.clock.setSystemTime(fixedNow);
 }
 
-/** Let a clock-frozen Bits UI entrance frame run without changing Date.now(). */
-export async function finishDialogEntrance(page: Page, dialog: Locator): Promise<void> {
-	const fixedNow = await page.evaluate(() => Date.now());
-	await page.clock.setFixedTime(fixedNow);
-	await page.clock.resume();
-	await page.clock.setFixedTime(fixedNow);
+/** Finish a Bits UI entrance frame without changing the caller's clock state. */
+export async function finishDialogEntrance(dialog: Locator): Promise<void> {
 	await dialog.evaluate(async (element) => {
 		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 		const animations = element.getAnimations();
@@ -44,6 +45,4 @@ export async function finishDialogEntrance(page: Page, dialog: Locator): Promise
 		}
 		await Promise.all(animations.map((animation) => animation.finished.catch(() => undefined)));
 	});
-	await page.clock.pauseAt(fixedNow);
-	await page.clock.setSystemTime(fixedNow);
 }
