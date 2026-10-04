@@ -954,7 +954,7 @@ test('tag game rules stay usable across desktop and mobile terminal states', asy
 	await expect(dialog.getByRole('button', { name: '閉じる' })).toBeVisible();
 	await expect(dialog.getByRole('button', { name: '開始を提案' })).toBeVisible();
 	await dialog.getByRole('button', { name: '閉じる' }).click();
-	await expect(dialog).toHaveCount(0);
+	await finishDialogExit(dialog);
 	await openTagGameTerminal(page);
 	await expect(page.getByRole('dialog', { name: '鬼ごっこ' }).locator('.tag-game-rules')).not.toHaveAttribute('open', '');
 });
