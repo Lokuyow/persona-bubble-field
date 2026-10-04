@@ -301,6 +301,8 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	const mountedBubbleRemeasures = new Map<string, () => void>();
 	const mountedTraceReplyRemeasures = new Map<string, () => void>();
 	let conversationState = $state.raw<ConversationState>(createConversationState());
+	let liveBubbleArrivalIds = $state.raw<ReadonlySet<string>>(new Set());
+	let consumedLiveBubbleArrivalIds = $state.raw<ReadonlySet<string>>(new Set());
 	let soundPreference = $state(DEFAULT_SOUND_PREFERENCE);
 	let soundController = $state.raw<SoundController | null>(null);
 	let devSoundSequence = 0;
@@ -473,6 +475,8 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	let manualTraceStatus = $state<'idle' | 'sending' | 'unknown' | 'confirmed'>('idle');
 	let manualTraceEnabled = $derived(Boolean((manualTraceMode || personaSnapshot && personaSnapshot.gameState.points >= 100) && selfMessageAvailability.kind === 'ready' && !personaLifecycleTransition));
 	let traceReadSnapshot = $state<TraceReadSnapshot>({ readRootIds: [], unreadReplyRootIds: [], hasUnreadReplies: false });
+	let traceReadBaselineSnapshot = $state<TraceReadSnapshot | null>(null);
+	let traceBaselineSessionGeneration = 0;
 	let composerPreferredHeight = $state<number | null>(null);
 	let composerKeyboardInset = $state(0);
 	let worldReader: ReturnType<typeof createWorldReadSession> | null = null;
@@ -1113,6 +1117,18 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			tailConnections: connections,
 			outlineOpenings: bubble.speechType === 'normal' ? [] : connections.map((connection) => ({ id: connection.participantId, points: tailOutlineOpeningPoints(connection.tail, bubble.anchor) })) };
 	}));
+	$effect(() => {
+		const activeIds = new Set([...conversationState.normalBubbles, ...conversationState.mergedBubbles].map((bubble) => bubble.id));
+		const pending = new Set([...liveBubbleArrivalIds].filter((id) => activeIds.has(id)));
+		const consumed = new Set([...consumedLiveBubbleArrivalIds].filter((id) => activeIds.has(id)));
+		if (pending.size !== liveBubbleArrivalIds.size) liveBubbleArrivalIds = pending;
+		if (consumed.size !== consumedLiveBubbleArrivalIds.size) consumedLiveBubbleArrivalIds = consumed;
+	});
+	function consumeLiveBubbleArrival(id: string): void {
+		if (!liveBubbleArrivalIds.has(id) || consumedLiveBubbleArrivalIds.has(id)) return;
+		liveBubbleArrivalIds = new Set([...liveBubbleArrivalIds].filter((candidate) => candidate !== id));
+		consumedLiveBubbleArrivalIds = new Set([...consumedLiveBubbleArrivalIds, id]);
+	}
 	let normalTailModels = $derived(liveBubblePresentations.filter((bubble) => bubble.kind === 'normal').map((bubble) => ({
 		id: bubble.participantId!, tone: bubble.tone, speechType: bubble.speechType, anchor: bubble.anchor, size: bubble.size, shape: bubble.shape, connection: bubble.tailConnections[0]
 	})));
@@ -1412,6 +1428,9 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			realtimeStartImmediately: boolean | undefined = undefined
 		): Promise<void> => {
 		tagGameDiscoverySince = 0;
+			const baselineGeneration = ++traceBaselineSessionGeneration;
+			traceReadSnapshot = { readRootIds: [], unreadReplyRootIds: [], hasUnreadReplies: false };
+			traceReadBaselineSnapshot = null;
 			const profileEvidenceSession = profileRunEvidenceStore.beginSession();
 			latestProfileWorldStates = new Map();
 			const previousSession = worldReader;
@@ -1468,6 +1487,11 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 				onTimelineMessage: receiveSessionTimelineMessage,
 				onEffectiveTraceRootsChanged: setEffectiveTraceRoots,
 				onTraceReadSnapshotChanged: (snapshot) => { traceReadSnapshot = snapshot; },
+				onTraceReadBaselineReady: (snapshot) => {
+					if (baselineGeneration !== traceBaselineSessionGeneration || worldReader !== nextSession) return;
+					traceReadSnapshot = snapshot;
+					traceReadBaselineSnapshot = snapshot;
+				},
 				onInteractionRewardApplied: showInteractionRewardFeedback,
 				onPersonaSnapshotChanged: (persona) => {
 					if (personaSnapshot && samePersonaIdentity(personaSnapshot, persona) &&
@@ -4902,6 +4926,10 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			now: conversationMessage.createdAt
 		});
 		conversationState = applyVisibility(nextConversationState, visibleParticipantIds);
+		const previousIds = new Set([...previousConversationState.normalBubbles, ...previousConversationState.mergedBubbles].map((bubble) => bubble.id));
+		const nextIds = [...conversationState.normalBubbles, ...conversationState.mergedBubbles].map((bubble) => bubble.id);
+		const arrivals = nextIds.filter((id) => !previousIds.has(id) && !consumedLiveBubbleArrivalIds.has(id));
+		if (arrivals.length) liveBubbleArrivalIds = new Set([...liveBubbleArrivalIds, ...arrivals]);
 		for (const effect of newLiveBubbleEffects(previousConversationState, conversationState)) soundController?.play(effect);
 	}
 
@@ -5136,12 +5164,14 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 				normalTails={normalTailModels}
 				mergedTails={mergedTailModels}
 				{liveBubblePresentations}
+				arrivalBubbleIds={liveBubbleArrivalIds}
 				{bubbleOverflowById}
 				currentSpeechId={traceConversationProjection?.current.event.id ?? null}
 				replyRefresh={traceConversationState.kind === 'open' ? traceConversationState.replyRefresh : null}
 				onSelectSpeech={selectTraceSpeech}
 				onOpenProfile={openProfile}
 				onBubbleMeasurement={applyBubbleMeasurement}
+				onBubbleArrivalConsumed={consumeLiveBubbleArrival}
 				onBubbleMeasurementRemoved={removeBubbleMeasurement}
 				registerBubbleRemeasure={registerBubbleRemeasure}
 				onReplyFootprint={applyTraceReplyFootprint}
@@ -5325,6 +5355,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			onSoundOpen={() => soundController?.unlock()}
 			onVolume={updateSoundVolume}
 			hasUnreadReplies={traceReadSnapshot.hasUnreadReplies}
+			unreadBaselineSnapshot={traceReadBaselineSnapshot}
 			chatterOpen={chatterOpen}
 			onToggleChatter={toggleChatter}
 			character={selfProfileCharacter ?? speechSuggestionCharacter}

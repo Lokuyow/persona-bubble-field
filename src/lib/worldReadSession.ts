@@ -189,6 +189,7 @@ export type WorldReadSessionOptions = Readonly<{
 	onTimelineMessage?: (message: ParsedWorldMessage) => void;
 	onEffectiveTraceRootsChanged?: (roots: readonly ParsedWorldMessage[]) => void;
 	onTraceReadSnapshotChanged?: (snapshot: TraceReadSnapshot) => void;
+	onTraceReadBaselineReady?: (snapshot: TraceReadSnapshot) => void;
 	onPersonaSnapshotChanged?: (persona: PersonaSnapshot) => void;
 	onInteractionRewardApplied?: (reward: AppliedTraceReadReward) => void;
 	onTraceConversationChanged?: (state: TraceConversationState) => void;
@@ -291,6 +292,8 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	let traceReadRewardQueue: Promise<void> = Promise.resolve();
 	let effectiveTraceRoots: readonly ParsedWorldMessage[] = [];
 	let traceReadSnapshot: TraceReadSnapshot = { readRootIds: [], unreadReplyRootIds: [], hasUnreadReplies: false };
+	let traceReadSnapshotRequestGeneration = 0;
+	let traceReadBaselineEmitted = false;
 	let traceRootBootstrapReadiness: Promise<'ready' | 'failed'> | null = null;
 	let traceStartupReadiness: Promise<'ready' | 'failed' | 'not-needed'> | null = null;
 	let traceNotificationStartup: Promise<'ready' | 'failed' | 'not-needed'> | null = null;
@@ -686,13 +689,43 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		emitStatus({ kind: 'degraded', issueCount });
 	}
 
-	function refreshTraceReadSnapshot(): void {
-		if (!channel || !selfSigner || disposed) return;
-		void loadTraceReadSnapshot({ channelId: channel.channelId, personaPubkey: selfSigner.pubkey }).then((snapshot) => {
-			if (disposed) return;
+	async function readTraceReadSnapshot(): Promise<TraceReadSnapshot | null> {
+		if (!channel || !selfSigner || disposed) return null;
+		const generation = ++traceReadSnapshotRequestGeneration;
+		const scope = { channelId: channel.channelId, personaPubkey: selfSigner.pubkey };
+		try {
+			const snapshot = await loadTraceReadSnapshot(scope);
+			if (disposed || generation !== traceReadSnapshotRequestGeneration || channel?.channelId !== scope.channelId || selfSigner?.pubkey !== scope.personaPubkey) return null;
 			traceReadSnapshot = snapshot;
 			options.onTraceReadSnapshotChanged?.(snapshot);
-		}).catch(() => {});
+			return snapshot;
+		} catch {
+			return null;
+		}
+	}
+
+	function refreshTraceReadSnapshot(): void {
+		void readTraceReadSnapshot();
+	}
+
+	async function establishTraceReadBaseline(): Promise<void> {
+		if (!channel || !selfSigner || disposed || traceReadBaselineEmitted) return;
+		const generation = ++traceReadSnapshotRequestGeneration;
+		const scope = { channelId: channel.channelId, personaPubkey: selfSigner.pubkey };
+		let snapshot: TraceReadSnapshot;
+		try {
+			snapshot = await loadTraceReadSnapshot(scope);
+		} catch {
+			return;
+		}
+		if (disposed || traceReadBaselineEmitted || channel?.channelId !== scope.channelId || selfSigner?.pubkey !== scope.personaPubkey) return;
+		const baseline = generation === traceReadSnapshotRequestGeneration ? snapshot : traceReadSnapshot;
+		if (generation === traceReadSnapshotRequestGeneration) {
+			traceReadSnapshot = snapshot;
+			options.onTraceReadSnapshotChanged?.(snapshot);
+		}
+		traceReadBaselineEmitted = true;
+		options.onTraceReadBaselineReady?.(baseline);
 	}
 
 	async function refreshPersonaAfterReward(): Promise<void> {
@@ -735,21 +768,36 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	}
 
 	function startTraceNotification(): Promise<'ready' | 'failed' | 'not-needed'> {
-		if (!traceRootBootstrapReadiness || !selfSigner) return Promise.resolve('not-needed');
+		if (!selfSigner) return Promise.resolve('not-needed');
 		if (traceNotificationStartup) return traceNotificationStartup;
-		traceNotificationStartup = traceRootBootstrapReadiness.then(async (readiness) => {
-			if (readiness !== 'ready' || disposed || !transport) return 'failed' as const;
-			if (typeof transport.configureTraceReplies !== 'function') return 'not-needed' as const;
-			const notification = traceNotificationConfig();
-			if (!notification) return 'not-needed' as const;
-			const result = await transport.configureTraceReplies({
-				notification,
-				onBatch: (batch) => { void reconcileTraceReplies(traceConversationGeneration, undefined, batch.events); },
-				onLiveEvent: (event) => { void reconcileTraceReplies(traceConversationGeneration, undefined, [event]); }
-			}).catch(() => {});
-			if (result?.status === 'active') await reconcileTraceReplies(traceConversationGeneration, undefined, result.initialBatch.events);
-			return result?.status === 'active' ? 'ready' as const : 'failed' as const;
-		}).catch(() => 'failed' as const);
+		traceNotificationStartup = (async () => {
+			let status: 'ready' | 'failed' | 'not-needed' = 'not-needed';
+			try {
+				const readiness = traceRootBootstrapReadiness ? await traceRootBootstrapReadiness : 'failed';
+				if (disposed) return 'failed';
+				if (readiness !== 'ready' || !transport) status = 'failed';
+				else if (typeof transport.configureTraceReplies !== 'function') status = 'not-needed';
+				else {
+					const notification = traceNotificationConfig();
+					if (!notification) status = 'not-needed';
+					else {
+						const result = await transport.configureTraceReplies({
+							notification,
+							onBatch: (batch) => { void reconcileTraceReplies(traceConversationGeneration, undefined, batch.events); },
+							onLiveEvent: (event) => { void reconcileTraceReplies(traceConversationGeneration, undefined, [event]); }
+						}).catch(() => undefined);
+						if (result?.status === 'active') {
+							await reconcileTraceReplies(traceConversationGeneration, undefined, result.initialBatch.events);
+							status = 'ready';
+						} else status = 'failed';
+					}
+				}
+			} catch {
+				status = 'failed';
+			}
+			if (!disposed) await establishTraceReadBaseline();
+			return status;
+		})();
 		return traceNotificationStartup;
 	}
 

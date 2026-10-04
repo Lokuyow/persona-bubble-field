@@ -49,6 +49,12 @@ kind 42の `w` は発言時点の不変な座標であり、その後発言者�
 
 その後、表示期限内に発言者が再び画面内へ戻ってきても、一度消えた通常フキダシを再表示しない。
 
+### liveフキダシの到着presentation
+
+実際のlive受信によって新しいフキダシpresentationが成立した場合は、そのpresentationの最初の表示時だけ短いentrance effectを行う。bootstrap履歴から復元されたフキダシには適用しない。同一presentationの更新、合体member追加、visibility/layout変更、または一度非表示になった後の再表示では繰り返さない。新しい合体presentation IDが成立した場合は、そのpresentationに一度だけ適用する。
+
+通常は軽いfadeと微小なscale、叫びは通常より明確なscale、モノローグはopacity中心とする。いずれも操作を待たせず、発言音や発言typeの意味論とは独立したpresentationである。entranceはcanonical position、measurement、bubble geometry、tail geometryを変えず、expiry時のexit animationは設けない。`prefers-reduced-motion: reduce`ではscaleを抑制し、必要に応じて短いopacity変化だけを残す。
+
 ---
 
 ## 18. liveフキダシの描画と配置
