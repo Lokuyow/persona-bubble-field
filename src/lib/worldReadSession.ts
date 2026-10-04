@@ -293,6 +293,8 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	let effectiveTraceRoots: readonly ParsedWorldMessage[] = [];
 	let traceReadSnapshot: TraceReadSnapshot = { readRootIds: [], unreadReplyRootIds: [], hasUnreadReplies: false };
 	let traceReadSnapshotRequestGeneration = 0;
+	type TraceReadSnapshotRequest = { promise: Promise<TraceReadSnapshot | null> };
+	let latestTraceReadSnapshotRequest: TraceReadSnapshotRequest | null = null;
 	let traceReadBaselineEmitted = false;
 	let traceRootBootstrapReadiness: Promise<'ready' | 'failed'> | null = null;
 	let traceStartupReadiness: Promise<'ready' | 'failed' | 'not-needed'> | null = null;
@@ -689,19 +691,30 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		emitStatus({ kind: 'degraded', issueCount });
 	}
 
-	async function readTraceReadSnapshot(): Promise<TraceReadSnapshot | null> {
+	function startTraceReadSnapshot(): TraceReadSnapshotRequest | null {
 		if (!channel || !selfSigner || disposed) return null;
 		const generation = ++traceReadSnapshotRequestGeneration;
 		const scope = { channelId: channel.channelId, personaPubkey: selfSigner.pubkey };
+		let load: Promise<TraceReadSnapshot>;
 		try {
-			const snapshot = await loadTraceReadSnapshot(scope);
-			if (disposed || generation !== traceReadSnapshotRequestGeneration || channel?.channelId !== scope.channelId || selfSigner?.pubkey !== scope.personaPubkey) return null;
-			traceReadSnapshot = snapshot;
-			options.onTraceReadSnapshotChanged?.(snapshot);
-			return snapshot;
+			load = loadTraceReadSnapshot(scope);
 		} catch {
-			return null;
+			load = Promise.reject(new Error('Trace read snapshot load failed.'));
 		}
+		const request: TraceReadSnapshotRequest = {
+			promise: Promise.resolve(load).then((snapshot) => {
+				if (disposed || generation !== traceReadSnapshotRequestGeneration || channel?.channelId !== scope.channelId || selfSigner?.pubkey !== scope.personaPubkey) return null;
+				traceReadSnapshot = snapshot;
+				options.onTraceReadSnapshotChanged?.(snapshot);
+				return snapshot;
+			}).catch(() => null)
+		};
+		latestTraceReadSnapshotRequest = request;
+		return request;
+	}
+
+	async function readTraceReadSnapshot(): Promise<TraceReadSnapshot | null> {
+		return startTraceReadSnapshot()?.promise ?? null;
 	}
 
 	function refreshTraceReadSnapshot(): void {
@@ -710,20 +723,17 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 
 	async function establishTraceReadBaseline(): Promise<void> {
 		if (!channel || !selfSigner || disposed || traceReadBaselineEmitted) return;
-		const generation = ++traceReadSnapshotRequestGeneration;
 		const scope = { channelId: channel.channelId, personaPubkey: selfSigner.pubkey };
-		let snapshot: TraceReadSnapshot;
-		try {
-			snapshot = await loadTraceReadSnapshot(scope);
-		} catch {
-			return;
+		let request = startTraceReadSnapshot();
+		if (!request) return;
+		let baseline: TraceReadSnapshot | null = null;
+		while (request) {
+			baseline = await request.promise;
+			if (disposed || traceReadBaselineEmitted || channel?.channelId !== scope.channelId || selfSigner?.pubkey !== scope.personaPubkey) return;
+			if (request === latestTraceReadSnapshotRequest) break;
+			request = latestTraceReadSnapshotRequest;
 		}
-		if (disposed || traceReadBaselineEmitted || channel?.channelId !== scope.channelId || selfSigner?.pubkey !== scope.personaPubkey) return;
-		const baseline = generation === traceReadSnapshotRequestGeneration ? snapshot : traceReadSnapshot;
-		if (generation === traceReadSnapshotRequestGeneration) {
-			traceReadSnapshot = snapshot;
-			options.onTraceReadSnapshotChanged?.(snapshot);
-		}
+		if (!baseline || !request) return;
 		traceReadBaselineEmitted = true;
 		options.onTraceReadBaselineReady?.(baseline);
 	}

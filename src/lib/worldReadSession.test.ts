@@ -2519,6 +2519,64 @@ describe('world read session', () => {
 		session.dispose();
 	});
 
+	it('waits for a newer in-flight snapshot before emitting the Trace unread baseline', async () => {
+		const traceRoots = deferred<{ rawEvents: readonly never[]; relays: readonly never[] }>();
+		const configuration = deferred<TraceReplyConfigurationResult>();
+		const reads: ReturnType<typeof deferred<{ readRootIds: readonly string[]; unreadReplyRootIds: readonly string[]; hasUnreadReplies: boolean }>>[] = [];
+		let notification: TraceReplyConfiguration | undefined;
+		const configureTraceReplies = vi.fn((options: TraceReplyConfiguration) => {
+			notification = options;
+			return configuration.promise;
+		});
+		mocked.loadTraceReadSnapshot.mockImplementation(() => {
+			const read = deferred<{ readRootIds: readonly string[]; unreadReplyRootIds: readonly string[]; hasUnreadReplies: boolean }>();
+			reads.push(read);
+			return read.promise;
+		});
+		mocked.createTransport.mockReturnValue({
+			start: vi.fn(async (nextInput) => { input = nextInput; return result; }),
+			bootstrapTraceRootCandidates: vi.fn(() => traceRoots.promise),
+			configureTraceReplies,
+			dispose,
+			publish
+		});
+		const callbacks: string[] = [];
+		const baselineReady = vi.fn((snapshot) => { callbacks.push(`baseline:${snapshot.hasUnreadReplies}`); });
+		const snapshotChanged = vi.fn((snapshot) => { callbacks.push(`snapshot:${snapshot.hasUnreadReplies}`); });
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 }, selfSigner: selfSigner(),
+			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn(),
+			onTraceReadSnapshotChanged: snapshotChanged, onTraceReadBaselineReady: baselineReady
+		});
+		await session.start();
+		session.completeBootstrap();
+		traceRoots.resolve({ rawEvents: [], relays: [] });
+		await vi.waitFor(() => expect(configureTraceReplies).toHaveBeenCalledOnce());
+		configuration.resolve({ status: 'active', generation: 1, initialBatch: { events: [], relays: [] } });
+		await vi.waitFor(() => expect(mocked.reconcileTraceReplyCache).toHaveBeenCalled());
+		await vi.waitFor(async () => {
+			await Promise.resolve();
+			expect(reads.length).toBeGreaterThanOrEqual(2);
+		});
+		for (let i = 0; i < 40; i++) await Promise.resolve();
+		const baselineReadIndex = reads.length - 1;
+		expect(notification).toBeDefined();
+		notification!.onLiveEvent({ id: 'baseline-race-live-reply' } as never);
+		await vi.waitFor(() => expect(reads.length).toBeGreaterThan(baselineReadIndex + 1));
+		const baselineSnapshot = { readRootIds: [], unreadReplyRootIds: [], hasUnreadReplies: true };
+		reads[baselineReadIndex].resolve(baselineSnapshot);
+		for (let i = 0; i < 40; i++) await Promise.resolve();
+		expect(baselineReady).not.toHaveBeenCalled();
+		const latestSnapshot = { readRootIds: ['a'.repeat(64)], unreadReplyRootIds: ['b'.repeat(64)], hasUnreadReplies: true };
+		reads[baselineReadIndex + 1].resolve(latestSnapshot);
+		await vi.waitFor(() => expect(baselineReady).toHaveBeenCalledWith(latestSnapshot));
+		expect(baselineReady).toHaveBeenCalledOnce();
+		expect(snapshotChanged).toHaveBeenCalledWith(latestSnapshot);
+		expect(callbacks.indexOf('snapshot:true')).toBeLessThan(callbacks.lastIndexOf('baseline:true'));
+		expect(callbacks.filter((entry) => entry === 'baseline:true')).toHaveLength(1);
+		session.dispose();
+	});
+
 	it('uses the local snapshot as the baseline when Trace notification startup is not needed', async () => {
 		const confirmed = { readRootIds: [], unreadReplyRootIds: ['b'.repeat(64)], hasUnreadReplies: true };
 		mocked.loadTraceReadSnapshot.mockResolvedValue(confirmed);
