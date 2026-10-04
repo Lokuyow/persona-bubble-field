@@ -100,8 +100,7 @@
 {/snippet}
 
 <Dialog.Root bind:open={() => open, onOpenChange}>
-	{#if open}
-		<Dialog.Portal>
+	<Dialog.Portal>
 			<Dialog.Overlay class="ranking-dialog-overlay" />
 			<Dialog.Content class="ranking-dialog-content" data-ranking-dialog preventScroll={false} onOpenAutoFocus={focusTitle}>
 				<header class="ranking-dialog-header">
@@ -150,13 +149,12 @@
 					{/if}
 				</div>
 			</Dialog.Content>
-		</Dialog.Portal>
-	{/if}
+	</Dialog.Portal>
 </Dialog.Root>
 
 <style>
-	:global(.ranking-dialog-overlay) { position: fixed; inset: 0; z-index: 100; background: rgba(4, 7, 18, .72); backdrop-filter: blur(2px); animation: ranking-overlay-in 180ms ease-out both; }
-	:global(.ranking-dialog-content) { position: fixed; top: 50%; left: 50%; z-index: 101; display: grid; grid-template-rows: auto auto minmax(0, 1fr); gap: 0; width: min(640px, calc(100vw - 24px)); max-height: calc(100svh - 28px); overflow: auto; padding: 22px; border: 1px solid rgba(122, 135, 255, .62); border-radius: 18px; background: linear-gradient(180deg, rgba(12, 18, 46, .98), rgba(8, 12, 33, .98)); box-shadow: 0 20px 80px rgba(0, 0, 0, .48), 0 0 34px rgba(90, 103, 255, .13); color: #f4f6ff; transform: translate(-50%, -50%); animation: ranking-dialog-in 220ms cubic-bezier(.2, .75, .25, 1) both; }
+	:global(.ranking-dialog-overlay) { position: fixed; inset: 0; z-index: 100; background: rgba(4, 7, 18, .72); backdrop-filter: blur(2px); }
+	:global(.ranking-dialog-content) { position: fixed; top: 50%; left: 50%; z-index: 101; display: grid; grid-template-rows: auto auto minmax(0, 1fr); gap: 0; width: min(640px, calc(100vw - 24px)); max-height: calc(100svh - 28px); overflow: auto; padding: 22px; border: 1px solid rgba(122, 135, 255, .62); border-radius: 18px; background: linear-gradient(180deg, rgba(12, 18, 46, .98), rgba(8, 12, 33, .98)); box-shadow: 0 20px 80px rgba(0, 0, 0, .48), 0 0 34px rgba(90, 103, 255, .13); color: #f4f6ff; transform: translate(-50%, -50%); }
 	.ranking-dialog-header { position: sticky; top: -22px; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: -22px -22px 16px; padding: 18px 22px 14px; background: linear-gradient(180deg, rgba(12, 18, 46, 1), rgba(12, 18, 46, .98)); }
 	.ranking-heading { display: flex; align-items: center; min-width: 0; gap: 9px; }
 	.ranking-heading > :global(svg) { width: 22px; height: 22px; color: #aeb6ff; }
@@ -189,10 +187,8 @@
 	.ranking-skeleton-row span { height: 13px; border-radius: 7px; background: linear-gradient(90deg, rgba(174, 182, 255, .1), rgba(174, 182, 255, .25), rgba(174, 182, 255, .1)); background-size: 200% 100%; animation: ranking-shimmer 1.2s ease-in-out infinite; }
 	.ranking-skeleton-row span:first-child { width: 20px; }
 	.ranking-skeleton-row span:nth-child(2) { width: 38px; height: 38px; border-radius: 42% 58% 48% 52%; }
-	@keyframes ranking-overlay-in { from { opacity: 0; } to { opacity: 1; } }
-	@keyframes ranking-dialog-in { from { opacity: 0; transform: translate(-50%, -48%) scale(.985); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
 	@keyframes ranking-shimmer { to { background-position: -200% 0; } }
-	@media (prefers-reduced-motion: reduce) { :global(.ranking-dialog-overlay), :global(.ranking-dialog-content) { animation: none; } .ranking-skeleton-row span { animation: none; } }
+	@media (prefers-reduced-motion: reduce) { .ranking-skeleton-row span { animation: none; } }
 	@media (max-width: 540px) { :global(.ranking-dialog-content) { padding: 16px; } .ranking-dialog-header { top: -16px; margin: -16px -16px 14px; padding: 15px 16px 12px; } .ranking-row { grid-template-columns: 24px 34px minmax(0, 1fr) auto; gap: 7px; padding: 9px 8px; } .ranking-row :global(.ranking-avatar.avatar) { width: 34px; height: 34px; } .ranking-value { max-width: 82px; font-size: 12px; white-space: normal; } }
 	@media (min-width: 640px) {
 		:global(.ranking-dialog-content) { grid-template-rows: auto minmax(0, 1fr); width: min(920px, calc(100vw - 48px)); }
