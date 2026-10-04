@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import sharp from 'sharp';
-import { expectIconCloseButton } from './helpers/iconCloseButton';
+import { expectDialogIconCloseButton, finishDialogEntrance, finishDialogExit } from './helpers/dialogMotion';
 import { finalizeEvent, getPublicKey, type Event as NostrEvent } from 'nostr-tools/pure';
 import { buildTagGameActionTemplate, createTagGameSchedule, finalizeTagGameState, isFreshTagGameTouchAction, parseTagGameActionEvent, parseTagGameEvent, tagGameScheduledEffectAt, TAG_GAME_KIND, TAG_GAME_RESERVATION_RECOVERY_MS, TAG_GAME_TRANSFER_COOLDOWN_MS, type TagGameState } from '../../src/lib/tagGame';
 import { MENDING_TERMINAL, TAG_GAME_TERMINAL } from '../../src/lib/fieldFacilities';
@@ -867,10 +867,8 @@ async function openTagGameTerminal(page: Page): Promise<void> {
 		if (await action.isVisible()) await action.click();
 		return dialog.isVisible();
 	}, { timeout: 10_000, message: `Expected the tag-game terminal to open from self position ${position}.` }).toBe(true);
-	const timeBeforeGeometry = await page.evaluate(() => Date.now());
-	await page.clock.runFor(16);
-	await page.clock.setSystemTime(timeBeforeGeometry);
-	await expectIconCloseButton(page.getByRole('dialog', { name: '鬼ごっこ' }).getByRole('button', { name: '閉じる' }), '閉じる');
+	await finishDialogEntrance(page, dialog);
+	await expectDialogIconCloseButton(dialog, dialog.getByRole('button', { name: '閉じる' }), '閉じる');
 }
 
 test('tag game rules stay usable across desktop and mobile terminal states', async ({ page }) => {
@@ -1482,7 +1480,7 @@ test('keeps join actions primary and equally emphasized when multiple tag-game l
 		expect(joinBackgrounds[0]).toBe(joinBackgrounds[1]);
 		for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
 			await joinerPage.setViewportSize(viewport);
-			await expectIconCloseButton(dialog.getByRole('button', { name: '閉じる' }), '閉じる');
+			await expectDialogIconCloseButton(dialog, dialog.getByRole('button', { name: '閉じる' }), '閉じる');
 			await expectButtonShape(joinButtons.nth(0));
 			await expectButtonShape(joinButtons.nth(1));
 			await expect(joinButtons.nth(0)).toBeVisible();
@@ -3256,10 +3254,7 @@ test('does not show unselected games and lets a spectator choose and clear one t
 	await expect(page.locator('[data-tag-game-hud]')).toHaveAttribute('data-tag-game-hud-id', gameBId);
 	await expect(page.locator('[data-tag-game-hud] [data-tag-game-effect]')).toContainText('所持者以外が追いかけて奪う');
 	await page.getByRole('dialog', { name: '鬼ごっこ' }).getByRole('button', { name: '閉じる' }).click();
-	const timeBeforeExit = await page.evaluate(() => Date.now());
-	await page.clock.runFor(100);
-	await page.clock.setSystemTime(timeBeforeExit);
-	await expect(page.getByRole('dialog', { name: '鬼ごっこ' })).toHaveCount(0);
+	await finishDialogExit(page.locator('.tag-game-dialog-content'));
 	await expect(page.locator('[data-tag-game-hud]')).toHaveAttribute('data-tag-game-hud-id', gameBId);
 	await openTagGameTerminal(page);
 	await expect(page.getByRole('dialog', { name: '鬼ごっこ' }).getByRole('button', { name: '観戦を解除' })).toBeVisible();

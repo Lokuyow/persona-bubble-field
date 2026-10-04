@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { expectIconCloseButton } from './helpers/iconCloseButton';
+import { expectDialogIconCloseButton } from './helpers/dialogMotion';
 import { HDKey } from '@scure/bip32';
 import { entropyToMnemonic, mnemonicToSeedSync } from '@scure/bip39';
 import { wordlist as englishWordlist } from '@scure/bip39/wordlists/english.js';
@@ -240,7 +240,7 @@ test.describe('Relay startup', () => {
 		await expect(dialog.getByRole('button', { name: /へ強化/ })).toHaveCount(0);
 
 		const closeButton = dialog.getByRole('button', { name: '閉じる', exact: true });
-		await expectIconCloseButton(closeButton, '閉じる');
+		await expectDialogIconCloseButton(dialog, closeButton, '閉じる');
 		await closeButton.click();
 		await expect(dialog).toBeHidden();
 		await expect(profileTrigger).toBeFocused();
@@ -408,7 +408,7 @@ test.describe('Relay startup', () => {
 		expect(expandedMetrics).toEqual(metrics);
 		await dialog.getByRole('button', { name: '脱出', exact: true }).scrollIntoViewIfNeeded();
 		await expect(dialog.getByRole('button', { name: '脱出', exact: true })).toBeVisible();
-		await expectIconCloseButton(dialog.getByRole('button', { name: '閉じる' }), '閉じる');
+		await expectDialogIconCloseButton(dialog, dialog.getByRole('button', { name: '閉じる' }), '閉じる');
 	});
 
 	test('places the ActionDock controls below the editor on mobile', async ({ page }) => {
@@ -798,7 +798,19 @@ test('opens an active field participant profile by pubkey and renders only match
 	expect(dialogGeometry!.x + dialogGeometry!.width).toBeLessThanOrEqual(viewportSize!.width);
 	expect(dialogGeometry!.y + dialogGeometry!.height).toBeLessThanOrEqual(viewportSize!.height);
 	expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+	await page.evaluate(() => {
+		(document as Document & { __profileExitText?: string }).__profileExitText = '';
+		document.addEventListener('transitionrun', (event) => {
+			if (!(event.target instanceof HTMLElement) || !event.target.matches('.profile-dialog-content[data-ending-style]')) return;
+			(document as Document & { __profileExitText?: string }).__profileExitText = event.target.textContent ?? '';
+		}, true);
+	});
 	await dialog.getByRole('button', { name: '閉じる', exact: true }).click();
+	await expect.poll(() => page.evaluate(() => (document as Document & { __profileExitText?: string }).__profileExitText ?? '')).not.toBe('');
+	const exitPresentationText = await page.evaluate(() => (document as Document & { __profileExitText?: string }).__profileExitText ?? '');
+	for (const expectedText of [otherCharacter.name, otherCharacter.about, '人生 #2', `${expectedProfilePoints} pt`, 'コンテキスト容量', '678 RP']) {
+		expect(exitPresentationText).toContain(expectedText);
+	}
 	await expect(dialog).toHaveCount(0);
 	await expect.poll(async () => {
 		const state = await relayState(page);
