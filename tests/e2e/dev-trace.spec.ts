@@ -2,6 +2,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { installFieldFrameSampling, sampleRenderedField } from './helpers/fieldFrames';
 import { openDevTraceWorld, openDevWorld, fieldOwnedBlankPoint, installTraceGeometryFrameSampling, sampleTraceGeometryFrames, profileTrigger, profileDialog, blankCellPoint } from './helpers/devWorldHarness';
+import { finishDialogExit } from './helpers/dialogMotion';
 
 
 test.describe('DEV World Sandbox', () => {
@@ -212,11 +213,17 @@ test.describe('DEV World Sandbox', () => {
 		const profileBox = await profile.boundingBox();
 		const contentBox = await content.boundingBox();
 		if (!profileBox || !contentBox) throw new Error('Expected full reply interaction regions.');
+		const settledBackground = (button: Locator) => button.evaluate(async (element) => {
+			// Read after the CSS transition settles; the test compares final hover states, not interpolated frames.
+			void getComputedStyle(element).backgroundColor;
+			await Promise.all(element.getAnimations().map((animation) => animation.finished.catch(() => undefined)));
+			return getComputedStyle(element).backgroundColor;
+		});
 		await page.mouse.move(contentBox.x + contentBox.width / 2, contentBox.y + 1);
-		const contentHoverBackground = await content.evaluate((button) => getComputedStyle(button).backgroundColor);
+		const contentHoverBackground = await settledBackground(content);
 		expect(contentHoverBackground).not.toBe(layout.contentBackground);
 		await page.mouse.move(profileBox.x + profileBox.width / 2, profileBox.y + profileBox.height / 2);
-		const profileHoverBackground = await profile.evaluate((button) => getComputedStyle(button).backgroundColor);
+		const profileHoverBackground = await settledBackground(profile);
 		expect(profileHoverBackground).not.toBe(layout.profileBackground);
 		expect(profileHoverBackground).toBe(contentHoverBackground);
 		await profile.focus();
@@ -459,6 +466,7 @@ test.describe('DEV World Sandbox', () => {
 			await page.locator(`[data-trace-role="child"][data-trace-reply-id="${'f'.repeat(64)}"]`).getByRole('button', { name: /プロフィール/ }).click();
 			await expect(profileDialog(page)).toBeVisible();
 			await page.keyboard.press('Escape');
+			await finishDialogExit(profileDialog(page), false);
 			const grandchild = page.locator(`[data-trace-reply-id="${'f'.repeat(64)}"]`);
 			const grandchildGeometry = await grandchild.evaluate((card) => {
 				const content = card.querySelector<HTMLElement>('.trace-reply-content-button');
