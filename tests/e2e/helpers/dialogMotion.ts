@@ -35,8 +35,23 @@ export async function finishDialogExit(dialog: Locator, clockIsPaused = true): P
 	await page.clock.setSystemTime(fixedNow);
 }
 
-/** Finish a Bits UI entrance frame without changing the caller's clock state. */
-export async function finishDialogEntrance(dialog: Locator): Promise<void> {
+/** Finish a Bits UI entrance frame, preserving a paused fake game's Date when requested. */
+export async function finishDialogEntrance(dialog: Locator, clockIsPaused = false): Promise<void> {
+	const page = dialog.page();
+	if (clockIsPaused) {
+		const fixedNow = await page.evaluate(() => Date.now());
+		await page.clock.setFixedTime(fixedNow);
+		await page.clock.resume();
+		await page.clock.setFixedTime(fixedNow);
+		await finishEntranceFrame(dialog);
+		await page.clock.pauseAt(fixedNow);
+		await page.clock.setSystemTime(fixedNow);
+		return;
+	}
+	await finishEntranceFrame(dialog);
+}
+
+async function finishEntranceFrame(dialog: Locator): Promise<void> {
 	await dialog.evaluate(async (element) => {
 		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 		const animations = element.getAnimations();

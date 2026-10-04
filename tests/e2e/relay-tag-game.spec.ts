@@ -845,7 +845,7 @@ test('rebases hidden-tab game audio cues on resume and keeps the resumed pulse a
 	expect((await recordedTagGameSounds(page)).filter((duration) => Math.abs(duration - 0.52) < 0.001)).toHaveLength(endSoundCount);
 });
 
-async function openTagGameTerminal(page: Page): Promise<void> {
+async function openTagGameTerminal(page: Page, clockIsPaused = false): Promise<void> {
 	const facility = page.locator('[data-field-facility="tag-game-terminal"]');
 	await expect(facility.locator('img')).toHaveAttribute('src', /field\/objects\/tag-game-terminal\.webp$/);
 	await expect(facility).not.toContainText('鬼');
@@ -867,7 +867,7 @@ async function openTagGameTerminal(page: Page): Promise<void> {
 		if (await action.isVisible()) await action.click();
 		return dialog.isVisible();
 	}, { timeout: 10_000, message: `Expected the tag-game terminal to open from self position ${position}.` }).toBe(true);
-	await finishDialogEntrance(dialog);
+	await finishDialogEntrance(dialog, clockIsPaused);
 	await expectDialogIconCloseButton(dialog, dialog.getByRole('button', { name: '閉じる' }), '閉じる');
 }
 
@@ -3253,14 +3253,14 @@ test('does not show unselected games and lets a spectator choose and clear one t
 	await expect(page.locator('[data-tag-game-hud]')).toHaveCount(0);
 	await expect(page.locator('.participant[data-tag-game-role]')).toHaveCount(0);
 
-	await openTagGameTerminal(page);
+	await openTagGameTerminal(page, true);
 	await page.locator(`[data-tag-game-watch="${gameBId}"]`).click();
 	await expect(page.locator('[data-tag-game-hud]')).toHaveAttribute('data-tag-game-hud-id', gameBId);
 	await expect(page.locator('[data-tag-game-hud] [data-tag-game-effect]')).toContainText('所持者以外が追いかけて奪う');
 	await page.getByRole('dialog', { name: '鬼ごっこ' }).getByRole('button', { name: '閉じる' }).click();
 	await finishDialogExit(page.locator('.tag-game-dialog-content'));
 	await expect(page.locator('[data-tag-game-hud]')).toHaveAttribute('data-tag-game-hud-id', gameBId);
-	await openTagGameTerminal(page);
+	await openTagGameTerminal(page, true);
 	await expect(page.getByRole('dialog', { name: '鬼ごっこ' }).getByRole('button', { name: '観戦を解除' })).toBeVisible();
 	const watchedGame = parseTagGameEvent(gameB, CHANNEL_ID)!.state;
 	const desktopHud = page.locator('[data-tag-game-hud]');
