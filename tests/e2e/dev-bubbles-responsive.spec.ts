@@ -184,15 +184,16 @@ test.describe('DEV World Sandbox', () => {
 				const avatar = participant.querySelector<HTMLElement>('.avatar');
 				const participantId = participant.dataset.participantId;
 				const bubble = bubbles.find((candidate) => candidate.dataset.bubbleParticipantId === participantId);
+				const visual = bubble?.querySelector<HTMLElement>('.bubble-visual');
 				const tail = document.querySelector<SVGPolygonElement>(`.tail-layer polygon[data-tail-participant-id="${participantId}"]`);
 				const outline = document.querySelector<SVGPathElement>(`.tail-layer path[data-tail-participant-id="${participantId}"]`);
-				if (!avatar || !bubble || !tail || !outline) throw new Error('Expected participant color elements');
+				if (!avatar || !bubble || !visual || !tail || !outline) throw new Error('Expected participant color elements');
 				const tone = [...bubble.classList].find((className) => className.startsWith('tone-'))?.slice(5);
 				return {
 					avatarTone: [...avatar.classList].find((className) => className.startsWith('avatar-'))?.slice(7),
 					bubbleTone: tone,
-					bubbleBackground: getComputedStyle(bubble).backgroundColor,
-					bubbleOutline: getComputedStyle(bubble).borderTopColor,
+					bubbleBackground: getComputedStyle(visual).backgroundColor,
+					bubbleOutline: getComputedStyle(visual).borderTopColor,
 					tailFill: getComputedStyle(tail).fill,
 					tailOutline: getComputedStyle(outline).stroke,
 					connectionBackground: getComputedStyle(bubble, '::after').backgroundColor
@@ -277,11 +278,14 @@ test.describe('DEV World Sandbox', () => {
 		await page.goto('/?devWorld=1&devScenario=speech-long');
 		await expect(page.getByLabel('DEV sandbox controls')).toBeVisible();
 		const readNormalStyle = () => page.locator('.bubble-normal').first().evaluate((element) => {
-			const style = getComputedStyle(element);
+			const hostStyle = getComputedStyle(element);
+			const visual = element.querySelector<HTMLElement>('.bubble-visual');
+			if (!visual) throw new Error('Expected normal bubble visual surface.');
+			const visualStyle = getComputedStyle(visual);
 			return {
-				fontSize: style.fontSize,
-				maxWidth: Number.parseFloat(style.maxWidth.match(/[\d.]+px/)?.[0] ?? 'NaN'),
-				padding: style.padding,
+				fontSize: visualStyle.fontSize,
+				maxWidth: Number.parseFloat(hostStyle.maxWidth.match(/[\d.]+px/)?.[0] ?? 'NaN'),
+				padding: visualStyle.padding,
 				width: element.getBoundingClientRect().width
 			};
 		});
@@ -311,8 +315,11 @@ test.describe('DEV World Sandbox', () => {
 			await page.goto(`/?devWorld=1&devScenario=${fixture.query}`);
 			await expect(page.locator('.bubble-merged')).toHaveAttribute('data-merged-members', String(fixture.count));
 			const style = await page.locator('.bubble-merged').evaluate((element) => {
-				const computed = getComputedStyle(element);
-				return { fontSize: computed.fontSize, minWidth: computed.minWidth, maxWidth: Number.parseFloat(computed.maxWidth.match(/[\d.]+px/)?.[0] ?? 'NaN'), padding: computed.padding, width: element.getBoundingClientRect().width, height: element.getBoundingClientRect().height };
+				const hostStyle = getComputedStyle(element);
+				const visual = element.querySelector<HTMLElement>('.bubble-visual');
+				if (!visual) throw new Error('Expected merged bubble visual surface.');
+				const visualStyle = getComputedStyle(visual);
+				return { fontSize: visualStyle.fontSize, minWidth: hostStyle.minWidth, maxWidth: Number.parseFloat(hostStyle.maxWidth.match(/[\d.]+px/)?.[0] ?? 'NaN'), padding: visualStyle.padding, width: element.getBoundingClientRect().width, height: element.getBoundingClientRect().height };
 			});
 			expect(style).toMatchObject({ fontSize: fixture.fontSize, minWidth: fixture.minWidth, maxWidth: Number.parseFloat(fixture.maxWidth), padding: fixture.padding });
 			expect(style.width).toBeLessThanOrEqual(Number.parseFloat(fixture.maxWidth));

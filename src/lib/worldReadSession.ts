@@ -809,7 +809,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 		}).catch(() => {
 			return 'failed' as const;
 		});
-		traceStartupReadiness = startTraceNotification();
+		if (selfSigner) traceStartupReadiness = startTraceNotification();
 	}
 
 	function traceNotificationConfig() {
@@ -1942,7 +1942,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			refreshTraceReadSnapshot();
 			void recoverManualTraceOutbox();
 			if (bootstrapComplete) {
-				traceStartupReadiness = startTraceNotification();
+				if (!traceNotificationStartup) traceStartupReadiness = startTraceNotification();
 				if (options.realtime?.registry.length && options.realtime.startImmediately !== false) void startRealtimeSubscription();
 			}
 		},
@@ -1952,7 +1952,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			bootstrapComplete = true;
 			const buffered = pendingLiveEvents.splice(0);
 			for (const event of buffered) receiveLive(event);
-			if (selfSigner && !traceStartupReadiness) {
+			if (selfSigner && !traceNotificationStartup) {
 				traceStartupReadiness = startTraceNotification();
 				if (options.realtime?.registry.length && options.realtime.startImmediately !== false) void startRealtimeSubscription();
 			}

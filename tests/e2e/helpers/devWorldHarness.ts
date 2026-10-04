@@ -36,7 +36,9 @@ export async function readMergedBubbleGeometry(page: Page, memberPrefixes: reado
 	return page.locator('.bubble-merged').evaluate((bubble, prefixes) => {
 		const mergedMemberIds = new Set(prefixes.map((prefix) => prefix.repeat(64)));
 		const rect = bubble.getBoundingClientRect();
-		const style = getComputedStyle(bubble);
+		const visual = bubble.querySelector<HTMLElement>('.bubble-visual');
+		if (!visual) throw new Error('Expected merged bubble visual surface.');
+		const visualStyle = getComputedStyle(visual);
 		const polygons = [...document.querySelectorAll<SVGPolygonElement>('.tail-layer polygon')]
 			.filter((polygon) => mergedMemberIds.has(polygon.dataset.tailParticipantId ?? ''));
 		const tailStarts = polygons.map((polygon) => {
@@ -66,14 +68,14 @@ export async function readMergedBubbleGeometry(page: Page, memberPrefixes: reado
 			memberCount: Number(bubble.dataset.mergedMembers),
 			width: rect.width,
 			height: rect.height,
-			fontSize: Number.parseFloat(style.fontSize),
-			paddingLeft: Number.parseFloat(style.paddingLeft),
+			fontSize: Number.parseFloat(visualStyle.fontSize),
+			paddingLeft: Number.parseFloat(visualStyle.paddingLeft),
 			tailStarts,
 			tailStartXs: tailStarts.map((point) => point.x),
 			connectionMasks,
 			tailOutlineCount: document.querySelectorAll('.tail-layer path[data-tail-participant-id]').length,
-			borderRadius: style.borderRadius,
-			background: style.backgroundColor
+			borderRadius: visualStyle.borderRadius,
+			background: visualStyle.backgroundColor
 		};
 	}, memberPrefixes);
 }
