@@ -16,6 +16,7 @@ import {
 } from '../../src/lib/nostrProtocol';
 import { buildRealtimeControlEventTemplate, finalizeRealtimeEvent } from '../../src/lib/realtimeEvents';
 import { SPEECH_SHORTCUT_IDS } from '../../src/lib/speechSubmission';
+import { formatElapsedDuration } from '../../src/lib/lifespanHud';
 import { characterPicturePath } from '../../src/lib/character';
 import { requireCharacterFromPubkey, resolveCharacterFromPubkey } from '../../src/lib/characterAssignment';
 import { deriveBip85NostrEntropy } from '../../src/lib/bip85';
@@ -373,8 +374,58 @@ test.describe('Relay startup', () => {
 		}
 		await page.setViewportSize({ width: 1280, height: 800 });
 		const beforeMendingReward = await publishedWorldStateCount();
-		const assertCollectionLayout = async (viewport: { width: number; height: number }, expectedPoints: number) => {
+		const assertCollectionLayout = async (viewport: { width: number; height: number }, expectedPoints: number, reducedMotion = false) => {
 			await page.setViewportSize(viewport);
+			if (reducedMotion) await page.emulateMedia({ reducedMotion: 'reduce' });
+			await page.evaluate(() => {
+					const dialog = document.querySelector<HTMLElement>('.mending-dialog-content')!;
+					const rewardLayer = document.querySelector<HTMLElement>('.mending-reward-layer')!;
+					const pointsCard = dialog.querySelector<HTMLElement>('.result-card[data-mending-icon="coins"]')!;
+					const wallet = dialog.querySelector<SVGElement>('[data-mending-icon="wallet"] svg')!;
+					const pointsValue = dialog.querySelector<HTMLElement>('.owned-points-value')!;
+					const observation = {
+						baselineBorder: getComputedStyle(pointsCard).borderColor,
+						baselineWallet: getComputedStyle(wallet).color,
+						baselinePoints: getComputedStyle(pointsValue).color,
+						sawSummary: false,
+						sawBorderEmphasis: false,
+						sawWalletEmphasis: false,
+						sawMotionTransform: false,
+						finalInlineStyles: [] as string[],
+					done: false
+					};
+					const observedWindow = window as typeof window & {
+						__mendingRewardObservation?: typeof observation;
+					};
+					observedWindow.__mendingRewardObservation = observation;
+					let summaryRef: HTMLElement | null = null;
+					let burstRef: SVGElement | null = null;
+					let ringRef: SVGElement | null = null;
+					const hasTransform = (element: HTMLElement | SVGElement): boolean => {
+						const style = getComputedStyle(element);
+						return element.style.transform !== '' || element.style.scale !== '' || element.style.translate !== '' || element.style.rotate !== '' ||
+							style.transform !== 'none' || (style.scale !== 'none' && style.scale !== '1') || style.translate !== 'none' || style.rotate !== 'none';
+					};
+					const sample = () => {
+						observation.sawBorderEmphasis ||= getComputedStyle(pointsCard).borderColor !== observation.baselineBorder;
+						observation.sawWalletEmphasis ||= getComputedStyle(wallet).color !== observation.baselineWallet || getComputedStyle(pointsValue).color !== observation.baselinePoints;
+						const summary = rewardLayer.querySelector<HTMLElement>('.reward-summary');
+						const burst = rewardLayer.querySelector<SVGElement>('.reward-burst-rays');
+						const ring = rewardLayer.querySelector<SVGElement>('.reward-burst-ring');
+						if (summary && burst && ring) {
+							summaryRef = summary;
+							burstRef = burst;
+							ringRef = ring;
+							observation.sawSummary = true;
+							observation.sawMotionTransform ||= hasTransform(summary) || hasTransform(burst) || hasTransform(ring) || hasTransform(wallet);
+						} else if (observation.sawSummary) {
+							observation.finalInlineStyles = [pointsCard, pointsValue, wallet, summaryRef, burstRef, ringRef].map((element) => element?.style.cssText ?? 'missing');
+							observation.done = true;
+						}
+						if (!observation.done) requestAnimationFrame(sample);
+					};
+					requestAnimationFrame(sample);
+			});
 			const dialog = page.getByRole('dialog');
 			const collect = dialog.getByRole('button', { name: '成果を受け取る' });
 			const readLayout = () => dialog.evaluate((element) => {
@@ -392,26 +443,85 @@ test.describe('Relay startup', () => {
 				};
 			});
 			const before = await readLayout();
+			const stateBefore = await readRelayGameState(page);
 			await collect.click();
 			await expect.poll(async () => {
 				const current = await readRelayGameState(page);
 				return current.points;
 			}).toBe(expectedPoints);
+			const stateAfter = await readRelayGameState(page);
+			const collectedPoints = stateAfter.points - stateBefore.points;
+			const materializedLifespan = Math.max(0, stateAfter.lifespanExpiresAtMs - stateBefore.lifespanExpiresAtMs);
+			const rewardSummary = page.locator('.mending-reward-layer .reward-summary');
+			await expect(rewardSummary).toBeVisible();
+			await expect(rewardSummary.locator('.reward-summary-title')).toHaveText('成果を受け取りました');
+			await expect(rewardSummary.locator('.reward-summary-points')).toHaveText(`+${collectedPoints} pt`);
+			const rewardStatus = dialog.locator('[role="status"][aria-live="polite"]');
+			await expect(rewardStatus).toContainText(`成果を受け取りました。${collectedPoints}ポイント。`);
+			if (materializedLifespan > 0) {
+				const formattedLifespan = formatElapsedDuration(materializedLifespan);
+				await expect(rewardSummary.locator('.reward-summary-lifespan')).toHaveText(`寿命延長 +${formattedLifespan}`);
+				await expect(rewardSummary.locator('.reward-summary-support')).toHaveText('作業中に反映済み');
+				await expect(rewardStatus).toContainText(`寿命延長 +${formattedLifespan}は作業中に反映済みです。`);
+			} else {
+				await expect(rewardSummary.locator('.reward-summary-lifespan')).toHaveCount(0);
+			}
+			const rewardLayerState = await page.locator('.mending-reward-layer').evaluate((layer) => ({
+				pointerEvents: getComputedStyle(layer).pointerEvents,
+				overflow: getComputedStyle(layer).overflow
+			}));
+			expect(rewardLayerState).toEqual({ pointerEvents: 'none', overflow: 'hidden' });
 			const pointsCard = dialog.locator('.result-card[data-mending-icon="coins"]');
 			const lifespanCard = dialog.locator('.result-card[data-mending-icon="heart"]');
 			await expect(pointsCard.locator('.result-label')).toHaveText('未回収ポイント');
 			await expect(pointsCard.locator('.result-copy')).toBeVisible();
 			await expect(lifespanCard.locator('.result-label')).toHaveText('寿命延長');
 			await expect(lifespanCard.locator('.result-support')).toHaveText('作業中に反映');
-			await expect(pointsCard).toHaveClass(/success-flash/);
-			await expect(lifespanCard).toHaveClass(/success-flash/);
 			expect(await readLayout()).toEqual(before);
 			const horizontalOverflow = await dialog.evaluate((element) => element.scrollWidth > element.clientWidth || document.documentElement.scrollWidth > innerWidth);
 			expect(horizontalOverflow).toBe(false);
 			await expect(collect).toBeDisabled();
 			expect(await readLayout()).toEqual(before);
+			let observation = await page.evaluate(() => (window as typeof window & { __mendingRewardObservation?: { done: boolean; sawMotionTransform: boolean } }).__mendingRewardObservation);
+			if (reducedMotion) {
+				while (!observation?.done) {
+					await page.clock.runFor(16);
+					observation = await page.evaluate(() => (window as typeof window & { __mendingRewardObservation?: { done: boolean; sawMotionTransform: boolean } }).__mendingRewardObservation);
+				}
+			} else {
+				while (!observation?.sawMotionTransform) {
+					await page.clock.runFor(16);
+					observation = await page.evaluate(() => (window as typeof window & { __mendingRewardObservation?: { done: boolean; sawMotionTransform: boolean } }).__mendingRewardObservation);
+				}
+			}
+			const feedback = await page.evaluate(() => (window as typeof window & {
+				__mendingRewardObservation?: {
+					sawSummary: boolean;
+					sawBorderEmphasis: boolean;
+					sawWalletEmphasis: boolean;
+					sawMotionTransform: boolean;
+					finalInlineStyles: string[];
+				};
+			}).__mendingRewardObservation);
+			expect(feedback?.sawSummary).toBe(true);
+			expect(feedback?.sawBorderEmphasis).toBe(true);
+			expect(feedback?.sawWalletEmphasis).toBe(true);
+			expect(feedback?.sawMotionTransform).toBe(!reducedMotion);
+			if (reducedMotion) {
+				expect(feedback?.finalInlineStyles).toEqual(['', '', '', '', '', '']);
+				await expect(rewardSummary).toHaveCount(0);
+			}
 		};
 		await assertCollectionLayout({ width: 1280, height: 800 }, 1);
+		const firstRewardDialog = page.getByRole('dialog');
+		await firstRewardDialog.getByRole('button', { name: '閉じる', exact: true }).click();
+		await finishDialogExit(firstRewardDialog);
+		await expect(terminal).toBeFocused();
+		await terminal.click();
+		const reopenedRewardDialog = page.getByRole('dialog');
+		await expect(reopenedRewardDialog).toContainText('1 pt');
+		await expect(page.locator('.mending-reward-layer .reward-summary')).toHaveCount(0);
+		await expect(reopenedRewardDialog.locator('[role="status"][aria-live="polite"]')).toHaveCount(0);
 		await expect.poll(async () => {
 			const partialState = await readRelayGameState(page);
 			return partialState.points === 1 && partialState.pointProgressTicks > 0 && partialState.pointProgressTicks < 60_000_000;
@@ -467,11 +577,41 @@ test.describe('Relay startup', () => {
 		await expect(page.getByRole('dialog')).toContainText('+5 pt');
 		await expect(page.getByRole('dialog')).not.toContainText('次の1ptまで');
 		await expect(page.getByRole('dialog').locator('[data-mending-icon="coins"] .next-point')).toHaveClass(/next-point-hidden/);
-		await page.getByRole('button', { name: '成果を受け取る' }).click();
+		await page.evaluate(() => {
+			let release: (() => void) | null = null;
+			let started = false;
+			(window as typeof window & {
+				__personaBubbleFieldTestHooks: {
+					started: () => boolean;
+					release: () => void;
+					beforeMendingMutation: (operation: 'start' | 'collect') => Promise<void>;
+				};
+			}).__personaBubbleFieldTestHooks = {
+				started: () => started,
+				release: () => { release?.(); release = null; },
+				beforeMendingMutation: async (operation) => {
+					if (operation !== 'collect') return;
+					started = true;
+					await new Promise<void>((resolve) => { release = resolve; });
+				}
+			};
+		});
+		const delayedCollectDialog = page.getByRole('dialog');
+		await delayedCollectDialog.getByRole('button', { name: '成果を受け取る' }).click();
+		await expect.poll(() => page.evaluate(() => (window as typeof window & { __personaBubbleFieldTestHooks: { started(): boolean } }).__personaBubbleFieldTestHooks.started())).toBe(true);
+		await delayedCollectDialog.getByRole('button', { name: '閉じる', exact: true }).click();
+		await finishDialogExit(delayedCollectDialog);
+		await expect(terminal).toBeFocused();
+		await page.evaluate(() => (window as typeof window & { __personaBubbleFieldTestHooks: { release(): void } }).__personaBubbleFieldTestHooks.release());
 		await expect.poll(() => readRelayGameState(page)).toMatchObject({ mendingJob: expect.any(Object), points: 9, pointProgressTicks: 30_000_000 });
-		await expect(page.getByRole('dialog')).toContainText('9 pt');
-		await expect(page.getByRole('dialog')).toContainText('上限まで あと5分');
-		await expect(page.getByRole('dialog')).toContainText('+0 pt');
+		await expect(page.getByRole('dialog')).toHaveCount(0);
+		await terminal.click();
+		const reopenedAfterClosedCollection = page.getByRole('dialog');
+		await expect(reopenedAfterClosedCollection).toContainText('9 pt');
+		await expect(reopenedAfterClosedCollection).toContainText('上限まで あと5分');
+		await expect(reopenedAfterClosedCollection).toContainText('+0 pt');
+		await expect(page.locator('.mending-reward-layer .reward-summary')).toHaveCount(0);
+		await expect(reopenedAfterClosedCollection.locator('[role="status"][aria-live="polite"]')).toHaveCount(0);
 		await expect(page.locator('[data-unified-status-hud] [data-mending-status]')).toHaveAttribute('aria-label', '作業中');
 		await expect(page.locator('[data-unified-status-hud] [data-mending-status]')).toHaveAttribute('data-mending-icon', 'tool');
 		await expect(page.locator('[data-unified-status-hud] [data-mending-rate]')).toHaveText('1.00 pt/分+0.1h/h');
@@ -480,7 +620,7 @@ test.describe('Relay startup', () => {
 		expect(collected.points).toBe(9);
 		expect(collected.lifespanExpiresAtMs).toBeGreaterThan(started.lifespanExpiresAtMs);
 		expect(collected.lifespanExpiresAtMs).toBeLessThanOrEqual(started.lifespanExpiresAtMs + 6 * 60 * 1000);
-		await page.getByRole('button', { name: '閉じる', exact: true }).click();
+		await reopenedAfterClosedCollection.getByRole('button', { name: '閉じる', exact: true }).click();
 	});
 
 	test('opens the adjustment terminal only nearby and persists ability upgrades', async ({ page }) => {

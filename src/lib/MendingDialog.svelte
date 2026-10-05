@@ -1,5 +1,9 @@
 <script lang="ts">
 	import { Dialog } from 'bits-ui';
+	import { tick } from 'svelte';
+	import { createTimeline } from 'animejs/timeline';
+	import type { Scope } from 'animejs/scope';
+	import type { Timeline } from 'animejs/timeline';
 	import Coins from '~icons/tabler/coins';
 	import Clock from '~icons/tabler/clock';
 	import Heart from '~icons/tabler/heart';
@@ -12,6 +16,9 @@
 	import ActionButton from '$lib/ActionButton.svelte';
 	import type { MendingProjection } from '$lib/mending';
 	import { formatElapsedDuration, formatRemainingDuration } from '$lib/lifespanHud';
+	import { createPresentationScope } from '$lib/presentationMotion';
+
+	type CollectionFeedback = Readonly<{ id: number; points: number; lifespanMs: number }>;
 
 	type Props = Readonly<{
 		open: boolean;
@@ -21,11 +28,19 @@
 		points: number;
 		onOpenChange: (open: boolean) => void;
 		onCollect: () => void;
-		collectFeedback?: Readonly<{ id: number; points: number; lifespanMs: number }> | null;
+		collectFeedback?: CollectionFeedback | null;
 		startupFeedback?: Readonly<{ id: number; phase: 'starting' | 'started' }> | null;
 	}>;
 
 	let { open, projection, hasJob, starting = false, points: ownedPointsValue, onOpenChange, onCollect, collectFeedback = null, startupFeedback = null }: Props = $props();
+	let dialogContent = $state<HTMLElement | null>(null);
+	let rewardLayer = $state<HTMLElement | null>(null);
+	let presentationScope = $state.raw<Scope | null>(null);
+	let rewardPresentation = $state.raw<CollectionFeedback | null>(null);
+	let activeRewardTimeline: Timeline | null = null;
+	let activeRewardCleanup: (() => void) | null = null;
+	let consumedCollectFeedbackId: number | null = null;
+	let pendingCollectFeedback: Readonly<{ id: number; root: HTMLElement; scope: Scope }> | null = null;
 	let remainingDuration = $derived(formatRemainingDuration(projection?.remainingDurationMs ?? 0));
 	let lifespanDuration = $derived(formatElapsedDuration(projection?.lifespanExtensionMs ?? 0));
 	let unclaimedPoints = $derived(String(projection?.points ?? 0));
@@ -48,12 +63,175 @@
 		event.preventDefault();
 		action.focus();
 	}
+
+	function clearRewardPresentation(clearSnapshot = true): void {
+		const timeline = activeRewardTimeline;
+		const cleanup = activeRewardCleanup;
+		activeRewardTimeline = null;
+		activeRewardCleanup = null;
+		if (timeline) timeline.revert();
+		cleanup?.();
+		if (clearSnapshot) rewardPresentation = null;
+	}
+
+	function announceCollection(feedback: CollectionFeedback): string {
+		const lifespan = feedback.lifespanMs > 0
+			? ` 寿命延長 +${formatElapsedDuration(feedback.lifespanMs)}は作業中に反映済みです。`
+			: '';
+		return `成果を受け取りました。${feedback.points}ポイント。${lifespan}`;
+	}
+
+	$effect(() => {
+		const root = dialogContent;
+		if (!root) return;
+
+		const scope = createPresentationScope(root);
+		presentationScope = scope;
+		scope.add(() => () => clearRewardPresentation());
+		scope.add('playCollectionReward', () => {
+			clearRewardPresentation(false);
+			const feedback = rewardPresentation;
+			const layer = rewardLayer;
+			const summary = layer?.querySelector<HTMLElement>('.reward-summary');
+			const burst = layer?.querySelector<SVGElement>('.reward-burst-rays');
+			const ring = layer?.querySelector<SVGElement>('.reward-burst-ring');
+			const wallet = root.querySelector<SVGElement>('[data-mending-icon="wallet"] svg');
+			const pointsValue = root.querySelector<HTMLElement>('.owned-points-value');
+			const pointsCard = root.querySelector<HTMLElement>('.result-card[data-mending-icon="coins"]');
+			const lifespanCard = feedback?.lifespanMs ? root.querySelector<HTMLElement>('.result-card[data-mending-icon="heart"]') : null;
+			if (!feedback || !open || dialogContent !== root || !layer || !summary || !burst || !ring || !wallet || !pointsValue || !pointsCard) return;
+
+			const reducedMotion = scope.matches.reducedMotion;
+			const timeline = createTimeline({
+				autoplay: false,
+				defaults: { duration: 820, ease: 'out(3)' },
+				onComplete: () => {
+					if (activeRewardTimeline !== timeline || rewardPresentation?.id !== feedback.id) return;
+					clearRewardPresentation();
+				}
+			});
+			const pointsBorder = getComputedStyle(pointsCard).borderColor;
+			const lifespanBorder = lifespanCard ? getComputedStyle(lifespanCard).borderColor : null;
+
+			timeline.add(summary, {
+				keyframes: reducedMotion
+					? { '0%': { opacity: 0 }, '100%': { opacity: 1 } }
+					: {
+							'0%': { opacity: 0, scale: 0.86, translateY: '8px' },
+							'55%': { opacity: 1, scale: 1.04, translateY: '0px' },
+							'100%': { opacity: 1, scale: 1 }
+						}
+			}, 0);
+			timeline.add(burst, reducedMotion
+				? { opacity: { from: 0, to: 0.8 } }
+				: { opacity: { from: 0, to: 0.8 }, scale: { from: 0.55, to: 1 } }, 0);
+			timeline.add(ring, reducedMotion
+				? { opacity: { from: 0, to: 0.9 } }
+				: { opacity: { from: 0, to: 0.9 }, scale: { from: 0.7, to: 1.12 } }, 0);
+			timeline.add(wallet, reducedMotion
+				? { keyframes: { '0%': { color: '#35e3e8' }, '45%': { color: '#b9ffff' }, '100%': { color: '#35e3e8' } } }
+				: { keyframes: { '0%': { color: '#35e3e8', scale: 1 }, '45%': { color: '#b9ffff', scale: 1.2 }, '100%': { color: '#35e3e8', scale: 1 } } }, 0);
+			timeline.add(pointsValue, {
+				keyframes: { '0%': { color: '#ecfbff' }, '40%': { color: '#64f5f0' }, '100%': { color: '#ecfbff' } }
+			}, 0);
+			timeline.add(pointsCard, {
+				keyframes: {
+					'0%': { borderColor: pointsBorder, boxShadow: 'none' },
+					'40%': { borderColor: '#64f5f0', boxShadow: '0 0 0 2px rgba(53, 227, 232, .4), 0 0 24px rgba(53, 227, 232, .34)' },
+					'100%': { borderColor: pointsBorder, boxShadow: 'none' }
+				}
+			}, 0);
+			if (lifespanCard && lifespanBorder) {
+				timeline.add(lifespanCard, {
+					keyframes: {
+						'0%': { borderColor: lifespanBorder, boxShadow: 'none' },
+						'40%': { borderColor: '#64f5f0', boxShadow: '0 0 0 2px rgba(53, 227, 232, .4), 0 0 24px rgba(53, 227, 232, .34)' },
+						'100%': { borderColor: lifespanBorder, boxShadow: 'none' }
+					}
+				}, 0);
+			}
+			timeline.add(summary, { opacity: { from: 1, to: 0 }, duration: 180 }, 640);
+			timeline.add(burst, { opacity: { from: 0.8, to: 0 }, duration: 240 }, 580);
+
+			const styleTargets = [
+				{ element: summary, properties: ['opacity', 'transform'] },
+				{ element: burst, properties: ['opacity', 'transform'] },
+				{ element: ring, properties: ['opacity', 'transform'] },
+				{ element: wallet, properties: ['color', 'transform'] },
+				{ element: pointsValue, properties: ['color'] },
+				{ element: pointsCard, properties: ['border-color', 'box-shadow'] },
+				...(lifespanCard ? [{ element: lifespanCard, properties: ['border-color', 'box-shadow'] }] : [])
+			].flatMap(({ element, properties }) => properties.map((property) => ({
+				element,
+				property,
+				value: element.style.getPropertyValue(property),
+				priority: element.style.getPropertyPriority(property)
+			})));
+			activeRewardCleanup = () => {
+				for (const { element, property, value, priority } of styleTargets) {
+					if (value) element.style.setProperty(property, value, priority);
+					else element.style.removeProperty(property);
+				}
+			};
+			activeRewardTimeline = timeline;
+			timeline.play();
+		});
+
+		return () => {
+			clearRewardPresentation();
+			scope.revert();
+			if (presentationScope === scope) presentationScope = null;
+		};
+	});
+
+	$effect(() => {
+		if (open) return;
+		if (pendingCollectFeedback) consumedCollectFeedbackId = pendingCollectFeedback.id;
+		pendingCollectFeedback = null;
+		clearRewardPresentation();
+	});
+
+	$effect(() => {
+		const feedback = collectFeedback;
+		const root = dialogContent;
+		const scope = presentationScope;
+		if (!feedback || consumedCollectFeedbackId === feedback.id || pendingCollectFeedback?.id === feedback.id) return;
+		if (!open || !root || !scope) {
+			consumedCollectFeedbackId = feedback.id;
+			return;
+		}
+		if (pendingCollectFeedback && pendingCollectFeedback.id !== feedback.id) {
+			consumedCollectFeedbackId = pendingCollectFeedback.id;
+			pendingCollectFeedback = null;
+		}
+
+		const pending = { id: feedback.id, root, scope };
+		pendingCollectFeedback = pending;
+		void tick().then(() => {
+			if (pendingCollectFeedback !== pending) return;
+			pendingCollectFeedback = null;
+			consumedCollectFeedbackId = feedback.id;
+			if (!open || dialogContent !== pending.root || presentationScope !== pending.scope || collectFeedback?.id !== feedback.id) return;
+
+			clearRewardPresentation();
+			rewardPresentation = Object.freeze({ ...feedback });
+			const snapshot = rewardPresentation;
+			void tick().then(() => {
+				if (rewardPresentation !== snapshot) return;
+				if (!open || dialogContent !== pending.root || presentationScope !== pending.scope) {
+					clearRewardPresentation();
+					return;
+				}
+				pending.scope.methods.playCollectionReward();
+			});
+		});
+	});
 </script>
 
 <Dialog.Root bind:open={() => open, onOpenChange}>
 	<Dialog.Portal>
 			<Dialog.Overlay class="mending-dialog-overlay" />
-			<Dialog.Content class="mending-dialog-content" preventScroll={false} onOpenAutoFocus={focusFirstAction}>
+			<Dialog.Content bind:ref={dialogContent} class="mending-dialog-content" preventScroll={false} onOpenAutoFocus={focusFirstAction}>
 				<div class="terminal-dialog-header">
 					<div>
 						<Dialog.Title class="mending-dialog-title">
@@ -62,12 +240,15 @@
 						</Dialog.Title>
 						<Dialog.Description class="sr-only">時間の経過でポイントが蓄積し、寿命延長は作業の進行中に反映されます。</Dialog.Description>
 					</div>
-					<div class:points-highlight={collectFeedback} class="owned-points" data-mending-icon="wallet" aria-label={`所持ポイント ${ownedPoints} pt`}>
+					<div class="owned-points" data-mending-icon="wallet" aria-label={`所持ポイント ${ownedPoints} pt`}>
 						<Wallet aria-hidden="true" />
 						<span class="owned-points-value">{ownedPoints} pt</span>
 					</div>
 					<Dialog.Close class="action-button action-button-tertiary action-button-close" aria-label="閉じる"><X aria-hidden="true" /></Dialog.Close>
 				</div>
+				{#if rewardPresentation}
+					<div class="sr-only" role="status" aria-live="polite" aria-atomic="true">{announceCollection(rewardPresentation)}</div>
+				{/if}
 				{#if startupFeedback}
 					{#key startupFeedback.id}
 						<div class="mending-startup-feedback" aria-live="polite" aria-atomic="true">
@@ -77,7 +258,7 @@
 				{/if}
 				{#if hasJob || starting}
 					<section class="result-list" aria-label="作業の成果">
-						<div class:success-flash={collectFeedback} class="result-card" data-mending-icon="coins">
+						<div class="result-card" data-mending-icon="coins">
 							<Coins aria-hidden="true" />
 							<div class="result-copy">
 								<span class="result-label">未回収ポイント</span>
@@ -87,7 +268,7 @@
 								</span>
 							</div>
 						</div>
-						<div class:success-flash={collectFeedback} class="result-card" data-mending-icon="heart">
+						<div class="result-card" data-mending-icon="heart">
 							<Heart aria-hidden="true" />
 							<div class="result-copy">
 								<span class="result-label">寿命延長</span>
@@ -117,25 +298,54 @@
 					</section>
 				{/if}
 			</Dialog.Content>
+			<div class="mending-reward-layer" bind:this={rewardLayer} aria-hidden="true">
+				{#if rewardPresentation}
+					<div class="reward-burst-anchor">
+						<svg class="reward-burst" viewBox="0 0 240 240" focusable="false">
+							<g class="reward-burst-rays" fill="#64f5f0" stroke="#64f5f0" stroke-linecap="round" stroke-width="2.5">
+								<path d="M120 8v28 M120 204v28 M8 120h28 M204 120h28 M41 41l20 20 M179 179l20 20 M199 41l-20 20 M61 179l-20 20" fill="none" />
+								<circle cx="120" cy="51" r="3" /><circle cx="189" cy="120" r="3" />
+								<circle cx="120" cy="189" r="3" /><circle cx="51" cy="120" r="3" />
+								<circle cx="71" cy="71" r="2.5" /><circle cx="169" cy="71" r="2.5" />
+								<circle cx="169" cy="169" r="2.5" /><circle cx="71" cy="169" r="2.5" />
+							</g>
+							<circle class="reward-burst-ring" cx="120" cy="120" r="72" fill="none" stroke="#35e3e8" stroke-width="2" />
+						</svg>
+					</div>
+					<div class="reward-summary-anchor">
+						<div class="reward-summary">
+							<strong class="reward-summary-title">成果を受け取りました</strong>
+							<span class="reward-summary-points">+{rewardPresentation.points} pt</span>
+							{#if rewardPresentation.lifespanMs > 0}
+								<span class="reward-summary-lifespan">寿命延長 +{formatElapsedDuration(rewardPresentation.lifespanMs)}</span>
+								<span class="reward-summary-support">作業中に反映済み</span>
+							{/if}
+						</div>
+					</div>
+				{/if}
+			</div>
 	</Dialog.Portal>
 </Dialog.Root>
 
 <style>
 	:global(.mending-dialog-overlay) { position: fixed; inset: 0; z-index: 100; background: rgba(2, 8, 18, 0.72); backdrop-filter: blur(2px); }
 	:global(.mending-dialog-content) { position: fixed; top: 50%; left: 50%; z-index: 101; display: grid; gap: 0; width: min(720px, calc(100vw - 24px)); max-height: calc(100svh - 32px); overflow: auto; padding: 28px; border: 1px solid rgba(35, 220, 226, .78); border-radius: 18px; background: linear-gradient(180deg, rgba(4, 29, 43, .92), rgba(3, 20, 30, .94)); box-shadow: 0 0 0 1px rgba(53, 227, 232, .10) inset, 0 18px 60px rgba(0, 0, 0, .42), 0 0 30px rgba(26, 212, 220, .08); backdrop-filter: blur(14px); color: #ecfbff; transform: translate(-50%, -50%); }
+	.mending-reward-layer { position: fixed; inset: 0; z-index: 102; overflow: hidden; pointer-events: none; }
+	.reward-burst-anchor, .reward-summary-anchor { position: fixed; inset: 0; display: grid; place-items: center; }
+	.reward-burst { width: min(72vw, 360px); max-height: 64svh; overflow: visible; }
+	.reward-burst-rays, .reward-burst-ring { transform-box: fill-box; transform-origin: center; }
+	.reward-summary { display: grid; justify-items: center; gap: 4px; width: min(420px, calc(100vw - 40px)); padding: 18px 22px; border: 1px solid rgba(100, 245, 240, .78); border-radius: 16px; background: linear-gradient(180deg, rgba(4, 35, 47, .97), rgba(3, 24, 36, .97)); box-shadow: 0 0 0 1px rgba(53, 227, 232, .18) inset, 0 0 32px rgba(53, 227, 232, .24); color: #ecfbff; text-align: center; }
+	.reward-summary-title { color: #b9ffff; font-size: clamp(18px, 4vw, 23px); font-weight: 850; line-height: 1.2; }
+	.reward-summary-points { color: #fff; font-size: clamp(28px, 7vw, 40px); font-weight: 900; line-height: 1.15; font-variant-numeric: tabular-nums; }
+	.reward-summary-lifespan { color: #64f5f0; font-size: 16px; font-weight: 800; }
+	.reward-summary-support { color: #cfe7ee; font-size: 13px; font-weight: 650; }
 	.result-card { position: relative; }
 	.mending-startup-feedback { position: absolute; inset: 0; z-index: 2; display: grid; place-items: center; overflow: hidden; pointer-events: none; border: 1px solid rgba(53, 227, 232, .86); border-radius: inherit; color: #64f5f0; font-size: 16px; font-weight: 800; letter-spacing: .04em; text-shadow: 0 0 18px rgba(53, 227, 232, .7); animation: mending-startup-scan 3000ms ease-out both; box-shadow: 0 0 24px rgba(53, 227, 232, .18) inset; }
 	.mending-startup-feedback::after { position: absolute; inset: 0; content: ''; background: linear-gradient(180deg, transparent 0%, rgba(53, 227, 232, .22) 48%, transparent 54%); animation: mending-startup-sweep 1000ms ease-out both; }
-	.points-highlight { animation: mending-points-highlight 420ms ease-out; }
-	.success-flash { animation: mending-card-flash 420ms ease-out; }
-	@keyframes mending-card-flash { 0%, 100% { box-shadow: none; } 35% { box-shadow: 0 0 0 2px rgba(53, 227, 232, .4), 0 0 24px rgba(53, 227, 232, .34); } }
-	@keyframes mending-points-highlight { 0%, 100% { color: #ecfbff; } 35% { color: #64f5f0; transform: scale(1.04); } }
-	@media (prefers-reduced-motion: reduce) { .mending-startup-feedback { animation-name: mending-startup-fade; } .mending-startup-feedback::after { animation: none; } .success-flash { animation-name: mending-card-highlight; } .points-highlight { animation-name: mending-points-color; } }
+	@media (prefers-reduced-motion: reduce) { .mending-startup-feedback { animation-name: mending-startup-fade; } .mending-startup-feedback::after { animation: none; } }
 	@keyframes mending-startup-scan { 0% { opacity: 0; } 8% { opacity: 1; } 78% { opacity: 1; } 100% { opacity: 0; } }
 	@keyframes mending-startup-sweep { from { opacity: 0; transform: translateY(-45%); } 45% { opacity: 1; } to { opacity: 0; transform: translateY(45%); } }
 	@keyframes mending-startup-fade { 0% { opacity: 0; } 8% { opacity: 1; } 78% { opacity: 1; } 100% { opacity: 0; } }
-	@keyframes mending-card-highlight { 0%, 100% { box-shadow: none; } 35% { box-shadow: 0 0 0 2px rgba(53, 227, 232, .4); } }
-	@keyframes mending-points-color { 0%, 100% { color: #ecfbff; } 35% { color: #64f5f0; } }
 	.terminal-dialog-header { position: sticky; top: -24px; z-index: 2; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 12px; margin: -24px -24px 22px; padding: 24px; background: linear-gradient(180deg, rgba(4, 29, 43, .98), rgba(3, 20, 30, .98)); }
 	:global(.mending-dialog-content .mending-dialog-title) { display: inline-flex; align-items: center; min-width: 0; gap: 8px; margin: 0; color: #ecfbff; font-size: clamp(18px, 4vw, 22px); line-height: 1.15; font-weight: 800; letter-spacing: .03em; }
 	:global(.mending-dialog-title svg) { flex: 0 0 auto; width: 22px; height: 22px; color: #35e3e8; }
