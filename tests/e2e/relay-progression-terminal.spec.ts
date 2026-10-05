@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { expectDialogIconCloseButton, finishDialogExit } from './helpers/dialogMotion';
+import { expectDialogIconCloseButton, finishDialogEntrance, finishDialogExit } from './helpers/dialogMotion';
 import { HDKey } from '@scure/bip32';
 import { entropyToMnemonic, mnemonicToSeedSync } from '@scure/bip39';
 import { wordlist as englishWordlist } from '@scure/bip39/wordlists/english.js';
@@ -483,7 +483,7 @@ test.describe('Relay startup', () => {
 		await page.getByRole('button', { name: '閉じる', exact: true }).click();
 	});
 
-	test('opens the adjustment terminal only nearby and persists one ability upgrade', async ({ page }) => {
+	test('opens the adjustment terminal only nearby and persists ability upgrades', async ({ page }) => {
 		const startTime = Date.now();
 		const secret = fixtureSecret(19);
 		const pubkey = getPublicKey(secret);
@@ -621,8 +621,11 @@ test.describe('Relay startup', () => {
 		await expect(upgradeButton).toHaveCSS('outline-style', 'solid');
 		await pauseAtCurrentBrowserTime(page);
 		await page.keyboard.press('Enter');
-		await page.keyboard.press('Enter');
 		await expect(dialog).toContainText('9 pt');
+		const liveUpgradeButton = upgradedCard.getByRole('button');
+		await expect(liveUpgradeButton).toHaveAttribute('aria-label', '推論効率をLv3へ強化（必要1pt）');
+		await liveUpgradeButton.press('Enter');
+		await expect(dialog).toContainText('8 pt');
 		const hudPoints = page.locator('[data-unified-status-hud] [data-points-value]');
 		await expect(hudPoints).toHaveAttribute('data-value-change', 'decrease');
 		await expect(hudPoints).toHaveCSS('color', 'rgb(255, 104, 117)');
@@ -635,6 +638,19 @@ test.describe('Relay startup', () => {
 			buttonY: card.querySelector('button')!.getBoundingClientRect().y
 		}));
 		expect(stableDuring).toEqual(stableBefore);
+		await page.keyboard.press('Escape');
+		await finishDialogExit(dialog);
+		await expect(adjustment).toBeFocused();
+		await adjustment.click();
+		await expect(dialog.getByRole('heading', { name: '能力強化' })).toBeFocused();
+		await finishDialogEntrance(dialog, true);
+		await expect(dialog.locator('.level-up-badge')).toHaveCount(1);
+		const reopenedPresentationStyles = await dialog.locator('.ability-card').first().evaluate((card) => ({
+			card: (card as HTMLElement).style.cssText,
+			level: card.querySelector<HTMLElement>('.ability-level')!.style.cssText,
+			badge: card.querySelector<HTMLElement>('.level-up-badge')!.style.cssText
+		}));
+		expect(reopenedPresentationStyles).toEqual({ card: '', level: '', badge: '' });
 		await page.clock.runFor(800);
 		await expect(hudPoints).not.toHaveAttribute('data-value-change', /.+/);
 		await expect(hudPoints).toHaveCSS('color', 'rgb(255, 255, 255)');
@@ -645,14 +661,41 @@ test.describe('Relay startup', () => {
 			buttonY: card.querySelector('button')!.getBoundingClientRect().y
 		}));
 		expect(stableAfter).toEqual(stableBefore);
-		await expect(page.locator('[data-unified-status-hud] [data-points-value]')).toHaveText('9pt');
-		await expect(page.locator('[data-unified-status-hud] [data-points-meter]')).toHaveAttribute('aria-valuenow', '9');
-		await expect(dialog).toContainText('推論効率 Lv2');
+		await expect(page.locator('[data-unified-status-hud] [data-points-value]')).toHaveText('8pt');
+		await expect(page.locator('[data-unified-status-hud] [data-points-meter]')).toHaveAttribute('aria-valuenow', '8');
+		await expect(dialog).toContainText('推論効率 Lv3');
 		await page.keyboard.press('Escape');
 		await finishDialogExit(dialog);
 		await expect(adjustment).toBeFocused();
 		await adjustment.click();
 		await expect(dialog.getByRole('heading', { name: '能力強化' })).toBeFocused();
+		await finishDialogEntrance(dialog, true);
+		await page.emulateMedia({ reducedMotion: 'reduce' });
+		const reducedMotionButton = upgradedCard.getByRole('button');
+		await expect(reducedMotionButton).toBeEnabled();
+		const baseFeedbackColors = await upgradedCard.evaluate((card) => ({
+			border: getComputedStyle(card).borderColor,
+			level: getComputedStyle(card.querySelector('.ability-level')!).color
+		}));
+		await reducedMotionButton.press('Enter');
+		await expect(dialog).toContainText('7 pt');
+		await expect(dialog.locator('.level-up-badge')).toHaveCount(1);
+		await page.clock.runFor(140);
+		const reducedMotionFeedback = await upgradedCard.evaluate((card) => ({
+			border: getComputedStyle(card).borderColor,
+			level: getComputedStyle(card.querySelector('.ability-level')!).color,
+			levelTransform: getComputedStyle(card.querySelector('.ability-level')!).transform,
+			badgeTransform: getComputedStyle(card.querySelector('.level-up-badge')!).transform,
+			badgeOpacity: Number(getComputedStyle(card.querySelector('.level-up-badge')!).opacity)
+		}));
+		expect(reducedMotionFeedback.border).not.toBe(baseFeedbackColors.border);
+		expect(reducedMotionFeedback.level).not.toBe(baseFeedbackColors.level);
+		expect(reducedMotionFeedback.levelTransform).toBe('none');
+		expect(reducedMotionFeedback.badgeTransform).toBe('none');
+		expect(reducedMotionFeedback.badgeOpacity).toBeGreaterThan(0);
+		await page.clock.runFor(500);
+		await expect(dialog.locator('.level-up-badge')).toHaveCount(0);
+		await expect(dialog).toContainText('推論効率 Lv4');
 		await page.setViewportSize({ width: 390, height: 640 });
 		await expectHeaderToStayReadable();
 		const mobileAdjustmentScroll = await dialog.evaluate((element) => {
@@ -674,7 +717,7 @@ test.describe('Relay startup', () => {
 		await finishDialogExit(dialog);
 		await expect(adjustment).toBeFocused();
 		await page.reload();
-		await expect.poll(() => readRelayGameState(page)).toMatchObject({ points: 9, abilities: { inferenceEfficiency: 2, contextCapacity: 1, hallucinationSuppression: 1 } });
+		await expect.poll(() => readRelayGameState(page)).toMatchObject({ points: 7, abilities: { inferenceEfficiency: 4, contextCapacity: 1, hallucinationSuppression: 1 } });
 	});
 
 	test('shows the linear Run effect and arrival-level cost at the adjustment terminal', async ({ page }) => {
