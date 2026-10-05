@@ -37,6 +37,7 @@
 	let dialogContent = $state<HTMLElement | null>(null);
 	let presentationScope = $state.raw<Scope | null>(null);
 	let activeTimeline: Timeline | null = null;
+	let activeTimelineCleanup: (() => void) | null = null;
 	let consumedUpgradeFeedbackId: number | null = null;
 	let pendingUpgradeFeedback: Readonly<{ id: number; root: HTMLElement; scope: Scope }> | null = null;
 	const abilityLabels: Readonly<Record<PersonaAbilityKey, string>> = {
@@ -72,14 +73,30 @@
 		document.querySelector<HTMLElement>('.adjustment-dialog-content .adjustment-dialog-title')?.focus({ preventScroll: true });
 	}
 
+	function revertUpgradeTimeline(): void {
+		const timeline = activeTimeline;
+		const cleanup = activeTimelineCleanup;
+		activeTimeline = null;
+		activeTimelineCleanup = null;
+		if (!timeline) return;
+		timeline.revert();
+		cleanup?.();
+	}
+
 	$effect(() => {
 		const root = dialogContent;
 		if (!root) return;
 
 		const scope = createPresentationScope(root);
 		presentationScope = scope;
-		scope.add(() => () => { activeTimeline = null; });
+		scope.add(() => () => {
+			activeTimelineCleanup?.();
+			activeTimelineCleanup = null;
+			activeTimeline = null;
+		});
 		scope.add('playUpgradeFeedback', () => {
+			revertUpgradeTimeline();
+
 			const card = root.querySelector<HTMLElement>('.ability-card.success-flash');
 			const level = card?.querySelector<HTMLElement>('.ability-level.level-up-highlight');
 			const badge = card?.querySelector<HTMLElement>('.level-up-badge');
@@ -92,8 +109,7 @@
 				defaults: { duration: 420, ease: 'out(3)' },
 				onComplete: () => {
 					if (activeTimeline !== timeline) return;
-					timeline.revert();
-					activeTimeline = null;
+					revertUpgradeTimeline();
 				}
 			});
 
@@ -128,13 +144,28 @@
 				...(reducedMotion ? {} : { translateY: { from: '4px', to: '0px' } })
 			}, 0);
 
+			const inlineStyleSnapshot = [
+				{ element: card, properties: ['border-color', 'box-shadow'] },
+				{ element: level, properties: ['color', 'transform'] },
+				{ element: badge, properties: ['opacity', 'transform'] }
+			].flatMap(({ element, properties }) => properties.map((property) => ({
+				element,
+				property,
+				value: element.style.getPropertyValue(property),
+				priority: element.style.getPropertyPriority(property)
+			})));
+			activeTimelineCleanup = () => {
+				for (const { element, property, value, priority } of inlineStyleSnapshot) {
+					if (value) element.style.setProperty(property, value, priority);
+					else element.style.removeProperty(property);
+				}
+			};
 			activeTimeline = timeline;
 			timeline.play();
 		});
 
 		return () => {
-			activeTimeline?.revert();
-			activeTimeline = null;
+			revertUpgradeTimeline();
 			scope.revert();
 			if (presentationScope === scope) presentationScope = null;
 		};
@@ -142,10 +173,13 @@
 
 	$effect(() => {
 		if (!open) {
-			activeTimeline?.revert();
-			activeTimeline = null;
+			revertUpgradeTimeline();
 			pendingUpgradeFeedback = null;
 		}
+	});
+
+	$effect(() => {
+		if (!upgradeFeedback) revertUpgradeTimeline();
 	});
 
 	$effect(() => {
@@ -162,7 +196,6 @@
 			if (!open || dialogContent !== pending.root || presentationScope !== pending.scope || upgradeFeedback?.id !== feedback.id) return;
 
 			consumedUpgradeFeedbackId = feedback.id;
-			pending.scope.refresh();
 			pending.scope.methods.playUpgradeFeedback();
 		});
 	});

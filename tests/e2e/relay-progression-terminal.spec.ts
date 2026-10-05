@@ -673,28 +673,76 @@ test.describe('Relay startup', () => {
 		await page.emulateMedia({ reducedMotion: 'reduce' });
 		const reducedMotionButton = upgradedCard.getByRole('button');
 		await expect(reducedMotionButton).toBeEnabled();
-		const baseFeedbackColors = await upgradedCard.evaluate((card) => ({
-			border: getComputedStyle(card).borderColor,
-			level: getComputedStyle(card.querySelector('.ability-level')!).color
-		}));
+		await upgradedCard.evaluate((card) => {
+			const level = card.querySelector<HTMLElement>('.ability-level')!;
+			const observation = {
+				baselineBorder: getComputedStyle(card).borderColor,
+				baselineLevel: getComputedStyle(level).color,
+				sawBorderEmphasis: false,
+				sawLevelEmphasis: false,
+				sawMotionTransform: false,
+				sawBadge: false,
+				badgeInlineStyleAfterRemoval: null as string | null,
+				done: false
+			};
+			const observedWindow = window as typeof window & {
+				__reducedMotionUpgradeObservation?: typeof observation;
+			};
+			observedWindow.__reducedMotionUpgradeObservation = observation;
+
+			const hasTransform = (element: HTMLElement): boolean => {
+				const style = getComputedStyle(element);
+				return element.style.transform !== '' || element.style.scale !== '' || element.style.translate !== '' ||
+					style.transform !== 'none' || (style.scale !== 'none' && style.scale !== '1') || style.translate !== 'none';
+			};
+			let observedBadge: HTMLElement | null = null;
+			const sample = () => {
+				observation.sawBorderEmphasis ||= getComputedStyle(card).borderColor !== observation.baselineBorder;
+				observation.sawLevelEmphasis ||= getComputedStyle(level).color !== observation.baselineLevel;
+				observation.sawMotionTransform ||= hasTransform(level);
+				const badge = card.querySelector<HTMLElement>('.level-up-badge');
+				if (badge) {
+					observedBadge = badge;
+					observation.sawBadge = true;
+					observation.sawMotionTransform ||= hasTransform(badge);
+				} else if (observation.sawBadge) {
+					observation.badgeInlineStyleAfterRemoval = observedBadge?.style.cssText ?? null;
+					observation.done = true;
+				}
+				if (!observation.done) requestAnimationFrame(sample);
+			};
+			requestAnimationFrame(sample);
+		});
 		await reducedMotionButton.press('Enter');
 		await expect(dialog).toContainText('7 pt');
 		await expect(dialog.locator('.level-up-badge')).toHaveCount(1);
-		await page.clock.runFor(140);
-		const reducedMotionFeedback = await upgradedCard.evaluate((card) => ({
-			border: getComputedStyle(card).borderColor,
-			level: getComputedStyle(card.querySelector('.ability-level')!).color,
-			levelTransform: getComputedStyle(card.querySelector('.ability-level')!).transform,
-			badgeTransform: getComputedStyle(card.querySelector('.level-up-badge')!).transform,
-			badgeOpacity: Number(getComputedStyle(card.querySelector('.level-up-badge')!).opacity)
-		}));
-		expect(reducedMotionFeedback.border).not.toBe(baseFeedbackColors.border);
-		expect(reducedMotionFeedback.level).not.toBe(baseFeedbackColors.level);
-		expect(reducedMotionFeedback.levelTransform).toBe('none');
-		expect(reducedMotionFeedback.badgeTransform).toBe('none');
-		expect(reducedMotionFeedback.badgeOpacity).toBeGreaterThan(0);
-		await page.clock.runFor(500);
+		let reducedMotionObservation = await page.evaluate(() => (window as typeof window & {
+			__reducedMotionUpgradeObservation?: { done: boolean };
+		}).__reducedMotionUpgradeObservation);
+		while (!reducedMotionObservation?.done) {
+			await page.clock.runFor(16);
+			reducedMotionObservation = await page.evaluate(() => (window as typeof window & {
+				__reducedMotionUpgradeObservation?: { done: boolean };
+			}).__reducedMotionUpgradeObservation);
+		}
+		const reducedMotionFeedback = await page.evaluate(() => (window as typeof window & {
+			__reducedMotionUpgradeObservation?: {
+				sawBorderEmphasis: boolean;
+				sawLevelEmphasis: boolean;
+				sawMotionTransform: boolean;
+				badgeInlineStyleAfterRemoval: string | null;
+			};
+		}).__reducedMotionUpgradeObservation);
+		expect(reducedMotionFeedback?.sawBorderEmphasis).toBe(true);
+		expect(reducedMotionFeedback?.sawLevelEmphasis).toBe(true);
+		expect(reducedMotionFeedback?.sawMotionTransform).toBe(false);
+		expect(reducedMotionFeedback?.badgeInlineStyleAfterRemoval).toBe('');
 		await expect(dialog.locator('.level-up-badge')).toHaveCount(0);
+		const reducedMotionCleanup = await upgradedCard.evaluate((card) => ({
+			card: (card as HTMLElement).style.cssText,
+			level: card.querySelector<HTMLElement>('.ability-level')!.style.cssText
+		}));
+		expect(reducedMotionCleanup).toEqual({ card: '', level: '' });
 		await expect(dialog).toContainText('推論効率 Lv4');
 		await page.setViewportSize({ width: 390, height: 640 });
 		await expectHeaderToStayReadable();
