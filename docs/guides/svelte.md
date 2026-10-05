@@ -67,3 +67,21 @@ applicable specifications remain the Source of Truth.
   adopting newer syntax. Do not introduce stores, context, or `.svelte.ts`
   owners merely to reduce prop count or file length.
 - Do not increase compiler or `svelte-check` warnings in changed Svelte code.
+
+## Presentation effects
+
+- Keep ordinary UI motion, Dialog transitions, simple fades, and single-element
+  effects in CSS, Bits UI, or Svelte. Use Anime.js for coordinated timelines
+  and component-local game or spatial presentations where cancellation or
+  replacement matters.
+- Bind an Anime.js Scope to the actual presentation root and its local owner.
+  Revert active timelines and the Scope when that root is removed or its owner
+  is destroyed. Do not add wrappers that alter geometry or measurement just to
+  provide an animation root.
+- Confirm canonical application state before starting optional presentation;
+  never make state updates or interaction availability wait for animation
+  completion. Respect Reduced Motion and do not replay stale one-shots after a
+  hidden tab becomes visible.
+- Avoid generic effect managers, registries, queues, or event buses unless a
+  repeated concrete need justifies them. Use Anime.js's Scope and Timeline
+  lifecycle directly for local effects.

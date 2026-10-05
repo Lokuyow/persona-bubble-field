@@ -51,6 +51,7 @@
 		"@noble/hashes": "^2.0.1",
 		"@scure/bip32": "2.4.0",
 		"@scure/bip39": "2.4.0",
+		"animejs": "4.5.0",
 		"bits-ui": "^2.19.0",
 		"idb": "^8.0.3",
 		"nostr-tools": "^2.25.0",

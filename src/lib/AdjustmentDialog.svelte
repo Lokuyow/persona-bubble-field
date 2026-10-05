@@ -1,5 +1,9 @@
 <script lang="ts">
 	import { Dialog } from 'bits-ui';
+	import { tick } from 'svelte';
+	import { createTimeline } from 'animejs/timeline';
+	import type { Scope } from 'animejs/scope';
+	import type { Timeline } from 'animejs/timeline';
 	import Adjustments from '~icons/tabler/adjustments';
 	import Brain from '~icons/tabler/brain';
 	import ShieldCheck from '~icons/tabler/shield-check';
@@ -9,6 +13,7 @@
 	import Wallet from '~icons/tabler/wallet';
 	import { formatContextCapacityMinutes } from '$lib/abilityDisplay';
 	import ActionButton from '$lib/ActionButton.svelte';
+	import { createPresentationScope } from '$lib/presentationMotion';
 	import {
 		getAbilityUpgrade,
 		getContextCapacityMinutes,
@@ -29,6 +34,12 @@
 	}>;
 
 	let { open, points, abilities, busy, onOpenChange, onUpgrade, upgradeFeedback = null }: Props = $props();
+	let dialogContent = $state<HTMLElement | null>(null);
+	let presentationScope = $state.raw<Scope | null>(null);
+	let activeTimeline: Timeline | null = null;
+	let activeTimelineCleanup: (() => void) | null = null;
+	let consumedUpgradeFeedbackId: number | null = null;
+	let pendingUpgradeFeedback: Readonly<{ id: number; root: HTMLElement; scope: Scope }> | null = null;
 	const abilityLabels: Readonly<Record<PersonaAbilityKey, string>> = {
 		inferenceEfficiency: '推論効率',
 		contextCapacity: 'コンテキスト容量',
@@ -61,12 +72,140 @@
 		event.preventDefault();
 		document.querySelector<HTMLElement>('.adjustment-dialog-content .adjustment-dialog-title')?.focus({ preventScroll: true });
 	}
+
+	function revertUpgradeTimeline(): void {
+		const timeline = activeTimeline;
+		const cleanup = activeTimelineCleanup;
+		activeTimeline = null;
+		activeTimelineCleanup = null;
+		if (!timeline) return;
+		timeline.revert();
+		cleanup?.();
+	}
+
+	$effect(() => {
+		const root = dialogContent;
+		if (!root) return;
+
+		const scope = createPresentationScope(root);
+		presentationScope = scope;
+		scope.add(() => () => {
+			activeTimelineCleanup?.();
+			activeTimelineCleanup = null;
+			activeTimeline = null;
+		});
+		scope.add('playUpgradeFeedback', () => {
+			revertUpgradeTimeline();
+
+			const card = root.querySelector<HTMLElement>('.ability-card.success-flash');
+			const level = card?.querySelector<HTMLElement>('.ability-level.level-up-highlight');
+			const badge = card?.querySelector<HTMLElement>('.level-up-badge');
+			if (!card || !level || !badge) return;
+
+			const reducedMotion = scope.matches.reducedMotion;
+			let timeline: Timeline;
+			timeline = createTimeline({
+				autoplay: false,
+				defaults: { duration: 420, ease: 'out(3)' },
+				onComplete: () => {
+					if (activeTimeline !== timeline) return;
+					revertUpgradeTimeline();
+				}
+			});
+
+			timeline.add(card, {
+				keyframes: reducedMotion
+					? {
+							'0%': { borderColor: 'rgba(122, 135, 255, .42)' },
+							'35%': { borderColor: '#aeb6ff' },
+							'100%': { borderColor: 'rgba(122, 135, 255, .42)' }
+						}
+					: {
+							'0%': { borderColor: 'rgba(122, 135, 255, .42)', boxShadow: 'none' },
+							'35%': { borderColor: '#aeb6ff', boxShadow: '0 0 0 2px rgba(174, 182, 255, .3), 0 0 24px rgba(90, 103, 255, .3)' },
+							'100%': { borderColor: 'rgba(122, 135, 255, .42)', boxShadow: 'none' }
+						}
+			}, 0);
+			timeline.add(level, {
+				keyframes: reducedMotion
+					? {
+							'0%': { color: '#aeb6ff' },
+							'35%': { color: '#fff' },
+							'100%': { color: '#aeb6ff' }
+						}
+					: {
+							'0%': { color: '#aeb6ff', scale: 1 },
+							'35%': { color: '#fff', scale: 1.08 },
+							'100%': { color: '#aeb6ff', scale: 1 }
+						}
+			}, 0);
+			timeline.add(badge, {
+				opacity: { from: 0, to: 1 },
+				...(reducedMotion ? {} : { translateY: { from: '4px', to: '0px' } })
+			}, 0);
+
+			const inlineStyleSnapshot = [
+				{ element: card, properties: ['border-color', 'box-shadow'] },
+				{ element: level, properties: ['color', 'transform'] },
+				{ element: badge, properties: ['opacity', 'transform'] }
+			].flatMap(({ element, properties }) => properties.map((property) => ({
+				element,
+				property,
+				value: element.style.getPropertyValue(property),
+				priority: element.style.getPropertyPriority(property)
+			})));
+			activeTimelineCleanup = () => {
+				for (const { element, property, value, priority } of inlineStyleSnapshot) {
+					if (value) element.style.setProperty(property, value, priority);
+					else element.style.removeProperty(property);
+				}
+			};
+			activeTimeline = timeline;
+			timeline.play();
+		});
+
+		return () => {
+			revertUpgradeTimeline();
+			scope.revert();
+			if (presentationScope === scope) presentationScope = null;
+		};
+	});
+
+	$effect(() => {
+		if (!open) {
+			revertUpgradeTimeline();
+			pendingUpgradeFeedback = null;
+		}
+	});
+
+	$effect(() => {
+		if (!upgradeFeedback) revertUpgradeTimeline();
+	});
+
+	$effect(() => {
+		const feedback = upgradeFeedback;
+		const scope = presentationScope;
+		const root = dialogContent;
+		if (!feedback || !open || !scope || !root || consumedUpgradeFeedbackId === feedback.id || pendingUpgradeFeedback?.id === feedback.id) return;
+
+		const pending = { id: feedback.id, root, scope };
+		pendingUpgradeFeedback = pending;
+		void tick().then(() => {
+			if (pendingUpgradeFeedback !== pending) return;
+			pendingUpgradeFeedback = null;
+			if (!open || dialogContent !== pending.root || presentationScope !== pending.scope || upgradeFeedback?.id !== feedback.id) return;
+
+			consumedUpgradeFeedbackId = feedback.id;
+			pending.scope.methods.playUpgradeFeedback();
+		});
+	});
+
 </script>
 
 <Dialog.Root bind:open={() => open, onOpenChange}>
 	<Dialog.Portal>
 			<Dialog.Overlay class="adjustment-dialog-overlay" />
-			<Dialog.Content class="adjustment-dialog-content" preventScroll={false} onOpenAutoFocus={focusFirstAvailableUpgrade}>
+			<Dialog.Content bind:ref={dialogContent} class="adjustment-dialog-content" preventScroll={false} onOpenAutoFocus={focusFirstAvailableUpgrade}>
 				<header class="adjustment-dialog-header">
 					<Dialog.Title class="adjustment-dialog-title" tabindex={-1}><Adjustments aria-hidden="true" />能力強化</Dialog.Title>
 					<Dialog.Description class="sr-only">能力を強化して作業の効果を高めます。</Dialog.Description>
@@ -121,16 +260,7 @@
 	.points-display :global(svg) { width: 18px; height: 18px; color: #aeb5d7; }
 	.ability-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: stretch; gap: 14px; }
 	.ability-card { position: relative; display: grid; grid-template-rows: auto auto 1fr auto; gap: 9px; min-width: 0; min-height: 250px; padding: 18px; border: 1px solid rgba(122, 135, 255, .42); border-radius: 12px; background: rgba(19, 26, 61, .78); }
-	.success-flash { animation: ability-card-flash 420ms ease-out; }
-	.level-up-highlight { animation: level-up-pop 420ms ease-out; }
-	.level-up-badge { position: absolute; top: -14px; right: 0; pointer-events: none; color: #aeb6ff; font-size: 11px; font-weight: 900; letter-spacing: .08em; animation: level-up-badge 420ms ease-out both; }
-	@keyframes ability-card-flash { 0%, 100% { border-color: rgba(122, 135, 255, .42); box-shadow: none; } 35% { border-color: #aeb6ff; box-shadow: 0 0 0 2px rgba(174, 182, 255, .3), 0 0 24px rgba(90, 103, 255, .3); } }
-	@keyframes level-up-pop { 0%, 100% { color: #aeb6ff; } 35% { color: #fff; transform: scale(1.08); } }
-	@keyframes level-up-badge { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
-	@media (prefers-reduced-motion: reduce) { .success-flash { animation-name: ability-card-highlight; } .level-up-highlight { animation-name: level-up-color; } .level-up-badge { animation-name: level-up-fade; } }
-	@keyframes ability-card-highlight { 0%, 100% { border-color: rgba(122, 135, 255, .42); } 35% { border-color: #aeb6ff; } }
-	@keyframes level-up-color { 0%, 100% { color: #aeb6ff; } 35% { color: #fff; } }
-	@keyframes level-up-fade { from { opacity: 0; } to { opacity: 1; } }
+	.level-up-badge { position: absolute; top: -14px; right: 0; pointer-events: none; color: #aeb6ff; font-size: 11px; font-weight: 900; letter-spacing: .08em; }
 	.ability-card-heading { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 	.ability-name { display: flex; align-items: center; min-width: 0; gap: 8px; margin: 0; color: #f4f6ff; font-size: 16px; font-weight: 800; }
 	.ability-name :global(svg) { flex: 0 0 auto; width: 20px; height: 20px; color: #aeb6ff; stroke-width: 2; }
