@@ -2,7 +2,7 @@ import type { ConversationState, SpeechType } from './conversation';
 
 export type SoundPreference = Readonly<{ volume: number }>;
 export type TagGameSoundEffect = 'tag-game-benefit' | 'tag-game-calamity' | 'tag-game-transfer' | 'tag-game-switch' | 'tag-game-start' | 'tag-game-end';
-export type SoundEffect = SpeechType | 'collect' | 'level-up' | 'startup' | 'cooperation-start' | 'death' | TagGameSoundEffect;
+export type SoundEffect = SpeechType | 'collect' | 'mending-collect' | 'level-up' | 'startup' | 'cooperation-start' | 'death' | TagGameSoundEffect;
 export type SpeechSoundEffect = SpeechType;
 
 export const DEFAULT_SOUND_PREFERENCE: SoundPreference = { volume: 0.5 };
@@ -36,7 +36,16 @@ export function newLiveBubbleEffects(previous: ConversationState, next: Conversa
 }
 
 export const SPEECH_SOUND_DURATIONS = { normal: 0.225, shout: 0.420, monologue: 0.715 } as const;
-export const UI_SOUND_DURATIONS = { collect: 0.19, 'level-up': 0.32, startup: 0.38, 'cooperation-start': 0.43,
+export const MENDING_COLLECT_CUES = {
+	pickup: 0.035,
+	ring: 0.15,
+	rays: 0.27,
+	sparkle: 0.36,
+	reward: 0.43,
+	release: 0.69,
+	end: 0.91
+} as const;
+export const UI_SOUND_DURATIONS = { collect: 0.19, 'mending-collect': MENDING_COLLECT_CUES.end, 'level-up': 0.32, startup: 0.38, 'cooperation-start': 0.43,
 	'tag-game-benefit': 0.26, 'tag-game-calamity': 0.11, 'tag-game-transfer': 0.34, 'tag-game-switch': 0.30,
 	'tag-game-start': 0.52, 'tag-game-end': 0.52 } as const;
 export const DEATH_SOUND_DURATION = 6.4;
@@ -45,6 +54,7 @@ export const SOUND_EFFECT_GAINS: Readonly<Record<SoundEffect, number>> = {
 	shout: 1,
 	monologue: 1,
 	collect: 0.75,
+	'mending-collect': 0.62,
 	'level-up': 0.75,
 	startup: 0.65,
 	'cooperation-start': 0.65,
@@ -237,6 +247,43 @@ function createChimeSamples(effect: 'collect' | 'level-up' | 'startup' | 'cooper
 	return normalize(output);
 }
 
+function createMendingCollectSamples(sampleRate: number): Float32Array {
+	const duration = MENDING_COLLECT_CUES.end;
+	const length = Math.ceil(sampleRate * duration);
+	const output = new Float32Array(length);
+	const sparkleNoise = seededNoise(length, 0x6d656e64, sampleRate, 2_800, 9_000, 3);
+	const notes = [
+		{ at: MENDING_COLLECT_CUES.pickup, frequency: 494, gain: 0.12, decay: 0.10 },
+		{ at: MENDING_COLLECT_CUES.ring, frequency: 659, gain: 0.16, decay: 0.14 },
+		{ at: MENDING_COLLECT_CUES.rays, frequency: 784, gain: 0.16, decay: 0.15 },
+		{ at: MENDING_COLLECT_CUES.sparkle, frequency: 988, gain: 0.13, decay: 0.17 },
+		{ at: MENDING_COLLECT_CUES.reward, frequency: 784, gain: 0.17, decay: 0.23 },
+		{ at: MENDING_COLLECT_CUES.reward, frequency: 988, gain: 0.11, decay: 0.21 },
+		{ at: MENDING_COLLECT_CUES.reward, frequency: 1_176, gain: 0.07, decay: 0.19 }
+	] as const;
+	const transientCues = [MENDING_COLLECT_CUES.ring, MENDING_COLLECT_CUES.rays, MENDING_COLLECT_CUES.sparkle, MENDING_COLLECT_CUES.reward] as const;
+	for (let index = 0; index < length; index += 1) {
+		const time = index / sampleRate;
+		const release = clamp01((duration - time) / (duration - MENDING_COLLECT_CUES.release));
+		for (const note of notes) {
+			const local = time - note.at;
+			if (local < 0) continue;
+			const attack = clamp01(local / 0.004);
+			const envelope = attack * Math.exp(-local / note.decay) * release;
+			const phase = TAU * note.frequency * local;
+			const harmonics = Math.sin(phase) + 0.18 * Math.sin(phase * 2 + 0.12) + 0.055 * Math.sin(phase * 3 + 0.28);
+			output[index] += note.gain * harmonics * envelope;
+		}
+		for (const cue of transientCues) {
+			const local = time - cue;
+			if (local < 0) continue;
+			const transient = clamp01(local / 0.0015) * Math.exp(-local / 0.022) * release;
+			output[index] += 0.035 * sparkleNoise[index] * transient;
+		}
+	}
+	return normalize(output);
+}
+
 function createDeathSamples(sampleRate: number): Float32Array {
 	const length = Math.ceil(sampleRate * DEATH_SOUND_DURATION);
 	const output = new Float32Array(length);
@@ -298,6 +345,10 @@ export function createSoundSamples(effect: SoundEffect, sampleRate: number): Flo
 	if (effect === 'death') {
 		if (!Number.isFinite(sampleRate) || sampleRate <= 0) return new Float32Array();
 		return createDeathSamples(sampleRate);
+	}
+	if (effect === 'mending-collect') {
+		if (!Number.isFinite(sampleRate) || sampleRate <= 0) return new Float32Array();
+		return createMendingCollectSamples(sampleRate);
 	}
 	if (effect === 'collect' || effect === 'level-up' || effect === 'startup' || effect === 'cooperation-start') {
 		if (!Number.isFinite(sampleRate) || sampleRate <= 0) return new Float32Array();

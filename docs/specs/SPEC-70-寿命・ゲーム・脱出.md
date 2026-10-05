@@ -93,6 +93,8 @@ clear前はactive Identityのchild secretをexportしない。Root entropyの保
 
 成果回収が成功したときは、作業端末上で一度限りの報酬presentationを行い、確定した受取pointsを表示する。寿命延長がmaterializeされた場合は「作業中に反映済み」であることを示し、回収時に初めて寿命延長を得たようには表現しない。ring・ray・particle風の短い視覚強調を加えてよいが、layoutを変えず、Dialog操作や他のinteractionを妨げない。Reduced Motionではmovement、scale、rotation、radial expansionを抑え、成果取得が分かるtext・color・border・opacity表現を維持する。同じ回収結果はDialogのclose/reopen、presentation rootの再生成、古いfeedback stateから再生しない。presentationやsoundの失敗は成立済みの回収をrollbackしない。
 
+成果回収にはMending専用の短いreward soundを使用し、その主要accentは報酬visual presentationの主要accentと同期する。soundは既存のvolume、mute、document visibility等のsound policyに従い、soundまたはvisual presentationが再生できない場合も成立した回収結果は維持する。他用途のgeneric `collect` soundはこの専用表現へ変更しない。
+
 通常作業はmaximum durationへ到達した時点で停止する。overflow時間はRootコンテキスト圧縮Rank 0/1/2/3に応じて、通常point生成速度と通常寿命延長率の両方を0/20/35/50%だけ継続する。overflow中は推論加速倍率を適用せず、推論加速budgetも消費しない。上限超過時間を次bucketへ持ち越さず、上限到達後も同じ回収操作を行える。
 
 ### 寿命延長

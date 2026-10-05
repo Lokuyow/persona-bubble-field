@@ -374,6 +374,7 @@ test.describe('Relay startup', () => {
 		}
 		await page.setViewportSize({ width: 1280, height: 800 });
 		const beforeMendingReward = await publishedWorldStateCount();
+		let initialRewardFeedbackAt: number | null = null;
 		const assertCollectionLayout = async (viewport: { width: number; height: number }, expectedPoints: number, reducedMotion = false) => {
 			await page.setViewportSize(viewport);
 			if (reducedMotion) await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -381,19 +382,26 @@ test.describe('Relay startup', () => {
 					const dialog = document.querySelector<HTMLElement>('.mending-dialog-content')!;
 					const rewardLayer = document.querySelector<HTMLElement>('.mending-reward-layer')!;
 					const pointsCard = dialog.querySelector<HTMLElement>('.result-card[data-mending-icon="coins"]')!;
+					const lifespanCard = dialog.querySelector<HTMLElement>('.result-card[data-mending-icon="heart"]')!;
 					const wallet = dialog.querySelector<SVGElement>('[data-mending-icon="wallet"] svg')!;
 					const pointsValue = dialog.querySelector<HTMLElement>('.owned-points-value')!;
 					const observation = {
 						baselineBorder: getComputedStyle(pointsCard).borderColor,
+						baselineLifespanBorder: getComputedStyle(lifespanCard).borderColor,
 						baselineWallet: getComputedStyle(wallet).color,
 						baselinePoints: getComputedStyle(pointsValue).color,
 						sawSummary: false,
 						sawBorderEmphasis: false,
+						sawLifespanBorderEmphasis: false,
 						sawWalletEmphasis: false,
 						sawSummaryTransform: false,
 						sawBurstTransform: false,
 						sawRingTransform: false,
+						sawSparklesTransform: false,
 						sawWalletTransform: false,
+						sawRingOpacity: false,
+						sawBurstOpacity: false,
+						sawSparklesOpacity: false,
 						finalInlineStyles: [] as string[],
 						done: false
 					};
@@ -404,6 +412,7 @@ test.describe('Relay startup', () => {
 					let summaryRef: HTMLElement | null = null;
 					let burstRef: SVGElement | null = null;
 					let ringRef: SVGElement | null = null;
+					let sparklesRef: SVGElement | null = null;
 					const hasTransform = (element: HTMLElement | SVGElement): boolean => {
 						const style = getComputedStyle(element);
 						return element.style.transform !== '' || element.style.scale !== '' || element.style.translate !== '' || element.style.rotate !== '' ||
@@ -411,21 +420,28 @@ test.describe('Relay startup', () => {
 					};
 					const sample = () => {
 						observation.sawBorderEmphasis ||= getComputedStyle(pointsCard).borderColor !== observation.baselineBorder;
+						observation.sawLifespanBorderEmphasis ||= getComputedStyle(lifespanCard).borderColor !== observation.baselineLifespanBorder;
 						observation.sawWalletEmphasis ||= getComputedStyle(wallet).color !== observation.baselineWallet || getComputedStyle(pointsValue).color !== observation.baselinePoints;
 						const summary = rewardLayer.querySelector<HTMLElement>('.reward-summary');
 						const burst = rewardLayer.querySelector<SVGElement>('.reward-burst-rays');
 						const ring = rewardLayer.querySelector<SVGElement>('.reward-burst-ring');
-						if (summary && burst && ring) {
+						const sparkles = rewardLayer.querySelector<SVGElement>('.reward-burst-sparkles');
+						if (summary && burst && ring && sparkles) {
 							summaryRef = summary;
 							burstRef = burst;
 							ringRef = ring;
+							sparklesRef = sparkles;
 							observation.sawSummary = true;
 							observation.sawSummaryTransform ||= hasTransform(summary);
 							observation.sawBurstTransform ||= hasTransform(burst);
 							observation.sawRingTransform ||= hasTransform(ring);
+							observation.sawSparklesTransform ||= hasTransform(sparkles);
 							observation.sawWalletTransform ||= hasTransform(wallet);
+							observation.sawRingOpacity ||= ring.style.opacity !== '';
+							observation.sawBurstOpacity ||= burst.style.opacity !== '';
+							observation.sawSparklesOpacity ||= sparkles.style.opacity !== '';
 						} else if (observation.sawSummary) {
-							observation.finalInlineStyles = [pointsCard, pointsValue, wallet, summaryRef, burstRef, ringRef].map((element) => element?.style.cssText ?? 'missing');
+							observation.finalInlineStyles = [pointsCard, lifespanCard, pointsValue, wallet, summaryRef, burstRef, ringRef, sparklesRef].map((element) => element?.style.cssText ?? 'missing');
 							observation.done = true;
 						}
 						if (!observation.done) requestAnimationFrame(sample);
@@ -464,6 +480,7 @@ test.describe('Relay startup', () => {
 			expect(stateAfter.lifespanExpiresAtMs).toBeGreaterThan(stateBefore.lifespanExpiresAtMs);
 			const rewardSummary = page.locator('.mending-reward-layer .reward-summary');
 			await expect(rewardSummary).toBeVisible();
+			if (expectedPoints === 1) initialRewardFeedbackAt = await page.evaluate(() => Date.now());
 			await expect(rewardSummary.locator('.reward-summary-title')).toHaveText('成果を受け取りました');
 			await expect(rewardSummary.locator('.reward-summary-points')).toHaveText(`+${collectedPoints} pt`);
 			await expect(rewardStatus).toContainText(`成果を受け取りました。${collectedPoints}ポイント。`);
@@ -491,16 +508,16 @@ test.describe('Relay startup', () => {
 			expect(horizontalOverflow).toBe(false);
 			await expect(collect).toBeDisabled();
 			expect(await readLayout()).toEqual(before);
-			let observation = await page.evaluate(() => (window as typeof window & { __mendingRewardObservation?: { done: boolean; sawSummaryTransform: boolean; sawBurstTransform: boolean; sawRingTransform: boolean; sawWalletTransform: boolean } }).__mendingRewardObservation);
+			let observation = await page.evaluate(() => (window as typeof window & { __mendingRewardObservation?: { done: boolean; sawSummaryTransform: boolean; sawBurstTransform: boolean; sawRingTransform: boolean; sawSparklesTransform: boolean; sawWalletTransform: boolean; sawBorderEmphasis: boolean; sawLifespanBorderEmphasis: boolean; sawWalletEmphasis: boolean } }).__mendingRewardObservation);
 			if (reducedMotion) {
 				while (!observation?.done) {
 					await page.clock.runFor(16);
-					observation = await page.evaluate(() => (window as typeof window & { __mendingRewardObservation?: { done: boolean; sawSummaryTransform: boolean; sawBurstTransform: boolean; sawRingTransform: boolean; sawWalletTransform: boolean } }).__mendingRewardObservation);
+					observation = await page.evaluate(() => (window as typeof window & { __mendingRewardObservation?: { done: boolean; sawSummaryTransform: boolean; sawBurstTransform: boolean; sawRingTransform: boolean; sawSparklesTransform: boolean; sawWalletTransform: boolean; sawBorderEmphasis: boolean; sawLifespanBorderEmphasis: boolean; sawWalletEmphasis: boolean } }).__mendingRewardObservation);
 				}
 			} else {
-				while (!observation || !(observation.sawSummaryTransform || observation.sawBurstTransform || observation.sawRingTransform || observation.sawWalletTransform)) {
+				while (!observation || !observation.sawSummaryTransform || !observation.sawBurstTransform || !observation.sawRingTransform || !observation.sawSparklesTransform || !observation.sawWalletTransform || !observation.sawBorderEmphasis || !observation.sawLifespanBorderEmphasis || !observation.sawWalletEmphasis) {
 					await page.clock.runFor(16);
-					observation = await page.evaluate(() => (window as typeof window & { __mendingRewardObservation?: { done: boolean; sawSummaryTransform: boolean; sawBurstTransform: boolean; sawRingTransform: boolean; sawWalletTransform: boolean } }).__mendingRewardObservation);
+					observation = await page.evaluate(() => (window as typeof window & { __mendingRewardObservation?: { done: boolean; sawSummaryTransform: boolean; sawBurstTransform: boolean; sawRingTransform: boolean; sawSparklesTransform: boolean; sawWalletTransform: boolean; sawBorderEmphasis: boolean; sawLifespanBorderEmphasis: boolean; sawWalletEmphasis: boolean } }).__mendingRewardObservation);
 				}
 			}
 			const feedback = await page.evaluate(() => (window as typeof window & {
@@ -511,18 +528,25 @@ test.describe('Relay startup', () => {
 					sawSummaryTransform: boolean;
 					sawBurstTransform: boolean;
 					sawRingTransform: boolean;
+					sawSparklesTransform: boolean;
 					sawWalletTransform: boolean;
+					sawRingOpacity: boolean;
+					sawBurstOpacity: boolean;
+					sawSparklesOpacity: boolean;
+					sawLifespanBorderEmphasis: boolean;
 					finalInlineStyles: string[];
 				};
 			}).__mendingRewardObservation);
 			expect(feedback?.sawSummary).toBe(true);
 			expect(feedback?.sawBorderEmphasis).toBe(true);
+			expect(feedback?.sawLifespanBorderEmphasis).toBe(true);
 			expect(feedback?.sawWalletEmphasis).toBe(true);
-			const observedMotionTransforms = [feedback?.sawSummaryTransform, feedback?.sawBurstTransform, feedback?.sawRingTransform, feedback?.sawWalletTransform];
-			if (reducedMotion) expect(observedMotionTransforms).toEqual([false, false, false, false]);
-			else expect(observedMotionTransforms.some(Boolean)).toBe(true);
+			const observedMotionTransforms = [feedback?.sawSummaryTransform, feedback?.sawRingTransform, feedback?.sawBurstTransform, feedback?.sawSparklesTransform, feedback?.sawWalletTransform];
+			if (reducedMotion) expect(observedMotionTransforms).toEqual([false, false, false, false, false]);
+			else expect(observedMotionTransforms).toEqual([true, true, true, true, true]);
+			expect([feedback?.sawRingOpacity, feedback?.sawBurstOpacity, feedback?.sawSparklesOpacity]).toEqual([true, true, true]);
 			if (reducedMotion) {
-				expect(feedback?.finalInlineStyles).toEqual(['', '', '', '', '', '']);
+				expect(feedback?.finalInlineStyles).toEqual(['', '', '', '', '', '', '', '']);
 				await expect(rewardSummary).toHaveCount(0);
 				await page.emulateMedia({ reducedMotion: 'no-preference' });
 			}
@@ -548,7 +572,9 @@ test.describe('Relay startup', () => {
 		await expect(hudPoints).toHaveAttribute('data-value-change', 'increase');
 		await expect(hudPoints).toHaveCSS('color', 'rgb(87, 230, 138)');
 		await expect(hudPoints).toHaveCSS('animation-name', 'none');
-		await page.clock.runFor(500);
+		const currentBrowserTime = await page.evaluate(() => Date.now());
+		const remainingFeedbackLifetime = Math.max(0, 500 - (currentBrowserTime - (initialRewardFeedbackAt ?? currentBrowserTime)));
+		await page.clock.runFor(remainingFeedbackLifetime);
 		await expect(hudPoints).toHaveCSS('color', 'rgb(87, 230, 138)');
 		await page.clock.runFor(300);
 		await expect(hudPoints).not.toHaveAttribute('data-value-change', /.+/);
@@ -635,13 +661,14 @@ test.describe('Relay startup', () => {
 		await expect(reopenedAfterClosedCollection.locator('.owned-points svg')).toHaveCount(1);
 		await expect(reopenedAfterClosedCollection.locator('.owned-points-value')).toHaveCount(1);
 		await expect(reopenedAfterClosedCollection.locator('.result-list .result-card').first()).toBeVisible();
+		await expect(reopenedAfterClosedCollection.locator('.result-list .result-card')).toHaveCount(2);
 		const closedCollectionInlineStyles = await reopenedAfterClosedCollection.evaluate((dialog) => {
 			const wallet = dialog.querySelector<SVGElement>('.owned-points svg');
 			const pointsValue = dialog.querySelector<HTMLElement>('.owned-points-value');
-			const pointsCard = dialog.querySelector<HTMLElement>('.result-list .result-card:first-child');
-			return [wallet, pointsValue, pointsCard].map((element) => element?.style.cssText ?? 'missing');
+			const cards = [...dialog.querySelectorAll<HTMLElement>('.result-list .result-card')];
+			return [wallet, pointsValue, ...cards].map((element) => element?.style.cssText ?? 'missing');
 		});
-		expect(closedCollectionInlineStyles).toEqual(['', '', '']);
+		expect(closedCollectionInlineStyles).toEqual(['', '', '', '']);
 		await expect(reopenedAfterClosedCollection.getByRole('button', { name: '成果を受け取る' })).toBeDisabled();
 		await expect(reopenedAfterClosedCollection.getByRole('button', { name: '閉じる', exact: true })).toBeEnabled();
 		await expect(page.locator('[data-unified-status-hud] [data-mending-status]')).toHaveAttribute('aria-label', '作業中');

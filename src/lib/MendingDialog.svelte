@@ -4,6 +4,7 @@
 	import { createTimeline } from 'animejs/timeline';
 	import type { Scope } from 'animejs/scope';
 	import type { Timeline } from 'animejs/timeline';
+	import { MENDING_COLLECT_CUES } from '$lib/speechSoundEffects';
 	import Coins from '~icons/tabler/coins';
 	import Clock from '~icons/tabler/clock';
 	import Heart from '~icons/tabler/heart';
@@ -19,6 +20,7 @@
 	import { createPresentationScope } from '$lib/presentationMotion';
 
 	type CollectionFeedback = Readonly<{ id: number; points: number; lifespanMs: number }>;
+	const collectionCueAt = (cue: keyof typeof MENDING_COLLECT_CUES): number => MENDING_COLLECT_CUES[cue] * 1000;
 
 	type Props = Readonly<{
 		open: boolean;
@@ -95,16 +97,17 @@
 			const summary = layer?.querySelector<HTMLElement>('.reward-summary');
 			const burst = layer?.querySelector<SVGElement>('.reward-burst-rays');
 			const ring = layer?.querySelector<SVGElement>('.reward-burst-ring');
+			const sparkles = layer?.querySelector<SVGElement>('.reward-burst-sparkles');
 			const wallet = root.querySelector<SVGElement>('[data-mending-icon="wallet"] svg');
 			const pointsValue = root.querySelector<HTMLElement>('.owned-points-value');
 			const pointsCard = root.querySelector<HTMLElement>('.result-card[data-mending-icon="coins"]');
 			const lifespanCard = feedback?.lifespanMs ? root.querySelector<HTMLElement>('.result-card[data-mending-icon="heart"]') : null;
-			if (!feedback || !open || dialogContent !== root || !layer || !summary || !burst || !ring || !wallet || !pointsValue || !pointsCard) return;
+			if (!feedback || !open || dialogContent !== root || !layer || !summary || !burst || !ring || !sparkles || !wallet || !pointsValue || !pointsCard) return;
 
 			const reducedMotion = scope.matches.reducedMotion;
 			const timeline = createTimeline({
 				autoplay: false,
-				defaults: { duration: 820, ease: 'out(3)' },
+				defaults: { duration: 120, ease: 'out(3)' },
 				onComplete: () => {
 					if (activeRewardTimeline !== timeline || rewardPresentation?.id !== feedback.id) return;
 					clearRewardPresentation();
@@ -113,6 +116,9 @@
 			const pointsBorder = getComputedStyle(pointsCard).borderColor;
 			const lifespanBorder = lifespanCard ? getComputedStyle(lifespanCard).borderColor : null;
 
+			const introDuration = collectionCueAt('reward') - collectionCueAt('pickup');
+			const rewardDuration = collectionCueAt('release') - collectionCueAt('reward');
+			const tailDuration = collectionCueAt('end') - collectionCueAt('release');
 			timeline.add(summary, {
 				keyframes: reducedMotion
 					? { '0%': { opacity: 0 }, '100%': { opacity: 1 } }
@@ -120,43 +126,53 @@
 							'0%': { opacity: 0, scale: 0.86, translateY: '8px' },
 							'55%': { opacity: 1, scale: 1.04, translateY: '0px' },
 							'100%': { opacity: 1, scale: 1 }
-						}
-			}, 0);
-			timeline.add(burst, reducedMotion
-				? { opacity: { from: 0, to: 0.8 } }
-				: { opacity: { from: 0, to: 0.8 }, scale: { from: 0.55, to: 1 } }, 0);
+						},
+				duration: introDuration
+			}, collectionCueAt('pickup'));
 			timeline.add(ring, reducedMotion
-				? { opacity: { from: 0, to: 0.9 } }
-				: { opacity: { from: 0, to: 0.9 }, scale: { from: 0.7, to: 1.12 } }, 0);
+				? { opacity: { from: 0, to: 0.9 }, duration: collectionCueAt('rays') - collectionCueAt('ring') }
+				: { opacity: { from: 0, to: 0.9 }, scale: { from: 0.7, to: 1.12 }, duration: collectionCueAt('rays') - collectionCueAt('ring') }, collectionCueAt('ring'));
+			timeline.add(burst, reducedMotion
+				? { opacity: { from: 0, to: 0.82 }, duration: collectionCueAt('sparkle') - collectionCueAt('rays') }
+				: { opacity: { from: 0, to: 0.82 }, scale: { from: 0.62, to: 1.08 }, duration: collectionCueAt('sparkle') - collectionCueAt('rays') }, collectionCueAt('rays'));
+			timeline.add(sparkles, reducedMotion
+				? { opacity: { from: 0, to: 0.92 }, duration: collectionCueAt('reward') - collectionCueAt('sparkle') }
+				: { opacity: { from: 0, to: 0.92 }, scale: { from: 0.65, to: 1.1 }, duration: collectionCueAt('reward') - collectionCueAt('sparkle') }, collectionCueAt('sparkle'));
 			timeline.add(wallet, reducedMotion
-				? { keyframes: { '0%': { color: '#35e3e8' }, '45%': { color: '#b9ffff' }, '100%': { color: '#35e3e8' } } }
-				: { keyframes: { '0%': { color: '#35e3e8', scale: 1 }, '45%': { color: '#b9ffff', scale: 1.2 }, '100%': { color: '#35e3e8', scale: 1 } } }, 0);
+				? { keyframes: { '0%': { color: '#35e3e8' }, '45%': { color: '#b9ffff' }, '100%': { color: '#35e3e8' } }, duration: rewardDuration }
+				: { keyframes: { '0%': { color: '#35e3e8', scale: 1 }, '45%': { color: '#b9ffff', scale: 1.2 }, '100%': { color: '#35e3e8', scale: 1 } }, duration: rewardDuration }, collectionCueAt('reward'));
 			timeline.add(pointsValue, {
-				keyframes: { '0%': { color: '#ecfbff' }, '40%': { color: '#64f5f0' }, '100%': { color: '#ecfbff' } }
-			}, 0);
+				keyframes: { '0%': { color: '#ecfbff' }, '40%': { color: '#64f5f0' }, '100%': { color: '#ecfbff' } },
+				duration: rewardDuration
+			}, collectionCueAt('reward'));
 			timeline.add(pointsCard, {
 				keyframes: {
 					'0%': { borderColor: pointsBorder, boxShadow: 'none' },
 					'40%': { borderColor: '#64f5f0', boxShadow: '0 0 0 2px rgba(53, 227, 232, .4), 0 0 24px rgba(53, 227, 232, .34)' },
 					'100%': { borderColor: pointsBorder, boxShadow: 'none' }
-				}
-			}, 0);
+				},
+				duration: rewardDuration
+			}, collectionCueAt('reward'));
 			if (lifespanCard && lifespanBorder) {
 				timeline.add(lifespanCard, {
 					keyframes: {
 						'0%': { borderColor: lifespanBorder, boxShadow: 'none' },
 						'40%': { borderColor: '#64f5f0', boxShadow: '0 0 0 2px rgba(53, 227, 232, .4), 0 0 24px rgba(53, 227, 232, .34)' },
 						'100%': { borderColor: lifespanBorder, boxShadow: 'none' }
-					}
-				}, 0);
+					},
+					duration: rewardDuration
+				}, collectionCueAt('reward'));
 			}
-			timeline.add(summary, { opacity: { from: 1, to: 0 }, duration: 180 }, 640);
-			timeline.add(burst, { opacity: { from: 0.8, to: 0 }, duration: 240 }, 580);
+			timeline.add(ring, { opacity: { from: 0.9, to: 0 }, duration: tailDuration, ease: 'in(2)' }, collectionCueAt('release'));
+			timeline.add(burst, { opacity: { from: 0.82, to: 0 }, duration: tailDuration, ease: 'in(2)' }, collectionCueAt('release'));
+			timeline.add(sparkles, { opacity: { from: 0.92, to: 0 }, duration: tailDuration, ease: 'in(2)' }, collectionCueAt('release'));
+			timeline.add(summary, { opacity: { from: 1, to: 0 }, duration: tailDuration, ease: 'in(2)' }, collectionCueAt('release'));
 
 			const styleTargets = [
 				{ element: summary, properties: ['opacity', 'transform'] },
 				{ element: burst, properties: ['opacity', 'transform'] },
 				{ element: ring, properties: ['opacity', 'transform'] },
+				{ element: sparkles, properties: ['opacity', 'transform'] },
 				{ element: wallet, properties: ['color', 'transform'] },
 				{ element: pointsValue, properties: ['color'] },
 				{ element: pointsCard, properties: ['border-color', 'box-shadow'] },
@@ -302,10 +318,13 @@
 						<svg class="reward-burst" viewBox="0 0 240 240" focusable="false">
 							<g class="reward-burst-rays" fill="#64f5f0" stroke="#64f5f0" stroke-linecap="round" stroke-width="2.5">
 								<path d="M120 8v28 M120 204v28 M8 120h28 M204 120h28 M41 41l20 20 M179 179l20 20 M199 41l-20 20 M61 179l-20 20" fill="none" />
+							</g>
+							<g class="reward-burst-sparkles" fill="#b9ffff" stroke="#64f5f0" stroke-linecap="round" stroke-width="1.5">
 								<circle cx="120" cy="51" r="3" /><circle cx="189" cy="120" r="3" />
 								<circle cx="120" cy="189" r="3" /><circle cx="51" cy="120" r="3" />
 								<circle cx="71" cy="71" r="2.5" /><circle cx="169" cy="71" r="2.5" />
 								<circle cx="169" cy="169" r="2.5" /><circle cx="71" cy="169" r="2.5" />
+								<path d="M120 43v16 M112 51h16 M185 120h8 M189 116v8 M120 181v16 M112 189h16 M47 120h8 M51 116v8" fill="none" />
 							</g>
 							<circle class="reward-burst-ring" cx="120" cy="120" r="72" fill="none" stroke="#35e3e8" stroke-width="2" />
 						</svg>
@@ -331,8 +350,8 @@
 	.mending-reward-layer { position: fixed; inset: 0; z-index: 102; overflow: hidden; pointer-events: none; }
 	.reward-burst-anchor, .reward-summary-anchor { position: fixed; inset: 0; display: grid; place-items: center; }
 	.reward-burst { width: min(72vw, 360px); max-height: 64svh; overflow: visible; }
-	.reward-burst-rays, .reward-burst-ring { transform-box: fill-box; transform-origin: center; }
-	.reward-summary { display: grid; justify-items: center; gap: 4px; width: min(420px, calc(100vw - 40px)); padding: 18px 22px; border: 1px solid rgba(100, 245, 240, .78); border-radius: 16px; background: linear-gradient(180deg, rgba(4, 35, 47, .97), rgba(3, 24, 36, .97)); box-shadow: 0 0 0 1px rgba(53, 227, 232, .18) inset, 0 0 32px rgba(53, 227, 232, .24); color: #ecfbff; text-align: center; }
+	.reward-burst-rays, .reward-burst-ring, .reward-burst-sparkles { opacity: 0; transform-box: fill-box; transform-origin: center; }
+	.reward-summary { display: grid; justify-items: center; gap: 4px; width: min(420px, calc(100vw - 40px)); padding: 18px 22px; border: 1px solid rgba(100, 245, 240, .78); border-radius: 16px; background: linear-gradient(180deg, rgba(4, 35, 47, .97), rgba(3, 24, 36, .97)); box-shadow: 0 0 0 1px rgba(53, 227, 232, .18) inset, 0 0 32px rgba(53, 227, 232, .24); color: #ecfbff; text-align: center; opacity: 0; }
 	.reward-summary-title { color: #b9ffff; font-size: clamp(18px, 4vw, 23px); font-weight: 850; line-height: 1.2; }
 	.reward-summary-points { color: #fff; font-size: clamp(28px, 7vw, 40px); font-weight: 900; line-height: 1.15; font-variant-numeric: tabular-nums; }
 	.reward-summary-lifespan { color: #64f5f0; font-size: 16px; font-weight: 800; }
