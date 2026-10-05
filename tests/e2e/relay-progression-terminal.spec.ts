@@ -390,9 +390,12 @@ test.describe('Relay startup', () => {
 						sawSummary: false,
 						sawBorderEmphasis: false,
 						sawWalletEmphasis: false,
-						sawMotionTransform: false,
+						sawSummaryTransform: false,
+						sawBurstTransform: false,
+						sawRingTransform: false,
+						sawWalletTransform: false,
 						finalInlineStyles: [] as string[],
-					done: false
+						done: false
 					};
 					const observedWindow = window as typeof window & {
 						__mendingRewardObservation?: typeof observation;
@@ -417,7 +420,10 @@ test.describe('Relay startup', () => {
 							burstRef = burst;
 							ringRef = ring;
 							observation.sawSummary = true;
-							observation.sawMotionTransform ||= hasTransform(summary) || hasTransform(burst) || hasTransform(ring) || hasTransform(wallet);
+							observation.sawSummaryTransform ||= hasTransform(summary);
+							observation.sawBurstTransform ||= hasTransform(burst);
+							observation.sawRingTransform ||= hasTransform(ring);
+							observation.sawWalletTransform ||= hasTransform(wallet);
 						} else if (observation.sawSummary) {
 							observation.finalInlineStyles = [pointsCard, pointsValue, wallet, summaryRef, burstRef, ringRef].map((element) => element?.style.cssText ?? 'missing');
 							observation.done = true;
@@ -444,6 +450,9 @@ test.describe('Relay startup', () => {
 			});
 			const before = await readLayout();
 			const stateBefore = await readRelayGameState(page);
+			const rewardStatus = dialog.locator('[role="status"][aria-live="polite"]');
+			await expect(rewardStatus).toHaveCount(1);
+			await expect(rewardStatus).toHaveText('');
 			await collect.click();
 			await expect.poll(async () => {
 				const current = await readRelayGameState(page);
@@ -452,11 +461,11 @@ test.describe('Relay startup', () => {
 			const stateAfter = await readRelayGameState(page);
 			const collectedPoints = stateAfter.points - stateBefore.points;
 			const materializedLifespan = Math.max(0, stateAfter.lifespanExpiresAtMs - stateBefore.lifespanExpiresAtMs);
+			expect(stateAfter.lifespanExpiresAtMs).toBeGreaterThan(stateBefore.lifespanExpiresAtMs);
 			const rewardSummary = page.locator('.mending-reward-layer .reward-summary');
 			await expect(rewardSummary).toBeVisible();
 			await expect(rewardSummary.locator('.reward-summary-title')).toHaveText('成果を受け取りました');
 			await expect(rewardSummary.locator('.reward-summary-points')).toHaveText(`+${collectedPoints} pt`);
-			const rewardStatus = dialog.locator('[role="status"][aria-live="polite"]');
 			await expect(rewardStatus).toContainText(`成果を受け取りました。${collectedPoints}ポイント。`);
 			if (materializedLifespan > 0) {
 				const formattedLifespan = formatElapsedDuration(materializedLifespan);
@@ -482,16 +491,16 @@ test.describe('Relay startup', () => {
 			expect(horizontalOverflow).toBe(false);
 			await expect(collect).toBeDisabled();
 			expect(await readLayout()).toEqual(before);
-			let observation = await page.evaluate(() => (window as typeof window & { __mendingRewardObservation?: { done: boolean; sawMotionTransform: boolean } }).__mendingRewardObservation);
+			let observation = await page.evaluate(() => (window as typeof window & { __mendingRewardObservation?: { done: boolean; sawSummaryTransform: boolean; sawBurstTransform: boolean; sawRingTransform: boolean; sawWalletTransform: boolean } }).__mendingRewardObservation);
 			if (reducedMotion) {
 				while (!observation?.done) {
 					await page.clock.runFor(16);
-					observation = await page.evaluate(() => (window as typeof window & { __mendingRewardObservation?: { done: boolean; sawMotionTransform: boolean } }).__mendingRewardObservation);
+					observation = await page.evaluate(() => (window as typeof window & { __mendingRewardObservation?: { done: boolean; sawSummaryTransform: boolean; sawBurstTransform: boolean; sawRingTransform: boolean; sawWalletTransform: boolean } }).__mendingRewardObservation);
 				}
 			} else {
-				while (!observation?.sawMotionTransform) {
+				while (!observation || !(observation.sawSummaryTransform || observation.sawBurstTransform || observation.sawRingTransform || observation.sawWalletTransform)) {
 					await page.clock.runFor(16);
-					observation = await page.evaluate(() => (window as typeof window & { __mendingRewardObservation?: { done: boolean; sawMotionTransform: boolean } }).__mendingRewardObservation);
+					observation = await page.evaluate(() => (window as typeof window & { __mendingRewardObservation?: { done: boolean; sawSummaryTransform: boolean; sawBurstTransform: boolean; sawRingTransform: boolean; sawWalletTransform: boolean } }).__mendingRewardObservation);
 				}
 			}
 			const feedback = await page.evaluate(() => (window as typeof window & {
@@ -499,17 +508,23 @@ test.describe('Relay startup', () => {
 					sawSummary: boolean;
 					sawBorderEmphasis: boolean;
 					sawWalletEmphasis: boolean;
-					sawMotionTransform: boolean;
+					sawSummaryTransform: boolean;
+					sawBurstTransform: boolean;
+					sawRingTransform: boolean;
+					sawWalletTransform: boolean;
 					finalInlineStyles: string[];
 				};
 			}).__mendingRewardObservation);
 			expect(feedback?.sawSummary).toBe(true);
 			expect(feedback?.sawBorderEmphasis).toBe(true);
 			expect(feedback?.sawWalletEmphasis).toBe(true);
-			expect(feedback?.sawMotionTransform).toBe(!reducedMotion);
+			const observedMotionTransforms = [feedback?.sawSummaryTransform, feedback?.sawBurstTransform, feedback?.sawRingTransform, feedback?.sawWalletTransform];
+			if (reducedMotion) expect(observedMotionTransforms).toEqual([false, false, false, false]);
+			else expect(observedMotionTransforms.some(Boolean)).toBe(true);
 			if (reducedMotion) {
 				expect(feedback?.finalInlineStyles).toEqual(['', '', '', '', '', '']);
 				await expect(rewardSummary).toHaveCount(0);
+				await page.emulateMedia({ reducedMotion: 'no-preference' });
 			}
 		};
 		await assertCollectionLayout({ width: 1280, height: 800 }, 1);
@@ -521,7 +536,9 @@ test.describe('Relay startup', () => {
 		const reopenedRewardDialog = page.getByRole('dialog');
 		await expect(reopenedRewardDialog).toContainText('1 pt');
 		await expect(page.locator('.mending-reward-layer .reward-summary')).toHaveCount(0);
-		await expect(reopenedRewardDialog.locator('[role="status"][aria-live="polite"]')).toHaveCount(0);
+		const reopenedRewardStatus = reopenedRewardDialog.locator('[role="status"][aria-live="polite"]');
+		await expect(reopenedRewardStatus).toHaveCount(1);
+		await expect(reopenedRewardStatus).toHaveText('');
 		await expect.poll(async () => {
 			const partialState = await readRelayGameState(page);
 			return partialState.points === 1 && partialState.pointProgressTicks > 0 && partialState.pointProgressTicks < 60_000_000;
@@ -547,7 +564,7 @@ test.describe('Relay startup', () => {
 		}
 		await terminal.click();
 		await expect(page.getByRole('dialog')).toContainText('+3 pt');
-		await assertCollectionLayout({ width: 390, height: 844 }, 4);
+		await assertCollectionLayout({ width: 390, height: 844 }, 4, true);
 		await page.setViewportSize(originalViewport);
 		await expect.poll(async () => (await readRelayGameState(page)).points).toBe(4);
 
@@ -611,7 +628,22 @@ test.describe('Relay startup', () => {
 		await expect(reopenedAfterClosedCollection).toContainText('上限まで あと5分');
 		await expect(reopenedAfterClosedCollection).toContainText('+0 pt');
 		await expect(page.locator('.mending-reward-layer .reward-summary')).toHaveCount(0);
-		await expect(reopenedAfterClosedCollection.locator('[role="status"][aria-live="polite"]')).toHaveCount(0);
+		const closedCollectionStatus = reopenedAfterClosedCollection.locator('[role="status"][aria-live="polite"]');
+		await expect(closedCollectionStatus).toHaveCount(1);
+		await expect(closedCollectionStatus).toHaveText('');
+		await expect(page.locator('.mending-reward-layer .reward-burst-rays, .mending-reward-layer .reward-burst-ring')).toHaveCount(0);
+		await expect(reopenedAfterClosedCollection.locator('.owned-points svg')).toHaveCount(1);
+		await expect(reopenedAfterClosedCollection.locator('.owned-points-value')).toHaveCount(1);
+		await expect(reopenedAfterClosedCollection.locator('.result-list .result-card').first()).toBeVisible();
+		const closedCollectionInlineStyles = await reopenedAfterClosedCollection.evaluate((dialog) => {
+			const wallet = dialog.querySelector<SVGElement>('.owned-points svg');
+			const pointsValue = dialog.querySelector<HTMLElement>('.owned-points-value');
+			const pointsCard = dialog.querySelector<HTMLElement>('.result-list .result-card:first-child');
+			return [wallet, pointsValue, pointsCard].map((element) => element?.style.cssText ?? 'missing');
+		});
+		expect(closedCollectionInlineStyles).toEqual(['', '', '']);
+		await expect(reopenedAfterClosedCollection.getByRole('button', { name: '成果を受け取る' })).toBeDisabled();
+		await expect(reopenedAfterClosedCollection.getByRole('button', { name: '閉じる', exact: true })).toBeEnabled();
 		await expect(page.locator('[data-unified-status-hud] [data-mending-status]')).toHaveAttribute('aria-label', '作業中');
 		await expect(page.locator('[data-unified-status-hud] [data-mending-status]')).toHaveAttribute('data-mending-icon', 'tool');
 		await expect(page.locator('[data-unified-status-hud] [data-mending-rate]')).toHaveText('1.00 pt/分+0.1h/h');

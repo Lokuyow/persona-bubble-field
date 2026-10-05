@@ -246,9 +246,7 @@
 					</div>
 					<Dialog.Close class="action-button action-button-tertiary action-button-close" aria-label="閉じる"><X aria-hidden="true" /></Dialog.Close>
 				</div>
-				{#if rewardPresentation}
-					<div class="sr-only" role="status" aria-live="polite" aria-atomic="true">{announceCollection(rewardPresentation)}</div>
-				{/if}
+				<div class="sr-only" role="status" aria-live="polite" aria-atomic="true">{rewardPresentation ? announceCollection(rewardPresentation) : ''}</div>
 				{#if startupFeedback}
 					{#key startupFeedback.id}
 						<div class="mending-startup-feedback" aria-live="polite" aria-atomic="true">
