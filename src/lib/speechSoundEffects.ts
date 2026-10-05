@@ -37,13 +37,15 @@ export function newLiveBubbleEffects(previous: ConversationState, next: Conversa
 
 export const SPEECH_SOUND_DURATIONS = { normal: 0.225, shout: 0.420, monologue: 0.715 } as const;
 export const MENDING_COLLECT_CUES = {
-	pickup: 0.035,
-	ring: 0.15,
-	rays: 0.27,
-	sparkle: 0.36,
-	reward: 0.43,
-	release: 0.69,
-	end: 0.91
+	impact: 0,
+	pickup: 0.13,
+	ring: 0.30,
+	rays: 0.48,
+	sparkle: 0.67,
+	reward: 0.82,
+	jackpot: 0.90,
+	release: 1.06,
+	end: 1.26
 } as const;
 export const UI_SOUND_DURATIONS = { collect: 0.19, 'mending-collect': MENDING_COLLECT_CUES.end, 'level-up': 0.32, startup: 0.38, 'cooperation-start': 0.43,
 	'tag-game-benefit': 0.26, 'tag-game-calamity': 0.11, 'tag-game-transfer': 0.34, 'tag-game-switch': 0.30,
@@ -54,7 +56,7 @@ export const SOUND_EFFECT_GAINS: Readonly<Record<SoundEffect, number>> = {
 	shout: 1,
 	monologue: 1,
 	collect: 0.75,
-	'mending-collect': 0.62,
+	'mending-collect': 0.96,
 	'level-up': 0.75,
 	startup: 0.65,
 	'cooperation-start': 0.65,
@@ -252,19 +254,33 @@ function createMendingCollectSamples(sampleRate: number): Float32Array {
 	const length = Math.ceil(sampleRate * duration);
 	const output = new Float32Array(length);
 	const sparkleNoise = seededNoise(length, 0x6d656e64, sampleRate, 2_800, 9_000, 3);
+	const impactNoise = seededNoise(length, 0x4a41434b, sampleRate, 90, 1_800, 3);
 	const notes = [
-		{ at: MENDING_COLLECT_CUES.pickup, frequency: 494, gain: 0.12, decay: 0.10 },
-		{ at: MENDING_COLLECT_CUES.ring, frequency: 659, gain: 0.16, decay: 0.14 },
-		{ at: MENDING_COLLECT_CUES.rays, frequency: 784, gain: 0.16, decay: 0.15 },
-		{ at: MENDING_COLLECT_CUES.sparkle, frequency: 988, gain: 0.13, decay: 0.17 },
-		{ at: MENDING_COLLECT_CUES.reward, frequency: 784, gain: 0.17, decay: 0.23 },
-		{ at: MENDING_COLLECT_CUES.reward, frequency: 988, gain: 0.11, decay: 0.21 },
-		{ at: MENDING_COLLECT_CUES.reward, frequency: 1_176, gain: 0.07, decay: 0.19 }
+		{ at: MENDING_COLLECT_CUES.pickup, frequency: 523, gain: 0.19, decay: 0.15 },
+		{ at: MENDING_COLLECT_CUES.ring, frequency: 659, gain: 0.21, decay: 0.17 },
+		{ at: MENDING_COLLECT_CUES.rays, frequency: 784, gain: 0.22, decay: 0.18 },
+		{ at: MENDING_COLLECT_CUES.sparkle, frequency: 988, gain: 0.18, decay: 0.20 },
+		{ at: MENDING_COLLECT_CUES.sparkle + 0.055, frequency: 1_318, gain: 0.12, decay: 0.23 },
+		{ at: MENDING_COLLECT_CUES.sparkle + 0.105, frequency: 1_568, gain: 0.09, decay: 0.25 },
+		{ at: MENDING_COLLECT_CUES.reward, frequency: 659, gain: 0.22, decay: 0.34 },
+		{ at: MENDING_COLLECT_CUES.reward, frequency: 831, gain: 0.19, decay: 0.32 },
+		{ at: MENDING_COLLECT_CUES.reward, frequency: 988, gain: 0.17, decay: 0.30 },
+		{ at: MENDING_COLLECT_CUES.reward, frequency: 1_318, gain: 0.12, decay: 0.28 },
+		{ at: MENDING_COLLECT_CUES.jackpot, frequency: 1_568, gain: 0.19, decay: 0.30 },
+		{ at: MENDING_COLLECT_CUES.jackpot, frequency: 1_976, gain: 0.13, decay: 0.34 },
+		{ at: MENDING_COLLECT_CUES.jackpot, frequency: 2_637, gain: 0.075, decay: 0.38 }
 	] as const;
-	const transientCues = [MENDING_COLLECT_CUES.ring, MENDING_COLLECT_CUES.rays, MENDING_COLLECT_CUES.sparkle, MENDING_COLLECT_CUES.reward] as const;
+	const transientCues = [MENDING_COLLECT_CUES.pickup, MENDING_COLLECT_CUES.ring, MENDING_COLLECT_CUES.rays, MENDING_COLLECT_CUES.sparkle, MENDING_COLLECT_CUES.reward, MENDING_COLLECT_CUES.jackpot] as const;
 	for (let index = 0; index < length; index += 1) {
 		const time = index / sampleRate;
 		const release = clamp01((duration - time) / (duration - MENDING_COLLECT_CUES.release));
+		const impact = time - MENDING_COLLECT_CUES.impact;
+		if (impact >= 0) {
+			const bodyEnvelope = Math.exp(-impact / 0.072) * clamp01((MENDING_COLLECT_CUES.pickup - time) / 0.045);
+			const bodyPhase = TAU * (92 * impact - 34 * impact * impact);
+			const click = Math.exp(-impact / 0.009) * clamp01(impact / 0.0005);
+			output[index] += 0.42 * Math.sin(bodyPhase) * bodyEnvelope + 0.11 * impactNoise[index] * click;
+		}
 		for (const note of notes) {
 			const local = time - note.at;
 			if (local < 0) continue;
@@ -277,8 +293,14 @@ function createMendingCollectSamples(sampleRate: number): Float32Array {
 		for (const cue of transientCues) {
 			const local = time - cue;
 			if (local < 0) continue;
-			const transient = clamp01(local / 0.0015) * Math.exp(-local / 0.022) * release;
-			output[index] += 0.035 * sparkleNoise[index] * transient;
+			const transient = clamp01(local / 0.0015) * Math.exp(-local / (cue === MENDING_COLLECT_CUES.jackpot ? 0.075 : 0.028)) * release;
+			output[index] += (cue === MENDING_COLLECT_CUES.jackpot ? 0.075 : 0.045) * sparkleNoise[index] * transient;
+		}
+		const shimmerLocal = time - MENDING_COLLECT_CUES.release;
+		if (shimmerLocal >= 0) {
+			const shimmer = Math.exp(-shimmerLocal / 0.12) * release;
+			const shimmerPhase = TAU * (2_640 * shimmerLocal + 980 * shimmerLocal * shimmerLocal);
+			output[index] += shimmer * (0.085 * sparkleNoise[index] + 0.045 * Math.sin(shimmerPhase) + 0.025 * Math.sin(shimmerPhase * 1.5));
 		}
 	}
 	return normalize(output);

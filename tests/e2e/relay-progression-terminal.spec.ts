@@ -26,6 +26,32 @@ import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { installFieldFrameSampling, readFieldFrames, sampleRenderedField } from './helpers/fieldFrames';
 import { CHANNEL_ID, AUTHORITATIVE_RELAYS, fixtureSecret, testEvents, isDeathTraceEvent, installDelayedRelay, relayState, dragRelayJoystick, publishedMessages, waitForPublishedMessageCount, pauseAtCurrentBrowserTime, startSelectedRun, openReadyRelayWorld, openClearReadyWorld, installPromptApiStub, seedRelayAccount, readRelayGameState, overwriteRelayGameState, overwriteRelayMendingBuild, seedUnavailablePersona, installDeathTransitionFailure, armDeathTransitionFailure, chooseMoveToward, moveRelaySelfTo } from './helpers/relayHarness';
 
+type MendingRewardObservation = {
+	done: boolean;
+	sawSummary: boolean;
+	sawImpactBloom: boolean;
+	sawJackpotBloom: boolean;
+	sawPrimaryRays: boolean;
+	sawSecondaryRays: boolean;
+	sawRings: boolean;
+	sawParticles: boolean;
+	sawBorderEmphasis: boolean;
+	sawLifespanBorderEmphasis: boolean;
+	sawCardsGlow: boolean;
+	sawWalletEmphasis: boolean;
+	sawSummaryTransform: boolean;
+	sawRaysTransform: boolean;
+	sawRingTransform: boolean;
+	sawSparklesTransform: boolean;
+	sawParticlesTransform: boolean;
+	sawPointsTransform: boolean;
+	sawWalletTransform: boolean;
+	sawPointsGlow: boolean;
+	sawRewardNumberEmphasis: boolean;
+	sawDecorativeOpacity: boolean;
+	finalInlineStyles: string[];
+};
+
 test.describe('Relay startup', () => {
 	test('shows Root-accelerated point speed before work and keeps it after work starts', async ({ page }) => {
 		const startTime = Date.now();
@@ -374,7 +400,7 @@ test.describe('Relay startup', () => {
 		}
 		await page.setViewportSize({ width: 1280, height: 800 });
 		const beforeMendingReward = await publishedWorldStateCount();
-		let initialRewardFeedbackAt: number | null = null;
+		const hudPoints = page.locator('[data-unified-status-hud] [data-points-value]');
 		const assertCollectionLayout = async (viewport: { width: number; height: number }, expectedPoints: number, reducedMotion = false) => {
 			await page.setViewportSize(viewport);
 			if (reducedMotion) await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -385,34 +411,51 @@ test.describe('Relay startup', () => {
 					const lifespanCard = dialog.querySelector<HTMLElement>('.result-card[data-mending-icon="heart"]')!;
 					const wallet = dialog.querySelector<SVGElement>('[data-mending-icon="wallet"] svg')!;
 					const pointsValue = dialog.querySelector<HTMLElement>('.owned-points-value')!;
+					const initialPointsCardShadow = getComputedStyle(pointsCard).boxShadow;
+					const initialLifespanCardShadow = getComputedStyle(lifespanCard).boxShadow;
 					const observation = {
 						baselineBorder: getComputedStyle(pointsCard).borderColor,
 						baselineLifespanBorder: getComputedStyle(lifespanCard).borderColor,
 						baselineWallet: getComputedStyle(wallet).color,
 						baselinePoints: getComputedStyle(pointsValue).color,
 						sawSummary: false,
+						sawImpactBloom: false,
+						sawJackpotBloom: false,
+						sawPrimaryRays: false,
+						sawSecondaryRays: false,
+						sawRings: false,
+						sawParticles: false,
 						sawBorderEmphasis: false,
 						sawLifespanBorderEmphasis: false,
+						sawCardsGlow: false,
 						sawWalletEmphasis: false,
 						sawSummaryTransform: false,
-						sawBurstTransform: false,
+						sawRaysTransform: false,
 						sawRingTransform: false,
 						sawSparklesTransform: false,
+						sawParticlesTransform: false,
+						sawPointsTransform: false,
 						sawWalletTransform: false,
-						sawRingOpacity: false,
-						sawBurstOpacity: false,
-						sawSparklesOpacity: false,
+						sawPointsGlow: false,
+						sawRewardNumberEmphasis: false,
+						sawDecorativeOpacity: false,
 						finalInlineStyles: [] as string[],
 						done: false
 					};
 					const observedWindow = window as typeof window & {
-						__mendingRewardObservation?: typeof observation;
+						__mendingRewardObservation?: MendingRewardObservation;
 					};
 					observedWindow.__mendingRewardObservation = observation;
 					let summaryRef: HTMLElement | null = null;
-					let burstRef: SVGElement | null = null;
-					let ringRef: SVGElement | null = null;
+					let impactBloomRef: HTMLElement | null = null;
+					let jackpotBloomRef: HTMLElement | null = null;
+					let primaryRaysRef: SVGElement | null = null;
+					let secondaryRaysRef: SVGElement | null = null;
+					let ringRefs: SVGElement[] = [];
 					let sparklesRef: SVGElement | null = null;
+					let particleRefs: SVGElement[] = [];
+					let pointsRef: HTMLElement | null = null;
+					let pointsBaselineShadow: string | null = null;
 					const hasTransform = (element: HTMLElement | SVGElement): boolean => {
 						const style = getComputedStyle(element);
 						return element.style.transform !== '' || element.style.scale !== '' || element.style.translate !== '' || element.style.rotate !== '' ||
@@ -423,25 +466,45 @@ test.describe('Relay startup', () => {
 						observation.sawLifespanBorderEmphasis ||= getComputedStyle(lifespanCard).borderColor !== observation.baselineLifespanBorder;
 						observation.sawWalletEmphasis ||= getComputedStyle(wallet).color !== observation.baselineWallet || getComputedStyle(pointsValue).color !== observation.baselinePoints;
 						const summary = rewardLayer.querySelector<HTMLElement>('.reward-summary');
-						const burst = rewardLayer.querySelector<SVGElement>('.reward-burst-rays');
-						const ring = rewardLayer.querySelector<SVGElement>('.reward-burst-ring');
+						const impactBloom = rewardLayer.querySelector<HTMLElement>('.reward-impact-bloom');
+						const jackpotBloom = rewardLayer.querySelector<HTMLElement>('.reward-jackpot-bloom');
+						const primaryRays = rewardLayer.querySelector<SVGElement>('.reward-burst-rays-primary');
+						const secondaryRays = rewardLayer.querySelector<SVGElement>('.reward-burst-rays-secondary');
+						const rings = [...rewardLayer.querySelectorAll<SVGElement>('.reward-burst-ring')];
 						const sparkles = rewardLayer.querySelector<SVGElement>('.reward-burst-sparkles');
-						if (summary && burst && ring && sparkles) {
+						const particles = [...rewardLayer.querySelectorAll<SVGElement>('.reward-particle')];
+						const rewardPoints = rewardLayer.querySelector<HTMLElement>('.reward-summary-points');
+						if (summary && impactBloom && jackpotBloom && primaryRays && secondaryRays && rings.length > 1 && sparkles && particles.length > 0 && rewardPoints) {
 							summaryRef = summary;
-							burstRef = burst;
-							ringRef = ring;
+							impactBloomRef = impactBloom;
+							jackpotBloomRef = jackpotBloom;
+							primaryRaysRef = primaryRays;
+							secondaryRaysRef = secondaryRays;
+							ringRefs = rings;
 							sparklesRef = sparkles;
+							particleRefs = particles;
+							pointsRef = rewardPoints;
+							pointsBaselineShadow ??= getComputedStyle(rewardPoints).textShadow;
 							observation.sawSummary = true;
+							observation.sawImpactBloom ||= Number(getComputedStyle(impactBloom).opacity) > 0;
+							observation.sawJackpotBloom ||= Number(getComputedStyle(jackpotBloom).opacity) > 0;
+							observation.sawPrimaryRays ||= Number(getComputedStyle(primaryRays).opacity) > 0;
+							observation.sawSecondaryRays ||= Number(getComputedStyle(secondaryRays).opacity) > 0;
+							observation.sawRings ||= rings.some((ring) => Number(getComputedStyle(ring).opacity) > 0);
+							observation.sawParticles ||= particles.some((particle) => Number(getComputedStyle(particle).opacity) > 0);
 							observation.sawSummaryTransform ||= hasTransform(summary);
-							observation.sawBurstTransform ||= hasTransform(burst);
-							observation.sawRingTransform ||= hasTransform(ring);
+							observation.sawRaysTransform ||= hasTransform(primaryRays) || hasTransform(secondaryRays);
+							observation.sawRingTransform ||= rings.some(hasTransform);
 							observation.sawSparklesTransform ||= hasTransform(sparkles);
+							observation.sawParticlesTransform ||= particles.some(hasTransform);
+							observation.sawPointsTransform ||= hasTransform(rewardPoints);
 							observation.sawWalletTransform ||= hasTransform(wallet);
-							observation.sawRingOpacity ||= ring.style.opacity !== '';
-							observation.sawBurstOpacity ||= burst.style.opacity !== '';
-							observation.sawSparklesOpacity ||= sparkles.style.opacity !== '';
+							observation.sawPointsGlow ||= getComputedStyle(pointsValue).textShadow !== 'none';
+							observation.sawRewardNumberEmphasis ||= getComputedStyle(rewardPoints).textShadow !== pointsBaselineShadow;
+							observation.sawCardsGlow ||= getComputedStyle(pointsCard).boxShadow !== initialPointsCardShadow || getComputedStyle(lifespanCard).boxShadow !== initialLifespanCardShadow;
+							observation.sawDecorativeOpacity ||= observation.sawImpactBloom && observation.sawJackpotBloom && observation.sawPrimaryRays && observation.sawSecondaryRays && observation.sawRings && Number(getComputedStyle(sparkles).opacity) > 0 && observation.sawParticles;
 						} else if (observation.sawSummary) {
-							observation.finalInlineStyles = [pointsCard, lifespanCard, pointsValue, wallet, summaryRef, burstRef, ringRef, sparklesRef].map((element) => element?.style.cssText ?? 'missing');
+							observation.finalInlineStyles = [pointsCard, lifespanCard, pointsValue, wallet, summaryRef, impactBloomRef, jackpotBloomRef, primaryRaysRef, secondaryRaysRef, ...ringRefs, sparklesRef, ...particleRefs, pointsRef].map((element) => element?.style.cssText ?? 'missing');
 							observation.done = true;
 						}
 						if (!observation.done) requestAnimationFrame(sample);
@@ -480,7 +543,6 @@ test.describe('Relay startup', () => {
 			expect(stateAfter.lifespanExpiresAtMs).toBeGreaterThan(stateBefore.lifespanExpiresAtMs);
 			const rewardSummary = page.locator('.mending-reward-layer .reward-summary');
 			await expect(rewardSummary).toBeVisible();
-			if (expectedPoints === 1) initialRewardFeedbackAt = await page.evaluate(() => Date.now());
 			await expect(rewardSummary.locator('.reward-summary-title')).toHaveText('成果を受け取りました');
 			await expect(rewardSummary.locator('.reward-summary-points')).toHaveText(`+${collectedPoints} pt`);
 			await expect(rewardStatus).toContainText(`成果を受け取りました。${collectedPoints}ポイント。`);
@@ -497,6 +559,9 @@ test.describe('Relay startup', () => {
 				overflow: getComputedStyle(layer).overflow
 			}));
 			expect(rewardLayerState).toEqual({ pointerEvents: 'none', overflow: 'hidden' });
+			await expect(hudPoints).toHaveAttribute('data-value-change', 'increase');
+			await expect(hudPoints).toHaveCSS('color', 'rgb(87, 230, 138)');
+			await expect(hudPoints).toHaveCSS('animation-name', 'none');
 			const pointsCard = dialog.locator('.result-card[data-mending-icon="coins"]');
 			const lifespanCard = dialog.locator('.result-card[data-mending-icon="heart"]');
 			await expect(pointsCard.locator('.result-label')).toHaveText('未回収ポイント');
@@ -508,46 +573,43 @@ test.describe('Relay startup', () => {
 			expect(horizontalOverflow).toBe(false);
 			await expect(collect).toBeDisabled();
 			expect(await readLayout()).toEqual(before);
-			let observation = await page.evaluate(() => (window as typeof window & { __mendingRewardObservation?: { done: boolean; sawSummaryTransform: boolean; sawBurstTransform: boolean; sawRingTransform: boolean; sawSparklesTransform: boolean; sawWalletTransform: boolean; sawBorderEmphasis: boolean; sawLifespanBorderEmphasis: boolean; sawWalletEmphasis: boolean } }).__mendingRewardObservation);
+			let observation = await page.evaluate(() => (window as typeof window & { __mendingRewardObservation?: MendingRewardObservation }).__mendingRewardObservation);
 			if (reducedMotion) {
 				while (!observation?.done) {
 					await page.clock.runFor(16);
-					observation = await page.evaluate(() => (window as typeof window & { __mendingRewardObservation?: { done: boolean; sawSummaryTransform: boolean; sawBurstTransform: boolean; sawRingTransform: boolean; sawSparklesTransform: boolean; sawWalletTransform: boolean; sawBorderEmphasis: boolean; sawLifespanBorderEmphasis: boolean; sawWalletEmphasis: boolean } }).__mendingRewardObservation);
+					observation = await page.evaluate(() => (window as typeof window & { __mendingRewardObservation?: MendingRewardObservation }).__mendingRewardObservation);
 				}
 			} else {
-				while (!observation || !observation.sawSummaryTransform || !observation.sawBurstTransform || !observation.sawRingTransform || !observation.sawSparklesTransform || !observation.sawWalletTransform || !observation.sawBorderEmphasis || !observation.sawLifespanBorderEmphasis || !observation.sawWalletEmphasis) {
+				while (!observation || !observation.sawDecorativeOpacity || !observation.sawSummaryTransform || !observation.sawRaysTransform || !observation.sawRingTransform || !observation.sawSparklesTransform || !observation.sawParticlesTransform || !observation.sawPointsTransform || !observation.sawWalletTransform || !observation.sawBorderEmphasis || !observation.sawLifespanBorderEmphasis || !observation.sawCardsGlow || !observation.sawWalletEmphasis || !observation.sawPointsGlow || !observation.sawRewardNumberEmphasis) {
 					await page.clock.runFor(16);
-					observation = await page.evaluate(() => (window as typeof window & { __mendingRewardObservation?: { done: boolean; sawSummaryTransform: boolean; sawBurstTransform: boolean; sawRingTransform: boolean; sawSparklesTransform: boolean; sawWalletTransform: boolean; sawBorderEmphasis: boolean; sawLifespanBorderEmphasis: boolean; sawWalletEmphasis: boolean } }).__mendingRewardObservation);
+					observation = await page.evaluate(() => (window as typeof window & { __mendingRewardObservation?: MendingRewardObservation }).__mendingRewardObservation);
 				}
 			}
-			const feedback = await page.evaluate(() => (window as typeof window & {
-				__mendingRewardObservation?: {
-					sawSummary: boolean;
-					sawBorderEmphasis: boolean;
-					sawWalletEmphasis: boolean;
-					sawSummaryTransform: boolean;
-					sawBurstTransform: boolean;
-					sawRingTransform: boolean;
-					sawSparklesTransform: boolean;
-					sawWalletTransform: boolean;
-					sawRingOpacity: boolean;
-					sawBurstOpacity: boolean;
-					sawSparklesOpacity: boolean;
-					sawLifespanBorderEmphasis: boolean;
-					finalInlineStyles: string[];
-				};
-			}).__mendingRewardObservation);
+			while (!observation?.done) {
+				await page.clock.runFor(16);
+				observation = await page.evaluate(() => (window as typeof window & { __mendingRewardObservation?: MendingRewardObservation }).__mendingRewardObservation);
+			}
+			const feedback = observation;
 			expect(feedback?.sawSummary).toBe(true);
+			expect(feedback?.sawImpactBloom).toBe(true);
+			expect(feedback?.sawJackpotBloom).toBe(true);
+			expect(feedback?.sawPrimaryRays).toBe(true);
+			expect(feedback?.sawSecondaryRays).toBe(true);
+			expect(feedback?.sawRings).toBe(true);
+			expect(feedback?.sawParticles).toBe(true);
+			expect(feedback?.sawDecorativeOpacity).toBe(true);
 			expect(feedback?.sawBorderEmphasis).toBe(true);
 			expect(feedback?.sawLifespanBorderEmphasis).toBe(true);
+			expect(feedback?.sawCardsGlow).toBe(true);
 			expect(feedback?.sawWalletEmphasis).toBe(true);
-			const observedMotionTransforms = [feedback?.sawSummaryTransform, feedback?.sawRingTransform, feedback?.sawBurstTransform, feedback?.sawSparklesTransform, feedback?.sawWalletTransform];
-			if (reducedMotion) expect(observedMotionTransforms).toEqual([false, false, false, false, false]);
-			else expect(observedMotionTransforms).toEqual([true, true, true, true, true]);
-			expect([feedback?.sawRingOpacity, feedback?.sawBurstOpacity, feedback?.sawSparklesOpacity]).toEqual([true, true, true]);
+			expect(feedback?.sawPointsGlow).toBe(true);
+			expect(feedback?.sawRewardNumberEmphasis).toBe(true);
+			const observedMotionTransforms = [feedback?.sawSummaryTransform, feedback?.sawRaysTransform, feedback?.sawRingTransform, feedback?.sawSparklesTransform, feedback?.sawParticlesTransform, feedback?.sawPointsTransform, feedback?.sawWalletTransform];
+			if (reducedMotion) expect(observedMotionTransforms).toEqual([false, false, false, false, false, false, false]);
+			else expect(observedMotionTransforms).toEqual([true, true, true, true, true, true, true]);
+			expect(feedback?.finalInlineStyles.every((style) => style === '')).toBe(true);
+			await expect(rewardSummary).toHaveCount(0);
 			if (reducedMotion) {
-				expect(feedback?.finalInlineStyles).toEqual(['', '', '', '', '', '', '', '']);
-				await expect(rewardSummary).toHaveCount(0);
 				await page.emulateMedia({ reducedMotion: 'no-preference' });
 			}
 		};
@@ -568,15 +630,6 @@ test.describe('Relay startup', () => {
 			return partialState.points === 1 && partialState.pointProgressTicks > 0 && partialState.pointProgressTicks < 60_000_000;
 		}).toBe(true);
 		await expect.poll(publishedWorldStateCount).toBeGreaterThan(beforeMendingReward);
-		const hudPoints = page.locator('[data-unified-status-hud] [data-points-value]');
-		await expect(hudPoints).toHaveAttribute('data-value-change', 'increase');
-		await expect(hudPoints).toHaveCSS('color', 'rgb(87, 230, 138)');
-		await expect(hudPoints).toHaveCSS('animation-name', 'none');
-		const currentBrowserTime = await page.evaluate(() => Date.now());
-		const remainingFeedbackLifetime = Math.max(0, 500 - (currentBrowserTime - (initialRewardFeedbackAt ?? currentBrowserTime)));
-		await page.clock.runFor(remainingFeedbackLifetime);
-		await expect(hudPoints).toHaveCSS('color', 'rgb(87, 230, 138)');
-		await page.clock.runFor(300);
 		await expect(hudPoints).not.toHaveAttribute('data-value-change', /.+/);
 		await expect(hudPoints).toHaveCSS('color', 'rgb(255, 255, 255)');
 

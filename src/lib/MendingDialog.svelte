@@ -95,14 +95,19 @@
 			const feedback = rewardPresentation;
 			const layer = rewardLayer;
 			const summary = layer?.querySelector<HTMLElement>('.reward-summary');
-			const burst = layer?.querySelector<SVGElement>('.reward-burst-rays');
-			const ring = layer?.querySelector<SVGElement>('.reward-burst-ring');
+			const impactBloom = layer?.querySelector<HTMLElement>('.reward-impact-bloom');
+			const jackpotBloom = layer?.querySelector<HTMLElement>('.reward-jackpot-bloom');
+			const primaryRays = layer?.querySelector<SVGElement>('.reward-burst-rays-primary');
+			const secondaryRays = layer?.querySelector<SVGElement>('.reward-burst-rays-secondary');
+			const rings = layer ? [...layer.querySelectorAll<SVGCircleElement>('.reward-burst-ring')] : [];
 			const sparkles = layer?.querySelector<SVGElement>('.reward-burst-sparkles');
+			const particles = layer ? [...layer.querySelectorAll<SVGCircleElement>('.reward-particle')] : [];
 			const wallet = root.querySelector<SVGElement>('[data-mending-icon="wallet"] svg');
 			const pointsValue = root.querySelector<HTMLElement>('.owned-points-value');
 			const pointsCard = root.querySelector<HTMLElement>('.result-card[data-mending-icon="coins"]');
 			const lifespanCard = feedback?.lifespanMs ? root.querySelector<HTMLElement>('.result-card[data-mending-icon="heart"]') : null;
-			if (!feedback || !open || dialogContent !== root || !layer || !summary || !burst || !ring || !sparkles || !wallet || !pointsValue || !pointsCard) return;
+			const rewardPoints = layer?.querySelector<HTMLElement>('.reward-summary-points');
+			if (!feedback || !open || dialogContent !== root || !layer || !summary || !impactBloom || !jackpotBloom || !primaryRays || !secondaryRays || rings.length !== 3 || !sparkles || particles.length === 0 || !wallet || !pointsValue || !pointsCard || !rewardPoints) return;
 
 			const reducedMotion = scope.matches.reducedMotion;
 			const timeline = createTimeline({
@@ -119,6 +124,11 @@
 			const introDuration = collectionCueAt('reward') - collectionCueAt('pickup');
 			const rewardDuration = collectionCueAt('release') - collectionCueAt('reward');
 			const tailDuration = collectionCueAt('end') - collectionCueAt('release');
+			const opacityOnly = (from: number, to: number, duration: number) => ({ opacity: { from, to }, duration });
+
+			// The full-screen layer stays outside layout; only its fixed decorative targets are animated.
+			timeline.add(impactBloom, opacityOnly(0, 0.92, collectionCueAt('pickup') - collectionCueAt('impact')), collectionCueAt('impact'));
+			timeline.add(impactBloom, opacityOnly(0.92, 0, collectionCueAt('ring') - collectionCueAt('pickup')), collectionCueAt('pickup'));
 			timeline.add(summary, {
 				keyframes: reducedMotion
 					? { '0%': { opacity: 0 }, '100%': { opacity: 1 } }
@@ -129,52 +139,84 @@
 						},
 				duration: introDuration
 			}, collectionCueAt('pickup'));
-			timeline.add(ring, reducedMotion
-				? { opacity: { from: 0, to: 0.9 }, duration: collectionCueAt('rays') - collectionCueAt('ring') }
-				: { opacity: { from: 0, to: 0.9 }, scale: { from: 0.7, to: 1.12 }, duration: collectionCueAt('rays') - collectionCueAt('ring') }, collectionCueAt('ring'));
-			timeline.add(burst, reducedMotion
-				? { opacity: { from: 0, to: 0.82 }, duration: collectionCueAt('sparkle') - collectionCueAt('rays') }
-				: { opacity: { from: 0, to: 0.82 }, scale: { from: 0.62, to: 1.08 }, duration: collectionCueAt('sparkle') - collectionCueAt('rays') }, collectionCueAt('rays'));
+			for (const [index, ring] of rings.entries()) {
+				const cue = collectionCueAt('ring') + index * 85;
+				const duration = collectionCueAt('rays') - collectionCueAt('ring');
+				timeline.add(ring, reducedMotion
+					? opacityOnly(0, 0.98 - index * 0.12, duration)
+					: { opacity: { from: 0, to: 0.98 - index * 0.12 }, scale: { from: 0.36 + index * 0.16, to: 2.05 - index * 0.24 }, duration }, cue);
+				timeline.add(ring, opacityOnly(0.86 - index * 0.12, 0, tailDuration), collectionCueAt('release'));
+			}
+			timeline.add(primaryRays, reducedMotion
+				? opacityOnly(0, 0.98, collectionCueAt('sparkle') - collectionCueAt('rays'))
+				: { opacity: { from: 0, to: 0.98 }, scale: { from: 0.55, to: 1.12 }, rotate: { from: -5, to: 5 }, duration: collectionCueAt('sparkle') - collectionCueAt('rays') }, collectionCueAt('rays'));
+			timeline.add(secondaryRays, reducedMotion
+				? opacityOnly(0, 0.86, collectionCueAt('sparkle') - collectionCueAt('rays'))
+				: { opacity: { from: 0, to: 0.86 }, scale: { from: 0.48, to: 1.2 }, rotate: { from: 4, to: -4 }, duration: collectionCueAt('sparkle') - collectionCueAt('rays') }, collectionCueAt('rays') + 45);
 			timeline.add(sparkles, reducedMotion
-				? { opacity: { from: 0, to: 0.92 }, duration: collectionCueAt('reward') - collectionCueAt('sparkle') }
-				: { opacity: { from: 0, to: 0.92 }, scale: { from: 0.65, to: 1.1 }, duration: collectionCueAt('reward') - collectionCueAt('sparkle') }, collectionCueAt('sparkle'));
+				? opacityOnly(0, 0.98, collectionCueAt('jackpot') - collectionCueAt('sparkle'))
+				: { opacity: { from: 0, to: 1 }, scale: { from: 0.45, to: 1.34 }, duration: collectionCueAt('jackpot') - collectionCueAt('sparkle') }, collectionCueAt('sparkle'));
+			timeline.add(jackpotBloom, reducedMotion
+				? opacityOnly(0, 0.92, collectionCueAt('release') - collectionCueAt('jackpot'))
+				: { opacity: { from: 0, to: 0.96 }, scale: { from: 0.7, to: 1 }, duration: collectionCueAt('release') - collectionCueAt('jackpot') }, collectionCueAt('jackpot'));
+			for (const particle of particles) {
+				const particleDuration = collectionCueAt('release') - collectionCueAt('sparkle');
+				const motion = {
+					opacity: { from: 0, to: 1 },
+					translateX: `${particle.dataset.dx ?? '0'}px`,
+					translateY: `${particle.dataset.dy ?? '0'}px`,
+					rotate: `${particle.dataset.rotate ?? '0'}deg`,
+					duration: particleDuration
+				};
+				timeline.add(particle, reducedMotion ? opacityOnly(0, 0.96, particleDuration) : motion, collectionCueAt('sparkle'));
+				timeline.add(particle, opacityOnly(1, 0, tailDuration), collectionCueAt('release'));
+			}
 			timeline.add(wallet, reducedMotion
-				? { keyframes: { '0%': { color: '#35e3e8' }, '45%': { color: '#b9ffff' }, '100%': { color: '#35e3e8' } }, duration: rewardDuration }
-				: { keyframes: { '0%': { color: '#35e3e8', scale: 1 }, '45%': { color: '#b9ffff', scale: 1.2 }, '100%': { color: '#35e3e8', scale: 1 } }, duration: rewardDuration }, collectionCueAt('reward'));
+				? { keyframes: { '0%': { color: '#35e3e8', filter: 'drop-shadow(0 0 0 rgba(100,245,240,0))' }, '50%': { color: '#eaffff', filter: 'drop-shadow(0 0 18px rgba(100,245,240,.95))' }, '100%': { color: '#35e3e8', filter: 'drop-shadow(0 0 0 rgba(100,245,240,0))' } }, duration: rewardDuration }
+				: { keyframes: { '0%': { color: '#35e3e8', scale: 1 }, '42%': { color: '#eaffff', scale: 1.48, filter: 'drop-shadow(0 0 22px rgba(100,245,240,1))' }, '100%': { color: '#35e3e8', scale: 1, filter: 'drop-shadow(0 0 0 rgba(100,245,240,0))' } }, duration: rewardDuration }, collectionCueAt('reward'));
 			timeline.add(pointsValue, {
-				keyframes: { '0%': { color: '#ecfbff' }, '40%': { color: '#64f5f0' }, '100%': { color: '#ecfbff' } },
+				keyframes: { '0%': { color: '#ecfbff', textShadow: '0 0 0 rgba(100,245,240,0)' }, '50%': { color: '#b9ffff', textShadow: '0 0 18px rgba(100,245,240,.95)' }, '100%': { color: '#ecfbff', textShadow: '0 0 0 rgba(100,245,240,0)' } },
 				duration: rewardDuration
 			}, collectionCueAt('reward'));
+			timeline.add(rewardPoints, reducedMotion
+				? { keyframes: { '0%': { color: '#fff', textShadow: '0 0 0 rgba(185,255,255,0)' }, '52%': { color: '#fff', textShadow: '0 0 30px rgba(185,255,255,1)' }, '100%': { color: '#fff', textShadow: '0 0 0 rgba(185,255,255,0)' } }, duration: rewardDuration }
+				: { keyframes: { '0%': { color: '#fff', scale: 0.72, textShadow: '0 0 0 rgba(185,255,255,0)' }, '42%': { color: '#fff', scale: 1.34, textShadow: '0 0 34px rgba(185,255,255,1)' }, '68%': { color: '#fff', scale: 0.96, textShadow: '0 0 22px rgba(185,255,255,.9)' }, '100%': { color: '#fff', scale: 1, textShadow: '0 0 0 rgba(185,255,255,0)' } }, duration: rewardDuration }, collectionCueAt('jackpot'));
 			timeline.add(pointsCard, {
 				keyframes: {
 					'0%': { borderColor: pointsBorder, boxShadow: 'none' },
-					'40%': { borderColor: '#64f5f0', boxShadow: '0 0 0 2px rgba(53, 227, 232, .4), 0 0 24px rgba(53, 227, 232, .34)' },
+					'45%': { borderColor: '#b9ffff', boxShadow: '0 0 0 3px rgba(53, 227, 232, .65), 0 0 38px rgba(53, 227, 232, .72), 0 0 78px rgba(53, 227, 232, .36)' },
 					'100%': { borderColor: pointsBorder, boxShadow: 'none' }
 				},
 				duration: rewardDuration
-			}, collectionCueAt('reward'));
+			}, collectionCueAt('jackpot'));
 			if (lifespanCard && lifespanBorder) {
 				timeline.add(lifespanCard, {
 					keyframes: {
 						'0%': { borderColor: lifespanBorder, boxShadow: 'none' },
-						'40%': { borderColor: '#64f5f0', boxShadow: '0 0 0 2px rgba(53, 227, 232, .4), 0 0 24px rgba(53, 227, 232, .34)' },
+						'45%': { borderColor: '#b9ffff', boxShadow: '0 0 0 3px rgba(53, 227, 232, .65), 0 0 38px rgba(53, 227, 232, .72), 0 0 78px rgba(53, 227, 232, .36)' },
 						'100%': { borderColor: lifespanBorder, boxShadow: 'none' }
 					},
 					duration: rewardDuration
-				}, collectionCueAt('reward'));
+				}, collectionCueAt('jackpot'));
 			}
-			timeline.add(ring, { opacity: { from: 0.9, to: 0 }, duration: tailDuration, ease: 'in(2)' }, collectionCueAt('release'));
-			timeline.add(burst, { opacity: { from: 0.82, to: 0 }, duration: tailDuration, ease: 'in(2)' }, collectionCueAt('release'));
+			timeline.add(primaryRays, opacityOnly(0.98, 0, tailDuration), collectionCueAt('release'));
+			timeline.add(secondaryRays, opacityOnly(0.86, 0, tailDuration), collectionCueAt('release'));
 			timeline.add(sparkles, { opacity: { from: 0.92, to: 0 }, duration: tailDuration, ease: 'in(2)' }, collectionCueAt('release'));
+			timeline.add(jackpotBloom, opacityOnly(0.92, 0, tailDuration), collectionCueAt('release'));
 			timeline.add(summary, { opacity: { from: 1, to: 0 }, duration: tailDuration, ease: 'in(2)' }, collectionCueAt('release'));
 
 			const styleTargets = [
-				{ element: summary, properties: ['opacity', 'transform'] },
-				{ element: burst, properties: ['opacity', 'transform'] },
-				{ element: ring, properties: ['opacity', 'transform'] },
-				{ element: sparkles, properties: ['opacity', 'transform'] },
-				{ element: wallet, properties: ['color', 'transform'] },
-				{ element: pointsValue, properties: ['color'] },
+				{ element: summary, properties: ['opacity', 'transform', 'translate', 'scale'] },
+				{ element: impactBloom, properties: ['opacity'] },
+				{ element: jackpotBloom, properties: ['opacity', 'transform', 'scale'] },
+				{ element: primaryRays, properties: ['opacity', 'transform', 'rotate', 'scale'] },
+				{ element: secondaryRays, properties: ['opacity', 'transform', 'rotate', 'scale'] },
+				...rings.map((element) => ({ element, properties: ['opacity', 'transform', 'scale'] })),
+				{ element: sparkles, properties: ['opacity', 'transform', 'scale'] },
+				...particles.map((element) => ({ element, properties: ['opacity', 'transform', 'translate', 'rotate', 'scale'] })),
+				{ element: wallet, properties: ['color', 'transform', 'scale', 'filter'] },
+				{ element: pointsValue, properties: ['color', 'text-shadow'] },
+				{ element: rewardPoints, properties: ['color', 'text-shadow', 'transform', 'scale'] },
 				{ element: pointsCard, properties: ['border-color', 'box-shadow'] },
 				...(lifespanCard ? [{ element: lifespanCard, properties: ['border-color', 'box-shadow'] }] : [])
 			].flatMap(({ element, properties }) => properties.map((property) => ({
@@ -314,19 +356,40 @@
 			</Dialog.Content>
 			<div class="mending-reward-layer" bind:this={rewardLayer} aria-hidden="true">
 				{#if rewardPresentation}
+					<div class="reward-impact-bloom"></div>
+					<div class="reward-jackpot-bloom"></div>
 					<div class="reward-burst-anchor">
 						<svg class="reward-burst" viewBox="0 0 240 240" focusable="false">
-							<g class="reward-burst-rays" fill="#64f5f0" stroke="#64f5f0" stroke-linecap="round" stroke-width="2.5">
-								<path d="M120 8v28 M120 204v28 M8 120h28 M204 120h28 M41 41l20 20 M179 179l20 20 M199 41l-20 20 M61 179l-20 20" fill="none" />
+							<g class="reward-burst-rays-primary" fill="none" stroke="#9cffff" stroke-linecap="round" stroke-width="3.5">
+								<path d="M120 3v39 M120 198v39 M3 120h39 M198 120h39 M37 37l28 28 M175 175l28 28 M203 37l-28 28 M65 175l-28 28" />
 							</g>
-							<g class="reward-burst-sparkles" fill="#b9ffff" stroke="#64f5f0" stroke-linecap="round" stroke-width="1.5">
-								<circle cx="120" cy="51" r="3" /><circle cx="189" cy="120" r="3" />
-								<circle cx="120" cy="189" r="3" /><circle cx="51" cy="120" r="3" />
-								<circle cx="71" cy="71" r="2.5" /><circle cx="169" cy="71" r="2.5" />
-								<circle cx="169" cy="169" r="2.5" /><circle cx="71" cy="169" r="2.5" />
-								<path d="M120 43v16 M112 51h16 M185 120h8 M189 116v8 M120 181v16 M112 189h16 M47 120h8 M51 116v8" fill="none" />
+							<g class="reward-burst-rays-secondary" fill="none" stroke="#42eaf3" stroke-linecap="round" stroke-width="2">
+								<path d="M120 18v19 M120 203v19 M18 120h19 M203 120h19 M59 22l11 20 M170 198l11 20 M218 59l-20 11 M42 170l-20 11 M191 28l-12 19 M61 193l-12 19 M212 191l-19-12 M47 61L28 49" />
 							</g>
-							<circle class="reward-burst-ring" cx="120" cy="120" r="72" fill="none" stroke="#35e3e8" stroke-width="2" />
+							<g class="reward-burst-sparkles" fill="#eaffff" stroke="#64f5f0" stroke-linecap="round" stroke-width="1.6">
+								<path d="M120 37l4 12 12 4-12 4-4 12-4-12-12-4 12-4z M54 82l3 9 9 3-9 3-3 9-3-9-9-3 9-3z M187 142l3 9 9 3-9 3-3 9-3-9-9-3 9-3z M169 46l2.5 7.5L179 56l-7.5 2.5L169 66l-2.5-7.5L159 56l7.5-2.5z M73 172l2.5 7.5L83 182l-7.5 2.5L73 192l-2.5-7.5L63 182l7.5-2.5z" />
+								<circle cx="90" cy="30" r="2.5" /><circle cx="208" cy="93" r="2.5" /><circle cx="144" cy="205" r="2.5" /><circle cx="28" cy="145" r="2.5" />
+								<path d="M35 110v16 M27 118h16 M204 168v14 M197 175h14 M111 203v13 M105 209h13 M149 22v12 M143 28h12" fill="none" />
+							</g>
+							<g class="reward-burst-rings" fill="none" stroke-linecap="round">
+								<circle class="reward-burst-ring" cx="120" cy="120" r="61" stroke="#f5ffff" stroke-width="2.5" />
+								<circle class="reward-burst-ring" cx="120" cy="120" r="78" stroke="#35e3e8" stroke-width="2" />
+								<circle class="reward-burst-ring" cx="120" cy="120" r="96" stroke="#a2ffff" stroke-width="1.5" />
+							</g>
+							<g class="reward-burst-particles" fill="#f5ffff" stroke="#64f5f0" stroke-width="1">
+								<circle class="reward-particle" data-dx="-86" data-dy="-24" data-rotate="-35" cx="120" cy="120" r="2.5" />
+								<circle class="reward-particle" data-dx="-66" data-dy="-63" data-rotate="45" cx="120" cy="120" r="2" />
+								<circle class="reward-particle" data-dx="-25" data-dy="-93" data-rotate="75" cx="120" cy="120" r="3" />
+								<circle class="reward-particle" data-dx="25" data-dy="-87" data-rotate="-45" cx="120" cy="120" r="2" />
+								<circle class="reward-particle" data-dx="70" data-dy="-56" data-rotate="55" cx="120" cy="120" r="2.5" />
+								<circle class="reward-particle" data-dx="94" data-dy="-14" data-rotate="-65" cx="120" cy="120" r="2" />
+								<circle class="reward-particle" data-dx="84" data-dy="32" data-rotate="35" cx="120" cy="120" r="3" />
+								<circle class="reward-particle" data-dx="53" data-dy="76" data-rotate="-55" cx="120" cy="120" r="2" />
+								<circle class="reward-particle" data-dx="12" data-dy="96" data-rotate="65" cx="120" cy="120" r="2.5" />
+								<circle class="reward-particle" data-dx="-34" data-dy="83" data-rotate="-35" cx="120" cy="120" r="2" />
+								<circle class="reward-particle" data-dx="-76" data-dy="52" data-rotate="45" cx="120" cy="120" r="3" />
+								<circle class="reward-particle" data-dx="-96" data-dy="8" data-rotate="-75" cx="120" cy="120" r="2" />
+							</g>
 						</svg>
 					</div>
 					<div class="reward-summary-anchor">
@@ -349,11 +412,19 @@
 	:global(.mending-dialog-content) { position: fixed; top: 50%; left: 50%; z-index: 101; display: grid; gap: 0; width: min(720px, calc(100vw - 24px)); max-height: calc(100svh - 32px); overflow: auto; padding: 28px; border: 1px solid rgba(35, 220, 226, .78); border-radius: 18px; background: linear-gradient(180deg, rgba(4, 29, 43, .92), rgba(3, 20, 30, .94)); box-shadow: 0 0 0 1px rgba(53, 227, 232, .10) inset, 0 18px 60px rgba(0, 0, 0, .42), 0 0 30px rgba(26, 212, 220, .08); backdrop-filter: blur(14px); color: #ecfbff; transform: translate(-50%, -50%); }
 	.mending-reward-layer { position: fixed; inset: 0; z-index: 102; overflow: hidden; pointer-events: none; }
 	.reward-burst-anchor, .reward-summary-anchor { position: fixed; inset: 0; display: grid; place-items: center; }
-	.reward-burst { width: min(72vw, 360px); max-height: 64svh; overflow: visible; }
-	.reward-burst-rays, .reward-burst-ring, .reward-burst-sparkles { opacity: 0; transform-box: fill-box; transform-origin: center; }
-	.reward-summary { display: grid; justify-items: center; gap: 4px; width: min(420px, calc(100vw - 40px)); padding: 18px 22px; border: 1px solid rgba(100, 245, 240, .78); border-radius: 16px; background: linear-gradient(180deg, rgba(4, 35, 47, .97), rgba(3, 24, 36, .97)); box-shadow: 0 0 0 1px rgba(53, 227, 232, .18) inset, 0 0 32px rgba(53, 227, 232, .24); color: #ecfbff; text-align: center; opacity: 0; }
+	.reward-impact-bloom, .reward-jackpot-bloom { position: fixed; inset: 0; background: radial-gradient(ellipse at center, rgba(219, 255, 255, .52) 0%, rgba(53, 227, 232, .24) 15%, rgba(36, 181, 226, .10) 34%, transparent 62%); opacity: 0; }
+	.reward-jackpot-bloom { background: radial-gradient(ellipse at center, rgba(244, 255, 255, .76) 0%, rgba(117, 255, 255, .42) 13%, rgba(53, 227, 232, .20) 32%, transparent 66%); }
+	.reward-burst-anchor { z-index: 1; }
+	.reward-burst { width: min(118vmin, 820px); max-height: 96svh; overflow: visible; filter: drop-shadow(0 0 20px rgba(53, 227, 232, .34)); }
+	.reward-burst-rays-primary, .reward-burst-rays-secondary, .reward-burst-ring, .reward-burst-sparkles, .reward-particle { opacity: 0; transform-box: fill-box; transform-origin: center; }
+	.reward-burst-rays-primary { filter: drop-shadow(0 0 8px rgba(185, 255, 255, .95)); }
+	.reward-burst-rays-secondary { filter: drop-shadow(0 0 6px rgba(53, 227, 232, .85)); }
+	.reward-burst-sparkles { filter: drop-shadow(0 0 7px rgba(185, 255, 255, .95)); }
+	.reward-burst-rings { filter: drop-shadow(0 0 8px rgba(53, 227, 232, .95)); }
+	.reward-burst-particles { filter: drop-shadow(0 0 5px rgba(185, 255, 255, .95)); }
+	.reward-summary { position: relative; z-index: 2; display: grid; justify-items: center; gap: 4px; width: min(420px, calc(100vw - 40px)); padding: 18px 22px; border: 1px solid rgba(180, 255, 255, .96); border-radius: 16px; background: linear-gradient(180deg, rgba(4, 35, 47, .93), rgba(3, 24, 36, .95)); box-shadow: 0 0 0 1px rgba(53, 227, 232, .38) inset, 0 0 38px rgba(53, 227, 232, .54), 0 0 96px rgba(53, 227, 232, .25); color: #ecfbff; text-align: center; opacity: 0; }
 	.reward-summary-title { color: #b9ffff; font-size: clamp(18px, 4vw, 23px); font-weight: 850; line-height: 1.2; }
-	.reward-summary-points { color: #fff; font-size: clamp(28px, 7vw, 40px); font-weight: 900; line-height: 1.15; font-variant-numeric: tabular-nums; }
+	.reward-summary-points { display: inline-block; color: #fff; font-size: clamp(34px, 9vw, 54px); font-weight: 950; line-height: 1.15; font-variant-numeric: tabular-nums; text-shadow: 0 0 18px rgba(185, 255, 255, .55); transform-origin: center; }
 	.reward-summary-lifespan { color: #64f5f0; font-size: 16px; font-weight: 800; }
 	.reward-summary-support { color: #cfe7ee; font-size: 13px; font-weight: 650; }
 	.result-card { position: relative; }

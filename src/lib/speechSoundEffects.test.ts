@@ -76,7 +76,7 @@ describe('speech sound effects', () => {
 			expect(samples).toEqual(createSoundSamples(effect, 10_000));
 		}
 	});
-	it('creates a distinct Mending reward flourish with energy at each shared cue and a decaying tail', () => {
+	it('creates a distinct Mending jackpot flourish with impact, cue energy, and a decaying shimmer tail', () => {
 		const sampleRate = 10_000;
 		const duration = UI_SOUND_DURATIONS['mending-collect'];
 		const reward = createSoundSamples('mending-collect', sampleRate);
@@ -89,11 +89,13 @@ describe('speech sound effects', () => {
 		expect(reward).not.toEqual(genericCollect);
 
 		const windows = [
+			[MENDING_COLLECT_CUES.impact, MENDING_COLLECT_CUES.pickup],
 			[MENDING_COLLECT_CUES.pickup, MENDING_COLLECT_CUES.ring],
 			[MENDING_COLLECT_CUES.ring, MENDING_COLLECT_CUES.rays],
 			[MENDING_COLLECT_CUES.rays, MENDING_COLLECT_CUES.sparkle],
 			[MENDING_COLLECT_CUES.sparkle, MENDING_COLLECT_CUES.reward],
-			[MENDING_COLLECT_CUES.reward, MENDING_COLLECT_CUES.release]
+			[MENDING_COLLECT_CUES.reward, MENDING_COLLECT_CUES.jackpot],
+			[MENDING_COLLECT_CUES.jackpot, MENDING_COLLECT_CUES.release]
 		] as const;
 		for (const [from, to] of windows) expect(windowRms(reward, sampleRate, from, to)).toBeGreaterThan(0.001);
 		const releaseTail = windowRms(reward, sampleRate, MENDING_COLLECT_CUES.release, duration - 0.08);
@@ -134,6 +136,10 @@ describe('speech sound effects', () => {
 		expect(SOUND_EFFECT_GAINS.monologue).toBe(1);
 		expect(SOUND_EFFECT_GAINS.collect).toBeCloseTo(0.75);
 		expect(SOUND_EFFECT_GAINS['level-up']).toBeCloseTo(0.75);
+		expect(SOUND_EFFECT_GAINS['mending-collect']).toBeGreaterThan(SOUND_EFFECT_GAINS['level-up']);
+		const mending = createSoundSamples('mending-collect', 10_000);
+		const levelUp = createSoundSamples('level-up', 10_000);
+		expect(rms(mending) * SOUND_EFFECT_GAINS['mending-collect']).toBeGreaterThan(rms(levelUp) * SOUND_EFFECT_GAINS['level-up']);
 		expect(SOUND_EFFECT_GAINS.startup).toBeCloseTo(0.65);
 		expect(SOUND_EFFECT_GAINS['cooperation-start']).toBeCloseTo(0.65);
 		expect(SOUND_EFFECT_GAINS.death).toBeCloseTo(0.70);
