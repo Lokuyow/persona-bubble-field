@@ -573,6 +573,14 @@ test.describe('Relay startup', () => {
 			expect(horizontalOverflow).toBe(false);
 			await expect(collect).toBeDisabled();
 			expect(await readLayout()).toEqual(before);
+			// Keep the result readable beyond the reward sound and through the summary's reading interval.
+			await page.clock.runFor(600);
+			await expect(rewardSummary).toBeVisible();
+			await expect(rewardSummary.locator('.reward-summary-points')).toHaveText(`+${collectedPoints} pt`);
+			await page.clock.runFor(900);
+			await expect(rewardSummary).toBeVisible();
+			await expect(rewardSummary.locator('.reward-summary-title')).toHaveText('成果を受け取りました');
+			await expect(rewardSummary.locator('.reward-summary-points')).toHaveText(`+${collectedPoints} pt`);
 			let observation = await page.evaluate(() => (window as typeof window & { __mendingRewardObservation?: MendingRewardObservation }).__mendingRewardObservation);
 			if (reducedMotion) {
 				while (!observation?.done) {
@@ -630,6 +638,7 @@ test.describe('Relay startup', () => {
 			return partialState.points === 1 && partialState.pointProgressTicks > 0 && partialState.pointProgressTicks < 60_000_000;
 		}).toBe(true);
 		await expect.poll(publishedWorldStateCount).toBeGreaterThan(beforeMendingReward);
+		while (await hudPoints.getAttribute('data-value-change') !== null) await page.clock.runFor(16);
 		await expect(hudPoints).not.toHaveAttribute('data-value-change', /.+/);
 		await expect(hudPoints).toHaveCSS('color', 'rgb(255, 255, 255)');
 

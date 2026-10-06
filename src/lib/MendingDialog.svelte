@@ -4,7 +4,6 @@
 	import { createTimeline } from 'animejs/timeline';
 	import type { Scope } from 'animejs/scope';
 	import type { Timeline } from 'animejs/timeline';
-	import { MENDING_COLLECT_CUES } from '$lib/speechSoundEffects';
 	import Coins from '~icons/tabler/coins';
 	import Clock from '~icons/tabler/clock';
 	import Heart from '~icons/tabler/heart';
@@ -20,7 +19,20 @@
 	import { createPresentationScope } from '$lib/presentationMotion';
 
 	type CollectionFeedback = Readonly<{ id: number; points: number; lifespanMs: number }>;
-	const collectionCueAt = (cue: keyof typeof MENDING_COLLECT_CUES): number => MENDING_COLLECT_CUES[cue] * 1000;
+	const collectionCues = {
+		impact: 0,
+		pickup: 0.045,
+		ring: 0.12,
+		rays: 0.20,
+		sparkle: 0.27,
+		reward: 0.34,
+		jackpot: 0.37,
+		release: 0.62,
+		end: 0.92
+	} as const;
+	const collectionCueAt = (cue: keyof typeof collectionCues): number => collectionCues[cue] * 1000;
+	const rewardSummaryReadableHoldDuration = 1200;
+	const rewardSummaryFadeDuration = 280;
 
 	type Props = Readonly<{
 		open: boolean;
@@ -124,6 +136,7 @@
 			const introDuration = collectionCueAt('reward') - collectionCueAt('pickup');
 			const rewardDuration = collectionCueAt('release') - collectionCueAt('reward');
 			const tailDuration = collectionCueAt('end') - collectionCueAt('release');
+			const rewardSummaryFadeAt = collectionCueAt('reward') + rewardSummaryReadableHoldDuration;
 			const opacityOnly = (from: number, to: number, duration: number) => ({ opacity: { from, to }, duration });
 
 			// The full-screen layer stays outside layout; only its fixed decorative targets are animated.
@@ -203,7 +216,7 @@
 			timeline.add(secondaryRays, opacityOnly(0.86, 0, tailDuration), collectionCueAt('release'));
 			timeline.add(sparkles, { opacity: { from: 0.92, to: 0 }, duration: tailDuration, ease: 'in(2)' }, collectionCueAt('release'));
 			timeline.add(jackpotBloom, opacityOnly(0.92, 0, tailDuration), collectionCueAt('release'));
-			timeline.add(summary, { opacity: { from: 1, to: 0 }, duration: tailDuration, ease: 'in(2)' }, collectionCueAt('release'));
+			timeline.add(summary, { opacity: { from: 1, to: 0 }, duration: rewardSummaryFadeDuration, ease: 'in(2)' }, rewardSummaryFadeAt);
 
 			const styleTargets = [
 				{ element: summary, properties: ['opacity', 'transform', 'translate', 'scale'] },
