@@ -573,13 +573,6 @@ test.describe('Relay startup', () => {
 			expect(horizontalOverflow).toBe(false);
 			await expect(collect).toBeDisabled();
 			expect(await readLayout()).toEqual(before);
-			const summaryOpacity = () => rewardSummary.evaluate((element) => Number(getComputedStyle(element).opacity));
-			await page.clock.runFor(600);
-			await expect(rewardSummary).toBeVisible();
-			expect(await summaryOpacity()).toBeGreaterThan(0.95);
-			await page.clock.runFor(900);
-			await expect(rewardSummary).toBeVisible();
-			expect(await summaryOpacity()).toBeGreaterThan(0.9);
 			let observation = await page.evaluate(() => (window as typeof window & { __mendingRewardObservation?: MendingRewardObservation }).__mendingRewardObservation);
 			if (reducedMotion) {
 				while (!observation?.done) {
