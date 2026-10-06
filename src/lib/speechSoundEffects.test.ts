@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createConversationState, receiveMessage, type SpeechType } from './conversation';
-import { createSoundController, createSoundSamples, createSpeechSoundSamples, DEFAULT_SOUND_PREFERENCE, DEATH_SOUND_DURATION, loadSoundPreference, MENDING_COLLECT_CUES, newLiveBubbleEffects, SOUND_EFFECT_GAINS, SPEECH_SOUND_DURATIONS, SPEECH_SOUND_PREFERENCE_KEY, UI_SOUND_DURATIONS } from './speechSoundEffects';
+import { createSoundController, createSoundSamples, createSpeechSoundSamples, DEFAULT_SOUND_PREFERENCE, DEATH_SOUND_DURATION, loadSoundPreference, newLiveBubbleEffects, SOUND_ASSET_URLS, SOUND_EFFECT_GAINS, SPEECH_SOUND_DURATIONS, SPEECH_SOUND_PREFERENCE_KEY, UI_SOUND_DURATIONS } from './speechSoundEffects';
 
 const options = { isSpeakerVisible: true, duration: 100, now: 0 };
 const message = (id: string, pubkey: string, content: string, speechType: SpeechType = 'normal') => ({ id, pubkey, content, speechType, createdAt: 0 });
@@ -27,48 +27,144 @@ function rms(samples: Float32Array): number {
 	return Math.sqrt(samples.reduce((total, sample) => total + sample * sample, 0) / samples.length);
 }
 
-function windowRms(samples: Float32Array, sampleRate: number, from: number, to: number): number {
-	return rms(samples.slice(Math.ceil(from * sampleRate), Math.ceil(to * sampleRate)));
+type FakeSoundBuffer = AudioBuffer & Readonly<{ assetId?: 'mending-collect' | 'level-up' }>;
+
+function createAudioContextFixture(decodeAudioData: (encoded: ArrayBuffer) => Promise<AudioBuffer> = async () => ({ numberOfChannels: 1 } as AudioBuffer)) {
+	const played: FakeSoundBuffer[] = [];
+	const gainNodes: Array<{ gain: { value: number; cancelScheduledValues: () => void; setTargetAtTime: (value: number) => void }; connect: () => void }> = [];
+	const masterVolumes: number[] = [];
+	let proceduralBufferCreations = 0;
+	let state: AudioContextState = 'suspended';
+	let resumeCalls = 0;
+	const context = {
+		get state() { return state; }, sampleRate: 10_000, currentTime: 0, destination: {},
+		createGain: () => {
+			const node = { gain: { value: 1, cancelScheduledValues: () => {}, setTargetAtTime: (value: number) => masterVolumes.push(value) }, connect: () => {} };
+			gainNodes.push(node);
+			return node;
+		},
+		createBuffer: (_channels: number, length: number) => {
+			proceduralBufferCreations += 1;
+			return { getChannelData: () => new Float32Array(length) };
+		},
+		createBufferSource: () => {
+			const source: { buffer: AudioBuffer | null; connect: () => void; start: () => void } = {
+				buffer: null,
+				connect: () => {},
+				start: () => played.push(source.buffer as FakeSoundBuffer)
+			};
+			return source;
+		},
+		decodeAudioData,
+		close: async () => {}, resume: () => { resumeCalls += 1; state = 'running'; return Promise.resolve(); }
+	} as unknown as AudioContext;
+	return { context, played, gainNodes, masterVolumes, get proceduralBufferCreations() { return proceduralBufferCreations; }, get resumeCalls() { return resumeCalls; } };
 }
 
+async function flushMicrotasks(): Promise<void> {
+	for (let index = 0; index < 8; index += 1) await Promise.resolve();
+}
+
+function encodedAssetResponse(assetId: 'mending-collect' | 'level-up'): Response {
+	const byte = assetId === 'mending-collect' ? 1 : 2;
+	return { ok: true, arrayBuffer: async () => new Uint8Array([byte]).buffer } as Response;
+}
+
+afterEach(() => vi.unstubAllGlobals());
+
 describe('speech sound effects', () => {
-	it('reuses collect while honoring unlock, volume, and document visibility constraints', () => {
-		const starts: number[] = [];
+	it('loads each reward asset once and preserves unlock, gain, mute, and hidden-document policies', async () => {
+		const decoded: FakeSoundBuffer[] = [];
+		const fixture = createAudioContextFixture(async (encoded) => {
+			const assetId = new Uint8Array(encoded)[0] === 1 ? 'mending-collect' : 'level-up';
+			const buffer = { numberOfChannels: 1, assetId } as FakeSoundBuffer;
+			decoded.push(buffer);
+			return buffer;
+		});
+		const fetchMock = vi.fn(async (input: RequestInfo | URL) => encodedAssetResponse(String(input) === SOUND_ASSET_URLS['mending-collect'] ? 'mending-collect' : 'level-up'));
+		vi.stubGlobal('fetch', fetchMock);
 		let hidden = false;
-		const context = {
-			state: 'running', sampleRate: 10_000, currentTime: 0, destination: {},
-			createGain: () => ({ gain: { value: 1, cancelScheduledValues: () => {}, setTargetAtTime: () => {} }, connect: () => {} }),
-			createBuffer: (_channels: number, length: number) => ({ getChannelData: () => new Float32Array(length) }),
-			createBufferSource: () => ({ buffer: null, connect: () => {}, start: (when: number) => starts.push(when) }),
-			close: async () => {}, resume: async () => {}
-		} as unknown as AudioContext;
-		const controller = createSoundController({ audioContextFactory: () => context, document: { get hidden() { return hidden; } } });
-		controller.play('collect');
+		const controller = createSoundController({ audioContextFactory: () => fixture.context, document: { get hidden() { return hidden; } } });
+
 		controller.play('mending-collect');
-		expect(starts).toEqual([]);
+		controller.play('level-up');
+		expect(fixture.played).toEqual([]);
+		expect(fetchMock).not.toHaveBeenCalled();
+
 		controller.unlock();
-		controller.play('collect');
-		expect(starts).toHaveLength(1);
+		await flushMicrotasks();
+		expect(fixture.resumeCalls).toBe(1);
+		expect(new Set(fetchMock.mock.calls.map(([url]) => String(url)))).toEqual(new Set(Object.values(SOUND_ASSET_URLS)));
+		expect(decoded.map(({ assetId }) => assetId).sort()).toEqual(['level-up', 'mending-collect']);
+
 		controller.play('mending-collect');
-		expect(starts).toHaveLength(2);
+		controller.play('mending-collect');
+		controller.play('level-up');
+		controller.play('collect');
+		controller.play('collect');
+		expect(fixture.played.map(({ assetId }) => assetId)).toEqual(['mending-collect', 'mending-collect', 'level-up', undefined, undefined]);
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+		expect(fixture.proceduralBufferCreations).toBe(1);
+		expect(fixture.gainNodes.slice(1).map(({ gain }) => gain.value)).toEqual([
+			SOUND_EFFECT_GAINS['mending-collect'], SOUND_EFFECT_GAINS['mending-collect'], SOUND_EFFECT_GAINS['level-up'], SOUND_EFFECT_GAINS.collect, SOUND_EFFECT_GAINS.collect
+		]);
+
 		hidden = true;
-		controller.play('collect');
 		controller.play('mending-collect');
-		expect(starts).toHaveLength(2);
-		hidden = false;
+		controller.play('collect');
 		controller.setVolume(0);
+		hidden = false;
+		controller.play('level-up');
 		controller.play('collect');
-		controller.play('mending-collect');
-		expect(starts).toHaveLength(2);
-		controller.setVolume(0.5);
-		controller.play('collect');
-		expect(starts).toHaveLength(3);
-		controller.play('mending-collect');
-		expect(starts).toHaveLength(4);
+		expect(fixture.played).toHaveLength(5);
+		expect(fixture.proceduralBufferCreations).toBe(1);
+		expect(fixture.masterVolumes.at(-1)).toBe(0);
 		controller.dispose();
 	});
+	it.each([
+		{ failure: 'fetch', effect: 'mending-collect' },
+		{ failure: 'fetch', effect: 'level-up' },
+		{ failure: 'decode', effect: 'mending-collect' },
+		{ failure: 'decode', effect: 'level-up' }
+	] as const)('does not fall back to procedural audio when the $effect asset $failure fails', async ({ failure, effect }) => {
+		const fixture = createAudioContextFixture(async () => {
+			if (failure === 'decode') throw new Error('decode failed');
+			return { numberOfChannels: 1 } as AudioBuffer;
+		});
+		vi.stubGlobal('fetch', failure === 'fetch'
+			? vi.fn(async () => { throw new Error('fetch failed'); })
+			: vi.fn(async () => encodedAssetResponse('level-up')));
+		const controller = createSoundController({ audioContextFactory: () => fixture.context });
+		controller.unlock();
+		await flushMicrotasks();
+		expect(() => controller.play(effect)).not.toThrow();
+		await flushMicrotasks();
+		expect(fixture.played).toEqual([]);
+		expect(fixture.proceduralBufferCreations).toBe(0);
+		expect(() => controller.play('collect')).not.toThrow();
+		expect(fixture.proceduralBufferCreations).toBe(1);
+		controller.dispose();
+	});
+	it('ignores asset decodes that finish after controller disposal', async () => {
+		const pendingDecodes: Array<(buffer: AudioBuffer) => void> = [];
+		const fixture = createAudioContextFixture(() => new Promise((resolve) => pendingDecodes.push(resolve)));
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => encodedAssetResponse(
+			String(input) === SOUND_ASSET_URLS['mending-collect'] ? 'mending-collect' : 'level-up'
+		)));
+		const controller = createSoundController({ audioContextFactory: () => fixture.context });
+		controller.unlock();
+		await flushMicrotasks();
+		expect(pendingDecodes).toHaveLength(2);
+		controller.dispose();
+		for (const resolve of pendingDecodes) resolve({ numberOfChannels: 1 } as AudioBuffer);
+		await flushMicrotasks();
+		controller.play('mending-collect');
+		controller.play('level-up');
+		expect(fixture.played).toEqual([]);
+		expect(fixture.proceduralBufferCreations).toBe(0);
+	});
 	it('creates deterministic UI chimes with effect-specific gains', () => {
-		for (const effect of ['collect', 'level-up', 'startup', 'cooperation-start'] as const) {
+		for (const effect of ['collect', 'startup', 'cooperation-start'] as const) {
 			const samples = createSoundSamples(effect, 10_000);
 			expect(samples.length).toBe(Math.ceil(UI_SOUND_DURATIONS[effect] * 10_000));
 			expect([...samples].every(Number.isFinite)).toBe(true);
@@ -76,32 +172,10 @@ describe('speech sound effects', () => {
 			expect(samples).toEqual(createSoundSamples(effect, 10_000));
 		}
 	});
-	it('creates a distinct Mending jackpot flourish with impact, cue energy, and a decaying shimmer tail', () => {
-		const sampleRate = 10_000;
-		const duration = UI_SOUND_DURATIONS['mending-collect'];
-		const reward = createSoundSamples('mending-collect', sampleRate);
-		const genericCollect = createSoundSamples('collect', sampleRate);
-		expect(reward.length).toBe(Math.ceil(duration * sampleRate));
-		expect([...reward].every(Number.isFinite)).toBe(true);
-		expect(Math.max(...reward.map(Math.abs))).toBeLessThanOrEqual(0.920001);
-		expect(reward.some((sample) => Math.abs(sample) > 0.001)).toBe(true);
-		expect(reward).toEqual(createSoundSamples('mending-collect', sampleRate));
-		expect(reward).not.toEqual(genericCollect);
-
-		const windows = [
-			[MENDING_COLLECT_CUES.impact, MENDING_COLLECT_CUES.pickup],
-			[MENDING_COLLECT_CUES.pickup, MENDING_COLLECT_CUES.ring],
-			[MENDING_COLLECT_CUES.ring, MENDING_COLLECT_CUES.rays],
-			[MENDING_COLLECT_CUES.rays, MENDING_COLLECT_CUES.sparkle],
-			[MENDING_COLLECT_CUES.sparkle, MENDING_COLLECT_CUES.reward],
-			[MENDING_COLLECT_CUES.reward, MENDING_COLLECT_CUES.jackpot],
-			[MENDING_COLLECT_CUES.jackpot, MENDING_COLLECT_CUES.release]
-		] as const;
-		for (const [from, to] of windows) expect(windowRms(reward, sampleRate, from, to)).toBeGreaterThan(0.001);
-		const releaseTail = windowRms(reward, sampleRate, MENDING_COLLECT_CUES.release, duration - 0.08);
-		const finalTail = windowRms(reward, sampleRate, duration - 0.08, duration);
-		expect(finalTail).toBeLessThan(releaseTail);
-		expect(Math.abs(reward.at(-1) ?? 1)).toBeLessThan(0.001);
+	it('maps Mending and level-up to their dedicated assets instead of procedural generators', () => {
+		expect(SOUND_ASSET_URLS['mending-collect']).toContain('mending-collection.ogg');
+		expect(SOUND_ASSET_URLS['level-up']).toContain('level-up.ogg');
+		expect(createSoundSamples('collect', 10_000)).toEqual(createSoundSamples('collect', 10_000));
 	});
 	it('creates six distinct, finite, non-clipping tag-game cues at their intended lengths', () => {
 		const effects = ['tag-game-benefit', 'tag-game-calamity', 'tag-game-transfer', 'tag-game-switch', 'tag-game-start', 'tag-game-end'] as const;
@@ -137,9 +211,6 @@ describe('speech sound effects', () => {
 		expect(SOUND_EFFECT_GAINS.collect).toBeCloseTo(0.75);
 		expect(SOUND_EFFECT_GAINS['level-up']).toBeCloseTo(0.75);
 		expect(SOUND_EFFECT_GAINS['mending-collect']).toBeGreaterThan(SOUND_EFFECT_GAINS['level-up']);
-		const mending = createSoundSamples('mending-collect', 10_000);
-		const levelUp = createSoundSamples('level-up', 10_000);
-		expect(rms(mending) * SOUND_EFFECT_GAINS['mending-collect']).toBeGreaterThan(rms(levelUp) * SOUND_EFFECT_GAINS['level-up']);
 		expect(SOUND_EFFECT_GAINS.startup).toBeCloseTo(0.65);
 		expect(SOUND_EFFECT_GAINS['cooperation-start']).toBeCloseTo(0.65);
 		expect(SOUND_EFFECT_GAINS.death).toBeCloseTo(0.70);

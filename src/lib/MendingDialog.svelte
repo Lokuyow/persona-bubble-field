@@ -4,7 +4,6 @@
 	import { createTimeline } from 'animejs/timeline';
 	import type { Scope } from 'animejs/scope';
 	import type { Timeline } from 'animejs/timeline';
-	import { MENDING_COLLECT_CUES } from '$lib/speechSoundEffects';
 	import Coins from '~icons/tabler/coins';
 	import Clock from '~icons/tabler/clock';
 	import Heart from '~icons/tabler/heart';
@@ -20,7 +19,18 @@
 	import { createPresentationScope } from '$lib/presentationMotion';
 
 	type CollectionFeedback = Readonly<{ id: number; points: number; lifespanMs: number }>;
-	const collectionCueAt = (cue: keyof typeof MENDING_COLLECT_CUES): number => MENDING_COLLECT_CUES[cue] * 1000;
+	const collectionCues = {
+		impact: 0,
+		pickup: 0.045,
+		ring: 0.12,
+		rays: 0.20,
+		sparkle: 0.27,
+		reward: 0.34,
+		jackpot: 0.37,
+		release: 0.44,
+		end: 0.54
+	} as const;
+	const collectionCueAt = (cue: keyof typeof collectionCues): number => collectionCues[cue] * 1000;
 
 	type Props = Readonly<{
 		open: boolean;

@@ -1,9 +1,18 @@
 import type { ConversationState, SpeechType } from './conversation';
+import levelUpSoundUrl from './assets/sounds/level-up.ogg?url';
+import mendingCollectionSoundUrl from './assets/sounds/mending-collection.ogg?url';
 
 export type SoundPreference = Readonly<{ volume: number }>;
 export type TagGameSoundEffect = 'tag-game-benefit' | 'tag-game-calamity' | 'tag-game-transfer' | 'tag-game-switch' | 'tag-game-start' | 'tag-game-end';
 export type SoundEffect = SpeechType | 'collect' | 'mending-collect' | 'level-up' | 'startup' | 'cooperation-start' | 'death' | TagGameSoundEffect;
+export type AssetSoundEffect = 'mending-collect' | 'level-up';
+export type ProceduralSoundEffect = Exclude<SoundEffect, AssetSoundEffect>;
 export type SpeechSoundEffect = SpeechType;
+
+export const SOUND_ASSET_URLS: Readonly<Record<AssetSoundEffect, string>> = {
+	'mending-collect': mendingCollectionSoundUrl,
+	'level-up': levelUpSoundUrl
+};
 
 export const DEFAULT_SOUND_PREFERENCE: SoundPreference = { volume: 0.5 };
 export const SPEECH_SOUND_PREFERENCE_KEY = 'persona-bubble-field:speech-sound:v1';
@@ -36,18 +45,7 @@ export function newLiveBubbleEffects(previous: ConversationState, next: Conversa
 }
 
 export const SPEECH_SOUND_DURATIONS = { normal: 0.225, shout: 0.420, monologue: 0.715 } as const;
-export const MENDING_COLLECT_CUES = {
-	impact: 0,
-	pickup: 0.13,
-	ring: 0.30,
-	rays: 0.48,
-	sparkle: 0.67,
-	reward: 0.82,
-	jackpot: 0.90,
-	release: 1.06,
-	end: 1.26
-} as const;
-export const UI_SOUND_DURATIONS = { collect: 0.19, 'mending-collect': MENDING_COLLECT_CUES.end, 'level-up': 0.32, startup: 0.38, 'cooperation-start': 0.43,
+export const UI_SOUND_DURATIONS = { collect: 0.19, startup: 0.38, 'cooperation-start': 0.43,
 	'tag-game-benefit': 0.26, 'tag-game-calamity': 0.11, 'tag-game-transfer': 0.34, 'tag-game-switch': 0.30,
 	'tag-game-start': 0.52, 'tag-game-end': 0.52 } as const;
 export const DEATH_SOUND_DURATION = 6.4;
@@ -226,81 +224,22 @@ export function createSpeechSoundSamples(effect: SpeechSoundEffect, sampleRate: 
 	return createMonologueSamples(sampleRate);
 }
 
-function createChimeSamples(effect: 'collect' | 'level-up' | 'startup' | 'cooperation-start', sampleRate: number): Float32Array {
+function createChimeSamples(effect: 'collect' | 'startup' | 'cooperation-start', sampleRate: number): Float32Array {
 	const duration = UI_SOUND_DURATIONS[effect];
 	const length = Math.ceil(sampleRate * duration);
 	const notes = effect === 'collect'
 		? [{ at: 0, frequency: 660 }, { at: 0.075, frequency: 990 }]
-		: effect === 'level-up'
-			? [{ at: 0, frequency: 523 }, { at: 0.095, frequency: 659 }, { at: 0.19, frequency: 784 }]
-			: effect === 'startup'
-				? [{ at: 0, frequency: 330 }, { at: 0.14, frequency: 494 }, { at: 0.25, frequency: 659 }]
-				: [{ at: 0, frequency: 587 }, { at: 0.12, frequency: 784 }, { at: 0.25, frequency: 988 }];
+		: effect === 'startup'
+			? [{ at: 0, frequency: 330 }, { at: 0.14, frequency: 494 }, { at: 0.25, frequency: 659 }]
+			: [{ at: 0, frequency: 587 }, { at: 0.12, frequency: 784 }, { at: 0.25, frequency: 988 }];
 	const output = new Float32Array(length);
 	for (let index = 0; index < length; index += 1) {
 		const time = index / sampleRate;
 		for (const note of notes) {
 			const local = time - note.at;
 			if (local < 0) continue;
-			const envelope = clamp01(local / 0.004) * Math.exp(-local / (effect === 'collect' ? 0.085 : effect === 'level-up' ? 0.13 : effect === 'cooperation-start' ? 0.17 : 0.16)) * clamp01((duration - local) / 0.028);
+			const envelope = clamp01(local / 0.004) * Math.exp(-local / (effect === 'collect' ? 0.085 : effect === 'cooperation-start' ? 0.17 : 0.16)) * clamp01((duration - local) / 0.028);
 			output[index] += 0.28 * Math.sin(TAU * note.frequency * local) * envelope;
-		}
-	}
-	return normalize(output);
-}
-
-function createMendingCollectSamples(sampleRate: number): Float32Array {
-	const duration = MENDING_COLLECT_CUES.end;
-	const length = Math.ceil(sampleRate * duration);
-	const output = new Float32Array(length);
-	const sparkleNoise = seededNoise(length, 0x6d656e64, sampleRate, 2_800, 9_000, 3);
-	const impactNoise = seededNoise(length, 0x4a41434b, sampleRate, 90, 1_800, 3);
-	const notes = [
-		{ at: MENDING_COLLECT_CUES.pickup, frequency: 523, gain: 0.19, decay: 0.15 },
-		{ at: MENDING_COLLECT_CUES.ring, frequency: 659, gain: 0.21, decay: 0.17 },
-		{ at: MENDING_COLLECT_CUES.rays, frequency: 784, gain: 0.22, decay: 0.18 },
-		{ at: MENDING_COLLECT_CUES.sparkle, frequency: 988, gain: 0.18, decay: 0.20 },
-		{ at: MENDING_COLLECT_CUES.sparkle + 0.055, frequency: 1_318, gain: 0.12, decay: 0.23 },
-		{ at: MENDING_COLLECT_CUES.sparkle + 0.105, frequency: 1_568, gain: 0.09, decay: 0.25 },
-		{ at: MENDING_COLLECT_CUES.reward, frequency: 659, gain: 0.22, decay: 0.34 },
-		{ at: MENDING_COLLECT_CUES.reward, frequency: 831, gain: 0.19, decay: 0.32 },
-		{ at: MENDING_COLLECT_CUES.reward, frequency: 988, gain: 0.17, decay: 0.30 },
-		{ at: MENDING_COLLECT_CUES.reward, frequency: 1_318, gain: 0.12, decay: 0.28 },
-		{ at: MENDING_COLLECT_CUES.jackpot, frequency: 1_568, gain: 0.19, decay: 0.30 },
-		{ at: MENDING_COLLECT_CUES.jackpot, frequency: 1_976, gain: 0.13, decay: 0.34 },
-		{ at: MENDING_COLLECT_CUES.jackpot, frequency: 2_637, gain: 0.075, decay: 0.38 }
-	] as const;
-	const transientCues = [MENDING_COLLECT_CUES.pickup, MENDING_COLLECT_CUES.ring, MENDING_COLLECT_CUES.rays, MENDING_COLLECT_CUES.sparkle, MENDING_COLLECT_CUES.reward, MENDING_COLLECT_CUES.jackpot] as const;
-	for (let index = 0; index < length; index += 1) {
-		const time = index / sampleRate;
-		const release = clamp01((duration - time) / (duration - MENDING_COLLECT_CUES.release));
-		const impact = time - MENDING_COLLECT_CUES.impact;
-		if (impact >= 0) {
-			const bodyEnvelope = Math.exp(-impact / 0.072) * clamp01((MENDING_COLLECT_CUES.pickup - time) / 0.045);
-			const bodyPhase = TAU * (92 * impact - 34 * impact * impact);
-			const click = Math.exp(-impact / 0.009) * clamp01(impact / 0.0005);
-			output[index] += 0.42 * Math.sin(bodyPhase) * bodyEnvelope + 0.11 * impactNoise[index] * click;
-		}
-		for (const note of notes) {
-			const local = time - note.at;
-			if (local < 0) continue;
-			const attack = clamp01(local / 0.004);
-			const envelope = attack * Math.exp(-local / note.decay) * release;
-			const phase = TAU * note.frequency * local;
-			const harmonics = Math.sin(phase) + 0.18 * Math.sin(phase * 2 + 0.12) + 0.055 * Math.sin(phase * 3 + 0.28);
-			output[index] += note.gain * harmonics * envelope;
-		}
-		for (const cue of transientCues) {
-			const local = time - cue;
-			if (local < 0) continue;
-			const transient = clamp01(local / 0.0015) * Math.exp(-local / (cue === MENDING_COLLECT_CUES.jackpot ? 0.075 : 0.028)) * release;
-			output[index] += (cue === MENDING_COLLECT_CUES.jackpot ? 0.075 : 0.045) * sparkleNoise[index] * transient;
-		}
-		const shimmerLocal = time - MENDING_COLLECT_CUES.release;
-		if (shimmerLocal >= 0) {
-			const shimmer = Math.exp(-shimmerLocal / 0.12) * release;
-			const shimmerPhase = TAU * (2_640 * shimmerLocal + 980 * shimmerLocal * shimmerLocal);
-			output[index] += shimmer * (0.085 * sparkleNoise[index] + 0.045 * Math.sin(shimmerPhase) + 0.025 * Math.sin(shimmerPhase * 1.5));
 		}
 	}
 	return normalize(output);
@@ -363,16 +302,12 @@ function createTagGameSamples(effect: TagGameSoundEffect, sampleRate: number): F
 	return normalize(output);
 }
 
-export function createSoundSamples(effect: SoundEffect, sampleRate: number): Float32Array {
+export function createSoundSamples(effect: ProceduralSoundEffect, sampleRate: number): Float32Array {
 	if (effect === 'death') {
 		if (!Number.isFinite(sampleRate) || sampleRate <= 0) return new Float32Array();
 		return createDeathSamples(sampleRate);
 	}
-	if (effect === 'mending-collect') {
-		if (!Number.isFinite(sampleRate) || sampleRate <= 0) return new Float32Array();
-		return createMendingCollectSamples(sampleRate);
-	}
-	if (effect === 'collect' || effect === 'level-up' || effect === 'startup' || effect === 'cooperation-start') {
+	if (effect === 'collect' || effect === 'startup' || effect === 'cooperation-start') {
 		if (!Number.isFinite(sampleRate) || sampleRate <= 0) return new Float32Array();
 		return createChimeSamples(effect, sampleRate);
 	}
@@ -394,6 +329,7 @@ export function createSoundController(options: ControllerOptions = {}): SoundCon
 	let masterGain: GainNode | null = null;
 	let disposed = false;
 	const buffers = new Map<SoundEffect, AudioBuffer>();
+	const assetLoads = new Map<AssetSoundEffect, Promise<AudioBuffer | null>>();
 	const applyGain = (at = context?.currentTime ?? 0) => {
 		if (!masterGain || !context) return;
 		masterGain.gain.cancelScheduledValues(at); masterGain.gain.setTargetAtTime(preference.volume, at, 0.015);
@@ -403,8 +339,47 @@ export function createSoundController(options: ControllerOptions = {}): SoundCon
 		try { context = options.audioContextFactory?.() ?? new AudioContext(); masterGain = context.createGain(); masterGain.connect(context.destination); applyGain(); return context; }
 		catch { context = null; masterGain = null; return null; }
 	};
-	const unlock = () => { const audio = ensureContext(); if (audio?.state === 'suspended') void audio.resume().catch(() => {}); };
+	const prepareAssetBuffer = (audio: AudioContextLike, effect: AssetSoundEffect): Promise<AudioBuffer | null> => {
+		const cached = buffers.get(effect);
+		if (cached) return Promise.resolve(cached);
+		const pending = assetLoads.get(effect);
+		if (pending) return pending;
+		let load: Promise<AudioBuffer | null>;
+		load = fetch(SOUND_ASSET_URLS[effect])
+			.then((response) => {
+				if (!response.ok) throw new Error(`Unable to load sound asset: ${effect}`);
+				return response.arrayBuffer();
+			})
+			.then((encoded) => audio.decodeAudioData(encoded.slice(0)))
+			.then((buffer) => {
+				if (disposed || context !== audio) return null;
+				buffers.set(effect, buffer);
+				return buffer;
+			})
+			.catch(() => null)
+			.finally(() => {
+				if (assetLoads.get(effect) === load) assetLoads.delete(effect);
+			});
+		assetLoads.set(effect, load);
+		return load;
+	};
+	const unlock = () => {
+		const audio = ensureContext();
+		if (!audio) return;
+		if (audio.state === 'suspended') void audio.resume().catch(() => {});
+		void prepareAssetBuffer(audio, 'mending-collect');
+		void prepareAssetBuffer(audio, 'level-up');
+	};
 	const setPreference = (next: SoundPreference) => { preference = next; saveSoundPreference(options.storage, preference); applyGain(); };
+	const playBuffer = (audio: AudioContextLike, effect: SoundEffect, buffer: AudioBuffer) => {
+		const source = audio.createBufferSource();
+		const effectGain = audio.createGain();
+		source.buffer = buffer;
+		effectGain.gain.value = SOUND_EFFECT_GAINS[effect];
+		source.connect(effectGain);
+		effectGain.connect(masterGain!);
+		source.start(audio.currentTime + 0.005);
+	};
 	return {
 		get preference() { return preference; }, unlock,
 		setVolume: (volume) => setPreference({ ...preference, volume: Math.min(1, Math.max(0, volume)) }),
@@ -412,15 +387,19 @@ export function createSoundController(options: ControllerOptions = {}): SoundCon
 			const audio = context;
 			if (!audio || !masterGain || audio.state !== 'running' || options.document?.hidden || preference.volume <= 0.001) return;
 			let buffer = buffers.get(effect);
-			if (!buffer) { const samples = createSoundSamples(effect, audio.sampleRate); buffer = audio.createBuffer(1, samples.length, audio.sampleRate); buffer.getChannelData(0).set(samples); buffers.set(effect, buffer); }
-			const source = audio.createBufferSource();
-			const effectGain = audio.createGain();
-			source.buffer = buffer;
-			effectGain.gain.value = SOUND_EFFECT_GAINS[effect];
-			source.connect(effectGain);
-			effectGain.connect(masterGain);
-			source.start(audio.currentTime + 0.005);
+			if (effect === 'mending-collect' || effect === 'level-up') {
+				if (!buffer) void prepareAssetBuffer(audio, effect);
+				else playBuffer(audio, effect, buffer);
+				return;
+			}
+			if (!buffer) {
+				const samples = createSoundSamples(effect, audio.sampleRate);
+				buffer = audio.createBuffer(1, samples.length, audio.sampleRate);
+				buffer.getChannelData(0).set(samples);
+				buffers.set(effect, buffer);
+			}
+			playBuffer(audio, effect, buffer);
 		},
-		dispose: () => { disposed = true; buffers.clear(); if (context) void context.close().catch(() => {}); context = null; masterGain = null; }
+		dispose: () => { disposed = true; buffers.clear(); assetLoads.clear(); if (context) void context.close().catch(() => {}); context = null; masterGain = null; }
 	};
 }
