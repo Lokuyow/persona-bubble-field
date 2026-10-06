@@ -31,6 +31,8 @@
 		end: 0.54
 	} as const;
 	const collectionCueAt = (cue: keyof typeof collectionCues): number => collectionCues[cue] * 1000;
+	const rewardSummaryReadableHoldDuration = 1200;
+	const rewardSummaryFadeDuration = 280;
 
 	type Props = Readonly<{
 		open: boolean;
@@ -134,6 +136,7 @@
 			const introDuration = collectionCueAt('reward') - collectionCueAt('pickup');
 			const rewardDuration = collectionCueAt('release') - collectionCueAt('reward');
 			const tailDuration = collectionCueAt('end') - collectionCueAt('release');
+			const rewardSummaryFadeAt = collectionCueAt('reward') + rewardSummaryReadableHoldDuration;
 			const opacityOnly = (from: number, to: number, duration: number) => ({ opacity: { from, to }, duration });
 
 			// The full-screen layer stays outside layout; only its fixed decorative targets are animated.
@@ -213,7 +216,7 @@
 			timeline.add(secondaryRays, opacityOnly(0.86, 0, tailDuration), collectionCueAt('release'));
 			timeline.add(sparkles, { opacity: { from: 0.92, to: 0 }, duration: tailDuration, ease: 'in(2)' }, collectionCueAt('release'));
 			timeline.add(jackpotBloom, opacityOnly(0.92, 0, tailDuration), collectionCueAt('release'));
-			timeline.add(summary, { opacity: { from: 1, to: 0 }, duration: tailDuration, ease: 'in(2)' }, collectionCueAt('release'));
+			timeline.add(summary, { opacity: { from: 1, to: 0 }, duration: rewardSummaryFadeDuration, ease: 'in(2)' }, rewardSummaryFadeAt);
 
 			const styleTargets = [
 				{ element: summary, properties: ['opacity', 'transform', 'translate', 'scale'] },
