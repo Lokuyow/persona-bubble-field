@@ -27,8 +27,8 @@
 		sparkle: 0.27,
 		reward: 0.34,
 		jackpot: 0.37,
-		release: 0.44,
-		end: 0.54
+		release: 0.62,
+		end: 0.92
 	} as const;
 	const collectionCueAt = (cue: keyof typeof collectionCues): number => collectionCues[cue] * 1000;
 	const rewardSummaryReadableHoldDuration = 1200;
