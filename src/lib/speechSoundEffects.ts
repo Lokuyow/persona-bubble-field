@@ -16,6 +16,7 @@ export const SOUND_ASSET_URLS: Readonly<Record<AssetSoundEffect, string>> = {
 
 export const DEFAULT_SOUND_PREFERENCE: SoundPreference = { volume: 0.5 };
 export const SPEECH_SOUND_PREFERENCE_KEY = 'persona-bubble-field:speech-sound:v1';
+const MASTER_OUTPUT_CALIBRATION_GAIN = 0.5;
 
 export function loadSoundPreference(storage: Pick<Storage, 'getItem'> | null | undefined): SoundPreference {
 	try {
@@ -332,7 +333,7 @@ export function createSoundController(options: ControllerOptions = {}): SoundCon
 	const assetLoads = new Map<AssetSoundEffect, Promise<AudioBuffer | null>>();
 	const applyGain = (at = context?.currentTime ?? 0) => {
 		if (!masterGain || !context) return;
-		masterGain.gain.cancelScheduledValues(at); masterGain.gain.setTargetAtTime(preference.volume, at, 0.015);
+		masterGain.gain.cancelScheduledValues(at); masterGain.gain.setTargetAtTime(preference.volume * MASTER_OUTPUT_CALIBRATION_GAIN, at, 0.015);
 	};
 	const ensureContext = (): AudioContextLike | null => {
 		if (disposed || context) return context;

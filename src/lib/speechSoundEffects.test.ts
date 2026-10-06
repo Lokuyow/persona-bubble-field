@@ -31,7 +31,7 @@ type FakeSoundBuffer = AudioBuffer & Readonly<{ assetId?: 'mending-collect' | 'l
 
 function createAudioContextFixture(decodeAudioData: (encoded: ArrayBuffer) => Promise<AudioBuffer> = async () => ({ numberOfChannels: 1 } as AudioBuffer)) {
 	const played: FakeSoundBuffer[] = [];
-	const gainNodes: Array<{ gain: { value: number; cancelScheduledValues: () => void; setTargetAtTime: (value: number) => void }; connect: () => void }> = [];
+	const gainNodes: Array<{ gain: { value: number; cancelScheduledValues: () => void; setTargetAtTime: (value: number) => void }; connections: unknown[] }> = [];
 	const masterVolumes: number[] = [];
 	let proceduralBufferCreations = 0;
 	let state: AudioContextState = 'suspended';
@@ -39,7 +39,8 @@ function createAudioContextFixture(decodeAudioData: (encoded: ArrayBuffer) => Pr
 	const context = {
 		get state() { return state; }, sampleRate: 10_000, currentTime: 0, destination: {},
 		createGain: () => {
-			const node = { gain: { value: 1, cancelScheduledValues: () => {}, setTargetAtTime: (value: number) => masterVolumes.push(value) }, connect: () => {} };
+			const node = { gain: { value: 1, cancelScheduledValues: () => {}, setTargetAtTime: (value: number) => masterVolumes.push(value) }, connections: [] as unknown[] };
+			(node as typeof node & { connect: (target: unknown) => void }).connect = (target) => node.connections.push(target);
 			gainNodes.push(node);
 			return node;
 		},
@@ -94,6 +95,7 @@ describe('speech sound effects', () => {
 		controller.unlock();
 		await flushMicrotasks();
 		expect(fixture.resumeCalls).toBe(1);
+		expect(fixture.masterVolumes).toEqual([0.25]);
 		expect(new Set(fetchMock.mock.calls.map(([url]) => String(url)))).toEqual(new Set(Object.values(SOUND_ASSET_URLS)));
 		expect(decoded.map(({ assetId }) => assetId).sort()).toEqual(['level-up', 'mending-collect']);
 
@@ -108,6 +110,11 @@ describe('speech sound effects', () => {
 		expect(fixture.gainNodes.slice(1).map(({ gain }) => gain.value)).toEqual([
 			SOUND_EFFECT_GAINS['mending-collect'], SOUND_EFFECT_GAINS['mending-collect'], SOUND_EFFECT_GAINS['level-up'], SOUND_EFFECT_GAINS.collect, SOUND_EFFECT_GAINS.collect
 		]);
+		expect(fixture.gainNodes.slice(1).every(({ connections }) => connections[0] === fixture.gainNodes[0])).toBe(true);
+		controller.setVolume(0);
+		controller.setVolume(0.5);
+		controller.setVolume(1);
+		expect(fixture.masterVolumes.slice(-3)).toEqual([0, 0.25, 0.5]);
 
 		hidden = true;
 		controller.play('mending-collect');
