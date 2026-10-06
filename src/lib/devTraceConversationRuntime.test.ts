@@ -165,7 +165,7 @@ describe('DEV trace conversation runtime', () => {
 		});
 	});
 
-	it('reactivates locally without network state and rejects an out-of-range post-reactivation', () => {
+	it('reactivates locally at its retained occupied cell and enforces trace range', () => {
 		let presence = createPresenceState({ columns: 4, rows: 3 }, 1_000, [
 			{ id: 'self', position: { x: 2, y: 2 } },
 			{ id: 'other', position: { x: 2, y: 2 } }
@@ -173,8 +173,12 @@ describe('DEV trace conversation runtime', () => {
 		presence = debugTimeoutParticipant(presence, 'self');
 		const f = fixture(presence);
 		f.roots = [root('target', 1, 2, 2)];
-		expect(f.runtime.openTraceConversation({ rootId: 'target', currentId: 'target' })).toEqual({ kind: 'blocked' });
-		expect(f.setPresence).not.toHaveBeenCalled();
+		expect(f.runtime.openTraceConversation({ rootId: 'target', currentId: 'target' })).toEqual({ kind: 'opened' });
+		expect(getParticipant(f.presence, 'self')).toMatchObject({ position: { x: 2, y: 2 }, status: 'active' });
+		expect(f.setPresence).toHaveBeenCalledOnce();
+		f.runtime.closeTraceConversation();
+		f.roots = [root('out-of-range', 2, 0, 0)];
+		expect(f.runtime.openTraceConversation({ rootId: 'out-of-range', currentId: 'out-of-range' })).toEqual({ kind: 'blocked' });
 	});
 
 	it('falls back without activity only while the replacement remains in range', () => {

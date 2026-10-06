@@ -37,16 +37,22 @@ describe('trace investigation', () => {
 		expect(refreshed).toMatchObject({ kind: 'ready', coalesced: false });
 	});
 
-	it('checks both current switch range and the actual post-reactivation position', () => {
+	it('keeps the retained occupied position on reactivation and checks current trace range', () => {
 		let presence = createPresenceState({ columns: 4, rows: 2 }, 10, [
 			{ id: 'self', position: { x: 2, y: 1 } },
 			{ id: 'other', position: { x: 2, y: 1 } }
 		]);
 		presence = debugTimeoutParticipant(presence, 'self');
-		expect(prepareTraceInspectionActivity({
+		const restored = prepareTraceInspectionActivity({
 			presence, selfId: 'self', target: { x: 2, y: 1 }, nowMs: 20,
 			requireCurrentRange: true, random: () => 0
-		})).toEqual({ kind: 'blocked' });
+		});
+		expect(restored).toMatchObject({ kind: 'ready', position: { x: 2, y: 1 } });
+		if (restored.kind === 'ready') {
+			expect(getParticipant(restored.nextPresence, 'self')).toMatchObject({
+				position: { x: 2, y: 1 }, status: 'active'
+			});
+		}
 		expect(prepareTraceInspectionActivity({
 			presence, selfId: 'self', target: { x: 0, y: 0 }, nowMs: 20,
 			requireCurrentRange: true, random: () => 0

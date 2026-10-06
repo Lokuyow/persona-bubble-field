@@ -79,8 +79,7 @@ function withParticipant(state: PresenceState, id: string, update: (participant:
 }
 
 function reactivatePosition(state: PresenceState, participant: PresenceParticipant, random: RandomSource): GridPosition {
-	const occupied = activeParticipants(state, participant.id).map((other) => other.position);
-	if (!isBlockedFacilityCell(participant.position) && !occupied.some((position) => samePosition(position, participant.position))) {
+	if (!isBlockedFacilityCell(participant.position)) {
 		return copyPosition(participant.position);
 	}
 	return chooseSpawnPosition(state, random, participant.id);
@@ -141,11 +140,7 @@ export function spawnParticipant(
 	};
 }
 
-/**
- * Places a participant for a new world entry. Unlike reactivation, an expired
- * participant is assigned from the current active occupancy instead of
- * retaining its old cell.
- */
+/** Places a participant for a world entry, retaining a known valid position. */
 export function enterParticipant(
 	state: PresenceState,
 	id: string,
@@ -155,8 +150,8 @@ export function enterParticipant(
 	const participant = state.participants.find((candidate) => candidate.id === id);
 	if (participant?.status === 'active' && !isBlockedFacilityCell(participant.position)) return state;
 
-	const position = chooseSpawnPosition(state, random);
 	if (!participant) {
+		const position = chooseSpawnPosition(state, random);
 		return {
 			...state,
 			participants: [
@@ -166,6 +161,9 @@ export function enterParticipant(
 		};
 	}
 
+	const position = isBlockedFacilityCell(participant.position)
+		? chooseSpawnPosition(state, random, participant.id)
+		: copyPosition(participant.position);
 	return withParticipant(state, id, (current) => activeWithActivity(current, position, now));
 }
 

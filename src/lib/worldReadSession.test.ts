@@ -1672,6 +1672,28 @@ describe('world read session', () => {
 		expect(publish).not.toHaveBeenCalled();
 	});
 
+	it('re-enters an inactive self at the retained position even when another participant occupies it', async () => {
+		result = startResult([], [
+			position('self-bootstrap', 700, selfPubkey, 0, { x: 2, y: 1 }),
+			position('other-at-retained-position', 1_300, alice, 0, { x: 2, y: 1 })
+		]);
+		vi.setSystemTime(1_300_000);
+		publish.mockResolvedValue([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 },
+			selfSigner: selfSigner(),
+			onPresenceChanged: vi.fn(),
+			onLiveMessage: vi.fn(),
+			onStatusChanged: vi.fn()
+		});
+
+		await session.start();
+		session.completeBootstrap();
+		await expect(session.enterSelf()).resolves.toEqual({ kind: 'succeeded', operation: 'entry' });
+		const event = parseWorldStateEvent(publish.mock.calls[0][0], 'c'.repeat(64));
+		expect(event?.position).toEqual({ x: 2, y: 1 });
+	});
+
 	it('replaces an active bootstrap self on the terminal cell with a non-blocked entry publication', async () => {
 		result = startResult([], [position('self-at-terminal', 700, selfPubkey, 0, { x: 12, y: 3 })]);
 		publish.mockResolvedValue([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
@@ -1690,7 +1712,7 @@ describe('world read session', () => {
 		expect(event?.position).not.toEqual({ x: 12, y: 3 });
 	});
 
-	it('uses the retained cell for the first post-timeout reactivation', async () => {
+	it('uses the retained cell for post-timeout reactivation even when occupied', async () => {
 		result = startResult([], [position('self-bootstrap', 700, selfPubkey, 0, { x: 2, y: 1 })]);
 		publish.mockResolvedValueOnce([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
 		const session = createWorldReadSession({
@@ -1705,6 +1727,7 @@ describe('world read session', () => {
 		session.completeBootstrap();
 		await session.enterSelf();
 		vi.setSystemTime(700_000 + PRESENCE_TIMEOUT_MS);
+		input!.onLiveWorldState(position('occupied', 700 + PRESENCE_TIMEOUT_MS / 1000, alice, 0, { x: 2, y: 1 }));
 		await expect(session.moveSelf('right')).resolves.toEqual({ kind: 'succeeded', operation: 'reactivation' });
 		const event = parseWorldStateEvent(publish.mock.calls[0][0], 'c'.repeat(64));
 		expect(event?.position).toEqual({ x: 2, y: 1 });
@@ -2108,7 +2131,7 @@ describe('world read session', () => {
 		await expect(session.publishMessage('duplicate', 'normal')).resolves.toEqual({ kind: 'succeeded', eventId: expect.any(String) });
 	});
 
-	it('reactivates an entered self through a message and records the reallocated w position', async () => {
+	it('reactivates an entered self through a message at its retained occupied position', async () => {
 		result = startResult([], [position('self-bootstrap', 700, selfPubkey, 0, { x: 2, y: 1 })]);
 		publish.mockResolvedValueOnce([{ relayUrl: 'wss://relay.test/', outcome: 'accepted' }]);
 		const session = createWorldReadSession({
@@ -2127,7 +2150,7 @@ describe('world read session', () => {
 		await expect(session.publishMessage('back', 'normal')).resolves.toEqual({ kind: 'succeeded', eventId: expect.any(String) });
 		const parsed = parseWorldMessage(publish.mock.calls[0][0], 'c'.repeat(64));
 
-		expect(parsed?.position).not.toEqual({ x: 2, y: 1 });
+		expect(parsed?.position).toEqual({ x: 2, y: 1 });
 		expect(session.refresh(700_000 + PRESENCE_TIMEOUT_MS).participants).toContainEqual(
 			expect.objectContaining({ id: selfPubkey, position: parsed?.position, status: 'active' })
 		);

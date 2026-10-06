@@ -71,7 +71,7 @@ describe('presence and conversation boundary', () => {
 		expect(conversation.normalBubbles[0]).toMatchObject({ pubkey: 'alice', id: 'm1' });
 	});
 
-	it('projects reactivated self with the new position and camera context', () => {
+	it('projects reactivated self at its retained occupied position and offsets same-cell participants', () => {
 		let presence = createPresenceState({ columns: 16, rows: 8 }, 0, [
 			{ id: 'you', position: { x: 15, y: 7 } },
 			{ id: 'bob', position: { x: 15, y: 7 } }
@@ -87,10 +87,12 @@ describe('presence and conversation boundary', () => {
 			now: PRESENCE_TIMEOUT_MS + 2
 		});
 
-		expect(presence.participants[0]).toMatchObject({ position: { x: 0, y: 0 }, status: 'active' });
-		expect(nextProjection.camera).not.toEqual(oldProjection.camera);
+		expect(presence.participants[0]).toMatchObject({ position: { x: 15, y: 7 }, status: 'active' });
+		expect(nextProjection.camera).toEqual(oldProjection.camera);
 		expect(nextProjection.visibleParticipantIds.has('you')).toBe(true);
-		expect(nextProjection.participants.find((participant) => participant.id === 'you')?.screen.y).toBeGreaterThanOrEqual(260);
+		expect(nextProjection.visibleParticipantIds.has('bob')).toBe(true);
+		expect(nextProjection.participants.find((participant) => participant.id === 'you')?.screen)
+			.not.toEqual(nextProjection.participants.find((participant) => participant.id === 'bob')?.screen);
 		expect(conversation.normalBubbles).toMatchObject([{ pubkey: 'you', id: 'reactivated' }]);
 	});
 

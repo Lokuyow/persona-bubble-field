@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { getSameCellVisualOffset, type Direction } from './geometry';
 import {
 	PRESENCE_TIMEOUT_MS,
@@ -76,16 +76,22 @@ describe('local position and presence domain', () => {
 		expect(getParticipant(recordPresenceActivity(debugTimeoutParticipant(stale, 'self'), 'self', 'message', 2, rng(0)), 'self')?.position).not.toEqual(blocked);
 	});
 
-	it('treats an expired participant as a new entry instead of restoring its old cell', () => {
+	it.each([false, true])('restores an expired entry to its valid retained cell (occupied: %s)', (occupied) => {
 		let state = createPresenceState(smallField, 10, [
-			{ id: 'alice', position: { x: 0, y: 0 } },
-			{ id: 'bob', position: { x: 0, y: 0 } }
+			{ id: 'alice', position: { x: 1, y: 1 } },
+			...(occupied ? [{ id: 'bob', position: { x: 1, y: 1 } }] : [])
 		]);
 		state = debugTimeoutParticipant(state, 'alice');
+		const lowRandom = vi.fn(() => 0);
+		const highRandom = vi.fn(() => 0.99);
 
-		const entered = enterParticipant(state, 'alice', 20, rng(0));
+		const low = enterParticipant(state, 'alice', 20, lowRandom);
+		const high = enterParticipant(state, 'alice', 20, highRandom);
 
-		expect(at(entered, 'alice')).toMatchObject({ position: { x: 1, y: 0 }, status: 'active', lastActivityAt: 20 });
+		expect(at(low, 'alice')).toMatchObject({ position: { x: 1, y: 1 }, status: 'active', lastActivityAt: 20 });
+		expect(at(high, 'alice').position).toEqual({ x: 1, y: 1 });
+		expect(lowRandom).not.toHaveBeenCalled();
+		expect(highRandom).not.toHaveBeenCalled();
 	});
 
 	it.each([
@@ -175,19 +181,24 @@ describe('local position and presence domain', () => {
 		expect(at(state, 'alice')).toMatchObject({ position: { x: 1, y: 1 }, lastActivityAt: 100, status: 'active' });
 	});
 
-	it('reactivates at an empty cell when the retained position is occupied', () => {
+	it('reactivates at the retained position when another active participant occupies it, regardless of RNG', () => {
 		let state = createPresenceState(smallField, 10, [
 			{ id: 'alice', position: { x: 1, y: 1 } },
 			{ id: 'bob', position: { x: 1, y: 1 } }
 		]);
 		state = debugTimeoutParticipant(state, 'alice');
-		state = recordPresenceActivity(state, 'alice', 'message', 100, rng(0));
+		const lowRandom = vi.fn(() => 0);
+		const highRandom = vi.fn(() => 0.99);
+		const low = recordPresenceActivity(state, 'alice', 'message', 100, lowRandom);
+		const high = recordPresenceActivity(state, 'alice', 'message', 100, highRandom);
 
-		expect(at(state, 'alice').position).toEqual({ x: 0, y: 0 });
-		expect(at(state, 'alice').status).toBe('active');
+		expect(at(low, 'alice')).toMatchObject({ position: { x: 1, y: 1 }, status: 'active' });
+		expect(at(high, 'alice').position).toEqual({ x: 1, y: 1 });
+		expect(lowRandom).not.toHaveBeenCalled();
+		expect(highRandom).not.toHaveBeenCalled();
 	});
 
-	it('allows duplicate reactivation when the field is full', () => {
+	it('keeps the retained same-cell position during reactivation when the field is full', () => {
 		let state = createPresenceState(smallField, 10, [
 			{ id: 'alice', position: { x: 0, y: 0 } },
 			{ id: 'b', position: { x: 0, y: 0 } },
@@ -198,9 +209,11 @@ describe('local position and presence domain', () => {
 			{ id: 'g', position: { x: 2, y: 1 } }
 		]);
 		state = debugTimeoutParticipant(state, 'alice');
-		state = recordPresenceActivity(state, 'alice', 'message', 100, rng(0.5));
+		const random = vi.fn(() => 0.5);
+		state = recordPresenceActivity(state, 'alice', 'message', 100, random);
 
-		expect(at(state, 'alice').position).toEqual({ x: 0, y: 1 });
+		expect(at(state, 'alice').position).toEqual({ x: 0, y: 0 });
+		expect(random).not.toHaveBeenCalled();
 	});
 
 	it('reconstructs active and inactive state from last activity time', () => {
