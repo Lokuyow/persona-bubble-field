@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createConversationState, receiveMessage, type SpeechType } from './conversation';
-import { createSoundController, createSoundSamples, createSpeechSoundSamples, DEFAULT_SOUND_PREFERENCE, DEATH_SOUND_DURATION, loadSoundPreference, newLiveBubbleEffects, SOUND_EFFECT_GAINS, SPEECH_SOUND_DURATIONS, SPEECH_SOUND_PREFERENCE_KEY, UI_SOUND_DURATIONS } from './speechSoundEffects';
+import { createSoundController, createSoundSamples, createSpeechSoundSamples, DEFAULT_SOUND_PREFERENCE, DEATH_SOUND_DURATION, loadSoundPreference, MENDING_COLLECT_CUES, newLiveBubbleEffects, SOUND_EFFECT_GAINS, SPEECH_SOUND_DURATIONS, SPEECH_SOUND_PREFERENCE_KEY, UI_SOUND_DURATIONS } from './speechSoundEffects';
 
 const options = { isSpeakerVisible: true, duration: 100, now: 0 };
 const message = (id: string, pubkey: string, content: string, speechType: SpeechType = 'normal') => ({ id, pubkey, content, speechType, createdAt: 0 });
@@ -27,6 +27,10 @@ function rms(samples: Float32Array): number {
 	return Math.sqrt(samples.reduce((total, sample) => total + sample * sample, 0) / samples.length);
 }
 
+function windowRms(samples: Float32Array, sampleRate: number, from: number, to: number): number {
+	return rms(samples.slice(Math.ceil(from * sampleRate), Math.ceil(to * sampleRate)));
+}
+
 describe('speech sound effects', () => {
 	it('reuses collect while honoring unlock, volume, and document visibility constraints', () => {
 		const starts: number[] = [];
@@ -40,20 +44,27 @@ describe('speech sound effects', () => {
 		} as unknown as AudioContext;
 		const controller = createSoundController({ audioContextFactory: () => context, document: { get hidden() { return hidden; } } });
 		controller.play('collect');
+		controller.play('mending-collect');
 		expect(starts).toEqual([]);
 		controller.unlock();
 		controller.play('collect');
 		expect(starts).toHaveLength(1);
+		controller.play('mending-collect');
+		expect(starts).toHaveLength(2);
 		hidden = true;
 		controller.play('collect');
-		expect(starts).toHaveLength(1);
+		controller.play('mending-collect');
+		expect(starts).toHaveLength(2);
 		hidden = false;
 		controller.setVolume(0);
 		controller.play('collect');
-		expect(starts).toHaveLength(1);
+		controller.play('mending-collect');
+		expect(starts).toHaveLength(2);
 		controller.setVolume(0.5);
 		controller.play('collect');
-		expect(starts).toHaveLength(2);
+		expect(starts).toHaveLength(3);
+		controller.play('mending-collect');
+		expect(starts).toHaveLength(4);
 		controller.dispose();
 	});
 	it('creates deterministic UI chimes with effect-specific gains', () => {
@@ -64,6 +75,33 @@ describe('speech sound effects', () => {
 			expect(Math.max(...samples.map(Math.abs))).toBeLessThanOrEqual(0.920001);
 			expect(samples).toEqual(createSoundSamples(effect, 10_000));
 		}
+	});
+	it('creates a distinct Mending jackpot flourish with impact, cue energy, and a decaying shimmer tail', () => {
+		const sampleRate = 10_000;
+		const duration = UI_SOUND_DURATIONS['mending-collect'];
+		const reward = createSoundSamples('mending-collect', sampleRate);
+		const genericCollect = createSoundSamples('collect', sampleRate);
+		expect(reward.length).toBe(Math.ceil(duration * sampleRate));
+		expect([...reward].every(Number.isFinite)).toBe(true);
+		expect(Math.max(...reward.map(Math.abs))).toBeLessThanOrEqual(0.920001);
+		expect(reward.some((sample) => Math.abs(sample) > 0.001)).toBe(true);
+		expect(reward).toEqual(createSoundSamples('mending-collect', sampleRate));
+		expect(reward).not.toEqual(genericCollect);
+
+		const windows = [
+			[MENDING_COLLECT_CUES.impact, MENDING_COLLECT_CUES.pickup],
+			[MENDING_COLLECT_CUES.pickup, MENDING_COLLECT_CUES.ring],
+			[MENDING_COLLECT_CUES.ring, MENDING_COLLECT_CUES.rays],
+			[MENDING_COLLECT_CUES.rays, MENDING_COLLECT_CUES.sparkle],
+			[MENDING_COLLECT_CUES.sparkle, MENDING_COLLECT_CUES.reward],
+			[MENDING_COLLECT_CUES.reward, MENDING_COLLECT_CUES.jackpot],
+			[MENDING_COLLECT_CUES.jackpot, MENDING_COLLECT_CUES.release]
+		] as const;
+		for (const [from, to] of windows) expect(windowRms(reward, sampleRate, from, to)).toBeGreaterThan(0.001);
+		const releaseTail = windowRms(reward, sampleRate, MENDING_COLLECT_CUES.release, duration - 0.08);
+		const finalTail = windowRms(reward, sampleRate, duration - 0.08, duration);
+		expect(finalTail).toBeLessThan(releaseTail);
+		expect(Math.abs(reward.at(-1) ?? 1)).toBeLessThan(0.001);
 	});
 	it('creates six distinct, finite, non-clipping tag-game cues at their intended lengths', () => {
 		const effects = ['tag-game-benefit', 'tag-game-calamity', 'tag-game-transfer', 'tag-game-switch', 'tag-game-start', 'tag-game-end'] as const;
@@ -98,6 +136,10 @@ describe('speech sound effects', () => {
 		expect(SOUND_EFFECT_GAINS.monologue).toBe(1);
 		expect(SOUND_EFFECT_GAINS.collect).toBeCloseTo(0.75);
 		expect(SOUND_EFFECT_GAINS['level-up']).toBeCloseTo(0.75);
+		expect(SOUND_EFFECT_GAINS['mending-collect']).toBeGreaterThan(SOUND_EFFECT_GAINS['level-up']);
+		const mending = createSoundSamples('mending-collect', 10_000);
+		const levelUp = createSoundSamples('level-up', 10_000);
+		expect(rms(mending) * SOUND_EFFECT_GAINS['mending-collect']).toBeGreaterThan(rms(levelUp) * SOUND_EFFECT_GAINS['level-up']);
 		expect(SOUND_EFFECT_GAINS.startup).toBeCloseTo(0.65);
 		expect(SOUND_EFFECT_GAINS['cooperation-start']).toBeCloseTo(0.65);
 		expect(SOUND_EFFECT_GAINS.death).toBeCloseTo(0.70);

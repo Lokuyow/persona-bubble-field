@@ -2244,7 +2244,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 					lifespanMs: Math.max(0, result.persona.activeRun.gameState.lifespanExpiresAtMs - expected.gameState.lifespanExpiresAtMs)
 				};
 				collectFeedbackTimer = window.setTimeout(() => { collectFeedback = null; collectFeedbackTimer = null; }, 500);
-				soundController?.play('collect');
+				try { soundController?.play('mending-collect'); } catch { /* Reward audio is best-effort after canonical collection. */ }
 			}
 			mendingNowMs = Date.now();
 			updateLifespanHud(mendingNowMs, true);

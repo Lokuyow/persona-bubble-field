@@ -16,6 +16,7 @@ import {
 } from '../../src/lib/nostrProtocol';
 import { buildRealtimeControlEventTemplate, finalizeRealtimeEvent } from '../../src/lib/realtimeEvents';
 import { SPEECH_SHORTCUT_IDS } from '../../src/lib/speechSubmission';
+import { formatElapsedDuration } from '../../src/lib/lifespanHud';
 import { characterPicturePath } from '../../src/lib/character';
 import { requireCharacterFromPubkey, resolveCharacterFromPubkey } from '../../src/lib/characterAssignment';
 import { deriveBip85NostrEntropy } from '../../src/lib/bip85';
@@ -24,6 +25,32 @@ import { INFERENCE_ACCELERATION_BUDGET_MS } from '../../src/lib/rootProgression'
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { installFieldFrameSampling, readFieldFrames, sampleRenderedField } from './helpers/fieldFrames';
 import { CHANNEL_ID, AUTHORITATIVE_RELAYS, fixtureSecret, testEvents, isDeathTraceEvent, installDelayedRelay, relayState, dragRelayJoystick, publishedMessages, waitForPublishedMessageCount, pauseAtCurrentBrowserTime, startSelectedRun, openReadyRelayWorld, openClearReadyWorld, installPromptApiStub, seedRelayAccount, readRelayGameState, overwriteRelayGameState, overwriteRelayMendingBuild, seedUnavailablePersona, installDeathTransitionFailure, armDeathTransitionFailure, chooseMoveToward, moveRelaySelfTo } from './helpers/relayHarness';
+
+type MendingRewardObservation = {
+	done: boolean;
+	sawSummary: boolean;
+	sawImpactBloom: boolean;
+	sawJackpotBloom: boolean;
+	sawPrimaryRays: boolean;
+	sawSecondaryRays: boolean;
+	sawRings: boolean;
+	sawParticles: boolean;
+	sawBorderEmphasis: boolean;
+	sawLifespanBorderEmphasis: boolean;
+	sawCardsGlow: boolean;
+	sawWalletEmphasis: boolean;
+	sawSummaryTransform: boolean;
+	sawRaysTransform: boolean;
+	sawRingTransform: boolean;
+	sawSparklesTransform: boolean;
+	sawParticlesTransform: boolean;
+	sawPointsTransform: boolean;
+	sawWalletTransform: boolean;
+	sawPointsGlow: boolean;
+	sawRewardNumberEmphasis: boolean;
+	sawDecorativeOpacity: boolean;
+	finalInlineStyles: string[];
+};
 
 test.describe('Relay startup', () => {
 	test('shows Root-accelerated point speed before work and keeps it after work starts', async ({ page }) => {
@@ -373,8 +400,117 @@ test.describe('Relay startup', () => {
 		}
 		await page.setViewportSize({ width: 1280, height: 800 });
 		const beforeMendingReward = await publishedWorldStateCount();
-		const assertCollectionLayout = async (viewport: { width: number; height: number }, expectedPoints: number) => {
+		const hudPoints = page.locator('[data-unified-status-hud] [data-points-value]');
+		const assertCollectionLayout = async (viewport: { width: number; height: number }, expectedPoints: number, reducedMotion = false) => {
 			await page.setViewportSize(viewport);
+			if (reducedMotion) await page.emulateMedia({ reducedMotion: 'reduce' });
+			await page.evaluate(() => {
+					const dialog = document.querySelector<HTMLElement>('.mending-dialog-content')!;
+					const rewardLayer = document.querySelector<HTMLElement>('.mending-reward-layer')!;
+					const pointsCard = dialog.querySelector<HTMLElement>('.result-card[data-mending-icon="coins"]')!;
+					const lifespanCard = dialog.querySelector<HTMLElement>('.result-card[data-mending-icon="heart"]')!;
+					const wallet = dialog.querySelector<SVGElement>('[data-mending-icon="wallet"] svg')!;
+					const pointsValue = dialog.querySelector<HTMLElement>('.owned-points-value')!;
+					const initialPointsCardShadow = getComputedStyle(pointsCard).boxShadow;
+					const initialLifespanCardShadow = getComputedStyle(lifespanCard).boxShadow;
+					const observation = {
+						baselineBorder: getComputedStyle(pointsCard).borderColor,
+						baselineLifespanBorder: getComputedStyle(lifespanCard).borderColor,
+						baselineWallet: getComputedStyle(wallet).color,
+						baselinePoints: getComputedStyle(pointsValue).color,
+						sawSummary: false,
+						sawImpactBloom: false,
+						sawJackpotBloom: false,
+						sawPrimaryRays: false,
+						sawSecondaryRays: false,
+						sawRings: false,
+						sawParticles: false,
+						sawBorderEmphasis: false,
+						sawLifespanBorderEmphasis: false,
+						sawCardsGlow: false,
+						sawWalletEmphasis: false,
+						sawSummaryTransform: false,
+						sawRaysTransform: false,
+						sawRingTransform: false,
+						sawSparklesTransform: false,
+						sawParticlesTransform: false,
+						sawPointsTransform: false,
+						sawWalletTransform: false,
+						sawPointsGlow: false,
+						sawRewardNumberEmphasis: false,
+						sawDecorativeOpacity: false,
+						finalInlineStyles: [] as string[],
+						done: false
+					};
+					const observedWindow = window as typeof window & {
+						__mendingRewardObservation?: MendingRewardObservation;
+					};
+					observedWindow.__mendingRewardObservation = observation;
+					let summaryRef: HTMLElement | null = null;
+					let impactBloomRef: HTMLElement | null = null;
+					let jackpotBloomRef: HTMLElement | null = null;
+					let primaryRaysRef: SVGElement | null = null;
+					let secondaryRaysRef: SVGElement | null = null;
+					let ringRefs: SVGElement[] = [];
+					let sparklesRef: SVGElement | null = null;
+					let particleRefs: SVGElement[] = [];
+					let pointsRef: HTMLElement | null = null;
+					let pointsBaselineShadow: string | null = null;
+					const hasTransform = (element: HTMLElement | SVGElement): boolean => {
+						const style = getComputedStyle(element);
+						return element.style.transform !== '' || element.style.scale !== '' || element.style.translate !== '' || element.style.rotate !== '' ||
+							style.transform !== 'none' || (style.scale !== 'none' && style.scale !== '1') || style.translate !== 'none' || style.rotate !== 'none';
+					};
+					const sample = () => {
+						observation.sawBorderEmphasis ||= getComputedStyle(pointsCard).borderColor !== observation.baselineBorder;
+						observation.sawLifespanBorderEmphasis ||= getComputedStyle(lifespanCard).borderColor !== observation.baselineLifespanBorder;
+						observation.sawWalletEmphasis ||= getComputedStyle(wallet).color !== observation.baselineWallet || getComputedStyle(pointsValue).color !== observation.baselinePoints;
+						const summary = rewardLayer.querySelector<HTMLElement>('.reward-summary');
+						const impactBloom = rewardLayer.querySelector<HTMLElement>('.reward-impact-bloom');
+						const jackpotBloom = rewardLayer.querySelector<HTMLElement>('.reward-jackpot-bloom');
+						const primaryRays = rewardLayer.querySelector<SVGElement>('.reward-burst-rays-primary');
+						const secondaryRays = rewardLayer.querySelector<SVGElement>('.reward-burst-rays-secondary');
+						const rings = [...rewardLayer.querySelectorAll<SVGElement>('.reward-burst-ring')];
+						const sparkles = rewardLayer.querySelector<SVGElement>('.reward-burst-sparkles');
+						const particles = [...rewardLayer.querySelectorAll<SVGElement>('.reward-particle')];
+						const rewardPoints = rewardLayer.querySelector<HTMLElement>('.reward-summary-points');
+						if (summary && impactBloom && jackpotBloom && primaryRays && secondaryRays && rings.length > 1 && sparkles && particles.length > 0 && rewardPoints) {
+							summaryRef = summary;
+							impactBloomRef = impactBloom;
+							jackpotBloomRef = jackpotBloom;
+							primaryRaysRef = primaryRays;
+							secondaryRaysRef = secondaryRays;
+							ringRefs = rings;
+							sparklesRef = sparkles;
+							particleRefs = particles;
+							pointsRef = rewardPoints;
+							pointsBaselineShadow ??= getComputedStyle(rewardPoints).textShadow;
+							observation.sawSummary = true;
+							observation.sawImpactBloom ||= Number(getComputedStyle(impactBloom).opacity) > 0;
+							observation.sawJackpotBloom ||= Number(getComputedStyle(jackpotBloom).opacity) > 0;
+							observation.sawPrimaryRays ||= Number(getComputedStyle(primaryRays).opacity) > 0;
+							observation.sawSecondaryRays ||= Number(getComputedStyle(secondaryRays).opacity) > 0;
+							observation.sawRings ||= rings.some((ring) => Number(getComputedStyle(ring).opacity) > 0);
+							observation.sawParticles ||= particles.some((particle) => Number(getComputedStyle(particle).opacity) > 0);
+							observation.sawSummaryTransform ||= hasTransform(summary);
+							observation.sawRaysTransform ||= hasTransform(primaryRays) || hasTransform(secondaryRays);
+							observation.sawRingTransform ||= rings.some(hasTransform);
+							observation.sawSparklesTransform ||= hasTransform(sparkles);
+							observation.sawParticlesTransform ||= particles.some(hasTransform);
+							observation.sawPointsTransform ||= hasTransform(rewardPoints);
+							observation.sawWalletTransform ||= hasTransform(wallet);
+							observation.sawPointsGlow ||= getComputedStyle(pointsValue).textShadow !== 'none';
+							observation.sawRewardNumberEmphasis ||= getComputedStyle(rewardPoints).textShadow !== pointsBaselineShadow;
+							observation.sawCardsGlow ||= getComputedStyle(pointsCard).boxShadow !== initialPointsCardShadow || getComputedStyle(lifespanCard).boxShadow !== initialLifespanCardShadow;
+							observation.sawDecorativeOpacity ||= observation.sawImpactBloom && observation.sawJackpotBloom && observation.sawPrimaryRays && observation.sawSecondaryRays && observation.sawRings && Number(getComputedStyle(sparkles).opacity) > 0 && observation.sawParticles;
+						} else if (observation.sawSummary) {
+							observation.finalInlineStyles = [pointsCard, lifespanCard, pointsValue, wallet, summaryRef, impactBloomRef, jackpotBloomRef, primaryRaysRef, secondaryRaysRef, ...ringRefs, sparklesRef, ...particleRefs, pointsRef].map((element) => element?.style.cssText ?? 'missing');
+							observation.done = true;
+						}
+						if (!observation.done) requestAnimationFrame(sample);
+					};
+					requestAnimationFrame(sample);
+			});
 			const dialog = page.getByRole('dialog');
 			const collect = dialog.getByRole('button', { name: '成果を受け取る' });
 			const readLayout = () => dialog.evaluate((element) => {
@@ -392,38 +528,108 @@ test.describe('Relay startup', () => {
 				};
 			});
 			const before = await readLayout();
+			const stateBefore = await readRelayGameState(page);
+			const rewardStatus = dialog.locator('[role="status"][aria-live="polite"]');
+			await expect(rewardStatus).toHaveCount(1);
+			await expect(rewardStatus).toHaveText('');
 			await collect.click();
 			await expect.poll(async () => {
 				const current = await readRelayGameState(page);
 				return current.points;
 			}).toBe(expectedPoints);
+			const stateAfter = await readRelayGameState(page);
+			const collectedPoints = stateAfter.points - stateBefore.points;
+			const materializedLifespan = Math.max(0, stateAfter.lifespanExpiresAtMs - stateBefore.lifespanExpiresAtMs);
+			expect(stateAfter.lifespanExpiresAtMs).toBeGreaterThan(stateBefore.lifespanExpiresAtMs);
+			const rewardSummary = page.locator('.mending-reward-layer .reward-summary');
+			await expect(rewardSummary).toBeVisible();
+			await expect(rewardSummary.locator('.reward-summary-title')).toHaveText('成果を受け取りました');
+			await expect(rewardSummary.locator('.reward-summary-points')).toHaveText(`+${collectedPoints} pt`);
+			await expect(rewardStatus).toContainText(`成果を受け取りました。${collectedPoints}ポイント。`);
+			if (materializedLifespan > 0) {
+				const formattedLifespan = formatElapsedDuration(materializedLifespan);
+				await expect(rewardSummary.locator('.reward-summary-lifespan')).toHaveText(`寿命延長 +${formattedLifespan}`);
+				await expect(rewardSummary.locator('.reward-summary-support')).toHaveText('作業中に反映済み');
+				await expect(rewardStatus).toContainText(`寿命延長 +${formattedLifespan}は作業中に反映済みです。`);
+			} else {
+				await expect(rewardSummary.locator('.reward-summary-lifespan')).toHaveCount(0);
+			}
+			const rewardLayerState = await page.locator('.mending-reward-layer').evaluate((layer) => ({
+				pointerEvents: getComputedStyle(layer).pointerEvents,
+				overflow: getComputedStyle(layer).overflow
+			}));
+			expect(rewardLayerState).toEqual({ pointerEvents: 'none', overflow: 'hidden' });
+			await expect(hudPoints).toHaveAttribute('data-value-change', 'increase');
+			await expect(hudPoints).toHaveCSS('color', 'rgb(87, 230, 138)');
+			await expect(hudPoints).toHaveCSS('animation-name', 'none');
 			const pointsCard = dialog.locator('.result-card[data-mending-icon="coins"]');
 			const lifespanCard = dialog.locator('.result-card[data-mending-icon="heart"]');
 			await expect(pointsCard.locator('.result-label')).toHaveText('未回収ポイント');
 			await expect(pointsCard.locator('.result-copy')).toBeVisible();
 			await expect(lifespanCard.locator('.result-label')).toHaveText('寿命延長');
 			await expect(lifespanCard.locator('.result-support')).toHaveText('作業中に反映');
-			await expect(pointsCard).toHaveClass(/success-flash/);
-			await expect(lifespanCard).toHaveClass(/success-flash/);
 			expect(await readLayout()).toEqual(before);
 			const horizontalOverflow = await dialog.evaluate((element) => element.scrollWidth > element.clientWidth || document.documentElement.scrollWidth > innerWidth);
 			expect(horizontalOverflow).toBe(false);
 			await expect(collect).toBeDisabled();
 			expect(await readLayout()).toEqual(before);
+			let observation = await page.evaluate(() => (window as typeof window & { __mendingRewardObservation?: MendingRewardObservation }).__mendingRewardObservation);
+			if (reducedMotion) {
+				while (!observation?.done) {
+					await page.clock.runFor(16);
+					observation = await page.evaluate(() => (window as typeof window & { __mendingRewardObservation?: MendingRewardObservation }).__mendingRewardObservation);
+				}
+			} else {
+				while (!observation || !observation.sawDecorativeOpacity || !observation.sawSummaryTransform || !observation.sawRaysTransform || !observation.sawRingTransform || !observation.sawSparklesTransform || !observation.sawParticlesTransform || !observation.sawPointsTransform || !observation.sawWalletTransform || !observation.sawBorderEmphasis || !observation.sawLifespanBorderEmphasis || !observation.sawCardsGlow || !observation.sawWalletEmphasis || !observation.sawPointsGlow || !observation.sawRewardNumberEmphasis) {
+					await page.clock.runFor(16);
+					observation = await page.evaluate(() => (window as typeof window & { __mendingRewardObservation?: MendingRewardObservation }).__mendingRewardObservation);
+				}
+			}
+			while (!observation?.done) {
+				await page.clock.runFor(16);
+				observation = await page.evaluate(() => (window as typeof window & { __mendingRewardObservation?: MendingRewardObservation }).__mendingRewardObservation);
+			}
+			const feedback = observation;
+			expect(feedback?.sawSummary).toBe(true);
+			expect(feedback?.sawImpactBloom).toBe(true);
+			expect(feedback?.sawJackpotBloom).toBe(true);
+			expect(feedback?.sawPrimaryRays).toBe(true);
+			expect(feedback?.sawSecondaryRays).toBe(true);
+			expect(feedback?.sawRings).toBe(true);
+			expect(feedback?.sawParticles).toBe(true);
+			expect(feedback?.sawDecorativeOpacity).toBe(true);
+			expect(feedback?.sawBorderEmphasis).toBe(true);
+			expect(feedback?.sawLifespanBorderEmphasis).toBe(true);
+			expect(feedback?.sawCardsGlow).toBe(true);
+			expect(feedback?.sawWalletEmphasis).toBe(true);
+			expect(feedback?.sawPointsGlow).toBe(true);
+			expect(feedback?.sawRewardNumberEmphasis).toBe(true);
+			const observedMotionTransforms = [feedback?.sawSummaryTransform, feedback?.sawRaysTransform, feedback?.sawRingTransform, feedback?.sawSparklesTransform, feedback?.sawParticlesTransform, feedback?.sawPointsTransform, feedback?.sawWalletTransform];
+			if (reducedMotion) expect(observedMotionTransforms).toEqual([false, false, false, false, false, false, false]);
+			else expect(observedMotionTransforms).toEqual([true, true, true, true, true, true, true]);
+			expect(feedback?.finalInlineStyles.every((style) => style === '')).toBe(true);
+			await expect(rewardSummary).toHaveCount(0);
+			if (reducedMotion) {
+				await page.emulateMedia({ reducedMotion: 'no-preference' });
+			}
 		};
 		await assertCollectionLayout({ width: 1280, height: 800 }, 1);
+		const firstRewardDialog = page.getByRole('dialog');
+		await firstRewardDialog.getByRole('button', { name: '閉じる', exact: true }).click();
+		await finishDialogExit(firstRewardDialog);
+		await expect(terminal).toBeFocused();
+		await terminal.click();
+		const reopenedRewardDialog = page.getByRole('dialog');
+		await expect(reopenedRewardDialog).toContainText('1 pt');
+		await expect(page.locator('.mending-reward-layer .reward-summary')).toHaveCount(0);
+		const reopenedRewardStatus = reopenedRewardDialog.locator('[role="status"][aria-live="polite"]');
+		await expect(reopenedRewardStatus).toHaveCount(1);
+		await expect(reopenedRewardStatus).toHaveText('');
 		await expect.poll(async () => {
 			const partialState = await readRelayGameState(page);
 			return partialState.points === 1 && partialState.pointProgressTicks > 0 && partialState.pointProgressTicks < 60_000_000;
 		}).toBe(true);
 		await expect.poll(publishedWorldStateCount).toBeGreaterThan(beforeMendingReward);
-		const hudPoints = page.locator('[data-unified-status-hud] [data-points-value]');
-		await expect(hudPoints).toHaveAttribute('data-value-change', 'increase');
-		await expect(hudPoints).toHaveCSS('color', 'rgb(87, 230, 138)');
-		await expect(hudPoints).toHaveCSS('animation-name', 'none');
-		await page.clock.runFor(500);
-		await expect(hudPoints).toHaveCSS('color', 'rgb(87, 230, 138)');
-		await page.clock.runFor(300);
 		await expect(hudPoints).not.toHaveAttribute('data-value-change', /.+/);
 		await expect(hudPoints).toHaveCSS('color', 'rgb(255, 255, 255)');
 
@@ -437,7 +643,7 @@ test.describe('Relay startup', () => {
 		}
 		await terminal.click();
 		await expect(page.getByRole('dialog')).toContainText('+3 pt');
-		await assertCollectionLayout({ width: 390, height: 844 }, 4);
+		await assertCollectionLayout({ width: 390, height: 844 }, 4, true);
 		await page.setViewportSize(originalViewport);
 		await expect.poll(async () => (await readRelayGameState(page)).points).toBe(4);
 
@@ -467,11 +673,57 @@ test.describe('Relay startup', () => {
 		await expect(page.getByRole('dialog')).toContainText('+5 pt');
 		await expect(page.getByRole('dialog')).not.toContainText('次の1ptまで');
 		await expect(page.getByRole('dialog').locator('[data-mending-icon="coins"] .next-point')).toHaveClass(/next-point-hidden/);
-		await page.getByRole('button', { name: '成果を受け取る' }).click();
+		await page.evaluate(() => {
+			let release: (() => void) | null = null;
+			let started = false;
+			(window as typeof window & {
+				__personaBubbleFieldTestHooks: {
+					started: () => boolean;
+					release: () => void;
+					beforeMendingMutation: (operation: 'start' | 'collect') => Promise<void>;
+				};
+			}).__personaBubbleFieldTestHooks = {
+				started: () => started,
+				release: () => { release?.(); release = null; },
+				beforeMendingMutation: async (operation) => {
+					if (operation !== 'collect') return;
+					started = true;
+					await new Promise<void>((resolve) => { release = resolve; });
+				}
+			};
+		});
+		const delayedCollectDialog = page.getByRole('dialog');
+		await delayedCollectDialog.getByRole('button', { name: '成果を受け取る' }).click();
+		await expect.poll(() => page.evaluate(() => (window as typeof window & { __personaBubbleFieldTestHooks: { started(): boolean } }).__personaBubbleFieldTestHooks.started())).toBe(true);
+		await delayedCollectDialog.getByRole('button', { name: '閉じる', exact: true }).click();
+		await finishDialogExit(delayedCollectDialog);
+		await expect(terminal).toBeFocused();
+		await page.evaluate(() => (window as typeof window & { __personaBubbleFieldTestHooks: { release(): void } }).__personaBubbleFieldTestHooks.release());
 		await expect.poll(() => readRelayGameState(page)).toMatchObject({ mendingJob: expect.any(Object), points: 9, pointProgressTicks: 30_000_000 });
-		await expect(page.getByRole('dialog')).toContainText('9 pt');
-		await expect(page.getByRole('dialog')).toContainText('上限まで あと5分');
-		await expect(page.getByRole('dialog')).toContainText('+0 pt');
+		await expect(page.getByRole('dialog')).toHaveCount(0);
+		await terminal.click();
+		const reopenedAfterClosedCollection = page.getByRole('dialog');
+		await expect(reopenedAfterClosedCollection).toContainText('9 pt');
+		await expect(reopenedAfterClosedCollection).toContainText('上限まで あと5分');
+		await expect(reopenedAfterClosedCollection).toContainText('+0 pt');
+		await expect(page.locator('.mending-reward-layer .reward-summary')).toHaveCount(0);
+		const closedCollectionStatus = reopenedAfterClosedCollection.locator('[role="status"][aria-live="polite"]');
+		await expect(closedCollectionStatus).toHaveCount(1);
+		await expect(closedCollectionStatus).toHaveText('');
+		await expect(page.locator('.mending-reward-layer .reward-burst-rays, .mending-reward-layer .reward-burst-ring')).toHaveCount(0);
+		await expect(reopenedAfterClosedCollection.locator('.owned-points svg')).toHaveCount(1);
+		await expect(reopenedAfterClosedCollection.locator('.owned-points-value')).toHaveCount(1);
+		await expect(reopenedAfterClosedCollection.locator('.result-list .result-card').first()).toBeVisible();
+		await expect(reopenedAfterClosedCollection.locator('.result-list .result-card')).toHaveCount(2);
+		const closedCollectionInlineStyles = await reopenedAfterClosedCollection.evaluate((dialog) => {
+			const wallet = dialog.querySelector<SVGElement>('.owned-points svg');
+			const pointsValue = dialog.querySelector<HTMLElement>('.owned-points-value');
+			const cards = [...dialog.querySelectorAll<HTMLElement>('.result-list .result-card')];
+			return [wallet, pointsValue, ...cards].map((element) => element?.style.cssText ?? 'missing');
+		});
+		expect(closedCollectionInlineStyles).toEqual(['', '', '', '']);
+		await expect(reopenedAfterClosedCollection.getByRole('button', { name: '成果を受け取る' })).toBeDisabled();
+		await expect(reopenedAfterClosedCollection.getByRole('button', { name: '閉じる', exact: true })).toBeEnabled();
 		await expect(page.locator('[data-unified-status-hud] [data-mending-status]')).toHaveAttribute('aria-label', '作業中');
 		await expect(page.locator('[data-unified-status-hud] [data-mending-status]')).toHaveAttribute('data-mending-icon', 'tool');
 		await expect(page.locator('[data-unified-status-hud] [data-mending-rate]')).toHaveText('1.00 pt/分+0.1h/h');
@@ -480,7 +732,7 @@ test.describe('Relay startup', () => {
 		expect(collected.points).toBe(9);
 		expect(collected.lifespanExpiresAtMs).toBeGreaterThan(started.lifespanExpiresAtMs);
 		expect(collected.lifespanExpiresAtMs).toBeLessThanOrEqual(started.lifespanExpiresAtMs + 6 * 60 * 1000);
-		await page.getByRole('button', { name: '閉じる', exact: true }).click();
+		await reopenedAfterClosedCollection.getByRole('button', { name: '閉じる', exact: true }).click();
 	});
 
 	test('opens the adjustment terminal only nearby and persists ability upgrades', async ({ page }) => {
