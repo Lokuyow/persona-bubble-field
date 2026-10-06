@@ -19,9 +19,10 @@ import { characterPicturePath } from '../../src/lib/character';
 import { requireCharacterFromPubkey, resolveCharacterFromPubkey } from '../../src/lib/characterAssignment';
 import { deriveBip85NostrEntropy } from '../../src/lib/bip85';
 import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL } from '../../src/lib/fieldFacilities';
+import { PRESENCE_TIMEOUT_MS } from '../../src/lib/presence';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { installFieldFrameSampling, readFieldFrames, sampleRenderedField } from './helpers/fieldFrames';
-import { CHANNEL_ID, AUTHORITATIVE_RELAYS, fixtureSecret, profileDialog, openProfile, installDelayedRelay, relayState, openClockedReadyRelayWorld, pauseAtCurrentBrowserTime, installVisualAnimationRafMetrics, openReadyRelayWorld, seedRelayAccount, chooseAvailableRelayMove, chooseHorizontalMove, chooseMoveToward, pressRelayKeyboardMovement, reverseMoveKey, type AvailableMove } from './helpers/relayHarness';
+import { CHANNEL_ID, AUTHORITATIVE_RELAYS, fixtureSecret, profileDialog, openProfile, installDelayedRelay, relayState, openClockedReadyRelayWorld, pauseAtCurrentBrowserTime, installVisualAnimationRafMetrics, openReadyRelayWorld, seedRelayAccount, chooseAvailableRelayMove, chooseHorizontalMove, chooseMoveToward, pressRelayKeyboardMovement, reverseMoveKey, publishedMessages, waitForPublishedMessageCount, type AvailableMove } from './helpers/relayHarness';
 
 
 test.describe('Relay startup', () => {
@@ -327,6 +328,41 @@ test.describe('Relay startup', () => {
 		await inject(exit);
 		await expect(remote).toHaveCount(0);
 		await expect(page.locator(`.participant[data-position="${cell.x},${cell.y}"]`)).toHaveCount(0);
+	});
+
+	test('reactivates self at the retained cell when another active participant occupies it', async ({ page }) => {
+		await page.clock.install({ time: Date.now() });
+		const editor = await openReadyRelayWorld(page);
+		await pauseAtCurrentBrowserTime(page);
+		const self = page.locator('.participant[data-self="true"]');
+		const retainedPosition = await self.getAttribute('data-position');
+		if (!retainedPosition) throw new Error('Expected the Relay self participant position.');
+		const [x, y] = retainedPosition.split(',').map(Number);
+		const now = await page.evaluate(() => Date.now());
+		const resumedAt = now + PRESENCE_TIMEOUT_MS;
+		await page.clock.setFixedTime(resumedAt);
+		expect(await page.evaluate(() => Date.now())).toBe(resumedAt);
+
+		const channel = { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' };
+		const remotePosition = finalizeEvent(buildWorldStateEventTemplate({
+			channel,
+			createdAt: Math.floor(resumedAt / 1000),
+			position: { x, y },
+			slot: 0
+		}), fixtureSecret(20));
+		await page.evaluate((event) => (window as typeof window & {
+			__relayStartupTest: { injectPosition(event: object): void }
+		}).__relayStartupTest.injectPosition(event), remotePosition);
+		const remote = page.locator(`.participant[data-participant-id="${remotePosition.pubkey}"]`);
+		await expect(remote).toHaveAttribute('data-position', retainedPosition);
+
+		await editor.fill('back after presence timeout');
+		await page.locator('ehagaki-composer').getByRole('button', { name: 'Send' }).click();
+		await waitForPublishedMessageCount(page, 1);
+		const [message] = await publishedMessages(page);
+		expect(message?.tags).toContainEqual(['w', `${x}:${y}`]);
+		await expect(self).toHaveAttribute('data-position', retainedPosition);
+		await expect(page.locator(`.participant[data-position="${retainedPosition}"]`)).toHaveCount(2);
 	});
 
 	test('retargets active participant and camera animation when another participant updates', async ({ page }) => {

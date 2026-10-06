@@ -204,7 +204,7 @@ position同期のNostr eventは1秒あたり最大2回とする。
 
 ### 初期位置
 
-初回入室時は、そのクライアントから見えている現在の占有状況を基に、空いているマスからランダムに初期位置を選ぶ。
+保持できる有効なposition evidenceがないparticipantの初回入室時は、そのクライアントから見えている現在の占有状況を基に、空いているマスからランダムに初期位置を選ぶ。
 
 決定した初期位置はposition更新としてNostrへ反映する。
 
@@ -547,13 +547,15 @@ presence切れ前に、
 
 ### presence切れ後の復帰
 
-presence切れ後にページを開いたまま再び操作した場合は再度presence状態へ復帰する。
+presence切れ後にページを開いたまま再び操作した場合、または既存Identityのposition evidenceを持って新しいworld sessionへentryする場合は、復帰としてpresence状態へ戻す。
 
-元いたマスが空いていればそのマスへ戻す。
+保持している元のpositionが現在配置可能なセルであれば、他のactive participantが同じマスを使用しているかどうかに関係なく、そのpositionへ戻す。
 
-元いたマスが他ユーザーに使用されている場合は、空いているマスからランダムに再配置する。
+復帰は初回position割当ではないため、occupiedを理由にpositionを選び直さない。同じ論理positionに複数participantが存在する場合は、既存のsame-cell participant表示処理を利用する。
 
-空きマスが存在しない場合は、満員時のルールに従って既存マスへ重複配置する。
+固定施設セルなど、仕様上配置できないpositionは復元せず、既存の有効position選択へ退避する。
+
+初めてpositionを持つparticipantの配置は初回割当として扱い、従来どおり空きセルをランダムに選ぶ。空きセルがない場合は既存の満員時fallbackを使う。通常movementのoccupied cell制約は復帰位置の維持によって変更しない。
 
 ---
 
