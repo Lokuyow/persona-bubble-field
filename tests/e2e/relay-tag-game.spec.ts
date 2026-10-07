@@ -535,7 +535,7 @@ async function seedTagGameRunLock(page: Page, gameId: string, startedAtMs: numbe
 	}), { id: gameId, start: startedAtMs });
 }
 
-test('keeps the tag-game benefit pulse in phase during repeated point gains and ignores ordinary lifespan countdown', async ({ page }) => {
+test('keeps the tag-game benefit pulse in phase during repeated point gains and marks ordinary lifespan countdown red', async ({ page }) => {
 	const nowMs = Date.now();
 	const secret = fixtureSecret(53);
 	await installTagGameAudioRecorder(page);
@@ -588,7 +588,8 @@ test('keeps the tag-game benefit pulse in phase during repeated point gains and 
 	const pulseStartTime = await points.evaluate((element) => element.getAnimations().find((animation): animation is CSSAnimation =>
 		animation instanceof CSSAnimation && animation.animationName.endsWith('tag-game-value-pulse'))?.startTime ?? null);
 	expect(pulseStartTime).not.toBeNull();
-	await expect(lifespan).not.toHaveAttribute('data-value-change', /.+/);
+	await expect(lifespan).toHaveAttribute('data-value-change', 'decrease');
+	await expect(lifespan).toHaveCSS('color', 'rgb(255, 104, 117)');
 	const meter = hud.locator('[data-points-meter]');
 	const firstMeterBox = await meter.boundingBox();
 	const firstRightEdge = await points.evaluate((element) => element.getBoundingClientRect().right);
