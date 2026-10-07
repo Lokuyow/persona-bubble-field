@@ -11,18 +11,19 @@ import {
 describe('prototype World authority config', () => {
 	it('pins the current channel, creator, authoritative Relays, hint, and revision', () => {
 		expect(PROTOTYPE_WORLD_CONFIG).toEqual({
-			configRevision: 1,
+			configRevision: 2,
 			channelId: '3212de4b75f0c41efa17e41affcfc3a811171ba930e5b657687b5f5148627d5b',
 			creatorPubkey: '89ae5e1f887b68ebc093b1e971164f59ee1e8d3bb02fd1fe168f77d7e4b2c10b',
 			authoritativeRelays: [
 				'wss://yabu.me/',
-				'wss://relay-jp.nostr.wirednet.jp/',
 				'wss://r.kojira.io/',
 				'wss://relay.nostrfy.org/',
-				'wss://nos.lol/'
+				'wss://nostr.compile-error.net/',
+				'wss://cagliostr.compile-error.net/'
 			],
-			preferredRelayHint: 'wss://nos.lol/'
+			preferredRelayHint: 'wss://yabu.me/'
 		});
+		expect(PROTOTYPE_AUTHORITATIVE_RELAYS).toEqual(PROTOTYPE_WORLD_CONFIG.authoritativeRelays);
 		expect(PROTOTYPE_AUTHORITATIVE_RELAYS).toContain(PROTOTYPE_PREFERRED_WORLD_RELAY_HINT);
 		expect(PROTOTYPE_WORLD_CONFIG.channelId).toBe(PROTOTYPE_CHANNEL_ID);
 		expect(PROTOTYPE_WORLD_CONFIG.creatorPubkey).toBe(PROTOTYPE_CREATOR_PUBKEY);

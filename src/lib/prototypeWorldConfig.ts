@@ -32,16 +32,16 @@ export const PROTOTYPE_CREATOR_PUBKEY =
 
 export const PROTOTYPE_AUTHORITATIVE_RELAYS = Object.freeze([
 	'wss://yabu.me/',
-	'wss://relay-jp.nostr.wirednet.jp/',
 	'wss://r.kojira.io/',
 	'wss://relay.nostrfy.org/',
-	'wss://nos.lol/'
+	'wss://nostr.compile-error.net/',
+	'wss://cagliostr.compile-error.net/'
 ]) as readonly string[];
 
-export const PROTOTYPE_PREFERRED_WORLD_RELAY_HINT = 'wss://nos.lol/';
+export const PROTOTYPE_PREFERRED_WORLD_RELAY_HINT = 'wss://yabu.me/';
 
 export const PROTOTYPE_WORLD_CONFIG: PrototypeWorldConfig = Object.freeze({
-	configRevision: 1,
+	configRevision: 2,
 	channelId: PROTOTYPE_CHANNEL_ID,
 	creatorPubkey: PROTOTYPE_CREATOR_PUBKEY,
 	authoritativeRelays: PROTOTYPE_AUTHORITATIVE_RELAYS,

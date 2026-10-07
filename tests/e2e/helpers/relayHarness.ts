@@ -25,7 +25,7 @@ import { requireCharacterFromPubkey, resolveCharacterFromPubkey } from '../../..
 import { deriveBip85NostrEntropy } from '../../../src/lib/bip85';
 import { isBlockedFacilityCell } from '../../../src/lib/fieldFacilities';
 import { moveOneCell, type Direction, type GridPosition } from '../../../src/lib/geometry';
-import { PROTOTYPE_AUTHORITATIVE_RELAYS, PROTOTYPE_CHANNEL_ID, PROTOTYPE_WORLD_CONFIG, type PrototypeWorldConfig } from '../../../src/lib/prototypeWorldConfig';
+import { PROTOTYPE_AUTHORITATIVE_RELAYS, PROTOTYPE_CHANNEL_ID, PROTOTYPE_PREFERRED_WORLD_RELAY_HINT, PROTOTYPE_WORLD_CONFIG, type PrototypeWorldConfig } from '../../../src/lib/prototypeWorldConfig';
 import { installHostOwnedStub } from './hostOwnedComposerStub';
 import { uncoveredTargetPoint } from './devWorldHarness';
 import { installFieldFrameSampling, readFieldFrames, sampleRenderedField } from './fieldFrames';
@@ -89,7 +89,7 @@ export async function openProfile(page: Page): Promise<void> {
 export function testEvents(nowMs = Date.now(), channelId = CHANNEL_ID) {
 	const secret = fixtureSecret(19);
 	const createdAt = Math.floor(nowMs / 1000);
-	const channel = { channelId, relayHint: 'wss://nos.lol/' };
+	const channel = { channelId, relayHint: PROTOTYPE_PREFERRED_WORLD_RELAY_HINT };
 	return {
 		message: finalizeEvent(buildWorldMessageTemplate({
 			channel,
@@ -131,7 +131,7 @@ export function upcomingRegistrationSchedule(): ReturnType<typeof getCooperation
 export function signedCooperationDefectionAction(secretKey: Uint8Array, schedule: ReturnType<typeof getCooperationDefectionSchedule>, action: CooperationDefectionAction, createdAtMs: number, channelId = CHANNEL_ID): NostrEvent {
 	return finalizeEvent(buildCooperationDefectionActionTemplate({
 		channelId,
-		relayHint: 'wss://nos.lol/',
+		relayHint: PROTOTYPE_PREFERRED_WORLD_RELAY_HINT,
 		instanceId: schedule.instanceId,
 		action,
 		createdAt: Math.floor(createdAtMs / 1000)
@@ -167,7 +167,7 @@ export function traceRuntimeEvents(rootPosition: { x: number; y: number } = { x:
 	const selfSecret = fixtureSecret(23);
 	const rootSecret = fixtureSecret(29);
 	const createdAt = Math.floor(Date.now() / 1000);
-	const channel = { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' };
+	const channel = { channelId: CHANNEL_ID, relayHint: PROTOTYPE_PREFERRED_WORLD_RELAY_HINT };
 	const selfPosition = finalizeEvent(buildWorldStateEventTemplate({
 		channel,
 		position: { x: 3, y: 2 },
