@@ -347,8 +347,8 @@
 	}
 	.chatter-toggle[aria-pressed='false']:hover:not(:disabled) { background: var(--action-icon-background-hover); }
 	.chatter-toggle[aria-pressed='false']:active:not(:disabled) { background: var(--action-icon-background-active); }
-	.profile-trigger:hover, .speech-type-toggle:hover:not(:disabled), .manual-trace-toggle:hover:not(:disabled) { background: var(--action-icon-background-hover); }
-	.profile-trigger:active, .speech-type-toggle:active:not(:disabled), .manual-trace-toggle:active:not(:disabled) { background: var(--action-icon-background-active); }
+	.profile-trigger:hover, .speech-type-toggle:hover:not(:disabled) { background: var(--action-icon-background-hover); }
+	.profile-trigger:active, .speech-type-toggle:active:not(:disabled) { background: var(--action-icon-background-active); }
 	.chatter-toggle-icon { display: inline-flex; width: 24px; height: 24px; align-items: center; justify-content: center; }
 	.chatter-toggle-icon :global(svg) { width: 24px; height: 24px; }
 	.chatter-toggle:focus-visible { outline: 3px solid var(--color-focus-ring); outline-offset: 2px; }
@@ -386,7 +386,9 @@
 		color: var(--action-icon-foreground);
 		cursor: pointer;
 	}
-	.manual-trace-toggle.action-selected { border-color: var(--color-focus-ring); background: var(--action-icon-background-active); }
+	.manual-trace-toggle.action-selected[aria-pressed='true']:not(:disabled) { border-color: var(--action-selected-border); background: var(--action-selected-background); color: var(--action-selected-foreground); }
+	.manual-trace-toggle.action-selected[aria-pressed='true']:hover:not(:disabled) { background: var(--action-selected-background-hover); }
+	.manual-trace-toggle.action-selected[aria-pressed='true']:active:not(:disabled) { background: var(--action-selected-background-active); }
 	.manual-trace-toggle:disabled { cursor: not-allowed; border-color: var(--action-disabled-border); background: var(--action-disabled-background); color: var(--action-disabled-foreground); }
 	.manual-trace-toggle:focus-visible { outline: 3px solid var(--color-focus-ring); outline-offset: 2px; }
 	.manual-trace-icon, .manual-trace-icon :global(svg) { display: inline-flex; width: 24px; height: 24px; align-items: center; justify-content: center; }
