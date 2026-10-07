@@ -389,7 +389,8 @@
 	.manual-trace-toggle.action-selected[aria-pressed='true']:not(:disabled) { border-color: var(--action-selected-border); background: var(--action-selected-background); color: var(--action-selected-foreground); }
 	.manual-trace-toggle.action-selected[aria-pressed='true']:hover:not(:disabled) { background: var(--action-selected-background-hover); }
 	.manual-trace-toggle.action-selected[aria-pressed='true']:active:not(:disabled) { background: var(--action-selected-background-active); }
-	.manual-trace-toggle:disabled { cursor: not-allowed; border-color: var(--action-disabled-border); background: var(--action-disabled-background); color: var(--action-disabled-foreground); }
+	.manual-trace-toggle:disabled { cursor: not-allowed; background: var(--action-icon-background); }
+	.manual-trace-toggle:disabled .manual-trace-icon, .manual-trace-toggle:disabled .manual-trace-cost { opacity: 0.32; }
 	.manual-trace-toggle:focus-visible { outline: 3px solid var(--color-focus-ring); outline-offset: 2px; }
 	.manual-trace-icon, .manual-trace-icon :global(svg) { display: inline-flex; width: 24px; height: 24px; align-items: center; justify-content: center; }
 	.manual-trace-toggle { flex-direction: column; gap: 0; }

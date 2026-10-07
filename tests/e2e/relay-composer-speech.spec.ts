@@ -31,10 +31,6 @@ test.describe('Relay startup', () => {
 		await openReadyRelayWorld(page, 1, 300);
 		const manualTrace = page.locator('.manual-trace-toggle');
 		await expect(manualTrace).toBeEnabled();
-		await manualTrace.click();
-		await expect(manualTrace).toHaveAttribute('aria-pressed', 'true');
-		await expect(manualTrace).toHaveClass(/action-selected/);
-
 		const readColors = () => manualTrace.evaluate((element) => {
 			const style = getComputedStyle(element);
 			const token = (name: string, property: 'backgroundColor' | 'borderColor' | 'color'): string => {
@@ -49,16 +45,20 @@ test.describe('Relay startup', () => {
 				background: style.backgroundColor,
 				border: style.borderColor,
 				foreground: style.color,
+				iconOpacity: getComputedStyle(element.querySelector('.manual-trace-icon')!).opacity,
+				costOpacity: getComputedStyle(element.querySelector('.manual-trace-cost')!).opacity,
 				selectedBackground: token('--action-selected-background', 'backgroundColor'),
 				selectedHover: token('--action-selected-background-hover', 'backgroundColor'),
 				selectedActive: token('--action-selected-background-active', 'backgroundColor'),
 				selectedBorder: token('--action-selected-border', 'borderColor'),
 				selectedForeground: token('--action-selected-foreground', 'color'),
-				disabledBackground: token('--action-disabled-background', 'backgroundColor'),
-				disabledBorder: token('--action-disabled-border', 'borderColor'),
-				disabledForeground: token('--action-disabled-foreground', 'color')
+				iconBackground: token('--action-icon-background', 'backgroundColor')
 			};
 		});
+		const normalStyle = await readColors();
+		await manualTrace.click();
+		await expect(manualTrace).toHaveAttribute('aria-pressed', 'true');
+		await expect(manualTrace).toHaveClass(/action-selected/);
 		const assertSelectedStyle = async (): Promise<void> => {
 			const selected = await readColors();
 			await expect.poll(async () => (await readColors()).background).toBe(selected.selectedBackground);
@@ -87,10 +87,13 @@ test.describe('Relay startup', () => {
 			await expect(manualTrace).toBeDisabled();
 			await expect(manualTrace).toHaveAttribute('aria-pressed', 'true');
 			const disabledTokens = await readColors();
-			await expect.poll(async () => (await readColors()).background).toBe(disabledTokens.disabledBackground);
+			await expect.poll(async () => (await readColors()).background).toBe(disabledTokens.iconBackground);
 			const disabled = await readColors();
-			expect(disabled.border).toBe(disabled.disabledBorder);
-			expect(disabled.foreground).toBe(disabled.disabledForeground);
+			expect(disabled.background).toBe(disabled.iconBackground);
+			expect(disabled.background).toBe(normalStyle.background);
+			expect(disabled.border).toBe(normalStyle.border);
+			expect(Number(disabled.iconOpacity)).toBeLessThan(Number(normalStyle.iconOpacity) / 2);
+			expect(Number(disabled.costOpacity)).toBeLessThan(Number(normalStyle.costOpacity) / 2);
 			expect([disabled.background, disabled.border, disabled.foreground]).not.toEqual([
 				disabled.selectedBackground, disabled.selectedBorder, disabled.selectedForeground
 			]);
