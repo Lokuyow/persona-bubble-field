@@ -439,12 +439,12 @@
 	}
 
 	.trace-marker-read:not(.trace-marker-unread-reply) {
-		opacity: 0.66;
+		opacity: 0.48;
 		filter: grayscale(1) brightness(1.12);
 	}
 
 	.trace-marker-random:not(.trace-marker-unread-reply) { opacity: 0.62; }
-	.trace-marker-random.trace-marker-read:not(.trace-marker-unread-reply) { opacity: 0.56; }
+	.trace-marker-random.trace-marker-read:not(.trace-marker-unread-reply) { opacity: 0.42; }
 	.trace-marker-random { background: none; mask-image: none; }
 
 	.trace-marker-unread-reply {
