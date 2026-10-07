@@ -417,7 +417,7 @@
 		width: max(22px, min(40px, calc(var(--cell-size) * 0.36)));
 		height: max(22px, min(40px, calc(var(--cell-size) * 0.36)));
 		color: #526886;
-		opacity: 0.72;
+		opacity: 0.84;
 		background-color: currentColor;
 		-webkit-mask-image: var(--trace-icon-image);
 		-webkit-mask-position: center;
@@ -443,12 +443,13 @@
 		filter: grayscale(1) brightness(1.12);
 	}
 
-	.trace-marker-random:not(.trace-marker-unread-reply) { opacity: 0.62; }
+	.trace-marker-random:not(.trace-marker-read):not(.trace-marker-unread-reply) { opacity: 0.78; }
 	.trace-marker-random.trace-marker-read:not(.trace-marker-unread-reply) { opacity: 0.42; }
 	.trace-marker-random { background: none; mask-image: none; }
 
 	.trace-marker-unread-reply {
 		color: #cf06fe;
+		opacity: 0.9;
 		filter: none;
 	}
 

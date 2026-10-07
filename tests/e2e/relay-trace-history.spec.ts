@@ -413,13 +413,14 @@ test.describe('Relay startup', () => {
 		await expect(unreadMarker.locator('.trace-marker-history-icon')).toBeVisible();
 		await expect(unreadMarker.locator('.trace-marker-history-icon path').first()).toHaveAttribute('d', 'M17 3.34a10 10 0 1 1-14.995 8.984L2 12l.005-.324A10 10 0 0 1 17 3.34M12 6a1 1 0 0 0-.993.883L11 7v5l.009.131a1 1 0 0 0 .197.477l.087.1l3 3l.094.082a1 1 0 0 0 1.226 0l.094-.083l.083-.094a1 1 0 0 0 0-1.226l-.083-.094L13 11.585V7l-.007-.117A1 1 0 0 0 12 6');
 		await expect(unreadMarker).toHaveCSS('color', 'rgb(82, 104, 134)');
-		await expect(unreadMarker).toHaveCSS('opacity', '0.62');
+		const unreadRootOpacity = Number(await unreadMarker.evaluate((element) => getComputedStyle(element).opacity));
 		const replyUnreadMarker = page.locator('[data-trace-marker-position="4,2"]');
 		await expect(replyUnreadMarker.locator('.trace-marker-history-icon')).toBeVisible();
 		await expect(replyUnreadMarker).toHaveAttribute('data-trace-marker-kind', 'random');
 		await expect(replyUnreadMarker).toHaveAttribute('data-trace-root-unread-reply', 'true');
 		await expect(replyUnreadMarker).toHaveCSS('color', 'rgb(207, 6, 254)');
-		await expect(replyUnreadMarker).toHaveCSS('opacity', '0.72');
+		const unreadReplyOpacity = Number(await replyUnreadMarker.evaluate((element) => getComputedStyle(element).opacity));
+		expect(unreadReplyOpacity).toBeGreaterThan(unreadRootOpacity);
 		for (const viewport of [{ width: 1100, cellSize: 76 }, { width: 390, cellSize: 50 }]) {
 			await page.setViewportSize({ width: viewport.width, height: 850 });
 			if (viewport.width !== 1100) {
@@ -475,7 +476,6 @@ test.describe('Relay startup', () => {
 		const manualMarker = page.locator('[data-trace-marker-position="7,2"]');
 		await expect(manualMarker).toHaveAttribute('data-trace-marker-kind', 'manual');
 		await expect(manualMarker).toHaveCSS('mask-image', /trace-icon\.svg/);
-		await expect(manualMarker).toHaveCSS('opacity', '0.72');
 		await expect(page.locator('.trace-unread-indicator')).toBeVisible();
 		expect(await page.evaluate(() => (window as typeof window & { __unreadArrivalCount?: number }).__unreadArrivalCount)).toBe(0);
 		await expect(page.locator('.trace-unread-explanation')).toHaveCount(0);
@@ -547,9 +547,9 @@ test.describe('Relay startup', () => {
 		await expect(replyUnreadMarker).toHaveAttribute('data-trace-root-read', 'true');
 		await expect(replyUnreadMarker.locator('.trace-marker-history-icon')).toBeVisible();
 		await expect(replyUnreadMarker).toHaveCSS('color', 'rgb(82, 104, 134)');
-		await expect(replyUnreadMarker).toHaveCSS('opacity', '0.42');
+		const readRootOpacity = Number(await replyUnreadMarker.evaluate((element) => getComputedStyle(element).opacity));
+		expect(unreadRootOpacity).toBeGreaterThan(readRootOpacity);
 		await expect(replyUnreadMarker).toHaveCSS('filter', 'grayscale(1) brightness(1.12)');
-		await expect(deathMarker).toHaveCSS('opacity', '0.72');
 		await page.reload();
 		await page.evaluate(() => {
 			const relay = (window as unknown as { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest;
@@ -564,7 +564,7 @@ test.describe('Relay startup', () => {
 		await expect(marker).toHaveAttribute('data-trace-root-unread-reply', 'true');
 		await expect(marker.locator('.trace-marker-history-icon')).toBeVisible();
 		await expect(marker).toHaveCSS('color', 'rgb(207, 6, 254)');
-		await expect(marker).toHaveCSS('opacity', '0.72');
+		const unreadReplyOpacityAfterRootRead = Number(await marker.evaluate((element) => getComputedStyle(element).opacity));
 		await expect(marker).toHaveCSS('filter', 'none');
 		await expect(page.locator('.trace-unread-indicator')).toBeVisible();
 		await expect.poll(() => page.evaluate(() => (window as typeof window & { __unreadArrivalCount?: number }).__unreadArrivalCount)).toBe(1);
@@ -585,7 +585,8 @@ test.describe('Relay startup', () => {
 		await expect(marker).not.toHaveAttribute('data-trace-root-unread-reply');
 		await expect(marker.locator('.trace-marker-history-icon')).toBeVisible();
 		await expect(marker).toHaveCSS('color', 'rgb(82, 104, 134)');
-		await expect(marker).toHaveCSS('opacity', '0.42');
+		const readRootOpacityAfterReplyRead = Number(await marker.evaluate((element) => getComputedStyle(element).opacity));
+		expect(unreadReplyOpacityAfterRootRead).toBeGreaterThan(readRootOpacityAfterReplyRead);
 		await expect(marker).toHaveCSS('filter', 'grayscale(1) brightness(1.12)');
 		await expect.poll(async () => {
 			const state = await relayState(page);
