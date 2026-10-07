@@ -19,7 +19,7 @@ function publicProfile(secret: Uint8Array, now: number, points: number) {
 function strictInvalidPublicProfile(secret: Uint8Array, createdAt: number, points: number) {
 	const profile = publicProfile(secret, createdAt * 1_000, points);
 	const content = JSON.parse(profile.content) as Record<string, unknown>;
-	content.version = 2;
+	content.version = 3;
 	return finalizeEvent({ ...profile, content: JSON.stringify(content), created_at: createdAt }, secret);
 }
 
