@@ -118,6 +118,19 @@ test.describe('DEV Tag Game Playground', () => {
 		const result = page.getByRole('dialog', { name: '鬼ごっこ終了' });
 		const resultRows = result.locator('[data-tag-game-result-participant]');
 		await expect(resultRows).toHaveCount(3);
+		await page.setViewportSize({ width: 390, height: 640 });
+		const mobileResultLayout = await result.evaluate((element) => {
+			const scrollContent = element.querySelector('.dialog-mobile-scroll-content')!;
+			const footer = element.querySelector<HTMLElement>('.dialog-mobile-close-footer')!;
+			const dialogRect = element.getBoundingClientRect();
+			const footerRect = footer.getBoundingClientRect();
+			return {
+				horizontalOverflow: element.scrollWidth > element.clientWidth || scrollContent.scrollWidth > scrollContent.clientWidth || document.documentElement.scrollWidth > innerWidth,
+				closeOutsideScroll: !scrollContent.contains(footer),
+				footerWithinDialog: footerRect.left >= dialogRect.left && footerRect.right <= dialogRect.right && footerRect.bottom <= dialogRect.bottom + 1
+			};
+		});
+		expect(mobileResultLayout).toEqual({ horizontalOverflow: false, closeOutsideScroll: true, footerWithinDialog: true });
 		await expect(resultRows.first()).toHaveAttribute('data-tag-game-result-self', 'true');
 		await expect(resultRows.first()).toContainText('福');
 		await expect(resultRows.first()).toContainText('ポイント +');
@@ -125,6 +138,7 @@ test.describe('DEV Tag Game Playground', () => {
 		await expect(resultRows.first()).toContainText('寿命 −');
 		await result.getByRole('button', { name: '閉じる' }).click();
 		await expect(result).toHaveCount(0);
+		await page.setViewportSize({ width: 1365, height: 900 });
 		await resultsPanel.getByRole('button', { name: '閉じる' }).click();
 		const totalsBefore = await page.locator('[data-dev-tag-game-controls] .tag-game-local-totals').innerText();
 		await page.getByRole('button', { name: 'Advance tag-game time 5 seconds' }).click();

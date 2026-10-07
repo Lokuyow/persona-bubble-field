@@ -931,14 +931,16 @@ test('tag game rules stay usable across desktop and mobile terminal states', asy
 	await expect(rules).toHaveAttribute('open', '');
 
 	await page.setViewportSize({ width: 390, height: 640 });
-	await dialog.evaluate((element) => { element.scrollTop = 0; });
+	await expectDialogIconCloseButton(dialog, dialog.getByRole('button', { name: '閉じる' }), '閉じる');
+	const mobileScrollContent = dialog.locator('.dialog-mobile-scroll-content');
+	await mobileScrollContent.evaluate((element) => { element.scrollTop = 0; });
 	await summary.focus();
 	await page.keyboard.press('Enter');
 	await expect(rules).not.toHaveAttribute('open', '');
 	await summary.focus();
 	await page.keyboard.press('Enter');
 	await expect(rules).toHaveAttribute('open', '');
-	await dialog.evaluate((element) => { element.scrollTop = 0; });
+	await mobileScrollContent.evaluate((element) => { element.scrollTop = 0; });
 	const [mobileBenefitBox, mobileCalamityBox] = await Promise.all([
 		rules.locator('.tag-game-effect-benefit').boundingBox(),
 		rules.locator('.tag-game-effect-calamity').boundingBox()
@@ -951,7 +953,15 @@ test('tag game rules stay usable across desktop and mobile terminal states', asy
 	await summary.focus();
 	await page.keyboard.press('Enter');
 	await expect(rules).toHaveAttribute('open', '');
-	await dialog.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+	const mobileFooterBeforeScroll = await dialog.locator('.dialog-mobile-close-footer').evaluate((footer) => footer.getBoundingClientRect().top);
+	await mobileScrollContent.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+	const mobileFooterAfterScroll = await dialog.locator('.dialog-mobile-close-footer').evaluate((footer) => footer.getBoundingClientRect().top);
+	const mobileDialogOverflow = await dialog.evaluate((element) => {
+		const body = element.querySelector<HTMLElement>('.dialog-mobile-scroll-content')!;
+		return element.scrollWidth > element.clientWidth || body.scrollWidth > body.clientWidth || document.documentElement.scrollWidth > innerWidth;
+	});
+	expect(Math.abs(mobileFooterAfterScroll - mobileFooterBeforeScroll)).toBeLessThan(1);
+	expect(mobileDialogOverflow).toBe(false);
 	await expect(dialog.getByRole('button', { name: '閉じる' })).toBeVisible();
 	await expect(dialog.getByRole('button', { name: '開始を提案' })).toBeVisible();
 	await dialog.getByRole('button', { name: '閉じる' }).click();
@@ -2177,6 +2187,7 @@ test('shows all eight historical results within a mobile result dialog', async (
 	const showResult = history.getByRole('button', { name: '結果を見る' });
 	await showResult.click();
 	const result = page.getByRole('dialog', { name: '鬼ごっこ終了' });
+	await expectDialogIconCloseButton(result, result.getByRole('button', { name: '閉じる' }), '閉じる');
 	const rows = result.locator('[data-tag-game-result-participant]');
 	await expect(rows).toHaveCount(8);
 	await expect(rows.first()).toHaveAttribute('data-tag-game-result-participant', selfPubkey);

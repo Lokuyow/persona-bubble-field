@@ -273,12 +273,19 @@ test.describe('Relay startup', () => {
 		await expect(activeDialog.getByRole('button', { name: /詳細を見る|詳細を閉じる/ })).toHaveCount(0);
 		for (const detail of ['現在のポイント速度', '最大蓄積', '1時間の作業で寿命', '推論加速', '最大寿命']) await expect(activeDialog).not.toContainText(detail);
 		await page.setViewportSize({ width: 390, height: 520 });
-		const dialogLayout = await activeDialog.evaluate((dialog) => ({
-			horizontalOverflow: dialog.scrollWidth > dialog.clientWidth || document.documentElement.scrollWidth > document.documentElement.clientWidth,
-			verticalOverflow: dialog.scrollHeight > dialog.clientHeight
-		}));
+		const dialogLayout = await activeDialog.evaluate((dialog) => {
+			const scrollContent = dialog.querySelector<HTMLElement>('.dialog-mobile-scroll-content');
+			const closeFooter = dialog.querySelector<HTMLElement>('.dialog-mobile-close-footer');
+			if (!scrollContent || !closeFooter) throw new Error('Expected the mobile dialog scroll area and close footer.');
+			return {
+				horizontalOverflow: dialog.scrollWidth > dialog.clientWidth || document.documentElement.scrollWidth > document.documentElement.clientWidth,
+				verticalOverflow: scrollContent.scrollHeight > scrollContent.clientHeight,
+				closeOutsideScroll: !scrollContent.contains(closeFooter)
+			};
+		});
 		expect(dialogLayout.horizontalOverflow).toBe(false);
 		expect(dialogLayout.verticalOverflow).toBe(true);
+		expect(dialogLayout.closeOutsideScroll).toBe(true);
 		await expect(closeButton).toBeInViewport({ ratio: 1 });
 		await page.setViewportSize(originalViewport);
 		await closeButton.click();
@@ -771,7 +778,9 @@ test.describe('Relay startup', () => {
 				const rect = (selector: string) => element.querySelector(selector)!.getBoundingClientRect();
 				const title = rect('.adjustment-dialog-title');
 				const points = rect('.points-display');
-				const close = rect('.action-button-close');
+				const closeButton = [...element.querySelectorAll<HTMLElement>('.action-button-close')].find((button) => button.getClientRects().length > 0);
+				if (!closeButton) throw new Error('Expected a visible ability dialog close button.');
+				const close = closeButton.getBoundingClientRect();
 				const intersects = (first: DOMRect, second: DOMRect) => first.left < second.right && second.left < first.right && first.top < second.bottom && second.top < first.bottom;
 				return { titlePoints: intersects(title, points), titleClose: intersects(title, close), pointsClose: intersects(points, close) };
 			});
@@ -994,13 +1003,27 @@ test.describe('Relay startup', () => {
 		expect(reducedMotionCleanup).toEqual({ card: '', level: '' });
 		await expect(dialog).toContainText('推論効率 Lv4');
 		await page.setViewportSize({ width: 390, height: 640 });
+		await expectDialogIconCloseButton(dialog, dialog.getByRole('button', { name: '閉じる' }), '閉じる');
 		await expectHeaderToStayReadable();
 		const mobileAdjustmentScroll = await dialog.evaluate((element) => {
-			element.scrollTop = element.scrollHeight;
-			return { top: element.scrollTop, maximum: element.scrollHeight - element.clientHeight };
+			const scrollContent = element.querySelector<HTMLElement>('.dialog-mobile-scroll-content');
+			const closeFooter = element.querySelector<HTMLElement>('.dialog-mobile-close-footer');
+			if (!scrollContent || !closeFooter) throw new Error('Expected the mobile ability dialog scroll area and close footer.');
+			const footerTop = closeFooter.getBoundingClientRect().top;
+			scrollContent.scrollTop = scrollContent.scrollHeight;
+			return {
+				top: scrollContent.scrollTop,
+				maximum: scrollContent.scrollHeight - scrollContent.clientHeight,
+				horizontalOverflow: element.scrollWidth > element.clientWidth || scrollContent.scrollWidth > scrollContent.clientWidth || document.documentElement.scrollWidth > innerWidth,
+				footerOutsideScroll: !scrollContent.contains(closeFooter),
+				footerStayedVisible: Math.abs(closeFooter.getBoundingClientRect().top - footerTop) < 1
+			};
 		});
 		expect(mobileAdjustmentScroll.maximum).toBeGreaterThan(0);
 		expect(mobileAdjustmentScroll.top).toBe(mobileAdjustmentScroll.maximum);
+		expect(mobileAdjustmentScroll.horizontalOverflow).toBe(false);
+		expect(mobileAdjustmentScroll.footerOutsideScroll).toBe(true);
+		expect(mobileAdjustmentScroll.footerStayedVisible).toBe(true);
 		const adjustmentClosePoint = await dialog.getByRole('button', { name: '閉じる', exact: true }).evaluate((button) => {
 			const rect = button.getBoundingClientRect();
 			const dialog = button.closest('.adjustment-dialog-content')!;

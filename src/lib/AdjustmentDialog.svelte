@@ -205,51 +205,56 @@
 <Dialog.Root bind:open={() => open, onOpenChange}>
 	<Dialog.Portal>
 			<Dialog.Overlay class="adjustment-dialog-overlay" />
-			<Dialog.Content bind:ref={dialogContent} class="adjustment-dialog-content" preventScroll={false} onOpenAutoFocus={focusFirstAvailableUpgrade}>
-				<header class="adjustment-dialog-header">
-					<Dialog.Title class="adjustment-dialog-title" tabindex={-1}><Adjustments aria-hidden="true" />能力強化</Dialog.Title>
-					<Dialog.Description class="sr-only">能力を強化して作業の効果を高めます。</Dialog.Description>
-					<div class="points-display" aria-label={`所持ポイント ${points} pt`}>
-						<Wallet aria-hidden="true" />
-						<span>{points} pt</span>
+			<Dialog.Content bind:ref={dialogContent} class="adjustment-dialog-content dialog-mobile-layout" preventScroll={false} onOpenAutoFocus={focusFirstAvailableUpgrade}>
+				<div class="dialog-mobile-scroll-content">
+					<header class="adjustment-dialog-header">
+						<Dialog.Title class="adjustment-dialog-title" tabindex={-1}><Adjustments aria-hidden="true" />能力強化</Dialog.Title>
+						<Dialog.Description class="sr-only">能力を強化して作業の効果を高めます。</Dialog.Description>
+						<div class="points-display" aria-label={`所持ポイント ${points} pt`}>
+							<Wallet aria-hidden="true" />
+							<span>{points} pt</span>
+						</div>
+						<Dialog.Close class="action-button action-button-tertiary action-button-close dialog-close-header" aria-label="閉じる"><X aria-hidden="true" /></Dialog.Close>
+					</header>
+					<section class="ability-list" aria-label="能力">
+						{#each abilityKeys as key}
+							{@const upgrade = getAbilityUpgrade(key, abilities)}
+							{@const canAfford = points >= upgrade.cost}
+							{@const isMaxed = upgrade.nextEffect === null}
+							{@const upgradeName = `${abilityLabels[key]}をLv${upgrade.level + 1}へ強化`}
+							<article class:success-flash={upgradeFeedback?.key === key} class="ability-card">
+								<div class="ability-card-heading">
+									<h2 class="ability-name">
+										{#if key === 'inferenceEfficiency'}<Brain aria-hidden="true" />{:else if key === 'contextCapacity'}<Stack2 aria-hidden="true" />{:else}<ShieldCheck aria-hidden="true" />{/if}
+										<span>{abilityLabels[key]}</span>
+									</h2>
+									<span class:level-up-highlight={upgradeFeedback?.key === key} class="ability-level">Lv{upgrade.level}</span>
+									{#if upgradeFeedback?.key === key}
+										{#key upgradeFeedback.id}<span class="level-up-badge" aria-live="polite">LEVEL UP</span>{/key}
+									{/if}
+								</div>
+								<p class="ability-type">{abilityTypes[key]}</p>
+								<div class="ability-values">
+									<div class="value-row current-row"><span>現在値</span><strong><span>{formatEffectValue(key, upgrade.level)}</span>{#if key !== 'contextCapacity'}<span class="unit">{effectUnit(key)}</span>{/if}</strong></div>
+									{#if !isMaxed}<div class="value-row delta-row"><span>増加量</span><strong>{formatDelta(key, upgrade.level)}</strong></div>{/if}
+								</div>
+								<ActionButton variant="primary" class={busy && !isMaxed ? 'upgrade-button processing' : 'upgrade-button'} type="button" aria-label={isMaxed ? `${abilityLabels[key]}は最大Lvです` : busy ? `${upgradeName}（必要${upgrade.cost}pt、強化処理中）` : !canAfford ? `${upgradeName}（必要${upgrade.cost}pt、ポイント不足）` : `${upgradeName}（必要${upgrade.cost}pt）`} disabled={busy || !canAfford || isMaxed} onclick={() => onUpgrade(key)}>
+									{#if isMaxed}<span>最大Lv</span>{:else}<span class="upgrade-requirement"><span>必要</span>{' '}<strong>{upgrade.cost}pt</strong></span><SquareChevronUpFilled aria-hidden="true" />{/if}
+				</ActionButton>
+							</article>
+						{/each}
+					</section>
 					</div>
+				<div class="dialog-mobile-close-footer">
 					<Dialog.Close class="action-button action-button-tertiary action-button-close" aria-label="閉じる"><X aria-hidden="true" /></Dialog.Close>
-				</header>
-				<section class="ability-list" aria-label="能力">
-					{#each abilityKeys as key}
-						{@const upgrade = getAbilityUpgrade(key, abilities)}
-						{@const canAfford = points >= upgrade.cost}
-						{@const isMaxed = upgrade.nextEffect === null}
-						{@const upgradeName = `${abilityLabels[key]}をLv${upgrade.level + 1}へ強化`}
-						<article class:success-flash={upgradeFeedback?.key === key} class="ability-card">
-							<div class="ability-card-heading">
-								<h2 class="ability-name">
-									{#if key === 'inferenceEfficiency'}<Brain aria-hidden="true" />{:else if key === 'contextCapacity'}<Stack2 aria-hidden="true" />{:else}<ShieldCheck aria-hidden="true" />{/if}
-									<span>{abilityLabels[key]}</span>
-								</h2>
-								<span class:level-up-highlight={upgradeFeedback?.key === key} class="ability-level">Lv{upgrade.level}</span>
-								{#if upgradeFeedback?.key === key}
-									{#key upgradeFeedback.id}<span class="level-up-badge" aria-live="polite">LEVEL UP</span>{/key}
-								{/if}
-							</div>
-							<p class="ability-type">{abilityTypes[key]}</p>
-							<div class="ability-values">
-								<div class="value-row current-row"><span>現在値</span><strong><span>{formatEffectValue(key, upgrade.level)}</span>{#if key !== 'contextCapacity'}<span class="unit">{effectUnit(key)}</span>{/if}</strong></div>
-								{#if !isMaxed}<div class="value-row delta-row"><span>増加量</span><strong>{formatDelta(key, upgrade.level)}</strong></div>{/if}
-							</div>
-							<ActionButton variant="primary" class={busy && !isMaxed ? 'upgrade-button processing' : 'upgrade-button'} type="button" aria-label={isMaxed ? `${abilityLabels[key]}は最大Lvです` : busy ? `${upgradeName}（必要${upgrade.cost}pt、強化処理中）` : !canAfford ? `${upgradeName}（必要${upgrade.cost}pt、ポイント不足）` : `${upgradeName}（必要${upgrade.cost}pt）`} disabled={busy || !canAfford || isMaxed} onclick={() => onUpgrade(key)}>
-								{#if isMaxed}<span>最大Lv</span>{:else}<span class="upgrade-requirement"><span>必要</span>{' '}<strong>{upgrade.cost}pt</strong></span><SquareChevronUpFilled aria-hidden="true" />{/if}
-			</ActionButton>
-						</article>
-					{/each}
-				</section>
+				</div>
 			</Dialog.Content>
 	</Dialog.Portal>
 </Dialog.Root>
 
 <style>
 	:global(.adjustment-dialog-overlay) { position: fixed; inset: 0; z-index: 100; background: rgba(4, 7, 18, .72); backdrop-filter: blur(2px); }
-	:global(.adjustment-dialog-content) { position: fixed; top: 50%; left: 50%; z-index: 101; display: grid; gap: 0; width: min(1080px, calc(100vw - 24px)); max-height: calc(100svh - 28px); overflow: auto; padding: 28px; border: 1px solid rgba(122, 135, 255, .74); border-radius: 18px; background: linear-gradient(180deg, rgba(12, 18, 46, .98), rgba(8, 12, 33, .98)); box-shadow: 0 20px 80px rgba(0, 0, 0, .48), 0 0 34px rgba(90, 103, 255, .13); color: #f4f6ff; transform: translate(-50%, -50%); }
+	:global(.adjustment-dialog-content) { --dialog-mobile-padding-top: 28px; --dialog-mobile-padding-inline: 28px; --dialog-mobile-close-footer-inset: 28px; position: fixed; top: 50%; left: 50%; z-index: 101; display: grid; gap: 0; width: min(1080px, calc(100vw - 24px)); max-height: calc(100svh - 28px); overflow: auto; padding: 28px; border: 1px solid rgba(122, 135, 255, .74); border-radius: 18px; background: linear-gradient(180deg, rgba(12, 18, 46, .98), rgba(8, 12, 33, .98)); box-shadow: 0 20px 80px rgba(0, 0, 0, .48), 0 0 34px rgba(90, 103, 255, .13); color: #f4f6ff; transform: translate(-50%, -50%); }
 	.adjustment-dialog-header { position: sticky; top: -28px; z-index: 2; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 16px; margin: -28px -28px 22px; padding: 28px; background: linear-gradient(180deg, rgba(12, 18, 46, 1), rgba(8, 12, 33, 1)); }
 	:global(.adjustment-dialog-title) { display: inline-flex; align-items: center; gap: 9px; margin: 0; color: #f4f6ff; font-size: 22px; line-height: 1; font-weight: 800; letter-spacing: .03em; }
 	.points-display { grid-column: 2; }
@@ -279,6 +284,6 @@
 	.upgrade-requirement > span { font-size: 14px; font-weight: 700; }
 	.upgrade-requirement > strong { font-size: 18px; font-weight: 850; }
 	:global(.adjustment-dialog-content button:focus-visible:not(.action-button-close)) { outline: 3px solid var(--color-focus-ring); outline-offset: 3px; }
-	@media (max-width: 920px) { :global(.adjustment-dialog-content) { padding: 22px; } .adjustment-dialog-header { top: -22px; margin: -22px -22px 22px; padding: 22px; } .ability-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } .ability-card { min-height: 238px; } }
-	@media (max-width: 560px) { :global(.adjustment-dialog-content) { padding: 18px; } .adjustment-dialog-header { top: -18px; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; margin: -18px -18px 22px; padding: 18px; } :global(.adjustment-dialog-title) { grid-row: 1; grid-column: 1; } .points-display { grid-row: 2; grid-column: 1 / 3; } .adjustment-dialog-header :global(.action-button-close) { grid-row: 1; grid-column: 2; } .ability-list { grid-template-columns: minmax(0, 1fr); } .ability-card { min-height: 220px; } }
+	@media (max-width: 920px) { :global(.adjustment-dialog-content) { --dialog-mobile-padding-top: 22px; --dialog-mobile-padding-inline: 22px; --dialog-mobile-close-footer-inset: 22px; padding: 22px; } .adjustment-dialog-header { top: -22px; margin: -22px -22px 22px; padding: 22px; } .ability-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } .ability-card { min-height: 238px; } }
+	@media (max-width: 560px) { :global(.adjustment-dialog-content) { --dialog-mobile-padding-top: 18px; --dialog-mobile-padding-inline: 18px; --dialog-mobile-close-footer-inset: 18px; padding: 18px; } .adjustment-dialog-header { top: -18px; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; margin: -18px -18px 22px; padding: 18px; } :global(.adjustment-dialog-title) { grid-row: 1; grid-column: 1; } .points-display { grid-row: 2; grid-column: 1 / 3; } .ability-list { grid-template-columns: minmax(0, 1fr); } .ability-card { min-height: 220px; } }
 </style>

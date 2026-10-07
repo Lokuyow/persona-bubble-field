@@ -302,70 +302,75 @@
 <Dialog.Root bind:open={() => open, onOpenChange}>
 	<Dialog.Portal>
 			<Dialog.Overlay class="mending-dialog-overlay" />
-			<Dialog.Content bind:ref={dialogContent} class="mending-dialog-content" preventScroll={false} onOpenAutoFocus={focusFirstAction}>
-				<div class="terminal-dialog-header">
-					<div>
-						<Dialog.Title class="mending-dialog-title">
-							{#if !projection?.completed}<Tool aria-hidden="true" data-mending-icon="tool" />{:else if overflowRewardAvailable}<HeartPlus aria-hidden="true" data-mending-icon="heart-plus" />{:else}<PlayerPause aria-hidden="true" data-mending-icon="player-pause" />{/if}
-							<span>{workStatusTitle}</span>
-						</Dialog.Title>
-						<Dialog.Description class="sr-only">時間の経過でポイントが蓄積し、寿命延長は作業の進行中に反映されます。</Dialog.Description>
+			<Dialog.Content bind:ref={dialogContent} class="mending-dialog-content dialog-mobile-layout" preventScroll={false} onOpenAutoFocus={focusFirstAction}>
+				<div class="dialog-mobile-scroll-content">
+					<div class="terminal-dialog-header">
+						<div>
+							<Dialog.Title class="mending-dialog-title">
+								{#if !projection?.completed}<Tool aria-hidden="true" data-mending-icon="tool" />{:else if overflowRewardAvailable}<HeartPlus aria-hidden="true" data-mending-icon="heart-plus" />{:else}<PlayerPause aria-hidden="true" data-mending-icon="player-pause" />{/if}
+								<span>{workStatusTitle}</span>
+							</Dialog.Title>
+							<Dialog.Description class="sr-only">時間の経過でポイントが蓄積し、寿命延長は作業の進行中に反映されます。</Dialog.Description>
+						</div>
+						<div class="owned-points" data-mending-icon="wallet" aria-label={`所持ポイント ${ownedPoints} pt`}>
+							<Wallet aria-hidden="true" />
+							<span class="owned-points-value">{ownedPoints} pt</span>
+						</div>
+						<Dialog.Close class="action-button action-button-tertiary action-button-close dialog-close-header" aria-label="閉じる"><X aria-hidden="true" /></Dialog.Close>
 					</div>
-					<div class="owned-points" data-mending-icon="wallet" aria-label={`所持ポイント ${ownedPoints} pt`}>
-						<Wallet aria-hidden="true" />
-						<span class="owned-points-value">{ownedPoints} pt</span>
+					<div class="sr-only" role="status" aria-live="polite" aria-atomic="true">{rewardPresentation ? announceCollection(rewardPresentation) : ''}</div>
+					{#if startupFeedback}
+						{#key startupFeedback.id}
+							<div class="mending-startup-feedback" aria-live="polite" aria-atomic="true">
+								<span>{startupFeedback.phase === 'started' ? '作業を開始しました' : '起動中…'}</span>
+							</div>
+						{/key}
+					{/if}
+					{#if hasJob || starting}
+						<section class="result-list" aria-label="作業の成果">
+							<div class="result-card" data-mending-icon="coins">
+								<Coins aria-hidden="true" />
+								<div class="result-copy">
+									<span class="result-label">未回収ポイント</span>
+									<strong>+{unclaimedPoints} pt</strong>
+									<span class:next-point-hidden={nextPointSeconds === null} class="next-point" data-mending-icon="clock" aria-hidden={nextPointSeconds === null}>
+										{#if nextPointSeconds !== null}<Clock aria-hidden="true" />次の1ptまで {nextPointSeconds}秒{/if}
+									</span>
+								</div>
+							</div>
+							<div class="result-card" data-mending-icon="heart">
+								<Heart aria-hidden="true" />
+								<div class="result-copy">
+									<span class="result-label">寿命延長</span>
+									<strong>+{lifespanDuration}</strong>
+									<span class="result-support">作業中に反映</span>
+								</div>
+							</div>
+						</section>
+						<section class="status-group" aria-label="作業の蓄積状況">
+							<strong class:overflow-lifespan-status={overflowRewardAvailable} class="progress-heading">
+								{#if !projection?.completed}
+									<span class="progress-prefix">上限まで あと</span><span class="progress-duration">{remainingDuration}</span>
+								{:else if overflowRewardAvailable}
+									<span>通常作業は上限</span><span>{overflowPointAvailable && overflowLifespanAvailable ? 'ポイント・寿命延長が継続中' : overflowPointAvailable ? 'ポイント蓄積のみ継続中' : '寿命延長のみ継続中'}</span>
+								{:else}
+									上限に達しました
+								{/if}
+							</strong>
+							<div class="progress-track" role="progressbar" aria-label="作業の蓄積進捗" aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(progressPercent)}>
+								<div class="progress-value" style={`width: ${progressPercent}%;`}></div>
+							</div>
+						</section>
+						<section class="action-group" aria-label="成果回収">
+							<ActionButton variant="primary" class="collect-button" type="button" disabled={starting || (projection?.points ?? 0) < 1} onclick={onCollect}>
+								<ArrowBarToDown aria-hidden="true" />成果を受け取る
+							</ActionButton>
+						</section>
+					{/if}
 					</div>
+				<div class="dialog-mobile-close-footer">
 					<Dialog.Close class="action-button action-button-tertiary action-button-close" aria-label="閉じる"><X aria-hidden="true" /></Dialog.Close>
 				</div>
-				<div class="sr-only" role="status" aria-live="polite" aria-atomic="true">{rewardPresentation ? announceCollection(rewardPresentation) : ''}</div>
-				{#if startupFeedback}
-					{#key startupFeedback.id}
-						<div class="mending-startup-feedback" aria-live="polite" aria-atomic="true">
-							<span>{startupFeedback.phase === 'started' ? '作業を開始しました' : '起動中…'}</span>
-						</div>
-					{/key}
-				{/if}
-				{#if hasJob || starting}
-					<section class="result-list" aria-label="作業の成果">
-						<div class="result-card" data-mending-icon="coins">
-							<Coins aria-hidden="true" />
-							<div class="result-copy">
-								<span class="result-label">未回収ポイント</span>
-								<strong>+{unclaimedPoints} pt</strong>
-								<span class:next-point-hidden={nextPointSeconds === null} class="next-point" data-mending-icon="clock" aria-hidden={nextPointSeconds === null}>
-									{#if nextPointSeconds !== null}<Clock aria-hidden="true" />次の1ptまで {nextPointSeconds}秒{/if}
-								</span>
-							</div>
-						</div>
-						<div class="result-card" data-mending-icon="heart">
-							<Heart aria-hidden="true" />
-							<div class="result-copy">
-								<span class="result-label">寿命延長</span>
-								<strong>+{lifespanDuration}</strong>
-								<span class="result-support">作業中に反映</span>
-							</div>
-						</div>
-					</section>
-					<section class="status-group" aria-label="作業の蓄積状況">
-						<strong class:overflow-lifespan-status={overflowRewardAvailable} class="progress-heading">
-							{#if !projection?.completed}
-								<span class="progress-prefix">上限まで あと</span><span class="progress-duration">{remainingDuration}</span>
-							{:else if overflowRewardAvailable}
-								<span>通常作業は上限</span><span>{overflowPointAvailable && overflowLifespanAvailable ? 'ポイント・寿命延長が継続中' : overflowPointAvailable ? 'ポイント蓄積のみ継続中' : '寿命延長のみ継続中'}</span>
-							{:else}
-								上限に達しました
-							{/if}
-						</strong>
-						<div class="progress-track" role="progressbar" aria-label="作業の蓄積進捗" aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(progressPercent)}>
-							<div class="progress-value" style={`width: ${progressPercent}%;`}></div>
-						</div>
-					</section>
-					<section class="action-group" aria-label="成果回収">
-						<ActionButton variant="primary" class="collect-button" type="button" disabled={starting || (projection?.points ?? 0) < 1} onclick={onCollect}>
-							<ArrowBarToDown aria-hidden="true" />成果を受け取る
-						</ActionButton>
-					</section>
-				{/if}
 			</Dialog.Content>
 			<div class="mending-reward-layer" bind:this={rewardLayer} aria-hidden="true">
 				{#if rewardPresentation}
@@ -422,7 +427,7 @@
 
 <style>
 	:global(.mending-dialog-overlay) { position: fixed; inset: 0; z-index: 100; background: rgba(2, 8, 18, 0.72); backdrop-filter: blur(2px); }
-	:global(.mending-dialog-content) { position: fixed; top: 50%; left: 50%; z-index: 101; display: grid; gap: 0; width: min(720px, calc(100vw - 24px)); max-height: calc(100svh - 32px); overflow: auto; padding: 28px; border: 1px solid rgba(35, 220, 226, .78); border-radius: 18px; background: linear-gradient(180deg, rgba(4, 29, 43, .92), rgba(3, 20, 30, .94)); box-shadow: 0 0 0 1px rgba(53, 227, 232, .10) inset, 0 18px 60px rgba(0, 0, 0, .42), 0 0 30px rgba(26, 212, 220, .08); backdrop-filter: blur(14px); color: #ecfbff; transform: translate(-50%, -50%); }
+	:global(.mending-dialog-content) { --dialog-mobile-padding-top: 28px; --dialog-mobile-padding-inline: 28px; --dialog-mobile-close-footer-inset: 28px; position: fixed; top: 50%; left: 50%; z-index: 101; display: grid; gap: 0; width: min(720px, calc(100vw - 24px)); max-height: calc(100svh - 32px); overflow: auto; padding: 28px; border: 1px solid rgba(35, 220, 226, .78); border-radius: 18px; background: linear-gradient(180deg, rgba(4, 29, 43, .92), rgba(3, 20, 30, .94)); box-shadow: 0 0 0 1px rgba(53, 227, 232, .10) inset, 0 18px 60px rgba(0, 0, 0, .42), 0 0 30px rgba(26, 212, 220, .08); backdrop-filter: blur(14px); color: #ecfbff; transform: translate(-50%, -50%); }
 	.mending-reward-layer { position: fixed; inset: 0; z-index: 102; overflow: hidden; pointer-events: none; }
 	.reward-burst-anchor, .reward-summary-anchor { position: fixed; inset: 0; display: grid; place-items: center; }
 	.reward-impact-bloom, .reward-jackpot-bloom { position: fixed; inset: 0; background: radial-gradient(ellipse at center, rgba(219, 255, 255, .52) 0%, rgba(53, 227, 232, .24) 15%, rgba(36, 181, 226, .10) 34%, transparent 62%); opacity: 0; }
@@ -477,6 +482,6 @@
 	:global(.collect-button) { width: 100%; min-width: 0; min-height: 50px; height: 50px; padding: 0 14px; font-size: 16px; }
 	:global(.collect-button svg) { flex: 0 0 auto; width: 24px; height: 24px; }
 	:global(.mending-dialog-content button:focus-visible:not(.action-button-close)) { outline: 3px solid var(--color-focus-ring); outline-offset: 3px; }
-	@media (max-width: 700px) { :global(.mending-dialog-content) { width: min(calc(100vw - 16px), 720px); padding: 24px; } .result-list { grid-template-columns: 1fr; } }
-	@media (max-width: 560px) { :global(.mending-dialog-content) { padding: 22px 18px; border-radius: 14px; } .terminal-dialog-header { grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin: -22px -18px 22px; padding: 22px 18px; } .owned-points { grid-row: 2; grid-column: 1 / 3; padding-top: 0; } .terminal-dialog-header > :global(.action-button-close) { grid-row: 1; grid-column: 2; } }
+	@media (max-width: 700px) { :global(.mending-dialog-content) { --dialog-mobile-padding-top: 24px; --dialog-mobile-padding-inline: 24px; --dialog-mobile-close-footer-inset: 24px; width: min(calc(100vw - 16px), 720px); padding: 24px; } .result-list { grid-template-columns: 1fr; } }
+	@media (max-width: 560px) { :global(.mending-dialog-content) { --dialog-mobile-padding-top: 22px; --dialog-mobile-padding-inline: 18px; --dialog-mobile-close-footer-inset: 18px; padding: 22px 18px; border-radius: 14px; } .terminal-dialog-header { grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin: -22px -18px 22px; padding: 22px 18px; } .owned-points { grid-row: 2; grid-column: 1 / 3; padding-top: 0; } .terminal-dialog-header > :global(.action-button-close) { grid-row: 1; grid-column: 2; } }
 </style>

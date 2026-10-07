@@ -247,6 +247,7 @@ test.describe('Relay startup', () => {
 		await groupTrigger.click();
 		await page.getByRole('dialog').getByRole('button', { name: 'ルールを見る' }).click();
 		const rulesDialog = page.getByRole('dialog', { name: '協力と抜け駆けのルール' });
+		await page.setViewportSize({ width: 390, height: 640 });
 		const outcomes = rulesDialog.locator('[data-cooperation-defection-rule-results]').getByRole('listitem');
 		await expect(outcomes).toHaveText([
 			'協力成功：全員が協力 → 全員 +1,000pt',
@@ -256,7 +257,20 @@ test.describe('Relay startup', () => {
 		]);
 		const closeButton = rulesDialog.getByRole('button', { name: '閉じる' });
 		await expectDialogIconCloseButton(rulesDialog, closeButton, '閉じる');
+		const mobileRulesLayout = await rulesDialog.evaluate((element) => {
+			const scrollContent = element.querySelector('.dialog-mobile-scroll-content')!;
+			const footer = element.querySelector<HTMLElement>('.dialog-mobile-close-footer')!;
+			const dialogRect = element.getBoundingClientRect();
+			const footerRect = footer.getBoundingClientRect();
+			return {
+				horizontalOverflow: element.scrollWidth > element.clientWidth || scrollContent.scrollWidth > scrollContent.clientWidth || document.documentElement.scrollWidth > innerWidth,
+				closeOutsideScroll: !scrollContent.contains(footer),
+				footerWithinDialog: footerRect.left >= dialogRect.left && footerRect.right <= dialogRect.right && footerRect.bottom <= dialogRect.bottom + 1
+			};
+		});
+		expect(mobileRulesLayout).toEqual({ horizontalOverflow: false, closeOutsideScroll: true, footerWithinDialog: true });
 		await closeButton.click();
+		await page.setViewportSize({ width: 2400, height: 1000 });
 		await groupTrigger.click();
 		const farEvent = finalizeEvent(buildWorldStateEventTemplate({ channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: farPosition, slot: 0, createdAt: Math.floor((startTime + 3_000) / 1000) }), selfSecret);
 		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), farEvent);
