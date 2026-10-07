@@ -26,6 +26,84 @@ import { fixtureSecret, installDelayedRelay, publishedMessages, waitForPublished
 
 
 test.describe('Relay startup', () => {
+	test('uses distinct selected and disabled styling for the manual Trace control', async ({ page }) => {
+		await installPromptApiStub(page);
+		await openReadyRelayWorld(page, 1, 300);
+		const manualTrace = page.locator('.manual-trace-toggle');
+		await expect(manualTrace).toBeEnabled();
+		const readColors = () => manualTrace.evaluate((element) => {
+			const style = getComputedStyle(element);
+			const token = (name: string, property: 'backgroundColor' | 'borderColor' | 'color'): string => {
+				const probe = document.createElement('button');
+				probe.style.setProperty(property.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`), `var(${name})`);
+				document.body.append(probe);
+				const value = getComputedStyle(probe)[property];
+				probe.remove();
+				return value;
+			};
+			return {
+				background: style.backgroundColor,
+				border: style.borderColor,
+				foreground: style.color,
+				iconOpacity: getComputedStyle(element.querySelector('.manual-trace-icon')!).opacity,
+				costOpacity: getComputedStyle(element.querySelector('.manual-trace-cost')!).opacity,
+				selectedBackground: token('--action-selected-background', 'backgroundColor'),
+				selectedHover: token('--action-selected-background-hover', 'backgroundColor'),
+				selectedActive: token('--action-selected-background-active', 'backgroundColor'),
+				selectedBorder: token('--action-selected-border', 'borderColor'),
+				selectedForeground: token('--action-selected-foreground', 'color'),
+				iconBackground: token('--action-icon-background', 'backgroundColor')
+			};
+		});
+		const normalStyle = await readColors();
+		await manualTrace.click();
+		await expect(manualTrace).toHaveAttribute('aria-pressed', 'true');
+		await expect(manualTrace).toHaveClass(/action-selected/);
+		const assertSelectedStyle = async (): Promise<void> => {
+			const selected = await readColors();
+			await expect.poll(async () => (await readColors()).background).toBe(selected.selectedBackground);
+			expect(selected.border).toBe(selected.selectedBorder);
+			expect(selected.foreground).toBe(selected.selectedForeground);
+			await manualTrace.hover();
+			await expect.poll(async () => (await readColors()).background).toBe(selected.selectedHover);
+			const box = await manualTrace.boundingBox();
+			if (!box) throw new Error('Expected selected manual Trace control geometry.');
+			await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+			await page.mouse.down();
+			await expect.poll(async () => (await readColors()).background).toBe(selected.selectedActive);
+			await page.mouse.move(0, 0);
+			await page.mouse.up();
+			await expect(manualTrace).toHaveAttribute('aria-pressed', 'true');
+		};
+
+		for (const width of [1200, 390]) {
+			await page.setViewportSize({ width, height: 844 });
+			if (await manualTrace.getAttribute('aria-pressed') === 'false') await manualTrace.click();
+			await expect(manualTrace).toHaveAttribute('aria-pressed', 'true');
+			await page.mouse.move(0, 0);
+			await assertSelectedStyle();
+
+			await manualTrace.evaluate((element) => { (element as HTMLButtonElement).disabled = true; });
+			await expect(manualTrace).toBeDisabled();
+			await expect(manualTrace).toHaveAttribute('aria-pressed', 'true');
+			const disabledTokens = await readColors();
+			await expect.poll(async () => (await readColors()).background).toBe(disabledTokens.iconBackground);
+			const disabled = await readColors();
+			expect(disabled.background).toBe(disabled.iconBackground);
+			expect(disabled.background).toBe(normalStyle.background);
+			expect(disabled.border).toBe(normalStyle.border);
+			expect(Number(disabled.iconOpacity)).toBeLessThan(Number(normalStyle.iconOpacity) / 2);
+			expect(Number(disabled.costOpacity)).toBeLessThan(Number(normalStyle.costOpacity) / 2);
+			expect([disabled.background, disabled.border, disabled.foreground]).not.toEqual([
+				disabled.selectedBackground, disabled.selectedBorder, disabled.selectedForeground
+			]);
+			await manualTrace.evaluate((element) => { (element as HTMLButtonElement).disabled = false; });
+			await manualTrace.click();
+			await expect(manualTrace).toHaveAttribute('aria-pressed', 'false');
+			await expect(manualTrace).not.toHaveClass(/action-selected/);
+		}
+	});
+
 	test('publishes all selected speech types on manual Trace kind 42 events', async ({ page }) => {
 		await installPromptApiStub(page);
 		const editor = await openReadyRelayWorld(page, 1, 300);
