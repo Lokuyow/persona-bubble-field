@@ -416,7 +416,7 @@ function sameIdentityReference(first: IdentityReference, second: IdentityReferen
 
 function sameGameState(first: PersonaGameState, second: PersonaGameState): boolean {
 	return first.version === second.version && first.personaPubkey === second.personaPubkey && first.lifespanExpiresAtMs === second.lifespanExpiresAtMs && first.points === second.points &&
-		first.pointProgressTicks === second.pointProgressTicks && first.inferenceAccelerationUsedMs === second.inferenceAccelerationUsedMs &&
+		first.pointProgressTicks === second.pointProgressTicks &&
 		first.abilities.inferenceEfficiency === second.abilities.inferenceEfficiency && first.abilities.contextCapacity === second.abilities.contextCapacity && first.abilities.hallucinationSuppression === second.abilities.hallucinationSuppression &&
 		first.mendingJob?.startedAtMs === second.mendingJob?.startedAtMs && first.mendingJob?.checkpointAtMs === second.mendingJob?.checkpointAtMs && first.mendingJob?.processedDurationMs === second.mendingJob?.processedDurationMs && first.mendingJob?.unclaimedPoints === second.mendingJob?.unclaimedPoints;
 }

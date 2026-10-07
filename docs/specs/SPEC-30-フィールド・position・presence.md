@@ -34,7 +34,7 @@ Profileのcanonical targetは明示的なunion `{ kind: 'pubkey'; pubkey } | { k
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "points": 0,
   "abilities": {
     "inferenceEfficiency": 1,
@@ -49,11 +49,11 @@ Profileのcanonical targetは明示的なunion `{ kind: 'pubkey'; pubkey } | { k
 }
 ```
 
-`extension`がある場合のversion 1 schemaは`anchorAtMs`、`regularUntilMs`、`roundingBoundaryAtMs`、`overflowPercent`、`maximumLifespanMs`を含む。`roundingBoundaryAtMs`はsafe integerまたは`null`で、計算境界がanchorまたはregular endに一致して不要な分割がない場合は`null`とする。これらはmending checkpointからの固定境界であり、publish時点へ計算起点を移さない。
+`extension`がある場合のversion 2 schemaは`anchorAtMs`、`regularUntilMs`、`overflowPercent`、`maximumLifespanMs`を含む。これらはmending checkpointからの固定境界であり、publish時点へ計算起点を移さない。version 1のbudget境界を含むprojectionは受理しない。
 
-受信時は署名済み`kind 30079`、world characterへ解決可能なauthor、profile-state addressとchannelに属するcandidateをcanonical選択した後、完全一致する`d` / channel参照、`r`、version、厳密なkey集合、safe integer、非負のpoints / Root Point / timestamp / duration、1–100の各ability level、寿命projectionの境界値を検証する。`d/e/r`は必要なmultiplicityとshapeを検証し、無関係な追加Nostr tagは拒否理由にしない。contentとnested objectの追加keyは拒否する。寿命のregular duration上限は公開された`contextCapacity` levelの通常capacityと取り得る最大Root context圧縮倍率から導出し、rounding boundaryはanchorから24時間以内かつregular interval内のstrict interiorに限る。`points`はpersist済みのowned pointsのみで、未回収Mending pointsを含めない。能力の文言とeffectは保存せず、levelから既存domain ruleで導出する。character data、Mending内部job/carry、Root build rankはcontentへ複製しない。
+受信時は署名済み`kind 30079`、world characterへ解決可能なauthor、profile-state addressとchannelに属するcandidateをcanonical選択した後、完全一致する`d` / channel参照、`r`、version、厳密なkey集合、safe integer、非負のpoints / Root Point / timestamp / duration、1–100の各ability level、寿命projectionの境界値を検証する。`d/e/r`は必要なmultiplicityとshapeを検証し、無関係な追加Nostr tagは拒否理由にしない。contentとnested objectの追加keyは拒否する。寿命のregular duration上限は公開された`contextCapacity` levelの通常capacityと取り得る最大Root context圧縮倍率から導出する。`points`はpersist済みのowned pointsのみで、未回収Mending pointsを含めない。能力の文言とeffectは保存せず、levelから既存domain ruleで導出する。character data、Mending内部job/carry、Root build rankはcontentへ複製しない。
 
-`lifespan`はpresentation-only projectionであり、内部Mending persistence schemaではない。`baseExpiresAtMs`を基準に、`anchorAtMs`からviewer時刻までを加速通常区間、通常区間、overflow区間へ分割し、各区間でlocal `projectMending`と同じfloor/cap順序を適用する。`roundingBoundaryAtMs`は推論加速budgetの境界、`regularUntilMs`はcontext容量境界であり、snapshot時刻を丸め起点にしない。extensionがnullならwall-clock elapsedだけで期限を動かさない。これはSelfProfileと同じ寿命表示を再現し、内部rank/job/carryを開示しない。
+`lifespan`はpresentation-only projectionであり、内部Mending persistence schemaではない。`baseExpiresAtMs`を基準に、`anchorAtMs`からviewer時刻までを通常区間とoverflow区間へ分割し、各区間でlocal `projectMending`と同じfloor/cap順序を適用する。`regularUntilMs`はcontext容量境界であり、snapshot時刻を丸め起点にしない。extensionがnullならwall-clock elapsedだけで期限を動かさない。これはSelfProfileと同じ寿命表示を再現し、内部rank/job/carryを開示しない。
 
 このeventはauthorが公開したpresentation stateでありgame authorityではない。受信値を報酬、参加資格、能力判定、寿命settlement、clear判定その他のgame logicへ使用しない。remote eventをlocal `PersonaSnapshot`やauthoritative lifecycle型へ変換しない。
 

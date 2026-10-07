@@ -86,7 +86,6 @@ export type PersonaGameState = Readonly<{
 	lifespanExpiresAtMs: number;
 	points: number;
 	pointProgressTicks: number;
-	inferenceAccelerationUsedMs: number;
 	abilities: PersonaAbilityLevels;
 	mendingJob: MendingJob | null;
 }>;
@@ -98,7 +97,6 @@ export function isValidPersonaGameState(value: unknown): value is PersonaGameSta
 		!isSafeTimestamp(candidate.lifespanExpiresAtMs) ||
 		typeof candidate.points !== 'number' || !Number.isSafeInteger(candidate.points) || candidate.points < 0 ||
 		!isValidPointProgressTicks(candidate.pointProgressTicks) ||
-		typeof candidate.inferenceAccelerationUsedMs !== 'number' || !Number.isSafeInteger(candidate.inferenceAccelerationUsedMs) || candidate.inferenceAccelerationUsedMs < 0 ||
 		typeof candidate.abilities !== 'object' || candidate.abilities === null || Array.isArray(candidate.abilities)) return false;
 	const abilities = candidate.abilities as Readonly<Record<string, unknown>>;
 	return (candidate.mendingJob === null || isValidMendingJob(candidate.mendingJob)) &&
@@ -117,7 +115,6 @@ export function createInitialPersonaGameState(personaPubkey: string, birthAtMs: 
 		lifespanExpiresAtMs: birthAtMs + initialLifespanMs,
 		points: 0,
 		pointProgressTicks: 0,
-		inferenceAccelerationUsedMs: 0,
 		abilities: { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 },
 		mendingJob: null
 	};

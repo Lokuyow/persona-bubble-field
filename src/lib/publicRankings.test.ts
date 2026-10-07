@@ -56,7 +56,7 @@ function ranking(events: readonly Event[], selfSecret?: Uint8Array) {
 describe('public profile rankings', () => {
 	it('canonicalizes profile envelopes before validation and does not fall back from invalid latest state', () => {
 		const old = profile(secrets[0]!, { points: 100 });
-		const invalidLatest = profile(secrets[0]!, { createdAt: old.created_at + 1, points: 200, version: 2 });
+		const invalidLatest = profile(secrets[0]!, { createdAt: old.created_at + 1, points: 200, version: 3 });
 		expect(ranking([old, invalidLatest]).points).toEqual([]);
 		expect(ranking([invalidLatest, old]).points).toEqual([]);
 	});

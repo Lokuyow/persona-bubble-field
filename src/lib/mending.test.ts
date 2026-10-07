@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createInitialPersonaGameState } from './personaGameState';
 import { createMendingJob, isValidMendingJob, materializeMending, projectMending, settleMending } from './mending';
-import { INFERENCE_ACCELERATION_BUDGET_MS, rootMaximumLifespanMs, type RootBuild } from './rootProgression';
+import { rootMaximumLifespanMs, type RootBuild } from './rootProgression';
 
 const minute = 60 * 1000;
 const hour = 60 * minute;
@@ -96,12 +96,12 @@ describe('checkpoint-settled asynchronous work', () => {
 		expect(projection.regularDurationMs).toBe(60 * minute);
 	});
 
-	it('splits the acceleration budget when it ends mid-segment', () => {
-		const work = { ...state(), abilities: { ...state().abilities, contextCapacity: 100 }, inferenceAccelerationUsedMs: 23 * hour };
-		const projection = projectMending(work, 1_000 + 2 * hour, { ...ZERO_BUILD, inferenceAcceleration: 3 });
-		expect(projection.regularDurationMs).toBe(2 * hour);
-		expect(projection.accelerationRemainingMs).toBe(0);
-		expect(projection.points).toBe(300);
+	it('applies Root inference acceleration throughout regular work', () => {
+		const work = { ...state(), abilities: { ...state().abilities, contextCapacity: 100 } };
+		const projection = projectMending(work, 1_000 + 25 * hour, { ...ZERO_BUILD, inferenceAcceleration: 3, contextCompression: 1 });
+		expect(projection.regularDurationMs).toBe(25 * hour);
+		expect(projection.pointRateHundredthsPerMinute).toBe(400);
+		expect(projection.points).toBe(6_000);
 	});
 
 	it('reports next-point time from the fixed-point rate units', () => {
@@ -122,7 +122,6 @@ describe('checkpoint-settled asynchronous work', () => {
 			expect(projection.overflowDurationMs).toBe((60 - capacityMinutes) * minute);
 			expect(projection.points).toBe(expectedPoints);
 			expect(projection.pointRateHundredthsPerMinute).toBe(expectedRate);
-			expect(projection.accelerationRemainingMs).toBe(INFERENCE_ACCELERATION_BUDGET_MS - capacityMinutes * minute);
 		}
 	});
 
@@ -145,7 +144,6 @@ describe('checkpoint-settled asynchronous work', () => {
 			expect(projection.completed).toBe(true);
 			expect(projection.pointRateHundredthsPerMinute).toBe(expectedPointRate);
 			expect(projection.lifespanExtensionRateHundredthsPerHour).toBe(expectedLifespanRate);
-			expect(projection.accelerationRemainingMs).toBe(INFERENCE_ACCELERATION_BUDGET_MS - 5 * (rank + 1) * minute);
 		}
 	});
 
@@ -156,7 +154,6 @@ describe('checkpoint-settled asynchronous work', () => {
 		expect(projection.overflowDurationMs).toBe(5 * minute);
 		expect(projection.points).toBe(41);
 		expect(projection.lifespanExtensionMs).toBe(66_000);
-		expect(projection.accelerationRemainingMs).toBe(INFERENCE_ACCELERATION_BUDGET_MS - 10 * minute);
 	});
 
 	it('keeps fractional carry and transfers integer unclaimed points only on collection', () => {

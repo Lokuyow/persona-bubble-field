@@ -173,16 +173,16 @@ describe('Nostr protocol foundation', () => {
 			channel, createdAt: 1_700_000_010, runNumber: 4, points: 123, rootPoints: 7,
 			abilities: { inferenceEfficiency: 2, contextCapacity: 3, hallucinationSuppression: 4 },
 			lifespan: { baseExpiresAtMs: 1_700_000_010_000, extension: { anchorAtMs: 1_700_000_000_000,
-				regularUntilMs: 1_700_000_120_000, roundingBoundaryAtMs: 1_700_000_060_000, overflowPercent: 50, maximumLifespanMs: 604_800_000 } }
+				regularUntilMs: 1_700_000_120_000, overflowPercent: 50, maximumLifespanMs: 604_800_000 } }
 		});
 		expect(template).toEqual({ kind: 30079, created_at: 1_700_000_010, tags: [
 			['d', `${PROTOTYPE_NAMESPACE}:profile-state:${CHANNEL_ID}`], ['e', CHANNEL_ID, channel.relayHint], ['r', '4']
-		], content: JSON.stringify({ version: 1, points: 123, abilities: { inferenceEfficiency: 2, contextCapacity: 3, hallucinationSuppression: 4 }, rootPoints: 7,
+		], content: JSON.stringify({ version: 2, points: 123, abilities: { inferenceEfficiency: 2, contextCapacity: 3, hallucinationSuppression: 4 }, rootPoints: 7,
 			lifespan: { baseExpiresAtMs: 1_700_000_010_000, extension: { anchorAtMs: 1_700_000_000_000,
-				regularUntilMs: 1_700_000_120_000, roundingBoundaryAtMs: 1_700_000_060_000, overflowPercent: 50, maximumLifespanMs: 604_800_000 } } }) });
+				regularUntilMs: 1_700_000_120_000, overflowPercent: 50, maximumLifespanMs: 604_800_000 } } }) });
 		expect(profileStateIdentifier(CHANNEL_ID)).toBe(`${PROTOTYPE_NAMESPACE}:profile-state:${CHANNEL_ID}`);
 		const event = finalizeWorldEvent(template, TEST_SECRET_KEY);
-		expect(parsePublicProfileState(event, CHANNEL_ID)).toMatchObject({ pubkey: event.pubkey, runNumber: 4, points: 123, rootPoints: 7, version: 1 });
+		expect(parsePublicProfileState(event, CHANNEL_ID)).toMatchObject({ pubkey: event.pubkey, runNumber: 4, points: 123, rootPoints: 7, version: 2 });
 		expect(parsePublicProfileState(event, CHANNEL_ID, 'f'.repeat(64))).toBeNull();
 		expect(parseWorldStateEvent(event, CHANNEL_ID)).toBeNull();
 		const extraTag = { ...event, tags: [...event.tags, ['client', 'extra']] };
@@ -204,14 +204,9 @@ describe('Nostr protocol foundation', () => {
 		expect(parsePublicProfileState(resign(malformedContent), CHANNEL_ID)).toBeNull();
 		const beyondContextCapacity = JSON.parse(event.content);
 		beyondContextCapacity.lifespan.extension.regularUntilMs = beyondContextCapacity.lifespan.extension.anchorAtMs + 400_000_000;
-		beyondContextCapacity.lifespan.extension.roundingBoundaryAtMs = null;
 		expect(parsePublicProfileState(finalizeWorldEvent({ kind: WORLD_STATE_KIND, created_at: event.created_at, tags: event.tags,
 			content: JSON.stringify(beyondContextCapacity) }, TEST_SECRET_KEY), CHANNEL_ID)).toBeNull();
-		const beyondInferenceBudget = JSON.parse(event.content);
-		beyondInferenceBudget.lifespan.extension.roundingBoundaryAtMs = beyondInferenceBudget.lifespan.extension.anchorAtMs + 24 * 60 * 60 * 1_000 + 1;
-		expect(parsePublicProfileState(finalizeWorldEvent({ kind: WORLD_STATE_KIND, created_at: event.created_at, tags: event.tags,
-			content: JSON.stringify(beyondInferenceBudget) }, TEST_SECRET_KEY), CHANNEL_ID)).toBeNull();
-		const newerUnknownSchema = resign({ ...event, created_at: event.created_at + 1, content: JSON.stringify({ ...JSON.parse(event.content), version: 2 }) });
+		const newerUnknownSchema = resign({ ...event, created_at: event.created_at + 1, content: JSON.stringify({ ...JSON.parse(event.content), version: 3 }) });
 		const canonicalEnvelope = parsePublicProfileEnvelope(newerUnknownSchema, CHANNEL_ID);
 		expect(canonicalEnvelope).not.toBeNull();
 		expect(parsePublicProfileState(newerUnknownSchema, CHANNEL_ID)).toBeNull();
@@ -230,7 +225,7 @@ describe('Nostr protocol foundation', () => {
 			channel, createdAt: 1_700_000_010, runNumber: 1, points: 0, rootPoints: 0,
 			abilities: contextCapacityLevelOne,
 			lifespan: { baseExpiresAtMs: anchorAtMs, extension: { anchorAtMs, regularUntilMs: anchorAtMs + durationMs,
-				roundingBoundaryAtMs: null, overflowPercent: 0, maximumLifespanMs: 604_800_000 } }
+				overflowPercent: 0, maximumLifespanMs: 604_800_000 } }
 		});
 		expect(() => template(maxRegularMs)).not.toThrow();
 		expect(() => template(maxRegularMs + 1)).toThrow(TypeError);

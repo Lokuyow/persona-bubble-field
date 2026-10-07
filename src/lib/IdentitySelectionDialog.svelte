@@ -35,7 +35,7 @@
 		hallucinationResistance: ['最大7日', '最大14日', '最大21日', '最大30日']
 	} as const;
 	const ROOT_DETAILS = {
-		inferenceAcceleration: ['Rank 0: ×1.00', 'Rank 1: ×2.00', 'Rank 2: ×3.00', 'Rank 3: ×4.00', '最初の有効通常作業24時間のポイント生成に適用。'],
+		inferenceAcceleration: ['Rank 0: ×1.00', 'Rank 1: ×2.00', 'Rank 2: ×3.00', 'Rank 3: ×4.00', 'Run中の有効通常作業のポイント生成に常時適用。'],
 		contextCompression: ['Rank 0: ×1.00 / overflow point・lifespan 0%', 'Rank 1: ×2.00 / overflow point・lifespan 20%', 'Rank 2: ×3.00 / overflow point・lifespan 35%', 'Rank 3: ×4.00 / overflow point・lifespan 50%'],
 		hallucinationResistance: ['Rank 0: 最大7日', 'Rank 1: 最大14日', 'Rank 2: 最大21日', 'Rank 3: 最大30日', '新しい一生の開始時の寿命は常に7日。']
 	} as const;
