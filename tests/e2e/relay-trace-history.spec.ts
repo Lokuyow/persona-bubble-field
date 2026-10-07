@@ -547,7 +547,7 @@ test.describe('Relay startup', () => {
 		await expect(replyUnreadMarker).toHaveAttribute('data-trace-root-read', 'true');
 		await expect(replyUnreadMarker.locator('.trace-marker-history-icon')).toBeVisible();
 		await expect(replyUnreadMarker).toHaveCSS('color', 'rgb(82, 104, 134)');
-		await expect(replyUnreadMarker).toHaveCSS('opacity', '0.56');
+		await expect(replyUnreadMarker).toHaveCSS('opacity', '0.42');
 		await expect(replyUnreadMarker).toHaveCSS('filter', 'grayscale(1) brightness(1.12)');
 		await expect(deathMarker).toHaveCSS('opacity', '0.72');
 		await page.reload();
@@ -585,7 +585,7 @@ test.describe('Relay startup', () => {
 		await expect(marker).not.toHaveAttribute('data-trace-root-unread-reply');
 		await expect(marker.locator('.trace-marker-history-icon')).toBeVisible();
 		await expect(marker).toHaveCSS('color', 'rgb(82, 104, 134)');
-		await expect(marker).toHaveCSS('opacity', '0.56');
+		await expect(marker).toHaveCSS('opacity', '0.42');
 		await expect(marker).toHaveCSS('filter', 'grayscale(1) brightness(1.12)');
 		await expect.poll(async () => {
 			const state = await relayState(page);
