@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getStatusValueChangeDirection, projectUnifiedStatusMeterValues, STATUS_HUD_POINTS_MAX } from './unifiedStatusHud';
+import { getLifespanValueChangeDirection, getStatusValueChangeDirection, projectUnifiedStatusMeterValues, STATUS_HUD_POINTS_MAX } from './unifiedStatusHud';
 import { rootMaximumLifespanMs } from './rootProgression';
 
 describe('unified status meter values', () => {
@@ -25,5 +25,15 @@ describe('unified status meter values', () => {
 		expect(projectUnifiedStatusMeterValues(0, 0, maximum).lifespan).toBe(0);
 		expect(projectUnifiedStatusMeterValues(0, maximum / 2, maximum).lifespan).toBe(maximum / 2);
 		expect(projectUnifiedStatusMeterValues(0, maximum * 2, maximum).lifespan).toBe(maximum);
+	});
+});
+
+describe('lifespan HUD change direction', () => {
+	it('classifies net remaining lifespan change including the ordinary countdown', () => {
+		expect(getLifespanValueChangeDirection(1_000_000, 0, 1_001_000, 10_000)).toBe('decrease');
+		expect(getLifespanValueChangeDirection(1_000_000, 0, 1_020_000, 10_000)).toBe('increase');
+		expect(getLifespanValueChangeDirection(1_000_000, 0, 1_000_000, 10_000)).toBe('decrease');
+		expect(getLifespanValueChangeDirection(1_000_000, 0, 1_010_000, 10_000)).toBeNull();
+		expect(getLifespanValueChangeDirection(1_000_000, 0, 1_000_000, 0)).toBeNull();
 	});
 });

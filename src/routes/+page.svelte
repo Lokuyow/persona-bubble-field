@@ -5050,6 +5050,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 					<UnifiedStatusHud
 						expiresAtMs={tagGameHudWorkProjection?.effectiveExpiresAtMs ?? mendingProjection?.effectiveExpiresAtMs ?? personaSnapshot.gameState.lifespanExpiresAtMs}
 						nowMs={tagGameHudProjection ? tagGameHudNowMs : lifespanHudNowMs ?? mendingNowMs}
+						projectionNowMs={tagGameHudWorkProjection ? tagGameHudNowMs : mendingNowMs}
 						maximumLifespanMs={rootMaximumLifespanMs(personaSnapshot.activeRun.rootBuild.hallucinationResistance)}
 						points={personaSnapshot.gameState.points}
 						hasJob={Boolean(personaSnapshot.gameState.mendingJob)}
