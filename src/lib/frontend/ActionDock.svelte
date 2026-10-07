@@ -499,7 +499,7 @@
 		.composer-controls-left :global(.sound-control) { margin: 0; }
 		.composer-controls-right .speech-type-toggle, .composer-controls-right .manual-trace-toggle, .composer-controls-right :global(.suggestions-anchor) { flex-basis: 44px; width: 44px; height: 44px; }
 	}
-	@media (max-width: 360px) {
+	@media (max-width: 359px) {
 		.action-dock-content { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 46px 46px; }
 		.composer-controls-left, .composer-controls-right { grid-column: 1; }
 		.composer-controls-left { grid-row: 2; justify-self: start; }

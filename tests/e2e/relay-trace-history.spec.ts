@@ -647,7 +647,7 @@ test.describe('Relay startup', () => {
 		]);
 		const fieldGeometryBeforeToggle = await page.locator('.field-grid').boundingBox();
 		const fieldCellSizeBeforeToggle = await page.locator('.field-scene').evaluate((element) => getComputedStyle(element).getPropertyValue('--cell-size'));
-		for (const width of [320, 390]) {
+		for (const width of [320, 360, 390]) {
 			await page.setViewportSize({ width, height: 844 });
 			const geometry = await page.evaluate(() => {
 				const rect = (selector: string) => document.querySelector<HTMLElement>(selector)!.getBoundingClientRect().toJSON();
@@ -661,10 +661,21 @@ test.describe('Relay startup', () => {
 						.map((selector) => rect(selector))
 				};
 			});
-			if (width <= 360) expect(geometry.left.bottom).toBeLessThanOrEqual(geometry.right.top);
-			else expect(geometry.left.right).toBeLessThanOrEqual(geometry.right.left);
+			if (width < 360) {
+				expect(geometry.left.bottom).toBeLessThanOrEqual(geometry.right.top);
+			} else {
+				expect(geometry.left.top).toBeLessThan(geometry.right.bottom);
+				expect(geometry.right.top).toBeLessThan(geometry.left.bottom);
+				expect(geometry.left.right).toBeLessThanOrEqual(geometry.right.left);
+			}
 			expect(geometry.left.left).toBeGreaterThanOrEqual(geometry.content.left);
+			expect(geometry.left.right).toBeLessThanOrEqual(geometry.content.right);
+			expect(geometry.left.top).toBeGreaterThanOrEqual(geometry.content.top);
+			expect(geometry.left.bottom).toBeLessThanOrEqual(geometry.content.bottom);
+			expect(geometry.right.left).toBeGreaterThanOrEqual(geometry.content.left);
 			expect(geometry.right.right).toBeLessThanOrEqual(geometry.content.right);
+			expect(geometry.right.top).toBeGreaterThanOrEqual(geometry.content.top);
+			expect(geometry.right.bottom).toBeLessThanOrEqual(geometry.content.bottom);
 			for (const box of [geometry.editor, ...geometry.controls]) {
 				expect(box.left).toBeGreaterThanOrEqual(0);
 				expect(box.top).toBeGreaterThanOrEqual(0);
