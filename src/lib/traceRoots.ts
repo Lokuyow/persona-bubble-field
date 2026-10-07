@@ -82,8 +82,8 @@ export function capTraceRootCandidates(
 		return (explicit.length ? explicit : cellCandidates).sort(compareRoots)[0];
 	});
 	const cellCount = BigInt(field.columns) * BigInt(field.rows);
-	const quota = Number(cellCount / 10n);
-	const totalLimit = Number(cellCount * 3n / 10n);
+	const quota = Number(cellCount / 20n);
+	const totalLimit = Number(cellCount * 3n / 20n);
 	const selected = new Map<string, TraceRootCandidate>();
 	for (const source of ['message', 'manual', 'death'] as const) {
 		const reserved = perCellSurvivors.filter(({ root }) => (root.source ?? 'message') === source).sort(compareRoots).slice(0, quota);

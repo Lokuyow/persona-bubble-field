@@ -85,17 +85,17 @@ describe('trace root selection', () => {
 		expect(roots).toHaveLength(1);
 	});
 
-	it('admits manual traces without the normal lottery and reserves ten percent for each source', () => {
+	it('admits manual traces without the normal lottery and reserves five percent for each source', () => {
 		const candidates = [
 			...Array.from({ length: 12 }, (_, index) => lotteryRoot({ createdAt: index + 10, position: { x: index % 10, y: Math.floor(index / 10) }, nonce: `quota-normal-${index}` }, true)),
 			...Array.from({ length: 12 }, (_, index) => manualTrace(`quota-manual-${index}`, index + 30, { x: (index + 12) % 10, y: Math.floor((index + 12) / 10) })),
 			...Array.from({ length: 12 }, (_, index) => deathTrace(`quota-death-${index}`, index + 50, { x: (index + 24) % 10, y: Math.floor((index + 24) / 10) }))
 		];
 		const roots = selectEffectiveTraceRoots(candidates, CHANNEL_ID, { columns: 10, rows: 10 });
-		expect(roots).toHaveLength(30);
-		expect(roots.filter((root) => !root.source)).toHaveLength(10);
-		expect(roots.filter((root) => root.source === 'manual')).toHaveLength(10);
-		expect(roots.filter((root) => root.source === 'death')).toHaveLength(10);
+		expect(roots).toHaveLength(15);
+		expect(roots.filter((root) => !root.source)).toHaveLength(5);
+		expect(roots.filter((root) => root.source === 'manual')).toHaveLength(5);
+		expect(roots.filter((root) => root.source === 'death')).toHaveLength(5);
 	});
 
 	it('prefers explicit roots in a cell and the newer explicit kind when manual and death compete', () => {
@@ -153,12 +153,12 @@ describe('trace root selection', () => {
 			.toEqual(expected);
 	});
 
-	it('keeps all 13 candidates under the 30 percent cap on a 16 by 8 field', () => {
-		const roots = Array.from({ length: 13 }, (_, index) =>
-			lotteryRoot({ createdAt: 50 + index, position: { x: index, y: 0 }, nonce: `cap-${index}` })
+	it('applies the 15 percent cap on a 16 by 8 field', () => {
+		const roots = Array.from({ length: 25 }, (_, index) =>
+			lotteryRoot({ createdAt: 50 + index, position: { x: index % 16, y: Math.floor(index / 16) }, nonce: `cap-${index}` })
 		);
 		const expected = [...roots].sort((first, second) => second.created_at - first.created_at ||
-			(first.id < second.id ? -1 : first.id > second.id ? 1 : 0)).map((event) => event.id);
+			(first.id < second.id ? -1 : first.id > second.id ? 1 : 0)).slice(0, 19).map((event) => event.id);
 		expect(selectEffectiveTraceRoots(roots, CHANNEL_ID, { columns: 16, rows: 8 }).map((root) => root.id))
 			.toEqual(expected);
 	});
