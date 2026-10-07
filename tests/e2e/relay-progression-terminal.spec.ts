@@ -520,6 +520,17 @@ test.describe('Relay startup', () => {
 			expect(stateAfter.lifespanExpiresAtMs).toBeGreaterThan(stateBefore.lifespanExpiresAtMs);
 			const rewardSummary = page.locator('.mending-reward-layer .reward-summary');
 			await expect(rewardSummary).toBeVisible();
+			const rewardCenters = await page.locator('.mending-reward-layer').evaluate((layer) => {
+				const centerX = (selector: string) => {
+					const rect = layer.querySelector<HTMLElement | SVGElement>(selector)!.getBoundingClientRect();
+					return rect.left + rect.width / 2;
+				};
+				return {
+					summary: centerX('.reward-summary'),
+					burst: centerX('.reward-burst')
+				};
+			});
+			expect(Math.abs(rewardCenters.burst - rewardCenters.summary)).toBeLessThanOrEqual(1);
 			await expect(rewardSummary.locator('.reward-summary-title')).toHaveText('成果を受け取りました');
 			await expect(rewardSummary.locator('.reward-summary-points')).toHaveText(`+${collectedPoints} pt`);
 			await expect(rewardStatus).toContainText(`成果を受け取りました。${collectedPoints}ポイント。`);
