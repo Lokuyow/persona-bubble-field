@@ -1508,12 +1508,22 @@ test('keeps join actions primary and equally emphasized when multiple tag-game l
 		}
 		await joinerPage.setViewportSize({ width: 390, height: 640 });
 		const dialogScroll = await dialog.evaluate((element) => {
-			const dialogElement = element as HTMLElement;
-			dialogElement.scrollTop = dialogElement.scrollHeight;
-			return { top: dialogElement.scrollTop, maximum: dialogElement.scrollHeight - dialogElement.clientHeight };
+			const scrollContent = element.querySelector<HTMLElement>('.dialog-mobile-scroll-content');
+			const closeFooter = element.querySelector<HTMLElement>('.dialog-mobile-close-footer');
+			if (!scrollContent || !closeFooter) throw new Error('Expected the mobile tag-game dialog scroll area and close footer.');
+			const footerTop = closeFooter.getBoundingClientRect().top;
+			scrollContent.scrollTop = scrollContent.scrollHeight;
+			return {
+				top: scrollContent.scrollTop,
+				maximum: scrollContent.scrollHeight - scrollContent.clientHeight,
+				footerOutsideScroll: !scrollContent.contains(closeFooter),
+				footerStayedVisible: Math.abs(closeFooter.getBoundingClientRect().top - footerTop) < 1
+			};
 		});
 		expect(dialogScroll.maximum).toBeGreaterThan(0);
 		expect(dialogScroll.top).toBe(dialogScroll.maximum);
+		expect(dialogScroll.footerOutsideScroll).toBe(true);
+		expect(dialogScroll.footerStayedVisible).toBe(true);
 		const closePoint = await dialog.getByRole('button', { name: '閉じる' }).evaluate((button) => {
 			const rect = button.getBoundingClientRect();
 			const dialogRect = button.closest('[role="dialog"]')!.getBoundingClientRect();
