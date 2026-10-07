@@ -8,11 +8,12 @@
 	import { formatMendingRate, formatRemainingLifespan } from '$lib/lifespanHud';
 	import type { MendingProjection } from '$lib/mending';
 	import type { TagGameHudProjection } from '$lib/tagGameHud';
-	import { getStatusValueChangeDirection, projectUnifiedStatusMeterValues, STATUS_HUD_POINTS_MAX, type StatusValueChangeDirection } from '$lib/unifiedStatusHud';
+	import { getLifespanValueChangeDirection, getStatusValueChangeDirection, projectUnifiedStatusMeterValues, STATUS_HUD_POINTS_MAX, type StatusValueChangeDirection } from '$lib/unifiedStatusHud';
 
 	type Props = Readonly<{
 		expiresAtMs: number;
 		nowMs: number;
+		projectionNowMs: number;
 		maximumLifespanMs: number;
 		points: number;
 		hasJob: boolean;
@@ -22,7 +23,7 @@
 		onTagGamePulse?: (effect: 'benefit' | 'calamity') => void;
 	}>;
 
-	let { expiresAtMs, nowMs, maximumLifespanMs, points, hasJob, mendingProjection, tagGameProjection = null, animationScope, onTagGamePulse }: Props = $props();
+	let { expiresAtMs, nowMs, projectionNowMs, maximumLifespanMs, points, hasJob, mendingProjection, tagGameProjection = null, animationScope, onTagGamePulse }: Props = $props();
 	let currentPoints = $derived(tagGameProjection?.points ?? points);
 	let currentExpiresAtMs = $derived(tagGameProjection?.expiresAtMs ?? expiresAtMs);
 	let tagGameBenefitActive = $derived(tagGameProjection?.benefitRateActive ?? false);
@@ -43,6 +44,7 @@
 	let lastScope: string | null = null;
 	let lastPoints: number | null = null;
 	let lastEffectiveExpiresAtMs: number | null = null;
+	let lastProjectionNowMs: number | null = null;
 	let feedbackSequence = 0;
 
 	$effect.pre(() => {
@@ -55,6 +57,7 @@
 			lastScope = scope;
 			lastPoints = nextPoints;
 			lastEffectiveExpiresAtMs = nextExpiresAtMs;
+			lastProjectionNowMs = projectionNowMs;
 			lifespanFeedback = null;
 			pointsFeedback = null;
 			return;
@@ -63,12 +66,13 @@
 			const direction = getStatusValueChangeDirection(lastPoints, nextPoints);
 			if (direction) pointsFeedback = { sequence: ++feedbackSequence, direction };
 		}
-		if (lastEffectiveExpiresAtMs !== null) {
-			const direction = getStatusValueChangeDirection(lastEffectiveExpiresAtMs, nextExpiresAtMs);
+		if (lastEffectiveExpiresAtMs !== null && lastProjectionNowMs !== null) {
+			const direction = getLifespanValueChangeDirection(lastEffectiveExpiresAtMs, lastProjectionNowMs, nextExpiresAtMs, projectionNowMs);
 			if (direction) lifespanFeedback = { sequence: ++feedbackSequence, direction };
 		}
 		lastPoints = nextPoints;
 		lastEffectiveExpiresAtMs = nextExpiresAtMs;
+		lastProjectionNowMs = projectionNowMs;
 	});
 
 	$effect(() => {

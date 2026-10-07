@@ -563,10 +563,14 @@ for (const stateKind of ['missing', 'corrupt'] as const) {
 		await page.clock.setSystemTime(expiresAtMs - 23 * hour - 59 * minute);
 		await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
 		await expect(hud.locator('[data-lifespan-value]')).toHaveText('23時間 59分');
+		await expect(hud.locator('[data-lifespan-value]')).toHaveAttribute('data-value-change', 'decrease');
+		await expect(hud.locator('[data-lifespan-value]')).toHaveCSS('color', 'rgb(255, 104, 117)');
 
 		await page.clock.setSystemTime(expiresAtMs - 59 * minute - 59 * 1000);
 		await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
 		await expect(hud.locator('[data-lifespan-value]')).toHaveText('59分');
+		await expect(hud.locator('[data-lifespan-value]')).toHaveAttribute('data-value-change', 'decrease');
+		await expect(hud.locator('[data-lifespan-value]')).toHaveCSS('color', 'rgb(255, 104, 117)');
 	});
 
 	test('keeps a rank-three seven-day Run inside its thirty-day lifespan meter and the top HUD operable on desktop and mobile', async ({ page }) => {

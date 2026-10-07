@@ -8,6 +8,17 @@ export function getStatusValueChangeDirection(previous: number, current: number)
 	return null;
 }
 
+export function getLifespanValueChangeDirection(
+	previousExpiresAtMs: number,
+	previousNowMs: number,
+	currentExpiresAtMs: number,
+	currentNowMs: number
+): StatusValueChangeDirection | null {
+	const previousRemainingMs = Math.max(0, previousExpiresAtMs - previousNowMs);
+	const currentRemainingMs = Math.max(0, currentExpiresAtMs - currentNowMs);
+	return getStatusValueChangeDirection(previousRemainingMs, currentRemainingMs);
+}
+
 export type UnifiedStatusMeterValues = Readonly<{
 	lifespan: number;
 	points: number;
