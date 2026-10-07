@@ -1,7 +1,6 @@
 export const BASE_INITIAL_LIFESPAN_MS = 7 * 24 * 60 * 60 * 1000;
 export const ROOT_ABILITY_RANK_LIMIT = 3;
 export const ROOT_POINT_USABLE_CAP = 9;
-export const INFERENCE_ACCELERATION_BUDGET_MS = 24 * 60 * 60 * 1000;
 
 export type RootBuild = Readonly<{
 	inferenceAcceleration: number;

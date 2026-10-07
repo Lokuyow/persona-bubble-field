@@ -5,7 +5,6 @@ import {
 	type PersonaAbilityLevels
 } from './personaGameState';
 import {
-	INFERENCE_ACCELERATION_BUDGET_MS,
 	rootContextCompressionMultiplierTenths,
 	rootInferenceAccelerationMultiplierTenths,
 	rootMaximumLifespanMs,
@@ -29,7 +28,6 @@ export type MendingState = Readonly<{
 	lifespanExpiresAtMs: number;
 	points: number;
 	pointProgressTicks: number;
-	inferenceAccelerationUsedMs: number;
 	abilities: PersonaAbilityLevels;
 	mendingJob: MendingJob | null;
 }>;
@@ -48,7 +46,6 @@ export type MendingProjection = Readonly<{
 	nextPointRemainingMs: number | null;
 	completed: boolean;
 	accelerationMultiplierTenths: number;
-	accelerationRemainingMs: number;
 	contextCapacityMs: number;
 	maximumLifespanMs: number;
 	pointRateHundredthsPerMinute: number;
@@ -59,7 +56,6 @@ export type MendingSettlement = Readonly<{
 	lifespanExpiresAtMs: number;
 	points: number;
 	pointProgressTicks: number;
-	inferenceAccelerationUsedMs: number;
 	mendingJob: MendingJob;
 }>;
 
@@ -162,7 +158,6 @@ export function projectMending(state: MendingState, nowMs: number, rootBuild: Ro
 		nextPointRemainingMs: null,
 		completed: false,
 		accelerationMultiplierTenths: 10,
-		accelerationRemainingMs: 0,
 		contextCapacityMs: 0,
 		maximumLifespanMs: rootMaximumLifespanMs(rootBuild.hallucinationResistance),
 		pointRateHundredthsPerMinute: getInferenceRateHundredths(state.abilities.inferenceEfficiency),
@@ -176,18 +171,13 @@ export function projectMending(state: MendingState, nowMs: number, rootBuild: Ro
 	const processedDurationMs = Math.min(contextCapacityMs, job.processedDurationMs + elapsedMs);
 	const regularDurationMs = Math.max(0, processedDurationMs - job.processedDurationMs);
 	const overflowDurationMs = elapsedMs - regularDurationMs;
-	const usedMs = Math.min(INFERENCE_ACCELERATION_BUDGET_MS, state.inferenceAccelerationUsedMs);
-	const accelerationRemainingMs = Math.max(0, INFERENCE_ACCELERATION_BUDGET_MS - usedMs);
-	const acceleratedDurationMs = Math.min(regularDurationMs, accelerationRemainingMs);
-	const normalDurationMs = regularDurationMs - acceleratedDurationMs;
 	const baseRate = getInferenceRateHundredths(abilities.inferenceEfficiency);
 	const accelerationMultiplierTenths = rootInferenceAccelerationMultiplierTenths(rootBuild.inferenceAcceleration);
 	let progressTicks = state.pointProgressTicks;
 	let generatedPoints = 0;
 	const overflowRatePercent = rootOverflowRewardPercent(rootBuild.contextCompression);
 	for (const [durationMs, multiplierNumerator, multiplierDenominator] of [
-		[acceleratedDurationMs, accelerationMultiplierTenths, 10],
-		[normalDurationMs, 10, 10],
+		[regularDurationMs, accelerationMultiplierTenths, 10],
 		[overflowDurationMs, overflowRatePercent, 100]
 	] as const) {
 		const result = pointSegment(progressTicks, durationMs, baseRate, multiplierNumerator, multiplierDenominator);
@@ -200,13 +190,10 @@ export function projectMending(state: MendingState, nowMs: number, rootBuild: Ro
 	const completed = processedDurationMs >= contextCapacityMs;
 	const currentPointRateHundredthsPerMinute = completed
 		? baseRate * overflowRatePercent / 100
-		: state.inferenceAccelerationUsedMs + regularDurationMs < INFERENCE_ACCELERATION_BUDGET_MS
-			? baseRate * accelerationMultiplierTenths / 10
-			: baseRate;
+		: baseRate * accelerationMultiplierTenths / 10;
 	const currentLifespanExtensionRateHundredthsPerHour = completed ? regularRate * overflowRatePercent / 100 : regularRate;
 	for (const [durationMs, rateNumerator, rateDenominator, offset] of [
-		[acceleratedDurationMs, regularRate, 100, 0],
-		[normalDurationMs, regularRate, 100, acceleratedDurationMs],
+		[regularDurationMs, regularRate, 100, 0],
 		[overflowDurationMs, regularRate * overflowRatePercent, 10_000, regularDurationMs]
 	] as const) {
 		const result = applyExtension(expiry, segmentEnd(job.checkpointAtMs, offset, durationMs), durationMs, rateNumerator, rateDenominator, rootMaximumLifespanMs(rootBuild.hallucinationResistance));
@@ -231,7 +218,6 @@ export function projectMending(state: MendingState, nowMs: number, rootBuild: Ro
 		nextPointRemainingMs,
 		completed,
 		accelerationMultiplierTenths,
-		accelerationRemainingMs: Math.max(0, accelerationRemainingMs - acceleratedDurationMs),
 		contextCapacityMs,
 		maximumLifespanMs: rootMaximumLifespanMs(rootBuild.hallucinationResistance),
 		pointRateHundredthsPerMinute: currentPointRateHundredthsPerMinute,
@@ -259,7 +245,6 @@ export function settleMending(state: MendingState, nowMs: number, rootBuild: Roo
 		lifespanExpiresAtMs: projection.effectiveExpiresAtMs,
 		points: ownedPoints,
 		pointProgressTicks: projection.pointProgressTicks,
-		inferenceAccelerationUsedMs: Math.min(INFERENCE_ACCELERATION_BUDGET_MS, state.inferenceAccelerationUsedMs + projection.regularDurationMs),
 		mendingJob: {
 			startedAtMs: collect ? nowMs : state.mendingJob.startedAtMs,
 			checkpointAtMs: nowMs,

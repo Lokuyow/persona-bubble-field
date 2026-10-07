@@ -1475,11 +1475,11 @@ describe('trace root bootstrap', () => {
 			})!;
 			const tags: string[][] = [['d', profileStateIdentifier(f.channel.id)], ['e', f.channel.id], ['r', '2']];
 			const older = finalizeEvent({ kind: WORLD_STATE_KIND, created_at: TIME, tags, content: JSON.stringify({
-				version: 1, points: 12, abilities: { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 }, rootPoints: 0,
+				version: 2, points: 12, abilities: { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 }, rootPoints: 0,
 				lifespan: { baseExpiresAtMs: TIME * 1_000 + 604_800_000, extension: null }
 			}) }, AUTHOR);
 			const newerInvalid = finalizeEvent({ kind: WORLD_STATE_KIND, created_at: TIME + 1, tags: invalidateTags(tags), content: JSON.stringify({
-				version: 1, points: 13, abilities: { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 }, rootPoints: 0,
+				version: 2, points: 13, abilities: { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 }, rootPoints: 0,
 				lifespan: { baseExpiresAtMs: TIME * 1_000 + 604_800_000, extension: null }
 			}) }, AUTHOR);
 			if (arrivalOrder === 'older first') {
@@ -1509,10 +1509,10 @@ describe('trace root bootstrap', () => {
 			(filters(candidate)[0] as { authors?: string[] }).authors?.[0] === getPublicKey(AUTHOR))!;
 		const tags = [['d', profileStateIdentifier(f.channel.id)], ['e', f.channel.id], ['r', '2']];
 		const older = finalizeEvent({ kind: WORLD_STATE_KIND, created_at: TIME, tags, content: JSON.stringify({
-			version: 1, points: 12, abilities: { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 }, rootPoints: 0,
+			version: 2, points: 12, abilities: { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 }, rootPoints: 0,
 			lifespan: { baseExpiresAtMs: TIME * 1_000 + 604_800_000, extension: null }
 		}) }, AUTHOR);
-		const newer = finalizeEvent({ kind: WORLD_STATE_KIND, created_at: TIME + 1, tags, content: JSON.stringify({ version: 2 }) }, AUTHOR);
+		const newer = finalizeEvent({ kind: WORLD_STATE_KIND, created_at: TIME + 1, tags, content: JSON.stringify({ version: 3 }) }, AUTHOR);
 		send(f.authorities[0].latestSocket(), 'EVENT', request[1], older);
 		send(f.authorities[0].latestSocket(), 'EVENT', request[1], newer);
 		await vi.advanceTimersByTimeAsync(10);

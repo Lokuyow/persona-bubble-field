@@ -12,7 +12,7 @@
 	import { getCharacterById } from './character';
 	import { formatElapsedDuration } from '$lib/lifespanHud';
 	import { getContextCapacityMinutes, getHallucinationExtensionHundredths, getInferenceRateHundredths } from '$lib/personaGameState';
-	import { INFERENCE_ACCELERATION_BUDGET_MS, rootContextCompressionMultiplierTenths, rootInferenceAccelerationMultiplierTenths, rootMaximumLifespanMs } from '$lib/rootProgression';
+	import { rootContextCompressionMultiplierTenths, rootInferenceAccelerationMultiplierTenths, rootMaximumLifespanMs } from '$lib/rootProgression';
 	import { MENDING_MINUTE_MS } from '$lib/mending';
 
 	type Props = Readonly<{
@@ -36,14 +36,13 @@
 	let pointBlocked = $derived(points < 100_000);
 	let clearBlocked = $derived(pointBlocked || clearBusy || clearBlockedReason !== null);
 	let workPointRate = $derived(persona?.gameState.mendingJob
-		? mendingProjection?.pointRateHundredthsPerMinute ?? getInferenceRateHundredths(persona.gameState.abilities.inferenceEfficiency)
+		? mendingProjection?.pointRateHundredthsPerMinute ?? getInferenceRateHundredths(persona.gameState.abilities.inferenceEfficiency) * rootInferenceAccelerationMultiplierTenths(persona.activeRun.rootBuild.inferenceAcceleration) / 10
 		: persona
-			? getInferenceRateHundredths(persona.gameState.abilities.inferenceEfficiency) * (persona.gameState.inferenceAccelerationUsedMs < INFERENCE_ACCELERATION_BUDGET_MS ? rootInferenceAccelerationMultiplierTenths(persona.activeRun.rootBuild.inferenceAcceleration) : 10) / 10
+			? getInferenceRateHundredths(persona.gameState.abilities.inferenceEfficiency) * rootInferenceAccelerationMultiplierTenths(persona.activeRun.rootBuild.inferenceAcceleration) / 10
 			: mendingProjection?.pointRateHundredthsPerMinute ?? 0);
 	let workCapacityMs = $derived(mendingProjection?.contextCapacityMs || (persona ? getContextCapacityMinutes(persona.gameState.abilities.contextCapacity) * MENDING_MINUTE_MS * rootContextCompressionMultiplierTenths(persona.activeRun.rootBuild.contextCompression) / 10 : 0));
 	let workLifespanRate = $derived(mendingProjection?.lifespanExtensionRateHundredthsPerHour ?? (persona ? getHallucinationExtensionHundredths(persona.gameState.abilities.hallucinationSuppression) : 0));
-	let accelerationMultiplier = $derived(((persona?.gameState.mendingJob ? mendingProjection?.accelerationMultiplierTenths ?? 10 : persona ? rootInferenceAccelerationMultiplierTenths(persona.activeRun.rootBuild.inferenceAcceleration) : 10) / 10).toFixed(2));
-	let accelerationRemaining = $derived(persona?.gameState.mendingJob ? mendingProjection?.accelerationRemainingMs ?? 0 : Math.max(0, INFERENCE_ACCELERATION_BUDGET_MS - (persona?.gameState.inferenceAccelerationUsedMs ?? 0)));
+	let accelerationMultiplier = $derived(((persona ? rootInferenceAccelerationMultiplierTenths(persona.activeRun.rootBuild.inferenceAcceleration) : mendingProjection?.accelerationMultiplierTenths ?? 10) / 10).toFixed(2));
 	let maximumLifespan = $derived(formatMaximumLifespan(mendingProjection?.maximumLifespanMs ?? (persona ? rootMaximumLifespanMs(persona.activeRun.rootBuild.hallucinationResistance) : 0)));
 
 	function formatLifespanRate(rateHundredthsPerHour: number): string {
@@ -71,7 +70,7 @@
 					<div><dt>現在のポイント速度</dt><dd>{(workPointRate / 100).toFixed(2)} pt/分</dd></div>
 					<div><dt>最大蓄積</dt><dd>{formatElapsedDuration(workCapacityMs)}</dd></div>
 					<div><dt>1時間の作業で寿命</dt><dd>+{formatLifespanRate(workLifespanRate)}分</dd></div>
-					<div><dt>推論加速</dt><dd>×{accelerationMultiplier}{#if persona.activeRun.rootBuild.inferenceAcceleration > 0}（有効作業 残り{formatElapsedDuration(accelerationRemaining)}）{/if}</dd></div>
+					<div><dt>推論加速</dt><dd>×{accelerationMultiplier}</dd></div>
 					<div><dt>最大寿命</dt><dd>{maximumLifespan}</dd></div>
 				</dl>
 			</section>

@@ -4,7 +4,7 @@ import type { SpeechType } from './conversation';
 import type { Character } from './character';
 import { resolveWorldCharacterFromPubkey } from './worldCharacterAssignment';
 import { getContextCapacityMinutes } from './personaGameState';
-import { rootContextCompressionMultiplierTenths, INFERENCE_ACCELERATION_BUDGET_MS } from './rootProgression';
+import { rootContextCompressionMultiplierTenths } from './rootProgression';
 import {
 	formatCanonicalGridPosition,
 	parseCanonicalGridPosition,
@@ -66,7 +66,6 @@ export type PublicLifespanProjection = Readonly<{
 	extension: null | Readonly<{
 		anchorAtMs: number;
 		regularUntilMs: number;
-		roundingBoundaryAtMs: number | null;
 		overflowPercent: number;
 		maximumLifespanMs: number;
 	}>;
@@ -157,7 +156,7 @@ export type PublicProfileState = Readonly<{
 	pubkey: string;
 	createdAt: number;
 	runNumber: number;
-	version: 1;
+	version: 2;
 	points: number;
 	abilities: Readonly<{ inferenceEfficiency: number; contextCapacity: number; hallucinationSuppression: number }>;
 	rootPoints: number;
@@ -424,7 +423,7 @@ export function buildPublicProfileStateTemplate(input: PublicProfileStateInput):
 			['e', input.channel.channelId, input.channel.relayHint],
 			['r', String(input.runNumber)]
 		],
-		content: JSON.stringify({ version: 1, points: input.points, abilities: input.abilities, rootPoints: input.rootPoints, lifespan: input.lifespan })
+		content: JSON.stringify({ version: 2, points: input.points, abilities: input.abilities, rootPoints: input.rootPoints, lifespan: input.lifespan })
 	};
 }
 
@@ -439,12 +438,9 @@ function assertPublicProfileNumbers(
 		!integer(abilities?.hallucinationSuppression, 1) || abilities.hallucinationSuppression > 100 ||
 		!integer(lifespan?.baseExpiresAtMs) || (lifespan.extension !== null && (
 			typeof lifespan.extension !== 'object' || !integer(lifespan.extension.anchorAtMs) ||
-			!integer(lifespan.extension.regularUntilMs) || !(lifespan.extension.roundingBoundaryAtMs === null || integer(lifespan.extension.roundingBoundaryAtMs)) ||
+			!integer(lifespan.extension.regularUntilMs) ||
 			lifespan.extension.regularUntilMs < lifespan.extension.anchorAtMs ||
 			lifespan.extension.regularUntilMs - lifespan.extension.anchorAtMs > getContextCapacityMinutes(abilities.contextCapacity) * 60_000 * rootContextCompressionMultiplierTenths(3) / 10 ||
-			(lifespan.extension.roundingBoundaryAtMs !== null && (lifespan.extension.roundingBoundaryAtMs <= lifespan.extension.anchorAtMs ||
-			lifespan.extension.roundingBoundaryAtMs >= lifespan.extension.regularUntilMs ||
-			lifespan.extension.roundingBoundaryAtMs - lifespan.extension.anchorAtMs > INFERENCE_ACCELERATION_BUDGET_MS)) ||
 			!integer(lifespan.extension.overflowPercent) || ![0, 20, 35, 50].includes(lifespan.extension.overflowPercent) ||
 			![604_800_000, 1_209_600_000, 1_814_400_000, 2_592_000_000].includes(lifespan.extension.maximumLifespanMs)
 		))) throw new TypeError('Invalid public profile state.');
@@ -760,7 +756,7 @@ export function parsePublicProfileState(event: Event, channelId: string, expecte
 	try { content = JSON.parse(event.content); } catch { return null; }
 	if (typeof content !== 'object' || content === null || Array.isArray(content)) return null;
 	const value = content as Record<string, unknown>;
-	if (!hasExactKeys(value, ['version', 'points', 'abilities', 'rootPoints', 'lifespan']) || value.version !== 1 ||
+	if (!hasExactKeys(value, ['version', 'points', 'abilities', 'rootPoints', 'lifespan']) || value.version !== 2 ||
 		typeof value.abilities !== 'object' || value.abilities === null || Array.isArray(value.abilities) ||
 		typeof value.lifespan !== 'object' || value.lifespan === null || Array.isArray(value.lifespan)) return null;
 	const abilities = value.abilities as Record<string, unknown>;
@@ -768,13 +764,13 @@ export function parsePublicProfileState(event: Event, channelId: string, expecte
 	if (!hasExactKeys(abilities, ['inferenceEfficiency', 'contextCapacity', 'hallucinationSuppression']) ||
 		!hasExactKeys(lifespan, ['baseExpiresAtMs', 'extension']) ||
 		lifespan.extension !== null && (typeof lifespan.extension !== 'object' || Array.isArray(lifespan.extension))) return null;
-	if (lifespan.extension !== null && !hasExactKeys(lifespan.extension as Record<string, unknown>, ['anchorAtMs', 'regularUntilMs', 'roundingBoundaryAtMs', 'overflowPercent', 'maximumLifespanMs'])) return null;
+	if (lifespan.extension !== null && !hasExactKeys(lifespan.extension as Record<string, unknown>, ['anchorAtMs', 'regularUntilMs', 'overflowPercent', 'maximumLifespanMs'])) return null;
 	try {
 		assertPublicProfileNumbers(runNumber, value.points as number, value.rootPoints as number,
 			abilities as unknown as PublicProfileStateInput['abilities'], lifespan as unknown as PublicLifespanProjection);
 	} catch { return null; }
 	return {
-		id: envelope.id, pubkey: envelope.pubkey, createdAt: envelope.createdAt, runNumber, version: 1,
+		id: envelope.id, pubkey: envelope.pubkey, createdAt: envelope.createdAt, runNumber, version: 2,
 		points: value.points as number,
 		abilities: { inferenceEfficiency: abilities.inferenceEfficiency as number, contextCapacity: abilities.contextCapacity as number, hallucinationSuppression: abilities.hallucinationSuppression as number },
 		rootPoints: value.rootPoints as number,
@@ -782,7 +778,6 @@ export function parsePublicProfileState(event: Event, channelId: string, expecte
 			extension: lifespan.extension === null ? null : {
 				anchorAtMs: (lifespan.extension as Record<string, number>).anchorAtMs,
 				regularUntilMs: (lifespan.extension as Record<string, number>).regularUntilMs,
-				roundingBoundaryAtMs: (lifespan.extension as Record<string, number>).roundingBoundaryAtMs,
 				overflowPercent: (lifespan.extension as Record<string, number>).overflowPercent,
 				maximumLifespanMs: (lifespan.extension as Record<string, number>).maximumLifespanMs
 			} }
