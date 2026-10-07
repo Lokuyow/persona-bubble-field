@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { finalizeEvent, getPublicKey } from 'nostr-tools/pure';
 import { buildPublicProfileStateTemplate, buildWorldStateEventTemplate } from '../../src/lib/nostrProtocol';
+import { expectDialogIconCloseButton } from './helpers/dialogMotion';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { AUTHORITATIVE_RELAYS, CHANNEL_ID, fixtureSecret, installDelayedRelay, openReadyRelayWorld, relayState, moveRelaySelfTo, clickRelayLogicalCell, seedRelayAccount, testEvents } from './helpers/relayHarness';
 
@@ -178,6 +179,7 @@ test.describe('public profile rankings', () => {
 		await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 		expect((await relayState(page)).state.requests.filter(isRankingRequest)).toHaveLength(requestCount);
 		await page.setViewportSize({ width: 390, height: 844 });
+		await expectDialogIconCloseButton(dialog, dialog.getByRole('button', { name: '閉じる' }), '閉じる');
 		const pointsTab = dialog.getByRole('button', { name: 'ポイント' });
 		const lifespanTab = dialog.getByRole('button', { name: '寿命' });
 		await expect(pointsTab).toBeVisible();
@@ -187,6 +189,18 @@ test.describe('public profile rankings', () => {
 		await expect(pointsColumn).toBeVisible();
 		await expect(lifespanColumn).toBeHidden();
 		await expectAvatarLayout(row);
+		const mobileCloseLayout = await dialog.evaluate((element) => {
+			const scrollContent = element.querySelector('.dialog-mobile-scroll-content')!;
+			const footer = element.querySelector<HTMLElement>('.dialog-mobile-close-footer')!;
+			const dialogRect = element.getBoundingClientRect();
+			const footerRect = footer.getBoundingClientRect();
+			return {
+				horizontalOverflow: element.scrollWidth > element.clientWidth || scrollContent.scrollWidth > scrollContent.clientWidth || document.documentElement.scrollWidth > innerWidth,
+				closeOutsideScroll: !scrollContent.contains(footer),
+				footerWithinDialog: footerRect.left >= dialogRect.left && footerRect.right <= dialogRect.right && footerRect.bottom <= dialogRect.bottom + 1
+			};
+		});
+		expect(mobileCloseLayout).toEqual({ horizontalOverflow: false, closeOutsideScroll: true, footerWithinDialog: true });
 
 		const deathSecret = fixtureSecret(41);
 		const clearSecret = fixtureSecret(53);

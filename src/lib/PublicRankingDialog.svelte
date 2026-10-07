@@ -102,51 +102,56 @@
 <Dialog.Root bind:open={() => open, onOpenChange}>
 	<Dialog.Portal>
 			<Dialog.Overlay class="ranking-dialog-overlay" />
-			<Dialog.Content class="ranking-dialog-content" data-ranking-dialog preventScroll={false} onOpenAutoFocus={focusTitle}>
-				<header class="ranking-dialog-header">
-					<div class="ranking-heading">
-						<Trophy aria-hidden="true" />
-						<Dialog.Title class="ranking-dialog-title" tabindex={-1}>ランキング</Dialog.Title>
-						<Dialog.Description class="sr-only">公開Profile Stateから取得したポイントと寿命のランキングです。</Dialog.Description>
-					</div>
-					<Dialog.Close class="action-button action-button-tertiary action-button-close" aria-label="閉じる"><X aria-hidden="true" /></Dialog.Close>
-				</header>
-				<div class="ranking-tabs" role="group" aria-label="ランキングの種類">
-					<button type="button" class="action-selected" aria-pressed={selectedRanking === 'points'} data-ranking-tab="points" onclick={() => { selectedRanking = 'points'; }}>
-						<ChartBar aria-hidden="true" /><span>ポイント</span>
-					</button>
-					<button type="button" class="action-selected" aria-pressed={selectedRanking === 'lifespan'} data-ranking-tab="lifespan" onclick={() => { selectedRanking = 'lifespan'; }}>
-						<Clock aria-hidden="true" /><span>寿命</span>
-					</button>
-				</div>
-				<div class="ranking-columns">
-					<section class="ranking-column" data-ranking-column="points" data-selected={selectedRanking === 'points'} aria-label="ポイントランキング" aria-busy={!readCompleted}>
-						<h2 class="ranking-column-heading"><ChartBar aria-hidden="true" />ポイント</h2>
-						{#if skeletonFinished && projection.points.length > 0}
-							{@render rankingRows(projection.points, 'points')}
-						{/if}
-					</section>
-					<section class="ranking-column" data-ranking-column="lifespan" data-selected={selectedRanking === 'lifespan'} aria-label="寿命ランキング" aria-busy={!readCompleted}>
-						<h2 class="ranking-column-heading"><Clock aria-hidden="true" />寿命</h2>
-						{#if skeletonFinished && projection.lifespan.length > 0}
-							{@render rankingRows(projection.lifespan, 'lifespan')}
-						{/if}
-					</section>
-					{#if !skeletonFinished}
-						<div class="ranking-shared-state" data-ranking-skeleton aria-hidden="true">
-							<div class="ranking-skeleton">
-								{#each [0, 1, 2, 3, 4] as row (row)}
-									<div class="ranking-skeleton-row"><span></span><span></span><span></span></div>
-								{/each}
-							</div>
+			<Dialog.Content class="ranking-dialog-content dialog-mobile-layout" data-ranking-dialog preventScroll={false} onOpenAutoFocus={focusTitle}>
+				<div class="dialog-mobile-scroll-content">
+					<header class="ranking-dialog-header">
+						<div class="ranking-heading">
+							<Trophy aria-hidden="true" />
+							<Dialog.Title class="ranking-dialog-title" tabindex={-1}>ランキング</Dialog.Title>
+							<Dialog.Description class="sr-only">公開Profile Stateから取得したポイントと寿命のランキングです。</Dialog.Description>
 						</div>
-					{:else if projection.points.length === 0 && projection.lifespan.length === 0}
-						{#if readCompleted}
-							<p class="ranking-empty ranking-shared-state" data-ranking-empty>ランキング情報がありません</p>
-						{:else}
-							<p class="ranking-loading ranking-shared-state" data-ranking-loading>ランキングを取得中…</p>
+						<Dialog.Close class="action-button action-button-tertiary action-button-close dialog-close-header" aria-label="閉じる"><X aria-hidden="true" /></Dialog.Close>
+					</header>
+					<div class="ranking-tabs" role="group" aria-label="ランキングの種類">
+						<button type="button" class="action-selected" aria-pressed={selectedRanking === 'points'} data-ranking-tab="points" onclick={() => { selectedRanking = 'points'; }}>
+							<ChartBar aria-hidden="true" /><span>ポイント</span>
+						</button>
+						<button type="button" class="action-selected" aria-pressed={selectedRanking === 'lifespan'} data-ranking-tab="lifespan" onclick={() => { selectedRanking = 'lifespan'; }}>
+							<Clock aria-hidden="true" /><span>寿命</span>
+						</button>
+					</div>
+					<div class="ranking-columns">
+						<section class="ranking-column" data-ranking-column="points" data-selected={selectedRanking === 'points'} aria-label="ポイントランキング" aria-busy={!readCompleted}>
+							<h2 class="ranking-column-heading"><ChartBar aria-hidden="true" />ポイント</h2>
+							{#if skeletonFinished && projection.points.length > 0}
+								{@render rankingRows(projection.points, 'points')}
+							{/if}
+						</section>
+						<section class="ranking-column" data-ranking-column="lifespan" data-selected={selectedRanking === 'lifespan'} aria-label="寿命ランキング" aria-busy={!readCompleted}>
+							<h2 class="ranking-column-heading"><Clock aria-hidden="true" />寿命</h2>
+							{#if skeletonFinished && projection.lifespan.length > 0}
+								{@render rankingRows(projection.lifespan, 'lifespan')}
+							{/if}
+						</section>
+						{#if !skeletonFinished}
+							<div class="ranking-shared-state" data-ranking-skeleton aria-hidden="true">
+								<div class="ranking-skeleton">
+									{#each [0, 1, 2, 3, 4] as row (row)}
+										<div class="ranking-skeleton-row"><span></span><span></span><span></span></div>
+									{/each}
+								</div>
+							</div>
+						{:else if projection.points.length === 0 && projection.lifespan.length === 0}
+							{#if readCompleted}
+								<p class="ranking-empty ranking-shared-state" data-ranking-empty>ランキング情報がありません</p>
+							{:else}
+								<p class="ranking-loading ranking-shared-state" data-ranking-loading>ランキングを取得中…</p>
+							{/if}
 						{/if}
-					{/if}
+					</div>
+					</div>
+				<div class="dialog-mobile-close-footer">
+					<Dialog.Close class="action-button action-button-tertiary action-button-close" aria-label="閉じる"><X aria-hidden="true" /></Dialog.Close>
 				</div>
 			</Dialog.Content>
 	</Dialog.Portal>
@@ -154,7 +159,7 @@
 
 <style>
 	:global(.ranking-dialog-overlay) { position: fixed; inset: 0; z-index: 100; background: rgba(4, 7, 18, .72); backdrop-filter: blur(2px); }
-	:global(.ranking-dialog-content) { position: fixed; top: 50%; left: 50%; z-index: 101; display: grid; grid-template-rows: auto auto minmax(0, 1fr); gap: 0; width: min(640px, calc(100vw - 24px)); max-height: calc(100svh - 28px); overflow: auto; padding: 22px; border: 1px solid rgba(122, 135, 255, .62); border-radius: 18px; background: linear-gradient(180deg, rgba(12, 18, 46, .98), rgba(8, 12, 33, .98)); box-shadow: 0 20px 80px rgba(0, 0, 0, .48), 0 0 34px rgba(90, 103, 255, .13); color: #f4f6ff; transform: translate(-50%, -50%); }
+	:global(.ranking-dialog-content) { --dialog-mobile-padding-top: 22px; --dialog-mobile-padding-inline: 22px; --dialog-mobile-close-footer-inset: 22px; position: fixed; top: 50%; left: 50%; z-index: 101; display: grid; grid-template-rows: auto auto minmax(0, 1fr); gap: 0; width: min(640px, calc(100vw - 24px)); max-height: calc(100svh - 28px); overflow: auto; padding: 22px; border: 1px solid rgba(122, 135, 255, .62); border-radius: 18px; background: linear-gradient(180deg, rgba(12, 18, 46, .98), rgba(8, 12, 33, .98)); box-shadow: 0 20px 80px rgba(0, 0, 0, .48), 0 0 34px rgba(90, 103, 255, .13); color: #f4f6ff; transform: translate(-50%, -50%); }
 	.ranking-dialog-header { position: sticky; top: -22px; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: -22px -22px 16px; padding: 18px 22px 14px; background: linear-gradient(180deg, rgba(12, 18, 46, 1), rgba(12, 18, 46, .98)); }
 	.ranking-heading { display: flex; align-items: center; min-width: 0; gap: 9px; }
 	.ranking-heading > :global(svg) { width: 22px; height: 22px; color: #aeb6ff; }
@@ -189,7 +194,7 @@
 	.ranking-skeleton-row span:nth-child(2) { width: 38px; height: 38px; border-radius: 42% 58% 48% 52%; }
 	@keyframes ranking-shimmer { to { background-position: -200% 0; } }
 	@media (prefers-reduced-motion: reduce) { .ranking-skeleton-row span { animation: none; } }
-	@media (max-width: 540px) { :global(.ranking-dialog-content) { padding: 16px; } .ranking-dialog-header { top: -16px; margin: -16px -16px 14px; padding: 15px 16px 12px; } .ranking-row { grid-template-columns: 24px 34px minmax(0, 1fr) auto; gap: 7px; padding: 9px 8px; } .ranking-row :global(.ranking-avatar.avatar) { width: 34px; height: 34px; } .ranking-value { max-width: 82px; font-size: 12px; white-space: normal; } }
+	@media (max-width: 540px) { :global(.ranking-dialog-content) { --dialog-mobile-padding-top: 16px; --dialog-mobile-padding-inline: 16px; --dialog-mobile-close-footer-inset: 16px; padding: 16px; } .ranking-dialog-header { top: -16px; margin: -16px -16px 14px; padding: 15px 16px 12px; } .ranking-row { grid-template-columns: 24px 34px minmax(0, 1fr) auto; gap: 7px; padding: 9px 8px; } .ranking-row :global(.ranking-avatar.avatar) { width: 34px; height: 34px; } .ranking-value { max-width: 82px; font-size: 12px; white-space: normal; } }
 	@media (min-width: 640px) {
 		:global(.ranking-dialog-content) { grid-template-rows: auto minmax(0, 1fr); width: min(920px, calc(100vw - 48px)); }
 		.ranking-tabs { display: none; }

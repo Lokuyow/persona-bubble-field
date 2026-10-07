@@ -394,6 +394,18 @@ test.describe('Relay startup', () => {
 		expect(viewportBox!.y).toBeGreaterThanOrEqual(dialogBox!.y);
 		expect(viewportBox!.y + viewportBox!.height).toBeLessThanOrEqual(dialogBox!.y + dialogBox!.height);
 		expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight);
+		const mobileCloseLayout = await dialog.evaluate((element) => {
+			const scrollArea = element.querySelector('.self-profile-scroll')!;
+			const footer = element.querySelector<HTMLElement>('.dialog-mobile-close-footer')!;
+			const dialogRect = element.getBoundingClientRect();
+			const footerRect = footer.getBoundingClientRect();
+			return {
+				horizontalOverflow: element.scrollWidth > element.clientWidth || document.documentElement.scrollWidth > innerWidth,
+				closeOutsideScroll: !scrollArea.contains(footer),
+				footerWithinDialog: footerRect.left >= dialogRect.left && footerRect.right <= dialogRect.right && footerRect.bottom <= dialogRect.bottom + 1
+			};
+		});
+		expect(mobileCloseLayout).toEqual({ horizontalOverflow: false, closeOutsideScroll: true, footerWithinDialog: true });
 		const escapeTrigger = dialog.locator('.escape-info-trigger');
 		await escapeTrigger.click();
 		const escapePopover = page.locator('.escape-info-popover');

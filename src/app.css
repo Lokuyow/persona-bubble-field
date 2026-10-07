@@ -194,6 +194,66 @@ button:not(:where(.trace-root-bubble, .trace-reply-content-button, .timeline-nam
 	height: 24px;
 }
 
+.dialog-mobile-scroll-content { display: contents; }
+.dialog-mobile-close-footer { display: none; }
+
+@media (max-width: 600px) {
+	.dialog-close-header { display: none !important; }
+	.dialog-mobile-layout {
+		display: flex !important;
+		flex-direction: column;
+		gap: 0 !important;
+		overflow: hidden !important;
+	}
+
+	.dialog-mobile-scroll-content {
+		display: flex;
+		flex: 1 1 auto;
+		flex-direction: column;
+		min-height: 0;
+		overflow-x: hidden;
+		overflow-y: auto;
+		gap: var(--dialog-mobile-scroll-gap, 0);
+		margin-block-start: calc(0px - var(--dialog-mobile-padding-top, 16px));
+		margin-inline: calc(0px - var(--dialog-mobile-padding-inline, 16px));
+		padding-block-start: var(--dialog-mobile-padding-top, 16px);
+		padding-inline: var(--dialog-mobile-padding-inline, 16px);
+		overscroll-behavior: contain;
+	}
+
+	.dialog-mobile-scroll-content > header,
+	.dialog-mobile-scroll-content > .terminal-dialog-header {
+		top: 0 !important;
+	}
+
+	.dialog-mobile-close-footer {
+		position: relative;
+		flex: 0 0 auto;
+		display: flex;
+		justify-content: center;
+		margin-block-start: 12px;
+		margin-inline: calc(0px - var(--dialog-mobile-close-footer-inset, 16px));
+		margin-block-end: calc(4px - var(--dialog-mobile-padding-top, var(--dialog-mobile-close-footer-inset, 16px)));
+		border-top: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+		background: inherit;
+	}
+
+	.dialog-mobile-close-footer > .action-button-close {
+		flex: 0 0 44px;
+		width: 44px;
+		min-width: 44px;
+		height: 44px;
+		min-height: 44px;
+		border: 0;
+		border-radius: 0;
+		background: transparent;
+	}
+
+	.dialog-mobile-close-footer > .action-button-close:hover:not(:disabled) {
+		background: color-mix(in srgb, currentColor 8%, transparent);
+	}
+}
+
 :where(.selection-dialog, .adjustment-dialog-content, .mending-dialog-content, .game-hud) {
 	--action-secondary-background: #30374a;
 	--action-secondary-background-hover: #3c4459;

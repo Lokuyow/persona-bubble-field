@@ -37,7 +37,7 @@
 		<Dialog.Portal>
 			<Dialog.Overlay class="profile-dialog-overlay" />
 			<Dialog.Content class={`${dialogClass} self-profile-content`} preventScroll={false} {onCloseAutoFocus} onOpenAutoFocus={focusInitialSection}>
-				<header class="profile-dialog-header self-profile-dialog-header">
+				<header class="profile-dialog-header self-profile-dialog-header dialog-close-header">
 					<Dialog.Close class="action-button action-button-tertiary action-button-close" aria-label="閉じる"><X aria-hidden="true" /></Dialog.Close>
 				</header>
 				<ScrollArea.Root class="profile-dialog-scroll-area self-profile-scroll" type="auto">
@@ -60,6 +60,9 @@
 					</ScrollArea.Viewport>
 					<ScrollArea.Scrollbar class="profile-dialog-scrollbar self-profile-scrollbar" orientation="vertical"><ScrollArea.Thumb class="profile-dialog-scroll-thumb self-profile-thumb" /></ScrollArea.Scrollbar>
 				</ScrollArea.Root>
+				<div class="dialog-mobile-close-footer" style="--dialog-mobile-close-footer-inset: 18px">
+					<Dialog.Close class="action-button action-button-tertiary action-button-close" aria-label="閉じる"><X aria-hidden="true" /></Dialog.Close>
+				</div>
 			</Dialog.Content>
 		</Dialog.Portal>
 	{/if}
@@ -84,5 +87,5 @@
 	.profile-dialog-about { margin: 8px 0; overflow-wrap: anywhere; white-space: pre-wrap; color: #56625e; font-size: 16px; font-weight: 700; line-height: 1.65; }
 	:global(.profile-dialog-scrollbar) { display: flex; width: 10px; padding: 2px; border-radius: 999px; background: rgba(86, 105, 98, .12); }
 	:global(.profile-dialog-scroll-thumb) { flex: 1; border-radius: inherit; background: #8fa8a0; }
-	@media (max-width: 600px) { :global(.profile-dialog-content), :global(.self-profile-content) { gap: 10px; width: min(560px, calc(100vw - 20px)); max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 16px); padding: 18px; } :global(.profile-dialog-scroll-area) { margin-right: -10px; } :global(.profile-dialog-scroll-viewport) { padding-right: 24px; } .profile-dialog-sections { gap: 18px; } .profile-dialog-identity { grid-template-columns: 96px minmax(0, 1fr); } :global(.profile-dialog-avatar) { width: 96px; height: 96px; border-radius: 32% 68% 42% 58%; } :global(.profile-dialog-identity-text [data-dialog-title]) { font-size: 20px; } }
+	@media (max-width: 600px) { :global(.profile-dialog-content), :global(.self-profile-content) { gap: 10px; grid-template-rows: minmax(0, 1fr) auto; width: min(560px, calc(100vw - 20px)); max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 16px); padding: 18px; } :global(.profile-dialog-scroll-area) { margin-right: -10px; } :global(.profile-dialog-scroll-viewport) { padding-right: 24px; } .profile-dialog-sections { gap: 18px; } .profile-dialog-identity { grid-template-columns: 96px minmax(0, 1fr); } :global(.profile-dialog-avatar) { width: 96px; height: 96px; border-radius: 32% 68% 42% 58%; } :global(.profile-dialog-identity-text [data-dialog-title]) { font-size: 20px; } }
 </style>
