@@ -14,7 +14,7 @@
 BigInt(`0x${event.id}`) % 5n === 0n
 ```
 
-上の決定的20%抽選にsparse-world boost、密度補正、時間expiryは設けない。effective rootは1 logical cellあたり最大1件とし、同一cellに複数のeligible root candidateがある場合は書置き・遺言を通常chatより優先し、explicit Trace同士ではnewest rootを選ぶ。`createdAt` が同じ場合は既存の決定的event ID orderingで1件を決める。フィールドの総logical cell数をNとしたとき、全体上限は `floor(N × 0.30)`、通常chat・書置き・遺言それぞれの予約枠は `floor(N × 0.10)` とする。端数と未使用の予約枠は種類共用とする。per-cell survivorを確定した後に各種類の予約枠を確保し、残りは種類を問わず新しい候補から採用する。候補が増えた場合は他種類へ貸した予約枠を返却する。予約枠は候補数を保証せず、同じcellへの集中で予約枠未満になることを許容する。上限はrootだけを数え、kind 1111 replyは数えない。
+上の決定的20%抽選にsparse-world boost、密度補正、時間expiryは設けない。effective rootは1 logical cellあたり最大1件とし、同一cellに複数のeligible root candidateがある場合は書置き・遺言を通常chatより優先し、explicit Trace同士ではnewest rootを選ぶ。`createdAt` が同じ場合は既存の決定的event ID orderingで1件を決める。フィールドの総logical cell数をNとしたとき、全体上限は `floor(N × 0.15)`、通常chat・書置き・遺言それぞれの予約枠は `floor(N × 0.05)` とする。端数と未使用の予約枠は種類共用とする。per-cell survivorを確定した後に各種類の予約枠を確保し、残りは種類を問わず新しい候補から採用する。候補が増えた場合は他種類へ貸した予約枠を返却する。予約枠は候補数を保証せず、同じcellへの集中で予約枠未満になることを許容する。上限はrootだけを数え、kind 1111 replyは数えない。
 
 ### 遺言
 

@@ -190,17 +190,17 @@ describe('trace root cache reconciliation', () => {
 		}, true));
 		const firstManual = Array.from({ length: 5 }, (_, index) => manualRoot(index + 100, { x: index + 5, y: 4 }, `loan-manual-first-${index}`));
 		const first = await reconcileTraceRootCache({ channelId: CHANNEL_ID, field, rawEvents: [...normal, ...firstManual] });
-		expect(first).toHaveLength(30);
+		expect(first).toHaveLength(15);
 		expect(first.filter((candidate) => candidate.source === 'manual')).toHaveLength(5);
 		const savedPool = await records();
 		expect(savedPool).toHaveLength(40);
-		expect(savedPool.filter((record) => (record as { effective?: boolean }).effective === false).length).toBe(10);
+		expect(savedPool.filter((record) => (record as { effective?: boolean }).effective === false).length).toBe(25);
 
 		const additionalManual = Array.from({ length: 5 }, (_, index) => manualRoot(index + 200, { x: index, y: 4 }, `loan-manual-return-${index}`));
 		const second = await reconcileTraceRootCache({ channelId: CHANNEL_ID, field, rawEvents: additionalManual });
-		expect(second).toHaveLength(30);
+		expect(second).toHaveLength(15);
 		expect(second.filter((candidate) => candidate.source === 'manual')).toHaveLength(10);
-		expect(second.filter((candidate) => !candidate.source)).toHaveLength(20);
+		expect(second.filter((candidate) => !candidate.source)).toHaveLength(5);
 	});
 
 	it('does not modify another channel partition', async () => {
