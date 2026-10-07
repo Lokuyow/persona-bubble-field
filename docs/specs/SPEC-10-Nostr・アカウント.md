@@ -31,15 +31,15 @@ channel creator authorityはproject-owned World configへ固定する。
 
 `89ae5e1f887b68ebc093b1e971164f59ee1e8d3bb02fd1fe168f77d7e4b2c10b`
 
-World config revision `1` のauthoritative read/write Relay setは、以下の順序で固定する。
+World config revision `2` のauthoritative read/write Relay setは、以下の順序で固定する。
 
 - `wss://yabu.me/`
-- `wss://relay-jp.nostr.wirednet.jp/`
 - `wss://r.kojira.io/`
 - `wss://relay.nostrfy.org/`
-- `wss://nos.lol/`
+- `wss://nostr.compile-error.net/`
+- `wss://cagliostr.compile-error.net/`
 
-preferred Relay hintは `wss://nos.lol/` とし、authoritative Relay setの一部として固定する。hintはchannel identityではない。
+preferred Relay hintは `wss://yabu.me/` とし、authoritative Relay setの一部として固定する。hintはchannel identityではない。
 
 startupではkind 40 / kind 41を取得せず、metadata discovery Relayへ問い合わせない。kind 41はHako World Relay authorityを変更しない。read、write、Trace、realtime、control queryは同じ固定authorityを使用する。
 

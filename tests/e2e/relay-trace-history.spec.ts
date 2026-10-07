@@ -108,7 +108,7 @@ test.describe('Relay startup', () => {
 		await installHostOwnedStub(page);
 		await installDelayedRelay(page, {
 			primaryEvents: { message: trace.message, position: trace.selfPosition }, traceRoots: [trace.root],
-			silentReplyRelays: AUTHORITATIVE_RELAYS.filter((url) => url !== 'wss://nos.lol/')
+			silentReplyRelays: AUTHORITATIVE_RELAYS.filter((url) => url !== AUTHORITATIVE_RELAYS[0])
 		});
 		await seedRelayAccount(page, trace.selfSecret, trace.selfPubkey);
 		await page.goto('/');

@@ -67,7 +67,7 @@ Profile publication timestamp fenceは既存world-write-journalにchannel/pubkey
 
 Self / Other Profileは同じpresentation componentとDialog geometry、header、close操作、scroll領域、プロフィール・人生・Root sectionを使う。Selfだけがlocal authoritative snapshotとEscape actionを持つ。OtherのRemote profile stateは表示modelのためだけに使い、PersonaSnapshot / authoritative lifecycleへ変換しない。DEV character-only targetではpublic profile-stateを購読しない。
 
-現在のtransportは通常最大4 active subscriptionsに加えてProfileまたはランキングopen中の補助subscription 1本を使う場合があるため、最大5 active subscriptionsを使用しうる。既知のNIP-11 `limitation.max_subscriptions`が5以上のRelayを互換条件とし、既知値が5未満のRelayでは該当購読を行わない。値が未広告なら既存の試行方針に従う。専用priority schedulerは設けない。2026-10-01時点で現在のauthoritative Relay 5本からNIP-11を直接取得した検証記録は`docs/PROJECT.md`にあり、実測値は設定変更で将来変わりうる。その他のNIP-11 limitation値はこれらのcompatibility gateにしない。
+現在のtransportは通常最大4 active subscriptionsに加えてProfileまたはランキングopen中の補助subscription 1本を使う場合があるため、最大5 active subscriptionsを使用しうる。既知のNIP-11 `limitation.max_subscriptions`が5以上のRelayを互換条件とし、既知値が5未満のRelayでは該当購読を行わない。値が未広告なら既存の試行方針に従う。専用priority schedulerは設けない。2026-10-07時点で現在のauthoritative Relay 5本からNIP-11を直接取得した検証記録は`docs/PROJECT.md`にあり、実測値は設定変更で将来変わりうる。その他のNIP-11 limitation値はこれらのcompatibility gateにしない。
 
 ProfileのRun evidenceはTag Game固有stateと独立した共通責務で保持し、world session置換時に破棄する。旧sessionのevidenceを新sessionのmessage/presenceと組み合わせない。同じ`created_at`のaddressable eventはNIP-01に従い辞書順で最小のevent IDをlatestとして保持する。`d`、`e`、`r` tagは必要なmultiplicityとshapeを検証するが、無関係な追加Nostr tagは拒否理由にしない。authorはworld characterへ解決できなければならず、contentとnested objectは厳密なkey集合を維持する。
 
@@ -596,7 +596,7 @@ network上のTrace root bootstrapは、従来どおりprimary Worldの初期同�
 
 RelayごとのWebSocket接続自体をsubscriptionごとに別接続へ分ける必要はなく、同一Relay接続上で複数subscriptionを管理してよい。
 
-通常最大はprimary World 2本、Trace補助1本、Realtime補助1本の計4 active subscriptionである。Profile open中だけprofile-state補助1本を加え、最大5本を使いうる。NIP-11 `limitation.max_subscriptions`が既知で5未満のRelayではProfile subscriptionを開始しない。未広告値は既存方針どおり試行する。その他のNIP-11 limitation値をProfileのcompatibility gateにしない。2026-10-01時点のauthoritative Relay 5本の直接確認値と可変性は [`docs/PROJECT.md`](../PROJECT.md) を参照する。
+通常最大はprimary World 2本、Trace補助1本、Realtime補助1本の計4 active subscriptionである。Profileまたはranking open中だけ対応する補助1本を加え、最大5本を使いうる。NIP-11 `limitation.max_subscriptions`が既知で5未満のRelayでは該当する補助subscriptionを開始しない。未広告値は既存方針どおり試行する。その他のNIP-11 limitation値をProfileやrankingのcompatibility gateにしない。2026-10-07時点のauthoritative Relay 5本の直接確認値と可変性は [`docs/PROJECT.md`](../PROJECT.md) を参照する。
 
 具体的なsubscription IDは製品仕様として固定しない。
 
