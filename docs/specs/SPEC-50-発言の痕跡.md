@@ -44,7 +44,7 @@ reply-tree LRU evictionではrootとroot read stateを残し、そのtreeのrepl
 
 ### root iconとauthor ghost
 
-通常時、trace cellにはroot traceが所有する小さな痕跡アイコンを表示し、author ghostや件数は表示しない。ランダム痕跡にはTabler IconsのHistory、書置きには従来の吹き出し、遺言には従来の墓標を表示する。ランダム痕跡の通常未読・既読opacityはそれぞれ0.62、0.56とし、書置きは従来の吹き出しアイコンとopacity（未読0.72、既読0.66）を維持する。replyが未読の場合は種類やroot read状態に優先して従来のreply未読アイコン色・opacityを表示する。replyは独立した通常fieldアイコンを生成しない。
+通常時、trace cellにはroot traceが所有する小さな痕跡アイコンを表示し、author ghostや件数は表示しない。ランダム痕跡にはTabler IconsのIconClockFilled、書置きには従来の吹き出し、遺言には従来の墓標を表示する。ランダム痕跡の通常未読・既読opacityはそれぞれ0.62、0.56とし、書置きは従来の吹き出しアイコンとopacity（未読0.72、既読0.66）を維持する。replyが未読の場合は種類やroot read状態に優先して従来のreply未読アイコン色・opacityを表示する。replyは独立した通常fieldアイコンを生成しない。
 
 rootアイコンはcellの右上内側に、cell sizeに応じた余白・小さなサイズで表示する。random、manual、遺言は同じ配置を使い、アイコンを新たなhit targetにはしない。調査可能性を示す虫眼鏡などの補助アイコンは表示しない。調査可否は既存のlogical-cell selectionで判定する。
 

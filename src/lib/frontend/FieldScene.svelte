@@ -6,7 +6,7 @@
 	import type { Character } from '$lib/character';
 	import CharacterAvatar from '$lib/CharacterAvatar.svelte';
 	import FieldParticipant from '$lib/FieldParticipant.svelte';
-	import History from '~icons/tabler/history';
+	import IconClockFilled from '~icons/tabler/clock-filled';
 	import type { BubbleTone } from '$lib/bubblePresentation';
 	import type { FieldCellAction } from '$lib/fieldSelection';
 	import type { Bounds, Direction, FieldSize, GridPosition, Size, WorldPoint } from '$lib/geometry';
@@ -193,7 +193,7 @@
 					class:trace-marker-read={cell.read}
 					class:trace-marker-unread-reply={cell.unreadReply}
 					style={`left: ${(cell.position.x + 1) * cellSize - inset}px; top: ${cell.position.y * cellSize + inset}px; --trace-icon-image: url("${asset(cell.kind === 'death' ? TRACE_DEATH_ICON_ASSET : TRACE_ICON_ASSET)}");`}
-				>{#if cell.kind === 'random'}<History class="trace-marker-history-icon" style="display: block; width: 100%; height: 100%; overflow: visible;" aria-hidden="true" />{/if}</span>
+				>{#if cell.kind === 'random'}<IconClockFilled class="trace-marker-history-icon" style="display: block; width: 100%; height: 100%; overflow: visible;" aria-hidden="true" />{/if}</span>
 			{/each}
 		</div>
 		<div class="field-facility-layer" aria-hidden="true">
