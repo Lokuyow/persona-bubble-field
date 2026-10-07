@@ -428,7 +428,7 @@
 	.reward-impact-bloom, .reward-jackpot-bloom { position: fixed; inset: 0; background: radial-gradient(ellipse at center, rgba(219, 255, 255, .52) 0%, rgba(53, 227, 232, .24) 15%, rgba(36, 181, 226, .10) 34%, transparent 62%); opacity: 0; }
 	.reward-jackpot-bloom { background: radial-gradient(ellipse at center, rgba(244, 255, 255, .76) 0%, rgba(117, 255, 255, .42) 13%, rgba(53, 227, 232, .20) 32%, transparent 66%); }
 	.reward-burst-anchor { z-index: 1; }
-	.reward-burst { width: min(118vmin, 820px); max-height: 96svh; overflow: visible; filter: drop-shadow(0 0 20px rgba(53, 227, 232, .34)); }
+	.reward-burst { position: absolute; top: 50%; left: 50%; width: min(118vmin, 820px); max-height: 96svh; overflow: visible; transform: translate(-50%, -50%); filter: drop-shadow(0 0 20px rgba(53, 227, 232, .34)); }
 	.reward-burst-rays-primary, .reward-burst-rays-secondary, .reward-burst-ring, .reward-burst-sparkles, .reward-particle { opacity: 0; transform-box: fill-box; transform-origin: center; }
 	.reward-burst-rays-primary { filter: drop-shadow(0 0 8px rgba(185, 255, 255, .95)); }
 	.reward-burst-rays-secondary { filter: drop-shadow(0 0 6px rgba(53, 227, 232, .85)); }
