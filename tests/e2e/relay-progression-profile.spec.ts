@@ -435,15 +435,22 @@ test.describe('Relay startup', () => {
 		const profileBox = await profileTrigger.boundingBox();
 		const soundBox = await soundButton.boundingBox();
 		const speechBox = await speechToggle.boundingBox();
+		const viewportWidth = await page.evaluate(() => window.innerWidth);
 		expect(editorBox).not.toBeNull();
 		expect(profileBox).not.toBeNull();
 		expect(soundBox).not.toBeNull();
 		expect(speechBox).not.toBeNull();
 		expect(editorBox!.y + editorBox!.height).toBeLessThanOrEqual(profileBox!.y + 1);
 		expect(editorBox!.y + editorBox!.height).toBeLessThanOrEqual(speechBox!.y + 1);
-		expect(Math.abs(profileBox!.y - speechBox!.y)).toBeLessThan(2);
+		expect(Math.abs(profileBox!.y - soundBox!.y)).toBeLessThan(2);
 		expect(profileBox!.x + profileBox!.width).toBeLessThan(soundBox!.x);
-		expect(soundBox!.x + soundBox!.width).toBeLessThan(speechBox!.x);
+		if (viewportWidth <= 420) {
+			expect(profileBox!.y + profileBox!.height).toBeLessThanOrEqual(speechBox!.y + 1);
+			expect(soundBox!.y + soundBox!.height).toBeLessThanOrEqual(speechBox!.y + 1);
+		} else {
+			expect(Math.abs(profileBox!.y - speechBox!.y)).toBeLessThan(2);
+			expect(soundBox!.x + soundBox!.width).toBeLessThan(speechBox!.x);
+		}
 	});
 
 	test('shows overflow point and lifespan status after the Context cap', async ({ page }) => {
