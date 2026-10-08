@@ -277,7 +277,6 @@
 	.opening-content h1 { font-size: clamp(28px, 5vw, 40px); }
 	.opening-copy { display: grid; gap: 22px; margin-top: 20px; color: rgb(255 255 255 / 88%); font-size: 1.05rem; line-height: 1.8; }
 	.opening-copy p { margin: 0; }
-	.opening-footer { justify-content: center; }
 	.selection-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
 	.transition-notice { display: grid; gap: 4px; margin: 16px 0 2px; padding: 12px 14px; border: 1px solid rgb(104 241 221 / 34%); border-radius: 12px; background: rgb(104 241 221 / 9%); color: rgb(241 255 253 / 92%); }
 	.transition-notice strong { color: #fff; }
@@ -348,6 +347,8 @@
 	.selection-summary strong { color: #fff; }
 	.summary-divider { width: 1px; height: 18px; background: rgb(255 255 255 / 20%); }
 	.selection-footer :global(.action-button) { min-width: 210px; min-height: 50px; }
+	.selection-dialog > .opening-footer { justify-content: center; }
+	.selection-dialog > .opening-footer :global(.action-button) { width: min(320px, 100%); min-width: min(210px, 100%); min-height: 64px; font-size: 1.1rem; }
 
 	@media (max-width: 700px) {
 		.selection-dialog { height: min(760px, calc(100dvh - 40px)); max-height: calc(100dvh - 40px); }
@@ -370,6 +371,5 @@
 		.selection-footer { align-items: stretch; flex-direction: column; gap: 12px; padding: 14px 16px max(16px, env(safe-area-inset-bottom)); }
 		.selection-footer :global(.action-button) { width: 100%; }
 		.opening-footer { align-items: center; }
-		.opening-footer :global(.action-button) { width: min(210px, 100%); }
 	}
 </style>
