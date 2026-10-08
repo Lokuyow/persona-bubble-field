@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL } from '../../src/lib/fieldFacilities';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
+import { finishDialogExit } from './helpers/dialogMotion';
 import {
 	chooseAvailableRelayMove,
 	installDelayedRelay,
@@ -89,6 +90,19 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 420, height: 800 
 		});
 		expect(lifeLayout).toEqual({ insideViewport: true, belowHud: true, buttonTarget: true });
 		await expect(page.locator('.action-dock')).toBeVisible();
+		const tutorialProgressBeforeHelp = await page.evaluate(() => sessionStorage.getItem('persona-bubble-field:first-run-tutorial'));
+		const helpTrigger = page.getByRole('button', { name: 'ヘルプ', exact: true });
+		await helpTrigger.click();
+		const helpDialog = page.locator('[data-help-dialog]');
+		await expect(page.getByRole('dialog', { name: 'ヘルプ' })).toBeVisible();
+		await helpDialog.locator('[data-help-category="start"]').click();
+		await expect(helpDialog.locator('#help-start-title')).toBeVisible();
+		await helpDialog.getByRole('button', { name: '戻る' }).click();
+		await page.keyboard.press('Escape');
+		await finishDialogExit(helpDialog, false);
+		await expect(helpTrigger).toBeFocused();
+		expect(await page.locator('[data-first-run-tutorial]').getAttribute('data-first-run-tutorial')).toBe('life');
+		expect(await page.evaluate(() => sessionStorage.getItem('persona-bubble-field:first-run-tutorial'))).toBe(tutorialProgressBeforeHelp);
 
 		await page.reload({ waitUntil: 'domcontentloaded' });
 		await releaseFirstRunPrimary(page);

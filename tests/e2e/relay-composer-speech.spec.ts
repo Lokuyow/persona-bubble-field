@@ -144,10 +144,12 @@ test.describe('Relay startup', () => {
 		const profile = page.locator('.profile-trigger');
 		const chatter = page.locator('.chatter-toggle');
 		const speechType = page.locator('.speech-type-toggle');
+		const help = page.locator('.help-trigger');
 		const suggestions = page.locator('.suggestions-tooltip-trigger');
 		await expect(profile).not.toHaveAttribute('title');
 		await expect(chatter).not.toHaveAttribute('title');
 		await expect(speechType).not.toHaveAttribute('title');
+		await expect(help).not.toHaveAttribute('title');
 		await expect(page.locator('.suggestions-toggle')).not.toHaveAttribute('title');
 		const dockBorders = await page.locator('.action-dock').evaluate((dock) => {
 			const token = getComputedStyle(dock).getPropertyValue('--action-icon-border').trim();
@@ -163,6 +165,7 @@ test.describe('Relay startup', () => {
 		expect(dockBorders.borders[1]).not.toBe(dockBorders.borders[0]);
 
 		await expectTooltip(profile, '自分のプロフィール');
+		await expectTooltip(help, 'ヘルプ');
 		await expectTooltip(chatter, 'Chatterを閉じる');
 		await chatter.click();
 		await expect(chatter).toHaveAttribute('aria-pressed', 'false');
@@ -185,6 +188,7 @@ test.describe('Relay startup', () => {
 		for (const width of [1200, 838, 720, 701, 700, 390, 320]) {
 			await page.setViewportSize({ width, height: 844 });
 			await openReadyRelayWorld(page, 1);
+			const help = page.locator('.help-trigger');
 			const chatterToggle = page.locator('.chatter-toggle');
 			const suggestionsToggle = page.locator('.suggestions-toggle');
 			const readChatterStyle = () => chatterToggle.evaluate((element) => {
@@ -335,7 +339,7 @@ test.describe('Relay startup', () => {
 			await expect(page.locator('.sound-control')).toHaveCount(1);
 			await expect(page.getByRole('dialog', { name: 'Sound settings' })).toHaveCount(0);
 			expect(await readActionDockControlOrder(page)).toEqual([
-				'profile-trigger', 'chatter-toggle', 'sound-control', 'speech-type-toggle', 'suggestions-anchor'
+				'profile-trigger', 'chatter-toggle', 'sound-control', 'help-trigger', 'speech-type-toggle', 'suggestions-anchor'
 			]);
 			if (width <= 700) {
 				const editorBox = await page.locator('.composer-editor-slot').boundingBox();
@@ -344,9 +348,10 @@ test.describe('Relay startup', () => {
 				expect(editorBox && leftBox && rightBox).toBeTruthy();
 				if (editorBox && leftBox && rightBox) {
 					expect(editorBox.y + editorBox.height).toBeLessThan(leftBox.y);
-					expect(leftBox.x + leftBox.width).toBeLessThanOrEqual(rightBox.x);
+					if (width <= 420) expect(leftBox.y + leftBox.height).toBeLessThanOrEqual(rightBox.y);
+					else expect(leftBox.x + leftBox.width).toBeLessThanOrEqual(rightBox.x);
 					expect(rightBox.x + rightBox.width).toBeLessThanOrEqual(width);
-					for (const control of [page.locator('.profile-trigger'), chatterToggle, page.locator('.trace-unread-indicator'), page.locator('.sound-control'), page.locator('.speech-type-toggle'), suggestionsToggle]) {
+					for (const control of [page.locator('.profile-trigger'), chatterToggle, page.locator('.trace-unread-indicator'), page.locator('.speaker-button'), help, page.locator('.speech-type-toggle'), page.locator('.manual-trace-toggle'), suggestionsToggle]) {
 						if (await control.isVisible()) {
 							const box = await control.boundingBox();
 							if (!box) throw new Error('Expected a visible mobile ActionDock control to have geometry.');
@@ -365,7 +370,7 @@ test.describe('Relay startup', () => {
 						left: rect('.composer-controls-left'),
 						editor: rect('.composer-editor-slot'),
 						right: rect('.composer-controls-right'),
-						controls: ['.profile-trigger', '.chatter-toggle', '.speaker-button', '.speech-type-toggle', '.suggestions-toggle']
+						controls: ['.profile-trigger', '.chatter-toggle', '.speaker-button', '.help-trigger', '.speech-type-toggle', '.suggestions-toggle']
 							.map((selector) => rect(selector))
 					};
 				});

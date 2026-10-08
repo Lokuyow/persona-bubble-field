@@ -233,6 +233,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		traceRootGhostGeometry
 	} from '$lib/traceBubblePresentation';
 	import ActionDock from '$lib/frontend/ActionDock.svelte';
+	import HelpDialog from '$lib/HelpDialog.svelte';
 	import Chatter from '$lib/frontend/Chatter.svelte';
 	import WorldEntryControls from '$lib/frontend/WorldEntryControls.svelte';
 	import DevWorldControls from '$lib/dev/DevWorldControls.svelte';
@@ -620,6 +621,8 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	let rankingDialogOpen = $state(false);
 	let selfProfileDialogOpen = $state(false);
 	let lastSelfProfileTrigger: HTMLButtonElement | null = null;
+	let helpDialogOpen = $state(false);
+	let lastHelpTrigger: HTMLButtonElement | null = null;
 	let abilityMutationInFlight = $state(false);
 	let upgradeFeedback = $state<Readonly<{ id: number; key: PersonaAbilityKey; level: number }> | null>(null);
 	let upgradeFeedbackTimer: number | null = null;
@@ -5136,6 +5139,11 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		selfProfileDialogOpen = true;
 	}
 
+	function openHelpDialog(trigger: HTMLButtonElement): void {
+		lastHelpTrigger = trigger;
+		helpDialogOpen = true;
+	}
+
 
 	function receiveTimelineMessage(message: ParsedWorldMessage): void {
 		recentMessageTimeline = addRecentMessage(recentMessageTimeline, message);
@@ -5610,6 +5618,11 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		onCloseAutoFocus={() => { lastSelfProfileTrigger?.focus(); }}
 		onClear={() => { void clearCurrentRun(); }}
 	/>
+	<HelpDialog
+		open={helpDialogOpen}
+		onOpenChange={(open) => { helpDialogOpen = open; }}
+		onCloseAutoFocus={() => { lastHelpTrigger?.focus(); }}
+	/>
 
 	{#if devWorldSandboxEnabled}
 		<DevWorldControls
@@ -5657,6 +5670,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		avatarTone={colorByPubkey[selfProjectionId] ?? 'coral'}
 			canOpenSelfProfile={selfProfileCharacter !== null}
 			onOpenSelfProfile={openSelfProfile}
+			onOpenHelp={openHelpDialog}
 			suggestionConversation={speechSuggestionConversation}
 			onSpeechTypeChange={(next) => { selectedSpeechType = next; }}
 				speechTutorialHighlighted={showFirstRunTutorial && firstRunTutorialStep === 'speech'}
@@ -5953,7 +5967,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			--action-reserved-height: calc(var(--composer-initial-preferred-height) + 8px + 46px + 8px + var(--action-dock-padding-block) + var(--action-dock-border-width) + env(safe-area-inset-bottom));
 		}
 	}
-	@media (max-width: 359px) {
+	@media (max-width: 420px) {
 		.app-shell {
 			--action-dock-height: calc(var(--composer-preferred-height) + 8px + 46px + 8px + 46px + 8px + var(--action-dock-padding-block) + var(--action-dock-border-width) + env(safe-area-inset-bottom));
 			--action-reserved-height: calc(var(--composer-initial-preferred-height) + 8px + 46px + 8px + 46px + 8px + var(--action-dock-padding-block) + var(--action-dock-border-width) + env(safe-area-inset-bottom));

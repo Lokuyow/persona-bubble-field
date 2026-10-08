@@ -483,7 +483,7 @@ test.describe('Relay startup', () => {
 		await expect(page.getByRole('tooltip')).toHaveCount(0);
 		await expect(page.getByRole('button', { name: 'AI発言候補を生成' })).toBeVisible();
 		expect(await readActionDockControlOrder(page)).toEqual([
-			'profile-trigger', 'chatter-toggle', 'trace-unread-indicator', 'sound-control', 'speech-type-toggle', 'suggestions-anchor'
+			'profile-trigger', 'chatter-toggle', 'trace-unread-indicator', 'sound-control', 'help-trigger', 'speech-type-toggle', 'suggestions-anchor'
 		]);
 		for (const width of [1200, 838, 701]) {
 			await page.setViewportSize({ width, height: 850 });
@@ -644,11 +644,11 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('.trace-unread-indicator')).toBeVisible();
 		await expect(page.getByRole('button', { name: 'AI発言候補を生成' })).toBeVisible();
 		expect(await readActionDockControlOrder(page)).toEqual([
-			'profile-trigger', 'chatter-toggle', 'trace-unread-indicator', 'sound-control', 'speech-type-toggle', 'suggestions-anchor'
+			'profile-trigger', 'chatter-toggle', 'trace-unread-indicator', 'sound-control', 'help-trigger', 'speech-type-toggle', 'suggestions-anchor'
 		]);
 		const fieldGeometryBeforeToggle = await page.locator('.field-grid').boundingBox();
 		const fieldCellSizeBeforeToggle = await page.locator('.field-scene').evaluate((element) => getComputedStyle(element).getPropertyValue('--cell-size'));
-		for (const width of [320, 360, 390]) {
+		for (const width of [320, 360, 390, 420, 421]) {
 			await page.setViewportSize({ width, height: 844 });
 			const geometry = await page.evaluate(() => {
 				const rect = (selector: string) => document.querySelector<HTMLElement>(selector)!.getBoundingClientRect().toJSON();
@@ -658,11 +658,13 @@ test.describe('Relay startup', () => {
 					editor: rect('.composer-editor-slot'),
 					left: rect('.composer-controls-left'),
 					right: rect('.composer-controls-right'),
-					controls: ['.profile-trigger', '.chatter-toggle', '.trace-unread-indicator', '.speaker-button', '.speech-type-toggle', '.suggestions-toggle']
+					controls: ['.profile-trigger', '.chatter-toggle', '.trace-unread-indicator', '.speaker-button', '.help-trigger', '.speech-type-toggle', '.manual-trace-toggle', '.suggestions-toggle']
 						.map((selector) => rect(selector))
 				};
 			});
-			if (width < 360) {
+			expect(geometry.editor.bottom).toBeLessThanOrEqual(geometry.left.top);
+			expect(geometry.editor.bottom).toBeLessThanOrEqual(geometry.right.top);
+			if (width <= 420) {
 				expect(geometry.left.bottom).toBeLessThanOrEqual(geometry.right.top);
 			} else {
 				expect(geometry.left.top).toBeLessThan(geometry.right.bottom);
@@ -693,6 +695,12 @@ test.describe('Relay startup', () => {
 					const b = geometry.controls[second];
 					expect(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top).toBe(true);
 				}
+			}
+			if (width === 420) expect(geometry.left.bottom).toBeLessThanOrEqual(geometry.right.top);
+			if (width === 421) {
+				expect(geometry.left.top).toBeLessThan(geometry.right.bottom);
+				expect(geometry.right.top).toBeLessThan(geometry.left.bottom);
+				expect(geometry.left.right).toBeLessThanOrEqual(geometry.right.left);
 			}
 		}
 
