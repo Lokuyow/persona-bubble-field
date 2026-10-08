@@ -541,7 +541,6 @@
 	}
 
 	@media (max-width: 700px) {
-		.action-dock { padding-inline: 8px; }
 		.action-dock-content { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 46px; column-gap: 0; row-gap: 8px; }
 		.composer-editor-slot { grid-column: 1 / -1; grid-row: 1; }
 		.composer-controls-left, .composer-controls-right { grid-row: 2; gap: 4px; }
@@ -551,12 +550,12 @@
 		.composer-controls-left .chatter-toggle, .composer-controls-left .trace-unread-indicator, .composer-controls-left .help-trigger { flex-basis: 44px; width: 44px; height: 44px; }
 		.composer-controls-left :global(.sound-control) { margin: 0; }
 		.composer-controls-right .speech-type-toggle, .composer-controls-right .manual-trace-toggle, .composer-controls-right :global(.suggestions-anchor) { flex-basis: 44px; width: 44px; height: 44px; }
-		.composer-controls-right :global(.suggestions-anchor) { display: none; }
 	}
 	@media (max-width: 420px) {
-		.action-dock.action-dock-has-unread-replies { padding-inline: 3px; }
-		.action-dock-content.action-dock-has-unread-replies .composer-controls-left,
-		.action-dock-content.action-dock-has-unread-replies .composer-controls-right { gap: 1px; }
+		.action-dock-content { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 46px 46px; }
+		.composer-controls-left, .composer-controls-right { grid-column: 1; }
+		.composer-controls-left { grid-row: 2; justify-self: start; }
+		.composer-controls-right { grid-row: 3; justify-self: end; }
 	}
 	@media (min-width: 701px) {
 		.action-dock-content { --action-dock-desktop-control-size: 54px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: minmax(var(--action-dock-desktop-control-size), 1fr); }
