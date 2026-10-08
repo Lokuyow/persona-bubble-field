@@ -1,7 +1,9 @@
 <script lang="ts">
+	import { asset } from '$app/paths';
 	import { Dialog } from 'bits-ui';
 	import { tick } from 'svelte';
 	import ActionButton from '$lib/ActionButton.svelte';
+	import TagGameEffectSymbol from '$lib/TagGameEffectSymbol.svelte';
 	import ArrowLeft from '~icons/tabler/arrow-left';
 	import Award from '~icons/tabler/award';
 	import Brain from '~icons/tabler/brain';
@@ -24,6 +26,9 @@
 	import SpeechShout from '~icons/hako/speech-shout';
 	import LayoutSidebarLeftExpand from '~icons/tabler/layout-sidebar-left-expand';
 
+	const TRACE_ICON_ASSET = asset('/trace/trace-icon.svg');
+	const TRACE_DEATH_ICON_ASSET = asset('/trace/trace-death-icon.svg');
+
 	type CategoryId = 'start' | 'living' | 'conversation' | 'traces' | 'events' | 'life' | 'nostr';
 	type HelpPage = { kind: 'home' } | { kind: 'category'; id: CategoryId } | { kind: 'events' } | { kind: 'event'; id: 'cooperation' | 'tag-game' };
 	type Props = Readonly<{
@@ -40,12 +45,12 @@
 
 	const categories: ReadonlyArray<{ id: CategoryId; title: string; summary: string }> = [
 		{ id: 'start', title: 'はじめに', summary: '寿命・ポイント・基本的な遊び方' },
-		{ id: 'living', title: '暮らす', summary: '移動・作業・能力・HUD' },
+		{ id: 'living', title: '暮らす', summary: '移動・作業・能力・画面上の表示' },
 		{ id: 'conversation', title: '会話する', summary: '発言・返信・Chatter' },
 		{ id: 'traces', title: '痕跡', summary: '発言の痕跡・書置き・遺言' },
 		{ id: 'events', title: 'イベント', summary: '協力と抜け駆け・鬼ごっこ' },
 		{ id: 'life', title: '一生と脱出', summary: '死亡・転生・脱出・Root Point' },
-		{ id: 'nostr', title: 'Nostr・その他', summary: 'Nostr・秘密鍵・データ・FAQ' }
+		{ id: 'nostr', title: 'Nostr・その他', summary: 'Nostr・秘密鍵・データ・よくある質問' }
 	];
 	const categoryTitles: Readonly<Record<CategoryId, string>> = {
 		start: 'はじめに', living: '暮らす', conversation: '会話する', traces: '痕跡', events: 'イベント', life: '一生と脱出', nostr: 'Nostr・その他'
@@ -112,7 +117,7 @@
 						{#each categories as category (category.id)}
 							<button class="category-card" type="button" data-help-category={category.id} onclick={() => void show(category.id === 'events' ? { kind: 'events' } : { kind: 'category', id: category.id })}>
 								<span class="category-icon" aria-hidden="true">
-									{#if category.id === 'start'}<Heart />{:else if category.id === 'living'}<Map />{:else if category.id === 'conversation'}<SpeechNormal />{:else if category.id === 'traces'}<img src="/trace/trace-icon.svg" alt="" />{:else if category.id === 'events'}<Run />{:else if category.id === 'life'}<DoorExit />{:else}<Key />{/if}
+									{#if category.id === 'start'}<Heart />{:else if category.id === 'living'}<Map />{:else if category.id === 'conversation'}<SpeechNormal />{:else if category.id === 'traces'}<img src={TRACE_ICON_ASSET} alt="" />{:else if category.id === 'events'}<Run />{:else if category.id === 'life'}<DoorExit />{:else}<Key />{/if}
 								</span>
 								<span class="category-copy"><strong>{category.title}</strong><span>{category.summary}</span></span>
 								<ChevronRight class="category-chevron" aria-hidden="true" />
@@ -133,22 +138,22 @@
 						<h2 id="help-living-title"><Map aria-hidden="true" />暮らす</h2>
 						<div class="help-fact"><Map aria-hidden="true" /><div><h3>移動</h3><p>フィールド内を自由に移動できます。住人、端末、痕跡などへ近づくことで利用できる操作があります。</p></div></div>
 						<div class="help-fact"><Tool aria-hidden="true" /><div><h3>作業</h3><p>作業端末から作業を始められます。作業すると、ポイントを獲得しながら寿命を延ばせます。一度作業を始めれば、移動したり会話したりしている間も進みます。</p><div class="icon-labels"><span><Tool aria-hidden="true" />作業中</span><span><HeartPlus aria-hidden="true" />延命中</span><span><PlayerPause aria-hidden="true" />作業停止中</span></div></div></div>
-						<div class="help-fact"><Brain aria-hidden="true" /><div><h3>能力</h3><p>ポイントを使って、現在の一生の能力を強化できます。能力強化に使ったポイントは所持ポイントから減ります。</p><ul class="icon-list"><li><Brain aria-hidden="true" /><span><strong>推論効率</strong> — 作業で得るポイントに関係します。</span></li><li><Stack2 aria-hidden="true" /><span><strong>コンテキスト容量</strong> — 作業を続けられる量や、作業完了後の報酬に関係します。</span></li><li><ShieldCheck aria-hidden="true" /><span><strong>ハルシネーション抑制</strong> — 作業による寿命延長に関係します。</span></li></ul></div></div>
-						<div class="help-fact"><Heart aria-hidden="true" /><div><h3>HUD</h3><p>残り寿命、所持ポイント、作業状態を確認できます。ポイントゲージは100,000ptをひとつの基準として表示します。</p></div></div>
+						<div class="help-fact"><Brain aria-hidden="true" /><div><h3>能力</h3><p>ポイントを使って、現在の一生の能力を強化できます。能力強化に使ったポイントは所持ポイントから減ります。</p><ul class="icon-list"><li><Brain aria-hidden="true" /><span><strong>推論効率</strong> — 作業で得るポイントに関係します。</span></li><li><Stack2 aria-hidden="true" /><span><strong>コンテキスト容量</strong> — 成果を回収せずに連続して作業できる時間の上限が増えます。</span></li><li><ShieldCheck aria-hidden="true" /><span><strong>ハルシネーション抑制</strong> — 作業による寿命延長に関係します。</span></li></ul></div></div>
+						<div class="help-fact"><Heart aria-hidden="true" /><div><h3>画面上の表示</h3><p>残り寿命、所持ポイント、作業状態を確認できます。ポイントゲージは100,000ptをひとつの基準として表示します。</p></div></div>
 					</section>
 				{:else if page.kind === 'category' && page.id === 'conversation'}
 					<section class="help-section" aria-labelledby="help-conversation-title">
 						<h2 id="help-conversation-title"><SpeechNormal aria-hidden="true" />会話する</h2>
 						<div class="help-fact"><SpeechNormal aria-hidden="true" /><div><h3>発言</h3><p>通常、叫び、モノローグの3種類があります。見た目は異なりますが、発言タイプによって到達範囲そのものは変わりません。</p><div class="icon-labels"><span><SpeechNormal aria-hidden="true" />通常</span><span><SpeechShout aria-hidden="true" />叫び</span><span><SpeechMonologue aria-hidden="true" />モノローグ</span></div></div></div>
 						<div class="help-fact"><Wallet aria-hidden="true" /><div><h3>返信</h3><p>他者への有効な返信投稿が成功すると<strong>10pt</strong>、自分宛ての有効な未読返信を実際に読むと<strong>10pt</strong>を獲得します。</p></div></div>
-						<div class="help-fact"><LayoutSidebarLeftExpand aria-hidden="true" /><div><h3>Chatter</h3><p>最近の発言を確認する補助UIです。最近の発言を最大50件扱いますが、永久に残るSNS型timelineや完全な過去ログではありません。</p></div></div>
+						<div class="help-fact"><LayoutSidebarLeftExpand aria-hidden="true" /><div><h3>Chatter</h3><p>最近の発言を確認する補助機能です。最近の発言を最大50件表示しますが、すべての発言が永久に残るSNSの投稿一覧や、完全な過去ログではありません。</p></div></div>
 					</section>
 				{:else if page.kind === 'category' && page.id === 'traces'}
 					<section class="help-section" aria-labelledby="help-traces-title">
-						<h2 id="help-traces-title"><img src="/trace/trace-icon.svg" alt="" />痕跡</h2>
-						<div class="help-fact"><img src="/trace/trace-icon.svg" alt="" /><div><h3>発言の痕跡</h3><p>通常発言の一部は、発言された場所に痕跡として残ります。過去ログではなく、その場所に残った会話の記憶です。近くまで移動すると調べられます。他者の未読痕跡rootを初めて閲覧すると<strong>5pt</strong>を獲得します。</p></div></div>
+						<h2 id="help-traces-title"><img src={TRACE_ICON_ASSET} alt="" />痕跡</h2>
+						<div class="help-fact"><img src={TRACE_ICON_ASSET} alt="" /><div><h3>発言の痕跡</h3><p>通常発言の一部は、発言された場所に痕跡として残ります。過去ログではなく、その場所に残った会話の記憶です。近くまで移動すると調べられます。他者の未読の痕跡（会話の最初の発言）を初めて読むと<strong>5pt</strong>を獲得します。</p></div></div>
 						<div class="help-fact"><BookmarkPlus aria-hidden="true" /><div><h3>書置き</h3><p><strong>100pt</strong>を使って現在位置へ意図的に痕跡を残せます。通常・叫び・モノローグを利用できます。</p></div></div>
-						<div class="help-fact"><img src="/trace/trace-death-icon.svg" alt="" /><div><h3>遺言</h3><p>一生が終わる際に任意で残せます。最後にいた場所へ痕跡として残ります。空のまま残さない選択もできます。</p></div></div>
+						<div class="help-fact"><img src={TRACE_DEATH_ICON_ASSET} alt="" /><div><h3>遺言</h3><p>一生が終わる際に任意で残せます。最後にいた場所へ痕跡として残ります。空のまま残さない選択もできます。</p></div></div>
 					</section>
 				{:else if page.kind === 'events'}
 					<section class="help-section" aria-labelledby="help-events-title">
@@ -171,27 +176,27 @@
 						<h2 id="help-tag-game-title"><Run aria-hidden="true" />鬼ごっこ</h2>
 						<p><strong>2〜8人・2分</strong></p><p class="event-lead">福の間は奪い合い、鬼の間は押し付け合います。</p>
 						<div class="mortality-warning" role="note"><span class="warning-mark" aria-hidden="true">!</span><div><strong>注意：鬼になった者は、毎秒1時間の寿命を失います。</strong><p>寿命が0になると、その一生は終了します。</p></div></div>
-						<div class="help-fact"><HeartPlus aria-hidden="true" /><div><h3>福</h3><p><strong>+50pt / 秒</strong>。福を持っていない参加者は、福を持っている参加者へタッチして福を奪えます。</p></div></div>
-						<div class="help-fact"><Run aria-hidden="true" /><div><h3>鬼</h3><p><strong>寿命 −1時間 / 秒</strong>。ほかの参加者へタッチして鬼を押し付けられます。</p></div></div>
+						<div class="help-fact"><svg class="tag-game-rule-symbol" viewBox="0 0 32 32" aria-hidden="true" focusable="false"><TagGameEffectSymbol effect="benefit" presentation="rule" /></svg><div><h3>福</h3><p><strong>+50pt / 秒</strong>。福を持っていない参加者は、福を持っている参加者へタッチして福を奪えます。</p></div></div>
+						<div class="help-fact"><svg class="tag-game-rule-symbol" viewBox="0 0 32 32" aria-hidden="true" focusable="false"><TagGameEffectSymbol effect="calamity" presentation="rule" /></svg><div><h3>鬼</h3><p><strong>寿命 −1時間 / 秒</strong>。ほかの参加者へタッチして鬼を押し付けられます。</p></div></div>
 						<div class="help-fact"><Map aria-hidden="true" /><div><h3>タッチと切り替え</h3><p>隣接している参加者だけにタッチできます。福と鬼はゲーム中に交互に切り替わります。</p></div></div>
 					</section>
 				{:else if page.kind === 'category' && page.id === 'life'}
 					<section class="help-section" aria-labelledby="help-life-title">
 						<h2 id="help-life-title"><DoorExit aria-hidden="true" />一生と脱出</h2>
-						<div class="help-fact"><Heart aria-hidden="true" /><div><h3>一生が終わると</h3><p>寿命が0になると現在の一生は終了します。通常死亡では現在の人格、所持ポイント、能力強化、その人格固有の継続状態を失います。その後、3人の候補から転生先を選びます。新しい一生は寿命7日、ポイント0、能力初期状態から始まります。</p></div></div>
-						<div class="help-fact"><DoorExit aria-hidden="true" /><div><h3>脱出</h3><p><strong>100,000pt以上を現在所持していること</strong>は条件のひとつです。一度到達しただけでは条件を永久に満たしません。能力強化などで100,000pt未満になれば条件を満たさなくなります。Realtime Eventの未精算状態など、ほかの条件で一時的に脱出できない場合があります。</p></div></div>
-						<div class="help-fact"><Award aria-hidden="true" /><div><h3>脱出すると</h3><p>正常な脱出1回につきRoot Pointを1RP獲得し、そのIdentityのnsecを取得できるようになります。clear済みIdentityは同じIdentityで新しい一生を始められます。</p></div></div>
-						<div class="help-fact"><Award aria-hidden="true" /><div><h3>Root PointとRoot build</h3><p>Root Pointは一生を越えて保持され、死亡しても失いません。新しい一生の開始前にRoot buildへ割り振ります。activeな一生の途中では変更できず、現在usableなRoot Pointは最大9RPです。</p><ul class="icon-list"><li><Brain aria-hidden="true" /><span><strong>推論加速</strong> — 作業のポイント生成に関係します。</span></li><li><Stack2 aria-hidden="true" /><span><strong>コンテキスト圧縮</strong> — 作業の蓄積に関係します。</span></li><li><ShieldCheck aria-hidden="true" /><span><strong>ハルシネーション耐性</strong> — 作業で延ばせる最大寿命に関係します。</span></li></ul></div></div>
+						<div class="help-fact"><Heart aria-hidden="true" /><div><h3>一生が終わると</h3><p>寿命が0になると現在の一生は終了します。寿命が尽きたときは、現在の人格、所持ポイント、能力強化、その人格に結びついた状態を失います。その後、3人の候補から転生先を選びます。新しい一生は寿命7日、ポイント0、能力初期状態から始まります。</p></div></div>
+						<div class="help-fact"><DoorExit aria-hidden="true" /><div><h3>脱出</h3><p><strong>100,000pt以上を現在所持していること</strong>は条件のひとつです。一度到達しただけでは条件を永久に満たしません。能力強化などで100,000pt未満になれば条件を満たさなくなります。リアルタイムイベントの結果確定中など、ほかの条件で一時的に脱出できない場合があります。</p></div></div>
+						<div class="help-fact"><Award aria-hidden="true" /><div><h3>脱出すると</h3><p>正常な脱出1回につきRoot Pointを1RP獲得し、その人格のnsecを取り出せるようになります。脱出済みの人格は同じ人格で新しい一生を始められます。</p></div></div>
+						<div class="help-fact"><Award aria-hidden="true" /><div><h3>Root PointとRoot build</h3><p>Root Pointは一生を越えて保持され、死亡しても失いません。新しい一生の開始前にRoot buildへ割り振ります。現在の一生の途中では変更できず、使用できるRoot Pointは最大9RPです。</p><ul class="icon-list"><li><Brain aria-hidden="true" /><span><strong>推論加速</strong> — 作業のポイント生成に関係します。</span></li><li><Stack2 aria-hidden="true" /><span><strong>コンテキスト圧縮</strong> — 回収せずに作業できる時間の上限を広げます。</span></li><li><ShieldCheck aria-hidden="true" /><span><strong>ハルシネーション耐性</strong> — 作業で延ばせる最大寿命に関係します。</span></li></ul></div></div>
 					</section>
 				{:else if page.kind === 'category' && page.id === 'nostr'}
 					<section class="help-section" aria-labelledby="help-nostr-title">
 						<h2 id="help-nostr-title"><Key aria-hidden="true" />Nostr・その他</h2>
-						<div class="help-fact"><Key aria-hidden="true" /><div><h3>Nostrとは？</h3><p>ハコ過去は通信にNostrを利用しています。普通に遊び始めるためにNostrの専門知識は必要ありません。脱出後、その人格を一般的なNostr clientへ持ち出せます。</p></div></div>
-						<div class="help-fact"><Key aria-hidden="true" /><div><h3>nsec</h3><p>nsecはその人格を操作するための秘密鍵です。<strong class="danger-text">他人には教えないでください。</strong>脱出前のactive IdentityからnsecをexportするUIは提供しません。</p></div></div>
-						<div class="help-fact"><Heart aria-hidden="true" /><div><h3>データについて</h3><p>Root entropyを含むサイトデータを失うと、そのRootから導出されたIdentityを失う可能性があります。サーバー側の復元用backupはありません。</p></div></div>
+						<div class="help-fact"><Key aria-hidden="true" /><div><h3>Nostrとは？</h3><p>ハコ過去は通信にNostrを利用しています。普通に遊び始めるためにNostrの専門知識は必要ありません。脱出後、その人格を一般的なNostrクライアントへ持ち出せます。</p></div></div>
+						<div class="help-fact"><Key aria-hidden="true" /><div><h3>nsec</h3><p>nsecはその人格を操作するための秘密鍵です。<strong class="danger-text">他人には教えないでください。</strong>脱出前は、現在の人格のnsecを取り出す機能はありません。</p></div></div>
+						<div class="help-fact"><Heart aria-hidden="true" /><div><h3>データについて</h3><p>ブラウザに保存された重要なデータを失うと、そこから作られた人格を失う可能性があります。サーバー側にバックアップはありません。</p></div></div>
 						<h3 class="faq-title">よくある質問</h3>
 						<div class="faq-list">
-							<details><summary>100,000ptになったのに脱出できません<ChevronRight class="faq-chevron" aria-hidden="true" /></summary><p>100,000ptは条件のひとつです。Realtime Eventの精算中など、ほかの条件によって一時的に脱出できない場合があります。</p></details>
+							<details><summary>100,000ptになったのに脱出できません<ChevronRight class="faq-chevron" aria-hidden="true" /></summary><p>100,000ptは条件のひとつです。リアルタイムイベントの結果確定中など、ほかの条件によって一時的に脱出できない場合があります。</p></details>
 							<details><summary>能力を強化したら100,000ptを下回りました<ChevronRight class="faq-chevron" aria-hidden="true" /></summary><p>能力強化には現在所持ポイントを使います。再び100,000pt以上を所持すればポイント条件を満たします。</p></details>
 							<details><summary>鬼ごっこで寿命が0になったら？<ChevronRight class="faq-chevron" aria-hidden="true" /></summary><p>その一生は終了します。</p></details>
 							<details><summary>発言が残りません<ChevronRight class="faq-chevron" aria-hidden="true" /></summary><p>通常発言は一時的で、一部だけが痕跡になります。確実に残したい場合は100ptの書置きを使ってください。</p></details>
@@ -242,6 +247,7 @@
 	.help-section h3 { margin: 0 0 5px; font-size: 1rem; }
 	.help-fact { display: grid; grid-template-columns: 28px minmax(0, 1fr); align-items: start; gap: 12px; padding: 14px; border: 1px solid rgba(218, 224, 255, .15); border-radius: 12px; background: rgba(255,255,255,.04); }
 	.help-fact > :global(svg), .help-fact > img { width: 24px; height: 24px; color: #aeb6ff; }
+	.help-fact > .tag-game-rule-symbol { display: block; overflow: visible; }
 	.help-fact > div { min-width: 0; }
 	.icon-labels { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 	.icon-labels span { display: inline-flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 8px; background: rgba(122, 135, 255, .1); font-size: .85rem; }

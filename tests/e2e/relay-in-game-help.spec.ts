@@ -14,6 +14,8 @@ import {
 	upcomingRegistrationSchedule
 } from './helpers/relayHarness';
 
+const APP_BASE_PATH = process.env.BASE_PATH ?? '';
+
 type HelpSideEffectSnapshot = Readonly<{
 	playerState: unknown;
 	interactionRewards: unknown;
@@ -90,6 +92,11 @@ async function expectHelpHeaderGeometry(dialog: Locator, withBack: boolean): Pro
 	}
 }
 
+async function expectPlayerFacingHelpText(dialog: Locator): Promise<void> {
+	const text = await dialog.locator('.help-body').innerText();
+	expect(text).not.toMatch(/Realtime Event|Identity|activeな一生|active Identity|usable|export|Root entropy|backup|Nostr client|\bHUD\b|\btimeline\b|\bUI\b|痕跡root/i);
+}
+
 test.describe('in-game Help', () => {
 	test('keeps Help browsing read-only and restores navigation, Escape, focus, and a fresh top page', async ({ page }) => {
 		const now = Date.now();
@@ -108,7 +115,7 @@ test.describe('in-game Help', () => {
 		await seedRelayAccount(page, secret, pubkey, now + 7 * 24 * 60 * 60 * 1_000, 654_321,
 			{ inferenceEfficiency: 2, contextCapacity: 3, hallucinationSuppression: 4 }, 2,
 			{ inferenceAcceleration: 1, contextCompression: 1, hallucinationResistance: 0 });
-		await page.goto('/');
+		await page.goto(`${APP_BASE_PATH}/`);
 		await expect(page.locator('.action-dock')).toBeVisible();
 		await page.evaluate(() => {
 			const relay = (window as typeof window & { __relayStartupTest: { releasePrimaryEvents(): void; releasePrimary(): void } }).__relayStartupTest;
@@ -130,6 +137,11 @@ test.describe('in-game Help', () => {
 		await expectHelpHeaderGeometry(dialog, false);
 		await expect(dialog).toHaveAttribute('aria-modal', 'true');
 		await expect(dialog.locator('[data-help-category]')).toHaveCount(7);
+		await expectPlayerFacingHelpText(dialog);
+		const traceCategoryIcon = dialog.locator('[data-help-category="traces"] .category-icon img');
+		await expect.poll(() => traceCategoryIcon.evaluate((image) => image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0)).toBe(true);
+		expect(await traceCategoryIcon.evaluate((image) => new URL((image as HTMLImageElement).currentSrc).pathname))
+			.toBe(`${APP_BASE_PATH}/trace/trace-icon.svg`);
 		const body = dialog.locator('.help-body');
 		await body.evaluate((element) => { element.scrollTop = 120; });
 		const livingCategory = dialog.locator('[data-help-category="living"]');
@@ -138,18 +150,45 @@ test.describe('in-game Help', () => {
 		await livingCategory.click();
 		await expect(body).toHaveAttribute('data-help-page', 'category');
 		await expect(dialog.locator('#help-living-title')).toBeVisible();
+		await expect(dialog.getByText('成果を回収せずに連続して作業できる時間の上限が増えます。')).toBeVisible();
+		await expectPlayerFacingHelpText(dialog);
 		await expectHelpHeaderGeometry(dialog, true);
 		await dialog.getByRole('button', { name: '戻る' }).click();
 		await expect(body).toHaveAttribute('data-help-page', 'home');
 		await expect.poll(() => body.evaluate((element) => element.scrollTop)).toBe(homeScroll);
+		const tracesCategory = dialog.locator('[data-help-category="traces"]');
+		await tracesCategory.scrollIntoViewIfNeeded();
+		await tracesCategory.click();
+		const traceImages = dialog.locator('.help-section img');
+		await expect(traceImages).toHaveCount(3);
+		await expect.poll(() => traceImages.evaluateAll((images) => images.every((image) => image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0))).toBe(true);
+		const traceImagePaths = await traceImages.evaluateAll((images) => images.map((image) => new URL((image as HTMLImageElement).currentSrc).pathname));
+		expect(traceImagePaths).toEqual([
+			`${APP_BASE_PATH}/trace/trace-icon.svg`,
+			`${APP_BASE_PATH}/trace/trace-icon.svg`,
+			`${APP_BASE_PATH}/trace/trace-death-icon.svg`
+		]);
+		await expectPlayerFacingHelpText(dialog);
+		await dialog.getByRole('button', { name: '戻る' }).click();
+		await expect(body).toHaveAttribute('data-help-page', 'home');
+		for (const categoryId of ['start', 'conversation'] as const) {
+			const category = dialog.locator(`[data-help-category="${categoryId}"]`);
+			await category.scrollIntoViewIfNeeded();
+			await category.click();
+			await expectPlayerFacingHelpText(dialog);
+			await dialog.getByRole('button', { name: '戻る' }).click();
+			await expect(body).toHaveAttribute('data-help-page', 'home');
+		}
 
 		await dialog.locator('[data-help-category="events"]').click();
 		await expect(body).toHaveAttribute('data-help-page', 'events');
+		await expectPlayerFacingHelpText(dialog);
 		const eventListScroll = await body.evaluate((element) => element.scrollTop);
 		await dialog.locator('[data-help-event="cooperation"]').click();
 		await expect(body).toHaveAttribute('data-help-page', 'event');
 		await expect(dialog.locator('#help-cooperation-title')).toBeVisible();
 		await expect(dialog.locator('table')).toHaveCount(2);
+		await expectPlayerFacingHelpText(dialog);
 		await dialog.getByRole('button', { name: '戻る' }).click();
 		await expect(body).toHaveAttribute('data-help-page', 'events');
 		await expect.poll(() => body.evaluate((element) => element.scrollTop)).toBe(eventListScroll);
@@ -159,14 +198,29 @@ test.describe('in-game Help', () => {
 		await dialog.locator('[data-help-event="tag-game"]').click();
 		await expect(dialog).toContainText('鬼になった者は、毎秒1時間の寿命を失います。');
 		await expect(dialog.getByText('寿命が0になると、その一生は終了します。', { exact: true })).toBeVisible();
+		const tagGameSymbols = dialog.locator('.tag-game-rule-symbol');
+		await expect(tagGameSymbols).toHaveCount(2);
+		await expect(tagGameSymbols.nth(0).locator('[data-tag-game-effect-symbol="benefit"]')).toHaveCount(1);
+		await expect(tagGameSymbols.nth(1).locator('[data-tag-game-effect-symbol="calamity"]')).toHaveCount(1);
+		await expectPlayerFacingHelpText(dialog);
 		await dialog.getByRole('button', { name: '戻る' }).click();
+		await dialog.getByRole('button', { name: '戻る' }).click();
+		await dialog.locator('[data-help-category="life"]').click();
+		await expect(dialog).toContainText('脱出済みの人格は同じ人格で新しい一生を始められます。');
+		await expect(dialog).toContainText('使用できるRoot Pointは最大9RPです。');
+		await expect(dialog).toContainText('回収せずに作業できる時間の上限を広げます。');
+		await expectPlayerFacingHelpText(dialog);
 		await dialog.getByRole('button', { name: '戻る' }).click();
 		await dialog.locator('[data-help-category="nostr"]').click();
+		await expect(dialog).toContainText('一般的なNostrクライアントへ持ち出せます。');
+		await expect(dialog).toContainText('ブラウザに保存された重要なデータを失うと');
+		await expectPlayerFacingHelpText(dialog);
 		const faqQuestions = dialog.locator('.faq-list details');
 		await expect(faqQuestions).toHaveCount(7);
 		await faqQuestions.nth(0).locator('summary').click();
 		await expect(faqQuestions.nth(0)).toHaveAttribute('open', '');
 		await expect(faqQuestions.nth(1)).not.toHaveAttribute('open', '');
+		await expectPlayerFacingHelpText(dialog);
 		await page.keyboard.press('Escape');
 		await finishDialogExit(dialog, true);
 		await expect(trigger).toBeFocused();
@@ -193,7 +247,7 @@ test.describe('in-game Help', () => {
 		await installDelayedRelay(page, { primaryEvents: testEvents(initialTime) });
 		const secret = fixtureSecret(19);
 		await seedRelayAccount(page, secret, getPublicKey(secret), initialTime + 7 * 24 * 60 * 60 * 1_000, 250);
-		await page.goto('/');
+		await page.goto(`${APP_BASE_PATH}/`);
 		await expect(page.locator('.action-dock')).toBeVisible();
 		await page.evaluate(() => {
 			const relay = (window as typeof window & { __relayStartupTest: { releasePrimaryEvents(): void; releasePrimary(): void } }).__relayStartupTest;
