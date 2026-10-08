@@ -450,7 +450,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			const abilities = persona.gameState.abilities;
 			if (abilities.inferenceEfficiency > baseline.inferenceEfficiency || abilities.contextCapacity > baseline.contextCapacity ||
 				abilities.hallucinationSuppression > baseline.hallucinationSuppression) {
-				showFirstRunTutorialCompletion(scope);
+				storeFirstRunTutorialStep('note', persona);
 				return;
 			}
 		}
@@ -464,9 +464,10 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		if (firstRunTutorialStep === 'life') {
 			storeFirstRunTutorialStep('movement', persona);
 		} else if (firstRunTutorialStep === 'speech') {
-			storeFirstRunTutorialStep('note', persona);
-		} else if (firstRunTutorialStep === 'note') {
 			storeFirstRunTutorialStep('trace', persona);
+		} else if (firstRunTutorialStep === 'note') {
+			const scope = firstRunTutorialScopeFor(persona);
+			if (scope) showFirstRunTutorialCompletion(scope);
 		}
 	}
 
@@ -492,7 +493,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 				firstRunTutorialStep = null;
 				firstRunTutorialScope = null;
 			}
-		}, 2_600);
+		}, 8_000);
 		return () => window.clearTimeout(timer);
 	});
 	$effect(() => {
@@ -2443,7 +2444,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 				soundController?.play('level-up');
 				const scope = firstRunTutorialScopeFor(result.persona);
 				if (firstRunTutorialStep === 'ability' && scope && firstRunTutorialScopesMatch(firstRunTutorialScope, scope)) {
-					showFirstRunTutorialCompletion(scope);
+					storeFirstRunTutorialStep('note', result.persona);
 				}
 			}
 		} catch {
@@ -5457,12 +5458,12 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			{:else if firstRunTutorialStep === 'ability'}
 				<p>強化端末へ移動して、能力をひとつ強化しよう。</p>
 			{:else if firstRunTutorialStep === 'speech'}
-				<p>ここでは、ほかの住人に発言できます。</p>
+				<p>誰かに話しかけてみましょう</p>
 				<ActionButton variant="primary" class="first-run-tutorial-next" type="button" onclick={advanceFirstRunTutorialFromPrompt}>次へ</ActionButton>
 			{:else if firstRunTutorialStep === 'trace'}
 				<p>他の住人の未読の痕跡・書置き・遺言のどれかを1つ読んで、5ptを受け取ろう。</p>
 			{:else if firstRunTutorialStep === 'note'}
-				<p>100ptを使って、書置きを残せます。</p>
+				<p>100ptを使って、その場に書置きを残せます</p>
 				<ActionButton variant="primary" class="first-run-tutorial-next" type="button" onclick={advanceFirstRunTutorialFromPrompt}>次へ</ActionButton>
 			{/if}
 		</div>

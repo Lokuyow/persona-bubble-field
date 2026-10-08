@@ -138,7 +138,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 420, height: 800 
 		const startedAtMs = (started.mendingJob as { startedAtMs: number }).startedAtMs;
 		await expect(mendingDialog).toBeVisible();
 		await expect(mendingDialog.locator('.mending-startup-feedback')).toContainText('作業を開始しました');
-		await expect(page.locator('[data-first-run-tutorial="speech"]')).toContainText('ここでは、ほかの住人に発言できます。');
+		await expect(page.locator('[data-first-run-tutorial="speech"]')).toContainText('誰かに話しかけてみましょう');
 		await expect(page.locator('.composer-editor-slot')).toHaveAttribute('data-tutorial-highlight', 'speech');
 		await expectSlowTutorialPulse(page, '.composer-editor-slot[data-tutorial-highlight="speech"]');
 		await expectSlowTutorialPulse(page, '[data-first-run-tutorial="speech"] p');
@@ -151,7 +151,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 420, height: 800 
 		await page.reload({ waitUntil: 'domcontentloaded' });
 		await releaseFirstRunPrimary(page);
 		const speechStep = page.locator('[data-first-run-tutorial="speech"]');
-		await expect(speechStep).toContainText('ここでは、ほかの住人に発言できます。');
+		await expect(speechStep).toContainText('誰かに話しかけてみましょう');
 		await expect(page.locator('.composer-editor-slot')).toHaveAttribute('data-tutorial-highlight', 'speech');
 		await expect(page.getByRole('dialog')).toHaveCount(0);
 		const recovered = await readRelayGameState(page);
@@ -177,50 +177,6 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 420, height: 800 
 		await expect(editor).toHaveValue('チュートリアル中の入力確認');
 		await editor.fill('');
 		await speechStep.getByRole('button', { name: '次へ' }).click();
-
-		const noteStep = page.locator('[data-first-run-tutorial="note"]');
-		await expect(noteStep).toContainText('100ptを使って、書置きを残せます。');
-		const noteAction = page.locator('.manual-trace-toggle');
-		await expect(noteAction).toHaveAttribute('data-tutorial-highlight', 'note');
-		await expectSlowTutorialPulse(page, '.manual-trace-toggle[data-tutorial-highlight="note"]');
-		await expectSlowTutorialPulse(page, '[data-first-run-tutorial="note"] p');
-		await expect.poll(() => noteAction.evaluate((element) => getComputedStyle(element).boxShadow)).not.toBe('none');
-		const noteGuidanceLayout = await noteStep.evaluate((guide) => {
-			const target = document.querySelector('.manual-trace-toggle[data-tutorial-highlight="note"]');
-			if (!(target instanceof HTMLElement)) return null;
-			const guideBounds = guide.getBoundingClientRect();
-			const targetBounds = target.getBoundingClientRect();
-			const dockBounds = document.querySelector<HTMLElement>('.action-dock')?.getBoundingClientRect();
-			const horizontalGap = Math.max(0, targetBounds.left - guideBounds.right, guideBounds.left - targetBounds.right);
-			const verticalGap = Math.max(0, targetBounds.top - guideBounds.bottom, guideBounds.top - targetBounds.bottom);
-			return {
-				insideViewport: guideBounds.left >= 0 && guideBounds.right <= innerWidth && guideBounds.top >= 0 && guideBounds.bottom <= innerHeight,
-				overlapsTarget: guideBounds.left < targetBounds.right && guideBounds.right > targetBounds.left && guideBounds.top < targetBounds.bottom && guideBounds.bottom > targetBounds.top,
-				separation: Math.hypot(horizontalGap, verticalGap),
-				overlapsDock: Boolean(dockBounds && guideBounds.left < dockBounds.right && guideBounds.right > dockBounds.left && guideBounds.top < dockBounds.bottom && guideBounds.bottom > dockBounds.top),
-				dockGap: dockBounds ? dockBounds.top - guideBounds.bottom : null,
-				messageAndNextShareRow: (() => {
-					const message = guide.querySelector('p')?.getBoundingClientRect();
-					const next = guide.querySelector('button')?.getBoundingClientRect();
-					return Boolean(message && next && message.top < next.bottom && message.bottom > next.top);
-				})()
-			};
-		});
-		expect(noteGuidanceLayout?.insideViewport, JSON.stringify(noteGuidanceLayout)).toBe(true);
-		expect(noteGuidanceLayout?.overlapsTarget, JSON.stringify(noteGuidanceLayout)).toBe(false);
-		if (viewport.width <= 700) {
-			expect(noteGuidanceLayout?.overlapsDock, JSON.stringify(noteGuidanceLayout)).toBe(false);
-			expect(noteGuidanceLayout?.dockGap, JSON.stringify(noteGuidanceLayout)).toBeGreaterThanOrEqual(0);
-			expect(noteGuidanceLayout?.dockGap, JSON.stringify(noteGuidanceLayout)).toBeLessThanOrEqual(16);
-			expect(noteGuidanceLayout?.messageAndNextShareRow, JSON.stringify(noteGuidanceLayout)).toBe(true);
-		} else {
-			expect(noteGuidanceLayout?.separation, JSON.stringify(noteGuidanceLayout)).toBeLessThanOrEqual(24);
-		}
-		await page.reload({ waitUntil: 'domcontentloaded' });
-		await releaseFirstRunPrimary(page);
-		await expect(noteStep).toBeVisible();
-		await expect(noteAction).toHaveAttribute('data-tutorial-highlight', 'note');
-		await noteStep.getByRole('button', { name: '次へ' }).click();
 
 		const traceStep = page.locator('[data-first-run-tutorial="trace"]');
 		await expect(traceStep).toContainText('他の住人の未読の痕跡・書置き・遺言のどれかを1つ読んで、5ptを受け取ろう。');
@@ -299,18 +255,65 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 420, height: 800 
 		await expect.poll(() => readRelayGameState(page)).toMatchObject({ abilities: { inferenceEfficiency: 2 }, points: abilityPointsBefore - 1 });
 		await expect(adjustmentDialog).toBeVisible();
 		await expect(adjustmentDialog.locator('.level-up-badge')).toContainText('LEVEL UP');
-		await expect(page.locator('[data-first-run-tutorial="complete"]')).toHaveText('あとは自由です。');
-		await expect.poll(() => page.locator('[data-first-run-tutorial="complete"]').evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(20);
+		const noteStep = page.locator('[data-first-run-tutorial="note"]');
+		await expect(noteStep).toContainText('100ptを使って、その場に書置きを残せます');
+		await expect(page.locator('[data-first-run-tutorial="complete"]')).toHaveCount(0);
 		await expect(adjustmentDialog.getByRole('button', { name: '閉じる', exact: true }).first()).toBeVisible();
 		await adjustmentDialog.getByRole('button', { name: '閉じる', exact: true }).first().click();
 		await expect(page.getByRole('dialog')).toHaveCount(0);
-		await expect(page.locator('[data-first-run-tutorial="complete"]')).toBeVisible();
+
+		const noteAction = page.locator('.manual-trace-toggle');
+		await expect(noteAction).toHaveAttribute('data-tutorial-highlight', 'note');
+		await expectSlowTutorialPulse(page, '.manual-trace-toggle[data-tutorial-highlight="note"]');
+		await expectSlowTutorialPulse(page, '[data-first-run-tutorial="note"] p');
+		await expect.poll(() => noteAction.evaluate((element) => getComputedStyle(element).boxShadow)).not.toBe('none');
+		const noteGuidanceLayout = await noteStep.evaluate((guide) => {
+			const target = document.querySelector('.manual-trace-toggle[data-tutorial-highlight="note"]');
+			if (!(target instanceof HTMLElement)) return null;
+			const guideBounds = guide.getBoundingClientRect();
+			const targetBounds = target.getBoundingClientRect();
+			const dockBounds = document.querySelector<HTMLElement>('.action-dock')?.getBoundingClientRect();
+			const horizontalGap = Math.max(0, targetBounds.left - guideBounds.right, guideBounds.left - targetBounds.right);
+			const verticalGap = Math.max(0, targetBounds.top - guideBounds.bottom, guideBounds.top - targetBounds.bottom);
+			return {
+				insideViewport: guideBounds.left >= 0 && guideBounds.right <= innerWidth && guideBounds.top >= 0 && guideBounds.bottom <= innerHeight,
+				overlapsTarget: guideBounds.left < targetBounds.right && guideBounds.right > targetBounds.left && guideBounds.top < targetBounds.bottom && guideBounds.bottom > targetBounds.top,
+				separation: Math.hypot(horizontalGap, verticalGap),
+				overlapsDock: Boolean(dockBounds && guideBounds.left < dockBounds.right && guideBounds.right > dockBounds.left && guideBounds.top < dockBounds.bottom && guideBounds.bottom > dockBounds.top),
+				dockGap: dockBounds ? dockBounds.top - guideBounds.bottom : null,
+				messageAndNextShareRow: (() => {
+					const message = guide.querySelector('p')?.getBoundingClientRect();
+					const next = guide.querySelector('button')?.getBoundingClientRect();
+					return Boolean(message && next && message.top < next.bottom && message.bottom > next.top);
+				})()
+			};
+		});
+		expect(noteGuidanceLayout?.insideViewport, JSON.stringify(noteGuidanceLayout)).toBe(true);
+		expect(noteGuidanceLayout?.overlapsTarget, JSON.stringify(noteGuidanceLayout)).toBe(false);
+		if (viewport.width <= 700) {
+			expect(noteGuidanceLayout?.overlapsDock, JSON.stringify(noteGuidanceLayout)).toBe(false);
+			expect(noteGuidanceLayout?.dockGap, JSON.stringify(noteGuidanceLayout)).toBeGreaterThanOrEqual(0);
+			expect(noteGuidanceLayout?.dockGap, JSON.stringify(noteGuidanceLayout)).toBeLessThanOrEqual(16);
+			expect(noteGuidanceLayout?.messageAndNextShareRow, JSON.stringify(noteGuidanceLayout)).toBe(true);
+		} else {
+			expect(noteGuidanceLayout?.separation, JSON.stringify(noteGuidanceLayout)).toBeLessThanOrEqual(24);
+		}
+
+		// A stale ability marker with the durable upgrade resumes at the remaining note step.
 		await page.evaluate((marker) => { if (marker) sessionStorage.setItem('persona-bubble-field:first-run-tutorial', marker); }, abilityMarker);
 		await page.reload({ waitUntil: 'domcontentloaded' });
 		await releaseFirstRunPrimary(page);
+		await expect(noteStep).toBeVisible();
+		await expect(noteAction).toHaveAttribute('data-tutorial-highlight', 'note');
+		await page.reload({ waitUntil: 'domcontentloaded' });
+		await releaseFirstRunPrimary(page);
+		await expect(noteStep).toBeVisible();
+		await expect(noteAction).toHaveAttribute('data-tutorial-highlight', 'note');
+		await noteStep.getByRole('button', { name: '次へ' }).click();
 		await expect(page.locator('[data-first-run-tutorial="complete"]')).toHaveText('あとは自由です。');
+		await expect.poll(() => page.locator('[data-first-run-tutorial="complete"]').evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(20);
 		expect(await page.evaluate(() => sessionStorage.getItem('persona-bubble-field:first-run-tutorial'))).toBeNull();
-		await page.clock.runFor(2_601);
+		await page.clock.runFor(8_001);
 		await expect(page.locator('[data-first-run-tutorial]')).toHaveCount(0);
 		await expect(page.locator('.action-dock')).toBeVisible();
 		await expect.poll(() => page.evaluate(() => (window as typeof window & { __ehagakiTerminalCount?: number }).__ehagakiTerminalCount ?? 0)).toBe(0);
