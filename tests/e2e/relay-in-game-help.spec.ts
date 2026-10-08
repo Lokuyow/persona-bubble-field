@@ -175,6 +175,10 @@ test.describe('in-game Help', () => {
 			const category = dialog.locator(`[data-help-category="${categoryId}"]`);
 			await category.scrollIntoViewIfNeeded();
 			await category.click();
+			if (categoryId === 'conversation') {
+				await expect(dialog).toContainText('最近の発言を最大50件まで扱い、そのうち画面内に完全に収まる新しい発言だけを表示します。すべての発言が永久に残るSNSの投稿一覧や、完全な過去ログではありません。');
+				await expect(dialog).not.toContainText('最近の発言を最大50件表示します');
+			}
 			await expectPlayerFacingHelpText(dialog);
 			await dialog.getByRole('button', { name: '戻る' }).click();
 			await expect(body).toHaveAttribute('data-help-page', 'home');

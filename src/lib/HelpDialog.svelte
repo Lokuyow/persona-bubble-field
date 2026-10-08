@@ -146,7 +146,7 @@
 						<h2 id="help-conversation-title"><SpeechNormal aria-hidden="true" />会話する</h2>
 						<div class="help-fact"><SpeechNormal aria-hidden="true" /><div><h3>発言</h3><p>通常、叫び、モノローグの3種類があります。見た目は異なりますが、発言タイプによって到達範囲そのものは変わりません。</p><div class="icon-labels"><span><SpeechNormal aria-hidden="true" />通常</span><span><SpeechShout aria-hidden="true" />叫び</span><span><SpeechMonologue aria-hidden="true" />モノローグ</span></div></div></div>
 						<div class="help-fact"><Wallet aria-hidden="true" /><div><h3>返信</h3><p>他者への有効な返信投稿が成功すると<strong>10pt</strong>、自分宛ての有効な未読返信を実際に読むと<strong>10pt</strong>を獲得します。</p></div></div>
-						<div class="help-fact"><LayoutSidebarLeftExpand aria-hidden="true" /><div><h3>Chatter</h3><p>最近の発言を確認する補助機能です。最近の発言を最大50件表示しますが、すべての発言が永久に残るSNSの投稿一覧や、完全な過去ログではありません。</p></div></div>
+						<div class="help-fact"><LayoutSidebarLeftExpand aria-hidden="true" /><div><h3>Chatter</h3><p>最近の発言を最大50件まで扱い、そのうち画面内に完全に収まる新しい発言だけを表示します。すべての発言が永久に残るSNSの投稿一覧や、完全な過去ログではありません。</p></div></div>
 					</section>
 				{:else if page.kind === 'category' && page.id === 'traces'}
 					<section class="help-section" aria-labelledby="help-traces-title">
