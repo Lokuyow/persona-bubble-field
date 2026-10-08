@@ -77,6 +77,7 @@
 		selfLogicalPosition: GridPosition | null;
 		presentationTombstonePosition: GridPosition | null;
 		traceRootGhost: TraceRootGhost | null;
+		traceTutorialRootId: string | null;
 		fieldActionMenu: FieldActionMenu | null;
 		resolveFieldCellSelection: (position: GridPosition, trigger?: HTMLButtonElement) => void;
 		executeFieldCellAction: (action: FieldCellAction, position: GridPosition, trigger?: HTMLButtonElement) => void;
@@ -118,6 +119,7 @@
 		selfLogicalPosition,
 		presentationTombstonePosition,
 		traceRootGhost,
+		traceTutorialRootId,
 		fieldActionMenu,
 		resolveFieldCellSelection,
 		executeFieldCellAction,
@@ -193,6 +195,7 @@
 					data-trace-marker-kind={cell.kind}
 					data-trace-root-read={cell.read ? 'true' : 'false'}
 					data-trace-root-unread-reply={cell.unreadReply ? 'true' : undefined}
+					data-tutorial-highlight={cell.roots[0].id === traceTutorialRootId ? 'trace' : undefined}
 					class:trace-marker-random={cell.kind === 'random'}
 					class:trace-marker-read={cell.read}
 					class:trace-marker-unread-reply={cell.unreadReply}
@@ -291,6 +294,7 @@
 			<div
 				class={['trace-ghost', { 'trace-ghost-compact': traceRootGhost.compact }]}
 				data-trace-ghost-root-id={traceRootGhost.event.id}
+				data-tutorial-highlight={traceRootGhost.event.id === traceTutorialRootId ? 'trace' : undefined}
 				style={`left: ${traceRootGhost.world.x}px; top: ${traceRootGhost.world.y}px; width: ${traceRootGhost.size.width}px; height: ${traceRootGhost.size.height}px;`}
 			>
 				<button
@@ -465,6 +469,8 @@
 		opacity: 0.9;
 		filter: none;
 	}
+	.trace-marker[data-tutorial-highlight="trace"],
+	.trace-ghost[data-tutorial-highlight="trace"] { opacity: 1; filter: drop-shadow(0 0 4px rgba(72, 221, 210, .95)) drop-shadow(0 0 10px rgba(72, 221, 210, .72)); }
 
 	.death-presentation-tombstone {
 		z-index: 6;
