@@ -332,6 +332,12 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	let connectionStatus: WorldReadConnectionStatus = { kind: 'bootstrapping' };
 	let selfSigner = $state.raw<ActiveSignerSnapshot | null>(null);
 	let personaSnapshot = $state.raw<PersonaSnapshot | null>(null);
+	type FirstRunTutorialStep = 'life' | 'movement' | 'work';
+	type FirstRunTutorialScope = Readonly<{ generation: 1; accountIndex: number; pubkey: string; runNumber: 1 }>;
+	type FirstRunTutorialMarker = FirstRunTutorialScope & Readonly<{ step: FirstRunTutorialStep }>;
+	const FIRST_RUN_TUTORIAL_SESSION_KEY = 'persona-bubble-field:first-run-tutorial';
+	let firstRunTutorialStep = $state<FirstRunTutorialStep | 'complete' | null>(null);
+	let firstRunTutorialScope = $state<FirstRunTutorialScope | null>(null);
 	let pendingIdentitySelection = $state<PendingSelection | null>(null);
 	let runTransitionNotice = $state<RunTransitionNotice | null>(null);
 	let pendingRootPoints = $state(0);
@@ -343,6 +349,92 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	let actionDockBounds = $state.raw<Bounds | null>(null);
 	let topStatusHudBottom = $derived(topStatusHudBounds ? topStatusHudBounds.y + topStatusHudBounds.height : 0);
 	let statusHudVisible = $derived(lifespanHudNowMs !== null && personaSnapshot !== null && !personaLifecycleTransition);
+	let showFirstRunTutorial = $derived(Boolean(statusHudVisible && firstRunTutorialStep && personaSnapshot && firstRunTutorialScope &&
+		firstRunTutorialScopesMatch(firstRunTutorialScope, firstRunTutorialScopeFor(personaSnapshot))));
+
+	function firstRunTutorialScopeFor(persona: PersonaSnapshot | null): FirstRunTutorialScope | null {
+		if (!persona || persona.identity.generation !== 1 || persona.activeRun.runNumber !== 1) return null;
+		const runIdentity = persona.activeRun.identity;
+		if (runIdentity.generation !== persona.identity.generation || runIdentity.accountIndex !== persona.identity.accountIndex || runIdentity.pubkey !== persona.identity.pubkey) return null;
+		return { generation: 1, accountIndex: persona.identity.accountIndex, pubkey: persona.identity.pubkey, runNumber: 1 };
+	}
+
+	function firstRunTutorialScopesMatch(first: FirstRunTutorialScope | null, second: FirstRunTutorialScope | null): boolean {
+		return Boolean(first && second && first.generation === second.generation && first.accountIndex === second.accountIndex && first.pubkey === second.pubkey && first.runNumber === second.runNumber);
+	}
+
+	function readFirstRunTutorialMarker(): FirstRunTutorialMarker | null {
+		try {
+			const parsed: unknown = JSON.parse(window.sessionStorage.getItem(FIRST_RUN_TUTORIAL_SESSION_KEY) ?? 'null');
+			if (!parsed || typeof parsed !== 'object') return null;
+			const marker = parsed as Partial<FirstRunTutorialMarker>;
+			if (marker.generation !== 1 || !Number.isInteger(marker.accountIndex) || typeof marker.pubkey !== 'string' || marker.runNumber !== 1 ||
+				(marker.step !== 'life' && marker.step !== 'movement' && marker.step !== 'work')) return null;
+			return marker as FirstRunTutorialMarker;
+		} catch {
+			return null;
+		}
+	}
+
+	function storeFirstRunTutorialStep(step: FirstRunTutorialStep, persona: PersonaSnapshot): void {
+		const scope = firstRunTutorialScopeFor(persona);
+		if (!scope) return;
+		firstRunTutorialScope = scope;
+		firstRunTutorialStep = step;
+		try { window.sessionStorage.setItem(FIRST_RUN_TUTORIAL_SESSION_KEY, JSON.stringify({ ...scope, step })); } catch { /* Tutorial storage is best-effort and never gates play. */ }
+	}
+
+	function removeFirstRunTutorialMarker(scope: FirstRunTutorialScope): void {
+		const marker = readFirstRunTutorialMarker();
+		if (!marker || !firstRunTutorialScopesMatch(marker, scope)) return;
+		try { window.sessionStorage.removeItem(FIRST_RUN_TUTORIAL_SESSION_KEY); } catch { /* Tutorial storage is best-effort and never gates play. */ }
+	}
+
+	function showFirstRunTutorialCompletion(scope: FirstRunTutorialScope): void {
+		removeFirstRunTutorialMarker(scope);
+		firstRunTutorialScope = scope;
+		firstRunTutorialStep = 'complete';
+	}
+
+	function finishFirstRunTutorial(persona: PersonaSnapshot): void {
+		const scope = firstRunTutorialScopeFor(persona);
+		if (firstRunTutorialStep !== 'work' || !firstRunTutorialScopesMatch(firstRunTutorialScope, scope) || !scope) return;
+		showFirstRunTutorialCompletion(scope);
+	}
+
+	function restoreFirstRunTutorial(persona: PersonaSnapshot): void {
+		const scope = firstRunTutorialScopeFor(persona);
+		const marker = readFirstRunTutorialMarker();
+		if (!scope || !marker || !firstRunTutorialScopesMatch(marker, scope)) return;
+		if (marker.step === 'work' && persona.gameState.mendingJob) {
+			showFirstRunTutorialCompletion(scope);
+			return;
+		}
+		firstRunTutorialScope = scope;
+		firstRunTutorialStep = marker.step;
+	}
+
+	function advanceFirstRunTutorialFromLife(): void {
+		if (firstRunTutorialStep !== 'life' || !personaSnapshot || !firstRunTutorialScopesMatch(firstRunTutorialScope, firstRunTutorialScopeFor(personaSnapshot))) return;
+		storeFirstRunTutorialStep('movement', personaSnapshot);
+	}
+
+	function advanceFirstRunTutorialFromMovement(persona: PersonaSnapshot): void {
+		if (firstRunTutorialStep !== 'movement' || !firstRunTutorialScopesMatch(firstRunTutorialScope, firstRunTutorialScopeFor(persona))) return;
+		storeFirstRunTutorialStep('work', persona);
+	}
+
+	$effect(() => {
+		if (firstRunTutorialStep !== 'complete' || !firstRunTutorialScope) return;
+		const scope = firstRunTutorialScope;
+		const timer = window.setTimeout(() => {
+			if (firstRunTutorialStep === 'complete' && firstRunTutorialScopesMatch(firstRunTutorialScope, scope)) {
+				firstRunTutorialStep = null;
+				firstRunTutorialScope = null;
+			}
+		}, 2_600);
+		return () => window.clearTimeout(timer);
+	});
 	const presentationRemeasures = new Set<() => void>();
 	function sameBounds(first: Bounds | null, second: Bounds | null): boolean {
 		return first === second || Boolean(first && second && first.x === second.x && first.y === second.y && first.width === second.width && first.height === second.height);
@@ -1722,7 +1814,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 						personaLifecycleTransition = false;
 						const result = await beginDeathTransition(activePersona, null, false);
 						if (result === 'reloaded' || result === 'failed') return;
-					}
+					} else restoreFirstRunTutorial(activePersona);
 					if (selfSigner.characterProfileRevision !== CURRENT_CHARACTER_PROFILE_REVISION) {
 						const character = requireCharacterFromPubkey(selfSigner.pubkey);
 						const absolutePictureUrl = new URL(
@@ -2026,6 +2118,9 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			} : undefined;
 			const result = await selectIdentity(selection.generation, candidate, rootBuild, selectionOptions);
 			if (result.kind === 'selected') {
+				if (selection.generation === 1 && selection.reusableIdentities.length === 0 && result.persona.activeRun.runNumber === 1) {
+					storeFirstRunTutorialStep('life', result.persona);
+				}
 				if (startSelectedWorld) {
 					await startSelectedWorld(result.persona);
 					return;
@@ -2235,6 +2330,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			if (result.kind === 'blocked') mendingStartupFeedback = null;
 			personaSnapshot = result.persona;
 			selfSigner = result.persona.signer;
+			if (result.kind === 'started') finishFirstRunTutorial(result.persona);
 			if (result.kind === 'started' || result.kind === 'collected') void worldSession?.refreshSelfActivity();
 			if (result.kind === 'collected') {
 				if (collectFeedbackTimer !== null) window.clearTimeout(collectFeedbackTimer);
@@ -4495,7 +4591,15 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 
 	function moveWorldSelf(direction: Direction): void {
 		if (devWorldSandboxEnabled || !selfSigner) return;
-		void worldSession?.moveSelf(direction);
+		const session = worldSession;
+		const expectedPersona = personaSnapshot;
+		if (!session || !expectedPersona) return;
+		void session.moveSelf(direction).then((result) => {
+			if (result.kind === 'succeeded' && result.operation === 'movement' && personaSnapshot &&
+				personaSnapshot.signer.pubkey === expectedPersona.signer.pubkey && personaSnapshot.activeRun.runNumber === expectedPersona.activeRun.runNumber) {
+				advanceFirstRunTutorialFromMovement(expectedPersona);
+			}
+		});
 	}
 
 	function moveSelfFromCell(direction: Direction): void {
@@ -5046,7 +5150,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	>
 		{#snippet children()}
 			{#if statusHudVisible && personaSnapshot}
-				<div class="top-status-hud" data-top-status-hud {@attach observeTopStatusHud}>
+				<div class="top-status-hud" class:first-run-life-highlight={showFirstRunTutorial && firstRunTutorialStep === 'life'} data-top-status-hud data-tutorial-highlight={showFirstRunTutorial && firstRunTutorialStep === 'life' ? 'lifespan' : undefined} {@attach observeTopStatusHud}>
 					<UnifiedStatusHud
 						expiresAtMs={tagGameHudWorkProjection?.effectiveExpiresAtMs ?? mendingProjection?.effectiveExpiresAtMs ?? personaSnapshot.gameState.lifespanExpiresAtMs}
 						nowMs={tagGameHudProjection ? tagGameHudNowMs : lifespanHudNowMs ?? mendingNowMs}
@@ -5075,6 +5179,18 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 						onVolume={updateSoundVolume}
 					/>
 				</div>{/if}
+			{/if}
+			{#if showFirstRunTutorial && firstRunTutorialStep && firstRunTutorialStep !== 'complete'}
+				<div class="first-run-tutorial" data-first-run-tutorial={firstRunTutorialStep} aria-live="polite" aria-atomic="true" style={`--first-run-tutorial-top:${Math.max(topStatusHudBottom + 8, 112)}px`}>
+					{#if firstRunTutorialStep === 'life'}
+						<p>あなたの一生が始まりました。<br />寿命が0になると、この一生は終わります。</p>
+						<button type="button" onclick={advanceFirstRunTutorialFromLife}>次へ</button>
+					{:else if firstRunTutorialStep === 'movement'}
+						<p>移動してみよう</p>
+					{:else if firstRunTutorialStep === 'work'}
+						<p>作業をすると、ポイントを得て寿命を延ばせます。</p>
+					{/if}
+				</div>
 			{/if}
 			<Chatter
 				bind:this={chatterComponent}
@@ -5110,6 +5226,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 				{tagGameHolderTransfer}
 				tagGameEffect={tagGameDisplayedEffect?.effect ?? null}
 				tagGameEffectActive={tagGameDisplayedEffect?.active ?? false}
+				mendingTerminalHighlighted={showFirstRunTutorial && firstRunTutorialStep === 'work'}
 				{selfProjectionId}
 				{movingParticipantIds}
 				{selfIsActive}
@@ -5289,6 +5406,9 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		collectFeedback={collectFeedback}
 		startupFeedback={mendingStartupFeedback}
 	/>
+	{#if showFirstRunTutorial && firstRunTutorialStep === 'complete'}
+		<div class="first-run-completion-notice" data-first-run-tutorial="complete" role="status" aria-live="polite" aria-atomic="true">あとは自由です。</div>
+	{/if}
 	<AdjustmentDialog
 		open={adjustmentDialogOpen}
 		points={personaSnapshot?.gameState.points ?? 0}
@@ -5429,6 +5549,69 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		display: grid;
 		width: auto;
 		gap: 3px;
+		pointer-events: none;
+	}
+	.top-status-hud.first-run-life-highlight :global([data-unified-status-hud]) {
+		outline: 3px solid rgba(23, 176, 148, .95);
+		outline-offset: 4px;
+		border-radius: 12px;
+		box-shadow: 0 0 0 8px rgba(23, 176, 148, .15), 0 0 20px rgba(23, 176, 148, .62);
+	}
+	.first-run-tutorial {
+		position: absolute;
+		top: var(--first-run-tutorial-top);
+		left: 50%;
+		z-index: 30;
+		display: grid;
+		justify-items: center;
+		gap: 8px;
+		width: min(460px, calc(100% - 28px));
+		transform: translateX(-50%);
+		pointer-events: none;
+		text-align: center;
+	}
+	.first-run-tutorial p {
+		margin: 0;
+		padding: 10px 16px;
+		border: 1px solid rgba(104, 241, 221, .56);
+		border-radius: 14px;
+		background: rgba(17, 23, 37, .94);
+		box-shadow: 0 5px 22px rgba(0, 0, 0, .26);
+		color: #fff;
+		font-size: .96rem;
+		line-height: 1.55;
+		text-wrap: pretty;
+	}
+	.first-run-tutorial button {
+		min-width: 88px;
+		min-height: 44px;
+		padding: 8px 20px;
+		border: 1px solid rgba(104, 241, 221, .72);
+		border-radius: 999px;
+		background: #d8fff5;
+		color: #153a35;
+		font: inherit;
+		font-weight: 700;
+		cursor: pointer;
+		pointer-events: auto;
+	}
+	.first-run-tutorial button:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+	.first-run-completion-notice {
+		position: fixed;
+		top: max(12px, env(safe-area-inset-top));
+		left: 50%;
+		z-index: 110;
+		width: max-content;
+		max-width: calc(100vw - 32px);
+		padding: 10px 18px;
+		transform: translateX(-50%);
+		border: 1px solid rgba(104, 241, 221, .7);
+		border-radius: 999px;
+		background: rgba(17, 23, 37, .96);
+		box-shadow: 0 5px 22px rgba(0, 0, 0, .3);
+		color: #fff;
+		font-weight: 700;
+		text-align: center;
 		pointer-events: none;
 	}
 	.top-status-controls { display: grid; justify-items: end; }

@@ -21,7 +21,7 @@ import { deriveBip85NostrEntropy } from '../../src/lib/bip85';
 import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL } from '../../src/lib/fieldFacilities';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { installFieldFrameSampling, readFieldFrames, sampleRenderedField } from './helpers/fieldFrames';
-import { AUTHORITATIVE_RELAYS, fixtureSecret, testEvents, installDelayedRelay, relayState, requestKind, publishedMessages, startSelectedRun, setPendingRootPoints, seedRelayAccount, isRealtimeRequest, overwriteRelayGameState, installDeathTransitionFailure, armDeathTransitionFailure, installDeathTransitionClockRollback, armDeathTransitionClockRollback, moveRelaySelfTo } from './helpers/relayHarness';
+import { AUTHORITATIVE_RELAYS, fixtureSecret, testEvents, installDelayedRelay, relayState, requestKind, publishedMessages, startSelectedRun, continueFirstRunOpeningIfPresent, setPendingRootPoints, seedRelayAccount, isRealtimeRequest, overwriteRelayGameState, installDeathTransitionFailure, armDeathTransitionFailure, installDeathTransitionClockRollback, armDeathTransitionClockRollback, moveRelaySelfTo } from './helpers/relayHarness';
 
 
 test.describe('Relay startup', () => {
@@ -89,6 +89,8 @@ test.describe('Relay startup', () => {
 				abilities: { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 }, mendingJob: null });
 			await deathTab.reload({ waitUntil: 'domcontentloaded' });
 			await expect(deathTab.getByRole('dialog')).toBeVisible();
+			await expect(deathTab.getByRole('button', { name: 'はじめる', exact: true })).toHaveCount(0);
+			await expect(deathTab.getByRole('region', { name: '転生先を選択' })).toBeVisible();
 			await expect(deathTab.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
 
 			const reloaded = page.waitForEvent('framenavigated', (frame) => frame === page.mainFrame());
@@ -228,10 +230,11 @@ test.describe('Relay startup', () => {
 		await installHostOwnedStub(page);
 		await installDelayedRelay(page);
 		await page.goto('/');
+		await continueFirstRunOpeningIfPresent(page);
 		const candidateButtons = page.getByRole('button', { name: /を選ぶ$/ });
 		await expect(candidateButtons).toHaveCount(3);
 		await expect.poll(() => page.locator('main > :not(.selection-backdrop)').evaluateAll((elements) => elements.every((element) => (element as HTMLElement).inert))).toBe(true);
-		await expect(page.getByRole('heading', { name: '命を始める' })).toBeFocused();
+		await expect(page.getByRole('heading', { name: '人格を選択' })).toBeFocused();
 		await page.keyboard.press('Tab');
 		await expect(candidateButtons.first()).toBeFocused();
 		await page.keyboard.press('Shift+Tab');
@@ -240,6 +243,7 @@ test.describe('Relay startup', () => {
 		const labelsBeforeReload = await candidateButtons.allTextContents();
 		await expect(page.locator('.participant[data-self="true"]')).toHaveCount(0);
 		await page.reload({ waitUntil: 'domcontentloaded' });
+		await continueFirstRunOpeningIfPresent(page);
 		const reloadedButtons = page.getByRole('button', { name: /を選ぶ$/ });
 		await expect(reloadedButtons).toHaveCount(3);
 		expect(await reloadedButtons.allTextContents()).toEqual(labelsBeforeReload);
@@ -308,9 +312,11 @@ test.describe('Relay startup', () => {
 		await installDelayedRelay(page);
 		await page.goto('/');
 		await page.setViewportSize({ width: 420, height: 420 });
+		await continueFirstRunOpeningIfPresent(page);
 		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
 		await setPendingRootPoints(page, 0);
 		await page.reload({ waitUntil: 'domcontentloaded' });
+		await continueFirstRunOpeningIfPresent(page);
 		await page.getByRole('button', { name: /を選ぶ$/ }).first().click();
 		const rootToggle = page.locator('.root-build-toggle');
 		await expect(rootToggle).toHaveAttribute('aria-expanded', 'false');
@@ -319,6 +325,7 @@ test.describe('Relay startup', () => {
 		await expect(page.getByRole('button', { name: '開始' })).toBeEnabled();
 		await setPendingRootPoints(page, 3);
 		await page.reload({ waitUntil: 'domcontentloaded' });
+		await continueFirstRunOpeningIfPresent(page);
 
 		await expect(page.locator('.rp-summary')).toContainText('3 RP');
 		const rootBuild = page.locator('.root-build');
@@ -393,6 +400,7 @@ test.describe('Relay startup', () => {
 		await installHostOwnedStub(page);
 		await installDelayedRelay(page);
 		await page.goto('/');
+		await continueFirstRunOpeningIfPresent(page);
 		const candidateButtons = page.getByRole('button', { name: /を選ぶ$/ });
 		await expect(candidateButtons).toHaveCount(3);
 		await expect.poll(async () => (await relayState(page)).state.requests.filter((request) =>
@@ -417,6 +425,7 @@ test.describe('Relay startup', () => {
 		await installHostOwnedStub(page);
 		await installDelayedRelay(page, { deferTraceRoots: true });
 		await page.goto('/');
+		await continueFirstRunOpeningIfPresent(page);
 		const candidateButtons = page.getByRole('button', { name: /を選ぶ$/ });
 		await expect(candidateButtons).toHaveCount(3);
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) => request.filter.limit === undefined && [42, WORLD_STATE_KIND].includes(requestKind(request)!))).toBe(true);
@@ -446,6 +455,7 @@ test.describe('Relay startup', () => {
 		await installHostOwnedStub(page);
 		await installDelayedRelay(page);
 		await page.goto('/');
+		await continueFirstRunOpeningIfPresent(page);
 
 		const dialog = page.locator('.selection-dialog');
 		const candidateButtons = page.getByRole('button', { name: /を選ぶ$/ });
@@ -500,14 +510,23 @@ test.describe('Relay startup', () => {
 		await page.goto('/');
 
 		const dialog = page.locator('.selection-dialog');
+		const opening = page.getByRole('button', { name: 'はじめる', exact: true });
 		const candidates = page.getByRole('button', { name: /を選ぶ$/ });
+		await expect(opening).toBeVisible();
+		await expect(candidates).toHaveCount(0);
+		await expect(dialog.getByRole('heading', { name: 'ここは、ハコ。' })).toBeFocused();
+		await expect(dialog).toContainText('あなたは、別の誰かとしてここで生きる。');
+		await expect(dialog).toContainText('寿命は7日。');
+		await expect(dialog).toContainText('生き延びて、ソトを目指してください。');
+		await expect(dialog).not.toContainText(/Nostr|Root Point|能力|Identity|Run/);
+		await opening.focus();
+		await page.keyboard.press('Enter');
+		await expect(dialog.getByRole('heading', { name: '人格を選択' })).toBeFocused();
+		await expect(dialog.locator('#identity-selection-description')).toHaveText('あなたとして生きる人格');
+		await expect(dialog.getByRole('region', { name: '人格を選択' })).toBeVisible();
 		const runButton = page.getByRole('button', { name: '開始' });
 		await expect(candidates).toHaveCount(3);
 		await expect(dialog).toBeVisible();
-		await expect(dialog.getByRole('heading', { name: '命を始める' })).toBeFocused();
-		await expect(dialog.locator('#identity-selection-description')).toHaveText('開始後は変更できません。');
-		await expect(dialog.getByRole('region', { name: '転生先を選択' })).toBeVisible();
-		await expect(candidates).toHaveCount(3);
 		await expect(dialog.locator('.candidate.chosen')).toHaveCount(0);
 		await expect(dialog.locator('.candidate-check')).toHaveCount(0);
 		await expect(dialog).toContainText('選択中未選択');
@@ -515,9 +534,7 @@ test.describe('Relay startup', () => {
 		await expect(runButton).toHaveAttribute('data-action-variant', 'primary');
 		await expect(dialog.locator('[data-action-variant="primary"]')).toHaveCount(1);
 
-		await page.keyboard.press('Shift+Tab');
-		await expect(dialog.getByRole('button', { name: /Root build/ })).toBeFocused();
-		await dialog.getByRole('heading', { name: '命を始める' }).focus();
+		await dialog.getByRole('heading', { name: '人格を選択' }).focus();
 		await page.keyboard.press('Tab');
 		await expect(candidates.first()).toBeFocused();
 		await page.keyboard.press('Enter');
@@ -532,6 +549,7 @@ test.describe('Relay startup', () => {
 			await installHostOwnedStub(page);
 			await installDelayedRelay(page);
 			await page.goto('/');
+			await continueFirstRunOpeningIfPresent(page);
 			await page.setViewportSize(viewport);
 			const dialog = page.locator('.selection-dialog');
 			await expect(dialog).toBeVisible();
@@ -555,6 +573,7 @@ test.describe('Relay startup', () => {
 				await installHostOwnedStub(client);
 				await installDelayedRelay(client);
 				await client.goto('/');
+				await continueFirstRunOpeningIfPresent(client);
 				await expect(client.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
 			}));
 			await page.getByRole('button', { name: /を選ぶ$/ }).nth(0).click();

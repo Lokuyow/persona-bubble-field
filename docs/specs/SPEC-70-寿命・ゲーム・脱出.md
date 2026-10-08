@@ -39,6 +39,16 @@ rollbackせず、wire formatとposition条件はSPEC-30を参照する。
 3. 能力を初期状態にする
 4. `mendingJob = null` にする
 
+### 初回Runの短い案内
+
+初回Rootで初めて選択したIdentityのRun #1を開始した直後だけ、フィールド上で「寿命」「移動」「作業」の順に短く案内する。寿命の案内中は寿命HUDを視覚的に強調し、「あなたの一生が始まりました。寿命が0になると、この一生は終わります。」と表示する。ユーザーが「次へ」を操作すると移動案内へ進む。
+
+移動案内では「移動してみよう」と表示する。既存のPC・pointer移動を使い、既存World sessionのmovementが `succeeded` かつ `operation = 'movement'` となった場合だけ作業案内へ進む。初期入室、再接続、移動失敗、再試行だけでは進めない。
+
+作業案内では作業端末を視覚的に強調し、「作業をすると、ポイントを得て寿命を延ばせます。」と表示する。既存の作業端末操作による `startMending` が `kind = 'started'` となった場合に完了とし、「あとは自由です。」を短く表示する。完了後は案内表示と進捗記録を終了し、通常プレイを阻害しない。案内完了を理由に作業ダイアログを閉じず、通常のstartup feedbackとユーザーによるclose操作を維持する。
+
+未完了段階は初回IdentityとRun #1に結び付けて同一タブの `sessionStorage` へ保存し、再読み込み後はその段階から復元する。作業段階を復元した時点で対象Runにdurableな `mendingJob` が存在すれば、作業開始済みとして案内を完了する。チュートリアル用にPlayer lifecycle stateや永続化schemaを追加しない。案内は非モーダルとし、既存のキーボード・pointer・タッチ操作やフィールドレイアウトを妨げない。
+
 旧Identityと新Identityの間に、Run-localの記憶・状態・自己認識の連続性を持たせない。Identity historyにはselected Identityとfinished Runのsummaryだけを残す。
 
 24時間に1回の任意転生および任意のリセマラは廃止する。転生は原則として死亡時のみ発生する。

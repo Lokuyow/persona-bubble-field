@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import { asset } from '$app/paths';
 	import { Popover } from 'bits-ui';
 	import ChevronDown from '~icons/tabler/chevron-down';
@@ -24,6 +25,10 @@
 	let backdrop = $state<HTMLElement | null>(null);
 	let initialFocusTarget = $state<HTMLElement | null>(null);
 	let chosen = $state<SelectionCandidate | null>(null);
+	let openingAccepted = $state(false);
+	let openingSelection: PendingSelection | null = null;
+	let firstSelection = $derived(Boolean(selection && selection.generation === 1 && selection.reusableIdentities.length === 0));
+	let showOpening = $derived(firstSelection && !openingAccepted);
 	let rootBuild = $state<RootBuild>({ inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0 });
 	let usablePoints = $derived(usableRootPoints(rootPoints));
 	let usedPoints = $derived(rootBuildCost(rootBuild));
@@ -43,6 +48,10 @@
 	$effect(() => {
 		if (!selection || selection === rootBuildSelection) return;
 		rootBuildSelection = selection;
+		if (selection !== openingSelection) {
+			openingSelection = selection;
+			openingAccepted = false;
+		}
 		rootBuildOpen = usableRootPoints(rootPoints) > 0;
 	});
 
@@ -65,6 +74,12 @@
 	function startRun(): void {
 		if (!chosen || !isRootBuildAllocatable(rootBuild, rootPoints)) return;
 		onSelect(chosen, rootBuild);
+	}
+
+	async function acceptOpening(): Promise<void> {
+		openingAccepted = true;
+		await tick();
+		initialFocusTarget?.focus();
 	}
 
 	function focusableElements(dialog: HTMLElement): HTMLElement[] {
@@ -121,11 +136,27 @@
 {#if selection}
 	<div bind:this={backdrop} class="selection-backdrop" role="presentation">
 		<dialog open class="selection-dialog" aria-labelledby="identity-selection-title" aria-describedby="identity-selection-description" aria-modal="true">
+			{#if showOpening}
+				<div class="selection-content opening-content">
+					<header class="selection-header">
+						<div>
+						<h1 bind:this={initialFocusTarget} class="initial-focus-target" id="identity-selection-title" tabindex="-1">ここは、ハコ。</h1>
+						<div id="identity-selection-description" class="opening-copy">
+							<p>あなたは、別の誰かとしてここで生きる。</p>
+							<p>寿命は7日。<br />生き延びて、ソトを目指してください。</p>
+						</div>
+					</div>
+				</header>
+				</div>
+				<footer class="selection-footer opening-footer">
+					<ActionButton variant="primary" type="button" onclick={() => { void acceptOpening(); }}>はじめる</ActionButton>
+				</footer>
+			{:else}
 			<div class="selection-content">
 				<header class="selection-header">
 					<div>
-						<h1 bind:this={initialFocusTarget} class="initial-focus-target" id="identity-selection-title" tabindex="-1">命を始める</h1>
-						<p id="identity-selection-description" class="selection-introduction">開始後は変更できません。</p>
+						<h1 bind:this={initialFocusTarget} class="initial-focus-target" id="identity-selection-title" tabindex="-1">{firstSelection ? '人格を選択' : '命を始める'}</h1>
+						<p id="identity-selection-description" class="selection-introduction">{firstSelection ? 'あなたとして生きる人格' : '開始後は変更できません。'}</p>
 					</div>
 					<div class="rp-summary"><span>Root Point</span><strong>{rootPoints} RP</strong></div>
 				</header>
@@ -136,8 +167,8 @@
 					</div>
 				{/if}
 
-				<section class="identity-section" aria-label="転生先を選択">
-					<div class="section-heading"><h2>転生先を選択</h2><span>次の一生を送る人格</span></div>
+				<section class="identity-section" aria-label={firstSelection ? '人格を選択' : '転生先を選択'}>
+					{#if !firstSelection}<div class="section-heading"><h2>転生先を選択</h2><span>次の一生を送る人格</span></div>{/if}
 					<div class="candidate-grid">
 						{#each selection.candidates as candidate}
 							{@const selectedCharacter = character(candidate)}
@@ -204,6 +235,7 @@
 				<div class="selection-summary"><span>選択中</span><strong>{chosen ? character(chosen).name : '未選択'}</strong><span class="summary-divider" aria-hidden="true"></span><span>使用 {usedPoints} / {usablePoints} RP</span></div>
 				<ActionButton variant="primary" type="button" onclick={startRun} disabled={!chosen || !isRootBuildAllocatable(rootBuild, rootPoints)}>開始</ActionButton>
 			</footer>
+			{/if}
 		</dialog>
 	</div>
 {/if}
@@ -240,6 +272,11 @@
 
 	.selection-dialog::backdrop { background: transparent; }
 	.selection-content { min-height: 0; overflow: auto; padding: 26px 26px 24px; }
+	.opening-content { display: grid; align-content: center; }
+	.opening-content h1 { font-size: clamp(28px, 5vw, 40px); }
+	.opening-copy { display: grid; gap: 22px; margin-top: 20px; color: rgb(255 255 255 / 88%); font-size: 1.05rem; line-height: 1.8; }
+	.opening-copy p { margin: 0; }
+	.opening-footer { justify-content: flex-end; }
 	.selection-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
 	.transition-notice { display: grid; gap: 4px; margin: 16px 0 2px; padding: 12px 14px; border: 1px solid rgb(104 241 221 / 34%); border-radius: 12px; background: rgb(104 241 221 / 9%); color: rgb(241 255 253 / 92%); }
 	.transition-notice strong { color: #fff; }

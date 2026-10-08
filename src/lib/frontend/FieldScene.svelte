@@ -69,6 +69,7 @@
 		tagGameHolderTransfer: Readonly<{ participantId: string; id: number }> | null;
 		tagGameEffect: 'benefit' | 'calamity' | null;
 		tagGameEffectActive: boolean;
+		mendingTerminalHighlighted: boolean;
 		selfProjectionId: string;
 		movingParticipantIds: ReadonlySet<string>;
 		selfIsActive: boolean;
@@ -108,6 +109,7 @@
 		tagGameHolderTransfer,
 		tagGameEffect,
 		tagGameEffectActive,
+		mendingTerminalHighlighted,
 		selfProjectionId,
 		movingParticipantIds,
 		selfIsActive,
@@ -198,7 +200,8 @@
 		</div>
 		<div class="field-facility-layer" aria-hidden="true">
 			{#each FIXED_FIELD_FACILITIES as facility (facility.kind)}
-				<span class={['field-facility', `field-${facility.kind}`]} data-field-facility={facility.kind}
+				<span class={['field-facility', `field-${facility.kind}`]} class:field-facility-highlighted={facility.kind === 'mending-terminal' && mendingTerminalHighlighted} data-field-facility={facility.kind}
+					data-tutorial-highlight={facility.kind === 'mending-terminal' && mendingTerminalHighlighted ? 'work' : undefined}
 					style={`left: ${(facility.position.x + 0.5) * cellSize}px; top: ${(facility.position.y + 0.5) * cellSize}px;`}>{#if facility.kind === 'mending-terminal'}<img src={asset(MENDING_TERMINAL_ASSET)} alt="" />{:else if facility.kind === 'adjustment-terminal'}<img src={asset(ADJUSTMENT_TERMINAL_ASSET)} alt="" />{:else if facility.kind === 'tag-game-terminal'}<img src={asset(TAG_GAME_TERMINAL_ASSET)} alt="" />{:else}<img src={asset(RANKING_TERMINAL_ASSET)} alt="" />{/if}</span>
 			{/each}
 		</div>
@@ -400,6 +403,14 @@
 		transform: translate(-50%, -50%); pointer-events: none;
 	}
 	.field-tag-game-terminal { width: calc(var(--cell-size) * 0.86); height: calc(var(--cell-size) * 0.86); }
+	.field-facility-highlighted { filter: drop-shadow(0 0 5px rgba(72, 221, 210, .95)) drop-shadow(0 0 12px rgba(72, 221, 210, .72)); }
+	.field-facility-highlighted::after {
+		position: absolute; inset: -12%; border: 2px solid rgba(72, 221, 210, .88); border-radius: 50%;
+		box-shadow: 0 0 0 4px rgba(72, 221, 210, .2); content: ''; pointer-events: none;
+		animation: mending-terminal-tutorial-pulse 1.8s ease-in-out infinite;
+	}
+	@keyframes mending-terminal-tutorial-pulse { 50% { opacity: .48; transform: scale(1.14); } }
+	@media (prefers-reduced-motion: reduce) { .field-facility-highlighted::after { animation: none; } }
 	.field-facility img { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
 	.realtime-group-layer { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
 	.realtime-group {
