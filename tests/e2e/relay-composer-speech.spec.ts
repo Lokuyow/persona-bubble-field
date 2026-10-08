@@ -185,7 +185,7 @@ test.describe('Relay startup', () => {
 	test('renders ActionDock controls in order on desktop and mobile without an unread slot', async ({ page }) => {
 		await installPromptApiStub(page);
 		let persistedChatterState: boolean | null = null;
-		for (const width of [1200, 838, 720, 701, 700, 390, 320]) {
+		for (const width of [1200, 838, 720, 701, 700, 421, 420, 390, 360, 320]) {
 			await page.setViewportSize({ width, height: 844 });
 			await openReadyRelayWorld(page, 1);
 			const help = page.locator('.help-trigger');
@@ -268,18 +268,21 @@ test.describe('Relay startup', () => {
 				expect(Math.abs(soundIconBox.x + soundIconBox.width / 2 - soundButtonRect.x - soundButtonRect.width / 2)).toBeLessThan(1);
 				expect(Math.abs(soundIconBox.y + soundIconBox.height / 2 - soundButtonRect.y - soundButtonRect.height / 2)).toBeLessThan(1);
 			}
-			await expect(page.getByRole('button', { name: 'AI発言候補を生成' })).toBeVisible();
+			if (width <= 700) await expect(page.getByRole('button', { name: 'AI発言候補を生成' })).toBeHidden();
+			else await expect(page.getByRole('button', { name: 'AI発言候補を生成' })).toBeVisible();
 			await expect(suggestionsToggle.locator('svg')).toHaveCount(1);
 			await expect(suggestionsToggle).not.toContainText('候補');
-			await expect(suggestionsToggle).toHaveAccessibleName('AI発言候補を生成');
-			const suggestionsButtonBox = await suggestionsToggle.boundingBox();
-			const suggestionsIconBox = await suggestionsToggle.locator('svg').boundingBox();
-			expect(suggestionsButtonBox && suggestionsIconBox).toBeTruthy();
-			if (suggestionsButtonBox && suggestionsIconBox) {
-				expect(suggestionsButtonBox.width).toBeGreaterThanOrEqual(44);
-				expect(suggestionsButtonBox.height).toBeGreaterThanOrEqual(44);
-				expect(Math.abs((suggestionsIconBox.x + suggestionsIconBox.width / 2) - (suggestionsButtonBox.x + suggestionsButtonBox.width / 2))).toBeLessThan(1);
-				expect(Math.abs((suggestionsIconBox.y + suggestionsIconBox.height / 2) - (suggestionsButtonBox.y + suggestionsButtonBox.height / 2))).toBeLessThan(1);
+			await expect(suggestionsToggle).toHaveAttribute('aria-label', 'AI発言候補を生成');
+			if (width > 700) {
+				const suggestionsButtonBox = await suggestionsToggle.boundingBox();
+				const suggestionsIconBox = await suggestionsToggle.locator('svg').boundingBox();
+				expect(suggestionsButtonBox && suggestionsIconBox).toBeTruthy();
+				if (suggestionsButtonBox && suggestionsIconBox) {
+					expect(suggestionsButtonBox.width).toBeGreaterThanOrEqual(44);
+					expect(suggestionsButtonBox.height).toBeGreaterThanOrEqual(44);
+					expect(Math.abs((suggestionsIconBox.x + suggestionsIconBox.width / 2) - (suggestionsButtonBox.x + suggestionsButtonBox.width / 2))).toBeLessThan(1);
+					expect(Math.abs((suggestionsIconBox.y + suggestionsIconBox.height / 2) - (suggestionsButtonBox.y + suggestionsButtonBox.height / 2))).toBeLessThan(1);
+				}
 			}
 			await expect(chatterToggle.locator('svg')).toHaveCount(1);
 			await expect(chatterToggle).not.toContainText('Chatter');
@@ -339,7 +342,8 @@ test.describe('Relay startup', () => {
 			await expect(page.locator('.sound-control')).toHaveCount(1);
 			await expect(page.getByRole('dialog', { name: 'Sound settings' })).toHaveCount(0);
 			expect(await readActionDockControlOrder(page)).toEqual([
-				'profile-trigger', 'chatter-toggle', 'sound-control', 'help-trigger', 'speech-type-toggle', 'suggestions-anchor'
+				'profile-trigger', 'chatter-toggle', 'sound-control', 'help-trigger', 'speech-type-toggle',
+				...(width > 700 ? ['suggestions-anchor'] : [])
 			]);
 			if (width <= 700) {
 				const editorBox = await page.locator('.composer-editor-slot').boundingBox();
@@ -348,17 +352,27 @@ test.describe('Relay startup', () => {
 				expect(editorBox && leftBox && rightBox).toBeTruthy();
 				if (editorBox && leftBox && rightBox) {
 					expect(editorBox.y + editorBox.height).toBeLessThan(leftBox.y);
-					if (width <= 420) expect(leftBox.y + leftBox.height).toBeLessThanOrEqual(rightBox.y);
-					else expect(leftBox.x + leftBox.width).toBeLessThanOrEqual(rightBox.x);
+					expect(Math.abs(leftBox.y - rightBox.y)).toBeLessThanOrEqual(1);
+					expect(leftBox.x + leftBox.width).toBeLessThanOrEqual(rightBox.x);
 					expect(rightBox.x + rightBox.width).toBeLessThanOrEqual(width);
+					const controlBoxes = [];
 					for (const control of [page.locator('.profile-trigger'), chatterToggle, page.locator('.trace-unread-indicator'), page.locator('.speaker-button'), help, page.locator('.speech-type-toggle'), page.locator('.manual-trace-toggle'), suggestionsToggle]) {
 						if (await control.isVisible()) {
 							const box = await control.boundingBox();
 							if (!box) throw new Error('Expected a visible mobile ActionDock control to have geometry.');
 							expect(box.x).toBeGreaterThanOrEqual(0);
 							expect(box.x + box.width).toBeLessThanOrEqual(width);
+							expect(box.y).toBeGreaterThanOrEqual(editorBox.y + editorBox.height);
 							expect(box.width).toBeGreaterThanOrEqual(44);
 							expect(box.height).toBeGreaterThanOrEqual(44);
+							controlBoxes.push(box);
+						}
+					}
+					for (let first = 0; first < controlBoxes.length; first += 1) {
+						for (let second = first + 1; second < controlBoxes.length; second += 1) {
+							const a = controlBoxes[first];
+							const b = controlBoxes[second];
+							expect(a.x + a.width <= b.x || b.x + b.width <= a.x || a.y + a.height <= b.y || b.y + b.height <= a.y).toBe(true);
 						}
 					}
 				}
@@ -434,7 +448,7 @@ test.describe('Relay startup', () => {
 		}
 	});
 
-	test('keeps candidate generation status inside narrow desktop and mobile viewports', async ({ page }) => {
+	test('keeps candidate generation status inside a narrow desktop viewport', async ({ page }) => {
 		await installPromptApiStub(page, 'available', 'pending');
 		const selfSecret = fixtureSecret(19);
 		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret));
@@ -442,7 +456,7 @@ test.describe('Relay startup', () => {
 		const candidateButton = page.getByRole('button', { name: 'AI発言候補を生成' });
 		await editor.fill('');
 		await candidateButton.click();
-		for (const viewport of [{ width: 720, height: 844 }, { width: 390, height: 844 }]) {
+		for (const viewport of [{ width: 720, height: 844 }]) {
 			await page.setViewportSize(viewport);
 			const status = page.getByRole('status');
 			await expect(status).toHaveText('候補を生成中…');
@@ -470,7 +484,7 @@ test.describe('Relay startup', () => {
 		const error = page.locator('.suggestion-error');
 		await expect(error).toHaveText('候補を生成できませんでした。もう一度お試しください。');
 		await expect(page.locator('.suggestion-panel')).toHaveCount(0);
-		for (const viewport of [{ width: 720, height: 844 }, { width: 390, height: 844 }]) {
+		for (const viewport of [{ width: 720, height: 844 }]) {
 			await page.setViewportSize(viewport);
 			await expect(error).toBeVisible();
 			await expect(page.getByRole('status')).toHaveCount(1);
@@ -612,7 +626,7 @@ test.describe('Relay startup', () => {
 		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret));
 		const editor = await openReadyRelayWorld(page, 1);
 		const candidateButton = page.getByRole('button', { name: 'AI発言候補を生成' });
-		for (const viewport of [{ width: 720, height: 900 }, { width: 390, height: 844 }]) {
+		for (const viewport of [{ width: 720, height: 900 }]) {
 			await page.setViewportSize(viewport);
 			await editor.fill('既存のdraft');
 			await expect(candidateButton).toBeDisabled();
@@ -654,7 +668,7 @@ test.describe('Relay startup', () => {
 		await seedRelayAccount(page, selfSecret, getPublicKey(selfSecret));
 		const editor = await openReadyRelayWorld(page, 1);
 		const candidateButton = page.getByRole('button', { name: 'AI発言候補を生成' });
-		for (const viewport of [{ width: 720, height: 900 }, { width: 390, height: 844 }]) {
+		for (const viewport of [{ width: 720, height: 900 }]) {
 			await page.setViewportSize(viewport);
 			await candidateButton.click();
 			const panel = page.locator('.suggestion-panel');
@@ -728,7 +742,7 @@ test.describe('Relay startup', () => {
 		await expect(page.getByRole('status')).toContainText('候補を送信できませんでした');
 		await expect(page.getByRole('status')).toHaveCount(1);
 		await expect(page.locator('.suggestion-panel')).toBeVisible();
-		for (const viewport of [{ width: 720, height: 844 }, { width: 390, height: 844 }]) {
+		for (const viewport of [{ width: 720, height: 844 }]) {
 			await page.setViewportSize(viewport);
 			const status = page.locator('.suggestion-error');
 			await expect(status).toBeVisible();
@@ -929,9 +943,9 @@ test.describe('Relay startup', () => {
 			await installPromptApiStub(touchPage);
 			await openReadyRelayWorld(touchPage, 1);
 			expect(await touchPage.evaluate(() => matchMedia('(hover: hover) and (pointer: fine)').matches)).toBe(false);
+			await expect(touchPage.locator('.suggestions-anchor')).toBeHidden();
+			await expect(touchPage.getByRole('button', { name: 'AI発言候補を生成' })).toHaveCount(0);
 			await touchPage.locator('.chatter-toggle').hover();
-			await expect(touchPage.getByRole('tooltip')).toHaveCount(0);
-			await touchPage.getByRole('button', { name: 'AI発言候補を生成' }).hover();
 			await expect(touchPage.getByRole('tooltip')).toHaveCount(0);
 			const chatter = touchPage.locator('.chatter-toggle');
 			const openBeforeTap = await chatter.getAttribute('aria-pressed');

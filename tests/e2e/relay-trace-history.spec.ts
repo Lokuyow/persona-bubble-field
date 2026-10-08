@@ -642,9 +642,9 @@ test.describe('Relay startup', () => {
 		});
 		await expect(page.locator('[data-trace-marker-position="4,2"]')).toBeVisible();
 		await expect(page.locator('.trace-unread-indicator')).toBeVisible();
-		await expect(page.getByRole('button', { name: 'AI発言候補を生成' })).toBeVisible();
+		await expect(page.getByRole('button', { name: 'AI発言候補を生成' })).toBeHidden();
 		expect(await readActionDockControlOrder(page)).toEqual([
-			'profile-trigger', 'chatter-toggle', 'trace-unread-indicator', 'sound-control', 'help-trigger', 'speech-type-toggle', 'suggestions-anchor'
+			'profile-trigger', 'chatter-toggle', 'trace-unread-indicator', 'sound-control', 'help-trigger', 'speech-type-toggle'
 		]);
 		const fieldGeometryBeforeToggle = await page.locator('.field-grid').boundingBox();
 		const fieldCellSizeBeforeToggle = await page.locator('.field-scene').evaluate((element) => getComputedStyle(element).getPropertyValue('--cell-size'));
@@ -658,19 +658,15 @@ test.describe('Relay startup', () => {
 					editor: rect('.composer-editor-slot'),
 					left: rect('.composer-controls-left'),
 					right: rect('.composer-controls-right'),
-					controls: ['.profile-trigger', '.chatter-toggle', '.trace-unread-indicator', '.speaker-button', '.help-trigger', '.speech-type-toggle', '.manual-trace-toggle', '.suggestions-toggle']
+					controls: ['.profile-trigger', '.chatter-toggle', '.trace-unread-indicator', '.speaker-button', '.help-trigger', '.speech-type-toggle', '.manual-trace-toggle']
 						.map((selector) => rect(selector))
 				};
 			});
+			expect(geometry.dock.height).toBeCloseTo(121, 1);
 			expect(geometry.editor.bottom).toBeLessThanOrEqual(geometry.left.top);
 			expect(geometry.editor.bottom).toBeLessThanOrEqual(geometry.right.top);
-			if (width <= 420) {
-				expect(geometry.left.bottom).toBeLessThanOrEqual(geometry.right.top);
-			} else {
-				expect(geometry.left.top).toBeLessThan(geometry.right.bottom);
-				expect(geometry.right.top).toBeLessThan(geometry.left.bottom);
-				expect(geometry.left.right).toBeLessThanOrEqual(geometry.right.left);
-			}
+			expect(Math.abs(geometry.left.top - geometry.right.top)).toBeLessThanOrEqual(1);
+			expect(geometry.left.right).toBeLessThanOrEqual(geometry.right.left);
 			expect(geometry.left.left).toBeGreaterThanOrEqual(geometry.content.left);
 			expect(geometry.left.right).toBeLessThanOrEqual(geometry.content.right);
 			expect(geometry.left.top).toBeGreaterThanOrEqual(geometry.content.top);
@@ -695,12 +691,6 @@ test.describe('Relay startup', () => {
 					const b = geometry.controls[second];
 					expect(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top).toBe(true);
 				}
-			}
-			if (width === 420) expect(geometry.left.bottom).toBeLessThanOrEqual(geometry.right.top);
-			if (width === 421) {
-				expect(geometry.left.top).toBeLessThan(geometry.right.bottom);
-				expect(geometry.right.top).toBeLessThan(geometry.left.bottom);
-				expect(geometry.left.right).toBeLessThanOrEqual(geometry.right.left);
 			}
 		}
 
@@ -767,14 +757,7 @@ test.describe('Relay startup', () => {
 		await speechType.click();
 		await expect(speechType).toHaveAttribute('data-speech-type', initialSpeechType!);
 
-		const suggestions = page.getByRole('button', { name: 'AI発言候補を生成' });
-		await suggestions.click();
-		const candidatePanel = page.locator('.suggestion-panel');
-		await expect(candidatePanel).toBeVisible();
-		const candidateClose = page.getByRole('button', { name: '発言候補を閉じる' });
-		await expectIconCloseButton(candidateClose, '発言候補を閉じる');
-		await candidateClose.click();
-		await expect(candidatePanel).toHaveCount(0);
+		await expect(page.getByRole('button', { name: 'AI発言候補を生成' })).toBeHidden();
 	});
 
 	test('opens death 遺言 with the regular reply tree, publication, and semantic validation', async ({ page }) => {

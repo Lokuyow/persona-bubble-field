@@ -5967,11 +5967,4 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			--action-reserved-height: calc(var(--composer-initial-preferred-height) + 8px + 46px + 8px + var(--action-dock-padding-block) + var(--action-dock-border-width) + env(safe-area-inset-bottom));
 		}
 	}
-	@media (max-width: 420px) {
-		.app-shell {
-			--action-dock-height: calc(var(--composer-preferred-height) + 8px + 46px + 8px + 46px + 8px + var(--action-dock-padding-block) + var(--action-dock-border-width) + env(safe-area-inset-bottom));
-			--action-reserved-height: calc(var(--composer-initial-preferred-height) + 8px + 46px + 8px + 46px + 8px + var(--action-dock-padding-block) + var(--action-dock-border-width) + env(safe-area-inset-bottom));
-		}
-	}
-
 </style>

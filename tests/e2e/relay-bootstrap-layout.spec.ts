@@ -279,7 +279,7 @@ test.describe('Relay startup', () => {
 			});
 			expect(beforePreferredHeight.initialPreferredHeight).toBe('50px');
 			expect(beforePreferredHeight.preferredHeight).toBe('50px');
-			const expectedInitialDockHeight = viewport.width <= 420 ? 175 : viewport.width <= 700 ? 121 : 71;
+			const expectedInitialDockHeight = viewport.width <= 700 ? 121 : 71;
 			expect(beforePreferredHeight.dockHeight).toBeCloseTo(expectedInitialDockHeight, 1);
 			expect(beforePreferredHeight.fieldHeight + beforePreferredHeight.dockHeight)
 				.toBeCloseTo(beforePreferredHeight.viewportHeight, 1);
