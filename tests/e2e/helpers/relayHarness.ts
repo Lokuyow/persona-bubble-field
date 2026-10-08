@@ -960,6 +960,13 @@ export async function startSelectedRun(page: Page): Promise<void> {
 	await start.click();
 }
 
+export async function continueFirstRunOpeningIfPresent(page: Page): Promise<void> {
+	const opening = page.getByRole('button', { name: 'はじめる', exact: true });
+	const candidates = page.getByRole('button', { name: /を選ぶ$/ });
+	await expect.poll(async () => (await opening.count()) + (await candidates.count())).toBeGreaterThan(0);
+	if (await opening.isVisible()) await opening.click();
+}
+
 export async function setPendingRootPoints(page: Page, rootPoints: number): Promise<void> {
 	await page.evaluate(async (nextRootPoints) => {
 		const database = await new Promise<IDBDatabase>((resolve, reject) => {

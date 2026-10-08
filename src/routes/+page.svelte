@@ -79,7 +79,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 	import { projectMending } from '$lib/mending';
 	import { comparePresenceEvidence, presenceEvidenceFromWorldState } from '$lib/presenceEvidence';
 	import { createProfileRunEvidenceStore, profileRunNumberForActiveParticipant } from '$lib/profileRunEvidence';
-	import { getAbilityUpgrade, type PersonaAbilityKey } from '$lib/personaGameState';
+	import { getAbilityUpgrade, type PersonaAbilityKey, type PersonaAbilityLevels } from '$lib/personaGameState';
 	import {
 		CURRENT_CHARACTER_PROFILE_REVISION,
 		LIFECYCLE_UPGRADE_BLOCKED_MESSAGE,
@@ -110,7 +110,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		type PendingSelection,
 		type SelectionCandidate
 	} from '$lib/rootIdentity';
-	import { settlePendingTraceRewards } from '$lib/traceRewards';
+	import { settlePendingTraceRewards, type AppliedTraceReadReward } from '$lib/traceRewards';
 	import { rootMaximumLifespanMs, type RootBuild } from '$lib/rootProgression';
 	import { isPersonaExpired } from '$lib/personaGameState';
 	import { deathDevMode, DEATH_DEV_INITIAL_LIFESPAN_MS } from '$lib/deathDevMode';
@@ -332,6 +332,14 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	let connectionStatus: WorldReadConnectionStatus = { kind: 'bootstrapping' };
 	let selfSigner = $state.raw<ActiveSignerSnapshot | null>(null);
 	let personaSnapshot = $state.raw<PersonaSnapshot | null>(null);
+	type FirstRunTutorialStep = 'life' | 'movement' | 'work' | 'ability' | 'speech' | 'trace' | 'note';
+	type FirstRunTutorialScope = Readonly<{ generation: 1; accountIndex: number; pubkey: string; runNumber: 1 }>;
+	type FirstRunTutorialMarker = FirstRunTutorialScope & Readonly<{ step: FirstRunTutorialStep; abilityLevelsAtStep?: PersonaAbilityLevels }>;
+	const FIRST_RUN_TUTORIAL_SESSION_KEY = 'persona-bubble-field:first-run-tutorial';
+	let firstRunTutorialStep = $state<FirstRunTutorialStep | 'complete' | null>(null);
+	let firstRunTutorialScope = $state<FirstRunTutorialScope | null>(null);
+	let firstRunTutorialElement = $state<HTMLDivElement | null>(null);
+	let firstRunTutorialAnchored = $state(false);
 	let pendingIdentitySelection = $state<PendingSelection | null>(null);
 	let runTransitionNotice = $state<RunTransitionNotice | null>(null);
 	let pendingRootPoints = $state(0);
@@ -343,6 +351,232 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	let actionDockBounds = $state.raw<Bounds | null>(null);
 	let topStatusHudBottom = $derived(topStatusHudBounds ? topStatusHudBounds.y + topStatusHudBounds.height : 0);
 	let statusHudVisible = $derived(lifespanHudNowMs !== null && personaSnapshot !== null && !personaLifecycleTransition);
+	let showFirstRunTutorial = $derived(Boolean(statusHudVisible && firstRunTutorialStep && personaSnapshot && firstRunTutorialScope &&
+		firstRunTutorialScopesMatch(firstRunTutorialScope, firstRunTutorialScopeFor(personaSnapshot))));
+
+	function firstRunTutorialAnchorSelector(step: FirstRunTutorialStep): string | null {
+		if (step === 'life') return '[data-top-status-hud][data-tutorial-highlight="lifespan"]';
+		if (step === 'work') return '[data-field-facility="mending-terminal"][data-tutorial-highlight="work"]';
+		if (step === 'ability') return '[data-field-facility="adjustment-terminal"][data-tutorial-highlight="ability"]';
+		if (step === 'speech') return '.composer-editor-slot[data-tutorial-highlight="speech"]';
+		if (step === 'note') return '.manual-trace-toggle[data-tutorial-highlight="note"]';
+		if (step === 'trace' && firstRunTutorialTraceTargetId) return '[data-tutorial-highlight="trace"]';
+		return null;
+	}
+
+	function clearFirstRunTutorialAnchor(): void {
+		firstRunTutorialAnchored = false;
+		const element = firstRunTutorialElement;
+		if (!element) return;
+		element.style.removeProperty('--first-run-tutorial-anchor-left');
+		element.style.removeProperty('--first-run-tutorial-anchor-top');
+	}
+
+	function firstRunTutorialScopeFor(persona: PersonaSnapshot | null): FirstRunTutorialScope | null {
+		if (!persona || persona.identity.generation !== 1 || persona.activeRun.runNumber !== 1) return null;
+		const runIdentity = persona.activeRun.identity;
+		if (runIdentity.generation !== persona.identity.generation || runIdentity.accountIndex !== persona.identity.accountIndex || runIdentity.pubkey !== persona.identity.pubkey) return null;
+		return { generation: 1, accountIndex: persona.identity.accountIndex, pubkey: persona.identity.pubkey, runNumber: 1 };
+	}
+
+	function firstRunTutorialScopesMatch(first: FirstRunTutorialScope | null, second: FirstRunTutorialScope | null): boolean {
+		return Boolean(first && second && first.generation === second.generation && first.accountIndex === second.accountIndex && first.pubkey === second.pubkey && first.runNumber === second.runNumber);
+	}
+
+	function readFirstRunTutorialMarker(): FirstRunTutorialMarker | null {
+		try {
+			const parsed: unknown = JSON.parse(window.sessionStorage.getItem(FIRST_RUN_TUTORIAL_SESSION_KEY) ?? 'null');
+			if (!parsed || typeof parsed !== 'object') return null;
+			const marker = parsed as Partial<FirstRunTutorialMarker>;
+			if (marker.generation !== 1 || !Number.isInteger(marker.accountIndex) || typeof marker.pubkey !== 'string' || marker.runNumber !== 1 ||
+				(marker.step !== 'life' && marker.step !== 'movement' && marker.step !== 'work' && marker.step !== 'ability' &&
+					marker.step !== 'speech' && marker.step !== 'trace' && marker.step !== 'note')) return null;
+			const abilities = marker.abilityLevelsAtStep;
+			const validAbilityLevels = abilities && typeof abilities === 'object' &&
+				Number.isInteger(abilities.inferenceEfficiency) && abilities.inferenceEfficiency! >= 1 &&
+				Number.isInteger(abilities.contextCapacity) && abilities.contextCapacity! >= 1 &&
+				Number.isInteger(abilities.hallucinationSuppression) && abilities.hallucinationSuppression! >= 1;
+			return { ...marker, abilityLevelsAtStep: validAbilityLevels ? abilities as PersonaAbilityLevels : undefined } as FirstRunTutorialMarker;
+		} catch {
+			return null;
+		}
+	}
+
+	function storeFirstRunTutorialStep(step: FirstRunTutorialStep, persona: PersonaSnapshot): void {
+		const scope = firstRunTutorialScopeFor(persona);
+		if (!scope) return;
+		firstRunTutorialScope = scope;
+		firstRunTutorialStep = step;
+		const marker: FirstRunTutorialMarker = {
+			...scope,
+			step,
+			...(step === 'ability' ? { abilityLevelsAtStep: { ...persona.gameState.abilities } } : {})
+		};
+		try { window.sessionStorage.setItem(FIRST_RUN_TUTORIAL_SESSION_KEY, JSON.stringify(marker)); } catch { /* Tutorial storage is best-effort and never gates play. */ }
+	}
+
+	function removeFirstRunTutorialMarker(scope: FirstRunTutorialScope): void {
+		const marker = readFirstRunTutorialMarker();
+		if (!marker || !firstRunTutorialScopesMatch(marker, scope)) return;
+		try { window.sessionStorage.removeItem(FIRST_RUN_TUTORIAL_SESSION_KEY); } catch { /* Tutorial storage is best-effort and never gates play. */ }
+	}
+
+	function showFirstRunTutorialCompletion(scope: FirstRunTutorialScope): void {
+		removeFirstRunTutorialMarker(scope);
+		firstRunTutorialScope = scope;
+		firstRunTutorialStep = 'complete';
+	}
+
+	function advanceFirstRunTutorialFromWork(persona: PersonaSnapshot): void {
+		const scope = firstRunTutorialScopeFor(persona);
+		if (firstRunTutorialStep !== 'work' || !firstRunTutorialScopesMatch(firstRunTutorialScope, scope) || !scope) return;
+		storeFirstRunTutorialStep('speech', persona);
+	}
+
+	function restoreFirstRunTutorial(persona: PersonaSnapshot): void {
+		const scope = firstRunTutorialScopeFor(persona);
+		const marker = readFirstRunTutorialMarker();
+		if (!scope || !marker || !firstRunTutorialScopesMatch(marker, scope)) return;
+		if (marker.step === 'work' && persona.gameState.mendingJob) {
+			storeFirstRunTutorialStep('speech', persona);
+			return;
+		}
+		if (marker.step === 'ability') {
+			const baseline = marker.abilityLevelsAtStep;
+			if (!baseline) {
+				storeFirstRunTutorialStep('ability', persona);
+				return;
+			}
+			const abilities = persona.gameState.abilities;
+			if (abilities.inferenceEfficiency > baseline.inferenceEfficiency || abilities.contextCapacity > baseline.contextCapacity ||
+				abilities.hallucinationSuppression > baseline.hallucinationSuppression) {
+				storeFirstRunTutorialStep('note', persona);
+				return;
+			}
+		}
+		firstRunTutorialScope = scope;
+		firstRunTutorialStep = marker.step;
+	}
+
+	function advanceFirstRunTutorialFromPrompt(): void {
+		const persona = personaSnapshot;
+		if (!persona || !firstRunTutorialScopesMatch(firstRunTutorialScope, firstRunTutorialScopeFor(persona))) return;
+		if (firstRunTutorialStep === 'life') {
+			storeFirstRunTutorialStep('movement', persona);
+		} else if (firstRunTutorialStep === 'speech') {
+			storeFirstRunTutorialStep('trace', persona);
+		} else if (firstRunTutorialStep === 'note') {
+			const scope = firstRunTutorialScopeFor(persona);
+			if (scope) showFirstRunTutorialCompletion(scope);
+		}
+	}
+
+	function handleInteractionRewardApplied(reward: AppliedTraceReadReward): void {
+		showInteractionRewardFeedback(reward);
+		const persona = personaSnapshot;
+		const scope = firstRunTutorialScopeFor(persona);
+		if (reward.points !== 5 || firstRunTutorialStep !== 'trace' || !persona || !scope ||
+			!firstRunTutorialScopesMatch(firstRunTutorialScope, scope)) return;
+		storeFirstRunTutorialStep('ability', persona);
+	}
+
+	function advanceFirstRunTutorialFromMovement(persona: PersonaSnapshot): void {
+		if (firstRunTutorialStep !== 'movement' || !firstRunTutorialScopesMatch(firstRunTutorialScope, firstRunTutorialScopeFor(persona))) return;
+		storeFirstRunTutorialStep('work', persona);
+	}
+
+	$effect(() => {
+		if (firstRunTutorialStep !== 'complete' || !firstRunTutorialScope) return;
+		const scope = firstRunTutorialScope;
+		const timer = window.setTimeout(() => {
+			if (firstRunTutorialStep === 'complete' && firstRunTutorialScopesMatch(firstRunTutorialScope, scope)) {
+				firstRunTutorialStep = null;
+				firstRunTutorialScope = null;
+			}
+		}, 8_000);
+		return () => window.clearTimeout(timer);
+	});
+	$effect(() => {
+		const step = firstRunTutorialStep;
+		const traceTargetId = step === 'trace' ? firstRunTutorialTraceTargetId : null;
+		const traceSelfPosition = step === 'trace' ? selfLogicalPosition : null;
+		const selector = step && step !== 'complete' ? firstRunTutorialAnchorSelector(step) : null;
+		if (!showFirstRunTutorial || !selector || (step === 'trace' && !traceTargetId)) {
+			untrack(clearFirstRunTutorialAnchor);
+			return;
+		}
+		let frame = 0;
+		const updateAnchor = (): void => {
+			const guide = firstRunTutorialElement;
+			const target = document.querySelector(selector);
+			const surface = guide?.offsetParent;
+			if (!(guide instanceof HTMLElement && target instanceof HTMLElement && surface instanceof HTMLElement)) {
+				untrack(clearFirstRunTutorialAnchor);
+				frame = window.requestAnimationFrame(updateAnchor);
+				return;
+			}
+			const surfaceBounds = surface.getBoundingClientRect();
+			const targetBounds = target.getBoundingClientRect();
+			if (step === 'trace') {
+				const fieldSurface = document.querySelector<HTMLElement>('.field-area');
+				const fieldBounds = fieldSurface?.getBoundingClientRect();
+				if (!traceSelfPosition || !fieldBounds || targetBounds.right <= fieldBounds.left || targetBounds.left >= fieldBounds.right ||
+					targetBounds.bottom <= fieldBounds.top || targetBounds.top >= fieldBounds.bottom) {
+					untrack(clearFirstRunTutorialAnchor);
+					return;
+				}
+			}
+			firstRunTutorialAnchored = true;
+			const guideBounds = guide.getBoundingClientRect();
+			const edge = 12;
+			const gap = 10;
+			const minCenterX = surfaceBounds.left + edge + guideBounds.width / 2;
+			const maxCenterX = surfaceBounds.right - edge - guideBounds.width / 2;
+			const clampCenterX = (center: number): number => Math.max(minCenterX, Math.min(maxCenterX, center));
+			const centerX = clampCenterX(targetBounds.left + targetBounds.width / 2);
+			const aboveTop = targetBounds.top - guideBounds.height - gap;
+			const belowTop = targetBounds.bottom + gap;
+			const minTop = surfaceBounds.top + edge;
+			const maxTop = surfaceBounds.bottom - edge - guideBounds.height;
+			const fitsVertically = (top: number): boolean => top >= minTop && top <= maxTop;
+			const verticalCenterTop = Math.max(minTop, Math.min(maxTop, targetBounds.top + (targetBounds.height - guideBounds.height) / 2));
+			const horizontalCenters = [
+				targetBounds.left - gap - guideBounds.width / 2,
+				targetBounds.right + gap + guideBounds.width / 2
+			];
+			const nonOverlappingPlacements = [
+				{ center: centerX, top: aboveTop },
+				{ center: centerX, top: belowTop },
+				...horizontalCenters.map((center) => ({ center: clampCenterX(center), top: verticalCenterTop }))
+			].filter((placement) => {
+				const left = placement.center - guideBounds.width / 2;
+				const right = placement.center + guideBounds.width / 2;
+				return fitsVertically(placement.top) &&
+					!(left < targetBounds.right && right > targetBounds.left && placement.top < targetBounds.bottom && placement.top + guideBounds.height > targetBounds.top);
+			}).sort((first, second) => {
+				const distance = (placement: Readonly<{ center: number; top: number }>): number =>
+					Math.hypot(placement.center - (targetBounds.left + targetBounds.width / 2), placement.top - targetBounds.top);
+				return distance(first) - distance(second);
+			});
+			const mobileDockBounds = window.matchMedia('(max-width: 700px)').matches
+				? target.closest<HTMLElement>('.action-dock')?.getBoundingClientRect() ?? null
+				: null;
+			const aboveDockTop = mobileDockBounds ? mobileDockBounds.top - guideBounds.height - gap : null;
+			const canPlaceAboveDock = aboveDockTop !== null && fitsVertically(aboveDockTop);
+			const fallbackTop = (targetBounds.top - minTop) >= (maxTop - targetBounds.bottom)
+				? Math.min(maxTop, Math.max(minTop, aboveTop))
+				: Math.min(maxTop, Math.max(minTop, belowTop));
+			const selectedPlacement = nonOverlappingPlacements[0];
+			const top = canPlaceAboveDock ? aboveDockTop : selectedPlacement?.top ?? fallbackTop;
+			const leftValue = `${(canPlaceAboveDock ? centerX : selectedPlacement?.center ?? centerX) - surfaceBounds.left}px`;
+			const topValue = `${top - surfaceBounds.top}px`;
+			if (guide.style.getPropertyValue('--first-run-tutorial-anchor-left') !== leftValue) guide.style.setProperty('--first-run-tutorial-anchor-left', leftValue);
+			if (guide.style.getPropertyValue('--first-run-tutorial-anchor-top') !== topValue) guide.style.setProperty('--first-run-tutorial-anchor-top', topValue);
+			frame = window.requestAnimationFrame(updateAnchor);
+		};
+		frame = window.requestAnimationFrame(updateAnchor);
+		return () => window.cancelAnimationFrame(frame);
+	});
 	const presentationRemeasures = new Set<() => void>();
 	function sameBounds(first: Bounds | null, second: Bounds | null): boolean {
 		return first === second || Boolean(first && second && first.x === second.x && first.y === second.y && first.width === second.width && first.height === second.height);
@@ -860,6 +1094,15 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	// Keep grouped roots intact for the Trace data flow, but let fixed facilities
 	// own their cells at the field presentation/interaction boundary.
 	let fieldTraceRootCells = $derived(traceRootCells.filter((cell) => !isBlockedFacilityCell(cell.position)));
+	let firstRunTutorialTraceTargetId = $derived(showFirstRunTutorial && firstRunTutorialStep === 'trace' && personaSnapshot
+		? [...fieldTraceRootCells]
+			.filter((cell) => cell.roots[0].pubkey !== personaSnapshot!.signer.pubkey && !traceReadSnapshot.readRootIds.includes(cell.roots[0].id))
+			.sort((first, second) => {
+				const firstDistance = selfLogicalPosition ? Math.max(Math.abs(first.position.x - selfLogicalPosition.x), Math.abs(first.position.y - selfLogicalPosition.y)) : 0;
+				const secondDistance = selfLogicalPosition ? Math.max(Math.abs(second.position.x - selfLogicalPosition.x), Math.abs(second.position.y - selfLogicalPosition.y)) : 0;
+				return firstDistance - secondDistance;
+			})[0]?.roots[0].id ?? null
+		: null);
 	let traceMarkerCells: readonly TraceMarkerCell[] = $derived(fieldTraceRootCells
 		.filter((cell) => traceConversationState.kind !== 'open' || !sameCell(cell.position, traceConversationState.root.position))
 		.map((cell) => ({
@@ -936,6 +1179,12 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		onSucceeded: (context) => {
 			traceReplyMode = completeTraceReplySubmission(traceReplyMode, context.generation);
 			if (context.manualTrace) manualTraceMode = false;
+			if (!context.manualTrace && firstRunTutorialStep === 'speech' && personaSnapshot) {
+				const scope = firstRunTutorialScopeFor(personaSnapshot);
+				if (scope && firstRunTutorialScopesMatch(firstRunTutorialScope, scope)) {
+					storeFirstRunTutorialStep('trace', personaSnapshot);
+				}
+			}
 		},
 		onOutOfRange: (context) => {
 			if (traceReplyMode.generation === context.generation) traceReplyMode = clearTraceReplyMode(traceReplyMode, true);
@@ -1492,7 +1741,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 					traceReadSnapshot = snapshot;
 					traceReadBaselineSnapshot = snapshot;
 				},
-				onInteractionRewardApplied: showInteractionRewardFeedback,
+				onInteractionRewardApplied: handleInteractionRewardApplied,
 				onPersonaSnapshotChanged: (persona) => {
 					if (personaSnapshot && samePersonaIdentity(personaSnapshot, persona) &&
 						persona.activeRun.revision >= personaSnapshot.activeRun.revision) personaSnapshot = persona;
@@ -1722,7 +1971,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 						personaLifecycleTransition = false;
 						const result = await beginDeathTransition(activePersona, null, false);
 						if (result === 'reloaded' || result === 'failed') return;
-					}
+					} else restoreFirstRunTutorial(activePersona);
 					if (selfSigner.characterProfileRevision !== CURRENT_CHARACTER_PROFILE_REVISION) {
 						const character = requireCharacterFromPubkey(selfSigner.pubkey);
 						const absolutePictureUrl = new URL(
@@ -2026,6 +2275,9 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			} : undefined;
 			const result = await selectIdentity(selection.generation, candidate, rootBuild, selectionOptions);
 			if (result.kind === 'selected') {
+				if (selection.generation === 1 && selection.reusableIdentities.length === 0 && result.persona.activeRun.runNumber === 1) {
+					storeFirstRunTutorialStep('life', result.persona);
+				}
 				if (startSelectedWorld) {
 					await startSelectedWorld(result.persona);
 					return;
@@ -2196,6 +2448,10 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 				upgradeFeedback = { id: ++feedbackSequence, key, level: result.persona.activeRun.gameState.abilities[key] };
 				upgradeFeedbackTimer = window.setTimeout(() => { upgradeFeedback = null; upgradeFeedbackTimer = null; }, 500);
 				soundController?.play('level-up');
+				const scope = firstRunTutorialScopeFor(result.persona);
+				if (firstRunTutorialStep === 'ability' && scope && firstRunTutorialScopesMatch(firstRunTutorialScope, scope)) {
+					storeFirstRunTutorialStep('note', result.persona);
+				}
 			}
 		} catch {
 			closeAdjustmentTerminal();
@@ -2235,6 +2491,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			if (result.kind === 'blocked') mendingStartupFeedback = null;
 			personaSnapshot = result.persona;
 			selfSigner = result.persona.signer;
+			if (result.kind === 'started') advanceFirstRunTutorialFromWork(result.persona);
 			if (result.kind === 'started' || result.kind === 'collected') void worldSession?.refreshSelfActivity();
 			if (result.kind === 'collected') {
 				if (collectFeedbackTimer !== null) window.clearTimeout(collectFeedbackTimer);
@@ -4495,7 +4752,15 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 
 	function moveWorldSelf(direction: Direction): void {
 		if (devWorldSandboxEnabled || !selfSigner) return;
-		void worldSession?.moveSelf(direction);
+		const session = worldSession;
+		const expectedPersona = personaSnapshot;
+		if (!session || !expectedPersona) return;
+		void session.moveSelf(direction).then((result) => {
+			if (result.kind === 'succeeded' && result.operation === 'movement' && personaSnapshot &&
+				personaSnapshot.signer.pubkey === expectedPersona.signer.pubkey && personaSnapshot.activeRun.runNumber === expectedPersona.activeRun.runNumber) {
+				advanceFirstRunTutorialFromMovement(expectedPersona);
+			}
+		});
 	}
 
 	function moveSelfFromCell(direction: Direction): void {
@@ -5046,7 +5311,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	>
 		{#snippet children()}
 			{#if statusHudVisible && personaSnapshot}
-				<div class="top-status-hud" data-top-status-hud {@attach observeTopStatusHud}>
+				<div class="top-status-hud" class:first-run-life-highlight={showFirstRunTutorial && firstRunTutorialStep === 'life'} data-top-status-hud data-tutorial-highlight={showFirstRunTutorial && firstRunTutorialStep === 'life' ? 'lifespan' : undefined} {@attach observeTopStatusHud}>
 					<UnifiedStatusHud
 						expiresAtMs={tagGameHudWorkProjection?.effectiveExpiresAtMs ?? mendingProjection?.effectiveExpiresAtMs ?? personaSnapshot.gameState.lifespanExpiresAtMs}
 						nowMs={tagGameHudProjection ? tagGameHudNowMs : lifespanHudNowMs ?? mendingNowMs}
@@ -5110,12 +5375,15 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 				{tagGameHolderTransfer}
 				tagGameEffect={tagGameDisplayedEffect?.effect ?? null}
 				tagGameEffectActive={tagGameDisplayedEffect?.active ?? false}
+				mendingTerminalHighlighted={showFirstRunTutorial && firstRunTutorialStep === 'work'}
+				adjustmentTerminalHighlighted={showFirstRunTutorial && firstRunTutorialStep === 'ability'}
 				{selfProjectionId}
 				{movingParticipantIds}
 				{selfIsActive}
 				{selfLogicalPosition}
 				presentationTombstonePosition={deathPresentation?.canonicalPosition ?? null}
 				{traceRootGhost}
+				traceTutorialRootId={firstRunTutorialTraceTargetId}
 				{fieldActionMenu}
 				resolveFieldCellSelection={resolveFieldCellSelection}
 				executeFieldCellAction={executeFieldCellAction}
@@ -5184,6 +5452,28 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			</div>
 		{/snippet}
 	</FieldViewport>
+	{#if showFirstRunTutorial && firstRunTutorialStep && firstRunTutorialStep !== 'complete'}
+		<div bind:this={firstRunTutorialElement} class="first-run-tutorial" class:first-run-tutorial-anchored={firstRunTutorialAnchored} data-first-run-tutorial={firstRunTutorialStep} aria-live="polite" aria-atomic="true" style={`--first-run-tutorial-top:${Math.max(topStatusHudBottom + 8, 112)}px`}>
+			{#if firstRunTutorialStep === 'life'}
+				<p>あなたの一生が始まりました。<br />寿命が0になると、この一生は終わります。</p>
+				<ActionButton variant="primary" class="first-run-tutorial-next" type="button" onclick={advanceFirstRunTutorialFromPrompt}>次へ</ActionButton>
+			{:else if firstRunTutorialStep === 'movement'}
+				<p>移動してみよう</p>
+			{:else if firstRunTutorialStep === 'work'}
+				<p>作業をすると、ポイントを得て寿命を延ばせます。</p>
+			{:else if firstRunTutorialStep === 'ability'}
+				<p>強化端末へ移動して、能力をひとつ強化しよう。</p>
+			{:else if firstRunTutorialStep === 'speech'}
+				<p>誰かに話しかけてみましょう</p>
+				<ActionButton variant="primary" class="first-run-tutorial-next" type="button" onclick={advanceFirstRunTutorialFromPrompt}>次へ</ActionButton>
+			{:else if firstRunTutorialStep === 'trace'}
+				<p>他の住人の未読の痕跡・書置き・遺言のどれかを1つ読んで、5ptを受け取ろう。</p>
+			{:else if firstRunTutorialStep === 'note'}
+				<p>100ptを使って、その場に書置きを残せます</p>
+				<ActionButton variant="primary" class="first-run-tutorial-next" type="button" onclick={advanceFirstRunTutorialFromPrompt}>次へ</ActionButton>
+			{/if}
+		</div>
+	{/if}
 	{#if tagGameCountdownStartAt !== null}
 		<TagGameCountdown startAt={tagGameCountdownStartAt} nowMs={mendingNowMs} />
 	{/if}
@@ -5289,11 +5579,15 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		collectFeedback={collectFeedback}
 		startupFeedback={mendingStartupFeedback}
 	/>
+	{#if showFirstRunTutorial && firstRunTutorialStep === 'complete'}
+		<div class="first-run-completion-notice" data-first-run-tutorial="complete" role="status" aria-live="polite" aria-atomic="true">あとは自由です。</div>
+	{/if}
 	<AdjustmentDialog
 		open={adjustmentDialogOpen}
 		points={personaSnapshot?.gameState.points ?? 0}
 		abilities={personaSnapshot?.gameState.abilities ?? { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 }}
 		busy={abilityMutationInFlight}
+		tutorialUpgradeRequired={showFirstRunTutorial && firstRunTutorialStep === 'ability'}
 		onOpenChange={(open) => { adjustmentDialogOpen = open; }}
 		onUpgrade={(key) => { void mutateAbility(key); }}
 		upgradeFeedback={upgradeFeedback}
@@ -5365,6 +5659,8 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			onOpenSelfProfile={openSelfProfile}
 			suggestionConversation={speechSuggestionConversation}
 			onSpeechTypeChange={(next) => { selectedSpeechType = next; }}
+				speechTutorialHighlighted={showFirstRunTutorial && firstRunTutorialStep === 'speech'}
+				noteTutorialHighlighted={showFirstRunTutorial && firstRunTutorialStep === 'note'}
 				manualTraceSelected={manualTraceMode}
 				{manualTraceEnabled}
 				{manualTraceStatus}
@@ -5429,6 +5725,87 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		display: grid;
 		width: auto;
 		gap: 3px;
+		pointer-events: none;
+	}
+	.top-status-hud.first-run-life-highlight :global([data-unified-status-hud]) {
+		outline: 3px solid rgba(23, 176, 148, .95);
+		outline-offset: 4px;
+		border-radius: 12px;
+		animation: first-run-hud-glow-pulse 2.6s ease-in-out infinite;
+	}
+	@keyframes first-run-hud-glow-pulse {
+		0%, 100% { box-shadow: 0 0 0 5px rgba(23, 176, 148, .08), 0 0 10px rgba(23, 176, 148, .32); }
+		50% { box-shadow: 0 0 0 9px rgba(23, 176, 148, .22), 0 0 24px rgba(23, 176, 148, .8); }
+	}
+	.first-run-tutorial {
+		position: absolute;
+		top: var(--first-run-tutorial-top);
+		left: 50%;
+		z-index: 30;
+		display: grid;
+		justify-items: center;
+		gap: 8px;
+		width: min(460px, calc(100% - 28px));
+		transform: translateX(-50%);
+		pointer-events: none;
+		text-align: center;
+	}
+	.first-run-tutorial-anchored {
+		left: var(--first-run-tutorial-anchor-left, 50%);
+		top: var(--first-run-tutorial-anchor-top, var(--first-run-tutorial-top));
+		width: min(340px, calc(100% - 28px));
+	}
+	@media (max-width: 700px) {
+		.first-run-tutorial-anchored[data-first-run-tutorial="speech"],
+		.first-run-tutorial-anchored[data-first-run-tutorial="note"] {
+			grid-template-columns: minmax(0, 1fr) auto;
+			align-items: center;
+			width: min(390px, calc(100% - 20px));
+			gap: 10px;
+		}
+		.first-run-tutorial-anchored[data-first-run-tutorial="speech"] p,
+		.first-run-tutorial-anchored[data-first-run-tutorial="note"] p { padding: 9px 12px; font-size: .9rem; text-align: left; }
+	}
+	.first-run-tutorial p {
+		margin: 0;
+		padding: 10px 16px;
+		border: 1px solid rgba(104, 241, 221, .56);
+		border-radius: 14px;
+		background: rgba(17, 23, 37, .94);
+		animation: first-run-tutorial-copy-pulse 2.6s ease-in-out infinite;
+		color: #fff;
+		font-size: .96rem;
+		line-height: 1.55;
+		text-wrap: pretty;
+	}
+	@keyframes first-run-tutorial-copy-pulse {
+		0%, 100% { border-color: rgba(104, 241, 221, .48); box-shadow: 0 5px 18px rgba(0, 0, 0, .26), 0 0 6px rgba(72, 221, 210, .2); }
+		50% { border-color: rgba(104, 241, 221, .98); box-shadow: 0 5px 20px rgba(0, 0, 0, .26), 0 0 18px rgba(72, 221, 210, .62); }
+	}
+	.first-run-tutorial :global(.first-run-tutorial-next) { pointer-events: auto; }
+	@media (prefers-reduced-motion: reduce) {
+		.top-status-hud.first-run-life-highlight :global([data-unified-status-hud]), .first-run-tutorial p { animation: none; }
+		.top-status-hud.first-run-life-highlight :global([data-unified-status-hud]) { box-shadow: 0 0 0 8px rgba(23, 176, 148, .15), 0 0 20px rgba(23, 176, 148, .62); }
+		.first-run-tutorial p { border-color: rgba(104, 241, 221, .7); box-shadow: 0 5px 22px rgba(0, 0, 0, .26); }
+	}
+	.first-run-completion-notice {
+		position: fixed;
+		top: max(12px, env(safe-area-inset-top));
+		left: 50%;
+		z-index: 110;
+		width: max-content;
+		max-width: calc(100vw - 32px);
+		padding: 14px 24px;
+		transform: translateX(-50%);
+		border: 2px solid rgba(104, 241, 221, .86);
+		border-radius: 999px;
+		background: rgba(17, 23, 37, .96);
+		box-shadow: 0 5px 24px rgba(0, 0, 0, .38), 0 0 18px rgba(72, 221, 210, .36);
+		color: #fff;
+		font-size: clamp(1.25rem, 5vw, 1.75rem);
+		font-weight: 800;
+		line-height: 1.35;
+		text-align: center;
 		pointer-events: none;
 	}
 	.top-status-controls { display: grid; justify-items: end; }

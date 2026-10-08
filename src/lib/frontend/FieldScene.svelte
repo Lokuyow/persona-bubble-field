@@ -69,12 +69,15 @@
 		tagGameHolderTransfer: Readonly<{ participantId: string; id: number }> | null;
 		tagGameEffect: 'benefit' | 'calamity' | null;
 		tagGameEffectActive: boolean;
+		mendingTerminalHighlighted: boolean;
+		adjustmentTerminalHighlighted: boolean;
 		selfProjectionId: string;
 		movingParticipantIds: ReadonlySet<string>;
 		selfIsActive: boolean;
 		selfLogicalPosition: GridPosition | null;
 		presentationTombstonePosition: GridPosition | null;
 		traceRootGhost: TraceRootGhost | null;
+		traceTutorialRootId: string | null;
 		fieldActionMenu: FieldActionMenu | null;
 		resolveFieldCellSelection: (position: GridPosition, trigger?: HTMLButtonElement) => void;
 		executeFieldCellAction: (action: FieldCellAction, position: GridPosition, trigger?: HTMLButtonElement) => void;
@@ -108,12 +111,15 @@
 		tagGameHolderTransfer,
 		tagGameEffect,
 		tagGameEffectActive,
+		mendingTerminalHighlighted,
+		adjustmentTerminalHighlighted,
 		selfProjectionId,
 		movingParticipantIds,
 		selfIsActive,
 		selfLogicalPosition,
 		presentationTombstonePosition,
 		traceRootGhost,
+		traceTutorialRootId,
 		fieldActionMenu,
 		resolveFieldCellSelection,
 		executeFieldCellAction,
@@ -189,6 +195,7 @@
 					data-trace-marker-kind={cell.kind}
 					data-trace-root-read={cell.read ? 'true' : 'false'}
 					data-trace-root-unread-reply={cell.unreadReply ? 'true' : undefined}
+					data-tutorial-highlight={cell.roots[0].id === traceTutorialRootId ? 'trace' : undefined}
 					class:trace-marker-random={cell.kind === 'random'}
 					class:trace-marker-read={cell.read}
 					class:trace-marker-unread-reply={cell.unreadReply}
@@ -198,7 +205,8 @@
 		</div>
 		<div class="field-facility-layer" aria-hidden="true">
 			{#each FIXED_FIELD_FACILITIES as facility (facility.kind)}
-				<span class={['field-facility', `field-${facility.kind}`]} data-field-facility={facility.kind}
+				<span class={['field-facility', `field-${facility.kind}`]} class:field-facility-highlighted={(facility.kind === 'mending-terminal' && mendingTerminalHighlighted) || (facility.kind === 'adjustment-terminal' && adjustmentTerminalHighlighted)} data-field-facility={facility.kind}
+					data-tutorial-highlight={facility.kind === 'mending-terminal' && mendingTerminalHighlighted ? 'work' : facility.kind === 'adjustment-terminal' && adjustmentTerminalHighlighted ? 'ability' : undefined}
 					style={`left: ${(facility.position.x + 0.5) * cellSize}px; top: ${(facility.position.y + 0.5) * cellSize}px;`}>{#if facility.kind === 'mending-terminal'}<img src={asset(MENDING_TERMINAL_ASSET)} alt="" />{:else if facility.kind === 'adjustment-terminal'}<img src={asset(ADJUSTMENT_TERMINAL_ASSET)} alt="" />{:else if facility.kind === 'tag-game-terminal'}<img src={asset(TAG_GAME_TERMINAL_ASSET)} alt="" />{:else}<img src={asset(RANKING_TERMINAL_ASSET)} alt="" />{/if}</span>
 			{/each}
 		</div>
@@ -286,6 +294,7 @@
 			<div
 				class={['trace-ghost', { 'trace-ghost-compact': traceRootGhost.compact }]}
 				data-trace-ghost-root-id={traceRootGhost.event.id}
+				data-tutorial-highlight={traceRootGhost.event.id === traceTutorialRootId ? 'trace' : undefined}
 				style={`left: ${traceRootGhost.world.x}px; top: ${traceRootGhost.world.y}px; width: ${traceRootGhost.size.width}px; height: ${traceRootGhost.size.height}px;`}
 			>
 				<button
@@ -400,6 +409,21 @@
 		transform: translate(-50%, -50%); pointer-events: none;
 	}
 	.field-tag-game-terminal { width: calc(var(--cell-size) * 0.86); height: calc(var(--cell-size) * 0.86); }
+	.field-facility-highlighted { animation: first-run-target-light-pulse 2.6s ease-in-out infinite; }
+	.field-facility-highlighted::after {
+		position: absolute; inset: -24%; border: 3px solid rgba(111, 255, 232, .98); border-radius: 50%;
+		box-shadow: 0 0 0 6px rgba(72, 221, 210, .34), 0 0 24px rgba(72, 221, 210, .72); content: ''; pointer-events: none;
+		animation: first-run-target-ring-pulse 2.6s ease-in-out infinite;
+	}
+	@keyframes first-run-target-light-pulse {
+		0%, 100% { filter: drop-shadow(0 0 6px rgba(72, 221, 210, .68)) drop-shadow(0 0 14px rgba(72, 221, 210, .5)); }
+		50% { filter: drop-shadow(0 0 11px rgba(111, 255, 232, 1)) drop-shadow(0 0 28px rgba(72, 221, 210, .94)); }
+	}
+	@keyframes first-run-target-ring-pulse { 0%, 100% { opacity: .48; transform: scale(1); } 50% { opacity: .95; transform: scale(1.14); } }
+	@media (prefers-reduced-motion: reduce) {
+		.field-facility-highlighted, .field-facility-highlighted::after { animation: none; }
+		.field-facility-highlighted { filter: drop-shadow(0 0 5px rgba(72, 221, 210, .95)) drop-shadow(0 0 12px rgba(72, 221, 210, .72)); }
+	}
 	.field-facility img { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
 	.realtime-group-layer { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
 	.realtime-group {
@@ -451,6 +475,19 @@
 		color: #cf06fe;
 		opacity: 0.9;
 		filter: none;
+	}
+	.trace-marker[data-tutorial-highlight="trace"] {
+		z-index: 5;
+		opacity: 1;
+		transform: translate(-100%, 0) scale(1.7);
+		animation: first-run-target-light-pulse 2.6s ease-in-out infinite;
+	}
+	.trace-ghost[data-tutorial-highlight="trace"] { opacity: 1; animation: first-run-target-light-pulse 2.6s ease-in-out infinite; }
+	@media (prefers-reduced-motion: reduce) {
+		.trace-marker[data-tutorial-highlight="trace"], .trace-ghost[data-tutorial-highlight="trace"] {
+			animation: none;
+			filter: drop-shadow(0 0 4px rgba(72, 221, 210, .95)) drop-shadow(0 0 10px rgba(72, 221, 210, .72));
+		}
 	}
 
 	.death-presentation-tombstone {

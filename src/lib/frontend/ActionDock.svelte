@@ -35,6 +35,8 @@
 		suggestionConversation: readonly SpeechSuggestionConversationEntry[];
 		chatterOpen: boolean;
 		onToggleChatter: () => void;
+		speechTutorialHighlighted: boolean;
+		noteTutorialHighlighted: boolean;
 		onSpeechTypeChange: (next: SpeechType) => void;
 		manualTraceSelected: boolean;
 		manualTraceEnabled: boolean;
@@ -45,7 +47,8 @@
 	};
 	let { onBoundsChange, boundsRevision, selectedSpeechType, submissionInProgress, volume, onSoundOpen, onVolume, onSpeechTypeChange, onOpenSelfProfile, submitContent, submitCandidate,
 		desiredContext, loadPreview, onPreviewClear, onEditorEmptyChange, onPreferredHeightChange,
-	 hasUnreadReplies, unreadBaselineSnapshot, character, avatarTone, suggestionConversation, canOpenSelfProfile, chatterOpen, onToggleChatter,
+		hasUnreadReplies, unreadBaselineSnapshot, character, avatarTone, suggestionConversation, canOpenSelfProfile, chatterOpen, onToggleChatter,
+		speechTutorialHighlighted, noteTutorialHighlighted,
 	 manualTraceSelected, manualTraceEnabled, manualTraceStatus, onToggleManualTrace }: Props = $props();
 	let remeasureBounds = () => {};
 	const observeBounds: Attachment<HTMLElement> = (node) => untrack(() => {
@@ -218,9 +221,10 @@
 				{#snippet child({ props })}
 					<button
 						{...props}
-						class="speech-type-toggle"
+						class={['speech-type-toggle', { 'speech-tutorial-highlighted': speechTutorialHighlighted }]}
 						type="button"
 						data-speech-type={selectedSpeechType}
+						data-tutorial-highlight={speechTutorialHighlighted ? 'speech' : undefined}
 						aria-label={`発言タイプ: ${SPEECH_TYPE_LABELS[selectedSpeechType]}（クリックで${SPEECH_TYPE_LABELS[nextSpeechType(selectedSpeechType)]}へ）`}
 						disabled={submissionInProgress}
 						onclick={cycleSpeechType}
@@ -246,8 +250,9 @@
 				{#snippet child({ props })}
 					<button
 						{...props}
-						class={['manual-trace-toggle', { 'action-selected': manualTraceSelected }]}
+						class={['manual-trace-toggle', { 'action-selected': manualTraceSelected, 'note-tutorial-highlighted': noteTutorialHighlighted }]}
 						type="button"
+						data-tutorial-highlight={noteTutorialHighlighted ? 'note' : undefined}
 						aria-label={`書置きを投稿（100pt消費${manualTraceStatus === 'unknown' ? '・結果未確認' : manualTraceStatus === 'sending' ? '・送信中' : ''}）`}
 						aria-pressed={manualTraceSelected}
 						data-manual-trace-status={manualTraceStatus}
@@ -274,7 +279,7 @@
 		/>
 		</div>
 		</Tooltip.Provider>
-		<div class="composer-editor-slot">
+		<div class="composer-editor-slot" class:composer-tutorial-highlighted={speechTutorialHighlighted} data-tutorial-highlight={speechTutorialHighlighted ? 'speech' : undefined}>
 			<HostOwnedComposerLite
 				bind:this={composerComponent}
 				{submitContent}
@@ -478,11 +483,36 @@
 		outline: 3px solid var(--color-focus-ring);
 		outline-offset: 2px;
 	}
+	.speech-type-toggle.speech-tutorial-highlighted, .manual-trace-toggle.note-tutorial-highlighted {
+		animation: first-run-action-glow-pulse 2.6s ease-in-out infinite;
+	}
+	@keyframes first-run-action-glow-pulse {
+		0%, 100% { box-shadow: 0 0 0 4px rgba(31, 173, 153, .32), 0 0 12px rgba(31, 173, 153, .64); }
+		50% { box-shadow: 0 0 0 7px rgba(31, 173, 153, .72), 0 0 24px rgba(31, 173, 153, 1); }
+	}
 
 	.composer-editor-slot {
 		flex: 1 1 auto;
 		min-width: 0;
 		min-height: 0;
+	}
+	.composer-editor-slot.composer-tutorial-highlighted {
+		outline: 2px solid rgba(31, 173, 153, .96);
+		outline-offset: 3px;
+		border-radius: 12px;
+		animation: first-run-composer-glow-pulse 2.6s ease-in-out infinite;
+	}
+	@keyframes first-run-composer-glow-pulse {
+		0%, 100% { box-shadow: 0 0 0 4px rgba(31, 173, 153, .2), 0 0 12px rgba(31, 173, 153, .48); }
+		50% { box-shadow: 0 0 0 8px rgba(31, 173, 153, .42), 0 0 26px rgba(31, 173, 153, .92); }
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.speech-type-toggle.speech-tutorial-highlighted, .manual-trace-toggle.note-tutorial-highlighted,
+		.composer-editor-slot.composer-tutorial-highlighted { animation: none; }
+		.speech-type-toggle.speech-tutorial-highlighted, .manual-trace-toggle.note-tutorial-highlighted {
+			box-shadow: 0 0 0 4px rgba(31, 173, 153, .35), 0 0 15px rgba(31, 173, 153, .82);
+		}
+		.composer-editor-slot.composer-tutorial-highlighted { box-shadow: 0 0 0 6px rgba(31, 173, 153, .16), 0 0 17px rgba(31, 173, 153, .52); }
 	}
 
 	.action-dock-content :global(.host-owned-composer) {
