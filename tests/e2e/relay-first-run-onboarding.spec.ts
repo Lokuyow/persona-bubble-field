@@ -166,6 +166,22 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 420, height: 800 
 		const noteAction = page.locator('.manual-trace-toggle');
 		await expect(noteAction).toHaveAttribute('data-tutorial-highlight', 'note');
 		await expect.poll(() => noteAction.evaluate((element) => getComputedStyle(element).boxShadow)).not.toBe('none');
+		const noteGuidanceLayout = await noteStep.evaluate((guide) => {
+			const target = document.querySelector('.manual-trace-toggle[data-tutorial-highlight="note"]');
+			if (!(target instanceof HTMLElement)) return null;
+			const guideBounds = guide.getBoundingClientRect();
+			const targetBounds = target.getBoundingClientRect();
+			const horizontalGap = Math.max(0, targetBounds.left - guideBounds.right, guideBounds.left - targetBounds.right);
+			const verticalGap = Math.max(0, targetBounds.top - guideBounds.bottom, guideBounds.top - targetBounds.bottom);
+			return {
+				insideViewport: guideBounds.left >= 0 && guideBounds.right <= innerWidth && guideBounds.top >= 0 && guideBounds.bottom <= innerHeight,
+				overlapsTarget: guideBounds.left < targetBounds.right && guideBounds.right > targetBounds.left && guideBounds.top < targetBounds.bottom && guideBounds.bottom > targetBounds.top,
+				separation: Math.hypot(horizontalGap, verticalGap)
+			};
+		});
+		expect(noteGuidanceLayout?.insideViewport, JSON.stringify(noteGuidanceLayout)).toBe(true);
+		expect(noteGuidanceLayout?.overlapsTarget, JSON.stringify(noteGuidanceLayout)).toBe(false);
+		expect(noteGuidanceLayout?.separation, JSON.stringify(noteGuidanceLayout)).toBeLessThanOrEqual(24);
 		await page.reload({ waitUntil: 'domcontentloaded' });
 		await releaseFirstRunPrimary(page);
 		await expect(page.locator('[data-first-run-tutorial="note"]')).toBeVisible();

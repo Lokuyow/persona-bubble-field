@@ -339,6 +339,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	let firstRunTutorialStep = $state<FirstRunTutorialStep | 'complete' | null>(null);
 	let firstRunTutorialScope = $state<FirstRunTutorialScope | null>(null);
 	let firstRunTutorialElement = $state<HTMLDivElement | null>(null);
+	let firstRunTutorialAnchored = $state(false);
 	let pendingIdentitySelection = $state<PendingSelection | null>(null);
 	let runTransitionNotice = $state<RunTransitionNotice | null>(null);
 	let pendingRootPoints = $state(0);
@@ -363,9 +364,9 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	}
 
 	function clearFirstRunTutorialAnchor(): void {
+		firstRunTutorialAnchored = false;
 		const element = firstRunTutorialElement;
 		if (!element) return;
-		element.classList.remove('first-run-tutorial-anchored');
 		element.style.removeProperty('--first-run-tutorial-anchor-left');
 		element.style.removeProperty('--first-run-tutorial-anchor-top');
 	}
@@ -483,7 +484,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 				frame = window.requestAnimationFrame(updateAnchor);
 				return;
 			}
-			guide.classList.add('first-run-tutorial-anchored');
+			firstRunTutorialAnchored = true;
 			const surfaceBounds = surface.getBoundingClientRect();
 			const targetBounds = target.getBoundingClientRect();
 			const guideBounds = guide.getBoundingClientRect();
@@ -5253,30 +5254,6 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 					/>
 				</div>{/if}
 			{/if}
-			{#if showFirstRunTutorial && firstRunTutorialStep && firstRunTutorialStep !== 'complete'}
-				<div bind:this={firstRunTutorialElement} class="first-run-tutorial" data-first-run-tutorial={firstRunTutorialStep} aria-live="polite" aria-atomic="true" style={`--first-run-tutorial-top:${Math.max(topStatusHudBottom + 8, 112)}px`}>
-					{#if firstRunTutorialStep === 'life'}
-						<p>あなたの一生が始まりました。<br />寿命が0になると、この一生は終わります。</p>
-						<ActionButton variant="primary" class="first-run-tutorial-next" type="button" onclick={advanceFirstRunTutorialFromPrompt}>次へ</ActionButton>
-					{:else if firstRunTutorialStep === 'movement'}
-						<p>移動してみよう</p>
-					{:else if firstRunTutorialStep === 'work'}
-						<p>作業をすると、ポイントを得て寿命を延ばせます。</p>
-					{:else if firstRunTutorialStep === 'ability'}
-						<p>ポイントを使って、能力を強化できます。</p>
-						<ActionButton variant="primary" class="first-run-tutorial-next" type="button" onclick={advanceFirstRunTutorialFromPrompt}>次へ</ActionButton>
-					{:else if firstRunTutorialStep === 'speech'}
-						<p>ここでは、ほかの住人に発言できます。</p>
-						<ActionButton variant="primary" class="first-run-tutorial-next" type="button" onclick={advanceFirstRunTutorialFromPrompt}>次へ</ActionButton>
-					{:else if firstRunTutorialStep === 'trace'}
-						<p>まだ読んでいない、他人の痕跡・遺言・書置きを読むと5pt獲得できます。</p>
-						<ActionButton variant="primary" class="first-run-tutorial-next" type="button" onclick={advanceFirstRunTutorialFromPrompt}>次へ</ActionButton>
-					{:else if firstRunTutorialStep === 'note'}
-						<p>100ptを使って、書置きを残せます。</p>
-						<ActionButton variant="primary" class="first-run-tutorial-next" type="button" onclick={advanceFirstRunTutorialFromPrompt}>次へ</ActionButton>
-					{/if}
-				</div>
-			{/if}
 			<Chatter
 				bind:this={chatterComponent}
 				messages={recentMessageTimeline}
@@ -5387,6 +5364,30 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			</div>
 		{/snippet}
 	</FieldViewport>
+	{#if showFirstRunTutorial && firstRunTutorialStep && firstRunTutorialStep !== 'complete'}
+		<div bind:this={firstRunTutorialElement} class="first-run-tutorial" class:first-run-tutorial-anchored={firstRunTutorialAnchored} data-first-run-tutorial={firstRunTutorialStep} aria-live="polite" aria-atomic="true" style={`--first-run-tutorial-top:${Math.max(topStatusHudBottom + 8, 112)}px`}>
+			{#if firstRunTutorialStep === 'life'}
+				<p>あなたの一生が始まりました。<br />寿命が0になると、この一生は終わります。</p>
+				<ActionButton variant="primary" class="first-run-tutorial-next" type="button" onclick={advanceFirstRunTutorialFromPrompt}>次へ</ActionButton>
+			{:else if firstRunTutorialStep === 'movement'}
+				<p>移動してみよう</p>
+			{:else if firstRunTutorialStep === 'work'}
+				<p>作業をすると、ポイントを得て寿命を延ばせます。</p>
+			{:else if firstRunTutorialStep === 'ability'}
+				<p>ポイントを使って、能力を強化できます。</p>
+				<ActionButton variant="primary" class="first-run-tutorial-next" type="button" onclick={advanceFirstRunTutorialFromPrompt}>次へ</ActionButton>
+			{:else if firstRunTutorialStep === 'speech'}
+				<p>ここでは、ほかの住人に発言できます。</p>
+				<ActionButton variant="primary" class="first-run-tutorial-next" type="button" onclick={advanceFirstRunTutorialFromPrompt}>次へ</ActionButton>
+			{:else if firstRunTutorialStep === 'trace'}
+				<p>まだ読んでいない、他人の痕跡・遺言・書置きを読むと5pt獲得できます。</p>
+				<ActionButton variant="primary" class="first-run-tutorial-next" type="button" onclick={advanceFirstRunTutorialFromPrompt}>次へ</ActionButton>
+			{:else if firstRunTutorialStep === 'note'}
+				<p>100ptを使って、書置きを残せます。</p>
+				<ActionButton variant="primary" class="first-run-tutorial-next" type="button" onclick={advanceFirstRunTutorialFromPrompt}>次へ</ActionButton>
+			{/if}
+		</div>
+	{/if}
 	{#if tagGameCountdownStartAt !== null}
 		<TagGameCountdown startAt={tagGameCountdownStartAt} nowMs={mendingNowMs} />
 	{/if}
