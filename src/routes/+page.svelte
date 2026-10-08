@@ -338,6 +338,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	const FIRST_RUN_TUTORIAL_SESSION_KEY = 'persona-bubble-field:first-run-tutorial';
 	let firstRunTutorialStep = $state<FirstRunTutorialStep | 'complete' | null>(null);
 	let firstRunTutorialScope = $state<FirstRunTutorialScope | null>(null);
+	let firstRunTutorialElement = $state<HTMLDivElement | null>(null);
 	let pendingIdentitySelection = $state<PendingSelection | null>(null);
 	let runTransitionNotice = $state<RunTransitionNotice | null>(null);
 	let pendingRootPoints = $state(0);
@@ -351,6 +352,23 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	let statusHudVisible = $derived(lifespanHudNowMs !== null && personaSnapshot !== null && !personaLifecycleTransition);
 	let showFirstRunTutorial = $derived(Boolean(statusHudVisible && firstRunTutorialStep && personaSnapshot && firstRunTutorialScope &&
 		firstRunTutorialScopesMatch(firstRunTutorialScope, firstRunTutorialScopeFor(personaSnapshot))));
+
+	function firstRunTutorialAnchorSelector(step: FirstRunTutorialStep): string | null {
+		if (step === 'life') return '[data-top-status-hud][data-tutorial-highlight="lifespan"]';
+		if (step === 'work') return '[data-field-facility="mending-terminal"][data-tutorial-highlight="work"]';
+		if (step === 'ability') return '[data-field-facility="adjustment-terminal"][data-tutorial-highlight="ability"]';
+		if (step === 'speech') return '.composer-editor-slot[data-tutorial-highlight="speech"]';
+		if (step === 'note') return '.manual-trace-toggle[data-tutorial-highlight="note"]';
+		return null;
+	}
+
+	function clearFirstRunTutorialAnchor(): void {
+		const element = firstRunTutorialElement;
+		if (!element) return;
+		element.classList.remove('first-run-tutorial-anchored');
+		element.style.removeProperty('--first-run-tutorial-anchor-left');
+		element.style.removeProperty('--first-run-tutorial-anchor-top');
+	}
 
 	function firstRunTutorialScopeFor(persona: PersonaSnapshot | null): FirstRunTutorialScope | null {
 		if (!persona || persona.identity.generation !== 1 || persona.activeRun.runNumber !== 1) return null;
@@ -447,6 +465,48 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			}
 		}, 2_600);
 		return () => window.clearTimeout(timer);
+	});
+	$effect(() => {
+		const step = firstRunTutorialStep;
+		const selector = step && step !== 'complete' ? firstRunTutorialAnchorSelector(step) : null;
+		if (!showFirstRunTutorial || !selector) {
+			untrack(clearFirstRunTutorialAnchor);
+			return;
+		}
+		let frame = 0;
+		const updateAnchor = (): void => {
+			const guide = firstRunTutorialElement;
+			const target = document.querySelector(selector);
+			const surface = guide?.offsetParent;
+			if (!(guide instanceof HTMLElement && target instanceof HTMLElement && surface instanceof HTMLElement)) {
+				untrack(clearFirstRunTutorialAnchor);
+				frame = window.requestAnimationFrame(updateAnchor);
+				return;
+			}
+			guide.classList.add('first-run-tutorial-anchored');
+			const surfaceBounds = surface.getBoundingClientRect();
+			const targetBounds = target.getBoundingClientRect();
+			const guideBounds = guide.getBoundingClientRect();
+			const edge = 12;
+			const gap = 10;
+			const minCenterX = surfaceBounds.left + edge + guideBounds.width / 2;
+			const maxCenterX = surfaceBounds.right - edge - guideBounds.width / 2;
+			const centerX = Math.max(minCenterX, Math.min(maxCenterX, targetBounds.left + targetBounds.width / 2));
+			const aboveTop = targetBounds.top - guideBounds.height - gap;
+			const belowTop = targetBounds.bottom + gap;
+			const top = aboveTop >= surfaceBounds.top + edge
+				? aboveTop
+				: belowTop + guideBounds.height <= surfaceBounds.bottom - edge
+					? belowTop
+					: Math.max(surfaceBounds.top + edge, Math.min(surfaceBounds.bottom - edge - guideBounds.height, targetBounds.top + (targetBounds.height - guideBounds.height) / 2));
+			const leftValue = `${centerX - surfaceBounds.left}px`;
+			const topValue = `${top - surfaceBounds.top}px`;
+			if (guide.style.getPropertyValue('--first-run-tutorial-anchor-left') !== leftValue) guide.style.setProperty('--first-run-tutorial-anchor-left', leftValue);
+			if (guide.style.getPropertyValue('--first-run-tutorial-anchor-top') !== topValue) guide.style.setProperty('--first-run-tutorial-anchor-top', topValue);
+			frame = window.requestAnimationFrame(updateAnchor);
+		};
+		frame = window.requestAnimationFrame(updateAnchor);
+		return () => window.cancelAnimationFrame(frame);
 	});
 	const presentationRemeasures = new Set<() => void>();
 	function sameBounds(first: Bounds | null, second: Bounds | null): boolean {
@@ -5194,7 +5254,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 				</div>{/if}
 			{/if}
 			{#if showFirstRunTutorial && firstRunTutorialStep && firstRunTutorialStep !== 'complete'}
-				<div class="first-run-tutorial" data-first-run-tutorial={firstRunTutorialStep} aria-live="polite" aria-atomic="true" style={`--first-run-tutorial-top:${Math.max(topStatusHudBottom + 8, 112)}px`}>
+				<div bind:this={firstRunTutorialElement} class="first-run-tutorial" data-first-run-tutorial={firstRunTutorialStep} aria-live="polite" aria-atomic="true" style={`--first-run-tutorial-top:${Math.max(topStatusHudBottom + 8, 112)}px`}>
 					{#if firstRunTutorialStep === 'life'}
 						<p>あなたの一生が始まりました。<br />寿命が0になると、この一生は終わります。</p>
 						<ActionButton variant="primary" class="first-run-tutorial-next" type="button" onclick={advanceFirstRunTutorialFromPrompt}>次へ</ActionButton>
@@ -5597,6 +5657,11 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		transform: translateX(-50%);
 		pointer-events: none;
 		text-align: center;
+	}
+	.first-run-tutorial-anchored {
+		left: var(--first-run-tutorial-anchor-left, 50%);
+		top: var(--first-run-tutorial-anchor-top, var(--first-run-tutorial-top));
+		width: min(340px, calc(100% - 28px));
 	}
 	.first-run-tutorial p {
 		margin: 0;
