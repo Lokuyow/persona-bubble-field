@@ -487,8 +487,8 @@
 		animation: first-run-action-glow-pulse 2.6s ease-in-out infinite;
 	}
 	@keyframes first-run-action-glow-pulse {
-		0%, 100% { box-shadow: 0 0 0 3px rgba(31, 173, 153, .2), 0 0 8px rgba(31, 173, 153, .42); }
-		50% { box-shadow: 0 0 0 5px rgba(31, 173, 153, .46), 0 0 18px rgba(31, 173, 153, .92); }
+		0%, 100% { box-shadow: 0 0 0 4px rgba(31, 173, 153, .32), 0 0 12px rgba(31, 173, 153, .64); }
+		50% { box-shadow: 0 0 0 7px rgba(31, 173, 153, .72), 0 0 24px rgba(31, 173, 153, 1); }
 	}
 
 	.composer-editor-slot {
@@ -503,8 +503,8 @@
 		animation: first-run-composer-glow-pulse 2.6s ease-in-out infinite;
 	}
 	@keyframes first-run-composer-glow-pulse {
-		0%, 100% { box-shadow: 0 0 0 4px rgba(31, 173, 153, .1), 0 0 9px rgba(31, 173, 153, .3); }
-		50% { box-shadow: 0 0 0 7px rgba(31, 173, 153, .28), 0 0 20px rgba(31, 173, 153, .78); }
+		0%, 100% { box-shadow: 0 0 0 4px rgba(31, 173, 153, .2), 0 0 12px rgba(31, 173, 153, .48); }
+		50% { box-shadow: 0 0 0 8px rgba(31, 173, 153, .42), 0 0 26px rgba(31, 173, 153, .92); }
 	}
 	@media (prefers-reduced-motion: reduce) {
 		.speech-type-toggle.speech-tutorial-highlighted, .manual-trace-toggle.note-tutorial-highlighted,

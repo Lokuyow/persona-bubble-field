@@ -531,15 +531,43 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			const gap = 10;
 			const minCenterX = surfaceBounds.left + edge + guideBounds.width / 2;
 			const maxCenterX = surfaceBounds.right - edge - guideBounds.width / 2;
-			const centerX = Math.max(minCenterX, Math.min(maxCenterX, targetBounds.left + targetBounds.width / 2));
+			const clampCenterX = (center: number): number => Math.max(minCenterX, Math.min(maxCenterX, center));
+			const centerX = clampCenterX(targetBounds.left + targetBounds.width / 2);
 			const aboveTop = targetBounds.top - guideBounds.height - gap;
 			const belowTop = targetBounds.bottom + gap;
-			const top = aboveTop >= surfaceBounds.top + edge
-				? aboveTop
-				: belowTop + guideBounds.height <= surfaceBounds.bottom - edge
-					? belowTop
-					: Math.max(surfaceBounds.top + edge, Math.min(surfaceBounds.bottom - edge - guideBounds.height, targetBounds.top + (targetBounds.height - guideBounds.height) / 2));
-			const leftValue = `${centerX - surfaceBounds.left}px`;
+			const minTop = surfaceBounds.top + edge;
+			const maxTop = surfaceBounds.bottom - edge - guideBounds.height;
+			const fitsVertically = (top: number): boolean => top >= minTop && top <= maxTop;
+			const verticalCenterTop = Math.max(minTop, Math.min(maxTop, targetBounds.top + (targetBounds.height - guideBounds.height) / 2));
+			const horizontalCenters = [
+				targetBounds.left - gap - guideBounds.width / 2,
+				targetBounds.right + gap + guideBounds.width / 2
+			];
+			const nonOverlappingPlacements = [
+				{ center: centerX, top: aboveTop },
+				{ center: centerX, top: belowTop },
+				...horizontalCenters.map((center) => ({ center: clampCenterX(center), top: verticalCenterTop }))
+			].filter((placement) => {
+				const left = placement.center - guideBounds.width / 2;
+				const right = placement.center + guideBounds.width / 2;
+				return fitsVertically(placement.top) &&
+					!(left < targetBounds.right && right > targetBounds.left && placement.top < targetBounds.bottom && placement.top + guideBounds.height > targetBounds.top);
+			}).sort((first, second) => {
+				const distance = (placement: Readonly<{ center: number; top: number }>): number =>
+					Math.hypot(placement.center - (targetBounds.left + targetBounds.width / 2), placement.top - targetBounds.top);
+				return distance(first) - distance(second);
+			});
+			const mobileDockBounds = window.matchMedia('(max-width: 700px)').matches
+				? target.closest<HTMLElement>('.action-dock')?.getBoundingClientRect() ?? null
+				: null;
+			const aboveDockTop = mobileDockBounds ? mobileDockBounds.top - guideBounds.height - gap : null;
+			const canPlaceAboveDock = aboveDockTop !== null && fitsVertically(aboveDockTop);
+			const fallbackTop = (targetBounds.top - minTop) >= (maxTop - targetBounds.bottom)
+				? Math.min(maxTop, Math.max(minTop, aboveTop))
+				: Math.min(maxTop, Math.max(minTop, belowTop));
+			const selectedPlacement = nonOverlappingPlacements[0];
+			const top = canPlaceAboveDock ? aboveDockTop : selectedPlacement?.top ?? fallbackTop;
+			const leftValue = `${(canPlaceAboveDock ? centerX : selectedPlacement?.center ?? centerX) - surfaceBounds.left}px`;
 			const topValue = `${top - surfaceBounds.top}px`;
 			if (guide.style.getPropertyValue('--first-run-tutorial-anchor-left') !== leftValue) guide.style.setProperty('--first-run-tutorial-anchor-left', leftValue);
 			if (guide.style.getPropertyValue('--first-run-tutorial-anchor-top') !== topValue) guide.style.setProperty('--first-run-tutorial-anchor-top', topValue);
@@ -5720,6 +5748,17 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		top: var(--first-run-tutorial-anchor-top, var(--first-run-tutorial-top));
 		width: min(340px, calc(100% - 28px));
 	}
+	@media (max-width: 700px) {
+		.first-run-tutorial-anchored[data-first-run-tutorial="speech"],
+		.first-run-tutorial-anchored[data-first-run-tutorial="note"] {
+			grid-template-columns: minmax(0, 1fr) auto;
+			align-items: center;
+			width: min(390px, calc(100% - 20px));
+			gap: 10px;
+		}
+		.first-run-tutorial-anchored[data-first-run-tutorial="speech"] p,
+		.first-run-tutorial-anchored[data-first-run-tutorial="note"] p { padding: 9px 12px; font-size: .9rem; text-align: left; }
+	}
 	.first-run-tutorial p {
 		margin: 0;
 		padding: 10px 16px;
@@ -5749,14 +5788,16 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		z-index: 110;
 		width: max-content;
 		max-width: calc(100vw - 32px);
-		padding: 10px 18px;
+		padding: 14px 24px;
 		transform: translateX(-50%);
-		border: 1px solid rgba(104, 241, 221, .7);
+		border: 2px solid rgba(104, 241, 221, .86);
 		border-radius: 999px;
 		background: rgba(17, 23, 37, .96);
-		box-shadow: 0 5px 22px rgba(0, 0, 0, .3);
+		box-shadow: 0 5px 24px rgba(0, 0, 0, .38), 0 0 18px rgba(72, 221, 210, .36);
 		color: #fff;
-		font-weight: 700;
+		font-size: clamp(1.25rem, 5vw, 1.75rem);
+		font-weight: 800;
+		line-height: 1.35;
 		text-align: center;
 		pointer-events: none;
 	}

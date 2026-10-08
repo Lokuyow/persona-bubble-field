@@ -31,7 +31,7 @@ async function expectTutorialPulseReducedToStatic(page: Page, selector: string):
 	await expect.poll(() => page.locator(selector).evaluateAll((elements) => elements.length > 0 && elements.every((element) => getComputedStyle(element).animationName === 'none'))).toBe(true);
 }
 
-for (const viewport of [{ width: 1280, height: 800 }, { width: 420, height: 800 }]) {
+for (const viewport of [{ width: 1280, height: 800 }, { width: 420, height: 800 }, { width: 390, height: 800 }]) {
 	test(`guides the first Run through all tutorial steps at ${viewport.width}px`, async ({ page }) => {
 		test.setTimeout(60_000);
 		const trace = traceRuntimeEvents();
@@ -164,6 +164,14 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 420, height: 800 
 		await expect(page.locator('.speech-type-toggle')).toHaveAttribute('data-tutorial-highlight', 'speech');
 		await expect.poll(() => page.locator('.composer-editor-slot').evaluate((element) => getComputedStyle(element).outlineStyle)).toBe('solid');
 		await expect.poll(() => page.locator('.speech-type-toggle').evaluate((element) => getComputedStyle(element).boxShadow)).not.toBe('none');
+		if (viewport.width <= 700) {
+			const guideAboveDock = await speechStep.evaluate((guide) => {
+				const dock = document.querySelector<HTMLElement>('.action-dock')?.getBoundingClientRect();
+				const bounds = guide.getBoundingClientRect();
+				return Boolean(dock && bounds.bottom <= dock.top && dock.top - bounds.bottom <= 16);
+			});
+			expect(guideAboveDock).toBe(true);
+		}
 		const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
 		await editor.fill('チュートリアル中の入力確認');
 		await expect(editor).toHaveValue('チュートリアル中の入力確認');
@@ -182,17 +190,32 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 420, height: 800 
 			if (!(target instanceof HTMLElement)) return null;
 			const guideBounds = guide.getBoundingClientRect();
 			const targetBounds = target.getBoundingClientRect();
+			const dockBounds = document.querySelector<HTMLElement>('.action-dock')?.getBoundingClientRect();
 			const horizontalGap = Math.max(0, targetBounds.left - guideBounds.right, guideBounds.left - targetBounds.right);
 			const verticalGap = Math.max(0, targetBounds.top - guideBounds.bottom, guideBounds.top - targetBounds.bottom);
 			return {
 				insideViewport: guideBounds.left >= 0 && guideBounds.right <= innerWidth && guideBounds.top >= 0 && guideBounds.bottom <= innerHeight,
 				overlapsTarget: guideBounds.left < targetBounds.right && guideBounds.right > targetBounds.left && guideBounds.top < targetBounds.bottom && guideBounds.bottom > targetBounds.top,
-				separation: Math.hypot(horizontalGap, verticalGap)
+				separation: Math.hypot(horizontalGap, verticalGap),
+				overlapsDock: Boolean(dockBounds && guideBounds.left < dockBounds.right && guideBounds.right > dockBounds.left && guideBounds.top < dockBounds.bottom && guideBounds.bottom > dockBounds.top),
+				dockGap: dockBounds ? dockBounds.top - guideBounds.bottom : null,
+				messageAndNextShareRow: (() => {
+					const message = guide.querySelector('p')?.getBoundingClientRect();
+					const next = guide.querySelector('button')?.getBoundingClientRect();
+					return Boolean(message && next && message.top < next.bottom && message.bottom > next.top);
+				})()
 			};
 		});
 		expect(noteGuidanceLayout?.insideViewport, JSON.stringify(noteGuidanceLayout)).toBe(true);
 		expect(noteGuidanceLayout?.overlapsTarget, JSON.stringify(noteGuidanceLayout)).toBe(false);
-		expect(noteGuidanceLayout?.separation, JSON.stringify(noteGuidanceLayout)).toBeLessThanOrEqual(24);
+		if (viewport.width <= 700) {
+			expect(noteGuidanceLayout?.overlapsDock, JSON.stringify(noteGuidanceLayout)).toBe(false);
+			expect(noteGuidanceLayout?.dockGap, JSON.stringify(noteGuidanceLayout)).toBeGreaterThanOrEqual(0);
+			expect(noteGuidanceLayout?.dockGap, JSON.stringify(noteGuidanceLayout)).toBeLessThanOrEqual(16);
+			expect(noteGuidanceLayout?.messageAndNextShareRow, JSON.stringify(noteGuidanceLayout)).toBe(true);
+		} else {
+			expect(noteGuidanceLayout?.separation, JSON.stringify(noteGuidanceLayout)).toBeLessThanOrEqual(24);
+		}
 		await page.reload({ waitUntil: 'domcontentloaded' });
 		await releaseFirstRunPrimary(page);
 		await expect(noteStep).toBeVisible();
@@ -206,6 +229,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 420, height: 800 
 		await expect(traceTarget).toHaveAttribute('data-tutorial-highlight', 'trace');
 		await expectSlowTutorialPulse(page, '[data-tutorial-highlight="trace"]');
 		await expectSlowTutorialPulse(page, '[data-first-run-tutorial="trace"] p');
+		await expect.poll(() => traceTarget.evaluate((element) => element instanceof HTMLElement ? element.getBoundingClientRect().width / element.offsetWidth : 0)).toBeGreaterThan(1.5);
 		await page.reload({ waitUntil: 'domcontentloaded' });
 		await releaseFirstRunPrimary(page);
 		await expect(traceStep).toBeVisible();
@@ -276,6 +300,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 420, height: 800 
 		await expect(adjustmentDialog).toBeVisible();
 		await expect(adjustmentDialog.locator('.level-up-badge')).toContainText('LEVEL UP');
 		await expect(page.locator('[data-first-run-tutorial="complete"]')).toHaveText('あとは自由です。');
+		await expect.poll(() => page.locator('[data-first-run-tutorial="complete"]').evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(20);
 		await expect(adjustmentDialog.getByRole('button', { name: '閉じる', exact: true }).first()).toBeVisible();
 		await adjustmentDialog.getByRole('button', { name: '閉じる', exact: true }).first().click();
 		await expect(page.getByRole('dialog')).toHaveCount(0);
