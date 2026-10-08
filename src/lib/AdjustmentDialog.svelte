@@ -262,7 +262,11 @@
 	.adjustment-dialog-header { position: sticky; top: -28px; z-index: 2; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 16px; margin: -28px -28px 22px; padding: 28px; background: linear-gradient(180deg, rgba(12, 18, 46, 1), rgba(8, 12, 33, 1)); }
 	:global(.adjustment-dialog-title) { display: inline-flex; align-items: center; gap: 9px; margin: 0; color: #f4f6ff; font-size: 22px; line-height: 1; font-weight: 800; letter-spacing: .03em; }
 	.points-display { grid-column: 2; }
-	.tutorial-upgrade-guidance { margin: 0 0 14px; padding: 10px 14px; border: 1px solid rgba(72, 221, 210, .7); border-radius: 10px; background: rgba(72, 221, 210, .1); color: #f4f6ff; font-weight: 750; text-align: center; }
+	.tutorial-upgrade-guidance { margin: 0 0 14px; padding: 10px 14px; border: 1px solid rgba(72, 221, 210, .7); border-radius: 10px; background: rgba(72, 221, 210, .1); animation: first-run-tutorial-guidance-pulse 2.6s ease-in-out infinite; color: #f4f6ff; font-weight: 750; text-align: center; }
+	@keyframes first-run-tutorial-guidance-pulse {
+		0%, 100% { box-shadow: 0 0 5px rgba(72, 221, 210, .16); }
+		50% { box-shadow: 0 0 16px rgba(72, 221, 210, .58); }
+	}
 	.adjustment-dialog-header :global(.action-button-close) { grid-column: 3; }
 	:global(.adjustment-dialog-title svg) { width: 22px; height: 22px; color: #aeb6ff; stroke-width: 2; }
 	:global(.adjustment-dialog-content .sr-only) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
@@ -270,7 +274,12 @@
 	.points-display :global(svg) { width: 18px; height: 18px; color: #aeb5d7; }
 	.ability-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: stretch; gap: 14px; }
 	.ability-card { position: relative; display: grid; grid-template-rows: auto auto 1fr auto; gap: 9px; min-width: 0; min-height: 250px; padding: 18px; border: 1px solid rgba(122, 135, 255, .42); border-radius: 12px; background: rgba(19, 26, 61, .78); }
-	.ability-card.tutorial-upgrade-choice { outline: 2px solid rgba(72, 221, 210, .88); outline-offset: 2px; }
+	.ability-card.tutorial-upgrade-choice { outline: 2px solid rgba(72, 221, 210, .88); outline-offset: 2px; animation: first-run-tutorial-upgrade-pulse 2.6s ease-in-out infinite; }
+	@keyframes first-run-tutorial-upgrade-pulse {
+		0%, 100% { box-shadow: 0 0 7px rgba(72, 221, 210, .14); }
+		50% { box-shadow: 0 0 18px rgba(72, 221, 210, .52); }
+	}
+	@media (prefers-reduced-motion: reduce) { .tutorial-upgrade-guidance, .ability-card.tutorial-upgrade-choice { animation: none; } }
 	.level-up-badge { position: absolute; top: -14px; right: 0; pointer-events: none; color: #aeb6ff; font-size: 11px; font-weight: 900; letter-spacing: .08em; }
 	.ability-card-heading { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 	.ability-name { display: flex; align-items: center; min-width: 0; gap: 8px; margin: 0; color: #f4f6ff; font-size: 16px; font-weight: 800; }

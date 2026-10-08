@@ -57,7 +57,7 @@ rollbackせず、wire formatとposition条件はSPEC-30を参照する。
 
 発言とComposerの挙動は[SPEC-40](./SPEC-40-会話・フキダシ.md)および[SPEC-60](./SPEC-60-eHagaki・Composer・Media.md)、痕跡閲覧報酬は[SPEC-50](./SPEC-50-発言の痕跡.md)、書置き投稿は[SPEC-50](./SPEC-50-発言の痕跡.md)および[SPEC-60](./SPEC-60-eHagaki・Composer・Media.md)、能力強化は本書の既存能力仕様を正とする。案内は各機能の仕様を変更しない。
 
-未完了段階は初回IdentityとRun #1に結び付けて同一タブの `sessionStorage` へ保存し、再読み込み後はその段階から復元する。作業段階を復元した時点で対象Runにdurableな `mendingJob` が存在すれば、作業開始済みとして発言案内へ進み、その段階を保存する。能力段階のmarkerには段階開始時の能力levelを保存し、再読み込み時にdurableな能力強化が確認できれば完了扱いとし、同じ強化を再要求しない。チュートリアル用にPlayer lifecycle stateや永続化schemaを追加しない。対象を示す案内は対応するHUD・端末・Composer・ActionDock操作または未読rootの近くに表示し、対象がない間は移動や通常操作を妨げない。案内は非モーダルとし、既存のキーボード・pointer・タッチ操作やフィールドレイアウトを妨げない。
+未完了段階は初回IdentityとRun #1に結び付けて同一タブの `sessionStorage` へ保存し、再読み込み後はその段階から復元する。作業段階を復元した時点で対象Runにdurableな `mendingJob` が存在すれば、作業開始済みとして発言案内へ進み、その段階を保存する。能力段階のmarkerには段階開始時の能力levelを保存し、再読み込み時にdurableな能力強化が確認できれば完了扱いとし、同じ強化を再要求しない。チュートリアル用にPlayer lifecycle stateや永続化schemaを追加しない。対象を示す案内は対応するHUD・端末・Composer・ActionDock操作または未読rootの近くに表示し、対象がない間は移動や通常操作を妨げない。対象の緑の光と案内テキストはゆっくり明滅し、OSの動きを減らす設定では静止表示する。案内は非モーダルとし、既存のキーボード・pointer・タッチ操作やフィールドレイアウトを妨げない。
 
 旧Identityと新Identityの間に、Run-localの記憶・状態・自己認識の連続性を持たせない。Identity historyにはselected Identityとfinished Runのsummaryだけを残す。
 

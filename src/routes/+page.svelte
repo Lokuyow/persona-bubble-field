@@ -5696,7 +5696,11 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		outline: 3px solid rgba(23, 176, 148, .95);
 		outline-offset: 4px;
 		border-radius: 12px;
-		box-shadow: 0 0 0 8px rgba(23, 176, 148, .15), 0 0 20px rgba(23, 176, 148, .62);
+		animation: first-run-hud-glow-pulse 2.6s ease-in-out infinite;
+	}
+	@keyframes first-run-hud-glow-pulse {
+		0%, 100% { box-shadow: 0 0 0 5px rgba(23, 176, 148, .08), 0 0 10px rgba(23, 176, 148, .32); }
+		50% { box-shadow: 0 0 0 9px rgba(23, 176, 148, .22), 0 0 24px rgba(23, 176, 148, .8); }
 	}
 	.first-run-tutorial {
 		position: absolute;
@@ -5722,13 +5726,22 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		border: 1px solid rgba(104, 241, 221, .56);
 		border-radius: 14px;
 		background: rgba(17, 23, 37, .94);
-		box-shadow: 0 5px 22px rgba(0, 0, 0, .26);
+		animation: first-run-tutorial-copy-pulse 2.6s ease-in-out infinite;
 		color: #fff;
 		font-size: .96rem;
 		line-height: 1.55;
 		text-wrap: pretty;
 	}
+	@keyframes first-run-tutorial-copy-pulse {
+		0%, 100% { border-color: rgba(104, 241, 221, .48); box-shadow: 0 5px 18px rgba(0, 0, 0, .26), 0 0 6px rgba(72, 221, 210, .2); }
+		50% { border-color: rgba(104, 241, 221, .98); box-shadow: 0 5px 20px rgba(0, 0, 0, .26), 0 0 18px rgba(72, 221, 210, .62); }
+	}
 	.first-run-tutorial :global(.first-run-tutorial-next) { pointer-events: auto; }
+	@media (prefers-reduced-motion: reduce) {
+		.top-status-hud.first-run-life-highlight :global([data-unified-status-hud]), .first-run-tutorial p { animation: none; }
+		.top-status-hud.first-run-life-highlight :global([data-unified-status-hud]) { box-shadow: 0 0 0 8px rgba(23, 176, 148, .15), 0 0 20px rgba(23, 176, 148, .62); }
+		.first-run-tutorial p { border-color: rgba(104, 241, 221, .7); box-shadow: 0 5px 22px rgba(0, 0, 0, .26); }
+	}
 	.first-run-completion-notice {
 		position: fixed;
 		top: max(12px, env(safe-area-inset-top));

@@ -409,14 +409,21 @@
 		transform: translate(-50%, -50%); pointer-events: none;
 	}
 	.field-tag-game-terminal { width: calc(var(--cell-size) * 0.86); height: calc(var(--cell-size) * 0.86); }
-	.field-facility-highlighted { filter: drop-shadow(0 0 5px rgba(72, 221, 210, .95)) drop-shadow(0 0 12px rgba(72, 221, 210, .72)); }
+	.field-facility-highlighted { animation: first-run-target-light-pulse 2.6s ease-in-out infinite; }
 	.field-facility-highlighted::after {
 		position: absolute; inset: -12%; border: 2px solid rgba(72, 221, 210, .88); border-radius: 50%;
 		box-shadow: 0 0 0 4px rgba(72, 221, 210, .2); content: ''; pointer-events: none;
-		animation: mending-terminal-tutorial-pulse 1.8s ease-in-out infinite;
+		animation: first-run-target-ring-pulse 2.6s ease-in-out infinite;
 	}
-	@keyframes mending-terminal-tutorial-pulse { 50% { opacity: .48; transform: scale(1.14); } }
-	@media (prefers-reduced-motion: reduce) { .field-facility-highlighted::after { animation: none; } }
+	@keyframes first-run-target-light-pulse {
+		0%, 100% { filter: drop-shadow(0 0 3px rgba(72, 221, 210, .5)) drop-shadow(0 0 7px rgba(72, 221, 210, .35)); }
+		50% { filter: drop-shadow(0 0 6px rgba(72, 221, 210, .98)) drop-shadow(0 0 16px rgba(72, 221, 210, .82)); }
+	}
+	@keyframes first-run-target-ring-pulse { 0%, 100% { opacity: .48; transform: scale(1); } 50% { opacity: .95; transform: scale(1.14); } }
+	@media (prefers-reduced-motion: reduce) {
+		.field-facility-highlighted, .field-facility-highlighted::after { animation: none; }
+		.field-facility-highlighted { filter: drop-shadow(0 0 5px rgba(72, 221, 210, .95)) drop-shadow(0 0 12px rgba(72, 221, 210, .72)); }
+	}
 	.field-facility img { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
 	.realtime-group-layer { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
 	.realtime-group {
@@ -470,7 +477,13 @@
 		filter: none;
 	}
 	.trace-marker[data-tutorial-highlight="trace"],
-	.trace-ghost[data-tutorial-highlight="trace"] { opacity: 1; filter: drop-shadow(0 0 4px rgba(72, 221, 210, .95)) drop-shadow(0 0 10px rgba(72, 221, 210, .72)); }
+	.trace-ghost[data-tutorial-highlight="trace"] { opacity: 1; animation: first-run-target-light-pulse 2.6s ease-in-out infinite; }
+	@media (prefers-reduced-motion: reduce) {
+		.trace-marker[data-tutorial-highlight="trace"], .trace-ghost[data-tutorial-highlight="trace"] {
+			animation: none;
+			filter: drop-shadow(0 0 4px rgba(72, 221, 210, .95)) drop-shadow(0 0 10px rgba(72, 221, 210, .72));
+		}
+	}
 
 	.death-presentation-tombstone {
 		z-index: 6;

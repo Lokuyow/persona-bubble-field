@@ -20,6 +20,17 @@ async function releaseFirstRunPrimary(page: Page): Promise<void> {
 	await expect(page.locator('.participant[data-self="true"]')).toBeVisible();
 }
 
+async function expectSlowTutorialPulse(page: Page, selector: string): Promise<void> {
+	await expect.poll(() => page.locator(selector).evaluateAll((elements) => elements.length > 0 && elements.every((element) => {
+		const style = getComputedStyle(element);
+		return style.animationName !== 'none' && Number.parseFloat(style.animationDuration) > 1;
+	}))).toBe(true);
+}
+
+async function expectTutorialPulseReducedToStatic(page: Page, selector: string): Promise<void> {
+	await expect.poll(() => page.locator(selector).evaluateAll((elements) => elements.length > 0 && elements.every((element) => getComputedStyle(element).animationName === 'none'))).toBe(true);
+}
+
 for (const viewport of [{ width: 1280, height: 800 }, { width: 420, height: 800 }]) {
 	test(`guides the first Run through all tutorial steps at ${viewport.width}px`, async ({ page }) => {
 		test.setTimeout(60_000);
@@ -63,6 +74,8 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 420, height: 800 
 		await expect(tutorial).toContainText('あなたの一生が始まりました。');
 		await expect(tutorial).toContainText('寿命が0になると、この一生は終わります。');
 		await expect(hud).toHaveAttribute('data-tutorial-highlight', 'lifespan');
+		await expectSlowTutorialPulse(page, '.top-status-hud [data-unified-status-hud]');
+		await expectSlowTutorialPulse(page, '[data-first-run-tutorial="life"] p');
 		const lifeLayout = await tutorial.evaluate((element) => {
 			const guide = element.getBoundingClientRect();
 			const status = document.querySelector('.top-status-hud')?.getBoundingClientRect();
@@ -98,6 +111,12 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 420, height: 800 
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', move.expected);
 		await expect(page.locator('[data-first-run-tutorial="work"]')).toContainText('作業をすると、ポイントを得て寿命を延ばせます。');
 		await expect(page.locator('[data-field-facility="mending-terminal"]')).toHaveAttribute('data-tutorial-highlight', 'work');
+		await expectSlowTutorialPulse(page, '[data-field-facility="mending-terminal"]');
+		await expectSlowTutorialPulse(page, '[data-first-run-tutorial="work"] p');
+		await page.emulateMedia({ reducedMotion: 'reduce' });
+		await expectTutorialPulseReducedToStatic(page, '[data-field-facility="mending-terminal"]');
+		await expectTutorialPulseReducedToStatic(page, '[data-first-run-tutorial="work"] p');
+		await page.emulateMedia({ reducedMotion: 'no-preference' });
 
 		await page.reload({ waitUntil: 'domcontentloaded' });
 		await releaseFirstRunPrimary(page);
@@ -121,6 +140,8 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 420, height: 800 
 		await expect(mendingDialog.locator('.mending-startup-feedback')).toContainText('作業を開始しました');
 		await expect(page.locator('[data-first-run-tutorial="speech"]')).toContainText('ここでは、ほかの住人に発言できます。');
 		await expect(page.locator('.composer-editor-slot')).toHaveAttribute('data-tutorial-highlight', 'speech');
+		await expectSlowTutorialPulse(page, '.composer-editor-slot[data-tutorial-highlight="speech"]');
+		await expectSlowTutorialPulse(page, '[data-first-run-tutorial="speech"] p');
 		await expect(page.locator('[data-first-run-tutorial="complete"]')).toHaveCount(0);
 		await mendingDialog.getByRole('button', { name: '閉じる', exact: true }).first().click();
 		await expect(page.getByRole('dialog')).toHaveCount(0);
@@ -153,6 +174,8 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 420, height: 800 
 		await expect(noteStep).toContainText('100ptを使って、書置きを残せます。');
 		const noteAction = page.locator('.manual-trace-toggle');
 		await expect(noteAction).toHaveAttribute('data-tutorial-highlight', 'note');
+		await expectSlowTutorialPulse(page, '.manual-trace-toggle[data-tutorial-highlight="note"]');
+		await expectSlowTutorialPulse(page, '[data-first-run-tutorial="note"] p');
 		await expect.poll(() => noteAction.evaluate((element) => getComputedStyle(element).boxShadow)).not.toBe('none');
 		const noteGuidanceLayout = await noteStep.evaluate((guide) => {
 			const target = document.querySelector('.manual-trace-toggle[data-tutorial-highlight="note"]');
@@ -181,6 +204,8 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 420, height: 800 
 		await expect(traceStep.getByRole('button')).toHaveCount(0);
 		const traceTarget = page.locator('[data-trace-marker-position="4,2"]');
 		await expect(traceTarget).toHaveAttribute('data-tutorial-highlight', 'trace');
+		await expectSlowTutorialPulse(page, '[data-tutorial-highlight="trace"]');
+		await expectSlowTutorialPulse(page, '[data-first-run-tutorial="trace"] p');
 		await page.reload({ waitUntil: 'domcontentloaded' });
 		await releaseFirstRunPrimary(page);
 		await expect(traceStep).toBeVisible();
@@ -221,6 +246,8 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 420, height: 800 
 		await expect(abilityStep).toContainText('強化端末へ移動して、能力をひとつ強化しよう。');
 		await expect(abilityStep.getByRole('button')).toHaveCount(0);
 		await expect(page.locator('[data-field-facility="adjustment-terminal"]')).toHaveAttribute('data-tutorial-highlight', 'ability');
+		await expectSlowTutorialPulse(page, '[data-field-facility="adjustment-terminal"]');
+		await expectSlowTutorialPulse(page, '[data-first-run-tutorial="ability"] p');
 		await expect.poll(() => page.locator('[data-field-facility="adjustment-terminal"]').evaluate((element) => getComputedStyle(element).filter)).not.toBe('none');
 		const abilityMarker = await page.evaluate(() => sessionStorage.getItem('persona-bubble-field:first-run-tutorial'));
 		expect(abilityMarker).toContain('"step":"ability"');
@@ -240,6 +267,8 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 420, height: 800 
 		const adjustmentDialog = page.getByRole('dialog');
 		await expect(adjustmentDialog.locator('[data-first-run-ability-guidance]')).toContainText('能力をどれか1つ強化してください。');
 		await expect(adjustmentDialog.locator('.ability-card.tutorial-upgrade-choice')).toHaveCount(3);
+		await expectSlowTutorialPulse(page, '[data-first-run-ability-guidance]');
+		await expectSlowTutorialPulse(page, '.ability-card.tutorial-upgrade-choice');
 		const upgrade = adjustmentDialog.getByRole('button', { name: '推論効率をLv2へ強化（必要1pt）' });
 		await expect(upgrade).toBeEnabled();
 		await upgrade.click();

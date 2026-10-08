@@ -484,7 +484,11 @@
 		outline-offset: 2px;
 	}
 	.speech-type-toggle.speech-tutorial-highlighted, .manual-trace-toggle.note-tutorial-highlighted {
-		box-shadow: 0 0 0 4px rgba(31, 173, 153, .35), 0 0 15px rgba(31, 173, 153, .82);
+		animation: first-run-action-glow-pulse 2.6s ease-in-out infinite;
+	}
+	@keyframes first-run-action-glow-pulse {
+		0%, 100% { box-shadow: 0 0 0 3px rgba(31, 173, 153, .2), 0 0 8px rgba(31, 173, 153, .42); }
+		50% { box-shadow: 0 0 0 5px rgba(31, 173, 153, .46), 0 0 18px rgba(31, 173, 153, .92); }
 	}
 
 	.composer-editor-slot {
@@ -496,7 +500,19 @@
 		outline: 2px solid rgba(31, 173, 153, .96);
 		outline-offset: 3px;
 		border-radius: 12px;
-		box-shadow: 0 0 0 6px rgba(31, 173, 153, .16), 0 0 17px rgba(31, 173, 153, .52);
+		animation: first-run-composer-glow-pulse 2.6s ease-in-out infinite;
+	}
+	@keyframes first-run-composer-glow-pulse {
+		0%, 100% { box-shadow: 0 0 0 4px rgba(31, 173, 153, .1), 0 0 9px rgba(31, 173, 153, .3); }
+		50% { box-shadow: 0 0 0 7px rgba(31, 173, 153, .28), 0 0 20px rgba(31, 173, 153, .78); }
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.speech-type-toggle.speech-tutorial-highlighted, .manual-trace-toggle.note-tutorial-highlighted,
+		.composer-editor-slot.composer-tutorial-highlighted { animation: none; }
+		.speech-type-toggle.speech-tutorial-highlighted, .manual-trace-toggle.note-tutorial-highlighted {
+			box-shadow: 0 0 0 4px rgba(31, 173, 153, .35), 0 0 15px rgba(31, 173, 153, .82);
+		}
+		.composer-editor-slot.composer-tutorial-highlighted { box-shadow: 0 0 0 6px rgba(31, 173, 153, .16), 0 0 17px rgba(31, 173, 153, .52); }
 	}
 
 	.action-dock-content :global(.host-owned-composer) {
