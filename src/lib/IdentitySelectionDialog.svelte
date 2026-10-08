@@ -273,10 +273,11 @@
 	.selection-dialog::backdrop { background: transparent; }
 	.selection-content { min-height: 0; overflow: auto; padding: 26px 26px 24px; }
 	.opening-content { display: grid; align-content: center; }
+	.opening-content .selection-header { justify-content: center; text-align: center; }
 	.opening-content h1 { font-size: clamp(28px, 5vw, 40px); }
 	.opening-copy { display: grid; gap: 22px; margin-top: 20px; color: rgb(255 255 255 / 88%); font-size: 1.05rem; line-height: 1.8; }
 	.opening-copy p { margin: 0; }
-	.opening-footer { justify-content: flex-end; }
+	.opening-footer { justify-content: center; }
 	.selection-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
 	.transition-notice { display: grid; gap: 4px; margin: 16px 0 2px; padding: 12px 14px; border: 1px solid rgb(104 241 221 / 34%); border-radius: 12px; background: rgb(104 241 221 / 9%); color: rgb(241 255 253 / 92%); }
 	.transition-notice strong { color: #fff; }
@@ -368,5 +369,7 @@
 		.root-build { padding-inline: 12px; }
 		.selection-footer { align-items: stretch; flex-direction: column; gap: 12px; padding: 14px 16px max(16px, env(safe-area-inset-bottom)); }
 		.selection-footer :global(.action-button) { width: 100%; }
+		.opening-footer { align-items: center; }
+		.opening-footer :global(.action-button) { width: min(210px, 100%); }
 	}
 </style>
