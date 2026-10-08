@@ -88,7 +88,7 @@
 					<ActionButton variant="tertiary" class="help-back" type="button" aria-label="戻る" onclick={back}><ArrowLeft aria-hidden="true" /><span>戻る</span></ActionButton>
 				{:else}<span class="help-back-spacer" aria-hidden="true"></span>{/if}
 				<Dialog.Title class="help-title">{currentTitle}</Dialog.Title>
-				<Dialog.Description class="sr-only">ハコ過去の遊び方を確認できます。閲覧中もゲームの時間は進みます。</Dialog.Description>
+				<Dialog.Description class="sr-only help-description">ハコ過去の遊び方を確認できます。閲覧中もゲームの時間は進みます。</Dialog.Description>
 				<Dialog.Close class="action-button action-button-tertiary action-button-close help-close" aria-label="閉じる"><X aria-hidden="true" /></Dialog.Close>
 			</header>
 			<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
@@ -210,11 +210,12 @@
 	:global(.help-dialog-overlay) { position: fixed; inset: 0; z-index: 100; background: rgba(4, 7, 18, .72); backdrop-filter: blur(2px); }
 	:global(.help-dialog-content) { position: fixed; inset: 50% auto auto 50%; z-index: 101; display: grid; grid-template-rows: auto minmax(0, 1fr); width: min(780px, calc(100vw - 28px)); height: min(820px, calc(100dvh - 32px)); overflow: hidden; padding: 0; border: 1px solid rgba(122, 135, 255, .74); border-radius: 18px; background: linear-gradient(180deg, rgba(12, 18, 46, .99), rgba(8, 12, 33, .99)); box-shadow: 0 20px 80px rgba(0, 0, 0, .48), 0 0 34px rgba(90, 103, 255, .13); color: #f4f6ff; transform: translate(-50%, -50%); }
 	.help-header { position: relative; z-index: 2; display: grid; grid-template-columns: minmax(64px, 1fr) minmax(0, 2fr) minmax(64px, 1fr); align-items: center; gap: 8px; min-height: 68px; padding: 10px 18px; border-bottom: 1px solid rgba(218, 224, 255, .15); background: #0c122e; }
-	:global(.help-title) { margin: 0; color: #f4f6ff; font-size: 1.18rem; font-weight: 800; text-align: center; }
-	:global(.help-back) { justify-self: start; display: inline-flex; align-items: center; gap: 4px; min-height: 44px; padding: 0 8px; color: #e5e9ff; }
+	:global(.help-title) { grid-column: 2; grid-row: 1; margin: 0; color: #f4f6ff; font-size: 1.18rem; font-weight: 800; text-align: center; }
+	:global(.help-back) { grid-column: 1; grid-row: 1; justify-self: start; display: inline-flex; align-items: center; gap: 4px; min-height: 44px; padding: 0 8px; color: #e5e9ff; }
 	:global(.help-back svg) { width: 20px; height: 20px; }
-	.help-back-spacer { min-width: 44px; }
-	:global(.help-close) { justify-self: end; }
+	.help-back-spacer { grid-column: 1; grid-row: 1; min-width: 44px; }
+	:global(.help-description) { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+	:global(.help-close) { grid-column: 3; grid-row: 1; justify-self: end; }
 	.help-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 22px 26px 30px; scrollbar-gutter: stable; }
 	.welcome-card { padding: 18px 20px; border: 1px solid rgba(122, 135, 255, .36); border-radius: 14px; background: rgba(122, 135, 255, .08); }
 	.welcome-card h2 { margin: 0 0 12px; font-size: 1.35rem; }

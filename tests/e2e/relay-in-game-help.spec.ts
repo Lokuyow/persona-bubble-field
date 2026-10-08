@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { getPublicKey } from 'nostr-tools/pure';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { finishDialogExit } from './helpers/dialogMotion';
@@ -63,6 +63,33 @@ async function readHelpSideEffectSnapshot(page: Page): Promise<HelpSideEffectSna
 	}) as HelpSideEffectSnapshot;
 }
 
+async function expectHelpHeaderGeometry(dialog: Locator, withBack: boolean): Promise<void> {
+	const header = dialog.locator('.help-header');
+	const title = dialog.locator('.help-title');
+	const close = dialog.getByRole('button', { name: '閉じる' });
+	const [headerBox, titleBox, closeBox] = await Promise.all([
+		header.boundingBox(), title.boundingBox(), close.boundingBox()
+	]);
+	expect(headerBox).not.toBeNull();
+	expect(titleBox).not.toBeNull();
+	expect(closeBox).not.toBeNull();
+	expect(closeBox!.x).toBeGreaterThan(titleBox!.x + titleBox!.width);
+	expect(closeBox!.x + closeBox!.width).toBeLessThanOrEqual(headerBox!.x + headerBox!.width);
+	expect(Math.abs((closeBox!.y + closeBox!.height / 2) - (titleBox!.y + titleBox!.height / 2))).toBeLessThanOrEqual(1);
+	await expect(dialog.locator('.help-description')).toHaveCSS('position', 'absolute');
+	const descriptionBox = await dialog.locator('.help-description').boundingBox();
+	expect(descriptionBox).not.toBeNull();
+	expect(descriptionBox!.width).toBeLessThanOrEqual(1);
+	expect(descriptionBox!.height).toBeLessThanOrEqual(1);
+
+	if (withBack) {
+		const backBox = await dialog.getByRole('button', { name: '戻る' }).boundingBox();
+		expect(backBox).not.toBeNull();
+		expect(backBox!.x + backBox!.width).toBeLessThanOrEqual(titleBox!.x);
+		expect(Math.abs((backBox!.y + backBox!.height / 2) - (closeBox!.y + closeBox!.height / 2))).toBeLessThanOrEqual(1);
+	}
+}
+
 test.describe('in-game Help', () => {
 	test('keeps Help browsing read-only and restores navigation, Escape, focus, and a fresh top page', async ({ page }) => {
 		const now = Date.now();
@@ -100,6 +127,7 @@ test.describe('in-game Help', () => {
 		await trigger.click();
 		const dialog = page.locator('[data-help-dialog]');
 		await expect(page.getByRole('dialog', { name: 'ヘルプ' })).toBeVisible();
+		await expectHelpHeaderGeometry(dialog, false);
 		await expect(dialog).toHaveAttribute('aria-modal', 'true');
 		await expect(dialog.locator('[data-help-category]')).toHaveCount(7);
 		const body = dialog.locator('.help-body');
@@ -110,6 +138,7 @@ test.describe('in-game Help', () => {
 		await livingCategory.click();
 		await expect(body).toHaveAttribute('data-help-page', 'category');
 		await expect(dialog.locator('#help-living-title')).toBeVisible();
+		await expectHelpHeaderGeometry(dialog, true);
 		await dialog.getByRole('button', { name: '戻る' }).click();
 		await expect(body).toHaveAttribute('data-help-page', 'home');
 		await expect.poll(() => body.evaluate((element) => element.scrollTop)).toBe(homeScroll);
@@ -180,6 +209,7 @@ test.describe('in-game Help', () => {
 		await trigger.click();
 		const dialog = page.getByRole('dialog', { name: 'ヘルプ' });
 		await expect(dialog).toBeVisible();
+		await expectHelpHeaderGeometry(dialog, false);
 		await page.clock.setSystemTime(schedule.gameAtMs + 1_000);
 		await page.clock.runFor(1_000);
 		await expect(realtimePanel).toContainText('ゲーム中');
