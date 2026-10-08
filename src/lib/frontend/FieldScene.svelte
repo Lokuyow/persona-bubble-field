@@ -70,6 +70,7 @@
 		tagGameEffect: 'benefit' | 'calamity' | null;
 		tagGameEffectActive: boolean;
 		mendingTerminalHighlighted: boolean;
+		adjustmentTerminalHighlighted: boolean;
 		selfProjectionId: string;
 		movingParticipantIds: ReadonlySet<string>;
 		selfIsActive: boolean;
@@ -110,6 +111,7 @@
 		tagGameEffect,
 		tagGameEffectActive,
 		mendingTerminalHighlighted,
+		adjustmentTerminalHighlighted,
 		selfProjectionId,
 		movingParticipantIds,
 		selfIsActive,
@@ -200,8 +202,8 @@
 		</div>
 		<div class="field-facility-layer" aria-hidden="true">
 			{#each FIXED_FIELD_FACILITIES as facility (facility.kind)}
-				<span class={['field-facility', `field-${facility.kind}`]} class:field-facility-highlighted={facility.kind === 'mending-terminal' && mendingTerminalHighlighted} data-field-facility={facility.kind}
-					data-tutorial-highlight={facility.kind === 'mending-terminal' && mendingTerminalHighlighted ? 'work' : undefined}
+				<span class={['field-facility', `field-${facility.kind}`]} class:field-facility-highlighted={(facility.kind === 'mending-terminal' && mendingTerminalHighlighted) || (facility.kind === 'adjustment-terminal' && adjustmentTerminalHighlighted)} data-field-facility={facility.kind}
+					data-tutorial-highlight={facility.kind === 'mending-terminal' && mendingTerminalHighlighted ? 'work' : facility.kind === 'adjustment-terminal' && adjustmentTerminalHighlighted ? 'ability' : undefined}
 					style={`left: ${(facility.position.x + 0.5) * cellSize}px; top: ${(facility.position.y + 0.5) * cellSize}px;`}>{#if facility.kind === 'mending-terminal'}<img src={asset(MENDING_TERMINAL_ASSET)} alt="" />{:else if facility.kind === 'adjustment-terminal'}<img src={asset(ADJUSTMENT_TERMINAL_ASSET)} alt="" />{:else if facility.kind === 'tag-game-terminal'}<img src={asset(TAG_GAME_TERMINAL_ASSET)} alt="" />{:else}<img src={asset(RANKING_TERMINAL_ASSET)} alt="" />{/if}</span>
 			{/each}
 		</div>

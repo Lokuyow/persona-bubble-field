@@ -332,7 +332,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	let connectionStatus: WorldReadConnectionStatus = { kind: 'bootstrapping' };
 	let selfSigner = $state.raw<ActiveSignerSnapshot | null>(null);
 	let personaSnapshot = $state.raw<PersonaSnapshot | null>(null);
-	type FirstRunTutorialStep = 'life' | 'movement' | 'work';
+	type FirstRunTutorialStep = 'life' | 'movement' | 'work' | 'ability' | 'speech' | 'trace' | 'note';
 	type FirstRunTutorialScope = Readonly<{ generation: 1; accountIndex: number; pubkey: string; runNumber: 1 }>;
 	type FirstRunTutorialMarker = FirstRunTutorialScope & Readonly<{ step: FirstRunTutorialStep }>;
 	const FIRST_RUN_TUTORIAL_SESSION_KEY = 'persona-bubble-field:first-run-tutorial';
@@ -369,7 +369,8 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			if (!parsed || typeof parsed !== 'object') return null;
 			const marker = parsed as Partial<FirstRunTutorialMarker>;
 			if (marker.generation !== 1 || !Number.isInteger(marker.accountIndex) || typeof marker.pubkey !== 'string' || marker.runNumber !== 1 ||
-				(marker.step !== 'life' && marker.step !== 'movement' && marker.step !== 'work')) return null;
+				(marker.step !== 'life' && marker.step !== 'movement' && marker.step !== 'work' && marker.step !== 'ability' &&
+					marker.step !== 'speech' && marker.step !== 'trace' && marker.step !== 'note')) return null;
 			return marker as FirstRunTutorialMarker;
 		} catch {
 			return null;
@@ -396,10 +397,10 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		firstRunTutorialStep = 'complete';
 	}
 
-	function finishFirstRunTutorial(persona: PersonaSnapshot): void {
+	function advanceFirstRunTutorialFromWork(persona: PersonaSnapshot): void {
 		const scope = firstRunTutorialScopeFor(persona);
 		if (firstRunTutorialStep !== 'work' || !firstRunTutorialScopesMatch(firstRunTutorialScope, scope) || !scope) return;
-		showFirstRunTutorialCompletion(scope);
+		storeFirstRunTutorialStep('ability', persona);
 	}
 
 	function restoreFirstRunTutorial(persona: PersonaSnapshot): void {
@@ -407,16 +408,28 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		const marker = readFirstRunTutorialMarker();
 		if (!scope || !marker || !firstRunTutorialScopesMatch(marker, scope)) return;
 		if (marker.step === 'work' && persona.gameState.mendingJob) {
-			showFirstRunTutorialCompletion(scope);
+			storeFirstRunTutorialStep('ability', persona);
 			return;
 		}
 		firstRunTutorialScope = scope;
 		firstRunTutorialStep = marker.step;
 	}
 
-	function advanceFirstRunTutorialFromLife(): void {
-		if (firstRunTutorialStep !== 'life' || !personaSnapshot || !firstRunTutorialScopesMatch(firstRunTutorialScope, firstRunTutorialScopeFor(personaSnapshot))) return;
-		storeFirstRunTutorialStep('movement', personaSnapshot);
+	function advanceFirstRunTutorialFromPrompt(): void {
+		const persona = personaSnapshot;
+		if (!persona || !firstRunTutorialScopesMatch(firstRunTutorialScope, firstRunTutorialScopeFor(persona))) return;
+		if (firstRunTutorialStep === 'life') {
+			storeFirstRunTutorialStep('movement', persona);
+		} else if (firstRunTutorialStep === 'ability') {
+			storeFirstRunTutorialStep('speech', persona);
+		} else if (firstRunTutorialStep === 'speech') {
+			storeFirstRunTutorialStep('trace', persona);
+		} else if (firstRunTutorialStep === 'trace') {
+			storeFirstRunTutorialStep('note', persona);
+		} else if (firstRunTutorialStep === 'note') {
+			const scope = firstRunTutorialScopeFor(persona);
+			if (scope) showFirstRunTutorialCompletion(scope);
+		}
 	}
 
 	function advanceFirstRunTutorialFromMovement(persona: PersonaSnapshot): void {
@@ -2330,7 +2343,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			if (result.kind === 'blocked') mendingStartupFeedback = null;
 			personaSnapshot = result.persona;
 			selfSigner = result.persona.signer;
-			if (result.kind === 'started') finishFirstRunTutorial(result.persona);
+			if (result.kind === 'started') advanceFirstRunTutorialFromWork(result.persona);
 			if (result.kind === 'started' || result.kind === 'collected') void worldSession?.refreshSelfActivity();
 			if (result.kind === 'collected') {
 				if (collectFeedbackTimer !== null) window.clearTimeout(collectFeedbackTimer);
@@ -5184,11 +5197,23 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 				<div class="first-run-tutorial" data-first-run-tutorial={firstRunTutorialStep} aria-live="polite" aria-atomic="true" style={`--first-run-tutorial-top:${Math.max(topStatusHudBottom + 8, 112)}px`}>
 					{#if firstRunTutorialStep === 'life'}
 						<p>あなたの一生が始まりました。<br />寿命が0になると、この一生は終わります。</p>
-						<button type="button" onclick={advanceFirstRunTutorialFromLife}>次へ</button>
+						<ActionButton variant="primary" class="first-run-tutorial-next" type="button" onclick={advanceFirstRunTutorialFromPrompt}>次へ</ActionButton>
 					{:else if firstRunTutorialStep === 'movement'}
 						<p>移動してみよう</p>
 					{:else if firstRunTutorialStep === 'work'}
 						<p>作業をすると、ポイントを得て寿命を延ばせます。</p>
+					{:else if firstRunTutorialStep === 'ability'}
+						<p>ポイントを使って、能力を強化できます。</p>
+						<ActionButton variant="primary" class="first-run-tutorial-next" type="button" onclick={advanceFirstRunTutorialFromPrompt}>次へ</ActionButton>
+					{:else if firstRunTutorialStep === 'speech'}
+						<p>ここでは、ほかの住人に発言できます。</p>
+						<ActionButton variant="primary" class="first-run-tutorial-next" type="button" onclick={advanceFirstRunTutorialFromPrompt}>次へ</ActionButton>
+					{:else if firstRunTutorialStep === 'trace'}
+						<p>まだ読んでいない、他人の痕跡・遺言・書置きを読むと5pt獲得できます。</p>
+						<ActionButton variant="primary" class="first-run-tutorial-next" type="button" onclick={advanceFirstRunTutorialFromPrompt}>次へ</ActionButton>
+					{:else if firstRunTutorialStep === 'note'}
+						<p>100ptを使って、書置きを残せます。</p>
+						<ActionButton variant="primary" class="first-run-tutorial-next" type="button" onclick={advanceFirstRunTutorialFromPrompt}>次へ</ActionButton>
 					{/if}
 				</div>
 			{/if}
@@ -5227,6 +5252,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 				tagGameEffect={tagGameDisplayedEffect?.effect ?? null}
 				tagGameEffectActive={tagGameDisplayedEffect?.active ?? false}
 				mendingTerminalHighlighted={showFirstRunTutorial && firstRunTutorialStep === 'work'}
+				adjustmentTerminalHighlighted={showFirstRunTutorial && firstRunTutorialStep === 'ability'}
 				{selfProjectionId}
 				{movingParticipantIds}
 				{selfIsActive}
@@ -5485,6 +5511,8 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			onOpenSelfProfile={openSelfProfile}
 			suggestionConversation={speechSuggestionConversation}
 			onSpeechTypeChange={(next) => { selectedSpeechType = next; }}
+				speechTutorialHighlighted={showFirstRunTutorial && firstRunTutorialStep === 'speech'}
+				noteTutorialHighlighted={showFirstRunTutorial && firstRunTutorialStep === 'note'}
 				manualTraceSelected={manualTraceMode}
 				{manualTraceEnabled}
 				{manualTraceStatus}
@@ -5582,20 +5610,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		line-height: 1.55;
 		text-wrap: pretty;
 	}
-	.first-run-tutorial button {
-		min-width: 88px;
-		min-height: 44px;
-		padding: 8px 20px;
-		border: 1px solid rgba(104, 241, 221, .72);
-		border-radius: 999px;
-		background: #d8fff5;
-		color: #153a35;
-		font: inherit;
-		font-weight: 700;
-		cursor: pointer;
-		pointer-events: auto;
-	}
-	.first-run-tutorial button:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+	.first-run-tutorial :global(.first-run-tutorial-next) { pointer-events: auto; }
 	.first-run-completion-notice {
 		position: fixed;
 		top: max(12px, env(safe-area-inset-top));
