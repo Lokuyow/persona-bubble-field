@@ -1179,6 +1179,12 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		onSucceeded: (context) => {
 			traceReplyMode = completeTraceReplySubmission(traceReplyMode, context.generation);
 			if (context.manualTrace) manualTraceMode = false;
+			if (!context.manualTrace && firstRunTutorialStep === 'speech' && personaSnapshot) {
+				const scope = firstRunTutorialScopeFor(personaSnapshot);
+				if (scope && firstRunTutorialScopesMatch(firstRunTutorialScope, scope)) {
+					storeFirstRunTutorialStep('trace', personaSnapshot);
+				}
+			}
 		},
 		onOutOfRange: (context) => {
 			if (traceReplyMode.generation === context.generation) traceReplyMode = clearTraceReplyMode(traceReplyMode, true);

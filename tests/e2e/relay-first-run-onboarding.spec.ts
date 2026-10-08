@@ -7,6 +7,7 @@ import {
 	moveRelaySelfTo,
 	openClearReadyWorld,
 	openReadyRelayWorld,
+	publishedMessages,
 	readRelayGameState,
 	relayState,
 	selectRelayTraceCell,
@@ -173,12 +174,16 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 420, height: 800 
 			expect(guideAboveDock).toBe(true);
 		}
 		const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
-		await editor.fill('チュートリアル中の入力確認');
-		await expect(editor).toHaveValue('チュートリアル中の入力確認');
-		await editor.fill('');
-		await speechStep.getByRole('button', { name: '次へ' }).click();
-
 		const traceStep = page.locator('[data-first-run-tutorial="trace"]');
+		const composer = page.locator('ehagaki-composer');
+		const speechContent = 'チュートリアル中の発言';
+		await editor.fill(speechContent);
+		await expect(editor).toHaveValue(speechContent);
+		await composer.getByRole('button', { name: 'Send' }).click();
+		await expect.poll(async () => (await publishedMessages(page)).filter((event) => event.content === speechContent)).toHaveLength(1);
+		await expect(traceStep).toBeVisible();
+		expect(await page.evaluate(() => sessionStorage.getItem('persona-bubble-field:first-run-tutorial'))).toContain('"step":"trace"');
+
 		await expect(traceStep).toContainText('他の住人の未読の痕跡・書置き・遺言のどれかを1つ読んで、5ptを受け取ろう。');
 		await expect(traceStep.getByRole('button')).toHaveCount(0);
 		const traceTarget = page.locator('[data-trace-marker-position="4,2"]');
