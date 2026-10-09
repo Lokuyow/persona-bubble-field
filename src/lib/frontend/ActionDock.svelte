@@ -39,6 +39,7 @@
 		speechTutorialHighlighted: boolean;
 		noteTutorialHighlighted: boolean;
 		replyTutorialHighlighted: boolean;
+		helpTutorialHighlighted: boolean;
 		onSpeechTypeChange: (next: SpeechType) => void;
 		manualTraceSelected: boolean;
 		manualTraceEnabled: boolean;
@@ -51,7 +52,7 @@
 	let { onBoundsChange, boundsRevision, selectedSpeechType, submissionInProgress, volume, onSoundOpen, onVolume, onSpeechTypeChange, onOpenSelfProfile, submitContent, submitCandidate,
 		desiredContext, loadPreview, onPreviewClear, onEditorEmptyChange, onPreferredHeightChange,
 		hasUnreadReplies, unreadBaselineSnapshot, character, avatarTone, suggestionConversation, canOpenSelfProfile, chatterOpen, onToggleChatter,
-		speechTutorialHighlighted, noteTutorialHighlighted, replyTutorialHighlighted, onOpenHelp,
+		speechTutorialHighlighted, noteTutorialHighlighted, replyTutorialHighlighted, helpTutorialHighlighted, onOpenHelp,
 	 manualTraceSelected, manualTraceEnabled, manualTraceStatus, onToggleManualTrace }: Props = $props();
 	let remeasureBounds = () => {};
 	const observeBounds: Attachment<HTMLElement> = (node) => untrack(() => {
@@ -220,7 +221,7 @@
 		<Tooltip.Root>
 			<Tooltip.Trigger>
 				{#snippet child({ props })}
-					<button {...props} class="help-trigger" type="button" aria-label="ヘルプ" onclick={(event) => onOpenHelp(event.currentTarget)}>
+					<button {...props} class="help-trigger" class:help-tutorial-highlighted={helpTutorialHighlighted} data-tutorial-highlight={helpTutorialHighlighted ? 'help' : undefined} type="button" aria-label="ヘルプ" onclick={(event) => onOpenHelp(event.currentTarget)}>
 						<HelpCircle aria-hidden="true" />
 					</button>
 				{/snippet}
@@ -503,7 +504,7 @@
 		outline: 3px solid var(--color-focus-ring);
 		outline-offset: 2px;
 	}
-	.speech-type-toggle.speech-tutorial-highlighted, .manual-trace-toggle.note-tutorial-highlighted {
+	.speech-type-toggle.speech-tutorial-highlighted, .manual-trace-toggle.note-tutorial-highlighted, .help-trigger.help-tutorial-highlighted {
 		animation: first-run-action-glow-pulse 2.6s ease-in-out infinite;
 	}
 	@keyframes first-run-action-glow-pulse {
@@ -527,9 +528,9 @@
 		50% { box-shadow: 0 0 0 8px rgba(31, 173, 153, .42), 0 0 26px rgba(31, 173, 153, .92); }
 	}
 	@media (prefers-reduced-motion: reduce) {
-		.speech-type-toggle.speech-tutorial-highlighted, .manual-trace-toggle.note-tutorial-highlighted,
+		.speech-type-toggle.speech-tutorial-highlighted, .manual-trace-toggle.note-tutorial-highlighted, .help-trigger.help-tutorial-highlighted,
 		.composer-editor-slot.composer-tutorial-highlighted { animation: none; }
-		.speech-type-toggle.speech-tutorial-highlighted, .manual-trace-toggle.note-tutorial-highlighted {
+		.speech-type-toggle.speech-tutorial-highlighted, .manual-trace-toggle.note-tutorial-highlighted, .help-trigger.help-tutorial-highlighted {
 			box-shadow: 0 0 0 4px rgba(31, 173, 153, .35), 0 0 15px rgba(31, 173, 153, .82);
 		}
 		.composer-editor-slot.composer-tutorial-highlighted { box-shadow: 0 0 0 6px rgba(31, 173, 153, .16), 0 0 17px rgba(31, 173, 153, .52); }

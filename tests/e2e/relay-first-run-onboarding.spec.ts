@@ -338,6 +338,11 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 420, height: 800 
 		await expect(noteStep).toBeVisible();
 		await expect(noteAction).toHaveAttribute('data-tutorial-highlight', 'note');
 		await noteStep.getByRole('button', { name: '次へ' }).click();
+		const helpStep = page.locator('[data-first-run-tutorial="help"]');
+		const helpButton = page.getByRole('button', { name: 'ヘルプ', exact: true });
+		await expect(helpStep).toContainText('遊び方を見返したいときは、いつでもヘルプボタンを開けます。');
+		await expect(helpButton).toHaveAttribute('data-tutorial-highlight', 'help');
+		await helpStep.getByRole('button', { name: '次へ' }).click();
 		await expect(page.locator('[data-first-run-tutorial="complete"]')).toHaveText('あとは自由です。');
 		await expect.poll(() => page.locator('[data-first-run-tutorial="complete"]').evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(20);
 		expect(await page.evaluate(() => sessionStorage.getItem('persona-bubble-field:first-run-tutorial'))).toBeNull();

@@ -333,7 +333,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	let connectionStatus: WorldReadConnectionStatus = { kind: 'bootstrapping' };
 	let selfSigner = $state.raw<ActiveSignerSnapshot | null>(null);
 	let personaSnapshot = $state.raw<PersonaSnapshot | null>(null);
-	type FirstRunTutorialStep = 'life' | 'movement' | 'work' | 'ability' | 'speech' | 'trace' | 'note' | 'reply';
+	type FirstRunTutorialStep = 'life' | 'movement' | 'work' | 'ability' | 'speech' | 'trace' | 'note' | 'reply' | 'help';
 	type FirstRunTutorialScope = Readonly<{ generation: 1; accountIndex: number; pubkey: string; runNumber: 1 }>;
 	type FirstRunTutorialMarker = FirstRunTutorialScope & Readonly<{ step: FirstRunTutorialStep; abilityLevelsAtStep?: PersonaAbilityLevels }>;
 	const FIRST_RUN_TUTORIAL_SESSION_KEY = 'persona-bubble-field:first-run-tutorial';
@@ -361,6 +361,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		if (step === 'ability') return '[data-field-facility="adjustment-terminal"][data-tutorial-highlight="ability"]';
 		if (step === 'speech') return '.composer-editor-slot[data-tutorial-highlight="speech"]';
 		if (step === 'note') return '.manual-trace-toggle[data-tutorial-highlight="note"]';
+		if (step === 'help') return '.help-trigger[data-tutorial-highlight="help"]';
 		if (step === 'trace' && firstRunTutorialTraceTargetId) return '[data-tutorial-highlight="trace"]';
 		if (step === 'reply' && firstRunTutorialReplyTargetId) return '[data-tutorial-highlight="trace"]';
 		return null;
@@ -392,7 +393,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			const marker = parsed as Partial<FirstRunTutorialMarker>;
 			if (marker.generation !== 1 || !Number.isInteger(marker.accountIndex) || typeof marker.pubkey !== 'string' || marker.runNumber !== 1 ||
 				(marker.step !== 'life' && marker.step !== 'movement' && marker.step !== 'work' && marker.step !== 'ability' &&
-					marker.step !== 'speech' && marker.step !== 'trace' && marker.step !== 'note' && marker.step !== 'reply')) return null;
+					marker.step !== 'speech' && marker.step !== 'trace' && marker.step !== 'note' && marker.step !== 'reply' && marker.step !== 'help')) return null;
 			const abilities = marker.abilityLevelsAtStep;
 			const validAbilityLevels = abilities && typeof abilities === 'object' &&
 				Number.isInteger(abilities.inferenceEfficiency) && abilities.inferenceEfficiency! >= 1 &&
@@ -468,10 +469,12 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		} else if (firstRunTutorialStep === 'speech') {
 			storeFirstRunTutorialStep('trace', persona);
 		} else if (firstRunTutorialStep === 'note') {
-			const scope = firstRunTutorialScopeFor(persona);
-			if (scope) showFirstRunTutorialCompletion(scope);
+			storeFirstRunTutorialStep('help', persona);
 		} else if (firstRunTutorialStep === 'reply') {
 			advanceFirstRunTutorialFromReply(persona);
+		} else if (firstRunTutorialStep === 'help') {
+			const scope = firstRunTutorialScopeFor(persona);
+			if (scope) showFirstRunTutorialCompletion(scope);
 		}
 	}
 
@@ -5507,6 +5510,9 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			{:else if firstRunTutorialStep === 'reply'}
 				<p>この痕跡にリプライできます。返事を投稿するか、「次へ」で進みましょう。書置きや遺言にも返信できます。</p>
 				<ActionButton variant="primary" class="first-run-tutorial-next" type="button" onclick={advanceFirstRunTutorialFromPrompt}>次へ</ActionButton>
+			{:else if firstRunTutorialStep === 'help'}
+				<p>遊び方を見返したいときは、いつでもヘルプボタンを開けます。</p>
+				<ActionButton variant="primary" class="first-run-tutorial-next" type="button" onclick={advanceFirstRunTutorialFromPrompt}>次へ</ActionButton>
 			{/if}
 		</div>
 	{/if}
@@ -5704,6 +5710,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 				speechTutorialHighlighted={showFirstRunTutorial && firstRunTutorialStep === 'speech'}
 				noteTutorialHighlighted={showFirstRunTutorial && firstRunTutorialStep === 'note'}
 				replyTutorialHighlighted={showFirstRunTutorial && firstRunTutorialStep === 'reply'}
+				helpTutorialHighlighted={showFirstRunTutorial && firstRunTutorialStep === 'help'}
 				manualTraceSelected={manualTraceMode}
 				{manualTraceEnabled}
 				{manualTraceStatus}
