@@ -246,6 +246,42 @@ test.describe('public profile rankings', () => {
 		}).toEqual(rankingSubIds.map(() => true));
 	});
 
+	test('shows only the top 20 rows in each ranking', async ({ page }) => {
+		const now = Date.now();
+		await page.clock.install({ time: now });
+		await openReadyRelayWorld(page, 1);
+		await page.evaluate(() => (window as typeof window & {
+			__relayStartupTest: { deferRankingEvents(): void }
+		}).__relayStartupTest.deferRankingEvents());
+		await moveRelaySelfTo(page, { x: 7, y: 0 });
+		await clickRelayLogicalCell(page, { x: 8, y: 0 });
+
+		const dialog = page.getByRole('dialog', { name: 'ランキング' });
+		await expect(dialog).toBeVisible();
+		await expect.poll(async () => (await relayState(page)).state.requests.filter((request) => request.filters.length === 2 &&
+			request.filters.some((filter) => ((filter['#d'] as string[] | undefined) ?? []).some((value) => value.includes(':profile-state:')))).length).toBeGreaterThan(0);
+
+		const fixtureIds = [20, 21, 23, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 41, 43, 47, 51, 53, 55, 57, 59, 61, 63] as const;
+		for (const [index, fixtureId] of fixtureIds.entries()) {
+			const event = publicProfile(fixtureSecret(fixtureId), now + (index + 1) * 1_000, 100 - index);
+			await page.evaluate((rankingEvent) => (window as typeof window & {
+				__relayStartupTest: { injectRankingEvent(event: object): number }
+			}).__relayStartupTest.injectRankingEvent(rankingEvent), event);
+		}
+		await page.evaluate(() => (window as typeof window & {
+			__relayStartupTest: { releaseRankingEvents(): void }
+		}).__relayStartupTest.releaseRankingEvents());
+
+		const pointsColumn = dialog.locator('[data-ranking-column="points"]');
+		const lifespanColumn = dialog.locator('[data-ranking-column="lifespan"]');
+		const pointsRows = pointsColumn.locator('[data-ranking-row]');
+		const lifespanRows = lifespanColumn.locator('[data-ranking-row]');
+		await expect(pointsRows).toHaveCount(20);
+		await expect(lifespanRows).toHaveCount(20);
+		await expect(pointsRows.first().locator('.ranking-value')).toHaveText('100 pt');
+		await expect(pointsRows.nth(19).locator('.ranking-value')).toHaveText('81 pt');
+	});
+
 	test('shows empty only after the deferred finite ranking batch completes without valid rows', async ({ page }) => {
 		await page.clock.install({ time: Date.now() });
 		await openReadyRelayWorld(page, 1);
