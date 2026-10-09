@@ -26,7 +26,7 @@ import type {
 
 export type OperatorMode = 'dry-run' | 'publish';
 
-export type OperatorOutput = Readonly<{
+type OperatorOutput = Readonly<{
 	stdout: (line: string) => void;
 	stderr: (line: string) => void;
 }>;

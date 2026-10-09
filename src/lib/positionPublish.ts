@@ -7,7 +7,7 @@ export type PositionPublishState = Readonly<{
 	consumedSlots: 0 | 1 | 2;
 }>;
 
-export type PositionPublishUnavailableReason = 'second-exhausted' | 'clock-regressed';
+type PositionPublishUnavailableReason = 'second-exhausted' | 'clock-regressed';
 
 export type PositionPublishEvidence =
 	| readonly []

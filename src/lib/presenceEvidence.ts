@@ -1,7 +1,7 @@
 import type { GridPosition } from './geometry';
 import type { ParsedWorldStateEvent, ParsedWorldMessage } from './nostrProtocol';
 
-export type PresenceEvidenceSource = 'message' | 'world-state-slot-0' | 'world-state-slot-1' | 'world-state-exit';
+type PresenceEvidenceSource = 'message' | 'world-state-slot-0' | 'world-state-slot-1' | 'world-state-exit';
 
 export type PresenceEvidence = Readonly<{
 	eventId: string;

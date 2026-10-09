@@ -17,7 +17,7 @@ export type TraceConversationConfig = Readonly<{
 	currentId: string;
 }>;
 
-export type TraceReplyRefreshState = 'loading' | 'settled' | 'unavailable';
+type TraceReplyRefreshState = 'loading' | 'settled' | 'unavailable';
 
 export type TraceConversationState =
 	| Readonly<{ kind: 'closed' }>

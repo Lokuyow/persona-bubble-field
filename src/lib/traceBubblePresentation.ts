@@ -23,9 +23,9 @@ import {
 } from './bubblePresentation';
 import type { SpeechBubbleShape } from './speechBubblePath';
 
-export type TraceCardRole = 'parent' | 'current' | 'child';
+type TraceCardRole = 'parent' | 'current' | 'child';
 
-export type TraceRootPresentation = Readonly<{
+type TraceRootPresentation = Readonly<{
 	id: string;
 	event: ParsedWorldMessage;
 	anchor: WorldPoint;
@@ -37,7 +37,7 @@ export type TraceRootPresentation = Readonly<{
 	compact: boolean;
 }>;
 
-export type TraceReplyPresentation = Readonly<{
+type TraceReplyPresentation = Readonly<{
 	id: string;
 	reply: ParsedTraceReply;
 	role: TraceCardRole;

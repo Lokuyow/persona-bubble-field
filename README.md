@@ -56,20 +56,20 @@ cleared Identity starts its next Run with the same clear-ready points. If an
 older `localhost:5175` site has stale storage, start a new Run or clear that
 site's data first.
 
-### Manual Rift operator CLI
+### Manual Cooperation and Defection operator CLI
 
-The local operator CLI runs on Node.js 24.19 or newer. The default command is
-a signed dry-run and never publishes:
+The local operator CLI uses the project-supported Node.js 24 release. The
+default command is a signed dry-run and never publishes:
 
 ```sh
-npm run operator:rift:start
+npm run operator:cooperation-defection:start
 ```
 
 The explicit publish command requires a hidden local interactive TTY
 confirmation and then publishes to the authoritative Relays:
 
 ```sh
-npm run operator:rift:publish
+npm run operator:cooperation-defection:publish
 ```
 
 This explicit npm command is the supported publish entrypoint; after an exact
@@ -107,9 +107,9 @@ http://localhost:5173/?devWorld=1
 This starts a DEV-only, local-only sandbox with one `Dev Wanderer` participant.
 Use the Scenario picker to choose a named fixture. Automation and direct
 debugging can select one with `?devWorld=1&devScenario=<id>`. The controls also
-keep `devCharacter=<id>` as an independent character option. `Rift Playground`
-is a fully local manual Rift simulation: it does not connect to a Relay and
-does not modify production persona or Run state.
+keep `devCharacter=<id>` as an independent character option. `Cooperation and
+Defection Playground` is a fully local simulation: it does not connect to a
+Relay and does not modify production persona or Run state.
 
 The DEV World query is ignored in a production build, which continues to start
 the normal Relay world.

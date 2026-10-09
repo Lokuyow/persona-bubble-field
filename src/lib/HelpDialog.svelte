@@ -236,18 +236,18 @@
 	.category-card, .event-card { display: grid; grid-template-columns: 42px minmax(0, 1fr) 22px; align-items: center; gap: 12px; width: 100%; min-height: 64px; padding: 9px 12px; border: 1px solid rgba(218, 224, 255, .17); border-radius: 12px; background: rgba(255,255,255,.045); color: inherit; text-align: left; cursor: pointer; }
 	.category-card:hover, .event-card:hover { border-color: rgba(174, 182, 255, .62); background: rgba(122, 135, 255, .11); }
 	.category-icon { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 10px; background: rgba(122, 135, 255, .13); color: #c3caff; }
-	.category-icon :global(svg), .category-icon img, .category-icon .help-trace-icon { width: 24px; height: 24px; }
+	.category-icon :global(svg), .category-icon .help-trace-icon { width: 24px; height: 24px; }
 	.category-copy { display: grid; gap: 3px; min-width: 0; }
 	.category-copy strong { font-size: .98rem; }
 	.category-copy span, .event-card small { color: #c9cde0; font-size: .83rem; line-height: 1.4; }
 	:global(.category-chevron) { width: 20px; height: 20px; color: #aeb6ff; }
 	.help-section { display: grid; align-content: start; gap: 14px; }
 	.help-section > h2 { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 1.35rem; }
-	.help-section > h2 :global(svg), .help-section > h2 img, .help-section > h2 .help-trace-icon { flex: 0 0 25px; width: 25px; height: 25px; color: #aeb6ff; }
+	.help-section > h2 :global(svg), .help-section > h2 .help-trace-icon { flex: 0 0 25px; width: 25px; height: 25px; color: #aeb6ff; }
 	.help-section > p, .help-fact p { margin: 0; color: #e4e6f2; line-height: 1.7; }
 	.help-section h3 { margin: 0 0 5px; font-size: 1rem; }
 	.help-fact { display: grid; grid-template-columns: 28px minmax(0, 1fr); align-items: start; gap: 12px; padding: 14px; border: 1px solid rgba(218, 224, 255, .15); border-radius: 12px; background: rgba(255,255,255,.04); }
-	.help-fact > :global(svg), .help-fact > img, .help-fact > .help-trace-icon { width: 24px; height: 24px; color: #aeb6ff; }
+	.help-fact > :global(svg), .help-fact > .help-trace-icon { width: 24px; height: 24px; color: #aeb6ff; }
 	.help-fact > .tag-game-rule-symbol { display: block; overflow: visible; }
 	.help-trace-icon { display: block; background-color: currentColor; -webkit-mask: var(--help-trace-image) center / contain no-repeat; mask: var(--help-trace-image) center / contain no-repeat; }
 	.help-fact > div { min-width: 0; }

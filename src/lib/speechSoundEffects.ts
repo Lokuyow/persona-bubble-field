@@ -3,7 +3,7 @@ import levelUpSoundUrl from './assets/sounds/level-up.ogg?url';
 import mendingCollectionSoundUrl from './assets/sounds/mending-collection.ogg?url';
 
 export type SoundPreference = Readonly<{ volume: number }>;
-export type TagGameSoundEffect = 'tag-game-benefit' | 'tag-game-calamity' | 'tag-game-transfer' | 'tag-game-switch' | 'tag-game-start' | 'tag-game-end';
+type TagGameSoundEffect = 'tag-game-benefit' | 'tag-game-calamity' | 'tag-game-transfer' | 'tag-game-switch' | 'tag-game-start' | 'tag-game-end';
 export type SoundEffect = SpeechType | 'collect' | 'mending-collect' | 'level-up' | 'startup' | 'cooperation-start' | 'death' | TagGameSoundEffect;
 export type AssetSoundEffect = 'mending-collect' | 'level-up';
 export type ProceduralSoundEffect = Exclude<SoundEffect, AssetSoundEffect>;
@@ -34,7 +34,7 @@ export function loadSoundPreference(storage: Pick<Storage, 'getItem'> | null | u
 	}
 }
 
-export function saveSoundPreference(storage: Pick<Storage, 'setItem'> | null | undefined, preference: SoundPreference): void {
+function saveSoundPreference(storage: Pick<Storage, 'setItem'> | null | undefined, preference: SoundPreference): void {
 	try { storage?.setItem(SPEECH_SOUND_PREFERENCE_KEY, JSON.stringify(preference)); } catch { /* storage is optional */ }
 }
 

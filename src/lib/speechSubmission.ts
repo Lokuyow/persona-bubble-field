@@ -5,8 +5,6 @@ export const SPEECH_SHORTCUT_IDS = {
 	monologue: 'persona-speech-monologue'
 } as const;
 
-export type SpeechShortcutId = (typeof SPEECH_SHORTCUT_IDS)[keyof typeof SPEECH_SHORTCUT_IDS];
-
 export type SpeechSubmissionInput = Readonly<{
 	content: string;
 	shortcutId?: string;

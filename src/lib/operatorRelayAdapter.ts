@@ -2,9 +2,9 @@ import { SimplePool } from 'nostr-tools/pool';
 import type { Event, VerifiedEvent } from 'nostr-tools/pure';
 import type { Filter } from 'nostr-tools/filter';
 
-export type OperatorRelayQueryStatus = 'eose' | 'closed' | 'timeout' | 'connection-failure';
+type OperatorRelayQueryStatus = 'eose' | 'closed' | 'timeout' | 'connection-failure';
 
-export type OperatorRelayQueryDiagnostic = Readonly<{
+type OperatorRelayQueryDiagnostic = Readonly<{
 	relayUrl: string;
 	status: OperatorRelayQueryStatus;
 	notice?: string;
@@ -17,7 +17,7 @@ export type OperatorRelayQueryResult = Readonly<{
 	eoseCount: number;
 }>;
 
-export type OperatorRelayPublishOutcome = 'accepted' | 'rejected' | 'timeout' | 'connection-failure';
+type OperatorRelayPublishOutcome = 'accepted' | 'rejected' | 'timeout' | 'connection-failure';
 
 export type OperatorRelayPublishResult = Readonly<{
 	relayUrl: string;
@@ -78,7 +78,7 @@ function classifySubscriptionClose(reason: string): Readonly<{ status: 'closed' 
 }
 
 /** Disable nostr-tools' default raw NOTICE logger at the operator boundary. */
-export function prepareOperatorRelayConnection(relay: OperatorRelayConnection): OperatorRelayConnection {
+function prepareOperatorRelayConnection(relay: OperatorRelayConnection): OperatorRelayConnection {
 	relay.onnotice = () => {};
 	return relay;
 }

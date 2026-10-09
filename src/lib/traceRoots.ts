@@ -120,7 +120,7 @@ export function selectTraceRootCandidatePool(
  * Validates supported trace-root events for one world and selects its effective roots.
  * The boundary validation is intentional even when rawEvents is empty.
  */
-export function selectTraceRootCandidates(
+function selectTraceRootCandidates(
 	rawEvents: readonly Event[],
 	channelId: string,
 	field: TraceRootField

@@ -1,9 +1,5 @@
 export {
 	assertPrototypeWorldConfig,
-	PROTOTYPE_CHANNEL_ID,
-	PROTOTYPE_CREATOR_PUBKEY,
-	PROTOTYPE_AUTHORITATIVE_RELAYS,
-	PROTOTYPE_PREFERRED_WORLD_RELAY_HINT,
 	PROTOTYPE_WORLD_CONFIG,
 	type PrototypeWorldConfig
 } from './prototypeWorldConfig';

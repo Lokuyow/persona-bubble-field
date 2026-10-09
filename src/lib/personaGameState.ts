@@ -2,9 +2,8 @@ import { isMendingExpired, isValidMendingJob, isValidPointProgressTicks, type Me
 import { BASE_INITIAL_LIFESPAN_MS, type RootBuild, ZERO_ROOT_BUILD } from './rootProgression';
 
 export const INITIAL_LIFESPAN_MS = BASE_INITIAL_LIFESPAN_MS;
-export const MAX_LIFESPAN_MS = BASE_INITIAL_LIFESPAN_MS;
 
-export const ABILITY_LEVEL_LIMITS = {
+const ABILITY_LEVEL_LIMITS = {
 	inferenceEfficiency: 100,
 	contextCapacity: 100,
 	hallucinationSuppression: 100
