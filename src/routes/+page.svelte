@@ -233,6 +233,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		traceRootGhostGeometry
 	} from '$lib/traceBubblePresentation';
 	import ActionDock from '$lib/frontend/ActionDock.svelte';
+	import HelpDialog from '$lib/HelpDialog.svelte';
 	import Chatter from '$lib/frontend/Chatter.svelte';
 	import WorldEntryControls from '$lib/frontend/WorldEntryControls.svelte';
 	import DevWorldControls from '$lib/dev/DevWorldControls.svelte';
@@ -332,7 +333,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	let connectionStatus: WorldReadConnectionStatus = { kind: 'bootstrapping' };
 	let selfSigner = $state.raw<ActiveSignerSnapshot | null>(null);
 	let personaSnapshot = $state.raw<PersonaSnapshot | null>(null);
-	type FirstRunTutorialStep = 'life' | 'movement' | 'work' | 'ability' | 'speech' | 'trace' | 'note';
+	type FirstRunTutorialStep = 'life' | 'movement' | 'work' | 'ability' | 'speech' | 'trace' | 'note' | 'reply' | 'help';
 	type FirstRunTutorialScope = Readonly<{ generation: 1; accountIndex: number; pubkey: string; runNumber: 1 }>;
 	type FirstRunTutorialMarker = FirstRunTutorialScope & Readonly<{ step: FirstRunTutorialStep; abilityLevelsAtStep?: PersonaAbilityLevels }>;
 	const FIRST_RUN_TUTORIAL_SESSION_KEY = 'persona-bubble-field:first-run-tutorial';
@@ -360,7 +361,9 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		if (step === 'ability') return '[data-field-facility="adjustment-terminal"][data-tutorial-highlight="ability"]';
 		if (step === 'speech') return '.composer-editor-slot[data-tutorial-highlight="speech"]';
 		if (step === 'note') return '.manual-trace-toggle[data-tutorial-highlight="note"]';
+		if (step === 'help') return '.help-trigger[data-tutorial-highlight="help"]';
 		if (step === 'trace' && firstRunTutorialTraceTargetId) return '[data-tutorial-highlight="trace"]';
+		if (step === 'reply' && firstRunTutorialReplyTargetId) return '[data-tutorial-highlight="trace"]';
 		return null;
 	}
 
@@ -390,7 +393,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			const marker = parsed as Partial<FirstRunTutorialMarker>;
 			if (marker.generation !== 1 || !Number.isInteger(marker.accountIndex) || typeof marker.pubkey !== 'string' || marker.runNumber !== 1 ||
 				(marker.step !== 'life' && marker.step !== 'movement' && marker.step !== 'work' && marker.step !== 'ability' &&
-					marker.step !== 'speech' && marker.step !== 'trace' && marker.step !== 'note')) return null;
+					marker.step !== 'speech' && marker.step !== 'trace' && marker.step !== 'note' && marker.step !== 'reply' && marker.step !== 'help')) return null;
 			const abilities = marker.abilityLevelsAtStep;
 			const validAbilityLevels = abilities && typeof abilities === 'object' &&
 				Number.isInteger(abilities.inferenceEfficiency) && abilities.inferenceEfficiency! >= 1 &&
@@ -466,6 +469,10 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		} else if (firstRunTutorialStep === 'speech') {
 			storeFirstRunTutorialStep('trace', persona);
 		} else if (firstRunTutorialStep === 'note') {
+			storeFirstRunTutorialStep('help', persona);
+		} else if (firstRunTutorialStep === 'reply') {
+			advanceFirstRunTutorialFromReply(persona);
+		} else if (firstRunTutorialStep === 'help') {
 			const scope = firstRunTutorialScopeFor(persona);
 			if (scope) showFirstRunTutorialCompletion(scope);
 		}
@@ -477,6 +484,12 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		const scope = firstRunTutorialScopeFor(persona);
 		if (reward.points !== 5 || firstRunTutorialStep !== 'trace' || !persona || !scope ||
 			!firstRunTutorialScopesMatch(firstRunTutorialScope, scope)) return;
+		storeFirstRunTutorialStep('reply', persona);
+	}
+
+	function advanceFirstRunTutorialFromReply(persona: PersonaSnapshot): void {
+		const scope = firstRunTutorialScopeFor(persona);
+		if (firstRunTutorialStep !== 'reply' || !scope || !firstRunTutorialScopesMatch(firstRunTutorialScope, scope)) return;
 		storeFirstRunTutorialStep('ability', persona);
 	}
 
@@ -498,10 +511,11 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	});
 	$effect(() => {
 		const step = firstRunTutorialStep;
-		const traceTargetId = step === 'trace' ? firstRunTutorialTraceTargetId : null;
-		const traceSelfPosition = step === 'trace' ? selfLogicalPosition : null;
+		const traceTargetId = step === 'trace' ? firstRunTutorialTraceTargetId : step === 'reply' ? firstRunTutorialReplyTargetId : null;
+		const traceSelfPosition = step === 'trace' || step === 'reply' ? selfLogicalPosition : null;
+		const traceStep = step === 'trace' || step === 'reply';
 		const selector = step && step !== 'complete' ? firstRunTutorialAnchorSelector(step) : null;
-		if (!showFirstRunTutorial || !selector || (step === 'trace' && !traceTargetId)) {
+		if (!showFirstRunTutorial || !selector || (traceStep && !traceTargetId)) {
 			untrack(clearFirstRunTutorialAnchor);
 			return;
 		}
@@ -517,7 +531,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			}
 			const surfaceBounds = surface.getBoundingClientRect();
 			const targetBounds = target.getBoundingClientRect();
-			if (step === 'trace') {
+			if (traceStep) {
 				const fieldSurface = document.querySelector<HTMLElement>('.field-area');
 				const fieldBounds = fieldSurface?.getBoundingClientRect();
 				if (!traceSelfPosition || !fieldBounds || targetBounds.right <= fieldBounds.left || targetBounds.left >= fieldBounds.right ||
@@ -620,6 +634,8 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	let rankingDialogOpen = $state(false);
 	let selfProfileDialogOpen = $state(false);
 	let lastSelfProfileTrigger: HTMLButtonElement | null = null;
+	let helpDialogOpen = $state(false);
+	let lastHelpTrigger: HTMLButtonElement | null = null;
 	let abilityMutationInFlight = $state(false);
 	let upgradeFeedback = $state<Readonly<{ id: number; key: PersonaAbilityKey; level: number }> | null>(null);
 	let upgradeFeedbackTimer: number | null = null;
@@ -1103,6 +1119,18 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 				return firstDistance - secondDistance;
 			})[0]?.roots[0].id ?? null
 		: null);
+	let firstRunTutorialReplyTargetId = $derived(showFirstRunTutorial && firstRunTutorialStep === 'reply' && personaSnapshot && selfLogicalPosition
+		? traceConversationState.kind === 'open' && traceConversationState.root.pubkey !== personaSnapshot.signer.pubkey &&
+			isWithinTraceInvestigationRange(selfLogicalPosition, traceConversationState.root.position)
+			? traceConversationState.root.id
+			: [...fieldTraceRootCells]
+			.filter((cell) => cell.roots[0].pubkey !== personaSnapshot!.signer.pubkey && isWithinTraceInvestigationRange(selfLogicalPosition!, cell.position))
+			.sort((first, second) => {
+				const firstDistance = Math.max(Math.abs(first.position.x - selfLogicalPosition!.x), Math.abs(first.position.y - selfLogicalPosition!.y));
+				const secondDistance = Math.max(Math.abs(second.position.x - selfLogicalPosition!.x), Math.abs(second.position.y - selfLogicalPosition!.y));
+				return firstDistance - secondDistance;
+			})[0]?.roots[0].id ?? null
+		: null);
 	let traceMarkerCells: readonly TraceMarkerCell[] = $derived(fieldTraceRootCells
 		.filter((cell) => traceConversationState.kind !== 'open' || !sameCell(cell.position, traceConversationState.root.position))
 		.map((cell) => ({
@@ -1184,6 +1212,9 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 				if (scope && firstRunTutorialScopesMatch(firstRunTutorialScope, scope)) {
 					storeFirstRunTutorialStep('trace', personaSnapshot);
 				}
+			}
+			if (!context.manualTrace && context.target && firstRunTutorialStep === 'reply' && personaSnapshot) {
+				advanceFirstRunTutorialFromReply(personaSnapshot);
 			}
 		},
 		onOutOfRange: (context) => {
@@ -5136,6 +5167,11 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		selfProfileDialogOpen = true;
 	}
 
+	function openHelpDialog(trigger: HTMLButtonElement): void {
+		lastHelpTrigger = trigger;
+		helpDialogOpen = true;
+	}
+
 
 	function receiveTimelineMessage(message: ParsedWorldMessage): void {
 		recentMessageTimeline = addRecentMessage(recentMessageTimeline, message);
@@ -5383,7 +5419,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 				{selfLogicalPosition}
 				presentationTombstonePosition={deathPresentation?.canonicalPosition ?? null}
 				{traceRootGhost}
-				traceTutorialRootId={firstRunTutorialTraceTargetId}
+				traceTutorialRootId={firstRunTutorialStep === 'reply' ? firstRunTutorialReplyTargetId : firstRunTutorialTraceTargetId}
 				{fieldActionMenu}
 				resolveFieldCellSelection={resolveFieldCellSelection}
 				executeFieldCellAction={executeFieldCellAction}
@@ -5470,6 +5506,12 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 				<p>他の住人の未読の痕跡・書置き・遺言のどれかを1つ読んで、5ptを受け取ろう。</p>
 			{:else if firstRunTutorialStep === 'note'}
 				<p>100ptを使って、その場に書置きを残せます</p>
+				<ActionButton variant="primary" class="first-run-tutorial-next" type="button" onclick={advanceFirstRunTutorialFromPrompt}>次へ</ActionButton>
+			{:else if firstRunTutorialStep === 'reply'}
+				<p>この痕跡にリプライできます。返事を投稿するか、「次へ」で進みましょう。書置きや遺言にも返信できます。</p>
+				<ActionButton variant="primary" class="first-run-tutorial-next" type="button" onclick={advanceFirstRunTutorialFromPrompt}>次へ</ActionButton>
+			{:else if firstRunTutorialStep === 'help'}
+				<p>遊び方を見返したいときは、いつでもヘルプボタンを開けます。</p>
 				<ActionButton variant="primary" class="first-run-tutorial-next" type="button" onclick={advanceFirstRunTutorialFromPrompt}>次へ</ActionButton>
 			{/if}
 		</div>
@@ -5610,6 +5652,11 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		onCloseAutoFocus={() => { lastSelfProfileTrigger?.focus(); }}
 		onClear={() => { void clearCurrentRun(); }}
 	/>
+	<HelpDialog
+		open={helpDialogOpen}
+		onOpenChange={(open) => { helpDialogOpen = open; }}
+		onCloseAutoFocus={() => { lastHelpTrigger?.focus(); }}
+	/>
 
 	{#if devWorldSandboxEnabled}
 		<DevWorldControls
@@ -5657,10 +5704,13 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		avatarTone={colorByPubkey[selfProjectionId] ?? 'coral'}
 			canOpenSelfProfile={selfProfileCharacter !== null}
 			onOpenSelfProfile={openSelfProfile}
+			onOpenHelp={openHelpDialog}
 			suggestionConversation={speechSuggestionConversation}
 			onSpeechTypeChange={(next) => { selectedSpeechType = next; }}
 				speechTutorialHighlighted={showFirstRunTutorial && firstRunTutorialStep === 'speech'}
 				noteTutorialHighlighted={showFirstRunTutorial && firstRunTutorialStep === 'note'}
+				replyTutorialHighlighted={showFirstRunTutorial && firstRunTutorialStep === 'reply'}
+				helpTutorialHighlighted={showFirstRunTutorial && firstRunTutorialStep === 'help'}
 				manualTraceSelected={manualTraceMode}
 				{manualTraceEnabled}
 				{manualTraceStatus}
@@ -5953,11 +6003,10 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			--action-reserved-height: calc(var(--composer-initial-preferred-height) + 8px + 46px + 8px + var(--action-dock-padding-block) + var(--action-dock-border-width) + env(safe-area-inset-bottom));
 		}
 	}
-	@media (max-width: 359px) {
+	@media (max-width: 420px) {
 		.app-shell {
 			--action-dock-height: calc(var(--composer-preferred-height) + 8px + 46px + 8px + 46px + 8px + var(--action-dock-padding-block) + var(--action-dock-border-width) + env(safe-area-inset-bottom));
 			--action-reserved-height: calc(var(--composer-initial-preferred-height) + 8px + 46px + 8px + 46px + 8px + var(--action-dock-padding-block) + var(--action-dock-border-width) + env(safe-area-inset-bottom));
 		}
 	}
-
 </style>

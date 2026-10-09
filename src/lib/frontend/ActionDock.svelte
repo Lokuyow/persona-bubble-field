@@ -6,6 +6,7 @@
 	import LayoutSidebarLeftCollapse from '~icons/tabler/layout-sidebar-left-collapse';
 	import LayoutSidebarLeftExpand from '~icons/tabler/layout-sidebar-left-expand';
 	import BookmarkPlus from '~icons/tabler/bookmark-plus';
+	import HelpCircle from '~icons/tabler/help-circle';
 	import HostOwnedComposerLite from '$lib/HostOwnedComposerLite.svelte';
 	import CharacterAvatar from '$lib/CharacterAvatar.svelte';
 	import SpeechSuggestions from '$lib/frontend/SpeechSuggestions.svelte';
@@ -37,18 +38,21 @@
 		onToggleChatter: () => void;
 		speechTutorialHighlighted: boolean;
 		noteTutorialHighlighted: boolean;
+		replyTutorialHighlighted: boolean;
+		helpTutorialHighlighted: boolean;
 		onSpeechTypeChange: (next: SpeechType) => void;
 		manualTraceSelected: boolean;
 		manualTraceEnabled: boolean;
 		manualTraceStatus: 'idle' | 'sending' | 'unknown' | 'confirmed';
 		onToggleManualTrace: () => void;
 		onOpenSelfProfile: (trigger: HTMLButtonElement) => void;
+		onOpenHelp: (trigger: HTMLButtonElement) => void;
 		submitCandidate: (content: string, signal: AbortSignal) => Promise<Readonly<{ eventId: string }>>;
 	};
 	let { onBoundsChange, boundsRevision, selectedSpeechType, submissionInProgress, volume, onSoundOpen, onVolume, onSpeechTypeChange, onOpenSelfProfile, submitContent, submitCandidate,
 		desiredContext, loadPreview, onPreviewClear, onEditorEmptyChange, onPreferredHeightChange,
 		hasUnreadReplies, unreadBaselineSnapshot, character, avatarTone, suggestionConversation, canOpenSelfProfile, chatterOpen, onToggleChatter,
-		speechTutorialHighlighted, noteTutorialHighlighted,
+		speechTutorialHighlighted, noteTutorialHighlighted, replyTutorialHighlighted, helpTutorialHighlighted, onOpenHelp,
 	 manualTraceSelected, manualTraceEnabled, manualTraceStatus, onToggleManualTrace }: Props = $props();
 	let remeasureBounds = () => {};
 	const observeBounds: Attachment<HTMLElement> = (node) => untrack(() => {
@@ -143,8 +147,8 @@
 
 </script>
 
-	<div class="action-dock" {@attach observeBounds} aria-label="主要操作">
-	<div class="action-dock-content">
+	<div class={['action-dock', { 'action-dock-has-unread-replies': hasUnreadReplies }]} {@attach observeBounds} aria-label="主要操作">
+	<div class={['action-dock-content', { 'action-dock-has-unread-replies': hasUnreadReplies }]}>
 		<Tooltip.Provider disabled={tooltipsDisabled} delayDuration={400} skipDelayDuration={100} disableHoverableContent>
 		<div class="composer-controls-left">
 		{#if canOpenSelfProfile}
@@ -214,6 +218,18 @@
 			</Popover.Root>
 		{/if}
 		<SoundControl {volume} onOpen={onSoundOpen} onVolume={onVolume} />
+		<Tooltip.Root>
+			<Tooltip.Trigger>
+				{#snippet child({ props })}
+					<button {...props} class="help-trigger" class:help-tutorial-highlighted={helpTutorialHighlighted} data-tutorial-highlight={helpTutorialHighlighted ? 'help' : undefined} type="button" aria-label="ヘルプ" onclick={(event) => onOpenHelp(event.currentTarget)}>
+						<HelpCircle aria-hidden="true" />
+					</button>
+				{/snippet}
+			</Tooltip.Trigger>
+			<Tooltip.Portal>
+				<Tooltip.Content role="tooltip" class="action-dock-tooltip" side="top" sideOffset={8}>ヘルプ</Tooltip.Content>
+			</Tooltip.Portal>
+		</Tooltip.Root>
 		</div>
 		<div class="composer-controls-right">
 		<Tooltip.Root>
@@ -279,7 +295,7 @@
 		/>
 		</div>
 		</Tooltip.Provider>
-		<div class="composer-editor-slot" class:composer-tutorial-highlighted={speechTutorialHighlighted} data-tutorial-highlight={speechTutorialHighlighted ? 'speech' : undefined}>
+		<div class="composer-editor-slot" class:composer-tutorial-highlighted={speechTutorialHighlighted || replyTutorialHighlighted} data-tutorial-highlight={speechTutorialHighlighted ? 'speech' : replyTutorialHighlighted ? 'reply' : undefined}>
 			<HostOwnedComposerLite
 				bind:this={composerComponent}
 				{submitContent}
@@ -329,6 +345,11 @@
 	:global(.profile-trigger-character-avatar img) { display: block; width: 100%; height: 100%; object-fit: contain; object-position: center; transform: scale(1.12); transform-origin: center; }
 	:global(.action-dock-tooltip) { z-index: 30; padding: 5px 8px; border: 1px solid rgba(82, 77, 68, 0.24); border-radius: 6px; background: rgba(50, 56, 52, 0.96); color: #fffdf2; font-size: 11px; font-weight: 700; line-height: 1.2; white-space: nowrap; }
 	.profile-trigger:focus-visible { outline: 3px solid var(--color-focus-ring); outline-offset: 2px; }
+	.help-trigger { display: inline-flex; flex: 0 0 54px; width: 54px; min-width: 44px; min-height: 44px; height: 54px; align-items: center; justify-content: center; padding: 0; border: 1px solid var(--action-icon-border); border-radius: 12px; background: var(--action-icon-background); box-shadow: 0 5px 12px rgba(58, 70, 61, 0.1); color: var(--action-icon-foreground); cursor: pointer; }
+	.help-trigger:hover { background: var(--action-icon-background-hover); }
+	.help-trigger:active { background: var(--action-icon-background-active); }
+	.help-trigger:focus-visible { outline: 3px solid var(--color-focus-ring); outline-offset: 2px; }
+	.help-trigger :global(svg) { width: 24px; height: 24px; }
 	.composer-controls-left, .composer-controls-right { display: flex; align-items: center; gap: 8px; min-width: 0; }
 	.composer-controls-left { grid-column: 1; }
 	.composer-controls-right { grid-column: 3; }
@@ -483,7 +504,7 @@
 		outline: 3px solid var(--color-focus-ring);
 		outline-offset: 2px;
 	}
-	.speech-type-toggle.speech-tutorial-highlighted, .manual-trace-toggle.note-tutorial-highlighted {
+	.speech-type-toggle.speech-tutorial-highlighted, .manual-trace-toggle.note-tutorial-highlighted, .help-trigger.help-tutorial-highlighted {
 		animation: first-run-action-glow-pulse 2.6s ease-in-out infinite;
 	}
 	@keyframes first-run-action-glow-pulse {
@@ -507,9 +528,9 @@
 		50% { box-shadow: 0 0 0 8px rgba(31, 173, 153, .42), 0 0 26px rgba(31, 173, 153, .92); }
 	}
 	@media (prefers-reduced-motion: reduce) {
-		.speech-type-toggle.speech-tutorial-highlighted, .manual-trace-toggle.note-tutorial-highlighted,
+		.speech-type-toggle.speech-tutorial-highlighted, .manual-trace-toggle.note-tutorial-highlighted, .help-trigger.help-tutorial-highlighted,
 		.composer-editor-slot.composer-tutorial-highlighted { animation: none; }
-		.speech-type-toggle.speech-tutorial-highlighted, .manual-trace-toggle.note-tutorial-highlighted {
+		.speech-type-toggle.speech-tutorial-highlighted, .manual-trace-toggle.note-tutorial-highlighted, .help-trigger.help-tutorial-highlighted {
 			box-shadow: 0 0 0 4px rgba(31, 173, 153, .35), 0 0 15px rgba(31, 173, 153, .82);
 		}
 		.composer-editor-slot.composer-tutorial-highlighted { box-shadow: 0 0 0 6px rgba(31, 173, 153, .16), 0 0 17px rgba(31, 173, 153, .52); }
@@ -528,11 +549,11 @@
 		.composer-controls-left { grid-column: 1; justify-self: start; }
 		.composer-controls-right { grid-column: 2; justify-self: end; }
 		.composer-controls-left .profile-trigger { flex-basis: 44px; width: 44px; height: 44px; }
-		.composer-controls-left .chatter-toggle, .composer-controls-left .trace-unread-indicator { flex-basis: 44px; width: 44px; height: 44px; }
+		.composer-controls-left .chatter-toggle, .composer-controls-left .trace-unread-indicator, .composer-controls-left .help-trigger { flex-basis: 44px; width: 44px; height: 44px; }
 		.composer-controls-left :global(.sound-control) { margin: 0; }
 		.composer-controls-right .speech-type-toggle, .composer-controls-right .manual-trace-toggle, .composer-controls-right :global(.suggestions-anchor) { flex-basis: 44px; width: 44px; height: 44px; }
 	}
-	@media (max-width: 359px) {
+	@media (max-width: 420px) {
 		.action-dock-content { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 46px 46px; }
 		.composer-controls-left, .composer-controls-right { grid-column: 1; }
 		.composer-controls-left { grid-row: 2; justify-self: start; }
@@ -542,7 +563,7 @@
 		.action-dock-content { --action-dock-desktop-control-size: 54px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: minmax(var(--action-dock-desktop-control-size), 1fr); }
 		.composer-controls-left, .composer-editor-slot, .composer-controls-right { grid-row: 1; }
 		.composer-controls-left, .composer-controls-right { align-self: center; }
-		.profile-trigger, .chatter-toggle, .trace-unread-indicator, .speech-type-toggle, .manual-trace-toggle, .composer-controls-right :global(.suggestions-anchor) { width: var(--action-dock-desktop-control-size); height: var(--action-dock-desktop-control-size); }
-		.profile-trigger, .chatter-toggle, .trace-unread-indicator, .speech-type-toggle, .manual-trace-toggle { flex-basis: var(--action-dock-desktop-control-size); }
+		.profile-trigger, .chatter-toggle, .trace-unread-indicator, .help-trigger, .speech-type-toggle, .manual-trace-toggle, .composer-controls-right :global(.suggestions-anchor) { width: var(--action-dock-desktop-control-size); height: var(--action-dock-desktop-control-size); }
+		.profile-trigger, .chatter-toggle, .trace-unread-indicator, .help-trigger, .speech-type-toggle, .manual-trace-toggle { flex-basis: var(--action-dock-desktop-control-size); }
 	}
 </style>

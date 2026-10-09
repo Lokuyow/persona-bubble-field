@@ -144,10 +144,12 @@ test.describe('Relay startup', () => {
 		const profile = page.locator('.profile-trigger');
 		const chatter = page.locator('.chatter-toggle');
 		const speechType = page.locator('.speech-type-toggle');
+		const help = page.locator('.help-trigger');
 		const suggestions = page.locator('.suggestions-tooltip-trigger');
 		await expect(profile).not.toHaveAttribute('title');
 		await expect(chatter).not.toHaveAttribute('title');
 		await expect(speechType).not.toHaveAttribute('title');
+		await expect(help).not.toHaveAttribute('title');
 		await expect(page.locator('.suggestions-toggle')).not.toHaveAttribute('title');
 		const dockBorders = await page.locator('.action-dock').evaluate((dock) => {
 			const token = getComputedStyle(dock).getPropertyValue('--action-icon-border').trim();
@@ -163,6 +165,7 @@ test.describe('Relay startup', () => {
 		expect(dockBorders.borders[1]).not.toBe(dockBorders.borders[0]);
 
 		await expectTooltip(profile, '自分のプロフィール');
+		await expectTooltip(help, 'ヘルプ');
 		await expectTooltip(chatter, 'Chatterを閉じる');
 		await chatter.click();
 		await expect(chatter).toHaveAttribute('aria-pressed', 'false');
@@ -182,9 +185,10 @@ test.describe('Relay startup', () => {
 	test('renders ActionDock controls in order on desktop and mobile without an unread slot', async ({ page }) => {
 		await installPromptApiStub(page);
 		let persistedChatterState: boolean | null = null;
-		for (const width of [1200, 838, 720, 701, 700, 390, 320]) {
+		for (const width of [1200, 838, 720, 701, 700, 421, 420, 390, 360, 320]) {
 			await page.setViewportSize({ width, height: 844 });
 			await openReadyRelayWorld(page, 1);
+			const help = page.locator('.help-trigger');
 			const chatterToggle = page.locator('.chatter-toggle');
 			const suggestionsToggle = page.locator('.suggestions-toggle');
 			const readChatterStyle = () => chatterToggle.evaluate((element) => {
@@ -335,7 +339,7 @@ test.describe('Relay startup', () => {
 			await expect(page.locator('.sound-control')).toHaveCount(1);
 			await expect(page.getByRole('dialog', { name: 'Sound settings' })).toHaveCount(0);
 			expect(await readActionDockControlOrder(page)).toEqual([
-				'profile-trigger', 'chatter-toggle', 'sound-control', 'speech-type-toggle', 'suggestions-anchor'
+				'profile-trigger', 'chatter-toggle', 'sound-control', 'help-trigger', 'speech-type-toggle', 'suggestions-anchor'
 			]);
 			if (width <= 700) {
 				const editorBox = await page.locator('.composer-editor-slot').boundingBox();
@@ -344,16 +348,30 @@ test.describe('Relay startup', () => {
 				expect(editorBox && leftBox && rightBox).toBeTruthy();
 				if (editorBox && leftBox && rightBox) {
 					expect(editorBox.y + editorBox.height).toBeLessThan(leftBox.y);
-					expect(leftBox.x + leftBox.width).toBeLessThanOrEqual(rightBox.x);
+					if (width <= 420) expect(leftBox.y + leftBox.height).toBeLessThanOrEqual(rightBox.y);
+					else {
+						expect(Math.abs(leftBox.y - rightBox.y)).toBeLessThanOrEqual(1);
+						expect(leftBox.x + leftBox.width).toBeLessThanOrEqual(rightBox.x);
+					}
 					expect(rightBox.x + rightBox.width).toBeLessThanOrEqual(width);
-					for (const control of [page.locator('.profile-trigger'), chatterToggle, page.locator('.trace-unread-indicator'), page.locator('.sound-control'), page.locator('.speech-type-toggle'), suggestionsToggle]) {
+					const controlBoxes = [];
+					for (const control of [page.locator('.profile-trigger'), chatterToggle, page.locator('.trace-unread-indicator'), page.locator('.speaker-button'), help, page.locator('.speech-type-toggle'), page.locator('.manual-trace-toggle'), suggestionsToggle]) {
 						if (await control.isVisible()) {
 							const box = await control.boundingBox();
 							if (!box) throw new Error('Expected a visible mobile ActionDock control to have geometry.');
 							expect(box.x).toBeGreaterThanOrEqual(0);
 							expect(box.x + box.width).toBeLessThanOrEqual(width);
+							expect(box.y).toBeGreaterThanOrEqual(editorBox.y + editorBox.height);
 							expect(box.width).toBeGreaterThanOrEqual(44);
 							expect(box.height).toBeGreaterThanOrEqual(44);
+							controlBoxes.push(box);
+						}
+					}
+					for (let first = 0; first < controlBoxes.length; first += 1) {
+						for (let second = first + 1; second < controlBoxes.length; second += 1) {
+							const a = controlBoxes[first];
+							const b = controlBoxes[second];
+							expect(a.x + a.width <= b.x || b.x + b.width <= a.x || a.y + a.height <= b.y || b.y + b.height <= a.y).toBe(true);
 						}
 					}
 				}
@@ -365,7 +383,7 @@ test.describe('Relay startup', () => {
 						left: rect('.composer-controls-left'),
 						editor: rect('.composer-editor-slot'),
 						right: rect('.composer-controls-right'),
-						controls: ['.profile-trigger', '.chatter-toggle', '.speaker-button', '.speech-type-toggle', '.suggestions-toggle']
+						controls: ['.profile-trigger', '.chatter-toggle', '.speaker-button', '.help-trigger', '.speech-type-toggle', '.suggestions-toggle']
 							.map((selector) => rect(selector))
 					};
 				});
@@ -924,6 +942,8 @@ test.describe('Relay startup', () => {
 			await installPromptApiStub(touchPage);
 			await openReadyRelayWorld(touchPage, 1);
 			expect(await touchPage.evaluate(() => matchMedia('(hover: hover) and (pointer: fine)').matches)).toBe(false);
+			await expect(touchPage.locator('.suggestions-anchor')).toBeVisible();
+			await expect(touchPage.getByRole('button', { name: 'AI発言候補を生成' })).toBeVisible();
 			await touchPage.locator('.chatter-toggle').hover();
 			await expect(touchPage.getByRole('tooltip')).toHaveCount(0);
 			await touchPage.getByRole('button', { name: 'AI発言候補を生成' }).hover();

@@ -120,13 +120,33 @@ desktop初期ON/mobile初期OFFを使用する。
 
 ### ActionDockの操作配置
 
-ActionDockでは、PC・スマートフォン共通で左側の操作群を「自分のプロフィール、Chatter、未読返信通知（未読がある場合のみ）、音量」の順にする。音量ポップオーバーはボタンより上へ開き、音量調整・ミュート・保存・効果音の挙動を維持する。ActionDock表示中は画面右上へ音量操作を重複表示しない。ActionDockがない画面では既存の音量操作を維持する。
+ActionDockでは、PC・スマートフォン共通で左側の操作群を「自分のプロフィール、Chatter、未読返信通知（未読がある場合のみ）、音量、ヘルプ」の順にする。ヘルプはvisible textのないアイコンbuttonとし、accessible nameとTooltipを「ヘルプ」とする。音量ポップオーバーはボタンより上へ開き、音量調整・ミュート・保存・効果音の挙動を維持する。ActionDock表示中は画面右上へ音量操作を重複表示しない。ActionDockがない画面では既存の音量操作を維持する。
 
 PCの広いviewportではActionDockを中央配置し、Composerへ十分な幅を割り当てる。幅が狭いPCでも操作群とComposerを重ねない。PC・スマートフォンとも操作群の順序とグループを維持し、ボタン間隔を整理してもスマートフォンの操作領域は各ボタン44px程度を確保する。未読通知の説明はBits UI Popoverで表示し、viewportの上下左右の安全領域へ衝突回避し、本文を折り返す。Popoverは再操作、外側操作、Escapeで閉じ、未読が解消された場合も閉じる。説明表示はActionDockの寸法を変えず、内容は未読の存在だけとする。
 
 ActionDock内のBits UI Tooltipは、`(hover: hover) and (pointer: fine)`に一致する入力環境で使用する。タッチ主体でホバーできない環境ではTooltipを無効化し、hover/pointer条件の変化に追従する。SSR時にbrowser APIを読まず、hydrationの初期表示を一致させる。ActionDock内の発言候補生成buttonにも同じTooltip設定を適用する。PopoverはTooltip設定によって無効化しない。
 
-PCではコンポーザーを中央に置き、発言タイプ切り替えとオンデバイス発言候補生成をコンポーザーの右側に並べる。スマートフォンではコンポーザーを上段に置き、下段左へ左側操作群、右へ発言タイプ切り替えと発言候補生成を右揃えで置く。未読通知がない場合も左右のグループ位置を維持し、通知のための空き領域を設けない。
+701px以上では既存PC構成を維持する。幅700px以下ではComposerを上段、左右の操作群を同じ下段に置く。ただし420px以下ではComposerを上段、左側操作群と右側操作群をそれぞれ別の行に置く3段構成とする。421〜700pxはComposer上段、左右操作群が同じ下段の通常モバイル構成を維持する。AI発言候補生成buttonを含む全操作領域をmobileでも利用可能とし、未読通知がない場合も左右のグループ位置を維持して通知のための空き領域を設けない。スマートフォンの各操作領域は44px以上を確保する。
+
+### 常設Help
+
+フィールド画面のActionDockから常設Help Dialogをいつでも開ける。Helpはプレイヤーが後から参照するread-onlyの説明書であり、開閉、カテゴリ・イベントnavigation、FAQ閲覧は、points、abilities、mending state、Trace read state、reward、投稿、Realtime Event参加操作、tutorial progressなどのゲームactionを実行しない。Help表示中もDialogとは独立した通常の時計進行と進行中Realtime Eventの時間・状態遷移は続く。
+
+Helpは1つのmodal Dialog内で画面を切り替え、別Dialogを重ねない。headerは固定し、本文領域だけを縦scrollさせる。Escapeと閉じるbuttonで閉じ、起動buttonへfocusを戻す。トップからカテゴリ詳細へ進み、イベントカテゴリからはイベント一覧を経由して個別イベントへ進む。戻ると直前の親ページのscroll位置へ戻る。Dialogを閉じて再度開くと、scroll位置を保持せずトップから始める。FAQのみ質問ごとのaccordionとする。
+
+トップでは「ハコで生きる」の導入、寿命・ポイント・作業・イベントの概要、および以下7カテゴリへの入口を示す。
+
+- はじめに: ハコ過去での一生、寿命、ポイント
+- 暮らす: 移動、作業中・延命中・作業停止中、Run能力、HUD
+- 会話する: 通常・叫び・モノローグ、返信報酬、Chatter
+- 痕跡: 発言痕跡、書置き、遺言
+- イベント: 協力と抜け駆け、鬼ごっこ
+- 一生と脱出: 通常死亡、転生、脱出、Root PointとRoot build
+- Nostr・その他: Nostr、nsecと秘密鍵、browser-local data、FAQ
+
+Help本文はプレイヤーが理解できる説明とし、protocolや内部運用の詳細を表示しない。イベントの死亡リスクは常時見える警告として表示する。アイコンは既存UIと同じSVGを優先し、Run能力はBrain / Stack2 / ShieldCheckと「推論効率／コンテキスト容量／ハルシネーション抑制」、Root buildは既存の画面表記に合わせて「推論加速／コンテキスト圧縮／ハルシネーション耐性」とする。補助アイコンは`aria-hidden`にし、意味を色だけで伝えない。
+
+ゲームルール、報酬・消費ポイント、開催時刻、能力効果、寿命・脱出・Identity・nsecのcanonicalな説明と数値は、SPEC-10、SPEC-50、SPEC-70等の各既存責務を正とする。このHelp UI仕様は表示場所・navigation・presentationおよびプレイヤー向けの案内範囲を定め、ゲームルールを別途定義しない。
 
 ### 通常フキダシの配置
 

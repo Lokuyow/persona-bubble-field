@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL } from '../../src/lib/fieldFacilities';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
+import { finishDialogExit } from './helpers/dialogMotion';
 import {
 	chooseAvailableRelayMove,
 	installDelayedRelay,
@@ -89,6 +90,19 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 420, height: 800 
 		});
 		expect(lifeLayout).toEqual({ insideViewport: true, belowHud: true, buttonTarget: true });
 		await expect(page.locator('.action-dock')).toBeVisible();
+		const tutorialProgressBeforeHelp = await page.evaluate(() => sessionStorage.getItem('persona-bubble-field:first-run-tutorial'));
+		const helpTrigger = page.getByRole('button', { name: 'ヘルプ', exact: true });
+		await helpTrigger.click();
+		const helpDialog = page.locator('[data-help-dialog]');
+		await expect(page.getByRole('dialog', { name: 'ヘルプ' })).toBeVisible();
+		await helpDialog.locator('[data-help-category="start"]').click();
+		await expect(helpDialog.locator('#help-start-title')).toBeVisible();
+		await helpDialog.getByRole('button', { name: '戻る' }).click();
+		await page.keyboard.press('Escape');
+		await finishDialogExit(helpDialog, false);
+		await expect(helpTrigger).toBeFocused();
+		expect(await page.locator('[data-first-run-tutorial]').getAttribute('data-first-run-tutorial')).toBe('life');
+		expect(await page.evaluate(() => sessionStorage.getItem('persona-bubble-field:first-run-tutorial'))).toBe(tutorialProgressBeforeHelp);
 
 		await page.reload({ waitUntil: 'domcontentloaded' });
 		await releaseFirstRunPrimary(page);
@@ -227,6 +241,15 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 420, height: 800 
 		await expect(page.locator(`[data-trace-root-id="${trace.root.id}"]`)).toContainText(trace.root.content);
 		await expect(page.locator(`[data-trace-ghost-root-id="${trace.root.id}"]`)).toBeVisible();
 		await expect.poll(() => readRelayGameState(page)).toMatchObject({ points: pointsBeforeTrace + 5 });
+		const replyStep = page.locator('[data-first-run-tutorial="reply"]');
+		await expect(replyStep).toContainText('この痕跡にリプライできます。');
+		await expect(page.locator(`[data-trace-ghost-root-id="${trace.root.id}"]`)).toHaveAttribute('data-tutorial-highlight', 'trace');
+		expect(await page.evaluate(() => sessionStorage.getItem('persona-bubble-field:first-run-tutorial'))).toContain('"step":"reply"');
+		await page.reload({ waitUntil: 'domcontentloaded' });
+		await releaseFirstRunPrimary(page);
+		await expect(replyStep).toBeVisible();
+		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveAttribute('data-tutorial-highlight', 'trace');
+		await replyStep.getByRole('button', { name: '次へ' }).click();
 		const abilityStep = page.locator('[data-first-run-tutorial="ability"]');
 		await expect(abilityStep).toContainText('強化端末へ移動して、能力をひとつ強化しよう。');
 		await expect(abilityStep.getByRole('button')).toHaveCount(0);
@@ -315,6 +338,11 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 420, height: 800 
 		await expect(noteStep).toBeVisible();
 		await expect(noteAction).toHaveAttribute('data-tutorial-highlight', 'note');
 		await noteStep.getByRole('button', { name: '次へ' }).click();
+		const helpStep = page.locator('[data-first-run-tutorial="help"]');
+		const helpButton = page.getByRole('button', { name: 'ヘルプ', exact: true });
+		await expect(helpStep).toContainText('遊び方を見返したいときは、いつでもヘルプボタンを開けます。');
+		await expect(helpButton).toHaveAttribute('data-tutorial-highlight', 'help');
+		await helpStep.getByRole('button', { name: '次へ' }).click();
 		await expect(page.locator('[data-first-run-tutorial="complete"]')).toHaveText('あとは自由です。');
 		await expect.poll(() => page.locator('[data-first-run-tutorial="complete"]').evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(20);
 		expect(await page.evaluate(() => sessionStorage.getItem('persona-bubble-field:first-run-tutorial'))).toBeNull();

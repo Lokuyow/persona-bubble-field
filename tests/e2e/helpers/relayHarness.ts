@@ -1055,7 +1055,7 @@ export async function readActionDockControlOrder(page: Page): Promise<string[]> 
 	return page.locator('.composer-controls-left > *, .composer-controls-right > *').evaluateAll((elements) => elements
 		.map((element) => {
 			const rect = element.getBoundingClientRect();
-			const className = ['profile-trigger', 'chatter-toggle', 'trace-unread-indicator', 'sound-control', 'speech-type-toggle', 'suggestions-anchor']
+			const className = ['profile-trigger', 'chatter-toggle', 'trace-unread-indicator', 'sound-control', 'help-trigger', 'speech-type-toggle', 'suggestions-anchor']
 				.find((name) => element.classList.contains(name));
 			return className && rect.width > 0 && rect.height > 0 ? { className, left: rect.left, top: rect.top } : null;
 		})
