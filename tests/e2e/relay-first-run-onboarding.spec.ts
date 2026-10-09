@@ -329,6 +329,14 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 420, height: 800 
 		await expect(noteStep).toBeVisible();
 		await expect(noteAction).toHaveAttribute('data-tutorial-highlight', 'note');
 		await noteStep.getByRole('button', { name: '次へ' }).click();
+		const replyStep = page.locator('[data-first-run-tutorial="reply"]');
+		await expect(replyStep).toContainText('痕跡・書置き・遺言の会話を開き、発言を選ぶとリプライできます。');
+		await expect(replyStep.getByRole('button', { name: '次へ' })).toBeVisible();
+		expect(await page.evaluate(() => sessionStorage.getItem('persona-bubble-field:first-run-tutorial'))).toContain('"step":"reply"');
+		await page.reload({ waitUntil: 'domcontentloaded' });
+		await releaseFirstRunPrimary(page);
+		await expect(replyStep).toBeVisible();
+		await replyStep.getByRole('button', { name: '次へ' }).click();
 		await expect(page.locator('[data-first-run-tutorial="complete"]')).toHaveText('あとは自由です。');
 		await expect.poll(() => page.locator('[data-first-run-tutorial="complete"]').evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(20);
 		expect(await page.evaluate(() => sessionStorage.getItem('persona-bubble-field:first-run-tutorial'))).toBeNull();
