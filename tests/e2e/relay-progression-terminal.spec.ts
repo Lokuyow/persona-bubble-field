@@ -1002,6 +1002,17 @@ test.describe('Relay startup', () => {
 		}));
 		expect(reducedMotionCleanup).toEqual({ card: '', level: '' });
 		await expect(dialog).toContainText('推論効率 Lv4');
+		await page.emulateMedia({ reducedMotion: 'no-preference' });
+		const rightmostCard = dialog.locator('.ability-card').last();
+		const rightmostUpgradeButton = rightmostCard.getByRole('button');
+		await expect(rightmostUpgradeButton).toBeEnabled();
+		await rightmostUpgradeButton.click();
+		await expect(rightmostCard).toHaveClass(/success-flash/);
+		const scrollDuringRightmostUpgrade = await dialog.evaluate((element) => ({
+			dialog: element.scrollWidth > element.clientWidth,
+			document: document.documentElement.scrollWidth > innerWidth
+		}));
+		expect(scrollDuringRightmostUpgrade).toEqual({ dialog: false, document: false });
 		await page.setViewportSize({ width: 390, height: 640 });
 		await expectDialogIconCloseButton(dialog, dialog.getByRole('button', { name: '閉じる' }), '閉じる');
 		await expectHeaderToStayReadable();
@@ -1037,7 +1048,7 @@ test.describe('Relay startup', () => {
 		await finishDialogExit(dialog);
 		await expect(adjustment).toBeFocused();
 		await page.reload();
-		await expect.poll(() => readRelayGameState(page)).toMatchObject({ points: 7, abilities: { inferenceEfficiency: 4, contextCapacity: 1, hallucinationSuppression: 1 } });
+		await expect.poll(() => readRelayGameState(page)).toMatchObject({ points: 6, abilities: { inferenceEfficiency: 4, contextCapacity: 1, hallucinationSuppression: 2 } });
 	});
 
 	test('shows the linear Run effect and arrival-level cost at the adjustment terminal', async ({ page }) => {
