@@ -38,6 +38,7 @@
 		onToggleChatter: () => void;
 		speechTutorialHighlighted: boolean;
 		noteTutorialHighlighted: boolean;
+		replyTutorialHighlighted: boolean;
 		onSpeechTypeChange: (next: SpeechType) => void;
 		manualTraceSelected: boolean;
 		manualTraceEnabled: boolean;
@@ -50,7 +51,7 @@
 	let { onBoundsChange, boundsRevision, selectedSpeechType, submissionInProgress, volume, onSoundOpen, onVolume, onSpeechTypeChange, onOpenSelfProfile, submitContent, submitCandidate,
 		desiredContext, loadPreview, onPreviewClear, onEditorEmptyChange, onPreferredHeightChange,
 		hasUnreadReplies, unreadBaselineSnapshot, character, avatarTone, suggestionConversation, canOpenSelfProfile, chatterOpen, onToggleChatter,
-		speechTutorialHighlighted, noteTutorialHighlighted, onOpenHelp,
+		speechTutorialHighlighted, noteTutorialHighlighted, replyTutorialHighlighted, onOpenHelp,
 	 manualTraceSelected, manualTraceEnabled, manualTraceStatus, onToggleManualTrace }: Props = $props();
 	let remeasureBounds = () => {};
 	const observeBounds: Attachment<HTMLElement> = (node) => untrack(() => {
@@ -293,7 +294,7 @@
 		/>
 		</div>
 		</Tooltip.Provider>
-		<div class="composer-editor-slot" class:composer-tutorial-highlighted={speechTutorialHighlighted} data-tutorial-highlight={speechTutorialHighlighted ? 'speech' : undefined}>
+		<div class="composer-editor-slot" class:composer-tutorial-highlighted={speechTutorialHighlighted || replyTutorialHighlighted} data-tutorial-highlight={speechTutorialHighlighted ? 'speech' : replyTutorialHighlighted ? 'reply' : undefined}>
 			<HostOwnedComposerLite
 				bind:this={composerComponent}
 				{submitContent}

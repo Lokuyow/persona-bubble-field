@@ -5703,6 +5703,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			onSpeechTypeChange={(next) => { selectedSpeechType = next; }}
 				speechTutorialHighlighted={showFirstRunTutorial && firstRunTutorialStep === 'speech'}
 				noteTutorialHighlighted={showFirstRunTutorial && firstRunTutorialStep === 'note'}
+				replyTutorialHighlighted={showFirstRunTutorial && firstRunTutorialStep === 'reply'}
 				manualTraceSelected={manualTraceMode}
 				{manualTraceEnabled}
 				{manualTraceStatus}
