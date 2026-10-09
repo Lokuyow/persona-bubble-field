@@ -101,13 +101,17 @@
 			const card = root.querySelector<HTMLElement>('.ability-card.success-flash');
 			const level = card?.querySelector<HTMLElement>('.ability-level.level-up-highlight');
 			const badge = card?.querySelector<HTMLElement>('.level-up-badge');
-			if (!card || !level || !badge) return;
+			const halo = card?.querySelector<SVGCircleElement>('.upgrade-burst-halo');
+			const ring = card?.querySelector<SVGCircleElement>('.upgrade-burst-ring');
+			const rays = card?.querySelector<SVGGElement>('.upgrade-burst-rays');
+			const particles = card ? [...card.querySelectorAll<SVGCircleElement>('.upgrade-burst-particle')] : [];
+			if (!card || !level || !badge || !halo || !ring || !rays || particles.length === 0) return;
 
 			const reducedMotion = scope.matches.reducedMotion;
 			let timeline: Timeline;
 			timeline = createTimeline({
 				autoplay: false,
-				defaults: { duration: 420, ease: 'out(3)' },
+				defaults: { duration: 620, ease: 'out(3)' },
 				onComplete: () => {
 					if (activeTimeline !== timeline) return;
 					revertUpgradeTimeline();
@@ -118,37 +122,67 @@
 				keyframes: reducedMotion
 					? {
 							'0%': { borderColor: 'rgba(122, 135, 255, .42)' },
-							'35%': { borderColor: '#aeb6ff' },
+							'35%': { borderColor: '#d6d9ff' },
 							'100%': { borderColor: 'rgba(122, 135, 255, .42)' }
 						}
 					: {
 							'0%': { borderColor: 'rgba(122, 135, 255, .42)', boxShadow: 'none' },
-							'35%': { borderColor: '#aeb6ff', boxShadow: '0 0 0 2px rgba(174, 182, 255, .3), 0 0 24px rgba(90, 103, 255, .3)' },
+							'32%': { borderColor: '#e0e2ff', boxShadow: '0 0 0 2px rgba(174, 182, 255, .34), 0 0 30px rgba(90, 103, 255, .42)' },
 							'100%': { borderColor: 'rgba(122, 135, 255, .42)', boxShadow: 'none' }
 						}
 			}, 0);
 			timeline.add(level, {
 				keyframes: reducedMotion
 					? {
-							'0%': { color: '#aeb6ff' },
-							'35%': { color: '#fff' },
-							'100%': { color: '#aeb6ff' }
+							'0%': { color: '#aeb6ff', textShadow: '0 0 0 rgba(210, 216, 255, 0)' },
+							'35%': { color: '#fff', textShadow: '0 0 12px rgba(210, 216, 255, .75)' },
+							'100%': { color: '#aeb6ff', textShadow: '0 0 0 rgba(210, 216, 255, 0)' }
 						}
 					: {
-							'0%': { color: '#aeb6ff', scale: 1 },
-							'35%': { color: '#fff', scale: 1.08 },
-							'100%': { color: '#aeb6ff', scale: 1 }
+							'0%': { color: '#aeb6ff', scale: 1, textShadow: '0 0 0 rgba(210, 216, 255, 0)' },
+							'34%': { color: '#fff', scale: 1.16, textShadow: '0 0 14px rgba(210, 216, 255, .9)' },
+							'62%': { color: '#fff', scale: 1.04, textShadow: '0 0 8px rgba(210, 216, 255, .58)' },
+							'100%': { color: '#aeb6ff', scale: 1, textShadow: '0 0 0 rgba(210, 216, 255, 0)' }
 						}
 			}, 0);
 			timeline.add(badge, {
-				opacity: { from: 0, to: 1 },
-				...(reducedMotion ? {} : { translateY: { from: '4px', to: '0px' } })
+				keyframes: reducedMotion
+					? { '0%': { opacity: 0 }, '100%': { opacity: 1 } }
+					: { '0%': { opacity: 0, translateY: '5px', scale: .88 }, '45%': { opacity: 1, translateY: '-1px', scale: 1.08 }, '100%': { opacity: 1, translateY: '0px', scale: 1 } }
 			}, 0);
+			timeline.add(halo, reducedMotion
+				? { keyframes: { '0%': { opacity: 0 }, '30%': { opacity: .56 }, '100%': { opacity: 0 } }, duration: 520 }
+				: { keyframes: { '0%': { opacity: 0, scale: .5 }, '32%': { opacity: .72, scale: 1.05 }, '100%': { opacity: 0, scale: 1.18 } }, duration: 560 }, 0);
+			timeline.add(ring, reducedMotion
+				? { keyframes: { '0%': { opacity: 0 }, '34%': { opacity: .62 }, '100%': { opacity: 0 } }, duration: 560 }
+				: { keyframes: { '0%': { opacity: 0, scale: .42 }, '32%': { opacity: .82, scale: 1.02 }, '100%': { opacity: 0, scale: 1.32 } }, duration: 610 }, 0);
+			timeline.add(rays, reducedMotion
+				? { keyframes: { '0%': { opacity: 0 }, '32%': { opacity: .48 }, '100%': { opacity: 0 } }, duration: 560 }
+				: { keyframes: { '0%': { opacity: 0, scale: .68, rotate: '-8deg' }, '34%': { opacity: .76, scale: 1.02, rotate: '5deg' }, '100%': { opacity: 0, scale: 1.08, rotate: '0deg' } }, duration: 610 }, 40);
+			const opacityOnly = (from: number, to: number, duration: number) => ({ opacity: { from, to }, duration });
+			for (const particle of particles) {
+				const fadeAt = reducedMotion ? 430 : 540;
+				const fadeDuration = reducedMotion ? 190 : 90;
+				const motion = reducedMotion
+					? opacityOnly(0, .78, 260)
+					: {
+						opacity: { from: 0, to: .92 },
+						translateX: `${particle.dataset.dx ?? '0'}px`,
+						translateY: `${particle.dataset.dy ?? '0'}px`,
+						duration: 430
+					};
+				timeline.add(particle, motion, 110);
+				timeline.add(particle, opacityOnly(reducedMotion ? .78 : .92, 0, fadeDuration), fadeAt);
+			}
 
 			const inlineStyleSnapshot = [
 				{ element: card, properties: ['border-color', 'box-shadow'] },
-				{ element: level, properties: ['color', 'transform'] },
-				{ element: badge, properties: ['opacity', 'transform'] }
+				{ element: level, properties: ['color', 'transform', 'text-shadow'] },
+				{ element: badge, properties: ['opacity', 'transform'] },
+				{ element: halo, properties: ['opacity', 'transform'] },
+				{ element: ring, properties: ['opacity', 'transform'] },
+				{ element: rays, properties: ['opacity', 'transform'] },
+				...particles.map((particle) => ({ element: particle, properties: ['opacity', 'transform'] }))
 			].flatMap(({ element, properties }) => properties.map((property) => ({
 				element,
 				property,
@@ -232,7 +266,26 @@
 										{#if key === 'inferenceEfficiency'}<Brain aria-hidden="true" />{:else if key === 'contextCapacity'}<Stack2 aria-hidden="true" />{:else}<ShieldCheck aria-hidden="true" />{/if}
 										<span>{abilityLabels[key]}</span>
 									</h2>
-									<span class:level-up-highlight={upgradeFeedback?.key === key} class="ability-level">Lv{upgrade.level}</span>
+									<span class:level-up-highlight={upgradeFeedback?.key === key} class="ability-level">
+										{#if upgradeFeedback?.key === key}
+											<svg class="upgrade-burst" viewBox="0 0 120 120" aria-hidden="true" focusable="false">
+												<circle class="upgrade-burst-halo" cx="60" cy="60" r="24" fill="#aeb6ff" />
+												<circle class="upgrade-burst-ring" cx="60" cy="60" r="23" fill="none" stroke="#dce0ff" stroke-width="2" />
+												<g class="upgrade-burst-rays" fill="none" stroke="#cbd0ff" stroke-linecap="round" stroke-width="2.5">
+													<path d="M60 7v13 M60 100v13 M7 60h13 M100 60h13 M22.5 22.5l9 9 M88.5 88.5l9 9 M97.5 22.5l-9 9 M31.5 88.5l-9 9" />
+												</g>
+												<g fill="#f4f5ff" stroke="#aeb6ff" stroke-width=".8">
+													<circle class="upgrade-burst-particle" data-dx="-22" data-dy="-10" cx="60" cy="60" r="2.4" />
+													<circle class="upgrade-burst-particle" data-dx="-14" data-dy="-24" cx="60" cy="60" r="2" />
+													<circle class="upgrade-burst-particle" data-dx="5" data-dy="-29" cx="60" cy="60" r="2.5" />
+													<circle class="upgrade-burst-particle" data-dx="23" data-dy="-16" cx="60" cy="60" r="2" />
+													<circle class="upgrade-burst-particle" data-dx="24" data-dy="9" cx="60" cy="60" r="2.4" />
+													<circle class="upgrade-burst-particle" data-dx="-7" data-dy="27" cx="60" cy="60" r="2" />
+												</g>
+											</svg>
+										{/if}
+										<span>Lv{upgrade.level}</span>
+									</span>
 									{#if upgradeFeedback?.key === key}
 										{#key upgradeFeedback.id}<span class="level-up-badge" aria-live="polite">LEVEL UP</span>{/key}
 									{/if}
@@ -273,19 +326,24 @@
 	.points-display { display: inline-flex; align-items: center; gap: 7px; color: #f4f6ff; font-size: 16px; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
 	.points-display :global(svg) { width: 18px; height: 18px; color: #aeb5d7; }
 	.ability-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: stretch; gap: 14px; }
-	.ability-card { position: relative; display: grid; grid-template-rows: auto auto 1fr auto; gap: 9px; min-width: 0; min-height: 250px; padding: 18px; border: 1px solid rgba(122, 135, 255, .42); border-radius: 12px; background: rgba(19, 26, 61, .78); }
+	.ability-card { position: relative; isolation: isolate; display: grid; grid-template-rows: auto auto 1fr auto; gap: 9px; min-width: 0; min-height: 250px; padding: 18px; border: 1px solid rgba(122, 135, 255, .42); border-radius: 12px; background: rgba(19, 26, 61, .78); }
+	.ability-card.success-flash { overflow: clip; overflow-clip-margin: 8px; }
+	.ability-card > * { position: relative; z-index: 1; }
+	.upgrade-burst { position: absolute; top: 50%; left: 50%; z-index: 0; width: 126px; height: auto; overflow: hidden; pointer-events: none; filter: drop-shadow(0 0 7px rgba(174, 182, 255, .28)); transform: translate(-50%, -50%); }
+	.upgrade-burst-halo, .upgrade-burst-ring, .upgrade-burst-rays, .upgrade-burst-particle { opacity: 0; transform-box: fill-box; transform-origin: center; }
 	.ability-card.tutorial-upgrade-choice { outline: 2px solid rgba(72, 221, 210, .88); outline-offset: 2px; animation: first-run-tutorial-upgrade-pulse 2.6s ease-in-out infinite; }
 	@keyframes first-run-tutorial-upgrade-pulse {
 		0%, 100% { box-shadow: 0 0 7px rgba(72, 221, 210, .14); }
 		50% { box-shadow: 0 0 18px rgba(72, 221, 210, .52); }
 	}
 	@media (prefers-reduced-motion: reduce) { .tutorial-upgrade-guidance, .ability-card.tutorial-upgrade-choice { animation: none; } }
-	.level-up-badge { position: absolute; top: -14px; right: 0; pointer-events: none; color: #aeb6ff; font-size: 11px; font-weight: 900; letter-spacing: .08em; }
+	.level-up-badge { position: absolute; z-index: 2; top: -14px; right: 0; pointer-events: none; color: #aeb6ff; font-size: 11px; font-weight: 900; letter-spacing: .08em; }
 	.ability-card-heading { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 	.ability-name { display: flex; align-items: center; min-width: 0; gap: 8px; margin: 0; color: #f4f6ff; font-size: 16px; font-weight: 800; }
 	.ability-name :global(svg) { flex: 0 0 auto; width: 20px; height: 20px; color: #aeb6ff; stroke-width: 2; }
 	.ability-name span { overflow-wrap: anywhere; }
-	.ability-level { flex: 0 0 auto; color: #aeb6ff; font-size: 14px; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+	.ability-level { position: relative; z-index: 1; flex: 0 0 auto; color: #aeb6ff; font-size: 14px; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+	.ability-level > span { position: relative; z-index: 1; }
 	.ability-type { margin: 0; color: #aeb5d7; font-size: 13px; line-height: 1.4; }
 	.ability-values { align-self: end; display: grid; gap: 7px; padding: 12px 0 4px; border-top: 1px solid rgba(122, 135, 255, .28); }
 	.value-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; color: #aeb5d7; font-size: 12px; }
