@@ -138,10 +138,14 @@ test.describe('in-game Help', () => {
 		await expect(dialog).toHaveAttribute('aria-modal', 'true');
 		await expect(dialog.locator('[data-help-category]')).toHaveCount(7);
 		await expectPlayerFacingHelpText(dialog);
-		const traceCategoryIcon = dialog.locator('[data-help-category="traces"] .category-icon img');
-		await expect.poll(() => traceCategoryIcon.evaluate((image) => image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0)).toBe(true);
-		expect(await traceCategoryIcon.evaluate((image) => new URL((image as HTMLImageElement).currentSrc).pathname))
-			.toBe(`${APP_BASE_PATH}/trace/trace-icon.svg`);
+		const traceCategoryIcon = dialog.locator('[data-help-category="traces"] .category-icon .help-trace-icon');
+		const traceCategoryPresentation = await traceCategoryIcon.evaluate((icon) => {
+			const maskImage = getComputedStyle(icon).maskImage;
+			const source = maskImage.match(/url\(["']?([^"')]+)["']?\)/)?.[1];
+			return { fill: getComputedStyle(icon).backgroundColor, categoryColor: getComputedStyle(icon.parentElement!).color, sourcePath: source ? new URL(source, document.baseURI).pathname : null };
+		});
+		expect(traceCategoryPresentation.fill).toBe(traceCategoryPresentation.categoryColor);
+		expect(traceCategoryPresentation.sourcePath).toBe(`${APP_BASE_PATH}/trace/trace-icon.svg`);
 		const body = dialog.locator('.help-body');
 		await body.evaluate((element) => { element.scrollTop = 120; });
 		const livingCategory = dialog.locator('[data-help-category="living"]');
@@ -159,10 +163,12 @@ test.describe('in-game Help', () => {
 		const tracesCategory = dialog.locator('[data-help-category="traces"]');
 		await tracesCategory.scrollIntoViewIfNeeded();
 		await tracesCategory.click();
-		const traceImages = dialog.locator('.help-section img');
-		await expect(traceImages).toHaveCount(3);
-		await expect.poll(() => traceImages.evaluateAll((images) => images.every((image) => image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0))).toBe(true);
-		const traceImagePaths = await traceImages.evaluateAll((images) => images.map((image) => new URL((image as HTMLImageElement).currentSrc).pathname));
+		const traceIcons = dialog.locator('.help-section .help-trace-icon');
+		await expect(traceIcons).toHaveCount(3);
+		const traceImagePaths = await traceIcons.evaluateAll((icons) => icons.map((icon) => {
+			const source = getComputedStyle(icon).maskImage.match(/url\(["']?([^"')]+)["']?\)/)?.[1];
+			return source ? new URL(source, document.baseURI).pathname : null;
+		}));
 		expect(traceImagePaths).toEqual([
 			`${APP_BASE_PATH}/trace/trace-icon.svg`,
 			`${APP_BASE_PATH}/trace/trace-icon.svg`,
