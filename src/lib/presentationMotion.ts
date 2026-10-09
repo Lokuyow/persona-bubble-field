@@ -2,7 +2,7 @@ import { engine } from 'animejs/engine';
 import { createScope } from 'animejs/scope';
 import type { Scope } from 'animejs/scope';
 
-export const REDUCED_MOTION_MEDIA_QUERY = '(prefers-reduced-motion: reduce)';
+const REDUCED_MOTION_MEDIA_QUERY = '(prefers-reduced-motion: reduce)';
 
 engine.pauseOnDocumentHidden = false;
 

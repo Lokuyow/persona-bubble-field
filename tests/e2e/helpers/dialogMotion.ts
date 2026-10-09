@@ -2,7 +2,7 @@ import { expect, type Locator } from '@playwright/test';
 import { expectIconCloseButton } from './iconCloseButton';
 
 /** Finish only Web Animations owned by one mounted Bits UI Dialog. */
-export async function finishDialogAnimations(dialog: Locator): Promise<void> {
+async function finishDialogAnimations(dialog: Locator): Promise<void> {
 	await dialog.evaluate(async (element) => {
 		const animations = element.getAnimations();
 		for (const animation of animations) {

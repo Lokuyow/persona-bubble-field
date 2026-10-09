@@ -13,7 +13,6 @@ import {
 	ZERO_ROOT_BUILD
 } from './rootProgression';
 
-export const MENDING_HOUR_MS = 60 * 60 * 1000;
 export const MENDING_MINUTE_MS = 60 * 1000;
 export const POINT_PROGRESS_SCALE = 60_000_000;
 

@@ -7,7 +7,7 @@ export type ViewportRect = Readonly<{
 	height: number;
 }>;
 
-export const MIN_VISUAL_VIEWPORT_KEYBOARD_INSET_PX = 100;
+const MIN_VISUAL_VIEWPORT_KEYBOARD_INSET_PX = 100;
 
 function clamp(value: number, minimum: number, maximum: number): number {
 	return Math.min(maximum, Math.max(minimum, value));

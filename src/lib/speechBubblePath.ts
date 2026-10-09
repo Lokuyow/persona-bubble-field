@@ -20,7 +20,7 @@ const CLOUD_SMALL_RATE = 0.85;
 
 type Point = Readonly<{ x: number; y: number }>;
 
-export type SpeechBubbleVisualBounds = Readonly<{ x: number; y: number; width: number; height: number }>;
+type SpeechBubbleVisualBounds = Readonly<{ x: number; y: number; width: number; height: number }>;
 export type SpeechBubbleShapeConstraints = Readonly<{ maxBleedX: number; maxBleedY: number }>;
 export type SpeechBubbleShape = Readonly<{
 	path: string;

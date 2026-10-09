@@ -239,6 +239,3 @@ export function createSpeechSuggestionService(api: SpeechSuggestionApi | null = 
 		}
 	};
 }
-
-export const speechSuggestionPromptOptions = PROMPT_OPTIONS;
-export const speechSuggestionResponseConstraint = RESPONSE_CONSTRAINT;

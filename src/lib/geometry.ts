@@ -88,8 +88,8 @@ export type FieldSize = {
 export const DESKTOP_CELL_SIZE = 76;
 export const MOBILE_CELL_SIZE = 50;
 export const MOBILE_FIELD_BREAKPOINT = 700;
-export const DESKTOP_FIELD_SIDE_MARGIN = 8;
-export const MOBILE_FIELD_SIDE_MARGIN = 8;
+const DESKTOP_FIELD_SIDE_MARGIN = 8;
+const MOBILE_FIELD_SIDE_MARGIN = 8;
 
 export function getResponsiveCellSize(viewportWidth: number): number {
 	return viewportWidth <= MOBILE_FIELD_BREAKPOINT ? MOBILE_CELL_SIZE : DESKTOP_CELL_SIZE;
@@ -209,7 +209,7 @@ export function characterFootprint(screen: WorldPoint, cellSize: number): Bounds
 	return { x: screen.x - cellSize / 2, y: screen.y - cellSize / 2, width: cellSize, height: cellSize };
 }
 
-export const PREFERRED_BUBBLE_CONNECTION_DISTANCE = 40;
+const PREFERRED_BUBBLE_CONNECTION_DISTANCE = 40;
 
 export function sourceAboveBubblePreferredAnchor(speaker: Bounds, bubble: Size): WorldPoint {
 	return {

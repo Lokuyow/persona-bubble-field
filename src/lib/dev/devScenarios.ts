@@ -1,6 +1,6 @@
 export type DevScenarioCategory = 'World' | 'Speech' | 'Chatter' | 'Trace' | 'Realtime';
 
-export type DevScenarioFixture =
+type DevScenarioFixture =
 	| Readonly<{ kind: 'default' }>
 	| Readonly<{ kind: 'speech'; fixture: 'obstacles' | 'showcase' | 'types' | 'normal-sizes' | 'merged2' | 'merged2-long' | 'merged3' | 'merged3-long' | 'merged4' | 'merged4-long' | 'merged2-shout-long' | 'merged2-monologue-long' | 'long' | 'linebreak' | 'linebreak-five' | 'linebreak-overflow' | 'comparison' }>
 	| Readonly<{ kind: 'chatter-timeline' }>
@@ -57,10 +57,6 @@ export function resolveDevScenario(search: URLSearchParams): DevScenario {
 	const scenario = SCENARIO_BY_ID.get(id);
 	if (!scenario) throw new Error(`Unknown DEV Scenario: ${id}`);
 	return scenario;
-}
-
-export function getDevScenario(id: string): DevScenario | undefined {
-	return SCENARIO_BY_ID.get(id);
 }
 
 export function devScenarioCategories(): readonly DevScenarioCategory[] {

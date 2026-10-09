@@ -68,7 +68,7 @@ export function fixtureSecret(value: number): Uint8Array {
 	return entry.secret.slice();
 }
 
-export function fixtureAccountIndexForSecret(secretKey: Uint8Array): number {
+function fixtureAccountIndexForSecret(secretKey: Uint8Array): number {
 	for (const { accountIndex, secret } of FIXTURE_CHILDREN.values()) {
 		if (secret.length === secretKey.length && secret.every((value, index) => value === secretKey[index])) return accountIndex;
 	}

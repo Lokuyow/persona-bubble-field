@@ -14,17 +14,17 @@ import {
 } from './realtimeEvents';
 
 export const COOPERATION_DEFECTION_EVENT_TYPE = 'cooperation-defection';
-export const COOPERATION_DEFECTION_PROTOCOL_VERSION = 1;
+const COOPERATION_DEFECTION_PROTOCOL_VERSION = 1;
 export const COOPERATION_DEFECTION_PROTOCOL_KEY = protocolKeyFor(COOPERATION_DEFECTION_EVENT_TYPE, COOPERATION_DEFECTION_PROTOCOL_VERSION);
 export const COOPERATION_DEFECTION_MIN_PARTICIPANTS = 3;
-export const COOPERATION_DEFECTION_MAX_PARTICIPANTS = 6;
+const COOPERATION_DEFECTION_MAX_PARTICIPANTS = 6;
 export const COOPERATION_DEFECTION_ROUND_COUNT = 3;
 export const COOPERATION_DEFECTION_CONSULTATION_MS = 30_000;
 export const COOPERATION_DEFECTION_SELECTION_MS = 30_000;
 export const COOPERATION_DEFECTION_RESULT_MS = 20_000;
 export const COOPERATION_DEFECTION_ROUND_MS = COOPERATION_DEFECTION_CONSULTATION_MS + COOPERATION_DEFECTION_SELECTION_MS + COOPERATION_DEFECTION_RESULT_MS;
 export const COOPERATION_DEFECTION_REVEAL_GRACE_MS = 5_000;
-export const COOPERATION_DEFECTION_JST_OFFSET_MS = 9 * 60 * 60 * 1000;
+const COOPERATION_DEFECTION_JST_OFFSET_MS = 9 * 60 * 60 * 1000;
 export const COOPERATION_DEFECTION_MANUAL_CONTROL_LOOKBACK_SECONDS = 15 * 60;
 const COOPERATION_DEFECTION_MANUAL_INSTANCE_PREFIX = 'cooperation-defection:1:manual:';
 const COOPERATION_DEFECTION_MANUAL_ID = /^cooperation-defection:1:manual:(\d+):([0-9a-f]{32})$/;
@@ -108,8 +108,8 @@ export const COOPERATION_DEFECTION_EVENT_DEFINITION: RealtimeEventDefinition<Coo
 };
 
 /** The compile-time registry. Removing a definition from the enabled list disables its runtime. */
-export const REALTIME_EVENT_REGISTRY: readonly RealtimeEventDefinition[] = [COOPERATION_DEFECTION_EVENT_DEFINITION];
-export const ENABLED_REALTIME_EVENT_TYPES: readonly string[] = [COOPERATION_DEFECTION_EVENT_TYPE];
+const REALTIME_EVENT_REGISTRY: readonly RealtimeEventDefinition[] = [COOPERATION_DEFECTION_EVENT_DEFINITION];
+const ENABLED_REALTIME_EVENT_TYPES: readonly string[] = [COOPERATION_DEFECTION_EVENT_TYPE];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -197,7 +197,7 @@ function textBytes(value: string): Uint8Array {
 }
 
 /** Deterministic commitment binding every public context field and both secrets. */
-export function computeCooperationDefectionCommitment(input: Readonly<{
+function computeCooperationDefectionCommitment(input: Readonly<{
 	instanceId: string;
 	groupId: string;
 	round: 1 | 2 | 3;
@@ -245,7 +245,7 @@ export function buildCooperationDefectionRevealAction(input: Readonly<{
 	return { action: 'reveal', ...input };
 }
 
-export function validateCooperationDefectionReveal(input: Readonly<{
+function validateCooperationDefectionReveal(input: Readonly<{
 	instanceId: string;
 	authorPubkey: string;
 	commitId: string;
@@ -272,7 +272,7 @@ function timeAtJst(dateKey: string, hour: number, minute: number, second = 0): n
 	return Date.UTC(year, month - 1, day, hour, minute, second) - COOPERATION_DEFECTION_JST_OFFSET_MS;
 }
 
-export function dailyCooperationDefectionInstanceId(dateKey: string): string {
+function dailyCooperationDefectionInstanceId(dateKey: string): string {
 	if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) throw new TypeError('CooperationDefection date key must be YYYY-MM-DD.');
 	return `${COOPERATION_DEFECTION_PROTOCOL_NAMESPACE_INSTANCE_PREFIX}:${dateKey}`;
 }

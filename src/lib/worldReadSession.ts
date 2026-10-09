@@ -121,7 +121,7 @@ export type WorldReadBootstrap = Readonly<{
 	realtimeStatus: 'inactive' | 'active' | 'degraded';
 }>;
 
-export type RealtimeSessionOptions = Readonly<{
+type RealtimeSessionOptions = Readonly<{
 	registry: RealtimeEventRegistry;
 	controlSince: number;
 	instanceFilters: readonly RealtimeInstanceFilterConfiguration[];

@@ -15,7 +15,7 @@ export type ConversationMessageOptions = {
 	now?: number;
 };
 
-export type NormalBubbleState = {
+type NormalBubbleState = {
 	id: string;
 	kind: 'normal';
 	messageIds: string[];
@@ -25,7 +25,7 @@ export type NormalBubbleState = {
 	expiresAt: number;
 };
 
-export type MergedBubbleState = {
+type MergedBubbleState = {
 	id: string;
 	kind: 'merged';
 	messageIds: string[];

@@ -18,7 +18,7 @@ export const TRACE_DATABASE_STORES = [
 ] as const;
 
 export type TraceRewardIdentity = Readonly<{ generation: number; accountIndex: number; pubkey: string }>;
-export type TraceRewardKind = 'trace-root-read' | 'trace-reply-read';
+type TraceRewardKind = 'trace-root-read' | 'trace-reply-read';
 export type TraceRewardOutboxRecord = Readonly<{
 	key: string;
 	kind: TraceRewardKind;
@@ -29,7 +29,7 @@ export type TraceRewardOutboxRecord = Readonly<{
 	status: 'pending' | 'processed' | 'stale';
 }>;
 
-export type TraceRootRecord = Readonly<{
+type TraceRootRecord = Readonly<{
 	channelId: string;
 	eventId: string;
 	rawEvent: unknown;
@@ -55,7 +55,7 @@ export type TraceRootReadRecord = Readonly<{
 	read: true;
 }>;
 
-export type TraceReplyReadState = 'read' | 'unread';
+type TraceReplyReadState = 'read' | 'unread';
 
 export type TraceReplyReadRecord = Readonly<{
 	channelId: string;

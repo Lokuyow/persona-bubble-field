@@ -18,9 +18,9 @@ export const WORLD_STATE_KIND = 30079;
 export const PROFILE_STATE_KIND = WORLD_STATE_KIND;
 export const PROFILE_KIND = 0;
 export const RECENT_MESSAGE_TIMELINE_LIMIT = 50;
-export const WORLD_STATE_SLOT_SUFFIXES = ['0', '1', 'exit'] as const;
+const WORLD_STATE_SLOT_SUFFIXES = ['0', '1', 'exit'] as const;
 export type WorldStateSlot = 0 | 1;
-export type WorldStateState = 'active' | 'exit';
+type WorldStateState = 'active' | 'exit';
 
 export function worldStateIdentifier(channelId: string, slot: WorldStateSlot | 'exit'): string {
 	assertChannelId(channelId);
@@ -837,7 +837,7 @@ export function buildWorldMessageFilter(options: LiveFilterOptions): Filter {
 	};
 }
 
-export function buildWorldMessageHistoryFilter(options: Pick<LiveFilterOptions, 'channelId'>): Filter {
+function buildWorldMessageHistoryFilter(options: Pick<LiveFilterOptions, 'channelId'>): Filter {
 	assertChannelId(options.channelId);
 	return {
 		kinds: [CHANNEL_MESSAGE_KIND],

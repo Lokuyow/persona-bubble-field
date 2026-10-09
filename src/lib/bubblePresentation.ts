@@ -20,7 +20,7 @@ const TONE_VALUES: Readonly<Record<BubbleTone, Readonly<{ background: string; ou
 };
 
 /** Keep the current Trace surface expression in one presentation token. */
-export const TRACE_SURFACE_OPACITY = '70%';
+const TRACE_SURFACE_OPACITY = '70%';
 
 export function bubbleToneStyle(tone: BubbleTone, trace = false): string {
 	const value = TONE_VALUES[tone];
@@ -98,7 +98,7 @@ export function taperedBandGeometry(
 	};
 }
 
-export function mergedTailFraction(index: number, count: number): number {
+function mergedTailFraction(index: number, count: number): number {
 	if (count <= 1) return 0.5;
 	const edgeInset = count === 2 ? 0.28 : count === 3 ? 0.22 : 0.18;
 	return edgeInset + (1 - edgeInset * 2) * (index / (count - 1));
@@ -209,7 +209,7 @@ export function liveTailSeamStyle(connection: BubbleTailConnection, merged: bool
 	return `--tail-seam-x: ${connection.seam.x}px; --tail-seam-y: ${connection.seam.y}px; --tail-seam-width: ${horizontal ? merged ? 9 : 11 : 3}px; --tail-seam-height: ${horizontal ? 3 : merged ? 9 : 11}px;`;
 }
 
-export function specialTailExtension(speechType: SpeechType): number {
+function specialTailExtension(speechType: SpeechType): number {
 	return speechType === 'normal' ? 0 : 26;
 }
 

@@ -13,9 +13,9 @@ export const DEV_TAG_GAME_BOT_A_PUBKEY = pubkeyForCharacterSlot(BOT_A_CHARACTER.
 export const DEV_TAG_GAME_BOT_B_PUBKEY = pubkeyForCharacterSlot(BOT_B_CHARACTER.slot);
 // The synthetic game identity is projected onto DEV World's selectable `you` participant.
 export const DEV_TAG_GAME_SELF_ID = DEV_WORLD_SELF_ID;
-export const DEV_TAG_GAME_BOT_A_ID = DEV_TAG_GAME_BOT_A_PUBKEY;
-export const DEV_TAG_GAME_BOT_B_ID = DEV_TAG_GAME_BOT_B_PUBKEY;
-export const DEV_TAG_GAME_ACTORS = [DEV_TAG_GAME_SELF_PUBKEY, DEV_TAG_GAME_BOT_A_PUBKEY, DEV_TAG_GAME_BOT_B_PUBKEY] as const;
+const DEV_TAG_GAME_BOT_A_ID = DEV_TAG_GAME_BOT_A_PUBKEY;
+const DEV_TAG_GAME_BOT_B_ID = DEV_TAG_GAME_BOT_B_PUBKEY;
+const DEV_TAG_GAME_ACTORS = [DEV_TAG_GAME_SELF_PUBKEY, DEV_TAG_GAME_BOT_A_PUBKEY, DEV_TAG_GAME_BOT_B_PUBKEY] as const;
 export type DevTagGameSound = 'tag-game-start' | 'tag-game-switch' | 'tag-game-transfer' | 'tag-game-end' | 'tag-game-benefit' | 'tag-game-calamity';
 export type DevTagGamePlaygroundSnapshot = Readonly<{
 	game: TagGameState | null;

@@ -5,8 +5,8 @@ import { PROTOTYPE_NAMESPACE } from './nostrProtocol';
 
 /** Project-owned regular event kind for the realtime-event prototype. */
 export const REALTIME_EVENT_KIND = 7070;
-export const REALTIME_INSTANCE_TAG = 'i';
-export const REALTIME_PROTOCOL_NAMESPACE = `${PROTOTYPE_NAMESPACE}:realtime`;
+const REALTIME_INSTANCE_TAG = 'i';
+const REALTIME_PROTOCOL_NAMESPACE = `${PROTOTYPE_NAMESPACE}:realtime`;
 export const REALTIME_CONTROL_PROTOCOL_KEY = `${REALTIME_PROTOCOL_NAMESPACE}:control:1`;
 
 export type RealtimeFieldTargetInput = Readonly<{
@@ -37,7 +37,7 @@ export type RealtimeEnvelope = Readonly<{
 	definition: RealtimeEventDefinition;
 }>;
 
-export type RealtimeControlPayload = Readonly<{
+type RealtimeControlPayload = Readonly<{
 	command: 'start';
 	targetProtocolKey: string;
 }>;
@@ -221,7 +221,7 @@ function parseRealtimeControlPayload(value: unknown): RealtimeControlPayload | n
 		: null;
 }
 
-export function isRealtimeControlPayload(value: unknown): value is RealtimeControlPayload {
+function isRealtimeControlPayload(value: unknown): value is RealtimeControlPayload {
 	return parseRealtimeControlPayload(value) !== null;
 }
 
@@ -317,8 +317,4 @@ export function buildRealtimeInstanceFilter(input: Readonly<{ channelId: string;
 	if (input.configuration.instanceIds.length === 0 || input.configuration.instanceIds.some((instanceId) => !INSTANCE_ID.test(instanceId))) throw new TypeError('Realtime instance IDs are invalid.');
 	assertCreatedAt(input.configuration.since);
 	return { kinds: [REALTIME_EVENT_KIND], '#e': [input.channelId], '#d': [input.configuration.protocolKey], [`#${REALTIME_INSTANCE_TAG}`]: [...new Set(input.configuration.instanceIds)], since: input.configuration.since } as Filter;
-}
-
-export function isRealtimeEventKind(kind: number): kind is typeof REALTIME_EVENT_KIND {
-	return kind === REALTIME_EVENT_KIND;
 }

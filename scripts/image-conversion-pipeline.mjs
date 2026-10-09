@@ -4,7 +4,7 @@ import { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
 import sharp from 'sharp';
 
-export function createPipelineSignature(config) { return createHash('sha256').update(JSON.stringify(config)).digest('hex'); }
+function createPipelineSignature(config) { return createHash('sha256').update(JSON.stringify(config)).digest('hex'); }
 function describePath(root, filePath) { const relative = path.relative(root, filePath); return relative && !relative.startsWith('..') ? relative : filePath; }
 async function metadata(filePath) { try { return await sharp(await readFile(filePath)).metadata(); } catch (error) { throw new Error(`cannot decode image (${error instanceof Error ? error.message : String(error)})`); } }
 async function hash(filePath) { return createHash('sha256').update(await readFile(filePath)).digest('hex'); }

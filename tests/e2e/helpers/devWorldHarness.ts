@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
-export type TraceGeometryRect = { x: number; y: number; width: number; height: number };
+type TraceGeometryRect = { x: number; y: number; width: number; height: number };
 export type TraceGeometryFrame = {
 	ready: string | null;
 	visible: boolean;
@@ -111,16 +111,6 @@ export async function readCharacterGeometry(page: Page) {
 			}
 		};
 	});
-}
-
-export async function fieldCellCenter(page: Page, position: { x: number; y: number }): Promise<{ x: number; y: number }> {
-	return page.locator('.field-grid').evaluate((grid, cell) => {
-		const scene = document.querySelector<HTMLElement>('.field-scene');
-		if (!scene) throw new Error('Expected the field scene to be rendered.');
-		const rect = grid.getBoundingClientRect();
-		const cellSize = Number.parseFloat(getComputedStyle(scene).getPropertyValue('--cell-size'));
-		return { x: rect.left + (cell.x + 0.5) * cellSize, y: rect.top + (cell.y + 0.5) * cellSize };
-	}, position);
 }
 
 export async function fieldOwnedBlankPoint(page: Page, preferred: { x: number; y: number }): Promise<{ x: number; y: number }> {

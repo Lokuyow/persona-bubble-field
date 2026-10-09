@@ -26,7 +26,7 @@ function compareRoots(first: ParsedWorldMessage, second: ParsedWorldMessage): nu
 		(first.id < second.id ? -1 : first.id > second.id ? 1 : 0);
 }
 
-export function traceCellKey(position: GridPosition): string {
+function traceCellKey(position: GridPosition): string {
 	return `${position.x},${position.y}`;
 }
 

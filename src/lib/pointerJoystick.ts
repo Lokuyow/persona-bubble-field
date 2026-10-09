@@ -3,7 +3,7 @@ import type { Direction } from './geometry';
 export type JoystickPoint = Readonly<{ x: number; y: number }>;
 
 export const POINTER_JOYSTICK_THRESHOLD = 12;
-export const POINTER_JOYSTICK_MAX_RADIUS = 32;
+const POINTER_JOYSTICK_MAX_RADIUS = 32;
 const POINTER_SECTOR_DIRECTIONS = [
 	'right',
 	'down-right',

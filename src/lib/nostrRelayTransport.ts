@@ -60,9 +60,9 @@ const EARLY_SELF_READ_DEADLINE_MS = 750;
 const TRACE_REPLY_RESUME_OVERLAP_SECONDS = 300;
 
 export type LogicalPrimarySubscription = 'world-messages' | 'world-state';
-export type PrimaryPairStatus = 'pending' | 'eose' | 'closed' | 'unavailable' | 'timeout';
-export type RelayCapacity = 'insufficient' | 'primary-only' | 'trace-capable' | 'unknown';
-export type RelayQueryStatus = 'eose' | 'closed' | 'unavailable' | 'timeout';
+type PrimaryPairStatus = 'pending' | 'eose' | 'closed' | 'unavailable' | 'timeout';
+type RelayCapacity = 'insufficient' | 'primary-only' | 'trace-capable' | 'unknown';
+type RelayQueryStatus = 'eose' | 'closed' | 'unavailable' | 'timeout';
 export type RelayQueryDiagnostic = Readonly<{
 	relayUrl: string;
 	status: RelayQueryStatus;
@@ -100,23 +100,18 @@ export type RealtimeRelayDiagnostic = Readonly<{
 	notice?: string;
 }>;
 
-export type RealtimeEventBatch = Readonly<{
-	events: readonly Event[];
-	relays: readonly RealtimeRelayDiagnostic[];
-}>;
-
 export type TraceReplyBatch = Readonly<{
 	events: readonly Event[];
 	relays: readonly TraceReplyRelayDiagnostic[];
 }>;
 
-export type TraceReplyNotificationConfig = Readonly<{
+type TraceReplyNotificationConfig = Readonly<{
 	personaPubkey: string;
 	effectiveRootIds?: readonly string[];
 	initialSince: number;
 }>;
 
-export type TraceReplyConversationConfig = Readonly<{
+type TraceReplyConversationConfig = Readonly<{
 	rootId: string;
 	currentId: string;
 }>;
