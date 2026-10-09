@@ -275,7 +275,7 @@
 	.selection-content { min-height: 0; overflow: auto; padding: 26px 26px 24px; }
 	.opening-content { display: grid; align-content: center; }
 	.opening-content .selection-header { justify-content: center; text-align: center; transform: translateY(-18px); }
-	.opening-logo { display: block; width: min(300px, 70vw); height: auto; margin: 0 auto 16px; }
+	.opening-logo { display: block; width: min(300px, 70vw); height: auto; margin: 0 auto 28px; }
 	.opening-content h1 { font-size: clamp(28px, 5vw, 40px); }
 	.opening-copy { display: grid; gap: 22px; margin-top: 20px; color: rgb(255 255 255 / 88%); font-size: 1.05rem; line-height: 1.8; }
 	.opening-copy p { margin: 0; }
