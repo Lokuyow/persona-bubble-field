@@ -29,7 +29,7 @@ test.describe('Relay startup', () => {
 	test('uses an empty Host-owned Composer editor Arrow for one movement and prevents its default', async ({ page }) => {
 		const editor = await openClockedReadyRelayWorld(page);
 		const self = page.locator('.participant[data-self="true"]');
-		const move = await chooseHorizontalMove(page);
+		const move = await chooseAvailableRelayMove(page);
 		await page.evaluate(() => {
 			(window as typeof window & { __keyboardDefaulted?: boolean }).__keyboardDefaulted = false;
 			window.addEventListener('keydown', (event) => {
@@ -77,7 +77,7 @@ test.describe('Relay startup', () => {
 		}))).toEqual({ value: 'x', selectionStart: 0 });
 
 		await editor.fill('');
-		const move = await chooseHorizontalMove(page);
+		const move = await chooseAvailableRelayMove(page);
 		await editor.focus();
 		await pressRelayKeyboardMovement(page, move);
 	});
@@ -110,7 +110,7 @@ test.describe('Relay startup', () => {
 		const self = page.locator('.participant[data-self="true"]');
 		const position = await self.getAttribute('data-position');
 		if (!position) throw new Error('Expected the Relay self participant position.');
-		const move = await chooseAvailableRelayMove(page);
+		const move = await chooseAvailableRelayMove(page, 3);
 		const key = move.key;
 		const publishedPositionIds = async () => new Set(
 			(await relayState(page)).state.published
@@ -129,6 +129,8 @@ test.describe('Relay startup', () => {
 				if (event.key === movementKey) (window as typeof window & { __relayCadenceKeyup?: string }).__relayCadenceKeyup = event.key;
 			}, { once: true });
 		}, key);
+		const movementStart = await page.evaluate(() => Math.ceil(Date.now() / 1_000) * 1_000);
+		await page.clock.setSystemTime(movementStart);
 		await page.keyboard.down(key);
 		await expect.poll(() => page.evaluate(() => (window as typeof window & { __relayCadenceKeydown?: string }).__relayCadenceKeydown)).toBe(key);
 		await page.clock.runFor(50);
@@ -136,14 +138,22 @@ test.describe('Relay startup', () => {
 		await page.clock.runFor(1);
 		await expect.poll(publishedPositionIds).toBeGreaterThan(initialPublishedPositionCount);
 		await expect(self).toHaveAttribute('data-position', move.expected);
-		await page.clock.runFor(750);
-		await page.clock.runFor(750);
+		let previousPosition = move.expected;
+		for (let repeat = 0; repeat < 2; repeat += 1) {
+			const previousPublishedPositionCount = await publishedPositionIds();
+			await page.clock.runFor(501);
+			await expect.poll(publishedPositionIds).toBeGreaterThan(previousPublishedPositionCount);
+			await expect.poll(() => self.getAttribute('data-position')).not.toBe(previousPosition);
+			previousPosition = (await self.getAttribute('data-position')) ?? '';
+		}
 		await page.keyboard.up(key);
 		await expect.poll(() => page.evaluate(() => (window as typeof window & { __relayCadenceKeyup?: string }).__relayCadenceKeyup)).toBe(key);
 		const finalPosition = await self.getAttribute('data-position');
 		expect(finalPosition).not.toBe(position);
-		await page.clock.runFor(1_000);
+		const publishedPositionCountAtRelease = await publishedPositionIds();
+		await page.clock.runFor(501);
 		await expect(self).toHaveAttribute('data-position', finalPosition ?? '');
+		expect(await publishedPositionIds()).toBe(publishedPositionCountAtRelease);
 	});
 
 	test('focuses the Composer with N and blurs it with Escape before WASD movement', async ({ page }) => {

@@ -376,6 +376,7 @@ export async function installDelayedRelay(page: Page, options: {
 			webSocketCloses?: Array<{ socketId: number; generation: number; url: string; readyState: number; origin: 'application' | 'pagehide' }>;
 		} : { published: [], closedSubscriptions: [], webSocketCloses: [] };
 		const lifecycleSockets: Array<{ readyState: number; close(code?: number): void }> = [];
+		const pendingPositionInjections = new Set<Promise<void>>();
 		const queuedBootstrapEventsKey = 'relay-startup-queued-realtime-bootstrap-events';
 		const queuedBootstrapEvents = JSON.parse(sessionStorage.getItem(queuedBootstrapEventsKey) ?? '[]') as Array<Record<string, unknown>>;
 		sessionStorage.removeItem(queuedBootstrapEventsKey);
@@ -828,13 +829,21 @@ export async function installDelayedRelay(page: Page, options: {
 				rejectTracePublishes: () => { state.rejectTracePublishes = true; },
 				allowTracePublishes: () => { state.rejectTracePublishes = false; },
 				allowMessagePublishes: () => { state.rejectMessagePublishes = false; },
-				injectPosition: async (event: object) => {
-					await recordInjectedPositionReservation(event);
-					for (const request of activePrimary) {
-						if (request.filters.some((filter) => (filter.kinds as number[] | undefined)?.includes(WORLD_STATE_KIND))) {
-							deliver(request.socket, ['EVENT', request.subId, event]);
+				injectPosition: (event: object) => {
+					const injection = (async () => {
+						await recordInjectedPositionReservation(event);
+						for (const request of activePrimary) {
+							if (request.filters.some((filter) => (filter.kinds as number[] | undefined)?.includes(WORLD_STATE_KIND))) {
+								deliver(request.socket, ['EVENT', request.subId, event]);
+							}
 						}
-					}
+					})();
+					pendingPositionInjections.add(injection);
+					void injection.then(
+						() => pendingPositionInjections.delete(injection),
+						() => pendingPositionInjections.delete(injection)
+					);
+					return injection;
 				},
 				injectPositionToRelay: (event: object, relayUrl: string) => {
 					sessionStorage.setItem(persistedLatePositionKey, JSON.stringify({ relayUrl: new URL(relayUrl).toString(), event }));
@@ -1114,6 +1123,10 @@ export async function installPromptApiStub(
 
 export async function seedRelayAccount(page: Page, secretKey: Uint8Array, pubkey: string, lifespanExpiresAtMs = Date.now() + 7 * 24 * 60 * 60 * 1000, points = 0, abilities = { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 }, rootPoints = 0, rootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0 }): Promise<void> {
 	const fixtureAccountIndex = fixtureAccountIndexForSecret(secretKey);
+	await page.route('**/favicon.svg', (route) => route.fulfill({
+		contentType: 'text/html',
+		body: '<!doctype html><html><body></body></html>'
+	}), { times: 1 });
 	await page.goto('/favicon.svg');
 	await page.evaluate(async ({ accountPubkey, accountIndex, expiresAtMs, points, abilities, characterId, rootPoints, rootBuild }) => {
 		const database = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -1449,7 +1462,8 @@ const CARDINAL_RELAY_MOVES = [
 	{ key: 'ArrowLeft', direction: 'left' }
 ] as const satisfies readonly Readonly<{ key: AvailableMove['key']; direction: Direction }>[];
 
-export async function chooseAvailableRelayMove(page: Page): Promise<AvailableMove> {
+export async function chooseAvailableRelayMove(page: Page, consecutiveMoves = 1): Promise<AvailableMove> {
+	if (!Number.isSafeInteger(consecutiveMoves) || consecutiveMoves < 1) throw new Error('Expected a positive number of consecutive Relay moves.');
 	const position = await page.locator('.participant[data-self="true"]').getAttribute('data-position');
 	if (!position) throw new Error('Expected the Relay self participant position.');
 	const [x, y] = position.split(',').map(Number);
@@ -1463,10 +1477,17 @@ export async function chooseAvailableRelayMove(page: Page): Promise<AvailableMov
 		})
 	);
 	for (const candidate of CARDINAL_RELAY_MOVES) {
-		const next = moveOneCell({ x, y }, candidate.direction, RELAY_FIELD, occupied);
-		if (next && !isBlockedFacilityCell(next)) return { key: candidate.key, expected: relayPositionKey(next) };
+		let next: GridPosition = { x, y };
+		let first: GridPosition | null = null;
+		for (let step = 0; step < consecutiveMoves; step += 1) {
+			const moved = moveOneCell(next, candidate.direction, RELAY_FIELD, occupied);
+			if (!moved || isBlockedFacilityCell(moved)) { first = null; break; }
+			if (step === 0) first = moved;
+			next = moved;
+		}
+		if (first) return { key: candidate.key, expected: relayPositionKey(first) };
 	}
-	throw new Error(`Expected an available Relay movement cell from ${position}.`);
+	throw new Error(`Expected ${consecutiveMoves} consecutive available Relay movement cells from ${position}.`);
 }
 
 function relayPositionKey(position: GridPosition): string {

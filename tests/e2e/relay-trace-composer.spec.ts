@@ -161,6 +161,18 @@ test.describe('Relay startup', () => {
 			await seedRelayAccount(page, trace.selfSecret, trace.selfPubkey);
 			await page.goto('/');
 			await page.evaluate(() => {
+				const rewards: string[] = [];
+				const recordRewards = () => {
+					for (const element of document.querySelectorAll<HTMLElement>('[data-interaction-reward-feedback]')) {
+						const reward = element.textContent?.trim();
+						if (reward && !rewards.includes(reward)) rewards.push(reward);
+					}
+				};
+				const observer = new MutationObserver(recordRewards);
+				observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+				Object.assign(window, { __observedInteractionRewards: rewards, __interactionRewardObserver: observer });
+			});
+			await page.evaluate(() => {
 				const relay = (window as unknown as { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest;
 				relay.releasePrimary();
 			});
@@ -173,6 +185,7 @@ test.describe('Relay startup', () => {
 			await expect(preview).toContainText('Relay trace root');
 			await expect(editor).not.toBeFocused();
 			await expect(page.locator('[data-points-value]')).toHaveText('5pt');
+			await expect.poll(() => page.evaluate(() => (window as typeof window & { __observedInteractionRewards: string[] }).__observedInteractionRewards)).toContain('+5pt');
 			const pointsBeforeReply = 5;
 			await speechType.click();
 			await speechType.click();
@@ -198,7 +211,12 @@ test.describe('Relay startup', () => {
 			await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '3,2');
 			expect((await relayState(page)).state.published.filter((event) => parseWorldStateEvent(event as NostrEvent, CHANNEL_ID)?.state === 'active')).toHaveLength(positionsBefore);
 			await page.evaluate(() => (window as unknown as { __relayStartupTest: { releasePublishes(kind: number): void } }).__relayStartupTest.releasePublishes(1111));
-			if (outcome !== 'rejected') await expect(page.locator('[data-interaction-reward-feedback]')).toHaveText(['+5pt', '+10pt']);
+			if (outcome !== 'rejected') {
+				await expect.poll(() => page.evaluate(() => (window as typeof window & { __observedInteractionRewards: string[] }).__observedInteractionRewards)).toEqual(expect.arrayContaining(['+5pt', '+10pt']));
+			} else {
+				expect(await page.evaluate(() => (window as typeof window & { __observedInteractionRewards: string[] }).__observedInteractionRewards)).toEqual(['+5pt']);
+			}
+			await page.evaluate(() => (window as typeof window & { __interactionRewardObserver: MutationObserver }).__interactionRewardObserver.disconnect());
 			await expect.poll(() => page.evaluate(() => (window as unknown as { __ehagakiTerminalCount: number }).__ehagakiTerminalCount)).toBe(1);
 			if (outcome === 'rejected') {
 				await expect(editor).toHaveValue('own Trace shout');

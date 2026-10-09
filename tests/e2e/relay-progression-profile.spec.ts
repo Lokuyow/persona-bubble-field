@@ -485,6 +485,15 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,3');
 		await page.clock.setSystemTime(startTime + 12 * 60 * 1000);
 		await pauseAtCurrentBrowserTime(page);
+		const activePosition = finalizeEvent(buildWorldStateEventTemplate({
+			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 11, y: 3 }, slot: 1,
+			createdAt: Math.floor(await page.evaluate(() => Date.now()) / 1000)
+		}), secret);
+		await page.evaluate(async (event) => {
+			await (window as typeof window & { __relayStartupTest: { injectPosition(event: object): Promise<void> } }).__relayStartupTest.injectPosition(event);
+		}, activePosition);
+		await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toBeVisible();
+		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,3');
 		await page.getByRole('button', { name: '作業端末' }).click();
 		const dialog = page.getByRole('dialog');
 		await expect(dialog.getByRole('heading', { name: '延命中' })).toBeVisible();
