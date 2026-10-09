@@ -468,10 +468,10 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		} else if (firstRunTutorialStep === 'speech') {
 			storeFirstRunTutorialStep('trace', persona);
 		} else if (firstRunTutorialStep === 'note') {
-			storeFirstRunTutorialStep('reply', persona);
-		} else if (firstRunTutorialStep === 'reply') {
 			const scope = firstRunTutorialScopeFor(persona);
 			if (scope) showFirstRunTutorialCompletion(scope);
+		} else if (firstRunTutorialStep === 'reply') {
+			advanceFirstRunTutorialFromReply(persona);
 		}
 	}
 
@@ -481,6 +481,12 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		const scope = firstRunTutorialScopeFor(persona);
 		if (reward.points !== 5 || firstRunTutorialStep !== 'trace' || !persona || !scope ||
 			!firstRunTutorialScopesMatch(firstRunTutorialScope, scope)) return;
+		storeFirstRunTutorialStep('reply', persona);
+	}
+
+	function advanceFirstRunTutorialFromReply(persona: PersonaSnapshot): void {
+		const scope = firstRunTutorialScopeFor(persona);
+		if (firstRunTutorialStep !== 'reply' || !scope || !firstRunTutorialScopesMatch(firstRunTutorialScope, scope)) return;
 		storeFirstRunTutorialStep('ability', persona);
 	}
 
@@ -1111,7 +1117,10 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			})[0]?.roots[0].id ?? null
 		: null);
 	let firstRunTutorialReplyTargetId = $derived(showFirstRunTutorial && firstRunTutorialStep === 'reply' && personaSnapshot && selfLogicalPosition
-		? [...fieldTraceRootCells]
+		? traceConversationState.kind === 'open' && traceConversationState.root.pubkey !== personaSnapshot.signer.pubkey &&
+			isWithinTraceInvestigationRange(selfLogicalPosition, traceConversationState.root.position)
+			? traceConversationState.root.id
+			: [...fieldTraceRootCells]
 			.filter((cell) => cell.roots[0].pubkey !== personaSnapshot!.signer.pubkey && isWithinTraceInvestigationRange(selfLogicalPosition!, cell.position))
 			.sort((first, second) => {
 				const firstDistance = Math.max(Math.abs(first.position.x - selfLogicalPosition!.x), Math.abs(first.position.y - selfLogicalPosition!.y));
@@ -1202,10 +1211,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 				}
 			}
 			if (!context.manualTrace && context.target && firstRunTutorialStep === 'reply' && personaSnapshot) {
-				const scope = firstRunTutorialScopeFor(personaSnapshot);
-				if (scope && firstRunTutorialScopesMatch(firstRunTutorialScope, scope)) {
-					showFirstRunTutorialCompletion(scope);
-				}
+				advanceFirstRunTutorialFromReply(personaSnapshot);
 			}
 		},
 		onOutOfRange: (context) => {
@@ -5499,7 +5505,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 				<p>100ptを使って、その場に書置きを残せます</p>
 				<ActionButton variant="primary" class="first-run-tutorial-next" type="button" onclick={advanceFirstRunTutorialFromPrompt}>次へ</ActionButton>
 			{:else if firstRunTutorialStep === 'reply'}
-				<p>痕跡・書置き・遺言の会話を開き、発言を選ぶとリプライできます。リプライを発言するか、「次へ」で案内を終えましょう。</p>
+				<p>この痕跡にリプライできます。返事を投稿するか、「次へ」で進みましょう。書置きや遺言にも返信できます。</p>
 				<ActionButton variant="primary" class="first-run-tutorial-next" type="button" onclick={advanceFirstRunTutorialFromPrompt}>次へ</ActionButton>
 			{/if}
 		</div>
