@@ -140,6 +140,7 @@
 				<div class="selection-content opening-content">
 					<header class="selection-header">
 						<div>
+						<img class="opening-logo" src={asset('/brand/HakoKako_logo.svg')} alt="ハコ過去 HakoKako" />
 						<h1 bind:this={initialFocusTarget} class="initial-focus-target" id="identity-selection-title" tabindex="-1">ここは、ハコ。</h1>
 						<div id="identity-selection-description" class="opening-copy">
 							<p>あなたは、別の誰かとしてここで生きる。</p>
@@ -274,6 +275,7 @@
 	.selection-content { min-height: 0; overflow: auto; padding: 26px 26px 24px; }
 	.opening-content { display: grid; align-content: center; }
 	.opening-content .selection-header { justify-content: center; text-align: center; }
+	.opening-logo { display: block; width: min(300px, 70vw); height: auto; margin: 0 auto 16px; }
 	.opening-content h1 { font-size: clamp(28px, 5vw, 40px); }
 	.opening-copy { display: grid; gap: 22px; margin-top: 20px; color: rgb(255 255 255 / 88%); font-size: 1.05rem; line-height: 1.8; }
 	.opening-copy p { margin: 0; }
