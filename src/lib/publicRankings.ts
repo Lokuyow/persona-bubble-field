@@ -15,6 +15,7 @@ import { resolveWorldCharacterFromPubkey } from './worldCharacterAssignment';
 
 type CanonicalProfile = Readonly<{ envelope: PublicProfileEnvelope; state: PublicProfileState | null }>;
 type CanonicalExit = Readonly<{ id: string; pubkey: string; createdAt: number; parsed: ParsedWorldStateEvent | null }>;
+const RANKING_DISPLAY_LIMIT = 20;
 
 export type PublicRankingRow = Readonly<{
 	key: string;
@@ -96,10 +97,14 @@ export function projectPublicRankings(input: Readonly<{
 		});
 	}
 
-	const points = [...rows].sort((first, second) => second.points - first.points || compareLexically(first.key, second.key));
+	const points = [...rows]
+		.sort((first, second) => second.points - first.points || compareLexically(first.key, second.key))
+		.slice(0, RANKING_DISPLAY_LIMIT);
 	const stateOrder = (row: PublicRankingRow) => row.terminalState === 'death' ? 0 : row.terminalState === 'clear' ? 2 : 1;
-	const lifespan = [...rows].sort((first, second) => stateOrder(first) - stateOrder(second) ||
-		(stateOrder(first) === 1 ? first.remainingLifespanMs - second.remainingLifespanMs : 0) ||
-		compareLexically(first.key, second.key));
+	const lifespan = [...rows]
+		.sort((first, second) => stateOrder(first) - stateOrder(second) ||
+			(stateOrder(first) === 1 ? first.remainingLifespanMs - second.remainingLifespanMs : 0) ||
+			compareLexically(first.key, second.key))
+		.slice(0, RANKING_DISPLAY_LIMIT);
 	return { points, lifespan };
 }

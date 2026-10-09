@@ -15,13 +15,17 @@ const NOW = 1_700_000_000_000;
 
 function mappedSecret(seed: number): Uint8Array {
 	for (let value = seed; value < seed + 10_000; value++) {
-		const secret = new Uint8Array(32).fill(value % 255 || 1);
+		const secret = new Uint8Array(32);
+		secret[28] = (value >>> 24) & 0xff;
+		secret[29] = (value >>> 16) & 0xff;
+		secret[30] = (value >>> 8) & 0xff;
+		secret[31] = value & 0xff;
 		if (resolveWorldCharacterFromPubkey(getPublicKey(secret))) return secret;
 	}
 	throw new Error('No assigned test character found.');
 }
 
-const secrets = [mappedSecret(5), mappedSecret(80), mappedSecret(160)];
+const secrets = [mappedSecret(5), mappedSecret(10_005), mappedSecret(20_005)];
 
 function profile(secret: Uint8Array, options: Readonly<{ createdAt?: number; runNumber?: number; points?: number; expiry?: number; version?: number }> = {}): Event {
 	const template = buildPublicProfileStateTemplate({
@@ -91,6 +95,19 @@ describe('public profile rankings', () => {
 		expect(projection.points.find((row) => row.points === 20)).toMatchObject({ terminalState: 'clear', isSelf: false });
 		expect(projection.points.find((row) => row.points === 30)?.isSelf).toBe(true);
 		expect(projection.lifespan.map((row) => row.terminalState)).toEqual(['death', null, 'clear']);
+	});
+
+	it('limits each independently ordered ranking to its top 20 rows', () => {
+		const events = Array.from({ length: 25 }, (_, index) => profile(mappedSecret(1_000_000 + index * 10_000), {
+			points: index,
+			expiry: NOW + (index + 1) * 1_000
+		}));
+		const projection = ranking(events);
+
+		expect(projection.points).toHaveLength(20);
+		expect(projection.points.map((row) => row.points)).toEqual(Array.from({ length: 20 }, (_, index) => 24 - index));
+		expect(projection.lifespan).toHaveLength(20);
+		expect(projection.lifespan.map((row) => row.remainingLifespanMs)).toEqual(Array.from({ length: 20 }, (_, index) => (index + 1) * 1_000));
 	});
 
 	it('maps matching death reason to death and ignores exits with a missing Run number', () => {
