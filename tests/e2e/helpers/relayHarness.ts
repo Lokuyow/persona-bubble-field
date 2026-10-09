@@ -376,7 +376,8 @@ export async function installDelayedRelay(page: Page, options: {
 			webSocketCloses?: Array<{ socketId: number; generation: number; url: string; readyState: number; origin: 'application' | 'pagehide' }>;
 		} : { published: [], closedSubscriptions: [], webSocketCloses: [] };
 		const lifecycleSockets: Array<{ readyState: number; close(code?: number): void }> = [];
-		const pendingPositionInjections = new Set<Promise<void>>();
+		// Keep returned promises rooted until this document is discarded; CDP may still be awaiting settlement after IndexedDB completes.
+		const retainedPositionInjections = new Set<Promise<void>>();
 		const queuedBootstrapEventsKey = 'relay-startup-queued-realtime-bootstrap-events';
 		const queuedBootstrapEvents = JSON.parse(sessionStorage.getItem(queuedBootstrapEventsKey) ?? '[]') as Array<Record<string, unknown>>;
 		sessionStorage.removeItem(queuedBootstrapEventsKey);
@@ -838,11 +839,7 @@ export async function installDelayedRelay(page: Page, options: {
 							}
 						}
 					})();
-					pendingPositionInjections.add(injection);
-					void injection.then(
-						() => pendingPositionInjections.delete(injection),
-						() => pendingPositionInjections.delete(injection)
-					);
+					retainedPositionInjections.add(injection);
 					return injection;
 				},
 				injectPositionToRelay: (event: object, relayUrl: string) => {
