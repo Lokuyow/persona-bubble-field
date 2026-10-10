@@ -416,9 +416,27 @@ test.describe('Relay startup', () => {
 		await page.clock.runFor(1_000);
 		await expect(page.locator('[data-realtime-panel]')).toContainText('選択');
 		await expect(page.locator('[data-realtime-panel]')).toContainText('参加中（3人）');
-		await page.locator('[data-cooperation-defection-choice="cooperate"]').click();
+		await page.setViewportSize({ width: 390, height: 844 });
+		const cooperateChoice = page.locator('[data-cooperation-defection-choice="cooperate"]');
+		const cooperateBounds = await cooperateChoice.boundingBox();
+		if (!cooperateBounds) throw new Error('Expected the mobile cooperation choice control to be visible.');
+		const choiceReceivesPointer = await page.evaluate((point) => {
+			const hit = document.elementFromPoint(point.x, point.y);
+			const choice = document.querySelector<HTMLElement>('[data-cooperation-defection-choice="cooperate"]')!;
+			return Boolean(hit && (hit === choice || choice.contains(hit)));
+		}, { x: cooperateBounds.x + cooperateBounds.width / 2, y: cooperateBounds.y + cooperateBounds.height / 2 });
+		expect(choiceReceivesPointer).toBe(true);
+		const touchClient = await page.context().newCDPSession(page);
+		await touchClient.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 });
+		const choiceX = cooperateBounds.x + cooperateBounds.width / 2;
+		const choiceY = cooperateBounds.y + cooperateBounds.height / 2;
+		await touchClient.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: choiceX, y: choiceY, id: 1 }] });
+		await touchClient.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+		await touchClient.send('Emulation.setTouchEmulationEnabled', { enabled: false });
+		await touchClient.detach();
 		await expect(page.locator('[data-cooperation-defection-choice="cooperate"]')).toBeDisabled();
 		await expect.poll(async () => (await relayState(page)).state.published.some((event) => event.kind === 7070 && event.pubkey === selfPubkey && JSON.parse(event.content).action === 'commit')).toBe(true);
+		await page.setViewportSize({ width: 1280, height: 720 });
 
 		await page.clock.setSystemTime(round.resultAtMs + 1_000);
 		await page.clock.runFor(1_000);

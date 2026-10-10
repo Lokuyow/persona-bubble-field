@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { Attachment } from 'svelte/attachments';
 	import ActionButton from '$lib/ActionButton.svelte';
 	import AlertTriangle from '~icons/tabler/alert-triangle';
 	import CalendarClock from '~icons/tabler/calendar-clock';
@@ -34,11 +35,12 @@
 		message: string | null;
 		viewportElement: HTMLElement | undefined;
 		topOffset?: string | null;
+		mobileFieldReservePx?: number;
 		onPanelBounds: (bounds: Bounds | null) => void;
 		onChoice: (choice: CooperationDefectionChoice) => void;
 	}>;
 
-	let { schedule, nowMs, registrationDeadline, registrationCountdown, status, session, selfGroupId, cancelled, selfPubkey, participantName, selectedChoice, commitStatus, selectionFailed, canChoose, message, viewportElement, topOffset = null, onPanelBounds, onChoice }: Props = $props();
+	let { schedule, nowMs, registrationDeadline, registrationCountdown, status, session, selfGroupId, cancelled, selfPubkey, participantName, selectedChoice, commitStatus, selectionFailed, canChoose, message, viewportElement, topOffset = null, mobileFieldReservePx = 0, onPanelBounds, onChoice }: Props = $props();
 	let panelElement = $state<HTMLElement>();
 	let choiceReservation = $state<HTMLElement>();
 	let panelBounds = $state<Bounds | null>(null);
@@ -135,6 +137,44 @@
 		requestAnimationFrame(() => detailsTrigger?.focus());
 	}
 
+	// FieldViewport disables browser panning for game gestures, so route panel touch drags to its own scrollports.
+	const touchScroll: Attachment<HTMLElement> = (node) => {
+		let gesture: Readonly<{ pointerId: number; startX: number; startY: number; startScrollTop: number; target: HTMLElement }> | null = null;
+		const down = (event: PointerEvent) => {
+			gesture = null;
+			if (event.pointerType !== 'touch' || !event.isPrimary || event.button !== 0 || !(event.target instanceof Element)) return;
+			if (event.target.closest('button, input, textarea, select, summary, [contenteditable="true"], .cooperation-defection-choice-controls')) return;
+			for (let target = event.target as HTMLElement | null; target && node.contains(target); target = target.parentElement) {
+				const style = getComputedStyle(target);
+				if (target.scrollHeight > target.clientHeight && (style.overflowY === 'auto' || style.overflowY === 'scroll')) {
+					gesture = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, startScrollTop: target.scrollTop, target };
+					return;
+				}
+			}
+		};
+		const move = (event: PointerEvent) => {
+			const current = gesture;
+			if (!current || current.pointerId !== event.pointerId) return;
+			const deltaX = event.clientX - current.startX;
+			const deltaY = event.clientY - current.startY;
+			if (Math.abs(deltaY) < 4 || Math.abs(deltaY) < Math.abs(deltaX)) return;
+			current.target.scrollTop = current.startScrollTop - deltaY;
+		};
+		const finish = (event: PointerEvent) => {
+			if (gesture?.pointerId === event.pointerId) gesture = null;
+		};
+		node.addEventListener('pointerdown', down);
+		node.addEventListener('pointermove', move);
+		node.addEventListener('pointerup', finish);
+		node.addEventListener('pointercancel', finish);
+		return () => {
+			node.removeEventListener('pointerdown', down);
+			node.removeEventListener('pointermove', move);
+			node.removeEventListener('pointerup', finish);
+			node.removeEventListener('pointercancel', finish);
+		};
+	};
+
 	function formatRemaining(value: number): string {
 		return `${Math.ceil(value / 1000)}秒`;
 	}
@@ -178,7 +218,7 @@
 <svelte:window onkeydown={handleWindowKeydown} />
 
 {#if schedule.phase === 'warning' || schedule.phase === 'registration' || (schedule.phase === 'game' && (!selfGroupCancelled || cancellationNoticeVisible))}
-	<section class="cooperation-defection-panel" bind:this={panelElement} data-realtime-panel data-realtime-status={status} aria-label="協力と抜け駆け" style={topOffset === null ? undefined : `--cooperation-top-offset:${topOffset}`}>
+	<section class="cooperation-defection-panel" bind:this={panelElement} data-realtime-panel data-realtime-status={status} aria-label="協力と抜け駆け" style={`${topOffset === null ? '' : `--cooperation-top-offset:${topOffset};`}--mobile-field-reserve:${mobileFieldReservePx}px`} {@attach touchScroll}>
 		<div class="cooperation-defection-heading">
 			<h2>協力と抜け駆け <span>experimental</span></h2>
 			<div class="cooperation-defection-meta">
@@ -341,6 +381,7 @@
 	.breakdown-names > .self-participant { background: rgba(145, 73, 151, .22); font-weight: 700; }
 	.breakdown-names small { margin-left: 3px; font-size: .75em; }
 	@media (max-width: 700px) {
-		.cooperation-defection-panel { top: var(--cooperation-top-offset, calc(64px + env(safe-area-inset-top))); max-height: max(0px, calc(100% - var(--cooperation-top-offset, calc(64px + env(safe-area-inset-top))) - 12px - env(safe-area-inset-bottom))); }
+		.cooperation-defection-panel { top: var(--cooperation-top-offset, calc(64px + env(safe-area-inset-top))); max-height: max(0px, calc(100% - var(--cooperation-top-offset, calc(64px + env(safe-area-inset-top))) - 12px - env(safe-area-inset-bottom) - var(--mobile-field-reserve) - 8px)); pointer-events: auto; touch-action: pan-y pinch-zoom; }
+		.cooperation-defection-choice-controls { z-index: 11; }
 	}
 </style>

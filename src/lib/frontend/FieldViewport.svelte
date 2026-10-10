@@ -10,6 +10,7 @@
 		geometryReady: boolean;
 		actionDockAvailable: boolean;
 		fieldAreaBounds: Bounds;
+		restrictPointerStartToFieldArea?: boolean;
 		deathPresentationActive: boolean;
 		field: FieldSize;
 		camera: WorldPoint;
@@ -28,6 +29,7 @@
 		geometryReady,
 		actionDockAvailable,
 		fieldAreaBounds,
+		restrictPointerStartToFieldArea = false,
 		deathPresentationActive,
 		field,
 		camera,
@@ -83,6 +85,12 @@
 			if (textSelectionTarget(event)) return;
 			if (event.composedPath().some((target) => target instanceof HTMLElement && target.matches('.action-dock, [role="dialog"], .sandbox-controls')) ||
 				(!textSelectionTarget(event) && event.composedPath().some((target) => target instanceof HTMLElement && target.matches('button, input, textarea, select, summary, [contenteditable="true"], .field-action-menu, .trace-reply-card')) && !gestureOrigin)) return;
+			if (restrictPointerStartToFieldArea) {
+				const viewportBounds = node.getBoundingClientRect();
+				const point = { x: event.clientX - viewportBounds.left, y: event.clientY - viewportBounds.top };
+				if (point.x < fieldAreaBounds.x || point.x >= fieldAreaBounds.x + fieldAreaBounds.width ||
+					point.y < fieldAreaBounds.y || point.y >= fieldAreaBounds.y + fieldAreaBounds.height) return;
+			}
 			const start = { x: event.clientX, y: event.clientY };
 			const anchor = viewportPointToLogicalCell({ point: start, fieldArea: fieldAreaBounds, camera, field });
 			activeGesture = { pointerId: event.pointerId, start, anchor, dragging: false, captureOwner: gestureOrigin ?? node };

@@ -197,7 +197,27 @@ test.describe('in-game Help', () => {
 		await dialog.locator('[data-help-event="cooperation"]').click();
 		await expect(body).toHaveAttribute('data-help-page', 'event');
 		await expect(dialog.locator('#help-cooperation-title')).toBeVisible();
+		await page.clock.runFor(100);
+		await expect.poll(() => dialog.evaluate((element) => getComputedStyle(element).opacity)).toBe('1');
 		await expect(dialog.locator('table')).toHaveCount(2);
+		const cooperationWarning = dialog.locator('.help-section[aria-labelledby="help-cooperation-title"] .mortality-warning');
+		await expect(cooperationWarning).toHaveAttribute('role', 'note');
+		await expect(cooperationWarning.locator('.warning-mark')).toHaveAttribute('aria-hidden', 'true');
+		await expect(cooperationWarning.locator('strong')).toHaveText('注意：協力不足で失敗した場合、抜け駆けした参加者は寿命を3日失います。');
+		await expect(cooperationWarning.locator('p')).toHaveText('この寿命減少によって寿命が0になると、現在の一生は終了します。');
+		for (const viewport of [{ width: 390, height: 844 }, { width: 1000, height: 800 }]) {
+			await page.setViewportSize(viewport);
+			await expect(cooperationWarning).toBeVisible();
+			const containedInInitialView = await cooperationWarning.evaluate((warning) => {
+				const body = warning.closest<HTMLElement>('.help-body');
+				if (!body) return false;
+				const warningRect = warning.getBoundingClientRect();
+				const bodyRect = body.getBoundingClientRect();
+				return warningRect.top >= bodyRect.top && warningRect.bottom <= bodyRect.bottom &&
+					warningRect.left >= bodyRect.left && warningRect.right <= bodyRect.right;
+			});
+			expect(containedInInitialView).toBe(true);
+		}
 		await expectPlayerFacingHelpText(dialog);
 		await dialog.getByRole('button', { name: '戻る' }).click();
 		await expect(body).toHaveAttribute('data-help-page', 'events');
