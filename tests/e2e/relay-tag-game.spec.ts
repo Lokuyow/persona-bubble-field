@@ -768,15 +768,19 @@ test('does not replay restored start and transfer cues during initial Realtime b
 });
 
 test('does not replay a restored owner transfer during a Realtime reconnect', async ({ page }) => {
-	const nowMs = Date.now();
+	const setupNowMs = Date.now();
 	const selfSecret = fixtureSecret(39);
 	const hostSecret = fixtureSecret(41);
 	await installTagGameAudioRecorder(page);
-	await preparePlayer(page, selfSecret, nowMs);
+	await preparePlayer(page, selfSecret, setupNowMs);
 	await unlockSoundFromTheUI(page);
 	const selfPubkey = getPublicKey(selfSecret);
 	const hostPubkey = getPublicKey(hostSecret);
-	const startAt = Math.floor(nowMs / 1_000) + 1;
+	// Base the synthetic game on the finished setup clock so worker latency
+	// cannot move browser time backwards while applying the restored history.
+	await pauseAtCurrentBrowserTime(page);
+	const fixtureNowMs = await page.evaluate(() => Date.now());
+	const startAt = Math.ceil(fixtureNowMs / 1_000) + 1;
 	const seed = Array.from({ length: 10_000 }, (_, index) => `tag-audio-reconnect-${index}`).find((candidate) => createTagGameSchedule(candidate)[0].effect === 'benefit')!;
 	const game = createAudioTestGame(selfPubkey, hostPubkey, startAt, seed, 'b');
 	await page.clock.setSystemTime((startAt - 1) * 1_000);
@@ -1543,16 +1547,20 @@ test('keeps join actions primary and equally emphasized when multiple tag-game l
 });
 
 test('organizer accepts a touch with the seed-derived role before the ordinary switch is republished', async ({ page }) => {
-	const nowMs = Date.now();
-	const nowSeconds = Math.floor(nowMs / 1_000);
+	const setupNowMs = Date.now();
 	const hostSecret = fixtureSecret(41);
 	const holderSecret = fixtureSecret(43);
 	const hostPubkey = getPublicKey(hostSecret);
 	const holderPubkey = getPublicKey(holderSecret);
-	await preparePlayer(page, hostSecret, nowMs, 200_000);
+	await preparePlayer(page, hostSecret, setupNowMs, 200_000);
 	await moveRelaySelfTo(page, { x: 7, y: 5 });
 	await openTagGameTerminal(page);
-	const startedAt = Math.floor(await page.evaluate(() => Date.now() / 1_000)) - 11;
+	// Start the synthetic game and activity evidence from one frozen time so
+	// worker latency cannot consume the holder-effect safety window.
+	await pauseAtCurrentBrowserTime(page);
+	const fixtureNowMs = await page.evaluate(() => Date.now());
+	const nowSeconds = Math.floor(fixtureNowMs / 1_000);
+	const startedAt = nowSeconds - 11;
 	const seed = Array.from({ length: 10_000 }, (_, index) => `switch-touch-${index}`).find((candidate) => {
 		const schedule = createTagGameSchedule(candidate);
 		return schedule[0].effect === 'calamity' && schedule[0].durationMs === 10_000 && schedule[1].effect === 'benefit' && schedule[1].durationMs >= 30_000;
@@ -1583,6 +1591,8 @@ test('organizer accepts a touch with the seed-derived role before the ordinary s
 	await expect(holder).toHaveAttribute('data-tag-game-touch-target', 'true');
 	const before = (await relayState(page)).state.published.filter((event) => event.kind === TAG_GAME_KIND).length;
 	await page.keyboard.down('ArrowRight');
+	// Resolve the input controller's 50ms keyboard chord timer while game time stays frozen.
+	await page.clock.runFor(51);
 	const actor = page.locator(`.participant[data-participant-id="${hostPubkey}"]`);
 	await expect(actor).toHaveAttribute('data-tag-game-touch-attempt', /\d+/);
 	await expect.poll(async () => (await relayState(page)).state.published.filter((event) => event.kind === 27070 && parseTagGameActionEvent(event as unknown as NostrEvent, CHANNEL_ID)?.action === 'touch').length).toBeGreaterThan(0);

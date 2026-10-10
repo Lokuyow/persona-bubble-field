@@ -953,11 +953,15 @@ export async function openClockedReadyRelayWorld(page: Page): Promise<Locator> {
 }
 
 export async function pauseAtCurrentBrowserTime(page: Page): Promise<void> {
-	const now = await page.evaluate(() => Date.now());
+	const now = Math.floor(await page.evaluate(() => Date.now()));
 	// Freeze Date while pausing so a running browser clock cannot overtake the target.
 	await page.clock.setFixedTime(now);
 	await page.clock.pauseAt(now);
 	await page.clock.setSystemTime(now);
+	await page.evaluate(() => {
+		const nativeNow = Date.now.bind(Date);
+		Date.now = () => Math.floor(nativeNow());
+	});
 }
 
 export async function startSelectedRun(page: Page): Promise<void> {
@@ -1046,6 +1050,27 @@ export async function openReadyRelayWorld(page: Page, expectedParticipantCount =
 	}).toBe(true);
 	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimaryEvents(): void } }).__relayStartupTest.releasePrimaryEvents());
 	await page.evaluate(() => (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest.releasePrimary());
+	await expect(page.locator('.participant')).toHaveCount(expectedParticipantCount);
+	return editor;
+}
+
+export async function reloadReadyRelayWorld(page: Page, expectedParticipantCount = 2): Promise<Locator> {
+	await page.reload({ waitUntil: 'domcontentloaded' });
+	await expect(page.locator('.action-dock')).toBeVisible();
+	const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
+	await expect(editor).toBeVisible();
+	await expect.poll(async () => {
+		const requests = (await relayState(page)).state.requests;
+		return [42, WORLD_STATE_KIND].every((kind) => requests.some((request) =>
+			AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) &&
+			(request.filter.kinds as number[])[0] === kind
+		));
+	}).toBe(true);
+	await page.evaluate(() => {
+		const relay = (window as typeof window & { __relayStartupTest: { releasePrimaryEvents(): void; releasePrimary(): void } }).__relayStartupTest;
+		relay.releasePrimaryEvents();
+		relay.releasePrimary();
+	});
 	await expect(page.locator('.participant')).toHaveCount(expectedParticipantCount);
 	return editor;
 }
@@ -1441,7 +1466,7 @@ export type AvailableMove = {
 	expected: string;
 };
 
-const RELAY_FIELD = { columns: 16, rows: 8 } as const;
+export const RELAY_FIELD = { columns: 16, rows: 8 } as const;
 
 export function cooperationDefectionInteractionCell(position: GridPosition): GridPosition {
 	const candidates = [{ x: position.x, y: position.y - 1 }, { x: position.x, y: position.y + 1 },
@@ -1570,7 +1595,7 @@ export async function moveRelaySelfTo(page: Page, target: { x: number; y: number
 		const position = await page.locator('.participant[data-self="true"]').getAttribute('data-position');
 		if (position === `${target.x},${target.y}`) return;
 		const move = await chooseMoveToward(page, target);
-		await page.clock.runFor(1_001);
+		await page.clock.fastForward(1_001);
 		await pressRelayKeyboardMovement(page, move);
 	}
 	throw new Error(`Self did not reach ${target.x},${target.y}.`);

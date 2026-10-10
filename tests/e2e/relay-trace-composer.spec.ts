@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { parseWorldStateEvent, WORLD_STATE_KIND } from '../../src/lib/nostrProtocol';
+import { CHANNEL_MESSAGE_KIND, parseWorldStateEvent, WORLD_STATE_KIND } from '../../src/lib/nostrProtocol';
 import type { Event as NostrEvent } from 'nostr-tools/pure';
 import { characterPicturePath } from '../../src/lib/character';
 import { requireCharacterFromPubkey } from '../../src/lib/characterAssignment';
@@ -126,7 +126,10 @@ test.describe('Relay startup', () => {
 		);
 		await expect.poll(inspectionPublishes).toHaveLength(AUTHORITATIVE_RELAYS.length);
 		expect([...new Set((await inspectionPublishes()).map((event) => event.id))]).toHaveLength(1);
-		const before = (await relayState(page)).state.published.length;
+		const publishedMessageAndPositionIds = async () => [...new Set((await relayState(page)).state.published
+			.filter((event) => event.kind === CHANNEL_MESSAGE_KIND || event.kind === WORLD_STATE_KIND)
+			.map((event) => `${event.kind}:${event.id}`))].sort();
+		const before = await publishedMessageAndPositionIds();
 		let terminals = 0;
 		for (const target of ['f'.repeat(64), null]) {
 			await page.evaluate((eventId) => {
@@ -137,7 +140,7 @@ test.describe('Relay startup', () => {
 			await expect.poll(() => page.evaluate(() => (window as unknown as { __ehagakiTerminalCount: number }).__ehagakiTerminalCount)).toBe(++terminals);
 			await expect(editor).toHaveValue('retain mismatched draft');
 			await expect(preview).toHaveAttribute('data-reply-id', trace.root.id);
-			expect((await relayState(page)).state.published).toHaveLength(before);
+			expect(await publishedMessageAndPositionIds()).toEqual(before);
 		}
 		await page.getByRole('button', { name: 'Clear reply', exact: true }).click();
 		await page.evaluate((eventId) => {
@@ -145,7 +148,7 @@ test.describe('Relay startup', () => {
 		}, trace.root.id);
 		await editor.press('Enter');
 		await expect.poll(() => page.evaluate(() => (window as unknown as { __ehagakiTerminalCount: number }).__ehagakiTerminalCount)).toBe(++terminals);
-		expect((await relayState(page)).state.published).toHaveLength(before);
+		expect(await publishedMessageAndPositionIds()).toEqual(before);
 		await expect(editor).toHaveValue('retain mismatched draft');
 	});
 

@@ -131,7 +131,9 @@ test.describe('Relay startup', () => {
 			channel: { channelId: CHANNEL_ID, relayHint: 'wss://nos.lol/' }, position: { x: 11, y: 3 }, slot: 1,
 			createdAt: Math.floor(await page.evaluate(() => Date.now()) / 1000)
 		}), secret);
-		await page.evaluate((event) => (window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event), atTerminal);
+		await page.evaluate((event) => {
+			(window as typeof window & { __relayStartupTest: { injectPosition(event: object): void } }).__relayStartupTest.injectPosition(event);
+		}, atTerminal);
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', '11,3');
 		await page.clock.runFor(1_001);
 		await page.keyboard.press('ArrowRight');
