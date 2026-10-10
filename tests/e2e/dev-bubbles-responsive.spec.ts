@@ -343,37 +343,76 @@ test.describe('DEV World Sandbox', () => {
 		const reply = page.locator('.trace-reply-card').first();
 		const readTraceStyles = () => page.locator('.trace-root-bubble').evaluate((root) => {
 			const style = getComputedStyle(root);
+			const rootCard = root.parentElement;
 			const replyCard = document.querySelector<HTMLElement>('.trace-reply-card');
 			const author = replyCard?.querySelector<HTMLElement>('.trace-reply-author-profile');
 			const avatar = replyCard?.querySelector<HTMLElement>('.trace-reply-author-avatar');
 			const name = replyCard?.querySelector<HTMLElement>('.trace-reply-author-name');
-			if (!replyCard || !author || !avatar || !name) throw new Error('Expected Trace reply presentation.');
+			if (!rootCard || !replyCard || !author || !avatar || !name) throw new Error('Expected Trace root and reply presentation.');
+			const rootCardStyle = getComputedStyle(rootCard);
 			const replyStyle = getComputedStyle(replyCard);
 			return {
-				root: { fontSize: style.fontSize, maxWidth: Number.parseFloat(style.maxWidth.match(/[\d.]+px/)?.[0] ?? 'NaN'), padding: style.padding },
+				root: {
+					fontSize: style.fontSize,
+					maxWidth: Number.parseFloat(rootCardStyle.maxWidth.match(/[\d.]+px/)?.[0] ?? 'NaN'),
+					padding: style.padding,
+					width: root.getBoundingClientRect().width,
+					cardWidth: rootCard.getBoundingClientRect().width
+				},
 				reply: { fontSize: replyStyle.fontSize, maxWidth: Number.parseFloat(replyStyle.maxWidth.match(/[\d.]+px/)?.[0] ?? 'NaN'), minWidth: replyStyle.minWidth },
 				author: { fontSize: getComputedStyle(author).fontSize, avatar: getComputedStyle(avatar).width, nameMaxWidth: getComputedStyle(name).maxWidth }
 			};
 		});
+		const shortTraceText = '大樹の陰';
+		const longTraceText = '大樹の陰でひと休みをしていました。'.repeat(20);
+		await root.locator('.bubble-content').evaluate((content, text) => { content.textContent = text; }, shortTraceText);
+		await expect.poll(() => root.locator('.bubble-content').evaluate((content) => {
+			const range = document.createRange();
+			range.selectNodeContents(content);
+			return range.getClientRects().length;
+		})).toBe(1);
 		expect(await readTraceStyles()).toEqual({
-			root: { fontSize: '13px', maxWidth: 180, padding: '8px 10px' },
+			root: { fontSize: '13px', maxWidth: 180, padding: '8px 10px', width: expect.any(Number), cardWidth: expect.any(Number) },
 			reply: { fontSize: '13px', maxWidth: 180, minWidth: '112px' },
 			author: { fontSize: '10px', avatar: '28px', nameMaxWidth: '48px' }
 		});
+		const mobileRootGeometry = await readTraceStyles();
+		expect(Math.abs(mobileRootGeometry.root.width - mobileRootGeometry.root.cardWidth)).toBeLessThan(0.5);
+		await root.locator('.bubble-content').evaluate((content, text) => { content.textContent = text; }, longTraceText);
+		await expect.poll(() => root.evaluate((element) => element.getBoundingClientRect().width)).toBeLessThanOrEqual(180);
+		await expect.poll(() => root.locator('.bubble-ellipsis').count()).toBe(1);
 		await expect(root).toBeVisible();
 		await expect(reply).toBeVisible();
 
 		await page.setViewportSize({ width: 701, height: 844 });
+		await root.locator('.bubble-content').evaluate((content, text) => { content.textContent = text; }, shortTraceText);
+		await expect.poll(() => root.locator('.bubble-content').evaluate((content) => {
+			const range = document.createRange();
+			range.selectNodeContents(content);
+			return range.getClientRects().length;
+		})).toBe(1);
+		await root.locator('.bubble-content').evaluate((content, text) => { content.textContent = text; }, longTraceText);
+		await expect.poll(() => root.evaluate((element) => element.getBoundingClientRect().width)).toBeLessThanOrEqual(240);
 		await expect.poll(readTraceStyles).toEqual({
-			root: { fontSize: '16px', maxWidth: 240, padding: '12px 15px' },
+			root: { fontSize: '16px', maxWidth: 240, padding: '12px 15px', width: expect.any(Number), cardWidth: expect.any(Number) },
 			reply: { fontSize: '16px', maxWidth: 240, minWidth: '144px' },
 			author: { fontSize: '12px', avatar: '36px', nameMaxWidth: '60px' }
 		});
 		await page.setViewportSize({ width: 700, height: 844 });
+		await expect.poll(() => root.evaluate((element) => element.getBoundingClientRect().width)).toBeLessThanOrEqual(180);
 		await expect.poll(readTraceStyles).toEqual({
-			root: { fontSize: '13px', maxWidth: 180, padding: '8px 10px' },
+			root: { fontSize: '13px', maxWidth: 180, padding: '8px 10px', width: expect.any(Number), cardWidth: expect.any(Number) },
 			reply: { fontSize: '13px', maxWidth: 180, minWidth: '112px' },
 			author: { fontSize: '10px', avatar: '28px', nameMaxWidth: '48px' }
 		});
+		const constrainedViewport = page.locator('.field-viewport');
+		await constrainedViewport.evaluate((viewport) => { viewport.style.width = '200px'; });
+		await expect.poll(() => constrainedViewport.evaluate((viewport) => viewport.getBoundingClientRect().width)).toBeLessThan(212);
+		await expect.poll(() => root.evaluate((element) => {
+			const viewport = document.querySelector<HTMLElement>('.field-viewport')!.getBoundingClientRect();
+			const bubble = element.getBoundingClientRect();
+			return bubble.left >= viewport.left + 16 && bubble.right <= viewport.right - 16;
+		})).toBe(true);
+		await constrainedViewport.evaluate((viewport) => { viewport.style.removeProperty('width'); });
 	});
 });
