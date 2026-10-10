@@ -26,7 +26,7 @@ describe('public lifespan projection', () => {
 			for (let contextCompression = 0; contextCompression <= 3; contextCompression++) {
 				for (let hallucinationResistance = 0; hallucinationResistance <= 3; hallucinationResistance++) {
 					for (let inferenceAcceleration = 0; inferenceAcceleration <= 3; inferenceAcceleration++) {
-						const rootBuild = { inferenceAcceleration, contextCompression, hallucinationResistance };
+						const rootBuild = { inferenceAcceleration, contextCompression, hallucinationResistance, candidateExpansion: 0 };
 						const source = persona(rootBuild, { inferenceEfficiency: 1, contextCapacity: level, hallucinationSuppression: level });
 						const profile = publicState(source);
 						const capacityMs = profile.lifespan.extension!.regularUntilMs - 1_000;
@@ -41,7 +41,7 @@ describe('public lifespan projection', () => {
 	});
 
 	it('keeps rounding anchored to the checkpoint when a snapshot is cut mid-segment', () => {
-		const rootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0 };
+		const rootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0, candidateExpansion: 0 };
 		const source = persona(rootBuild, { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 });
 		const profile = publicState(source);
 		const checkpointPlusOne = projectPublicLifespan(profile, 1_001);
@@ -53,7 +53,7 @@ describe('public lifespan projection', () => {
 	});
 
 	it('keeps a non-mending lifespan fixed as wall time passes', () => {
-		const rootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0 };
+		const rootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0, candidateExpansion: 0 };
 		const source = { ...persona(rootBuild, { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 }),
 			gameState: createInitialPersonaGameState(PUBKEY, 1_000) } as PersonaSnapshot;
 		const projection = publicLifespanProjection(source);
@@ -64,7 +64,7 @@ describe('public lifespan projection', () => {
 	it('keeps public lifespan projection independent of Root inference acceleration', () => {
 		const abilities = { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 };
 		const projections = [0, 1, 2, 3].map((inferenceAcceleration) => publicLifespanProjection(persona(
-			{ inferenceAcceleration, contextCompression: 0, hallucinationResistance: 0 }, abilities
+			{ inferenceAcceleration, contextCompression: 0, hallucinationResistance: 0, candidateExpansion: 0 }, abilities
 		)));
 		expect(projections.every((projection) => projection.extension !== null)).toBe(true);
 		expect(projections.every((projection) => JSON.stringify(projection) === JSON.stringify(projections[0]))).toBe(true);

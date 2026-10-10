@@ -18,6 +18,7 @@ import {
 	applyTagGameCumulative,
 	completeRealtimeEventInstance,
 	clearPersona,
+	confirmRootBuild,
 	confirmWorldPosition,
 	claimManualTraceOutbox,
 	collectMending,
@@ -42,9 +43,10 @@ import {
 	type PendingSelection,
 	type PersonaSnapshot,
 	type PlayerLifecycle,
+	type SelectionCandidate,
 	type SelectIdentityOptions
 } from './rootIdentity';
-import type { RootBuild } from './rootProgression';
+import { rootBuildCost, type RootBuild } from './rootProgression';
 import { buildManualTraceEventTemplate, buildWorldStateEventTemplate } from './nostrProtocol';
 import { projectMending } from './mending';
 
@@ -52,7 +54,7 @@ const TIME = 1_700_000_000_000;
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
 const connections: IDBPDatabase[] = [];
-const ZERO_BUILD: RootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0 };
+const ZERO_BUILD: RootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0, candidateExpansion: 0 };
 type SelectingLifecycle = Readonly<{ kind: 'selecting'; selection: PendingSelection; rootPoints: number }>;
 
 async function records(storeName: string): Promise<Record<string, unknown>> {
@@ -79,9 +81,47 @@ function restored(result: LoadLifecycleResult): PersonaSnapshot {
 async function selected(build: RootBuild = ZERO_BUILD, options: SelectIdentityOptions = {}): Promise<PersonaSnapshot> {
 	const pending = await loadOrCreateLifecycle();
 	if (pending.kind !== 'created' && pending.kind !== 'selecting') throw new Error('Expected a pending selection.');
-	const result = await selectIdentity(pending.selection.generation, pending.selection.candidates[0], build, options);
+	let selection = pending.selection;
+	if (selection.stage === 'candidates' && JSON.stringify(selection.rootBuild) !== JSON.stringify(build)) {
+		const stored = (await records(PLAYER_LIFECYCLE_STORE_NAME))['player-lifecycle'] as PlayerLifecycle;
+		if (stored.identities.length !== 0 || selection.generation !== 1) throw new Error('A test build can only be seeded before the first Identity.');
+		selection = { stage: 'allocating', generation: selection.generation, reusableIdentities: selection.reusableIdentities, previousFinishedRun: selection.previousFinishedRun };
+		await putPlayer({ ...stored, rootPoints: rootBuildCost(build), mode: { kind: 'selecting', pendingSelection: selection } });
+		const reloaded = await loadOrCreateLifecycle();
+		if (reloaded.kind !== 'selecting') throw new Error('Expected an allocation selection.');
+		selection = reloaded.selection;
+	}
+	if (selection.stage === 'allocating') {
+		const confirmed = await confirmRootBuild(selection, build);
+		if (confirmed.kind !== 'confirmed') throw new Error(`Expected confirmed Root build, got ${confirmed.kind}.`);
+		selection = confirmed.selection;
+	}
+	if (selection.stage !== 'candidates') throw new Error('Expected fixed candidates.');
+	const result = await selectIdentity(selection, selection.candidates[0], options);
 	if (result.kind !== 'selected') throw new Error(`Expected selected state, got ${result.kind}.`);
 	return result.persona;
+}
+
+async function selectPending(selection: PendingSelection, candidate: SelectionCandidate, build: RootBuild = ZERO_BUILD, options: SelectIdentityOptions = {}) {
+	const fixed = await confirmPendingSelection(selection, build);
+	return selectIdentity(fixed, candidate, options);
+}
+
+async function confirmPendingSelection(selection: PendingSelection, build: RootBuild): Promise<Extract<PendingSelection, { stage: 'candidates' }>> {
+	if (selection.stage === 'allocating') {
+		const confirmed = await confirmRootBuild(selection, build);
+		if (confirmed.kind !== 'confirmed') throw new Error(`Expected confirmed Root build, got ${confirmed.kind}.`);
+		return confirmed.selection;
+	}
+	if (JSON.stringify(selection.rootBuild) !== JSON.stringify(build)) {
+		throw new Error('The test attempted to change a confirmed Root build.');
+	}
+	return selection;
+}
+
+async function selectFirstPending(selection: PendingSelection, build: RootBuild = ZERO_BUILD, options: SelectIdentityOptions = {}) {
+	const fixed = await confirmPendingSelection(selection, build);
+	return selectIdentity(fixed, fixed.candidates[0], options);
 }
 
 beforeEach(() => {
@@ -280,7 +320,7 @@ describe('Root / Identity / Run lifecycle', () => {
 		expect(current.tagGame?.reservation?.gameId).toBe(nextGameId);
 	});
 
-	it('preserves a valid v7 Root and active Player while adding the write journal', async () => {
+	it('keeps the Root and resets a valid v7 Player at the prototype clean break', async () => {
 		const original = await selected();
 		const root = await records(ROOT_SECRET_STORE_NAME);
 		const player = await records(PLAYER_LIFECYCLE_STORE_NAME);
@@ -293,10 +333,123 @@ describe('Root / Identity / Run lifecycle', () => {
 		for (const [key, value] of Object.entries(root)) await old.put(ROOT_SECRET_STORE_NAME, value, key);
 		for (const [key, value] of Object.entries(player)) await old.put(PLAYER_LIFECYCLE_STORE_NAME, value, key);
 		old.close();
-		const upgraded = restored(await loadOrCreateLifecycle());
-		expect(upgraded.signer.pubkey).toBe(original.signer.pubkey);
-		expect(upgraded.activeRun.runNumber).toBe(original.activeRun.runNumber);
+		const upgraded = await loadOrCreateLifecycle();
+		expect(upgraded.kind).toBe('selecting');
+		if (upgraded.kind !== 'selecting') return;
+		expect(upgraded.rootPoints).toBe(0);
+		expect(upgraded.selection.generation).toBe(1);
+		expect(upgraded.selection.stage).toBe('candidates');
+		if (upgraded.selection.stage !== 'candidates') return;
+		expect(upgraded.selection.candidates[0]?.pubkey).toBe(original.signer.pubkey);
+		expect((await records(PLAYER_LIFECYCLE_STORE_NAME))['player-lifecycle']).toMatchObject({ schemaVersion: 3, rootPoints: 0, identities: [] });
+		expect(await records(ROOT_SECRET_STORE_NAME)).toEqual(root);
 		expect(await records(WORLD_WRITE_JOURNAL_STORE_NAME)).toEqual({});
+	});
+
+	it.each([1, 2] as const)('resets a v9 Run #%i and fences its pending Trace without poisoning the same Root Identity Run #1', async (oldRunNumber) => {
+		let oldPersona = await selected(ZERO_BUILD, { initialPoints: 100_000 });
+		if (oldRunNumber === 2) {
+			expect((await clearPersona(oldPersona)).kind).toBe('cleared');
+			const afterClear = await loadOrCreateLifecycle();
+			if (afterClear.kind !== 'selecting') throw new Error('Expected selection after clear.');
+			const reusable = afterClear.selection.reusableIdentities.find((identity) => identity.pubkey === oldPersona.signer.pubkey);
+			if (!reusable) throw new Error('Expected the cleared Identity to be reusable.');
+			const fresh = await selectPending(afterClear.selection, reusable,
+				{ inferenceAcceleration: 1, contextCompression: 0, hallucinationResistance: 0, candidateExpansion: 0 });
+			if (fresh.kind !== 'selected') throw new Error('Expected old Run #2.');
+			oldPersona = fresh.persona;
+		}
+		expect(oldPersona.activeRun.runNumber).toBe(oldRunNumber);
+		const channelId = 'e'.repeat(64);
+		const oldSecond = TIME / 1_000;
+		const oldPosition = finalizeEvent(buildWorldStateEventTemplate({
+			channel: { channelId, relayHint: 'wss://nos.lol/' }, position: { x: 5, y: 2 }, slot: 1, createdAt: oldSecond
+		}), oldPersona.signer.secretKey);
+		const oldTrace = finalizeEvent(buildManualTraceEventTemplate({
+			channel: { channelId, relayHint: 'wss://nos.lol/' }, content: 'old pending trace', position: { x: 5, y: 2 }, speechType: 'normal', createdAt: oldSecond
+		}), oldPersona.signer.secretKey);
+		const oldDedupeId = 'f'.repeat(64);
+		const journalKey = `${channelId}\u0000${oldPersona.signer.pubkey}`;
+		const legacyJournal = {
+			version: 1, channelId, pubkey: oldPersona.signer.pubkey, runNumber: oldRunNumber,
+			lastReservedSecond: oldSecond, profileLastReservedSecond: oldSecond + 1, consumedSlots: 2 as const,
+			lastPositiveSecond: oldSecond, exitSecond: oldSecond + 2, nextToken: 7, confirmedPosition: oldPosition,
+			messageDedupeIds: [oldDedupeId],
+			pendingManualTrace: { runNumber: oldRunNumber, event: oldTrace,
+				status: oldRunNumber === 1 ? 'unknown' as const : 'dispatching' as const,
+				attemptId: oldRunNumber === 1 ? null : 'old-attempt', leaseUntilMs: oldRunNumber === 1 ? 0 : TIME + 60_000 }
+		};
+		const rootRecords = await records(ROOT_SECRET_STORE_NAME);
+		const activePlayer = (await records(PLAYER_LIFECYCLE_STORE_NAME))['player-lifecycle'] as PlayerLifecycle;
+		if (activePlayer.mode.kind !== 'running') throw new Error('Expected the old Run to be active.');
+		const { candidateExpansion: _candidateExpansion, ...oldRootBuild } = activePlayer.mode.activeRun.rootBuild;
+		void _candidateExpansion;
+		const legacyPlayer = { ...activePlayer, schemaVersion: 2, mode: { ...activePlayer.mode,
+			activeRun: { ...activePlayer.mode.activeRun, rootBuild: oldRootBuild } } };
+		while (connections.length) connections.pop()!.close();
+		await new Promise<void>((resolve, reject) => {
+			const request = (indexedDB as IDBFactory).deleteDatabase(DATABASE_NAME);
+			request.onsuccess = () => resolve();
+			request.onerror = () => reject(request.error);
+			request.onblocked = () => reject(new Error('Unexpected blocked v9 fixture reset.'));
+		});
+		const v9 = await openDB(DATABASE_NAME, 9, { upgrade(db) {
+			db.createObjectStore(ROOT_SECRET_STORE_NAME);
+			db.createObjectStore(PLAYER_LIFECYCLE_STORE_NAME);
+			db.createObjectStore(WORLD_WRITE_JOURNAL_STORE_NAME);
+			db.createObjectStore(INTERACTION_REWARD_STORE_NAME, { keyPath: 'key' });
+		} });
+		for (const [key, value] of Object.entries(rootRecords)) await v9.put(ROOT_SECRET_STORE_NAME, value, key);
+		await v9.put(PLAYER_LIFECYCLE_STORE_NAME, legacyPlayer, 'player-lifecycle');
+		await v9.put(WORLD_WRITE_JOURNAL_STORE_NAME, legacyJournal, journalKey);
+		await v9.put(INTERACTION_REWARD_STORE_NAME, { key: 'old-reward', identity: oldPersona.activeRun.identity, runNumber: oldRunNumber });
+		v9.close();
+
+		const reset = await loadOrCreateLifecycle();
+		expect(reset.kind).toBe('selecting');
+		if (reset.kind !== 'selecting') return;
+		expect(reset.rootPoints).toBe(0);
+		expect(reset.selection.generation).toBe(1);
+		expect(reset.selection.stage).toBe('candidates');
+		if (reset.selection.stage !== 'candidates') return;
+		expect(reset.selection.candidates[0]?.pubkey).toBe(oldPersona.signer.pubkey);
+		expect(await records(ROOT_SECRET_STORE_NAME)).toEqual(rootRecords);
+		expect(await records(INTERACTION_REWARD_STORE_NAME)).toEqual({});
+		expect(await records(PLAYER_LIFECYCLE_STORE_NAME)).toMatchObject({ 'player-lifecycle': { schemaVersion: 3, rootPoints: 0, identities: [] } });
+		expect((await records(WORLD_WRITE_JOURNAL_STORE_NAME))[journalKey]).toEqual({
+			...legacyJournal, runNumber: 1, confirmedPosition: null, messageDedupeIds: [], pendingManualTrace: undefined
+		});
+		const newRun = await selectFirstPending(reset.selection, ZERO_BUILD);
+		if (newRun.kind !== 'selected') throw new Error('Expected the same Root Identity to start Run #1.');
+		const newScope = { identity: newRun.persona.activeRun.identity, runNumber: newRun.persona.activeRun.runNumber, channelId };
+		expect(newScope).toMatchObject({ runNumber: 1, identity: { pubkey: oldPersona.signer.pubkey } });
+		expect((await loadWorldWriteJournal(newScope))?.confirmedPosition).toBeNull();
+		expect(await claimManualTraceOutbox(newScope, 'after-clean-break')).toEqual({ kind: 'empty' });
+
+		const profile = await reservePublicProfilePublication({ scope: newScope, nowSecond: oldSecond + 2 });
+		expect(profile.kind).toBe('reserved');
+		expect((await records(WORLD_WRITE_JOURNAL_STORE_NAME))[journalKey]).toMatchObject({ runNumber: 1, profileLastReservedSecond: oldSecond + 2 });
+		const duplicateIdMessage = await reserveWorldPositive({ scope: newScope, kind: 'message', nowSecond: oldSecond + 3,
+			observedSecond: null, observedConsumedSlots: 0, observedExitSecond: null, messageDedupeId: oldDedupeId });
+		expect(duplicateIdMessage).toEqual({ kind: 'reserved', reservation: { token: 8, createdAt: oldSecond + 3, slot: null } });
+		const firstPosition = await reserveWorldPositive({ scope: newScope, kind: 'position', nowSecond: oldSecond + 3,
+			observedSecond: null, observedConsumedSlots: 0, observedExitSecond: null });
+		const secondPosition = await reserveWorldPositive({ scope: newScope, kind: 'position', nowSecond: oldSecond + 3,
+			observedSecond: null, observedConsumedSlots: 0, observedExitSecond: null });
+		expect(firstPosition).toMatchObject({ kind: 'reserved', reservation: { token: 9, slot: 0 } });
+		expect(secondPosition).toMatchObject({ kind: 'reserved', reservation: { token: 10, slot: 1 } });
+		const concurrent = await Promise.all([0, 1].map(() => reserveWorldPositive({ scope: newScope, kind: 'message', nowSecond: oldSecond + 4,
+			observedSecond: null, observedConsumedSlots: 0, observedExitSecond: null })));
+		expect(concurrent.every((result) => result.kind === 'reserved')).toBe(true);
+		expect(concurrent.map((result) => result.kind === 'reserved' ? result.reservation.token : -1).sort()).toEqual([11, 12]);
+
+		const funding = await applyRealtimeOutcome(newRun.persona, { id: 'new-run-funding', kind: 'points', points: 100, instanceId: 'post-upgrade' });
+		expect(funding.kind).toBe('applied');
+		const funded = restored(await loadOrCreateLifecycle());
+		const newTrace = finalizeEvent(buildManualTraceEventTemplate({
+			channel: { channelId, relayHint: 'wss://nos.lol/' }, content: 'new Run trace', position: { x: 6, y: 2 }, speechType: 'normal', createdAt: oldSecond + 5
+		}), funded.signer.secretKey);
+		expect((await reserveManualTraceOutbox(newScope, () => newTrace, 'new-run-trace', TIME + 5_000)).kind).toBe('reserved');
 	});
 
 	it('fails closed while an old tab blocks the v7 to v8 upgrade', async () => {
@@ -337,7 +490,7 @@ describe('Root / Identity / Run lifecycle', () => {
 		if (selecting.kind !== 'selecting') throw new Error('Expected reusable identity selection.');
 		const reusable = selecting.selection.reusableIdentities.find((identity) => identity.pubkey === first.signer.pubkey);
 		if (!reusable) throw new Error('Expected the same Identity to be reusable.');
-		const next = await selectIdentity(selecting.selection.generation, reusable, { inferenceAcceleration: 1, contextCompression: 0, hallucinationResistance: 0 });
+		const next = await selectPending(selecting.selection, reusable, { inferenceAcceleration: 1, contextCompression: 0, hallucinationResistance: 0, candidateExpansion: 0 });
 		if (next.kind !== 'selected') throw new Error(`Expected new Run, got ${next.kind}.`);
 		const nextScope = { identity: next.persona.signer.identity, runNumber: next.persona.activeRun.runNumber, channelId };
 		expect(nextScope.runNumber).not.toBe(scope.runNumber);
@@ -389,8 +542,8 @@ describe('Root / Identity / Run lifecycle', () => {
 		if (selecting.kind !== 'selecting') throw new Error('Expected selection after clear.');
 		const reusable = selecting.selection.reusableIdentities.find((item) => item.pubkey === first.signer.pubkey);
 		if (!reusable) throw new Error('Expected reusable Identity.');
-		const next = await selectIdentity(selecting.selection.generation, reusable,
-			{ inferenceAcceleration: 1, contextCompression: 0, hallucinationResistance: 0 });
+		const next = await selectPending(selecting.selection, reusable,
+			{ inferenceAcceleration: 1, contextCompression: 0, hallucinationResistance: 0, candidateExpansion: 0 });
 		if (next.kind !== 'selected') throw new Error(`Expected a new Run, got ${next.kind}.`);
 		const nextScope = { identity: next.persona.signer.identity, runNumber: next.persona.activeRun.runNumber, channelId };
 		expect((await loadWorldWriteJournal(nextScope))?.confirmedPosition).toBeNull();
@@ -410,7 +563,7 @@ describe('Root / Identity / Run lifecycle', () => {
 		if (pending.kind !== 'selecting') throw new Error('Expected post-death selection.');
 
 		vi.mocked(Date.now).mockReturnValue(TIME + 4_000);
-		const second = await selectIdentity(pending.selection.generation, pending.selection.candidates[0], ZERO_BUILD, { initialLifespanMs: 3_000 });
+		const second = await selectFirstPending(pending.selection, ZERO_BUILD, { initialLifespanMs: 3_000 });
 		if (second.kind !== 'selected') throw new Error(`Expected selected state, got ${second.kind}.`);
 		expect(second.persona.gameState.lifespanExpiresAtMs).toBe(TIME + 7_000);
 	});
@@ -420,9 +573,59 @@ describe('Root / Identity / Run lifecycle', () => {
 		expect(result.kind).toBe('created');
 		if (result.kind !== 'created') return;
 		expect(result.rootPoints).toBe(0);
+		expect(result.selection.stage).toBe('candidates');
+		if (result.selection.stage !== 'candidates') return;
 		expect(result.selection.candidates).toHaveLength(3);
 		expect(result.selection.reusableIdentities).toEqual([]);
 		expect(Object.keys(await records(ROOT_SECRET_STORE_NAME)).sort()).toEqual(['encrypted-root-entropy', 'root-wrapping-key']);
+	});
+
+	it('requires the confirmed full allocation before selection and restores twelve fixed candidates without reallocation', async () => {
+		const initial = await loadOrCreateLifecycle();
+		if (initial.kind !== 'created' || initial.selection.stage !== 'candidates') throw new Error('Expected first Root candidates.');
+		const player = (await records(PLAYER_LIFECYCLE_STORE_NAME))['player-lifecycle'] as PlayerLifecycle;
+		const allocating: PendingSelection = { stage: 'allocating', generation: 1, reusableIdentities: [], previousFinishedRun: null };
+		await putPlayer({ ...player, rootPoints: 12, mode: { kind: 'selecting', pendingSelection: allocating } });
+		const pending = await loadOrCreateLifecycle();
+		if (pending.kind !== 'selecting' || pending.selection.stage !== 'allocating') throw new Error('Expected allocation before candidates.');
+		expect(pending.selection).toEqual(allocating);
+		expect(await selectIdentity(allocating, initial.selection.candidates[0])).toMatchObject({ kind: 'blocked', reason: 'build-not-confirmed' });
+
+		const fullBuild: RootBuild = { inferenceAcceleration: 3, contextCompression: 3, hallucinationResistance: 3, candidateExpansion: 3 };
+		const confirmation = await confirmRootBuild(pending.selection, fullBuild);
+		expect(confirmation.kind).toBe('confirmed');
+		if (confirmation.kind !== 'confirmed') return;
+		expect(confirmation.selection.candidates).toHaveLength(12);
+		expect(await confirmRootBuild(pending.selection, { ...fullBuild, candidateExpansion: 2 })).toMatchObject({ kind: 'superseded' });
+		expect(await selectIdentity(pending.selection, confirmation.selection.candidates[0])).toMatchObject({ kind: 'blocked', reason: 'build-not-confirmed' });
+
+		const reloaded = await loadOrCreateLifecycle();
+		if (reloaded.kind !== 'selecting' || reloaded.selection.stage !== 'candidates') throw new Error('Expected persisted candidates after reload.');
+		expect(reloaded.selection.rootBuild).toEqual(fullBuild);
+		expect(reloaded.selection.candidates).toEqual(confirmation.selection.candidates);
+		const chosen = await selectIdentity(reloaded.selection, reloaded.selection.candidates[0]);
+		expect(chosen.kind).toBe('selected');
+		if (chosen.kind !== 'selected') return;
+		expect(chosen.persona.activeRun.rootBuild).toEqual(fullBuild);
+	});
+
+	it('allows only one competing Root build confirmation for a selection context', async () => {
+		const initial = await loadOrCreateLifecycle();
+		if (initial.kind !== 'created') throw new Error('Expected first Root selection.');
+		const player = (await records(PLAYER_LIFECYCLE_STORE_NAME))['player-lifecycle'] as PlayerLifecycle;
+		const allocating: PendingSelection = { stage: 'allocating', generation: 1, reusableIdentities: [], previousFinishedRun: null };
+		await putPlayer({ ...player, rootPoints: 11, mode: { kind: 'selecting', pendingSelection: allocating } });
+		const pending = await loadOrCreateLifecycle();
+		if (pending.kind !== 'selecting' || pending.selection.stage !== 'allocating') throw new Error('Expected allocation stage.');
+		const [first, second] = await Promise.all([
+			confirmRootBuild(pending.selection, { inferenceAcceleration: 3, contextCompression: 3, hallucinationResistance: 3, candidateExpansion: 2 }),
+			confirmRootBuild(pending.selection, { inferenceAcceleration: 3, contextCompression: 3, hallucinationResistance: 2, candidateExpansion: 3 })
+		]);
+		expect([first.kind, second.kind].filter((kind) => kind === 'confirmed')).toHaveLength(1);
+		expect([first.kind, second.kind].filter((kind) => kind === 'superseded')).toHaveLength(1);
+		const current = await loadOrCreateLifecycle();
+		expect(current.kind).toBe('selecting');
+		if (current.kind === 'selecting') expect(current.selection.stage).toBe('candidates');
 	});
 
 	it('keeps Root secret while resetting a v6 Player state automatically', async () => {
@@ -438,7 +641,7 @@ describe('Root / Identity / Run lifecycle', () => {
 		const result = await loadOrCreateLifecycle();
 		expect(result.kind).toBe('selecting');
 		const player = (await records(PLAYER_LIFECYCLE_STORE_NAME))['player-lifecycle'] as { schemaVersion: number; rootPoints: number };
-		expect(player).toMatchObject({ schemaVersion: 2, rootPoints: 0 });
+		expect(player).toMatchObject({ schemaVersion: 3, rootPoints: 0 });
 		const root = (await records(ROOT_SECRET_STORE_NAME))['encrypted-root-entropy'] as { ciphertext: Uint8Array };
 		expect([...root.ciphertext]).toEqual([...ciphertext]);
 	});
@@ -501,17 +704,16 @@ describe('Root / Identity / Run lifecycle', () => {
 
 	it('fails closed for malformed current-schema Player state', async () => {
 		await loadOrCreateLifecycle();
-		await putPlayer({ schemaVersion: 2, rootPoints: -1, identities: [], mode: { kind: 'broken' } });
+		await putPlayer({ schemaVersion: 3, rootPoints: -1, identities: [], mode: { kind: 'broken' } });
 		expect(await loadOrCreateLifecycle()).toEqual({ kind: 'corrupt', reason: 'player-state' });
 	});
 
 	it('freezes Root build and restores it unchanged', async () => {
-		const pending = await loadOrCreateLifecycle();
-		if (pending.kind !== 'created') throw new Error('Expected the initial selection.');
-		await putPlayer({ ...(await records(PLAYER_LIFECYCLE_STORE_NAME))['player-lifecycle'] as object, rootPoints: 3 });
-		const persona = await selected({ inferenceAcceleration: 1, contextCompression: 1, hallucinationResistance: 1 });
+		const initial = await loadOrCreateLifecycle();
+		if (initial.kind !== 'created') throw new Error('Expected the initial selection.');
+		const persona = await selected({ inferenceAcceleration: 1, contextCompression: 1, hallucinationResistance: 1, candidateExpansion: 0 });
 		expect(restored(await loadOrCreateLifecycle()).activeRun.rootBuild).toEqual(persona.activeRun.rootBuild);
-		const invalid = await selectIdentity(1, { accountIndex: 1, pubkey: 'f'.repeat(64), characterId: persona.identity.characterId }, { inferenceAcceleration: 1, contextCompression: 0, hallucinationResistance: 0 });
+		const invalid = await selectIdentity(initial.selection, { accountIndex: 1, pubkey: 'f'.repeat(64), characterId: persona.identity.characterId });
 		expect(invalid.kind).not.toBe('selected');
 	});
 
@@ -644,7 +846,7 @@ describe('Root / Identity / Run lifecycle', () => {
 		expect((await transitionRealtimeDeath(current, { id: 'close-before-new-run', kind: 'death', instanceId: 'new-run' })).kind).toBe('transitioned');
 		const selection = await loadOrCreateLifecycle();
 		if (selection.kind !== 'selecting') throw new Error('Expected identity selection after Run death.');
-		const next = await selectIdentity(selection.selection.generation, selection.selection.candidates[0], ZERO_BUILD);
+		const next = await selectFirstPending(selection.selection, ZERO_BUILD);
 		if (next.kind !== 'selected') throw new Error('Expected a new active Run.');
 		continueDuplicate();
 		const result = await duplicatePromise;
@@ -654,11 +856,7 @@ describe('Root / Identity / Run lifecycle', () => {
 	});
 
 	it('checkpoints active Mending before subtracting lifespan without collecting points or losing carry', async () => {
-		const pending = await loadOrCreateLifecycle();
-		if (pending.kind !== 'created' && pending.kind !== 'selecting') throw new Error('Expected a pending selection.');
-		const player = (await records(PLAYER_LIFECYCLE_STORE_NAME))['player-lifecycle'] as object;
-		await putPlayer({ ...player, rootPoints: 1 });
-		const persona = await selected({ inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 1 });
+		const persona = await selected({ inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 1, candidateExpansion: 0 });
 		const started = await startMending(persona);
 		if (started.kind !== 'started') throw new Error('Expected started work.');
 		const nowMs = TIME + 90 * 60 * 1000;
@@ -793,7 +991,7 @@ describe('Root / Identity / Run lifecycle', () => {
 		}), persona.signer.secretKey);
 		const reserved = await reserveManualTraceOutbox(scope, () => event, 'first-attempt');
 		expect(reserved).toMatchObject({ kind: 'reserved', outbox: { event: { id: event.id }, status: 'dispatching' }, points: 100_900 });
-		expect(DATABASE_VERSION).toBe(9);
+		expect(DATABASE_VERSION).toBe(10);
 		expect(await records(ROOT_SECRET_STORE_NAME)).toEqual(storedRootBefore);
 		if (storedPlayerBefore.mode.kind !== 'running') throw new Error('Expected a running lifecycle before reservation.');
 		const storedPlayerAfter = (await records(PLAYER_LIFECYCLE_STORE_NAME))['player-lifecycle'] as PlayerLifecycle;
@@ -852,7 +1050,7 @@ describe('Root / Identity / Run lifecycle', () => {
 		expect(oldJournal.pendingManualTrace).toMatchObject({ event: { id: event.id }, status: 'terminal' });
 		const nextSelection = await loadOrCreateLifecycle();
 		if (nextSelection.kind !== 'selecting') throw new Error('Expected selection after death.');
-		const next = await selectIdentity(nextSelection.selection.generation, nextSelection.selection.candidates[0], ZERO_BUILD);
+		const next = await selectFirstPending(nextSelection.selection, ZERO_BUILD);
 		if (next.kind !== 'selected') throw new Error('Expected a new Run.');
 		expect(next.persona.gameState.points).toBe(0);
 		const nextScope = { identity: next.persona.activeRun.identity, runNumber: next.persona.activeRun.runNumber, channelId };
@@ -871,7 +1069,7 @@ describe('Root / Identity / Run lifecycle', () => {
 		expect(cleared.pubkey).toBe(persona.signer.pubkey);
 		const nsec = await exportClearedIdentityNsec({ generation: cleared.generation, accountIndex: cleared.accountIndex, pubkey: cleared.pubkey });
 		expect(nsec).toMatch(/^nsec1/);
-		const fresh = await selectIdentity(pending.selection.generation, cleared, { inferenceAcceleration: 1, contextCompression: 0, hallucinationResistance: 0 });
+		const fresh = await selectPending(pending.selection, cleared, { inferenceAcceleration: 1, contextCompression: 0, hallucinationResistance: 0, candidateExpansion: 0 });
 		expect(fresh.kind).toBe('selected');
 		if (fresh.kind !== 'selected') return;
 		expect(fresh.persona.signer.pubkey).toBe(persona.signer.pubkey);
@@ -892,14 +1090,14 @@ describe('Root / Identity / Run lifecycle', () => {
 
 		const first = await selected();
 		const afterFirstClear = await fundAndClear(first);
-		const second = await selectIdentity(afterFirstClear.selection.generation, afterFirstClear.selection.candidates[0], { inferenceAcceleration: 1, contextCompression: 0, hallucinationResistance: 0 });
+		const second = await selectFirstPending(afterFirstClear.selection, { inferenceAcceleration: 1, contextCompression: 0, hallucinationResistance: 0, candidateExpansion: 0 });
 		if (second.kind !== 'selected') throw new Error('Expected the second Run.');
 		const afterSecondClear = await fundAndClear(second.persona);
 		expect(afterSecondClear.selection.reusableIdentities.map((identity) => identity.pubkey)).toEqual(expect.arrayContaining([first.identity.pubkey, second.persona.identity.pubkey]));
 
 		const firstCandidate = afterSecondClear.selection.reusableIdentities.find((identity) => identity.pubkey === first.identity.pubkey);
 		if (!firstCandidate) throw new Error('Expected the first cleared Identity to remain reusable.');
-		const reusedFirst = await selectIdentity(afterSecondClear.selection.generation, firstCandidate, { inferenceAcceleration: 2, contextCompression: 0, hallucinationResistance: 0 });
+		const reusedFirst = await selectPending(afterSecondClear.selection, firstCandidate, { inferenceAcceleration: 2, contextCompression: 0, hallucinationResistance: 0, candidateExpansion: 0 });
 		if (reusedFirst.kind !== 'selected') throw new Error('Expected the cleared Identity to start again.');
 		expect(reusedFirst.persona.signer.pubkey).toBe(first.signer.pubkey);
 		expect(reusedFirst.persona.activeRun.runNumber).toBe(2);
@@ -919,13 +1117,13 @@ describe('Root / Identity / Run lifecycle', () => {
 
 		const first = await selected();
 		const afterFirstClear = await fundAndClear(first);
-		const second = await selectIdentity(afterFirstClear.selection.generation, afterFirstClear.selection.candidates[0], { inferenceAcceleration: 1, contextCompression: 0, hallucinationResistance: 0 });
+		const second = await selectFirstPending(afterFirstClear.selection, { inferenceAcceleration: 1, contextCompression: 0, hallucinationResistance: 0, candidateExpansion: 0 });
 		if (second.kind !== 'selected') throw new Error('Expected the second Run.');
 		vi.mocked(Date.now).mockReturnValue(TIME + DAY * 7);
 		expect((await transitionExpiredPersona(second.persona)).kind).toBe('transitioned');
 		const afterDeath = await loadOrCreateLifecycle();
 		if (afterDeath.kind !== 'selecting') throw new Error('Expected post-death selection.');
-		const third = await selectIdentity(afterDeath.selection.generation, afterDeath.selection.candidates[0], { inferenceAcceleration: 1, contextCompression: 0, hallucinationResistance: 0 });
+		const third = await selectFirstPending(afterDeath.selection, { inferenceAcceleration: 1, contextCompression: 0, hallucinationResistance: 0, candidateExpansion: 0 });
 		if (third.kind !== 'selected') throw new Error('Expected the third Run.');
 		const afterThirdClear = await fundAndClear(third.persona);
 		const reusableAfterThird = afterThirdClear.selection.reusableIdentities.map((identity) => identity.pubkey);
@@ -934,7 +1132,7 @@ describe('Root / Identity / Run lifecycle', () => {
 
 		const firstCandidate = afterThirdClear.selection.reusableIdentities.find((identity) => identity.pubkey === first.identity.pubkey);
 		if (!firstCandidate) throw new Error('Expected the first cleared Identity to remain reusable.');
-		const reusedFirst = await selectIdentity(afterThirdClear.selection.generation, firstCandidate, { inferenceAcceleration: 2, contextCompression: 0, hallucinationResistance: 0 });
+		const reusedFirst = await selectPending(afterThirdClear.selection, firstCandidate, { inferenceAcceleration: 2, contextCompression: 0, hallucinationResistance: 0, candidateExpansion: 0 });
 		if (reusedFirst.kind !== 'selected') throw new Error('Expected the cleared Identity to start again.');
 		expect(reusedFirst.persona.signer.pubkey).toBe(first.signer.pubkey);
 		expect(reusedFirst.persona.activeRun.runNumber).toBe(2);
@@ -949,15 +1147,17 @@ describe('Root / Identity / Run lifecycle', () => {
 		expect((await clearPersona(funded)).kind).toBe('cleared');
 		const afterClear = await loadOrCreateLifecycle();
 		if (afterClear.kind !== 'selecting') throw new Error('Expected post-clear selection.');
-		const next = await selectIdentity(afterClear.selection.generation, afterClear.selection.candidates[0], { inferenceAcceleration: 1, contextCompression: 0, hallucinationResistance: 0 });
+		const next = await selectFirstPending(afterClear.selection, { inferenceAcceleration: 1, contextCompression: 0, hallucinationResistance: 0, candidateExpansion: 0 });
 		if (next.kind !== 'selected') throw new Error('Expected the next Run.');
 		vi.mocked(Date.now).mockReturnValue(TIME + DAY * 7);
 		expect((await transitionExpiredPersona(next.persona)).kind).toBe('transitioned');
 		const afterDeath = await loadOrCreateLifecycle();
 		if (afterDeath.kind !== 'selecting') throw new Error('Expected post-death selection.');
 		expect(afterDeath.selection.reusableIdentities).toEqual([]);
-		expect(afterDeath.selection.candidates).toHaveLength(3);
-		expect(afterDeath.selection.candidates.some((candidate) => candidate.pubkey === first.identity.pubkey)).toBe(false);
+		expect(afterDeath.selection.stage).toBe('allocating');
+		const fixed = await confirmPendingSelection(afterDeath.selection, { inferenceAcceleration: 1, contextCompression: 0, hallucinationResistance: 0, candidateExpansion: 0 });
+		expect(fixed.candidates).toHaveLength(3);
+		expect(fixed.candidates.some((candidate) => candidate.pubkey === first.identity.pubkey)).toBe(false);
 	});
 
 	it('uses the same fixed-three-only selection after realtime death', async () => {
@@ -967,13 +1167,15 @@ describe('Root / Identity / Run lifecycle', () => {
 		expect((await clearPersona(funded)).kind).toBe('cleared');
 		const afterClear = await loadOrCreateLifecycle();
 		if (afterClear.kind !== 'selecting') throw new Error('Expected post-clear selection.');
-		const next = await selectIdentity(afterClear.selection.generation, afterClear.selection.candidates[0], { inferenceAcceleration: 1, contextCompression: 0, hallucinationResistance: 0 });
+		const next = await selectFirstPending(afterClear.selection, { inferenceAcceleration: 1, contextCompression: 0, hallucinationResistance: 0, candidateExpansion: 0 });
 		if (next.kind !== 'selected') throw new Error('Expected the next Run.');
 		expect((await transitionRealtimeDeath(next.persona, { id: 'realtime-death', kind: 'death', instanceId: 'realtime-death' })).kind).toBe('transitioned');
 		const afterDeath = await loadOrCreateLifecycle();
 		if (afterDeath.kind !== 'selecting') throw new Error('Expected post-realtime-death selection.');
 		expect(afterDeath.selection.reusableIdentities).toEqual([]);
-		expect(afterDeath.selection.candidates).toHaveLength(3);
+		expect(afterDeath.selection.stage).toBe('allocating');
+		const fixed = await confirmPendingSelection(afterDeath.selection, { inferenceAcceleration: 1, contextCompression: 0, hallucinationResistance: 0, candidateExpansion: 0 });
+		expect(fixed.candidates).toHaveLength(3);
 	});
 
 	it('applies initial points only when creating a fresh Run', async () => {
@@ -991,7 +1193,7 @@ describe('Root / Identity / Run lifecycle', () => {
 		if (pending.kind !== 'selecting') throw new Error('Expected post-clear selection.');
 		const reusable = pending.selection.reusableIdentities[0];
 		if (!reusable) throw new Error(`Expected reusable Identity: ${JSON.stringify(pending.selection)}`);
-		const reused = await selectIdentity(pending.selection.generation, reusable, { inferenceAcceleration: 1, contextCompression: 0, hallucinationResistance: 0 }, { initialPoints: 100_000 });
+		const reused = await selectPending(pending.selection, reusable, { inferenceAcceleration: 1, contextCompression: 0, hallucinationResistance: 0, candidateExpansion: 0 }, { initialPoints: 100_000 });
 		if (reused.kind !== 'selected') throw new Error(`Expected reused Run, got ${reused.kind}.`);
 		expect(reused.persona.activeRun.runNumber).toBe(2);
 		expect(reused.persona.signer.pubkey).toBe(first.signer.pubkey);

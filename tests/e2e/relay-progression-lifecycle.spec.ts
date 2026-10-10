@@ -21,7 +21,7 @@ import { deriveBip85NostrEntropy } from '../../src/lib/bip85';
 import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL } from '../../src/lib/fieldFacilities';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { installFieldFrameSampling, readFieldFrames, sampleRenderedField } from './helpers/fieldFrames';
-import { CHANNEL_ID, AUTHORITATIVE_RELAYS, fixtureSecret, testEvents, isDeathTraceEvent, installDelayedRelay, relayState, dragRelayJoystick, publishedMessages, waitForPublishedMessageCount, pauseAtCurrentBrowserTime, startSelectedRun, openReadyRelayWorld, openClearReadyWorld, installPromptApiStub, seedRelayAccount, readRelayGameState, overwriteRelayGameState, overwriteRelayMendingBuild, seedUnavailablePersona, installDeathTransitionFailure, armDeathTransitionFailure, moveRelaySelfTo } from './helpers/relayHarness';
+import { CHANNEL_ID, AUTHORITATIVE_RELAYS, fixtureSecret, testEvents, isDeathTraceEvent, installDelayedRelay, relayState, dragRelayJoystick, publishedMessages, waitForPublishedMessageCount, pauseAtCurrentBrowserTime, startSelectedRun, openReadyRelayWorld, openClearReadyWorld, installPromptApiStub, seedRelayAccount, readRelayGameState, overwriteRelayGameState, overwriteRelayMendingBuild, seedUnavailablePersona, installDeathTransitionFailure, armDeathTransitionFailure, moveRelaySelfTo, confirmPendingRootBuild } from './helpers/relayHarness';
 
 async function waitForDeathLastWords(page: Page, canonicalPosition?: string | null): Promise<void> {
 	const presentation = page.locator('[data-death-presentation]');
@@ -64,6 +64,7 @@ test.describe('Relay startup', () => {
 		await expect(profile.getByRole('button', { name: '脱出', exact: true })).toBeEnabled();
 		await profile.getByRole('button', { name: '脱出', exact: true }).click();
 		await expect(page.getByRole('dialog')).toBeVisible();
+		await confirmPendingRootBuild(page);
 		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
 		await expect(page.getByText('脱出しました', { exact: true })).toBeVisible();
 		await expect(page.getByText('一生を終え、Root Pointを1獲得しました。', { exact: true })).toBeVisible();
@@ -106,6 +107,7 @@ test.describe('Relay startup', () => {
 		await page.getByRole('button', { name: '自分のプロフィールを開く' }).click();
 		await page.getByRole('dialog').getByRole('button', { name: '脱出', exact: true }).click();
 		await expect(page.getByRole('dialog')).toBeVisible();
+		await confirmPendingRootBuild(page);
 		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
 		const lifecycle = await page.evaluate(async () => {
 			const database = await new Promise<IDBDatabase>((resolve, reject) => {

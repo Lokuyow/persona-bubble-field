@@ -1,17 +1,19 @@
 export const BASE_INITIAL_LIFESPAN_MS = 7 * 24 * 60 * 60 * 1000;
 const ROOT_ABILITY_RANK_LIMIT = 3;
-const ROOT_POINT_USABLE_CAP = 9;
+const ROOT_POINT_USABLE_CAP = 12;
 
 export type RootBuild = Readonly<{
 	inferenceAcceleration: number;
 	contextCompression: number;
 	hallucinationResistance: number;
+	candidateExpansion: number;
 }>;
 
 export const ZERO_ROOT_BUILD: RootBuild = {
 	inferenceAcceleration: 0,
 	contextCompression: 0,
-	hallucinationResistance: 0
+	hallucinationResistance: 0,
+	candidateExpansion: 0
 };
 
 const INFERENCE_ACCELERATION_MULTIPLIERS_TENTHS = [10, 20, 30, 40] as const;
@@ -26,13 +28,13 @@ function isRank(value: unknown): value is number {
 export function isValidRootBuild(value: unknown): value is RootBuild {
 	if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
 	const candidate = value as Record<string, unknown>;
-	return isRank(candidate.inferenceAcceleration) && isRank(candidate.contextCompression) && isRank(candidate.hallucinationResistance) &&
-		(candidate.inferenceAcceleration as number) + (candidate.contextCompression as number) + (candidate.hallucinationResistance as number) <= ROOT_POINT_USABLE_CAP;
+	return isRank(candidate.inferenceAcceleration) && isRank(candidate.contextCompression) && isRank(candidate.hallucinationResistance) && isRank(candidate.candidateExpansion) &&
+		(candidate.inferenceAcceleration as number) + (candidate.contextCompression as number) + (candidate.hallucinationResistance as number) + (candidate.candidateExpansion as number) <= ROOT_POINT_USABLE_CAP;
 }
 
 export function rootBuildCost(build: RootBuild): number {
 	if (!isValidRootBuild(build)) throw new TypeError('Invalid Root build.');
-	return build.inferenceAcceleration + build.contextCompression + build.hallucinationResistance;
+	return build.inferenceAcceleration + build.contextCompression + build.hallucinationResistance + build.candidateExpansion;
 }
 
 export function usableRootPoints(rootPoints: number): number {
@@ -42,6 +44,11 @@ export function usableRootPoints(rootPoints: number): number {
 
 export function isRootBuildAllocatable(build: RootBuild, rootPoints: number): boolean {
 	return isValidRootBuild(build) && rootBuildCost(build) === usableRootPoints(rootPoints);
+}
+
+export function rootCandidateCount(rank: number): number {
+	if (!isRank(rank)) throw new TypeError('Invalid Root rank.');
+	return (rank + 1) * 3;
 }
 
 export function rootInferenceAccelerationMultiplierTenths(rank: number): number {

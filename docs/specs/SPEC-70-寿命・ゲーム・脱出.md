@@ -21,7 +21,7 @@
 - 能力強化状態
 - その他、その人格固有の継続状態
 
-通常死亡後は、current Runを閉じ、current Identityを `dead` として履歴へ残す。その後、Rootから次generationの未選択candidateを3つ準備し、blockingな選択画面へ戻る。候補を1つ選択すると、そのIdentityにRun #1を作成する。
+通常死亡後は、current Runを閉じ、current Identityを `dead` として履歴へ残し、blockingなRoot build配分段階へ戻る。usable RPを全て配分・確定した後に、その候補拡張Rankに応じた3/6/9/12人の未選択candidateを次generation用に一度だけ生成・保存して公開する。候補を1つ選択すると、確定済みRoot buildでそのIdentityのRun #1を作成する。usable RPが0ならRank 0を自動確定する。
 
 normal deathおよびrealtime deathは、まずbrowser-local lifecycleへdurably commit
 する。live World sessionが利用できる場合は、そのcommit成功後にPublic World State
@@ -81,7 +81,7 @@ rollbackせず、wire formatとposition条件はSPEC-30を参照する。
 
 ## 3. 100,000pt到達とnormal clear
 
-normal clear working thresholdは現在所持ポイント100,000ptとする。100,000pt以上である間だけclear選択を利用でき、過去の到達だけで永久unlock flagにはしない。100,000ptを所持しているだけで自動clearにはしない。未回収作業pointsはthresholdへ含めない。effective lifespanが尽きている場合、またはcurrent Runに未解決のrealtime settlementがある場合もclearできない。clearはactive Runを`cleared`として閉じ、Root Pointを1つ加算し、blockingなRun選択状態へ移行する。clear後はcurrent Identityのnsec取得と同じIdentityのfresh Runを可能にする。
+normal clear working thresholdは現在所持ポイント100,000ptとする。100,000pt以上である間だけclear選択を利用でき、過去の到達だけで永久unlock flagにはしない。100,000ptを所持しているだけで自動clearにはしない。未回収作業pointsはthresholdへ含めない。effective lifespanが尽きている場合、またはcurrent Runに未解決のrealtime settlementがある場合もclearできない。clearはactive Runを`cleared`として閉じ、Root Pointを1つ加算し、blockingなRoot build配分段階へ移行する。clear後はcurrent Identityのnsec取得と同じIdentityのfresh Runまたは別Identityの選択を可能にする。reusable Identityは新規候補とは別枠で示し、新規candidate数には加えない。
 
 clearはbrowser-local lifecycleへdurably commitして成立し、commit成功後にlive World sessionがあれば旧RunのPublic World State terminal `exit`をbest-effortで通知する。短時間の投稿送信中だけ同じRunのclearを待たせる。結果不明のoutboxはpoint予約を利用可能所持pointから差し引いたまま保持するが、clearを無期限に禁止しない。送信前にdurableなoutboxと予約が成立していないeventはRelayへ送らない。Runを閉じるtransactionはterminal exitを準備できない場合も旧Runの未確定outboxをterminal化する。終了後は旧Runから再送を開始せず、予約の新Runへの移転・返金もしない。clear成立前に送信開始したNostr eventは取り消せない。Relay failureやexit publication failureはclearをrollbackしない。同じcleared Identityをfresh Runで再利用する場合は、新しいworld entryとして再参加し、exitより新しいpositive activityでpresenceへ戻る。wire上のexitとpresence timestampの詳細は [`SPEC-30-フィールド・position・presence.md`](./SPEC-30-フィールド・position・presence.md) を正とする。
 
@@ -274,13 +274,21 @@ channel creator authorityが署名したkind 7070のversioned controlで、任�
 
 ## 7. IdentityとRunのライフサイクル
 
-Player lifecycleはRoot secret storeと分離したbrowser-local aggregateとして管理する。aggregateはschema version、Root Point、selected Identity history、current modeを持ち、modeは `selecting(pendingSelection)` または `running(activeRun)` のどちらかである。Rootだけ、またはPlayer stateだけのpartial stateは修復せずread-only fail-closeする。
+Player lifecycleはRoot secret storeと分離したbrowser-local aggregateとして管理する。aggregateはschema version、Root Point、selected Identity history、current modeを持ち、modeは `selecting(pendingSelection)` または `running(activeRun)` のどちらかである。pending selectionはallocation待ち、または確定済みRoot buildと固定candidate配列を持つ候補選択段階とする。Rootだけ、またはPlayer stateだけのpartial stateは修復せずread-only fail-closeする。
 
 Identityにはgeneration、account index、pubkey、characterId、`identityCreatedAtMs`、status、character profile revision、Run history summaryを持たせる。未選択candidateやskip candidateはIdentity historyへ保存せず、候補のprofile publicationも行わない。
 
 Runにはrun number、monotonic revision、started timestamp、Identity reference、Run-local game state、開始時にfreezeしたRoot buildを持たせる。寿命、points、abilities、`mendingJob`はRun-localであり、mending start/collection、能力強化、normal clear、寿命死亡transitionはactive Runのrevisionを再確認するCASとして扱う。profile publication markerの更新はRun revisionを進めない。
 
-正常なclear 1回につきRoot Pointを1つ加算する。Root PointはIdentity変更、fresh Run、死亡でも失わず、死亡やrealtime eventでは増えない。Root PointはRoot buildへ配分し、usable RPは`min(総RP, 9)`、各能力Rankは0〜3、Run開始時はusable RPを全て配分する。推論加速Rank 0/1/2/3はactive Run中の有効通常作業におけるpoint生成へ×1.00/2.00/3.00/4.00を常時適用し、overflowでは適用しない。コンテキスト圧縮Rank 0/1/2/3は通常容量へ×1.00/2.00/3.00/4.00を適用し、overflowのpoint生成速度と寿命延長率は0/20/35/50%とする。ハルシネーション耐性Rank 0/1/2/3は最大寿命を7/14/21/30日にする。出生時は常に7日である。Root buildはRun開始前にのみ配分・再配分でき、active Run中はfreezeする。RP9を超える余剰用途、高周回point sink、True End triggerは未決定とする。
+正常なclear 1回につきRoot Pointを1つ加算する。Root PointはIdentity変更、fresh Run、死亡でも失わず、死亡やrealtime eventでは増えない。Root buildは推論加速、コンテキスト圧縮、ハルシネーション耐性、候補拡張の4能力で、各Rankは0〜3。usable RPは`min(総RP, 12)`とし、Run開始前に全usable RPを配分・確定する。候補を公開した後は、そのRun用buildを変更できない。候補拡張Rank 0/1/2/3は新しいIdentity candidateを3/6/9/12人生成する。clear済みIdentity再利用候補は別枠で、候補拡張の件数に含めない。推論加速Rank 0/1/2/3はactive Run中の有効通常作業におけるpoint生成へ×1.00/2.00/3.00/4.00を常時適用し、overflowでは適用しない。コンテキスト圧縮Rank 0/1/2/3は通常容量へ×1.00/2.00/3.00/4.00を適用し、overflowのpoint生成速度と寿命延長率は0/20/35/50%とする。ハルシネーション耐性Rank 0/1/2/3は最大寿命を7/14/21/30日にする。出生時は常に7日である。12RPを超える余剰用途、高周回point sink、True End triggerは未決定とする。
+
+### Root candidate selectionと保存upgrade
+
+配分段階では未確定draftを保存せず、reload後はRank 0から再開する。確定時は選択contextを再確認し、Root build snapshotと必要数すべての候補を同一Player transactionで保存する。候補生成失敗時は部分候補や未完了buildを保存・公開しない。保存後のreloadは保存済み配列の順序を保ってRootから各candidateを検証し、candidate集合を再抽選しない。未選択候補をIdentity historyへ追加しない。現catalogは40 characterであり、既選択characterが29人以上になるとRank 3の12候補を揃えられない。必要数または既定scan上限まで候補を揃えられない場合はfail-closeし、候補やRunを部分生成しない。少人数化、Rank制限、reusableだけの選択、catalog追加等のexhaustion UXは未決定とする。
+
+Account DB v9→v10およびPlayer lifecycle schema v2→v3は今回一度だけのprototype clean breakとする。正常なRoot wrapping keyと暗号化Rootを保持し、Player lifecycleをgeneration 1、0RP、historyなしから初期化する。旧active Runやpending selectionを新schemaのvalidatorへ渡さない。不正Root、partial state、blocked upgradeは既存どおりfail-closeする。
+
+world write journalは既存の`channelId + pubkey` key、record version、channel、pubkeyを保持する。同じRoot由来のpubkeyがRun #1へ戻るため、validなrecordの`runNumber`だけ1へ揃え、`confirmedPosition`をnull、`messageDedupeIds`を空にし、旧manual trace outboxを既存terminal semantics（未確定outboxの`attemptId: null`、`leaseUntilMs: 0`）で終端化して新Run scopeから除く。`lastReservedSecond`と`consumedSlots`の組、`profileLastReservedSecond`、`lastPositiveSecond`、`exitSecond`、`nextToken`は保持し、過去publicationとのtimestamp ordering、同一秒slotの非再利用、reservation sequenceの単調性を保つ。新Runの最初のwriteからjournalはRun #1 scopeとして扱う。旧署名済みtrace eventは再送せず、予約pointを移転・返金せず、既に開始したRelay送信を取り消さない。これらは新しいjournal compatibility layerを設けない一度限りのstorage upgradeで行う。
 
 clear後はcurrent Identityのnsec取得、同じIdentityのfresh Runまたは別Identityの選択を可能にする。cleared Identityへ戻る場合は同じkey/pubkey/characterを維持してRun numberだけを増やし、Run-local stateを初期化する。clear済みIdentityの再利用回数に上限は設けない。True End、Root mnemonicとIdentity Manifestの受け渡しは別途実装する。
 

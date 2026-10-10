@@ -4,7 +4,7 @@ import { openDB } from 'idb';
 import { getPublicKey } from 'nostr-tools/pure';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildTraceReplyTemplate, buildWorldMessageTemplate, finalizeWorldEvent, parseWorldMessage, type ChannelReference } from './nostrProtocol';
-import { openTraceDatabase, TRACE_DATABASE_NAME, TRACE_DATABASE_VERSION, TRACE_REPLY_READ_STORE, TRACE_REPLY_STORE, TRACE_ROOT_READ_STORE, TRACE_ROOT_STORE, TRACE_REWARD_OUTBOX_STORE } from './traceDatabase';
+import { openTraceDatabase, TRACE_DATABASE_NAME, TRACE_DATABASE_VERSION, TRACE_REPLY_LRU_STORE, TRACE_REPLY_READ_STORE, TRACE_REPLY_STORE, TRACE_ROOT_READ_STORE, TRACE_ROOT_STORE, TRACE_REWARD_OUTBOX_STORE } from './traceDatabase';
 import { reconcileTraceReplyCache } from './traceReplyCache';
 import { reconcileTraceRootCache } from './traceRootCache';
 import { loadTraceReadSnapshot, markTraceReplyRead, markTraceRootRead, setTraceReplyReadState } from './traceReadState';
@@ -69,6 +69,39 @@ describe('Trace read state', () => {
 			TRACE_ROOT_STORE, TRACE_REPLY_STORE, TRACE_REPLY_READ_STORE, TRACE_ROOT_READ_STORE, TRACE_REWARD_OUTBOX_STORE
 		]));
 		db.close();
+	});
+
+	it('cleans v4 read and reward state while retaining public Trace caches on the v5 clean break', async () => {
+		const v4 = await openDB(TRACE_DATABASE_NAME, 4, {
+			upgrade(db) {
+				db.createObjectStore(TRACE_ROOT_STORE, { keyPath: ['channelId', 'eventId'] });
+				db.createObjectStore(TRACE_REPLY_STORE, { keyPath: ['channelId', 'rootId', 'eventId'] });
+				db.createObjectStore(TRACE_REPLY_LRU_STORE, { keyPath: ['channelId', 'rootId'] });
+				db.createObjectStore(TRACE_ROOT_READ_STORE, { keyPath: ['channelId', 'eventId'] });
+				db.createObjectStore(TRACE_REPLY_READ_STORE, { keyPath: ['channelId', 'personaPubkey', 'rootId', 'replyId'] });
+				db.createObjectStore(TRACE_REWARD_OUTBOX_STORE, { keyPath: 'key' });
+			}
+		});
+		const rootId = 'b'.repeat(64);
+		const replyId = 'c'.repeat(64);
+		await v4.put(TRACE_ROOT_STORE, { channelId: CHANNEL_ID, eventId: rootId, rawEvent: { public: true } });
+		await v4.put(TRACE_REPLY_STORE, { channelId: CHANNEL_ID, rootId, eventId: replyId, rawEvent: { public: true } });
+		await v4.put(TRACE_REPLY_LRU_STORE, { channelId: CHANNEL_ID, rootId, accessOrder: 1 });
+		await v4.put(TRACE_ROOT_READ_STORE, { channelId: CHANNEL_ID, eventId: rootId, read: true });
+		await v4.put(TRACE_REPLY_READ_STORE, { channelId: CHANNEL_ID, personaPubkey: PERSONA, rootId, replyId, state: 'unread' });
+		await v4.put(TRACE_REWARD_OUTBOX_STORE, { key: 'old-reward', kind: 'trace-root-read', channelId: CHANNEL_ID,
+			eventId: rootId, identity: { generation: 1, accountIndex: 1, pubkey: PERSONA }, runNumber: 1, status: 'pending' });
+		v4.close();
+
+		const upgraded = await openTraceDatabase();
+		expect(upgraded.version).toBe(5);
+		expect(await upgraded.get(TRACE_ROOT_STORE, [CHANNEL_ID, rootId])).toBeTruthy();
+		expect(await upgraded.get(TRACE_REPLY_STORE, [CHANNEL_ID, rootId, replyId])).toBeTruthy();
+		expect(await upgraded.get(TRACE_REPLY_LRU_STORE, [CHANNEL_ID, rootId])).toBeTruthy();
+		expect(await upgraded.count(TRACE_ROOT_READ_STORE)).toBe(0);
+		expect(await upgraded.count(TRACE_REPLY_READ_STORE)).toBe(0);
+		expect(await upgraded.count(TRACE_REWARD_OUTBOX_STORE)).toBe(0);
+		upgraded.close();
 	});
 
 	it('keeps root reads browser-person scoped while separating reply state by persona', async () => {

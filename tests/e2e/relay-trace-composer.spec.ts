@@ -4,7 +4,7 @@ import type { Event as NostrEvent } from 'nostr-tools/pure';
 import { characterPicturePath } from '../../src/lib/character';
 import { requireCharacterFromPubkey } from '../../src/lib/characterAssignment';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
-import { AUTHORITATIVE_RELAYS, CHANNEL_ID, traceRuntimeEvents, installDelayedRelay, relayState, installPromptApiStub, seedRelayAccount, composerContextCalls, moveRelaySelfTo } from './helpers/relayHarness';
+import { AUTHORITATIVE_RELAYS, CHANNEL_ID, traceRuntimeEvents, installDelayedRelay, relayState, installPromptApiStub, seedRelayAccount, composerContextCalls, moveRelaySelfTo, confirmPendingRootBuild } from './helpers/relayHarness';
 
 
 
@@ -368,6 +368,7 @@ test.describe('Relay startup', () => {
 		const profile = restarted.getByRole('dialog');
 		await expect(profile.getByRole('button', { name: '脱出', exact: true })).toBeEnabled();
 		await profile.getByRole('button', { name: '脱出', exact: true }).click();
+		await confirmPendingRootBuild(restarted);
 		await expect(restarted.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
 		const traceEventsAfterClear = await restarted.evaluate(() => {
 			const state = (window as unknown as { __relayStartupTest: { state: { previousPublished: Array<{ id: string; kind: number; tags: string[][] }>; published: Array<{ id: string; kind: number; tags: string[][] }> } } }).__relayStartupTest.state;

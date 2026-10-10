@@ -20,8 +20,8 @@ async function activePersona(): Promise<PersonaSnapshot> {
 	const lifecycle = await loadOrCreateLifecycle();
 	if (lifecycle.kind === 'restored') return lifecycle.persona;
 	if (lifecycle.kind !== 'created' && lifecycle.kind !== 'selecting') throw new Error('Could not initialize test Account.');
-	const selected = await selectIdentity(lifecycle.selection.generation, lifecycle.selection.candidates[0],
-		{ inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0 });
+	if (lifecycle.selection.stage !== 'candidates') throw new Error('Expected fixed Root candidates.');
+	const selected = await selectIdentity(lifecycle.selection, lifecycle.selection.candidates[0]);
 	if (selected.kind !== 'selected') throw new Error('Could not select test Identity.');
 	return selected.persona;
 }

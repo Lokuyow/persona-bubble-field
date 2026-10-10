@@ -6,6 +6,7 @@ import {
 	rootInferenceAccelerationMultiplierTenths,
 	rootMaximumLifespanMs,
 	rootOverflowRewardPercent,
+	rootCandidateCount,
 	usableRootPoints,
 	type RootBuild
 } from './rootProgression';
@@ -13,13 +14,18 @@ import {
 const HOUR = 60 * 60 * 1000;
 
 describe('Root permanent progression', () => {
-	it('caps basic allocation at nine points while retaining overflow', () => {
-		const build: RootBuild = { inferenceAcceleration: 3, contextCompression: 3, hallucinationResistance: 3 };
+	it('caps usable allocation at twelve points while retaining overflow', () => {
+		const build: RootBuild = { inferenceAcceleration: 3, contextCompression: 3, hallucinationResistance: 3, candidateExpansion: 3 };
 		expect(usableRootPoints(0)).toBe(0);
-		expect(usableRootPoints(12)).toBe(9);
-		expect(rootBuildCost(build)).toBe(9);
+		expect(usableRootPoints(9)).toBe(9);
+		expect(usableRootPoints(10)).toBe(10);
+		expect(usableRootPoints(11)).toBe(11);
+		expect(usableRootPoints(12)).toBe(12);
+		expect(usableRootPoints(13)).toBe(12);
+		expect(rootBuildCost(build)).toBe(12);
 		expect(isRootBuildAllocatable(build, 12)).toBe(true);
-		expect(isRootBuildAllocatable({ inferenceAcceleration: 3, contextCompression: 3, hallucinationResistance: 2 }, 12)).toBe(false);
+		expect(isRootBuildAllocatable({ inferenceAcceleration: 3, contextCompression: 3, hallucinationResistance: 3, candidateExpansion: 2 }, 12)).toBe(false);
+		expect([0, 1, 2, 3].map(rootCandidateCount)).toEqual([3, 6, 9, 12]);
 	});
 
 	it('exposes the specified rank effects', () => {

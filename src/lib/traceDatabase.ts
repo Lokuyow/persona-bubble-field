@@ -1,7 +1,7 @@
 import { openDB, type DBSchema, type IDBPTransaction } from 'idb';
 
 export const TRACE_DATABASE_NAME = 'persona-bubble-field-trace';
-export const TRACE_DATABASE_VERSION = 4;
+export const TRACE_DATABASE_VERSION = 5;
 export const TRACE_ROOT_STORE = 'trace-roots';
 export const TRACE_REPLY_STORE = 'trace-replies';
 export const TRACE_REPLY_LRU_STORE = 'trace-reply-lru';
@@ -100,7 +100,7 @@ export type TraceReadwriteTransaction = IDBPTransaction<
 
 export async function openTraceDatabase() {
 	return openDB<TraceDatabase>(TRACE_DATABASE_NAME, TRACE_DATABASE_VERSION, {
-		upgrade(db) {
+		async upgrade(db, oldVersion, _newVersion, transaction) {
 			if (!db.objectStoreNames.contains(TRACE_ROOT_STORE)) {
 				db.createObjectStore(TRACE_ROOT_STORE, { keyPath: ['channelId', 'eventId'] });
 			}
@@ -118,6 +118,13 @@ export async function openTraceDatabase() {
 			}
 			if (!db.objectStoreNames.contains(TRACE_REWARD_OUTBOX_STORE)) {
 				db.createObjectStore(TRACE_REWARD_OUTBOX_STORE, { keyPath: 'key' });
+			}
+			if (oldVersion === 4) {
+				await Promise.all([
+					transaction.objectStore(TRACE_ROOT_READ_STORE).clear(),
+					transaction.objectStore(TRACE_REPLY_READ_STORE).clear(),
+					transaction.objectStore(TRACE_REWARD_OUTBOX_STORE).clear()
+				]);
 			}
 		}
 	});

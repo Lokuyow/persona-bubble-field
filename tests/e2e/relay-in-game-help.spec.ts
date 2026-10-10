@@ -114,7 +114,7 @@ test.describe('in-game Help', () => {
 		});
 		await seedRelayAccount(page, secret, pubkey, now + 7 * 24 * 60 * 60 * 1_000, 654_321,
 			{ inferenceEfficiency: 2, contextCapacity: 3, hallucinationSuppression: 4 }, 2,
-			{ inferenceAcceleration: 1, contextCompression: 1, hallucinationResistance: 0 });
+			{ inferenceAcceleration: 1, contextCompression: 1, hallucinationResistance: 0, candidateExpansion: 0 });
 		await page.goto(`${APP_BASE_PATH}/`);
 		await expect(page.locator('.action-dock')).toBeVisible();
 		await page.evaluate(() => {
@@ -237,12 +237,14 @@ test.describe('in-game Help', () => {
 		await dialog.getByRole('button', { name: '戻る' }).click();
 		await dialog.locator('[data-help-category="life"]').click();
 		await expect(dialog).toContainText('脱出済みの人格は同じ人格で新しい一生を始められます。');
-		await expect(dialog).toContainText('使用できるのは最大9RPで、各能力はRank 0〜3');
+		await expect(dialog).toContainText('使用できるのは最大12RPで、4能力はRank 0〜3');
+		await expect(dialog).toContainText('候補公開後は配分を変更できません。脱出済みの人格の再利用候補は、新しく生成する候補数に含みません。');
 		await expect(dialog).toContainText('正常な脱出1回につき1RPを獲得します。死亡ではRPは増えません。');
-		await expect(dialog).toContainText('各能力はRank 0〜3、Rankを1上げるごとに1RPを使います。');
+		await expect(dialog).toContainText('4能力はRank 0〜3、Rankを1上げるごとに1RPを使います。');
 		await expect(dialog).toContainText('Rank 0〜3の順に×1.00／×2.00／×3.00／×4.00です。蓄積上限後の作業には適用されません。');
 		await expect(dialog).toContainText('Rank 0〜3の順に通常の×1.00／×2.00／×3.00／×4.00です。蓄積上限後のポイント生成と寿命延長は、通常時の0%／20%／35%／50%になります。');
 		await expect(dialog).toContainText('Rank 0〜3の順に7日／14日／21日／30日です。新しい一生の開始時は、どのRankでも7日です。');
+		await expect(dialog).toContainText('Rank 0／1／2／3の順に3人／6人／9人／12人です。初回Rootは0RPのため、Rank 0の3候補へ直接進みます。');
 		const rootBuildFact = dialog.locator('.help-section[aria-labelledby="help-life-title"] .help-fact').nth(3);
 		const rootBuildList = rootBuildFact.locator('.icon-list');
 		for (const viewport of [{ width: 390, height: 844 }, { width: 1000, height: 800 }]) {

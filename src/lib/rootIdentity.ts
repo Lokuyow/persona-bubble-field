@@ -16,11 +16,11 @@ import {
 	type PersonaGameState
 } from './personaGameState';
 import { createMendingJob, settleMending, projectMending, type MendingJob } from './mending';
-import { isRootBuildAllocatable, isValidRootBuild, type RootBuild, rootBuildCost } from './rootProgression';
+import { isRootBuildAllocatable, isValidRootBuild, rootCandidateCount, usableRootPoints, ZERO_ROOT_BUILD, type RootBuild } from './rootProgression';
 import { TAG_GAME_FINAL_WAIT_MS, TAG_GAME_GAME_MS, TAG_GAME_MAX_POINTS, TAG_GAME_MAX_LIFESPAN_LOSS_MS } from './tagGame';
 
 export const DATABASE_NAME = 'persona-bubble-field-account';
-export const DATABASE_VERSION = 9;
+export const DATABASE_VERSION = 10;
 export const ROOT_SECRET_STORE_NAME = 'persona-bubble-field-root-secret';
 export const PLAYER_LIFECYCLE_STORE_NAME = 'persona-bubble-field-player-state';
 export const WORLD_WRITE_JOURNAL_STORE_NAME = 'persona-bubble-field-world-write-journal';
@@ -32,7 +32,7 @@ const ROOT_WRAPPING_KEY = 'root-wrapping-key';
 const ENCRYPTED_ROOT_ENTROPY = 'encrypted-root-entropy';
 const PLAYER_STATE = 'player-lifecycle';
 const ROOT_RECORD_VERSION = 1;
-const PLAYER_SCHEMA_VERSION = 2;
+const PLAYER_SCHEMA_VERSION = 3;
 const AES_KEY_LENGTH = 256;
 const AES_GCM_IV_BYTES = 12;
 const ROOT_ENTROPY_BYTES = 16;
@@ -86,11 +86,15 @@ export type SelectIdentityOptions = Readonly<{
 	initialPoints?: number;
 }>;
 
-export type PendingSelection = Readonly<{
+export type PreviousFinishedRun = Readonly<{ identity: IdentityReference; runNumber: number }>;
+type PendingSelectionBase = Readonly<{
 	generation: number;
-	candidates: readonly [IdentityCandidate, IdentityCandidate, IdentityCandidate];
 	reusableIdentities: readonly ClearedIdentityCandidate[];
+	previousFinishedRun: PreviousFinishedRun | null;
 }>;
+export type PendingSelection =
+	| (PendingSelectionBase & Readonly<{ stage: 'allocating' }>)
+	| (PendingSelectionBase & Readonly<{ stage: 'candidates'; rootBuild: RootBuild; candidates: readonly IdentityCandidate[] }>);
 
 export type ActiveRun = Readonly<{
 	runNumber: number;
@@ -126,7 +130,7 @@ export type TagGameLifecycle = Readonly<{
 export type RealtimeOutcome = Readonly<{ id: string; kind: 'points' | 'death' | 'lifespan-loss'; points?: number; lifespanLossMs?: number; instanceId: string }>;
 
 export type PlayerLifecycle = Readonly<{
-	schemaVersion: 2;
+	schemaVersion: 3;
 	rootPoints: number;
 	identities: readonly IdentityRecord[];
 	mode:
@@ -196,7 +200,12 @@ export type LoadLifecycleResult =
 export type SelectionResult =
 	| Readonly<{ kind: 'selected'; persona: PersonaSnapshot }>
 	| Readonly<{ kind: 'superseded'; lifecycle: LoadLifecycleResult }>
-	| Readonly<{ kind: 'blocked'; reason: 'root-build' | 'candidate' }>
+	| Readonly<{ kind: 'blocked'; reason: 'root-build' | 'candidate' | 'build-not-confirmed' }>
+	| CorruptLifecycleState;
+export type RootBuildConfirmationResult =
+	| Readonly<{ kind: 'confirmed'; selection: Extract<PendingSelection, { stage: 'candidates' }> }>
+	| Readonly<{ kind: 'superseded'; lifecycle: LoadLifecycleResult }>
+	| Readonly<{ kind: 'blocked'; reason: 'root-build' }>
 	| CorruptLifecycleState;
 
 export type MendingMutationResult =
@@ -305,15 +314,25 @@ function isValidClearedCandidate(value: unknown): value is ClearedIdentityCandid
 	return isValidCandidate(value) && isPositiveIndex((value as Record<string, unknown>).generation);
 }
 
+function isValidPreviousFinishedRun(value: unknown): value is PreviousFinishedRun {
+	if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+	const candidate = value as Record<string, unknown>;
+	return isValidIdentityReference(candidate.identity) && Number.isSafeInteger(candidate.runNumber) && (candidate.runNumber as number) > 0;
+}
+
 function isValidPendingSelection(value: unknown): value is PendingSelection {
 	if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
 	const candidate = value as Record<string, unknown>;
-	if (!isPositiveIndex(candidate.generation) || !Array.isArray(candidate.candidates) || candidate.candidates.length !== 3 || !candidate.candidates.every(isValidCandidate) ||
-		!Array.isArray(candidate.reusableIdentities) || !candidate.reusableIdentities.every(isValidClearedCandidate)) return false;
-	const candidates = candidate.candidates as IdentityCandidate[];
+	if (!isPositiveIndex(candidate.generation) || !Array.isArray(candidate.reusableIdentities) || !candidate.reusableIdentities.every(isValidClearedCandidate) ||
+		(candidate.previousFinishedRun !== null && !isValidPreviousFinishedRun(candidate.previousFinishedRun))) return false;
 	const reusable = candidate.reusableIdentities as ClearedIdentityCandidate[];
-	return new Set(candidates.map((item) => item.accountIndex)).size === 3 && new Set(candidates.map((item) => item.pubkey)).size === 3 &&
-		new Set(candidates.map((item) => item.characterId)).size === 3 && new Set(reusable.map((item) => `${item.generation}:${item.accountIndex}`)).size === reusable.length;
+	if (new Set(reusable.map((item) => `${item.generation}:${item.accountIndex}`)).size !== reusable.length) return false;
+	if (candidate.stage === 'allocating') return candidate.candidates === undefined && candidate.rootBuild === undefined;
+	if (candidate.stage !== 'candidates' || !isValidRootBuild(candidate.rootBuild) || !Array.isArray(candidate.candidates) ||
+		candidate.candidates.length !== rootCandidateCount(candidate.rootBuild.candidateExpansion) || !candidate.candidates.every(isValidCandidate)) return false;
+	const candidates = candidate.candidates as IdentityCandidate[];
+	return new Set(candidates.map((item) => item.accountIndex)).size === candidates.length && new Set(candidates.map((item) => item.pubkey)).size === candidates.length &&
+		new Set(candidates.map((item) => item.characterId)).size === candidates.length;
 }
 
 function isValidRealtimeSettlementLedger(value: unknown): value is RealtimeSettlementLedger {
@@ -379,7 +398,18 @@ function isValidPlayerLifecycle(value: unknown): value is PlayerLifecycle {
 		if (identities.some((identity) => identity.status === 'alive') || !isValidPendingSelection(mode.pendingSelection)) return false;
 		const pending = mode.pendingSelection as PendingSelection;
 		const highestGeneration = Math.max(...identities.map((identity) => identity.generation), 0);
-		if (pending.generation !== highestGeneration + 1 || identities.some((identity) => pending.candidates.some((item) => item.characterId === identity.characterId || item.pubkey === identity.pubkey))) return false;
+		if (pending.generation !== highestGeneration + 1) return false;
+		if (identities.length === 0) {
+			if (pending.previousFinishedRun !== null) return false;
+		} else {
+			const previous = pending.previousFinishedRun;
+			if (!previous) return false;
+			const previousIdentity = identities.find((identity) => sameIdentityReference(identity, previous.identity));
+			if (!previousIdentity || previousIdentity.runHistory.at(-1)?.runNumber !== previous.runNumber) return false;
+		}
+		if (pending.stage === 'candidates' && (!isRootBuildAllocatable(pending.rootBuild, candidate.rootPoints as number) ||
+			pending.candidates.length !== rootCandidateCount(pending.rootBuild.candidateExpansion) ||
+			identities.some((identity) => pending.candidates.some((item) => item.characterId === identity.characterId || item.pubkey === identity.pubkey)))) return false;
 		return pending.reusableIdentities.every((item) => {
 			const identity = identities.find((candidate) => candidate.generation === item.generation && candidate.accountIndex === item.accountIndex && candidate.pubkey === item.pubkey);
 			return Boolean(identity && identity.status === 'cleared' && identity.characterId === item.characterId);
@@ -422,7 +452,8 @@ function sameGameState(first: PersonaGameState, second: PersonaGameState): boole
 }
 
 function sameRootBuild(first: RootBuild, second: RootBuild): boolean {
-	return first.inferenceAcceleration === second.inferenceAcceleration && first.contextCompression === second.contextCompression && first.hallucinationResistance === second.hallucinationResistance;
+	return first.inferenceAcceleration === second.inferenceAcceleration && first.contextCompression === second.contextCompression &&
+		first.hallucinationResistance === second.hallucinationResistance && first.candidateExpansion === second.candidateExpansion;
 }
 
 function samePersonaExpected(expected: PersonaSnapshot, activeRun: ActiveRun): boolean {
@@ -445,18 +476,7 @@ function openLifecycleDatabase(): Promise<IDBPDatabase<LifecycleDatabase>> {
 				const ensureRewardStore = () => {
 					if (!db.objectStoreNames.contains(INTERACTION_REWARD_STORE_NAME)) db.createObjectStore(INTERACTION_REWARD_STORE_NAME, { keyPath: 'key' });
 				};
-				// v8 is the current lifecycle format. Preserve its records while adding the independent reward ledger.
-				if (oldVersion === 8 && hasRootStore && hasPlayerStore) {
-					if (!db.objectStoreNames.contains(WORLD_WRITE_JOURNAL_STORE_NAME)) db.createObjectStore(WORLD_WRITE_JOURNAL_STORE_NAME);
-					ensureRewardStore();
-					return;
-				}
-				// Preserve the v7 lifecycle records while adding stores introduced later.
-				if (oldVersion === 7 && hasRootStore && hasPlayerStore) {
-					if (!db.objectStoreNames.contains(WORLD_WRITE_JOURNAL_STORE_NAME)) db.createObjectStore(WORLD_WRITE_JOURNAL_STORE_NAME);
-					ensureRewardStore();
-					return;
-				}
+				// One-time prototype clean break: keep a valid Root, reset Player, and fence old World writes.
 				if (oldVersion >= 6 && hasRootStore && hasPlayerStore) {
 					if (!db.objectStoreNames.contains(WORLD_WRITE_JOURNAL_STORE_NAME)) db.createObjectStore(WORLD_WRITE_JOURNAL_STORE_NAME);
 					ensureRewardStore();
@@ -470,9 +490,26 @@ function openLifecycleDatabase(): Promise<IDBPDatabase<LifecycleDatabase>> {
 					]);
 					const rootRecordsPresent = rootKeys.length === 2 && rootKeys.every((key) => key === ROOT_WRAPPING_KEY || key === ENCRYPTED_ROOT_ENTROPY) && hasValidWrappingKey(rootWrappingKey) && isEncryptedRootEntropy(encryptedEntropy);
 					if (rootRecordsPresent && playerKeys.includes(PLAYER_STATE)) {
+						const journalStore = transaction.objectStore(WORLD_WRITE_JOURNAL_STORE_NAME);
+						for (const key of await journalStore.getAllKeys()) {
+							const raw = await journalStore.get(key);
+							if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) continue;
+							const record = raw as Record<string, unknown>;
+							if (typeof key !== 'string' || typeof record.channelId !== 'string' || typeof record.pubkey !== 'string' ||
+								! /^[0-9a-f]{64}$/.test(record.channelId) || !/^[0-9a-f]{64}$/.test(record.pubkey) ||
+								key !== journalKey(record.channelId, record.pubkey) || !validJournal(raw, record.channelId, record.pubkey)) continue;
+							const outbox = record.pendingManualTrace as ManualTraceOutbox | undefined;
+							if (outbox && outbox.status !== 'confirmed' && outbox.status !== 'terminal') {
+								await journalStore.put({ ...raw, pendingManualTrace: { ...outbox, status: 'terminal', attemptId: null, leaseUntilMs: 0 } }, key);
+							}
+							const { pendingManualTrace: _retiredOutbox, ...fenced } = raw;
+							void _retiredOutbox;
+							await journalStore.put({ ...fenced, runNumber: 1, confirmedPosition: null, messageDedupeIds: [] }, key);
+						}
+						await transaction.objectStore(INTERACTION_REWARD_STORE_NAME).clear();
 						db.deleteObjectStore(PLAYER_LIFECYCLE_STORE_NAME);
 						db.createObjectStore(PLAYER_LIFECYCLE_STORE_NAME);
-						transaction.objectStore(PLAYER_LIFECYCLE_STORE_NAME).put({ kind: 'legacy-player-reset', sourceVersion: 1 }, PLAYER_STATE);
+						await transaction.objectStore(PLAYER_LIFECYCLE_STORE_NAME).put({ kind: 'legacy-player-reset', sourceVersion: 1 }, PLAYER_STATE);
 					}
 					return;
 				}
@@ -575,13 +612,36 @@ function reusableIdentityCandidates(identities: readonly IdentityRecord[]): read
 	return identities.filter((identity) => identity.status === 'cleared').map((identity) => ({ generation: identity.generation, accountIndex: identity.accountIndex, pubkey: identity.pubkey, characterId: identity.characterId }));
 }
 
-async function preparePendingSelection(entropy: Uint8Array, generation: number, selectedCharacterIds: ReadonlySet<string>, reusableIdentities: readonly ClearedIdentityCandidate[] = []): Promise<PendingSelection> {
+function allocatingSelection(generation: number, reusableIdentities: readonly ClearedIdentityCandidate[] = [], previousFinishedRun: PreviousFinishedRun | null = null): Extract<PendingSelection, { stage: 'allocating' }> {
 	assertBip85Index(generation, 'generation');
-	if (CHARACTER_CATALOG.length - selectedCharacterIds.size < 3) throw new Error('Selection is unavailable.');
+	return { stage: 'allocating', generation, reusableIdentities, previousFinishedRun };
+}
+
+function samePreviousFinishedRun(first: PreviousFinishedRun | null, second: PreviousFinishedRun | null): boolean {
+	return first === null ? second === null : second !== null && first.runNumber === second.runNumber && sameIdentityReference(first.identity, second.identity);
+}
+
+function sameSelectionContext(first: PendingSelection, second: PendingSelection): boolean {
+	return first.generation === second.generation && samePreviousFinishedRun(first.previousFinishedRun, second.previousFinishedRun) &&
+		first.reusableIdentities.length === second.reusableIdentities.length && first.reusableIdentities.every((item, index) => {
+			const other = second.reusableIdentities[index];
+			return Boolean(other && item.generation === other.generation && candidateMatches(item, other));
+		});
+}
+
+function sameConfirmedSelection(first: PendingSelection, second: PendingSelection): boolean {
+	return first.stage === 'candidates' && second.stage === 'candidates' && sameSelectionContext(first, second) &&
+		sameRootBuild(first.rootBuild, second.rootBuild) && first.candidates.length === second.candidates.length &&
+		first.candidates.every((candidate, index) => candidateMatches(candidate, second.candidates[index]));
+}
+
+async function generateIdentityCandidates(entropy: Uint8Array, generation: number, selectedCharacterIds: ReadonlySet<string>, candidateCount: number): Promise<readonly IdentityCandidate[]> {
+	assertBip85Index(generation, 'generation');
+	if (CHARACTER_CATALOG.length - selectedCharacterIds.size < candidateCount) throw new Error('Selection is unavailable.');
 	const master = deriveMaster(entropy);
 	const candidates: IdentityCandidate[] = [];
 	try {
-		for (let accountIndex = BIP85_INDEX_MIN; accountIndex <= Math.min(MAX_CANDIDATE_SCAN, BIP85_INDEX_MAX) && candidates.length < 3; accountIndex += 1) {
+		for (let accountIndex = BIP85_INDEX_MIN; accountIndex <= Math.min(MAX_CANDIDATE_SCAN, BIP85_INDEX_MAX) && candidates.length < candidateCount; accountIndex += 1) {
 			let childEntropy: Uint8Array;
 			try { childEntropy = await deriveBip85NostrEntropy(master, generation, accountIndex); } catch { continue; }
 			const secret = childEntropy.slice();
@@ -592,8 +652,13 @@ async function preparePendingSelection(entropy: Uint8Array, generation: number, 
 			candidates.push(candidate);
 		}
 	} finally { master.wipePrivateData(); }
-	if (candidates.length !== 3) throw new Error('Selection is unavailable.');
-	return { generation, candidates: [candidates[0], candidates[1], candidates[2]], reusableIdentities };
+	if (candidates.length !== candidateCount) throw new Error('Selection is unavailable.');
+	return candidates;
+}
+
+async function prepareInitialSelection(entropy: Uint8Array): Promise<Extract<PendingSelection, { stage: 'candidates' }>> {
+	const candidates = await generateIdentityCandidates(entropy, 1, new Set(), rootCandidateCount(0));
+	return { stage: 'candidates', generation: 1, previousFinishedRun: null, reusableIdentities: [], rootBuild: ZERO_ROOT_BUILD, candidates };
 }
 
 async function prepareRoot(): Promise<PreparedRoot> {
@@ -653,20 +718,24 @@ async function hydrateLifecycle(entropy: Uint8Array, player: PlayerLifecycle): P
 		await validateIdentityDerivations(master, player.identities);
 		if (player.mode.kind === 'selecting') {
 			const expectedCandidates: IdentityCandidate[] = [];
-			for (const candidate of player.mode.pendingSelection.candidates) {
-				const childEntropy = await deriveBip85NostrEntropy(master, player.mode.pendingSelection.generation, candidate.accountIndex);
-				try {
-					const derived = candidateFromSecret(candidate.accountIndex, childEntropy);
-					if (!derived || !candidateMatches(derived, candidate)) return { kind: 'corrupt', reason: 'invalid-candidate' };
-					expectedCandidates.push(derived);
-				} finally { childEntropy.fill(0); }
+			if (player.mode.pendingSelection.stage === 'candidates') {
+				for (const candidate of player.mode.pendingSelection.candidates) {
+					const childEntropy = await deriveBip85NostrEntropy(master, player.mode.pendingSelection.generation, candidate.accountIndex);
+					try {
+						const derived = candidateFromSecret(candidate.accountIndex, childEntropy);
+						if (!derived || !candidateMatches(derived, candidate)) return { kind: 'corrupt', reason: 'invalid-candidate' };
+						expectedCandidates.push(derived);
+					} finally { childEntropy.fill(0); }
+				}
 			}
 			for (const candidate of player.mode.pendingSelection.reusableIdentities) {
 				const identity = player.identities.find((item) => item.generation === candidate.generation && item.accountIndex === candidate.accountIndex && item.pubkey === candidate.pubkey && item.status === 'cleared');
 				if (!identity || identity.characterId !== candidate.characterId) return { kind: 'corrupt', reason: 'invalid-candidate' };
 			}
-			const expected: PendingSelection = { generation: player.mode.pendingSelection.generation, candidates: expectedCandidates as unknown as PendingSelection['candidates'], reusableIdentities: player.mode.pendingSelection.reusableIdentities };
-		if (JSON.stringify(expected) !== JSON.stringify(player.mode.pendingSelection)) return { kind: 'corrupt', reason: 'invalid-candidate' };
+			const expected: PendingSelection = player.mode.pendingSelection.stage === 'candidates'
+				? { ...player.mode.pendingSelection, candidates: expectedCandidates }
+				: player.mode.pendingSelection;
+			if (JSON.stringify(expected) !== JSON.stringify(player.mode.pendingSelection)) return { kind: 'corrupt', reason: 'invalid-candidate' };
 		return { kind: 'selecting', selection: player.mode.pendingSelection, rootPoints: player.rootPoints };
 		}
 		const activeRun = player.mode.activeRun;
@@ -696,13 +765,67 @@ async function replaceLegacyPlayer(db: IDBPDatabase<LifecycleDatabase>, selectio
 	} catch (error) { try { tx.abort(); } catch { /* already aborted */ } await tx.done.catch(() => {}); throw error; }
 }
 
+export async function confirmRootBuild(expectedSelection: PendingSelection, rootBuild: RootBuild): Promise<RootBuildConfirmationResult> {
+	if (!isValidPendingSelection(expectedSelection) || expectedSelection.stage !== 'allocating' || !isValidRootBuild(rootBuild)) return { kind: 'blocked', reason: 'root-build' };
+	const observed = await withLifecycle((db) => readRootAndPlayer(db));
+	if (!observed) return { kind: 'corrupt', reason: 'partial-state' };
+	if (isCorruptLifecycle(observed)) return observed;
+	if ('kind' in observed && observed.kind === 'legacy-player-reset') {
+		observed.entropy.fill(0);
+		const lifecycle = await loadOrCreateLifecycle();
+		return isCorruptLifecycle(lifecycle) ? lifecycle : { kind: 'superseded', lifecycle };
+	}
+	try {
+		if (observed.player.mode.kind !== 'selecting' || !sameSelectionContext(expectedSelection, observed.player.mode.pendingSelection)) {
+			return { kind: 'superseded', lifecycle: await hydrateLifecycle(observed.entropy, observed.player) };
+		}
+		const pending = observed.player.mode.pendingSelection;
+		if (pending.stage !== 'allocating') return { kind: 'superseded', lifecycle: await hydrateLifecycle(observed.entropy, observed.player) };
+		if (!isRootBuildAllocatable(rootBuild, observed.player.rootPoints)) return { kind: 'blocked', reason: 'root-build' };
+		const persistedRootBuild: RootBuild = { ...rootBuild };
+		let candidates: readonly IdentityCandidate[];
+		try {
+			candidates = await generateIdentityCandidates(observed.entropy, pending.generation,
+				new Set(observed.player.identities.map((identity) => identity.characterId)), rootCandidateCount(persistedRootBuild.candidateExpansion));
+		} catch (error) {
+			return { kind: 'corrupt', reason: error instanceof Error && error.message === 'Selection is unavailable.' ? 'selection-unavailable' : 'derivation-mismatch' };
+		}
+		const confirmed: Extract<PendingSelection, { stage: 'candidates' }> = { ...pending, stage: 'candidates', rootBuild: persistedRootBuild, candidates };
+		return await withLifecycle(async (db) => {
+			const tx = db.transaction(PLAYER_LIFECYCLE_STORE_NAME, 'readwrite');
+			try {
+				const store = tx.objectStore(PLAYER_LIFECYCLE_STORE_NAME);
+				const current = await store.get(PLAYER_STATE);
+				if (!isValidPlayerLifecycle(current)) { await tx.done; return { kind: 'corrupt', reason: 'player-state' } as const; }
+				if (current.mode.kind !== 'selecting' || !sameSelectionContext(expectedSelection, current.mode.pendingSelection)) {
+					await tx.done;
+					const lifecycle = await restoreCurrent(db);
+					return isCorruptLifecycle(lifecycle) ? lifecycle : { kind: 'superseded', lifecycle } as const;
+				}
+				if (current.mode.pendingSelection.stage !== 'allocating') {
+					await tx.done;
+					const lifecycle = await restoreCurrent(db);
+					return isCorruptLifecycle(lifecycle) ? lifecycle : { kind: 'superseded', lifecycle } as const;
+				}
+				if (current.rootPoints !== observed.player.rootPoints || !isRootBuildAllocatable(persistedRootBuild, current.rootPoints)) {
+					await tx.done;
+					return { kind: 'blocked', reason: 'root-build' } as const;
+				}
+				await store.put({ ...current, mode: { kind: 'selecting', pendingSelection: confirmed } }, PLAYER_STATE);
+				await tx.done;
+				return { kind: 'confirmed', selection: confirmed } as const;
+			} catch (error) { try { tx.abort(); } catch { /* already aborted */ } await tx.done.catch(() => {}); throw error; }
+		});
+	} finally { observed.entropy.fill(0); }
+}
+
 export async function loadOrCreateLifecycle(): Promise<LoadLifecycleResult> {
 	for (;;) {
 		const observed = await withLifecycle((db) => readRootAndPlayer(db));
 		if (observed === null) {
 			const root = await prepareRoot();
 			try {
-				const selection = await preparePendingSelection(root.entropy, 1, new Set());
+				const selection = await prepareInitialSelection(root.entropy);
 				const committed = await withLifecycle((db) => commitFresh(db, root, freshPlayer(selection)));
 				if (committed) return { kind: 'created', selection, rootPoints: 0 };
 			} finally { root.entropy.fill(0); }
@@ -711,11 +834,19 @@ export async function loadOrCreateLifecycle(): Promise<LoadLifecycleResult> {
 		if (isCorruptLifecycle(observed)) return observed;
 		if ('kind' in observed && observed.kind === 'legacy-player-reset') {
 			try {
-				const selection = await preparePendingSelection(observed.entropy, 1, new Set());
+				const selection = await prepareInitialSelection(observed.entropy);
 				const replaced = await withLifecycle((db) => replaceLegacyPlayer(db, selection));
 				if (replaced) return { kind: 'selecting', selection, rootPoints: 0 };
 			} finally { observed.entropy.fill(0); }
 			continue;
+		}
+		if (observed.player.mode.kind === 'selecting' && observed.player.mode.pendingSelection.stage === 'allocating' && usableRootPoints(observed.player.rootPoints) === 0) {
+			const pendingSelection = observed.player.mode.pendingSelection;
+			observed.entropy.fill(0);
+			const confirmation = await confirmRootBuild(pendingSelection, ZERO_ROOT_BUILD);
+			if (confirmation.kind === 'confirmed') return { kind: 'selecting', selection: confirmation.selection, rootPoints: observed.player.rootPoints };
+			if (confirmation.kind === 'superseded') return confirmation.lifecycle;
+			return confirmation.kind === 'corrupt' ? confirmation : { kind: 'corrupt', reason: 'player-state' };
 		}
 		if (observed.player.tagGame?.lock && observed.player.tagGame.lock.finalDeadlineMs <= Date.now()) {
 			await withLifecycle(async (db) => {
@@ -863,7 +994,10 @@ export async function reservePublicProfilePublication(input: Readonly<{
 					await tx.done;
 					return { kind: 'wait', untilSecond: lastReservedSecond + 1 } as const;
 				}
-				await journalStore.put({ ...record, profileLastReservedSecond: input.nowSecond }, journalKey(scope.channelId, scope.identity.pubkey));
+				await journalStore.put({ ...record, runNumber: scope.runNumber,
+					confirmedPosition: record.runNumber === scope.runNumber ? record.confirmedPosition : null,
+					messageDedupeIds: record.runNumber === scope.runNumber ? record.messageDedupeIds ?? [] : [],
+					profileLastReservedSecond: input.nowSecond }, journalKey(scope.channelId, scope.identity.pubkey));
 				await tx.done;
 				const latest = await hydrateLifecycle(observed.entropy, player);
 				if (latest.kind !== 'restored' || !sameIdentityReference(latest.persona.activeRun.identity, scope.identity) || latest.persona.activeRun.runNumber !== scope.runNumber) return { kind: 'stale' } as const;
@@ -1131,8 +1265,9 @@ function isValidSelectionCandidate(value: SelectionCandidate): boolean {
 	return isValidCandidate(value) && (!('generation' in value) || isPositiveIndex(value.generation));
 }
 
-export async function selectIdentity(expectedGeneration: number, candidate: SelectionCandidate, rootBuild: RootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0 }, options: SelectIdentityOptions = {}): Promise<SelectionResult> {
-	assertBip85Index(expectedGeneration, 'generation');
+export async function selectIdentity(expectedSelection: PendingSelection, candidate: SelectionCandidate, options: SelectIdentityOptions = {}): Promise<SelectionResult> {
+	if (!isValidPendingSelection(expectedSelection)) return { kind: 'corrupt', reason: 'invalid-candidate' };
+	assertBip85Index(expectedSelection.generation, 'generation');
 	if (!isValidSelectionCandidate(candidate)) return { kind: 'corrupt', reason: 'invalid-candidate' };
 	if (options.initialPoints !== undefined && (!Number.isSafeInteger(options.initialPoints) || options.initialPoints < 0)) throw new TypeError('Invalid initial points.');
 	return withLifecycle(async (db) => {
@@ -1141,16 +1276,18 @@ export async function selectIdentity(expectedGeneration: number, candidate: Sele
 			const store = tx.objectStore(PLAYER_LIFECYCLE_STORE_NAME);
 			const current = await store.get(PLAYER_STATE);
 			if (!isValidPlayerLifecycle(current)) { await tx.done; return { kind: 'corrupt', reason: 'player-state' }; }
-			if (current.mode.kind !== 'selecting' || current.mode.pendingSelection.generation !== expectedGeneration) {
+			if (current.mode.kind !== 'selecting' || !sameSelectionContext(expectedSelection, current.mode.pendingSelection)) {
 				await tx.done;
 				const lifecycle = await restoreCurrent(db);
 				return isCorruptLifecycle(lifecycle) ? lifecycle : { kind: 'superseded', lifecycle };
 			}
 			const pending = current.mode.pendingSelection;
+			if (pending.stage !== 'candidates' || expectedSelection.stage !== 'candidates') { await tx.done; return { kind: 'blocked', reason: 'build-not-confirmed' }; }
+			if (!sameConfirmedSelection(expectedSelection, pending)) { await tx.done; return { kind: 'blocked', reason: 'candidate' }; }
 			const reusable = 'generation' in candidate ? pending.reusableIdentities.some((item) => item.generation === candidate.generation && candidateMatches(item, candidate)) : false;
 			const fresh = pending.candidates.some((item) => candidateMatches(item, candidate));
-			if ((!reusable && !fresh) || !isRootBuildAllocatable(rootBuild, current.rootPoints)) { await tx.done; return { kind: 'blocked', reason: reusable || fresh ? 'root-build' : 'candidate' }; }
-			const persistedRootBuild: RootBuild = { inferenceAcceleration: rootBuild.inferenceAcceleration, contextCompression: rootBuild.contextCompression, hallucinationResistance: rootBuild.hallucinationResistance };
+			if (!reusable && !fresh) { await tx.done; return { kind: 'blocked', reason: 'candidate' }; }
+			const persistedRootBuild: RootBuild = { ...pending.rootBuild };
 			const nowMs = Date.now();
 			if (!isSafeTimestamp(nowMs)) throw new Error('Invalid lifecycle timestamp.');
 			let selected: IdentityRecord;
@@ -1163,7 +1300,7 @@ export async function selectIdentity(expectedGeneration: number, candidate: Sele
 				selected = { ...existing, status: 'alive' };
 				identities = current.identities.map((item) => item === existing ? selected : item);
 			} else {
-				selected = { generation: expectedGeneration, accountIndex: candidate.accountIndex, pubkey: candidate.pubkey, characterId: candidate.characterId, identityCreatedAtMs: nowMs, status: 'alive', characterProfileRevision: null, runHistory: [] };
+				selected = { generation: expectedSelection.generation, accountIndex: candidate.accountIndex, pubkey: candidate.pubkey, characterId: candidate.characterId, identityCreatedAtMs: nowMs, status: 'alive', characterProfileRevision: null, runHistory: [] };
 				identities = [...current.identities, selected];
 			}
 			const identityReference: IdentityReference = { generation: selected.generation, accountIndex: selected.accountIndex, pubkey: selected.pubkey };
@@ -1364,7 +1501,7 @@ export async function applyTagGameCumulative(expected: PersonaSnapshot, gameId: 
 	if (!observed || isCorruptLifecycle(observed) || ('kind' in observed && observed.kind === 'legacy-player-reset')) return !observed ? { kind: 'corrupt', reason: 'partial-state' } : isCorruptLifecycle(observed) ? observed : { kind: 'corrupt', reason: 'partial-state' };
 	try {
 		if (observed.player.mode.kind !== 'running' || !sameRealtimeRunScope(expected, observed.player.mode.activeRun)) return { kind: 'stale' };
-		const selection = await prepareDeathSelection(observed.entropy, observed.player);
+		const selection = prepareDeathSelection(observed.player);
 		const mutation = await withLifecycle(async (db): Promise<RealtimeSettlementResult> => {
 			const tx = db.transaction([PLAYER_LIFECYCLE_STORE_NAME, WORLD_WRITE_JOURNAL_STORE_NAME], 'readwrite');
 			try {
@@ -1510,7 +1647,7 @@ export async function applyRealtimeLifespanLoss(
 			return persona ? { kind: 'duplicate', persona } : { kind: 'stale' };
 		}
 		if (!samePersonaExpected(expected, observed.player.mode.activeRun)) return { kind: 'stale' };
-		const selection = await prepareDeathSelection(observed.entropy, observed.player);
+		const selection = prepareDeathSelection(observed.player);
 		const mutation = await withLifecycle(async (db): Promise<RealtimeLifespanLossResult | Readonly<{ kind: 'duplicate' }>> => {
 			const tx = db.transaction([PLAYER_LIFECYCLE_STORE_NAME, WORLD_WRITE_JOURNAL_STORE_NAME], 'readwrite');
 			try {
@@ -1575,14 +1712,18 @@ export async function applyRealtimeLifespanLoss(
 	} finally { observed.entropy.fill(0); }
 }
 
-async function prepareDeathSelection(entropy: Uint8Array, player: PlayerLifecycle): Promise<PendingSelection> {
+function prepareDeathSelection(player: PlayerLifecycle): Extract<PendingSelection, { stage: 'allocating' }> {
+	if (player.mode.kind !== 'running') throw new TypeError('A running Player is required.');
 	const generation = Math.max(...player.identities.map((identity) => identity.generation), 0) + 1;
-	return preparePendingSelection(entropy, generation, new Set(player.identities.map((identity) => identity.characterId)));
+	const activeRun = player.mode.activeRun;
+	return allocatingSelection(generation, [], { identity: activeRun.identity, runNumber: activeRun.runNumber });
 }
 
-async function prepareClearSelection(entropy: Uint8Array, player: PlayerLifecycle): Promise<PendingSelection> {
+function prepareClearSelection(player: PlayerLifecycle): Extract<PendingSelection, { stage: 'allocating' }> {
+	if (player.mode.kind !== 'running') throw new TypeError('A running Player is required.');
 	const generation = Math.max(...player.identities.map((identity) => identity.generation), 0) + 1;
-	return preparePendingSelection(entropy, generation, new Set(player.identities.map((identity) => identity.characterId)), reusableIdentityCandidates(player.identities));
+	const activeRun = player.mode.activeRun;
+	return allocatingSelection(generation, reusableIdentityCandidates(player.identities), { identity: activeRun.identity, runNumber: activeRun.runNumber });
 }
 
 async function commitTerminalFence(
@@ -1647,7 +1788,7 @@ export async function transitionRealtimeDeath(expected: PersonaSnapshot, outcome
 		if (observed.player.mode.kind !== 'running' || !sameRealtimeRunScope(expected, observed.player.mode.activeRun)) return { kind: 'stale' };
 		const ledger = scopedRealtimeLedger(observed.player, observed.player.mode.activeRun);
 		if (ledger.appliedOutcomeIds.includes(outcome.id)) return { kind: 'duplicate' };
-		const selection = await prepareDeathSelection(observed.entropy, observed.player);
+		const selection = prepareDeathSelection(observed.player);
 		return closeRunAsDeath(expected, outcome.id, selection, terminalExit);
 	} finally { observed.entropy.fill(0); }
 }
@@ -1680,7 +1821,7 @@ export async function transitionExpiredPersona(expected: PersonaSnapshot, termin
 	try {
 		if (observed.player.mode.kind !== 'running' || !samePersonaExpected(expected, observed.player.mode.activeRun)) return { kind: 'superseded' };
 		if (!isPersonaExpired(observed.player.mode.activeRun.gameState, Date.now(), observed.player.mode.activeRun.rootBuild)) return { kind: 'not-expired', persona: { ...expected, activeRun: observed.player.mode.activeRun, gameState: observed.player.mode.activeRun.gameState } };
-		const selection = await prepareDeathSelection(observed.entropy, observed.player);
+		const selection = prepareDeathSelection(observed.player);
 		const testHook = (globalThis as typeof globalThis & { __personaBubbleFieldTestHooks?: { beforeDeathTransitionCompareAndSwap?: () => void | Promise<void> } }).__personaBubbleFieldTestHooks?.beforeDeathTransitionCompareAndSwap;
 		if (testHook) await testHook();
 		return withLifecycle(async (db) => {
@@ -1715,7 +1856,7 @@ export async function clearPersona(expected: PersonaSnapshot, terminalExit?: Ter
 		if (activeRun.gameState.points < NORMAL_CLEAR_THRESHOLD) return { kind: 'blocked', reason: 'points' };
 		if (isPersonaExpired(activeRun.gameState, Date.now(), activeRun.rootBuild)) return { kind: 'blocked', reason: 'expired' };
 		if (ledger.pendingInstanceIds.length > 0) return { kind: 'blocked', reason: 'pending-realtime' };
-		const selection = await prepareClearSelection(observed.entropy, observed.player);
+		const selection = prepareClearSelection(observed.player);
 		return withLifecycle(async (db) => {
 			const tx = db.transaction([PLAYER_LIFECYCLE_STORE_NAME, WORLD_WRITE_JOURNAL_STORE_NAME], 'readwrite');
 			try {

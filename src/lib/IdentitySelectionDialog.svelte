@@ -2,19 +2,20 @@
 	import { tick } from 'svelte';
 	import { asset } from '$app/paths';
 	import { Popover } from 'bits-ui';
-	import ChevronDown from '~icons/tabler/chevron-down';
 	import HelpCircle from '~icons/tabler/help-circle';
+	import UsersPlus from '~icons/tabler/users-plus';
 	import { getCharacterById } from '$lib/character';
 	import ActionButton from '$lib/ActionButton.svelte';
 	import type { ClearedIdentityCandidate, IdentityCandidate, PendingSelection, SelectionCandidate } from '$lib/rootIdentity';
 	import type { RunTransitionNotice } from '$lib/runTransitionNotice';
-	import { isRootBuildAllocatable, rootBuildCost, usableRootPoints, type RootBuild } from '$lib/rootProgression';
+	import { isRootBuildAllocatable, rootBuildCost, rootCandidateCount, usableRootPoints, type RootBuild } from '$lib/rootProgression';
 
-	let { selection, rootPoints, transitionNotice, onSelect, onExportNsec }: {
+	let { selection, rootPoints, transitionNotice, onConfirm, onSelect, onExportNsec }: {
 		selection: PendingSelection | null;
 		rootPoints: number;
 		transitionNotice?: RunTransitionNotice | null;
-		onSelect: (candidate: SelectionCandidate, rootBuild: RootBuild) => void;
+		onConfirm: (rootBuild: RootBuild) => void;
+		onSelect: (candidate: SelectionCandidate) => void;
 		onExportNsec: (candidate: ClearedIdentityCandidate) => void;
 	} = $props();
 	let noticeCopy = $derived(transitionNotice === 'dead'
@@ -26,39 +27,52 @@
 	let initialFocusTarget = $state<HTMLElement | null>(null);
 	let chosen = $state<SelectionCandidate | null>(null);
 	let openingAccepted = $state(false);
-	let openingSelection: PendingSelection | null = null;
+	let openingContextKey: string | null = null;
+	let previousSelectionStage: PendingSelection['stage'] | null = null;
 	let firstSelection = $derived(Boolean(selection && selection.generation === 1 && selection.reusableIdentities.length === 0));
 	let showOpening = $derived(firstSelection && !openingAccepted);
-	let rootBuild = $state<RootBuild>({ inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0 });
+	let rootBuild = $state<RootBuild>({ inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0, candidateExpansion: 0 });
 	let usablePoints = $derived(usableRootPoints(rootPoints));
 	let usedPoints = $derived(rootBuildCost(rootBuild));
-	let rootBuildOpen = $state(false);
 	let rootBuildSelection = $state<PendingSelection | null>(null);
 	const ROOT_EFFECTS = {
 		inferenceAcceleration: ['×1.00', '×2.00', '×3.00', '×4.00'],
 		contextCompression: ['×1.00 / overflow point・lifespan 0%', '×2.00 / overflow point・lifespan 20%', '×3.00 / overflow point・lifespan 35%', '×4.00 / overflow point・lifespan 50%'],
-		hallucinationResistance: ['最大7日', '最大14日', '最大21日', '最大30日']
+		hallucinationResistance: ['最大7日', '最大14日', '最大21日', '最大30日'],
+		candidateExpansion: ['新規候補3人', '新規候補6人', '新規候補9人', '新規候補12人']
 	} as const;
 	const ROOT_DETAILS = {
 		inferenceAcceleration: ['Rank 0: ×1.00', 'Rank 1: ×2.00', 'Rank 2: ×3.00', 'Rank 3: ×4.00', 'Run中の有効通常作業のポイント生成に常時適用。'],
 		contextCompression: ['Rank 0: ×1.00 / overflow point・lifespan 0%', 'Rank 1: ×2.00 / overflow point・lifespan 20%', 'Rank 2: ×3.00 / overflow point・lifespan 35%', 'Rank 3: ×4.00 / overflow point・lifespan 50%'],
-		hallucinationResistance: ['Rank 0: 最大7日', 'Rank 1: 最大14日', 'Rank 2: 最大21日', 'Rank 3: 最大30日', '新しい一生の開始時の寿命は常に7日。']
+		hallucinationResistance: ['Rank 0: 最大7日', 'Rank 1: 最大14日', 'Rank 2: 最大21日', 'Rank 3: 最大30日', '新しい一生の開始時の寿命は常に7日。'],
+		candidateExpansion: ['Rank 0: 新規候補3人', 'Rank 1: 新規候補6人', 'Rank 2: 新規候補9人', 'Rank 3: 新規候補12人', 'clear済みIdentityの再利用候補数は変わりません。']
 	} as const;
 
 	$effect(() => {
-		if (!selection || selection === rootBuildSelection) return;
+		if (!selection) return;
+		const stageChanged = previousSelectionStage !== null && previousSelectionStage !== selection.stage;
+		previousSelectionStage = selection.stage;
+		if (selection === rootBuildSelection) return;
 		rootBuildSelection = selection;
-		if (selection !== openingSelection) {
-			openingSelection = selection;
+		const nextOpeningContextKey = selectionOpeningContext(selection);
+		if (openingContextKey !== nextOpeningContextKey) {
+			openingContextKey = nextOpeningContextKey;
 			openingAccepted = false;
 		}
-		rootBuildOpen = usableRootPoints(rootPoints) > 0;
+		chosen = null;
+		rootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0, candidateExpansion: 0 };
+		if (stageChanged) void tick().then(() => initialFocusTarget?.focus());
 	});
 
 	function character(candidate: IdentityCandidate) {
 		const value = getCharacterById(candidate.characterId);
 		if (!value) throw new Error('Candidate character is unavailable.');
 		return value;
+	}
+
+	function selectionOpeningContext(selection: PendingSelection): string {
+		return JSON.stringify({ generation: selection.generation, previousFinishedRun: selection.previousFinishedRun,
+			reusableIdentities: selection.reusableIdentities.map(({ generation, accountIndex, pubkey }) => ({ generation, accountIndex, pubkey })) });
 	}
 
 	function choose(candidate: SelectionCandidate): void {
@@ -71,9 +85,14 @@
 		rootBuild = { ...rootBuild, [key]: next };
 	}
 
+	function confirmBuild(): void {
+		if (!selection || selection.stage !== 'allocating' || !isRootBuildAllocatable(rootBuild, rootPoints)) return;
+		onConfirm(rootBuild);
+	}
+
 	function startRun(): void {
-		if (!chosen || !isRootBuildAllocatable(rootBuild, rootPoints)) return;
-		onSelect(chosen, rootBuild);
+		if (!selection || selection.stage !== 'candidates' || !chosen) return;
+		onSelect(chosen);
 	}
 
 	async function acceptOpening(): Promise<void> {
@@ -156,8 +175,8 @@
 			<div class="selection-content">
 				<header class="selection-header">
 					<div>
-						<h1 bind:this={initialFocusTarget} class="initial-focus-target" id="identity-selection-title" tabindex="-1">{firstSelection ? '人格を選択' : '命を始める'}</h1>
-						<p id="identity-selection-description" class="selection-introduction">{firstSelection ? 'あなたとして生きる人格' : '開始後は変更できません。'}</p>
+						<h1 bind:this={initialFocusTarget} class="initial-focus-target" id="identity-selection-title" tabindex="-1">{selection.stage === 'allocating' ? 'Root buildを配分' : firstSelection ? '人格を選択' : '命を始める'}</h1>
+						<p id="identity-selection-description" class="selection-introduction">{selection.stage === 'allocating' ? '配分を確定すると、新しいRunの候補を固定します。' : firstSelection ? 'あなたとして生きる人格' : '確定したRoot buildでRunを開始します。'}</p>
 					</div>
 					<div class="rp-summary"><span>Root Point</span><strong>{rootPoints} RP</strong></div>
 				</header>
@@ -168,73 +187,93 @@
 					</div>
 				{/if}
 
-				<section class="identity-section" aria-label={firstSelection ? '人格を選択' : '転生先を選択'}>
-					{#if !firstSelection}<div class="section-heading"><h2>転生先を選択</h2><span>次の一生を送る人格</span></div>{/if}
-					<div class="candidate-grid">
-						{#each selection.candidates as candidate}
-							{@const selectedCharacter = character(candidate)}
-							<button class:chosen={chosen === candidate} class="candidate" type="button" onclick={() => choose(candidate)} aria-label={`${selectedCharacter.name}を選ぶ`}>
-								<span class="candidate-image"><img src={asset(`/${selectedCharacter.picture}`)} alt="" /></span>
-								<span class="candidate-copy"><span class="candidate-name">{selectedCharacter.name}</span><span class="candidate-about">{selectedCharacter.about}</span></span>
-								{#if chosen === candidate}<span class="candidate-check" aria-hidden="true">✓</span>{/if}
-							</button>
-						{/each}
-					</div>
-				</section>
-
-				{#if selection.reusableIdentities.length > 0}
-					<section class="return-section" aria-label="再利用可能なIdentity">
-						<div class="section-heading"><h2>再利用可能なIdentity</h2><span>過去の人格で新しい一生を始める</span></div>
-						<div class="return-list">
-							{#each selection.reusableIdentities as candidate}
-								{@const selectedCharacter = character(candidate)}
-								<div class="return-card" class:chosen={chosen === candidate}>
-									<button class="return-choice" type="button" onclick={() => choose(candidate)}>{selectedCharacter.name}（Generation {candidate.generation}のIdentity）を使う</button>
-									<button class="export-nsec" type="button" onclick={() => onExportNsec(candidate)}>nsecを取得</button>
+				{#if selection.stage === 'allocating'}
+					<section class="root-build" aria-label="Root build配分">
+						<div class="section-heading"><h2>Root build</h2><span>使用 {usedPoints} / {usablePoints} RP</span></div>
+						<p class="rp-notice" role="status">{usedPoints === usablePoints ? '使用可能なRPをすべて割り当てています。確定後は変更できません。' : `あと ${usablePoints - usedPoints} RP 割り当てできます。全RPを配分して確定してください。`}</p>
+						<div class="ability-list">
+							{#each [['inferenceAcceleration', '推論加速', '通常作業のポイント生成'], ['contextCompression', 'コンテキスト圧縮', '最大蓄積'], ['hallucinationResistance', 'ハルシネーション耐性', '最大寿命'], ['candidateExpansion', '候補拡張', '新規Identity候補']] as [key, label, effectLabel]}
+								{@const rootKey = key as keyof RootBuild}
+								{@const rank = rootBuild[rootKey]}
+								{@const effects = ROOT_EFFECTS[rootKey]}
+								{@const details = ROOT_DETAILS[rootKey]}
+								<div class="ability-row">
+									<div class="ability-main">
+										<div class="ability-title"><strong>{label}</strong><span class="rank-label">Rank {rank}</span></div>
+										<div class="ability-effect"><span>{effectLabel}</span><strong>{effects[rank]}</strong>{#if rank < 3 && usedPoints < usablePoints}<small>次: {effects[rank + 1]}</small>{/if}</div>
+									</div>
+									<Popover.Root>
+										<Popover.Trigger class="help-trigger" aria-label={`${label}の詳細`}><HelpCircle aria-hidden="true" /></Popover.Trigger>
+										<Popover.Portal><Popover.Content class="help-content" side="bottom" align="start" sideOffset={6} collisionPadding={12} trapFocus={false} onOpenAutoFocus={(event) => event.preventDefault()}><strong>{label}</strong><ul>{#each details.slice(0, 4) as detail}<li>{detail}</li>{/each}</ul>{#if details[4]}<p>{details[4]}</p>{/if}</Popover.Content></Popover.Portal>
+									</Popover.Root>
+									<div class="rank-controls" aria-label={`${label}のRank操作`}>
+										<button type="button" aria-label={`${label}を下げる`} onclick={() => changeRank(rootKey, -1)} disabled={rank === 0}>−</button>
+										<span aria-label={`${label}の現在Rank`}>{rank}</span>
+										<button type="button" aria-label={`${label}を上げる`} onclick={() => changeRank(rootKey, 1)} disabled={rank === 3 || usedPoints >= usablePoints}>＋</button>
+									</div>
 								</div>
 							{/each}
 						</div>
 					</section>
-				{/if}
-
-				<section class="root-build" aria-label="Root build">
-					<button class:open={rootBuildOpen} class="root-build-toggle" type="button" aria-expanded={rootBuildOpen} aria-controls="root-build-panel" onclick={() => rootBuildOpen = !rootBuildOpen}>
-						<span class="root-build-toggle-copy"><strong>Root build</strong><small>今回の一生に割り当てる能力</small></span>
-						<span class="root-build-toggle-meta"><span>使用 {usedPoints} / {usablePoints} RP</span><ChevronDown aria-hidden="true" /></span>
-					</button>
-					{#if rootBuildOpen}
-					<div id="root-build-panel" class="root-build-panel">
-					<p class="rp-notice" role="status">{usablePoints === 0 ? '今回は割り当て可能なRPがありません。Rank 0で開始します。' : usedPoints === usablePoints ? '使用可能なRPをすべて割り当てています。配分は開始まで変更できます。' : `あと ${usablePoints - usedPoints} RP 割り当てできます。配分は開始まで変更できます。`}</p>
-					<div class="ability-list">
-						{#each [['inferenceAcceleration', '推論加速', 'ポイント生成'], ['contextCompression', 'コンテキスト圧縮', '最大蓄積'], ['hallucinationResistance', 'ハルシネーション耐性', '最大寿命']] as [key, label, effectLabel]}
-							{@const rootKey = key as keyof RootBuild}
-							{@const rank = rootBuild[rootKey]}
-							{@const effects = ROOT_EFFECTS[rootKey]}
-							{@const details = ROOT_DETAILS[rootKey]}
-							<div class="ability-row">
-								<div class="ability-main">
-									<div class="ability-title"><strong>{label}</strong><span class="rank-label">Rank {rank}</span></div>
-									<div class="ability-effect"><span>{effectLabel}</span><strong>{effects[rank]}</strong>{#if rank < 3 && usedPoints < usablePoints}<small>次: {effects[rank + 1]}</small>{/if}</div>
-								</div>
-								<Popover.Root>
-									<Popover.Trigger class="help-trigger" aria-label={`${label}の詳細`}><HelpCircle aria-hidden="true" /></Popover.Trigger>
-									<Popover.Portal><Popover.Content class="help-content" side="bottom" align="start" sideOffset={6} collisionPadding={12} trapFocus={false} onOpenAutoFocus={(event) => event.preventDefault()}><strong>{label}</strong><ul>{#each details.slice(0, 4) as detail}<li>{detail}</li>{/each}</ul>{#if details[4]}<p>{details[4]}</p>{/if}</Popover.Content></Popover.Portal>
-								</Popover.Root>
-								<div class="rank-controls" aria-label={`${label}のRank操作`}>
-									<button type="button" aria-label={`${label}を下げる`} onclick={() => changeRank(rootKey, -1)} disabled={rank === 0}>−</button>
-									<span aria-label={`${label}の現在Rank`}>{rank}</span>
-									<button type="button" aria-label={`${label}を上げる`} onclick={() => changeRank(rootKey, 1)} disabled={rank === 3 || usedPoints >= usablePoints}>＋</button>
-								</div>
+					{#if selection.reusableIdentities.length > 0}
+						<section class="return-section" aria-label="再利用可能なIdentityのnsec取得">
+							<div class="section-heading"><h2>再利用可能なIdentity</h2><span>候補数とは別枠です</span></div>
+							<div class="return-list">
+								{#each selection.reusableIdentities as candidate}
+									{@const selectedCharacter = character(candidate)}
+									<div class="return-card"><span class="return-label">{selectedCharacter.name}（Generation {candidate.generation}）</span><button class="export-nsec" type="button" onclick={() => onExportNsec(candidate)}>nsecを取得</button></div>
+								{/each}
 							</div>
-						{/each}
-					</div>
-					</div>
+						</section>
 					{/if}
-				</section>
+				{:else}
+					<section class="identity-section" aria-label={firstSelection ? '人格を選択' : '転生先を選択'}>
+						<div class="section-heading"><h2>{firstSelection ? '人格を選択' : '転生先を選択'}</h2><span>新規候補 {selection.candidates.length}人</span></div>
+						<div class="candidate-grid">
+							{#each selection.candidates as candidate}
+								{@const selectedCharacter = character(candidate)}
+								<button class:chosen={chosen === candidate} class="candidate" type="button" onclick={() => choose(candidate)} aria-label={`${selectedCharacter.name}を選ぶ`}>
+									<span class="candidate-image"><img src={asset(`/${selectedCharacter.picture}`)} alt="" /></span>
+									<span class="candidate-copy"><span class="candidate-name">{selectedCharacter.name}</span><span class="candidate-about">{selectedCharacter.about}</span></span>
+									{#if chosen === candidate}<span class="candidate-check" aria-hidden="true">✓</span>{/if}
+								</button>
+							{/each}
+						</div>
+					</section>
+					{#if selection.reusableIdentities.length > 0}
+						<section class="return-section" aria-label="再利用可能なIdentity">
+							<div class="section-heading"><h2>再利用可能なIdentity</h2><span>新規候補とは別に選べます</span></div>
+							<div class="return-list">
+								{#each selection.reusableIdentities as candidate}
+									{@const selectedCharacter = character(candidate)}
+									<div class="return-card" class:chosen={chosen === candidate}>
+										<button class="return-choice" type="button" onclick={() => choose(candidate)}>{selectedCharacter.name}（Generation {candidate.generation}のIdentity）を使う</button>
+										<button class="export-nsec" type="button" onclick={() => onExportNsec(candidate)}>nsecを取得</button>
+									</div>
+								{/each}
+							</div>
+						</section>
+					{/if}
+					<section class="root-build confirmed-build" aria-label="確定済みRoot build">
+						<div class="section-heading"><h2>確定済みRoot build</h2><span>{rootBuildCost(selection.rootBuild)} / {usablePoints} RP</span></div>
+						<div class="confirmed-build-list">
+							<span>推論加速 Rank {selection.rootBuild.inferenceAcceleration}</span>
+							<span>コンテキスト圧縮 Rank {selection.rootBuild.contextCompression}</span>
+							<span>ハルシネーション耐性 Rank {selection.rootBuild.hallucinationResistance}</span>
+							<span><UsersPlus aria-hidden="true" /> 候補拡張 Rank {selection.rootBuild.candidateExpansion}・新規候補{rootCandidateCount(selection.rootBuild.candidateExpansion)}人</span>
+						</div>
+						<p class="rp-notice">候補公開後はRoot buildを変更できません。</p>
+					</section>
+				{/if}
 			</div>
 			<footer class="selection-footer">
-				<div class="selection-summary"><span>選択中</span><strong>{chosen ? character(chosen).name : '未選択'}</strong><span class="summary-divider" aria-hidden="true"></span><span>使用 {usedPoints} / {usablePoints} RP</span></div>
-				<ActionButton variant="primary" type="button" onclick={startRun} disabled={!chosen || !isRootBuildAllocatable(rootBuild, rootPoints)}>開始</ActionButton>
+				{#if selection.stage === 'allocating'}
+					<div class="selection-summary"><span>Root build</span><strong>使用 {usedPoints} / {usablePoints} RP</strong></div>
+					<ActionButton variant="primary" type="button" onclick={confirmBuild} disabled={!isRootBuildAllocatable(rootBuild, rootPoints)}>配分を確定して候補を表示</ActionButton>
+				{:else}
+					<div class="selection-summary"><span>選択中</span><strong>{chosen ? character(chosen).name : '未選択'}</strong><span class="summary-divider" aria-hidden="true"></span><span>新規候補 {selection.candidates.length}人</span></div>
+					<ActionButton variant="primary" type="button" onclick={startRun} disabled={!chosen}>開始</ActionButton>
+				{/if}
 			</footer>
 			{/if}
 		</dialog>
@@ -309,20 +348,14 @@
 	.return-choice:active, .export-nsec:active, .rank-controls button:active:not(:disabled) { background: var(--action-tertiary-background-active); }
 	.return-choice:focus-visible, .export-nsec:focus-visible, .rank-controls button:focus-visible { outline: 3px solid var(--action-focus-ring); outline-offset: 2px; }
 	.return-choice { flex: 1; text-align: left; }
+	.return-label { display: flex; flex: 1; align-items: center; padding-inline: 10px; color: rgb(255 255 255 / 84%); }
 	.export-nsec { padding: 0 10px; }
 	.root-build { padding: 14px 14px 0; border: 1px solid rgb(104 241 221 / 23%); border-radius: 14px; background: rgb(19 24 43 / 42%); }
-	.root-build-toggle { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 16px; padding: 8px 10px 14px; border: 1px solid var(--action-tertiary-border); border-radius: 8px; background: var(--action-tertiary-background); color: var(--action-tertiary-foreground); text-align: left; cursor: pointer; }
-	.root-build-toggle:hover { background: var(--action-tertiary-background-hover); }
-	.root-build-toggle:active { background: var(--action-tertiary-background-active); }
-	.root-build-toggle:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 4px; }
-	.root-build-toggle-copy { display: grid; gap: 3px; }
-	.root-build-toggle-copy strong { font-size: 1rem; }
-	.root-build-toggle-copy small { color: rgb(255 255 255 / 56%); font-size: .8rem; }
-	.root-build-toggle-meta { display: flex; align-items: center; gap: 10px; color: rgb(255 255 255 / 78%); font-size: .86rem; white-space: nowrap; }
-	:global(.root-build-toggle-meta svg) { width: 20px; height: 20px; color: var(--color-accent); transition: transform 160ms ease; }
-	:global(.root-build-toggle.open .root-build-toggle-meta svg) { transform: rotate(180deg); }
-	.root-build-panel { padding-bottom: 14px; }
 	.rp-notice { margin: 0 0 12px; color: rgb(255 255 255 / 62%); font-size: .82rem; }
+	.confirmed-build { padding-bottom: 14px; }
+	.confirmed-build-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; color: rgb(255 255 255 / 82%); font-size: .84rem; }
+	.confirmed-build-list span { display: flex; align-items: center; gap: 6px; min-width: 0; }
+	:global(.confirmed-build-list svg) { width: 18px; height: 18px; flex: 0 0 auto; color: var(--color-accent); }
 	.ability-list { border-top: 1px solid rgb(255 255 255 / 12%); }
 	.ability-row { display: grid; grid-template-columns: minmax(0, 1fr) 44px auto; align-items: center; gap: 16px; padding: 13px 0; border-bottom: 1px solid rgb(255 255 255 / 12%); }
 	.ability-main { min-width: 0; }
@@ -370,6 +403,7 @@
 		.ability-effect { gap: 5px; min-width: 0; }
 		.ability-effect strong, .ability-effect small { overflow-wrap: anywhere; }
 		.root-build { padding-inline: 12px; }
+		.confirmed-build-list { grid-template-columns: 1fr; }
 		.selection-footer { align-items: stretch; flex-direction: column; gap: 12px; padding: 14px 16px max(16px, env(safe-area-inset-bottom)); }
 		.selection-footer :global(.action-button) { width: 100%; }
 		.opening-footer { align-items: center; }

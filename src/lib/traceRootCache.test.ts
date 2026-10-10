@@ -11,6 +11,7 @@ import {
 import {
 	openTraceDatabase,
 	TRACE_DATABASE_NAME,
+	TRACE_DATABASE_VERSION,
 	TRACE_REPLY_LRU_STORE,
 	TRACE_REPLY_STORE,
 	TRACE_ROOT_STORE,
@@ -103,7 +104,7 @@ describe('trace root cache reconciliation', () => {
 			channelId: CHANNEL_ID, field: { columns: 20, rows: 1 }, rawEvents: []
 		})).map((root) => root.id)).toEqual([event.id]);
 		const upgraded = await database();
-		expect(upgraded.version).toBe(4);
+		expect(upgraded.version).toBe(TRACE_DATABASE_VERSION);
 		expect([...upgraded.objectStoreNames]).toEqual([
 			'trace-replies', 'trace-reply-lru', 'trace-reply-read', 'trace-reward-outbox', 'trace-root-read', 'trace-roots'
 		]);

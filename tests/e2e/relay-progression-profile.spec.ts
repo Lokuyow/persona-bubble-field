@@ -460,7 +460,7 @@ test.describe('Relay startup', () => {
 		await page.clock.install({ time: startTime });
 		await installHostOwnedStub(page);
 		await installDelayedRelay(page, { primaryEvents: testEvents(startTime) });
-		await seedRelayAccount(page, secret, pubkey, Date.now() + 7 * 24 * 60 * 60 * 1000, 0, { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 }, 1, { inferenceAcceleration: 0, contextCompression: 1, hallucinationResistance: 0 });
+		await seedRelayAccount(page, secret, pubkey, Date.now() + 7 * 24 * 60 * 60 * 1000, 0, { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 }, 1, { inferenceAcceleration: 0, contextCompression: 1, hallucinationResistance: 0, candidateExpansion: 0 });
 		await page.goto('/');
 		await page.evaluate(() => {
 			const relay = (window as typeof window & { __relayStartupTest: { releasePrimary(): void } }).__relayStartupTest;
@@ -610,7 +610,7 @@ for (const stateKind of ['missing', 'corrupt'] as const) {
 		await page.clock.install({ time: startTime });
 		await installHostOwnedStub(page);
 		await installDelayedRelay(page, { primaryEvents: testEvents(startTime) });
-		await seedRelayAccount(page, secret, pubkey, startTime + 7 * day, 125_000, undefined, 3, { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 3 });
+		await seedRelayAccount(page, secret, pubkey, startTime + 7 * day, 125_000, undefined, 3, { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 3, candidateExpansion: 0 });
 		await page.goto('/');
 		await expect(page.locator('.action-dock')).toBeVisible();
 		await expect.poll(async () => (await relayState(page)).state.requests.some((request) =>

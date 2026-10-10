@@ -234,11 +234,11 @@ test.describe('Relay startup', () => {
 		const candidateButtons = page.getByRole('button', { name: /を選ぶ$/ });
 		await expect(candidateButtons).toHaveCount(3);
 		await expect.poll(() => page.locator('main > :not(.selection-backdrop)').evaluateAll((elements) => elements.every((element) => (element as HTMLElement).inert))).toBe(true);
-		await expect(page.getByRole('heading', { name: '人格を選択' })).toBeFocused();
+		await expect(page.locator('#identity-selection-title')).toBeFocused();
 		await page.keyboard.press('Tab');
 		await expect(candidateButtons.first()).toBeFocused();
 		await page.keyboard.press('Shift+Tab');
-		await expect(page.getByRole('button', { name: /Root build/ })).toBeFocused();
+		await expect(candidateButtons.last()).toBeFocused();
 		expect((await relayState(page)).state.published.filter((event) => event.kind === 0)).toHaveLength(0);
 		const labelsBeforeReload = await candidateButtons.allTextContents();
 		await expect(page.locator('.participant[data-self="true"]')).toHaveCount(0);
@@ -307,35 +307,30 @@ test.describe('Relay startup', () => {
 		expect(lifecycle).toEqual({ mode: 'running', identities: 1, runNumber: 1 });
 	});
 
-	test('allocates a Root build before starting a Run', async ({ page }) => {
+	test('confirms all twelve Root Points before fixing and restoring twelve candidates', async ({ page }) => {
 		await installHostOwnedStub(page);
 		await installDelayedRelay(page);
 		await page.goto('/');
 		await page.setViewportSize({ width: 420, height: 420 });
 		await continueFirstRunOpeningIfPresent(page);
-		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
-		await setPendingRootPoints(page, 0);
+		await setPendingRootPoints(page, 12);
 		await page.reload({ waitUntil: 'domcontentloaded' });
 		await continueFirstRunOpeningIfPresent(page);
-		await page.getByRole('button', { name: /を選ぶ$/ }).first().click();
-		const rootToggle = page.locator('.root-build-toggle');
-		await expect(rootToggle).toHaveAttribute('aria-expanded', 'false');
-		await expect(rootToggle).toContainText('使用 0 / 0 RP');
-		await expect(page.locator('.rank-controls')).toHaveCount(0);
-		await expect(page.getByRole('button', { name: '開始' })).toBeEnabled();
-		await setPendingRootPoints(page, 3);
+		await expect(page.locator('.rp-summary')).toContainText('12 RP');
+		const allocation = page.locator('.root-build');
+		await expect(allocation.locator('.ability-row')).toHaveCount(4);
+		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(0);
+		await expect(page.getByRole('button', { name: '開始' })).toHaveCount(0);
+		const confirm = page.getByRole('button', { name: '配分を確定して候補を表示' });
+		await expect(confirm).toBeDisabled();
+		await allocation.locator('.rank-controls').nth(0).getByRole('button', { name: /を上げる$/ }).click();
 		await page.reload({ waitUntil: 'domcontentloaded' });
 		await continueFirstRunOpeningIfPresent(page);
+		await expect(page.locator('.root-build .rank-controls span').first()).toHaveText('0');
+		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(0);
 
-		await expect(page.locator('.rp-summary')).toContainText('3 RP');
 		const rootBuild = page.locator('.root-build');
-		await expect(rootToggle).toHaveAttribute('aria-expanded', 'true');
-		await expect(rootBuild.locator('.ability-row')).toHaveCount(3);
-		await rootToggle.focus();
-		await page.keyboard.press('Enter');
-		await expect(rootToggle).toHaveAttribute('aria-expanded', 'false');
-		await page.keyboard.press('Space');
-		await expect(rootToggle).toHaveAttribute('aria-expanded', 'true');
+		const rankRows = rootBuild.locator('.ability-row');
 		await expect(rootBuild.getByRole('button', { name: '推論加速の詳細' })).toBeVisible();
 		const mobileLayout = await rootBuild.locator('.ability-row').first().evaluate((row) => {
 			const main = row.querySelector('.ability-main')?.getBoundingClientRect();
@@ -345,26 +340,17 @@ test.describe('Relay startup', () => {
 		});
 		expect(mobileLayout.mainWidth).toBeGreaterThan(120);
 		expect(mobileLayout.noHorizontalOverflow).toBe(true);
-		await page.setViewportSize({ width: 1280, height: 800 });
-		const desktopCenters = await rootBuild.locator('.ability-row').first().evaluate((row) => {
-			const help = row.querySelector('.help-trigger')?.getBoundingClientRect();
-			const rank = row.querySelector('.rank-controls button')?.getBoundingClientRect();
-			if (!help || !rank) throw new Error('ability controls are incomplete');
-			return { helpCenter: help.top + help.height / 2, rankCenter: rank.top + rank.height / 2 };
-		});
-		expect(Math.abs(desktopCenters.helpCenter - desktopCenters.rankCenter)).toBeLessThanOrEqual(1);
 		await expect.poll(async () => rootBuild.locator('.help-trigger').evaluateAll((elements) => elements.every((element) => {
 			const rect = element.getBoundingClientRect();
 			return rect.width >= 44 && rect.height >= 44;
 		}))).toBe(true);
-		await expect.poll(async () => rootBuild.locator('.rank-controls button').first().evaluate((element) => {
+		await expect.poll(async () => rankRows.first().locator('.rank-controls button').first().evaluate((element) => {
 			const rect = element.getBoundingClientRect();
 			return rect.width >= 44 && rect.height >= 44;
 		})).toBe(true);
-		const selectionContent = page.locator('.selection-content');
-		await selectionContent.evaluate((element) => { element.scrollTop = element.scrollHeight - element.clientHeight; });
 		const help = rootBuild.getByRole('button', { name: '推論加速の詳細' });
 		await help.scrollIntoViewIfNeeded();
+		const selectionContent = page.locator('.selection-content');
 		const scrollBeforeHelp = await selectionContent.evaluate((element) => element.scrollTop);
 		await help.click();
 		await expect(page.locator('.help-content')).toBeVisible();
@@ -379,13 +365,30 @@ test.describe('Relay startup', () => {
 		await expect.poll(async () => selectionContent.evaluate((element) => element.scrollTop)).toBe(scrollBeforeHelp);
 		await expect.poll(async () => page.evaluate(() => document.activeElement?.getAttribute('aria-label'))).toBe('推論加速の詳細');
 		await page.keyboard.press('Escape');
-		await expect(rootBuild).not.toContainText('Rank 3: ×4.00');
-		await page.getByRole('button', { name: /を選ぶ$/ }).first().click();
-		const rankRows = page.locator('.ability-row');
-		for (let index = 0; index < 3; index += 1) {
-			await rankRows.nth(index).getByRole('button', { name: /を上げる$/ }).click();
+		await expect(rootBuild).not.toContainText('Rank 3: 新規候補12人');
+		for (let row = 0; row < 4; row += 1) {
+			for (let rank = 0; rank < 3; rank += 1) {
+				await rankRows.nth(row).getByRole('button', { name: /を上げる$/ }).click();
+			}
 		}
 		await expect.poll(async () => page.locator('.rank-controls button[aria-label$="を上げる"]').evaluateAll((buttons) => buttons.every((button) => (button as HTMLButtonElement).disabled))).toBe(true);
+		await expect(confirm).toBeEnabled();
+		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(0);
+		await confirm.click();
+		const candidateButtons = page.getByRole('button', { name: /を選ぶ$/ });
+		await expect(candidateButtons).toHaveCount(12);
+		await expect(page.locator('.rank-controls')).toHaveCount(0);
+		await expect(page.locator('.confirmed-build')).toContainText('候補拡張 Rank 3・新規候補12人');
+		const labelsBeforeReload = await candidateButtons.allTextContents();
+		await page.reload({ waitUntil: 'domcontentloaded' });
+		await continueFirstRunOpeningIfPresent(page);
+		const restoredCandidates = page.getByRole('button', { name: /を選ぶ$/ });
+		await expect(restoredCandidates).toHaveCount(12);
+		expect(await restoredCandidates.allTextContents()).toEqual(labelsBeforeReload);
+		await expect(page.locator('.confirmed-build')).toContainText('候補公開後はRoot buildを変更できません');
+		await restoredCandidates.nth(11).scrollIntoViewIfNeeded();
+		await expect(restoredCandidates.nth(11)).toBeVisible();
+		await restoredCandidates.nth(11).click();
 		await expect(page.getByRole('button', { name: '開始' })).toBeEnabled();
 		await startSelectedRun(page);
 		await expect(page.getByRole('dialog')).toHaveCount(0);
@@ -394,6 +397,21 @@ test.describe('Relay startup', () => {
 			relay.releasePrimary();
 		});
 		await expect(page.locator('.participant[data-self="true"]')).toBeVisible();
+		const persistedBuild = await page.evaluate(async () => {
+			const database = await new Promise<IDBDatabase>((resolve, reject) => {
+				const request = indexedDB.open('persona-bubble-field-account');
+				request.onsuccess = () => resolve(request.result);
+				request.onerror = () => reject(request.error);
+			});
+			try {
+				const request = database.transaction('persona-bubble-field-player-state').objectStore('persona-bubble-field-player-state').get('player-lifecycle');
+				return await new Promise((resolve, reject) => {
+					request.onsuccess = () => resolve((request.result as { mode: { activeRun: { rootBuild: unknown } } }).mode.activeRun.rootBuild);
+					request.onerror = () => reject(request.error);
+				});
+			} finally { database.close(); }
+		});
+		expect(persistedBuild).toEqual({ inferenceAcceleration: 3, contextCompression: 3, hallucinationResistance: 3, candidateExpansion: 3 });
 	});
 
 	test('reuses a completed anonymous world session after Identity selection', async ({ page }) => {
@@ -521,7 +539,7 @@ test.describe('Relay startup', () => {
 		await expect(dialog).not.toContainText(/Nostr|Root Point|能力|Identity|Run/);
 		await opening.focus();
 		await page.keyboard.press('Enter');
-		await expect(dialog.getByRole('heading', { name: '人格を選択' })).toBeFocused();
+		await expect(dialog.locator('#identity-selection-title')).toBeFocused();
 		await expect(dialog.locator('#identity-selection-description')).toHaveText('あなたとして生きる人格');
 		await expect(dialog.getByRole('region', { name: '人格を選択' })).toBeVisible();
 		const runButton = page.getByRole('button', { name: '開始' });
@@ -534,7 +552,7 @@ test.describe('Relay startup', () => {
 		await expect(runButton).toHaveAttribute('data-action-variant', 'primary');
 		await expect(dialog.locator('[data-action-variant="primary"]')).toHaveCount(1);
 
-		await dialog.getByRole('heading', { name: '人格を選択' }).focus();
+		await dialog.locator('#identity-selection-title').focus();
 		await page.keyboard.press('Tab');
 		await expect(candidates.first()).toBeFocused();
 		await page.keyboard.press('Enter');

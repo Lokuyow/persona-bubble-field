@@ -559,7 +559,7 @@ describe('world read session', () => {
 		const session = createWorldReadSession({ field: { columns: 4, rows: 3 }, selfSigner: signer, selfRunNumber: 1,
 			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn() });
 		await session.start();
-		const rootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0 } as const;
+		const rootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0, candidateExpansion: 0 } as const;
 		const snapshot = (rootPoints: number) => ({ signer, identity: signer.identity, rootPoints,
 			activeRun: { runNumber: 1, rootBuild }, gameState: createInitialPersonaGameState(signer.pubkey, 700_000) }) as unknown as PersonaSnapshot;
 		mocked.reservePublicProfilePublication.mockResolvedValue({ kind: 'reserved', createdAt: 701, persona: snapshot(2) });
@@ -583,7 +583,7 @@ describe('world read session', () => {
 		const session = createWorldReadSession({ field: { columns: 4, rows: 3 }, selfSigner: signer, selfRunNumber: 1,
 			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn() });
 		await session.start();
-		const rootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0 } as const;
+		const rootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0, candidateExpansion: 0 } as const;
 		const persona = { signer, identity: signer.identity, rootPoints: 2, activeRun: { runNumber: 1, rootBuild },
 			gameState: createInitialPersonaGameState(signer.pubkey, 700_000) } as unknown as PersonaSnapshot;
 		mocked.reservePublicProfilePublication.mockResolvedValue({ kind: 'reserved', createdAt: 701, persona });
@@ -616,7 +616,7 @@ describe('world read session', () => {
 		const session = createWorldReadSession({ field: { columns: 4, rows: 3 }, selfSigner: signer, selfRunNumber: 1,
 			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn() });
 		await session.start();
-		const rootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0 } as const;
+		const rootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0, candidateExpansion: 0 } as const;
 		const snapshot = (points: number) => ({ signer, identity: signer.identity, rootPoints: 2,
 			activeRun: { runNumber: 1, rootBuild }, gameState: { ...createInitialPersonaGameState(signer.pubkey, 700_000), points } }) as unknown as PersonaSnapshot;
 		mocked.reservePublicProfilePublication
@@ -644,7 +644,7 @@ describe('world read session', () => {
 		const session = createWorldReadSession({ field: { columns: 4, rows: 3 }, selfSigner: signer, selfRunNumber: 1,
 			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn() });
 		await session.start();
-		const rootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0 } as const;
+		const rootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0, candidateExpansion: 0 } as const;
 		const persona = { signer, identity: signer.identity, rootPoints: 2, activeRun: { runNumber: 1, rootBuild },
 			gameState: createInitialPersonaGameState(signer.pubkey, 700_000) } as unknown as PersonaSnapshot;
 		mocked.reservePublicProfilePublication.mockResolvedValue({ kind: 'reserved', createdAt: 701, persona });
@@ -664,7 +664,7 @@ describe('world read session', () => {
 		const session = createWorldReadSession({ field: { columns: 4, rows: 3 }, selfSigner: signer, selfRunNumber: 1,
 			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn() });
 		await session.start();
-		const rootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0 } as const;
+		const rootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0, candidateExpansion: 0 } as const;
 		const persona = { signer, identity: signer.identity, rootPoints: 2, activeRun: { runNumber: 1, rootBuild },
 			gameState: createInitialPersonaGameState(signer.pubkey, 700_000) } as unknown as PersonaSnapshot;
 		mocked.reservePublicProfilePublication

@@ -85,6 +85,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		LIFECYCLE_UPGRADE_BLOCKED_MESSAGE,
 		authorizeActiveRun,
 		collectMending,
+		confirmRootBuild,
 		loadOrCreateLifecycle,
 		selectIdentity,
 		transitionExpiredPersona,
@@ -1981,7 +1982,14 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 				if (personaResult.kind === 'created' || personaResult.kind === 'selecting') {
 					pendingIdentitySelection = personaResult.selection;
 					pendingRootPoints = personaResult.rootPoints;
-					runTransitionNotice = transitionNotice;
+					if (personaResult.selection.generation === 1 && personaResult.selection.previousFinishedRun === null) {
+						try { window.sessionStorage.removeItem(FIRST_RUN_TUTORIAL_SESSION_KEY); } catch { /* A stale session hint must not survive the clean lifecycle reset. */ }
+						firstRunTutorialScope = null;
+						firstRunTutorialStep = null;
+						runTransitionNotice = null;
+					} else {
+						runTransitionNotice = transitionNotice;
+					}
 					selfSigner = null;
 					personaSnapshot = null;
 				} else if (personaResult.kind !== 'restored') {
@@ -2312,16 +2320,38 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		rankingDialogOpen = true;
 	}
 
-	async function chooseIdentity(candidate: SelectionCandidate, rootBuild: RootBuild): Promise<void> {
+	async function confirmIdentityRootBuild(rootBuild: RootBuild): Promise<void> {
 		const selection = pendingIdentitySelection;
-		if (!selection || personaLifecycleTransition) return;
+		if (!selection || selection.stage !== 'allocating' || personaLifecycleTransition) return;
+		personaLifecycleTransition = true;
+		try {
+			const result = await confirmRootBuild(selection, rootBuild);
+			if (result.kind === 'confirmed') {
+				pendingIdentitySelection = result.selection;
+				return;
+			}
+			if (result.kind === 'superseded') {
+				window.location.reload();
+				return;
+			}
+			enterReadOnlyFallback('Root build could not be confirmed.');
+		} catch {
+			enterReadOnlyFallback('Root build could not be confirmed.');
+		} finally {
+			personaLifecycleTransition = false;
+		}
+	}
+
+	async function chooseIdentity(candidate: SelectionCandidate): Promise<void> {
+		const selection = pendingIdentitySelection;
+		if (!selection || selection.stage !== 'candidates' || personaLifecycleTransition) return;
 		personaLifecycleTransition = true;
 		try {
 			const selectionOptions = deathDevMode || clearDevMode ? {
 				...(deathDevMode ? { initialLifespanMs: DEATH_DEV_INITIAL_LIFESPAN_MS } : {}),
 				...(clearDevMode ? { initialPoints: CLEAR_DEV_INITIAL_POINTS } : {})
 			} : undefined;
-			const result = await selectIdentity(selection.generation, candidate, rootBuild, selectionOptions);
+			const result = await selectIdentity(selection, candidate, selectionOptions);
 			if (result.kind === 'selected') {
 				if (selection.generation === 1 && selection.reusableIdentities.length === 0 && result.persona.activeRun.runNumber === 1) {
 					storeFirstRunTutorialStep('life', result.persona);
@@ -5628,7 +5658,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		currentRunNumber={profileRunNumber}
 		avatarTone={profileTargetPubkey ? colorByPubkey[profileTargetPubkey] ?? 'sky' : 'sky'}
 	/>
-	<IdentitySelectionDialog selection={pendingIdentitySelection} rootPoints={pendingRootPoints} transitionNotice={runTransitionNotice} onSelect={(candidate, rootBuild) => { void chooseIdentity(candidate, rootBuild); }} onExportNsec={(candidate) => { void exportIdentityNsec(candidate); }} />
+	<IdentitySelectionDialog selection={pendingIdentitySelection} rootPoints={pendingRootPoints} transitionNotice={runTransitionNotice} onConfirm={(rootBuild) => { void confirmIdentityRootBuild(rootBuild); }} onSelect={(candidate) => { void chooseIdentity(candidate); }} onExportNsec={(candidate) => { void exportIdentityNsec(candidate); }} />
 	<MendingDialog
 		open={mendingDialogOpen}
 		projection={mendingProjection}
