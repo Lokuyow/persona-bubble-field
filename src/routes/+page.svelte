@@ -468,6 +468,8 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			storeFirstRunTutorialStep('movement', persona);
 		} else if (firstRunTutorialStep === 'speech') {
 			storeFirstRunTutorialStep('trace', persona);
+		} else if (firstRunTutorialStep === 'trace' && !firstRunTutorialTraceTargetId && traceReadBaselineSnapshot) {
+			storeFirstRunTutorialStep('reply', persona);
 		} else if (firstRunTutorialStep === 'note') {
 			storeFirstRunTutorialStep('help', persona);
 		} else if (firstRunTutorialStep === 'reply') {
@@ -5522,7 +5524,12 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 				<p>誰かに話しかけてみましょう</p>
 				<ActionButton variant="primary" class="first-run-tutorial-next" type="button" onclick={advanceFirstRunTutorialFromPrompt}>次へ</ActionButton>
 			{:else if firstRunTutorialStep === 'trace'}
-				<p>他の住人の未読の痕跡・書置き・遺言のどれかを1つ読んで、5ptを受け取ろう。</p>
+				{#if firstRunTutorialTraceTargetId || !traceReadBaselineSnapshot}
+					<p>他の住人の未読の痕跡・書置き・遺言のどれかを1つ読んで、5ptを受け取ろう。</p>
+				{:else}
+					<p>読める未読の痕跡がありません。次へ進めます。</p>
+					<ActionButton variant="primary" class="first-run-tutorial-next" type="button" onclick={advanceFirstRunTutorialFromPrompt}>次へ</ActionButton>
+				{/if}
 			{:else if firstRunTutorialStep === 'note'}
 				<p>100ptを使って、その場に書置きを残せます</p>
 				<ActionButton variant="primary" class="first-run-tutorial-next" type="button" onclick={advanceFirstRunTutorialFromPrompt}>次へ</ActionButton>

@@ -190,6 +190,16 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 420, height: 800 
 		const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
 		const traceStep = page.locator('[data-first-run-tutorial="trace"]');
 		const composer = page.locator('ehagaki-composer');
+		if (viewport.width === 1280) {
+			const pointsBeforeEarlyRead = (await readRelayGameState(page)).points;
+			await editor.focus();
+			await page.keyboard.press('Escape');
+			await moveRelaySelfTo(page, { x: 5, y: 2 });
+			await selectRelayTraceCell(page, '4,2');
+			await expect(page.locator(`[data-trace-root-id="${trace.root.id}"]`)).toContainText(trace.root.content);
+			await expect.poll(() => readRelayGameState(page)).toMatchObject({ points: pointsBeforeEarlyRead + 5 });
+			await moveRelaySelfTo(page, { x: 6, y: 2 });
+		}
 		const speechContent = 'チュートリアル中の発言';
 		await editor.fill(speechContent);
 		await expect(editor).toHaveValue(speechContent);
@@ -198,49 +208,58 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 420, height: 800 
 		await expect(traceStep).toBeVisible();
 		expect(await page.evaluate(() => sessionStorage.getItem('persona-bubble-field:first-run-tutorial'))).toContain('"step":"trace"');
 
-		await expect(traceStep).toContainText('他の住人の未読の痕跡・書置き・遺言のどれかを1つ読んで、5ptを受け取ろう。');
-		await expect(traceStep.getByRole('button')).toHaveCount(0);
-		const traceTarget = page.locator('[data-trace-marker-position="4,2"]');
-		await expect(traceTarget).toHaveAttribute('data-tutorial-highlight', 'trace');
-		await expectSlowTutorialPulse(page, '[data-tutorial-highlight="trace"]');
-		await expectSlowTutorialPulse(page, '[data-first-run-tutorial="trace"] p');
-		await expect.poll(() => traceTarget.evaluate((element) => element instanceof HTMLElement ? element.getBoundingClientRect().width / element.offsetWidth : 0)).toBeGreaterThan(1.5);
-		await page.reload({ waitUntil: 'domcontentloaded' });
-		await releaseFirstRunPrimary(page);
-		await expect(traceStep).toBeVisible();
-		await expect(traceTarget).toHaveAttribute('data-tutorial-highlight', 'trace');
-		const pointsBeforeTrace = (await readRelayGameState(page)).points;
-		const traceMovementEditor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
-		await traceMovementEditor.focus();
-		await page.keyboard.press('Escape');
-		await moveRelaySelfTo(page, { x: 5, y: 2 });
-		await expect(traceTarget).toBeInViewport();
-		await expect.poll(() => traceStep.evaluate((guide) => guide.classList.contains('first-run-tutorial-anchored'))).toBe(true);
-		const measureTraceGuidance = () => traceStep.evaluate((guide) => {
-			const target = document.querySelector('[data-trace-marker-position="4,2"][data-tutorial-highlight="trace"]');
-			if (!(target instanceof HTMLElement)) return null;
-			const guideBounds = guide.getBoundingClientRect();
-			const targetBounds = target.getBoundingClientRect();
-			const horizontalGap = Math.max(0, targetBounds.left - guideBounds.right, guideBounds.left - targetBounds.right);
-			const verticalGap = Math.max(0, targetBounds.top - guideBounds.bottom, guideBounds.top - targetBounds.bottom);
-			return {
-				insideViewport: guideBounds.left >= 0 && guideBounds.right <= innerWidth && guideBounds.top >= 0 && guideBounds.bottom <= innerHeight,
-				overlapsTarget: guideBounds.left < targetBounds.right && guideBounds.right > targetBounds.left && guideBounds.top < targetBounds.bottom && guideBounds.bottom > targetBounds.top,
-				separation: Math.hypot(horizontalGap, verticalGap)
-			};
-		});
-		await expect.poll(async () => {
-			const layout = await measureTraceGuidance();
-			return layout && layout.separation <= 24 ? null : layout;
-		}).toBeNull();
-		const traceGuidanceLayout = await measureTraceGuidance();
-		expect(traceGuidanceLayout?.insideViewport, JSON.stringify(traceGuidanceLayout)).toBe(true);
-		expect(traceGuidanceLayout?.overlapsTarget, JSON.stringify(traceGuidanceLayout)).toBe(false);
-		expect(traceGuidanceLayout?.separation, JSON.stringify(traceGuidanceLayout)).toBeLessThanOrEqual(24);
-		await selectRelayTraceCell(page, '4,2');
-		await expect(page.locator(`[data-trace-root-id="${trace.root.id}"]`)).toContainText(trace.root.content);
-		await expect(page.locator(`[data-trace-ghost-root-id="${trace.root.id}"]`)).toBeVisible();
-		await expect.poll(() => readRelayGameState(page)).toMatchObject({ points: pointsBeforeTrace + 5 });
+		if (viewport.width === 1280) {
+			await expect(traceStep).toContainText('読める未読の痕跡がありません。次へ進めます。');
+			await expect(traceStep.getByRole('button', { name: '次へ' })).toBeVisible();
+			await page.reload({ waitUntil: 'domcontentloaded' });
+			await releaseFirstRunPrimary(page);
+			await expect(traceStep).toContainText('読める未読の痕跡がありません。次へ進めます。');
+			await traceStep.getByRole('button', { name: '次へ' }).click();
+		} else {
+			await expect(traceStep).toContainText('他の住人の未読の痕跡・書置き・遺言のどれかを1つ読んで、5ptを受け取ろう。');
+			await expect(traceStep.getByRole('button')).toHaveCount(0);
+			const traceTarget = page.locator('[data-trace-marker-position="4,2"]');
+			await expect(traceTarget).toHaveAttribute('data-tutorial-highlight', 'trace');
+			await expectSlowTutorialPulse(page, '[data-tutorial-highlight="trace"]');
+			await expectSlowTutorialPulse(page, '[data-first-run-tutorial="trace"] p');
+			await expect.poll(() => traceTarget.evaluate((element) => element instanceof HTMLElement ? element.getBoundingClientRect().width / element.offsetWidth : 0)).toBeGreaterThan(1.5);
+			await page.reload({ waitUntil: 'domcontentloaded' });
+			await releaseFirstRunPrimary(page);
+			await expect(traceStep).toBeVisible();
+			await expect(traceTarget).toHaveAttribute('data-tutorial-highlight', 'trace');
+			const pointsBeforeTrace = (await readRelayGameState(page)).points;
+			const traceMovementEditor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
+			await traceMovementEditor.focus();
+			await page.keyboard.press('Escape');
+			await moveRelaySelfTo(page, { x: 5, y: 2 });
+			await expect(traceTarget).toBeInViewport();
+			await expect.poll(() => traceStep.evaluate((guide) => guide.classList.contains('first-run-tutorial-anchored'))).toBe(true);
+			const measureTraceGuidance = () => traceStep.evaluate((guide) => {
+				const target = document.querySelector('[data-trace-marker-position="4,2"][data-tutorial-highlight="trace"]');
+				if (!(target instanceof HTMLElement)) return null;
+				const guideBounds = guide.getBoundingClientRect();
+				const targetBounds = target.getBoundingClientRect();
+				const horizontalGap = Math.max(0, targetBounds.left - guideBounds.right, guideBounds.left - targetBounds.right);
+				const verticalGap = Math.max(0, targetBounds.top - guideBounds.bottom, guideBounds.top - targetBounds.bottom);
+				return {
+					insideViewport: guideBounds.left >= 0 && guideBounds.right <= innerWidth && guideBounds.top >= 0 && guideBounds.bottom <= innerHeight,
+					overlapsTarget: guideBounds.left < targetBounds.right && guideBounds.right > targetBounds.left && guideBounds.top < targetBounds.bottom && guideBounds.bottom > targetBounds.top,
+					separation: Math.hypot(horizontalGap, verticalGap)
+				};
+			});
+			await expect.poll(async () => {
+				const layout = await measureTraceGuidance();
+				return layout && layout.separation <= 24 ? null : layout;
+			}).toBeNull();
+			const traceGuidanceLayout = await measureTraceGuidance();
+			expect(traceGuidanceLayout?.insideViewport, JSON.stringify(traceGuidanceLayout)).toBe(true);
+			expect(traceGuidanceLayout?.overlapsTarget, JSON.stringify(traceGuidanceLayout)).toBe(false);
+			expect(traceGuidanceLayout?.separation, JSON.stringify(traceGuidanceLayout)).toBeLessThanOrEqual(24);
+			await selectRelayTraceCell(page, '4,2');
+			await expect(page.locator(`[data-trace-root-id="${trace.root.id}"]`)).toContainText(trace.root.content);
+			await expect(page.locator(`[data-trace-ghost-root-id="${trace.root.id}"]`)).toBeVisible();
+			await expect.poll(() => readRelayGameState(page)).toMatchObject({ points: pointsBeforeTrace + 5 });
+		}
 		const replyStep = page.locator('[data-first-run-tutorial="reply"]');
 		await expect(replyStep).toContainText('この痕跡にリプライできます。');
 		await expect(page.locator(`[data-trace-ghost-root-id="${trace.root.id}"]`)).toHaveAttribute('data-tutorial-highlight', 'trace');
