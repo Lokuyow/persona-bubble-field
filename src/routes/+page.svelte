@@ -905,7 +905,13 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		width: fieldWorldSize.width * FIELD_ARTWORK_SCALE,
 		height: fieldWorldSize.height * FIELD_ARTWORK_SCALE
 	});
-	let fieldAreaBounds = $derived(getFieldAreaBounds(viewportSize));
+	let mobileEventPanelFramingActive = $derived(viewportSize.width <= MOBILE_FIELD_BREAKPOINT && cooperationDefectionPanelBounds !== null);
+	let fieldAreaBounds = $derived.by(() => {
+		const baseline = getFieldAreaBounds(viewportSize);
+		if (!mobileEventPanelFramingActive || !cooperationDefectionPanelBounds) return baseline;
+		const y = cooperationDefectionPanelBounds.y + cooperationDefectionPanelBounds.height + 8;
+		return { ...baseline, y, height: Math.max(0, baseline.y + baseline.height - y) };
+	});
 	let selfProjectionId = $derived(devWorldSandboxEnabled ? DEV_WORLD_SELF_ID : selfSigner?.pubkey ?? 'you');
 	let presenceProjection = $derived(projectFrontendPresence({ presence: presenceState, selectedCharacterId, selfProjectionId,
 		geometry: { cellSize, fieldAreaBounds, cameraWorldBounds: fieldArtworkBounds }, colors: colorByPubkey }));
@@ -1518,6 +1524,17 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		visualCamera = presenceProjection.camera;
 		visualProjectionInitialized = true;
 	}
+	let previousVisualFieldAreaBounds: Bounds | null = null;
+	$effect(() => {
+		const bounds = fieldAreaBounds;
+		if (!previousVisualFieldAreaBounds) {
+			previousVisualFieldAreaBounds = bounds;
+			return;
+		}
+		if (sameBounds(previousVisualFieldAreaBounds, bounds)) return;
+		previousVisualFieldAreaBounds = bounds;
+		if (initialFieldGeometryReady) untrack(syncVisualToCanonical);
+	});
 
 	function animatePresenceTransition(previous: ReturnType<typeof projectFrontendPresence>, next: ReturnType<typeof projectFrontendPresence>, selfId: string): void {
 		const logicalParticipantsChanged = previous.participants.length !== next.participants.length || previous.participants.some((participant, index) => {
@@ -5335,6 +5352,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		bind:viewportElement
 		geometryReady={initialFieldGeometryReady}
 		actionDockAvailable={actionDockAvailable}
+		restrictPointerStartToFieldArea={mobileEventPanelFramingActive}
 		deathPresentationActive={deathPresentation !== null}
 		{fieldAreaBounds}
 		{field}
@@ -5455,9 +5473,10 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 					selectionFailed={Boolean(cooperationDefectionSelection && cooperationDefectionSelection.round === cooperationDefectionRound && cooperationDefectionSelection.revealStatus === 'failed')}
 					canChoose={cooperationDefectionCanChoose}
 					topOffset={statusHudVisible ? `calc(${topStatusHudBottom}px + 8px)` : null}
+					mobileFieldReservePx={viewportSize.width <= MOBILE_FIELD_BREAKPOINT ? 2 * cellSize : 0}
 					message={devCooperationDefectionPlaygroundState?.message ?? null}
 					{viewportElement}
-					onPanelBounds={(bounds) => { cooperationDefectionPanelBounds = bounds; }}
+					onPanelBounds={(bounds) => { if (!sameBounds(cooperationDefectionPanelBounds, bounds)) cooperationDefectionPanelBounds = bounds; }}
 					onChoice={(choice) => { void chooseCooperationDefectionChoice(choice); }}
 				/>
 			{/if}

@@ -167,6 +167,7 @@
 					<section class="help-section" aria-labelledby="help-cooperation-title">
 						<h2 id="help-cooperation-title"><Award aria-hidden="true" />協力と抜け駆け</h2>
 						<p class="event-lead">みんなで協力すれば安全。抜け駆けすれば大きな報酬。ただし、抜け駆けが多すぎると失敗します。</p>
+						<div class="mortality-warning" role="note"><span class="warning-mark" aria-hidden="true">!</span><div><strong>注意：協力不足で失敗した場合、抜け駆けした参加者は寿命を3日失います。</strong><p>この寿命減少によって寿命が0になると、現在の一生は終了します。</p></div></div>
 						<p><strong>3〜6人・全3ラウンド</strong></p><p>1ラウンドは<strong>相談 30秒 → 選択 30秒 → 結果発表 20秒</strong>。選択は結果発表まで秘密です。</p>
 						<h3>成功に必要な協力人数</h3><div class="table-scroll"><table><thead><tr><th>参加人数</th><th>必要な協力</th></tr></thead><tbody><tr><td>3人</td><td>2人</td></tr><tr><td>4人</td><td>3人</td></tr><tr><td>5人</td><td>4人</td></tr><tr><td>6人</td><td>4人</td></tr></tbody></table></div>
 						<h3>結果</h3><div class="table-scroll"><table><thead><tr><th>結果</th><th>協力した人</th><th>抜け駆けした人</th></tr></thead><tbody><tr><td>全員協力</td><td>+1,000pt</td><td>—</td></tr><tr><td>抜け駆けあり・成功</td><td>+100pt</td><td>+10,000pt</td></tr><tr><td>協力不足・失敗</td><td>0pt</td><td>寿命 −3日</td></tr></tbody></table></div>
