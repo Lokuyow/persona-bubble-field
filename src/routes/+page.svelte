@@ -313,6 +313,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	let colorByPubkey = $state.raw<Record<string, BubbleTone>>({});
 	let recentMessageTimeline = $state.raw<RecentMessageTimeline>([]);
 	let effectiveTraceRoots = $state.raw<readonly ParsedWorldMessage[]>([]);
+	let traceStorageUpgradeNotice = $state<string | null>(null);
 	let traceConversationState = $state.raw<TraceConversationState>({ kind: 'closed' });
 	let traceReplyMode = $state.raw(createTraceReplyMode());
 	let manualTraceMode = $state(false);
@@ -1796,6 +1797,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 						persona.activeRun.revision >= personaSnapshot.activeRun.revision) personaSnapshot = persona;
 				},
 				onTraceConversationChanged: setTraceConversation,
+				onTraceStorageUpgradeBlocked: (message) => { traceStorageUpgradeNotice = message; },
 				onStatusChanged: (status) => {
 					if (!mounted || worldReader !== nextSession) return;
 					connectionStatus = status;
@@ -5377,6 +5379,11 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	data-trace-runtime={traceConversationController ? runtimeMode : undefined}
 	style={`--composer-keyboard-inset: ${composerKeyboardInset}px;--composer-initial-preferred-height: ${INITIAL_COMPOSER_PREFERRED_HEIGHT}px;${composerPreferredHeight === null ? '' : `--composer-preferred-height: ${composerPreferredHeight}px;`}`}
 >
+	{#if traceStorageUpgradeNotice}
+		<div class="trace-storage-upgrade-notice" role="alert" aria-live="assertive">
+			{traceStorageUpgradeNotice}
+		</div>
+	{/if}
 	<FieldViewport
 		bind:this={fieldViewportComponent}
 		bind:viewportElement
@@ -5949,6 +5956,23 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		flex-direction: column;
 		overflow: hidden;
 		background: transparent;
+	}
+	.trace-storage-upgrade-notice {
+		position: fixed;
+		top: max(72px, calc(env(safe-area-inset-top) + 64px));
+		left: 50%;
+		z-index: 100;
+		width: min(620px, calc(100% - 24px));
+		padding: 12px 16px;
+		transform: translateX(-50%);
+		border: 1px solid rgb(255 201 138 / 70%);
+		border-radius: 12px;
+		background: rgb(47 35 24 / 96%);
+		color: #fff4e7;
+		font-size: .9rem;
+		line-height: 1.45;
+		text-align: center;
+		box-shadow: 0 8px 28px rgb(0 0 0 / 30%);
 	}
 
 	.action-dock-available {

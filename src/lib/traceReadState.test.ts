@@ -4,7 +4,7 @@ import { openDB } from 'idb';
 import { getPublicKey } from 'nostr-tools/pure';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildTraceReplyTemplate, buildWorldMessageTemplate, finalizeWorldEvent, parseWorldMessage, type ChannelReference } from './nostrProtocol';
-import { openTraceDatabase, TRACE_DATABASE_NAME, TRACE_DATABASE_VERSION, TRACE_REPLY_LRU_STORE, TRACE_REPLY_READ_STORE, TRACE_REPLY_STORE, TRACE_ROOT_READ_STORE, TRACE_ROOT_STORE, TRACE_REWARD_OUTBOX_STORE } from './traceDatabase';
+import { openTraceDatabase, TRACE_DATABASE_NAME, TRACE_DATABASE_UPGRADE_BLOCKED_MESSAGE, TRACE_DATABASE_VERSION, TRACE_REPLY_LRU_STORE, TRACE_REPLY_READ_STORE, TRACE_REPLY_STORE, TRACE_ROOT_READ_STORE, TRACE_ROOT_STORE, TRACE_REWARD_OUTBOX_STORE } from './traceDatabase';
 import { reconcileTraceReplyCache } from './traceReplyCache';
 import { reconcileTraceRootCache } from './traceRootCache';
 import { loadTraceReadSnapshot, markTraceReplyRead, markTraceRootRead, setTraceReplyReadState } from './traceReadState';
@@ -102,6 +102,29 @@ describe('Trace read state', () => {
 		expect(await upgraded.count(TRACE_REPLY_READ_STORE)).toBe(0);
 		expect(await upgraded.count(TRACE_REWARD_OUTBOX_STORE)).toBe(0);
 		upgraded.close();
+	});
+
+	it.each(['root cache', 'reply cache'] as const)('fails closed with actionable storage errors from the %s while v4 is open, then retries the v5 upgrade', async (cache) => {
+		const v4 = await openDB(TRACE_DATABASE_NAME, 4, { upgrade(db) {
+			db.createObjectStore(TRACE_ROOT_STORE, { keyPath: ['channelId', 'eventId'] });
+			db.createObjectStore(TRACE_REPLY_STORE, { keyPath: ['channelId', 'rootId', 'eventId'] });
+			db.createObjectStore(TRACE_REPLY_LRU_STORE, { keyPath: ['channelId', 'rootId'] });
+			db.createObjectStore(TRACE_ROOT_READ_STORE, { keyPath: ['channelId', 'eventId'] });
+			db.createObjectStore(TRACE_REPLY_READ_STORE, { keyPath: ['channelId', 'personaPubkey', 'rootId', 'replyId'] });
+			db.createObjectStore(TRACE_REWARD_OUTBOX_STORE, { keyPath: 'key' });
+		} });
+		const upgrade = cache === 'root cache'
+			? reconcileTraceRootCache({ channelId: CHANNEL_ID, field: { columns: 10, rows: 1 }, rawEvents: [] })
+			: reconcileTraceReplyCache({ channelId: CHANNEL_ID, effectiveRoots: [], rawEvents: [] });
+		await expect(upgrade).rejects.toThrow(TRACE_DATABASE_UPGRADE_BLOCKED_MESSAGE);
+
+		v4.close();
+		const retried = await openTraceDatabase();
+		expect(retried.version).toBe(TRACE_DATABASE_VERSION);
+		expect([...retried.objectStoreNames]).toEqual(expect.arrayContaining([
+			TRACE_ROOT_STORE, TRACE_REPLY_STORE, TRACE_REPLY_LRU_STORE, TRACE_ROOT_READ_STORE, TRACE_REPLY_READ_STORE, TRACE_REWARD_OUTBOX_STORE
+		]));
+		retried.close();
 	});
 
 	it('keeps root reads browser-person scoped while separating reply state by persona', async () => {
