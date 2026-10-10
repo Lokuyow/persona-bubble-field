@@ -116,12 +116,12 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 420, height: 800 
 
 		const move = await chooseAvailableRelayMove(page);
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { rejectPositionPublishes(): void } }).__relayStartupTest.rejectPositionPublishes());
-		await page.clock.runFor(1_001);
+		await page.clock.fastForward(1_001);
 		await page.keyboard.press(move.key);
 		await expect.poll(async () => (await relayState(page)).state.rejectedPositionPublishIds.length).toBeGreaterThan(0);
 		await expect(page.locator('[data-first-run-tutorial="movement"]')).toBeVisible();
 		await page.evaluate(() => (window as typeof window & { __relayStartupTest: { allowPositionPublishes(): void } }).__relayStartupTest.allowPositionPublishes());
-		await page.clock.runFor(1_001);
+		await page.clock.fastForward(1_001);
 		await page.keyboard.press(move.key);
 		await expect(page.locator('.participant[data-self="true"]')).toHaveAttribute('data-position', move.expected);
 		await expect(page.locator('[data-first-run-tutorial="work"]')).toContainText('作業をすると、ポイントを得て寿命を延ばせます。');
@@ -346,7 +346,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 420, height: 800 
 		await expect(page.locator('[data-first-run-tutorial="complete"]')).toHaveText('あとは自由です。');
 		await expect.poll(() => page.locator('[data-first-run-tutorial="complete"]').evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(20);
 		expect(await page.evaluate(() => sessionStorage.getItem('persona-bubble-field:first-run-tutorial'))).toBeNull();
-		await page.clock.runFor(8_001);
+		await page.clock.fastForward(8_001);
 		await expect(page.locator('[data-first-run-tutorial]')).toHaveCount(0);
 		await expect(page.locator('.action-dock')).toBeVisible();
 		await expect.poll(() => page.evaluate(() => (window as typeof window & { __ehagakiTerminalCount?: number }).__ehagakiTerminalCount ?? 0)).toBe(0);

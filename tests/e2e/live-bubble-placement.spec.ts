@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { finalizeEvent } from 'nostr-tools/pure';
 import { buildWorldMessageTemplate, buildWorldStateEventTemplate } from '../../src/lib/nostrProtocol';
-import { CHANNEL_ID, fixtureSecret, openReadyRelayWorld, installVirtualKeyboardStub } from './helpers/relayHarness';
+import { CHANNEL_ID, fixtureSecret, openReadyRelayWorld, installVirtualKeyboardStub, RELAY_FIELD } from './helpers/relayHarness';
 
 
 async function readPlacement(page: Page) {
@@ -138,8 +138,14 @@ test('minimally corrects a retained offscreen merged anchor for a moving charact
 		const cell = document.querySelector('.participant')!.getBoundingClientRect().width;
 		return { x: grid.x, y: grid.y, cell };
 	});
-	const cell = { x: Math.floor((held.x + held.width / 2 - geometry.x) / geometry.cell),
+	const nearestCell = { x: Math.floor((held.x + held.width / 2 - geometry.x) / geometry.cell),
 		y: Math.floor((held.y + held.height / 2 - geometry.y) / geometry.cell) };
+	// The bubble overlay can extend slightly above the grid at its top edge.
+	// Place the synthetic character in the nearest valid field cell.
+	const cell = {
+		x: Math.min(RELAY_FIELD.columns - 1, Math.max(0, nearestCell.x)),
+		y: Math.min(RELAY_FIELD.rows - 1, Math.max(0, nearestCell.y))
+	};
 	await inject(19, cell);
 	await expect.poll(async () => (await readPlacement(page)).find((item) => item.body.width === held.width)?.characterOverlap).toBe(0);
 	const corrected = (await bubble.boundingBox())!;

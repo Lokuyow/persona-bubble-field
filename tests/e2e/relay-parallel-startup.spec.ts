@@ -205,7 +205,7 @@ test('uses completed bootstrap self evidence without a fresh-second wait or redu
 	}).__relayStartupTest.releasePrimary());
 	await expect(page.locator(`.participant[data-self="true"][data-participant-id="${selfPubkey}"]`)).toBeVisible();
 	expect((await relayState(page)).state.published.filter((event) =>
-		event.kind === WORLD_STATE_KIND && event.pubkey === selfPubkey)).toHaveLength(0);
+		isWorldPositionEvent(event) && event.pubkey === selfPubkey)).toHaveLength(0);
 });
 
 test('keeps a journal-confirmed self position through late canonical handoff on reload', async ({ page }) => {
@@ -221,7 +221,7 @@ test('keeps a journal-confirmed self position through late canonical handoff on 
 	}).__relayStartupTest.releasePrimary());
 	await expect(page.locator(`.participant[data-self="true"][data-participant-id="${selfPubkey}"]`)).toBeVisible();
 	await expect.poll(async () => (await relayState(page)).state.published.some((event) =>
-		event.kind === WORLD_STATE_KIND && event.pubkey === selfPubkey)).toBe(true);
+		isWorldPositionEvent(event) && event.pubkey === selfPubkey)).toBe(true);
 	await page.reload({ waitUntil: 'domcontentloaded' });
 	await waitForPrimary(page);
 	await page.evaluate((urls) => (window as typeof window & {
@@ -233,7 +233,7 @@ test('keeps a journal-confirmed self position through late canonical handoff on 
 	}).__relayStartupTest.releasePrimary());
 	await expect(page.locator(`.participant[data-self="true"][data-participant-id="${selfPubkey}"]`)).toHaveCount(1);
 	expect((await relayState(page)).state.published.filter((event) =>
-		event.kind === WORLD_STATE_KIND && event.pubkey === selfPubkey)).toHaveLength(0);
+		isWorldPositionEvent(event) && event.pubkey === selfPubkey)).toHaveLength(0);
 });
 
 for (const { state, slot } of [{ state: 'exit', slot: 'exit' }, { state: 'active', slot: 0 }] as const) {

@@ -35,7 +35,7 @@ import { deriveBip85NostrEntropy } from '../../src/lib/bip85';
 import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL } from '../../src/lib/fieldFacilities';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { installFieldFrameSampling, readFieldFrames, sampleRenderedField } from './helpers/fieldFrames';
-import { CHANNEL_ID, AUTHORITATIVE_RELAYS, cooperationDefectionInteractionCell, fixtureSecret, testEvents, upcomingRegistrationSchedule, nextScheduledCooperationDefectionSchedule, signedCooperationDefectionAction, syntheticChannelFixture, installDelayedRelay, relayState, seedRelayAccount, readRelayGameState, realtimeInstanceIds, isRealtimeRequest, isDeathTraceEvent, readRealtimePendingInstances, seedRealtimePendingInstance, chooseHorizontalMove, pressRelayKeyboardMovement, moveRelaySelfTo } from './helpers/relayHarness';
+import { CHANNEL_ID, AUTHORITATIVE_RELAYS, cooperationDefectionInteractionCell, fixtureSecret, testEvents, upcomingRegistrationSchedule, nextScheduledCooperationDefectionSchedule, signedCooperationDefectionAction, syntheticChannelFixture, installDelayedRelay, relayState, seedRelayAccount, readRelayGameState, realtimeInstanceIds, isRealtimeRequest, isDeathTraceEvent, readRealtimePendingInstances, seedRealtimePendingInstance, chooseAvailableRelayMove, pressRelayKeyboardMovement, moveRelaySelfTo } from './helpers/relayHarness';
 
 const COOPERATION_DEFECTION_SELF_POSITION = { x: 3, y: 2 } as const;
 const COOPERATION_DEFECTION_FIELD_SIZE = { columns: 16, rows: 8 } as const;
@@ -191,7 +191,7 @@ test.describe('Relay startup', () => {
 		const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
 		await expect.poll(async () => (await relayState(page)).state.published.some((event) => event.kind === 42 && event.pubkey === selfPubkey && event.content === '抜け駆け')).toBe(true);
 
-		const move = await chooseHorizontalMove(page);
+		const move = await chooseAvailableRelayMove(page);
 		await page.clock.runFor(1_001);
 		await editor.fill('normal message after surviving penalty');
 		await editor.press('Enter');

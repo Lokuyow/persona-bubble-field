@@ -376,6 +376,8 @@ export async function installDelayedRelay(page: Page, options: {
 			webSocketCloses?: Array<{ socketId: number; generation: number; url: string; readyState: number; origin: 'application' | 'pagehide' }>;
 		} : { published: [], closedSubscriptions: [], webSocketCloses: [] };
 		const lifecycleSockets: Array<{ readyState: number; close(code?: number): void }> = [];
+		// Keep returned promises rooted until this document is discarded; CDP may still be awaiting settlement after IndexedDB completes.
+		const retainedPositionInjections = new Set<Promise<void>>();
 		const queuedBootstrapEventsKey = 'relay-startup-queued-realtime-bootstrap-events';
 		const queuedBootstrapEvents = JSON.parse(sessionStorage.getItem(queuedBootstrapEventsKey) ?? '[]') as Array<Record<string, unknown>>;
 		sessionStorage.removeItem(queuedBootstrapEventsKey);
@@ -828,13 +830,17 @@ export async function installDelayedRelay(page: Page, options: {
 				rejectTracePublishes: () => { state.rejectTracePublishes = true; },
 				allowTracePublishes: () => { state.rejectTracePublishes = false; },
 				allowMessagePublishes: () => { state.rejectMessagePublishes = false; },
-				injectPosition: async (event: object) => {
-					await recordInjectedPositionReservation(event);
-					for (const request of activePrimary) {
-						if (request.filters.some((filter) => (filter.kinds as number[] | undefined)?.includes(WORLD_STATE_KIND))) {
-							deliver(request.socket, ['EVENT', request.subId, event]);
+				injectPosition: (event: object) => {
+					const injection = (async () => {
+						await recordInjectedPositionReservation(event);
+						for (const request of activePrimary) {
+							if (request.filters.some((filter) => (filter.kinds as number[] | undefined)?.includes(WORLD_STATE_KIND))) {
+								deliver(request.socket, ['EVENT', request.subId, event]);
+							}
 						}
-					}
+					})();
+					retainedPositionInjections.add(injection);
+					return injection;
 				},
 				injectPositionToRelay: (event: object, relayUrl: string) => {
 					sessionStorage.setItem(persistedLatePositionKey, JSON.stringify({ relayUrl: new URL(relayUrl).toString(), event }));
@@ -947,11 +953,15 @@ export async function openClockedReadyRelayWorld(page: Page): Promise<Locator> {
 }
 
 export async function pauseAtCurrentBrowserTime(page: Page): Promise<void> {
-	const now = await page.evaluate(() => Date.now());
+	const now = Math.floor(await page.evaluate(() => Date.now()));
 	// Freeze Date while pausing so a running browser clock cannot overtake the target.
 	await page.clock.setFixedTime(now);
 	await page.clock.pauseAt(now);
 	await page.clock.setSystemTime(now);
+	await page.evaluate(() => {
+		const nativeNow = Date.now.bind(Date);
+		Date.now = () => Math.floor(nativeNow());
+	});
 }
 
 export async function startSelectedRun(page: Page): Promise<void> {
@@ -1044,6 +1054,27 @@ export async function openReadyRelayWorld(page: Page, expectedParticipantCount =
 	return editor;
 }
 
+export async function reloadReadyRelayWorld(page: Page, expectedParticipantCount = 2): Promise<Locator> {
+	await page.reload({ waitUntil: 'domcontentloaded' });
+	await expect(page.locator('.action-dock')).toBeVisible();
+	const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
+	await expect(editor).toBeVisible();
+	await expect.poll(async () => {
+		const requests = (await relayState(page)).state.requests;
+		return [42, WORLD_STATE_KIND].every((kind) => requests.some((request) =>
+			AUTHORITATIVE_RELAYS.includes(request.url as typeof AUTHORITATIVE_RELAYS[number]) &&
+			(request.filter.kinds as number[])[0] === kind
+		));
+	}).toBe(true);
+	await page.evaluate(() => {
+		const relay = (window as typeof window & { __relayStartupTest: { releasePrimaryEvents(): void; releasePrimary(): void } }).__relayStartupTest;
+		relay.releasePrimaryEvents();
+		relay.releasePrimary();
+	});
+	await expect(page.locator('.participant')).toHaveCount(expectedParticipantCount);
+	return editor;
+}
+
 export async function waitForRelayComposerReady(page: Page): Promise<Locator> {
 	await expect(page.locator('.action-dock')).toBeVisible();
 	const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
@@ -1114,6 +1145,10 @@ export async function installPromptApiStub(
 
 export async function seedRelayAccount(page: Page, secretKey: Uint8Array, pubkey: string, lifespanExpiresAtMs = Date.now() + 7 * 24 * 60 * 60 * 1000, points = 0, abilities = { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 }, rootPoints = 0, rootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0 }): Promise<void> {
 	const fixtureAccountIndex = fixtureAccountIndexForSecret(secretKey);
+	await page.route('**/favicon.svg', (route) => route.fulfill({
+		contentType: 'text/html',
+		body: '<!doctype html><html><body></body></html>'
+	}), { times: 1 });
 	await page.goto('/favicon.svg');
 	await page.evaluate(async ({ accountPubkey, accountIndex, expiresAtMs, points, abilities, characterId, rootPoints, rootBuild }) => {
 		const database = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -1431,7 +1466,7 @@ export type AvailableMove = {
 	expected: string;
 };
 
-const RELAY_FIELD = { columns: 16, rows: 8 } as const;
+export const RELAY_FIELD = { columns: 16, rows: 8 } as const;
 
 export function cooperationDefectionInteractionCell(position: GridPosition): GridPosition {
 	const candidates = [{ x: position.x, y: position.y - 1 }, { x: position.x, y: position.y + 1 },
@@ -1449,7 +1484,8 @@ const CARDINAL_RELAY_MOVES = [
 	{ key: 'ArrowLeft', direction: 'left' }
 ] as const satisfies readonly Readonly<{ key: AvailableMove['key']; direction: Direction }>[];
 
-export async function chooseAvailableRelayMove(page: Page): Promise<AvailableMove> {
+export async function chooseAvailableRelayMove(page: Page, consecutiveMoves = 1): Promise<AvailableMove> {
+	if (!Number.isSafeInteger(consecutiveMoves) || consecutiveMoves < 1) throw new Error('Expected a positive number of consecutive Relay moves.');
 	const position = await page.locator('.participant[data-self="true"]').getAttribute('data-position');
 	if (!position) throw new Error('Expected the Relay self participant position.');
 	const [x, y] = position.split(',').map(Number);
@@ -1463,10 +1499,17 @@ export async function chooseAvailableRelayMove(page: Page): Promise<AvailableMov
 		})
 	);
 	for (const candidate of CARDINAL_RELAY_MOVES) {
-		const next = moveOneCell({ x, y }, candidate.direction, RELAY_FIELD, occupied);
-		if (next && !isBlockedFacilityCell(next)) return { key: candidate.key, expected: relayPositionKey(next) };
+		let next: GridPosition = { x, y };
+		let first: GridPosition | null = null;
+		for (let step = 0; step < consecutiveMoves; step += 1) {
+			const moved = moveOneCell(next, candidate.direction, RELAY_FIELD, occupied);
+			if (!moved || isBlockedFacilityCell(moved)) { first = null; break; }
+			if (step === 0) first = moved;
+			next = moved;
+		}
+		if (first) return { key: candidate.key, expected: relayPositionKey(first) };
 	}
-	throw new Error(`Expected an available Relay movement cell from ${position}.`);
+	throw new Error(`Expected ${consecutiveMoves} consecutive available Relay movement cells from ${position}.`);
 }
 
 function relayPositionKey(position: GridPosition): string {
@@ -1552,7 +1595,7 @@ export async function moveRelaySelfTo(page: Page, target: { x: number; y: number
 		const position = await page.locator('.participant[data-self="true"]').getAttribute('data-position');
 		if (position === `${target.x},${target.y}`) return;
 		const move = await chooseMoveToward(page, target);
-		await page.clock.runFor(1_001);
+		await page.clock.fastForward(1_001);
 		await pressRelayKeyboardMovement(page, move);
 	}
 	throw new Error(`Self did not reach ${target.x},${target.y}.`);

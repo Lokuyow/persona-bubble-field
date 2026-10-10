@@ -3,12 +3,14 @@ import { expectIconCloseButton } from './iconCloseButton';
 
 /** Finish only Web Animations owned by one mounted Bits UI Dialog. */
 async function finishDialogAnimations(dialog: Locator): Promise<void> {
-	await dialog.evaluate(async (element) => {
-		const animations = element.getAnimations();
-		for (const animation of animations) {
-			if (animation.playState !== 'finished') animation.finish();
+	await dialog.evaluateAll(async (elements) => {
+		for (const element of elements) {
+			const animations = element.getAnimations();
+			for (const animation of animations) {
+				if (animation.playState !== 'finished') animation.finish();
+			}
+			await Promise.all(animations.map((animation) => animation.finished.catch(() => undefined)));
 		}
-		await Promise.all(animations.map((animation) => animation.finished.catch(() => undefined)));
 	});
 }
 

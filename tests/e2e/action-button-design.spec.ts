@@ -154,12 +154,14 @@ test('shared action tokens expose every state on light and dark surfaces at desk
 test('shared action buttons respond during pointer press and return to rest on release', async ({ page }) => {
 	await page.goto('/');
 	await page.emulateMedia({ reducedMotion: 'no-preference' });
-	await page.evaluate(() => {
+	const focusScope = page.locator('.selection-dialog');
+	await expect(focusScope).toBeVisible();
+	await focusScope.evaluate((dialog) => {
 		const fixture = document.createElement('div');
 		fixture.dataset.motionButtonFixture = 'true';
 		fixture.style.cssText = 'position:fixed;z-index:9999;inset:16px auto auto 16px;display:flex;gap:12px';
 		fixture.innerHTML = '<button class="action-button action-button-primary">Enabled</button><button class="action-button action-button-primary" disabled>Disabled</button>';
-		document.body.append(fixture);
+		dialog.append(fixture);
 	});
 
 	const enabled = page.locator('[data-motion-button-fixture] button').first();

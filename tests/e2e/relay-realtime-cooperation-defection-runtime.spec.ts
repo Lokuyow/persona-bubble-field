@@ -34,7 +34,7 @@ import { deriveBip85NostrEntropy } from '../../src/lib/bip85';
 import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL } from '../../src/lib/fieldFacilities';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { installFieldFrameSampling, readFieldFrames, sampleRenderedField } from './helpers/fieldFrames';
-import { CHANNEL_ID, AUTHORITATIVE_RELAYS, fixtureSecret, testEvents, upcomingRegistrationSchedule, nextScheduledCooperationDefectionSchedule, signedCooperationDefectionAction, syntheticChannelFixture, installDelayedRelay, relayState, seedRelayAccount, readRelayGameState, realtimeInstanceIds, isRealtimeRequest, readRealtimePendingInstances, seedRealtimePendingInstance, chooseHorizontalMove, pressRelayKeyboardMovement } from './helpers/relayHarness';
+import { CHANNEL_ID, AUTHORITATIVE_RELAYS, fixtureSecret, testEvents, upcomingRegistrationSchedule, nextScheduledCooperationDefectionSchedule, signedCooperationDefectionAction, syntheticChannelFixture, installDelayedRelay, relayState, seedRelayAccount, readRelayGameState, realtimeInstanceIds, isRealtimeRequest, readRealtimePendingInstances, seedRealtimePendingInstance, chooseAvailableRelayMove, pressRelayKeyboardMovement } from './helpers/relayHarness';
 
 const formatJstDeadline = (timeMs: number) => `${new Intl.DateTimeFormat('ja-JP', {
 	timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
@@ -200,7 +200,7 @@ test.describe('Relay startup', () => {
 		await editor.press('Enter');
 		await expect.poll(async () => (await relayState(page)).state.published.some((event) =>
 			event.kind === 42 && event.content === 'normal world survives realtime timeout')).toBe(true);
-		const move = await chooseHorizontalMove(page);
+		const move = await chooseAvailableRelayMove(page);
 		await editor.fill('');
 		await editor.focus();
 		await page.clock.runFor(1_001);

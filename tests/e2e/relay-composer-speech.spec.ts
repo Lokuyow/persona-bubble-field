@@ -22,7 +22,7 @@ import { deriveBip85NostrEntropy } from '../../src/lib/bip85';
 import { ADJUSTMENT_TERMINAL, MENDING_TERMINAL } from '../../src/lib/fieldFacilities';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 import { installFieldFrameSampling, readFieldFrames, sampleRenderedField } from './helpers/fieldFrames';
-import { fixtureSecret, installDelayedRelay, publishedMessages, waitForPublishedMessageCount, openReadyRelayWorld, installPromptApiStub, seedRelayAccount, composerContextCalls, readActionDockControlOrder } from './helpers/relayHarness';
+import { fixtureSecret, installDelayedRelay, publishedMessages, waitForPublishedMessageCount, openReadyRelayWorld, reloadReadyRelayWorld, installPromptApiStub, seedRelayAccount, composerContextCalls, readActionDockControlOrder } from './helpers/relayHarness';
 
 
 test.describe('Relay startup', () => {
@@ -185,9 +185,14 @@ test.describe('Relay startup', () => {
 	test('renders ActionDock controls in order on desktop and mobile without an unread slot', async ({ page }) => {
 		await installPromptApiStub(page);
 		let persistedChatterState: boolean | null = null;
+		let verifiedSavedChatterStateOnReload = false;
 		for (const width of [1200, 838, 720, 701, 700, 421, 420, 390, 360, 320]) {
 			await page.setViewportSize({ width, height: 844 });
-			await openReadyRelayWorld(page, 1);
+			if (persistedChatterState === null) await openReadyRelayWorld(page, 1);
+			else if (!verifiedSavedChatterStateOnReload) {
+				await reloadReadyRelayWorld(page, 1);
+				verifiedSavedChatterStateOnReload = true;
+			}
 			const help = page.locator('.help-trigger');
 			const chatterToggle = page.locator('.chatter-toggle');
 			const suggestionsToggle = page.locator('.suggestions-toggle');
