@@ -237,8 +237,20 @@ test.describe('in-game Help', () => {
 		await dialog.getByRole('button', { name: '戻る' }).click();
 		await dialog.locator('[data-help-category="life"]').click();
 		await expect(dialog).toContainText('脱出済みの人格は同じ人格で新しい一生を始められます。');
-		await expect(dialog).toContainText('使用できるRoot Pointは最大9RPです。');
-		await expect(dialog).toContainText('回収せずに作業できる時間の上限を広げます。');
+		await expect(dialog).toContainText('使用できるのは最大9RPで、各能力はRank 0〜3');
+		await expect(dialog).toContainText('正常な脱出1回につき1RPを獲得します。死亡ではRPは増えません。');
+		await expect(dialog).toContainText('各能力はRank 0〜3、Rankを1上げるごとに1RPを使います。');
+		await expect(dialog).toContainText('Rank 0〜3の順に×1.00／×2.00／×3.00／×4.00です。蓄積上限後の作業には適用されません。');
+		await expect(dialog).toContainText('Rank 0〜3の順に通常の×1.00／×2.00／×3.00／×4.00です。蓄積上限後のポイント生成と寿命延長は、通常時の0%／20%／35%／50%になります。');
+		await expect(dialog).toContainText('Rank 0〜3の順に7日／14日／21日／30日です。新しい一生の開始時は、どのRankでも7日です。');
+		const rootBuildFact = dialog.locator('.help-section[aria-labelledby="help-life-title"] .help-fact').nth(3);
+		const rootBuildList = rootBuildFact.locator('.icon-list');
+		for (const viewport of [{ width: 390, height: 844 }, { width: 1000, height: 800 }]) {
+			await page.setViewportSize(viewport);
+			await rootBuildFact.scrollIntoViewIfNeeded();
+			await expect(rootBuildFact).toBeVisible();
+			expect(await rootBuildList.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+		}
 		await expectPlayerFacingHelpText(dialog);
 		await dialog.getByRole('button', { name: '戻る' }).click();
 		await dialog.locator('[data-help-category="nostr"]').click();
