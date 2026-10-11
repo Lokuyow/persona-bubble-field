@@ -399,23 +399,23 @@
 	.rp-summary-panels { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; gap: 12px; margin-top: 12px; }
 	.progression-card, .allocation-summary { min-width: 0; padding: 14px; border: 1px solid rgb(104 241 221 / 24%); border-radius: 14px; background: rgb(19 24 43 / 54%); }
 	.progression-card { border-color: rgb(104 241 221 / 35%); background: linear-gradient(140deg, rgb(104 241 221 / 11%), rgb(19 24 43 / 64%) 65%); }
-	.progression-kicker { color: rgb(255 255 255 / 72%); font-size: .72rem; font-weight: 750; letter-spacing: .04em; }
+	.progression-kicker { color: rgb(255 255 255 / 72%); font-size: .875rem; font-weight: 750; letter-spacing: .04em; }
 	.progression-card h2, .allocation-heading h2 { margin: 5px 0 0; font-size: .98rem; line-height: 1.3; }
 	.progression-card p { margin: 8px 0 0; color: rgb(255 255 255 / 76%); font-size: .875rem; line-height: 1.5; }
 	.allocation-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
 	.allocation-heading h2 { margin: 0; }
-	.allocation-heading > span { color: rgb(255 255 255 / 72%); font-size: .76rem; white-space: nowrap; }
+	.allocation-heading > span { color: rgb(255 255 255 / 72%); font-size: .875rem; white-space: nowrap; }
 	.root-ability-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 	.root-ability-card { min-width: 0; padding: 9px; border: 1px solid rgb(255 255 255 / 12%); border-radius: 10px; background: rgb(37 37 58 / 45%); color: rgb(255 255 255 / 78%); }
 	.root-ability-card.ranked { border-color: rgb(104 241 221 / 46%); background: rgb(104 241 221 / 8%); }
 	.root-ability-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; }
-	.root-ability-heading strong { min-width: 0; font-size: .78rem; line-height: 1.35; }
+	.root-ability-heading strong { min-width: 0; font-size: .875rem; line-height: 1.35; }
 	.root-ability-icon { display: inline-grid; width: 18px; height: 18px; flex: 0 0 auto; place-items: center; color: rgb(255 255 255 / 58%); }
 	.root-ability-card.ranked .root-ability-icon { color: var(--color-accent); }
 	:global(.root-ability-icon svg) { display: block; width: 18px; height: 18px; }
-	.root-ability-rank { margin-left: auto; padding: 2px 5px; border: 1px solid rgb(255 255 255 / 16%); border-radius: 999px; color: rgb(255 255 255 / 64%); font-size: .68rem; white-space: nowrap; }
+	.root-ability-rank { margin-left: auto; padding: 2px 5px; border: 1px solid rgb(255 255 255 / 16%); border-radius: 999px; color: rgb(255 255 255 / 64%); font-size: .875rem; white-space: nowrap; }
 	.root-ability-rank.ranked { border-color: rgb(104 241 221 / 40%); background: rgb(104 241 221 / 10%); color: rgb(255 255 255 / 88%); }
-	.root-ability-effects { display: grid; gap: 3px; margin-top: 6px; font-size: .73rem; line-height: 1.4; }
+	.root-ability-effects { display: grid; gap: 3px; margin-top: 6px; font-size: .875rem; line-height: 1.4; }
 	.root-ability-effects > span { overflow-wrap: anywhere; }
 	.root-ability-next { color: rgb(255 255 255 / 78%); }
 	.ability-list { border-top: 1px solid rgb(255 255 255 / 12%); }
