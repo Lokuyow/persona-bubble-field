@@ -3,7 +3,7 @@ import { finalizeEvent, getPublicKey } from 'nostr-tools/pure';
 import { buildManualTraceEventTemplate, buildWorldStateEventTemplate, WORLD_STATE_KIND } from '../../src/lib/nostrProtocol';
 import {
 	AUTHORITATIVE_RELAYS, CHANNEL_ID, fixtureSecret, installDelayedRelay, isRealtimeRequest, relayState,
-	requestKind, seedRelayAccount, testEvents, isWorldPositionEvent
+	requestKind, seedRelayAccount, testEvents, isWorldPositionEvent, confirmPendingRootBuild
 } from './helpers/relayHarness';
 import { installHostOwnedStub } from './helpers/hostOwnedComposerStub';
 
@@ -372,6 +372,7 @@ test('re-enters a reused Identity after a rejected exit even when its old Relay 
 	}).__relayStartupTest.rejectPositionPublishes());
 	await page.getByRole('button', { name: '自分のプロフィールを開く' }).click();
 	await page.getByRole('dialog').getByRole('button', { name: '脱出', exact: true }).click();
+	await confirmPendingRootBuild(page, ['推論加速']);
 	await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(3);
 	const exits = await page.evaluate((pubkey) => {
 		const state = (window as typeof window & { __relayStartupTest: { state: {
@@ -384,10 +385,22 @@ test('re-enters a reused Identity after a rejected exit even when its old Relay 
 	}, selfPubkey);
 	expect(exits.length).toBeGreaterThan(0);
 	await page.getByRole('region', { name: '再利用可能なIdentity' }).getByRole('button', { name: /を使う$/ }).click();
-	const rootBuildToggle = page.getByRole('region', { name: 'Root build' }).getByRole('button', { name: /Root build/ });
-	if (await rootBuildToggle.getAttribute('aria-expanded') === 'false') await rootBuildToggle.click();
-	await page.getByRole('button', { name: '推論加速を上げる' }).click();
 	await page.getByRole('button', { name: '開始' }).click();
+	const persistedRootBuild = await page.evaluate(async () => {
+		const database = await new Promise<IDBDatabase>((resolve, reject) => {
+			const request = indexedDB.open('persona-bubble-field-account');
+			request.onsuccess = () => resolve(request.result);
+			request.onerror = () => reject(request.error);
+		});
+		try {
+			const request = database.transaction('persona-bubble-field-player-state').objectStore('persona-bubble-field-player-state').get('player-lifecycle');
+			return await new Promise((resolve, reject) => {
+				request.onsuccess = () => resolve((request.result as { mode: { activeRun: { rootBuild: unknown } } }).mode.activeRun.rootBuild);
+				request.onerror = () => reject(request.error);
+			});
+		} finally { database.close(); }
+	});
+	expect(persistedRootBuild).toEqual({ inferenceAcceleration: 1, contextCompression: 0, hallucinationResistance: 0, candidateExpansion: 0 });
 	await page.evaluate(() => (window as typeof window & {
 		__relayStartupTest: { releasePrimary(): void }
 	}).__relayStartupTest.releasePrimary());

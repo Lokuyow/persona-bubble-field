@@ -217,9 +217,9 @@ kind 0は専用世界識別用のNIP-32ラベルの対象にしない。
 RootからBIP39 English 12-word mnemonic、BIP32 master、BIP85 Nostr childを決定的に導出する。BIP85のpathは `m/83696968'/128002'/{generation}'/{account_index}'` とし、generationとaccount indexは1-basedである。
 BIP39 passphraseは使用せず、empty passphrase（空文字列）で導出する。
 
-初回Root生成後、未選択のIdentity候補を3つだけ表示する。候補はRoot、generation、account indexから再導出できるが、候補の時点ではIdentityではない。ユーザーが1つを選択したときだけ、そのpubkey・account index・characterIdをIdentityとして記録し、Run #1を開始する。
+初回Root生成後はRoot Pointが0のため、Rank 0として未選択のIdentity候補を3つ表示する。候補はRoot、generation、account indexから再導出できるが、候補の時点ではIdentityではない。ユーザーが1つを選択したときだけ、そのpubkey・account index・characterIdをIdentityとして記録し、Run #1を開始する。
 
-初回Rootの人格選択前に限り、次の短いオープニングを表示し、「はじめる」で固定3候補の選択へ進む。
+初回Rootの人格選択前に限り、次の短いオープニングを表示し、「はじめる」でRank 0の3候補の選択へ進む。
 
 > ここは、ハコ。
 >
@@ -231,7 +231,9 @@ BIP39 passphraseは使用せず、empty passphrase（空文字列）で導出す
 
 初回の候補選択画面では見出しを「人格を選択」、補足を「あなたとして生きる人格」とする。死亡後の選択画面では「転生先を選択」を維持する。初回人格を選択する前に再読み込みした場合は、オープニングを再表示してよい。Run #1開始後の案内は [`SPEC-70-寿命・ゲーム・脱出.md`](./SPEC-70-寿命・ゲーム・脱出.md) を正とする。
 
-選択画面はdismissできず、reroll、close、候補の追加生成を提供しない。既存のselected IdentityのcharacterIdは、死亡後を含む以後の候補から除外する。保存されたpending selectionはreload後も同じ3候補として復元する。
+新しいRunの選択画面は、Root build配分と候補選択の二段階とする。usable RPをすべてRoot buildへ配分して確定した後に候補を生成・公開し、候補公開後はそのRunの配分を変更できない。候補拡張Rank 0/1/2/3の新規候補数は3/6/9/12人とする。clear済みIdentityの再利用候補は別枠で提示し、新規候補数に含めない。初回Rootの0RPではRank 0を自動確定し、既存のオープニングから3候補へ直接進む。
+
+選択画面はdismissできず、reroll、close、候補の追加生成を提供しない。既存のselected IdentityのcharacterIdは、死亡後を含む以後の新規候補から除外する。候補公開後のpending selectionは候補配列とRoot buildを一緒に保存し、reload後も同じ候補・順序・確定済みbuildを復元する。未選択候補や候補生成時にskipしたcharacterIdは消費せず、selected Identityだけをhistoryへ追加する。
 
 既存のNostrアカウントは持ち込ませない。MVPでは以下を提供しない。
 
@@ -327,7 +329,7 @@ trace conversationのauthor表示は、kind 0ではなくpubkeyから導出し�
 
 キャラクターを即座に引き直す機能は設けない。
 
-キャラクター変更は「転生」として扱う。24時間に1回の任意転生、初回アカウント作成後の24時間禁止、任意のリセマラは設けない。転生は原則として死亡時のみ発生する。死亡時はcurrent Runを閉じ、current Identityをdeadとして履歴へ残し、次generationの固定3択へ戻る。
+キャラクター変更は「転生」として扱う。24時間に1回の任意転生、初回アカウント作成後の24時間禁止、任意のリセマラは設けない。転生は原則として死亡時のみ発生する。死亡時はcurrent Runを閉じ、current Identityをdeadとして履歴へ残し、次generationのRoot build配分後に候補拡張Rankに応じた3/6/9/12人の新規候補へ進む。
 
 死亡したIdentityは通常の候補選択へ戻さない。次に選択されたIdentityはRootから決定的に導出された別のpubkeyを持ち、既存のRun-local stateを引き継がずRun #1を開始する。clear済みIdentityへ戻る場合は同じkey/pubkey/characterでfresh Runを開始できるものとする。
 

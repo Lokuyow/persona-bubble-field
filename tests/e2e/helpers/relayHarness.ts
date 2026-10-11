@@ -479,7 +479,7 @@ export async function installDelayedRelay(page: Page, options: {
 			const key = channelId && event.pubkey ? `${channelId}\u0000${event.pubkey}` : null;
 			const slotTag = event.tags?.find((tag) => tag[0] === 'd')?.[1] ?? '';
 			if (!key || !Number.isSafeInteger(event.created_at) || slotTag.endsWith(':exit')) { resolve(); return; }
-			const database = indexedDB.open('persona-bubble-field-account', 9);
+			const database = indexedDB.open('persona-bubble-field-account', 10);
 			database.onerror = () => reject(database.error);
 			database.onsuccess = () => {
 				const db = database.result;
@@ -970,6 +970,37 @@ export async function startSelectedRun(page: Page): Promise<void> {
 	await start.click();
 }
 
+export async function confirmPendingRootBuild(page: Page, preferredAbilities: readonly string[] = []): Promise<void> {
+	const allocation = page.getByRole('region', { name: 'Root build配分' });
+	const candidates = page.getByRole('button', { name: /を選ぶ$/ });
+	await expect.poll(async () => (await allocation.count()) + (await candidates.count())).toBeGreaterThan(0);
+	if (await allocation.count() === 0) return;
+	const usage = allocation.getByText(/^使用 \d+ \/ \d+ RP$/);
+	const rankOrder = [...preferredAbilities, '推論加速', 'コンテキスト圧縮', 'ハルシネーション耐性', '候補拡張'];
+	const uniqueRankOrder = [...new Set(rankOrder)];
+	const readUsage = async () => {
+		const match = (await usage.innerText()).match(/^使用 (\d+) \/ (\d+) RP$/);
+		if (!match) throw new Error('Root build allocation usage is unavailable.');
+		return { used: Number(match[1]), total: Number(match[2]) };
+	};
+	while (true) {
+		const { used, total } = await readUsage();
+		if (used === total) break;
+		let allocated = false;
+		for (const ability of uniqueRankOrder) {
+			const increase = allocation.getByRole('button', { name: `${ability}を上げる` });
+			if (await increase.isEnabled()) {
+				await increase.click();
+				allocated = true;
+				break;
+			}
+		}
+		if (!allocated) throw new Error('The available Root Points cannot be fully allocated in the selection UI.');
+	}
+	await page.getByRole('button', { name: '配分を確定して候補を表示' }).click();
+	await expect.poll(() => candidates.count()).toBeGreaterThan(0);
+}
+
 export async function continueFirstRunOpeningIfPresent(page: Page): Promise<void> {
 	const opening = page.getByRole('button', { name: 'はじめる', exact: true });
 	const candidates = page.getByRole('button', { name: /を選ぶ$/ });
@@ -980,7 +1011,14 @@ export async function continueFirstRunOpeningIfPresent(page: Page): Promise<void
 export async function setPendingRootPoints(page: Page, rootPoints: number): Promise<void> {
 	await page.evaluate(async (nextRootPoints) => {
 		const database = await new Promise<IDBDatabase>((resolve, reject) => {
-			const request = indexedDB.open('persona-bubble-field-account');
+			const request = indexedDB.open('persona-bubble-field-account', 10);
+			request.onupgradeneeded = () => {
+				const db = request.result;
+				if (!db.objectStoreNames.contains('persona-bubble-field-root-secret')) db.createObjectStore('persona-bubble-field-root-secret');
+				if (!db.objectStoreNames.contains('persona-bubble-field-player-state')) db.createObjectStore('persona-bubble-field-player-state');
+				if (!db.objectStoreNames.contains('persona-bubble-field-world-write-journal')) db.createObjectStore('persona-bubble-field-world-write-journal');
+				if (!db.objectStoreNames.contains('persona-bubble-field-interaction-rewards')) db.createObjectStore('persona-bubble-field-interaction-rewards', { keyPath: 'key' });
+			};
 			request.onsuccess = () => resolve(request.result);
 			request.onerror = () => reject(request.error);
 		});
@@ -990,8 +1028,13 @@ export async function setPendingRootPoints(page: Page, rootPoints: number): Prom
 			const request = store.get('player-lifecycle');
 			await new Promise<void>((resolve, reject) => {
 				request.onsuccess = () => {
-					const state = request.result as { rootPoints: number };
-					store.put({ ...state, rootPoints: nextRootPoints }, 'player-lifecycle');
+					const state = request.result as { rootPoints: number; identities: unknown[]; mode: { kind: string; pendingSelection?: { generation: number; reusableIdentities: unknown[]; previousFinishedRun: unknown; stage: string; candidates?: unknown[]; rootBuild?: unknown } } };
+					if (state.mode.kind !== 'selecting' || !state.mode.pendingSelection || state.identities.length !== 0) throw new Error('Root points can only be seeded before the first Identity.');
+					const pending = state.mode.pendingSelection;
+					const pendingSelection = nextRootPoints === 0 && pending.stage === 'candidates'
+						? pending
+						: { stage: 'allocating', generation: pending.generation, reusableIdentities: pending.reusableIdentities, previousFinishedRun: pending.previousFinishedRun };
+					store.put({ ...state, rootPoints: nextRootPoints, mode: { kind: 'selecting', pendingSelection } }, 'player-lifecycle');
 				};
 				request.onerror = () => reject(request.error);
 				transaction.oncomplete = () => resolve();
@@ -1143,7 +1186,7 @@ export async function installPromptApiStub(
 		}, { availability, promptBehavior });
 }
 
-export async function seedRelayAccount(page: Page, secretKey: Uint8Array, pubkey: string, lifespanExpiresAtMs = Date.now() + 7 * 24 * 60 * 60 * 1000, points = 0, abilities = { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 }, rootPoints = 0, rootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0 }): Promise<void> {
+export async function seedRelayAccount(page: Page, secretKey: Uint8Array, pubkey: string, lifespanExpiresAtMs = Date.now() + 7 * 24 * 60 * 60 * 1000, points = 0, abilities = { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 }, rootPoints = 0, rootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0, candidateExpansion: 0 }): Promise<void> {
 	const fixtureAccountIndex = fixtureAccountIndexForSecret(secretKey);
 	await page.route('**/favicon.svg', (route) => route.fulfill({
 		contentType: 'text/html',
@@ -1152,7 +1195,7 @@ export async function seedRelayAccount(page: Page, secretKey: Uint8Array, pubkey
 	await page.goto('/favicon.svg');
 	await page.evaluate(async ({ accountPubkey, accountIndex, expiresAtMs, points, abilities, characterId, rootPoints, rootBuild }) => {
 		const database = await new Promise<IDBDatabase>((resolve, reject) => {
-			const request = indexedDB.open('persona-bubble-field-account', 9);
+			const request = indexedDB.open('persona-bubble-field-account', 10);
 			request.onupgradeneeded = () => {
 				for (const name of Array.from(request.result.objectStoreNames)) request.result.deleteObjectStore(name);
 				request.result.createObjectStore('persona-bubble-field-root-secret');
@@ -1171,7 +1214,7 @@ export async function seedRelayAccount(page: Page, secretKey: Uint8Array, pubkey
 		transaction.objectStore('persona-bubble-field-root-secret').put(wrappingKey, 'root-wrapping-key');
 		transaction.objectStore('persona-bubble-field-root-secret').put({ version: 1, iv, ciphertext }, 'encrypted-root-entropy');
 		transaction.objectStore('persona-bubble-field-player-state').put({
-			schemaVersion: 2,
+			schemaVersion: 3,
 			rootPoints,
 			identities: [{ generation: 1, accountIndex, pubkey: accountPubkey, characterId, identityCreatedAtMs: now,
 				status: 'alive', characterProfileRevision: 2, runHistory: [] }],
@@ -1316,7 +1359,7 @@ export async function overwriteRelayGameState(page: Page, gameState: Record<stri
 	}, gameState);
 }
 
-export async function overwriteRelayMendingBuild(page: Page, rootBuild: { inferenceAcceleration: number; contextCompression: number; hallucinationResistance: number }, abilities: { inferenceEfficiency: number; contextCapacity: number; hallucinationSuppression: number }): Promise<void> {
+export async function overwriteRelayMendingBuild(page: Page, rootBuild: { inferenceAcceleration: number; contextCompression: number; hallucinationResistance: number; candidateExpansion: number }, abilities: { inferenceEfficiency: number; contextCapacity: number; hallucinationSuppression: number }): Promise<void> {
 	await page.evaluate(async ({ rootBuild: nextRootBuild, abilities: nextAbilities }) => {
 		const database = await new Promise<IDBDatabase>((resolve, reject) => {
 			const request = indexedDB.open('persona-bubble-field-account');
@@ -1346,7 +1389,7 @@ export async function overwriteRelayMendingBuild(page: Page, rootBuild: { infere
 export async function seedUnavailablePersona(page: Page, kind: 'missing' | 'corrupt'): Promise<void> {
 	await page.goto('/favicon.svg');
 	await page.evaluate((stateKind) => new Promise<void>((resolve, reject) => {
-		const request = indexedDB.open('persona-bubble-field-account', 9);
+		const request = indexedDB.open('persona-bubble-field-account', 10);
 		request.onupgradeneeded = () => {
 			for (const name of Array.from(request.result.objectStoreNames)) request.result.deleteObjectStore(name);
 			request.result.createObjectStore('persona-bubble-field-root-secret');

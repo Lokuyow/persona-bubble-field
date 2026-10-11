@@ -8,7 +8,7 @@ import type { RootBuild } from './rootProgression';
 const SELF = 'a'.repeat(64);
 const OTHER = 'b'.repeat(64);
 const GAME_ID = `${SELF}:100:${'c'.repeat(64)}`;
-const ZERO_BUILD: RootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0 };
+const ZERO_BUILD: RootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0, candidateExpansion: 0 };
 const benefitSeed = Array.from({ length: 1_000 }, (_, index) => `benefit-${index}`).find((candidate) => createTagGameSchedule(candidate)[0].effect === 'benefit')!;
 const calamitySeed = Array.from({ length: 1_000 }, (_, index) => `calamity-${index}`).find((candidate) => createTagGameSchedule(candidate)[0].effect === 'calamity')!;
 

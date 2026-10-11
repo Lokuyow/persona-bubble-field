@@ -13,6 +13,7 @@ import {
 	relayState,
 	selectRelayTraceCell,
 	startSelectedRun,
+	confirmPendingRootBuild,
 	traceRuntimeEvents,
 	overwriteRelayGameState
 } from './helpers/relayHarness';
@@ -80,7 +81,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 420, height: 800 
 		await expect(page.getByRole('button', { name: 'はじめる', exact: true })).toBeVisible();
 		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(0);
 		await page.getByRole('button', { name: 'はじめる', exact: true }).click();
-		await expect(page.getByRole('heading', { name: '人格を選択' })).toBeFocused();
+		await expect(page.locator('#identity-selection-title')).toBeFocused();
 		await expect(page.locator('#identity-selection-description')).toHaveText('あなたとして生きる人格');
 		await expect(page.getByRole('region', { name: '人格を選択' })).toBeVisible();
 		await expect(candidates).toHaveCount(3);
@@ -423,13 +424,17 @@ test('does not show first-run guidance for an existing Run', async ({ page }) =>
 	await expect(page.locator('[data-first-run-tutorial]')).toHaveCount(0);
 });
 
-test('keeps reincarnation selection copy after clear without onboarding', async ({ page }) => {
+test('keeps clear allocation flow without showing first-run onboarding', async ({ page }) => {
 	const { pubkey } = await openClearReadyWorld(page);
 	await page.getByRole('button', { name: '自分のプロフィールを開く' }).click();
 	await page.getByRole('dialog').getByRole('button', { name: '脱出', exact: true }).click();
 	await expect(page.getByRole('dialog')).toBeVisible();
 	await expect(page.getByRole('button', { name: 'はじめる', exact: true })).toHaveCount(0);
 	await expect(page.locator('[data-first-run-tutorial]')).toHaveCount(0);
+	await expect(page.locator('#identity-selection-title')).toHaveText('Root buildを配分');
+	await expect(page.getByRole('region', { name: 'Root build配分' })).toBeVisible();
+	await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(0);
+	await confirmPendingRootBuild(page);
 	await expect(page.getByRole('region', { name: '転生先を選択' })).toBeVisible();
 	await expect(page.locator(`.participant[data-self="true"][data-participant-id="${pubkey}"]`)).toHaveCount(0);
 });

@@ -61,7 +61,7 @@ test.describe('Relay startup', () => {
 		await installDelayedRelay(page, { primaryEvents: testEvents(startTime) });
 		await seedRelayAccount(page, secret, pubkey, startTime + 7 * 24 * 60 * 60 * 1_000, 0,
 			{ inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 }, 1,
-			{ inferenceAcceleration: 1, contextCompression: 0, hallucinationResistance: 0 });
+			{ inferenceAcceleration: 1, contextCompression: 0, hallucinationResistance: 0, candidateExpansion: 0 });
 		await page.goto('/');
 		await expect(page.locator('.action-dock')).toBeVisible();
 		await page.evaluate(() => {

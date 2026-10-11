@@ -366,7 +366,7 @@ async function latestTagGameAction(page: Page, author: string, action: string): 
 
 async function tagGamePersistence(page: Page): Promise<{ lock: unknown; reservation: unknown; receipt: unknown; savedPoints: number | null }> {
 	return page.evaluate(() => new Promise((resolve, reject) => {
-		const open = indexedDB.open('persona-bubble-field-account', 9);
+		const open = indexedDB.open('persona-bubble-field-account', 10);
 		open.onerror = () => reject(open.error);
 		open.onsuccess = () => {
 			const database = open.result;
@@ -514,7 +514,7 @@ async function injectSelfOwnedProjection(page: Page, secret: Uint8Array, effect:
 
 async function seedTagGameRunLock(page: Page, gameId: string, startedAtMs: number): Promise<void> {
 	await page.evaluate(({ id, start }) => new Promise<void>((resolve, reject) => {
-		const open = indexedDB.open('persona-bubble-field-account', 9);
+		const open = indexedDB.open('persona-bubble-field-account', 10);
 		open.onerror = () => reject(open.error);
 		open.onsuccess = () => {
 			const database = open.result;
@@ -1963,7 +1963,7 @@ test('shows the game result after a midgame death presentation without settling 
 	await moveRelaySelfTo(page, { x: 7, y: 5 });
 	await seedTagGameRunLock(page, gameId, startedAt * 1_000);
 	await page.evaluate(() => new Promise<void>((resolve, reject) => {
-		const request = indexedDB.open('persona-bubble-field-account', 9);
+		const request = indexedDB.open('persona-bubble-field-account', 10);
 		request.onerror = () => reject(request.error);
 		request.onsuccess = () => {
 			const database = request.result;
@@ -2033,7 +2033,7 @@ test('midgame death followed by host exit labels other results as last confirmed
 	const gameId = `${hostPubkey}:${startedAt}:${'e'.repeat(64)}`;
 	await seedTagGameRunLock(page, gameId, startedAt * 1_000);
 	await page.evaluate(() => new Promise<void>((resolve, reject) => {
-		const request = indexedDB.open('persona-bubble-field-account', 9);
+		const request = indexedDB.open('persona-bubble-field-account', 10);
 		request.onerror = () => reject(request.error);
 		request.onsuccess = () => {
 			const database = request.result;
@@ -3041,7 +3041,7 @@ test('reuses the anonymous Relay session for restored reservation states without
 			await expect.poll(async () => (await relayState(page)).state.requests.some((request) => request.filters.some((filter) => (filter.kinds as number[] | undefined)?.includes(7070)))).toBe(true);
 			if (reservationCase !== 'none') {
 				await page.evaluate(({ reservationCase, gameId, nowMs }) => new Promise<void>((resolve, reject) => {
-					const request = indexedDB.open('persona-bubble-field-account', 9);
+					const request = indexedDB.open('persona-bubble-field-account', 10);
 					request.onerror = () => reject(request.error);
 					request.onsuccess = () => {
 						const database = request.result;
@@ -3114,7 +3114,7 @@ test('releases an approved reservation after finite known-game recovery when Rel
 		await preparePlayer(page, selfSecret, nowMs, 0, true, true);
 		await moveRelaySelfTo(page, { x: 8, y: 5 });
 		await page.evaluate((reservationGameId) => new Promise<void>((resolve, reject) => {
-			const request = indexedDB.open('persona-bubble-field-account', 9);
+			const request = indexedDB.open('persona-bubble-field-account', 10);
 			request.onerror = () => reject(request.error);
 			request.onsuccess = () => {
 				const database = request.result;

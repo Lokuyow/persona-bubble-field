@@ -20,6 +20,7 @@
 	import ShieldCheck from '~icons/tabler/shield-check';
 	import Stack2 from '~icons/tabler/stack-2';
 	import Tool from '~icons/tabler/tool';
+	import UsersPlus from '~icons/tabler/users-plus';
 	import Wallet from '~icons/tabler/wallet';
 	import X from '~icons/tabler/x';
 	import SpeechMonologue from '~icons/hako/speech-monologue';
@@ -185,10 +186,10 @@
 				{:else if page.kind === 'category' && page.id === 'life'}
 					<section class="help-section" aria-labelledby="help-life-title">
 						<h2 id="help-life-title"><DoorExit aria-hidden="true" />一生と脱出</h2>
-						<div class="help-fact"><Heart aria-hidden="true" /><div><h3>一生が終わると</h3><p>寿命が0になると現在の一生は終了します。寿命が尽きたときは、現在の人格、所持ポイント、能力強化、その人格に結びついた状態を失います。その後、3人の候補から転生先を選びます。新しい一生は寿命7日、ポイント0、能力初期状態から始まります。</p></div></div>
+						<div class="help-fact"><Heart aria-hidden="true" /><div><h3>一生が終わると</h3><p>寿命が0になると現在の一生は終了します。寿命が尽きたときは、現在の人格、所持ポイント、能力強化、その人格に結びついた状態を失います。その後、Root buildを配分・確定してから、候補拡張Rankに応じた3／6／9／12人の候補から転生先を選びます。新しい一生は寿命7日、ポイント0、能力初期状態から始まります。</p></div></div>
 						<div class="help-fact"><DoorExit aria-hidden="true" /><div><h3>脱出</h3><p><strong>100,000pt以上を現在所持していること</strong>は条件のひとつです。一度到達しただけでは条件を永久に満たしません。能力強化などで100,000pt未満になれば条件を満たさなくなります。リアルタイムイベントの結果確定中など、ほかの条件で一時的に脱出できない場合があります。</p></div></div>
 						<div class="help-fact"><Award aria-hidden="true" /><div><h3>脱出すると</h3><p>正常な脱出1回につき1RPを獲得します。死亡ではRPは増えません。その人格のnsecを取り出せるようになり、脱出済みの人格は同じ人格で新しい一生を始められます。</p></div></div>
-						<div class="help-fact"><Award aria-hidden="true" /><div><h3>Root PointとRoot build</h3><p>Root Pointは一生を越えて保持され、死亡しても失いません。新しい一生を始める前に、使用できるRPをすべてRoot buildへ割り振ります。使用できるのは最大9RPで、各能力はRank 0〜3、Rankを1上げるごとに1RPを使います。一生が始まった後は配分を変更できません。</p><ul class="icon-list"><li><Brain aria-hidden="true" /><span><strong>推論加速</strong> — 通常作業のポイント生成倍率はRank 0〜3の順に×1.00／×2.00／×3.00／×4.00です。蓄積上限後の作業には適用されません。</span></li><li><Stack2 aria-hidden="true" /><span><strong>コンテキスト圧縮</strong> — 回収せずに作業できる時間は、Rank 0〜3の順に通常の×1.00／×2.00／×3.00／×4.00です。蓄積上限後のポイント生成と寿命延長は、通常時の0%／20%／35%／50%になります。</span></li><li><ShieldCheck aria-hidden="true" /><span><strong>ハルシネーション耐性</strong> — 作業で延ばせる最大寿命は、Rank 0〜3の順に7日／14日／21日／30日です。新しい一生の開始時は、どのRankでも7日です。</span></li></ul></div></div>
+						<div class="help-fact"><Award aria-hidden="true" /><div><h3>Root PointとRoot build</h3><p>Root Pointは一生を越えて保持され、死亡しても失いません。新しい一生を始める前に、使用できるRPをすべてRoot buildへ割り振り、候補を表示する前に確定します。使用できるのは最大12RPで、4能力はRank 0〜3、Rankを1上げるごとに1RPを使います。候補公開後は配分を変更できません。脱出済みの人格の再利用候補は、新しく生成する候補数に含みません。</p><ul class="icon-list"><li><Brain aria-hidden="true" /><span><strong>推論加速</strong> — 通常作業のポイント生成倍率はRank 0〜3の順に×1.00／×2.00／×3.00／×4.00です。蓄積上限後の作業には適用されません。</span></li><li><Stack2 aria-hidden="true" /><span><strong>コンテキスト圧縮</strong> — 回収せずに作業できる時間は、Rank 0〜3の順に通常の×1.00／×2.00／×3.00／×4.00です。蓄積上限後のポイント生成と寿命延長は、通常時の0%／20%／35%／50%になります。</span></li><li><ShieldCheck aria-hidden="true" /><span><strong>ハルシネーション耐性</strong> — 作業で延ばせる最大寿命は、Rank 0〜3の順に7日／14日／21日／30日です。新しい一生の開始時は、どのRankでも7日です。</span></li><li><UsersPlus aria-hidden="true" /><span><strong>候補拡張</strong> — 新しく生成する候補はRank 0／1／2／3の順に3人／6人／9人／12人です。初回Rootは0RPのため、Rank 0の3候補へ直接進みます。</span></li></ul></div></div>
 					</section>
 				{:else if page.kind === 'category' && page.id === 'nostr'}
 					<section class="help-section" aria-labelledby="help-nostr-title">

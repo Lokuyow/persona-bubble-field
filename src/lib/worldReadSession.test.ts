@@ -18,6 +18,7 @@ import { createInitialPersonaGameState } from './personaGameState';
 import type { PersonaSnapshot } from './rootIdentity';
 import { protocolKeyFor } from './realtimeEvents';
 import { createWorldReadSession, type RealtimeStartConfiguration, type WorldReadConnectionStatus } from './worldReadSession';
+import { TRACE_DATABASE_UPGRADE_BLOCKED_MESSAGE } from './traceDatabase';
 
 const mocked = vi.hoisted(() => ({
 	createTransport: vi.fn(),
@@ -559,7 +560,7 @@ describe('world read session', () => {
 		const session = createWorldReadSession({ field: { columns: 4, rows: 3 }, selfSigner: signer, selfRunNumber: 1,
 			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn() });
 		await session.start();
-		const rootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0 } as const;
+		const rootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0, candidateExpansion: 0 } as const;
 		const snapshot = (rootPoints: number) => ({ signer, identity: signer.identity, rootPoints,
 			activeRun: { runNumber: 1, rootBuild }, gameState: createInitialPersonaGameState(signer.pubkey, 700_000) }) as unknown as PersonaSnapshot;
 		mocked.reservePublicProfilePublication.mockResolvedValue({ kind: 'reserved', createdAt: 701, persona: snapshot(2) });
@@ -583,7 +584,7 @@ describe('world read session', () => {
 		const session = createWorldReadSession({ field: { columns: 4, rows: 3 }, selfSigner: signer, selfRunNumber: 1,
 			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn() });
 		await session.start();
-		const rootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0 } as const;
+		const rootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0, candidateExpansion: 0 } as const;
 		const persona = { signer, identity: signer.identity, rootPoints: 2, activeRun: { runNumber: 1, rootBuild },
 			gameState: createInitialPersonaGameState(signer.pubkey, 700_000) } as unknown as PersonaSnapshot;
 		mocked.reservePublicProfilePublication.mockResolvedValue({ kind: 'reserved', createdAt: 701, persona });
@@ -616,7 +617,7 @@ describe('world read session', () => {
 		const session = createWorldReadSession({ field: { columns: 4, rows: 3 }, selfSigner: signer, selfRunNumber: 1,
 			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn() });
 		await session.start();
-		const rootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0 } as const;
+		const rootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0, candidateExpansion: 0 } as const;
 		const snapshot = (points: number) => ({ signer, identity: signer.identity, rootPoints: 2,
 			activeRun: { runNumber: 1, rootBuild }, gameState: { ...createInitialPersonaGameState(signer.pubkey, 700_000), points } }) as unknown as PersonaSnapshot;
 		mocked.reservePublicProfilePublication
@@ -644,7 +645,7 @@ describe('world read session', () => {
 		const session = createWorldReadSession({ field: { columns: 4, rows: 3 }, selfSigner: signer, selfRunNumber: 1,
 			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn() });
 		await session.start();
-		const rootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0 } as const;
+		const rootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0, candidateExpansion: 0 } as const;
 		const persona = { signer, identity: signer.identity, rootPoints: 2, activeRun: { runNumber: 1, rootBuild },
 			gameState: createInitialPersonaGameState(signer.pubkey, 700_000) } as unknown as PersonaSnapshot;
 		mocked.reservePublicProfilePublication.mockResolvedValue({ kind: 'reserved', createdAt: 701, persona });
@@ -664,7 +665,7 @@ describe('world read session', () => {
 		const session = createWorldReadSession({ field: { columns: 4, rows: 3 }, selfSigner: signer, selfRunNumber: 1,
 			onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(), onStatusChanged: vi.fn() });
 		await session.start();
-		const rootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0 } as const;
+		const rootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0, candidateExpansion: 0 } as const;
 		const persona = { signer, identity: signer.identity, rootPoints: 2, activeRun: { runNumber: 1, rootBuild },
 			gameState: createInitialPersonaGameState(signer.pubkey, 700_000) } as unknown as PersonaSnapshot;
 		mocked.reservePublicProfilePublication
@@ -1413,6 +1414,29 @@ describe('world read session', () => {
 		await Promise.resolve();
 		await Promise.resolve();
 		expect(statuses).toEqual([{ kind: 'bootstrapping' }, { kind: 'available' }]);
+	});
+
+	it('reports a blocked Trace upgrade through the Trace storage notice callback', async () => {
+		mocked.reconcileTraceRootCache.mockRejectedValue(new Error(TRACE_DATABASE_UPGRADE_BLOCKED_MESSAGE));
+		mocked.createTransport.mockReturnValue({
+			start: vi.fn(async (nextInput) => {
+				input = nextInput;
+				return startResult();
+			}),
+			bootstrapTraceRootCandidates: vi.fn().mockResolvedValue({ rawEvents: [], relays: [] }),
+			dispose,
+			publish
+		});
+		const onTraceStorageUpgradeBlocked = vi.fn();
+		const session = createWorldReadSession({
+			field: { columns: 4, rows: 3 }, onPresenceChanged: vi.fn(), onLiveMessage: vi.fn(),
+			onTraceStorageUpgradeBlocked, onStatusChanged: vi.fn()
+		});
+
+		await session.start();
+		await vi.waitFor(() => expect(onTraceStorageUpgradeBlocked).toHaveBeenCalledWith(TRACE_DATABASE_UPGRADE_BLOCKED_MESSAGE));
+		expect(onTraceStorageUpgradeBlocked).toHaveBeenCalledOnce();
+		session.dispose();
 	});
 
 	it('does not notify late trace cache snapshots after disposal', async () => {

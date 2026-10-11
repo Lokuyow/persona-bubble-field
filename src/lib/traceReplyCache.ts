@@ -7,6 +7,7 @@ import {
 	TRACE_REPLY_READ_STORE,
 	TRACE_REPLY_STORE,
 	TRACE_ROOT_STORE,
+	TRACE_DATABASE_UPGRADE_BLOCKED_MESSAGE,
 	type TraceReadwriteTransaction,
 	type TraceReplyRecord,
 	type TraceReplyLruRecord
@@ -90,7 +91,8 @@ async function openReplyDatabase() {
 	}
 	try {
 		return await openTraceDatabase();
-	} catch {
+	} catch (error) {
+		if (error instanceof Error && error.message === TRACE_DATABASE_UPGRADE_BLOCKED_MESSAGE) throw error;
 		throw new Error('Trace reply storage could not be opened.');
 	}
 }

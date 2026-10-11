@@ -227,7 +227,8 @@ export function projectMending(state: MendingState, nowMs: number, rootBuild: Ro
 function isValidRootBuildForProjection(value: RootBuild): boolean {
 	return Number.isSafeInteger(value.inferenceAcceleration) && value.inferenceAcceleration >= 0 && value.inferenceAcceleration <= 3 &&
 		Number.isSafeInteger(value.contextCompression) && value.contextCompression >= 0 && value.contextCompression <= 3 &&
-		Number.isSafeInteger(value.hallucinationResistance) && value.hallucinationResistance >= 0 && value.hallucinationResistance <= 3;
+		Number.isSafeInteger(value.hallucinationResistance) && value.hallucinationResistance >= 0 && value.hallucinationResistance <= 3 &&
+		Number.isSafeInteger(value.candidateExpansion) && value.candidateExpansion >= 0 && value.candidateExpansion <= 3;
 }
 
 export function isMendingExpired(state: MendingState, nowMs: number, rootBuild: RootBuild = ZERO_ROOT_BUILD): boolean {

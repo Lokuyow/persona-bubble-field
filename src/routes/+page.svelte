@@ -85,6 +85,7 @@ import { requireWorldCharacterFromPubkey } from '$lib/worldCharacterAssignment';
 		LIFECYCLE_UPGRADE_BLOCKED_MESSAGE,
 		authorizeActiveRun,
 		collectMending,
+		confirmRootBuild,
 		loadOrCreateLifecycle,
 		selectIdentity,
 		transitionExpiredPersona,
@@ -312,6 +313,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	let colorByPubkey = $state.raw<Record<string, BubbleTone>>({});
 	let recentMessageTimeline = $state.raw<RecentMessageTimeline>([]);
 	let effectiveTraceRoots = $state.raw<readonly ParsedWorldMessage[]>([]);
+	let traceStorageUpgradeNotice = $state<string | null>(null);
 	let traceConversationState = $state.raw<TraceConversationState>({ kind: 'closed' });
 	let traceReplyMode = $state.raw(createTraceReplyMode());
 	let manualTraceMode = $state(false);
@@ -1800,6 +1802,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 						persona.activeRun.revision >= personaSnapshot.activeRun.revision) personaSnapshot = persona;
 				},
 				onTraceConversationChanged: setTraceConversation,
+				onTraceStorageUpgradeBlocked: (message) => { traceStorageUpgradeNotice = message; },
 				onStatusChanged: (status) => {
 					if (!mounted || worldReader !== nextSession) return;
 					connectionStatus = status;
@@ -1986,7 +1989,14 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 				if (personaResult.kind === 'created' || personaResult.kind === 'selecting') {
 					pendingIdentitySelection = personaResult.selection;
 					pendingRootPoints = personaResult.rootPoints;
-					runTransitionNotice = transitionNotice;
+					if (personaResult.selection.generation === 1 && personaResult.selection.previousFinishedRun === null) {
+						try { window.sessionStorage.removeItem(FIRST_RUN_TUTORIAL_SESSION_KEY); } catch { /* A stale session hint must not survive the clean lifecycle reset. */ }
+						firstRunTutorialScope = null;
+						firstRunTutorialStep = null;
+						runTransitionNotice = null;
+					} else {
+						runTransitionNotice = transitionNotice;
+					}
 					selfSigner = null;
 					personaSnapshot = null;
 				} else if (personaResult.kind !== 'restored') {
@@ -2317,16 +2327,38 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		rankingDialogOpen = true;
 	}
 
-	async function chooseIdentity(candidate: SelectionCandidate, rootBuild: RootBuild): Promise<void> {
+	async function confirmIdentityRootBuild(rootBuild: RootBuild): Promise<void> {
 		const selection = pendingIdentitySelection;
-		if (!selection || personaLifecycleTransition) return;
+		if (!selection || selection.stage !== 'allocating' || personaLifecycleTransition) return;
+		personaLifecycleTransition = true;
+		try {
+			const result = await confirmRootBuild(selection, rootBuild);
+			if (result.kind === 'confirmed') {
+				pendingIdentitySelection = result.selection;
+				return;
+			}
+			if (result.kind === 'superseded') {
+				window.location.reload();
+				return;
+			}
+			enterReadOnlyFallback('Root build could not be confirmed.');
+		} catch {
+			enterReadOnlyFallback('Root build could not be confirmed.');
+		} finally {
+			personaLifecycleTransition = false;
+		}
+	}
+
+	async function chooseIdentity(candidate: SelectionCandidate): Promise<void> {
+		const selection = pendingIdentitySelection;
+		if (!selection || selection.stage !== 'candidates' || personaLifecycleTransition) return;
 		personaLifecycleTransition = true;
 		try {
 			const selectionOptions = deathDevMode || clearDevMode ? {
 				...(deathDevMode ? { initialLifespanMs: DEATH_DEV_INITIAL_LIFESPAN_MS } : {}),
 				...(clearDevMode ? { initialPoints: CLEAR_DEV_INITIAL_POINTS } : {})
 			} : undefined;
-			const result = await selectIdentity(selection.generation, candidate, rootBuild, selectionOptions);
+			const result = await selectIdentity(selection, candidate, selectionOptions);
 			if (result.kind === 'selected') {
 				if (selection.generation === 1 && selection.reusableIdentities.length === 0 && result.persona.activeRun.runNumber === 1) {
 					storeFirstRunTutorialStep('life', result.persona);
@@ -5352,6 +5384,11 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	data-trace-runtime={traceConversationController ? runtimeMode : undefined}
 	style={`--composer-keyboard-inset: ${composerKeyboardInset}px;--composer-initial-preferred-height: ${INITIAL_COMPOSER_PREFERRED_HEIGHT}px;${composerPreferredHeight === null ? '' : `--composer-preferred-height: ${composerPreferredHeight}px;`}`}
 >
+	{#if traceStorageUpgradeNotice}
+		<div class="trace-storage-upgrade-notice" role="alert" aria-live="assertive">
+			{traceStorageUpgradeNotice}
+		</div>
+	{/if}
 	<FieldViewport
 		bind:this={fieldViewportComponent}
 		bind:viewportElement
@@ -5638,7 +5675,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		currentRunNumber={profileRunNumber}
 		avatarTone={profileTargetPubkey ? colorByPubkey[profileTargetPubkey] ?? 'sky' : 'sky'}
 	/>
-	<IdentitySelectionDialog selection={pendingIdentitySelection} rootPoints={pendingRootPoints} transitionNotice={runTransitionNotice} onSelect={(candidate, rootBuild) => { void chooseIdentity(candidate, rootBuild); }} onExportNsec={(candidate) => { void exportIdentityNsec(candidate); }} />
+	<IdentitySelectionDialog selection={pendingIdentitySelection} rootPoints={pendingRootPoints} transitionNotice={runTransitionNotice} onConfirm={(rootBuild) => { void confirmIdentityRootBuild(rootBuild); }} onSelect={(candidate) => { void chooseIdentity(candidate); }} onExportNsec={(candidate) => { void exportIdentityNsec(candidate); }} />
 	<MendingDialog
 		open={mendingDialogOpen}
 		projection={mendingProjection}
@@ -5931,6 +5968,23 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		flex-direction: column;
 		overflow: hidden;
 		background: transparent;
+	}
+	.trace-storage-upgrade-notice {
+		position: fixed;
+		top: max(72px, calc(env(safe-area-inset-top) + 64px));
+		left: 50%;
+		z-index: 100;
+		width: min(620px, calc(100% - 24px));
+		padding: 12px 16px;
+		transform: translateX(-50%);
+		border: 1px solid rgb(255 201 138 / 70%);
+		border-radius: 12px;
+		background: rgb(47 35 24 / 96%);
+		color: #fff4e7;
+		font-size: .9rem;
+		line-height: 1.45;
+		text-align: center;
+		box-shadow: 0 8px 28px rgb(0 0 0 / 30%);
 	}
 
 	.action-dock-available {

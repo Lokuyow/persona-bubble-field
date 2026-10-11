@@ -6,7 +6,7 @@ import { rootMaximumLifespanMs, type RootBuild } from './rootProgression';
 const minute = 60 * 1000;
 const hour = 60 * minute;
 const PUBKEY = 'a'.repeat(64);
-const ZERO_BUILD: RootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0 };
+const ZERO_BUILD: RootBuild = { inferenceAcceleration: 0, contextCompression: 0, hallucinationResistance: 0, candidateExpansion: 0 };
 
 function state(startedAtMs = 1_000) {
 	const initial = createInitialPersonaGameState(PUBKEY, startedAtMs);
@@ -117,7 +117,7 @@ describe('checkpoint-settled asynchronous work', () => {
 	it('applies Root context capacity and overflow point rates without acceleration in overflow', () => {
 		const work = { ...state(), abilities: { ...state().abilities, contextCapacity: 1 } };
 		for (const [rank, capacityMinutes, expectedRate, expectedPoints] of [[0, 5, 0, 20], [1, 10, 20, 50], [2, 15, 35, 75], [3, 20, 50, 100]] as const) {
-			const projection = projectMending({ ...work, abilities: { ...work.abilities, inferenceEfficiency: 1 } }, 1_000 + hour, { inferenceAcceleration: 3, contextCompression: rank, hallucinationResistance: 0 });
+			const projection = projectMending({ ...work, abilities: { ...work.abilities, inferenceEfficiency: 1 } }, 1_000 + hour, { inferenceAcceleration: 3, contextCompression: rank, hallucinationResistance: 0, candidateExpansion: 0 });
 			expect(projection.contextCapacityMs).toBe(capacityMinutes * minute);
 			expect(projection.overflowDurationMs).toBe((60 - capacityMinutes) * minute);
 			expect(projection.points).toBe(expectedPoints);
@@ -139,7 +139,7 @@ describe('checkpoint-settled asynchronous work', () => {
 
 	it('switches to the overflow rate exactly at the Context cap', () => {
 		for (const [rank, expectedPointRate, expectedLifespanRate] of [[0, 0, 0], [1, 20, 2], [2, 35, 3.5], [3, 50, 5]] as const) {
-			const projection = projectMending({ ...state(), abilities: { ...state().abilities, contextCapacity: 1 } }, 1_000 + (5 * (rank + 1)) * minute, { inferenceAcceleration: 3, contextCompression: rank, hallucinationResistance: 0 });
+			const projection = projectMending({ ...state(), abilities: { ...state().abilities, contextCapacity: 1 } }, 1_000 + (5 * (rank + 1)) * minute, { inferenceAcceleration: 3, contextCompression: rank, hallucinationResistance: 0, candidateExpansion: 0 });
 			expect(projection.overflowDurationMs).toBe(0);
 			expect(projection.completed).toBe(true);
 			expect(projection.pointRateHundredthsPerMinute).toBe(expectedPointRate);
@@ -149,7 +149,7 @@ describe('checkpoint-settled asynchronous work', () => {
 
 	it('settles the regular-to-overflow boundary at each segment rate', () => {
 		const work = { ...state(), abilities: { ...state().abilities, contextCapacity: 1 } };
-		const projection = projectMending(work, 1_000 + 15 * minute, { inferenceAcceleration: 3, contextCompression: 1, hallucinationResistance: 0 });
+		const projection = projectMending(work, 1_000 + 15 * minute, { inferenceAcceleration: 3, contextCompression: 1, hallucinationResistance: 0, candidateExpansion: 0 });
 		expect(projection.regularDurationMs).toBe(10 * minute);
 		expect(projection.overflowDurationMs).toBe(5 * minute);
 		expect(projection.points).toBe(41);

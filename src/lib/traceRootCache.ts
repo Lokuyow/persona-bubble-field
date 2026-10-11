@@ -7,6 +7,7 @@ import {
 	TRACE_REPLY_STORE,
 	TRACE_ROOT_STORE,
 	TRACE_ROOT_READ_STORE,
+	TRACE_DATABASE_UPGRADE_BLOCKED_MESSAGE,
 	type TraceReadwriteTransaction
 } from './traceDatabase';
 import { deleteTraceRootReadState } from './traceReadState';
@@ -31,7 +32,8 @@ async function openRootDatabase() {
 	}
 	try {
 		return await openTraceDatabase();
-	} catch {
+	} catch (error) {
+		if (error instanceof Error && error.message === TRACE_DATABASE_UPGRADE_BLOCKED_MESSAGE) throw error;
 		throw new Error('Trace root storage could not be opened.');
 	}
 }

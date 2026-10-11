@@ -8,6 +8,7 @@ import {
 import { normalizeRealtimeInstanceFilterConfigurations, parseRealtimeEnvelope, type RealtimeControlEnvelope, type RealtimeEnvelope, type RealtimeEventRegistry, type RealtimeInstanceFilterConfiguration } from './realtimeEvents';
 import { reconcileTraceRootCache } from './traceRootCache';
 import { loadTracePreviewEvent, reconcileTraceReplyCache, touchTraceReplyTree } from './traceReplyCache';
+import { TRACE_DATABASE_UPGRADE_BLOCKED_MESSAGE } from './traceDatabase';
 import {
 	loadTraceReadSnapshot,
 	markTraceReplyRead,
@@ -193,6 +194,7 @@ export type WorldReadSessionOptions = Readonly<{
 	onPersonaSnapshotChanged?: (persona: PersonaSnapshot) => void;
 	onInteractionRewardApplied?: (reward: AppliedTraceReadReward) => void;
 	onTraceConversationChanged?: (state: TraceConversationState) => void;
+	onTraceStorageUpgradeBlocked?: (message: string) => void;
 	onStatusChanged: (status: WorldReadConnectionStatus) => void;
 	onSelfPositionWriteStateChanged?: (state: SelfPositionWriteState) => void;
 	onSelfMessageAvailabilityChanged?: (state: SelfMessageAvailability) => void;
@@ -300,6 +302,7 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	let traceStartupReadiness: Promise<'ready' | 'failed' | 'not-needed'> | null = null;
 	let traceNotificationStartup: Promise<'ready' | 'failed' | 'not-needed'> | null = null;
 	let traceConversationState: TraceConversationState = { kind: 'closed' };
+	let traceStorageUpgradeBlockedReported = false;
 	let traceConversationGeneration = 0;
 	let realtimeEvents: RealtimeEnvelope[] = [];
 	const realtimeControlIds = new Set<string>();
@@ -443,6 +446,12 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 	function emitTraceConversationState(next: TraceConversationState): void {
 		traceConversationState = next;
 		if (!disposed) options.onTraceConversationChanged?.(next);
+	}
+
+	function reportTraceStorageUpgradeBlocked(error: unknown): void {
+		if (disposed || traceStorageUpgradeBlockedReported || !(error instanceof Error) || error.message !== TRACE_DATABASE_UPGRADE_BLOCKED_MESSAGE) return;
+		traceStorageUpgradeBlockedReported = true;
+		options.onTraceStorageUpgradeBlocked?.(error.message);
 	}
 
 	function refreshSelfMessageAvailability(): void {
@@ -772,7 +781,8 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 			reconcileOpenTraceRoot(roots);
 			options.onEffectiveTraceRootsChanged?.(roots);
 			refreshTraceReadSnapshot();
-		}).catch(() => {
+		}).catch((error) => {
+			reportTraceStorageUpgradeBlocked(error);
 			// Trace is viewer-local supplemental state and never changes world status.
 		});
 	}
@@ -1441,7 +1451,8 @@ export function createWorldReadSession(input: WorldReadSessionOptions) {
 				refreshTraceReadSnapshot();
 				const visibleRootId = rootId ?? (traceConversationState.kind === 'open' ? traceConversationState.root.id : null);
 				if (visibleRootId) applyTraceReplySnapshot(generation, replies.filter((reply) => reply.rootId === visibleRootId));
-			} catch {
+			} catch (error) {
+				reportTraceStorageUpgradeBlocked(error);
 				// A supplemental cache failure does not affect primary world reads.
 			}
 		});
