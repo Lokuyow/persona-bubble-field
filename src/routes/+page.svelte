@@ -470,6 +470,10 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			storeFirstRunTutorialStep('movement', persona);
 		} else if (firstRunTutorialStep === 'speech') {
 			storeFirstRunTutorialStep('trace', persona);
+		} else if (firstRunTutorialStep === 'trace' && !firstRunTutorialTraceTargetId && traceReadBaselineSnapshot) {
+			storeFirstRunTutorialStep('reply', persona);
+		} else if (firstRunTutorialStep === 'ability' && firstRunTutorialAbilityAlreadyUpgraded) {
+			storeFirstRunTutorialStep('note', persona);
 		} else if (firstRunTutorialStep === 'note') {
 			storeFirstRunTutorialStep('help', persona);
 		} else if (firstRunTutorialStep === 'reply') {
@@ -1115,6 +1119,7 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 	let visibleTagGameStates = $derived(tagGameStates.filter((game) => game.endReason !== 'host-cancelled' && (isFreshTagGameLobby(game, Math.floor(Date.now() / 1000)) || game.phase !== 'lobby')));
 	let clearBlockedReason = $derived(!personaSnapshot ? 'Runがありません' : tagGameLocalLock ? '鬼ごっこ終了後の精算中です' : personaSnapshot.gameState.points < 100_000 ? '所持ポイントが100,000pt未満です' : isPersonaExpired(personaSnapshot.gameState, mendingNowMs, personaSnapshot.activeRun.rootBuild) ? '寿命が尽きています' : pendingRealtimeSettlement ? '協力と抜け駆けの精算が未完了です' : null);
 	let traceRootCells = $derived(groupTraceRoots(effectiveTraceRoots));
+	let firstRunTutorialAbilityAlreadyUpgraded = $derived(Boolean(personaSnapshot && Object.values(personaSnapshot.gameState.abilities).some((level) => level > 1)));
 	// Keep grouped roots intact for the Trace data flow, but let fixed facilities
 	// own their cells at the field presentation/interaction boundary.
 	let fieldTraceRootCells = $derived(traceRootCells.filter((cell) => !isBlockedFacilityCell(cell.position)));
@@ -5554,12 +5559,17 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 			{:else if firstRunTutorialStep === 'work'}
 				<p>作業をすると、ポイントを得て寿命を延ばせます。</p>
 			{:else if firstRunTutorialStep === 'ability'}
-				<p>強化端末へ移動して、能力をひとつ強化しよう。</p>
+				<p>{firstRunTutorialAbilityAlreadyUpgraded ? '能力は強化済みです。強化端末で次へ進めます。' : '強化端末へ移動して、能力をひとつ強化しよう。'}</p>
 			{:else if firstRunTutorialStep === 'speech'}
 				<p>誰かに話しかけてみましょう</p>
 				<ActionButton variant="primary" class="first-run-tutorial-next" type="button" onclick={advanceFirstRunTutorialFromPrompt}>次へ</ActionButton>
 			{:else if firstRunTutorialStep === 'trace'}
-				<p>他の住人の未読の痕跡・書置き・遺言のどれかを1つ読んで、5ptを受け取ろう。</p>
+				{#if firstRunTutorialTraceTargetId || !traceReadBaselineSnapshot}
+					<p>他の住人の未読の痕跡・書置き・遺言のどれかを1つ読んで、5ptを受け取ろう。</p>
+				{:else}
+					<p>読める未読の痕跡がありません。次へ進めます。</p>
+					<ActionButton variant="primary" class="first-run-tutorial-next" type="button" onclick={advanceFirstRunTutorialFromPrompt}>次へ</ActionButton>
+				{/if}
 			{:else if firstRunTutorialStep === 'note'}
 				<p>100ptを使って、その場に書置きを残せます</p>
 				<ActionButton variant="primary" class="first-run-tutorial-next" type="button" onclick={advanceFirstRunTutorialFromPrompt}>次へ</ActionButton>
@@ -5686,6 +5696,8 @@ import { isOwnTagGameCountdown, isOwnTagGameStartTransition, tagGameCountdownSec
 		abilities={personaSnapshot?.gameState.abilities ?? { inferenceEfficiency: 1, contextCapacity: 1, hallucinationSuppression: 1 }}
 		busy={abilityMutationInFlight}
 		tutorialUpgradeRequired={showFirstRunTutorial && firstRunTutorialStep === 'ability'}
+		tutorialUpgradeSatisfied={firstRunTutorialAbilityAlreadyUpgraded}
+		onTutorialContinue={advanceFirstRunTutorialFromPrompt}
 		onOpenChange={(open) => { adjustmentDialogOpen = open; }}
 		onUpgrade={(key) => { void mutateAbility(key); }}
 		upgradeFeedback={upgradeFeedback}

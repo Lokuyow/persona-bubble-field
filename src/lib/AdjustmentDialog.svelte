@@ -29,12 +29,14 @@
 		abilities: PersonaAbilityLevels;
 		busy: boolean;
 		tutorialUpgradeRequired?: boolean;
+		tutorialUpgradeSatisfied?: boolean;
 		onOpenChange: (open: boolean) => void;
 		onUpgrade: (key: PersonaAbilityKey) => void;
+		onTutorialContinue?: () => void;
 		upgradeFeedback?: Readonly<{ id: number; key: PersonaAbilityKey; level: number }> | null;
 	}>;
 
-	let { open, points, abilities, busy, tutorialUpgradeRequired = false, onOpenChange, onUpgrade, upgradeFeedback = null }: Props = $props();
+	let { open, points, abilities, busy, tutorialUpgradeRequired = false, tutorialUpgradeSatisfied = false, onOpenChange, onUpgrade, onTutorialContinue = () => {}, upgradeFeedback = null }: Props = $props();
 	let dialogContent = $state<HTMLElement | null>(null);
 	let presentationScope = $state.raw<Scope | null>(null);
 	let activeTimeline: Timeline | null = null;
@@ -251,7 +253,12 @@
 						</div>
 						<Dialog.Close class="action-button action-button-tertiary action-button-close dialog-close-header" aria-label="閉じる"><X aria-hidden="true" /></Dialog.Close>
 					</header>
-					{#if tutorialUpgradeRequired}
+					{#if tutorialUpgradeRequired && tutorialUpgradeSatisfied}
+						<div class="tutorial-upgrade-continuation" data-first-run-ability-guidance>
+							<p class="tutorial-upgrade-guidance" role="status" aria-live="polite">能力は強化済みです。次へ進めます。</p>
+							<ActionButton variant="primary" class="tutorial-upgrade-next" type="button" onclick={onTutorialContinue}>次へ</ActionButton>
+						</div>
+					{:else if tutorialUpgradeRequired}
 						<p class="tutorial-upgrade-guidance" data-first-run-ability-guidance role="status" aria-live="polite">能力をどれか1つ強化してください。</p>
 					{/if}
 					<section class="ability-list" aria-label="能力">
@@ -260,7 +267,7 @@
 							{@const canAfford = points >= upgrade.cost}
 							{@const isMaxed = upgrade.nextEffect === null}
 							{@const upgradeName = `${abilityLabels[key]}をLv${upgrade.level + 1}へ強化`}
-							<article class:success-flash={upgradeFeedback?.key === key} class:tutorial-upgrade-choice={tutorialUpgradeRequired && canAfford && !isMaxed} class="ability-card">
+							<article class:success-flash={upgradeFeedback?.key === key} class:tutorial-upgrade-choice={tutorialUpgradeRequired && !tutorialUpgradeSatisfied && canAfford && !isMaxed} class="ability-card">
 								<div class="ability-card-heading">
 									<h2 class="ability-name">
 										{#if key === 'inferenceEfficiency'}<Brain aria-hidden="true" />{:else if key === 'contextCapacity'}<Stack2 aria-hidden="true" />{:else}<ShieldCheck aria-hidden="true" />{/if}
@@ -316,6 +323,8 @@
 	:global(.adjustment-dialog-title) { display: inline-flex; align-items: center; gap: 9px; margin: 0; color: #f4f6ff; font-size: 22px; line-height: 1; font-weight: 800; letter-spacing: .03em; }
 	.points-display { grid-column: 2; }
 	.tutorial-upgrade-guidance { margin: 0 0 14px; padding: 10px 14px; border: 1px solid rgba(72, 221, 210, .7); border-radius: 10px; background: rgba(72, 221, 210, .1); animation: first-run-tutorial-guidance-pulse 2.6s ease-in-out infinite; color: #f4f6ff; font-weight: 750; text-align: center; }
+	.tutorial-upgrade-continuation { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; margin-bottom: 14px; }
+	.tutorial-upgrade-continuation .tutorial-upgrade-guidance { margin: 0; }
 	@keyframes first-run-tutorial-guidance-pulse {
 		0%, 100% { box-shadow: 0 0 5px rgba(72, 221, 210, .16); }
 		50% { box-shadow: 0 0 16px rgba(72, 221, 210, .58); }

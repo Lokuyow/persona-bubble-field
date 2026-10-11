@@ -201,8 +201,8 @@
 	.trace-root-card,
 	.trace-reply-card { position: absolute; pointer-events: auto; }
 	.trace-presentation-pending { visibility: hidden; pointer-events: none; }
-	.trace-root-card { z-index: 1; display: flex; }
-	.trace-root-card .trace-root-bubble { position: relative; }
+	.trace-root-card { z-index: 1; display: flex; min-width: min(72px, calc(100% - 32px)); max-width: min(240px, calc(100% - 32px)); }
+	.trace-root-card .trace-root-bubble { position: relative; width: 100%; min-width: 0; max-width: 100%; }
 	.trace-root-bubble:not(.speech-bubble-special) { background: transparent; border-color: transparent; }
 	.trace-reply-card { z-index: 2; display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 0; align-items: stretch; min-width: 144px; padding: 0; }
 	.trace-reply-card.trace-current-selected:not(.speech-bubble-special)::before { content: ''; position: absolute; inset: 0; z-index: 2; border: 2px solid var(--color-accent); border-radius: inherit; pointer-events: none; box-sizing: border-box; }
@@ -232,6 +232,7 @@
 		.bubble-normal,
 		.trace-root-bubble,
 		.trace-reply-card { min-width: 60px; max-width: min(180px, calc(100% - 32px)); padding: 8px 10px; }
+		.trace-root-card { min-width: min(60px, calc(100% - 32px)); max-width: min(180px, calc(100% - 32px)); }
 		.trace-reply-card { min-width: 112px; padding: 0; }
 		.trace-reply-author-profile { font-size: 10px; }
 		.trace-reply-author-profile { padding: 8px 5px 8px 10px; }

@@ -14,8 +14,26 @@ import {
 	selectRelayTraceCell,
 	startSelectedRun,
 	confirmPendingRootBuild,
-	traceRuntimeEvents
+	traceRuntimeEvents,
+	overwriteRelayGameState
 } from './helpers/relayHarness';
+
+async function resetFirstRunBrowserState(page: Page): Promise<void> {
+	await page.goto('/favicon.svg');
+	await page.evaluate(async () => {
+		localStorage.clear();
+		sessionStorage.clear();
+		const databases = await indexedDB.databases();
+		await Promise.all(databases
+			.filter((database): database is IDBDatabaseInfo & { name: string } => Boolean(database.name?.startsWith('persona-bubble-field-')))
+			.map(({ name }) => new Promise<void>((resolve, reject) => {
+				const request = indexedDB.deleteDatabase(name);
+				request.onsuccess = () => resolve();
+				request.onerror = () => reject(request.error);
+				request.onblocked = () => reject(new Error(`Could not reset ${name}.`));
+			})));
+	});
+}
 
 async function releaseFirstRunPrimary(page: Page): Promise<void> {
 	await expect.poll(() => page.evaluate(() => Boolean((window as typeof window & { __relayStartupTest?: unknown }).__relayStartupTest))).toBe(true);
@@ -45,6 +63,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 420, height: 800 
 			traceRoots: [trace.root]
 		});
 		await page.setViewportSize(viewport);
+		await resetFirstRunBrowserState(page);
 		await page.goto('/');
 
 		const dialog = page.getByRole('dialog');
@@ -191,6 +210,16 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 420, height: 800 
 		const editor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
 		const traceStep = page.locator('[data-first-run-tutorial="trace"]');
 		const composer = page.locator('ehagaki-composer');
+		if (viewport.width === 1280) {
+			const pointsBeforeEarlyRead = (await readRelayGameState(page)).points;
+			await editor.focus();
+			await page.keyboard.press('Escape');
+			await moveRelaySelfTo(page, { x: 5, y: 2 });
+			await selectRelayTraceCell(page, '4,2');
+			await expect(page.locator(`[data-trace-root-id="${trace.root.id}"]`)).toContainText(trace.root.content);
+			await expect.poll(() => readRelayGameState(page)).toMatchObject({ points: pointsBeforeEarlyRead + 5 });
+			await moveRelaySelfTo(page, { x: 6, y: 2 });
+		}
 		const speechContent = 'チュートリアル中の発言';
 		await editor.fill(speechContent);
 		await expect(editor).toHaveValue(speechContent);
@@ -199,60 +228,77 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 420, height: 800 
 		await expect(traceStep).toBeVisible();
 		expect(await page.evaluate(() => sessionStorage.getItem('persona-bubble-field:first-run-tutorial'))).toContain('"step":"trace"');
 
-		await expect(traceStep).toContainText('他の住人の未読の痕跡・書置き・遺言のどれかを1つ読んで、5ptを受け取ろう。');
-		await expect(traceStep.getByRole('button')).toHaveCount(0);
-		const traceTarget = page.locator('[data-trace-marker-position="4,2"]');
-		await expect(traceTarget).toHaveAttribute('data-tutorial-highlight', 'trace');
-		await expectSlowTutorialPulse(page, '[data-tutorial-highlight="trace"]');
-		await expectSlowTutorialPulse(page, '[data-first-run-tutorial="trace"] p');
-		await expect.poll(() => traceTarget.evaluate((element) => element instanceof HTMLElement ? element.getBoundingClientRect().width / element.offsetWidth : 0)).toBeGreaterThan(1.5);
-		await page.reload({ waitUntil: 'domcontentloaded' });
-		await releaseFirstRunPrimary(page);
-		await expect(traceStep).toBeVisible();
-		await expect(traceTarget).toHaveAttribute('data-tutorial-highlight', 'trace');
-		const pointsBeforeTrace = (await readRelayGameState(page)).points;
-		const traceMovementEditor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
-		await traceMovementEditor.focus();
-		await page.keyboard.press('Escape');
-		await moveRelaySelfTo(page, { x: 5, y: 2 });
-		await expect(traceTarget).toBeInViewport();
-		await expect.poll(() => traceStep.evaluate((guide) => guide.classList.contains('first-run-tutorial-anchored'))).toBe(true);
-		const measureTraceGuidance = () => traceStep.evaluate((guide) => {
-			const target = document.querySelector('[data-trace-marker-position="4,2"][data-tutorial-highlight="trace"]');
-			if (!(target instanceof HTMLElement)) return null;
-			const guideBounds = guide.getBoundingClientRect();
-			const targetBounds = target.getBoundingClientRect();
-			const horizontalGap = Math.max(0, targetBounds.left - guideBounds.right, guideBounds.left - targetBounds.right);
-			const verticalGap = Math.max(0, targetBounds.top - guideBounds.bottom, guideBounds.top - targetBounds.bottom);
-			return {
-				insideViewport: guideBounds.left >= 0 && guideBounds.right <= innerWidth && guideBounds.top >= 0 && guideBounds.bottom <= innerHeight,
-				overlapsTarget: guideBounds.left < targetBounds.right && guideBounds.right > targetBounds.left && guideBounds.top < targetBounds.bottom && guideBounds.bottom > targetBounds.top,
-				separation: Math.hypot(horizontalGap, verticalGap)
-			};
-		});
-		await expect.poll(async () => {
-			const layout = await measureTraceGuidance();
-			return layout && layout.separation <= 24 ? null : layout;
-		}).toBeNull();
-		const traceGuidanceLayout = await measureTraceGuidance();
-		expect(traceGuidanceLayout?.insideViewport, JSON.stringify(traceGuidanceLayout)).toBe(true);
-		expect(traceGuidanceLayout?.overlapsTarget, JSON.stringify(traceGuidanceLayout)).toBe(false);
-		expect(traceGuidanceLayout?.separation, JSON.stringify(traceGuidanceLayout)).toBeLessThanOrEqual(24);
-		await selectRelayTraceCell(page, '4,2');
-		await expect(page.locator(`[data-trace-root-id="${trace.root.id}"]`)).toContainText(trace.root.content);
-		await expect(page.locator(`[data-trace-ghost-root-id="${trace.root.id}"]`)).toBeVisible();
-		await expect.poll(() => readRelayGameState(page)).toMatchObject({ points: pointsBeforeTrace + 5 });
+		if (viewport.width === 1280) {
+			await expect(traceStep).toContainText('読める未読の痕跡がありません。次へ進めます。');
+			await expect(traceStep.getByRole('button', { name: '次へ' })).toBeVisible();
+			await page.reload({ waitUntil: 'domcontentloaded' });
+			await releaseFirstRunPrimary(page);
+			await expect(traceStep).toContainText('読める未読の痕跡がありません。次へ進めます。');
+			await overwriteRelayGameState(page, { points: 0, abilities: { contextCapacity: 20, hallucinationSuppression: 28 } });
+			await page.reload({ waitUntil: 'domcontentloaded' });
+			await releaseFirstRunPrimary(page);
+			await expect(traceStep).toContainText('読める未読の痕跡がありません。次へ進めます。');
+			await traceStep.getByRole('button', { name: '次へ' }).click();
+		} else {
+			await expect(traceStep).toContainText('他の住人の未読の痕跡・書置き・遺言のどれかを1つ読んで、5ptを受け取ろう。');
+			await expect(traceStep.getByRole('button')).toHaveCount(0);
+			const traceTarget = page.locator('[data-trace-marker-position="4,2"]');
+			await expect(traceTarget).toHaveAttribute('data-tutorial-highlight', 'trace');
+			await expectSlowTutorialPulse(page, '[data-tutorial-highlight="trace"]');
+			await expectSlowTutorialPulse(page, '[data-first-run-tutorial="trace"] p');
+			await expect.poll(() => traceTarget.evaluate((element) => element instanceof HTMLElement ? element.getBoundingClientRect().width / element.offsetWidth : 0)).toBeGreaterThan(1.5);
+			await page.reload({ waitUntil: 'domcontentloaded' });
+			await releaseFirstRunPrimary(page);
+			await expect(traceStep).toBeVisible();
+			await expect(traceTarget).toHaveAttribute('data-tutorial-highlight', 'trace');
+			const pointsBeforeTrace = (await readRelayGameState(page)).points;
+			const traceMovementEditor = page.locator('ehagaki-composer').getByRole('textbox', { name: '投稿エディター' });
+			await traceMovementEditor.focus();
+			await page.keyboard.press('Escape');
+			await moveRelaySelfTo(page, { x: 5, y: 2 });
+			await expect(traceTarget).toBeInViewport();
+			await expect.poll(() => traceStep.evaluate((guide) => guide.classList.contains('first-run-tutorial-anchored'))).toBe(true);
+			const measureTraceGuidance = () => traceStep.evaluate((guide) => {
+				const target = document.querySelector('[data-trace-marker-position="4,2"][data-tutorial-highlight="trace"]');
+				if (!(target instanceof HTMLElement)) return null;
+				const guideBounds = guide.getBoundingClientRect();
+				const targetBounds = target.getBoundingClientRect();
+				const horizontalGap = Math.max(0, targetBounds.left - guideBounds.right, guideBounds.left - targetBounds.right);
+				const verticalGap = Math.max(0, targetBounds.top - guideBounds.bottom, guideBounds.top - targetBounds.bottom);
+				return {
+					insideViewport: guideBounds.left >= 0 && guideBounds.right <= innerWidth && guideBounds.top >= 0 && guideBounds.bottom <= innerHeight,
+					overlapsTarget: guideBounds.left < targetBounds.right && guideBounds.right > targetBounds.left && guideBounds.top < targetBounds.bottom && guideBounds.bottom > targetBounds.top,
+					separation: Math.hypot(horizontalGap, verticalGap)
+				};
+			});
+			await expect.poll(async () => {
+				const layout = await measureTraceGuidance();
+				return layout && layout.separation <= 24 ? null : layout;
+			}).toBeNull();
+			const traceGuidanceLayout = await measureTraceGuidance();
+			expect(traceGuidanceLayout?.insideViewport, JSON.stringify(traceGuidanceLayout)).toBe(true);
+			expect(traceGuidanceLayout?.overlapsTarget, JSON.stringify(traceGuidanceLayout)).toBe(false);
+			expect(traceGuidanceLayout?.separation, JSON.stringify(traceGuidanceLayout)).toBeLessThanOrEqual(24);
+			await selectRelayTraceCell(page, '4,2');
+			await expect(page.locator(`[data-trace-root-id="${trace.root.id}"]`)).toContainText(trace.root.content);
+			await expect(page.locator(`[data-trace-ghost-root-id="${trace.root.id}"]`)).toBeVisible();
+			await expect.poll(() => readRelayGameState(page)).toMatchObject({ points: pointsBeforeTrace + 5 });
+		}
 		const replyStep = page.locator('[data-first-run-tutorial="reply"]');
 		await expect(replyStep).toContainText('この痕跡にリプライできます。');
-		await expect(page.locator(`[data-trace-ghost-root-id="${trace.root.id}"]`)).toHaveAttribute('data-tutorial-highlight', 'trace');
+		if (viewport.width !== 1280) {
+			await expect(page.locator(`[data-trace-ghost-root-id="${trace.root.id}"]`)).toHaveAttribute('data-tutorial-highlight', 'trace');
+		}
 		expect(await page.evaluate(() => sessionStorage.getItem('persona-bubble-field:first-run-tutorial'))).toContain('"step":"reply"');
 		await page.reload({ waitUntil: 'domcontentloaded' });
 		await releaseFirstRunPrimary(page);
 		await expect(replyStep).toBeVisible();
-		await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveAttribute('data-tutorial-highlight', 'trace');
+		if (viewport.width !== 1280) {
+			await expect(page.locator('[data-trace-marker-position="4,2"]')).toHaveAttribute('data-tutorial-highlight', 'trace');
+		}
 		await replyStep.getByRole('button', { name: '次へ' }).click();
 		const abilityStep = page.locator('[data-first-run-tutorial="ability"]');
-		await expect(abilityStep).toContainText('強化端末へ移動して、能力をひとつ強化しよう。');
+		await expect(abilityStep).toContainText(viewport.width === 1280 ? '能力は強化済みです。強化端末で次へ進めます。' : '強化端末へ移動して、能力をひとつ強化しよう。');
 		await expect(abilityStep.getByRole('button')).toHaveCount(0);
 		await expect(page.locator('[data-field-facility="adjustment-terminal"]')).toHaveAttribute('data-tutorial-highlight', 'ability');
 		await expectSlowTutorialPulse(page, '[data-field-facility="adjustment-terminal"]');
@@ -274,17 +320,29 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 420, height: 800 
 		await expect(adjustmentTerminal).toBeEnabled();
 		await adjustmentTerminal.click();
 		const adjustmentDialog = page.getByRole('dialog');
-		await expect(adjustmentDialog.locator('[data-first-run-ability-guidance]')).toContainText('能力をどれか1つ強化してください。');
-		await expect(adjustmentDialog.locator('.ability-card.tutorial-upgrade-choice')).toHaveCount(3);
-		await expectSlowTutorialPulse(page, '[data-first-run-ability-guidance]');
-		await expectSlowTutorialPulse(page, '.ability-card.tutorial-upgrade-choice');
-		const upgrade = adjustmentDialog.getByRole('button', { name: '推論効率をLv2へ強化（必要1pt）' });
-		await expect(upgrade).toBeEnabled();
-		await upgrade.click();
-		await expect.poll(() => readRelayGameState(page)).toMatchObject({ abilities: { inferenceEfficiency: 2 }, points: abilityPointsBefore - 1 });
-		await expect(adjustmentDialog).toBeVisible();
-		await expect(adjustmentDialog.locator('.level-up-badge')).toContainText('LEVEL UP');
+		const abilityGuidance = adjustmentDialog.locator('[data-first-run-ability-guidance]');
+		if (viewport.width === 1280) {
+			await expect(abilityGuidance).toContainText('能力は強化済みです。次へ進めます。');
+			await expect(abilityGuidance.getByRole('button', { name: '次へ' })).toBeVisible();
+			await expect(adjustmentDialog.locator('.ability-card.tutorial-upgrade-choice')).toHaveCount(0);
+		} else {
+			await expect(abilityGuidance).toContainText('能力をどれか1つ強化してください。');
+			await expect(adjustmentDialog.locator('.ability-card.tutorial-upgrade-choice')).toHaveCount(3);
+		}
+		await expectSlowTutorialPulse(page, '.tutorial-upgrade-guidance');
 		const noteStep = page.locator('[data-first-run-tutorial="note"]');
+		if (viewport.width === 1280) {
+			await abilityGuidance.getByRole('button', { name: '次へ' }).click();
+			await expect.poll(() => readRelayGameState(page)).toMatchObject({ abilities: { contextCapacity: 20, hallucinationSuppression: 28 }, points: 0 });
+		} else {
+			await expectSlowTutorialPulse(page, '.ability-card.tutorial-upgrade-choice');
+			const upgrade = adjustmentDialog.getByRole('button', { name: '推論効率をLv2へ強化（必要1pt）' });
+			await expect(upgrade).toBeEnabled();
+			await upgrade.click();
+			await expect.poll(() => readRelayGameState(page)).toMatchObject({ abilities: { inferenceEfficiency: 2 }, points: abilityPointsBefore - 1 });
+			await expect(adjustmentDialog.locator('.level-up-badge')).toContainText('LEVEL UP');
+		}
+		await expect(adjustmentDialog).toBeVisible();
 		await expect(noteStep).toContainText('100ptを使って、その場に書置きを残せます');
 		await expect(page.locator('[data-first-run-tutorial="complete"]')).toHaveCount(0);
 		await expect(adjustmentDialog.getByRole('button', { name: '閉じる', exact: true }).first()).toBeVisible();
@@ -328,16 +386,18 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 420, height: 800 
 			expect(noteGuidanceLayout?.separation, JSON.stringify(noteGuidanceLayout)).toBeLessThanOrEqual(24);
 		}
 
-		// A stale ability marker with the durable upgrade resumes at the remaining note step.
-		await page.evaluate((marker) => { if (marker) sessionStorage.setItem('persona-bubble-field:first-run-tutorial', marker); }, abilityMarker);
-		await page.reload({ waitUntil: 'domcontentloaded' });
-		await releaseFirstRunPrimary(page);
-		await expect(noteStep).toBeVisible();
-		await expect(noteAction).toHaveAttribute('data-tutorial-highlight', 'note');
-		await page.reload({ waitUntil: 'domcontentloaded' });
-		await releaseFirstRunPrimary(page);
-		await expect(noteStep).toBeVisible();
-		await expect(noteAction).toHaveAttribute('data-tutorial-highlight', 'note');
+		if (viewport.width !== 1280) {
+			// A stale ability marker with the durable upgrade resumes at the remaining note step.
+			await page.evaluate((marker) => { if (marker) sessionStorage.setItem('persona-bubble-field:first-run-tutorial', marker); }, abilityMarker);
+			await page.reload({ waitUntil: 'domcontentloaded' });
+			await releaseFirstRunPrimary(page);
+			await expect(noteStep).toBeVisible();
+			await expect(noteAction).toHaveAttribute('data-tutorial-highlight', 'note');
+			await page.reload({ waitUntil: 'domcontentloaded' });
+			await releaseFirstRunPrimary(page);
+			await expect(noteStep).toBeVisible();
+			await expect(noteAction).toHaveAttribute('data-tutorial-highlight', 'note');
+		}
 		await noteStep.getByRole('button', { name: '次へ' }).click();
 		const helpStep = page.locator('[data-first-run-tutorial="help"]');
 		const helpButton = page.getByRole('button', { name: 'ヘルプ', exact: true });
