@@ -401,7 +401,7 @@
 	.progression-card { border-color: rgb(104 241 221 / 35%); background: linear-gradient(140deg, rgb(104 241 221 / 11%), rgb(19 24 43 / 64%) 65%); }
 	.progression-kicker { color: rgb(255 255 255 / 72%); font-size: .72rem; font-weight: 750; letter-spacing: .04em; }
 	.progression-card h2, .allocation-heading h2 { margin: 5px 0 0; font-size: .98rem; line-height: 1.3; }
-	.progression-card p { margin: 8px 0 0; color: rgb(255 255 255 / 76%); font-size: .82rem; line-height: 1.5; }
+	.progression-card p { margin: 8px 0 0; color: rgb(255 255 255 / 76%); font-size: .875rem; line-height: 1.5; }
 	.allocation-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
 	.allocation-heading h2 { margin: 0; }
 	.allocation-heading > span { color: rgb(255 255 255 / 72%); font-size: .76rem; white-space: nowrap; }
