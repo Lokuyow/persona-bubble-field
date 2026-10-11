@@ -302,7 +302,7 @@
 <Dialog.Root bind:open={() => open, onOpenChange}>
 	<Dialog.Portal>
 			<Dialog.Overlay class="mending-dialog-overlay" />
-			<Dialog.Content bind:ref={dialogContent} class="mending-dialog-content dialog-mobile-layout" preventScroll={false} onOpenAutoFocus={focusFirstAction}>
+			<Dialog.Content bind:ref={dialogContent} class="mending-dialog-content dialog-mobile-layout" data-mending-startup={startupFeedback?.phase} preventScroll={false} onOpenAutoFocus={focusFirstAction}>
 				<div class="dialog-mobile-scroll-content">
 					<div class="terminal-dialog-header">
 						<div>
@@ -317,15 +317,22 @@
 							<span class="owned-points-value">{ownedPoints} pt</span>
 						</div>
 						<Dialog.Close class="action-button action-button-tertiary action-button-close dialog-close-header" aria-label="閉じる"><X aria-hidden="true" /></Dialog.Close>
+						{#if startupFeedback}
+							{#key startupFeedback.id}
+								<div class={['mending-startup-feedback', { 'startup-started': startupFeedback.phase === 'started' }]} role="status" aria-live="polite" aria-atomic="true">
+									<span class="startup-signal" aria-hidden="true">
+										{#if startupFeedback.phase === 'started'}
+											<svg class="startup-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 12 4 4 8-8" /></svg>
+										{:else}
+											<span class="startup-dot"></span>
+										{/if}
+									</span>
+									<span>{startupFeedback.phase === 'started' ? '作業を開始しました' : '起動中…'}</span>
+								</div>
+							{/key}
+						{/if}
 					</div>
 					<div class="sr-only" role="status" aria-live="polite" aria-atomic="true">{rewardPresentation ? announceCollection(rewardPresentation) : ''}</div>
-					{#if startupFeedback}
-						{#key startupFeedback.id}
-							<div class="mending-startup-feedback" aria-live="polite" aria-atomic="true">
-								<span>{startupFeedback.phase === 'started' ? '作業を開始しました' : '起動中…'}</span>
-							</div>
-						{/key}
-					{/if}
 					{#if hasJob || starting}
 						<section class="result-list" aria-label="作業の成果">
 							<div class="result-card" data-mending-icon="coins">
@@ -446,12 +453,25 @@
 	.reward-summary-lifespan { color: #64f5f0; font-size: 16px; font-weight: 800; }
 	.reward-summary-support { color: #cfe7ee; font-size: 13px; font-weight: 650; }
 	.result-card { position: relative; }
-	.mending-startup-feedback { position: absolute; inset: 0; z-index: 2; display: grid; place-items: center; overflow: hidden; pointer-events: none; border: 1px solid rgba(53, 227, 232, .86); border-radius: inherit; color: #64f5f0; font-size: 16px; font-weight: 800; letter-spacing: .04em; text-shadow: 0 0 18px rgba(53, 227, 232, .7); animation: mending-startup-scan 3000ms ease-out both; box-shadow: 0 0 24px rgba(53, 227, 232, .18) inset; }
-	.mending-startup-feedback::after { position: absolute; inset: 0; content: ''; background: linear-gradient(180deg, transparent 0%, rgba(53, 227, 232, .22) 48%, transparent 54%); animation: mending-startup-sweep 1000ms ease-out both; }
-	@media (prefers-reduced-motion: reduce) { .mending-startup-feedback { animation-name: mending-startup-fade; } .mending-startup-feedback::after { animation: none; } }
-	@keyframes mending-startup-scan { 0% { opacity: 0; } 8% { opacity: 1; } 78% { opacity: 1; } 100% { opacity: 0; } }
-	@keyframes mending-startup-sweep { from { opacity: 0; transform: translateY(-45%); } 45% { opacity: 1; } to { opacity: 0; transform: translateY(45%); } }
-	@keyframes mending-startup-fade { 0% { opacity: 0; } 8% { opacity: 1; } 78% { opacity: 1; } 100% { opacity: 0; } }
+	.mending-startup-feedback { --startup-accent: #a9fff1; position: absolute; bottom: 4px; inset-inline: 24px; display: flex; align-items: center; justify-content: center; gap: 8px; height: 22px; pointer-events: none; color: var(--startup-accent); font-size: 13px; font-weight: 700; line-height: 1; letter-spacing: .02em; animation: mending-startup-enter 180ms ease-out both; }
+	.mending-startup-feedback::before, .mending-startup-feedback::after { content: ''; flex: 1; height: 1px; background: linear-gradient(90deg, transparent, var(--startup-accent)); opacity: .45; }
+	.mending-startup-feedback::after { background: linear-gradient(90deg, var(--startup-accent), transparent); }
+	.startup-started { animation: mending-startup-confirm 3000ms ease-out both; }
+	.startup-started::before { transform-origin: right; animation: mending-startup-connect 550ms cubic-bezier(.16, 1, .3, 1) both; }
+	.startup-started::after { transform-origin: left; animation: mending-startup-connect 550ms cubic-bezier(.16, 1, .3, 1) both; }
+	.startup-signal { position: relative; display: grid; place-items: center; flex: 0 0 20px; height: 20px; border: 1px solid currentColor; border-radius: 50%; background: rgba(35, 220, 226, .08); }
+	.startup-check { width: 16px; height: 16px; }
+	.startup-check path { stroke-dasharray: 24; stroke-dashoffset: 0; animation: mending-startup-check 380ms 90ms ease-out both; }
+	.startup-started .startup-signal::after { position: absolute; inset: -1px; content: ''; border: 1px solid currentColor; border-radius: inherit; animation: mending-startup-pulse 650ms ease-out both; }
+	.startup-dot { width: 4px; height: 4px; border-radius: 50%; background: currentColor; }
+	:global(.mending-dialog-content[data-mending-startup='started']) { animation: mending-startup-power 900ms ease-out both; }
+	@keyframes mending-startup-enter { from { opacity: 0; } to { opacity: 1; } }
+	@keyframes mending-startup-confirm { 0% { opacity: 0; } 6%, 80% { opacity: 1; } 100% { opacity: 0; } }
+	@keyframes mending-startup-connect { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+	@keyframes mending-startup-check { from { stroke-dashoffset: 24; } to { stroke-dashoffset: 0; } }
+	@keyframes mending-startup-pulse { from { opacity: .8; transform: scale(1); } to { opacity: 0; transform: scale(1.8); } }
+	@keyframes mending-startup-power { 0%, 100% { border-color: rgba(35, 220, 226, .78); } 25% { border-color: #c6fff5; box-shadow: 0 0 0 1px rgba(169, 255, 241, .25) inset, 0 18px 60px rgba(0, 0, 0, .42), 0 0 32px rgba(53, 227, 232, .28); } }
+	@media (prefers-reduced-motion: reduce) { .startup-started::before, .startup-started::after, .startup-check path, .startup-started .startup-signal::after { animation: none; } .startup-started .startup-signal::after { display: none; } }
 	.terminal-dialog-header { position: sticky; top: -24px; z-index: 2; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 12px; margin: -24px -24px 22px; padding: 24px; background: linear-gradient(180deg, rgba(4, 29, 43, .98), rgba(3, 20, 30, .98)); }
 	:global(.mending-dialog-content .mending-dialog-title) { display: inline-flex; align-items: center; min-width: 0; gap: 8px; margin: 0; color: #ecfbff; font-size: clamp(18px, 4vw, 22px); line-height: 1.15; font-weight: 800; letter-spacing: .03em; }
 	:global(.mending-dialog-title svg) { flex: 0 0 auto; width: 22px; height: 22px; color: #35e3e8; }
@@ -483,5 +503,5 @@
 	:global(.collect-button svg) { flex: 0 0 auto; width: 24px; height: 24px; }
 	:global(.mending-dialog-content button:focus-visible:not(.action-button-close)) { outline: 3px solid var(--color-focus-ring); outline-offset: 3px; }
 	@media (max-width: 700px) { :global(.mending-dialog-content) { --dialog-mobile-padding-top: 24px; --dialog-mobile-padding-inline: 24px; --dialog-mobile-close-footer-inset: 24px; width: min(calc(100vw - 16px), 720px); padding: 24px; } .result-list { grid-template-columns: 1fr; } }
-	@media (max-width: 560px) { :global(.mending-dialog-content) { --dialog-mobile-padding-top: 22px; --dialog-mobile-padding-inline: 18px; --dialog-mobile-close-footer-inset: 18px; padding: 22px 18px; border-radius: 14px; } .terminal-dialog-header { grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin: -22px -18px 22px; padding: 22px 18px; } .owned-points { grid-row: 2; grid-column: 1 / 3; padding-top: 0; } .terminal-dialog-header > :global(.action-button-close) { grid-row: 1; grid-column: 2; } }
+	@media (max-width: 560px) { :global(.mending-dialog-content) { --dialog-mobile-padding-top: 22px; --dialog-mobile-padding-inline: 18px; --dialog-mobile-close-footer-inset: 18px; padding: 22px 18px; border-radius: 14px; } .terminal-dialog-header { grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin: -22px -18px 22px; padding: 22px 18px; } .owned-points { grid-row: 2; grid-column: 1 / 3; padding-top: 0; } .terminal-dialog-header > :global(.action-button-close) { grid-row: 1; grid-column: 2; } .mending-startup-feedback { inset-inline: 18px; } }
 </style>
