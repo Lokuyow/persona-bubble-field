@@ -286,6 +286,8 @@ Runにはrun number、monotonic revision、started timestamp、Identity referenc
 
 配分段階では未確定draftを保存せず、reload後はRank 0から再開する。確定時は選択contextを再確認し、Root build snapshotと必要数すべての候補を同一Player transactionで保存する。候補生成失敗時は部分候補や未完了buildを保存・公開しない。保存後のreloadは保存済み配列の順序を保ってRootから各candidateを検証し、candidate集合を再抽選しない。未選択候補をIdentity historyへ追加しない。現catalogは40 characterであり、既選択characterが29人以上になるとRank 3の12候補を揃えられない。必要数または既定scan上限まで候補を揃えられない場合はfail-closeし、候補やRunを部分生成しない。少人数化、Rank制限、reusableだけの選択、catalog追加等のexhaustion UXは未決定とする。
 
+候補選択画面では、画像・名前・設定を表示したカードで人格を見比べ、選択した人格を開始操作の近くに表示する。画面の下部には、脱出で1 RPを獲得し次の一生の強化に使える案内と、今回確定したRP配分の4能力について現在Rankと主要効果、およびRank 3未満なら次Rankの主要効果を表示する領域を置く。この領域は初期状態では折りたたみ、候補選択画面では「Root build」を見出しや説明の主語にせず、能力名と効果で配分内容を示す。
+
 Account DB v9→v10およびPlayer lifecycle schema v2→v3は今回一度だけのprototype clean breakとする。正常なRoot wrapping keyと暗号化Rootを保持し、Player lifecycleをgeneration 1、0RP、historyなしから初期化する。旧active Runやpending selectionを新schemaのvalidatorへ渡さない。不正Root、partial state、blocked upgradeは既存どおりfail-closeする。
 
 world write journalは既存の`channelId + pubkey` key、record version、channel、pubkeyを保持する。同じRoot由来のpubkeyがRun #1へ戻るため、validなrecordの`runNumber`だけ1へ揃え、`confirmedPosition`をnull、`messageDedupeIds`を空にし、旧manual trace outboxを既存terminal semantics（未確定outboxの`attemptId: null`、`leaseUntilMs: 0`）で終端化して新Run scopeから除く。`lastReservedSecond`と`consumedSlots`の組、`profileLastReservedSecond`、`lastPositiveSecond`、`exitSecond`、`nextToken`は保持し、過去publicationとのtimestamp ordering、同一秒slotの非再利用、reservation sequenceの単調性を保つ。新Runの最初のwriteからjournalはRun #1 scopeとして扱う。旧署名済みtrace eventは再送せず、予約pointを移転・返金せず、既に開始したRelay送信を取り消さない。これらは新しいjournal compatibility layerを設けない一度限りのstorage upgradeで行う。
