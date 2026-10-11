@@ -2,13 +2,16 @@
 	import { tick } from 'svelte';
 	import { asset } from '$app/paths';
 	import { Popover } from 'bits-ui';
+	import Brain from '~icons/tabler/brain';
 	import HelpCircle from '~icons/tabler/help-circle';
+	import ShieldCheck from '~icons/tabler/shield-check';
+	import Stack2 from '~icons/tabler/stack-2';
 	import UsersPlus from '~icons/tabler/users-plus';
 	import { getCharacterById } from '$lib/character';
 	import ActionButton from '$lib/ActionButton.svelte';
 	import type { ClearedIdentityCandidate, IdentityCandidate, PendingSelection, SelectionCandidate } from '$lib/rootIdentity';
 	import type { RunTransitionNotice } from '$lib/runTransitionNotice';
-	import { isRootBuildAllocatable, rootBuildCost, rootCandidateCount, usableRootPoints, type RootBuild } from '$lib/rootProgression';
+	import { isRootBuildAllocatable, rootBuildCost, rootCandidateCount, rootContextCompressionMultiplierTenths, rootInferenceAccelerationMultiplierTenths, rootMaximumLifespanMs, rootOverflowRewardPercent, usableRootPoints, type RootBuild } from '$lib/rootProgression';
 
 	let { selection, rootPoints, transitionNotice, onConfirm, onSelect, onExportNsec }: {
 		selection: PendingSelection | null;
@@ -95,6 +98,19 @@
 		onSelect(chosen);
 	}
 
+	function rootAbilityEffect(key: keyof RootBuild, rank: number): string {
+		switch (key) {
+			case 'inferenceAcceleration':
+				return `×${(rootInferenceAccelerationMultiplierTenths(rank) / 10).toFixed(2)}`;
+			case 'contextCompression':
+				return `容量 ×${(rootContextCompressionMultiplierTenths(rank) / 10).toFixed(2)} / 上限後 ${rootOverflowRewardPercent(rank)}%`;
+			case 'hallucinationResistance':
+				return `作業の最大寿命 ${rootMaximumLifespanMs(rank) / (24 * 60 * 60 * 1000)}日`;
+			case 'candidateExpansion':
+				return `新規候補 ${rootCandidateCount(rank)}人`;
+		}
+	}
+
 	async function acceptOpening(): Promise<void> {
 		openingAccepted = true;
 		await tick();
@@ -176,7 +192,7 @@
 				<header class="selection-header">
 					<div>
 						<h1 bind:this={initialFocusTarget} class="initial-focus-target" id="identity-selection-title" tabindex="-1">{selection.stage === 'allocating' ? 'Root buildを配分' : firstSelection ? '人格を選択' : '命を始める'}</h1>
-						<p id="identity-selection-description" class="selection-introduction">{selection.stage === 'allocating' ? '配分を確定すると、新しいRunの候補を固定します。' : firstSelection ? 'あなたとして生きる人格' : '確定したRoot buildでRunを開始します。'}</p>
+						<p id="identity-selection-description" class="selection-introduction">{selection.stage === 'allocating' ? '配分を確定すると、新しいRunの候補を固定します。' : firstSelection ? 'あなたとして生きる人格' : '次の一生を始める人格を選びます。'}</p>
 					</div>
 					<div class="rp-summary"><span>Root Point</span><strong>{rootPoints} RP</strong></div>
 				</header>
@@ -254,16 +270,33 @@
 							</div>
 						</section>
 					{/if}
-					<section class="root-build confirmed-build" aria-label="確定済みRoot build">
-						<div class="section-heading"><h2>確定済みRoot build</h2><span>{rootBuildCost(selection.rootBuild)} / {usablePoints} RP</span></div>
-						<div class="confirmed-build-list">
-							<span>推論加速 Rank {selection.rootBuild.inferenceAcceleration}</span>
-							<span>コンテキスト圧縮 Rank {selection.rootBuild.contextCompression}</span>
-							<span>ハルシネーション耐性 Rank {selection.rootBuild.hallucinationResistance}</span>
-							<span><UsersPlus aria-hidden="true" /> 候補拡張 Rank {selection.rootBuild.candidateExpansion}・新規候補{rootCandidateCount(selection.rootBuild.candidateExpansion)}人</span>
-						</div>
-						<p class="rp-notice">候補公開後はRoot buildを変更できません。</p>
-					</section>
+					<div class="rp-summary-panels" aria-label="脱出後の成長と今回のRP配分">
+						<section class="progression-card" aria-label="将来の成長">
+							<span class="progression-kicker">脱出の先へ</span>
+							<h2>脱出して、次の一生を強く</h2>
+							<p>脱出すると1 RP獲得。次の一生の強化に使えます。</p>
+						</section>
+						<section class="allocation-summary" aria-label="今回のRP配分">
+							<div class="allocation-heading"><h2>今回のRP配分</h2><span>{rootBuildCost(selection.rootBuild) === 0 ? '0 RP' : `${rootBuildCost(selection.rootBuild)} RP 配分済み`}</span></div>
+							<div class="root-ability-grid">
+								{#each [{ key: 'inferenceAcceleration', label: '推論加速' }, { key: 'contextCompression', label: 'コンテキスト圧縮' }, { key: 'hallucinationResistance', label: 'ハルシネーション耐性' }, { key: 'candidateExpansion', label: '候補拡張' }] as ability}
+									{@const abilityKey = ability.key as keyof RootBuild}
+									{@const rank = selection.rootBuild[abilityKey]}
+									<article class={['root-ability-card', { ranked: rank > 0 }]} data-rp-ability={abilityKey}>
+										<div class="root-ability-heading">
+											<span class="root-ability-icon" aria-hidden="true">{#if abilityKey === 'inferenceAcceleration'}<Brain />{:else if abilityKey === 'contextCompression'}<Stack2 />{:else if abilityKey === 'hallucinationResistance'}<ShieldCheck />{:else}<UsersPlus />{/if}</span>
+											<strong>{ability.label}</strong>
+											<span class="root-ability-rank" class:ranked={rank > 0}>Rank {rank}</span>
+										</div>
+										<div class="root-ability-effects">
+											<span>{rootAbilityEffect(abilityKey, rank)}</span>
+											{#if rank < 3}<span class="root-ability-next">→ 次 {rootAbilityEffect(abilityKey, rank + 1)}</span>{/if}
+										</div>
+									</article>
+								{/each}
+							</div>
+						</section>
+					</div>
 				{/if}
 			</div>
 			<footer class="selection-footer">
@@ -327,7 +360,7 @@
 	.selection-introduction { max-width: 620px; margin: 8px 0 0; color: rgb(255 255 255 / 64%); font-size: .9rem; }
 	.rp-summary { display: grid; justify-items: end; gap: 2px; color: rgb(255 255 255 / 62%); font-size: .82rem; white-space: nowrap; }
 	.rp-summary strong { color: #fff; font-size: 1.05rem; }
-	.identity-section, .return-section, .root-build { margin-top: 28px; }
+	.identity-section, .return-section, .root-build, .rp-summary-panels { margin-top: 28px; }
 	.section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 	.section-heading h2 { margin: 0; font-size: 1rem; }
 	.section-heading > span { color: rgb(255 255 255 / 56%); font-size: .8rem; }
@@ -352,10 +385,28 @@
 	.export-nsec { padding: 0 10px; }
 	.root-build { padding: 14px 14px 0; border: 1px solid rgb(104 241 221 / 23%); border-radius: 14px; background: rgb(19 24 43 / 42%); }
 	.rp-notice { margin: 0 0 12px; color: rgb(255 255 255 / 62%); font-size: .82rem; }
-	.confirmed-build { padding-bottom: 14px; }
-	.confirmed-build-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; color: rgb(255 255 255 / 82%); font-size: .84rem; }
-	.confirmed-build-list span { display: flex; align-items: center; gap: 6px; min-width: 0; }
-	:global(.confirmed-build-list svg) { width: 18px; height: 18px; flex: 0 0 auto; color: var(--color-accent); }
+	.rp-summary-panels { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; gap: 12px; }
+	.progression-card, .allocation-summary { min-width: 0; padding: 14px; border: 1px solid rgb(104 241 221 / 24%); border-radius: 14px; background: rgb(19 24 43 / 54%); }
+	.progression-card { border-color: rgb(104 241 221 / 35%); background: linear-gradient(140deg, rgb(104 241 221 / 11%), rgb(19 24 43 / 64%) 65%); }
+	.progression-kicker { color: var(--color-accent); font-size: .72rem; font-weight: 750; letter-spacing: .04em; }
+	.progression-card h2, .allocation-heading h2 { margin: 5px 0 0; font-size: .98rem; line-height: 1.3; }
+	.progression-card p { margin: 8px 0 0; color: rgb(255 255 255 / 76%); font-size: .82rem; line-height: 1.5; }
+	.allocation-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+	.allocation-heading h2 { margin: 0; }
+	.allocation-heading > span { color: rgb(255 255 255 / 72%); font-size: .76rem; white-space: nowrap; }
+	.root-ability-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+	.root-ability-card { min-width: 0; padding: 9px; border: 1px solid rgb(255 255 255 / 12%); border-radius: 10px; background: rgb(37 37 58 / 45%); color: rgb(255 255 255 / 78%); }
+	.root-ability-card.ranked { border-color: rgb(104 241 221 / 46%); background: rgb(104 241 221 / 8%); }
+	.root-ability-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; }
+	.root-ability-heading strong { min-width: 0; font-size: .78rem; line-height: 1.35; }
+	.root-ability-icon { display: inline-grid; width: 18px; height: 18px; flex: 0 0 auto; place-items: center; color: rgb(255 255 255 / 58%); }
+	.root-ability-card.ranked .root-ability-icon { color: var(--color-accent); }
+	:global(.root-ability-icon svg) { display: block; width: 18px; height: 18px; }
+	.root-ability-rank { margin-left: auto; padding: 2px 5px; border: 1px solid rgb(255 255 255 / 16%); border-radius: 999px; color: rgb(255 255 255 / 64%); font-size: .68rem; white-space: nowrap; }
+	.root-ability-rank.ranked { border-color: rgb(104 241 221 / 40%); color: var(--color-accent); }
+	.root-ability-effects { display: grid; gap: 3px; margin-top: 6px; font-size: .73rem; line-height: 1.4; }
+	.root-ability-effects > span { overflow-wrap: anywhere; }
+	.root-ability-next { color: var(--color-accent); }
 	.ability-list { border-top: 1px solid rgb(255 255 255 / 12%); }
 	.ability-row { display: grid; grid-template-columns: minmax(0, 1fr) 44px auto; align-items: center; gap: 16px; padding: 13px 0; border-bottom: 1px solid rgb(255 255 255 / 12%); }
 	.ability-main { min-width: 0; }
@@ -391,7 +442,7 @@
 		.selection-header { gap: 12px; }
 		.selection-dialog h1 { font-size: 21px; }
 		.rp-summary { font-size: .75rem; }
-		.identity-section, .return-section, .root-build { margin-top: 22px; }
+		.identity-section, .return-section, .root-build, .rp-summary-panels { margin-top: 22px; }
 		.candidate-grid { grid-template-columns: 1fr; }
 		.candidate { grid-template-columns: 82px minmax(0, 1fr); align-items: center; min-height: 104px; }
 		.candidate-image { grid-row: span 2; }
@@ -403,7 +454,7 @@
 		.ability-effect { gap: 5px; min-width: 0; }
 		.ability-effect strong, .ability-effect small { overflow-wrap: anywhere; }
 		.root-build { padding-inline: 12px; }
-		.confirmed-build-list { grid-template-columns: 1fr; }
+		.rp-summary-panels, .root-ability-grid { grid-template-columns: 1fr; }
 		.selection-footer { align-items: stretch; flex-direction: column; gap: 12px; padding: 14px 16px max(16px, env(safe-area-inset-bottom)); }
 		.selection-footer :global(.action-button) { width: 100%; }
 		.opening-footer { align-items: center; }

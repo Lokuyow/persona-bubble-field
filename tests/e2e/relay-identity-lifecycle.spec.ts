@@ -233,6 +233,35 @@ test.describe('Relay startup', () => {
 		await continueFirstRunOpeningIfPresent(page);
 		const candidateButtons = page.getByRole('button', { name: /を選ぶ$/ });
 		await expect(candidateButtons).toHaveCount(3);
+		const rpSummary = page.locator('.rp-summary-panels');
+		await expect(rpSummary).toContainText('脱出して、次の一生を強く');
+		await expect(rpSummary).toContainText('脱出すると1 RP獲得。次の一生の強化に使えます。');
+		await expect(rpSummary).not.toContainText('Root build');
+		await expect(page.locator('#identity-selection-description')).not.toContainText('Root build');
+		await expect(page.getByRole('region', { name: '今回のRP配分' })).toContainText('0 RP');
+		const zeroRankEffects = [
+			['inferenceAcceleration', '推論加速', '×1.00', '次 ×2.00'],
+			['contextCompression', 'コンテキスト圧縮', '容量 ×1.00 / 上限後 0%', '次 容量 ×2.00 / 上限後 20%'],
+			['hallucinationResistance', 'ハルシネーション耐性', '作業の最大寿命 7日', '次 作業の最大寿命 14日'],
+			['candidateExpansion', '候補拡張', '新規候補 3人', '次 新規候補 6人']
+		] as const;
+		for (const [key, label, currentEffect, nextEffect] of zeroRankEffects) {
+			const ability = rpSummary.locator(`[data-rp-ability="${key}"]`);
+			await expect(ability).toContainText(label);
+			await expect(ability).toContainText('Rank 0');
+			await expect(ability).toContainText(currentEffect);
+			await expect(ability).toContainText(nextEffect);
+			await expect(ability.locator('.root-ability-icon svg')).toHaveCount(1);
+		}
+		const desktopSummaryLayout = await rpSummary.evaluate((element) => {
+			const progression = element.querySelector('.progression-card')?.getBoundingClientRect();
+			const allocation = element.querySelector('.allocation-summary')?.getBoundingClientRect();
+			const content = element.closest('.selection-content');
+			if (!progression || !allocation || !(content instanceof HTMLElement)) throw new Error('RP summary layout is incomplete');
+			return { twoColumns: progression.left < allocation.left && progression.right <= allocation.left && Math.abs(progression.top - allocation.top) < 2,
+				noHorizontalOverflow: content.scrollWidth <= content.clientWidth };
+		});
+		expect(desktopSummaryLayout).toEqual({ twoColumns: true, noHorizontalOverflow: true });
 		await expect.poll(() => page.locator('main > :not(.selection-backdrop)').evaluateAll((elements) => elements.every((element) => (element as HTMLElement).inert))).toBe(true);
 		await expect(page.locator('#identity-selection-title')).toBeFocused();
 		await page.keyboard.press('Tab');
@@ -247,6 +276,23 @@ test.describe('Relay startup', () => {
 		const reloadedButtons = page.getByRole('button', { name: /を選ぶ$/ });
 		await expect(reloadedButtons).toHaveCount(3);
 		expect(await reloadedButtons.allTextContents()).toEqual(labelsBeforeReload);
+		await page.setViewportSize({ width: 420, height: 420 });
+		const mobileSummaryLayout = await rpSummary.evaluate((element) => {
+			const progression = element.querySelector('.progression-card')?.getBoundingClientRect();
+			const allocation = element.querySelector('.allocation-summary')?.getBoundingClientRect();
+			const content = element.closest('.selection-content');
+			const footer = element.closest('.selection-dialog')?.querySelector('.selection-footer')?.getBoundingClientRect();
+			if (!progression || !allocation || !(content instanceof HTMLElement) || !footer) throw new Error('mobile RP summary layout is incomplete');
+			const contentRect = content.getBoundingClientRect();
+			return { stacked: progression.bottom <= allocation.top,
+				noHorizontalOverflow: content.scrollWidth <= content.clientWidth,
+				footerBelowScrollArea: contentRect.bottom <= footer.top };
+		});
+		expect(mobileSummaryLayout).toEqual({ stacked: true, noHorizontalOverflow: true, footerBelowScrollArea: true });
+		const startButton = page.getByRole('button', { name: '開始' });
+		await rpSummary.scrollIntoViewIfNeeded();
+		await expect(startButton).toBeVisible();
+		await expect(startButton).toBeDisabled();
 		await page.evaluate(() => { document.documentElement.dataset.identitySelectionDocumentToken = crypto.randomUUID(); });
 		const documentToken = await page.locator('html').getAttribute('data-identity-selection-document-token');
 		await reloadedButtons.nth(1).click();
@@ -378,18 +424,39 @@ test.describe('Relay startup', () => {
 		const candidateButtons = page.getByRole('button', { name: /を選ぶ$/ });
 		await expect(candidateButtons).toHaveCount(12);
 		await expect(page.locator('.rank-controls')).toHaveCount(0);
-		await expect(page.locator('.confirmed-build')).toContainText('候補拡張 Rank 3・新規候補12人');
+		const rpSummary = page.locator('.rp-summary-panels');
+		await expect(page.getByRole('region', { name: '今回のRP配分' })).toContainText('12 RP 配分済み');
+		await expect(rpSummary).not.toContainText('Root build');
+		const maxRankEffects = [
+			['inferenceAcceleration', 'Rank 3', '×4.00'],
+			['contextCompression', 'Rank 3', '容量 ×4.00 / 上限後 50%'],
+			['hallucinationResistance', 'Rank 3', '作業の最大寿命 30日'],
+			['candidateExpansion', 'Rank 3', '新規候補 12人']
+		] as const;
+		for (const [key, rank, effect] of maxRankEffects) {
+			const ability = rpSummary.locator(`[data-rp-ability="${key}"]`);
+			await expect(ability).toContainText(rank);
+			await expect(ability).toContainText(effect);
+			await expect(ability.locator('.root-ability-icon svg')).toHaveCount(1);
+			await expect(ability.locator('.root-ability-next')).toHaveCount(0);
+		}
 		const labelsBeforeReload = await candidateButtons.allTextContents();
 		await page.reload({ waitUntil: 'domcontentloaded' });
 		await continueFirstRunOpeningIfPresent(page);
 		const restoredCandidates = page.getByRole('button', { name: /を選ぶ$/ });
 		await expect(restoredCandidates).toHaveCount(12);
 		expect(await restoredCandidates.allTextContents()).toEqual(labelsBeforeReload);
-		await expect(page.locator('.confirmed-build')).toContainText('候補公開後はRoot buildを変更できません');
+		await expect(rpSummary.locator('[data-rp-ability="candidateExpansion"]')).toContainText('Rank 3');
+		const startButton = page.getByRole('button', { name: '開始' });
+		await rpSummary.scrollIntoViewIfNeeded();
+		await expect(rpSummary).toBeVisible();
+		await expect(startButton).toBeVisible();
+		await expect(startButton).toBeDisabled();
 		await restoredCandidates.nth(11).scrollIntoViewIfNeeded();
 		await expect(restoredCandidates.nth(11)).toBeVisible();
+		await expect(startButton).toBeVisible();
 		await restoredCandidates.nth(11).click();
-		await expect(page.getByRole('button', { name: '開始' })).toBeEnabled();
+		await expect(startButton).toBeEnabled();
 		await startSelectedRun(page);
 		await expect(page.getByRole('dialog')).toHaveCount(0);
 		await page.evaluate(() => {
