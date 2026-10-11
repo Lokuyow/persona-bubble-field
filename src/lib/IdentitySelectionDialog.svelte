@@ -3,6 +3,7 @@
 	import { asset } from '$app/paths';
 	import { Popover } from 'bits-ui';
 	import Brain from '~icons/tabler/brain';
+	import ChevronDown from '~icons/tabler/chevron-down';
 	import HelpCircle from '~icons/tabler/help-circle';
 	import ShieldCheck from '~icons/tabler/shield-check';
 	import Stack2 from '~icons/tabler/stack-2';
@@ -119,7 +120,7 @@
 
 	function focusableElements(dialog: HTMLElement): HTMLElement[] {
 		return Array.from(dialog.querySelectorAll<HTMLElement>(
-			'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+			'button:not([disabled]), summary, [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
 		));
 	}
 
@@ -270,33 +271,36 @@
 							</div>
 						</section>
 					{/if}
-					<div class="rp-summary-panels" aria-label="脱出後の成長と今回のRP配分">
-						<section class="progression-card" aria-label="将来の成長">
-							<span class="progression-kicker">脱出の先へ</span>
-							<h2>脱出して、次の一生を強く</h2>
-							<p>脱出すると1 RP獲得。次の一生の強化に使えます。</p>
-						</section>
-						<section class="allocation-summary" aria-label="今回のRP配分">
-							<div class="allocation-heading"><h2>今回のRP配分</h2><span>{rootBuildCost(selection.rootBuild) === 0 ? '0 RP' : `${rootBuildCost(selection.rootBuild)} RP 配分済み`}</span></div>
-							<div class="root-ability-grid">
-								{#each [{ key: 'inferenceAcceleration', label: '推論加速' }, { key: 'contextCompression', label: 'コンテキスト圧縮' }, { key: 'hallucinationResistance', label: 'ハルシネーション耐性' }, { key: 'candidateExpansion', label: '候補拡張' }] as ability}
-									{@const abilityKey = ability.key as keyof RootBuild}
-									{@const rank = selection.rootBuild[abilityKey]}
-									<article class={['root-ability-card', { ranked: rank > 0 }]} data-rp-ability={abilityKey}>
-										<div class="root-ability-heading">
-											<span class="root-ability-icon" aria-hidden="true">{#if abilityKey === 'inferenceAcceleration'}<Brain />{:else if abilityKey === 'contextCompression'}<Stack2 />{:else if abilityKey === 'hallucinationResistance'}<ShieldCheck />{:else}<UsersPlus />{/if}</span>
-											<strong>{ability.label}</strong>
-											<span class="root-ability-rank" class:ranked={rank > 0}>Rank {rank}</span>
-										</div>
-										<div class="root-ability-effects">
-											<span>{rootAbilityEffect(abilityKey, rank)}</span>
-											{#if rank < 3}<span class="root-ability-next">→ 次 {rootAbilityEffect(abilityKey, rank + 1)}</span>{/if}
-										</div>
-									</article>
-								{/each}
-							</div>
-						</section>
-					</div>
+					<details class="rp-details">
+						<summary class="rp-details-toggle"><span>脱出後の成長と今回のRP配分</span><ChevronDown aria-hidden="true" /></summary>
+						<div class="rp-summary-panels" aria-label="脱出後の成長と今回のRP配分">
+							<section class="progression-card" aria-label="将来の成長">
+								<span class="progression-kicker">脱出の先へ</span>
+								<h2>脱出して、次の一生を強く</h2>
+								<p>脱出すると1 RP獲得。次の一生の強化に使えます。</p>
+							</section>
+							<section class="allocation-summary" aria-label="今回のRP配分">
+								<div class="allocation-heading"><h2>今回のRP配分</h2><span>{rootBuildCost(selection.rootBuild) === 0 ? '0 RP' : `${rootBuildCost(selection.rootBuild)} RP 配分済み`}</span></div>
+								<div class="root-ability-grid">
+									{#each [{ key: 'inferenceAcceleration', label: '推論加速' }, { key: 'contextCompression', label: 'コンテキスト圧縮' }, { key: 'hallucinationResistance', label: 'ハルシネーション耐性' }, { key: 'candidateExpansion', label: '候補拡張' }] as ability}
+										{@const abilityKey = ability.key as keyof RootBuild}
+										{@const rank = selection.rootBuild[abilityKey]}
+										<article class={['root-ability-card', { ranked: rank > 0 }]} data-rp-ability={abilityKey}>
+											<div class="root-ability-heading">
+												<span class="root-ability-icon" aria-hidden="true">{#if abilityKey === 'inferenceAcceleration'}<Brain />{:else if abilityKey === 'contextCompression'}<Stack2 />{:else if abilityKey === 'hallucinationResistance'}<ShieldCheck />{:else}<UsersPlus />{/if}</span>
+												<strong>{ability.label}</strong>
+												<span class="root-ability-rank" class:ranked={rank > 0}>Rank {rank}</span>
+											</div>
+											<div class="root-ability-effects">
+												<span>{rootAbilityEffect(abilityKey, rank)}</span>
+												{#if rank < 3}<span class="root-ability-next">→ 次 {rootAbilityEffect(abilityKey, rank + 1)}</span>{/if}
+											</div>
+										</article>
+									{/each}
+								</div>
+							</section>
+						</div>
+					</details>
 				{/if}
 			</div>
 			<footer class="selection-footer">
@@ -360,7 +364,7 @@
 	.selection-introduction { max-width: 620px; margin: 8px 0 0; color: rgb(255 255 255 / 64%); font-size: .9rem; }
 	.rp-summary { display: grid; justify-items: end; gap: 2px; color: rgb(255 255 255 / 62%); font-size: .82rem; white-space: nowrap; }
 	.rp-summary strong { color: #fff; font-size: 1.05rem; }
-	.identity-section, .return-section, .root-build, .rp-summary-panels { margin-top: 28px; }
+	.identity-section, .return-section, .root-build, .rp-details { margin-top: 28px; }
 	.section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 	.section-heading h2 { margin: 0; font-size: 1rem; }
 	.section-heading > span { color: rgb(255 255 255 / 56%); font-size: .8rem; }
@@ -385,10 +389,17 @@
 	.export-nsec { padding: 0 10px; }
 	.root-build { padding: 14px 14px 0; border: 1px solid rgb(104 241 221 / 23%); border-radius: 14px; background: rgb(19 24 43 / 42%); }
 	.rp-notice { margin: 0 0 12px; color: rgb(255 255 255 / 62%); font-size: .82rem; }
-	.rp-summary-panels { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; gap: 12px; }
+	.rp-details { min-width: 0; }
+	.rp-details-toggle { display: flex; min-height: 44px; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border: 1px solid rgb(104 241 221 / 24%); border-radius: 12px; background: rgb(19 24 43 / 54%); color: rgb(255 255 255 / 88%); cursor: pointer; font-size: .88rem; font-weight: 700; list-style: none; }
+	.rp-details-toggle::-webkit-details-marker { display: none; }
+	.rp-details-toggle:hover { border-color: rgb(104 241 221 / 48%); background: rgb(19 24 43 / 76%); }
+	.rp-details-toggle:focus-visible { outline: 3px solid var(--color-focus-ring); outline-offset: 2px; }
+	:global(.rp-details-toggle svg) { width: 18px; height: 18px; flex: 0 0 auto; color: rgb(255 255 255 / 70%); transition: transform 160ms ease; }
+	:global(.rp-details[open] .rp-details-toggle svg) { transform: rotate(180deg); }
+	.rp-summary-panels { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; gap: 12px; margin-top: 12px; }
 	.progression-card, .allocation-summary { min-width: 0; padding: 14px; border: 1px solid rgb(104 241 221 / 24%); border-radius: 14px; background: rgb(19 24 43 / 54%); }
 	.progression-card { border-color: rgb(104 241 221 / 35%); background: linear-gradient(140deg, rgb(104 241 221 / 11%), rgb(19 24 43 / 64%) 65%); }
-	.progression-kicker { color: var(--color-accent); font-size: .72rem; font-weight: 750; letter-spacing: .04em; }
+	.progression-kicker { color: rgb(255 255 255 / 72%); font-size: .72rem; font-weight: 750; letter-spacing: .04em; }
 	.progression-card h2, .allocation-heading h2 { margin: 5px 0 0; font-size: .98rem; line-height: 1.3; }
 	.progression-card p { margin: 8px 0 0; color: rgb(255 255 255 / 76%); font-size: .82rem; line-height: 1.5; }
 	.allocation-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
@@ -403,10 +414,10 @@
 	.root-ability-card.ranked .root-ability-icon { color: var(--color-accent); }
 	:global(.root-ability-icon svg) { display: block; width: 18px; height: 18px; }
 	.root-ability-rank { margin-left: auto; padding: 2px 5px; border: 1px solid rgb(255 255 255 / 16%); border-radius: 999px; color: rgb(255 255 255 / 64%); font-size: .68rem; white-space: nowrap; }
-	.root-ability-rank.ranked { border-color: rgb(104 241 221 / 40%); color: var(--color-accent); }
+	.root-ability-rank.ranked { border-color: rgb(104 241 221 / 40%); background: rgb(104 241 221 / 10%); color: rgb(255 255 255 / 88%); }
 	.root-ability-effects { display: grid; gap: 3px; margin-top: 6px; font-size: .73rem; line-height: 1.4; }
 	.root-ability-effects > span { overflow-wrap: anywhere; }
-	.root-ability-next { color: var(--color-accent); }
+	.root-ability-next { color: rgb(255 255 255 / 78%); }
 	.ability-list { border-top: 1px solid rgb(255 255 255 / 12%); }
 	.ability-row { display: grid; grid-template-columns: minmax(0, 1fr) 44px auto; align-items: center; gap: 16px; padding: 13px 0; border-bottom: 1px solid rgb(255 255 255 / 12%); }
 	.ability-main { min-width: 0; }
@@ -442,7 +453,7 @@
 		.selection-header { gap: 12px; }
 		.selection-dialog h1 { font-size: 21px; }
 		.rp-summary { font-size: .75rem; }
-		.identity-section, .return-section, .root-build, .rp-summary-panels { margin-top: 22px; }
+		.identity-section, .return-section, .root-build, .rp-details { margin-top: 22px; }
 		.candidate-grid { grid-template-columns: 1fr; }
 		.candidate { grid-template-columns: 82px minmax(0, 1fr); align-items: center; min-height: 104px; }
 		.candidate-image { grid-row: span 2; }

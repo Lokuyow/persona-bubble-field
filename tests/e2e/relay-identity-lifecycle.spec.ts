@@ -233,7 +233,21 @@ test.describe('Relay startup', () => {
 		await continueFirstRunOpeningIfPresent(page);
 		const candidateButtons = page.getByRole('button', { name: /を選ぶ$/ });
 		await expect(candidateButtons).toHaveCount(3);
+		const rpDetails = page.locator('.rp-details');
 		const rpSummary = page.locator('.rp-summary-panels');
+		await expect(rpDetails).not.toHaveAttribute('open');
+		await expect(rpSummary).toBeHidden();
+		const rpDetailsToggle = rpDetails.locator('summary');
+		await expect(rpDetailsToggle).toHaveAccessibleName('脱出後の成長と今回のRP配分');
+		await expect.poll(() => page.locator('main > :not(.selection-backdrop)').evaluateAll((elements) => elements.every((element) => (element as HTMLElement).inert))).toBe(true);
+		await expect(page.locator('#identity-selection-title')).toBeFocused();
+		await page.keyboard.press('Tab');
+		await expect(candidateButtons.first()).toBeFocused();
+		await page.keyboard.press('Shift+Tab');
+		await expect(rpDetailsToggle).toBeFocused();
+		await page.keyboard.press('Enter');
+		await expect(rpDetails).toHaveAttribute('open');
+		await expect(rpSummary).toBeVisible();
 		await expect(rpSummary).toContainText('脱出して、次の一生を強く');
 		await expect(rpSummary).toContainText('脱出すると1 RP獲得。次の一生の強化に使えます。');
 		await expect(rpSummary).not.toContainText('Root build');
@@ -262,12 +276,6 @@ test.describe('Relay startup', () => {
 				noHorizontalOverflow: content.scrollWidth <= content.clientWidth };
 		});
 		expect(desktopSummaryLayout).toEqual({ twoColumns: true, noHorizontalOverflow: true });
-		await expect.poll(() => page.locator('main > :not(.selection-backdrop)').evaluateAll((elements) => elements.every((element) => (element as HTMLElement).inert))).toBe(true);
-		await expect(page.locator('#identity-selection-title')).toBeFocused();
-		await page.keyboard.press('Tab');
-		await expect(candidateButtons.first()).toBeFocused();
-		await page.keyboard.press('Shift+Tab');
-		await expect(candidateButtons.last()).toBeFocused();
 		expect((await relayState(page)).state.published.filter((event) => event.kind === 0)).toHaveLength(0);
 		const labelsBeforeReload = await candidateButtons.allTextContents();
 		await expect(page.locator('.participant[data-self="true"]')).toHaveCount(0);
@@ -276,7 +284,11 @@ test.describe('Relay startup', () => {
 		const reloadedButtons = page.getByRole('button', { name: /を選ぶ$/ });
 		await expect(reloadedButtons).toHaveCount(3);
 		expect(await reloadedButtons.allTextContents()).toEqual(labelsBeforeReload);
+		await expect(rpDetails).not.toHaveAttribute('open');
+		await expect(rpSummary).toBeHidden();
 		await page.setViewportSize({ width: 420, height: 420 });
+		await rpDetailsToggle.click();
+		await expect(rpSummary).toBeVisible();
 		const mobileSummaryLayout = await rpSummary.evaluate((element) => {
 			const progression = element.querySelector('.progression-card')?.getBoundingClientRect();
 			const allocation = element.querySelector('.allocation-summary')?.getBoundingClientRect();
@@ -425,6 +437,11 @@ test.describe('Relay startup', () => {
 		await expect(candidateButtons).toHaveCount(12);
 		await expect(page.locator('.rank-controls')).toHaveCount(0);
 		const rpSummary = page.locator('.rp-summary-panels');
+		const rpDetails = page.locator('.rp-details');
+		await expect(rpDetails).not.toHaveAttribute('open');
+		await expect(rpSummary).toBeHidden();
+		await rpDetails.locator('summary').click();
+		await expect(rpSummary).toBeVisible();
 		await expect(page.getByRole('region', { name: '今回のRP配分' })).toContainText('12 RP 配分済み');
 		await expect(rpSummary).not.toContainText('Root build');
 		const maxRankEffects = [
@@ -446,6 +463,10 @@ test.describe('Relay startup', () => {
 		const restoredCandidates = page.getByRole('button', { name: /を選ぶ$/ });
 		await expect(restoredCandidates).toHaveCount(12);
 		expect(await restoredCandidates.allTextContents()).toEqual(labelsBeforeReload);
+		await expect(rpDetails).not.toHaveAttribute('open');
+		await expect(rpSummary).toBeHidden();
+		await rpDetails.locator('summary').click();
+		await expect(rpSummary).toBeVisible();
 		await expect(rpSummary.locator('[data-rp-ability="candidateExpansion"]')).toContainText('Rank 3');
 		const startButton = page.getByRole('button', { name: '開始' });
 		await rpSummary.scrollIntoViewIfNeeded();
