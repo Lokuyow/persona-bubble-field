@@ -2,6 +2,7 @@
 	import { tick } from 'svelte';
 	import { asset } from '$app/paths';
 	import { Popover } from 'bits-ui';
+	import ArrowUpRight from '~icons/tabler/arrow-up-right';
 	import Brain from '~icons/tabler/brain';
 	import ChevronDown from '~icons/tabler/chevron-down';
 	import HelpCircle from '~icons/tabler/help-circle';
@@ -275,9 +276,11 @@
 						<summary class="rp-details-toggle"><span>脱出後の成長と今回のRP配分</span><ChevronDown aria-hidden="true" /></summary>
 						<div class="rp-summary-panels" aria-label="脱出後の成長と今回のRP配分">
 							<section class="progression-card" aria-label="将来の成長">
-								<span class="progression-kicker">脱出の先へ</span>
-								<h2>脱出して、次の一生を強く</h2>
-								<p>脱出すると1 RP獲得。次の一生の強化に使えます。</p>
+								<span class="progression-icon" aria-hidden="true"><ArrowUpRight /></span>
+								<div class="progression-copy">
+									<h2>脱出して、次の一生を強く</h2>
+									<p>脱出すると1 RP獲得。次の一生の強化に使えます。</p>
+								</div>
 							</section>
 							<section class="allocation-summary" aria-label="今回のRP配分">
 								<div class="allocation-heading"><h2>今回のRP配分</h2><span>{rootBuildCost(selection.rootBuild) === 0 ? '0 RP' : `${rootBuildCost(selection.rootBuild)} RP 配分済み`}</span></div>
@@ -291,10 +294,10 @@
 												<strong>{ability.label}</strong>
 												<span class="root-ability-rank" class:ranked={rank > 0}>Rank {rank}</span>
 											</div>
-											<div class="root-ability-effects">
-												<span>{rootAbilityEffect(abilityKey, rank)}</span>
-												{#if rank < 3}<span class="root-ability-next">→ 次 {rootAbilityEffect(abilityKey, rank + 1)}</span>{/if}
-											</div>
+											<dl class="root-ability-effects">
+												<div class="root-ability-current"><dt>今回</dt><dd>{rootAbilityEffect(abilityKey, rank)}</dd></div>
+												{#if rank < 3}<div class="root-ability-next"><dt>次Rank</dt><dd>{rootAbilityEffect(abilityKey, rank + 1)}</dd></div>{/if}
+											</dl>
 										</article>
 									{/each}
 								</div>
@@ -390,34 +393,36 @@
 	.root-build { padding: 14px 14px 0; border: 1px solid rgb(104 241 221 / 23%); border-radius: 14px; background: rgb(19 24 43 / 42%); }
 	.rp-notice { margin: 0 0 12px; color: rgb(255 255 255 / 62%); font-size: .82rem; }
 	.rp-details { min-width: 0; }
-	.rp-details-toggle { display: flex; min-height: 44px; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border: 1px solid rgb(104 241 221 / 24%); border-radius: 12px; background: rgb(19 24 43 / 54%); color: rgb(255 255 255 / 88%); cursor: pointer; font-size: .88rem; font-weight: 700; list-style: none; }
+	.rp-details-toggle { display: flex; min-height: 44px; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; border: 1px solid rgb(255 255 255 / 14%); border-radius: 12px; background: rgb(255 255 255 / 3%); color: rgb(255 255 255 / 88%); cursor: pointer; font-size: 0.9375rem; font-weight: 700; list-style: none; }
 	.rp-details-toggle::-webkit-details-marker { display: none; }
-	.rp-details-toggle:hover { border-color: rgb(104 241 221 / 48%); background: rgb(19 24 43 / 76%); }
+	.rp-details-toggle:hover { border-color: rgb(255 255 255 / 28%); background: rgb(255 255 255 / 6%); }
 	.rp-details-toggle:focus-visible { outline: 3px solid var(--color-focus-ring); outline-offset: 2px; }
 	:global(.rp-details-toggle svg) { width: 18px; height: 18px; flex: 0 0 auto; color: rgb(255 255 255 / 70%); transition: transform 160ms ease; }
 	:global(.rp-details[open] .rp-details-toggle svg) { transform: rotate(180deg); }
-	.rp-summary-panels { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; gap: 12px; margin-top: 12px; }
-	.progression-card, .allocation-summary { min-width: 0; padding: 14px; border: 1px solid rgb(104 241 221 / 24%); border-radius: 14px; background: rgb(19 24 43 / 54%); }
-	.progression-card { border-color: rgb(104 241 221 / 35%); background: linear-gradient(140deg, rgb(104 241 221 / 11%), rgb(19 24 43 / 64%) 65%); }
-	.progression-kicker { color: rgb(255 255 255 / 72%); font-size: .875rem; font-weight: 750; letter-spacing: .04em; }
-	.progression-card h2, .allocation-heading h2 { margin: 5px 0 0; font-size: .98rem; line-height: 1.3; }
-	.progression-card p { margin: 8px 0 0; color: rgb(255 255 255 / 76%); font-size: .875rem; line-height: 1.5; }
-	.allocation-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
-	.allocation-heading h2 { margin: 0; }
-	.allocation-heading > span { color: rgb(255 255 255 / 72%); font-size: .875rem; white-space: nowrap; }
-	.root-ability-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-	.root-ability-card { min-width: 0; padding: 9px; border: 1px solid rgb(255 255 255 / 12%); border-radius: 10px; background: rgb(37 37 58 / 45%); color: rgb(255 255 255 / 78%); }
-	.root-ability-card.ranked { border-color: rgb(104 241 221 / 46%); background: rgb(104 241 221 / 8%); }
-	.root-ability-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; }
-	.root-ability-heading strong { min-width: 0; font-size: .875rem; line-height: 1.35; }
-	.root-ability-icon { display: inline-grid; width: 18px; height: 18px; flex: 0 0 auto; place-items: center; color: rgb(255 255 255 / 58%); }
-	.root-ability-card.ranked .root-ability-icon { color: var(--color-accent); }
-	:global(.root-ability-icon svg) { display: block; width: 18px; height: 18px; }
-	.root-ability-rank { margin-left: auto; padding: 2px 5px; border: 1px solid rgb(255 255 255 / 16%); border-radius: 999px; color: rgb(255 255 255 / 64%); font-size: .875rem; white-space: nowrap; }
-	.root-ability-rank.ranked { border-color: rgb(104 241 221 / 40%); background: rgb(104 241 221 / 10%); color: rgb(255 255 255 / 88%); }
-	.root-ability-effects { display: grid; gap: 3px; margin-top: 6px; font-size: .875rem; line-height: 1.4; }
-	.root-ability-effects > span { overflow-wrap: anywhere; }
-	.root-ability-next { color: rgb(255 255 255 / 78%); }
+	.rp-summary-panels { display: grid; gap: 20px; margin-top: 12px; font-size: 0.875rem; }
+	.progression-card { display: flex; align-items: center; gap: 14px; min-width: 0; padding: 16px; border: 1px solid rgb(255 255 255 / 12%); border-radius: 12px; background: linear-gradient(110deg, rgb(104 241 221 / 7%), rgb(255 255 255 / 2%)); }
+	.progression-icon { display: grid; width: 36px; height: 36px; flex: 0 0 auto; place-items: center; border-radius: 10px; background: rgb(104 241 221 / 10%); color: var(--color-accent); }
+	:global(.progression-icon svg) { width: 22px; height: 22px; }
+	.progression-copy, .allocation-summary { min-width: 0; }
+	.progression-card h2, .allocation-heading h2 { margin: 0; font-size: 1rem; font-weight: 750; line-height: 1.4; }
+	.progression-card p { margin: 4px 0 0; color: rgb(255 255 255 / 72%); font-size: 0.875rem; line-height: 1.5; }
+	.allocation-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+	.allocation-heading > span { color: rgb(255 255 255 / 64%); font-size: 0.875rem; white-space: nowrap; }
+	.root-ability-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+	.root-ability-card { min-width: 0; padding: 16px; border: 1px solid rgb(255 255 255 / 12%); border-radius: 12px; background: rgb(255 255 255 / 3%); color: rgb(255 255 255 / 88%); }
+	.root-ability-card.ranked { border-color: rgb(104 241 221 / 36%); background: rgb(104 241 221 / 5%); }
+	.root-ability-heading { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; }
+	.root-ability-heading strong { min-width: 0; font-size: 0.9375rem; line-height: 1.4; }
+	.root-ability-icon { display: inline-grid; width: 32px; height: 32px; place-items: center; border-radius: 8px; background: rgb(255 255 255 / 5%); color: rgb(255 255 255 / 68%); }
+	.root-ability-card.ranked .root-ability-icon { background: rgb(104 241 221 / 10%); color: var(--color-accent); }
+	:global(.root-ability-icon svg) { display: block; width: 20px; height: 20px; }
+	.root-ability-rank { padding: 4px 8px; border-radius: 6px; background: rgb(255 255 255 / 5%); color: rgb(255 255 255 / 68%); font-size: 0.875rem; white-space: nowrap; }
+	.root-ability-rank.ranked { background: rgb(104 241 221 / 10%); color: rgb(255 255 255 / 88%); }
+	.root-ability-effects { display: grid; gap: 6px; margin: 12px 0 0; padding-top: 12px; border-top: 1px solid rgb(255 255 255 / 8%); line-height: 1.5; }
+	.root-ability-effects > div { display: grid; grid-template-columns: 3.4rem minmax(0, 1fr); align-items: baseline; gap: 8px; }
+	.root-ability-effects dt { color: rgb(255 255 255 / 58%); font-size: 0.875rem; }
+	.root-ability-effects dd { min-width: 0; margin: 0; color: rgb(255 255 255 / 92%); font-size: 0.9375rem; font-weight: 650; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; text-align: right; }
+	.root-ability-next dd { color: rgb(255 255 255 / 72%); font-weight: 500; }
 	.ability-list { border-top: 1px solid rgb(255 255 255 / 12%); }
 	.ability-row { display: grid; grid-template-columns: minmax(0, 1fr) 44px auto; align-items: center; gap: 16px; padding: 13px 0; border-bottom: 1px solid rgb(255 255 255 / 12%); }
 	.ability-main { min-width: 0; }
@@ -465,7 +470,8 @@
 		.ability-effect { gap: 5px; min-width: 0; }
 		.ability-effect strong, .ability-effect small { overflow-wrap: anywhere; }
 		.root-build { padding-inline: 12px; }
-		.rp-summary-panels, .root-ability-grid { grid-template-columns: 1fr; }
+		.root-ability-grid { grid-template-columns: 1fr; }
+		.progression-card, .root-ability-card { padding: 14px; }
 		.selection-footer { align-items: stretch; flex-direction: column; gap: 12px; padding: 14px 16px max(16px, env(safe-area-inset-bottom)); }
 		.selection-footer :global(.action-button) { width: 100%; }
 		.opening-footer { align-items: center; }

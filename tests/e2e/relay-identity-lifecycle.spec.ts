@@ -254,28 +254,30 @@ test.describe('Relay startup', () => {
 		await expect(page.locator('#identity-selection-description')).not.toContainText('Root build');
 		await expect(page.getByRole('region', { name: '今回のRP配分' })).toContainText('0 RP');
 		const zeroRankEffects = [
-			['inferenceAcceleration', '推論加速', '×1.00', '次 ×2.00'],
-			['contextCompression', 'コンテキスト圧縮', '容量 ×1.00 / 上限後 0%', '次 容量 ×2.00 / 上限後 20%'],
-			['hallucinationResistance', 'ハルシネーション耐性', '作業の最大寿命 7日', '次 作業の最大寿命 14日'],
-			['candidateExpansion', '候補拡張', '新規候補 3人', '次 新規候補 6人']
+			['inferenceAcceleration', '推論加速', '×1.00', '×2.00'],
+			['contextCompression', 'コンテキスト圧縮', '容量 ×1.00 / 上限後 0%', '容量 ×2.00 / 上限後 20%'],
+			['hallucinationResistance', 'ハルシネーション耐性', '作業の最大寿命 7日', '作業の最大寿命 14日'],
+			['candidateExpansion', '候補拡張', '新規候補 3人', '新規候補 6人']
 		] as const;
 		for (const [key, label, currentEffect, nextEffect] of zeroRankEffects) {
 			const ability = rpSummary.locator(`[data-rp-ability="${key}"]`);
 			await expect(ability).toContainText(label);
 			await expect(ability).toContainText('Rank 0');
-			await expect(ability).toContainText(currentEffect);
-			await expect(ability).toContainText(nextEffect);
+			await expect(ability.locator('.root-ability-current dd')).toHaveText(currentEffect);
+			await expect(ability.locator('.root-ability-next dd')).toHaveText(nextEffect);
 			await expect(ability.locator('.root-ability-icon svg')).toHaveCount(1);
 		}
 		const desktopSummaryLayout = await rpSummary.evaluate((element) => {
 			const progression = element.querySelector('.progression-card')?.getBoundingClientRect();
 			const allocation = element.querySelector('.allocation-summary')?.getBoundingClientRect();
+			const abilities = Array.from(element.querySelectorAll('.root-ability-card'), (card) => card.getBoundingClientRect());
 			const content = element.closest('.selection-content');
-			if (!progression || !allocation || !(content instanceof HTMLElement)) throw new Error('RP summary layout is incomplete');
-			return { twoColumns: progression.left < allocation.left && progression.right <= allocation.left && Math.abs(progression.top - allocation.top) < 2,
+			if (!progression || !allocation || abilities.length !== 4 || !(content instanceof HTMLElement)) throw new Error('RP summary layout is incomplete');
+			return { guideAboveAllocation: progression.bottom <= allocation.top,
+				twoAbilityColumns: abilities[0].right <= abilities[1].left && abilities[0].top === abilities[1].top,
 				noHorizontalOverflow: content.scrollWidth <= content.clientWidth };
 		});
-		expect(desktopSummaryLayout).toEqual({ twoColumns: true, noHorizontalOverflow: true });
+		expect(desktopSummaryLayout).toEqual({ guideAboveAllocation: true, twoAbilityColumns: true, noHorizontalOverflow: true });
 		expect((await relayState(page)).state.published.filter((event) => event.kind === 0)).toHaveLength(0);
 		const labelsBeforeReload = await candidateButtons.allTextContents();
 		await expect(page.locator('.participant[data-self="true"]')).toHaveCount(0);
@@ -292,15 +294,17 @@ test.describe('Relay startup', () => {
 		const mobileSummaryLayout = await rpSummary.evaluate((element) => {
 			const progression = element.querySelector('.progression-card')?.getBoundingClientRect();
 			const allocation = element.querySelector('.allocation-summary')?.getBoundingClientRect();
+			const abilities = Array.from(element.querySelectorAll('.root-ability-card'), (card) => card.getBoundingClientRect());
 			const content = element.closest('.selection-content');
 			const footer = element.closest('.selection-dialog')?.querySelector('.selection-footer')?.getBoundingClientRect();
-			if (!progression || !allocation || !(content instanceof HTMLElement) || !footer) throw new Error('mobile RP summary layout is incomplete');
+			if (!progression || !allocation || abilities.length !== 4 || !(content instanceof HTMLElement) || !footer) throw new Error('mobile RP summary layout is incomplete');
 			const contentRect = content.getBoundingClientRect();
 			return { stacked: progression.bottom <= allocation.top,
+				oneAbilityColumn: abilities[0].bottom <= abilities[1].top,
 				noHorizontalOverflow: content.scrollWidth <= content.clientWidth,
 				footerBelowScrollArea: contentRect.bottom <= footer.top };
 		});
-		expect(mobileSummaryLayout).toEqual({ stacked: true, noHorizontalOverflow: true, footerBelowScrollArea: true });
+		expect(mobileSummaryLayout).toEqual({ stacked: true, oneAbilityColumn: true, noHorizontalOverflow: true, footerBelowScrollArea: true });
 		const startButton = page.getByRole('button', { name: '開始' });
 		await rpSummary.scrollIntoViewIfNeeded();
 		await expect(startButton).toBeVisible();
@@ -453,7 +457,7 @@ test.describe('Relay startup', () => {
 		for (const [key, rank, effect] of maxRankEffects) {
 			const ability = rpSummary.locator(`[data-rp-ability="${key}"]`);
 			await expect(ability).toContainText(rank);
-			await expect(ability).toContainText(effect);
+			await expect(ability.locator('.root-ability-current dd')).toHaveText(effect);
 			await expect(ability.locator('.root-ability-icon svg')).toHaveCount(1);
 			await expect(ability.locator('.root-ability-next')).toHaveCount(0);
 		}
