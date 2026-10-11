@@ -4,11 +4,13 @@
 	import { Popover } from 'bits-ui';
 	import ArrowUpRight from '~icons/tabler/arrow-up-right';
 	import Brain from '~icons/tabler/brain';
+	import Check from '~icons/tabler/check';
 	import ChevronDown from '~icons/tabler/chevron-down';
 	import HelpCircle from '~icons/tabler/help-circle';
 	import ShieldCheck from '~icons/tabler/shield-check';
 	import Stack2 from '~icons/tabler/stack-2';
 	import UsersPlus from '~icons/tabler/users-plus';
+	import UserCircle from '~icons/tabler/user-circle';
 	import { getCharacterById } from '$lib/character';
 	import ActionButton from '$lib/ActionButton.svelte';
 	import type { ClearedIdentityCandidate, IdentityCandidate, PendingSelection, SelectionCandidate } from '$lib/rootIdentity';
@@ -172,7 +174,7 @@
 
 {#if selection}
 	<div bind:this={backdrop} class="selection-backdrop" role="presentation">
-		<dialog open class="selection-dialog" aria-labelledby="identity-selection-title" aria-describedby="identity-selection-description" aria-modal="true">
+		<dialog open class={['selection-dialog', { 'candidate-selection': !showOpening && selection.stage === 'candidates' }]} aria-labelledby="identity-selection-title" aria-describedby="identity-selection-description" aria-modal="true">
 			{#if showOpening}
 				<div class="selection-content opening-content">
 					<header class="selection-header">
@@ -194,9 +196,9 @@
 				<header class="selection-header">
 					<div>
 						<h1 bind:this={initialFocusTarget} class="initial-focus-target" id="identity-selection-title" tabindex="-1">{selection.stage === 'allocating' ? 'Root buildを配分' : firstSelection ? '人格を選択' : '命を始める'}</h1>
-						<p id="identity-selection-description" class="selection-introduction">{selection.stage === 'allocating' ? '配分を確定すると、新しいRunの候補を固定します。' : firstSelection ? 'あなたとして生きる人格' : '次の一生を始める人格を選びます。'}</p>
+						<p id="identity-selection-description" class="selection-introduction">{selection.stage === 'allocating' ? '配分を確定すると、新しいRunの候補を固定します。' : firstSelection ? 'この一生を過ごす人格を、ひとり選んでください。' : '次の一生を過ごす人格を、ひとり選んでください。'}</p>
 					</div>
-					<div class="rp-summary"><span>Root Point</span><strong>{rootPoints} RP</strong></div>
+					{#if selection.stage === 'allocating'}<div class="rp-summary"><span>Root Point</span><strong>{rootPoints} RP</strong></div>{:else}<span class="candidate-count">新規候補 {selection.candidates.length}人</span>{/if}
 				</header>
 				{#if noticeCopy}
 					<div class="transition-notice" role="status">
@@ -246,14 +248,13 @@
 					{/if}
 				{:else}
 					<section class="identity-section" aria-label={firstSelection ? '人格を選択' : '転生先を選択'}>
-						<div class="section-heading"><h2>{firstSelection ? '人格を選択' : '転生先を選択'}</h2><span>新規候補 {selection.candidates.length}人</span></div>
 						<div class="candidate-grid">
 							{#each selection.candidates as candidate}
 								{@const selectedCharacter = character(candidate)}
-								<button class:chosen={chosen === candidate} class="candidate" type="button" onclick={() => choose(candidate)} aria-label={`${selectedCharacter.name}を選ぶ`}>
+								<button class={['candidate', 'action-selected', { chosen: chosen === candidate }]} type="button" onclick={() => choose(candidate)} aria-label={`${selectedCharacter.name}を選ぶ`} aria-pressed={chosen === candidate}>
 									<span class="candidate-image"><img src={asset(`/${selectedCharacter.picture}`)} alt="" /></span>
 									<span class="candidate-copy"><span class="candidate-name">{selectedCharacter.name}</span><span class="candidate-about">{selectedCharacter.about}</span></span>
-									{#if chosen === candidate}<span class="candidate-check" aria-hidden="true">✓</span>{/if}
+									{#if chosen === candidate}<span class="candidate-check" aria-hidden="true"><Check /></span>{/if}
 								</button>
 							{/each}
 						</div>
@@ -265,7 +266,7 @@
 								{#each selection.reusableIdentities as candidate}
 									{@const selectedCharacter = character(candidate)}
 									<div class="return-card" class:chosen={chosen === candidate}>
-										<button class="return-choice" type="button" onclick={() => choose(candidate)}>{selectedCharacter.name}（Generation {candidate.generation}のIdentity）を使う</button>
+									<button class="return-choice action-selected" type="button" onclick={() => choose(candidate)} aria-pressed={chosen === candidate}>{selectedCharacter.name}（Generation {candidate.generation}のIdentity）を使う</button>
 										<button class="export-nsec" type="button" onclick={() => onExportNsec(candidate)}>nsecを取得</button>
 									</div>
 								{/each}
@@ -311,7 +312,10 @@
 					<div class="selection-summary"><span>Root build</span><strong>使用 {usedPoints} / {usablePoints} RP</strong></div>
 					<ActionButton variant="primary" type="button" onclick={confirmBuild} disabled={!isRootBuildAllocatable(rootBuild, rootPoints)}>配分を確定して候補を表示</ActionButton>
 				{:else}
-					<div class="selection-summary"><span>選択中</span><strong>{chosen ? character(chosen).name : '未選択'}</strong><span class="summary-divider" aria-hidden="true"></span><span>新規候補 {selection.candidates.length}人</span></div>
+					<div class="selection-choice">
+						<span class="selection-choice-avatar" aria-hidden="true">{#if chosen}<img src={asset(`/${character(chosen).picture}`)} alt="" />{:else}<UserCircle />{/if}</span>
+						<div class="selection-choice-copy"><span>{firstSelection ? 'この一生の人格' : '次の一生の人格'}</span><strong>{chosen ? character(chosen).name : '選んでください'}</strong></div>
+					</div>
 					<ActionButton variant="primary" type="button" onclick={startRun} disabled={!chosen}>開始</ActionButton>
 				{/if}
 			</footer>
@@ -351,6 +355,7 @@
 	}
 
 	.selection-dialog::backdrop { background: transparent; }
+	.selection-dialog.candidate-selection { height: auto; border-color: rgb(255 255 255 / 18%); box-shadow: 0 24px 80px rgb(0 0 0 / 38%); }
 	.selection-content { min-height: 0; overflow: auto; padding: 26px 26px 24px; }
 	.opening-content { display: grid; align-content: center; }
 	.opening-content .selection-header { justify-content: center; text-align: center; transform: translateY(-18px); }
@@ -365,24 +370,36 @@
 	.selection-dialog h1 { margin: 0; font-size: 24px; line-height: 1.2; }
 	.selection-dialog .initial-focus-target:focus { outline: none; }
 	.selection-introduction { max-width: 620px; margin: 8px 0 0; color: rgb(255 255 255 / 64%); font-size: .9rem; }
+	.candidate-selection .selection-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px 12px; }
+	.candidate-selection .selection-header > div { display: contents; }
+	.candidate-selection .selection-header h1 { grid-column: 1; grid-row: 1; }
+	.candidate-selection .selection-introduction { grid-column: 1 / -1; grid-row: 2; margin: 0; color: rgb(255 255 255 / 72%); font-size: 0.9375rem; line-height: 1.6; }
+	.candidate-count { grid-column: 2; grid-row: 1; padding: 6px 10px; border-radius: 8px; background: rgb(255 255 255 / 5%); color: rgb(255 255 255 / 72%); font-size: 0.875rem; white-space: nowrap; }
 	.rp-summary { display: grid; justify-items: end; gap: 2px; color: rgb(255 255 255 / 62%); font-size: .82rem; white-space: nowrap; }
 	.rp-summary strong { color: #fff; font-size: 1.05rem; }
 	.identity-section, .return-section, .root-build, .rp-details { margin-top: 28px; }
 	.section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 	.section-heading h2 { margin: 0; font-size: 1rem; }
 	.section-heading > span { color: rgb(255 255 255 / 56%); font-size: .8rem; }
-	.candidate-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
-	.candidate { position: relative; display: grid; gap: 10px; padding: 12px; border: 1px solid rgb(255 255 255 / 17%); border-radius: 14px; background: rgb(37 37 58 / 68%); color: inherit; text-align: left; cursor: pointer; }
-	.candidate:hover, .candidate:focus-visible { border-color: var(--color-accent); outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
-	.candidate.chosen, .return-card.chosen { border-color: var(--color-accent); box-shadow: 0 0 0 2px rgb(111 255 233 / 22%); }
-	.candidate-image { display: block; aspect-ratio: 1; overflow: hidden; border-radius: 10px; background: #30304b; }
-	.candidate img { width: 100%; height: 100%; object-fit: contain; }
-	.candidate-copy { display: grid; gap: 5px; min-width: 0; }
-	.candidate-name { font-weight: 750; }
-	.candidate-about { min-height: 3.5em; color: rgb(255 255 255 / 68%); overflow-wrap: anywhere; white-space: pre-line; font-size: .82rem; line-height: 1.35; }
-	.candidate-check { position: absolute; top: 10px; right: 10px; display: grid; width: 24px; height: 24px; place-items: center; border-radius: 50%; background: var(--color-accent); color: #08121d; font-weight: 900; }
+	.candidate-selection .identity-section { margin-top: 24px; }
+	.candidate-selection .section-heading > span { font-size: 0.875rem; }
+	.candidate-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+	.candidate { position: relative; display: flex; flex-direction: column; min-width: 0; padding: 0; overflow: hidden; border: 1px solid rgb(255 255 255 / 14%); border-radius: 14px; background: rgb(255 255 255 / 3%); color: inherit; text-align: left; cursor: pointer; }
+	.candidate:hover:not([aria-pressed='true']) { border-color: rgb(255 255 255 / 32%); background: rgb(255 255 255 / 6%); }
+	.candidate:active:not([aria-pressed='true']) { background: rgb(255 255 255 / 9%); }
+	.candidate:focus-visible { outline: 3px solid var(--color-focus-ring); outline-offset: 3px; }
+	.candidate-image { display: block; flex: 0 0 auto; aspect-ratio: 4 / 3; overflow: hidden; border-bottom: 1px solid rgb(255 255 255 / 8%); background: radial-gradient(ellipse at 50% 20%, rgb(255 255 255 / 7%), transparent 75%), #24283b; }
+	.candidate[aria-pressed='true'] .candidate-image { border-color: var(--action-selected-border); background: var(--action-selected-background-active); }
+	.candidate img { display: block; width: 100%; height: 100%; object-fit: contain; }
+	.candidate-copy { display: grid; flex: 1; align-content: start; gap: 8px; min-width: 0; padding: 16px; }
+	.candidate-name { font-size: 1.0625rem; font-weight: 750; line-height: 1.4; overflow-wrap: anywhere; }
+	.candidate-about { color: rgb(255 255 255 / 72%); overflow-wrap: anywhere; white-space: pre-line; font-size: 0.875rem; line-height: 1.55; }
+	.candidate[aria-pressed='true'] .candidate-about { color: var(--action-selected-foreground); }
+	.candidate-check { position: absolute; top: 12px; right: 12px; display: grid; width: 28px; height: 28px; place-items: center; border-radius: 50%; background: var(--action-selected-foreground); color: var(--action-selected-background); }
+	:global(.candidate-check svg) { width: 18px; height: 18px; }
 	.return-list { display: grid; gap: 8px; }
 	.return-card { display: flex; gap: 8px; padding: 8px; border: 1px solid rgb(255 255 255 / 17%); border-radius: 10px; background: rgb(37 37 58 / 56%); }
+	.return-card.chosen { border-color: var(--action-selected-border); background: var(--action-selected-background); }
 	.return-choice, .export-nsec, .rank-controls button { min-height: 38px; border: 1px solid var(--action-tertiary-border); border-radius: 7px; background: var(--action-tertiary-background); color: var(--action-tertiary-foreground); cursor: pointer; }
 	.return-choice:hover, .export-nsec:hover, .rank-controls button:hover:not(:disabled) { background: var(--action-tertiary-background-hover); }
 	.return-choice:active, .export-nsec:active, .rank-controls button:active:not(:disabled) { background: var(--action-tertiary-background-active); }
@@ -447,8 +464,16 @@
 	.selection-footer { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 16px 26px 20px; border-top: 1px solid rgb(255 255 255 / 18%); background: rgb(13 16 32 / 96%); }
 	.selection-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: rgb(255 255 255 / 62%); font-size: .82rem; }
 	.selection-summary strong { color: #fff; }
-	.summary-divider { width: 1px; height: 18px; background: rgb(255 255 255 / 20%); }
+	.selection-choice { display: flex; align-items: center; gap: 12px; min-width: 0; }
+	.selection-choice-avatar { display: grid; width: 44px; height: 44px; flex: 0 0 auto; place-items: center; overflow: hidden; border: 1px solid rgb(255 255 255 / 12%); border-radius: 10px; background: rgb(255 255 255 / 5%); color: rgb(255 255 255 / 60%); }
+	.selection-choice-avatar img { display: block; width: 100%; height: 100%; object-fit: contain; }
+	:global(.selection-choice-avatar svg) { width: 24px; height: 24px; }
+	.selection-choice-copy { display: grid; gap: 3px; min-width: 0; }
+	.selection-choice-copy > span { color: rgb(255 255 255 / 62%); font-size: 0.875rem; line-height: 1.4; }
+	.selection-choice-copy strong { font-size: 1rem; line-height: 1.4; overflow-wrap: anywhere; }
 	.selection-footer :global(.action-button) { min-width: 210px; min-height: 50px; }
+	.candidate-selection .selection-footer { gap: 20px; border-color: rgb(255 255 255 / 12%); }
+	.candidate-selection .selection-footer :global(.action-button) { min-width: 160px; }
 	.selection-dialog > .opening-footer { justify-content: center; }
 	.selection-dialog > .opening-footer :global(.action-button) { width: min(320px, 100%); min-width: min(210px, 100%); min-height: 64px; font-size: 1.1rem; }
 
@@ -460,9 +485,10 @@
 		.rp-summary { font-size: .75rem; }
 		.identity-section, .return-section, .root-build, .rp-details { margin-top: 22px; }
 		.candidate-grid { grid-template-columns: 1fr; }
-		.candidate { grid-template-columns: 82px minmax(0, 1fr); align-items: center; min-height: 104px; }
-		.candidate-image { grid-row: span 2; }
-		.candidate-about { min-height: auto; }
+		.candidate { display: grid; grid-template-columns: 96px minmax(0, 1fr); min-height: 112px; }
+		.candidate-image { height: 100%; min-height: 112px; aspect-ratio: auto; border-bottom: 0; border-right: 1px solid rgb(255 255 255 / 8%); }
+		.candidate-copy { align-self: center; padding: 14px; }
+		.candidate-check { top: 8px; left: 8px; right: auto; width: 24px; height: 24px; }
 		.ability-row { grid-template-columns: minmax(0, 1fr) 44px; grid-template-areas: "main help" "controls controls"; gap: 8px 10px; padding: 14px 0; }
 		.ability-main { grid-area: main; min-width: 0; }
 		:global(.help-trigger) { grid-area: help; justify-self: end; }
@@ -474,6 +500,8 @@
 		.progression-card, .root-ability-card { padding: 14px; }
 		.selection-footer { align-items: stretch; flex-direction: column; gap: 12px; padding: 14px 16px max(16px, env(safe-area-inset-bottom)); }
 		.selection-footer :global(.action-button) { width: 100%; }
+		.candidate-selection .selection-footer { flex-direction: row; align-items: center; gap: 12px; }
+		.candidate-selection .selection-footer :global(.action-button) { width: auto; min-width: 96px; flex: 0 0 auto; }
 		.opening-footer { align-items: center; }
 	}
 </style>

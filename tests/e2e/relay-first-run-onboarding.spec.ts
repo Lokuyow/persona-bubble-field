@@ -82,7 +82,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 420, height: 800 
 		await expect(page.getByRole('button', { name: /を選ぶ$/ })).toHaveCount(0);
 		await page.getByRole('button', { name: 'はじめる', exact: true }).click();
 		await expect(page.locator('#identity-selection-title')).toBeFocused();
-		await expect(page.locator('#identity-selection-description')).toHaveText('あなたとして生きる人格');
+		await expect(page.locator('#identity-selection-description')).toHaveText('この一生を過ごす人格を、ひとり選んでください。');
 		await expect(page.getByRole('region', { name: '人格を選択' })).toBeVisible();
 		await expect(candidates).toHaveCount(3);
 		await candidates.first().click();

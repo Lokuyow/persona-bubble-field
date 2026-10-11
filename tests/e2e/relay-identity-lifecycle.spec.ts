@@ -632,14 +632,15 @@ test.describe('Relay startup', () => {
 		await opening.focus();
 		await page.keyboard.press('Enter');
 		await expect(dialog.locator('#identity-selection-title')).toBeFocused();
-		await expect(dialog.locator('#identity-selection-description')).toHaveText('あなたとして生きる人格');
+		await expect(dialog.locator('#identity-selection-description')).toHaveText('この一生を過ごす人格を、ひとり選んでください。');
 		await expect(dialog.getByRole('region', { name: '人格を選択' })).toBeVisible();
 		const runButton = page.getByRole('button', { name: '開始' });
 		await expect(candidates).toHaveCount(3);
 		await expect(dialog).toBeVisible();
 		await expect(dialog.locator('.candidate.chosen')).toHaveCount(0);
 		await expect(dialog.locator('.candidate-check')).toHaveCount(0);
-		await expect(dialog).toContainText('選択中未選択');
+		await expect(dialog.locator('.candidate[aria-pressed="true"]')).toHaveCount(0);
+		await expect(dialog.locator('.selection-choice-copy strong')).toHaveText('選んでください');
 		await expect(runButton).toBeDisabled();
 		await expect(runButton).toHaveAttribute('data-action-variant', 'primary');
 		await expect(dialog.locator('[data-action-variant="primary"]')).toHaveCount(1);
@@ -649,8 +650,11 @@ test.describe('Relay startup', () => {
 		await expect(candidates.first()).toBeFocused();
 		await page.keyboard.press('Enter');
 		await expect(candidates.first()).toHaveClass(/chosen/);
+		await expect(candidates.first()).toHaveAttribute('aria-pressed', 'true');
+		await expect(dialog.locator('.candidate[aria-pressed="true"]')).toHaveCount(1);
 		await expect(dialog.locator('.candidate-check')).toHaveCount(1);
-		await expect(dialog).not.toContainText('選択中未選択');
+		await expect(dialog.locator('.selection-choice-copy strong')).toHaveText(await candidates.first().locator('.candidate-name').innerText());
+		await expect(dialog.locator('.selection-choice-avatar img')).toHaveCount(1);
 		await expect(runButton).toBeEnabled();
 	});
 
